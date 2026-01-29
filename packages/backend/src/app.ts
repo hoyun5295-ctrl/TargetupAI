@@ -1,0 +1,77 @@
+import express from 'express';
+import cors from 'cors';
+import helmet from 'helmet';
+import morgan from 'morgan';
+import dotenv from 'dotenv';
+
+// 라우트 import
+import authRoutes from './routes/auth';
+import companiesRoutes from './routes/companies';
+import plansRoutes from './routes/plans';
+import customersRoutes from './routes/customers';
+import campaignsRoutes from './routes/campaigns';
+
+// DB 연결
+import './config/database';
+
+dotenv.config();
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+// 미들웨어
+app.use(helmet());
+app.use(cors());
+app.use(morgan('dev'));
+app.use(express.json({ limit: '50mb' }));
+
+// 헬스체크
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// API 라우트
+app.get('/api', (req, res) => {
+  res.json({ 
+    message: 'Target-UP API Server',
+    version: '1.0.0',
+    endpoints: {
+      auth: '/api/auth',
+      companies: '/api/companies',
+      plans: '/api/plans',
+      customers: '/api/customers',
+      campaigns: '/api/campaigns',
+    }
+  });
+});
+
+// 라우트 등록
+app.use('/api/auth', authRoutes);
+app.use('/api/companies', companiesRoutes);
+app.use('/api/plans', plansRoutes);
+app.use('/api/customers', customersRoutes);
+app.use('/api/campaigns', campaignsRoutes);
+
+// 404 처리
+app.use((req, res) => {
+  res.status(404).json({ error: '요청한 리소스를 찾을 수 없습니다.' });
+});
+
+// 에러 핸들러
+app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  console.error('서버 에러:', err);
+  res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+});
+
+// 서버 시작
+app.listen(PORT, () => {
+  console.log('');
+  console.log('🚀 ================================');
+  console.log(`🚀  Target-UP API Server`);
+  console.log(`🚀  Port: ${PORT}`);
+  console.log(`🚀  http://localhost:${PORT}`);
+  console.log('🚀 ================================');
+  console.log('');
+});
+
+export default app;

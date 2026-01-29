@@ -1,0 +1,84 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: targetup-postgres
+    environment:
+      POSTGRES_USER: targetup
+      POSTGRES_PASSWORD: targetup_dev_password
+      POSTGRES_DB: targetup
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U targetup"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis (Queue & Cache)
+  redis:
+    image: redis:7-alpine
+    container_name: targetup-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Backend API (개발 시에는 로컬에서 실행)
+  # backend:
+  #   build:
+  #     context: ./packages/backend
+  #     dockerfile: Dockerfile.dev
+  #   container_name: targetup-backend
+  #   ports:
+  #     - "3000:3000"
+  #   environment:
+  #     - DATABASE_URL=postgresql://targetup:targetup_dev_password@postgres:5432/targetup
+  #     - REDIS_URL=redis://redis:6379
+  #   depends_on:
+  #     - postgres
+  #     - redis
+  #   volumes:
+  #     - ./packages/backend:/app
+  #     - /app/node_modules
+
+  # pgAdmin (DB 관리 UI)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: targetup-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@invito.kr
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+
+  # Redis Commander (Redis 관리 UI)
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: targetup-redis-commander
+    environment:
+      - REDIS_HOSTS=local:redis:6379
+    ports:
+      - "8081:8081"
+    depends_on:
+      - redis
+
+volumes:
+  postgres_data:
+  redis_data:
+  pgadmin_data:

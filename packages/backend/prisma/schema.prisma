@@ -1,0 +1,599 @@
+// Target-UP Prisma Schema
+// PostgreSQL
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// 1. 사용자 및 인증
+// ============================================
+
+model Company {
+  id             String   @id @default(uuid())
+  name           String   @db.VarChar(100)
+  businessNumber String?  @map("business_number") @db.VarChar(20)
+
+  // 080 수신거부 번호
+  optOut080Number String? @map("opt_out_080_number") @db.VarChar(20)
+
+  // 발신번호 사전등록 여부
+  senderNumberPreregistered Boolean @default(false) @map("sender_number_preregistered")
+
+  // 분석자료 설정
+  basicAnalysisUrl      String?  @map("basic_analysis_url") @db.VarChar(400)
+  premiumAnalysisEnabled Boolean @default(false) @map("premium_analysis_enabled")
+  premiumAnalysisUrl    String?  @map("premium_analysis_url") @db.VarChar(400)
+  printUrl              String?  @map("print_url") @db.VarChar(400)
+
+  // 알람 설정
+  alarmThreshold Int @default(30000) @map("alarm_threshold")
+
+  // 상품정보 사용 설정
+  useProductCategoryLarge  Boolean @default(true) @map("use_product_category_large")
+  useProductCategoryMedium Boolean @default(true) @map("use_product_category_medium")
+  useProductCategorySmall  Boolean @default(true) @map("use_product_category_small")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  users                  User[]
+  customers              Customer[]
+  customerFieldDefs      CustomerFieldDefinition[]
+  purchases              Purchase[]
+  products               Product[]
+  senderNumbers          SenderNumber[]
+  kakaoSenderProfiles    KakaoSenderProfile[]
+  projects               Project[]
+  kakaoTemplates         KakaoTemplate[]
+  kakaoFriendtalkImages  KakaoFriendtalkImage[]
+  smsTemplates           SmsTemplate[]
+  mobileDmRequests       MobileDmRequest[]
+  optOuts                OptOut[]
+
+  @@map("companies")
+}
+
+model User {
+  id        String @id @default(uuid())
+  companyId String @map("company_id")
+
+  loginId      String @unique @map("login_id") @db.VarChar(50)
+  passwordHash String @map("password_hash") @db.VarChar(255)
+
+  // 사용자 유형
+  userType UserType @map("user_type")
+
+  // 담당자 정보
+  name       String  @db.VarChar(100)
+  email      String? @db.VarChar(100)
+  phone      String? @db.VarChar(20)
+  department String? @db.VarChar(100)
+
+  // 계정 상태
+  status             UserStatus @default(ACTIVE)
+  passwordChangedAt  DateTime?  @map("password_changed_at")
+  mustChangePassword Boolean    @default(true) @map("must_change_password")
+
+  // 접속 제한
+  allowedIps String[] @map("allowed_ips")
+
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  lastLoginAt DateTime? @map("last_login_at")
+
+  // Relations
+  company              Company               @relation(fields: [companyId], references: [id])
+  alarmPhones          UserAlarmPhone[]
+  senderNumbers        SenderNumber[]
+  userSenderProfiles   UserSenderProfile[]
+  projects             Project[]
+  kakaoFriendtalkImages KakaoFriendtalkImage[]
+  smsTemplates         SmsTemplate[]
+  mobileDmRequests     MobileDmRequest[]
+
+  @@map("users")
+}
+
+enum UserType {
+  ADMIN @map("admin")
+  USER  @map("user")
+}
+
+enum UserStatus {
+  ACTIVE  @map("active")
+  LOCKED  @map("locked")
+  DORMANT @map("dormant")
+}
+
+model UserAlarmPhone {
+  id       String  @id @default(uuid())
+  userId   String  @map("user_id")
+  phone    String  @db.VarChar(20)
+  isActive Boolean @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, phone])
+  @@map("user_alarm_phones")
+}
+
+// ============================================
+// 2. 고객 데이터
+// ============================================
+
+model Customer {
+  id        String @id @default(uuid())
+  companyId String @map("company_id")
+
+  // 필수 필드
+  phone String  @db.VarChar(20)
+  name  String? @db.VarChar(100)
+
+  // 표준 필드
+  gender    String?   @db.VarChar(10)
+  birthDate DateTime? @map("birth_date") @db.Date
+  age       Int?
+  email     String?   @db.VarChar(100)
+  address   String?
+
+  // 등급/멤버십
+  grade  String? @db.VarChar(50)
+  points Int     @default(0)
+
+  // 매장 관련
+  storeCode             String? @map("store_code") @db.VarChar(50)
+  registeredStore       String? @map("registered_store") @db.VarChar(100)
+  registeredStoreNumber String? @map("registered_store_number") @db.VarChar(50)
+  registrationType      String? @map("registration_type") @db.VarChar(50)
+
+  // 구매 관련 집계
+  recentPurchaseAmount Decimal? @map("recent_purchase_amount") @db.Decimal(15, 2)
+  recentPurchaseStore  String?  @map("recent_purchase_store") @db.VarChar(100)
+  totalPurchaseAmount  Decimal? @map("total_purchase_amount") @db.Decimal(15, 2)
+
+  // 기념일
+  weddingAnniversary DateTime? @map("wedding_anniversary") @db.Date
+  isMarried          Boolean?  @map("is_married")
+
+  // 수신 동의
+  smsOptIn Boolean @default(true) @map("sms_opt_in")
+
+  // 동적 필드
+  customFields Json @default("{}") @map("custom_fields")
+
+  // 상태
+  isOptOut  Boolean @default(false) @map("is_opt_out")
+  isInvalid Boolean @default(false) @map("is_invalid")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  company   Company    @relation(fields: [companyId], references: [id])
+  purchases Purchase[]
+
+  @@unique([companyId, phone])
+  @@index([companyId, name])
+  @@map("customers")
+}
+
+model CustomerFieldDefinition {
+  id        String @id @default(uuid())
+  companyId String @map("company_id")
+
+  fieldKey   String    @map("field_key") @db.VarChar(50)
+  fieldLabel String    @map("field_label") @db.VarChar(100)
+  fieldType  FieldType @map("field_type")
+  fieldSize  Int?      @map("field_size")
+
+  // 검색 조건 팝업 타입
+  searchPopupType SearchPopupType? @map("search_popup_type")
+
+  isKey        Boolean @default(false) @map("is_key")
+  isHidden     Boolean @default(false) @map("is_hidden")
+  displayOrder Int     @default(0) @map("display_order")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  company Company @relation(fields: [companyId], references: [id])
+
+  @@unique([companyId, fieldKey])
+  @@map("customer_field_definitions")
+}
+
+enum FieldType {
+  INT
+  VARCHAR
+  DATE
+  BOOLEAN
+}
+
+enum SearchPopupType {
+  CHECKBOX       @map("checkbox")
+  CHECKBOX_RANGE @map("checkbox_range")
+  LISTBOX_SEARCH @map("listbox_search")
+  SEARCHBOX      @map("searchbox")
+  PRODUCT_INFO   @map("product_info")
+}
+
+model Purchase {
+  id            String  @id @default(uuid())
+  companyId     String  @map("company_id")
+  customerId    String? @map("customer_id")
+  customerPhone String  @map("customer_phone") @db.VarChar(20)
+
+  purchaseDate DateTime @map("purchase_date")
+  storeCode    String?  @map("store_code") @db.VarChar(50)
+  storeName    String?  @map("store_name") @db.VarChar(100)
+
+  // 상품 정보
+  productId   String?  @map("product_id")
+  productCode String?  @map("product_code") @db.VarChar(50)
+  productName String?  @map("product_name") @db.VarChar(200)
+
+  quantity    Int      @default(1)
+  unitPrice   Decimal? @map("unit_price") @db.Decimal(15, 2)
+  totalAmount Decimal? @map("total_amount") @db.Decimal(15, 2)
+
+  customFields Json @default("{}") @map("custom_fields")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  company  Company   @relation(fields: [companyId], references: [id])
+  customer Customer? @relation(fields: [customerId], references: [id])
+  product  Product?  @relation(fields: [productId], references: [id])
+
+  @@map("purchases")
+}
+
+model Product {
+  id        String @id @default(uuid())
+  companyId String @map("company_id")
+
+  productCode String? @map("product_code") @db.VarChar(50)
+  productName String  @map("product_name") @db.VarChar(200)
+
+  // 대/중/소분류
+  categoryLarge  String? @map("category_large") @db.VarChar(100)
+  categoryMedium String? @map("category_medium") @db.VarChar(100)
+  categorySmall  String? @map("category_small") @db.VarChar(100)
+
+  price    Decimal? @db.Decimal(15, 2)
+  isActive Boolean  @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  company   Company    @relation(fields: [companyId], references: [id])
+  purchases Purchase[]
+
+  @@unique([companyId, productCode])
+  @@map("products")
+}
+
+// ============================================
+// 3. 발송 관리
+// ============================================
+
+model SenderNumber {
+  id        String  @id @default(uuid())
+  companyId String  @map("company_id")
+  userId    String? @map("user_id")
+
+  phoneNumber String  @map("phone_number") @db.VarChar(20)
+  description String? @db.VarChar(200)
+
+  isVerified Boolean @default(false) @map("is_verified")
+  isActive   Boolean @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  company Company @relation(fields: [companyId], references: [id])
+  user    User?   @relation(fields: [userId], references: [id])
+
+  @@unique([companyId, phoneNumber])
+  @@map("sender_numbers")
+}
+
+model KakaoSenderProfile {
+  id        String @id @default(uuid())
+  companyId String @map("company_id")
+
+  profileKey  String @map("profile_key") @db.VarChar(100)
+  profileName String @map("profile_name") @db.VarChar(100)
+
+  isActive Boolean @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  company           Company             @relation(fields: [companyId], references: [id])
+  userSenderProfiles UserSenderProfile[]
+  kakaoTemplates    KakaoTemplate[]
+
+  @@unique([companyId, profileKey])
+  @@map("kakao_sender_profiles")
+}
+
+model UserSenderProfile {
+  userId    String @map("user_id")
+  profileId String @map("profile_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user    User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  profile KakaoSenderProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@id([userId, profileId])
+  @@map("user_sender_profiles")
+}
+
+model Project {
+  id        String @id @default(uuid())
+  companyId String @map("company_id")
+  userId    String @map("user_id")
+
+  projectName String @map("project_name") @db.VarChar(200)
+
+  // 분석 설정
+  analysisStartDate DateTime? @map("analysis_start_date") @db.Date
+  analysisEndDate   DateTime? @map("analysis_end_date") @db.Date
+
+  // 통계
+  totalCount   Int @default(0) @map("total_count")
+  successCount Int @default(0) @map("success_count")
+  failCount    Int @default(0) @map("fail_count")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  company  Company   @relation(fields: [companyId], references: [id])
+  user     User      @relation(fields: [userId], references: [id])
+  messages Message[]
+
+  @@map("projects")
+}
+
+model Message {
+  id        String @id @default(uuid())
+  companyId String @map("company_id")
+  projectId String @map("project_id")
+  userId    String @map("user_id")
+
+  // 메시지 타입
+  messageType MessageType @map("message_type")
+
+  // 수신자 정보
+  recipientPhone String  @map("recipient_phone") @db.VarChar(20)
+  recipientName  String? @map("recipient_name") @db.VarChar(100)
+  mergeData      Json    @default("{}") @map("merge_data")
+
+  // 발신 정보
+  senderNumber String? @map("sender_number") @db.VarChar(20)
+  replyNumber  String? @map("reply_number") @db.VarChar(20)
+
+  // 메시지 내용
+  subject       String? @db.VarChar(200)
+  content       String
+  contentMerged String? @map("content_merged")
+
+  // MMS/GMS 이미지
+  imageUrls String[] @map("image_urls")
+
+  // 카카오 관련
+  templateId     String? @map("template_id")
+  kakaoProfileId String? @map("kakao_profile_id")
+  kakaoButtons   Json?   @map("kakao_buttons")
+
+  // 대체 발송 설정
+  fallbackEnabled   Boolean @default(false) @map("fallback_enabled")
+  fallbackMessageId String? @map("fallback_message_id")
+
+  // 발송 스케줄
+  scheduledAt       DateTime? @map("scheduled_at")
+  sendRatePerMinute Int?      @map("send_rate_per_minute")
+
+  // 상태
+  status MessageStatus @default(PENDING)
+
+  // 결과
+  resultCode    String?   @map("result_code") @db.VarChar(20)
+  resultMessage String?   @map("result_message")
+  sentAt        DateTime? @map("sent_at")
+  deliveredAt   DateTime? @map("delivered_at")
+
+  // 비용
+  chargeAmount Decimal? @map("charge_amount") @db.Decimal(10, 2)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id])
+
+  @@index([projectId, createdAt])
+  @@index([userId, createdAt])
+  @@index([status, scheduledAt])
+  @@index([recipientPhone, createdAt])
+  @@map("messages")
+}
+
+enum MessageType {
+  SMS
+  LMS
+  MMS
+  KMS // 알림톡
+  FMS // 친구톡
+  GMS // 친구톡 이미지
+  RCS // RCS 메시지 (2024년~ 주요 채널)
+}
+
+enum MessageStatus {
+  PENDING   @map("pending")
+  SENDING   @map("sending")
+  SENT      @map("sent")
+  DELIVERED @map("delivered")
+  FAILED    @map("failed")
+  CANCELLED @map("cancelled")
+}
+
+// ============================================
+// 4. 템플릿 관리
+// ============================================
+
+model KakaoTemplate {
+  id        String @id @default(uuid())
+  companyId String @map("company_id")
+  profileId String @map("profile_id")
+
+  templateCode String? @map("template_code") @db.VarChar(50)
+  templateName String  @map("template_name") @db.VarChar(100)
+  content      String
+
+  // 버튼 (최대 5개)
+  buttons Json @default("[]")
+
+  // 가변값 정보
+  variables String[]
+
+  // 검수 상태
+  status TemplateStatus @default(DRAFT)
+
+  rejectReason String? @map("reject_reason")
+
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+  approvedAt DateTime? @map("approved_at")
+
+  company Company            @relation(fields: [companyId], references: [id])
+  profile KakaoSenderProfile @relation(fields: [profileId], references: [id])
+
+  @@index([companyId, status])
+  @@map("kakao_templates")
+}
+
+enum TemplateStatus {
+  DRAFT     @map("draft")
+  REQUESTED @map("requested")
+  APPROVED  @map("approved")
+  REJECTED  @map("rejected")
+  BLOCKED   @map("blocked")
+}
+
+model KakaoFriendtalkImage {
+  id        String @id @default(uuid())
+  companyId String @map("company_id")
+  userId    String @map("user_id")
+
+  imageName String? @map("image_name") @db.VarChar(200)
+  imageUrl  String? @map("image_url") @db.VarChar(500)
+
+  // 원본 이미지 정보
+  originalFilename String? @map("original_filename") @db.VarChar(200)
+  fileSize         Int?    @map("file_size")
+  width            Int?
+  height           Int?
+
+  status ImageStatus @default(REQUESTED)
+
+  createdAt   DateTime  @default(now()) @map("created_at")
+  processedAt DateTime? @map("processed_at")
+
+  company Company @relation(fields: [companyId], references: [id])
+  user    User    @relation(fields: [userId], references: [id])
+
+  @@map("kakao_friendtalk_images")
+}
+
+enum ImageStatus {
+  REQUESTED @map("requested")
+  APPROVED  @map("approved")
+  REJECTED  @map("rejected")
+}
+
+model SmsTemplate {
+  id        String @id @default(uuid())
+  companyId String @map("company_id")
+  userId    String @map("user_id")
+
+  templateName String      @map("template_name") @db.VarChar(100)
+  messageType  MessageType @map("message_type")
+
+  subject   String?  @db.VarChar(200)
+  content   String
+  imageUrls String[] @map("image_urls")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  company Company @relation(fields: [companyId], references: [id])
+  user    User    @relation(fields: [userId], references: [id])
+
+  @@map("sms_templates")
+}
+
+model MobileDmRequest {
+  id        String @id @default(uuid())
+  companyId String @map("company_id")
+  userId    String @map("user_id")
+
+  dmSampleId String? @map("dm_sample_id") @db.VarChar(50)
+
+  // 요청 이미지 (최대 10개)
+  requestImages String[] @map("request_images")
+  requestNote   String?  @map("request_note")
+
+  // 완성된 DM
+  completedUrl String? @map("completed_url") @db.VarChar(500)
+
+  status DmStatus @default(REQUESTED)
+
+  createdAt   DateTime  @default(now()) @map("created_at")
+  completedAt DateTime? @map("completed_at")
+
+  company Company @relation(fields: [companyId], references: [id])
+  user    User    @relation(fields: [userId], references: [id])
+
+  @@map("mobile_dm_requests")
+}
+
+enum DmStatus {
+  REQUESTED  @map("requested")
+  PROCESSING @map("processing")
+  COMPLETED  @map("completed")
+}
+
+// ============================================
+// 5. 수신거부 관리
+// ============================================
+
+model OptOut {
+  id           String @id @default(uuid())
+  companyId    String @map("company_id")
+  optOutNumber String @map("opt_out_number") @db.VarChar(20)
+
+  phone String @db.VarChar(20)
+
+  // 등록 방식
+  source OptOutSource @default(AUTO)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  company Company @relation(fields: [companyId], references: [id])
+
+  @@unique([companyId, optOutNumber, phone])
+  @@index([companyId, phone])
+  @@map("opt_outs")
+}
+
+enum OptOutSource {
+  AUTO   @map("auto")
+  MANUAL @map("manual")
+}
