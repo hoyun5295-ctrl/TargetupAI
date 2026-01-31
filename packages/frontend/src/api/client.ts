@@ -64,4 +64,10 @@ export const campaignsApi = {
   send: (id: string) => api.post(`/campaigns/${id}/send`),
 };
 
+// AI API
+export const aiApi = {
+  status: () => api.get('/ai/status'),
+  generateMessage: (data: any) => api.post('/ai/generate-message', data),
+  recommendTarget: (data: any) => api.post('/ai/recommend-target', data),
+};
 export default api;

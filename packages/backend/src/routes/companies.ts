@@ -227,4 +227,75 @@ router.post('/:id/admin', requireSuperAdmin, async (req: Request, res: Response)
   }
 });
 
+// 회사 설정 조회
+router.get('/settings', authenticate, async (req: Request, res: Response) => {
+  try {
+    const companyId = (req as any).user?.companyId;
+    const result = await query(`
+      SELECT 
+        brand_name, business_type, reject_number,
+        monthly_budget, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao,
+        send_start_hour, send_end_hour, daily_limit_per_customer,
+        holiday_send_allowed, duplicate_prevention_days,
+        target_strategy, cross_category_allowed, excluded_segments,
+        approval_required
+      FROM companies WHERE id = $1
+    `, [companyId]);
+    
+    res.json(result.rows[0] || {});
+  } catch (error) {
+    console.error('설정 조회 에러:', error);
+    res.status(500).json({ error: '설정 조회 실패' });
+  }
+});
+
+// 회사 설정 수정
+router.put('/settings', authenticate, async (req: Request, res: Response) => {
+  try {
+    const companyId = (req as any).user?.companyId;
+    const {
+      brand_name, business_type, reject_number,
+      monthly_budget, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao,
+      send_start_hour, send_end_hour, daily_limit_per_customer,
+      holiday_send_allowed, duplicate_prevention_days,
+      target_strategy, cross_category_allowed, excluded_segments,
+      approval_required
+    } = req.body;
+
+    await query(`
+      UPDATE companies SET
+        brand_name = COALESCE($1, brand_name),
+        business_type = COALESCE($2, business_type),
+        reject_number = COALESCE($3, reject_number),
+        monthly_budget = COALESCE($4, monthly_budget),
+        cost_per_sms = COALESCE($5, cost_per_sms),
+        cost_per_lms = COALESCE($6, cost_per_lms),
+        cost_per_mms = COALESCE($7, cost_per_mms),
+        cost_per_kakao = COALESCE($8, cost_per_kakao),
+        send_start_hour = COALESCE($9, send_start_hour),
+        send_end_hour = COALESCE($10, send_end_hour),
+        daily_limit_per_customer = COALESCE($11, daily_limit_per_customer),
+        holiday_send_allowed = COALESCE($12, holiday_send_allowed),
+        duplicate_prevention_days = COALESCE($13, duplicate_prevention_days),
+        target_strategy = COALESCE($14, target_strategy),
+        cross_category_allowed = COALESCE($15, cross_category_allowed),
+        excluded_segments = COALESCE($16, excluded_segments),
+        approval_required = COALESCE($17, approval_required),
+        updated_at = NOW()
+      WHERE id = $18
+    `, [
+      brand_name, business_type, reject_number,
+      monthly_budget, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao,
+      send_start_hour, send_end_hour, daily_limit_per_customer,
+      holiday_send_allowed, duplicate_prevention_days,
+      target_strategy, cross_category_allowed, excluded_segments ? JSON.stringify(excluded_segments) : null,
+      approval_required, companyId
+    ]);
+
+    res.json({ message: '설정이 저장되었습니다' });
+  } catch (error) {
+    console.error('설정 수정 에러:', error);
+    res.status(500).json({ error: '설정 저장 실패' });
+  }
+});
 export default router;

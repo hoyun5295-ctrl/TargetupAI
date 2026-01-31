@@ -6,42 +6,55 @@ const router = Router();
 
 router.use(authenticate);
 
-// GET /api/campaigns - 캠페인 목록
+// GET /api/campaigns - 캠페인 목록 (캘린더용)
 router.get('/', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
-
     if (!companyId) {
       return res.status(403).json({ error: '고객사 권한이 필요합니다.' });
     }
-
-    const { status, page = 1, limit = 20 } = req.query;
+    
+    const { status, page = 1, limit = 20, year, month } = req.query;
     const offset = (Number(page) - 1) * Number(limit);
-
+    
     let whereClause = 'WHERE company_id = $1';
     const params: any[] = [companyId];
     let paramIndex = 2;
-
+    
     if (status) {
       whereClause += ` AND status = $${paramIndex++}`;
       params.push(status);
     }
-
+    
+    // 월별 필터링 (캘린더용)
+    if (year && month) {
+      whereClause += ` AND (
+        DATE_TRUNC('month', scheduled_at) = $${paramIndex}::date
+        OR DATE_TRUNC('month', created_at) = $${paramIndex}::date
+      )`;
+      params.push(`${year}-${month}-01`);
+      paramIndex++;
+    }
+    
     const countResult = await query(
       `SELECT COUNT(*) FROM campaigns ${whereClause}`,
       params
     );
     const total = parseInt(countResult.rows[0].count);
-
+    
     params.push(Number(limit), offset);
     const result = await query(
-      `SELECT * FROM campaigns
+      `SELECT 
+        id, campaign_name, status, message_type,
+        target_count, sent_count, success_count, fail_count,
+        scheduled_at, sent_at, created_at
+       FROM campaigns
        ${whereClause}
-       ORDER BY created_at DESC
+       ORDER BY COALESCE(scheduled_at, created_at) DESC
        LIMIT $${paramIndex++} OFFSET $${paramIndex}`,
       params
     );
-
+    
     return res.json({
       campaigns: result.rows,
       pagination: {
@@ -56,6 +69,7 @@ router.get('/', async (req: Request, res: Response) => {
     return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
   }
 });
+
 
 // POST /api/campaigns - 캠페인 생성
 router.post('/', async (req: Request, res: Response) => {
@@ -141,7 +155,9 @@ router.post('/:id/send', async (req: Request, res: Response) => {
 
     // 타겟 고객 조회
     const targetFilter = campaign.target_filter;
+    console.log('targetFilter:', JSON.stringify(targetFilter, null, 2));
     const filterQuery = buildFilterQuery(targetFilter, companyId);
+    console.log('filterQuery:', filterQuery);
     
     const customersResult = await query(
       `SELECT id, phone, name FROM customers 
@@ -157,14 +173,16 @@ router.post('/:id/send', async (req: Request, res: Response) => {
 
     // 메시지 생성 (실제로는 여기서 QTmsg에 INSERT)
     for (const customer of customers) {
+      // QTmsg 발송 테이블에 INSERT
       await query(
-        `INSERT INTO messages (
-          campaign_id, customer_id, phone, message_type,
-          message_content, status
-        ) VALUES ($1, $2, $3, $4, $5, 'pending')`,
+        `INSERT INTO SMSQ_SEND (
+          dest_no, call_back, msg_contents, msg_type, sendreq_time, status_code, rsv1
+        ) VALUES ($1, $2, $3, $4, NOW(), 100, '1')`,
         [
-          campaign.id, customer.id, customer.phone,
-          campaign.message_type, campaign.message_content
+          customer.phone.replace(/-/g, ''),
+          '18008125',
+          campaign.message_content,
+          campaign.message_type === 'SMS' ? 'S' : 'L'
         ]
       );
     }
@@ -197,27 +215,80 @@ function buildFilterQuery(filter: any, companyId: string) {
 
   if (!filter) return { where, params };
 
-  if (filter.gender) {
+  const getValue = (field: any) => {
+    if (!field) return null;
+    if (typeof field === 'object' && field.value !== undefined) return field.value;
+    return field;
+  };
+
+  // gender
+  const gender = getValue(filter.gender);
+  if (gender) {
     where += ` AND gender = $${paramIndex++}`;
-    params.push(filter.gender);
+    params.push(gender);
   }
 
-  if (filter.minAge) {
+  // age (배열: [30, 39])
+  const age = getValue(filter.age);
+  if (age && Array.isArray(age) && age.length === 2) {
     where += ` AND EXTRACT(YEAR FROM AGE(birth_date)) >= $${paramIndex++}`;
-    params.push(filter.minAge);
-  }
-
-  if (filter.maxAge) {
+    params.push(age[0]);
     where += ` AND EXTRACT(YEAR FROM AGE(birth_date)) <= $${paramIndex++}`;
-    params.push(filter.maxAge);
+    params.push(age[1]);
   }
 
-  if (filter.grade) {
+  // minAge/maxAge (기존 호환)
+  const minAge = getValue(filter.minAge) || getValue(filter.min_age);
+  if (minAge) {
+    where += ` AND EXTRACT(YEAR FROM AGE(birth_date)) >= $${paramIndex++}`;
+    params.push(minAge);
+  }
+
+  const maxAge = getValue(filter.maxAge) || getValue(filter.max_age);
+  if (maxAge) {
+    where += ` AND EXTRACT(YEAR FROM AGE(birth_date)) <= $${paramIndex++}`;
+    params.push(maxAge);
+  }
+
+  // grade
+  const grade = getValue(filter.grade);
+  if (grade) {
     where += ` AND grade = $${paramIndex++}`;
-    params.push(filter.grade);
+    params.push(grade);
   }
 
   return { where, params };
 }
+
+// GET /api/campaigns/:id - 캠페인 상세 조회
+router.get('/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const companyId = req.user?.companyId;
+    
+    const result = await query(
+      `SELECT * FROM campaigns WHERE id = $1 AND company_id = $2`,
+      [id, companyId]
+    );
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: '캠페인을 찾을 수 없습니다.' });
+    }
+    
+    // 발송 이력도 함께 조회
+    const runs = await query(
+      `SELECT * FROM campaign_runs WHERE campaign_id = $1 ORDER BY created_at DESC`,
+      [id]
+    );
+    
+    return res.json({
+      ...result.rows[0],
+      runs: runs.rows
+    });
+  } catch (error) {
+    console.error('캠페인 상세 조회 에러:', error);
+    return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+});
 
 export default router;

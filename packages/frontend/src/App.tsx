@@ -1,9 +1,11 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useAuthStore } from './stores/authStore';
 import LoginPage from './pages/LoginPage';
 import AdminDashboard from './pages/AdminDashboard';
 import Dashboard from './pages/Dashboard';
+import CalendarPage from './pages/CalendarPage';
+import Settings from './pages/Settings';
 
 // 인증 필요 라우트
 function PrivateRoute({ children, allowedTypes }: { children: React.ReactNode; allowedTypes?: string[] }) {
@@ -22,12 +24,18 @@ function PrivateRoute({ children, allowedTypes }: { children: React.ReactNode; a
 
 function App() {
   const { loadFromStorage, isAuthenticated, user } = useAuthStore();
+const [isLoading, setIsLoading] = useState(true);
 
-  useEffect(() => {
-    loadFromStorage();
-  }, [loadFromStorage]);
+useEffect(() => {
+  loadFromStorage();
+  setIsLoading(false);
+}, [loadFromStorage]);
 
-  return (
+if (isLoading) {
+  return <div>로딩 중...</div>;
+}
+
+return (
     <BrowserRouter>
       <Routes>
         {/* 로그인 */}
@@ -52,7 +60,15 @@ function App() {
             </PrivateRoute>
           }
         />
-
+{/* 캘린더 */}
+<Route
+          path="/calendar"
+          element={
+            <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
+              <CalendarPage />
+            </PrivateRoute>
+          }
+        />
         {/* 기본 리다이렉트 */}
         <Route
           path="/"
@@ -68,7 +84,7 @@ function App() {
             )
           }
         />
-
+<Route path="/settings" element={<PrivateRoute><Settings /></PrivateRoute>} />
         {/* 404 */}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

@@ -1,3 +1,4 @@
+import aiRoutes from './routes/ai';
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -36,6 +37,7 @@ app.get('/api', (req, res) => {
     message: 'Target-UP API Server',
     version: '1.0.0',
     endpoints: {
+      ai: '/api/ai',
       auth: '/api/auth',
       companies: '/api/companies',
       plans: '/api/plans',
@@ -51,6 +53,7 @@ app.use('/api/companies', companiesRoutes);
 app.use('/api/plans', plansRoutes);
 app.use('/api/customers', customersRoutes);
 app.use('/api/campaigns', campaignsRoutes);
+app.use('/api/ai', aiRoutes);
 
 // 404 처리
 app.use((req, res) => {

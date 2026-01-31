@@ -1,7 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 
-// JWT 페이로드 타입
 export interface JwtPayload {
   userId: string;
   companyId?: string;
@@ -9,7 +8,6 @@ export interface JwtPayload {
   loginId: string;
 }
 
-// Request에 user 추가
 declare global {
   namespace Express {
     interface Request {
@@ -18,53 +16,40 @@ declare global {
   }
 }
 
-// JWT 검증 미들웨어
-export const authenticate = (
-  req: Request,
-  res: Response,
-  next: NextFunction
-): void => {
+export const generateToken = (payload: JwtPayload): string => {
+  return jwt.sign(payload, process.env.JWT_SECRET || 'secret', { expiresIn: '24h' });
+};
+
+export const authenticate = (req: Request, res: Response, next: NextFunction) => {
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'No token provided' });
+  }
+
+  const token = authHeader.split(' ')[1];
+
   try {
-    const authHeader = req.headers.authorization;
-
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      res.status(401).json({ error: '인증 토큰이 필요합니다.' });
-      return;
-    }
-
-    const token = authHeader.split(' ')[1];
-    const secret = process.env.JWT_SECRET || 'default-secret';
-
-    const decoded = jwt.verify(token, secret) as JwtPayload;
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret') as JwtPayload;
     req.user = decoded;
-
     next();
   } catch (error) {
-    res.status(401).json({ error: '유효하지 않은 토큰입니다.' });
+    return res.status(401).json({ error: 'Invalid token' });
   }
 };
 
-// 슈퍼관리자 권한 확인
-export const requireSuperAdmin = (
-  req: Request,
-  res: Response,
-  next: NextFunction
-): void => {
-  if (!req.user) {
-    res.status(401).json({ error: '인증이 필요합니다.' });
-    return;
+export const requireSuperAdmin = (req: Request, res: Response, next: NextFunction) => {
+  if (!req.user || req.user.userType !== 'super_admin') {
+    return res.status(403).json({ error: 'Super admin access required' });
   }
-
-  if (req.user.userType !== 'super_admin') {
-    res.status(403).json({ error: '슈퍼관리자 권한이 필요합니다.' });
-    return;
-  }
-
   next();
 };
 
-// 토큰 생성
-export const generateToken = (payload: JwtPayload): string => {
-  const secret = process.env.JWT_SECRET || 'default-secret';
-  return jwt.sign(payload, secret, { expiresIn: '24h' });
+export const requireCompanyAdmin = (req: Request, res: Response, next: NextFunction) => {
+  if (!req.user || (req.user.userType !== 'company_admin' && req.user.userType !== 'super_admin')) {
+    return res.status(403).json({ error: 'Admin access required' });
+  }
+  next();
 };
+
+export default { authenticate, requireSuperAdmin, requireCompanyAdmin, generateToken };
