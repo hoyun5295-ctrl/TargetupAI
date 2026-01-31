@@ -9,6 +9,96 @@ const router = Router();
 // 모든 라우트에 인증 필요
 router.use(authenticate);
 
+// ⚠️ /settings 라우트를 /:id 보다 먼저 정의해야 함!
+// 회사 설정 조회
+router.get('/settings', authenticate, async (req: Request, res: Response) => {
+  try {
+    const companyId = (req as any).user?.companyId;
+    const result = await query(`
+      SELECT 
+        brand_name, business_type, reject_number, manager_phone,
+        monthly_budget, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao,
+        send_start_hour, send_end_hour, daily_limit_per_customer,
+        holiday_send_allowed, duplicate_prevention_days,
+        target_strategy, cross_category_allowed, excluded_segments,
+        approval_required
+      FROM companies WHERE id = $1
+    `, [companyId]);
+    
+    const row = result.rows[0] || {};
+    // manager_phone: JSON 문자열이면 파싱, 단일 번호면 배열로 변환
+    if (row.manager_phone) {
+      try {
+        row.manager_phones = JSON.parse(row.manager_phone);
+      } catch {
+        // 기존 단일 번호 → 배열로 변환
+        row.manager_phones = row.manager_phone ? [row.manager_phone] : [];
+      }
+    } else {
+      row.manager_phones = [];
+    }
+    
+    res.json(row);
+  } catch (error) {
+    console.error('설정 조회 에러:', error);
+    res.status(500).json({ error: '설정 조회 실패' });
+  }
+});
+
+// 회사 설정 수정
+router.put('/settings', authenticate, async (req: Request, res: Response) => {
+  try {
+    const companyId = (req as any).user?.companyId;
+    const {
+      brand_name, business_type, reject_number, manager_phones,
+      monthly_budget, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao,
+      send_start_hour, send_end_hour, daily_limit_per_customer,
+      holiday_send_allowed, duplicate_prevention_days,
+      target_strategy, cross_category_allowed, excluded_segments,
+      approval_required
+    } = req.body;
+
+    // manager_phones 배열 → JSON 문자열로 저장
+    const managerPhoneJson = manager_phones ? JSON.stringify(manager_phones) : null;
+
+    await query(`
+      UPDATE companies SET
+        brand_name = COALESCE($1, brand_name),
+        business_type = COALESCE($2, business_type),
+        reject_number = COALESCE($3, reject_number),
+        manager_phone = COALESCE($4, manager_phone),
+        monthly_budget = COALESCE($5, monthly_budget),
+        cost_per_sms = COALESCE($6, cost_per_sms),
+        cost_per_lms = COALESCE($7, cost_per_lms),
+        cost_per_mms = COALESCE($8, cost_per_mms),
+        cost_per_kakao = COALESCE($9, cost_per_kakao),
+        send_start_hour = COALESCE($10, send_start_hour),
+        send_end_hour = COALESCE($11, send_end_hour),
+        daily_limit_per_customer = COALESCE($12, daily_limit_per_customer),
+        holiday_send_allowed = COALESCE($13, holiday_send_allowed),
+        duplicate_prevention_days = COALESCE($14, duplicate_prevention_days),
+        target_strategy = COALESCE($15, target_strategy),
+        cross_category_allowed = COALESCE($16, cross_category_allowed),
+        excluded_segments = COALESCE($17, excluded_segments),
+        approval_required = COALESCE($18, approval_required),
+        updated_at = NOW()
+      WHERE id = $19
+    `, [
+      brand_name, business_type, reject_number, managerPhoneJson,
+      monthly_budget, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao,
+      send_start_hour, send_end_hour, daily_limit_per_customer,
+      holiday_send_allowed, duplicate_prevention_days,
+      target_strategy, cross_category_allowed, excluded_segments ? JSON.stringify(excluded_segments) : null,
+      approval_required, companyId
+    ]);
+
+    res.json({ message: '설정이 저장되었습니다' });
+  } catch (error) {
+    console.error('설정 수정 에러:', error);
+    res.status(500).json({ error: '설정 저장 실패' });
+  }
+});
+
 // GET /api/companies - 고객사 목록
 router.get('/', requireSuperAdmin, async (req: Request, res: Response) => {
   try {
@@ -30,14 +120,12 @@ router.get('/', requireSuperAdmin, async (req: Request, res: Response) => {
       paramIndex++;
     }
 
-    // 총 개수
     const countResult = await query(
       `SELECT COUNT(*) FROM companies c ${whereClause}`,
       params
     );
     const total = parseInt(countResult.rows[0].count);
 
-    // 목록 조회
     params.push(Number(limit), offset);
     const result = await query(
       `SELECT c.*, p.plan_name, p.plan_code
@@ -104,11 +192,8 @@ router.post('/', requireSuperAdmin, async (req: Request, res: Response) => {
       dataInputMethod = 'file',
     } = req.body;
 
-    // API 키 생성
     const apiKey = `tk_${crypto.randomBytes(24).toString('hex')}`;
     const apiSecret = crypto.randomBytes(32).toString('hex');
-
-    // DB 이름 생성
     const dbName = `targetup_${companyCode.toLowerCase()}`;
 
     const result = await query(
@@ -199,7 +284,6 @@ router.post('/:id/admin', requireSuperAdmin, async (req: Request, res: Response)
     const { id } = req.params;
     const { loginId, password, name, email, phone } = req.body;
 
-    // 고객사 확인
     const companyResult = await query('SELECT * FROM companies WHERE id = $1', [id]);
     if (companyResult.rows.length === 0) {
       return res.status(404).json({ error: '고객사를 찾을 수 없습니다.' });
@@ -227,75 +311,4 @@ router.post('/:id/admin', requireSuperAdmin, async (req: Request, res: Response)
   }
 });
 
-// 회사 설정 조회
-router.get('/settings', authenticate, async (req: Request, res: Response) => {
-  try {
-    const companyId = (req as any).user?.companyId;
-    const result = await query(`
-      SELECT 
-        brand_name, business_type, reject_number,
-        monthly_budget, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao,
-        send_start_hour, send_end_hour, daily_limit_per_customer,
-        holiday_send_allowed, duplicate_prevention_days,
-        target_strategy, cross_category_allowed, excluded_segments,
-        approval_required
-      FROM companies WHERE id = $1
-    `, [companyId]);
-    
-    res.json(result.rows[0] || {});
-  } catch (error) {
-    console.error('설정 조회 에러:', error);
-    res.status(500).json({ error: '설정 조회 실패' });
-  }
-});
-
-// 회사 설정 수정
-router.put('/settings', authenticate, async (req: Request, res: Response) => {
-  try {
-    const companyId = (req as any).user?.companyId;
-    const {
-      brand_name, business_type, reject_number,
-      monthly_budget, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao,
-      send_start_hour, send_end_hour, daily_limit_per_customer,
-      holiday_send_allowed, duplicate_prevention_days,
-      target_strategy, cross_category_allowed, excluded_segments,
-      approval_required
-    } = req.body;
-
-    await query(`
-      UPDATE companies SET
-        brand_name = COALESCE($1, brand_name),
-        business_type = COALESCE($2, business_type),
-        reject_number = COALESCE($3, reject_number),
-        monthly_budget = COALESCE($4, monthly_budget),
-        cost_per_sms = COALESCE($5, cost_per_sms),
-        cost_per_lms = COALESCE($6, cost_per_lms),
-        cost_per_mms = COALESCE($7, cost_per_mms),
-        cost_per_kakao = COALESCE($8, cost_per_kakao),
-        send_start_hour = COALESCE($9, send_start_hour),
-        send_end_hour = COALESCE($10, send_end_hour),
-        daily_limit_per_customer = COALESCE($11, daily_limit_per_customer),
-        holiday_send_allowed = COALESCE($12, holiday_send_allowed),
-        duplicate_prevention_days = COALESCE($13, duplicate_prevention_days),
-        target_strategy = COALESCE($14, target_strategy),
-        cross_category_allowed = COALESCE($15, cross_category_allowed),
-        excluded_segments = COALESCE($16, excluded_segments),
-        approval_required = COALESCE($17, approval_required),
-        updated_at = NOW()
-      WHERE id = $18
-    `, [
-      brand_name, business_type, reject_number,
-      monthly_budget, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao,
-      send_start_hour, send_end_hour, daily_limit_per_customer,
-      holiday_send_allowed, duplicate_prevention_days,
-      target_strategy, cross_category_allowed, excluded_segments ? JSON.stringify(excluded_segments) : null,
-      approval_required, companyId
-    ]);
-
-    res.json({ message: '설정이 저장되었습니다' });
-  } catch (error) {
-    console.error('설정 수정 에러:', error);
-    res.status(500).json({ error: '설정 저장 실패' });
-  }
-});
 export default router;

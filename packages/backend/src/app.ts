@@ -11,6 +11,7 @@ import companiesRoutes from './routes/companies';
 import plansRoutes from './routes/plans';
 import customersRoutes from './routes/customers';
 import campaignsRoutes from './routes/campaigns';
+import resultsRoutes from './routes/results';
 
 // DB 연결
 import './config/database';
@@ -54,6 +55,7 @@ app.use('/api/plans', plansRoutes);
 app.use('/api/customers', customersRoutes);
 app.use('/api/campaigns', campaignsRoutes);
 app.use('/api/ai', aiRoutes);
+app.use('/api/v1/results', resultsRoutes);
 
 // 404 처리
 app.use((req, res) => {

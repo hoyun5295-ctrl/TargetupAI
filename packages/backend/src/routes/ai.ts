@@ -127,6 +127,38 @@ if (age && Array.isArray(age) && age.length === 2) {
   filterParams.push(age[1]);
 }
 
+const grade = getValue(result.filters?.grade);
+if (grade) {
+  filterWhere += ` AND grade = $${paramIndex++}`;
+  filterParams.push(grade);
+}
+
+// custom_fields 처리
+Object.keys(result.filters || {}).forEach(key => {
+  if (key.startsWith('custom_fields.')) {
+    const fieldName = key.replace('custom_fields.', '');
+    const condition = result.filters[key];
+    const value = getValue(condition);
+    const operator = condition?.operator || 'eq';
+    
+    if (value !== null && value !== undefined) {
+      if (operator === 'eq') {
+        filterWhere += ` AND custom_fields->>'${fieldName}' = $${paramIndex++}`;
+        filterParams.push(value);
+      } else if (operator === 'gte') {
+        filterWhere += ` AND (custom_fields->>'${fieldName}')::numeric >= $${paramIndex++}`;
+        filterParams.push(value);
+      } else if (operator === 'lte') {
+        filterWhere += ` AND (custom_fields->>'${fieldName}')::numeric <= $${paramIndex++}`;
+        filterParams.push(value);
+      } else if (operator === 'in' && Array.isArray(value)) {
+        filterWhere += ` AND custom_fields->>'${fieldName}' = ANY($${paramIndex++})`;
+        filterParams.push(value);
+      }
+    }
+  }
+});
+
 const actualCountResult = await query(
   `SELECT COUNT(*) FROM customers 
    WHERE company_id = $1 AND is_active = true AND sms_opt_in = true ${filterWhere}`,

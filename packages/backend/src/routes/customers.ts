@@ -402,15 +402,35 @@ router.get('/stats', async (req: Request, res: Response) => {
         COUNT(*) FILTER (WHERE sms_opt_in = true) as sms_opt_in_count,
         COUNT(*) FILTER (WHERE gender = 'M') as male_count,
         COUNT(*) FILTER (WHERE gender = 'F') as female_count,
-        COUNT(DISTINCT grade) as grade_count,
-        AVG((custom_fields->>'purchase_count')::numeric) as avg_purchase_count,
-        AVG((custom_fields->>'total_spent')::numeric) as avg_total_spent
+        COUNT(*) FILTER (WHERE grade = 'VIP') as vip_count
        FROM customers
        WHERE company_id = $1 AND is_active = true`,
       [companyId]
     );
 
-    return res.json({ stats: result.rows[0] });
+    // 이번 달 발송 통계 (campaigns 테이블 조인)
+    const campaignStats = await query(
+      `SELECT
+        COALESCE(SUM(cr.sent_count), 0) as monthly_sent,
+        COALESCE(SUM(cr.success_count), 0) as monthly_success
+       FROM campaign_runs cr
+       JOIN campaigns c ON cr.campaign_id = c.id
+       WHERE c.company_id = $1
+         AND cr.created_at >= date_trunc('month', CURRENT_DATE)`,
+      [companyId]
+    );
+
+    const monthlySent = parseInt(campaignStats.rows[0]?.monthly_sent || '0');
+    const monthlySuccess = parseInt(campaignStats.rows[0]?.monthly_success || '0');
+    const successRate = monthlySent > 0 ? ((monthlySuccess / monthlySent) * 100).toFixed(1) : '0';
+
+    return res.json({ 
+      stats: {
+        ...result.rows[0],
+        monthly_sent: monthlySent,
+        success_rate: successRate
+      }
+    });
   } catch (error) {
     console.error('고객 통계 조회 오류:', error);
     return res.status(500).json({ error: '서버 오류가 발생했습니다.' });

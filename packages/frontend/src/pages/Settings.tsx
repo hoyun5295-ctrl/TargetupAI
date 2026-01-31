@@ -7,6 +7,8 @@ export default function Settings() {
   const { user } = useAuthStore();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [newPhone, setNewPhone] = useState('');
+  const [managerPhones, setManagerPhones] = useState<string[]>([]);
   const [settings, setSettings] = useState({
     brand_name: '',
     business_type: '',
@@ -37,7 +39,11 @@ export default function Settings() {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
-      if (data) setSettings({ ...settings, ...data });
+      if (data) {
+        const { manager_phones, manager_phone, ...rest } = data;
+        setSettings((prev) => ({ ...prev, ...rest }));
+        setManagerPhones(manager_phones || []);
+      }
     } catch (error) {
       console.error('설정 로드 실패:', error);
     } finally {
@@ -55,7 +61,7 @@ export default function Settings() {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify(settings),
+        body: JSON.stringify({ ...settings, manager_phones: managerPhones }),
       });
       const data = await res.json();
       alert(data.message || '저장 완료');
@@ -64,6 +70,60 @@ export default function Settings() {
     } finally {
       setSaving(false);
     }
+  };
+
+  // 담당자 번호 포맷 (010-1234-5678)
+  const formatPhone = (phone: string) => {
+    const cleaned = phone.replace(/\D/g, '');
+    if (cleaned.length === 11) {
+      return `${cleaned.slice(0, 3)}-${cleaned.slice(3, 7)}-${cleaned.slice(7)}`;
+    }
+    return phone;
+  };
+
+  // 번호 추가
+  const handleAddPhone = async () => {
+    const cleaned = newPhone.replace(/\D/g, '');
+    if (cleaned.length < 10 || cleaned.length > 11) {
+      alert('올바른 전화번호를 입력해주세요');
+      return;
+    }
+    if (managerPhones.includes(cleaned)) {
+      alert('이미 등록된 번호입니다');
+      return;
+    }
+
+    const updated = [...managerPhones, cleaned];
+    setManagerPhones(updated);
+    setNewPhone('');
+
+    // 즉시 저장
+    const token = localStorage.getItem('token');
+    await fetch('/api/companies/settings', {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ ...settings, manager_phones: updated }),
+    });
+  };
+
+  // 번호 삭제
+  const handleRemovePhone = async (phone: string) => {
+    const updated = managerPhones.filter((p) => p !== phone);
+    setManagerPhones(updated);
+
+    // 즉시 저장
+    const token = localStorage.getItem('token');
+    await fetch('/api/companies/settings', {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ ...settings, manager_phones: updated }),
+    });
   };
 
   if (loading) return <div className="p-8 text-center">로딩 중...</div>;
@@ -120,6 +180,64 @@ export default function Settings() {
                 placeholder="예: 080-123-4567"
               />
             </div>
+          </div>
+        </section>
+
+        {/* 담당자 사전수신 */}
+        <section className="bg-white rounded-lg shadow p-6">
+          <h2 className="text-lg font-semibold mb-4">📱 담당자 사전수신</h2>
+          <p className="text-sm text-gray-500 mb-4">
+            캠페인 발송 전 등록된 담당자 전원에게 테스트 문자를 보내 확인할 수 있습니다.
+          </p>
+
+          {/* 등록된 번호 목록 */}
+          {managerPhones.length > 0 && (
+            <div className="space-y-2 mb-4">
+              {managerPhones.map((phone, idx) => (
+                <div
+                  key={phone}
+                  className="flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-lg px-4 py-2.5"
+                >
+                  <span className="text-lg">👤</span>
+                  <span className="flex-1 font-medium text-gray-800">
+                    담당자 {idx + 1}: {formatPhone(phone)}
+                  </span>
+                  <button
+                    onClick={() => handleRemovePhone(phone)}
+                    className="px-2.5 py-1 text-sm bg-white border border-red-300 text-red-600 rounded-lg hover:bg-red-50"
+                  >
+                    삭제
+                  </button>
+                </div>
+              ))}
+              <p className="text-xs text-gray-400 mt-1">
+                총 {managerPhones.length}명 등록됨 · 사전수신 시 전원에게 발송
+              </p>
+            </div>
+          )}
+
+          {/* 번호 추가 입력 */}
+          <div className="flex items-end gap-3">
+            <div className="flex-1">
+              <label className="block text-sm font-medium text-gray-700 mb-1">번호 추가</label>
+              <input
+                type="text"
+                value={newPhone}
+                onChange={(e) => setNewPhone(e.target.value.replace(/[^\d-]/g, ''))}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleAddPhone();
+                }}
+                className="w-full px-3 py-2 border rounded-lg"
+                placeholder="01012345678"
+              />
+            </div>
+            <button
+              onClick={handleAddPhone}
+              disabled={!newPhone.replace(/\D/g, '')}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              + 추가
+            </button>
           </div>
         </section>
 

@@ -3,6 +3,53 @@ import Anthropic from '@anthropic-ai/sdk';
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY || '',
 });
+// 한국 시간 기준 현재 월 달력 생성
+function getKoreanCalendar(): string {
+  const now = new Date();
+  const koreaTime = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Seoul' }));
+  const year = koreaTime.getFullYear();
+  const month = koreaTime.getMonth();
+  
+  const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  
+  let calendar = `## ${year}년 ${month + 1}월 달력 (요일 참고 필수!)\n`;
+  
+  for (let day = 1; day <= daysInMonth; day++) {
+    const date = new Date(year, month, day);
+    const dayOfWeek = dayNames[date.getDay()];
+    calendar += `${day}일(${dayOfWeek})`;
+    if (day < daysInMonth) calendar += day % 7 === 0 ? '\n' : ', ';
+  }
+  
+  // 다음 달도 추가 (이벤트가 다음 달에 걸칠 수 있으므로)
+  const nextMonth = month + 1 > 11 ? 0 : month + 1;
+  const nextYear = month + 1 > 11 ? year + 1 : year;
+  const daysInNextMonth = new Date(nextYear, nextMonth + 1, 0).getDate();
+  
+  calendar += `\n\n## ${nextYear}년 ${nextMonth + 1}월 달력\n`;
+  
+  for (let day = 1; day <= daysInNextMonth; day++) {
+    const date = new Date(nextYear, nextMonth, day);
+    const dayOfWeek = dayNames[date.getDay()];
+    calendar += `${day}일(${dayOfWeek})`;
+    if (day < daysInNextMonth) calendar += day % 7 === 0 ? '\n' : ', ';
+  }
+  
+  return calendar;
+}
+
+// 한국 시간 기준 현재 날짜
+function getKoreanToday(): string {
+  const now = new Date();
+  return now.toLocaleDateString('ko-KR', { 
+    timeZone: 'Asia/Seoul', 
+    year: 'numeric', 
+    month: 'long', 
+    day: 'numeric', 
+    weekday: 'long' 
+  });
+}
 
 // 브랜드 시스템 프롬프트
 const BRAND_SYSTEM_PROMPT = `당신은 마케팅 문자 메시지 전문가입니다.
@@ -206,6 +253,13 @@ export async function recommendTarget(
 - 업종: ${businessType}
 - 브랜드명: ${brandName}
 
+## 현재 날짜 (한국 시간 기준)
+오늘: ${getKoreanToday()}
+
+${getKoreanCalendar()}
+
+이벤트 기간 작성 시 반드시 위 달력의 요일을 확인하세요!
+
 ## 마케팅 목표
 ${objective}
 
@@ -225,7 +279,7 @@ ${objective}
 - recent_purchase_date: 최근구매일
 - custom_fields.purchase_count: 구매횟수
 - custom_fields.total_spent: 총지출
-- custom_fields.preferred_category: 선호카테고리 (의류, 식품, 전자제품, 화장품, 생활용품)
+- custom_fields.preferred_category: 선호카테고리 (기초, 스킨케어, 색조, 클렌징, 마스크팩)
 - custom_fields.visit_count: 방문횟수
 - custom_fields.last_purchase_date: 마지막구매일
 
@@ -248,8 +302,8 @@ ${objective}
   "estimated_percentage": 예상 타겟 비율(%),
   "recommended_channel": "SMS 또는 LMS 또는 MMS 또는 카카오",
   "channel_reason": "이 채널을 추천하는 이유 (한글 1문장)",
-  ""is_ad": true 또는 false,
-"recommended_time": "YYYY-MM-DD HH:mm"
+ "is_ad": true 또는 false,
+  "recommended_time": "YYYY-MM-DD HH:mm (한국시간 기준)"
 }
 
 연산자: eq(같음), gte(이상), lte(이하), between([최소,최대]), in([배열])`;

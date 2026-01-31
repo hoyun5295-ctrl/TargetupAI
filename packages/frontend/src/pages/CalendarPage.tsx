@@ -37,6 +37,7 @@ export default function CalendarPage() {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null);
   const [loading, setLoading] = useState(true);
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
@@ -44,6 +45,18 @@ export default function CalendarPage() {
   useEffect(() => {
     fetchCampaigns();
   }, [year, month]);
+
+  // 드로어 열기/닫기 동기화
+  useEffect(() => {
+    if (selectedCampaign) {
+      setDrawerOpen(true);
+    }
+  }, [selectedCampaign]);
+
+  const closeDrawer = () => {
+    setDrawerOpen(false);
+    setTimeout(() => setSelectedCampaign(null), 300); // 애니메이션 후 데이터 클리어
+  };
 
   const fetchCampaigns = async () => {
     setLoading(true);
@@ -128,8 +141,13 @@ export default function CalendarPage() {
           <div className="flex-1 bg-white rounded-lg shadow p-4">
             {/* 요일 헤더 */}
             <div className="grid grid-cols-7 gap-1 mb-2">
-              {['일', '월', '화', '수', '목', '금', '토'].map((day) => (
-                <div key={day} className="text-center text-sm font-medium text-gray-500 py-2">
+              {['일', '월', '화', '수', '목', '금', '토'].map((day, idx) => (
+                <div 
+                  key={day} 
+                  className={`text-center text-sm font-medium py-2 ${
+                    idx === 0 ? 'text-red-500' : idx === 6 ? 'text-blue-500' : 'text-gray-500'
+                  }`}
+                >
                   {day}
                 </div>
               ))}
@@ -146,15 +164,20 @@ export default function CalendarPage() {
                   day === new Date().getDate() &&
                   month === new Date().getMonth() &&
                   year === new Date().getFullYear();
+                const dayOfWeek = new Date(year, month, day).getDay();
 
                 return (
                   <div
                     key={day}
-                    className={`h-24 border rounded p-1 overflow-hidden ${
-                      isToday ? 'border-blue-500 border-2' : 'border-gray-200'
+                    className={`h-24 border rounded p-1 overflow-hidden cursor-pointer hover:bg-gray-50 transition-colors ${
+                      isToday ? 'border-blue-500 border-2 bg-blue-50' : 'border-gray-200'
                     }`}
                   >
-                    <div className={`text-sm font-medium mb-1 ${isToday ? 'text-blue-600' : 'text-gray-700'}`}>
+                    <div className={`text-sm font-medium mb-1 ${
+                      isToday ? 'text-blue-600' : 
+                      dayOfWeek === 0 ? 'text-red-500' : 
+                      dayOfWeek === 6 ? 'text-blue-500' : 'text-gray-700'
+                    }`}>
                       {day}
                     </div>
                     <div className="space-y-1">
@@ -179,42 +202,47 @@ export default function CalendarPage() {
             </div>
           </div>
 
-          {/* 우측 상세 드로어 */}
-          <div className="w-80 bg-white rounded-lg shadow p-4">
+          {/* 우측 상세 드로어 - 슬라이드 애니메이션 */}
+          <div 
+            className={`w-80 bg-white rounded-lg shadow-lg transition-all duration-300 ease-in-out overflow-hidden ${
+              drawerOpen ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-4 pointer-events-none'
+            }`}
+            style={{ minHeight: '400px' }}
+          >
             {selectedCampaign ? (
-              <>
+              <div className="p-4">
                 <div className="flex justify-between items-start mb-4">
                   <h3 className="text-lg font-semibold">{selectedCampaign.campaign_name}</h3>
                   <button
-                    onClick={() => setSelectedCampaign(null)}
-                    className="text-gray-400 hover:text-gray-600"
+                    onClick={closeDrawer}
+                    className="text-gray-400 hover:text-gray-600 transition-colors"
                   >
                     ✕
                   </button>
                 </div>
 
                 <div className="space-y-3">
-                  <div>
-                    <span className="text-sm text-gray-500">상태</span>
-                    <div className={`inline-block ml-2 px-2 py-1 rounded text-sm ${statusColors[selectedCampaign.status]}`}>
+                  <div className="flex items-center">
+                    <span className="text-sm text-gray-500 w-16">상태</span>
+                    <span className={`px-2 py-1 rounded text-sm ${statusColors[selectedCampaign.status]}`}>
                       {statusLabels[selectedCampaign.status] || selectedCampaign.status}
-                    </div>
+                    </span>
                   </div>
 
-                  <div>
-                    <span className="text-sm text-gray-500">채널</span>
-                    <span className="ml-2 font-medium">{selectedCampaign.message_type}</span>
+                  <div className="flex items-center">
+                    <span className="text-sm text-gray-500 w-16">채널</span>
+                    <span className="font-medium">{selectedCampaign.message_type}</span>
                   </div>
 
-                  <div>
-                    <span className="text-sm text-gray-500">대상</span>
-                    <span className="ml-2 font-medium">{selectedCampaign.target_count?.toLocaleString()}명</span>
+                  <div className="flex items-center">
+                    <span className="text-sm text-gray-500 w-16">대상</span>
+                    <span className="font-medium">{selectedCampaign.target_count?.toLocaleString()}명</span>
                   </div>
 
                   {selectedCampaign.scheduled_at && (
-                    <div>
-                      <span className="text-sm text-gray-500">예약시간</span>
-                      <span className="ml-2 font-medium">
+                    <div className="flex items-center">
+                      <span className="text-sm text-gray-500 w-16">예약</span>
+                      <span className="font-medium">
                         {new Date(selectedCampaign.scheduled_at).toLocaleString('ko-KR')}
                       </span>
                     </div>
@@ -241,23 +269,33 @@ export default function CalendarPage() {
                   )}
 
                   <div className="pt-4 space-y-2">
-                    <button className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                    <button className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
                       편집
                     </button>
-                    <button className="w-full px-4 py-2 border rounded-lg hover:bg-gray-50">
+                    <button className="w-full px-4 py-2 border rounded-lg hover:bg-gray-50 transition-colors">
                       복제
                     </button>
                   </div>
                 </div>
-              </>
+              </div>
             ) : (
-              <div className="text-center text-gray-500 py-12">
+              <div className="text-center text-gray-500 py-12 p-4">
                 <div className="text-4xl mb-4">📋</div>
                 <p>캠페인을 선택하면<br />상세 정보가 표시됩니다</p>
               </div>
             )}
           </div>
         </div>
+
+        {/* 로딩 표시 */}
+        {loading && (
+          <div className="fixed inset-0 bg-black bg-opacity-20 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg p-4 shadow-lg">
+              <div className="animate-spin w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full mx-auto"></div>
+              <p className="mt-2 text-gray-600">로딩 중...</p>
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );
