@@ -17,9 +17,11 @@ router.get('/summary', async (req: Request, res: Response) => {
     const { from, to } = req.query;
     const yearMonth = String(from || new Date().toISOString().slice(0, 7).replace('-', ''));
 
+    const userId = req.user?.userId;
+    const userType = req.user?.userType;
+    
     // PostgreSQL에서 캠페인 집계 조회
-    const campaignStats = await query(
-      `SELECT 
+    let summaryQuery = `SELECT 
         COUNT(*) as total_campaigns,
         SUM(target_count) as total_target,
         SUM(sent_count) as total_sent,
@@ -28,9 +30,17 @@ router.get('/summary', async (req: Request, res: Response) => {
        FROM campaigns 
        WHERE company_id = $1 
        AND created_at >= $2::date 
-       AND created_at < ($2::date + interval '1 month')`,
-      [companyId, `${yearMonth.slice(0,4)}-${yearMonth.slice(4,6)}-01`]
-    );
+       AND created_at < ($2::date + interval '1 month')`;
+    
+    const summaryParams: any[] = [companyId, `${yearMonth.slice(0,4)}-${yearMonth.slice(4,6)}-01`];
+    
+    // 일반 사용자는 본인 캠페인만
+    if (userType === 'company_user') {
+      summaryQuery += ` AND created_by = $3`;
+      summaryParams.push(userId);
+    }
+    
+    const campaignStats = await query(summaryQuery, summaryParams);
 
     // 비용 계산
     const costResult = await query(
@@ -79,9 +89,18 @@ router.get('/campaigns', async (req: Request, res: Response) => {
     const { from, to, channel, page = 1, limit = 20 } = req.query;
     const offset = (Number(page) - 1) * Number(limit);
 
+    const userId = req.user?.userId;
+    const userType = req.user?.userType;
+    
     let whereClause = 'WHERE company_id = $1';
     const params: any[] = [companyId];
     let paramIndex = 2;
+    
+    // 일반 사용자는 본인이 만든 캠페인만 조회
+    if (userType === 'company_user') {
+      whereClause += ` AND created_by = $${paramIndex++}`;
+      params.push(userId);
+    }
 
     // 기간 필터
     if (from) {
@@ -106,18 +125,28 @@ router.get('/campaigns', async (req: Request, res: Response) => {
     const total = parseInt(countResult.rows[0].count);
 
     params.push(Number(limit), offset);
+    // whereClause에 테이블 별칭 적용
+    const aliasedWhere = whereClause
+      .replace(/company_id/g, 'c.company_id')
+      .replace(/created_by/g, 'c.created_by')
+      .replace(/created_at/g, 'c.created_at')
+      .replace(/message_type/g, 'c.message_type');
+
     const result = await query(
       `SELECT 
-        id, campaign_name, message_type, message_content, send_type, status,
-        target_count, sent_count, success_count, fail_count,
-        is_ad, scheduled_at, sent_at, created_at,
-        CASE WHEN sent_count > 0 
-          THEN ROUND((success_count::numeric / sent_count) * 100, 1)
+        c.id, c.campaign_name, c.message_type, c.message_content, c.send_type, c.status,
+        c.target_count, c.sent_count, c.success_count, c.fail_count,
+        c.is_ad, c.scheduled_at, c.sent_at, c.created_at,
+        c.cancelled_by_type, c.cancel_reason,
+        u.login_id as created_by_name,
+        CASE WHEN c.sent_count > 0 
+          THEN ROUND((c.success_count::numeric / c.sent_count) * 100, 1)
           ELSE 0 
         END as success_rate
-       FROM campaigns
-       ${whereClause}
-       ORDER BY created_at DESC
+       FROM campaigns c
+       LEFT JOIN users u ON c.created_by = u.id
+       ${aliasedWhere}
+       ORDER BY c.created_at DESC
        LIMIT $${paramIndex++} OFFSET $${paramIndex}`,
       params
     );

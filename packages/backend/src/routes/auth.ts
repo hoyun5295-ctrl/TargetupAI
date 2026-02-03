@@ -56,7 +56,7 @@ router.post('/login', async (req: Request, res: Response) => {
     }
 
     const result = await query(
-      `SELECT u.*, c.name as company_name, c.id as company_code
+      `SELECT u.*, u.must_change_password, c.name as company_name, c.id as company_code
        FROM users u
        JOIN companies c ON u.company_id = c.id
        WHERE u.login_id = $1 AND u.is_active = true`,
@@ -102,6 +102,8 @@ router.post('/login', async (req: Request, res: Response) => {
         name: user.name,
         email: user.email,
         userType: payload.userType,
+        mustChangePassword: user.must_change_password || false,
+        storeCodes: user.store_codes || [],
         company: {
           id: user.company_id,
           name: user.company_name,
@@ -144,6 +146,43 @@ router.post('/register-super-admin', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Login ID already exists' });
     }
     return res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// 비밀번호 변경 (최초 로그인 시)
+router.post('/change-password', async (req: Request, res: Response) => {
+  try {
+    const { userId, currentPassword, newPassword } = req.body;
+
+    if (!userId || !currentPassword || !newPassword) {
+      return res.status(400).json({ error: '필수 정보가 누락되었습니다.' });
+    }
+
+    if (newPassword.length < 8) {
+      return res.status(400).json({ error: '비밀번호는 8자 이상이어야 합니다.' });
+    }
+
+    const result = await query('SELECT * FROM users WHERE id = $1', [userId]);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
+    }
+
+    const user = result.rows[0];
+    const validPassword = await bcrypt.compare(currentPassword, user.password_hash);
+    if (!validPassword) {
+      return res.status(401).json({ error: '현재 비밀번호가 일치하지 않습니다.' });
+    }
+
+    const newPasswordHash = await bcrypt.hash(newPassword, 10);
+    await query(
+      'UPDATE users SET password_hash = $1, must_change_password = false, updated_at = NOW() WHERE id = $2',
+      [newPasswordHash, userId]
+    );
+
+    return res.json({ message: '비밀번호가 변경되었습니다.' });
+  } catch (error) {
+    console.error('비밀번호 변경 오류:', error);
+    return res.status(500).json({ error: '서버 오류' });
   }
 });
 

@@ -27,9 +27,9 @@ router.post('/generate-message', async (req: Request, res: Response) => {
       return res.status(400).json({ error: '프롬프트를 입력해주세요' });
     }
 
-    // 회사 정보 조회 (수신거부번호)
+    // 회사 정보 조회 (브랜드 정보 포함)
     const companyResult = await query(
-      'SELECT reject_number, brand_name FROM companies WHERE id = $1',
+      'SELECT reject_number, brand_name, brand_slogan, brand_description, brand_tone FROM companies WHERE id = $1',
       [companyId]
     );
     const companyInfo = companyResult.rows[0] || {};
@@ -56,7 +56,10 @@ router.post('/generate-message', async (req: Request, res: Response) => {
       productName,
       discountRate,
       eventName,
-      brandName: brandName || companyInfo.brand_name,
+      brandName: companyInfo.brand_name || brandName || '브랜드',
+      brandSlogan: companyInfo.brand_slogan,
+      brandDescription: companyInfo.brand_description,
+      brandTone: companyInfo.brand_tone,
       channel,
       isAd,
       rejectNumber: companyInfo.reject_number,
@@ -73,6 +76,9 @@ router.post('/generate-message', async (req: Request, res: Response) => {
 router.post('/recommend-target', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
+    const userType = req.user?.userType;
+    
     if (!companyId) {
       return res.status(403).json({ error: '회사 권한이 필요합니다' });
     }
@@ -83,38 +89,51 @@ router.post('/recommend-target', async (req: Request, res: Response) => {
       return res.status(400).json({ error: '마케팅 목표를 입력해주세요' });
     }
 
-    // 회사 정보 조회
+    // 회사 정보 조회 (스키마 포함)
     const companyResult = await query(
-      `SELECT name, business_type, reject_number, brand_name FROM companies WHERE id = $1::uuid`,
+      `SELECT company_name, business_type, reject_number, brand_name, customer_schema FROM companies WHERE id = $1::uuid`,
       [companyId]
     );
     const companyInfo = companyResult.rows[0] || {};
+    // company_name을 name으로 매핑
+    companyInfo.name = companyInfo.company_name;
     console.log('companyInfo:', companyInfo);
-    if (!objective) {
-      return res.status(400).json({ error: '마케팅 목표를 입력해주세요' });
-    }
+
+    // 일반 사용자는 본인 store_codes에 해당하는 고객만
+    let storeFilter = '';
+    const baseParams: any[] = [companyId];
     
+    if (userType === 'company_user' && userId) {
+      const userResult = await query('SELECT store_codes FROM users WHERE id = $1', [userId]);
+      const storeCodes = userResult.rows[0]?.store_codes;
+      if (storeCodes && storeCodes.length > 0) {
+        storeFilter = ' AND store_code = ANY($2::text[])';
+        baseParams.push(storeCodes);
+      }
+    }
 
     // 고객 통계 조회
     const statsResult = await query(
       `SELECT
         COUNT(*) as total,
         COUNT(*) FILTER (WHERE sms_opt_in = true) as sms_opt_in_count,
-        COUNT(*) FILTER (WHERE gender = 'M') as male_count,
-        COUNT(*) FILTER (WHERE gender = 'F') as female_count,
+        COUNT(*) FILTER (WHERE gender = '남성') as male_count,
+        COUNT(*) FILTER (WHERE gender = '여성') as female_count,
         AVG((custom_fields->>'purchase_count')::numeric) as avg_purchase_count,
         AVG((custom_fields->>'total_spent')::numeric) as avg_total_spent
        FROM customers
-       WHERE company_id = $1 AND is_active = true`,
-      [companyId]
+       WHERE company_id = $1 AND is_active = true${storeFilter}`,
+      baseParams
     );
 
     const result = await recommendTarget(companyId, objective, statsResult.rows[0], companyInfo);
 
+console.log('AI 필터 결과:', JSON.stringify(result.filters, null, 2));
+
 // 실제 타겟 수 계산
 let filterWhere = '';
 const filterParams: any[] = [];
-let paramIndex = 2;
+let paramIndex = baseParams.length + 1;
 
 const getValue = (field: any) => {
   if (!field) return null;
@@ -122,17 +141,22 @@ const getValue = (field: any) => {
   return field;
 };
 
-const gender = getValue(result.filters?.gender);
+let gender = getValue(result.filters?.gender);
 if (gender) {
+  // 다양한 성별 표현 → 남성/여성 변환
+  const genderLower = String(gender).toLowerCase();
+  if (['m', 'male', '남', '남자', '남성'].includes(genderLower)) gender = '남성';
+  if (['f', 'female', '여', '여자', '여성'].includes(genderLower)) gender = '여성';
   filterWhere += ` AND gender = $${paramIndex++}`;
   filterParams.push(gender);
 }
 
 const age = getValue(result.filters?.age);
 if (age && Array.isArray(age) && age.length === 2) {
-  filterWhere += ` AND EXTRACT(YEAR FROM AGE(birth_date)) >= $${paramIndex++}`;
+  // birth_year 기준으로 나이 계산 (2026 - birth_year)
+  filterWhere += ` AND (2026 - birth_year) >= $${paramIndex++}`;
   filterParams.push(age[0]);
-  filterWhere += ` AND EXTRACT(YEAR FROM AGE(birth_date)) <= $${paramIndex++}`;
+  filterWhere += ` AND (2026 - birth_year) <= $${paramIndex++}`;
   filterParams.push(age[1]);
 }
 
@@ -170,18 +194,18 @@ Object.keys(result.filters || {}).forEach(key => {
 
 const actualCountResult = await query(
   `SELECT COUNT(*) FROM customers c
-   WHERE c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true ${filterWhere}
+   WHERE c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true${storeFilter} ${filterWhere}
    AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.company_id = c.company_id AND u.phone = c.phone)`,
-  [companyId, ...filterParams]
+  [...baseParams, ...filterParams]
 );
 const actualCount = parseInt(actualCountResult.rows[0].count);
 
 // 수신거부 건수 계산
 const unsubCountResult = await query(
   `SELECT COUNT(*) FROM customers c
-   WHERE c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true ${filterWhere}
+   WHERE c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true${storeFilter} ${filterWhere}
    AND EXISTS (SELECT 1 FROM unsubscribes u WHERE u.company_id = c.company_id AND u.phone = c.phone)`,
-  [companyId, ...filterParams]
+  [...baseParams, ...filterParams]
 );
 const unsubscribeCount = parseInt(unsubCountResult.rows[0].count);
 

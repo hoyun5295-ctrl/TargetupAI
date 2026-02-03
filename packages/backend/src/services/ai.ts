@@ -155,6 +155,9 @@ export async function generateMessages(
     discountRate?: number;
     eventName?: string;
     brandName?: string;
+    brandSlogan?: string;
+    brandDescription?: string;
+    brandTone?: string;
     channel?: string;
     isAd?: boolean;
     rejectNumber?: string;
@@ -165,6 +168,9 @@ export async function generateMessages(
   }
 
   const brandName = extraContext?.brandName || '브랜드';
+  const brandSlogan = extraContext?.brandSlogan || '';
+  const brandDescription = extraContext?.brandDescription || '';
+  const brandTone = extraContext?.brandTone || '친근함';
   const channel = extraContext?.channel || 'SMS';
   const isAd = extraContext?.isAd !== false;
   const rawRejectNumber = extraContext?.rejectNumber || '080-XXX-XXXX';
@@ -189,16 +195,27 @@ export async function generateMessages(
 ${isAd ? `- 수신거부 표기: ${rejectText}` : ''}
 - 타겟 고객 수: ${targetInfo.total_count.toLocaleString()}명
 
-## 브랜드 정보
+## 브랜드 정보 (⚠️ 반드시 아래 브랜드명을 정확히 사용!)
 - 브랜드명: ${brandName}
+${brandSlogan ? `- 슬로건: ${brandSlogan}` : ''}
+${brandDescription ? `- 브랜드 소개: ${brandDescription}` : ''}
+- 톤앤매너: ${brandTone}
 ${extraContext?.productName ? `- 상품: ${extraContext.productName}` : ''}
 ${extraContext?.discountRate ? `- 할인율: ${extraContext.discountRate}%` : ''}
 ${extraContext?.eventName ? `- 이벤트: ${extraContext.eventName}` : ''}
 
+## 특수문자 규칙 (⚠️ 필수!)
+이모지(😀🎁🔥💕 등)는 SMS에서 깨지므로 절대 사용 금지!
+대신 아래 특수문자만 사용하세요:
+★☆●○◎◇◆□■△▲▽▼→←↑↓♠♣♥♡♦※☎▶◀【】「」『』
+
 ## 요청사항
 ${channel} 채널에 최적화된 3가지 문안(A/B/C)을 생성해주세요.
-${channel === 'SMS' ? 'SMS는 90바이트 제한! (광고)와 무료거부번호 포함하여 반드시 90바이트 이내로!' : ''}
-${channel === 'LMS' ? 'LMS는 줄바꿈, 이모지, 상세설명을 활용하여 가독성 좋게 작성해주세요.' : ''}`;
+- 브랜드명은 "[${brandName}]" 형태로 정확히 사용
+${brandSlogan ? `- 브랜드 슬로건 "${brandSlogan}"의 느낌을 반영` : ''}
+- 톤앤매너: ${brandTone}
+${channel === 'SMS' ? '- SMS는 90바이트 제한! (광고)와 무료거부번호 포함하여 반드시 90바이트 이내로!' : ''}
+${channel === 'LMS' ? '- LMS는 줄바꿈, 특수문자로 가독성 좋게 작성 (이모지 금지!)' : ''}`;
 
   try {
     const response = await anthropic.messages.create({
@@ -235,7 +252,7 @@ export async function recommendTarget(
   companyId: string,
   objective: string,
   customerStats: any,
-  companyInfo?: { business_type?: string; reject_number?: string; brand_name?: string; company_name?: string }
+  companyInfo?: { business_type?: string; reject_number?: string; brand_name?: string; company_name?: string; customer_schema?: any }
 ): Promise<{
   filters: any;
   reasoning: string;
@@ -261,6 +278,12 @@ export async function recommendTarget(
 
   const businessType = companyInfo?.business_type || '기타';
   const brandName = companyInfo?.brand_name || companyInfo?.company_name || '브랜드';
+  
+  // 동적 스키마 파싱
+  const schema = companyInfo?.customer_schema || {};
+  const genders = schema.genders?.join(', ') || '남성, 여성';
+  const grades = schema.grades?.join(', ') || 'VIP, GOLD, SILVER, BRONZE';
+  const customKeys = schema.custom_field_keys || [];
 
   const userMessage = `## 회사 정보
 - 업종: ${businessType}
@@ -283,18 +306,14 @@ ${objective}
 - 평균 구매횟수: ${Number(customerStats.avg_purchase_count || 0).toFixed(1)}회
 - 평균 구매금액: ${Math.round(Number(customerStats.avg_total_spent || 0)).toLocaleString()}원
 
-## 사용 가능한 필터 필드
-- gender: 성별 (M/F)
-- age: 나이 (between 연산자로 범위 지정)
-- grade: 등급
+## 사용 가능한 필터 필드 (⚠️ 반드시 아래 값만 정확히 사용!)
+- gender: 성별 → 반드시 다음 값 중 하나만 사용: ${genders}
+- age: 나이 (between 연산자로 범위 지정, 예: [20, 29])
+- grade: 등급 → 반드시 다음 값 중 하나만 사용: ${grades}
 - points: 포인트 (gte, lte, between)
 - total_purchase_amount: 총구매금액
 - recent_purchase_date: 최근구매일
-- custom_fields.purchase_count: 구매횟수
-- custom_fields.total_spent: 총지출
-- custom_fields.preferred_category: 선호카테고리 (기초, 스킨케어, 색조, 클렌징, 마스크팩)
-- custom_fields.visit_count: 방문횟수
-- custom_fields.last_purchase_date: 마지막구매일
+${customKeys.map((k: string) => `- custom_fields.${k}: ${k} 필터`).join('\n')}
 
 ## 채널 선택 기준
 - SMS: 간단한 할인 안내, 짧은 알림 (90바이트 제한)

@@ -321,4 +321,30 @@ router.get('/callback-numbers', async (req: Request, res: Response) => {
   }
 });
 
+// POST /api/companies/refresh-schema - 고객 스키마 갱신
+router.post('/refresh-schema', async (req: Request, res: Response) => {
+  try {
+    const companyId = (req as any).user?.companyId;
+    if (!companyId) {
+      return res.status(401).json({ success: false, error: '인증 필요' });
+    }
+
+    await query(`
+      UPDATE companies SET customer_schema = (
+        SELECT jsonb_build_object(
+          'genders', (SELECT array_agg(DISTINCT gender) FROM customers WHERE company_id = $1 AND gender IS NOT NULL),
+          'grades', (SELECT array_agg(DISTINCT grade) FROM customers WHERE company_id = $1 AND grade IS NOT NULL),
+          'custom_field_keys', (SELECT array_agg(DISTINCT k) FROM customers, jsonb_object_keys(custom_fields) k WHERE company_id = $1),
+          'store_codes', (SELECT array_agg(DISTINCT store_code) FROM customers WHERE company_id = $1 AND store_code IS NOT NULL)
+        )
+      ) WHERE id = $1
+    `, [companyId]);
+
+    res.json({ success: true, message: '스키마가 갱신되었습니다.' });
+  } catch (error) {
+    console.error('스키마 갱신 실패:', error);
+    res.status(500).json({ success: false, error: '스키마 갱신 실패' });
+  }
+});
+
 export default router;

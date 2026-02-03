@@ -112,6 +112,8 @@ function buildDynamicFilter(filters: any, startIndex: number) {
 router.get('/', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
+    const userType = req.user?.userType;
 
     if (!companyId) {
       return res.status(403).json({ error: '회사 권한이 필요합니다' });
@@ -123,6 +125,16 @@ router.get('/', async (req: Request, res: Response) => {
     let whereClause = 'WHERE company_id = $1 AND is_active = true';
     const params: any[] = [companyId];
     let paramIndex = 2;
+
+    // 일반 사용자는 본인 store_codes에 해당하는 고객만 조회
+    if (userType === 'company_user' && userId) {
+      const userResult = await query('SELECT store_codes FROM users WHERE id = $1', [userId]);
+      const storeCodes = userResult.rows[0]?.store_codes;
+      if (storeCodes && storeCodes.length > 0) {
+        whereClause += ` AND store_code = ANY($${paramIndex++})`;
+        params.push(storeCodes);
+      }
+    }
 
     // 동적 필터 적용
     if (filters) {
@@ -285,6 +297,31 @@ router.post('/', async (req: Request, res: Response) => {
       return res.status(400).json({ error: '전화번호는 필수입니다' });
     }
 
+    // 요금제 제한 체크
+    const limitCheck = await query(`
+      SELECT 
+        c.id,
+        p.max_customers,
+        p.plan_name,
+        (SELECT COUNT(*) FROM customers WHERE company_id = c.id AND is_active = true) as current_count
+      FROM companies c
+      LEFT JOIN plans p ON c.plan_id = p.id
+      WHERE c.id = $1
+    `, [companyId]);
+
+    if (limitCheck.rows.length > 0) {
+      const { max_customers, current_count, plan_name } = limitCheck.rows[0];
+      if (max_customers && current_count >= max_customers) {
+        return res.status(403).json({ 
+          error: '요금제 고객 수 제한을 초과했습니다.',
+          code: 'PLAN_LIMIT_EXCEEDED',
+          planName: plan_name,
+          maxCustomers: max_customers,
+          currentCount: current_count
+        });
+      }
+    }
+
     const result = await query(
       `INSERT INTO customers (
         company_id, phone, name, gender, birth_date, email, address,
@@ -335,6 +372,35 @@ router.post('/bulk', async (req: Request, res: Response) => {
       return res.status(400).json({ error: '고객 데이터가 필요합니다' });
     }
 
+    // 요금제 제한 체크
+    const limitCheck = await query(`
+      SELECT 
+        c.id,
+        p.max_customers,
+        p.plan_name,
+        (SELECT COUNT(*) FROM customers WHERE company_id = c.id AND is_active = true) as current_count
+      FROM companies c
+      LEFT JOIN plans p ON c.plan_id = p.id
+      WHERE c.id = $1
+    `, [companyId]);
+
+    if (limitCheck.rows.length > 0) {
+      const { max_customers, current_count, plan_name } = limitCheck.rows[0];
+      const newTotal = Number(current_count) + customers.length;
+      if (max_customers && newTotal > max_customers) {
+        const available = max_customers - current_count;
+        return res.status(403).json({ 
+          error: '요금제 고객 수 제한을 초과합니다.',
+          code: 'PLAN_LIMIT_EXCEEDED',
+          planName: plan_name,
+          maxCustomers: max_customers,
+          currentCount: current_count,
+          requestedCount: customers.length,
+          availableCount: available > 0 ? available : 0
+        });
+      }
+    }
+
     let successCount = 0;
     let failCount = 0;
     const errors: string[] = [];
@@ -375,6 +441,18 @@ router.post('/bulk', async (req: Request, res: Response) => {
       }
     }
 
+    // 엑셀 업로드 완료 후 스키마 자동 갱신
+    await query(`
+      UPDATE companies SET customer_schema = (
+        SELECT jsonb_build_object(
+          'genders', (SELECT array_agg(DISTINCT gender) FROM customers WHERE company_id = $1 AND gender IS NOT NULL),
+          'grades', (SELECT array_agg(DISTINCT grade) FROM customers WHERE company_id = $1 AND grade IS NOT NULL),
+          'custom_field_keys', (SELECT array_agg(DISTINCT k) FROM customers, jsonb_object_keys(custom_fields) k WHERE company_id = $1),
+          'store_codes', (SELECT array_agg(DISTINCT store_code) FROM customers WHERE company_id = $1 AND store_code IS NOT NULL)
+        )
+      ) WHERE id = $1
+    `, [companyId]);
+
     return res.json({
       message: `${successCount}건 성공, ${failCount}건 실패`,
       successCount,
@@ -391,17 +469,32 @@ router.post('/bulk', async (req: Request, res: Response) => {
 router.get('/stats', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
+    const userType = req.user?.userType;
 
     if (!companyId) {
       return res.status(403).json({ error: '회사 권한이 필요합니다' });
+    }
+
+    // 일반 사용자는 본인 store_codes에 해당하는 고객만
+    let storeFilter = '';
+    const params: any[] = [companyId];
+    
+    if (userType === 'company_user' && userId) {
+      const userResult = await query('SELECT store_codes FROM users WHERE id = $1', [userId]);
+      const storeCodes = userResult.rows[0]?.store_codes;
+      if (storeCodes && storeCodes.length > 0) {
+        storeFilter = ' AND store_code = ANY($2)';
+        params.push(storeCodes);
+      }
     }
 
     const result = await query(
       `SELECT
         COUNT(*) as total,
         COUNT(*) FILTER (WHERE sms_opt_in = true) as sms_opt_in_count,
-        COUNT(*) FILTER (WHERE gender = 'M') as male_count,
-        COUNT(*) FILTER (WHERE gender = 'F') as female_count,
+        COUNT(*) FILTER (WHERE gender = '남성') as male_count,
+        COUNT(*) FILTER (WHERE gender = '여성') as female_count,
         COUNT(*) FILTER (WHERE grade = 'VIP') as vip_count,
         COUNT(*) FILTER (WHERE birth_year IS NOT NULL AND (2026 - birth_year) < 20) as age_under20,
         COUNT(*) FILTER (WHERE birth_year IS NOT NULL AND (2026 - birth_year) BETWEEN 20 AND 29) as age_20s,
@@ -410,8 +503,8 @@ router.get('/stats', async (req: Request, res: Response) => {
         COUNT(*) FILTER (WHERE birth_year IS NOT NULL AND (2026 - birth_year) BETWEEN 50 AND 59) as age_50s,
         COUNT(*) FILTER (WHERE birth_year IS NOT NULL AND (2026 - birth_year) >= 60) as age_60plus
        FROM customers_unified
-       WHERE company_id = $1 AND is_active = true`,
-      [companyId]
+       WHERE company_id = $1 AND is_active = true${storeFilter}`,
+      params
     );
 
     // 회사 요금 정보 조회

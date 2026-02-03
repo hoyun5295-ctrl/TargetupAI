@@ -255,8 +255,19 @@ function CalendarModal({ onClose, token }: { onClose: () => void; token: string 
                     <span className="text-gray-500 w-16">상태</span>
                     <span className={`px-2 py-0.5 rounded text-xs font-medium ${statusColors[selectedCampaign.status]}`}>
                       {statusLabels[selectedCampaign.status]}
+                      {selectedCampaign.status === 'cancelled' && selectedCampaign.cancelled_by_type === 'super_admin' && (
+                        <span className="ml-1 text-red-500">(관리자)</span>
+                      )}
                     </span>
                   </div>
+                  
+                  {/* 취소 사유 (관리자 취소 시) */}
+                  {selectedCampaign.status === 'cancelled' && selectedCampaign.cancel_reason && (
+                    <div className="flex items-start gap-2">
+                      <span className="text-gray-500 w-16">취소사유</span>
+                      <span className="text-red-600 text-xs flex-1">{selectedCampaign.cancel_reason}</span>
+                    </div>
+                  )}
                   
                   {/* 채널 */}
                   <div className="flex items-center gap-2">
@@ -854,6 +865,7 @@ const handleAiGenerateChannelMessage = async () => {
   };
 // AI 캠페인 발송 확정
 const handleAiCampaignSend = async () => {
+  if (isSending) return; // 중복 클릭 방지
   setIsSending(true);
   try {
     // 선택된 메시지 가져오기 (첫번째 메시지 사용, 나중에 라디오 선택값으로 변경 가능)
@@ -1686,9 +1698,7 @@ const handleTestSend = async () => {
                           <label key={msg.variant_id || idx} className="cursor-pointer group">
                             <input type="radio" name="message" className="hidden" defaultChecked={idx === 0} />
                             {/* 모던 폰 프레임 */}
-                            <div className={`rounded-[1.8rem] p-[3px] transition-all ${
-                              idx === 0 ? 'bg-gradient-to-b from-purple-400 to-purple-600 shadow-lg shadow-purple-200' : 'bg-gray-300'
-                            } group-has-[:checked]:bg-gradient-to-b group-has-[:checked]:from-purple-400 group-has-[:checked]:to-purple-600 group-has-[:checked]:shadow-lg group-has-[:checked]:shadow-purple-200 hover:from-purple-300 hover:to-purple-500`}>
+                            <div className="rounded-[1.8rem] p-[3px] transition-all bg-gray-300 group-has-[:checked]:bg-gradient-to-b group-has-[:checked]:from-purple-400 group-has-[:checked]:to-purple-600 group-has-[:checked]:shadow-lg group-has-[:checked]:shadow-purple-200 hover:bg-gray-400">
                               <div className="bg-white rounded-[1.6rem] overflow-hidden flex flex-col" style={{ height: '420px' }}>
                                 {/* 상단 - 타입명 */}
                                 <div className="px-4 py-2.5 bg-gradient-to-r from-gray-50 to-gray-100 flex justify-between items-center shrink-0 border-b">
@@ -2844,7 +2854,7 @@ const handleTestSend = async () => {
                           setMessageEditProgress(100);
                           
                           if (data.success) {
-                            setToast({ show: true, type: 'success', message: `${data.updatedCount?.toLocaleString()}건 문안 수정 완료` });
+                            setToast({ show: true, type: 'success', message: data.message || `${data.updatedCount?.toLocaleString()}건 문안 수정 완료` });
                             setTimeout(() => setToast({ show: false, type: 'success', message: '' }), 3000);
                             setMessageEditModal(false);
                             // 캠페인 정보 업데이트

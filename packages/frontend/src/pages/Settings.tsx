@@ -5,6 +5,7 @@ import { useAuthStore } from '../stores/authStore';
 export default function Settings() {
   const navigate = useNavigate();
   const { user } = useAuthStore();
+  const isAdmin = user?.userType === 'company_admin';
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [newPhone, setNewPhone] = useState('');
@@ -353,7 +354,8 @@ export default function Settings() {
   )}
 </section>
 
-{/* 요금 설정 */}
+{/* 요금 설정 - 관리자만 */}
+{isAdmin && (
 <section className="bg-white rounded-lg shadow p-6 min-h-[240px]">
           <h2 className="text-lg font-semibold mb-4">💰 요금 설정</h2>
           <div className="grid grid-cols-3 gap-4">
@@ -409,8 +411,10 @@ export default function Settings() {
           </div>
           <p className="text-xs text-gray-400 mt-2">※ 단가는 관리자가 설정합니다</p>
         </section>
+)}
 
-        {/* 발송 정책 */}
+        {/* 발송 정책 - 관리자만 */}
+        {isAdmin && (
         <section className="bg-white rounded-lg shadow p-6 min-h-[240px]">
                     <h2 className="text-lg font-semibold mb-4">📤 발송 정책</h2>
           <div className="grid grid-cols-3 gap-4">
@@ -467,8 +471,9 @@ export default function Settings() {
                 <span className="text-sm text-gray-700">휴일 발송 허용</span>
               </label>
             </div>
-          </div>
+            </div>
         </section>
+        )}
 
         {/* AI 설정 */}
         <section className="bg-white rounded-lg shadow p-6 min-h-[160px]">
@@ -500,7 +505,8 @@ export default function Settings() {
           </div>
         </section>
 
-        {/* 승인 설정 */}
+        {/* 승인 설정 - 관리자만 */}
+        {isAdmin && (
         <section className="bg-white rounded-lg shadow p-6">
           <h2 className="text-lg font-semibold mb-4">✅ 승인 설정</h2>
           <label className="flex items-center gap-2 cursor-pointer">
@@ -513,6 +519,7 @@ export default function Settings() {
             <span className="text-sm text-gray-700">발송 전 승인 필요</span>
           </label>
           </section>
+        )}
         </div>
 
         {/* 저장 버튼 */}

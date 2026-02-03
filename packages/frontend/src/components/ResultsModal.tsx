@@ -220,6 +220,7 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
                   <thead className="bg-gray-100">
                   <tr>
                       <th className="px-3 py-2 text-left">유형</th>
+                      <th className="px-3 py-2 text-center">발송자</th>
                       <th className="px-3 py-2 text-left">메시지 내용</th>
                       <th className="px-3 py-2 text-center">등록일시</th>
                       <th className="px-3 py-2 text-center">발송일시</th>
@@ -235,7 +236,7 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
                   <tbody>
                     {campaigns.length === 0 ? (
                       <tr>
-                        <td colSpan={11} className="px-4 py-8 text-center text-gray-400">
+                        <td colSpan={12} className="px-4 py-8 text-center text-gray-400">
                           등록된 데이터가 없습니다.
                         </td>
                       </tr>
@@ -245,9 +246,15 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
                         .map((c) => (
                         <tr key={c.id} className="border-t hover:bg-gray-50">
                           <td className="px-3 py-2">
-                          <span className={`px-2 py-0.5 rounded text-xs ${c.send_type === 'direct' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>
-                          {c.send_type === 'direct' ? '수동' : 'AI'}({c.status === 'completed' ? '완료' : c.status === 'scheduled' ? '예약' : c.status === 'sending' ? '발송중' : c.status === 'cancelled' ? '취소' : c.status})
+                          <span 
+                            className={`px-2 py-0.5 rounded text-xs cursor-default ${c.send_type === 'direct' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}
+                            title={c.status === 'cancelled' && c.cancelled_by_type === 'super_admin' ? `관리자 취소\n사유: ${c.cancel_reason || '없음'}` : ''}
+                          >
+                          {c.send_type === 'direct' ? '수동' : 'AI'}({c.status === 'completed' ? '완료' : c.status === 'scheduled' ? '예약' : c.status === 'sending' ? '발송중' : c.status === 'cancelled' ? (c.cancelled_by_type === 'super_admin' ? '관리자취소' : '취소') : c.status})
                             </span>
+                            </td>
+                          <td className="px-3 py-2 text-center text-xs text-gray-600">
+                            {c.created_by_name || '-'}
                           </td>
                           <td className="px-3 py-2 max-w-[200px] truncate">{c.message_content}</td>
                           <td className="px-3 py-2 text-center text-xs">
