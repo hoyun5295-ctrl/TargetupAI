@@ -21,11 +21,18 @@ router.post('/generate-message', async (req: Request, res: Response) => {
       return res.status(403).json({ error: '회사 권한이 필요합니다' });
     }
 
-    const { prompt, filters, productName, discountRate, eventName, brandName, channel } = req.body;
+    const { prompt, filters, productName, discountRate, eventName, brandName, channel, isAd } = req.body;
 
     if (!prompt) {
       return res.status(400).json({ error: '프롬프트를 입력해주세요' });
     }
+
+    // 회사 정보 조회 (수신거부번호)
+    const companyResult = await query(
+      'SELECT reject_number, brand_name FROM companies WHERE id = $1',
+      [companyId]
+    );
+    const companyInfo = companyResult.rows[0] || {};
 
     // 타겟 정보 조회
     let targetQuery = 'SELECT COUNT(*) as total FROM customers WHERE company_id = $1 AND is_active = true AND sms_opt_in = true';
@@ -49,8 +56,10 @@ router.post('/generate-message', async (req: Request, res: Response) => {
       productName,
       discountRate,
       eventName,
-      brandName,
+      brandName: brandName || companyInfo.brand_name,
       channel,
+      isAd,
+      rejectNumber: companyInfo.reject_number,
     });
 
     return res.json(result);
@@ -160,11 +169,24 @@ Object.keys(result.filters || {}).forEach(key => {
 });
 
 const actualCountResult = await query(
-  `SELECT COUNT(*) FROM customers 
-   WHERE company_id = $1 AND is_active = true AND sms_opt_in = true ${filterWhere}`,
+  `SELECT COUNT(*) FROM customers c
+   WHERE c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true ${filterWhere}
+   AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.company_id = c.company_id AND u.phone = c.phone)`,
   [companyId, ...filterParams]
 );
-result.estimated_count = parseInt(actualCountResult.rows[0].count);
+const actualCount = parseInt(actualCountResult.rows[0].count);
+
+// 수신거부 건수 계산
+const unsubCountResult = await query(
+  `SELECT COUNT(*) FROM customers c
+   WHERE c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true ${filterWhere}
+   AND EXISTS (SELECT 1 FROM unsubscribes u WHERE u.company_id = c.company_id AND u.phone = c.phone)`,
+  [companyId, ...filterParams]
+);
+const unsubscribeCount = parseInt(unsubCountResult.rows[0].count);
+
+result.estimated_count = actualCount;
+(result as any).unsubscribe_count = unsubscribeCount;
 
 return res.json(result);
   } catch (error) {

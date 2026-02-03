@@ -12,6 +12,9 @@ import plansRoutes from './routes/plans';
 import customersRoutes from './routes/customers';
 import campaignsRoutes from './routes/campaigns';
 import resultsRoutes from './routes/results';
+import uploadRoutes from './routes/upload'
+import unsubscribesRoutes from './routes/unsubscribes';
+import addressBooksRoutes from './routes/address-books';
 
 // DB 연결
 import './config/database';
@@ -26,6 +29,7 @@ app.use(helmet());
 app.use(cors());
 app.use(morgan('dev'));
 app.use(express.json({ limit: '50mb' }));
+app.use('/api/upload', uploadRoutes);
 
 // 헬스체크
 app.get('/health', (req, res) => {
@@ -56,6 +60,8 @@ app.use('/api/customers', customersRoutes);
 app.use('/api/campaigns', campaignsRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/v1/results', resultsRoutes);
+app.use('/api/unsubscribes', unsubscribesRoutes);
+app.use('/api/address-books', addressBooksRoutes);
 
 // 404 처리
 app.use((req, res) => {

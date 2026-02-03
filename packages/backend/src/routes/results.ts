@@ -108,7 +108,7 @@ router.get('/campaigns', async (req: Request, res: Response) => {
     params.push(Number(limit), offset);
     const result = await query(
       `SELECT 
-        id, campaign_name, message_type, message_content,
+        id, campaign_name, message_type, message_content, send_type, status,
         target_count, sent_count, success_count, fail_count,
         is_ad, scheduled_at, sent_at, created_at,
         CASE WHEN sent_count > 0 
@@ -165,20 +165,21 @@ router.get('/campaigns/:id', async (req: Request, res: Response) => {
       [id]
     );
 
-    // campaign_run_id 목록
-    const runIds = runsResult.rows.map(r => r.id);
+    // 직접발송은 campaign_runs가 없으므로 campaign.id 사용
+    const isDirect = campaign.send_type === 'direct';
+    const queryIds = isDirect ? [id] : runsResult.rows.map(r => r.id);
 
     // MySQL에서 실패사유별 집계 조회
     let errorStats: Record<string, number> = {};
     let carrierStats: Record<string, number> = {};
     
-    if (runIds.length > 0) {
+    if (queryIds.length > 0) {
       // 실패사유별 집계
       const errorResult = await mysqlQuery(
         `SELECT status_code, COUNT(*) as cnt FROM SMSQ_SEND 
-         WHERE app_etc1 IN (${runIds.map(() => '?').join(',')})
+         WHERE app_etc1 IN (${queryIds.map(() => '?').join(',')})
          GROUP BY status_code`,
-        runIds
+        queryIds
       ) as any[];
 
       // status_code 매핑
@@ -212,19 +213,22 @@ router.get('/campaigns/:id', async (req: Request, res: Response) => {
       // 통신사별 집계
       const carrierResult = await mysqlQuery(
         `SELECT mob_company, COUNT(*) as cnt FROM SMSQ_SEND 
-         WHERE app_etc1 IN (${runIds.map(() => '?').join(',')})
+         WHERE app_etc1 IN (${queryIds.map(() => '?').join(',')})
          AND status_code IN (6, 1000, 1800)
          GROUP BY mob_company`,
-        runIds
+        queryIds
       ) as any[];
 
       const carrierMap: Record<string, string> = {
+        '11': 'SKT',
+        '16': 'KT', 
+        '19': 'LG U+',
+        '12': 'SKT 알뜰폰',
+        '17': 'KT 알뜰폰',
+        '20': 'LG 알뜰폰',
         'SKT': 'SKT',
         'KTF': 'KT',
         'LGT': 'LG U+',
-        'SKM': 'SKT 알뜰폰',
-        'KTM': 'KT 알뜰폰',
-        'LGM': 'LG 알뜰폰',
       };
 
       carrierResult.forEach((row: any) => {

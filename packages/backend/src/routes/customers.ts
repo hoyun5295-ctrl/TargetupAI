@@ -162,7 +162,7 @@ if (smsOptIn === 'true') {
 
     // 총 개수
     const countResult = await query(
-      `SELECT COUNT(*) FROM customers ${whereClause}`,
+      `SELECT COUNT(*) FROM customers_unified ${whereClause}`,
       params
     );
     const total = parseInt(countResult.rows[0].count);
@@ -172,7 +172,7 @@ if (smsOptIn === 'true') {
     const result = await query(
       `SELECT id, name, phone, gender, birth_date, email, grade, points,
               sms_opt_in, recent_purchase_date, total_purchase_amount, custom_fields
-       FROM customers
+       FROM customers_unified
        ${whereClause}
        ORDER BY created_at DESC
        LIMIT $${paramIndex++} OFFSET $${paramIndex}`,
@@ -215,7 +215,7 @@ router.post('/filter', async (req: Request, res: Response) => {
     }
 
     const countResult = await query(
-      `SELECT COUNT(*) FROM customers ${whereClause}`,
+      `SELECT COUNT(*) FROM customers_unified ${whereClause}`,
       params
     );
 
@@ -402,33 +402,84 @@ router.get('/stats', async (req: Request, res: Response) => {
         COUNT(*) FILTER (WHERE sms_opt_in = true) as sms_opt_in_count,
         COUNT(*) FILTER (WHERE gender = 'M') as male_count,
         COUNT(*) FILTER (WHERE gender = 'F') as female_count,
-        COUNT(*) FILTER (WHERE grade = 'VIP') as vip_count
-       FROM customers
+        COUNT(*) FILTER (WHERE grade = 'VIP') as vip_count,
+        COUNT(*) FILTER (WHERE birth_year IS NOT NULL AND (2026 - birth_year) < 20) as age_under20,
+        COUNT(*) FILTER (WHERE birth_year IS NOT NULL AND (2026 - birth_year) BETWEEN 20 AND 29) as age_20s,
+        COUNT(*) FILTER (WHERE birth_year IS NOT NULL AND (2026 - birth_year) BETWEEN 30 AND 39) as age_30s,
+        COUNT(*) FILTER (WHERE birth_year IS NOT NULL AND (2026 - birth_year) BETWEEN 40 AND 49) as age_40s,
+        COUNT(*) FILTER (WHERE birth_year IS NOT NULL AND (2026 - birth_year) BETWEEN 50 AND 59) as age_50s,
+        COUNT(*) FILTER (WHERE birth_year IS NOT NULL AND (2026 - birth_year) >= 60) as age_60plus
+       FROM customers_unified
        WHERE company_id = $1 AND is_active = true`,
       [companyId]
     );
 
-    // 이번 달 발송 통계 (campaigns 테이블 조인)
+    // 회사 요금 정보 조회
+    const companyResult = await query(
+      `SELECT monthly_budget, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao, use_db_sync, use_file_upload
+       FROM companies WHERE id = $1`,
+      [companyId]
+    );
+    const company = companyResult.rows[0] || {};
+
+    // 이번 달 채널별 발송 통계
     const campaignStats = await query(
       `SELECT
-        COALESCE(SUM(cr.sent_count), 0) as monthly_sent,
-        COALESCE(SUM(cr.success_count), 0) as monthly_success
+        c.message_type,
+        COALESCE(SUM(cr.sent_count), 0) as sent,
+        COALESCE(SUM(cr.success_count), 0) as success
        FROM campaign_runs cr
        JOIN campaigns c ON cr.campaign_id = c.id
        WHERE c.company_id = $1
-         AND cr.created_at >= date_trunc('month', CURRENT_DATE)`,
+         AND cr.created_at >= date_trunc('month', CURRENT_DATE)
+       GROUP BY c.message_type`,
       [companyId]
     );
 
-    const monthlySent = parseInt(campaignStats.rows[0]?.monthly_sent || '0');
-    const monthlySuccess = parseInt(campaignStats.rows[0]?.monthly_success || '0');
-    const successRate = monthlySent > 0 ? ((monthlySuccess / monthlySent) * 100).toFixed(1) : '0';
+    // 채널별 집계
+    let smsSent = 0, lmsSent = 0, mmsSent = 0, kakaoSent = 0;
+    let totalSent = 0, totalSuccess = 0;
+
+    campaignStats.rows.forEach((row: any) => {
+      const sent = parseInt(row.sent || '0');
+      const success = parseInt(row.success || '0');
+      totalSent += sent;
+      totalSuccess += success;
+
+      switch (row.message_type) {
+        case 'SMS': smsSent = sent; break;
+        case 'LMS': lmsSent = sent; break;
+        case 'MMS': mmsSent = sent; break;
+        case 'KAKAO': kakaoSent = sent; break;
+      }
+    });
+
+    // 월 사용금액 계산
+    const monthlyCost = 
+      smsSent * parseFloat(company.cost_per_sms || '9.9') +
+      lmsSent * parseFloat(company.cost_per_lms || '27') +
+      mmsSent * parseFloat(company.cost_per_mms || '50') +
+      kakaoSent * parseFloat(company.cost_per_kakao || '7.5');
+
+    const successRate = totalSent > 0 ? ((totalSuccess / totalSent) * 100).toFixed(1) : '0';
 
     return res.json({ 
       stats: {
         ...result.rows[0],
-        monthly_sent: monthlySent,
-        success_rate: successRate
+        monthly_sent: totalSent,
+        success_rate: successRate,
+        monthly_budget: parseFloat(company.monthly_budget || '0'),
+        monthly_cost: Math.round(monthlyCost),
+        sms_sent: smsSent,
+        lms_sent: lmsSent,
+        mms_sent: mmsSent,
+        kakao_sent: kakaoSent,
+        cost_per_sms: parseFloat(company.cost_per_sms || '9.9'),
+        cost_per_lms: parseFloat(company.cost_per_lms || '27'),
+        cost_per_mms: parseFloat(company.cost_per_mms || '50'),
+        cost_per_kakao: parseFloat(company.cost_per_kakao || '7.5'),
+        use_db_sync: company.use_db_sync ?? true,
+        use_file_upload: company.use_file_upload ?? true
       }
     });
   } catch (error) {

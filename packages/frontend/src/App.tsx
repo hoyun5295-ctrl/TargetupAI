@@ -6,6 +6,7 @@ import AdminDashboard from './pages/AdminDashboard';
 import Dashboard from './pages/Dashboard';
 import CalendarPage from './pages/CalendarPage';
 import Settings from './pages/Settings';
+import Unsubscribes from './pages/Unsubscribes';
 
 // 인증 필요 라우트
 function PrivateRoute({ children, allowedTypes }: { children: React.ReactNode; allowedTypes?: string[] }) {
@@ -85,7 +86,8 @@ return (
           }
         />
 <Route path="/settings" element={<PrivateRoute><Settings /></PrivateRoute>} />
-        {/* 404 */}
+<Route path="/unsubscribes" element={<PrivateRoute><Unsubscribes /></PrivateRoute>} />
+          {/* 404 */}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>

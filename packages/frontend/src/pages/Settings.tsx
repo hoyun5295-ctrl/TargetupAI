@@ -8,7 +8,11 @@ export default function Settings() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [newPhone, setNewPhone] = useState('');
-  const [managerPhones, setManagerPhones] = useState<string[]>([]);
+  const [newName, setNewName] = useState('');
+  const [managerContacts, setManagerContacts] = useState<{phone: string, name: string}[]>([]);
+  const [callbackNumbers, setCallbackNumbers] = useState<{id: string, phone: string, label: string, is_default: boolean}[]>([]);
+  const [callbackAuthPhone, setCallbackAuthPhone] = useState('');
+  const [callbackAuthVerified, setCallbackAuthVerified] = useState(false);
   const [settings, setSettings] = useState({
     brand_name: '',
     business_type: '',
@@ -40,9 +44,25 @@ export default function Settings() {
       });
       const data = await res.json();
       if (data) {
-        const { manager_phones, manager_phone, ...rest } = data;
+        const { manager_phones, manager_contacts, manager_phone, callback_auth_phone, callback_auth_verified, ...rest } = data;
         setSettings((prev) => ({ ...prev, ...rest }));
-        setManagerPhones(manager_phones || []);
+        // 새 형식 우선, 없으면 기존 형식 변환
+        if (manager_contacts && manager_contacts.length > 0) {
+          setManagerContacts(manager_contacts);
+        } else if (manager_phones && manager_phones.length > 0) {
+          setManagerContacts(manager_phones.map((p: string) => ({ phone: p, name: '' })));
+        }
+        setCallbackAuthPhone(callback_auth_phone || '');
+        setCallbackAuthVerified(callback_auth_verified || false);
+      }
+      
+      // 회신번호 목록 불러오기
+      const cbRes = await fetch('/api/companies/callback-numbers', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const cbData = await cbRes.json();
+      if (cbData.success) {
+        setCallbackNumbers(cbData.numbers || []);
       }
     } catch (error) {
       console.error('설정 로드 실패:', error);
@@ -61,7 +81,7 @@ export default function Settings() {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ ...settings, manager_phones: managerPhones }),
+        body: JSON.stringify({ ...settings, manager_contacts: managerContacts }),
       });
       const data = await res.json();
       alert(data.message || '저장 완료');
@@ -88,14 +108,15 @@ export default function Settings() {
       alert('올바른 전화번호를 입력해주세요');
       return;
     }
-    if (managerPhones.includes(cleaned)) {
+    if (managerContacts.some(c => c.phone === cleaned)) {
       alert('이미 등록된 번호입니다');
       return;
     }
 
-    const updated = [...managerPhones, cleaned];
-    setManagerPhones(updated);
+    const updated = [...managerContacts, { phone: cleaned, name: newName.trim() }];
+    setManagerContacts(updated);
     setNewPhone('');
+    setNewName('');
 
     // 즉시 저장
     const token = localStorage.getItem('token');
@@ -105,14 +126,14 @@ export default function Settings() {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({ ...settings, manager_phones: updated }),
+      body: JSON.stringify({ ...settings, manager_contacts: updated }),
     });
   };
 
-  // 번호 삭제
+  // 담당자 삭제
   const handleRemovePhone = async (phone: string) => {
-    const updated = managerPhones.filter((p) => p !== phone);
-    setManagerPhones(updated);
+    const updated = managerContacts.filter((c) => c.phone !== phone);
+    setManagerContacts(updated);
 
     // 즉시 저장
     const token = localStorage.getItem('token');
@@ -122,7 +143,7 @@ export default function Settings() {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({ ...settings, manager_phones: updated }),
+      body: JSON.stringify({ ...settings, manager_contacts: updated }),
     });
   };
 
@@ -139,9 +160,10 @@ export default function Settings() {
         </div>
       </header>
 
-      <main className="max-w-4xl mx-auto px-4 py-8 space-y-6">
+      <main className="max-w-6xl mx-auto px-4 py-8">
+        <div className="grid grid-cols-2 gap-6">
         {/* 기본 정보 */}
-        <section className="bg-white rounded-lg shadow p-6">
+        <section className="bg-white rounded-lg shadow p-6 min-h-[280px]">
           <h2 className="text-lg font-semibold mb-4">📌 기본 정보</h2>
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -184,26 +206,26 @@ export default function Settings() {
         </section>
 
         {/* 담당자 사전수신 */}
-        <section className="bg-white rounded-lg shadow p-6">
+        <section className="bg-white rounded-lg shadow p-6 min-h-[280px]">
           <h2 className="text-lg font-semibold mb-4">📱 담당자 사전수신</h2>
           <p className="text-sm text-gray-500 mb-4">
             캠페인 발송 전 등록된 담당자 전원에게 테스트 문자를 보내 확인할 수 있습니다.
           </p>
 
-          {/* 등록된 번호 목록 */}
-          {managerPhones.length > 0 && (
+          {/* 등록된 담당자 목록 */}
+          {managerContacts.length > 0 && (
             <div className="space-y-2 mb-4">
-              {managerPhones.map((phone, idx) => (
+              {managerContacts.map((contact, idx) => (
                 <div
-                  key={phone}
+                  key={contact.phone}
                   className="flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-lg px-4 py-2.5"
                 >
                   <span className="text-lg">👤</span>
                   <span className="flex-1 font-medium text-gray-800">
-                    담당자 {idx + 1}: {formatPhone(phone)}
+                    {contact.name || `담당자 ${idx + 1}`}: {formatPhone(contact.phone)}
                   </span>
                   <button
-                    onClick={() => handleRemovePhone(phone)}
+                    onClick={() => handleRemovePhone(contact.phone)}
                     className="px-2.5 py-1 text-sm bg-white border border-red-300 text-red-600 rounded-lg hover:bg-red-50"
                   >
                     삭제
@@ -211,15 +233,25 @@ export default function Settings() {
                 </div>
               ))}
               <p className="text-xs text-gray-400 mt-1">
-                총 {managerPhones.length}명 등록됨 · 사전수신 시 전원에게 발송
+                총 {managerContacts.length}명 등록됨 · 사전수신 시 전원에게 발송
               </p>
             </div>
           )}
 
-          {/* 번호 추가 입력 */}
-          <div className="flex items-end gap-3">
+          {/* 담당자 추가 입력 */}
+          <div className="flex items-end gap-2">
+            <div className="w-24">
+              <label className="block text-sm font-medium text-gray-700 mb-1">이름</label>
+              <input
+                type="text"
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                className="w-full px-3 py-2 border rounded-lg"
+                placeholder="홍길동"
+              />
+            </div>
             <div className="flex-1">
-              <label className="block text-sm font-medium text-gray-700 mb-1">번호 추가</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">전화번호</label>
               <input
                 type="text"
                 value={newPhone}
@@ -239,10 +271,90 @@ export default function Settings() {
               + 추가
             </button>
           </div>
-        </section>
+          </section>
 
-        {/* 요금 설정 */}
-        <section className="bg-white rounded-lg shadow p-6">
+{/* 회신번호 관리 */}
+<section className="bg-white rounded-lg shadow p-6 min-h-[280px]">
+  <h2 className="text-lg font-semibold mb-4">📞 회신번호 관리</h2>
+  
+  {/* 등록된 회신번호 목록 */}
+  {callbackNumbers.length > 0 ? (
+    <div className="space-y-2 mb-4">
+      {callbackNumbers.map((cb) => (
+        <div
+          key={cb.id}
+          className="flex items-center gap-3 bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3"
+        >
+          <span className="text-lg">📱</span>
+          <span className="flex-1 font-medium text-gray-800">
+            {cb.phone}
+            {cb.label && <span className="ml-2 text-sm text-gray-500">({cb.label})</span>}
+          </span>
+          {cb.is_default && (
+            <span className="px-2 py-0.5 bg-emerald-500 text-white text-xs rounded-full">기본</span>
+          )}
+        </div>
+      ))}
+    </div>
+  ) : (
+    <div className="text-center py-8 text-gray-400">
+      <p>등록된 회신번호가 없습니다</p>
+      <p className="text-sm mt-1">관리자에게 문의해주세요</p>
+    </div>
+  )}
+  
+  {/* 본인인증 안내 */}
+  <div className="mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+    <p className="text-sm text-yellow-800">
+      🔒 회신번호 직접 등록은 <strong>본인인증 완료 후</strong> 가능합니다.
+    </p>
+  </div>
+</section>
+
+{/* 회신번호 설정 담당자 */}
+<section className="bg-white rounded-lg shadow p-6 min-h-[280px]">
+  <h2 className="text-lg font-semibold mb-4">🔐 회신번호 설정 담당자</h2>
+  <p className="text-sm text-gray-500 mb-4">
+            회신번호 등록 권한을 가진 담당자입니다.<br />
+            본인인증 완료 시 회신번호를 직접 관리할 수 있습니다.
+          </p>
+  
+  <div className="flex items-end gap-3">
+    <div className="flex-1">
+      <label className="block text-sm font-medium text-gray-700 mb-1">담당자 전화번호</label>
+      <input
+        type="text"
+        value={callbackAuthPhone}
+        onChange={(e) => setCallbackAuthPhone(e.target.value.replace(/[^\d-]/g, ''))}
+        className="w-full px-3 py-2 border rounded-lg"
+        placeholder="01012345678"
+        disabled={callbackAuthVerified}
+      />
+    </div>
+    {callbackAuthVerified ? (
+      <div className="px-4 py-2 bg-emerald-100 text-emerald-700 rounded-lg text-sm font-medium">
+        ✅ 인증완료
+      </div>
+    ) : (
+      <button
+        onClick={() => alert('본인인증 기능은 추후 업데이트 됩니다')}
+        disabled={!callbackAuthPhone.replace(/\D/g, '')}
+        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed"
+      >
+        📱 본인인증
+      </button>
+    )}
+  </div>
+  
+  {!callbackAuthVerified && (
+    <p className="text-xs text-gray-400 mt-2">
+      ※ 담당자 번호를 먼저 저장한 후, 본인인증을 진행해주세요
+    </p>
+  )}
+</section>
+
+{/* 요금 설정 */}
+<section className="bg-white rounded-lg shadow p-6 min-h-[240px]">
           <h2 className="text-lg font-semibold mb-4">💰 요금 설정</h2>
           <div className="grid grid-cols-3 gap-4">
             <div>
@@ -299,8 +411,8 @@ export default function Settings() {
         </section>
 
         {/* 발송 정책 */}
-        <section className="bg-white rounded-lg shadow p-6">
-          <h2 className="text-lg font-semibold mb-4">📤 발송 정책</h2>
+        <section className="bg-white rounded-lg shadow p-6 min-h-[240px]">
+                    <h2 className="text-lg font-semibold mb-4">📤 발송 정책</h2>
           <div className="grid grid-cols-3 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">발송 시작시간</label>
@@ -359,7 +471,7 @@ export default function Settings() {
         </section>
 
         {/* AI 설정 */}
-        <section className="bg-white rounded-lg shadow p-6">
+        <section className="bg-white rounded-lg shadow p-6 min-h-[160px]">
           <h2 className="text-lg font-semibold mb-4">✨ AI 설정</h2>
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -400,10 +512,11 @@ export default function Settings() {
             />
             <span className="text-sm text-gray-700">발송 전 승인 필요</span>
           </label>
-        </section>
+          </section>
+        </div>
 
         {/* 저장 버튼 */}
-        <div className="flex justify-end">
+        <div className="flex justify-center mt-6">
           <button
             onClick={handleSave}
             disabled={saving}

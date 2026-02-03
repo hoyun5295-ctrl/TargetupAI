@@ -16,11 +16,12 @@ interface Campaign {
 }
 
 const statusColors: Record<string, string> = {
-  draft: 'bg-gray-100 text-gray-800',
-  scheduled: 'bg-blue-100 text-blue-800',
+  draft: 'bg-gray-100 text-gray-600',
+  scheduled: 'bg-pink-100 text-pink-700',
   sending: 'bg-yellow-100 text-yellow-800',
-  completed: 'bg-green-100 text-green-800',
+  completed: 'bg-amber-100 text-amber-700',
   failed: 'bg-red-100 text-red-800',
+  cancelled: 'bg-gray-200 text-gray-500',
 };
 
 const statusLabels: Record<string, string> = {
@@ -29,6 +30,7 @@ const statusLabels: Record<string, string> = {
   sending: '진행',
   completed: '완료',
   failed: '실패',
+  cancelled: '취소',
 };
 
 export default function CalendarPage() {
@@ -139,6 +141,26 @@ export default function CalendarPage() {
         <div className="flex gap-6">
           {/* 캘린더 그리드 */}
           <div className="flex-1 bg-white rounded-lg shadow p-4">
+            {/* 상태 색상 가이드 */}
+            <div className="flex items-center gap-4 mb-4 pb-3 border-b">
+              <span className="text-sm text-gray-500">상태:</span>
+              <div className="flex items-center gap-1">
+                <span className="w-3 h-3 rounded bg-amber-100 border border-amber-300"></span>
+                <span className="text-xs text-gray-600">완료</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <span className="w-3 h-3 rounded bg-pink-100 border border-pink-300"></span>
+                <span className="text-xs text-gray-600">예약</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <span className="w-3 h-3 rounded bg-gray-200 border border-gray-300"></span>
+                <span className="text-xs text-gray-600">취소</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <span className="w-3 h-3 rounded bg-yellow-100 border border-yellow-300"></span>
+                <span className="text-xs text-gray-600">진행중</span>
+              </div>
+            </div>
             {/* 요일 헤더 */}
             <div className="grid grid-cols-7 gap-1 mb-2">
               {['일', '월', '화', '수', '목', '금', '토'].map((day, idx) => (

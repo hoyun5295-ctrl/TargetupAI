@@ -16,7 +16,7 @@ router.get('/settings', authenticate, async (req: Request, res: Response) => {
     const companyId = (req as any).user?.companyId;
     const result = await query(`
       SELECT 
-        brand_name, business_type, reject_number, manager_phone,
+        brand_name, business_type, reject_number, manager_phone, manager_contacts,
         monthly_budget, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao,
         send_start_hour, send_end_hour, daily_limit_per_customer,
         holiday_send_allowed, duplicate_prevention_days,
@@ -50,7 +50,7 @@ router.put('/settings', authenticate, async (req: Request, res: Response) => {
   try {
     const companyId = (req as any).user?.companyId;
     const {
-      brand_name, business_type, reject_number, manager_phones,
+      brand_name, business_type, reject_number, manager_phones, manager_contacts,
       monthly_budget, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao,
       send_start_hour, send_end_hour, daily_limit_per_customer,
       holiday_send_allowed, duplicate_prevention_days,
@@ -58,8 +58,10 @@ router.put('/settings', authenticate, async (req: Request, res: Response) => {
       approval_required
     } = req.body;
 
-    // manager_phones 배열 → JSON 문자열로 저장
+    // manager_phones 배열 → JSON 문자열로 저장 (하위 호환)
     const managerPhoneJson = manager_phones ? JSON.stringify(manager_phones) : null;
+    // manager_contacts는 JSON 문자열로 변환해서 저장
+    const managerContactsJson = manager_contacts ? JSON.stringify(manager_contacts) : null;
 
     await query(`
       UPDATE companies SET
@@ -67,24 +69,25 @@ router.put('/settings', authenticate, async (req: Request, res: Response) => {
         business_type = COALESCE($2, business_type),
         reject_number = COALESCE($3, reject_number),
         manager_phone = COALESCE($4, manager_phone),
-        monthly_budget = COALESCE($5, monthly_budget),
-        cost_per_sms = COALESCE($6, cost_per_sms),
-        cost_per_lms = COALESCE($7, cost_per_lms),
-        cost_per_mms = COALESCE($8, cost_per_mms),
-        cost_per_kakao = COALESCE($9, cost_per_kakao),
-        send_start_hour = COALESCE($10, send_start_hour),
-        send_end_hour = COALESCE($11, send_end_hour),
-        daily_limit_per_customer = COALESCE($12, daily_limit_per_customer),
-        holiday_send_allowed = COALESCE($13, holiday_send_allowed),
-        duplicate_prevention_days = COALESCE($14, duplicate_prevention_days),
-        target_strategy = COALESCE($15, target_strategy),
-        cross_category_allowed = COALESCE($16, cross_category_allowed),
-        excluded_segments = COALESCE($17, excluded_segments),
-        approval_required = COALESCE($18, approval_required),
+        manager_contacts = COALESCE($5, manager_contacts),
+        monthly_budget = COALESCE($6, monthly_budget),
+        cost_per_sms = COALESCE($7, cost_per_sms),
+        cost_per_lms = COALESCE($8, cost_per_lms),
+        cost_per_mms = COALESCE($9, cost_per_mms),
+        cost_per_kakao = COALESCE($10, cost_per_kakao),
+        send_start_hour = COALESCE($11, send_start_hour),
+        send_end_hour = COALESCE($12, send_end_hour),
+        daily_limit_per_customer = COALESCE($13, daily_limit_per_customer),
+        holiday_send_allowed = COALESCE($14, holiday_send_allowed),
+        duplicate_prevention_days = COALESCE($15, duplicate_prevention_days),
+        target_strategy = COALESCE($16, target_strategy),
+        cross_category_allowed = COALESCE($17, cross_category_allowed),
+        excluded_segments = COALESCE($18, excluded_segments),
+        approval_required = COALESCE($19, approval_required),
         updated_at = NOW()
-      WHERE id = $19
+      WHERE id = $20
     `, [
-      brand_name, business_type, reject_number, managerPhoneJson,
+      brand_name, business_type, reject_number, managerPhoneJson, managerContactsJson,
       monthly_budget, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao,
       send_start_hour, send_end_hour, daily_limit_per_customer,
       holiday_send_allowed, duplicate_prevention_days,
@@ -96,6 +99,26 @@ router.put('/settings', authenticate, async (req: Request, res: Response) => {
   } catch (error) {
     console.error('설정 수정 에러:', error);
     res.status(500).json({ error: '설정 저장 실패' });
+  }
+});
+
+// 회신번호 목록 조회
+router.get('/callback-numbers', async (req: Request, res: Response) => {
+  try {
+    const companyId = (req as any).user?.companyId;
+    if (!companyId) {
+      return res.status(401).json({ success: false, error: '인증 필요' });
+    }
+
+    const result = await query(
+      'SELECT id, phone, label, is_default, created_at FROM callback_numbers WHERE company_id = $1 ORDER BY is_default DESC, created_at ASC',
+      [companyId]
+    );
+
+    res.json({ success: true, numbers: result.rows });
+  } catch (error) {
+    console.error('회신번호 조회 실패:', error);
+    res.status(500).json({ success: false, error: '조회 실패' });
   }
 });
 
@@ -278,36 +301,23 @@ router.put('/:id', requireSuperAdmin, async (req: Request, res: Response) => {
   }
 });
 
-// POST /api/companies/:id/admin - 고객사 관리자 생성
-router.post('/:id/admin', requireSuperAdmin, async (req: Request, res: Response) => {
+// 회신번호 목록 조회
+router.get('/callback-numbers', async (req: Request, res: Response) => {
   try {
-    const { id } = req.params;
-    const { loginId, password, name, email, phone } = req.body;
-
-    const companyResult = await query('SELECT * FROM companies WHERE id = $1', [id]);
-    if (companyResult.rows.length === 0) {
-      return res.status(404).json({ error: '고객사를 찾을 수 없습니다.' });
+    const companyId = (req as any).user?.companyId;
+    if (!companyId) {
+      return res.status(401).json({ success: false, error: '인증 필요' });
     }
-
-    const passwordHash = await bcrypt.hash(password, 10);
 
     const result = await query(
-      `INSERT INTO users (company_id, login_id, password_hash, name, email, phone, role)
-       VALUES ($1, $2, $3, $4, $5, $6, 'admin')
-       RETURNING id, login_id, name, email, phone, role`,
-      [id, loginId, passwordHash, name, email, phone]
+      'SELECT id, phone, label, is_default, created_at FROM callback_numbers WHERE company_id = $1 ORDER BY is_default DESC, created_at ASC',
+      [companyId]
     );
 
-    return res.status(201).json({
-      message: '고객사 관리자가 생성되었습니다.',
-      user: result.rows[0],
-    });
-  } catch (error: any) {
-    console.error('고객사 관리자 생성 에러:', error);
-    if (error.code === '23505') {
-      return res.status(400).json({ error: '이미 존재하는 로그인 ID입니다.' });
-    }
-    return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+    res.json({ success: true, numbers: result.rows });
+  } catch (error) {
+    console.error('회신번호 조회 실패:', error);
+    res.status(500).json({ success: false, error: '조회 실패' });
   }
 });
 

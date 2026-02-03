@@ -167,7 +167,18 @@ export async function generateMessages(
   const brandName = extraContext?.brandName || '브랜드';
   const channel = extraContext?.channel || 'SMS';
   const isAd = extraContext?.isAd !== false;
-  const rejectNumber = extraContext?.rejectNumber || '080-XXX-XXXX';
+  const rawRejectNumber = extraContext?.rejectNumber || '080-XXX-XXXX';
+  // 080번호 하이픈 포맷팅 (0801111111 → 080-111-1111)
+  const formatRejectNumber = (num: string) => {
+    const clean = num.replace(/-/g, '');
+    if (clean.length === 10) {
+      return `${clean.slice(0,3)}-${clean.slice(3,6)}-${clean.slice(6)}`;
+    }
+    return num;
+  };
+  const rejectText = channel === 'SMS' 
+    ? `무료거부${rawRejectNumber.replace(/-/g, '')}` 
+    : `무료수신거부 ${formatRejectNumber(rawRejectNumber)}`;
   
   const byteLimit = channel === 'SMS' ? 90 : channel === 'LMS' ? 2000 : channel === 'MMS' ? 2000 : 1000;
   
@@ -175,7 +186,7 @@ export async function generateMessages(
 - 요청: ${prompt}
 - 채널: ${channel} (${byteLimit}바이트 제한)
 - 광고성 메시지: ${isAd ? '예 - (광고)와 무료거부번호 필수 포함' : '아니오'}
-${isAd ? `- 무료거부번호: ${rejectNumber}` : ''}
+${isAd ? `- 수신거부 표기: ${rejectText}` : ''}
 - 타겟 고객 수: ${targetInfo.total_count.toLocaleString()}명
 
 ## 브랜드 정보
@@ -233,6 +244,7 @@ export async function recommendTarget(
   channel_reason: string;
   is_ad: boolean;
   recommended_time: string;
+  suggested_campaign_name: string;
 }> {
   if (!process.env.ANTHROPIC_API_KEY) {
     return {
@@ -243,6 +255,7 @@ export async function recommendTarget(
       channel_reason: '기본 채널입니다.',
       is_ad: true,
       recommended_time: '',
+      suggested_campaign_name: '캠페인',
     };
   }
 
@@ -302,8 +315,9 @@ ${objective}
   "estimated_percentage": 예상 타겟 비율(%),
   "recommended_channel": "SMS 또는 LMS 또는 MMS 또는 카카오",
   "channel_reason": "이 채널을 추천하는 이유 (한글 1문장)",
- "is_ad": true 또는 false,
-  "recommended_time": "YYYY-MM-DD HH:mm (한국시간 기준)"
+  "is_ad": true 또는 false,
+  "recommended_time": "YYYY-MM-DD HH:mm (한국시간 기준)",
+  "suggested_campaign_name": "타겟+이벤트 요약 (예: 20대여성 봄세일, VIP고객 감사이벤트, 30대남성 스킨케어)"
 }
 
 연산자: eq(같음), gte(이상), lte(이하), between([최소,최대]), in([배열])`;
@@ -339,6 +353,7 @@ ${objective}
       channel_reason: result.channel_reason || '기본 채널입니다.',
       is_ad: result.is_ad !== false,
       recommended_time: result.recommended_time || '',
+      suggested_campaign_name: result.suggested_campaign_name || '캠페인',
     };
   } catch (error) {
     console.error('AI 타겟 추천 오류:', error);
@@ -350,6 +365,7 @@ ${objective}
       channel_reason: '기본 채널입니다.',
       is_ad: true,
       recommended_time: '',
+      suggested_campaign_name: '캠페인',
     };
   }
 }
@@ -359,6 +375,19 @@ function getFallbackVariants(extraContext?: any): AIRecommendResult {
   const brand = extraContext?.brandName || '브랜드';
   const product = extraContext?.productName || '상품';
   const discount = extraContext?.discountRate ? `${extraContext.discountRate}%` : '특별';
+  const rawRejectNumber = extraContext?.rejectNumber || '080-XXX-XXXX';
+  
+  // SMS: 무료거부 + 하이픈제거, LMS/MMS: 무료수신거부 + 하이픈유지
+  // 080번호 하이픈 포맷팅
+  const formatRejectNumber = (num: string) => {
+    const clean = num.replace(/-/g, '');
+    if (clean.length === 10) {
+      return `${clean.slice(0,3)}-${clean.slice(3,6)}-${clean.slice(6)}`;
+    }
+    return num;
+  };
+  const smsRejectText = `무료거부${rawRejectNumber.replace(/-/g, '')}`;
+  const lmsRejectText = `무료수신거부 ${formatRejectNumber(rawRejectNumber)}`;
 
   return {
     variants: [
@@ -366,24 +395,24 @@ function getFallbackVariants(extraContext?: any): AIRecommendResult {
         variant_id: 'A',
         variant_name: '혜택 직접형',
         concept: '할인 혜택 직접 전달',
-        sms_text: `(광고)[${brand}] ${product} ${discount} 할인! 지금 확인▶ 무료수신거부 080-XXX-XXXX`,
-        lms_text: `(광고)\n[${brand}] ${product} ${discount} 할인\n\n지금 바로 확인하세요!\n\n▶ 바로가기\n\n무료 수신거부: 080-XXX-XXXX`,
+        sms_text: `(광고)[${brand}] ${product} ${discount} 할인! 지금 확인▶ ${smsRejectText}`,
+        lms_text: `(광고)\n[${brand}] ${product} ${discount} 할인\n\n지금 바로 확인하세요!\n\n▶ 바로가기\n\n${lmsRejectText}`,
         score: 70,
       },
       {
         variant_id: 'B',
         variant_name: '긴급/한정',
         concept: '마감 임박 긴급함 강조',
-        sms_text: `(광고)[${brand}] 마감임박! ${product} ${discount} 할인▶ 무료수신거부 080-XXX-XXXX`,
-        lms_text: `(광고)\n[${brand}] ⏰ 마감 임박!\n\n${product} ${discount} 할인\n\n서두르세요!\n\n▶ 바로가기\n\n무료 수신거부: 080-XXX-XXXX`,
+        sms_text: `(광고)[${brand}] 마감임박! ${product} ${discount} 할인▶ ${smsRejectText}`,
+        lms_text: `(광고)\n[${brand}] ⏰ 마감 임박!\n\n${product} ${discount} 할인\n\n서두르세요!\n\n▶ 바로가기\n\n${lmsRejectText}`,
         score: 65,
       },
       {
         variant_id: 'C',
         variant_name: '재방문 유도',
         concept: '휴면 고객 재활성화',
-        sms_text: `(광고)[${brand}] 오랜만이에요💕 ${product} ${discount} 할인▶ 무료수신거부 080-XXX-XXXX`,
-        lms_text: `(광고)\n[${brand}] 오랜만이에요 💕\n\n다시 만나 반가워요!\n${product} ${discount} 할인\n\n▶ 바로가기\n\n무료 수신거부: 080-XXX-XXXX`,
+        sms_text: `(광고)[${brand}] 오랜만이에요💕 ${product} ${discount} 할인▶ ${smsRejectText}`,
+        lms_text: `(광고)\n[${brand}] 오랜만이에요 💕\n\n다시 만나 반가워요!\n${product} ${discount} 할인\n\n▶ 바로가기\n\n${lmsRejectText}`,
         score: 60,
       },
     ],
