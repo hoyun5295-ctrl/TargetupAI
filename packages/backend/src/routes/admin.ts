@@ -240,6 +240,44 @@ router.put('/companies/:id', authenticate, requireSuperAdmin, async (req: Reques
   }
 });
 
+// 회사 비활성화 (soft delete)
+router.delete('/companies/:id', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  
+  try {
+    // 활성 캠페인이 있는지 확인
+    const activeCampaigns = await query(
+      "SELECT COUNT(*) FROM campaigns WHERE company_id = $1 AND status IN ('scheduled', 'sending')",
+      [id]
+    );
+    if (parseInt(activeCampaigns.rows[0].count) > 0) {
+      return res.status(400).json({ error: '진행 중이거나 예약된 캠페인이 있어 해지할 수 없습니다.' });
+    }
+    
+    const result = await query(`
+      UPDATE companies 
+      SET status = 'terminated', updated_at = NOW()
+      WHERE id = $1
+      RETURNING id, company_name
+    `, [id]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: '회사를 찾을 수 없습니다.' });
+    }
+    
+    // 해당 회사 사용자도 비활성화
+    await query(
+      "UPDATE users SET status = 'inactive', updated_at = NOW() WHERE company_id = $1",
+      [id]
+    );
+    
+    res.json({ message: `${result.rows[0].company_name}이(가) 해지되었습니다.` });
+  } catch (error) {
+    console.error('회사 해지 실패:', error);
+    res.status(500).json({ error: '회사 해지 실패' });
+  }
+});
+
 // ===== 예약 캠페인 관리 API =====
 
 // 예약된 캠페인 목록 조회 (전체 고객사)
@@ -357,6 +395,31 @@ router.post('/callback-numbers', authenticate, requireSuperAdmin, async (req: Re
   } catch (error) {
     console.error('발신번호 등록 실패:', error);
     res.status(500).json({ error: '발신번호 등록 실패' });
+  }
+});
+
+// 발신번호 수정
+router.put('/callback-numbers/:id', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { phone, label } = req.body;
+  
+  try {
+    const result = await query(`
+      UPDATE callback_numbers 
+      SET phone = COALESCE($1, phone),
+          label = COALESCE($2, label)
+      WHERE id = $3
+      RETURNING id, phone, label, is_default
+    `, [phone, label, id]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: '발신번호를 찾을 수 없습니다.' });
+    }
+    
+    res.json({ message: '수정되었습니다.', callbackNumber: result.rows[0] });
+  } catch (error) {
+    console.error('발신번호 수정 실패:', error);
+    res.status(500).json({ error: '발신번호 수정 실패' });
   }
 });
 
@@ -496,4 +559,177 @@ router.delete('/plans/:id', authenticate, requireSuperAdmin, async (req: Request
     res.status(500).json({ error: '요금제 삭제 실패' });
   }
 });
+
+// ===== 플랜 변경 신청 관리 API =====
+
+// 플랜 신청 목록 조회
+router.get('/plan-requests', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const result = await query(`
+      SELECT 
+        pr.*,
+        c.company_name, c.company_code,
+        p_current.plan_name as current_plan_name,
+        p_requested.plan_name as requested_plan_name,
+        p_requested.monthly_price as requested_plan_price,
+        u.name as user_name, u.login_id as user_login_id,
+        admin.name as processed_by_name
+      FROM plan_requests pr
+      LEFT JOIN companies c ON pr.company_id = c.id
+      LEFT JOIN plans p_current ON c.plan_id = p_current.id
+      LEFT JOIN plans p_requested ON pr.requested_plan_id = p_requested.id
+      LEFT JOIN users u ON pr.user_id = u.id
+      LEFT JOIN users admin ON pr.processed_by = admin.id
+      ORDER BY 
+        CASE WHEN pr.status = 'pending' THEN 0 ELSE 1 END,
+        pr.created_at DESC
+    `);
+    
+    res.json({ requests: result.rows });
+  } catch (error) {
+    console.error('플랜 신청 조회 실패:', error);
+    res.status(500).json({ error: '플랜 신청 조회 실패' });
+  }
+});
+
+// 플랜 신청 승인
+router.put('/plan-requests/:id/approve', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { adminNote } = req.body;
+  const adminId = (req as any).user?.userId;
+  
+  try {
+    // 신청 정보 조회
+    const requestResult = await query(
+      'SELECT company_id, requested_plan_id, status FROM plan_requests WHERE id = $1',
+      [id]
+    );
+    
+    if (requestResult.rows.length === 0) {
+      return res.status(404).json({ error: '신청을 찾을 수 없습니다.' });
+    }
+    
+    const request = requestResult.rows[0];
+    
+    if (request.status !== 'pending') {
+      return res.status(400).json({ error: '이미 처리된 신청입니다.' });
+    }
+    
+    // 회사 플랜 변경
+    await query(
+      'UPDATE companies SET plan_id = $1, updated_at = NOW() WHERE id = $2',
+      [request.requested_plan_id, request.company_id]
+    );
+    
+    // 신청 상태 변경
+    const result = await query(`
+      UPDATE plan_requests 
+      SET status = 'approved',
+          admin_note = $1,
+          processed_by = $2,
+          processed_at = NOW()
+      WHERE id = $3
+      RETURNING *
+    `, [adminNote || null, adminId, id]);
+    
+    res.json({ 
+      message: '승인되었습니다. 회사 플랜이 변경되었습니다.',
+      request: result.rows[0]
+    });
+  } catch (error) {
+    console.error('플랜 신청 승인 실패:', error);
+    res.status(500).json({ error: '플랜 신청 승인 실패' });
+  }
+});
+
+// 플랜 신청 거절
+router.put('/plan-requests/:id/reject', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { adminNote } = req.body;
+  const adminId = (req as any).user?.userId;
+  
+  if (!adminNote || adminNote.trim() === '') {
+    return res.status(400).json({ error: '거절 사유를 입력해주세요.' });
+  }
+  
+  try {
+    const checkResult = await query('SELECT status FROM plan_requests WHERE id = $1', [id]);
+    
+    if (checkResult.rows.length === 0) {
+      return res.status(404).json({ error: '신청을 찾을 수 없습니다.' });
+    }
+    
+    if (checkResult.rows[0].status !== 'pending') {
+      return res.status(400).json({ error: '이미 처리된 신청입니다.' });
+    }
+    
+    const result = await query(`
+      UPDATE plan_requests 
+      SET status = 'rejected',
+          admin_note = $1,
+          processed_by = $2,
+          processed_at = NOW()
+      WHERE id = $3
+      RETURNING *
+    `, [adminNote.trim(), adminId, id]);
+    
+    res.json({ 
+      message: '거절되었습니다.',
+      request: result.rows[0]
+    });
+  } catch (error) {
+    console.error('플랜 신청 거절 실패:', error);
+    res.status(500).json({ error: '플랜 신청 거절 실패' });
+  }
+});
+// ===== 표준 필드 관리 API =====
+
+// 표준 필드 목록 조회
+router.get('/standard-fields', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const result = await query(
+      'SELECT id, field_key, display_name, category, data_type, description, sort_order FROM standard_fields WHERE is_active = true ORDER BY sort_order'
+    );
+    res.json({ fields: result.rows });
+  } catch (error) {
+    console.error('표준 필드 조회 실패:', error);
+    res.status(500).json({ error: '표준 필드 조회 실패' });
+  }
+});
+
+// 회사별 활성 필드 조회
+router.get('/companies/:id/fields', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  try {
+    const result = await query('SELECT enabled_fields FROM companies WHERE id = $1', [id]);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: '회사를 찾을 수 없습니다.' });
+    }
+    res.json({ enabledFields: result.rows[0].enabled_fields || [] });
+  } catch (error) {
+    console.error('회사 필드 조회 실패:', error);
+    res.status(500).json({ error: '회사 필드 조회 실패' });
+  }
+});
+
+// 회사별 활성 필드 저장
+router.put('/companies/:id/fields', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { enabledFields } = req.body;
+  
+  try {
+    const result = await query(
+      'UPDATE companies SET enabled_fields = $1, updated_at = NOW() WHERE id = $2 RETURNING id',
+      [JSON.stringify(enabledFields || []), id]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: '회사를 찾을 수 없습니다.' });
+    }
+    res.json({ message: '필터항목이 저장되었습니다.', enabledFields });
+  } catch (error) {
+    console.error('필터항목 저장 실패:', error);
+    res.status(500).json({ error: '필터항목 저장 실패' });
+  }
+});
+
 export default router;

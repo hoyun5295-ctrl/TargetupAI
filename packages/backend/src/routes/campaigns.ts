@@ -1,6 +1,8 @@
 import { Router, Request, Response } from 'express';
 import { query, mysqlQuery } from '../config/database';
 import { authenticate } from '../middlewares/auth';
+import { extractVarCatalog, validatePersonalizationVars, VarCatalogEntry } from '../services/ai';
+import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getGenderVariants, getGradeVariants, getRegionVariants } from '../utils/normalize';
 // 한국시간 문자열 변환 (MySQL datetime 형식)
 const toKoreaTimeStr = (date: Date) => {
   return date.toLocaleString('sv-SE', { timeZone: 'Asia/Seoul' }).replace('T', ' ');
@@ -335,12 +337,29 @@ router.post('/:id/send', async (req: Request, res: Response) => {
 
     const campaign = campaignResult.rows[0];
 
-    // 회사 정보 조회 (회신번호)
-    const companyResult = await query(
-      'SELECT reject_number FROM companies WHERE id = $1',
+    // 기본 회신번호 조회 (callback_numbers 테이블에서)
+    const callbackResult = await query(
+      'SELECT phone FROM callback_numbers WHERE company_id = $1 AND is_default = true LIMIT 1',
       [companyId]
     );
-    const callbackNumber = companyResult.rows[0]?.reject_number || '18008125';
+    // campaign에 설정된 회신번호 우선, 없으면 기본 회신번호
+    const defaultCallback = callbackResult.rows[0]?.phone || '18008125';
+    
+    // 개별회신번호 사용 여부
+    const useIndividualCallback = campaign.use_individual_callback || false;
+
+    // ★ 회사 스키마 조회 → 동적 변수 치환을 위한 field_mappings
+    const companySchemaResult = await query(
+      'SELECT customer_schema FROM companies WHERE id = $1',
+      [companyId]
+    );
+    const customerSchema = companySchemaResult.rows[0]?.customer_schema || {};
+    const { fieldMappings, availableVars } = extractVarCatalog(customerSchema);
+
+    // ★ field_mappings에서 필요한 컬럼 자동 추출 (동적 SELECT)
+    const baseColumns = ['id', 'phone', 'callback'];
+    const mappingColumns = Object.values(fieldMappings).map((m: VarCatalogEntry) => m.column);
+    const selectColumns = [...new Set([...baseColumns, ...mappingColumns])].join(', ');
 
     // draft 또는 completed 상태에서 재발송 가능
     if (campaign.status === 'sending') {
@@ -357,8 +376,9 @@ router.post('/:id/send', async (req: Request, res: Response) => {
     const storeParamIdx = 1 + filterQuery.params.length + 1;
     const storeFilterFinal = storeFilter.replace('$STORE_IDX', `$${storeParamIdx}`);
     
+    // ★ 동적 SELECT: field_mappings 기반으로 필요한 컬럼만 자동 조회
     const customersResult = await query(
-      `SELECT id, phone, name FROM customers c
+      `SELECT ${selectColumns} FROM customers c
        WHERE c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true ${filterQuery.where}${storeFilterFinal}
        AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.company_id = c.company_id AND u.phone = c.phone)`,
       [companyId, ...filterQuery.params, ...storeParams]
@@ -368,6 +388,13 @@ router.post('/:id/send', async (req: Request, res: Response) => {
 
     if (customers.length === 0) {
       return res.status(400).json({ error: '발송 대상이 없습니다.' });
+    }
+
+    // ★ 발송 전 메시지 변수 검증 (잘못된 변수가 고객에게 노출되는 것을 방지)
+    const messageValidation = validatePersonalizationVars(campaign.message_content || '', availableVars);
+    if (!messageValidation.valid) {
+      console.warn(`[발송 변수 검증] 잘못된 변수 발견: ${messageValidation.invalidVars.join(', ')}`);
+      // 잘못된 변수는 빈 문자열로 치환하여 발송 (차단하지 않고 안전하게 처리)
     }
 
     // campaign_runs에 발송 이력 생성
@@ -400,43 +427,81 @@ router.post('/:id/send', async (req: Request, res: Response) => {
     );
     const campaignRun = runResult.rows[0];
     
-// 즉시 발송일 때만 SMSQ_SEND에 INSERT (MySQL)
-if (!isScheduled) {
-  for (const customer of customers) {
-    await mysqlQuery(
-      `INSERT INTO SMSQ_SEND (
-        dest_no, call_back, msg_contents, msg_type, sendreq_time, status_code, rsv1, app_etc1, app_etc2
-      ) VALUES (?, ?, ?, ?, NOW(), 100, '1', ?, ?)`,
-      [customer.phone.replace(/-/g, ''), callbackNumber.replace(/-/g, ''), campaign.message_content, campaign.message_type === 'SMS' ? 'S' : 'L', campaignRun.id, companyId]
-    );
- }
-  
-    // campaign_runs 상태 업데이트
-    await query(
-      `UPDATE campaign_runs SET 
-        sent_count = $1, 
-        status = 'sending',
-        sent_at = CURRENT_TIMESTAMP
-       WHERE id = $2`,
-      [customers.length, campaignRun.id]
-    );
+// excluded_phones 목록 조회
+const excludedPhones = campaign.excluded_phones || [];
 
-    // 캠페인 상태 업데이트 (전체 누적)
-    await query(
-      `UPDATE campaigns SET 
-        status = 'sending', 
-        sent_count = COALESCE(sent_count, 0) + $1,
-        sent_at = CURRENT_TIMESTAMP
-       WHERE id = $2`,
-      [customers.length, id]
-    );
-  } else {
-    // 예약 발송: 캠페인/런 상태를 scheduled로
-    await query(
-      `UPDATE campaigns SET status = 'scheduled', target_count = $1 WHERE id = $2`,
-      [customers.length, id]
+// 제외 대상 필터링
+const filteredCustomers = customers.filter(
+  (c: any) => !excludedPhones.includes(c.phone.replace(/-/g, ''))
+);
+
+if (filteredCustomers.length === 0) {
+  return res.status(400).json({ error: '발송 대상이 없습니다. (모두 제외됨)' });
+}
+
+// MySQL에 INSERT (즉시/예약 공통)
+const sendTime = isScheduled ? toKoreaTimeStr(new Date(campaign.scheduled_at)) : null;
+
+for (const customer of filteredCustomers) {
+  // ★ 동적 변수 치환 (field_mappings 기반 - 하드코딩 완전 제거!)
+  let personalizedMessage = campaign.message_content || '';
+  
+  for (const [varName, mapping] of Object.entries(fieldMappings) as [string, VarCatalogEntry][]) {
+    const value = customer[mapping.column];
+    let displayValue = '';
+    
+    if (value === null || value === undefined) {
+      displayValue = '';
+    } else if (mapping.type === 'number' && typeof value === 'number') {
+      displayValue = value.toLocaleString();
+    } else if (mapping.type === 'date' && value) {
+      displayValue = new Date(value).toLocaleDateString('ko-KR');
+    } else {
+      displayValue = String(value);
+    }
+    
+    personalizedMessage = personalizedMessage.replace(
+      new RegExp(`%${varName}%`, 'g'),
+      displayValue
     );
   }
+  
+  // 검증에서 발견된 잘못된 변수 잔여분 제거 (안전장치)
+  personalizedMessage = personalizedMessage.replace(/%[^%\s]{1,20}%/g, '');
+
+  // 개별회신번호: customer.callback 있으면 사용, 없으면 캠페인 설정 또는 기본값
+  const customerCallback = useIndividualCallback && customer.callback 
+    ? customer.callback.replace(/-/g, '') 
+    : (campaign.callback_number || defaultCallback).replace(/-/g, '');
+
+  await mysqlQuery(
+    `INSERT INTO SMSQ_SEND (
+      dest_no, call_back, msg_contents, msg_type, sendreq_time, status_code, rsv1, app_etc1, app_etc2
+    ) VALUES (?, ?, ?, ?, ${sendTime ? `'${sendTime}'` : 'NOW()'}, 100, '1', ?, ?)`,
+    [customer.phone.replace(/-/g, ''), customerCallback, personalizedMessage, campaign.message_type === 'SMS' ? 'S' : 'L', id, companyId]
+  );
+}
+
+// campaign_runs 상태 업데이트
+await query(
+  `UPDATE campaign_runs SET 
+    sent_count = $1, 
+    status = $2,
+    sent_at = CURRENT_TIMESTAMP
+   WHERE id = $3`,
+  [filteredCustomers.length, isScheduled ? 'scheduled' : 'sending', campaignRun.id]
+);
+
+// 캠페인 상태 업데이트
+await query(
+  `UPDATE campaigns SET 
+    status = $1, 
+    sent_count = COALESCE(sent_count, 0) + $2,
+    target_count = $3,
+    sent_at = CURRENT_TIMESTAMP
+   WHERE id = $4`,
+  [isScheduled ? 'scheduled' : 'sending', filteredCustomers.length, filteredCustomers.length, id]
+);
     return res.json({
       message: `${customers.length}건 발송이 시작되었습니다.`,
       sentCount: customers.length,
@@ -463,11 +528,13 @@ function buildFilterQuery(filter: any, companyId: string) {
     return field;
   };
 
-  // gender
+  // gender (normalize.ts 변형값 매칭)
   const gender = getValue(filter.gender);
   if (gender) {
-    where += ` AND gender = $${paramIndex++}`;
-    params.push(gender);
+    const genderResult = buildGenderFilter(gender, paramIndex);
+    where += genderResult.sql;
+    params.push(...genderResult.params);
+    paramIndex = genderResult.nextIndex;
   }
 
   // age (배열: [30, 39])
@@ -492,11 +559,30 @@ function buildFilterQuery(filter: any, companyId: string) {
     params.push(maxAge);
   }
 
-  // grade
+  // grade (normalize.ts 변형값 매칭)
   const grade = getValue(filter.grade);
   if (grade) {
-    where += ` AND grade = $${paramIndex++}`;
-    params.push(grade);
+    const gradeResult = buildGradeFilter(grade, paramIndex);
+    where += gradeResult.sql;
+    params.push(...gradeResult.params);
+    paramIndex = gradeResult.nextIndex;
+  }
+
+  // region (normalize.ts 변형값 매칭)
+  const regionFilter = filter.region;
+  const region = getValue(regionFilter);
+  if (region) {
+    const regionOp = regionFilter?.operator || 'eq';
+    if (regionOp === 'in' && Array.isArray(region)) {
+      const allVariants = (region as string[]).flatMap(r => getRegionVariants(r));
+      where += ` AND region = ANY($${paramIndex++}::text[])`;
+      params.push(allVariants);
+    } else {
+      const regionResult = buildRegionFilter(String(region), paramIndex);
+      where += regionResult.sql;
+      params.push(...regionResult.params);
+      paramIndex = regionResult.nextIndex;
+    }
   }
 
   // custom_fields 처리 (AI 필터 확장)
@@ -560,7 +646,7 @@ router.get('/test-stats', async (req: Request, res: Response) => {
     // MySQL에서 담당자 테스트 조회 (app_etc1 = 'test', app_etc2 = companyId)
     const testResults = await mysqlQuery(
       `SELECT 
-        seqno, dest_no, msg_contents, msg_type, sendreq_time, status_code, mobsend_time
+        seqno, dest_no, msg_contents, msg_type, sendreq_time, status_code, mobsend_time, bill_id
       FROM SMSQ_SEND 
       WHERE app_etc1 = 'test' AND app_etc2 = ?${userFilter}
       ${dateFilter}
@@ -568,6 +654,19 @@ router.get('/test-stats', async (req: Request, res: Response) => {
       LIMIT 100`,
       queryParams
     ) as any[];
+
+    // 발송자 정보 조회 (관리자용)
+    const senderIds = [...new Set(testResults.map((r: any) => r.bill_id).filter(Boolean))];
+    let senderMap: Record<string, string> = {};
+    if (senderIds.length > 0) {
+      const senderResult = await query(
+        `SELECT id, name FROM users WHERE id = ANY($1::uuid[])`,
+        [senderIds]
+      );
+      senderResult.rows.forEach((u: any) => {
+        senderMap[u.id] = u.name;
+      });
+    }
 
     // 통계 계산
     const stats = {
@@ -594,6 +693,7 @@ router.get('/test-stats', async (req: Request, res: Response) => {
       sentAt: r.sendreq_time,
       status: [6, 1000, 1800].includes(r.status_code) ? 'success' : r.status_code === 100 ? 'pending' : 'fail',
       testType: 'manager', // 담당자 테스트
+      senderName: senderMap[r.bill_id] || '-',
     }));
 
     res.json({
@@ -644,9 +744,9 @@ router.post('/sync-results', async (req: Request, res: Response) => {
       return res.status(403).json({ error: '권한이 필요합니다.' });
     }
 
-    // 동기화 대상: sending 상태인 campaign_runs
+    // 동기화 대상: sending 또는 scheduled 상태인 campaign_runs
     const runsResult = await query(
-      `SELECT id FROM campaign_runs WHERE status = 'sending'`
+      `SELECT id, campaign_id FROM campaign_runs WHERE status IN ('sending', 'scheduled')`
     );
 
     let syncCount = 0;
@@ -657,7 +757,7 @@ router.post('/sync-results', async (req: Request, res: Response) => {
           COUNT(CASE WHEN status_code IN (6, 1000, 1800) THEN 1 END) as success_count,
           COUNT(CASE WHEN status_code NOT IN (6, 1000, 1800, 100) THEN 1 END) as fail_count
          FROM SMSQ_SEND WHERE app_etc1 = ?`,
-        [run.id]
+        [run.campaign_id]
       );
 
       const rows = mysqlResult as any[];
@@ -683,8 +783,8 @@ router.post('/sync-results', async (req: Request, res: Response) => {
         if (runInfo.rows.length > 0) {
           await query(
             `UPDATE campaigns SET 
-              success_count = COALESCE(success_count, 0) + $1,
-              fail_count = COALESCE(fail_count, 0) + $2,
+              success_count = $1,
+              fail_count = $2,
               status = $3
              WHERE id = $4`,
             [successCount, failCount, newStatus, runInfo.rows[0].campaign_id]
@@ -754,15 +854,24 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       scheduled,      // 예약 여부
       scheduledAt,    // 예약 시간
       splitEnabled,   // 분할전송 여부
-      splitCount      // 분당 발송 건수
+      splitCount,     // 분당 발송 건수
+      useIndividualCallback  // 개별회신번호 사용 여부
     } = req.body;
 
     if (!recipients || recipients.length === 0) {
       return res.status(400).json({ success: false, error: '수신자가 없습니다' });
     }
 
-    if (!callback) {
+    if (!callback && !useIndividualCallback) {
       return res.status(400).json({ success: false, error: '회신번호를 선택해주세요' });
+    }
+
+    // 개별회신번호 사용 시 모든 수신자에게 callback 있는지 확인
+    if (useIndividualCallback) {
+      const missingCallback = recipients.filter((r: any) => !r.callback);
+      if (missingCallback.length > 0) {
+        return res.status(400).json({ success: false, error: `개별회신번호가 없는 수신자가 ${missingCallback.length}명 있습니다` });
+      }
     }
 
     // 1. 수신거부 필터링
@@ -838,15 +947,30 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       const batchIdx = Math.floor(i / bulkBatchSize);
       if (!bulkData[batchIdx]) bulkData[batchIdx] = [];
       
+      // 개별회신번호면 recipient.callback 사용, 아니면 공통 callback 사용
+      const recipientCallback = useIndividualCallback 
+        ? (recipient.callback || '').replace(/-/g, '')
+        : callback.replace(/-/g, '');
+
       bulkData[batchIdx].push([
         recipient.phone.replace(/-/g, ''),
-        callback.replace(/-/g, ''),
+        recipientCallback,
         finalMessage,
         msgType === 'SMS' ? 'S' : msgType === 'LMS' ? 'L' : 'M',
         subject || '',
         sendTime,
         campaignId
-      ]);
+      ]);if (!callback && !useIndividualCallback) {
+        return res.status(400).json({ success: false, error: '회신번호를 선택해주세요' });
+      }
+  
+      // 개별회신번호 사용 시 모든 수신자에게 callback 있는지 확인
+      if (useIndividualCallback) {
+        const missingCallback = recipients.filter((r: any) => !r.callback);
+        if (missingCallback.length > 0) {
+          return res.status(400).json({ success: false, error: `개별회신번호가 없는 수신자가 ${missingCallback.length}명 있습니다` });
+        }
+      }
     }
 
     // Bulk INSERT 실행 (1000건씩)
@@ -947,7 +1071,34 @@ router.get('/:id/recipients', async (req: Request, res: Response) => {
 
     const camp = campaign.rows[0];
 
-    // 예약/draft 상태면 PostgreSQL customers에서 조회
+    // 예약 상태면 먼저 MySQL SMSQ_SEND에서 조회 시도
+    if (camp.status === 'scheduled') {
+      const mysqlRecipients = await mysqlQuery(
+        `SELECT seqno as idx, dest_no as phone, call_back as callback, msg_contents as message 
+         FROM SMSQ_SEND 
+         WHERE app_etc1 = ? AND status_code = 100
+         ORDER BY seqno
+         LIMIT 1000`,
+        [campaignId]
+      ) as any[];
+
+      // MySQL에 데이터 있으면 그걸 반환
+      if (mysqlRecipients && mysqlRecipients.length > 0) {
+        const totalResult = await mysqlQuery(
+          `SELECT COUNT(*) as total FROM SMSQ_SEND WHERE app_etc1 = ? AND status_code = 100`,
+          [campaignId]
+        ) as any[];
+
+        return res.json({ 
+          success: true, 
+          campaign: camp,
+          recipients: mysqlRecipients,
+          total: totalResult[0]?.total || 0
+        });
+      }
+    }
+
+    // draft 상태이거나 MySQL에 데이터 없으면 PostgreSQL customers에서 조회
     if (camp.status === 'scheduled' || camp.status === 'draft') {
       const targetFilter = camp.target_filter || {};
       const filterQuery = buildFilterQuery(targetFilter, companyId);
@@ -997,7 +1148,7 @@ router.get('/:id/recipients', async (req: Request, res: Response) => {
       // 수신자 목록 (상위 10개)
       const limitIdx = 1 + filterQuery.params.length + storeParams.length + searchParams.length + excludeParams.length + 1;
       const recipients = await query(
-        `SELECT phone, name 
+        `SELECT phone, name, phone as idx 
          FROM customers 
          WHERE company_id = $1 AND is_active = true AND sms_opt_in = true 
          ${filterQuery.where}${storeFilter}${searchFilter}${excludeFilter}
@@ -1017,7 +1168,7 @@ router.get('/:id/recipients', async (req: Request, res: Response) => {
 
     // 발송 완료/진행중이면 MySQL에서 조회
     const recipients = await mysqlQuery(
-      `SELECT seqno as idx, dest_no as phone, msg_contents as message, sendreq_time, status_code 
+      `SELECT seqno as idx, dest_no as phone, call_back as callback, msg_contents as message, sendreq_time, status_code 
        FROM SMSQ_SEND 
        WHERE app_etc1 = ? AND status_code = 100
        ORDER BY seqno
@@ -1067,7 +1218,7 @@ router.delete('/:id/recipients/:idx', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: '발송 15분 전에는 수정할 수 없습니다', tooLate: true });
     }
 
-    // MySQL에 데이터 있으면 MySQL에서 삭제
+        // MySQL에 데이터 있으면 MySQL에서 삭제
     const mysqlCount = await mysqlQuery(
       `SELECT COUNT(*) as cnt FROM SMSQ_SEND WHERE app_etc1 = ? AND status_code = 100`,
       [campaignId]

@@ -10,8 +10,12 @@ export default function Settings() {
   const [saving, setSaving] = useState(false);
   const [newPhone, setNewPhone] = useState('');
   const [newName, setNewName] = useState('');
-  const [managerContacts, setManagerContacts] = useState<{phone: string, name: string}[]>([]);
-  const [callbackNumbers, setCallbackNumbers] = useState<{id: string, phone: string, label: string, is_default: boolean}[]>([]);
+  const [managerContacts, setManagerContacts] = useState<{id?: string, phone: string, name: string, type?: string}[]>([]);
+  const [testContactMode, setTestContactMode] = useState<'shared' | 'personal' | 'both'>('shared');
+  const [activeTab, setActiveTab] = useState<'shared' | 'personal'>('shared');
+  const [callbackNumbers, setCallbackNumbers] = useState<{id: string, phone: string, label: string, is_default: boolean, store_code?: string, store_name?: string}[]>([]);
+  const [callbackPage, setCallbackPage] = useState(0);
+  const callbackPageSize = 5;
   const [callbackAuthPhone, setCallbackAuthPhone] = useState('');
   const [callbackAuthVerified, setCallbackAuthVerified] = useState(false);
   const [settings, setSettings] = useState({
@@ -47,11 +51,14 @@ export default function Settings() {
       if (data) {
         const { manager_phones, manager_contacts, manager_phone, callback_auth_phone, callback_auth_verified, ...rest } = data;
         setSettings((prev) => ({ ...prev, ...rest }));
-        // 새 형식 우선, 없으면 기존 형식 변환
-        if (manager_contacts && manager_contacts.length > 0) {
-          setManagerContacts(manager_contacts);
-        } else if (manager_phones && manager_phones.length > 0) {
-          setManagerContacts(manager_phones.map((p: string) => ({ phone: p, name: '' })));
+        // 새 API로 담당자 목록 불러오기
+        const tcRes = await fetch('/api/test-contacts', {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const tcData = await tcRes.json();
+        if (tcData.success) {
+          setManagerContacts(tcData.contacts || []);
+          setTestContactMode(tcData.mode || 'shared');
         }
         setCallbackAuthPhone(callback_auth_phone || '');
         setCallbackAuthVerified(callback_auth_verified || false);
@@ -109,43 +116,45 @@ export default function Settings() {
       alert('올바른 전화번호를 입력해주세요');
       return;
     }
-    if (managerContacts.some(c => c.phone === cleaned)) {
-      alert('이미 등록된 번호입니다');
-      return;
-    }
 
-    const updated = [...managerContacts, { phone: cleaned, name: newName.trim() }];
-    setManagerContacts(updated);
-    setNewPhone('');
-    setNewName('');
-
-    // 즉시 저장
     const token = localStorage.getItem('token');
-    await fetch('/api/companies/settings', {
-      method: 'PUT',
+    const res = await fetch('/api/test-contacts', {
+      method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({ ...settings, manager_contacts: updated }),
+      body: JSON.stringify({ 
+        name: newName.trim(), 
+        phone: cleaned,
+        isShared: testContactMode === 'both' ? activeTab === 'shared' : undefined
+      }),
     });
+    const data = await res.json();
+    
+    if (data.success) {
+      setManagerContacts([...managerContacts, data.contact]);
+      setNewPhone('');
+      setNewName('');
+    } else {
+      alert(data.error || '추가 실패');
+    }
   };
 
   // 담당자 삭제
-  const handleRemovePhone = async (phone: string) => {
-    const updated = managerContacts.filter((c) => c.phone !== phone);
-    setManagerContacts(updated);
-
-    // 즉시 저장
+  const handleRemovePhone = async (id: string) => {
     const token = localStorage.getItem('token');
-    await fetch('/api/companies/settings', {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ ...settings, manager_contacts: updated }),
+    const res = await fetch(`/api/test-contacts/${id}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
     });
+    const data = await res.json();
+    
+    if (data.success) {
+      setManagerContacts(managerContacts.filter((c) => c.id !== id));
+    } else {
+      alert(data.error || '삭제 실패');
+    }
   };
 
   if (loading) return <div className="p-8 text-center">로딩 중...</div>;
@@ -213,20 +222,60 @@ export default function Settings() {
             캠페인 발송 전 등록된 담당자 전원에게 테스트 문자를 보내 확인할 수 있습니다.
           </p>
 
+          {/* both 모드일 때 탭 표시 */}
+          {testContactMode === 'both' && (
+            <div className="flex gap-2 mb-4">
+              <button
+                onClick={() => setActiveTab('shared')}
+                className={`px-4 py-2 rounded-lg text-sm font-medium ${
+                  activeTab === 'shared' 
+                    ? 'bg-blue-600 text-white' 
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}
+              >
+                🏢 회사 공용
+              </button>
+              <button
+                onClick={() => setActiveTab('personal')}
+                className={`px-4 py-2 rounded-lg text-sm font-medium ${
+                  activeTab === 'personal' 
+                    ? 'bg-purple-600 text-white' 
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}
+              >
+                👤 내 번호
+              </button>
+            </div>
+          )}
+
           {/* 등록된 담당자 목록 */}
-          {managerContacts.length > 0 && (
+          {managerContacts.filter(c => 
+            testContactMode === 'both' 
+              ? (activeTab === 'shared' ? c.type === 'shared' : c.type === 'personal')
+              : true
+          ).length > 0 ? (
             <div className="space-y-2 mb-4">
-              {managerContacts.map((contact, idx) => (
+              {managerContacts
+                .filter(c => 
+                  testContactMode === 'both' 
+                    ? (activeTab === 'shared' ? c.type === 'shared' : c.type === 'personal')
+                    : true
+                )
+                .map((contact, idx) => (
                 <div
-                  key={contact.phone}
-                  className="flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-lg px-4 py-2.5"
+                  key={contact.id || contact.phone}
+                  className={`flex items-center gap-3 rounded-lg px-4 py-2.5 ${
+                    contact.type === 'shared' 
+                      ? 'bg-blue-50 border border-blue-200' 
+                      : 'bg-purple-50 border border-purple-200'
+                  }`}
                 >
-                  <span className="text-lg">👤</span>
+                  <span className="text-lg">{contact.type === 'shared' ? '🏢' : '👤'}</span>
                   <span className="flex-1 font-medium text-gray-800">
                     {contact.name || `담당자 ${idx + 1}`}: {formatPhone(contact.phone)}
                   </span>
                   <button
-                    onClick={() => handleRemovePhone(contact.phone)}
+                    onClick={() => contact.id && handleRemovePhone(contact.id)}
                     className="px-2.5 py-1 text-sm bg-white border border-red-300 text-red-600 rounded-lg hover:bg-red-50"
                   >
                     삭제
@@ -234,8 +283,16 @@ export default function Settings() {
                 </div>
               ))}
               <p className="text-xs text-gray-400 mt-1">
-                총 {managerContacts.length}명 등록됨 · 사전수신 시 전원에게 발송
+                총 {managerContacts.filter(c => 
+                  testContactMode === 'both' 
+                    ? (activeTab === 'shared' ? c.type === 'shared' : c.type === 'personal')
+                    : true
+                ).length}명 등록됨 · 사전수신 시 전원에게 발송
               </p>
+            </div>
+          ) : (
+            <div className="text-center py-4 text-gray-400 mb-4">
+              등록된 담당자가 없습니다
             </div>
           )}
 
@@ -273,44 +330,6 @@ export default function Settings() {
             </button>
           </div>
           </section>
-
-{/* 회신번호 관리 */}
-<section className="bg-white rounded-lg shadow p-6 min-h-[280px]">
-  <h2 className="text-lg font-semibold mb-4">📞 회신번호 관리</h2>
-  
-  {/* 등록된 회신번호 목록 */}
-  {callbackNumbers.length > 0 ? (
-    <div className="space-y-2 mb-4">
-      {callbackNumbers.map((cb) => (
-        <div
-          key={cb.id}
-          className="flex items-center gap-3 bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3"
-        >
-          <span className="text-lg">📱</span>
-          <span className="flex-1 font-medium text-gray-800">
-            {cb.phone}
-            {cb.label && <span className="ml-2 text-sm text-gray-500">({cb.label})</span>}
-          </span>
-          {cb.is_default && (
-            <span className="px-2 py-0.5 bg-emerald-500 text-white text-xs rounded-full">기본</span>
-          )}
-        </div>
-      ))}
-    </div>
-  ) : (
-    <div className="text-center py-8 text-gray-400">
-      <p>등록된 회신번호가 없습니다</p>
-      <p className="text-sm mt-1">관리자에게 문의해주세요</p>
-    </div>
-  )}
-  
-  {/* 본인인증 안내 */}
-  <div className="mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-    <p className="text-sm text-yellow-800">
-      🔒 회신번호 직접 등록은 <strong>본인인증 완료 후</strong> 가능합니다.
-    </p>
-  </div>
-</section>
 
 {/* 회신번호 설정 담당자 */}
 <section className="bg-white rounded-lg shadow p-6 min-h-[280px]">
@@ -352,6 +371,67 @@ export default function Settings() {
       ※ 담당자 번호를 먼저 저장한 후, 본인인증을 진행해주세요
     </p>
   )}
+</section>
+
+{/* 회신번호 관리 */}
+<section className="bg-white rounded-lg shadow p-6 min-h-[280px]">
+  <h2 className="text-lg font-semibold mb-4">📞 회신번호 관리</h2>
+  
+  {/* 등록된 회신번호 목록 */}
+  {callbackNumbers.length > 0 ? (
+    <div className="space-y-2 mb-4">
+      {callbackNumbers.slice(callbackPage * callbackPageSize, (callbackPage + 1) * callbackPageSize).map((cb) => (
+        <div
+          key={cb.id}
+          className="flex items-center gap-3 bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3"
+        >
+          <span className="text-lg">📱</span>
+          <span className="flex-1 font-medium text-gray-800">
+            {cb.phone}
+            {cb.store_name && <span className="ml-2 text-sm text-gray-500">({cb.store_name})</span>}
+            {!cb.store_name && cb.label && <span className="ml-2 text-sm text-gray-500">({cb.label})</span>}
+          </span>
+          {cb.is_default && (
+            <span className="px-2 py-0.5 bg-emerald-500 text-white text-xs rounded-full">기본</span>
+          )}
+        </div>
+      ))}
+      {/* 페이징 */}
+      {callbackNumbers.length > callbackPageSize && (
+        <div className="flex items-center justify-center gap-2 pt-3">
+          <button
+            onClick={() => setCallbackPage(p => Math.max(0, p - 1))}
+            disabled={callbackPage === 0}
+            className="px-3 py-1 text-sm border rounded-lg disabled:opacity-30 hover:bg-gray-50"
+          >
+            ◀ 이전
+          </button>
+          <span className="text-sm text-gray-600">
+            {callbackPage + 1} / {Math.ceil(callbackNumbers.length / callbackPageSize)}
+          </span>
+          <button
+            onClick={() => setCallbackPage(p => Math.min(Math.ceil(callbackNumbers.length / callbackPageSize) - 1, p + 1))}
+            disabled={callbackPage >= Math.ceil(callbackNumbers.length / callbackPageSize) - 1}
+            className="px-3 py-1 text-sm border rounded-lg disabled:opacity-30 hover:bg-gray-50"
+          >
+            다음 ▶
+          </button>
+        </div>
+      )}
+    </div>
+  ) : (
+    <div className="text-center py-8 text-gray-400">
+      <p>등록된 회신번호가 없습니다</p>
+      <p className="text-sm mt-1">관리자에게 문의해주세요</p>
+    </div>
+  )}
+  
+  {/* 본인인증 안내 */}
+  <div className="mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+    <p className="text-sm text-yellow-800">
+      🔒 회신번호 직접 등록은 <strong>본인인증 완료 후</strong> 가능합니다.
+    </p>
+  </div>
 </section>
 
 {/* 요금 설정 - 관리자만 */}

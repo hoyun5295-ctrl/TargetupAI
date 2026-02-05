@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import Redis from 'ioredis';
+import { normalizePhone, normalizeGender, normalizeGrade, normalizeRegion, normalizeSmsOptIn } from '../utils/normalize';
 
 const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
 import multer from 'multer';
@@ -250,6 +251,36 @@ router.post('/save', authenticate, async (req: Request, res: Response) => {
       connectionString: process.env.DATABASE_URL
     });
 
+    // 플랜 초과 체크
+    const limitCheck = await pool.query(`
+      SELECT 
+        c.id,
+        p.max_customers,
+        p.plan_name,
+        (SELECT COUNT(*) FROM customers WHERE company_id = c.id AND is_active = true) as current_count
+      FROM companies c
+      LEFT JOIN plans p ON c.plan_id = p.id
+      WHERE c.id = $1
+    `, [companyId]);
+
+    if (limitCheck.rows.length > 0) {
+      const { max_customers, current_count, plan_name } = limitCheck.rows[0];
+      const newTotal = Number(current_count) + rows.length;
+      if (max_customers && newTotal > max_customers) {
+        const available = Number(max_customers) - Number(current_count);
+        await pool.end();
+        return res.status(403).json({ 
+          error: '최대 고객 관리 DB를 초과합니다. 플랜을 업그레이드하세요.',
+          code: 'PLAN_LIMIT_EXCEEDED',
+          planName: plan_name,
+          maxCustomers: max_customers,
+          currentCount: Number(current_count),
+          requestedCount: rows.length,
+          availableCount: available > 0 ? available : 0
+        });
+      }
+    }
+
     let insertCount = 0;
     let duplicateCount = 0;
     let errorCount = 0;
@@ -292,19 +323,24 @@ await redis.set(`upload:${fileId}:progress`, JSON.stringify({
           record.birth_year = parseInt(String(record.birth_year));
         }
 
-        // phone 필수 체크
+        // phone 정규화 + 필수 체크
+        record.phone = normalizePhone(record.phone);
         if (!record.phone) {
           errorCount++;
           continue;
         }
 
-        record.phone = String(record.phone).replace(/-/g, '');
+        // 데이터 정규화
+        record.gender = normalizeGender(record.gender);
+        record.grade = normalizeGrade(record.grade);
+        record.region = normalizeRegion(record.region);
+        const smsOptIn = normalizeSmsOptIn(record.sms_opt_in);
 
         values.push(
           companyId, record.phone, record.name || null, record.gender || null,
           record.birth_date || null, record.birth_year || null, record.birth_month_day || null,
           record.grade || null, record.region || null,
-          record.sms_opt_in === 'Y' || record.sms_opt_in === true || record.sms_opt_in === 1 || record.sms_opt_in === undefined ? true : false,
+          smsOptIn !== null ? smsOptIn : true,
           record.email || null, record.total_purchase || null, record.last_purchase_date || null, record.purchase_count || null
         );
 

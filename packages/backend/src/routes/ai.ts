@@ -1,7 +1,8 @@
 import { Router, Request, Response } from 'express';
 import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
-import { generateMessages, recommendTarget, checkAPIStatus } from '../services/ai';
+import { generateMessages, recommendTarget, checkAPIStatus, extractVarCatalog } from '../services/ai';
+import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getGenderVariants, getGradeVariants, getRegionVariants } from '../utils/normalize';
 
 const router = Router();
 
@@ -21,7 +22,7 @@ router.post('/generate-message', async (req: Request, res: Response) => {
       return res.status(403).json({ error: '회사 권한이 필요합니다' });
     }
 
-    const { prompt, filters, productName, discountRate, eventName, brandName, channel, isAd } = req.body;
+    const { prompt, filters, productName, discountRate, eventName, brandName, channel, isAd, usePersonalization, personalizationVars } = req.body;
 
     if (!prompt) {
       return res.status(400).json({ error: '프롬프트를 입력해주세요' });
@@ -29,10 +30,11 @@ router.post('/generate-message', async (req: Request, res: Response) => {
 
     // 회사 정보 조회 (브랜드 정보 포함)
     const companyResult = await query(
-      'SELECT reject_number, brand_name, brand_slogan, brand_description, brand_tone FROM companies WHERE id = $1',
+      'SELECT reject_number, brand_name, brand_slogan, brand_description, brand_tone, customer_schema FROM companies WHERE id = $1',
       [companyId]
     );
     const companyInfo = companyResult.rows[0] || {};
+    const { fieldMappings: varCatalog, availableVars } = extractVarCatalog(companyInfo.customer_schema);
 
     // 타겟 정보 조회
     let targetQuery = 'SELECT COUNT(*) as total FROM customers WHERE company_id = $1 AND is_active = true AND sms_opt_in = true';
@@ -63,6 +65,10 @@ router.post('/generate-message', async (req: Request, res: Response) => {
       channel,
       isAd,
       rejectNumber: companyInfo.reject_number,
+      usePersonalization,
+      personalizationVars,
+      availableVarsCatalog: varCatalog,
+      availableVars: availableVars,
     });
 
     return res.json(result);
@@ -117,13 +123,13 @@ router.post('/recommend-target', async (req: Request, res: Response) => {
       `SELECT
         COUNT(*) as total,
         COUNT(*) FILTER (WHERE sms_opt_in = true) as sms_opt_in_count,
-        COUNT(*) FILTER (WHERE gender = '남성') as male_count,
-        COUNT(*) FILTER (WHERE gender = '여성') as female_count,
+        COUNT(*) FILTER (WHERE gender = ANY($${baseParams.length + 1}::text[])) as male_count,
+        COUNT(*) FILTER (WHERE gender = ANY($${baseParams.length + 2}::text[])) as female_count,
         AVG((custom_fields->>'purchase_count')::numeric) as avg_purchase_count,
         AVG((custom_fields->>'total_spent')::numeric) as avg_total_spent
        FROM customers
        WHERE company_id = $1 AND is_active = true${storeFilter}`,
-      baseParams
+      [...baseParams, getGenderVariants('M'), getGenderVariants('F')]
     );
 
     const result = await recommendTarget(companyId, objective, statsResult.rows[0], companyInfo);
@@ -141,14 +147,16 @@ const getValue = (field: any) => {
   return field;
 };
 
-let gender = getValue(result.filters?.gender);
+const gender = getValue(result.filters?.gender);
 if (gender) {
-  // 다양한 성별 표현 → 남성/여성 변환
-  const genderLower = String(gender).toLowerCase();
-  if (['m', 'male', '남', '남자', '남성'].includes(genderLower)) gender = '남성';
-  if (['f', 'female', '여', '여자', '여성'].includes(genderLower)) gender = '여성';
-  filterWhere += ` AND gender = $${paramIndex++}`;
-  filterParams.push(gender);
+  // normalize.ts 변형값 매칭 (DB에 어떤 형식으로 저장되어 있든 매칭)
+  const standardGender = String(gender).toLowerCase();
+  const genderKey = ['m', 'male', '남', '남자', '남성'].includes(standardGender) ? 'M' 
+    : ['f', 'female', '여', '여자', '여성'].includes(standardGender) ? 'F' : gender;
+  const genderResult = buildGenderFilter(genderKey, paramIndex);
+  filterWhere += genderResult.sql;
+  filterParams.push(...genderResult.params);
+  paramIndex = genderResult.nextIndex;
 }
 
 const age = getValue(result.filters?.age);
@@ -160,10 +168,81 @@ if (age && Array.isArray(age) && age.length === 2) {
   filterParams.push(age[1]);
 }
 
-const grade = getValue(result.filters?.grade);
+const gradeFilter = result.filters?.grade;
+const grade = getValue(gradeFilter);
 if (grade) {
-  filterWhere += ` AND grade = $${paramIndex++}`;
-  filterParams.push(grade);
+  const gradeOp = gradeFilter?.operator || 'eq';
+  if (gradeOp === 'in' && Array.isArray(grade)) {
+    // 배열의 모든 등급에 대해 변형값 매칭
+    const gradeResult = buildGradeFilter(grade, paramIndex);
+    filterWhere += gradeResult.sql;
+    filterParams.push(...gradeResult.params);
+    paramIndex = gradeResult.nextIndex;
+  } else {
+    const gradeResult = buildGradeFilter(String(grade), paramIndex);
+    filterWhere += gradeResult.sql;
+    filterParams.push(...gradeResult.params);
+    paramIndex = gradeResult.nextIndex;
+  }
+}
+
+const regionFilter = result.filters?.region;
+const region = getValue(regionFilter);
+if (region) {
+  const regionOp = regionFilter?.operator || 'eq';
+  if (regionOp === 'in' && Array.isArray(region)) {
+    // 배열의 모든 지역에 대해 변형값 매칭
+    const allVariants = (region as string[]).flatMap(r => getRegionVariants(r));
+    filterWhere += ` AND region = ANY($${paramIndex++}::text[])`;
+    filterParams.push(allVariants);
+  } else {
+    const regionResult = buildRegionFilter(String(region), paramIndex);
+    filterWhere += regionResult.sql;
+    filterParams.push(...regionResult.params);
+    paramIndex = regionResult.nextIndex;
+  }
+}
+
+const pointsFilter = result.filters?.points;
+const points = getValue(pointsFilter);
+if (points !== null && points !== undefined) {
+  const pointsOp = pointsFilter?.operator || 'gte';
+  if (pointsOp === 'gte') {
+    filterWhere += ` AND points >= $${paramIndex++}`;
+    filterParams.push(points);
+  } else if (pointsOp === 'lte') {
+    filterWhere += ` AND points <= $${paramIndex++}`;
+    filterParams.push(points);
+  } else if (pointsOp === 'between' && Array.isArray(points)) {
+    filterWhere += ` AND points >= $${paramIndex++} AND points <= $${paramIndex++}`;
+    filterParams.push(points[0], points[1]);
+  }
+}
+
+const purchaseFilter = result.filters?.total_purchase_amount;
+const purchaseAmt = getValue(purchaseFilter);
+if (purchaseAmt !== null && purchaseAmt !== undefined) {
+  const purchaseOp = purchaseFilter?.operator || 'gte';
+  if (purchaseOp === 'gte') {
+    filterWhere += ` AND total_purchase_amount >= $${paramIndex++}`;
+    filterParams.push(purchaseAmt);
+  } else if (purchaseOp === 'lte') {
+    filterWhere += ` AND total_purchase_amount <= $${paramIndex++}`;
+    filterParams.push(purchaseAmt);
+  }
+}
+
+const recentDateFilter = result.filters?.recent_purchase_date;
+const recentDate = getValue(recentDateFilter);
+if (recentDate) {
+  const dateOp = recentDateFilter?.operator || 'lte';
+  if (dateOp === 'lte') {
+    filterWhere += ` AND recent_purchase_date <= $${paramIndex++}`;
+    filterParams.push(recentDate);
+  } else if (dateOp === 'gte') {
+    filterWhere += ` AND recent_purchase_date >= $${paramIndex++}`;
+    filterParams.push(recentDate);
+  }
 }
 
 // custom_fields 처리

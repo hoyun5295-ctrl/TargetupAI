@@ -2,6 +2,7 @@
 import { Router, Request, Response } from 'express';
 import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
+import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getGenderVariants } from '../utils/normalize';
 
 const router = Router();
 
@@ -30,8 +31,20 @@ function buildDynamicFilter(filters: any, startIndex: number) {
 
     if (basicFields.includes(field)) {
       if (operator === 'eq') {
-        whereClause += ` AND ${field} = $${paramIndex++}`;
-        params.push(value);
+        if (field === 'gender') {
+          const gf = buildGenderFilter(String(value), paramIndex);
+          whereClause += gf.sql;
+          params.push(...gf.params);
+          paramIndex = gf.nextIndex;
+        } else if (field === 'grade') {
+          const grf = buildGradeFilter(String(value), paramIndex);
+          whereClause += grf.sql;
+          params.push(...grf.params);
+          paramIndex = grf.nextIndex;
+        } else {
+          whereClause += ` AND ${field} = $${paramIndex++}`;
+          params.push(value);
+        }
       } else if (operator === 'in' && Array.isArray(value)) {
         const placeholders = value.map(() => `$${paramIndex++}`).join(', ');
         whereClause += ` AND ${field} IN (${placeholders})`;
@@ -145,10 +158,12 @@ router.get('/', async (req: Request, res: Response) => {
       paramIndex = filterResult.nextIndex;
     }
     // 개별 파라미터 필터 (기존 방식 호환)
-if (gender) {
-  whereClause += ` AND gender = $${paramIndex++}`;
-  params.push(gender);
-}
+    if (gender) {
+      const gf = buildGenderFilter(String(gender), paramIndex);
+      whereClause += gf.sql;
+      params.push(...gf.params);
+      paramIndex = gf.nextIndex;
+    }
 if (minAge) {
   whereClause += ` AND EXTRACT(YEAR FROM AGE(birth_date)) >= $${paramIndex++}`;
   params.push(Number(minAge));
@@ -158,8 +173,10 @@ if (maxAge) {
   params.push(Number(maxAge));
 }
 if (grade) {
-  whereClause += ` AND grade = $${paramIndex++}`;
-  params.push(grade);
+  const grf = buildGradeFilter(String(grade), paramIndex);
+  whereClause += grf.sql;
+  params.push(...grf.params);
+  paramIndex = grf.nextIndex;
 }
 if (smsOptIn === 'true') {
   whereClause += ` AND sms_opt_in = true`;
@@ -182,7 +199,7 @@ if (smsOptIn === 'true') {
     // 목록 조회
     params.push(Number(limit), offset);
     const result = await query(
-      `SELECT id, name, phone, gender, birth_date, email, grade, points,
+      `SELECT id, name, phone, gender, birth_date, age, email, grade, region, points,
               sms_opt_in, recent_purchase_date, total_purchase_amount, custom_fields
        FROM customers_unified
        ${whereClause}
@@ -493,8 +510,8 @@ router.get('/stats', async (req: Request, res: Response) => {
       `SELECT
         COUNT(*) as total,
         COUNT(*) FILTER (WHERE sms_opt_in = true) as sms_opt_in_count,
-        COUNT(*) FILTER (WHERE gender = '남성') as male_count,
-        COUNT(*) FILTER (WHERE gender = '여성') as female_count,
+        COUNT(*) FILTER (WHERE gender = ANY($${params.length + 1}::text[])) as male_count,
+        COUNT(*) FILTER (WHERE gender = ANY($${params.length + 2}::text[])) as female_count,
         COUNT(*) FILTER (WHERE grade = 'VIP') as vip_count,
         COUNT(*) FILTER (WHERE birth_year IS NOT NULL AND (2026 - birth_year) < 20) as age_under20,
         COUNT(*) FILTER (WHERE birth_year IS NOT NULL AND (2026 - birth_year) BETWEEN 20 AND 29) as age_20s,
@@ -504,7 +521,7 @@ router.get('/stats', async (req: Request, res: Response) => {
         COUNT(*) FILTER (WHERE birth_year IS NOT NULL AND (2026 - birth_year) >= 60) as age_60plus
        FROM customers_unified
        WHERE company_id = $1 AND is_active = true${storeFilter}`,
-      params
+      [...params, getGenderVariants('M'), getGenderVariants('F')]
     );
 
     // 회사 요금 정보 조회
@@ -578,6 +595,302 @@ router.get('/stats', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('고객 통계 조회 오류:', error);
     return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// ====== 직접 타겟 설정 API ======
+
+// GET /api/customers/schema - 회사의 customer_schema 조회
+router.get('/schema', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) {
+      return res.status(403).json({ error: '회사 권한이 필요합니다' });
+    }
+
+    const result = await query(
+      'SELECT customer_schema FROM companies WHERE id = $1',
+      [companyId]
+    );
+
+    const schema = result.rows[0]?.customer_schema || {};
+    
+    // 스키마에서 필드 목록 추출
+    const fields = Object.keys(schema).map(key => ({
+      name: key,
+      label: schema[key]?.label || key,
+      type: schema[key]?.type || 'text'
+    }));
+
+    // 기본 필드 추가 (customers_unified 테이블 기본 컬럼)
+    const defaultFields = [
+      { name: 'phone', label: '전화번호', type: 'text' },
+      { name: 'name', label: '이름', type: 'text' },
+      { name: 'gender', label: '성별', type: 'select' },
+      { name: 'birth_date', label: '생년월일', type: 'date' },
+      { name: 'grade', label: '등급', type: 'select' },
+      { name: 'region', label: '지역', type: 'text' },
+      { name: 'total_purchase_amount', label: '총구매금액', type: 'number' },
+      { name: 'recent_purchase_date', label: '최근구매일', type: 'date' },
+      { name: 'sms_opt_in', label: '수신동의', type: 'boolean' }
+    ];
+
+    res.json({ 
+      fields: [...defaultFields, ...fields],
+      phoneFields: ['phone', 'mobile', 'phone_number', 'tel', 'cell_phone'].filter(f => 
+        defaultFields.some(df => df.name === f) || fields.some(cf => cf.name === f)
+      )
+    });
+  } catch (error) {
+    console.error('스키마 조회 에러:', error);
+    res.status(500).json({ error: '스키마 조회 실패' });
+  }
+});
+
+// POST /api/customers/filter-count - 필터 조건으로 대상 인원 카운트
+router.post('/filter-count', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
+    const userType = req.user?.userType;
+    if (!companyId) {
+      return res.status(403).json({ error: '회사 권한이 필요합니다' });
+    }
+
+    const { gender, ageRange, grade, region, minPurchase, recentDays, smsOptIn } = req.body;
+
+    let whereClause = 'WHERE company_id = $1 AND is_active = true';
+    const params: any[] = [companyId];
+    let paramIndex = 2;
+
+    // 일반 사용자는 본인 store_codes에 해당하는 고객만
+    if (userType === 'company_user' && userId) {
+      const userResult = await query('SELECT store_codes FROM users WHERE id = $1', [userId]);
+      const storeCodes = userResult.rows[0]?.store_codes;
+      if (storeCodes && storeCodes.length > 0) {
+        whereClause += ` AND store_code = ANY($${paramIndex++}::text[])`;
+        params.push(storeCodes);
+      }
+    }
+
+    // 수신동의 필터
+    if (smsOptIn) {
+      whereClause += ' AND sms_opt_in = true';
+    }
+
+    // 성별 필터
+    if (gender) {
+      const gf = buildGenderFilter(String(gender), paramIndex);
+      whereClause += gf.sql;
+      params.push(...gf.params);
+      paramIndex = gf.nextIndex;
+    }
+
+    // 나이대 필터
+    if (ageRange) {
+      const ageVal = parseInt(ageRange);
+      if (ageVal === 60) {
+        whereClause += ` AND age >= 60`;
+      } else {
+        whereClause += ` AND age >= $${paramIndex++} AND age < $${paramIndex++}`;
+        params.push(ageVal, ageVal + 10);
+      }
+    }
+
+    // 등급 필터
+    if (grade) {
+      const grf = buildGradeFilter(String(grade), paramIndex);
+      whereClause += grf.sql;
+      params.push(...grf.params);
+      paramIndex = grf.nextIndex;
+    }
+
+    // 지역 필터 (normalize.ts 변형값 매칭)
+    if (region) {
+      const regionResult = buildRegionFilter(String(region), paramIndex);
+      whereClause += regionResult.sql;
+      params.push(...regionResult.params);
+      paramIndex = regionResult.nextIndex;
+    }
+
+    // 구매금액 필터
+    if (minPurchase) {
+      whereClause += ` AND total_purchase_amount >= $${paramIndex++}`;
+      params.push(parseInt(minPurchase));
+    }
+
+    // 최근 구매일 필터
+    if (recentDays) {
+      whereClause += ` AND recent_purchase_date >= NOW() - INTERVAL '${parseInt(recentDays)} days'`;
+    }
+
+    const result = await query(
+      `SELECT COUNT(*) FROM customers_unified ${whereClause}`,
+      params
+    );
+
+    const count = parseInt(result.rows[0].count);
+    res.json({ count });
+  } catch (error) {
+    console.error('필터 카운트 에러:', error);
+    res.status(500).json({ error: '카운트 조회 실패' });
+  }
+});
+
+// POST /api/customers/extract - 타겟 추출 (데이터 반환)
+router.post('/extract', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
+    const userType = req.user?.userType;
+    if (!companyId) {
+      return res.status(403).json({ error: '회사 권한이 필요합니다' });
+    }
+
+    const { gender, ageRange, grade, region, minPurchase, recentDays, smsOptIn, phoneField, limit = 10000 } = req.body;
+
+    let whereClause = 'WHERE company_id = $1 AND is_active = true';
+    const params: any[] = [companyId];
+    let paramIndex = 2;
+
+    // 일반 사용자는 본인 store_codes에 해당하는 고객만
+    if (userType === 'company_user' && userId) {
+      const userResult = await query('SELECT store_codes FROM users WHERE id = $1', [userId]);
+      const storeCodes = userResult.rows[0]?.store_codes;
+      if (storeCodes && storeCodes.length > 0) {
+        whereClause += ` AND store_code = ANY($${paramIndex++}::text[])`;
+        params.push(storeCodes);
+      }
+    }
+
+    // 수신동의 필터
+    if (smsOptIn) {
+      whereClause += ' AND sms_opt_in = true';
+    }
+
+    // 성별 필터
+    if (gender) {
+      const gf = buildGenderFilter(String(gender), paramIndex);
+      whereClause += gf.sql;
+      params.push(...gf.params);
+      paramIndex = gf.nextIndex;
+    }
+
+    // 나이대 필터
+    if (ageRange) {
+      const ageVal = parseInt(ageRange);
+      if (ageVal === 60) {
+        whereClause += ` AND age >= 60`;
+      } else {
+        whereClause += ` AND age >= $${paramIndex++} AND age < $${paramIndex++}`;
+        params.push(ageVal, ageVal + 10);
+      }
+    }
+
+    // 등급 필터
+    if (grade) {
+      const grf = buildGradeFilter(String(grade), paramIndex);
+      whereClause += grf.sql;
+      params.push(...grf.params);
+      paramIndex = grf.nextIndex;
+    }
+
+    // 지역 필터 (normalize.ts 변형값 매칭)
+    if (region) {
+      const regionResult = buildRegionFilter(String(region), paramIndex);
+      whereClause += regionResult.sql;
+      params.push(...regionResult.params);
+      paramIndex = regionResult.nextIndex;
+    }
+
+    // 구매금액 필터
+    if (minPurchase) {
+      whereClause += ` AND total_purchase_amount >= $${paramIndex++}`;
+      params.push(parseInt(minPurchase));
+    }
+
+    // 최근 구매일 필터
+    if (recentDays) {
+      whereClause += ` AND recent_purchase_date >= NOW() - INTERVAL '${parseInt(recentDays)} days'`;
+    }
+
+    // 데이터 추출 (전화번호 필드 동적 선택)
+    const phoneColumn = phoneField || 'phone';
+    
+    params.push(parseInt(limit as string));
+    const result = await query(
+      `SELECT 
+        ${phoneColumn} as phone,
+        name,
+        gender,
+        grade,
+        region,
+        total_purchase_amount,
+        recent_purchase_date,
+        custom_fields,
+        callback
+      FROM customers_unified 
+      ${whereClause}
+      ORDER BY created_at DESC
+      LIMIT $${paramIndex}`,
+      params
+    );
+
+    res.json({ 
+      success: true,
+      count: result.rows.length,
+      recipients: result.rows 
+    });
+  } catch (error) {
+    console.error('타겟 추출 에러:', error);
+    res.status(500).json({ error: '타겟 추출 실패' });
+  }
+});
+
+// GET /api/customers/filter-options - 필터 드롭다운용 고유값 조회
+router.get('/filter-options', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다' });
+
+    const gradesResult = await query(
+      `SELECT DISTINCT grade FROM customers_unified WHERE company_id = $1 AND is_active = true AND grade IS NOT NULL AND grade != '' ORDER BY grade`,
+      [companyId]
+    );
+    const regionsResult = await query(
+      `SELECT DISTINCT region FROM customers_unified WHERE company_id = $1 AND is_active = true AND region IS NOT NULL AND region != '' ORDER BY region`,
+      [companyId]
+    );
+
+    res.json({
+      grades: gradesResult.rows.map((r: any) => r.grade),
+      regions: regionsResult.rows.map((r: any) => r.region),
+    });
+  } catch (error) {
+    console.error('필터 옵션 조회 에러:', error);
+    res.status(500).json({ error: '조회 실패' });
+  }
+});
+
+// GET /api/customers/:id - 고객 상세
+router.get('/:id', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const { id } = req.params;
+
+    const result = await query(
+      `SELECT * FROM customers_unified WHERE id = $1 AND company_id = $2 AND is_active = true`,
+      [id, companyId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: '고객을 찾을 수 없습니다.' });
+    }
+
+    res.json({ customer: result.rows[0] });
+  } catch (error) {
+    console.error('고객 상세 조회 에러:', error);
+    res.status(500).json({ error: '조회 실패' });
   }
 });
 

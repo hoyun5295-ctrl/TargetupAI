@@ -195,8 +195,7 @@ router.get('/campaigns/:id', async (req: Request, res: Response) => {
     );
 
     // 직접발송은 campaign_runs가 없으므로 campaign.id 사용
-    const isDirect = campaign.send_type === 'direct';
-    const queryIds = isDirect ? [id] : runsResult.rows.map(r => r.id);
+    const queryIds = [id];
 
     // MySQL에서 실패사유별 집계 조회
     let errorStats: Record<string, number> = {};
@@ -297,20 +296,10 @@ router.get('/campaigns/:id/messages', async (req: Request, res: Response) => {
       return res.status(403).json({ error: '권한이 필요합니다.' });
     }
 
-    // 캠페인 run_id로 MySQL에서 조회
-    const runsResult = await query(
-      `SELECT id FROM campaign_runs WHERE campaign_id = $1`,
-      [id]
-    );
-    
-    if (runsResult.rows.length === 0) {
-      return res.json({ messages: [], pagination: { total: 0 } });
-    }
-
-    const runIds = runsResult.rows.map(r => r.id);
+    const runIds = [id];
     const offset = (Number(page) - 1) * Number(limit);
 
-    // MySQL에서 SMSQ_SEND 조회 (app_etc1 = campaign_run_id)
+    // MySQL에서 SMSQ_SEND 조회 (app_etc1 = campaign_id)
     let whereClause = `WHERE app_etc1 IN (${runIds.map(() => '?').join(',')})`;
     const params: any[] = [...runIds];
 
@@ -319,6 +308,10 @@ router.get('/campaigns/:id/messages', async (req: Request, res: Response) => {
       switch (searchType) {
         case 'phone':
           whereClause += ` AND dest_no LIKE ?`;
+          params.push(`%${searchValue}%`);
+          break;
+        case 'callback':
+          whereClause += ` AND call_back LIKE ?`;
           params.push(`%${searchValue}%`);
           break;
         case 'content':
@@ -335,9 +328,16 @@ router.get('/campaigns/:id/messages', async (req: Request, res: Response) => {
       whereClause += ` AND status_code NOT IN (6, 1000, 1800, 100)`;
     }
 
+    // 총 건수 조회
+    const countResult = await mysqlQuery(
+      `SELECT COUNT(*) as total FROM SMSQ_SEND ${whereClause}`,
+      params
+    ) as any[];
+    const total = countResult[0]?.total || 0;
+
     const messages = await mysqlQuery(
       `SELECT 
-        seqno, dest_no, msg_type, status_code, mob_company,
+        seqno, dest_no, call_back, msg_type, msg_contents, status_code, mob_company,
         sendreq_time, mobsend_time, repmsg_recvtm
        FROM SMSQ_SEND 
        ${whereClause}
@@ -349,6 +349,7 @@ router.get('/campaigns/:id/messages', async (req: Request, res: Response) => {
     return res.json({
       messages,
       pagination: {
+        total,
         page: Number(page),
         limit: Number(limit),
       },
@@ -356,6 +357,53 @@ router.get('/campaigns/:id/messages', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('메시지 목록 조회 에러:', error);
     return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+});
+// GET /api/v1/results/campaigns/:id/export - 발송내역 CSV 다운로드
+router.get('/campaigns/:id/export', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const { id } = req.params;
+    if (!companyId) return res.status(403).json({ error: '권한이 필요합니다.' });
+
+    const campaignResult = await query(
+      `SELECT campaign_name FROM campaigns WHERE id = $1 AND company_id = $2`,
+      [id, companyId]
+    );
+    if (campaignResult.rows.length === 0) return res.status(404).json({ error: '캠페인을 찾을 수 없습니다.' });
+
+    const messages = await mysqlQuery(
+      `SELECT seqno, dest_no, call_back, msg_type, msg_contents, status_code, mob_company, sendreq_time, mobsend_time, repmsg_recvtm
+       FROM SMSQ_SEND WHERE app_etc1 = ? ORDER BY seqno`,
+      [id]
+    ) as any[];
+
+    const statusMap: Record<number, string> = {
+      6:'SMS성공', 1000:'LMS성공', 1800:'카카오성공', 100:'대기',
+      55:'요금부족', 2008:'비가입자/결번', 23:'식별코드오류', 2323:'식별코드오류',
+      3000:'형식오류', 3001:'발신번호오류', 3002:'수신번호오류', 3003:'길이초과', 3004:'스팸차단', 4000:'시간초과', 9999:'기타오류'
+    };
+    const carrierMap: Record<string, string> = {
+      '11':'SKT', '16':'KT', '19':'LG U+', '12':'SKT알뜰폰', '17':'KT알뜰폰', '20':'LG알뜰폰', 'SKT':'SKT', 'KTF':'KT', 'LGT':'LG U+'
+    };
+
+    const BOM = '\uFEFF';
+    const headers = '수신번호,회신번호,메시지유형,메시지내용,전송결과,결과코드,통신사,전송요청시간,발송시간,수신확인시간';
+    const rows = messages.map((m: any) => [
+      m.dest_no, m.call_back,
+      m.msg_type === 'S' ? 'SMS' : m.msg_type === 'L' ? 'LMS' : m.msg_type,
+      `"${(m.msg_contents || '').replace(/"/g, '""')}"`,
+      statusMap[m.status_code] || `코드${m.status_code}`, m.status_code,
+      carrierMap[m.mob_company] || m.mob_company || '',
+      m.sendreq_time || '', m.mobsend_time || '', m.repmsg_recvtm || ''
+    ].join(','));
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename=send_detail_${id}.csv`);
+    res.send(BOM + headers + '\n' + rows.join('\n'));
+  } catch (error) {
+    console.error('내보내기 에러:', error);
+    res.status(500).json({ error: '내보내기 실패' });
   }
 });
 

@@ -2,6 +2,6 @@
 @tailwind components;
 @tailwind utilities;
 
-body {
-  font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif;
+*, *::before, *::after {
+  font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif !important;
 }

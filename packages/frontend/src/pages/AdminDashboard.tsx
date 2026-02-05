@@ -57,7 +57,7 @@ export default function AdminDashboard() {
   const navigate = useNavigate();
   const { user, logout } = useAuthStore();
 
-  const [activeTab, setActiveTab] = useState<'companies' | 'users' | 'scheduled' | 'callbacks' | 'plans'>('companies');
+  const [activeTab, setActiveTab] = useState<'companies' | 'users' | 'scheduled' | 'callbacks' | 'plans' | 'requests'>('companies');
   const [companies, setCompanies] = useState<Company[]>([]);
   const [plans, setPlans] = useState<Plan[]>([]);
   const [users, setUsers] = useState<User[]>([]);
@@ -78,16 +78,22 @@ export default function AdminDashboard() {
     sendHourStart: 9,
     sendHourEnd: 21,
     dailyLimit: 0,
-    holidaySend: false,
     duplicateDays: 7,
     costPerSms: 9.9,
     costPerLms: 27,
     costPerMms: 50,
     costPerKakao: 7.5,
+    targetStrategy: 'balanced',
+    crossCategoryAllowed: true,
+    excludedSegments: [] as string[],
+    approvalRequired: false,
     storeCodeList: [] as string[],
     newStoreCode: '',
+    newExcludedSegment: '',
   });
-
+  const [editCompanyTab, setEditCompanyTab] = useState<'basic' | 'send' | 'cost' | 'ai' | 'store' | 'fields'>('basic');
+  const [standardFields, setStandardFields] = useState<any[]>([]);
+  const [enabledFields, setEnabledFields] = useState<string[]>([]);
   // 예약 캠페인 관리
   const [scheduledCampaigns, setScheduledCampaigns] = useState<any[]>([]);
   const [showCancelModal, setShowCancelModal] = useState(false);
@@ -95,6 +101,7 @@ export default function AdminDashboard() {
   const [cancelReason, setCancelReason] = useState('');
   const [scheduledPage, setScheduledPage] = useState(1);
   const scheduledPerPage = 10;
+  const [scheduledSearch, setScheduledSearch] = useState('');
 
   // 사용자 검색/필터
   const [userSearch, setUserSearch] = useState('');
@@ -104,6 +111,8 @@ export default function AdminDashboard() {
   // 발신번호 관리
   const [callbackNumbers, setCallbackNumbers] = useState<any[]>([]);
   const [showCallbackModal, setShowCallbackModal] = useState(false);
+  const [callbackSearch, setCallbackSearch] = useState('');
+  const [expandedCallbackCompanies, setExpandedCallbackCompanies] = useState<Set<string>>(new Set());
   const [newCallback, setNewCallback] = useState({
     companyId: '',
     phone: '',
@@ -114,9 +123,21 @@ export default function AdminDashboard() {
   // 회사 목록 검색/필터
   const [companySearch, setCompanySearch] = useState('');
   const [companyStatusFilter, setCompanyStatusFilter] = useState('all');
+  const [companyPage, setCompanyPage] = useState(1);
+  const companyPerPage = 10;
 
   // 요금제 관리
   const [planList, setPlanList] = useState<any[]>([]);
+  const [planPage, setPlanPage] = useState(1);
+  const planPerPage = 10;
+  
+  // 플랜 신청 관리
+  const [planRequests, setPlanRequests] = useState<any[]>([]);
+  const [requestPage, setRequestPage] = useState(1);
+  const requestPerPage = 10;
+  const [showRejectModal, setShowRejectModal] = useState(false);
+  const [rejectTarget, setRejectTarget] = useState<any>(null);
+  const [rejectReason, setRejectReason] = useState('');
   const [showPlanModal, setShowPlanModal] = useState(false);
   const [editingPlan, setEditingPlan] = useState<any>(null);
   const [newPlan, setNewPlan] = useState({
@@ -174,6 +195,8 @@ export default function AdminDashboard() {
       await loadCallbackNumbers();
       // 요금제 로드
       await loadPlans();
+      // 플랜 신청 로드
+      await loadPlanRequests();
     } catch (error) {
       console.error('데이터 로드 실패:', error);
     } finally {
@@ -238,6 +261,88 @@ export default function AdminDashboard() {
       }
     } catch (error) {
       console.error('요금제 로드 실패:', error);
+    }
+  };
+
+  const loadPlanRequests = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch('/api/admin/plan-requests', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setPlanRequests(data.requests || []);
+      }
+    } catch (error) {
+      console.error('플랜 신청 로드 실패:', error);
+    }
+  };
+
+  const handleApproveRequest = async (id: string) => {
+    setModal({
+      type: 'confirm',
+      title: '플랜 변경 승인',
+      message: '이 신청을 승인하시겠습니까?\n승인 시 즉시 플랜이 변경됩니다.',
+      onConfirm: async () => {
+        try {
+          const token = localStorage.getItem('token');
+          const res = await fetch(`/api/admin/plan-requests/${id}/approve`, {
+            method: 'PUT',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({})
+          });
+          
+          if (res.ok) {
+            closeModal();
+            setModal({ type: 'alert', title: '승인 완료', message: '플랜이 변경되었습니다.', variant: 'success' });
+            loadPlanRequests();
+            loadData();
+          } else {
+            const data = await res.json();
+            closeModal();
+            setModal({ type: 'alert', title: '승인 실패', message: data.error || '승인에 실패했습니다.', variant: 'error' });
+          }
+        } catch (error) {
+          closeModal();
+          setModal({ type: 'alert', title: '오류', message: '처리 중 오류가 발생했습니다.', variant: 'error' });
+        }
+      }
+    });
+  };
+
+  const handleRejectRequest = async () => {
+    if (!rejectTarget || !rejectReason.trim()) {
+      setModal({ type: 'alert', title: '입력 오류', message: '거절 사유를 입력해주세요.', variant: 'warning' });
+      return;
+    }
+    
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`/api/admin/plan-requests/${rejectTarget.id}/reject`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ adminNote: rejectReason.trim() })
+      });
+      
+      if (res.ok) {
+        setShowRejectModal(false);
+        setRejectTarget(null);
+        setRejectReason('');
+        setModal({ type: 'alert', title: '거절 완료', message: '신청이 거절되었습니다.', variant: 'success' });
+        loadPlanRequests();
+      } else {
+        const data = await res.json();
+        setModal({ type: 'alert', title: '거절 실패', message: data.error || '거절에 실패했습니다.', variant: 'error' });
+      }
+    } catch (error) {
+      setModal({ type: 'alert', title: '오류', message: '처리 중 오류가 발생했습니다.', variant: 'error' });
     }
   };
 
@@ -416,15 +521,59 @@ export default function AdminDashboard() {
     }
   };
 
+  const handleDeactivateCompany = (company: Company) => {
+    showConfirm(
+      '고객사 해지',
+      `${company.company_name}을(를) 해지하시겠습니까?\n해당 회사의 모든 사용자도 비활성화됩니다.`,
+      async () => {
+        closeModal();
+        try {
+          const token = localStorage.getItem('token');
+          const res = await fetch(`/api/admin/companies/${company.id}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          
+          if (!res.ok) {
+            const data = await res.json();
+            throw new Error(data.error || '해지 실패');
+          }
+          
+          loadData();
+          loadUsers();
+          showAlert('성공', '고객사가 해지되었습니다.', 'success');
+        } catch (error: any) {
+          showAlert('오류', error.message || '해지 실패', 'error');
+        }
+      }
+    );
+  };
+
   const handleEditCompany = async (company: Company) => {
     try {
       const token = localStorage.getItem('token');
-      const res = await fetch(`/api/admin/companies/${company.id}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
+      const [res, fieldsRes, enabledRes] = await Promise.all([
+        fetch(`/api/admin/companies/${company.id}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        }),
+        fetch('/api/admin/standard-fields', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        }),
+        fetch(`/api/admin/companies/${company.id}/fields`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        })
+      ]);
       if (res.ok) {
         const data = await res.json();
         const c = data.company;
+        if (fieldsRes.ok) {
+          const fData = await fieldsRes.json();
+          setStandardFields(fData.fields || []);
+        }
+        if (enabledRes.ok) {
+          const eData = await enabledRes.json();
+          setEnabledFields(eData.enabledFields || []);
+        }
         setEditCompany({
           id: c.id,
           companyName: c.company_name || '',
@@ -434,18 +583,23 @@ export default function AdminDashboard() {
           status: c.status || 'active',
           planId: c.plan_id || '',
           rejectNumber: c.reject_number || '',
-          sendHourStart: c.send_hour_start ?? 9,
-          sendHourEnd: c.send_hour_end ?? 21,
-          dailyLimit: c.daily_limit ?? 0,
-          holidaySend: c.holiday_send ?? false,
-          duplicateDays: c.duplicate_days ?? 7,
+          sendHourStart: c.send_start_hour ?? 9,
+          sendHourEnd: c.send_end_hour ?? 21,
+          dailyLimit: c.daily_limit_per_customer ?? 0,
+          duplicateDays: c.duplicate_prevention_days ?? 7,
           costPerSms: c.cost_per_sms ?? 9.9,
           costPerLms: c.cost_per_lms ?? 27,
           costPerMms: c.cost_per_mms ?? 50,
           costPerKakao: c.cost_per_kakao ?? 7.5,
+          targetStrategy: c.target_strategy || 'balanced',
+          crossCategoryAllowed: c.cross_category_allowed ?? true,
+          excludedSegments: c.excluded_segments || [],
+          approvalRequired: c.approval_required ?? false,
           storeCodeList: c.store_code_list || [],
           newStoreCode: '',
+          newExcludedSegment: '',
         });
+        setEditCompanyTab('basic');
         setShowEditCompanyModal(true);
       }
     } catch (error) {
@@ -457,14 +611,24 @@ export default function AdminDashboard() {
     e.preventDefault();
     try {
       const token = localStorage.getItem('token');
-      const res = await fetch(`/api/admin/companies/${editCompany.id}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify(editCompany)
-      });
+      const [res, fieldsRes] = await Promise.all([
+        fetch(`/api/admin/companies/${editCompany.id}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify(editCompany)
+        }),
+        fetch(`/api/admin/companies/${editCompany.id}/fields`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ enabledFields })
+        })
+      ]);
       
       if (!res.ok) {
         const data = await res.json();
@@ -541,6 +705,30 @@ export default function AdminDashboard() {
       showAlert('성공', '발신번호가 등록되었습니다.', 'success');
     } catch (error: any) {
       showAlert('오류', error.message || '등록 실패', 'error');
+    }
+  };
+
+  const [editingCallback, setEditingCallback] = useState<any>(null);
+
+  const handleUpdateCallback = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingCallback) return;
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`/api/admin/callback-numbers/${editingCallback.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ phone: editingCallback.phone, label: editingCallback.label })
+      });
+      if (!res.ok) throw new Error('수정 실패');
+      setEditingCallback(null);
+      loadCallbackNumbers();
+      showAlert('성공', '발신번호가 수정되었습니다.', 'success');
+    } catch (error) {
+      showAlert('오류', '수정 실패', 'error');
     }
   };
 
@@ -824,8 +1012,23 @@ export default function AdminDashboard() {
                     ? 'border-blue-500 text-blue-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700'
                 }`}
-              >
+                >
                 요금제 관리
+              </button>
+              <button
+                onClick={() => setActiveTab('requests')}
+                className={`px-6 py-4 text-sm font-medium border-b-2 relative ${
+                  activeTab === 'requests'
+                    ? 'border-blue-500 text-blue-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                플랜 신청
+                {planRequests.filter(r => r.status === 'pending').length > 0 && (
+                  <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
+                    {planRequests.filter(r => r.status === 'pending').length}
+                  </span>
+                )}
               </button>
             </nav>
           </div>
@@ -850,7 +1053,7 @@ export default function AdminDashboard() {
                 <input
                   type="text"
                   value={companySearch}
-                  onChange={(e) => setCompanySearch(e.target.value)}
+                  onChange={(e) => { setCompanySearch(e.target.value); setCompanyPage(1); }}
                   placeholder="회사코드, 회사명, 담당자명 검색..."
                   className="w-full max-w-xs px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
                 />
@@ -859,7 +1062,7 @@ export default function AdminDashboard() {
                 <span className="text-sm text-gray-500">상태:</span>
                 <select
                   value={companyStatusFilter}
-                  onChange={(e) => setCompanyStatusFilter(e.target.value)}
+                  onChange={(e) => { setCompanyStatusFilter(e.target.value); setCompanyPage(1); }}
                   className="px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
                 >
                   <option value="all">전체</option>
@@ -896,7 +1099,9 @@ export default function AdminDashboard() {
                       </td>
                     </tr>
                   ) : (
-                    filteredCompanies.map((company) => (
+                    filteredCompanies
+                      .slice((companyPage - 1) * companyPerPage, companyPage * companyPerPage)
+                      .map((company) => (
                       <tr key={company.id} className="hover:bg-gray-50">
                         <td className="px-6 py-4 text-sm font-medium text-gray-900">
                           {company.company_code}
@@ -918,13 +1123,39 @@ export default function AdminDashboard() {
                           >
                             수정
                           </button>
+                          {company.status !== 'terminated' && (
+                            <button 
+                              onClick={() => handleDeactivateCompany(company)}
+                              className="text-red-600 hover:text-red-800 text-sm"
+                            >
+                              해지
+                            </button>
+                          )}
                         </td>
                       </tr>
                     ))
                   )}
                 </tbody>
-              </table>
+                </table>
             </div>
+            {filteredCompanies.length > companyPerPage && (
+              <div className="px-6 py-4 border-t flex items-center justify-between">
+                <span className="text-sm text-gray-500">
+                  총 {filteredCompanies.length}개 중 {(companyPage - 1) * companyPerPage + 1}-{Math.min(companyPage * companyPerPage, filteredCompanies.length)}
+                </span>
+                <div className="flex gap-1">
+                  <button onClick={() => setCompanyPage(p => Math.max(1, p - 1))} disabled={companyPage === 1}
+                    className="px-3 py-1 rounded border text-sm disabled:opacity-40 hover:bg-gray-50">◀ 이전</button>
+                  {Array.from({ length: Math.ceil(filteredCompanies.length / companyPerPage) }, (_, i) => i + 1).map(p => (
+                    <button key={p} onClick={() => setCompanyPage(p)}
+                      className={`px-3 py-1 rounded border text-sm ${companyPage === p ? 'bg-blue-600 text-white border-blue-600' : 'hover:bg-gray-50'}`}>{p}</button>
+                  ))}
+                  <button onClick={() => setCompanyPage(p => Math.min(Math.ceil(filteredCompanies.length / companyPerPage), p + 1))}
+                    disabled={companyPage >= Math.ceil(filteredCompanies.length / companyPerPage)}
+                    className="px-3 py-1 rounded border text-sm disabled:opacity-40 hover:bg-gray-50">다음 ▶</button>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -1111,6 +1342,21 @@ export default function AdminDashboard() {
               <span className="text-sm text-gray-500">총 {scheduledCampaigns.length}건</span>
             </div>
 
+            <div className="px-6 py-3 border-b bg-gray-50 flex gap-4 items-center">
+              <input
+                type="text"
+                value={scheduledSearch}
+                onChange={(e) => { setScheduledSearch(e.target.value); setScheduledPage(1); }}
+                placeholder="🔍 고객사명으로 검색..."
+                className="w-full max-w-xs px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+              />
+              {scheduledSearch && (
+                <span className="text-sm text-gray-500">
+                  {scheduledCampaigns.filter(c => (c.company_name || '').toLowerCase().includes(scheduledSearch.toLowerCase())).length}건 검색됨
+                </span>
+              )}
+            </div>
+
             <div className="overflow-x-auto">
               <table className="w-full">
               <thead className="bg-gray-50">
@@ -1133,6 +1379,7 @@ export default function AdminDashboard() {
                     </tr>
                   ) : (
                     scheduledCampaigns
+                      .filter(c => !scheduledSearch || (c.company_name || '').toLowerCase().includes(scheduledSearch.toLowerCase()))
                       .slice((scheduledPage - 1) * scheduledPerPage, scheduledPage * scheduledPerPage)
                       .map((campaign) => (
                       <tr key={campaign.id} className="hover:bg-gray-50">
@@ -1184,37 +1431,29 @@ export default function AdminDashboard() {
             </div>
 
             {/* 페이지네이션 */}
-            {scheduledCampaigns.length > scheduledPerPage && (
-              <div className="px-6 py-4 border-t flex justify-center items-center gap-2">
-                <button
-                  onClick={() => setScheduledPage(p => Math.max(1, p - 1))}
-                  disabled={scheduledPage === 1}
-                  className="px-3 py-1 rounded border text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
-                >
-                  ◀ 이전
-                </button>
-                {Array.from({ length: Math.ceil(scheduledCampaigns.length / scheduledPerPage) }, (_, i) => i + 1)
-                  .filter(p => p === 1 || p === Math.ceil(scheduledCampaigns.length / scheduledPerPage) || Math.abs(p - scheduledPage) <= 2)
-                  .map((p, idx, arr) => (
-                    <span key={p}>
-                      {idx > 0 && arr[idx - 1] !== p - 1 && <span className="px-1">...</span>}
-                      <button
-                        onClick={() => setScheduledPage(p)}
-                        className={`w-8 h-8 rounded text-sm ${scheduledPage === p ? 'bg-blue-600 text-white' : 'hover:bg-gray-100'}`}
-                      >
-                        {p}
-                      </button>
-                    </span>
-                  ))}
-                <button
-                  onClick={() => setScheduledPage(p => Math.min(Math.ceil(scheduledCampaigns.length / scheduledPerPage), p + 1))}
-                  disabled={scheduledPage >= Math.ceil(scheduledCampaigns.length / scheduledPerPage)}
-                  className="px-3 py-1 rounded border text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
-                >
-                  다음 ▶
-                </button>
-              </div>
-            )}
+            {(() => {
+              const filtered = scheduledCampaigns.filter(c => !scheduledSearch || (c.company_name || '').toLowerCase().includes(scheduledSearch.toLowerCase()));
+              const totalPages = Math.ceil(filtered.length / scheduledPerPage);
+              if (filtered.length <= scheduledPerPage) return null;
+              return (
+                <div className="px-6 py-4 border-t flex items-center justify-between">
+                  <span className="text-sm text-gray-500">
+                    총 {filtered.length}건 중 {(scheduledPage - 1) * scheduledPerPage + 1}-{Math.min(scheduledPage * scheduledPerPage, filtered.length)}
+                  </span>
+                  <div className="flex gap-1">
+                    <button onClick={() => setScheduledPage(p => Math.max(1, p - 1))} disabled={scheduledPage === 1}
+                      className="px-3 py-1 rounded border text-sm disabled:opacity-40 hover:bg-gray-50">◀ 이전</button>
+                    {Array.from({ length: totalPages }, (_, i) => i + 1).map(p => (
+                      <button key={p} onClick={() => setScheduledPage(p)}
+                        className={`px-3 py-1 rounded border text-sm ${scheduledPage === p ? 'bg-blue-600 text-white border-blue-600' : 'hover:bg-gray-50'}`}>{p}</button>
+                    ))}
+                    <button onClick={() => setScheduledPage(p => Math.min(totalPages, p + 1))}
+                      disabled={scheduledPage >= totalPages}
+                      className="px-3 py-1 rounded border text-sm disabled:opacity-40 hover:bg-gray-50">다음 ▶</button>
+                  </div>
+                </div>
+              );
+            })()}
             </div>
         )}
 
@@ -1231,62 +1470,103 @@ export default function AdminDashboard() {
               </button>
             </div>
 
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">고객사</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">발신번호</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">별칭</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">대표</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">등록일</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">관리</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200">
-                  {callbackNumbers.length === 0 ? (
-                    <tr>
-                      <td colSpan={6} className="px-6 py-12 text-center text-gray-500">
-                        등록된 발신번호가 없습니다.
-                      </td>
-                    </tr>
-                  ) : (
-                    callbackNumbers.map((cb) => (
-                      <tr key={cb.id} className="hover:bg-gray-50">
-                        <td className="px-6 py-4 text-sm text-gray-900">
-                          {cb.company_name}
-                          <span className="text-gray-400 ml-1">({cb.company_code})</span>
-                        </td>
-                        <td className="px-6 py-4 text-sm font-medium text-gray-900">{cb.phone}</td>
-                        <td className="px-6 py-4 text-sm text-gray-500">{cb.label || '-'}</td>
-                        <td className="px-6 py-4">
-                          {cb.is_default ? (
-                            <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">대표</span>
-                          ) : (
-                            <button
-                              onClick={() => handleSetDefault(cb.id)}
-                              className="text-blue-600 hover:text-blue-800 text-xs"
-                            >
-                              대표설정
-                            </button>
-                          )}
-                        </td>
-                        <td className="px-6 py-4 text-sm text-gray-500">
-                          {new Date(cb.created_at).toLocaleDateString()}
-                        </td>
-                        <td className="px-6 py-4">
+            <div className="px-6 py-3 border-b bg-gray-50 flex gap-4 items-center">
+              <input
+                type="text"
+                value={callbackSearch}
+                onChange={(e) => setCallbackSearch(e.target.value)}
+                placeholder="🔍 고객사명으로 검색..."
+                className="w-full max-w-xs px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+              />
+              <span className="text-sm text-gray-500">총 {callbackNumbers.length}개</span>
+            </div>
+
+            <div>
+              {(() => {
+                const filtered = callbackNumbers.filter(cb => 
+                  !callbackSearch || (cb.company_name || '').toLowerCase().includes(callbackSearch.toLowerCase())
+                );
+
+                const grouped = filtered.reduce((acc: Record<string, { companyName: string; companyCode: string; items: any[] }>, cb: any) => {
+                  const cid = cb.company_id || 'none';
+                  if (!acc[cid]) {
+                    acc[cid] = { companyName: cb.company_name || '미지정', companyCode: cb.company_code || '', items: [] };
+                  }
+                  acc[cid].items.push(cb);
+                  return acc;
+                }, {});
+
+                const companyIds = Object.keys(grouped);
+
+                if (filtered.length === 0) {
+                  return (
+                    <div className="px-6 py-12 text-center text-gray-500">
+                      {callbackNumbers.length === 0 ? '등록된 발신번호가 없습니다.' : '검색 결과가 없습니다.'}
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="divide-y">
+                    {companyIds.map(cid => {
+                      const group = grouped[cid];
+                      const isExpanded = expandedCallbackCompanies.has(cid);
+                      return (
+                        <div key={cid}>
                           <button
-                            onClick={() => handleDeleteCallback(cb.id, cb.phone)}
-                            className="text-red-600 hover:text-red-800 text-sm"
+                            onClick={() => {
+                              const newSet = new Set(expandedCallbackCompanies);
+                              if (isExpanded) newSet.delete(cid); else newSet.add(cid);
+                              setExpandedCallbackCompanies(newSet);
+                            }}
+                            className="w-full px-6 py-3 bg-gray-50 hover:bg-gray-100 flex items-center justify-between transition-colors"
                           >
-                            삭제
+                            <div className="flex items-center gap-3">
+                              <span className={`text-gray-400 transition-transform duration-200 ${isExpanded ? 'rotate-90' : ''}`}>▶</span>
+                              <span className="font-semibold text-gray-800">{group.companyName}</span>
+                              <span className="text-xs text-gray-400">({group.companyCode})</span>
+                              <span className="text-sm text-gray-500">{group.items.length}개</span>
+                            </div>
                           </button>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
+                          {isExpanded && (
+                            <table className="w-full">
+                              <thead className="bg-gray-50/50">
+                                <tr>
+                                  <th className="px-6 py-2 text-left text-xs font-medium text-gray-500 uppercase">발신번호</th>
+                                  <th className="px-6 py-2 text-left text-xs font-medium text-gray-500 uppercase">별칭</th>
+                                  <th className="px-6 py-2 text-left text-xs font-medium text-gray-500 uppercase">대표</th>
+                                  <th className="px-6 py-2 text-left text-xs font-medium text-gray-500 uppercase">등록일</th>
+                                  <th className="px-6 py-2 text-left text-xs font-medium text-gray-500 uppercase">관리</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-gray-100">
+                                {group.items.map((cb: any) => (
+                                  <tr key={cb.id} className="hover:bg-blue-50/30">
+                                    <td className="px-6 py-3 text-sm font-medium text-gray-900">{cb.phone}</td>
+                                    <td className="px-6 py-3 text-sm text-gray-500">{cb.label || '-'}</td>
+                                    <td className="px-6 py-3">
+                                      {cb.is_default ? (
+                                        <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">대표</span>
+                                      ) : (
+                                        <button onClick={() => handleSetDefault(cb.id)} className="text-blue-600 hover:text-blue-800 text-xs">대표설정</button>
+                                      )}
+                                    </td>
+                                    <td className="px-6 py-3 text-sm text-gray-500">{new Date(cb.created_at).toLocaleDateString()}</td>
+                                    <td className="px-6 py-3">
+                                      <button onClick={() => setEditingCallback({ id: cb.id, phone: cb.phone, label: cb.label || '' })} className="text-blue-600 hover:text-blue-800 text-sm mr-2">수정</button>
+                                      <button onClick={() => handleDeleteCallback(cb.id, cb.phone)} className="text-red-600 hover:text-red-800 text-sm">삭제</button>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
             </div>
             </div>
         )}
@@ -1325,7 +1605,9 @@ export default function AdminDashboard() {
                       </td>
                     </tr>
                   ) : (
-                    planList.map((plan) => (
+                    planList
+                      .slice((planPage - 1) * planPerPage, planPage * planPerPage)
+                      .map((plan) => (
                       <tr key={plan.id} className="hover:bg-gray-50">
                         <td className="px-6 py-4 text-sm font-medium text-gray-900">{plan.plan_code}</td>
                         <td className="px-6 py-4 text-sm text-gray-900">{plan.plan_name}</td>
@@ -1365,8 +1647,153 @@ export default function AdminDashboard() {
                     ))
                   )}
                 </tbody>
-              </table>
+                </table>
             </div>
+            {planList.length > planPerPage && (
+              <div className="px-6 py-4 border-t flex items-center justify-between">
+                <span className="text-sm text-gray-500">
+                  총 {planList.length}개 중 {(planPage - 1) * planPerPage + 1}-{Math.min(planPage * planPerPage, planList.length)}
+                </span>
+                <div className="flex gap-1">
+                  <button onClick={() => setPlanPage(p => Math.max(1, p - 1))} disabled={planPage === 1}
+                    className="px-3 py-1 rounded border text-sm disabled:opacity-40 hover:bg-gray-50">◀ 이전</button>
+                  {Array.from({ length: Math.ceil(planList.length / planPerPage) }, (_, i) => i + 1).map(p => (
+                    <button key={p} onClick={() => setPlanPage(p)}
+                      className={`px-3 py-1 rounded border text-sm ${planPage === p ? 'bg-blue-600 text-white border-blue-600' : 'hover:bg-gray-50'}`}>{p}</button>
+                  ))}
+                  <button onClick={() => setPlanPage(p => Math.min(Math.ceil(planList.length / planPerPage), p + 1))}
+                    disabled={planPage >= Math.ceil(planList.length / planPerPage)}
+                    className="px-3 py-1 rounded border text-sm disabled:opacity-40 hover:bg-gray-50">다음 ▶</button>
+                </div>
+              </div>
+            )}
+            </div>
+        )}
+
+        {/* 플랜 신청 관리 탭 */}
+        {activeTab === 'requests' && (
+          <div className="bg-white rounded-lg shadow">
+            <div className="px-6 py-4 border-b">
+              <h2 className="text-lg font-semibold">플랜 변경 신청 목록</h2>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">신청일시</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">회사</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">신청자</th>
+                    <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">현재 플랜</th>
+                    <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">신청 플랜</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">메시지</th>
+                    <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">상태</th>
+                    <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">처리</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {planRequests.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="px-6 py-12 text-center text-gray-500">
+                        플랜 변경 신청이 없습니다.
+                      </td>
+                    </tr>
+                  ) : (
+                    planRequests
+                      .slice((requestPage - 1) * requestPerPage, requestPage * requestPerPage)
+                      .map((req) => (
+                      <tr key={req.id} className={`hover:bg-gray-50 ${req.status === 'pending' ? 'bg-yellow-50' : ''}`}>
+                        <td className="px-6 py-4 text-sm text-gray-600">
+                          {new Date(req.created_at).toLocaleString('ko-KR')}
+                        </td>
+                        <td className="px-6 py-4 text-sm">
+                          <div className="font-medium text-gray-900">{req.company_name}</div>
+                          <div className="text-xs text-gray-500">{req.company_code}</div>
+                        </td>
+                        <td className="px-6 py-4 text-sm text-gray-900">
+                          {req.user_name} ({req.user_login_id})
+                        </td>
+                        <td className="px-6 py-4 text-sm text-center text-gray-600">
+                          {req.current_plan_name || '-'}
+                        </td>
+                        <td className="px-6 py-4 text-sm text-center">
+                          <span className="font-medium text-blue-600">{req.requested_plan_name}</span>
+                          <div className="text-xs text-gray-500">
+                            {Number(req.requested_plan_price).toLocaleString()}원/월
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 text-sm text-gray-600 max-w-xs truncate" title={req.message}>
+                          {req.message || '-'}
+                        </td>
+                        <td className="px-6 py-4 text-center">
+                          {req.status === 'pending' && (
+                            <span className="px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">대기</span>
+                          )}
+                          {req.status === 'approved' && (
+                            <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">승인</span>
+                          )}
+                          {req.status === 'rejected' && (
+                            <span className="px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">거절</span>
+                          )}
+                        </td>
+                        <td className="px-6 py-4 text-center">
+                          {req.status === 'pending' ? (
+                            <div className="flex justify-center gap-2">
+                              <button
+                                onClick={() => handleApproveRequest(req.id)}
+                                className="px-3 py-1 bg-green-600 text-white rounded text-sm hover:bg-green-700"
+                              >
+                                승인
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setRejectTarget(req);
+                                  setRejectReason('');
+                                  setShowRejectModal(true);
+                                }}
+                                className="px-3 py-1 bg-red-600 text-white rounded text-sm hover:bg-red-700"
+                              >
+                                거절
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="text-xs text-gray-500">
+                              <div>{req.processed_by_name || '-'}</div>
+                              {req.processed_at && (
+                                <div>{new Date(req.processed_at).toLocaleDateString('ko-KR')}</div>
+                              )}
+                              {req.admin_note && (
+                                <div className="text-red-600 mt-1" title={req.admin_note}>
+                                  {req.admin_note.length > 10 ? req.admin_note.slice(0, 10) + '...' : req.admin_note}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+                </table>
+            </div>
+            {planRequests.length > requestPerPage && (
+              <div className="px-6 py-4 border-t flex items-center justify-between">
+                <span className="text-sm text-gray-500">
+                  총 {planRequests.length}개 중 {(requestPage - 1) * requestPerPage + 1}-{Math.min(requestPage * requestPerPage, planRequests.length)}
+                </span>
+                <div className="flex gap-1">
+                  <button onClick={() => setRequestPage(p => Math.max(1, p - 1))} disabled={requestPage === 1}
+                    className="px-3 py-1 rounded border text-sm disabled:opacity-40 hover:bg-gray-50">◀ 이전</button>
+                  {Array.from({ length: Math.ceil(planRequests.length / requestPerPage) }, (_, i) => i + 1).map(p => (
+                    <button key={p} onClick={() => setRequestPage(p)}
+                      className={`px-3 py-1 rounded border text-sm ${requestPage === p ? 'bg-blue-600 text-white border-blue-600' : 'hover:bg-gray-50'}`}>{p}</button>
+                  ))}
+                  <button onClick={() => setRequestPage(p => Math.min(Math.ceil(planRequests.length / requestPerPage), p + 1))}
+                    disabled={requestPage >= Math.ceil(planRequests.length / requestPerPage)}
+                    className="px-3 py-1 rounded border text-sm disabled:opacity-40 hover:bg-gray-50">다음 ▶</button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </main>
@@ -1826,306 +2253,402 @@ export default function AdminDashboard() {
       {/* 고객사 수정 모달 */}
       {showEditCompanyModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-lg max-h-[90vh] flex flex-col">
             <div className="px-6 py-4 border-b">
-              <h3 className="text-lg font-semibold">고객사 정보 수정</h3>
+              <h3 className="text-lg font-semibold">고객사 상세 설정</h3>
+              <p className="text-xs text-gray-500 mt-1">{editCompany.companyName}</p>
             </div>
-            <form onSubmit={handleUpdateCompany} className="p-6 space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  회사명 *
-                </label>
-                <input
-                  type="text"
-                  value={editCompany.companyName}
-                  onChange={(e) => setEditCompany({ ...editCompany, companyName: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  담당자명
-                </label>
-                <input
-                  type="text"
-                  value={editCompany.contactName}
-                  onChange={(e) => setEditCompany({ ...editCompany, contactName: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  이메일
-                </label>
-                <input
-                  type="email"
-                  value={editCompany.contactEmail}
-                  onChange={(e) => setEditCompany({ ...editCompany, contactEmail: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  연락처
-                </label>
-                <input
-                  type="text"
-                  value={editCompany.contactPhone}
-                  onChange={(e) => setEditCompany({ ...editCompany, contactPhone: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                  placeholder="010-0000-0000"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  요금제 *
-                </label>
-                <select
-                  value={editCompany.planId}
-                  onChange={(e) => setEditCompany({ ...editCompany, planId: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                  required
-                >
-                  <option value="">선택하세요</option>
-                  {plans.map((plan) => (
-                    <option key={plan.id} value={plan.id}>
-                      {plan.plan_name} ({plan.max_customers.toLocaleString()}명)
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  상태 *
-                </label>
-                <select
-                  value={editCompany.status}
-                  onChange={(e) => setEditCompany({ ...editCompany, status: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                >
-                  <option value="trial">체험</option>
-                  <option value="active">활성</option>
-                  <option value="suspended">정지</option>
-                  <option value="terminated">해지</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  080 수신거부번호
-                </label>
-                <input
-                  type="text"
-                  value={editCompany.rejectNumber}
-                  onChange={(e) => setEditCompany({ ...editCompany, rejectNumber: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                  placeholder="080-000-0000"
-                />
-              </div>
-
-              {/* 발송 설정 섹션 */}
-              <div className="pt-4 border-t">
-                <h4 className="text-sm font-semibold text-gray-800 mb-3">📋 발송 설정</h4>
-                
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">
-                      발송 시작 시간
-                    </label>
-                    <select
-                      value={editCompany.sendHourStart}
-                      onChange={(e) => setEditCompany({ ...editCompany, sendHourStart: Number(e.target.value) })}
-                      className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                    >
-                      {Array.from({ length: 24 }, (_, i) => (
-                        <option key={i} value={i}>{String(i).padStart(2, '0')}:00</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">
-                      발송 종료 시간
-                    </label>
-                    <select
-                      value={editCompany.sendHourEnd}
-                      onChange={(e) => setEditCompany({ ...editCompany, sendHourEnd: Number(e.target.value) })}
-                      className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                    >
-                      {Array.from({ length: 24 }, (_, i) => (
-                        <option key={i} value={i}>{String(i).padStart(2, '0')}:00</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                <div className="mt-3">
-                  <label className="block text-xs font-medium text-gray-600 mb-1">
-                    일일 발송 한도 (0 = 무제한)
-                  </label>
-                  <input
-                    type="number"
-                    value={editCompany.dailyLimit}
-                    onChange={(e) => setEditCompany({ ...editCompany, dailyLimit: Number(e.target.value) })}
-                    className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                    min="0"
-                    placeholder="0"
-                  />
-                </div>
-
-                <div className="mt-3">
-                  <label className="block text-xs font-medium text-gray-600 mb-1">
-                    중복 발송 방지 기간 (일)
-                  </label>
-                  <input
-                    type="number"
-                    value={editCompany.duplicateDays}
-                    onChange={(e) => setEditCompany({ ...editCompany, duplicateDays: Number(e.target.value) })}
-                    className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                    min="0"
-                    placeholder="7"
-                  />
-                </div>
-
-                <div className="mt-3 flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    id="holidaySend"
-                    checked={editCompany.holidaySend}
-                    onChange={(e) => setEditCompany({ ...editCompany, holidaySend: e.target.checked })}
-                    className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
-                  />
-                  <label htmlFor="holidaySend" className="text-sm text-gray-700">
-                    휴일 발송 허용
-                  </label>
-                </div>
-                </div>
-
-{/* 단가 설정 섹션 */}
-<div className="pt-4 border-t">
-  <h4 className="text-sm font-semibold text-gray-800 mb-3">💰 단가 설정 (원)</h4>
-  
-  <div className="grid grid-cols-2 gap-3">
-    <div>
-      <label className="block text-xs font-medium text-gray-600 mb-1">SMS</label>
-      <input
-        type="number"
-        step="0.1"
-        value={editCompany.costPerSms}
-        onChange={(e) => setEditCompany({ ...editCompany, costPerSms: Number(e.target.value) })}
-        className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-      />
-    </div>
-    <div>
-      <label className="block text-xs font-medium text-gray-600 mb-1">LMS</label>
-      <input
-        type="number"
-        step="0.1"
-        value={editCompany.costPerLms}
-        onChange={(e) => setEditCompany({ ...editCompany, costPerLms: Number(e.target.value) })}
-        className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-      />
-    </div>
-    <div>
-      <label className="block text-xs font-medium text-gray-600 mb-1">MMS</label>
-      <input
-        type="number"
-        step="0.1"
-        value={editCompany.costPerMms}
-        onChange={(e) => setEditCompany({ ...editCompany, costPerMms: Number(e.target.value) })}
-        className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-      />
-    </div>
-    <div>
-      <label className="block text-xs font-medium text-gray-600 mb-1">카카오</label>
-      <input
-        type="number"
-        step="0.1"
-        value={editCompany.costPerKakao}
-        onChange={(e) => setEditCompany({ ...editCompany, costPerKakao: Number(e.target.value) })}
-        className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-      />
-    </div>
-    </div>
-</div>
-
-{/* 🏷️ 분류 코드 관리 */}
-<div className="pt-4 border-t">
-  <h4 className="text-sm font-semibold text-gray-800 mb-3">🏷️ 분류 코드 관리</h4>
-  <p className="text-xs text-gray-500 mb-3">브랜드, 팀 등으로 고객/사용자를 구분할 때 사용</p>
-  
-  <div className="flex flex-wrap gap-2 mb-3">
-    {editCompany.storeCodeList.map((code, idx) => (
-      <span key={idx} className="inline-flex items-center gap-1 px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm">
-        {code}
-        <button
-          type="button"
-          onClick={() => setEditCompany({
-            ...editCompany,
-            storeCodeList: editCompany.storeCodeList.filter((_, i) => i !== idx)
-          })}
-          className="text-blue-600 hover:text-blue-800 font-bold"
-        >
-          ×
-        </button>
-      </span>
-    ))}
-    {editCompany.storeCodeList.length === 0 && (
-      <span className="text-gray-400 text-sm">분류 코드 없음 (전체 공유)</span>
-    )}
-  </div>
-  
-  <div className="flex gap-2">
-    <input
-      type="text"
-      value={editCompany.newStoreCode}
-      onChange={(e) => setEditCompany({ ...editCompany, newStoreCode: e.target.value.toUpperCase() })}
-      className="flex-1 px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-      placeholder="예: LUNA, BLOOM, ONLINE"
-      onKeyPress={(e) => {
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          const code = editCompany.newStoreCode.trim();
-          if (code && !editCompany.storeCodeList.includes(code)) {
-            setEditCompany({
-              ...editCompany,
-              storeCodeList: [...editCompany.storeCodeList, code],
-              newStoreCode: ''
-            });
-          }
-        }
-      }}
-    />
-    <button
-      type="button"
-      onClick={() => {
-        const code = editCompany.newStoreCode.trim();
-        if (code && !editCompany.storeCodeList.includes(code)) {
-          setEditCompany({
-            ...editCompany,
-            storeCodeList: [...editCompany.storeCodeList, code],
-            newStoreCode: ''
-          });
-        }
-      }}
-      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm"
-    >
-      추가
-    </button>
-  </div>
-</div>
-
-<div className="flex gap-3 pt-4">
+            
+            {/* 탭 네비게이션 */}
+            <div className="flex border-b px-2 bg-gray-50">
+              {[
+                { key: 'basic', label: '기본정보', icon: '🏢' },
+                { key: 'send', label: '발송정책', icon: '📋' },
+                { key: 'cost', label: '단가', icon: '💰' },
+                { key: 'ai', label: 'AI설정', icon: '🤖' },
+                { key: 'store', label: '분류코드', icon: '🏷️' },
+                { key: 'fields', label: '필터항목', icon: '🔍' },
+              ].map((tab) => (
                 <button
+                  key={tab.key}
                   type="button"
-                  onClick={() => setShowEditCompanyModal(false)}
-                  className="flex-1 px-4 py-2 border rounded-lg text-gray-700 hover:bg-gray-50"
+                  onClick={() => setEditCompanyTab(tab.key as any)}
+                  className={`flex-1 px-2 py-3 text-xs font-medium border-b-2 transition-colors ${
+                    editCompanyTab === tab.key
+                      ? 'border-blue-600 text-blue-600 bg-white'
+                      : 'border-transparent text-gray-500 hover:text-gray-700'
+                  }`}
                 >
+                  <span className="block text-base">{tab.icon}</span>
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            <form onSubmit={handleUpdateCompany} className="flex-1 overflow-y-auto p-6">
+              {/* 기본정보 탭 */}
+              {editCompanyTab === 'basic' && (
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">회사명 *</label>
+                    <input type="text" value={editCompany.companyName}
+                      onChange={(e) => setEditCompany({ ...editCompany, companyName: e.target.value })}
+                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" required />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">담당자명</label>
+                    <input type="text" value={editCompany.contactName}
+                      onChange={(e) => setEditCompany({ ...editCompany, contactName: e.target.value })}
+                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">이메일</label>
+                    <input type="email" value={editCompany.contactEmail}
+                      onChange={(e) => setEditCompany({ ...editCompany, contactEmail: e.target.value })}
+                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">연락처</label>
+                    <input type="text" value={editCompany.contactPhone}
+                      onChange={(e) => setEditCompany({ ...editCompany, contactPhone: e.target.value })}
+                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" placeholder="010-0000-0000" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">요금제 *</label>
+                    <select value={editCompany.planId}
+                      onChange={(e) => setEditCompany({ ...editCompany, planId: e.target.value })}
+                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" required>
+                      <option value="">선택하세요</option>
+                      {plans.map((plan) => (
+                        <option key={plan.id} value={plan.id}>{plan.plan_name} ({plan.max_customers.toLocaleString()}명)</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">상태 *</label>
+                    <select value={editCompany.status}
+                      onChange={(e) => setEditCompany({ ...editCompany, status: e.target.value })}
+                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
+                      <option value="trial">체험</option>
+                      <option value="active">활성</option>
+                      <option value="suspended">정지</option>
+                      <option value="terminated">해지</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">080 수신거부번호</label>
+                    <input type="text" value={editCompany.rejectNumber}
+                      onChange={(e) => setEditCompany({ ...editCompany, rejectNumber: e.target.value })}
+                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" placeholder="080-000-0000" />
+                  </div>
+                </div>
+              )}
+
+              {/* 발송정책 탭 */}
+              {editCompanyTab === 'send' && (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">발송 시작 시간</label>
+                      <select value={editCompany.sendHourStart}
+                        onChange={(e) => setEditCompany({ ...editCompany, sendHourStart: Number(e.target.value) })}
+                        className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+                        {Array.from({ length: 24 }, (_, i) => (
+                          <option key={i} value={i}>{String(i).padStart(2, '0')}:00</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">발송 종료 시간</label>
+                      <select value={editCompany.sendHourEnd}
+                        onChange={(e) => setEditCompany({ ...editCompany, sendHourEnd: Number(e.target.value) })}
+                        className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+                        {Array.from({ length: 24 }, (_, i) => (
+                          <option key={i} value={i}>{String(i).padStart(2, '0')}:00</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">일일 발송 한도 (0 = 무제한)</label>
+                    <input type="number" value={editCompany.dailyLimit}
+                      onChange={(e) => setEditCompany({ ...editCompany, dailyLimit: Number(e.target.value) })}
+                      className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" min="0" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">중복 발송 방지 기간 (일)</label>
+                    <input type="number" value={editCompany.duplicateDays}
+                      onChange={(e) => setEditCompany({ ...editCompany, duplicateDays: Number(e.target.value) })}
+                      className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" min="0" />
+                  </div>
+                                    <div className="flex items-center gap-2">
+                    <input type="checkbox" id="approvalRequired" checked={editCompany.approvalRequired}
+                      onChange={(e) => setEditCompany({ ...editCompany, approvalRequired: e.target.checked })}
+                      className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500" />
+                    <label htmlFor="approvalRequired" className="text-sm text-gray-700">발송 전 승인 필요</label>
+                  </div>
+                  <div className="bg-blue-50 rounded-lg p-3 mt-2">
+                    <p className="text-xs text-blue-700">
+                      💡 발송 시간은 한국 시간(KST) 기준이며, 광고성 메시지는 08:00~21:00 사이에만 발송할 수 있습니다.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* 단가 탭 */}
+              {editCompanyTab === 'cost' && (
+                <div className="space-y-4">
+                  <p className="text-sm text-gray-500">건당 단가를 설정합니다. (단위: 원)</p>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="bg-gray-50 rounded-lg p-4">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">SMS</label>
+                      <div className="flex items-center gap-1">
+                        <input type="number" step="0.1" value={editCompany.costPerSms}
+                          onChange={(e) => setEditCompany({ ...editCompany, costPerSms: Number(e.target.value) })}
+                          className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                        <span className="text-sm text-gray-500">원</span>
+                      </div>
+                    </div>
+                    <div className="bg-gray-50 rounded-lg p-4">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">LMS</label>
+                      <div className="flex items-center gap-1">
+                        <input type="number" step="0.1" value={editCompany.costPerLms}
+                          onChange={(e) => setEditCompany({ ...editCompany, costPerLms: Number(e.target.value) })}
+                          className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                        <span className="text-sm text-gray-500">원</span>
+                      </div>
+                    </div>
+                    <div className="bg-gray-50 rounded-lg p-4">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">MMS</label>
+                      <div className="flex items-center gap-1">
+                        <input type="number" step="0.1" value={editCompany.costPerMms}
+                          onChange={(e) => setEditCompany({ ...editCompany, costPerMms: Number(e.target.value) })}
+                          className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                        <span className="text-sm text-gray-500">원</span>
+                      </div>
+                    </div>
+                    <div className="bg-gray-50 rounded-lg p-4">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">카카오</label>
+                      <div className="flex items-center gap-1">
+                        <input type="number" step="0.1" value={editCompany.costPerKakao}
+                          onChange={(e) => setEditCompany({ ...editCompany, costPerKakao: Number(e.target.value) })}
+                          className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                        <span className="text-sm text-gray-500">원</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* AI설정 탭 */}
+              {editCompanyTab === 'ai' && (
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">타겟 전략</label>
+                    <select value={editCompany.targetStrategy}
+                      onChange={(e) => setEditCompany({ ...editCompany, targetStrategy: e.target.value })}
+                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
+                      <option value="balanced">균형형 (Balanced)</option>
+                      <option value="aggressive">공격형 (Aggressive) - 넓은 타겟</option>
+                      <option value="conservative">보수형 (Conservative) - 정밀 타겟</option>
+                    </select>
+                    <p className="text-xs text-gray-500 mt-1">AI가 타겟을 추출할 때 적용하는 전략입니다.</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input type="checkbox" id="crossCategory" checked={editCompany.crossCategoryAllowed}
+                      onChange={(e) => setEditCompany({ ...editCompany, crossCategoryAllowed: e.target.checked })}
+                      className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500" />
+                    <label htmlFor="crossCategory" className="text-sm text-gray-700">교차 카테고리 타겟 허용</label>
+                  </div>
+                  <p className="text-xs text-gray-500 -mt-2 ml-6">예: 스킨케어 구매자에게 색조 제품 추천</p>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">제외 세그먼트</label>
+                    <p className="text-xs text-gray-500 mb-2">AI 타겟에서 항상 제외할 고객 그룹</p>
+                    <div className="flex flex-wrap gap-2 mb-3">
+                      {editCompany.excludedSegments.map((seg: string, idx: number) => (
+                        <span key={idx} className="inline-flex items-center gap-1 px-3 py-1 bg-red-100 text-red-800 rounded-full text-sm">
+                          {seg}
+                          <button type="button"
+                            onClick={() => setEditCompany({
+                              ...editCompany,
+                              excludedSegments: editCompany.excludedSegments.filter((_: string, i: number) => i !== idx)
+                            })}
+                            className="text-red-600 hover:text-red-800 font-bold">×</button>
+                        </span>
+                      ))}
+                      {editCompany.excludedSegments.length === 0 && (
+                        <span className="text-gray-400 text-sm">제외 세그먼트 없음</span>
+                      )}
+                    </div>
+                    <div className="flex gap-2">
+                      <input type="text" value={editCompany.newExcludedSegment}
+                        onChange={(e) => setEditCompany({ ...editCompany, newExcludedSegment: e.target.value })}
+                        className="flex-1 px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                        placeholder="예: 탈퇴요청, VIP제외, 휴면고객"
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            const seg = editCompany.newExcludedSegment.trim();
+                            if (seg && !editCompany.excludedSegments.includes(seg)) {
+                              setEditCompany({
+                                ...editCompany,
+                                excludedSegments: [...editCompany.excludedSegments, seg],
+                                newExcludedSegment: ''
+                              });
+                            }
+                          }
+                        }} />
+                      <button type="button"
+                        onClick={() => {
+                          const seg = editCompany.newExcludedSegment.trim();
+                          if (seg && !editCompany.excludedSegments.includes(seg)) {
+                            setEditCompany({
+                              ...editCompany,
+                              excludedSegments: [...editCompany.excludedSegments, seg],
+                              newExcludedSegment: ''
+                            });
+                          }
+                        }}
+                        className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm">
+                        추가
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="bg-purple-50 rounded-lg p-3 mt-2">
+                    <p className="text-xs text-purple-700">
+                      🤖 이 설정은 AI가 캠페인 타겟을 추출할 때 기본 조건으로 적용됩니다.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* 분류코드 탭 */}
+              {editCompanyTab === 'store' && (
+                <div className="space-y-4">
+                  <p className="text-sm text-gray-500">브랜드, 팀 등으로 고객/사용자를 구분할 때 사용합니다.</p>
+                  <div className="flex flex-wrap gap-2 mb-3">
+                    {editCompany.storeCodeList.map((code: string, idx: number) => (
+                      <span key={idx} className="inline-flex items-center gap-1 px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm">
+                        {code}
+                        <button type="button"
+                          onClick={() => setEditCompany({
+                            ...editCompany,
+                            storeCodeList: editCompany.storeCodeList.filter((_: string, i: number) => i !== idx)
+                          })}
+                          className="text-blue-600 hover:text-blue-800 font-bold">×</button>
+                      </span>
+                    ))}
+                    {editCompany.storeCodeList.length === 0 && (
+                      <span className="text-gray-400 text-sm">분류 코드 없음 (전체 공유)</span>
+                    )}
+                  </div>
+                  <div className="flex gap-2">
+                    <input type="text" value={editCompany.newStoreCode}
+                      onChange={(e) => setEditCompany({ ...editCompany, newStoreCode: e.target.value.toUpperCase() })}
+                      className="flex-1 px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                      placeholder="예: LUNA, BLOOM, ONLINE"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          const code = editCompany.newStoreCode.trim();
+                          if (code && !editCompany.storeCodeList.includes(code)) {
+                            setEditCompany({
+                              ...editCompany,
+                              storeCodeList: [...editCompany.storeCodeList, code],
+                              newStoreCode: ''
+                            });
+                          }
+                        }
+                      }} />
+                    <button type="button"
+                      onClick={() => {
+                        const code = editCompany.newStoreCode.trim();
+                        if (code && !editCompany.storeCodeList.includes(code)) {
+                          setEditCompany({
+                            ...editCompany,
+                            storeCodeList: [...editCompany.storeCodeList, code],
+                            newStoreCode: ''
+                          });
+                        }
+                      }}
+                      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm">
+                      추가
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* 필터항목 탭 */}
+              {editCompanyTab === 'fields' && (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-sm text-gray-600">이 고객사에서 사용할 필터 항목을 선택하세요.</p>
+                    <div className="flex gap-2">
+                      <button type="button" onClick={() => setEnabledFields(standardFields.map((f: any) => f.field_key))}
+                        className="text-xs text-blue-600 hover:underline">전체선택</button>
+                      <button type="button" onClick={() => setEnabledFields([])}
+                        className="text-xs text-gray-500 hover:underline">전체해제</button>
+                    </div>
+                  </div>
+                  <p className="text-xs text-gray-400 mb-3">선택: {enabledFields.length} / {standardFields.length}개</p>
+
+                  {['basic', 'segment', 'purchase', 'loyalty', 'store', 'preference', 'marketing', 'custom'].map(cat => {
+                    const catFields = standardFields.filter((f: any) => f.category === cat);
+                    if (catFields.length === 0) return null;
+                    const catLabels: Record<string, string> = {
+                      basic: '기본정보', segment: '등급/세그먼트', purchase: '구매/거래',
+                      loyalty: '충성도/활동', store: '소속/채널', preference: '선호/관심',
+                      marketing: '마케팅수신', custom: '커스텀'
+                    };
+                    const allChecked = catFields.every((f: any) => enabledFields.includes(f.field_key));
+                    return (
+                      <div key={cat} className="border rounded-lg p-3">
+                        <div className="flex items-center gap-2 mb-2">
+                          <input type="checkbox" checked={allChecked}
+                            onChange={() => {
+                              if (allChecked) {
+                                setEnabledFields(enabledFields.filter(k => !catFields.some((f: any) => f.field_key === k)));
+                              } else {
+                                const newKeys = catFields.map((f: any) => f.field_key).filter((k: string) => !enabledFields.includes(k));
+                                setEnabledFields([...enabledFields, ...newKeys]);
+                              }
+                            }}
+                            className="w-4 h-4 text-blue-600 rounded" />
+                          <span className="text-sm font-semibold text-gray-700">{catLabels[cat] || cat}</span>
+                          <span className="text-xs text-gray-400">({catFields.filter((f: any) => enabledFields.includes(f.field_key)).length}/{catFields.length})</span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-1 ml-6">
+                          {catFields.map((field: any) => (
+                            <label key={field.field_key} className="flex items-center gap-2 py-1 cursor-pointer hover:bg-gray-50 rounded px-1">
+                              <input type="checkbox"
+                                checked={enabledFields.includes(field.field_key)}
+                                onChange={() => {
+                                  setEnabledFields(prev =>
+                                    prev.includes(field.field_key)
+                                      ? prev.filter(k => k !== field.field_key)
+                                      : [...prev, field.field_key]
+                                  );
+                                }}
+                                className="w-3.5 h-3.5 text-blue-600 rounded" />
+                              <span className="text-xs text-gray-700">{field.display_name}</span>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              <div className="flex gap-3 pt-6 mt-4 border-t">
+                <button type="button" onClick={() => setShowEditCompanyModal(false)}
+                  className="flex-1 px-4 py-2 border rounded-lg text-gray-700 hover:bg-gray-50">
                   취소
                 </button>
-                <button
-                  type="submit"
-                  className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-                >
+                <button type="submit"
+                  className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
                   저장
                 </button>
               </div>
@@ -2179,6 +2702,45 @@ export default function AdminDashboard() {
               >
                 취소하기
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 발신번호 수정 모달 */}
+      {editingCallback && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+            <div className="p-6">
+              <h3 className="text-lg font-semibold text-gray-800 mb-4">📞 발신번호 수정</h3>
+              <form onSubmit={handleUpdateCallback} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">발신번호 *</label>
+                  <input
+                    type="text"
+                    value={editingCallback.phone}
+                    onChange={(e) => setEditingCallback({ ...editingCallback, phone: e.target.value })}
+                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">별칭</label>
+                  <input
+                    type="text"
+                    value={editingCallback.label}
+                    onChange={(e) => setEditingCallback({ ...editingCallback, label: e.target.value })}
+                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                    placeholder="예: 대표번호, 강남점"
+                  />
+                </div>
+                <div className="flex gap-2 pt-2">
+                  <button type="button" onClick={() => setEditingCallback(null)}
+                    className="flex-1 px-4 py-2 border rounded-lg text-gray-700 hover:bg-gray-50">취소</button>
+                  <button type="submit"
+                    className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">저장</button>
+                </div>
+              </form>
             </div>
           </div>
         </div>
@@ -2576,6 +3138,57 @@ export default function AdminDashboard() {
                 className="w-full px-4 py-3 text-blue-600 font-medium hover:bg-blue-50 transition-colors"
               >
                 확인
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 플랜 신청 거절 모달 */}
+      {showRejectModal && rejectTarget && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[60]">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+            <div className="p-6">
+              <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-4">
+                <svg className="w-6 h-6 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </div>
+              <h3 className="text-lg font-semibold text-center text-gray-900 mb-2">플랜 신청 거절</h3>
+              <p className="text-sm text-center text-gray-600 mb-4">
+                <strong>{rejectTarget.company_name}</strong>의<br/>
+                {rejectTarget.requested_plan_name} 플랜 신청을 거절합니다.
+              </p>
+              
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  거절 사유 *
+                </label>
+                <textarea
+                  value={rejectReason}
+                  onChange={(e) => setRejectReason(e.target.value)}
+                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-red-500 outline-none resize-none"
+                  rows={3}
+                  placeholder="거절 사유를 입력해주세요."
+                />
+              </div>
+            </div>
+            <div className="flex border-t">
+              <button
+                onClick={() => {
+                  setShowRejectModal(false);
+                  setRejectTarget(null);
+                  setRejectReason('');
+                }}
+                className="flex-1 px-4 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors border-r"
+              >
+                취소
+              </button>
+              <button
+                onClick={handleRejectRequest}
+                className="flex-1 px-4 py-3 text-red-600 font-medium hover:bg-red-50 transition-colors"
+              >
+                거절하기
               </button>
             </div>
           </div>

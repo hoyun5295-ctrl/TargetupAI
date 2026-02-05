@@ -16,6 +16,7 @@ import uploadRoutes from './routes/upload'
 import unsubscribesRoutes from './routes/unsubscribes';
 import addressBooksRoutes from './routes/address-books';
 import adminRoutes from './routes/admin';
+import testContactsRoutes from './routes/test-contacts';
 
 // DB 연결
 import './config/database';
@@ -64,6 +65,7 @@ app.use('/api/v1/results', resultsRoutes);
 app.use('/api/unsubscribes', unsubscribesRoutes);
 app.use('/api/address-books', addressBooksRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/test-contacts', testContactsRoutes);
 
 // 404 처리
 app.use((req, res) => {

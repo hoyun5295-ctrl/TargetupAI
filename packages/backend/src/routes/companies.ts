@@ -101,19 +101,95 @@ router.put('/settings', authenticate, async (req: Request, res: Response) => {
     res.status(500).json({ error: '설정 저장 실패' });
   }
 });
+// GET /api/companies/my-plan - 현재 회사 플랜 정보
+router.get('/my-plan', async (req: Request, res: Response) => {
+  try {
+    const companyId = (req as any).user?.companyId;
+    if (!companyId) {
+      return res.status(401).json({ error: '인증 필요' });
+    }
+
+    const result = await query(`
+      SELECT 
+        c.company_name,
+        c.plan_id,
+        p.plan_name,
+        p.plan_code,
+        p.max_customers,
+        c.created_at,
+        c.created_at + INTERVAL '7 days' as trial_expires_at,
+        NOW() > c.created_at + INTERVAL '7 days' as is_trial_expired,
+        (SELECT COUNT(*) FROM customers WHERE company_id = c.id) as current_customers
+      FROM companies c
+      LEFT JOIN plans p ON c.plan_id = p.id
+      WHERE c.id = $1
+    `, [companyId]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: '회사 정보를 찾을 수 없습니다.' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('플랜 조회 실패:', error);
+    res.status(500).json({ error: '플랜 조회 실패' });
+  }
+});
+
+// POST /api/companies/plan-request - 플랜 변경 신청
+router.post('/plan-request', async (req: Request, res: Response) => {
+  try {
+    const companyId = (req as any).user?.companyId;
+    const userId = (req as any).user?.userId;
+    
+    if (!companyId) {
+      return res.status(401).json({ error: '인증 필요' });
+    }
+
+    const { requestedPlanId, message } = req.body;
+
+    if (!requestedPlanId) {
+      return res.status(400).json({ error: '요청할 플랜을 선택해주세요.' });
+    }
+
+    // plan_requests 테이블에 저장
+    await query(`
+      INSERT INTO plan_requests (company_id, user_id, requested_plan_id, message, status)
+      VALUES ($1, $2, $3, $4, 'pending')
+    `, [companyId, userId, requestedPlanId, message || null]);
+
+    res.json({ message: '플랜 변경 신청이 접수되었습니다.' });
+  } catch (error) {
+    console.error('플랜 신청 실패:', error);
+    res.status(500).json({ error: '플랜 신청 실패' });
+  }
+});
 
 // 회신번호 목록 조회
 router.get('/callback-numbers', async (req: Request, res: Response) => {
   try {
     const companyId = (req as any).user?.companyId;
+    const userId = (req as any).user?.userId;
+    const userType = (req as any).user?.userType;
     if (!companyId) {
       return res.status(401).json({ success: false, error: '인증 필요' });
     }
 
-    const result = await query(
-      'SELECT id, phone, label, is_default, created_at FROM callback_numbers WHERE company_id = $1 ORDER BY is_default DESC, created_at ASC',
-      [companyId]
-    );
+    let sql = 'SELECT id, phone, label, is_default, store_code, store_name, created_at FROM callback_numbers WHERE company_id = $1';
+    const params: any[] = [companyId];
+
+    // 일반 사용자는 본인 store_codes에 해당하는 회신번호만
+    if (userType !== 'admin') {
+      const userResult = await query('SELECT store_codes FROM users WHERE id = $1', [userId]);
+      const storeCodes = userResult.rows[0]?.store_codes;
+      if (storeCodes && storeCodes.length > 0) {
+        sql += ' AND (store_code = ANY($2) OR store_code IS NULL OR is_default = true)';
+        params.push(storeCodes);
+      }
+    }
+
+    sql += ' ORDER BY is_default DESC, store_code ASC, created_at ASC';
+    const result = await query(sql, params);
 
     res.json({ success: true, numbers: result.rows });
   } catch (error) {
@@ -248,21 +324,25 @@ router.post('/', requireSuperAdmin, async (req: Request, res: Response) => {
   }
 });
 
-// PUT /api/companies/:id - 고객사 수정
+// PUT /api/companies/:id - 고객사 수정 (전체 설정 포함)
 router.put('/:id', requireSuperAdmin, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const {
-      companyName,
-      businessNumber,
-      ceoName,
-      contactName,
-      contactEmail,
-      contactPhone,
-      address,
-      planId,
-      status,
-      dataInputMethod,
+      companyName, businessNumber, ceoName,
+      contactName, contactEmail, contactPhone,
+      address, planId, status, dataInputMethod,
+      rejectNumber,
+      // 발송정책
+      sendHourStart, sendHourEnd, dailyLimit,
+      holidaySend, duplicateDays,
+      // 단가
+      costPerSms, costPerLms, costPerMms, costPerKakao,
+      // AI설정
+      targetStrategy, crossCategoryAllowed, excludedSegments,
+      approvalRequired,
+      // 분류코드
+      storeCodeList,
     } = req.body;
 
     const result = await query(
@@ -277,13 +357,36 @@ router.put('/:id', requireSuperAdmin, async (req: Request, res: Response) => {
         plan_id = COALESCE($8, plan_id),
         status = COALESCE($9, status),
         data_input_method = COALESCE($10, data_input_method),
+        reject_number = COALESCE($11, reject_number),
+        send_start_hour = COALESCE($12, send_start_hour),
+        send_end_hour = COALESCE($13, send_end_hour),
+        daily_limit_per_customer = COALESCE($14, daily_limit_per_customer),
+        holiday_send_allowed = COALESCE($15, holiday_send_allowed),
+        duplicate_prevention_days = COALESCE($16, duplicate_prevention_days),
+        cost_per_sms = COALESCE($17, cost_per_sms),
+        cost_per_lms = COALESCE($18, cost_per_lms),
+        cost_per_mms = COALESCE($19, cost_per_mms),
+        cost_per_kakao = COALESCE($20, cost_per_kakao),
+        target_strategy = COALESCE($21, target_strategy),
+        cross_category_allowed = COALESCE($22, cross_category_allowed),
+        excluded_segments = COALESCE($23, excluded_segments),
+        approval_required = COALESCE($24, approval_required),
+        store_code_list = COALESCE($25, store_code_list),
         updated_at = CURRENT_TIMESTAMP
-      WHERE id = $11
+      WHERE id = $26
       RETURNING *`,
       [
         companyName, businessNumber, ceoName, contactName,
         contactEmail, contactPhone, address, planId,
-        status, dataInputMethod, id
+        status, dataInputMethod, rejectNumber,
+        sendHourStart, sendHourEnd, dailyLimit,
+        holidaySend, duplicateDays,
+        costPerSms, costPerLms, costPerMms, costPerKakao,
+        targetStrategy, crossCategoryAllowed,
+        excludedSegments ? JSON.stringify(excludedSegments) : null,
+        approvalRequired,
+        storeCodeList ? JSON.stringify(storeCodeList) : null,
+        id
       ]
     );
 
@@ -313,7 +416,7 @@ router.get('/callback-numbers', async (req: Request, res: Response) => {
       'SELECT id, phone, label, is_default, created_at FROM callback_numbers WHERE company_id = $1 ORDER BY is_default DESC, created_at ASC',
       [companyId]
     );
-
+  
     res.json({ success: true, numbers: result.rows });
   } catch (error) {
     console.error('회신번호 조회 실패:', error);
