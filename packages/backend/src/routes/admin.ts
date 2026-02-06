@@ -201,7 +201,8 @@ router.put('/companies/:id', authenticate, requireSuperAdmin, async (req: Reques
     sendHourStart, sendHourEnd, dailyLimit, holidaySend, duplicateDays,
     costPerSms, costPerLms, costPerMms, costPerKakao,
     storeCodeList,
-    businessNumber, ceoName, businessType, businessItem, address
+    businessNumber, ceoName, businessType, businessItem, address,
+    allowCallbackSelfRegister
   } = req.body;
   
   try {
@@ -230,10 +231,11 @@ router.put('/companies/:id', authenticate, requireSuperAdmin, async (req: Reques
           business_type = COALESCE($21, business_type),
           business_item = COALESCE($22, business_item),
           address = COALESCE($23, address),
+          allow_callback_self_register = COALESCE($24, allow_callback_self_register),
           updated_at = NOW()
-      WHERE id = $24
+      WHERE id = $25
       RETURNING *
-    `, [companyName, contactName, contactEmail, contactPhone, status, planId, rejectNumber, brandName, sendHourStart, sendHourEnd, dailyLimit, holidaySend, duplicateDays, costPerSms, costPerLms, costPerMms, costPerKakao, storeCodeList ? JSON.stringify(storeCodeList) : null, businessNumber, ceoName, businessType, businessItem, address, id]);
+    `, [companyName, contactName, contactEmail, contactPhone, status, planId, rejectNumber, brandName, sendHourStart, sendHourEnd, dailyLimit, holidaySend, duplicateDays, costPerSms, costPerLms, costPerMms, costPerKakao, storeCodeList ? JSON.stringify(storeCodeList) : null, businessNumber, ceoName, businessType, businessItem, address, allowCallbackSelfRegister !== undefined ? allowCallbackSelfRegister : null, id]);
     
     if (result.rows.length === 0) {
       return res.status(404).json({ error: '회사를 찾을 수 없습니다.' });

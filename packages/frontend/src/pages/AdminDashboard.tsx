@@ -92,6 +92,7 @@ export default function AdminDashboard() {
     crossCategoryAllowed: true,
     excludedSegments: [] as string[],
     approvalRequired: false,
+    allowCallbackSelfRegister: false,
     storeCodeList: [] as string[],
     newStoreCode: '',
     newExcludedSegment: '',
@@ -886,6 +887,7 @@ const handleApproveRequest = async (id: string) => {
           crossCategoryAllowed: c.cross_category_allowed ?? true,
           excludedSegments: c.excluded_segments || [],
           approvalRequired: c.approval_required ?? false,
+          allowCallbackSelfRegister: c.allow_callback_self_register ?? false,
           storeCodeList: c.store_code_list || [],
           newStoreCode: '',
           newExcludedSegment: '',
@@ -3005,6 +3007,12 @@ const handleApproveRequest = async (id: string) => {
                       onChange={(e) => setEditCompany({ ...editCompany, approvalRequired: e.target.checked })}
                       className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500" />
                     <label htmlFor="approvalRequired" className="text-sm text-gray-700">발송 전 승인 필요</label>
+                    </div>
+                  <div className="flex items-center gap-2">
+                    <input type="checkbox" id="allowCallbackSelfRegister" checked={editCompany.allowCallbackSelfRegister}
+                      onChange={(e) => setEditCompany({ ...editCompany, allowCallbackSelfRegister: e.target.checked })}
+                      className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500" />
+                    <label htmlFor="allowCallbackSelfRegister" className="text-sm text-gray-700">발신번호 자체 등록 허용</label>
                   </div>
                   <div className="bg-blue-50 rounded-lg p-3 mt-2">
                     <p className="text-xs text-blue-700">

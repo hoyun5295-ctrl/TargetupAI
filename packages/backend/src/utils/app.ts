@@ -19,12 +19,6 @@ import adminRoutes from './routes/admin';
 import testContactsRoutes from './routes/test-contacts';
 import billingRoutes from './routes/billing';
 
-// 공용 관리 라우트 (슈퍼관리자 + 고객사관리자)
-import manageUsersRoutes from './routes/manage-users';
-import manageCallbacksRoutes from './routes/manage-callbacks';
-import manageScheduledRoutes from './routes/manage-scheduled';
-import manageStatsRoutes from './routes/manage-stats';
-
 // DB 연결
 import './config/database';
 
@@ -74,12 +68,6 @@ app.use('/api/address-books', addressBooksRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/admin/billing', billingRoutes);
 app.use('/api/test-contacts', testContactsRoutes);
-
-// 공용 관리 라우트 (슈퍼관리자 + 고객사관리자)
-app.use('/api/manage/users', manageUsersRoutes);
-app.use('/api/manage/callbacks', manageCallbacksRoutes);
-app.use('/api/manage/scheduled', manageScheduledRoutes);
-app.use('/api/manage/stats', manageStatsRoutes);
 
 // 404 처리
 app.use((req, res) => {
