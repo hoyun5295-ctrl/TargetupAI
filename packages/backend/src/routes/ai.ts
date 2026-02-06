@@ -97,7 +97,7 @@ router.post('/recommend-target', async (req: Request, res: Response) => {
 
     // 회사 정보 조회 (스키마 포함)
     const companyResult = await query(
-      `SELECT company_name, business_type, reject_number, brand_name, customer_schema FROM companies WHERE id = $1::uuid`,
+      `SELECT company_name, business_category, reject_number, brand_name, customer_schema FROM companies WHERE id = $1::uuid`,
       [companyId]
     );
     const companyInfo = companyResult.rows[0] || {};

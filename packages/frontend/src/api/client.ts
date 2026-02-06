@@ -70,4 +70,29 @@ export const aiApi = {
   generateMessage: (data: any) => api.post('/ai/generate-message', data),
   recommendTarget: (data: any) => api.post('/ai/recommend-target', data),
 };
+
+export const billingApi = {
+  // 기존 거래내역서
+  preview: (params: any) => api.get('/admin/billing/preview', { params }),
+  createInvoice: (data: any) => api.post('/admin/billing/invoices', data),
+  getInvoices: (params?: any) => api.get('/admin/billing/invoices', { params }),
+  getInvoice: (id: string) => api.get(`/admin/billing/invoices/${id}`),
+  updateStatus: (id: string, status: string) => api.put(`/admin/billing/invoices/${id}/status`, { status }),
+  getPdf: (id: string) => api.get(`/admin/billing/invoices/${id}/pdf`),
+  // 정산
+  generateBilling: (data: { company_id: string; user_id?: string; billing_start: string; billing_end: string }) =>
+    api.post('/admin/billing/generate', data),
+  getBillings: (params?: { company_id?: string; year?: number; status?: string }) =>
+    api.get('/admin/billing/list', { params }),
+  getBillingItems: (id: string) =>
+    api.get(`/admin/billing/${id}/items`),
+  updateBillingStatus: (id: string, status: string) =>
+    api.put(`/admin/billing/${id}/status`, { status }),
+  deleteBilling: (id: string) =>
+    api.delete(`/admin/billing/${id}`),
+  getCompanyUsers: (companyId: string) =>
+    api.get(`/admin/billing/company-users/${companyId}`),
+  sendBillingEmail: (id: string, data: { to: string; subject: string; body_html: string }) =>
+    api.post(`/admin/billing/${id}/send-email`, data),
+};
 export default api;

@@ -15,6 +15,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.71.2",
     "@prisma/client": "^5.9.0",
+    "@types/pdfkit": "^0.17.4",
     "bcryptjs": "^2.4.3",
     "bullmq": "^5.1.0",
     "cors": "^2.8.5",
@@ -26,6 +27,7 @@
     "morgan": "^1.10.0",
     "multer": "^2.0.2",
     "mysql2": "^3.16.2",
+    "pdfkit": "^0.17.2",
     "pg": "^8.11.3",
     "xlsx": "^0.18.5",
     "zod": "^3.22.4"

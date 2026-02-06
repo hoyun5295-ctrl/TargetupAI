@@ -297,14 +297,14 @@ router.post('/', requireSuperAdmin, async (req: Request, res: Response) => {
 
     const result = await query(
       `INSERT INTO companies (
-        company_code, company_name, business_number, ceo_name,
+        name, company_code, company_name, business_number, ceo_name,
         contact_name, contact_email, contact_phone, address,
         plan_id, data_input_method, api_key, api_secret, db_name,
         created_by
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
       RETURNING *`,
       [
-        companyCode, companyName, businessNumber, ceoName,
+        companyName, companyCode, companyName, businessNumber, ceoName,
         contactName, contactEmail, contactPhone, address,
         planId, dataInputMethod, apiKey, apiSecret, dbName,
         req.user?.userId

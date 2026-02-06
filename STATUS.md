@@ -1,630 +1,820 @@
-# Target-UP 개발 현황
+# Target-UP (타겟업) - 프로젝트 레퍼런스
 
-> 최종 업데이트: 2026-02-05 세션 19 (타겟업 17)
+## 프로젝트 개요
+- **서비스**: AI 기반 SMS/LMS 마케팅 자동화 플랫폼
+- **회사**: INVITO (인비토) / 대표: Harold
+- **경로**: `C:\projects\targetup`
+- **핵심 가치**: 자연어 입력 → AI 타겟 추출 → 메시지 자동 생성 → 실제 발송
+- **구조**: 멀티 테넌트 (고객사별 독립 DB/캠페인 관리)
 
----
+## 핵심 원칙
+- **데이터 정확성**: 대상자 수는 AI 추정이 아닌 DB 실제 쿼리 결과로 산출
+- **자연어 인터페이스**: 복잡한 필터 폼 대신, 사용자가 자유롭게 설명하면 AI가 타겟 조건으로 변환
+- **처음부터 제대로**: "일단 만들고 나중에 업그레이드" 없음
+- **백업 필수**: 컨테이너 작업 전 pg_dump → 작업 → 복원. 작업 완료 후 pg_dump + git commit
+- **UI 품질**: confirm/alert 대신 커스텀 모달(복사 기능 포함), 버튼 쿨다운, 일관된 피드백
 
-## 🚀 시작 가이드
-
-```powershell
-# 1. 도커 컨테이너
-docker start targetup-postgres targetup-redis targetup-mysql
-
-# 2. 백엔드 (터미널 1)
-cd C:\projects\targetup\packages\backend && npm run dev
-
-# 3. 프론트엔드 (터미널 2)
-cd C:\projects\targetup\packages\frontend && npm run dev
-
-# 4. QTmsg (필요시)
-cd C:\projects\qtmsg\bin && .\test_in_cmd_win.bat
-```
-
----
-
-## ✅ 완료된 핵심 기능
-
-### 발송 시스템
-- [x] 즉시/예약/분할 발송 (QTmsg MySQL 연동)
-- [x] SMS/LMS/MMS 지원
-- [x] 바이트 계산 EUC-KR 통일 (한글 2byte)
-- [x] 90byte 초과 시 LMS 전환 경고 모달
-- [x] SMS 비용 절감 안내 모달
-- [x] 광고문구 자동 삽입 (080 수신거부)
-- [x] 개인화 변수 치환 (%이름%, %포인트%, %등급%)
-- [x] 발송결과 실시간 동기화 (통신사별 분포)
-- [x] 개별회신번호 발송 (직접발송 완료)
-
-### AI 마케팅
-- [x] AI 타겟 추출 + 메시지 3안 생성
-- [x] 채널/시간대 추천
-- [x] 브랜드 정보 반영 (슬로건/설명/톤)
-- [x] 동적 스키마 캐싱 (customer_schema)
-- [x] 캠페인명 AI 자동 생성
-- [x] 개인화 키워드 감지 (ai.ts: "개인화" → usePersonalization)
-- [x] 개별회신번호 키워드 감지 ("매장번호", "주이용매장" → useIndividualCallback)
-- [x] AI 캠페인 회신번호 선택 UI (2단계에 드롭다운 추가)
-- [x] AI 캠페인 시간 선택 UI (오전/오후 드롭다운 + 날짜/시간 분리)
-- [x] AI 미리보기 개인화 샘플 3개 표시
-
-### 직접 타겟 설정
-- [x] 필터 모달 UI (성별/나이/등급/지역/구매금액/최근구매)
-- [x] 실시간 대상 인원 카운트
-- [x] 타겟 추출 API (/api/customers/schema, count, extract)
-- [x] store_codes 보안 필터 (일반 사용자는 본인 매장만)
-
-### 개별회신번호
-- [x] customers.callback 컬럼 추가
-- [x] customers_unified 뷰 재생성
-- [x] callback_numbers에 store_code, store_name 추가
-- [x] 4브랜드 × 5매장 = 20개 회신번호 등록
-- [x] 25만 고객에 매장별 callback 배정
-- [x] 드롭다운 "📱 개별회신번호" 옵션
-- [x] 회신번호 검증 로직
-- [x] 직접발송 개별회신번호 발송 완료 (campaigns.ts direct-send)
-
-### 예약 전송
-- [x] 공용 달력 모달 (타겟/직접발송)
-- [x] 12시간제 + 오전/오후 드롭다운
-- [x] 현재시간 이전 예약 불가 검증
-- [x] 예약 수정/취소 기능
-- [x] 예약 대기 모달 개선 (회신번호 + 메시지 상세보기)
-
-### 주소록 & 수신거부
-- [x] 주소록 CRUD (address_books)
-- [x] 수신거부 관리 (unsubscribes)
-- [x] 080 API 콜백 연동 (나래인터넷)
-- [x] 발송 시 수신거부 자동 필터링
-
-### 슈퍼관리자
-- [x] 회사/사용자 관리 (CRUD)
-- [x] 요금제 관리 (plans)
-- [x] 발신번호 관리 (callback_numbers)
-- [x] 예약 캠페인 취소 (사유 기록)
-- [x] 비밀번호 초기화 SMS 발송
-- [x] 권한별 접근 제어 (super_admin/company_admin/company_user)
-
-### 요금제 시스템
-- [x] 요금제 안내 페이지 (PricingPage.tsx)
-- [x] 요금제 신청/승인/거절 (plan_requests)
-- [x] 플랜 제한 체크 모달
-
-### UI/UX
-- [x] 대시보드 리디자인 (INVITO 컬러: 그린+골드)
-- [x] Lucide React 아이콘
-- [x] 3컬럼 레이아웃 (AI/직접타겟/직접발송)
-- [x] 토스트 알림 + 예쁜 모달 전면 적용
-- [x] 미리보기 모달 (폰 프레임 UI)
-- [x] 예약 대기 모달 버튼 정렬 (예약취소/문안수정 flex gap-2)
+## 방향성
+- MVP → 엔터프라이즈급 마케팅 자동화 플랫폼으로 확장
+- SMS/LMS → MMS, 카카오톡 등 멀티채널 확장 예정
+- 고객 데이터 동기화: Sync Agent(범용 exe) + Excel/CSV 업로드(AI 자동 컬럼 매핑)
+- 소스 보호: 핵심 로직 별도 서버 분리, 빌드 시 난독화, 라이선스 서버 검토
+- 프로덕션 배포: IDC 서버 (HTTPS, AES-256, 방화벽, Rate Limiting 등)
 
 ---
 
-## ✅ 세션19 완료 작업 상세
-
-### 1. AI 캠페인 시간 선택 UI 개선
-- **파일**: Dashboard.tsx 2040~2133줄
-- 기존 `datetime-local` → 날짜(date) + 오전/오후 드롭다운 + 시(1-12) + 분(0-59)
-- 12시간제 → 24시간제 자동 변환 로직
-
-### 2. AI 캠페인 회신번호 선택 UI 추가
-- **파일**: Dashboard.tsx 2단계
-- 회신번호 드롭다운 추가 (개별회신번호 옵션 포함)
-- handleAiCampaignSend에 회신번호 검증 추가
-
-### 3. routes/ai.ts 개인화 정보 전달 버그 수정
-- req.body에서 usePersonalization, personalizationVars 받기
-- generateMessages에 개인화 정보 전달
-
-### 4. 예약 대기 모달 개선
-- **파일**: Dashboard.tsx 3400~3500줄
-- 테이블 헤더: 발송시간 → 메시지 내용 + 회신번호
-- 상세보기 버튼 + 메시지 상세보기 모달 추가 (messagePreview state)
-- 버튼 정렬: 예약취소, 문안수정을 `<div className="flex gap-2">`로 감싸기
-
-### 5. campaigns.ts recipients API 수정
-- **파일**: campaigns.ts 995~1020줄
-- scheduled 캠페인도 MySQL SMSQ_SEND에서 먼저 조회
-- MySQL에 데이터 있으면 message, callback 포함하여 반환
-- 쿼리에 `call_back as callback, msg_contents as message` 추가
-
-### 6. 세션19에서 발견 및 수정한 버그들
-
-| 버그 | 파일/위치 | 원인 | 수정 내용 |
-|------|----------|------|----------|
-| 예약 대기에서 AI 캠페인 데이터 안 보임 | campaigns.ts 423줄 | app_etc1에 campaignRun.id 저장 | `campaignRun.id` → `id` (campaign.id) |
-| 개인화 변수 치환 안 됨 | campaigns.ts 422~434줄 | 치환 로직 없음 | personalizedMessage 치환 로직 추가 |
-| 회신번호가 수신거부번호(080)로 발송 | campaigns.ts 338~344줄 | reject_number 조회 | callback_numbers 테이블에서 조회 |
-| 개별회신번호 로직 없음 | campaigns.ts 347줄 | 로직 누락 | useIndividualCallback + customer.callback 사용 |
-| customers 조회 필드 누락 | campaigns.ts 364~368줄 | points, callback 없음 | `points, callback` 컬럼 추가 |
-
-### 7. 기존 AI 캠페인 MySQL 데이터 수정
-```powershell
-# app_etc1이 campaignRun.id로 저장된 기존 데이터 수정
-docker exec -it targetup-mysql mysql -usmsuser -psms123 smsdb -e "UPDATE SMSQ_SEND SET app_etc1 = '34a8a11f-b1e9-4d9b-92f9-1f278bb594e4' WHERE app_etc1 = 'a4bc580d-275a-4a80-9252-b12b5826bf3b'"
-```
-
----
-
-## 🚨 발견된 심각한 문제: AI 개인화 스키마 매핑
-
-### 문제 상황
-1. **AI가 존재하지 않는 변수 임의 생성**: `%매장번호%` 같은 DB에 없는 변수를 AI가 마음대로 만듦
-2. **하드코딩된 3개 변수만 치환**: 이름, 포인트, 등급만 치환됨 (campaigns.ts 422~427줄)
-3. **고객사마다 컬럼명이 다름**: 범용 시스템으로 사용 불가
-
-### 예시: 고객사별 컬럼명 차이
-| 표준 변수 | 우리 DB | A고객사 | B고객사 |
-|----------|--------|--------|--------|
-| 이름 | name | customer_name | 고객명 |
-| 포인트 | points | mileage | 적립금 |
-| 등급 | grade | vip_level | 회원등급 |
-| 매장명 | store_name | shop_name | 담당매장 |
-
-### 현재 하드코딩된 코드 (문제점)
-
-**ai.ts 209~215줄:**
-```typescript
-const varToTag: { [key: string]: string } = {
-  '이름': '%이름%',
-  '포인트': '%포인트%',
-  '등급': '%등급%',
-  '구매금액': '%구매금액%',
-};
-```
-
-**campaigns.ts 422~427줄:**
-```typescript
-const personalizedMessage = (campaign.message_content || '')
-  .replace(/%이름%/g, customer.name || '')
-  .replace(/%포인트%/g, customer.points?.toLocaleString() || '0')
-  .replace(/%등급%/g, customer.grade || '');
-```
-
----
-
-## 🎯 해결 방향: AI 자동 매핑 아키텍처
-
-### 전체 플로우
-```
-[STEP 1: 업로드 시점]
-엑셀/CSV 업로드 → AI가 컬럼명 + 샘플데이터 분석 → 매핑 추천
-
-[STEP 2: 사용자 확인]
-매핑 결과 보여주고 확인/수정 → 확정
-
-[STEP 3: customer_schema 저장]
-companies.customer_schema에 field_mappings, available_vars 저장
-
-[STEP 4: AI 메시지 생성]
-ai.ts에서 available_vars만 사용하도록 프롬프트 전달
-
-[STEP 5: 발송]
-field_mappings 기반으로 동적 변수 치환
-```
-
-### STEP 1: 업로드 시점 AI 분석
-
-```typescript
-// POST /api/upload/analyze-columns
-// 요청
-{
-  columns: ["customer_name", "mileage", "vip_level", "shop_name", "reg_date"],
-  samples: [
-    ["김민수", 12500, "VIP", "강남점", "2024-01-15"],
-    ["이영희", 8200, "GOLD", "홍대점", "2024-02-20"],
-    ["박지현", 5000, "SILVER", "신촌점", "2024-03-10"]
-  ]
-}
-
-// AI 분석 결과
-{
-  mappings: {
-    "이름": "customer_name",      // "김민수", "이영희" → 이름이네
-    "포인트": "mileage",          // 12500, 8200 → 숫자, 포인트/적립금이네
-    "등급": "vip_level",          // VIP, GOLD, SILVER → 등급이네
-    "매장명": "shop_name"         // 강남점, 홍대점 → 매장명이네
-  },
-  confidence: {
-    "이름": 0.95,
-    "포인트": 0.90,
-    "등급": 0.98,
-    "매장명": 0.85
-  },
-  unmapped: ["reg_date"]  // 매핑 못한 컬럼
-}
-```
-
-### STEP 2: 사용자 확인 UI
-
-```
-┌────────────────────────────────────────────────────────┐
-│  📋 컬럼 매핑 확인                                      │
-├────────────────┬─────────────┬────────────┬───────────┤
-│ 원본 컬럼명     │ 매핑된 변수   │ 샘플 데이터  │ 확인      │
-├────────────────┼─────────────┼────────────┼───────────┤
-│ customer_name  │ 이름 ✓      │ 김민수      │ [확인]    │
-│ mileage        │ 포인트 ✓    │ 12,500     │ [확인]    │
-│ vip_level      │ 등급 ✓      │ VIP        │ [확인]    │
-│ shop_name      │ 매장명 ✓    │ 강남점      │ [확인]    │
-│ reg_date       │ ??? ▼      │ 2024-01-15 │ [선택]    │
-└────────────────┴─────────────┴────────────┴───────────┘
-                              [저장하고 진행]
-```
-
-### STEP 3: customer_schema 구조 확장
-
-```json
-// companies.customer_schema
-{
-  // 기존 필드
-  "genders": ["남성", "여성"],
-  "grades": ["VIP", "GOLD", "SILVER", "BRONZE"],
-  "custom_field_keys": ["store_code"],
-  
-  // 신규 추가 필드
-  "field_mappings": {
-    "이름": "customer_name",
-    "포인트": "mileage",
-    "등급": "vip_level",
-    "매장명": "shop_name",
-    "지역": "region",
-    "구매금액": "total_purchase"
-  },
-  "available_vars": ["이름", "포인트", "등급", "매장명", "지역", "구매금액"],
-  "custom_vars": {
-    "가입일": "reg_date",
-    "생일": "birthday"
-  }
-}
-```
-
-### STEP 4: ai.ts 수정
-
-**recommendTarget 프롬프트에 추가 (391줄 부근):**
-```typescript
-## 사용 가능한 개인화 변수 (⚠️ 이 변수만 사용 가능!)
-${availableVars.map(v => `- %${v}%`).join('\n')}
-
-⚠️ 위 변수 외 다른 형식(%매장번호%, %고객명% 등)은 절대 사용 금지!
-존재하지 않는 변수를 만들면 발송 시 치환되지 않고 그대로 노출됩니다.
-```
-
-**generateMessages 프롬프트에도 동일하게 추가 (253줄 부근)**
-
-### STEP 5: campaigns.ts 동적 치환
-
-```typescript
-// 기존 하드코딩 → 동적 치환으로 변경
-const fieldMappings = companySchema?.field_mappings || {
-  '이름': 'name',
-  '포인트': 'points',
-  '등급': 'grade',
-  '매장명': 'store_name',
-  '지역': 'region',
-  '구매금액': 'total_purchase_amount'
-};
-
-let personalizedMessage = campaign.message_content || '';
-
-for (const [varName, columnName] of Object.entries(fieldMappings)) {
-  const value = customer[columnName];
-  const displayValue = typeof value === 'number' 
-    ? value.toLocaleString() 
-    : (value || '');
-  personalizedMessage = personalizedMessage.replace(
-    new RegExp(`%${varName}%`, 'g'),
-    displayValue
-  );
-}
-```
-
----
-
-## 📦 DB 스키마 참조
-
-### companies 테이블 (주요 컬럼)
-```
-id, name, brand_name, reject_number, customer_schema (JSONB),
-manager_contacts (JSONB), store_code_list (JSONB), plan_id
-```
-
-### customers 테이블 (주요 컬럼)
-```
-id, company_id, phone, name, gender, grade, points, 
-store_code, store_name, callback, region,
-total_purchase_amount, recent_purchase_date, custom_fields (JSONB)
-```
-
-### callback_numbers 테이블
-```
-id, company_id, phone, description, is_default, is_active,
-store_code, store_name
-```
-
-### SMSQ_SEND (MySQL QTmsg)
-```
-seqno, dest_no, call_back, msg_contents, msg_type, title_str,
-sendreq_time, status_code, rsv1, app_etc1 (campaign_id), app_etc2 (company_id),
-mobsend_time, mob_company
-```
-- status_code: 100=대기, 6=SMS성공, 1000=LMS성공, 1800=MMS성공
-- mob_company: 11=SKT, 16=KT, 19=LG U+
-
----
-
-## 📋 TODO (우선순위)
-
-| 순위 | 작업 | 상태 | 비고 |
-|:---:|------|:---:|------|
-| 1 | AI 스키마 매핑 아키텍처 구현 | ⏳ | 핵심! 위 설계 참조 |
-| 2 | POST /api/upload/analyze-columns API | ⏳ | AI 컬럼 분석 |
-| 3 | 매핑 확인 UI 컴포넌트 | ⏳ | |
-| 4 | ai.ts available_vars 프롬프트 전달 | ⏳ | |
-| 5 | campaigns.ts 동적 변수 치환 | ⏳ | |
-| 6 | AI 발송 개별회신번호 테스트 | ⏳ | |
-| 7 | 성과지표 대시보드 | ⏳ | |
-| 8 | IDC 서버 배포 | ⏳ | |
-
----
-
-## 🗄️ 테스트 환경
-
-### 계정
-| 역할 | ID | PW |
-|------|----|----|
-| 슈퍼관리자 | admin | 12345 |
-| 테스트회사 | luna1234 | 12345 |
-
-### 테스트 데이터
-- company_id: `50031bbd-9930-46e9-af39-2e0d18a72727`
-- 4개 브랜드: BLOOM, GLOW, LUNA, VELVET
-- 25만 고객 (브랜드당 62,500명)
-- 20개 매장 회신번호 (브랜드당 5개)
-
-### 예약 대기 중인 캠페인
-```
-직접발송: b1833883-bbc5-4170-baf4-9439d5e68929 (24명)
-AI발송: 34a8a11f-b1e9-4d9b-92f9-1f278bb594e4 (1,580명)
-```
-
----
-
-## ⚠️ 주의사항
-
-1. **백업 필수**: 작업 전 `pg_dump`, 작업 후 `git commit`
-2. **모달은 예쁘게**: confirm/alert 사용 금지, 커스텀 모달 사용
-3. **코드 수정 형식**: "기존코드 → 새코드" 형식으로 요청
-4. **Docker 주의**: 재생성/삭제 시 반드시 백업 먼저
-5. **app_etc1 주의**: campaign.id를 저장해야 함 (campaignRun.id 아님!)
-
----
-
-## 📝 세션20 시작용 지시사항
-
-### 필수 파일 업로드
-```
-1. Dashboard.tsx
-2. campaigns.ts
-3. ai.ts
-4. STATUS.md (이 파일)
-```
-
-### 시작 메시지
-```
-타겟업 세션20 시작.
-
-STATUS.md 파일 읽고 시작해주세요.
-
-세션19 완료:
-- AI 캠페인 시간 선택 UI (오전/오후 드롭다운)
-- AI 캠페인 회신번호 선택 UI
-- 예약 대기 모달 (회신번호+메시지상세보기)
-- campaigns.ts recipients API (MySQL 우선 조회)
-- campaigns.ts send API 버그 수정 (app_etc1, 개인화, 회신번호)
-
-세션19 발견된 심각한 문제:
-- AI가 %매장번호% 같은 존재하지 않는 변수 임의 생성
-- 고객사마다 컬럼명이 다름 (범용 불가)
-- 하드코딩된 3개 변수만 치환
-
-세션20 핵심 작업: AI 스키마 매핑 아키텍처
-1. customer_schema 구조 확장 (field_mappings, available_vars)
-2. POST /api/upload/analyze-columns API
-3. ai.ts: available_vars 프롬프트 전달 + "다른 변수 금지"
-4. campaigns.ts: 동적 변수 치환 (field_mappings 기반)
-
-STATUS.md의 "해결 방향: AI 자동 매핑 아키텍처" 섹션에 상세 설계 있음.
-```
-
-### 세션20 작업 순서
-
-**1단계: customer_schema 확장**
-```sql
--- companies 테이블 customer_schema 구조 확인
-SELECT customer_schema FROM companies WHERE id = '50031bbd-9930-46e9-af39-2e0d18a72727';
-
--- 기존 구조에 field_mappings, available_vars 추가
-```
-
-**2단계: AI 컬럼 분석 API 구현**
-```typescript
-// routes/upload.ts 또는 routes/customers.ts
-// POST /api/upload/analyze-columns
-// - 컬럼명 + 샘플 5개 받아서 AI 분석
-// - field_mappings 추천 반환
-```
-
-**3단계: ai.ts 수정**
-```typescript
-// recommendTarget 함수 (291줄~)
-// - companyInfo.customer_schema.available_vars 받아서
-// - 프롬프트에 "사용 가능 변수" 목록 추가
-// - "다른 변수 사용 금지" 경고 추가
-
-// generateMessages 함수 (156줄~)
-// - 동일하게 available_vars 전달
-```
-
-**4단계: campaigns.ts 동적 치환**
-```typescript
-// send 엔드포인트 (302줄~)
-// - companySchema.field_mappings 조회
-// - 하드코딩 replace → 동적 루프로 변경
-```
-
-**5단계: 테스트**
-```
-1. AI 캠페인 생성 → %매장번호% 같은 잘못된 변수 안 나오는지 확인
-2. AI 캠페인 발송 → 개인화 변수 제대로 치환되는지 확인
-3. 개별회신번호 → customer.callback으로 발송되는지 확인
-```
-
----
-
-## 🔧 현재 코드 수정 상태
-
-### campaigns.ts 수정된 부분 (세션19)
-
-**338~347줄 (회신번호 조회):**
-```typescript
-// 기본 회신번호 조회 (callback_numbers 테이블에서)
-const callbackResult = await query(
-  'SELECT phone FROM callback_numbers WHERE company_id = $1 AND is_default = true LIMIT 1',
-  [companyId]
-);
-const defaultCallback = callbackResult.rows[0]?.phone || '18008125';
-
-// 개별회신번호 사용 여부
-const useIndividualCallback = campaign.use_individual_callback || false;
-```
-
-**364~368줄 (고객 조회):**
-```typescript
-const customersResult = await query(
-  `SELECT id, phone, name, grade, points, callback FROM customers c
-   WHERE c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true ${filterQuery.where}${storeFilterFinal}
-   AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.company_id = c.company_id AND u.phone = c.phone)`,
-  [companyId, ...filterQuery.params, ...storeParams]
-);
-```
-
-**422~434줄 (개인화 + 개별회신번호):**
-```typescript
-for (const customer of filteredCustomers) {
-  // 개인화 변수 치환
-  const personalizedMessage = (campaign.message_content || '')
-    .replace(/%이름%/g, customer.name || '')
-    .replace(/%포인트%/g, customer.points?.toLocaleString() || '0')
-    .replace(/%등급%/g, customer.grade || '');
-
-  // 개별회신번호: customer.callback 있으면 사용, 없으면 캠페인 설정 또는 기본값
-  const customerCallback = useIndividualCallback && customer.callback 
-    ? customer.callback.replace(/-/g, '') 
-    : (campaign.callback_number || defaultCallback).replace(/-/g, '');
-
-  await mysqlQuery(
-    `INSERT INTO SMSQ_SEND (
-      dest_no, call_back, msg_contents, msg_type, sendreq_time, status_code, rsv1, app_etc1, app_etc2
-    ) VALUES (?, ?, ?, ?, ${sendTime ? `'${sendTime}'` : 'NOW()'}, 100, '1', ?, ?)`,
-    [customer.phone.replace(/-/g, ''), customerCallback, personalizedMessage, campaign.message_type === 'SMS' ? 'S' : 'L', id, companyId]
-  );
-}
-```
-
-**995~1020줄 (recipients API - MySQL 우선 조회):**
-```typescript
-// 예약 상태면 먼저 MySQL SMSQ_SEND에서 조회 시도
-if (camp.status === 'scheduled') {
-  const mysqlRecipients = await mysqlQuery(
-    `SELECT seqno as idx, dest_no as phone, call_back as callback, msg_contents as message 
-     FROM SMSQ_SEND 
-     WHERE app_etc1 = ? AND status_code = 100
-     ORDER BY seqno
-     LIMIT 1000`,
-    [campaignId]
-  ) as any[];
-
-  // MySQL에 데이터 있으면 그걸 반환
-  if (mysqlRecipients && mysqlRecipients.length > 0) {
-    const totalResult = await mysqlQuery(
-      `SELECT COUNT(*) as total FROM SMSQ_SEND WHERE app_etc1 = ? AND status_code = 100`,
-      [campaignId]
-    ) as any[];
-
-    return res.json({ 
-      success: true, 
-      campaign: camp,
-      recipients: mysqlRecipients,
-      total: totalResult[0]?.total || 0
-    });
-  }
-}
-```
-
----
-
-## 📞 QTmsg MySQL 접속
-
+## 기술 스택
+| 구분 | 기술 |
+|------|------|
+| 프론트엔드 | React + TypeScript |
+| 백엔드 | Node.js / Express + JWT 인증 |
+| 캠페인 DB | PostgreSQL (Docker) |
+| SMS 큐 DB | MySQL (Docker) |
+| 캐싱 | Redis (Docker) |
+| AI | Claude API |
+| SMS 발송 | QTmsg (통신사: 11=SKT, 16=KT, 19=LG U+) |
+| DB 관리 | pgAdmin |
+
+## 실행 명령어
+
+### 1. 도커 컨테이너 시작
 ```bash
-# 접속
-docker exec -it targetup-mysql mysql -usmsuser -psms123 smsdb
+docker start targetup-postgres targetup-redis targetup-mysql
+```
 
-# 예약 대기 확인
-SELECT app_etc1, COUNT(*) as cnt FROM SMSQ_SEND WHERE status_code = 100 GROUP BY app_etc1;
+### 2. 백엔드 (터미널 1)
+```bash
+cd C:\projects\targetup\packages\backend && npm run dev
+```
 
-# 특정 캠페인 확인
-SELECT seqno, dest_no, call_back, LEFT(msg_contents, 50) FROM SMSQ_SEND WHERE app_etc1 = 'campaign-id' LIMIT 5;
+### 3. 프론트엔드 (터미널 2)
+```bash
+cd C:\projects\targetup\packages\frontend && npm run dev
+```
+
+### 4. QTmsg 발송 엔진 (필요 시)
+```bash
+cd C:\projects\qtmsg\bin
+.\test_in_cmd_win.bat
+# 이미 실행 중 에러 시: del *.pid *.lock 후 재실행
+```
+
+## 접속 정보
+
+| 서비스 | Host | Port | DB/User | 비고 |
+|--------|------|------|---------|------|
+| PostgreSQL | localhost | 5432 | targetup / targetup | `docker exec -it targetup-postgres psql -U targetup targetup` |
+| MySQL (QTmsg) | localhost | 3306 | smsdb / smsuser / sms123 | `docker exec -it targetup-mysql mysql -usmsuser -psms123 smsdb` |
+| Redis | localhost | 6379 | - | |
+| 프론트엔드 | localhost | 5173 | - | |
+| 백엔드 API | localhost | 3000 | - | |
+| pgAdmin | localhost | 5050 | - | |
+
+## 주요 파일 경로
+```
+C:\projects\targetup\
+├── packages/
+│   ├── backend/
+│   │   └── src/
+│   │       ├── app.ts              ← 백엔드 메인
+│   │       ├── routes/             ← API 라우트
+│   │       └── services/           ← 비즈니스 로직
+│   └── frontend/
+│       └── src/
+│           ├── components/         ← UI 컴포넌트
+│           ├── pages/              ← 페이지
+│           └── services/           ← API 호출
+├── docker-compose.yml
+└── STATUS.md
 ```
 
 ---
 
-## 📚 최근 3개 세션 요약 (타겟업 15~17)
+## DB 스키마 (PostgreSQL)
 
-### 타겟업 15 (세션17)
-- 분할전송 완성 (Bulk INSERT 최적화 7만건 30초)
-- 예약 수정/삭제 API
-- 15분 전 변경 차단
-- 문안수정 (변수치환 + 진행률)
-- 예약상태 자동동기화
-- 담당자 이름 추가
-- 특수문자 안내
+### address_books (주소록)
+| 컬럼 | 타입 |
+|------|------|
+| id | uuid PK |
+| company_id | uuid FK |
+| group_name | varchar(100) |
+| phone | varchar(20) |
+| name | varchar(50) |
+| extra1~3 | varchar(100) |
+| created_at | timestamp |
 
-### 타겟업 16 (세션18)
-- 요금제 시스템 (PricingPage, plan_requests)
-- 대시보드 UI 리디자인 (INVITO 컬러)
-- 직접 타겟 설정 (schema/count/extract API)
-- 바이트 계산 EUC-KR 통일
-- 예약전송 개선 (공용달력, 12시간제)
-- 개별회신번호 DB (callback컬럼, 20매장, 25만고객배정)
-- 개별회신번호 프론트 (state, 드롭다운, 검증)
-- 분할전송 테스트 성공
+### audit_logs (감사 로그)
+| 컬럼 | 타입 |
+|------|------|
+| id | uuid PK |
+| user_id | uuid FK |
+| action | varchar(50) |
+| target_type | varchar(50) |
+| target_id | uuid |
+| details | jsonb |
+| ip_address | inet |
+| user_agent | text |
+| created_at | timestamptz |
 
-### 타겟업 17 (세션19) - 현재
-- AI 캠페인 시간 선택 UI (오전/오후 드롭다운)
-- AI 캠페인 회신번호 선택 UI (2단계)
-- AI 미리보기 개인화 샘플 3개 표시
-- routes/ai.ts 개인화 정보 전달 수정
-- 예약 대기 모달 (회신번호 + 메시지상세보기)
-- campaigns.ts recipients API (MySQL 우선 조회)
-- campaigns.ts send API 버그 수정:
-  - app_etc1: campaignRun.id → campaign.id
-  - 개인화 변수 치환 로직 추가
-  - 회신번호: callback_numbers에서 조회
-  - 개별회신번호 로직 (useIndividualCallback)
-  - customers 조회에 points, callback 추가
-- **발견된 심각한 문제**: AI 스키마 매핑 아키텍처 필요
+### callback_numbers (발신번호)
+| 컬럼 | 타입 |
+|------|------|
+| id | uuid PK |
+| company_id | uuid FK |
+| phone | varchar(20) |
+| label | varchar(100) |
+| is_default | boolean |
+| store_code | varchar(50) |
+| store_name | varchar(100) |
+| created_at | timestamp |
+
+### campaign_runs (캠페인 실행)
+| 컬럼 | 타입 |
+|------|------|
+| id | uuid PK |
+| campaign_id | uuid FK |
+| run_number | integer |
+| target_filter | jsonb |
+| sent_count | integer |
+| success_count | integer |
+| fail_count | integer |
+| status | varchar(20) |
+| scheduled_at | timestamp |
+| sent_at | timestamp |
+| target_count | integer |
+| message_content | text |
+| message_type | varchar(20) |
+| started_at | timestamp |
+| completed_at | timestamp |
+| created_at | timestamp |
+
+### campaigns (캠페인)
+| 컬럼 | 타입 |
+|------|------|
+| id | uuid PK |
+| user_id | uuid FK |
+| company_id | uuid FK |
+| campaign_name | varchar(200) |
+| description | text |
+| user_prompt | text |
+| ai_mode | boolean |
+| send_type | varchar(20) — ai/manual |
+| target_spec | jsonb |
+| target_filter | jsonb |
+| target_count | integer |
+| total_target_count | integer |
+| message_type | varchar(10) |
+| message_content | text |
+| message_template | text |
+| message_subject | varchar(200) |
+| subject | varchar(200) |
+| callback_number | varchar(20) |
+| sender_number_id | uuid FK |
+| kakao_profile_id | uuid FK |
+| kakao_template_id | uuid FK |
+| is_ad | boolean |
+| sent_count | integer |
+| success_count | integer |
+| fail_count | integer |
+| status | varchar(20) |
+| scheduled_at | timestamptz |
+| sent_at | timestamptz |
+| send_rate_per_minute | integer |
+| analysis_start_date | date |
+| analysis_end_date | date |
+| event_start_date | date |
+| event_end_date | date |
+| excluded_phones | text[] |
+| created_by | uuid FK |
+| cancelled_by | uuid |
+| cancelled_by_type | varchar(20) |
+| cancel_reason | text |
+| cancelled_at | timestamp |
+| created_at | timestamptz |
+| updated_at | timestamptz |
+
+### companies (고객사)
+| 컬럼 | 타입 | 설명 |
+|------|------|------|
+| id | uuid PK | |
+| name | varchar(100) | |
+| company_name | varchar(100) | |
+| company_code | varchar(20) | |
+| business_number | varchar(20) | 사업자번호 |
+| business_type | varchar(50) | |
+| ceo_name | varchar(50) | |
+| brand_name | varchar(100) | |
+| brand_slogan | varchar(200) | |
+| brand_description | text | |
+| brand_tone | varchar(50) | |
+| contact_name | varchar(50) | |
+| contact_email | varchar(100) | |
+| contact_phone | varchar(20) | |
+| address | text | |
+| manager_phone | varchar(20) | |
+| manager_contacts | jsonb | |
+| opt_out_080_number | varchar(20) | 수신거부 번호 |
+| reject_number | varchar(20) | |
+| sender_number_preregistered | boolean | |
+| status | varchar(20) | active 등 |
+| plan_id | uuid FK | |
+| trial_expires_at | timestamp | |
+| monthly_budget | numeric(12,2) | 요금 |
+| cost_per_sms | numeric(6,2) | |
+| cost_per_lms | numeric(6,2) | |
+| cost_per_mms | numeric(6,2) | |
+| cost_per_kakao | numeric(6,2) | |
+| send_start_hour | integer | 기본 9 |
+| send_end_hour | integer | 기본 21 |
+| daily_limit | integer | |
+| daily_limit_per_customer | integer | |
+| holiday_send_allowed | boolean | |
+| duplicate_prevention_days | integer | 기본 7 |
+| cross_category_allowed | boolean | |
+| target_strategy | varchar(50) | AI 설정 |
+| excluded_segments | text | |
+| approval_required | boolean | 승인 |
+| approver_email | varchar(100) | |
+| use_db_sync | boolean | 데이터 |
+| use_file_upload | boolean | |
+| data_input_method | varchar(20) | |
+| db_name | varchar(100) | |
+| customer_schema | jsonb | |
+| enabled_fields | jsonb | |
+| test_contact_mode | varchar(20) | |
+| store_code_list | jsonb | |
+| basic_analysis_url | varchar(400) | |
+| premium_analysis_enabled | boolean | |
+| premium_analysis_url | varchar(400) | |
+| print_url | varchar(400) | |
+| alarm_threshold | integer | |
+| use_product_category_large | boolean | |
+| use_product_category_medium | boolean | |
+| use_product_category_small | boolean | |
+| api_key | varchar(100) | |
+| api_secret | varchar(100) | |
+| created_by | uuid | |
+| created_at | timestamp | |
+| updated_at | timestamp | |
+
+### company_settings (고객사 설정 KV)
+| 컬럼 | 타입 |
+|------|------|
+| id | uuid PK |
+| company_id | uuid FK |
+| setting_key | varchar(100) |
+| setting_value | text |
+| setting_type | varchar(20) |
+| description | varchar(500) |
+| created_at | timestamp |
+| updated_at | timestamp |
+
+### consents (수신 동의)
+| 컬럼 | 타입 |
+|------|------|
+| id | uuid PK |
+| customer_id | uuid FK |
+| channel | varchar(20) |
+| consent_type | varchar(20) |
+| status | varchar(20) |
+| consented_at | timestamptz |
+| revoked_at | timestamptz |
+| source | varchar(30) |
+| source_detail | text |
+| consent_text | text |
+| proof_ref | varchar(200) |
+| collected_by_user_id | uuid FK |
+| created_at | timestamptz |
+| updated_at | timestamptz |
+
+### customer_field_definitions (고객 필드 정의)
+| 컬럼 | 타입 |
+|------|------|
+| id | uuid PK |
+| company_id | uuid FK |
+| field_key | varchar(50) |
+| field_label | varchar(100) |
+| field_type | varchar(20) |
+| field_size | integer |
+| search_popup_type | varchar(30) |
+| is_key | boolean |
+| is_hidden | boolean |
+| display_order | integer |
+| created_at | timestamp |
+
+### customers (고객)
+| 컬럼 | 타입 |
+|------|------|
+| id | uuid PK |
+| company_id | uuid FK |
+| phone | varchar(20) |
+| name | varchar(100) |
+| gender | varchar(10) |
+| birth_date | date |
+| birth_year | integer |
+| birth_month_day | varchar(10) |
+| age | integer |
+| email | varchar(100) |
+| address | text |
+| region | varchar(100) |
+| grade | varchar(50) |
+| points | integer |
+| store_code | varchar(50) |
+| store_name | varchar(100) |
+| registered_store | varchar(100) |
+| registered_store_number | varchar(50) |
+| registration_type | varchar(50) |
+| callback | varchar(20) |
+| recent_purchase_date | date |
+| recent_purchase_amount | numeric(15,2) |
+| recent_purchase_store | varchar(100) |
+| last_purchase_date | varchar(20) |
+| total_purchase_amount | numeric(15,2) |
+| total_purchase | numeric(12,2) |
+| purchase_count | integer |
+| avg_order_value | numeric |
+| ltv_score | integer |
+| wedding_anniversary | date |
+| is_married | boolean |
+| sms_opt_in | boolean |
+| is_opt_out | boolean |
+| is_invalid | boolean |
+| is_active | boolean |
+| custom_fields | jsonb |
+| source | varchar(20) |
+| created_at | timestamp |
+| updated_at | timestamp |
+
+### file_uploads (파일 업로드)
+| 컬럼 | 타입 |
+|------|------|
+| id | uuid PK |
+| user_id | uuid FK |
+| original_filename | varchar(255) |
+| stored_filename | varchar(255) |
+| file_size | integer |
+| file_type | varchar(20) |
+| total_rows | integer |
+| success_rows | integer |
+| fail_rows | integer |
+| column_mapping | jsonb |
+| status | varchar(20) |
+| error_message | text |
+| created_at | timestamptz |
+| completed_at | timestamptz |
+
+### kakao_sender_profiles (카카오 발신 프로필)
+| 컬럼 | 타입 |
+|------|------|
+| id | uuid PK |
+| company_id | uuid FK |
+| profile_key | varchar(100) |
+| profile_name | varchar(100) |
+| is_active | boolean |
+| created_at | timestamp |
+
+### kakao_templates (카카오 템플릿)
+| 컬럼 | 타입 |
+|------|------|
+| id | uuid PK |
+| company_id | uuid FK |
+| profile_id | uuid FK |
+| template_code | varchar(50) |
+| template_name | varchar(100) |
+| content | text |
+| buttons | jsonb |
+| status | varchar(20) |
+| reject_reason | text |
+| created_at | timestamp |
+| updated_at | timestamp |
+| approved_at | timestamp |
+
+### kakao_friendtalk_images (카카오 친구톡 이미지)
+| 컬럼 | 타입 |
+|------|------|
+| id | uuid PK |
+| company_id | uuid FK |
+| user_id | uuid FK |
+| image_name | varchar(200) |
+| image_url | varchar(500) |
+| original_filename | varchar(200) |
+| file_size | integer |
+| width | integer |
+| height | integer |
+| status | varchar(20) |
+| created_at | timestamp |
+| processed_at | timestamp |
+
+### messages (메시지) — 월별 파티션 (messages_2026_01~12)
+| 컬럼 | 타입 |
+|------|------|
+| id | uuid PK |
+| company_id | uuid FK |
+| project_id | uuid FK |
+| user_id | uuid FK |
+| message_type | varchar(10) |
+| recipient_phone | varchar(20) |
+| recipient_name | varchar(100) |
+| merge_data | jsonb |
+| sender_number | varchar(20) |
+| reply_number | varchar(20) |
+| subject | varchar(200) |
+| content | text |
+| content_merged | text |
+| template_id | uuid FK |
+| kakao_profile_id | uuid FK |
+| kakao_buttons | jsonb |
+| fallback_enabled | boolean |
+| fallback_message_id | uuid |
+| scheduled_at | timestamp |
+| send_rate_per_minute | integer |
+| status | varchar(20) |
+| result_code | varchar(20) |
+| result_message | text |
+| sent_at | timestamp |
+| delivered_at | timestamp |
+| charge_amount | numeric(10,2) |
+| created_at | timestamp |
+| updated_at | timestamp |
+
+### mobile_dm_requests (모바일 DM 요청)
+| 컬럼 | 타입 |
+|------|------|
+| id | uuid PK |
+| company_id | uuid FK |
+| user_id | uuid FK |
+| dm_sample_id | varchar(50) |
+| request_note | text |
+| completed_url | varchar(500) |
+| status | varchar(20) |
+| created_at | timestamp |
+| completed_at | timestamp |
+
+### opt_outs (수신거부)
+| 컬럼 | 타입 |
+|------|------|
+| id | uuid PK |
+| company_id | uuid FK |
+| opt_out_number | varchar(20) |
+| phone | varchar(20) |
+| source | varchar(20) |
+| created_at | timestamp |
+
+### opt_out_sync_logs (수신거부 동기화 로그)
+| 컬럼 | 타입 |
+|------|------|
+| id | uuid PK |
+| company_id | uuid FK |
+| sync_type | varchar(20) |
+| total_count | integer |
+| added_count | integer |
+| removed_count | integer |
+| status | varchar(20) |
+| error_message | text |
+| started_at | timestamp |
+| completed_at | timestamp |
+
+### plans (요금제)
+| 컬럼 | 타입 |
+|------|------|
+| id | uuid PK |
+| plan_code | varchar(20) |
+| plan_name | varchar(50) |
+| max_customers | integer |
+| monthly_price | numeric(12,2) |
+| is_active | boolean |
+| trial_days | integer |
+| created_at | timestamp |
+
+### plan_requests (요금제 변경 요청)
+| 컬럼 | 타입 |
+|------|------|
+| id | uuid PK |
+| company_id | uuid FK |
+| user_id | uuid FK |
+| requested_plan_id | uuid FK |
+| message | text |
+| status | varchar(20) |
+| admin_note | text |
+| processed_by | uuid |
+| processed_at | timestamp |
+| created_at | timestamp |
+
+### products (상품)
+| 컬럼 | 타입 |
+|------|------|
+| id | uuid PK |
+| company_id | uuid FK |
+| product_code | varchar(50) |
+| product_name | varchar(200) |
+| category_large | varchar(100) |
+| category_medium | varchar(100) |
+| category_small | varchar(100) |
+| price | numeric(15,2) |
+| is_active | boolean |
+| created_at | timestamp |
+| updated_at | timestamp |
+
+### projects (프로젝트)
+| 컬럼 | 타입 |
+|------|------|
+| id | uuid PK |
+| company_id | uuid FK |
+| user_id | uuid FK |
+| project_name | varchar(200) |
+| analysis_start_date | date |
+| analysis_end_date | date |
+| total_count | integer |
+| success_count | integer |
+| fail_count | integer |
+| created_at | timestamp |
+| updated_at | timestamp |
+
+### purchases (구매내역)
+| 컬럼 | 타입 |
+|------|------|
+| id | uuid PK |
+| company_id | uuid FK |
+| customer_id | uuid FK |
+| customer_phone | varchar(20) |
+| purchase_date | timestamp |
+| store_code | varchar(50) |
+| store_name | varchar(100) |
+| product_id | uuid FK |
+| product_code | varchar(50) |
+| product_name | varchar(200) |
+| quantity | integer |
+| unit_price | numeric(15,2) |
+| total_amount | numeric(15,2) |
+| custom_fields | jsonb |
+| created_at | timestamp |
+
+### rcs_templates (RCS 템플릿)
+| 컬럼 | 타입 |
+|------|------|
+| id | uuid PK |
+| company_id | uuid FK |
+| brand_id | varchar(100) |
+| brand_name | varchar(100) |
+| template_id | varchar(100) |
+| template_name | varchar(100) |
+| message_type | varchar(20) |
+| content | text |
+| media_url | varchar(500) |
+| buttons | jsonb |
+| status | varchar(20) |
+| reject_reason | text |
+| created_at | timestamp |
+| updated_at | timestamp |
+| approved_at | timestamp |
+
+### sender_numbers (발신번호 관리)
+| 컬럼 | 타입 |
+|------|------|
+| id | uuid PK |
+| company_id | uuid FK |
+| user_id | uuid FK |
+| phone_number | varchar(20) |
+| description | varchar(200) |
+| is_verified | boolean |
+| is_active | boolean |
+| created_at | timestamp |
+
+### sender_number_documents (발신번호 인증서류)
+| 컬럼 | 타입 |
+|------|------|
+| id | uuid PK |
+| sender_number_id | uuid FK |
+| document_type | varchar(50) |
+| file_name | varchar(200) |
+| file_path | varchar(500) |
+| file_size | integer |
+| status | varchar(20) |
+| reject_reason | text |
+| verified_at | timestamp |
+| verified_by | uuid FK |
+| created_at | timestamp |
+| expires_at | timestamp |
+
+### sms_templates (SMS 템플릿)
+| 컬럼 | 타입 |
+|------|------|
+| id | uuid PK |
+| company_id | uuid FK |
+| user_id | uuid FK |
+| template_name | varchar(100) |
+| message_type | varchar(10) |
+| subject | varchar(200) |
+| content | text |
+| created_at | timestamp |
+| updated_at | timestamp |
+
+### standard_fields (표준 필드 정의)
+| 컬럼 | 타입 |
+|------|------|
+| id | integer PK |
+| field_key | varchar(50) |
+| display_name | varchar(50) |
+| category | varchar(20) |
+| data_type | varchar(10) |
+| description | text |
+| sort_order | integer |
+| is_active | boolean |
+| created_at | timestamptz |
+
+### super_admins (슈퍼 관리자)
+| 컬럼 | 타입 |
+|------|------|
+| id | uuid PK |
+| login_id | varchar(50) |
+| password_hash | varchar(255) |
+| name | varchar(100) |
+| email | varchar(100) |
+| role | varchar(20) |
+| is_active | boolean |
+| created_at | timestamp |
+| last_login_at | timestamp |
+
+### test_contacts (테스트 연락처)
+| 컬럼 | 타입 |
+|------|------|
+| id | uuid PK |
+| company_id | uuid FK |
+| user_id | uuid FK |
+| name | varchar(100) |
+| phone | varchar(20) |
+| created_at | timestamp |
+
+### transmission_certifications (전송 인증)
+| 컬럼 | 타입 |
+|------|------|
+| id | uuid PK |
+| company_id | uuid FK |
+| certification_number | varchar(100) |
+| certification_type | varchar(50) |
+| issued_by | varchar(100) |
+| issued_at | date |
+| expires_at | date |
+| certificate_file_path | varchar(500) |
+| is_active | boolean |
+| created_at | timestamp |
+
+### unsubscribes (수신거부)
+| 컬럼 | 타입 |
+|------|------|
+| id | uuid PK |
+| company_id | uuid FK |
+| phone | varchar(20) |
+| source | varchar(20) |
+| created_at | timestamp |
+
+### user_alarm_phones (사용자 알림 전화번호)
+| 컬럼 | 타입 |
+|------|------|
+| id | uuid PK |
+| user_id | uuid FK |
+| phone | varchar(20) |
+| is_active | boolean |
+| created_at | timestamp |
+
+### user_sender_profiles (사용자-카카오 프로필 매핑)
+| 컬럼 | 타입 |
+|------|------|
+| user_id | uuid FK |
+| profile_id | uuid FK |
+| created_at | timestamp |
+
+### user_sessions (사용자 세션)
+| 컬럼 | 타입 |
+|------|------|
+| id | uuid PK |
+| user_id | uuid FK |
+| session_token | varchar(500) |
+| ip_address | varchar(50) |
+| user_agent | text |
+| device_type | varchar(20) |
+| is_active | boolean |
+| created_at | timestamp |
+| last_activity_at | timestamp |
+| expires_at | timestamp |
+
+### users (사용자)
+| 컬럼 | 타입 |
+|------|------|
+| id | uuid PK |
+| company_id | uuid FK |
+| login_id | varchar(50) |
+| password_hash | varchar(255) |
+| user_type | varchar(20) |
+| role | varchar(20) |
+| name | varchar(100) |
+| email | varchar(100) |
+| phone | varchar(20) |
+| department | varchar(100) |
+| status | varchar(20) |
+| is_active | boolean |
+| must_change_password | boolean |
+| password_changed_at | timestamp |
+| created_at | timestamp |
+| updated_at | timestamp |
+| last_login_at | timestamp |
 
 ---
 
-## 2026-02-05 세션20 (타겟업 18) 완료
-- normalize.ts 유틸리티 생성 (성별/등급/지역/전화번호/수신동의/나이/금액/날짜 정규화)
-- services/ai.ts 전면수정: DEFAULT_FIELD_MAPPINGS, VarCatalog, available_vars 프롬프트 전달
-- routes/campaigns.ts 7곳 수정: buildGenderFilter/buildGradeFilter 헬퍼함수 + 동적치환
-- routes/ai.ts 수정: generateMessages 호출부에 변수카탈로그 전달
-- customer_schema DB UPDATE: field_mappings + available_vars 구조 추가
+## DB 스키마 (MySQL - QTmsg)
 
-## 2026-02-05 세션21-22 (타겟업 21) 완료
-- normalize.ts 전체적용 (ai.ts, campaigns.ts, customers.ts, upload.ts)
-- 성별/등급/지역 변형값매칭, 업로드시 정규화
+### smsdb.SMSQ_SEND (SMS 발송 큐)
+| 컬럼 | 타입 | 설명 |
+|------|------|------|
+| seqno | int PK AUTO_INCREMENT | |
+| dest_no | varchar(20) | 수신번호 |
+| call_back | varchar(20) | 발신번호 |
+| msg_contents | mediumtext | 메시지 내용 |
+| msg_instm | datetime | 입력 시간 |
+| sendreq_time | datetime | 발송 요청 시간 |
+| mobsend_time | datetime | 발송 완료 시간 |
+| repmsg_recvtm | datetime | 결과 수신 시간 |
+| status_code | int | 100=대기, 200+=결과 |
+| mob_company | varchar(10) | 11=SKT, 16=KT, 19=LGU+ |
+| title_str | varchar(200) | LMS 제목 |
+| msg_type | varchar(10) | S=SMS, L=LMS |
+| rsv1 | varchar(10) | 기본 '1' |
+| sender_code | varchar(9) | |
+| bill_id | varchar(40) | |
+| file_name1~5 | varchar(120) | MMS 첨부 |
+| k_template_code | varchar(30) | 카카오 템플릿 |
+| k_next_type | varchar(1) | N=없음 |
+| k_next_contents | text | |
+| k_button_json | varchar(1024) | |
+| k_etc_json | varchar(1024) | |
+| k_oriseq | varchar(20) | |
+| k_resyes | varchar(1) | |
+| app_etc1 | varchar(50) | campaign_run_id 저장 |
+| app_etc2 | varchar(50) | |
 
-**⚠️ 프로젝트 작업 시작 전 반드시 이 파일 전체를 읽고 시작하세요!**
+/api/auth          → routes/auth.ts (로그인, 비밀번호 변경)
+/api/campaigns     → routes/campaigns.ts (캠페인 CRUD, 발송, 동기화)
+/api/customers     → routes/customers.ts (고객 조회, 필터, 추출)
+/api/companies     → routes/companies.ts (회사 설정, 발신번호)
+/api/ai            → routes/ai.ts (타겟 추천, 메시지 생성)
+/api/admin         → routes/admin.ts (슈퍼관리자 전용)
+/api/results       → routes/results.ts (발송 결과/통계)
+/api/upload        → routes/upload.ts (파일 업로드/매핑)
+/api/unsubscribes  → routes/unsubscribes.ts (수신거부)
+/api/address-books → routes/address-books.ts (주소록)
+/api/test-contacts → routes/test-contacts.ts (테스트 연락처)
+/api/plans         → routes/plans.ts (요금제)
+
+★중요사항 - 슈퍼관리자 와 고객사 관리자는 접속주소 자체를 분리예정(단, 고객사관리자는 슈퍼관리자의 기능만 몇개 가려서 기능부여예정)
+
+### utils/normalize.ts (데이터 정규화 코어)
+
+**역할 3가지:**
+1. **값 정규화** — 어떤 형태로 들어오든 표준값으로 통일
+   - 성별: 남/남자/male/man/1 → 'M' | 등급: vip/VIP고객/V → 'VIP'
+   - 지역: 서울시/서울특별시/Seoul → '서울' | 전화번호: +82-10-1234-5678 → '01012345678'
+   - 금액: ₩1,000원 → 1000 | 날짜: 20240101, 2024.01.01 → '2024-01-01'
+2. **필드명 매핑** — `normalizeCustomerRecord()`에서 다양한 컬럼명을 표준 필드로 통일
+   - raw.mobile / raw.phone_number / raw.tel → phone
+   - raw.sex / raw.성별 → gender | raw.등급 / raw.membership → grade
+3. **필터 빌더** — DB에 어떤 형식으로 저장돼 있든 잡아내는 SQL 조건 생성
+   - `buildGenderFilter('M')` → WHERE gender = ANY(['M','m','남','남자','male'...])
+
+**참조 파일:** ai.ts, customers.ts, campaigns.ts, upload.ts (백엔드 핵심 4개 전부)
+
+> ⚠️ 이 유틸이 고객사별 DB 형식 차이를 흡수하는 핵심 레이어.
+> standard_fields(49개) + normalize.ts + upload AI매핑 조합으로 field_mappings 별도 UI 불필요.
+
+### billing_invoices (거래내역서/정산)
+| 컬럼 | 타입 | 설명 |
+|------|------|------|
+| id | uuid PK | |
+| company_id | uuid FK | 고객사 |
+| store_code | varchar(50) | 브랜드별 정산 시 매장코드 |
+| store_name | varchar(100) | 브랜드별 정산 시 매장명 |
+| billing_start | date | 정산 시작일 |
+| billing_end | date | 정산 종료일 |
+| invoice_type | varchar(20) | combined=통합, brand=브랜드별 |
+| sms_success_count | integer | SMS 성공 수량 |
+| sms_unit_price | numeric(6,2) | SMS 단가 |
+| lms_success_count | integer | LMS 성공 수량 |
+| lms_unit_price | numeric(6,2) | LMS 단가 |
+| mms_success_count | integer | MMS 성공 수량 |
+| mms_unit_price | numeric(6,2) | MMS 단가 |
+| kakao_success_count | integer | 카카오 성공 수량 |
+| kakao_unit_price | numeric(6,2) | 카카오 단가 |
+| test_sms_count | integer | 테스트 SMS 수량 |
+| test_sms_unit_price | numeric(6,2) | 테스트 SMS 단가 |
+| test_lms_count | integer | 테스트 LMS 수량 |
+| test_lms_unit_price | numeric(6,2) | 테스트 LMS 단가 |
+| spam_filter_count | integer | 스팸필터 테스트 수량 |
+| spam_filter_unit_price | numeric(6,2) | 스팸필터 단가 |
+| subtotal | numeric(12,2) | 공급가액 |
+| vat | numeric(12,2) | 부가세 |
+| total_amount | numeric(12,2) | 합계 |
+| status | varchar(20) | draft/confirmed/paid |
+| pdf_path | varchar(500) | 생성된 PDF 경로 |
+| notes | text | 비고 |
+| created_by | uuid | 생성자 |
+| created_at | timestamptz | |
+| updated_at | timestamptz | |

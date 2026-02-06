@@ -449,17 +449,17 @@ export default function Dashboard() {
   const [showFileUpload, setShowFileUpload] = useState(false);
   const [showDirectTargeting, setShowDirectTargeting] = useState(false);
   // 직접 타겟 설정 관련 state
-  const [targetPhoneField, setTargetPhoneField] = useState('phone');
-  const [targetGender, setTargetGender] = useState('');
-  const [targetAgeRange, setTargetAgeRange] = useState('');
-  const [targetGrade, setTargetGrade] = useState('');
-  const [targetRegion, setTargetRegion] = useState('');
-  const [targetMinPurchase, setTargetMinPurchase] = useState('');
-  const [targetRecentDays, setTargetRecentDays] = useState('');
-  const [targetSmsOptIn, setTargetSmsOptIn] = useState(true);
-  const [targetCount, setTargetCount] = useState(0);
-  const [targetCountLoading, setTargetCountLoading] = useState(false);
-  const [targetSchemaFields, setTargetSchemaFields] = useState<{name: string, label: string, type: string}[]>([]);
+   // 직접 타겟 설정 관련 state
+   const [targetPhoneField, setTargetPhoneField] = useState('phone');
+   const [targetSmsOptIn, setTargetSmsOptIn] = useState(true);
+   const [targetCount, setTargetCount] = useState(0);
+   const [targetCountLoading, setTargetCountLoading] = useState(false);
+   const [targetSchemaFields, setTargetSchemaFields] = useState<{name: string, label: string, type: string}[]>([]);
+   // 동적 필터 state
+   const [enabledFields, setEnabledFields] = useState<any[]>([]);
+   const [targetFilters, setTargetFilters] = useState<Record<string, string>>({});
+   const [filterOptions, setFilterOptions] = useState<Record<string, string[]>>({});
+   const [expandedCats, setExpandedCats] = useState<Record<string, boolean>>({ basic: true });
   const [showTemplates, setShowTemplates] = useState(false);
   const [showInsights, setShowInsights] = useState(false);
   const [showTodayStats, setShowTodayStats] = useState(false);
@@ -832,6 +832,7 @@ export default function Dashboard() {
   };
 
   // 직접 타겟 설정 - 스키마 로드
+  // 직접 타겟 설정 - 스키마 로드 (기존 유지)
   const loadTargetSchema = async () => {
     try {
       const token = localStorage.getItem('token');
@@ -847,26 +848,70 @@ export default function Dashboard() {
     }
   };
 
+  // 동적 필터 - 활성 필드 로드
+  const loadEnabledFields = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch('/api/customers/enabled-fields', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setEnabledFields(data.fields || []);
+        setFilterOptions(data.options || {});
+      }
+    } catch (error) {
+      console.error('필드 로드 실패:', error);
+    }
+  };
+
+  // 동적 필터 → API 포맷 변환
+  const buildDynamicFiltersForAPI = () => {
+    const filters: Record<string, any> = {};
+    for (const [fieldKey, value] of Object.entries(targetFilters)) {
+      if (!value) continue;
+      const field = enabledFields.find((f: any) => f.field_key === fieldKey);
+      if (!field) continue;
+
+      // 특수 필드 변환
+      if (fieldKey === 'age_group') {
+        const ageVal = parseInt(value);
+        if (ageVal >= 60) { filters['age'] = { operator: 'gte', value: 60 }; }
+        else { filters['age'] = { operator: 'between', value: [ageVal, ageVal + 9] }; }
+        continue;
+      }
+      if (fieldKey === 'last_purchase_date' || fieldKey === 'first_purchase_date' || fieldKey === 'last_visit_date') {
+        const dbCol = fieldKey === 'last_purchase_date' ? 'recent_purchase_date' : fieldKey;
+        filters[dbCol] = { operator: 'days_within', value: parseInt(value) };
+        continue;
+      }
+
+      const dbFieldMap: Record<string, string> = { 'opt_in_sms': 'sms_opt_in' };
+      const dbField = dbFieldMap[fieldKey] || fieldKey;
+
+      if (field.data_type === 'string') {
+        filters[dbField] = { operator: 'eq', value };
+      } else if (field.data_type === 'number') {
+        filters[dbField] = { operator: 'gte', value: Number(value) };
+      } else if (field.data_type === 'date') {
+        filters[dbField] = { operator: 'days_within', value: parseInt(value) };
+      } else if (field.data_type === 'boolean') {
+        filters[dbField] = { operator: 'eq', value: value === 'true' };
+      }
+    }
+    return filters;
+  };
+
   // 직접 타겟 설정 - 필터 카운트
   const loadTargetCount = async () => {
     setTargetCountLoading(true);
     try {
       const token = localStorage.getItem('token');
+      const dynamicFilters = buildDynamicFiltersForAPI();
       const res = await fetch('/api/customers/filter-count', {
         method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}` 
-        },
-        body: JSON.stringify({
-          gender: targetGender || undefined,
-          ageRange: targetAgeRange || undefined,
-          grade: targetGrade || undefined,
-          region: targetRegion || undefined,
-          minPurchase: targetMinPurchase || undefined,
-          recentDays: targetRecentDays || undefined,
-          smsOptIn: targetSmsOptIn
-        })
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ dynamicFilters, smsOptIn: targetSmsOptIn })
       });
       const data = await res.json();
       setTargetCount(data.count || 0);
@@ -909,26 +954,18 @@ export default function Dashboard() {
         if (defaultCb) setSelectedCallback(defaultCb.phone);
       }
       
+      const dynamicFilters = buildDynamicFiltersForAPI();
       const res = await fetch('/api/customers/extract', {
         method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}` 
-        },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
-          gender: targetGender || undefined,
-          ageRange: targetAgeRange || undefined,
-          grade: targetGrade || undefined,
-          region: targetRegion || undefined,
-          minPurchase: targetMinPurchase || undefined,
-          recentDays: targetRecentDays || undefined,
+          dynamicFilters,
           smsOptIn: targetSmsOptIn,
           phoneField: targetPhoneField
         })
       });
       const data = await res.json();
       if (data.success && data.recipients) {
-        // 직접타겟발송 화면으로 데이터 전달
         const recipients = data.recipients.map((r: any) => ({
           phone: r.phone,
           name: r.name || '',
@@ -952,13 +989,9 @@ export default function Dashboard() {
 
   // 직접 타겟 설정 - 필터 초기화
   const resetTargetFilters = () => {
-    setTargetGender('');
-    setTargetAgeRange('');
-    setTargetGrade('');
-    setTargetRegion('');
-    setTargetMinPurchase('');
-    setTargetRecentDays('');
+    setTargetFilters({});
     setTargetSmsOptIn(true);
+    setTargetCount(0);
   };
 
   const handleExtractTarget = async () => {
@@ -1601,7 +1634,7 @@ const campaignData = {
 
               {/* 직접 타겟 설정 - 금색 */}
               <button 
-                onClick={() => setShowDirectTargeting(true)}
+                onClick={() => { setShowDirectTargeting(true); loadEnabledFields(); }}
                 className="p-6 bg-amber-500 hover:bg-amber-600 rounded-xl transition-all hover:shadow-lg group text-right h-[140px] flex flex-col justify-between"
               >
                 <div>
@@ -2505,12 +2538,10 @@ const campaignData = {
               </div>
 
               {/* 필터 영역 */}
-              <div className="p-6 space-y-5 overflow-y-auto max-h-[70vh]">
+              <div className="p-6 space-y-4 overflow-y-auto max-h-[65vh]">
                 {/* 수신번호 필드 선택 */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    수신번호 필드
-                  </label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">수신번호 필드</label>
                   <select 
                     value={targetPhoneField}
                     onChange={(e) => setTargetPhoneField(e.target.value)}
@@ -2520,119 +2551,177 @@ const campaignData = {
                     <option value="mobile">mobile</option>
                     <option value="phone_number">phone_number</option>
                   </select>
-                  <p className="text-xs text-gray-400 mt-1">발송에 사용할 전화번호 필드를 선택하세요</p>
                 </div>
 
-                {/* 구분선 */}
                 <div className="border-t border-gray-100"></div>
 
-                {/* 필터 조건 */}
-                <div>
-                  <div className="flex items-center justify-between mb-3">
+                {/* 필터 조건 헤더 */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
                     <span className="text-sm font-medium text-gray-700">필터 조건</span>
-                    <button onClick={resetTargetFilters} className="text-xs text-green-600 hover:text-green-700">초기화</button>
+                    {Object.keys(targetFilters).length > 0 && (
+                      <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full font-medium">
+                        {Object.values(targetFilters).filter(v => v).length}개 적용
+                      </span>
+                    )}
                   </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    {/* 성별 */}
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-1.5">성별</label>
-                      <select 
-                        value={targetGender}
-                        onChange={(e) => { setTargetGender(e.target.value); }}
-                        className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent text-sm"
-                      >
-                        <option value="">전체</option>
-                        <option value="남성">남성</option>
-                        <option value="여성">여성</option>
-                      </select>
-                    </div>
-
-                    {/* 나이대 */}
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-1.5">나이대</label>
-                      <select 
-                        value={targetAgeRange}
-                        onChange={(e) => { setTargetAgeRange(e.target.value); }}
-                        className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent text-sm"
-                      >
-                        <option value="">전체</option>
-                        <option value="20">20대</option>
-                        <option value="30">30대</option>
-                        <option value="40">40대</option>
-                        <option value="50">50대</option>
-                        <option value="60">60대 이상</option>
-                      </select>
-                    </div>
-
-                    {/* 등급 */}
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-1.5">등급</label>
-                      <select 
-                        value={targetGrade}
-                        onChange={(e) => { setTargetGrade(e.target.value); }}
-                        className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent text-sm"
-                      >
-                        <option value="">전체</option>
-                        <option value="VIP">VIP</option>
-                        <option value="GOLD">GOLD</option>
-                        <option value="SILVER">SILVER</option>
-                        <option value="BRONZE">BRONZE</option>
-                      </select>
-                    </div>
-
-                    {/* 지역 */}
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-1.5">지역</label>
-                      <select 
-                        value={targetRegion}
-                        onChange={(e) => { setTargetRegion(e.target.value); }}
-                        className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent text-sm"
-                      >
-                        <option value="">전체</option>
-                        <option value="서울">서울</option>
-                        <option value="경기">경기</option>
-                        <option value="인천">인천</option>
-                        <option value="부산">부산</option>
-                        <option value="대구">대구</option>
-                        <option value="광주">광주</option>
-                        <option value="대전">대전</option>
-                      </select>
-                    </div>
-
-                    {/* 구매금액 */}
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-1.5">구매금액</label>
-                      <select 
-                        value={targetMinPurchase}
-                        onChange={(e) => { setTargetMinPurchase(e.target.value); }}
-                        className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent text-sm"
-                      >
-                        <option value="">전체</option>
-                        <option value="100000">10만원 이상</option>
-                        <option value="500000">50만원 이상</option>
-                        <option value="1000000">100만원 이상</option>
-                        <option value="5000000">500만원 이상</option>
-                      </select>
-                    </div>
-
-                    {/* 최근 구매일 */}
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-1.5">최근 구매</label>
-                      <select 
-                        value={targetRecentDays}
-                        onChange={(e) => { setTargetRecentDays(e.target.value); }}
-                        className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent text-sm"
-                      >
-                        <option value="">전체</option>
-                        <option value="7">7일 이내</option>
-                        <option value="30">30일 이내</option>
-                        <option value="90">90일 이내</option>
-                        <option value="180">180일 이내</option>
-                      </select>
-                    </div>
-                  </div>
+                  <button onClick={resetTargetFilters} className="text-xs text-green-600 hover:text-green-700 font-medium">초기화</button>
                 </div>
+
+                {/* 아코디언 필터 */}
+                {enabledFields.length === 0 ? (
+                  <div className="text-center py-8 text-gray-400 text-sm">
+                    필터 항목을 로딩 중...
+                  </div>
+                ) : (
+                  (() => {
+                    const CAT_LABELS: Record<string, string> = {
+                      basic: '📋 기본정보', segment: '🏷️ 등급/세그먼트', purchase: '💰 구매/거래',
+                      loyalty: '⭐ 충성도/활동', store: '🏪 소속/채널', preference: '❤️ 선호/관심',
+                      marketing: '📱 마케팅수신', custom: '🔧 커스텀'
+                    };
+                    // 필터 대상에서 제외할 필드 (식별용/수신동의는 별도 처리)
+                    const SKIP_FIELDS = ['name', 'phone', 'email', 'address', 'opt_in_sms', 'opt_in_date', 'opt_out_date'];
+                    const filterableFields = enabledFields.filter((f: any) => !SKIP_FIELDS.includes(f.field_key));
+                    
+                    // 연령대 프리셋
+                    const AGE_OPTIONS = [
+                      { label: '20대', value: '20' }, { label: '30대', value: '30' },
+                      { label: '40대', value: '40' }, { label: '50대', value: '50' },
+                      { label: '60대 이상', value: '60' },
+                    ];
+                    // 금액 프리셋
+                    const AMOUNT_OPTIONS = [
+                      { label: '5만원 이상', value: '50000' }, { label: '10만원 이상', value: '100000' },
+                      { label: '50만원 이상', value: '500000' }, { label: '100만원 이상', value: '1000000' },
+                      { label: '500만원 이상', value: '5000000' },
+                    ];
+                    // 일수 프리셋
+                    const DAYS_OPTIONS = [
+                      { label: '7일 이내', value: '7' }, { label: '30일 이내', value: '30' },
+                      { label: '90일 이내', value: '90' }, { label: '180일 이내', value: '180' },
+                      { label: '1년 이내', value: '365' },
+                    ];
+
+                    const renderInput = (field: any) => {
+                      const val = targetFilters[field.field_key] || '';
+                      const set = (v: string) => setTargetFilters(prev => {
+                        if (!v) { const next = {...prev}; delete next[field.field_key]; return next; }
+                        return {...prev, [field.field_key]: v};
+                      });
+                      const selectClass = "w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent text-sm bg-white";
+
+                      // 연령대 특수 처리
+                      if (field.field_key === 'age_group') {
+                        return (
+                          <select value={val} onChange={e => set(e.target.value)} className={selectClass}>
+                            <option value="">전체</option>
+                            {AGE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                          </select>
+                        );
+                      }
+
+                      // 문자열 + DB 옵션 → 드롭다운
+                      if (field.data_type === 'string' && filterOptions[field.field_key]?.length) {
+                        return (
+                          <select value={val} onChange={e => set(e.target.value)} className={selectClass}>
+                            <option value="">전체</option>
+                            {filterOptions[field.field_key].map((opt: string) => (
+                              <option key={opt} value={opt}>{opt}</option>
+                            ))}
+                          </select>
+                        );
+                      }
+
+                      // 금액 필드 → 프리셋 드롭다운
+                      if (field.data_type === 'number' && ['total_purchase_amount', 'avg_order_value'].includes(field.field_key)) {
+                        return (
+                          <select value={val} onChange={e => set(e.target.value)} className={selectClass}>
+                            <option value="">전체</option>
+                            {AMOUNT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                          </select>
+                        );
+                      }
+
+                      // 숫자 필드 → 직접 입력
+                      if (field.data_type === 'number') {
+                        return (
+                          <input type="number" value={val} onChange={e => set(e.target.value)}
+                            placeholder="이상" className={selectClass} />
+                        );
+                      }
+
+                      // 날짜 필드 → 일수 드롭다운
+                      if (field.data_type === 'date') {
+                        return (
+                          <select value={val} onChange={e => set(e.target.value)} className={selectClass}>
+                            <option value="">전체</option>
+                            {DAYS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                          </select>
+                        );
+                      }
+
+                      // 불리언
+                      if (field.data_type === 'boolean') {
+                        return (
+                          <select value={val} onChange={e => set(e.target.value)} className={selectClass}>
+                            <option value="">전체</option>
+                            <option value="true">예</option>
+                            <option value="false">아니오</option>
+                          </select>
+                        );
+                      }
+
+                      // 기본: 텍스트 입력
+                      return (
+                        <input type="text" value={val} onChange={e => set(e.target.value)}
+                          placeholder="입력" className={selectClass} />
+                      );
+                    };
+
+                    return (
+                      <div className="space-y-2">
+                        {Object.entries(CAT_LABELS).map(([cat, label]) => {
+                          const catFields = filterableFields.filter((f: any) => f.category === cat);
+                          if (catFields.length === 0) return null;
+                          const activeCount = catFields.filter((f: any) => targetFilters[f.field_key]).length;
+                          const isExpanded = expandedCats[cat] ?? false;
+
+                          return (
+                            <div key={cat} className="border border-gray-200 rounded-lg overflow-hidden">
+                              <button
+                                type="button"
+                                onClick={() => setExpandedCats(prev => ({ ...prev, [cat]: !prev[cat] }))}
+                                className="w-full px-4 py-3 flex items-center justify-between bg-gray-50 hover:bg-gray-100 transition-colors"
+                              >
+                                <div className="flex items-center gap-2">
+                                  <span className="text-sm font-medium text-gray-700">{label}</span>
+                                  <span className="text-xs text-gray-400">({catFields.length})</span>
+                                  {activeCount > 0 && (
+                                    <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full font-semibold">{activeCount}</span>
+                                  )}
+                                </div>
+                                <svg className={`w-4 h-4 text-gray-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                </svg>
+                              </button>
+                              {isExpanded && (
+                                <div className="p-4 bg-white grid grid-cols-2 gap-3 border-t border-gray-100">
+                                  {catFields.map((field: any) => (
+                                    <div key={field.field_key}>
+                                      <label className="block text-xs text-gray-500 mb-1.5">{field.display_name}</label>
+                                      {renderInput(field)}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()
+                )}
 
                 {/* 수신동의 */}
                 <div className="flex items-center gap-2 p-3 bg-gray-50 rounded-lg">

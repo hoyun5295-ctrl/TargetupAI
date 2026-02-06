@@ -25,8 +25,8 @@ function buildDynamicFilter(filters: any, startIndex: number) {
     if (value === undefined || value === null || value === '') continue;
 
     // 기본 필드 처리
-    const basicFields = ['gender', 'grade', 'sms_opt_in', 'store_code'];
-    const numericFields = ['points', 'total_purchase_amount'];
+    const basicFields = ['gender', 'grade', 'sms_opt_in', 'store_code', 'region'];
+    const numericFields = ['points', 'total_purchase_amount', 'purchase_count', 'avg_order_value', 'ltv_score', 'visit_count', 'coupon_usage_count', 'return_count'];
     const dateFields = ['birth_date', 'recent_purchase_date', 'created_at'];
 
     if (basicFields.includes(field)) {
@@ -41,6 +41,11 @@ function buildDynamicFilter(filters: any, startIndex: number) {
           whereClause += grf.sql;
           params.push(...grf.params);
           paramIndex = grf.nextIndex;
+        } else if (field === 'region') {
+          const rf = buildRegionFilter(String(value), paramIndex);
+          whereClause += rf.sql;
+          params.push(...rf.params);
+          paramIndex = rf.nextIndex;
         } else {
           whereClause += ` AND ${field} = $${paramIndex++}`;
           params.push(value);
@@ -74,6 +79,11 @@ function buildDynamicFilter(filters: any, startIndex: number) {
       } else if (operator === 'between' && Array.isArray(value)) {
         whereClause += ` AND ${field} BETWEEN $${paramIndex++} AND $${paramIndex++}`;
         params.push(value[0], value[1]);
+      } else if (operator === 'days_within') {
+        const daysAgo = new Date();
+        daysAgo.setDate(daysAgo.getDate() - parseInt(value));
+        whereClause += ` AND ${field} >= $${paramIndex++}`;
+        params.push(daysAgo.toISOString().split('T')[0]);
       }
     } else if (field === 'age') {
       // 나이는 birth_date로 계산
@@ -657,7 +667,7 @@ router.post('/filter-count', async (req: Request, res: Response) => {
       return res.status(403).json({ error: '회사 권한이 필요합니다' });
     }
 
-    const { gender, ageRange, grade, region, minPurchase, recentDays, smsOptIn } = req.body;
+    const { gender, ageRange, grade, region, minPurchase, recentDays, smsOptIn, dynamicFilters } = req.body;
 
     let whereClause = 'WHERE company_id = $1 AND is_active = true';
     const params: any[] = [companyId];
@@ -674,54 +684,52 @@ router.post('/filter-count', async (req: Request, res: Response) => {
     }
 
     // 수신동의 필터
-    if (smsOptIn) {
-      whereClause += ' AND sms_opt_in = true';
-    }
-
-    // 성별 필터
-    if (gender) {
-      const gf = buildGenderFilter(String(gender), paramIndex);
-      whereClause += gf.sql;
-      params.push(...gf.params);
-      paramIndex = gf.nextIndex;
-    }
-
-    // 나이대 필터
-    if (ageRange) {
-      const ageVal = parseInt(ageRange);
-      if (ageVal === 60) {
-        whereClause += ` AND age >= 60`;
-      } else {
-        whereClause += ` AND age >= $${paramIndex++} AND age < $${paramIndex++}`;
-        params.push(ageVal, ageVal + 10);
+    if (dynamicFilters && typeof dynamicFilters === 'object' && Object.keys(dynamicFilters).length > 0) {
+      // === 동적 필터 (새 UI) ===
+      if (smsOptIn) whereClause += ' AND sms_opt_in = true';
+      const df = buildDynamicFilter(dynamicFilters, paramIndex);
+      whereClause += df.where;
+      params.push(...df.params);
+      paramIndex = df.nextIndex;
+    } else {
+      // === 레거시 필터 (기존 UI - 하위호환) ===
+      if (smsOptIn) {
+        whereClause += ' AND sms_opt_in = true';
       }
-    }
-
-    // 등급 필터
-    if (grade) {
-      const grf = buildGradeFilter(String(grade), paramIndex);
-      whereClause += grf.sql;
-      params.push(...grf.params);
-      paramIndex = grf.nextIndex;
-    }
-
-    // 지역 필터 (normalize.ts 변형값 매칭)
-    if (region) {
-      const regionResult = buildRegionFilter(String(region), paramIndex);
-      whereClause += regionResult.sql;
-      params.push(...regionResult.params);
-      paramIndex = regionResult.nextIndex;
-    }
-
-    // 구매금액 필터
-    if (minPurchase) {
-      whereClause += ` AND total_purchase_amount >= $${paramIndex++}`;
-      params.push(parseInt(minPurchase));
-    }
-
-    // 최근 구매일 필터
-    if (recentDays) {
-      whereClause += ` AND recent_purchase_date >= NOW() - INTERVAL '${parseInt(recentDays)} days'`;
+      if (gender) {
+        const gf = buildGenderFilter(String(gender), paramIndex);
+        whereClause += gf.sql;
+        params.push(...gf.params);
+        paramIndex = gf.nextIndex;
+      }
+      if (ageRange) {
+        const ageVal = parseInt(ageRange);
+        if (ageVal === 60) {
+          whereClause += ` AND age >= 60`;
+        } else {
+          whereClause += ` AND age >= $${paramIndex++} AND age < $${paramIndex++}`;
+          params.push(ageVal, ageVal + 10);
+        }
+      }
+      if (grade) {
+        const grf = buildGradeFilter(String(grade), paramIndex);
+        whereClause += grf.sql;
+        params.push(...grf.params);
+        paramIndex = grf.nextIndex;
+      }
+      if (region) {
+        const regionResult = buildRegionFilter(String(region), paramIndex);
+        whereClause += regionResult.sql;
+        params.push(...regionResult.params);
+        paramIndex = regionResult.nextIndex;
+      }
+      if (minPurchase) {
+        whereClause += ` AND total_purchase_amount >= $${paramIndex++}`;
+        params.push(parseInt(minPurchase));
+      }
+      if (recentDays) {
+        whereClause += ` AND recent_purchase_date >= NOW() - INTERVAL '${parseInt(recentDays)} days'`;
+      }
     }
 
     const result = await query(
@@ -747,7 +755,7 @@ router.post('/extract', async (req: Request, res: Response) => {
       return res.status(403).json({ error: '회사 권한이 필요합니다' });
     }
 
-    const { gender, ageRange, grade, region, minPurchase, recentDays, smsOptIn, phoneField, limit = 10000 } = req.body;
+    const { gender, ageRange, grade, region, minPurchase, recentDays, smsOptIn, phoneField, limit = 10000, dynamicFilters } = req.body;
 
     let whereClause = 'WHERE company_id = $1 AND is_active = true';
     const params: any[] = [companyId];
@@ -763,55 +771,50 @@ router.post('/extract', async (req: Request, res: Response) => {
       }
     }
 
-    // 수신동의 필터
-    if (smsOptIn) {
-      whereClause += ' AND sms_opt_in = true';
-    }
-
-    // 성별 필터
-    if (gender) {
-      const gf = buildGenderFilter(String(gender), paramIndex);
-      whereClause += gf.sql;
-      params.push(...gf.params);
-      paramIndex = gf.nextIndex;
-    }
-
-    // 나이대 필터
-    if (ageRange) {
-      const ageVal = parseInt(ageRange);
-      if (ageVal === 60) {
-        whereClause += ` AND age >= 60`;
-      } else {
-        whereClause += ` AND age >= $${paramIndex++} AND age < $${paramIndex++}`;
-        params.push(ageVal, ageVal + 10);
+    if (dynamicFilters && typeof dynamicFilters === 'object' && Object.keys(dynamicFilters).length > 0) {
+      if (smsOptIn) whereClause += ' AND sms_opt_in = true';
+      const df = buildDynamicFilter(dynamicFilters, paramIndex);
+      whereClause += df.where;
+      params.push(...df.params);
+      paramIndex = df.nextIndex;
+    } else {
+      if (smsOptIn) {
+        whereClause += ' AND sms_opt_in = true';
       }
-    }
-
-    // 등급 필터
-    if (grade) {
-      const grf = buildGradeFilter(String(grade), paramIndex);
-      whereClause += grf.sql;
-      params.push(...grf.params);
-      paramIndex = grf.nextIndex;
-    }
-
-    // 지역 필터 (normalize.ts 변형값 매칭)
-    if (region) {
-      const regionResult = buildRegionFilter(String(region), paramIndex);
-      whereClause += regionResult.sql;
-      params.push(...regionResult.params);
-      paramIndex = regionResult.nextIndex;
-    }
-
-    // 구매금액 필터
-    if (minPurchase) {
-      whereClause += ` AND total_purchase_amount >= $${paramIndex++}`;
-      params.push(parseInt(minPurchase));
-    }
-
-    // 최근 구매일 필터
-    if (recentDays) {
-      whereClause += ` AND recent_purchase_date >= NOW() - INTERVAL '${parseInt(recentDays)} days'`;
+      if (gender) {
+        const gf = buildGenderFilter(String(gender), paramIndex);
+        whereClause += gf.sql;
+        params.push(...gf.params);
+        paramIndex = gf.nextIndex;
+      }
+      if (ageRange) {
+        const ageVal = parseInt(ageRange);
+        if (ageVal === 60) {
+          whereClause += ` AND age >= 60`;
+        } else {
+          whereClause += ` AND age >= $${paramIndex++} AND age < $${paramIndex++}`;
+          params.push(ageVal, ageVal + 10);
+        }
+      }
+      if (grade) {
+        const grf = buildGradeFilter(String(grade), paramIndex);
+        whereClause += grf.sql;
+        params.push(...grf.params);
+        paramIndex = grf.nextIndex;
+      }
+      if (region) {
+        const regionResult = buildRegionFilter(String(region), paramIndex);
+        whereClause += regionResult.sql;
+        params.push(...regionResult.params);
+        paramIndex = regionResult.nextIndex;
+      }
+      if (minPurchase) {
+        whereClause += ` AND total_purchase_amount >= $${paramIndex++}`;
+        params.push(parseInt(minPurchase));
+      }
+      if (recentDays) {
+        whereClause += ` AND recent_purchase_date >= NOW() - INTERVAL '${parseInt(recentDays)} days'`;
+      }
     }
 
     // 데이터 추출 (전화번호 필드 동적 선택)
@@ -872,7 +875,59 @@ router.get('/filter-options', async (req: Request, res: Response) => {
   }
 });
 
-// GET /api/customers/:id - 고객 상세
+// GET /api/customers/enabled-fields - 회사별 활성 필터 필드 + 드롭다운 옵션
+router.get('/enabled-fields', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다' });
+
+    const companyResult = await query('SELECT enabled_fields FROM companies WHERE id = $1', [companyId]);
+    
+    const DEFAULT_FIELDS = ['gender', 'age_group', 'grade', 'region', 'total_purchase_amount', 'last_purchase_date'];
+    const enabledKeys = companyResult.rows[0]?.enabled_fields?.length > 0 
+      ? companyResult.rows[0].enabled_fields 
+      : DEFAULT_FIELDS;
+
+    if (enabledKeys.length === 0) {
+      return res.json({ fields: [], options: {} });
+    }
+
+    const fieldsResult = await query(
+      `SELECT field_key, display_name, category, data_type, description, sort_order 
+       FROM standard_fields 
+       WHERE is_active = true AND field_key = ANY($1) 
+       ORDER BY sort_order`,
+      [enabledKeys]
+    );
+
+    const OPTION_COLUMNS: Record<string, string> = {
+      'gender': 'gender', 'grade': 'grade', 'region': 'region', 'store_code': 'store_code',
+    };
+
+    const options: Record<string, string[]> = {};
+    for (const field of fieldsResult.rows) {
+      if (field.data_type === 'string' && OPTION_COLUMNS[field.field_key]) {
+        const col = OPTION_COLUMNS[field.field_key];
+        try {
+          const optResult = await query(
+            `SELECT DISTINCT ${col} FROM customers_unified WHERE company_id = $1 AND is_active = true AND ${col} IS NOT NULL AND ${col} != '' ORDER BY ${col} LIMIT 100`,
+            [companyId]
+          );
+          if (optResult.rows.length > 0) {
+            options[field.field_key] = optResult.rows.map((r: any) => r[col]);
+          }
+        } catch (e) { /* 컬럼 없으면 무시 */ }
+      }
+    }
+
+    res.json({ fields: fieldsResult.rows, options });
+  } catch (error) {
+    console.error('활성 필드 조회 실패:', error);
+    res.status(500).json({ error: '조회 실패' });
+  }
+});
+
+// GET /api/customers/:id - 고객 상세 (⚠️ 반드시 맨 아래! 위의 라우트보다 뒤에 있어야 함)
 router.get('/:id', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
