@@ -1,11 +1,18 @@
-# Target-UP (타겟업) - 프로젝트 레퍼런스
+# 한줄로 (Target-UP) - 프로젝트 레퍼런스
 
 ## 프로젝트 개요
+- **서비스명**: 한줄로 (내부 코드명: Target-UP / 타겟업)
 - **서비스**: AI 기반 SMS/LMS 마케팅 자동화 플랫폼
 - **회사**: INVITO (인비토) / 대표: Harold
-- **경로**: `C:\projects\targetup`
+- **로컬 경로**: `C:\projects\targetup`
+- **서버 경로**: `/home/administrator/targetup-app`
 - **핵심 가치**: 자연어 입력 → AI 타겟 추출 → 메시지 자동 생성 → 실제 발송
 - **구조**: 멀티 테넌트 (고객사별 독립 DB/캠페인 관리)
+
+## 브랜딩
+- **서비스명**: 한줄로 (상표 출원 예정)
+- **도메인**: hanjul.ai (메인), hanjullo.com (브랜드 보호), hanjul.co.kr, hanjullo.co.kr, hanjullo.ai
+- **상표 전략**: "한줄로" 결합 상표 (제9류, 35류, 42류 출원 예정)
 
 ## 핵심 원칙
 - **데이터 정확성**: 대상자 수는 AI 추정이 아닌 DB 실제 쿼리 결과로 산출
@@ -19,7 +26,27 @@
 - SMS/LMS → MMS, 카카오톡 등 멀티채널 확장 예정
 - 고객 데이터 동기화: Sync Agent(범용 exe) + Excel/CSV 업로드(AI 자동 컬럼 매핑)
 - 소스 보호: 핵심 로직 별도 서버 분리, 빌드 시 난독화, 라이선스 서버 검토
-- 프로덕션 배포: IDC 서버 (HTTPS, AES-256, 방화벽, Rate Limiting 등)
+- 프로덕션 배포: IDC 서버 ✅ 완료 (HTTPS, Let's Encrypt, Nginx, PM2)
+
+---
+
+## 도메인 & 접속 구조 (상용 서버)
+
+| 도메인 | 용도 | 대상 | 프론트엔드 |
+|--------|------|------|------------|
+| **https://hanjul.ai** | 서비스 | 고객사 일반 사용자 | frontend (React) |
+| **https://app.hanjul.ai** | 고객사 관리 | 고객사 관리자 | company-frontend (React) |
+| **https://sys.hanjullo.com** | 시스템 관리 | 슈퍼관리자 (INVITO 내부) | frontend (슈퍼관리자 모드) |
+
+- 모든 도메인 → IDC 서버 58.227.193.62
+- 모든 도메인 HTTPS (Let's Encrypt 자동갱신)
+- IP 직접 접속 차단 (SSL 없는 접속 방지)
+- 슈퍼관리자 URL은 hanjullo.com 서브도메인으로 분리 → 유추 어려움
+
+### 로그인 페이지 분기 (LoginPage.tsx)
+- **hanjul.ai**: "한줄로 / AI 마케팅 자동화" 브랜딩, 탭 없음 (서비스 사용자 전용)
+- **sys.hanjullo.com**: "Target-UP / 시스템 관리자" 브랜딩, 탭 없음 (슈퍼관리자 전용)
+- hostname 기반 조건부 렌더링: `window.location.hostname === 'sys.hanjullo.com'`
 
 ---
 
@@ -34,33 +61,62 @@
 | AI | Claude API |
 | SMS 발송 | QTmsg (통신사: 11=SKT, 16=KT, 19=LG U+) |
 | DB 관리 | pgAdmin |
+| 웹서버 | Nginx (리버스 프록시 + SSL) |
+| 프로세스 관리 | PM2 |
 
-## 실행 명령어
+---
 
-### 1. 도커 컨테이너 시작
+## 개발 워크플로우
+
+### 로컬 개발 (코드 수정 & 테스트)
 ```bash
+# 1. 도커 시작
 docker start targetup-postgres targetup-redis targetup-mysql
-```
 
-### 2. 백엔드 (터미널 1)
-```bash
+# 2. 백엔드
 cd C:\projects\targetup\packages\backend && npm run dev
-```
 
-### 3. 프론트엔드 (터미널 2)
-```bash
+# 3. 프론트엔드
 cd C:\projects\targetup\packages\frontend && npm run dev
+
+# 4. 코드 수정 → 로컬 테스트 → 완료 후:
+git add -A
+git commit -m "설명"
+git push
 ```
 
-### 4. QTmsg 발송 엔진 (필요 시)
+### 서버 배포 (SSH 접속 후)
+```bash
+ssh administrator@58.227.193.62
+
+# 1. 소스 업데이트
+cd /home/administrator/targetup-app
+git pull
+
+# 2. 프론트엔드 빌드 (변경 시)
+cd packages/frontend && npm run build
+# 또는 company-frontend 변경 시
+cd packages/company-frontend && npm run build
+
+# 3. 백엔드 재시작 (변경 시)
+pm2 restart all
+
+# 4. 확인
+pm2 status
+```
+
+### QTmsg 발송 엔진 (로컬 - 개발용)
 ```bash
 cd C:\projects\qtmsg\bin
 .\test_in_cmd_win.bat
 # 이미 실행 중 에러 시: del *.pid *.lock 후 재실행
 ```
 
+---
+
 ## 접속 정보
 
+### 로컬 개발 환경
 | 서비스 | Host | Port | DB/User | 비고 |
 |--------|------|------|---------|------|
 | PostgreSQL | localhost | 5432 | targetup / targetup | `docker exec -it targetup-postgres psql -U targetup targetup` |
@@ -70,23 +126,141 @@ cd C:\projects\qtmsg\bin
 | 백엔드 API | localhost | 3000 | - | |
 | pgAdmin | localhost | 5050 | - | |
 
+### 상용 서버 (IDC)
+| 서비스 | Host | Port | 비고 |
+|--------|------|------|------|
+| SSH | 58.227.193.62 | 22 | administrator |
+| PostgreSQL | localhost | 5432 | Docker 컨테이너 |
+| MySQL (QTmsg) | localhost | 3306 | Docker 컨테이너 |
+| Redis | localhost | 6379 | Docker 컨테이너 |
+| Nginx | 0.0.0.0 | 80/443 | 리버스 프록시 + SSL |
+| 백엔드 API | localhost | 3000 | PM2 관리 |
+
+### Nginx 설정 파일 (서버)
+| 파일 | 도메인 | 프론트엔드 경로 |
+|------|--------|----------------|
+| `/etc/nginx/sites-available/targetup` | hanjul.ai | frontend/dist |
+| `/etc/nginx/sites-available/targetup-company` | sys.hanjullo.com | frontend/dist |
+| `/etc/nginx/sites-available/targetup-app` | app.hanjul.ai | company-frontend/dist |
+
+### SSL 인증서 (Let's Encrypt)
+| 도메인 | 인증서 경로 | 만료일 |
+|--------|------------|--------|
+| hanjul.ai | /etc/letsencrypt/live/hanjul.ai/ | 2026-05-08 |
+| sys.hanjullo.com | /etc/letsencrypt/live/sys.hanjullo.com/ | 2026-05-08 |
+| app.hanjul.ai | /etc/letsencrypt/live/app.hanjul.ai/ | 2026-05-08 |
+
+---
+
 ## 주요 파일 경로
 ```
-C:\projects\targetup\
+C:\projects\targetup\  (로컬)
+/home/administrator/targetup-app/  (서버)
 ├── packages/
 │   ├── backend/
 │   │   └── src/
 │   │       ├── app.ts              ← 백엔드 메인
 │   │       ├── routes/             ← API 라우트
 │   │       └── services/           ← 비즈니스 로직
-│   └── frontend/
+│   ├── frontend/                   ← 서비스 사용자 + 슈퍼관리자 UI
+│   │   └── src/
+│   │       ├── components/         ← UI 컴포넌트
+│   │       ├── pages/              ← 페이지 (LoginPage.tsx: hostname 분기)
+│   │       └── services/           ← API 호출
+│   └── company-frontend/           ← 고객사 관리자 UI (app.hanjul.ai)
 │       └── src/
-│           ├── components/         ← UI 컴포넌트
-│           ├── pages/              ← 페이지
-│           └── services/           ← API 호출
+│           ├── components/
+│           ├── pages/
+│           └── services/
 ├── docker-compose.yml
 └── STATUS.md
 ```
+
+---
+
+## API 라우트
+```
+/api/auth          → routes/auth.ts (로그인, 비밀번호 변경)
+/api/campaigns     → routes/campaigns.ts (캠페인 CRUD, 발송, 동기화)
+/api/customers     → routes/customers.ts (고객 조회, 필터, 추출)
+/api/companies     → routes/companies.ts (회사 설정, 발신번호)
+/api/ai            → routes/ai.ts (타겟 추천, 메시지 생성)
+/api/admin         → routes/admin.ts (슈퍼관리자 전용)
+/api/results       → routes/results.ts (발송 결과/통계)
+/api/upload        → routes/upload.ts (파일 업로드/매핑)
+/api/unsubscribes  → routes/unsubscribes.ts (수신거부)
+/api/address-books → routes/address-books.ts (주소록)
+/api/test-contacts → routes/test-contacts.ts (테스트 연락처)
+/api/plans         → routes/plans.ts (요금제)
+```
+
+★ 슈퍼관리자(sys.hanjullo.com) / 고객사관리자(app.hanjul.ai) / 서비스사용자(hanjul.ai) 접속주소 완전 분리 완료
+
+---
+
+## 접속 구조 상세
+
+### 사용자 역할별 접근
+| 역할 | 접속 URL | 로그인 방식 | 로그인 후 이동 |
+|------|----------|-------------|----------------|
+| 서비스 사용자 | hanjul.ai | company 로그인 | /dashboard |
+| 고객사 관리자 | app.hanjul.ai | company-admin 로그인 | 고객사 관리 대시보드 |
+| 슈퍼관리자 | sys.hanjullo.com | super_admin 로그인 | /admin |
+
+---
+
+## QTmsg 발송 시스템
+
+### 현재 구조
+- Agent 1개 (단일 Bind ID) → 로컬 개발용
+- SMSQ_SEND 테이블에 insert → Agent가 poll → 중계서버 → 이통사 발송
+- rsv1 상태: 1=발송대기, 2=Agent처리중, 3=서버전송완료, 4=결과수신, 5=월별처리완료
+
+### 상용 서버 계획: 5개 Agent 균등 발송
+- 운영실에 Bind ID 5개 발급 요청 필요
+- 각 Agent별 **별도 테이블** 운영 (충돌 방지)
+
+| Agent | Bind ID | 테이블 | admin_port | 로그 테이블 |
+|-------|---------|--------|------------|------------|
+| 1 | agent01 | SMSQ_SEND_1 | 9001 | SMSQ_SEND_1_YYYYMM |
+| 2 | agent02 | SMSQ_SEND_2 | 9002 | SMSQ_SEND_2_YYYYMM |
+| 3 | agent03 | SMSQ_SEND_3 | 9003 | SMSQ_SEND_3_YYYYMM |
+| 4 | agent04 | SMSQ_SEND_4 | 9004 | SMSQ_SEND_4_YYYYMM |
+| 5 | agent05 | SMSQ_SEND_5 | 9005 | SMSQ_SEND_5_YYYYMM |
+
+- 백엔드 캠페인 발송 시 라운드로빈으로 5개 테이블에 균등 분배
+- 결과 조회 시 5개 로그 테이블 합산 조회
+
+### QTmsg 주요 결과 코드
+| 코드 | 의미 |
+|------|------|
+| 6 | SMS 전송 성공 |
+| 1000 | LMS/MMS 전송 성공 |
+| 1800 | 카카오톡 전달 성공 |
+| 7 | 비가입자/결번/서비스정지 |
+| 8 | Power-off |
+| 16 | 스팸 차단 |
+| 100 | 발송 대기 |
+
+---
+
+## utils/normalize.ts (데이터 정규화 코어)
+
+**역할 3가지:**
+1. **값 정규화** — 어떤 형태로 들어오든 표준값으로 통일
+   - 성별: 남/남자/male/man/1 → 'M' | 등급: vip/VIP고객/V → 'VIP'
+   - 지역: 서울시/서울특별시/Seoul → '서울' | 전화번호: +82-10-1234-5678 → '01012345678'
+   - 금액: ₩1,000원 → 1000 | 날짜: 20240101, 2024.01.01 → '2024-01-01'
+2. **필드명 매핑** — `normalizeCustomerRecord()`에서 다양한 컬럼명을 표준 필드로 통일
+   - raw.mobile / raw.phone_number / raw.tel → phone
+   - raw.sex / raw.성별 → gender | raw.등급 / raw.membership → grade
+3. **필터 빌더** — DB에 어떤 형식으로 저장돼 있든 잡아내는 SQL 조건 생성
+   - `buildGenderFilter('M')` → WHERE gender = ANY(['M','m','남','남자','male'...])
+
+**참조 파일:** ai.ts, customers.ts, campaigns.ts, upload.ts (백엔드 핵심 4개 전부)
+
+> ⚠️ 이 유틸이 고객사별 DB 형식 차이를 흡수하는 핵심 레이어.
+> standard_fields(49개) + normalize.ts + upload AI매핑 조합으로 field_mappings 별도 UI 불필요.
 
 ---
 
@@ -752,39 +926,6 @@ C:\projects\targetup\
 | app_etc1 | varchar(50) | campaign_run_id 저장 |
 | app_etc2 | varchar(50) | |
 
-/api/auth          → routes/auth.ts (로그인, 비밀번호 변경)
-/api/campaigns     → routes/campaigns.ts (캠페인 CRUD, 발송, 동기화)
-/api/customers     → routes/customers.ts (고객 조회, 필터, 추출)
-/api/companies     → routes/companies.ts (회사 설정, 발신번호)
-/api/ai            → routes/ai.ts (타겟 추천, 메시지 생성)
-/api/admin         → routes/admin.ts (슈퍼관리자 전용)
-/api/results       → routes/results.ts (발송 결과/통계)
-/api/upload        → routes/upload.ts (파일 업로드/매핑)
-/api/unsubscribes  → routes/unsubscribes.ts (수신거부)
-/api/address-books → routes/address-books.ts (주소록)
-/api/test-contacts → routes/test-contacts.ts (테스트 연락처)
-/api/plans         → routes/plans.ts (요금제)
-
-★중요사항 - 슈퍼관리자 와 고객사 관리자는 접속주소 자체를 분리예정(단, 고객사관리자는 슈퍼관리자의 기능만 몇개 가려서 기능부여예정)
-
-### utils/normalize.ts (데이터 정규화 코어)
-
-**역할 3가지:**
-1. **값 정규화** — 어떤 형태로 들어오든 표준값으로 통일
-   - 성별: 남/남자/male/man/1 → 'M' | 등급: vip/VIP고객/V → 'VIP'
-   - 지역: 서울시/서울특별시/Seoul → '서울' | 전화번호: +82-10-1234-5678 → '01012345678'
-   - 금액: ₩1,000원 → 1000 | 날짜: 20240101, 2024.01.01 → '2024-01-01'
-2. **필드명 매핑** — `normalizeCustomerRecord()`에서 다양한 컬럼명을 표준 필드로 통일
-   - raw.mobile / raw.phone_number / raw.tel → phone
-   - raw.sex / raw.성별 → gender | raw.등급 / raw.membership → grade
-3. **필터 빌더** — DB에 어떤 형식으로 저장돼 있든 잡아내는 SQL 조건 생성
-   - `buildGenderFilter('M')` → WHERE gender = ANY(['M','m','남','남자','male'...])
-
-**참조 파일:** ai.ts, customers.ts, campaigns.ts, upload.ts (백엔드 핵심 4개 전부)
-
-> ⚠️ 이 유틸이 고객사별 DB 형식 차이를 흡수하는 핵심 레이어.
-> standard_fields(49개) + normalize.ts + upload AI매핑 조합으로 field_mappings 별도 UI 불필요.
-
 ### billing_invoices (거래내역서/정산)
 | 컬럼 | 타입 | 설명 |
 |------|------|------|
@@ -818,3 +959,67 @@ C:\projects\targetup\
 | created_by | uuid | 생성자 |
 | created_at | timestamptz | |
 | updated_at | timestamptz | |
+
+---
+
+## 작업 현황 체크리스트
+
+### ✅ 완료된 작업
+
+**서버 인프라**
+- [x] IDC 상용서버 전체 배포 (SSH, Docker, Node.js, PostgreSQL/MySQL/Redis, Nginx, PM2)
+- [x] 도메인 구매 (hanjul.ai, hanjul.co.kr, hanjullo.com, hanjullo.co.kr, hanjullo.ai)
+- [x] DNS 설정 (가비아: hanjul.ai, sys.hanjullo.com, app.hanjul.ai → 58.227.193.62)
+- [x] SSL 인증서 발급 (Let's Encrypt: hanjul.ai, sys.hanjullo.com, app.hanjul.ai)
+- [x] Nginx 리버스 프록시 설정 (3개 도메인 → 각각 프론트엔드 + API)
+- [x] IP 직접 접속 차단 (SSL 없는 접속 방지)
+- [x] PM2 백엔드 프로세스 관리
+
+**도메인 분리 & 브랜딩**
+- [x] 서비스명 "한줄로" 확정 (GPT/Gemini 대안 비교 완료)
+- [x] hanjul.ai → 서비스 사용자 전용 (탭 없는 깔끔한 로그인)
+- [x] app.hanjul.ai → 고객사 관리자 전용 (company-frontend)
+- [x] sys.hanjullo.com → 슈퍼관리자 전용 (유추 어려운 URL)
+- [x] 로그인 페이지 hostname 기반 조건부 렌더링
+- [x] 로그인 페이지 디자인 통일 (깔끔한 스타일)
+- [x] Git 소스 서버 동기화
+
+**핵심 기능 (로컬 개발 완료)**
+- [x] 캠페인 CRUD + AI 타겟 추출 + 메시지 생성
+- [x] QTmsg 연동 (로컬 Agent 1개)
+- [x] 고객 데이터 업로드 (Excel/CSV + AI 자동 매핑)
+- [x] 슈퍼관리자 대시보드
+- [x] 고객사 관리자 대시보드 (company-frontend)
+- [x] 정산/거래내역서 시스템
+- [x] 데이터 정규화 시스템 (normalize.ts)
+
+### 🔲 진행 예정 작업
+
+**서버 - 긴급 (상용화 필수)**
+- [ ] QTmsg Agent 리눅스 버전 서버 설치 (실제 SMS 발송 가능하게)
+- [ ] QTmsg Agent 5개 균등 발송 구현 (운영실에 Bind ID 5개 발급 요청)
+- [ ] 백엔드 발송 로직에 라운드로빈 분배 추가
+- [ ] 로컬에서 수정한 LoginPage.tsx 서버와 git 동기화
+
+**보안**
+- [ ] 슈퍼관리자 IP 화이트리스트 설정
+- [ ] www.hanjul.ai SSL 인증서 추가 (DNS 전파 후)
+- [ ] VPN 접근 제한 검토
+
+**법률/규정**
+- [ ] 개인정보처리방침 작성
+- [ ] 이용약관 작성
+- [ ] 푸터 사업자정보 추가 (주식회사 인비토, 사업자번호, 통신판매업 등)
+- [ ] 각 로그인 페이지 하단에 반영
+
+**브랜딩**
+- [ ] "한줄로" 로고 디자인
+- [ ] 상표 출원 (제9류, 35류, 42류 결합 상표)
+- [ ] 파비콘/OG 이미지 적용
+
+**기능 확장**
+- [ ] 카카오톡 알림톡/친구톡 연동
+- [ ] MMS 발송 기능
+- [ ] PDF 승인 기능 (이메일 링크)
+- [ ] Android 앱 (스팸필터 자동 테스트)
+- [ ] 고객사 관리자 기능 세분화 (슈퍼관리자 기능 축소 버전)

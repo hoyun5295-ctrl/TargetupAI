@@ -8,6 +8,8 @@ import CalendarPage from './pages/CalendarPage';
 import Settings from './pages/Settings';
 import Unsubscribes from './pages/Unsubscribes';
 import PricingPage from './pages/PricingPage';
+import PrivacyPage from './pages/PrivacyPage';
+import TermsPage from './pages/TermsPage';
 
 // 인증 필요 라우트
 function PrivateRoute({ children, allowedTypes }: { children: React.ReactNode; allowedTypes?: string[] }) {
@@ -89,6 +91,8 @@ return (
 <Route path="/settings" element={<PrivateRoute><Settings /></PrivateRoute>} />
 <Route path="/unsubscribes" element={<PrivateRoute><Unsubscribes /></PrivateRoute>} />
 <Route path="/pricing" element={<PrivateRoute><PricingPage /></PrivateRoute>} />
+<Route path="/privacy" element={<PrivacyPage />} />
+<Route path="/terms" element={<TermsPage />} />
           {/* 404 */}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

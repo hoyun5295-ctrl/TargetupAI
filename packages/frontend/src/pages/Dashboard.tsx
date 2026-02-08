@@ -5945,6 +5945,15 @@ const campaignData = {
           </div>
         </div>
       )}
+
+      {/* 하단 링크 */}
+      <div className="max-w-7xl mx-auto px-4 py-6 mt-8 border-t border-gray-200 text-center text-xs text-gray-400 space-x-3">
+        <a href="/privacy" target="_blank" className="hover:text-gray-600 transition">개인정보처리방침</a>
+        <span>|</span>
+        <a href="/terms" target="_blank" className="hover:text-gray-600 transition">이용약관</a>
+        <span>|</span>
+        <span>© 2026 INVITO</span>
+      </div>
     </div>
   );
 }
