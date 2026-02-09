@@ -329,9 +329,7 @@ router.delete('/:id', async (req: Request, res: Response) => {
   try {
     const check = await pool.query('SELECT status FROM billings WHERE id = $1', [req.params.id]);
     if (check.rows.length === 0) return res.status(404).json({ error: '정산을 찾을 수 없습니다' });
-    if (check.rows[0].status !== 'draft') {
-      return res.status(400).json({ error: '초안 상태의 정산만 삭제할 수 있습니다' });
-    }
+    
     // billing_items는 ON DELETE CASCADE로 자동 삭제
     await pool.query('DELETE FROM billings WHERE id = $1', [req.params.id]);
     return res.json({ success: true });
