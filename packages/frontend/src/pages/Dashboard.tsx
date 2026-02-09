@@ -733,55 +733,80 @@ export default function Dashboard() {
     loadRecentCampaigns();
     loadScheduledCampaigns();
   }, []);
-
+// 자동입력 변수를 수신자 중 가장 긴 값으로 치환하여 최대 바이트 메시지 생성
+const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<string, string>) => {
+  let result = msg;
+  // variableMap: { '%이름%': 'name', '%등급%': 'grade', ... }
+  Object.entries(variableMap).forEach(([variable, field]) => {
+    if (!result.includes(variable)) return;
+    // 수신자 중 해당 필드의 가장 긴 값 찾기
+    let maxValue = '';
+    recipients.forEach((r: any) => {
+      const val = String(r[field] || '');
+      if (val.length > maxValue.length) maxValue = val;
+    });
+    // 수신자가 없거나 값이 없으면 기본 최대값 사용
+    if (!maxValue) {
+      const defaults: Record<string, string> = {
+        '%이름%': '홍길동어머니', '%등급%': 'VVIP', '%지역%': '경기도 성남시',
+        '%구매금액%': '99,999,999원', '%기타1%': '가나다라마바사', '%기타2%': '가나다라마바사', '%기타3%': '가나다라마바사',
+      };
+      maxValue = defaults[variable] || '가나다라마바';
+    }
+    result = result.replace(new RegExp(variable.replace(/%/g, '%'), 'g'), maxValue);
+  });
+  return result;
+};
   // 바이트 초과 시 자동 LMS 전환 (SMS→LMS만, LMS→SMS 복귀는 수동)
   useEffect(() => {
-    // 광고문구 포함된 전체 메시지로 바이트 계산
-    let fullMsg = directMessage;
+    // 자동입력 변수를 최대 길이 값으로 치환
+    const directVarMap: Record<string, string> = {
+      '%이름%': 'name', '%기타1%': 'extra1', '%기타2%': 'extra2', '%기타3%': 'extra3',
+    };
+    let fullMsg = getMaxByteMessage(directMessage, directRecipients, directVarMap);
     if (adTextEnabled) {
       const optOutText = directMsgType === 'SMS'
         ? `무료거부${optOutNumber.replace(/-/g, '')}`
         : `무료수신거부 ${optOutNumber}`;
-      fullMsg = `(광고) ${directMessage}\n${optOutText}`;
+      fullMsg = `(광고) ${fullMsg}\n${optOutText}`;
     }
-    
     // 한글 2byte, 영문/숫자 1byte 계산
     let bytes = 0;
     for (let i = 0; i < fullMsg.length; i++) {
       const char = fullMsg.charCodeAt(i);
       bytes += char > 127 ? 2 : 1;
     }
-    
     // SMS에서 90바이트 초과 시 LMS 전환 확인 모달
     if (directMsgType === 'SMS' && bytes > 90 && !showLmsConfirm) {
       setPendingBytes(bytes);
       setShowLmsConfirm(true);
     }
-  }, [directMessage, directMsgType, adTextEnabled, optOutNumber]);
+  }, [directMessage, directMsgType, adTextEnabled, optOutNumber, directRecipients]);
 
   // 타겟발송 메시지 실시간 바이트 체크
   useEffect(() => {
     if (!showTargetSend) return;
-    
-    let fullMsg = targetMessage;
+    // 자동입력 변수를 최대 길이 값으로 치환
+    const targetVarMap: Record<string, string> = {
+      '%이름%': 'name', '%등급%': 'grade', '%지역%': 'region', '%구매금액%': 'total_purchase_amount',
+    };
+    let fullMsg = getMaxByteMessage(targetMessage, targetRecipients, targetVarMap);
     if (adTextEnabled) {
       const optOutText = targetMsgType === 'SMS'
         ? `무료거부${optOutNumber.replace(/-/g, '')}`
         : `무료수신거부 ${optOutNumber}`;
-      fullMsg = `(광고)${targetMessage}\n${optOutText}`;
+      fullMsg = `(광고)${fullMsg}\n${optOutText}`;
     }
-    
     let bytes = 0;
     for (let i = 0; i < fullMsg.length; i++) {
       const char = fullMsg.charCodeAt(i);
       bytes += char > 127 ? 2 : 1;
     }
-    
     if (targetMsgType === 'SMS' && bytes > 90 && !showLmsConfirm) {
       setPendingBytes(bytes);
       setShowLmsConfirm(true);
     }
-  }, [targetMessage, targetMsgType, adTextEnabled, optOutNumber, showTargetSend]);
+  }, [targetMessage, targetMsgType, adTextEnabled, optOutNumber, showTargetSend, targetRecipients]);
 
   const loadStats = async () => {
     try {
