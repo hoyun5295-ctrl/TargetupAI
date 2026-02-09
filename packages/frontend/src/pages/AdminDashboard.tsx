@@ -4056,13 +4056,9 @@ const handleApproveRequest = async (id: string) => {
                         </td>
                         <td className="px-4 py-2.5 text-center" onClick={e => e.stopPropagation()}>
                           <div className="flex items-center justify-center gap-1">
-                            {b.status === 'draft' && (
-                              <>
-                                <button onClick={() => handleBillingStatusChange(b.id, 'confirmed')}
-                                  className="px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200 transition-colors">확정</button>
-                                <button onClick={() => { setDeleteTargetId(b.id); setShowBillingDeleteConfirm(true); }}
-                                  className="px-2 py-1 text-xs bg-red-100 text-red-600 rounded hover:bg-red-200 transition-colors">삭제</button>
-                              </>
+                          {b.status === 'draft' && (
+                              <button onClick={() => handleBillingStatusChange(b.id, 'confirmed')}
+                                className="px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200 transition-colors">확정</button>
                             )}
                             {b.status === 'confirmed' && (
                               <button onClick={() => handleBillingStatusChange(b.id, 'paid')}
@@ -4077,6 +4073,8 @@ const handleApproveRequest = async (id: string) => {
                                 발송
                               </button>
                             )}
+                            <button onClick={() => { setDeleteTargetId(b.id); setShowBillingDeleteConfirm(true); }}
+                              className="px-2 py-1 text-xs bg-red-100 text-red-600 rounded hover:bg-red-200 transition-colors">삭제</button>
                           </div>
                         </td>
                       </tr>
