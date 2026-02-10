@@ -1217,7 +1217,7 @@ const handleApproveRequest = async (id: string) => {
       {/* 헤더 */}
       <header className="bg-white shadow">
         <div className="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
-          <h1 className="text-xl font-bold text-gray-800">Target-UP Admin</h1>
+        <h1 className="text-xl font-bold text-gray-800">한줄로 시스템 관리</h1>
           <div className="flex items-center gap-4">
             <span className="text-sm text-gray-600">{user?.name}님</span>
             <button

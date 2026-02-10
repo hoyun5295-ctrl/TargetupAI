@@ -46,9 +46,9 @@ export default function LoginPage() {
         {/* 로고 */}
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-gray-900">
-            Target<span className="text-blue-600">-UP</span>
+          한줄로
           </h1>
-          <p className="mt-2 text-sm text-gray-500">고객사 관리자</p>
+          <p className="mt-2 text-sm text-gray-500">사용자 관리</p>
         </div>
 
         {/* 로그인 폼 */}
