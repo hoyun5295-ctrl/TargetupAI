@@ -4,6 +4,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import dotenv from 'dotenv';
+import syncRoutes from './routes/sync';
 
 // 라우트 import
 import authRoutes from './routes/auth';
@@ -39,6 +40,7 @@ app.use(cors());
 app.use(morgan('dev'));
 app.use(express.json({ limit: '50mb' }));
 app.use('/api/upload', uploadRoutes);
+app.use('/api/sync', syncRoutes);
 
 // 헬스체크
 app.get('/health', (req, res) => {
