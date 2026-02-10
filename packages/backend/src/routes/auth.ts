@@ -1,7 +1,9 @@
 import { Router, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
 import { query } from '../config/database';
-import { generateToken, JwtPayload } from '../middlewares/auth';
+// 새코드
+import { generateToken, JwtPayload, authenticate } from '../middlewares/auth';
 
 const router = Router();
 
@@ -13,6 +15,7 @@ router.post('/login', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'ID and password required' });
     }
 
+    // ===== 슈퍼관리자 로그인 (세션 관리 없음) =====
     if (userType === 'super_admin') {
       const result = await query(
         'SELECT * FROM super_admins WHERE login_id = $1 AND is_active = true',
@@ -55,6 +58,7 @@ router.post('/login', async (req: Request, res: Response) => {
       });
     }
 
+    // ===== 고객사 사용자 로그인 =====
     const result = await query(
       `SELECT u.*, u.must_change_password, c.name as company_name, c.id as company_code
        FROM users u
@@ -68,31 +72,74 @@ router.post('/login', async (req: Request, res: Response) => {
     }
 
     const user = result.rows[0];
-    
-    console.log('User found:', user.login_id);
-    console.log('Password hash from DB:', user.password_hash);
-    
     const validPassword = await bcrypt.compare(password, user.password_hash);
-    
-    console.log('Password valid:', validPassword);
 
     if (!validPassword) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    await query(
-      'UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = $1',
+    // ===== 단일 세션 체크 =====
+    const activeSessions = await query(
+      `SELECT id, last_activity_at FROM user_sessions
+       WHERE user_id = $1 AND is_active = true
+       ORDER BY last_activity_at DESC`,
       [user.id]
     );
+
+    if (activeSessions.rows.length > 0) {
+      const lastActivity = new Date(activeSessions.rows[0].last_activity_at);
+      const now = new Date();
+      const minutesSinceActivity = (now.getTime() - lastActivity.getTime()) / (1000 * 60);
+
+      // 30분 이내 활동 + 발송 중 캠페인이 있으면 로그인 차단
+      if (minutesSinceActivity < 30) {
+        const sendingCampaign = await query(
+          `SELECT id, campaign_name FROM campaigns
+           WHERE company_id = $1 AND status = 'sending'
+           LIMIT 1`,
+          [user.company_id]
+        );
+
+        if (sendingCampaign.rows.length > 0) {
+          return res.status(409).json({
+            error: `현재 발송이 진행 중입니다 (${sendingCampaign.rows[0].campaign_name}). 발송 완료 후 다시 시도해주세요.`,
+            reason: 'sending_in_progress'
+          });
+        }
+      }
+
+      // 기존 세션 전부 무효화
+      await query(
+        `UPDATE user_sessions SET is_active = false WHERE user_id = $1`,
+        [user.id]
+      );
+    }
+
+    // ===== 새 세션 생성 =====
+    const sessionId = crypto.randomUUID();
 
     const payload: JwtPayload = {
       userId: user.id,
       companyId: user.company_id,
       userType: user.user_type === 'admin' ? 'company_admin' : 'company_user',
       loginId: user.login_id,
+      sessionId: sessionId,
     };
 
     const token = generateToken(payload);
+
+    // 세션 레코드 저장
+    await query(
+      `INSERT INTO user_sessions (id, user_id, session_token, is_active, ip_address, user_agent, device_type, created_at, last_activity_at, expires_at)
+       VALUES ($1, $2, $3, true, $4, $5, 'web', NOW(), NOW(), NOW() + INTERVAL '24 hours')`,
+      [sessionId, user.id, token, req.ip || '', req.headers['user-agent'] || '']
+    );
+
+    // 로그인 시간 갱신
+    await query(
+      'UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = $1',
+      [user.id]
+    );
 
     return res.json({
       token,
@@ -184,6 +231,10 @@ router.post('/change-password', async (req: Request, res: Response) => {
     console.error('비밀번호 변경 오류:', error);
     return res.status(500).json({ error: '서버 오류' });
   }
+});
+
+router.get('/session-check', authenticate, async (req: Request, res: Response) => {
+  res.json({ ok: true });
 });
 
 export default router;

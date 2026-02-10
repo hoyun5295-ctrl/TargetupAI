@@ -21,9 +21,20 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
+      const data = error.response.data;
+
       localStorage.removeItem('token');
       localStorage.removeItem('user');
-      window.location.href = '/login';
+
+      // 강제 로그아웃 (다른 곳에서 로그인)
+      if (data?.forceLogout) {
+        sessionStorage.setItem('forceLogoutReason', data.error || '다른 곳에서 로그인되어 현재 세션이 종료되었습니다.');
+      }
+
+      // 이미 로그인 페이지면 무시
+      if (window.location.pathname !== '/login') {
+        window.location.href = '/login';
+      }
     }
     return Promise.reject(error);
   }

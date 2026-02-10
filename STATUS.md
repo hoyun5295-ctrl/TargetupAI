@@ -228,25 +228,62 @@ C:\projects\targetup\  (로컬)
 
 ## QTmsg 발송 시스템
 
-### 현재 구조
-- Agent 1개 (단일 Bind ID) → 로컬 개발용
-- SMSQ_SEND 테이블에 insert → Agent가 poll → 중계서버 → 이통사 발송
-- rsv1 상태: 1=발송대기, 2=Agent처리중, 3=서버전송완료, 4=결과수신, 5=월별처리완료
+### 로컬 개발 환경
+- Agent 1개 (단일 Bind ID) → 로컬 개발/테스트용
+- SMSQ_SEND 테이블 1개 사용
+- 환경변수: SMS_TABLES 미설정 → 기본값 `SMSQ_SEND`
 
-### 상용 서버 계획: 5개 Agent 균등 발송
-- 운영실에 Bind ID 5개 발급 요청 필요
+### 상용 서버: 5개 Agent 균등 발송 ✅ 운영 중
 - 각 Agent별 **별도 테이블** 운영 (충돌 방지)
+- 중계서버 58.227.193.58:26352 연결 완료 (bind ack 성공)
+- Agent 경로: `/home/administrator/agent1~5/`
+- Java 8 (OpenJDK 1.8.0_482)
+- MySQL 인증: `mysql_native_password` (QTmsg JDBC 호환)
+- 서버 타임존: Asia/Seoul (KST)
 
-| Agent | Bind ID | 테이블 | admin_port | 로그 테이블 |
-|-------|---------|--------|------------|------------|
-| 1 | agent01 | SMSQ_SEND_1 | 9001 | SMSQ_SEND_1_YYYYMM |
-| 2 | agent02 | SMSQ_SEND_2 | 9002 | SMSQ_SEND_2_YYYYMM |
-| 3 | agent03 | SMSQ_SEND_3 | 9003 | SMSQ_SEND_3_YYYYMM |
-| 4 | agent04 | SMSQ_SEND_4 | 9004 | SMSQ_SEND_4_YYYYMM |
-| 5 | agent05 | SMSQ_SEND_5 | 9005 | SMSQ_SEND_5_YYYYMM |
+| Agent | Deliver ID | Report ID | 테이블 | admin_port | 로그 테이블 |
+|-------|-----------|-----------|--------|------------|------------|
+| 1 | targetai_m | targetai_r | SMSQ_SEND_1 | 9001 | SMSQ_SEND_1_YYYYMM |
+| 2 | targetai2_m | targetai2_r | SMSQ_SEND_2 | 9002 | SMSQ_SEND_2_YYYYMM |
+| 3 | targetai3_m | targetai3_r | SMSQ_SEND_3 | 9003 | SMSQ_SEND_3_YYYYMM |
+| 4 | targetai4_m | targetai4_r | SMSQ_SEND_4 | 9004 | SMSQ_SEND_4_YYYYMM |
+| 5 | targetai5_m | targetai5_r | SMSQ_SEND_5 | 9005 | SMSQ_SEND_5_YYYYMM |
 
+### Agent 관리 명령어
+```bash
+# 개별 시작/중지
+cd /home/administrator/agent1/bin && ./qtmsg.sh start
+cd /home/administrator/agent1/bin && ./qtmsg.sh stop
+
+# 전체 시작
+for i in 1 2 3 4 5; do cd /home/administrator/agent$i/bin && ./qtmsg.sh start; done
+
+# 전체 중지
+pkill -f qtmsg
+
+# 프로세스 확인
+ps aux | grep qtmsg | grep -v grep | wc -l   # 5개면 정상
+
+# 로그 확인
+grep "bind ack" /home/administrator/agent*/logs/*mtdeliver.txt
+```
+
+### 백엔드 라운드로빈 분배 ✅
+- 환경변수: `SMS_TABLES=SMSQ_SEND_1,SMSQ_SEND_2,SMSQ_SEND_3,SMSQ_SEND_4,SMSQ_SEND_5`
+- 서버 `.env`: `packages/backend/.env`에 설정
+- 로컬은 SMS_TABLES 미설정 → 기존 `SMSQ_SEND` 1개로 동작 (변화 없음)
+- campaigns.ts 헬퍼 함수: `getNextSmsTable()`, `smsCountAll()`, `smsAggAll()`, `smsSelectAll()`, `smsMinAll()`, `smsExecAll()`
+- INSERT → 라운드로빈 분배, SELECT/COUNT → 5개 합산, DELETE/UPDATE → 5개 모두 실행
+- 기동 시 로그: `[QTmsg] SMS_TABLES: SMSQ_SEND_1, ... (5개 Agent)`
+
+### 로그 테이블 자동 생성
+- MySQL 이벤트 스케줄러: `auto_create_sms_log_tables`
+- 매월 25일 자동으로 2개월 후 로그 테이블 생성 (SMSQ_SEND_1~5_YYYYMM)
+- 현재 수동 생성 완료: 202602, 202603
+
+- rsv1 상태: 1=발송대기, 2=Agent처리중, 3=서버전송완료, 4=결과수신, 5=월별처리완료
 - 백엔드 캠페인 발송 시 라운드로빈으로 5개 테이블에 균등 분배
-- 결과 조회 시 5개 로그 테이블 합산 조회
+- 결과 조회 시 5개 테이블 합산 조회
 
 ### QTmsg 주요 결과 코드
 | 코드 | 의미 |
@@ -914,7 +951,8 @@ C:\projects\targetup\  (로컬)
 
 ## DB 스키마 (MySQL - QTmsg)
 
-### smsdb.SMSQ_SEND (SMS 발송 큐)
+### smsdb.SMSQ_SEND_1~5 (SMS 발송 큐 - 5개 Agent 분배)
+> 로컬: SMSQ_SEND (1개), 서버: SMSQ_SEND_1~5 (5개, 환경변수 SMS_TABLES로 분기)
 | 컬럼 | 타입 | 설명 |
 |------|------|------|
 | seqno | int PK AUTO_INCREMENT | |
@@ -1020,13 +1058,24 @@ C:\projects\targetup\  (로컬)
 - [x] 자동입력변수 최대길이 기반 SMS/LMS 자동전환 바이트 계산 (getMaxByteMessage)
 - [x] 정산 삭제 버튼 모든 상태에서 표시 + 백엔드 상태 제한 해제
 
+**QTmsg 5개 Agent 서버 설치 (2026-02-10)**
+- [x] QTmsg Agent 리눅스 버전 서버 설치 (Java 8 + 5개 Agent)
+- [x] 5개 Agent 중계서버 연결 완료 (bind ack 성공)
+- [x] MySQL 발송 테이블 5개 생성 (SMSQ_SEND_1~5)
+- [x] MySQL 로그 테이블 수동 생성 (202602, 202603)
+- [x] MySQL 로그 테이블 월별 자동 생성 이벤트 등록
+- [x] MySQL smsuser 인증 방식 변경 (caching_sha2 → mysql_native_password)
+- [x] 서버 타임존 KST 설정 (timedatectl set-timezone Asia/Seoul)
+- [x] 백엔드 라운드로빈 분배 구현 (환경변수 SMS_TABLES 분기)
+- [x] 로컬/서버 환경변수 분기 (로컬: SMSQ_SEND 1개, 서버: 5개)
+
 ### 🔲 진행 예정 작업
 
-**서버 - 긴급 (상용화 필수)**
-- [ ] QTmsg Agent 리눅스 버전 서버 설치 (실제 SMS 발송 가능하게)
-- [ ] QTmsg Agent 5개 균등 발송 구현 (운영실에 Bind ID 5개 발급 요청)
-- [ ] 백엔드 발송 로직에 라운드로빈 분배 추가
-- [ ] 서버 SMSQ_SEND 테이블 생성 (현재 테이블 없음 에러)
+**Sync Agent (고객사 DB 동기화)**
+- [ ] Target-UP 백엔드 Sync API 4개 엔드포인트 개발 (register, heartbeat, customers, purchases)
+- [ ] sync_agents, sync_logs 테이블 생성
+- [ ] 테스트 계정 생성 (api_key/api_secret)
+- [ ] Sync Agent 코어 완성 (로컬 큐, 스케줄러, Heartbeat 남음)
 
 **보안**
 - [ ] 슈퍼관리자 IP 화이트리스트 설정
