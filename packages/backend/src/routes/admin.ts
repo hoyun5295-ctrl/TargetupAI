@@ -1077,4 +1077,350 @@ router.post('/billing/:id/send-email', async (req: any, res) => {
   }
 });
 
+// ===== 선불 잔액 관리 API =====
+
+// billing_type 변경 (후불 ↔ 선불)
+router.patch('/companies/:id/billing-type', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { billingType } = req.body;
+
+  if (!billingType || !['prepaid', 'postpaid'].includes(billingType)) {
+    return res.status(400).json({ error: '올바른 요금제 유형을 선택해주세요. (prepaid 또는 postpaid)' });
+  }
+
+  try {
+    // 진행 중인 캠페인 확인
+    const activeCampaigns = await query(
+      "SELECT COUNT(*) FROM campaigns WHERE company_id = $1 AND status IN ('scheduled', 'sending')",
+      [id]
+    );
+    if (parseInt(activeCampaigns.rows[0].count) > 0) {
+      return res.status(400).json({ error: '진행 중이거나 예약된 캠페인이 있어 요금제 유형을 변경할 수 없습니다.' });
+    }
+
+    const result = await query(
+      'UPDATE companies SET billing_type = $1, updated_at = NOW() WHERE id = $2 RETURNING id, company_name, billing_type, balance',
+      [billingType, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: '회사를 찾을 수 없습니다.' });
+    }
+
+    const c = result.rows[0];
+    console.log(`[요금제변경] ${c.company_name} → ${billingType} (잔액: ${c.balance}원)`);
+
+    res.json({
+      message: `요금제 유형이 ${billingType === 'prepaid' ? '선불' : '후불'}로 변경되었습니다.`,
+      company: { id: c.id, companyName: c.company_name, billingType: c.billing_type, balance: Number(c.balance) }
+    });
+  } catch (error) {
+    console.error('요금제 유형 변경 실패:', error);
+    res.status(500).json({ error: '요금제 유형 변경 실패' });
+  }
+});
+
+// 수동 잔액 조정 (충전 또는 차감)
+router.post('/companies/:id/balance-adjust', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { type, amount, reason } = req.body;
+  const adminId = (req as any).user?.userId;
+
+  if (!type || !['charge', 'deduct'].includes(type)) {
+    return res.status(400).json({ error: '올바른 유형을 선택해주세요. (charge 또는 deduct)' });
+  }
+  if (!amount || amount <= 0) {
+    return res.status(400).json({ error: '금액은 0보다 커야 합니다.' });
+  }
+  if (!reason || reason.trim() === '') {
+    return res.status(400).json({ error: '사유를 입력해주세요.' });
+  }
+
+  try {
+    const txType = type === 'charge' ? 'admin_charge' : 'admin_deduct';
+
+    if (type === 'deduct') {
+      // 차감: 잔액 부족 체크 (atomic)
+      const result = await query(
+        'UPDATE companies SET balance = balance - $1, updated_at = NOW() WHERE id = $2 AND balance >= $1 RETURNING balance, company_name',
+        [amount, id]
+      );
+      if (result.rows.length === 0) {
+        const co = await query('SELECT balance, company_name FROM companies WHERE id = $1', [id]);
+        if (co.rows.length === 0) return res.status(404).json({ error: '회사를 찾을 수 없습니다.' });
+        return res.status(400).json({ error: `잔액이 부족합니다. 현재 잔액: ${Number(co.rows[0].balance).toLocaleString()}원` });
+      }
+
+      await query(
+        `INSERT INTO balance_transactions (company_id, type, amount, balance_before, balance_after, description, admin_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [id, txType, amount, Number(result.rows[0].balance) + amount, result.rows[0].balance, reason.trim(), adminId]
+      );
+
+      console.log(`[관리자차감] ${result.rows[0].company_name}: -${amount}원 → 잔액 ${result.rows[0].balance}원 (사유: ${reason})`);
+      res.json({
+        message: `${amount.toLocaleString()}원이 차감되었습니다.`,
+        balance: Number(result.rows[0].balance),
+        transactionType: txType
+      });
+    } else {
+      // 충전
+      const result = await query(
+        'UPDATE companies SET balance = balance + $1, updated_at = NOW() WHERE id = $2 RETURNING balance, company_name',
+        [amount, id]
+      );
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: '회사를 찾을 수 없습니다.' });
+      }
+
+      await query(
+        `INSERT INTO balance_transactions (company_id, type, amount, balance_before, balance_after, description, admin_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [id, txType, amount, Number(result.rows[0].balance) - amount, result.rows[0].balance, reason.trim(), adminId]
+      );
+
+      console.log(`[관리자충전] ${result.rows[0].company_name}: +${amount}원 → 잔액 ${result.rows[0].balance}원 (사유: ${reason})`);
+      res.json({
+        message: `${amount.toLocaleString()}원이 충전되었습니다.`,
+        balance: Number(result.rows[0].balance),
+        transactionType: txType
+      });
+    }
+  } catch (error) {
+    console.error('잔액 조정 실패:', error);
+    res.status(500).json({ error: '잔액 조정 실패' });
+  }
+});
+
+// 회사별 잔액 이력 조회 (슈퍼관리자용)
+router.get('/companies/:id/balance-transactions', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const page = parseInt(req.query.page as string) || 1;
+  const limit = parseInt(req.query.limit as string) || 20;
+  const offset = (page - 1) * limit;
+
+  try {
+    // 회사 잔액 정보
+    const companyResult = await query(
+      'SELECT company_name, billing_type, balance FROM companies WHERE id = $1',
+      [id]
+    );
+    if (companyResult.rows.length === 0) {
+      return res.status(404).json({ error: '회사를 찾을 수 없습니다.' });
+    }
+
+    // 총 건수
+    const countResult = await query(
+      'SELECT COUNT(*) FROM balance_transactions WHERE company_id = $1',
+      [id]
+    );
+    const total = parseInt(countResult.rows[0].count);
+
+    // 이력 조회
+    const result = await query(
+      `SELECT bt.id, bt.type, bt.amount, bt.balance_after, bt.description, bt.reference_type, bt.reference_id, bt.admin_id, bt.created_at,
+              sa.name as admin_name
+       FROM balance_transactions bt
+       LEFT JOIN super_admins sa ON bt.admin_id = sa.id
+       WHERE bt.company_id = $1
+       ORDER BY bt.created_at DESC
+       LIMIT $2 OFFSET $3`,
+      [id, limit, offset]
+    );
+
+    const c = companyResult.rows[0];
+    res.json({
+      company: { companyName: c.company_name, billingType: c.billing_type, balance: Number(c.balance) },
+      transactions: result.rows,
+      total,
+      page,
+      totalPages: Math.ceil(total / limit),
+    });
+  } catch (error) {
+    console.error('잔액 이력 조회 실패:', error);
+    res.status(500).json({ error: '잔액 이력 조회 실패' });
+  }
+});
+
+// ===== 충전 요청 관리 API =====
+
+// 충전 요청 목록 조회 (필터 + 페이지네이션)
+router.get('/deposit-requests', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 10;
+    const offset = (page - 1) * limit;
+    const status = req.query.status as string; // pending, confirmed, rejected
+    const paymentMethod = req.query.paymentMethod as string; // deposit, card, virtual_account
+
+    let where = 'WHERE 1=1';
+    const params: any[] = [];
+    let paramIdx = 1;
+
+    if (status && status !== 'all') {
+      where += ` AND dr.status = $${paramIdx++}`;
+      params.push(status);
+    }
+    if (paymentMethod && paymentMethod !== 'all') {
+      where += ` AND COALESCE(dr.payment_method, 'deposit') = $${paramIdx++}`;
+      params.push(paymentMethod);
+    }
+
+    const countResult = await query(
+      `SELECT COUNT(*) FROM deposit_requests dr ${where}`,
+      params
+    );
+    const total = parseInt(countResult.rows[0].count);
+
+    const result = await query(
+      `SELECT dr.id, dr.company_id, dr.amount, dr.depositor_name, dr.status,
+              COALESCE(dr.payment_method, 'deposit') as payment_method,
+              dr.admin_note, dr.confirmed_by, dr.confirmed_at, dr.created_at,
+              c.company_name, c.billing_type, c.balance,
+              sa.name as confirmed_by_name
+       FROM deposit_requests dr
+       JOIN companies c ON dr.company_id = c.id
+       LEFT JOIN super_admins sa ON dr.confirmed_by = sa.id
+       ${where}
+       ORDER BY CASE WHEN dr.status = 'pending' THEN 0 ELSE 1 END, dr.created_at DESC
+       LIMIT $${paramIdx++} OFFSET $${paramIdx}`,
+      [...params, limit, offset]
+    );
+
+    res.json({
+      requests: result.rows,
+      total,
+      page,
+      totalPages: Math.ceil(total / limit),
+    });
+  } catch (error) {
+    console.error('충전 요청 목록 조회 실패:', error);
+    res.status(500).json({ error: '충전 요청 목록 조회 실패' });
+  }
+});
+
+// 충전 요청 승인 (잔액 자동 충전)
+router.put('/deposit-requests/:id/approve', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const adminId = (req as any).user?.userId;
+  const { adminNote } = req.body;
+
+  try {
+    // 요청 조회
+    const reqResult = await query(
+      `SELECT dr.*, c.company_name, c.billing_type, c.balance
+       FROM deposit_requests dr
+       JOIN companies c ON dr.company_id = c.id
+       WHERE dr.id = $1`,
+      [id]
+    );
+
+    if (reqResult.rows.length === 0) {
+      return res.status(404).json({ error: '충전 요청을 찾을 수 없습니다.' });
+    }
+
+    const depositReq = reqResult.rows[0];
+
+    if (depositReq.status !== 'pending') {
+      return res.status(400).json({ error: '이미 처리된 요청입니다.' });
+    }
+
+    if (depositReq.billing_type !== 'prepaid') {
+      return res.status(400).json({ error: '선불 고객사가 아닙니다.' });
+    }
+
+    // 1. 잔액 충전
+    const balanceResult = await query(
+      'UPDATE companies SET balance = balance + $1, updated_at = NOW() WHERE id = $2 RETURNING balance',
+      [depositReq.amount, depositReq.company_id]
+    );
+
+    // 2. balance_transactions 기록
+    const newBalance = Number(balanceResult.rows[0].balance);
+    await query(
+      `INSERT INTO balance_transactions (company_id, type, amount, balance_before, balance_after, description, reference_type, reference_id, admin_id)
+       VALUES ($1, 'deposit_charge', $2, $3, $4, $5, 'deposit_request', $6, $7)`,
+      [
+        depositReq.company_id,
+        depositReq.amount,
+        newBalance - Number(depositReq.amount),
+        newBalance,
+        `무통장입금 승인 (입금자: ${depositReq.depositor_name})`,
+        id,
+        adminId
+      ]
+    );
+
+    // 3. deposit_requests 상태 변경
+    await query(
+      `UPDATE deposit_requests SET status = 'confirmed', confirmed_by = $1, confirmed_at = NOW(), admin_note = $2 WHERE id = $3`,
+      [adminId, adminNote || null, id]
+    );
+
+    console.log(`[입금승인] ${depositReq.company_name}: +${Number(depositReq.amount).toLocaleString()}원 → 잔액 ${newBalance.toLocaleString()}원 (입금자: ${depositReq.depositor_name})`);
+
+    res.json({
+      message: `${Number(depositReq.amount).toLocaleString()}원이 충전되었습니다.`,
+      balance: newBalance,
+    });
+  } catch (error) {
+    console.error('충전 요청 승인 실패:', error);
+    res.status(500).json({ error: '충전 요청 승인 실패' });
+  }
+});
+
+// 충전 요청 거절
+router.put('/deposit-requests/:id/reject', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const adminId = (req as any).user?.userId;
+  const { adminNote } = req.body;
+
+  try {
+    const reqResult = await query(
+      'SELECT status, amount, depositor_name FROM deposit_requests WHERE id = $1',
+      [id]
+    );
+
+    if (reqResult.rows.length === 0) {
+      return res.status(404).json({ error: '충전 요청을 찾을 수 없습니다.' });
+    }
+
+    if (reqResult.rows[0].status !== 'pending') {
+      return res.status(400).json({ error: '이미 처리된 요청입니다.' });
+    }
+
+    await query(
+      `UPDATE deposit_requests SET status = 'rejected', confirmed_by = $1, confirmed_at = NOW(), admin_note = $2 WHERE id = $3`,
+      [adminId, adminNote || '거절', id]
+    );
+
+    console.log(`[입금거절] 요청 ${id}: ${Number(reqResult.rows[0].amount).toLocaleString()}원 (입금자: ${reqResult.rows[0].depositor_name})`);
+
+    res.json({ message: '충전 요청이 거절되었습니다.' });
+  } catch (error) {
+    console.error('충전 요청 거절 실패:', error);
+    res.status(500).json({ error: '충전 요청 거절 실패' });
+  }
+});
+
+// 전체 선불 고객사 잔액 현황
+router.get('/balance-overview', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const result = await query(`
+      SELECT c.id, c.company_name, c.billing_type, c.balance,
+        c.cost_per_sms, c.cost_per_lms,
+        (SELECT COUNT(*) FROM balance_transactions WHERE company_id = c.id AND created_at >= NOW() - INTERVAL '30 days') as recent_tx_count,
+        (SELECT SUM(amount) FROM balance_transactions WHERE company_id = c.id AND type = 'deduct' AND created_at >= NOW() - INTERVAL '30 days') as monthly_usage
+      FROM companies c
+      WHERE c.billing_type = 'prepaid' AND c.status = 'active'
+      ORDER BY c.balance ASC
+    `);
+
+    res.json({ companies: result.rows });
+  } catch (error) {
+    console.error('잔액 현황 조회 실패:', error);
+    res.status(500).json({ error: '잔액 현황 조회 실패' });
+  }
+});
+
 export default router;

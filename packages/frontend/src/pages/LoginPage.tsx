@@ -7,7 +7,7 @@ export default function LoginPage() {
   const navigate = useNavigate();
   const { login } = useAuthStore();
 
-  const isSuperAdminOnly = window.location.hostname === 'sys.hanjullo.com';
+  const isSuperAdminOnly = window.location.hostname === 'sys.hanjullo.com' || window.location.port === '5174';
 
   const [loginId, setLoginId] = useState('');
   const [password, setPassword] = useState('');

@@ -16,9 +16,10 @@ import resultsRoutes from './routes/results';
 import uploadRoutes from './routes/upload'
 import unsubscribesRoutes from './routes/unsubscribes';
 import addressBooksRoutes from './routes/address-books';
-import adminRoutes from './routes/admin';
+import balanceRoutes from './routes/balance';
 import testContactsRoutes from './routes/test-contacts';
 import billingRoutes from './routes/billing';
+import adminRoutes from './routes/admin';
 
 // 공용 관리 라우트 (슈퍼관리자 + 고객사관리자)
 import manageUsersRoutes from './routes/manage-users';
@@ -73,8 +74,9 @@ app.use('/api/ai', aiRoutes);
 app.use('/api/v1/results', resultsRoutes);
 app.use('/api/unsubscribes', unsubscribesRoutes);
 app.use('/api/address-books', addressBooksRoutes);
-app.use('/api/admin', adminRoutes);
+app.use('/api/balance', balanceRoutes);
 app.use('/api/admin/billing', billingRoutes);
+app.use('/api/admin', adminRoutes);
 app.use('/api/test-contacts', testContactsRoutes);
 
 // 공용 관리 라우트 (슈퍼관리자 + 고객사관리자)

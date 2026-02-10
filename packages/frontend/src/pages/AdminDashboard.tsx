@@ -57,7 +57,7 @@ export default function AdminDashboard() {
   const navigate = useNavigate();
   const { user, logout } = useAuthStore();
 
-  const [activeTab, setActiveTab] = useState<'companies' | 'users' | 'scheduled' | 'callbacks' | 'plans' | 'requests' | 'allCampaigns' | 'stats' | 'billing'>('companies');
+  const [activeTab, setActiveTab] = useState<'companies' | 'users' | 'scheduled' | 'callbacks' | 'plans' | 'requests' | 'deposits' | 'allCampaigns' | 'stats' | 'billing'>('companies');
   const [companies, setCompanies] = useState<Company[]>([]);
   const [plans, setPlans] = useState<Plan[]>([]);
   const [users, setUsers] = useState<User[]>([]);
@@ -88,6 +88,12 @@ export default function AdminDashboard() {
     costPerLms: 27,
     costPerMms: 50,
     costPerKakao: 7.5,
+    billingType: 'postpaid',
+    balance: 0,
+    balanceAdjustType: 'charge' as 'charge' | 'deduct',
+    balanceAdjustAmount: '',
+    balanceAdjustReason: '',
+    balanceAdjusting: false,
     targetStrategy: 'balanced',
     crossCategoryAllowed: true,
     excludedSegments: [] as string[],
@@ -171,6 +177,20 @@ const [statsDetailInfo, setStatsDetailInfo] = useState<{ date: string; companyNa
     maxCustomers: 1000,
     monthlyPrice: 0,
   });
+
+  // 충전 관리
+  const [depositRequests, setDepositRequests] = useState<any[]>([]);
+  const [depositPage, setDepositPage] = useState(1);
+  const [depositTotal, setDepositTotal] = useState(0);
+  const depositPerPage = 10;
+  const [depositStatusFilter, setDepositStatusFilter] = useState('all');
+  const [depositMethodFilter, setDepositMethodFilter] = useState('all');
+  const [depositLoading, setDepositLoading] = useState(false);
+  const [showDepositApproveModal, setShowDepositApproveModal] = useState(false);
+  const [showDepositRejectModal, setShowDepositRejectModal] = useState(false);
+  const [depositTarget, setDepositTarget] = useState<any>(null);
+  const [depositAdminNote, setDepositAdminNote] = useState('');
+
 // ===== 정산 관리 =====
 const [billingCompanyId, setBillingCompanyId] = useState('');
 const [billingStart, setBillingStart] = useState(() => {
@@ -239,6 +259,7 @@ const [emailSending, setEmailSending] = useState(false);
 // ===== 정산 useEffect =====
 useEffect(() => { if (activeTab === 'billing') { loadBillings(); loadInvoices(); } }, [activeTab]);
 useEffect(() => { if (activeTab === 'billing') loadBillings(); }, [filterYear]);
+useEffect(() => { if (activeTab === 'deposits') loadDepositRequests(1); }, [activeTab, depositStatusFilter, depositMethodFilter]);
 useEffect(() => { if (billingToast) { const t = setTimeout(() => setBillingToast(null), 3000); return () => clearTimeout(t); } }, [billingToast]);
 useEffect(() => {
   if (billingScope === 'user' && billingCompanyId) {
@@ -417,6 +438,8 @@ const handleSendBillingEmail = async () => {
       await loadPlans();
       // 플랜 신청 로드
       await loadPlanRequests();
+      // 충전 요청 로드 (배지 카운트용)
+      await loadDepositRequests(1);
     } catch (error) {
       console.error('데이터 로드 실패:', error);
     } finally {
@@ -498,6 +521,77 @@ const handleSendBillingEmail = async () => {
       console.error('플랜 신청 로드 실패:', error);
     }
   };
+
+  const loadDepositRequests = async (page = 1) => {
+    setDepositLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      const params = new URLSearchParams({ page: String(page), limit: String(depositPerPage) });
+      if (depositStatusFilter !== 'all') params.set('status', depositStatusFilter);
+      if (depositMethodFilter !== 'all') params.set('paymentMethod', depositMethodFilter);
+      const res = await fetch(`/api/admin/deposit-requests?${params}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setDepositRequests(data.requests || []);
+        setDepositTotal(data.total || 0);
+        setDepositPage(page);
+      }
+    } catch (error) {
+      console.error('충전 요청 로드 실패:', error);
+    }
+    setDepositLoading(false);
+  };
+
+  const handleApproveDeposit = async () => {
+    if (!depositTarget) return;
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`/api/admin/deposit-requests/${depositTarget.id}/approve`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ adminNote: depositAdminNote || null })
+      });
+      if (res.ok) {
+        setModal({ type: 'alert', title: '승인 완료', message: `${Number(depositTarget.amount).toLocaleString()}원이 충전되었습니다.`, variant: 'success' });
+        setShowDepositApproveModal(false);
+        setDepositTarget(null);
+        setDepositAdminNote('');
+        loadDepositRequests(depositPage);
+      } else {
+        const err = await res.json();
+        setModal({ type: 'alert', title: '승인 실패', message: err.error || '처리 중 오류 발생', variant: 'error' });
+      }
+    } catch (error) {
+      setModal({ type: 'alert', title: '오류', message: '네트워크 오류', variant: 'error' });
+    }
+  };
+
+  const handleRejectDeposit = async () => {
+    if (!depositTarget) return;
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`/api/admin/deposit-requests/${depositTarget.id}/reject`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ adminNote: depositAdminNote || '거절' })
+      });
+      if (res.ok) {
+        setModal({ type: 'alert', title: '거절 완료', message: '충전 요청이 거절되었습니다.', variant: 'success' });
+        setShowDepositRejectModal(false);
+        setDepositTarget(null);
+        setDepositAdminNote('');
+        loadDepositRequests(depositPage);
+      } else {
+        const err = await res.json();
+        setModal({ type: 'alert', title: '거절 실패', message: err.error || '처리 중 오류 발생', variant: 'error' });
+      }
+    } catch (error) {
+      setModal({ type: 'alert', title: '오류', message: '네트워크 오류', variant: 'error' });
+    }
+  };
+
   const loadAllCampaigns = async (page = 1) => {
     try {
       const token = localStorage.getItem('token');
@@ -883,6 +977,12 @@ const handleApproveRequest = async (id: string) => {
           costPerLms: c.cost_per_lms ?? 27,
           costPerMms: c.cost_per_mms ?? 50,
           costPerKakao: c.cost_per_kakao ?? 7.5,
+          billingType: c.billing_type || 'postpaid',
+          balance: Number(c.balance) || 0,
+          balanceAdjustType: 'charge' as 'charge' | 'deduct',
+          balanceAdjustAmount: '',
+          balanceAdjustReason: '',
+          balanceAdjusting: false,
           targetStrategy: c.target_strategy || 'balanced',
           crossCategoryAllowed: c.cross_category_allowed ?? true,
           excludedSegments: c.excluded_segments || [],
@@ -1340,6 +1440,21 @@ const handleApproveRequest = async (id: string) => {
                 {planRequests.filter(r => r.status === 'pending').length > 0 && (
                   <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
                     {planRequests.filter(r => r.status === 'pending').length}
+                  </span>
+                )}
+              </button>
+              <button
+                onClick={() => setActiveTab('deposits')}
+                className={`px-6 py-4 text-sm font-medium border-b-2 relative ${
+                  activeTab === 'deposits'
+                    ? 'border-blue-500 text-blue-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                충전 관리
+                {depositRequests.filter(r => r.status === 'pending').length > 0 && (
+                  <span className="absolute -top-1 -right-1 bg-emerald-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
+                    {depositRequests.filter(r => r.status === 'pending').length}
                   </span>
                 )}
               </button>
@@ -2118,6 +2233,167 @@ const handleApproveRequest = async (id: string) => {
             )}
           </div>
         )}
+
+        {/* 충전 관리 탭 */}
+        {activeTab === 'deposits' && (
+          <div className="bg-white rounded-lg shadow">
+            <div className="px-6 py-4 border-b flex flex-wrap justify-between items-center gap-3">
+              <h2 className="text-lg font-semibold">충전 관리</h2>
+              <div className="flex gap-2">
+                <select
+                  value={depositMethodFilter}
+                  onChange={(e) => setDepositMethodFilter(e.target.value)}
+                  className="px-3 py-2 border rounded-lg text-sm"
+                >
+                  <option value="all">전체 결제수단</option>
+                  <option value="deposit">무통장입금</option>
+                  <option value="card">카드결제</option>
+                  <option value="virtual_account">가상계좌</option>
+                </select>
+                <select
+                  value={depositStatusFilter}
+                  onChange={(e) => setDepositStatusFilter(e.target.value)}
+                  className="px-3 py-2 border rounded-lg text-sm"
+                >
+                  <option value="all">전체 상태</option>
+                  <option value="pending">대기</option>
+                  <option value="confirmed">승인</option>
+                  <option value="rejected">거절</option>
+                </select>
+                <button
+                  onClick={() => loadDepositRequests(1)}
+                  className="px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm font-medium transition-colors"
+                >
+                  새로고침
+                </button>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">요청일</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">회사</th>
+                    <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">결제수단</th>
+                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">금액</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">입금자명</th>
+                    <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">상태</th>
+                    <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">처리</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {depositLoading ? (
+                    <tr>
+                      <td colSpan={7} className="px-6 py-12 text-center text-gray-500">불러오는 중...</td>
+                    </tr>
+                  ) : depositRequests.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="px-6 py-12 text-center text-gray-500">충전 요청이 없습니다.</td>
+                    </tr>
+                  ) : (
+                    depositRequests.map((dr) => (
+                      <tr key={dr.id} className={`hover:bg-gray-50 ${dr.status === 'pending' ? 'bg-yellow-50' : ''}`}>
+                        <td className="px-6 py-4 text-sm text-center text-gray-600">
+                          {new Date(dr.created_at).toLocaleString('ko-KR')}
+                        </td>
+                        <td className="px-6 py-4 text-sm">
+                          <div className="font-medium text-gray-900">{dr.company_name}</div>
+                          <div className="text-xs text-gray-500">잔액: {Number(dr.balance || 0).toLocaleString()}원</div>
+                        </td>
+                        <td className="px-6 py-4 text-sm text-center">
+                          {dr.payment_method === 'deposit' && (
+                            <span className="px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">무통장입금</span>
+                          )}
+                          {dr.payment_method === 'card' && (
+                            <span className="px-2 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-800">카드결제</span>
+                          )}
+                          {dr.payment_method === 'virtual_account' && (
+                            <span className="px-2 py-1 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">가상계좌</span>
+                          )}
+                        </td>
+                        <td className="px-6 py-4 text-sm text-right font-bold text-gray-900">
+                          {Number(dr.amount).toLocaleString()}원
+                        </td>
+                        <td className="px-6 py-4 text-sm text-gray-700">
+                          {dr.depositor_name || '-'}
+                        </td>
+                        <td className="px-6 py-4 text-center">
+                          {dr.status === 'pending' && (
+                            <span className="px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">대기</span>
+                          )}
+                          {dr.status === 'confirmed' && (
+                            <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">승인</span>
+                          )}
+                          {dr.status === 'rejected' && (
+                            <span className="px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">거절</span>
+                          )}
+                        </td>
+                        <td className="px-6 py-4 text-center">
+                          {dr.status === 'pending' ? (
+                            <div className="flex justify-center gap-2">
+                              <button
+                                onClick={() => {
+                                  setDepositTarget(dr);
+                                  setDepositAdminNote('');
+                                  setShowDepositApproveModal(true);
+                                }}
+                                className="px-3 py-1 bg-green-600 text-white rounded text-sm hover:bg-green-700"
+                              >
+                                승인
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setDepositTarget(dr);
+                                  setDepositAdminNote('');
+                                  setShowDepositRejectModal(true);
+                                }}
+                                className="px-3 py-1 bg-red-600 text-white rounded text-sm hover:bg-red-700"
+                              >
+                                거절
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="text-xs text-gray-500">
+                              <div>{dr.confirmed_by_name || '-'}</div>
+                              {dr.confirmed_at && (
+                                <div>{new Date(dr.confirmed_at).toLocaleDateString('ko-KR')}</div>
+                              )}
+                              {dr.admin_note && (
+                                <div className="text-gray-600 mt-1" title={dr.admin_note}>
+                                  {dr.admin_note.length > 15 ? dr.admin_note.slice(0, 15) + '...' : dr.admin_note}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+            {depositTotal > depositPerPage && (
+              <div className="px-6 py-4 border-t flex items-center justify-between">
+                <span className="text-sm text-gray-500">
+                  총 {depositTotal}건 중 {(depositPage - 1) * depositPerPage + 1}-{Math.min(depositPage * depositPerPage, depositTotal)}
+                </span>
+                <div className="flex gap-1">
+                  <button onClick={() => loadDepositRequests(depositPage - 1)} disabled={depositPage === 1}
+                    className="px-3 py-1 rounded border text-sm disabled:opacity-40 hover:bg-gray-50">◀ 이전</button>
+                  {Array.from({ length: Math.ceil(depositTotal / depositPerPage) }, (_, i) => i + 1).map(p => (
+                    <button key={p} onClick={() => loadDepositRequests(p)}
+                      className={`px-3 py-1 rounded border text-sm ${depositPage === p ? 'bg-blue-600 text-white border-blue-600' : 'hover:bg-gray-50'}`}>{p}</button>
+                  ))}
+                  <button onClick={() => loadDepositRequests(depositPage + 1)}
+                    disabled={depositPage >= Math.ceil(depositTotal / depositPerPage)}
+                    className="px-3 py-1 rounded border text-sm disabled:opacity-40 hover:bg-gray-50">다음 ▶</button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* 전체 캠페인 탭 */}
         {activeTab === 'allCampaigns' && (
           <div className="bg-white rounded-lg shadow">
@@ -2853,7 +3129,7 @@ const handleApproveRequest = async (id: string) => {
               {[
                 { key: 'basic', label: '기본정보', icon: '🏢' },
                 { key: 'send', label: '발송정책', icon: '📋' },
-                { key: 'cost', label: '단가', icon: '💰' },
+                { key: 'cost', label: '단가/요금', icon: '💰' },
                 { key: 'ai', label: 'AI설정', icon: '🤖' },
                 { key: 'store', label: '분류코드', icon: '🏷️' },
                 { key: 'fields', label: '필터항목', icon: '🔍' },
@@ -3022,9 +3298,114 @@ const handleApproveRequest = async (id: string) => {
                 </div>
               )}
 
-              {/* 단가 탭 */}
+              {/* 단가/요금 탭 */}
               {editCompanyTab === 'cost' && (
                 <div className="space-y-4">
+                  {/* 요금제 유형 전환 */}
+                  <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-4 border border-blue-200">
+                    <div className="flex items-center justify-between mb-2">
+                      <div>
+                        <div className="text-sm font-bold text-gray-800">요금제 유형</div>
+                        <div className="text-xs text-gray-500 mt-0.5">
+                          {editCompany.billingType === 'prepaid' ? '선불: 충전 후 차감' : '후불: 월말 정산'}
+                        </div>
+                      </div>
+                      <div className="flex bg-white rounded-lg border shadow-sm overflow-hidden">
+                        <button type="button"
+                          onClick={async () => {
+                            if (editCompany.billingType === 'postpaid') return;
+                            try {
+                              const token = localStorage.getItem('token');
+                              const res = await fetch(`/api/admin/companies/${editCompany.id}/billing-type`, {
+                                method: 'PATCH', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                                body: JSON.stringify({ billingType: 'postpaid' })
+                              });
+                              const data = await res.json();
+                              if (res.ok) {
+                                setEditCompany({ ...editCompany, billingType: 'postpaid' });
+                                setModal({ type: 'alert', title: '변경 완료', message: data.message, variant: 'success' });
+                              } else {
+                                setModal({ type: 'alert', title: '변경 실패', message: data.error, variant: 'error' });
+                              }
+                            } catch { setModal({ type: 'alert', title: '오류', message: '요금제 유형 변경 실패', variant: 'error' }); }
+                          }}
+                          className={`px-4 py-2 text-xs font-medium transition-colors ${editCompany.billingType === 'postpaid' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-50'}`}
+                        >후불</button>
+                        <button type="button"
+                          onClick={async () => {
+                            if (editCompany.billingType === 'prepaid') return;
+                            try {
+                              const token = localStorage.getItem('token');
+                              const res = await fetch(`/api/admin/companies/${editCompany.id}/billing-type`, {
+                                method: 'PATCH', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                                body: JSON.stringify({ billingType: 'prepaid' })
+                              });
+                              const data = await res.json();
+                              if (res.ok) {
+                                setEditCompany({ ...editCompany, billingType: 'prepaid' });
+                                setModal({ type: 'alert', title: '변경 완료', message: data.message, variant: 'success' });
+                              } else {
+                                setModal({ type: 'alert', title: '변경 실패', message: data.error, variant: 'error' });
+                              }
+                            } catch { setModal({ type: 'alert', title: '오류', message: '요금제 유형 변경 실패', variant: 'error' }); }
+                          }}
+                          className={`px-4 py-2 text-xs font-medium transition-colors ${editCompany.billingType === 'prepaid' ? 'bg-emerald-600 text-white' : 'text-gray-500 hover:bg-gray-50'}`}
+                        >선불</button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 선불 잔액 관리 (선불일 때만) */}
+                  {editCompany.billingType === 'prepaid' && (
+                    <div className="bg-gradient-to-r from-emerald-50 to-teal-50 rounded-xl p-4 border border-emerald-200">
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="text-sm font-bold text-gray-800">💰 충전 잔액</div>
+                        <div className={`text-xl font-bold ${editCompany.balance < 10000 ? 'text-red-600' : 'text-emerald-700'}`}>
+                          {editCompany.balance.toLocaleString()}원
+                        </div>
+                      </div>
+                      <div className="flex gap-2 mb-3">
+                        <button type="button" onClick={() => setEditCompany({ ...editCompany, balanceAdjustType: 'charge' })}
+                          className={`flex-1 py-1.5 text-xs font-medium rounded-lg transition-colors ${editCompany.balanceAdjustType === 'charge' ? 'bg-emerald-600 text-white' : 'bg-white border text-gray-600'}`}
+                        >충전</button>
+                        <button type="button" onClick={() => setEditCompany({ ...editCompany, balanceAdjustType: 'deduct' })}
+                          className={`flex-1 py-1.5 text-xs font-medium rounded-lg transition-colors ${editCompany.balanceAdjustType === 'deduct' ? 'bg-red-600 text-white' : 'bg-white border text-gray-600'}`}
+                        >차감</button>
+                      </div>
+                      <div className="space-y-2">
+                        <input type="number" placeholder="금액 (원)" value={editCompany.balanceAdjustAmount}
+                          onChange={(e) => setEditCompany({ ...editCompany, balanceAdjustAmount: e.target.value })}
+                          className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none" />
+                        <input type="text" placeholder="사유 (필수)" value={editCompany.balanceAdjustReason}
+                          onChange={(e) => setEditCompany({ ...editCompany, balanceAdjustReason: e.target.value })}
+                          className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none" />
+                        <button type="button" disabled={editCompany.balanceAdjusting || !editCompany.balanceAdjustAmount || !editCompany.balanceAdjustReason}
+                          onClick={async () => {
+                            setEditCompany({ ...editCompany, balanceAdjusting: true });
+                            try {
+                              const token = localStorage.getItem('token');
+                              const res = await fetch(`/api/admin/companies/${editCompany.id}/balance-adjust`, {
+                                method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                                body: JSON.stringify({ type: editCompany.balanceAdjustType, amount: Number(editCompany.balanceAdjustAmount), reason: editCompany.balanceAdjustReason })
+                              });
+                              const data = await res.json();
+                              if (res.ok) {
+                                setEditCompany({ ...editCompany, balance: data.balance, balanceAdjustAmount: '', balanceAdjustReason: '', balanceAdjusting: false });
+                                setModal({ type: 'alert', title: '완료', message: data.message, variant: 'success' });
+                              } else {
+                                setEditCompany({ ...editCompany, balanceAdjusting: false });
+                                setModal({ type: 'alert', title: '실패', message: data.error, variant: 'error' });
+                              }
+                            } catch { setEditCompany({ ...editCompany, balanceAdjusting: false }); setModal({ type: 'alert', title: '오류', message: '잔액 조정 실패', variant: 'error' }); }
+                          }}
+                          className={`w-full py-2.5 text-sm font-medium rounded-lg transition-colors disabled:opacity-50 ${
+                            editCompany.balanceAdjustType === 'charge' ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'bg-red-600 hover:bg-red-700 text-white'
+                          }`}
+                        >{editCompany.balanceAdjusting ? '처리 중...' : editCompany.balanceAdjustType === 'charge' ? '충전하기' : '차감하기'}</button>
+                      </div>
+                    </div>
+                  )}
+
                   <p className="text-sm text-gray-500">건당 단가를 설정합니다. (단위: 원)</p>
                   <div className="grid grid-cols-2 gap-4">
                     <div className="bg-gray-50 rounded-lg p-4">
@@ -4543,6 +4924,116 @@ const handleApproveRequest = async (id: string) => {
               </button>
               <button
                 onClick={handleRejectRequest}
+                className="flex-1 px-4 py-3 text-red-600 font-medium hover:bg-red-50 transition-colors"
+              >
+                거절하기
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 충전 승인 확인 모달 */}
+      {showDepositApproveModal && depositTarget && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl shadow-2xl w-[400px] overflow-hidden animate-in fade-in zoom-in">
+            <div className="p-5 border-b bg-gradient-to-r from-emerald-50 to-green-50">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-emerald-100 rounded-full flex items-center justify-center text-xl">✅</div>
+                <div>
+                  <h3 className="text-lg font-bold text-gray-800">충전 승인</h3>
+                  <p className="text-xs text-gray-500">승인 시 잔액이 즉시 충전됩니다</p>
+                </div>
+              </div>
+            </div>
+            <div className="p-5">
+              <div className="bg-gray-50 rounded-xl p-4 space-y-2 mb-4">
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-400">회사</span>
+                  <span className="font-medium text-gray-800">{depositTarget.company_name}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-400">결제수단</span>
+                  <span className="font-medium">{depositTarget.payment_method === 'deposit' ? '무통장입금' : depositTarget.payment_method === 'card' ? '카드결제' : '가상계좌'}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-400">금액</span>
+                  <span className="font-bold text-emerald-700">{Number(depositTarget.amount).toLocaleString()}원</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-400">입금자명</span>
+                  <span className="font-medium">{depositTarget.depositor_name}</span>
+                </div>
+                <div className="flex justify-between text-sm border-t pt-2">
+                  <span className="text-gray-400">현재 잔액</span>
+                  <span className="font-medium">{Number(depositTarget.balance || 0).toLocaleString()}원</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-400">충전 후 잔액</span>
+                  <span className="font-bold text-blue-700">{(Number(depositTarget.balance || 0) + Number(depositTarget.amount)).toLocaleString()}원</span>
+                </div>
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 font-medium mb-1.5 block">관리자 메모 (선택)</label>
+                <input
+                  type="text"
+                  value={depositAdminNote}
+                  onChange={(e) => setDepositAdminNote(e.target.value)}
+                  placeholder="입금 확인 메모"
+                  className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                />
+              </div>
+            </div>
+            <div className="flex border-t">
+              <button
+                onClick={() => { setShowDepositApproveModal(false); setDepositTarget(null); setDepositAdminNote(''); }}
+                className="flex-1 px-4 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors border-r"
+              >
+                취소
+              </button>
+              <button
+                onClick={handleApproveDeposit}
+                className="flex-1 px-4 py-3 text-emerald-600 font-medium hover:bg-emerald-50 transition-colors"
+              >
+                승인하기
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 충전 거절 모달 */}
+      {showDepositRejectModal && depositTarget && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl shadow-2xl w-[400px] overflow-hidden animate-in fade-in zoom-in">
+            <div className="p-5 border-b bg-red-50">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center text-xl">❌</div>
+                <div>
+                  <h3 className="text-lg font-bold text-gray-800">충전 거절</h3>
+                  <p className="text-xs text-gray-500">{depositTarget.company_name} · {Number(depositTarget.amount).toLocaleString()}원</p>
+                </div>
+              </div>
+            </div>
+            <div className="p-5">
+              <label className="text-xs text-gray-500 font-medium mb-1.5 block">거절 사유 *</label>
+              <textarea
+                value={depositAdminNote}
+                onChange={(e) => setDepositAdminNote(e.target.value)}
+                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-red-500 outline-none resize-none"
+                rows={3}
+                placeholder="거절 사유를 입력해주세요."
+              />
+            </div>
+            <div className="flex border-t">
+              <button
+                onClick={() => { setShowDepositRejectModal(false); setDepositTarget(null); setDepositAdminNote(''); }}
+                className="flex-1 px-4 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors border-r"
+              >
+                취소
+              </button>
+              <button
+                onClick={handleRejectDeposit}
                 className="flex-1 px-4 py-3 text-red-600 font-medium hover:bg-red-50 transition-colors"
               >
                 거절하기

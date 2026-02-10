@@ -79,6 +79,107 @@ async function smsExecAll(sqlTemplate: string, params: any[]): Promise<void> {
 }
 // ===== 라운드로빈 헬퍼 끝 =====
 
+// ===== 선불 잔액 관리 =====
+// 선불 잔액 체크 + 차감 (atomic UPDATE ... WHERE balance >= amount)
+async function prepaidDeduct(
+  companyId: string, count: number, messageType: string, referenceId: string
+): Promise<{ ok: boolean; error?: string; amount?: number; balance?: number; insufficientBalance?: boolean }> {
+  const co = await query(
+    'SELECT billing_type, balance, cost_per_sms, cost_per_lms, cost_per_mms FROM companies WHERE id = $1',
+    [companyId]
+  );
+  if (co.rows.length === 0) return { ok: false, error: '회사 정보를 찾을 수 없습니다' };
+
+  const c = co.rows[0];
+  if (c.billing_type !== 'prepaid') return { ok: true, amount: 0 }; // 후불은 패스
+
+  const unitPrice = messageType === 'SMS' ? Number(c.cost_per_sms || 0)
+    : messageType === 'LMS' ? Number(c.cost_per_lms || 0)
+    : messageType === 'MMS' ? Number(c.cost_per_mms || 0) : 0;
+
+  const totalAmount = unitPrice * count;
+  if (totalAmount === 0) return { ok: true, amount: 0 };
+
+  // Atomic 차감: balance >= totalAmount 일 때만 성공
+  const result = await query(
+    'UPDATE companies SET balance = balance - $1, updated_at = NOW() WHERE id = $2 AND balance >= $1 RETURNING balance',
+    [totalAmount, companyId]
+  );
+
+  if (result.rows.length === 0) {
+    return {
+      ok: false,
+      error: `잔액이 부족합니다. 필요: ${totalAmount.toLocaleString()}원 / 현재: ${Number(c.balance).toLocaleString()}원`,
+      amount: totalAmount,
+      balance: Number(c.balance),
+      insufficientBalance: true
+    };
+  }
+
+  // 거래 기록
+  await query(
+    `INSERT INTO balance_transactions (company_id, type, amount, balance_after, description, reference_type, reference_id)
+     VALUES ($1, 'deduct', $2, $3, $4, 'campaign', $5)`,
+    [companyId, totalAmount, result.rows[0].balance, `${messageType} ${count}건 발송 차감 (건당 ${unitPrice}원)`, referenceId]
+  );
+
+  console.log(`[선불차감] company=${companyId} ${messageType}×${count} = ${totalAmount}원 차감 → 잔액 ${result.rows[0].balance}원`);
+  return { ok: true, amount: totalAmount, balance: Number(result.rows[0].balance) };
+}
+
+// 선불 환불 (실패건 또는 취소)
+async function prepaidRefund(
+  companyId: string, count: number, messageType: string, campaignId: string, reason: string
+): Promise<{ refunded: number }> {
+  const co = await query(
+    'SELECT billing_type, cost_per_sms, cost_per_lms, cost_per_mms FROM companies WHERE id = $1',
+    [companyId]
+  );
+  if (co.rows.length === 0 || co.rows[0].billing_type !== 'prepaid') return { refunded: 0 };
+  if (count <= 0) return { refunded: 0 };
+
+  const c = co.rows[0];
+  const unitPrice = messageType === 'SMS' ? Number(c.cost_per_sms || 0)
+    : messageType === 'LMS' ? Number(c.cost_per_lms || 0)
+    : messageType === 'MMS' ? Number(c.cost_per_mms || 0) : 0;
+
+  // 이미 환불된 금액 조회 (중복 환불 방지)
+  const existing = await query(
+    `SELECT COALESCE(SUM(amount), 0) as total FROM balance_transactions
+     WHERE company_id = $1 AND type = 'refund' AND reference_type = 'campaign' AND reference_id = $2`,
+    [companyId, campaignId]
+  );
+  const alreadyRefunded = Number(existing.rows[0].total);
+
+  // 원래 차감 금액 조회
+  const deducted = await query(
+    `SELECT COALESCE(SUM(amount), 0) as total FROM balance_transactions
+     WHERE company_id = $1 AND type = 'deduct' AND reference_type = 'campaign' AND reference_id = $2`,
+    [companyId, campaignId]
+  );
+  const totalDeducted = Number(deducted.rows[0].total);
+
+  const refundAmount = Math.min(unitPrice * count, totalDeducted - alreadyRefunded);
+  if (refundAmount <= 0) return { refunded: 0 };
+
+  const result = await query(
+    'UPDATE companies SET balance = balance + $1, updated_at = NOW() WHERE id = $2 RETURNING balance',
+    [refundAmount, companyId]
+  );
+
+  if (result.rows.length > 0) {
+    await query(
+      `INSERT INTO balance_transactions (company_id, type, amount, balance_after, description, reference_type, reference_id)
+       VALUES ($1, 'refund', $2, $3, $4, 'campaign', $5)`,
+      [companyId, refundAmount, result.rows[0].balance, `${reason} (${messageType} ${count}건 × ${unitPrice}원)`, campaignId]
+    );
+    console.log(`[선불환불] company=${companyId} ${refundAmount}원 환불 → 잔액 ${result.rows[0].balance}원`);
+  }
+
+  return { refunded: refundAmount };
+}
+// ===== 선불 잔액 관리 끝 =====
+
 const router = Router();
 
 router.use(authenticate);
@@ -139,6 +240,14 @@ router.get('/', async (req: Request, res: Response) => {
               `UPDATE campaigns SET status = 'completed', sent_count = $1, success_count = $2, fail_count = $3, sent_at = NOW(), updated_at = NOW() WHERE id = $4`,
               [sentCount, successCount, failCount, camp.id]
             );
+
+            // ★ 선불 실패건 환불
+            if (failCount > 0) {
+              const campInfo = await query('SELECT company_id, message_type FROM campaigns WHERE id = $1', [camp.id]);
+              if (campInfo.rows.length > 0) {
+                await prepaidRefund(campInfo.rows[0].company_id, failCount, campInfo.rows[0].message_type, camp.id, '발송 실패 환불');
+              }
+            }
           }
         }
       }
@@ -264,6 +373,13 @@ router.post('/test-send', async (req: Request, res: Response) => {
 
     if (managerContacts.length === 0) {
       return res.status(400).json({ error: '등록된 담당자 번호가 없습니다. 설정에서 번호를 추가해주세요.' });
+    }
+
+    // ★ 선불 잔액 체크
+    const testMsgType = (messageType || 'SMS') as string;
+    const testDeduct = await prepaidDeduct(companyId, managerContacts.length, testMsgType === 'LMS' ? 'LMS' : 'SMS', 'test');
+    if (!testDeduct.ok) {
+      return res.status(402).json({ error: testDeduct.error, insufficientBalance: true, balance: testDeduct.balance, requiredAmount: testDeduct.amount });
     }
 
     // 담당자별로 라운드로빈 INSERT
@@ -496,6 +612,17 @@ const filteredCustomers = customers.filter(
 
 if (filteredCustomers.length === 0) {
   return res.status(400).json({ error: '발송 대상이 없습니다. (모두 제외됨)' });
+}
+
+// ★ 선불 잔액 체크 + 차감 (MySQL INSERT 전에 atomic 차감)
+const sendDeduct = await prepaidDeduct(companyId, filteredCustomers.length, campaign.message_type, id);
+if (!sendDeduct.ok) {
+  return res.status(402).json({
+    error: sendDeduct.error,
+    insufficientBalance: true,
+    balance: sendDeduct.balance,
+    requiredAmount: sendDeduct.amount
+  });
 }
 
 // MySQL에 INSERT (즉시/예약 공통) — 5개 테이블 라운드로빈 분배
@@ -843,6 +970,14 @@ router.post('/sync-results', async (req: Request, res: Response) => {
              WHERE id = $4`,
             [successCount, failCount, newStatus, runInfo.rows[0].campaign_id]
           );
+
+          // ★ 선불 실패건 환불
+          if (failCount > 0) {
+            const campInfo = await query('SELECT company_id, message_type FROM campaigns WHERE id = $1', [runInfo.rows[0].campaign_id]);
+            if (campInfo.rows.length > 0) {
+              await prepaidRefund(campInfo.rows[0].company_id, failCount, campInfo.rows[0].message_type, runInfo.rows[0].campaign_id, '발송 실패 환불');
+            }
+          }
         }
 
         syncCount++;
@@ -877,6 +1012,15 @@ router.post('/sync-results', async (req: Request, res: Response) => {
            WHERE id = $4`,
           [successCount, failCount, newStatus, campaign.id]
         );
+
+        // ★ 선불 실패건 환불
+        if (failCount > 0) {
+          const campInfo = await query('SELECT company_id, message_type FROM campaigns WHERE id = $1', [campaign.id]);
+          if (campInfo.rows.length > 0) {
+            await prepaidRefund(campInfo.rows[0].company_id, failCount, campInfo.rows[0].message_type, campaign.id, '발송 실패 환불');
+          }
+        }
+
         syncCount++;
       }
     }
@@ -962,6 +1106,20 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       ]
     );
     const campaignId = campaignResult.rows[0].id;
+
+    // ★ 선불 잔액 체크 + 차감
+    const directDeduct = await prepaidDeduct(companyId, filteredRecipients.length, msgType, campaignId);
+    if (!directDeduct.ok) {
+      // 캠페인 레코드 롤백
+      await query('DELETE FROM campaigns WHERE id = $1', [campaignId]);
+      return res.status(402).json({
+        success: false,
+        error: directDeduct.error,
+        insufficientBalance: true,
+        balance: directDeduct.balance,
+        requiredAmount: directDeduct.amount
+      });
+    }
 
     // 2. MySQL 큐에 메시지 삽입 — 5개 테이블 라운드로빈 분배
     const isScheduledSend = scheduled && scheduledAt;
@@ -1084,15 +1242,24 @@ router.post('/:id/cancel', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: '발송 15분 전에는 취소할 수 없습니다', tooLate: true });
     }
 
-    // 2. 5개 테이블에서 대기 중인 메시지 삭제 (status_code = 100)
+    // 2. 대기 중인 메시지 건수 확인 (환불 계산용)
+    const cancelCount = await smsCountAll('app_etc1 = ? AND status_code = 100', [campaignId]);
+
+    // 3. 5개 테이블에서 대기 중인 메시지 삭제 (status_code = 100)
     await smsExecAll(
       `DELETE FROM SMSQ_SEND WHERE app_etc1 = ? AND status_code = 100`,
       [campaignId]
     );
 
-    // 3. PostgreSQL 캠페인 상태 변경
+    // 4. 선불 환불 (예약 취소)
+    const camp = campaign.rows[0];
+    if (cancelCount > 0) {
+      await prepaidRefund(companyId, cancelCount, camp.message_type, campaignId, '예약 취소 환불');
+    }
+
+    // 5. PostgreSQL 캠페인 상태 변경
     await query(
-      `UPDATE campaigns SET status = 'cancelled', updated_at = NOW() WHERE id = $1`,
+      `UPDATE campaigns SET status = 'cancelled', cancelled_at = NOW(), updated_at = NOW() WHERE id = $1`,
       [campaignId]
     );
 

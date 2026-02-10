@@ -10,9 +10,16 @@
 - **구조**: 멀티 테넌트 (고객사별 독립 DB/캠페인 관리)
 
 ## 브랜딩
-- **서비스명**: 한줄로 (상표 출원 예정)
+- **서비스명**: 한줄로
 - **도메인**: hanjul.ai (메인), hanjullo.com (브랜드 보호), hanjul.co.kr, hanjullo.co.kr, hanjullo.ai
-- **상표 전략**: "한줄로" 결합 상표 (제9류, 35류, 42류 출원 예정)
+- **상표 출원**: ✅ 2026-02-10 특허로 출원 완료 (문자상표, 출원인: 유호윤)
+  - 제09류 (소프트웨어): 데이터 처리용 컴퓨터 소프트웨어 등 5개 항목
+  - 제35류 (광고/마케팅): 온라인 광고업, 마케팅업, 디지털 마케팅업 등 30개 항목
+  - 제38류 (통신): SMS송신업, 데이터통신업, 인터넷통신업 등 17개 항목
+  - 제42류 (SaaS/IT): 서비스형 소프트웨어업, 클라우드 컴퓨팅, AIaaS 등 22개 항목
+  - 출원료: 262,000원 (출원료 184,000 + 지정상품 가산금 78,000)
+  - 등록 예상: 14~18개월 소요
+- **로고**: 디자이너 시안 대기 중 (워드마크형 방향, 화해 스타일 참고)
 
 ## 핵심 원칙
 - **데이터 정확성**: 대상자 수는 AI 추정이 아닌 DB 실제 쿼리 결과로 산출
@@ -209,6 +216,8 @@ C:\projects\targetup\  (로컬)
 /api/test-contacts → routes/test-contacts.ts (테스트 연락처)
 /api/plans         → routes/plans.ts (요금제)
 /api/billing       → routes/billing.ts (정산/거래내역서)
+/api/balance       → routes/balance.ts (선불 잔액 조회/이력/요약)
+/api/sync          → routes/sync.ts (Sync Agent 연동 - register, heartbeat, customers, purchases)
 ```
 
 ★ 슈퍼관리자(sys.hanjullo.com) / 고객사관리자(app.hanjul.ai) / 서비스사용자(hanjul.ai) 접속주소 완전 분리 완료
@@ -452,6 +461,9 @@ grep "bind ack" /home/administrator/agent*/logs/*mtdeliver.txt
 | cost_per_lms | numeric(6,2) | |
 | cost_per_mms | numeric(6,2) | |
 | cost_per_kakao | numeric(6,2) | |
+| billing_type | varchar(20) | postpaid/prepaid (기본 postpaid) |
+| balance | numeric(15,2) | 선불 잔액 (기본 0) |
+| deposit_account_info | text | 무통장입금 계좌 안내 |
 | send_start_hour | integer | 기본 9 |
 | send_end_hour | integer | 기본 21 |
 | daily_limit | integer | |
@@ -949,6 +961,83 @@ grep "bind ack" /home/administrator/agent*/logs/*mtdeliver.txt
 
 ---
 
+## Sync Agent 연동 시스템
+
+### 개요
+- 고객사 로컬 DB → 한줄로 서버로 고객/구매 데이터 자동 동기화
+- Sync Agent (.exe)를 고객사 PC에 설치 → API 키 인증으로 데이터 전송
+- 기존 upload와 독립적 (source: 'sync' vs 'upload' 구분)
+
+### API 엔드포인트 (Phase 1 ✅ 완료)
+```
+POST /api/sync/register    ← Agent 최초 등록 (api_key로 company_id 바인딩)
+POST /api/sync/heartbeat   ← Agent 상태 보고
+POST /api/sync/customers   ← 고객 데이터 벌크 UPSERT (배치 최대 1000건)
+POST /api/sync/purchases   ← 구매내역 벌크 INSERT (배치 최대 1000건)
+```
+
+### 인증 방식
+- 헤더: `X-Sync-ApiKey` + `X-Sync-Secret`
+- companies 테이블의 api_key/api_secret으로 인증
+- company.status = 'active' && use_db_sync = true 검증
+
+### UPSERT 규칙 (customers)
+- UNIQUE KEY: company_id + phone (idx_customers_company_phone)
+- sms_opt_in, is_opt_out → 기존 한줄로 값 유지 (덮어쓰지 않음)
+- 나머지 필드 → Agent 값으로 덮어쓰기 (COALESCE 처리)
+- source = 'sync' 태깅
+
+### 테스트 계정
+- 회사: 테스트고객사_싱크 (company_code: TEST_SYNC)
+- company_id: `081000cc-ea67-4977-836c-713ace42e913`
+- api_key: `test-sync-api-key-001` / api_secret: `test-sync-api-secret-001`
+- agent_id: `63864d32-91ea-4daf-99bb-74f6642fc81e`
+
+### 서버 배포 시 주의
+1. 서버 DB에 DDL 먼저 실행 (sync_agents, sync_logs 테이블 + idx_customers_company_phone)
+2. git pull
+3. pm2 restart
+
+### sync_agents (Agent 등록 정보)
+| 컬럼 | 타입 |
+|------|------|
+| id | uuid PK |
+| company_id | uuid FK |
+| agent_name | varchar(100) |
+| agent_version | varchar(20) |
+| os_info | varchar(100) |
+| db_type | varchar(20) |
+| status | varchar(20) — active/inactive/error |
+| last_heartbeat_at | timestamptz |
+| last_sync_at | timestamptz |
+| total_customers_synced | integer |
+| total_purchases_synced | integer |
+| queued_items | integer |
+| uptime | integer |
+| ip_address | varchar(50) |
+| created_at | timestamptz |
+| updated_at | timestamptz |
+
+### sync_logs (동기화 로그)
+| 컬럼 | 타입 |
+|------|------|
+| id | uuid PK |
+| agent_id | uuid FK |
+| company_id | uuid FK |
+| sync_type | varchar(20) — customers/purchases |
+| mode | varchar(20) — full/incremental |
+| batch_index | integer |
+| total_batches | integer |
+| total_count | integer |
+| success_count | integer |
+| fail_count | integer |
+| failures | jsonb |
+| started_at | timestamptz |
+| completed_at | timestamptz |
+| created_at | timestamptz |
+
+---
+
 ## DB 스키마 (MySQL - QTmsg)
 
 ### smsdb.SMSQ_SEND_1~5 (SMS 발송 큐 - 5개 Agent 분배)
@@ -1015,9 +1104,89 @@ grep "bind ack" /home/administrator/agent*/logs/*mtdeliver.txt
 | created_at | timestamptz | |
 | updated_at | timestamptz | |
 
+### balance_transactions (잔액 변동 이력)
+| 컬럼 | 타입 | 설명 |
+|------|------|------|
+| id | uuid PK | |
+| company_id | uuid FK | 고객사 |
+| type | varchar(20) | charge/deduct/refund/admin_charge/admin_deduct/deposit_charge |
+| amount | numeric(15,2) | 변동 금액 |
+| balance_after | numeric(15,2) | 변동 후 잔액 |
+| description | text | 설명/사유 |
+| reference_type | varchar(30) | campaign/payment/admin 등 |
+| reference_id | uuid | 연관 ID |
+| admin_id | uuid | 관리자 수동 조정 시 |
+| created_at | timestamptz | |
+
+### payments (PG 결제 내역)
+| 컬럼 | 타입 | 설명 |
+|------|------|------|
+| id | uuid PK | |
+| company_id | uuid FK | 고객사 |
+| payment_method | varchar(20) | card/virtual_account/transfer |
+| pg_provider | varchar(20) | tosspayments |
+| pg_payment_key | varchar(200) | PG 결제 키 |
+| pg_order_id | varchar(100) | 주문 ID |
+| amount | numeric(15,2) | 결제 금액 |
+| status | varchar(20) | pending/completed/failed/cancelled |
+| paid_at | timestamptz | |
+| cancelled_at | timestamptz | |
+| pg_response | jsonb | PG 응답 원본 |
+| created_at | timestamptz | |
+
+### deposit_requests (무통장입금 요청)
+| 컬럼 | 타입 | 설명 |
+|------|------|------|
+| id | uuid PK | |
+| company_id | uuid FK | 고객사 |
+| amount | numeric(15,2) | 요청 금액 |
+| depositor_name | varchar(50) | 입금자명 |
+| status | varchar(20) | pending/confirmed/rejected |
+| confirmed_by | uuid | 승인 관리자 |
+| confirmed_at | timestamptz | |
+| admin_note | text | 관리자 메모 |
+| created_at | timestamptz | |
+
 ---
 
-## 작업 현황 체크리스트
+## 선불/후불 요금제 시스템
+
+### 개요
+- **후불(postpaid)**: 기본값. 제한 없이 발송, 월말 정산 (기존 방식)
+- **선불(prepaid)**: 잔액 충전 후 사용, 발송 시 atomic 차감, 실패 시 환불
+
+### 단가 체계
+- companies.cost_per_sms/lms/mms/kakao → **VAT 포함 금액** 저장
+- 프론트엔드: 단가 × 건수로 표시
+- PDF 거래내역서만: 총액 ÷ 1.1로 공급가액/부가세 분리
+
+### 발송 시 차감 흐름 (campaigns.ts)
+1. `prepaidDeduct()` → billing_type 확인 → postpaid면 즉시 pass
+2. 필요금액 = 건수 × VAT포함단가
+3. Atomic 차감: `UPDATE companies SET balance = balance - $1 WHERE balance >= $1`
+4. 성공 → balance_transactions 기록 / 실패 → 402 응답 (insufficientBalance)
+5. 발송 결과 sync 시 실패 건수 → `prepaidRefund()` 환불 (중복 방지 내장)
+
+### 통합 포인트 (8곳)
+- POST /test-send: 테스트 발송 전 잔액 체크
+- POST /:id/send: AI 캠페인 발송 전 차감
+- POST /direct-send: 직접발송 전 차감
+- POST /sync-results: 결과 동기화 시 실패분 환불 (campaign_runs/direct 모두)
+- POST /:id/cancel: 예약 취소 시 대기 건수 전액 환불
+- GET /: 목록 조회 시 완료 캠페인 자동 환불 체크
+
+### 슈퍼관리자 API
+- PATCH /api/admin/companies/:id/billing-type → 후불↔선불 전환
+- POST /api/admin/companies/:id/balance-adjust → 수동 충전/차감 (사유 필수)
+- GET /api/admin/companies/:id/balance-transactions → 회사별 이력
+- GET /api/admin/balance-overview → 전체 선불 고객사 잔액 현황
+
+### 서비스 사용자 API
+- GET /api/balance → 잔액 + billing_type + 단가 조회
+- GET /api/balance/transactions → 변동 이력 (페이지네이션, 타입/날짜 필터)
+- GET /api/balance/summary → 월별 충전/차감/환불 요약
+
+---
 
 ### ✅ 완료된 작업
 
@@ -1069,13 +1238,36 @@ grep "bind ack" /home/administrator/agent*/logs/*mtdeliver.txt
 - [x] 백엔드 라운드로빈 분배 구현 (환경변수 SMS_TABLES 분기)
 - [x] 로컬/서버 환경변수 분기 (로컬: SMSQ_SEND 1개, 서버: 5개)
 
+**Sync Agent 서버 API Phase 1 (2026-02-10)**
+- [x] Sync API 4개 엔드포인트 개발 (register, heartbeat, customers, purchases)
+- [x] sync_agents, sync_logs 테이블 생성
+- [x] customers 테이블 UPSERT용 유니크 인덱스 추가 (company_id + phone)
+- [x] 테스트 계정 생성 (TEST_SYNC, api_key/api_secret)
+- [x] register + customers UPSERT 로컬 테스트 완료
+- [x] X-Sync-ApiKey/Secret 헤더 인증 + company 상태/use_db_sync 검증
+
+**선불/후불 요금제 Phase 1-A (2026-02-10)**
+- [x] DB 마이그레이션 (companies: billing_type/balance/deposit_account_info + balance_transactions/payments/deposit_requests 테이블)
+- [x] campaigns.ts 선불 차감/환불 로직 통합 (prepaidDeduct/prepaidRefund, 8곳 적용)
+- [x] balance.ts 신규 API (잔액 조회/이력/요약)
+- [x] admin.ts 선불 관리 API (billing_type 전환, 수동 충전/차감, 이력, 전체 현황)
+- [x] app.ts 라우트 등록 (/api/balance)
+- [x] Dashboard.tsx: 잔액 표시 카드 (선불일 때만) + 402 잔액 부족 모달 (3개 발송 함수 전부)
+- [x] AdminDashboard.tsx: 단가/요금 탭에 후불↔선불 전환 토글 + 선불 잔액 충전/차감 UI
+
 ### 🔲 진행 예정 작업
 
+**선불 요금제 Phase 1-B~2**
+- [ ] Phase 1-A 로컬 테스트 (선불 전환→충전→발송→차감→잔액부족 모달 확인)
+- [ ] Phase 1-A 서버 배포 (서버 DB 마이그레이션 + git pull + pm2 restart)
+- [ ] Phase 1-B: 토스페이먼츠 PG 연동 (카드결제/가상계좌 충전)
+- [ ] Phase 1-C: 직접입금 수동 승인 UI
+- [ ] Phase 2: 입금감지 API 자동화
+
 **Sync Agent (고객사 DB 동기화)**
-- [ ] Target-UP 백엔드 Sync API 4개 엔드포인트 개발 (register, heartbeat, customers, purchases)
-- [ ] sync_agents, sync_logs 테이블 생성
-- [ ] 테스트 계정 생성 (api_key/api_secret)
 - [ ] Sync Agent 코어 완성 (로컬 큐, 스케줄러, Heartbeat 남음)
+- [ ] Sync API Phase 2 개발 (log, config, version 엔드포인트)
+- [ ] 서버 배포 (DDL 실행 → git pull → pm2 restart)
 
 **보안**
 - [ ] 슈퍼관리자 IP 화이트리스트 설정
@@ -1083,8 +1275,8 @@ grep "bind ack" /home/administrator/agent*/logs/*mtdeliver.txt
 - [ ] VPN 접근 제한 검토
 
 **브랜딩**
-- [ ] "한줄로" 로고 디자인
-- [ ] 상표 출원 (제9류, 35류, 42류 결합 상표)
+- [ ] "한줄로" 로고 디자인 (디자이너 시안 대기 중)
+- [x] 상표 출원 완료 (2026-02-10, 특허로, 문자상표 4개 류: 09/35/38/42, 출원료 262,000원)
 - [ ] 파비콘/OG 이미지 적용
 
 **기능 확장**
