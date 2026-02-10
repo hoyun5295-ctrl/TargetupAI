@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+﻿import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { authApi } from '../api/client';
 import { useAuthStore } from '../stores/authStore';
@@ -212,8 +212,8 @@ export default function LoginPage() {
           <div className="text-center mb-8">
             {isSuperAdminOnly ? (
               <>
-                <h1 className="text-3xl font-bold text-gray-900">Target<span className="text-blue-600">-UP</span></h1>
-                <p className="mt-2 text-sm text-gray-500">시스템 관리자</p>
+                <h1 className="text-3xl font-bold text-gray-900">한줄로</h1>
+                <p className="mt-2 text-sm text-gray-500">시스템 관리</p>
               </>
             ) : (
               <>
