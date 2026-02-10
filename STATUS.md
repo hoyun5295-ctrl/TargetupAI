@@ -47,6 +47,8 @@
 - **hanjul.ai**: "한줄로 / AI 마케팅 자동화" 브랜딩, 탭 없음 (서비스 사용자 전용)
 - **sys.hanjullo.com**: "Target-UP / 시스템 관리자" 브랜딩, 탭 없음 (슈퍼관리자 전용)
 - hostname 기반 조건부 렌더링: `window.location.hostname === 'sys.hanjullo.com'`
+- 푸터: 사업자정보 (주식회사 인비토, 대표이사 유호윤, 사업자등록번호, 통신판매신고, 주소, 문의전화)
+- 개인정보처리방침 / 이용약관 링크 포함
 
 ---
 
@@ -130,11 +132,25 @@ cd C:\projects\qtmsg\bin
 | 서비스 | Host | Port | 비고 |
 |--------|------|------|------|
 | SSH | 58.227.193.62 | 22 | administrator |
-| PostgreSQL | localhost | 5432 | Docker 컨테이너 |
+| PostgreSQL | localhost | 5432 | Docker 컨테이너 (튜닝 완료) |
 | MySQL (QTmsg) | localhost | 3306 | Docker 컨테이너 |
 | Redis | localhost | 6379 | Docker 컨테이너 |
-| Nginx | 0.0.0.0 | 80/443 | 리버스 프록시 + SSL |
+| Nginx | 0.0.0.0 | 80/443 | 리버스 프록시 + SSL, client_max_body_size 50M |
 | 백엔드 API | localhost | 3000 | PM2 관리 |
+
+### 상용 PostgreSQL 튜닝 (62GB RAM, 8코어)
+| 설정 | 값 |
+|------|-----|
+| shared_buffers | 4GB |
+| work_mem | 64MB |
+| maintenance_work_mem | 512MB |
+| effective_cache_size | 48GB |
+| random_page_cost | 1.1 |
+| checkpoint_completion_target | 0.9 |
+| wal_buffers | 64MB |
+| max_worker_processes | 8 |
+| max_parallel_workers_per_gather | 4 |
+| max_parallel_workers | 8 |
 
 ### Nginx 설정 파일 (서버)
 | 파일 | 도메인 | 프론트엔드 경로 |
@@ -165,7 +181,7 @@ C:\projects\targetup\  (로컬)
 │   ├── frontend/                   ← 서비스 사용자 + 슈퍼관리자 UI
 │   │   └── src/
 │   │       ├── components/         ← UI 컴포넌트
-│   │       ├── pages/              ← 페이지 (LoginPage.tsx: hostname 분기)
+│   │       ├── pages/              ← 페이지 (LoginPage.tsx, PrivacyPage.tsx, TermsPage.tsx)
 │   │       └── services/           ← API 호출
 │   └── company-frontend/           ← 고객사 관리자 UI (app.hanjul.ai)
 │       └── src/
@@ -192,6 +208,7 @@ C:\projects\targetup\  (로컬)
 /api/address-books → routes/address-books.ts (주소록)
 /api/test-contacts → routes/test-contacts.ts (테스트 연락처)
 /api/plans         → routes/plans.ts (요금제)
+/api/billing       → routes/billing.ts (정산/거래내역서)
 ```
 
 ★ 슈퍼관리자(sys.hanjullo.com) / 고객사관리자(app.hanjul.ai) / 서비스사용자(hanjul.ai) 접속주소 완전 분리 완료
@@ -972,8 +989,10 @@ C:\projects\targetup\  (로컬)
 - [x] DNS 설정 (가비아: hanjul.ai, sys.hanjullo.com, app.hanjul.ai → 58.227.193.62)
 - [x] SSL 인증서 발급 (Let's Encrypt: hanjul.ai, sys.hanjullo.com, app.hanjul.ai)
 - [x] Nginx 리버스 프록시 설정 (3개 도메인 → 각각 프론트엔드 + API)
+- [x] Nginx client_max_body_size 50M 설정 (파일 업로드 413 에러 해결)
 - [x] IP 직접 접속 차단 (SSL 없는 접속 방지)
 - [x] PM2 백엔드 프로세스 관리
+- [x] 상용 PostgreSQL 성능 튜닝 (shared_buffers 4GB, work_mem 64MB 등)
 
 **도메인 분리 & 브랜딩**
 - [x] 서비스명 "한줄로" 확정 (GPT/Gemini 대안 비교 완료)
@@ -984,6 +1003,12 @@ C:\projects\targetup\  (로컬)
 - [x] 로그인 페이지 디자인 통일 (깔끔한 스타일)
 - [x] Git 소스 서버 동기화
 
+**법률/규정**
+- [x] 개인정보처리방침 작성 (PrivacyPage.tsx, /privacy)
+- [x] 이용약관 작성 (TermsPage.tsx, /terms)
+- [x] 푸터 사업자정보 추가 (주식회사 인비토, 사업자번호, 통신판매업 등)
+- [x] 로그인 페이지 하단 + 대시보드 하단에 링크 반영
+
 **핵심 기능 (로컬 개발 완료)**
 - [x] 캠페인 CRUD + AI 타겟 추출 + 메시지 생성
 - [x] QTmsg 연동 (로컬 Agent 1개)
@@ -992,6 +1017,8 @@ C:\projects\targetup\  (로컬)
 - [x] 고객사 관리자 대시보드 (company-frontend)
 - [x] 정산/거래내역서 시스템
 - [x] 데이터 정규화 시스템 (normalize.ts)
+- [x] 자동입력변수 최대길이 기반 SMS/LMS 자동전환 바이트 계산 (getMaxByteMessage)
+- [x] 정산 삭제 버튼 모든 상태에서 표시 + 백엔드 상태 제한 해제
 
 ### 🔲 진행 예정 작업
 
@@ -999,18 +1026,12 @@ C:\projects\targetup\  (로컬)
 - [ ] QTmsg Agent 리눅스 버전 서버 설치 (실제 SMS 발송 가능하게)
 - [ ] QTmsg Agent 5개 균등 발송 구현 (운영실에 Bind ID 5개 발급 요청)
 - [ ] 백엔드 발송 로직에 라운드로빈 분배 추가
-- [ ] 로컬에서 수정한 LoginPage.tsx 서버와 git 동기화
+- [ ] 서버 SMSQ_SEND 테이블 생성 (현재 테이블 없음 에러)
 
 **보안**
 - [ ] 슈퍼관리자 IP 화이트리스트 설정
 - [ ] www.hanjul.ai SSL 인증서 추가 (DNS 전파 후)
 - [ ] VPN 접근 제한 검토
-
-**법률/규정**
-- [ ] 개인정보처리방침 작성
-- [ ] 이용약관 작성
-- [ ] 푸터 사업자정보 추가 (주식회사 인비토, 사업자번호, 통신판매업 등)
-- [ ] 각 로그인 페이지 하단에 반영
 
 **브랜딩**
 - [ ] "한줄로" 로고 디자인
@@ -1023,3 +1044,4 @@ C:\projects\targetup\  (로컬)
 - [ ] PDF 승인 기능 (이메일 링크)
 - [ ] Android 앱 (스팸필터 자동 테스트)
 - [ ] 고객사 관리자 기능 세분화 (슈퍼관리자 기능 축소 버전)
+- [ ] 추천 템플릿 8개 → 실용적 활용 예시로 개선 (직원 의견 수렴 후)
