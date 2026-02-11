@@ -1,5 +1,8 @@
-import { Pool } from 'pg';
+import { Pool, types } from 'pg';
 import mysql from 'mysql2/promise';
+
+// timestamp without timezone를 UTC로 강제 처리
+types.setTypeParser(1114, (str) => str + 'Z');
 
 import dotenv from 'dotenv';
 
@@ -10,11 +13,9 @@ export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
 });
 
-// 서버 시작 시 timezone 확인 및 설정
-pool.query("SET timezone = 'Asia/Seoul'").then(() => {
-  return pool.query("SHOW timezone");
-}).then(res => {
-  console.log(`✅ PostgreSQL 연결됨 (timezone: ${res.rows[0].TimeZone})`);
+// PostgreSQL 연결 확인
+pool.query("SELECT 1").then(() => {
+  console.log('✅ PostgreSQL 연결됨');
 }).catch(err => {
   console.error('❌ PostgreSQL 연결 실패:', err.message);
 });
