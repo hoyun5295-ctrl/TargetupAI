@@ -42,6 +42,15 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
     const now = new Date();
     return `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`;
   });
+  // 일자별 기간 필터
+  const [startDate, setStartDate] = useState(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+  });
+  const [endDate, setEndDate] = useState(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  });
   const [cooldown, setCooldown] = useState(0);
   const [testCooldown, setTestCooldown] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
@@ -65,7 +74,7 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
   const [messageLoading, setMessageLoading] = useState(false);
   const messagePerPage = 10;
 
-  useEffect(() => { fetchData(); }, [yearMonth]);
+  useEffect(() => { fetchData(); }, [startDate, endDate]);
   useEffect(() => {
     if (cooldown > 0) { const t = setTimeout(() => setCooldown(cooldown - 1), 1000); return () => clearTimeout(t); }
   }, [cooldown]);
@@ -80,9 +89,10 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
     setCooldown(30);
     try {
       await fetch('/api/campaigns/sync-results', { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
-      const summaryRes = await fetch(`/api/v1/results/summary?from=${yearMonth}`, { headers: { Authorization: `Bearer ${token}` } });
+      const from = startDate.replace(/-/g, '').slice(0, 6);
+      const summaryRes = await fetch(`/api/v1/results/summary?from=${from}&fromDate=${startDate}&toDate=${endDate}`, { headers: { Authorization: `Bearer ${token}` } });
       setSummary(await summaryRes.json());
-      const campaignsRes = await fetch(`/api/v1/results/campaigns?from=${yearMonth}&limit=50`, { headers: { Authorization: `Bearer ${token}` } });
+      const campaignsRes = await fetch(`/api/v1/results/campaigns?from=${from}&fromDate=${startDate}&toDate=${endDate}&limit=50`, { headers: { Authorization: `Bearer ${token}` } });
       const campaignsData = await campaignsRes.json();
       setCampaigns(campaignsData.campaigns || []);
     } catch (error) {
@@ -105,7 +115,8 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
     if (testCooldown > 0) return;
     setTestCooldown(30);
     try {
-      const res = await fetch(`/api/campaigns/test-stats?yearMonth=${yearMonth}`, { headers: { Authorization: `Bearer ${token}` } });
+      const testFrom = startDate.replace(/-/g, '').slice(0, 6);
+      const res = await fetch(`/api/campaigns/test-stats?yearMonth=${testFrom}&fromDate=${startDate}&toDate=${endDate}`, { headers: { Authorization: `Bearer ${token}` } });
       const data = await res.json();
       setTestStats(data.stats);
       setTestList(data.list);
@@ -257,9 +268,16 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
               <div className="flex items-center gap-3 flex-wrap">
                 <span className="text-sm text-gray-500 font-medium">기간</span>
                 <input
-                  type="month"
-                  value={`${yearMonth.slice(0, 4)}-${yearMonth.slice(4, 6)}`}
-                  onChange={(e) => setYearMonth(e.target.value.replace('-', ''))}
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                  className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-200 focus:border-emerald-400"
+                />
+                <span className="text-gray-400">~</span>
+                <input
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
                   className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-200 focus:border-emerald-400"
                 />
                 <div className="w-px h-6 bg-gray-200" />
@@ -454,9 +472,16 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
               <div className="flex items-center gap-4">
                 <span className="text-sm text-gray-500 font-medium">기간</span>
                 <input
-                  type="month"
-                  value={`${yearMonth.slice(0, 4)}-${yearMonth.slice(4, 6)}`}
-                  onChange={(e) => setYearMonth(e.target.value.replace('-', ''))}
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                  className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-200 focus:border-orange-400"
+                />
+                <span className="text-gray-400">~</span>
+                <input
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
                   className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-200 focus:border-orange-400"
                 />
                 <button

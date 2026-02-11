@@ -387,13 +387,14 @@ router.post('/test-send', async (req: Request, res: Response) => {
 
     // ★ 선불 잔액 체크
     const testMsgType = (messageType || 'SMS') as string;
-    const testDeduct = await prepaidDeduct(companyId, managerContacts.length, testMsgType === 'LMS' ? 'LMS' : 'SMS', 'test');
+    const testDeduct = await prepaidDeduct(companyId, managerContacts.length, testMsgType, 'test');
     if (!testDeduct.ok) {
       return res.status(402).json({ error: testDeduct.error, insufficientBalance: true, balance: testDeduct.balance, requiredAmount: testDeduct.amount });
     }
 
     // 담당자별로 라운드로빈 INSERT
-    const msgType = (messageType || 'SMS') === 'SMS' ? 'S' : 'L';
+    const msgType = (messageType || 'SMS') === 'SMS' ? 'S' : (messageType || 'SMS') === 'LMS' ? 'L' : 'M';
+    const mmsImagePaths: string[] = req.body.mmsImagePaths || [];
     let sentCount = 0;
 
     for (const contact of managerContacts) {
@@ -404,9 +405,9 @@ router.post('/test-send', async (req: Request, res: Response) => {
         const table = getNextSmsTable();
         await mysqlQuery(
           `INSERT INTO ${table} (
-            dest_no, call_back, msg_contents, msg_type, sendreq_time, status_code, rsv1, app_etc1, app_etc2, bill_id
-          ) VALUES (?, ?, ?, ?, NOW(), 100, '1', ?, ?, ?)`,
-          [cleanPhone, callbackNumber, testMsg, msgType, 'test', companyId, userId || '']
+            dest_no, call_back, msg_contents, msg_type, sendreq_time, status_code, rsv1, app_etc1, app_etc2, bill_id, file_name1, file_name2, file_name3
+          ) VALUES (?, ?, ?, ?, NOW(), 100, '1', ?, ?, ?, ?, ?, ?)`,
+          [cleanPhone, callbackNumber, testMsg, msgType, 'test', companyId, userId || '', mmsImagePaths[0] || '', mmsImagePaths[1] || '', mmsImagePaths[2] || '']
       );
       sentCount++;
     }
@@ -444,6 +445,7 @@ router.post('/', async (req: Request, res: Response) => {
       isAd,
       eventStartDate,
       eventEndDate,
+      mmsImagePaths,
     } = req.body;
 
     if (!campaignName || !messageType || !messageContent) {
@@ -465,13 +467,14 @@ router.post('/', async (req: Request, res: Response) => {
       `INSERT INTO campaigns (
         company_id, campaign_name, message_type, target_filter,
         message_content, scheduled_at, is_ad, target_count, created_by,
-        event_start_date, event_end_date
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        event_start_date, event_end_date, mms_image_paths
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
       RETURNING *`,
       [
         companyId, campaignName, messageType, JSON.stringify(targetFilter),
         messageContent, scheduledAt, isAd ?? false, targetCount, userId,
-        eventStartDate || null, eventEndDate || null
+        eventStartDate || null, eventEndDate || null,
+        mmsImagePaths && mmsImagePaths.length > 0 ? JSON.stringify(mmsImagePaths) : null
       ]
     );
 
@@ -638,6 +641,10 @@ if (!sendDeduct.ok) {
 // MySQL에 INSERT (즉시/예약 공통) — 5개 테이블 라운드로빈 분배
 const sendTime = isScheduled ? toKoreaTimeStr(new Date(campaign.scheduled_at)) : null;
 
+// MMS 이미지 경로 (campaigns 테이블에서 가져옴)
+const campaignMmsImages: string[] = campaign.mms_image_paths || [];
+const aiMsgTypeCode = campaign.message_type === 'SMS' ? 'S' : campaign.message_type === 'LMS' ? 'L' : 'M';
+
 for (const customer of filteredCustomers) {
   // ★ 동적 변수 치환 (field_mappings 기반 - 하드코딩 완전 제거!)
   let personalizedMessage = campaign.message_content || '';
@@ -673,9 +680,9 @@ for (const customer of filteredCustomers) {
   const table = getNextSmsTable();
   await mysqlQuery(
     `INSERT INTO ${table} (
-      dest_no, call_back, msg_contents, msg_type, sendreq_time, status_code, rsv1, app_etc1, app_etc2
-    ) VALUES (?, ?, ?, ?, ${sendTime ? `'${sendTime}'` : 'NOW()'}, 100, '1', ?, ?)`,
-    [customer.phone.replace(/-/g, ''), customerCallback, personalizedMessage, campaign.message_type === 'SMS' ? 'S' : 'L', id, companyId]
+      dest_no, call_back, msg_contents, msg_type, sendreq_time, status_code, rsv1, app_etc1, app_etc2, file_name1, file_name2, file_name3
+    ) VALUES (?, ?, ?, ?, ${sendTime ? `'${sendTime}'` : 'NOW()'}, 100, '1', ?, ?, ?, ?, ?)`,
+    [customer.phone.replace(/-/g, ''), customerCallback, personalizedMessage, aiMsgTypeCode, id, companyId, campaignMmsImages[0] || '', campaignMmsImages[1] || '', campaignMmsImages[2] || '']
   );
 }
 
@@ -870,10 +877,10 @@ router.get('/test-stats', async (req: Request, res: Response) => {
       cost: 0,
     };
 
-    // 비용 계산 (SMS 27원, LMS 81원 기준)
+    // 비용 계산 (SMS 27원, LMS 81원, MMS 단가 기준)
     testResults.forEach((r: any) => {
       if ([6, 1000, 1800].includes(r.status_code)) {
-        stats.cost += r.msg_type === 'S' ? 27 : 81;
+        stats.cost += r.msg_type === 'S' ? 27 : r.msg_type === 'M' ? 110 : 81;
       }
     });
 
@@ -882,7 +889,7 @@ router.get('/test-stats', async (req: Request, res: Response) => {
       id: r.seqno,
       phone: r.dest_no, // 담당자 테스트는 마스킹 안함
       content: r.msg_contents,
-      type: r.msg_type === 'S' ? 'SMS' : 'LMS',
+      type: r.msg_type === 'S' ? 'SMS' : r.msg_type === 'M' ? 'MMS' : 'LMS',
       sentAt: r.sendreq_time,
       status: [6, 1000, 1800].includes(r.status_code) ? 'success' : r.status_code === 100 ? 'pending' : 'fail',
       testType: 'manager', // 담당자 테스트
@@ -1061,7 +1068,8 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       scheduledAt,    // 예약 시간
       splitEnabled,   // 분할전송 여부
       splitCount,     // 분당 발송 건수
-      useIndividualCallback  // 개별회신번호 사용 여부
+      useIndividualCallback,  // 개별회신번호 사용 여부
+      mmsImagePaths   // MMS 이미지 서버 경로 배열
     } = req.body;
 
     if (!recipients || recipients.length === 0) {
@@ -1097,8 +1105,8 @@ router.post('/direct-send', async (req: Request, res: Response) => {
 
     // 2. 캠페인 레코드 생성 (원본 템플릿도 저장)
     const campaignResult = await query(
-      `INSERT INTO campaigns (company_id, campaign_name, message_type, message_content, subject, callback_number, target_count, send_type, status, scheduled_at, message_template, message_subject, created_by, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'direct', $8, $9, $10, $11, $12, NOW())
+      `INSERT INTO campaigns (company_id, campaign_name, message_type, message_content, subject, callback_number, target_count, send_type, status, scheduled_at, message_template, message_subject, created_by, mms_image_paths, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'direct', $8, $9, $10, $11, $12, $13, NOW())
        RETURNING id`,
       [
         companyId,
@@ -1112,7 +1120,8 @@ router.post('/direct-send', async (req: Request, res: Response) => {
         scheduled && scheduledAt ? new Date(scheduledAt) : null,
         message,  // message_template: 원본 템플릿
         subject || null,  // message_subject: 원본 제목
-        userId  // created_by: 발송자
+        userId,  // created_by: 발송자
+        mmsImagePaths && mmsImagePaths.length > 0 ? JSON.stringify(mmsImagePaths) : null
       ]
     );
     const campaignId = campaignResult.rows[0].id;
@@ -1188,7 +1197,10 @@ router.post('/direct-send', async (req: Request, res: Response) => {
         msgType === 'SMS' ? 'S' : msgType === 'LMS' ? 'L' : 'M',
         subject || '',
         sendTime,
-        campaignId
+        campaignId,
+        (mmsImagePaths || [])[0] || '',
+        (mmsImagePaths || [])[1] || '',
+        (mmsImagePaths || [])[2] || ''
       ]);
     }
 
@@ -1196,11 +1208,11 @@ router.post('/direct-send', async (req: Request, res: Response) => {
     for (const [table, batches] of Object.entries(tableBatches)) {
       for (const batch of batches) {
         if (batch.length === 0) continue;
-        const placeholders = batch.map(() => '(?, ?, ?, ?, ?, ?, 100, \'1\', ?)').join(', ');
+        const placeholders = batch.map(() => '(?, ?, ?, ?, ?, ?, 100, \'1\', ?, ?, ?, ?)').join(', ');
         const flatValues = batch.flat();
 
         await mysqlQuery(
-          `INSERT INTO ${table} (dest_no, call_back, msg_contents, msg_type, title_str, sendreq_time, status_code, rsv1, app_etc1) VALUES ${placeholders}`,
+          `INSERT INTO ${table} (dest_no, call_back, msg_contents, msg_type, title_str, sendreq_time, status_code, rsv1, app_etc1, file_name1, file_name2, file_name3) VALUES ${placeholders}`,
           flatValues
         );
       }

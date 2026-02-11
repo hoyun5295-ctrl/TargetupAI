@@ -97,11 +97,11 @@ function CalendarModal({ onClose, token }: { onClose: () => void; token: string 
 
   const statusColors: Record<string, string> = {
     draft: 'bg-gray-200 text-gray-600',
-    scheduled: 'bg-pink-200 text-pink-700',
-    sending: 'bg-yellow-200 text-yellow-700',
-    completed: 'bg-amber-200 text-amber-700',
+    scheduled: 'bg-blue-200 text-blue-700',
+    sending: 'bg-orange-200 text-orange-700',
+    completed: 'bg-green-200 text-green-700',
     failed: 'bg-red-200 text-red-700',
-    cancelled: 'bg-gray-300 text-gray-500',
+    cancelled: 'bg-gray-200 text-gray-400',
   };
   const statusLabels: Record<string, string> = {
     draft: '준비', scheduled: '예약', sending: '진행', completed: '완료', failed: '실패', cancelled: '취소',
@@ -140,19 +140,19 @@ function CalendarModal({ onClose, token }: { onClose: () => void; token: string 
             <div className="flex items-center gap-4 mb-3 pb-2 border-b text-xs">
               <span className="text-gray-500">상태:</span>
               <div className="flex items-center gap-1">
-                <span className="w-3 h-3 rounded bg-amber-200"></span>
+                <span className="w-3 h-3 rounded bg-green-200"></span>
                 <span className="text-gray-600">완료</span>
               </div>
               <div className="flex items-center gap-1">
-                <span className="w-3 h-3 rounded bg-pink-200"></span>
+                <span className="w-3 h-3 rounded bg-blue-200"></span>
                 <span className="text-gray-600">예약</span>
               </div>
               <div className="flex items-center gap-1">
-                <span className="w-3 h-3 rounded bg-gray-300"></span>
+                <span className="w-3 h-3 rounded bg-gray-200"></span>
                 <span className="text-gray-600">취소</span>
               </div>
               <div className="flex items-center gap-1">
-                <span className="w-3 h-3 rounded bg-yellow-200"></span>
+                <span className="w-3 h-3 rounded bg-orange-200"></span>
                 <span className="text-gray-600">진행</span>
               </div>
             </div>
@@ -543,7 +543,8 @@ export default function Dashboard() {
           scheduled: reserveEnabled,
           scheduledAt: reserveEnabled && reserveDateTime ? new Date(reserveDateTime).toISOString() : null,
           splitEnabled: splitEnabled,
-          splitCount: splitEnabled ? splitCount : null
+          splitCount: splitEnabled ? splitCount : null,
+          mmsImagePaths: mmsUploadedImages.map(img => img.serverPath)
         })
       });
       const data = await res.json();
@@ -623,7 +624,8 @@ export default function Dashboard() {
           scheduledAt: reserveEnabled && reserveDateTime ? new Date(reserveDateTime).toISOString() : null,
           splitEnabled: splitEnabled,
           splitCount: splitEnabled ? splitCount : null,
-          customMessages: recipientsWithMessage.map(r => ({ ...r, callback: r.callback || null }))
+          customMessages: recipientsWithMessage.map(r => ({ ...r, callback: r.callback || null })),
+          mmsImagePaths: mmsUploadedImages.map(img => img.serverPath)
         })
       });
       const data = await res.json();
@@ -659,7 +661,71 @@ export default function Dashboard() {
     setSendConfirm({show: false, type: 'immediate', count: 0, unsubscribeCount: 0});
   };
   
-  const [mmsImages, setMmsImages] = useState<File[]>([]);
+  // MMS 이미지 (서버 업로드 방식)
+  const [mmsUploadedImages, setMmsUploadedImages] = useState<{serverPath: string; url: string; filename: string; size: number}[]>([]);
+  const [mmsUploading, setMmsUploading] = useState(false);
+  const [showMmsUploadModal, setShowMmsUploadModal] = useState(false);
+
+  // MMS 이미지 단일 슬롯 업로드 함수
+  const handleMmsSlotUpload = async (file: File, slotIndex: number) => {
+    // 검증: JPG만
+    if (!file.name.toLowerCase().endsWith('.jpg') && !file.name.toLowerCase().endsWith('.jpeg')) {
+      setToast({ show: true, type: 'error', message: 'JPG 파일만 업로드 가능합니다 (PNG/GIF 미지원)' });
+      setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
+      return;
+    }
+    // 검증: 300KB
+    if (file.size > 300 * 1024) {
+      setToast({ show: true, type: 'error', message: `${(file.size / 1024).toFixed(0)}KB — 300KB 이하만 가능합니다` });
+      setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
+      return;
+    }
+
+    setMmsUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('images', file);
+      const token = localStorage.getItem('token');
+      const res = await fetch('/api/mms-images/upload', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      });
+      const data = await res.json();
+      if (res.ok && data.success && data.images.length > 0) {
+        setMmsUploadedImages(prev => {
+          const updated = [...prev];
+          updated[slotIndex] = data.images[0];
+          return updated;
+        });
+      } else {
+        setToast({ show: true, type: 'error', message: data.error || '업로드 실패' });
+        setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
+      }
+    } catch {
+      setToast({ show: true, type: 'error', message: '이미지 업로드 중 오류 발생' });
+      setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
+    } finally {
+      setMmsUploading(false);
+    }
+  };
+
+  // MMS 이미지 서버 업로드 함수 → 모달 오픈으로 변경
+  const handleMmsImageUpload = (files: FileList | null, sendType: 'ai' | 'target' | 'direct') => {
+    setShowMmsUploadModal(true);
+  };
+
+  // MMS 이미지 삭제 함수 (슬롯 기반)
+  const handleMmsImageRemove = async (index: number) => {
+    const img = mmsUploadedImages[index];
+    if (img) {
+      try {
+        const token = localStorage.getItem('token');
+        await fetch(img.url, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+      } catch { /* 서버 삭제 실패해도 UI에서는 제거 */ }
+    }
+    setMmsUploadedImages(prev => prev.filter((_, i) => i !== index));
+  };
   const [directInputMode, setDirectInputMode] = useState<'file' | 'direct' | 'address'>('file');
   const [showAddressBook, setShowAddressBook] = useState(false);
   const [addressGroups, setAddressGroups] = useState<{group_name: string, count: number}[]>([]);
@@ -1405,6 +1471,7 @@ const campaignData = {
       eventEndDate: eventEndDate,
       callback: useIndividualCallback ? null : selectedCallback,
       useIndividualCallback: useIndividualCallback,
+      mmsImagePaths: mmsUploadedImages.map(img => img.serverPath),
     };
 
     console.log('=== 발송 디버깅 ===');
@@ -1472,6 +1539,7 @@ const campaignData = {
         body: JSON.stringify({
           messageContent: selectedMsg.message_text,
           messageType: selectedChannel,
+          mmsImagePaths: mmsUploadedImages.map(img => img.serverPath),
         }),
       });
       const data = await res.json();
@@ -2250,6 +2318,32 @@ const campaignData = {
                     </div>
                   </div>
 
+                  {/* MMS 이미지 첨부 */}
+                  <div>
+                    <div className="text-base font-semibold text-gray-700 mb-3">🖼️ 이미지 첨부 (MMS)</div>
+                    <div
+                      onClick={() => setShowMmsUploadModal(true)}
+                      className="border-2 border-dashed border-gray-200 rounded-xl p-4 bg-gray-50/50 cursor-pointer hover:border-purple-400 hover:bg-purple-50/50 transition-all"
+                    >
+                      {mmsUploadedImages.length > 0 ? (
+                        <div className="flex items-center gap-3">
+                          {mmsUploadedImages.map((img, idx) => (
+                            <img key={idx} src={img.url} alt="" className="w-16 h-16 object-cover rounded-lg border shadow-sm" crossOrigin="use-credentials" />
+                          ))}
+                          <div className="text-sm text-purple-600 font-medium">✏️ {mmsUploadedImages.length}장 첨부됨 (클릭하여 수정)</div>
+                        </div>
+                      ) : (
+                        <div className="flex flex-col items-center gap-2 py-2">
+                          <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center">
+                            <span className="text-xl">📷</span>
+                          </div>
+                          <div className="text-sm text-gray-500">클릭하여 이미지를 첨부하면 MMS로 발송됩니다</div>
+                          <div className="text-xs text-gray-400">JPG만 · 300KB 이하 · 최대 3장</div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
                   {/* 발송시간 */}
                   <div>
                     <div className="text-base font-semibold text-gray-700 mb-4">⏰ 발송시간</div>
@@ -2485,6 +2579,27 @@ const campaignData = {
                   )}
                 </div>
 
+                {/* MMS 이미지 미리보기 */}
+                {mmsUploadedImages.length > 0 && (
+                  <div>
+                    <div className="text-sm text-gray-600 mb-2">🖼️ 첨부 이미지 ({mmsUploadedImages.length}장)</div>
+                    <div className="flex gap-3 mb-2">
+                      {mmsUploadedImages.map((img, idx) => (
+                        <img
+                          key={idx}
+                          src={img.url}
+                          alt={`MMS ${idx + 1}`}
+                          className="w-20 h-20 object-cover rounded-lg border shadow-sm"
+                          crossOrigin="use-credentials"
+                        />
+                      ))}
+                    </div>
+                    <div className="text-xs text-amber-600 bg-amber-50 rounded-lg p-2">
+                      ⚠️ 실제 수신 화면은 이통사 및 휴대폰 기종에 따라 다르게 보일 수 있습니다
+                    </div>
+                  </div>
+                )}
+
                 {/* 발송 시간 */}
                 <div className="flex items-center gap-2">
                   <span className="text-sm text-gray-600">⏰ 발송시간:</span>
@@ -2515,6 +2630,24 @@ const campaignData = {
                     className="flex-1 py-3 bg-orange-500 text-white rounded-lg hover:bg-orange-600 disabled:opacity-50"
                   >
                     {testSending ? '📱 발송 중...' : testCooldown ? '⏳ 10초 대기' : '📱 담당자 사전수신'}
+                  </button>
+                  <button
+                    onClick={() => {
+                      const toast = document.createElement('div');
+                      toast.innerHTML = `
+                        <div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:white;padding:24px 32px;border-radius:16px;box-shadow:0 10px 40px rgba(0,0,0,0.2);z-index:9999;text-align:center;">
+                          <div style="font-size:48px;margin-bottom:12px;">🚧</div>
+                          <div style="font-size:16px;font-weight:bold;color:#374151;margin-bottom:8px;">준비 중인 기능입니다</div>
+                          <div style="font-size:14px;color:#6B7280;">스팸필터테스트는 곧 업데이트됩니다</div>
+                        </div>
+                        <div style="position:fixed;inset:0;background:rgba(0,0,0,0.3);z-index:9998;" onclick="this.parentElement.remove()"></div>
+                      `;
+                      document.body.appendChild(toast);
+                      setTimeout(() => toast.remove(), 2000);
+                    }}
+                    className="flex-1 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300"
+                  >
+                    🛡️ 스팸필터
                   </button>
                   <button
                     onClick={handleAiCampaignSend}
@@ -2567,6 +2700,113 @@ const campaignData = {
         {showResults && <ResultsModal onClose={() => setShowResults(false)} token={localStorage.getItem('token')} />}
         {showCustomerDB && <CustomerDBModal onClose={() => setShowCustomerDB(false)} token={localStorage.getItem('token')} />}
         {showCalendar && <CalendarModal onClose={() => setShowCalendar(false)} token={localStorage.getItem('token')} />}
+
+        {/* MMS 이미지 업로드 모달 */}
+        {showMmsUploadModal && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[70]">
+            <div className="bg-white rounded-2xl shadow-2xl w-[520px] overflow-hidden animate-in fade-in zoom-in">
+              {/* 헤더 */}
+              <div className="px-6 py-4 border-b bg-gradient-to-r from-amber-50 to-orange-50 flex justify-between items-center">
+                <div className="flex items-center gap-2">
+                  <span className="text-xl">🖼️</span>
+                  <h3 className="font-bold text-lg text-gray-800">MMS 이미지 첨부</h3>
+                </div>
+                <button onClick={() => setShowMmsUploadModal(false)} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
+              </div>
+
+              {/* 규격 안내 */}
+              <div className="px-6 py-3 bg-blue-50 border-b">
+                <div className="text-sm font-semibold text-blue-700 mb-1">📋 이미지 규격 안내</div>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-blue-600">
+                  <div>• 파일 형식: <span className="font-bold">JPG/JPEG만</span> 가능</div>
+                  <div>• 최대 용량: <span className="font-bold">300KB 이하</span> (이통사 권장)</div>
+                  <div>• 최대 장수: <span className="font-bold">3장</span> (이통사 보장)</div>
+                  <div>• PNG/GIF: 이통사 거절 가능 (미지원)</div>
+                </div>
+              </div>
+
+              {/* 3칸 슬롯 */}
+              <div className="p-6">
+                <div className="grid grid-cols-3 gap-4">
+                  {[0, 1, 2].map(slotIdx => {
+                    const img = mmsUploadedImages[slotIdx];
+                    return (
+                      <div key={slotIdx} className="aspect-square relative">
+                        {img ? (
+                          /* 업로드 완료 슬롯 */
+                          <div className="w-full h-full rounded-xl border-2 border-green-300 bg-green-50 overflow-hidden relative group">
+                            <img
+                              src={img.url}
+                              alt={`이미지 ${slotIdx + 1}`}
+                              className="w-full h-full object-cover"
+                              crossOrigin="use-credentials"
+                            />
+                            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center">
+                              <button
+                                onClick={() => handleMmsImageRemove(slotIdx)}
+                                className="opacity-0 group-hover:opacity-100 transition-opacity bg-red-500 hover:bg-red-600 text-white rounded-full w-8 h-8 flex items-center justify-center text-sm font-bold shadow-lg"
+                              >×</button>
+                            </div>
+                            <div className="absolute bottom-1 right-1 bg-green-600 text-white text-[10px] px-1.5 py-0.5 rounded-full font-bold">
+                              {(img.size / 1024).toFixed(0)}KB
+                            </div>
+                            <div className="absolute top-1 left-1 bg-green-600 text-white text-[10px] w-5 h-5 rounded-full flex items-center justify-center font-bold">
+                              {slotIdx + 1}
+                            </div>
+                          </div>
+                        ) : (
+                          /* 빈 슬롯 */
+                          <label className={`w-full h-full rounded-xl border-2 border-dashed border-gray-300 bg-gray-50 flex flex-col items-center justify-center cursor-pointer hover:border-amber-400 hover:bg-amber-50 transition-all ${mmsUploading ? 'opacity-50 pointer-events-none' : ''}`}>
+                            <div className="text-3xl text-gray-300 mb-2">+</div>
+                            <div className="text-xs text-gray-400 font-medium">이미지 {slotIdx + 1}</div>
+                            <div className="text-[10px] text-gray-300 mt-1">JPG · 300KB</div>
+                            <input
+                              type="file"
+                              accept=".jpg,.jpeg"
+                              className="hidden"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) handleMmsSlotUpload(file, slotIdx);
+                                e.target.value = '';
+                              }}
+                            />
+                          </label>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {mmsUploading && (
+                  <div className="flex items-center justify-center gap-2 mt-4 text-sm text-amber-600">
+                    <span className="animate-spin">⏳</span> 이미지 업로드 중...
+                  </div>
+                )}
+              </div>
+
+              {/* 안내 + 확인 */}
+              <div className="px-6 pb-6 space-y-3">
+                <div className="text-xs text-amber-600 bg-amber-50 rounded-lg p-3 text-center">
+                  ⚠️ 실제 수신 화면은 이통사 및 휴대폰 기종에 따라 다르게 보일 수 있습니다
+                </div>
+                <button
+                  onClick={() => {
+                    setShowMmsUploadModal(false);
+                    // 이미지가 있으면 자동 MMS 전환
+                    if (mmsUploadedImages.length > 0) {
+                      setTargetMsgType('MMS');
+                      setDirectMsgType('MMS');
+                      setSelectedChannel('MMS');
+                    }
+                  }}
+                  className="w-full py-3 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-semibold text-sm transition-colors"
+                >
+                  {mmsUploadedImages.length > 0 ? `✅ ${mmsUploadedImages.length}장 첨부 완료` : '확인'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
         
         {/* 최근 캠페인 모달 */}
         {showRecentCampaigns && (
@@ -4090,6 +4330,25 @@ const campaignData = {
                     </div>
                   </div>
                   
+                  {/* MMS 이미지 업로드 영역 */}
+                  {(targetMsgType === 'MMS' || mmsUploadedImages.length > 0) && (
+                    <div className="px-3 py-2 border-t bg-amber-50/50 cursor-pointer hover:bg-amber-100/50 transition-colors" onClick={() => setShowMmsUploadModal(true)}>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-semibold text-gray-600">🖼️ MMS 이미지</span>
+                        {mmsUploadedImages.length > 0 ? (
+                          <div className="flex items-center gap-1">
+                            {mmsUploadedImages.map((img, idx) => (
+                              <img key={idx} src={img.url} alt="" className="w-10 h-10 object-cover rounded border" crossOrigin="use-credentials" />
+                            ))}
+                            <span className="text-xs text-purple-600 ml-1">✏️ 수정</span>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-amber-600">클릭하여 이미지 첨부 →</span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
                   {/* 미리보기 + 스팸필터 버튼 */}
                   <div className="px-3 py-1.5 border-t">
                     <div className="grid grid-cols-2 gap-2">
@@ -4602,17 +4861,21 @@ const campaignData = {
                     </div>
                     
                     {/* MMS 이미지 미리보기 */}
-                    {directMsgType === 'MMS' && mmsImages.length > 0 && (
-                      <div className="flex gap-2 mt-2 pt-2 border-t">
-                        {mmsImages.map((img, idx) => (
-                          <div key={idx} className="relative w-16 h-16">
-                            <img src={URL.createObjectURL(img)} alt="" className="w-full h-full object-cover rounded" />
-                            <button 
-                              onClick={() => setMmsImages(mmsImages.filter((_, i) => i !== idx))}
-                              className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white rounded-full text-xs"
-                            >×</button>
-                          </div>
-                        ))}
+                    {(directMsgType === 'MMS' || mmsUploadedImages.length > 0) && (
+                      <div className="mt-2 pt-2 border-t cursor-pointer hover:bg-amber-50/50 transition-colors rounded-lg p-2" onClick={() => setShowMmsUploadModal(true)}>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-semibold text-gray-600">🖼️ MMS 이미지</span>
+                          {mmsUploadedImages.length > 0 ? (
+                            <div className="flex items-center gap-1">
+                              {mmsUploadedImages.map((img, idx) => (
+                                <img key={idx} src={img.url} alt="" className="w-10 h-10 object-cover rounded border" crossOrigin="use-credentials" />
+                              ))}
+                              <span className="text-xs text-purple-600 ml-1">✏️ 수정</span>
+                            </div>
+                          ) : (
+                            <span className="text-xs text-amber-600">클릭하여 이미지 첨부 →</span>
+                          )}
+                        </div>
                       </div>
                     )}
                   </div>
@@ -4623,25 +4886,6 @@ const campaignData = {
                       <button onClick={() => setShowSpecialChars('direct')} className="px-2 py-1 text-xs bg-white border rounded hover:bg-gray-100">특수문자</button>
                       <button onClick={() => { loadTemplates(); setShowTemplateBox('direct'); }} className="px-2 py-1 text-xs bg-white border rounded hover:bg-gray-100">보관함</button>
                       <button onClick={() => { if (!directMessage.trim()) { setToast({show: true, type: 'error', message: '저장할 메시지를 먼저 입력해주세요.'}); setTimeout(() => setToast({show: false, type: 'error', message: ''}), 3000); return; } setTemplateSaveName(''); setShowTemplateSave('direct'); }} className="px-2 py-1 text-xs bg-white border rounded hover:bg-gray-100">문자저장</button>
-                      {directMsgType === 'MMS' && (
-                        <label className="px-2 py-1 text-xs bg-white border rounded hover:bg-gray-100 cursor-pointer">
-                          이미지
-                          <input 
-                            type="file" 
-                            accept="image/*" 
-                            multiple 
-                            className="hidden"
-                            onChange={(e) => {
-                              const files = Array.from(e.target.files || []);
-                              if (mmsImages.length + files.length > 3) {
-                                alert('이미지는 최대 3개까지 첨부 가능합니다.');
-                                return;
-                              }
-                              setMmsImages([...mmsImages, ...files]);
-                            }}
-                          />
-                        </label>
-                      )}
                     </div>
                     <span className="text-xs text-gray-500 whitespace-nowrap">
                       <span className={`font-bold ${messageBytes > maxBytes ? 'text-red-500' : 'text-emerald-600'}`}>{messageBytes}</span>/{maxBytes}byte
@@ -6199,6 +6443,14 @@ const campaignData = {
                       <span className="text-sm font-bold text-orange-700">{directSubject}</span>
                     </div>
                   )}
+                  {/* MMS 이미지 */}
+                  {mmsUploadedImages.length > 0 && (
+                    <div className="shrink-0">
+                      {mmsUploadedImages.map((img, idx) => (
+                        <img key={idx} src={img.url} alt="" className="w-full h-auto max-h-[140px] object-cover" crossOrigin="use-credentials" />
+                      ))}
+                    </div>
+                  )}
                   {/* 메시지 영역 - 스크롤 */}
                   <div className="flex-1 overflow-y-auto p-3 bg-gradient-to-b from-emerald-50/30 to-white">
                     <div className="flex gap-2">
@@ -6239,6 +6491,13 @@ const campaignData = {
               </div>
             </div>
             
+            {/* MMS 이미지 안내 */}
+            {mmsUploadedImages.length > 0 && (
+              <div className="mx-6 mb-2 p-3 bg-amber-50 rounded-lg text-xs text-amber-700 text-center">
+                ⚠️ 실제 수신 화면은 이통사 및 휴대폰 기종에 따라 다르게 보일 수 있습니다
+              </div>
+            )}
+
             {/* 치환 안내 */}
             {(directMessage.includes('%이름%') || directMessage.includes('%기타') || directMessage.includes('%등급%') || directMessage.includes('%지역%') || directMessage.includes('%구매금액%') || directMessage.includes('%회신번호%')) && (
               <div className="mx-6 mb-4 p-3 bg-blue-50 rounded-lg text-xs text-blue-700 text-center">

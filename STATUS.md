@@ -1367,11 +1367,33 @@ POST /api/sync/purchases   ← 구매내역 벌크 INSERT (배치 최대 1000건
 - [x] 문자저장 → 보관함 저장 / 보관함 → 목록 조회 + 적용 + 삭제
 - [x] 서버 배포 완료
 
+**고객 DB 삭제 기능 (2026-02-12)**
+- [x] 백엔드 DELETE API 3개: 개별 삭제, 선택 삭제(bulk-delete), 전체 삭제(delete-all)
+- [x] 권한 분리: 서비스 사용자 ❌ / 고객사 관리자 개별+선택 / 슈퍼관리자 전체 포함 전부
+- [x] 연관 데이터 CASCADE 삭제 (purchases, consents)
+- [x] audit_logs 감사 로그 기록 (삭제 유형, 건수, 대상 정보)
+- [x] 슈퍼관리자 companyId 오버라이드 (다른 회사 고객 조회/삭제 가능)
+- [x] 고객사 관리자 "고객DB" 탭 신규 (CustomersTab.tsx, 25건 페이지네이션, 체크박스 선택/삭제)
+- [x] 슈퍼관리자 고객사 수정 모달 "고객DB" 탭 신규 (목록 조회 + 개별/선택/전체 삭제)
+- [x] 전체 삭제: 회사명 직접 입력 확인 모달 (슈퍼관리자만)
+- [x] company-frontend client.ts에 customersApi 추가 (list, deleteOne, bulkDelete)
+- [x] Dashboard.tsx department 타입 에러 수정 (as any 캐스팅)
+- [x] 서버 배포 완료
+
 ### 🔲 진행 예정 작업
 
-**직원 버그 리포트 3차 — 신규 기능 (미정)**
-- [ ] 고객 DB 삭제 기능 (개별/선택/전체 — API + UI)
-- [ ] MMS 이미지 삽입 기능
+**MMS 이미지 삽입 기능 (다음 세션 예정)**
+- [ ] 백엔드: 이미지 업로드 API (multer, QTmsg 규격 검증 — 파일형식/용량/해상도)
+- [ ] 백엔드: campaigns.ts MMS 발송 분기 (msg_type='M', file_name1 경로 설정, cost_per_mms 단가 반영)
+- [ ] 백엔드: 업로드 이미지 → 5개 Agent 공유 경로 저장 (서버 파일시스템)
+- [ ] 프론트: MmsImageUpload 공통 컴포넌트 (업로드 + 미리보기 + 삭제/교체)
+- [ ] 프론트: AI 타겟발송에 이미지 업로드 추가 (MMS 유형 선택 시 활성화)
+- [ ] 프론트: 직접발송에 이미지 업로드 추가
+- [ ] 프론트: SMS→LMS→MMS 자동전환 로직 확장 (이미지 첨부 시 자동 MMS)
+- [ ] 프론트: MMS 미리보기 (이미지+텍스트 레이아웃, "실제 수신 화면과 다를 수 있습니다" 안내)
+- [ ] 오솔링 불필요 — QTmsg file_name1에 규격 맞는 이미지 경로만 설정하면 Agent가 처리
+- 필요 파일: campaigns.ts, Dashboard.tsx, QTmsg 이미지 규격 문서
+- 예상: 2세션
 
 **선불 요금제 Phase 1-B~2**
 - [ ] Phase 1-B: 토스페이먼츠 PG 연동 (카드결제/가상계좌 충전)

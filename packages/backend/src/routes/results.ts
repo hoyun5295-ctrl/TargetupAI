@@ -61,7 +61,7 @@ router.get('/summary', async (req: Request, res: Response) => {
       return res.status(403).json({ error: '권한이 필요합니다.' });
     }
 
-    const { from, to } = req.query;
+    const { from, to, fromDate, toDate } = req.query;
     const yearMonth = String(from || new Date().toISOString().slice(0, 7).replace('-', ''));
 
     const userId = req.user?.userId;
@@ -75,21 +75,28 @@ router.get('/summary', async (req: Request, res: Response) => {
         SUM(success_count) as total_success,
         SUM(fail_count) as total_fail
        FROM campaigns 
-       WHERE company_id = $1 
-       AND created_at >= $2::date 
-       AND created_at < ($2::date + interval '1 month')`;
+       WHERE company_id = $1`;
     
-    const summaryParams: any[] = [companyId, `${yearMonth.slice(0,4)}-${yearMonth.slice(4,6)}-01`];
+    const summaryParams: any[] = [companyId];
+
+    // 일자 범위 필터 (fromDate/toDate 우선, 없으면 월 단위)
+    if (fromDate && toDate) {
+      summaryQuery += ` AND created_at >= $2::date AND created_at < ($3::date + interval '1 day')`;
+      summaryParams.push(String(fromDate), String(toDate));
+    } else {
+      summaryQuery += ` AND created_at >= $2::date AND created_at < ($2::date + interval '1 month')`;
+      summaryParams.push(`${yearMonth.slice(0,4)}-${yearMonth.slice(4,6)}-01`);
+    }
     
     // 일반 사용자는 본인 캠페인만
     if (userType === 'company_user') {
-      summaryQuery += ` AND created_by = $3`;
+      summaryQuery += ` AND created_by = $${summaryParams.length + 1}`;
       summaryParams.push(userId);
     }
 
     // 고객사 관리자: 특정 사용자 필터
     if (userType === 'company_admin' && req.query.filter_user_id) {
-      summaryQuery += ` AND created_by = $3`;
+      summaryQuery += ` AND created_by = $${summaryParams.length + 1}`;
       summaryParams.push(req.query.filter_user_id);
     }
     
@@ -139,7 +146,7 @@ router.get('/campaigns', async (req: Request, res: Response) => {
       return res.status(403).json({ error: '권한이 필요합니다.' });
     }
 
-    const { from, to, channel, page = 1, limit = 20 } = req.query;
+    const { from, to, channel, page = 1, limit = 20, fromDate, toDate } = req.query;
     const offset = (Number(page) - 1) * Number(limit);
 
     const userId = req.user?.userId;
@@ -161,14 +168,21 @@ router.get('/campaigns', async (req: Request, res: Response) => {
       params.push(req.query.filter_user_id);
     }
 
-    // 기간 필터
-    if (from) {
+    // 기간 필터 (fromDate/toDate 일자 범위 우선, 없으면 from/to 월 단위)
+    if (fromDate && toDate) {
       whereClause += ` AND created_at >= $${paramIndex++}::date`;
-      params.push(`${String(from).slice(0,4)}-${String(from).slice(4,6)}-01`);
-    }
-    if (to) {
-      whereClause += ` AND created_at < ($${paramIndex++}::date + interval '1 month')`;
-      params.push(`${String(to).slice(0,4)}-${String(to).slice(4,6)}-01`);
+      params.push(String(fromDate));
+      whereClause += ` AND created_at < ($${paramIndex++}::date + interval '1 day')`;
+      params.push(String(toDate));
+    } else {
+      if (from) {
+        whereClause += ` AND created_at >= $${paramIndex++}::date`;
+        params.push(`${String(from).slice(0,4)}-${String(from).slice(4,6)}-01`);
+      }
+      if (to) {
+        whereClause += ` AND created_at < ($${paramIndex++}::date + interval '1 month')`;
+        params.push(`${String(to).slice(0,4)}-${String(to).slice(4,6)}-01`);
+      }
     }
 
     // 채널 필터
