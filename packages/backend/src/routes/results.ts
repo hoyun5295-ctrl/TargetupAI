@@ -4,6 +4,53 @@ import { authenticate } from '../middlewares/auth';
 
 const router = Router();
 
+// SMS 멀티테이블 설정 (campaigns.ts와 동일)
+const SMS_TABLES = (process.env.SMS_TABLES || 'SMSQ_SEND').split(',').map(t => t.trim());
+
+async function smsQueryAll(sql: string, params: any[]): Promise<any[]> {
+  let all: any[] = [];
+  for (const t of SMS_TABLES) {
+    const rows = await mysqlQuery(sql.replace(/SMSQ_SEND/g, t), params) as any[];
+    all = all.concat(rows);
+  }
+  return all;
+}
+
+async function smsCountAllWhere(whereClause: string, params: any[]): Promise<number> {
+  let total = 0;
+  for (const t of SMS_TABLES) {
+    const rows = await mysqlQuery(`SELECT COUNT(*) as cnt FROM ${t} ${whereClause}`, params) as any[];
+    total += parseInt(rows[0]?.cnt || '0');
+  }
+  return total;
+}
+
+async function smsSelectAllWhere(selectFields: string, whereClause: string, params: any[], suffix?: string): Promise<any[]> {
+  let all: any[] = [];
+  for (const t of SMS_TABLES) {
+    const rows = await mysqlQuery(`SELECT ${selectFields} FROM ${t} ${whereClause} ${suffix || ''}`, params) as any[];
+    all = all.concat(rows);
+  }
+  return all;
+}
+
+async function smsAggAllWhere(selectFields: string, whereClause: string, params: any[]): Promise<any> {
+  const results: any[] = [];
+  for (const t of SMS_TABLES) {
+    const rows = await mysqlQuery(`SELECT ${selectFields} FROM ${t} ${whereClause}`, params) as any[];
+    results.push(rows[0]);
+  }
+  // 숫자 필드 합산
+  const merged: any = {};
+  for (const row of results) {
+    if (!row) continue;
+    for (const key of Object.keys(row)) {
+      merged[key] = (merged[key] || 0) + (parseInt(row[key]) || 0);
+    }
+  }
+  return merged;
+}
+
 router.use(authenticate);
 
 // GET /api/v1/results/summary - 요약 + 비용
@@ -202,13 +249,18 @@ router.get('/campaigns/:id', async (req: Request, res: Response) => {
     let carrierStats: Record<string, number> = {};
     
     if (queryIds.length > 0) {
-      // 실패사유별 집계
-      const errorResult = await mysqlQuery(
-        `SELECT status_code, COUNT(*) as cnt FROM SMSQ_SEND 
-         WHERE app_etc1 IN (${queryIds.map(() => '?').join(',')})
-         GROUP BY status_code`,
-        queryIds
-      ) as any[];
+      // 실패사유별 집계 (멀티테이블 합산)
+      const errorResult = await smsSelectAllWhere(
+        'status_code, COUNT(*) as cnt',
+        `WHERE app_etc1 IN (${queryIds.map(() => '?').join(',')})`,
+        queryIds,
+        'GROUP BY status_code'
+      );
+      // 같은 status_code 합산
+      const errorAgg: Record<number, number> = {};
+      errorResult.forEach((row: any) => {
+        errorAgg[row.status_code] = (errorAgg[row.status_code] || 0) + parseInt(row.cnt);
+      });
 
       // status_code 매핑
       const statusCodeMap: Record<number, string> = {
@@ -229,23 +281,27 @@ router.get('/campaigns/:id', async (req: Request, res: Response) => {
         9999: '기타 오류',
       };
 
-      errorResult.forEach((row: any) => {
-        const code = row.status_code;
+      Object.entries(errorAgg).forEach(([codeStr, cnt]) => {
+        const code = parseInt(codeStr);
         const label = statusCodeMap[code] || `오류 코드 ${code}`;
-        // 성공 코드는 제외
         if (![6, 1000, 1800, 100].includes(code)) {
-          errorStats[label] = (errorStats[label] || 0) + parseInt(row.cnt);
+          errorStats[label] = (errorStats[label] || 0) + cnt;
         }
       });
 
-      // 통신사별 집계
-      const carrierResult = await mysqlQuery(
-        `SELECT mob_company, COUNT(*) as cnt FROM SMSQ_SEND 
-         WHERE app_etc1 IN (${queryIds.map(() => '?').join(',')})
-         AND status_code IN (6, 1000, 1800)
-         GROUP BY mob_company`,
-        queryIds
-      ) as any[];
+      // 통신사별 집계 (멀티테이블 합산)
+      const carrierResult = await smsSelectAllWhere(
+        'mob_company, COUNT(*) as cnt',
+        `WHERE app_etc1 IN (${queryIds.map(() => '?').join(',')}) AND status_code IN (6, 1000, 1800)`,
+        queryIds,
+        'GROUP BY mob_company'
+      );
+      // 같은 통신사 합산
+      const carrierAgg: Record<string, number> = {};
+      carrierResult.forEach((row: any) => {
+        const key = row.mob_company || '';
+        carrierAgg[key] = (carrierAgg[key] || 0) + parseInt(row.cnt);
+      });
 
       const carrierMap: Record<string, string> = {
         '11': 'SKT',
@@ -259,10 +315,9 @@ router.get('/campaigns/:id', async (req: Request, res: Response) => {
         'LGT': 'LG U+',
       };
 
-      carrierResult.forEach((row: any) => {
-        const carrier = row.mob_company;
+      Object.entries(carrierAgg).forEach(([carrier, cnt]) => {
         const label = carrierMap[carrier] || carrier || '알 수 없음';
-        carrierStats[label] = (carrierStats[label] || 0) + parseInt(row.cnt);
+        carrierStats[label] = (carrierStats[label] || 0) + cnt;
       });
     }
 
@@ -328,23 +383,17 @@ router.get('/campaigns/:id/messages', async (req: Request, res: Response) => {
       whereClause += ` AND status_code NOT IN (6, 1000, 1800, 100)`;
     }
 
-    // 총 건수 조회
-    const countResult = await mysqlQuery(
-      `SELECT COUNT(*) as total FROM SMSQ_SEND ${whereClause}`,
-      params
-    ) as any[];
-    const total = countResult[0]?.total || 0;
+    // 총 건수 조회 (멀티테이블 합산)
+    const total = await smsCountAllWhere(whereClause, params);
 
-    const messages = await mysqlQuery(
-      `SELECT 
-        seqno, dest_no, call_back, msg_type, msg_contents, status_code, mob_company,
-        sendreq_time, mobsend_time, repmsg_recvtm
-       FROM SMSQ_SEND 
-       ${whereClause}
-       ORDER BY seqno DESC
-       LIMIT ? OFFSET ?`,
-      [...params, Number(limit), offset]
+    // 전체 테이블에서 조회 후 정렬/페이지네이션 (메모리)
+    const allMessages = await smsSelectAllWhere(
+      'seqno, dest_no, call_back, msg_type, msg_contents, status_code, mob_company, sendreq_time, mobsend_time, repmsg_recvtm',
+      whereClause,
+      params
     );
+    allMessages.sort((a: any, b: any) => b.seqno - a.seqno);
+    const messages = allMessages.slice(offset, offset + Number(limit));
 
     return res.json({
       messages,
@@ -372,11 +421,12 @@ router.get('/campaigns/:id/export', async (req: Request, res: Response) => {
     );
     if (campaignResult.rows.length === 0) return res.status(404).json({ error: '캠페인을 찾을 수 없습니다.' });
 
-    const messages = await mysqlQuery(
-      `SELECT seqno, dest_no, call_back, msg_type, msg_contents, status_code, mob_company, sendreq_time, mobsend_time, repmsg_recvtm
-       FROM SMSQ_SEND WHERE app_etc1 = ? ORDER BY seqno`,
+    const messages = await smsSelectAllWhere(
+      'seqno, dest_no, call_back, msg_type, msg_contents, status_code, mob_company, sendreq_time, mobsend_time, repmsg_recvtm',
+      'WHERE app_etc1 = ?',
       [id]
-    ) as any[];
+    );
+    messages.sort((a: any, b: any) => a.seqno - b.seqno);
 
     const statusMap: Record<number, string> = {
       6:'SMS성공', 1000:'LMS성공', 1800:'카카오성공', 100:'대기',

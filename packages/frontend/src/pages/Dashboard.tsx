@@ -438,6 +438,7 @@ export default function Dashboard() {
   const [selectedChannel, setSelectedChannel] = useState('SMS');
   const [showLmsConfirm, setShowLmsConfirm] = useState(false);
   const [pendingBytes, setPendingBytes] = useState(0);
+  const [smsOverrideAccepted, setSmsOverrideAccepted] = useState(false);
   const [showSmsConvert, setShowSmsConvert] = useState<{show: boolean, from: 'direct' | 'target', currentBytes: number, smsBytes: number, count: number}>({show: false, from: 'direct', currentBytes: 0, smsBytes: 0, count: 0});
   const [splitEnabled, setSplitEnabled] = useState(false);
   const [splitCount, setSplitCount] = useState<number>(1000);
@@ -789,6 +790,8 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
 };
   // 바이트 초과 시 자동 LMS 전환 (SMS→LMS만, LMS→SMS 복귀는 수동)
   useEffect(() => {
+    // 메시지 변경 시 오버라이드 리셋
+    setSmsOverrideAccepted(false);
     // 자동입력 변수를 최대 길이 값으로 치환
     const directVarMap: Record<string, string> = {
       '%이름%': 'name', '%기타1%': 'extra1', '%기타2%': 'extra2', '%기타3%': 'extra3',
@@ -816,6 +819,7 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
   // 타겟발송 메시지 실시간 바이트 체크
   useEffect(() => {
     if (!showTargetSend) return;
+    setSmsOverrideAccepted(false);
     // 자동입력 변수를 최대 길이 값으로 치환
     const targetVarMap: Record<string, string> = {
       '%이름%': 'name', '%등급%': 'grade', '%지역%': 'region', '%구매금액%': 'total_purchase_amount',
@@ -4155,7 +4159,7 @@ const campaignData = {
                         const msgBytes = calculateBytes(fullMsg);
 
                         // SMS인데 90바이트 초과 시 예쁜 모달로 전환 안내
-                        if (targetMsgType === 'SMS' && msgBytes > 90) {
+                        if (targetMsgType === 'SMS' && msgBytes > 90 && !smsOverrideAccepted) {
                           setPendingBytes(msgBytes);
                           setShowLmsConfirm(true);
                           return;
@@ -4741,6 +4745,13 @@ const campaignData = {
                         }
                         if ((directMsgType === 'LMS' || directMsgType === 'MMS') && !directSubject.trim()) {
                           alert('제목을 입력해주세요');
+                          return;
+                        }
+
+                        // SMS 바이트 초과 시 LMS 전환 모달
+                        if (directMsgType === 'SMS' && messageBytes > 90 && !smsOverrideAccepted) {
+                          setPendingBytes(messageBytes);
+                          setShowLmsConfirm(true);
                           return;
                         }
 
@@ -5673,6 +5684,7 @@ const campaignData = {
                 ) : (
                   <button
                     onClick={() => {
+                      setSmsOverrideAccepted(true);
                       setShowLmsConfirm(false);
                     }}
                     className="flex-1 py-3 border-2 border-amber-300 rounded-lg text-amber-700 font-medium hover:bg-amber-50"

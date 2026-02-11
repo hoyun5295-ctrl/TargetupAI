@@ -221,7 +221,8 @@ router.put('/companies/:id', authenticate, requireSuperAdmin, async (req: Reques
     costPerSms, costPerLms, costPerMms, costPerKakao,
     storeCodeList,
     businessNumber, ceoName, businessType, businessItem, address,
-    allowCallbackSelfRegister, maxUsers, sessionTimeoutMinutes
+    allowCallbackSelfRegister, maxUsers, sessionTimeoutMinutes,
+    approvalRequired, targetStrategy
   } = req.body;
   
   try {
@@ -235,11 +236,11 @@ router.put('/companies/:id', authenticate, requireSuperAdmin, async (req: Reques
           plan_id = COALESCE($6, plan_id),
           reject_number = COALESCE($7, reject_number),
           brand_name = COALESCE($8, brand_name),
-          send_hour_start = COALESCE($9, send_hour_start),
-          send_hour_end = COALESCE($10, send_hour_end),
-          daily_limit = COALESCE($11, daily_limit),
-          holiday_send = COALESCE($12, holiday_send),
-          duplicate_days = COALESCE($13, duplicate_days),
+          send_start_hour = COALESCE($9, send_start_hour),
+          send_end_hour = COALESCE($10, send_end_hour),
+          daily_limit_per_customer = COALESCE($11, daily_limit_per_customer),
+          holiday_send_allowed = COALESCE($12, holiday_send_allowed),
+          duplicate_prevention_days = COALESCE($13, duplicate_prevention_days),
           cost_per_sms = COALESCE($14, cost_per_sms),
           cost_per_lms = COALESCE($15, cost_per_lms),
           cost_per_mms = COALESCE($16, cost_per_mms),
@@ -253,10 +254,12 @@ router.put('/companies/:id', authenticate, requireSuperAdmin, async (req: Reques
           allow_callback_self_register = COALESCE($24, allow_callback_self_register),
           max_users = COALESCE($25, max_users),
           session_timeout_minutes = COALESCE($26, session_timeout_minutes),
+          approval_required = COALESCE($27, approval_required),
+          target_strategy = COALESCE($28, target_strategy),
           updated_at = NOW()
-      WHERE id = $27
+      WHERE id = $29
       RETURNING *
-    `, [companyName, contactName, contactEmail, contactPhone, status, planId, rejectNumber, brandName, sendHourStart, sendHourEnd, dailyLimit, holidaySend, duplicateDays, costPerSms, costPerLms, costPerMms, costPerKakao, storeCodeList ? JSON.stringify(storeCodeList) : null, businessNumber, ceoName, businessType, businessItem, address, allowCallbackSelfRegister !== undefined ? allowCallbackSelfRegister : null, maxUsers || null, sessionTimeoutMinutes || null, id]);
+    `, [companyName, contactName, contactEmail, contactPhone, status, planId, rejectNumber, brandName, sendHourStart, sendHourEnd, dailyLimit, holidaySend, duplicateDays, costPerSms, costPerLms, costPerMms, costPerKakao, storeCodeList ? JSON.stringify(storeCodeList) : null, businessNumber, ceoName, businessType, businessItem, address, allowCallbackSelfRegister !== undefined ? allowCallbackSelfRegister : null, maxUsers || null, sessionTimeoutMinutes || null, approvalRequired !== undefined ? approvalRequired : null, targetStrategy || null, id]);
     
     if (result.rows.length === 0) {
       return res.status(404).json({ error: '회사를 찾을 수 없습니다.' });

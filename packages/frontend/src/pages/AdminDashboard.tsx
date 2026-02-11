@@ -3522,7 +3522,7 @@ const handleApproveRequest = async (id: string) => {
                           className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none" />
                         <button type="button" disabled={editCompany.balanceAdjusting || !editCompany.balanceAdjustAmount || !editCompany.balanceAdjustReason}
                           onClick={async () => {
-                            setEditCompany({ ...editCompany, balanceAdjusting: true });
+                            setEditCompany(prev => ({ ...prev, balanceAdjusting: true }));
                             try {
                               const token = localStorage.getItem('token');
                               const res = await fetch(`/api/admin/companies/${editCompany.id}/balance-adjust`, {
@@ -3531,13 +3531,13 @@ const handleApproveRequest = async (id: string) => {
                               });
                               const data = await res.json();
                               if (res.ok) {
-                                setEditCompany({ ...editCompany, balance: data.balance, balanceAdjustAmount: '', balanceAdjustReason: '', balanceAdjusting: false });
+                                setEditCompany(prev => ({ ...prev, balance: data.balance, balanceAdjustAmount: '', balanceAdjustReason: '', balanceAdjusting: false }));
                                 setModal({ type: 'alert', title: '완료', message: data.message, variant: 'success' });
                               } else {
-                                setEditCompany({ ...editCompany, balanceAdjusting: false });
+                                setEditCompany(prev => ({ ...prev, balanceAdjusting: false }));
                                 setModal({ type: 'alert', title: '실패', message: data.error, variant: 'error' });
                               }
-                            } catch { setEditCompany({ ...editCompany, balanceAdjusting: false }); setModal({ type: 'alert', title: '오류', message: '잔액 조정 실패', variant: 'error' }); }
+                            } catch { setEditCompany(prev => ({ ...prev, balanceAdjusting: false })); setModal({ type: 'alert', title: '오류', message: '잔액 조정 실패', variant: 'error' }); }
                           }}
                           className={`w-full py-2.5 text-sm font-medium rounded-lg transition-colors disabled:opacity-50 ${
                             editCompany.balanceAdjustType === 'charge' ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'bg-red-600 hover:bg-red-700 text-white'

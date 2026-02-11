@@ -80,7 +80,7 @@ router.post('/login', async (req: Request, res: Response) => {
       `SELECT u.*, u.must_change_password, c.name as company_name, c.id as company_code
        FROM users u
        JOIN companies c ON u.company_id = c.id
-       WHERE u.login_id = $1 AND u.is_active = true`,
+       WHERE u.login_id = $1`,
       [loginId]
     );
 
@@ -94,6 +94,22 @@ router.post('/login', async (req: Request, res: Response) => {
     }
 
     const user = result.rows[0];
+
+    // ===== 계정 상태 체크 =====
+    if (!user.is_active || user.status !== 'active') {
+      const statusReason = !user.is_active ? 'account_disabled' : `account_${user.status}`;
+      const statusMessages: Record<string, string> = {
+        'account_locked': '계정이 잠금 상태입니다. 관리자에게 문의해주세요.',
+        'account_dormant': '휴면 계정입니다. 관리자에게 문의해주세요.',
+        'account_disabled': '비활성화된 계정입니다. 관리자에게 문의해주세요.',
+      };
+      await query(
+        `INSERT INTO audit_logs (id, user_id, action, target_type, details, ip_address, user_agent, created_at)
+         VALUES (gen_random_uuid(), $1, 'login_blocked', 'user', $2, $3, $4, NOW())`,
+        [user.id, JSON.stringify({ loginId, reason: statusReason, status: user.status, companyName: user.company_name }), req.ip, req.headers['user-agent'] || '']
+      );
+      return res.status(403).json({ error: statusMessages[statusReason] || '로그인할 수 없는 계정입니다. 관리자에게 문의해주세요.' });
+    }
     const validPassword = await bcrypt.compare(password, user.password_hash);
 
     if (!validPassword) {
