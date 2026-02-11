@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+﻿import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { customersApi, campaignsApi, aiApi } from '../api/client';
 import { useAuthStore } from '../stores/authStore';
@@ -42,7 +42,7 @@ interface PlanInfo {
   is_trial_expired: boolean;
 }
 
-// Ķ���� ��� ������Ʈ
+// 캘린더 모달 컴포넌트
 function CalendarModal({ onClose, token }: { onClose: () => void; token: string | null }) {
   const [campaigns, setCampaigns] = useState<any[]>([]);
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -64,7 +64,7 @@ function CalendarModal({ onClose, token }: { onClose: () => void; token: string 
       const data = await res.json();
       setCampaigns(data.campaigns || []);
     } catch (error) {
-      console.error('ķ���� ��ȸ ����:', error);
+      console.error('캠페인 조회 에러:', error);
     }
   };
 
@@ -74,7 +74,7 @@ function CalendarModal({ onClose, token }: { onClose: () => void; token: string 
   const getCampaignsForDay = (day: number) => {
     const currentDay = new Date(year, month, day);
     return campaigns.filter((c) => {
-      // �̺�Ʈ �Ⱓ�� ��ȿ�ϸ� �� ���� üũ
+      // 이벤트 기간이 유효하면 그 범위 체크
       if (c.event_start_date && c.event_end_date) {
         const startStr = c.event_start_date.slice(0, 10); // "2026-02-09"
         const endStr = c.event_end_date.slice(0, 10);     // "2026-02-13"
@@ -83,7 +83,7 @@ function CalendarModal({ onClose, token }: { onClose: () => void; token: string 
           return currentStr >= startStr && currentStr <= endStr;
         }
       }
-      // ���ų� ��ȿ���� ������ scheduled_at �Ǵ� created_at ����
+      // 없거나 유효하지 않으면 scheduled_at 또는 created_at 기준
       const dateStr = c.scheduled_at || c.created_at;
       const date = new Date(dateStr);
       return date.getDate() === day && date.getMonth() === month && date.getFullYear() === year;
@@ -104,61 +104,61 @@ function CalendarModal({ onClose, token }: { onClose: () => void; token: string 
     cancelled: 'bg-gray-200 text-gray-400',
   };
   const statusLabels: Record<string, string> = {
-    draft: '�غ�', scheduled: '����', sending: '����', completed: '�Ϸ�', failed: '����', cancelled: '���',
+    draft: '준비', scheduled: '예약', sending: '진행', completed: '완료', failed: '실패', cancelled: '취소',
   };
 
-  // ��¥ Ŭ�� �ڵ鷯
+  // 날짜 클릭 핸들러
   const handleDateClick = (day: number) => {
     setSelectedDate(day);
-    setSelectedCampaign(null); // ķ���� ���� �ʱ�ȭ
+    setSelectedCampaign(null); // 캠페인 선택 초기화
   };
 
-  // ķ���� Ŭ�� �ڵ鷯
+  // 캠페인 클릭 핸들러
   const handleCampaignClick = (campaign: any, e: React.MouseEvent) => {
-    e.stopPropagation(); // ��¥ Ŭ�� �̺�Ʈ ���� ����
+    e.stopPropagation(); // 날짜 클릭 이벤트 전파 방지
     setSelectedCampaign(campaign);
   };
 
-  // ���õ� ��¥�� ķ���� ���
+  // 선택된 날짜의 캠페인 목록
   const selectedDateCampaigns = selectedDate ? getCampaignsForDay(selectedDate) : [];
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div className="bg-white rounded-xl shadow-2xl w-[900px] max-h-[650px] overflow-hidden">
-        {/* ��� */}
+        {/* 헤더 */}
         <div className="flex justify-between items-center p-4 border-b bg-gray-50">
-          <button onClick={() => setCurrentDate(new Date(year, month - 1, 1))} className="px-3 py-1 hover:bg-gray-200 rounded">��</button>
-          <h2 className="text-lg font-bold">{year}�� {month + 1}��</h2>
-          <button onClick={() => setCurrentDate(new Date(year, month + 1, 1))} className="px-3 py-1 hover:bg-gray-200 rounded">��</button>
-          <button onClick={onClose} className="ml-4 text-gray-500 hover:text-gray-700 text-xl">?</button>
+          <button onClick={() => setCurrentDate(new Date(year, month - 1, 1))} className="px-3 py-1 hover:bg-gray-200 rounded">←</button>
+          <h2 className="text-lg font-bold">{year}년 {month + 1}월</h2>
+          <button onClick={() => setCurrentDate(new Date(year, month + 1, 1))} className="px-3 py-1 hover:bg-gray-200 rounded">→</button>
+          <button onClick={onClose} className="ml-4 text-gray-500 hover:text-gray-700 text-xl">✕</button>
         </div>
 
         <div className="flex">
-          {/* Ķ���� */}
+          {/* 캘린더 */}
           <div className="flex-1 p-4">
-            {/* ���� ���� ���̵� */}
+            {/* 상태 색상 가이드 */}
             <div className="flex items-center gap-4 mb-3 pb-2 border-b text-xs">
-              <span className="text-gray-500">����:</span>
+              <span className="text-gray-500">상태:</span>
               <div className="flex items-center gap-1">
                 <span className="w-3 h-3 rounded bg-green-200"></span>
-                <span className="text-gray-600">�Ϸ�</span>
+                <span className="text-gray-600">완료</span>
               </div>
               <div className="flex items-center gap-1">
                 <span className="w-3 h-3 rounded bg-blue-200"></span>
-                <span className="text-gray-600">����</span>
+                <span className="text-gray-600">예약</span>
               </div>
               <div className="flex items-center gap-1">
                 <span className="w-3 h-3 rounded bg-gray-200"></span>
-                <span className="text-gray-600">���</span>
+                <span className="text-gray-600">취소</span>
               </div>
               <div className="flex items-center gap-1">
                 <span className="w-3 h-3 rounded bg-orange-200"></span>
-                <span className="text-gray-600">����</span>
+                <span className="text-gray-600">진행</span>
               </div>
             </div>
-            {/* ���� ��� - ���� ���� */}
+            {/* 요일 헤더 - 색상 적용 */}
             <div className="grid grid-cols-7 gap-1 mb-2">
-              {['��','��','ȭ','��','��','��','��'].map((d, idx) => (
+              {['일','월','화','수','목','금','토'].map((d, idx) => (
                 <div 
                   key={d} 
                   className={`text-center text-xs font-medium ${
@@ -169,7 +169,7 @@ function CalendarModal({ onClose, token }: { onClose: () => void; token: string 
                 </div>
               ))}
             </div>
-            {/* ��¥ �׸��� */}
+            {/* 날짜 그리드 */}
             <div className="grid grid-cols-7 gap-1">
               {blanks.map(i => <div key={`b-${i}`} className="h-20 bg-gray-50 rounded" />)}
               {days.map(day => {
@@ -208,7 +208,7 @@ function CalendarModal({ onClose, token }: { onClose: () => void; token: string 
                       isSelected ? 'border-purple-500 border-2 bg-purple-50' : 'border-gray-200'
                     }`}
                   >
-                    {/* ��¥ ���� - ���Ϻ� ���� */}
+                    {/* 날짜 숫자 - 요일별 색상 */}
                     <div className={`font-medium text-center ${
                       isToday ? 'text-blue-600' : 
                       dayOfWeek === 0 ? 'text-red-500' : 
@@ -216,7 +216,7 @@ function CalendarModal({ onClose, token }: { onClose: () => void; token: string 
                     }`}>
                       {day}
                     </div>
-                    {/* ķ���� ��� - ���� �� */}                    {/* ķ���� ��� - ���� �� */}
+                    {/* 캠페인 목록 - 연결 바 */}                    {/* 캠페인 목록 - 연결 바 */}
 {dayCampaigns.slice(0, 2).map(c => {
   const position = getEventPosition(c);
   const barMargin = position === 'start' ? '-mr-2' : position === 'end' ? '-ml-2' : position === 'middle' ? '-mx-2' : '';
@@ -241,7 +241,7 @@ function CalendarModal({ onClose, token }: { onClose: () => void; token: string 
   );
 })}
                     {dayCampaigns.length > 2 && (
-                      <div className="text-gray-400 mt-0.5 hover:text-purple-600">+{dayCampaigns.length - 2}�� ��</div>
+                      <div className="text-gray-400 mt-0.5 hover:text-purple-600">+{dayCampaigns.length - 2}개 더</div>
                     )}
                   </div>
                 );
@@ -249,52 +249,52 @@ function CalendarModal({ onClose, token }: { onClose: () => void; token: string 
             </div>
           </div>
 
-          {/* ���� �г� - ��¥ ���� �Ǵ� ķ���� �� */}
+          {/* 우측 패널 - 날짜 선택 또는 캠페인 상세 */}
           <div className="w-72 border-l bg-gray-50 flex flex-col max-h-[580px]">
             {selectedCampaign ? (
-              // ķ���� �� ����
+              // 캠페인 상세 보기
               <div className="p-4 overflow-y-auto flex-1">
                 <div className="flex justify-between items-start mb-4">
                   <h3 className="font-bold text-base leading-tight">{selectedCampaign.campaign_name}</h3>
-                  <button onClick={() => setSelectedCampaign(null)} className="text-gray-400 hover:text-gray-600 text-sm">?</button>
+                  <button onClick={() => setSelectedCampaign(null)} className="text-gray-400 hover:text-gray-600 text-sm">✕</button>
                 </div>
                 
                 <div className="space-y-3 text-sm">
-                  {/* ���� */}
+                  {/* 상태 */}
                   <div className="flex items-center gap-2">
-                    <span className="text-gray-500 w-16">����</span>
+                    <span className="text-gray-500 w-16">상태</span>
                     <span className={`px-2 py-0.5 rounded text-xs font-medium ${statusColors[selectedCampaign.status]}`}>
                       {statusLabels[selectedCampaign.status]}
                       {selectedCampaign.status === 'cancelled' && selectedCampaign.cancelled_by_type === 'super_admin' && (
-                        <span className="ml-1 text-red-500">(������)</span>
+                        <span className="ml-1 text-red-500">(관리자)</span>
                       )}
                     </span>
                   </div>
                   
-                  {/* ��� ���� (������ ��� ��) */}
+                  {/* 취소 사유 (관리자 취소 시) */}
                   {selectedCampaign.status === 'cancelled' && selectedCampaign.cancel_reason && (
                     <div className="flex items-start gap-2">
-                      <span className="text-gray-500 w-16">��һ���</span>
+                      <span className="text-gray-500 w-16">취소사유</span>
                       <span className="text-red-600 text-xs flex-1">{selectedCampaign.cancel_reason}</span>
                     </div>
                   )}
                   
-                  {/* ä�� */}
+                  {/* 채널 */}
                   <div className="flex items-center gap-2">
-                    <span className="text-gray-500 w-16">ä��</span>
+                    <span className="text-gray-500 w-16">채널</span>
                     <span className="font-medium">{selectedCampaign.message_type}</span>
                   </div>
                   
-                  {/* ��� */}
+                  {/* 대상 */}
                   <div className="flex items-center gap-2">
-                    <span className="text-gray-500 w-16">���</span>
-                    <span className="font-medium">{selectedCampaign.target_count?.toLocaleString()}��</span>
+                    <span className="text-gray-500 w-16">대상</span>
+                    <span className="font-medium">{selectedCampaign.target_count?.toLocaleString()}명</span>
                   </div>
                   
-                  {/* ����ð� */}
+                  {/* 예약시간 */}
                   {selectedCampaign.scheduled_at && (
                     <div className="flex items-center gap-2">
-                      <span className="text-gray-500 w-16">����</span>
+                      <span className="text-gray-500 w-16">예약</span>
                       <span className="font-medium text-blue-600">
                         {new Date(selectedCampaign.scheduled_at).toLocaleString('ko-KR', {
                           timeZone: 'Asia/Seoul', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
@@ -303,10 +303,10 @@ function CalendarModal({ onClose, token }: { onClose: () => void; token: string 
                     </div>
                   )}
                   
-                  {/* �߼۽ð� */}
+                  {/* 발송시간 */}
                   {selectedCampaign.sent_at && (
                     <div className="flex items-center gap-2">
-                      <span className="text-gray-500 w-16">�߼�</span>
+                      <span className="text-gray-500 w-16">발송</span>
                       <span className="font-medium">
                         {new Date(selectedCampaign.sent_at).toLocaleString('ko-KR', {
                           timeZone: 'Asia/Seoul', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
@@ -315,59 +315,59 @@ function CalendarModal({ onClose, token }: { onClose: () => void; token: string 
                     </div>
                   )}
                   
-                  {/* �޽��� �̸����� */}
+                  {/* 메시지 미리보기 */}
                   {selectedCampaign.message_content && (
                     <div className="pt-3 border-t">
-                      <div className="text-gray-500 mb-2">?? �޽���</div>
+                      <div className="text-gray-500 mb-2">💬 메시지</div>
                       <div className="bg-white rounded-lg p-3 text-xs text-gray-700 whitespace-pre-wrap border max-h-24 overflow-y-auto">
                         {selectedCampaign.message_content}
                       </div>
                     </div>
                   )}
                   
-                  {/* �߼� ��� */}
+                  {/* 발송 결과 */}
                   {(selectedCampaign.status === 'completed' || selectedCampaign.status === 'sending') && (
                     <div className="pt-3 border-t">
-                      <div className="text-gray-500 mb-2">?? �߼� ���</div>
+                      <div className="text-gray-500 mb-2">📊 발송 결과</div>
                       <div className="grid grid-cols-3 gap-2 text-center">
                         <div className="bg-white rounded p-2 border">
                           <div className="font-bold text-gray-700">{selectedCampaign.sent_count?.toLocaleString() || 0}</div>
-                          <div className="text-xs text-gray-400">�߼�</div>
+                          <div className="text-xs text-gray-400">발송</div>
                         </div>
                         <div className="bg-green-50 rounded p-2 border border-green-200">
                           <div className="font-bold text-green-600">{selectedCampaign.success_count?.toLocaleString() || 0}</div>
-                          <div className="text-xs text-gray-400">����</div>
+                          <div className="text-xs text-gray-400">성공</div>
                         </div>
                         <div className="bg-red-50 rounded p-2 border border-red-200">
                           <div className="font-bold text-red-600">{selectedCampaign.fail_count?.toLocaleString() || 0}</div>
-                          <div className="text-xs text-gray-400">����</div>
+                          <div className="text-xs text-gray-400">실패</div>
                         </div>
                       </div>
                     </div>
                   )}
                   
-                  {/* ��ư */}
+                  {/* 버튼 */}
                   <div className="pt-4 space-y-2">
                     <button className="w-full py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 text-sm font-medium transition-colors">
-                      ?? ����
+                      ✏️ 편집
                     </button>
                     <button className="w-full py-2 border border-gray-300 rounded-lg hover:bg-gray-100 text-sm font-medium transition-colors">
-                      ?? ����
+                      📋 복제
                     </button>
                   </div>
                 </div>
               </div>
             ) : selectedDate ? (
-              // ��¥ ���� - ķ���� ���
+              // 날짜 선택 - 캠페인 목록
               <div className="p-4 overflow-y-auto flex-1">
                 <div className="flex justify-between items-center mb-4">
                   <h3 className="font-bold">
-                    {month + 1}�� {selectedDate}��
+                    {month + 1}월 {selectedDate}일
                     <span className="text-gray-400 font-normal ml-1">
-                      ({['��','��','ȭ','��','��','��','��'][new Date(year, month, selectedDate).getDay()]})
+                      ({['일','월','화','수','목','금','토'][new Date(year, month, selectedDate).getDay()]})
                     </span>
                   </h3>
-                  <button onClick={() => setSelectedDate(null)} className="text-gray-400 hover:text-gray-600 text-sm">?</button>
+                  <button onClick={() => setSelectedDate(null)} className="text-gray-400 hover:text-gray-600 text-sm">✕</button>
                 </div>
                 
                 {selectedDateCampaigns.length > 0 ? (
@@ -384,24 +384,24 @@ function CalendarModal({ onClose, token }: { onClose: () => void; token: string 
                             {statusLabels[c.status]}
                           </span>
                           <span className="text-gray-400">{c.message_type}</span>
-                          <span className="text-gray-400">{c.target_count?.toLocaleString()}��</span>
+                          <span className="text-gray-400">{c.target_count?.toLocaleString()}명</span>
                         </div>
                       </div>
                     ))}
                   </div>
                 ) : (
                   <div className="text-center text-gray-400 py-8">
-                    <div className="text-3xl mb-2">??</div>
-                    <p>�� ��¥�� ķ������ �����ϴ�</p>
+                    <div className="text-3xl mb-2">📭</div>
+                    <p>이 날짜에 캠페인이 없습니다</p>
                   </div>
                 )}
               </div>
             ) : (
-              // �⺻ ����
+              // 기본 상태
               <div className="flex-1 flex items-center justify-center text-center text-gray-400 p-4">
                 <div>
-                  <div className="text-4xl mb-3">??</div>
-                  <p className="text-sm">��¥�� ķ������<br/>�������ּ���</p>
+                  <div className="text-4xl mb-3">📅</div>
+                  <p className="text-sm">날짜나 캠페인을<br/>선택해주세요</p>
                 </div>
               </div>
             )}
@@ -448,25 +448,25 @@ export default function Dashboard() {
   const [successCampaignId, setSuccessCampaignId] = useState('');
   const [selectedMessage, setSelectedMessage] = useState<any>(null);
   const [sendTimeOption, setSendTimeOption] = useState<'ai' | 'now' | 'custom'>('now');
-  const [successSendInfo, setSuccessSendInfo] = useState<string>('');  // ���� ��޿� �߼� ����
+  const [successSendInfo, setSuccessSendInfo] = useState<string>('');  // 성공 모달용 발송 정보
   const [customSendTime, setCustomSendTime] = useState('');
   const [testSending, setTestSending] = useState(false);
   const [testCooldown, setTestCooldown] = useState(false);
   const [testSentResult, setTestSentResult] = useState<string | null>(null);
   const [showResults, setShowResults] = useState(false);
   const [showCustomerDB, setShowCustomerDB] = useState(false);
-  // 5�� ī�� ��� state
+  // 5개 카드 모달 state
   const [showRecentCampaigns, setShowRecentCampaigns] = useState(false);
   const [showFileUpload, setShowFileUpload] = useState(false);
   const [showDirectTargeting, setShowDirectTargeting] = useState(false);
-  // ���� Ÿ�� ���� ���� state
-   // ���� Ÿ�� ���� ���� state
+  // 직접 타겟 설정 관련 state
+   // 직접 타겟 설정 관련 state
    const [targetPhoneField, setTargetPhoneField] = useState('phone');
    const [targetSmsOptIn, setTargetSmsOptIn] = useState(true);
    const [targetCount, setTargetCount] = useState(0);
    const [targetCountLoading, setTargetCountLoading] = useState(false);
    const [targetSchemaFields, setTargetSchemaFields] = useState<{name: string, label: string, type: string}[]>([]);
-   // ���� ���� state
+   // 동적 필터 state
    const [enabledFields, setEnabledFields] = useState<any[]>([]);
    const [targetFilters, setTargetFilters] = useState<Record<string, string>>({});
    const [filterOptions, setFilterOptions] = useState<Record<string, string[]>>({});
@@ -475,7 +475,7 @@ export default function Dashboard() {
   const [showInsights, setShowInsights] = useState(false);
   const [showTodayStats, setShowTodayStats] = useState(false);
   const [showScheduled, setShowScheduled] = useState(false);
-  // ��޿� ������
+  // 모달용 데이터
   const [recentCampaigns, setRecentCampaigns] = useState<any[]>([]);
   const [scheduledCampaigns, setScheduledCampaigns] = useState<any[]>([]);
   const [selectedScheduled, setSelectedScheduled] = useState<any>(null);
@@ -491,7 +491,7 @@ export default function Dashboard() {
   const [editSubject, setEditSubject] = useState('');
   const [messageEditProgress, setMessageEditProgress] = useState(0);
   const [messageEditing, setMessageEditing] = useState(false);
-  // ���� ���ε� ����
+  // 파일 업로드 관련
   const [uploadedFile, setUploadedFile] = useState<any>(null);
   const [fileHeaders, setFileHeaders] = useState<string[]>([]);
   const [filePreview, setFilePreview] = useState<any[]>([]);
@@ -504,7 +504,7 @@ export default function Dashboard() {
   const [uploadProgress, setUploadProgress] = useState({ total: 0, processed: 0, percent: 0 });
   const [showDirectSend, setShowDirectSend] = useState(false);
   const [showTargetSend, setShowTargetSend] = useState(false);
-  // ����Ÿ�ٹ߼� ���� state
+  // 직접타겟발송 관련 state
   const [targetMsgType, setTargetMsgType] = useState<'SMS' | 'LMS' | 'MMS'>('SMS');
   const [targetSubject, setTargetSubject] = useState('');
   const [targetMessage, setTargetMessage] = useState('');
@@ -513,7 +513,7 @@ export default function Dashboard() {
   const [targetListPage, setTargetListPage] = useState(0);
   const [targetListSearch, setTargetListSearch] = useState('');
   const [showTargetPreview, setShowTargetPreview] = useState(false);
-  // �����߼� ���� state
+  // 직접발송 관련 state
   const [directMsgType, setDirectMsgType] = useState<'SMS' | 'LMS' | 'MMS'>('SMS');
   const [directSubject, setDirectSubject] = useState('');
   const [directMessage, setDirectMessage] = useState('');
@@ -522,7 +522,7 @@ export default function Dashboard() {
   const [reserveEnabled, setReserveEnabled] = useState(false);
   const [reserveDateTime, setReserveDateTime] = useState('');
   const [showReservePicker, setShowReservePicker] = useState(false);
-  // �����߼� ���� �Լ�
+  // 직접발송 실행 함수
   const executeDirectSend = async () => {
     setDirectSending(true);
     try {
@@ -561,7 +561,7 @@ export default function Dashboard() {
           const balanceRes = await fetch('/api/balance', { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
           if (balanceRes.ok) setBalanceInfo(await balanceRes.json());
         }
-        // ��� ����, �Է� �ʵ常 �ʱ�ȭ
+        // 모달 유지, 입력 필드만 초기화
         setDirectMessage('');
         setDirectSubject('');
         setDirectRecipients([]);
@@ -575,7 +575,7 @@ export default function Dashboard() {
         setTimeout(() => setToast({show: false, type: 'error', message: ''}), 3000);
       }
     } catch (err) {
-      setToast({show: true, type: 'error', message: '�߼� ����'});
+      setToast({show: true, type: 'error', message: '발송 실패'});
       setTimeout(() => setToast({show: false, type: 'error', message: ''}), 3000);
     } finally {
       setDirectSending(false);
@@ -583,12 +583,12 @@ export default function Dashboard() {
     setSendConfirm({show: false, type: 'immediate', count: 0, unsubscribeCount: 0});
   };
   
-  // ����Ÿ������ �߼� �Լ�
+  // 직접타겟추출 발송 함수
   const executeTargetSend = async () => {
     setTargetSending(true);
     try {
       const token = localStorage.getItem('token');
-      // ���� ġȯ ó��
+      // 변수 치환 처리
       const recipientsWithMessage = targetRecipients.map((r: any) => ({
         phone: r.phone,
         name: r.name || '',
@@ -596,14 +596,14 @@ export default function Dashboard() {
         region: r.region || '',
         amount: r.total_purchase_amount || '',
         callback: r.callback || null,
-        message: (adTextEnabled ? '(����)' : '') + 
+        message: (adTextEnabled ? '(광고)' : '') + 
           targetMessage
-            .replace(/%�̸�%/g, r.name || '')
-            .replace(/%���%/g, r.grade || '')
-            .replace(/%����%/g, r.region || '')
-            .replace(/%���űݾ�%/g, r.total_purchase_amount || '')
-            .replace(/%ȸ�Ź�ȣ%/g, r.callback || '') +
-          (adTextEnabled ? (targetMsgType === 'SMS' ? `\n����ź�${optOutNumber.replace(/-/g, '')}` : `\n������Űź� ${formatRejectNumber(optOutNumber)}`) : '')
+            .replace(/%이름%/g, r.name || '')
+            .replace(/%등급%/g, r.grade || '')
+            .replace(/%지역%/g, r.region || '')
+            .replace(/%구매금액%/g, r.total_purchase_amount || '')
+            .replace(/%회신번호%/g, r.callback || '') +
+          (adTextEnabled ? (targetMsgType === 'SMS' ? `\n무료거부${optOutNumber.replace(/-/g, '')}` : `\n무료수신거부 ${formatRejectNumber(optOutNumber)}`) : '')
       }));
 
       const res = await fetch('/api/campaigns/direct-send', {
@@ -653,7 +653,7 @@ export default function Dashboard() {
         setTimeout(() => setToast({show: false, type: 'error', message: ''}), 3000);
       }
     } catch (err) {
-      setToast({show: true, type: 'error', message: '�߼� ����'});
+      setToast({show: true, type: 'error', message: '발송 실패'});
       setTimeout(() => setToast({show: false, type: 'error', message: ''}), 3000);
     } finally {
       setTargetSending(false);
@@ -661,22 +661,22 @@ export default function Dashboard() {
     setSendConfirm({show: false, type: 'immediate', count: 0, unsubscribeCount: 0});
   };
   
-  // MMS �̹��� (���� ���ε� ���)
+  // MMS 이미지 (서버 업로드 방식)
   const [mmsUploadedImages, setMmsUploadedImages] = useState<{serverPath: string; url: string; filename: string; size: number}[]>([]);
   const [mmsUploading, setMmsUploading] = useState(false);
   const [showMmsUploadModal, setShowMmsUploadModal] = useState(false);
 
-  // MMS �̹��� ���� ���� ���ε� �Լ�
+  // MMS 이미지 단일 슬롯 업로드 함수
   const handleMmsSlotUpload = async (file: File, slotIndex: number) => {
-    // ����: JPG��
+    // 검증: JPG만
     if (!file.name.toLowerCase().endsWith('.jpg') && !file.name.toLowerCase().endsWith('.jpeg')) {
-      setToast({ show: true, type: 'error', message: 'JPG ���ϸ� ���ε� �����մϴ� (PNG/GIF ������)' });
+      setToast({ show: true, type: 'error', message: 'JPG 파일만 업로드 가능합니다 (PNG/GIF 미지원)' });
       setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
       return;
     }
-    // ����: 300KB
+    // 검증: 300KB
     if (file.size > 300 * 1024) {
-      setToast({ show: true, type: 'error', message: `${(file.size / 1024).toFixed(0)}KB ? 300KB ���ϸ� �����մϴ�` });
+      setToast({ show: true, type: 'error', message: `${(file.size / 1024).toFixed(0)}KB — 300KB 이하만 가능합니다` });
       setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
       return;
     }
@@ -699,30 +699,30 @@ export default function Dashboard() {
           return updated;
         });
       } else {
-        setToast({ show: true, type: 'error', message: data.error || '���ε� ����' });
+        setToast({ show: true, type: 'error', message: data.error || '업로드 실패' });
         setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
       }
     } catch {
-      setToast({ show: true, type: 'error', message: '�̹��� ���ε� �� ���� �߻�' });
+      setToast({ show: true, type: 'error', message: '이미지 업로드 중 오류 발생' });
       setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
     } finally {
       setMmsUploading(false);
     }
   };
 
-  // MMS �̹��� ���� ���ε� �Լ� �� ��� �������� ����
+  // MMS 이미지 서버 업로드 함수 → 모달 오픈으로 변경
   const handleMmsImageUpload = (files: FileList | null, sendType: 'ai' | 'target' | 'direct') => {
     setShowMmsUploadModal(true);
   };
 
-  // MMS �̹��� ���� �Լ� (���� ���)
+  // MMS 이미지 삭제 함수 (슬롯 기반)
   const handleMmsImageRemove = async (index: number) => {
     const img = mmsUploadedImages[index];
     if (img) {
       try {
         const token = localStorage.getItem('token');
         await fetch(img.url, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
-      } catch { /* ���� ���� �����ص� UI������ ���� */ }
+      } catch { /* 서버 삭제 실패해도 UI에서는 제거 */ }
     }
     setMmsUploadedImages(prev => prev.filter((_, i) => i !== index));
   };
@@ -759,40 +759,40 @@ export default function Dashboard() {
   const [useIndividualCallback, setUseIndividualCallback] = useState(false);
   const [sendConfirm, setSendConfirm] = useState<{show: boolean, type: 'immediate' | 'scheduled', count: number, unsubscribeCount: number, dateTime?: string, from?: 'direct' | 'target'}>({show: false, type: 'immediate', count: 0, unsubscribeCount: 0});
 
-  // ��ȭ��ȣ ������ �Լ�
+  // 전화번호 포맷팅 함수
   const formatPhoneNumber = (phone: string) => {
     if (!phone) return '';
     const cleaned = phone.replace(/\D/g, '');
     
-    // �޴��� 11�ڸ�: 010-XXXX-XXXX
+    // 휴대폰 11자리: 010-XXXX-XXXX
     if (cleaned.length === 11 && cleaned.startsWith('01')) {
       return `${cleaned.slice(0, 3)}-${cleaned.slice(3, 7)}-${cleaned.slice(7)}`;
     }
-    // �޴��� 10�ڸ� (����): 01X-XXX-XXXX
+    // 휴대폰 10자리 (구형): 01X-XXX-XXXX
     if (cleaned.length === 10 && cleaned.startsWith('01')) {
       return `${cleaned.slice(0, 3)}-${cleaned.slice(3, 6)}-${cleaned.slice(6)}`;
     }
-    // ���� 02 ������ȣ (9�ڸ�): 02-XXX-XXXX
+    // 서울 02 지역번호 (9자리): 02-XXX-XXXX
     if (cleaned.length === 9 && cleaned.startsWith('02')) {
       return `${cleaned.slice(0, 2)}-${cleaned.slice(2, 5)}-${cleaned.slice(5)}`;
     }
-    // ���� 02 ������ȣ (10�ڸ�): 02-XXXX-XXXX
+    // 서울 02 지역번호 (10자리): 02-XXXX-XXXX
     if (cleaned.length === 10 && cleaned.startsWith('02')) {
       return `${cleaned.slice(0, 2)}-${cleaned.slice(2, 6)}-${cleaned.slice(6)}`;
     }
-    // ��ǥ��ȣ 8�ڸ� (15XX, 16XX, 18XX): 1XXX-XXXX
+    // 대표번호 8자리 (15XX, 16XX, 18XX): 1XXX-XXXX
     if (cleaned.length === 8 && cleaned.startsWith('1')) {
       return `${cleaned.slice(0, 4)}-${cleaned.slice(4)}`;
     }
-    // ��Ÿ ������ȣ 10�ڸ�: 0XX-XXX-XXXX
+    // 기타 지역번호 10자리: 0XX-XXX-XXXX
     if (cleaned.length === 10 && cleaned.startsWith('0')) {
       return `${cleaned.slice(0, 3)}-${cleaned.slice(3, 6)}-${cleaned.slice(6)}`;
     }
-    // ��Ÿ ������ȣ 11�ڸ�: 0XX-XXXX-XXXX
+    // 기타 지역번호 11자리: 0XX-XXXX-XXXX
     if (cleaned.length === 11 && cleaned.startsWith('0')) {
       return `${cleaned.slice(0, 3)}-${cleaned.slice(3, 7)}-${cleaned.slice(7)}`;
     }
-    // �� �ܴ� ���� ��ȯ
+    // 그 외는 원본 반환
     return phone;
   };
   const [selectedRecipients, setSelectedRecipients] = useState<Set<number>>(new Set());
@@ -803,7 +803,7 @@ export default function Dashboard() {
   const [fileUploading, setFileUploading] = useState(false);
   const [columnMapping, setColumnMapping] = useState<{[key: string]: string | null}>({});
   const [mappingStep, setMappingStep] = useState<'upload' | 'mapping' | 'confirm'>('upload');
-  // Ÿ�� ����
+  // 타겟 필터
   const [filter, setFilter] = useState({
     gender: '',
     minAge: '',
@@ -812,10 +812,10 @@ export default function Dashboard() {
     smsOptIn: true,
   });
 
-  // Ÿ�� ���
+  // 타겟 결과
   const [targetResult, setTargetResult] = useState<any>(null);
 
-  // ķ���� ����
+  // 캠페인 설정
   const [campaign, setCampaign] = useState({
     campaignName: '',
     messageType: 'SMS',
@@ -823,7 +823,7 @@ export default function Dashboard() {
     isAd: false,
   });
 
-  // AI ���� ����
+  // AI 관련 상태
   const [aiLoading, setAiLoading] = useState(false);
   const [showPromptAlert, setShowPromptAlert] = useState(false);
   const [aiObjective, setAiObjective] = useState('');
@@ -831,80 +831,80 @@ export default function Dashboard() {
   const [aiMessages, setAiMessages] = useState<any[]>([]);
   const [showAiTarget, setShowAiTarget] = useState(false);
   const [showAiMessage, setShowAiMessage] = useState(false);
-  const [campaignContext, setCampaignContext] = useState(''); // Ÿ�١�޽��� �����
+  const [campaignContext, setCampaignContext] = useState(''); // 타겟→메시지 연결용
 
   useEffect(() => {
     loadStats();
     loadRecentCampaigns();
     loadScheduledCampaigns();
   }, []);
-// �ڵ��Է� ������ ������ �� ���� �� ������ ġȯ�Ͽ� �ִ� ����Ʈ �޽��� ����
+// 자동입력 변수를 수신자 중 가장 긴 값으로 치환하여 최대 바이트 메시지 생성
 const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<string, string>) => {
   let result = msg;
-  // variableMap: { '%�̸�%': 'name', '%���%': 'grade', ... }
+  // variableMap: { '%이름%': 'name', '%등급%': 'grade', ... }
   Object.entries(variableMap).forEach(([variable, field]) => {
     if (!result.includes(variable)) return;
-    // ������ �� �ش� �ʵ��� ���� �� �� ã��
+    // 수신자 중 해당 필드의 가장 긴 값 찾기
     let maxValue = '';
     recipients.forEach((r: any) => {
       const val = String(r[field] || '');
       if (val.length > maxValue.length) maxValue = val;
     });
-    // �����ڰ� ���ų� ���� ������ �⺻ �ִ밪 ���
+    // 수신자가 없거나 값이 없으면 기본 최대값 사용
     if (!maxValue) {
       const defaults: Record<string, string> = {
-        '%�̸�%': 'ȫ�浿��Ӵ�', '%���%': 'VVIP', '%����%': '��⵵ ������',
-        '%���űݾ�%': '99,999,999��', '%��Ÿ1%': '�����ٶ󸶹ٻ�', '%��Ÿ2%': '�����ٶ󸶹ٻ�', '%��Ÿ3%': '�����ٶ󸶹ٻ�',
-        '%ȸ�Ź�ȣ%': '07012345678',
+        '%이름%': '홍길동어머니', '%등급%': 'VVIP', '%지역%': '경기도 성남시',
+        '%구매금액%': '99,999,999원', '%기타1%': '가나다라마바사', '%기타2%': '가나다라마바사', '%기타3%': '가나다라마바사',
+        '%회신번호%': '07012345678',
       };
-      maxValue = defaults[variable] || '�����ٶ󸶹�';
+      maxValue = defaults[variable] || '가나다라마바';
     }
     result = result.replace(new RegExp(variable.replace(/%/g, '%'), 'g'), maxValue);
   });
   return result;
 };
-  // ����Ʈ �ʰ� �� �ڵ� LMS ��ȯ (SMS��LMS��, LMS��SMS ���ʹ� ����)
+  // 바이트 초과 시 자동 LMS 전환 (SMS→LMS만, LMS→SMS 복귀는 수동)
   useEffect(() => {
-    // �޽��� ���� �� �������̵� ����
+    // 메시지 변경 시 오버라이드 리셋
     setSmsOverrideAccepted(false);
-    // �ڵ��Է� ������ �ִ� ���� ������ ġȯ
+    // 자동입력 변수를 최대 길이 값으로 치환
     const directVarMap: Record<string, string> = {
-      '%�̸�%': 'name', '%��Ÿ1%': 'extra1', '%��Ÿ2%': 'extra2', '%��Ÿ3%': 'extra3', '%ȸ�Ź�ȣ%': 'callback',
+      '%이름%': 'name', '%기타1%': 'extra1', '%기타2%': 'extra2', '%기타3%': 'extra3', '%회신번호%': 'callback',
     };
     let fullMsg = getMaxByteMessage(directMessage, directRecipients, directVarMap);
     if (adTextEnabled) {
       const optOutText = directMsgType === 'SMS'
-        ? `����ź�${optOutNumber.replace(/-/g, '')}`
-        : `������Űź� ${optOutNumber}`;
-      fullMsg = `(����) ${fullMsg}\n${optOutText}`;
+        ? `무료거부${optOutNumber.replace(/-/g, '')}`
+        : `무료수신거부 ${optOutNumber}`;
+      fullMsg = `(광고) ${fullMsg}\n${optOutText}`;
     }
-    // �ѱ� 2byte, ����/���� 1byte ���
+    // 한글 2byte, 영문/숫자 1byte 계산
     let bytes = 0;
     for (let i = 0; i < fullMsg.length; i++) {
       const char = fullMsg.charCodeAt(i);
       bytes += char > 127 ? 2 : 1;
     }
-    // SMS���� 90����Ʈ �ʰ� �� LMS ��ȯ Ȯ�� ���
+    // SMS에서 90바이트 초과 시 LMS 전환 확인 모달
     if (directMsgType === 'SMS' && bytes > 90 && !showLmsConfirm) {
       setPendingBytes(bytes);
       setShowLmsConfirm(true);
     }
   }, [directMessage, directMsgType, adTextEnabled, optOutNumber, directRecipients]);
 
-  // Ÿ�ٹ߼� �޽��� �ǽð� ����Ʈ üũ
+  // 타겟발송 메시지 실시간 바이트 체크
   useEffect(() => {
     if (!showTargetSend) return;
     setSmsOverrideAccepted(false);
-    // �ڵ��Է� ������ �ִ� ���� ������ ġȯ
+    // 자동입력 변수를 최대 길이 값으로 치환
     const targetVarMap: Record<string, string> = {
-      '%�̸�%': 'name', '%���%': 'grade', '%����%': 'region', '%���űݾ�%': 'total_purchase_amount', '%ȸ�Ź�ȣ%': 'callback',
+      '%이름%': 'name', '%등급%': 'grade', '%지역%': 'region', '%구매금액%': 'total_purchase_amount', '%회신번호%': 'callback',
     };
     let fullMsg = getMaxByteMessage(targetMessage, targetRecipients, targetVarMap);
     if (adTextEnabled) {
       const optOutText = targetMsgType === 'SMS'
-        ? `����ź�${optOutNumber.replace(/-/g, '')}`
-        : `������Űź� ${optOutNumber}`;
-      fullMsg = `(����)${fullMsg}\n${optOutText}`;
+        ? `무료거부${optOutNumber.replace(/-/g, '')}`
+        : `무료수신거부 ${optOutNumber}`;
+      fullMsg = `(광고)${fullMsg}\n${optOutText}`;
     }
     let bytes = 0;
     for (let i = 0; i < fullMsg.length; i++) {
@@ -922,7 +922,7 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
       const response = await customersApi.stats();
       setStats(response.data.stats);
       
-      // �÷� ���� ��ȸ
+      // 플랜 정보 조회
       const token = localStorage.getItem('token');
       const planRes = await fetch('/api/companies/my-plan', {
         headers: { Authorization: `Bearer ${token}` },
@@ -932,7 +932,7 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
         setPlanInfo(planData);
       }
 
-      // �ܾ� ���� ��ȸ
+      // 잔액 정보 조회
       const balanceRes = await fetch('/api/balance', {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -941,12 +941,12 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
         setBalanceInfo(balanceData);
       }
     } catch (error) {
-      console.error('��� �ε� ����:', error);
+      console.error('통계 로드 실패:', error);
     } finally {
       setLoading(false);
     }
   };
-  // �ֱ� ķ���� �ε�
+  // 최근 캠페인 로드
   const loadRecentCampaigns = async () => {
     try {
       const token = localStorage.getItem('token');
@@ -957,11 +957,11 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
       const campaigns = (data.campaigns || []).filter((c: any) => c.status !== 'draft');
       setRecentCampaigns(campaigns.slice(0, 5));
     } catch (error) {
-      console.error('�ֱ� ķ���� �ε� ����:', error);
+      console.error('최근 캠페인 로드 실패:', error);
     }
   };
 
-  // ���� ��� ķ���� �ε�
+  // 예약 대기 캠페인 로드
   const loadScheduledCampaigns = async () => {
     try {
       const token = localStorage.getItem('token');
@@ -971,12 +971,12 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
       const data = await res.json();
       setScheduledCampaigns(data.campaigns || []);
     } catch (error) {
-      console.error('���� ķ���� �ε� ����:', error);
+      console.error('예약 캠페인 로드 실패:', error);
     }
   };
 
-  // ���� Ÿ�� ���� - ��Ű�� �ε�
-  // ���� Ÿ�� ���� - ��Ű�� �ε� (���� ����)
+  // 직접 타겟 설정 - 스키마 로드
+  // 직접 타겟 설정 - 스키마 로드 (기존 유지)
   const loadTargetSchema = async () => {
     try {
       const token = localStorage.getItem('token');
@@ -988,11 +988,11 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
         setTargetSchemaFields(data.fields);
       }
     } catch (error) {
-      console.error('��Ű�� �ε� ����:', error);
+      console.error('스키마 로드 실패:', error);
     }
   };
 
-  // SMS ���ø� �ε�
+  // SMS 템플릿 로드
   const loadTemplates = async () => {
     try {
       const token = localStorage.getItem('token');
@@ -1002,11 +1002,11 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
       const data = await res.json();
       if (data.success) setTemplateList(data.templates || []);
     } catch (error) {
-      console.error('���ø� �ε� ����:', error);
+      console.error('템플릿 로드 실패:', error);
     }
   };
 
-  // SMS ���ø� ����
+  // SMS 템플릿 저장
   const saveTemplate = async (name: string, content: string, msgType: string, subject: string) => {
     try {
       const token = localStorage.getItem('token');
@@ -1017,22 +1017,22 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
       });
       const data = await res.json();
       if (data.success) {
-        setToast({ show: true, type: 'success', message: '���ڰ� �����Կ� ����Ǿ����ϴ�.' });
+        setToast({ show: true, type: 'success', message: '문자가 보관함에 저장되었습니다.' });
         setTimeout(() => setToast({ show: false, type: 'success', message: '' }), 3000);
         return true;
       } else {
-        setToast({ show: true, type: 'error', message: data.error || '���� ����' });
+        setToast({ show: true, type: 'error', message: data.error || '저장 실패' });
         setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
         return false;
       }
     } catch (error) {
-      setToast({ show: true, type: 'error', message: '���� �� ���� �߻�' });
+      setToast({ show: true, type: 'error', message: '저장 중 오류 발생' });
       setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
       return false;
     }
   };
 
-  // SMS ���ø� ����
+  // SMS 템플릿 삭제
   const deleteTemplate = async (id: string) => {
     try {
       const token = localStorage.getItem('token');
@@ -1043,15 +1043,15 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
       const data = await res.json();
       if (data.success) {
         setTemplateList(prev => prev.filter(t => t.id !== id));
-        setToast({ show: true, type: 'success', message: '�����Ǿ����ϴ�.' });
+        setToast({ show: true, type: 'success', message: '삭제되었습니다.' });
         setTimeout(() => setToast({ show: false, type: 'success', message: '' }), 3000);
       }
     } catch (error) {
-      console.error('���ø� ���� ����:', error);
+      console.error('템플릿 삭제 실패:', error);
     }
   };
 
-  // ���� ���� - Ȱ�� �ʵ� �ε�
+  // 동적 필터 - 활성 필드 로드
   const loadEnabledFields = async () => {
     try {
       const token = localStorage.getItem('token');
@@ -1064,11 +1064,11 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
         setFilterOptions(data.options || {});
       }
     } catch (error) {
-      console.error('�ʵ� �ε� ����:', error);
+      console.error('필드 로드 실패:', error);
     }
   };
 
-  // ���� ���� �� API ���� ��ȯ
+  // 동적 필터 → API 포맷 변환
   const buildDynamicFiltersForAPI = () => {
     const filters: Record<string, any> = {};
     for (const [fieldKey, value] of Object.entries(targetFilters)) {
@@ -1076,7 +1076,7 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
       const field = enabledFields.find((f: any) => f.field_key === fieldKey);
       if (!field) continue;
 
-      // Ư�� �ʵ� ��ȯ
+      // 특수 필드 변환
       if (fieldKey === 'age_group') {
         const ageVal = parseInt(value);
         if (ageVal >= 60) { filters['age'] = { operator: 'gte', value: 60 }; }
@@ -1105,7 +1105,7 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
     return filters;
   };
 
-  // ���� Ÿ�� ���� - ���� ī��Ʈ
+  // 직접 타겟 설정 - 필터 카운트
   const loadTargetCount = async () => {
     setTargetCountLoading(true);
     try {
@@ -1119,23 +1119,23 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
       const data = await res.json();
       setTargetCount(data.count || 0);
     } catch (error) {
-      console.error('ī��Ʈ ��ȸ ����:', error);
+      console.error('카운트 조회 실패:', error);
     } finally {
       setTargetCountLoading(false);
     }
   };
 
-  // ���� Ÿ�� ���� - Ÿ�� ���� �� �߼�ȭ�� �̵�
+  // 직접 타겟 설정 - 타겟 추출 후 발송화면 이동
   const handleTargetExtract = async () => {
     if (targetCount === 0) {
-      setToast({show: true, type: 'error', message: '������ ����� �����ϴ�'});
+      setToast({show: true, type: 'error', message: '추출할 대상이 없습니다'});
       setTimeout(() => setToast({show: false, type: 'error', message: ''}), 3000);
       return;
     }
     try {
       const token = localStorage.getItem('token');
       
-      // 080 ���Űźι�ȣ �ε�
+      // 080 수신거부번호 로드
       const settingsRes = await fetch('/api/companies/settings', {
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -1146,7 +1146,7 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
         }
       }
       
-      // ȸ�Ź�ȣ �ε�
+      // 회신번호 로드
       const cbRes = await fetch('/api/companies/callback-numbers', {
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -1174,23 +1174,23 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
           name: r.name || '',
           grade: r.grade || '',
           region: r.region || '',
-          amount: r.total_purchase_amount ? Math.floor(r.total_purchase_amount).toLocaleString() + '��' : '',
+          amount: r.total_purchase_amount ? Math.floor(r.total_purchase_amount).toLocaleString() + '원' : '',
           callback: r.callback || ''
         }));
         setTargetRecipients(recipients);
         setShowDirectTargeting(false);
         setShowTargetSend(true);
-        setToast({show: true, type: 'success', message: `${data.count}�� ���� �Ϸ�`});
+        setToast({show: true, type: 'success', message: `${data.count}명 추출 완료`});
         setTimeout(() => setToast({show: false, type: 'success', message: ''}), 3000);
       }
     } catch (error) {
-      console.error('Ÿ�� ���� ����:', error);
-      setToast({show: true, type: 'error', message: 'Ÿ�� ���� ����'});
+      console.error('타겟 추출 실패:', error);
+      setToast({show: true, type: 'error', message: '타겟 추출 실패'});
       setTimeout(() => setToast({show: false, type: 'error', message: ''}), 3000);
     }
   };
 
-  // ���� Ÿ�� ���� - ���� �ʱ�ȭ
+  // 직접 타겟 설정 - 필터 초기화
   const resetTargetFilters = () => {
     setTargetFilters({});
     setTargetSmsOptIn(true);
@@ -1206,28 +1206,28 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
       if (filter.grade) params.grade = filter.grade;
       if (filter.smsOptIn) params.smsOptIn = 'true';
 
-      console.log('API ȣ�� params:', params);
+      console.log('API 호출 params:', params);
       const response = await customersApi.list({ ...params, limit: 100 });
       setTargetResult(response.data);
     } catch (error) {
-      console.error('Ÿ�� ���� ����:', error);
+      console.error('타겟 추출 실패:', error);
     }
   };
 
-  // AI Ÿ�� ��õ
+  // AI 타겟 추천
   const handleAiRecommendTarget = async () => {
     if (!aiObjective.trim()) {
-      alert('������ ��ǥ�� �Է����ּ���');
+      alert('마케팅 목표를 입력해주세요');
       return;
     }
     setAiLoading(true);
     try {
       const response = await aiApi.recommendTarget({ objective: aiObjective });
       const result = response.data;
-      console.log('AI ����:', result);
-      console.log('������ gender:', result.filters?.gender?.value);
+      console.log('AI 응답:', result);
+      console.log('적용할 gender:', result.filters?.gender?.value);
 
-      // ��õ�� ���� ����
+      // 추천된 필터 적용
       if (result.filters) {
         const newFilter = { ...filter };
         if (result.filters.gender?.value) newFilter.gender = result.filters.gender.value;
@@ -1237,23 +1237,23 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
         }
         if (result.filters.grade?.value) newFilter.grade = result.filters.grade.value;
         setFilter(newFilter);
-        console.log('������ ����:', newFilter);
+        console.log('설정된 필터:', newFilter);
       }
       
-      // ķ���� ���ؽ�Ʈ ���� (�޽��� ������ ���)
+      // 캠페인 컨텍스트 저장 (메시지 생성에 사용)
       setCampaignContext(aiObjective);
       
-      alert(`AI ��õ �Ϸ�!\n\n${result.reasoning}\n\n���� Ÿ��: ${result.estimated_count.toLocaleString()}��${result.unsubscribe_count > 0 ? `\n���Űź� ����: ${result.unsubscribe_count.toLocaleString()}��` : ''}`);
+      alert(`AI 추천 완료!\n\n${result.reasoning}\n\n예상 타겟: ${result.estimated_count.toLocaleString()}명${result.unsubscribe_count > 0 ? `\n수신거부 제외: ${result.unsubscribe_count.toLocaleString()}명` : ''}`);
       setShowAiTarget(false);
       setAiObjective('');
     } catch (error) {
-      console.error('AI Ÿ�� ��õ ����:', error);
-      alert('AI ��õ �� ������ �߻��߽��ϴ�.');
+      console.error('AI 타겟 추천 실패:', error);
+      alert('AI 추천 중 오류가 발생했습니다.');
     } finally {
       setAiLoading(false);
     }
   };
-// AI ķ���� ���� (������Ʈ �� ��)
+// AI 캠페인 생성 (프롬프트 한 방)
 const handleAiCampaignGenerate = async () => {
   if (!aiCampaignPrompt.trim()) {
     setShowPromptAlert(true);
@@ -1261,20 +1261,20 @@ const handleAiCampaignGenerate = async () => {
   }
   setAiLoading(true);
   try {
-    // 1. Ÿ�� + ä�� ��õ �ޱ�
+    // 1. 타겟 + 채널 추천 받기
     const response = await aiApi.recommendTarget({ objective: aiCampaignPrompt });
     const result = response.data;
     
-    // AI ��� ����
+    // AI 결과 저장
     setAiResult({
       target: {
-        description: result.reasoning || '��õ Ÿ��',
+        description: result.reasoning || '추천 타겟',
         count: result.estimated_count || 0,
         unsubscribeCount: result.unsubscribe_count || 0,
         filters: result.filters || {},
       },
       recommendedChannel: result.recommended_channel || 'SMS',
-      channelReason: result.channel_reason || '������ �ȳ� �޽����� �����մϴ�.',
+      channelReason: result.channel_reason || '간단한 안내 메시지에 적합합니다.',
       recommendedTime: result.recommended_time || '',
       suggestedCampaignName: result.suggested_campaign_name || '',
       useIndividualCallback: result.use_individual_callback || false,
@@ -1282,77 +1282,77 @@ const handleAiCampaignGenerate = async () => {
       personalizationVars: result.personalization_vars || [],
     });
     
-    // ��õ ä�η� �⺻ ����
+    // 추천 채널로 기본 설정
     setSelectedChannel(result.recommended_channel || 'SMS');
     setIsAd(result.is_ad !== false);
     
-    // ����ȸ�Ź�ȣ �ڵ� ����
+    // 개별회신번호 자동 설정
     if (result.use_individual_callback) {
       setUseIndividualCallback(true);
     }
   
-    // �˾� ����
+    // 팝업 열기
     setShowAiResult(true);
     setAiStep(1);
   } catch (error) {
-    console.error('AI ķ���� ���� ����:', error);
-    alert('AI ��õ �� ������ �߻��߽��ϴ�.');
+    console.error('AI 캠페인 생성 실패:', error);
+    alert('AI 추천 중 오류가 발생했습니다.');
   } finally {
     setAiLoading(false);
   }
 };
 
-// AI �޽��� ���� (ä�� ���� ��)
+// AI 메시지 생성 (채널 선택 후)
 const handleAiGenerateChannelMessage = async () => {
   setAiLoading(true);
   try {
     const response = await aiApi.generateMessage({
       prompt: aiCampaignPrompt,
-      brandName: user?.company?.name || '�귣��',
+      brandName: user?.company?.name || '브랜드',
       channel: selectedChannel,
       usePersonalization: aiResult?.usePersonalization || false,
       personalizationVars: aiResult?.personalizationVars || [],
     });
     
-    // �޽��� ��� ����
+    // 메시지 결과 저장
     setAiResult((prev: any) => ({
       ...prev,
       messages: response.data.variants || [],
     }));
     
-    // 2�ܰ�� �̵�
+    // 2단계로 이동
     setAiStep(2);
   } catch (error) {
-    console.error('AI �޽��� ���� ����:', error);
-    alert('�޽��� ���� �� ������ �߻��߽��ϴ�.');
+    console.error('AI 메시지 생성 실패:', error);
+    alert('메시지 생성 중 오류가 발생했습니다.');
   } finally {
     setAiLoading(false);
   }
 };
 
-  // AI �޽��� ����
+  // AI 메시지 생성
   const handleAiGenerateMessage = async () => {
     const prompt = aiPrompt.trim() || campaignContext;
     if (!prompt) {
-      alert('�޽��� ��û ������ �Է����ּ���');
+      alert('메시지 요청 내용을 입력해주세요');
       return;
     }
     setAiLoading(true);
     try {
       const response = await aiApi.generateMessage({
         prompt: prompt,
-        brandName: user?.company?.name || '�귣��',
+        brandName: user?.company?.name || '브랜드',
       });
       setAiMessages(response.data.variants || []);
     } catch (error) {
-      console.error('AI �޽��� ���� ����:', error);
-      alert('AI �޽��� ���� �� ������ �߻��߽��ϴ�.');
+      console.error('AI 메시지 생성 실패:', error);
+      alert('AI 메시지 생성 중 오류가 발생했습니다.');
     } finally {
       setAiLoading(false);
     }
   };
 
-  // AI �޽��� ����
+  // AI 메시지 선택
   const handleSelectAiMessage = (message: any) => {
     const text = campaign.messageType === 'SMS' ? message.sms_text : message.lms_text;
     setCampaign({ ...campaign, messageContent: text });
@@ -1363,7 +1363,7 @@ const handleAiGenerateChannelMessage = async () => {
 
   const handleCreateCampaign = async () => {
     if (!campaign.campaignName || !campaign.messageContent) {
-      alert('ķ���θ�� �޽��� ������ �Է��ϼ���');
+      alert('캠페인명과 메시지 내용을 입력하세요');
       return;
     }
 
@@ -1372,45 +1372,45 @@ const handleAiGenerateChannelMessage = async () => {
         ...campaign,
         targetFilter: filter,
       });
-      alert('ķ������ �����Ǿ����ϴ�');
+      alert('캠페인이 생성되었습니다');
       setActiveTab('send');
     } catch (error: any) {
-      alert(error.response?.data?.error || 'ķ���� ���� ����');
+      alert(error.response?.data?.error || '캠페인 생성 실패');
     } finally {
       setIsSending(false);
     }
   };
-// AI ķ���� �߼� Ȯ��
+// AI 캠페인 발송 확정
 const handleAiCampaignSend = async () => {
-  if (isSending) return; // �ߺ� Ŭ�� ����
+  if (isSending) return; // 중복 클릭 방지
   
-  // ȸ�Ź�ȣ ����
+  // 회신번호 검증
   if (!selectedCallback && !useIndividualCallback) {
-    alert('ȸ�Ź�ȣ�� �������ּ���');
+    alert('회신번호를 선택해주세요');
     return;
   }
   
   setIsSending(true);
   try {
-    // ���õ� �޽��� �������� (ù��° �޽��� ���, ���߿� ���� ���ð����� ���� ����)
+    // 선택된 메시지 가져오기 (첫번째 메시지 사용, 나중에 라디오 선택값으로 변경 가능)
     const selectedMsg = aiResult?.messages?.[0];
     if (!selectedMsg) {
-      alert('�޽����� �������ּ���');
+      alert('메시지를 선택해주세요');
       setIsSending(false);
       return;
     }
 
-    // �߼۽ð� ���
+    // 발송시간 계산
     let scheduledAt: string | null = null;
     if (sendTimeOption === 'ai' && aiResult?.recommendedTime) {
-      // AI ��õ�ð� �Ľ� (��: "2024-02-01 19:00" �Ǵ� "2�� 1�� ���� 7��")
+      // AI 추천시간 파싱 (예: "2024-02-01 19:00" 또는 "2월 1일 오후 7시")
       const timeStr = aiResult.recommendedTime;
-      // ISO �����̸� �״��, �ƴϸ� �Ľ� �õ�
+      // ISO 형식이면 그대로, 아니면 파싱 시도
       if (timeStr.includes('T') || timeStr.match(/^\d{4}-\d{2}-\d{2}/)) {
         scheduledAt = timeStr;
       } else {
-        // �ѱ��� ���� �Ľ� �õ� (��: "2�� 1�� 19:00")
-        const match = timeStr.match(/(\d+)��\s*(\d+)��.*?(\d{1,2}):?(\d{2})?/);
+        // 한국어 형식 파싱 시도 (예: "2월 1일 19:00")
+        const match = timeStr.match(/(\d+)월\s*(\d+)일.*?(\d{1,2}):?(\d{2})?/);
         if (match) {
           const year = new Date().getFullYear();
           const month = parseInt(match[1]) - 1;
@@ -1423,20 +1423,20 @@ const handleAiCampaignSend = async () => {
     } else if (sendTimeOption === 'custom' && customSendTime) {
       scheduledAt = new Date(customSendTime).toISOString();
     }
-    // 'now'�� scheduledAt�� null (��� �߼�)
+    // 'now'면 scheduledAt은 null (즉시 발송)
 
-    // �̺�Ʈ �Ⱓ �Ľ� (AI �޽������� ���� �õ�)
+    // 이벤트 기간 파싱 (AI 메시지에서 추출 시도)
     let eventStartDate: string | null = null;
     let eventEndDate: string | null = null;
     
-    // �޽��� ���뿡�� �̺�Ʈ �Ⱓ ���� �õ�
+    // 메시지 내용에서 이벤트 기간 추출 시도
     const msgText = selectedMsg.message_text || '';
-    // ���� ���� ����: "X�� X�� ~ X��", "X�� X�� ~ X�� X��", "X/X ~ X/X"
-    let eventMatch = msgText.match(/(\d+)��\s*(\d+)��.*?~\s*(\d+)��\s*(\d+)��/); // 2�� 13�� ~ 2�� 15��
+    // 여러 형식 지원: "X월 X일 ~ X일", "X월 X일 ~ X월 X일", "X/X ~ X/X"
+    let eventMatch = msgText.match(/(\d+)월\s*(\d+)일.*?~\s*(\d+)월\s*(\d+)일/); // 2월 13일 ~ 2월 15일
     if (!eventMatch) {
-      eventMatch = msgText.match(/(\d+)��\s*(\d+)��.*?~\s*(\d+)��/); // 2�� 13�� ~ 15��
+      eventMatch = msgText.match(/(\d+)월\s*(\d+)일.*?~\s*(\d+)일/); // 2월 13일 ~ 15일
       if (eventMatch) {
-        // ������ ���� ������ ���� ���� ����
+        // 끝나는 월이 없으면 시작 월과 같음
         eventMatch = [eventMatch[0], eventMatch[1], eventMatch[2], eventMatch[1], eventMatch[3]];
       }
     }
@@ -1454,10 +1454,10 @@ const handleAiCampaignSend = async () => {
       eventEndDate = `${year}-${String(endMonth + 1).padStart(2, '0')}-${String(endDay).padStart(2, '0')}`;
     }
 
-    // AI ��õ ķ���θ� �켱 ���, ������ �޽������� ����
+    // AI 추천 캠페인명 우선 사용, 없으면 메시지에서 추출
 const msgContent = selectedMsg.message_text || '';
 const nameMatch = msgContent.match(/\][\s]*(.+?)[\s]*[\n\r]/);
-const extractedName = nameMatch ? nameMatch[1].replace(/[^\w��-�R\s]/g, '').trim().slice(0, 30) : `ķ����_${formatDate(new Date().toISOString())}`;
+const extractedName = nameMatch ? nameMatch[1].replace(/[^\w가-힣\s]/g, '').trim().slice(0, 30) : `캠페인_${formatDate(new Date().toISOString())}`;
 const autoName = aiResult?.suggestedCampaignName || extractedName;
 
 const campaignData = {
@@ -1474,28 +1474,28 @@ const campaignData = {
       mmsImagePaths: mmsUploadedImages.map(img => img.serverPath),
     };
 
-    console.log('=== �߼� ����� ===');
+    console.log('=== 발송 디버깅 ===');
     console.log('sendTimeOption:', sendTimeOption);
     console.log('scheduledAt:', scheduledAt);
     console.log('campaignData:', campaignData);
 
     const response = await campaignsApi.create(campaignData);
 
-    // ķ���� �߼� API ȣ�� (����/��� ���)
+    // 캠페인 발송 API 호출 (예약/즉시 모두)
     const campaignId = response.data.campaign?.id;
     if (campaignId) {
       await campaignsApi.send(campaignId);
     }
     
-    // ��� �ݱ�
+    // 모달 닫기
     setShowPreview(false);
     setShowAiResult(false);
     setAiStep(1);
     setAiCampaignPrompt('');
-    // ���� ��޿� �߼� ���� ���� (�ʱ�ȭ ����!)
-    const sendInfoText = sendTimeOption === 'now' ? '��� �߼� �Ϸ�' : 
-                         sendTimeOption === 'ai' ? `���� �Ϸ� (${aiResult?.recommendedTime || 'AI ��õ'})` :
-                         `���� �Ϸ� (${customSendTime ? formatDateTime(customSendTime) : ''})`;
+    // 성공 모달용 발송 정보 저장 (초기화 전에!)
+    const sendInfoText = sendTimeOption === 'now' ? '즉시 발송 완료' : 
+                         sendTimeOption === 'ai' ? `예약 완료 (${aiResult?.recommendedTime || 'AI 추천'})` :
+                         `예약 완료 (${customSendTime ? formatDateTime(customSendTime) : ''})`;
     setSuccessSendInfo(sendInfoText);
     
     setSendTimeOption('ai');
@@ -1507,25 +1507,25 @@ const campaignData = {
     loadScheduledCampaigns();
     
   } catch (error: any) {
-    console.error('ķ���� ���� ����:', error);
+    console.error('캠페인 생성 실패:', error);
     if (error.response?.status === 402 && error.response?.data?.insufficientBalance) {
       setShowInsufficientBalance({show: true, balance: error.response.data.balance, required: error.response.data.requiredAmount});
     } else {
-      alert(error.response?.data?.error || 'ķ���� ������ �����߽��ϴ�.');
+      alert(error.response?.data?.error || '캠페인 생성에 실패했습니다.');
     }
   } finally {
     setIsSending(false);
   }
 };
 
-  // ����� ��������
+  // 담당자 사전수신
   const handleTestSend = async () => {
     setTestSending(true);
     setTestSentResult(null);
     try {
       const selectedMsg = aiResult?.messages?.[0];
       if (!selectedMsg) {
-        alert('�޽����� �������ּ���');
+        alert('메시지를 선택해주세요');
         setTestSending(false);
         return;
       }
@@ -1545,12 +1545,12 @@ const campaignData = {
       const data = await res.json();
       if (res.ok) {
         const contactList = data.contacts?.map((c: any) => `${c.name}(${c.phone})`).join(', ') || '';
-        setTestSentResult(`? ${data.message}\n${contactList}`);
+        setTestSentResult(`✅ ${data.message}\n${contactList}`);
       } else {
-        setTestSentResult(`? ${data.error}`);
+        setTestSentResult(`❌ ${data.error}`);
       }
     } catch (error) {
-      setTestSentResult('? �׽�Ʈ �߼� ����');
+      setTestSentResult('❌ 테스트 발송 실패');
     } finally {
       setTestSending(false);
       setTestCooldown(true);
@@ -1569,12 +1569,12 @@ const campaignData = {
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-100 flex items-center justify-center">
-        <div className="text-gray-500">�ε� ��...</div>
+        <div className="text-gray-500">로딩 중...</div>
       </div>
     );
   }
 
-  // ����Ʈ ��� �Լ� (�ѱ� 2byte, ����/���� 1byte)
+  // 바이트 계산 함수 (한글 2byte, 영문/숫자 1byte)
   const calculateBytes = (text: string) => {
     let bytes = 0;
     for (let i = 0; i < text.length; i++) {
@@ -1584,7 +1584,7 @@ const campaignData = {
     return bytes;
   };
 
-  // SMS 90����Ʈ�� �߸� �޽��� ��ȯ
+  // SMS 90바이트로 잘린 메시지 반환
   const truncateToSmsBytes = (text: string, maxBytes: number = 90) => {
     let bytes = 0;
     for (let i = 0; i < text.length; i++) {
@@ -1595,8 +1595,8 @@ const campaignData = {
     return text;
   };
 
-  // ������� ���Ե� ���� �޽���
-  // 080��ȣ ������ ������ (0801111111 �� 080-111-1111)
+  // 광고문구 포함된 최종 메시지
+  // 080번호 하이픈 포맷팅 (0801111111 → 080-111-1111)
   const formatRejectNumber = (num: string) => {
     const clean = num.replace(/-/g, '');
     if (clean.length === 10) {
@@ -1608,9 +1608,9 @@ const campaignData = {
   const getFullMessage = (msg: string) => {
     if (!adTextEnabled) return msg;
     const optOutText = directMsgType === 'SMS' 
-      ? `����ź�${optOutNumber.replace(/-/g, '')}` 
-      : `������Űź� ${formatRejectNumber(optOutNumber)}`;
-    return `(����)${msg}\n${optOutText}`;
+      ? `무료거부${optOutNumber.replace(/-/g, '')}` 
+      : `무료수신거부 ${formatRejectNumber(optOutNumber)}`;
+    return `(광고)${msg}\n${optOutText}`;
   };
 
   const messageBytes = calculateBytes(getFullMessage(directMessage));
@@ -1619,7 +1619,7 @@ const campaignData = {
 
   return (
     <div className="min-h-screen bg-gray-100">
-      {/* AI ������Ʈ �Է� �ȳ� ��� */}
+      {/* AI 프롬프트 입력 안내 모달 */}
       {showPromptAlert && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
@@ -1628,34 +1628,34 @@ const campaignData = {
                 <div className="w-12 h-12 bg-emerald-100 rounded-full flex items-center justify-center">
                   <Sparkles className="w-6 h-6 text-emerald-600" />
                 </div>
-                <h3 className="text-xl font-bold text-gray-800">AI ķ���� ����</h3>
+                <h3 className="text-xl font-bold text-gray-800">AI 캠페인 생성</h3>
               </div>
               <p className="text-gray-600 leading-relaxed">
-                ���ϴ� ķ���� ������ �Է��ϼ���.<br/>
-                <span className="text-emerald-700 font-medium">Ÿ�� �������� �޽��� �ۼ�, �߼� �ð�����</span><br/>
-                AI�� �ڵ����� �����ص帳�ϴ�.
+                원하는 캠페인 내용을 입력하세요.<br/>
+                <span className="text-emerald-700 font-medium">타겟 선정부터 메시지 작성, 발송 시간까지</span><br/>
+                AI가 자동으로 설계해드립니다.
               </p>
             </div>
             <div className="p-4 bg-gray-50 border-t">
               <div className="text-sm text-gray-500 mb-4">
-                <p className="font-medium mb-2">?? �Է� ����:</p>
+                <p className="font-medium mb-2">💡 입력 예시:</p>
                 <ul className="space-y-1 text-gray-600">
-                  <li>? 30�� ���� VIP���� �� �Ż�ǰ 20% ���� �ȳ�</li>
-                  <li>? 3���� �̱��� ������� ��湮 ���� �߼�</li>
-                  <li>? ���� ������� ���� �޽��� ������</li>
+                  <li>• 30대 여성 VIP에게 봄 신상품 20% 할인 안내</li>
+                  <li>• 3개월 미구매 고객에게 재방문 쿠폰 발송</li>
+                  <li>• 생일 고객에게 축하 메시지 보내기</li>
                 </ul>
               </div>
               <button
                 onClick={() => setShowPromptAlert(false)}
                 className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold transition-colors"
               >
-                Ȯ��
+                확인
               </button>
             </div>
           </div>
           </div>
       )}
-      {/* �佺Ʈ �˸� */}
+      {/* 토스트 알림 */}
       {toast.show && (
         <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[100] animate-bounce">
           <div className={`px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-3 ${
@@ -1663,17 +1663,17 @@ const campaignData = {
               ? 'bg-gradient-to-r from-emerald-500 to-green-500 text-white' 
               : 'bg-gradient-to-r from-red-500 to-rose-500 text-white'
           }`}>
-            <span className="text-2xl">{toast.type === 'success' ? '?' : '?'}</span>
+            <span className="text-2xl">{toast.type === 'success' ? '✅' : '❌'}</span>
             <span className="font-medium text-lg">{toast.message}</span>
           </div>
         </div>
       )}
-      {/* ��� */}
+      {/* 헤더 */}
       <header className="bg-white shadow">
         <div className="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
           <div className="cursor-pointer" onClick={() => window.location.reload()}>
-          <h1 className="text-xl font-bold text-gray-800">���ٷ�</h1>
-            <p className="text-sm text-gray-500">{user?.company?.name}{(user as any)?.department ? ` �� ${(user as any).department}` : ''}</p>
+          <h1 className="text-xl font-bold text-gray-800">한줄로</h1>
+            <p className="text-sm text-gray-500">{user?.company?.name}{(user as any)?.department ? ` · ${(user as any).department}` : ''}</p>
           </div>
           <div className="flex items-center gap-4">
           <button
@@ -1682,7 +1682,7 @@ const campaignData = {
                 try {
                   const token = localStorage.getItem('token');
                   
-                  // ȸ�� �������� 080 ��ȣ ��������
+                  // 회사 설정에서 080 번호 가져오기
                   const settingsRes = await fetch('/api/companies/settings', {
                     headers: { Authorization: `Bearer ${token}` }
                   });
@@ -1703,120 +1703,120 @@ const campaignData = {
                     if (defaultCb) setSelectedCallback(defaultCb.phone);
                   }
                 } catch (err) {
-                  console.error('ȸ�Ź�ȣ �ε� ����:', err);
+                  console.error('회신번호 로드 실패:', err);
                 }
               }}
               className="flex items-center gap-2 px-4 py-2 bg-green-700 hover:bg-green-800 text-white rounded-lg transition-colors"
             >
               <Send className="w-4 h-4" />
-              <span className="text-sm font-medium">�����߼�</span>
+              <span className="text-sm font-medium">직접발송</span>
             </button>
             <button
               onClick={() => setShowCalendar(true)}
               className="flex items-center gap-2 px-4 py-2 border border-gray-300 hover:bg-gray-50 rounded-lg transition-colors"
             >
               <Calendar className="w-4 h-4 text-gray-600" />
-              <span className="text-sm font-medium text-gray-700">Ķ����</span>
+              <span className="text-sm font-medium text-gray-700">캘린더</span>
             </button>
             <button
               onClick={() => setShowResults(true)}
               className="flex items-center gap-2 px-4 py-2 border border-gray-300 hover:bg-gray-50 rounded-lg transition-colors"
             >
               <BarChart3 className="w-4 h-4 text-gray-600" />
-              <span className="text-sm font-medium text-gray-700">�߼۰��</span>
+              <span className="text-sm font-medium text-gray-700">발송결과</span>
             </button>
             <button
               onClick={() => navigate('/unsubscribes')}
               className="flex items-center gap-2 px-4 py-2 border border-gray-300 hover:bg-gray-50 rounded-lg transition-colors"
             >
               <Ban className="w-4 h-4 text-gray-600" />
-              <span className="text-sm font-medium text-gray-700">���Űź�</span>
+              <span className="text-sm font-medium text-gray-700">수신거부</span>
             </button>
             <button
               onClick={() => navigate('/settings')}
               className="flex items-center gap-2 px-4 py-2 border border-gray-300 hover:bg-gray-50 rounded-lg transition-colors"
             >
               <Settings className="w-4 h-4 text-gray-600" />
-              <span className="text-sm font-medium text-gray-700">����</span>
+              <span className="text-sm font-medium text-gray-700">설정</span>
             </button>
             <button
               onClick={handleLogout}
               className="flex items-center gap-2 px-4 py-2 border border-red-200 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
             >
               <LogOut className="w-4 h-4" />
-              <span className="text-sm font-medium">�α׾ƿ�</span>
+              <span className="text-sm font-medium">로그아웃</span>
             </button>
           </div>
         </div>
       </header>
 
-      {/* ���� */}
+      {/* 메인 */}
       <main className="max-w-7xl mx-auto px-4 py-8">
-        {/* ��� ī�� */}
-        {/* ��� + AI ������Ʈ ���� */}
+        {/* 통계 카드 */}
+        {/* 통계 + AI 프롬프트 영역 */}
         <div className="flex gap-6 mb-8">
-          {/* ����: ��� ī�� */}
+          {/* 좌측: 통계 카드 */}
           <div className="w-72 space-y-4">
-            {/* �÷� ���� */}
+            {/* 플랜 정보 */}
             <div 
               onClick={() => navigate('/pricing')}
               className="flex items-center justify-between p-3 bg-white/50 rounded-xl cursor-pointer hover:bg-white/80 transition-all"
             >
               <div className="text-sm text-gray-600">
-                <span className="font-semibold text-gray-800">{planInfo?.plan_name || '�ε�...'}</span>
+                <span className="font-semibold text-gray-800">{planInfo?.plan_name || '로딩...'}</span>
                 {planInfo?.plan_code === 'FREE' && !planInfo?.is_trial_expired && (
                   <span className="text-orange-500 ml-1 text-xs">
                     D-{Math.max(0, Math.ceil((new Date(planInfo.trial_expires_at).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)))}
                   </span>
                 )}
                 {planInfo?.plan_code === 'FREE' && planInfo?.is_trial_expired && (
-                  <span className="text-red-500 ml-1 text-xs">����</span>
+                  <span className="text-red-500 ml-1 text-xs">만료</span>
                 )}
               </div>
-              <span className="text-green-700 text-xs font-medium">����� �ȳ� ��</span>
+              <span className="text-green-700 text-xs font-medium">요금제 안내 →</span>
             </div>
-                        {/* ��� ��Ȳ */}
+                        {/* 고객 현황 */}
                         <div className="bg-white/50 rounded-xl p-4">
               <div className="flex items-center justify-between mb-3">
-                <span className="text-xs text-gray-400 font-medium">��� ��Ȳ</span>
-                <button onClick={() => setShowCustomerDB(true)} className="text-green-700 text-xs font-medium hover:text-green-800 transition-colors">DB ������ȸ ��</button>
+                <span className="text-xs text-gray-400 font-medium">고객 현황</span>
+                <button onClick={() => setShowCustomerDB(true)} className="text-green-700 text-xs font-medium hover:text-green-800 transition-colors">DB 정보조회 →</button>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="text-center p-2">
                   <div className="text-xl font-bold text-gray-800">{parseInt(stats?.total || '0').toLocaleString()}</div>
-                  <div className="text-xs text-gray-400 mt-1">��ü</div>
+                  <div className="text-xs text-gray-400 mt-1">전체</div>
                 </div>
                 <div className="text-center p-2">
                   <div className="text-xl font-bold text-green-700">{parseInt(stats?.sms_opt_in_count || '0').toLocaleString()}</div>
-                  <div className="text-xs text-gray-400 mt-1">���ŵ���</div>
+                  <div className="text-xs text-gray-400 mt-1">수신동의</div>
                 </div>
                 <div className="text-center p-2">
                   <div className="text-xl font-bold text-gray-800">{parseInt(stats?.male_count || '0').toLocaleString()}</div>
-                  <div className="text-xs text-gray-400 mt-1">����</div>
+                  <div className="text-xs text-gray-400 mt-1">남성</div>
                 </div>
                 <div className="text-center p-2">
                   <div className="text-xl font-bold text-gray-800">{parseInt(stats?.female_count || '0').toLocaleString()}</div>
-                  <div className="text-xs text-gray-400 mt-1">����</div>
+                  <div className="text-xs text-gray-400 mt-1">여성</div>
                 </div>
               </div>
             </div>
 
-            {/* �߼� ��Ȳ */}
+            {/* 발송 현황 */}
             <div className="bg-white/50 rounded-xl p-4">
             <div className="flex items-center justify-between mb-3">
-                <span className="text-xs text-gray-400 font-medium">�߼� ��Ȳ</span>
+                <span className="text-xs text-gray-400 font-medium">발송 현황</span>
                 {balanceInfo?.billingType === 'prepaid' && (
-                  <button onClick={() => setShowBalanceModal(true)} className="text-green-700 text-xs font-medium hover:text-green-800 transition-colors">�ܾ� ��Ȳ ��</button>
+                  <button onClick={() => setShowBalanceModal(true)} className="text-green-700 text-xs font-medium hover:text-green-800 transition-colors">잔액 현황 →</button>
                 )}
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="text-center p-2">
                   <div className="text-xl font-bold text-gray-800">{(stats?.monthly_sent || 0).toLocaleString()}</div>
-                  <div className="text-xs text-gray-400 mt-1">�̹� ��</div>
+                  <div className="text-xs text-gray-400 mt-1">이번 달</div>
                 </div>
                 <div className="text-center p-2">
                   <div className="text-xl font-bold text-gray-800">{stats?.success_rate || '0'}%</div>
-                  <div className="text-xs text-gray-400 mt-1">������</div>
+                  <div className="text-xs text-gray-400 mt-1">성공률</div>
                 </div>
                 <div className="text-center p-2">
                   <div className="text-xl font-bold text-amber-600">{parseInt(stats?.vip_count || '0').toLocaleString()}</div>
@@ -1824,7 +1824,7 @@ const campaignData = {
                 </div>
                 <div className="text-center p-2">
                   <div className="text-xl font-bold text-gray-800">-</div>
-                  <div className="text-xs text-gray-400 mt-1">30�� ����</div>
+                  <div className="text-xs text-gray-400 mt-1">30일 매출</div>
                 </div>
               </div>
               </div>
@@ -1832,46 +1832,46 @@ const campaignData = {
             
                         </div>
 
-{/* ����: AI ������Ʈ �Է� */}
+{/* 우측: AI 프롬프트 입력 */}
           <div className="flex-1 bg-green-50 rounded-xl p-6 border border-green-200">
-          <h3 className="text-xl font-bold text-gray-800 mb-2">AI �ڵ�ȭ ������</h3>
+          <h3 className="text-xl font-bold text-gray-800 mb-2">AI 자동화 마케팅</h3>
             <p className="text-sm text-gray-500 mb-5">
-              �� ���̸� ����մϴ�. Ÿ�� �������� �޽��� �ۼ�, �߼� �ð����� AI�� �ڵ����� �����ص帳�ϴ�.
+              한 줄이면 충분합니다. 타겟 선정부터 메시지 작성, 발송 시간까지 AI가 자동으로 설계해드립니다.
             </p>
             <textarea
               value={aiCampaignPrompt}
               onChange={(e) => setAiCampaignPrompt(e.target.value)}
               className="w-full p-4 border border-gray-300 rounded-lg resize-none focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white"
               rows={4}
-              placeholder="��: 30�� ���� VIP ������� �� �Ż�ǰ 20% ���� �ȳ� ���� ������"
+              placeholder="예: 30대 여성 VIP 고객에게 봄 신상품 20% 할인 안내 문자 보내줘"
             />
-            {/* 3���� �޴� ī�� */}
+            {/* 3분할 메뉴 카드 */}
             <div className="grid grid-cols-3 gap-4 mt-6">
-              {/* ��� DB ���ε� - ������Ʈ ��� */}
+              {/* 고객 DB 업로드 - 슬레이트 블루 */}
               <button 
                 onClick={() => setShowFileUpload(true)}
                 className="p-6 bg-slate-600 hover:bg-slate-700 rounded-xl transition-all hover:shadow-lg group text-right h-[140px] flex flex-col justify-between"
               >
                 <div>
-                  <div className="text-lg font-bold text-white mb-1">��� DB ���ε�</div>
-                  <div className="text-sm text-slate-200">����/CSV�� ��� �߰�</div>
+                  <div className="text-lg font-bold text-white mb-1">고객 DB 업로드</div>
+                  <div className="text-sm text-slate-200">엑셀/CSV로 고객 추가</div>
                 </div>
-                <div className="text-2xl text-slate-300 self-end">��</div>
+                <div className="text-2xl text-slate-300 self-end">→</div>
               </button>
 
-              {/* ���� Ÿ�� ���� - �ݻ� */}
+              {/* 직접 타겟 설정 - 금색 */}
               <button 
                 onClick={() => { setShowDirectTargeting(true); loadEnabledFields(); }}
                 className="p-6 bg-amber-500 hover:bg-amber-600 rounded-xl transition-all hover:shadow-lg group text-right h-[140px] flex flex-col justify-between"
               >
                 <div>
-                  <div className="text-lg font-bold text-white mb-1">���� Ÿ�� ����</div>
-                  <div className="text-sm text-amber-100">���ϴ� ����� ���� ���͸�</div>
+                  <div className="text-lg font-bold text-white mb-1">직접 타겟 설정</div>
+                  <div className="text-sm text-amber-100">원하는 고객을 직접 필터링</div>
                 </div>
-                <div className="text-2xl text-amber-200 self-end">��</div>
+                <div className="text-2xl text-amber-200 self-end">→</div>
               </button>
 
-              {/* AI ��õ �߼� - �ʷ� */}
+              {/* AI 추천 발송 - 초록 */}
               <button 
                 onClick={handleAiCampaignGenerate}
                 disabled={aiLoading}
@@ -1883,31 +1883,31 @@ const campaignData = {
                 {aiLoading ? (
                   <>
                     <div>
-                      <div className="text-lg font-bold text-white mb-1">AI �м� ��...</div>
-                      <div className="text-sm text-green-200">��ø� ��ٷ��ּ���</div>
+                      <div className="text-lg font-bold text-white mb-1">AI 분석 중...</div>
+                      <div className="text-sm text-green-200">잠시만 기다려주세요</div>
                     </div>
-                    <div className="text-2xl text-green-300 self-end animate-pulse">?</div>
+                    <div className="text-2xl text-green-300 self-end animate-pulse">⏳</div>
                   </>
                 ) : (
                   <>
                     <div>
-                      <div className="text-lg font-bold text-white mb-1">AI ��õ �߼�</div>
-                      <div className="text-sm text-green-200">�ڿ���� AI�� �ڵ� ����</div>
+                      <div className="text-lg font-bold text-white mb-1">AI 추천 발송</div>
+                      <div className="text-sm text-green-200">자연어로 AI가 자동 설계</div>
                     </div>
-                    <div className="text-2xl text-green-300 self-end">��</div>
+                    <div className="text-2xl text-green-300 self-end">→</div>
                   </>
                 )}
               </button>
             </div>
 
-            {/* AI �ȳ����� */}
+            {/* AI 안내문구 */}
             <p className="text-xs text-gray-400 text-right mt-2 mb-0">
-              AI�� �Ǽ��� �� �ֽ��ϴ�. �߼� �� �̸����⿡�� ������ �� Ȯ�����ּ���.
+              AI는 실수할 수 있습니다. 발송 전 미리보기에서 내용을 꼭 확인해주세요.
             </p>
           </div>
         </div>
 
-        {/* �� */}
+        {/* 탭 */}
         <div className="bg-transparent rounded-lg -mt-6 mb-8">
         <div className="flex border-b hidden">
             <button
@@ -1918,7 +1918,7 @@ const campaignData = {
                   : 'text-gray-500 hover:text-gray-700'
               }`}
             >
-              1. Ÿ�� ����
+              1. 타겟 추출
             </button>
             <button
               onClick={() => setActiveTab('campaign')}
@@ -1928,7 +1928,7 @@ const campaignData = {
                   : 'text-gray-500 hover:text-gray-700'
               }`}
             >
-              2. ķ���� ����
+              2. 캠페인 설정
             </button>
             <button
               onClick={() => setActiveTab('send')}
@@ -1938,68 +1938,68 @@ const campaignData = {
                   : 'text-gray-500 hover:text-gray-700'
               }`}
             >
-              3. �߼�
+              3. 발송
             </button>
             </div>
 
             <div className="px-4 pt-1 pb-4">
-             {/* Ÿ�� ���� �� */}
+             {/* 타겟 추출 탭 */}
             {activeTab === 'target' && (
               <div>
-{/* 5�� ��� ī�� */}
+{/* 5개 기능 카드 */}
 <div className="grid grid-cols-5 gap-4">
-                  {/* �ֱ� ķ���� */}
+                  {/* 최근 캠페인 */}
                   <div onClick={() => { loadRecentCampaigns(); setShowRecentCampaigns(true); }} className="bg-white/50 shadow-sm rounded-xl p-6 min-h-[140px] cursor-pointer hover:shadow-lg transition-all text-center">
                     <BarChart3 className="w-8 h-8 mx-auto mb-3 text-green-700" />
-                    <div className="font-semibold text-gray-800 mb-1">�ֱ� ķ����</div>
-                    <div className="text-xs text-gray-500 mb-3">�ֱ� �߼� ����</div>
-                    <div className="text-xl font-bold text-green-700">{recentCampaigns.length}��</div>
+                    <div className="font-semibold text-gray-800 mb-1">최근 캠페인</div>
+                    <div className="text-xs text-gray-500 mb-3">최근 발송 내역</div>
+                    <div className="text-xl font-bold text-green-700">{recentCampaigns.length}건</div>
                   </div>
 
-                  {/* ��õ ���ø� */}
+                  {/* 추천 템플릿 */}
                   <div onClick={() => setShowTemplates(true)} className="bg-white/50 shadow-sm rounded-xl p-6 min-h-[140px] cursor-pointer hover:shadow-lg transition-all text-center">
                     <FileText className="w-8 h-8 mx-auto mb-3 text-amber-500" />
-                    <div className="font-semibold text-gray-800 mb-1">��õ ���ø�</div>
-                    <div className="text-xs text-gray-500 mb-3">��Ŭ�� ����</div>
-                    <div className="text-xl font-bold text-amber-600">8��</div>
+                    <div className="font-semibold text-gray-800 mb-1">추천 템플릿</div>
+                    <div className="text-xs text-gray-500 mb-3">원클릭 적용</div>
+                    <div className="text-xl font-bold text-amber-600">8개</div>
                   </div>
 
-                  {/* ��� �λ���Ʈ */}
+                  {/* 고객 인사이트 */}
                   <div onClick={() => setShowInsights(true)} className="bg-white/50 shadow-sm rounded-xl p-6 min-h-[140px] cursor-pointer hover:shadow-lg transition-all text-center">
                     <Users className="w-8 h-8 mx-auto mb-3 text-green-600" />
-                    <div className="font-semibold text-gray-800 mb-1">��� �λ���Ʈ</div>
-                    <div className="text-xs text-gray-500 mb-3">���׸�Ʈ ����</div>
-                    <div className="text-xl font-bold text-green-700">5��</div>
+                    <div className="font-semibold text-gray-800 mb-1">고객 인사이트</div>
+                    <div className="text-xs text-gray-500 mb-3">세그먼트 분포</div>
+                    <div className="text-xl font-bold text-green-700">5개</div>
                   </div>
 
-                  {/* ������ ��� */}
+                  {/* 오늘의 통계 */}
                   <div onClick={() => setShowTodayStats(true)} className="bg-white/50 shadow-sm rounded-xl p-6 min-h-[140px] cursor-pointer hover:shadow-lg transition-all text-center">
                     <Activity className="w-8 h-8 mx-auto mb-3 text-green-600" />
-                    <div className="font-semibold text-gray-800 mb-1">������ ���</div>
-                    <div className="text-xs text-gray-500 mb-3">�߼۷�/������</div>
-                    <div className="text-xl font-bold text-green-700">{(stats?.monthly_sent || 0).toLocaleString()}��</div>
+                    <div className="font-semibold text-gray-800 mb-1">오늘의 통계</div>
+                    <div className="text-xs text-gray-500 mb-3">발송량/성공률</div>
+                    <div className="text-xl font-bold text-green-700">{(stats?.monthly_sent || 0).toLocaleString()}건</div>
                   </div>
 
-                  {/* ���� ��� */}
+                  {/* 예약 대기 */}
                   <div onClick={() => { loadScheduledCampaigns(); setShowScheduled(true); }} className="bg-white/50 shadow-sm rounded-xl p-6 min-h-[140px] cursor-pointer hover:shadow-lg transition-all text-center">
                     <Clock className="w-8 h-8 mx-auto mb-3 text-amber-500" />
-                    <div className="font-semibold text-gray-800 mb-1">���� ���</div>
-                    <div className="text-xs text-gray-500 mb-3">�� �߼۵� ķ����</div>
-                    <div className="text-xl font-bold text-amber-600">{scheduledCampaigns.length}��</div>
+                    <div className="font-semibold text-gray-800 mb-1">예약 대기</div>
+                    <div className="text-xs text-gray-500 mb-3">곧 발송될 캠페인</div>
+                    <div className="text-xl font-bold text-amber-600">{scheduledCampaigns.length}건</div>
                   </div>
                 </div>
               </div>
             )}
-            {/* ķ���� ���� �� */}
+            {/* 캠페인 설정 탭 */}
             {activeTab === 'campaign' && (
               <div>
-                <h3 className="text-lg font-semibold mb-4">ķ���� ����</h3>
+                <h3 className="text-lg font-semibold mb-4">캠페인 설정</h3>
                 
-                {/* ķ���� ���ؽ�Ʈ ǥ�� */}
+                {/* 캠페인 컨텍스트 표시 */}
                 {campaignContext && (
                   <div className="mb-4 p-3 bg-purple-50 border border-purple-200 rounded-lg">
                     <span className="text-sm text-purple-700">
-                      ?? ������ ��ǥ: {campaignContext}
+                      📌 마케팅 목표: {campaignContext}
                     </span>
                   </div>
                 )}
@@ -2007,70 +2007,70 @@ const campaignData = {
                 <div className="space-y-4 max-w-2xl">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      ķ���θ� *
+                      캠페인명 *
                     </label>
                     <input
                       type="text"
                       value={campaign.campaignName}
                       onChange={(e) => setCampaign({ ...campaign, campaignName: e.target.value })}
                       className="w-full px-3 py-2 border rounded-lg"
-                      placeholder="��: 1�� VIP ���θ��"
+                      placeholder="예: 1월 VIP 프로모션"
                     />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      �޽��� ����
+                      메시지 유형
                     </label>
                     <select
                       value={campaign.messageType}
                       onChange={(e) => setCampaign({ ...campaign, messageType: e.target.value })}
                       className="w-full px-3 py-2 border rounded-lg"
                     >
-                      <option value="SMS">SMS (�ܹ�)</option>
-                      <option value="LMS">LMS (�幮)</option>
-                      <option value="MMS">MMS (����)</option>
-                      <option value="KAKAO">īī�� �˸���</option>
+                      <option value="SMS">SMS (단문)</option>
+                      <option value="LMS">LMS (장문)</option>
+                      <option value="MMS">MMS (사진)</option>
+                      <option value="KAKAO">카카오 알림톡</option>
                     </select>
                   </div>
                   <div>
                     <div className="flex justify-between items-center mb-1">
                       <label className="block text-sm font-medium text-gray-700">
-                        �޽��� ���� *
+                        메시지 내용 *
                       </label>
                       <button
                         onClick={() => setShowAiMessage(true)}
                         className="bg-purple-600 hover:bg-purple-700 text-white px-3 py-1 rounded text-sm font-medium flex items-center gap-1"
                       >
-                        ? AI ���� ����
+                        ✨ AI 문구 생성
                       </button>
                     </div>
                     <textarea
                       value={campaign.messageContent}
                       onChange={(e) => setCampaign({ ...campaign, messageContent: e.target.value })}
                       className="w-full px-3 py-2 border rounded-lg h-32"
-                      placeholder="�޽��� ������ �Է��ϼ���..."
+                      placeholder="메시지 내용을 입력하세요..."
                     />
                     <div className="text-right text-sm text-gray-500 mt-1">
-                      {campaign.messageContent.length}/90�� (SMS ����)
+                      {campaign.messageContent.length}/90자 (SMS 기준)
                     </div>
                   </div>
 
-                  {/* AI �޽��� ���� ��� */}
+                  {/* AI 메시지 생성 모달 */}
                   {showAiMessage && (
                     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
                       <div className="bg-white rounded-lg p-6 w-full max-w-2xl max-h-[80vh] overflow-y-auto">
-                        <h4 className="text-lg font-semibold mb-4">? AI ���� ����</h4>
+                        <h4 className="text-lg font-semibold mb-4">✨ AI 문구 생성</h4>
                         
                         {aiMessages.length === 0 ? (
                           <>
                             <p className="text-sm text-gray-600 mb-4">
-                              � �޽����� ������ ������ �������ּ���.
+                              어떤 메시지를 보내고 싶은지 설명해주세요.
                             </p>
                             <textarea
                               value={aiPrompt || campaignContext}
                               onChange={(e) => setAiPrompt(e.target.value)}
                               className="w-full px-3 py-2 border rounded-lg h-24 mb-4"
-                              placeholder="��: �ű� ��� ��� 20% ���� ���� �ȳ�"
+                              placeholder="예: 신규 고객 대상 20% 할인 쿠폰 안내"
                             />
                             <div className="flex gap-2">
                               <button
@@ -2080,21 +2080,21 @@ const campaignData = {
                                 }}
                                 className="flex-1 px-4 py-2 border rounded-lg text-gray-600"
                               >
-                                ���
+                                취소
                               </button>
                               <button
                                 onClick={handleAiGenerateMessage}
                                 disabled={aiLoading}
                                 className="flex-1 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg disabled:opacity-50"
                               >
-                                {aiLoading ? '���� ��...' : 'AI ���� ����'}
+                                {aiLoading ? '생성 중...' : 'AI 문구 생성'}
                               </button>
                             </div>
                           </>
                         ) : (
                           <>
                             <p className="text-sm text-gray-600 mb-4">
-                              AI�� ������ ���� �� �ϳ��� �����ϼ���.
+                              AI가 생성한 문구 중 하나를 선택하세요.
                             </p>
                             <div className="space-y-4 mb-4">
                               {aiMessages.map((msg, idx) => (
@@ -2108,7 +2108,7 @@ const campaignData = {
                                       {msg.variant_id}. {msg.variant_name}
                                     </span>
                                     <span className="text-sm text-gray-500">
-                                      ����: {msg.score}
+                                      점수: {msg.score}
                                     </span>
                                   </div>
                                   <p className="text-sm text-gray-600 mb-2">{msg.concept}</p>
@@ -2125,7 +2125,7 @@ const campaignData = {
                               }}
                               className="w-full px-4 py-2 border rounded-lg text-gray-600"
                             >
-                              �ٽ� �����ϱ�
+                              다시 생성하기
                             </button>
                           </>
                         )}
@@ -2141,7 +2141,7 @@ const campaignData = {
                         onChange={(e) => setCampaign({ ...campaign, isAd: e.target.checked })}
                         className="rounded"
                       />
-                      <span className="text-sm text-gray-700">����� �޽��� (�տ� [����] �ڵ� �߰�)</span>
+                      <span className="text-sm text-gray-700">광고성 메시지 (앞에 [광고] 자동 추가)</span>
                     </label>
                   </div>
 
@@ -2149,68 +2149,68 @@ const campaignData = {
                     onClick={handleCreateCampaign}
                     className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-medium"
                   >
-                    ķ���� ����
+                    캠페인 생성
                   </button>
                 </div>
               </div>
             )}
 
-            {/* �߼� �� */}
+            {/* 발송 탭 */}
             {activeTab === 'send' && (
               <div className="text-center py-12">
-                <div className="text-6xl mb-4">??</div>
-                <h3 className="text-lg font-semibold mb-2">�߼� �غ� �Ϸ�</h3>
+                <div className="text-6xl mb-4">📤</div>
+                <h3 className="text-lg font-semibold mb-2">발송 준비 완료</h3>
                 <p className="text-gray-500 mb-6">
-                  ķ���� ��Ͽ��� �߼��� ķ������ �����ϼ���
+                  캠페인 목록에서 발송할 캠페인을 선택하세요
                 </p>
                 <button
-                  onClick={() => alert('ķ���� ��� �������� �̵� (���� ����)')}
+                  onClick={() => alert('캠페인 목록 페이지로 이동 (개발 예정)')}
                   className="bg-green-600 hover:bg-green-700 text-white px-8 py-3 rounded-lg font-medium"
                 >
-                  ķ���� �߼��ϱ�
+                  캠페인 발송하기
                 </button>
               </div>
             )}
           </div>
         </div>
-{/* AI ķ���� ��� �˾� */}
+{/* AI 캠페인 결과 팝업 */}
 {showAiResult && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
             <div className={`bg-white rounded-xl shadow-2xl max-h-[90vh] overflow-y-auto ${aiStep === 2 ? 'w-[960px]' : 'w-[600px]'}`}>
               
-              {/* ��� */}
+              {/* 헤더 */}
               <div className="p-6 border-b bg-green-50">
                 <div className="flex justify-between items-center">
                   <h3 className="text-lg font-bold flex items-center gap-2">
-                    <span>?</span> AI ��õ ��� {aiStep === 1 ? '- Ÿ�� & ä��' : '- �޽��� & �߼�'}
+                    <span>✨</span> AI 추천 결과 {aiStep === 1 ? '- 타겟 & 채널' : '- 메시지 & 발송'}
                   </h3>
-                  <button onClick={() => { setShowAiResult(false); setAiStep(1); }} className="text-gray-500 hover:text-gray-700 text-xl">?</button>
+                  <button onClick={() => { setShowAiResult(false); setAiStep(1); }} className="text-gray-500 hover:text-gray-700 text-xl">✕</button>
                 </div>
               </div>
 
-              {/* Step 1: Ÿ�� + ä�� ���� */}
+              {/* Step 1: 타겟 + 채널 선택 */}
               {aiStep === 1 && (
                 <div className="p-6 space-y-6">
-                  {/* Ÿ�� ��� */}
+                  {/* 타겟 요약 */}
                   <div className="bg-blue-50 rounded-lg p-4">
-                    <div className="text-sm text-gray-600 mb-1">?? ����� Ÿ��</div>
-                    <div className="font-semibold text-gray-800">{aiResult?.target?.description || '��õ Ÿ��'}</div>
-<div className="text-blue-600 font-bold text-lg mt-1">{aiResult?.target?.count?.toLocaleString() || 0}��</div>
+                    <div className="text-sm text-gray-600 mb-1">📌 추출된 타겟</div>
+                    <div className="font-semibold text-gray-800">{aiResult?.target?.description || '추천 타겟'}</div>
+<div className="text-blue-600 font-bold text-lg mt-1">{aiResult?.target?.count?.toLocaleString() || 0}명</div>
                   </div>
 
-                  {/* ä�� ��õ */}
+                  {/* 채널 추천 */}
                   <div>
-                    <div className="text-sm text-gray-600 mb-2">?? AI ��õ ä��</div>
+                    <div className="text-sm text-gray-600 mb-2">📱 AI 추천 채널</div>
                     <div className="bg-purple-50 border border-purple-200 rounded-lg p-4 mb-4">
-                    <div className="font-semibold text-purple-800">{aiResult?.recommendedChannel || 'SMS'} ��õ</div>
-                    <div className="text-sm text-purple-600 mt-1">"{aiResult?.channelReason || '��õ ä���Դϴ�'}"</div>
+                    <div className="font-semibold text-purple-800">{aiResult?.recommendedChannel || 'SMS'} 추천</div>
+                    <div className="text-sm text-purple-600 mt-1">"{aiResult?.channelReason || '추천 채널입니다'}"</div>
                     </div>
-{/* ����� ���� */}
+{/* 광고성 여부 */}
 <div className="flex items-center justify-between bg-yellow-50 rounded-lg p-4 mb-4">
                     <div>
-                      <div className="font-semibold text-gray-800">?? ����� �޽���</div>
+                      <div className="font-semibold text-gray-800">📢 광고성 메시지</div>
                       <div className="text-sm text-gray-500">
-                        {isAd ? '(����) ǥ�� + ����źι�ȣ �ʼ� ����' : '�˸��� �޽��� (ǥ�� ���ʿ�)'}
+                        {isAd ? '(광고) 표기 + 무료거부번호 필수 포함' : '알림성 메시지 (표기 불필요)'}
                       </div>
                     </div>
                     <label className="relative inline-flex items-center cursor-pointer">
@@ -2223,9 +2223,9 @@ const campaignData = {
                       <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
                     </label>
                   </div>
-                    <div className="text-sm text-gray-600 mb-2">ä�� ����</div>
+                    <div className="text-sm text-gray-600 mb-2">채널 선택</div>
                     <div className="grid grid-cols-4 gap-2">
-                      {['SMS', 'LMS', 'MMS', 'īī��'].map((ch) => (
+                      {['SMS', 'LMS', 'MMS', '카카오'].map((ch) => (
                         <button
                           key={ch}
                           onClick={() => setSelectedChannel(ch)}
@@ -2235,17 +2235,17 @@ const campaignData = {
                               : 'border-gray-200 hover:border-gray-300 text-gray-600'
                           }`}
                         >
-                          {ch === 'SMS' && '?? '}
-                          {ch === 'LMS' && '?? '}
-                          {ch === 'MMS' && '??? '}
-                          {ch === 'īī��' && '?? '}
+                          {ch === 'SMS' && '📱 '}
+                          {ch === 'LMS' && '📝 '}
+                          {ch === 'MMS' && '🖼️ '}
+                          {ch === '카카오' && '💬 '}
                           {ch}
                         </button>
                       ))}
                     </div>
                   </div>
 
-                  {/* ���� ��ư */}
+                  {/* 다음 버튼 */}
                   <button
                     onClick={handleAiGenerateChannelMessage}
                     disabled={aiLoading}
@@ -2253,48 +2253,48 @@ const campaignData = {
                   >
                     {aiLoading ? (
                       <>
-                        <span className="animate-spin">?</span>
-                        �޽��� ���� ��...
+                        <span className="animate-spin">⏳</span>
+                        메시지 생성 중...
                       </>
                     ) : (
-                      <>����: ���� ���� ��</>
+                      <>다음: 문구 생성 →</>
                     )}
                   </button>
                 </div>
               )}
 
-              {/* Step 2: �޽��� + �߼۽ð� */}
+              {/* Step 2: 메시지 + 발송시간 */}
               {aiStep === 2 && (
                 <div className="p-6 space-y-6">
-                  {/* ���õ� ä�� ǥ�� */}
+                  {/* 선택된 채널 표시 */}
                   <div className="flex items-center gap-2 text-sm text-gray-600">
-                    <span>���õ� ä��:</span>
+                    <span>선택된 채널:</span>
                     <span className="px-2 py-1 bg-purple-100 text-purple-700 rounded font-medium">{selectedChannel}</span>
                   </div>
 
-                  {/* �޽��� 3�� - ��� �� UI */}
+                  {/* 메시지 3안 - 모던 폰 UI */}
                   <div>
-                    <div className="text-sm text-gray-600 mb-3">?? {selectedChannel} �޽��� ��õ (��1)</div>
+                    <div className="text-sm text-gray-600 mb-3">💬 {selectedChannel} 메시지 추천 (택1)</div>
                     <div className="grid grid-cols-3 gap-5">
                       {aiResult?.messages?.length > 0 ? (
                         aiResult.messages.map((msg: any, idx: number) => (
                           <label key={msg.variant_id || idx} className="cursor-pointer group">
                             <input type="radio" name="message" className="hidden" defaultChecked={idx === 0} />
-                            {/* ��� �� ������ */}
+                            {/* 모던 폰 프레임 */}
                             <div className="rounded-[1.8rem] p-[3px] transition-all bg-gray-300 group-has-[:checked]:bg-gradient-to-b group-has-[:checked]:from-purple-400 group-has-[:checked]:to-purple-600 group-has-[:checked]:shadow-lg group-has-[:checked]:shadow-purple-200 hover:bg-gray-400">
                               <div className="bg-white rounded-[1.6rem] overflow-hidden flex flex-col" style={{ height: '420px' }}>
-                                {/* ��� - Ÿ�Ը� */}
+                                {/* 상단 - 타입명 */}
                                 <div className="px-4 py-2.5 bg-gradient-to-r from-gray-50 to-gray-100 flex justify-between items-center shrink-0 border-b">
-                                  <span className="text-[11px] text-gray-400 font-medium">���ڸ޽���</span>
+                                  <span className="text-[11px] text-gray-400 font-medium">문자메시지</span>
                                   <span className="text-[11px] font-bold text-purple-600">{msg.variant_id}. {msg.variant_name}</span>
                                 </div>
-                                {/* �޽��� ���� - ��ũ�� */}
+                                {/* 메시지 영역 - 스크롤 */}
                                 <div className="flex-1 overflow-y-auto p-3 bg-gradient-to-b from-purple-50/30 to-white">
                                   <div className="flex gap-2">
-                                    <div className="w-7 h-7 rounded-full bg-purple-100 flex items-center justify-center shrink-0 text-xs">??</div>
+                                    <div className="w-7 h-7 rounded-full bg-purple-100 flex items-center justify-center shrink-0 text-xs">📱</div>
                                     <div className="bg-white rounded-2xl rounded-tl-sm p-3 shadow-sm border border-gray-100 text-[12px] leading-[1.6] whitespace-pre-wrap text-gray-700 max-w-[95%]">
                                       {aiResult?.usePersonalization ? (() => {
-                                        const sampleData: Record<string, string> = { '�̸�': '��μ�', '����Ʈ': '12,500', '���': 'VIP', '�����': '������', '����': '����', '���űݾ�': '350,000', '����Ƚ��': '8', '����ֹ��ݾ�': '43,750', 'LTV����': '85' };
+                                        const sampleData: Record<string, string> = { '이름': '김민수', '포인트': '12,500', '등급': 'VIP', '매장명': '강남점', '지역': '서울', '구매금액': '350,000', '구매횟수': '8', '평균주문금액': '43,750', 'LTV점수': '85' };
                                         let text = msg.message_text || '';
                                         Object.entries(sampleData).forEach(([k, v]) => { text = text.replace(new RegExp(`%${k}%`, 'g'), v); });
                                         return text;
@@ -2302,7 +2302,7 @@ const campaignData = {
                                     </div>
                                   </div>
                                 </div>
-                                {/* �ϴ� ����Ʈ */}
+                                {/* 하단 바이트 */}
                                 <div className="px-3 py-2 border-t bg-gray-50 text-center shrink-0">
                                   <span className="text-[10px] text-gray-400">{msg.byte_count || '?'} / {selectedChannel === 'SMS' ? 90 : 2000} bytes</span>
                                 </div>
@@ -2312,15 +2312,15 @@ const campaignData = {
                         ))
                       ) : (
                         <div className="col-span-3 text-center py-8 text-gray-400">
-                          �޽����� �ҷ����� ��...
+                          메시지를 불러오는 중...
                         </div>
                       )}
                     </div>
                   </div>
 
-                  {/* MMS �̹��� ÷�� */}
+                  {/* MMS 이미지 첨부 */}
                   <div>
-                    <div className="text-base font-semibold text-gray-700 mb-3">??? �̹��� ÷�� (MMS)</div>
+                    <div className="text-base font-semibold text-gray-700 mb-3">🖼️ 이미지 첨부 (MMS)</div>
                     <div
                       onClick={() => setShowMmsUploadModal(true)}
                       className="border-2 border-dashed border-gray-200 rounded-xl p-4 bg-gray-50/50 cursor-pointer hover:border-purple-400 hover:bg-purple-50/50 transition-all"
@@ -2330,43 +2330,43 @@ const campaignData = {
                           {mmsUploadedImages.map((img, idx) => (
                             <img key={idx} src={img.url} alt="" className="w-16 h-16 object-cover rounded-lg border shadow-sm" crossOrigin="use-credentials" />
                           ))}
-                          <div className="text-sm text-purple-600 font-medium">?? {mmsUploadedImages.length}�� ÷�ε� (Ŭ���Ͽ� ����)</div>
+                          <div className="text-sm text-purple-600 font-medium">✏️ {mmsUploadedImages.length}장 첨부됨 (클릭하여 수정)</div>
                         </div>
                       ) : (
                         <div className="flex flex-col items-center gap-2 py-2">
                           <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center">
-                            <span className="text-xl">??</span>
+                            <span className="text-xl">📷</span>
                           </div>
-                          <div className="text-sm text-gray-500">Ŭ���Ͽ� �̹����� ÷���ϸ� MMS�� �߼۵˴ϴ�</div>
-                          <div className="text-xs text-gray-400">JPG�� �� 300KB ���� �� �ִ� 3��</div>
+                          <div className="text-sm text-gray-500">클릭하여 이미지를 첨부하면 MMS로 발송됩니다</div>
+                          <div className="text-xs text-gray-400">JPG만 · 300KB 이하 · 최대 3장</div>
                         </div>
                       )}
                     </div>
                   </div>
 
-                  {/* �߼۽ð� */}
+                  {/* 발송시간 */}
                   <div>
-                    <div className="text-base font-semibold text-gray-700 mb-4">? �߼۽ð�</div>
+                    <div className="text-base font-semibold text-gray-700 mb-4">⏰ 발송시간</div>
                     <div className="flex gap-3 items-stretch">
                       <label 
                         onClick={() => setSendTimeOption('ai')}
                         className={`flex-1 p-3 border-2 rounded-xl cursor-pointer text-center flex flex-col justify-center ${sendTimeOption === 'ai' ? 'border-purple-500 bg-purple-50' : 'border-gray-200 hover:border-purple-300'}`}
                       >
-                        <div className="font-bold text-base">?? AI ��õ�ð�</div>
-                        <div className="text-sm text-gray-500 mt-1">{aiResult?.recommendedTime || '���� �ð�'}</div>
+                        <div className="font-bold text-base">🤖 AI 추천시간</div>
+                        <div className="text-sm text-gray-500 mt-1">{aiResult?.recommendedTime || '최적 시간'}</div>
                       </label>
                       <label 
                         onClick={() => setSendTimeOption('now')}
                         className={`flex-1 p-3 border-2 rounded-xl cursor-pointer text-center flex flex-col justify-center ${sendTimeOption === 'now' ? 'border-purple-500 bg-purple-50' : 'border-gray-200 hover:border-purple-300'}`}
                       >
-                        <div className="font-bold text-base">? ��� �߼�</div>
-                        <div className="text-sm text-gray-500 mt-1">���� �ٷ�</div>
+                        <div className="font-bold text-base">⚡ 즉시 발송</div>
+                        <div className="text-sm text-gray-500 mt-1">지금 바로</div>
                       </label>
                       <label 
                         onClick={() => setSendTimeOption('custom')}
                         className={`flex-[1.5] p-3 border-2 rounded-xl cursor-pointer text-center ${sendTimeOption === 'custom' ? 'border-purple-500 bg-purple-50' : 'border-gray-200 hover:border-purple-300'}`}
                       >
-                        <div className="font-bold text-base mb-2">?? ���� ����</div>
+                        <div className="font-bold text-base mb-2">📅 직접 선택</div>
                         <div className="flex flex-col gap-2 w-full">
                           <input 
                             type="date" 
@@ -2395,8 +2395,8 @@ const campaignData = {
                               }}
                               className="border-2 rounded-lg px-2 py-1.5 text-sm font-medium"
                             >
-                              <option value="AM">����</option>
-                              <option value="PM">����</option>
+                              <option value="AM">오전</option>
+                              <option value="PM">오후</option>
                             </select>
                             <input
                               type="number"
@@ -2439,9 +2439,9 @@ const campaignData = {
                     </div>
                     </div>
 
-{/* ȸ�Ź�ȣ ���� */}
+{/* 회신번호 선택 */}
 <div>
-  <div className="text-base font-semibold text-gray-700 mb-3">?? ȸ�Ź�ȣ</div>
+  <div className="text-base font-semibold text-gray-700 mb-3">📞 회신번호</div>
   <div className="flex gap-3 items-center">
     <select
       value={useIndividualCallback ? '__individual__' : selectedCallback}
@@ -2456,23 +2456,23 @@ const campaignData = {
       }}
       className="flex-1 border-2 rounded-lg px-4 py-3 text-sm focus:border-purple-400 focus:outline-none"
     >
-      <option value="">ȸ�Ź�ȣ ����</option>
-      <option value="__individual__">?? ����ȸ�Ź�ȣ (����� �����ȣ)</option>
+      <option value="">회신번호 선택</option>
+      <option value="__individual__">📱 개별회신번호 (고객별 매장번호)</option>
       {callbackNumbers.map((cb) => (
         <option key={cb.id} value={cb.phone}>
-          {cb.label || cb.phone} {cb.is_default && '(�⺻)'}
+          {cb.label || cb.phone} {cb.is_default && '(기본)'}
         </option>
       ))}
     </select>
     {useIndividualCallback && (
-      <span className="text-sm text-blue-600">?? �� ����� ���̿���� ȸ�Ź�ȣ�� �߼�</span>
+      <span className="text-sm text-blue-600">💡 각 고객의 주이용매장 회신번호로 발송</span>
     )}
   </div>
 </div>
 
-{/* �ϴ� ��ư */}
+{/* 하단 버튼 */}
 {testSentResult && (
-                    <div className={`p-3 rounded-lg text-sm whitespace-pre-wrap mb-3 ${testSentResult.startsWith('?') ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+                    <div className={`p-3 rounded-lg text-sm whitespace-pre-wrap mb-3 ${testSentResult.startsWith('✅') ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
                       {testSentResult}
                     </div>
                   )}
@@ -2481,27 +2481,27 @@ const campaignData = {
                       onClick={() => setAiStep(1)}
                       className="flex-1 py-3 border rounded-lg text-gray-600 hover:bg-gray-100 flex items-center justify-center gap-2"
                     >
-                      �� ä�κ���
+                      ← 채널변경
                     </button>
                     <button
   onClick={handleTestSend}
   disabled={testSending || testCooldown}
   className="flex-1 py-3 bg-orange-500 text-white rounded-lg hover:bg-orange-600 disabled:opacity-50 flex items-center justify-center gap-2"
 >
-{testSending ? '?? �߼� ��...' : testCooldown ? '? 10�� ���' : '?? ����� �׽�Ʈ'}
+{testSending ? '📱 발송 중...' : testCooldown ? '⏳ 10초 대기' : '📱 담당자 테스트'}
 </button>
 <button 
   onClick={() => setShowPreview(true)}
   className="flex-1 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center justify-center gap-2"
 >
-  ??? �̸�����
+  👁️ 미리보기
 </button>
 <button 
   onClick={handleAiCampaignSend}
   disabled={isSending}
   className="flex-1 py-3 bg-green-700 text-white rounded-lg hover:bg-green-800 flex items-center justify-center gap-2"
 >
-{isSending ? '? �߼� ��...' : '?? �߼��ϱ�'}
+{isSending ? '⏳ 발송 중...' : '🚀 발송하기'}
 </button>
                   </div>
                 </div>
@@ -2509,53 +2509,53 @@ const campaignData = {
             </div>
           </div>
         )}
-        {/* �̸����� ��� */}
+        {/* 미리보기 모달 */}
         {showPreview && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
             <div className={`bg-white rounded-xl shadow-2xl max-h-[90vh] overflow-y-auto ${aiStep === 2 ? 'w-[960px]' : 'w-[600px]'}`}>
               <div className="p-6 border-b bg-green-50">
                 <div className="flex justify-between items-center">
-                  <h3 className="text-lg font-bold">?? �߼� �̸�����</h3>
-                  <button onClick={() => setShowPreview(false)} className="text-gray-500 hover:text-gray-700 text-xl">?</button>
+                  <h3 className="text-lg font-bold">📱 발송 미리보기</h3>
+                  <button onClick={() => setShowPreview(false)} className="text-gray-500 hover:text-gray-700 text-xl">✕</button>
                 </div>
               </div>
               
               <div className="p-6 space-y-4">
-                {/* Ÿ�� ���� */}
+                {/* 타겟 정보 */}
                 <div className="bg-blue-50 rounded-lg p-4">
-                  <div className="text-sm text-gray-600 mb-1">?? �߼� ���</div>
-                  <div className="font-semibold">{aiResult?.target?.description || 'Ÿ�� ���'}</div>
-                  <div className="text-blue-600 font-bold">{aiResult?.target?.count?.toLocaleString() || 0}��</div>
+                  <div className="text-sm text-gray-600 mb-1">📌 발송 대상</div>
+                  <div className="font-semibold">{aiResult?.target?.description || '타겟 고객'}</div>
+                  <div className="text-blue-600 font-bold">{aiResult?.target?.count?.toLocaleString() || 0}명</div>
                   {aiResult?.target?.unsubscribeCount > 0 && (
-                    <div className="text-rose-500 text-sm mt-1">���Űź� ����: {aiResult?.target?.unsubscribeCount?.toLocaleString()}��</div>
+                    <div className="text-rose-500 text-sm mt-1">수신거부 제외: {aiResult?.target?.unsubscribeCount?.toLocaleString()}명</div>
                   )}
                 </div>
 
-                {/* ä�� */}
+                {/* 채널 */}
                 <div className="flex items-center gap-2">
-                  <span className="text-sm text-gray-600">ä��:</span>
+                  <span className="text-sm text-gray-600">채널:</span>
                   <span className="px-2 py-1 bg-purple-100 text-purple-700 rounded font-medium">{selectedChannel}</span>
                 </div>
 
-                {/* ȸ�Ź�ȣ */}
+                {/* 회신번호 */}
                 <div className="flex items-center gap-2">
-                  <span className="text-sm text-gray-600">?? ȸ�Ź�ȣ:</span>
+                  <span className="text-sm text-gray-600">📞 회신번호:</span>
                   <span className="font-medium">
-                    {useIndividualCallback ? '����ȸ�Ź�ȣ (����� ����)' : (selectedCallback || '�̼���')}
+                    {useIndividualCallback ? '개별회신번호 (고객별 매장)' : (selectedCallback || '미선택')}
                   </span>
                 </div>
 
-                {/* �޽��� �̸����� - ����ȭ ���� */}
+                {/* 메시지 미리보기 - 개인화 샘플 */}
                 <div>
-                  <div className="text-sm text-gray-600 mb-2">?? �޽��� ����</div>
+                  <div className="text-sm text-gray-600 mb-2">💬 메시지 내용</div>
                   {aiResult?.usePersonalization && aiResult?.personalizationVars?.length > 0 ? (
                     <div>
-                      <div className="text-xs text-purple-600 mb-2">? ����ȭ ���� ���� (���� 3�� ����)</div>
+                      <div className="text-xs text-purple-600 mb-2">✨ 개인화 적용 예시 (상위 3명 샘플)</div>
                       <div className="grid grid-cols-3 gap-3">
                         {[
-                          { '�̸�': '��μ�', '����Ʈ': '12,500', '���': 'VIP', '�����': '������', '����': '����', '���űݾ�': '350,000', '����Ƚ��': '8', '����ֹ��ݾ�': '43,750', 'LTV����': '85' },
-                          { '�̸�': '�̿���', '����Ʈ': '8,200', '���': 'GOLD', '�����': 'ȫ����', '����': '���', '���űݾ�': '180,000', '����Ƚ��': '5', '����ֹ��ݾ�': '36,000', 'LTV����': '62' },
-                          { '�̸�': '������', '����Ʈ': '25,800', '���': 'VIP', '�����': '�λ꼾����', '����': '�λ�', '���űݾ�': '520,000', '����Ƚ��': '12', '����ֹ��ݾ�': '43,300', 'LTV����': '91' },
+                          { '이름': '김민수', '포인트': '12,500', '등급': 'VIP', '매장명': '강남점', '지역': '서울', '구매금액': '350,000', '구매횟수': '8', '평균주문금액': '43,750', 'LTV점수': '85' },
+                          { '이름': '이영희', '포인트': '8,200', '등급': 'GOLD', '매장명': '홍대점', '지역': '경기', '구매금액': '180,000', '구매횟수': '5', '평균주문금액': '36,000', 'LTV점수': '62' },
+                          { '이름': '박지현', '포인트': '25,800', '등급': 'VIP', '매장명': '부산센텀점', '지역': '부산', '구매금액': '520,000', '구매횟수': '12', '평균주문금액': '43,300', 'LTV점수': '91' },
                         ].map((sample, idx) => {
                           let msg = aiResult?.messages?.[0]?.message_text || '';
                           Object.entries(sample).forEach(([varName, value]) => {
@@ -2563,7 +2563,7 @@ const campaignData = {
                           });
                           return (
                             <div key={idx} className="rounded-2xl border-2 border-gray-200 overflow-hidden bg-white">
-                              <div className="bg-gray-100 px-3 py-1.5 text-xs text-gray-500 text-center">���� {idx + 1}</div>
+                              <div className="bg-gray-100 px-3 py-1.5 text-xs text-gray-500 text-center">샘플 {idx + 1}</div>
                               <div className="p-3 text-xs leading-relaxed whitespace-pre-wrap bg-gray-50" style={{ minHeight: '120px', maxHeight: '200px', overflowY: 'auto' }}>
                                 {msg}
                               </div>
@@ -2574,15 +2574,15 @@ const campaignData = {
                     </div>
                   ) : (
                     <div className="bg-gray-100 rounded-lg p-4 whitespace-pre-wrap text-sm">
-                      {aiResult?.messages?.[0]?.message_text || '�޽��� ����'}
+                      {aiResult?.messages?.[0]?.message_text || '메시지 없음'}
                     </div>
                   )}
                 </div>
 
-                {/* MMS �̹��� �̸����� */}
+                {/* MMS 이미지 미리보기 */}
                 {mmsUploadedImages.length > 0 && (
                   <div>
-                    <div className="text-sm text-gray-600 mb-2">??? ÷�� �̹��� ({mmsUploadedImages.length}��)</div>
+                    <div className="text-sm text-gray-600 mb-2">🖼️ 첨부 이미지 ({mmsUploadedImages.length}장)</div>
                     <div className="flex gap-3 mb-2">
                       {mmsUploadedImages.map((img, idx) => (
                         <img
@@ -2595,25 +2595,25 @@ const campaignData = {
                       ))}
                     </div>
                     <div className="text-xs text-amber-600 bg-amber-50 rounded-lg p-2">
-                      ?? ���� ���� ȭ���� ����� �� �޴��� ������ ���� �ٸ��� ���� �� �ֽ��ϴ�
+                      ⚠️ 실제 수신 화면은 이통사 및 휴대폰 기종에 따라 다르게 보일 수 있습니다
                     </div>
                   </div>
                 )}
 
-                {/* �߼� �ð� */}
+                {/* 발송 시간 */}
                 <div className="flex items-center gap-2">
-                  <span className="text-sm text-gray-600">? �߼۽ð�:</span>
+                  <span className="text-sm text-gray-600">⏰ 발송시간:</span>
                   <span className="font-medium">
-                    {sendTimeOption === 'ai' ? (aiResult?.recommendedTime || 'AI ��õ�ð�') : 
-                     sendTimeOption === 'now' ? '��� �߼�' : 
-                     customSendTime ? formatDateTime(customSendTime) : '���� ����'}
+                    {sendTimeOption === 'ai' ? (aiResult?.recommendedTime || 'AI 추천시간') : 
+                     sendTimeOption === 'now' ? '즉시 발송' : 
+                     customSendTime ? formatDateTime(customSendTime) : '직접 선택'}
                   </span>
                 </div>
               </div>
 
               <div className="p-6 border-t space-y-3">
                 {testSentResult && (
-                  <div className={`p-3 rounded-lg text-sm whitespace-pre-wrap mb-3 ${testSentResult.startsWith('?') ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+                  <div className={`p-3 rounded-lg text-sm whitespace-pre-wrap mb-3 ${testSentResult.startsWith('✅') ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
                     {testSentResult}
                   </div>
                 )}
@@ -2622,23 +2622,23 @@ const campaignData = {
                     onClick={() => { setShowPreview(false); setTestSentResult(null); }}
                     className="flex-1 py-3 border rounded-lg text-gray-600 hover:bg-gray-100"
                   >
-                    �� ���ư���
+                    ← 돌아가기
                   </button>
                   <button
                     onClick={handleTestSend}
                     disabled={testSending || testCooldown}
                     className="flex-1 py-3 bg-orange-500 text-white rounded-lg hover:bg-orange-600 disabled:opacity-50"
                   >
-                    {testSending ? '?? �߼� ��...' : testCooldown ? '? 10�� ���' : '?? ����� ��������'}
+                    {testSending ? '📱 발송 중...' : testCooldown ? '⏳ 10초 대기' : '📱 담당자 사전수신'}
                   </button>
                   <button
                     onClick={() => {
                       const toast = document.createElement('div');
                       toast.innerHTML = `
                         <div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:white;padding:24px 32px;border-radius:16px;box-shadow:0 10px 40px rgba(0,0,0,0.2);z-index:9999;text-align:center;">
-                          <div style="font-size:48px;margin-bottom:12px;">??</div>
-                          <div style="font-size:16px;font-weight:bold;color:#374151;margin-bottom:8px;">�غ� ���� ����Դϴ�</div>
-                          <div style="font-size:14px;color:#6B7280;">���������׽�Ʈ�� �� ������Ʈ�˴ϴ�</div>
+                          <div style="font-size:48px;margin-bottom:12px;">🚧</div>
+                          <div style="font-size:16px;font-weight:bold;color:#374151;margin-bottom:8px;">준비 중인 기능입니다</div>
+                          <div style="font-size:14px;color:#6B7280;">스팸필터테스트는 곧 업데이트됩니다</div>
                         </div>
                         <div style="position:fixed;inset:0;background:rgba(0,0,0,0.3);z-index:9998;" onclick="this.parentElement.remove()"></div>
                       `;
@@ -2647,34 +2647,34 @@ const campaignData = {
                     }}
                     className="flex-1 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300"
                   >
-                    ??? ��������
+                    🛡️ 스팸필터
                   </button>
                   <button
                     onClick={handleAiCampaignSend}
                     disabled={isSending}
                     className="flex-1 py-3 bg-green-700 text-white rounded-lg hover:bg-green-800"
                   >
-                    {isSending ? '? �߼� ��...' : '?? �߼� Ȯ��'}
+                    {isSending ? '⏳ 발송 중...' : '🚀 발송 확정'}
                   </button>
                 </div>
               </div>
             </div>
           </div>
         )}
-        {/* ķ���� Ȯ�� ���� ��� */}
+        {/* 캠페인 확정 성공 모달 */}
         {showSuccess && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
             <div className="bg-white rounded-xl shadow-2xl w-[400px] text-center p-8">
-              <div className="text-6xl mb-4">??</div>
-              <h3 className="text-xl font-bold text-gray-800 mb-2">ķ������ Ȯ���Ǿ����ϴ�!</h3>
+              <div className="text-6xl mb-4">🎉</div>
+              <h3 className="text-xl font-bold text-gray-800 mb-2">캠페인이 확정되었습니다!</h3>
                <div className="bg-green-50 rounded-lg p-4 mb-6 text-left">
                <div className="text-sm text-gray-600 space-y-1">
-                  <div>?? ä��: <span className="font-medium">{selectedChannel}</span></div>
-                  <div>?? ���: <span className="font-medium">{aiResult?.target?.count?.toLocaleString() || 0}��</span></div>
+                  <div>📱 채널: <span className="font-medium">{selectedChannel}</span></div>
+                  <div>👥 대상: <span className="font-medium">{aiResult?.target?.count?.toLocaleString() || 0}명</span></div>
                   {aiResult?.target?.unsubscribeCount > 0 && (
-                    <div>?? ���Űź� ����: <span className="font-medium text-rose-500">{aiResult?.target?.unsubscribeCount?.toLocaleString()}��</span></div>
+                    <div>🚫 수신거부 제외: <span className="font-medium text-rose-500">{aiResult?.target?.unsubscribeCount?.toLocaleString()}명</span></div>
                   )}
-                  <div>? �߼�: <span className="font-medium">{successSendInfo}</span></div>
+                  <div>⏰ 발송: <span className="font-medium">{successSendInfo}</span></div>
                 </div>
               </div>
               <div className="flex gap-3">
@@ -2685,13 +2685,13 @@ const campaignData = {
                   }}
                   className="flex-1 py-3 border rounded-lg text-gray-600 hover:bg-gray-100"
                 >
-                  ?? Ķ���� Ȯ��
+                  📅 캘린더 확인
                 </button>
                 <button
                   onClick={() => setShowSuccess(false)}
                   className="flex-1 py-3 bg-green-700 text-white rounded-lg hover:bg-green-800"
                 >
-                  Ȯ��
+                  확인
                 </button>
               </div>
             </div>
@@ -2701,31 +2701,31 @@ const campaignData = {
         {showCustomerDB && <CustomerDBModal onClose={() => setShowCustomerDB(false)} token={localStorage.getItem('token')} />}
         {showCalendar && <CalendarModal onClose={() => setShowCalendar(false)} token={localStorage.getItem('token')} />}
 
-        {/* MMS �̹��� ���ε� ��� */}
+        {/* MMS 이미지 업로드 모달 */}
         {showMmsUploadModal && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[70]">
             <div className="bg-white rounded-2xl shadow-2xl w-[520px] overflow-hidden animate-in fade-in zoom-in">
-              {/* ��� */}
+              {/* 헤더 */}
               <div className="px-6 py-4 border-b bg-gradient-to-r from-amber-50 to-orange-50 flex justify-between items-center">
                 <div className="flex items-center gap-2">
-                  <span className="text-xl">???</span>
-                  <h3 className="font-bold text-lg text-gray-800">MMS �̹��� ÷��</h3>
+                  <span className="text-xl">🖼️</span>
+                  <h3 className="font-bold text-lg text-gray-800">MMS 이미지 첨부</h3>
                 </div>
-                <button onClick={() => setShowMmsUploadModal(false)} className="text-gray-400 hover:text-gray-600 text-xl">?</button>
+                <button onClick={() => setShowMmsUploadModal(false)} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
               </div>
 
-              {/* �԰� �ȳ� */}
+              {/* 규격 안내 */}
               <div className="px-6 py-3 bg-blue-50 border-b">
-                <div className="text-sm font-semibold text-blue-700 mb-1">?? �̹��� �԰� �ȳ�</div>
+                <div className="text-sm font-semibold text-blue-700 mb-1">📋 이미지 규격 안내</div>
                 <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-blue-600">
-                  <div>? ���� ����: <span className="font-bold">JPG/JPEG��</span> ����</div>
-                  <div>? �ִ� �뷮: <span className="font-bold">300KB ����</span> (����� ����)</div>
-                  <div>? �ִ� ���: <span className="font-bold">3��</span> (����� ����)</div>
-                  <div>? PNG/GIF: ����� ���� ���� (������)</div>
+                  <div>• 파일 형식: <span className="font-bold">JPG/JPEG만</span> 가능</div>
+                  <div>• 최대 용량: <span className="font-bold">300KB 이하</span> (이통사 권장)</div>
+                  <div>• 최대 장수: <span className="font-bold">3장</span> (이통사 보장)</div>
+                  <div>• PNG/GIF: 이통사 거절 가능 (미지원)</div>
                 </div>
               </div>
 
-              {/* 3ĭ ���� */}
+              {/* 3칸 슬롯 */}
               <div className="p-6">
                 <div className="grid grid-cols-3 gap-4">
                   {[0, 1, 2].map(slotIdx => {
@@ -2733,11 +2733,11 @@ const campaignData = {
                     return (
                       <div key={slotIdx} className="aspect-square relative">
                         {img ? (
-                          /* ���ε� �Ϸ� ���� */
+                          /* 업로드 완료 슬롯 */
                           <div className="w-full h-full rounded-xl border-2 border-green-300 bg-green-50 overflow-hidden relative group">
                             <img
                               src={img.url}
-                              alt={`�̹��� ${slotIdx + 1}`}
+                              alt={`이미지 ${slotIdx + 1}`}
                               className="w-full h-full object-cover"
                               crossOrigin="use-credentials"
                             />
@@ -2745,7 +2745,7 @@ const campaignData = {
                               <button
                                 onClick={() => handleMmsImageRemove(slotIdx)}
                                 className="opacity-0 group-hover:opacity-100 transition-opacity bg-red-500 hover:bg-red-600 text-white rounded-full w-8 h-8 flex items-center justify-center text-sm font-bold shadow-lg"
-                              >��</button>
+                              >×</button>
                             </div>
                             <div className="absolute bottom-1 right-1 bg-green-600 text-white text-[10px] px-1.5 py-0.5 rounded-full font-bold">
                               {(img.size / 1024).toFixed(0)}KB
@@ -2755,11 +2755,11 @@ const campaignData = {
                             </div>
                           </div>
                         ) : (
-                          /* �� ���� */
+                          /* 빈 슬롯 */
                           <label className={`w-full h-full rounded-xl border-2 border-dashed border-gray-300 bg-gray-50 flex flex-col items-center justify-center cursor-pointer hover:border-amber-400 hover:bg-amber-50 transition-all ${mmsUploading ? 'opacity-50 pointer-events-none' : ''}`}>
                             <div className="text-3xl text-gray-300 mb-2">+</div>
-                            <div className="text-xs text-gray-400 font-medium">�̹��� {slotIdx + 1}</div>
-                            <div className="text-[10px] text-gray-300 mt-1">JPG �� 300KB</div>
+                            <div className="text-xs text-gray-400 font-medium">이미지 {slotIdx + 1}</div>
+                            <div className="text-[10px] text-gray-300 mt-1">JPG · 300KB</div>
                             <input
                               type="file"
                               accept=".jpg,.jpeg"
@@ -2779,20 +2779,20 @@ const campaignData = {
 
                 {mmsUploading && (
                   <div className="flex items-center justify-center gap-2 mt-4 text-sm text-amber-600">
-                    <span className="animate-spin">?</span> �̹��� ���ε� ��...
+                    <span className="animate-spin">⏳</span> 이미지 업로드 중...
                   </div>
                 )}
               </div>
 
-              {/* �ȳ� + Ȯ�� */}
+              {/* 안내 + 확인 */}
               <div className="px-6 pb-6 space-y-3">
                 <div className="text-xs text-amber-600 bg-amber-50 rounded-lg p-3 text-center">
-                  ?? ���� ���� ȭ���� ����� �� �޴��� ������ ���� �ٸ��� ���� �� �ֽ��ϴ�
+                  ⚠️ 실제 수신 화면은 이통사 및 휴대폰 기종에 따라 다르게 보일 수 있습니다
                 </div>
                 <button
                   onClick={() => {
                     setShowMmsUploadModal(false);
-                    // �̹����� ������ �ڵ� MMS ��ȯ
+                    // 이미지가 있으면 자동 MMS 전환
                     if (mmsUploadedImages.length > 0) {
                       setTargetMsgType('MMS');
                       setDirectMsgType('MMS');
@@ -2801,20 +2801,20 @@ const campaignData = {
                   }}
                   className="w-full py-3 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-semibold text-sm transition-colors"
                 >
-                  {mmsUploadedImages.length > 0 ? `? ${mmsUploadedImages.length}�� ÷�� �Ϸ�` : 'Ȯ��'}
+                  {mmsUploadedImages.length > 0 ? `✅ ${mmsUploadedImages.length}장 첨부 완료` : '확인'}
                 </button>
               </div>
             </div>
           </div>
         )}
         
-        {/* �ֱ� ķ���� ��� */}
+        {/* 최근 캠페인 모달 */}
         {showRecentCampaigns && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
             <div className="bg-white rounded-xl shadow-2xl w-[600px] max-h-[80vh] overflow-hidden">
               <div className="p-4 border-b bg-blue-50 flex justify-between items-center">
-                <h3 className="font-bold text-lg">?? �ֱ� ķ����</h3>
-                <button onClick={() => setShowRecentCampaigns(false)} className="text-gray-500 hover:text-gray-700 text-xl">?</button>
+                <h3 className="font-bold text-lg">📊 최근 캠페인</h3>
+                <button onClick={() => setShowRecentCampaigns(false)} className="text-gray-500 hover:text-gray-700 text-xl">✕</button>
               </div>
               <div className="p-4 overflow-y-auto max-h-[60vh]">
                 {recentCampaigns.length > 0 ? (
@@ -2830,96 +2830,96 @@ const campaignData = {
                             c.status === 'cancelled' ? 'bg-gray-200 text-gray-500' :
                             'bg-gray-100 text-gray-700'
                           }`}>
-                            {c.status === 'completed' ? '�Ϸ�' : c.status === 'scheduled' ? '����' : c.status === 'sending' ? '�߼���' : c.status === 'cancelled' ? '���' : '�غ�'}
+                            {c.status === 'completed' ? '완료' : c.status === 'scheduled' ? '예약' : c.status === 'sending' ? '발송중' : c.status === 'cancelled' ? '취소' : '준비'}
                           </span>
                         </div>
                         <div className="text-sm text-gray-500 space-y-1">
                           <div>
-                            {c.send_type === 'direct' ? '??' : '??'} 
+                            {c.send_type === 'direct' ? '📤' : '🤖'} 
                             <span className={`ml-1 text-xs px-1.5 py-0.5 rounded ${c.send_type === 'direct' ? 'bg-emerald-100 text-emerald-700' : 'bg-purple-100 text-purple-700'}`}>
-                              {c.send_type === 'direct' ? '����' : 'AI'}
+                              {c.send_type === 'direct' ? '직접' : 'AI'}
                             </span>
-                            <span className="ml-2">?? {c.message_type} �� ?? {c.target_count?.toLocaleString()}��</span>
+                            <span className="ml-2">📱 {c.message_type} · 👥 {c.target_count?.toLocaleString()}명</span>
                           </div>
-                          <div>? ���� {c.success_count?.toLocaleString() || 0} �� ? ���� {c.fail_count?.toLocaleString() || 0}</div>
+                          <div>✅ 성공 {c.success_count?.toLocaleString() || 0} · ❌ 실패 {c.fail_count?.toLocaleString() || 0}</div>
                           <div className="text-xs text-gray-400">{formatDateTime(c.created_at)}</div>
                         </div>
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <p className="text-gray-500 text-center py-8">�ֱ� ķ������ �����ϴ�</p>
+                  <p className="text-gray-500 text-center py-8">최근 캠페인이 없습니다</p>
                 )}
               </div>
             </div>
           </div>
         )}
 
-        {/* ��õ ���ø� ��� */}
+        {/* 추천 템플릿 모달 */}
         {showTemplates && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
             <div className="bg-white rounded-xl shadow-2xl w-[700px] max-h-[85vh] overflow-hidden">
               <div className="p-4 border-b bg-purple-50 flex justify-between items-center">
-                <h3 className="font-bold text-lg">?? ��õ ���ø�</h3>
-                <button onClick={() => setShowTemplates(false)} className="text-gray-500 hover:text-gray-700 text-xl">?</button>
+                <h3 className="font-bold text-lg">📝 추천 템플릿</h3>
+                <button onClick={() => setShowTemplates(false)} className="text-gray-500 hover:text-gray-700 text-xl">✕</button>
               </div>
               <div className="p-6 overflow-y-auto max-h-[70vh]">
                 <div className="grid grid-cols-2 gap-4">
-                  <div onClick={() => { setAiCampaignPrompt('VIP ������� ���� �λ� ���� ������'); setShowTemplates(false); }} className="p-4 border rounded-lg hover:border-purple-400 cursor-pointer transition-all text-center">
-                    <div className="text-2xl mb-2">??</div>
-                    <div className="font-semibold text-gray-800 mb-1">VIP ���� �λ�</div>
-                    <div className="text-sm text-gray-500">VIP ������� ���� �޽��� �߼�</div>
+                  <div onClick={() => { setAiCampaignPrompt('VIP 고객에게 감사 인사 문자 보내줘'); setShowTemplates(false); }} className="p-4 border rounded-lg hover:border-purple-400 cursor-pointer transition-all text-center">
+                    <div className="text-2xl mb-2">💎</div>
+                    <div className="font-semibold text-gray-800 mb-1">VIP 감사 인사</div>
+                    <div className="text-sm text-gray-500">VIP 고객에게 감사 메시지 발송</div>
                   </div>
-                  <div onClick={() => { setAiCampaignPrompt('������ ������� ���� ���� ���� ������'); setShowTemplates(false); }} className="p-4 border rounded-lg hover:border-purple-400 cursor-pointer transition-all text-center">
-                    <div className="text-2xl mb-2">??</div>
-                    <div className="font-semibold text-gray-800 mb-1">���� ����</div>
-                    <div className="text-sm text-gray-500">���� ������� ���� ���� �߼�</div>
+                  <div onClick={() => { setAiCampaignPrompt('생일인 고객에게 축하 쿠폰 문자 보내줘'); setShowTemplates(false); }} className="p-4 border rounded-lg hover:border-purple-400 cursor-pointer transition-all text-center">
+                    <div className="text-2xl mb-2">🎂</div>
+                    <div className="font-semibold text-gray-800 mb-1">생일 축하</div>
+                    <div className="text-sm text-gray-500">생일 고객에게 축하 쿠폰 발송</div>
                   </div>
-                  <div onClick={() => { setAiCampaignPrompt('�Ż�ǰ ��� �ȳ� ���� ��ü ������� ������'); setShowTemplates(false); }} className="p-4 border rounded-lg hover:border-purple-400 cursor-pointer transition-all text-center">
-                    <div className="text-2xl mb-2">??</div>
-                    <div className="font-semibold text-gray-800 mb-1">�Ż�ǰ �ȳ�</div>
-                    <div className="text-sm text-gray-500">�Ż�ǰ ��� �ҽ� ��ü �߼�</div>
+                  <div onClick={() => { setAiCampaignPrompt('신상품 출시 안내 문자 전체 고객에게 보내줘'); setShowTemplates(false); }} className="p-4 border rounded-lg hover:border-purple-400 cursor-pointer transition-all text-center">
+                    <div className="text-2xl mb-2">🆕</div>
+                    <div className="font-semibold text-gray-800 mb-1">신상품 안내</div>
+                    <div className="text-sm text-gray-500">신상품 출시 소식 전체 발송</div>
                   </div>
-                  <div onClick={() => { setAiCampaignPrompt('30�� ���� ������� �� ���� ���� �̺�Ʈ ���� ������'); setShowTemplates(false); }} className="p-4 border rounded-lg hover:border-purple-400 cursor-pointer transition-all text-center">
-                    <div className="text-2xl mb-2">??</div>
-                    <div className="font-semibold text-gray-800 mb-1">���� ����</div>
-                    <div className="text-sm text-gray-500">Ÿ�� ��� ���� ���θ��</div>
+                  <div onClick={() => { setAiCampaignPrompt('30대 여성 고객에게 봄 시즌 할인 이벤트 문자 보내줘'); setShowTemplates(false); }} className="p-4 border rounded-lg hover:border-purple-400 cursor-pointer transition-all text-center">
+                    <div className="text-2xl mb-2">🌸</div>
+                    <div className="font-semibold text-gray-800 mb-1">시즌 할인</div>
+                    <div className="text-sm text-gray-500">타겟 고객 시즌 프로모션</div>
                   </div>
-                  <div onClick={() => { setAiCampaignPrompt('3���� �̻� �̱��� ������� ��湮 ���� ���� ������'); setShowTemplates(false); }} className="p-4 border rounded-lg hover:border-purple-400 cursor-pointer transition-all text-center">
-                    <div className="text-2xl mb-2">??</div>
-                    <div className="font-semibold text-gray-800 mb-1">��湮 ����</div>
-                    <div className="text-sm text-gray-500">�޸� ��� Ȱ��ȭ</div>
+                  <div onClick={() => { setAiCampaignPrompt('3개월 이상 미구매 고객에게 재방문 유도 문자 보내줘'); setShowTemplates(false); }} className="p-4 border rounded-lg hover:border-purple-400 cursor-pointer transition-all text-center">
+                    <div className="text-2xl mb-2">🔄</div>
+                    <div className="font-semibold text-gray-800 mb-1">재방문 유도</div>
+                    <div className="text-sm text-gray-500">휴면 고객 활성화</div>
                   </div>
-                  <div onClick={() => { setAiCampaignPrompt('����Ʈ �Ҹ� ���� ������� ��� �ȳ� ���� ������'); setShowTemplates(false); }} className="p-4 border rounded-lg hover:border-purple-400 cursor-pointer transition-all text-center">
-                    <div className="text-2xl mb-2">??</div>
-                    <div className="font-semibold text-gray-800 mb-1">����Ʈ �Ҹ� �ȳ�</div>
-                    <div className="text-sm text-gray-500">����Ʈ ���� �� �˸�</div>
+                  <div onClick={() => { setAiCampaignPrompt('포인트 소멸 예정 고객에게 사용 안내 문자 보내줘'); setShowTemplates(false); }} className="p-4 border rounded-lg hover:border-purple-400 cursor-pointer transition-all text-center">
+                    <div className="text-2xl mb-2">💰</div>
+                    <div className="font-semibold text-gray-800 mb-1">포인트 소멸 안내</div>
+                    <div className="text-sm text-gray-500">포인트 만료 전 알림</div>
                   </div>
-                  <div onClick={() => { setAiCampaignPrompt('���� ���� ��� �ȳ� ���� ��ü ������� ������'); setShowTemplates(false); }} className="p-4 border rounded-lg hover:border-purple-400 cursor-pointer transition-all text-center">
-                    <div className="text-2xl mb-2">??</div>
-                    <div className="font-semibold text-gray-800 mb-1">��� �ȳ�</div>
-                    <div className="text-sm text-gray-500">����/�̺�Ʈ ��� ����</div>
+                  <div onClick={() => { setAiCampaignPrompt('설날 연휴 배송 안내 문자 전체 고객에게 보내줘'); setShowTemplates(false); }} className="p-4 border rounded-lg hover:border-purple-400 cursor-pointer transition-all text-center">
+                    <div className="text-2xl mb-2">📦</div>
+                    <div className="font-semibold text-gray-800 mb-1">배송 안내</div>
+                    <div className="text-sm text-gray-500">연휴/이벤트 배송 공지</div>
                   </div>
-                  <div onClick={() => { setAiCampaignPrompt('����ũ�� �����ϴ� ������� 1+1 �̺�Ʈ ���� ������'); setShowTemplates(false); }} className="p-4 border rounded-lg hover:border-purple-400 cursor-pointer transition-all text-center">
-                    <div className="text-2xl mb-2">??</div>
-                    <div className="font-semibold text-gray-800 mb-1">1+1 �̺�Ʈ</div>
-                    <div className="text-sm text-gray-500">ī�װ���� ���θ��</div>
+                  <div onClick={() => { setAiCampaignPrompt('마스크팩 좋아하는 고객에게 1+1 이벤트 문자 보내줘'); setShowTemplates(false); }} className="p-4 border rounded-lg hover:border-purple-400 cursor-pointer transition-all text-center">
+                    <div className="text-2xl mb-2">🎁</div>
+                    <div className="font-semibold text-gray-800 mb-1">1+1 이벤트</div>
+                    <div className="text-sm text-gray-500">카테고리별 프로모션</div>
                   </div>
                 </div>
               </div>
             </div>
           </div>
         )}
-                            {/* ���� ���ε� ķ���� ��� */}
-        {/* ���� Ÿ�� ���� ��� */}
+                            {/* 파일 업로드 캠페인 모달 */}
+        {/* 직접 타겟 설정 모달 */}
         {showDirectTargeting && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
             <div className="bg-white rounded-2xl shadow-2xl w-[700px] max-h-[95vh] overflow-hidden">
-              {/* ��� */}
+              {/* 헤더 */}
               <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center">
                 <div>
-                  <h3 className="text-lg font-bold text-gray-800">���� Ÿ�� ����</h3>
-                  <p className="text-sm text-gray-500 mt-0.5">���� �������� ��� ����� �����ϼ���</p>
+                  <h3 className="text-lg font-bold text-gray-800">직접 타겟 설정</h3>
+                  <p className="text-sm text-gray-500 mt-0.5">필터 조건으로 대상 고객을 선택하세요</p>
                 </div>
                 <button 
                   onClick={() => { setShowDirectTargeting(false); resetTargetFilters(); }}
@@ -2931,17 +2931,17 @@ const campaignData = {
                 </button>
               </div>
 
-              {/* ���� ���� */}
+              {/* 필터 영역 */}
               <div className="p-6 space-y-4 overflow-y-auto max-h-[65vh]">
-                {/* ���Ź�ȣ �ʵ� ���� */}
+                {/* 수신번호 필드 선택 */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">���Ź�ȣ �ʵ�</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">수신번호 필드</label>
                   <select 
                     value={targetPhoneField}
                     onChange={(e) => setTargetPhoneField(e.target.value)}
                     className="w-full px-4 py-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white text-gray-700"
                   >
-                    <option value="phone">phone (��ȭ��ȣ)</option>
+                    <option value="phone">phone (전화번호)</option>
                     <option value="mobile">mobile</option>
                     <option value="phone_number">phone_number</option>
                   </select>
@@ -2949,52 +2949,52 @@ const campaignData = {
 
                 <div className="border-t border-gray-100"></div>
 
-                {/* ���� ���� ��� */}
+                {/* 필터 조건 헤더 */}
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-gray-700">���� ����</span>
+                    <span className="text-sm font-medium text-gray-700">필터 조건</span>
                     {Object.keys(targetFilters).length > 0 && (
                       <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full font-medium">
-                        {Object.values(targetFilters).filter(v => v).length}�� ����
+                        {Object.values(targetFilters).filter(v => v).length}개 적용
                       </span>
                     )}
                   </div>
-                  <button onClick={resetTargetFilters} className="text-xs text-green-600 hover:text-green-700 font-medium">�ʱ�ȭ</button>
+                  <button onClick={resetTargetFilters} className="text-xs text-green-600 hover:text-green-700 font-medium">초기화</button>
                 </div>
 
-                {/* ���ڵ�� ���� */}
+                {/* 아코디언 필터 */}
                 {enabledFields.length === 0 ? (
                   <div className="text-center py-8 text-gray-400 text-sm">
-                    ���� �׸��� �ε� ��...
+                    필터 항목을 로딩 중...
                   </div>
                 ) : (
                   (() => {
                     const CAT_LABELS: Record<string, string> = {
-                      basic: '?? �⺻����', segment: '??? ���/���׸�Ʈ', purchase: '?? ����/�ŷ�',
-                      loyalty: '? �漺��/Ȱ��', store: '?? �Ҽ�/ä��', preference: '?? ��ȣ/����',
-                      marketing: '?? �����ü���', custom: '?? Ŀ����'
+                      basic: '📋 기본정보', segment: '🏷️ 등급/세그먼트', purchase: '💰 구매/거래',
+                      loyalty: '⭐ 충성도/활동', store: '🏪 소속/채널', preference: '❤️ 선호/관심',
+                      marketing: '📱 마케팅수신', custom: '🔧 커스텀'
                     };
-                    // ���� ��󿡼� ������ �ʵ� (�ĺ���/���ŵ��Ǵ� ���� ó��)
+                    // 필터 대상에서 제외할 필드 (식별용/수신동의는 별도 처리)
                     const SKIP_FIELDS = ['name', 'phone', 'email', 'address', 'opt_in_sms', 'opt_in_date', 'opt_out_date'];
                     const filterableFields = enabledFields.filter((f: any) => !SKIP_FIELDS.includes(f.field_key));
                     
-                    // ���ɴ� ������
+                    // 연령대 프리셋
                     const AGE_OPTIONS = [
-                      { label: '20��', value: '20' }, { label: '30��', value: '30' },
-                      { label: '40��', value: '40' }, { label: '50��', value: '50' },
-                      { label: '60�� �̻�', value: '60' },
+                      { label: '20대', value: '20' }, { label: '30대', value: '30' },
+                      { label: '40대', value: '40' }, { label: '50대', value: '50' },
+                      { label: '60대 이상', value: '60' },
                     ];
-                    // �ݾ� ������
+                    // 금액 프리셋
                     const AMOUNT_OPTIONS = [
-                      { label: '5���� �̻�', value: '50000' }, { label: '10���� �̻�', value: '100000' },
-                      { label: '50���� �̻�', value: '500000' }, { label: '100���� �̻�', value: '1000000' },
-                      { label: '500���� �̻�', value: '5000000' },
+                      { label: '5만원 이상', value: '50000' }, { label: '10만원 이상', value: '100000' },
+                      { label: '50만원 이상', value: '500000' }, { label: '100만원 이상', value: '1000000' },
+                      { label: '500만원 이상', value: '5000000' },
                     ];
-                    // �ϼ� ������
+                    // 일수 프리셋
                     const DAYS_OPTIONS = [
-                      { label: '7�� �̳�', value: '7' }, { label: '30�� �̳�', value: '30' },
-                      { label: '90�� �̳�', value: '90' }, { label: '180�� �̳�', value: '180' },
-                      { label: '1�� �̳�', value: '365' },
+                      { label: '7일 이내', value: '7' }, { label: '30일 이내', value: '30' },
+                      { label: '90일 이내', value: '90' }, { label: '180일 이내', value: '180' },
+                      { label: '1년 이내', value: '365' },
                     ];
 
                     const renderInput = (field: any) => {
@@ -3005,21 +3005,21 @@ const campaignData = {
                       });
                       const selectClass = "w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent text-sm bg-white";
 
-                      // ���ɴ� Ư�� ó��
+                      // 연령대 특수 처리
                       if (field.field_key === 'age_group') {
                         return (
                           <select value={val} onChange={e => set(e.target.value)} className={selectClass}>
-                            <option value="">��ü</option>
+                            <option value="">전체</option>
                             {AGE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                           </select>
                         );
                       }
 
-                      // ���ڿ� + DB �ɼ� �� ��Ӵٿ�
+                      // 문자열 + DB 옵션 → 드롭다운
                       if (field.data_type === 'string' && filterOptions[field.field_key]?.length) {
                         return (
                           <select value={val} onChange={e => set(e.target.value)} className={selectClass}>
-                            <option value="">��ü</option>
+                            <option value="">전체</option>
                             {filterOptions[field.field_key].map((opt: string) => (
                               <option key={opt} value={opt}>{opt}</option>
                             ))}
@@ -3027,49 +3027,49 @@ const campaignData = {
                         );
                       }
 
-                      // �ݾ� �ʵ� �� ������ ��Ӵٿ�
+                      // 금액 필드 → 프리셋 드롭다운
                       if (field.data_type === 'number' && ['total_purchase_amount', 'avg_order_value'].includes(field.field_key)) {
                         return (
                           <select value={val} onChange={e => set(e.target.value)} className={selectClass}>
-                            <option value="">��ü</option>
+                            <option value="">전체</option>
                             {AMOUNT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                           </select>
                         );
                       }
 
-                      // ���� �ʵ� �� ���� �Է�
+                      // 숫자 필드 → 직접 입력
                       if (field.data_type === 'number') {
                         return (
                           <input type="number" value={val} onChange={e => set(e.target.value)}
-                            placeholder="�̻�" className={selectClass} />
+                            placeholder="이상" className={selectClass} />
                         );
                       }
 
-                      // ��¥ �ʵ� �� �ϼ� ��Ӵٿ�
+                      // 날짜 필드 → 일수 드롭다운
                       if (field.data_type === 'date') {
                         return (
                           <select value={val} onChange={e => set(e.target.value)} className={selectClass}>
-                            <option value="">��ü</option>
+                            <option value="">전체</option>
                             {DAYS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                           </select>
                         );
                       }
 
-                      // �Ҹ���
+                      // 불리언
                       if (field.data_type === 'boolean') {
                         return (
                           <select value={val} onChange={e => set(e.target.value)} className={selectClass}>
-                            <option value="">��ü</option>
-                            <option value="true">��</option>
-                            <option value="false">�ƴϿ�</option>
+                            <option value="">전체</option>
+                            <option value="true">예</option>
+                            <option value="false">아니오</option>
                           </select>
                         );
                       }
 
-                      // �⺻: �ؽ�Ʈ �Է�
+                      // 기본: 텍스트 입력
                       return (
                         <input type="text" value={val} onChange={e => set(e.target.value)}
-                          placeholder="�Է�" className={selectClass} />
+                          placeholder="입력" className={selectClass} />
                       );
                     };
 
@@ -3117,7 +3117,7 @@ const campaignData = {
                   })()
                 )}
 
-                {/* ���ŵ��� */}
+                {/* 수신동의 */}
                 <div className="flex items-center gap-2 p-3 bg-gray-50 rounded-lg">
                   <input 
                     type="checkbox" 
@@ -3126,20 +3126,20 @@ const campaignData = {
                     onChange={(e) => setTargetSmsOptIn(e.target.checked)}
                     className="w-4 h-4 text-green-600 rounded focus:ring-green-500" 
                   />
-                  <label htmlFor="targetSmsOptIn" className="text-sm text-gray-700">���ŵ��� ����� ����</label>
+                  <label htmlFor="targetSmsOptIn" className="text-sm text-gray-700">수신동의 고객만 포함</label>
                 </div>
 
-                {/* ��ȸ ��ư */}
+                {/* 조회 버튼 */}
                 <button
                   onClick={loadTargetCount}
                   disabled={targetCountLoading}
                   className="w-full py-2.5 border border-green-600 text-green-700 rounded-lg hover:bg-green-50 transition-colors font-medium disabled:opacity-50"
                 >
-                  {targetCountLoading ? '��ȸ ��...' : '��� �ο� ��ȸ'}
+                  {targetCountLoading ? '조회 중...' : '대상 인원 조회'}
                 </button>
               </div>
 
-              {/* Ǫ�� - ��� �ο� + ��ư */}
+              {/* 푸터 - 대상 인원 + 버튼 */}
               <div className="px-6 py-4 border-t border-gray-100 bg-gray-50">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
@@ -3147,10 +3147,10 @@ const campaignData = {
                       <Users className="w-5 h-5 text-green-600" />
                     </div>
                     <div>
-                      <div className="text-sm text-gray-500">��� �ο�</div>
+                      <div className="text-sm text-gray-500">대상 인원</div>
                       <div className="text-2xl font-bold text-green-700">
                         {targetCountLoading ? '...' : targetCount.toLocaleString()}
-                        <span className="text-base font-normal text-gray-500 ml-1">��</span>
+                        <span className="text-base font-normal text-gray-500 ml-1">명</span>
                       </div>
                     </div>
                   </div>
@@ -3159,7 +3159,7 @@ const campaignData = {
                       onClick={() => { setShowDirectTargeting(false); resetTargetFilters(); }}
                       className="px-5 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-100 transition-colors font-medium"
                     >
-                      ���
+                      취소
                     </button>
                     <button
                       onClick={handleTargetExtract}
@@ -3167,7 +3167,7 @@ const campaignData = {
                       className="px-6 py-2.5 bg-green-700 text-white rounded-lg hover:bg-green-800 transition-colors font-medium flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       <Users className="w-4 h-4" />
-                      Ÿ�� ����
+                      타겟 추출
                     </button>
                   </div>
                 </div>
@@ -3180,12 +3180,12 @@ const campaignData = {
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
             <div className="bg-white rounded-xl shadow-2xl w-[900px] max-h-[90vh] overflow-hidden">
               
-              {/* Step 1: ���� ���ε� */}
+              {/* Step 1: 파일 업로드 */}
               {mappingStep === 'upload' && (
                 <>
                   <div className="p-4 border-b bg-gradient-to-r from-green-50 to-emerald-50 flex justify-between items-center">
                     <h3 className="font-bold text-lg flex items-center gap-2">
-                      <span>??</span> ���� ���ε� ķ���� ����
+                      <span>📤</span> 파일 업로드 캠페인 생성
                     </h3>
                     <button onClick={() => { 
                       setShowFileUpload(false); 
@@ -3196,21 +3196,21 @@ const campaignData = {
                       setFileId('');
                       setMappingStep('upload');
                       setColumnMapping({});
-                    }} className="text-gray-500 hover:text-gray-700 text-xl">?</button>
+                    }} className="text-gray-500 hover:text-gray-700 text-xl">✕</button>
                   </div>
                   <div className="p-6 space-y-6 overflow-y-auto max-h-[80vh]">
                     {!fileHeaders.length ? (
                       <div className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center hover:border-green-400 transition-colors relative">
                         {fileUploading && (
                           <div className="absolute inset-0 bg-white bg-opacity-90 flex flex-col items-center justify-center rounded-xl z-10">
-                            <div className="text-4xl mb-4 animate-bounce">??</div>
-                            <div className="text-lg font-semibold text-green-600">���� �м� ��...</div>
-                            <div className="text-sm text-gray-500 mt-2">��ø� ��ٷ��ּ���</div>
+                            <div className="text-4xl mb-4 animate-bounce">📊</div>
+                            <div className="text-lg font-semibold text-green-600">파일 분석 중...</div>
+                            <div className="text-sm text-gray-500 mt-2">잠시만 기다려주세요</div>
                           </div>
                         )}
-                        <div className="text-4xl mb-4">??</div>
-                        <p className="text-gray-600 mb-2">���� �Ǵ� CSV ������ �巡���ϰų� Ŭ���Ͽ� ���ε�</p>
-                        <p className="text-sm text-gray-400 mb-4">���� ����: .xlsx, .xls, .csv</p>
+                        <div className="text-4xl mb-4">📁</div>
+                        <p className="text-gray-600 mb-2">엑셀 또는 CSV 파일을 드래그하거나 클릭하여 업로드</p>
+                        <p className="text-sm text-gray-400 mb-4">지원 형식: .xlsx, .xls, .csv</p>
                         <input
                           type="file"
                           accept=".xlsx,.xls,.csv"
@@ -3233,10 +3233,10 @@ const campaignData = {
                                   setFileTotalRows(data.totalRows);
                                   setFileId(data.fileId);
                                 } else {
-                                  alert(data.error || '���� ó�� ����');
+                                  alert(data.error || '파일 처리 실패');
                                 }
                               } catch (err) {
-                                alert('���� ���ε� �� ������ �߻��߽��ϴ�.');
+                                alert('파일 업로드 중 오류가 발생했습니다.');
                               } finally {
                                 setFileUploading(false);
                               }
@@ -3249,14 +3249,14 @@ const campaignData = {
                           htmlFor="file-upload"
                           className={`inline-block px-6 py-3 text-white rounded-lg transition-colors ${fileUploading ? 'bg-gray-400 cursor-wait' : 'bg-green-600 cursor-pointer hover:bg-green-700'}`}
                         >
-                          {fileUploading ? '? ���� �м� ��...' : '���� ����'}
+                          {fileUploading ? '⏳ 파일 분석 중...' : '파일 선택'}
                         </label>
                         <div className="mt-6 bg-gray-50 rounded-lg p-4 text-left">
-                          <h4 className="font-semibold text-gray-700 mb-2">?? ���ε� �ȳ�</h4>
+                          <h4 className="font-semibold text-gray-700 mb-2">📋 업로드 안내</h4>
                           <ul className="text-sm text-gray-600 space-y-1">
-                            <li>? ù ��° ���� �÷������� �νĵ˴ϴ�</li>
-                            <li>? ��ȭ��ȣ �÷��� �ʼ��Դϴ�</li>
-                            <li>? AI�� �ڵ����� �÷��� �����մϴ�</li>
+                            <li>• 첫 번째 행은 컬럼명으로 인식됩니다</li>
+                            <li>• 전화번호 컬럼은 필수입니다</li>
+                            <li>• AI가 자동으로 컬럼을 매핑합니다</li>
                           </ul>
                         </div>
                       </div>
@@ -3264,16 +3264,16 @@ const campaignData = {
                       <>
                         <div className="bg-green-50 border border-green-200 rounded-lg p-4 flex items-center justify-between">
                           <div className="flex items-center gap-3">
-                            <span className="text-2xl">??</span>
+                            <span className="text-2xl">📄</span>
                             <div>
                               <div className="font-semibold text-gray-800">{uploadedFile?.name}</div>
-                              <div className="text-sm text-gray-500">�� {fileTotalRows.toLocaleString()}���� ������</div>
+                              <div className="text-sm text-gray-500">총 {fileTotalRows.toLocaleString()}건의 데이터</div>
                             </div>
                           </div>
-                          <button onClick={() => { setUploadedFile(null); setFileHeaders([]); setFilePreview([]); setFileTotalRows(0); setFileId(''); }} className="text-gray-400 hover:text-red-500">? �ٽ� ����</button>
+                          <button onClick={() => { setUploadedFile(null); setFileHeaders([]); setFilePreview([]); setFileTotalRows(0); setFileId(''); }} className="text-gray-400 hover:text-red-500">✕ 다시 선택</button>
                         </div>
                         <div>
-                          <h4 className="font-semibold text-gray-700 mb-3">?? ������ �÷� ({fileHeaders.length}��)</h4>
+                          <h4 className="font-semibold text-gray-700 mb-3">📋 감지된 컬럼 ({fileHeaders.length}개)</h4>
                           <div className="flex flex-wrap gap-2">
                             {fileHeaders.map((h, i) => (
                               <span key={i} className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm">{h}</span>
@@ -3281,7 +3281,7 @@ const campaignData = {
                           </div>
                         </div>
                         <div>
-                          <h4 className="font-semibold text-gray-700 mb-3">?? ������ �̸����� (���� 5��)</h4>
+                          <h4 className="font-semibold text-gray-700 mb-3">👀 데이터 미리보기 (상위 5건)</h4>
                           <div className="overflow-x-auto border rounded-lg">
                             <table className="w-full text-sm">
                               <thead className="bg-gray-50">
@@ -3317,10 +3317,10 @@ const campaignData = {
                                 setColumnMapping(data.mapping);
                                 setMappingStep('mapping');
                               } else {
-                                alert(data.error || '���� ����');
+                                alert(data.error || '매핑 실패');
                               }
                             } catch (err) {
-                              alert('���� �� ������ �߻��߽��ϴ�.');
+                              alert('매핑 중 오류가 발생했습니다.');
                             } finally {
                               setFileUploading(false);
                             }
@@ -3328,7 +3328,7 @@ const campaignData = {
                           disabled={fileUploading}
                           className="w-full py-4 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-lg font-medium hover:from-green-700 hover:to-emerald-700 flex items-center justify-center gap-2 text-lg disabled:opacity-50"
                         >
-                          {fileUploading ? (<><span className="animate-spin">?</span>AI�� �÷��� �м��ϰ� �ֽ��ϴ�...</>) : (<><span>??</span>AI �ڵ� ���� ����</>)}
+                          {fileUploading ? (<><span className="animate-spin">⏳</span>AI가 컬럼을 분석하고 있습니다...</>) : (<><span>🤖</span>AI 자동 매핑 시작</>)}
                         </button>
                       </>
                     )}
@@ -3336,50 +3336,50 @@ const campaignData = {
                 </>
               )}
 
-              {/* Step 2: AI ���� ��� */}
+              {/* Step 2: AI 매핑 결과 */}
               {mappingStep === 'mapping' && (
                 <>
                   <div className="p-4 border-b bg-green-50 flex justify-between items-center">
                     <h3 className="font-bold text-lg flex items-center gap-2">
-                      <span>??</span> AI ���� ���
+                      <span>🤖</span> AI 매핑 결과
                     </h3>
-                    <button onClick={() => { setShowFileUpload(false); setUploadedFile(null); setFileHeaders([]); setFilePreview([]); setFileTotalRows(0); setFileId(''); setMappingStep('upload'); setColumnMapping({}); }} className="text-gray-500 hover:text-gray-700 text-xl">?</button>
+                    <button onClick={() => { setShowFileUpload(false); setUploadedFile(null); setFileHeaders([]); setFilePreview([]); setFileTotalRows(0); setFileId(''); setMappingStep('upload'); setColumnMapping({}); }} className="text-gray-500 hover:text-gray-700 text-xl">✕</button>
                   </div>
                   <div className="p-6 space-y-6 overflow-y-auto max-h-[80vh]">
                   <div className="bg-green-50 border border-green-200 rounded-lg p-4 flex items-center justify-center gap-3">
-                      <span className="text-2xl">??</span>
+                      <span className="text-2xl">📄</span>
                       <div className="text-center">
                         <div className="font-semibold text-gray-800">{uploadedFile?.name}</div>
-                        <div className="text-sm text-gray-500">�� {fileTotalRows.toLocaleString()}���� ������</div>
+                        <div className="text-sm text-gray-500">총 {fileTotalRows.toLocaleString()}건의 데이터</div>
                       </div>
                     </div>
                     <div>
-                      <h4 className="font-semibold text-gray-700 mb-3">?? �÷� ���� (���� ����)</h4>
+                      <h4 className="font-semibold text-gray-700 mb-3">📋 컬럼 매핑 (수정 가능)</h4>
                       <div className="space-y-2 max-h-[400px] overflow-y-auto">
                         {Object.entries(columnMapping).map(([header, dbCol]) => (
                           <div key={header} className="grid grid-cols-[1fr_40px_1fr] items-center p-3 bg-white rounded-lg border gap-2">
                           <span className="text-sm font-medium text-gray-700">{header}</span>
-                          <span className="text-gray-400 text-center">��</span>
+                          <span className="text-gray-400 text-center">→</span>
                           <select
                             value={dbCol || ''}
                             onChange={(e) => setColumnMapping({...columnMapping, [header]: e.target.value || null})}
                             className={`px-3 py-2 rounded-lg border text-sm w-full ${dbCol ? 'bg-green-50 border-green-300' : 'bg-gray-50 border-gray-300'}`}
                           >
-                              <option value="">���� ����</option>
-                              <option value="phone">?? ��ȭ��ȣ</option>
-                              <option value="name">?? �̸�</option>
-                              <option value="gender">? ����</option>
-                              <option value="birth_year">?? �������</option>
-                              <option value="birth_month_day">?? ����(��-��)</option>
-                              <option value="birth_date">?? ������� ��ü</option>
-                              <option value="grade">? ���</option>
-                              <option value="region">?? ����</option>
-                              <option value="sms_opt_in">? ���ŵ���</option>
-                              <option value="email">?? �̸���</option>
-                              <option value="total_purchase">?? �ѱ��ž�</option>
-                              <option value="last_purchase_date">?? �ֱٱ�����</option>
-                              <option value="purchase_count">?? ����Ƚ��</option>
-                              <option value="callback">?? ȸ�Ź�ȣ(�����ȣ)</option>
+                              <option value="">매핑 안함</option>
+                              <option value="phone">📱 전화번호</option>
+                              <option value="name">👤 이름</option>
+                              <option value="gender">⚧ 성별</option>
+                              <option value="birth_year">🎂 출생연도</option>
+                              <option value="birth_month_day">🎁 생일(월-일)</option>
+                              <option value="birth_date">📅 생년월일 전체</option>
+                              <option value="grade">⭐ 등급</option>
+                              <option value="region">📍 지역</option>
+                              <option value="sms_opt_in">✅ 수신동의</option>
+                              <option value="email">📧 이메일</option>
+                              <option value="total_purchase">💰 총구매액</option>
+                              <option value="last_purchase_date">📅 최근구매일</option>
+                              <option value="purchase_count">🛒 구매횟수</option>
+                              <option value="callback">📞 회신번호(매장번호)</option>
                             </select>
                           </div>
                         ))}
@@ -3387,17 +3387,17 @@ const campaignData = {
                     </div>
                     {!Object.values(columnMapping).includes('phone') && (
                       <div className="p-4 bg-red-50 border border-red-200 rounded-lg text-red-600 flex items-center gap-2">
-                        <span>??</span>
-                        <span>��ȭ��ȣ �÷��� �������ּ��� (�ʼ�)</span>
+                        <span>⚠️</span>
+                        <span>전화번호 컬럼을 매핑해주세요 (필수)</span>
                       </div>
                     )}
                     <div className="flex gap-3">
-                      <button onClick={() => setMappingStep('upload')} className="flex-1 py-3 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50">�� ����</button>
+                      <button onClick={() => setMappingStep('upload')} className="flex-1 py-3 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50">← 이전</button>
                       <button
                         onClick={async () => {
                           setUploadProgress({ total: 0, processed: 0, percent: 0 });
                           
-                          // ����� ���� ����
+                          // 진행률 폴링 시작
                           const progressInterval = setInterval(async () => {
                             try {
                               const pRes = await fetch(`/api/upload/progress/${fileId}`);
@@ -3439,12 +3439,12 @@ const campaignData = {
                                 setShowPlanLimitError(true);
                                 setShowFileUpload(false);
                               } else {
-                                alert(data.error || '���� ����');
+                                alert(data.error || '저장 실패');
                               }
                             }
                           } catch (err) {
                             clearInterval(progressInterval);
-                            alert('���� �� ������ �߻��߽��ϴ�.');
+                            alert('저장 중 오류가 발생했습니다.');
                           } finally {
                             setFileUploading(false);
                           }
@@ -3454,13 +3454,13 @@ const campaignData = {
                       >
                         {fileUploading ? (
                           <>
-                            <span className="animate-spin">?</span>
-                            ���� ��... {uploadProgress.percent > 0 ? `${uploadProgress.percent}%` : '�غ� ��'}
+                            <span className="animate-spin">⏳</span>
+                            저장 중... {uploadProgress.percent > 0 ? `${uploadProgress.percent}%` : '준비 중'}
                           </>
                         ) : (
                           <>
-                            <span>??</span>
-                            ��� ������ ���� ({fileTotalRows.toLocaleString()}��)
+                            <span>💾</span>
+                            고객 데이터 저장 ({fileTotalRows.toLocaleString()}건)
                           </>
                         )}
                       </button>
@@ -3472,89 +3472,89 @@ const campaignData = {
             </div>
           </div>
         )}
-        {/* ��� �λ���Ʈ ��� */}
+        {/* 고객 인사이트 모달 */}
         {showInsights && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
             <div className="bg-white rounded-xl shadow-2xl w-[800px] max-h-[90vh] overflow-hidden">
               <div className="p-4 border-b bg-green-50 flex justify-between items-center">
-                <h3 className="font-bold text-lg">?? ��� �λ���Ʈ</h3>
-                <button onClick={() => setShowInsights(false)} className="text-gray-500 hover:text-gray-700 text-xl">?</button>
+                <h3 className="font-bold text-lg">👥 고객 인사이트</h3>
+                <button onClick={() => setShowInsights(false)} className="text-gray-500 hover:text-gray-700 text-xl">✕</button>
               </div>
               <div className="p-6 overflow-y-auto max-h-[80vh] space-y-6">
-                {/* ��ü ��� */}
+                {/* 전체 고객 */}
                 <div className="p-6 bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl text-center">
-                  <div className="text-sm text-gray-500 mb-2">��ü ���</div>
-                  <div className="text-4xl font-bold text-gray-800">{parseInt(stats?.total || '0').toLocaleString()}��</div>
-                  <div className="text-sm text-green-600 mt-2">���ŵ���: {parseInt(stats?.sms_opt_in_count || '0').toLocaleString()}��</div>
+                  <div className="text-sm text-gray-500 mb-2">전체 고객</div>
+                  <div className="text-4xl font-bold text-gray-800">{parseInt(stats?.total || '0').toLocaleString()}명</div>
+                  <div className="text-sm text-green-600 mt-2">수신동의: {parseInt(stats?.sms_opt_in_count || '0').toLocaleString()}명</div>
                 </div>
 
-                {/* ������ ��Ȳ */}
+                {/* 성별별 현황 */}
                 <div>
-                  <div className="text-sm font-semibold text-gray-700 mb-3">������ ��Ȳ</div>
+                  <div className="text-sm font-semibold text-gray-700 mb-3">성별별 현황</div>
                   <div className="grid grid-cols-2 gap-4">
                     <div className="p-4 bg-blue-50 rounded-lg text-center">
-                      <div className="text-2xl mb-2">??</div>
-                      <div className="text-2xl font-bold text-blue-600">{parseInt(stats?.male_count || '0').toLocaleString()}��</div>
-                      <div className="text-xs text-gray-500 mt-1">����</div>
+                      <div className="text-2xl mb-2">👨</div>
+                      <div className="text-2xl font-bold text-blue-600">{parseInt(stats?.male_count || '0').toLocaleString()}명</div>
+                      <div className="text-xs text-gray-500 mt-1">남성</div>
                     </div>
                     <div className="p-4 bg-pink-50 rounded-lg text-center">
-                      <div className="text-2xl mb-2">??</div>
-                      <div className="text-2xl font-bold text-pink-600">{parseInt(stats?.female_count || '0').toLocaleString()}��</div>
-                      <div className="text-xs text-gray-500 mt-1">����</div>
+                      <div className="text-2xl mb-2">👩</div>
+                      <div className="text-2xl font-bold text-pink-600">{parseInt(stats?.female_count || '0').toLocaleString()}명</div>
+                      <div className="text-xs text-gray-500 mt-1">여성</div>
                     </div>
                   </div>
                 </div>
 
-                {/* ���ɴ뺰 ������� */}
+                {/* 연령대별 고객분포 */}
                 <div>
-                  <div className="text-sm font-semibold text-gray-700 mb-3">���ɴ뺰 �������</div>
+                  <div className="text-sm font-semibold text-gray-700 mb-3">연령대별 고객분포</div>
                   <div className="space-y-3">
                     <div className="grid grid-cols-2 gap-4">
                       <div className="p-4 bg-purple-50 rounded-lg text-center">
-                        <div className="text-2xl font-bold text-purple-600">{parseInt(stats?.age_under20 || '0').toLocaleString()}��</div>
-                        <div className="text-xs text-gray-500 mt-1">~19��</div>
+                        <div className="text-2xl font-bold text-purple-600">{parseInt(stats?.age_under20 || '0').toLocaleString()}명</div>
+                        <div className="text-xs text-gray-500 mt-1">~19세</div>
                       </div>
                       <div className="p-4 bg-indigo-50 rounded-lg text-center">
-                        <div className="text-2xl font-bold text-indigo-600">{parseInt(stats?.age_20s || '0').toLocaleString()}��</div>
-                        <div className="text-xs text-gray-500 mt-1">20��</div>
+                        <div className="text-2xl font-bold text-indigo-600">{parseInt(stats?.age_20s || '0').toLocaleString()}명</div>
+                        <div className="text-xs text-gray-500 mt-1">20대</div>
                       </div>
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                       <div className="p-4 bg-cyan-50 rounded-lg text-center">
-                        <div className="text-2xl font-bold text-cyan-600">{parseInt(stats?.age_30s || '0').toLocaleString()}��</div>
-                        <div className="text-xs text-gray-500 mt-1">30��</div>
+                        <div className="text-2xl font-bold text-cyan-600">{parseInt(stats?.age_30s || '0').toLocaleString()}명</div>
+                        <div className="text-xs text-gray-500 mt-1">30대</div>
                       </div>
                       <div className="p-4 bg-teal-50 rounded-lg text-center">
-                        <div className="text-2xl font-bold text-teal-600">{parseInt(stats?.age_40s || '0').toLocaleString()}��</div>
-                        <div className="text-xs text-gray-500 mt-1">40��</div>
+                        <div className="text-2xl font-bold text-teal-600">{parseInt(stats?.age_40s || '0').toLocaleString()}명</div>
+                        <div className="text-xs text-gray-500 mt-1">40대</div>
                       </div>
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                       <div className="p-4 bg-orange-50 rounded-lg text-center">
-                        <div className="text-2xl font-bold text-orange-600">{parseInt(stats?.age_50s || '0').toLocaleString()}��</div>
-                        <div className="text-xs text-gray-500 mt-1">50��</div>
+                        <div className="text-2xl font-bold text-orange-600">{parseInt(stats?.age_50s || '0').toLocaleString()}명</div>
+                        <div className="text-xs text-gray-500 mt-1">50대</div>
                       </div>
                       <div className="p-4 bg-red-50 rounded-lg text-center">
-                        <div className="text-2xl font-bold text-red-600">{parseInt(stats?.age_60plus || '0').toLocaleString()}��</div>
-                        <div className="text-xs text-gray-500 mt-1">60�� �̻�</div>
+                        <div className="text-2xl font-bold text-red-600">{parseInt(stats?.age_60plus || '0').toLocaleString()}명</div>
+                        <div className="text-xs text-gray-500 mt-1">60대 이상</div>
                       </div>
                     </div>
                   </div>
                 </div>
 
-                {/* �����޺� ��Ȳ */}
+                {/* 고객등급별 현황 */}
                 <div>
-                  <div className="text-sm font-semibold text-gray-700 mb-3">�����޺� ��Ȳ</div>
+                  <div className="text-sm font-semibold text-gray-700 mb-3">고객등급별 현황</div>
                   <div className="grid grid-cols-2 gap-4">
                     <div className="p-4 bg-yellow-50 rounded-lg text-center">
-                      <div className="text-2xl mb-2">?</div>
-                      <div className="text-2xl font-bold text-yellow-600">{parseInt(stats?.vip_count || '0').toLocaleString()}��</div>
+                      <div className="text-2xl mb-2">⭐</div>
+                      <div className="text-2xl font-bold text-yellow-600">{parseInt(stats?.vip_count || '0').toLocaleString()}명</div>
                       <div className="text-xs text-gray-500 mt-1">VIP</div>
                     </div>
                     <div className="p-4 bg-gray-100 rounded-lg text-center">
-                      <div className="text-2xl mb-2">??</div>
-                      <div className="text-2xl font-bold text-gray-600">{(parseInt(stats?.total || '0') - parseInt(stats?.vip_count || '0')).toLocaleString()}��</div>
-                      <div className="text-xs text-gray-500 mt-1">�Ϲ�</div>
+                      <div className="text-2xl mb-2">👤</div>
+                      <div className="text-2xl font-bold text-gray-600">{(parseInt(stats?.total || '0') - parseInt(stats?.vip_count || '0')).toLocaleString()}명</div>
+                      <div className="text-xs text-gray-500 mt-1">일반</div>
                     </div>
                   </div>
                 </div>
@@ -3563,72 +3563,72 @@ const campaignData = {
           </div>
         )}
 
-        {/* ������ ��� ��� */}
+        {/* 오늘의 통계 모달 */}
         {showTodayStats && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
             <div className="bg-white rounded-xl shadow-2xl w-[800px] max-h-[85vh] overflow-hidden">
               <div className="p-4 border-b bg-orange-50 flex justify-between items-center">
-                <h3 className="font-bold text-lg">?? �̹� �� ���</h3>
-                <button onClick={() => setShowTodayStats(false)} className="text-gray-500 hover:text-gray-700 text-xl">?</button>
+                <h3 className="font-bold text-lg">📈 이번 달 통계</h3>
+                <button onClick={() => setShowTodayStats(false)} className="text-gray-500 hover:text-gray-700 text-xl">✕</button>
               </div>
               <div className="p-6 overflow-y-auto max-h-[70vh] space-y-6">
-                {/* ��� ��� ī�� */}
+                {/* 상단 요약 카드 */}
                 <div className="grid grid-cols-2 gap-4">
                   <div className="p-6 bg-gradient-to-br from-orange-50 to-yellow-50 rounded-xl text-center">
-                    <div className="text-sm text-gray-500 mb-2">�̹� �� �� �߼�</div>
-                    <div className="text-4xl font-bold text-orange-600">{(stats?.monthly_sent || 0).toLocaleString()}��</div>
+                    <div className="text-sm text-gray-500 mb-2">이번 달 총 발송</div>
+                    <div className="text-4xl font-bold text-orange-600">{(stats?.monthly_sent || 0).toLocaleString()}건</div>
                   </div>
                   <div className="p-6 bg-gradient-to-br from-green-50 to-emerald-50 rounded-xl text-center">
-                    <div className="text-sm text-gray-500 mb-2">�̹� �� ���ݾ�</div>
-                    <div className="text-4xl font-bold text-green-600">{(stats?.monthly_cost || 0).toLocaleString()}��</div>
-                    <div className="text-xs text-gray-400 mt-1">����: {(stats?.monthly_budget || 0).toLocaleString()}��</div>
+                    <div className="text-sm text-gray-500 mb-2">이번 달 사용금액</div>
+                    <div className="text-4xl font-bold text-green-600">{(stats?.monthly_cost || 0).toLocaleString()}원</div>
+                    <div className="text-xs text-gray-400 mt-1">예산: {(stats?.monthly_budget || 0).toLocaleString()}원</div>
                   </div>
                 </div>
 
-                {/* �� ��ǥ */}
+                {/* 상세 지표 */}
                 <div className="grid grid-cols-2 gap-4">
                   <div className="p-4 bg-blue-50 rounded-lg text-center">
-                    <div className="text-2xl mb-2">?</div>
+                    <div className="text-2xl mb-2">✅</div>
                     <div className="text-2xl font-bold text-blue-600">{stats?.success_rate || '0'}%</div>
-                    <div className="text-xs text-gray-500">��� ������</div>
+                    <div className="text-xs text-gray-500">평균 성공률</div>
                   </div>
                   <div className="p-4 bg-purple-50 rounded-lg text-center">
-                    <div className="text-2xl mb-2">??</div>
-                    <div className="text-2xl font-bold text-purple-600">{recentCampaigns.length}��</div>
-                    <div className="text-xs text-gray-500">����� ķ����</div>
+                    <div className="text-2xl mb-2">📊</div>
+                    <div className="text-2xl font-bold text-purple-600">{recentCampaigns.length}건</div>
+                    <div className="text-xs text-gray-500">진행된 캠페인</div>
                   </div>
                 </div>
 
-                {/* ä�κ� ��� */}
+                {/* 채널별 통계 */}
                 <div>
-                  <div className="text-sm font-semibold text-gray-700 mb-3">ä�κ� �߼�</div>
+                  <div className="text-sm font-semibold text-gray-700 mb-3">채널별 발송</div>
                   <div className="space-y-2">
                     <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                      <span className="font-medium">?? SMS</span>
+                      <span className="font-medium">📱 SMS</span>
                       <div className="text-right">
-                        <span className="font-bold text-gray-700">{(stats?.sms_sent || 0).toLocaleString()}��</span>
-                        <span className="text-xs text-gray-400 ml-2">(@{stats?.cost_per_sms || 9.9}��)</span>
+                        <span className="font-bold text-gray-700">{(stats?.sms_sent || 0).toLocaleString()}건</span>
+                        <span className="text-xs text-gray-400 ml-2">(@{stats?.cost_per_sms || 9.9}원)</span>
                       </div>
                     </div>
                     <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                      <span className="font-medium">?? LMS</span>
+                      <span className="font-medium">📨 LMS</span>
                       <div className="text-right">
-                        <span className="font-bold text-gray-700">{(stats?.lms_sent || 0).toLocaleString()}��</span>
-                        <span className="text-xs text-gray-400 ml-2">(@{stats?.cost_per_lms || 27}��)</span>
+                        <span className="font-bold text-gray-700">{(stats?.lms_sent || 0).toLocaleString()}건</span>
+                        <span className="text-xs text-gray-400 ml-2">(@{stats?.cost_per_lms || 27}원)</span>
                       </div>
                     </div>
                     <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                      <span className="font-medium">??? MMS</span>
+                      <span className="font-medium">🖼️ MMS</span>
                       <div className="text-right">
-                        <span className="font-bold text-gray-700">{(stats?.mms_sent || 0).toLocaleString()}��</span>
-                        <span className="text-xs text-gray-400 ml-2">(@{stats?.cost_per_mms || 50}��)</span>
+                        <span className="font-bold text-gray-700">{(stats?.mms_sent || 0).toLocaleString()}건</span>
+                        <span className="text-xs text-gray-400 ml-2">(@{stats?.cost_per_mms || 50}원)</span>
                       </div>
                     </div>
                     <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                      <span className="font-medium">?? īī����</span>
+                      <span className="font-medium">💬 카카오톡</span>
                       <div className="text-right">
-                        <span className="font-bold text-gray-700">{(stats?.kakao_sent || 0).toLocaleString()}��</span>
-                        <span className="text-xs text-gray-400 ml-2">(@{stats?.cost_per_kakao || 7.5}��)</span>
+                        <span className="font-bold text-gray-700">{(stats?.kakao_sent || 0).toLocaleString()}건</span>
+                        <span className="text-xs text-gray-400 ml-2">(@{stats?.cost_per_kakao || 7.5}원)</span>
                       </div>
                     </div>
                   </div>
@@ -3637,76 +3637,76 @@ const campaignData = {
             </div>
           </div>
         )}
-{/* ���ε� ��� ��� */}
+{/* 업로드 결과 모달 */}
 {showUploadResult && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl p-8 max-w-md w-full mx-4 shadow-2xl">
             <div className="text-center">
-              <div className="text-6xl mb-4">??</div>
-              <h3 className="text-2xl font-bold text-gray-800 mb-4">���� �Ϸ�!</h3>
+              <div className="text-6xl mb-4">🎉</div>
+              <h3 className="text-2xl font-bold text-gray-800 mb-4">저장 완료!</h3>
               <div className="bg-gray-50 rounded-xl p-4 mb-6">
                 <div className="flex justify-between py-2 border-b border-gray-200">
-                  <span className="text-gray-600">�ű� �߰�</span>
-                  <span className="font-bold text-blue-600">{uploadResult.insertCount.toLocaleString()}��</span>
+                  <span className="text-gray-600">신규 추가</span>
+                  <span className="font-bold text-blue-600">{uploadResult.insertCount.toLocaleString()}건</span>
                 </div>
                 <div className="flex justify-between py-2">
-                  <span className="text-gray-600">������Ʈ</span>
-                  <span className="font-bold text-green-600">{uploadResult.duplicateCount.toLocaleString()}��</span>
+                  <span className="text-gray-600">업데이트</span>
+                  <span className="font-bold text-green-600">{uploadResult.duplicateCount.toLocaleString()}건</span>
                 </div>
               </div>
               <button
                 onClick={() => { setShowUploadResult(false); window.location.reload(); }}
                 className="w-full py-3 bg-green-700 text-white rounded-xl font-medium hover:bg-green-800"
               >
-                Ȯ��
+                확인
               </button>
             </div>
           </div>
         </div>
       )}
       
-      {/* �÷� �ʰ� ���� ��� */}
+      {/* 플랜 초과 에러 모달 */}
       {showPlanLimitError && planLimitInfo && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
             <div className="p-6 bg-gradient-to-r from-red-50 to-orange-50 border-b">
               <div className="text-center">
-                <div className="text-5xl mb-3">??</div>
-                <h3 className="text-xl font-bold text-gray-800">��� DB �ѵ� �ʰ�</h3>
+                <div className="text-5xl mb-3">⚠️</div>
+                <h3 className="text-xl font-bold text-gray-800">고객 DB 한도 초과</h3>
               </div>
             </div>
             <div className="p-6">
               <div className="bg-gray-50 rounded-xl p-4 mb-4 space-y-3">
                 <div className="flex justify-between">
-                  <span className="text-gray-600">���� �÷�</span>
+                  <span className="text-gray-600">현재 플랜</span>
                   <span className="font-semibold text-gray-800">{planLimitInfo.planName}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-gray-600">�ִ� ��� ��</span>
-                  <span className="font-semibold text-gray-800">{Number(planLimitInfo.maxCustomers).toLocaleString()}��</span>
+                  <span className="text-gray-600">최대 고객 수</span>
+                  <span className="font-semibold text-gray-800">{Number(planLimitInfo.maxCustomers).toLocaleString()}명</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-gray-600">���� ��� ��</span>
-                  <span className="font-semibold text-blue-600">{Number(planLimitInfo.currentCount).toLocaleString()}��</span>
+                  <span className="text-gray-600">현재 고객 수</span>
+                  <span className="font-semibold text-blue-600">{Number(planLimitInfo.currentCount).toLocaleString()}명</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-gray-600">���ε� �õ�</span>
-                  <span className="font-semibold text-orange-600">+{Number(planLimitInfo.requestedCount).toLocaleString()}��</span>
+                  <span className="text-gray-600">업로드 시도</span>
+                  <span className="font-semibold text-orange-600">+{Number(planLimitInfo.requestedCount).toLocaleString()}명</span>
                 </div>
                 <div className="border-t pt-3 flex justify-between">
-                  <span className="text-gray-600">�߰� ����</span>
-                  <span className="font-bold text-red-600">{Number(planLimitInfo.availableCount).toLocaleString()}��</span>
+                  <span className="text-gray-600">추가 가능</span>
+                  <span className="font-bold text-red-600">{Number(planLimitInfo.availableCount).toLocaleString()}명</span>
                 </div>
               </div>
               <p className="text-sm text-gray-600 text-center mb-4">
-                �÷��� ���׷��̵��Ͻø� �� ���� ����� ������ �� �ֽ��ϴ�.
+                플랜을 업그레이드하시면 더 많은 고객을 관리할 수 있습니다.
               </p>
               <div className="flex gap-3">
                 <button
                   onClick={() => setShowPlanLimitError(false)}
                   className="flex-1 py-3 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50"
                 >
-                  �ݱ�
+                  닫기
                 </button>
                 <button
                   onClick={() => {
@@ -3715,7 +3715,7 @@ const campaignData = {
                   }}
                   className="flex-1 py-3 bg-green-700 text-white rounded-lg font-medium hover:bg-green-800"
                 >
-                  ����� �ȳ�
+                  요금제 안내
                 </button>
               </div>
             </div>
@@ -3723,16 +3723,16 @@ const campaignData = {
         </div>
       )}
 
-        {/* ���� ��� ��� */}
+        {/* 예약 대기 모달 */}
         {showScheduled && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
             <div className="bg-white rounded-xl shadow-2xl w-[900px] max-h-[85vh] overflow-hidden">
               <div className="p-4 border-b bg-red-50 flex justify-between items-center">
-                <h3 className="font-bold text-lg">? ���� ��� {scheduledCampaigns.length > 0 && `(${scheduledCampaigns.length}��)`}</h3>
-                <button onClick={() => { setShowScheduled(false); setSelectedScheduled(null); }} className="text-gray-500 hover:text-gray-700 text-xl">?</button>
+                <h3 className="font-bold text-lg">⏰ 예약 대기 {scheduledCampaigns.length > 0 && `(${scheduledCampaigns.length}건)`}</h3>
+                <button onClick={() => { setShowScheduled(false); setSelectedScheduled(null); }} className="text-gray-500 hover:text-gray-700 text-xl">✕</button>
               </div>
               <div className="flex h-[70vh]">
-                {/* ����: ķ���� ��� */}
+                {/* 좌측: 캠페인 목록 */}
                 <div className="w-[320px] border-r overflow-y-auto p-3 space-y-2">
                   {scheduledCampaigns.length > 0 ? (
                     scheduledCampaigns.map((c: any) => (
@@ -3763,29 +3763,29 @@ const campaignData = {
                       >
                         <div className="font-semibold text-gray-800 text-sm truncate">{c.campaign_name}</div>
                         <div className="text-xs text-gray-500 mt-1">
-                          ?? {c.message_type} �� ?? {c.target_count?.toLocaleString()}��
+                          📱 {c.message_type} · 👥 {c.target_count?.toLocaleString()}명
                         </div>
                         <div className="text-xs text-blue-600 mt-1">
-                          ? {c.scheduled_at ? new Date(c.scheduled_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-'}
+                          ⏰ {c.scheduled_at ? new Date(c.scheduled_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-'}
                         </div>
                       </div>
                     ))
                   ) : (
-                    <p className="text-gray-500 text-center py-8 text-sm">����� ķ������ �����ϴ�</p>
+                    <p className="text-gray-500 text-center py-8 text-sm">예약된 캠페인이 없습니다</p>
                   )}
                 </div>
                 
-                {/* ����: �� & ������ */}
+                {/* 우측: 상세 & 수신자 */}
                 <div className="flex-1 flex flex-col">
                   {selectedScheduled ? (
                     <>
-                      {/* ���: ķ���� ���� */}
+                      {/* 상단: 캠페인 정보 */}
                       <div className="p-4 border-b bg-gray-50">
                       <div className="flex justify-between items-start mb-3">
                           <div>
                             <div className="font-bold text-lg">{selectedScheduled.campaign_name}</div>
                             <div className="text-sm text-gray-500 mt-1">
-                              {selectedScheduled.message_type} �� {selectedScheduled.target_count?.toLocaleString()}��
+                              {selectedScheduled.message_type} · {selectedScheduled.target_count?.toLocaleString()}명
                             </div>
                           </div>
                           <div className="flex gap-2">
@@ -3798,12 +3798,12 @@ const campaignData = {
                                 });
                                 const data = await res.json();
                                 if (data.success) {
-                                  setToast({ show: true, type: 'success', message: '������ ��ҵǾ����ϴ�' });
+                                  setToast({ show: true, type: 'success', message: '예약이 취소되었습니다' });
                                   setTimeout(() => setToast({ show: false, type: 'success', message: '' }), 3000);
                                   setScheduledCampaigns(prev => prev.filter(c => c.id !== selectedScheduled.id));
                                   setSelectedScheduled(null);
                                 } else {
-                                  setToast({ show: true, type: 'error', message: data.error || '��� ����' });
+                                  setToast({ show: true, type: 'error', message: data.error || '취소 실패' });
                                   setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
                                 }
                               }}
@@ -3813,7 +3813,7 @@ const campaignData = {
                                   ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
                                   : 'bg-red-500 text-white hover:bg-red-600'
                               }`}
-                            >�������</button>
+                            >예약취소</button>
                             <button
                               onClick={() => {
                                 setEditMessage(selectedScheduled?.message_template || selectedScheduled?.message_content || '');
@@ -3826,12 +3826,12 @@ const campaignData = {
                                   ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
                                   : 'bg-amber-500 text-white hover:bg-amber-600'
                               }`}
-                            >���ȼ���</button>
+                            >문안수정</button>
                           </div>
                         </div>
-                        {/* ���� �ð� ���� */}
+                        {/* 예약 시간 수정 */}
                         <div className="flex items-center gap-2">
-                          <span className="text-sm text-gray-600">����ð�:</span>
+                          <span className="text-sm text-gray-600">예약시간:</span>
                           <input
                             type="datetime-local"
                             value={editScheduleTime}
@@ -3849,14 +3849,14 @@ const campaignData = {
                               });
                               const data = await res.json();
                               if (data.success) {
-                                setToast({ show: true, type: 'success', message: '���� �ð��� ����Ǿ����ϴ�' });
+                                setToast({ show: true, type: 'success', message: '예약 시간이 변경되었습니다' });
                                 setTimeout(() => setToast({ show: false, type: 'success', message: '' }), 3000);
                                 setScheduledCampaigns(prev => prev.map(c => 
                                   c.id === selectedScheduled.id ? { ...c, scheduled_at: editScheduleTime } : c
                                 ));
                                 setSelectedScheduled({ ...selectedScheduled, scheduled_at: editScheduleTime });
                               } else {
-                                setToast({ show: true, type: 'error', message: data.error || '���� ����' });
+                                setToast({ show: true, type: 'error', message: data.error || '변경 실패' });
                                 setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
                               }
                             }}
@@ -3866,42 +3866,42 @@ const campaignData = {
                                 ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
                                 : 'bg-blue-500 text-white hover:bg-blue-600'
                             }`}
-                            >�ð�����</button>
+                            >시간변경</button>
                             {selectedScheduled?.scheduled_at && (new Date(selectedScheduled.scheduled_at).getTime() - Date.now()) < 15 * 60 * 1000 && (
-                              <span className="text-xs text-amber-600 ml-2">?? 15�� �̳� ���� �Ұ�</span>
+                              <span className="text-xs text-amber-600 ml-2">⚠️ 15분 이내 변경 불가</span>
                             )}
                           </div>
                         </div>
                       
-                      {/* ������ �˻� */}
+                      {/* 수신자 검색 */}
                       <div className="p-3 border-b flex items-center gap-2">
                         <input
                           type="text"
-                          placeholder="?? ��ȣ �˻�"
+                          placeholder="🔍 번호 검색"
                           value={scheduledSearch}
                           onChange={(e) => setScheduledSearch(e.target.value)}
                           className="flex-1 border rounded px-3 py-2 text-sm"
                         />
                         <span className="text-sm text-gray-500">
-                          �� {scheduledRecipientsTotal.toLocaleString()}��
-                          {scheduledRecipientsTotal > 1000 && ' (�ִ� 1000�� ǥ��)'}
+                          총 {scheduledRecipientsTotal.toLocaleString()}명
+                          {scheduledRecipientsTotal > 1000 && ' (최대 1000명 표시)'}
                         </span>
                       </div>
                       
-                      {/* ������ ��� */}
+                      {/* 수신자 목록 */}
                       <div className="flex-1 overflow-y-auto">
                         {scheduledLoading ? (
                           <div className="flex items-center justify-center h-full text-gray-500">
-                            <span className="animate-spin mr-2">?</span> �ε���...
+                            <span className="animate-spin mr-2">⏳</span> 로딩중...
                           </div>
                         ) : (
                           <table className="w-full text-sm">
                             <thead className="bg-gray-100 sticky top-0">
                               <tr>
-                                <th className="px-3 py-2 text-left">��ȣ</th>
-                                <th className="px-3 py-2 text-left">ȸ�Ź�ȣ</th>
-                                <th className="px-3 py-2 text-center">�޽���</th>
-                                <th className="px-3 py-2 text-center w-16">����</th>
+                                <th className="px-3 py-2 text-left">번호</th>
+                                <th className="px-3 py-2 text-left">회신번호</th>
+                                <th className="px-3 py-2 text-center">메시지</th>
+                                <th className="px-3 py-2 text-center w-16">삭제</th>
                               </tr>
                             </thead>
                             <tbody>
@@ -3915,13 +3915,13 @@ const campaignData = {
                                       <button
                                         onClick={() => setMessagePreview({show: true, phone: r.phone, message: r.message || ''})}
                                         className="px-2 py-1 bg-blue-100 text-blue-600 rounded text-xs hover:bg-blue-200"
-                                      >�󼼺���</button>
+                                      >상세보기</button>
                                     </td>
                                     <td className="px-3 py-2 text-center">
                                       <button
                                         onClick={() => setDeleteConfirm({show: true, phone: r.phone, idx: r.idx})}
                                         className="text-red-500 hover:text-red-700"
-                                      >???</button>
+                                      >🗑️</button>
                                     </td>
                                   </tr>
                                 ))}
@@ -3932,30 +3932,30 @@ const campaignData = {
                     </>
                   ) : (
                     <div className="flex-1 flex items-center justify-center text-gray-400">
-                      �� ķ������ �����ϼ���
+                      ← 캠페인을 선택하세요
                     </div>
                   )}
                 </div>
               </div>
             </div>
-            {/* ���� Ȯ�� ��� */}
+            {/* 삭제 확인 모달 */}
             {deleteConfirm.show && (
               <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60]">
                 <div className="bg-white rounded-2xl shadow-2xl w-[360px] overflow-hidden">
                   <div className="p-6 text-center">
                     <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                      <span className="text-3xl">???</span>
+                      <span className="text-3xl">🗑️</span>
                     </div>
-                    <h3 className="text-lg font-bold text-gray-800 mb-2">������ ����</h3>
-                    <p className="text-gray-600 mb-1">���� ��ȣ�� �����Ͻðڽ��ϱ�?</p>
+                    <h3 className="text-lg font-bold text-gray-800 mb-2">수신자 삭제</h3>
+                    <p className="text-gray-600 mb-1">다음 번호를 삭제하시겠습니까?</p>
                     <p className="text-xl font-bold text-red-600 mb-4">{deleteConfirm.phone}</p>
-                    <p className="text-sm text-gray-400">������ ��ȣ�� �� ���࿡�� �߼۵��� �ʽ��ϴ�.</p>
+                    <p className="text-sm text-gray-400">삭제된 번호는 이 예약에서 발송되지 않습니다.</p>
                   </div>
                   <div className="flex border-t">
                     <button
                       onClick={() => setDeleteConfirm({show: false, phone: '', idx: null})}
                       className="flex-1 py-3.5 text-gray-600 hover:bg-gray-50 font-medium transition-colors"
-                    >���</button>
+                    >취소</button>
                     <button
                       onClick={async () => {
                         const token = localStorage.getItem('token');
@@ -3971,10 +3971,10 @@ const campaignData = {
                             c.id === selectedScheduled.id ? { ...c, target_count: data.remainingCount } : c
                           ));
                           setSelectedScheduled({ ...selectedScheduled, target_count: data.remainingCount });
-                          setToast({ show: true, type: 'success', message: '�����Ǿ����ϴ�' });
+                          setToast({ show: true, type: 'success', message: '삭제되었습니다' });
                           setTimeout(() => setToast({ show: false, type: 'success', message: '' }), 3000);
                         } else {
-                          setToast({ show: true, type: 'error', message: data.error || '���� ����' });
+                          setToast({ show: true, type: 'error', message: data.error || '삭제 실패' });
                           setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
                         }
                         setDeleteConfirm({show: false, phone: '', idx: null});
@@ -3985,24 +3985,24 @@ const campaignData = {
                           ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
                           : 'bg-red-500 text-white hover:bg-red-600'
                       }`}
-                    >����</button>
+                    >삭제</button>
                   </div>
                 </div>
               </div>
             )}
-            {/* �޽��� �󼼺��� ��� */}
+            {/* 메시지 상세보기 모달 */}
             {messagePreview.show && (
               <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60]">
                 <div className="bg-white rounded-2xl shadow-2xl w-[400px] overflow-hidden">
                   <div className="p-4 border-b bg-blue-50 flex justify-between items-center">
                     <div>
-                      <h3 className="text-lg font-bold text-blue-700">?? �޽��� ����</h3>
+                      <h3 className="text-lg font-bold text-blue-700">💬 메시지 내용</h3>
                       <p className="text-sm text-blue-600 mt-1">{messagePreview.phone}</p>
                     </div>
                     <button 
                       onClick={() => setMessagePreview({show: false, phone: '', message: ''})}
                       className="text-gray-500 hover:text-gray-700 text-xl"
-                    >?</button>
+                    >✕</button>
                   </div>
                   <div className="p-4">
                     <div className="bg-gray-100 rounded-lg p-4 whitespace-pre-wrap text-sm leading-relaxed max-h-[400px] overflow-y-auto">
@@ -4013,39 +4013,39 @@ const campaignData = {
                     <button
                       onClick={() => setMessagePreview({show: false, phone: '', message: ''})}
                       className="w-full py-2.5 bg-blue-500 text-white rounded-lg hover:bg-blue-600 font-medium"
-                    >Ȯ��</button>
+                    >확인</button>
                   </div>
                 </div>
               </div>
             )}
-            {/* ���� ���� ��� */}
+            {/* 문안 수정 모달 */}
             {messageEditModal && (
               <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60]">
                 <div className="bg-white rounded-2xl shadow-2xl w-[500px] overflow-hidden">
                   <div className="p-4 border-b bg-amber-50">
-                    <h3 className="text-lg font-bold text-amber-700">?? ���� ����</h3>
-                    <p className="text-sm text-amber-600 mt-1">����: %�̸�%, %���%, %����%, %ȸ�Ź�ȣ%</p>
+                    <h3 className="text-lg font-bold text-amber-700">✏️ 문안 수정</h3>
+                    <p className="text-sm text-amber-600 mt-1">변수: %이름%, %등급%, %지역%, %회신번호%</p>
                   </div>
                   <div className="p-4 space-y-4">
                     {(selectedScheduled?.message_type === 'LMS' || selectedScheduled?.message_type === 'MMS') && (
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">����</label>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">제목</label>
                         <input
                           type="text"
                           value={editSubject}
                           onChange={(e) => setEditSubject(e.target.value)}
                           className="w-full border rounded-lg px-3 py-2"
-                          placeholder="���� �Է�"
+                          placeholder="제목 입력"
                         />
                       </div>
                     )}
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">�޽��� ����</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">메시지 내용</label>
                       <textarea
                         value={editMessage}
                         onChange={(e) => setEditMessage(e.target.value)}
                         className="w-full border rounded-lg px-3 py-2 h-40 resize-none"
-                        placeholder="�޽��� ���� �Է�"
+                        placeholder="메시지 내용 입력"
                       />
                       <div className="text-right text-sm text-gray-500 mt-1">
                         {new TextEncoder().encode(editMessage).length} bytes
@@ -4054,7 +4054,7 @@ const campaignData = {
                     {messageEditing && (
                       <div className="bg-blue-50 rounded-lg p-3">
                         <div className="flex justify-between text-sm mb-2">
-                          <span className="text-blue-700">���� ��...</span>
+                          <span className="text-blue-700">수정 중...</span>
                           <span className="text-blue-700 font-bold">{messageEditProgress}%</span>
                         </div>
                         <div className="w-full bg-blue-200 rounded-full h-2">
@@ -4071,11 +4071,11 @@ const campaignData = {
                       onClick={() => setMessageEditModal(false)}
                       disabled={messageEditing}
                       className="flex-1 py-3.5 text-gray-600 hover:bg-gray-50 font-medium disabled:opacity-50"
-                    >���</button>
+                    >취소</button>
                     <button
                       onClick={async () => {
                         if (!editMessage.trim()) {
-                          setToast({ show: true, type: 'error', message: '�޽����� �Է����ּ���' });
+                          setToast({ show: true, type: 'error', message: '메시지를 입력해주세요' });
                           setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
                           return;
                         }
@@ -4083,7 +4083,7 @@ const campaignData = {
                         setMessageEditing(true);
                         setMessageEditProgress(0);
                         
-                        // ����� ����
+                        // 진행률 폴링
                         const progressInterval = setInterval(async () => {
                           try {
                             const token = localStorage.getItem('token');
@@ -4108,18 +4108,18 @@ const campaignData = {
                           setMessageEditProgress(100);
                           
                           if (data.success) {
-                            setToast({ show: true, type: 'success', message: data.message || `${data.updatedCount?.toLocaleString()}�� ���� ���� �Ϸ�` });
+                            setToast({ show: true, type: 'success', message: data.message || `${data.updatedCount?.toLocaleString()}건 문안 수정 완료` });
                             setTimeout(() => setToast({ show: false, type: 'success', message: '' }), 3000);
                             setMessageEditModal(false);
-                            // ķ���� ���� ������Ʈ
+                            // 캠페인 정보 업데이트
                             setSelectedScheduled({ ...selectedScheduled, message_template: editMessage, message_subject: editSubject });
                           } else {
-                            setToast({ show: true, type: 'error', message: data.error || '���� ����' });
+                            setToast({ show: true, type: 'error', message: data.error || '수정 실패' });
                             setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
                           }
                         } catch (err) {
                           clearInterval(progressInterval);
-                          setToast({ show: true, type: 'error', message: '���� ����' });
+                          setToast({ show: true, type: 'error', message: '수정 실패' });
                           setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
                         } finally {
                           setMessageEditing(false);
@@ -4127,7 +4127,7 @@ const campaignData = {
                       }}
                       disabled={messageEditing}
                       className="flex-1 py-3.5 bg-amber-500 text-white hover:bg-amber-600 font-medium disabled:opacity-50"
-                    >{messageEditing ? '���� ��...' : '�����ϱ�'}</button>
+                    >{messageEditing ? '수정 중...' : '수정하기'}</button>
                   </div>
                 </div>
               </div>
@@ -4135,43 +4135,43 @@ const campaignData = {
           </div>
         )}
       </main>
-    {/* ���ε� ��� ��� */}
+    {/* 업로드 결과 모달 */}
     {showUploadResult && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl p-8 max-w-md w-full mx-4 shadow-2xl">
             <div className="text-center">
-              <div className="text-6xl mb-4">??</div>
-              <h3 className="text-2xl font-bold text-gray-800 mb-4">���� �Ϸ�!</h3>
+              <div className="text-6xl mb-4">🎉</div>
+              <h3 className="text-2xl font-bold text-gray-800 mb-4">저장 완료!</h3>
               <div className="bg-gray-50 rounded-xl p-4 mb-6">
                 <div className="flex justify-between py-2 border-b border-gray-200">
-                  <span className="text-gray-600">�ű� �߰�</span>
-                  <span className="font-bold text-blue-600">{uploadResult.insertCount.toLocaleString()}��</span>
+                  <span className="text-gray-600">신규 추가</span>
+                  <span className="font-bold text-blue-600">{uploadResult.insertCount.toLocaleString()}건</span>
                 </div>
                 <div className="flex justify-between py-2">
-                  <span className="text-gray-600">�ߺ� (��ŵ)</span>
-                  <span className="font-bold text-orange-500">{uploadResult.duplicateCount.toLocaleString()}��</span>
+                  <span className="text-gray-600">중복 (스킵)</span>
+                  <span className="font-bold text-orange-500">{uploadResult.duplicateCount.toLocaleString()}건</span>
                 </div>
               </div>
               <button
                 onClick={() => { setShowUploadResult(false); window.location.reload(); }}
                 className="w-full py-3 bg-green-700 text-white rounded-xl font-medium hover:bg-green-800"
               >
-                Ȯ��
+                확인
               </button>
             </div>
           </div>
         </div>
       )}
-      {/* �����߼� ��� */}
-      {/* ���� Ÿ�� �߼� ��� */}
+      {/* 직접발송 모달 */}
+      {/* 직접 타겟 발송 모달 */}
       {showTargetSend && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl shadow-2xl w-[1400px] max-h-[95vh] overflow-y-auto">
-            {/* ��� */}
+            {/* 헤더 */}
             <div className="px-6 py-4 border-b flex justify-between items-center bg-green-50">
               <div>
-                <h3 className="text-xl font-bold text-gray-800">���� Ÿ�� �߼�</h3>
-                <p className="text-base text-gray-500 mt-1">����� <span className="font-bold text-emerald-600">{targetRecipients.length.toLocaleString()}��</span>���� �޽����� �߼��մϴ�</p>
+                <h3 className="text-xl font-bold text-gray-800">직접 타겟 발송</h3>
+                <p className="text-base text-gray-500 mt-1">추출된 <span className="font-bold text-emerald-600">{targetRecipients.length.toLocaleString()}명</span>에게 메시지를 발송합니다</p>
               </div>
               <button 
                 onClick={() => { setShowTargetSend(false); setTargetRecipients([]); setTargetMessage(''); setTargetSubject(''); }}
@@ -4182,11 +4182,11 @@ const campaignData = {
                 </svg>
               </button>
             </div>
-            {/* ���� */}
+            {/* 본문 */}
             <div className="px-6 py-5 flex gap-5">
-              {/* ����: �޽��� �ۼ� */}
+              {/* 좌측: 메시지 작성 */}
               <div className="w-[400px]">
-                {/* SMS/LMS/MMS �� */}
+                {/* SMS/LMS/MMS 탭 */}
                 <div className="flex mb-3 bg-gray-100 rounded-lg p-1">
                   <button 
                     onClick={() => setTargetMsgType('SMS')}
@@ -4208,78 +4208,78 @@ const campaignData = {
                   </button>
                 </div>
 
-                {/* �޽��� �ۼ� ���� */}
+                {/* 메시지 작성 영역 */}
                 <div className="border-2 border-gray-200 rounded-2xl overflow-hidden bg-white shadow-sm">
-                  {/* LMS/MMS ���� */}
+                  {/* LMS/MMS 제목 */}
                   {(targetMsgType === 'LMS' || targetMsgType === 'MMS') && (
                     <div className="px-4 pt-3">
                       <input
                         type="text"
                         value={targetSubject}
                         onChange={(e) => setTargetSubject(e.target.value)}
-                        placeholder="���� (�ʼ�)"
+                        placeholder="제목 (필수)"
                         className="w-full px-3 py-2 border border-orange-300 bg-orange-50 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 placeholder-orange-400"
                       />
                     </div>
                   )}
                   
-                  {/* �޽��� �Է� */}
+                  {/* 메시지 입력 */}
                   <div className="p-4">
                     <div className="relative">
                       {adTextEnabled && (
-                        <span className="absolute left-0 top-0 text-sm text-orange-600 font-medium pointer-events-none select-none">(����) </span>
+                        <span className="absolute left-0 top-0 text-sm text-orange-600 font-medium pointer-events-none select-none">(광고) </span>
                       )}
                       <textarea
                         value={targetMessage}
                         onChange={(e) => setTargetMessage(e.target.value)}
-                        placeholder="�����Ͻ� ������ �Է��ϼ���."
+                        placeholder="전송하실 내용을 입력하세요."
                         style={adTextEnabled ? { textIndent: '42px' } : {}}
                         className={`w-full resize-none border-0 focus:outline-none text-sm leading-relaxed ${targetMsgType === 'SMS' ? 'h-[180px]' : 'h-[140px]'}`}
                       />
                     </div>
-                    {/* ����ź� ǥ�� */}
+                    {/* 무료거부 표기 */}
                     {adTextEnabled && (
                       <div className="text-sm text-orange-600 mt-1">
                         {targetMsgType === 'SMS' 
-                          ? `����ź�${optOutNumber.replace(/-/g, '')}` 
-                          : `������Űź� ${formatRejectNumber(optOutNumber)}`}
+                          ? `무료거부${optOutNumber.replace(/-/g, '')}` 
+                          : `무료수신거부 ${formatRejectNumber(optOutNumber)}`}
                       </div>
                     )}
-                    {/* Ư������/�̸��� �ȳ� */}
+                    {/* 특수문자/이모지 안내 */}
                     <div className="text-xs text-gray-400 mt-2">
-                      ?? �̸���(??)��Ư�����ڴ� LMS ��ȯ �Ǵ� �߼� ���� ������ �� �� �ֽ��ϴ�
+                      ⚠️ 이모지(😀)·특수문자는 LMS 전환 또는 발송 실패 원인이 될 수 있습니다
                     </div>
                   </div>
                   
-                  {/* ��ư�� + ����Ʈ ǥ�� */}
+                  {/* 버튼들 + 바이트 표시 */}
                   <div className="px-3 py-1.5 bg-gray-50 border-t flex items-center justify-between">
                     <div className="flex items-center gap-0.5">
-                      <button onClick={() => setShowSpecialChars('target')} className="px-2 py-1 text-xs bg-white border rounded hover:bg-gray-100">Ư������</button>
-                      <button onClick={() => { loadTemplates(); setShowTemplateBox('target'); }} className="px-2 py-1 text-xs bg-white border rounded hover:bg-gray-100">������</button>
-                      <button onClick={() => { if (!targetMessage.trim()) { setToast({show: true, type: 'error', message: '������ �޽����� ���� �Է����ּ���.'}); setTimeout(() => setToast({show: false, type: 'error', message: ''}), 3000); return; } setTemplateSaveName(''); setShowTemplateSave('target'); }} className="px-2 py-1 text-xs bg-white border rounded hover:bg-gray-100">��������</button>
+                      <button onClick={() => setShowSpecialChars('target')} className="px-2 py-1 text-xs bg-white border rounded hover:bg-gray-100">특수문자</button>
+                      <button onClick={() => { loadTemplates(); setShowTemplateBox('target'); }} className="px-2 py-1 text-xs bg-white border rounded hover:bg-gray-100">보관함</button>
+                      <button onClick={() => { if (!targetMessage.trim()) { setToast({show: true, type: 'error', message: '저장할 메시지를 먼저 입력해주세요.'}); setTimeout(() => setToast({show: false, type: 'error', message: ''}), 3000); return; } setTemplateSaveName(''); setShowTemplateSave('target'); }} className="px-2 py-1 text-xs bg-white border rounded hover:bg-gray-100">문자저장</button>
                     </div>
                     <span className="text-xs text-gray-500 whitespace-nowrap">
                       <span className={`font-bold ${(() => {
                         const optOutText = targetMsgType === 'SMS' 
-                          ? `����ź�${optOutNumber.replace(/-/g, '')}` 
-                          : `������Űź� ${formatRejectNumber(optOutNumber)}`;
-                        const fullMsg = adTextEnabled ? `(����)${targetMessage}\n${optOutText}` : targetMessage;
+                          ? `무료거부${optOutNumber.replace(/-/g, '')}` 
+                          : `무료수신거부 ${formatRejectNumber(optOutNumber)}`;
+                        const fullMsg = adTextEnabled ? `(광고)${targetMessage}\n${optOutText}` : targetMessage;
                         const bytes = calculateBytes(fullMsg);
                         const max = targetMsgType === 'SMS' ? 90 : 2000;
                         return bytes > max ? 'text-red-500' : 'text-emerald-600';
                       })()}`}>
                         {(() => {
                           const optOutText = targetMsgType === 'SMS' 
-                            ? `����ź�${optOutNumber.replace(/-/g, '')}` 
-                            : `������Űź� ${formatRejectNumber(optOutNumber)}`;
-                          const fullMsg = adTextEnabled ? `(����)${targetMessage}\n${optOutText}` : targetMessage;
+                            ? `무료거부${optOutNumber.replace(/-/g, '')}` 
+                            : `무료수신거부 ${formatRejectNumber(optOutNumber)}`;
+                          const fullMsg = adTextEnabled ? `(광고)${targetMessage}\n${optOutText}` : targetMessage;
                           return calculateBytes(fullMsg);
                         })()}
                       </span>/{targetMsgType === 'SMS' ? 90 : 2000}byte
                     </span>
                   </div>
                   
-                  {/* ȸ�Ź�ȣ ���� */}
+                  {/* 회신번호 선택 */}
                   <div className="px-3 py-1.5 border-t">
                     <select 
                       value={useIndividualCallback ? '__individual__' : selectedCallback}
@@ -4294,23 +4294,23 @@ const campaignData = {
                       }}
                       className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                     >
-                      <option value="">ȸ�Ź�ȣ ����</option>
-                      <option value="__individual__">?? ����ȸ�Ź�ȣ (����� �����ȣ)</option>
+                      <option value="">회신번호 선택</option>
+                      <option value="__individual__">📱 개별회신번호 (고객별 매장번호)</option>
                       {callbackNumbers.map((cb) => (
                         <option key={cb.id} value={cb.phone}>
-                        {formatPhoneNumber(cb.phone)} {cb.label ? `(${cb.label})` : ''} {cb.is_default ? '?' : ''}
+                        {formatPhoneNumber(cb.phone)} {cb.label ? `(${cb.label})` : ''} {cb.is_default ? '⭐' : ''}
                       </option>
                       ))}
                     </select>
                     {useIndividualCallback && (
-                      <p className="text-xs text-blue-600 mt-1">?? �� ����� ���̿���� ȸ�Ź�ȣ�� �߼۵˴ϴ�</p>
+                      <p className="text-xs text-blue-600 mt-1">💡 각 고객의 주이용매장 회신번호로 발송됩니다</p>
                     )}
                   </div>
 
-                  {/* �ڵ��Է� ��Ӵٿ� */}
+                  {/* 자동입력 드롭다운 */}
                   <div className="px-3 py-1.5 border-t bg-gray-50">
                     <div className="flex items-center gap-3">
-                      <span className="text-sm font-bold text-gray-700 whitespace-nowrap">�ڵ��Է�</span>
+                      <span className="text-sm font-bold text-gray-700 whitespace-nowrap">자동입력</span>
                       <select 
                         value=""
                         onChange={(e) => {
@@ -4320,42 +4320,42 @@ const campaignData = {
                         }}
                         className="flex-1 border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                       >
-                        <option value="">���� ����</option>
-                        <option value="%�̸�%">�̸�</option>
-                        <option value="%���%">���</option>
-                        <option value="%����%">����</option>
-                        <option value="%���űݾ�%">���űݾ�</option>
-                        <option value="%ȸ�Ź�ȣ%">ȸ�Ź�ȣ</option>
+                        <option value="">변수 선택</option>
+                        <option value="%이름%">이름</option>
+                        <option value="%등급%">등급</option>
+                        <option value="%지역%">지역</option>
+                        <option value="%구매금액%">구매금액</option>
+                        <option value="%회신번호%">회신번호</option>
                       </select>
                     </div>
                   </div>
                   
-                  {/* MMS �̹��� ���ε� ���� */}
+                  {/* MMS 이미지 업로드 영역 */}
                   {(targetMsgType === 'MMS' || mmsUploadedImages.length > 0) && (
                     <div className="px-3 py-2 border-t bg-amber-50/50 cursor-pointer hover:bg-amber-100/50 transition-colors" onClick={() => setShowMmsUploadModal(true)}>
                       <div className="flex items-center gap-2">
-                        <span className="text-xs font-semibold text-gray-600">??? MMS �̹���</span>
+                        <span className="text-xs font-semibold text-gray-600">🖼️ MMS 이미지</span>
                         {mmsUploadedImages.length > 0 ? (
                           <div className="flex items-center gap-1">
                             {mmsUploadedImages.map((img, idx) => (
                               <img key={idx} src={img.url} alt="" className="w-10 h-10 object-cover rounded border" crossOrigin="use-credentials" />
                             ))}
-                            <span className="text-xs text-purple-600 ml-1">?? ����</span>
+                            <span className="text-xs text-purple-600 ml-1">✏️ 수정</span>
                           </div>
                         ) : (
-                          <span className="text-xs text-amber-600">Ŭ���Ͽ� �̹��� ÷�� ��</span>
+                          <span className="text-xs text-amber-600">클릭하여 이미지 첨부 →</span>
                         )}
                       </div>
                     </div>
                   )}
 
-                  {/* �̸����� + �������� ��ư */}
+                  {/* 미리보기 + 스팸필터 버튼 */}
                   <div className="px-3 py-1.5 border-t">
                     <div className="grid grid-cols-2 gap-2">
                     <button 
                         onClick={() => {
                           if (!targetMessage.trim()) {
-                            alert('�޽����� �Է����ּ���');
+                            alert('메시지를 입력해주세요');
                             return;
                           }
                           setDirectMessage(targetMessage);
@@ -4365,16 +4365,16 @@ const campaignData = {
                         }}
                         className="py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-sm font-medium transition-colors"
                       >
-                        ?? �̸�����
+                        📄 미리보기
                       </button>
                       <button 
                         onClick={() => {
                           const toast = document.createElement('div');
                           toast.innerHTML = `
                             <div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:white;padding:24px 32px;border-radius:16px;box-shadow:0 10px 40px rgba(0,0,0,0.2);z-index:9999;text-align:center;">
-                              <div style="font-size:48px;margin-bottom:12px;">??</div>
-                              <div style="font-size:16px;font-weight:bold;color:#374151;margin-bottom:8px;">�غ� ���� ����Դϴ�</div>
-                              <div style="font-size:14px;color:#6B7280;">���������׽�Ʈ�� �� ������Ʈ�˴ϴ�</div>
+                              <div style="font-size:48px;margin-bottom:12px;">🚧</div>
+                              <div style="font-size:16px;font-weight:bold;color:#374151;margin-bottom:8px;">준비 중인 기능입니다</div>
+                              <div style="font-size:14px;color:#6B7280;">스팸필터테스트는 곧 업데이트됩니다</div>
                             </div>
                             <div style="position:fixed;inset:0;background:rgba(0,0,0,0.3);z-index:9998;" onclick="this.parentElement.remove()"></div>
                           `;
@@ -4383,15 +4383,15 @@ const campaignData = {
                         }}
                         className="py-2.5 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg text-sm font-medium transition-colors"
                       >
-                        ??? ���������׽�Ʈ
+                        🛡️ 스팸필터테스트
                       </button>
                     </div>
                   </div>
                   
-                  {/* ����/����/���� �ɼ� - 3���� 2�� */}
+                  {/* 예약/분할/광고 옵션 - 3분할 2줄 */}
                   <div className="px-3 py-2 border-t">
                   <div className="grid grid-cols-3 gap-2 text-xs">
-                      {/* �������� */}
+                      {/* 예약전송 */}
                       <div className={`rounded-lg p-3 text-center ${reserveEnabled ? 'bg-blue-50' : 'bg-gray-50'}`}>
                         <label className="flex items-center justify-center gap-1.5 cursor-pointer">
                           <input 
@@ -4403,7 +4403,7 @@ const campaignData = {
                             }}
                             className="rounded w-4 h-4" 
                           />
-                          <span className={`font-medium ${reserveEnabled ? 'text-blue-700' : ''}`}>��������</span>
+                          <span className={`font-medium ${reserveEnabled ? 'text-blue-700' : ''}`}>예약전송</span>
                         </label>
                         <div 
                           className={`mt-1.5 text-xs cursor-pointer ${reserveEnabled ? 'text-blue-600 font-medium' : 'text-gray-400'}`}
@@ -4411,10 +4411,10 @@ const campaignData = {
                         >
                           {reserveDateTime 
                             ? new Date(reserveDateTime).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-                            : '����ð� ����'}
+                            : '예약시간 선택'}
                         </div>
                       </div>
-                      {/* �������� */}
+                      {/* 분할전송 */}
                       <div className={`rounded-lg p-3 text-center ${splitEnabled ? 'bg-purple-50' : 'bg-gray-50'}`}>
                         <label className="flex items-center justify-center gap-1.5 cursor-pointer">
                           <input 
@@ -4423,7 +4423,7 @@ const campaignData = {
                             checked={splitEnabled}
                             onChange={(e) => setSplitEnabled(e.target.checked)}
                           />
-                          <span className={`font-medium ${splitEnabled ? 'text-purple-700' : ''}`}>��������</span>
+                          <span className={`font-medium ${splitEnabled ? 'text-purple-700' : ''}`}>분할전송</span>
                         </label>
                         <div className="mt-1.5 flex items-center justify-center gap-1">
                           <input 
@@ -4434,10 +4434,10 @@ const campaignData = {
                             onChange={(e) => setSplitCount(Number(e.target.value) || 1000)}
                             disabled={!splitEnabled}
                           />
-                          <span className="text-xs text-gray-500">��/��</span>
+                          <span className="text-xs text-gray-500">건/분</span>
                         </div>
                       </div>
-                      {/* ����/080 */}
+                      {/* 광고/080 */}
                       <div className={`rounded-lg p-3 text-center ${adTextEnabled ? 'bg-orange-50' : 'bg-gray-50'}`}>
                         <label className="flex items-center justify-center gap-1.5 cursor-pointer">
                           <input 
@@ -4446,56 +4446,56 @@ const campaignData = {
                             onChange={(e) => setAdTextEnabled(e.target.checked)}
                             className="rounded w-4 h-4"
                           />
-                          <span className={`font-medium ${adTextEnabled ? 'text-orange-700' : ''}`}>����ǥ��</span>
+                          <span className={`font-medium ${adTextEnabled ? 'text-orange-700' : ''}`}>광고표기</span>
                         </label>
-                        <div className={`mt-1.5 text-xs ${adTextEnabled ? 'text-orange-500' : 'text-gray-400'}`}>080 ���Űź�</div>
+                        <div className={`mt-1.5 text-xs ${adTextEnabled ? 'text-orange-500' : 'text-gray-400'}`}>080 수신거부</div>
                       </div>
                     </div>
                   </div>
                   
-                  {/* �����ϱ� ��ư */}
+                  {/* 전송하기 버튼 */}
                   <div className="px-3 py-2 border-t">
                     <button 
                       onClick={async () => {
                         if (targetRecipients.length === 0) {
-                          alert('�����ڰ� �����ϴ�');
+                          alert('수신자가 없습니다');
                           return;
                         }
                         if (!targetMessage.trim()) {
-                          alert('�޽����� �Է����ּ���');
+                          alert('메시지를 입력해주세요');
                           return;
                         }
                         if (!selectedCallback && !useIndividualCallback) {
-                          alert('ȸ�Ź�ȣ�� �������ּ���');
+                          alert('회신번호를 선택해주세요');
                           return;
                         }
                         if (useIndividualCallback && targetRecipients.some((r: any) => !r.callback)) {
-                          alert('����ȸ�Ź�ȣ�� ���� ����� �ֽ��ϴ�.\n�Ϲ� ȸ�Ź�ȣ�� �����ϰų� ��� �����͸� Ȯ�����ּ���.');
+                          alert('개별회신번호가 없는 고객이 있습니다.\n일반 회신번호를 선택하거나 고객 데이터를 확인해주세요.');
                           return;
                         }
                         if ((targetMsgType === 'LMS' || targetMsgType === 'MMS') && !targetSubject.trim()) {
-                          alert('������ �Է����ּ���');
+                          alert('제목을 입력해주세요');
                           return;
                         }
 
-                        // ����Ʈ ���
+                        // 바이트 계산
                         const optOutText = targetMsgType === 'SMS' 
-                          ? `����ź�${optOutNumber.replace(/-/g, '')}` 
-                          : `������Űź� ${formatRejectNumber(optOutNumber)}`;
-                        const fullMsg = adTextEnabled ? `(����)${targetMessage}\n${optOutText}` : targetMessage;
+                          ? `무료거부${optOutNumber.replace(/-/g, '')}` 
+                          : `무료수신거부 ${formatRejectNumber(optOutNumber)}`;
+                        const fullMsg = adTextEnabled ? `(광고)${targetMessage}\n${optOutText}` : targetMessage;
                         const msgBytes = calculateBytes(fullMsg);
 
-                        // SMS�ε� 90����Ʈ �ʰ� �� ���� ��޷� ��ȯ �ȳ�
+                        // SMS인데 90바이트 초과 시 예쁜 모달로 전환 안내
                         if (targetMsgType === 'SMS' && msgBytes > 90 && !smsOverrideAccepted) {
                           setPendingBytes(msgBytes);
                           setShowLmsConfirm(true);
                           return;
                         }
 
-                        // LMS/MMS�ε� SMS�� ������ �Ǵ� ��� ��� ���� �ȳ�
+                        // LMS/MMS인데 SMS로 보내도 되는 경우 비용 절감 안내
                         if (targetMsgType !== 'SMS') {
-                          const smsOptOut = `����ź�${optOutNumber.replace(/-/g, '')}`;
-                          const smsFullMsg = adTextEnabled ? `(����)${targetMessage}\n${smsOptOut}` : targetMessage;
+                          const smsOptOut = `무료거부${optOutNumber.replace(/-/g, '')}`;
+                          const smsFullMsg = adTextEnabled ? `(광고)${targetMessage}\n${smsOptOut}` : targetMessage;
                           const smsBytes = calculateBytes(smsFullMsg);
                           if (smsBytes <= 90) {
                             setShowSmsConvert({show: true, from: 'target', currentBytes: msgBytes, smsBytes, count: targetRecipients.length});
@@ -4503,7 +4503,7 @@ const campaignData = {
                           }
                         }
 
-                        // ���Űź� üũ
+                        // 수신거부 체크
                         const token = localStorage.getItem('token');
                         const phones = targetRecipients.map((r: any) => r.phone);
                         const checkRes = await fetch('/api/unsubscribes/check', {
@@ -4514,7 +4514,7 @@ const campaignData = {
                         const checkData = await checkRes.json();
                         const unsubCount = checkData.unsubscribeCount || 0;
 
-                        // �߼� Ȯ�� ���
+                        // 발송 확인 모달
                         setSendConfirm({
                           show: true,
                           type: reserveEnabled ? 'scheduled' : 'immediate',
@@ -4528,52 +4528,52 @@ const campaignData = {
                       disabled={targetSending}
                       className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-base transition-colors disabled:opacity-50"
                     >
-                      {targetSending ? '�߼� ��...' : '�����ϱ�'}
+                      {targetSending ? '발송 중...' : '전송하기'}
                     </button>
                   </div>
                 </div>
               </div>
               
                         
-              {/* ����: ������ ��� */}
+              {/* 우측: 수신자 목록 */}
               <div className="flex-1 flex flex-col">
-                {/* ��� */}
+                {/* 헤더 */}
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-3">
-                    <span className="text-lg font-bold text-gray-800">������ ���</span>
+                    <span className="text-lg font-bold text-gray-800">수신자 목록</span>
                     <span className="px-3 py-1 bg-emerald-100 text-emerald-700 rounded-full text-sm font-medium">
-                      �� {targetRecipients.length.toLocaleString()}��
+                      총 {targetRecipients.length.toLocaleString()}건
                     </span>
                   </div>
                   <div className="flex items-center gap-2">
                     <input
                       type="text"
-                      placeholder="?? ���Ź�ȣ �˻�"
+                      placeholder="🔍 수신번호 검색"
                       value={targetListSearch}
                       onChange={(e) => { setTargetListSearch(e.target.value); setTargetListPage(0); }}
                       className="border rounded-lg px-3 py-1.5 text-sm w-48"
                     />
                     <label className="flex items-center gap-1 text-sm text-gray-600">
                       <input type="checkbox" defaultChecked className="rounded" />
-                      �ߺ�����
+                      중복제거
                     </label>
                     <label className="flex items-center gap-1 text-sm text-gray-600">
                       <input type="checkbox" defaultChecked className="rounded" />
-                      ���Űź�����
+                      수신거부제거
                     </label>
                   </div>
                 </div>
 
-                {/* ���̺� */}
+                {/* 테이블 */}
                 <div className="flex-1 border rounded-xl overflow-hidden">
                   <table className="w-full text-sm">
                     <thead className="bg-gray-50">
                       <tr>
-                        <th className="px-4 py-2.5 text-left font-medium text-gray-600">���Ź�ȣ</th>
-                        <th className="px-4 py-2.5 text-left font-medium text-gray-600">�̸�</th>
-                        <th className="px-4 py-2.5 text-left font-medium text-gray-600">���</th>
-                        <th className="px-4 py-2.5 text-left font-medium text-gray-600">����</th>
-                        <th className="px-4 py-2.5 text-left font-medium text-gray-600">���űݾ�</th>
+                        <th className="px-4 py-2.5 text-left font-medium text-gray-600">수신번호</th>
+                        <th className="px-4 py-2.5 text-left font-medium text-gray-600">이름</th>
+                        <th className="px-4 py-2.5 text-left font-medium text-gray-600">등급</th>
+                        <th className="px-4 py-2.5 text-left font-medium text-gray-600">지역</th>
+                        <th className="px-4 py-2.5 text-left font-medium text-gray-600">구매금액</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -4597,7 +4597,7 @@ const campaignData = {
                   </table>
                 </div>
 
-                {/* ����¡ */}
+                {/* 페이징 */}
                 <div className="mt-3 flex justify-center items-center gap-2">
                   {(() => {
                     const filtered = targetListSearch 
@@ -4613,40 +4613,40 @@ const campaignData = {
                           disabled={targetListPage === 0}
                           className="px-3 py-1.5 border rounded-lg text-sm disabled:opacity-50"
                         >
-                          ����
+                          이전
                         </button>
                         <span className="text-sm text-gray-600">
-                          {targetListPage + 1} / {totalPages} ������
+                          {targetListPage + 1} / {totalPages} 페이지
                         </span>
                         <button 
                           onClick={() => setTargetListPage(p => Math.min(totalPages - 1, p + 1))}
                           disabled={targetListPage >= totalPages - 1}
                           className="px-3 py-1.5 border rounded-lg text-sm disabled:opacity-50"
                         >
-                          ����
+                          다음
                         </button>
                       </>
                     );
                   })()}
                 </div>
 
-                {/* �ϴ� ��ư */}
+                {/* 하단 버튼 */}
                 <div className="mt-3 flex justify-between items-center">
                   <div className="flex gap-2">
-                    <button className="px-3 py-1.5 text-sm border rounded-lg hover:bg-gray-50">�ߺ�����</button>
-                    <button className="px-3 py-1.5 text-sm border rounded-lg hover:bg-gray-50">���û���</button>
+                    <button className="px-3 py-1.5 text-sm border rounded-lg hover:bg-gray-50">중복제거</button>
+                    <button className="px-3 py-1.5 text-sm border rounded-lg hover:bg-gray-50">선택삭제</button>
                     <button 
                       onClick={() => setTargetRecipients([])}
                       className="px-3 py-1.5 text-sm border rounded-lg hover:bg-gray-50"
                     >
-                      ��ü����
+                      전체삭제
                     </button>
                   </div>
                   <button 
                     onClick={() => { setShowTargetSend(false); setShowDirectTargeting(true); }}
                     className="px-3 py-1.5 text-sm bg-gray-100 rounded-lg hover:bg-gray-200"
                   >
-                    ?? Ÿ�� �缳��
+                    🔄 타겟 재설정
                   </button>
                 </div>
                 </div>
@@ -4655,22 +4655,22 @@ const campaignData = {
         </div>
       )}
 
-      {/* �������� �޷� ��� (����) */}
+      {/* 예약전송 달력 모달 (공용) */}
       {showReservePicker && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60]">
           <div className="bg-white rounded-xl shadow-2xl w-[360px] overflow-hidden">
             <div className="bg-blue-50 px-5 py-4 border-b">
-              <h3 className="text-lg font-bold text-blue-700">?? ���� �ð� ����</h3>
+              <h3 className="text-lg font-bold text-blue-700">📅 예약 시간 설정</h3>
             </div>
             <div className="p-5">
-              {/* ���� ���� */}
+              {/* 빠른 선택 */}
               <div className="mb-4">
-                <div className="text-xs text-gray-500 mb-2">���� ����</div>
+                <div className="text-xs text-gray-500 mb-2">빠른 선택</div>
                 <div className="grid grid-cols-3 gap-2">
                   {[
-                    { label: '1�ð� ��', hours: 1 },
-                    { label: '3�ð� ��', hours: 3 },
-                    { label: '���� ���� 9��', tomorrow: 9 },
+                    { label: '1시간 후', hours: 1 },
+                    { label: '3시간 후', hours: 3 },
+                    { label: '내일 오전 9시', tomorrow: 9 },
                   ].map((opt) => (
                     <button
                       key={opt.label}
@@ -4692,12 +4692,12 @@ const campaignData = {
                   ))}
                 </div>
               </div>
-              {/* ���� ���� */}
+              {/* 직접 선택 */}
               <div>
                 <div className="flex gap-4">
-                  {/* ��¥ */}
+                  {/* 날짜 */}
                   <div className="flex-1">
-                    <div className="text-xs text-gray-500 mb-2">��¥</div>
+                    <div className="text-xs text-gray-500 mb-2">날짜</div>
                     <input
                       type="date"
                       value={reserveDateTime?.split('T')[0] || ''}
@@ -4709,9 +4709,9 @@ const campaignData = {
                       className="w-full border-2 border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:border-blue-400 focus:outline-none"
                     />
                   </div>
-                  {/* �ð� */}
+                  {/* 시간 */}
                   <div className="flex-1">
-                    <div className="text-xs text-gray-500 mb-2">�ð�</div>
+                    <div className="text-xs text-gray-500 mb-2">시간</div>
                     <div className="flex items-center gap-1">
                       <input
                         type="number"
@@ -4744,10 +4744,10 @@ const campaignData = {
                   </div>
                 </div>
               </div>
-              {/* ���õ� �ð� ǥ�� */}
+              {/* 선택된 시간 표시 */}
               {reserveDateTime && (
                 <div className="mt-4 p-3 bg-blue-50 rounded-lg text-center">
-                  <span className="text-sm text-gray-600">���� �ð�: </span>
+                  <span className="text-sm text-gray-600">예약 시간: </span>
                   <span className="text-sm font-bold text-blue-700">
                     {new Date(reserveDateTime).toLocaleString('ko-KR', {
                       timeZone: 'Asia/Seoul',
@@ -4770,19 +4770,19 @@ const campaignData = {
                 }}
                 className="flex-1 py-2.5 border rounded-lg text-sm font-medium hover:bg-gray-100"
               >
-                ���
+                취소
               </button>
               <button
                 onClick={() => {
                   if (!reserveDateTime) {
-                    alert('���� �ð��� �������ּ���');
+                    alert('예약 시간을 선택해주세요');
                     return;
                   }
                   setShowReservePicker(false);
                 }}
                 className="flex-1 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700"
               >
-                Ȯ��
+                확인
               </button>
             </div>
           </div>
@@ -4792,11 +4792,11 @@ const campaignData = {
       {showDirectSend && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl shadow-2xl w-[1400px] max-h-[95vh] overflow-y-auto">
-            {/* ���� */}
+            {/* 본문 */}
             <div className="px-6 py-5 flex gap-5">
-              {/* ����: �޽��� �ۼ� */}
+              {/* 좌측: 메시지 작성 */}
               <div className="w-[400px]">
-                {/* SMS/LMS/MMS �� */}
+                {/* SMS/LMS/MMS 탭 */}
                 <div className="flex mb-3 bg-gray-100 rounded-lg p-1">
                   <button 
                     onClick={() => setDirectMsgType('SMS')}
@@ -4818,81 +4818,81 @@ const campaignData = {
                   </button>
                 </div>
 
-                {/* �޽��� �ۼ� ���� */}
+                {/* 메시지 작성 영역 */}
                 <div className="border-2 border-gray-200 rounded-2xl overflow-hidden bg-white shadow-sm">
-                  {/* LMS/MMS ���� */}
+                  {/* LMS/MMS 제목 */}
                   {(directMsgType === 'LMS' || directMsgType === 'MMS') && (
                     <div className="px-4 pt-3">
                       <input
                         type="text"
                         value={directSubject}
                         onChange={(e) => setDirectSubject(e.target.value)}
-                        placeholder="���� (�ʼ�)"
+                        placeholder="제목 (필수)"
                         className="w-full px-3 py-2 border border-orange-300 bg-orange-50 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 placeholder-orange-400"
                       />
                     </div>
                   )}
                   
-                  {/* �޽��� �Է� */}
+                  {/* 메시지 입력 */}
                   <div className="p-4">
                     <div className="relative">
                       {adTextEnabled && (
-                        <span className="absolute left-0 top-0 text-sm text-orange-600 font-medium pointer-events-none select-none">(����) </span>
+                        <span className="absolute left-0 top-0 text-sm text-orange-600 font-medium pointer-events-none select-none">(광고) </span>
                       )}
                       <textarea
                         value={directMessage}
                         onChange={(e) => setDirectMessage(e.target.value)}
-                        placeholder="�����Ͻ� ������ �Է��ϼ���."
+                        placeholder="전송하실 내용을 입력하세요."
                         style={adTextEnabled ? { textIndent: '42px' } : {}}
                         className={`w-full resize-none border-0 focus:outline-none text-sm leading-relaxed ${directMsgType === 'SMS' ? 'h-[180px]' : 'h-[140px]'}`}
                       />
                     </div>
-                    {/* ����ź� ǥ�� */}
+                    {/* 무료거부 표기 */}
                     {adTextEnabled && (
                       <div className="text-sm text-orange-600 mt-1">
                         {directMsgType === 'SMS' 
-                          ? `����ź�${optOutNumber.replace(/-/g, '')}` 
-                          : `������Űź� ${formatRejectNumber(optOutNumber)}`}
+                          ? `무료거부${optOutNumber.replace(/-/g, '')}` 
+                          : `무료수신거부 ${formatRejectNumber(optOutNumber)}`}
                       </div>
                     )}
-                    {/* Ư������/�̸��� �ȳ� */}
+                    {/* 특수문자/이모지 안내 */}
                     <div className="text-xs text-gray-400 mt-2">
-                      ?? �̸���(??)��Ư�����ڴ� LMS ��ȯ �Ǵ� �߼� ���� ������ �� �� �ֽ��ϴ�
+                      ⚠️ 이모지(😀)·특수문자는 LMS 전환 또는 발송 실패 원인이 될 수 있습니다
                     </div>
                     
-                    {/* MMS �̹��� �̸����� */}
+                    {/* MMS 이미지 미리보기 */}
                     {(directMsgType === 'MMS' || mmsUploadedImages.length > 0) && (
                       <div className="mt-2 pt-2 border-t cursor-pointer hover:bg-amber-50/50 transition-colors rounded-lg p-2" onClick={() => setShowMmsUploadModal(true)}>
                         <div className="flex items-center gap-2">
-                          <span className="text-xs font-semibold text-gray-600">??? MMS �̹���</span>
+                          <span className="text-xs font-semibold text-gray-600">🖼️ MMS 이미지</span>
                           {mmsUploadedImages.length > 0 ? (
                             <div className="flex items-center gap-1">
                               {mmsUploadedImages.map((img, idx) => (
                                 <img key={idx} src={img.url} alt="" className="w-10 h-10 object-cover rounded border" crossOrigin="use-credentials" />
                               ))}
-                              <span className="text-xs text-purple-600 ml-1">?? ����</span>
+                              <span className="text-xs text-purple-600 ml-1">✏️ 수정</span>
                             </div>
                           ) : (
-                            <span className="text-xs text-amber-600">Ŭ���Ͽ� �̹��� ÷�� ��</span>
+                            <span className="text-xs text-amber-600">클릭하여 이미지 첨부 →</span>
                           )}
                         </div>
                       </div>
                     )}
                   </div>
                   
-                  {/* ��ư�� + ����Ʈ ǥ�� */}
+                  {/* 버튼들 + 바이트 표시 */}
                   <div className="px-3 py-1.5 bg-gray-50 border-t flex items-center justify-between">
                     <div className="flex items-center gap-0.5">
-                      <button onClick={() => setShowSpecialChars('direct')} className="px-2 py-1 text-xs bg-white border rounded hover:bg-gray-100">Ư������</button>
-                      <button onClick={() => { loadTemplates(); setShowTemplateBox('direct'); }} className="px-2 py-1 text-xs bg-white border rounded hover:bg-gray-100">������</button>
-                      <button onClick={() => { if (!directMessage.trim()) { setToast({show: true, type: 'error', message: '������ �޽����� ���� �Է����ּ���.'}); setTimeout(() => setToast({show: false, type: 'error', message: ''}), 3000); return; } setTemplateSaveName(''); setShowTemplateSave('direct'); }} className="px-2 py-1 text-xs bg-white border rounded hover:bg-gray-100">��������</button>
+                      <button onClick={() => setShowSpecialChars('direct')} className="px-2 py-1 text-xs bg-white border rounded hover:bg-gray-100">특수문자</button>
+                      <button onClick={() => { loadTemplates(); setShowTemplateBox('direct'); }} className="px-2 py-1 text-xs bg-white border rounded hover:bg-gray-100">보관함</button>
+                      <button onClick={() => { if (!directMessage.trim()) { setToast({show: true, type: 'error', message: '저장할 메시지를 먼저 입력해주세요.'}); setTimeout(() => setToast({show: false, type: 'error', message: ''}), 3000); return; } setTemplateSaveName(''); setShowTemplateSave('direct'); }} className="px-2 py-1 text-xs bg-white border rounded hover:bg-gray-100">문자저장</button>
                     </div>
                     <span className="text-xs text-gray-500 whitespace-nowrap">
                       <span className={`font-bold ${messageBytes > maxBytes ? 'text-red-500' : 'text-emerald-600'}`}>{messageBytes}</span>/{maxBytes}byte
                     </span>
                   </div>
                   
-                  {/* ȸ�Ź�ȣ ���� */}
+                  {/* 회신번호 선택 */}
                   <div className="px-3 py-1.5 border-t">
                     <select 
                       value={useIndividualCallback ? '__individual__' : selectedCallback}
@@ -4907,56 +4907,56 @@ const campaignData = {
                       }}
                       className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                     >
-                      <option value="">ȸ�Ź�ȣ ����</option>
-                      <option value="__individual__">?? ����ȸ�Ź�ȣ (����� �����ȣ)</option>
+                      <option value="">회신번호 선택</option>
+                      <option value="__individual__">📱 개별회신번호 (고객별 매장번호)</option>
                       {callbackNumbers.map((cb) => (
                         <option key={cb.id} value={cb.phone}>
-                        {formatPhoneNumber(cb.phone)} {cb.label ? `(${cb.label})` : ''} {cb.is_default ? '?' : ''}
+                        {formatPhoneNumber(cb.phone)} {cb.label ? `(${cb.label})` : ''} {cb.is_default ? '⭐' : ''}
                       </option>
                       ))}
                     </select>
                     {useIndividualCallback && (
-                      <p className="text-xs text-blue-600 mt-1">?? �� ����� ���̿���� ȸ�Ź�ȣ�� �߼۵˴ϴ�</p>
+                      <p className="text-xs text-blue-600 mt-1">💡 각 고객의 주이용매장 회신번호로 발송됩니다</p>
                     )}
                   </div>
 
-                  {/* �ڵ��Է� ��ư */}
+                  {/* 자동입력 버튼 */}
                   <div className="px-3 py-1.5 border-t bg-gray-50">
                     <div className="flex items-center gap-3">
-                      <span className="text-sm font-bold text-gray-700 whitespace-nowrap">�ڵ��Է�</span>
+                      <span className="text-sm font-bold text-gray-700 whitespace-nowrap">자동입력</span>
                       <div className="flex gap-2 flex-1">
-                        <button onClick={() => setDirectMessage(prev => prev + '%�̸�%')} className="flex-1 py-2 text-sm bg-white border rounded-lg hover:bg-gray-100 font-medium">�̸�</button>
-                        <button onClick={() => setDirectMessage(prev => prev + '%ȸ�Ź�ȣ%')} className="flex-1 py-2 text-sm bg-white border rounded-lg hover:bg-blue-50 font-medium text-blue-700">ȸ�Ź�ȣ</button>
-                        <button onClick={() => setDirectMessage(prev => prev + '%��Ÿ1%')} className="flex-1 py-2 text-sm bg-white border rounded-lg hover:bg-gray-100 font-medium">��Ÿ1</button>
-                        <button onClick={() => setDirectMessage(prev => prev + '%��Ÿ2%')} className="flex-1 py-2 text-sm bg-white border rounded-lg hover:bg-gray-100 font-medium">��Ÿ2</button>
-                        <button onClick={() => setDirectMessage(prev => prev + '%��Ÿ3%')} className="flex-1 py-2 text-sm bg-white border rounded-lg hover:bg-gray-100 font-medium">��Ÿ3</button>
+                        <button onClick={() => setDirectMessage(prev => prev + '%이름%')} className="flex-1 py-2 text-sm bg-white border rounded-lg hover:bg-gray-100 font-medium">이름</button>
+                        <button onClick={() => setDirectMessage(prev => prev + '%회신번호%')} className="flex-1 py-2 text-sm bg-white border rounded-lg hover:bg-blue-50 font-medium text-blue-700">회신번호</button>
+                        <button onClick={() => setDirectMessage(prev => prev + '%기타1%')} className="flex-1 py-2 text-sm bg-white border rounded-lg hover:bg-gray-100 font-medium">기타1</button>
+                        <button onClick={() => setDirectMessage(prev => prev + '%기타2%')} className="flex-1 py-2 text-sm bg-white border rounded-lg hover:bg-gray-100 font-medium">기타2</button>
+                        <button onClick={() => setDirectMessage(prev => prev + '%기타3%')} className="flex-1 py-2 text-sm bg-white border rounded-lg hover:bg-gray-100 font-medium">기타3</button>
                       </div>
                     </div>
                   </div>
                   
-                  {/* �̸����� + �������� ��ư */}
+                  {/* 미리보기 + 스팸필터 버튼 */}
                   <div className="px-3 py-1.5 border-t">
                     <div className="grid grid-cols-2 gap-2">
                     <button 
                         onClick={() => {
                           if (!directMessage.trim()) {
-                            alert('�޽����� �Է����ּ���');
+                            alert('메시지를 입력해주세요');
                             return;
                           }
                           setShowDirectPreview(true);
                         }}
                         className="py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-sm font-medium transition-colors"
                       >
-                        ?? �̸�����
+                        📄 미리보기
                       </button>
                       <button 
                         onClick={() => {
                           const toast = document.createElement('div');
                           toast.innerHTML = `
                             <div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:white;padding:24px 32px;border-radius:16px;box-shadow:0 10px 40px rgba(0,0,0,0.2);z-index:9999;text-align:center;">
-                              <div style="font-size:48px;margin-bottom:12px;">??</div>
-                              <div style="font-size:16px;font-weight:bold;color:#374151;margin-bottom:8px;">�غ� ���� ����Դϴ�</div>
-                              <div style="font-size:14px;color:#6B7280;">���������׽�Ʈ�� �� ������Ʈ�˴ϴ�</div>
+                              <div style="font-size:48px;margin-bottom:12px;">🚧</div>
+                              <div style="font-size:16px;font-weight:bold;color:#374151;margin-bottom:8px;">준비 중인 기능입니다</div>
+                              <div style="font-size:14px;color:#6B7280;">스팸필터테스트는 곧 업데이트됩니다</div>
                             </div>
                             <div style="position:fixed;inset:0;background:rgba(0,0,0,0.3);z-index:9998;" onclick="this.parentElement.remove()"></div>
                           `;
@@ -4965,15 +4965,15 @@ const campaignData = {
                         }}
                         className="py-2.5 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg text-sm font-medium transition-colors"
                       >
-                        ??? ���������׽�Ʈ
+                        🛡️ 스팸필터테스트
                       </button>
                     </div>
                   </div>
                   
-                  {/* ����/����/���� �ɼ� - 3���� 2�� */}
+                  {/* 예약/분할/광고 옵션 - 3분할 2줄 */}
                   <div className="px-3 py-2 border-t">
                     <div className="grid grid-cols-3 gap-2 text-xs">
-                      {/* �������� */}
+                      {/* 예약전송 */}
                       <div className={`rounded-lg p-3 text-center ${reserveEnabled ? 'bg-blue-50' : 'bg-gray-50'}`}>
                         <label className="flex items-center justify-center gap-1.5 cursor-pointer">
                           <input 
@@ -4985,7 +4985,7 @@ const campaignData = {
                             }}
                             className="rounded w-4 h-4" 
                           />
-                          <span className={`font-medium ${reserveEnabled ? 'text-blue-700' : ''}`}>��������</span>
+                          <span className={`font-medium ${reserveEnabled ? 'text-blue-700' : ''}`}>예약전송</span>
                         </label>
                         <div 
                           className={`mt-1.5 text-xs cursor-pointer ${reserveEnabled ? 'text-blue-600 font-medium' : 'text-gray-400'}`}
@@ -4993,10 +4993,10 @@ const campaignData = {
                         >
                           {reserveDateTime 
                             ? new Date(reserveDateTime).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-                            : '����ð� ����'}
+                            : '예약시간 선택'}
                         </div>
                       </div>
-                      {/* �������� */}
+                      {/* 분할전송 */}
                       <div className={`rounded-lg p-3 text-center ${splitEnabled ? 'bg-purple-50' : 'bg-gray-50'}`}>
                         <label className="flex items-center justify-center gap-1.5 cursor-pointer">
                           <input 
@@ -5005,7 +5005,7 @@ const campaignData = {
                             checked={splitEnabled}
                             onChange={(e) => setSplitEnabled(e.target.checked)}
                           />
-                          <span className={`font-medium ${splitEnabled ? 'text-purple-700' : ''}`}>��������</span>
+                          <span className={`font-medium ${splitEnabled ? 'text-purple-700' : ''}`}>분할전송</span>
                         </label>
                         <div className="mt-1.5 flex items-center justify-center gap-1">
                           <input 
@@ -5016,10 +5016,10 @@ const campaignData = {
                             onChange={(e) => setSplitCount(Number(e.target.value) || 1000)}
                             disabled={!splitEnabled}
                           />
-                          <span className="text-xs text-gray-500">��/��</span>
+                          <span className="text-xs text-gray-500">건/분</span>
                         </div>
                       </div>
-                      {/* ����/080 */}
+                      {/* 광고/080 */}
                       <div className={`rounded-lg p-3 text-center ${adTextEnabled ? 'bg-orange-50' : 'bg-gray-50'}`}>
                         <label className="flex items-center justify-center gap-1.5 cursor-pointer">
                           <input 
@@ -5028,50 +5028,50 @@ const campaignData = {
                             onChange={(e) => setAdTextEnabled(e.target.checked)}
                             className="rounded w-4 h-4"
                           />
-                          <span className={`font-medium ${adTextEnabled ? 'text-orange-700' : ''}`}>����ǥ��</span>
+                          <span className={`font-medium ${adTextEnabled ? 'text-orange-700' : ''}`}>광고표기</span>
                         </label>
-                        <div className={`mt-1.5 text-xs ${adTextEnabled ? 'text-orange-500' : 'text-gray-400'}`}>080 ���Űź�</div>
+                        <div className={`mt-1.5 text-xs ${adTextEnabled ? 'text-orange-500' : 'text-gray-400'}`}>080 수신거부</div>
                       </div>
                       </div>
                   </div>
                   
-                  {/* �����ϱ� ��ư */}
+                  {/* 전송하기 버튼 */}
                   <div className="px-3 py-2 border-t">
                     <button 
                       onClick={async () => {
-                        // ��ȿ�� �˻�
+                        // 유효성 검사
                         if (directRecipients.length === 0) {
-                          alert('�����ڸ� �߰����ּ���');
+                          alert('수신자를 추가해주세요');
                           return;
                         }
                         if (!directMessage.trim()) {
-                          alert('�޽����� �Է����ּ���');
+                          alert('메시지를 입력해주세요');
                           return;
                         }
                         if (!selectedCallback && !useIndividualCallback) {
-                          alert('ȸ�Ź�ȣ�� �������ּ���');
+                          alert('회신번호를 선택해주세요');
                           return;
                         }
                         if (useIndividualCallback && directRecipients.some((r: any) => !r.callback)) {
-                          alert('����ȸ�Ź�ȣ�� ���� �����ڰ� �ֽ��ϴ�.\n�Ϲ� ȸ�Ź�ȣ�� �������ּ���.');
+                          alert('개별회신번호가 없는 수신자가 있습니다.\n일반 회신번호를 선택해주세요.');
                           return;
                         }
                         if ((directMsgType === 'LMS' || directMsgType === 'MMS') && !directSubject.trim()) {
-                          alert('������ �Է����ּ���');
+                          alert('제목을 입력해주세요');
                           return;
                         }
 
-                        // SMS ����Ʈ �ʰ� �� LMS ��ȯ ���
+                        // SMS 바이트 초과 시 LMS 전환 모달
                         if (directMsgType === 'SMS' && messageBytes > 90 && !smsOverrideAccepted) {
                           setPendingBytes(messageBytes);
                           setShowLmsConfirm(true);
                           return;
                         }
 
-                        // LMS/MMS�ε� SMS�� ������ �Ǵ� ��� ��� ���� �ȳ�
+                        // LMS/MMS인데 SMS로 보내도 되는 경우 비용 절감 안내
                         if (directMsgType !== 'SMS') {
-                          const smsOptOut = `����ź�${optOutNumber.replace(/-/g, '')}`;
-                          const smsFullMsg = adTextEnabled ? `(����)${directMessage}\n${smsOptOut}` : directMessage;
+                          const smsOptOut = `무료거부${optOutNumber.replace(/-/g, '')}`;
+                          const smsFullMsg = adTextEnabled ? `(광고)${directMessage}\n${smsOptOut}` : directMessage;
                           const smsBytes = calculateBytes(smsFullMsg);
                           if (smsBytes <= 90) {
                             setShowSmsConvert({show: true, from: 'direct', currentBytes: messageBytes, smsBytes, count: directRecipients.length});
@@ -5079,7 +5079,7 @@ const campaignData = {
                           }
                         }
 
-                        // ���Űź� üũ
+                        // 수신거부 체크
                         const token = localStorage.getItem('token');
                         const phones = directRecipients.map((r: any) => r.phone);
                         const checkRes = await fetch('/api/unsubscribes/check', {
@@ -5102,24 +5102,24 @@ const campaignData = {
                       }}
                       className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-base transition-colors"
                     >
-                      �����ϱ�
+                      전송하기
                     </button>
                   </div>
                 </div>
               </div>
               
-              {/* ����: ������ ��� */}
+              {/* 우측: 수신자 목록 */}
               <div className="flex-1 flex flex-col">
-                {/* �Է� ��� �� + üũ�ڽ� */}
+                {/* 입력 방식 탭 + 체크박스 */}
                 <div className="flex items-center gap-3 mb-4">
                   <button 
                     onClick={() => setShowDirectInput(true)}
                     className={`px-5 py-2.5 border-2 rounded-lg text-sm font-medium hover:bg-gray-50 ${directInputMode === 'direct' ? 'bg-emerald-50 border-emerald-400 text-emerald-700' : ''}`}
-                  >?? �����Է�</button>
+                  >✏️ 직접입력</button>
                   <label 
                     className={`px-5 py-2.5 border-2 rounded-lg text-sm font-medium cursor-pointer hover:bg-gray-50 ${directInputMode === 'file' ? 'bg-amber-50 border-amber-400 text-amber-700' : ''} ${directFileLoading ? 'opacity-50 cursor-wait' : ''}`}
                   >
-                    {directFileLoading ? '? ���� �м���...' : '?? ���ϵ��'}
+                    {directFileLoading ? '⏳ 파일 분석중...' : '📁 파일등록'}
                     <input
                       type="file"
                       accept=".xlsx,.xls,.csv"
@@ -5146,10 +5146,10 @@ const campaignData = {
                             setDirectShowMapping(true);
                             setDirectColumnMapping({});
                           } else {
-                            alert(data.error || '���� �Ľ� ����');
+                            alert(data.error || '파일 파싱 실패');
                           }
                         } catch (err) {
-                          alert('���� ���ε� �� ������ �߻��߽��ϴ�.');
+                          alert('파일 업로드 중 오류가 발생했습니다.');
                         } finally {
                           setDirectFileLoading(false);
                         }
@@ -5170,36 +5170,36 @@ const campaignData = {
                        setShowAddressBook(true);
                      }}
                      className={`px-5 py-2.5 border-2 rounded-lg text-sm font-medium hover:bg-gray-50 ${directInputMode === 'address' ? 'bg-emerald-50 border-emerald-400 text-emerald-700' : ''}`}
-                   >?? �ּҷ�</button>
+                   >📒 주소록</button>
                   <label className="flex items-center gap-2 text-sm cursor-pointer ml-2">
                     <input type="checkbox" defaultChecked className="rounded w-4 h-4" />
-                    <span className="font-medium">�ߺ�����</span>
+                    <span className="font-medium">중복제거</span>
                   </label>
                   <label className="flex items-center gap-2 text-sm cursor-pointer">
                     <input type="checkbox" defaultChecked className="rounded w-4 h-4" />
-                    <span className="font-medium">���Űź�����</span>
+                    <span className="font-medium">수신거부제거</span>
                   </label>
                   <div className="flex-1"></div>
                   <button 
                     onClick={() => setShowDirectSend(false)}
                     className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-medium flex items-center gap-1"
                   >
-                    <span>?</span> â�ݱ�
+                    <span>✕</span> 창닫기
                   </button>
                 </div>
                 
-                {/* ������ ���̺� */}
+                {/* 수신자 테이블 */}
                 <div className="border-2 rounded-xl overflow-hidden flex-1 flex flex-col">
                   <div className="bg-gray-50 px-4 py-3 flex justify-between items-center border-b">
                   <span className="text-sm font-medium">
-                      �� <span className="text-emerald-600 font-bold text-lg">{directRecipients.length.toLocaleString()}</span> ��
+                      총 <span className="text-emerald-600 font-bold text-lg">{directRecipients.length.toLocaleString()}</span> 건
                       {directRecipients.length > 10 && !directSearchQuery && (
-                        <span className="text-gray-400 text-xs ml-2">(���� 10�� ǥ��)</span>
+                        <span className="text-gray-400 text-xs ml-2">(상위 10개 표시)</span>
                       )}
                     </span>
                     <input
                       type="text"
-                      placeholder="?? ���Ź�ȣ �˻�"
+                      placeholder="🔍 수신번호 검색"
                       value={directSearchQuery}
                       onChange={(e) => setDirectSearchQuery(e.target.value)}
                       className="border rounded-lg px-3 py-2 text-sm w-52"
@@ -5223,20 +5223,20 @@ const campaignData = {
                               }}
                             />
                           </th>
-                          <th className="px-4 py-3 text-left text-xs font-bold text-gray-600">���Ź�ȣ</th>
-                          <th className="px-4 py-3 text-left text-xs font-bold text-gray-600">�̸�</th>
-                          <th className="px-4 py-3 text-left text-xs font-bold text-gray-600">ȸ�Ź�ȣ</th>
-                          <th className="px-4 py-3 text-left text-xs font-bold text-gray-600">��Ÿ1</th>
-                          <th className="px-4 py-3 text-left text-xs font-bold text-gray-600">��Ÿ2</th>
-                          <th className="px-4 py-3 text-left text-xs font-bold text-gray-600">��Ÿ3</th>
+                          <th className="px-4 py-3 text-left text-xs font-bold text-gray-600">수신번호</th>
+                          <th className="px-4 py-3 text-left text-xs font-bold text-gray-600">이름</th>
+                          <th className="px-4 py-3 text-left text-xs font-bold text-gray-600">회신번호</th>
+                          <th className="px-4 py-3 text-left text-xs font-bold text-gray-600">기타1</th>
+                          <th className="px-4 py-3 text-left text-xs font-bold text-gray-600">기타2</th>
+                          <th className="px-4 py-3 text-left text-xs font-bold text-gray-600">기타3</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y">
                         {directRecipients.length === 0 ? (
                           <tr>
                             <td colSpan={7} className="px-4 py-24 text-center text-gray-400">
-                              <div className="text-4xl mb-2">??</div>
-                              <div className="text-sm">������ ���ε��ϰų� ���� �Է����ּ���</div>
+                              <div className="text-4xl mb-2">📋</div>
+                              <div className="text-sm">파일을 업로드하거나 직접 입력해주세요</div>
                             </td>
                           </tr>
                         ) : (
@@ -5273,12 +5273,12 @@ const campaignData = {
                   </div>
                 </div>
                 
-                {/* �ϴ� ��ư - �����ϱ�� ���� ���� */}
+                {/* 하단 버튼 - 전송하기와 높이 맞춤 */}
                 <div className="flex gap-3 mt-4">
                   <button 
                     onClick={() => {
                       if (selectedRecipients.size === 0) {
-                        alert('���õ� �׸��� �����ϴ�');
+                        alert('선택된 항목이 없습니다');
                         return;
                       }
                       const newList = directRecipients.filter((_, idx) => !selectedRecipients.has(idx));
@@ -5286,17 +5286,17 @@ const campaignData = {
                       setSelectedRecipients(new Set());
                     }}
                     className="px-5 py-3 border-2 rounded-xl text-sm font-medium hover:bg-gray-50"
-                  >���û���</button>
+                  >선택삭제</button>
                   <button 
                     onClick={() => {
                       if (directRecipients.length === 0) return;
-                      if (confirm('��ü �����Ͻðڽ��ϱ�?')) {
+                      if (confirm('전체 삭제하시겠습니까?')) {
                         setDirectRecipients([]);
                         setSelectedRecipients(new Set());
                       }
                     }}
                     className="px-5 py-3 border-2 rounded-xl text-sm font-medium hover:bg-gray-50"
-                  >��ü����</button>
+                  >전체삭제</button>
                   <div className="flex-1"></div>
                   <button 
                     onClick={() => {
@@ -5308,124 +5308,124 @@ const campaignData = {
                       setSelectedCallback('');
                     }}
                     className="px-5 py-3 border-2 rounded-xl text-sm font-medium hover:bg-gray-50"
-                  >?? �ʱ�ȭ</button>
+                  >🔄 초기화</button>
                 </div>
               </div>
             </div>
-            {/* ���� ���� ��� */}
+            {/* 파일 매핑 모달 */}
             {directShowMapping && (
               <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60]">
                 <div className="bg-white rounded-2xl shadow-2xl w-[550px] overflow-hidden">
                   <div className="p-4 border-b bg-blue-50 flex justify-between items-center">
-                    <h3 className="font-bold text-lg">?? �÷� ����</h3>
-                    <button onClick={() => setDirectShowMapping(false)} className="text-gray-500 hover:text-gray-700 text-xl">?</button>
+                    <h3 className="font-bold text-lg">📁 컬럼 매핑</h3>
+                    <button onClick={() => setDirectShowMapping(false)} className="text-gray-500 hover:text-gray-700 text-xl">✕</button>
                   </div>
                   
                   <div className="p-6">
-                    {/* ���� �ȳ� */}
+                    {/* 매핑 안내 */}
                     <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-xl text-sm text-yellow-800">
-                      ?? �Ʒ� �ʼ� �׸� <strong>������ � �÷�</strong>�� �������� �������ּ���.
+                      💡 아래 필수 항목에 <strong>엑셀의 어떤 컬럼</strong>을 매핑할지 선택해주세요.
                     </div>
                     
-                    {/* ��� */}
+                    {/* 헤더 */}
                     <div className="flex items-center gap-4 mb-3 px-4">
-                      <span className="w-28 text-xs font-bold text-gray-500">�ʼ� �׸�</span>
-                      <span className="w-8 text-center text-xs text-gray-400">��</span>
-                      <span className="flex-1 text-xs font-bold text-gray-500">���� �÷� ����</span>
+                      <span className="w-28 text-xs font-bold text-gray-500">필수 항목</span>
+                      <span className="w-8 text-center text-xs text-gray-400">→</span>
+                      <span className="flex-1 text-xs font-bold text-gray-500">엑셀 컬럼 선택</span>
                     </div>
                     
-                    {/* ���� ���� - 5���� */}
+                    {/* 매핑 선택 - 5개만 */}
                     <div className="space-y-3">
-                      {/* ���Ź�ȣ (�ʼ�) */}
+                      {/* 수신번호 (필수) */}
                       <div className="flex items-center gap-4 p-4 bg-red-50 rounded-xl border-2 border-red-200">
-                        <span className="w-28 text-sm font-bold text-red-700">?? ���Ź�ȣ *</span>
-                        <span className="w-8 text-center text-gray-400">��</span>
+                        <span className="w-28 text-sm font-bold text-red-700">📱 수신번호 *</span>
+                        <span className="w-8 text-center text-gray-400">→</span>
                         <select
                           className="flex-1 border-2 border-red-300 rounded-lg px-4 py-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-red-500"
                           value={directColumnMapping.phone || ''}
                           onChange={(e) => setDirectColumnMapping({...directColumnMapping, phone: e.target.value})}
                         >
-                          <option value="">-- �÷� ���� --</option>
+                          <option value="">-- 컬럼 선택 --</option>
                           {directFileHeaders.map((h, i) => (
                             <option key={i} value={h}>{h}</option>
                           ))}
                         </select>
                       </div>
                       
-                      {/* �̸� */}
+                      {/* 이름 */}
                       <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-xl">
-                        <span className="w-28 text-sm font-bold text-gray-700">?? �̸�</span>
-                        <span className="w-8 text-center text-gray-400">��</span>
+                        <span className="w-28 text-sm font-bold text-gray-700">👤 이름</span>
+                        <span className="w-8 text-center text-gray-400">→</span>
                         <select
                           className="flex-1 border rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                           value={directColumnMapping.name || ''}
                           onChange={(e) => setDirectColumnMapping({...directColumnMapping, name: e.target.value})}
                         >
-                          <option value="">-- �÷� ���� --</option>
+                          <option value="">-- 컬럼 선택 --</option>
                           {directFileHeaders.map((h, i) => (
                             <option key={i} value={h}>{h}</option>
                           ))}
                         </select>
                       </div>
                       
-                      {/* ��Ÿ1 */}
+                      {/* 기타1 */}
                       <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-xl">
-                        <span className="w-28 text-sm font-bold text-gray-700">1?? ��Ÿ1</span>
-                        <span className="w-8 text-center text-gray-400">��</span>
+                        <span className="w-28 text-sm font-bold text-gray-700">1️⃣ 기타1</span>
+                        <span className="w-8 text-center text-gray-400">→</span>
                         <select
                           className="flex-1 border rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                           value={directColumnMapping.extra1 || ''}
                           onChange={(e) => setDirectColumnMapping({...directColumnMapping, extra1: e.target.value})}
                         >
-                          <option value="">-- �÷� ���� --</option>
+                          <option value="">-- 컬럼 선택 --</option>
                           {directFileHeaders.map((h, i) => (
                             <option key={i} value={h}>{h}</option>
                           ))}
                         </select>
                       </div>
                       
-                      {/* ��Ÿ2 */}
+                      {/* 기타2 */}
                       <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-xl">
-                        <span className="w-28 text-sm font-bold text-gray-700">2?? ��Ÿ2</span>
-                        <span className="w-8 text-center text-gray-400">��</span>
+                        <span className="w-28 text-sm font-bold text-gray-700">2️⃣ 기타2</span>
+                        <span className="w-8 text-center text-gray-400">→</span>
                         <select
                           className="flex-1 border rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                           value={directColumnMapping.extra2 || ''}
                           onChange={(e) => setDirectColumnMapping({...directColumnMapping, extra2: e.target.value})}
                         >
-                          <option value="">-- �÷� ���� --</option>
+                          <option value="">-- 컬럼 선택 --</option>
                           {directFileHeaders.map((h, i) => (
                             <option key={i} value={h}>{h}</option>
                           ))}
                         </select>
                       </div>
                       
-                      {/* ��Ÿ3 */}
+                      {/* 기타3 */}
                       <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-xl">
-                        <span className="w-28 text-sm font-bold text-gray-700">3?? ��Ÿ3</span>
-                        <span className="w-8 text-center text-gray-400">��</span>
+                        <span className="w-28 text-sm font-bold text-gray-700">3️⃣ 기타3</span>
+                        <span className="w-8 text-center text-gray-400">→</span>
                         <select
                           className="flex-1 border rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                           value={directColumnMapping.extra3 || ''}
                           onChange={(e) => setDirectColumnMapping({...directColumnMapping, extra3: e.target.value})}
                         >
-                          <option value="">-- �÷� ���� --</option>
+                          <option value="">-- 컬럼 선택 --</option>
                           {directFileHeaders.map((h, i) => (
                             <option key={i} value={h}>{h}</option>
                           ))}
                         </select>
                       </div>
                       
-                      {/* ȸ�Ź�ȣ (�����ȣ) */}
+                      {/* 회신번호 (매장번호) */}
                       <div className="flex items-center gap-4 p-4 bg-blue-50 rounded-xl border border-blue-200">
-                        <span className="w-28 text-sm font-bold text-blue-700">?? ȸ�Ź�ȣ</span>
-                        <span className="w-8 text-center text-gray-400">��</span>
+                        <span className="w-28 text-sm font-bold text-blue-700">📞 회신번호</span>
+                        <span className="w-8 text-center text-gray-400">→</span>
                         <select
                           className="flex-1 border border-blue-300 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                           value={directColumnMapping.callback || ''}
                           onChange={(e) => setDirectColumnMapping({...directColumnMapping, callback: e.target.value})}
                         >
-                          <option value="">-- �÷� ���� --</option>
+                          <option value="">-- 컬럼 선택 --</option>
                           {directFileHeaders.map((h, i) => (
                             <option key={i} value={h}>{h}</option>
                           ))}
@@ -5435,23 +5435,23 @@ const campaignData = {
                   </div>
                   
                   <div className="p-4 border-t bg-gray-50 flex justify-between items-center">
-                    <span className="text-sm text-gray-600">?? �� <strong>{directFileData.length.toLocaleString()}</strong>��</span>
+                    <span className="text-sm text-gray-600">📊 총 <strong>{directFileData.length.toLocaleString()}</strong>건</span>
                     <div className="flex gap-3">
                       <button 
                         onClick={() => setDirectShowMapping(false)}
                         className="px-6 py-2.5 border rounded-lg text-sm font-medium hover:bg-gray-100"
-                      >���</button>
+                      >취소</button>
                       <button 
                         onClick={async () => {
                           if (!directColumnMapping.phone) {
-                            alert('���Ź�ȣ�� �ʼ��Դϴ�.');
+                            alert('수신번호는 필수입니다.');
                             return;
                           }
                           
                           setDirectMappingLoading(true);
                           setDirectLoadingProgress(0);
                           
-                          // �񵿱�� ó���Ͽ� UI ������Ʈ ���
+                          // 비동기로 처리하여 UI 업데이트 허용
                           await new Promise(resolve => setTimeout(resolve, 10));
                           
                           const total = directFileData.length;
@@ -5487,7 +5487,7 @@ const campaignData = {
                         disabled={!directColumnMapping.phone || directMappingLoading}
                         className="px-8 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-sm font-bold disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        {directMappingLoading ? `ó����... ${directLoadingProgress}%` : '����ϱ�'}
+                        {directMappingLoading ? `처리중... ${directLoadingProgress}%` : '등록하기'}
                       </button>
                     </div>
                   </div>
@@ -5495,17 +5495,17 @@ const campaignData = {
               </div>
             )}
             
-            {/* Ư������ ��� */}
+            {/* 특수문자 모달 */}
             {showSpecialChars && (
               <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[70]" onClick={() => setShowSpecialChars(null)}>
                 <div className="bg-white rounded-2xl shadow-2xl w-[400px] overflow-hidden animate-in fade-in zoom-in" onClick={e => e.stopPropagation()}>
                   <div className="p-4 border-b bg-purple-50 flex justify-between items-center">
-                    <h3 className="font-bold text-lg">? Ư������</h3>
-                    <button onClick={() => setShowSpecialChars(null)} className="text-gray-500 hover:text-gray-700 text-xl">?</button>
+                    <h3 className="font-bold text-lg">✨ 특수문자</h3>
+                    <button onClick={() => setShowSpecialChars(null)} className="text-gray-500 hover:text-gray-700 text-xl">✕</button>
                   </div>
                   <div className="p-4">
                     <div className="grid grid-cols-8 gap-1.5">
-                      {['��','��','��','��','��','��','��','��','��','��','��','��','��','��','��','��','��','��','��','?','?','��','��','��','��','?','?','?','��','?','?','?','?','?','?','?','?','??','??','??','?','?','?','?','��','��','��','��','��','��','��','��','��','��','��','��','��','��','��','��','��','��','��','��'].map((char, i) => (
+                      {['★','☆','♥','♡','◆','◇','■','□','▲','△','▶','◀','●','○','◎','♤','♠','♧','♣','♢','♦','♪','♬','♩','☎','✉','✈','✌','♨','☀','☁','☂','⭐','✅','❌','⚡','❤','💛','💚','💙','⬆','⬇','⬅','➡','↑','↓','←','→','①','②','③','④','⑤','⑥','⑦','⑧','㈜','㈔','℡','㉿','㎝','㎏','㎡','㎎'].map((char, i) => (
                         <button
                           key={i}
                           onClick={() => {
@@ -5519,26 +5519,26 @@ const campaignData = {
                         </button>
                       ))}
                     </div>
-                    <p className="text-xs text-gray-400 mt-3 text-center">?? �Ϻ� Ư�����ڴ� LMS �ڵ� ��ȯ�� �� �ֽ��ϴ�</p>
+                    <p className="text-xs text-gray-400 mt-3 text-center">⚠️ 일부 특수문자는 LMS 자동 전환될 수 있습니다</p>
                   </div>
                 </div>
               </div>
             )}
 
-            {/* ������ ��� */}
+            {/* 보관함 모달 */}
             {showTemplateBox && (
               <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[70]" onClick={() => setShowTemplateBox(null)}>
                 <div className="bg-white rounded-2xl shadow-2xl w-[500px] max-h-[70vh] overflow-hidden animate-in fade-in zoom-in" onClick={e => e.stopPropagation()}>
                   <div className="p-4 border-b bg-amber-50 flex justify-between items-center">
-                    <h3 className="font-bold text-lg">?? ������</h3>
-                    <button onClick={() => setShowTemplateBox(null)} className="text-gray-500 hover:text-gray-700 text-xl">?</button>
+                    <h3 className="font-bold text-lg">📂 보관함</h3>
+                    <button onClick={() => setShowTemplateBox(null)} className="text-gray-500 hover:text-gray-700 text-xl">✕</button>
                   </div>
                   <div className="p-4 overflow-y-auto max-h-[50vh]">
                     {templateList.length === 0 ? (
                       <div className="text-center py-12 text-gray-400">
-                        <div className="text-4xl mb-3">??</div>
-                        <div className="text-sm">����� ���ڰ� �����ϴ�</div>
-                        <div className="text-xs mt-1">�޽��� �ۼ� �� '��������'�� �����ּ���</div>
+                        <div className="text-4xl mb-3">📭</div>
+                        <div className="text-sm">저장된 문자가 없습니다</div>
+                        <div className="text-xs mt-1">메시지 작성 후 '문자저장'을 눌러주세요</div>
                       </div>
                     ) : (
                       <div className="space-y-2">
@@ -5551,7 +5551,7 @@ const campaignData = {
                                 <button
                                   onClick={(e) => { e.stopPropagation(); deleteTemplate(t.id); }}
                                   className="text-gray-300 hover:text-red-500 text-sm opacity-0 group-hover:opacity-100 transition-opacity"
-                                >???</button>
+                                >🗑️</button>
                               </div>
                             </div>
                             <div className="text-xs text-gray-500 mb-3 line-clamp-2 whitespace-pre-wrap">{t.content}</div>
@@ -5567,11 +5567,11 @@ const campaignData = {
                                   if (t.message_type) setDirectMsgType(t.message_type);
                                 }
                                 setShowTemplateBox(null);
-                                setToast({ show: true, type: 'success', message: '���ڰ� ����Ǿ����ϴ�.' });
+                                setToast({ show: true, type: 'success', message: '문자가 적용되었습니다.' });
                                 setTimeout(() => setToast({ show: false, type: 'success', message: '' }), 3000);
                               }}
                               className="w-full py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-sm font-medium transition-colors"
-                            >�����ϱ�</button>
+                            >적용하기</button>
                           </div>
                         ))}
                       </div>
@@ -5581,28 +5581,28 @@ const campaignData = {
               </div>
             )}
 
-            {/* �������� ��� */}
+            {/* 문자저장 모달 */}
             {showTemplateSave && (
               <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[70]" onClick={() => setShowTemplateSave(null)}>
                 <div className="bg-white rounded-2xl shadow-2xl w-[400px] overflow-hidden animate-in fade-in zoom-in" onClick={e => e.stopPropagation()}>
                   <div className="p-4 border-b bg-emerald-50 flex justify-between items-center">
-                    <h3 className="font-bold text-lg">?? ���� ����</h3>
-                    <button onClick={() => setShowTemplateSave(null)} className="text-gray-500 hover:text-gray-700 text-xl">?</button>
+                    <h3 className="font-bold text-lg">💾 문자 저장</h3>
+                    <button onClick={() => setShowTemplateSave(null)} className="text-gray-500 hover:text-gray-700 text-xl">✕</button>
                   </div>
                   <div className="p-6">
                     <div className="mb-4">
-                      <label className="block text-sm font-medium text-gray-700 mb-2">������ �̸�</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">저장할 이름</label>
                       <input
                         type="text"
                         value={templateSaveName}
                         onChange={(e) => setTemplateSaveName(e.target.value)}
-                        placeholder="��: VIP ���� �ȳ�, �� �Ż�ǰ ȫ��"
+                        placeholder="예: VIP 할인 안내, 봄 신상품 홍보"
                         className="w-full border-2 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
                         autoFocus
                       />
                     </div>
                     <div className="mb-4 p-3 bg-gray-50 rounded-xl">
-                      <div className="text-xs text-gray-400 mb-1">����� ���� �̸�����</div>
+                      <div className="text-xs text-gray-400 mb-1">저장될 내용 미리보기</div>
                       <div className="text-sm text-gray-700 whitespace-pre-wrap line-clamp-4">
                         {showTemplateSave === 'target' ? targetMessage : directMessage}
                       </div>
@@ -5611,11 +5611,11 @@ const campaignData = {
                       <button
                         onClick={() => setShowTemplateSave(null)}
                         className="flex-1 py-3 border-2 rounded-xl text-sm font-medium hover:bg-gray-50"
-                      >���</button>
+                      >취소</button>
                       <button
                         onClick={async () => {
                           if (!templateSaveName.trim()) {
-                            setToast({ show: true, type: 'error', message: '�̸��� �Է����ּ���.' });
+                            setToast({ show: true, type: 'error', message: '이름을 입력해주세요.' });
                             setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
                             return;
                           }
@@ -5626,25 +5626,25 @@ const campaignData = {
                           if (ok) setShowTemplateSave(null);
                         }}
                         className="flex-1 py-3 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl text-sm font-bold transition-colors"
-                      >?? �����ϱ�</button>
+                      >💾 저장하기</button>
                     </div>
                   </div>
                 </div>
               </div>
             )}
 
-            {/* �����Է� ��� */}
+            {/* 직접입력 모달 */}
             {showDirectInput && (
               <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60]">
                 <div className="bg-white rounded-2xl shadow-2xl w-[500px] overflow-hidden">
                   <div className="p-4 border-b bg-blue-50 flex justify-between items-center">
-                    <h3 className="font-bold text-lg">?? �����Է�</h3>
-                    <button onClick={() => setShowDirectInput(false)} className="text-gray-500 hover:text-gray-700 text-xl">?</button>
+                    <h3 className="font-bold text-lg">✏️ 직접입력</h3>
+                    <button onClick={() => setShowDirectInput(false)} className="text-gray-500 hover:text-gray-700 text-xl">✕</button>
                   </div>
                   
                   <div className="p-6">
                     <div className="mb-3 text-sm text-gray-600">
-                      ��ȭ��ȣ�� �� �ٿ� �ϳ��� �Է����ּ���.
+                      전화번호를 한 줄에 하나씩 입력해주세요.
                     </div>
                     <textarea
                       value={directInputText}
@@ -5658,7 +5658,7 @@ const campaignData = {
                     <button 
                       onClick={() => setShowDirectInput(false)}
                       className="px-6 py-2.5 border rounded-lg text-sm font-medium hover:bg-gray-100"
-                    >���</button>
+                    >취소</button>
                     <button 
                       onClick={() => {
                         const lines = directInputText.split('\n').map(l => l.trim()).filter(l => l);
@@ -5677,7 +5677,7 @@ const campaignData = {
                       }}
                       className="px-6 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-sm font-medium"
                     >
-                      ���
+                      등록
                     </button>
                   </div>
                 </div>
@@ -5687,23 +5687,23 @@ const campaignData = {
             </div>
         </div>
       )}
-      {/* �ּҷ� ��� */}
+      {/* 주소록 모달 */}
       {showAddressBook && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60]">
           <div className="bg-white rounded-xl shadow-2xl w-[750px] max-h-[85vh] overflow-hidden">
             <div className="px-6 py-4 border-b bg-amber-50 flex justify-between items-center">
-              <h3 className="text-lg font-bold text-amber-700">?? �ּҷ�</h3>
-              <button onClick={() => setShowAddressBook(false)} className="text-gray-500 hover:text-gray-700 text-xl">?</button>
+              <h3 className="text-lg font-bold text-amber-700">📒 주소록</h3>
+              <button onClick={() => setShowAddressBook(false)} className="text-gray-500 hover:text-gray-700 text-xl">✕</button>
             </div>
             
             <div className="p-6 overflow-y-auto max-h-[60vh]">
-              {/* ���� ���ε� ���� */}
+              {/* 파일 업로드 영역 */}
               {!addressSaveMode && (
                 <div className="mb-4 p-4 border-2 border-dashed border-amber-300 rounded-lg text-center bg-amber-50">
                   <label className="cursor-pointer">
-                    <div className="text-amber-600 mb-2">?? ������ �����Ͽ� �ּҷ� ���</div>
-                    <div className="text-xs text-gray-400 mb-3">Excel, CSV ���� ����</div>
-                    <span className="px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 inline-block">���� ����</span>
+                    <div className="text-amber-600 mb-2">📁 파일을 선택하여 주소록 등록</div>
+                    <div className="text-xs text-gray-400 mb-3">Excel, CSV 파일 지원</div>
+                    <span className="px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 inline-block">파일 선택</span>
                     <input
                       type="file"
                       accept=".xlsx,.xls,.csv"
@@ -5722,7 +5722,7 @@ const campaignData = {
                             setAddressSaveMode(true);
                           }
                         } catch (err) {
-                          alert('���� �Ľ� ����');
+                          alert('파일 파싱 실패');
                         }
                         e.target.value = '';
                       }}
@@ -5731,38 +5731,38 @@ const campaignData = {
                 </div>
               )}
 
-              {/* ���� ������ ���� ��ư */}
+              {/* 현재 수신자 저장 버튼 */}
               {directRecipients.length > 0 && !addressSaveMode && (
                 <div className="mb-4 p-3 bg-blue-50 rounded-lg">
-                  <div className="text-sm text-blue-700 mb-2">���� ������ {directRecipients.length}���� �ּҷ����� �����Ͻðڽ��ϱ�?</div>
+                  <div className="text-sm text-blue-700 mb-2">현재 수신자 {directRecipients.length}명을 주소록으로 저장하시겠습니까?</div>
                   <button
                     onClick={() => setAddressSaveMode(true)}
                     className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700"
-                  >?? �ּҷ����� ����</button>
+                  >💾 주소록으로 저장</button>
                 </div>
               )}
 
-              {/* ���� ��� - �÷� ���� */}
+              {/* 저장 모드 - 컬럼 매핑 */}
               {addressSaveMode && addressFileData.length > 0 && (
                 <div className="mb-4 p-4 bg-amber-50 rounded-lg border border-amber-200">
-                  <div className="text-sm font-medium text-amber-700 mb-3">?? �÷� ���� ({addressFileData.length}��)</div>
+                  <div className="text-sm font-medium text-amber-700 mb-3">📋 컬럼 매핑 ({addressFileData.length}건)</div>
                   <div className="space-y-2 mb-4">
                     {[
-                      { key: 'phone', label: '���Ź�ȣ *', required: true },
-                      { key: 'name', label: '�̸�' },
-                      { key: 'extra1', label: '��Ÿ1' },
-                      { key: 'extra2', label: '��Ÿ2' },
-                      { key: 'extra3', label: '��Ÿ3' },
+                      { key: 'phone', label: '수신번호 *', required: true },
+                      { key: 'name', label: '이름' },
+                      { key: 'extra1', label: '기타1' },
+                      { key: 'extra2', label: '기타2' },
+                      { key: 'extra3', label: '기타3' },
                     ].map((field) => (
                       <div key={field.key} className="flex items-center gap-3">
                         <span className={`w-24 text-sm ${field.required ? 'text-red-600 font-medium' : 'text-gray-600'}`}>{field.label}</span>
-                        <span className="text-gray-400">��</span>
+                        <span className="text-gray-400">→</span>
                         <select
                           className="flex-1 px-3 py-2 border rounded-lg text-sm"
                           value={addressColumnMapping[field.key] || ''}
                           onChange={(e) => setAddressColumnMapping(prev => ({ ...prev, [field.key]: e.target.value }))}
                         >
-                          <option value="">-- �÷� ���� --</option>
+                          <option value="">-- 컬럼 선택 --</option>
                           {addressFileHeaders.map((h) => (
                             <option key={h} value={h}>{h}</option>
                           ))}
@@ -5771,12 +5771,12 @@ const campaignData = {
                     ))}
                   </div>
                   <div className="flex items-center gap-2 mb-3">
-                    <span className="text-sm text-gray-600 w-24">�׷�� *</span>
+                    <span className="text-sm text-gray-600 w-24">그룹명 *</span>
                     <input
                       type="text"
                       value={newGroupName}
                       onChange={(e) => setNewGroupName(e.target.value)}
-                      placeholder="��: VIP���, �̺�Ʈ������"
+                      placeholder="예: VIP고객, 이벤트참여자"
                       className="flex-1 px-3 py-2 border rounded-lg text-sm"
                     />
                   </div>
@@ -5784,11 +5784,11 @@ const campaignData = {
                     <button
                       onClick={async () => {
                         if (!addressColumnMapping.phone) {
-                          alert('���Ź�ȣ �÷��� �����ϼ���');
+                          alert('수신번호 컬럼을 선택하세요');
                           return;
                         }
                         if (!newGroupName.trim()) {
-                          alert('�׷���� �Է��ϼ���');
+                          alert('그룹명을 입력하세요');
                           return;
                         }
                         const contacts = addressFileData.map((row: any) => ({
@@ -5816,35 +5816,35 @@ const campaignData = {
                           const groupData = await groupRes.json();
                           if (groupData.success) setAddressGroups(groupData.groups || []);
                         } else {
-                          alert(data.error || '���� ����');
+                          alert(data.error || '저장 실패');
                         }
                       }}
                       className="flex-1 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700"
-                    >?? �ּҷ� ����</button>
+                    >💾 주소록 저장</button>
                     <button
                       onClick={() => { setAddressSaveMode(false); setAddressFileData([]); setAddressColumnMapping({}); setNewGroupName(''); }}
                       className="px-4 py-2 bg-gray-300 rounded-lg hover:bg-gray-400"
-                    >���</button>
+                    >취소</button>
                   </div>
                 </div>
               )}
 
-              {/* ���� ������ ���� ��� */}
+              {/* 현재 수신자 저장 모드 */}
               {addressSaveMode && addressFileData.length === 0 && directRecipients.length > 0 && (
                 <div className="mb-4 p-4 bg-green-50 rounded-lg border-2 border-green-200">
-                  <div className="text-sm text-green-700 mb-2 font-medium">�׷���� �Է��ϼ��� ({directRecipients.length}��)</div>
+                  <div className="text-sm text-green-700 mb-2 font-medium">그룹명을 입력하세요 ({directRecipients.length}명)</div>
                   <div className="flex gap-2">
                     <input
                       type="text"
                       value={newGroupName}
                       onChange={(e) => setNewGroupName(e.target.value)}
-                      placeholder="��: VIP���, �̺�Ʈ������"
+                      placeholder="예: VIP고객, 이벤트참여자"
                       className="flex-1 px-3 py-2 border rounded-lg"
                     />
                     <button
                       onClick={async () => {
                         if (!newGroupName.trim()) {
-                          alert('�׷���� �Է��ϼ���');
+                          alert('그룹명을 입력하세요');
                           return;
                         }
                         const token = localStorage.getItem('token');
@@ -5863,27 +5863,27 @@ const campaignData = {
                           const groupData = await groupRes.json();
                           if (groupData.success) setAddressGroups(groupData.groups || []);
                         } else {
-                          alert(data.error || '���� ����');
+                          alert(data.error || '저장 실패');
                         }
                       }}
                       className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
-                    >����</button>
+                    >저장</button>
                     <button
                       onClick={() => { setAddressSaveMode(false); setNewGroupName(''); }}
                       className="px-4 py-2 bg-gray-300 rounded-lg hover:bg-gray-400"
-                    >���</button>
+                    >취소</button>
                   </div>
                 </div>
               )}
 
-              {/* �׷� ��� */}
+              {/* 그룹 목록 */}
               {!addressSaveMode && (
                 <>
-                  <div className="text-sm font-medium text-gray-600 mb-2">����� �ּҷ�</div>
+                  <div className="text-sm font-medium text-gray-600 mb-2">저장된 주소록</div>
                   {addressGroups.length === 0 ? (
                 <div className="text-center py-8 text-gray-400">
-                  <div className="text-4xl mb-2">??</div>
-                  <div>����� �ּҷ��� �����ϴ�</div>
+                  <div className="text-4xl mb-2">📭</div>
+                  <div>저장된 주소록이 없습니다</div>
                 </div>
               ) : (
                 <>
@@ -5893,7 +5893,7 @@ const campaignData = {
                         <div className="flex items-center justify-between p-3 bg-gray-50 hover:bg-gray-100">
                           <div>
                             <div className="font-medium">{group.group_name}</div>
-                            <div className="text-sm text-gray-500">{group.count}��</div>
+                            <div className="text-sm text-gray-500">{group.count}명</div>
                           </div>
                           <div className="flex gap-2">
                             <button
@@ -5916,7 +5916,7 @@ const campaignData = {
                                 }
                               }}
                               className="px-3 py-1 bg-blue-100 text-blue-700 rounded hover:bg-blue-200 text-sm"
-                            >{addressViewGroup === group.group_name ? '�ݱ�' : '��ȸ'}</button>
+                            >{addressViewGroup === group.group_name ? '닫기' : '조회'}</button>
                             <button
                               onClick={async () => {
                                 const token = localStorage.getItem('token');
@@ -5935,15 +5935,15 @@ const campaignData = {
                                   setShowAddressBook(false);
                                   setAddressViewGroup(null);
                                   setAddressViewContacts([]);
-                                  setToast({show: true, type: 'success', message: `${data.contacts.length}�� �ҷ����� �Ϸ�`});
+                                  setToast({show: true, type: 'success', message: `${data.contacts.length}명 불러오기 완료`});
                                   setTimeout(() => setToast({show: false, type: 'success', message: ''}), 3000);
                                 }
                               }}
                               className="px-3 py-1 bg-emerald-100 text-emerald-700 rounded hover:bg-emerald-200 text-sm"
-                            >�ҷ�����</button>
+                            >불러오기</button>
                             <button
                               onClick={async () => {
-                                if (!confirm(`"${group.group_name}" �ּҷ��� �����Ͻðڽ��ϱ�?`)) return;
+                                if (!confirm(`"${group.group_name}" 주소록을 삭제하시겠습니까?`)) return;
                                 const token = localStorage.getItem('token');
                                 const res = await fetch(`/api/address-books/${encodeURIComponent(group.group_name)}`, {
                                   method: 'DELETE',
@@ -5956,12 +5956,12 @@ const campaignData = {
                                     setAddressViewGroup(null);
                                     setAddressViewContacts([]);
                                   }
-                                  setToast({show: true, type: 'success', message: '�����Ǿ����ϴ�'});
+                                  setToast({show: true, type: 'success', message: '삭제되었습니다'});
                                   setTimeout(() => setToast({show: false, type: 'success', message: ''}), 3000);
                                 }
                               }}
                               className="px-3 py-1 bg-red-100 text-red-700 rounded hover:bg-red-200 text-sm"
-                            >����</button>
+                            >삭제</button>
                           </div>
                         </div>
                         {addressViewGroup === group.group_name && (
@@ -5969,7 +5969,7 @@ const campaignData = {
                             <div className="flex gap-2 mb-2">
                               <input
                                 type="text"
-                                placeholder="��ȣ �Ǵ� �̸����� �˻�"
+                                placeholder="번호 또는 이름으로 검색"
                                 value={addressViewSearch}
                                 onChange={(e) => setAddressViewSearch(e.target.value)}
                                 className="flex-1 px-3 py-1.5 border rounded text-sm"
@@ -5979,11 +5979,11 @@ const campaignData = {
                               <table className="w-full text-sm">
                                 <thead className="bg-gray-100 sticky top-0">
                                   <tr>
-                                    <th className="px-2 py-1 text-left">��ȣ</th>
-                                    <th className="px-2 py-1 text-left">�̸�</th>
-                                    <th className="px-2 py-1 text-left">��Ÿ1</th>
-                                    <th className="px-2 py-1 text-left">��Ÿ2</th>
-                                    <th className="px-2 py-1 text-left">��Ÿ3</th>
+                                    <th className="px-2 py-1 text-left">번호</th>
+                                    <th className="px-2 py-1 text-left">이름</th>
+                                    <th className="px-2 py-1 text-left">기타1</th>
+                                    <th className="px-2 py-1 text-left">기타2</th>
+                                    <th className="px-2 py-1 text-left">기타3</th>
                                   </tr>
                                 </thead>
                                 <tbody>
@@ -6010,7 +6010,7 @@ const campaignData = {
                                 c.phone?.includes(addressViewSearch) || 
                                 c.name?.includes(addressViewSearch)).length > 10 && (
                                 <div className="text-center text-xs text-gray-400 py-2">
-                                  ���� 10�Ǹ� ǥ�� (��ü {addressViewContacts.filter(c => !addressViewSearch || c.phone?.includes(addressViewSearch) || c.name?.includes(addressViewSearch)).length}��)
+                                  상위 10건만 표시 (전체 {addressViewContacts.filter(c => !addressViewSearch || c.phone?.includes(addressViewSearch) || c.name?.includes(addressViewSearch)).length}건)
                                 </div>
                               )}
                             </div>
@@ -6025,13 +6025,13 @@ const campaignData = {
                         onClick={() => setAddressPage(p => Math.max(0, p - 1))}
                         disabled={addressPage === 0}
                         className="px-3 py-1 bg-gray-100 rounded hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
-                      >��</button>
+                      >◀</button>
                       <span className="text-sm text-gray-600">{addressPage + 1} / {Math.ceil(addressGroups.length / 5)}</span>
                       <button
                         onClick={() => setAddressPage(p => Math.min(Math.ceil(addressGroups.length / 5) - 1, p + 1))}
                         disabled={addressPage >= Math.ceil(addressGroups.length / 5) - 1}
                         className="px-3 py-1 bg-gray-100 rounded hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
-                      >��</button>
+                      >▶</button>
                     </div>
                   )}
                 </>
@@ -6044,27 +6044,27 @@ const campaignData = {
               <button
                 onClick={() => setShowAddressBook(false)}
                 className="w-full py-2 bg-gray-200 rounded-lg hover:bg-gray-300"
-              >�ݱ�</button>
+              >닫기</button>
             </div>
           </div>
         </div>
       )}
-      {/* LMS ��ȯ Ȯ�� ��� */}
+      {/* LMS 전환 확인 모달 */}
       {showLmsConfirm && (() => {
-        // ���� Ȱ�� �߼� ����� Ǯ �޽��� ���
+        // 현재 활성 발송 모드의 풀 메시지 계산
         const activeMsg = showTargetSend ? targetMessage : directMessage;
         const activeMsgType = showTargetSend ? targetMsgType : directMsgType;
         const activeRecipients = showTargetSend ? targetRecipients : directRecipients;
         const activeVarMap: Record<string, string> = showTargetSend
-          ? { '%�̸�%': 'name', '%���%': 'grade', '%����%': 'region', '%���űݾ�%': 'total_purchase_amount', '%ȸ�Ź�ȣ%': 'callback' }
-          : { '%�̸�%': 'name', '%��Ÿ1%': 'extra1', '%��Ÿ2%': 'extra2', '%��Ÿ3%': 'extra3', '%ȸ�Ź�ȣ%': 'callback' };
+          ? { '%이름%': 'name', '%등급%': 'grade', '%지역%': 'region', '%구매금액%': 'total_purchase_amount', '%회신번호%': 'callback' }
+          : { '%이름%': 'name', '%기타1%': 'extra1', '%기타2%': 'extra2', '%기타3%': 'extra3', '%회신번호%': 'callback' };
         let fullMsg = getMaxByteMessage(activeMsg, activeRecipients, activeVarMap);
         
         const optOutText = activeMsgType === 'SMS'
-          ? `����ź�${optOutNumber.replace(/-/g, '')}`
-          : `������Űź� ${optOutNumber}`;
+          ? `무료거부${optOutNumber.replace(/-/g, '')}`
+          : `무료수신거부 ${optOutNumber}`;
         if (adTextEnabled) {
-          fullMsg = `(����) ${fullMsg}\n${optOutText}`;
+          fullMsg = `(광고) ${fullMsg}\n${optOutText}`;
         }
 
         const truncated = truncateToSmsBytes(fullMsg, 90);
@@ -6077,48 +6077,48 @@ const campaignData = {
           <div className="bg-white rounded-xl shadow-2xl w-[440px] overflow-hidden">
             <div className="p-6 bg-gradient-to-r from-amber-50 to-orange-50 border-b">
               <div className="text-center">
-                <div className="text-5xl mb-3">??</div>
-                <h3 className="text-lg font-bold text-gray-800">�޽��� ���� �ʰ�</h3>
+                <div className="text-5xl mb-3">📝</div>
+                <h3 className="text-lg font-bold text-gray-800">메시지 길이 초과</h3>
               </div>
             </div>
             <div className="p-6">
               <div className="text-center mb-4">
                 <div className="text-3xl font-bold text-red-500 mb-1">{pendingBytes} <span className="text-lg text-gray-400">/ 90 byte</span></div>
-                <div className="text-gray-600">SMS ������ �ʰ��߽��ϴ�</div>
+                <div className="text-gray-600">SMS 제한을 초과했습니다</div>
               </div>
 
-              {/* �߸� �޽��� �̸����� */}
+              {/* 잘린 메시지 미리보기 */}
               <div className="mb-4">
-                <div className="text-xs font-medium text-gray-500 mb-1.5">SMS �߼� �� ���� ���� ({truncatedBytes}/90 byte)</div>
+                <div className="text-xs font-medium text-gray-500 mb-1.5">SMS 발송 시 수신 내용 ({truncatedBytes}/90 byte)</div>
                 <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-sm text-gray-700 whitespace-pre-wrap leading-relaxed max-h-32 overflow-y-auto">
                   {truncated}
-                  <span className="text-red-400 bg-red-50 px-0.5">������(�߸�)</span>
+                  <span className="text-red-400 bg-red-50 px-0.5">···(잘림)</span>
                 </div>
               </div>
 
-              {/* ���� ���� ���Űź� �߸� ��� */}
+              {/* 광고 문자 수신거부 잘림 경고 */}
               {isAdBlocked && (
                 <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4">
                   <div className="flex items-start gap-2">
-                    <span className="text-red-500 text-lg leading-none mt-0.5">?</span>
+                    <span className="text-red-500 text-lg leading-none mt-0.5">⛔</span>
                     <div>
-                      <div className="text-sm font-semibold text-red-700">���Űź� ��ȣ�� �߸��ϴ�</div>
+                      <div className="text-sm font-semibold text-red-700">수신거부 번호가 잘립니다</div>
                       <div className="text-xs text-red-600 mt-0.5">
-                        ���� ���ڴ� ���Űź� ��ȣ�� �ݵ�� �����ؾ� �մϴ� (������Ÿ��� ��50��).<br/>
-                        SMS�� �߼��� �� �����ϴ�. LMS�� ��ȯ���ּ���.
+                        광고 문자는 수신거부 번호를 반드시 포함해야 합니다 (정보통신망법 제50조).<br/>
+                        SMS로 발송할 수 없습니다. LMS로 전환해주세요.
                       </div>
                     </div>
                   </div>
                 </div>
               )}
 
-              {/* �񱤰� �߸� ��� */}
+              {/* 비광고 잘림 경고 */}
               {!isAdBlocked && (
                 <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4">
                   <div className="flex items-start gap-2">
-                    <span className="text-amber-500 text-lg leading-none mt-0.5">??</span>
+                    <span className="text-amber-500 text-lg leading-none mt-0.5">⚠️</span>
                     <div className="text-xs text-amber-700">
-                      SMS�� �߼��ϸ� 90����Ʈ ���� ������ �߷��� ���ŵ˴ϴ�.
+                      SMS로 발송하면 90바이트 이후 내용이 잘려서 수신됩니다.
                     </div>
                   </div>
                 </div>
@@ -6126,8 +6126,8 @@ const campaignData = {
 
               <div className="bg-blue-50 rounded-lg p-4 mb-4">
                 <div className="text-sm text-blue-800">
-                  <div className="font-medium mb-1">?? LMS�� ��ȯ�Ͻðڽ��ϱ�?</div>
-                  <div className="text-blue-600">LMS�� �ִ� 2,000byte���� �߼� �����մϴ�</div>
+                  <div className="font-medium mb-1">💡 LMS로 전환하시겠습니까?</div>
+                  <div className="text-blue-600">LMS는 최대 2,000byte까지 발송 가능합니다</div>
                 </div>
               </div>
               <div className="flex gap-3">
@@ -6135,7 +6135,7 @@ const campaignData = {
                   <button
                     disabled
                     className="flex-1 py-3 border-2 border-gray-200 rounded-lg text-gray-400 font-medium cursor-not-allowed bg-gray-50"
-                  >SMS �߼� �Ұ�</button>
+                  >SMS 발송 불가</button>
                 ) : (
                   <button
                     onClick={() => {
@@ -6143,7 +6143,7 @@ const campaignData = {
                       setShowLmsConfirm(false);
                     }}
                     className="flex-1 py-3 border-2 border-amber-300 rounded-lg text-amber-700 font-medium hover:bg-amber-50"
-                  >SMS ���� (�߸� �߼�)</button>
+                  >SMS 유지 (잘림 발송)</button>
                 )}
                 <button
                   onClick={() => {
@@ -6155,7 +6155,7 @@ const campaignData = {
                     setShowLmsConfirm(false);
                   }}
                   className="flex-1 py-3 bg-green-700 text-white rounded-lg font-medium hover:bg-green-800"
-                  >LMS ��ȯ</button>
+                  >LMS 전환</button>
                   </div>
                 </div>
               </div>
@@ -6163,42 +6163,42 @@ const campaignData = {
           );
         })()}
     
-          {/* SMS ��ȯ ������� ��� */}
+          {/* SMS 전환 비용절감 모달 */}
           {showSmsConvert.show && (
             <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[70]">
               <div className="bg-white rounded-xl shadow-2xl w-[420px] overflow-hidden">
                 <div className="p-6 bg-gradient-to-r from-blue-50 to-emerald-50 border-b">
                   <div className="text-center">
-                    <div className="text-5xl mb-3">??</div>
-                    <h3 className="text-lg font-bold text-gray-800">��� ���� �ȳ�</h3>
+                    <div className="text-5xl mb-3">💰</div>
+                    <h3 className="text-lg font-bold text-gray-800">비용 절감 안내</h3>
                   </div>
                 </div>
                 <div className="p-6">
                   <div className="text-center mb-4">
-                    <div className="text-sm text-gray-600 mb-2">SMS�� �߼��ϸ� ����� �����˴ϴ�!</div>
+                    <div className="text-sm text-gray-600 mb-2">SMS로 발송하면 비용이 절감됩니다!</div>
                     <div className="flex items-center justify-center gap-3 text-lg">
                       <span className="text-gray-500">{showSmsConvert.currentBytes}byte</span>
-                      <span className="text-gray-400">��</span>
+                      <span className="text-gray-400">→</span>
                       <span className="font-bold text-emerald-600">{showSmsConvert.smsBytes}byte</span>
                     </div>
                   </div>
                   
                   <div className="bg-gray-50 rounded-lg p-4 mb-4">
-                    <div className="text-sm text-gray-600 mb-3 text-center">���� ��� �� ({showSmsConvert.count.toLocaleString()}�� ����)</div>
+                    <div className="text-sm text-gray-600 mb-3 text-center">예상 비용 비교 ({showSmsConvert.count.toLocaleString()}건 기준)</div>
                     <div className="flex justify-between items-center">
                       <div className="text-center flex-1">
-                        <div className="text-xs text-gray-500 mb-1">LMS (27��/��)</div>
-                        <div className="text-lg font-bold text-gray-700">{(showSmsConvert.count * 27).toLocaleString()}��</div>
+                        <div className="text-xs text-gray-500 mb-1">LMS (27원/건)</div>
+                        <div className="text-lg font-bold text-gray-700">{(showSmsConvert.count * 27).toLocaleString()}원</div>
                       </div>
-                      <div className="text-2xl text-gray-300 px-4">��</div>
+                      <div className="text-2xl text-gray-300 px-4">→</div>
                       <div className="text-center flex-1">
-                        <div className="text-xs text-gray-500 mb-1">SMS (10��/��)</div>
-                        <div className="text-lg font-bold text-emerald-600">{(showSmsConvert.count * 10).toLocaleString()}��</div>
+                        <div className="text-xs text-gray-500 mb-1">SMS (10원/건)</div>
+                        <div className="text-lg font-bold text-emerald-600">{(showSmsConvert.count * 10).toLocaleString()}원</div>
                       </div>
                     </div>
                     <div className="mt-3 pt-3 border-t border-gray-200 text-center">
-                      <span className="text-sm text-gray-600">���� �ݾ�: </span>
-                      <span className="text-lg font-bold text-red-500">{((showSmsConvert.count * 27) - (showSmsConvert.count * 10)).toLocaleString()}��</span>
+                      <span className="text-sm text-gray-600">절감 금액: </span>
+                      <span className="text-lg font-bold text-red-500">{((showSmsConvert.count * 27) - (showSmsConvert.count * 10)).toLocaleString()}원</span>
                     </div>
                   </div>
     
@@ -6206,7 +6206,7 @@ const campaignData = {
                     <button
                       onClick={() => setShowSmsConvert({show: false, from: 'direct', currentBytes: 0, smsBytes: 0, count: 0})}
                       className="flex-1 py-3 border-2 border-gray-300 rounded-lg text-gray-700 font-medium hover:bg-gray-50"
-                    >LMS ����</button>
+                    >LMS 유지</button>
                     <button
                       onClick={() => {
                         if (showSmsConvert.from === 'target') {
@@ -6217,29 +6217,29 @@ const campaignData = {
                         setShowSmsConvert({show: false, from: 'direct', currentBytes: 0, smsBytes: 0, count: 0});
                       }}
                       className="flex-1 py-3 bg-emerald-600 text-white rounded-lg font-medium hover:bg-emerald-700"
-                      >SMS ��ȯ</button>
+                      >SMS 전환</button>
                       </div>
                     </div>
                   </div>
                 </div>
               )}
         
-              {/* �������� ��¥/�ð� ���� ��� (����) */}
+              {/* 예약전송 날짜/시간 선택 모달 (공용) */}
               {showReservePicker && (
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60]">
                   <div className="bg-white rounded-xl shadow-2xl w-[460px] overflow-hidden">
                     <div className="bg-blue-50 px-6 py-5 border-b">
-                      <h3 className="text-xl font-bold text-blue-700">?? ���� �ð� ����</h3>
+                      <h3 className="text-xl font-bold text-blue-700">📅 예약 시간 설정</h3>
                     </div>
                     <div className="p-6">
-                      {/* ���� ���� */}
+                      {/* 빠른 선택 */}
                       <div className="mb-5">
-                        <div className="text-sm text-gray-500 mb-2">���� ����</div>
+                        <div className="text-sm text-gray-500 mb-2">빠른 선택</div>
                         <div className="grid grid-cols-3 gap-2">
                           {[
-                            { label: '1�ð� ��', hours: 1 },
-                            { label: '3�ð� ��', hours: 3 },
-                            { label: '���� ���� 9��', tomorrow: 9 },
+                            { label: '1시간 후', hours: 1 },
+                            { label: '3시간 후', hours: 3 },
+                            { label: '내일 오전 9시', tomorrow: 9 },
                           ].map((opt) => (
                             <button
                               key={opt.label}
@@ -6261,12 +6261,12 @@ const campaignData = {
                           ))}
                         </div>
                       </div>
-                      {/* ���� ���� */}
+                      {/* 직접 선택 */}
                       <div>
                         <div className="flex gap-4">
-                          {/* ��¥ */}
+                          {/* 날짜 */}
                           <div className="flex-1">
-                            <div className="text-xs text-gray-500 mb-2">��¥</div>
+                            <div className="text-xs text-gray-500 mb-2">날짜</div>
                             <input
                               type="date"
                               value={reserveDateTime?.split('T')[0] || ''}
@@ -6278,9 +6278,9 @@ const campaignData = {
                               className="w-full border-2 border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:border-blue-400 focus:outline-none"
                             />
                           </div>
-                          {/* �ð� */}
+                          {/* 시간 */}
                           <div className="flex-1">
-                            <div className="text-xs text-gray-500 mb-2">�ð�</div>
+                            <div className="text-xs text-gray-500 mb-2">시간</div>
                             <div className="flex items-center gap-1">
                               <input
                                 type="number"
@@ -6330,17 +6330,17 @@ const campaignData = {
                                 }}
                                 className="border-2 border-gray-200 rounded-lg px-2 py-2.5 text-sm focus:border-blue-400 focus:outline-none"
                               >
-                                <option value="AM">����</option>
-                                <option value="PM">����</option>
+                                <option value="AM">오전</option>
+                                <option value="PM">오후</option>
                               </select>
                             </div>
                           </div>
                         </div>
                       </div>
-                      {/* ���õ� �ð� ǥ�� */}
+                      {/* 선택된 시간 표시 */}
                       {reserveDateTime && (
                         <div className="mt-4 p-3 bg-blue-50 rounded-lg text-center">
-                          <span className="text-sm text-gray-600">���� �ð�: </span>
+                          <span className="text-sm text-gray-600">예약 시간: </span>
                           <span className="text-sm font-bold text-blue-700">
                             {new Date(reserveDateTime).toLocaleString('ko-KR', {
                               timeZone: 'Asia/Seoul',
@@ -6363,7 +6363,7 @@ const campaignData = {
                         }}
                         className="flex-1 py-3 text-gray-600 hover:bg-gray-50 font-medium"
                       >
-                        ���
+                        취소
                       </button>
                       <button
                         onClick={() => {
@@ -6373,12 +6373,12 @@ const campaignData = {
                               <div style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9998;display:flex;align-items:center;justify-content:center;" onclick="this.parentElement.remove()">
                                 <div style="background:white;padding:0;border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,0.3);width:380px;overflow:hidden;" onclick="event.stopPropagation()">
                                   <div style="background:linear-gradient(135deg,#fef3c7,#fde68a);padding:24px;text-align:center;">
-                                    <div style="font-size:48px;margin-bottom:8px;">?</div>
-                                    <div style="font-size:18px;font-weight:bold;color:#92400e;">�ð��� �������ּ���</div>
+                                    <div style="font-size:48px;margin-bottom:8px;">⏰</div>
+                                    <div style="font-size:18px;font-weight:bold;color:#92400e;">시간을 선택해주세요</div>
                                   </div>
                                   <div style="padding:24px;text-align:center;">
-                                    <div style="color:#6b7280;margin-bottom:20px;">���� �ð��� ���� �������ּ���.</div>
-                                    <button onclick="this.closest('[style*=position]').parentElement.remove()" style="width:100%;padding:12px;background:#f59e0b;color:white;border:none;border-radius:8px;font-weight:bold;font-size:14px;cursor:pointer;">Ȯ��</button>
+                                    <div style="color:#6b7280;margin-bottom:20px;">예약 시간을 먼저 선택해주세요.</div>
+                                    <button onclick="this.closest('[style*=position]').parentElement.remove()" style="width:100%;padding:12px;background:#f59e0b;color:white;border:none;border-radius:8px;font-weight:bold;font-size:14px;cursor:pointer;">확인</button>
                                   </div>
                                 </div>
                               </div>
@@ -6394,13 +6394,13 @@ const campaignData = {
                               <div style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9998;display:flex;align-items:center;justify-content:center;" onclick="this.parentElement.remove()">
                                 <div style="background:white;padding:0;border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,0.3);width:400px;overflow:hidden;" onclick="event.stopPropagation()">
                                   <div style="background:linear-gradient(135deg,#fee2e2,#fecaca);padding:24px;text-align:center;">
-                                    <div style="font-size:48px;margin-bottom:8px;">??</div>
-                                    <div style="font-size:18px;font-weight:bold;color:#dc2626;">���� �Ұ�</div>
+                                    <div style="font-size:48px;margin-bottom:8px;">🚫</div>
+                                    <div style="font-size:18px;font-weight:bold;color:#dc2626;">예약 불가</div>
                                   </div>
                                   <div style="padding:24px;text-align:center;">
-                                    <div style="color:#374151;font-weight:500;margin-bottom:8px;">���� �ð����� �������δ� ������ �� �����ϴ�.</div>
-                                    <div style="color:#6b7280;margin-bottom:20px;">���� �ð��� �ٽ� �������ּ���.</div>
-                                    <button onclick="this.closest('[style*=position]').parentElement.remove()" style="width:100%;padding:12px;background:#dc2626;color:white;border:none;border-radius:8px;font-weight:bold;font-size:14px;cursor:pointer;">Ȯ��</button>
+                                    <div style="color:#374151;font-weight:500;margin-bottom:8px;">현재 시간보다 이전으로는 예약할 수 없습니다.</div>
+                                    <div style="color:#6b7280;margin-bottom:20px;">예약 시간을 다시 선택해주세요.</div>
+                                    <button onclick="this.closest('[style*=position]').parentElement.remove()" style="width:100%;padding:12px;background:#dc2626;color:white;border:none;border-radius:8px;font-weight:bold;font-size:14px;cursor:pointer;">확인</button>
                                   </div>
                                 </div>
                               </div>
@@ -6412,38 +6412,38 @@ const campaignData = {
                         }}
                         className="flex-1 py-3 bg-blue-500 text-white hover:bg-blue-600 font-medium"
                       >
-                        Ȯ��
+                        확인
                       </button>
                     </div>
                   </div>
                 </div>
               )}
         
-              {/* �̸����� ��� (����) */}
+              {/* 미리보기 모달 (공용) */}
       {showDirectPreview && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60]">
           <div className="bg-white rounded-2xl shadow-2xl w-[400px] overflow-hidden">
             <div className="p-4 border-b bg-emerald-50 flex justify-between items-center">
-              <h3 className="font-bold text-lg">?? �޽��� �̸�����</h3>
-              <button onClick={() => setShowDirectPreview(false)} className="text-gray-500 hover:text-gray-700 text-xl">?</button>
+              <h3 className="font-bold text-lg">📄 메시지 미리보기</h3>
+              <button onClick={() => setShowDirectPreview(false)} className="text-gray-500 hover:text-gray-700 text-xl">✕</button>
             </div>
             
             <div className="p-6 flex justify-center">
-              {/* ��� �� ������ */}
+              {/* 모던 폰 프레임 */}
               <div className="rounded-[1.8rem] p-[3px] bg-gradient-to-b from-emerald-400 to-emerald-600 shadow-lg shadow-emerald-200">
                 <div className="bg-white rounded-[1.6rem] overflow-hidden flex flex-col w-[280px]" style={{ height: '420px' }}>
-                  {/* ��� - ȸ�Ź�ȣ */}
+                  {/* 상단 - 회신번호 */}
                   <div className="px-4 py-2.5 bg-gradient-to-r from-gray-50 to-gray-100 flex justify-between items-center shrink-0 border-b">
-                    <span className="text-[11px] text-gray-400 font-medium">���ڸ޽���</span>
-                    <span className="text-[11px] font-bold text-emerald-600">{formatPhoneNumber(selectedCallback) || 'ȸ�Ź�ȣ'}</span>
+                    <span className="text-[11px] text-gray-400 font-medium">문자메시지</span>
+                    <span className="text-[11px] font-bold text-emerald-600">{formatPhoneNumber(selectedCallback) || '회신번호'}</span>
                   </div>
-                  {/* LMS/MMS ���� */}
+                  {/* LMS/MMS 제목 */}
                   {(directMsgType === 'LMS' || directMsgType === 'MMS') && directSubject && (
                     <div className="px-4 py-2 bg-orange-50 border-b border-orange-200">
                       <span className="text-sm font-bold text-orange-700">{directSubject}</span>
                     </div>
                   )}
-                  {/* MMS �̹��� */}
+                  {/* MMS 이미지 */}
                   {mmsUploadedImages.length > 0 && (
                     <div className="shrink-0">
                       {mmsUploadedImages.map((img, idx) => (
@@ -6451,58 +6451,58 @@ const campaignData = {
                       ))}
                     </div>
                   )}
-                  {/* �޽��� ���� - ��ũ�� */}
+                  {/* 메시지 영역 - 스크롤 */}
                   <div className="flex-1 overflow-y-auto p-3 bg-gradient-to-b from-emerald-50/30 to-white">
                     <div className="flex gap-2">
-                      <div className="w-7 h-7 rounded-full bg-emerald-100 flex items-center justify-center shrink-0 text-xs">??</div>
+                      <div className="w-7 h-7 rounded-full bg-emerald-100 flex items-center justify-center shrink-0 text-xs">📱</div>
                       <div className="bg-white rounded-2xl rounded-tl-sm p-3 shadow-sm border border-gray-100 text-[13px] leading-[1.7] whitespace-pre-wrap text-gray-700 max-w-[95%]">
                         {(() => {
                           const mergedMsg = getFullMessage(directMessage)
-                            .replace(/%�̸�%/g, (showTargetSend ? targetRecipients[0]?.name : directRecipients[0]?.name) || 'ȫ�浿')
-                            .replace(/%���%/g, (showTargetSend ? targetRecipients[0]?.grade : '') || 'VIP')
-                            .replace(/%����%/g, (showTargetSend ? targetRecipients[0]?.region : '') || '����')
-                            .replace(/%���űݾ�%/g, (showTargetSend ? targetRecipients[0]?.amount : '') || '100,000��')
-                            .replace(/%��Ÿ1%/g, directRecipients[0]?.extra1 || '��Ÿ1')
-                            .replace(/%��Ÿ2%/g, directRecipients[0]?.extra2 || '��Ÿ2')
-                            .replace(/%��Ÿ3%/g, directRecipients[0]?.extra3 || '��Ÿ3');
+                            .replace(/%이름%/g, (showTargetSend ? targetRecipients[0]?.name : directRecipients[0]?.name) || '홍길동')
+                            .replace(/%등급%/g, (showTargetSend ? targetRecipients[0]?.grade : '') || 'VIP')
+                            .replace(/%지역%/g, (showTargetSend ? targetRecipients[0]?.region : '') || '서울')
+                            .replace(/%구매금액%/g, (showTargetSend ? targetRecipients[0]?.amount : '') || '100,000원')
+                            .replace(/%기타1%/g, directRecipients[0]?.extra1 || '기타1')
+                            .replace(/%기타2%/g, directRecipients[0]?.extra2 || '기타2')
+                            .replace(/%기타3%/g, directRecipients[0]?.extra3 || '기타3');
                           return mergedMsg;
                         })()}
                       </div>
                     </div>
                   </div>
-                  {/* �ϴ� ����Ʈ - ������ �޽��� ���� */}
+                  {/* 하단 바이트 - 머지된 메시지 기준 */}
                   <div className="px-3 py-2 border-t bg-gray-50 text-center shrink-0">
                     {(() => {
                       const mergedMsg = getFullMessage(directMessage)
-                        .replace(/%�̸�%/g, (showTargetSend ? targetRecipients[0]?.name : directRecipients[0]?.name) || 'ȫ�浿')
-                        .replace(/%���%/g, (showTargetSend ? targetRecipients[0]?.grade : '') || 'VIP')
-                        .replace(/%����%/g, (showTargetSend ? targetRecipients[0]?.region : '') || '����')
-                        .replace(/%���űݾ�%/g, (showTargetSend ? targetRecipients[0]?.amount : '') || '100,000��')
-                        .replace(/%��Ÿ1%/g, directRecipients[0]?.extra1 || '��Ÿ1')
-                        .replace(/%��Ÿ2%/g, directRecipients[0]?.extra2 || '��Ÿ2')
-                        .replace(/%��Ÿ3%/g, directRecipients[0]?.extra3 || '��Ÿ3');
+                        .replace(/%이름%/g, (showTargetSend ? targetRecipients[0]?.name : directRecipients[0]?.name) || '홍길동')
+                        .replace(/%등급%/g, (showTargetSend ? targetRecipients[0]?.grade : '') || 'VIP')
+                        .replace(/%지역%/g, (showTargetSend ? targetRecipients[0]?.region : '') || '서울')
+                        .replace(/%구매금액%/g, (showTargetSend ? targetRecipients[0]?.amount : '') || '100,000원')
+                        .replace(/%기타1%/g, directRecipients[0]?.extra1 || '기타1')
+                        .replace(/%기타2%/g, directRecipients[0]?.extra2 || '기타2')
+                        .replace(/%기타3%/g, directRecipients[0]?.extra3 || '기타3');
                       const mergedBytes = calculateBytes(mergedMsg);
                       const limit = directMsgType === 'SMS' ? 90 : 2000;
                       const isOver = mergedBytes > limit;
-                      return <span className={`text-[10px] ${isOver ? 'text-red-500 font-semibold' : 'text-gray-400'}`}>{mergedBytes} / {limit} bytes �� {directMsgType}{isOver ? ' ?? �ʰ�' : ''}</span>;
+                      return <span className={`text-[10px] ${isOver ? 'text-red-500 font-semibold' : 'text-gray-400'}`}>{mergedBytes} / {limit} bytes · {directMsgType}{isOver ? ' ⚠️ 초과' : ''}</span>;
                     })()}
                   </div>
                 </div>
               </div>
             </div>
             
-            {/* MMS �̹��� �ȳ� */}
+            {/* MMS 이미지 안내 */}
             {mmsUploadedImages.length > 0 && (
               <div className="mx-6 mb-2 p-3 bg-amber-50 rounded-lg text-xs text-amber-700 text-center">
-                ?? ���� ���� ȭ���� ����� �� �޴��� ������ ���� �ٸ��� ���� �� �ֽ��ϴ�
+                ⚠️ 실제 수신 화면은 이통사 및 휴대폰 기종에 따라 다르게 보일 수 있습니다
               </div>
             )}
 
-            {/* ġȯ �ȳ� */}
-            {(directMessage.includes('%�̸�%') || directMessage.includes('%��Ÿ') || directMessage.includes('%���%') || directMessage.includes('%����%') || directMessage.includes('%���űݾ�%') || directMessage.includes('%ȸ�Ź�ȣ%')) && (
+            {/* 치환 안내 */}
+            {(directMessage.includes('%이름%') || directMessage.includes('%기타') || directMessage.includes('%등급%') || directMessage.includes('%지역%') || directMessage.includes('%구매금액%') || directMessage.includes('%회신번호%')) && (
               <div className="mx-6 mb-4 p-3 bg-blue-50 rounded-lg text-xs text-blue-700 text-center">
-                ?? �ڵ��Է� ������ ù ��° ������ ������ ǥ�õ˴ϴ�
-                {(!directRecipients[0] && !targetRecipients[0]) && ' (���� ������)'}
+                💡 자동입력 변수는 첫 번째 수신자 정보로 표시됩니다
+                {(!directRecipients[0] && !targetRecipients[0]) && ' (샘플 데이터)'}
               </div>
             )}
             
@@ -6511,42 +6511,42 @@ const campaignData = {
                 onClick={() => setShowDirectPreview(false)}
                 className="px-12 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-sm font-semibold"
               >
-                Ȯ��
+                확인
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* �߼� Ȯ�� ��� */}
+      {/* 발송 확인 모달 */}
       {sendConfirm.show && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60]">
           <div className="bg-white rounded-xl shadow-2xl w-[420px] overflow-hidden">
             <div className={`px-6 py-4 border-b ${sendConfirm.type === 'immediate' ? 'bg-emerald-50' : 'bg-blue-50'}`}>
               <h3 className={`text-lg font-bold ${sendConfirm.type === 'immediate' ? 'text-emerald-700' : 'text-blue-700'}`}>
-                {sendConfirm.type === 'immediate' ? '? ��� �߼�' : '?? ���� �߼�'}
+                {sendConfirm.type === 'immediate' ? '⚡ 즉시 발송' : '📅 예약 발송'}
               </h3>
             </div>
             <div className="p-6">
               <p className="text-gray-700 mb-4">
                 {sendConfirm.type === 'immediate' 
-                  ? '�޽����� ��� �߼��Ͻðڽ��ϱ�?' 
-                  : '�޽����� ���� �߼��Ͻðڽ��ϱ�?'}
+                  ? '메시지를 즉시 발송하시겠습니까?' 
+                  : '메시지를 예약 발송하시겠습니까?'}
               </p>
               <div className="bg-gray-50 rounded-lg p-4 space-y-2">
                 <div className="flex justify-between">
-                  <span className="text-gray-500">�߼� �Ǽ�</span>
-                  <span className="font-bold text-emerald-600">{sendConfirm.count.toLocaleString()}��</span>
+                  <span className="text-gray-500">발송 건수</span>
+                  <span className="font-bold text-emerald-600">{sendConfirm.count.toLocaleString()}건</span>
                 </div>
                 {sendConfirm.unsubscribeCount > 0 && (
                   <div className="flex justify-between">
-                    <span className="text-gray-500">���Űź� ����</span>
-                    <span className="font-bold text-rose-500">{sendConfirm.unsubscribeCount.toLocaleString()}��</span>
+                    <span className="text-gray-500">수신거부 제외</span>
+                    <span className="font-bold text-rose-500">{sendConfirm.unsubscribeCount.toLocaleString()}건</span>
                   </div>
                 )}
                 {sendConfirm.type === 'scheduled' && sendConfirm.dateTime && (
                   <div className="flex justify-between">
-                    <span className="text-gray-500">���� �ð�</span>
+                    <span className="text-gray-500">예약 시간</span>
                     <span className="font-bold text-blue-600">
                       {new Date(sendConfirm.dateTime).toLocaleString('ko-KR', {
                         timeZone: 'Asia/Seoul',
@@ -6560,13 +6560,13 @@ const campaignData = {
                   </div>
                 )}
                 <div className="flex justify-between">
-                  <span className="text-gray-500">�޽��� Ÿ��</span>
+                  <span className="text-gray-500">메시지 타입</span>
                   <span className="font-medium">{directMsgType}</span>
                 </div>
                 {sendConfirm.type === 'scheduled' && (
                   <div className="mt-3 pt-3 border-t border-gray-200">
                     <p className="text-xs text-amber-600 flex items-center gap-1">
-                      <span>??</span> ���� ��Ҵ� �߼� 15�� ������ �����մϴ�
+                      <span>⚠️</span> 예약 취소는 발송 15분 전까지 가능합니다
                     </p>
                   </div>
                 )}
@@ -6578,7 +6578,7 @@ const campaignData = {
                 disabled={directSending}
                 className="flex-1 py-3 text-gray-600 hover:bg-gray-50 font-medium disabled:opacity-50"
               >
-                ���
+                취소
               </button>
               <button
                 onClick={sendConfirm.from === 'target' ? executeTargetSend : executeDirectSend}
@@ -6587,10 +6587,10 @@ const campaignData = {
               >
                 {directSending ? (
                   <span className="flex items-center justify-center gap-2">
-                    <span className="animate-spin">?</span> ó����...
+                    <span className="animate-spin">⏳</span> 처리중...
                   </span>
                 ) : (
-                  sendConfirm.type === 'immediate' ? '��� �߼�' : '���� �߼�'
+                  sendConfirm.type === 'immediate' ? '즉시 발송' : '예약 발송'
                 )}
               </button>
             </div>
@@ -6598,163 +6598,163 @@ const campaignData = {
         </div>
       )}
 
-      {/* �ܾ� ��Ȳ ��� */}
+      {/* 잔액 현황 모달 */}
       {showBalanceModal && balanceInfo && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[60]" onClick={() => setShowBalanceModal(false)}>
           <div className="bg-white rounded-2xl shadow-2xl w-[380px] overflow-hidden animate-in fade-in zoom-in" onClick={e => e.stopPropagation()}>
-            {/* ��� */}
+            {/* 헤더 */}
             <div className="p-5 bg-gradient-to-r from-emerald-50 to-green-50 border-b">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-emerald-100 rounded-full flex items-center justify-center text-xl">??</div>
+                <div className="w-10 h-10 bg-emerald-100 rounded-full flex items-center justify-center text-xl">💰</div>
                 <div>
-                  <div className="text-sm text-gray-500">���� �ܾ�</div>
+                  <div className="text-sm text-gray-500">충전 잔액</div>
                   <div className={`text-2xl font-bold ${balanceInfo.balance < 10000 ? 'text-red-600' : 'text-emerald-700'}`}>
-                    {balanceInfo.balance.toLocaleString()}��
+                    {balanceInfo.balance.toLocaleString()}원
                   </div>
                 </div>
               </div>
               {balanceInfo.balance < 10000 && (
                 <div className="mt-2 text-xs text-red-500 bg-red-50 rounded-lg px-3 py-1.5 flex items-center gap-1">
-                  <span>??</span> �ܾ��� �����մϴ�. ���� �� �߼����ּ���.
+                  <span>⚠️</span> 잔액이 부족합니다. 충전 후 발송해주세요.
                 </div>
               )}
             </div>
-            {/* �߼� ���� �Ǽ� */}
+            {/* 발송 가능 건수 */}
             <div className="p-5">
-              <div className="text-xs text-gray-400 font-medium mb-3">�߼� ���� �Ǽ�</div>
+              <div className="text-xs text-gray-400 font-medium mb-3">발송 가능 건수</div>
               <div className="space-y-2.5">
                 {[
                   { label: 'SMS', price: balanceInfo.costPerSms },
                   { label: 'LMS', price: balanceInfo.costPerLms },
                   ...(balanceInfo.costPerMms && balanceInfo.costPerMms > 0 ? [{ label: 'MMS' as const, price: balanceInfo.costPerMms }] : []),
-                  ...(balanceInfo.costPerKakao && balanceInfo.costPerKakao > 0 ? [{ label: 'īī����' as const, price: balanceInfo.costPerKakao }] : []),
+                  ...(balanceInfo.costPerKakao && balanceInfo.costPerKakao > 0 ? [{ label: '카카오톡' as const, price: balanceInfo.costPerKakao }] : []),
                 ].map(item => (
                   <div key={item.label} className="flex items-center justify-between py-2 px-3 bg-gray-50 rounded-lg">
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-medium text-gray-700">{item.label}</span>
-                      <span className="text-xs text-gray-400">@{item.price}��</span>
+                      <span className="text-xs text-gray-400">@{item.price}원</span>
                     </div>
                     <span className="text-sm font-bold text-gray-800">
-                      {item.price > 0 ? `${Math.floor(balanceInfo.balance / item.price).toLocaleString()}��` : '-'}
+                      {item.price > 0 ? `${Math.floor(balanceInfo.balance / item.price).toLocaleString()}건` : '-'}
                     </span>
                   </div>
                 ))}
               </div>
             </div>
-            {/* �ϴ� ��ư */}
+            {/* 하단 버튼 */}
             <div className="px-5 pb-5 space-y-2">
             <button
                 onClick={() => { setShowBalanceModal(false); setChargeStep('select'); setDepositSuccess(false); setShowChargeModal(true); }}
                 className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-medium transition-colors text-sm"
               >
-                ?? �ܾ� �����ϱ�
+                💳 잔액 충전하기
               </button>
               <button
                 onClick={() => setShowBalanceModal(false)}
                 className="w-full py-2.5 text-gray-500 hover:text-gray-700 text-sm transition-colors"
               >
-                �ݱ�
+                닫기
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* �ܾ� ���� ��� */}
+      {/* 잔액 충전 모달 */}
       {showChargeModal && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[65]">
           <div className="bg-white rounded-2xl shadow-2xl w-[420px] overflow-hidden animate-in fade-in zoom-in" onClick={e => e.stopPropagation()}>
             
-            {/* ���� ��� ���� */}
+            {/* 충전 방법 선택 */}
             {chargeStep === 'select' && (
               <>
                 <div className="p-5 border-b bg-gradient-to-r from-emerald-50 to-green-50">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-emerald-100 rounded-full flex items-center justify-center text-xl">??</div>
+                    <div className="w-10 h-10 bg-emerald-100 rounded-full flex items-center justify-center text-xl">💳</div>
                     <div>
-                      <h3 className="text-lg font-bold text-gray-800">�ܾ� ����</h3>
-                      <p className="text-xs text-gray-500">���� ����� �������ּ���</p>
+                      <h3 className="text-lg font-bold text-gray-800">잔액 충전</h3>
+                      <p className="text-xs text-gray-500">충전 방법을 선택해주세요</p>
                     </div>
                   </div>
                 </div>
                 <div className="p-5 space-y-3">
-                  {/* ī����� - �غ��� */}
+                  {/* 카드결제 - 준비중 */}
                   <div className="relative p-4 rounded-xl border border-gray-200 bg-gray-50 opacity-60 cursor-not-allowed">
-                    <div className="absolute top-2 right-2 bg-gray-400 text-white text-[10px] px-2 py-0.5 rounded-full font-medium">�غ� ��</div>
+                    <div className="absolute top-2 right-2 bg-gray-400 text-white text-[10px] px-2 py-0.5 rounded-full font-medium">준비 중</div>
                     <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 bg-blue-100 rounded-lg flex items-center justify-center text-lg">??</div>
+                      <div className="w-9 h-9 bg-blue-100 rounded-lg flex items-center justify-center text-lg">💳</div>
                       <div>
-                        <div className="text-sm font-semibold text-gray-500">ī�����</div>
-                        <div className="text-xs text-gray-400">�ſ�ī�� / üũī�� ��� ����</div>
+                        <div className="text-sm font-semibold text-gray-500">카드결제</div>
+                        <div className="text-xs text-gray-400">신용카드 / 체크카드 즉시 충전</div>
                       </div>
                     </div>
                   </div>
-                  {/* ������� - �غ��� */}
+                  {/* 가상계좌 - 준비중 */}
                   <div className="relative p-4 rounded-xl border border-gray-200 bg-gray-50 opacity-60 cursor-not-allowed">
-                    <div className="absolute top-2 right-2 bg-gray-400 text-white text-[10px] px-2 py-0.5 rounded-full font-medium">�غ� ��</div>
+                    <div className="absolute top-2 right-2 bg-gray-400 text-white text-[10px] px-2 py-0.5 rounded-full font-medium">준비 중</div>
                     <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 bg-purple-100 rounded-lg flex items-center justify-center text-lg">??</div>
+                      <div className="w-9 h-9 bg-purple-100 rounded-lg flex items-center justify-center text-lg">🏦</div>
                       <div>
-                        <div className="text-sm font-semibold text-gray-500">�������</div>
-                        <div className="text-xs text-gray-400">�߱޵� ���·� �Ա� �� �ڵ� ����</div>
+                        <div className="text-sm font-semibold text-gray-500">가상계좌</div>
+                        <div className="text-xs text-gray-400">발급된 계좌로 입금 시 자동 충전</div>
                       </div>
                     </div>
                   </div>
-                  {/* �������Ա� */}
+                  {/* 무통장입금 */}
                   <button
                     onClick={() => { setChargeStep('deposit'); setDepositAmount(''); setDepositorName(''); setDepositSuccess(false); }}
                     className="w-full p-4 rounded-xl border-2 border-emerald-200 bg-emerald-50 hover:bg-emerald-100 hover:border-emerald-300 transition-all text-left"
                   >
                     <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 bg-emerald-100 rounded-lg flex items-center justify-center text-lg">??</div>
+                      <div className="w-9 h-9 bg-emerald-100 rounded-lg flex items-center justify-center text-lg">📋</div>
                       <div>
-                        <div className="text-sm font-semibold text-gray-800">�������Ա�</div>
-                        <div className="text-xs text-gray-500">������ü �� �Ա� Ȯ�� ��û</div>
+                        <div className="text-sm font-semibold text-gray-800">무통장입금</div>
+                        <div className="text-xs text-gray-500">계좌이체 후 입금 확인 요청</div>
                       </div>
-                      <div className="ml-auto text-emerald-500 text-sm">��</div>
+                      <div className="ml-auto text-emerald-500 text-sm">→</div>
                     </div>
                   </button>
                 </div>
                 <div className="px-5 pb-5">
                   <button onClick={() => setShowChargeModal(false)} className="w-full py-2.5 text-gray-500 hover:text-gray-700 text-sm transition-colors">
-                    �ݱ�
+                    닫기
                   </button>
                 </div>
               </>
             )}
 
-            {/* �������Ա� �� */}
+            {/* 무통장입금 폼 */}
             {chargeStep === 'deposit' && !depositSuccess && (
               <>
                 <div className="p-5 border-b bg-gradient-to-r from-emerald-50 to-green-50">
                   <div className="flex items-center gap-3">
-                    <button onClick={() => setChargeStep('select')} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-emerald-100 text-gray-500 transition-colors">��</button>
+                    <button onClick={() => setChargeStep('select')} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-emerald-100 text-gray-500 transition-colors">←</button>
                     <div>
-                      <h3 className="text-lg font-bold text-gray-800">�������Ա�</h3>
-                      <p className="text-xs text-gray-500">�Ʒ� ���·� �Ա� �� ��û���ּ���</p>
+                      <h3 className="text-lg font-bold text-gray-800">무통장입금</h3>
+                      <p className="text-xs text-gray-500">아래 계좌로 입금 후 요청해주세요</p>
                     </div>
                   </div>
                 </div>
                 <div className="p-5 space-y-4">
-                  {/* �Ա� ���� �ȳ� */}
+                  {/* 입금 계좌 안내 */}
                   <div className="bg-blue-50 rounded-xl p-4 border border-blue-100">
-                    <div className="text-xs text-blue-500 font-medium mb-2">�Ա� ����</div>
+                    <div className="text-xs text-blue-500 font-medium mb-2">입금 계좌</div>
                     <div className="flex items-center justify-between">
                       <div>
-                        <div className="text-sm font-bold text-gray-800">������� 585-028893-01-011</div>
-                        <div className="text-xs text-gray-500 mt-0.5">������: �ֽ�ȸ�� �κ���</div>
+                        <div className="text-sm font-bold text-gray-800">기업은행 585-028893-01-011</div>
+                        <div className="text-xs text-gray-500 mt-0.5">예금주: 주식회사 인비토</div>
                       </div>
                       <button
                         onClick={() => { navigator.clipboard.writeText('585-028893-01-011'); }}
                         className="text-xs bg-blue-100 hover:bg-blue-200 text-blue-600 px-2.5 py-1.5 rounded-lg transition-colors font-medium"
                       >
-                        ����
+                        복사
                       </button>
                     </div>
                   </div>
-                  {/* �Ա� �ݾ� */}
+                  {/* 입금 금액 */}
                   <div>
-                    <label className="text-xs text-gray-500 font-medium mb-1.5 block">�Ա� �ݾ� *</label>
+                    <label className="text-xs text-gray-500 font-medium mb-1.5 block">입금 금액 *</label>
                     <div className="relative">
                       <input
                         type="text"
@@ -6763,23 +6763,23 @@ const campaignData = {
                           const v = e.target.value.replace(/[^0-9]/g, '');
                           setDepositAmount(v);
                         }}
-                        placeholder="�ݾ��� �Է����ּ���"
+                        placeholder="금액을 입력해주세요"
                         className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 pr-10"
                       />
-                      <span className="absolute right-4 top-1/2 -translate-y-1/2 text-sm text-gray-400">��</span>
+                      <span className="absolute right-4 top-1/2 -translate-y-1/2 text-sm text-gray-400">원</span>
                     </div>
                     {depositAmount && (
-                      <div className="text-xs text-gray-400 mt-1 text-right">{Number(depositAmount).toLocaleString()}��</div>
+                      <div className="text-xs text-gray-400 mt-1 text-right">{Number(depositAmount).toLocaleString()}원</div>
                     )}
                   </div>
-                                    {/* �Ա��ڸ� */}
+                                    {/* 입금자명 */}
                   <div>
-                    <label className="text-xs text-gray-500 font-medium mb-1.5 block">�Ա��ڸ� *</label>
+                    <label className="text-xs text-gray-500 font-medium mb-1.5 block">입금자명 *</label>
                     <input
                       type="text"
                       value={depositorName}
                       onChange={e => setDepositorName(e.target.value)}
-                      placeholder="�Ա��ڸ��� �Է����ּ���"
+                      placeholder="입금자명을 입력해주세요"
                       className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
                     />
                   </div>
@@ -6787,8 +6787,8 @@ const campaignData = {
                 <div className="px-5 pb-5 space-y-2">
                   <button
                     onClick={async () => {
-                      if (!depositAmount || Number(depositAmount) < 1000) return alert('1,000�� �̻� �Է����ּ���.');
-                      if (!depositorName.trim()) return alert('�Ա��ڸ��� �Է����ּ���.');
+                      if (!depositAmount || Number(depositAmount) < 1000) return alert('1,000원 이상 입력해주세요.');
+                      if (!depositorName.trim()) return alert('입금자명을 입력해주세요.');
                       setDepositSubmitting(true);
                       try {
                         const res = await fetch('/api/balance/deposit-request', {
@@ -6800,45 +6800,45 @@ const campaignData = {
                           setDepositSuccess(true);
                         } else {
                           const err = await res.json();
-                          alert(err.error || '��û ����');
+                          alert(err.error || '요청 실패');
                         }
-                      } catch (e) { alert('��Ʈ��ũ ����'); }
+                      } catch (e) { alert('네트워크 오류'); }
                       setDepositSubmitting(false);
                     }}
                     disabled={depositSubmitting || !depositAmount || !depositorName.trim()}
                     className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white rounded-xl font-medium transition-colors text-sm"
                   >
-                    {depositSubmitting ? '��û ��...' : `${Number(depositAmount || 0).toLocaleString()}�� �Ա� Ȯ�� ��û`}
+                    {depositSubmitting ? '요청 중...' : `${Number(depositAmount || 0).toLocaleString()}원 입금 확인 요청`}
                   </button>
                   <button onClick={() => setChargeStep('select')} className="w-full py-2.5 text-gray-500 hover:text-gray-700 text-sm transition-colors">
-                    �ڷ�
+                    뒤로
                   </button>
                 </div>
               </>
             )}
 
-            {/* ��û �Ϸ� */}
+            {/* 요청 완료 */}
             {chargeStep === 'deposit' && depositSuccess && (
               <>
                 <div className="p-8 text-center">
-                  <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center text-3xl mx-auto mb-4">?</div>
-                  <h3 className="text-lg font-bold text-gray-800 mb-2">�Ա� Ȯ�� ��û �Ϸ�</h3>
-                  <p className="text-sm text-gray-500 mb-1">�����ڰ� �Ա� Ȯ�� �� �ܾ��� �����˴ϴ�.</p>
-                  <p className="text-sm text-gray-500">������ ���� 1�ð� �̳� ó���˴ϴ�.</p>
+                  <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center text-3xl mx-auto mb-4">✅</div>
+                  <h3 className="text-lg font-bold text-gray-800 mb-2">입금 확인 요청 완료</h3>
+                  <p className="text-sm text-gray-500 mb-1">관리자가 입금 확인 후 잔액이 충전됩니다.</p>
+                  <p className="text-sm text-gray-500">영업일 기준 1시간 이내 처리됩니다.</p>
                   <div className="mt-4 bg-gray-50 rounded-xl p-3 text-sm">
                     <div className="flex justify-between">
-                      <span className="text-gray-400">��û �ݾ�</span>
-                      <span className="font-bold text-emerald-700">{Number(depositAmount).toLocaleString()}��</span>
+                      <span className="text-gray-400">요청 금액</span>
+                      <span className="font-bold text-emerald-700">{Number(depositAmount).toLocaleString()}원</span>
                     </div>
                     <div className="flex justify-between mt-1">
-                      <span className="text-gray-400">�Ա��ڸ�</span>
+                      <span className="text-gray-400">입금자명</span>
                       <span className="font-medium text-gray-700">{depositorName}</span>
                     </div>
                   </div>
                 </div>
                 <div className="px-5 pb-5">
                   <button onClick={() => setShowChargeModal(false)} className="w-full py-3 bg-gray-800 hover:bg-gray-900 text-white rounded-xl font-medium transition-colors text-sm">
-                    Ȯ��
+                    확인
                   </button>
                 </div>
               </>
@@ -6848,32 +6848,32 @@ const campaignData = {
         </div>
       )}
 
-      {/* �ܾ� ���� ��� */}
+      {/* 잔액 부족 모달 */}
       {showInsufficientBalance?.show && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[70]">
           <div className="bg-white rounded-2xl shadow-2xl w-[400px] overflow-hidden animate-in fade-in zoom-in">
             <div className="p-6 bg-gradient-to-r from-red-50 to-orange-50 border-b flex items-center gap-3">
-              <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center text-2xl">??</div>
+              <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center text-2xl">💳</div>
               <div>
-                <h3 className="text-lg font-bold text-red-700">�ܾ��� �����մϴ�</h3>
-                <p className="text-sm text-red-500">���� �� �ٽ� �õ����ּ���</p>
+                <h3 className="text-lg font-bold text-red-700">잔액이 부족합니다</h3>
+                <p className="text-sm text-red-500">충전 후 다시 시도해주세요</p>
               </div>
             </div>
             <div className="p-6">
               <div className="bg-gray-50 rounded-xl p-4 space-y-3">
                 <div className="flex justify-between items-center">
-                  <span className="text-gray-500 text-sm">���� �ܾ�</span>
-                  <span className="text-lg font-bold text-red-600">{(showInsufficientBalance.balance || 0).toLocaleString()}��</span>
+                  <span className="text-gray-500 text-sm">현재 잔액</span>
+                  <span className="text-lg font-bold text-red-600">{(showInsufficientBalance.balance || 0).toLocaleString()}원</span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-gray-500 text-sm">�߼� ���</span>
-                  <span className="text-lg font-bold text-gray-800">{(showInsufficientBalance.required || 0).toLocaleString()}��</span>
+                  <span className="text-gray-500 text-sm">발송 비용</span>
+                  <span className="text-lg font-bold text-gray-800">{(showInsufficientBalance.required || 0).toLocaleString()}원</span>
                 </div>
                 <div className="border-t pt-3">
                   <div className="flex justify-between items-center">
-                    <span className="text-gray-500 text-sm">���� �ݾ�</span>
+                    <span className="text-gray-500 text-sm">부족 금액</span>
                     <span className="text-lg font-bold text-orange-600">
-                      {((showInsufficientBalance.required || 0) - (showInsufficientBalance.balance || 0)).toLocaleString()}��
+                      {((showInsufficientBalance.required || 0) - (showInsufficientBalance.balance || 0)).toLocaleString()}원
                     </span>
                   </div>
                 </div>
@@ -6884,20 +6884,20 @@ const campaignData = {
                 onClick={() => setShowInsufficientBalance(null)}
                 className="w-full py-3 bg-gray-800 hover:bg-gray-900 text-white rounded-xl font-medium transition-colors"
               >
-                Ȯ��
+                확인
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* �ϴ� ��ũ */}
+      {/* 하단 링크 */}
       <div className="max-w-7xl mx-auto px-4 py-6 mt-8 border-t border-gray-200 text-center text-xs text-gray-400 space-x-3">
-        <a href="/privacy" target="_blank" className="hover:text-gray-600 transition">��������ó����ħ</a>
+        <a href="/privacy" target="_blank" className="hover:text-gray-600 transition">개인정보처리방침</a>
         <span>|</span>
-        <a href="/terms" target="_blank" className="hover:text-gray-600 transition">�̿���</a>
+        <a href="/terms" target="_blank" className="hover:text-gray-600 transition">이용약관</a>
         <span>|</span>
-        <span>�� 2026 INVITO</span>
+        <span>© 2026 INVITO</span>
       </div>
     </div>
   );
