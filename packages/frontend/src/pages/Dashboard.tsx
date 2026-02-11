@@ -1441,6 +1441,17 @@ const campaignData = {
     return bytes;
   };
 
+  // SMS 90바이트로 잘린 메시지 반환
+  const truncateToSmsBytes = (text: string, maxBytes: number = 90) => {
+    let bytes = 0;
+    for (let i = 0; i < text.length; i++) {
+      const char = text.charCodeAt(i);
+      bytes += char > 127 ? 2 : 1;
+      if (bytes > maxBytes) return text.substring(0, i);
+    }
+    return text;
+  };
+
   // 광고문구 포함된 최종 메시지
   // 080번호 하이픈 포맷팅 (0801111111 → 080-111-1111)
   const formatRejectNumber = (num: string) => {
@@ -5573,9 +5584,31 @@ const campaignData = {
         </div>
       )}
       {/* LMS 전환 확인 모달 */}
-      {showLmsConfirm && (
+      {showLmsConfirm && (() => {
+        // 현재 활성 발송 모드의 풀 메시지 계산
+        const activeMsg = showTargetSend ? targetMessage : directMessage;
+        const activeMsgType = showTargetSend ? targetMsgType : directMsgType;
+        const activeRecipients = showTargetSend ? targetRecipients : directRecipients;
+        const activeVarMap: Record<string, string> = showTargetSend
+          ? { '%이름%': 'name', '%등급%': 'grade', '%지역%': 'region', '%구매금액%': 'total_purchase_amount' }
+          : { '%이름%': 'name', '%기타1%': 'extra1', '%기타2%': 'extra2', '%기타3%': 'extra3' };
+        let fullMsg = getMaxByteMessage(activeMsg, activeRecipients, activeVarMap);
+        
+        const optOutText = activeMsgType === 'SMS'
+          ? `무료거부${optOutNumber.replace(/-/g, '')}`
+          : `무료수신거부 ${optOutNumber}`;
+        if (adTextEnabled) {
+          fullMsg = `(광고) ${fullMsg}\n${optOutText}`;
+        }
+
+        const truncated = truncateToSmsBytes(fullMsg, 90);
+        const truncatedBytes = calculateBytes(truncated);
+        const isOptOutCut = adTextEnabled && !truncated.includes(optOutText);
+        const isAdBlocked = adTextEnabled && isOptOutCut;
+
+        return (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[70]">
-          <div className="bg-white rounded-xl shadow-2xl w-[400px] overflow-hidden">
+          <div className="bg-white rounded-xl shadow-2xl w-[440px] overflow-hidden">
             <div className="p-6 bg-gradient-to-r from-amber-50 to-orange-50 border-b">
               <div className="text-center">
                 <div className="text-5xl mb-3">📝</div>
@@ -5587,6 +5620,44 @@ const campaignData = {
                 <div className="text-3xl font-bold text-red-500 mb-1">{pendingBytes} <span className="text-lg text-gray-400">/ 90 byte</span></div>
                 <div className="text-gray-600">SMS 제한을 초과했습니다</div>
               </div>
+
+              {/* 잘린 메시지 미리보기 */}
+              <div className="mb-4">
+                <div className="text-xs font-medium text-gray-500 mb-1.5">SMS 발송 시 수신 내용 ({truncatedBytes}/90 byte)</div>
+                <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-sm text-gray-700 whitespace-pre-wrap leading-relaxed max-h-32 overflow-y-auto">
+                  {truncated}
+                  <span className="text-red-400 bg-red-50 px-0.5">···(잘림)</span>
+                </div>
+              </div>
+
+              {/* 광고 문자 수신거부 잘림 경고 */}
+              {isAdBlocked && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4">
+                  <div className="flex items-start gap-2">
+                    <span className="text-red-500 text-lg leading-none mt-0.5">⛔</span>
+                    <div>
+                      <div className="text-sm font-semibold text-red-700">수신거부 번호가 잘립니다</div>
+                      <div className="text-xs text-red-600 mt-0.5">
+                        광고 문자는 수신거부 번호를 반드시 포함해야 합니다 (정보통신망법 제50조).<br/>
+                        SMS로 발송할 수 없습니다. LMS로 전환해주세요.
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* 비광고 잘림 경고 */}
+              {!isAdBlocked && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4">
+                  <div className="flex items-start gap-2">
+                    <span className="text-amber-500 text-lg leading-none mt-0.5">⚠️</span>
+                    <div className="text-xs text-amber-700">
+                      SMS로 발송하면 90바이트 이후 내용이 잘려서 수신됩니다.
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div className="bg-blue-50 rounded-lg p-4 mb-4">
                 <div className="text-sm text-blue-800">
                   <div className="font-medium mb-1">💡 LMS로 전환하시겠습니까?</div>
@@ -5594,12 +5665,19 @@ const campaignData = {
                 </div>
               </div>
               <div className="flex gap-3">
-                <button
-                  onClick={() => {
-                    setShowLmsConfirm(false);
-                  }}
-                  className="flex-1 py-3 border-2 border-gray-300 rounded-lg text-gray-700 font-medium hover:bg-gray-50"
-                >SMS 유지 (수정)</button>
+                {isAdBlocked ? (
+                  <button
+                    disabled
+                    className="flex-1 py-3 border-2 border-gray-200 rounded-lg text-gray-400 font-medium cursor-not-allowed bg-gray-50"
+                  >SMS 발송 불가</button>
+                ) : (
+                  <button
+                    onClick={() => {
+                      setShowLmsConfirm(false);
+                    }}
+                    className="flex-1 py-3 border-2 border-amber-300 rounded-lg text-amber-700 font-medium hover:bg-amber-50"
+                  >SMS 유지 (잘림 발송)</button>
+                )}
                 <button
                   onClick={() => {
                     if (showTargetSend) {
@@ -5615,7 +5693,8 @@ const campaignData = {
                 </div>
               </div>
             </div>
-          )}
+          );
+        })()}
     
           {/* SMS 전환 비용절감 모달 */}
           {showSmsConvert.show && (
@@ -5902,21 +5981,36 @@ const campaignData = {
                     <div className="flex gap-2">
                       <div className="w-7 h-7 rounded-full bg-emerald-100 flex items-center justify-center shrink-0 text-xs">📱</div>
                       <div className="bg-white rounded-2xl rounded-tl-sm p-3 shadow-sm border border-gray-100 text-[13px] leading-[1.7] whitespace-pre-wrap text-gray-700 max-w-[95%]">
-                        {getFullMessage(directMessage)
-                          .replace(/%이름%/g, (showTargetSend ? targetRecipients[0]?.name : directRecipients[0]?.name) || '홍길동')
-                          .replace(/%등급%/g, (showTargetSend ? targetRecipients[0]?.grade : '') || 'VIP')
-                          .replace(/%지역%/g, (showTargetSend ? targetRecipients[0]?.region : '') || '서울')
-                          .replace(/%구매금액%/g, (showTargetSend ? targetRecipients[0]?.amount : '') || '100,000원')
-                          .replace(/%기타1%/g, directRecipients[0]?.extra1 || '기타1')
-                          .replace(/%기타2%/g, directRecipients[0]?.extra2 || '기타2')
-                          .replace(/%기타3%/g, directRecipients[0]?.extra3 || '기타3')
-                        }
+                        {(() => {
+                          const mergedMsg = getFullMessage(directMessage)
+                            .replace(/%이름%/g, (showTargetSend ? targetRecipients[0]?.name : directRecipients[0]?.name) || '홍길동')
+                            .replace(/%등급%/g, (showTargetSend ? targetRecipients[0]?.grade : '') || 'VIP')
+                            .replace(/%지역%/g, (showTargetSend ? targetRecipients[0]?.region : '') || '서울')
+                            .replace(/%구매금액%/g, (showTargetSend ? targetRecipients[0]?.amount : '') || '100,000원')
+                            .replace(/%기타1%/g, directRecipients[0]?.extra1 || '기타1')
+                            .replace(/%기타2%/g, directRecipients[0]?.extra2 || '기타2')
+                            .replace(/%기타3%/g, directRecipients[0]?.extra3 || '기타3');
+                          return mergedMsg;
+                        })()}
                       </div>
                     </div>
                   </div>
-                  {/* 하단 바이트 */}
+                  {/* 하단 바이트 - 머지된 메시지 기준 */}
                   <div className="px-3 py-2 border-t bg-gray-50 text-center shrink-0">
-                    <span className="text-[10px] text-gray-400">{messageBytes} / {directMsgType === 'SMS' ? 90 : 2000} bytes · {directMsgType}</span>
+                    {(() => {
+                      const mergedMsg = getFullMessage(directMessage)
+                        .replace(/%이름%/g, (showTargetSend ? targetRecipients[0]?.name : directRecipients[0]?.name) || '홍길동')
+                        .replace(/%등급%/g, (showTargetSend ? targetRecipients[0]?.grade : '') || 'VIP')
+                        .replace(/%지역%/g, (showTargetSend ? targetRecipients[0]?.region : '') || '서울')
+                        .replace(/%구매금액%/g, (showTargetSend ? targetRecipients[0]?.amount : '') || '100,000원')
+                        .replace(/%기타1%/g, directRecipients[0]?.extra1 || '기타1')
+                        .replace(/%기타2%/g, directRecipients[0]?.extra2 || '기타2')
+                        .replace(/%기타3%/g, directRecipients[0]?.extra3 || '기타3');
+                      const mergedBytes = calculateBytes(mergedMsg);
+                      const limit = directMsgType === 'SMS' ? 90 : 2000;
+                      const isOver = mergedBytes > limit;
+                      return <span className={`text-[10px] ${isOver ? 'text-red-500 font-semibold' : 'text-gray-400'}`}>{mergedBytes} / {limit} bytes · {directMsgType}{isOver ? ' ⚠️ 초과' : ''}</span>;
+                    })()}
                   </div>
                 </div>
               </div>
