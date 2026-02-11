@@ -1471,7 +1471,7 @@ const handleApproveRequest = async (id: string) => {
             <nav className="flex">
               <button
                 onClick={() => setActiveTab('companies')}
-                className={`px-6 py-4 text-sm font-medium border-b-2 ${
+                className={`px-4 py-3 text-sm font-medium border-b-2 ${
                   activeTab === 'companies'
                     ? 'border-blue-500 text-blue-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700'
@@ -1481,7 +1481,7 @@ const handleApproveRequest = async (id: string) => {
               </button>
               <button
                 onClick={() => setActiveTab('users')}
-                className={`px-6 py-4 text-sm font-medium border-b-2 ${
+                className={`px-4 py-3 text-sm font-medium border-b-2 ${
                   activeTab === 'users'
                     ? 'border-blue-500 text-blue-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700'
@@ -1491,7 +1491,7 @@ const handleApproveRequest = async (id: string) => {
               </button>
               <button
                 onClick={() => setActiveTab('callbacks')}
-                className={`px-6 py-4 text-sm font-medium border-b-2 ${
+                className={`px-4 py-3 text-sm font-medium border-b-2 ${
                   activeTab === 'callbacks'
                     ? 'border-blue-500 text-blue-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700'
@@ -1501,7 +1501,7 @@ const handleApproveRequest = async (id: string) => {
               </button>
               <button
                 onClick={() => { setActiveTab('stats'); loadSendStats(); }}
-                className={`px-6 py-4 text-sm font-medium border-b-2 ${
+                className={`px-4 py-3 text-sm font-medium border-b-2 ${
                   activeTab === 'stats'
                     ? 'border-blue-500 text-blue-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700'
@@ -1511,7 +1511,7 @@ const handleApproveRequest = async (id: string) => {
               </button>
               <button
                 onClick={() => setActiveTab('scheduled')}
-                className={`px-6 py-4 text-sm font-medium border-b-2 ${
+                className={`px-4 py-3 text-sm font-medium border-b-2 ${
                   activeTab === 'scheduled'
                     ? 'border-blue-500 text-blue-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700'
@@ -1521,7 +1521,7 @@ const handleApproveRequest = async (id: string) => {
               </button>
               <button
                 onClick={() => { setActiveTab('allCampaigns'); loadAllCampaigns(); }}
-                className={`px-6 py-4 text-sm font-medium border-b-2 ${
+                className={`px-4 py-3 text-sm font-medium border-b-2 ${
                   activeTab === 'allCampaigns'
                     ? 'border-blue-500 text-blue-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700'
@@ -1531,7 +1531,7 @@ const handleApproveRequest = async (id: string) => {
               </button>
               <button
                 onClick={() => setActiveTab('plans')}
-                className={`px-6 py-4 text-sm font-medium border-b-2 ${
+                className={`px-4 py-3 text-sm font-medium border-b-2 ${
                   activeTab === 'plans'
                     ? 'border-blue-500 text-blue-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700'
@@ -1541,7 +1541,7 @@ const handleApproveRequest = async (id: string) => {
               </button>
               <button
                 onClick={() => setActiveTab('requests')}
-                className={`px-6 py-4 text-sm font-medium border-b-2 relative ${
+                className={`px-4 py-3 text-sm font-medium border-b-2 relative ${
                   activeTab === 'requests'
                     ? 'border-blue-500 text-blue-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700'
@@ -1556,7 +1556,7 @@ const handleApproveRequest = async (id: string) => {
               </button>
               <button
                 onClick={() => setActiveTab('deposits')}
-                className={`px-6 py-4 text-sm font-medium border-b-2 relative ${
+                className={`px-4 py-3 text-sm font-medium border-b-2 relative ${
                   activeTab === 'deposits'
                     ? 'border-blue-500 text-blue-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700'
@@ -1571,7 +1571,7 @@ const handleApproveRequest = async (id: string) => {
               </button>
               <button
                 onClick={() => setActiveTab('billing')}
-                className={`px-6 py-4 text-sm font-medium border-b-2 ${
+                className={`px-4 py-3 text-sm font-medium border-b-2 ${
                   activeTab === 'billing'
                     ? 'border-blue-500 text-blue-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700'
@@ -1581,7 +1581,7 @@ const handleApproveRequest = async (id: string) => {
               </button>
               <button
                 onClick={() => setActiveTab('syncAgents')}
-                className={`px-6 py-4 text-sm font-medium border-b-2 ${
+                className={`px-4 py-3 text-sm font-medium border-b-2 ${
                   activeTab === 'syncAgents'
                     ? 'border-blue-500 text-blue-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700'
@@ -1636,17 +1636,17 @@ const handleApproveRequest = async (id: string) => {
             </div>
 
             <div className="overflow-x-auto">
-              <table className="w-full">
+              <table className="w-full text-sm">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">코드</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">회사명</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">담당자</th>
-                    <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">요금제</th>
-                    <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">상태</th>
-                    <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">고객 수</th>
-                    <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">등록일</th>
-                    <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">관리</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 whitespace-nowrap">코드</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 whitespace-nowrap">회사명</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 whitespace-nowrap">담당자</th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">요금제</th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">상태</th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">고객 수</th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">등록일</th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">관리</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
@@ -1661,20 +1661,20 @@ const handleApproveRequest = async (id: string) => {
                       .slice((companyPage - 1) * companyPerPage, companyPage * companyPerPage)
                       .map((company) => (
                       <tr key={company.id} className="hover:bg-gray-50">
-                        <td className="px-6 py-4 text-sm font-medium text-gray-900">
+                        <td className="px-4 py-3 font-medium text-gray-900 whitespace-nowrap">
                           {company.company_code}
                         </td>
-                        <td className="px-6 py-4 text-sm text-gray-900">{company.company_name}</td>
-                        <td className="px-6 py-4 text-sm text-gray-500">{company.contact_name || '-'}</td>
-                        <td className="px-6 py-4 text-sm text-center text-gray-500">{company.plan_name || '-'}</td>
-                        <td className="px-6 py-4 text-center">{getStatusBadge(company.status)}</td>
-                        <td className="px-6 py-4 text-sm text-center text-gray-500">
+                        <td className="px-4 py-3 text-gray-900">{company.company_name}</td>
+                        <td className="px-4 py-3 text-gray-500">{company.contact_name || '-'}</td>
+                        <td className="px-4 py-3 text-center text-gray-500 whitespace-nowrap">{company.plan_name || '-'}</td>
+                        <td className="px-4 py-3 text-center">{getStatusBadge(company.status)}</td>
+                        <td className="px-4 py-3 text-center text-gray-500 whitespace-nowrap">
                           {company.total_customers?.toLocaleString() || 0}
                         </td>
-                        <td className="px-6 py-4 text-sm text-center text-gray-500">
+                        <td className="px-4 py-3 text-center text-gray-500 whitespace-nowrap">
                           {formatDate(company.created_at)}
                         </td>
-                        <td className="px-6 py-4 text-center">
+                        <td className="px-4 py-3 text-center">
                           <button 
                             onClick={() => handleEditCompany(company)}
                             className="text-blue-600 hover:text-blue-800 text-sm mr-2"
@@ -1830,34 +1830,34 @@ const handleApproveRequest = async (id: string) => {
                           </button>
                           
                           {isExpanded && (
-                            <table className="w-full">
+                            <table className="w-full text-sm">
                               <thead className="bg-gray-50/50">
                                 <tr>
-                                  <th className="px-6 py-2 text-left text-xs font-medium text-gray-500 uppercase">로그인ID</th>
-                                  <th className="px-6 py-2 text-left text-xs font-medium text-gray-500 uppercase">이름</th>
-                                  <th className="px-6 py-2 text-center text-xs font-medium text-gray-500 uppercase">권한</th>
-                                  <th className="px-6 py-2 text-center text-xs font-medium text-gray-500 uppercase">담당 브랜드</th>
-                                  <th className="px-6 py-2 text-center text-xs font-medium text-gray-500 uppercase">상태</th>
-                                  <th className="px-6 py-2 text-center text-xs font-medium text-gray-500 uppercase">최근로그인</th>
-                                  <th className="px-6 py-2 text-center text-xs font-medium text-gray-500 uppercase">관리</th>
+                                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 whitespace-nowrap">로그인ID</th>
+                                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 whitespace-nowrap">이름</th>
+                                  <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 whitespace-nowrap">권한</th>
+                                  <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 whitespace-nowrap">담당 브랜드</th>
+                                  <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 whitespace-nowrap">상태</th>
+                                  <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 whitespace-nowrap">최근로그인</th>
+                                  <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 whitespace-nowrap">관리</th>
                                 </tr>
                               </thead>
                               <tbody className="divide-y divide-gray-100">
                                 {group.users.map((u) => (
                                   <tr key={u.id} className="hover:bg-blue-50/30">
-                                    <td className="px-6 py-3 text-sm font-medium text-gray-900">{u.login_id}</td>
-                                    <td className="px-6 py-3 text-sm text-gray-900">{u.name}</td>
-                                    <td className="px-6 py-3 text-center">{getUserTypeBadge(u.user_type)}</td>
-                                    <td className="px-6 py-3 text-sm text-center text-gray-600">
+                                    <td className="px-4 py-2.5 font-medium text-gray-900">{u.login_id}</td>
+                                    <td className="px-4 py-2.5 text-gray-900">{u.name}</td>
+                                    <td className="px-4 py-2.5 text-center">{getUserTypeBadge(u.user_type)}</td>
+                                    <td className="px-4 py-2.5 text-center text-gray-600">
                                       {(u as any).store_codes && (u as any).store_codes.length > 0 
                                         ? (u as any).store_codes.join(', ') 
                                         : <span className="text-gray-400">전체</span>}
                                     </td>
-                                    <td className="px-6 py-3 text-center">{getStatusBadge(u.status)}</td>
-                                    <td className="px-6 py-3 text-sm text-center text-gray-500">
+                                    <td className="px-4 py-2.5 text-center">{getStatusBadge(u.status)}</td>
+                                    <td className="px-4 py-2.5 text-center text-gray-500">
                                       {u.last_login_at ? formatDateTime(u.last_login_at) : '-'}
                                     </td>
-                                    <td className="px-6 py-3 text-center">
+                                    <td className="px-4 py-2.5 text-center">
                                       <button 
                                         onClick={() => handleEditUser(u)}
                                         className="text-blue-600 hover:text-blue-800 text-sm mr-2"
@@ -1916,16 +1916,16 @@ const handleApproveRequest = async (id: string) => {
             </div>
 
             <div className="overflow-x-auto">
-              <table className="w-full">
+              <table className="w-full text-sm">
               <thead className="bg-gray-50">
                   <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">고객사</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">캠페인명</th>
-                    <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">대상</th>
-                    <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">등록일시</th>
-                    <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">예약시간</th>
-                    <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">상태</th>
-                    <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">관리</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 whitespace-nowrap">고객사</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 whitespace-nowrap">캠페인명</th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">대상</th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">등록일시</th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">예약시간</th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">상태</th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">관리</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
@@ -1941,21 +1941,21 @@ const handleApproveRequest = async (id: string) => {
                       .slice((scheduledPage - 1) * scheduledPerPage, scheduledPage * scheduledPerPage)
                       .map((campaign) => (
                       <tr key={campaign.id} className="hover:bg-gray-50">
-                        <td className="px-6 py-4 text-sm text-gray-900">
+                        <td className="px-4 py-3 text-gray-900">
                           {campaign.company_name}
                           <span className="text-gray-400 ml-1">({campaign.company_code})</span>
                         </td>
-                        <td className="px-6 py-4 text-sm text-gray-900">{campaign.campaign_name}</td>
-                        <td className="px-6 py-4 text-sm text-center text-gray-500">
+                        <td className="px-4 py-3 text-gray-900">{campaign.campaign_name}</td>
+                        <td className="px-4 py-3 text-center text-gray-500 whitespace-nowrap">
                           {campaign.target_count?.toLocaleString() || 0}명
                         </td>
-                        <td className="px-6 py-4 text-sm text-center text-gray-500">
+                        <td className="px-4 py-3 text-center text-gray-500 whitespace-nowrap">
                           {campaign.created_at ? formatDateTime(campaign.created_at) : '-'}
                         </td>
-                        <td className="px-6 py-4 text-sm text-center text-gray-500">
+                        <td className="px-4 py-3 text-center text-gray-500 whitespace-nowrap">
                           {campaign.scheduled_at ? formatDateTime(campaign.scheduled_at) : '-'}
                         </td>
-                        <td className="px-6 py-4 text-center">
+                        <td className="px-4 py-3 text-center">
                           {campaign.status === 'scheduled' ? (
                             <span className="px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">예약</span>
                           ) : (
@@ -1967,7 +1967,7 @@ const handleApproveRequest = async (id: string) => {
                             </div>
                           )}
                         </td>
-                        <td className="px-6 py-4 text-center">
+                        <td className="px-4 py-3 text-center">
                           {campaign.status === 'scheduled' ? (
                             <button
                               onClick={() => openCancelModal(campaign.id, campaign.campaign_name)}
@@ -2087,30 +2087,30 @@ const handleApproveRequest = async (id: string) => {
                             </div>
                           </button>
                           {isExpanded && (
-                            <table className="w-full">
+                            <table className="w-full text-sm">
                               <thead className="bg-gray-50/50">
                                 <tr>
-                                  <th className="px-6 py-2 text-left text-xs font-medium text-gray-500 uppercase">발신번호</th>
-                                  <th className="px-6 py-2 text-left text-xs font-medium text-gray-500 uppercase">별칭</th>
-                                  <th className="px-6 py-2 text-center text-xs font-medium text-gray-500 uppercase">대표</th>
-                                  <th className="px-6 py-2 text-center text-xs font-medium text-gray-500 uppercase">등록일</th>
-                                  <th className="px-6 py-2 text-center text-xs font-medium text-gray-500 uppercase">관리</th>
+                                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 whitespace-nowrap">발신번호</th>
+                                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 whitespace-nowrap">별칭</th>
+                                  <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 whitespace-nowrap">대표</th>
+                                  <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 whitespace-nowrap">등록일</th>
+                                  <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 whitespace-nowrap">관리</th>
                                 </tr>
                               </thead>
                               <tbody className="divide-y divide-gray-100">
                                 {group.items.map((cb: any) => (
                                   <tr key={cb.id} className="hover:bg-blue-50/30">
-                                    <td className="px-6 py-3 text-sm font-medium text-gray-900">{cb.phone}</td>
-                                    <td className="px-6 py-3 text-sm text-gray-500">{cb.label || '-'}</td>
-                                    <td className="px-6 py-3 text-center">
+                                    <td className="px-4 py-2.5 font-medium text-gray-900">{cb.phone}</td>
+                                    <td className="px-4 py-2.5 text-gray-500">{cb.label || '-'}</td>
+                                    <td className="px-4 py-2.5 text-center">
                                       {cb.is_default ? (
                                         <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">대표</span>
                                       ) : (
                                         <button onClick={() => handleSetDefault(cb.id)} className="text-blue-600 hover:text-blue-800 text-xs">대표설정</button>
                                       )}
                                     </td>
-                                    <td className="px-6 py-3 text-sm text-center text-gray-500">{formatDate(cb.created_at)}</td>
-                                    <td className="px-6 py-3 text-center">
+                                    <td className="px-4 py-2.5 text-center text-gray-500">{formatDate(cb.created_at)}</td>
+                                    <td className="px-4 py-2.5 text-center">
                                       <button onClick={() => setEditingCallback({ id: cb.id, phone: cb.phone, label: cb.label || '' })} className="text-blue-600 hover:text-blue-800 text-sm mr-2">수정</button>
                                       <button onClick={() => handleDeleteCallback(cb.id, cb.phone)} className="text-red-600 hover:text-red-800 text-sm">삭제</button>
                                     </td>
@@ -2143,16 +2143,16 @@ const handleApproveRequest = async (id: string) => {
             </div>
 
             <div className="overflow-x-auto">
-              <table className="w-full">
+              <table className="w-full text-sm">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">코드</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">요금제명</th>
-                    <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">최대 고객수</th>
-                    <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">월 요금</th>
-                    <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">사용 회사</th>
-                    <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">상태</th>
-                    <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">관리</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 whitespace-nowrap">코드</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 whitespace-nowrap">요금제명</th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">최대 고객수</th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">월 요금</th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">사용 회사</th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">상태</th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">관리</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
@@ -2167,25 +2167,25 @@ const handleApproveRequest = async (id: string) => {
                       .slice((planPage - 1) * planPerPage, planPage * planPerPage)
                       .map((plan) => (
                       <tr key={plan.id} className="hover:bg-gray-50">
-                        <td className="px-6 py-4 text-sm font-medium text-gray-900">{plan.plan_code}</td>
-                        <td className="px-6 py-4 text-sm text-gray-900">{plan.plan_name}</td>
-                        <td className="px-6 py-4 text-sm text-center text-gray-600">
+                        <td className="px-4 py-3 font-medium text-gray-900 whitespace-nowrap">{plan.plan_code}</td>
+                        <td className="px-4 py-3 text-gray-900">{plan.plan_name}</td>
+                        <td className="px-4 py-3 text-center text-gray-600 whitespace-nowrap">
                           {plan.max_customers.toLocaleString()}명
                         </td>
-                        <td className="px-6 py-4 text-sm text-center text-gray-900 font-medium">
+                        <td className="px-4 py-3 text-center text-gray-900 whitespace-nowrap font-medium">
                           {Number(plan.monthly_price).toLocaleString()}원
                         </td>
-                        <td className="px-6 py-4 text-sm text-center">
+                        <td className="px-4 py-3 text-center">
                           <span className="text-blue-600 font-medium">{plan.company_count || 0}개</span>
                         </td>
-                        <td className="px-6 py-4 text-center">
+                        <td className="px-4 py-3 text-center">
                           {plan.is_active ? (
                             <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">활성</span>
                           ) : (
                             <span className="px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">비활성</span>
                           )}
                         </td>
-                        <td className="px-6 py-4 text-center">
+                        <td className="px-4 py-3 text-center">
                           <div className="flex justify-center gap-2">
                             <button
                               onClick={() => setEditingPlan({ ...plan })}
@@ -2236,17 +2236,17 @@ const handleApproveRequest = async (id: string) => {
             </div>
 
             <div className="overflow-x-auto">
-              <table className="w-full">
+              <table className="w-full text-sm">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">신청일시</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">회사</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">신청자</th>
-                    <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">현재 플랜</th>
-                    <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">신청 플랜</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">메시지</th>
-                    <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">상태</th>
-                    <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">처리</th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">신청일시</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 whitespace-nowrap">회사</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 whitespace-nowrap">신청자</th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">현재 플랜</th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">신청 플랜</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 whitespace-nowrap">메시지</th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">상태</th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">처리</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
@@ -2261,29 +2261,29 @@ const handleApproveRequest = async (id: string) => {
                       .slice((requestPage - 1) * requestPerPage, requestPage * requestPerPage)
                       .map((req) => (
                       <tr key={req.id} className={`hover:bg-gray-50 ${req.status === 'pending' ? 'bg-yellow-50' : ''}`}>
-                        <td className="px-6 py-4 text-sm text-center text-gray-600">
+                        <td className="px-4 py-3 text-center text-gray-600 whitespace-nowrap">
                           {formatDateTime(req.created_at)}
                         </td>
-                        <td className="px-6 py-4 text-sm">
+                        <td className="px-4 py-3">
                           <div className="font-medium text-gray-900">{req.company_name}</div>
                           <div className="text-xs text-gray-500">{req.company_code}</div>
                         </td>
-                        <td className="px-6 py-4 text-sm text-gray-900">
+                        <td className="px-4 py-3 text-gray-900">
                           {req.user_name} ({req.user_login_id})
                         </td>
-                        <td className="px-6 py-4 text-sm text-center text-gray-600">
+                        <td className="px-4 py-3 text-center text-gray-600 whitespace-nowrap">
                           {req.current_plan_name || '-'}
                         </td>
-                        <td className="px-6 py-4 text-sm text-center">
+                        <td className="px-4 py-3 text-center">
                           <span className="font-medium text-blue-600">{req.requested_plan_name}</span>
                           <div className="text-xs text-gray-500">
                             {Number(req.requested_plan_price).toLocaleString()}원/월
                           </div>
                         </td>
-                        <td className="px-6 py-4 text-sm text-gray-600 max-w-xs truncate" title={req.message}>
+                        <td className="px-4 py-3 text-gray-600 max-w-[200px] truncate" title={req.message}>
                           {req.message || '-'}
                         </td>
-                        <td className="px-6 py-4 text-center">
+                        <td className="px-4 py-3 text-center">
                           {req.status === 'pending' && (
                             <span className="px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">대기</span>
                           )}
@@ -2294,7 +2294,7 @@ const handleApproveRequest = async (id: string) => {
                             <span className="px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">거절</span>
                           )}
                         </td>
-                        <td className="px-6 py-4 text-center">
+                        <td className="px-4 py-3 text-center">
                           {req.status === 'pending' ? (
                             <div className="flex justify-center gap-2">
                               <button
@@ -2391,16 +2391,16 @@ const handleApproveRequest = async (id: string) => {
             </div>
 
             <div className="overflow-x-auto">
-              <table className="w-full">
+              <table className="w-full text-sm">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">요청일</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">회사</th>
-                    <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">결제수단</th>
-                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">금액</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">입금자명</th>
-                    <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">상태</th>
-                    <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">처리</th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">요청일</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 whitespace-nowrap">회사</th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">결제수단</th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 whitespace-nowrap">금액</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 whitespace-nowrap">입금자명</th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">상태</th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">처리</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
@@ -2415,14 +2415,14 @@ const handleApproveRequest = async (id: string) => {
                   ) : (
                     depositRequests.map((dr) => (
                       <tr key={dr.id} className={`hover:bg-gray-50 ${dr.status === 'pending' ? 'bg-yellow-50' : ''}`}>
-                        <td className="px-6 py-4 text-sm text-center text-gray-600">
+                        <td className="px-4 py-3 text-center text-gray-600 whitespace-nowrap">
                           {formatDateTime(dr.created_at)}
                         </td>
-                        <td className="px-6 py-4 text-sm">
+                        <td className="px-4 py-3">
                           <div className="font-medium text-gray-900">{dr.company_name}</div>
                           <div className="text-xs text-gray-500">잔액: {Number(dr.balance || 0).toLocaleString()}원</div>
                         </td>
-                        <td className="px-6 py-4 text-sm text-center">
+                        <td className="px-4 py-3 text-center">
                           {dr.payment_method === 'deposit' && (
                             <span className="px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">무통장입금</span>
                           )}
@@ -2433,13 +2433,13 @@ const handleApproveRequest = async (id: string) => {
                             <span className="px-2 py-1 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">가상계좌</span>
                           )}
                         </td>
-                        <td className="px-6 py-4 text-sm text-right font-bold text-gray-900">
+                        <td className="px-4 py-3 text-right font-bold text-gray-900 whitespace-nowrap">
                           {Number(dr.amount).toLocaleString()}원
                         </td>
-                        <td className="px-6 py-4 text-sm text-gray-700">
+                        <td className="px-4 py-3 text-gray-700">
                           {dr.depositor_name || '-'}
                         </td>
-                        <td className="px-6 py-4 text-center">
+                        <td className="px-4 py-3 text-center">
                           {dr.status === 'pending' && (
                             <span className="px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">대기</span>
                           )}
@@ -2450,7 +2450,7 @@ const handleApproveRequest = async (id: string) => {
                             <span className="px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">거절</span>
                           )}
                         </td>
-                        <td className="px-6 py-4 text-center">
+                        <td className="px-4 py-3 text-center">
                           {dr.status === 'pending' ? (
                             <div className="flex justify-center gap-2">
                               <button
