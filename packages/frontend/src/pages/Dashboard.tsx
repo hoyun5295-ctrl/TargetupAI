@@ -2613,13 +2613,11 @@ const campaignData = {
                               <span className="text-sm font-bold text-orange-700">{aiResult?.messages?.[0]?.subject || 'LMS 제목'}</span>
                             </div>
                           ) : null}
-                          <div className="shrink-0">
-                            {mmsUploadedImages.map((img, idx) => (
-                              <img key={idx} src={img.url} alt="" className="w-full h-auto max-h-[120px] object-cover" />
-                            ))}
-                          </div>
                           <div className="flex-1 overflow-y-auto p-3 bg-gradient-to-b from-purple-50/30 to-white">
-                            <div className="flex gap-2">
+                            {mmsUploadedImages.map((img, idx) => (
+                              <img key={idx} src={img.url} alt="" className="w-full h-auto rounded mb-1.5" />
+                            ))}
+                            <div className="flex gap-2 mt-1">
                               <div className="w-7 h-7 rounded-full bg-purple-100 flex items-center justify-center shrink-0 text-xs">📱</div>
                               <div className="bg-white rounded-2xl rounded-tl-sm p-3 shadow-sm border border-gray-100 text-[13px] leading-[1.7] whitespace-pre-wrap text-gray-700 max-w-[95%]">
                                 {aiResult?.messages?.[0]?.message_text || '메시지 없음'}
@@ -5338,7 +5336,7 @@ const campaignData = {
                       setDirectRecipients([]);
                       setDirectMessage('');
                       setDirectSubject('');
-                      setMmsImages([]);
+                      setMmsUploadedImages([]);
                       setSelectedRecipients(new Set());
                       setSelectedCallback('');
                     }}
@@ -6478,17 +6476,13 @@ const campaignData = {
                       <span className="text-sm font-bold text-orange-700">{directSubject}</span>
                     </div>
                   )}
-                  {/* MMS 이미지 */}
-                  {mmsUploadedImages.length > 0 && (
-                    <div className="shrink-0">
-                      {mmsUploadedImages.map((img, idx) => (
-                        <img key={idx} src={img.url} alt="" className="w-full h-auto max-h-[140px] object-cover" />
-                      ))}
-                    </div>
-                  )}
-                  {/* 메시지 영역 - 스크롤 */}
+                  {/* 메시지 영역 - 스크롤 (MMS 이미지 포함) */}
                   <div className="flex-1 overflow-y-auto p-3 bg-gradient-to-b from-emerald-50/30 to-white">
-                    <div className="flex gap-2">
+                    {/* MMS 이미지 */}
+                    {mmsUploadedImages.length > 0 && mmsUploadedImages.map((img, idx) => (
+                      <img key={idx} src={img.url} alt="" className="w-full h-auto rounded mb-1.5" />
+                    ))}
+                    <div className="flex gap-2 mt-1">
                       <div className="w-7 h-7 rounded-full bg-emerald-100 flex items-center justify-center shrink-0 text-xs">📱</div>
                       <div className="bg-white rounded-2xl rounded-tl-sm p-3 shadow-sm border border-gray-100 text-[13px] leading-[1.7] whitespace-pre-wrap text-gray-700 max-w-[95%]">
                         {(() => {
