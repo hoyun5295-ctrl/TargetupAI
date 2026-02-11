@@ -92,6 +92,25 @@ router.post('/', async (req: Request, res: Response) => {
       return res.status(400).json({ error: '이미 사용중인 로그인 ID입니다.' });
     }
 
+    // max_users 상한 체크
+    const companyCheck = await pool.query(
+      'SELECT max_users FROM companies WHERE id = $1',
+      [targetCompanyId]
+    );
+    if (companyCheck.rows.length > 0 && companyCheck.rows[0].max_users) {
+      const userCount = await pool.query(
+        'SELECT COUNT(*) FROM users WHERE company_id = $1 AND is_active = true',
+        [targetCompanyId]
+      );
+      const currentUsers = parseInt(userCount.rows[0].count);
+      if (currentUsers >= companyCheck.rows[0].max_users) {
+        return res.status(403).json({
+          error: `최대 사용자 수(${companyCheck.rows[0].max_users}명)를 초과할 수 없습니다. 추가가 필요하시면 인비토에 문의해주세요.`,
+          code: 'MAX_USERS_REACHED'
+        });
+      }
+    }
+
     const passwordHash = await bcrypt.hash(password, 10);
 
     // 고객사관리자가 생성하면 user_type은 'user' 고정

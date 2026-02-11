@@ -217,7 +217,8 @@ C:\projects\targetup\  (로컬)
 /api/plans         → routes/plans.ts (요금제)
 /api/billing       → routes/billing.ts (정산/거래내역서)
 /api/balance       → routes/balance.ts (선불 잔액 조회/이력/요약)
-/api/sync          → routes/sync.ts (Sync Agent 연동 - register, heartbeat, customers, purchases)
+/api/sync          → routes/sync.ts (Sync Agent 연동 - register, heartbeat, customers, purchases, log, config, version)
+/api/admin/sync    → routes/admin-sync.ts (슈퍼관리자 Sync Agent 관리)
 ```
 
 ★ 슈퍼관리자(sys.hanjullo.com) / 고객사관리자(app.hanjul.ai) / 서비스사용자(hanjul.ai) 접속주소 완전 분리 완료
@@ -1271,6 +1272,20 @@ POST /api/sync/purchases   ← 구매내역 벌크 INSERT (배치 최대 1000건
 **Sync Agent 서버 배포 (2026-02-10)**
 - [x] 서버 배포 완료 (sync_agents, sync_logs DDL + idx_customers_company_phone 인덱스)
 
+**Sync Agent Phase 2 API + 모니터링 (2026-02-11)**
+- [x] Sync API Phase 2: POST /api/sync/log, GET /api/sync/config, GET /api/sync/version
+- [x] Admin Sync API 5개: agents 목록/상세, config 변경, command 전송, logs 조회
+- [x] admin-sync.ts 신규 생성 + app.ts 라우트 등록
+- [x] DB 마이그레이션 (sync_agents: config/sync_interval 컬럼, sync_logs: duration_ms/error_message, sync_releases 테이블)
+- [x] AdminDashboard.tsx Sync 모니터링 탭 추가 (Agent 목록 테이블 + 상세/설정/명령 모달 3개)
+- [x] 서버 배포 완료
+
+**보안 강화 (2026-02-11)**
+- [x] app.hanjul.ai 일반 사용자 로그인 차단 (auth.ts loginSource 체크 + company-frontend 헤더 전송)
+- [x] 로그인 감사 로그 구현 (audit_logs에 login_success/login_fail/login_blocked 기록)
+- [x] 로그인 IP 주소 기록 (Nginx X-Forwarded-For + Express trust proxy 설정)
+- [x] audit_logs FK 제약 제거 (super_admin ID 호환)
+
 ### 🔲 진행 예정 작업
 
 **선불 요금제 Phase 1-B~2**
@@ -1279,7 +1294,6 @@ POST /api/sync/purchases   ← 구매내역 벌크 INSERT (배치 최대 1000건
 
 **Sync Agent (고객사 DB 동기화)**
 - [ ] Sync Agent 코어 완성 (로컬 큐, 스케줄러, Heartbeat 남음)
-- [ ] Sync API Phase 2 개발 (log, config, version 엔드포인트)
 
 **보안**
 - [ ] 슈퍼관리자 IP 화이트리스트 설정
@@ -1287,7 +1301,7 @@ POST /api/sync/purchases   ← 구매내역 벌크 INSERT (배치 최대 1000건
 - [ ] VPN 접근 제한 검토
 
 **브랜딩**
-- [ ] "한줄로" 로고 디자인 (디자이너 시안 대기 중)
+- [ ] "한줄로" 로고 확정 (워드마크형, 디자이너 피드백 진행 중)
 - [x] 상표 출원 완료 (2026-02-10, 특허로, 문자상표 4개 류: 09/35/38/42, 출원료 262,000원)
 - [ ] 파비콘/OG 이미지 적용
 

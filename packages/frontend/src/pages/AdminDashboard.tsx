@@ -99,6 +99,7 @@ export default function AdminDashboard() {
     excludedSegments: [] as string[],
     approvalRequired: false,
     allowCallbackSelfRegister: false,
+    maxUsers: 5,
     storeCodeList: [] as string[],
     newStoreCode: '',
     newExcludedSegment: '',
@@ -1094,6 +1095,7 @@ const handleApproveRequest = async (id: string) => {
           excludedSegments: c.excluded_segments || [],
           approvalRequired: c.approval_required ?? false,
           allowCallbackSelfRegister: c.allow_callback_self_register ?? false,
+          maxUsers: c.max_users ?? 5,
           storeCodeList: c.store_code_list || [],
           newStoreCode: '',
           newExcludedSegment: '',
@@ -3347,6 +3349,16 @@ const handleApproveRequest = async (id: string) => {
                       <option value="suspended">정지</option>
                       <option value="terminated">해지</option>
                     </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">최대 사용자 수</label>
+                    <div className="flex items-center gap-2">
+                      <input type="number" value={editCompany.maxUsers}
+                        onChange={(e) => setEditCompany({ ...editCompany, maxUsers: Math.max(1, Number(e.target.value)) })}
+                        className="w-24 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" min={1} />
+                      <span className="text-sm text-gray-500">명</span>
+                    </div>
+                    <p className="text-xs text-gray-400 mt-1">고객사 관리자가 생성할 수 있는 최대 사용자 계정 수</p>
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">080 수신거부번호</label>

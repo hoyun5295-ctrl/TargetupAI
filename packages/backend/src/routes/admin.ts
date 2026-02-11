@@ -42,6 +42,25 @@ router.post('/users', authenticate, requireSuperAdmin, async (req: Request, res:
     if (existing.rows.length > 0) {
       return res.status(400).json({ error: '이미 사용중인 로그인 ID입니다.' });
     }
+
+    // max_users 상한 체크
+    const companyResult = await query(
+      'SELECT max_users FROM companies WHERE id = $1',
+      [companyId]
+    );
+    if (companyResult.rows.length > 0 && companyResult.rows[0].max_users) {
+      const userCountResult = await query(
+        'SELECT COUNT(*) FROM users WHERE company_id = $1 AND is_active = true',
+        [companyId]
+      );
+      const currentUsers = parseInt(userCountResult.rows[0].count);
+      if (currentUsers >= companyResult.rows[0].max_users) {
+        return res.status(403).json({ 
+          error: `최대 사용자 수(${companyResult.rows[0].max_users}명)를 초과할 수 없습니다.`,
+          code: 'MAX_USERS_REACHED'
+        });
+      }
+    }
     
     // 비밀번호 해시
     const passwordHash = await bcrypt.hash(password, 10);
@@ -202,7 +221,7 @@ router.put('/companies/:id', authenticate, requireSuperAdmin, async (req: Reques
     costPerSms, costPerLms, costPerMms, costPerKakao,
     storeCodeList,
     businessNumber, ceoName, businessType, businessItem, address,
-    allowCallbackSelfRegister
+    allowCallbackSelfRegister, maxUsers
   } = req.body;
   
   try {
@@ -232,10 +251,11 @@ router.put('/companies/:id', authenticate, requireSuperAdmin, async (req: Reques
           business_item = COALESCE($22, business_item),
           address = COALESCE($23, address),
           allow_callback_self_register = COALESCE($24, allow_callback_self_register),
+          max_users = COALESCE($25, max_users),
           updated_at = NOW()
-      WHERE id = $25
+      WHERE id = $26
       RETURNING *
-    `, [companyName, contactName, contactEmail, contactPhone, status, planId, rejectNumber, brandName, sendHourStart, sendHourEnd, dailyLimit, holidaySend, duplicateDays, costPerSms, costPerLms, costPerMms, costPerKakao, storeCodeList ? JSON.stringify(storeCodeList) : null, businessNumber, ceoName, businessType, businessItem, address, allowCallbackSelfRegister !== undefined ? allowCallbackSelfRegister : null, id]);
+    `, [companyName, contactName, contactEmail, contactPhone, status, planId, rejectNumber, brandName, sendHourStart, sendHourEnd, dailyLimit, holidaySend, duplicateDays, costPerSms, costPerLms, costPerMms, costPerKakao, storeCodeList ? JSON.stringify(storeCodeList) : null, businessNumber, ceoName, businessType, businessItem, address, allowCallbackSelfRegister !== undefined ? allowCallbackSelfRegister : null, maxUsers || null, id]);
     
     if (result.rows.length === 0) {
       return res.status(404).json({ error: '회사를 찾을 수 없습니다.' });
