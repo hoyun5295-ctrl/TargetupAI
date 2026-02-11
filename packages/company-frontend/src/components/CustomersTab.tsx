@@ -24,7 +24,7 @@ interface Pagination {
 
 export default function CustomersTab() {
   const [customers, setCustomers] = useState<Customer[]>([]);
-  const [pagination, setPagination] = useState<Pagination>({ total: 0, page: 1, limit: 50, totalPages: 0 });
+  const [pagination, setPagination] = useState<Pagination>({ total: 0, page: 1, limit: 25, totalPages: 0 });
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -40,11 +40,11 @@ export default function CustomersTab() {
   const loadCustomers = useCallback(async (page = 1) => {
     setLoading(true);
     try {
-      const params: any = { page, limit: 50 };
+      const params: any = { page, limit: 25 };
       if (search.trim()) params.search = search.trim();
       const res = await customersApi.list(params);
       setCustomers(res.data.customers || []);
-      setPagination(res.data.pagination || { total: 0, page, limit: 50, totalPages: 0 });
+      setPagination(res.data.pagination || { total: 0, page, limit: 25, totalPages: 0 });
       setSelectedIds(new Set());
     } catch (e: any) {
       setToast({ msg: e.response?.data?.error || '고객 목록 조회 실패', type: 'error' });
@@ -226,10 +226,10 @@ export default function CustomersTab() {
                   </td>
                   <td className="px-4 py-3 text-right text-gray-600">{formatAmount(c.total_purchase_amount)}</td>
                   <td className="px-4 py-3 text-center text-gray-500 text-xs">
-                    {c.recent_purchase_date ? formatDateTime(c.recent_purchase_date, 'date') : '-'}
+                    {c.recent_purchase_date ? formatDateTime(c.recent_purchase_date) : '-'}
                   </td>
                   <td className="px-4 py-3 text-center text-gray-500 text-xs">
-                    {c.created_at ? formatDateTime(c.created_at, 'date') : '-'}
+                    {c.created_at ? formatDateTime(c.created_at) : '-'}
                   </td>
                   <td className="px-4 py-3 text-center">
                     <button onClick={() => confirmDeleteOne(c)}

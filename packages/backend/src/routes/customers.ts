@@ -134,9 +134,14 @@ function buildDynamicFilter(filters: any, startIndex: number) {
 // GET /api/customers - 고객 목록 (동적 필터)
 router.get('/', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
+    let companyId = req.user?.companyId;
     const userId = req.user?.userId;
     const userType = req.user?.userType;
+
+    // 슈퍼관리자는 companyId 쿼리 파라미터로 다른 회사 조회 가능
+    if (userType === 'super_admin' && req.query.companyId) {
+      companyId = req.query.companyId as string;
+    }
 
     if (!companyId) {
       return res.status(403).json({ error: '회사 권한이 필요합니다' });
@@ -932,10 +937,15 @@ router.get('/enabled-fields', async (req: Request, res: Response) => {
 // DELETE /api/customers/:id - 개별 삭제 (고객사관리자, 슈퍼관리자만)
 router.delete('/:id', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
+    let companyId = req.user?.companyId;
     const userId = req.user?.userId;
     const userType = req.user?.userType;
     const { id } = req.params;
+
+    // 슈퍼관리자는 companyId 쿼리 파라미터로 다른 회사 고객 삭제 가능
+    if (userType === 'super_admin' && req.query.companyId) {
+      companyId = req.query.companyId as string;
+    }
 
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다' });
     if (userType !== 'company_admin' && userType !== 'super_admin') {
@@ -985,9 +995,14 @@ router.delete('/:id', async (req: Request, res: Response) => {
 // POST /api/customers/bulk-delete - 선택 삭제 (고객사관리자, 슈퍼관리자만)
 router.post('/bulk-delete', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
+    let companyId = req.user?.companyId;
     const userId = req.user?.userId;
     const userType = req.user?.userType;
+
+    // 슈퍼관리자는 body에서 companyId 전달 가능
+    if (userType === 'super_admin' && req.body.companyId) {
+      companyId = req.body.companyId;
+    }
 
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다' });
     if (userType !== 'company_admin' && userType !== 'super_admin') {

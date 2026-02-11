@@ -106,7 +106,7 @@ export default function AdminDashboard() {
     newStoreCode: '',
     newExcludedSegment: '',
   });
-  const [editCompanyTab, setEditCompanyTab] = useState<'basic' | 'send' | 'cost' | 'ai' | 'store' | 'fields'>('basic');
+  const [editCompanyTab, setEditCompanyTab] = useState<'basic' | 'send' | 'cost' | 'ai' | 'store' | 'fields' | 'customers'>('basic');
   const [standardFields, setStandardFields] = useState<any[]>([]);
   const [enabledFields, setEnabledFields] = useState<string[]>([]);
   const [fieldDataCheck, setFieldDataCheck] = useState<Record<string, { hasData: boolean; count: number }>>({});
@@ -225,6 +225,16 @@ const [deleteTargetId, setDeleteTargetId] = useState('');
 const [showCustomerDeleteAll, setShowCustomerDeleteAll] = useState(false);
 const [customerDeleteConfirmName, setCustomerDeleteConfirmName] = useState('');
 const [customerDeleteLoading, setCustomerDeleteLoading] = useState(false);
+
+// 고객 DB 관리 (슈퍼관리자 - 고객사 수정 모달 내)
+const [adminCustomers, setAdminCustomers] = useState<any[]>([]);
+const [adminCustPage, setAdminCustPage] = useState({ total: 0, page: 1, totalPages: 0 });
+const [adminCustSearch, setAdminCustSearch] = useState('');
+const [adminCustSelected, setAdminCustSelected] = useState<Set<string>>(new Set());
+const [adminCustLoading, setAdminCustLoading] = useState(false);
+const [showAdminCustDeleteModal, setShowAdminCustDeleteModal] = useState(false);
+const [adminCustDeleteTarget, setAdminCustDeleteTarget] = useState<{ type: 'individual' | 'bulk'; customer?: any; count?: number } | null>(null);
+const [adminCustDeleteLoading, setAdminCustDeleteLoading] = useState(false);
 const [invoices, setInvoices] = useState<any[]>([]);
 const [invoicesLoading, setInvoicesLoading] = useState(false);
 const [billingToast, setBillingToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
@@ -459,6 +469,50 @@ const handleCustomerDeleteAll = async () => {
   } finally {
     setCustomerDeleteLoading(false);
   }
+};
+
+// 슈퍼관리자 고객 목록 로드
+const loadAdminCustomers = async (page = 1) => {
+  if (!editCompany.id) return;
+  setAdminCustLoading(true);
+  try {
+    const token = localStorage.getItem('token');
+    const params = new URLSearchParams({ page: String(page), limit: '25', companyId: editCompany.id });
+    if (adminCustSearch.trim()) params.set('search', adminCustSearch.trim());
+    const res = await fetch(`/api/customers?${params}`, { headers: { 'Authorization': `Bearer ${token}` } });
+    const data = await res.json();
+    setAdminCustomers(data.customers || []);
+    setAdminCustPage({ total: data.pagination?.total || 0, page: data.pagination?.page || 1, totalPages: data.pagination?.totalPages || 0 });
+    setAdminCustSelected(new Set());
+  } catch (e) { console.error('고객 목록 조회 실패:', e); }
+  finally { setAdminCustLoading(false); }
+};
+
+// 슈퍼관리자 고객 삭제 실행
+const executeAdminCustDelete = async () => {
+  if (!adminCustDeleteTarget) return;
+  setAdminCustDeleteLoading(true);
+  try {
+    const token = localStorage.getItem('token');
+    if (adminCustDeleteTarget.type === 'individual' && adminCustDeleteTarget.customer) {
+      const res = await fetch(`/api/customers/${adminCustDeleteTarget.customer.id}?companyId=${editCompany.id}`, {
+        method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (!res.ok) { const d = await res.json(); throw new Error(d.error); }
+    } else if (adminCustDeleteTarget.type === 'bulk') {
+      const res = await fetch('/api/customers/bulk-delete', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: Array.from(adminCustSelected), companyId: editCompany.id })
+      });
+      if (!res.ok) { const d = await res.json(); throw new Error(d.error); }
+    }
+    setShowAdminCustDeleteModal(false);
+    setAdminCustDeleteTarget(null);
+    showAlert('성공', '삭제되었습니다.', 'success');
+    loadAdminCustomers(adminCustPage.page);
+  } catch (e: any) { showAlert('오류', e.message || '삭제 실패', 'error'); }
+  finally { setAdminCustDeleteLoading(false); }
 };
 
 const downloadBillingPdf = async (id: string, label: string) => {
@@ -3268,7 +3322,7 @@ const handleApproveRequest = async (id: string) => {
       {/* 고객사 수정 모달 */}
       {showEditCompanyModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-lg max-h-[90vh] flex flex-col">
+          <div className={`bg-white rounded-lg shadow-xl w-full ${editCompanyTab === 'customers' ? 'max-w-3xl' : 'max-w-lg'} max-h-[90vh] flex flex-col transition-all`}>
             <div className="px-6 py-4 border-b">
               <h3 className="text-lg font-semibold">고객사 상세 설정</h3>
               <p className="text-xs text-gray-500 mt-1">{editCompany.companyName}</p>
@@ -3283,11 +3337,15 @@ const handleApproveRequest = async (id: string) => {
                 { key: 'ai', label: 'AI설정', icon: '🤖' },
                 { key: 'store', label: '분류코드', icon: '🏷️' },
                 { key: 'fields', label: '필터항목', icon: '🔍' },
+                { key: 'customers', label: '고객DB', icon: '👥' },
               ].map((tab) => (
                 <button
                   key={tab.key}
                   type="button"
-                  onClick={() => setEditCompanyTab(tab.key as any)}
+                  onClick={() => {
+                    setEditCompanyTab(tab.key as any);
+                    if (tab.key === 'customers') { setAdminCustSearch(''); loadAdminCustomers(1); }
+                  }}
                   className={`flex-1 px-2 py-3 text-xs font-medium border-b-2 transition-colors ${
                     editCompanyTab === tab.key
                       ? 'border-blue-600 text-blue-600 bg-white'
@@ -3407,24 +3465,6 @@ const handleApproveRequest = async (id: string) => {
                     <input type="text" value={editCompany.rejectNumber}
                       onChange={(e) => setEditCompany({ ...editCompany, rejectNumber: e.target.value })}
                       className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" placeholder="080-000-0000" />
-                  </div>
-
-                  {/* 고객 데이터 전체 삭제 */}
-                  <div className="mt-6 pt-4 border-t border-red-200">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <div className="text-sm font-medium text-red-600 flex items-center gap-1.5">
-                          ⚠️ 고객 데이터 전체 삭제
-                        </div>
-                        <p className="text-xs text-gray-400 mt-0.5">해당 고객사의 모든 고객 및 구매내역이 영구 삭제됩니다</p>
-                      </div>
-                      <button
-                        onClick={() => { setCustomerDeleteConfirmName(''); setShowCustomerDeleteAll(true); }}
-                        className="px-4 py-2 bg-red-50 text-red-600 border border-red-200 rounded-lg text-sm font-medium hover:bg-red-100 transition"
-                      >
-                        전체 삭제
-                      </button>
-                    </div>
                   </div>
                 </div>
               )}
@@ -3846,6 +3886,122 @@ const handleApproveRequest = async (id: string) => {
                 </div>
               )}
 
+              {/* 고객DB 탭 */}
+              {editCompanyTab === 'customers' && (
+                <div className="space-y-3">
+                  {/* 상단: 검색 + 선택삭제 + 전체삭제 */}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <div className="relative flex-1 min-w-[180px]">
+                      <input type="text" value={adminCustSearch}
+                        onChange={(e) => setAdminCustSearch(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); loadAdminCustomers(1); } }}
+                        placeholder="이름/전화번호 검색"
+                        className="w-full pl-8 pr-3 py-1.5 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                      <svg className="absolute left-2.5 top-2 w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                      </svg>
+                    </div>
+                    <button type="button" onClick={() => loadAdminCustomers(1)}
+                      className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-700">조회</button>
+                    {adminCustSelected.size > 0 && (
+                      <button type="button" onClick={() => { setAdminCustDeleteTarget({ type: 'bulk', count: adminCustSelected.size }); setShowAdminCustDeleteModal(true); }}
+                        className="px-3 py-1.5 bg-red-500 text-white rounded-lg text-xs font-medium hover:bg-red-600">
+                        선택 삭제 ({adminCustSelected.size})
+                      </button>
+                    )}
+                    <span className="text-xs text-gray-500 ml-auto">총 {adminCustPage.total.toLocaleString()}명</span>
+                  </div>
+
+                  {/* 테이블 */}
+                  <div className="border rounded-lg overflow-hidden">
+                    <div className="overflow-x-auto max-h-[340px] overflow-y-auto">
+                      <table className="w-full text-xs">
+                        <thead className="bg-gray-50 border-b sticky top-0">
+                          <tr>
+                            <th className="px-2 py-2 text-center w-8">
+                              <input type="checkbox"
+                                checked={adminCustomers.length > 0 && adminCustSelected.size === adminCustomers.length}
+                                onChange={() => {
+                                  if (adminCustSelected.size === adminCustomers.length) setAdminCustSelected(new Set());
+                                  else setAdminCustSelected(new Set(adminCustomers.map((c: any) => c.id)));
+                                }}
+                                className="rounded border-gray-300 text-blue-600" />
+                            </th>
+                            <th className="px-2 py-2 text-left font-medium text-gray-600">이름</th>
+                            <th className="px-2 py-2 text-left font-medium text-gray-600">전화번호</th>
+                            <th className="px-2 py-2 text-center font-medium text-gray-600">성별</th>
+                            <th className="px-2 py-2 text-center font-medium text-gray-600">등급</th>
+                            <th className="px-2 py-2 text-center font-medium text-gray-600">수신</th>
+                            <th className="px-2 py-2 text-center font-medium text-gray-600 w-10"></th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y">
+                          {adminCustLoading ? (
+                            <tr><td colSpan={7} className="text-center py-8 text-gray-400">불러오는 중...</td></tr>
+                          ) : adminCustomers.length === 0 ? (
+                            <tr><td colSpan={7} className="text-center py-8 text-gray-400">고객 데이터가 없습니다</td></tr>
+                          ) : adminCustomers.map((c: any) => (
+                            <tr key={c.id} className={`hover:bg-gray-50 ${adminCustSelected.has(c.id) ? 'bg-blue-50/50' : ''}`}>
+                              <td className="px-2 py-1.5 text-center">
+                                <input type="checkbox" checked={adminCustSelected.has(c.id)}
+                                  onChange={() => { const s = new Set(adminCustSelected); s.has(c.id) ? s.delete(c.id) : s.add(c.id); setAdminCustSelected(s); }}
+                                  className="rounded border-gray-300 text-blue-600" />
+                              </td>
+                              <td className="px-2 py-1.5 text-left font-medium text-gray-800">{c.name || '-'}</td>
+                              <td className="px-2 py-1.5 text-left text-gray-600">{c.phone || '-'}</td>
+                              <td className="px-2 py-1.5 text-center">{c.gender ? (['M','m','남','남자','male'].includes(c.gender) ? '남' : ['F','f','여','여자','female'].includes(c.gender) ? '여' : c.gender) : '-'}</td>
+                              <td className="px-2 py-1.5 text-center">{c.grade || '-'}</td>
+                              <td className="px-2 py-1.5 text-center">{c.sms_opt_in ? <span className="text-green-600">✓</span> : <span className="text-red-400">✗</span>}</td>
+                              <td className="px-2 py-1.5 text-center">
+                                <button type="button" onClick={() => { setAdminCustDeleteTarget({ type: 'individual', customer: c }); setShowAdminCustDeleteModal(true); }}
+                                  className="p-1 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded transition" title="삭제">
+                                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                  </svg>
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* 페이지네이션 */}
+                    {adminCustPage.totalPages > 1 && (
+                      <div className="flex items-center justify-between px-3 py-2 border-t bg-gray-50 text-xs">
+                        <span className="text-gray-500">{adminCustPage.page} / {adminCustPage.totalPages} 페이지</span>
+                        <div className="flex gap-1">
+                          <button type="button" onClick={() => loadAdminCustomers(1)} disabled={adminCustPage.page === 1}
+                            className="px-2 py-1 border rounded disabled:opacity-30 hover:bg-white">«</button>
+                          <button type="button" onClick={() => loadAdminCustomers(adminCustPage.page - 1)} disabled={adminCustPage.page === 1}
+                            className="px-2 py-1 border rounded disabled:opacity-30 hover:bg-white">‹</button>
+                          <button type="button" onClick={() => loadAdminCustomers(adminCustPage.page + 1)} disabled={adminCustPage.page === adminCustPage.totalPages}
+                            className="px-2 py-1 border rounded disabled:opacity-30 hover:bg-white">›</button>
+                          <button type="button" onClick={() => loadAdminCustomers(adminCustPage.totalPages)} disabled={adminCustPage.page === adminCustPage.totalPages}
+                            className="px-2 py-1 border rounded disabled:opacity-30 hover:bg-white">»</button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 전체 삭제 */}
+                  <div className="pt-3 border-t border-red-200">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="text-xs font-medium text-red-600">⚠️ 전체 삭제</div>
+                        <p className="text-[11px] text-gray-400">모든 고객 및 구매내역 영구 삭제</p>
+                      </div>
+                      <button type="button"
+                        onClick={() => { setCustomerDeleteConfirmName(''); setShowCustomerDeleteAll(true); }}
+                        className="px-3 py-1.5 bg-red-50 text-red-600 border border-red-200 rounded-lg text-xs font-medium hover:bg-red-100 transition">
+                        전체 삭제
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {editCompanyTab !== 'customers' && (
               <div className="flex gap-3 pt-6 mt-4 border-t">
                 <button type="button" onClick={() => setShowEditCompanyModal(false)}
                   className="flex-1 px-4 py-2 border rounded-lg text-gray-700 hover:bg-gray-50">
@@ -3856,6 +4012,7 @@ const handleApproveRequest = async (id: string) => {
                   저장
                 </button>
               </div>
+              )}
             </form>
           </div>
         </div>
@@ -4772,6 +4929,38 @@ const handleApproveRequest = async (id: string) => {
                     className="flex-1 px-4 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors border-r">취소</button>
                   <button onClick={handleBillingDelete}
                     className="flex-1 px-4 py-3 text-red-600 font-medium hover:bg-red-50 transition-colors">삭제</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ===== 고객 개별/선택 삭제 확인 모달 ===== */}
+          {showAdminCustDeleteModal && adminCustDeleteTarget && (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[60]">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in fade-in zoom-in duration-200">
+                <div className="p-6">
+                  <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-4">
+                    <svg className="w-6 h-6 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                  </div>
+                  <h3 className="text-lg font-semibold text-center text-gray-900 mb-2">
+                    {adminCustDeleteTarget.type === 'individual' ? '고객 삭제' : '선택 삭제'}
+                  </h3>
+                  <p className="text-sm text-center text-gray-600 mb-1">
+                    {adminCustDeleteTarget.type === 'individual'
+                      ? `"${adminCustDeleteTarget.customer?.name || adminCustDeleteTarget.customer?.phone}" 고객을 삭제합니다.`
+                      : `선택한 ${adminCustDeleteTarget.count}명의 고객을 삭제합니다.`}
+                  </p>
+                  <p className="text-xs text-red-500 text-center font-medium">삭제된 데이터는 복구할 수 없습니다.</p>
+                </div>
+                <div className="flex border-t">
+                  <button onClick={() => { setShowAdminCustDeleteModal(false); setAdminCustDeleteTarget(null); }}
+                    className="flex-1 px-4 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors border-r">취소</button>
+                  <button onClick={executeAdminCustDelete} disabled={adminCustDeleteLoading}
+                    className="flex-1 px-4 py-3 text-red-600 font-bold hover:bg-red-50 transition-colors disabled:opacity-50">
+                    {adminCustDeleteLoading ? '삭제 중...' : '삭제'}
+                  </button>
                 </div>
               </div>
             </div>
