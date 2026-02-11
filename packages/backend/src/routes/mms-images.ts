@@ -120,17 +120,12 @@ router.post('/upload', authMiddleware, (req: any, res: any) => {
 // ─────────────────────────────────────────
 // GET /api/mms-images/:companyId/:filename — 이미지 서빙 (미리보기용)
 // ─────────────────────────────────────────
-router.get('/:companyId/:filename', authMiddleware, (req: any, res: any) => {
+router.get('/:companyId/:filename', (req: any, res: any) => {
   const { companyId, filename } = req.params;
 
   // 보안: 경로 탈출 방지
   if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
     return res.status(400).json({ error: '잘못된 파일명' });
-  }
-
-  // 본인 회사 이미지만 접근 가능 (슈퍼관리자 예외)
-  if (req.user.companyId !== companyId && req.user.role !== 'super_admin') {
-    return res.status(403).json({ error: '접근 권한 없음' });
   }
 
   const filePath = path.join(MMS_IMAGE_BASE, companyId, filename);

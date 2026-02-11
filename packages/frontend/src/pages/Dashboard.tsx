@@ -2328,7 +2328,7 @@ const campaignData = {
                       {mmsUploadedImages.length > 0 ? (
                         <div className="flex items-center gap-3">
                           {mmsUploadedImages.map((img, idx) => (
-                            <img key={idx} src={img.url} alt="" className="w-16 h-16 object-cover rounded-lg border shadow-sm" crossOrigin="use-credentials" />
+                            <img key={idx} src={img.url} alt="" className="w-16 h-16 object-cover rounded-lg border shadow-sm" />
                           ))}
                           <div className="text-sm text-purple-600 font-medium">✏️ {mmsUploadedImages.length}장 첨부됨 (클릭하여 수정)</div>
                         </div>
@@ -2497,6 +2497,24 @@ const campaignData = {
   👁️ 미리보기
 </button>
 <button 
+  onClick={() => {
+    const toast = document.createElement('div');
+    toast.innerHTML = `
+      <div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:white;padding:24px 32px;border-radius:16px;box-shadow:0 10px 40px rgba(0,0,0,0.2);z-index:9999;text-align:center;">
+        <div style="font-size:48px;margin-bottom:12px;">🚧</div>
+        <div style="font-size:16px;font-weight:bold;color:#374151;margin-bottom:8px;">준비 중인 기능입니다</div>
+        <div style="font-size:14px;color:#6B7280;">스팸필터테스트는 곧 업데이트됩니다</div>
+      </div>
+      <div style="position:fixed;inset:0;background:rgba(0,0,0,0.3);z-index:9998;" onclick="this.parentElement.remove()"></div>
+    `;
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 2000);
+  }}
+  className="flex-1 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 flex items-center justify-center gap-2"
+>
+  🛡️ 스팸필터
+</button>
+<button 
   onClick={handleAiCampaignSend}
   disabled={isSending}
   className="flex-1 py-3 bg-green-700 text-white rounded-lg hover:bg-green-800 flex items-center justify-center gap-2"
@@ -2582,19 +2600,36 @@ const campaignData = {
                 {/* MMS 이미지 미리보기 */}
                 {mmsUploadedImages.length > 0 && (
                   <div>
-                    <div className="text-sm text-gray-600 mb-2">🖼️ 첨부 이미지 ({mmsUploadedImages.length}장)</div>
-                    <div className="flex gap-3 mb-2">
-                      {mmsUploadedImages.map((img, idx) => (
-                        <img
-                          key={idx}
-                          src={img.url}
-                          alt={`MMS ${idx + 1}`}
-                          className="w-20 h-20 object-cover rounded-lg border shadow-sm"
-                          crossOrigin="use-credentials"
-                        />
-                      ))}
+                    <div className="text-sm text-gray-600 mb-2">🖼️ MMS 미리보기</div>
+                    <div className="flex justify-center">
+                      <div className="rounded-[1.8rem] p-[3px] bg-gradient-to-b from-purple-400 to-purple-600 shadow-lg shadow-purple-200">
+                        <div className="bg-white rounded-[1.6rem] overflow-hidden flex flex-col w-[280px]" style={{ height: '420px' }}>
+                          <div className="px-4 py-2.5 bg-gradient-to-r from-gray-50 to-gray-100 flex justify-between items-center shrink-0 border-b">
+                            <span className="text-[11px] text-gray-400 font-medium">문자메시지</span>
+                            <span className="text-[11px] font-bold text-purple-600">{useIndividualCallback ? '매장번호' : (selectedCallback || '회신번호')}</span>
+                          </div>
+                          {selectedChannel === 'LMS' || selectedChannel === 'MMS' ? (
+                            <div className="px-4 py-2 bg-orange-50 border-b border-orange-200 shrink-0">
+                              <span className="text-sm font-bold text-orange-700">{aiResult?.messages?.[0]?.subject || 'LMS 제목'}</span>
+                            </div>
+                          ) : null}
+                          <div className="shrink-0">
+                            {mmsUploadedImages.map((img, idx) => (
+                              <img key={idx} src={img.url} alt="" className="w-full h-auto max-h-[120px] object-cover" />
+                            ))}
+                          </div>
+                          <div className="flex-1 overflow-y-auto p-3 bg-gradient-to-b from-purple-50/30 to-white">
+                            <div className="flex gap-2">
+                              <div className="w-7 h-7 rounded-full bg-purple-100 flex items-center justify-center shrink-0 text-xs">📱</div>
+                              <div className="bg-white rounded-2xl rounded-tl-sm p-3 shadow-sm border border-gray-100 text-[13px] leading-[1.7] whitespace-pre-wrap text-gray-700 max-w-[95%]">
+                                {aiResult?.messages?.[0]?.message_text || '메시지 없음'}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
                     </div>
-                    <div className="text-xs text-amber-600 bg-amber-50 rounded-lg p-2">
+                    <div className="text-xs text-amber-600 bg-amber-50 rounded-lg p-2 mt-2 text-center">
                       ⚠️ 실제 수신 화면은 이통사 및 휴대폰 기종에 따라 다르게 보일 수 있습니다
                     </div>
                   </div>
@@ -2739,7 +2774,7 @@ const campaignData = {
                               src={img.url}
                               alt={`이미지 ${slotIdx + 1}`}
                               className="w-full h-full object-cover"
-                              crossOrigin="use-credentials"
+                             
                             />
                             <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center">
                               <button
@@ -4338,7 +4373,7 @@ const campaignData = {
                         {mmsUploadedImages.length > 0 ? (
                           <div className="flex items-center gap-1">
                             {mmsUploadedImages.map((img, idx) => (
-                              <img key={idx} src={img.url} alt="" className="w-10 h-10 object-cover rounded border" crossOrigin="use-credentials" />
+                              <img key={idx} src={img.url} alt="" className="w-10 h-10 object-cover rounded border" />
                             ))}
                             <span className="text-xs text-purple-600 ml-1">✏️ 수정</span>
                           </div>
@@ -4868,7 +4903,7 @@ const campaignData = {
                           {mmsUploadedImages.length > 0 ? (
                             <div className="flex items-center gap-1">
                               {mmsUploadedImages.map((img, idx) => (
-                                <img key={idx} src={img.url} alt="" className="w-10 h-10 object-cover rounded border" crossOrigin="use-credentials" />
+                                <img key={idx} src={img.url} alt="" className="w-10 h-10 object-cover rounded border" />
                               ))}
                               <span className="text-xs text-purple-600 ml-1">✏️ 수정</span>
                             </div>
@@ -5303,7 +5338,7 @@ const campaignData = {
                       setDirectRecipients([]);
                       setDirectMessage('');
                       setDirectSubject('');
-                      setMmsUploadedImages([]);
+                      setMmsImages([]);
                       setSelectedRecipients(new Set());
                       setSelectedCallback('');
                     }}
@@ -6447,7 +6482,7 @@ const campaignData = {
                   {mmsUploadedImages.length > 0 && (
                     <div className="shrink-0">
                       {mmsUploadedImages.map((img, idx) => (
-                        <img key={idx} src={img.url} alt="" className="w-full h-auto max-h-[140px] object-cover" crossOrigin="use-credentials" />
+                        <img key={idx} src={img.url} alt="" className="w-full h-auto max-h-[140px] object-cover" />
                       ))}
                     </div>
                   )}
