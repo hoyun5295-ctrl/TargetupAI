@@ -33,9 +33,7 @@ export default function CompanyDashboard() {
           <div className="flex items-center justify-between h-14">
             {/* 로고 */}
             <div className="flex items-center gap-3">
-              <h1 className="text-xl font-bold text-gray-900">
-                Target<span className="text-blue-600">-UP</span>
-              </h1>
+              <img src="/logo.png" alt="한줄로" className="h-8" />
               <span className="hidden sm:inline px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full text-xs font-medium">
                 관리자
               </span>
