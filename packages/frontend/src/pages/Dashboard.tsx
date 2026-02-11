@@ -879,11 +879,12 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
   const loadRecentCampaigns = async () => {
     try {
       const token = localStorage.getItem('token');
-      const res = await fetch('/api/campaigns?limit=5', {
+      const res = await fetch('/api/campaigns?limit=10', {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
-      setRecentCampaigns(data.campaigns || []);
+      const campaigns = (data.campaigns || []).filter((c: any) => c.status !== 'draft');
+      setRecentCampaigns(campaigns.slice(0, 5));
     } catch (error) {
       console.error('최근 캠페인 로드 실패:', error);
     }
@@ -2432,11 +2433,6 @@ const campaignData = {
               </div>
 
               <div className="p-6 border-t space-y-3">
-                {testSentResult && (
-                  <div className={`p-3 rounded-lg text-sm whitespace-pre-wrap ${testSentResult.startsWith('✅') ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
-                    {testSentResult}
-                  </div>
-                )}
                 {testSentResult && (
                   <div className={`p-3 rounded-lg text-sm whitespace-pre-wrap mb-3 ${testSentResult.startsWith('✅') ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
                     {testSentResult}
