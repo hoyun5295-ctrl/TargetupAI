@@ -212,7 +212,7 @@ export default function LoginPage() {
           <div className="text-center mb-8">
           {isSuperAdminOnly ? (
               <>
-                <img src="/logo.png" alt="한줄로" className="h-16 mx-auto rounded-lg" />
+                <img src="/logo.png" alt="한줄로" className="h-10 mx-auto" />
                 <p className="mt-3 text-sm text-gray-500">시스템 관리</p>
               </>
             ) : (
