@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useAuthStore } from '../stores/authStore';
+import { formatDateTime } from '../utils/formatDate';
 
 interface Campaign {
   id: string;
@@ -265,7 +266,7 @@ export default function CalendarPage() {
                     <div className="flex items-center">
                       <span className="text-sm text-gray-500 w-16">예약</span>
                       <span className="font-medium">
-                        {new Date(selectedCampaign.scheduled_at).toLocaleString('ko-KR')}
+                      {formatDateTime(selectedCampaign.scheduled_at)}
                       </span>
                     </div>
                   )}

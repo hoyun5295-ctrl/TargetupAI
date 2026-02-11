@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
+import { formatDate } from '../utils/formatDate';
 
 interface Plan {
   id: string;
@@ -181,7 +182,7 @@ export default function PricingPage() {
                 </div>
                 {companyInfo.plan_code === 'FREE' && !companyInfo.is_trial_expired && (
                   <p className="text-sm text-gray-500 mt-1">
-                    체험 기간: {new Date(companyInfo.trial_expires_at).toLocaleDateString('ko-KR')}까지 
+                    체험 기간: {formatDate(companyInfo.trial_expires_at)}까지 
                     <span className="text-orange-600 font-medium ml-1">
                       (D-{Math.max(0, Math.ceil((new Date(companyInfo.trial_expires_at).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)))})
                     </span>

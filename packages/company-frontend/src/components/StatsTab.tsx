@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { manageStatsApi } from '../api/client';
 import Toast from './Toast';
+import { formatDateTime } from '../utils/formatDate';
 
 export default function StatsTab() {
   const [view, setView] = useState<'daily' | 'monthly'>('daily');
@@ -310,7 +311,7 @@ export default function StatsTab() {
                               </span>
                             </td>
                             <td className="px-3 py-2 text-gray-500 text-xs">
-                              {t.sentAt ? new Date(t.sentAt).toLocaleString('ko-KR') : '-'}
+                            {formatDateTime(t.sentAt)}
                             </td>
                           </tr>
                         ))}

@@ -2,6 +2,7 @@
 import { useNavigate } from 'react-router-dom';
 import { customersApi, campaignsApi, aiApi } from '../api/client';
 import { useAuthStore } from '../stores/authStore';
+import { formatDateTime, formatDate } from '../utils/formatDate';
 import ResultsModal from '../components/ResultsModal';
 import CustomerDBModal from '../components/CustomerDBModal';
 import { Users, CheckCircle, UserCircle, Star, Send, TrendingUp, Rocket, Upload, Calendar, BarChart3, Settings, Ban, LogOut, Sparkles, Clock, LayoutGrid, Lightbulb, PieChart, FileText, Activity } from 'lucide-react';
@@ -296,7 +297,7 @@ function CalendarModal({ onClose, token }: { onClose: () => void; token: string 
                       <span className="text-gray-500 w-16">예약</span>
                       <span className="font-medium text-blue-600">
                         {new Date(selectedCampaign.scheduled_at).toLocaleString('ko-KR', {
-                          month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+                          timeZone: 'Asia/Seoul', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
                         })}
                       </span>
                     </div>
@@ -308,7 +309,7 @@ function CalendarModal({ onClose, token }: { onClose: () => void; token: string 
                       <span className="text-gray-500 w-16">발송</span>
                       <span className="font-medium">
                         {new Date(selectedCampaign.sent_at).toLocaleString('ko-KR', {
-                          month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+                          timeZone: 'Asia/Seoul', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
                         })}
                       </span>
                     </div>
@@ -1317,7 +1318,7 @@ const handleAiCampaignSend = async () => {
     // AI 추천 캠페인명 우선 사용, 없으면 메시지에서 추출
 const msgContent = selectedMsg.message_text || '';
 const nameMatch = msgContent.match(/\][\s]*(.+?)[\s]*[\n\r]/);
-const extractedName = nameMatch ? nameMatch[1].replace(/[^\w가-힣\s]/g, '').trim().slice(0, 30) : `캠페인_${new Date().toLocaleDateString('ko-KR')}`;
+const extractedName = nameMatch ? nameMatch[1].replace(/[^\w가-힣\s]/g, '').trim().slice(0, 30) : `캠페인_${formatDate(new Date().toISOString())}`;
 const autoName = aiResult?.suggestedCampaignName || extractedName;
 
 const campaignData = {
@@ -1354,7 +1355,7 @@ const campaignData = {
     // 성공 모달용 발송 정보 저장 (초기화 전에!)
     const sendInfoText = sendTimeOption === 'now' ? '즉시 발송 완료' : 
                          sendTimeOption === 'ai' ? `예약 완료 (${aiResult?.recommendedTime || 'AI 추천'})` :
-                         `예약 완료 (${customSendTime ? new Date(customSendTime).toLocaleString('ko-KR') : ''})`;
+                         `예약 완료 (${customSendTime ? formatDateTime(customSendTime) : ''})`;
     setSuccessSendInfo(sendInfoText);
     
     setSendTimeOption('ai');
@@ -2404,7 +2405,7 @@ const campaignData = {
                   <span className="font-medium">
                     {sendTimeOption === 'ai' ? (aiResult?.recommendedTime || 'AI 추천시간') : 
                      sendTimeOption === 'now' ? '즉시 발송' : 
-                     customSendTime ? new Date(customSendTime).toLocaleString('ko-KR') : '직접 선택'}
+                     customSendTime ? formatDateTime(customSendTime) : '직접 선택'}
                   </span>
                 </div>
               </div>
@@ -2520,7 +2521,7 @@ const campaignData = {
                             <span className="ml-2">📱 {c.message_type} · 👥 {c.target_count?.toLocaleString()}명</span>
                           </div>
                           <div>✅ 성공 {c.success_count?.toLocaleString() || 0} · ❌ 실패 {c.fail_count?.toLocaleString() || 0}</div>
-                          <div className="text-xs text-gray-400">{new Date(c.created_at).toLocaleString('ko-KR')}</div>
+                          <div className="text-xs text-gray-400">{formatDateTime(c.created_at)}</div>
                         </div>
                       </div>
                     ))}
@@ -3443,7 +3444,7 @@ const campaignData = {
                           📱 {c.message_type} · 👥 {c.target_count?.toLocaleString()}명
                         </div>
                         <div className="text-xs text-blue-600 mt-1">
-                          ⏰ {c.scheduled_at ? new Date(c.scheduled_at).toLocaleString('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-'}
+                          ⏰ {c.scheduled_at ? new Date(c.scheduled_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-'}
                         </div>
                       </div>
                     ))
@@ -4067,7 +4068,7 @@ const campaignData = {
                           onClick={() => reserveEnabled && setShowReservePicker(true)}
                         >
                           {reserveDateTime 
-                            ? new Date(reserveDateTime).toLocaleString('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+                            ? new Date(reserveDateTime).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
                             : '예약시간 선택'}
                         </div>
                       </div>
@@ -4407,6 +4408,7 @@ const campaignData = {
                   <span className="text-sm text-gray-600">예약 시간: </span>
                   <span className="text-sm font-bold text-blue-700">
                     {new Date(reserveDateTime).toLocaleString('ko-KR', {
+                      timeZone: 'Asia/Seoul',
                       year: 'numeric',
                       month: 'long',
                       day: 'numeric',
@@ -4662,7 +4664,7 @@ const campaignData = {
                           onClick={() => reserveEnabled && setShowReservePicker(true)}
                         >
                           {reserveDateTime 
-                            ? new Date(reserveDateTime).toLocaleString('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+                            ? new Date(reserveDateTime).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
                             : '예약시간 선택'}
                         </div>
                       </div>
@@ -5795,6 +5797,7 @@ const campaignData = {
                           <span className="text-sm text-gray-600">예약 시간: </span>
                           <span className="text-sm font-bold text-blue-700">
                             {new Date(reserveDateTime).toLocaleString('ko-KR', {
+                              timeZone: 'Asia/Seoul',
                               year: 'numeric',
                               month: 'long',
                               day: 'numeric',
@@ -5970,6 +5973,7 @@ const campaignData = {
                     <span className="text-gray-500">예약 시간</span>
                     <span className="font-bold text-blue-600">
                       {new Date(sendConfirm.dateTime).toLocaleString('ko-KR', {
+                        timeZone: 'Asia/Seoul',
                         year: 'numeric',
                         month: 'long',
                         day: 'numeric',

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { manageCallbacksApi } from '../api/client';
 import CustomModal from './CustomModal';
 import Toast from './Toast';
+import { formatDate } from '../utils/formatDate';
 
 interface CallbackNumber {
   id: string;
@@ -190,7 +191,7 @@ export default function CallbacksTab() {
                     )}
                   </td>
                   <td className="px-4 py-3 text-gray-500 text-xs">
-                    {n.created_at ? new Date(n.created_at).toLocaleDateString('ko-KR') : '-'}
+                  {formatDate(n.created_at)}
                   </td>
                   <td className="px-4 py-3 text-center">
                     {allowSelfRegister ? (

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { formatDate } from '../utils/formatDate';
 
 interface CustomerDBModalProps {
   onClose: () => void;
@@ -127,16 +128,16 @@ export default function CustomerDBModal({ onClose, token }: CustomerDBModalProps
     { key: 'phone', label: '전화번호', format: formatPhone },
     { key: 'gender', label: '성별', format: (v) => v === 'M' || v === '남' ? '남성' : v === 'F' || v === '여' ? '여성' : v || '-' },
     { key: 'age', label: '나이', format: (v) => v ? `${v}세` : '-' },
-    { key: 'birth_date', label: '생년월일', format: (v) => v ? new Date(v).toLocaleDateString('ko-KR') : '-' },
+    { key: 'birth_date', label: '생년월일', format: (v) => formatDate(v) },
     { key: 'email', label: '이메일' },
     { key: 'grade', label: '등급' },
     { key: 'region', label: '지역' },
     { key: 'store_code', label: '매장코드' },
     { key: 'points', label: '포인트', format: (v) => v != null ? Number(v).toLocaleString() : '-' },
     { key: 'total_purchase_amount', label: '총구매금액', format: (v) => v != null ? `${Number(v).toLocaleString()}원` : '-' },
-    { key: 'recent_purchase_date', label: '최근구매일', format: (v) => v ? new Date(v).toLocaleDateString('ko-KR') : '-' },
+    { key: 'recent_purchase_date', label: '최근구매일', format: (v) => formatDate(v) },
     { key: 'sms_opt_in', label: '수신동의', format: (v) => v === true || v === 'Y' ? '동의' : '거부' },
-    { key: 'created_at', label: '등록일', format: (v) => v ? new Date(v).toLocaleDateString('ko-KR') : '-' },
+    { key: 'created_at', label: '등록일', format: (v) => formatDate(v) },
   ];
 
   return (

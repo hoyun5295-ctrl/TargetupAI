@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { manageUsersApi } from '../api/client';
 import CustomModal from './CustomModal';
 import Toast from './Toast';
+import { formatDateTime } from '../utils/formatDate';
 
 interface User {
   id: string;
@@ -269,7 +270,7 @@ export default function UsersTab() {
                   <td className="px-4 py-3 text-gray-600">{u.phone || u.email || '-'}</td>
                   <td className="px-4 py-3">{statusBadge(u.status)}</td>
                   <td className="px-4 py-3 text-gray-500 text-xs">
-                    {u.last_login_at ? new Date(u.last_login_at).toLocaleString('ko-KR') : '-'}
+                  {formatDateTime(u.last_login_at)}
                   </td>
                   <td className="px-4 py-3 text-center">
                     <div className="flex justify-center gap-1">

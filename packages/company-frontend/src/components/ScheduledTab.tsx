@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { manageScheduledApi } from '../api/client';
 import CustomModal from './CustomModal';
 import Toast from './Toast';
+import { formatDateTime } from '../utils/formatDate';
 
 interface Campaign {
   id: string;
@@ -133,7 +134,7 @@ export default function ScheduledTab() {
 
   const formatDate = (d: string) => {
     if (!d) return '-';
-    return new Date(d).toLocaleString('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+    return new Date(d).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
   };
 
   if (loading) return <div className="p-8 text-center text-gray-500">로딩 중...</div>;

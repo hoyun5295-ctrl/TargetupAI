@@ -176,7 +176,7 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
 
   const formatDateTime = (dt: string) => {
     if (!dt) return '-';
-    return new Date(dt).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    return new Date(dt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
   };
 
   const formatPhone = (phone: string) => {
@@ -360,16 +360,16 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
                           <td className="px-3 py-2.5 text-center text-xs text-gray-600">{c.created_by_name || '-'}</td>
                           <td className="px-3 py-2.5 max-w-[200px] truncate text-gray-700">{c.message_content}</td>
                           <td className="px-3 py-2.5 text-center text-xs text-gray-500">
-                            {new Date(c.created_at).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                          {new Date(c.created_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
                           </td>
                           <td className="px-3 py-2.5 text-center text-xs">
                             {c.scheduled_at ? (
                               <span className="text-blue-600">
-                                {new Date(c.scheduled_at).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                                {new Date(c.scheduled_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
                                 <span className="text-[10px] ml-1 text-blue-400">(예약)</span>
                               </span>
                             ) : c.sent_at ? (
-                              <span className="text-gray-500">{new Date(c.sent_at).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
+                              <span className="text-gray-500">{new Date(c.sent_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
                             ) : '-'}
                           </td>
                           <td className="px-3 py-2.5 text-center">
@@ -517,7 +517,7 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
                           .map((t: any) => (
                           <tr key={t.id} className="border-t hover:bg-gray-50">
                             <td className="px-3 py-2 text-xs text-gray-500">
-                              {new Date(t.sentAt).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                            {new Date(t.sentAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
                             </td>
                             <td className="px-3 py-2 text-xs text-gray-700">{t.senderName || '-'}</td>
                             <td className="px-3 py-2">
@@ -675,8 +675,8 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
                         { label: '회신번호', value: selectedCampaign.callback_number || '-' },
                         { label: '전송건수', value: `${(selectedCampaign.target_count || selectedCampaign.sent_count || 0).toLocaleString()}건` },
                         { label: '성공 / 실패', value: `${(selectedCampaign.success_count || 0).toLocaleString()} / ${(selectedCampaign.fail_count || 0).toLocaleString()}` },
-                        { label: '등록일시', value: new Date(selectedCampaign.created_at).toLocaleString('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) },
-                        { label: '발송일시', value: selectedCampaign.sent_at ? new Date(selectedCampaign.sent_at).toLocaleString('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : selectedCampaign.scheduled_at ? `${new Date(selectedCampaign.scheduled_at).toLocaleString('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })} (예약)` : '-' },
+                        { label: '등록일시', value: new Date(selectedCampaign.created_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) },
+                        { label: '발송일시', value: selectedCampaign.sent_at ? new Date(selectedCampaign.sent_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : selectedCampaign.scheduled_at ? `${new Date(selectedCampaign.scheduled_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })} (예약)` : '-' },
                       ].map(row => (
                         <div key={row.label} className="flex px-4 py-2.5 text-sm">
                           <span className="w-24 flex-shrink-0 text-gray-500">{row.label}</span>

@@ -10,9 +10,13 @@ export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
 });
 
-// 연결 테스트
-pool.on('connect', () => {
-  console.log('✅ PostgreSQL 연결됨');
+// 서버 시작 시 timezone 확인 및 설정
+pool.query("SET timezone = 'Asia/Seoul'").then(() => {
+  return pool.query("SHOW timezone");
+}).then(res => {
+  console.log(`✅ PostgreSQL 연결됨 (timezone: ${res.rows[0].TimeZone})`);
+}).catch(err => {
+  console.error('❌ PostgreSQL 연결 실패:', err.message);
 });
 
 pool.on('error', (err) => {

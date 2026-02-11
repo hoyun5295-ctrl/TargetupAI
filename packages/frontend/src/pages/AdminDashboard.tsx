@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { companiesApi, plansApi, billingApi } from '../api/client';
 import { useAuthStore } from '../stores/authStore';
+import { formatDateTime, formatDate, formatDateTimeShort } from '../utils/formatDate';
 
 interface Company {
   id: string;
@@ -1669,7 +1670,7 @@ const handleApproveRequest = async (id: string) => {
                           {company.total_customers?.toLocaleString() || 0}
                         </td>
                         <td className="px-6 py-4 text-sm text-center text-gray-500">
-                          {new Date(company.created_at).toLocaleDateString()}
+                          {formatDate(company.created_at)}
                         </td>
                         <td className="px-6 py-4 text-center">
                           <button 
@@ -1852,7 +1853,7 @@ const handleApproveRequest = async (id: string) => {
                                     </td>
                                     <td className="px-6 py-3 text-center">{getStatusBadge(u.status)}</td>
                                     <td className="px-6 py-3 text-sm text-center text-gray-500">
-                                      {u.last_login_at ? new Date(u.last_login_at).toLocaleString() : '-'}
+                                      {u.last_login_at ? formatDateTime(u.last_login_at) : '-'}
                                     </td>
                                     <td className="px-6 py-3 text-center">
                                       <button 
@@ -1947,10 +1948,10 @@ const handleApproveRequest = async (id: string) => {
                           {campaign.target_count?.toLocaleString() || 0}명
                         </td>
                         <td className="px-6 py-4 text-sm text-center text-gray-500">
-                          {campaign.created_at ? new Date(campaign.created_at).toLocaleString('ko-KR') : '-'}
+                          {campaign.created_at ? formatDateTime(campaign.created_at) : '-'}
                         </td>
                         <td className="px-6 py-4 text-sm text-center text-gray-500">
-                          {campaign.scheduled_at ? new Date(campaign.scheduled_at).toLocaleString('ko-KR') : '-'}
+                          {campaign.scheduled_at ? formatDateTime(campaign.scheduled_at) : '-'}
                         </td>
                         <td className="px-6 py-4 text-center">
                           {campaign.status === 'scheduled' ? (
@@ -2106,7 +2107,7 @@ const handleApproveRequest = async (id: string) => {
                                         <button onClick={() => handleSetDefault(cb.id)} className="text-blue-600 hover:text-blue-800 text-xs">대표설정</button>
                                       )}
                                     </td>
-                                    <td className="px-6 py-3 text-sm text-center text-gray-500">{new Date(cb.created_at).toLocaleDateString()}</td>
+                                    <td className="px-6 py-3 text-sm text-center text-gray-500">{formatDate(cb.created_at)}</td>
                                     <td className="px-6 py-3 text-center">
                                       <button onClick={() => setEditingCallback({ id: cb.id, phone: cb.phone, label: cb.label || '' })} className="text-blue-600 hover:text-blue-800 text-sm mr-2">수정</button>
                                       <button onClick={() => handleDeleteCallback(cb.id, cb.phone)} className="text-red-600 hover:text-red-800 text-sm">삭제</button>
@@ -2259,7 +2260,7 @@ const handleApproveRequest = async (id: string) => {
                       .map((req) => (
                       <tr key={req.id} className={`hover:bg-gray-50 ${req.status === 'pending' ? 'bg-yellow-50' : ''}`}>
                         <td className="px-6 py-4 text-sm text-center text-gray-600">
-                          {new Date(req.created_at).toLocaleString('ko-KR')}
+                          {formatDateTime(req.created_at)}
                         </td>
                         <td className="px-6 py-4 text-sm">
                           <div className="font-medium text-gray-900">{req.company_name}</div>
@@ -2315,7 +2316,7 @@ const handleApproveRequest = async (id: string) => {
                             <div className="text-xs text-gray-500">
                               <div>{req.processed_by_name || '-'}</div>
                               {req.processed_at && (
-                                <div>{new Date(req.processed_at).toLocaleDateString('ko-KR')}</div>
+                                <div>{formatDate(req.processed_at)}</div>
                               )}
                               {req.admin_note && (
                                 <div className="text-red-600 mt-1" title={req.admin_note}>
@@ -2413,7 +2414,7 @@ const handleApproveRequest = async (id: string) => {
                     depositRequests.map((dr) => (
                       <tr key={dr.id} className={`hover:bg-gray-50 ${dr.status === 'pending' ? 'bg-yellow-50' : ''}`}>
                         <td className="px-6 py-4 text-sm text-center text-gray-600">
-                          {new Date(dr.created_at).toLocaleString('ko-KR')}
+                          {formatDateTime(dr.created_at)}
                         </td>
                         <td className="px-6 py-4 text-sm">
                           <div className="font-medium text-gray-900">{dr.company_name}</div>
@@ -2475,7 +2476,7 @@ const handleApproveRequest = async (id: string) => {
                             <div className="text-xs text-gray-500">
                               <div>{dr.confirmed_by_name || '-'}</div>
                               {dr.confirmed_at && (
-                                <div>{new Date(dr.confirmed_at).toLocaleDateString('ko-KR')}</div>
+                                <div>{formatDate(dr.confirmed_at)}</div>
                               )}
                               {dr.admin_note && (
                                 <div className="text-gray-600 mt-1" title={dr.admin_note}>
@@ -2607,10 +2608,10 @@ const handleApproveRequest = async (id: string) => {
                       <td className="px-4 py-3 text-center text-green-600 font-medium">{(parseInt(c.total_success) || 0).toLocaleString()}</td>
                       <td className="px-4 py-3 text-center text-red-600">{(parseInt(c.total_fail) || 0).toLocaleString()}</td>
                       <td className="px-4 py-3 text-center text-gray-500 text-xs">
-                        {c.last_sent_at ? new Date(c.last_sent_at).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '-'}
+                        {c.last_sent_at ? formatDateTimeShort(c.last_sent_at) : '-'}
                       </td>
                       <td className="px-4 py-3 text-center text-gray-500 text-xs">
-                        {new Date(c.created_at).toLocaleDateString('ko-KR')}
+                        {formatDate(c.created_at)}
                       </td>
                     </tr>
                   ))}
@@ -4415,7 +4416,7 @@ const handleApproveRequest = async (id: string) => {
                                 </span>
                               </td>
                               <td className="px-4 py-2.5 text-center text-gray-500 font-mono text-xs">
-                                {c.sent_at ? new Date(c.sent_at).toLocaleString('ko-KR', { hour: '2-digit', minute: '2-digit' }) : '-'}
+                                {c.sent_at ? new Date(c.sent_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit' }) : '-'}
                               </td>
                             </tr>
                           ))}
@@ -4555,9 +4556,9 @@ const handleApproveRequest = async (id: string) => {
                         <td className="px-4 py-2.5 text-center">{billingStatusBadge(b.status)}</td>
                         <td className="px-4 py-2.5 text-center text-xs text-gray-500">
                           {b.emailed_at ? (
-                            <span className="inline-flex items-center gap-1 text-green-600" title={`${b.emailed_to}\n${new Date(b.emailed_at).toLocaleString('ko-KR')}`}>
+                            <span className="inline-flex items-center gap-1 text-green-600" title={`${b.emailed_to}\n${formatDateTime(b.emailed_at)}`}>
                               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                              {new Date(b.emailed_at).toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric' })}
+                              {new Date(b.emailed_at).toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric' })}
                             </span>
                           ) : (
                             <span className="text-gray-300">—</span>
@@ -4736,7 +4737,7 @@ const handleApproveRequest = async (id: string) => {
                         {detailBilling.emailed_at && (
                           <p className="text-xs text-green-600 mt-1 flex items-center gap-1">
                             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                            {new Date(detailBilling.emailed_at).toLocaleString('ko-KR')} · {detailBilling.emailed_to}로 발송됨
+                            {formatDateTime(detailBilling.emailed_at)} · {detailBilling.emailed_to}로 발송됨
                           </p>
                         )}
                       </div>
@@ -4929,7 +4930,7 @@ const handleApproveRequest = async (id: string) => {
                   {emailTarget.emailed_at && (
                     <div className="bg-green-50 border border-green-200 rounded-lg px-3 py-2 mb-4 text-xs text-green-700 flex items-center gap-1.5">
                       <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                      이전 발송: {new Date(emailTarget.emailed_at).toLocaleString('ko-KR')} → {emailTarget.emailed_to}
+                      이전 발송: {formatDateTime(emailTarget.emailed_at)} → {emailTarget.emailed_to}
                     </div>
                   )}
 
@@ -5183,7 +5184,7 @@ const handleApproveRequest = async (id: string) => {
                       <tbody className="divide-y">
                         {(syncAgentDetail.recent_logs || []).map((log: any) => (
                           <tr key={log.id} className="hover:bg-gray-50">
-                            <td className="px-3 py-2 text-gray-500">{log.started_at ? new Date(log.started_at).toLocaleString('ko-KR', { month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' }) : '-'}</td>
+                            <td className="px-3 py-2 text-gray-500">{log.started_at ? formatDateTimeShort(log.started_at) : '-'}</td>
                             <td className="px-3 py-2">
                               <span className={`px-1.5 py-0.5 rounded text-xs ${log.sync_type === 'customers' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>
                                 {log.sync_type === 'customers' ? '고객' : '구매'}

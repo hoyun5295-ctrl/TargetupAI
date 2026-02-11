@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { formatDateTime } from '../utils/formatDate';
 
 export default function Unsubscribes() {
   const navigate = useNavigate();
@@ -274,7 +275,7 @@ export default function Unsubscribes() {
                       </span>
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-500">
-                      {new Date(item.created_at).toLocaleString('ko-KR')}
+                    {formatDateTime(item.created_at)}
                     </td>
                     <td className="px-4 py-3 text-center">
                       <button
