@@ -732,12 +732,12 @@ router.get('/stats/send', authenticate, requireSuperAdmin, async (req: Request, 
     let paramIdx = 1;
 
     if (startDate) {
-      dateWhere += ` AND cr.sent_at >= $${paramIdx}::date`;
+      dateWhere += ` AND c.sent_at >= $${paramIdx}::date`;
       baseParams.push(startDate);
       paramIdx++;
     }
     if (endDate) {
-      dateWhere += ` AND cr.sent_at < ($${paramIdx}::date + INTERVAL '1 day')`;
+      dateWhere += ` AND c.sent_at < ($${paramIdx}::date + INTERVAL '1 day')`;
       baseParams.push(endDate);
       paramIdx++;
     }
@@ -748,30 +748,30 @@ router.get('/stats/send', authenticate, requireSuperAdmin, async (req: Request, 
       paramIdx++;
     }
 
-    // 1) 요약
+    // 1) 요약 (campaigns 직접 조회 - 직접발송 포함)
     const summaryResult = await query(`
       SELECT 
-        COALESCE(SUM(cr.sent_count), 0) as total_sent,
-        COALESCE(SUM(cr.success_count), 0) as total_success,
-        COALESCE(SUM(cr.fail_count), 0) as total_fail
-      FROM campaign_runs cr
-      JOIN campaigns c ON cr.campaign_id = c.id
-      WHERE cr.sent_at IS NOT NULL ${dateWhere} ${companyWhere}
+        COALESCE(SUM(c.sent_count), 0) as total_sent,
+        COALESCE(SUM(c.success_count), 0) as total_success,
+        COALESCE(SUM(c.fail_count), 0) as total_fail
+      FROM campaigns c
+      WHERE c.sent_at IS NOT NULL
+        AND c.status IN ('completed', 'sent', 'sending') ${dateWhere} ${companyWhere}
     `, baseParams);
 
     // 2) 페이징된 일별/월별
     const groupCol = view === 'monthly'
-      ? `TO_CHAR(cr.sent_at AT TIME ZONE 'Asia/Seoul', 'YYYY-MM')`
-      : `TO_CHAR(cr.sent_at AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD')`;
+      ? `TO_CHAR(c.sent_at AT TIME ZONE 'Asia/Seoul', 'YYYY-MM')`
+      : `TO_CHAR(c.sent_at AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD')`;
     const groupAlias = view === 'monthly' ? 'month' : 'date';
 
     const countResult = await query(`
       SELECT COUNT(*) FROM (
         SELECT ${groupCol} as grp, co.company_name
-        FROM campaign_runs cr
-        JOIN campaigns c ON cr.campaign_id = c.id
+        FROM campaigns c
         JOIN companies co ON c.company_id = co.id
-        WHERE cr.sent_at IS NOT NULL ${dateWhere} ${companyWhere}
+        WHERE c.sent_at IS NOT NULL
+          AND c.status IN ('completed', 'sent', 'sending') ${dateWhere} ${companyWhere}
         GROUP BY grp, co.company_name
       ) sub
     `, baseParams);
@@ -782,14 +782,14 @@ router.get('/stats/send', authenticate, requireSuperAdmin, async (req: Request, 
         ${groupCol} as "${groupAlias}",
         co.id as company_id,
         co.company_name,
-        COUNT(DISTINCT cr.id) as runs,
-        COALESCE(SUM(cr.sent_count), 0) as sent,
-        COALESCE(SUM(cr.success_count), 0) as success,
-        COALESCE(SUM(cr.fail_count), 0) as fail
-      FROM campaign_runs cr
-      JOIN campaigns c ON cr.campaign_id = c.id
+        COUNT(DISTINCT c.id) as runs,
+        COALESCE(SUM(c.sent_count), 0) as sent,
+        COALESCE(SUM(c.success_count), 0) as success,
+        COALESCE(SUM(c.fail_count), 0) as fail
+      FROM campaigns c
       JOIN companies co ON c.company_id = co.id
-      WHERE cr.sent_at IS NOT NULL ${dateWhere} ${companyWhere}
+      WHERE c.sent_at IS NOT NULL
+        AND c.status IN ('completed', 'sent', 'sending') ${dateWhere} ${companyWhere}
       GROUP BY ${groupCol}, co.id, co.company_name
       ORDER BY "${groupAlias}" DESC, co.company_name
       LIMIT $${paramIdx} OFFSET $${paramIdx + 1}
@@ -820,10 +820,10 @@ router.get('/stats/send/detail', authenticate, requireSuperAdmin, async (req: Re
     }
 
     const groupCol = view === 'monthly'
-      ? `TO_CHAR(cr.sent_at AT TIME ZONE 'Asia/Seoul', 'YYYY-MM')`
-      : `TO_CHAR(cr.sent_at AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD')`;
+      ? `TO_CHAR(c.sent_at AT TIME ZONE 'Asia/Seoul', 'YYYY-MM')`
+      : `TO_CHAR(c.sent_at AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD')`;
 
-    // 사용자별 통계
+    // 사용자별 통계 (campaigns 직접 조회)
     const result = await query(`
       SELECT 
         u.id as user_id,
@@ -831,21 +831,21 @@ router.get('/stats/send/detail', authenticate, requireSuperAdmin, async (req: Re
         u.login_id,
         u.department,
         u.store_codes,
-        COUNT(DISTINCT cr.id) as runs,
-        COALESCE(SUM(cr.sent_count), 0) as sent,
-        COALESCE(SUM(cr.success_count), 0) as success,
-        COALESCE(SUM(cr.fail_count), 0) as fail
-      FROM campaign_runs cr
-      JOIN campaigns c ON cr.campaign_id = c.id
+        COUNT(DISTINCT c.id) as runs,
+        COALESCE(SUM(c.sent_count), 0) as sent,
+        COALESCE(SUM(c.success_count), 0) as success,
+        COALESCE(SUM(c.fail_count), 0) as fail
+      FROM campaigns c
       LEFT JOIN users u ON c.created_by = u.id
-      WHERE cr.sent_at IS NOT NULL
+      WHERE c.sent_at IS NOT NULL
+        AND c.status IN ('completed', 'sent', 'sending')
         AND ${groupCol} = $1
         AND c.company_id = $2
       GROUP BY u.id, u.name, u.login_id, u.department, u.store_codes
       ORDER BY sent DESC
     `, [dateVal, companyId]);
 
-    // 캠페인 상세 목록
+    // 캠페인 상세 목록 (campaigns 직접 조회)
     const campaignsResult = await query(`
       SELECT 
         c.id as campaign_id,
@@ -853,21 +853,21 @@ router.get('/stats/send/detail', authenticate, requireSuperAdmin, async (req: Re
         c.send_type,
         u.name as user_name,
         u.login_id,
-        cr.id as run_id,
-        cr.run_number,
-        cr.sent_count,
-        cr.success_count,
-        cr.fail_count,
-        cr.target_count,
-        cr.message_type,
-        cr.sent_at
-      FROM campaign_runs cr
-      JOIN campaigns c ON cr.campaign_id = c.id
+        c.id as run_id,
+        1 as run_number,
+        c.sent_count,
+        c.success_count,
+        c.fail_count,
+        c.target_count,
+        c.message_type,
+        c.sent_at
+      FROM campaigns c
       LEFT JOIN users u ON c.created_by = u.id
-      WHERE cr.sent_at IS NOT NULL
+      WHERE c.sent_at IS NOT NULL
+        AND c.status IN ('completed', 'sent', 'sending')
         AND ${groupCol} = $1
         AND c.company_id = $2
-      ORDER BY cr.sent_at DESC
+      ORDER BY c.sent_at DESC
     `, [dateVal, companyId]);
 
     res.json({
