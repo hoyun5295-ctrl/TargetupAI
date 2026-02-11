@@ -210,15 +210,15 @@ export default function LoginPage() {
       <div className="flex-1 flex items-center justify-center px-4">
         <div className="w-full max-w-sm">
           <div className="text-center mb-8">
-            {isSuperAdminOnly ? (
+          {isSuperAdminOnly ? (
               <>
-                <h1 className="text-3xl font-bold text-gray-900">한줄로</h1>
-                <p className="mt-2 text-sm text-gray-500">시스템 관리</p>
+                <img src="/logo.png" alt="한줄로" className="h-16 mx-auto rounded-lg" />
+                <p className="mt-3 text-sm text-gray-500">시스템 관리</p>
               </>
             ) : (
               <>
-                <h1 className="text-3xl font-bold text-gray-900">한줄로</h1>
-                <p className="mt-2 text-sm text-gray-500">AI 마케팅 자동화</p>
+                <img src="/logo.png" alt="한줄로" className="h-10 mx-auto" />
+                <p className="mt-3 text-sm text-gray-500">AI 마케팅 자동화</p>
               </>
             )}
           </div>

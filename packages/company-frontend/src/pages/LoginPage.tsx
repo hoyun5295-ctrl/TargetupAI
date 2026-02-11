@@ -45,10 +45,8 @@ export default function LoginPage() {
       <div className="w-full max-w-sm">
         {/* 로고 */}
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-gray-900">
-          한줄로
-          </h1>
-          <p className="mt-2 text-sm text-gray-500">사용자 관리</p>
+        <img src="/logo.png" alt="한줄로" className="h-16 mx-auto rounded-lg" />
+        <p className="mt-3 text-sm text-gray-500">사용자 관리</p>
         </div>
 
         {/* 로그인 폼 */}
