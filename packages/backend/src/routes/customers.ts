@@ -927,6 +927,208 @@ router.get('/enabled-fields', async (req: Request, res: Response) => {
   }
 });
 
+// ====== 고객 삭제 API ======
+
+// DELETE /api/customers/:id - 개별 삭제 (고객사관리자, 슈퍼관리자만)
+router.delete('/:id', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
+    const userType = req.user?.userType;
+    const { id } = req.params;
+
+    if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다' });
+    if (userType !== 'company_admin' && userType !== 'super_admin') {
+      return res.status(403).json({ error: '고객사 관리자 이상 권한이 필요합니다' });
+    }
+
+    // 삭제 대상 확인
+    const target = await query(
+      'SELECT id, name, phone FROM customers WHERE id = $1 AND company_id = $2 AND is_active = true',
+      [id, companyId]
+    );
+    if (target.rows.length === 0) {
+      return res.status(404).json({ error: '고객을 찾을 수 없습니다' });
+    }
+
+    const customer = target.rows[0];
+
+    // 연관 데이터 삭제 (purchases, consents)
+    await query('DELETE FROM purchases WHERE customer_id = $1 AND company_id = $2', [id, companyId]);
+    await query('DELETE FROM consents WHERE customer_id = $1', [id]);
+
+    // 고객 삭제 (하드 삭제)
+    await query('DELETE FROM customers WHERE id = $1 AND company_id = $2', [id, companyId]);
+
+    // 감사 로그
+    await query(
+      `INSERT INTO audit_logs (user_id, action, target_type, target_id, details, ip_address, user_agent)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [
+        userId,
+        'customer_delete',
+        'customer',
+        id,
+        JSON.stringify({ name: customer.name, phone: customer.phone, delete_type: 'individual' }),
+        req.ip,
+        req.headers['user-agent'] || ''
+      ]
+    );
+
+    res.json({ success: true, message: '고객이 삭제되었습니다', deletedCount: 1 });
+  } catch (error) {
+    console.error('고객 개별 삭제 에러:', error);
+    res.status(500).json({ error: '삭제 실패' });
+  }
+});
+
+// POST /api/customers/bulk-delete - 선택 삭제 (고객사관리자, 슈퍼관리자만)
+router.post('/bulk-delete', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
+    const userType = req.user?.userType;
+
+    if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다' });
+    if (userType !== 'company_admin' && userType !== 'super_admin') {
+      return res.status(403).json({ error: '고객사 관리자 이상 권한이 필요합니다' });
+    }
+
+    const { ids } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: '삭제할 고객 ID를 선택해주세요' });
+    }
+    if (ids.length > 1000) {
+      return res.status(400).json({ error: '한 번에 최대 1,000건까지 삭제할 수 있습니다' });
+    }
+
+    // 실제 존재하는 고객만 필터
+    const existing = await query(
+      'SELECT id, name, phone FROM customers WHERE id = ANY($1) AND company_id = $2 AND is_active = true',
+      [ids, companyId]
+    );
+    const validIds = existing.rows.map((r: any) => r.id);
+    if (validIds.length === 0) {
+      return res.status(404).json({ error: '삭제할 고객이 없습니다' });
+    }
+
+    // 연관 데이터 삭제
+    await query('DELETE FROM purchases WHERE customer_id = ANY($1) AND company_id = $2', [validIds, companyId]);
+    await query('DELETE FROM consents WHERE customer_id = ANY($1)', [validIds]);
+
+    // 고객 삭제
+    const deleteResult = await query(
+      'DELETE FROM customers WHERE id = ANY($1) AND company_id = $2',
+      [validIds, companyId]
+    );
+
+    // 감사 로그
+    await query(
+      `INSERT INTO audit_logs (user_id, action, target_type, target_id, details, ip_address, user_agent)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [
+        userId,
+        'customer_bulk_delete',
+        'customer',
+        null,
+        JSON.stringify({
+          delete_type: 'bulk',
+          requested_count: ids.length,
+          deleted_count: deleteResult.rowCount,
+          sample_phones: existing.rows.slice(0, 5).map((r: any) => r.phone)
+        }),
+        req.ip,
+        req.headers['user-agent'] || ''
+      ]
+    );
+
+    res.json({
+      success: true,
+      message: `${deleteResult.rowCount}명의 고객이 삭제되었습니다`,
+      deletedCount: deleteResult.rowCount
+    });
+  } catch (error) {
+    console.error('고객 선택 삭제 에러:', error);
+    res.status(500).json({ error: '삭제 실패' });
+  }
+});
+
+// POST /api/customers/delete-all - 전체 삭제 (슈퍼관리자만)
+router.post('/delete-all', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
+    const userType = req.user?.userType;
+
+    if (userType !== 'super_admin') {
+      return res.status(403).json({ error: '슈퍼관리자만 전체 삭제가 가능합니다' });
+    }
+
+    const { targetCompanyId, confirmCompanyName } = req.body;
+    const deleteCompanyId = targetCompanyId || companyId;
+
+    if (!deleteCompanyId) return res.status(400).json({ error: '회사 ID가 필요합니다' });
+    if (!confirmCompanyName) return res.status(400).json({ error: '회사명 확인이 필요합니다' });
+
+    // 회사명 확인
+    const companyResult = await query('SELECT company_name FROM companies WHERE id = $1', [deleteCompanyId]);
+    if (companyResult.rows.length === 0) {
+      return res.status(404).json({ error: '회사를 찾을 수 없습니다' });
+    }
+    if (companyResult.rows[0].company_name !== confirmCompanyName) {
+      return res.status(400).json({ error: '회사명이 일치하지 않습니다' });
+    }
+
+    // 삭제 전 건수 확인
+    const countResult = await query(
+      'SELECT COUNT(*) FROM customers WHERE company_id = $1 AND is_active = true',
+      [deleteCompanyId]
+    );
+    const totalCount = parseInt(countResult.rows[0].count);
+
+    if (totalCount === 0) {
+      return res.status(400).json({ error: '삭제할 고객 데이터가 없습니다' });
+    }
+
+    // 연관 데이터 삭제 (해당 회사 전체)
+    const purchaseResult = await query('DELETE FROM purchases WHERE company_id = $1', [deleteCompanyId]);
+    await query('DELETE FROM consents WHERE customer_id IN (SELECT id FROM customers WHERE company_id = $1)', [deleteCompanyId]);
+
+    // 고객 전체 삭제
+    const deleteResult = await query('DELETE FROM customers WHERE company_id = $1', [deleteCompanyId]);
+
+    // 감사 로그
+    await query(
+      `INSERT INTO audit_logs (user_id, action, target_type, target_id, details, ip_address, user_agent)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [
+        userId,
+        'customer_delete_all',
+        'company',
+        deleteCompanyId,
+        JSON.stringify({
+          delete_type: 'all',
+          company_name: confirmCompanyName,
+          deleted_customers: deleteResult.rowCount,
+          deleted_purchases: purchaseResult.rowCount
+        }),
+        req.ip,
+        req.headers['user-agent'] || ''
+      ]
+    );
+
+    res.json({
+      success: true,
+      message: `${deleteResult.rowCount}명의 고객 데이터가 전체 삭제되었습니다`,
+      deletedCount: deleteResult.rowCount,
+      deletedPurchases: purchaseResult.rowCount
+    });
+  } catch (error) {
+    console.error('고객 전체 삭제 에러:', error);
+    res.status(500).json({ error: '삭제 실패' });
+  }
+});
+
 // GET /api/customers/:id - 고객 상세 (⚠️ 반드시 맨 아래! 위의 라우트보다 뒤에 있어야 함)
 router.get('/:id', async (req: Request, res: Response) => {
   try {

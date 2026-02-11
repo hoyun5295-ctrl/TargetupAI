@@ -65,4 +65,11 @@ export const manageStatsApi = {
   sendDetail: (params: any) => api.get('/manage/stats/send/detail', { params }),
 };
 
+// 고객 DB 관리
+export const customersApi = {
+  list: (params?: any) => api.get('/customers', { params }),
+  deleteOne: (id: string) => api.delete(`/customers/${id}`),
+  bulkDelete: (ids: string[]) => api.post('/customers/bulk-delete', { ids }),
+};
+
 export default api;

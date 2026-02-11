@@ -220,6 +220,11 @@ const [detailItems, setDetailItems] = useState<any[]>([]);
 const [detailLoading, setDetailLoading] = useState(false);
 const [showBillingDeleteConfirm, setShowBillingDeleteConfirm] = useState(false);
 const [deleteTargetId, setDeleteTargetId] = useState('');
+
+// 고객 전체 삭제
+const [showCustomerDeleteAll, setShowCustomerDeleteAll] = useState(false);
+const [customerDeleteConfirmName, setCustomerDeleteConfirmName] = useState('');
+const [customerDeleteLoading, setCustomerDeleteLoading] = useState(false);
 const [invoices, setInvoices] = useState<any[]>([]);
 const [invoicesLoading, setInvoicesLoading] = useState(false);
 const [billingToast, setBillingToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
@@ -432,6 +437,30 @@ const handleBillingDelete = async () => {
     if (showBillingDetail && detailBilling?.id === deleteTargetId) setShowBillingDetail(false);
   } catch (e: any) { setBillingToast({ msg: e.response?.data?.error || '삭제 실패', type: 'error' }); }
 };
+
+// 고객 전체 삭제 실행
+const handleCustomerDeleteAll = async () => {
+  setCustomerDeleteLoading(true);
+  try {
+    const token = localStorage.getItem('token');
+    const res = await fetch('/api/customers/delete-all', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ targetCompanyId: editCompany.id, confirmCompanyName: customerDeleteConfirmName })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '삭제 실패');
+    setShowCustomerDeleteAll(false);
+    setCustomerDeleteConfirmName('');
+    showAlert('삭제 완료', `${data.deletedCount}명의 고객 데이터가 삭제되었습니다.\n구매내역 ${data.deletedPurchases}건도 함께 삭제되었습니다.`, 'success');
+    loadCompanies();
+  } catch (e: any) {
+    showAlert('오류', e.message || '삭제 실패', 'error');
+  } finally {
+    setCustomerDeleteLoading(false);
+  }
+};
+
 const downloadBillingPdf = async (id: string, label: string) => {
   try {
     const token = localStorage.getItem('token');
@@ -3379,6 +3408,24 @@ const handleApproveRequest = async (id: string) => {
                       onChange={(e) => setEditCompany({ ...editCompany, rejectNumber: e.target.value })}
                       className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" placeholder="080-000-0000" />
                   </div>
+
+                  {/* 고객 데이터 전체 삭제 */}
+                  <div className="mt-6 pt-4 border-t border-red-200">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="text-sm font-medium text-red-600 flex items-center gap-1.5">
+                          ⚠️ 고객 데이터 전체 삭제
+                        </div>
+                        <p className="text-xs text-gray-400 mt-0.5">해당 고객사의 모든 고객 및 구매내역이 영구 삭제됩니다</p>
+                      </div>
+                      <button
+                        onClick={() => { setCustomerDeleteConfirmName(''); setShowCustomerDeleteAll(true); }}
+                        className="px-4 py-2 bg-red-50 text-red-600 border border-red-200 rounded-lg text-sm font-medium hover:bg-red-100 transition"
+                      >
+                        전체 삭제
+                      </button>
+                    </div>
+                  </div>
                 </div>
               )}
 
@@ -4725,6 +4772,51 @@ const handleApproveRequest = async (id: string) => {
                     className="flex-1 px-4 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors border-r">취소</button>
                   <button onClick={handleBillingDelete}
                     className="flex-1 px-4 py-3 text-red-600 font-medium hover:bg-red-50 transition-colors">삭제</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ===== 고객 전체 삭제 확인 모달 ===== */}
+          {showCustomerDeleteAll && (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[60]">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in fade-in zoom-in duration-200">
+                <div className="p-6">
+                  <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-4">
+                    <svg className="w-6 h-6 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                    </svg>
+                  </div>
+                  <h3 className="text-lg font-semibold text-center text-gray-900 mb-2">⚠️ 고객 데이터 전체 삭제</h3>
+                  <p className="text-sm text-center text-gray-600 mb-1">
+                    <span className="font-bold text-red-600">{editCompany.companyName}</span>의
+                  </p>
+                  <p className="text-sm text-center text-gray-600 mb-4">
+                    모든 고객 데이터와 구매내역이 <span className="font-bold text-red-600">영구 삭제</span>됩니다.
+                  </p>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">
+                      확인을 위해 회사명을 정확히 입력해주세요
+                    </label>
+                    <input
+                      type="text"
+                      value={customerDeleteConfirmName}
+                      onChange={(e) => setCustomerDeleteConfirmName(e.target.value)}
+                      placeholder={editCompany.companyName}
+                      className="w-full px-3 py-2 border border-red-200 rounded-lg text-sm focus:ring-2 focus:ring-red-500 outline-none"
+                    />
+                  </div>
+                </div>
+                <div className="flex border-t">
+                  <button onClick={() => { setShowCustomerDeleteAll(false); setCustomerDeleteConfirmName(''); }}
+                    className="flex-1 px-4 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors border-r">취소</button>
+                  <button
+                    onClick={handleCustomerDeleteAll}
+                    disabled={customerDeleteConfirmName !== editCompany.companyName || customerDeleteLoading}
+                    className="flex-1 px-4 py-3 text-red-600 font-bold hover:bg-red-50 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                  >
+                    {customerDeleteLoading ? '삭제 중...' : '전체 삭제'}
+                  </button>
                 </div>
               </div>
             </div>

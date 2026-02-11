@@ -5,14 +5,16 @@ import UsersTab from '../components/UsersTab';
 import CallbacksTab from '../components/CallbacksTab';
 import ScheduledTab from '../components/ScheduledTab';
 import StatsTab from '../components/StatsTab';
+import CustomersTab from '../components/CustomersTab';
 
-type Tab = 'users' | 'callbacks' | 'scheduled' | 'stats';
+type Tab = 'users' | 'callbacks' | 'scheduled' | 'stats' | 'customers';
 
 const TABS: { key: Tab; label: string; icon: string }[] = [
   { key: 'users', label: '사용자', icon: '👤' },
   { key: 'callbacks', label: '발신번호', icon: '📞' },
   { key: 'scheduled', label: '예약캠페인', icon: '⏰' },
   { key: 'stats', label: '발송통계', icon: '📊' },
+  { key: 'customers', label: '고객DB', icon: '👥' },
 ];
 
 export default function CompanyDashboard() {
@@ -80,6 +82,7 @@ export default function CompanyDashboard() {
         {activeTab === 'callbacks' && <CallbacksTab />}
         {activeTab === 'scheduled' && <ScheduledTab />}
         {activeTab === 'stats' && <StatsTab />}
+        {activeTab === 'customers' && <CustomersTab />}
       </div>
     </div>
   );

@@ -1605,7 +1605,7 @@ const campaignData = {
         <div className="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
           <div className="cursor-pointer" onClick={() => window.location.reload()}>
           <h1 className="text-xl font-bold text-gray-800">한줄로</h1>
-            <p className="text-sm text-gray-500">{user?.company?.name}{user?.department ? ` · ${user.department}` : ''}</p>
+            <p className="text-sm text-gray-500">{user?.company?.name}{(user as any)?.department ? ` · ${(user as any).department}` : ''}</p>
           </div>
           <div className="flex items-center gap-4">
           <button
@@ -1913,7 +1913,7 @@ const campaignData = {
                   </div>
 
                   {/* 예약 대기 */}
-                  <div onClick={() => { loadScheduledCampaigns(); setShowScheduled(true); }} className="bg-transparent border border-gray-200 rounded-xl p-6 min-h-[140px] cursor-pointer hover:border-amber-400 hover:shadow-md transition-all text-center">
+                  <div onClick={() => { loadScheduledCampaigns(); setShowScheduled(true); }} className="bg-white/50 shadow-sm rounded-xl p-6 min-h-[140px] cursor-pointer hover:shadow-lg transition-all text-center">
                     <Clock className="w-8 h-8 mx-auto mb-3 text-amber-500" />
                     <div className="font-semibold text-gray-800 mb-1">예약 대기</div>
                     <div className="text-xs text-gray-500 mb-3">곧 발송될 캠페인</div>
