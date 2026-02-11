@@ -78,6 +78,12 @@ router.post('/login', async (req: Request, res: Response) => {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
+    // ===== 고객사 관리자 전용 접속 체크 =====
+    const loginSource = req.body.loginSource;
+    if (loginSource === 'company-admin' && user.user_type !== 'admin') {
+      return res.status(403).json({ error: '고객사 관리자 권한이 없습니다.' });
+    }
+
     // ===== 단일 세션 체크 =====
     const activeSessions = await query(
       `SELECT id, last_activity_at FROM user_sessions

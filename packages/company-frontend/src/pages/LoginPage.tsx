@@ -22,7 +22,7 @@ export default function LoginPage() {
     setError('');
 
     try {
-      const res = await authApi.login({ loginId, password });
+      const res = await authApi.login({ loginId, password, loginSource: 'company-admin' });
       const { token, user } = res.data;
 
       // 슈퍼관리자는 이 프론트에 접속 불가
