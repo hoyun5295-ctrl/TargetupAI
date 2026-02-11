@@ -21,6 +21,7 @@ import testContactsRoutes from './routes/test-contacts';
 import billingRoutes from './routes/billing';
 import adminSyncRoutes from './routes/admin-sync';
 import adminRoutes from './routes/admin';
+import smsTemplatesRoutes from './routes/sms-templates';
 
 // 공용 관리 라우트 (슈퍼관리자 + 고객사관리자)
 import manageUsersRoutes from './routes/manage-users';
@@ -81,6 +82,7 @@ app.use('/api/admin/billing', billingRoutes);
 app.use('/api/admin/sync', adminSyncRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/test-contacts', testContactsRoutes);
+app.use('/api/sms-templates', smsTemplatesRoutes);
 
 // 공용 관리 라우트 (슈퍼관리자 + 고객사관리자)
 app.use('/api/manage/users', manageUsersRoutes);
