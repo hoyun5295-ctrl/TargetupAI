@@ -71,6 +71,7 @@ router.post('/login', async (req: Request, res: Response) => {
           email: admin.email,
           userType: 'super_admin',
         },
+        sessionTimeoutMinutes: 60,
       });
     }
 
@@ -185,6 +186,13 @@ router.post('/login', async (req: Request, res: Response) => {
       [user.id]
     );
 
+    // 세션 타임아웃 조회
+    const timeoutResult = await query(
+      'SELECT session_timeout_minutes FROM companies WHERE id = $1',
+      [user.company_id]
+    );
+    const sessionTimeoutMinutes = timeoutResult.rows[0]?.session_timeout_minutes || 30;
+
     return res.json({
       token,
       user: {
@@ -201,6 +209,7 @@ router.post('/login', async (req: Request, res: Response) => {
           code: user.company_code,
         },
       },
+      sessionTimeoutMinutes,
     });
   } catch (error) {
     console.error('Login error:', error);
@@ -274,6 +283,29 @@ router.post('/change-password', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('비밀번호 변경 오류:', error);
     return res.status(500).json({ error: '서버 오류' });
+  }
+});
+
+// 세션 연장
+router.post('/extend-session', authenticate, async (req: any, res: Response) => {
+  try {
+    if (req.user?.sessionId) {
+      const timeoutResult = await query(
+        'SELECT c.session_timeout_minutes FROM companies c JOIN users u ON u.company_id = c.id WHERE u.id = $1',
+        [req.user.userId]
+      );
+      const minutes = timeoutResult.rows[0]?.session_timeout_minutes || 30;
+
+      await query(
+        `UPDATE user_sessions SET last_activity_at = NOW(), expires_at = NOW() + INTERVAL '1 minute' * $2
+         WHERE id = $1 AND is_active = true`,
+        [req.user.sessionId, minutes]
+      );
+    }
+    res.json({ success: true });
+  } catch (error) {
+    console.error('세션 연장 오류:', error);
+    res.json({ success: true });
   }
 });
 

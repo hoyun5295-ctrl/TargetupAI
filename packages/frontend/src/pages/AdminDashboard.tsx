@@ -101,6 +101,7 @@ export default function AdminDashboard() {
     approvalRequired: false,
     allowCallbackSelfRegister: false,
     maxUsers: 5,
+    sessionTimeoutMinutes: 30,
     storeCodeList: [] as string[],
     newStoreCode: '',
     newExcludedSegment: '',
@@ -1097,6 +1098,7 @@ const handleApproveRequest = async (id: string) => {
           approvalRequired: c.approval_required ?? false,
           allowCallbackSelfRegister: c.allow_callback_self_register ?? false,
           maxUsers: c.max_users ?? 5,
+          sessionTimeoutMinutes: c.session_timeout_minutes ?? 30,
           storeCodeList: c.store_code_list || [],
           newStoreCode: '',
           newExcludedSegment: '',
@@ -3360,6 +3362,16 @@ const handleApproveRequest = async (id: string) => {
                       <span className="text-sm text-gray-500">명</span>
                     </div>
                     <p className="text-xs text-gray-400 mt-1">고객사 관리자가 생성할 수 있는 최대 사용자 계정 수</p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">세션 타임아웃</label>
+                    <div className="flex items-center gap-2">
+                      <input type="number" value={editCompany.sessionTimeoutMinutes}
+                        onChange={(e) => setEditCompany({ ...editCompany, sessionTimeoutMinutes: Math.min(480, Math.max(5, Number(e.target.value))) })}
+                        className="w-24 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" min={5} max={480} />
+                      <span className="text-sm text-gray-500">분</span>
+                    </div>
+                    <p className="text-xs text-gray-400 mt-1">비활동 시 자동 로그아웃 시간 (5~480분)</p>
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">080 수신거부번호</label>

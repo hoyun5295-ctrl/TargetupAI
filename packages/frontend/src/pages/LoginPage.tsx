@@ -53,7 +53,8 @@ export default function LoginPage() {
         userType: isSuperAdminOnly ? 'super_admin' : undefined,
       });
 
-      const { token, user } = response.data;
+      const { token, user, sessionTimeoutMinutes } = response.data;
+      localStorage.setItem('sessionTimeoutMinutes', String(sessionTimeoutMinutes || 30));
 
       if (user.mustChangePassword) {
         setTempUser(user);

@@ -23,7 +23,8 @@ export default function LoginPage() {
 
     try {
       const res = await authApi.login({ loginId, password, loginSource: 'company-admin' });
-      const { token, user } = res.data;
+      const { token, user, sessionTimeoutMinutes } = res.data;
+      localStorage.setItem('sessionTimeoutMinutes', String(sessionTimeoutMinutes || 30));
 
       // 슈퍼관리자는 이 프론트에 접속 불가
       if (user.userType === 'super_admin') {

@@ -2,6 +2,8 @@ import { useEffect, useState, useCallback } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { useAuthStore } from './stores/authStore';
 import { useSessionGuard } from './hooks/useSessionGuard';
+import { useSessionTimeout } from './hooks/useSessionTimeout';
+import SessionTimeoutModal from './components/SessionTimeoutModal';
 import LoginPage from './pages/LoginPage';
 import AdminDashboard from './pages/AdminDashboard';
 import Dashboard from './pages/Dashboard';
@@ -86,6 +88,32 @@ function SessionGuard() {
   );
 }
 
+// 세션 타임아웃 (비활동 감지 → 자동 로그아웃)
+function SessionTimeoutGuard() {
+  const navigate = useNavigate();
+  const { isAuthenticated, logout } = useAuthStore();
+
+  const handleSessionLogout = useCallback(() => {
+    logout();
+    sessionStorage.setItem('forceLogoutReason', '장시간 활동이 없어 자동 로그아웃되었습니다.');
+    navigate('/login', { replace: true });
+  }, [logout, navigate]);
+
+  const { showWarningModal, remainingSeconds, extendSession, handleLogout } =
+    useSessionTimeout({ onLogout: handleSessionLogout });
+
+  if (!isAuthenticated) return null;
+
+  return (
+    <SessionTimeoutModal
+      isOpen={showWarningModal}
+      remainingSeconds={remainingSeconds}
+      onExtend={extendSession}
+      onLogout={handleLogout}
+    />
+  );
+}
+
 function App() {
   const { loadFromStorage, isAuthenticated, user } = useAuthStore();
   const [isLoading, setIsLoading] = useState(true);
@@ -103,6 +131,7 @@ function App() {
     <BrowserRouter>
       {/* 세션 감시 (로그인 상태일 때만 활성) */}
       <SessionGuard />
+      <SessionTimeoutGuard />
 
       <Routes>
         {/* 로그인 */}
