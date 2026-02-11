@@ -1145,7 +1145,8 @@ router.post('/direct-send', async (req: Request, res: Response) => {
         .replace(/%이름%/g, recipient.name || '')
         .replace(/%기타1%/g, recipient.extra1 || '')
         .replace(/%기타2%/g, recipient.extra2 || '')
-        .replace(/%기타3%/g, recipient.extra3 || '');
+        .replace(/%기타3%/g, recipient.extra3 || '')
+        .replace(/%회신번호%/g, recipient.callback || '');
 
       // 분할전송 시간 계산
       let sendTime: string;

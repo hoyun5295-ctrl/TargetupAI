@@ -568,6 +568,7 @@ export default function Dashboard() {
         setReserveEnabled(false);
         setReserveDateTime('');
         loadRecentCampaigns();
+        loadScheduledCampaigns();
       } else {
         setToast({show: true, type: 'error', message: data.error});
         setTimeout(() => setToast({show: false, type: 'error', message: ''}), 3000);
@@ -599,7 +600,8 @@ export default function Dashboard() {
             .replace(/%이름%/g, r.name || '')
             .replace(/%등급%/g, r.grade || '')
             .replace(/%지역%/g, r.region || '')
-            .replace(/%구매금액%/g, r.total_purchase_amount || '') +
+            .replace(/%구매금액%/g, r.total_purchase_amount || '')
+            .replace(/%회신번호%/g, r.callback || '') +
           (adTextEnabled ? (targetMsgType === 'SMS' ? `\n무료거부${optOutNumber.replace(/-/g, '')}` : `\n무료수신거부 ${formatRejectNumber(optOutNumber)}`) : '')
       }));
 
@@ -643,6 +645,7 @@ export default function Dashboard() {
         setTargetMessage('');
         setTargetSubject('');
         loadRecentCampaigns();
+        loadScheduledCampaigns();
       } else {
         setToast({show: true, type: 'error', message: data.error});
         setTimeout(() => setToast({show: false, type: 'error', message: ''}), 3000);
@@ -781,6 +784,7 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
       const defaults: Record<string, string> = {
         '%이름%': '홍길동어머니', '%등급%': 'VVIP', '%지역%': '경기도 성남시',
         '%구매금액%': '99,999,999원', '%기타1%': '가나다라마바사', '%기타2%': '가나다라마바사', '%기타3%': '가나다라마바사',
+        '%회신번호%': '07012345678',
       };
       maxValue = defaults[variable] || '가나다라마바';
     }
@@ -794,7 +798,7 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
     setSmsOverrideAccepted(false);
     // 자동입력 변수를 최대 길이 값으로 치환
     const directVarMap: Record<string, string> = {
-      '%이름%': 'name', '%기타1%': 'extra1', '%기타2%': 'extra2', '%기타3%': 'extra3',
+      '%이름%': 'name', '%기타1%': 'extra1', '%기타2%': 'extra2', '%기타3%': 'extra3', '%회신번호%': 'callback',
     };
     let fullMsg = getMaxByteMessage(directMessage, directRecipients, directVarMap);
     if (adTextEnabled) {
@@ -822,7 +826,7 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
     setSmsOverrideAccepted(false);
     // 자동입력 변수를 최대 길이 값으로 치환
     const targetVarMap: Record<string, string> = {
-      '%이름%': 'name', '%등급%': 'grade', '%지역%': 'region', '%구매금액%': 'total_purchase_amount',
+      '%이름%': 'name', '%등급%': 'grade', '%지역%': 'region', '%구매금액%': 'total_purchase_amount', '%회신번호%': 'callback',
     };
     let fullMsg = getMaxByteMessage(targetMessage, targetRecipients, targetVarMap);
     if (adTextEnabled) {
@@ -1367,6 +1371,8 @@ const campaignData = {
     
     setSuccessCampaignId(response.data.campaign?.id || '');
     setShowSuccess(true);
+    loadRecentCampaigns();
+    loadScheduledCampaigns();
     
   } catch (error: any) {
     console.error('캠페인 생성 실패:', error);
@@ -1532,9 +1538,9 @@ const campaignData = {
       {/* 헤더 */}
       <header className="bg-white shadow">
         <div className="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
-          <div>
+          <div className="cursor-pointer" onClick={() => window.location.reload()}>
           <h1 className="text-xl font-bold text-gray-800">한줄로</h1>
-            <p className="text-sm text-gray-500">{user?.company?.name}</p>
+            <p className="text-sm text-gray-500">{user?.company?.name}{user?.department ? ` · ${user.department}` : ''}</p>
           </div>
           <div className="flex items-center gap-4">
           <button
@@ -3073,6 +3079,7 @@ const campaignData = {
                               <option value="total_purchase">💰 총구매액</option>
                               <option value="last_purchase_date">📅 최근구매일</option>
                               <option value="purchase_count">🛒 구매횟수</option>
+                              <option value="callback">📞 회신번호(매장번호)</option>
                             </select>
                           </div>
                         ))}
@@ -3717,7 +3724,7 @@ const campaignData = {
                 <div className="bg-white rounded-2xl shadow-2xl w-[500px] overflow-hidden">
                   <div className="p-4 border-b bg-amber-50">
                     <h3 className="text-lg font-bold text-amber-700">✏️ 문안 수정</h3>
-                    <p className="text-sm text-amber-600 mt-1">변수: %이름%, %등급%, %지역%</p>
+                    <p className="text-sm text-amber-600 mt-1">변수: %이름%, %등급%, %지역%, %회신번호%</p>
                   </div>
                   <div className="p-4 space-y-4">
                     {(selectedScheduled?.message_type === 'LMS' || selectedScheduled?.message_type === 'MMS') && (
@@ -4018,6 +4025,7 @@ const campaignData = {
                         <option value="%등급%">등급</option>
                         <option value="%지역%">지역</option>
                         <option value="%구매금액%">구매금액</option>
+                        <option value="%회신번호%">회신번호</option>
                       </select>
                     </div>
                   </div>
@@ -4614,6 +4622,7 @@ const campaignData = {
                       <span className="text-sm font-bold text-gray-700 whitespace-nowrap">자동입력</span>
                       <div className="flex gap-2 flex-1">
                         <button onClick={() => setDirectMessage(prev => prev + '%이름%')} className="flex-1 py-2 text-sm bg-white border rounded-lg hover:bg-gray-100 font-medium">이름</button>
+                        <button onClick={() => setDirectMessage(prev => prev + '%회신번호%')} className="flex-1 py-2 text-sm bg-white border rounded-lg hover:bg-blue-50 font-medium text-blue-700">회신번호</button>
                         <button onClick={() => setDirectMessage(prev => prev + '%기타1%')} className="flex-1 py-2 text-sm bg-white border rounded-lg hover:bg-gray-100 font-medium">기타1</button>
                         <button onClick={() => setDirectMessage(prev => prev + '%기타2%')} className="flex-1 py-2 text-sm bg-white border rounded-lg hover:bg-gray-100 font-medium">기타2</button>
                         <button onClick={() => setDirectMessage(prev => prev + '%기타3%')} className="flex-1 py-2 text-sm bg-white border rounded-lg hover:bg-gray-100 font-medium">기타3</button>
@@ -4912,6 +4921,7 @@ const campaignData = {
                           </th>
                           <th className="px-4 py-3 text-left text-xs font-bold text-gray-600">수신번호</th>
                           <th className="px-4 py-3 text-left text-xs font-bold text-gray-600">이름</th>
+                          <th className="px-4 py-3 text-left text-xs font-bold text-gray-600">회신번호</th>
                           <th className="px-4 py-3 text-left text-xs font-bold text-gray-600">기타1</th>
                           <th className="px-4 py-3 text-left text-xs font-bold text-gray-600">기타2</th>
                           <th className="px-4 py-3 text-left text-xs font-bold text-gray-600">기타3</th>
@@ -4920,7 +4930,7 @@ const campaignData = {
                       <tbody className="divide-y">
                         {directRecipients.length === 0 ? (
                           <tr>
-                            <td colSpan={6} className="px-4 py-24 text-center text-gray-400">
+                            <td colSpan={7} className="px-4 py-24 text-center text-gray-400">
                               <div className="text-4xl mb-2">📋</div>
                               <div className="text-sm">파일을 업로드하거나 직접 입력해주세요</div>
                             </td>
@@ -4947,6 +4957,7 @@ const campaignData = {
                               </td>
                               <td className="px-4 py-3 text-sm">{r.phone}</td>
                               <td className="px-4 py-3 text-sm">{r.name || '-'}</td>
+                              <td className="px-4 py-3 text-sm font-mono text-xs text-gray-600">{r.callback || '-'}</td>
                               <td className="px-4 py-3 text-sm">{r.extra1 || '-'}</td>
                               <td className="px-4 py-3 text-sm">{r.extra2 || '-'}</td>
                               <td className="px-4 py-3 text-sm">{r.extra3 || '-'}</td>
@@ -5116,6 +5127,22 @@ const campaignData = {
                           ))}
                         </select>
                       </div>
+                      
+                      {/* 회신번호 (매장번호) */}
+                      <div className="flex items-center gap-4 p-4 bg-blue-50 rounded-xl border border-blue-200">
+                        <span className="w-28 text-sm font-bold text-blue-700">📞 회신번호</span>
+                        <span className="w-8 text-center text-gray-400">→</span>
+                        <select
+                          className="flex-1 border border-blue-300 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          value={directColumnMapping.callback || ''}
+                          onChange={(e) => setDirectColumnMapping({...directColumnMapping, callback: e.target.value})}
+                        >
+                          <option value="">-- 컬럼 선택 --</option>
+                          {directFileHeaders.map((h, i) => (
+                            <option key={i} value={h}>{h}</option>
+                          ))}
+                        </select>
+                      </div>
                     </div>
                   </div>
                   
@@ -5155,7 +5182,8 @@ const campaignData = {
                                 name: row[directColumnMapping.name] || '',
                                 extra1: row[directColumnMapping.extra1] || '',
                                 extra2: row[directColumnMapping.extra2] || '',
-                                extra3: row[directColumnMapping.extra3] || ''
+                                extra3: row[directColumnMapping.extra3] || '',
+                                callback: directColumnMapping.callback ? String(row[directColumnMapping.callback] || '').replace(/-/g, '').trim() : ''
                               };
                             }).filter(r => r.phone && r.phone.length >= 10);
                             
@@ -5213,7 +5241,8 @@ const campaignData = {
                           name: '',
                           extra1: '',
                           extra2: '',
-                          extra3: ''
+                          extra3: '',
+                          callback: ''
                         }));
                         setDirectRecipients([...directRecipients, ...newRecipients]);
                         setDirectInputText('');
@@ -5601,8 +5630,8 @@ const campaignData = {
         const activeMsgType = showTargetSend ? targetMsgType : directMsgType;
         const activeRecipients = showTargetSend ? targetRecipients : directRecipients;
         const activeVarMap: Record<string, string> = showTargetSend
-          ? { '%이름%': 'name', '%등급%': 'grade', '%지역%': 'region', '%구매금액%': 'total_purchase_amount' }
-          : { '%이름%': 'name', '%기타1%': 'extra1', '%기타2%': 'extra2', '%기타3%': 'extra3' };
+          ? { '%이름%': 'name', '%등급%': 'grade', '%지역%': 'region', '%구매금액%': 'total_purchase_amount', '%회신번호%': 'callback' }
+          : { '%이름%': 'name', '%기타1%': 'extra1', '%기타2%': 'extra2', '%기타3%': 'extra3', '%회신번호%': 'callback' };
         let fullMsg = getMaxByteMessage(activeMsg, activeRecipients, activeVarMap);
         
         const optOutText = activeMsgType === 'SMS'
@@ -6029,7 +6058,7 @@ const campaignData = {
             </div>
             
             {/* 치환 안내 */}
-            {(directMessage.includes('%이름%') || directMessage.includes('%기타') || directMessage.includes('%등급%') || directMessage.includes('%지역%') || directMessage.includes('%구매금액%')) && (
+            {(directMessage.includes('%이름%') || directMessage.includes('%기타') || directMessage.includes('%등급%') || directMessage.includes('%지역%') || directMessage.includes('%구매금액%') || directMessage.includes('%회신번호%')) && (
               <div className="mx-6 mb-4 p-3 bg-blue-50 rounded-lg text-xs text-blue-700 text-center">
                 💡 자동입력 변수는 첫 번째 수신자 정보로 표시됩니다
                 {(!directRecipients[0] && !targetRecipients[0]) && ' (샘플 데이터)'}

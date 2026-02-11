@@ -143,7 +143,8 @@ router.post('/mapping', async (req: Request, res: Response) => {
       email: '이메일',
       total_purchase: '총 구매금액',
       last_purchase_date: '최근 구매일',
-      purchase_count: '구매 횟수'
+      purchase_count: '구매 횟수',
+      callback: '매장번호/회신번호 (발신번호로 사용되는 매장 전화번호)'
     };
 
     // Claude API 호출
@@ -341,18 +342,19 @@ await redis.set(`upload:${fileId}:progress`, JSON.stringify({
           record.birth_date || null, record.birth_year || null, record.birth_month_day || null,
           record.grade || null, record.region || null,
           smsOptIn !== null ? smsOptIn : true,
-          record.email || null, record.total_purchase || null, record.last_purchase_date || null, record.purchase_count || null
+          record.email || null, record.total_purchase || null, record.last_purchase_date || null, record.purchase_count || null,
+          record.callback ? String(record.callback).replace(/-/g, '').trim() : null
         );
 
-        placeholders.push(`($${paramIndex}, $${paramIndex + 1}, $${paramIndex + 2}, $${paramIndex + 3}, $${paramIndex + 4}, $${paramIndex + 5}, $${paramIndex + 6}, $${paramIndex + 7}, $${paramIndex + 8}, $${paramIndex + 9}, $${paramIndex + 10}, $${paramIndex + 11}, $${paramIndex + 12}, $${paramIndex + 13}, 'upload', NOW(), NOW())`);
-        paramIndex += 14;
+        placeholders.push(`($${paramIndex}, $${paramIndex + 1}, $${paramIndex + 2}, $${paramIndex + 3}, $${paramIndex + 4}, $${paramIndex + 5}, $${paramIndex + 6}, $${paramIndex + 7}, $${paramIndex + 8}, $${paramIndex + 9}, $${paramIndex + 10}, $${paramIndex + 11}, $${paramIndex + 12}, $${paramIndex + 13}, $${paramIndex + 14}, 'upload', NOW(), NOW())`);
+        paramIndex += 15;
       }
 
       if (placeholders.length === 0) continue;
 
       try {
         const result = await pool.query(`
-          INSERT INTO customers (company_id, phone, name, gender, birth_date, birth_year, birth_month_day, grade, region, sms_opt_in, email, total_purchase, last_purchase_date, purchase_count, source, created_at, updated_at)
+          INSERT INTO customers (company_id, phone, name, gender, birth_date, birth_year, birth_month_day, grade, region, sms_opt_in, email, total_purchase, last_purchase_date, purchase_count, callback, source, created_at, updated_at)
           VALUES ${placeholders.join(', ')}
           ON CONFLICT (company_id, phone) 
           DO UPDATE SET 
@@ -368,6 +370,7 @@ await redis.set(`upload:${fileId}:progress`, JSON.stringify({
             total_purchase = COALESCE(EXCLUDED.total_purchase, customers.total_purchase),
             last_purchase_date = COALESCE(EXCLUDED.last_purchase_date, customers.last_purchase_date),
             purchase_count = COALESCE(EXCLUDED.purchase_count, customers.purchase_count),
+            callback = COALESCE(EXCLUDED.callback, customers.callback),
             source = CASE WHEN customers.source = 'sync' THEN 'sync' ELSE 'upload' END,
             updated_at = NOW()
           RETURNING (xmax = 0) as is_insert
