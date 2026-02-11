@@ -57,7 +57,7 @@ export default function AdminDashboard() {
   const navigate = useNavigate();
   const { user, logout } = useAuthStore();
 
-  const [activeTab, setActiveTab] = useState<'companies' | 'users' | 'scheduled' | 'callbacks' | 'plans' | 'requests' | 'deposits' | 'allCampaigns' | 'stats' | 'billing'>('companies');
+  const [activeTab, setActiveTab] = useState<'companies' | 'users' | 'scheduled' | 'callbacks' | 'plans' | 'requests' | 'deposits' | 'allCampaigns' | 'stats' | 'billing' | 'syncAgents'>('companies');
   const [companies, setCompanies] = useState<Company[]>([]);
   const [plans, setPlans] = useState<Plan[]>([]);
   const [users, setUsers] = useState<User[]>([]);
@@ -226,6 +226,18 @@ const [emailTarget, setEmailTarget] = useState<any>(null);
 const [emailTo, setEmailTo] = useState('');
 const [emailSubject, setEmailSubject] = useState('');
 const [emailSending, setEmailSending] = useState(false);
+  // ===== Sync Agent 모니터링 =====
+  const [syncAgents, setSyncAgents] = useState<any[]>([]);
+  const [syncAgentsLoading, setSyncAgentsLoading] = useState(false);
+  const [syncSelectedAgent, setSyncSelectedAgent] = useState<any>(null);
+  const [syncAgentDetail, setSyncAgentDetail] = useState<any>(null);
+  const [syncDetailLoading, setSyncDetailLoading] = useState(false);
+  const [showSyncDetailModal, setShowSyncDetailModal] = useState(false);
+  const [showSyncConfigModal, setShowSyncConfigModal] = useState(false);
+  const [syncConfigForm, setSyncConfigForm] = useState({ sync_interval_customers: 60, sync_interval_purchases: 30 });
+  const [showSyncCommandModal, setShowSyncCommandModal] = useState(false);
+  const [syncCommandType, setSyncCommandType] = useState<'full_sync' | 'restart'>('full_sync');
+
   // 커스텀 모달 상태
   const [modal, setModal] = useState<ModalState>({ type: null, title: '', message: '' });
   const [copied, setCopied] = useState(false);
@@ -260,6 +272,7 @@ const [emailSending, setEmailSending] = useState(false);
 useEffect(() => { if (activeTab === 'billing') { loadBillings(); loadInvoices(); } }, [activeTab]);
 useEffect(() => { if (activeTab === 'billing') loadBillings(); }, [filterYear]);
 useEffect(() => { if (activeTab === 'deposits') loadDepositRequests(1); }, [activeTab, depositStatusFilter, depositMethodFilter]);
+useEffect(() => { if (activeTab === 'syncAgents') loadSyncAgents(); }, [activeTab]);
 useEffect(() => { if (billingToast) { const t = setTimeout(() => setBillingToast(null), 3000); return () => clearTimeout(t); } }, [billingToast]);
 useEffect(() => {
   if (billingScope === 'user' && billingCompanyId) {
@@ -273,6 +286,99 @@ useEffect(() => {
     setBillingUserId('');
   }
 }, [billingScope, billingCompanyId]);
+
+// ===== Sync Agent 함수 =====
+const loadSyncAgents = async () => {
+  setSyncAgentsLoading(true);
+  try {
+    const token = localStorage.getItem('token');
+    const res = await fetch('/api/admin/sync/agents', {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (!res.ok) throw new Error('조회 실패');
+    const data = await res.json();
+    setSyncAgents(data.agents || []);
+  } catch (e) {
+    console.error('Sync Agent 목록 조회 실패:', e);
+  } finally {
+    setSyncAgentsLoading(false);
+  }
+};
+
+const loadSyncAgentDetail = async (agentId: string) => {
+  setSyncDetailLoading(true);
+  setShowSyncDetailModal(true);
+  try {
+    const token = localStorage.getItem('token');
+    const res = await fetch(`/api/admin/sync/agents/${agentId}`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (!res.ok) throw new Error('조회 실패');
+    const data = await res.json();
+    setSyncAgentDetail(data);
+  } catch (e) {
+    showAlert('오류', 'Agent 상세 조회 실패', 'error');
+    setShowSyncDetailModal(false);
+  } finally {
+    setSyncDetailLoading(false);
+  }
+};
+
+const handleSyncConfigSave = async () => {
+  if (!syncSelectedAgent) return;
+  try {
+    const token = localStorage.getItem('token');
+    const res = await fetch(`/api/admin/sync/agents/${syncSelectedAgent.id}/config`, {
+      method: 'PUT',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(syncConfigForm)
+    });
+    if (!res.ok) {
+      const data = await res.json();
+      throw new Error(data.error || '설정 변경 실패');
+    }
+    setShowSyncConfigModal(false);
+    showAlert('성공', '설정이 저장되었습니다. Agent가 다음 config 조회 시 반영됩니다.', 'success');
+    loadSyncAgents();
+  } catch (e: any) {
+    showAlert('오류', e.message || '설정 변경 실패', 'error');
+  }
+};
+
+const handleSyncCommand = async () => {
+  if (!syncSelectedAgent) return;
+  try {
+    const token = localStorage.getItem('token');
+    const res = await fetch(`/api/admin/sync/agents/${syncSelectedAgent.id}/command`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: syncCommandType })
+    });
+    if (!res.ok) throw new Error('명령 전송 실패');
+    setShowSyncCommandModal(false);
+    showAlert('성공', '명령이 등록되었습니다. Agent가 다음 config 조회 시 실행합니다.', 'success');
+  } catch (e) {
+    showAlert('오류', '명령 전송 실패', 'error');
+  }
+};
+
+const getSyncOnlineBadge = (status: string) => {
+  if (status === 'online') return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">● 정상</span>;
+  if (status === 'delayed') return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-700">● 지연</span>;
+  return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">● 오프라인</span>;
+};
+
+const syncTimeAgo = (dateStr: string | null) => {
+  if (!dateStr) return '-';
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const minutes = Math.floor(diff / 60000);
+  if (minutes < 1) return '방금 전';
+  if (minutes < 60) return `${minutes}분 전`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}시간 전`;
+  const days = Math.floor(hours / 24);
+  return `${days}일 전`;
+};
 
 // ===== 정산 함수 =====
 const loadBillings = async () => {
@@ -1467,6 +1573,16 @@ const handleApproveRequest = async (id: string) => {
                 }`}
               >
                 정산 관리
+              </button>
+              <button
+                onClick={() => setActiveTab('syncAgents')}
+                className={`px-6 py-4 text-sm font-medium border-b-2 ${
+                  activeTab === 'syncAgents'
+                    ? 'border-blue-500 text-blue-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                Sync 모니터링
               </button>
             </nav>
           </div>
@@ -4881,7 +4997,319 @@ const handleApproveRequest = async (id: string) => {
           )}
         </div>
       )}
+      {/* Sync 모니터링 탭 */}
+      {activeTab === 'syncAgents' && (
+        <div className="bg-white rounded-lg shadow">
+          <div className="px-6 py-4 border-b flex justify-between items-center">
+            <h2 className="text-lg font-semibold">Sync Agent 모니터링</h2>
+            <button
+              onClick={loadSyncAgents}
+              className="text-sm text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+              새로고침
+            </button>
+          </div>
+
+          {syncAgentsLoading ? (
+            <div className="p-12 text-center text-gray-500">로딩 중...</div>
+          ) : syncAgents.length === 0 ? (
+            <div className="p-12 text-center text-gray-400">
+              <svg className="w-12 h-12 mx-auto mb-3 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2" /></svg>
+              <p>등록된 Sync Agent가 없습니다.</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 border-b">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">고객사</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Agent명</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">버전</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">DB</th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">상태</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">마지막 Heartbeat</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">마지막 동기화</th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">고객 수</th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">오늘 동기화</th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">에러</th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">관리</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {syncAgents.map((agent: any) => (
+                    <tr key={agent.id} className="hover:bg-gray-50">
+                      <td className="px-4 py-3 font-medium text-gray-900">{agent.company_name || '-'}</td>
+                      <td className="px-4 py-3 text-gray-700">{agent.agent_name || '-'}</td>
+                      <td className="px-4 py-3 text-gray-500">{agent.agent_version || '-'}</td>
+                      <td className="px-4 py-3 text-gray-500">{agent.db_type || '-'}</td>
+                      <td className="px-4 py-3 text-center">{getSyncOnlineBadge(agent.online_status)}</td>
+                      <td className="px-4 py-3 text-gray-500">{syncTimeAgo(agent.last_heartbeat_at)}</td>
+                      <td className="px-4 py-3 text-gray-500">{syncTimeAgo(agent.last_sync_at)}</td>
+                      <td className="px-4 py-3 text-right text-gray-700">{(agent.total_customers_synced || 0).toLocaleString()}</td>
+                      <td className="px-4 py-3 text-right text-gray-700">{agent.today_sync_count || 0}건</td>
+                      <td className="px-4 py-3 text-right">
+                        <span className={agent.recent_error_count > 0 ? 'text-red-600 font-medium' : 'text-gray-400'}>
+                          {agent.recent_error_count || 0}건
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <div className="flex items-center justify-center gap-1">
+                          <button
+                            onClick={() => { setSyncSelectedAgent(agent); loadSyncAgentDetail(agent.id); }}
+                            className="text-blue-600 hover:text-blue-800 text-xs font-medium px-2 py-1 rounded hover:bg-blue-50"
+                          >
+                            상세
+                          </button>
+                          <button
+                            onClick={() => {
+                              setSyncSelectedAgent(agent);
+                              setSyncConfigForm({ sync_interval_customers: 60, sync_interval_purchases: 30 });
+                              setShowSyncConfigModal(true);
+                            }}
+                            className="text-gray-600 hover:text-gray-800 text-xs font-medium px-2 py-1 rounded hover:bg-gray-100"
+                          >
+                            설정
+                          </button>
+                          <button
+                            onClick={() => {
+                              setSyncSelectedAgent(agent);
+                              setSyncCommandType('full_sync');
+                              setShowSyncCommandModal(true);
+                            }}
+                            className="text-emerald-600 hover:text-emerald-800 text-xs font-medium px-2 py-1 rounded hover:bg-emerald-50"
+                          >
+                            명령
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
       </main>
+      {/* Sync Agent 상세 모달 */}
+      {showSyncDetailModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl shadow-2xl w-[700px] max-h-[85vh] overflow-hidden animate-in fade-in zoom-in">
+            <div className="p-5 border-b bg-gradient-to-r from-blue-50 to-indigo-50">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
+                    <svg className="w-5 h-5 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2" /></svg>
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold text-gray-800">Agent 상세</h3>
+                    <p className="text-xs text-gray-500">{syncSelectedAgent?.company_name} · {syncSelectedAgent?.agent_name}</p>
+                  </div>
+                </div>
+                <button onClick={() => setShowSyncDetailModal(false)} className="text-gray-400 hover:text-gray-600">
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                </button>
+              </div>
+            </div>
+            <div className="p-5 overflow-y-auto max-h-[calc(85vh-80px)]">
+              {syncDetailLoading ? (
+                <div className="text-center py-8 text-gray-500">로딩 중...</div>
+              ) : syncAgentDetail ? (
+                <>
+                  {/* 기본 정보 */}
+                  <div className="grid grid-cols-3 gap-3 mb-5">
+                    <div className="bg-gray-50 rounded-lg p-3">
+                      <div className="text-xs text-gray-400 mb-1">버전</div>
+                      <div className="font-medium text-gray-800">{syncAgentDetail.agent?.agent_version || '-'}</div>
+                    </div>
+                    <div className="bg-gray-50 rounded-lg p-3">
+                      <div className="text-xs text-gray-400 mb-1">OS</div>
+                      <div className="font-medium text-gray-800 text-xs">{syncAgentDetail.agent?.os_info || '-'}</div>
+                    </div>
+                    <div className="bg-gray-50 rounded-lg p-3">
+                      <div className="text-xs text-gray-400 mb-1">상태</div>
+                      <div>{getSyncOnlineBadge(syncAgentDetail.agent?.online_status)}</div>
+                    </div>
+                  </div>
+
+                  {/* 통계 카드 */}
+                  <div className="grid grid-cols-4 gap-3 mb-5">
+                    <div className="bg-blue-50 rounded-lg p-3 text-center">
+                      <div className="text-xl font-bold text-blue-700">{syncAgentDetail.stats?.total_syncs_today || 0}</div>
+                      <div className="text-xs text-blue-500">오늘 동기화</div>
+                    </div>
+                    <div className="bg-red-50 rounded-lg p-3 text-center">
+                      <div className="text-xl font-bold text-red-700">{syncAgentDetail.stats?.total_errors_today || 0}</div>
+                      <div className="text-xs text-red-500">오늘 에러</div>
+                    </div>
+                    <div className="bg-emerald-50 rounded-lg p-3 text-center">
+                      <div className="text-xl font-bold text-emerald-700">{(syncAgentDetail.stats?.total_customers || 0).toLocaleString()}</div>
+                      <div className="text-xs text-emerald-500">총 고객</div>
+                    </div>
+                    <div className="bg-purple-50 rounded-lg p-3 text-center">
+                      <div className="text-xl font-bold text-purple-700">{(syncAgentDetail.stats?.total_purchases || 0).toLocaleString()}</div>
+                      <div className="text-xs text-purple-500">총 구매</div>
+                    </div>
+                  </div>
+
+                  {/* 동기화 이력 */}
+                  <h4 className="text-sm font-semibold text-gray-700 mb-2">최근 동기화 이력</h4>
+                  <div className="border rounded-lg overflow-hidden">
+                    <table className="w-full text-xs">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-3 py-2 text-left text-gray-500">시각</th>
+                          <th className="px-3 py-2 text-left text-gray-500">타입</th>
+                          <th className="px-3 py-2 text-left text-gray-500">모드</th>
+                          <th className="px-3 py-2 text-right text-gray-500">건수</th>
+                          <th className="px-3 py-2 text-right text-gray-500">성공</th>
+                          <th className="px-3 py-2 text-right text-gray-500">실패</th>
+                          <th className="px-3 py-2 text-right text-gray-500">소요</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y">
+                        {(syncAgentDetail.recent_logs || []).map((log: any) => (
+                          <tr key={log.id} className="hover:bg-gray-50">
+                            <td className="px-3 py-2 text-gray-500">{log.started_at ? new Date(log.started_at).toLocaleString('ko-KR', { month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' }) : '-'}</td>
+                            <td className="px-3 py-2">
+                              <span className={`px-1.5 py-0.5 rounded text-xs ${log.sync_type === 'customers' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>
+                                {log.sync_type === 'customers' ? '고객' : '구매'}
+                              </span>
+                            </td>
+                            <td className="px-3 py-2 text-gray-500">{log.mode === 'full' ? '전체' : '증분'}</td>
+                            <td className="px-3 py-2 text-right text-gray-700">{log.total_count || 0}</td>
+                            <td className="px-3 py-2 text-right text-green-600">{log.success_count || 0}</td>
+                            <td className="px-3 py-2 text-right">
+                              <span className={log.fail_count > 0 ? 'text-red-600 font-medium' : 'text-gray-400'}>{log.fail_count || 0}</span>
+                            </td>
+                            <td className="px-3 py-2 text-right text-gray-500">{log.duration_ms ? `${(log.duration_ms / 1000).toFixed(1)}초` : '-'}</td>
+                          </tr>
+                        ))}
+                        {(!syncAgentDetail.recent_logs || syncAgentDetail.recent_logs.length === 0) && (
+                          <tr><td colSpan={7} className="px-3 py-4 text-center text-gray-400">동기화 이력이 없습니다.</td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              ) : (
+                <div className="text-center py-8 text-gray-400">데이터를 불러올 수 없습니다.</div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Sync 설정 변경 모달 */}
+      {showSyncConfigModal && syncSelectedAgent && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl shadow-2xl w-[400px] overflow-hidden animate-in fade-in zoom-in">
+            <div className="p-5 border-b bg-gradient-to-r from-gray-50 to-slate-50">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-gray-100 rounded-full flex items-center justify-center">
+                  <svg className="w-5 h-5 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-gray-800">동기화 설정</h3>
+                  <p className="text-xs text-gray-500">{syncSelectedAgent.company_name} · {syncSelectedAgent.agent_name}</p>
+                </div>
+              </div>
+            </div>
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="text-xs text-gray-500 font-medium mb-1.5 block">고객 동기화 주기 (분)</label>
+                <input
+                  type="number"
+                  min={5}
+                  value={syncConfigForm.sync_interval_customers}
+                  onChange={(e) => setSyncConfigForm({ ...syncConfigForm, sync_interval_customers: parseInt(e.target.value) || 5 })}
+                  className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 font-medium mb-1.5 block">구매 동기화 주기 (분)</label>
+                <input
+                  type="number"
+                  min={5}
+                  value={syncConfigForm.sync_interval_purchases}
+                  onChange={(e) => setSyncConfigForm({ ...syncConfigForm, sync_interval_purchases: parseInt(e.target.value) || 5 })}
+                  className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                />
+              </div>
+              <p className="text-xs text-gray-400">Agent가 다음 config 조회 시 변경사항이 반영됩니다.</p>
+            </div>
+            <div className="flex border-t">
+              <button
+                onClick={() => setShowSyncConfigModal(false)}
+                className="flex-1 px-4 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors border-r"
+              >
+                취소
+              </button>
+              <button
+                onClick={handleSyncConfigSave}
+                className="flex-1 px-4 py-3 text-blue-600 font-medium hover:bg-blue-50 transition-colors"
+              >
+                저장하기
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Sync 명령 전송 모달 */}
+      {showSyncCommandModal && syncSelectedAgent && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl shadow-2xl w-[400px] overflow-hidden animate-in fade-in zoom-in">
+            <div className="p-5 border-b bg-gradient-to-r from-emerald-50 to-green-50">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-emerald-100 rounded-full flex items-center justify-center">
+                  <svg className="w-5 h-5 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-gray-800">Agent 명령 전송</h3>
+                  <p className="text-xs text-gray-500">{syncSelectedAgent.company_name} · {syncSelectedAgent.agent_name}</p>
+                </div>
+              </div>
+            </div>
+            <div className="p-5 space-y-3">
+              <label className="text-xs text-gray-500 font-medium mb-1.5 block">명령 유형</label>
+              <div className="space-y-2">
+                <label className={`flex items-center gap-3 p-3 border rounded-lg cursor-pointer transition-colors ${syncCommandType === 'full_sync' ? 'border-emerald-500 bg-emerald-50' : 'hover:bg-gray-50'}`}>
+                  <input type="radio" name="cmdType" value="full_sync" checked={syncCommandType === 'full_sync'} onChange={() => setSyncCommandType('full_sync')} className="text-emerald-600" />
+                  <div>
+                    <div className="text-sm font-medium text-gray-800">전체 동기화</div>
+                    <div className="text-xs text-gray-500">모든 고객/구매 데이터를 다시 동기화합니다</div>
+                  </div>
+                </label>
+                <label className={`flex items-center gap-3 p-3 border rounded-lg cursor-pointer transition-colors ${syncCommandType === 'restart' ? 'border-emerald-500 bg-emerald-50' : 'hover:bg-gray-50'}`}>
+                  <input type="radio" name="cmdType" value="restart" checked={syncCommandType === 'restart'} onChange={() => setSyncCommandType('restart')} className="text-emerald-600" />
+                  <div>
+                    <div className="text-sm font-medium text-gray-800">Agent 재시작</div>
+                    <div className="text-xs text-gray-500">Agent 프로세스를 재시작합니다</div>
+                  </div>
+                </label>
+              </div>
+              <p className="text-xs text-gray-400">Agent가 다음 config 조회 시 명령을 실행합니다.</p>
+            </div>
+            <div className="flex border-t">
+              <button
+                onClick={() => setShowSyncCommandModal(false)}
+                className="flex-1 px-4 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors border-r"
+              >
+                취소
+              </button>
+              <button
+                onClick={handleSyncCommand}
+                className="flex-1 px-4 py-3 text-emerald-600 font-medium hover:bg-emerald-50 transition-colors"
+              >
+                명령 전송
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 플랜 신청 거절 모달 */}
       {showRejectModal && rejectTarget && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[60]">

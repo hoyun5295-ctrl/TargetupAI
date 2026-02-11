@@ -489,5 +489,240 @@ router.post('/purchases', async (req: SyncAuthRequest, res: Response) => {
     });
   }
 });
+// ============================================================================
+// sync.ts 하단에 추가할 라우트 3개
+// POST /log, GET /config, GET /version
+//
+// 주의: router.use(syncAuth)가 이미 전역 적용되어 있으므로
+//       개별 라우트에 syncAuth 파라미터 불필요
+// ============================================================================
+
+
+// ============================================
+// POST /api/sync/log — 동기화 로그 전송
+// ============================================
+router.post('/log', async (req: SyncAuthRequest, res: Response) => {
+  try {
+    const companyId = req.companyId!;
+    const {
+      agent_id,
+      sync_type,
+      sync_mode,
+      total_count,
+      success_count,
+      fail_count,
+      duration_ms,
+      error_message,
+      started_at,
+      completed_at
+    } = req.body;
+
+    // 필수 필드 검증
+    if (!agent_id || !sync_type || !sync_mode) {
+      return res.status(400).json({
+        success: false,
+        error: 'agent_id, sync_type, sync_mode는 필수입니다.'
+      });
+    }
+
+    // sync_type 검증
+    if (!['customers', 'purchases'].includes(sync_type)) {
+      return res.status(400).json({
+        success: false,
+        error: 'sync_type은 customers 또는 purchases여야 합니다.'
+      });
+    }
+
+    // sync_mode 검증
+    if (!['incremental', 'full'].includes(sync_mode)) {
+      return res.status(400).json({
+        success: false,
+        error: 'sync_mode는 incremental 또는 full이어야 합니다.'
+      });
+    }
+
+    // agent_id 소유권 확인
+    const agentCheck = await query(
+      'SELECT id FROM sync_agents WHERE id = $1 AND company_id = $2',
+      [agent_id, companyId]
+    );
+    if (agentCheck.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: '해당 Agent를 찾을 수 없습니다.'
+      });
+    }
+
+    // sync_logs INSERT (sync_mode → mode 컬럼 매핑)
+    const result = await query(
+      `INSERT INTO sync_logs (
+        agent_id, company_id, sync_type, mode,
+        total_count, success_count, fail_count,
+        duration_ms, error_message,
+        started_at, completed_at, created_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
+      RETURNING id`,
+      [
+        agent_id, companyId, sync_type, sync_mode,
+        total_count || 0, success_count || 0, fail_count || 0,
+        duration_ms ?? null, error_message || null,
+        started_at || null, completed_at || null
+      ]
+    );
+
+    // sync_agents.last_sync_at 업데이트
+    await query(
+      'UPDATE sync_agents SET last_sync_at = NOW(), updated_at = NOW() WHERE id = $1',
+      [agent_id]
+    );
+
+    console.log(`[Sync] Log recorded: ${sync_type}/${sync_mode} - ${success_count}/${total_count} (company: ${req.companyName})`);
+
+    return res.status(201).json({
+      success: true,
+      log_id: result.rows[0].id
+    });
+  } catch (error) {
+    console.error('[Sync Log Error]', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to record sync log'
+    });
+  }
+});
+
+
+// ============================================
+// GET /api/sync/config — Agent 설정 원격 조회
+// ============================================
+router.get('/config', async (req: SyncAuthRequest, res: Response) => {
+  try {
+    const companyId = req.companyId!;
+    const agentId = req.query.agent_id as string;
+
+    if (!agentId) {
+      return res.status(400).json({
+        success: false,
+        error: 'agent_id query parameter is required'
+      });
+    }
+
+    // agent 조회 (company_id 소유권 확인 포함)
+    const result = await query(
+      `SELECT id, config, sync_interval_customers, sync_interval_purchases
+       FROM sync_agents
+       WHERE id = $1 AND company_id = $2`,
+      [agentId, companyId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Agent not found'
+      });
+    }
+
+    const agent = result.rows[0];
+    const config = agent.config || {};
+
+    return res.json({
+      success: true,
+      config: {
+        sync_interval_customers: config.sync_interval_customers ?? agent.sync_interval_customers ?? 60,
+        sync_interval_purchases: config.sync_interval_purchases ?? agent.sync_interval_purchases ?? 30,
+        batch_size: config.batch_size ?? 4000,
+        column_mapping: config.column_mapping ?? null,
+        commands: config.commands ?? []
+      }
+    });
+  } catch (error) {
+    console.error('[Sync Config Error]', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to retrieve config'
+    });
+  }
+});
+
+
+// ============================================
+// GET /api/sync/version — 버전 확인 (자동 업데이트)
+// ============================================
+router.get('/version', async (req: SyncAuthRequest, res: Response) => {
+  try {
+    const currentVersion = req.query.current_version as string;
+    const agentId = req.query.agent_id as string;
+    const companyId = req.companyId!;
+
+    if (!currentVersion) {
+      return res.status(400).json({
+        success: false,
+        error: 'current_version query parameter is required'
+      });
+    }
+
+    // Agent의 agent_version 업데이트
+    if (agentId) {
+      await query(
+        'UPDATE sync_agents SET agent_version = $1, updated_at = NOW() WHERE id = $2 AND company_id = $3',
+        [currentVersion, agentId, companyId]
+      );
+    }
+
+    // 최신 활성 릴리스 조회
+    const result = await query(
+      `SELECT version, download_url, release_notes, force_update, released_at
+       FROM sync_releases
+       WHERE is_active = true
+       ORDER BY released_at DESC
+       LIMIT 1`
+    );
+
+    // 릴리스가 없으면 업데이트 없음 응답
+    if (result.rows.length === 0) {
+      return res.json({
+        success: true,
+        latest_version: currentVersion,
+        current_version: currentVersion,
+        update_available: false
+      });
+    }
+
+    const latest = result.rows[0];
+    const updateAvailable = compareSemver(latest.version, currentVersion) > 0;
+
+    return res.json({
+      success: true,
+      latest_version: latest.version,
+      current_version: currentVersion,
+      update_available: updateAvailable,
+      ...(updateAvailable && {
+        force_update: latest.force_update,
+        download_url: latest.download_url,
+        release_notes: latest.release_notes,
+        released_at: latest.released_at
+      })
+    });
+  } catch (error) {
+    console.error('[Sync Version Error]', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to check version'
+    });
+  }
+});
+
+
+// Semver 비교 헬퍼 (외부 라이브러리 없이)
+// 반환: 양수 (a > b), 0 (a == b), 음수 (a < b)
+function compareSemver(a: string, b: string): number {
+  const pa = a.split('.').map(Number);
+  const pb = b.split('.').map(Number);
+  for (let i = 0; i < 3; i++) {
+    const diff = (pa[i] || 0) - (pb[i] || 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}
 
 export default router;

@@ -19,6 +19,7 @@ import addressBooksRoutes from './routes/address-books';
 import balanceRoutes from './routes/balance';
 import testContactsRoutes from './routes/test-contacts';
 import billingRoutes from './routes/billing';
+import adminSyncRoutes from './routes/admin-sync';
 import adminRoutes from './routes/admin';
 
 // 공용 관리 라우트 (슈퍼관리자 + 고객사관리자)
@@ -76,6 +77,7 @@ app.use('/api/unsubscribes', unsubscribesRoutes);
 app.use('/api/address-books', addressBooksRoutes);
 app.use('/api/balance', balanceRoutes);
 app.use('/api/admin/billing', billingRoutes);
+app.use('/api/admin/sync', adminSyncRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/test-contacts', testContactsRoutes);
 
