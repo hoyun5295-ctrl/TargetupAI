@@ -208,6 +208,12 @@ router.get('/', async (req: Request, res: Response) => {
       params.push(userId);
     }
 
+    // 고객사 관리자: 특정 사용자 필터
+    if (userType === 'company_admin' && req.query.filter_user_id) {
+      whereClause += ` AND created_by = $${paramIndex++}`;
+      params.push(req.query.filter_user_id);
+    }
+
     if (status) {
       // status=scheduled 조회 시 MySQL과 동기화
       if (status === 'scheduled') {
@@ -217,6 +223,10 @@ router.get('/', async (req: Request, res: Response) => {
         if (userType === 'company_user' && userId) {
           scheduleQuery += ` AND created_by = $2`;
           scheduleParams.push(userId);
+        }
+        if (userType === 'company_admin' && req.query.filter_user_id) {
+          scheduleQuery += ` AND created_by = $2`;
+          scheduleParams.push(req.query.filter_user_id);
         }
         const scheduledCampaigns = await query(scheduleQuery, scheduleParams);
 

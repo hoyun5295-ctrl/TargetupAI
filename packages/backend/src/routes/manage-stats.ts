@@ -51,6 +51,15 @@ router.get('/send', async (req: Request, res: Response) => {
       paramIdx++;
     }
 
+    // 사용자 필터 (고객사관리자용)
+    let userWhere = '';
+    const filterUserId = req.query.filterUserId as string;
+    if (filterUserId) {
+      userWhere = ` AND c.created_by = $${paramIdx}`;
+      baseParams.push(filterUserId);
+      paramIdx++;
+    }
+
     // 1) 요약 (실발송만 — campaign_runs 기반)
     const summaryResult = await pool.query(`
       SELECT 
@@ -59,7 +68,7 @@ router.get('/send', async (req: Request, res: Response) => {
         COALESCE(SUM(cr.fail_count), 0) as total_fail
       FROM campaign_runs cr
       JOIN campaigns c ON cr.campaign_id = c.id
-      WHERE cr.sent_at IS NOT NULL ${dateWhere} ${companyWhere}
+      WHERE cr.sent_at IS NOT NULL ${dateWhere} ${companyWhere} ${userWhere}
     `, baseParams);
 
     // 2) 테스트 발송 통계 (MySQL — app_etc1 = 'test')
@@ -116,7 +125,7 @@ router.get('/send', async (req: Request, res: Response) => {
         SELECT ${groupCol} as grp
         FROM campaign_runs cr
         JOIN campaigns c ON cr.campaign_id = c.id
-        WHERE cr.sent_at IS NOT NULL ${dateWhere} ${companyWhere}
+        WHERE cr.sent_at IS NOT NULL ${dateWhere} ${companyWhere} ${userWhere}
         GROUP BY grp
       ) sub
     `, baseParams);
@@ -131,7 +140,7 @@ router.get('/send', async (req: Request, res: Response) => {
         COALESCE(SUM(cr.fail_count), 0) as fail
       FROM campaign_runs cr
       JOIN campaigns c ON cr.campaign_id = c.id
-      WHERE cr.sent_at IS NOT NULL ${dateWhere} ${companyWhere}
+      WHERE cr.sent_at IS NOT NULL ${dateWhere} ${companyWhere} ${userWhere}
       GROUP BY ${groupCol}
       ORDER BY "${groupAlias}" DESC
       LIMIT $${paramIdx} OFFSET $${paramIdx + 1}
@@ -172,6 +181,11 @@ router.get('/send/detail', async (req: Request, res: Response) => {
       ? `TO_CHAR(cr.sent_at AT TIME ZONE 'Asia/Seoul', 'YYYY-MM')`
       : `TO_CHAR(cr.sent_at AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD')`;
 
+    // 사용자 필터 (고객사관리자용)
+    const filterUserId = req.query.filterUserId as string;
+    const userFilter = filterUserId ? ` AND c.created_by = $3` : '';
+    const detailParams = filterUserId ? [dateVal, targetCompanyId, filterUserId] : [dateVal, targetCompanyId];
+
     // 사용자별 통계
     const result = await pool.query(`
       SELECT 
@@ -190,9 +204,10 @@ router.get('/send/detail', async (req: Request, res: Response) => {
       WHERE cr.sent_at IS NOT NULL
         AND ${groupCol} = $1
         AND c.company_id = $2
+        ${userFilter}
       GROUP BY u.id, u.name, u.login_id, u.department, u.store_codes
       ORDER BY sent DESC
-    `, [dateVal, targetCompanyId]);
+    `, detailParams);
 
     // 캠페인 상세 목록
     const campaignsResult = await pool.query(`
@@ -216,8 +231,9 @@ router.get('/send/detail', async (req: Request, res: Response) => {
       WHERE cr.sent_at IS NOT NULL
         AND ${groupCol} = $1
         AND c.company_id = $2
+        ${userFilter}
       ORDER BY cr.sent_at DESC
-    `, [dateVal, targetCompanyId]);
+    `, detailParams);
 
     // 테스트 발송 상세 (MySQL)
     let testDetail: any[] = [];

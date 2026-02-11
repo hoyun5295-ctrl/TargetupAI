@@ -1328,6 +1328,16 @@ POST /api/sync/purchases   ← 구매내역 벌크 INSERT (배치 최대 1000건
 - [x] 메시지 미리보기 바이트 수 버그 수정: 자동입력 변수 치환 후 실제 바이트 수로 표시
 - [x] 미리보기 바이트 초과 시 빨간색 경고 표시
 
+**직원 버그 리포트 대응 2차 + 발송 시스템 수정 (2026-02-12)**
+- [x] 발송정책 저장 안됨: SQL 컬럼명 6개 불일치 수정 (send_hour_start→send_start_hour, daily_limit→daily_limit_per_customer 등)
+- [x] 타겟전략 저장 안됨: PUT /companies/:id에 approval_required, target_strategy 파라미터 추가
+- [x] 선불 충전금액 2~3번 시도 문제: setEditCompany stale closure → 함수형 업데이트로 수정
+- [x] 잠금/휴면 계정 로그인 차단: auth.ts에 status='active' 체크 추가 + 상태별 안내 메시지 (잠금/휴면/비활성)
+- [x] 발송내역 조회 0건: results.ts SMSQ_SEND 하드코딩 → SMS_TABLES 멀티테이블 합산 조회 (5개 Agent 대응)
+- [x] 직접발송 바이트 초과 차단 누락: Dashboard.tsx 직접발송 버튼에 90바이트 초과 체크 추가 + smsOverrideAccepted 플래그
+- [x] 슈퍼관리자 발송통계 0건: campaign_runs만 조회 → campaigns 직접 조회로 변경 (직접발송 포함)
+- [x] 서버 로그인 500 에러: companies.session_timeout_minutes 컬럼 DDL 누락 → 서버 DB 추가
+
 ### 🔲 진행 예정 작업
 
 **선불 요금제 Phase 1-B~2**
@@ -1348,7 +1358,7 @@ POST /api/sync/purchases   ← 구매내역 벌크 INSERT (배치 최대 1000건
 - [ ] 파비콘/OG 이미지 적용
 
 **기능 확장**
-- [ ] 카카오톡 알림톡/친구톡 연동
+- [ ] 카카오톡 브랜드메시지/알림톡 연동 (단가 세분화: 브랜드메시지/알림톡 별도)
 - [ ] MMS 발송 기능
 - [ ] PDF 승인 기능 (이메일 링크)
 - [ ] Android 앱 (스팸필터 자동 테스트)

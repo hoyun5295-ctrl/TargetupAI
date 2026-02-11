@@ -64,6 +64,7 @@ export default function ScheduledTab() {
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'scheduled' | 'cancelled'>('all');
+  const [filterUser, setFilterUser] = useState('');
   const [page, setPage] = useState(1);
   const perPage = 10;
 
@@ -87,13 +88,17 @@ export default function ScheduledTab() {
     } catch { /* */ } finally { setLoading(false); }
   };
 
-  // 검색 + 상태 필터
+  // 고유 사용자 목록 추출
+  const uniqueUsers = Array.from(new Set(campaigns.map(c => c.created_by_name).filter(Boolean))).sort();
+
+  // 검색 + 상태 + 사용자 필터
   const filtered = campaigns.filter(c => {
     const matchSearch = !search ||
       c.campaign_name.toLowerCase().includes(search.toLowerCase()) ||
       (c.created_by_name || '').toLowerCase().includes(search.toLowerCase());
     const matchStatus = statusFilter === 'all' || c.status === statusFilter;
-    return matchSearch && matchStatus;
+    const matchUser = !filterUser || c.created_by_name === filterUser;
+    return matchSearch && matchStatus && matchUser;
   });
 
   // 정렬: 예약대기 먼저 → 취소 뒤로, 각각 날짜 내림차순
@@ -153,11 +158,20 @@ export default function ScheduledTab() {
           <h2 className="text-lg font-semibold">예약 캠페인</h2>
         </div>
 
-        {/* 검색 + 상태 필터 */}
+        {/* 검색 + 상태 + 사용자 필터 */}
         <div className="px-6 py-3 bg-gray-50 border-b flex flex-wrap items-center gap-4">
           <input type="text" value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }}
             placeholder="🔍 캠페인명, 생성자 검색..."
             className="flex-1 max-w-xs px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+          {uniqueUsers.length > 1 && (
+            <select value={filterUser} onChange={(e) => { setFilterUser(e.target.value); setPage(1); }}
+              className="px-3 py-2 border rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none">
+              <option value="">👤 전체 사용자</option>
+              {uniqueUsers.map(u => (
+                <option key={u} value={u}>{u}</option>
+              ))}
+            </select>
+          )}
           <div className="flex items-center gap-2">
             {([
               { key: 'all', label: `전체 (${scheduledCount + cancelledCount})` },

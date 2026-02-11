@@ -86,6 +86,12 @@ router.get('/summary', async (req: Request, res: Response) => {
       summaryQuery += ` AND created_by = $3`;
       summaryParams.push(userId);
     }
+
+    // 고객사 관리자: 특정 사용자 필터
+    if (userType === 'company_admin' && req.query.filter_user_id) {
+      summaryQuery += ` AND created_by = $3`;
+      summaryParams.push(req.query.filter_user_id);
+    }
     
     const campaignStats = await query(summaryQuery, summaryParams);
 
@@ -147,6 +153,12 @@ router.get('/campaigns', async (req: Request, res: Response) => {
     if (userType === 'company_user') {
       whereClause += ` AND created_by = $${paramIndex++}`;
       params.push(userId);
+    }
+
+    // 고객사 관리자: 특정 사용자 필터
+    if (userType === 'company_admin' && req.query.filter_user_id) {
+      whereClause += ` AND created_by = $${paramIndex++}`;
+      params.push(req.query.filter_user_id);
     }
 
     // 기간 필터

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { manageStatsApi } from '../api/client';
+import { manageStatsApi, manageUsersApi } from '../api/client';
 import Toast from './Toast';
 import { formatDateTime } from '../utils/formatDate';
 
@@ -12,6 +12,10 @@ export default function StatsTab() {
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
 
+  // 사용자 필터
+  const [users, setUsers] = useState<{ id: string; name: string; login_id: string }[]>([]);
+  const [filterUserId, setFilterUserId] = useState('');
+
   // 상세
   const [detail, setDetail] = useState<any>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -19,16 +23,24 @@ export default function StatsTab() {
 
   const perPage = 10;
 
+  // 사용자 목록 로드
+  useEffect(() => {
+    manageUsersApi.list()
+      .then((res: any) => setUsers(res.data.users || []))
+      .catch(() => {});
+  }, []);
+
   const loadStats = useCallback(async (p = 1) => {
     setLoading(true);
     try {
       const res = await manageStatsApi.send({
         view, startDate, endDate, page: p, limit: perPage,
+        filterUserId: filterUserId || undefined,
       });
       setStats(res.data);
       setPage(p);
     } catch { /* */ } finally { setLoading(false); }
-  }, [view, startDate, endDate]);
+  }, [view, startDate, endDate, filterUserId]);
 
   useEffect(() => { loadStats(1); }, [loadStats]);
 
@@ -36,7 +48,7 @@ export default function StatsTab() {
     setDetailLoading(true);
     setDetailInfo({ date });
     try {
-      const res = await manageStatsApi.sendDetail({ view, date });
+      const res = await manageStatsApi.sendDetail({ view, date, filterUserId: filterUserId || undefined });
       setDetail(res.data);
     } catch {
       setToast({ msg: '상세 조회 실패', type: 'error' });
@@ -96,6 +108,15 @@ export default function StatsTab() {
             <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)}
               className="px-3 py-1.5 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
           </div>
+          {users.length > 1 && (
+            <select value={filterUserId} onChange={(e) => setFilterUserId(e.target.value)}
+              className="px-3 py-1.5 border rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none">
+              <option value="">👤 전체 사용자</option>
+              {users.map(u => (
+                <option key={u.id} value={u.id}>{u.name || u.login_id}</option>
+              ))}
+            </select>
+          )}
           <button onClick={() => loadStats(1)}
             className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition">
             조회

@@ -42,6 +42,13 @@ router.get('/', async (req: Request, res: Response) => {
       sql += ` AND c.company_id = $${params.length}`;
     }
 
+    // 사용자 필터 (고객사관리자용)
+    const filterUserId = req.query.filter_user_id as string;
+    if (filterUserId) {
+      params.push(filterUserId);
+      sql += ` AND c.created_by = $${params.length}`;
+    }
+
     sql += ' ORDER BY c.created_at DESC';
 
     const result = await query(sql, params);
