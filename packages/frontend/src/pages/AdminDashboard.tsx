@@ -463,7 +463,7 @@ const handleCustomerDeleteAll = async () => {
     setShowCustomerDeleteAll(false);
     setCustomerDeleteConfirmName('');
     showAlert('삭제 완료', `${data.deletedCount}명의 고객 데이터가 삭제되었습니다.\n구매내역 ${data.deletedPurchases}건도 함께 삭제되었습니다.`, 'success');
-    loadCompanies();
+    loadData();
   } catch (e: any) {
     showAlert('오류', e.message || '삭제 실패', 'error');
   } finally {
