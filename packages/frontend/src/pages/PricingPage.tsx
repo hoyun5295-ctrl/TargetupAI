@@ -35,6 +35,10 @@ export default function PricingPage() {
   const [submitting, setSubmitting] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showContactModal, setShowContactModal] = useState(false);
+  const [hasPending, setHasPending] = useState(false);
+  const [pendingPlanName, setPendingPlanName] = useState('');
+  const [unconfirmedResult, setUnconfirmedResult] = useState<any>(null);
+  const [showResultModal, setShowResultModal] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -58,6 +62,22 @@ export default function PricingPage() {
       });
       const companyData = await companyRes.json();
       setCompanyInfo(companyData);
+
+      // 요금제 신청 상태 조회 (pending + 미확인 결과)
+      const statusRes = await fetch('/api/companies/plan-request/status', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (statusRes.ok) {
+        const statusData = await statusRes.json();
+        if (statusData.pending) {
+          setHasPending(true);
+          setPendingPlanName(statusData.pending.requested_plan_name || '');
+        }
+        if (statusData.unconfirmed) {
+          setUnconfirmedResult(statusData.unconfirmed);
+          setShowResultModal(true);
+        }
+      }
     } catch (error) {
       console.error('데이터 로드 실패:', error);
     } finally {
@@ -101,9 +121,16 @@ export default function PricingPage() {
       if (res.ok) {
         setShowRequestModal(false);
         setShowSuccessModal(true);
+        setHasPending(true);
+        setPendingPlanName(selectedPlan.plan_name);
       } else {
         const data = await res.json();
-        alert(data.error || '신청 실패');
+        if (data.code === 'DUPLICATE_PENDING') {
+          setShowRequestModal(false);
+          setHasPending(true);
+        } else {
+          alert(data.error || '신청 실패');
+        }
       }
     } catch (error) {
       alert('신청 중 오류가 발생했습니다.');
@@ -223,6 +250,23 @@ export default function PricingPage() {
           </div>
         )}
 
+        {/* 대기 중 신청 배너 */}
+        {hasPending && (
+          <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 mb-6 flex items-center gap-3">
+            <div className="w-10 h-10 bg-yellow-100 rounded-full flex items-center justify-center flex-shrink-0">
+              <svg className="w-5 h-5 text-yellow-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <div>
+              <p className="font-medium text-yellow-800">
+                {pendingPlanName ? `${pendingPlanName} 플랜` : '요금제'} 변경 신청이 대기 중입니다
+              </p>
+              <p className="text-sm text-yellow-600 mt-0.5">담당자 확인 후 처리됩니다. 중복 신청은 불가합니다.</p>
+            </div>
+          </div>
+        )}
+
         <h2 className="text-lg font-semibold mb-4">요금제 비교</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
           {plans.map((plan) => {
@@ -289,6 +333,13 @@ export default function PricingPage() {
                       >
                         이용 중
                       </button>
+                    ) : hasPending ? (
+                      <button
+                        disabled
+                        className="w-full py-2 px-4 bg-yellow-50 text-yellow-600 border border-yellow-200 rounded-lg cursor-not-allowed text-sm"
+                      >
+                        신청 대기 중
+                      </button>
                     ) : plan.max_customers < Number(companyInfo?.current_customers || 0) ? (
                       <button
                         disabled
@@ -309,10 +360,10 @@ export default function PricingPage() {
                       </button>
                     ) : (
                       <button
-                        disabled
-                        className="w-full py-2 px-4 bg-gray-100 text-gray-400 rounded-lg cursor-not-allowed text-sm"
+                        onClick={() => handleRequestPlan(plan)}
+                        className="w-full py-2 px-4 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors text-sm font-medium"
                       >
-                        현재보다 낮은 플랜
+                        다운그레이드 신청
                       </button>
                     )}
                   </div>
@@ -353,7 +404,10 @@ export default function PricingPage() {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
             <div className="p-6">
-              <h3 className="text-lg font-semibold mb-4">플랜 변경 신청</h3>
+              <h3 className="text-lg font-semibold mb-4">
+                {selectedPlan && companyInfo && selectedPlan.max_customers > (companyInfo.max_customers || 0)
+                  ? '업그레이드 신청' : '다운그레이드 신청'}
+              </h3>
               
               <div className="bg-blue-50 rounded-lg p-4 mb-4">
                 <div className="flex justify-between items-center">
@@ -490,6 +544,79 @@ export default function PricingPage() {
                 className="w-full px-4 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors"
               >
                 닫기
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 요금제 승인/거절 결과 알림 모달 */}
+      {showResultModal && unconfirmedResult && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in fade-in zoom-in">
+            <div className="p-6 text-center">
+              {unconfirmedResult.status === 'approved' ? (
+                <>
+                  <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <svg className="w-8 h-8 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                  </div>
+                  <h3 className="text-lg font-semibold text-gray-900 mb-2">요금제 변경 완료</h3>
+                  <p className="text-sm text-gray-600">
+                    <span className="font-semibold text-blue-600">{unconfirmedResult.requested_plan_name}</span> 플랜으로<br/>
+                    변경이 완료되었습니다.
+                  </p>
+                  {unconfirmedResult.admin_note && (
+                    <div className="mt-3 p-3 bg-gray-50 rounded-lg text-left">
+                      <p className="text-xs text-gray-500 mb-1">관리자 메모</p>
+                      <p className="text-sm text-gray-700">{unconfirmedResult.admin_note}</p>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <svg className="w-8 h-8 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </div>
+                  <h3 className="text-lg font-semibold text-gray-900 mb-2">요금제 승인 반려</h3>
+                  <p className="text-sm text-gray-600">
+                    <span className="font-semibold text-gray-800">{unconfirmedResult.requested_plan_name}</span> 플랜 신청이<br/>
+                    반려되었습니다.
+                  </p>
+                  {unconfirmedResult.admin_note && (
+                    <div className="mt-3 p-3 bg-red-50 rounded-lg text-left">
+                      <p className="text-xs text-red-500 mb-1">반려 사유</p>
+                      <p className="text-sm text-red-700">{unconfirmedResult.admin_note}</p>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+            <div className="border-t">
+              <button
+                onClick={async () => {
+                  try {
+                    const token = localStorage.getItem('token');
+                    await fetch(`/api/companies/plan-request/${unconfirmedResult.id}/confirm`, {
+                      method: 'PUT',
+                      headers: { Authorization: `Bearer ${token}` },
+                    });
+                  } catch (e) {
+                    console.error('확인 처리 실패:', e);
+                  }
+                  setShowResultModal(false);
+                  setUnconfirmedResult(null);
+                  // 승인된 경우 페이지 데이터 새로고침
+                  if (unconfirmedResult.status === 'approved') {
+                    loadData();
+                  }
+                }}
+                className="w-full px-4 py-3 text-blue-600 font-medium hover:bg-blue-50 transition-colors"
+              >
+                확인
               </button>
             </div>
           </div>

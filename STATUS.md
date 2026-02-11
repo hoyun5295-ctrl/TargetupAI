@@ -1300,6 +1300,18 @@ POST /api/sync/purchases   ← 구매내역 벌크 INSERT (배치 최대 1000건
 - [x] AI 원본 파일에서 투명 배경 로고 추출 (pymupdf + PIL 크롭)
 - [x] 로그인 페이지 로고 이미지 적용 (frontend + company-frontend, h-10)
 
+**세션 타임아웃 구현 (2026-02-11)**
+- [x] useSessionTimeout 훅 개발 (비활동 감지: mousedown/keydown/scroll/touchstart/click)
+- [x] SessionTimeoutModal 컴포넌트 (원형 프로그레스 타이머, 1분 이하 긴급모드, animate-in)
+- [x] auth.ts 로그인 응답에 sessionTimeoutMinutes 추가 (고객사: DB 조회, 슈퍼관리자: 60분 고정)
+- [x] auth.ts POST /extend-session API 추가 (세션 연장 시 DB expires_at 갱신)
+- [x] frontend App.tsx SessionTimeoutGuard 추가
+- [x] company-frontend App.tsx SessionTimeoutGuard 추가
+- [x] 로그인 시 localStorage에 sessionTimeoutMinutes 저장 (frontend + company-frontend)
+- [x] AdminDashboard 기본정보 탭에 세션 타임아웃 설정 필드 추가 (5~480분)
+- [x] admin.ts PUT /companies/:id에 session_timeout_minutes 저장 추가
+- [x] 서버 배포 완료
+
 ### 🔲 진행 예정 작업
 
 **선불 요금제 Phase 1-B~2**
@@ -1310,12 +1322,6 @@ POST /api/sync/purchases   ← 구매내역 벌크 INSERT (배치 최대 1000건
 - [ ] Sync Agent 코어 완성 (로컬 큐, 스케줄러, Heartbeat 남음)
 
 **보안**
-- [ ] 세션 타임아웃 구현 (기본 30분, 고객사별 조정 가능, 5분전 경고 모달, 자동 로그아웃)
-  - companies.session_timeout_minutes 컬럼 (기본 30)
-  - 로그인 응답에 sessionTimeoutMinutes 포함
-  - 비활동 감지 (마우스/키보드/클릭/API호출)
-  - 만료 5분 전 경고 모달 → 연장 가능
-  - frontend + company-frontend + 슈퍼관리자 모두 적용
 - [ ] 슈퍼관리자 IP 화이트리스트 설정
 - [ ] www.hanjul.ai SSL 인증서 추가 (DNS 전파 후)
 - [ ] VPN 접근 제한 검토

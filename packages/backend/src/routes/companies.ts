@@ -152,6 +152,15 @@ router.post('/plan-request', async (req: Request, res: Response) => {
       return res.status(400).json({ error: '요청할 플랜을 선택해주세요.' });
     }
 
+    // 중복 신청 방지: 이미 pending 상태인 신청이 있는지 확인
+    const pendingCheck = await query(
+      `SELECT id FROM plan_requests WHERE company_id = $1 AND status = 'pending' LIMIT 1`,
+      [companyId]
+    );
+    if (pendingCheck.rows.length > 0) {
+      return res.status(409).json({ error: '이미 처리 대기 중인 요금제 신청이 있습니다.', code: 'DUPLICATE_PENDING' });
+    }
+
     // plan_requests 테이블에 저장
     await query(`
       INSERT INTO plan_requests (company_id, user_id, requested_plan_id, message, status)
@@ -162,6 +171,66 @@ router.post('/plan-request', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('플랜 신청 실패:', error);
     res.status(500).json({ error: '플랜 신청 실패' });
+  }
+});
+
+// GET /api/companies/plan-request/status - 현재 신청 상태 조회 (pending + 미확인 결과)
+router.get('/plan-request/status', async (req: Request, res: Response) => {
+  try {
+    const companyId = (req as any).user?.companyId;
+    if (!companyId) {
+      return res.status(401).json({ error: '인증 필요' });
+    }
+
+    // pending 신청 확인
+    const pendingResult = await query(
+      `SELECT pr.id, pr.status, p.plan_name as requested_plan_name
+       FROM plan_requests pr
+       LEFT JOIN plans p ON pr.requested_plan_id = p.id
+       WHERE pr.company_id = $1 AND pr.status = 'pending'
+       ORDER BY pr.created_at DESC LIMIT 1`,
+      [companyId]
+    );
+
+    // 미확인 처리 결과 (approved/rejected 중 user_confirmed = false)
+    const unconfirmedResult = await query(
+      `SELECT pr.id, pr.status, pr.admin_note, p.plan_name as requested_plan_name, pr.processed_at
+       FROM plan_requests pr
+       LEFT JOIN plans p ON pr.requested_plan_id = p.id
+       WHERE pr.company_id = $1 AND pr.status IN ('approved', 'rejected') AND pr.user_confirmed = false
+       ORDER BY pr.processed_at DESC LIMIT 1`,
+      [companyId]
+    );
+
+    res.json({
+      pending: pendingResult.rows[0] || null,
+      unconfirmed: unconfirmedResult.rows[0] || null,
+    });
+  } catch (error) {
+    console.error('플랜 신청 상태 조회 실패:', error);
+    res.status(500).json({ error: '플랜 신청 상태 조회 실패' });
+  }
+});
+
+// PUT /api/companies/plan-request/:id/confirm - 사용자 결과 확인 처리
+router.put('/plan-request/:id/confirm', async (req: Request, res: Response) => {
+  try {
+    const companyId = (req as any).user?.companyId;
+    const { id } = req.params;
+
+    if (!companyId) {
+      return res.status(401).json({ error: '인증 필요' });
+    }
+
+    await query(
+      `UPDATE plan_requests SET user_confirmed = true WHERE id = $1 AND company_id = $2`,
+      [id, companyId]
+    );
+
+    res.json({ message: '확인 처리되었습니다.' });
+  } catch (error) {
+    console.error('플랜 결과 확인 실패:', error);
+    res.status(500).json({ error: '플랜 결과 확인 실패' });
   }
 });
 
