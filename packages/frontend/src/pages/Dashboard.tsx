@@ -1,4 +1,4 @@
-ï»¿import { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { customersApi, campaignsApi, aiApi } from '../api/client';
 import { useAuthStore } from '../stores/authStore';
@@ -42,7 +42,7 @@ interface PlanInfo {
   is_trial_expired: boolean;
 }
 
-// ìº˜ë¦°ë” ëª¨ë‹¬ ì»´í¬ë„ŒíŠ¸
+// Ä¶¸°´õ ¸ğ´Ş ÄÄÆ÷³ÍÆ®
 function CalendarModal({ onClose, token }: { onClose: () => void; token: string | null }) {
   const [campaigns, setCampaigns] = useState<any[]>([]);
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -64,7 +64,7 @@ function CalendarModal({ onClose, token }: { onClose: () => void; token: string 
       const data = await res.json();
       setCampaigns(data.campaigns || []);
     } catch (error) {
-      console.error('ìº í˜ì¸ ì¡°íšŒ ì—ëŸ¬:', error);
+      console.error('Ä·ÆäÀÎ Á¶È¸ ¿¡·¯:', error);
     }
   };
 
@@ -74,7 +74,7 @@ function CalendarModal({ onClose, token }: { onClose: () => void; token: string 
   const getCampaignsForDay = (day: number) => {
     const currentDay = new Date(year, month, day);
     return campaigns.filter((c) => {
-      // ì´ë²¤íŠ¸ ê¸°ê°„ì´ ìœ íš¨í•˜ë©´ ê·¸ ë²”ìœ„ ì²´í¬
+      // ÀÌº¥Æ® ±â°£ÀÌ À¯È¿ÇÏ¸é ±× ¹üÀ§ Ã¼Å©
       if (c.event_start_date && c.event_end_date) {
         const startStr = c.event_start_date.slice(0, 10); // "2026-02-09"
         const endStr = c.event_end_date.slice(0, 10);     // "2026-02-13"
@@ -83,7 +83,7 @@ function CalendarModal({ onClose, token }: { onClose: () => void; token: string 
           return currentStr >= startStr && currentStr <= endStr;
         }
       }
-      // ì—†ê±°ë‚˜ ìœ íš¨í•˜ì§€ ì•Šìœ¼ë©´ scheduled_at ë˜ëŠ” created_at ê¸°ì¤€
+      // ¾ø°Å³ª À¯È¿ÇÏÁö ¾ÊÀ¸¸é scheduled_at ¶Ç´Â created_at ±âÁØ
       const dateStr = c.scheduled_at || c.created_at;
       const date = new Date(dateStr);
       return date.getDate() === day && date.getMonth() === month && date.getFullYear() === year;
@@ -104,61 +104,61 @@ function CalendarModal({ onClose, token }: { onClose: () => void; token: string 
     cancelled: 'bg-gray-200 text-gray-400',
   };
   const statusLabels: Record<string, string> = {
-    draft: 'ì¤€ë¹„', scheduled: 'ì˜ˆì•½', sending: 'ì§„í–‰', completed: 'ì™„ë£Œ', failed: 'ì‹¤íŒ¨', cancelled: 'ì·¨ì†Œ',
+    draft: 'ÁØºñ', scheduled: '¿¹¾à', sending: 'ÁøÇà', completed: '¿Ï·á', failed: '½ÇÆĞ', cancelled: 'Ãë¼Ò',
   };
 
-  // ë‚ ì§œ í´ë¦­ í•¸ë“¤ëŸ¬
+  // ³¯Â¥ Å¬¸¯ ÇÚµé·¯
   const handleDateClick = (day: number) => {
     setSelectedDate(day);
-    setSelectedCampaign(null); // ìº í˜ì¸ ì„ íƒ ì´ˆê¸°í™”
+    setSelectedCampaign(null); // Ä·ÆäÀÎ ¼±ÅÃ ÃÊ±âÈ­
   };
 
-  // ìº í˜ì¸ í´ë¦­ í•¸ë“¤ëŸ¬
+  // Ä·ÆäÀÎ Å¬¸¯ ÇÚµé·¯
   const handleCampaignClick = (campaign: any, e: React.MouseEvent) => {
-    e.stopPropagation(); // ë‚ ì§œ í´ë¦­ ì´ë²¤íŠ¸ ì „íŒŒ ë°©ì§€
+    e.stopPropagation(); // ³¯Â¥ Å¬¸¯ ÀÌº¥Æ® ÀüÆÄ ¹æÁö
     setSelectedCampaign(campaign);
   };
 
-  // ì„ íƒëœ ë‚ ì§œì˜ ìº í˜ì¸ ëª©ë¡
+  // ¼±ÅÃµÈ ³¯Â¥ÀÇ Ä·ÆäÀÎ ¸ñ·Ï
   const selectedDateCampaigns = selectedDate ? getCampaignsForDay(selectedDate) : [];
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div className="bg-white rounded-xl shadow-2xl w-[900px] max-h-[650px] overflow-hidden">
-        {/* í—¤ë” */}
+        {/* Çì´õ */}
         <div className="flex justify-between items-center p-4 border-b bg-gray-50">
-          <button onClick={() => setCurrentDate(new Date(year, month - 1, 1))} className="px-3 py-1 hover:bg-gray-200 rounded">â†</button>
-          <h2 className="text-lg font-bold">{year}ë…„ {month + 1}ì›”</h2>
-          <button onClick={() => setCurrentDate(new Date(year, month + 1, 1))} className="px-3 py-1 hover:bg-gray-200 rounded">â†’</button>
-          <button onClick={onClose} className="ml-4 text-gray-500 hover:text-gray-700 text-xl">âœ•</button>
+          <button onClick={() => setCurrentDate(new Date(year, month - 1, 1))} className="px-3 py-1 hover:bg-gray-200 rounded">¡ç</button>
+          <h2 className="text-lg font-bold">{year}³â {month + 1}¿ù</h2>
+          <button onClick={() => setCurrentDate(new Date(year, month + 1, 1))} className="px-3 py-1 hover:bg-gray-200 rounded">¡æ</button>
+          <button onClick={onClose} className="ml-4 text-gray-500 hover:text-gray-700 text-xl">?</button>
         </div>
 
         <div className="flex">
-          {/* ìº˜ë¦°ë” */}
+          {/* Ä¶¸°´õ */}
           <div className="flex-1 p-4">
-            {/* ìƒíƒœ ìƒ‰ìƒ ê°€ì´ë“œ */}
+            {/* »óÅÂ »ö»ó °¡ÀÌµå */}
             <div className="flex items-center gap-4 mb-3 pb-2 border-b text-xs">
-              <span className="text-gray-500">ìƒíƒœ:</span>
+              <span className="text-gray-500">»óÅÂ:</span>
               <div className="flex items-center gap-1">
                 <span className="w-3 h-3 rounded bg-green-200"></span>
-                <span className="text-gray-600">ì™„ë£Œ</span>
+                <span className="text-gray-600">¿Ï·á</span>
               </div>
               <div className="flex items-center gap-1">
                 <span className="w-3 h-3 rounded bg-blue-200"></span>
-                <span className="text-gray-600">ì˜ˆì•½</span>
+                <span className="text-gray-600">¿¹¾à</span>
               </div>
               <div className="flex items-center gap-1">
                 <span className="w-3 h-3 rounded bg-gray-200"></span>
-                <span className="text-gray-600">ì·¨ì†Œ</span>
+                <span className="text-gray-600">Ãë¼Ò</span>
               </div>
               <div className="flex items-center gap-1">
                 <span className="w-3 h-3 rounded bg-orange-200"></span>
-                <span className="text-gray-600">ì§„í–‰</span>
+                <span className="text-gray-600">ÁøÇà</span>
               </div>
             </div>
-            {/* ìš”ì¼ í—¤ë” - ìƒ‰ìƒ ì ìš© */}
+            {/* ¿äÀÏ Çì´õ - »ö»ó Àû¿ë */}
             <div className="grid grid-cols-7 gap-1 mb-2">
-              {['ì¼','ì›”','í™”','ìˆ˜','ëª©','ê¸ˆ','í† '].map((d, idx) => (
+              {['ÀÏ','¿ù','È­','¼ö','¸ñ','±İ','Åä'].map((d, idx) => (
                 <div 
                   key={d} 
                   className={`text-center text-xs font-medium ${
@@ -169,7 +169,7 @@ function CalendarModal({ onClose, token }: { onClose: () => void; token: string 
                 </div>
               ))}
             </div>
-            {/* ë‚ ì§œ ê·¸ë¦¬ë“œ */}
+            {/* ³¯Â¥ ±×¸®µå */}
             <div className="grid grid-cols-7 gap-1">
               {blanks.map(i => <div key={`b-${i}`} className="h-20 bg-gray-50 rounded" />)}
               {days.map(day => {
@@ -208,7 +208,7 @@ function CalendarModal({ onClose, token }: { onClose: () => void; token: string 
                       isSelected ? 'border-purple-500 border-2 bg-purple-50' : 'border-gray-200'
                     }`}
                   >
-                    {/* ë‚ ì§œ ìˆ«ì - ìš”ì¼ë³„ ìƒ‰ìƒ */}
+                    {/* ³¯Â¥ ¼ıÀÚ - ¿äÀÏº° »ö»ó */}
                     <div className={`font-medium text-center ${
                       isToday ? 'text-blue-600' : 
                       dayOfWeek === 0 ? 'text-red-500' : 
@@ -216,7 +216,7 @@ function CalendarModal({ onClose, token }: { onClose: () => void; token: string 
                     }`}>
                       {day}
                     </div>
-                    {/* ìº í˜ì¸ ëª©ë¡ - ì—°ê²° ë°” */}                    {/* ìº í˜ì¸ ëª©ë¡ - ì—°ê²° ë°” */}
+                    {/* Ä·ÆäÀÎ ¸ñ·Ï - ¿¬°á ¹Ù */}                    {/* Ä·ÆäÀÎ ¸ñ·Ï - ¿¬°á ¹Ù */}
 {dayCampaigns.slice(0, 2).map(c => {
   const position = getEventPosition(c);
   const barMargin = position === 'start' ? '-mr-2' : position === 'end' ? '-ml-2' : position === 'middle' ? '-mx-2' : '';
@@ -241,7 +241,7 @@ function CalendarModal({ onClose, token }: { onClose: () => void; token: string 
   );
 })}
                     {dayCampaigns.length > 2 && (
-                      <div className="text-gray-400 mt-0.5 hover:text-purple-600">+{dayCampaigns.length - 2}ê°œ ë”</div>
+                      <div className="text-gray-400 mt-0.5 hover:text-purple-600">+{dayCampaigns.length - 2}°³ ´õ</div>
                     )}
                   </div>
                 );
@@ -249,52 +249,52 @@ function CalendarModal({ onClose, token }: { onClose: () => void; token: string 
             </div>
           </div>
 
-          {/* ìš°ì¸¡ íŒ¨ë„ - ë‚ ì§œ ì„ íƒ ë˜ëŠ” ìº í˜ì¸ ìƒì„¸ */}
+          {/* ¿ìÃø ÆĞ³Î - ³¯Â¥ ¼±ÅÃ ¶Ç´Â Ä·ÆäÀÎ »ó¼¼ */}
           <div className="w-72 border-l bg-gray-50 flex flex-col max-h-[580px]">
             {selectedCampaign ? (
-              // ìº í˜ì¸ ìƒì„¸ ë³´ê¸°
+              // Ä·ÆäÀÎ »ó¼¼ º¸±â
               <div className="p-4 overflow-y-auto flex-1">
                 <div className="flex justify-between items-start mb-4">
                   <h3 className="font-bold text-base leading-tight">{selectedCampaign.campaign_name}</h3>
-                  <button onClick={() => setSelectedCampaign(null)} className="text-gray-400 hover:text-gray-600 text-sm">âœ•</button>
+                  <button onClick={() => setSelectedCampaign(null)} className="text-gray-400 hover:text-gray-600 text-sm">?</button>
                 </div>
                 
                 <div className="space-y-3 text-sm">
-                  {/* ìƒíƒœ */}
+                  {/* »óÅÂ */}
                   <div className="flex items-center gap-2">
-                    <span className="text-gray-500 w-16">ìƒíƒœ</span>
+                    <span className="text-gray-500 w-16">»óÅÂ</span>
                     <span className={`px-2 py-0.5 rounded text-xs font-medium ${statusColors[selectedCampaign.status]}`}>
                       {statusLabels[selectedCampaign.status]}
                       {selectedCampaign.status === 'cancelled' && selectedCampaign.cancelled_by_type === 'super_admin' && (
-                        <span className="ml-1 text-red-500">(ê´€ë¦¬ì)</span>
+                        <span className="ml-1 text-red-500">(°ü¸®ÀÚ)</span>
                       )}
                     </span>
                   </div>
                   
-                  {/* ì·¨ì†Œ ì‚¬ìœ  (ê´€ë¦¬ì ì·¨ì†Œ ì‹œ) */}
+                  {/* Ãë¼Ò »çÀ¯ (°ü¸®ÀÚ Ãë¼Ò ½Ã) */}
                   {selectedCampaign.status === 'cancelled' && selectedCampaign.cancel_reason && (
                     <div className="flex items-start gap-2">
-                      <span className="text-gray-500 w-16">ì·¨ì†Œì‚¬ìœ </span>
+                      <span className="text-gray-500 w-16">Ãë¼Ò»çÀ¯</span>
                       <span className="text-red-600 text-xs flex-1">{selectedCampaign.cancel_reason}</span>
                     </div>
                   )}
                   
-                  {/* ì±„ë„ */}
+                  {/* Ã¤³Î */}
                   <div className="flex items-center gap-2">
-                    <span className="text-gray-500 w-16">ì±„ë„</span>
+                    <span className="text-gray-500 w-16">Ã¤³Î</span>
                     <span className="font-medium">{selectedCampaign.message_type}</span>
                   </div>
                   
-                  {/* ëŒ€ìƒ */}
+                  {/* ´ë»ó */}
                   <div className="flex items-center gap-2">
-                    <span className="text-gray-500 w-16">ëŒ€ìƒ</span>
-                    <span className="font-medium">{selectedCampaign.target_count?.toLocaleString()}ëª…</span>
+                    <span className="text-gray-500 w-16">´ë»ó</span>
+                    <span className="font-medium">{selectedCampaign.target_count?.toLocaleString()}¸í</span>
                   </div>
                   
-                  {/* ì˜ˆì•½ì‹œê°„ */}
+                  {/* ¿¹¾à½Ã°£ */}
                   {selectedCampaign.scheduled_at && (
                     <div className="flex items-center gap-2">
-                      <span className="text-gray-500 w-16">ì˜ˆì•½</span>
+                      <span className="text-gray-500 w-16">¿¹¾à</span>
                       <span className="font-medium text-blue-600">
                         {new Date(selectedCampaign.scheduled_at).toLocaleString('ko-KR', {
                           timeZone: 'Asia/Seoul', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
@@ -303,10 +303,10 @@ function CalendarModal({ onClose, token }: { onClose: () => void; token: string 
                     </div>
                   )}
                   
-                  {/* ë°œì†¡ì‹œê°„ */}
+                  {/* ¹ß¼Û½Ã°£ */}
                   {selectedCampaign.sent_at && (
                     <div className="flex items-center gap-2">
-                      <span className="text-gray-500 w-16">ë°œì†¡</span>
+                      <span className="text-gray-500 w-16">¹ß¼Û</span>
                       <span className="font-medium">
                         {new Date(selectedCampaign.sent_at).toLocaleString('ko-KR', {
                           timeZone: 'Asia/Seoul', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
@@ -315,59 +315,59 @@ function CalendarModal({ onClose, token }: { onClose: () => void; token: string 
                     </div>
                   )}
                   
-                  {/* ë©”ì‹œì§€ ë¯¸ë¦¬ë³´ê¸° */}
+                  {/* ¸Ş½ÃÁö ¹Ì¸®º¸±â */}
                   {selectedCampaign.message_content && (
                     <div className="pt-3 border-t">
-                      <div className="text-gray-500 mb-2">ğŸ’¬ ë©”ì‹œì§€</div>
+                      <div className="text-gray-500 mb-2">?? ¸Ş½ÃÁö</div>
                       <div className="bg-white rounded-lg p-3 text-xs text-gray-700 whitespace-pre-wrap border max-h-24 overflow-y-auto">
                         {selectedCampaign.message_content}
                       </div>
                     </div>
                   )}
                   
-                  {/* ë°œì†¡ ê²°ê³¼ */}
+                  {/* ¹ß¼Û °á°ú */}
                   {(selectedCampaign.status === 'completed' || selectedCampaign.status === 'sending') && (
                     <div className="pt-3 border-t">
-                      <div className="text-gray-500 mb-2">ğŸ“Š ë°œì†¡ ê²°ê³¼</div>
+                      <div className="text-gray-500 mb-2">?? ¹ß¼Û °á°ú</div>
                       <div className="grid grid-cols-3 gap-2 text-center">
                         <div className="bg-white rounded p-2 border">
                           <div className="font-bold text-gray-700">{selectedCampaign.sent_count?.toLocaleString() || 0}</div>
-                          <div className="text-xs text-gray-400">ë°œì†¡</div>
+                          <div className="text-xs text-gray-400">¹ß¼Û</div>
                         </div>
                         <div className="bg-green-50 rounded p-2 border border-green-200">
                           <div className="font-bold text-green-600">{selectedCampaign.success_count?.toLocaleString() || 0}</div>
-                          <div className="text-xs text-gray-400">ì„±ê³µ</div>
+                          <div className="text-xs text-gray-400">¼º°ø</div>
                         </div>
                         <div className="bg-red-50 rounded p-2 border border-red-200">
                           <div className="font-bold text-red-600">{selectedCampaign.fail_count?.toLocaleString() || 0}</div>
-                          <div className="text-xs text-gray-400">ì‹¤íŒ¨</div>
+                          <div className="text-xs text-gray-400">½ÇÆĞ</div>
                         </div>
                       </div>
                     </div>
                   )}
                   
-                  {/* ë²„íŠ¼ */}
+                  {/* ¹öÆ° */}
                   <div className="pt-4 space-y-2">
                     <button className="w-full py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 text-sm font-medium transition-colors">
-                      âœï¸ í¸ì§‘
+                      ?? ÆíÁı
                     </button>
                     <button className="w-full py-2 border border-gray-300 rounded-lg hover:bg-gray-100 text-sm font-medium transition-colors">
-                      ğŸ“‹ ë³µì œ
+                      ?? º¹Á¦
                     </button>
                   </div>
                 </div>
               </div>
             ) : selectedDate ? (
-              // ë‚ ì§œ ì„ íƒ - ìº í˜ì¸ ëª©ë¡
+              // ³¯Â¥ ¼±ÅÃ - Ä·ÆäÀÎ ¸ñ·Ï
               <div className="p-4 overflow-y-auto flex-1">
                 <div className="flex justify-between items-center mb-4">
                   <h3 className="font-bold">
-                    {month + 1}ì›” {selectedDate}ì¼
+                    {month + 1}¿ù {selectedDate}ÀÏ
                     <span className="text-gray-400 font-normal ml-1">
-                      ({['ì¼','ì›”','í™”','ìˆ˜','ëª©','ê¸ˆ','í† '][new Date(year, month, selectedDate).getDay()]})
+                      ({['ÀÏ','¿ù','È­','¼ö','¸ñ','±İ','Åä'][new Date(year, month, selectedDate).getDay()]})
                     </span>
                   </h3>
-                  <button onClick={() => setSelectedDate(null)} className="text-gray-400 hover:text-gray-600 text-sm">âœ•</button>
+                  <button onClick={() => setSelectedDate(null)} className="text-gray-400 hover:text-gray-600 text-sm">?</button>
                 </div>
                 
                 {selectedDateCampaigns.length > 0 ? (
@@ -384,24 +384,24 @@ function CalendarModal({ onClose, token }: { onClose: () => void; token: string 
                             {statusLabels[c.status]}
                           </span>
                           <span className="text-gray-400">{c.message_type}</span>
-                          <span className="text-gray-400">{c.target_count?.toLocaleString()}ëª…</span>
+                          <span className="text-gray-400">{c.target_count?.toLocaleString()}¸í</span>
                         </div>
                       </div>
                     ))}
                   </div>
                 ) : (
                   <div className="text-center text-gray-400 py-8">
-                    <div className="text-3xl mb-2">ğŸ“­</div>
-                    <p>ì´ ë‚ ì§œì— ìº í˜ì¸ì´ ì—†ìŠµë‹ˆë‹¤</p>
+                    <div className="text-3xl mb-2">??</div>
+                    <p>ÀÌ ³¯Â¥¿¡ Ä·ÆäÀÎÀÌ ¾ø½À´Ï´Ù</p>
                   </div>
                 )}
               </div>
             ) : (
-              // ê¸°ë³¸ ìƒíƒœ
+              // ±âº» »óÅÂ
               <div className="flex-1 flex items-center justify-center text-center text-gray-400 p-4">
                 <div>
-                  <div className="text-4xl mb-3">ğŸ“…</div>
-                  <p className="text-sm">ë‚ ì§œë‚˜ ìº í˜ì¸ì„<br/>ì„ íƒí•´ì£¼ì„¸ìš”</p>
+                  <div className="text-4xl mb-3">??</div>
+                  <p className="text-sm">³¯Â¥³ª Ä·ÆäÀÎÀ»<br/>¼±ÅÃÇØÁÖ¼¼¿ä</p>
                 </div>
               </div>
             )}
@@ -448,25 +448,25 @@ export default function Dashboard() {
   const [successCampaignId, setSuccessCampaignId] = useState('');
   const [selectedMessage, setSelectedMessage] = useState<any>(null);
   const [sendTimeOption, setSendTimeOption] = useState<'ai' | 'now' | 'custom'>('now');
-  const [successSendInfo, setSuccessSendInfo] = useState<string>('');  // ì„±ê³µ ëª¨ë‹¬ìš© ë°œì†¡ ì •ë³´
+  const [successSendInfo, setSuccessSendInfo] = useState<string>('');  // ¼º°ø ¸ğ´Ş¿ë ¹ß¼Û Á¤º¸
   const [customSendTime, setCustomSendTime] = useState('');
   const [testSending, setTestSending] = useState(false);
   const [testCooldown, setTestCooldown] = useState(false);
   const [testSentResult, setTestSentResult] = useState<string | null>(null);
   const [showResults, setShowResults] = useState(false);
   const [showCustomerDB, setShowCustomerDB] = useState(false);
-  // 5ê°œ ì¹´ë“œ ëª¨ë‹¬ state
+  // 5°³ Ä«µå ¸ğ´Ş state
   const [showRecentCampaigns, setShowRecentCampaigns] = useState(false);
   const [showFileUpload, setShowFileUpload] = useState(false);
   const [showDirectTargeting, setShowDirectTargeting] = useState(false);
-  // ì§ì ‘ íƒ€ê²Ÿ ì„¤ì • ê´€ë ¨ state
-   // ì§ì ‘ íƒ€ê²Ÿ ì„¤ì • ê´€ë ¨ state
+  // Á÷Á¢ Å¸°Ù ¼³Á¤ °ü·Ã state
+   // Á÷Á¢ Å¸°Ù ¼³Á¤ °ü·Ã state
    const [targetPhoneField, setTargetPhoneField] = useState('phone');
    const [targetSmsOptIn, setTargetSmsOptIn] = useState(true);
    const [targetCount, setTargetCount] = useState(0);
    const [targetCountLoading, setTargetCountLoading] = useState(false);
    const [targetSchemaFields, setTargetSchemaFields] = useState<{name: string, label: string, type: string}[]>([]);
-   // ë™ì  í•„í„° state
+   // µ¿Àû ÇÊÅÍ state
    const [enabledFields, setEnabledFields] = useState<any[]>([]);
    const [targetFilters, setTargetFilters] = useState<Record<string, string>>({});
    const [filterOptions, setFilterOptions] = useState<Record<string, string[]>>({});
@@ -475,7 +475,7 @@ export default function Dashboard() {
   const [showInsights, setShowInsights] = useState(false);
   const [showTodayStats, setShowTodayStats] = useState(false);
   const [showScheduled, setShowScheduled] = useState(false);
-  // ëª¨ë‹¬ìš© ë°ì´í„°
+  // ¸ğ´Ş¿ë µ¥ÀÌÅÍ
   const [recentCampaigns, setRecentCampaigns] = useState<any[]>([]);
   const [scheduledCampaigns, setScheduledCampaigns] = useState<any[]>([]);
   const [selectedScheduled, setSelectedScheduled] = useState<any>(null);
@@ -491,7 +491,7 @@ export default function Dashboard() {
   const [editSubject, setEditSubject] = useState('');
   const [messageEditProgress, setMessageEditProgress] = useState(0);
   const [messageEditing, setMessageEditing] = useState(false);
-  // íŒŒì¼ ì—…ë¡œë“œ ê´€ë ¨
+  // ÆÄÀÏ ¾÷·Îµå °ü·Ã
   const [uploadedFile, setUploadedFile] = useState<any>(null);
   const [fileHeaders, setFileHeaders] = useState<string[]>([]);
   const [filePreview, setFilePreview] = useState<any[]>([]);
@@ -504,7 +504,7 @@ export default function Dashboard() {
   const [uploadProgress, setUploadProgress] = useState({ total: 0, processed: 0, percent: 0 });
   const [showDirectSend, setShowDirectSend] = useState(false);
   const [showTargetSend, setShowTargetSend] = useState(false);
-  // ì§ì ‘íƒ€ê²Ÿë°œì†¡ ê´€ë ¨ state
+  // Á÷Á¢Å¸°Ù¹ß¼Û °ü·Ã state
   const [targetMsgType, setTargetMsgType] = useState<'SMS' | 'LMS' | 'MMS'>('SMS');
   const [targetSubject, setTargetSubject] = useState('');
   const [targetMessage, setTargetMessage] = useState('');
@@ -513,7 +513,7 @@ export default function Dashboard() {
   const [targetListPage, setTargetListPage] = useState(0);
   const [targetListSearch, setTargetListSearch] = useState('');
   const [showTargetPreview, setShowTargetPreview] = useState(false);
-  // ì§ì ‘ë°œì†¡ ê´€ë ¨ state
+  // Á÷Á¢¹ß¼Û °ü·Ã state
   const [directMsgType, setDirectMsgType] = useState<'SMS' | 'LMS' | 'MMS'>('SMS');
   const [directSubject, setDirectSubject] = useState('');
   const [directMessage, setDirectMessage] = useState('');
@@ -522,7 +522,7 @@ export default function Dashboard() {
   const [reserveEnabled, setReserveEnabled] = useState(false);
   const [reserveDateTime, setReserveDateTime] = useState('');
   const [showReservePicker, setShowReservePicker] = useState(false);
-  // ì§ì ‘ë°œì†¡ ì‹¤í–‰ í•¨ìˆ˜
+  // Á÷Á¢¹ß¼Û ½ÇÇà ÇÔ¼ö
   const executeDirectSend = async () => {
     setDirectSending(true);
     try {
@@ -561,7 +561,7 @@ export default function Dashboard() {
           const balanceRes = await fetch('/api/balance', { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
           if (balanceRes.ok) setBalanceInfo(await balanceRes.json());
         }
-        // ëª¨ë‹¬ ìœ ì§€, ì…ë ¥ í•„ë“œë§Œ ì´ˆê¸°í™”
+        // ¸ğ´Ş À¯Áö, ÀÔ·Â ÇÊµå¸¸ ÃÊ±âÈ­
         setDirectMessage('');
         setDirectSubject('');
         setDirectRecipients([]);
@@ -575,7 +575,7 @@ export default function Dashboard() {
         setTimeout(() => setToast({show: false, type: 'error', message: ''}), 3000);
       }
     } catch (err) {
-      setToast({show: true, type: 'error', message: 'ë°œì†¡ ì‹¤íŒ¨'});
+      setToast({show: true, type: 'error', message: '¹ß¼Û ½ÇÆĞ'});
       setTimeout(() => setToast({show: false, type: 'error', message: ''}), 3000);
     } finally {
       setDirectSending(false);
@@ -583,12 +583,12 @@ export default function Dashboard() {
     setSendConfirm({show: false, type: 'immediate', count: 0, unsubscribeCount: 0});
   };
   
-  // ì§ì ‘íƒ€ê²Ÿì¶”ì¶œ ë°œì†¡ í•¨ìˆ˜
+  // Á÷Á¢Å¸°ÙÃßÃâ ¹ß¼Û ÇÔ¼ö
   const executeTargetSend = async () => {
     setTargetSending(true);
     try {
       const token = localStorage.getItem('token');
-      // ë³€ìˆ˜ ì¹˜í™˜ ì²˜ë¦¬
+      // º¯¼ö Ä¡È¯ Ã³¸®
       const recipientsWithMessage = targetRecipients.map((r: any) => ({
         phone: r.phone,
         name: r.name || '',
@@ -596,14 +596,14 @@ export default function Dashboard() {
         region: r.region || '',
         amount: r.total_purchase_amount || '',
         callback: r.callback || null,
-        message: (adTextEnabled ? '(ê´‘ê³ )' : '') + 
+        message: (adTextEnabled ? '(±¤°í)' : '') + 
           targetMessage
-            .replace(/%ì´ë¦„%/g, r.name || '')
-            .replace(/%ë“±ê¸‰%/g, r.grade || '')
-            .replace(/%ì§€ì—­%/g, r.region || '')
-            .replace(/%êµ¬ë§¤ê¸ˆì•¡%/g, r.total_purchase_amount || '')
-            .replace(/%íšŒì‹ ë²ˆí˜¸%/g, r.callback || '') +
-          (adTextEnabled ? (targetMsgType === 'SMS' ? `\në¬´ë£Œê±°ë¶€${optOutNumber.replace(/-/g, '')}` : `\në¬´ë£Œìˆ˜ì‹ ê±°ë¶€ ${formatRejectNumber(optOutNumber)}`) : '')
+            .replace(/%ÀÌ¸§%/g, r.name || '')
+            .replace(/%µî±Ş%/g, r.grade || '')
+            .replace(/%Áö¿ª%/g, r.region || '')
+            .replace(/%±¸¸Å±İ¾×%/g, r.total_purchase_amount || '')
+            .replace(/%È¸½Å¹øÈ£%/g, r.callback || '') +
+          (adTextEnabled ? (targetMsgType === 'SMS' ? `\n¹«·á°ÅºÎ${optOutNumber.replace(/-/g, '')}` : `\n¹«·á¼ö½Å°ÅºÎ ${formatRejectNumber(optOutNumber)}`) : '')
       }));
 
       const res = await fetch('/api/campaigns/direct-send', {
@@ -653,7 +653,7 @@ export default function Dashboard() {
         setTimeout(() => setToast({show: false, type: 'error', message: ''}), 3000);
       }
     } catch (err) {
-      setToast({show: true, type: 'error', message: 'ë°œì†¡ ì‹¤íŒ¨'});
+      setToast({show: true, type: 'error', message: '¹ß¼Û ½ÇÆĞ'});
       setTimeout(() => setToast({show: false, type: 'error', message: ''}), 3000);
     } finally {
       setTargetSending(false);
@@ -661,22 +661,22 @@ export default function Dashboard() {
     setSendConfirm({show: false, type: 'immediate', count: 0, unsubscribeCount: 0});
   };
   
-  // MMS ì´ë¯¸ì§€ (ì„œë²„ ì—…ë¡œë“œ ë°©ì‹)
+  // MMS ÀÌ¹ÌÁö (¼­¹ö ¾÷·Îµå ¹æ½Ä)
   const [mmsUploadedImages, setMmsUploadedImages] = useState<{serverPath: string; url: string; filename: string; size: number}[]>([]);
   const [mmsUploading, setMmsUploading] = useState(false);
   const [showMmsUploadModal, setShowMmsUploadModal] = useState(false);
 
-  // MMS ì´ë¯¸ì§€ ë‹¨ì¼ ìŠ¬ë¡¯ ì—…ë¡œë“œ í•¨ìˆ˜
+  // MMS ÀÌ¹ÌÁö ´ÜÀÏ ½½·Ô ¾÷·Îµå ÇÔ¼ö
   const handleMmsSlotUpload = async (file: File, slotIndex: number) => {
-    // ê²€ì¦: JPGë§Œ
+    // °ËÁõ: JPG¸¸
     if (!file.name.toLowerCase().endsWith('.jpg') && !file.name.toLowerCase().endsWith('.jpeg')) {
-      setToast({ show: true, type: 'error', message: 'JPG íŒŒì¼ë§Œ ì—…ë¡œë“œ ê°€ëŠ¥í•©ë‹ˆë‹¤ (PNG/GIF ë¯¸ì§€ì›)' });
+      setToast({ show: true, type: 'error', message: 'JPG ÆÄÀÏ¸¸ ¾÷·Îµå °¡´ÉÇÕ´Ï´Ù (PNG/GIF ¹ÌÁö¿ø)' });
       setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
       return;
     }
-    // ê²€ì¦: 300KB
+    // °ËÁõ: 300KB
     if (file.size > 300 * 1024) {
-      setToast({ show: true, type: 'error', message: `${(file.size / 1024).toFixed(0)}KB â€” 300KB ì´í•˜ë§Œ ê°€ëŠ¥í•©ë‹ˆë‹¤` });
+      setToast({ show: true, type: 'error', message: `${(file.size / 1024).toFixed(0)}KB ? 300KB ÀÌÇÏ¸¸ °¡´ÉÇÕ´Ï´Ù` });
       setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
       return;
     }
@@ -699,30 +699,30 @@ export default function Dashboard() {
           return updated;
         });
       } else {
-        setToast({ show: true, type: 'error', message: data.error || 'ì—…ë¡œë“œ ì‹¤íŒ¨' });
+        setToast({ show: true, type: 'error', message: data.error || '¾÷·Îµå ½ÇÆĞ' });
         setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
       }
     } catch {
-      setToast({ show: true, type: 'error', message: 'ì´ë¯¸ì§€ ì—…ë¡œë“œ ì¤‘ ì˜¤ë¥˜ ë°œìƒ' });
+      setToast({ show: true, type: 'error', message: 'ÀÌ¹ÌÁö ¾÷·Îµå Áß ¿À·ù ¹ß»ı' });
       setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
     } finally {
       setMmsUploading(false);
     }
   };
 
-  // MMS ì´ë¯¸ì§€ ì„œë²„ ì—…ë¡œë“œ í•¨ìˆ˜ â†’ ëª¨ë‹¬ ì˜¤í”ˆìœ¼ë¡œ ë³€ê²½
+  // MMS ÀÌ¹ÌÁö ¼­¹ö ¾÷·Îµå ÇÔ¼ö ¡æ ¸ğ´Ş ¿ÀÇÂÀ¸·Î º¯°æ
   const handleMmsImageUpload = (files: FileList | null, sendType: 'ai' | 'target' | 'direct') => {
     setShowMmsUploadModal(true);
   };
 
-  // MMS ì´ë¯¸ì§€ ì‚­ì œ í•¨ìˆ˜ (ìŠ¬ë¡¯ ê¸°ë°˜)
+  // MMS ÀÌ¹ÌÁö »èÁ¦ ÇÔ¼ö (½½·Ô ±â¹İ)
   const handleMmsImageRemove = async (index: number) => {
     const img = mmsUploadedImages[index];
     if (img) {
       try {
         const token = localStorage.getItem('token');
         await fetch(img.url, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
-      } catch { /* ì„œë²„ ì‚­ì œ ì‹¤íŒ¨í•´ë„ UIì—ì„œëŠ” ì œê±° */ }
+      } catch { /* ¼­¹ö »èÁ¦ ½ÇÆĞÇØµµ UI¿¡¼­´Â Á¦°Å */ }
     }
     setMmsUploadedImages(prev => prev.filter((_, i) => i !== index));
   };
@@ -759,40 +759,40 @@ export default function Dashboard() {
   const [useIndividualCallback, setUseIndividualCallback] = useState(false);
   const [sendConfirm, setSendConfirm] = useState<{show: boolean, type: 'immediate' | 'scheduled', count: number, unsubscribeCount: number, dateTime?: string, from?: 'direct' | 'target'}>({show: false, type: 'immediate', count: 0, unsubscribeCount: 0});
 
-  // ì „í™”ë²ˆí˜¸ í¬ë§·íŒ… í•¨ìˆ˜
+  // ÀüÈ­¹øÈ£ Æ÷¸ËÆÃ ÇÔ¼ö
   const formatPhoneNumber = (phone: string) => {
     if (!phone) return '';
     const cleaned = phone.replace(/\D/g, '');
     
-    // íœ´ëŒ€í° 11ìë¦¬: 010-XXXX-XXXX
+    // ÈŞ´ëÆù 11ÀÚ¸®: 010-XXXX-XXXX
     if (cleaned.length === 11 && cleaned.startsWith('01')) {
       return `${cleaned.slice(0, 3)}-${cleaned.slice(3, 7)}-${cleaned.slice(7)}`;
     }
-    // íœ´ëŒ€í° 10ìë¦¬ (êµ¬í˜•): 01X-XXX-XXXX
+    // ÈŞ´ëÆù 10ÀÚ¸® (±¸Çü): 01X-XXX-XXXX
     if (cleaned.length === 10 && cleaned.startsWith('01')) {
       return `${cleaned.slice(0, 3)}-${cleaned.slice(3, 6)}-${cleaned.slice(6)}`;
     }
-    // ì„œìš¸ 02 ì§€ì—­ë²ˆí˜¸ (9ìë¦¬): 02-XXX-XXXX
+    // ¼­¿ï 02 Áö¿ª¹øÈ£ (9ÀÚ¸®): 02-XXX-XXXX
     if (cleaned.length === 9 && cleaned.startsWith('02')) {
       return `${cleaned.slice(0, 2)}-${cleaned.slice(2, 5)}-${cleaned.slice(5)}`;
     }
-    // ì„œìš¸ 02 ì§€ì—­ë²ˆí˜¸ (10ìë¦¬): 02-XXXX-XXXX
+    // ¼­¿ï 02 Áö¿ª¹øÈ£ (10ÀÚ¸®): 02-XXXX-XXXX
     if (cleaned.length === 10 && cleaned.startsWith('02')) {
       return `${cleaned.slice(0, 2)}-${cleaned.slice(2, 6)}-${cleaned.slice(6)}`;
     }
-    // ëŒ€í‘œë²ˆí˜¸ 8ìë¦¬ (15XX, 16XX, 18XX): 1XXX-XXXX
+    // ´ëÇ¥¹øÈ£ 8ÀÚ¸® (15XX, 16XX, 18XX): 1XXX-XXXX
     if (cleaned.length === 8 && cleaned.startsWith('1')) {
       return `${cleaned.slice(0, 4)}-${cleaned.slice(4)}`;
     }
-    // ê¸°íƒ€ ì§€ì—­ë²ˆí˜¸ 10ìë¦¬: 0XX-XXX-XXXX
+    // ±âÅ¸ Áö¿ª¹øÈ£ 10ÀÚ¸®: 0XX-XXX-XXXX
     if (cleaned.length === 10 && cleaned.startsWith('0')) {
       return `${cleaned.slice(0, 3)}-${cleaned.slice(3, 6)}-${cleaned.slice(6)}`;
     }
-    // ê¸°íƒ€ ì§€ì—­ë²ˆí˜¸ 11ìë¦¬: 0XX-XXXX-XXXX
+    // ±âÅ¸ Áö¿ª¹øÈ£ 11ÀÚ¸®: 0XX-XXXX-XXXX
     if (cleaned.length === 11 && cleaned.startsWith('0')) {
       return `${cleaned.slice(0, 3)}-${cleaned.slice(3, 7)}-${cleaned.slice(7)}`;
     }
-    // ê·¸ ì™¸ëŠ” ì›ë³¸ ë°˜í™˜
+    // ±× ¿Ü´Â ¿øº» ¹İÈ¯
     return phone;
   };
   const [selectedRecipients, setSelectedRecipients] = useState<Set<number>>(new Set());
@@ -803,7 +803,7 @@ export default function Dashboard() {
   const [fileUploading, setFileUploading] = useState(false);
   const [columnMapping, setColumnMapping] = useState<{[key: string]: string | null}>({});
   const [mappingStep, setMappingStep] = useState<'upload' | 'mapping' | 'confirm'>('upload');
-  // íƒ€ê²Ÿ í•„í„°
+  // Å¸°Ù ÇÊÅÍ
   const [filter, setFilter] = useState({
     gender: '',
     minAge: '',
@@ -812,10 +812,10 @@ export default function Dashboard() {
     smsOptIn: true,
   });
 
-  // íƒ€ê²Ÿ ê²°ê³¼
+  // Å¸°Ù °á°ú
   const [targetResult, setTargetResult] = useState<any>(null);
 
-  // ìº í˜ì¸ ì„¤ì •
+  // Ä·ÆäÀÎ ¼³Á¤
   const [campaign, setCampaign] = useState({
     campaignName: '',
     messageType: 'SMS',
@@ -823,7 +823,7 @@ export default function Dashboard() {
     isAd: false,
   });
 
-  // AI ê´€ë ¨ ìƒíƒœ
+  // AI °ü·Ã »óÅÂ
   const [aiLoading, setAiLoading] = useState(false);
   const [showPromptAlert, setShowPromptAlert] = useState(false);
   const [aiObjective, setAiObjective] = useState('');
@@ -831,80 +831,80 @@ export default function Dashboard() {
   const [aiMessages, setAiMessages] = useState<any[]>([]);
   const [showAiTarget, setShowAiTarget] = useState(false);
   const [showAiMessage, setShowAiMessage] = useState(false);
-  const [campaignContext, setCampaignContext] = useState(''); // íƒ€ê²Ÿâ†’ë©”ì‹œì§€ ì—°ê²°ìš©
+  const [campaignContext, setCampaignContext] = useState(''); // Å¸°Ù¡æ¸Ş½ÃÁö ¿¬°á¿ë
 
   useEffect(() => {
     loadStats();
     loadRecentCampaigns();
     loadScheduledCampaigns();
   }, []);
-// ìë™ì…ë ¥ ë³€ìˆ˜ë¥¼ ìˆ˜ì‹ ì ì¤‘ ê°€ì¥ ê¸´ ê°’ìœ¼ë¡œ ì¹˜í™˜í•˜ì—¬ ìµœëŒ€ ë°”ì´íŠ¸ ë©”ì‹œì§€ ìƒì„±
+// ÀÚµ¿ÀÔ·Â º¯¼ö¸¦ ¼ö½ÅÀÚ Áß °¡Àå ±ä °ªÀ¸·Î Ä¡È¯ÇÏ¿© ÃÖ´ë ¹ÙÀÌÆ® ¸Ş½ÃÁö »ı¼º
 const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<string, string>) => {
   let result = msg;
-  // variableMap: { '%ì´ë¦„%': 'name', '%ë“±ê¸‰%': 'grade', ... }
+  // variableMap: { '%ÀÌ¸§%': 'name', '%µî±Ş%': 'grade', ... }
   Object.entries(variableMap).forEach(([variable, field]) => {
     if (!result.includes(variable)) return;
-    // ìˆ˜ì‹ ì ì¤‘ í•´ë‹¹ í•„ë“œì˜ ê°€ì¥ ê¸´ ê°’ ì°¾ê¸°
+    // ¼ö½ÅÀÚ Áß ÇØ´ç ÇÊµåÀÇ °¡Àå ±ä °ª Ã£±â
     let maxValue = '';
     recipients.forEach((r: any) => {
       const val = String(r[field] || '');
       if (val.length > maxValue.length) maxValue = val;
     });
-    // ìˆ˜ì‹ ìê°€ ì—†ê±°ë‚˜ ê°’ì´ ì—†ìœ¼ë©´ ê¸°ë³¸ ìµœëŒ€ê°’ ì‚¬ìš©
+    // ¼ö½ÅÀÚ°¡ ¾ø°Å³ª °ªÀÌ ¾øÀ¸¸é ±âº» ÃÖ´ë°ª »ç¿ë
     if (!maxValue) {
       const defaults: Record<string, string> = {
-        '%ì´ë¦„%': 'í™ê¸¸ë™ì–´ë¨¸ë‹ˆ', '%ë“±ê¸‰%': 'VVIP', '%ì§€ì—­%': 'ê²½ê¸°ë„ ì„±ë‚¨ì‹œ',
-        '%êµ¬ë§¤ê¸ˆì•¡%': '99,999,999ì›', '%ê¸°íƒ€1%': 'ê°€ë‚˜ë‹¤ë¼ë§ˆë°”ì‚¬', '%ê¸°íƒ€2%': 'ê°€ë‚˜ë‹¤ë¼ë§ˆë°”ì‚¬', '%ê¸°íƒ€3%': 'ê°€ë‚˜ë‹¤ë¼ë§ˆë°”ì‚¬',
-        '%íšŒì‹ ë²ˆí˜¸%': '07012345678',
+        '%ÀÌ¸§%': 'È«±æµ¿¾î¸Ó´Ï', '%µî±Ş%': 'VVIP', '%Áö¿ª%': '°æ±âµµ ¼º³²½Ã',
+        '%±¸¸Å±İ¾×%': '99,999,999¿ø', '%±âÅ¸1%': '°¡³ª´Ù¶ó¸¶¹Ù»ç', '%±âÅ¸2%': '°¡³ª´Ù¶ó¸¶¹Ù»ç', '%±âÅ¸3%': '°¡³ª´Ù¶ó¸¶¹Ù»ç',
+        '%È¸½Å¹øÈ£%': '07012345678',
       };
-      maxValue = defaults[variable] || 'ê°€ë‚˜ë‹¤ë¼ë§ˆë°”';
+      maxValue = defaults[variable] || '°¡³ª´Ù¶ó¸¶¹Ù';
     }
     result = result.replace(new RegExp(variable.replace(/%/g, '%'), 'g'), maxValue);
   });
   return result;
 };
-  // ë°”ì´íŠ¸ ì´ˆê³¼ ì‹œ ìë™ LMS ì „í™˜ (SMSâ†’LMSë§Œ, LMSâ†’SMS ë³µê·€ëŠ” ìˆ˜ë™)
+  // ¹ÙÀÌÆ® ÃÊ°ú ½Ã ÀÚµ¿ LMS ÀüÈ¯ (SMS¡æLMS¸¸, LMS¡æSMS º¹±Í´Â ¼öµ¿)
   useEffect(() => {
-    // ë©”ì‹œì§€ ë³€ê²½ ì‹œ ì˜¤ë²„ë¼ì´ë“œ ë¦¬ì…‹
+    // ¸Ş½ÃÁö º¯°æ ½Ã ¿À¹ö¶óÀÌµå ¸®¼Â
     setSmsOverrideAccepted(false);
-    // ìë™ì…ë ¥ ë³€ìˆ˜ë¥¼ ìµœëŒ€ ê¸¸ì´ ê°’ìœ¼ë¡œ ì¹˜í™˜
+    // ÀÚµ¿ÀÔ·Â º¯¼ö¸¦ ÃÖ´ë ±æÀÌ °ªÀ¸·Î Ä¡È¯
     const directVarMap: Record<string, string> = {
-      '%ì´ë¦„%': 'name', '%ê¸°íƒ€1%': 'extra1', '%ê¸°íƒ€2%': 'extra2', '%ê¸°íƒ€3%': 'extra3', '%íšŒì‹ ë²ˆí˜¸%': 'callback',
+      '%ÀÌ¸§%': 'name', '%±âÅ¸1%': 'extra1', '%±âÅ¸2%': 'extra2', '%±âÅ¸3%': 'extra3', '%È¸½Å¹øÈ£%': 'callback',
     };
     let fullMsg = getMaxByteMessage(directMessage, directRecipients, directVarMap);
     if (adTextEnabled) {
       const optOutText = directMsgType === 'SMS'
-        ? `ë¬´ë£Œê±°ë¶€${optOutNumber.replace(/-/g, '')}`
-        : `ë¬´ë£Œìˆ˜ì‹ ê±°ë¶€ ${optOutNumber}`;
-      fullMsg = `(ê´‘ê³ ) ${fullMsg}\n${optOutText}`;
+        ? `¹«·á°ÅºÎ${optOutNumber.replace(/-/g, '')}`
+        : `¹«·á¼ö½Å°ÅºÎ ${optOutNumber}`;
+      fullMsg = `(±¤°í) ${fullMsg}\n${optOutText}`;
     }
-    // í•œê¸€ 2byte, ì˜ë¬¸/ìˆ«ì 1byte ê³„ì‚°
+    // ÇÑ±Û 2byte, ¿µ¹®/¼ıÀÚ 1byte °è»ê
     let bytes = 0;
     for (let i = 0; i < fullMsg.length; i++) {
       const char = fullMsg.charCodeAt(i);
       bytes += char > 127 ? 2 : 1;
     }
-    // SMSì—ì„œ 90ë°”ì´íŠ¸ ì´ˆê³¼ ì‹œ LMS ì „í™˜ í™•ì¸ ëª¨ë‹¬
+    // SMS¿¡¼­ 90¹ÙÀÌÆ® ÃÊ°ú ½Ã LMS ÀüÈ¯ È®ÀÎ ¸ğ´Ş
     if (directMsgType === 'SMS' && bytes > 90 && !showLmsConfirm) {
       setPendingBytes(bytes);
       setShowLmsConfirm(true);
     }
   }, [directMessage, directMsgType, adTextEnabled, optOutNumber, directRecipients]);
 
-  // íƒ€ê²Ÿë°œì†¡ ë©”ì‹œì§€ ì‹¤ì‹œê°„ ë°”ì´íŠ¸ ì²´í¬
+  // Å¸°Ù¹ß¼Û ¸Ş½ÃÁö ½Ç½Ã°£ ¹ÙÀÌÆ® Ã¼Å©
   useEffect(() => {
     if (!showTargetSend) return;
     setSmsOverrideAccepted(false);
-    // ìë™ì…ë ¥ ë³€ìˆ˜ë¥¼ ìµœëŒ€ ê¸¸ì´ ê°’ìœ¼ë¡œ ì¹˜í™˜
+    // ÀÚµ¿ÀÔ·Â º¯¼ö¸¦ ÃÖ´ë ±æÀÌ °ªÀ¸·Î Ä¡È¯
     const targetVarMap: Record<string, string> = {
-      '%ì´ë¦„%': 'name', '%ë“±ê¸‰%': 'grade', '%ì§€ì—­%': 'region', '%êµ¬ë§¤ê¸ˆì•¡%': 'total_purchase_amount', '%íšŒì‹ ë²ˆí˜¸%': 'callback',
+      '%ÀÌ¸§%': 'name', '%µî±Ş%': 'grade', '%Áö¿ª%': 'region', '%±¸¸Å±İ¾×%': 'total_purchase_amount', '%È¸½Å¹øÈ£%': 'callback',
     };
     let fullMsg = getMaxByteMessage(targetMessage, targetRecipients, targetVarMap);
     if (adTextEnabled) {
       const optOutText = targetMsgType === 'SMS'
-        ? `ë¬´ë£Œê±°ë¶€${optOutNumber.replace(/-/g, '')}`
-        : `ë¬´ë£Œìˆ˜ì‹ ê±°ë¶€ ${optOutNumber}`;
-      fullMsg = `(ê´‘ê³ )${fullMsg}\n${optOutText}`;
+        ? `¹«·á°ÅºÎ${optOutNumber.replace(/-/g, '')}`
+        : `¹«·á¼ö½Å°ÅºÎ ${optOutNumber}`;
+      fullMsg = `(±¤°í)${fullMsg}\n${optOutText}`;
     }
     let bytes = 0;
     for (let i = 0; i < fullMsg.length; i++) {
@@ -922,7 +922,7 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
       const response = await customersApi.stats();
       setStats(response.data.stats);
       
-      // í”Œëœ ì •ë³´ ì¡°íšŒ
+      // ÇÃ·£ Á¤º¸ Á¶È¸
       const token = localStorage.getItem('token');
       const planRes = await fetch('/api/companies/my-plan', {
         headers: { Authorization: `Bearer ${token}` },
@@ -932,7 +932,7 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
         setPlanInfo(planData);
       }
 
-      // ì”ì•¡ ì •ë³´ ì¡°íšŒ
+      // ÀÜ¾× Á¤º¸ Á¶È¸
       const balanceRes = await fetch('/api/balance', {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -941,12 +941,12 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
         setBalanceInfo(balanceData);
       }
     } catch (error) {
-      console.error('í†µê³„ ë¡œë“œ ì‹¤íŒ¨:', error);
+      console.error('Åë°è ·Îµå ½ÇÆĞ:', error);
     } finally {
       setLoading(false);
     }
   };
-  // ìµœê·¼ ìº í˜ì¸ ë¡œë“œ
+  // ÃÖ±Ù Ä·ÆäÀÎ ·Îµå
   const loadRecentCampaigns = async () => {
     try {
       const token = localStorage.getItem('token');
@@ -957,11 +957,11 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
       const campaigns = (data.campaigns || []).filter((c: any) => c.status !== 'draft');
       setRecentCampaigns(campaigns.slice(0, 5));
     } catch (error) {
-      console.error('ìµœê·¼ ìº í˜ì¸ ë¡œë“œ ì‹¤íŒ¨:', error);
+      console.error('ÃÖ±Ù Ä·ÆäÀÎ ·Îµå ½ÇÆĞ:', error);
     }
   };
 
-  // ì˜ˆì•½ ëŒ€ê¸° ìº í˜ì¸ ë¡œë“œ
+  // ¿¹¾à ´ë±â Ä·ÆäÀÎ ·Îµå
   const loadScheduledCampaigns = async () => {
     try {
       const token = localStorage.getItem('token');
@@ -971,12 +971,12 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
       const data = await res.json();
       setScheduledCampaigns(data.campaigns || []);
     } catch (error) {
-      console.error('ì˜ˆì•½ ìº í˜ì¸ ë¡œë“œ ì‹¤íŒ¨:', error);
+      console.error('¿¹¾à Ä·ÆäÀÎ ·Îµå ½ÇÆĞ:', error);
     }
   };
 
-  // ì§ì ‘ íƒ€ê²Ÿ ì„¤ì • - ìŠ¤í‚¤ë§ˆ ë¡œë“œ
-  // ì§ì ‘ íƒ€ê²Ÿ ì„¤ì • - ìŠ¤í‚¤ë§ˆ ë¡œë“œ (ê¸°ì¡´ ìœ ì§€)
+  // Á÷Á¢ Å¸°Ù ¼³Á¤ - ½ºÅ°¸¶ ·Îµå
+  // Á÷Á¢ Å¸°Ù ¼³Á¤ - ½ºÅ°¸¶ ·Îµå (±âÁ¸ À¯Áö)
   const loadTargetSchema = async () => {
     try {
       const token = localStorage.getItem('token');
@@ -988,11 +988,11 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
         setTargetSchemaFields(data.fields);
       }
     } catch (error) {
-      console.error('ìŠ¤í‚¤ë§ˆ ë¡œë“œ ì‹¤íŒ¨:', error);
+      console.error('½ºÅ°¸¶ ·Îµå ½ÇÆĞ:', error);
     }
   };
 
-  // SMS í…œí”Œë¦¿ ë¡œë“œ
+  // SMS ÅÛÇÃ¸´ ·Îµå
   const loadTemplates = async () => {
     try {
       const token = localStorage.getItem('token');
@@ -1002,11 +1002,11 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
       const data = await res.json();
       if (data.success) setTemplateList(data.templates || []);
     } catch (error) {
-      console.error('í…œí”Œë¦¿ ë¡œë“œ ì‹¤íŒ¨:', error);
+      console.error('ÅÛÇÃ¸´ ·Îµå ½ÇÆĞ:', error);
     }
   };
 
-  // SMS í…œí”Œë¦¿ ì €ì¥
+  // SMS ÅÛÇÃ¸´ ÀúÀå
   const saveTemplate = async (name: string, content: string, msgType: string, subject: string) => {
     try {
       const token = localStorage.getItem('token');
@@ -1017,22 +1017,22 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
       });
       const data = await res.json();
       if (data.success) {
-        setToast({ show: true, type: 'success', message: 'ë¬¸ìê°€ ë³´ê´€í•¨ì— ì €ì¥ë˜ì—ˆìŠµë‹ˆë‹¤.' });
+        setToast({ show: true, type: 'success', message: '¹®ÀÚ°¡ º¸°üÇÔ¿¡ ÀúÀåµÇ¾ú½À´Ï´Ù.' });
         setTimeout(() => setToast({ show: false, type: 'success', message: '' }), 3000);
         return true;
       } else {
-        setToast({ show: true, type: 'error', message: data.error || 'ì €ì¥ ì‹¤íŒ¨' });
+        setToast({ show: true, type: 'error', message: data.error || 'ÀúÀå ½ÇÆĞ' });
         setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
         return false;
       }
     } catch (error) {
-      setToast({ show: true, type: 'error', message: 'ì €ì¥ ì¤‘ ì˜¤ë¥˜ ë°œìƒ' });
+      setToast({ show: true, type: 'error', message: 'ÀúÀå Áß ¿À·ù ¹ß»ı' });
       setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
       return false;
     }
   };
 
-  // SMS í…œí”Œë¦¿ ì‚­ì œ
+  // SMS ÅÛÇÃ¸´ »èÁ¦
   const deleteTemplate = async (id: string) => {
     try {
       const token = localStorage.getItem('token');
@@ -1043,15 +1043,15 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
       const data = await res.json();
       if (data.success) {
         setTemplateList(prev => prev.filter(t => t.id !== id));
-        setToast({ show: true, type: 'success', message: 'ì‚­ì œë˜ì—ˆìŠµë‹ˆë‹¤.' });
+        setToast({ show: true, type: 'success', message: '»èÁ¦µÇ¾ú½À´Ï´Ù.' });
         setTimeout(() => setToast({ show: false, type: 'success', message: '' }), 3000);
       }
     } catch (error) {
-      console.error('í…œí”Œë¦¿ ì‚­ì œ ì‹¤íŒ¨:', error);
+      console.error('ÅÛÇÃ¸´ »èÁ¦ ½ÇÆĞ:', error);
     }
   };
 
-  // ë™ì  í•„í„° - í™œì„± í•„ë“œ ë¡œë“œ
+  // µ¿Àû ÇÊÅÍ - È°¼º ÇÊµå ·Îµå
   const loadEnabledFields = async () => {
     try {
       const token = localStorage.getItem('token');
@@ -1064,11 +1064,11 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
         setFilterOptions(data.options || {});
       }
     } catch (error) {
-      console.error('í•„ë“œ ë¡œë“œ ì‹¤íŒ¨:', error);
+      console.error('ÇÊµå ·Îµå ½ÇÆĞ:', error);
     }
   };
 
-  // ë™ì  í•„í„° â†’ API í¬ë§· ë³€í™˜
+  // µ¿Àû ÇÊÅÍ ¡æ API Æ÷¸Ë º¯È¯
   const buildDynamicFiltersForAPI = () => {
     const filters: Record<string, any> = {};
     for (const [fieldKey, value] of Object.entries(targetFilters)) {
@@ -1076,7 +1076,7 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
       const field = enabledFields.find((f: any) => f.field_key === fieldKey);
       if (!field) continue;
 
-      // íŠ¹ìˆ˜ í•„ë“œ ë³€í™˜
+      // Æ¯¼ö ÇÊµå º¯È¯
       if (fieldKey === 'age_group') {
         const ageVal = parseInt(value);
         if (ageVal >= 60) { filters['age'] = { operator: 'gte', value: 60 }; }
@@ -1105,7 +1105,7 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
     return filters;
   };
 
-  // ì§ì ‘ íƒ€ê²Ÿ ì„¤ì • - í•„í„° ì¹´ìš´íŠ¸
+  // Á÷Á¢ Å¸°Ù ¼³Á¤ - ÇÊÅÍ Ä«¿îÆ®
   const loadTargetCount = async () => {
     setTargetCountLoading(true);
     try {
@@ -1119,23 +1119,23 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
       const data = await res.json();
       setTargetCount(data.count || 0);
     } catch (error) {
-      console.error('ì¹´ìš´íŠ¸ ì¡°íšŒ ì‹¤íŒ¨:', error);
+      console.error('Ä«¿îÆ® Á¶È¸ ½ÇÆĞ:', error);
     } finally {
       setTargetCountLoading(false);
     }
   };
 
-  // ì§ì ‘ íƒ€ê²Ÿ ì„¤ì • - íƒ€ê²Ÿ ì¶”ì¶œ í›„ ë°œì†¡í™”ë©´ ì´ë™
+  // Á÷Á¢ Å¸°Ù ¼³Á¤ - Å¸°Ù ÃßÃâ ÈÄ ¹ß¼ÛÈ­¸é ÀÌµ¿
   const handleTargetExtract = async () => {
     if (targetCount === 0) {
-      setToast({show: true, type: 'error', message: 'ì¶”ì¶œí•  ëŒ€ìƒì´ ì—†ìŠµë‹ˆë‹¤'});
+      setToast({show: true, type: 'error', message: 'ÃßÃâÇÒ ´ë»óÀÌ ¾ø½À´Ï´Ù'});
       setTimeout(() => setToast({show: false, type: 'error', message: ''}), 3000);
       return;
     }
     try {
       const token = localStorage.getItem('token');
       
-      // 080 ìˆ˜ì‹ ê±°ë¶€ë²ˆí˜¸ ë¡œë“œ
+      // 080 ¼ö½Å°ÅºÎ¹øÈ£ ·Îµå
       const settingsRes = await fetch('/api/companies/settings', {
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -1146,7 +1146,7 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
         }
       }
       
-      // íšŒì‹ ë²ˆí˜¸ ë¡œë“œ
+      // È¸½Å¹øÈ£ ·Îµå
       const cbRes = await fetch('/api/companies/callback-numbers', {
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -1174,23 +1174,23 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
           name: r.name || '',
           grade: r.grade || '',
           region: r.region || '',
-          amount: r.total_purchase_amount ? Math.floor(r.total_purchase_amount).toLocaleString() + 'ì›' : '',
+          amount: r.total_purchase_amount ? Math.floor(r.total_purchase_amount).toLocaleString() + '¿ø' : '',
           callback: r.callback || ''
         }));
         setTargetRecipients(recipients);
         setShowDirectTargeting(false);
         setShowTargetSend(true);
-        setToast({show: true, type: 'success', message: `${data.count}ëª… ì¶”ì¶œ ì™„ë£Œ`});
+        setToast({show: true, type: 'success', message: `${data.count}¸í ÃßÃâ ¿Ï·á`});
         setTimeout(() => setToast({show: false, type: 'success', message: ''}), 3000);
       }
     } catch (error) {
-      console.error('íƒ€ê²Ÿ ì¶”ì¶œ ì‹¤íŒ¨:', error);
-      setToast({show: true, type: 'error', message: 'íƒ€ê²Ÿ ì¶”ì¶œ ì‹¤íŒ¨'});
+      console.error('Å¸°Ù ÃßÃâ ½ÇÆĞ:', error);
+      setToast({show: true, type: 'error', message: 'Å¸°Ù ÃßÃâ ½ÇÆĞ'});
       setTimeout(() => setToast({show: false, type: 'error', message: ''}), 3000);
     }
   };
 
-  // ì§ì ‘ íƒ€ê²Ÿ ì„¤ì • - í•„í„° ì´ˆê¸°í™”
+  // Á÷Á¢ Å¸°Ù ¼³Á¤ - ÇÊÅÍ ÃÊ±âÈ­
   const resetTargetFilters = () => {
     setTargetFilters({});
     setTargetSmsOptIn(true);
@@ -1206,28 +1206,28 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
       if (filter.grade) params.grade = filter.grade;
       if (filter.smsOptIn) params.smsOptIn = 'true';
 
-      console.log('API í˜¸ì¶œ params:', params);
+      console.log('API È£Ãâ params:', params);
       const response = await customersApi.list({ ...params, limit: 100 });
       setTargetResult(response.data);
     } catch (error) {
-      console.error('íƒ€ê²Ÿ ì¶”ì¶œ ì‹¤íŒ¨:', error);
+      console.error('Å¸°Ù ÃßÃâ ½ÇÆĞ:', error);
     }
   };
 
-  // AI íƒ€ê²Ÿ ì¶”ì²œ
+  // AI Å¸°Ù ÃßÃµ
   const handleAiRecommendTarget = async () => {
     if (!aiObjective.trim()) {
-      alert('ë§ˆì¼€íŒ… ëª©í‘œë¥¼ ì…ë ¥í•´ì£¼ì„¸ìš”');
+      alert('¸¶ÄÉÆÃ ¸ñÇ¥¸¦ ÀÔ·ÂÇØÁÖ¼¼¿ä');
       return;
     }
     setAiLoading(true);
     try {
       const response = await aiApi.recommendTarget({ objective: aiObjective });
       const result = response.data;
-      console.log('AI ì‘ë‹µ:', result);
-      console.log('ì ìš©í•  gender:', result.filters?.gender?.value);
+      console.log('AI ÀÀ´ä:', result);
+      console.log('Àû¿ëÇÒ gender:', result.filters?.gender?.value);
 
-      // ì¶”ì²œëœ í•„í„° ì ìš©
+      // ÃßÃµµÈ ÇÊÅÍ Àû¿ë
       if (result.filters) {
         const newFilter = { ...filter };
         if (result.filters.gender?.value) newFilter.gender = result.filters.gender.value;
@@ -1237,23 +1237,23 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
         }
         if (result.filters.grade?.value) newFilter.grade = result.filters.grade.value;
         setFilter(newFilter);
-        console.log('ì„¤ì •ëœ í•„í„°:', newFilter);
+        console.log('¼³Á¤µÈ ÇÊÅÍ:', newFilter);
       }
       
-      // ìº í˜ì¸ ì»¨í…ìŠ¤íŠ¸ ì €ì¥ (ë©”ì‹œì§€ ìƒì„±ì— ì‚¬ìš©)
+      // Ä·ÆäÀÎ ÄÁÅØ½ºÆ® ÀúÀå (¸Ş½ÃÁö »ı¼º¿¡ »ç¿ë)
       setCampaignContext(aiObjective);
       
-      alert(`AI ì¶”ì²œ ì™„ë£Œ!\n\n${result.reasoning}\n\nì˜ˆìƒ íƒ€ê²Ÿ: ${result.estimated_count.toLocaleString()}ëª…${result.unsubscribe_count > 0 ? `\nìˆ˜ì‹ ê±°ë¶€ ì œì™¸: ${result.unsubscribe_count.toLocaleString()}ëª…` : ''}`);
+      alert(`AI ÃßÃµ ¿Ï·á!\n\n${result.reasoning}\n\n¿¹»ó Å¸°Ù: ${result.estimated_count.toLocaleString()}¸í${result.unsubscribe_count > 0 ? `\n¼ö½Å°ÅºÎ Á¦¿Ü: ${result.unsubscribe_count.toLocaleString()}¸í` : ''}`);
       setShowAiTarget(false);
       setAiObjective('');
     } catch (error) {
-      console.error('AI íƒ€ê²Ÿ ì¶”ì²œ ì‹¤íŒ¨:', error);
-      alert('AI ì¶”ì²œ ì¤‘ ì˜¤ë¥˜ê°€ ë°œìƒí–ˆìŠµë‹ˆë‹¤.');
+      console.error('AI Å¸°Ù ÃßÃµ ½ÇÆĞ:', error);
+      alert('AI ÃßÃµ Áß ¿À·ù°¡ ¹ß»ıÇß½À´Ï´Ù.');
     } finally {
       setAiLoading(false);
     }
   };
-// AI ìº í˜ì¸ ìƒì„± (í”„ë¡¬í”„íŠ¸ í•œ ë°©)
+// AI Ä·ÆäÀÎ »ı¼º (ÇÁ·ÒÇÁÆ® ÇÑ ¹æ)
 const handleAiCampaignGenerate = async () => {
   if (!aiCampaignPrompt.trim()) {
     setShowPromptAlert(true);
@@ -1261,20 +1261,20 @@ const handleAiCampaignGenerate = async () => {
   }
   setAiLoading(true);
   try {
-    // 1. íƒ€ê²Ÿ + ì±„ë„ ì¶”ì²œ ë°›ê¸°
+    // 1. Å¸°Ù + Ã¤³Î ÃßÃµ ¹Ş±â
     const response = await aiApi.recommendTarget({ objective: aiCampaignPrompt });
     const result = response.data;
     
-    // AI ê²°ê³¼ ì €ì¥
+    // AI °á°ú ÀúÀå
     setAiResult({
       target: {
-        description: result.reasoning || 'ì¶”ì²œ íƒ€ê²Ÿ',
+        description: result.reasoning || 'ÃßÃµ Å¸°Ù',
         count: result.estimated_count || 0,
         unsubscribeCount: result.unsubscribe_count || 0,
         filters: result.filters || {},
       },
       recommendedChannel: result.recommended_channel || 'SMS',
-      channelReason: result.channel_reason || 'ê°„ë‹¨í•œ ì•ˆë‚´ ë©”ì‹œì§€ì— ì í•©í•©ë‹ˆë‹¤.',
+      channelReason: result.channel_reason || '°£´ÜÇÑ ¾È³» ¸Ş½ÃÁö¿¡ ÀûÇÕÇÕ´Ï´Ù.',
       recommendedTime: result.recommended_time || '',
       suggestedCampaignName: result.suggested_campaign_name || '',
       useIndividualCallback: result.use_individual_callback || false,
@@ -1282,77 +1282,77 @@ const handleAiCampaignGenerate = async () => {
       personalizationVars: result.personalization_vars || [],
     });
     
-    // ì¶”ì²œ ì±„ë„ë¡œ ê¸°ë³¸ ì„¤ì •
+    // ÃßÃµ Ã¤³Î·Î ±âº» ¼³Á¤
     setSelectedChannel(result.recommended_channel || 'SMS');
     setIsAd(result.is_ad !== false);
     
-    // ê°œë³„íšŒì‹ ë²ˆí˜¸ ìë™ ì„¤ì •
+    // °³º°È¸½Å¹øÈ£ ÀÚµ¿ ¼³Á¤
     if (result.use_individual_callback) {
       setUseIndividualCallback(true);
     }
   
-    // íŒì—… ì—´ê¸°
+    // ÆË¾÷ ¿­±â
     setShowAiResult(true);
     setAiStep(1);
   } catch (error) {
-    console.error('AI ìº í˜ì¸ ìƒì„± ì‹¤íŒ¨:', error);
-    alert('AI ì¶”ì²œ ì¤‘ ì˜¤ë¥˜ê°€ ë°œìƒí–ˆìŠµë‹ˆë‹¤.');
+    console.error('AI Ä·ÆäÀÎ »ı¼º ½ÇÆĞ:', error);
+    alert('AI ÃßÃµ Áß ¿À·ù°¡ ¹ß»ıÇß½À´Ï´Ù.');
   } finally {
     setAiLoading(false);
   }
 };
 
-// AI ë©”ì‹œì§€ ìƒì„± (ì±„ë„ ì„ íƒ í›„)
+// AI ¸Ş½ÃÁö »ı¼º (Ã¤³Î ¼±ÅÃ ÈÄ)
 const handleAiGenerateChannelMessage = async () => {
   setAiLoading(true);
   try {
     const response = await aiApi.generateMessage({
       prompt: aiCampaignPrompt,
-      brandName: user?.company?.name || 'ë¸Œëœë“œ',
+      brandName: user?.company?.name || 'ºê·£µå',
       channel: selectedChannel,
       usePersonalization: aiResult?.usePersonalization || false,
       personalizationVars: aiResult?.personalizationVars || [],
     });
     
-    // ë©”ì‹œì§€ ê²°ê³¼ ì €ì¥
+    // ¸Ş½ÃÁö °á°ú ÀúÀå
     setAiResult((prev: any) => ({
       ...prev,
       messages: response.data.variants || [],
     }));
     
-    // 2ë‹¨ê³„ë¡œ ì´ë™
+    // 2´Ü°è·Î ÀÌµ¿
     setAiStep(2);
   } catch (error) {
-    console.error('AI ë©”ì‹œì§€ ìƒì„± ì‹¤íŒ¨:', error);
-    alert('ë©”ì‹œì§€ ìƒì„± ì¤‘ ì˜¤ë¥˜ê°€ ë°œìƒí–ˆìŠµë‹ˆë‹¤.');
+    console.error('AI ¸Ş½ÃÁö »ı¼º ½ÇÆĞ:', error);
+    alert('¸Ş½ÃÁö »ı¼º Áß ¿À·ù°¡ ¹ß»ıÇß½À´Ï´Ù.');
   } finally {
     setAiLoading(false);
   }
 };
 
-  // AI ë©”ì‹œì§€ ìƒì„±
+  // AI ¸Ş½ÃÁö »ı¼º
   const handleAiGenerateMessage = async () => {
     const prompt = aiPrompt.trim() || campaignContext;
     if (!prompt) {
-      alert('ë©”ì‹œì§€ ìš”ì²­ ë‚´ìš©ì„ ì…ë ¥í•´ì£¼ì„¸ìš”');
+      alert('¸Ş½ÃÁö ¿äÃ» ³»¿ëÀ» ÀÔ·ÂÇØÁÖ¼¼¿ä');
       return;
     }
     setAiLoading(true);
     try {
       const response = await aiApi.generateMessage({
         prompt: prompt,
-        brandName: user?.company?.name || 'ë¸Œëœë“œ',
+        brandName: user?.company?.name || 'ºê·£µå',
       });
       setAiMessages(response.data.variants || []);
     } catch (error) {
-      console.error('AI ë©”ì‹œì§€ ìƒì„± ì‹¤íŒ¨:', error);
-      alert('AI ë©”ì‹œì§€ ìƒì„± ì¤‘ ì˜¤ë¥˜ê°€ ë°œìƒí–ˆìŠµë‹ˆë‹¤.');
+      console.error('AI ¸Ş½ÃÁö »ı¼º ½ÇÆĞ:', error);
+      alert('AI ¸Ş½ÃÁö »ı¼º Áß ¿À·ù°¡ ¹ß»ıÇß½À´Ï´Ù.');
     } finally {
       setAiLoading(false);
     }
   };
 
-  // AI ë©”ì‹œì§€ ì„ íƒ
+  // AI ¸Ş½ÃÁö ¼±ÅÃ
   const handleSelectAiMessage = (message: any) => {
     const text = campaign.messageType === 'SMS' ? message.sms_text : message.lms_text;
     setCampaign({ ...campaign, messageContent: text });
@@ -1363,7 +1363,7 @@ const handleAiGenerateChannelMessage = async () => {
 
   const handleCreateCampaign = async () => {
     if (!campaign.campaignName || !campaign.messageContent) {
-      alert('ìº í˜ì¸ëª…ê³¼ ë©”ì‹œì§€ ë‚´ìš©ì„ ì…ë ¥í•˜ì„¸ìš”');
+      alert('Ä·ÆäÀÎ¸í°ú ¸Ş½ÃÁö ³»¿ëÀ» ÀÔ·ÂÇÏ¼¼¿ä');
       return;
     }
 
@@ -1372,45 +1372,45 @@ const handleAiGenerateChannelMessage = async () => {
         ...campaign,
         targetFilter: filter,
       });
-      alert('ìº í˜ì¸ì´ ìƒì„±ë˜ì—ˆìŠµë‹ˆë‹¤');
+      alert('Ä·ÆäÀÎÀÌ »ı¼ºµÇ¾ú½À´Ï´Ù');
       setActiveTab('send');
     } catch (error: any) {
-      alert(error.response?.data?.error || 'ìº í˜ì¸ ìƒì„± ì‹¤íŒ¨');
+      alert(error.response?.data?.error || 'Ä·ÆäÀÎ »ı¼º ½ÇÆĞ');
     } finally {
       setIsSending(false);
     }
   };
-// AI ìº í˜ì¸ ë°œì†¡ í™•ì •
+// AI Ä·ÆäÀÎ ¹ß¼Û È®Á¤
 const handleAiCampaignSend = async () => {
-  if (isSending) return; // ì¤‘ë³µ í´ë¦­ ë°©ì§€
+  if (isSending) return; // Áßº¹ Å¬¸¯ ¹æÁö
   
-  // íšŒì‹ ë²ˆí˜¸ ê²€ì¦
+  // È¸½Å¹øÈ£ °ËÁõ
   if (!selectedCallback && !useIndividualCallback) {
-    alert('íšŒì‹ ë²ˆí˜¸ë¥¼ ì„ íƒí•´ì£¼ì„¸ìš”');
+    alert('È¸½Å¹øÈ£¸¦ ¼±ÅÃÇØÁÖ¼¼¿ä');
     return;
   }
   
   setIsSending(true);
   try {
-    // ì„ íƒëœ ë©”ì‹œì§€ ê°€ì ¸ì˜¤ê¸° (ì²«ë²ˆì§¸ ë©”ì‹œì§€ ì‚¬ìš©, ë‚˜ì¤‘ì— ë¼ë””ì˜¤ ì„ íƒê°’ìœ¼ë¡œ ë³€ê²½ ê°€ëŠ¥)
+    // ¼±ÅÃµÈ ¸Ş½ÃÁö °¡Á®¿À±â (Ã¹¹øÂ° ¸Ş½ÃÁö »ç¿ë, ³ªÁß¿¡ ¶óµğ¿À ¼±ÅÃ°ªÀ¸·Î º¯°æ °¡´É)
     const selectedMsg = aiResult?.messages?.[0];
     if (!selectedMsg) {
-      alert('ë©”ì‹œì§€ë¥¼ ì„ íƒí•´ì£¼ì„¸ìš”');
+      alert('¸Ş½ÃÁö¸¦ ¼±ÅÃÇØÁÖ¼¼¿ä');
       setIsSending(false);
       return;
     }
 
-    // ë°œì†¡ì‹œê°„ ê³„ì‚°
+    // ¹ß¼Û½Ã°£ °è»ê
     let scheduledAt: string | null = null;
     if (sendTimeOption === 'ai' && aiResult?.recommendedTime) {
-      // AI ì¶”ì²œì‹œê°„ íŒŒì‹± (ì˜ˆ: "2024-02-01 19:00" ë˜ëŠ” "2ì›” 1ì¼ ì˜¤í›„ 7ì‹œ")
+      // AI ÃßÃµ½Ã°£ ÆÄ½Ì (¿¹: "2024-02-01 19:00" ¶Ç´Â "2¿ù 1ÀÏ ¿ÀÈÄ 7½Ã")
       const timeStr = aiResult.recommendedTime;
-      // ISO í˜•ì‹ì´ë©´ ê·¸ëŒ€ë¡œ, ì•„ë‹ˆë©´ íŒŒì‹± ì‹œë„
+      // ISO Çü½ÄÀÌ¸é ±×´ë·Î, ¾Æ´Ï¸é ÆÄ½Ì ½Ãµµ
       if (timeStr.includes('T') || timeStr.match(/^\d{4}-\d{2}-\d{2}/)) {
         scheduledAt = timeStr;
       } else {
-        // í•œêµ­ì–´ í˜•ì‹ íŒŒì‹± ì‹œë„ (ì˜ˆ: "2ì›” 1ì¼ 19:00")
-        const match = timeStr.match(/(\d+)ì›”\s*(\d+)ì¼.*?(\d{1,2}):?(\d{2})?/);
+        // ÇÑ±¹¾î Çü½Ä ÆÄ½Ì ½Ãµµ (¿¹: "2¿ù 1ÀÏ 19:00")
+        const match = timeStr.match(/(\d+)¿ù\s*(\d+)ÀÏ.*?(\d{1,2}):?(\d{2})?/);
         if (match) {
           const year = new Date().getFullYear();
           const month = parseInt(match[1]) - 1;
@@ -1423,20 +1423,20 @@ const handleAiCampaignSend = async () => {
     } else if (sendTimeOption === 'custom' && customSendTime) {
       scheduledAt = new Date(customSendTime).toISOString();
     }
-    // 'now'ë©´ scheduledAtì€ null (ì¦‰ì‹œ ë°œì†¡)
+    // 'now'¸é scheduledAtÀº null (Áï½Ã ¹ß¼Û)
 
-    // ì´ë²¤íŠ¸ ê¸°ê°„ íŒŒì‹± (AI ë©”ì‹œì§€ì—ì„œ ì¶”ì¶œ ì‹œë„)
+    // ÀÌº¥Æ® ±â°£ ÆÄ½Ì (AI ¸Ş½ÃÁö¿¡¼­ ÃßÃâ ½Ãµµ)
     let eventStartDate: string | null = null;
     let eventEndDate: string | null = null;
     
-    // ë©”ì‹œì§€ ë‚´ìš©ì—ì„œ ì´ë²¤íŠ¸ ê¸°ê°„ ì¶”ì¶œ ì‹œë„
+    // ¸Ş½ÃÁö ³»¿ë¿¡¼­ ÀÌº¥Æ® ±â°£ ÃßÃâ ½Ãµµ
     const msgText = selectedMsg.message_text || '';
-    // ì—¬ëŸ¬ í˜•ì‹ ì§€ì›: "Xì›” Xì¼ ~ Xì¼", "Xì›” Xì¼ ~ Xì›” Xì¼", "X/X ~ X/X"
-    let eventMatch = msgText.match(/(\d+)ì›”\s*(\d+)ì¼.*?~\s*(\d+)ì›”\s*(\d+)ì¼/); // 2ì›” 13ì¼ ~ 2ì›” 15ì¼
+    // ¿©·¯ Çü½Ä Áö¿ø: "X¿ù XÀÏ ~ XÀÏ", "X¿ù XÀÏ ~ X¿ù XÀÏ", "X/X ~ X/X"
+    let eventMatch = msgText.match(/(\d+)¿ù\s*(\d+)ÀÏ.*?~\s*(\d+)¿ù\s*(\d+)ÀÏ/); // 2¿ù 13ÀÏ ~ 2¿ù 15ÀÏ
     if (!eventMatch) {
-      eventMatch = msgText.match(/(\d+)ì›”\s*(\d+)ì¼.*?~\s*(\d+)ì¼/); // 2ì›” 13ì¼ ~ 15ì¼
+      eventMatch = msgText.match(/(\d+)¿ù\s*(\d+)ÀÏ.*?~\s*(\d+)ÀÏ/); // 2¿ù 13ÀÏ ~ 15ÀÏ
       if (eventMatch) {
-        // ëë‚˜ëŠ” ì›”ì´ ì—†ìœ¼ë©´ ì‹œì‘ ì›”ê³¼ ê°™ìŒ
+        // ³¡³ª´Â ¿ùÀÌ ¾øÀ¸¸é ½ÃÀÛ ¿ù°ú °°À½
         eventMatch = [eventMatch[0], eventMatch[1], eventMatch[2], eventMatch[1], eventMatch[3]];
       }
     }
@@ -1454,10 +1454,10 @@ const handleAiCampaignSend = async () => {
       eventEndDate = `${year}-${String(endMonth + 1).padStart(2, '0')}-${String(endDay).padStart(2, '0')}`;
     }
 
-    // AI ì¶”ì²œ ìº í˜ì¸ëª… ìš°ì„  ì‚¬ìš©, ì—†ìœ¼ë©´ ë©”ì‹œì§€ì—ì„œ ì¶”ì¶œ
+    // AI ÃßÃµ Ä·ÆäÀÎ¸í ¿ì¼± »ç¿ë, ¾øÀ¸¸é ¸Ş½ÃÁö¿¡¼­ ÃßÃâ
 const msgContent = selectedMsg.message_text || '';
 const nameMatch = msgContent.match(/\][\s]*(.+?)[\s]*[\n\r]/);
-const extractedName = nameMatch ? nameMatch[1].replace(/[^\wê°€-í£\s]/g, '').trim().slice(0, 30) : `ìº í˜ì¸_${formatDate(new Date().toISOString())}`;
+const extractedName = nameMatch ? nameMatch[1].replace(/[^\w°¡-ÆR\s]/g, '').trim().slice(0, 30) : `Ä·ÆäÀÎ_${formatDate(new Date().toISOString())}`;
 const autoName = aiResult?.suggestedCampaignName || extractedName;
 
 const campaignData = {
@@ -1474,28 +1474,28 @@ const campaignData = {
       mmsImagePaths: mmsUploadedImages.map(img => img.serverPath),
     };
 
-    console.log('=== ë°œì†¡ ë””ë²„ê¹… ===');
+    console.log('=== ¹ß¼Û µğ¹ö±ë ===');
     console.log('sendTimeOption:', sendTimeOption);
     console.log('scheduledAt:', scheduledAt);
     console.log('campaignData:', campaignData);
 
     const response = await campaignsApi.create(campaignData);
 
-    // ìº í˜ì¸ ë°œì†¡ API í˜¸ì¶œ (ì˜ˆì•½/ì¦‰ì‹œ ëª¨ë‘)
+    // Ä·ÆäÀÎ ¹ß¼Û API È£Ãâ (¿¹¾à/Áï½Ã ¸ğµÎ)
     const campaignId = response.data.campaign?.id;
     if (campaignId) {
       await campaignsApi.send(campaignId);
     }
     
-    // ëª¨ë‹¬ ë‹«ê¸°
+    // ¸ğ´Ş ´İ±â
     setShowPreview(false);
     setShowAiResult(false);
     setAiStep(1);
     setAiCampaignPrompt('');
-    // ì„±ê³µ ëª¨ë‹¬ìš© ë°œì†¡ ì •ë³´ ì €ì¥ (ì´ˆê¸°í™” ì „ì—!)
-    const sendInfoText = sendTimeOption === 'now' ? 'ì¦‰ì‹œ ë°œì†¡ ì™„ë£Œ' : 
-                         sendTimeOption === 'ai' ? `ì˜ˆì•½ ì™„ë£Œ (${aiResult?.recommendedTime || 'AI ì¶”ì²œ'})` :
-                         `ì˜ˆì•½ ì™„ë£Œ (${customSendTime ? formatDateTime(customSendTime) : ''})`;
+    // ¼º°ø ¸ğ´Ş¿ë ¹ß¼Û Á¤º¸ ÀúÀå (ÃÊ±âÈ­ Àü¿¡!)
+    const sendInfoText = sendTimeOption === 'now' ? 'Áï½Ã ¹ß¼Û ¿Ï·á' : 
+                         sendTimeOption === 'ai' ? `¿¹¾à ¿Ï·á (${aiResult?.recommendedTime || 'AI ÃßÃµ'})` :
+                         `¿¹¾à ¿Ï·á (${customSendTime ? formatDateTime(customSendTime) : ''})`;
     setSuccessSendInfo(sendInfoText);
     
     setSendTimeOption('ai');
@@ -1507,25 +1507,25 @@ const campaignData = {
     loadScheduledCampaigns();
     
   } catch (error: any) {
-    console.error('ìº í˜ì¸ ìƒì„± ì‹¤íŒ¨:', error);
+    console.error('Ä·ÆäÀÎ »ı¼º ½ÇÆĞ:', error);
     if (error.response?.status === 402 && error.response?.data?.insufficientBalance) {
       setShowInsufficientBalance({show: true, balance: error.response.data.balance, required: error.response.data.requiredAmount});
     } else {
-      alert(error.response?.data?.error || 'ìº í˜ì¸ ìƒì„±ì— ì‹¤íŒ¨í–ˆìŠµë‹ˆë‹¤.');
+      alert(error.response?.data?.error || 'Ä·ÆäÀÎ »ı¼º¿¡ ½ÇÆĞÇß½À´Ï´Ù.');
     }
   } finally {
     setIsSending(false);
   }
 };
 
-  // ë‹´ë‹¹ì ì‚¬ì „ìˆ˜ì‹ 
+  // ´ã´çÀÚ »çÀü¼ö½Å
   const handleTestSend = async () => {
     setTestSending(true);
     setTestSentResult(null);
     try {
       const selectedMsg = aiResult?.messages?.[0];
       if (!selectedMsg) {
-        alert('ë©”ì‹œì§€ë¥¼ ì„ íƒí•´ì£¼ì„¸ìš”');
+        alert('¸Ş½ÃÁö¸¦ ¼±ÅÃÇØÁÖ¼¼¿ä');
         setTestSending(false);
         return;
       }
@@ -1545,12 +1545,12 @@ const campaignData = {
       const data = await res.json();
       if (res.ok) {
         const contactList = data.contacts?.map((c: any) => `${c.name}(${c.phone})`).join(', ') || '';
-        setTestSentResult(`âœ… ${data.message}\n${contactList}`);
+        setTestSentResult(`? ${data.message}\n${contactList}`);
       } else {
-        setTestSentResult(`âŒ ${data.error}`);
+        setTestSentResult(`? ${data.error}`);
       }
     } catch (error) {
-      setTestSentResult('âŒ í…ŒìŠ¤íŠ¸ ë°œì†¡ ì‹¤íŒ¨');
+      setTestSentResult('? Å×½ºÆ® ¹ß¼Û ½ÇÆĞ');
     } finally {
       setTestSending(false);
       setTestCooldown(true);
@@ -1569,12 +1569,12 @@ const campaignData = {
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-100 flex items-center justify-center">
-        <div className="text-gray-500">ë¡œë”© ì¤‘...</div>
+        <div className="text-gray-500">·Îµù Áß...</div>
       </div>
     );
   }
 
-  // ë°”ì´íŠ¸ ê³„ì‚° í•¨ìˆ˜ (í•œê¸€ 2byte, ì˜ë¬¸/ìˆ«ì 1byte)
+  // ¹ÙÀÌÆ® °è»ê ÇÔ¼ö (ÇÑ±Û 2byte, ¿µ¹®/¼ıÀÚ 1byte)
   const calculateBytes = (text: string) => {
     let bytes = 0;
     for (let i = 0; i < text.length; i++) {
@@ -1584,7 +1584,7 @@ const campaignData = {
     return bytes;
   };
 
-  // SMS 90ë°”ì´íŠ¸ë¡œ ì˜ë¦° ë©”ì‹œì§€ ë°˜í™˜
+  // SMS 90¹ÙÀÌÆ®·Î Àß¸° ¸Ş½ÃÁö ¹İÈ¯
   const truncateToSmsBytes = (text: string, maxBytes: number = 90) => {
     let bytes = 0;
     for (let i = 0; i < text.length; i++) {
@@ -1595,8 +1595,8 @@ const campaignData = {
     return text;
   };
 
-  // ê´‘ê³ ë¬¸êµ¬ í¬í•¨ëœ ìµœì¢… ë©”ì‹œì§€
-  // 080ë²ˆí˜¸ í•˜ì´í”ˆ í¬ë§·íŒ… (0801111111 â†’ 080-111-1111)
+  // ±¤°í¹®±¸ Æ÷ÇÔµÈ ÃÖÁ¾ ¸Ş½ÃÁö
+  // 080¹øÈ£ ÇÏÀÌÇÂ Æ÷¸ËÆÃ (0801111111 ¡æ 080-111-1111)
   const formatRejectNumber = (num: string) => {
     const clean = num.replace(/-/g, '');
     if (clean.length === 10) {
@@ -1608,9 +1608,9 @@ const campaignData = {
   const getFullMessage = (msg: string) => {
     if (!adTextEnabled) return msg;
     const optOutText = directMsgType === 'SMS' 
-      ? `ë¬´ë£Œê±°ë¶€${optOutNumber.replace(/-/g, '')}` 
-      : `ë¬´ë£Œìˆ˜ì‹ ê±°ë¶€ ${formatRejectNumber(optOutNumber)}`;
-    return `(ê´‘ê³ )${msg}\n${optOutText}`;
+      ? `¹«·á°ÅºÎ${optOutNumber.replace(/-/g, '')}` 
+      : `¹«·á¼ö½Å°ÅºÎ ${formatRejectNumber(optOutNumber)}`;
+    return `(±¤°í)${msg}\n${optOutText}`;
   };
 
   const messageBytes = calculateBytes(getFullMessage(directMessage));
@@ -1619,7 +1619,7 @@ const campaignData = {
 
   return (
     <div className="min-h-screen bg-gray-100">
-      {/* AI í”„ë¡¬í”„íŠ¸ ì…ë ¥ ì•ˆë‚´ ëª¨ë‹¬ */}
+      {/* AI ÇÁ·ÒÇÁÆ® ÀÔ·Â ¾È³» ¸ğ´Ş */}
       {showPromptAlert && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
@@ -1628,34 +1628,34 @@ const campaignData = {
                 <div className="w-12 h-12 bg-emerald-100 rounded-full flex items-center justify-center">
                   <Sparkles className="w-6 h-6 text-emerald-600" />
                 </div>
-                <h3 className="text-xl font-bold text-gray-800">AI ìº í˜ì¸ ìƒì„±</h3>
+                <h3 className="text-xl font-bold text-gray-800">AI Ä·ÆäÀÎ »ı¼º</h3>
               </div>
               <p className="text-gray-600 leading-relaxed">
-                ì›í•˜ëŠ” ìº í˜ì¸ ë‚´ìš©ì„ ì…ë ¥í•˜ì„¸ìš”.<br/>
-                <span className="text-emerald-700 font-medium">íƒ€ê²Ÿ ì„ ì •ë¶€í„° ë©”ì‹œì§€ ì‘ì„±, ë°œì†¡ ì‹œê°„ê¹Œì§€</span><br/>
-                AIê°€ ìë™ìœ¼ë¡œ ì„¤ê³„í•´ë“œë¦½ë‹ˆë‹¤.
+                ¿øÇÏ´Â Ä·ÆäÀÎ ³»¿ëÀ» ÀÔ·ÂÇÏ¼¼¿ä.<br/>
+                <span className="text-emerald-700 font-medium">Å¸°Ù ¼±Á¤ºÎÅÍ ¸Ş½ÃÁö ÀÛ¼º, ¹ß¼Û ½Ã°£±îÁö</span><br/>
+                AI°¡ ÀÚµ¿À¸·Î ¼³°èÇØµå¸³´Ï´Ù.
               </p>
             </div>
             <div className="p-4 bg-gray-50 border-t">
               <div className="text-sm text-gray-500 mb-4">
-                <p className="font-medium mb-2">ğŸ’¡ ì…ë ¥ ì˜ˆì‹œ:</p>
+                <p className="font-medium mb-2">?? ÀÔ·Â ¿¹½Ã:</p>
                 <ul className="space-y-1 text-gray-600">
-                  <li>â€¢ 30ëŒ€ ì—¬ì„± VIPì—ê²Œ ë´„ ì‹ ìƒí’ˆ 20% í• ì¸ ì•ˆë‚´</li>
-                  <li>â€¢ 3ê°œì›” ë¯¸êµ¬ë§¤ ê³ ê°ì—ê²Œ ì¬ë°©ë¬¸ ì¿ í° ë°œì†¡</li>
-                  <li>â€¢ ìƒì¼ ê³ ê°ì—ê²Œ ì¶•í•˜ ë©”ì‹œì§€ ë³´ë‚´ê¸°</li>
+                  <li>? 30´ë ¿©¼º VIP¿¡°Ô º½ ½Å»óÇ° 20% ÇÒÀÎ ¾È³»</li>
+                  <li>? 3°³¿ù ¹Ì±¸¸Å °í°´¿¡°Ô Àç¹æ¹® ÄíÆù ¹ß¼Û</li>
+                  <li>? »ıÀÏ °í°´¿¡°Ô ÃàÇÏ ¸Ş½ÃÁö º¸³»±â</li>
                 </ul>
               </div>
               <button
                 onClick={() => setShowPromptAlert(false)}
                 className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold transition-colors"
               >
-                í™•ì¸
+                È®ÀÎ
               </button>
             </div>
           </div>
           </div>
       )}
-      {/* í† ìŠ¤íŠ¸ ì•Œë¦¼ */}
+      {/* Åä½ºÆ® ¾Ë¸² */}
       {toast.show && (
         <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[100] animate-bounce">
           <div className={`px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-3 ${
@@ -1663,17 +1663,17 @@ const campaignData = {
               ? 'bg-gradient-to-r from-emerald-500 to-green-500 text-white' 
               : 'bg-gradient-to-r from-red-500 to-rose-500 text-white'
           }`}>
-            <span className="text-2xl">{toast.type === 'success' ? 'âœ…' : 'âŒ'}</span>
+            <span className="text-2xl">{toast.type === 'success' ? '?' : '?'}</span>
             <span className="font-medium text-lg">{toast.message}</span>
           </div>
         </div>
       )}
-      {/* í—¤ë” */}
+      {/* Çì´õ */}
       <header className="bg-white shadow">
         <div className="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
           <div className="cursor-pointer" onClick={() => window.location.reload()}>
-          <h1 className="text-xl font-bold text-gray-800">í•œì¤„ë¡œ</h1>
-            <p className="text-sm text-gray-500">{user?.company?.name}{(user as any)?.department ? ` Â· ${(user as any).department}` : ''}</p>
+          <h1 className="text-xl font-bold text-gray-800">ÇÑÁÙ·Î</h1>
+            <p className="text-sm text-gray-500">{user?.company?.name}{(user as any)?.department ? ` ¡¤ ${(user as any).department}` : ''}</p>
           </div>
           <div className="flex items-center gap-4">
           <button
@@ -1682,7 +1682,7 @@ const campaignData = {
                 try {
                   const token = localStorage.getItem('token');
                   
-                  // íšŒì‚¬ ì„¤ì •ì—ì„œ 080 ë²ˆí˜¸ ê°€ì ¸ì˜¤ê¸°
+                  // È¸»ç ¼³Á¤¿¡¼­ 080 ¹øÈ£ °¡Á®¿À±â
                   const settingsRes = await fetch('/api/companies/settings', {
                     headers: { Authorization: `Bearer ${token}` }
                   });
@@ -1703,120 +1703,120 @@ const campaignData = {
                     if (defaultCb) setSelectedCallback(defaultCb.phone);
                   }
                 } catch (err) {
-                  console.error('íšŒì‹ ë²ˆí˜¸ ë¡œë“œ ì‹¤íŒ¨:', err);
+                  console.error('È¸½Å¹øÈ£ ·Îµå ½ÇÆĞ:', err);
                 }
               }}
               className="flex items-center gap-2 px-4 py-2 bg-green-700 hover:bg-green-800 text-white rounded-lg transition-colors"
             >
               <Send className="w-4 h-4" />
-              <span className="text-sm font-medium">ì§ì ‘ë°œì†¡</span>
+              <span className="text-sm font-medium">Á÷Á¢¹ß¼Û</span>
             </button>
             <button
               onClick={() => setShowCalendar(true)}
               className="flex items-center gap-2 px-4 py-2 border border-gray-300 hover:bg-gray-50 rounded-lg transition-colors"
             >
               <Calendar className="w-4 h-4 text-gray-600" />
-              <span className="text-sm font-medium text-gray-700">ìº˜ë¦°ë”</span>
+              <span className="text-sm font-medium text-gray-700">Ä¶¸°´õ</span>
             </button>
             <button
               onClick={() => setShowResults(true)}
               className="flex items-center gap-2 px-4 py-2 border border-gray-300 hover:bg-gray-50 rounded-lg transition-colors"
             >
               <BarChart3 className="w-4 h-4 text-gray-600" />
-              <span className="text-sm font-medium text-gray-700">ë°œì†¡ê²°ê³¼</span>
+              <span className="text-sm font-medium text-gray-700">¹ß¼Û°á°ú</span>
             </button>
             <button
               onClick={() => navigate('/unsubscribes')}
               className="flex items-center gap-2 px-4 py-2 border border-gray-300 hover:bg-gray-50 rounded-lg transition-colors"
             >
               <Ban className="w-4 h-4 text-gray-600" />
-              <span className="text-sm font-medium text-gray-700">ìˆ˜ì‹ ê±°ë¶€</span>
+              <span className="text-sm font-medium text-gray-700">¼ö½Å°ÅºÎ</span>
             </button>
             <button
               onClick={() => navigate('/settings')}
               className="flex items-center gap-2 px-4 py-2 border border-gray-300 hover:bg-gray-50 rounded-lg transition-colors"
             >
               <Settings className="w-4 h-4 text-gray-600" />
-              <span className="text-sm font-medium text-gray-700">ì„¤ì •</span>
+              <span className="text-sm font-medium text-gray-700">¼³Á¤</span>
             </button>
             <button
               onClick={handleLogout}
               className="flex items-center gap-2 px-4 py-2 border border-red-200 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
             >
               <LogOut className="w-4 h-4" />
-              <span className="text-sm font-medium">ë¡œê·¸ì•„ì›ƒ</span>
+              <span className="text-sm font-medium">·Î±×¾Æ¿ô</span>
             </button>
           </div>
         </div>
       </header>
 
-      {/* ë©”ì¸ */}
+      {/* ¸ŞÀÎ */}
       <main className="max-w-7xl mx-auto px-4 py-8">
-        {/* í†µê³„ ì¹´ë“œ */}
-        {/* í†µê³„ + AI í”„ë¡¬í”„íŠ¸ ì˜ì—­ */}
+        {/* Åë°è Ä«µå */}
+        {/* Åë°è + AI ÇÁ·ÒÇÁÆ® ¿µ¿ª */}
         <div className="flex gap-6 mb-8">
-          {/* ì¢Œì¸¡: í†µê³„ ì¹´ë“œ */}
+          {/* ÁÂÃø: Åë°è Ä«µå */}
           <div className="w-72 space-y-4">
-            {/* í”Œëœ ì •ë³´ */}
+            {/* ÇÃ·£ Á¤º¸ */}
             <div 
               onClick={() => navigate('/pricing')}
               className="flex items-center justify-between p-3 bg-white/50 rounded-xl cursor-pointer hover:bg-white/80 transition-all"
             >
               <div className="text-sm text-gray-600">
-                <span className="font-semibold text-gray-800">{planInfo?.plan_name || 'ë¡œë”©...'}</span>
+                <span className="font-semibold text-gray-800">{planInfo?.plan_name || '·Îµù...'}</span>
                 {planInfo?.plan_code === 'FREE' && !planInfo?.is_trial_expired && (
                   <span className="text-orange-500 ml-1 text-xs">
                     D-{Math.max(0, Math.ceil((new Date(planInfo.trial_expires_at).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)))}
                   </span>
                 )}
                 {planInfo?.plan_code === 'FREE' && planInfo?.is_trial_expired && (
-                  <span className="text-red-500 ml-1 text-xs">ë§Œë£Œ</span>
+                  <span className="text-red-500 ml-1 text-xs">¸¸·á</span>
                 )}
               </div>
-              <span className="text-green-700 text-xs font-medium">ìš”ê¸ˆì œ ì•ˆë‚´ â†’</span>
+              <span className="text-green-700 text-xs font-medium">¿ä±İÁ¦ ¾È³» ¡æ</span>
             </div>
-                        {/* ê³ ê° í˜„í™© */}
+                        {/* °í°´ ÇöÈ² */}
                         <div className="bg-white/50 rounded-xl p-4">
               <div className="flex items-center justify-between mb-3">
-                <span className="text-xs text-gray-400 font-medium">ê³ ê° í˜„í™©</span>
-                <button onClick={() => setShowCustomerDB(true)} className="text-green-700 text-xs font-medium hover:text-green-800 transition-colors">DB ì •ë³´ì¡°íšŒ â†’</button>
+                <span className="text-xs text-gray-400 font-medium">°í°´ ÇöÈ²</span>
+                <button onClick={() => setShowCustomerDB(true)} className="text-green-700 text-xs font-medium hover:text-green-800 transition-colors">DB Á¤º¸Á¶È¸ ¡æ</button>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="text-center p-2">
                   <div className="text-xl font-bold text-gray-800">{parseInt(stats?.total || '0').toLocaleString()}</div>
-                  <div className="text-xs text-gray-400 mt-1">ì „ì²´</div>
+                  <div className="text-xs text-gray-400 mt-1">ÀüÃ¼</div>
                 </div>
                 <div className="text-center p-2">
                   <div className="text-xl font-bold text-green-700">{parseInt(stats?.sms_opt_in_count || '0').toLocaleString()}</div>
-                  <div className="text-xs text-gray-400 mt-1">ìˆ˜ì‹ ë™ì˜</div>
+                  <div className="text-xs text-gray-400 mt-1">¼ö½Åµ¿ÀÇ</div>
                 </div>
                 <div className="text-center p-2">
                   <div className="text-xl font-bold text-gray-800">{parseInt(stats?.male_count || '0').toLocaleString()}</div>
-                  <div className="text-xs text-gray-400 mt-1">ë‚¨ì„±</div>
+                  <div className="text-xs text-gray-400 mt-1">³²¼º</div>
                 </div>
                 <div className="text-center p-2">
                   <div className="text-xl font-bold text-gray-800">{parseInt(stats?.female_count || '0').toLocaleString()}</div>
-                  <div className="text-xs text-gray-400 mt-1">ì—¬ì„±</div>
+                  <div className="text-xs text-gray-400 mt-1">¿©¼º</div>
                 </div>
               </div>
             </div>
 
-            {/* ë°œì†¡ í˜„í™© */}
+            {/* ¹ß¼Û ÇöÈ² */}
             <div className="bg-white/50 rounded-xl p-4">
             <div className="flex items-center justify-between mb-3">
-                <span className="text-xs text-gray-400 font-medium">ë°œì†¡ í˜„í™©</span>
+                <span className="text-xs text-gray-400 font-medium">¹ß¼Û ÇöÈ²</span>
                 {balanceInfo?.billingType === 'prepaid' && (
-                  <button onClick={() => setShowBalanceModal(true)} className="text-green-700 text-xs font-medium hover:text-green-800 transition-colors">ì”ì•¡ í˜„í™© â†’</button>
+                  <button onClick={() => setShowBalanceModal(true)} className="text-green-700 text-xs font-medium hover:text-green-800 transition-colors">ÀÜ¾× ÇöÈ² ¡æ</button>
                 )}
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="text-center p-2">
                   <div className="text-xl font-bold text-gray-800">{(stats?.monthly_sent || 0).toLocaleString()}</div>
-                  <div className="text-xs text-gray-400 mt-1">ì´ë²ˆ ë‹¬</div>
+                  <div className="text-xs text-gray-400 mt-1">ÀÌ¹ø ´Ş</div>
                 </div>
                 <div className="text-center p-2">
                   <div className="text-xl font-bold text-gray-800">{stats?.success_rate || '0'}%</div>
-                  <div className="text-xs text-gray-400 mt-1">ì„±ê³µë¥ </div>
+                  <div className="text-xs text-gray-400 mt-1">¼º°ø·ü</div>
                 </div>
                 <div className="text-center p-2">
                   <div className="text-xl font-bold text-amber-600">{parseInt(stats?.vip_count || '0').toLocaleString()}</div>
@@ -1824,7 +1824,7 @@ const campaignData = {
                 </div>
                 <div className="text-center p-2">
                   <div className="text-xl font-bold text-gray-800">-</div>
-                  <div className="text-xs text-gray-400 mt-1">30ì¼ ë§¤ì¶œ</div>
+                  <div className="text-xs text-gray-400 mt-1">30ÀÏ ¸ÅÃâ</div>
                 </div>
               </div>
               </div>
@@ -1832,46 +1832,46 @@ const campaignData = {
             
                         </div>
 
-{/* ìš°ì¸¡: AI í”„ë¡¬í”„íŠ¸ ì…ë ¥ */}
+{/* ¿ìÃø: AI ÇÁ·ÒÇÁÆ® ÀÔ·Â */}
           <div className="flex-1 bg-green-50 rounded-xl p-6 border border-green-200">
-          <h3 className="text-xl font-bold text-gray-800 mb-2">AI ìë™í™” ë§ˆì¼€íŒ…</h3>
+          <h3 className="text-xl font-bold text-gray-800 mb-2">AI ÀÚµ¿È­ ¸¶ÄÉÆÃ</h3>
             <p className="text-sm text-gray-500 mb-5">
-              í•œ ì¤„ì´ë©´ ì¶©ë¶„í•©ë‹ˆë‹¤. íƒ€ê²Ÿ ì„ ì •ë¶€í„° ë©”ì‹œì§€ ì‘ì„±, ë°œì†¡ ì‹œê°„ê¹Œì§€ AIê°€ ìë™ìœ¼ë¡œ ì„¤ê³„í•´ë“œë¦½ë‹ˆë‹¤.
+              ÇÑ ÁÙÀÌ¸é ÃæºĞÇÕ´Ï´Ù. Å¸°Ù ¼±Á¤ºÎÅÍ ¸Ş½ÃÁö ÀÛ¼º, ¹ß¼Û ½Ã°£±îÁö AI°¡ ÀÚµ¿À¸·Î ¼³°èÇØµå¸³´Ï´Ù.
             </p>
             <textarea
               value={aiCampaignPrompt}
               onChange={(e) => setAiCampaignPrompt(e.target.value)}
               className="w-full p-4 border border-gray-300 rounded-lg resize-none focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white"
               rows={4}
-              placeholder="ì˜ˆ: 30ëŒ€ ì—¬ì„± VIP ê³ ê°ì—ê²Œ ë´„ ì‹ ìƒí’ˆ 20% í• ì¸ ì•ˆë‚´ ë¬¸ì ë³´ë‚´ì¤˜"
+              placeholder="¿¹: 30´ë ¿©¼º VIP °í°´¿¡°Ô º½ ½Å»óÇ° 20% ÇÒÀÎ ¾È³» ¹®ÀÚ º¸³»Áà"
             />
-            {/* 3ë¶„í•  ë©”ë‰´ ì¹´ë“œ */}
+            {/* 3ºĞÇÒ ¸Ş´º Ä«µå */}
             <div className="grid grid-cols-3 gap-4 mt-6">
-              {/* ê³ ê° DB ì—…ë¡œë“œ - ìŠ¬ë ˆì´íŠ¸ ë¸”ë£¨ */}
+              {/* °í°´ DB ¾÷·Îµå - ½½·¹ÀÌÆ® ºí·ç */}
               <button 
                 onClick={() => setShowFileUpload(true)}
                 className="p-6 bg-slate-600 hover:bg-slate-700 rounded-xl transition-all hover:shadow-lg group text-right h-[140px] flex flex-col justify-between"
               >
                 <div>
-                  <div className="text-lg font-bold text-white mb-1">ê³ ê° DB ì—…ë¡œë“œ</div>
-                  <div className="text-sm text-slate-200">ì—‘ì…€/CSVë¡œ ê³ ê° ì¶”ê°€</div>
+                  <div className="text-lg font-bold text-white mb-1">°í°´ DB ¾÷·Îµå</div>
+                  <div className="text-sm text-slate-200">¿¢¼¿/CSV·Î °í°´ Ãß°¡</div>
                 </div>
-                <div className="text-2xl text-slate-300 self-end">â†’</div>
+                <div className="text-2xl text-slate-300 self-end">¡æ</div>
               </button>
 
-              {/* ì§ì ‘ íƒ€ê²Ÿ ì„¤ì • - ê¸ˆìƒ‰ */}
+              {/* Á÷Á¢ Å¸°Ù ¼³Á¤ - ±İ»ö */}
               <button 
                 onClick={() => { setShowDirectTargeting(true); loadEnabledFields(); }}
                 className="p-6 bg-amber-500 hover:bg-amber-600 rounded-xl transition-all hover:shadow-lg group text-right h-[140px] flex flex-col justify-between"
               >
                 <div>
-                  <div className="text-lg font-bold text-white mb-1">ì§ì ‘ íƒ€ê²Ÿ ì„¤ì •</div>
-                  <div className="text-sm text-amber-100">ì›í•˜ëŠ” ê³ ê°ì„ ì§ì ‘ í•„í„°ë§</div>
+                  <div className="text-lg font-bold text-white mb-1">Á÷Á¢ Å¸°Ù ¼³Á¤</div>
+                  <div className="text-sm text-amber-100">¿øÇÏ´Â °í°´À» Á÷Á¢ ÇÊÅÍ¸µ</div>
                 </div>
-                <div className="text-2xl text-amber-200 self-end">â†’</div>
+                <div className="text-2xl text-amber-200 self-end">¡æ</div>
               </button>
 
-              {/* AI ì¶”ì²œ ë°œì†¡ - ì´ˆë¡ */}
+              {/* AI ÃßÃµ ¹ß¼Û - ÃÊ·Ï */}
               <button 
                 onClick={handleAiCampaignGenerate}
                 disabled={aiLoading}
@@ -1883,31 +1883,31 @@ const campaignData = {
                 {aiLoading ? (
                   <>
                     <div>
-                      <div className="text-lg font-bold text-white mb-1">AI ë¶„ì„ ì¤‘...</div>
-                      <div className="text-sm text-green-200">ì ì‹œë§Œ ê¸°ë‹¤ë ¤ì£¼ì„¸ìš”</div>
+                      <div className="text-lg font-bold text-white mb-1">AI ºĞ¼® Áß...</div>
+                      <div className="text-sm text-green-200">Àá½Ã¸¸ ±â´Ù·ÁÁÖ¼¼¿ä</div>
                     </div>
-                    <div className="text-2xl text-green-300 self-end animate-pulse">â³</div>
+                    <div className="text-2xl text-green-300 self-end animate-pulse">?</div>
                   </>
                 ) : (
                   <>
                     <div>
-                      <div className="text-lg font-bold text-white mb-1">AI ì¶”ì²œ ë°œì†¡</div>
-                      <div className="text-sm text-green-200">ìì—°ì–´ë¡œ AIê°€ ìë™ ì„¤ê³„</div>
+                      <div className="text-lg font-bold text-white mb-1">AI ÃßÃµ ¹ß¼Û</div>
+                      <div className="text-sm text-green-200">ÀÚ¿¬¾î·Î AI°¡ ÀÚµ¿ ¼³°è</div>
                     </div>
-                    <div className="text-2xl text-green-300 self-end">â†’</div>
+                    <div className="text-2xl text-green-300 self-end">¡æ</div>
                   </>
                 )}
               </button>
             </div>
 
-            {/* AI ì•ˆë‚´ë¬¸êµ¬ */}
+            {/* AI ¾È³»¹®±¸ */}
             <p className="text-xs text-gray-400 text-right mt-2 mb-0">
-              AIëŠ” ì‹¤ìˆ˜í•  ìˆ˜ ìˆìŠµë‹ˆë‹¤. ë°œì†¡ ì „ ë¯¸ë¦¬ë³´ê¸°ì—ì„œ ë‚´ìš©ì„ ê¼­ í™•ì¸í•´ì£¼ì„¸ìš”.
+              AI´Â ½Ç¼öÇÒ ¼ö ÀÖ½À´Ï´Ù. ¹ß¼Û Àü ¹Ì¸®º¸±â¿¡¼­ ³»¿ëÀ» ²À È®ÀÎÇØÁÖ¼¼¿ä.
             </p>
           </div>
         </div>
 
-        {/* íƒ­ */}
+        {/* ÅÇ */}
         <div className="bg-transparent rounded-lg -mt-6 mb-8">
         <div className="flex border-b hidden">
             <button
@@ -1918,7 +1918,7 @@ const campaignData = {
                   : 'text-gray-500 hover:text-gray-700'
               }`}
             >
-              1. íƒ€ê²Ÿ ì¶”ì¶œ
+              1. Å¸°Ù ÃßÃâ
             </button>
             <button
               onClick={() => setActiveTab('campaign')}
@@ -1928,7 +1928,7 @@ const campaignData = {
                   : 'text-gray-500 hover:text-gray-700'
               }`}
             >
-              2. ìº í˜ì¸ ì„¤ì •
+              2. Ä·ÆäÀÎ ¼³Á¤
             </button>
             <button
               onClick={() => setActiveTab('send')}
@@ -1938,68 +1938,68 @@ const campaignData = {
                   : 'text-gray-500 hover:text-gray-700'
               }`}
             >
-              3. ë°œì†¡
+              3. ¹ß¼Û
             </button>
             </div>
 
             <div className="px-4 pt-1 pb-4">
-             {/* íƒ€ê²Ÿ ì¶”ì¶œ íƒ­ */}
+             {/* Å¸°Ù ÃßÃâ ÅÇ */}
             {activeTab === 'target' && (
               <div>
-{/* 5ê°œ ê¸°ëŠ¥ ì¹´ë“œ */}
+{/* 5°³ ±â´É Ä«µå */}
 <div className="grid grid-cols-5 gap-4">
-                  {/* ìµœê·¼ ìº í˜ì¸ */}
+                  {/* ÃÖ±Ù Ä·ÆäÀÎ */}
                   <div onClick={() => { loadRecentCampaigns(); setShowRecentCampaigns(true); }} className="bg-white/50 shadow-sm rounded-xl p-6 min-h-[140px] cursor-pointer hover:shadow-lg transition-all text-center">
                     <BarChart3 className="w-8 h-8 mx-auto mb-3 text-green-700" />
-                    <div className="font-semibold text-gray-800 mb-1">ìµœê·¼ ìº í˜ì¸</div>
-                    <div className="text-xs text-gray-500 mb-3">ìµœê·¼ ë°œì†¡ ë‚´ì—­</div>
-                    <div className="text-xl font-bold text-green-700">{recentCampaigns.length}ê±´</div>
+                    <div className="font-semibold text-gray-800 mb-1">ÃÖ±Ù Ä·ÆäÀÎ</div>
+                    <div className="text-xs text-gray-500 mb-3">ÃÖ±Ù ¹ß¼Û ³»¿ª</div>
+                    <div className="text-xl font-bold text-green-700">{recentCampaigns.length}°Ç</div>
                   </div>
 
-                  {/* ì¶”ì²œ í…œí”Œë¦¿ */}
+                  {/* ÃßÃµ ÅÛÇÃ¸´ */}
                   <div onClick={() => setShowTemplates(true)} className="bg-white/50 shadow-sm rounded-xl p-6 min-h-[140px] cursor-pointer hover:shadow-lg transition-all text-center">
                     <FileText className="w-8 h-8 mx-auto mb-3 text-amber-500" />
-                    <div className="font-semibold text-gray-800 mb-1">ì¶”ì²œ í…œí”Œë¦¿</div>
-                    <div className="text-xs text-gray-500 mb-3">ì›í´ë¦­ ì ìš©</div>
-                    <div className="text-xl font-bold text-amber-600">8ê°œ</div>
+                    <div className="font-semibold text-gray-800 mb-1">ÃßÃµ ÅÛÇÃ¸´</div>
+                    <div className="text-xs text-gray-500 mb-3">¿øÅ¬¸¯ Àû¿ë</div>
+                    <div className="text-xl font-bold text-amber-600">8°³</div>
                   </div>
 
-                  {/* ê³ ê° ì¸ì‚¬ì´íŠ¸ */}
+                  {/* °í°´ ÀÎ»çÀÌÆ® */}
                   <div onClick={() => setShowInsights(true)} className="bg-white/50 shadow-sm rounded-xl p-6 min-h-[140px] cursor-pointer hover:shadow-lg transition-all text-center">
                     <Users className="w-8 h-8 mx-auto mb-3 text-green-600" />
-                    <div className="font-semibold text-gray-800 mb-1">ê³ ê° ì¸ì‚¬ì´íŠ¸</div>
-                    <div className="text-xs text-gray-500 mb-3">ì„¸ê·¸ë¨¼íŠ¸ ë¶„í¬</div>
-                    <div className="text-xl font-bold text-green-700">5ê°œ</div>
+                    <div className="font-semibold text-gray-800 mb-1">°í°´ ÀÎ»çÀÌÆ®</div>
+                    <div className="text-xs text-gray-500 mb-3">¼¼±×¸ÕÆ® ºĞÆ÷</div>
+                    <div className="text-xl font-bold text-green-700">5°³</div>
                   </div>
 
-                  {/* ì˜¤ëŠ˜ì˜ í†µê³„ */}
+                  {/* ¿À´ÃÀÇ Åë°è */}
                   <div onClick={() => setShowTodayStats(true)} className="bg-white/50 shadow-sm rounded-xl p-6 min-h-[140px] cursor-pointer hover:shadow-lg transition-all text-center">
                     <Activity className="w-8 h-8 mx-auto mb-3 text-green-600" />
-                    <div className="font-semibold text-gray-800 mb-1">ì˜¤ëŠ˜ì˜ í†µê³„</div>
-                    <div className="text-xs text-gray-500 mb-3">ë°œì†¡ëŸ‰/ì„±ê³µë¥ </div>
-                    <div className="text-xl font-bold text-green-700">{(stats?.monthly_sent || 0).toLocaleString()}ê±´</div>
+                    <div className="font-semibold text-gray-800 mb-1">¿À´ÃÀÇ Åë°è</div>
+                    <div className="text-xs text-gray-500 mb-3">¹ß¼Û·®/¼º°ø·ü</div>
+                    <div className="text-xl font-bold text-green-700">{(stats?.monthly_sent || 0).toLocaleString()}°Ç</div>
                   </div>
 
-                  {/* ì˜ˆì•½ ëŒ€ê¸° */}
+                  {/* ¿¹¾à ´ë±â */}
                   <div onClick={() => { loadScheduledCampaigns(); setShowScheduled(true); }} className="bg-white/50 shadow-sm rounded-xl p-6 min-h-[140px] cursor-pointer hover:shadow-lg transition-all text-center">
                     <Clock className="w-8 h-8 mx-auto mb-3 text-amber-500" />
-                    <div className="font-semibold text-gray-800 mb-1">ì˜ˆì•½ ëŒ€ê¸°</div>
-                    <div className="text-xs text-gray-500 mb-3">ê³§ ë°œì†¡ë  ìº í˜ì¸</div>
-                    <div className="text-xl font-bold text-amber-600">{scheduledCampaigns.length}ê±´</div>
+                    <div className="font-semibold text-gray-800 mb-1">¿¹¾à ´ë±â</div>
+                    <div className="text-xs text-gray-500 mb-3">°ğ ¹ß¼ÛµÉ Ä·ÆäÀÎ</div>
+                    <div className="text-xl font-bold text-amber-600">{scheduledCampaigns.length}°Ç</div>
                   </div>
                 </div>
               </div>
             )}
-            {/* ìº í˜ì¸ ì„¤ì • íƒ­ */}
+            {/* Ä·ÆäÀÎ ¼³Á¤ ÅÇ */}
             {activeTab === 'campaign' && (
               <div>
-                <h3 className="text-lg font-semibold mb-4">ìº í˜ì¸ ì„¤ì •</h3>
+                <h3 className="text-lg font-semibold mb-4">Ä·ÆäÀÎ ¼³Á¤</h3>
                 
-                {/* ìº í˜ì¸ ì»¨í…ìŠ¤íŠ¸ í‘œì‹œ */}
+                {/* Ä·ÆäÀÎ ÄÁÅØ½ºÆ® Ç¥½Ã */}
                 {campaignContext && (
                   <div className="mb-4 p-3 bg-purple-50 border border-purple-200 rounded-lg">
                     <span className="text-sm text-purple-700">
-                      ğŸ“Œ ë§ˆì¼€íŒ… ëª©í‘œ: {campaignContext}
+                      ?? ¸¶ÄÉÆÃ ¸ñÇ¥: {campaignContext}
                     </span>
                   </div>
                 )}
@@ -2007,70 +2007,70 @@ const campaignData = {
                 <div className="space-y-4 max-w-2xl">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      ìº í˜ì¸ëª… *
+                      Ä·ÆäÀÎ¸í *
                     </label>
                     <input
                       type="text"
                       value={campaign.campaignName}
                       onChange={(e) => setCampaign({ ...campaign, campaignName: e.target.value })}
                       className="w-full px-3 py-2 border rounded-lg"
-                      placeholder="ì˜ˆ: 1ì›” VIP í”„ë¡œëª¨ì…˜"
+                      placeholder="¿¹: 1¿ù VIP ÇÁ·Î¸ğ¼Ç"
                     />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      ë©”ì‹œì§€ ìœ í˜•
+                      ¸Ş½ÃÁö À¯Çü
                     </label>
                     <select
                       value={campaign.messageType}
                       onChange={(e) => setCampaign({ ...campaign, messageType: e.target.value })}
                       className="w-full px-3 py-2 border rounded-lg"
                     >
-                      <option value="SMS">SMS (ë‹¨ë¬¸)</option>
-                      <option value="LMS">LMS (ì¥ë¬¸)</option>
-                      <option value="MMS">MMS (ì‚¬ì§„)</option>
-                      <option value="KAKAO">ì¹´ì¹´ì˜¤ ì•Œë¦¼í†¡</option>
+                      <option value="SMS">SMS (´Ü¹®)</option>
+                      <option value="LMS">LMS (Àå¹®)</option>
+                      <option value="MMS">MMS (»çÁø)</option>
+                      <option value="KAKAO">Ä«Ä«¿À ¾Ë¸²Åå</option>
                     </select>
                   </div>
                   <div>
                     <div className="flex justify-between items-center mb-1">
                       <label className="block text-sm font-medium text-gray-700">
-                        ë©”ì‹œì§€ ë‚´ìš© *
+                        ¸Ş½ÃÁö ³»¿ë *
                       </label>
                       <button
                         onClick={() => setShowAiMessage(true)}
                         className="bg-purple-600 hover:bg-purple-700 text-white px-3 py-1 rounded text-sm font-medium flex items-center gap-1"
                       >
-                        âœ¨ AI ë¬¸êµ¬ ìƒì„±
+                        ? AI ¹®±¸ »ı¼º
                       </button>
                     </div>
                     <textarea
                       value={campaign.messageContent}
                       onChange={(e) => setCampaign({ ...campaign, messageContent: e.target.value })}
                       className="w-full px-3 py-2 border rounded-lg h-32"
-                      placeholder="ë©”ì‹œì§€ ë‚´ìš©ì„ ì…ë ¥í•˜ì„¸ìš”..."
+                      placeholder="¸Ş½ÃÁö ³»¿ëÀ» ÀÔ·ÂÇÏ¼¼¿ä..."
                     />
                     <div className="text-right text-sm text-gray-500 mt-1">
-                      {campaign.messageContent.length}/90ì (SMS ê¸°ì¤€)
+                      {campaign.messageContent.length}/90ÀÚ (SMS ±âÁØ)
                     </div>
                   </div>
 
-                  {/* AI ë©”ì‹œì§€ ìƒì„± ëª¨ë‹¬ */}
+                  {/* AI ¸Ş½ÃÁö »ı¼º ¸ğ´Ş */}
                   {showAiMessage && (
                     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
                       <div className="bg-white rounded-lg p-6 w-full max-w-2xl max-h-[80vh] overflow-y-auto">
-                        <h4 className="text-lg font-semibold mb-4">âœ¨ AI ë¬¸êµ¬ ìƒì„±</h4>
+                        <h4 className="text-lg font-semibold mb-4">? AI ¹®±¸ »ı¼º</h4>
                         
                         {aiMessages.length === 0 ? (
                           <>
                             <p className="text-sm text-gray-600 mb-4">
-                              ì–´ë–¤ ë©”ì‹œì§€ë¥¼ ë³´ë‚´ê³  ì‹¶ì€ì§€ ì„¤ëª…í•´ì£¼ì„¸ìš”.
+                              ¾î¶² ¸Ş½ÃÁö¸¦ º¸³»°í ½ÍÀºÁö ¼³¸íÇØÁÖ¼¼¿ä.
                             </p>
                             <textarea
                               value={aiPrompt || campaignContext}
                               onChange={(e) => setAiPrompt(e.target.value)}
                               className="w-full px-3 py-2 border rounded-lg h-24 mb-4"
-                              placeholder="ì˜ˆ: ì‹ ê·œ ê³ ê° ëŒ€ìƒ 20% í• ì¸ ì¿ í° ì•ˆë‚´"
+                              placeholder="¿¹: ½Å±Ô °í°´ ´ë»ó 20% ÇÒÀÎ ÄíÆù ¾È³»"
                             />
                             <div className="flex gap-2">
                               <button
@@ -2080,21 +2080,21 @@ const campaignData = {
                                 }}
                                 className="flex-1 px-4 py-2 border rounded-lg text-gray-600"
                               >
-                                ì·¨ì†Œ
+                                Ãë¼Ò
                               </button>
                               <button
                                 onClick={handleAiGenerateMessage}
                                 disabled={aiLoading}
                                 className="flex-1 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg disabled:opacity-50"
                               >
-                                {aiLoading ? 'ìƒì„± ì¤‘...' : 'AI ë¬¸êµ¬ ìƒì„±'}
+                                {aiLoading ? '»ı¼º Áß...' : 'AI ¹®±¸ »ı¼º'}
                               </button>
                             </div>
                           </>
                         ) : (
                           <>
                             <p className="text-sm text-gray-600 mb-4">
-                              AIê°€ ìƒì„±í•œ ë¬¸êµ¬ ì¤‘ í•˜ë‚˜ë¥¼ ì„ íƒí•˜ì„¸ìš”.
+                              AI°¡ »ı¼ºÇÑ ¹®±¸ Áß ÇÏ³ª¸¦ ¼±ÅÃÇÏ¼¼¿ä.
                             </p>
                             <div className="space-y-4 mb-4">
                               {aiMessages.map((msg, idx) => (
@@ -2108,7 +2108,7 @@ const campaignData = {
                                       {msg.variant_id}. {msg.variant_name}
                                     </span>
                                     <span className="text-sm text-gray-500">
-                                      ì ìˆ˜: {msg.score}
+                                      Á¡¼ö: {msg.score}
                                     </span>
                                   </div>
                                   <p className="text-sm text-gray-600 mb-2">{msg.concept}</p>
@@ -2125,7 +2125,7 @@ const campaignData = {
                               }}
                               className="w-full px-4 py-2 border rounded-lg text-gray-600"
                             >
-                              ë‹¤ì‹œ ìƒì„±í•˜ê¸°
+                              ´Ù½Ã »ı¼ºÇÏ±â
                             </button>
                           </>
                         )}
@@ -2141,7 +2141,7 @@ const campaignData = {
                         onChange={(e) => setCampaign({ ...campaign, isAd: e.target.checked })}
                         className="rounded"
                       />
-                      <span className="text-sm text-gray-700">ê´‘ê³ ì„± ë©”ì‹œì§€ (ì•ì— [ê´‘ê³ ] ìë™ ì¶”ê°€)</span>
+                      <span className="text-sm text-gray-700">±¤°í¼º ¸Ş½ÃÁö (¾Õ¿¡ [±¤°í] ÀÚµ¿ Ãß°¡)</span>
                     </label>
                   </div>
 
@@ -2149,68 +2149,68 @@ const campaignData = {
                     onClick={handleCreateCampaign}
                     className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-medium"
                   >
-                    ìº í˜ì¸ ìƒì„±
+                    Ä·ÆäÀÎ »ı¼º
                   </button>
                 </div>
               </div>
             )}
 
-            {/* ë°œì†¡ íƒ­ */}
+            {/* ¹ß¼Û ÅÇ */}
             {activeTab === 'send' && (
               <div className="text-center py-12">
-                <div className="text-6xl mb-4">ğŸ“¤</div>
-                <h3 className="text-lg font-semibold mb-2">ë°œì†¡ ì¤€ë¹„ ì™„ë£Œ</h3>
+                <div className="text-6xl mb-4">??</div>
+                <h3 className="text-lg font-semibold mb-2">¹ß¼Û ÁØºñ ¿Ï·á</h3>
                 <p className="text-gray-500 mb-6">
-                  ìº í˜ì¸ ëª©ë¡ì—ì„œ ë°œì†¡í•  ìº í˜ì¸ì„ ì„ íƒí•˜ì„¸ìš”
+                  Ä·ÆäÀÎ ¸ñ·Ï¿¡¼­ ¹ß¼ÛÇÒ Ä·ÆäÀÎÀ» ¼±ÅÃÇÏ¼¼¿ä
                 </p>
                 <button
-                  onClick={() => alert('ìº í˜ì¸ ëª©ë¡ í˜ì´ì§€ë¡œ ì´ë™ (ê°œë°œ ì˜ˆì •)')}
+                  onClick={() => alert('Ä·ÆäÀÎ ¸ñ·Ï ÆäÀÌÁö·Î ÀÌµ¿ (°³¹ß ¿¹Á¤)')}
                   className="bg-green-600 hover:bg-green-700 text-white px-8 py-3 rounded-lg font-medium"
                 >
-                  ìº í˜ì¸ ë°œì†¡í•˜ê¸°
+                  Ä·ÆäÀÎ ¹ß¼ÛÇÏ±â
                 </button>
               </div>
             )}
           </div>
         </div>
-{/* AI ìº í˜ì¸ ê²°ê³¼ íŒì—… */}
+{/* AI Ä·ÆäÀÎ °á°ú ÆË¾÷ */}
 {showAiResult && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
             <div className={`bg-white rounded-xl shadow-2xl max-h-[90vh] overflow-y-auto ${aiStep === 2 ? 'w-[960px]' : 'w-[600px]'}`}>
               
-              {/* í—¤ë” */}
+              {/* Çì´õ */}
               <div className="p-6 border-b bg-green-50">
                 <div className="flex justify-between items-center">
                   <h3 className="text-lg font-bold flex items-center gap-2">
-                    <span>âœ¨</span> AI ì¶”ì²œ ê²°ê³¼ {aiStep === 1 ? '- íƒ€ê²Ÿ & ì±„ë„' : '- ë©”ì‹œì§€ & ë°œì†¡'}
+                    <span>?</span> AI ÃßÃµ °á°ú {aiStep === 1 ? '- Å¸°Ù & Ã¤³Î' : '- ¸Ş½ÃÁö & ¹ß¼Û'}
                   </h3>
-                  <button onClick={() => { setShowAiResult(false); setAiStep(1); }} className="text-gray-500 hover:text-gray-700 text-xl">âœ•</button>
+                  <button onClick={() => { setShowAiResult(false); setAiStep(1); }} className="text-gray-500 hover:text-gray-700 text-xl">?</button>
                 </div>
               </div>
 
-              {/* Step 1: íƒ€ê²Ÿ + ì±„ë„ ì„ íƒ */}
+              {/* Step 1: Å¸°Ù + Ã¤³Î ¼±ÅÃ */}
               {aiStep === 1 && (
                 <div className="p-6 space-y-6">
-                  {/* íƒ€ê²Ÿ ìš”ì•½ */}
+                  {/* Å¸°Ù ¿ä¾à */}
                   <div className="bg-blue-50 rounded-lg p-4">
-                    <div className="text-sm text-gray-600 mb-1">ğŸ“Œ ì¶”ì¶œëœ íƒ€ê²Ÿ</div>
-                    <div className="font-semibold text-gray-800">{aiResult?.target?.description || 'ì¶”ì²œ íƒ€ê²Ÿ'}</div>
-<div className="text-blue-600 font-bold text-lg mt-1">{aiResult?.target?.count?.toLocaleString() || 0}ëª…</div>
+                    <div className="text-sm text-gray-600 mb-1">?? ÃßÃâµÈ Å¸°Ù</div>
+                    <div className="font-semibold text-gray-800">{aiResult?.target?.description || 'ÃßÃµ Å¸°Ù'}</div>
+<div className="text-blue-600 font-bold text-lg mt-1">{aiResult?.target?.count?.toLocaleString() || 0}¸í</div>
                   </div>
 
-                  {/* ì±„ë„ ì¶”ì²œ */}
+                  {/* Ã¤³Î ÃßÃµ */}
                   <div>
-                    <div className="text-sm text-gray-600 mb-2">ğŸ“± AI ì¶”ì²œ ì±„ë„</div>
+                    <div className="text-sm text-gray-600 mb-2">?? AI ÃßÃµ Ã¤³Î</div>
                     <div className="bg-purple-50 border border-purple-200 rounded-lg p-4 mb-4">
-                    <div className="font-semibold text-purple-800">{aiResult?.recommendedChannel || 'SMS'} ì¶”ì²œ</div>
-                    <div className="text-sm text-purple-600 mt-1">"{aiResult?.channelReason || 'ì¶”ì²œ ì±„ë„ì…ë‹ˆë‹¤'}"</div>
+                    <div className="font-semibold text-purple-800">{aiResult?.recommendedChannel || 'SMS'} ÃßÃµ</div>
+                    <div className="text-sm text-purple-600 mt-1">"{aiResult?.channelReason || 'ÃßÃµ Ã¤³ÎÀÔ´Ï´Ù'}"</div>
                     </div>
-{/* ê´‘ê³ ì„± ì—¬ë¶€ */}
+{/* ±¤°í¼º ¿©ºÎ */}
 <div className="flex items-center justify-between bg-yellow-50 rounded-lg p-4 mb-4">
                     <div>
-                      <div className="font-semibold text-gray-800">ğŸ“¢ ê´‘ê³ ì„± ë©”ì‹œì§€</div>
+                      <div className="font-semibold text-gray-800">?? ±¤°í¼º ¸Ş½ÃÁö</div>
                       <div className="text-sm text-gray-500">
-                        {isAd ? '(ê´‘ê³ ) í‘œê¸° + ë¬´ë£Œê±°ë¶€ë²ˆí˜¸ í•„ìˆ˜ í¬í•¨' : 'ì•Œë¦¼ì„± ë©”ì‹œì§€ (í‘œê¸° ë¶ˆí•„ìš”)'}
+                        {isAd ? '(±¤°í) Ç¥±â + ¹«·á°ÅºÎ¹øÈ£ ÇÊ¼ö Æ÷ÇÔ' : '¾Ë¸²¼º ¸Ş½ÃÁö (Ç¥±â ºÒÇÊ¿ä)'}
                       </div>
                     </div>
                     <label className="relative inline-flex items-center cursor-pointer">
@@ -2223,9 +2223,9 @@ const campaignData = {
                       <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
                     </label>
                   </div>
-                    <div className="text-sm text-gray-600 mb-2">ì±„ë„ ì„ íƒ</div>
+                    <div className="text-sm text-gray-600 mb-2">Ã¤³Î ¼±ÅÃ</div>
                     <div className="grid grid-cols-4 gap-2">
-                      {['SMS', 'LMS', 'MMS', 'ì¹´ì¹´ì˜¤'].map((ch) => (
+                      {['SMS', 'LMS', 'MMS', 'Ä«Ä«¿À'].map((ch) => (
                         <button
                           key={ch}
                           onClick={() => setSelectedChannel(ch)}
@@ -2235,17 +2235,17 @@ const campaignData = {
                               : 'border-gray-200 hover:border-gray-300 text-gray-600'
                           }`}
                         >
-                          {ch === 'SMS' && 'ğŸ“± '}
-                          {ch === 'LMS' && 'ğŸ“ '}
-                          {ch === 'MMS' && 'ğŸ–¼ï¸ '}
-                          {ch === 'ì¹´ì¹´ì˜¤' && 'ğŸ’¬ '}
+                          {ch === 'SMS' && '?? '}
+                          {ch === 'LMS' && '?? '}
+                          {ch === 'MMS' && '??? '}
+                          {ch === 'Ä«Ä«¿À' && '?? '}
                           {ch}
                         </button>
                       ))}
                     </div>
                   </div>
 
-                  {/* ë‹¤ìŒ ë²„íŠ¼ */}
+                  {/* ´ÙÀ½ ¹öÆ° */}
                   <button
                     onClick={handleAiGenerateChannelMessage}
                     disabled={aiLoading}
@@ -2253,48 +2253,48 @@ const campaignData = {
                   >
                     {aiLoading ? (
                       <>
-                        <span className="animate-spin">â³</span>
-                        ë©”ì‹œì§€ ìƒì„± ì¤‘...
+                        <span className="animate-spin">?</span>
+                        ¸Ş½ÃÁö »ı¼º Áß...
                       </>
                     ) : (
-                      <>ë‹¤ìŒ: ë¬¸êµ¬ ìƒì„± â†’</>
+                      <>´ÙÀ½: ¹®±¸ »ı¼º ¡æ</>
                     )}
                   </button>
                 </div>
               )}
 
-              {/* Step 2: ë©”ì‹œì§€ + ë°œì†¡ì‹œê°„ */}
+              {/* Step 2: ¸Ş½ÃÁö + ¹ß¼Û½Ã°£ */}
               {aiStep === 2 && (
                 <div className="p-6 space-y-6">
-                  {/* ì„ íƒëœ ì±„ë„ í‘œì‹œ */}
+                  {/* ¼±ÅÃµÈ Ã¤³Î Ç¥½Ã */}
                   <div className="flex items-center gap-2 text-sm text-gray-600">
-                    <span>ì„ íƒëœ ì±„ë„:</span>
+                    <span>¼±ÅÃµÈ Ã¤³Î:</span>
                     <span className="px-2 py-1 bg-purple-100 text-purple-700 rounded font-medium">{selectedChannel}</span>
                   </div>
 
-                  {/* ë©”ì‹œì§€ 3ì•ˆ - ëª¨ë˜ í° UI */}
+                  {/* ¸Ş½ÃÁö 3¾È - ¸ğ´ø Æù UI */}
                   <div>
-                    <div className="text-sm text-gray-600 mb-3">ğŸ’¬ {selectedChannel} ë©”ì‹œì§€ ì¶”ì²œ (íƒ1)</div>
+                    <div className="text-sm text-gray-600 mb-3">?? {selectedChannel} ¸Ş½ÃÁö ÃßÃµ (ÅÃ1)</div>
                     <div className="grid grid-cols-3 gap-5">
                       {aiResult?.messages?.length > 0 ? (
                         aiResult.messages.map((msg: any, idx: number) => (
                           <label key={msg.variant_id || idx} className="cursor-pointer group">
                             <input type="radio" name="message" className="hidden" defaultChecked={idx === 0} />
-                            {/* ëª¨ë˜ í° í”„ë ˆì„ */}
+                            {/* ¸ğ´ø Æù ÇÁ·¹ÀÓ */}
                             <div className="rounded-[1.8rem] p-[3px] transition-all bg-gray-300 group-has-[:checked]:bg-gradient-to-b group-has-[:checked]:from-purple-400 group-has-[:checked]:to-purple-600 group-has-[:checked]:shadow-lg group-has-[:checked]:shadow-purple-200 hover:bg-gray-400">
                               <div className="bg-white rounded-[1.6rem] overflow-hidden flex flex-col" style={{ height: '420px' }}>
-                                {/* ìƒë‹¨ - íƒ€ì…ëª… */}
+                                {/* »ó´Ü - Å¸ÀÔ¸í */}
                                 <div className="px-4 py-2.5 bg-gradient-to-r from-gray-50 to-gray-100 flex justify-between items-center shrink-0 border-b">
-                                  <span className="text-[11px] text-gray-400 font-medium">ë¬¸ìë©”ì‹œì§€</span>
+                                  <span className="text-[11px] text-gray-400 font-medium">¹®ÀÚ¸Ş½ÃÁö</span>
                                   <span className="text-[11px] font-bold text-purple-600">{msg.variant_id}. {msg.variant_name}</span>
                                 </div>
-                                {/* ë©”ì‹œì§€ ì˜ì—­ - ìŠ¤í¬ë¡¤ */}
+                                {/* ¸Ş½ÃÁö ¿µ¿ª - ½ºÅ©·Ñ */}
                                 <div className="flex-1 overflow-y-auto p-3 bg-gradient-to-b from-purple-50/30 to-white">
                                   <div className="flex gap-2">
-                                    <div className="w-7 h-7 rounded-full bg-purple-100 flex items-center justify-center shrink-0 text-xs">ğŸ“±</div>
+                                    <div className="w-7 h-7 rounded-full bg-purple-100 flex items-center justify-center shrink-0 text-xs">??</div>
                                     <div className="bg-white rounded-2xl rounded-tl-sm p-3 shadow-sm border border-gray-100 text-[12px] leading-[1.6] whitespace-pre-wrap text-gray-700 max-w-[95%]">
                                       {aiResult?.usePersonalization ? (() => {
-                                        const sampleData: Record<string, string> = { 'ì´ë¦„': 'ê¹€ë¯¼ìˆ˜', 'í¬ì¸íŠ¸': '12,500', 'ë“±ê¸‰': 'VIP', 'ë§¤ì¥ëª…': 'ê°•ë‚¨ì ', 'ì§€ì—­': 'ì„œìš¸', 'êµ¬ë§¤ê¸ˆì•¡': '350,000', 'êµ¬ë§¤íšŸìˆ˜': '8', 'í‰ê· ì£¼ë¬¸ê¸ˆì•¡': '43,750', 'LTVì ìˆ˜': '85' };
+                                        const sampleData: Record<string, string> = { 'ÀÌ¸§': '±è¹Î¼ö', 'Æ÷ÀÎÆ®': '12,500', 'µî±Ş': 'VIP', '¸ÅÀå¸í': '°­³²Á¡', 'Áö¿ª': '¼­¿ï', '±¸¸Å±İ¾×': '350,000', '±¸¸ÅÈ½¼ö': '8', 'Æò±ÕÁÖ¹®±İ¾×': '43,750', 'LTVÁ¡¼ö': '85' };
                                         let text = msg.message_text || '';
                                         Object.entries(sampleData).forEach(([k, v]) => { text = text.replace(new RegExp(`%${k}%`, 'g'), v); });
                                         return text;
@@ -2302,7 +2302,7 @@ const campaignData = {
                                     </div>
                                   </div>
                                 </div>
-                                {/* í•˜ë‹¨ ë°”ì´íŠ¸ */}
+                                {/* ÇÏ´Ü ¹ÙÀÌÆ® */}
                                 <div className="px-3 py-2 border-t bg-gray-50 text-center shrink-0">
                                   <span className="text-[10px] text-gray-400">{msg.byte_count || '?'} / {selectedChannel === 'SMS' ? 90 : 2000} bytes</span>
                                 </div>
@@ -2312,15 +2312,15 @@ const campaignData = {
                         ))
                       ) : (
                         <div className="col-span-3 text-center py-8 text-gray-400">
-                          ë©”ì‹œì§€ë¥¼ ë¶ˆëŸ¬ì˜¤ëŠ” ì¤‘...
+                          ¸Ş½ÃÁö¸¦ ºÒ·¯¿À´Â Áß...
                         </div>
                       )}
                     </div>
                   </div>
 
-                  {/* MMS ì´ë¯¸ì§€ ì²¨ë¶€ */}
+                  {/* MMS ÀÌ¹ÌÁö Ã·ºÎ */}
                   <div>
-                    <div className="text-base font-semibold text-gray-700 mb-3">ğŸ–¼ï¸ ì´ë¯¸ì§€ ì²¨ë¶€ (MMS)</div>
+                    <div className="text-base font-semibold text-gray-700 mb-3">??? ÀÌ¹ÌÁö Ã·ºÎ (MMS)</div>
                     <div
                       onClick={() => setShowMmsUploadModal(true)}
                       className="border-2 border-dashed border-gray-200 rounded-xl p-4 bg-gray-50/50 cursor-pointer hover:border-purple-400 hover:bg-purple-50/50 transition-all"
@@ -2330,43 +2330,43 @@ const campaignData = {
                           {mmsUploadedImages.map((img, idx) => (
                             <img key={idx} src={img.url} alt="" className="w-16 h-16 object-cover rounded-lg border shadow-sm" crossOrigin="use-credentials" />
                           ))}
-                          <div className="text-sm text-purple-600 font-medium">âœï¸ {mmsUploadedImages.length}ì¥ ì²¨ë¶€ë¨ (í´ë¦­í•˜ì—¬ ìˆ˜ì •)</div>
+                          <div className="text-sm text-purple-600 font-medium">?? {mmsUploadedImages.length}Àå Ã·ºÎµÊ (Å¬¸¯ÇÏ¿© ¼öÁ¤)</div>
                         </div>
                       ) : (
                         <div className="flex flex-col items-center gap-2 py-2">
                           <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center">
-                            <span className="text-xl">ğŸ“·</span>
+                            <span className="text-xl">??</span>
                           </div>
-                          <div className="text-sm text-gray-500">í´ë¦­í•˜ì—¬ ì´ë¯¸ì§€ë¥¼ ì²¨ë¶€í•˜ë©´ MMSë¡œ ë°œì†¡ë©ë‹ˆë‹¤</div>
-                          <div className="text-xs text-gray-400">JPGë§Œ Â· 300KB ì´í•˜ Â· ìµœëŒ€ 3ì¥</div>
+                          <div className="text-sm text-gray-500">Å¬¸¯ÇÏ¿© ÀÌ¹ÌÁö¸¦ Ã·ºÎÇÏ¸é MMS·Î ¹ß¼ÛµË´Ï´Ù</div>
+                          <div className="text-xs text-gray-400">JPG¸¸ ¡¤ 300KB ÀÌÇÏ ¡¤ ÃÖ´ë 3Àå</div>
                         </div>
                       )}
                     </div>
                   </div>
 
-                  {/* ë°œì†¡ì‹œê°„ */}
+                  {/* ¹ß¼Û½Ã°£ */}
                   <div>
-                    <div className="text-base font-semibold text-gray-700 mb-4">â° ë°œì†¡ì‹œê°„</div>
+                    <div className="text-base font-semibold text-gray-700 mb-4">? ¹ß¼Û½Ã°£</div>
                     <div className="flex gap-3 items-stretch">
                       <label 
                         onClick={() => setSendTimeOption('ai')}
                         className={`flex-1 p-3 border-2 rounded-xl cursor-pointer text-center flex flex-col justify-center ${sendTimeOption === 'ai' ? 'border-purple-500 bg-purple-50' : 'border-gray-200 hover:border-purple-300'}`}
                       >
-                        <div className="font-bold text-base">ğŸ¤– AI ì¶”ì²œì‹œê°„</div>
-                        <div className="text-sm text-gray-500 mt-1">{aiResult?.recommendedTime || 'ìµœì  ì‹œê°„'}</div>
+                        <div className="font-bold text-base">?? AI ÃßÃµ½Ã°£</div>
+                        <div className="text-sm text-gray-500 mt-1">{aiResult?.recommendedTime || 'ÃÖÀû ½Ã°£'}</div>
                       </label>
                       <label 
                         onClick={() => setSendTimeOption('now')}
                         className={`flex-1 p-3 border-2 rounded-xl cursor-pointer text-center flex flex-col justify-center ${sendTimeOption === 'now' ? 'border-purple-500 bg-purple-50' : 'border-gray-200 hover:border-purple-300'}`}
                       >
-                        <div className="font-bold text-base">âš¡ ì¦‰ì‹œ ë°œì†¡</div>
-                        <div className="text-sm text-gray-500 mt-1">ì§€ê¸ˆ ë°”ë¡œ</div>
+                        <div className="font-bold text-base">? Áï½Ã ¹ß¼Û</div>
+                        <div className="text-sm text-gray-500 mt-1">Áö±İ ¹Ù·Î</div>
                       </label>
                       <label 
                         onClick={() => setSendTimeOption('custom')}
                         className={`flex-[1.5] p-3 border-2 rounded-xl cursor-pointer text-center ${sendTimeOption === 'custom' ? 'border-purple-500 bg-purple-50' : 'border-gray-200 hover:border-purple-300'}`}
                       >
-                        <div className="font-bold text-base mb-2">ğŸ“… ì§ì ‘ ì„ íƒ</div>
+                        <div className="font-bold text-base mb-2">?? Á÷Á¢ ¼±ÅÃ</div>
                         <div className="flex flex-col gap-2 w-full">
                           <input 
                             type="date" 
@@ -2395,8 +2395,8 @@ const campaignData = {
                               }}
                               className="border-2 rounded-lg px-2 py-1.5 text-sm font-medium"
                             >
-                              <option value="AM">ì˜¤ì „</option>
-                              <option value="PM">ì˜¤í›„</option>
+                              <option value="AM">¿ÀÀü</option>
+                              <option value="PM">¿ÀÈÄ</option>
                             </select>
                             <input
                               type="number"
@@ -2439,9 +2439,9 @@ const campaignData = {
                     </div>
                     </div>
 
-{/* íšŒì‹ ë²ˆí˜¸ ì„ íƒ */}
+{/* È¸½Å¹øÈ£ ¼±ÅÃ */}
 <div>
-  <div className="text-base font-semibold text-gray-700 mb-3">ğŸ“ íšŒì‹ ë²ˆí˜¸</div>
+  <div className="text-base font-semibold text-gray-700 mb-3">?? È¸½Å¹øÈ£</div>
   <div className="flex gap-3 items-center">
     <select
       value={useIndividualCallback ? '__individual__' : selectedCallback}
@@ -2456,23 +2456,23 @@ const campaignData = {
       }}
       className="flex-1 border-2 rounded-lg px-4 py-3 text-sm focus:border-purple-400 focus:outline-none"
     >
-      <option value="">íšŒì‹ ë²ˆí˜¸ ì„ íƒ</option>
-      <option value="__individual__">ğŸ“± ê°œë³„íšŒì‹ ë²ˆí˜¸ (ê³ ê°ë³„ ë§¤ì¥ë²ˆí˜¸)</option>
+      <option value="">È¸½Å¹øÈ£ ¼±ÅÃ</option>
+      <option value="__individual__">?? °³º°È¸½Å¹øÈ£ (°í°´º° ¸ÅÀå¹øÈ£)</option>
       {callbackNumbers.map((cb) => (
         <option key={cb.id} value={cb.phone}>
-          {cb.label || cb.phone} {cb.is_default && '(ê¸°ë³¸)'}
+          {cb.label || cb.phone} {cb.is_default && '(±âº»)'}
         </option>
       ))}
     </select>
     {useIndividualCallback && (
-      <span className="text-sm text-blue-600">ğŸ’¡ ê° ê³ ê°ì˜ ì£¼ì´ìš©ë§¤ì¥ íšŒì‹ ë²ˆí˜¸ë¡œ ë°œì†¡</span>
+      <span className="text-sm text-blue-600">?? °¢ °í°´ÀÇ ÁÖÀÌ¿ë¸ÅÀå È¸½Å¹øÈ£·Î ¹ß¼Û</span>
     )}
   </div>
 </div>
 
-{/* í•˜ë‹¨ ë²„íŠ¼ */}
+{/* ÇÏ´Ü ¹öÆ° */}
 {testSentResult && (
-                    <div className={`p-3 rounded-lg text-sm whitespace-pre-wrap mb-3 ${testSentResult.startsWith('âœ…') ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+                    <div className={`p-3 rounded-lg text-sm whitespace-pre-wrap mb-3 ${testSentResult.startsWith('?') ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
                       {testSentResult}
                     </div>
                   )}
@@ -2481,27 +2481,27 @@ const campaignData = {
                       onClick={() => setAiStep(1)}
                       className="flex-1 py-3 border rounded-lg text-gray-600 hover:bg-gray-100 flex items-center justify-center gap-2"
                     >
-                      â† ì±„ë„ë³€ê²½
+                      ¡ç Ã¤³Îº¯°æ
                     </button>
                     <button
   onClick={handleTestSend}
   disabled={testSending || testCooldown}
   className="flex-1 py-3 bg-orange-500 text-white rounded-lg hover:bg-orange-600 disabled:opacity-50 flex items-center justify-center gap-2"
 >
-{testSending ? 'ğŸ“± ë°œì†¡ ì¤‘...' : testCooldown ? 'â³ 10ì´ˆ ëŒ€ê¸°' : 'ğŸ“± ë‹´ë‹¹ì í…ŒìŠ¤íŠ¸'}
+{testSending ? '?? ¹ß¼Û Áß...' : testCooldown ? '? 10ÃÊ ´ë±â' : '?? ´ã´çÀÚ Å×½ºÆ®'}
 </button>
 <button 
   onClick={() => setShowPreview(true)}
   className="flex-1 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center justify-center gap-2"
 >
-  ğŸ‘ï¸ ë¯¸ë¦¬ë³´ê¸°
+  ??? ¹Ì¸®º¸±â
 </button>
 <button 
   onClick={handleAiCampaignSend}
   disabled={isSending}
   className="flex-1 py-3 bg-green-700 text-white rounded-lg hover:bg-green-800 flex items-center justify-center gap-2"
 >
-{isSending ? 'â³ ë°œì†¡ ì¤‘...' : 'ğŸš€ ë°œì†¡í•˜ê¸°'}
+{isSending ? '? ¹ß¼Û Áß...' : '?? ¹ß¼ÛÇÏ±â'}
 </button>
                   </div>
                 </div>
@@ -2509,53 +2509,53 @@ const campaignData = {
             </div>
           </div>
         )}
-        {/* ë¯¸ë¦¬ë³´ê¸° ëª¨ë‹¬ */}
+        {/* ¹Ì¸®º¸±â ¸ğ´Ş */}
         {showPreview && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
             <div className={`bg-white rounded-xl shadow-2xl max-h-[90vh] overflow-y-auto ${aiStep === 2 ? 'w-[960px]' : 'w-[600px]'}`}>
               <div className="p-6 border-b bg-green-50">
                 <div className="flex justify-between items-center">
-                  <h3 className="text-lg font-bold">ğŸ“± ë°œì†¡ ë¯¸ë¦¬ë³´ê¸°</h3>
-                  <button onClick={() => setShowPreview(false)} className="text-gray-500 hover:text-gray-700 text-xl">âœ•</button>
+                  <h3 className="text-lg font-bold">?? ¹ß¼Û ¹Ì¸®º¸±â</h3>
+                  <button onClick={() => setShowPreview(false)} className="text-gray-500 hover:text-gray-700 text-xl">?</button>
                 </div>
               </div>
               
               <div className="p-6 space-y-4">
-                {/* íƒ€ê²Ÿ ì •ë³´ */}
+                {/* Å¸°Ù Á¤º¸ */}
                 <div className="bg-blue-50 rounded-lg p-4">
-                  <div className="text-sm text-gray-600 mb-1">ğŸ“Œ ë°œì†¡ ëŒ€ìƒ</div>
-                  <div className="font-semibold">{aiResult?.target?.description || 'íƒ€ê²Ÿ ê³ ê°'}</div>
-                  <div className="text-blue-600 font-bold">{aiResult?.target?.count?.toLocaleString() || 0}ëª…</div>
+                  <div className="text-sm text-gray-600 mb-1">?? ¹ß¼Û ´ë»ó</div>
+                  <div className="font-semibold">{aiResult?.target?.description || 'Å¸°Ù °í°´'}</div>
+                  <div className="text-blue-600 font-bold">{aiResult?.target?.count?.toLocaleString() || 0}¸í</div>
                   {aiResult?.target?.unsubscribeCount > 0 && (
-                    <div className="text-rose-500 text-sm mt-1">ìˆ˜ì‹ ê±°ë¶€ ì œì™¸: {aiResult?.target?.unsubscribeCount?.toLocaleString()}ëª…</div>
+                    <div className="text-rose-500 text-sm mt-1">¼ö½Å°ÅºÎ Á¦¿Ü: {aiResult?.target?.unsubscribeCount?.toLocaleString()}¸í</div>
                   )}
                 </div>
 
-                {/* ì±„ë„ */}
+                {/* Ã¤³Î */}
                 <div className="flex items-center gap-2">
-                  <span className="text-sm text-gray-600">ì±„ë„:</span>
+                  <span className="text-sm text-gray-600">Ã¤³Î:</span>
                   <span className="px-2 py-1 bg-purple-100 text-purple-700 rounded font-medium">{selectedChannel}</span>
                 </div>
 
-                {/* íšŒì‹ ë²ˆí˜¸ */}
+                {/* È¸½Å¹øÈ£ */}
                 <div className="flex items-center gap-2">
-                  <span className="text-sm text-gray-600">ğŸ“ íšŒì‹ ë²ˆí˜¸:</span>
+                  <span className="text-sm text-gray-600">?? È¸½Å¹øÈ£:</span>
                   <span className="font-medium">
-                    {useIndividualCallback ? 'ê°œë³„íšŒì‹ ë²ˆí˜¸ (ê³ ê°ë³„ ë§¤ì¥)' : (selectedCallback || 'ë¯¸ì„ íƒ')}
+                    {useIndividualCallback ? '°³º°È¸½Å¹øÈ£ (°í°´º° ¸ÅÀå)' : (selectedCallback || '¹Ì¼±ÅÃ')}
                   </span>
                 </div>
 
-                {/* ë©”ì‹œì§€ ë¯¸ë¦¬ë³´ê¸° - ê°œì¸í™” ìƒ˜í”Œ */}
+                {/* ¸Ş½ÃÁö ¹Ì¸®º¸±â - °³ÀÎÈ­ »ùÇÃ */}
                 <div>
-                  <div className="text-sm text-gray-600 mb-2">ğŸ’¬ ë©”ì‹œì§€ ë‚´ìš©</div>
+                  <div className="text-sm text-gray-600 mb-2">?? ¸Ş½ÃÁö ³»¿ë</div>
                   {aiResult?.usePersonalization && aiResult?.personalizationVars?.length > 0 ? (
                     <div>
-                      <div className="text-xs text-purple-600 mb-2">âœ¨ ê°œì¸í™” ì ìš© ì˜ˆì‹œ (ìƒìœ„ 3ëª… ìƒ˜í”Œ)</div>
+                      <div className="text-xs text-purple-600 mb-2">? °³ÀÎÈ­ Àû¿ë ¿¹½Ã (»óÀ§ 3¸í »ùÇÃ)</div>
                       <div className="grid grid-cols-3 gap-3">
                         {[
-                          { 'ì´ë¦„': 'ê¹€ë¯¼ìˆ˜', 'í¬ì¸íŠ¸': '12,500', 'ë“±ê¸‰': 'VIP', 'ë§¤ì¥ëª…': 'ê°•ë‚¨ì ', 'ì§€ì—­': 'ì„œìš¸', 'êµ¬ë§¤ê¸ˆì•¡': '350,000', 'êµ¬ë§¤íšŸìˆ˜': '8', 'í‰ê· ì£¼ë¬¸ê¸ˆì•¡': '43,750', 'LTVì ìˆ˜': '85' },
-                          { 'ì´ë¦„': 'ì´ì˜í¬', 'í¬ì¸íŠ¸': '8,200', 'ë“±ê¸‰': 'GOLD', 'ë§¤ì¥ëª…': 'í™ëŒ€ì ', 'ì§€ì—­': 'ê²½ê¸°', 'êµ¬ë§¤ê¸ˆì•¡': '180,000', 'êµ¬ë§¤íšŸìˆ˜': '5', 'í‰ê· ì£¼ë¬¸ê¸ˆì•¡': '36,000', 'LTVì ìˆ˜': '62' },
-                          { 'ì´ë¦„': 'ë°•ì§€í˜„', 'í¬ì¸íŠ¸': '25,800', 'ë“±ê¸‰': 'VIP', 'ë§¤ì¥ëª…': 'ë¶€ì‚°ì„¼í…€ì ', 'ì§€ì—­': 'ë¶€ì‚°', 'êµ¬ë§¤ê¸ˆì•¡': '520,000', 'êµ¬ë§¤íšŸìˆ˜': '12', 'í‰ê· ì£¼ë¬¸ê¸ˆì•¡': '43,300', 'LTVì ìˆ˜': '91' },
+                          { 'ÀÌ¸§': '±è¹Î¼ö', 'Æ÷ÀÎÆ®': '12,500', 'µî±Ş': 'VIP', '¸ÅÀå¸í': '°­³²Á¡', 'Áö¿ª': '¼­¿ï', '±¸¸Å±İ¾×': '350,000', '±¸¸ÅÈ½¼ö': '8', 'Æò±ÕÁÖ¹®±İ¾×': '43,750', 'LTVÁ¡¼ö': '85' },
+                          { 'ÀÌ¸§': 'ÀÌ¿µÈñ', 'Æ÷ÀÎÆ®': '8,200', 'µî±Ş': 'GOLD', '¸ÅÀå¸í': 'È«´ëÁ¡', 'Áö¿ª': '°æ±â', '±¸¸Å±İ¾×': '180,000', '±¸¸ÅÈ½¼ö': '5', 'Æò±ÕÁÖ¹®±İ¾×': '36,000', 'LTVÁ¡¼ö': '62' },
+                          { 'ÀÌ¸§': '¹ÚÁöÇö', 'Æ÷ÀÎÆ®': '25,800', 'µî±Ş': 'VIP', '¸ÅÀå¸í': 'ºÎ»ê¼¾ÅÒÁ¡', 'Áö¿ª': 'ºÎ»ê', '±¸¸Å±İ¾×': '520,000', '±¸¸ÅÈ½¼ö': '12', 'Æò±ÕÁÖ¹®±İ¾×': '43,300', 'LTVÁ¡¼ö': '91' },
                         ].map((sample, idx) => {
                           let msg = aiResult?.messages?.[0]?.message_text || '';
                           Object.entries(sample).forEach(([varName, value]) => {
@@ -2563,7 +2563,7 @@ const campaignData = {
                           });
                           return (
                             <div key={idx} className="rounded-2xl border-2 border-gray-200 overflow-hidden bg-white">
-                              <div className="bg-gray-100 px-3 py-1.5 text-xs text-gray-500 text-center">ìƒ˜í”Œ {idx + 1}</div>
+                              <div className="bg-gray-100 px-3 py-1.5 text-xs text-gray-500 text-center">»ùÇÃ {idx + 1}</div>
                               <div className="p-3 text-xs leading-relaxed whitespace-pre-wrap bg-gray-50" style={{ minHeight: '120px', maxHeight: '200px', overflowY: 'auto' }}>
                                 {msg}
                               </div>
@@ -2574,15 +2574,15 @@ const campaignData = {
                     </div>
                   ) : (
                     <div className="bg-gray-100 rounded-lg p-4 whitespace-pre-wrap text-sm">
-                      {aiResult?.messages?.[0]?.message_text || 'ë©”ì‹œì§€ ì—†ìŒ'}
+                      {aiResult?.messages?.[0]?.message_text || '¸Ş½ÃÁö ¾øÀ½'}
                     </div>
                   )}
                 </div>
 
-                {/* MMS ì´ë¯¸ì§€ ë¯¸ë¦¬ë³´ê¸° */}
+                {/* MMS ÀÌ¹ÌÁö ¹Ì¸®º¸±â */}
                 {mmsUploadedImages.length > 0 && (
                   <div>
-                    <div className="text-sm text-gray-600 mb-2">ğŸ–¼ï¸ ì²¨ë¶€ ì´ë¯¸ì§€ ({mmsUploadedImages.length}ì¥)</div>
+                    <div className="text-sm text-gray-600 mb-2">??? Ã·ºÎ ÀÌ¹ÌÁö ({mmsUploadedImages.length}Àå)</div>
                     <div className="flex gap-3 mb-2">
                       {mmsUploadedImages.map((img, idx) => (
                         <img
@@ -2595,25 +2595,25 @@ const campaignData = {
                       ))}
                     </div>
                     <div className="text-xs text-amber-600 bg-amber-50 rounded-lg p-2">
-                      âš ï¸ ì‹¤ì œ ìˆ˜ì‹  í™”ë©´ì€ ì´í†µì‚¬ ë° íœ´ëŒ€í° ê¸°ì¢…ì— ë”°ë¼ ë‹¤ë¥´ê²Œ ë³´ì¼ ìˆ˜ ìˆìŠµë‹ˆë‹¤
+                      ?? ½ÇÁ¦ ¼ö½Å È­¸éÀº ÀÌÅë»ç ¹× ÈŞ´ëÆù ±âÁ¾¿¡ µû¶ó ´Ù¸£°Ô º¸ÀÏ ¼ö ÀÖ½À´Ï´Ù
                     </div>
                   </div>
                 )}
 
-                {/* ë°œì†¡ ì‹œê°„ */}
+                {/* ¹ß¼Û ½Ã°£ */}
                 <div className="flex items-center gap-2">
-                  <span className="text-sm text-gray-600">â° ë°œì†¡ì‹œê°„:</span>
+                  <span className="text-sm text-gray-600">? ¹ß¼Û½Ã°£:</span>
                   <span className="font-medium">
-                    {sendTimeOption === 'ai' ? (aiResult?.recommendedTime || 'AI ì¶”ì²œì‹œê°„') : 
-                     sendTimeOption === 'now' ? 'ì¦‰ì‹œ ë°œì†¡' : 
-                     customSendTime ? formatDateTime(customSendTime) : 'ì§ì ‘ ì„ íƒ'}
+                    {sendTimeOption === 'ai' ? (aiResult?.recommendedTime || 'AI ÃßÃµ½Ã°£') : 
+                     sendTimeOption === 'now' ? 'Áï½Ã ¹ß¼Û' : 
+                     customSendTime ? formatDateTime(customSendTime) : 'Á÷Á¢ ¼±ÅÃ'}
                   </span>
                 </div>
               </div>
 
               <div className="p-6 border-t space-y-3">
                 {testSentResult && (
-                  <div className={`p-3 rounded-lg text-sm whitespace-pre-wrap mb-3 ${testSentResult.startsWith('âœ…') ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+                  <div className={`p-3 rounded-lg text-sm whitespace-pre-wrap mb-3 ${testSentResult.startsWith('?') ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
                     {testSentResult}
                   </div>
                 )}
@@ -2622,23 +2622,23 @@ const campaignData = {
                     onClick={() => { setShowPreview(false); setTestSentResult(null); }}
                     className="flex-1 py-3 border rounded-lg text-gray-600 hover:bg-gray-100"
                   >
-                    â† ëŒì•„ê°€ê¸°
+                    ¡ç µ¹¾Æ°¡±â
                   </button>
                   <button
                     onClick={handleTestSend}
                     disabled={testSending || testCooldown}
                     className="flex-1 py-3 bg-orange-500 text-white rounded-lg hover:bg-orange-600 disabled:opacity-50"
                   >
-                    {testSending ? 'ğŸ“± ë°œì†¡ ì¤‘...' : testCooldown ? 'â³ 10ì´ˆ ëŒ€ê¸°' : 'ğŸ“± ë‹´ë‹¹ì ì‚¬ì „ìˆ˜ì‹ '}
+                    {testSending ? '?? ¹ß¼Û Áß...' : testCooldown ? '? 10ÃÊ ´ë±â' : '?? ´ã´çÀÚ »çÀü¼ö½Å'}
                   </button>
                   <button
                     onClick={() => {
                       const toast = document.createElement('div');
                       toast.innerHTML = `
                         <div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:white;padding:24px 32px;border-radius:16px;box-shadow:0 10px 40px rgba(0,0,0,0.2);z-index:9999;text-align:center;">
-                          <div style="font-size:48px;margin-bottom:12px;">ğŸš§</div>
-                          <div style="font-size:16px;font-weight:bold;color:#374151;margin-bottom:8px;">ì¤€ë¹„ ì¤‘ì¸ ê¸°ëŠ¥ì…ë‹ˆë‹¤</div>
-                          <div style="font-size:14px;color:#6B7280;">ìŠ¤íŒ¸í•„í„°í…ŒìŠ¤íŠ¸ëŠ” ê³§ ì—…ë°ì´íŠ¸ë©ë‹ˆë‹¤</div>
+                          <div style="font-size:48px;margin-bottom:12px;">??</div>
+                          <div style="font-size:16px;font-weight:bold;color:#374151;margin-bottom:8px;">ÁØºñ ÁßÀÎ ±â´ÉÀÔ´Ï´Ù</div>
+                          <div style="font-size:14px;color:#6B7280;">½ºÆÔÇÊÅÍÅ×½ºÆ®´Â °ğ ¾÷µ¥ÀÌÆ®µË´Ï´Ù</div>
                         </div>
                         <div style="position:fixed;inset:0;background:rgba(0,0,0,0.3);z-index:9998;" onclick="this.parentElement.remove()"></div>
                       `;
@@ -2647,34 +2647,34 @@ const campaignData = {
                     }}
                     className="flex-1 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300"
                   >
-                    ğŸ›¡ï¸ ìŠ¤íŒ¸í•„í„°
+                    ??? ½ºÆÔÇÊÅÍ
                   </button>
                   <button
                     onClick={handleAiCampaignSend}
                     disabled={isSending}
                     className="flex-1 py-3 bg-green-700 text-white rounded-lg hover:bg-green-800"
                   >
-                    {isSending ? 'â³ ë°œì†¡ ì¤‘...' : 'ğŸš€ ë°œì†¡ í™•ì •'}
+                    {isSending ? '? ¹ß¼Û Áß...' : '?? ¹ß¼Û È®Á¤'}
                   </button>
                 </div>
               </div>
             </div>
           </div>
         )}
-        {/* ìº í˜ì¸ í™•ì • ì„±ê³µ ëª¨ë‹¬ */}
+        {/* Ä·ÆäÀÎ È®Á¤ ¼º°ø ¸ğ´Ş */}
         {showSuccess && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
             <div className="bg-white rounded-xl shadow-2xl w-[400px] text-center p-8">
-              <div className="text-6xl mb-4">ğŸ‰</div>
-              <h3 className="text-xl font-bold text-gray-800 mb-2">ìº í˜ì¸ì´ í™•ì •ë˜ì—ˆìŠµë‹ˆë‹¤!</h3>
+              <div className="text-6xl mb-4">??</div>
+              <h3 className="text-xl font-bold text-gray-800 mb-2">Ä·ÆäÀÎÀÌ È®Á¤µÇ¾ú½À´Ï´Ù!</h3>
                <div className="bg-green-50 rounded-lg p-4 mb-6 text-left">
                <div className="text-sm text-gray-600 space-y-1">
-                  <div>ğŸ“± ì±„ë„: <span className="font-medium">{selectedChannel}</span></div>
-                  <div>ğŸ‘¥ ëŒ€ìƒ: <span className="font-medium">{aiResult?.target?.count?.toLocaleString() || 0}ëª…</span></div>
+                  <div>?? Ã¤³Î: <span className="font-medium">{selectedChannel}</span></div>
+                  <div>?? ´ë»ó: <span className="font-medium">{aiResult?.target?.count?.toLocaleString() || 0}¸í</span></div>
                   {aiResult?.target?.unsubscribeCount > 0 && (
-                    <div>ğŸš« ìˆ˜ì‹ ê±°ë¶€ ì œì™¸: <span className="font-medium text-rose-500">{aiResult?.target?.unsubscribeCount?.toLocaleString()}ëª…</span></div>
+                    <div>?? ¼ö½Å°ÅºÎ Á¦¿Ü: <span className="font-medium text-rose-500">{aiResult?.target?.unsubscribeCount?.toLocaleString()}¸í</span></div>
                   )}
-                  <div>â° ë°œì†¡: <span className="font-medium">{successSendInfo}</span></div>
+                  <div>? ¹ß¼Û: <span className="font-medium">{successSendInfo}</span></div>
                 </div>
               </div>
               <div className="flex gap-3">
@@ -2685,13 +2685,13 @@ const campaignData = {
                   }}
                   className="flex-1 py-3 border rounded-lg text-gray-600 hover:bg-gray-100"
                 >
-                  ğŸ“… ìº˜ë¦°ë” í™•ì¸
+                  ?? Ä¶¸°´õ È®ÀÎ
                 </button>
                 <button
                   onClick={() => setShowSuccess(false)}
                   className="flex-1 py-3 bg-green-700 text-white rounded-lg hover:bg-green-800"
                 >
-                  í™•ì¸
+                  È®ÀÎ
                 </button>
               </div>
             </div>
@@ -2701,31 +2701,31 @@ const campaignData = {
         {showCustomerDB && <CustomerDBModal onClose={() => setShowCustomerDB(false)} token={localStorage.getItem('token')} />}
         {showCalendar && <CalendarModal onClose={() => setShowCalendar(false)} token={localStorage.getItem('token')} />}
 
-        {/* MMS ì´ë¯¸ì§€ ì—…ë¡œë“œ ëª¨ë‹¬ */}
+        {/* MMS ÀÌ¹ÌÁö ¾÷·Îµå ¸ğ´Ş */}
         {showMmsUploadModal && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[70]">
             <div className="bg-white rounded-2xl shadow-2xl w-[520px] overflow-hidden animate-in fade-in zoom-in">
-              {/* í—¤ë” */}
+              {/* Çì´õ */}
               <div className="px-6 py-4 border-b bg-gradient-to-r from-amber-50 to-orange-50 flex justify-between items-center">
                 <div className="flex items-center gap-2">
-                  <span className="text-xl">ğŸ–¼ï¸</span>
-                  <h3 className="font-bold text-lg text-gray-800">MMS ì´ë¯¸ì§€ ì²¨ë¶€</h3>
+                  <span className="text-xl">???</span>
+                  <h3 className="font-bold text-lg text-gray-800">MMS ÀÌ¹ÌÁö Ã·ºÎ</h3>
                 </div>
-                <button onClick={() => setShowMmsUploadModal(false)} className="text-gray-400 hover:text-gray-600 text-xl">âœ•</button>
+                <button onClick={() => setShowMmsUploadModal(false)} className="text-gray-400 hover:text-gray-600 text-xl">?</button>
               </div>
 
-              {/* ê·œê²© ì•ˆë‚´ */}
+              {/* ±Ô°İ ¾È³» */}
               <div className="px-6 py-3 bg-blue-50 border-b">
-                <div className="text-sm font-semibold text-blue-700 mb-1">ğŸ“‹ ì´ë¯¸ì§€ ê·œê²© ì•ˆë‚´</div>
+                <div className="text-sm font-semibold text-blue-700 mb-1">?? ÀÌ¹ÌÁö ±Ô°İ ¾È³»</div>
                 <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-blue-600">
-                  <div>â€¢ íŒŒì¼ í˜•ì‹: <span className="font-bold">JPG/JPEGë§Œ</span> ê°€ëŠ¥</div>
-                  <div>â€¢ ìµœëŒ€ ìš©ëŸ‰: <span className="font-bold">300KB ì´í•˜</span> (ì´í†µì‚¬ ê¶Œì¥)</div>
-                  <div>â€¢ ìµœëŒ€ ì¥ìˆ˜: <span className="font-bold">3ì¥</span> (ì´í†µì‚¬ ë³´ì¥)</div>
-                  <div>â€¢ PNG/GIF: ì´í†µì‚¬ ê±°ì ˆ ê°€ëŠ¥ (ë¯¸ì§€ì›)</div>
+                  <div>? ÆÄÀÏ Çü½Ä: <span className="font-bold">JPG/JPEG¸¸</span> °¡´É</div>
+                  <div>? ÃÖ´ë ¿ë·®: <span className="font-bold">300KB ÀÌÇÏ</span> (ÀÌÅë»ç ±ÇÀå)</div>
+                  <div>? ÃÖ´ë Àå¼ö: <span className="font-bold">3Àå</span> (ÀÌÅë»ç º¸Àå)</div>
+                  <div>? PNG/GIF: ÀÌÅë»ç °ÅÀı °¡´É (¹ÌÁö¿ø)</div>
                 </div>
               </div>
 
-              {/* 3ì¹¸ ìŠ¬ë¡¯ */}
+              {/* 3Ä­ ½½·Ô */}
               <div className="p-6">
                 <div className="grid grid-cols-3 gap-4">
                   {[0, 1, 2].map(slotIdx => {
@@ -2733,11 +2733,11 @@ const campaignData = {
                     return (
                       <div key={slotIdx} className="aspect-square relative">
                         {img ? (
-                          /* ì—…ë¡œë“œ ì™„ë£Œ ìŠ¬ë¡¯ */
+                          /* ¾÷·Îµå ¿Ï·á ½½·Ô */
                           <div className="w-full h-full rounded-xl border-2 border-green-300 bg-green-50 overflow-hidden relative group">
                             <img
                               src={img.url}
-                              alt={`ì´ë¯¸ì§€ ${slotIdx + 1}`}
+                              alt={`ÀÌ¹ÌÁö ${slotIdx + 1}`}
                               className="w-full h-full object-cover"
                               crossOrigin="use-credentials"
                             />
@@ -2745,7 +2745,7 @@ const campaignData = {
                               <button
                                 onClick={() => handleMmsImageRemove(slotIdx)}
                                 className="opacity-0 group-hover:opacity-100 transition-opacity bg-red-500 hover:bg-red-600 text-white rounded-full w-8 h-8 flex items-center justify-center text-sm font-bold shadow-lg"
-                              >Ã—</button>
+                              >¡¿</button>
                             </div>
                             <div className="absolute bottom-1 right-1 bg-green-600 text-white text-[10px] px-1.5 py-0.5 rounded-full font-bold">
                               {(img.size / 1024).toFixed(0)}KB
@@ -2755,11 +2755,11 @@ const campaignData = {
                             </div>
                           </div>
                         ) : (
-                          /* ë¹ˆ ìŠ¬ë¡¯ */
+                          /* ºó ½½·Ô */
                           <label className={`w-full h-full rounded-xl border-2 border-dashed border-gray-300 bg-gray-50 flex flex-col items-center justify-center cursor-pointer hover:border-amber-400 hover:bg-amber-50 transition-all ${mmsUploading ? 'opacity-50 pointer-events-none' : ''}`}>
                             <div className="text-3xl text-gray-300 mb-2">+</div>
-                            <div className="text-xs text-gray-400 font-medium">ì´ë¯¸ì§€ {slotIdx + 1}</div>
-                            <div className="text-[10px] text-gray-300 mt-1">JPG Â· 300KB</div>
+                            <div className="text-xs text-gray-400 font-medium">ÀÌ¹ÌÁö {slotIdx + 1}</div>
+                            <div className="text-[10px] text-gray-300 mt-1">JPG ¡¤ 300KB</div>
                             <input
                               type="file"
                               accept=".jpg,.jpeg"
@@ -2779,20 +2779,20 @@ const campaignData = {
 
                 {mmsUploading && (
                   <div className="flex items-center justify-center gap-2 mt-4 text-sm text-amber-600">
-                    <span className="animate-spin">â³</span> ì´ë¯¸ì§€ ì—…ë¡œë“œ ì¤‘...
+                    <span className="animate-spin">?</span> ÀÌ¹ÌÁö ¾÷·Îµå Áß...
                   </div>
                 )}
               </div>
 
-              {/* ì•ˆë‚´ + í™•ì¸ */}
+              {/* ¾È³» + È®ÀÎ */}
               <div className="px-6 pb-6 space-y-3">
                 <div className="text-xs text-amber-600 bg-amber-50 rounded-lg p-3 text-center">
-                  âš ï¸ ì‹¤ì œ ìˆ˜ì‹  í™”ë©´ì€ ì´í†µì‚¬ ë° íœ´ëŒ€í° ê¸°ì¢…ì— ë”°ë¼ ë‹¤ë¥´ê²Œ ë³´ì¼ ìˆ˜ ìˆìŠµë‹ˆë‹¤
+                  ?? ½ÇÁ¦ ¼ö½Å È­¸éÀº ÀÌÅë»ç ¹× ÈŞ´ëÆù ±âÁ¾¿¡ µû¶ó ´Ù¸£°Ô º¸ÀÏ ¼ö ÀÖ½À´Ï´Ù
                 </div>
                 <button
                   onClick={() => {
                     setShowMmsUploadModal(false);
-                    // ì´ë¯¸ì§€ê°€ ìˆìœ¼ë©´ ìë™ MMS ì „í™˜
+                    // ÀÌ¹ÌÁö°¡ ÀÖÀ¸¸é ÀÚµ¿ MMS ÀüÈ¯
                     if (mmsUploadedImages.length > 0) {
                       setTargetMsgType('MMS');
                       setDirectMsgType('MMS');
@@ -2801,20 +2801,20 @@ const campaignData = {
                   }}
                   className="w-full py-3 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-semibold text-sm transition-colors"
                 >
-                  {mmsUploadedImages.length > 0 ? `âœ… ${mmsUploadedImages.length}ì¥ ì²¨ë¶€ ì™„ë£Œ` : 'í™•ì¸'}
+                  {mmsUploadedImages.length > 0 ? `? ${mmsUploadedImages.length}Àå Ã·ºÎ ¿Ï·á` : 'È®ÀÎ'}
                 </button>
               </div>
             </div>
           </div>
         )}
         
-        {/* ìµœê·¼ ìº í˜ì¸ ëª¨ë‹¬ */}
+        {/* ÃÖ±Ù Ä·ÆäÀÎ ¸ğ´Ş */}
         {showRecentCampaigns && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
             <div className="bg-white rounded-xl shadow-2xl w-[600px] max-h-[80vh] overflow-hidden">
               <div className="p-4 border-b bg-blue-50 flex justify-between items-center">
-                <h3 className="font-bold text-lg">ğŸ“Š ìµœê·¼ ìº í˜ì¸</h3>
-                <button onClick={() => setShowRecentCampaigns(false)} className="text-gray-500 hover:text-gray-700 text-xl">âœ•</button>
+                <h3 className="font-bold text-lg">?? ÃÖ±Ù Ä·ÆäÀÎ</h3>
+                <button onClick={() => setShowRecentCampaigns(false)} className="text-gray-500 hover:text-gray-700 text-xl">?</button>
               </div>
               <div className="p-4 overflow-y-auto max-h-[60vh]">
                 {recentCampaigns.length > 0 ? (
@@ -2830,96 +2830,96 @@ const campaignData = {
                             c.status === 'cancelled' ? 'bg-gray-200 text-gray-500' :
                             'bg-gray-100 text-gray-700'
                           }`}>
-                            {c.status === 'completed' ? 'ì™„ë£Œ' : c.status === 'scheduled' ? 'ì˜ˆì•½' : c.status === 'sending' ? 'ë°œì†¡ì¤‘' : c.status === 'cancelled' ? 'ì·¨ì†Œ' : 'ì¤€ë¹„'}
+                            {c.status === 'completed' ? '¿Ï·á' : c.status === 'scheduled' ? '¿¹¾à' : c.status === 'sending' ? '¹ß¼ÛÁß' : c.status === 'cancelled' ? 'Ãë¼Ò' : 'ÁØºñ'}
                           </span>
                         </div>
                         <div className="text-sm text-gray-500 space-y-1">
                           <div>
-                            {c.send_type === 'direct' ? 'ğŸ“¤' : 'ğŸ¤–'} 
+                            {c.send_type === 'direct' ? '??' : '??'} 
                             <span className={`ml-1 text-xs px-1.5 py-0.5 rounded ${c.send_type === 'direct' ? 'bg-emerald-100 text-emerald-700' : 'bg-purple-100 text-purple-700'}`}>
-                              {c.send_type === 'direct' ? 'ì§ì ‘' : 'AI'}
+                              {c.send_type === 'direct' ? 'Á÷Á¢' : 'AI'}
                             </span>
-                            <span className="ml-2">ğŸ“± {c.message_type} Â· ğŸ‘¥ {c.target_count?.toLocaleString()}ëª…</span>
+                            <span className="ml-2">?? {c.message_type} ¡¤ ?? {c.target_count?.toLocaleString()}¸í</span>
                           </div>
-                          <div>âœ… ì„±ê³µ {c.success_count?.toLocaleString() || 0} Â· âŒ ì‹¤íŒ¨ {c.fail_count?.toLocaleString() || 0}</div>
+                          <div>? ¼º°ø {c.success_count?.toLocaleString() || 0} ¡¤ ? ½ÇÆĞ {c.fail_count?.toLocaleString() || 0}</div>
                           <div className="text-xs text-gray-400">{formatDateTime(c.created_at)}</div>
                         </div>
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <p className="text-gray-500 text-center py-8">ìµœê·¼ ìº í˜ì¸ì´ ì—†ìŠµë‹ˆë‹¤</p>
+                  <p className="text-gray-500 text-center py-8">ÃÖ±Ù Ä·ÆäÀÎÀÌ ¾ø½À´Ï´Ù</p>
                 )}
               </div>
             </div>
           </div>
         )}
 
-        {/* ì¶”ì²œ í…œí”Œë¦¿ ëª¨ë‹¬ */}
+        {/* ÃßÃµ ÅÛÇÃ¸´ ¸ğ´Ş */}
         {showTemplates && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
             <div className="bg-white rounded-xl shadow-2xl w-[700px] max-h-[85vh] overflow-hidden">
               <div className="p-4 border-b bg-purple-50 flex justify-between items-center">
-                <h3 className="font-bold text-lg">ğŸ“ ì¶”ì²œ í…œí”Œë¦¿</h3>
-                <button onClick={() => setShowTemplates(false)} className="text-gray-500 hover:text-gray-700 text-xl">âœ•</button>
+                <h3 className="font-bold text-lg">?? ÃßÃµ ÅÛÇÃ¸´</h3>
+                <button onClick={() => setShowTemplates(false)} className="text-gray-500 hover:text-gray-700 text-xl">?</button>
               </div>
               <div className="p-6 overflow-y-auto max-h-[70vh]">
                 <div className="grid grid-cols-2 gap-4">
-                  <div onClick={() => { setAiCampaignPrompt('VIP ê³ ê°ì—ê²Œ ê°ì‚¬ ì¸ì‚¬ ë¬¸ì ë³´ë‚´ì¤˜'); setShowTemplates(false); }} className="p-4 border rounded-lg hover:border-purple-400 cursor-pointer transition-all text-center">
-                    <div className="text-2xl mb-2">ğŸ’</div>
-                    <div className="font-semibold text-gray-800 mb-1">VIP ê°ì‚¬ ì¸ì‚¬</div>
-                    <div className="text-sm text-gray-500">VIP ê³ ê°ì—ê²Œ ê°ì‚¬ ë©”ì‹œì§€ ë°œì†¡</div>
+                  <div onClick={() => { setAiCampaignPrompt('VIP °í°´¿¡°Ô °¨»ç ÀÎ»ç ¹®ÀÚ º¸³»Áà'); setShowTemplates(false); }} className="p-4 border rounded-lg hover:border-purple-400 cursor-pointer transition-all text-center">
+                    <div className="text-2xl mb-2">??</div>
+                    <div className="font-semibold text-gray-800 mb-1">VIP °¨»ç ÀÎ»ç</div>
+                    <div className="text-sm text-gray-500">VIP °í°´¿¡°Ô °¨»ç ¸Ş½ÃÁö ¹ß¼Û</div>
                   </div>
-                  <div onClick={() => { setAiCampaignPrompt('ìƒì¼ì¸ ê³ ê°ì—ê²Œ ì¶•í•˜ ì¿ í° ë¬¸ì ë³´ë‚´ì¤˜'); setShowTemplates(false); }} className="p-4 border rounded-lg hover:border-purple-400 cursor-pointer transition-all text-center">
-                    <div className="text-2xl mb-2">ğŸ‚</div>
-                    <div className="font-semibold text-gray-800 mb-1">ìƒì¼ ì¶•í•˜</div>
-                    <div className="text-sm text-gray-500">ìƒì¼ ê³ ê°ì—ê²Œ ì¶•í•˜ ì¿ í° ë°œì†¡</div>
+                  <div onClick={() => { setAiCampaignPrompt('»ıÀÏÀÎ °í°´¿¡°Ô ÃàÇÏ ÄíÆù ¹®ÀÚ º¸³»Áà'); setShowTemplates(false); }} className="p-4 border rounded-lg hover:border-purple-400 cursor-pointer transition-all text-center">
+                    <div className="text-2xl mb-2">??</div>
+                    <div className="font-semibold text-gray-800 mb-1">»ıÀÏ ÃàÇÏ</div>
+                    <div className="text-sm text-gray-500">»ıÀÏ °í°´¿¡°Ô ÃàÇÏ ÄíÆù ¹ß¼Û</div>
                   </div>
-                  <div onClick={() => { setAiCampaignPrompt('ì‹ ìƒí’ˆ ì¶œì‹œ ì•ˆë‚´ ë¬¸ì ì „ì²´ ê³ ê°ì—ê²Œ ë³´ë‚´ì¤˜'); setShowTemplates(false); }} className="p-4 border rounded-lg hover:border-purple-400 cursor-pointer transition-all text-center">
-                    <div className="text-2xl mb-2">ğŸ†•</div>
-                    <div className="font-semibold text-gray-800 mb-1">ì‹ ìƒí’ˆ ì•ˆë‚´</div>
-                    <div className="text-sm text-gray-500">ì‹ ìƒí’ˆ ì¶œì‹œ ì†Œì‹ ì „ì²´ ë°œì†¡</div>
+                  <div onClick={() => { setAiCampaignPrompt('½Å»óÇ° Ãâ½Ã ¾È³» ¹®ÀÚ ÀüÃ¼ °í°´¿¡°Ô º¸³»Áà'); setShowTemplates(false); }} className="p-4 border rounded-lg hover:border-purple-400 cursor-pointer transition-all text-center">
+                    <div className="text-2xl mb-2">??</div>
+                    <div className="font-semibold text-gray-800 mb-1">½Å»óÇ° ¾È³»</div>
+                    <div className="text-sm text-gray-500">½Å»óÇ° Ãâ½Ã ¼Ò½Ä ÀüÃ¼ ¹ß¼Û</div>
                   </div>
-                  <div onClick={() => { setAiCampaignPrompt('30ëŒ€ ì—¬ì„± ê³ ê°ì—ê²Œ ë´„ ì‹œì¦Œ í• ì¸ ì´ë²¤íŠ¸ ë¬¸ì ë³´ë‚´ì¤˜'); setShowTemplates(false); }} className="p-4 border rounded-lg hover:border-purple-400 cursor-pointer transition-all text-center">
-                    <div className="text-2xl mb-2">ğŸŒ¸</div>
-                    <div className="font-semibold text-gray-800 mb-1">ì‹œì¦Œ í• ì¸</div>
-                    <div className="text-sm text-gray-500">íƒ€ê²Ÿ ê³ ê° ì‹œì¦Œ í”„ë¡œëª¨ì…˜</div>
+                  <div onClick={() => { setAiCampaignPrompt('30´ë ¿©¼º °í°´¿¡°Ô º½ ½ÃÁğ ÇÒÀÎ ÀÌº¥Æ® ¹®ÀÚ º¸³»Áà'); setShowTemplates(false); }} className="p-4 border rounded-lg hover:border-purple-400 cursor-pointer transition-all text-center">
+                    <div className="text-2xl mb-2">??</div>
+                    <div className="font-semibold text-gray-800 mb-1">½ÃÁğ ÇÒÀÎ</div>
+                    <div className="text-sm text-gray-500">Å¸°Ù °í°´ ½ÃÁğ ÇÁ·Î¸ğ¼Ç</div>
                   </div>
-                  <div onClick={() => { setAiCampaignPrompt('3ê°œì›” ì´ìƒ ë¯¸êµ¬ë§¤ ê³ ê°ì—ê²Œ ì¬ë°©ë¬¸ ìœ ë„ ë¬¸ì ë³´ë‚´ì¤˜'); setShowTemplates(false); }} className="p-4 border rounded-lg hover:border-purple-400 cursor-pointer transition-all text-center">
-                    <div className="text-2xl mb-2">ğŸ”„</div>
-                    <div className="font-semibold text-gray-800 mb-1">ì¬ë°©ë¬¸ ìœ ë„</div>
-                    <div className="text-sm text-gray-500">íœ´ë©´ ê³ ê° í™œì„±í™”</div>
+                  <div onClick={() => { setAiCampaignPrompt('3°³¿ù ÀÌ»ó ¹Ì±¸¸Å °í°´¿¡°Ô Àç¹æ¹® À¯µµ ¹®ÀÚ º¸³»Áà'); setShowTemplates(false); }} className="p-4 border rounded-lg hover:border-purple-400 cursor-pointer transition-all text-center">
+                    <div className="text-2xl mb-2">??</div>
+                    <div className="font-semibold text-gray-800 mb-1">Àç¹æ¹® À¯µµ</div>
+                    <div className="text-sm text-gray-500">ÈŞ¸é °í°´ È°¼ºÈ­</div>
                   </div>
-                  <div onClick={() => { setAiCampaignPrompt('í¬ì¸íŠ¸ ì†Œë©¸ ì˜ˆì • ê³ ê°ì—ê²Œ ì‚¬ìš© ì•ˆë‚´ ë¬¸ì ë³´ë‚´ì¤˜'); setShowTemplates(false); }} className="p-4 border rounded-lg hover:border-purple-400 cursor-pointer transition-all text-center">
-                    <div className="text-2xl mb-2">ğŸ’°</div>
-                    <div className="font-semibold text-gray-800 mb-1">í¬ì¸íŠ¸ ì†Œë©¸ ì•ˆë‚´</div>
-                    <div className="text-sm text-gray-500">í¬ì¸íŠ¸ ë§Œë£Œ ì „ ì•Œë¦¼</div>
+                  <div onClick={() => { setAiCampaignPrompt('Æ÷ÀÎÆ® ¼Ò¸ê ¿¹Á¤ °í°´¿¡°Ô »ç¿ë ¾È³» ¹®ÀÚ º¸³»Áà'); setShowTemplates(false); }} className="p-4 border rounded-lg hover:border-purple-400 cursor-pointer transition-all text-center">
+                    <div className="text-2xl mb-2">??</div>
+                    <div className="font-semibold text-gray-800 mb-1">Æ÷ÀÎÆ® ¼Ò¸ê ¾È³»</div>
+                    <div className="text-sm text-gray-500">Æ÷ÀÎÆ® ¸¸·á Àü ¾Ë¸²</div>
                   </div>
-                  <div onClick={() => { setAiCampaignPrompt('ì„¤ë‚  ì—°íœ´ ë°°ì†¡ ì•ˆë‚´ ë¬¸ì ì „ì²´ ê³ ê°ì—ê²Œ ë³´ë‚´ì¤˜'); setShowTemplates(false); }} className="p-4 border rounded-lg hover:border-purple-400 cursor-pointer transition-all text-center">
-                    <div className="text-2xl mb-2">ğŸ“¦</div>
-                    <div className="font-semibold text-gray-800 mb-1">ë°°ì†¡ ì•ˆë‚´</div>
-                    <div className="text-sm text-gray-500">ì—°íœ´/ì´ë²¤íŠ¸ ë°°ì†¡ ê³µì§€</div>
+                  <div onClick={() => { setAiCampaignPrompt('¼³³¯ ¿¬ÈŞ ¹è¼Û ¾È³» ¹®ÀÚ ÀüÃ¼ °í°´¿¡°Ô º¸³»Áà'); setShowTemplates(false); }} className="p-4 border rounded-lg hover:border-purple-400 cursor-pointer transition-all text-center">
+                    <div className="text-2xl mb-2">??</div>
+                    <div className="font-semibold text-gray-800 mb-1">¹è¼Û ¾È³»</div>
+                    <div className="text-sm text-gray-500">¿¬ÈŞ/ÀÌº¥Æ® ¹è¼Û °øÁö</div>
                   </div>
-                  <div onClick={() => { setAiCampaignPrompt('ë§ˆìŠ¤í¬íŒ© ì¢‹ì•„í•˜ëŠ” ê³ ê°ì—ê²Œ 1+1 ì´ë²¤íŠ¸ ë¬¸ì ë³´ë‚´ì¤˜'); setShowTemplates(false); }} className="p-4 border rounded-lg hover:border-purple-400 cursor-pointer transition-all text-center">
-                    <div className="text-2xl mb-2">ğŸ</div>
-                    <div className="font-semibold text-gray-800 mb-1">1+1 ì´ë²¤íŠ¸</div>
-                    <div className="text-sm text-gray-500">ì¹´í…Œê³ ë¦¬ë³„ í”„ë¡œëª¨ì…˜</div>
+                  <div onClick={() => { setAiCampaignPrompt('¸¶½ºÅ©ÆÑ ÁÁ¾ÆÇÏ´Â °í°´¿¡°Ô 1+1 ÀÌº¥Æ® ¹®ÀÚ º¸³»Áà'); setShowTemplates(false); }} className="p-4 border rounded-lg hover:border-purple-400 cursor-pointer transition-all text-center">
+                    <div className="text-2xl mb-2">??</div>
+                    <div className="font-semibold text-gray-800 mb-1">1+1 ÀÌº¥Æ®</div>
+                    <div className="text-sm text-gray-500">Ä«Å×°í¸®º° ÇÁ·Î¸ğ¼Ç</div>
                   </div>
                 </div>
               </div>
             </div>
           </div>
         )}
-                            {/* íŒŒì¼ ì—…ë¡œë“œ ìº í˜ì¸ ëª¨ë‹¬ */}
-        {/* ì§ì ‘ íƒ€ê²Ÿ ì„¤ì • ëª¨ë‹¬ */}
+                            {/* ÆÄÀÏ ¾÷·Îµå Ä·ÆäÀÎ ¸ğ´Ş */}
+        {/* Á÷Á¢ Å¸°Ù ¼³Á¤ ¸ğ´Ş */}
         {showDirectTargeting && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
             <div className="bg-white rounded-2xl shadow-2xl w-[700px] max-h-[95vh] overflow-hidden">
-              {/* í—¤ë” */}
+              {/* Çì´õ */}
               <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center">
                 <div>
-                  <h3 className="text-lg font-bold text-gray-800">ì§ì ‘ íƒ€ê²Ÿ ì„¤ì •</h3>
-                  <p className="text-sm text-gray-500 mt-0.5">í•„í„° ì¡°ê±´ìœ¼ë¡œ ëŒ€ìƒ ê³ ê°ì„ ì„ íƒí•˜ì„¸ìš”</p>
+                  <h3 className="text-lg font-bold text-gray-800">Á÷Á¢ Å¸°Ù ¼³Á¤</h3>
+                  <p className="text-sm text-gray-500 mt-0.5">ÇÊÅÍ Á¶°ÇÀ¸·Î ´ë»ó °í°´À» ¼±ÅÃÇÏ¼¼¿ä</p>
                 </div>
                 <button 
                   onClick={() => { setShowDirectTargeting(false); resetTargetFilters(); }}
@@ -2931,17 +2931,17 @@ const campaignData = {
                 </button>
               </div>
 
-              {/* í•„í„° ì˜ì—­ */}
+              {/* ÇÊÅÍ ¿µ¿ª */}
               <div className="p-6 space-y-4 overflow-y-auto max-h-[65vh]">
-                {/* ìˆ˜ì‹ ë²ˆí˜¸ í•„ë“œ ì„ íƒ */}
+                {/* ¼ö½Å¹øÈ£ ÇÊµå ¼±ÅÃ */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">ìˆ˜ì‹ ë²ˆí˜¸ í•„ë“œ</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">¼ö½Å¹øÈ£ ÇÊµå</label>
                   <select 
                     value={targetPhoneField}
                     onChange={(e) => setTargetPhoneField(e.target.value)}
                     className="w-full px-4 py-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white text-gray-700"
                   >
-                    <option value="phone">phone (ì „í™”ë²ˆí˜¸)</option>
+                    <option value="phone">phone (ÀüÈ­¹øÈ£)</option>
                     <option value="mobile">mobile</option>
                     <option value="phone_number">phone_number</option>
                   </select>
@@ -2949,52 +2949,52 @@ const campaignData = {
 
                 <div className="border-t border-gray-100"></div>
 
-                {/* í•„í„° ì¡°ê±´ í—¤ë” */}
+                {/* ÇÊÅÍ Á¶°Ç Çì´õ */}
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-gray-700">í•„í„° ì¡°ê±´</span>
+                    <span className="text-sm font-medium text-gray-700">ÇÊÅÍ Á¶°Ç</span>
                     {Object.keys(targetFilters).length > 0 && (
                       <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full font-medium">
-                        {Object.values(targetFilters).filter(v => v).length}ê°œ ì ìš©
+                        {Object.values(targetFilters).filter(v => v).length}°³ Àû¿ë
                       </span>
                     )}
                   </div>
-                  <button onClick={resetTargetFilters} className="text-xs text-green-600 hover:text-green-700 font-medium">ì´ˆê¸°í™”</button>
+                  <button onClick={resetTargetFilters} className="text-xs text-green-600 hover:text-green-700 font-medium">ÃÊ±âÈ­</button>
                 </div>
 
-                {/* ì•„ì½”ë””ì–¸ í•„í„° */}
+                {/* ¾ÆÄÚµğ¾ğ ÇÊÅÍ */}
                 {enabledFields.length === 0 ? (
                   <div className="text-center py-8 text-gray-400 text-sm">
-                    í•„í„° í•­ëª©ì„ ë¡œë”© ì¤‘...
+                    ÇÊÅÍ Ç×¸ñÀ» ·Îµù Áß...
                   </div>
                 ) : (
                   (() => {
                     const CAT_LABELS: Record<string, string> = {
-                      basic: 'ğŸ“‹ ê¸°ë³¸ì •ë³´', segment: 'ğŸ·ï¸ ë“±ê¸‰/ì„¸ê·¸ë¨¼íŠ¸', purchase: 'ğŸ’° êµ¬ë§¤/ê±°ë˜',
-                      loyalty: 'â­ ì¶©ì„±ë„/í™œë™', store: 'ğŸª ì†Œì†/ì±„ë„', preference: 'â¤ï¸ ì„ í˜¸/ê´€ì‹¬',
-                      marketing: 'ğŸ“± ë§ˆì¼€íŒ…ìˆ˜ì‹ ', custom: 'ğŸ”§ ì»¤ìŠ¤í…€'
+                      basic: '?? ±âº»Á¤º¸', segment: '??? µî±Ş/¼¼±×¸ÕÆ®', purchase: '?? ±¸¸Å/°Å·¡',
+                      loyalty: '? Ãæ¼ºµµ/È°µ¿', store: '?? ¼Ò¼Ó/Ã¤³Î', preference: '?? ¼±È£/°ü½É',
+                      marketing: '?? ¸¶ÄÉÆÃ¼ö½Å', custom: '?? Ä¿½ºÅÒ'
                     };
-                    // í•„í„° ëŒ€ìƒì—ì„œ ì œì™¸í•  í•„ë“œ (ì‹ë³„ìš©/ìˆ˜ì‹ ë™ì˜ëŠ” ë³„ë„ ì²˜ë¦¬)
+                    // ÇÊÅÍ ´ë»ó¿¡¼­ Á¦¿ÜÇÒ ÇÊµå (½Äº°¿ë/¼ö½Åµ¿ÀÇ´Â º°µµ Ã³¸®)
                     const SKIP_FIELDS = ['name', 'phone', 'email', 'address', 'opt_in_sms', 'opt_in_date', 'opt_out_date'];
                     const filterableFields = enabledFields.filter((f: any) => !SKIP_FIELDS.includes(f.field_key));
                     
-                    // ì—°ë ¹ëŒ€ í”„ë¦¬ì…‹
+                    // ¿¬·É´ë ÇÁ¸®¼Â
                     const AGE_OPTIONS = [
-                      { label: '20ëŒ€', value: '20' }, { label: '30ëŒ€', value: '30' },
-                      { label: '40ëŒ€', value: '40' }, { label: '50ëŒ€', value: '50' },
-                      { label: '60ëŒ€ ì´ìƒ', value: '60' },
+                      { label: '20´ë', value: '20' }, { label: '30´ë', value: '30' },
+                      { label: '40´ë', value: '40' }, { label: '50´ë', value: '50' },
+                      { label: '60´ë ÀÌ»ó', value: '60' },
                     ];
-                    // ê¸ˆì•¡ í”„ë¦¬ì…‹
+                    // ±İ¾× ÇÁ¸®¼Â
                     const AMOUNT_OPTIONS = [
-                      { label: '5ë§Œì› ì´ìƒ', value: '50000' }, { label: '10ë§Œì› ì´ìƒ', value: '100000' },
-                      { label: '50ë§Œì› ì´ìƒ', value: '500000' }, { label: '100ë§Œì› ì´ìƒ', value: '1000000' },
-                      { label: '500ë§Œì› ì´ìƒ', value: '5000000' },
+                      { label: '5¸¸¿ø ÀÌ»ó', value: '50000' }, { label: '10¸¸¿ø ÀÌ»ó', value: '100000' },
+                      { label: '50¸¸¿ø ÀÌ»ó', value: '500000' }, { label: '100¸¸¿ø ÀÌ»ó', value: '1000000' },
+                      { label: '500¸¸¿ø ÀÌ»ó', value: '5000000' },
                     ];
-                    // ì¼ìˆ˜ í”„ë¦¬ì…‹
+                    // ÀÏ¼ö ÇÁ¸®¼Â
                     const DAYS_OPTIONS = [
-                      { label: '7ì¼ ì´ë‚´', value: '7' }, { label: '30ì¼ ì´ë‚´', value: '30' },
-                      { label: '90ì¼ ì´ë‚´', value: '90' }, { label: '180ì¼ ì´ë‚´', value: '180' },
-                      { label: '1ë…„ ì´ë‚´', value: '365' },
+                      { label: '7ÀÏ ÀÌ³»', value: '7' }, { label: '30ÀÏ ÀÌ³»', value: '30' },
+                      { label: '90ÀÏ ÀÌ³»', value: '90' }, { label: '180ÀÏ ÀÌ³»', value: '180' },
+                      { label: '1³â ÀÌ³»', value: '365' },
                     ];
 
                     const renderInput = (field: any) => {
@@ -3005,21 +3005,21 @@ const campaignData = {
                       });
                       const selectClass = "w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent text-sm bg-white";
 
-                      // ì—°ë ¹ëŒ€ íŠ¹ìˆ˜ ì²˜ë¦¬
+                      // ¿¬·É´ë Æ¯¼ö Ã³¸®
                       if (field.field_key === 'age_group') {
                         return (
                           <select value={val} onChange={e => set(e.target.value)} className={selectClass}>
-                            <option value="">ì „ì²´</option>
+                            <option value="">ÀüÃ¼</option>
                             {AGE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                           </select>
                         );
                       }
 
-                      // ë¬¸ìì—´ + DB ì˜µì…˜ â†’ ë“œë¡­ë‹¤ìš´
+                      // ¹®ÀÚ¿­ + DB ¿É¼Ç ¡æ µå·Ó´Ù¿î
                       if (field.data_type === 'string' && filterOptions[field.field_key]?.length) {
                         return (
                           <select value={val} onChange={e => set(e.target.value)} className={selectClass}>
-                            <option value="">ì „ì²´</option>
+                            <option value="">ÀüÃ¼</option>
                             {filterOptions[field.field_key].map((opt: string) => (
                               <option key={opt} value={opt}>{opt}</option>
                             ))}
@@ -3027,49 +3027,49 @@ const campaignData = {
                         );
                       }
 
-                      // ê¸ˆì•¡ í•„ë“œ â†’ í”„ë¦¬ì…‹ ë“œë¡­ë‹¤ìš´
+                      // ±İ¾× ÇÊµå ¡æ ÇÁ¸®¼Â µå·Ó´Ù¿î
                       if (field.data_type === 'number' && ['total_purchase_amount', 'avg_order_value'].includes(field.field_key)) {
                         return (
                           <select value={val} onChange={e => set(e.target.value)} className={selectClass}>
-                            <option value="">ì „ì²´</option>
+                            <option value="">ÀüÃ¼</option>
                             {AMOUNT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                           </select>
                         );
                       }
 
-                      // ìˆ«ì í•„ë“œ â†’ ì§ì ‘ ì…ë ¥
+                      // ¼ıÀÚ ÇÊµå ¡æ Á÷Á¢ ÀÔ·Â
                       if (field.data_type === 'number') {
                         return (
                           <input type="number" value={val} onChange={e => set(e.target.value)}
-                            placeholder="ì´ìƒ" className={selectClass} />
+                            placeholder="ÀÌ»ó" className={selectClass} />
                         );
                       }
 
-                      // ë‚ ì§œ í•„ë“œ â†’ ì¼ìˆ˜ ë“œë¡­ë‹¤ìš´
+                      // ³¯Â¥ ÇÊµå ¡æ ÀÏ¼ö µå·Ó´Ù¿î
                       if (field.data_type === 'date') {
                         return (
                           <select value={val} onChange={e => set(e.target.value)} className={selectClass}>
-                            <option value="">ì „ì²´</option>
+                            <option value="">ÀüÃ¼</option>
                             {DAYS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                           </select>
                         );
                       }
 
-                      // ë¶ˆë¦¬ì–¸
+                      // ºÒ¸®¾ğ
                       if (field.data_type === 'boolean') {
                         return (
                           <select value={val} onChange={e => set(e.target.value)} className={selectClass}>
-                            <option value="">ì „ì²´</option>
-                            <option value="true">ì˜ˆ</option>
-                            <option value="false">ì•„ë‹ˆì˜¤</option>
+                            <option value="">ÀüÃ¼</option>
+                            <option value="true">¿¹</option>
+                            <option value="false">¾Æ´Ï¿À</option>
                           </select>
                         );
                       }
 
-                      // ê¸°ë³¸: í…ìŠ¤íŠ¸ ì…ë ¥
+                      // ±âº»: ÅØ½ºÆ® ÀÔ·Â
                       return (
                         <input type="text" value={val} onChange={e => set(e.target.value)}
-                          placeholder="ì…ë ¥" className={selectClass} />
+                          placeholder="ÀÔ·Â" className={selectClass} />
                       );
                     };
 
@@ -3117,7 +3117,7 @@ const campaignData = {
                   })()
                 )}
 
-                {/* ìˆ˜ì‹ ë™ì˜ */}
+                {/* ¼ö½Åµ¿ÀÇ */}
                 <div className="flex items-center gap-2 p-3 bg-gray-50 rounded-lg">
                   <input 
                     type="checkbox" 
@@ -3126,20 +3126,20 @@ const campaignData = {
                     onChange={(e) => setTargetSmsOptIn(e.target.checked)}
                     className="w-4 h-4 text-green-600 rounded focus:ring-green-500" 
                   />
-                  <label htmlFor="targetSmsOptIn" className="text-sm text-gray-700">ìˆ˜ì‹ ë™ì˜ ê³ ê°ë§Œ í¬í•¨</label>
+                  <label htmlFor="targetSmsOptIn" className="text-sm text-gray-700">¼ö½Åµ¿ÀÇ °í°´¸¸ Æ÷ÇÔ</label>
                 </div>
 
-                {/* ì¡°íšŒ ë²„íŠ¼ */}
+                {/* Á¶È¸ ¹öÆ° */}
                 <button
                   onClick={loadTargetCount}
                   disabled={targetCountLoading}
                   className="w-full py-2.5 border border-green-600 text-green-700 rounded-lg hover:bg-green-50 transition-colors font-medium disabled:opacity-50"
                 >
-                  {targetCountLoading ? 'ì¡°íšŒ ì¤‘...' : 'ëŒ€ìƒ ì¸ì› ì¡°íšŒ'}
+                  {targetCountLoading ? 'Á¶È¸ Áß...' : '´ë»ó ÀÎ¿ø Á¶È¸'}
                 </button>
               </div>
 
-              {/* í‘¸í„° - ëŒ€ìƒ ì¸ì› + ë²„íŠ¼ */}
+              {/* ÇªÅÍ - ´ë»ó ÀÎ¿ø + ¹öÆ° */}
               <div className="px-6 py-4 border-t border-gray-100 bg-gray-50">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
@@ -3147,10 +3147,10 @@ const campaignData = {
                       <Users className="w-5 h-5 text-green-600" />
                     </div>
                     <div>
-                      <div className="text-sm text-gray-500">ëŒ€ìƒ ì¸ì›</div>
+                      <div className="text-sm text-gray-500">´ë»ó ÀÎ¿ø</div>
                       <div className="text-2xl font-bold text-green-700">
                         {targetCountLoading ? '...' : targetCount.toLocaleString()}
-                        <span className="text-base font-normal text-gray-500 ml-1">ëª…</span>
+                        <span className="text-base font-normal text-gray-500 ml-1">¸í</span>
                       </div>
                     </div>
                   </div>
@@ -3159,7 +3159,7 @@ const campaignData = {
                       onClick={() => { setShowDirectTargeting(false); resetTargetFilters(); }}
                       className="px-5 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-100 transition-colors font-medium"
                     >
-                      ì·¨ì†Œ
+                      Ãë¼Ò
                     </button>
                     <button
                       onClick={handleTargetExtract}
@@ -3167,7 +3167,7 @@ const campaignData = {
                       className="px-6 py-2.5 bg-green-700 text-white rounded-lg hover:bg-green-800 transition-colors font-medium flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       <Users className="w-4 h-4" />
-                      íƒ€ê²Ÿ ì¶”ì¶œ
+                      Å¸°Ù ÃßÃâ
                     </button>
                   </div>
                 </div>
@@ -3180,12 +3180,12 @@ const campaignData = {
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
             <div className="bg-white rounded-xl shadow-2xl w-[900px] max-h-[90vh] overflow-hidden">
               
-              {/* Step 1: íŒŒì¼ ì—…ë¡œë“œ */}
+              {/* Step 1: ÆÄÀÏ ¾÷·Îµå */}
               {mappingStep === 'upload' && (
                 <>
                   <div className="p-4 border-b bg-gradient-to-r from-green-50 to-emerald-50 flex justify-between items-center">
                     <h3 className="font-bold text-lg flex items-center gap-2">
-                      <span>ğŸ“¤</span> íŒŒì¼ ì—…ë¡œë“œ ìº í˜ì¸ ìƒì„±
+                      <span>??</span> ÆÄÀÏ ¾÷·Îµå Ä·ÆäÀÎ »ı¼º
                     </h3>
                     <button onClick={() => { 
                       setShowFileUpload(false); 
@@ -3196,21 +3196,21 @@ const campaignData = {
                       setFileId('');
                       setMappingStep('upload');
                       setColumnMapping({});
-                    }} className="text-gray-500 hover:text-gray-700 text-xl">âœ•</button>
+                    }} className="text-gray-500 hover:text-gray-700 text-xl">?</button>
                   </div>
                   <div className="p-6 space-y-6 overflow-y-auto max-h-[80vh]">
                     {!fileHeaders.length ? (
                       <div className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center hover:border-green-400 transition-colors relative">
                         {fileUploading && (
                           <div className="absolute inset-0 bg-white bg-opacity-90 flex flex-col items-center justify-center rounded-xl z-10">
-                            <div className="text-4xl mb-4 animate-bounce">ğŸ“Š</div>
-                            <div className="text-lg font-semibold text-green-600">íŒŒì¼ ë¶„ì„ ì¤‘...</div>
-                            <div className="text-sm text-gray-500 mt-2">ì ì‹œë§Œ ê¸°ë‹¤ë ¤ì£¼ì„¸ìš”</div>
+                            <div className="text-4xl mb-4 animate-bounce">??</div>
+                            <div className="text-lg font-semibold text-green-600">ÆÄÀÏ ºĞ¼® Áß...</div>
+                            <div className="text-sm text-gray-500 mt-2">Àá½Ã¸¸ ±â´Ù·ÁÁÖ¼¼¿ä</div>
                           </div>
                         )}
-                        <div className="text-4xl mb-4">ğŸ“</div>
-                        <p className="text-gray-600 mb-2">ì—‘ì…€ ë˜ëŠ” CSV íŒŒì¼ì„ ë“œë˜ê·¸í•˜ê±°ë‚˜ í´ë¦­í•˜ì—¬ ì—…ë¡œë“œ</p>
-                        <p className="text-sm text-gray-400 mb-4">ì§€ì› í˜•ì‹: .xlsx, .xls, .csv</p>
+                        <div className="text-4xl mb-4">??</div>
+                        <p className="text-gray-600 mb-2">¿¢¼¿ ¶Ç´Â CSV ÆÄÀÏÀ» µå·¡±×ÇÏ°Å³ª Å¬¸¯ÇÏ¿© ¾÷·Îµå</p>
+                        <p className="text-sm text-gray-400 mb-4">Áö¿ø Çü½Ä: .xlsx, .xls, .csv</p>
                         <input
                           type="file"
                           accept=".xlsx,.xls,.csv"
@@ -3233,10 +3233,10 @@ const campaignData = {
                                   setFileTotalRows(data.totalRows);
                                   setFileId(data.fileId);
                                 } else {
-                                  alert(data.error || 'íŒŒì¼ ì²˜ë¦¬ ì‹¤íŒ¨');
+                                  alert(data.error || 'ÆÄÀÏ Ã³¸® ½ÇÆĞ');
                                 }
                               } catch (err) {
-                                alert('íŒŒì¼ ì—…ë¡œë“œ ì¤‘ ì˜¤ë¥˜ê°€ ë°œìƒí–ˆìŠµë‹ˆë‹¤.');
+                                alert('ÆÄÀÏ ¾÷·Îµå Áß ¿À·ù°¡ ¹ß»ıÇß½À´Ï´Ù.');
                               } finally {
                                 setFileUploading(false);
                               }
@@ -3249,14 +3249,14 @@ const campaignData = {
                           htmlFor="file-upload"
                           className={`inline-block px-6 py-3 text-white rounded-lg transition-colors ${fileUploading ? 'bg-gray-400 cursor-wait' : 'bg-green-600 cursor-pointer hover:bg-green-700'}`}
                         >
-                          {fileUploading ? 'â³ íŒŒì¼ ë¶„ì„ ì¤‘...' : 'íŒŒì¼ ì„ íƒ'}
+                          {fileUploading ? '? ÆÄÀÏ ºĞ¼® Áß...' : 'ÆÄÀÏ ¼±ÅÃ'}
                         </label>
                         <div className="mt-6 bg-gray-50 rounded-lg p-4 text-left">
-                          <h4 className="font-semibold text-gray-700 mb-2">ğŸ“‹ ì—…ë¡œë“œ ì•ˆë‚´</h4>
+                          <h4 className="font-semibold text-gray-700 mb-2">?? ¾÷·Îµå ¾È³»</h4>
                           <ul className="text-sm text-gray-600 space-y-1">
-                            <li>â€¢ ì²« ë²ˆì§¸ í–‰ì€ ì»¬ëŸ¼ëª…ìœ¼ë¡œ ì¸ì‹ë©ë‹ˆë‹¤</li>
-                            <li>â€¢ ì „í™”ë²ˆí˜¸ ì»¬ëŸ¼ì€ í•„ìˆ˜ì…ë‹ˆë‹¤</li>
-                            <li>â€¢ AIê°€ ìë™ìœ¼ë¡œ ì»¬ëŸ¼ì„ ë§¤í•‘í•©ë‹ˆë‹¤</li>
+                            <li>? Ã¹ ¹øÂ° ÇàÀº ÄÃ·³¸íÀ¸·Î ÀÎ½ÄµË´Ï´Ù</li>
+                            <li>? ÀüÈ­¹øÈ£ ÄÃ·³Àº ÇÊ¼öÀÔ´Ï´Ù</li>
+                            <li>? AI°¡ ÀÚµ¿À¸·Î ÄÃ·³À» ¸ÅÇÎÇÕ´Ï´Ù</li>
                           </ul>
                         </div>
                       </div>
@@ -3264,16 +3264,16 @@ const campaignData = {
                       <>
                         <div className="bg-green-50 border border-green-200 rounded-lg p-4 flex items-center justify-between">
                           <div className="flex items-center gap-3">
-                            <span className="text-2xl">ğŸ“„</span>
+                            <span className="text-2xl">??</span>
                             <div>
                               <div className="font-semibold text-gray-800">{uploadedFile?.name}</div>
-                              <div className="text-sm text-gray-500">ì´ {fileTotalRows.toLocaleString()}ê±´ì˜ ë°ì´í„°</div>
+                              <div className="text-sm text-gray-500">ÃÑ {fileTotalRows.toLocaleString()}°ÇÀÇ µ¥ÀÌÅÍ</div>
                             </div>
                           </div>
-                          <button onClick={() => { setUploadedFile(null); setFileHeaders([]); setFilePreview([]); setFileTotalRows(0); setFileId(''); }} className="text-gray-400 hover:text-red-500">âœ• ë‹¤ì‹œ ì„ íƒ</button>
+                          <button onClick={() => { setUploadedFile(null); setFileHeaders([]); setFilePreview([]); setFileTotalRows(0); setFileId(''); }} className="text-gray-400 hover:text-red-500">? ´Ù½Ã ¼±ÅÃ</button>
                         </div>
                         <div>
-                          <h4 className="font-semibold text-gray-700 mb-3">ğŸ“‹ ê°ì§€ëœ ì»¬ëŸ¼ ({fileHeaders.length}ê°œ)</h4>
+                          <h4 className="font-semibold text-gray-700 mb-3">?? °¨ÁöµÈ ÄÃ·³ ({fileHeaders.length}°³)</h4>
                           <div className="flex flex-wrap gap-2">
                             {fileHeaders.map((h, i) => (
                               <span key={i} className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm">{h}</span>
@@ -3281,7 +3281,7 @@ const campaignData = {
                           </div>
                         </div>
                         <div>
-                          <h4 className="font-semibold text-gray-700 mb-3">ğŸ‘€ ë°ì´í„° ë¯¸ë¦¬ë³´ê¸° (ìƒìœ„ 5ê±´)</h4>
+                          <h4 className="font-semibold text-gray-700 mb-3">?? µ¥ÀÌÅÍ ¹Ì¸®º¸±â (»óÀ§ 5°Ç)</h4>
                           <div className="overflow-x-auto border rounded-lg">
                             <table className="w-full text-sm">
                               <thead className="bg-gray-50">
@@ -3317,10 +3317,10 @@ const campaignData = {
                                 setColumnMapping(data.mapping);
                                 setMappingStep('mapping');
                               } else {
-                                alert(data.error || 'ë§¤í•‘ ì‹¤íŒ¨');
+                                alert(data.error || '¸ÅÇÎ ½ÇÆĞ');
                               }
                             } catch (err) {
-                              alert('ë§¤í•‘ ì¤‘ ì˜¤ë¥˜ê°€ ë°œìƒí–ˆìŠµë‹ˆë‹¤.');
+                              alert('¸ÅÇÎ Áß ¿À·ù°¡ ¹ß»ıÇß½À´Ï´Ù.');
                             } finally {
                               setFileUploading(false);
                             }
@@ -3328,7 +3328,7 @@ const campaignData = {
                           disabled={fileUploading}
                           className="w-full py-4 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-lg font-medium hover:from-green-700 hover:to-emerald-700 flex items-center justify-center gap-2 text-lg disabled:opacity-50"
                         >
-                          {fileUploading ? (<><span className="animate-spin">â³</span>AIê°€ ì»¬ëŸ¼ì„ ë¶„ì„í•˜ê³  ìˆìŠµë‹ˆë‹¤...</>) : (<><span>ğŸ¤–</span>AI ìë™ ë§¤í•‘ ì‹œì‘</>)}
+                          {fileUploading ? (<><span className="animate-spin">?</span>AI°¡ ÄÃ·³À» ºĞ¼®ÇÏ°í ÀÖ½À´Ï´Ù...</>) : (<><span>??</span>AI ÀÚµ¿ ¸ÅÇÎ ½ÃÀÛ</>)}
                         </button>
                       </>
                     )}
@@ -3336,50 +3336,50 @@ const campaignData = {
                 </>
               )}
 
-              {/* Step 2: AI ë§¤í•‘ ê²°ê³¼ */}
+              {/* Step 2: AI ¸ÅÇÎ °á°ú */}
               {mappingStep === 'mapping' && (
                 <>
                   <div className="p-4 border-b bg-green-50 flex justify-between items-center">
                     <h3 className="font-bold text-lg flex items-center gap-2">
-                      <span>ğŸ¤–</span> AI ë§¤í•‘ ê²°ê³¼
+                      <span>??</span> AI ¸ÅÇÎ °á°ú
                     </h3>
-                    <button onClick={() => { setShowFileUpload(false); setUploadedFile(null); setFileHeaders([]); setFilePreview([]); setFileTotalRows(0); setFileId(''); setMappingStep('upload'); setColumnMapping({}); }} className="text-gray-500 hover:text-gray-700 text-xl">âœ•</button>
+                    <button onClick={() => { setShowFileUpload(false); setUploadedFile(null); setFileHeaders([]); setFilePreview([]); setFileTotalRows(0); setFileId(''); setMappingStep('upload'); setColumnMapping({}); }} className="text-gray-500 hover:text-gray-700 text-xl">?</button>
                   </div>
                   <div className="p-6 space-y-6 overflow-y-auto max-h-[80vh]">
                   <div className="bg-green-50 border border-green-200 rounded-lg p-4 flex items-center justify-center gap-3">
-                      <span className="text-2xl">ğŸ“„</span>
+                      <span className="text-2xl">??</span>
                       <div className="text-center">
                         <div className="font-semibold text-gray-800">{uploadedFile?.name}</div>
-                        <div className="text-sm text-gray-500">ì´ {fileTotalRows.toLocaleString()}ê±´ì˜ ë°ì´í„°</div>
+                        <div className="text-sm text-gray-500">ÃÑ {fileTotalRows.toLocaleString()}°ÇÀÇ µ¥ÀÌÅÍ</div>
                       </div>
                     </div>
                     <div>
-                      <h4 className="font-semibold text-gray-700 mb-3">ğŸ“‹ ì»¬ëŸ¼ ë§¤í•‘ (ìˆ˜ì • ê°€ëŠ¥)</h4>
+                      <h4 className="font-semibold text-gray-700 mb-3">?? ÄÃ·³ ¸ÅÇÎ (¼öÁ¤ °¡´É)</h4>
                       <div className="space-y-2 max-h-[400px] overflow-y-auto">
                         {Object.entries(columnMapping).map(([header, dbCol]) => (
                           <div key={header} className="grid grid-cols-[1fr_40px_1fr] items-center p-3 bg-white rounded-lg border gap-2">
                           <span className="text-sm font-medium text-gray-700">{header}</span>
-                          <span className="text-gray-400 text-center">â†’</span>
+                          <span className="text-gray-400 text-center">¡æ</span>
                           <select
                             value={dbCol || ''}
                             onChange={(e) => setColumnMapping({...columnMapping, [header]: e.target.value || null})}
                             className={`px-3 py-2 rounded-lg border text-sm w-full ${dbCol ? 'bg-green-50 border-green-300' : 'bg-gray-50 border-gray-300'}`}
                           >
-                              <option value="">ë§¤í•‘ ì•ˆí•¨</option>
-                              <option value="phone">ğŸ“± ì „í™”ë²ˆí˜¸</option>
-                              <option value="name">ğŸ‘¤ ì´ë¦„</option>
-                              <option value="gender">âš§ ì„±ë³„</option>
-                              <option value="birth_year">ğŸ‚ ì¶œìƒì—°ë„</option>
-                              <option value="birth_month_day">ğŸ ìƒì¼(ì›”-ì¼)</option>
-                              <option value="birth_date">ğŸ“… ìƒë…„ì›”ì¼ ì „ì²´</option>
-                              <option value="grade">â­ ë“±ê¸‰</option>
-                              <option value="region">ğŸ“ ì§€ì—­</option>
-                              <option value="sms_opt_in">âœ… ìˆ˜ì‹ ë™ì˜</option>
-                              <option value="email">ğŸ“§ ì´ë©”ì¼</option>
-                              <option value="total_purchase">ğŸ’° ì´êµ¬ë§¤ì•¡</option>
-                              <option value="last_purchase_date">ğŸ“… ìµœê·¼êµ¬ë§¤ì¼</option>
-                              <option value="purchase_count">ğŸ›’ êµ¬ë§¤íšŸìˆ˜</option>
-                              <option value="callback">ğŸ“ íšŒì‹ ë²ˆí˜¸(ë§¤ì¥ë²ˆí˜¸)</option>
+                              <option value="">¸ÅÇÎ ¾ÈÇÔ</option>
+                              <option value="phone">?? ÀüÈ­¹øÈ£</option>
+                              <option value="name">?? ÀÌ¸§</option>
+                              <option value="gender">? ¼ºº°</option>
+                              <option value="birth_year">?? Ãâ»ı¿¬µµ</option>
+                              <option value="birth_month_day">?? »ıÀÏ(¿ù-ÀÏ)</option>
+                              <option value="birth_date">?? »ı³â¿ùÀÏ ÀüÃ¼</option>
+                              <option value="grade">? µî±Ş</option>
+                              <option value="region">?? Áö¿ª</option>
+                              <option value="sms_opt_in">? ¼ö½Åµ¿ÀÇ</option>
+                              <option value="email">?? ÀÌ¸ŞÀÏ</option>
+                              <option value="total_purchase">?? ÃÑ±¸¸Å¾×</option>
+                              <option value="last_purchase_date">?? ÃÖ±Ù±¸¸ÅÀÏ</option>
+                              <option value="purchase_count">?? ±¸¸ÅÈ½¼ö</option>
+                              <option value="callback">?? È¸½Å¹øÈ£(¸ÅÀå¹øÈ£)</option>
                             </select>
                           </div>
                         ))}
@@ -3387,17 +3387,17 @@ const campaignData = {
                     </div>
                     {!Object.values(columnMapping).includes('phone') && (
                       <div className="p-4 bg-red-50 border border-red-200 rounded-lg text-red-600 flex items-center gap-2">
-                        <span>âš ï¸</span>
-                        <span>ì „í™”ë²ˆí˜¸ ì»¬ëŸ¼ì„ ë§¤í•‘í•´ì£¼ì„¸ìš” (í•„ìˆ˜)</span>
+                        <span>??</span>
+                        <span>ÀüÈ­¹øÈ£ ÄÃ·³À» ¸ÅÇÎÇØÁÖ¼¼¿ä (ÇÊ¼ö)</span>
                       </div>
                     )}
                     <div className="flex gap-3">
-                      <button onClick={() => setMappingStep('upload')} className="flex-1 py-3 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50">â† ì´ì „</button>
+                      <button onClick={() => setMappingStep('upload')} className="flex-1 py-3 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50">¡ç ÀÌÀü</button>
                       <button
                         onClick={async () => {
                           setUploadProgress({ total: 0, processed: 0, percent: 0 });
                           
-                          // ì§„í–‰ë¥  í´ë§ ì‹œì‘
+                          // ÁøÇà·ü Æú¸µ ½ÃÀÛ
                           const progressInterval = setInterval(async () => {
                             try {
                               const pRes = await fetch(`/api/upload/progress/${fileId}`);
@@ -3439,12 +3439,12 @@ const campaignData = {
                                 setShowPlanLimitError(true);
                                 setShowFileUpload(false);
                               } else {
-                                alert(data.error || 'ì €ì¥ ì‹¤íŒ¨');
+                                alert(data.error || 'ÀúÀå ½ÇÆĞ');
                               }
                             }
                           } catch (err) {
                             clearInterval(progressInterval);
-                            alert('ì €ì¥ ì¤‘ ì˜¤ë¥˜ê°€ ë°œìƒí–ˆìŠµë‹ˆë‹¤.');
+                            alert('ÀúÀå Áß ¿À·ù°¡ ¹ß»ıÇß½À´Ï´Ù.');
                           } finally {
                             setFileUploading(false);
                           }
@@ -3454,13 +3454,13 @@ const campaignData = {
                       >
                         {fileUploading ? (
                           <>
-                            <span className="animate-spin">â³</span>
-                            ì €ì¥ ì¤‘... {uploadProgress.percent > 0 ? `${uploadProgress.percent}%` : 'ì¤€ë¹„ ì¤‘'}
+                            <span className="animate-spin">?</span>
+                            ÀúÀå Áß... {uploadProgress.percent > 0 ? `${uploadProgress.percent}%` : 'ÁØºñ Áß'}
                           </>
                         ) : (
                           <>
-                            <span>ğŸ’¾</span>
-                            ê³ ê° ë°ì´í„° ì €ì¥ ({fileTotalRows.toLocaleString()}ê±´)
+                            <span>??</span>
+                            °í°´ µ¥ÀÌÅÍ ÀúÀå ({fileTotalRows.toLocaleString()}°Ç)
                           </>
                         )}
                       </button>
@@ -3472,89 +3472,89 @@ const campaignData = {
             </div>
           </div>
         )}
-        {/* ê³ ê° ì¸ì‚¬ì´íŠ¸ ëª¨ë‹¬ */}
+        {/* °í°´ ÀÎ»çÀÌÆ® ¸ğ´Ş */}
         {showInsights && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
             <div className="bg-white rounded-xl shadow-2xl w-[800px] max-h-[90vh] overflow-hidden">
               <div className="p-4 border-b bg-green-50 flex justify-between items-center">
-                <h3 className="font-bold text-lg">ğŸ‘¥ ê³ ê° ì¸ì‚¬ì´íŠ¸</h3>
-                <button onClick={() => setShowInsights(false)} className="text-gray-500 hover:text-gray-700 text-xl">âœ•</button>
+                <h3 className="font-bold text-lg">?? °í°´ ÀÎ»çÀÌÆ®</h3>
+                <button onClick={() => setShowInsights(false)} className="text-gray-500 hover:text-gray-700 text-xl">?</button>
               </div>
               <div className="p-6 overflow-y-auto max-h-[80vh] space-y-6">
-                {/* ì „ì²´ ê³ ê° */}
+                {/* ÀüÃ¼ °í°´ */}
                 <div className="p-6 bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl text-center">
-                  <div className="text-sm text-gray-500 mb-2">ì „ì²´ ê³ ê°</div>
-                  <div className="text-4xl font-bold text-gray-800">{parseInt(stats?.total || '0').toLocaleString()}ëª…</div>
-                  <div className="text-sm text-green-600 mt-2">ìˆ˜ì‹ ë™ì˜: {parseInt(stats?.sms_opt_in_count || '0').toLocaleString()}ëª…</div>
+                  <div className="text-sm text-gray-500 mb-2">ÀüÃ¼ °í°´</div>
+                  <div className="text-4xl font-bold text-gray-800">{parseInt(stats?.total || '0').toLocaleString()}¸í</div>
+                  <div className="text-sm text-green-600 mt-2">¼ö½Åµ¿ÀÇ: {parseInt(stats?.sms_opt_in_count || '0').toLocaleString()}¸í</div>
                 </div>
 
-                {/* ì„±ë³„ë³„ í˜„í™© */}
+                {/* ¼ºº°º° ÇöÈ² */}
                 <div>
-                  <div className="text-sm font-semibold text-gray-700 mb-3">ì„±ë³„ë³„ í˜„í™©</div>
+                  <div className="text-sm font-semibold text-gray-700 mb-3">¼ºº°º° ÇöÈ²</div>
                   <div className="grid grid-cols-2 gap-4">
                     <div className="p-4 bg-blue-50 rounded-lg text-center">
-                      <div className="text-2xl mb-2">ğŸ‘¨</div>
-                      <div className="text-2xl font-bold text-blue-600">{parseInt(stats?.male_count || '0').toLocaleString()}ëª…</div>
-                      <div className="text-xs text-gray-500 mt-1">ë‚¨ì„±</div>
+                      <div className="text-2xl mb-2">??</div>
+                      <div className="text-2xl font-bold text-blue-600">{parseInt(stats?.male_count || '0').toLocaleString()}¸í</div>
+                      <div className="text-xs text-gray-500 mt-1">³²¼º</div>
                     </div>
                     <div className="p-4 bg-pink-50 rounded-lg text-center">
-                      <div className="text-2xl mb-2">ğŸ‘©</div>
-                      <div className="text-2xl font-bold text-pink-600">{parseInt(stats?.female_count || '0').toLocaleString()}ëª…</div>
-                      <div className="text-xs text-gray-500 mt-1">ì—¬ì„±</div>
+                      <div className="text-2xl mb-2">??</div>
+                      <div className="text-2xl font-bold text-pink-600">{parseInt(stats?.female_count || '0').toLocaleString()}¸í</div>
+                      <div className="text-xs text-gray-500 mt-1">¿©¼º</div>
                     </div>
                   </div>
                 </div>
 
-                {/* ì—°ë ¹ëŒ€ë³„ ê³ ê°ë¶„í¬ */}
+                {/* ¿¬·É´ëº° °í°´ºĞÆ÷ */}
                 <div>
-                  <div className="text-sm font-semibold text-gray-700 mb-3">ì—°ë ¹ëŒ€ë³„ ê³ ê°ë¶„í¬</div>
+                  <div className="text-sm font-semibold text-gray-700 mb-3">¿¬·É´ëº° °í°´ºĞÆ÷</div>
                   <div className="space-y-3">
                     <div className="grid grid-cols-2 gap-4">
                       <div className="p-4 bg-purple-50 rounded-lg text-center">
-                        <div className="text-2xl font-bold text-purple-600">{parseInt(stats?.age_under20 || '0').toLocaleString()}ëª…</div>
-                        <div className="text-xs text-gray-500 mt-1">~19ì„¸</div>
+                        <div className="text-2xl font-bold text-purple-600">{parseInt(stats?.age_under20 || '0').toLocaleString()}¸í</div>
+                        <div className="text-xs text-gray-500 mt-1">~19¼¼</div>
                       </div>
                       <div className="p-4 bg-indigo-50 rounded-lg text-center">
-                        <div className="text-2xl font-bold text-indigo-600">{parseInt(stats?.age_20s || '0').toLocaleString()}ëª…</div>
-                        <div className="text-xs text-gray-500 mt-1">20ëŒ€</div>
+                        <div className="text-2xl font-bold text-indigo-600">{parseInt(stats?.age_20s || '0').toLocaleString()}¸í</div>
+                        <div className="text-xs text-gray-500 mt-1">20´ë</div>
                       </div>
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                       <div className="p-4 bg-cyan-50 rounded-lg text-center">
-                        <div className="text-2xl font-bold text-cyan-600">{parseInt(stats?.age_30s || '0').toLocaleString()}ëª…</div>
-                        <div className="text-xs text-gray-500 mt-1">30ëŒ€</div>
+                        <div className="text-2xl font-bold text-cyan-600">{parseInt(stats?.age_30s || '0').toLocaleString()}¸í</div>
+                        <div className="text-xs text-gray-500 mt-1">30´ë</div>
                       </div>
                       <div className="p-4 bg-teal-50 rounded-lg text-center">
-                        <div className="text-2xl font-bold text-teal-600">{parseInt(stats?.age_40s || '0').toLocaleString()}ëª…</div>
-                        <div className="text-xs text-gray-500 mt-1">40ëŒ€</div>
+                        <div className="text-2xl font-bold text-teal-600">{parseInt(stats?.age_40s || '0').toLocaleString()}¸í</div>
+                        <div className="text-xs text-gray-500 mt-1">40´ë</div>
                       </div>
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                       <div className="p-4 bg-orange-50 rounded-lg text-center">
-                        <div className="text-2xl font-bold text-orange-600">{parseInt(stats?.age_50s || '0').toLocaleString()}ëª…</div>
-                        <div className="text-xs text-gray-500 mt-1">50ëŒ€</div>
+                        <div className="text-2xl font-bold text-orange-600">{parseInt(stats?.age_50s || '0').toLocaleString()}¸í</div>
+                        <div className="text-xs text-gray-500 mt-1">50´ë</div>
                       </div>
                       <div className="p-4 bg-red-50 rounded-lg text-center">
-                        <div className="text-2xl font-bold text-red-600">{parseInt(stats?.age_60plus || '0').toLocaleString()}ëª…</div>
-                        <div className="text-xs text-gray-500 mt-1">60ëŒ€ ì´ìƒ</div>
+                        <div className="text-2xl font-bold text-red-600">{parseInt(stats?.age_60plus || '0').toLocaleString()}¸í</div>
+                        <div className="text-xs text-gray-500 mt-1">60´ë ÀÌ»ó</div>
                       </div>
                     </div>
                   </div>
                 </div>
 
-                {/* ê³ ê°ë“±ê¸‰ë³„ í˜„í™© */}
+                {/* °í°´µî±Şº° ÇöÈ² */}
                 <div>
-                  <div className="text-sm font-semibold text-gray-700 mb-3">ê³ ê°ë“±ê¸‰ë³„ í˜„í™©</div>
+                  <div className="text-sm font-semibold text-gray-700 mb-3">°í°´µî±Şº° ÇöÈ²</div>
                   <div className="grid grid-cols-2 gap-4">
                     <div className="p-4 bg-yellow-50 rounded-lg text-center">
-                      <div className="text-2xl mb-2">â­</div>
-                      <div className="text-2xl font-bold text-yellow-600">{parseInt(stats?.vip_count || '0').toLocaleString()}ëª…</div>
+                      <div className="text-2xl mb-2">?</div>
+                      <div className="text-2xl font-bold text-yellow-600">{parseInt(stats?.vip_count || '0').toLocaleString()}¸í</div>
                       <div className="text-xs text-gray-500 mt-1">VIP</div>
                     </div>
                     <div className="p-4 bg-gray-100 rounded-lg text-center">
-                      <div className="text-2xl mb-2">ğŸ‘¤</div>
-                      <div className="text-2xl font-bold text-gray-600">{(parseInt(stats?.total || '0') - parseInt(stats?.vip_count || '0')).toLocaleString()}ëª…</div>
-                      <div className="text-xs text-gray-500 mt-1">ì¼ë°˜</div>
+                      <div className="text-2xl mb-2">??</div>
+                      <div className="text-2xl font-bold text-gray-600">{(parseInt(stats?.total || '0') - parseInt(stats?.vip_count || '0')).toLocaleString()}¸í</div>
+                      <div className="text-xs text-gray-500 mt-1">ÀÏ¹İ</div>
                     </div>
                   </div>
                 </div>
@@ -3563,72 +3563,72 @@ const campaignData = {
           </div>
         )}
 
-        {/* ì˜¤ëŠ˜ì˜ í†µê³„ ëª¨ë‹¬ */}
+        {/* ¿À´ÃÀÇ Åë°è ¸ğ´Ş */}
         {showTodayStats && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
             <div className="bg-white rounded-xl shadow-2xl w-[800px] max-h-[85vh] overflow-hidden">
               <div className="p-4 border-b bg-orange-50 flex justify-between items-center">
-                <h3 className="font-bold text-lg">ğŸ“ˆ ì´ë²ˆ ë‹¬ í†µê³„</h3>
-                <button onClick={() => setShowTodayStats(false)} className="text-gray-500 hover:text-gray-700 text-xl">âœ•</button>
+                <h3 className="font-bold text-lg">?? ÀÌ¹ø ´Ş Åë°è</h3>
+                <button onClick={() => setShowTodayStats(false)} className="text-gray-500 hover:text-gray-700 text-xl">?</button>
               </div>
               <div className="p-6 overflow-y-auto max-h-[70vh] space-y-6">
-                {/* ìƒë‹¨ ìš”ì•½ ì¹´ë“œ */}
+                {/* »ó´Ü ¿ä¾à Ä«µå */}
                 <div className="grid grid-cols-2 gap-4">
                   <div className="p-6 bg-gradient-to-br from-orange-50 to-yellow-50 rounded-xl text-center">
-                    <div className="text-sm text-gray-500 mb-2">ì´ë²ˆ ë‹¬ ì´ ë°œì†¡</div>
-                    <div className="text-4xl font-bold text-orange-600">{(stats?.monthly_sent || 0).toLocaleString()}ê±´</div>
+                    <div className="text-sm text-gray-500 mb-2">ÀÌ¹ø ´Ş ÃÑ ¹ß¼Û</div>
+                    <div className="text-4xl font-bold text-orange-600">{(stats?.monthly_sent || 0).toLocaleString()}°Ç</div>
                   </div>
                   <div className="p-6 bg-gradient-to-br from-green-50 to-emerald-50 rounded-xl text-center">
-                    <div className="text-sm text-gray-500 mb-2">ì´ë²ˆ ë‹¬ ì‚¬ìš©ê¸ˆì•¡</div>
-                    <div className="text-4xl font-bold text-green-600">{(stats?.monthly_cost || 0).toLocaleString()}ì›</div>
-                    <div className="text-xs text-gray-400 mt-1">ì˜ˆì‚°: {(stats?.monthly_budget || 0).toLocaleString()}ì›</div>
+                    <div className="text-sm text-gray-500 mb-2">ÀÌ¹ø ´Ş »ç¿ë±İ¾×</div>
+                    <div className="text-4xl font-bold text-green-600">{(stats?.monthly_cost || 0).toLocaleString()}¿ø</div>
+                    <div className="text-xs text-gray-400 mt-1">¿¹»ê: {(stats?.monthly_budget || 0).toLocaleString()}¿ø</div>
                   </div>
                 </div>
 
-                {/* ìƒì„¸ ì§€í‘œ */}
+                {/* »ó¼¼ ÁöÇ¥ */}
                 <div className="grid grid-cols-2 gap-4">
                   <div className="p-4 bg-blue-50 rounded-lg text-center">
-                    <div className="text-2xl mb-2">âœ…</div>
+                    <div className="text-2xl mb-2">?</div>
                     <div className="text-2xl font-bold text-blue-600">{stats?.success_rate || '0'}%</div>
-                    <div className="text-xs text-gray-500">í‰ê·  ì„±ê³µë¥ </div>
+                    <div className="text-xs text-gray-500">Æò±Õ ¼º°ø·ü</div>
                   </div>
                   <div className="p-4 bg-purple-50 rounded-lg text-center">
-                    <div className="text-2xl mb-2">ğŸ“Š</div>
-                    <div className="text-2xl font-bold text-purple-600">{recentCampaigns.length}ê±´</div>
-                    <div className="text-xs text-gray-500">ì§„í–‰ëœ ìº í˜ì¸</div>
+                    <div className="text-2xl mb-2">??</div>
+                    <div className="text-2xl font-bold text-purple-600">{recentCampaigns.length}°Ç</div>
+                    <div className="text-xs text-gray-500">ÁøÇàµÈ Ä·ÆäÀÎ</div>
                   </div>
                 </div>
 
-                {/* ì±„ë„ë³„ í†µê³„ */}
+                {/* Ã¤³Îº° Åë°è */}
                 <div>
-                  <div className="text-sm font-semibold text-gray-700 mb-3">ì±„ë„ë³„ ë°œì†¡</div>
+                  <div className="text-sm font-semibold text-gray-700 mb-3">Ã¤³Îº° ¹ß¼Û</div>
                   <div className="space-y-2">
                     <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                      <span className="font-medium">ğŸ“± SMS</span>
+                      <span className="font-medium">?? SMS</span>
                       <div className="text-right">
-                        <span className="font-bold text-gray-700">{(stats?.sms_sent || 0).toLocaleString()}ê±´</span>
-                        <span className="text-xs text-gray-400 ml-2">(@{stats?.cost_per_sms || 9.9}ì›)</span>
+                        <span className="font-bold text-gray-700">{(stats?.sms_sent || 0).toLocaleString()}°Ç</span>
+                        <span className="text-xs text-gray-400 ml-2">(@{stats?.cost_per_sms || 9.9}¿ø)</span>
                       </div>
                     </div>
                     <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                      <span className="font-medium">ğŸ“¨ LMS</span>
+                      <span className="font-medium">?? LMS</span>
                       <div className="text-right">
-                        <span className="font-bold text-gray-700">{(stats?.lms_sent || 0).toLocaleString()}ê±´</span>
-                        <span className="text-xs text-gray-400 ml-2">(@{stats?.cost_per_lms || 27}ì›)</span>
+                        <span className="font-bold text-gray-700">{(stats?.lms_sent || 0).toLocaleString()}°Ç</span>
+                        <span className="text-xs text-gray-400 ml-2">(@{stats?.cost_per_lms || 27}¿ø)</span>
                       </div>
                     </div>
                     <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                      <span className="font-medium">ğŸ–¼ï¸ MMS</span>
+                      <span className="font-medium">??? MMS</span>
                       <div className="text-right">
-                        <span className="font-bold text-gray-700">{(stats?.mms_sent || 0).toLocaleString()}ê±´</span>
-                        <span className="text-xs text-gray-400 ml-2">(@{stats?.cost_per_mms || 50}ì›)</span>
+                        <span className="font-bold text-gray-700">{(stats?.mms_sent || 0).toLocaleString()}°Ç</span>
+                        <span className="text-xs text-gray-400 ml-2">(@{stats?.cost_per_mms || 50}¿ø)</span>
                       </div>
                     </div>
                     <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                      <span className="font-medium">ğŸ’¬ ì¹´ì¹´ì˜¤í†¡</span>
+                      <span className="font-medium">?? Ä«Ä«¿ÀÅå</span>
                       <div className="text-right">
-                        <span className="font-bold text-gray-700">{(stats?.kakao_sent || 0).toLocaleString()}ê±´</span>
-                        <span className="text-xs text-gray-400 ml-2">(@{stats?.cost_per_kakao || 7.5}ì›)</span>
+                        <span className="font-bold text-gray-700">{(stats?.kakao_sent || 0).toLocaleString()}°Ç</span>
+                        <span className="text-xs text-gray-400 ml-2">(@{stats?.cost_per_kakao || 7.5}¿ø)</span>
                       </div>
                     </div>
                   </div>
@@ -3637,76 +3637,76 @@ const campaignData = {
             </div>
           </div>
         )}
-{/* ì—…ë¡œë“œ ê²°ê³¼ ëª¨ë‹¬ */}
+{/* ¾÷·Îµå °á°ú ¸ğ´Ş */}
 {showUploadResult && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl p-8 max-w-md w-full mx-4 shadow-2xl">
             <div className="text-center">
-              <div className="text-6xl mb-4">ğŸ‰</div>
-              <h3 className="text-2xl font-bold text-gray-800 mb-4">ì €ì¥ ì™„ë£Œ!</h3>
+              <div className="text-6xl mb-4">??</div>
+              <h3 className="text-2xl font-bold text-gray-800 mb-4">ÀúÀå ¿Ï·á!</h3>
               <div className="bg-gray-50 rounded-xl p-4 mb-6">
                 <div className="flex justify-between py-2 border-b border-gray-200">
-                  <span className="text-gray-600">ì‹ ê·œ ì¶”ê°€</span>
-                  <span className="font-bold text-blue-600">{uploadResult.insertCount.toLocaleString()}ê±´</span>
+                  <span className="text-gray-600">½Å±Ô Ãß°¡</span>
+                  <span className="font-bold text-blue-600">{uploadResult.insertCount.toLocaleString()}°Ç</span>
                 </div>
                 <div className="flex justify-between py-2">
-                  <span className="text-gray-600">ì—…ë°ì´íŠ¸</span>
-                  <span className="font-bold text-green-600">{uploadResult.duplicateCount.toLocaleString()}ê±´</span>
+                  <span className="text-gray-600">¾÷µ¥ÀÌÆ®</span>
+                  <span className="font-bold text-green-600">{uploadResult.duplicateCount.toLocaleString()}°Ç</span>
                 </div>
               </div>
               <button
                 onClick={() => { setShowUploadResult(false); window.location.reload(); }}
                 className="w-full py-3 bg-green-700 text-white rounded-xl font-medium hover:bg-green-800"
               >
-                í™•ì¸
+                È®ÀÎ
               </button>
             </div>
           </div>
         </div>
       )}
       
-      {/* í”Œëœ ì´ˆê³¼ ì—ëŸ¬ ëª¨ë‹¬ */}
+      {/* ÇÃ·£ ÃÊ°ú ¿¡·¯ ¸ğ´Ş */}
       {showPlanLimitError && planLimitInfo && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
             <div className="p-6 bg-gradient-to-r from-red-50 to-orange-50 border-b">
               <div className="text-center">
-                <div className="text-5xl mb-3">âš ï¸</div>
-                <h3 className="text-xl font-bold text-gray-800">ê³ ê° DB í•œë„ ì´ˆê³¼</h3>
+                <div className="text-5xl mb-3">??</div>
+                <h3 className="text-xl font-bold text-gray-800">°í°´ DB ÇÑµµ ÃÊ°ú</h3>
               </div>
             </div>
             <div className="p-6">
               <div className="bg-gray-50 rounded-xl p-4 mb-4 space-y-3">
                 <div className="flex justify-between">
-                  <span className="text-gray-600">í˜„ì¬ í”Œëœ</span>
+                  <span className="text-gray-600">ÇöÀç ÇÃ·£</span>
                   <span className="font-semibold text-gray-800">{planLimitInfo.planName}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-gray-600">ìµœëŒ€ ê³ ê° ìˆ˜</span>
-                  <span className="font-semibold text-gray-800">{Number(planLimitInfo.maxCustomers).toLocaleString()}ëª…</span>
+                  <span className="text-gray-600">ÃÖ´ë °í°´ ¼ö</span>
+                  <span className="font-semibold text-gray-800">{Number(planLimitInfo.maxCustomers).toLocaleString()}¸í</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-gray-600">í˜„ì¬ ê³ ê° ìˆ˜</span>
-                  <span className="font-semibold text-blue-600">{Number(planLimitInfo.currentCount).toLocaleString()}ëª…</span>
+                  <span className="text-gray-600">ÇöÀç °í°´ ¼ö</span>
+                  <span className="font-semibold text-blue-600">{Number(planLimitInfo.currentCount).toLocaleString()}¸í</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-gray-600">ì—…ë¡œë“œ ì‹œë„</span>
-                  <span className="font-semibold text-orange-600">+{Number(planLimitInfo.requestedCount).toLocaleString()}ëª…</span>
+                  <span className="text-gray-600">¾÷·Îµå ½Ãµµ</span>
+                  <span className="font-semibold text-orange-600">+{Number(planLimitInfo.requestedCount).toLocaleString()}¸í</span>
                 </div>
                 <div className="border-t pt-3 flex justify-between">
-                  <span className="text-gray-600">ì¶”ê°€ ê°€ëŠ¥</span>
-                  <span className="font-bold text-red-600">{Number(planLimitInfo.availableCount).toLocaleString()}ëª…</span>
+                  <span className="text-gray-600">Ãß°¡ °¡´É</span>
+                  <span className="font-bold text-red-600">{Number(planLimitInfo.availableCount).toLocaleString()}¸í</span>
                 </div>
               </div>
               <p className="text-sm text-gray-600 text-center mb-4">
-                í”Œëœì„ ì—…ê·¸ë ˆì´ë“œí•˜ì‹œë©´ ë” ë§ì€ ê³ ê°ì„ ê´€ë¦¬í•  ìˆ˜ ìˆìŠµë‹ˆë‹¤.
+                ÇÃ·£À» ¾÷±×·¹ÀÌµåÇÏ½Ã¸é ´õ ¸¹Àº °í°´À» °ü¸®ÇÒ ¼ö ÀÖ½À´Ï´Ù.
               </p>
               <div className="flex gap-3">
                 <button
                   onClick={() => setShowPlanLimitError(false)}
                   className="flex-1 py-3 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50"
                 >
-                  ë‹«ê¸°
+                  ´İ±â
                 </button>
                 <button
                   onClick={() => {
@@ -3715,7 +3715,7 @@ const campaignData = {
                   }}
                   className="flex-1 py-3 bg-green-700 text-white rounded-lg font-medium hover:bg-green-800"
                 >
-                  ìš”ê¸ˆì œ ì•ˆë‚´
+                  ¿ä±İÁ¦ ¾È³»
                 </button>
               </div>
             </div>
@@ -3723,16 +3723,16 @@ const campaignData = {
         </div>
       )}
 
-        {/* ì˜ˆì•½ ëŒ€ê¸° ëª¨ë‹¬ */}
+        {/* ¿¹¾à ´ë±â ¸ğ´Ş */}
         {showScheduled && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
             <div className="bg-white rounded-xl shadow-2xl w-[900px] max-h-[85vh] overflow-hidden">
               <div className="p-4 border-b bg-red-50 flex justify-between items-center">
-                <h3 className="font-bold text-lg">â° ì˜ˆì•½ ëŒ€ê¸° {scheduledCampaigns.length > 0 && `(${scheduledCampaigns.length}ê±´)`}</h3>
-                <button onClick={() => { setShowScheduled(false); setSelectedScheduled(null); }} className="text-gray-500 hover:text-gray-700 text-xl">âœ•</button>
+                <h3 className="font-bold text-lg">? ¿¹¾à ´ë±â {scheduledCampaigns.length > 0 && `(${scheduledCampaigns.length}°Ç)`}</h3>
+                <button onClick={() => { setShowScheduled(false); setSelectedScheduled(null); }} className="text-gray-500 hover:text-gray-700 text-xl">?</button>
               </div>
               <div className="flex h-[70vh]">
-                {/* ì¢Œì¸¡: ìº í˜ì¸ ëª©ë¡ */}
+                {/* ÁÂÃø: Ä·ÆäÀÎ ¸ñ·Ï */}
                 <div className="w-[320px] border-r overflow-y-auto p-3 space-y-2">
                   {scheduledCampaigns.length > 0 ? (
                     scheduledCampaigns.map((c: any) => (
@@ -3763,29 +3763,29 @@ const campaignData = {
                       >
                         <div className="font-semibold text-gray-800 text-sm truncate">{c.campaign_name}</div>
                         <div className="text-xs text-gray-500 mt-1">
-                          ğŸ“± {c.message_type} Â· ğŸ‘¥ {c.target_count?.toLocaleString()}ëª…
+                          ?? {c.message_type} ¡¤ ?? {c.target_count?.toLocaleString()}¸í
                         </div>
                         <div className="text-xs text-blue-600 mt-1">
-                          â° {c.scheduled_at ? new Date(c.scheduled_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-'}
+                          ? {c.scheduled_at ? new Date(c.scheduled_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-'}
                         </div>
                       </div>
                     ))
                   ) : (
-                    <p className="text-gray-500 text-center py-8 text-sm">ì˜ˆì•½ëœ ìº í˜ì¸ì´ ì—†ìŠµë‹ˆë‹¤</p>
+                    <p className="text-gray-500 text-center py-8 text-sm">¿¹¾àµÈ Ä·ÆäÀÎÀÌ ¾ø½À´Ï´Ù</p>
                   )}
                 </div>
                 
-                {/* ìš°ì¸¡: ìƒì„¸ & ìˆ˜ì‹ ì */}
+                {/* ¿ìÃø: »ó¼¼ & ¼ö½ÅÀÚ */}
                 <div className="flex-1 flex flex-col">
                   {selectedScheduled ? (
                     <>
-                      {/* ìƒë‹¨: ìº í˜ì¸ ì •ë³´ */}
+                      {/* »ó´Ü: Ä·ÆäÀÎ Á¤º¸ */}
                       <div className="p-4 border-b bg-gray-50">
                       <div className="flex justify-between items-start mb-3">
                           <div>
                             <div className="font-bold text-lg">{selectedScheduled.campaign_name}</div>
                             <div className="text-sm text-gray-500 mt-1">
-                              {selectedScheduled.message_type} Â· {selectedScheduled.target_count?.toLocaleString()}ëª…
+                              {selectedScheduled.message_type} ¡¤ {selectedScheduled.target_count?.toLocaleString()}¸í
                             </div>
                           </div>
                           <div className="flex gap-2">
@@ -3798,12 +3798,12 @@ const campaignData = {
                                 });
                                 const data = await res.json();
                                 if (data.success) {
-                                  setToast({ show: true, type: 'success', message: 'ì˜ˆì•½ì´ ì·¨ì†Œë˜ì—ˆìŠµë‹ˆë‹¤' });
+                                  setToast({ show: true, type: 'success', message: '¿¹¾àÀÌ Ãë¼ÒµÇ¾ú½À´Ï´Ù' });
                                   setTimeout(() => setToast({ show: false, type: 'success', message: '' }), 3000);
                                   setScheduledCampaigns(prev => prev.filter(c => c.id !== selectedScheduled.id));
                                   setSelectedScheduled(null);
                                 } else {
-                                  setToast({ show: true, type: 'error', message: data.error || 'ì·¨ì†Œ ì‹¤íŒ¨' });
+                                  setToast({ show: true, type: 'error', message: data.error || 'Ãë¼Ò ½ÇÆĞ' });
                                   setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
                                 }
                               }}
@@ -3813,7 +3813,7 @@ const campaignData = {
                                   ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
                                   : 'bg-red-500 text-white hover:bg-red-600'
                               }`}
-                            >ì˜ˆì•½ì·¨ì†Œ</button>
+                            >¿¹¾àÃë¼Ò</button>
                             <button
                               onClick={() => {
                                 setEditMessage(selectedScheduled?.message_template || selectedScheduled?.message_content || '');
@@ -3826,12 +3826,12 @@ const campaignData = {
                                   ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
                                   : 'bg-amber-500 text-white hover:bg-amber-600'
                               }`}
-                            >ë¬¸ì•ˆìˆ˜ì •</button>
+                            >¹®¾È¼öÁ¤</button>
                           </div>
                         </div>
-                        {/* ì˜ˆì•½ ì‹œê°„ ìˆ˜ì • */}
+                        {/* ¿¹¾à ½Ã°£ ¼öÁ¤ */}
                         <div className="flex items-center gap-2">
-                          <span className="text-sm text-gray-600">ì˜ˆì•½ì‹œê°„:</span>
+                          <span className="text-sm text-gray-600">¿¹¾à½Ã°£:</span>
                           <input
                             type="datetime-local"
                             value={editScheduleTime}
@@ -3849,14 +3849,14 @@ const campaignData = {
                               });
                               const data = await res.json();
                               if (data.success) {
-                                setToast({ show: true, type: 'success', message: 'ì˜ˆì•½ ì‹œê°„ì´ ë³€ê²½ë˜ì—ˆìŠµë‹ˆë‹¤' });
+                                setToast({ show: true, type: 'success', message: '¿¹¾à ½Ã°£ÀÌ º¯°æµÇ¾ú½À´Ï´Ù' });
                                 setTimeout(() => setToast({ show: false, type: 'success', message: '' }), 3000);
                                 setScheduledCampaigns(prev => prev.map(c => 
                                   c.id === selectedScheduled.id ? { ...c, scheduled_at: editScheduleTime } : c
                                 ));
                                 setSelectedScheduled({ ...selectedScheduled, scheduled_at: editScheduleTime });
                               } else {
-                                setToast({ show: true, type: 'error', message: data.error || 'ë³€ê²½ ì‹¤íŒ¨' });
+                                setToast({ show: true, type: 'error', message: data.error || 'º¯°æ ½ÇÆĞ' });
                                 setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
                               }
                             }}
@@ -3866,42 +3866,42 @@ const campaignData = {
                                 ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
                                 : 'bg-blue-500 text-white hover:bg-blue-600'
                             }`}
-                            >ì‹œê°„ë³€ê²½</button>
+                            >½Ã°£º¯°æ</button>
                             {selectedScheduled?.scheduled_at && (new Date(selectedScheduled.scheduled_at).getTime() - Date.now()) < 15 * 60 * 1000 && (
-                              <span className="text-xs text-amber-600 ml-2">âš ï¸ 15ë¶„ ì´ë‚´ ë³€ê²½ ë¶ˆê°€</span>
+                              <span className="text-xs text-amber-600 ml-2">?? 15ºĞ ÀÌ³» º¯°æ ºÒ°¡</span>
                             )}
                           </div>
                         </div>
                       
-                      {/* ìˆ˜ì‹ ì ê²€ìƒ‰ */}
+                      {/* ¼ö½ÅÀÚ °Ë»ö */}
                       <div className="p-3 border-b flex items-center gap-2">
                         <input
                           type="text"
-                          placeholder="ğŸ” ë²ˆí˜¸ ê²€ìƒ‰"
+                          placeholder="?? ¹øÈ£ °Ë»ö"
                           value={scheduledSearch}
                           onChange={(e) => setScheduledSearch(e.target.value)}
                           className="flex-1 border rounded px-3 py-2 text-sm"
                         />
                         <span className="text-sm text-gray-500">
-                          ì´ {scheduledRecipientsTotal.toLocaleString()}ëª…
-                          {scheduledRecipientsTotal > 1000 && ' (ìµœëŒ€ 1000ëª… í‘œì‹œ)'}
+                          ÃÑ {scheduledRecipientsTotal.toLocaleString()}¸í
+                          {scheduledRecipientsTotal > 1000 && ' (ÃÖ´ë 1000¸í Ç¥½Ã)'}
                         </span>
                       </div>
                       
-                      {/* ìˆ˜ì‹ ì ëª©ë¡ */}
+                      {/* ¼ö½ÅÀÚ ¸ñ·Ï */}
                       <div className="flex-1 overflow-y-auto">
                         {scheduledLoading ? (
                           <div className="flex items-center justify-center h-full text-gray-500">
-                            <span className="animate-spin mr-2">â³</span> ë¡œë”©ì¤‘...
+                            <span className="animate-spin mr-2">?</span> ·ÎµùÁß...
                           </div>
                         ) : (
                           <table className="w-full text-sm">
                             <thead className="bg-gray-100 sticky top-0">
                               <tr>
-                                <th className="px-3 py-2 text-left">ë²ˆí˜¸</th>
-                                <th className="px-3 py-2 text-left">íšŒì‹ ë²ˆí˜¸</th>
-                                <th className="px-3 py-2 text-center">ë©”ì‹œì§€</th>
-                                <th className="px-3 py-2 text-center w-16">ì‚­ì œ</th>
+                                <th className="px-3 py-2 text-left">¹øÈ£</th>
+                                <th className="px-3 py-2 text-left">È¸½Å¹øÈ£</th>
+                                <th className="px-3 py-2 text-center">¸Ş½ÃÁö</th>
+                                <th className="px-3 py-2 text-center w-16">»èÁ¦</th>
                               </tr>
                             </thead>
                             <tbody>
@@ -3915,13 +3915,13 @@ const campaignData = {
                                       <button
                                         onClick={() => setMessagePreview({show: true, phone: r.phone, message: r.message || ''})}
                                         className="px-2 py-1 bg-blue-100 text-blue-600 rounded text-xs hover:bg-blue-200"
-                                      >ìƒì„¸ë³´ê¸°</button>
+                                      >»ó¼¼º¸±â</button>
                                     </td>
                                     <td className="px-3 py-2 text-center">
                                       <button
                                         onClick={() => setDeleteConfirm({show: true, phone: r.phone, idx: r.idx})}
                                         className="text-red-500 hover:text-red-700"
-                                      >ğŸ—‘ï¸</button>
+                                      >???</button>
                                     </td>
                                   </tr>
                                 ))}
@@ -3932,30 +3932,30 @@ const campaignData = {
                     </>
                   ) : (
                     <div className="flex-1 flex items-center justify-center text-gray-400">
-                      â† ìº í˜ì¸ì„ ì„ íƒí•˜ì„¸ìš”
+                      ¡ç Ä·ÆäÀÎÀ» ¼±ÅÃÇÏ¼¼¿ä
                     </div>
                   )}
                 </div>
               </div>
             </div>
-            {/* ì‚­ì œ í™•ì¸ ëª¨ë‹¬ */}
+            {/* »èÁ¦ È®ÀÎ ¸ğ´Ş */}
             {deleteConfirm.show && (
               <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60]">
                 <div className="bg-white rounded-2xl shadow-2xl w-[360px] overflow-hidden">
                   <div className="p-6 text-center">
                     <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                      <span className="text-3xl">ğŸ—‘ï¸</span>
+                      <span className="text-3xl">???</span>
                     </div>
-                    <h3 className="text-lg font-bold text-gray-800 mb-2">ìˆ˜ì‹ ì ì‚­ì œ</h3>
-                    <p className="text-gray-600 mb-1">ë‹¤ìŒ ë²ˆí˜¸ë¥¼ ì‚­ì œí•˜ì‹œê² ìŠµë‹ˆê¹Œ?</p>
+                    <h3 className="text-lg font-bold text-gray-800 mb-2">¼ö½ÅÀÚ »èÁ¦</h3>
+                    <p className="text-gray-600 mb-1">´ÙÀ½ ¹øÈ£¸¦ »èÁ¦ÇÏ½Ã°Ú½À´Ï±î?</p>
                     <p className="text-xl font-bold text-red-600 mb-4">{deleteConfirm.phone}</p>
-                    <p className="text-sm text-gray-400">ì‚­ì œëœ ë²ˆí˜¸ëŠ” ì´ ì˜ˆì•½ì—ì„œ ë°œì†¡ë˜ì§€ ì•ŠìŠµë‹ˆë‹¤.</p>
+                    <p className="text-sm text-gray-400">»èÁ¦µÈ ¹øÈ£´Â ÀÌ ¿¹¾à¿¡¼­ ¹ß¼ÛµÇÁö ¾Ê½À´Ï´Ù.</p>
                   </div>
                   <div className="flex border-t">
                     <button
                       onClick={() => setDeleteConfirm({show: false, phone: '', idx: null})}
                       className="flex-1 py-3.5 text-gray-600 hover:bg-gray-50 font-medium transition-colors"
-                    >ì·¨ì†Œ</button>
+                    >Ãë¼Ò</button>
                     <button
                       onClick={async () => {
                         const token = localStorage.getItem('token');
@@ -3971,10 +3971,10 @@ const campaignData = {
                             c.id === selectedScheduled.id ? { ...c, target_count: data.remainingCount } : c
                           ));
                           setSelectedScheduled({ ...selectedScheduled, target_count: data.remainingCount });
-                          setToast({ show: true, type: 'success', message: 'ì‚­ì œë˜ì—ˆìŠµë‹ˆë‹¤' });
+                          setToast({ show: true, type: 'success', message: '»èÁ¦µÇ¾ú½À´Ï´Ù' });
                           setTimeout(() => setToast({ show: false, type: 'success', message: '' }), 3000);
                         } else {
-                          setToast({ show: true, type: 'error', message: data.error || 'ì‚­ì œ ì‹¤íŒ¨' });
+                          setToast({ show: true, type: 'error', message: data.error || '»èÁ¦ ½ÇÆĞ' });
                           setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
                         }
                         setDeleteConfirm({show: false, phone: '', idx: null});
@@ -3985,24 +3985,24 @@ const campaignData = {
                           ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
                           : 'bg-red-500 text-white hover:bg-red-600'
                       }`}
-                    >ì‚­ì œ</button>
+                    >»èÁ¦</button>
                   </div>
                 </div>
               </div>
             )}
-            {/* ë©”ì‹œì§€ ìƒì„¸ë³´ê¸° ëª¨ë‹¬ */}
+            {/* ¸Ş½ÃÁö »ó¼¼º¸±â ¸ğ´Ş */}
             {messagePreview.show && (
               <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60]">
                 <div className="bg-white rounded-2xl shadow-2xl w-[400px] overflow-hidden">
                   <div className="p-4 border-b bg-blue-50 flex justify-between items-center">
                     <div>
-                      <h3 className="text-lg font-bold text-blue-700">ğŸ’¬ ë©”ì‹œì§€ ë‚´ìš©</h3>
+                      <h3 className="text-lg font-bold text-blue-700">?? ¸Ş½ÃÁö ³»¿ë</h3>
                       <p className="text-sm text-blue-600 mt-1">{messagePreview.phone}</p>
                     </div>
                     <button 
                       onClick={() => setMessagePreview({show: false, phone: '', message: ''})}
                       className="text-gray-500 hover:text-gray-700 text-xl"
-                    >âœ•</button>
+                    >?</button>
                   </div>
                   <div className="p-4">
                     <div className="bg-gray-100 rounded-lg p-4 whitespace-pre-wrap text-sm leading-relaxed max-h-[400px] overflow-y-auto">
@@ -4013,39 +4013,39 @@ const campaignData = {
                     <button
                       onClick={() => setMessagePreview({show: false, phone: '', message: ''})}
                       className="w-full py-2.5 bg-blue-500 text-white rounded-lg hover:bg-blue-600 font-medium"
-                    >í™•ì¸</button>
+                    >È®ÀÎ</button>
                   </div>
                 </div>
               </div>
             )}
-            {/* ë¬¸ì•ˆ ìˆ˜ì • ëª¨ë‹¬ */}
+            {/* ¹®¾È ¼öÁ¤ ¸ğ´Ş */}
             {messageEditModal && (
               <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60]">
                 <div className="bg-white rounded-2xl shadow-2xl w-[500px] overflow-hidden">
                   <div className="p-4 border-b bg-amber-50">
-                    <h3 className="text-lg font-bold text-amber-700">âœï¸ ë¬¸ì•ˆ ìˆ˜ì •</h3>
-                    <p className="text-sm text-amber-600 mt-1">ë³€ìˆ˜: %ì´ë¦„%, %ë“±ê¸‰%, %ì§€ì—­%, %íšŒì‹ ë²ˆí˜¸%</p>
+                    <h3 className="text-lg font-bold text-amber-700">?? ¹®¾È ¼öÁ¤</h3>
+                    <p className="text-sm text-amber-600 mt-1">º¯¼ö: %ÀÌ¸§%, %µî±Ş%, %Áö¿ª%, %È¸½Å¹øÈ£%</p>
                   </div>
                   <div className="p-4 space-y-4">
                     {(selectedScheduled?.message_type === 'LMS' || selectedScheduled?.message_type === 'MMS') && (
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">ì œëª©</label>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Á¦¸ñ</label>
                         <input
                           type="text"
                           value={editSubject}
                           onChange={(e) => setEditSubject(e.target.value)}
                           className="w-full border rounded-lg px-3 py-2"
-                          placeholder="ì œëª© ì…ë ¥"
+                          placeholder="Á¦¸ñ ÀÔ·Â"
                         />
                       </div>
                     )}
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">ë©”ì‹œì§€ ë‚´ìš©</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">¸Ş½ÃÁö ³»¿ë</label>
                       <textarea
                         value={editMessage}
                         onChange={(e) => setEditMessage(e.target.value)}
                         className="w-full border rounded-lg px-3 py-2 h-40 resize-none"
-                        placeholder="ë©”ì‹œì§€ ë‚´ìš© ì…ë ¥"
+                        placeholder="¸Ş½ÃÁö ³»¿ë ÀÔ·Â"
                       />
                       <div className="text-right text-sm text-gray-500 mt-1">
                         {new TextEncoder().encode(editMessage).length} bytes
@@ -4054,7 +4054,7 @@ const campaignData = {
                     {messageEditing && (
                       <div className="bg-blue-50 rounded-lg p-3">
                         <div className="flex justify-between text-sm mb-2">
-                          <span className="text-blue-700">ìˆ˜ì • ì¤‘...</span>
+                          <span className="text-blue-700">¼öÁ¤ Áß...</span>
                           <span className="text-blue-700 font-bold">{messageEditProgress}%</span>
                         </div>
                         <div className="w-full bg-blue-200 rounded-full h-2">
@@ -4071,11 +4071,11 @@ const campaignData = {
                       onClick={() => setMessageEditModal(false)}
                       disabled={messageEditing}
                       className="flex-1 py-3.5 text-gray-600 hover:bg-gray-50 font-medium disabled:opacity-50"
-                    >ì·¨ì†Œ</button>
+                    >Ãë¼Ò</button>
                     <button
                       onClick={async () => {
                         if (!editMessage.trim()) {
-                          setToast({ show: true, type: 'error', message: 'ë©”ì‹œì§€ë¥¼ ì…ë ¥í•´ì£¼ì„¸ìš”' });
+                          setToast({ show: true, type: 'error', message: '¸Ş½ÃÁö¸¦ ÀÔ·ÂÇØÁÖ¼¼¿ä' });
                           setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
                           return;
                         }
@@ -4083,7 +4083,7 @@ const campaignData = {
                         setMessageEditing(true);
                         setMessageEditProgress(0);
                         
-                        // ì§„í–‰ë¥  í´ë§
+                        // ÁøÇà·ü Æú¸µ
                         const progressInterval = setInterval(async () => {
                           try {
                             const token = localStorage.getItem('token');
@@ -4108,18 +4108,18 @@ const campaignData = {
                           setMessageEditProgress(100);
                           
                           if (data.success) {
-                            setToast({ show: true, type: 'success', message: data.message || `${data.updatedCount?.toLocaleString()}ê±´ ë¬¸ì•ˆ ìˆ˜ì • ì™„ë£Œ` });
+                            setToast({ show: true, type: 'success', message: data.message || `${data.updatedCount?.toLocaleString()}°Ç ¹®¾È ¼öÁ¤ ¿Ï·á` });
                             setTimeout(() => setToast({ show: false, type: 'success', message: '' }), 3000);
                             setMessageEditModal(false);
-                            // ìº í˜ì¸ ì •ë³´ ì—…ë°ì´íŠ¸
+                            // Ä·ÆäÀÎ Á¤º¸ ¾÷µ¥ÀÌÆ®
                             setSelectedScheduled({ ...selectedScheduled, message_template: editMessage, message_subject: editSubject });
                           } else {
-                            setToast({ show: true, type: 'error', message: data.error || 'ìˆ˜ì • ì‹¤íŒ¨' });
+                            setToast({ show: true, type: 'error', message: data.error || '¼öÁ¤ ½ÇÆĞ' });
                             setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
                           }
                         } catch (err) {
                           clearInterval(progressInterval);
-                          setToast({ show: true, type: 'error', message: 'ìˆ˜ì • ì‹¤íŒ¨' });
+                          setToast({ show: true, type: 'error', message: '¼öÁ¤ ½ÇÆĞ' });
                           setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
                         } finally {
                           setMessageEditing(false);
@@ -4127,7 +4127,7 @@ const campaignData = {
                       }}
                       disabled={messageEditing}
                       className="flex-1 py-3.5 bg-amber-500 text-white hover:bg-amber-600 font-medium disabled:opacity-50"
-                    >{messageEditing ? 'ìˆ˜ì • ì¤‘...' : 'ìˆ˜ì •í•˜ê¸°'}</button>
+                    >{messageEditing ? '¼öÁ¤ Áß...' : '¼öÁ¤ÇÏ±â'}</button>
                   </div>
                 </div>
               </div>
@@ -4135,43 +4135,43 @@ const campaignData = {
           </div>
         )}
       </main>
-    {/* ì—…ë¡œë“œ ê²°ê³¼ ëª¨ë‹¬ */}
+    {/* ¾÷·Îµå °á°ú ¸ğ´Ş */}
     {showUploadResult && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl p-8 max-w-md w-full mx-4 shadow-2xl">
             <div className="text-center">
-              <div className="text-6xl mb-4">ğŸ‰</div>
-              <h3 className="text-2xl font-bold text-gray-800 mb-4">ì €ì¥ ì™„ë£Œ!</h3>
+              <div className="text-6xl mb-4">??</div>
+              <h3 className="text-2xl font-bold text-gray-800 mb-4">ÀúÀå ¿Ï·á!</h3>
               <div className="bg-gray-50 rounded-xl p-4 mb-6">
                 <div className="flex justify-between py-2 border-b border-gray-200">
-                  <span className="text-gray-600">ì‹ ê·œ ì¶”ê°€</span>
-                  <span className="font-bold text-blue-600">{uploadResult.insertCount.toLocaleString()}ê±´</span>
+                  <span className="text-gray-600">½Å±Ô Ãß°¡</span>
+                  <span className="font-bold text-blue-600">{uploadResult.insertCount.toLocaleString()}°Ç</span>
                 </div>
                 <div className="flex justify-between py-2">
-                  <span className="text-gray-600">ì¤‘ë³µ (ìŠ¤í‚µ)</span>
-                  <span className="font-bold text-orange-500">{uploadResult.duplicateCount.toLocaleString()}ê±´</span>
+                  <span className="text-gray-600">Áßº¹ (½ºÅµ)</span>
+                  <span className="font-bold text-orange-500">{uploadResult.duplicateCount.toLocaleString()}°Ç</span>
                 </div>
               </div>
               <button
                 onClick={() => { setShowUploadResult(false); window.location.reload(); }}
                 className="w-full py-3 bg-green-700 text-white rounded-xl font-medium hover:bg-green-800"
               >
-                í™•ì¸
+                È®ÀÎ
               </button>
             </div>
           </div>
         </div>
       )}
-      {/* ì§ì ‘ë°œì†¡ ëª¨ë‹¬ */}
-      {/* ì§ì ‘ íƒ€ê²Ÿ ë°œì†¡ ëª¨ë‹¬ */}
+      {/* Á÷Á¢¹ß¼Û ¸ğ´Ş */}
+      {/* Á÷Á¢ Å¸°Ù ¹ß¼Û ¸ğ´Ş */}
       {showTargetSend && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl shadow-2xl w-[1400px] max-h-[95vh] overflow-y-auto">
-            {/* í—¤ë” */}
+            {/* Çì´õ */}
             <div className="px-6 py-4 border-b flex justify-between items-center bg-green-50">
               <div>
-                <h3 className="text-xl font-bold text-gray-800">ì§ì ‘ íƒ€ê²Ÿ ë°œì†¡</h3>
-                <p className="text-base text-gray-500 mt-1">ì¶”ì¶œëœ <span className="font-bold text-emerald-600">{targetRecipients.length.toLocaleString()}ëª…</span>ì—ê²Œ ë©”ì‹œì§€ë¥¼ ë°œì†¡í•©ë‹ˆë‹¤</p>
+                <h3 className="text-xl font-bold text-gray-800">Á÷Á¢ Å¸°Ù ¹ß¼Û</h3>
+                <p className="text-base text-gray-500 mt-1">ÃßÃâµÈ <span className="font-bold text-emerald-600">{targetRecipients.length.toLocaleString()}¸í</span>¿¡°Ô ¸Ş½ÃÁö¸¦ ¹ß¼ÛÇÕ´Ï´Ù</p>
               </div>
               <button 
                 onClick={() => { setShowTargetSend(false); setTargetRecipients([]); setTargetMessage(''); setTargetSubject(''); }}
@@ -4182,11 +4182,11 @@ const campaignData = {
                 </svg>
               </button>
             </div>
-            {/* ë³¸ë¬¸ */}
+            {/* º»¹® */}
             <div className="px-6 py-5 flex gap-5">
-              {/* ì¢Œì¸¡: ë©”ì‹œì§€ ì‘ì„± */}
+              {/* ÁÂÃø: ¸Ş½ÃÁö ÀÛ¼º */}
               <div className="w-[400px]">
-                {/* SMS/LMS/MMS íƒ­ */}
+                {/* SMS/LMS/MMS ÅÇ */}
                 <div className="flex mb-3 bg-gray-100 rounded-lg p-1">
                   <button 
                     onClick={() => setTargetMsgType('SMS')}
@@ -4208,78 +4208,78 @@ const campaignData = {
                   </button>
                 </div>
 
-                {/* ë©”ì‹œì§€ ì‘ì„± ì˜ì—­ */}
+                {/* ¸Ş½ÃÁö ÀÛ¼º ¿µ¿ª */}
                 <div className="border-2 border-gray-200 rounded-2xl overflow-hidden bg-white shadow-sm">
-                  {/* LMS/MMS ì œëª© */}
+                  {/* LMS/MMS Á¦¸ñ */}
                   {(targetMsgType === 'LMS' || targetMsgType === 'MMS') && (
                     <div className="px-4 pt-3">
                       <input
                         type="text"
                         value={targetSubject}
                         onChange={(e) => setTargetSubject(e.target.value)}
-                        placeholder="ì œëª© (í•„ìˆ˜)"
+                        placeholder="Á¦¸ñ (ÇÊ¼ö)"
                         className="w-full px-3 py-2 border border-orange-300 bg-orange-50 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 placeholder-orange-400"
                       />
                     </div>
                   )}
                   
-                  {/* ë©”ì‹œì§€ ì…ë ¥ */}
+                  {/* ¸Ş½ÃÁö ÀÔ·Â */}
                   <div className="p-4">
                     <div className="relative">
                       {adTextEnabled && (
-                        <span className="absolute left-0 top-0 text-sm text-orange-600 font-medium pointer-events-none select-none">(ê´‘ê³ ) </span>
+                        <span className="absolute left-0 top-0 text-sm text-orange-600 font-medium pointer-events-none select-none">(±¤°í) </span>
                       )}
                       <textarea
                         value={targetMessage}
                         onChange={(e) => setTargetMessage(e.target.value)}
-                        placeholder="ì „ì†¡í•˜ì‹¤ ë‚´ìš©ì„ ì…ë ¥í•˜ì„¸ìš”."
+                        placeholder="Àü¼ÛÇÏ½Ç ³»¿ëÀ» ÀÔ·ÂÇÏ¼¼¿ä."
                         style={adTextEnabled ? { textIndent: '42px' } : {}}
                         className={`w-full resize-none border-0 focus:outline-none text-sm leading-relaxed ${targetMsgType === 'SMS' ? 'h-[180px]' : 'h-[140px]'}`}
                       />
                     </div>
-                    {/* ë¬´ë£Œê±°ë¶€ í‘œê¸° */}
+                    {/* ¹«·á°ÅºÎ Ç¥±â */}
                     {adTextEnabled && (
                       <div className="text-sm text-orange-600 mt-1">
                         {targetMsgType === 'SMS' 
-                          ? `ë¬´ë£Œê±°ë¶€${optOutNumber.replace(/-/g, '')}` 
-                          : `ë¬´ë£Œìˆ˜ì‹ ê±°ë¶€ ${formatRejectNumber(optOutNumber)}`}
+                          ? `¹«·á°ÅºÎ${optOutNumber.replace(/-/g, '')}` 
+                          : `¹«·á¼ö½Å°ÅºÎ ${formatRejectNumber(optOutNumber)}`}
                       </div>
                     )}
-                    {/* íŠ¹ìˆ˜ë¬¸ì/ì´ëª¨ì§€ ì•ˆë‚´ */}
+                    {/* Æ¯¼ö¹®ÀÚ/ÀÌ¸ğÁö ¾È³» */}
                     <div className="text-xs text-gray-400 mt-2">
-                      âš ï¸ ì´ëª¨ì§€(ğŸ˜€)Â·íŠ¹ìˆ˜ë¬¸ìëŠ” LMS ì „í™˜ ë˜ëŠ” ë°œì†¡ ì‹¤íŒ¨ ì›ì¸ì´ ë  ìˆ˜ ìˆìŠµë‹ˆë‹¤
+                      ?? ÀÌ¸ğÁö(??)¡¤Æ¯¼ö¹®ÀÚ´Â LMS ÀüÈ¯ ¶Ç´Â ¹ß¼Û ½ÇÆĞ ¿øÀÎÀÌ µÉ ¼ö ÀÖ½À´Ï´Ù
                     </div>
                   </div>
                   
-                  {/* ë²„íŠ¼ë“¤ + ë°”ì´íŠ¸ í‘œì‹œ */}
+                  {/* ¹öÆ°µé + ¹ÙÀÌÆ® Ç¥½Ã */}
                   <div className="px-3 py-1.5 bg-gray-50 border-t flex items-center justify-between">
                     <div className="flex items-center gap-0.5">
-                      <button onClick={() => setShowSpecialChars('target')} className="px-2 py-1 text-xs bg-white border rounded hover:bg-gray-100">íŠ¹ìˆ˜ë¬¸ì</button>
-                      <button onClick={() => { loadTemplates(); setShowTemplateBox('target'); }} className="px-2 py-1 text-xs bg-white border rounded hover:bg-gray-100">ë³´ê´€í•¨</button>
-                      <button onClick={() => { if (!targetMessage.trim()) { setToast({show: true, type: 'error', message: 'ì €ì¥í•  ë©”ì‹œì§€ë¥¼ ë¨¼ì € ì…ë ¥í•´ì£¼ì„¸ìš”.'}); setTimeout(() => setToast({show: false, type: 'error', message: ''}), 3000); return; } setTemplateSaveName(''); setShowTemplateSave('target'); }} className="px-2 py-1 text-xs bg-white border rounded hover:bg-gray-100">ë¬¸ìì €ì¥</button>
+                      <button onClick={() => setShowSpecialChars('target')} className="px-2 py-1 text-xs bg-white border rounded hover:bg-gray-100">Æ¯¼ö¹®ÀÚ</button>
+                      <button onClick={() => { loadTemplates(); setShowTemplateBox('target'); }} className="px-2 py-1 text-xs bg-white border rounded hover:bg-gray-100">º¸°üÇÔ</button>
+                      <button onClick={() => { if (!targetMessage.trim()) { setToast({show: true, type: 'error', message: 'ÀúÀåÇÒ ¸Ş½ÃÁö¸¦ ¸ÕÀú ÀÔ·ÂÇØÁÖ¼¼¿ä.'}); setTimeout(() => setToast({show: false, type: 'error', message: ''}), 3000); return; } setTemplateSaveName(''); setShowTemplateSave('target'); }} className="px-2 py-1 text-xs bg-white border rounded hover:bg-gray-100">¹®ÀÚÀúÀå</button>
                     </div>
                     <span className="text-xs text-gray-500 whitespace-nowrap">
                       <span className={`font-bold ${(() => {
                         const optOutText = targetMsgType === 'SMS' 
-                          ? `ë¬´ë£Œê±°ë¶€${optOutNumber.replace(/-/g, '')}` 
-                          : `ë¬´ë£Œìˆ˜ì‹ ê±°ë¶€ ${formatRejectNumber(optOutNumber)}`;
-                        const fullMsg = adTextEnabled ? `(ê´‘ê³ )${targetMessage}\n${optOutText}` : targetMessage;
+                          ? `¹«·á°ÅºÎ${optOutNumber.replace(/-/g, '')}` 
+                          : `¹«·á¼ö½Å°ÅºÎ ${formatRejectNumber(optOutNumber)}`;
+                        const fullMsg = adTextEnabled ? `(±¤°í)${targetMessage}\n${optOutText}` : targetMessage;
                         const bytes = calculateBytes(fullMsg);
                         const max = targetMsgType === 'SMS' ? 90 : 2000;
                         return bytes > max ? 'text-red-500' : 'text-emerald-600';
                       })()}`}>
                         {(() => {
                           const optOutText = targetMsgType === 'SMS' 
-                            ? `ë¬´ë£Œê±°ë¶€${optOutNumber.replace(/-/g, '')}` 
-                            : `ë¬´ë£Œìˆ˜ì‹ ê±°ë¶€ ${formatRejectNumber(optOutNumber)}`;
-                          const fullMsg = adTextEnabled ? `(ê´‘ê³ )${targetMessage}\n${optOutText}` : targetMessage;
+                            ? `¹«·á°ÅºÎ${optOutNumber.replace(/-/g, '')}` 
+                            : `¹«·á¼ö½Å°ÅºÎ ${formatRejectNumber(optOutNumber)}`;
+                          const fullMsg = adTextEnabled ? `(±¤°í)${targetMessage}\n${optOutText}` : targetMessage;
                           return calculateBytes(fullMsg);
                         })()}
                       </span>/{targetMsgType === 'SMS' ? 90 : 2000}byte
                     </span>
                   </div>
                   
-                  {/* íšŒì‹ ë²ˆí˜¸ ì„ íƒ */}
+                  {/* È¸½Å¹øÈ£ ¼±ÅÃ */}
                   <div className="px-3 py-1.5 border-t">
                     <select 
                       value={useIndividualCallback ? '__individual__' : selectedCallback}
@@ -4294,23 +4294,23 @@ const campaignData = {
                       }}
                       className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                     >
-                      <option value="">íšŒì‹ ë²ˆí˜¸ ì„ íƒ</option>
-                      <option value="__individual__">ğŸ“± ê°œë³„íšŒì‹ ë²ˆí˜¸ (ê³ ê°ë³„ ë§¤ì¥ë²ˆí˜¸)</option>
+                      <option value="">È¸½Å¹øÈ£ ¼±ÅÃ</option>
+                      <option value="__individual__">?? °³º°È¸½Å¹øÈ£ (°í°´º° ¸ÅÀå¹øÈ£)</option>
                       {callbackNumbers.map((cb) => (
                         <option key={cb.id} value={cb.phone}>
-                        {formatPhoneNumber(cb.phone)} {cb.label ? `(${cb.label})` : ''} {cb.is_default ? 'â­' : ''}
+                        {formatPhoneNumber(cb.phone)} {cb.label ? `(${cb.label})` : ''} {cb.is_default ? '?' : ''}
                       </option>
                       ))}
                     </select>
                     {useIndividualCallback && (
-                      <p className="text-xs text-blue-600 mt-1">ğŸ’¡ ê° ê³ ê°ì˜ ì£¼ì´ìš©ë§¤ì¥ íšŒì‹ ë²ˆí˜¸ë¡œ ë°œì†¡ë©ë‹ˆë‹¤</p>
+                      <p className="text-xs text-blue-600 mt-1">?? °¢ °í°´ÀÇ ÁÖÀÌ¿ë¸ÅÀå È¸½Å¹øÈ£·Î ¹ß¼ÛµË´Ï´Ù</p>
                     )}
                   </div>
 
-                  {/* ìë™ì…ë ¥ ë“œë¡­ë‹¤ìš´ */}
+                  {/* ÀÚµ¿ÀÔ·Â µå·Ó´Ù¿î */}
                   <div className="px-3 py-1.5 border-t bg-gray-50">
                     <div className="flex items-center gap-3">
-                      <span className="text-sm font-bold text-gray-700 whitespace-nowrap">ìë™ì…ë ¥</span>
+                      <span className="text-sm font-bold text-gray-700 whitespace-nowrap">ÀÚµ¿ÀÔ·Â</span>
                       <select 
                         value=""
                         onChange={(e) => {
@@ -4320,42 +4320,42 @@ const campaignData = {
                         }}
                         className="flex-1 border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                       >
-                        <option value="">ë³€ìˆ˜ ì„ íƒ</option>
-                        <option value="%ì´ë¦„%">ì´ë¦„</option>
-                        <option value="%ë“±ê¸‰%">ë“±ê¸‰</option>
-                        <option value="%ì§€ì—­%">ì§€ì—­</option>
-                        <option value="%êµ¬ë§¤ê¸ˆì•¡%">êµ¬ë§¤ê¸ˆì•¡</option>
-                        <option value="%íšŒì‹ ë²ˆí˜¸%">íšŒì‹ ë²ˆí˜¸</option>
+                        <option value="">º¯¼ö ¼±ÅÃ</option>
+                        <option value="%ÀÌ¸§%">ÀÌ¸§</option>
+                        <option value="%µî±Ş%">µî±Ş</option>
+                        <option value="%Áö¿ª%">Áö¿ª</option>
+                        <option value="%±¸¸Å±İ¾×%">±¸¸Å±İ¾×</option>
+                        <option value="%È¸½Å¹øÈ£%">È¸½Å¹øÈ£</option>
                       </select>
                     </div>
                   </div>
                   
-                  {/* MMS ì´ë¯¸ì§€ ì—…ë¡œë“œ ì˜ì—­ */}
+                  {/* MMS ÀÌ¹ÌÁö ¾÷·Îµå ¿µ¿ª */}
                   {(targetMsgType === 'MMS' || mmsUploadedImages.length > 0) && (
                     <div className="px-3 py-2 border-t bg-amber-50/50 cursor-pointer hover:bg-amber-100/50 transition-colors" onClick={() => setShowMmsUploadModal(true)}>
                       <div className="flex items-center gap-2">
-                        <span className="text-xs font-semibold text-gray-600">ğŸ–¼ï¸ MMS ì´ë¯¸ì§€</span>
+                        <span className="text-xs font-semibold text-gray-600">??? MMS ÀÌ¹ÌÁö</span>
                         {mmsUploadedImages.length > 0 ? (
                           <div className="flex items-center gap-1">
                             {mmsUploadedImages.map((img, idx) => (
                               <img key={idx} src={img.url} alt="" className="w-10 h-10 object-cover rounded border" crossOrigin="use-credentials" />
                             ))}
-                            <span className="text-xs text-purple-600 ml-1">âœï¸ ìˆ˜ì •</span>
+                            <span className="text-xs text-purple-600 ml-1">?? ¼öÁ¤</span>
                           </div>
                         ) : (
-                          <span className="text-xs text-amber-600">í´ë¦­í•˜ì—¬ ì´ë¯¸ì§€ ì²¨ë¶€ â†’</span>
+                          <span className="text-xs text-amber-600">Å¬¸¯ÇÏ¿© ÀÌ¹ÌÁö Ã·ºÎ ¡æ</span>
                         )}
                       </div>
                     </div>
                   )}
 
-                  {/* ë¯¸ë¦¬ë³´ê¸° + ìŠ¤íŒ¸í•„í„° ë²„íŠ¼ */}
+                  {/* ¹Ì¸®º¸±â + ½ºÆÔÇÊÅÍ ¹öÆ° */}
                   <div className="px-3 py-1.5 border-t">
                     <div className="grid grid-cols-2 gap-2">
                     <button 
                         onClick={() => {
                           if (!targetMessage.trim()) {
-                            alert('ë©”ì‹œì§€ë¥¼ ì…ë ¥í•´ì£¼ì„¸ìš”');
+                            alert('¸Ş½ÃÁö¸¦ ÀÔ·ÂÇØÁÖ¼¼¿ä');
                             return;
                           }
                           setDirectMessage(targetMessage);
@@ -4365,16 +4365,16 @@ const campaignData = {
                         }}
                         className="py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-sm font-medium transition-colors"
                       >
-                        ğŸ“„ ë¯¸ë¦¬ë³´ê¸°
+                        ?? ¹Ì¸®º¸±â
                       </button>
                       <button 
                         onClick={() => {
                           const toast = document.createElement('div');
                           toast.innerHTML = `
                             <div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:white;padding:24px 32px;border-radius:16px;box-shadow:0 10px 40px rgba(0,0,0,0.2);z-index:9999;text-align:center;">
-                              <div style="font-size:48px;margin-bottom:12px;">ğŸš§</div>
-                              <div style="font-size:16px;font-weight:bold;color:#374151;margin-bottom:8px;">ì¤€ë¹„ ì¤‘ì¸ ê¸°ëŠ¥ì…ë‹ˆë‹¤</div>
-                              <div style="font-size:14px;color:#6B7280;">ìŠ¤íŒ¸í•„í„°í…ŒìŠ¤íŠ¸ëŠ” ê³§ ì—…ë°ì´íŠ¸ë©ë‹ˆë‹¤</div>
+                              <div style="font-size:48px;margin-bottom:12px;">??</div>
+                              <div style="font-size:16px;font-weight:bold;color:#374151;margin-bottom:8px;">ÁØºñ ÁßÀÎ ±â´ÉÀÔ´Ï´Ù</div>
+                              <div style="font-size:14px;color:#6B7280;">½ºÆÔÇÊÅÍÅ×½ºÆ®´Â °ğ ¾÷µ¥ÀÌÆ®µË´Ï´Ù</div>
                             </div>
                             <div style="position:fixed;inset:0;background:rgba(0,0,0,0.3);z-index:9998;" onclick="this.parentElement.remove()"></div>
                           `;
@@ -4383,15 +4383,15 @@ const campaignData = {
                         }}
                         className="py-2.5 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg text-sm font-medium transition-colors"
                       >
-                        ğŸ›¡ï¸ ìŠ¤íŒ¸í•„í„°í…ŒìŠ¤íŠ¸
+                        ??? ½ºÆÔÇÊÅÍÅ×½ºÆ®
                       </button>
                     </div>
                   </div>
                   
-                  {/* ì˜ˆì•½/ë¶„í• /ê´‘ê³  ì˜µì…˜ - 3ë¶„í•  2ì¤„ */}
+                  {/* ¿¹¾à/ºĞÇÒ/±¤°í ¿É¼Ç - 3ºĞÇÒ 2ÁÙ */}
                   <div className="px-3 py-2 border-t">
                   <div className="grid grid-cols-3 gap-2 text-xs">
-                      {/* ì˜ˆì•½ì „ì†¡ */}
+                      {/* ¿¹¾àÀü¼Û */}
                       <div className={`rounded-lg p-3 text-center ${reserveEnabled ? 'bg-blue-50' : 'bg-gray-50'}`}>
                         <label className="flex items-center justify-center gap-1.5 cursor-pointer">
                           <input 
@@ -4403,7 +4403,7 @@ const campaignData = {
                             }}
                             className="rounded w-4 h-4" 
                           />
-                          <span className={`font-medium ${reserveEnabled ? 'text-blue-700' : ''}`}>ì˜ˆì•½ì „ì†¡</span>
+                          <span className={`font-medium ${reserveEnabled ? 'text-blue-700' : ''}`}>¿¹¾àÀü¼Û</span>
                         </label>
                         <div 
                           className={`mt-1.5 text-xs cursor-pointer ${reserveEnabled ? 'text-blue-600 font-medium' : 'text-gray-400'}`}
@@ -4411,10 +4411,10 @@ const campaignData = {
                         >
                           {reserveDateTime 
                             ? new Date(reserveDateTime).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-                            : 'ì˜ˆì•½ì‹œê°„ ì„ íƒ'}
+                            : '¿¹¾à½Ã°£ ¼±ÅÃ'}
                         </div>
                       </div>
-                      {/* ë¶„í• ì „ì†¡ */}
+                      {/* ºĞÇÒÀü¼Û */}
                       <div className={`rounded-lg p-3 text-center ${splitEnabled ? 'bg-purple-50' : 'bg-gray-50'}`}>
                         <label className="flex items-center justify-center gap-1.5 cursor-pointer">
                           <input 
@@ -4423,7 +4423,7 @@ const campaignData = {
                             checked={splitEnabled}
                             onChange={(e) => setSplitEnabled(e.target.checked)}
                           />
-                          <span className={`font-medium ${splitEnabled ? 'text-purple-700' : ''}`}>ë¶„í• ì „ì†¡</span>
+                          <span className={`font-medium ${splitEnabled ? 'text-purple-700' : ''}`}>ºĞÇÒÀü¼Û</span>
                         </label>
                         <div className="mt-1.5 flex items-center justify-center gap-1">
                           <input 
@@ -4434,10 +4434,10 @@ const campaignData = {
                             onChange={(e) => setSplitCount(Number(e.target.value) || 1000)}
                             disabled={!splitEnabled}
                           />
-                          <span className="text-xs text-gray-500">ê±´/ë¶„</span>
+                          <span className="text-xs text-gray-500">°Ç/ºĞ</span>
                         </div>
                       </div>
-                      {/* ê´‘ê³ /080 */}
+                      {/* ±¤°í/080 */}
                       <div className={`rounded-lg p-3 text-center ${adTextEnabled ? 'bg-orange-50' : 'bg-gray-50'}`}>
                         <label className="flex items-center justify-center gap-1.5 cursor-pointer">
                           <input 
@@ -4446,56 +4446,56 @@ const campaignData = {
                             onChange={(e) => setAdTextEnabled(e.target.checked)}
                             className="rounded w-4 h-4"
                           />
-                          <span className={`font-medium ${adTextEnabled ? 'text-orange-700' : ''}`}>ê´‘ê³ í‘œê¸°</span>
+                          <span className={`font-medium ${adTextEnabled ? 'text-orange-700' : ''}`}>±¤°íÇ¥±â</span>
                         </label>
-                        <div className={`mt-1.5 text-xs ${adTextEnabled ? 'text-orange-500' : 'text-gray-400'}`}>080 ìˆ˜ì‹ ê±°ë¶€</div>
+                        <div className={`mt-1.5 text-xs ${adTextEnabled ? 'text-orange-500' : 'text-gray-400'}`}>080 ¼ö½Å°ÅºÎ</div>
                       </div>
                     </div>
                   </div>
                   
-                  {/* ì „ì†¡í•˜ê¸° ë²„íŠ¼ */}
+                  {/* Àü¼ÛÇÏ±â ¹öÆ° */}
                   <div className="px-3 py-2 border-t">
                     <button 
                       onClick={async () => {
                         if (targetRecipients.length === 0) {
-                          alert('ìˆ˜ì‹ ìê°€ ì—†ìŠµë‹ˆë‹¤');
+                          alert('¼ö½ÅÀÚ°¡ ¾ø½À´Ï´Ù');
                           return;
                         }
                         if (!targetMessage.trim()) {
-                          alert('ë©”ì‹œì§€ë¥¼ ì…ë ¥í•´ì£¼ì„¸ìš”');
+                          alert('¸Ş½ÃÁö¸¦ ÀÔ·ÂÇØÁÖ¼¼¿ä');
                           return;
                         }
                         if (!selectedCallback && !useIndividualCallback) {
-                          alert('íšŒì‹ ë²ˆí˜¸ë¥¼ ì„ íƒí•´ì£¼ì„¸ìš”');
+                          alert('È¸½Å¹øÈ£¸¦ ¼±ÅÃÇØÁÖ¼¼¿ä');
                           return;
                         }
                         if (useIndividualCallback && targetRecipients.some((r: any) => !r.callback)) {
-                          alert('ê°œë³„íšŒì‹ ë²ˆí˜¸ê°€ ì—†ëŠ” ê³ ê°ì´ ìˆìŠµë‹ˆë‹¤.\nì¼ë°˜ íšŒì‹ ë²ˆí˜¸ë¥¼ ì„ íƒí•˜ê±°ë‚˜ ê³ ê° ë°ì´í„°ë¥¼ í™•ì¸í•´ì£¼ì„¸ìš”.');
+                          alert('°³º°È¸½Å¹øÈ£°¡ ¾ø´Â °í°´ÀÌ ÀÖ½À´Ï´Ù.\nÀÏ¹İ È¸½Å¹øÈ£¸¦ ¼±ÅÃÇÏ°Å³ª °í°´ µ¥ÀÌÅÍ¸¦ È®ÀÎÇØÁÖ¼¼¿ä.');
                           return;
                         }
                         if ((targetMsgType === 'LMS' || targetMsgType === 'MMS') && !targetSubject.trim()) {
-                          alert('ì œëª©ì„ ì…ë ¥í•´ì£¼ì„¸ìš”');
+                          alert('Á¦¸ñÀ» ÀÔ·ÂÇØÁÖ¼¼¿ä');
                           return;
                         }
 
-                        // ë°”ì´íŠ¸ ê³„ì‚°
+                        // ¹ÙÀÌÆ® °è»ê
                         const optOutText = targetMsgType === 'SMS' 
-                          ? `ë¬´ë£Œê±°ë¶€${optOutNumber.replace(/-/g, '')}` 
-                          : `ë¬´ë£Œìˆ˜ì‹ ê±°ë¶€ ${formatRejectNumber(optOutNumber)}`;
-                        const fullMsg = adTextEnabled ? `(ê´‘ê³ )${targetMessage}\n${optOutText}` : targetMessage;
+                          ? `¹«·á°ÅºÎ${optOutNumber.replace(/-/g, '')}` 
+                          : `¹«·á¼ö½Å°ÅºÎ ${formatRejectNumber(optOutNumber)}`;
+                        const fullMsg = adTextEnabled ? `(±¤°í)${targetMessage}\n${optOutText}` : targetMessage;
                         const msgBytes = calculateBytes(fullMsg);
 
-                        // SMSì¸ë° 90ë°”ì´íŠ¸ ì´ˆê³¼ ì‹œ ì˜ˆìœ ëª¨ë‹¬ë¡œ ì „í™˜ ì•ˆë‚´
+                        // SMSÀÎµ¥ 90¹ÙÀÌÆ® ÃÊ°ú ½Ã ¿¹»Û ¸ğ´Ş·Î ÀüÈ¯ ¾È³»
                         if (targetMsgType === 'SMS' && msgBytes > 90 && !smsOverrideAccepted) {
                           setPendingBytes(msgBytes);
                           setShowLmsConfirm(true);
                           return;
                         }
 
-                        // LMS/MMSì¸ë° SMSë¡œ ë³´ë‚´ë„ ë˜ëŠ” ê²½ìš° ë¹„ìš© ì ˆê° ì•ˆë‚´
+                        // LMS/MMSÀÎµ¥ SMS·Î º¸³»µµ µÇ´Â °æ¿ì ºñ¿ë Àı°¨ ¾È³»
                         if (targetMsgType !== 'SMS') {
-                          const smsOptOut = `ë¬´ë£Œê±°ë¶€${optOutNumber.replace(/-/g, '')}`;
-                          const smsFullMsg = adTextEnabled ? `(ê´‘ê³ )${targetMessage}\n${smsOptOut}` : targetMessage;
+                          const smsOptOut = `¹«·á°ÅºÎ${optOutNumber.replace(/-/g, '')}`;
+                          const smsFullMsg = adTextEnabled ? `(±¤°í)${targetMessage}\n${smsOptOut}` : targetMessage;
                           const smsBytes = calculateBytes(smsFullMsg);
                           if (smsBytes <= 90) {
                             setShowSmsConvert({show: true, from: 'target', currentBytes: msgBytes, smsBytes, count: targetRecipients.length});
@@ -4503,7 +4503,7 @@ const campaignData = {
                           }
                         }
 
-                        // ìˆ˜ì‹ ê±°ë¶€ ì²´í¬
+                        // ¼ö½Å°ÅºÎ Ã¼Å©
                         const token = localStorage.getItem('token');
                         const phones = targetRecipients.map((r: any) => r.phone);
                         const checkRes = await fetch('/api/unsubscribes/check', {
@@ -4514,7 +4514,7 @@ const campaignData = {
                         const checkData = await checkRes.json();
                         const unsubCount = checkData.unsubscribeCount || 0;
 
-                        // ë°œì†¡ í™•ì¸ ëª¨ë‹¬
+                        // ¹ß¼Û È®ÀÎ ¸ğ´Ş
                         setSendConfirm({
                           show: true,
                           type: reserveEnabled ? 'scheduled' : 'immediate',
@@ -4528,52 +4528,52 @@ const campaignData = {
                       disabled={targetSending}
                       className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-base transition-colors disabled:opacity-50"
                     >
-                      {targetSending ? 'ë°œì†¡ ì¤‘...' : 'ì „ì†¡í•˜ê¸°'}
+                      {targetSending ? '¹ß¼Û Áß...' : 'Àü¼ÛÇÏ±â'}
                     </button>
                   </div>
                 </div>
               </div>
               
                         
-              {/* ìš°ì¸¡: ìˆ˜ì‹ ì ëª©ë¡ */}
+              {/* ¿ìÃø: ¼ö½ÅÀÚ ¸ñ·Ï */}
               <div className="flex-1 flex flex-col">
-                {/* í—¤ë” */}
+                {/* Çì´õ */}
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-3">
-                    <span className="text-lg font-bold text-gray-800">ìˆ˜ì‹ ì ëª©ë¡</span>
+                    <span className="text-lg font-bold text-gray-800">¼ö½ÅÀÚ ¸ñ·Ï</span>
                     <span className="px-3 py-1 bg-emerald-100 text-emerald-700 rounded-full text-sm font-medium">
-                      ì´ {targetRecipients.length.toLocaleString()}ê±´
+                      ÃÑ {targetRecipients.length.toLocaleString()}°Ç
                     </span>
                   </div>
                   <div className="flex items-center gap-2">
                     <input
                       type="text"
-                      placeholder="ğŸ” ìˆ˜ì‹ ë²ˆí˜¸ ê²€ìƒ‰"
+                      placeholder="?? ¼ö½Å¹øÈ£ °Ë»ö"
                       value={targetListSearch}
                       onChange={(e) => { setTargetListSearch(e.target.value); setTargetListPage(0); }}
                       className="border rounded-lg px-3 py-1.5 text-sm w-48"
                     />
                     <label className="flex items-center gap-1 text-sm text-gray-600">
                       <input type="checkbox" defaultChecked className="rounded" />
-                      ì¤‘ë³µì œê±°
+                      Áßº¹Á¦°Å
                     </label>
                     <label className="flex items-center gap-1 text-sm text-gray-600">
                       <input type="checkbox" defaultChecked className="rounded" />
-                      ìˆ˜ì‹ ê±°ë¶€ì œê±°
+                      ¼ö½Å°ÅºÎÁ¦°Å
                     </label>
                   </div>
                 </div>
 
-                {/* í…Œì´ë¸” */}
+                {/* Å×ÀÌºí */}
                 <div className="flex-1 border rounded-xl overflow-hidden">
                   <table className="w-full text-sm">
                     <thead className="bg-gray-50">
                       <tr>
-                        <th className="px-4 py-2.5 text-left font-medium text-gray-600">ìˆ˜ì‹ ë²ˆí˜¸</th>
-                        <th className="px-4 py-2.5 text-left font-medium text-gray-600">ì´ë¦„</th>
-                        <th className="px-4 py-2.5 text-left font-medium text-gray-600">ë“±ê¸‰</th>
-                        <th className="px-4 py-2.5 text-left font-medium text-gray-600">ì§€ì—­</th>
-                        <th className="px-4 py-2.5 text-left font-medium text-gray-600">êµ¬ë§¤ê¸ˆì•¡</th>
+                        <th className="px-4 py-2.5 text-left font-medium text-gray-600">¼ö½Å¹øÈ£</th>
+                        <th className="px-4 py-2.5 text-left font-medium text-gray-600">ÀÌ¸§</th>
+                        <th className="px-4 py-2.5 text-left font-medium text-gray-600">µî±Ş</th>
+                        <th className="px-4 py-2.5 text-left font-medium text-gray-600">Áö¿ª</th>
+                        <th className="px-4 py-2.5 text-left font-medium text-gray-600">±¸¸Å±İ¾×</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -4597,7 +4597,7 @@ const campaignData = {
                   </table>
                 </div>
 
-                {/* í˜ì´ì§• */}
+                {/* ÆäÀÌÂ¡ */}
                 <div className="mt-3 flex justify-center items-center gap-2">
                   {(() => {
                     const filtered = targetListSearch 
@@ -4613,40 +4613,40 @@ const campaignData = {
                           disabled={targetListPage === 0}
                           className="px-3 py-1.5 border rounded-lg text-sm disabled:opacity-50"
                         >
-                          ì´ì „
+                          ÀÌÀü
                         </button>
                         <span className="text-sm text-gray-600">
-                          {targetListPage + 1} / {totalPages} í˜ì´ì§€
+                          {targetListPage + 1} / {totalPages} ÆäÀÌÁö
                         </span>
                         <button 
                           onClick={() => setTargetListPage(p => Math.min(totalPages - 1, p + 1))}
                           disabled={targetListPage >= totalPages - 1}
                           className="px-3 py-1.5 border rounded-lg text-sm disabled:opacity-50"
                         >
-                          ë‹¤ìŒ
+                          ´ÙÀ½
                         </button>
                       </>
                     );
                   })()}
                 </div>
 
-                {/* í•˜ë‹¨ ë²„íŠ¼ */}
+                {/* ÇÏ´Ü ¹öÆ° */}
                 <div className="mt-3 flex justify-between items-center">
                   <div className="flex gap-2">
-                    <button className="px-3 py-1.5 text-sm border rounded-lg hover:bg-gray-50">ì¤‘ë³µì œê±°</button>
-                    <button className="px-3 py-1.5 text-sm border rounded-lg hover:bg-gray-50">ì„ íƒì‚­ì œ</button>
+                    <button className="px-3 py-1.5 text-sm border rounded-lg hover:bg-gray-50">Áßº¹Á¦°Å</button>
+                    <button className="px-3 py-1.5 text-sm border rounded-lg hover:bg-gray-50">¼±ÅÃ»èÁ¦</button>
                     <button 
                       onClick={() => setTargetRecipients([])}
                       className="px-3 py-1.5 text-sm border rounded-lg hover:bg-gray-50"
                     >
-                      ì „ì²´ì‚­ì œ
+                      ÀüÃ¼»èÁ¦
                     </button>
                   </div>
                   <button 
                     onClick={() => { setShowTargetSend(false); setShowDirectTargeting(true); }}
                     className="px-3 py-1.5 text-sm bg-gray-100 rounded-lg hover:bg-gray-200"
                   >
-                    ğŸ”„ íƒ€ê²Ÿ ì¬ì„¤ì •
+                    ?? Å¸°Ù Àç¼³Á¤
                   </button>
                 </div>
                 </div>
@@ -4655,22 +4655,22 @@ const campaignData = {
         </div>
       )}
 
-      {/* ì˜ˆì•½ì „ì†¡ ë‹¬ë ¥ ëª¨ë‹¬ (ê³µìš©) */}
+      {/* ¿¹¾àÀü¼Û ´Ş·Â ¸ğ´Ş (°ø¿ë) */}
       {showReservePicker && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60]">
           <div className="bg-white rounded-xl shadow-2xl w-[360px] overflow-hidden">
             <div className="bg-blue-50 px-5 py-4 border-b">
-              <h3 className="text-lg font-bold text-blue-700">ğŸ“… ì˜ˆì•½ ì‹œê°„ ì„¤ì •</h3>
+              <h3 className="text-lg font-bold text-blue-700">?? ¿¹¾à ½Ã°£ ¼³Á¤</h3>
             </div>
             <div className="p-5">
-              {/* ë¹ ë¥¸ ì„ íƒ */}
+              {/* ºü¸¥ ¼±ÅÃ */}
               <div className="mb-4">
-                <div className="text-xs text-gray-500 mb-2">ë¹ ë¥¸ ì„ íƒ</div>
+                <div className="text-xs text-gray-500 mb-2">ºü¸¥ ¼±ÅÃ</div>
                 <div className="grid grid-cols-3 gap-2">
                   {[
-                    { label: '1ì‹œê°„ í›„', hours: 1 },
-                    { label: '3ì‹œê°„ í›„', hours: 3 },
-                    { label: 'ë‚´ì¼ ì˜¤ì „ 9ì‹œ', tomorrow: 9 },
+                    { label: '1½Ã°£ ÈÄ', hours: 1 },
+                    { label: '3½Ã°£ ÈÄ', hours: 3 },
+                    { label: '³»ÀÏ ¿ÀÀü 9½Ã', tomorrow: 9 },
                   ].map((opt) => (
                     <button
                       key={opt.label}
@@ -4692,12 +4692,12 @@ const campaignData = {
                   ))}
                 </div>
               </div>
-              {/* ì§ì ‘ ì„ íƒ */}
+              {/* Á÷Á¢ ¼±ÅÃ */}
               <div>
                 <div className="flex gap-4">
-                  {/* ë‚ ì§œ */}
+                  {/* ³¯Â¥ */}
                   <div className="flex-1">
-                    <div className="text-xs text-gray-500 mb-2">ë‚ ì§œ</div>
+                    <div className="text-xs text-gray-500 mb-2">³¯Â¥</div>
                     <input
                       type="date"
                       value={reserveDateTime?.split('T')[0] || ''}
@@ -4709,9 +4709,9 @@ const campaignData = {
                       className="w-full border-2 border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:border-blue-400 focus:outline-none"
                     />
                   </div>
-                  {/* ì‹œê°„ */}
+                  {/* ½Ã°£ */}
                   <div className="flex-1">
-                    <div className="text-xs text-gray-500 mb-2">ì‹œê°„</div>
+                    <div className="text-xs text-gray-500 mb-2">½Ã°£</div>
                     <div className="flex items-center gap-1">
                       <input
                         type="number"
@@ -4744,10 +4744,10 @@ const campaignData = {
                   </div>
                 </div>
               </div>
-              {/* ì„ íƒëœ ì‹œê°„ í‘œì‹œ */}
+              {/* ¼±ÅÃµÈ ½Ã°£ Ç¥½Ã */}
               {reserveDateTime && (
                 <div className="mt-4 p-3 bg-blue-50 rounded-lg text-center">
-                  <span className="text-sm text-gray-600">ì˜ˆì•½ ì‹œê°„: </span>
+                  <span className="text-sm text-gray-600">¿¹¾à ½Ã°£: </span>
                   <span className="text-sm font-bold text-blue-700">
                     {new Date(reserveDateTime).toLocaleString('ko-KR', {
                       timeZone: 'Asia/Seoul',
@@ -4770,19 +4770,19 @@ const campaignData = {
                 }}
                 className="flex-1 py-2.5 border rounded-lg text-sm font-medium hover:bg-gray-100"
               >
-                ì·¨ì†Œ
+                Ãë¼Ò
               </button>
               <button
                 onClick={() => {
                   if (!reserveDateTime) {
-                    alert('ì˜ˆì•½ ì‹œê°„ì„ ì„ íƒí•´ì£¼ì„¸ìš”');
+                    alert('¿¹¾à ½Ã°£À» ¼±ÅÃÇØÁÖ¼¼¿ä');
                     return;
                   }
                   setShowReservePicker(false);
                 }}
                 className="flex-1 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700"
               >
-                í™•ì¸
+                È®ÀÎ
               </button>
             </div>
           </div>
@@ -4792,11 +4792,11 @@ const campaignData = {
       {showDirectSend && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl shadow-2xl w-[1400px] max-h-[95vh] overflow-y-auto">
-            {/* ë³¸ë¬¸ */}
+            {/* º»¹® */}
             <div className="px-6 py-5 flex gap-5">
-              {/* ì¢Œì¸¡: ë©”ì‹œì§€ ì‘ì„± */}
+              {/* ÁÂÃø: ¸Ş½ÃÁö ÀÛ¼º */}
               <div className="w-[400px]">
-                {/* SMS/LMS/MMS íƒ­ */}
+                {/* SMS/LMS/MMS ÅÇ */}
                 <div className="flex mb-3 bg-gray-100 rounded-lg p-1">
                   <button 
                     onClick={() => setDirectMsgType('SMS')}
@@ -4818,81 +4818,81 @@ const campaignData = {
                   </button>
                 </div>
 
-                {/* ë©”ì‹œì§€ ì‘ì„± ì˜ì—­ */}
+                {/* ¸Ş½ÃÁö ÀÛ¼º ¿µ¿ª */}
                 <div className="border-2 border-gray-200 rounded-2xl overflow-hidden bg-white shadow-sm">
-                  {/* LMS/MMS ì œëª© */}
+                  {/* LMS/MMS Á¦¸ñ */}
                   {(directMsgType === 'LMS' || directMsgType === 'MMS') && (
                     <div className="px-4 pt-3">
                       <input
                         type="text"
                         value={directSubject}
                         onChange={(e) => setDirectSubject(e.target.value)}
-                        placeholder="ì œëª© (í•„ìˆ˜)"
+                        placeholder="Á¦¸ñ (ÇÊ¼ö)"
                         className="w-full px-3 py-2 border border-orange-300 bg-orange-50 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 placeholder-orange-400"
                       />
                     </div>
                   )}
                   
-                  {/* ë©”ì‹œì§€ ì…ë ¥ */}
+                  {/* ¸Ş½ÃÁö ÀÔ·Â */}
                   <div className="p-4">
                     <div className="relative">
                       {adTextEnabled && (
-                        <span className="absolute left-0 top-0 text-sm text-orange-600 font-medium pointer-events-none select-none">(ê´‘ê³ ) </span>
+                        <span className="absolute left-0 top-0 text-sm text-orange-600 font-medium pointer-events-none select-none">(±¤°í) </span>
                       )}
                       <textarea
                         value={directMessage}
                         onChange={(e) => setDirectMessage(e.target.value)}
-                        placeholder="ì „ì†¡í•˜ì‹¤ ë‚´ìš©ì„ ì…ë ¥í•˜ì„¸ìš”."
+                        placeholder="Àü¼ÛÇÏ½Ç ³»¿ëÀ» ÀÔ·ÂÇÏ¼¼¿ä."
                         style={adTextEnabled ? { textIndent: '42px' } : {}}
                         className={`w-full resize-none border-0 focus:outline-none text-sm leading-relaxed ${directMsgType === 'SMS' ? 'h-[180px]' : 'h-[140px]'}`}
                       />
                     </div>
-                    {/* ë¬´ë£Œê±°ë¶€ í‘œê¸° */}
+                    {/* ¹«·á°ÅºÎ Ç¥±â */}
                     {adTextEnabled && (
                       <div className="text-sm text-orange-600 mt-1">
                         {directMsgType === 'SMS' 
-                          ? `ë¬´ë£Œê±°ë¶€${optOutNumber.replace(/-/g, '')}` 
-                          : `ë¬´ë£Œìˆ˜ì‹ ê±°ë¶€ ${formatRejectNumber(optOutNumber)}`}
+                          ? `¹«·á°ÅºÎ${optOutNumber.replace(/-/g, '')}` 
+                          : `¹«·á¼ö½Å°ÅºÎ ${formatRejectNumber(optOutNumber)}`}
                       </div>
                     )}
-                    {/* íŠ¹ìˆ˜ë¬¸ì/ì´ëª¨ì§€ ì•ˆë‚´ */}
+                    {/* Æ¯¼ö¹®ÀÚ/ÀÌ¸ğÁö ¾È³» */}
                     <div className="text-xs text-gray-400 mt-2">
-                      âš ï¸ ì´ëª¨ì§€(ğŸ˜€)Â·íŠ¹ìˆ˜ë¬¸ìëŠ” LMS ì „í™˜ ë˜ëŠ” ë°œì†¡ ì‹¤íŒ¨ ì›ì¸ì´ ë  ìˆ˜ ìˆìŠµë‹ˆë‹¤
+                      ?? ÀÌ¸ğÁö(??)¡¤Æ¯¼ö¹®ÀÚ´Â LMS ÀüÈ¯ ¶Ç´Â ¹ß¼Û ½ÇÆĞ ¿øÀÎÀÌ µÉ ¼ö ÀÖ½À´Ï´Ù
                     </div>
                     
-                    {/* MMS ì´ë¯¸ì§€ ë¯¸ë¦¬ë³´ê¸° */}
+                    {/* MMS ÀÌ¹ÌÁö ¹Ì¸®º¸±â */}
                     {(directMsgType === 'MMS' || mmsUploadedImages.length > 0) && (
                       <div className="mt-2 pt-2 border-t cursor-pointer hover:bg-amber-50/50 transition-colors rounded-lg p-2" onClick={() => setShowMmsUploadModal(true)}>
                         <div className="flex items-center gap-2">
-                          <span className="text-xs font-semibold text-gray-600">ğŸ–¼ï¸ MMS ì´ë¯¸ì§€</span>
+                          <span className="text-xs font-semibold text-gray-600">??? MMS ÀÌ¹ÌÁö</span>
                           {mmsUploadedImages.length > 0 ? (
                             <div className="flex items-center gap-1">
                               {mmsUploadedImages.map((img, idx) => (
                                 <img key={idx} src={img.url} alt="" className="w-10 h-10 object-cover rounded border" crossOrigin="use-credentials" />
                               ))}
-                              <span className="text-xs text-purple-600 ml-1">âœï¸ ìˆ˜ì •</span>
+                              <span className="text-xs text-purple-600 ml-1">?? ¼öÁ¤</span>
                             </div>
                           ) : (
-                            <span className="text-xs text-amber-600">í´ë¦­í•˜ì—¬ ì´ë¯¸ì§€ ì²¨ë¶€ â†’</span>
+                            <span className="text-xs text-amber-600">Å¬¸¯ÇÏ¿© ÀÌ¹ÌÁö Ã·ºÎ ¡æ</span>
                           )}
                         </div>
                       </div>
                     )}
                   </div>
                   
-                  {/* ë²„íŠ¼ë“¤ + ë°”ì´íŠ¸ í‘œì‹œ */}
+                  {/* ¹öÆ°µé + ¹ÙÀÌÆ® Ç¥½Ã */}
                   <div className="px-3 py-1.5 bg-gray-50 border-t flex items-center justify-between">
                     <div className="flex items-center gap-0.5">
-                      <button onClick={() => setShowSpecialChars('direct')} className="px-2 py-1 text-xs bg-white border rounded hover:bg-gray-100">íŠ¹ìˆ˜ë¬¸ì</button>
-                      <button onClick={() => { loadTemplates(); setShowTemplateBox('direct'); }} className="px-2 py-1 text-xs bg-white border rounded hover:bg-gray-100">ë³´ê´€í•¨</button>
-                      <button onClick={() => { if (!directMessage.trim()) { setToast({show: true, type: 'error', message: 'ì €ì¥í•  ë©”ì‹œì§€ë¥¼ ë¨¼ì € ì…ë ¥í•´ì£¼ì„¸ìš”.'}); setTimeout(() => setToast({show: false, type: 'error', message: ''}), 3000); return; } setTemplateSaveName(''); setShowTemplateSave('direct'); }} className="px-2 py-1 text-xs bg-white border rounded hover:bg-gray-100">ë¬¸ìì €ì¥</button>
+                      <button onClick={() => setShowSpecialChars('direct')} className="px-2 py-1 text-xs bg-white border rounded hover:bg-gray-100">Æ¯¼ö¹®ÀÚ</button>
+                      <button onClick={() => { loadTemplates(); setShowTemplateBox('direct'); }} className="px-2 py-1 text-xs bg-white border rounded hover:bg-gray-100">º¸°üÇÔ</button>
+                      <button onClick={() => { if (!directMessage.trim()) { setToast({show: true, type: 'error', message: 'ÀúÀåÇÒ ¸Ş½ÃÁö¸¦ ¸ÕÀú ÀÔ·ÂÇØÁÖ¼¼¿ä.'}); setTimeout(() => setToast({show: false, type: 'error', message: ''}), 3000); return; } setTemplateSaveName(''); setShowTemplateSave('direct'); }} className="px-2 py-1 text-xs bg-white border rounded hover:bg-gray-100">¹®ÀÚÀúÀå</button>
                     </div>
                     <span className="text-xs text-gray-500 whitespace-nowrap">
                       <span className={`font-bold ${messageBytes > maxBytes ? 'text-red-500' : 'text-emerald-600'}`}>{messageBytes}</span>/{maxBytes}byte
                     </span>
                   </div>
                   
-                  {/* íšŒì‹ ë²ˆí˜¸ ì„ íƒ */}
+                  {/* È¸½Å¹øÈ£ ¼±ÅÃ */}
                   <div className="px-3 py-1.5 border-t">
                     <select 
                       value={useIndividualCallback ? '__individual__' : selectedCallback}
@@ -4907,56 +4907,56 @@ const campaignData = {
                       }}
                       className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                     >
-                      <option value="">íšŒì‹ ë²ˆí˜¸ ì„ íƒ</option>
-                      <option value="__individual__">ğŸ“± ê°œë³„íšŒì‹ ë²ˆí˜¸ (ê³ ê°ë³„ ë§¤ì¥ë²ˆí˜¸)</option>
+                      <option value="">È¸½Å¹øÈ£ ¼±ÅÃ</option>
+                      <option value="__individual__">?? °³º°È¸½Å¹øÈ£ (°í°´º° ¸ÅÀå¹øÈ£)</option>
                       {callbackNumbers.map((cb) => (
                         <option key={cb.id} value={cb.phone}>
-                        {formatPhoneNumber(cb.phone)} {cb.label ? `(${cb.label})` : ''} {cb.is_default ? 'â­' : ''}
+                        {formatPhoneNumber(cb.phone)} {cb.label ? `(${cb.label})` : ''} {cb.is_default ? '?' : ''}
                       </option>
                       ))}
                     </select>
                     {useIndividualCallback && (
-                      <p className="text-xs text-blue-600 mt-1">ğŸ’¡ ê° ê³ ê°ì˜ ì£¼ì´ìš©ë§¤ì¥ íšŒì‹ ë²ˆí˜¸ë¡œ ë°œì†¡ë©ë‹ˆë‹¤</p>
+                      <p className="text-xs text-blue-600 mt-1">?? °¢ °í°´ÀÇ ÁÖÀÌ¿ë¸ÅÀå È¸½Å¹øÈ£·Î ¹ß¼ÛµË´Ï´Ù</p>
                     )}
                   </div>
 
-                  {/* ìë™ì…ë ¥ ë²„íŠ¼ */}
+                  {/* ÀÚµ¿ÀÔ·Â ¹öÆ° */}
                   <div className="px-3 py-1.5 border-t bg-gray-50">
                     <div className="flex items-center gap-3">
-                      <span className="text-sm font-bold text-gray-700 whitespace-nowrap">ìë™ì…ë ¥</span>
+                      <span className="text-sm font-bold text-gray-700 whitespace-nowrap">ÀÚµ¿ÀÔ·Â</span>
                       <div className="flex gap-2 flex-1">
-                        <button onClick={() => setDirectMessage(prev => prev + '%ì´ë¦„%')} className="flex-1 py-2 text-sm bg-white border rounded-lg hover:bg-gray-100 font-medium">ì´ë¦„</button>
-                        <button onClick={() => setDirectMessage(prev => prev + '%íšŒì‹ ë²ˆí˜¸%')} className="flex-1 py-2 text-sm bg-white border rounded-lg hover:bg-blue-50 font-medium text-blue-700">íšŒì‹ ë²ˆí˜¸</button>
-                        <button onClick={() => setDirectMessage(prev => prev + '%ê¸°íƒ€1%')} className="flex-1 py-2 text-sm bg-white border rounded-lg hover:bg-gray-100 font-medium">ê¸°íƒ€1</button>
-                        <button onClick={() => setDirectMessage(prev => prev + '%ê¸°íƒ€2%')} className="flex-1 py-2 text-sm bg-white border rounded-lg hover:bg-gray-100 font-medium">ê¸°íƒ€2</button>
-                        <button onClick={() => setDirectMessage(prev => prev + '%ê¸°íƒ€3%')} className="flex-1 py-2 text-sm bg-white border rounded-lg hover:bg-gray-100 font-medium">ê¸°íƒ€3</button>
+                        <button onClick={() => setDirectMessage(prev => prev + '%ÀÌ¸§%')} className="flex-1 py-2 text-sm bg-white border rounded-lg hover:bg-gray-100 font-medium">ÀÌ¸§</button>
+                        <button onClick={() => setDirectMessage(prev => prev + '%È¸½Å¹øÈ£%')} className="flex-1 py-2 text-sm bg-white border rounded-lg hover:bg-blue-50 font-medium text-blue-700">È¸½Å¹øÈ£</button>
+                        <button onClick={() => setDirectMessage(prev => prev + '%±âÅ¸1%')} className="flex-1 py-2 text-sm bg-white border rounded-lg hover:bg-gray-100 font-medium">±âÅ¸1</button>
+                        <button onClick={() => setDirectMessage(prev => prev + '%±âÅ¸2%')} className="flex-1 py-2 text-sm bg-white border rounded-lg hover:bg-gray-100 font-medium">±âÅ¸2</button>
+                        <button onClick={() => setDirectMessage(prev => prev + '%±âÅ¸3%')} className="flex-1 py-2 text-sm bg-white border rounded-lg hover:bg-gray-100 font-medium">±âÅ¸3</button>
                       </div>
                     </div>
                   </div>
                   
-                  {/* ë¯¸ë¦¬ë³´ê¸° + ìŠ¤íŒ¸í•„í„° ë²„íŠ¼ */}
+                  {/* ¹Ì¸®º¸±â + ½ºÆÔÇÊÅÍ ¹öÆ° */}
                   <div className="px-3 py-1.5 border-t">
                     <div className="grid grid-cols-2 gap-2">
                     <button 
                         onClick={() => {
                           if (!directMessage.trim()) {
-                            alert('ë©”ì‹œì§€ë¥¼ ì…ë ¥í•´ì£¼ì„¸ìš”');
+                            alert('¸Ş½ÃÁö¸¦ ÀÔ·ÂÇØÁÖ¼¼¿ä');
                             return;
                           }
                           setShowDirectPreview(true);
                         }}
                         className="py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-sm font-medium transition-colors"
                       >
-                        ğŸ“„ ë¯¸ë¦¬ë³´ê¸°
+                        ?? ¹Ì¸®º¸±â
                       </button>
                       <button 
                         onClick={() => {
                           const toast = document.createElement('div');
                           toast.innerHTML = `
                             <div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:white;padding:24px 32px;border-radius:16px;box-shadow:0 10px 40px rgba(0,0,0,0.2);z-index:9999;text-align:center;">
-                              <div style="font-size:48px;margin-bottom:12px;">ğŸš§</div>
-                              <div style="font-size:16px;font-weight:bold;color:#374151;margin-bottom:8px;">ì¤€ë¹„ ì¤‘ì¸ ê¸°ëŠ¥ì…ë‹ˆë‹¤</div>
-                              <div style="font-size:14px;color:#6B7280;">ìŠ¤íŒ¸í•„í„°í…ŒìŠ¤íŠ¸ëŠ” ê³§ ì—…ë°ì´íŠ¸ë©ë‹ˆë‹¤</div>
+                              <div style="font-size:48px;margin-bottom:12px;">??</div>
+                              <div style="font-size:16px;font-weight:bold;color:#374151;margin-bottom:8px;">ÁØºñ ÁßÀÎ ±â´ÉÀÔ´Ï´Ù</div>
+                              <div style="font-size:14px;color:#6B7280;">½ºÆÔÇÊÅÍÅ×½ºÆ®´Â °ğ ¾÷µ¥ÀÌÆ®µË´Ï´Ù</div>
                             </div>
                             <div style="position:fixed;inset:0;background:rgba(0,0,0,0.3);z-index:9998;" onclick="this.parentElement.remove()"></div>
                           `;
@@ -4965,15 +4965,15 @@ const campaignData = {
                         }}
                         className="py-2.5 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg text-sm font-medium transition-colors"
                       >
-                        ğŸ›¡ï¸ ìŠ¤íŒ¸í•„í„°í…ŒìŠ¤íŠ¸
+                        ??? ½ºÆÔÇÊÅÍÅ×½ºÆ®
                       </button>
                     </div>
                   </div>
                   
-                  {/* ì˜ˆì•½/ë¶„í• /ê´‘ê³  ì˜µì…˜ - 3ë¶„í•  2ì¤„ */}
+                  {/* ¿¹¾à/ºĞÇÒ/±¤°í ¿É¼Ç - 3ºĞÇÒ 2ÁÙ */}
                   <div className="px-3 py-2 border-t">
                     <div className="grid grid-cols-3 gap-2 text-xs">
-                      {/* ì˜ˆì•½ì „ì†¡ */}
+                      {/* ¿¹¾àÀü¼Û */}
                       <div className={`rounded-lg p-3 text-center ${reserveEnabled ? 'bg-blue-50' : 'bg-gray-50'}`}>
                         <label className="flex items-center justify-center gap-1.5 cursor-pointer">
                           <input 
@@ -4985,7 +4985,7 @@ const campaignData = {
                             }}
                             className="rounded w-4 h-4" 
                           />
-                          <span className={`font-medium ${reserveEnabled ? 'text-blue-700' : ''}`}>ì˜ˆì•½ì „ì†¡</span>
+                          <span className={`font-medium ${reserveEnabled ? 'text-blue-700' : ''}`}>¿¹¾àÀü¼Û</span>
                         </label>
                         <div 
                           className={`mt-1.5 text-xs cursor-pointer ${reserveEnabled ? 'text-blue-600 font-medium' : 'text-gray-400'}`}
@@ -4993,10 +4993,10 @@ const campaignData = {
                         >
                           {reserveDateTime 
                             ? new Date(reserveDateTime).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-                            : 'ì˜ˆì•½ì‹œê°„ ì„ íƒ'}
+                            : '¿¹¾à½Ã°£ ¼±ÅÃ'}
                         </div>
                       </div>
-                      {/* ë¶„í• ì „ì†¡ */}
+                      {/* ºĞÇÒÀü¼Û */}
                       <div className={`rounded-lg p-3 text-center ${splitEnabled ? 'bg-purple-50' : 'bg-gray-50'}`}>
                         <label className="flex items-center justify-center gap-1.5 cursor-pointer">
                           <input 
@@ -5005,7 +5005,7 @@ const campaignData = {
                             checked={splitEnabled}
                             onChange={(e) => setSplitEnabled(e.target.checked)}
                           />
-                          <span className={`font-medium ${splitEnabled ? 'text-purple-700' : ''}`}>ë¶„í• ì „ì†¡</span>
+                          <span className={`font-medium ${splitEnabled ? 'text-purple-700' : ''}`}>ºĞÇÒÀü¼Û</span>
                         </label>
                         <div className="mt-1.5 flex items-center justify-center gap-1">
                           <input 
@@ -5016,10 +5016,10 @@ const campaignData = {
                             onChange={(e) => setSplitCount(Number(e.target.value) || 1000)}
                             disabled={!splitEnabled}
                           />
-                          <span className="text-xs text-gray-500">ê±´/ë¶„</span>
+                          <span className="text-xs text-gray-500">°Ç/ºĞ</span>
                         </div>
                       </div>
-                      {/* ê´‘ê³ /080 */}
+                      {/* ±¤°í/080 */}
                       <div className={`rounded-lg p-3 text-center ${adTextEnabled ? 'bg-orange-50' : 'bg-gray-50'}`}>
                         <label className="flex items-center justify-center gap-1.5 cursor-pointer">
                           <input 
@@ -5028,50 +5028,50 @@ const campaignData = {
                             onChange={(e) => setAdTextEnabled(e.target.checked)}
                             className="rounded w-4 h-4"
                           />
-                          <span className={`font-medium ${adTextEnabled ? 'text-orange-700' : ''}`}>ê´‘ê³ í‘œê¸°</span>
+                          <span className={`font-medium ${adTextEnabled ? 'text-orange-700' : ''}`}>±¤°íÇ¥±â</span>
                         </label>
-                        <div className={`mt-1.5 text-xs ${adTextEnabled ? 'text-orange-500' : 'text-gray-400'}`}>080 ìˆ˜ì‹ ê±°ë¶€</div>
+                        <div className={`mt-1.5 text-xs ${adTextEnabled ? 'text-orange-500' : 'text-gray-400'}`}>080 ¼ö½Å°ÅºÎ</div>
                       </div>
                       </div>
                   </div>
                   
-                  {/* ì „ì†¡í•˜ê¸° ë²„íŠ¼ */}
+                  {/* Àü¼ÛÇÏ±â ¹öÆ° */}
                   <div className="px-3 py-2 border-t">
                     <button 
                       onClick={async () => {
-                        // ìœ íš¨ì„± ê²€ì‚¬
+                        // À¯È¿¼º °Ë»ç
                         if (directRecipients.length === 0) {
-                          alert('ìˆ˜ì‹ ìë¥¼ ì¶”ê°€í•´ì£¼ì„¸ìš”');
+                          alert('¼ö½ÅÀÚ¸¦ Ãß°¡ÇØÁÖ¼¼¿ä');
                           return;
                         }
                         if (!directMessage.trim()) {
-                          alert('ë©”ì‹œì§€ë¥¼ ì…ë ¥í•´ì£¼ì„¸ìš”');
+                          alert('¸Ş½ÃÁö¸¦ ÀÔ·ÂÇØÁÖ¼¼¿ä');
                           return;
                         }
                         if (!selectedCallback && !useIndividualCallback) {
-                          alert('íšŒì‹ ë²ˆí˜¸ë¥¼ ì„ íƒí•´ì£¼ì„¸ìš”');
+                          alert('È¸½Å¹øÈ£¸¦ ¼±ÅÃÇØÁÖ¼¼¿ä');
                           return;
                         }
                         if (useIndividualCallback && directRecipients.some((r: any) => !r.callback)) {
-                          alert('ê°œë³„íšŒì‹ ë²ˆí˜¸ê°€ ì—†ëŠ” ìˆ˜ì‹ ìê°€ ìˆìŠµë‹ˆë‹¤.\nì¼ë°˜ íšŒì‹ ë²ˆí˜¸ë¥¼ ì„ íƒí•´ì£¼ì„¸ìš”.');
+                          alert('°³º°È¸½Å¹øÈ£°¡ ¾ø´Â ¼ö½ÅÀÚ°¡ ÀÖ½À´Ï´Ù.\nÀÏ¹İ È¸½Å¹øÈ£¸¦ ¼±ÅÃÇØÁÖ¼¼¿ä.');
                           return;
                         }
                         if ((directMsgType === 'LMS' || directMsgType === 'MMS') && !directSubject.trim()) {
-                          alert('ì œëª©ì„ ì…ë ¥í•´ì£¼ì„¸ìš”');
+                          alert('Á¦¸ñÀ» ÀÔ·ÂÇØÁÖ¼¼¿ä');
                           return;
                         }
 
-                        // SMS ë°”ì´íŠ¸ ì´ˆê³¼ ì‹œ LMS ì „í™˜ ëª¨ë‹¬
+                        // SMS ¹ÙÀÌÆ® ÃÊ°ú ½Ã LMS ÀüÈ¯ ¸ğ´Ş
                         if (directMsgType === 'SMS' && messageBytes > 90 && !smsOverrideAccepted) {
                           setPendingBytes(messageBytes);
                           setShowLmsConfirm(true);
                           return;
                         }
 
-                        // LMS/MMSì¸ë° SMSë¡œ ë³´ë‚´ë„ ë˜ëŠ” ê²½ìš° ë¹„ìš© ì ˆê° ì•ˆë‚´
+                        // LMS/MMSÀÎµ¥ SMS·Î º¸³»µµ µÇ´Â °æ¿ì ºñ¿ë Àı°¨ ¾È³»
                         if (directMsgType !== 'SMS') {
-                          const smsOptOut = `ë¬´ë£Œê±°ë¶€${optOutNumber.replace(/-/g, '')}`;
-                          const smsFullMsg = adTextEnabled ? `(ê´‘ê³ )${directMessage}\n${smsOptOut}` : directMessage;
+                          const smsOptOut = `¹«·á°ÅºÎ${optOutNumber.replace(/-/g, '')}`;
+                          const smsFullMsg = adTextEnabled ? `(±¤°í)${directMessage}\n${smsOptOut}` : directMessage;
                           const smsBytes = calculateBytes(smsFullMsg);
                           if (smsBytes <= 90) {
                             setShowSmsConvert({show: true, from: 'direct', currentBytes: messageBytes, smsBytes, count: directRecipients.length});
@@ -5079,7 +5079,7 @@ const campaignData = {
                           }
                         }
 
-                        // ìˆ˜ì‹ ê±°ë¶€ ì²´í¬
+                        // ¼ö½Å°ÅºÎ Ã¼Å©
                         const token = localStorage.getItem('token');
                         const phones = directRecipients.map((r: any) => r.phone);
                         const checkRes = await fetch('/api/unsubscribes/check', {
@@ -5102,24 +5102,24 @@ const campaignData = {
                       }}
                       className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-base transition-colors"
                     >
-                      ì „ì†¡í•˜ê¸°
+                      Àü¼ÛÇÏ±â
                     </button>
                   </div>
                 </div>
               </div>
               
-              {/* ìš°ì¸¡: ìˆ˜ì‹ ì ëª©ë¡ */}
+              {/* ¿ìÃø: ¼ö½ÅÀÚ ¸ñ·Ï */}
               <div className="flex-1 flex flex-col">
-                {/* ì…ë ¥ ë°©ì‹ íƒ­ + ì²´í¬ë°•ìŠ¤ */}
+                {/* ÀÔ·Â ¹æ½Ä ÅÇ + Ã¼Å©¹Ú½º */}
                 <div className="flex items-center gap-3 mb-4">
                   <button 
                     onClick={() => setShowDirectInput(true)}
                     className={`px-5 py-2.5 border-2 rounded-lg text-sm font-medium hover:bg-gray-50 ${directInputMode === 'direct' ? 'bg-emerald-50 border-emerald-400 text-emerald-700' : ''}`}
-                  >âœï¸ ì§ì ‘ì…ë ¥</button>
+                  >?? Á÷Á¢ÀÔ·Â</button>
                   <label 
                     className={`px-5 py-2.5 border-2 rounded-lg text-sm font-medium cursor-pointer hover:bg-gray-50 ${directInputMode === 'file' ? 'bg-amber-50 border-amber-400 text-amber-700' : ''} ${directFileLoading ? 'opacity-50 cursor-wait' : ''}`}
                   >
-                    {directFileLoading ? 'â³ íŒŒì¼ ë¶„ì„ì¤‘...' : 'ğŸ“ íŒŒì¼ë“±ë¡'}
+                    {directFileLoading ? '? ÆÄÀÏ ºĞ¼®Áß...' : '?? ÆÄÀÏµî·Ï'}
                     <input
                       type="file"
                       accept=".xlsx,.xls,.csv"
@@ -5146,10 +5146,10 @@ const campaignData = {
                             setDirectShowMapping(true);
                             setDirectColumnMapping({});
                           } else {
-                            alert(data.error || 'íŒŒì¼ íŒŒì‹± ì‹¤íŒ¨');
+                            alert(data.error || 'ÆÄÀÏ ÆÄ½Ì ½ÇÆĞ');
                           }
                         } catch (err) {
-                          alert('íŒŒì¼ ì—…ë¡œë“œ ì¤‘ ì˜¤ë¥˜ê°€ ë°œìƒí–ˆìŠµë‹ˆë‹¤.');
+                          alert('ÆÄÀÏ ¾÷·Îµå Áß ¿À·ù°¡ ¹ß»ıÇß½À´Ï´Ù.');
                         } finally {
                           setDirectFileLoading(false);
                         }
@@ -5170,36 +5170,36 @@ const campaignData = {
                        setShowAddressBook(true);
                      }}
                      className={`px-5 py-2.5 border-2 rounded-lg text-sm font-medium hover:bg-gray-50 ${directInputMode === 'address' ? 'bg-emerald-50 border-emerald-400 text-emerald-700' : ''}`}
-                   >ğŸ“’ ì£¼ì†Œë¡</button>
+                   >?? ÁÖ¼Ò·Ï</button>
                   <label className="flex items-center gap-2 text-sm cursor-pointer ml-2">
                     <input type="checkbox" defaultChecked className="rounded w-4 h-4" />
-                    <span className="font-medium">ì¤‘ë³µì œê±°</span>
+                    <span className="font-medium">Áßº¹Á¦°Å</span>
                   </label>
                   <label className="flex items-center gap-2 text-sm cursor-pointer">
                     <input type="checkbox" defaultChecked className="rounded w-4 h-4" />
-                    <span className="font-medium">ìˆ˜ì‹ ê±°ë¶€ì œê±°</span>
+                    <span className="font-medium">¼ö½Å°ÅºÎÁ¦°Å</span>
                   </label>
                   <div className="flex-1"></div>
                   <button 
                     onClick={() => setShowDirectSend(false)}
                     className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-medium flex items-center gap-1"
                   >
-                    <span>âœ•</span> ì°½ë‹«ê¸°
+                    <span>?</span> Ã¢´İ±â
                   </button>
                 </div>
                 
-                {/* ìˆ˜ì‹ ì í…Œì´ë¸” */}
+                {/* ¼ö½ÅÀÚ Å×ÀÌºí */}
                 <div className="border-2 rounded-xl overflow-hidden flex-1 flex flex-col">
                   <div className="bg-gray-50 px-4 py-3 flex justify-between items-center border-b">
                   <span className="text-sm font-medium">
-                      ì´ <span className="text-emerald-600 font-bold text-lg">{directRecipients.length.toLocaleString()}</span> ê±´
+                      ÃÑ <span className="text-emerald-600 font-bold text-lg">{directRecipients.length.toLocaleString()}</span> °Ç
                       {directRecipients.length > 10 && !directSearchQuery && (
-                        <span className="text-gray-400 text-xs ml-2">(ìƒìœ„ 10ê°œ í‘œì‹œ)</span>
+                        <span className="text-gray-400 text-xs ml-2">(»óÀ§ 10°³ Ç¥½Ã)</span>
                       )}
                     </span>
                     <input
                       type="text"
-                      placeholder="ğŸ” ìˆ˜ì‹ ë²ˆí˜¸ ê²€ìƒ‰"
+                      placeholder="?? ¼ö½Å¹øÈ£ °Ë»ö"
                       value={directSearchQuery}
                       onChange={(e) => setDirectSearchQuery(e.target.value)}
                       className="border rounded-lg px-3 py-2 text-sm w-52"
@@ -5223,20 +5223,20 @@ const campaignData = {
                               }}
                             />
                           </th>
-                          <th className="px-4 py-3 text-left text-xs font-bold text-gray-600">ìˆ˜ì‹ ë²ˆí˜¸</th>
-                          <th className="px-4 py-3 text-left text-xs font-bold text-gray-600">ì´ë¦„</th>
-                          <th className="px-4 py-3 text-left text-xs font-bold text-gray-600">íšŒì‹ ë²ˆí˜¸</th>
-                          <th className="px-4 py-3 text-left text-xs font-bold text-gray-600">ê¸°íƒ€1</th>
-                          <th className="px-4 py-3 text-left text-xs font-bold text-gray-600">ê¸°íƒ€2</th>
-                          <th className="px-4 py-3 text-left text-xs font-bold text-gray-600">ê¸°íƒ€3</th>
+                          <th className="px-4 py-3 text-left text-xs font-bold text-gray-600">¼ö½Å¹øÈ£</th>
+                          <th className="px-4 py-3 text-left text-xs font-bold text-gray-600">ÀÌ¸§</th>
+                          <th className="px-4 py-3 text-left text-xs font-bold text-gray-600">È¸½Å¹øÈ£</th>
+                          <th className="px-4 py-3 text-left text-xs font-bold text-gray-600">±âÅ¸1</th>
+                          <th className="px-4 py-3 text-left text-xs font-bold text-gray-600">±âÅ¸2</th>
+                          <th className="px-4 py-3 text-left text-xs font-bold text-gray-600">±âÅ¸3</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y">
                         {directRecipients.length === 0 ? (
                           <tr>
                             <td colSpan={7} className="px-4 py-24 text-center text-gray-400">
-                              <div className="text-4xl mb-2">ğŸ“‹</div>
-                              <div className="text-sm">íŒŒì¼ì„ ì—…ë¡œë“œí•˜ê±°ë‚˜ ì§ì ‘ ì…ë ¥í•´ì£¼ì„¸ìš”</div>
+                              <div className="text-4xl mb-2">??</div>
+                              <div className="text-sm">ÆÄÀÏÀ» ¾÷·ÎµåÇÏ°Å³ª Á÷Á¢ ÀÔ·ÂÇØÁÖ¼¼¿ä</div>
                             </td>
                           </tr>
                         ) : (
@@ -5273,12 +5273,12 @@ const campaignData = {
                   </div>
                 </div>
                 
-                {/* í•˜ë‹¨ ë²„íŠ¼ - ì „ì†¡í•˜ê¸°ì™€ ë†’ì´ ë§ì¶¤ */}
+                {/* ÇÏ´Ü ¹öÆ° - Àü¼ÛÇÏ±â¿Í ³ôÀÌ ¸ÂÃã */}
                 <div className="flex gap-3 mt-4">
                   <button 
                     onClick={() => {
                       if (selectedRecipients.size === 0) {
-                        alert('ì„ íƒëœ í•­ëª©ì´ ì—†ìŠµë‹ˆë‹¤');
+                        alert('¼±ÅÃµÈ Ç×¸ñÀÌ ¾ø½À´Ï´Ù');
                         return;
                       }
                       const newList = directRecipients.filter((_, idx) => !selectedRecipients.has(idx));
@@ -5286,146 +5286,146 @@ const campaignData = {
                       setSelectedRecipients(new Set());
                     }}
                     className="px-5 py-3 border-2 rounded-xl text-sm font-medium hover:bg-gray-50"
-                  >ì„ íƒì‚­ì œ</button>
+                  >¼±ÅÃ»èÁ¦</button>
                   <button 
                     onClick={() => {
                       if (directRecipients.length === 0) return;
-                      if (confirm('ì „ì²´ ì‚­ì œí•˜ì‹œê² ìŠµë‹ˆê¹Œ?')) {
+                      if (confirm('ÀüÃ¼ »èÁ¦ÇÏ½Ã°Ú½À´Ï±î?')) {
                         setDirectRecipients([]);
                         setSelectedRecipients(new Set());
                       }
                     }}
                     className="px-5 py-3 border-2 rounded-xl text-sm font-medium hover:bg-gray-50"
-                  >ì „ì²´ì‚­ì œ</button>
+                  >ÀüÃ¼»èÁ¦</button>
                   <div className="flex-1"></div>
                   <button 
                     onClick={() => {
                       setDirectRecipients([]);
                       setDirectMessage('');
                       setDirectSubject('');
-                      setMmsImages([]);
+                      setMmsUploadedImages([]);
                       setSelectedRecipients(new Set());
                       setSelectedCallback('');
                     }}
                     className="px-5 py-3 border-2 rounded-xl text-sm font-medium hover:bg-gray-50"
-                  >ğŸ”„ ì´ˆê¸°í™”</button>
+                  >?? ÃÊ±âÈ­</button>
                 </div>
               </div>
             </div>
-            {/* íŒŒì¼ ë§¤í•‘ ëª¨ë‹¬ */}
+            {/* ÆÄÀÏ ¸ÅÇÎ ¸ğ´Ş */}
             {directShowMapping && (
               <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60]">
                 <div className="bg-white rounded-2xl shadow-2xl w-[550px] overflow-hidden">
                   <div className="p-4 border-b bg-blue-50 flex justify-between items-center">
-                    <h3 className="font-bold text-lg">ğŸ“ ì»¬ëŸ¼ ë§¤í•‘</h3>
-                    <button onClick={() => setDirectShowMapping(false)} className="text-gray-500 hover:text-gray-700 text-xl">âœ•</button>
+                    <h3 className="font-bold text-lg">?? ÄÃ·³ ¸ÅÇÎ</h3>
+                    <button onClick={() => setDirectShowMapping(false)} className="text-gray-500 hover:text-gray-700 text-xl">?</button>
                   </div>
                   
                   <div className="p-6">
-                    {/* ë§¤í•‘ ì•ˆë‚´ */}
+                    {/* ¸ÅÇÎ ¾È³» */}
                     <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-xl text-sm text-yellow-800">
-                      ğŸ’¡ ì•„ë˜ í•„ìˆ˜ í•­ëª©ì— <strong>ì—‘ì…€ì˜ ì–´ë–¤ ì»¬ëŸ¼</strong>ì„ ë§¤í•‘í• ì§€ ì„ íƒí•´ì£¼ì„¸ìš”.
+                      ?? ¾Æ·¡ ÇÊ¼ö Ç×¸ñ¿¡ <strong>¿¢¼¿ÀÇ ¾î¶² ÄÃ·³</strong>À» ¸ÅÇÎÇÒÁö ¼±ÅÃÇØÁÖ¼¼¿ä.
                     </div>
                     
-                    {/* í—¤ë” */}
+                    {/* Çì´õ */}
                     <div className="flex items-center gap-4 mb-3 px-4">
-                      <span className="w-28 text-xs font-bold text-gray-500">í•„ìˆ˜ í•­ëª©</span>
-                      <span className="w-8 text-center text-xs text-gray-400">â†’</span>
-                      <span className="flex-1 text-xs font-bold text-gray-500">ì—‘ì…€ ì»¬ëŸ¼ ì„ íƒ</span>
+                      <span className="w-28 text-xs font-bold text-gray-500">ÇÊ¼ö Ç×¸ñ</span>
+                      <span className="w-8 text-center text-xs text-gray-400">¡æ</span>
+                      <span className="flex-1 text-xs font-bold text-gray-500">¿¢¼¿ ÄÃ·³ ¼±ÅÃ</span>
                     </div>
                     
-                    {/* ë§¤í•‘ ì„ íƒ - 5ê°œë§Œ */}
+                    {/* ¸ÅÇÎ ¼±ÅÃ - 5°³¸¸ */}
                     <div className="space-y-3">
-                      {/* ìˆ˜ì‹ ë²ˆí˜¸ (í•„ìˆ˜) */}
+                      {/* ¼ö½Å¹øÈ£ (ÇÊ¼ö) */}
                       <div className="flex items-center gap-4 p-4 bg-red-50 rounded-xl border-2 border-red-200">
-                        <span className="w-28 text-sm font-bold text-red-700">ğŸ“± ìˆ˜ì‹ ë²ˆí˜¸ *</span>
-                        <span className="w-8 text-center text-gray-400">â†’</span>
+                        <span className="w-28 text-sm font-bold text-red-700">?? ¼ö½Å¹øÈ£ *</span>
+                        <span className="w-8 text-center text-gray-400">¡æ</span>
                         <select
                           className="flex-1 border-2 border-red-300 rounded-lg px-4 py-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-red-500"
                           value={directColumnMapping.phone || ''}
                           onChange={(e) => setDirectColumnMapping({...directColumnMapping, phone: e.target.value})}
                         >
-                          <option value="">-- ì»¬ëŸ¼ ì„ íƒ --</option>
+                          <option value="">-- ÄÃ·³ ¼±ÅÃ --</option>
                           {directFileHeaders.map((h, i) => (
                             <option key={i} value={h}>{h}</option>
                           ))}
                         </select>
                       </div>
                       
-                      {/* ì´ë¦„ */}
+                      {/* ÀÌ¸§ */}
                       <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-xl">
-                        <span className="w-28 text-sm font-bold text-gray-700">ğŸ‘¤ ì´ë¦„</span>
-                        <span className="w-8 text-center text-gray-400">â†’</span>
+                        <span className="w-28 text-sm font-bold text-gray-700">?? ÀÌ¸§</span>
+                        <span className="w-8 text-center text-gray-400">¡æ</span>
                         <select
                           className="flex-1 border rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                           value={directColumnMapping.name || ''}
                           onChange={(e) => setDirectColumnMapping({...directColumnMapping, name: e.target.value})}
                         >
-                          <option value="">-- ì»¬ëŸ¼ ì„ íƒ --</option>
+                          <option value="">-- ÄÃ·³ ¼±ÅÃ --</option>
                           {directFileHeaders.map((h, i) => (
                             <option key={i} value={h}>{h}</option>
                           ))}
                         </select>
                       </div>
                       
-                      {/* ê¸°íƒ€1 */}
+                      {/* ±âÅ¸1 */}
                       <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-xl">
-                        <span className="w-28 text-sm font-bold text-gray-700">1ï¸âƒ£ ê¸°íƒ€1</span>
-                        <span className="w-8 text-center text-gray-400">â†’</span>
+                        <span className="w-28 text-sm font-bold text-gray-700">1?? ±âÅ¸1</span>
+                        <span className="w-8 text-center text-gray-400">¡æ</span>
                         <select
                           className="flex-1 border rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                           value={directColumnMapping.extra1 || ''}
                           onChange={(e) => setDirectColumnMapping({...directColumnMapping, extra1: e.target.value})}
                         >
-                          <option value="">-- ì»¬ëŸ¼ ì„ íƒ --</option>
+                          <option value="">-- ÄÃ·³ ¼±ÅÃ --</option>
                           {directFileHeaders.map((h, i) => (
                             <option key={i} value={h}>{h}</option>
                           ))}
                         </select>
                       </div>
                       
-                      {/* ê¸°íƒ€2 */}
+                      {/* ±âÅ¸2 */}
                       <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-xl">
-                        <span className="w-28 text-sm font-bold text-gray-700">2ï¸âƒ£ ê¸°íƒ€2</span>
-                        <span className="w-8 text-center text-gray-400">â†’</span>
+                        <span className="w-28 text-sm font-bold text-gray-700">2?? ±âÅ¸2</span>
+                        <span className="w-8 text-center text-gray-400">¡æ</span>
                         <select
                           className="flex-1 border rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                           value={directColumnMapping.extra2 || ''}
                           onChange={(e) => setDirectColumnMapping({...directColumnMapping, extra2: e.target.value})}
                         >
-                          <option value="">-- ì»¬ëŸ¼ ì„ íƒ --</option>
+                          <option value="">-- ÄÃ·³ ¼±ÅÃ --</option>
                           {directFileHeaders.map((h, i) => (
                             <option key={i} value={h}>{h}</option>
                           ))}
                         </select>
                       </div>
                       
-                      {/* ê¸°íƒ€3 */}
+                      {/* ±âÅ¸3 */}
                       <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-xl">
-                        <span className="w-28 text-sm font-bold text-gray-700">3ï¸âƒ£ ê¸°íƒ€3</span>
-                        <span className="w-8 text-center text-gray-400">â†’</span>
+                        <span className="w-28 text-sm font-bold text-gray-700">3?? ±âÅ¸3</span>
+                        <span className="w-8 text-center text-gray-400">¡æ</span>
                         <select
                           className="flex-1 border rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                           value={directColumnMapping.extra3 || ''}
                           onChange={(e) => setDirectColumnMapping({...directColumnMapping, extra3: e.target.value})}
                         >
-                          <option value="">-- ì»¬ëŸ¼ ì„ íƒ --</option>
+                          <option value="">-- ÄÃ·³ ¼±ÅÃ --</option>
                           {directFileHeaders.map((h, i) => (
                             <option key={i} value={h}>{h}</option>
                           ))}
                         </select>
                       </div>
                       
-                      {/* íšŒì‹ ë²ˆí˜¸ (ë§¤ì¥ë²ˆí˜¸) */}
+                      {/* È¸½Å¹øÈ£ (¸ÅÀå¹øÈ£) */}
                       <div className="flex items-center gap-4 p-4 bg-blue-50 rounded-xl border border-blue-200">
-                        <span className="w-28 text-sm font-bold text-blue-700">ğŸ“ íšŒì‹ ë²ˆí˜¸</span>
-                        <span className="w-8 text-center text-gray-400">â†’</span>
+                        <span className="w-28 text-sm font-bold text-blue-700">?? È¸½Å¹øÈ£</span>
+                        <span className="w-8 text-center text-gray-400">¡æ</span>
                         <select
                           className="flex-1 border border-blue-300 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                           value={directColumnMapping.callback || ''}
                           onChange={(e) => setDirectColumnMapping({...directColumnMapping, callback: e.target.value})}
                         >
-                          <option value="">-- ì»¬ëŸ¼ ì„ íƒ --</option>
+                          <option value="">-- ÄÃ·³ ¼±ÅÃ --</option>
                           {directFileHeaders.map((h, i) => (
                             <option key={i} value={h}>{h}</option>
                           ))}
@@ -5435,23 +5435,23 @@ const campaignData = {
                   </div>
                   
                   <div className="p-4 border-t bg-gray-50 flex justify-between items-center">
-                    <span className="text-sm text-gray-600">ğŸ“Š ì´ <strong>{directFileData.length.toLocaleString()}</strong>ê±´</span>
+                    <span className="text-sm text-gray-600">?? ÃÑ <strong>{directFileData.length.toLocaleString()}</strong>°Ç</span>
                     <div className="flex gap-3">
                       <button 
                         onClick={() => setDirectShowMapping(false)}
                         className="px-6 py-2.5 border rounded-lg text-sm font-medium hover:bg-gray-100"
-                      >ì·¨ì†Œ</button>
+                      >Ãë¼Ò</button>
                       <button 
                         onClick={async () => {
                           if (!directColumnMapping.phone) {
-                            alert('ìˆ˜ì‹ ë²ˆí˜¸ëŠ” í•„ìˆ˜ì…ë‹ˆë‹¤.');
+                            alert('¼ö½Å¹øÈ£´Â ÇÊ¼öÀÔ´Ï´Ù.');
                             return;
                           }
                           
                           setDirectMappingLoading(true);
                           setDirectLoadingProgress(0);
                           
-                          // ë¹„ë™ê¸°ë¡œ ì²˜ë¦¬í•˜ì—¬ UI ì—…ë°ì´íŠ¸ í—ˆìš©
+                          // ºñµ¿±â·Î Ã³¸®ÇÏ¿© UI ¾÷µ¥ÀÌÆ® Çã¿ë
                           await new Promise(resolve => setTimeout(resolve, 10));
                           
                           const total = directFileData.length;
@@ -5487,7 +5487,7 @@ const campaignData = {
                         disabled={!directColumnMapping.phone || directMappingLoading}
                         className="px-8 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-sm font-bold disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        {directMappingLoading ? `ì²˜ë¦¬ì¤‘... ${directLoadingProgress}%` : 'ë“±ë¡í•˜ê¸°'}
+                        {directMappingLoading ? `Ã³¸®Áß... ${directLoadingProgress}%` : 'µî·ÏÇÏ±â'}
                       </button>
                     </div>
                   </div>
@@ -5495,17 +5495,17 @@ const campaignData = {
               </div>
             )}
             
-            {/* íŠ¹ìˆ˜ë¬¸ì ëª¨ë‹¬ */}
+            {/* Æ¯¼ö¹®ÀÚ ¸ğ´Ş */}
             {showSpecialChars && (
               <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[70]" onClick={() => setShowSpecialChars(null)}>
                 <div className="bg-white rounded-2xl shadow-2xl w-[400px] overflow-hidden animate-in fade-in zoom-in" onClick={e => e.stopPropagation()}>
                   <div className="p-4 border-b bg-purple-50 flex justify-between items-center">
-                    <h3 className="font-bold text-lg">âœ¨ íŠ¹ìˆ˜ë¬¸ì</h3>
-                    <button onClick={() => setShowSpecialChars(null)} className="text-gray-500 hover:text-gray-700 text-xl">âœ•</button>
+                    <h3 className="font-bold text-lg">? Æ¯¼ö¹®ÀÚ</h3>
+                    <button onClick={() => setShowSpecialChars(null)} className="text-gray-500 hover:text-gray-700 text-xl">?</button>
                   </div>
                   <div className="p-4">
                     <div className="grid grid-cols-8 gap-1.5">
-                      {['â˜…','â˜†','â™¥','â™¡','â—†','â—‡','â– ','â–¡','â–²','â–³','â–¶','â—€','â—','â—‹','â—','â™¤','â™ ','â™§','â™£','â™¢','â™¦','â™ª','â™¬','â™©','â˜','âœ‰','âœˆ','âœŒ','â™¨','â˜€','â˜','â˜‚','â­','âœ…','âŒ','âš¡','â¤','ğŸ’›','ğŸ’š','ğŸ’™','â¬†','â¬‡','â¬…','â¡','â†‘','â†“','â†','â†’','â‘ ','â‘¡','â‘¢','â‘£','â‘¤','â‘¥','â‘¦','â‘§','ãˆœ','ãˆ”','â„¡','ã‰¿','ã','ã','ã¡','ã'].map((char, i) => (
+                      {['¡Ú','¡Ù','¢¾','¢½','¡ß','¡Ş','¡á','¡à','¡ã','¡â','¢º','¢¸','¡Ü','¡Û','¡İ','¢»','¢¼','¢¿','¢À','?','?','¢Ü','¢İ','¢Û','¢Ï','?','?','?','¢Í','?','?','?','?','?','?','?','?','??','??','??','?','?','?','?','¡è','¡é','¡ç','¡æ','¨ç','¨è','¨é','¨ê','¨ë','¨ì','¨í','¨î','¢ß','©Å','¢å','¢Ş','§¯','§¸','§³','§·'].map((char, i) => (
                         <button
                           key={i}
                           onClick={() => {
@@ -5519,26 +5519,26 @@ const campaignData = {
                         </button>
                       ))}
                     </div>
-                    <p className="text-xs text-gray-400 mt-3 text-center">âš ï¸ ì¼ë¶€ íŠ¹ìˆ˜ë¬¸ìëŠ” LMS ìë™ ì „í™˜ë  ìˆ˜ ìˆìŠµë‹ˆë‹¤</p>
+                    <p className="text-xs text-gray-400 mt-3 text-center">?? ÀÏºÎ Æ¯¼ö¹®ÀÚ´Â LMS ÀÚµ¿ ÀüÈ¯µÉ ¼ö ÀÖ½À´Ï´Ù</p>
                   </div>
                 </div>
               </div>
             )}
 
-            {/* ë³´ê´€í•¨ ëª¨ë‹¬ */}
+            {/* º¸°üÇÔ ¸ğ´Ş */}
             {showTemplateBox && (
               <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[70]" onClick={() => setShowTemplateBox(null)}>
                 <div className="bg-white rounded-2xl shadow-2xl w-[500px] max-h-[70vh] overflow-hidden animate-in fade-in zoom-in" onClick={e => e.stopPropagation()}>
                   <div className="p-4 border-b bg-amber-50 flex justify-between items-center">
-                    <h3 className="font-bold text-lg">ğŸ“‚ ë³´ê´€í•¨</h3>
-                    <button onClick={() => setShowTemplateBox(null)} className="text-gray-500 hover:text-gray-700 text-xl">âœ•</button>
+                    <h3 className="font-bold text-lg">?? º¸°üÇÔ</h3>
+                    <button onClick={() => setShowTemplateBox(null)} className="text-gray-500 hover:text-gray-700 text-xl">?</button>
                   </div>
                   <div className="p-4 overflow-y-auto max-h-[50vh]">
                     {templateList.length === 0 ? (
                       <div className="text-center py-12 text-gray-400">
-                        <div className="text-4xl mb-3">ğŸ“­</div>
-                        <div className="text-sm">ì €ì¥ëœ ë¬¸ìê°€ ì—†ìŠµë‹ˆë‹¤</div>
-                        <div className="text-xs mt-1">ë©”ì‹œì§€ ì‘ì„± í›„ 'ë¬¸ìì €ì¥'ì„ ëˆŒëŸ¬ì£¼ì„¸ìš”</div>
+                        <div className="text-4xl mb-3">??</div>
+                        <div className="text-sm">ÀúÀåµÈ ¹®ÀÚ°¡ ¾ø½À´Ï´Ù</div>
+                        <div className="text-xs mt-1">¸Ş½ÃÁö ÀÛ¼º ÈÄ '¹®ÀÚÀúÀå'À» ´­·¯ÁÖ¼¼¿ä</div>
                       </div>
                     ) : (
                       <div className="space-y-2">
@@ -5551,7 +5551,7 @@ const campaignData = {
                                 <button
                                   onClick={(e) => { e.stopPropagation(); deleteTemplate(t.id); }}
                                   className="text-gray-300 hover:text-red-500 text-sm opacity-0 group-hover:opacity-100 transition-opacity"
-                                >ğŸ—‘ï¸</button>
+                                >???</button>
                               </div>
                             </div>
                             <div className="text-xs text-gray-500 mb-3 line-clamp-2 whitespace-pre-wrap">{t.content}</div>
@@ -5567,11 +5567,11 @@ const campaignData = {
                                   if (t.message_type) setDirectMsgType(t.message_type);
                                 }
                                 setShowTemplateBox(null);
-                                setToast({ show: true, type: 'success', message: 'ë¬¸ìê°€ ì ìš©ë˜ì—ˆìŠµë‹ˆë‹¤.' });
+                                setToast({ show: true, type: 'success', message: '¹®ÀÚ°¡ Àû¿ëµÇ¾ú½À´Ï´Ù.' });
                                 setTimeout(() => setToast({ show: false, type: 'success', message: '' }), 3000);
                               }}
                               className="w-full py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-sm font-medium transition-colors"
-                            >ì ìš©í•˜ê¸°</button>
+                            >Àû¿ëÇÏ±â</button>
                           </div>
                         ))}
                       </div>
@@ -5581,28 +5581,28 @@ const campaignData = {
               </div>
             )}
 
-            {/* ë¬¸ìì €ì¥ ëª¨ë‹¬ */}
+            {/* ¹®ÀÚÀúÀå ¸ğ´Ş */}
             {showTemplateSave && (
               <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[70]" onClick={() => setShowTemplateSave(null)}>
                 <div className="bg-white rounded-2xl shadow-2xl w-[400px] overflow-hidden animate-in fade-in zoom-in" onClick={e => e.stopPropagation()}>
                   <div className="p-4 border-b bg-emerald-50 flex justify-between items-center">
-                    <h3 className="font-bold text-lg">ğŸ’¾ ë¬¸ì ì €ì¥</h3>
-                    <button onClick={() => setShowTemplateSave(null)} className="text-gray-500 hover:text-gray-700 text-xl">âœ•</button>
+                    <h3 className="font-bold text-lg">?? ¹®ÀÚ ÀúÀå</h3>
+                    <button onClick={() => setShowTemplateSave(null)} className="text-gray-500 hover:text-gray-700 text-xl">?</button>
                   </div>
                   <div className="p-6">
                     <div className="mb-4">
-                      <label className="block text-sm font-medium text-gray-700 mb-2">ì €ì¥í•  ì´ë¦„</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">ÀúÀåÇÒ ÀÌ¸§</label>
                       <input
                         type="text"
                         value={templateSaveName}
                         onChange={(e) => setTemplateSaveName(e.target.value)}
-                        placeholder="ì˜ˆ: VIP í• ì¸ ì•ˆë‚´, ë´„ ì‹ ìƒí’ˆ í™ë³´"
+                        placeholder="¿¹: VIP ÇÒÀÎ ¾È³», º½ ½Å»óÇ° È«º¸"
                         className="w-full border-2 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
                         autoFocus
                       />
                     </div>
                     <div className="mb-4 p-3 bg-gray-50 rounded-xl">
-                      <div className="text-xs text-gray-400 mb-1">ì €ì¥ë  ë‚´ìš© ë¯¸ë¦¬ë³´ê¸°</div>
+                      <div className="text-xs text-gray-400 mb-1">ÀúÀåµÉ ³»¿ë ¹Ì¸®º¸±â</div>
                       <div className="text-sm text-gray-700 whitespace-pre-wrap line-clamp-4">
                         {showTemplateSave === 'target' ? targetMessage : directMessage}
                       </div>
@@ -5611,11 +5611,11 @@ const campaignData = {
                       <button
                         onClick={() => setShowTemplateSave(null)}
                         className="flex-1 py-3 border-2 rounded-xl text-sm font-medium hover:bg-gray-50"
-                      >ì·¨ì†Œ</button>
+                      >Ãë¼Ò</button>
                       <button
                         onClick={async () => {
                           if (!templateSaveName.trim()) {
-                            setToast({ show: true, type: 'error', message: 'ì´ë¦„ì„ ì…ë ¥í•´ì£¼ì„¸ìš”.' });
+                            setToast({ show: true, type: 'error', message: 'ÀÌ¸§À» ÀÔ·ÂÇØÁÖ¼¼¿ä.' });
                             setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
                             return;
                           }
@@ -5626,25 +5626,25 @@ const campaignData = {
                           if (ok) setShowTemplateSave(null);
                         }}
                         className="flex-1 py-3 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl text-sm font-bold transition-colors"
-                      >ğŸ’¾ ì €ì¥í•˜ê¸°</button>
+                      >?? ÀúÀåÇÏ±â</button>
                     </div>
                   </div>
                 </div>
               </div>
             )}
 
-            {/* ì§ì ‘ì…ë ¥ ëª¨ë‹¬ */}
+            {/* Á÷Á¢ÀÔ·Â ¸ğ´Ş */}
             {showDirectInput && (
               <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60]">
                 <div className="bg-white rounded-2xl shadow-2xl w-[500px] overflow-hidden">
                   <div className="p-4 border-b bg-blue-50 flex justify-between items-center">
-                    <h3 className="font-bold text-lg">âœï¸ ì§ì ‘ì…ë ¥</h3>
-                    <button onClick={() => setShowDirectInput(false)} className="text-gray-500 hover:text-gray-700 text-xl">âœ•</button>
+                    <h3 className="font-bold text-lg">?? Á÷Á¢ÀÔ·Â</h3>
+                    <button onClick={() => setShowDirectInput(false)} className="text-gray-500 hover:text-gray-700 text-xl">?</button>
                   </div>
                   
                   <div className="p-6">
                     <div className="mb-3 text-sm text-gray-600">
-                      ì „í™”ë²ˆí˜¸ë¥¼ í•œ ì¤„ì— í•˜ë‚˜ì”© ì…ë ¥í•´ì£¼ì„¸ìš”.
+                      ÀüÈ­¹øÈ£¸¦ ÇÑ ÁÙ¿¡ ÇÏ³ª¾¿ ÀÔ·ÂÇØÁÖ¼¼¿ä.
                     </div>
                     <textarea
                       value={directInputText}
@@ -5658,7 +5658,7 @@ const campaignData = {
                     <button 
                       onClick={() => setShowDirectInput(false)}
                       className="px-6 py-2.5 border rounded-lg text-sm font-medium hover:bg-gray-100"
-                    >ì·¨ì†Œ</button>
+                    >Ãë¼Ò</button>
                     <button 
                       onClick={() => {
                         const lines = directInputText.split('\n').map(l => l.trim()).filter(l => l);
@@ -5677,7 +5677,7 @@ const campaignData = {
                       }}
                       className="px-6 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-sm font-medium"
                     >
-                      ë“±ë¡
+                      µî·Ï
                     </button>
                   </div>
                 </div>
@@ -5687,23 +5687,23 @@ const campaignData = {
             </div>
         </div>
       )}
-      {/* ì£¼ì†Œë¡ ëª¨ë‹¬ */}
+      {/* ÁÖ¼Ò·Ï ¸ğ´Ş */}
       {showAddressBook && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60]">
           <div className="bg-white rounded-xl shadow-2xl w-[750px] max-h-[85vh] overflow-hidden">
             <div className="px-6 py-4 border-b bg-amber-50 flex justify-between items-center">
-              <h3 className="text-lg font-bold text-amber-700">ğŸ“’ ì£¼ì†Œë¡</h3>
-              <button onClick={() => setShowAddressBook(false)} className="text-gray-500 hover:text-gray-700 text-xl">âœ•</button>
+              <h3 className="text-lg font-bold text-amber-700">?? ÁÖ¼Ò·Ï</h3>
+              <button onClick={() => setShowAddressBook(false)} className="text-gray-500 hover:text-gray-700 text-xl">?</button>
             </div>
             
             <div className="p-6 overflow-y-auto max-h-[60vh]">
-              {/* íŒŒì¼ ì—…ë¡œë“œ ì˜ì—­ */}
+              {/* ÆÄÀÏ ¾÷·Îµå ¿µ¿ª */}
               {!addressSaveMode && (
                 <div className="mb-4 p-4 border-2 border-dashed border-amber-300 rounded-lg text-center bg-amber-50">
                   <label className="cursor-pointer">
-                    <div className="text-amber-600 mb-2">ğŸ“ íŒŒì¼ì„ ì„ íƒí•˜ì—¬ ì£¼ì†Œë¡ ë“±ë¡</div>
-                    <div className="text-xs text-gray-400 mb-3">Excel, CSV íŒŒì¼ ì§€ì›</div>
-                    <span className="px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 inline-block">íŒŒì¼ ì„ íƒ</span>
+                    <div className="text-amber-600 mb-2">?? ÆÄÀÏÀ» ¼±ÅÃÇÏ¿© ÁÖ¼Ò·Ï µî·Ï</div>
+                    <div className="text-xs text-gray-400 mb-3">Excel, CSV ÆÄÀÏ Áö¿ø</div>
+                    <span className="px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 inline-block">ÆÄÀÏ ¼±ÅÃ</span>
                     <input
                       type="file"
                       accept=".xlsx,.xls,.csv"
@@ -5722,7 +5722,7 @@ const campaignData = {
                             setAddressSaveMode(true);
                           }
                         } catch (err) {
-                          alert('íŒŒì¼ íŒŒì‹± ì‹¤íŒ¨');
+                          alert('ÆÄÀÏ ÆÄ½Ì ½ÇÆĞ');
                         }
                         e.target.value = '';
                       }}
@@ -5731,38 +5731,38 @@ const campaignData = {
                 </div>
               )}
 
-              {/* í˜„ì¬ ìˆ˜ì‹ ì ì €ì¥ ë²„íŠ¼ */}
+              {/* ÇöÀç ¼ö½ÅÀÚ ÀúÀå ¹öÆ° */}
               {directRecipients.length > 0 && !addressSaveMode && (
                 <div className="mb-4 p-3 bg-blue-50 rounded-lg">
-                  <div className="text-sm text-blue-700 mb-2">í˜„ì¬ ìˆ˜ì‹ ì {directRecipients.length}ëª…ì„ ì£¼ì†Œë¡ìœ¼ë¡œ ì €ì¥í•˜ì‹œê² ìŠµë‹ˆê¹Œ?</div>
+                  <div className="text-sm text-blue-700 mb-2">ÇöÀç ¼ö½ÅÀÚ {directRecipients.length}¸íÀ» ÁÖ¼Ò·ÏÀ¸·Î ÀúÀåÇÏ½Ã°Ú½À´Ï±î?</div>
                   <button
                     onClick={() => setAddressSaveMode(true)}
                     className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700"
-                  >ğŸ’¾ ì£¼ì†Œë¡ìœ¼ë¡œ ì €ì¥</button>
+                  >?? ÁÖ¼Ò·ÏÀ¸·Î ÀúÀå</button>
                 </div>
               )}
 
-              {/* ì €ì¥ ëª¨ë“œ - ì»¬ëŸ¼ ë§¤í•‘ */}
+              {/* ÀúÀå ¸ğµå - ÄÃ·³ ¸ÅÇÎ */}
               {addressSaveMode && addressFileData.length > 0 && (
                 <div className="mb-4 p-4 bg-amber-50 rounded-lg border border-amber-200">
-                  <div className="text-sm font-medium text-amber-700 mb-3">ğŸ“‹ ì»¬ëŸ¼ ë§¤í•‘ ({addressFileData.length}ê±´)</div>
+                  <div className="text-sm font-medium text-amber-700 mb-3">?? ÄÃ·³ ¸ÅÇÎ ({addressFileData.length}°Ç)</div>
                   <div className="space-y-2 mb-4">
                     {[
-                      { key: 'phone', label: 'ìˆ˜ì‹ ë²ˆí˜¸ *', required: true },
-                      { key: 'name', label: 'ì´ë¦„' },
-                      { key: 'extra1', label: 'ê¸°íƒ€1' },
-                      { key: 'extra2', label: 'ê¸°íƒ€2' },
-                      { key: 'extra3', label: 'ê¸°íƒ€3' },
+                      { key: 'phone', label: '¼ö½Å¹øÈ£ *', required: true },
+                      { key: 'name', label: 'ÀÌ¸§' },
+                      { key: 'extra1', label: '±âÅ¸1' },
+                      { key: 'extra2', label: '±âÅ¸2' },
+                      { key: 'extra3', label: '±âÅ¸3' },
                     ].map((field) => (
                       <div key={field.key} className="flex items-center gap-3">
                         <span className={`w-24 text-sm ${field.required ? 'text-red-600 font-medium' : 'text-gray-600'}`}>{field.label}</span>
-                        <span className="text-gray-400">â†’</span>
+                        <span className="text-gray-400">¡æ</span>
                         <select
                           className="flex-1 px-3 py-2 border rounded-lg text-sm"
                           value={addressColumnMapping[field.key] || ''}
                           onChange={(e) => setAddressColumnMapping(prev => ({ ...prev, [field.key]: e.target.value }))}
                         >
-                          <option value="">-- ì»¬ëŸ¼ ì„ íƒ --</option>
+                          <option value="">-- ÄÃ·³ ¼±ÅÃ --</option>
                           {addressFileHeaders.map((h) => (
                             <option key={h} value={h}>{h}</option>
                           ))}
@@ -5771,12 +5771,12 @@ const campaignData = {
                     ))}
                   </div>
                   <div className="flex items-center gap-2 mb-3">
-                    <span className="text-sm text-gray-600 w-24">ê·¸ë£¹ëª… *</span>
+                    <span className="text-sm text-gray-600 w-24">±×·ì¸í *</span>
                     <input
                       type="text"
                       value={newGroupName}
                       onChange={(e) => setNewGroupName(e.target.value)}
-                      placeholder="ì˜ˆ: VIPê³ ê°, ì´ë²¤íŠ¸ì°¸ì—¬ì"
+                      placeholder="¿¹: VIP°í°´, ÀÌº¥Æ®Âü¿©ÀÚ"
                       className="flex-1 px-3 py-2 border rounded-lg text-sm"
                     />
                   </div>
@@ -5784,11 +5784,11 @@ const campaignData = {
                     <button
                       onClick={async () => {
                         if (!addressColumnMapping.phone) {
-                          alert('ìˆ˜ì‹ ë²ˆí˜¸ ì»¬ëŸ¼ì„ ì„ íƒí•˜ì„¸ìš”');
+                          alert('¼ö½Å¹øÈ£ ÄÃ·³À» ¼±ÅÃÇÏ¼¼¿ä');
                           return;
                         }
                         if (!newGroupName.trim()) {
-                          alert('ê·¸ë£¹ëª…ì„ ì…ë ¥í•˜ì„¸ìš”');
+                          alert('±×·ì¸íÀ» ÀÔ·ÂÇÏ¼¼¿ä');
                           return;
                         }
                         const contacts = addressFileData.map((row: any) => ({
@@ -5816,35 +5816,35 @@ const campaignData = {
                           const groupData = await groupRes.json();
                           if (groupData.success) setAddressGroups(groupData.groups || []);
                         } else {
-                          alert(data.error || 'ì €ì¥ ì‹¤íŒ¨');
+                          alert(data.error || 'ÀúÀå ½ÇÆĞ');
                         }
                       }}
                       className="flex-1 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700"
-                    >ğŸ’¾ ì£¼ì†Œë¡ ì €ì¥</button>
+                    >?? ÁÖ¼Ò·Ï ÀúÀå</button>
                     <button
                       onClick={() => { setAddressSaveMode(false); setAddressFileData([]); setAddressColumnMapping({}); setNewGroupName(''); }}
                       className="px-4 py-2 bg-gray-300 rounded-lg hover:bg-gray-400"
-                    >ì·¨ì†Œ</button>
+                    >Ãë¼Ò</button>
                   </div>
                 </div>
               )}
 
-              {/* í˜„ì¬ ìˆ˜ì‹ ì ì €ì¥ ëª¨ë“œ */}
+              {/* ÇöÀç ¼ö½ÅÀÚ ÀúÀå ¸ğµå */}
               {addressSaveMode && addressFileData.length === 0 && directRecipients.length > 0 && (
                 <div className="mb-4 p-4 bg-green-50 rounded-lg border-2 border-green-200">
-                  <div className="text-sm text-green-700 mb-2 font-medium">ê·¸ë£¹ëª…ì„ ì…ë ¥í•˜ì„¸ìš” ({directRecipients.length}ëª…)</div>
+                  <div className="text-sm text-green-700 mb-2 font-medium">±×·ì¸íÀ» ÀÔ·ÂÇÏ¼¼¿ä ({directRecipients.length}¸í)</div>
                   <div className="flex gap-2">
                     <input
                       type="text"
                       value={newGroupName}
                       onChange={(e) => setNewGroupName(e.target.value)}
-                      placeholder="ì˜ˆ: VIPê³ ê°, ì´ë²¤íŠ¸ì°¸ì—¬ì"
+                      placeholder="¿¹: VIP°í°´, ÀÌº¥Æ®Âü¿©ÀÚ"
                       className="flex-1 px-3 py-2 border rounded-lg"
                     />
                     <button
                       onClick={async () => {
                         if (!newGroupName.trim()) {
-                          alert('ê·¸ë£¹ëª…ì„ ì…ë ¥í•˜ì„¸ìš”');
+                          alert('±×·ì¸íÀ» ÀÔ·ÂÇÏ¼¼¿ä');
                           return;
                         }
                         const token = localStorage.getItem('token');
@@ -5863,27 +5863,27 @@ const campaignData = {
                           const groupData = await groupRes.json();
                           if (groupData.success) setAddressGroups(groupData.groups || []);
                         } else {
-                          alert(data.error || 'ì €ì¥ ì‹¤íŒ¨');
+                          alert(data.error || 'ÀúÀå ½ÇÆĞ');
                         }
                       }}
                       className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
-                    >ì €ì¥</button>
+                    >ÀúÀå</button>
                     <button
                       onClick={() => { setAddressSaveMode(false); setNewGroupName(''); }}
                       className="px-4 py-2 bg-gray-300 rounded-lg hover:bg-gray-400"
-                    >ì·¨ì†Œ</button>
+                    >Ãë¼Ò</button>
                   </div>
                 </div>
               )}
 
-              {/* ê·¸ë£¹ ëª©ë¡ */}
+              {/* ±×·ì ¸ñ·Ï */}
               {!addressSaveMode && (
                 <>
-                  <div className="text-sm font-medium text-gray-600 mb-2">ì €ì¥ëœ ì£¼ì†Œë¡</div>
+                  <div className="text-sm font-medium text-gray-600 mb-2">ÀúÀåµÈ ÁÖ¼Ò·Ï</div>
                   {addressGroups.length === 0 ? (
                 <div className="text-center py-8 text-gray-400">
-                  <div className="text-4xl mb-2">ğŸ“­</div>
-                  <div>ì €ì¥ëœ ì£¼ì†Œë¡ì´ ì—†ìŠµë‹ˆë‹¤</div>
+                  <div className="text-4xl mb-2">??</div>
+                  <div>ÀúÀåµÈ ÁÖ¼Ò·ÏÀÌ ¾ø½À´Ï´Ù</div>
                 </div>
               ) : (
                 <>
@@ -5893,7 +5893,7 @@ const campaignData = {
                         <div className="flex items-center justify-between p-3 bg-gray-50 hover:bg-gray-100">
                           <div>
                             <div className="font-medium">{group.group_name}</div>
-                            <div className="text-sm text-gray-500">{group.count}ëª…</div>
+                            <div className="text-sm text-gray-500">{group.count}¸í</div>
                           </div>
                           <div className="flex gap-2">
                             <button
@@ -5916,7 +5916,7 @@ const campaignData = {
                                 }
                               }}
                               className="px-3 py-1 bg-blue-100 text-blue-700 rounded hover:bg-blue-200 text-sm"
-                            >{addressViewGroup === group.group_name ? 'ë‹«ê¸°' : 'ì¡°íšŒ'}</button>
+                            >{addressViewGroup === group.group_name ? '´İ±â' : 'Á¶È¸'}</button>
                             <button
                               onClick={async () => {
                                 const token = localStorage.getItem('token');
@@ -5935,15 +5935,15 @@ const campaignData = {
                                   setShowAddressBook(false);
                                   setAddressViewGroup(null);
                                   setAddressViewContacts([]);
-                                  setToast({show: true, type: 'success', message: `${data.contacts.length}ëª… ë¶ˆëŸ¬ì˜¤ê¸° ì™„ë£Œ`});
+                                  setToast({show: true, type: 'success', message: `${data.contacts.length}¸í ºÒ·¯¿À±â ¿Ï·á`});
                                   setTimeout(() => setToast({show: false, type: 'success', message: ''}), 3000);
                                 }
                               }}
                               className="px-3 py-1 bg-emerald-100 text-emerald-700 rounded hover:bg-emerald-200 text-sm"
-                            >ë¶ˆëŸ¬ì˜¤ê¸°</button>
+                            >ºÒ·¯¿À±â</button>
                             <button
                               onClick={async () => {
-                                if (!confirm(`"${group.group_name}" ì£¼ì†Œë¡ì„ ì‚­ì œí•˜ì‹œê² ìŠµë‹ˆê¹Œ?`)) return;
+                                if (!confirm(`"${group.group_name}" ÁÖ¼Ò·ÏÀ» »èÁ¦ÇÏ½Ã°Ú½À´Ï±î?`)) return;
                                 const token = localStorage.getItem('token');
                                 const res = await fetch(`/api/address-books/${encodeURIComponent(group.group_name)}`, {
                                   method: 'DELETE',
@@ -5956,12 +5956,12 @@ const campaignData = {
                                     setAddressViewGroup(null);
                                     setAddressViewContacts([]);
                                   }
-                                  setToast({show: true, type: 'success', message: 'ì‚­ì œë˜ì—ˆìŠµë‹ˆë‹¤'});
+                                  setToast({show: true, type: 'success', message: '»èÁ¦µÇ¾ú½À´Ï´Ù'});
                                   setTimeout(() => setToast({show: false, type: 'success', message: ''}), 3000);
                                 }
                               }}
                               className="px-3 py-1 bg-red-100 text-red-700 rounded hover:bg-red-200 text-sm"
-                            >ì‚­ì œ</button>
+                            >»èÁ¦</button>
                           </div>
                         </div>
                         {addressViewGroup === group.group_name && (
@@ -5969,7 +5969,7 @@ const campaignData = {
                             <div className="flex gap-2 mb-2">
                               <input
                                 type="text"
-                                placeholder="ë²ˆí˜¸ ë˜ëŠ” ì´ë¦„ìœ¼ë¡œ ê²€ìƒ‰"
+                                placeholder="¹øÈ£ ¶Ç´Â ÀÌ¸§À¸·Î °Ë»ö"
                                 value={addressViewSearch}
                                 onChange={(e) => setAddressViewSearch(e.target.value)}
                                 className="flex-1 px-3 py-1.5 border rounded text-sm"
@@ -5979,11 +5979,11 @@ const campaignData = {
                               <table className="w-full text-sm">
                                 <thead className="bg-gray-100 sticky top-0">
                                   <tr>
-                                    <th className="px-2 py-1 text-left">ë²ˆí˜¸</th>
-                                    <th className="px-2 py-1 text-left">ì´ë¦„</th>
-                                    <th className="px-2 py-1 text-left">ê¸°íƒ€1</th>
-                                    <th className="px-2 py-1 text-left">ê¸°íƒ€2</th>
-                                    <th className="px-2 py-1 text-left">ê¸°íƒ€3</th>
+                                    <th className="px-2 py-1 text-left">¹øÈ£</th>
+                                    <th className="px-2 py-1 text-left">ÀÌ¸§</th>
+                                    <th className="px-2 py-1 text-left">±âÅ¸1</th>
+                                    <th className="px-2 py-1 text-left">±âÅ¸2</th>
+                                    <th className="px-2 py-1 text-left">±âÅ¸3</th>
                                   </tr>
                                 </thead>
                                 <tbody>
@@ -6010,7 +6010,7 @@ const campaignData = {
                                 c.phone?.includes(addressViewSearch) || 
                                 c.name?.includes(addressViewSearch)).length > 10 && (
                                 <div className="text-center text-xs text-gray-400 py-2">
-                                  ìƒìœ„ 10ê±´ë§Œ í‘œì‹œ (ì „ì²´ {addressViewContacts.filter(c => !addressViewSearch || c.phone?.includes(addressViewSearch) || c.name?.includes(addressViewSearch)).length}ê±´)
+                                  »óÀ§ 10°Ç¸¸ Ç¥½Ã (ÀüÃ¼ {addressViewContacts.filter(c => !addressViewSearch || c.phone?.includes(addressViewSearch) || c.name?.includes(addressViewSearch)).length}°Ç)
                                 </div>
                               )}
                             </div>
@@ -6025,13 +6025,13 @@ const campaignData = {
                         onClick={() => setAddressPage(p => Math.max(0, p - 1))}
                         disabled={addressPage === 0}
                         className="px-3 py-1 bg-gray-100 rounded hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
-                      >â—€</button>
+                      >¢¸</button>
                       <span className="text-sm text-gray-600">{addressPage + 1} / {Math.ceil(addressGroups.length / 5)}</span>
                       <button
                         onClick={() => setAddressPage(p => Math.min(Math.ceil(addressGroups.length / 5) - 1, p + 1))}
                         disabled={addressPage >= Math.ceil(addressGroups.length / 5) - 1}
                         className="px-3 py-1 bg-gray-100 rounded hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
-                      >â–¶</button>
+                      >¢º</button>
                     </div>
                   )}
                 </>
@@ -6044,27 +6044,27 @@ const campaignData = {
               <button
                 onClick={() => setShowAddressBook(false)}
                 className="w-full py-2 bg-gray-200 rounded-lg hover:bg-gray-300"
-              >ë‹«ê¸°</button>
+              >´İ±â</button>
             </div>
           </div>
         </div>
       )}
-      {/* LMS ì „í™˜ í™•ì¸ ëª¨ë‹¬ */}
+      {/* LMS ÀüÈ¯ È®ÀÎ ¸ğ´Ş */}
       {showLmsConfirm && (() => {
-        // í˜„ì¬ í™œì„± ë°œì†¡ ëª¨ë“œì˜ í’€ ë©”ì‹œì§€ ê³„ì‚°
+        // ÇöÀç È°¼º ¹ß¼Û ¸ğµåÀÇ Ç® ¸Ş½ÃÁö °è»ê
         const activeMsg = showTargetSend ? targetMessage : directMessage;
         const activeMsgType = showTargetSend ? targetMsgType : directMsgType;
         const activeRecipients = showTargetSend ? targetRecipients : directRecipients;
         const activeVarMap: Record<string, string> = showTargetSend
-          ? { '%ì´ë¦„%': 'name', '%ë“±ê¸‰%': 'grade', '%ì§€ì—­%': 'region', '%êµ¬ë§¤ê¸ˆì•¡%': 'total_purchase_amount', '%íšŒì‹ ë²ˆí˜¸%': 'callback' }
-          : { '%ì´ë¦„%': 'name', '%ê¸°íƒ€1%': 'extra1', '%ê¸°íƒ€2%': 'extra2', '%ê¸°íƒ€3%': 'extra3', '%íšŒì‹ ë²ˆí˜¸%': 'callback' };
+          ? { '%ÀÌ¸§%': 'name', '%µî±Ş%': 'grade', '%Áö¿ª%': 'region', '%±¸¸Å±İ¾×%': 'total_purchase_amount', '%È¸½Å¹øÈ£%': 'callback' }
+          : { '%ÀÌ¸§%': 'name', '%±âÅ¸1%': 'extra1', '%±âÅ¸2%': 'extra2', '%±âÅ¸3%': 'extra3', '%È¸½Å¹øÈ£%': 'callback' };
         let fullMsg = getMaxByteMessage(activeMsg, activeRecipients, activeVarMap);
         
         const optOutText = activeMsgType === 'SMS'
-          ? `ë¬´ë£Œê±°ë¶€${optOutNumber.replace(/-/g, '')}`
-          : `ë¬´ë£Œìˆ˜ì‹ ê±°ë¶€ ${optOutNumber}`;
+          ? `¹«·á°ÅºÎ${optOutNumber.replace(/-/g, '')}`
+          : `¹«·á¼ö½Å°ÅºÎ ${optOutNumber}`;
         if (adTextEnabled) {
-          fullMsg = `(ê´‘ê³ ) ${fullMsg}\n${optOutText}`;
+          fullMsg = `(±¤°í) ${fullMsg}\n${optOutText}`;
         }
 
         const truncated = truncateToSmsBytes(fullMsg, 90);
@@ -6077,48 +6077,48 @@ const campaignData = {
           <div className="bg-white rounded-xl shadow-2xl w-[440px] overflow-hidden">
             <div className="p-6 bg-gradient-to-r from-amber-50 to-orange-50 border-b">
               <div className="text-center">
-                <div className="text-5xl mb-3">ğŸ“</div>
-                <h3 className="text-lg font-bold text-gray-800">ë©”ì‹œì§€ ê¸¸ì´ ì´ˆê³¼</h3>
+                <div className="text-5xl mb-3">??</div>
+                <h3 className="text-lg font-bold text-gray-800">¸Ş½ÃÁö ±æÀÌ ÃÊ°ú</h3>
               </div>
             </div>
             <div className="p-6">
               <div className="text-center mb-4">
                 <div className="text-3xl font-bold text-red-500 mb-1">{pendingBytes} <span className="text-lg text-gray-400">/ 90 byte</span></div>
-                <div className="text-gray-600">SMS ì œí•œì„ ì´ˆê³¼í–ˆìŠµë‹ˆë‹¤</div>
+                <div className="text-gray-600">SMS Á¦ÇÑÀ» ÃÊ°úÇß½À´Ï´Ù</div>
               </div>
 
-              {/* ì˜ë¦° ë©”ì‹œì§€ ë¯¸ë¦¬ë³´ê¸° */}
+              {/* Àß¸° ¸Ş½ÃÁö ¹Ì¸®º¸±â */}
               <div className="mb-4">
-                <div className="text-xs font-medium text-gray-500 mb-1.5">SMS ë°œì†¡ ì‹œ ìˆ˜ì‹  ë‚´ìš© ({truncatedBytes}/90 byte)</div>
+                <div className="text-xs font-medium text-gray-500 mb-1.5">SMS ¹ß¼Û ½Ã ¼ö½Å ³»¿ë ({truncatedBytes}/90 byte)</div>
                 <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-sm text-gray-700 whitespace-pre-wrap leading-relaxed max-h-32 overflow-y-auto">
                   {truncated}
-                  <span className="text-red-400 bg-red-50 px-0.5">Â·Â·Â·(ì˜ë¦¼)</span>
+                  <span className="text-red-400 bg-red-50 px-0.5">¡¤¡¤¡¤(Àß¸²)</span>
                 </div>
               </div>
 
-              {/* ê´‘ê³  ë¬¸ì ìˆ˜ì‹ ê±°ë¶€ ì˜ë¦¼ ê²½ê³  */}
+              {/* ±¤°í ¹®ÀÚ ¼ö½Å°ÅºÎ Àß¸² °æ°í */}
               {isAdBlocked && (
                 <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4">
                   <div className="flex items-start gap-2">
-                    <span className="text-red-500 text-lg leading-none mt-0.5">â›”</span>
+                    <span className="text-red-500 text-lg leading-none mt-0.5">?</span>
                     <div>
-                      <div className="text-sm font-semibold text-red-700">ìˆ˜ì‹ ê±°ë¶€ ë²ˆí˜¸ê°€ ì˜ë¦½ë‹ˆë‹¤</div>
+                      <div className="text-sm font-semibold text-red-700">¼ö½Å°ÅºÎ ¹øÈ£°¡ Àß¸³´Ï´Ù</div>
                       <div className="text-xs text-red-600 mt-0.5">
-                        ê´‘ê³  ë¬¸ìëŠ” ìˆ˜ì‹ ê±°ë¶€ ë²ˆí˜¸ë¥¼ ë°˜ë“œì‹œ í¬í•¨í•´ì•¼ í•©ë‹ˆë‹¤ (ì •ë³´í†µì‹ ë§ë²• ì œ50ì¡°).<br/>
-                        SMSë¡œ ë°œì†¡í•  ìˆ˜ ì—†ìŠµë‹ˆë‹¤. LMSë¡œ ì „í™˜í•´ì£¼ì„¸ìš”.
+                        ±¤°í ¹®ÀÚ´Â ¼ö½Å°ÅºÎ ¹øÈ£¸¦ ¹İµå½Ã Æ÷ÇÔÇØ¾ß ÇÕ´Ï´Ù (Á¤º¸Åë½Å¸Á¹ı Á¦50Á¶).<br/>
+                        SMS·Î ¹ß¼ÛÇÒ ¼ö ¾ø½À´Ï´Ù. LMS·Î ÀüÈ¯ÇØÁÖ¼¼¿ä.
                       </div>
                     </div>
                   </div>
                 </div>
               )}
 
-              {/* ë¹„ê´‘ê³  ì˜ë¦¼ ê²½ê³  */}
+              {/* ºñ±¤°í Àß¸² °æ°í */}
               {!isAdBlocked && (
                 <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4">
                   <div className="flex items-start gap-2">
-                    <span className="text-amber-500 text-lg leading-none mt-0.5">âš ï¸</span>
+                    <span className="text-amber-500 text-lg leading-none mt-0.5">??</span>
                     <div className="text-xs text-amber-700">
-                      SMSë¡œ ë°œì†¡í•˜ë©´ 90ë°”ì´íŠ¸ ì´í›„ ë‚´ìš©ì´ ì˜ë ¤ì„œ ìˆ˜ì‹ ë©ë‹ˆë‹¤.
+                      SMS·Î ¹ß¼ÛÇÏ¸é 90¹ÙÀÌÆ® ÀÌÈÄ ³»¿ëÀÌ Àß·Á¼­ ¼ö½ÅµË´Ï´Ù.
                     </div>
                   </div>
                 </div>
@@ -6126,8 +6126,8 @@ const campaignData = {
 
               <div className="bg-blue-50 rounded-lg p-4 mb-4">
                 <div className="text-sm text-blue-800">
-                  <div className="font-medium mb-1">ğŸ’¡ LMSë¡œ ì „í™˜í•˜ì‹œê² ìŠµë‹ˆê¹Œ?</div>
-                  <div className="text-blue-600">LMSëŠ” ìµœëŒ€ 2,000byteê¹Œì§€ ë°œì†¡ ê°€ëŠ¥í•©ë‹ˆë‹¤</div>
+                  <div className="font-medium mb-1">?? LMS·Î ÀüÈ¯ÇÏ½Ã°Ú½À´Ï±î?</div>
+                  <div className="text-blue-600">LMS´Â ÃÖ´ë 2,000byte±îÁö ¹ß¼Û °¡´ÉÇÕ´Ï´Ù</div>
                 </div>
               </div>
               <div className="flex gap-3">
@@ -6135,7 +6135,7 @@ const campaignData = {
                   <button
                     disabled
                     className="flex-1 py-3 border-2 border-gray-200 rounded-lg text-gray-400 font-medium cursor-not-allowed bg-gray-50"
-                  >SMS ë°œì†¡ ë¶ˆê°€</button>
+                  >SMS ¹ß¼Û ºÒ°¡</button>
                 ) : (
                   <button
                     onClick={() => {
@@ -6143,7 +6143,7 @@ const campaignData = {
                       setShowLmsConfirm(false);
                     }}
                     className="flex-1 py-3 border-2 border-amber-300 rounded-lg text-amber-700 font-medium hover:bg-amber-50"
-                  >SMS ìœ ì§€ (ì˜ë¦¼ ë°œì†¡)</button>
+                  >SMS À¯Áö (Àß¸² ¹ß¼Û)</button>
                 )}
                 <button
                   onClick={() => {
@@ -6155,7 +6155,7 @@ const campaignData = {
                     setShowLmsConfirm(false);
                   }}
                   className="flex-1 py-3 bg-green-700 text-white rounded-lg font-medium hover:bg-green-800"
-                  >LMS ì „í™˜</button>
+                  >LMS ÀüÈ¯</button>
                   </div>
                 </div>
               </div>
@@ -6163,42 +6163,42 @@ const campaignData = {
           );
         })()}
     
-          {/* SMS ì „í™˜ ë¹„ìš©ì ˆê° ëª¨ë‹¬ */}
+          {/* SMS ÀüÈ¯ ºñ¿ëÀı°¨ ¸ğ´Ş */}
           {showSmsConvert.show && (
             <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[70]">
               <div className="bg-white rounded-xl shadow-2xl w-[420px] overflow-hidden">
                 <div className="p-6 bg-gradient-to-r from-blue-50 to-emerald-50 border-b">
                   <div className="text-center">
-                    <div className="text-5xl mb-3">ğŸ’°</div>
-                    <h3 className="text-lg font-bold text-gray-800">ë¹„ìš© ì ˆê° ì•ˆë‚´</h3>
+                    <div className="text-5xl mb-3">??</div>
+                    <h3 className="text-lg font-bold text-gray-800">ºñ¿ë Àı°¨ ¾È³»</h3>
                   </div>
                 </div>
                 <div className="p-6">
                   <div className="text-center mb-4">
-                    <div className="text-sm text-gray-600 mb-2">SMSë¡œ ë°œì†¡í•˜ë©´ ë¹„ìš©ì´ ì ˆê°ë©ë‹ˆë‹¤!</div>
+                    <div className="text-sm text-gray-600 mb-2">SMS·Î ¹ß¼ÛÇÏ¸é ºñ¿ëÀÌ Àı°¨µË´Ï´Ù!</div>
                     <div className="flex items-center justify-center gap-3 text-lg">
                       <span className="text-gray-500">{showSmsConvert.currentBytes}byte</span>
-                      <span className="text-gray-400">â†’</span>
+                      <span className="text-gray-400">¡æ</span>
                       <span className="font-bold text-emerald-600">{showSmsConvert.smsBytes}byte</span>
                     </div>
                   </div>
                   
                   <div className="bg-gray-50 rounded-lg p-4 mb-4">
-                    <div className="text-sm text-gray-600 mb-3 text-center">ì˜ˆìƒ ë¹„ìš© ë¹„êµ ({showSmsConvert.count.toLocaleString()}ê±´ ê¸°ì¤€)</div>
+                    <div className="text-sm text-gray-600 mb-3 text-center">¿¹»ó ºñ¿ë ºñ±³ ({showSmsConvert.count.toLocaleString()}°Ç ±âÁØ)</div>
                     <div className="flex justify-between items-center">
                       <div className="text-center flex-1">
-                        <div className="text-xs text-gray-500 mb-1">LMS (27ì›/ê±´)</div>
-                        <div className="text-lg font-bold text-gray-700">{(showSmsConvert.count * 27).toLocaleString()}ì›</div>
+                        <div className="text-xs text-gray-500 mb-1">LMS (27¿ø/°Ç)</div>
+                        <div className="text-lg font-bold text-gray-700">{(showSmsConvert.count * 27).toLocaleString()}¿ø</div>
                       </div>
-                      <div className="text-2xl text-gray-300 px-4">â†’</div>
+                      <div className="text-2xl text-gray-300 px-4">¡æ</div>
                       <div className="text-center flex-1">
-                        <div className="text-xs text-gray-500 mb-1">SMS (10ì›/ê±´)</div>
-                        <div className="text-lg font-bold text-emerald-600">{(showSmsConvert.count * 10).toLocaleString()}ì›</div>
+                        <div className="text-xs text-gray-500 mb-1">SMS (10¿ø/°Ç)</div>
+                        <div className="text-lg font-bold text-emerald-600">{(showSmsConvert.count * 10).toLocaleString()}¿ø</div>
                       </div>
                     </div>
                     <div className="mt-3 pt-3 border-t border-gray-200 text-center">
-                      <span className="text-sm text-gray-600">ì ˆê° ê¸ˆì•¡: </span>
-                      <span className="text-lg font-bold text-red-500">{((showSmsConvert.count * 27) - (showSmsConvert.count * 10)).toLocaleString()}ì›</span>
+                      <span className="text-sm text-gray-600">Àı°¨ ±İ¾×: </span>
+                      <span className="text-lg font-bold text-red-500">{((showSmsConvert.count * 27) - (showSmsConvert.count * 10)).toLocaleString()}¿ø</span>
                     </div>
                   </div>
     
@@ -6206,7 +6206,7 @@ const campaignData = {
                     <button
                       onClick={() => setShowSmsConvert({show: false, from: 'direct', currentBytes: 0, smsBytes: 0, count: 0})}
                       className="flex-1 py-3 border-2 border-gray-300 rounded-lg text-gray-700 font-medium hover:bg-gray-50"
-                    >LMS ìœ ì§€</button>
+                    >LMS À¯Áö</button>
                     <button
                       onClick={() => {
                         if (showSmsConvert.from === 'target') {
@@ -6217,29 +6217,29 @@ const campaignData = {
                         setShowSmsConvert({show: false, from: 'direct', currentBytes: 0, smsBytes: 0, count: 0});
                       }}
                       className="flex-1 py-3 bg-emerald-600 text-white rounded-lg font-medium hover:bg-emerald-700"
-                      >SMS ì „í™˜</button>
+                      >SMS ÀüÈ¯</button>
                       </div>
                     </div>
                   </div>
                 </div>
               )}
         
-              {/* ì˜ˆì•½ì „ì†¡ ë‚ ì§œ/ì‹œê°„ ì„ íƒ ëª¨ë‹¬ (ê³µìš©) */}
+              {/* ¿¹¾àÀü¼Û ³¯Â¥/½Ã°£ ¼±ÅÃ ¸ğ´Ş (°ø¿ë) */}
               {showReservePicker && (
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60]">
                   <div className="bg-white rounded-xl shadow-2xl w-[460px] overflow-hidden">
                     <div className="bg-blue-50 px-6 py-5 border-b">
-                      <h3 className="text-xl font-bold text-blue-700">ğŸ“… ì˜ˆì•½ ì‹œê°„ ì„¤ì •</h3>
+                      <h3 className="text-xl font-bold text-blue-700">?? ¿¹¾à ½Ã°£ ¼³Á¤</h3>
                     </div>
                     <div className="p-6">
-                      {/* ë¹ ë¥¸ ì„ íƒ */}
+                      {/* ºü¸¥ ¼±ÅÃ */}
                       <div className="mb-5">
-                        <div className="text-sm text-gray-500 mb-2">ë¹ ë¥¸ ì„ íƒ</div>
+                        <div className="text-sm text-gray-500 mb-2">ºü¸¥ ¼±ÅÃ</div>
                         <div className="grid grid-cols-3 gap-2">
                           {[
-                            { label: '1ì‹œê°„ í›„', hours: 1 },
-                            { label: '3ì‹œê°„ í›„', hours: 3 },
-                            { label: 'ë‚´ì¼ ì˜¤ì „ 9ì‹œ', tomorrow: 9 },
+                            { label: '1½Ã°£ ÈÄ', hours: 1 },
+                            { label: '3½Ã°£ ÈÄ', hours: 3 },
+                            { label: '³»ÀÏ ¿ÀÀü 9½Ã', tomorrow: 9 },
                           ].map((opt) => (
                             <button
                               key={opt.label}
@@ -6261,12 +6261,12 @@ const campaignData = {
                           ))}
                         </div>
                       </div>
-                      {/* ì§ì ‘ ì„ íƒ */}
+                      {/* Á÷Á¢ ¼±ÅÃ */}
                       <div>
                         <div className="flex gap-4">
-                          {/* ë‚ ì§œ */}
+                          {/* ³¯Â¥ */}
                           <div className="flex-1">
-                            <div className="text-xs text-gray-500 mb-2">ë‚ ì§œ</div>
+                            <div className="text-xs text-gray-500 mb-2">³¯Â¥</div>
                             <input
                               type="date"
                               value={reserveDateTime?.split('T')[0] || ''}
@@ -6278,9 +6278,9 @@ const campaignData = {
                               className="w-full border-2 border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:border-blue-400 focus:outline-none"
                             />
                           </div>
-                          {/* ì‹œê°„ */}
+                          {/* ½Ã°£ */}
                           <div className="flex-1">
-                            <div className="text-xs text-gray-500 mb-2">ì‹œê°„</div>
+                            <div className="text-xs text-gray-500 mb-2">½Ã°£</div>
                             <div className="flex items-center gap-1">
                               <input
                                 type="number"
@@ -6330,17 +6330,17 @@ const campaignData = {
                                 }}
                                 className="border-2 border-gray-200 rounded-lg px-2 py-2.5 text-sm focus:border-blue-400 focus:outline-none"
                               >
-                                <option value="AM">ì˜¤ì „</option>
-                                <option value="PM">ì˜¤í›„</option>
+                                <option value="AM">¿ÀÀü</option>
+                                <option value="PM">¿ÀÈÄ</option>
                               </select>
                             </div>
                           </div>
                         </div>
                       </div>
-                      {/* ì„ íƒëœ ì‹œê°„ í‘œì‹œ */}
+                      {/* ¼±ÅÃµÈ ½Ã°£ Ç¥½Ã */}
                       {reserveDateTime && (
                         <div className="mt-4 p-3 bg-blue-50 rounded-lg text-center">
-                          <span className="text-sm text-gray-600">ì˜ˆì•½ ì‹œê°„: </span>
+                          <span className="text-sm text-gray-600">¿¹¾à ½Ã°£: </span>
                           <span className="text-sm font-bold text-blue-700">
                             {new Date(reserveDateTime).toLocaleString('ko-KR', {
                               timeZone: 'Asia/Seoul',
@@ -6363,7 +6363,7 @@ const campaignData = {
                         }}
                         className="flex-1 py-3 text-gray-600 hover:bg-gray-50 font-medium"
                       >
-                        ì·¨ì†Œ
+                        Ãë¼Ò
                       </button>
                       <button
                         onClick={() => {
@@ -6373,12 +6373,12 @@ const campaignData = {
                               <div style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9998;display:flex;align-items:center;justify-content:center;" onclick="this.parentElement.remove()">
                                 <div style="background:white;padding:0;border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,0.3);width:380px;overflow:hidden;" onclick="event.stopPropagation()">
                                   <div style="background:linear-gradient(135deg,#fef3c7,#fde68a);padding:24px;text-align:center;">
-                                    <div style="font-size:48px;margin-bottom:8px;">â°</div>
-                                    <div style="font-size:18px;font-weight:bold;color:#92400e;">ì‹œê°„ì„ ì„ íƒí•´ì£¼ì„¸ìš”</div>
+                                    <div style="font-size:48px;margin-bottom:8px;">?</div>
+                                    <div style="font-size:18px;font-weight:bold;color:#92400e;">½Ã°£À» ¼±ÅÃÇØÁÖ¼¼¿ä</div>
                                   </div>
                                   <div style="padding:24px;text-align:center;">
-                                    <div style="color:#6b7280;margin-bottom:20px;">ì˜ˆì•½ ì‹œê°„ì„ ë¨¼ì € ì„ íƒí•´ì£¼ì„¸ìš”.</div>
-                                    <button onclick="this.closest('[style*=position]').parentElement.remove()" style="width:100%;padding:12px;background:#f59e0b;color:white;border:none;border-radius:8px;font-weight:bold;font-size:14px;cursor:pointer;">í™•ì¸</button>
+                                    <div style="color:#6b7280;margin-bottom:20px;">¿¹¾à ½Ã°£À» ¸ÕÀú ¼±ÅÃÇØÁÖ¼¼¿ä.</div>
+                                    <button onclick="this.closest('[style*=position]').parentElement.remove()" style="width:100%;padding:12px;background:#f59e0b;color:white;border:none;border-radius:8px;font-weight:bold;font-size:14px;cursor:pointer;">È®ÀÎ</button>
                                   </div>
                                 </div>
                               </div>
@@ -6394,13 +6394,13 @@ const campaignData = {
                               <div style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9998;display:flex;align-items:center;justify-content:center;" onclick="this.parentElement.remove()">
                                 <div style="background:white;padding:0;border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,0.3);width:400px;overflow:hidden;" onclick="event.stopPropagation()">
                                   <div style="background:linear-gradient(135deg,#fee2e2,#fecaca);padding:24px;text-align:center;">
-                                    <div style="font-size:48px;margin-bottom:8px;">ğŸš«</div>
-                                    <div style="font-size:18px;font-weight:bold;color:#dc2626;">ì˜ˆì•½ ë¶ˆê°€</div>
+                                    <div style="font-size:48px;margin-bottom:8px;">??</div>
+                                    <div style="font-size:18px;font-weight:bold;color:#dc2626;">¿¹¾à ºÒ°¡</div>
                                   </div>
                                   <div style="padding:24px;text-align:center;">
-                                    <div style="color:#374151;font-weight:500;margin-bottom:8px;">í˜„ì¬ ì‹œê°„ë³´ë‹¤ ì´ì „ìœ¼ë¡œëŠ” ì˜ˆì•½í•  ìˆ˜ ì—†ìŠµë‹ˆë‹¤.</div>
-                                    <div style="color:#6b7280;margin-bottom:20px;">ì˜ˆì•½ ì‹œê°„ì„ ë‹¤ì‹œ ì„ íƒí•´ì£¼ì„¸ìš”.</div>
-                                    <button onclick="this.closest('[style*=position]').parentElement.remove()" style="width:100%;padding:12px;background:#dc2626;color:white;border:none;border-radius:8px;font-weight:bold;font-size:14px;cursor:pointer;">í™•ì¸</button>
+                                    <div style="color:#374151;font-weight:500;margin-bottom:8px;">ÇöÀç ½Ã°£º¸´Ù ÀÌÀüÀ¸·Î´Â ¿¹¾àÇÒ ¼ö ¾ø½À´Ï´Ù.</div>
+                                    <div style="color:#6b7280;margin-bottom:20px;">¿¹¾à ½Ã°£À» ´Ù½Ã ¼±ÅÃÇØÁÖ¼¼¿ä.</div>
+                                    <button onclick="this.closest('[style*=position]').parentElement.remove()" style="width:100%;padding:12px;background:#dc2626;color:white;border:none;border-radius:8px;font-weight:bold;font-size:14px;cursor:pointer;">È®ÀÎ</button>
                                   </div>
                                 </div>
                               </div>
@@ -6412,38 +6412,38 @@ const campaignData = {
                         }}
                         className="flex-1 py-3 bg-blue-500 text-white hover:bg-blue-600 font-medium"
                       >
-                        í™•ì¸
+                        È®ÀÎ
                       </button>
                     </div>
                   </div>
                 </div>
               )}
         
-              {/* ë¯¸ë¦¬ë³´ê¸° ëª¨ë‹¬ (ê³µìš©) */}
+              {/* ¹Ì¸®º¸±â ¸ğ´Ş (°ø¿ë) */}
       {showDirectPreview && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60]">
           <div className="bg-white rounded-2xl shadow-2xl w-[400px] overflow-hidden">
             <div className="p-4 border-b bg-emerald-50 flex justify-between items-center">
-              <h3 className="font-bold text-lg">ğŸ“„ ë©”ì‹œì§€ ë¯¸ë¦¬ë³´ê¸°</h3>
-              <button onClick={() => setShowDirectPreview(false)} className="text-gray-500 hover:text-gray-700 text-xl">âœ•</button>
+              <h3 className="font-bold text-lg">?? ¸Ş½ÃÁö ¹Ì¸®º¸±â</h3>
+              <button onClick={() => setShowDirectPreview(false)} className="text-gray-500 hover:text-gray-700 text-xl">?</button>
             </div>
             
             <div className="p-6 flex justify-center">
-              {/* ëª¨ë˜ í° í”„ë ˆì„ */}
+              {/* ¸ğ´ø Æù ÇÁ·¹ÀÓ */}
               <div className="rounded-[1.8rem] p-[3px] bg-gradient-to-b from-emerald-400 to-emerald-600 shadow-lg shadow-emerald-200">
                 <div className="bg-white rounded-[1.6rem] overflow-hidden flex flex-col w-[280px]" style={{ height: '420px' }}>
-                  {/* ìƒë‹¨ - íšŒì‹ ë²ˆí˜¸ */}
+                  {/* »ó´Ü - È¸½Å¹øÈ£ */}
                   <div className="px-4 py-2.5 bg-gradient-to-r from-gray-50 to-gray-100 flex justify-between items-center shrink-0 border-b">
-                    <span className="text-[11px] text-gray-400 font-medium">ë¬¸ìë©”ì‹œì§€</span>
-                    <span className="text-[11px] font-bold text-emerald-600">{formatPhoneNumber(selectedCallback) || 'íšŒì‹ ë²ˆí˜¸'}</span>
+                    <span className="text-[11px] text-gray-400 font-medium">¹®ÀÚ¸Ş½ÃÁö</span>
+                    <span className="text-[11px] font-bold text-emerald-600">{formatPhoneNumber(selectedCallback) || 'È¸½Å¹øÈ£'}</span>
                   </div>
-                  {/* LMS/MMS ì œëª© */}
+                  {/* LMS/MMS Á¦¸ñ */}
                   {(directMsgType === 'LMS' || directMsgType === 'MMS') && directSubject && (
                     <div className="px-4 py-2 bg-orange-50 border-b border-orange-200">
                       <span className="text-sm font-bold text-orange-700">{directSubject}</span>
                     </div>
                   )}
-                  {/* MMS ì´ë¯¸ì§€ */}
+                  {/* MMS ÀÌ¹ÌÁö */}
                   {mmsUploadedImages.length > 0 && (
                     <div className="shrink-0">
                       {mmsUploadedImages.map((img, idx) => (
@@ -6451,58 +6451,58 @@ const campaignData = {
                       ))}
                     </div>
                   )}
-                  {/* ë©”ì‹œì§€ ì˜ì—­ - ìŠ¤í¬ë¡¤ */}
+                  {/* ¸Ş½ÃÁö ¿µ¿ª - ½ºÅ©·Ñ */}
                   <div className="flex-1 overflow-y-auto p-3 bg-gradient-to-b from-emerald-50/30 to-white">
                     <div className="flex gap-2">
-                      <div className="w-7 h-7 rounded-full bg-emerald-100 flex items-center justify-center shrink-0 text-xs">ğŸ“±</div>
+                      <div className="w-7 h-7 rounded-full bg-emerald-100 flex items-center justify-center shrink-0 text-xs">??</div>
                       <div className="bg-white rounded-2xl rounded-tl-sm p-3 shadow-sm border border-gray-100 text-[13px] leading-[1.7] whitespace-pre-wrap text-gray-700 max-w-[95%]">
                         {(() => {
                           const mergedMsg = getFullMessage(directMessage)
-                            .replace(/%ì´ë¦„%/g, (showTargetSend ? targetRecipients[0]?.name : directRecipients[0]?.name) || 'í™ê¸¸ë™')
-                            .replace(/%ë“±ê¸‰%/g, (showTargetSend ? targetRecipients[0]?.grade : '') || 'VIP')
-                            .replace(/%ì§€ì—­%/g, (showTargetSend ? targetRecipients[0]?.region : '') || 'ì„œìš¸')
-                            .replace(/%êµ¬ë§¤ê¸ˆì•¡%/g, (showTargetSend ? targetRecipients[0]?.amount : '') || '100,000ì›')
-                            .replace(/%ê¸°íƒ€1%/g, directRecipients[0]?.extra1 || 'ê¸°íƒ€1')
-                            .replace(/%ê¸°íƒ€2%/g, directRecipients[0]?.extra2 || 'ê¸°íƒ€2')
-                            .replace(/%ê¸°íƒ€3%/g, directRecipients[0]?.extra3 || 'ê¸°íƒ€3');
+                            .replace(/%ÀÌ¸§%/g, (showTargetSend ? targetRecipients[0]?.name : directRecipients[0]?.name) || 'È«±æµ¿')
+                            .replace(/%µî±Ş%/g, (showTargetSend ? targetRecipients[0]?.grade : '') || 'VIP')
+                            .replace(/%Áö¿ª%/g, (showTargetSend ? targetRecipients[0]?.region : '') || '¼­¿ï')
+                            .replace(/%±¸¸Å±İ¾×%/g, (showTargetSend ? targetRecipients[0]?.amount : '') || '100,000¿ø')
+                            .replace(/%±âÅ¸1%/g, directRecipients[0]?.extra1 || '±âÅ¸1')
+                            .replace(/%±âÅ¸2%/g, directRecipients[0]?.extra2 || '±âÅ¸2')
+                            .replace(/%±âÅ¸3%/g, directRecipients[0]?.extra3 || '±âÅ¸3');
                           return mergedMsg;
                         })()}
                       </div>
                     </div>
                   </div>
-                  {/* í•˜ë‹¨ ë°”ì´íŠ¸ - ë¨¸ì§€ëœ ë©”ì‹œì§€ ê¸°ì¤€ */}
+                  {/* ÇÏ´Ü ¹ÙÀÌÆ® - ¸ÓÁöµÈ ¸Ş½ÃÁö ±âÁØ */}
                   <div className="px-3 py-2 border-t bg-gray-50 text-center shrink-0">
                     {(() => {
                       const mergedMsg = getFullMessage(directMessage)
-                        .replace(/%ì´ë¦„%/g, (showTargetSend ? targetRecipients[0]?.name : directRecipients[0]?.name) || 'í™ê¸¸ë™')
-                        .replace(/%ë“±ê¸‰%/g, (showTargetSend ? targetRecipients[0]?.grade : '') || 'VIP')
-                        .replace(/%ì§€ì—­%/g, (showTargetSend ? targetRecipients[0]?.region : '') || 'ì„œìš¸')
-                        .replace(/%êµ¬ë§¤ê¸ˆì•¡%/g, (showTargetSend ? targetRecipients[0]?.amount : '') || '100,000ì›')
-                        .replace(/%ê¸°íƒ€1%/g, directRecipients[0]?.extra1 || 'ê¸°íƒ€1')
-                        .replace(/%ê¸°íƒ€2%/g, directRecipients[0]?.extra2 || 'ê¸°íƒ€2')
-                        .replace(/%ê¸°íƒ€3%/g, directRecipients[0]?.extra3 || 'ê¸°íƒ€3');
+                        .replace(/%ÀÌ¸§%/g, (showTargetSend ? targetRecipients[0]?.name : directRecipients[0]?.name) || 'È«±æµ¿')
+                        .replace(/%µî±Ş%/g, (showTargetSend ? targetRecipients[0]?.grade : '') || 'VIP')
+                        .replace(/%Áö¿ª%/g, (showTargetSend ? targetRecipients[0]?.region : '') || '¼­¿ï')
+                        .replace(/%±¸¸Å±İ¾×%/g, (showTargetSend ? targetRecipients[0]?.amount : '') || '100,000¿ø')
+                        .replace(/%±âÅ¸1%/g, directRecipients[0]?.extra1 || '±âÅ¸1')
+                        .replace(/%±âÅ¸2%/g, directRecipients[0]?.extra2 || '±âÅ¸2')
+                        .replace(/%±âÅ¸3%/g, directRecipients[0]?.extra3 || '±âÅ¸3');
                       const mergedBytes = calculateBytes(mergedMsg);
                       const limit = directMsgType === 'SMS' ? 90 : 2000;
                       const isOver = mergedBytes > limit;
-                      return <span className={`text-[10px] ${isOver ? 'text-red-500 font-semibold' : 'text-gray-400'}`}>{mergedBytes} / {limit} bytes Â· {directMsgType}{isOver ? ' âš ï¸ ì´ˆê³¼' : ''}</span>;
+                      return <span className={`text-[10px] ${isOver ? 'text-red-500 font-semibold' : 'text-gray-400'}`}>{mergedBytes} / {limit} bytes ¡¤ {directMsgType}{isOver ? ' ?? ÃÊ°ú' : ''}</span>;
                     })()}
                   </div>
                 </div>
               </div>
             </div>
             
-            {/* MMS ì´ë¯¸ì§€ ì•ˆë‚´ */}
+            {/* MMS ÀÌ¹ÌÁö ¾È³» */}
             {mmsUploadedImages.length > 0 && (
               <div className="mx-6 mb-2 p-3 bg-amber-50 rounded-lg text-xs text-amber-700 text-center">
-                âš ï¸ ì‹¤ì œ ìˆ˜ì‹  í™”ë©´ì€ ì´í†µì‚¬ ë° íœ´ëŒ€í° ê¸°ì¢…ì— ë”°ë¼ ë‹¤ë¥´ê²Œ ë³´ì¼ ìˆ˜ ìˆìŠµë‹ˆë‹¤
+                ?? ½ÇÁ¦ ¼ö½Å È­¸éÀº ÀÌÅë»ç ¹× ÈŞ´ëÆù ±âÁ¾¿¡ µû¶ó ´Ù¸£°Ô º¸ÀÏ ¼ö ÀÖ½À´Ï´Ù
               </div>
             )}
 
-            {/* ì¹˜í™˜ ì•ˆë‚´ */}
-            {(directMessage.includes('%ì´ë¦„%') || directMessage.includes('%ê¸°íƒ€') || directMessage.includes('%ë“±ê¸‰%') || directMessage.includes('%ì§€ì—­%') || directMessage.includes('%êµ¬ë§¤ê¸ˆì•¡%') || directMessage.includes('%íšŒì‹ ë²ˆí˜¸%')) && (
+            {/* Ä¡È¯ ¾È³» */}
+            {(directMessage.includes('%ÀÌ¸§%') || directMessage.includes('%±âÅ¸') || directMessage.includes('%µî±Ş%') || directMessage.includes('%Áö¿ª%') || directMessage.includes('%±¸¸Å±İ¾×%') || directMessage.includes('%È¸½Å¹øÈ£%')) && (
               <div className="mx-6 mb-4 p-3 bg-blue-50 rounded-lg text-xs text-blue-700 text-center">
-                ğŸ’¡ ìë™ì…ë ¥ ë³€ìˆ˜ëŠ” ì²« ë²ˆì§¸ ìˆ˜ì‹ ì ì •ë³´ë¡œ í‘œì‹œë©ë‹ˆë‹¤
-                {(!directRecipients[0] && !targetRecipients[0]) && ' (ìƒ˜í”Œ ë°ì´í„°)'}
+                ?? ÀÚµ¿ÀÔ·Â º¯¼ö´Â Ã¹ ¹øÂ° ¼ö½ÅÀÚ Á¤º¸·Î Ç¥½ÃµË´Ï´Ù
+                {(!directRecipients[0] && !targetRecipients[0]) && ' (»ùÇÃ µ¥ÀÌÅÍ)'}
               </div>
             )}
             
@@ -6511,42 +6511,42 @@ const campaignData = {
                 onClick={() => setShowDirectPreview(false)}
                 className="px-12 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-sm font-semibold"
               >
-                í™•ì¸
+                È®ÀÎ
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* ë°œì†¡ í™•ì¸ ëª¨ë‹¬ */}
+      {/* ¹ß¼Û È®ÀÎ ¸ğ´Ş */}
       {sendConfirm.show && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60]">
           <div className="bg-white rounded-xl shadow-2xl w-[420px] overflow-hidden">
             <div className={`px-6 py-4 border-b ${sendConfirm.type === 'immediate' ? 'bg-emerald-50' : 'bg-blue-50'}`}>
               <h3 className={`text-lg font-bold ${sendConfirm.type === 'immediate' ? 'text-emerald-700' : 'text-blue-700'}`}>
-                {sendConfirm.type === 'immediate' ? 'âš¡ ì¦‰ì‹œ ë°œì†¡' : 'ğŸ“… ì˜ˆì•½ ë°œì†¡'}
+                {sendConfirm.type === 'immediate' ? '? Áï½Ã ¹ß¼Û' : '?? ¿¹¾à ¹ß¼Û'}
               </h3>
             </div>
             <div className="p-6">
               <p className="text-gray-700 mb-4">
                 {sendConfirm.type === 'immediate' 
-                  ? 'ë©”ì‹œì§€ë¥¼ ì¦‰ì‹œ ë°œì†¡í•˜ì‹œê² ìŠµë‹ˆê¹Œ?' 
-                  : 'ë©”ì‹œì§€ë¥¼ ì˜ˆì•½ ë°œì†¡í•˜ì‹œê² ìŠµë‹ˆê¹Œ?'}
+                  ? '¸Ş½ÃÁö¸¦ Áï½Ã ¹ß¼ÛÇÏ½Ã°Ú½À´Ï±î?' 
+                  : '¸Ş½ÃÁö¸¦ ¿¹¾à ¹ß¼ÛÇÏ½Ã°Ú½À´Ï±î?'}
               </p>
               <div className="bg-gray-50 rounded-lg p-4 space-y-2">
                 <div className="flex justify-between">
-                  <span className="text-gray-500">ë°œì†¡ ê±´ìˆ˜</span>
-                  <span className="font-bold text-emerald-600">{sendConfirm.count.toLocaleString()}ê±´</span>
+                  <span className="text-gray-500">¹ß¼Û °Ç¼ö</span>
+                  <span className="font-bold text-emerald-600">{sendConfirm.count.toLocaleString()}°Ç</span>
                 </div>
                 {sendConfirm.unsubscribeCount > 0 && (
                   <div className="flex justify-between">
-                    <span className="text-gray-500">ìˆ˜ì‹ ê±°ë¶€ ì œì™¸</span>
-                    <span className="font-bold text-rose-500">{sendConfirm.unsubscribeCount.toLocaleString()}ê±´</span>
+                    <span className="text-gray-500">¼ö½Å°ÅºÎ Á¦¿Ü</span>
+                    <span className="font-bold text-rose-500">{sendConfirm.unsubscribeCount.toLocaleString()}°Ç</span>
                   </div>
                 )}
                 {sendConfirm.type === 'scheduled' && sendConfirm.dateTime && (
                   <div className="flex justify-between">
-                    <span className="text-gray-500">ì˜ˆì•½ ì‹œê°„</span>
+                    <span className="text-gray-500">¿¹¾à ½Ã°£</span>
                     <span className="font-bold text-blue-600">
                       {new Date(sendConfirm.dateTime).toLocaleString('ko-KR', {
                         timeZone: 'Asia/Seoul',
@@ -6560,13 +6560,13 @@ const campaignData = {
                   </div>
                 )}
                 <div className="flex justify-between">
-                  <span className="text-gray-500">ë©”ì‹œì§€ íƒ€ì…</span>
+                  <span className="text-gray-500">¸Ş½ÃÁö Å¸ÀÔ</span>
                   <span className="font-medium">{directMsgType}</span>
                 </div>
                 {sendConfirm.type === 'scheduled' && (
                   <div className="mt-3 pt-3 border-t border-gray-200">
                     <p className="text-xs text-amber-600 flex items-center gap-1">
-                      <span>âš ï¸</span> ì˜ˆì•½ ì·¨ì†ŒëŠ” ë°œì†¡ 15ë¶„ ì „ê¹Œì§€ ê°€ëŠ¥í•©ë‹ˆë‹¤
+                      <span>??</span> ¿¹¾à Ãë¼Ò´Â ¹ß¼Û 15ºĞ Àü±îÁö °¡´ÉÇÕ´Ï´Ù
                     </p>
                   </div>
                 )}
@@ -6578,7 +6578,7 @@ const campaignData = {
                 disabled={directSending}
                 className="flex-1 py-3 text-gray-600 hover:bg-gray-50 font-medium disabled:opacity-50"
               >
-                ì·¨ì†Œ
+                Ãë¼Ò
               </button>
               <button
                 onClick={sendConfirm.from === 'target' ? executeTargetSend : executeDirectSend}
@@ -6587,10 +6587,10 @@ const campaignData = {
               >
                 {directSending ? (
                   <span className="flex items-center justify-center gap-2">
-                    <span className="animate-spin">â³</span> ì²˜ë¦¬ì¤‘...
+                    <span className="animate-spin">?</span> Ã³¸®Áß...
                   </span>
                 ) : (
-                  sendConfirm.type === 'immediate' ? 'ì¦‰ì‹œ ë°œì†¡' : 'ì˜ˆì•½ ë°œì†¡'
+                  sendConfirm.type === 'immediate' ? 'Áï½Ã ¹ß¼Û' : '¿¹¾à ¹ß¼Û'
                 )}
               </button>
             </div>
@@ -6598,163 +6598,163 @@ const campaignData = {
         </div>
       )}
 
-      {/* ì”ì•¡ í˜„í™© ëª¨ë‹¬ */}
+      {/* ÀÜ¾× ÇöÈ² ¸ğ´Ş */}
       {showBalanceModal && balanceInfo && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[60]" onClick={() => setShowBalanceModal(false)}>
           <div className="bg-white rounded-2xl shadow-2xl w-[380px] overflow-hidden animate-in fade-in zoom-in" onClick={e => e.stopPropagation()}>
-            {/* í—¤ë” */}
+            {/* Çì´õ */}
             <div className="p-5 bg-gradient-to-r from-emerald-50 to-green-50 border-b">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-emerald-100 rounded-full flex items-center justify-center text-xl">ğŸ’°</div>
+                <div className="w-10 h-10 bg-emerald-100 rounded-full flex items-center justify-center text-xl">??</div>
                 <div>
-                  <div className="text-sm text-gray-500">ì¶©ì „ ì”ì•¡</div>
+                  <div className="text-sm text-gray-500">ÃæÀü ÀÜ¾×</div>
                   <div className={`text-2xl font-bold ${balanceInfo.balance < 10000 ? 'text-red-600' : 'text-emerald-700'}`}>
-                    {balanceInfo.balance.toLocaleString()}ì›
+                    {balanceInfo.balance.toLocaleString()}¿ø
                   </div>
                 </div>
               </div>
               {balanceInfo.balance < 10000 && (
                 <div className="mt-2 text-xs text-red-500 bg-red-50 rounded-lg px-3 py-1.5 flex items-center gap-1">
-                  <span>âš ï¸</span> ì”ì•¡ì´ ë¶€ì¡±í•©ë‹ˆë‹¤. ì¶©ì „ í›„ ë°œì†¡í•´ì£¼ì„¸ìš”.
+                  <span>??</span> ÀÜ¾×ÀÌ ºÎÁ·ÇÕ´Ï´Ù. ÃæÀü ÈÄ ¹ß¼ÛÇØÁÖ¼¼¿ä.
                 </div>
               )}
             </div>
-            {/* ë°œì†¡ ê°€ëŠ¥ ê±´ìˆ˜ */}
+            {/* ¹ß¼Û °¡´É °Ç¼ö */}
             <div className="p-5">
-              <div className="text-xs text-gray-400 font-medium mb-3">ë°œì†¡ ê°€ëŠ¥ ê±´ìˆ˜</div>
+              <div className="text-xs text-gray-400 font-medium mb-3">¹ß¼Û °¡´É °Ç¼ö</div>
               <div className="space-y-2.5">
                 {[
                   { label: 'SMS', price: balanceInfo.costPerSms },
                   { label: 'LMS', price: balanceInfo.costPerLms },
                   ...(balanceInfo.costPerMms && balanceInfo.costPerMms > 0 ? [{ label: 'MMS' as const, price: balanceInfo.costPerMms }] : []),
-                  ...(balanceInfo.costPerKakao && balanceInfo.costPerKakao > 0 ? [{ label: 'ì¹´ì¹´ì˜¤í†¡' as const, price: balanceInfo.costPerKakao }] : []),
+                  ...(balanceInfo.costPerKakao && balanceInfo.costPerKakao > 0 ? [{ label: 'Ä«Ä«¿ÀÅå' as const, price: balanceInfo.costPerKakao }] : []),
                 ].map(item => (
                   <div key={item.label} className="flex items-center justify-between py-2 px-3 bg-gray-50 rounded-lg">
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-medium text-gray-700">{item.label}</span>
-                      <span className="text-xs text-gray-400">@{item.price}ì›</span>
+                      <span className="text-xs text-gray-400">@{item.price}¿ø</span>
                     </div>
                     <span className="text-sm font-bold text-gray-800">
-                      {item.price > 0 ? `${Math.floor(balanceInfo.balance / item.price).toLocaleString()}ê±´` : '-'}
+                      {item.price > 0 ? `${Math.floor(balanceInfo.balance / item.price).toLocaleString()}°Ç` : '-'}
                     </span>
                   </div>
                 ))}
               </div>
             </div>
-            {/* í•˜ë‹¨ ë²„íŠ¼ */}
+            {/* ÇÏ´Ü ¹öÆ° */}
             <div className="px-5 pb-5 space-y-2">
             <button
                 onClick={() => { setShowBalanceModal(false); setChargeStep('select'); setDepositSuccess(false); setShowChargeModal(true); }}
                 className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-medium transition-colors text-sm"
               >
-                ğŸ’³ ì”ì•¡ ì¶©ì „í•˜ê¸°
+                ?? ÀÜ¾× ÃæÀüÇÏ±â
               </button>
               <button
                 onClick={() => setShowBalanceModal(false)}
                 className="w-full py-2.5 text-gray-500 hover:text-gray-700 text-sm transition-colors"
               >
-                ë‹«ê¸°
+                ´İ±â
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* ì”ì•¡ ì¶©ì „ ëª¨ë‹¬ */}
+      {/* ÀÜ¾× ÃæÀü ¸ğ´Ş */}
       {showChargeModal && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[65]">
           <div className="bg-white rounded-2xl shadow-2xl w-[420px] overflow-hidden animate-in fade-in zoom-in" onClick={e => e.stopPropagation()}>
             
-            {/* ì¶©ì „ ë°©ë²• ì„ íƒ */}
+            {/* ÃæÀü ¹æ¹ı ¼±ÅÃ */}
             {chargeStep === 'select' && (
               <>
                 <div className="p-5 border-b bg-gradient-to-r from-emerald-50 to-green-50">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-emerald-100 rounded-full flex items-center justify-center text-xl">ğŸ’³</div>
+                    <div className="w-10 h-10 bg-emerald-100 rounded-full flex items-center justify-center text-xl">??</div>
                     <div>
-                      <h3 className="text-lg font-bold text-gray-800">ì”ì•¡ ì¶©ì „</h3>
-                      <p className="text-xs text-gray-500">ì¶©ì „ ë°©ë²•ì„ ì„ íƒí•´ì£¼ì„¸ìš”</p>
+                      <h3 className="text-lg font-bold text-gray-800">ÀÜ¾× ÃæÀü</h3>
+                      <p className="text-xs text-gray-500">ÃæÀü ¹æ¹ıÀ» ¼±ÅÃÇØÁÖ¼¼¿ä</p>
                     </div>
                   </div>
                 </div>
                 <div className="p-5 space-y-3">
-                  {/* ì¹´ë“œê²°ì œ - ì¤€ë¹„ì¤‘ */}
+                  {/* Ä«µå°áÁ¦ - ÁØºñÁß */}
                   <div className="relative p-4 rounded-xl border border-gray-200 bg-gray-50 opacity-60 cursor-not-allowed">
-                    <div className="absolute top-2 right-2 bg-gray-400 text-white text-[10px] px-2 py-0.5 rounded-full font-medium">ì¤€ë¹„ ì¤‘</div>
+                    <div className="absolute top-2 right-2 bg-gray-400 text-white text-[10px] px-2 py-0.5 rounded-full font-medium">ÁØºñ Áß</div>
                     <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 bg-blue-100 rounded-lg flex items-center justify-center text-lg">ğŸ’³</div>
+                      <div className="w-9 h-9 bg-blue-100 rounded-lg flex items-center justify-center text-lg">??</div>
                       <div>
-                        <div className="text-sm font-semibold text-gray-500">ì¹´ë“œê²°ì œ</div>
-                        <div className="text-xs text-gray-400">ì‹ ìš©ì¹´ë“œ / ì²´í¬ì¹´ë“œ ì¦‰ì‹œ ì¶©ì „</div>
+                        <div className="text-sm font-semibold text-gray-500">Ä«µå°áÁ¦</div>
+                        <div className="text-xs text-gray-400">½Å¿ëÄ«µå / Ã¼Å©Ä«µå Áï½Ã ÃæÀü</div>
                       </div>
                     </div>
                   </div>
-                  {/* ê°€ìƒê³„ì¢Œ - ì¤€ë¹„ì¤‘ */}
+                  {/* °¡»ó°èÁÂ - ÁØºñÁß */}
                   <div className="relative p-4 rounded-xl border border-gray-200 bg-gray-50 opacity-60 cursor-not-allowed">
-                    <div className="absolute top-2 right-2 bg-gray-400 text-white text-[10px] px-2 py-0.5 rounded-full font-medium">ì¤€ë¹„ ì¤‘</div>
+                    <div className="absolute top-2 right-2 bg-gray-400 text-white text-[10px] px-2 py-0.5 rounded-full font-medium">ÁØºñ Áß</div>
                     <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 bg-purple-100 rounded-lg flex items-center justify-center text-lg">ğŸ¦</div>
+                      <div className="w-9 h-9 bg-purple-100 rounded-lg flex items-center justify-center text-lg">??</div>
                       <div>
-                        <div className="text-sm font-semibold text-gray-500">ê°€ìƒê³„ì¢Œ</div>
-                        <div className="text-xs text-gray-400">ë°œê¸‰ëœ ê³„ì¢Œë¡œ ì…ê¸ˆ ì‹œ ìë™ ì¶©ì „</div>
+                        <div className="text-sm font-semibold text-gray-500">°¡»ó°èÁÂ</div>
+                        <div className="text-xs text-gray-400">¹ß±ŞµÈ °èÁÂ·Î ÀÔ±İ ½Ã ÀÚµ¿ ÃæÀü</div>
                       </div>
                     </div>
                   </div>
-                  {/* ë¬´í†µì¥ì…ê¸ˆ */}
+                  {/* ¹«ÅëÀåÀÔ±İ */}
                   <button
                     onClick={() => { setChargeStep('deposit'); setDepositAmount(''); setDepositorName(''); setDepositSuccess(false); }}
                     className="w-full p-4 rounded-xl border-2 border-emerald-200 bg-emerald-50 hover:bg-emerald-100 hover:border-emerald-300 transition-all text-left"
                   >
                     <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 bg-emerald-100 rounded-lg flex items-center justify-center text-lg">ğŸ“‹</div>
+                      <div className="w-9 h-9 bg-emerald-100 rounded-lg flex items-center justify-center text-lg">??</div>
                       <div>
-                        <div className="text-sm font-semibold text-gray-800">ë¬´í†µì¥ì…ê¸ˆ</div>
-                        <div className="text-xs text-gray-500">ê³„ì¢Œì´ì²´ í›„ ì…ê¸ˆ í™•ì¸ ìš”ì²­</div>
+                        <div className="text-sm font-semibold text-gray-800">¹«ÅëÀåÀÔ±İ</div>
+                        <div className="text-xs text-gray-500">°èÁÂÀÌÃ¼ ÈÄ ÀÔ±İ È®ÀÎ ¿äÃ»</div>
                       </div>
-                      <div className="ml-auto text-emerald-500 text-sm">â†’</div>
+                      <div className="ml-auto text-emerald-500 text-sm">¡æ</div>
                     </div>
                   </button>
                 </div>
                 <div className="px-5 pb-5">
                   <button onClick={() => setShowChargeModal(false)} className="w-full py-2.5 text-gray-500 hover:text-gray-700 text-sm transition-colors">
-                    ë‹«ê¸°
+                    ´İ±â
                   </button>
                 </div>
               </>
             )}
 
-            {/* ë¬´í†µì¥ì…ê¸ˆ í¼ */}
+            {/* ¹«ÅëÀåÀÔ±İ Æû */}
             {chargeStep === 'deposit' && !depositSuccess && (
               <>
                 <div className="p-5 border-b bg-gradient-to-r from-emerald-50 to-green-50">
                   <div className="flex items-center gap-3">
-                    <button onClick={() => setChargeStep('select')} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-emerald-100 text-gray-500 transition-colors">â†</button>
+                    <button onClick={() => setChargeStep('select')} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-emerald-100 text-gray-500 transition-colors">¡ç</button>
                     <div>
-                      <h3 className="text-lg font-bold text-gray-800">ë¬´í†µì¥ì…ê¸ˆ</h3>
-                      <p className="text-xs text-gray-500">ì•„ë˜ ê³„ì¢Œë¡œ ì…ê¸ˆ í›„ ìš”ì²­í•´ì£¼ì„¸ìš”</p>
+                      <h3 className="text-lg font-bold text-gray-800">¹«ÅëÀåÀÔ±İ</h3>
+                      <p className="text-xs text-gray-500">¾Æ·¡ °èÁÂ·Î ÀÔ±İ ÈÄ ¿äÃ»ÇØÁÖ¼¼¿ä</p>
                     </div>
                   </div>
                 </div>
                 <div className="p-5 space-y-4">
-                  {/* ì…ê¸ˆ ê³„ì¢Œ ì•ˆë‚´ */}
+                  {/* ÀÔ±İ °èÁÂ ¾È³» */}
                   <div className="bg-blue-50 rounded-xl p-4 border border-blue-100">
-                    <div className="text-xs text-blue-500 font-medium mb-2">ì…ê¸ˆ ê³„ì¢Œ</div>
+                    <div className="text-xs text-blue-500 font-medium mb-2">ÀÔ±İ °èÁÂ</div>
                     <div className="flex items-center justify-between">
                       <div>
-                        <div className="text-sm font-bold text-gray-800">ê¸°ì—…ì€í–‰ 585-028893-01-011</div>
-                        <div className="text-xs text-gray-500 mt-0.5">ì˜ˆê¸ˆì£¼: ì£¼ì‹íšŒì‚¬ ì¸ë¹„í† </div>
+                        <div className="text-sm font-bold text-gray-800">±â¾÷ÀºÇà 585-028893-01-011</div>
+                        <div className="text-xs text-gray-500 mt-0.5">¿¹±İÁÖ: ÁÖ½ÄÈ¸»ç ÀÎºñÅä</div>
                       </div>
                       <button
                         onClick={() => { navigator.clipboard.writeText('585-028893-01-011'); }}
                         className="text-xs bg-blue-100 hover:bg-blue-200 text-blue-600 px-2.5 py-1.5 rounded-lg transition-colors font-medium"
                       >
-                        ë³µì‚¬
+                        º¹»ç
                       </button>
                     </div>
                   </div>
-                  {/* ì…ê¸ˆ ê¸ˆì•¡ */}
+                  {/* ÀÔ±İ ±İ¾× */}
                   <div>
-                    <label className="text-xs text-gray-500 font-medium mb-1.5 block">ì…ê¸ˆ ê¸ˆì•¡ *</label>
+                    <label className="text-xs text-gray-500 font-medium mb-1.5 block">ÀÔ±İ ±İ¾× *</label>
                     <div className="relative">
                       <input
                         type="text"
@@ -6763,23 +6763,23 @@ const campaignData = {
                           const v = e.target.value.replace(/[^0-9]/g, '');
                           setDepositAmount(v);
                         }}
-                        placeholder="ê¸ˆì•¡ì„ ì…ë ¥í•´ì£¼ì„¸ìš”"
+                        placeholder="±İ¾×À» ÀÔ·ÂÇØÁÖ¼¼¿ä"
                         className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 pr-10"
                       />
-                      <span className="absolute right-4 top-1/2 -translate-y-1/2 text-sm text-gray-400">ì›</span>
+                      <span className="absolute right-4 top-1/2 -translate-y-1/2 text-sm text-gray-400">¿ø</span>
                     </div>
                     {depositAmount && (
-                      <div className="text-xs text-gray-400 mt-1 text-right">{Number(depositAmount).toLocaleString()}ì›</div>
+                      <div className="text-xs text-gray-400 mt-1 text-right">{Number(depositAmount).toLocaleString()}¿ø</div>
                     )}
                   </div>
-                                    {/* ì…ê¸ˆìëª… */}
+                                    {/* ÀÔ±İÀÚ¸í */}
                   <div>
-                    <label className="text-xs text-gray-500 font-medium mb-1.5 block">ì…ê¸ˆìëª… *</label>
+                    <label className="text-xs text-gray-500 font-medium mb-1.5 block">ÀÔ±İÀÚ¸í *</label>
                     <input
                       type="text"
                       value={depositorName}
                       onChange={e => setDepositorName(e.target.value)}
-                      placeholder="ì…ê¸ˆìëª…ì„ ì…ë ¥í•´ì£¼ì„¸ìš”"
+                      placeholder="ÀÔ±İÀÚ¸íÀ» ÀÔ·ÂÇØÁÖ¼¼¿ä"
                       className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
                     />
                   </div>
@@ -6787,8 +6787,8 @@ const campaignData = {
                 <div className="px-5 pb-5 space-y-2">
                   <button
                     onClick={async () => {
-                      if (!depositAmount || Number(depositAmount) < 1000) return alert('1,000ì› ì´ìƒ ì…ë ¥í•´ì£¼ì„¸ìš”.');
-                      if (!depositorName.trim()) return alert('ì…ê¸ˆìëª…ì„ ì…ë ¥í•´ì£¼ì„¸ìš”.');
+                      if (!depositAmount || Number(depositAmount) < 1000) return alert('1,000¿ø ÀÌ»ó ÀÔ·ÂÇØÁÖ¼¼¿ä.');
+                      if (!depositorName.trim()) return alert('ÀÔ±İÀÚ¸íÀ» ÀÔ·ÂÇØÁÖ¼¼¿ä.');
                       setDepositSubmitting(true);
                       try {
                         const res = await fetch('/api/balance/deposit-request', {
@@ -6800,45 +6800,45 @@ const campaignData = {
                           setDepositSuccess(true);
                         } else {
                           const err = await res.json();
-                          alert(err.error || 'ìš”ì²­ ì‹¤íŒ¨');
+                          alert(err.error || '¿äÃ» ½ÇÆĞ');
                         }
-                      } catch (e) { alert('ë„¤íŠ¸ì›Œí¬ ì˜¤ë¥˜'); }
+                      } catch (e) { alert('³×Æ®¿öÅ© ¿À·ù'); }
                       setDepositSubmitting(false);
                     }}
                     disabled={depositSubmitting || !depositAmount || !depositorName.trim()}
                     className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white rounded-xl font-medium transition-colors text-sm"
                   >
-                    {depositSubmitting ? 'ìš”ì²­ ì¤‘...' : `${Number(depositAmount || 0).toLocaleString()}ì› ì…ê¸ˆ í™•ì¸ ìš”ì²­`}
+                    {depositSubmitting ? '¿äÃ» Áß...' : `${Number(depositAmount || 0).toLocaleString()}¿ø ÀÔ±İ È®ÀÎ ¿äÃ»`}
                   </button>
                   <button onClick={() => setChargeStep('select')} className="w-full py-2.5 text-gray-500 hover:text-gray-700 text-sm transition-colors">
-                    ë’¤ë¡œ
+                    µÚ·Î
                   </button>
                 </div>
               </>
             )}
 
-            {/* ìš”ì²­ ì™„ë£Œ */}
+            {/* ¿äÃ» ¿Ï·á */}
             {chargeStep === 'deposit' && depositSuccess && (
               <>
                 <div className="p-8 text-center">
-                  <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center text-3xl mx-auto mb-4">âœ…</div>
-                  <h3 className="text-lg font-bold text-gray-800 mb-2">ì…ê¸ˆ í™•ì¸ ìš”ì²­ ì™„ë£Œ</h3>
-                  <p className="text-sm text-gray-500 mb-1">ê´€ë¦¬ìê°€ ì…ê¸ˆ í™•ì¸ í›„ ì”ì•¡ì´ ì¶©ì „ë©ë‹ˆë‹¤.</p>
-                  <p className="text-sm text-gray-500">ì˜ì—…ì¼ ê¸°ì¤€ 1ì‹œê°„ ì´ë‚´ ì²˜ë¦¬ë©ë‹ˆë‹¤.</p>
+                  <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center text-3xl mx-auto mb-4">?</div>
+                  <h3 className="text-lg font-bold text-gray-800 mb-2">ÀÔ±İ È®ÀÎ ¿äÃ» ¿Ï·á</h3>
+                  <p className="text-sm text-gray-500 mb-1">°ü¸®ÀÚ°¡ ÀÔ±İ È®ÀÎ ÈÄ ÀÜ¾×ÀÌ ÃæÀüµË´Ï´Ù.</p>
+                  <p className="text-sm text-gray-500">¿µ¾÷ÀÏ ±âÁØ 1½Ã°£ ÀÌ³» Ã³¸®µË´Ï´Ù.</p>
                   <div className="mt-4 bg-gray-50 rounded-xl p-3 text-sm">
                     <div className="flex justify-between">
-                      <span className="text-gray-400">ìš”ì²­ ê¸ˆì•¡</span>
-                      <span className="font-bold text-emerald-700">{Number(depositAmount).toLocaleString()}ì›</span>
+                      <span className="text-gray-400">¿äÃ» ±İ¾×</span>
+                      <span className="font-bold text-emerald-700">{Number(depositAmount).toLocaleString()}¿ø</span>
                     </div>
                     <div className="flex justify-between mt-1">
-                      <span className="text-gray-400">ì…ê¸ˆìëª…</span>
+                      <span className="text-gray-400">ÀÔ±İÀÚ¸í</span>
                       <span className="font-medium text-gray-700">{depositorName}</span>
                     </div>
                   </div>
                 </div>
                 <div className="px-5 pb-5">
                   <button onClick={() => setShowChargeModal(false)} className="w-full py-3 bg-gray-800 hover:bg-gray-900 text-white rounded-xl font-medium transition-colors text-sm">
-                    í™•ì¸
+                    È®ÀÎ
                   </button>
                 </div>
               </>
@@ -6848,32 +6848,32 @@ const campaignData = {
         </div>
       )}
 
-      {/* ì”ì•¡ ë¶€ì¡± ëª¨ë‹¬ */}
+      {/* ÀÜ¾× ºÎÁ· ¸ğ´Ş */}
       {showInsufficientBalance?.show && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[70]">
           <div className="bg-white rounded-2xl shadow-2xl w-[400px] overflow-hidden animate-in fade-in zoom-in">
             <div className="p-6 bg-gradient-to-r from-red-50 to-orange-50 border-b flex items-center gap-3">
-              <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center text-2xl">ğŸ’³</div>
+              <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center text-2xl">??</div>
               <div>
-                <h3 className="text-lg font-bold text-red-700">ì”ì•¡ì´ ë¶€ì¡±í•©ë‹ˆë‹¤</h3>
-                <p className="text-sm text-red-500">ì¶©ì „ í›„ ë‹¤ì‹œ ì‹œë„í•´ì£¼ì„¸ìš”</p>
+                <h3 className="text-lg font-bold text-red-700">ÀÜ¾×ÀÌ ºÎÁ·ÇÕ´Ï´Ù</h3>
+                <p className="text-sm text-red-500">ÃæÀü ÈÄ ´Ù½Ã ½ÃµµÇØÁÖ¼¼¿ä</p>
               </div>
             </div>
             <div className="p-6">
               <div className="bg-gray-50 rounded-xl p-4 space-y-3">
                 <div className="flex justify-between items-center">
-                  <span className="text-gray-500 text-sm">í˜„ì¬ ì”ì•¡</span>
-                  <span className="text-lg font-bold text-red-600">{(showInsufficientBalance.balance || 0).toLocaleString()}ì›</span>
+                  <span className="text-gray-500 text-sm">ÇöÀç ÀÜ¾×</span>
+                  <span className="text-lg font-bold text-red-600">{(showInsufficientBalance.balance || 0).toLocaleString()}¿ø</span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-gray-500 text-sm">ë°œì†¡ ë¹„ìš©</span>
-                  <span className="text-lg font-bold text-gray-800">{(showInsufficientBalance.required || 0).toLocaleString()}ì›</span>
+                  <span className="text-gray-500 text-sm">¹ß¼Û ºñ¿ë</span>
+                  <span className="text-lg font-bold text-gray-800">{(showInsufficientBalance.required || 0).toLocaleString()}¿ø</span>
                 </div>
                 <div className="border-t pt-3">
                   <div className="flex justify-between items-center">
-                    <span className="text-gray-500 text-sm">ë¶€ì¡± ê¸ˆì•¡</span>
+                    <span className="text-gray-500 text-sm">ºÎÁ· ±İ¾×</span>
                     <span className="text-lg font-bold text-orange-600">
-                      {((showInsufficientBalance.required || 0) - (showInsufficientBalance.balance || 0)).toLocaleString()}ì›
+                      {((showInsufficientBalance.required || 0) - (showInsufficientBalance.balance || 0)).toLocaleString()}¿ø
                     </span>
                   </div>
                 </div>
@@ -6884,20 +6884,20 @@ const campaignData = {
                 onClick={() => setShowInsufficientBalance(null)}
                 className="w-full py-3 bg-gray-800 hover:bg-gray-900 text-white rounded-xl font-medium transition-colors"
               >
-                í™•ì¸
+                È®ÀÎ
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* í•˜ë‹¨ ë§í¬ */}
+      {/* ÇÏ´Ü ¸µÅ© */}
       <div className="max-w-7xl mx-auto px-4 py-6 mt-8 border-t border-gray-200 text-center text-xs text-gray-400 space-x-3">
-        <a href="/privacy" target="_blank" className="hover:text-gray-600 transition">ê°œì¸ì •ë³´ì²˜ë¦¬ë°©ì¹¨</a>
+        <a href="/privacy" target="_blank" className="hover:text-gray-600 transition">°³ÀÎÁ¤º¸Ã³¸®¹æÄ§</a>
         <span>|</span>
-        <a href="/terms" target="_blank" className="hover:text-gray-600 transition">ì´ìš©ì•½ê´€</a>
+        <a href="/terms" target="_blank" className="hover:text-gray-600 transition">ÀÌ¿ë¾à°ü</a>
         <span>|</span>
-        <span>Â© 2026 INVITO</span>
+        <span>¨Ï 2026 INVITO</span>
       </div>
     </div>
   );
