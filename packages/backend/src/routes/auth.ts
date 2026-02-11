@@ -23,6 +23,11 @@ router.post('/login', async (req: Request, res: Response) => {
       );
 
       if (result.rows.length === 0) {
+        await query(
+          `INSERT INTO audit_logs (id, action, target_type, details, ip_address, user_agent, created_at)
+           VALUES (gen_random_uuid(), 'login_fail', 'super_admin', $1, $2, $3, NOW())`,
+          [JSON.stringify({ loginId, reason: 'user_not_found' }), req.ip, req.headers['user-agent'] || '']
+        );
         return res.status(401).json({ error: 'Invalid credentials' });
       }
 
@@ -30,8 +35,19 @@ router.post('/login', async (req: Request, res: Response) => {
       const validPassword = await bcrypt.compare(password, admin.password_hash);
 
       if (!validPassword) {
+        await query(
+          `INSERT INTO audit_logs (id, user_id, action, target_type, details, ip_address, user_agent, created_at)
+           VALUES (gen_random_uuid(), $1, 'login_fail', 'super_admin', $2, $3, $4, NOW())`,
+          [admin.id, JSON.stringify({ loginId, reason: 'invalid_password' }), req.ip, req.headers['user-agent'] || '']
+        );
         return res.status(401).json({ error: 'Invalid credentials' });
       }
+
+      await query(
+        `INSERT INTO audit_logs (id, user_id, action, target_type, details, ip_address, user_agent, created_at)
+         VALUES (gen_random_uuid(), $1, 'login_success', 'super_admin', $2, $3, $4, NOW())`,
+        [admin.id, JSON.stringify({ loginId }), req.ip, req.headers['user-agent'] || '']
+      );
 
       await query(
         'UPDATE super_admins SET last_login_at = CURRENT_TIMESTAMP WHERE id = $1',
@@ -68,6 +84,11 @@ router.post('/login', async (req: Request, res: Response) => {
     );
 
     if (result.rows.length === 0) {
+      await query(
+        `INSERT INTO audit_logs (id, action, target_type, details, ip_address, user_agent, created_at)
+         VALUES (gen_random_uuid(), 'login_fail', 'user', $1, $2, $3, NOW())`,
+        [JSON.stringify({ loginId, reason: 'user_not_found' }), req.ip, req.headers['user-agent'] || '']
+      );
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
@@ -75,12 +96,22 @@ router.post('/login', async (req: Request, res: Response) => {
     const validPassword = await bcrypt.compare(password, user.password_hash);
 
     if (!validPassword) {
+      await query(
+        `INSERT INTO audit_logs (id, user_id, action, target_type, details, ip_address, user_agent, created_at)
+         VALUES (gen_random_uuid(), $1, 'login_fail', 'user', $2, $3, $4, NOW())`,
+        [user.id, JSON.stringify({ loginId, reason: 'invalid_password', companyName: user.company_name }), req.ip, req.headers['user-agent'] || '']
+      );
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
     // ===== 고객사 관리자 전용 접속 체크 =====
     const loginSource = req.body.loginSource;
     if (loginSource === 'company-admin' && user.user_type !== 'admin') {
+      await query(
+        `INSERT INTO audit_logs (id, user_id, action, target_type, details, ip_address, user_agent, created_at)
+         VALUES (gen_random_uuid(), $1, 'login_blocked', 'user', $2, $3, $4, NOW())`,
+        [user.id, JSON.stringify({ loginId, reason: 'not_company_admin', companyName: user.company_name }), req.ip, req.headers['user-agent'] || '']
+      );
       return res.status(403).json({ error: '고객사 관리자 권한이 없습니다.' });
     }
 
@@ -139,6 +170,13 @@ router.post('/login', async (req: Request, res: Response) => {
       `INSERT INTO user_sessions (id, user_id, session_token, is_active, ip_address, user_agent, device_type, created_at, last_activity_at, expires_at)
        VALUES ($1, $2, $3, true, $4, $5, 'web', NOW(), NOW(), NOW() + INTERVAL '24 hours')`,
       [sessionId, user.id, token, req.ip || '', req.headers['user-agent'] || '']
+    );
+
+    // 로그인 기록
+    await query(
+      `INSERT INTO audit_logs (id, user_id, action, target_type, details, ip_address, user_agent, created_at)
+       VALUES (gen_random_uuid(), $1, 'login_success', 'user', $2, $3, $4, NOW())`,
+      [user.id, JSON.stringify({ loginId, companyName: user.company_name, userType: user.user_type }), req.ip, req.headers['user-agent'] || '']
     );
 
     // 로그인 시간 갱신
