@@ -1181,8 +1181,8 @@ router.post('/companies/:id/balance-adjust', authenticate, requireSuperAdmin, as
       }
 
       await query(
-        `INSERT INTO balance_transactions (company_id, type, amount, balance_before, balance_after, description, admin_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        `INSERT INTO balance_transactions (company_id, type, amount, balance_before, balance_after, description, admin_id, payment_method)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'admin')`,
         [id, txType, amount, Number(result.rows[0].balance) + amount, result.rows[0].balance, reason.trim(), adminId]
       );
 
@@ -1203,8 +1203,8 @@ router.post('/companies/:id/balance-adjust', authenticate, requireSuperAdmin, as
       }
 
       await query(
-        `INSERT INTO balance_transactions (company_id, type, amount, balance_before, balance_after, description, admin_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        `INSERT INTO balance_transactions (company_id, type, amount, balance_before, balance_after, description, admin_id, payment_method)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'admin')`,
         [id, txType, amount, Number(result.rows[0].balance) - amount, result.rows[0].balance, reason.trim(), adminId]
       );
 
@@ -1367,8 +1367,8 @@ router.put('/deposit-requests/:id/approve', authenticate, requireSuperAdmin, asy
     // 2. balance_transactions 기록
     const newBalance = Number(balanceResult.rows[0].balance);
     await query(
-      `INSERT INTO balance_transactions (company_id, type, amount, balance_before, balance_after, description, reference_type, reference_id, admin_id)
-       VALUES ($1, 'deposit_charge', $2, $3, $4, $5, 'deposit_request', $6, $7)`,
+      `INSERT INTO balance_transactions (company_id, type, amount, balance_before, balance_after, description, reference_type, reference_id, admin_id, payment_method)
+       VALUES ($1, 'deposit_charge', $2, $3, $4, $5, 'deposit_request', $6, $7, 'bank_transfer')`,
       [
         depositReq.company_id,
         depositReq.amount,
@@ -1449,6 +1449,95 @@ router.get('/balance-overview', authenticate, requireSuperAdmin, async (req: Req
   } catch (error) {
     console.error('잔액 현황 조회 실패:', error);
     res.status(500).json({ error: '잔액 현황 조회 실패' });
+  }
+});
+
+// ===== 충전 관리 통합 API =====
+router.get('/charge-management', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 15;
+    const offset = (page - 1) * limit;
+    const companyId = req.query.companyId as string;
+    const type = req.query.type as string;
+    const paymentMethod = req.query.paymentMethod as string;
+    const startDate = req.query.startDate as string;
+    const endDate = req.query.endDate as string;
+
+    // 1. Pending deposit requests (항상 조회)
+    const pendingResult = await query(
+      `SELECT dr.id, dr.company_id, dr.amount, dr.depositor_name, dr.status,
+              COALESCE(dr.payment_method, 'deposit') as payment_method,
+              dr.created_at, c.company_name, c.balance
+       FROM deposit_requests dr
+       JOIN companies c ON dr.company_id = c.id
+       WHERE dr.status = 'pending'
+       ORDER BY dr.created_at DESC`
+    );
+
+    // 2. Balance transactions 필터
+    let where = 'WHERE 1=1';
+    const params: any[] = [];
+    let paramIdx = 1;
+
+    if (companyId && companyId !== 'all') {
+      where += ` AND bt.company_id = $${paramIdx++}`;
+      params.push(companyId);
+    }
+    if (type && type !== 'all') {
+      if (type === 'charge') {
+        where += ` AND bt.type IN ('admin_charge', 'charge', 'deposit_charge')`;
+      } else if (type === 'deduct') {
+        where += ` AND bt.type IN ('admin_deduct', 'deduct')`;
+      } else if (type === 'refund') {
+        where += ` AND bt.type = 'refund'`;
+      }
+    }
+    if (paymentMethod && paymentMethod !== 'all') {
+      where += ` AND COALESCE(bt.payment_method, 'system') = $${paramIdx++}`;
+      params.push(paymentMethod);
+    }
+    if (startDate) {
+      where += ` AND bt.created_at >= $${paramIdx++}::date`;
+      params.push(startDate);
+    }
+    if (endDate) {
+      where += ` AND bt.created_at < ($${paramIdx++}::date + INTERVAL '1 day')`;
+      params.push(endDate);
+    }
+
+    const countResult = await query(
+      `SELECT COUNT(*) FROM balance_transactions bt ${where}`,
+      params
+    );
+    const total = parseInt(countResult.rows[0].count);
+
+    const txResult = await query(
+      `SELECT bt.id, bt.company_id, bt.type, bt.amount, bt.balance_after, bt.description,
+              bt.reference_type, bt.reference_id, bt.admin_id,
+              COALESCE(bt.payment_method, 'system') as payment_method,
+              bt.created_at,
+              c.company_name,
+              sa.name as admin_name
+       FROM balance_transactions bt
+       JOIN companies c ON bt.company_id = c.id
+       LEFT JOIN super_admins sa ON bt.admin_id = sa.id
+       ${where}
+       ORDER BY bt.created_at DESC
+       LIMIT $${paramIdx++} OFFSET $${paramIdx}`,
+      [...params, limit, offset]
+    );
+
+    res.json({
+      pendingRequests: pendingResult.rows,
+      transactions: txResult.rows,
+      total,
+      page,
+      totalPages: Math.ceil(total / limit),
+    });
+  } catch (error) {
+    console.error('충전 관리 조회 실패:', error);
+    res.status(500).json({ error: '충전 관리 조회 실패' });
   }
 });
 

@@ -1465,6 +1465,25 @@ POST /api/sync/purchases   ← 구매내역 벌크 INSERT (배치 최대 1000건
 - [x] campaigns.ts test-stats: 비용 계산 하드코딩(27/81/110원) → 회사 실제 단가(cost_per_sms/lms/mms) DB 조회 적용
 - [x] 서버 배포 완료
 
+**직원 버그 리포트 4차 — 통계KST/취소제외/사용자필터/캘린더/AI시간 (2026-02-12)**
+- [x] manage-stats.ts: WHERE절 날짜 필터 KST 변환 (UTC→AT TIME ZONE 'Asia/Seoul')
+- [x] manage-stats.ts: 취소/draft 캠페인 통계 제외 (요약/페이징/상세 6개 쿼리)
+- [x] manage-stats.ts: MySQL 테스트 통계 테이블 동적화 (SMSQ_SEND→SMSQ_SEND_10)
+- [x] customers.ts: 고객사관리자 사용자(ID)별 필터 추가 (filterUserId→store_codes 매칭)
+- [x] customers.ts: 목록 조회 SELECT에 store_code/store_name 추가
+- [x] customers.ts: 이번달 통계 취소/예약 제외 + success_count 기준 비용 계산 + KST 적용
+- [x] customers.ts: 전화번호 검색 하이픈 제거 매칭 (010-1234→01012345678)
+- [x] campaigns.ts: 개별회신번호 사용 시 callback 없는 고객 발송 제외
+- [x] services/ai.ts: 현재 시각 프롬프트 전달 + 과거 시간 추천 방지 규칙 추가
+- [x] Dashboard.tsx: 캘린더 scheduled_at 기준 표시 + 편집/복제 버튼 활성화
+- [x] Dashboard.tsx: AI 추천시간 과거→다음날 자동 보정 + UI 안내 표시
+- [x] CustomerDBModal.tsx: 검색 시 selectedCustomer 초기화
+- [x] CustomersTab.tsx (company-frontend): 사용자별 드롭다운 필터 + 매장 컬럼 추가
+- [x] CompanyLoginPage.tsx: 하단 푸터(사업자정보) 추가
+- [x] LoginPage.tsx + CompanyLoginPage.tsx: 푸터 오타 수정 (신송→신승빌딩)
+- [x] results.ts: 날짜 필터/그룹핑 KST 변환 + 취소/draft 제외
+- [x] 서버 배포 완료
+
 ### 🔲 진행 예정 작업
 
 **선불 요금제 Phase 1-B~2**

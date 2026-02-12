@@ -182,14 +182,18 @@ const [statsDetailInfo, setStatsDetailInfo] = useState<{ date: string; companyNa
     monthlyPrice: 0,
   });
 
-  // 충전 관리
-  const [depositRequests, setDepositRequests] = useState<any[]>([]);
-  const [depositPage, setDepositPage] = useState(1);
-  const [depositTotal, setDepositTotal] = useState(0);
-  const depositPerPage = 10;
-  const [depositStatusFilter, setDepositStatusFilter] = useState('all');
-  const [depositMethodFilter, setDepositMethodFilter] = useState('all');
-  const [depositLoading, setDepositLoading] = useState(false);
+  // 충전 관리 (통합)
+  const [chargeTxList, setChargeTxList] = useState<any[]>([]);
+  const [chargeTxPage, setChargeTxPage] = useState(1);
+  const [chargeTxTotal, setChargeTxTotal] = useState(0);
+  const chargeTxPerPage = 15;
+  const [chargeTxCompanyFilter, setChargeTxCompanyFilter] = useState('all');
+  const [chargeTxTypeFilter, setChargeTxTypeFilter] = useState('all');
+  const [chargeTxMethodFilter, setChargeTxMethodFilter] = useState('all');
+  const [chargeTxStartDate, setChargeTxStartDate] = useState('');
+  const [chargeTxEndDate, setChargeTxEndDate] = useState('');
+  const [chargeTxLoading, setChargeTxLoading] = useState(false);
+  const [pendingDeposits, setPendingDeposits] = useState<any[]>([]);
   const [showDepositApproveModal, setShowDepositApproveModal] = useState(false);
   const [showDepositRejectModal, setShowDepositRejectModal] = useState(false);
   const [depositTarget, setDepositTarget] = useState<any>(null);
@@ -316,7 +320,7 @@ const [emailSending, setEmailSending] = useState(false);
 // ===== 정산 useEffect =====
 useEffect(() => { if (activeTab === 'billing') { loadBillings(); loadInvoices(); } }, [activeTab]);
 useEffect(() => { if (activeTab === 'billing') loadBillings(); }, [filterYear]);
-useEffect(() => { if (activeTab === 'deposits') loadDepositRequests(1); }, [activeTab, depositStatusFilter, depositMethodFilter]);
+useEffect(() => { if (activeTab === 'deposits') loadChargeManagement(1); }, [activeTab, chargeTxCompanyFilter, chargeTxTypeFilter, chargeTxMethodFilter, chargeTxStartDate, chargeTxEndDate]);
 useEffect(() => { if (activeTab === 'syncAgents') loadSyncAgents(); }, [activeTab]);
 useEffect(() => { if (activeTab === 'auditLogs') loadAuditLogs(1); }, [activeTab]);
 useEffect(() => { loadLineGroups(); }, []);
@@ -726,8 +730,8 @@ const handleSendBillingEmail = async () => {
       await loadPlans();
       // 플랜 신청 로드
       await loadPlanRequests();
-      // 충전 요청 로드 (배지 카운트용)
-      await loadDepositRequests(1);
+      // 충전 관리 로드 (배지 카운트용)
+      await loadChargeManagement(1);
     } catch (error) {
       console.error('데이터 로드 실패:', error);
     } finally {
@@ -810,26 +814,30 @@ const handleSendBillingEmail = async () => {
     }
   };
 
-  const loadDepositRequests = async (page = 1) => {
-    setDepositLoading(true);
+  const loadChargeManagement = async (page = 1) => {
+    setChargeTxLoading(true);
     try {
       const token = localStorage.getItem('token');
-      const params = new URLSearchParams({ page: String(page), limit: String(depositPerPage) });
-      if (depositStatusFilter !== 'all') params.set('status', depositStatusFilter);
-      if (depositMethodFilter !== 'all') params.set('paymentMethod', depositMethodFilter);
-      const res = await fetch(`/api/admin/deposit-requests?${params}`, {
+      const params = new URLSearchParams({ page: String(page), limit: String(chargeTxPerPage) });
+      if (chargeTxCompanyFilter !== 'all') params.set('companyId', chargeTxCompanyFilter);
+      if (chargeTxTypeFilter !== 'all') params.set('type', chargeTxTypeFilter);
+      if (chargeTxMethodFilter !== 'all') params.set('paymentMethod', chargeTxMethodFilter);
+      if (chargeTxStartDate) params.set('startDate', chargeTxStartDate);
+      if (chargeTxEndDate) params.set('endDate', chargeTxEndDate);
+      const res = await fetch(`/api/admin/charge-management?${params}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.ok) {
         const data = await res.json();
-        setDepositRequests(data.requests || []);
-        setDepositTotal(data.total || 0);
-        setDepositPage(page);
+        setChargeTxList(data.transactions || []);
+        setChargeTxTotal(data.total || 0);
+        setChargeTxPage(page);
+        setPendingDeposits(data.pendingRequests || []);
       }
     } catch (error) {
-      console.error('충전 요청 로드 실패:', error);
+      console.error('충전 관리 로드 실패:', error);
     }
-    setDepositLoading(false);
+    setChargeTxLoading(false);
   };
 
   const handleApproveDeposit = async () => {
@@ -846,7 +854,7 @@ const handleSendBillingEmail = async () => {
         setShowDepositApproveModal(false);
         setDepositTarget(null);
         setDepositAdminNote('');
-        loadDepositRequests(depositPage);
+        loadChargeManagement(chargeTxPage);
       } else {
         const err = await res.json();
         setModal({ type: 'alert', title: '승인 실패', message: err.error || '처리 중 오류 발생', variant: 'error' });
@@ -870,7 +878,7 @@ const handleSendBillingEmail = async () => {
         setShowDepositRejectModal(false);
         setDepositTarget(null);
         setDepositAdminNote('');
-        loadDepositRequests(depositPage);
+        loadChargeManagement(chargeTxPage);
       } else {
         const err = await res.json();
         setModal({ type: 'alert', title: '거절 실패', message: err.error || '처리 중 오류 발생', variant: 'error' });
@@ -1743,9 +1751,9 @@ const handleApproveRequest = async (id: string) => {
                 }`}
               >
                 충전 관리
-                {depositRequests.filter(r => r.status === 'pending').length > 0 && (
+                {pendingDeposits.length > 0 && (
                   <span className="absolute -top-1 -right-1 bg-emerald-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
-                    {depositRequests.filter(r => r.status === 'pending').length}
+                    {pendingDeposits.length}
                   </span>
                 )}
               </button>
@@ -2545,163 +2553,220 @@ const handleApproveRequest = async (id: string) => {
           </div>
         )}
 
-        {/* 충전 관리 탭 */}
+        {/* 충전 관리 탭 (통합) */}
         {activeTab === 'deposits' && (
-          <div className="bg-white rounded-lg shadow">
-            <div className="px-6 py-4 border-b flex flex-wrap justify-between items-center gap-3">
-              <h2 className="text-lg font-semibold">충전 관리</h2>
-              <div className="flex gap-2">
-                <select
-                  value={depositMethodFilter}
-                  onChange={(e) => setDepositMethodFilter(e.target.value)}
-                  className="px-3 py-2 border rounded-lg text-sm"
-                >
-                  <option value="all">전체 결제수단</option>
-                  <option value="deposit">무통장입금</option>
-                  <option value="card">카드결제</option>
-                  <option value="virtual_account">가상계좌</option>
-                </select>
-                <select
-                  value={depositStatusFilter}
-                  onChange={(e) => setDepositStatusFilter(e.target.value)}
-                  className="px-3 py-2 border rounded-lg text-sm"
-                >
-                  <option value="all">전체 상태</option>
-                  <option value="pending">대기</option>
-                  <option value="confirmed">승인</option>
-                  <option value="rejected">거절</option>
-                </select>
-                <button
-                  onClick={() => loadDepositRequests(1)}
-                  className="px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm font-medium transition-colors"
-                >
-                  새로고침
-                </button>
-              </div>
-            </div>
-
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">요청일</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 whitespace-nowrap">회사</th>
-                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">결제수단</th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 whitespace-nowrap">금액</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 whitespace-nowrap">입금자명</th>
-                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">상태</th>
-                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">처리</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200">
-                  {depositLoading ? (
-                    <tr>
-                      <td colSpan={7} className="px-6 py-12 text-center text-gray-500">불러오는 중...</td>
-                    </tr>
-                  ) : depositRequests.length === 0 ? (
-                    <tr>
-                      <td colSpan={7} className="px-6 py-12 text-center text-gray-500">충전 요청이 없습니다.</td>
-                    </tr>
-                  ) : (
-                    depositRequests.map((dr) => (
-                      <tr key={dr.id} className={`hover:bg-gray-50 ${dr.status === 'pending' ? 'bg-yellow-50' : ''}`}>
-                        <td className="px-4 py-3 text-center text-gray-600 whitespace-nowrap">
-                          {formatDateTime(dr.created_at)}
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="font-medium text-gray-900">{dr.company_name}</div>
-                          <div className="text-xs text-gray-500">잔액: {Number(dr.balance || 0).toLocaleString()}원</div>
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                          {dr.payment_method === 'deposit' && (
-                            <span className="px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">무통장입금</span>
-                          )}
-                          {dr.payment_method === 'card' && (
-                            <span className="px-2 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-800">카드결제</span>
-                          )}
-                          {dr.payment_method === 'virtual_account' && (
-                            <span className="px-2 py-1 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">가상계좌</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-right font-bold text-gray-900 whitespace-nowrap">
-                          {Number(dr.amount).toLocaleString()}원
-                        </td>
-                        <td className="px-4 py-3 text-gray-700">
-                          {dr.depositor_name || '-'}
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                          {dr.status === 'pending' && (
-                            <span className="px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">대기</span>
-                          )}
-                          {dr.status === 'confirmed' && (
-                            <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">승인</span>
-                          )}
-                          {dr.status === 'rejected' && (
-                            <span className="px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">거절</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                          {dr.status === 'pending' ? (
-                            <div className="flex justify-center gap-2">
-                              <button
-                                onClick={() => {
-                                  setDepositTarget(dr);
-                                  setDepositAdminNote('');
-                                  setShowDepositApproveModal(true);
-                                }}
-                                className="px-3 py-1 bg-green-600 text-white rounded text-sm hover:bg-green-700"
-                              >
-                                승인
-                              </button>
-                              <button
-                                onClick={() => {
-                                  setDepositTarget(dr);
-                                  setDepositAdminNote('');
-                                  setShowDepositRejectModal(true);
-                                }}
-                                className="px-3 py-1 bg-red-600 text-white rounded text-sm hover:bg-red-700"
-                              >
-                                거절
-                              </button>
-                            </div>
-                          ) : (
-                            <div className="text-xs text-gray-500">
-                              <div>{dr.confirmed_by_name || '-'}</div>
-                              {dr.confirmed_at && (
-                                <div>{formatDate(dr.confirmed_at)}</div>
-                              )}
-                              {dr.admin_note && (
-                                <div className="text-gray-600 mt-1" title={dr.admin_note}>
-                                  {dr.admin_note.length > 15 ? dr.admin_note.slice(0, 15) + '...' : dr.admin_note}
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-            {depositTotal > depositPerPage && (
-              <div className="px-6 py-4 border-t flex items-center justify-between">
-                <span className="text-sm text-gray-500">
-                  총 {depositTotal}건 중 {(depositPage - 1) * depositPerPage + 1}-{Math.min(depositPage * depositPerPage, depositTotal)}
-                </span>
-                <div className="flex gap-1">
-                  <button onClick={() => loadDepositRequests(depositPage - 1)} disabled={depositPage === 1}
-                    className="px-3 py-1 rounded border text-sm disabled:opacity-40 hover:bg-gray-50">◀ 이전</button>
-                  {Array.from({ length: Math.ceil(depositTotal / depositPerPage) }, (_, i) => i + 1).map(p => (
-                    <button key={p} onClick={() => loadDepositRequests(p)}
-                      className={`px-3 py-1 rounded border text-sm ${depositPage === p ? 'bg-blue-600 text-white border-blue-600' : 'hover:bg-gray-50'}`}>{p}</button>
+          <div className="space-y-4">
+            {/* 대기 건 알림 */}
+            {pendingDeposits.length > 0 && (
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-lg">⏳</span>
+                  <h3 className="font-semibold text-amber-800">승인 대기 {pendingDeposits.length}건</h3>
+                </div>
+                <div className="space-y-2">
+                  {pendingDeposits.map((dr) => (
+                    <div key={dr.id} className="flex items-center justify-between bg-white rounded-lg px-4 py-3 border border-amber-100">
+                      <div className="flex items-center gap-4">
+                        <span className="px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">무통장입금</span>
+                        <span className="font-medium text-gray-900">{dr.company_name}</span>
+                        <span className="font-bold text-lg text-gray-900">{Number(dr.amount).toLocaleString()}원</span>
+                        <span className="text-sm text-gray-500">입금자: {dr.depositor_name}</span>
+                        <span className="text-xs text-gray-400">{formatDateTime(dr.created_at)}</span>
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => { setDepositTarget(dr); setDepositAdminNote(''); setShowDepositApproveModal(true); }}
+                          className="px-4 py-1.5 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition-colors"
+                        >
+                          승인
+                        </button>
+                        <button
+                          onClick={() => { setDepositTarget(dr); setDepositAdminNote(''); setShowDepositRejectModal(true); }}
+                          className="px-4 py-1.5 bg-red-500 text-white rounded-lg text-sm font-medium hover:bg-red-600 transition-colors"
+                        >
+                          거절
+                        </button>
+                      </div>
+                    </div>
                   ))}
-                  <button onClick={() => loadDepositRequests(depositPage + 1)}
-                    disabled={depositPage >= Math.ceil(depositTotal / depositPerPage)}
-                    className="px-3 py-1 rounded border text-sm disabled:opacity-40 hover:bg-gray-50">다음 ▶</button>
                 </div>
               </div>
             )}
+
+            {/* 전체 잔액 변동 이력 */}
+            <div className="bg-white rounded-lg shadow">
+              <div className="px-6 py-4 border-b">
+                <div className="flex flex-wrap justify-between items-center gap-3 mb-3">
+                  <h2 className="text-lg font-semibold">💰 잔액 변동 이력</h2>
+                  <button
+                    onClick={() => loadChargeManagement(1)}
+                    className="px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm font-medium transition-colors"
+                  >
+                    새로고침
+                  </button>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <select
+                    value={chargeTxCompanyFilter}
+                    onChange={(e) => setChargeTxCompanyFilter(e.target.value)}
+                    className="px-3 py-2 border rounded-lg text-sm"
+                  >
+                    <option value="all">전체 고객사</option>
+                    {companies.filter(c => c.billing_type === 'prepaid').map(c => (
+                      <option key={c.id} value={c.id}>{c.company_name}</option>
+                    ))}
+                  </select>
+                  <select
+                    value={chargeTxTypeFilter}
+                    onChange={(e) => setChargeTxTypeFilter(e.target.value)}
+                    className="px-3 py-2 border rounded-lg text-sm"
+                  >
+                    <option value="all">전체 구분</option>
+                    <option value="charge">충전</option>
+                    <option value="deduct">차감</option>
+                    <option value="refund">환불</option>
+                  </select>
+                  <select
+                    value={chargeTxMethodFilter}
+                    onChange={(e) => setChargeTxMethodFilter(e.target.value)}
+                    className="px-3 py-2 border rounded-lg text-sm"
+                  >
+                    <option value="all">전체 결제수단</option>
+                    <option value="bank_transfer">무통장입금</option>
+                    <option value="card">카드결제</option>
+                    <option value="virtual_account">가상계좌</option>
+                    <option value="admin">관리자</option>
+                    <option value="system">시스템(발송)</option>
+                  </select>
+                  <input
+                    type="date"
+                    value={chargeTxStartDate}
+                    onChange={(e) => setChargeTxStartDate(e.target.value)}
+                    className="px-3 py-2 border rounded-lg text-sm"
+                  />
+                  <span className="flex items-center text-gray-400">~</span>
+                  <input
+                    type="date"
+                    value={chargeTxEndDate}
+                    onChange={(e) => setChargeTxEndDate(e.target.value)}
+                    className="px-3 py-2 border rounded-lg text-sm"
+                  />
+                  {(chargeTxCompanyFilter !== 'all' || chargeTxTypeFilter !== 'all' || chargeTxMethodFilter !== 'all' || chargeTxStartDate || chargeTxEndDate) && (
+                    <button
+                      onClick={() => { setChargeTxCompanyFilter('all'); setChargeTxTypeFilter('all'); setChargeTxMethodFilter('all'); setChargeTxStartDate(''); setChargeTxEndDate(''); }}
+                      className="px-3 py-2 text-sm text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors"
+                    >
+                      필터 초기화
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">일시</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 whitespace-nowrap">고객사</th>
+                      <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">구분</th>
+                      <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">결제수단</th>
+                      <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 whitespace-nowrap">금액</th>
+                      <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 whitespace-nowrap">변동 후 잔액</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 whitespace-nowrap">설명</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200">
+                    {chargeTxLoading ? (
+                      <tr>
+                        <td colSpan={7} className="px-6 py-12 text-center text-gray-500">불러오는 중...</td>
+                      </tr>
+                    ) : chargeTxList.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="px-6 py-12 text-center text-gray-500">잔액 변동 이력이 없습니다.</td>
+                      </tr>
+                    ) : (
+                      chargeTxList.map((tx) => {
+                        const typeConfig: Record<string, { label: string; color: string; sign: string }> = {
+                          admin_charge: { label: '충전', color: 'bg-emerald-100 text-emerald-800', sign: '+' },
+                          charge: { label: '충전', color: 'bg-emerald-100 text-emerald-800', sign: '+' },
+                          deposit_charge: { label: '충전', color: 'bg-emerald-100 text-emerald-800', sign: '+' },
+                          admin_deduct: { label: '차감', color: 'bg-red-100 text-red-800', sign: '-' },
+                          deduct: { label: '차감', color: 'bg-red-100 text-red-800', sign: '-' },
+                          refund: { label: '환불', color: 'bg-blue-100 text-blue-800', sign: '+' },
+                        };
+                        const methodConfig: Record<string, { label: string; color: string }> = {
+                          bank_transfer: { label: '무통장입금', color: 'bg-blue-50 text-blue-700' },
+                          card: { label: '카드결제', color: 'bg-purple-50 text-purple-700' },
+                          virtual_account: { label: '가상계좌', color: 'bg-indigo-50 text-indigo-700' },
+                          admin: { label: '관리자', color: 'bg-gray-100 text-gray-700' },
+                          system: { label: '시스템', color: 'bg-orange-50 text-orange-700' },
+                        };
+                        const tc = typeConfig[tx.type] || { label: tx.type, color: 'bg-gray-100 text-gray-600', sign: '' };
+                        const mc = methodConfig[tx.payment_method] || { label: tx.payment_method || '-', color: 'bg-gray-50 text-gray-600' };
+                        const isPlus = ['admin_charge', 'charge', 'deposit_charge', 'refund'].includes(tx.type);
+
+                        return (
+                          <tr key={tx.id} className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-center text-gray-600 whitespace-nowrap text-xs">
+                              {formatDateTime(tx.created_at)}
+                            </td>
+                            <td className="px-4 py-3 font-medium text-gray-900 whitespace-nowrap">
+                              {tx.company_name}
+                            </td>
+                            <td className="px-4 py-3 text-center">
+                              <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${tc.color}`}>{tc.label}</span>
+                            </td>
+                            <td className="px-4 py-3 text-center">
+                              <span className={`px-2 py-0.5 rounded text-xs font-medium ${mc.color}`}>{mc.label}</span>
+                            </td>
+                            <td className={`px-4 py-3 text-right font-bold whitespace-nowrap ${isPlus ? 'text-emerald-600' : 'text-red-600'}`}>
+                              {tc.sign}{Number(tx.amount).toLocaleString()}원
+                            </td>
+                            <td className="px-4 py-3 text-right text-gray-600 whitespace-nowrap">
+                              {Number(tx.balance_after).toLocaleString()}원
+                            </td>
+                            <td className="px-4 py-3 text-gray-600 max-w-[300px]">
+                              <div className="truncate" title={tx.description || ''}>
+                                {tx.description || '-'}
+                              </div>
+                              {tx.admin_name && (
+                                <div className="text-xs text-gray-400">처리: {tx.admin_name}</div>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {chargeTxTotal > chargeTxPerPage && (
+                <div className="px-6 py-4 border-t flex items-center justify-between">
+                  <span className="text-sm text-gray-500">
+                    총 {chargeTxTotal}건 중 {(chargeTxPage - 1) * chargeTxPerPage + 1}-{Math.min(chargeTxPage * chargeTxPerPage, chargeTxTotal)}
+                  </span>
+                  <div className="flex gap-1">
+                    <button onClick={() => loadChargeManagement(chargeTxPage - 1)} disabled={chargeTxPage === 1}
+                      className="px-3 py-1 rounded border text-sm disabled:opacity-40 hover:bg-gray-50">◀ 이전</button>
+                    {(() => {
+                      const totalPages = Math.ceil(chargeTxTotal / chargeTxPerPage);
+                      const pages: number[] = [];
+                      const start = Math.max(1, chargeTxPage - 2);
+                      const end = Math.min(totalPages, start + 4);
+                      for (let i = start; i <= end; i++) pages.push(i);
+                      return pages.map(p => (
+                        <button key={p} onClick={() => loadChargeManagement(p)}
+                          className={`px-3 py-1 rounded border text-sm ${chargeTxPage === p ? 'bg-blue-600 text-white border-blue-600' : 'hover:bg-gray-50'}`}>{p}</button>
+                      ));
+                    })()}
+                    <button onClick={() => loadChargeManagement(chargeTxPage + 1)}
+                      disabled={chargeTxPage >= Math.ceil(chargeTxTotal / chargeTxPerPage)}
+                      className="px-3 py-1 rounded border text-sm disabled:opacity-40 hover:bg-gray-50">다음 ▶</button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         )}
 

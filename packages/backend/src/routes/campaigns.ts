@@ -181,8 +181,8 @@ async function prepaidDeduct(
 
   // 거래 기록
   await query(
-    `INSERT INTO balance_transactions (company_id, type, amount, balance_after, description, reference_type, reference_id)
-     VALUES ($1, 'deduct', $2, $3, $4, 'campaign', $5)`,
+    `INSERT INTO balance_transactions (company_id, type, amount, balance_after, description, reference_type, reference_id, payment_method)
+     VALUES ($1, 'deduct', $2, $3, $4, 'campaign', $5, 'system')`,
     [companyId, totalAmount, result.rows[0].balance, `${messageType} ${count}건 발송 차감 (건당 ${unitPrice}원)`, referenceId]
   );
 
@@ -232,8 +232,8 @@ async function prepaidRefund(
 
   if (result.rows.length > 0) {
     await query(
-      `INSERT INTO balance_transactions (company_id, type, amount, balance_after, description, reference_type, reference_id)
-       VALUES ($1, 'refund', $2, $3, $4, 'campaign', $5)`,
+      `INSERT INTO balance_transactions (company_id, type, amount, balance_after, description, reference_type, reference_id, payment_method)
+       VALUES ($1, 'refund', $2, $3, $4, 'campaign', $5, 'system')`,
       [companyId, refundAmount, result.rows[0].balance, `${reason} (${messageType} ${count}건 × ${unitPrice}원)`, campaignId]
     );
     console.log(`[선불환불] company=${companyId} ${refundAmount}원 환불 → 잔액 ${result.rows[0].balance}원`);
