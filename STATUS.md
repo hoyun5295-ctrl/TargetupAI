@@ -1460,6 +1460,11 @@ POST /api/sync/purchases   ← 구매내역 벌크 INSERT (배치 최대 1000건
 - [x] 서버 .env SMS_TABLES 11개로 확장
 - [x] 서버 배포 완료
 
+**테스트 발송 결과 조회 수정 (2026-02-12)**
+- [x] campaigns.ts test-stats: 메인 테이블 + 로그 테이블(SMSQ_SEND_10_YYYYMM) 합산 조회 (Agent 처리 완료 건 누락 해결)
+- [x] campaigns.ts test-stats: 비용 계산 하드코딩(27/81/110원) → 회사 실제 단가(cost_per_sms/lms/mms) DB 조회 적용
+- [x] 서버 배포 완료
+
 ### 🔲 진행 예정 작업
 
 **선불 요금제 Phase 1-B~2**

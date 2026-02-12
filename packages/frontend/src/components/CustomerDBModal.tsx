@@ -48,6 +48,7 @@ export default function CustomerDBModal({ onClose, token }: CustomerDBModalProps
 
   const fetchCustomers = async (p: number, overrides?: { gender?: string; grade?: string; region?: string; smsOptIn?: string; search?: string }) => {
     setLoading(true);
+    setSelectedCustomer(null); // 검색/필터 변경 시 상세 패널 초기화
     try {
       const currentGender = overrides?.gender ?? filterGender;
       const currentGrade = overrides?.grade ?? filterGrade;

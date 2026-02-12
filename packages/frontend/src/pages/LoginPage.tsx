@@ -255,7 +255,7 @@ export default function LoginPage() {
             주식회사 인비토 | 대표이사 유호윤 | 사업자등록번호 667-86-00578 | 통신판매신고 제 2017-서울송파-0160호
           </p>
           <p className="mt-1">
-            서울시 송파구 오금로36길 46, 신송빌딩 4F | 문의전화 1800-8125
+            서울시 송파구 오금로36길 46, 신승빌딩 4F | 문의전화 1800-8125
           </p>
           <p className="mt-2">
             <Link to="/privacy" className="hover:text-white transition">개인정보처리방침</Link>

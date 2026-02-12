@@ -77,12 +77,15 @@ router.get('/summary', async (req: Request, res: Response) => {
     
     const summaryParams: any[] = [companyId];
 
-    // 일자 범위 필터 (fromDate/toDate 우선, 없으면 월 단위)
+    // 취소/초안 캠페인 제외
+    summaryQuery += ` AND status NOT IN ('cancelled', 'draft')`;
+
+    // 일자 범위 필터 (fromDate/toDate 우선, 없으면 월 단위) — KST 기준
     if (fromDate && toDate) {
-      summaryQuery += ` AND created_at >= $2::date AND created_at < ($3::date + interval '1 day')`;
+      summaryQuery += ` AND created_at >= ($2 || ' 00:00:00')::timestamp AT TIME ZONE 'Asia/Seoul' AND created_at < (($3::date + interval '1 day') || ' 00:00:00')::timestamp AT TIME ZONE 'Asia/Seoul'`;
       summaryParams.push(String(fromDate), String(toDate));
     } else {
-      summaryQuery += ` AND created_at >= $2::date AND created_at < ($2::date + interval '1 month')`;
+      summaryQuery += ` AND created_at >= ($2 || ' 00:00:00')::timestamp AT TIME ZONE 'Asia/Seoul' AND created_at < ($2::date + interval '1 month' || ' 00:00:00')::timestamp AT TIME ZONE 'Asia/Seoul'`;
       summaryParams.push(`${yearMonth.slice(0,4)}-${yearMonth.slice(4,6)}-01`);
     }
     
@@ -166,19 +169,19 @@ router.get('/campaigns', async (req: Request, res: Response) => {
       params.push(req.query.filter_user_id);
     }
 
-    // 기간 필터 (fromDate/toDate 일자 범위 우선, 없으면 from/to 월 단위)
+    // 기간 필터 (fromDate/toDate 일자 범위 우선, 없으면 from/to 월 단위) — KST 기준
     if (fromDate && toDate) {
-      whereClause += ` AND created_at >= $${paramIndex++}::date`;
+      whereClause += ` AND created_at >= ($${paramIndex++} || ' 00:00:00')::timestamp AT TIME ZONE 'Asia/Seoul'`;
       params.push(String(fromDate));
-      whereClause += ` AND created_at < ($${paramIndex++}::date + interval '1 day')`;
+      whereClause += ` AND created_at < (($${paramIndex++}::date + interval '1 day') || ' 00:00:00')::timestamp AT TIME ZONE 'Asia/Seoul'`;
       params.push(String(toDate));
     } else {
       if (from) {
-        whereClause += ` AND created_at >= $${paramIndex++}::date`;
+        whereClause += ` AND created_at >= ($${paramIndex++} || ' 00:00:00')::timestamp AT TIME ZONE 'Asia/Seoul'`;
         params.push(`${String(from).slice(0,4)}-${String(from).slice(4,6)}-01`);
       }
       if (to) {
-        whereClause += ` AND created_at < ($${paramIndex++}::date + interval '1 month')`;
+        whereClause += ` AND created_at < (($${paramIndex++}::date + interval '1 month') || ' 00:00:00')::timestamp AT TIME ZONE 'Asia/Seoul'`;
         params.push(`${String(to).slice(0,4)}-${String(to).slice(4,6)}-01`);
       }
     }
@@ -208,6 +211,7 @@ router.get('/campaigns', async (req: Request, res: Response) => {
         c.id, c.campaign_name, c.message_type, c.message_content, c.send_type, c.status,
         c.target_count, c.sent_count, c.success_count, c.fail_count,
         c.is_ad, c.scheduled_at, c.sent_at, c.created_at,
+        (c.created_at AT TIME ZONE 'Asia/Seoul')::date as created_date_kst,
         c.cancelled_by_type, c.cancel_reason,
         u.login_id as created_by_name,
         CASE WHEN c.sent_count > 0 

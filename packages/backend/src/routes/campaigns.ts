@@ -686,9 +686,19 @@ router.post('/:id/send', async (req: Request, res: Response) => {
 const excludedPhones = campaign.excluded_phones || [];
 
 // 제외 대상 필터링
-const filteredCustomers = customers.filter(
+let filteredCustomers = customers.filter(
   (c: any) => !excludedPhones.includes(c.phone.replace(/-/g, ''))
 );
+
+// ★ 개별회신번호 사용 시 callback 없는 고객 제외
+if (useIndividualCallback) {
+  const beforeCount = filteredCustomers.length;
+  filteredCustomers = filteredCustomers.filter((c: any) => c.callback && c.callback.trim());
+  const skippedCount = beforeCount - filteredCustomers.length;
+  if (skippedCount > 0) {
+    console.log(`[개별회신번호] callback 없는 고객 ${skippedCount}명 제외 (${filteredCustomers.length}명 발송)`);
+  }
+}
 
 if (filteredCustomers.length === 0) {
   return res.status(400).json({ error: '발송 대상이 없습니다. (모두 제외됨)' });

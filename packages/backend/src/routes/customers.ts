@@ -208,8 +208,16 @@ if (smsOptIn === 'true') {
 
     // 검색어
     if (search) {
-      whereClause += ` AND (name ILIKE $${paramIndex} OR phone ILIKE $${paramIndex})`;
-      params.push(`%${search}%`);
+      const searchStr = String(search);
+      // 전화번호 검색: 하이픈 제거 후 매칭
+      const cleanSearch = searchStr.replace(/-/g, '');
+      if (/^\d+$/.test(cleanSearch)) {
+        whereClause += ` AND REPLACE(phone, '-', '') LIKE $${paramIndex}`;
+        params.push(`%${cleanSearch}%`);
+      } else {
+        whereClause += ` AND (name ILIKE $${paramIndex} OR phone ILIKE $${paramIndex})`;
+        params.push(`%${searchStr}%`);
+      }
       paramIndex++;
     }
 
@@ -567,7 +575,7 @@ router.get('/stats', async (req: Request, res: Response) => {
     );
     const company = companyResult.rows[0] || {};
 
-    // 이번 달 채널별 발송 통계
+    // 이번 달 채널별 발송 통계 (취소/초안/예약 제외, 성공 건수 기준)
     const campaignStats = await query(
       `SELECT
         c.message_type,
@@ -576,12 +584,13 @@ router.get('/stats', async (req: Request, res: Response) => {
        FROM campaign_runs cr
        JOIN campaigns c ON cr.campaign_id = c.id
        WHERE c.company_id = $1
-         AND cr.created_at >= date_trunc('month', CURRENT_DATE)
+         AND c.status NOT IN ('cancelled', 'draft', 'scheduled')
+         AND cr.created_at >= date_trunc('month', (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Seoul'))::date::timestamp AT TIME ZONE 'Asia/Seoul'
        GROUP BY c.message_type`,
       [companyId]
     );
 
-    // 채널별 집계
+    // 채널별 집계 (성공 건수 기준으로 비용 계산)
     let smsSent = 0, lmsSent = 0, mmsSent = 0, kakaoSent = 0;
     let totalSent = 0, totalSuccess = 0;
 
@@ -592,10 +601,10 @@ router.get('/stats', async (req: Request, res: Response) => {
       totalSuccess += success;
 
       switch (row.message_type) {
-        case 'SMS': smsSent = sent; break;
-        case 'LMS': lmsSent = sent; break;
-        case 'MMS': mmsSent = sent; break;
-        case 'KAKAO': kakaoSent = sent; break;
+        case 'SMS': smsSent = success; break;
+        case 'LMS': lmsSent = success; break;
+        case 'MMS': mmsSent = success; break;
+        case 'KAKAO': kakaoSent = success; break;
       }
     });
 

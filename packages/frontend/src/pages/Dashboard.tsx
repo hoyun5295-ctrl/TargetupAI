@@ -43,7 +43,7 @@ interface PlanInfo {
 }
 
 // 캘린더 모달 컴포넌트
-function CalendarModal({ onClose, token }: { onClose: () => void; token: string | null }) {
+function CalendarModal({ onClose, token, onEdit }: { onClose: () => void; token: string | null; onEdit?: (campaign: any) => void }) {
   const [campaigns, setCampaigns] = useState<any[]>([]);
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<number | null>(null);
@@ -72,19 +72,10 @@ function CalendarModal({ onClose, token }: { onClose: () => void; token: string 
   const getFirstDayOfMonth = (y: number, m: number) => new Date(y, m, 1).getDay();
 
   const getCampaignsForDay = (day: number) => {
-    const currentDay = new Date(year, month, day);
     return campaigns.filter((c) => {
-      // 이벤트 기간이 유효하면 그 범위 체크
-      if (c.event_start_date && c.event_end_date) {
-        const startStr = c.event_start_date.slice(0, 10); // "2026-02-09"
-        const endStr = c.event_end_date.slice(0, 10);     // "2026-02-13"
-        const currentStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-        if (endStr >= startStr) {
-          return currentStr >= startStr && currentStr <= endStr;
-        }
-      }
-      // 없거나 유효하지 않으면 scheduled_at 또는 created_at 기준
-      const dateStr = c.scheduled_at || c.created_at;
+      // 실제 발송/예약 날짜 기준으로 캘린더에 표시 (이벤트 사용기간이 아닌 발송일)
+      const dateStr = c.scheduled_at || c.sent_at || c.created_at;
+      if (!dateStr) return false;
       const date = new Date(dateStr);
       return date.getDate() === day && date.getMonth() === month && date.getFullYear() === year;
     });
@@ -179,15 +170,7 @@ function CalendarModal({ onClose, token }: { onClose: () => void; token: string 
                 const dayOfWeek = new Date(year, month, day).getDay();
                 
                 const getEventPosition = (c: any) => {
-                  if (!c.event_start_date || !c.event_end_date) return 'single';
-                  const startStr = c.event_start_date.slice(0, 10);
-                  const endStr = c.event_end_date.slice(0, 10);
-                  const currentStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-                  if (endStr < startStr) return 'single';
-                  if (currentStr === startStr && currentStr === endStr) return 'single';
-                  if (currentStr === startStr) return 'start';
-                  if (currentStr === endStr) return 'end';
-                  return 'middle';
+                  return 'single';
                 };
 
                 const getBarStyle = (position: string) => {
@@ -348,10 +331,22 @@ function CalendarModal({ onClose, token }: { onClose: () => void; token: string 
                   
                   {/* 버튼 */}
                   <div className="pt-4 space-y-2">
-                    <button className="w-full py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 text-sm font-medium transition-colors">
-                      ✏️ 편집
-                    </button>
-                    <button className="w-full py-2 border border-gray-300 rounded-lg hover:bg-gray-100 text-sm font-medium transition-colors">
+                    {selectedCampaign.status === 'scheduled' ? (
+                      <button 
+                        onClick={() => onEdit?.(selectedCampaign)}
+                        className="w-full py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 text-sm font-medium transition-colors">
+                        ✏️ 편집
+                      </button>
+                    ) : (
+                      <button 
+                        disabled
+                        className="w-full py-2 bg-gray-300 text-gray-500 rounded-lg text-sm font-medium cursor-not-allowed">
+                        ✏️ 편집 ({statusLabels[selectedCampaign.status] || selectedCampaign.status})
+                      </button>
+                    )}
+                    <button 
+                      onClick={() => onEdit?.({ ...selectedCampaign, _clone: true })}
+                      className="w-full py-2 border border-gray-300 rounded-lg hover:bg-gray-100 text-sm font-medium transition-colors">
                       📋 복제
                     </button>
                   </div>
@@ -1405,9 +1400,10 @@ const handleAiCampaignSend = async () => {
     if (sendTimeOption === 'ai' && aiResult?.recommendedTime) {
       // AI 추천시간 파싱 (예: "2024-02-01 19:00" 또는 "2월 1일 오후 7시")
       const timeStr = aiResult.recommendedTime;
+      let parsedDate: Date | null = null;
       // ISO 형식이면 그대로, 아니면 파싱 시도
       if (timeStr.includes('T') || timeStr.match(/^\d{4}-\d{2}-\d{2}/)) {
-        scheduledAt = timeStr;
+        parsedDate = new Date(timeStr);
       } else {
         // 한국어 형식 파싱 시도 (예: "2월 1일 19:00")
         const match = timeStr.match(/(\d+)월\s*(\d+)일.*?(\d{1,2}):?(\d{2})?/);
@@ -1417,8 +1413,16 @@ const handleAiCampaignSend = async () => {
           const day = parseInt(match[2]);
           const hour = parseInt(match[3]);
           const minute = parseInt(match[4] || '0');
-          scheduledAt = new Date(year, month, day, hour, minute).toISOString();
+          parsedDate = new Date(year, month, day, hour, minute);
         }
+      }
+      // ★ 추천시간이 과거이면 다음날 같은 시간으로 보정
+      if (parsedDate && parsedDate.getTime() <= Date.now()) {
+        parsedDate.setDate(parsedDate.getDate() + 1);
+        console.log('[AI 추천시간] 과거 시간 → 다음날로 보정:', parsedDate.toISOString());
+      }
+      if (parsedDate) {
+        scheduledAt = parsedDate.toISOString();
       }
     } else if (sendTimeOption === 'custom' && customSendTime) {
       scheduledAt = new Date(customSendTime).toISOString();
@@ -2353,7 +2357,16 @@ const campaignData = {
                         className={`flex-1 p-3 border-2 rounded-xl cursor-pointer text-center flex flex-col justify-center ${sendTimeOption === 'ai' ? 'border-purple-500 bg-purple-50' : 'border-gray-200 hover:border-purple-300'}`}
                       >
                         <div className="font-bold text-base">🤖 AI 추천시간</div>
-                        <div className="text-sm text-gray-500 mt-1">{aiResult?.recommendedTime || '최적 시간'}</div>
+                        <div className="text-sm text-gray-500 mt-1">
+                          {aiResult?.recommendedTime || '최적 시간'}
+                          {aiResult?.recommendedTime && (() => {
+                            const t = aiResult.recommendedTime;
+                            let d: Date | null = null;
+                            if (t.includes('T') || t.match(/^\d{4}-\d{2}-\d{2}/)) d = new Date(t);
+                            else { const m = t.match(/(\d+)월\s*(\d+)일.*?(\d{1,2}):?(\d{2})?/); if (m) d = new Date(new Date().getFullYear(), parseInt(m[1])-1, parseInt(m[2]), parseInt(m[3]), parseInt(m[4]||'0')); }
+                            return d && d.getTime() <= Date.now() ? <div className="text-xs text-orange-500 mt-0.5">→ 다음날로 자동 보정</div> : null;
+                          })()}
+                        </div>
                       </label>
                       <label 
                         onClick={() => setSendTimeOption('now')}
@@ -2732,7 +2745,17 @@ const campaignData = {
         )}
         {showResults && <ResultsModal onClose={() => setShowResults(false)} token={localStorage.getItem('token')} />}
         {showCustomerDB && <CustomerDBModal onClose={() => setShowCustomerDB(false)} token={localStorage.getItem('token')} />}
-        {showCalendar && <CalendarModal onClose={() => setShowCalendar(false)} token={localStorage.getItem('token')} />}
+        {showCalendar && <CalendarModal onClose={() => setShowCalendar(false)} token={localStorage.getItem('token')} onEdit={(campaign) => {
+          setShowCalendar(false);
+          if (campaign._clone) {
+            // 복제: AI 프롬프트에 캠페인 내용 복사
+            setAiCampaignPrompt(campaign.description || campaign.campaign_name || '');
+            setActiveSection('ai');
+          } else {
+            // 편집: 예약 캠페인이면 취소 안내
+            alert(`예약 캠페인을 편집하려면 예약 대기 목록에서 취소 후 재생성해주세요.\n\n캠페인: ${campaign.campaign_name}`);
+          }
+        }} />
 
         {/* MMS 이미지 업로드 모달 */}
         {showMmsUploadModal && (
