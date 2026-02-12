@@ -173,6 +173,17 @@ router.get('/', async (req: Request, res: Response) => {
       }
     }
 
+    // ★ 고객사관리자: 사용자(ID)별 필터 (해당 사용자의 store_codes로 고객 필터)
+    const filterUserId = req.query.filterUserId as string;
+    if (filterUserId && (userType === 'company_admin' || userType === 'super_admin')) {
+      const filterUserResult = await query('SELECT store_codes FROM users WHERE id = $1', [filterUserId]);
+      const filterStoreCodes = filterUserResult.rows[0]?.store_codes;
+      if (filterStoreCodes && filterStoreCodes.length > 0) {
+        whereClause += ` AND store_code = ANY($${paramIndex++}::text[])`;
+        params.push(filterStoreCodes);
+      }
+    }
+
     // 동적 필터 적용
     if (filters) {
       const parsedFilters = typeof filters === 'string' ? JSON.parse(filters) : filters;
@@ -232,7 +243,7 @@ if (smsOptIn === 'true') {
     params.push(Number(limit), offset);
     const result = await query(
       `SELECT id, name, phone, gender, birth_date, age, email, grade, region, points,
-              sms_opt_in, recent_purchase_date, total_purchase_amount, custom_fields
+              store_code, store_name, sms_opt_in, recent_purchase_date, total_purchase_amount, custom_fields
        FROM customers_unified
        ${whereClause}
        ORDER BY created_at DESC

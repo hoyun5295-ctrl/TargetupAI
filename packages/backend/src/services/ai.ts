@@ -110,6 +110,17 @@ function getKoreanToday(): string {
   });
 }
 
+// 한국 시간 기준 현재 시각 (HH:mm)
+function getKoreanNowTime(): string {
+  const now = new Date();
+  return now.toLocaleTimeString('ko-KR', {
+    timeZone: 'Asia/Seoul',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  });
+}
+
 // 080번호 하이픈 포맷팅 (0801111111 → 080-111-1111)
 function formatRejectNumber(num: string): string {
   const clean = num.replace(/-/g, '');
@@ -535,6 +546,10 @@ export async function recommendTarget(
 
 ## 현재 날짜 (한국 시간 기준)
 오늘: ${getKoreanToday()}
+현재 시각: ${getKoreanNowTime()}
+
+⚠️ recommended_time은 반드시 현재 시각 이후여야 합니다!
+현재 시각이 이미 지난 시간이면 내일 또는 다음 적절한 날짜의 시간을 추천하세요.
 
 ${getKoreanCalendar()}
 
@@ -613,7 +628,7 @@ ${varCatalogPrompt}
       model: 'claude-sonnet-4-20250514',
       max_tokens: 1024,
       temperature: 0.3,
-      system: '당신은 CRM 마케팅 타겟팅 전문가입니다. 주어진 목표에 최적화된 고객 세그먼트와 최적의 발송 채널을 추천해주세요. JSON 형식으로만 응답하세요.',
+      system: '당신은 CRM 마케팅 타겟팅 전문가입니다. 주어진 목표에 최적화된 고객 세그먼트와 최적의 발송 채널을 추천해주세요. recommended_time은 반드시 현재 시각 이후의 미래 시간이어야 합니다. JSON 형식으로만 응답하세요.',
       messages: [{ role: 'user', content: userMessage }],
     });
 
