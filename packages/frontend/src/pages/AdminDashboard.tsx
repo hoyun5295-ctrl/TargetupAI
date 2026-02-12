@@ -320,7 +320,7 @@ const loadAuditLogs = async (page: number) => {
   setAuditLogsLoading(true);
   try {
     const token = localStorage.getItem('token');
-    const params = new URLSearchParams({ page: String(page), limit: '25' });
+    const params = new URLSearchParams({ page: String(page), limit: '10' });
     if (auditActionFilter !== 'all') params.set('action', auditActionFilter);
     if (auditCompanyFilter !== 'all') params.set('companyId', auditCompanyFilter);
     if (auditFromDate) params.set('fromDate', auditFromDate);
@@ -5460,13 +5460,13 @@ const handleApproveRequest = async (id: string) => {
             <select value={auditActionFilter} onChange={(e) => setAuditActionFilter(e.target.value)}
               className="border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200">
               <option value="all">전체</option>
-              {auditActions.map(a => <option key={a} value={a}>{a}</option>)}
+              {auditActions.map(a => { const m={login_success:"로그인 성공",login_fail:"로그인 실패",login_blocked:"로그인 차단",customer_delete:"고객 삭제",customer_bulk_delete:"고객 선택삭제",customer_delete_all:"고객 전체삭제"} as any; return <option key={a} value={a}>{m[a]||a}</option>; })}
             </select>
             <span className="text-sm text-gray-500 font-medium">고객사</span>
             <select value={auditCompanyFilter} onChange={(e) => setAuditCompanyFilter(e.target.value)}
               className="border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200">
               <option value="all">전체</option>
-              {companies.map(c => <option key={c.id} value={c.id}>{c.companyName}</option>)}
+              {companies.map(c => <option key={c.id} value={c.id}>{c.company_name}</option>)}
             </select>
             <button onClick={() => loadAuditLogs(1)}
               className="px-4 py-1.5 bg-blue-500 text-white rounded-lg text-sm font-medium hover:bg-blue-600 transition-colors">
@@ -5516,14 +5516,24 @@ const handleApproveRequest = async (id: string) => {
                       customer_delete_all: '고객 전체삭제',
                     };
                     const details = log.details || {};
+                    const userTypes: Record<string,string> = { admin:'관리자', user:'사용자', super_admin:'슈퍼관리자', company_admin:'고객사관리자' };
+                    const reasons: Record<string,string> = { invalid_password:'비밀번호 불일치', user_not_found:'계정 없음', inactive:'비활성 계정', locked:'잠금 계정', dormant:'휴면 계정', not_allowed:'접근 차단' };
                     let detailText = '';
-                    if (details.deletedCount) detailText += `삭제 ${details.deletedCount}건`;
-                    if (details.login_id) detailText += `ID: ${details.login_id}`;
-                    if (details.reason) detailText += ` (${details.reason})`;
-                    if (details.customerName) detailText += ` 대상: ${details.customerName}`;
-                    if (details.customerPhone) detailText += ` ${details.customerPhone}`;
-                    if (!detailText && details.message) detailText = details.message;
-                    if (!detailText) detailText = JSON.stringify(details).slice(0, 80);
+                    if (log.action === 'login_success') {
+                      detailText = (details.loginId || '') + ' (' + (userTypes[details.userType as string] || details.userType || '') + ') · ' + (details.companyName || '');
+                    } else if (log.action === 'login_fail') {
+                      detailText = (details.loginId || '') + ' · ' + (reasons[details.reason as string] || details.reason || '');
+                    } else if (log.action === 'login_blocked') {
+                      detailText = (details.loginId || '') + ' · ' + (reasons[details.reason as string] || details.reason || '');
+                    } else if (log.action === 'customer_delete_all') {
+                      detailText = (details.company_name || '') + ' · ' + (details.deleted_customers || 0).toLocaleString() + '명 전체삭제';
+                    } else if (log.action === 'customer_bulk_delete') {
+                      detailText = (details.company_name || '') + ' · ' + (details.deleted_count || details.count || 0).toLocaleString() + '명 선택삭제';
+                    } else if (log.action === 'customer_delete') {
+                      detailText = (details.company_name || '') + ' · ' + (details.phone || '') + ' 삭제';
+                    } else {
+                      detailText = JSON.stringify(details).slice(0, 60);
+                    }
 
                     return (
                       <tr key={log.id} className="hover:bg-gray-50">
