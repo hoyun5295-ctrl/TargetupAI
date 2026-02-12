@@ -9,35 +9,95 @@ const toKoreaTimeStr = (date: Date) => {
   return date.toLocaleString('sv-SE', { timeZone: 'Asia/Seoul' }).replace('T', ' ');
 };
 
-// ===== Agent 라운드로빈 발송 설정 =====
-// 로컬: .env에 SMS_TABLES 없으면 기본값 SMSQ_SEND (1개, 기존 호환)
-// 서버: SMS_TABLES=SMSQ_SEND_1,SMSQ_SEND_2,SMSQ_SEND_3,SMSQ_SEND_4,SMSQ_SEND_5
-const SMS_TABLES = (process.env.SMS_TABLES || 'SMSQ_SEND').split(',').map(t => t.trim());
+// ===== 라인그룹 기반 Agent 발송 설정 =====
+// 환경변수: 서버에 연결된 전체 테이블 목록 (폴백용)
+const ALL_SMS_TABLES = (process.env.SMS_TABLES || 'SMSQ_SEND').split(',').map(t => t.trim());
 let rrIndex = 0;
-console.log(`[QTmsg] SMS_TABLES: ${SMS_TABLES.join(', ')} (${SMS_TABLES.length}개 Agent)`);
+console.log(`[QTmsg] ALL_SMS_TABLES: ${ALL_SMS_TABLES.join(', ')} (${ALL_SMS_TABLES.length}개 Agent)`);
 
+// 라인그룹 캐시 (1분 TTL)
+const lineGroupCache = new Map<string, { tables: string[], expires: number }>();
+const LINE_GROUP_CACHE_TTL = 60 * 1000;
+
+// 회사별 발송 테이블 조회 (캐시)
+async function getCompanySmsTables(companyId: string): Promise<string[]> {
+  const cacheKey = `company:${companyId}`;
+  const cached = lineGroupCache.get(cacheKey);
+  if (cached && cached.expires > Date.now()) return cached.tables;
+
+  const result = await query(`
+    SELECT lg.sms_tables
+    FROM sms_line_groups lg
+    JOIN companies c ON c.line_group_id = lg.id
+    WHERE c.id = $1 AND lg.is_active = true AND lg.group_type = 'bulk'
+  `, [companyId]);
+
+  const tables = (result.rows.length > 0 && result.rows[0].sms_tables?.length > 0)
+    ? result.rows[0].sms_tables
+    : ALL_SMS_TABLES;
+
+  lineGroupCache.set(cacheKey, { tables, expires: Date.now() + LINE_GROUP_CACHE_TTL });
+  return tables;
+}
+
+// 테스트 발송 테이블 조회 (캐시)
+async function getTestSmsTables(): Promise<string[]> {
+  const cached = lineGroupCache.get('test');
+  if (cached && cached.expires > Date.now()) return cached.tables;
+
+  const result = await query(`SELECT sms_tables FROM sms_line_groups WHERE group_type = 'test' AND is_active = true LIMIT 1`);
+  const tables = (result.rows.length > 0 && result.rows[0].sms_tables?.length > 0)
+    ? result.rows[0].sms_tables
+    : ALL_SMS_TABLES;
+
+  lineGroupCache.set('test', { tables, expires: Date.now() + LINE_GROUP_CACHE_TTL });
+  return tables;
+}
+
+// 인증번호 발송 테이블 조회 (캐시)
+async function getAuthSmsTable(): Promise<string> {
+  const cached = lineGroupCache.get('auth');
+  if (cached && cached.expires > Date.now()) return cached.tables[0];
+
+  const result = await query(`SELECT sms_tables FROM sms_line_groups WHERE group_type = 'auth' AND is_active = true LIMIT 1`);
+  const tables = (result.rows.length > 0 && result.rows[0].sms_tables?.length > 0)
+    ? result.rows[0].sms_tables
+    : [ALL_SMS_TABLES[0]];
+
+  lineGroupCache.set('auth', { tables, expires: Date.now() + LINE_GROUP_CACHE_TTL });
+  return tables[0];
+}
+
+// 캐시 무효화 (라인그룹 설정 변경 시 호출)
+function invalidateLineGroupCache(companyId?: string) {
+  if (companyId) {
+    lineGroupCache.delete(`company:${companyId}`);
+  } else {
+    lineGroupCache.clear();
+  }
+}
 
 // INSERT용: 라운드로빈으로 다음 테이블 반환
-function getNextSmsTable(): string {
-  const table = SMS_TABLES[rrIndex % SMS_TABLES.length];
+function getNextSmsTable(tables: string[]): string {
+  const table = tables[rrIndex % tables.length];
   rrIndex++;
   return table;
 }
 
-// COUNT 합산: 5개 테이블 카운트 합산
-async function smsCountAll(whereClause: string, params: any[]): Promise<number> {
+// COUNT 합산
+async function smsCountAll(tables: string[], whereClause: string, params: any[]): Promise<number> {
   let total = 0;
-  for (const t of SMS_TABLES) {
+  for (const t of tables) {
     const rows = await mysqlQuery(`SELECT COUNT(*) as cnt FROM ${t} WHERE ${whereClause}`, params) as any[];
     total += Number(rows[0]?.cnt || 0);
   }
   return total;
 }
 
-// 집계 합산: 5개 테이블에서 집계 쿼리 실행 후 숫자 필드 합산
-async function smsAggAll(selectFields: string, whereClause: string, params: any[]): Promise<any> {
+// 집계 합산
+async function smsAggAll(tables: string[], selectFields: string, whereClause: string, params: any[]): Promise<any> {
   const agg: any = {};
-  for (const t of SMS_TABLES) {
+  for (const t of tables) {
     const rows = await mysqlQuery(`SELECT ${selectFields} FROM ${t} WHERE ${whereClause}`, params) as any[];
     if (rows[0]) {
       for (const k of Object.keys(rows[0])) {
@@ -48,20 +108,20 @@ async function smsAggAll(selectFields: string, whereClause: string, params: any[
   return agg;
 }
 
-// SELECT 합산: 5개 테이블에서 행 조회 후 합치기 (_sms_table 포함)
-async function smsSelectAll(selectFields: string, whereClause: string, params: any[], suffix?: string): Promise<any[]> {
+// SELECT 합산
+async function smsSelectAll(tables: string[], selectFields: string, whereClause: string, params: any[], suffix?: string): Promise<any[]> {
   let all: any[] = [];
-  for (const t of SMS_TABLES) {
+  for (const t of tables) {
     const rows = await mysqlQuery(`SELECT ${selectFields} FROM ${t} WHERE ${whereClause} ${suffix || ''}`, params) as any[];
     all = all.concat(rows.map((r: any) => ({ ...r, _sms_table: t })));
   }
   return all;
 }
 
-// MIN 합산: 5개 테이블에서 MIN 값 찾기
-async function smsMinAll(field: string, whereClause: string, params: any[]): Promise<any> {
+// MIN 합산
+async function smsMinAll(tables: string[], field: string, whereClause: string, params: any[]): Promise<any> {
   let minVal: any = null;
-  for (const t of SMS_TABLES) {
+  for (const t of tables) {
     const rows = await mysqlQuery(`SELECT MIN(${field}) as min_val FROM ${t} WHERE ${whereClause}`, params) as any[];
     const val = rows[0]?.min_val;
     if (val && (!minVal || new Date(val) < new Date(minVal))) {
@@ -71,13 +131,16 @@ async function smsMinAll(field: string, whereClause: string, params: any[]): Pro
   return minVal;
 }
 
-// DELETE/UPDATE: 5개 테이블 모두 실행
-async function smsExecAll(sqlTemplate: string, params: any[]): Promise<void> {
-  for (const t of SMS_TABLES) {
+// DELETE/UPDATE: 해당 테이블 모두 실행
+async function smsExecAll(tables: string[], sqlTemplate: string, params: any[]): Promise<void> {
+  for (const t of tables) {
     await mysqlQuery(sqlTemplate.replace(/SMSQ_SEND/g, t), params);
   }
 }
-// ===== 라운드로빈 헬퍼 끝 =====
+
+// export for other modules
+export { getCompanySmsTables, getTestSmsTables, getAuthSmsTable, invalidateLineGroupCache, ALL_SMS_TABLES, smsCountAll, smsAggAll, smsSelectAll, smsExecAll };
+// ===== 라인그룹 헬퍼 끝 =====
 
 // ===== 선불 잔액 관리 =====
 // 선불 잔액 체크 + 차감 (atomic UPDATE ... WHERE balance >= amount)
@@ -195,6 +258,7 @@ router.get('/', async (req: Request, res: Response) => {
       return res.status(403).json({ error: '고객사 권한이 필요합니다.' });
     }
 
+    const companyTables = await getCompanySmsTables(companyId);
     const { status, page = 1, limit = 20, year, month } = req.query;
     const offset = (Number(page) - 1) * Number(limit);
 
@@ -231,7 +295,7 @@ router.get('/', async (req: Request, res: Response) => {
         const scheduledCampaigns = await query(scheduleQuery, scheduleParams);
 
         for (const camp of scheduledCampaigns.rows) {
-          const pendingCount = await smsCountAll('app_etc1 = ? AND status_code = 100', [camp.id]);
+          const pendingCount = await smsCountAll(companyTables, 'app_etc1 = ? AND status_code = 100', [camp.id]);
 
           // 예약 시간이 아직 안 됐으면 스킵 (MySQL에 데이터 없는게 정상)
           const campDetail = await query(`SELECT scheduled_at FROM campaigns WHERE id = $1`, [camp.id]);
@@ -242,9 +306,9 @@ router.get('/', async (req: Request, res: Response) => {
 
           if (pendingCount === 0) {
             // 대기 건이 없으면 발송 완료 처리
-            const sentCount = await smsCountAll('app_etc1 = ?', [camp.id]);
-            const successCount = await smsCountAll('app_etc1 = ? AND status_code IN (6, 1000, 1800)', [camp.id]);
-            const failCount = await smsCountAll('app_etc1 = ? AND status_code NOT IN (6, 100, 1000, 1800)', [camp.id]);
+            const sentCount = await smsCountAll(companyTables, 'app_etc1 = ?', [camp.id]);
+            const successCount = await smsCountAll(companyTables, 'app_etc1 = ? AND status_code IN (6, 1000, 1800)', [camp.id]);
+            const failCount = await smsCountAll(companyTables, 'app_etc1 = ? AND status_code NOT IN (6, 100, 1000, 1800)', [camp.id]);
 
             await query(
               `UPDATE campaigns SET status = 'completed', sent_count = $1, success_count = $2, fail_count = $3, sent_at = NOW(), updated_at = NOW() WHERE id = $4`,
@@ -392,7 +456,8 @@ router.post('/test-send', async (req: Request, res: Response) => {
       return res.status(402).json({ error: testDeduct.error, insufficientBalance: true, balance: testDeduct.balance, requiredAmount: testDeduct.amount });
     }
 
-    // 담당자별로 라운드로빈 INSERT
+    // 담당자별로 테스트 전용 라인으로 INSERT
+    const testTables = await getTestSmsTables();
     const msgType = (messageType || 'SMS') === 'SMS' ? 'S' : (messageType || 'SMS') === 'LMS' ? 'L' : 'M';
     const mmsImagePaths: string[] = req.body.mmsImagePaths || [];
     let sentCount = 0;
@@ -402,7 +467,7 @@ router.post('/test-send', async (req: Request, res: Response) => {
       const testMsg = contact.name
         ? `[테스트] ${contact.name}님, ${messageContent}`
         : `[테스트] ${messageContent}`;
-        const table = getNextSmsTable();
+        const table = getNextSmsTable(testTables);
         await mysqlQuery(
           `INSERT INTO ${table} (
             dest_no, call_back, msg_contents, msg_type, sendreq_time, status_code, rsv1, app_etc1, app_etc2, bill_id, file_name1, file_name2, file_name3
@@ -499,6 +564,8 @@ router.post('/:id/send', async (req: Request, res: Response) => {
     if (!companyId) {
       return res.status(403).json({ error: '고객사 권한이 필요합니다.' });
     }
+
+    const companyTables = await getCompanySmsTables(companyId);
 
     // 일반 사용자는 본인 store_codes에 해당하는 고객만
     let storeFilter = '';
@@ -677,7 +744,7 @@ for (const customer of filteredCustomers) {
     ? customer.callback.replace(/-/g, '')
     : (campaign.callback_number || defaultCallback).replace(/-/g, '');
 
-  const table = getNextSmsTable();
+  const table = getNextSmsTable(companyTables);
   await mysqlQuery(
     `INSERT INTO ${table} (
       dest_no, call_back, msg_contents, msg_type, sendreq_time, status_code, rsv1, app_etc1, app_etc2, file_name1, file_name2, file_name3
@@ -847,8 +914,9 @@ router.get('/test-stats', async (req: Request, res: Response) => {
       queryParams.push(userId);
     }
 
-    // MySQL 5개 테이블에서 담당자 테스트 조회
-    const testResults = await smsSelectAll(
+    // MySQL 테스트 전용 테이블에서 담당자 테스트 조회
+    const testTables = await getTestSmsTables();
+    const testResults = await smsSelectAll(testTables,
       'seqno, dest_no, msg_contents, msg_type, sendreq_time, status_code, mobsend_time, bill_id',
       `app_etc1 = 'test' AND app_etc2 = ?${userFilter} ${dateFilter}`,
       queryParams,
@@ -944,15 +1012,19 @@ router.post('/sync-results', async (req: Request, res: Response) => {
       return res.status(403).json({ error: '권한이 필요합니다.' });
     }
 
-    // 동기화 대상: sending 또는 scheduled 상태인 campaign_runs
+    // 동기화 대상: sending 또는 scheduled 상태인 campaign_runs (campaign의 company_id 포함)
     const runsResult = await query(
-      `SELECT id, campaign_id FROM campaign_runs WHERE status IN ('sending', 'scheduled')`
+      `SELECT cr.id, cr.campaign_id, c.company_id
+       FROM campaign_runs cr
+       JOIN campaigns c ON c.id = cr.campaign_id
+       WHERE cr.status IN ('sending', 'scheduled')`
     );
 
     let syncCount = 0;
     for (const run of runsResult.rows) {
-      // 5개 테이블 합산 집계
-      const agg = await smsAggAll(
+      // 캠페인 소속 회사의 라인그룹 테이블에서 합산 집계
+      const runTables = await getCompanySmsTables(run.company_id);
+      const agg = await smsAggAll(runTables,
         `COUNT(CASE WHEN status_code IN (6, 1000, 1800) THEN 1 END) as success_count,
          COUNT(CASE WHEN status_code NOT IN (6, 1000, 1800, 100) THEN 1 END) as fail_count`,
         'app_etc1 = ?',
@@ -1003,11 +1075,12 @@ router.post('/sync-results', async (req: Request, res: Response) => {
 
     // 직접발송 동기화 (send_type='direct'인 campaigns)
     const directCampaigns = await query(
-      `SELECT id FROM campaigns WHERE send_type = 'direct' AND status IN ('sending', 'completed') AND (success_count IS NULL OR success_count = 0)`
+      `SELECT id, company_id FROM campaigns WHERE send_type = 'direct' AND status IN ('sending', 'completed') AND (success_count IS NULL OR success_count = 0)`
     );
 
     for (const campaign of directCampaigns.rows) {
-      const agg = await smsAggAll(
+      const directTables = await getCompanySmsTables(campaign.company_id);
+      const agg = await smsAggAll(directTables,
         `COUNT(*) as total_count,
          COUNT(CASE WHEN status_code IN (6, 1000, 1800) THEN 1 END) as success_count,
          COUNT(CASE WHEN status_code NOT IN (6, 1000, 1800, 100) THEN 1 END) as fail_count`,
@@ -1056,6 +1129,8 @@ router.post('/direct-send', async (req: Request, res: Response) => {
     if (!companyId) {
       return res.status(401).json({ success: false, error: '인증 필요' });
     }
+
+    const companyTables = await getCompanySmsTables(companyId);
 
     const {
       msgType,        // SMS, LMS, MMS
@@ -1140,12 +1215,12 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       });
     }
 
-    // 2. MySQL 큐에 메시지 삽입 — 5개 테이블 라운드로빈 분배
+    // 2. MySQL 큐에 메시지 삽입 — 회사 라인그룹 테이블 라운드로빈 분배
     const isScheduledSend = scheduled && scheduledAt;
 
     // 테이블별 데이터 분배
     const tableBatches: Record<string, any[][]> = {};
-    for (const t of SMS_TABLES) tableBatches[t] = [[]];
+    for (const t of companyTables) tableBatches[t] = [[]];
 
     for (let i = 0; i < filteredRecipients.length; i++) {
       const recipient = filteredRecipients[i];
@@ -1181,7 +1256,7 @@ router.post('/direct-send', async (req: Request, res: Response) => {
         : callback.replace(/-/g, '');
 
       // 라운드로빈으로 테이블 선택
-      const table = getNextSmsTable();
+      const table = getNextSmsTable(companyTables);
       const currentBatch = tableBatches[table];
       const lastBatch = currentBatch[currentBatch.length - 1];
 
@@ -1266,10 +1341,11 @@ router.post('/:id/cancel', async (req: Request, res: Response) => {
     }
 
     // 2. 대기 중인 메시지 건수 확인 (환불 계산용)
-    const cancelCount = await smsCountAll('app_etc1 = ? AND status_code = 100', [campaignId]);
+    const cancelTables = await getCompanySmsTables(companyId);
+    const cancelCount = await smsCountAll(cancelTables, 'app_etc1 = ? AND status_code = 100', [campaignId]);
 
-    // 3. 5개 테이블에서 대기 중인 메시지 삭제 (status_code = 100)
-    await smsExecAll(
+    // 3. 회사 라인그룹 테이블에서 대기 중인 메시지 삭제 (status_code = 100)
+    await smsExecAll(cancelTables,
       `DELETE FROM SMSQ_SEND WHERE app_etc1 = ? AND status_code = 100`,
       [campaignId]
     );
@@ -1314,9 +1390,10 @@ router.get('/:id/recipients', async (req: Request, res: Response) => {
 
     const camp = campaign.rows[0];
 
-    // 예약 상태면 먼저 MySQL 5개 테이블에서 조회 시도
+    // 예약 상태면 먼저 MySQL 회사 라인그룹 테이블에서 조회 시도
+    const recipientTables = await getCompanySmsTables(companyId);
     if (camp.status === 'scheduled') {
-      const mysqlRecipients = await smsSelectAll(
+      const mysqlRecipients = await smsSelectAll(recipientTables,
         'seqno as idx, dest_no as phone, call_back as callback, msg_contents as message',
         'app_etc1 = ? AND status_code = 100',
         [campaignId],
@@ -1325,7 +1402,7 @@ router.get('/:id/recipients', async (req: Request, res: Response) => {
 
       // MySQL에 데이터 있으면 그걸 반환
       if (mysqlRecipients && mysqlRecipients.length > 0) {
-        const totalCount = await smsCountAll('app_etc1 = ? AND status_code = 100', [campaignId]);
+        const totalCount = await smsCountAll(recipientTables, 'app_etc1 = ? AND status_code = 100', [campaignId]);
 
         return res.json({
           success: true,
@@ -1404,15 +1481,15 @@ router.get('/:id/recipients', async (req: Request, res: Response) => {
       });
     }
 
-    // 발송 완료/진행중이면 MySQL 5개 테이블에서 조회
-    const recipients = await smsSelectAll(
+    // 발송 완료/진행중이면 MySQL 회사 라인그룹 테이블에서 조회
+    const recipients = await smsSelectAll(recipientTables,
       'seqno as idx, dest_no as phone, call_back as callback, msg_contents as message, sendreq_time, status_code',
       'app_etc1 = ? AND status_code = 100',
       [campaignId],
       'ORDER BY seqno LIMIT 1000'
     );
 
-    const totalCount = await smsCountAll('app_etc1 = ? AND status_code = 100', [campaignId]);
+    const totalCount = await smsCountAll(recipientTables, 'app_etc1 = ? AND status_code = 100', [campaignId]);
 
     res.json({
       success: true,
@@ -1451,17 +1528,18 @@ router.delete('/:id/recipients/:idx', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: '발송 15분 전에는 수정할 수 없습니다', tooLate: true });
     }
 
-    // MySQL 5개 테이블에서 데이터 있는지 확인
-    const mysqlCount = await smsCountAll('app_etc1 = ? AND status_code = 100', [campaignId]);
+    // MySQL 회사 라인그룹 테이블에서 데이터 있는지 확인
+    const delTables = await getCompanySmsTables(companyId);
+    const mysqlCount = await smsCountAll(delTables, 'app_etc1 = ? AND status_code = 100', [campaignId]);
 
     if (mysqlCount > 0) {
-      // 5개 테이블에서 삭제
-      await smsExecAll(
+      // 회사 테이블에서 삭제
+      await smsExecAll(delTables,
         `DELETE FROM SMSQ_SEND WHERE app_etc1 = ? AND dest_no = ? AND status_code = 100`,
         [campaignId, phone]
       );
 
-      const remainingCount = await smsCountAll('app_etc1 = ? AND status_code = 100', [campaignId]);
+      const remainingCount = await smsCountAll(delTables, 'app_etc1 = ? AND status_code = 100', [campaignId]);
 
       await query(
         `UPDATE campaigns SET target_count = $1, updated_at = NOW() WHERE id = $2`,
@@ -1511,15 +1589,16 @@ router.put('/:id/reschedule', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: '발송 15분 전에는 시간을 변경할 수 없습니다', tooLate: true });
     }
 
-    // 1. 5개 테이블에서 MIN(sendreq_time) 찾기
-    const currentMinTime = await smsMinAll('sendreq_time', 'app_etc1 = ? AND status_code = 100', [campaignId]);
+    // 1. 회사 라인그룹 테이블에서 MIN(sendreq_time) 찾기
+    const reschTables = await getCompanySmsTables(companyId);
+    const currentMinTime = await smsMinAll(reschTables, 'sendreq_time', 'app_etc1 = ? AND status_code = 100', [campaignId]);
 
     // MySQL에 데이터 있으면 시간 조정 (분할전송 간격 유지)
     if (currentMinTime) {
       const newTime = new Date(scheduledAt);
       const diffSeconds = Math.round((newTime.getTime() - new Date(currentMinTime).getTime()) / 1000);
 
-      await smsExecAll(
+      await smsExecAll(reschTables,
         `UPDATE SMSQ_SEND SET sendreq_time = DATE_ADD(sendreq_time, INTERVAL ? SECOND) WHERE app_etc1 = ? AND status_code = 100`,
         [diffSeconds, campaignId]
       );
@@ -1562,8 +1641,9 @@ router.put('/:id/message', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: '발송 15분 전에는 수정할 수 없습니다', tooLate: true });
     }
 
-    // 1. MySQL 5개 테이블에서 수신자 목록 조회 (전화번호, seqno, 테이블명 포함)
-    const recipients = await smsSelectAll(
+    // 1. MySQL 회사 라인그룹 테이블에서 수신자 목록 조회 (전화번호, seqno, 테이블명 포함)
+    const msgTables = await getCompanySmsTables(companyId);
+    const recipients = await smsSelectAll(msgTables,
       'seqno, dest_no',
       'app_etc1 = ? AND status_code = 100',
       [campaignId]

@@ -1,42 +1,40 @@
 import { Router, Request, Response } from 'express';
 import { query, mysqlQuery } from '../config/database';
 import { authenticate } from '../middlewares/auth';
+import { getCompanySmsTables, ALL_SMS_TABLES } from './campaigns';
 
 const router = Router();
 
-// SMS 멀티테이블 설정 (campaigns.ts와 동일)
-const SMS_TABLES = (process.env.SMS_TABLES || 'SMSQ_SEND').split(',').map(t => t.trim());
-
-async function smsQueryAll(sql: string, params: any[]): Promise<any[]> {
+async function smsQueryAll(tables: string[], sql: string, params: any[]): Promise<any[]> {
   let all: any[] = [];
-  for (const t of SMS_TABLES) {
+  for (const t of tables) {
     const rows = await mysqlQuery(sql.replace(/SMSQ_SEND/g, t), params) as any[];
     all = all.concat(rows);
   }
   return all;
 }
 
-async function smsCountAllWhere(whereClause: string, params: any[]): Promise<number> {
+async function smsCountAllWhere(tables: string[], whereClause: string, params: any[]): Promise<number> {
   let total = 0;
-  for (const t of SMS_TABLES) {
+  for (const t of tables) {
     const rows = await mysqlQuery(`SELECT COUNT(*) as cnt FROM ${t} ${whereClause}`, params) as any[];
     total += parseInt(rows[0]?.cnt || '0');
   }
   return total;
 }
 
-async function smsSelectAllWhere(selectFields: string, whereClause: string, params: any[], suffix?: string): Promise<any[]> {
+async function smsSelectAllWhere(tables: string[], selectFields: string, whereClause: string, params: any[], suffix?: string): Promise<any[]> {
   let all: any[] = [];
-  for (const t of SMS_TABLES) {
+  for (const t of tables) {
     const rows = await mysqlQuery(`SELECT ${selectFields} FROM ${t} ${whereClause} ${suffix || ''}`, params) as any[];
     all = all.concat(rows);
   }
   return all;
 }
 
-async function smsAggAllWhere(selectFields: string, whereClause: string, params: any[]): Promise<any> {
+async function smsAggAllWhere(tables: string[], selectFields: string, whereClause: string, params: any[]): Promise<any> {
   const results: any[] = [];
-  for (const t of SMS_TABLES) {
+  for (const t of tables) {
     const rows = await mysqlQuery(`SELECT ${selectFields} FROM ${t} ${whereClause}`, params) as any[];
     results.push(rows[0]);
   }
@@ -249,6 +247,8 @@ router.get('/campaigns/:id', async (req: Request, res: Response) => {
       return res.status(403).json({ error: '권한이 필요합니다.' });
     }
 
+    const companyTables = await getCompanySmsTables(companyId);
+
     // 캠페인 기본 정보
     const campaignResult = await query(
       `SELECT * FROM campaigns WHERE id = $1 AND company_id = $2`,
@@ -275,8 +275,8 @@ router.get('/campaigns/:id', async (req: Request, res: Response) => {
     let carrierStats: Record<string, number> = {};
     
     if (queryIds.length > 0) {
-      // 실패사유별 집계 (멀티테이블 합산)
-      const errorResult = await smsSelectAllWhere(
+      // 실패사유별 집계 (회사 라인그룹 테이블 합산)
+      const errorResult = await smsSelectAllWhere(companyTables,
         'status_code, COUNT(*) as cnt',
         `WHERE app_etc1 IN (${queryIds.map(() => '?').join(',')})`,
         queryIds,
@@ -315,8 +315,8 @@ router.get('/campaigns/:id', async (req: Request, res: Response) => {
         }
       });
 
-      // 통신사별 집계 (멀티테이블 합산)
-      const carrierResult = await smsSelectAllWhere(
+      // 통신사별 집계 (회사 라인그룹 테이블 합산)
+      const carrierResult = await smsSelectAllWhere(companyTables,
         'mob_company, COUNT(*) as cnt',
         `WHERE app_etc1 IN (${queryIds.map(() => '?').join(',')}) AND status_code IN (6, 1000, 1800)`,
         queryIds,
@@ -377,6 +377,7 @@ router.get('/campaigns/:id/messages', async (req: Request, res: Response) => {
       return res.status(403).json({ error: '권한이 필요합니다.' });
     }
 
+    const msgTables = await getCompanySmsTables(companyId);
     const runIds = [id];
     const offset = (Number(page) - 1) * Number(limit);
 
@@ -409,11 +410,11 @@ router.get('/campaigns/:id/messages', async (req: Request, res: Response) => {
       whereClause += ` AND status_code NOT IN (6, 1000, 1800, 100)`;
     }
 
-    // 총 건수 조회 (멀티테이블 합산)
-    const total = await smsCountAllWhere(whereClause, params);
+    // 총 건수 조회 (회사 라인그룹 테이블 합산)
+    const total = await smsCountAllWhere(msgTables, whereClause, params);
 
-    // 전체 테이블에서 조회 후 정렬/페이지네이션 (메모리)
-    const allMessages = await smsSelectAllWhere(
+    // 회사 테이블에서 조회 후 정렬/페이지네이션 (메모리)
+    const allMessages = await smsSelectAllWhere(msgTables,
       'seqno, dest_no, call_back, msg_type, msg_contents, status_code, mob_company, sendreq_time, mobsend_time, repmsg_recvtm',
       whereClause,
       params
@@ -447,7 +448,8 @@ router.get('/campaigns/:id/export', async (req: Request, res: Response) => {
     );
     if (campaignResult.rows.length === 0) return res.status(404).json({ error: '캠페인을 찾을 수 없습니다.' });
 
-    const messages = await smsSelectAllWhere(
+    const exportTables = await getCompanySmsTables(companyId);
+    const messages = await smsSelectAllWhere(exportTables,
       'seqno, dest_no, call_back, msg_type, msg_contents, status_code, mob_company, sendreq_time, mobsend_time, repmsg_recvtm',
       'WHERE app_etc1 = ?',
       [id]

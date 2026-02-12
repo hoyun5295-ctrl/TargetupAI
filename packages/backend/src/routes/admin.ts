@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import { authenticate, requireSuperAdmin } from '../middlewares/auth';
 import { query, mysqlQuery } from '../config/database';
+import { ALL_SMS_TABLES, invalidateLineGroupCache } from './campaigns';
 
 const router = Router();
 
@@ -162,7 +163,7 @@ router.post('/users/:id/reset-password', authenticate, requireSuperAdmin, async 
         const message = `[Target-UP] 임시 비밀번호: ${tempPassword}\n최초 로그인 시 비밀번호 변경이 필요합니다.`;
         
         await mysqlQuery(
-          `INSERT INTO SMSQ_SEND (dest_no, call_back, msg_contents, msg_type, sendreq_time, status_code, rsv1) VALUES (?, ?, ?, 'S', NOW(), 100, '1')`,
+          `INSERT INTO ${ALL_SMS_TABLES[0]} (dest_no, call_back, msg_contents, msg_type, sendreq_time, status_code, rsv1) VALUES (?, ?, ?, 'S', NOW(), 100, '1')`,
           [phone, '18008125', message]
         );
         smsSent = true;
@@ -222,7 +223,7 @@ router.put('/companies/:id', authenticate, requireSuperAdmin, async (req: Reques
     storeCodeList,
     businessNumber, ceoName, businessType, businessItem, address,
     allowCallbackSelfRegister, maxUsers, sessionTimeoutMinutes,
-    approvalRequired, targetStrategy
+    approvalRequired, targetStrategy, lineGroupId
   } = req.body;
   
   try {
@@ -256,10 +257,11 @@ router.put('/companies/:id', authenticate, requireSuperAdmin, async (req: Reques
           session_timeout_minutes = COALESCE($26, session_timeout_minutes),
           approval_required = COALESCE($27, approval_required),
           target_strategy = COALESCE($28, target_strategy),
+          line_group_id = COALESCE($29, line_group_id),
           updated_at = NOW()
-      WHERE id = $29
+      WHERE id = $30
       RETURNING *
-    `, [companyName, contactName, contactEmail, contactPhone, status, planId, rejectNumber, brandName, sendHourStart, sendHourEnd, dailyLimit, holidaySend, duplicateDays, costPerSms, costPerLms, costPerMms, costPerKakao, storeCodeList ? JSON.stringify(storeCodeList) : null, businessNumber, ceoName, businessType, businessItem, address, allowCallbackSelfRegister !== undefined ? allowCallbackSelfRegister : null, maxUsers || null, sessionTimeoutMinutes || null, approvalRequired !== undefined ? approvalRequired : null, targetStrategy || null, id]);
+    `, [companyName, contactName, contactEmail, contactPhone, status, planId, rejectNumber, brandName, sendHourStart, sendHourEnd, dailyLimit, holidaySend, duplicateDays, costPerSms, costPerLms, costPerMms, costPerKakao, storeCodeList ? JSON.stringify(storeCodeList) : null, businessNumber, ceoName, businessType, businessItem, address, allowCallbackSelfRegister !== undefined ? allowCallbackSelfRegister : null, maxUsers || null, sessionTimeoutMinutes || null, approvalRequired !== undefined ? approvalRequired : null, targetStrategy || null, lineGroupId || null, id]);
     
     if (result.rows.length === 0) {
       return res.status(404).json({ error: '회사를 찾을 수 없습니다.' });
@@ -1528,6 +1530,92 @@ router.get('/audit-logs', authenticate, requireSuperAdmin, async (req: Request, 
   } catch (error) {
     console.error('감사 로그 조회 실패:', error);
     res.status(500).json({ error: '감사 로그 조회 실패' });
+  }
+});
+
+// ===== 발송 라인그룹 관리 API =====
+
+// GET /api/admin/line-groups - 라인그룹 목록
+router.get('/line-groups', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const result = await query(`
+      SELECT lg.*,
+        (SELECT COUNT(*) FROM companies c WHERE c.line_group_id = lg.id) as company_count
+      FROM sms_line_groups lg
+      ORDER BY lg.sort_order, lg.created_at
+    `);
+    res.json({ lineGroups: result.rows });
+  } catch (error) {
+    console.error('라인그룹 목록 조회 실패:', error);
+    res.status(500).json({ error: '조회 실패' });
+  }
+});
+
+// POST /api/admin/line-groups - 라인그룹 생성
+router.post('/line-groups', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const { groupName, groupType, smsTables, sortOrder } = req.body;
+    if (!groupName || !groupType || !smsTables || smsTables.length === 0) {
+      return res.status(400).json({ error: '필수 필드를 입력해주세요.' });
+    }
+    const result = await query(`
+      INSERT INTO sms_line_groups (group_name, group_type, sms_tables, sort_order)
+      VALUES ($1, $2, $3, $4)
+      RETURNING *
+    `, [groupName, groupType, smsTables, sortOrder || 0]);
+
+    invalidateLineGroupCache();
+    res.json({ lineGroup: result.rows[0], message: '라인그룹이 생성되었습니다.' });
+  } catch (error) {
+    console.error('라인그룹 생성 실패:', error);
+    res.status(500).json({ error: '생성 실패' });
+  }
+});
+
+// PUT /api/admin/line-groups/:id - 라인그룹 수정
+router.put('/line-groups/:id', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { groupName, groupType, smsTables, sortOrder, isActive } = req.body;
+    const result = await query(`
+      UPDATE sms_line_groups
+      SET group_name = COALESCE($1, group_name),
+          group_type = COALESCE($2, group_type),
+          sms_tables = COALESCE($3, sms_tables),
+          sort_order = COALESCE($4, sort_order),
+          is_active = COALESCE($5, is_active),
+          updated_at = NOW()
+      WHERE id = $6
+      RETURNING *
+    `, [groupName || null, groupType || null, smsTables || null, sortOrder !== undefined ? sortOrder : null, isActive !== undefined ? isActive : null, id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: '라인그룹을 찾을 수 없습니다.' });
+    }
+
+    invalidateLineGroupCache();
+    res.json({ lineGroup: result.rows[0], message: '수정되었습니다.' });
+  } catch (error) {
+    console.error('라인그룹 수정 실패:', error);
+    res.status(500).json({ error: '수정 실패' });
+  }
+});
+
+// DELETE /api/admin/line-groups/:id - 라인그룹 삭제
+router.delete('/line-groups/:id', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    // 할당된 회사 있는지 확인
+    const assigned = await query('SELECT COUNT(*) FROM companies WHERE line_group_id = $1', [id]);
+    if (parseInt(assigned.rows[0].count) > 0) {
+      return res.status(400).json({ error: '할당된 고객사가 있어 삭제할 수 없습니다. 먼저 고객사 라인그룹을 변경해주세요.' });
+    }
+    await query('DELETE FROM sms_line_groups WHERE id = $1', [id]);
+    invalidateLineGroupCache();
+    res.json({ message: '삭제되었습니다.' });
+  } catch (error) {
+    console.error('라인그룹 삭제 실패:', error);
+    res.status(500).json({ error: '삭제 실패' });
   }
 });
 
