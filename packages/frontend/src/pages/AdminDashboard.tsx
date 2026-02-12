@@ -1567,7 +1567,7 @@ const handleApproveRequest = async (id: string) => {
       {/* 헤더 */}
       <header className="bg-white shadow">
         <div className="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
-        <h1 className="text-xl font-bold text-gray-800">한줄로 시스템 관리</h1>
+        <h1 className="text-xl font-bold text-gray-800 cursor-pointer hover:text-blue-600 transition" onClick={() => window.location.reload()}>한줄로 시스템 관리</h1>
           <div className="flex items-center gap-4">
             <span className="text-sm text-gray-600">{user?.name}님</span>
             <button
@@ -4114,6 +4114,14 @@ const handleApproveRequest = async (id: string) => {
                         전체 삭제
                       </button>
                     </div>
+                  </div>
+
+                  {/* 닫기 버튼 */}
+                  <div className="flex pt-4 mt-4 border-t">
+                    <button type="button" onClick={() => setShowEditCompanyModal(false)}
+                      className="w-full px-4 py-2 border rounded-lg text-gray-700 hover:bg-gray-50">
+                      닫기
+                    </button>
                   </div>
                 </div>
               )}
