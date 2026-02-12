@@ -896,14 +896,12 @@ router.get('/test-stats', async (req: Request, res: Response) => {
       return res.status(403).json({ error: '고객사 권한이 필요합니다.' });
     }
 
-    const { yearMonth } = req.query;
+    const { fromDate, toDate } = req.query;
 
-    // 월 필터링
+    // 날짜 범위 필터
     let dateFilter = '';
-    if (yearMonth) {
-      const year = String(yearMonth).slice(0, 4);
-      const month = String(yearMonth).slice(4, 6);
-      dateFilter = `AND DATE_FORMAT(sendreq_time, '%Y%m') = '${year}${month}'`;
+    if (fromDate && toDate) {
+      dateFilter = ` AND sendreq_time >= '${fromDate} 00:00:00' AND sendreq_time <= '${toDate} 23:59:59'`;
     }
 
     // 일반 사용자는 본인이 보낸 테스트만
@@ -914,17 +912,51 @@ router.get('/test-stats', async (req: Request, res: Response) => {
       queryParams.push(userId);
     }
 
-    // MySQL 테스트 전용 테이블에서 담당자 테스트 조회
+    // 테스트 전용 메인 테이블
     const testTables = await getTestSmsTables();
-    const testResults = await smsSelectAll(testTables,
+
+    // 로그 테이블도 포함 (Agent 처리 완료 시 SMSQ_SEND_10 → SMSQ_SEND_10_YYYYMM 이동)
+    const logTables: string[] = [];
+    if (fromDate && toDate) {
+      const start = new Date(fromDate as string);
+      const end = new Date(toDate as string);
+      const cur = new Date(start.getFullYear(), start.getMonth(), 1);
+      while (cur <= end) {
+        const ym = `${cur.getFullYear()}${String(cur.getMonth() + 1).padStart(2, '0')}`;
+        for (const t of testTables) {
+          logTables.push(`${t}_${ym}`);
+        }
+        cur.setMonth(cur.getMonth() + 1);
+      }
+    } else {
+      const now = new Date();
+      const ym = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`;
+      for (const t of testTables) {
+        logTables.push(`${t}_${ym}`);
+      }
+    }
+
+    // 존재하는 로그 테이블만 추가
+    const allTables = [...testTables];
+    for (const lt of logTables) {
+      try {
+        await mysqlQuery(`SELECT 1 FROM ${lt} LIMIT 0`);
+        allTables.push(lt);
+      } catch { /* 테이블 없으면 스킵 */ }
+    }
+
+    const allResults = await smsSelectAll(allTables,
       'seqno, dest_no, msg_contents, msg_type, sendreq_time, status_code, mobsend_time, bill_id',
-      `app_etc1 = 'test' AND app_etc2 = ?${userFilter} ${dateFilter}`,
+      `app_etc1 = 'test' AND app_etc2 = ?${userFilter}${dateFilter}`,
       queryParams,
-      'ORDER BY sendreq_time DESC LIMIT 100'
+      'ORDER BY sendreq_time DESC'
     );
 
+    // 시간순 정렬 (여러 테이블 합산이므로 재정렬)
+    allResults.sort((a: any, b: any) => new Date(b.sendreq_time).getTime() - new Date(a.sendreq_time).getTime());
+
     // 발송자 정보 조회 (관리자용)
-    const senderIds = [...new Set(testResults.map((r: any) => r.bill_id).filter(Boolean))];
+    const senderIds = [...new Set(allResults.map((r: any) => r.bill_id).filter(Boolean))];
     let senderMap: Record<string, string> = {};
     if (senderIds.length > 0) {
       const senderResult = await query(
@@ -936,31 +968,31 @@ router.get('/test-stats', async (req: Request, res: Response) => {
       });
     }
 
-    // 통계 계산
+    // 통계 계산 (전체 결과 기준)
     const stats = {
-      total: testResults.length,
-      success: testResults.filter((r: any) => [6, 1000, 1800].includes(r.status_code)).length,
-      fail: testResults.filter((r: any) => ![6, 1000, 1800, 100].includes(r.status_code)).length,
-      pending: testResults.filter((r: any) => r.status_code === 100).length,
+      total: allResults.length,
+      success: allResults.filter((r: any) => [6, 1000, 1800].includes(r.status_code)).length,
+      fail: allResults.filter((r: any) => ![6, 1000, 1800, 100].includes(r.status_code)).length,
+      pending: allResults.filter((r: any) => r.status_code === 100).length,
       cost: 0,
     };
 
     // 비용 계산 (SMS 27원, LMS 81원, MMS 단가 기준)
-    testResults.forEach((r: any) => {
+    allResults.forEach((r: any) => {
       if ([6, 1000, 1800].includes(r.status_code)) {
         stats.cost += r.msg_type === 'S' ? 27 : r.msg_type === 'M' ? 110 : 81;
       }
     });
 
     // 리스트 포맷팅
-    const list = testResults.map((r: any) => ({
+    const list = allResults.map((r: any) => ({
       id: r.seqno,
-      phone: r.dest_no, // 담당자 테스트는 마스킹 안함
+      phone: r.dest_no,
       content: r.msg_contents,
       type: r.msg_type === 'S' ? 'SMS' : r.msg_type === 'M' ? 'MMS' : 'LMS',
       sentAt: r.sendreq_time,
       status: [6, 1000, 1800].includes(r.status_code) ? 'success' : r.status_code === 100 ? 'pending' : 'fail',
-      testType: 'manager', // 담당자 테스트
+      testType: 'manager',
       senderName: senderMap[r.bill_id] || '-',
     }));
 

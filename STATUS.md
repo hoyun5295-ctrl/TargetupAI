@@ -243,21 +243,38 @@ C:\projects\targetup\  (로컬)
 - SMSQ_SEND 테이블 1개 사용
 - 환경변수: SMS_TABLES 미설정 → 기본값 `SMSQ_SEND`
 
-### 상용 서버: 5개 Agent 균등 발송 ✅ 운영 중
+### 상용 서버: 11개 Agent 라인그룹 발송 ✅ 운영 중
 - 각 Agent별 **별도 테이블** 운영 (충돌 방지)
 - 중계서버 58.227.193.58:26352 연결 완료 (bind ack 성공)
-- Agent 경로: `/home/administrator/agent1~5/`
+- Agent 경로: `/home/administrator/agent1~11/`
 - Java 8 (OpenJDK 1.8.0_482)
 - MySQL 인증: `mysql_native_password` (QTmsg JDBC 호환)
 - 서버 타임존: Asia/Seoul (KST)
 
-| Agent | Deliver ID | Report ID | 테이블 | admin_port | 로그 테이블 |
-|-------|-----------|-----------|--------|------------|------------|
-| 1 | targetai_m | targetai_r | SMSQ_SEND_1 | 9001 | SMSQ_SEND_1_YYYYMM |
-| 2 | targetai2_m | targetai2_r | SMSQ_SEND_2 | 9002 | SMSQ_SEND_2_YYYYMM |
-| 3 | targetai3_m | targetai3_r | SMSQ_SEND_3 | 9003 | SMSQ_SEND_3_YYYYMM |
-| 4 | targetai4_m | targetai4_r | SMSQ_SEND_4 | 9004 | SMSQ_SEND_4_YYYYMM |
-| 5 | targetai5_m | targetai5_r | SMSQ_SEND_5 | 9005 | SMSQ_SEND_5_YYYYMM |
+| Agent | Deliver ID | Report ID | 테이블 | admin_port | 로그 테이블 | 용도 |
+|-------|-----------|-----------|--------|------------|------------|------|
+| 1 | targetai_m | targetai_r | SMSQ_SEND_1 | 9001 | SMSQ_SEND_1_YYYYMM | 대량발송 |
+| 2 | targetai2_m | targetai2_r | SMSQ_SEND_2 | 9002 | SMSQ_SEND_2_YYYYMM | 대량발송 |
+| 3 | targetai3_m | targetai3_r | SMSQ_SEND_3 | 9003 | SMSQ_SEND_3_YYYYMM | 대량발송 |
+| 4 | targetai4_m | targetai4_r | SMSQ_SEND_4 | 9004 | SMSQ_SEND_4_YYYYMM | 대량발송 |
+| 5 | targetai5_m | targetai5_r | SMSQ_SEND_5 | 9005 | SMSQ_SEND_5_YYYYMM | 대량발송 |
+| 6 | targetai6_m | targetai6_r | SMSQ_SEND_6 | 9006 | SMSQ_SEND_6_YYYYMM | 대량발송 |
+| 7 | targetai7_m | targetai7_r | SMSQ_SEND_7 | 9007 | SMSQ_SEND_7_YYYYMM | 대량발송 |
+| 8 | targetai8_m | targetai8_r | SMSQ_SEND_8 | 9008 | SMSQ_SEND_8_YYYYMM | 대량발송 |
+| 9 | targetai9_m | targetai9_r | SMSQ_SEND_9 | 9009 | SMSQ_SEND_9_YYYYMM | 대량발송 |
+| 10 | targetai10_m | targetai10_r | SMSQ_SEND_10 | 9010 | SMSQ_SEND_10_YYYYMM | 테스트 전용 |
+| 11 | targetai11_m | targetai11_r | SMSQ_SEND_11 | 9011 | SMSQ_SEND_11_YYYYMM | 인증 전용 |
+
+### 라인그룹 배정 구조
+| 그룹 | 타입 | 테이블 | 용도 |
+|------|------|--------|------|
+| 대량발송(1) | bulk | SMSQ_SEND_1,2,3 | 고객사 A 전용 |
+| 대량발송(2) | bulk | SMSQ_SEND_4,5,6 | 고객사 B 전용 |
+| 대량발송(3) | bulk | SMSQ_SEND_7,8,9 | 고객사 C 전용 |
+| 테스트발송 | test | SMSQ_SEND_10 | 테스트 전용 (격리) |
+| 슈퍼관리자인증 | auth | SMSQ_SEND_11 | 2FA 인증번호 전용 |
+- 고객사별 라인그룹 할당: 고객사 수정 → 기본정보 탭 → 발송 라인 드롭다운
+- 미할당 고객사는 ALL_SMS_TABLES 전체 라운드로빈 폴백
 
 ### Agent 관리 명령어
 ```bash
@@ -266,34 +283,38 @@ cd /home/administrator/agent1/bin && ./qtmsg.sh start
 cd /home/administrator/agent1/bin && ./qtmsg.sh stop
 
 # 전체 시작
-for i in 1 2 3 4 5; do cd /home/administrator/agent$i/bin && ./qtmsg.sh start; done
+for i in 1 2 3 4 5 6 7 8 9 10 11; do cd /home/administrator/agent$i/bin && ./qtmsg.sh start; done
 
 # 전체 중지
 pkill -f qtmsg
 
 # 프로세스 확인
-ps aux | grep qtmsg | grep -v grep | wc -l   # 5개면 정상
+ps aux | grep qtmsg | grep -v grep | wc -l   # 11개면 정상
 
 # 로그 확인
 grep "bind ack" /home/administrator/agent*/logs/*mtdeliver.txt
 ```
 
-### 백엔드 라운드로빈 분배 ✅
-- 환경변수: `SMS_TABLES=SMSQ_SEND_1,SMSQ_SEND_2,SMSQ_SEND_3,SMSQ_SEND_4,SMSQ_SEND_5`
+### 백엔드 라인그룹 기반 분배 ✅
+- 환경변수: `SMS_TABLES=SMSQ_SEND_1,SMSQ_SEND_2,SMSQ_SEND_3,SMSQ_SEND_4,SMSQ_SEND_5,SMSQ_SEND_6,SMSQ_SEND_7,SMSQ_SEND_8,SMSQ_SEND_9,SMSQ_SEND_10,SMSQ_SEND_11`
 - 서버 `.env`: `packages/backend/.env`에 설정
 - 로컬은 SMS_TABLES 미설정 → 기존 `SMSQ_SEND` 1개로 동작 (변화 없음)
-- campaigns.ts 헬퍼 함수: `getNextSmsTable()`, `smsCountAll()`, `smsAggAll()`, `smsSelectAll()`, `smsMinAll()`, `smsExecAll()`
-- INSERT → 라운드로빈 분배, SELECT/COUNT → 5개 합산, DELETE/UPDATE → 5개 모두 실행
-- 기동 시 로그: `[QTmsg] SMS_TABLES: SMSQ_SEND_1, ... (5개 Agent)`
+- campaigns.ts 헬퍼 함수: `getNextSmsTable(tables)`, `smsCountAll(tables, ...)`, `smsAggAll(tables, ...)`, `smsSelectAll(tables, ...)`, `smsMinAll(tables, ...)`, `smsExecAll(tables, ...)`
+- 모든 헬퍼에 `tables: string[]` 파라미터 → 회사별 라인그룹 테이블 기반 동작
+- `getCompanySmsTables(companyId)`: 회사별 라인그룹 조회 (1분 캐시)
+- `getTestSmsTables()`: 테스트 전용 라인 조회
+- `getAuthSmsTable()`: 인증번호 전용 라인 조회
+- 기동 시 로그: `[QTmsg] ALL_SMS_TABLES: SMSQ_SEND_1, ... (11개 Agent)`
 
 ### 로그 테이블 자동 생성
 - MySQL 이벤트 스케줄러: `auto_create_sms_log_tables`
-- 매월 25일 자동으로 2개월 후 로그 테이블 생성 (SMSQ_SEND_1~5_YYYYMM)
+- 매월 25일 자동으로 2개월 후 로그 테이블 생성 (SMSQ_SEND_1~11_YYYYMM)
 - 현재 수동 생성 완료: 202602, 202603
 
 - rsv1 상태: 1=발송대기, 2=Agent처리중, 3=서버전송완료, 4=결과수신, 5=월별처리완료
-- 백엔드 캠페인 발송 시 라운드로빈으로 5개 테이블에 균등 분배
-- 결과 조회 시 5개 테이블 합산 조회
+- 백엔드 캠페인 발송 시 회사 라인그룹 테이블 기반 라운드로빈 분배
+- 테스트 발송 → 테스트 전용 라인 (SMSQ_SEND_10) 격리
+- 결과 조회 시 회사 라인그룹 테이블 합산 조회
 
 ### QTmsg 주요 결과 코드
 | 코드 | 의미 |
@@ -1021,7 +1042,21 @@ POST /api/sync/purchases   ← 구매내역 벌크 INSERT (배치 최대 1000건
 | created_at | timestamptz |
 | updated_at | timestamptz |
 
-### sync_logs (동기화 로그)
+### sms_line_groups (발송 라인그룹)
+| 컬럼 | 타입 | 설명 |
+|------|------|------|
+| id | uuid PK | |
+| group_name | varchar(50) | 그룹명 (대량발송(1) 등) |
+| group_type | varchar(20) | bulk/test/auth |
+| sms_tables | text[] | 할당된 테이블 목록 |
+| is_active | boolean | 활성 여부 |
+| sort_order | integer | 정렬 순서 |
+| created_at | timestamptz | |
+| updated_at | timestamptz | |
+
+---
+
+## DB 스키마 (MySQL - QTmsg)
 | 컬럼 | 타입 |
 |------|------|
 | id | uuid PK |
@@ -1043,8 +1078,8 @@ POST /api/sync/purchases   ← 구매내역 벌크 INSERT (배치 최대 1000건
 
 ## DB 스키마 (MySQL - QTmsg)
 
-### smsdb.SMSQ_SEND_1~5 (SMS 발송 큐 - 5개 Agent 분배)
-> 로컬: SMSQ_SEND (1개), 서버: SMSQ_SEND_1~5 (5개, 환경변수 SMS_TABLES로 분기)
+### smsdb.SMSQ_SEND_1~11 (SMS 발송 큐 - 11개 Agent 라인그룹 분배)
+> 로컬: SMSQ_SEND (1개), 서버: SMSQ_SEND_1~11 (11개, 환경변수 SMS_TABLES + 라인그룹으로 분기)
 | 컬럼 | 타입 | 설명 |
 |------|------|------|
 | seqno | int PK AUTO_INCREMENT | |
@@ -1401,6 +1436,28 @@ POST /api/sync/purchases   ← 구매내역 벌크 INSERT (배치 최대 1000건
 - [x] 단가/요금 탭: 선불 잔액 최근 10건 변동 이력 (충전=초록, 차감=빨강, 환불=파랑)
 - [x] 고객 삭제 모달 z-index 버그 수정 (최상위 레벨 이동)
 - [x] GitHub 서버 PAT 설정 (credential.helper store)
+- [x] 서버 배포 완료
+
+**소스맵 비활성화 + 업로드 매핑 확장 (2026-02-12)**
+- [x] vite.config.ts 소스맵 비활성화 (frontend + company-frontend, build: { sourcemap: false })
+- [x] upload.ts AI 매핑 대상에 store_name, store_code 추가
+
+**발송 라인그룹 시스템 (2026-02-12)**
+- [x] QTmsg Agent 6~11 서버 설치 (agent1 복사 + sed 설정 치환)
+- [x] 11개 Agent 중계서버 연결 완료 (bind ack 성공)
+- [x] MySQL SMSQ_SEND_6~11 테이블 + 로그 테이블(202602,202603) 생성
+- [x] MySQL 월별 자동 생성 이벤트 업데이트 (1~11)
+- [x] PostgreSQL sms_line_groups 테이블 생성 (5개 그룹 초기 데이터)
+- [x] PostgreSQL companies.line_group_id 컬럼 추가
+- [x] campaigns.ts 라인그룹 기반 리팩토링 (getCompanySmsTables/getTestSmsTables/getAuthSmsTable + 1분 캐시)
+- [x] 모든 SMS 헬퍼 함수에 tables 파라미터 추가 (20+ 호출 지점 변경)
+- [x] results.ts 회사별 라인그룹 테이블 기반 조회
+- [x] admin.ts 라인그룹 CRUD API 4개 (GET/POST/PUT/DELETE /api/admin/line-groups)
+- [x] admin.ts companies PUT에 lineGroupId 파라미터 추가
+- [x] admin.ts 발송통계 쿼리에 sms_line_groups JOIN → 라인그룹명 응답
+- [x] AdminDashboard 발송라인 독립 탭 → 고객사 수정 기본정보 탭으로 이동 (드롭다운)
+- [x] AdminDashboard 발송통계 "기타" 컬럼 → "발송라인" (라인그룹명 표시)
+- [x] 서버 .env SMS_TABLES 11개로 확장
 - [x] 서버 배포 완료
 
 ### 🔲 진행 예정 작업
