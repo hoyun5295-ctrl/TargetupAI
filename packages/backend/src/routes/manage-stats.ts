@@ -11,9 +11,11 @@ const router = Router();
 //  고객사관리자: 자사 통계만
 // ============================================================
 
-// SMS 테이블 설정 (로컬: SMSQ_SEND 1개, 서버: 11개)
-const ALL_SMS_TABLES = process.env.SMS_TABLES ? process.env.SMS_TABLES.split(',') : ['SMSQ_SEND'];
-const TEST_SMS_TABLE = ALL_SMS_TABLES.find(t => t.includes('_10')) || ALL_SMS_TABLES[0];
+// SMS 테이블 설정 (런타임에 읽어야 dotenv 로드 후 적용됨)
+function getTestSmsTable(): string {
+  const tables = process.env.SMS_TABLES ? process.env.SMS_TABLES.split(',') : ['SMSQ_SEND'];
+  return tables.find(t => t.includes('_10')) || tables[0];
+}
 
 router.use(authenticate, requireCompanyAdmin);
 
@@ -102,7 +104,7 @@ router.get('/send', async (req: Request, res: Response) => {
             SUM(CASE WHEN status_code = 100 THEN 1 ELSE 0 END) as pending,
             SUM(CASE WHEN msg_type = 'S' THEN 1 ELSE 0 END) as sms,
             SUM(CASE WHEN msg_type = 'L' THEN 1 ELSE 0 END) as lms
-          FROM ${TEST_SMS_TABLE}
+          FROM ${getTestSmsTable()}
           WHERE app_etc1 = 'test' AND app_etc2 = ? ${mysqlDateWhere}`,
           mysqlParams
         );
@@ -269,7 +271,7 @@ router.get('/send/detail', async (req: Request, res: Response) => {
           status_code,
           msg_instm as sent_at,
           bill_id as sender_id
-        FROM ${TEST_SMS_TABLE}
+        FROM ${getTestSmsTable()}
         WHERE app_etc1 = 'test' AND app_etc2 = ? ${mysqlDateWhere}
         ORDER BY msg_instm DESC
         LIMIT 50`,
