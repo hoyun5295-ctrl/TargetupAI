@@ -443,6 +443,7 @@ export default function Dashboard() {
   const [showSuccess, setShowSuccess] = useState(false);
   const [successCampaignId, setSuccessCampaignId] = useState('');
   const [selectedMessage, setSelectedMessage] = useState<any>(null);
+  const [selectedAiMsgIdx, setSelectedAiMsgIdx] = useState(0);
   const [showSpamFilter, setShowSpamFilter] = useState(false);
   const [spamFilterData, setSpamFilterData] = useState<{sms?: string; lms?: string; callback: string; msgType: 'SMS'|'LMS'|'MMS'}>({callback:'',msgType:'SMS'});
   const [sendTimeOption, setSendTimeOption] = useState<'ai' | 'now' | 'custom'>('now');
@@ -1391,7 +1392,7 @@ const handleAiCampaignSend = async () => {
   setIsSending(true);
   try {
     // 선택된 메시지 가져오기 (첫번째 메시지 사용, 나중에 라디오 선택값으로 변경 가능)
-    const selectedMsg = aiResult?.messages?.[0];
+    const selectedMsg = aiResult?.messages?.[selectedAiMsgIdx];
     if (!selectedMsg) {
       alert('메시지를 선택해주세요');
       setIsSending(false);
@@ -1530,7 +1531,7 @@ const campaignData = {
     setTestSending(true);
     setTestSentResult(null);
     try {
-      const selectedMsg = aiResult?.messages?.[0];
+      const selectedMsg = aiResult?.messages?.[selectedAiMsgIdx];
       if (!selectedMsg) {
         alert('메시지를 선택해주세요');
         setTestSending(false);
@@ -2297,7 +2298,7 @@ const campaignData = {
                       {aiResult?.messages?.length > 0 ? (
                         aiResult.messages.map((msg: any, idx: number) => (
                           <label key={msg.variant_id || idx} className="cursor-pointer group">
-                            <input type="radio" name="message" className="hidden" defaultChecked={idx === 0} />
+                            <input type="radio" name="message" className="hidden" defaultChecked={idx === 0} onChange={() => setSelectedAiMsgIdx(idx)} />
                             {/* 모던 폰 프레임 */}
                             <div className="rounded-[1.8rem] p-[3px] transition-all bg-gray-300 group-has-[:checked]:bg-gradient-to-b group-has-[:checked]:from-purple-400 group-has-[:checked]:to-purple-600 group-has-[:checked]:shadow-lg group-has-[:checked]:shadow-purple-200 hover:bg-gray-400">
                               <div className="bg-white rounded-[1.6rem] overflow-hidden flex flex-col" style={{ height: '420px' }}>
@@ -2525,7 +2526,7 @@ const campaignData = {
 </button>
 <button 
   onClick={() => {
-    const msg = campaign.messageContent || '';
+    const msg = aiResult?.messages?.[selectedAiMsgIdx]?.message_text || campaign.messageContent || '';
                           const cb = selectedCallback || '';
                           const smsMsg = adTextEnabled ? `(광고)${msg}\n무료거부${optOutNumber.replace(/-/g, '')}` : msg;
                           const lmsMsg = adTextEnabled ? `(광고)${msg}\n무료수신거부 ${optOutNumber}` : msg;
@@ -2597,7 +2598,7 @@ const campaignData = {
                           { '이름': '이영희', '포인트': '8,200', '등급': 'GOLD', '매장명': '홍대점', '지역': '경기', '구매금액': '180,000', '구매횟수': '5', '평균주문금액': '36,000', 'LTV점수': '62' },
                           { '이름': '박지현', '포인트': '25,800', '등급': 'VIP', '매장명': '부산센텀점', '지역': '부산', '구매금액': '520,000', '구매횟수': '12', '평균주문금액': '43,300', 'LTV점수': '91' },
                         ].map((sample, idx) => {
-                          let msg = aiResult?.messages?.[0]?.message_text || '';
+                          let msg = aiResult?.messages?.[selectedAiMsgIdx]?.message_text || '';
                           Object.entries(sample).forEach(([varName, value]) => {
                             msg = msg.replace(new RegExp(`%${varName}%`, 'g'), value);
                           });
@@ -2614,7 +2615,7 @@ const campaignData = {
                     </div>
                   ) : (
                     <div className="bg-gray-100 rounded-lg p-4 whitespace-pre-wrap text-sm">
-                      {aiResult?.messages?.[0]?.message_text || '메시지 없음'}
+                      {aiResult?.messages?.[selectedAiMsgIdx]?.message_text || '메시지 없음'}
                     </div>
                   )}
                 </div>
@@ -2632,7 +2633,7 @@ const campaignData = {
                           </div>
                           {selectedChannel === 'LMS' || selectedChannel === 'MMS' ? (
                             <div className="px-4 py-2 bg-orange-50 border-b border-orange-200 shrink-0">
-                              <span className="text-sm font-bold text-orange-700">{aiResult?.messages?.[0]?.subject || 'LMS 제목'}</span>
+                              <span className="text-sm font-bold text-orange-700">{aiResult?.messages?.[selectedAiMsgIdx]?.subject || 'LMS 제목'}</span>
                             </div>
                           ) : null}
                           <div className="flex-1 overflow-y-auto p-3 bg-gradient-to-b from-purple-50/30 to-white">
@@ -2642,7 +2643,7 @@ const campaignData = {
                             <div className="flex gap-2 mt-1">
                               <div className="w-7 h-7 rounded-full bg-purple-100 flex items-center justify-center shrink-0 text-xs">📱</div>
                               <div className="bg-white rounded-2xl rounded-tl-sm p-3 shadow-sm border border-gray-100 text-[13px] leading-[1.7] whitespace-pre-wrap text-gray-700 max-w-[95%]">
-                                {aiResult?.messages?.[0]?.message_text || '메시지 없음'}
+                                {aiResult?.messages?.[selectedAiMsgIdx]?.message_text || '메시지 없음'}
                               </div>
                             </div>
                           </div>
@@ -4435,7 +4436,7 @@ const campaignData = {
                       </button>
                       <button 
                         onClick={() => {
-                          const msg = campaign.messageContent || '';
+                          const msg = aiResult?.messages?.[selectedAiMsgIdx]?.message_text || campaign.messageContent || '';
                           const cb = selectedCallback || '';
                           const smsMsg = adTextEnabled ? `(광고)${msg}\n무료거부${optOutNumber.replace(/-/g, '')}` : msg;
                           const lmsMsg = adTextEnabled ? `(광고)${msg}\n무료수신거부 ${optOutNumber}` : msg;
