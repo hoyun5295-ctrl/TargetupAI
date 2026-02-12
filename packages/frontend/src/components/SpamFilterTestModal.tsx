@@ -3,10 +3,10 @@ import { useAuthStore } from '../stores/authStore';
 
 interface SpamFilterTestModalProps {
   onClose: () => void;
-  messageContentSms?: string;   // SMS 메시지 (광고+수신거부 포함된 최종본)
-  messageContentLms?: string;   // LMS 메시지 (광고+수신거부 포함된 최종본)
-  callbackNumber: string;       // 발신번호
-  messageType: 'SMS' | 'LMS' | 'MMS';  // 현재 선택된 타입
+  messageContentSms?: string;
+  messageContentLms?: string;
+  callbackNumber: string;
+  messageType: 'SMS' | 'LMS' | 'MMS';
 }
 
 interface TestResult {
@@ -30,10 +30,9 @@ export default function SpamFilterTestModal({
   const [countdown, setCountdown] = useState(60);
   const [error, setError] = useState('');
   const [totalCount, setTotalCount] = useState(0);
-  const pollRef = useRef<NodeJS.Timeout | null>(null);
-  const countdownRef = useRef<NodeJS.Timeout | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // 클린업
   useEffect(() => {
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
@@ -41,7 +40,6 @@ export default function SpamFilterTestModal({
     };
   }, []);
 
-  // 테스트 시작
   const startTest = async () => {
     if (!callbackNumber) {
       setError('발신번호가 선택되지 않았습니다.');
@@ -87,14 +85,11 @@ export default function SpamFilterTestModal({
       setTestId(data.testId);
       setTotalCount(data.totalCount);
 
-      // 폴링 시작 (2초 간격)
       pollRef.current = setInterval(() => pollResults(data.testId), 2000);
 
-      // 카운트다운 시작
       countdownRef.current = setInterval(() => {
         setCountdown((prev) => {
           if (prev <= 1) {
-            // 타임아웃
             if (pollRef.current) clearInterval(pollRef.current);
             if (countdownRef.current) clearInterval(countdownRef.current);
             setStatus('completed');
@@ -110,7 +105,6 @@ export default function SpamFilterTestModal({
     }
   };
 
-  // 결과 폴링
   const pollResults = async (id: string) => {
     try {
       const res = await fetch(`/api/spam-filter/tests/${id}`, {
@@ -122,7 +116,6 @@ export default function SpamFilterTestModal({
         setResults(data.results);
       }
 
-      // 모두 완료되었으면 폴링 중지
       if (data.test?.status === 'completed') {
         if (pollRef.current) clearInterval(pollRef.current);
         if (countdownRef.current) clearInterval(countdownRef.current);
@@ -133,7 +126,6 @@ export default function SpamFilterTestModal({
     }
   };
 
-  // 통신사 한글명
   const carrierLabel = (c: string) => {
     switch (c) {
       case 'SKT': return 'SKT';
@@ -143,7 +135,6 @@ export default function SpamFilterTestModal({
     }
   };
 
-  // 수신 상태 아이콘
   const statusIcon = (result: TestResult) => {
     if (status === 'ready') return <span className="text-gray-400">—</span>;
     if (result.received) return <span className="text-green-500 font-bold text-lg">✅</span>;
@@ -151,7 +142,6 @@ export default function SpamFilterTestModal({
     return <span className="animate-pulse text-yellow-500 text-lg">⏳</span>;
   };
 
-  // 수신 상태 텍스트
   const statusText = (result: TestResult) => {
     if (status === 'ready') return '대기';
     if (result.received) return '수신 완료';
@@ -159,15 +149,21 @@ export default function SpamFilterTestModal({
     return '확인 중...';
   };
 
-  // 수신 통계
   const receivedCount = results.filter(r => r.received).length;
   const blockedCount = status === 'completed' ? results.filter(r => !r.received).length : 0;
-
-  // 미리보기 메시지 (SMS 우선, 없으면 LMS)
   const previewMessage = messageContentSms || messageContentLms || '';
 
+  // 발신번호 포맷
+  const formatPhoneNumber = (num: string) => {
+    if (!num) return '';
+    const clean = num.replace(/\D/g, '');
+    if (clean.startsWith('02')) return clean.replace(/(\d{2})(\d{3,4})(\d{4})/, '$1-$2-$3');
+    if (clean.length === 8) return clean.replace(/(\d{4})(\d{4})/, '$1-$2');
+    return clean.replace(/(\d{3,4})(\d{3,4})(\d{4})/, '$1-$2-$3');
+  };
+
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60]">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl overflow-hidden animate-in fade-in zoom-in duration-200">
         {/* 헤더 */}
         <div className="p-5 bg-gradient-to-r from-blue-50 to-indigo-50 border-b flex items-center justify-between">
@@ -180,43 +176,48 @@ export default function SpamFilterTestModal({
               <p className="text-xs text-gray-500">통신사별 SMS/LMS 수신 여부를 확인합니다</p>
             </div>
           </div>
-          {status === 'testing' && (
-            <div className="flex items-center gap-2 bg-yellow-100 px-3 py-1.5 rounded-full">
-              <div className="w-2 h-2 bg-yellow-500 rounded-full animate-pulse" />
-              <span className="text-sm font-medium text-yellow-700">{countdown}초</span>
-            </div>
-          )}
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
+          <div className="flex items-center gap-3">
+            {status === 'testing' && (
+              <div className="flex items-center gap-2 bg-yellow-100 px-3 py-1.5 rounded-full">
+                <div className="w-2 h-2 bg-yellow-500 rounded-full animate-pulse" />
+                <span className="text-sm font-medium text-yellow-700">{countdown}초</span>
+              </div>
+            )}
+            <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
+          </div>
         </div>
 
         {/* 본문 */}
         <div className="p-5">
           <div className="flex gap-5">
-            {/* 왼쪽: 핸드폰 미리보기 */}
-            <div className="w-[220px] flex-shrink-0">
-              <div className="bg-gray-900 rounded-[24px] p-2 shadow-lg">
-                <div className="bg-white rounded-[18px] overflow-hidden">
-                  {/* 폰 상단 */}
-                  <div className="bg-gray-100 px-3 py-2 text-center">
-                    <div className="text-[10px] text-gray-500">발신</div>
-                    <div className="text-xs font-bold text-gray-700">{callbackNumber || '미선택'}</div>
+            {/* 왼쪽: 모던 폰 프레임 (기존 미리보기와 동일) */}
+            <div className="flex-shrink-0">
+              <div className="rounded-[1.8rem] p-[3px] bg-gradient-to-b from-blue-400 to-indigo-600 shadow-lg shadow-blue-200">
+                <div className="bg-white rounded-[1.6rem] overflow-hidden flex flex-col w-[240px]" style={{ height: '380px' }}>
+                  {/* 상단 - 회신번호 */}
+                  <div className="px-4 py-2.5 bg-gradient-to-r from-gray-50 to-gray-100 flex justify-between items-center shrink-0 border-b">
+                    <span className="text-[11px] text-gray-400 font-medium">문자메시지</span>
+                    <span className="text-[11px] font-bold text-blue-600">{formatPhoneNumber(callbackNumber) || '회신번호'}</span>
                   </div>
                   {/* 메시지 영역 */}
-                  <div className="p-3 min-h-[280px] max-h-[280px] overflow-y-auto bg-gray-50">
-                    <div className="bg-white rounded-lg p-2.5 shadow-sm border text-xs leading-relaxed whitespace-pre-wrap break-all text-gray-700">
-                      {previewMessage || '메시지 없음'}
+                  <div className="flex-1 overflow-y-auto p-3 bg-gradient-to-b from-blue-50/30 to-white">
+                    <div className="flex gap-2 mt-1">
+                      <div className="w-7 h-7 rounded-full bg-blue-100 flex items-center justify-center shrink-0 text-xs">📱</div>
+                      <div className="bg-white rounded-2xl rounded-tl-sm p-3 shadow-sm border border-gray-100 text-[12px] leading-[1.7] whitespace-pre-wrap break-all text-gray-700 max-w-[95%]">
+                        {previewMessage || '메시지 없음'}
+                      </div>
                     </div>
                   </div>
-                  {/* 폰 하단 */}
-                  <div className="bg-gray-100 px-3 py-2 text-center">
-                    <div className="text-[10px] text-gray-400">{messageType}</div>
+                  {/* 하단 */}
+                  <div className="px-3 py-2 border-t bg-gray-50 text-center shrink-0">
+                    <span className="text-[10px] text-gray-400">{messageType}</span>
                   </div>
                 </div>
               </div>
             </div>
 
             {/* 오른쪽: 결과 영역 */}
-            <div className="flex-1">
+            <div className="flex-1 min-w-0">
               {/* 상태 요약 */}
               {status !== 'ready' && (
                 <div className={`mb-4 p-3 rounded-lg text-sm ${
