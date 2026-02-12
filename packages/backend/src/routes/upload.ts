@@ -308,6 +308,7 @@ await redis.set(`upload:${fileId}:progress`, JSON.stringify({
       const placeholders: string[] = [];
       let paramIndex = 1;
       const batchPhones: string[] = [];
+      const seenInBatch = new Set<string>();
 
       for (const row of batch) {
         const record: any = {};
@@ -339,6 +340,13 @@ await redis.set(`upload:${fileId}:progress`, JSON.stringify({
           errorCount++;
           continue;
         }
+
+        // 배치 내 중복 번호 스킵 (ON CONFLICT 에러 방지)
+        if (seenInBatch.has(record.phone)) {
+          duplicateCount++;
+          continue;
+        }
+        seenInBatch.add(record.phone);
 
         batchPhones.push(record.phone);
 
