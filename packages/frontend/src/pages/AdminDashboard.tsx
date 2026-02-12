@@ -2612,7 +2612,7 @@ const handleApproveRequest = async (id: string) => {
                     className="px-3 py-2 border rounded-lg text-sm"
                   >
                     <option value="all">전체 고객사</option>
-                    {companies.filter(c => c.billing_type === 'prepaid').map(c => (
+                    {companies.filter((c: any) => c.billing_type === 'prepaid').map(c => (
                       <option key={c.id} value={c.id}>{c.company_name}</option>
                     ))}
                   </select>

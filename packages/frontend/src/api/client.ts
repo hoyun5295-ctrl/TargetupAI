@@ -66,8 +66,12 @@ export const customersApi = {
   create: (data: any) => api.post('/customers', data),
   bulkCreate: (customers: any[]) => api.post('/customers/bulk', { customers }),
   stats: () => api.get('/customers/stats'),
+  deleteOne: (id: string) => api.delete(`/customers/${id}`),
+  bulkDelete: (ids: string[]) => api.post('/customers/bulk-delete', { ids }),
 };
-
+export const manageUsersApi = {
+  list: () => api.get('/companies/users'),
+};
 // Campaigns API
 export const campaignsApi = {
   list: (params?: any) => api.get('/campaigns', { params }),
