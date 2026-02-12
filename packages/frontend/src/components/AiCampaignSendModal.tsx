@@ -167,18 +167,16 @@ export default function AiCampaignSendModal({
                   </div>
                 </div>
               </div>
+              {/* 타겟 요약 - 폰 아래 */}
+              <div className="bg-blue-50 rounded-lg p-2.5 mt-3 text-center">
+                <div className="text-xs text-gray-500">📌 발송 대상</div>
+                <div className="text-blue-600 font-bold text-lg mt-0.5">{targetCount?.toLocaleString()}명</div>
+                <div className="text-[11px] text-gray-500 mt-0.5 leading-tight">{targetDescription}</div>
+              </div>
             </div>
 
             {/* 우측: 발송 설정 */}
             <div className="flex-1 min-w-0 space-y-5">
-              {/* 타겟 요약 */}
-              <div className="bg-blue-50 rounded-lg p-3 flex items-center justify-between">
-                <div>
-                  <span className="text-xs text-gray-500">📌 발송 대상</span>
-                  <div className="text-sm font-medium text-gray-700 mt-0.5">{targetDescription}</div>
-                </div>
-                <div className="text-blue-600 font-bold text-lg">{targetCount?.toLocaleString()}명</div>
-              </div>
 
               {/* 캠페인명 */}
               <div>
