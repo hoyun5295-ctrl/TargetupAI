@@ -1484,7 +1484,40 @@ POST /api/sync/purchases   ← 구매내역 벌크 INSERT (배치 최대 1000건
 - [x] results.ts: 날짜 필터/그룹핑 KST 변환 + 취소/draft 제외
 - [x] 서버 배포 완료
 
+**충전 관리 통합 뷰 (2026-02-12)**
+- [x] balance_transactions에 payment_method 컬럼 추가 (admin/bank_transfer/card/virtual_account/system)
+- [x] 기존 데이터 백필 (admin 4건, bank_transfer 1건)
+- [x] admin.ts: 통합 API GET /api/admin/charge-management (pending + 전체 이력 + 필터)
+- [x] admin.ts/campaigns.ts: 모든 INSERT에 payment_method 태깅
+- [x] AdminDashboard 충전 관리 탭 전면 교체 (상단 대기건 카드 + 하단 통합 이력 테이블)
+- [x] 필터: 고객사/구분(충전·차감·환불)/결제수단(무통장·카드·가상계좌·관리자·시스템)/날짜범위
+- [x] 토스페이먼츠 PG 연동 시 card/virtual_account 태깅만 하면 바로 표시 가능
+- [x] 서버 배포 완료
+
+**080 수신거부 콜백 연동 (2026-02-12)**
+- [x] unsubscribes.ts: GET /api/unsubscribes/080callback 엔드포인트 신규 (기존 /unsubscribe 교체)
+- [x] 토큰 인증 (OPT_OUT_080_TOKEN 환경변수), 고객사 매칭 (companies.opt_out_080_number)
+- [x] source '080_ars' 태깅 + Unsubscribes.tsx 주황색 배지 추가
+- [x] curl 테스트 성공 (080-719-6700 → 디버깅테스트 고객사 매칭 확인)
+- [x] campaigns.ts 3개 발송 경로 수신거부 필터링 기존 구현 확인 (AI추천/직접타겟/직접발송)
+- [ ] ⏳ 나래인터넷에 콜백 URL + 토큰 전달 (설 연휴 후)
+- [ ] ⏳ 나래에 확인: 콜백 실패 시 재시도 정책, 수신거부 목록 조회 API 제공 여부
+- [ ] ⏳ Nginx 나래 IP 화이트리스트 (121.156.104.161~165, 183.98.207.13)
+- [x] 서버 배포 완료
+
+**manage-stats.ts SMSQ_SEND 에러 수정 (2026-02-12)**
+- [x] dotenv 로드 타이밍 문제: 모듈 로드 시 process.env.SMS_TABLES가 빈 값 → SMSQ_SEND 폴백
+- [x] 상수(const TEST_SMS_TABLE) → 함수(getTestSmsTable()) 변환으로 런타임 env 읽기
+- [x] 서버 에러 로그 해소 확인 완료
+- [x] 서버 배포 완료
+
 ### 🔲 진행 예정 작업
+
+**080 수신거부 (설 연휴 후)**
+- [ ] 나래인터넷에 콜백 URL + 토큰 키값 전달
+- [ ] 나래에 확인: 콜백 실패 재시도 정책, 수신거부 목록 조회 API 여부
+- [ ] Nginx 080callback 경로 나래 IP 화이트리스트 (121.156.104.161~165, 183.98.207.13)
+- [ ] 실제 080 ARS 수신거부 테스트 (080-719-6700)
 
 **선불 요금제 Phase 1-B~2**
 - [ ] Phase 1-B: 토스페이먼츠 PG 연동 (카드결제/가상계좌 충전)

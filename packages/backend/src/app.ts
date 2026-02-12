@@ -23,6 +23,7 @@ import adminSyncRoutes from './routes/admin-sync';
 import adminRoutes from './routes/admin';
 import smsTemplatesRoutes from './routes/sms-templates';
 import mmsImagesRoutes from './routes/mms-images';
+import spamFilterRoutes from './routes/spam-filter';
 
 // 공용 관리 라우트 (슈퍼관리자 + 고객사관리자)
 import manageUsersRoutes from './routes/manage-users';
@@ -46,6 +47,7 @@ app.use(morgan('dev'));
 app.use(express.json({ limit: '50mb' }));
 app.use('/api/upload', uploadRoutes);
 app.use('/api/sync', syncRoutes);
+app.use('/api/spam-filter', spamFilterRoutes);
 
 // 헬스체크
 app.get('/health', (req, res) => {

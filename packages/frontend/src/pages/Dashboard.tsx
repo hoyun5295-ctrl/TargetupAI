@@ -4,6 +4,7 @@ import { customersApi, campaignsApi, aiApi } from '../api/client';
 import { useAuthStore } from '../stores/authStore';
 import { formatDateTime, formatDate } from '../utils/formatDate';
 import ResultsModal from '../components/ResultsModal';
+import SpamFilterTestModal from '../components/SpamFilterTestModal';
 import CustomerDBModal from '../components/CustomerDBModal';
 import { Users, CheckCircle, UserCircle, Star, Send, TrendingUp, Rocket, Upload, Calendar, BarChart3, Settings, Ban, LogOut, Sparkles, Clock, LayoutGrid, Lightbulb, PieChart, FileText, Activity } from 'lucide-react';
 
@@ -442,6 +443,8 @@ export default function Dashboard() {
   const [showSuccess, setShowSuccess] = useState(false);
   const [successCampaignId, setSuccessCampaignId] = useState('');
   const [selectedMessage, setSelectedMessage] = useState<any>(null);
+  const [showSpamFilter, setShowSpamFilter] = useState(false);
+  const [spamFilterData, setSpamFilterData] = useState<{sms?: string; lms?: string; callback: string; msgType: 'SMS'|'LMS'|'MMS'}>({callback:'',msgType:'SMS'});
   const [sendTimeOption, setSendTimeOption] = useState<'ai' | 'now' | 'custom'>('now');
   const [successSendInfo, setSuccessSendInfo] = useState<string>('');  // 성공 모달용 발송 정보
   const [customSendTime, setCustomSendTime] = useState('');
@@ -1623,6 +1626,17 @@ const campaignData = {
 
   return (
     <div className="min-h-screen bg-gray-100">
+      {/* 스팸필터 테스트 모달 */}
+      {showSpamFilter && (
+        <SpamFilterTestModal
+          onClose={() => setShowSpamFilter(false)}
+          messageContentSms={spamFilterData.sms}
+          messageContentLms={spamFilterData.lms}
+          callbackNumber={spamFilterData.callback}
+          messageType={spamFilterData.msgType}
+        />
+      )}
+
       {/* AI 프롬프트 입력 안내 모달 */}
       {showPromptAlert && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
@@ -2511,17 +2525,12 @@ const campaignData = {
 </button>
 <button 
   onClick={() => {
-    const toast = document.createElement('div');
-    toast.innerHTML = `
-      <div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:white;padding:24px 32px;border-radius:16px;box-shadow:0 10px 40px rgba(0,0,0,0.2);z-index:9999;text-align:center;">
-        <div style="font-size:48px;margin-bottom:12px;">🚧</div>
-        <div style="font-size:16px;font-weight:bold;color:#374151;margin-bottom:8px;">준비 중인 기능입니다</div>
-        <div style="font-size:14px;color:#6B7280;">스팸필터테스트는 곧 업데이트됩니다</div>
-      </div>
-      <div style="position:fixed;inset:0;background:rgba(0,0,0,0.3);z-index:9998;" onclick="this.parentElement.remove()"></div>
-    `;
-    document.body.appendChild(toast);
-    setTimeout(() => toast.remove(), 2000);
+    const msg = campaign.messageContent || '';
+                          const cb = selectedCallback || '';
+                          const smsMsg = adTextEnabled ? `(광고)${msg}\n무료거부${optOutNumber.replace(/-/g, '')}` : msg;
+                          const lmsMsg = adTextEnabled ? `(광고)${msg}\n무료수신거부 ${optOutNumber}` : msg;
+                          setSpamFilterData({sms: smsMsg, lms: lmsMsg, callback: cb, msgType: 'SMS'});
+                          setShowSpamFilter(true);
   }}
   className="flex-1 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 flex items-center justify-center gap-2"
 >
@@ -4426,17 +4435,12 @@ const campaignData = {
                       </button>
                       <button 
                         onClick={() => {
-                          const toast = document.createElement('div');
-                          toast.innerHTML = `
-                            <div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:white;padding:24px 32px;border-radius:16px;box-shadow:0 10px 40px rgba(0,0,0,0.2);z-index:9999;text-align:center;">
-                              <div style="font-size:48px;margin-bottom:12px;">🚧</div>
-                              <div style="font-size:16px;font-weight:bold;color:#374151;margin-bottom:8px;">준비 중인 기능입니다</div>
-                              <div style="font-size:14px;color:#6B7280;">스팸필터테스트는 곧 업데이트됩니다</div>
-                            </div>
-                            <div style="position:fixed;inset:0;background:rgba(0,0,0,0.3);z-index:9998;" onclick="this.parentElement.remove()"></div>
-                          `;
-                          document.body.appendChild(toast);
-                          setTimeout(() => toast.remove(), 2000);
+                          const msg = campaign.messageContent || '';
+                          const cb = selectedCallback || '';
+                          const smsMsg = adTextEnabled ? `(광고)${msg}\n무료거부${optOutNumber.replace(/-/g, '')}` : msg;
+                          const lmsMsg = adTextEnabled ? `(광고)${msg}\n무료수신거부 ${optOutNumber}` : msg;
+                          setSpamFilterData({sms: smsMsg, lms: lmsMsg, callback: cb, msgType: 'SMS'});
+                          setShowSpamFilter(true);
                         }}
                         className="py-2.5 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg text-sm font-medium transition-colors"
                       >
@@ -5008,17 +5012,12 @@ const campaignData = {
                       </button>
                       <button 
                         onClick={() => {
-                          const toast = document.createElement('div');
-                          toast.innerHTML = `
-                            <div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:white;padding:24px 32px;border-radius:16px;box-shadow:0 10px 40px rgba(0,0,0,0.2);z-index:9999;text-align:center;">
-                              <div style="font-size:48px;margin-bottom:12px;">🚧</div>
-                              <div style="font-size:16px;font-weight:bold;color:#374151;margin-bottom:8px;">준비 중인 기능입니다</div>
-                              <div style="font-size:14px;color:#6B7280;">스팸필터테스트는 곧 업데이트됩니다</div>
-                            </div>
-                            <div style="position:fixed;inset:0;background:rgba(0,0,0,0.3);z-index:9998;" onclick="this.parentElement.remove()"></div>
-                          `;
-                          document.body.appendChild(toast);
-                          setTimeout(() => toast.remove(), 2000);
+                          const msg = directMessage || '';
+                          const cb = selectedCallback || '';
+                          const smsMsg = adTextEnabled ? `(광고)${msg}\n무료거부${optOutNumber.replace(/-/g, '')}` : msg;
+                          const lmsMsg = adTextEnabled ? `(광고)${msg}\n무료수신거부 ${optOutNumber}` : msg;
+                          setSpamFilterData({sms: smsMsg, lms: lmsMsg, callback: cb, msgType: directMsgType});
+                          setShowSpamFilter(true);
                         }}
                         className="py-2.5 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg text-sm font-medium transition-colors"
                       >
