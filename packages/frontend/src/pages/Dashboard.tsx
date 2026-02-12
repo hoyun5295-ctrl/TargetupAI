@@ -2755,7 +2755,7 @@ const campaignData = {
             // 편집: 예약 캠페인이면 취소 안내
             alert(`예약 캠페인을 편집하려면 예약 대기 목록에서 취소 후 재생성해주세요.\n\n캠페인: ${campaign.campaign_name}`);
           }
-        }} />
+        }} />}
 
         {/* MMS 이미지 업로드 모달 */}
         {showMmsUploadModal && (
