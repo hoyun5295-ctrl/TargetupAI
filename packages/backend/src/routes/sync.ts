@@ -403,8 +403,8 @@ router.post('/purchases', async (req: SyncAuthRequest, res: Response) => {
           continue;
         }
 
-        const phone = cleanPhone(p.customer_phone);
-        if (!isValidPhone(phone)) {
+        const phone = normalizePhone(p.customer_phone);
+        if (!phone) {
           failedCount++;
           failures.push({ phone: p.customer_phone, reason: 'invalid phone format' });
           continue;
