@@ -187,6 +187,12 @@ export function normalizePhone(value: any): string | null {
   if (v.startsWith('+82')) v = '0' + v.slice(3);
   // 숫자만 남기기
   v = v.replace(/\D/g, '');
+  // Excel 숫자 저장으로 인한 앞 0 빠짐 보정
+  // 10XXXXXXXX (10자리) → 010XXXXXXXX (11자리)
+  // 11~19XXXXXXX (9~10자리) → 011~019XXXXXXX (구번호)
+  if (!v.startsWith('0') && /^1[016789]/.test(v)) {
+    v = '0' + v;
+  }
   // 유효성 검사: 한국 휴대폰 번호만 허용
   if (!isValidKoreanPhone(v)) return null;
   return v;

@@ -113,7 +113,7 @@ router.post('/recommend-target', async (req: Request, res: Response) => {
       const userResult = await query('SELECT store_codes FROM users WHERE id = $1', [userId]);
       const storeCodes = userResult.rows[0]?.store_codes;
       if (storeCodes && storeCodes.length > 0) {
-        storeFilter = ' AND store_code = ANY($2::text[])';
+        storeFilter = ' AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = $1 AND store_code = ANY($2::text[]))';
         baseParams.push(storeCodes);
       }
     }

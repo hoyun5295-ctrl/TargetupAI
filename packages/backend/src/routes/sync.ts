@@ -315,6 +315,16 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
         );
 
         upsertedCount++;
+
+        // customer_stores N:N 매핑 (store_code가 있을 때만)
+        if (c.store_code) {
+          await query(
+            `INSERT INTO customer_stores (company_id, customer_id, store_code)
+             SELECT $1, id, $2 FROM customers WHERE company_id = $1 AND phone = $3
+             ON CONFLICT (customer_id, store_code) DO NOTHING`,
+            [companyId, c.store_code, phone]
+          );
+        }
       } catch (rowError: any) {
         failedCount++;
         failures.push({

@@ -286,6 +286,14 @@ router.post('/save', authenticate, async (req: Request, res: Response) => {
     let duplicateCount = 0;
     let errorCount = 0;
 
+    // 업로드 사용자의 store_codes 조회 (customer_stores 매핑용)
+    const userId = (req as any).user?.userId;
+    let userStoreCodes: string[] = [];
+    if (userId) {
+      const userResult = await pool.query('SELECT store_codes FROM users WHERE id = $1', [userId]);
+      userStoreCodes = userResult.rows[0]?.store_codes || [];
+    }
+
     // Bulk INSERT (4000건씩)
     const BATCH_SIZE = 4000;
 // 진행률 초기화
@@ -299,6 +307,7 @@ await redis.set(`upload:${fileId}:progress`, JSON.stringify({
       const values: any[] = [];
       const placeholders: string[] = [];
       let paramIndex = 1;
+      const batchPhones: string[] = [];
 
       for (const row of batch) {
         const record: any = {};
@@ -330,6 +339,8 @@ await redis.set(`upload:${fileId}:progress`, JSON.stringify({
           errorCount++;
           continue;
         }
+
+        batchPhones.push(record.phone);
 
         // 데이터 정규화
         record.gender = normalizeGender(record.gender);
@@ -380,6 +391,17 @@ await redis.set(`upload:${fileId}:progress`, JSON.stringify({
           if (r.is_insert) insertCount++;
           else duplicateCount++;
         });
+
+        // customer_stores N:N 매핑 (사용자의 store_codes → 업로드 고객에 매핑)
+        if (userStoreCodes.length > 0 && batchPhones.length > 0) {
+          await pool.query(`
+            INSERT INTO customer_stores (company_id, customer_id, store_code)
+            SELECT $1, c.id, unnest($2::text[])
+            FROM customers c
+            WHERE c.company_id = $1 AND c.phone = ANY($3::text[])
+            ON CONFLICT (customer_id, store_code) DO NOTHING
+          `, [companyId, userStoreCodes, batchPhones]);
+        }
       // 진행률 업데이트
       const processed = Math.min(i + BATCH_SIZE, rows.length);
       await redis.set(`upload:${fileId}:progress`, JSON.stringify({

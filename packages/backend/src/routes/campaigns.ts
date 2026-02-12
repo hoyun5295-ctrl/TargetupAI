@@ -339,7 +339,7 @@ router.post('/test-send', async (req: Request, res: Response) => {
       const userResult = await query('SELECT store_codes FROM users WHERE id = $1', [userId]);
       const storeCodes = userResult.rows[0]?.store_codes;
       if (storeCodes && storeCodes.length > 0) {
-        storeFilter = ' AND store_code = ANY($STORE_IDX::text[])';
+        storeFilter = ' AND c.id IN (SELECT customer_id FROM customer_stores WHERE company_id = c.company_id AND store_code = ANY($STORE_IDX::text[]))';
         storeParams = [storeCodes];
       }
     }
@@ -508,7 +508,7 @@ router.post('/:id/send', async (req: Request, res: Response) => {
       const userResult = await query('SELECT store_codes FROM users WHERE id = $1', [userId]);
       const storeCodes = userResult.rows[0]?.store_codes;
       if (storeCodes && storeCodes.length > 0) {
-        storeFilter = ' AND store_code = ANY($STORE_IDX::text[])';
+        storeFilter = ' AND c.id IN (SELECT customer_id FROM customer_stores WHERE company_id = c.company_id AND store_code = ANY($STORE_IDX::text[]))';
         storeParams.push(storeCodes);
       }
     }
@@ -1350,7 +1350,7 @@ router.get('/:id/recipients', async (req: Request, res: Response) => {
         const storeCodes = userResult.rows[0]?.store_codes;
         if (storeCodes && storeCodes.length > 0) {
           const storeIdx = 1 + filterQuery.params.length + 1;
-          storeFilter = ` AND store_code = ANY($${storeIdx}::text[])`;
+          storeFilter = ` AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = $1 AND store_code = ANY($${storeIdx}::text[]))`;
           storeParams = [storeCodes];
         }
       }

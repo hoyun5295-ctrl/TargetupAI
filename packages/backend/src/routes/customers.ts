@@ -25,7 +25,8 @@ function buildDynamicFilter(filters: any, startIndex: number) {
     if (value === undefined || value === null || value === '') continue;
 
     // 기본 필드 처리
-    const basicFields = ['gender', 'grade', 'sms_opt_in', 'store_code', 'region'];
+    const basicFields = ['gender', 'grade', 'sms_opt_in', 'region'];
+    const storeField = 'store_code';
     const numericFields = ['points', 'total_purchase_amount', 'purchase_count', 'avg_order_value', 'ltv_score', 'visit_count', 'coupon_usage_count', 'return_count'];
     const dateFields = ['birth_date', 'recent_purchase_date', 'created_at'];
 
@@ -54,6 +55,14 @@ function buildDynamicFilter(filters: any, startIndex: number) {
         const placeholders = value.map(() => `$${paramIndex++}`).join(', ');
         whereClause += ` AND ${field} IN (${placeholders})`;
         params.push(...value);
+      }
+    } else if (field === storeField) {
+      if (operator === 'eq') {
+        whereClause += ` AND id IN (SELECT customer_id FROM customer_stores WHERE store_code = $${paramIndex++})`;
+        params.push(value);
+      } else if (operator === 'in' && Array.isArray(value)) {
+        whereClause += ` AND id IN (SELECT customer_id FROM customer_stores WHERE store_code = ANY($${paramIndex++}::text[]))`;
+        params.push(value);
       }
     } else if (numericFields.includes(field)) {
       if (operator === 'eq') {
@@ -159,7 +168,7 @@ router.get('/', async (req: Request, res: Response) => {
       const userResult = await query('SELECT store_codes FROM users WHERE id = $1', [userId]);
       const storeCodes = userResult.rows[0]?.store_codes;
       if (storeCodes && storeCodes.length > 0) {
-        whereClause += ` AND store_code = ANY($${paramIndex++})`;
+        whereClause += ` AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = $1 AND store_code = ANY($${paramIndex++}::text[]))`;
         params.push(storeCodes);
       }
     }
@@ -379,6 +388,17 @@ router.post('/', async (req: Request, res: Response) => {
       ]
     );
 
+    // customer_stores N:N 매핑 (store_code가 있을 때)
+    const customerId = result.rows[0]?.id;
+    if (customerId && storeCode) {
+      await query(
+        `INSERT INTO customer_stores (company_id, customer_id, store_code)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (customer_id, store_code) DO NOTHING`,
+        [companyId, customerId, storeCode]
+      );
+    }
+
     return res.status(201).json({
       message: '고객이 추가되었습니다',
       customer: result.rows[0],
@@ -480,7 +500,7 @@ router.post('/bulk', async (req: Request, res: Response) => {
           'genders', (SELECT array_agg(DISTINCT gender) FROM customers WHERE company_id = $1 AND gender IS NOT NULL),
           'grades', (SELECT array_agg(DISTINCT grade) FROM customers WHERE company_id = $1 AND grade IS NOT NULL),
           'custom_field_keys', (SELECT array_agg(DISTINCT k) FROM customers, jsonb_object_keys(custom_fields) k WHERE company_id = $1),
-          'store_codes', (SELECT array_agg(DISTINCT store_code) FROM customers WHERE company_id = $1 AND store_code IS NOT NULL)
+          'store_codes', (SELECT array_agg(DISTINCT store_code) FROM customer_stores WHERE company_id = $1)
         )
       ) WHERE id = $1
     `, [companyId]);
@@ -516,7 +536,7 @@ router.get('/stats', async (req: Request, res: Response) => {
       const userResult = await query('SELECT store_codes FROM users WHERE id = $1', [userId]);
       const storeCodes = userResult.rows[0]?.store_codes;
       if (storeCodes && storeCodes.length > 0) {
-        storeFilter = ' AND store_code = ANY($2)';
+        storeFilter = ' AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = $1 AND store_code = ANY($2::text[]))';
         params.push(storeCodes);
       }
     }
@@ -683,7 +703,7 @@ router.post('/filter-count', async (req: Request, res: Response) => {
       const userResult = await query('SELECT store_codes FROM users WHERE id = $1', [userId]);
       const storeCodes = userResult.rows[0]?.store_codes;
       if (storeCodes && storeCodes.length > 0) {
-        whereClause += ` AND store_code = ANY($${paramIndex++}::text[])`;
+        whereClause += ` AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = $1 AND store_code = ANY($${paramIndex++}::text[]))`;
         params.push(storeCodes);
       }
     }
@@ -771,7 +791,7 @@ router.post('/extract', async (req: Request, res: Response) => {
       const userResult = await query('SELECT store_codes FROM users WHERE id = $1', [userId]);
       const storeCodes = userResult.rows[0]?.store_codes;
       if (storeCodes && storeCodes.length > 0) {
-        whereClause += ` AND store_code = ANY($${paramIndex++}::text[])`;
+        whereClause += ` AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = $1 AND store_code = ANY($${paramIndex++}::text[]))`;
         params.push(storeCodes);
       }
     }
@@ -906,7 +926,7 @@ router.get('/enabled-fields', async (req: Request, res: Response) => {
     );
 
     const OPTION_COLUMNS: Record<string, string> = {
-      'gender': 'gender', 'grade': 'grade', 'region': 'region', 'store_code': 'store_code',
+      'gender': 'gender', 'grade': 'grade', 'region': 'region',
     };
 
     const options: Record<string, string[]> = {};
@@ -922,6 +942,18 @@ router.get('/enabled-fields', async (req: Request, res: Response) => {
             options[field.field_key] = optResult.rows.map((r: any) => r[col]);
           }
         } catch (e) { /* 컬럼 없으면 무시 */ }
+      }
+      // store_code는 customer_stores 테이블에서 조회
+      if (field.field_key === 'store_code') {
+        try {
+          const storeResult = await query(
+            `SELECT DISTINCT store_code FROM customer_stores WHERE company_id = $1 ORDER BY store_code LIMIT 100`,
+            [companyId]
+          );
+          if (storeResult.rows.length > 0) {
+            options['store_code'] = storeResult.rows.map((r: any) => r.store_code);
+          }
+        } catch (e) { /* 테이블 없으면 무시 */ }
       }
     }
 
