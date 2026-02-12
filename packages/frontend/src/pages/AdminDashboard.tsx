@@ -105,6 +105,7 @@ export default function AdminDashboard() {
     storeCodeList: [] as string[],
     newStoreCode: '',
     newExcludedSegment: '',
+    lineGroupId: '',
   });
   const [editCompanyTab, setEditCompanyTab] = useState<'basic' | 'send' | 'cost' | 'ai' | 'store' | 'fields' | 'customers'>('basic');
   const [standardFields, setStandardFields] = useState<any[]>([]);
@@ -318,7 +319,7 @@ useEffect(() => { if (activeTab === 'billing') loadBillings(); }, [filterYear]);
 useEffect(() => { if (activeTab === 'deposits') loadDepositRequests(1); }, [activeTab, depositStatusFilter, depositMethodFilter]);
 useEffect(() => { if (activeTab === 'syncAgents') loadSyncAgents(); }, [activeTab]);
 useEffect(() => { if (activeTab === 'auditLogs') loadAuditLogs(1); }, [activeTab]);
-useEffect(() => { if (activeTab === 'lineGroups') loadLineGroups(); }, [activeTab]);
+useEffect(() => { loadLineGroups(); }, []);
 
 // 감사 로그 조회
 const loadAuditLogs = async (page: number) => {
@@ -1280,6 +1281,7 @@ const handleApproveRequest = async (id: string) => {
           storeCodeList: c.store_code_list || [],
           newStoreCode: '',
           newExcludedSegment: '',
+          lineGroupId: c.line_group_id || '',
         });
         setEditCompanyTab('basic');
         setShowEditCompanyModal(true);
@@ -1776,17 +1778,7 @@ const handleApproveRequest = async (id: string) => {
                 }`}
               >
                 📋 감사 로그
-              </button>
-              <button
-                onClick={() => setActiveTab('lineGroups')}
-                className={`px-4 py-3 text-sm font-medium border-b-2 ${
-                  activeTab === 'lineGroups'
-                    ? 'border-blue-500 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                📡 발송라인
-              </button>
+                </button>
             </nav>
           </div>
         </div>
@@ -2922,7 +2914,7 @@ const handleApproveRequest = async (id: string) => {
                       <th className="px-4 py-3 text-center text-gray-600 font-medium">실패</th>
                       <th className="px-4 py-3 text-center text-gray-600 font-medium">대기</th>
                       <th className="px-4 py-3 text-center text-gray-600 font-medium">성공률</th>
-                      <th className="px-4 py-3 text-center text-gray-600 font-medium">기타</th>
+                      <th className="px-4 py-3 text-center text-gray-600 font-medium">발송라인</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y">
@@ -2944,12 +2936,11 @@ const handleApproveRequest = async (id: string) => {
                           <td className="px-4 py-3 text-center text-amber-600">{pending > 0 ? pending.toLocaleString() : '0'}</td>
                           <td className="px-4 py-3 text-center font-medium">{rate}%</td>
                           <td className="px-4 py-3 text-center">
-                          <button
-                              onClick={() => loadStatsDetail(row.date || row.month, row.company_id, row.company_name)}
-                              className="text-blue-500 hover:text-blue-700 text-xs underline"
-                            >
-                              상세
-                            </button>
+                            {row.line_group_name ? (
+                              <span className="px-2 py-1 bg-blue-50 text-blue-700 text-xs rounded-full font-medium">{row.line_group_name}</span>
+                            ) : (
+                              <span className="text-xs text-gray-400">미배정</span>
+                            )}
                           </td>
                         </tr>
                       );
@@ -3575,6 +3566,18 @@ const handleApproveRequest = async (id: string) => {
                       <span className="text-sm text-gray-500">분</span>
                     </div>
                     <p className="text-xs text-gray-400 mt-1">비활동 시 자동 로그아웃 시간 (5~480분)</p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">발송 라인</label>
+                    <select value={editCompany.lineGroupId}
+                      onChange={(e) => setEditCompany({ ...editCompany, lineGroupId: e.target.value })}
+                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
+                      <option value="">미할당 (전체 라인 사용)</option>
+                      {lineGroups.filter((lg: any) => lg.group_type === 'bulk' && lg.is_active).map((lg: any) => (
+                        <option key={lg.id} value={lg.id}>{lg.group_name} ({(lg.sms_tables || []).join(', ')})</option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-gray-400 mt-1">대량발송 시 사용할 전용 라인그룹 (미할당 시 전체 라인 라운드로빈)</p>
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">080 수신거부번호</label>
@@ -5648,112 +5651,7 @@ const handleApproveRequest = async (id: string) => {
         </div>
       )}
 
-      {/* 발송라인 관리 탭 */}
-      {activeTab === 'lineGroups' && (
-        <div className="bg-white rounded-lg shadow">
-          <div className="px-6 py-4 border-b flex justify-between items-center">
-            <h2 className="text-lg font-semibold">발송 라인그룹 관리</h2>
-          </div>
-          {lineGroupsLoading ? (
-            <div className="p-10 text-center text-gray-400">로딩 중...</div>
-          ) : (
-            <div className="p-6">
-              <div className="grid gap-4">
-                {lineGroups.map((lg: any) => (
-                  <div key={lg.id} className="border rounded-xl p-5 hover:shadow-md transition-shadow">
-                    <div className="flex justify-between items-start mb-3">
-                      <div className="flex items-center gap-3">
-                        <span className={`px-3 py-1 rounded-full text-xs font-bold ${
-                          lg.group_type === 'bulk' ? 'bg-blue-100 text-blue-700' :
-                          lg.group_type === 'test' ? 'bg-amber-100 text-amber-700' :
-                          'bg-purple-100 text-purple-700'
-                        }`}>
-                          {lg.group_type === 'bulk' ? '대량발송' : lg.group_type === 'test' ? '테스트' : '인증'}
-                        </span>
-                        <h3 className="text-lg font-bold text-gray-800">{lg.group_name}</h3>
-                        {!lg.is_active && <span className="text-xs text-red-500">(비활성)</span>}
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-gray-500">{lg.company_count || 0}개 고객사 할당</span>
-                      </div>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {(lg.sms_tables || []).map((t: string) => (
-                        <span key={t} className="px-3 py-1 bg-gray-100 text-gray-700 rounded-lg text-sm font-mono">
-                          {t}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-                {lineGroups.length === 0 && (
-                  <div className="text-center py-10 text-gray-400">
-                    <p className="text-lg mb-2">라인그룹이 없습니다</p>
-                    <p className="text-sm">DDL 실행 후 초기 데이터를 생성해주세요</p>
-                  </div>
-                )}
-              </div>
-
-              {/* 고객사별 라인 할당 현황 */}
-              <div className="mt-8 border-t pt-6">
-                <h3 className="text-base font-bold text-gray-800 mb-4">고객사별 라인 할당</h3>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="bg-gray-50 border-y">
-                        <th className="px-4 py-3 text-left font-semibold text-gray-600">고객사</th>
-                        <th className="px-4 py-3 text-center font-semibold text-gray-600">할당 라인그룹</th>
-                        <th className="px-4 py-3 text-center font-semibold text-gray-600">상태</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {companies.filter((c: any) => c.status === 'active').map((c: any) => {
-                        const assigned = lineGroups.find((lg: any) => lg.id === c.line_group_id);
-                        return (
-                          <tr key={c.id} className="border-b hover:bg-gray-50">
-                            <td className="px-4 py-3 text-left font-medium">{c.company_name}</td>
-                            <td className="px-4 py-3 text-center">
-                              <select
-                                value={c.line_group_id || ''}
-                                onChange={async (e) => {
-                                  try {
-                                    const token = localStorage.getItem('token');
-                                    await fetch(`/api/admin/companies/${c.id}`, {
-                                      method: 'PUT',
-                                      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-                                      body: JSON.stringify({ lineGroupId: e.target.value || null })
-                                    });
-                                    const companiesRes = await companiesApi.list();
-                                    setCompanies(companiesRes.data.companies);
-                                    loadLineGroups();
-                                  } catch (err) { console.error('라인그룹 할당 실패:', err); }
-                                }}
-                                className="px-3 py-1.5 border rounded-lg text-sm bg-white"
-                              >
-                                <option value="">미할당</option>
-                                {lineGroups.filter((lg: any) => lg.group_type === 'bulk' && lg.is_active).map((lg: any) => (
-                                  <option key={lg.id} value={lg.id}>{lg.group_name}</option>
-                                ))}
-                              </select>
-                            </td>
-                            <td className="px-4 py-3 text-center">
-                              {assigned ? (
-                                <span className="px-2 py-1 bg-green-100 text-green-700 text-xs rounded-full font-medium">할당됨</span>
-                              ) : (
-                                <span className="px-2 py-1 bg-gray-100 text-gray-500 text-xs rounded-full">미할당</span>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
+      
       </main>
       {showSyncDetailModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">

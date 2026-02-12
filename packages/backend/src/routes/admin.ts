@@ -772,9 +772,10 @@ router.get('/stats/send', authenticate, requireSuperAdmin, async (req: Request, 
         SELECT ${groupCol} as grp, co.company_name
         FROM campaigns c
         JOIN companies co ON c.company_id = co.id
+        LEFT JOIN sms_line_groups lg ON co.line_group_id = lg.id
         WHERE c.sent_at IS NOT NULL
           AND c.status IN ('completed', 'sent', 'sending') ${dateWhere} ${companyWhere}
-        GROUP BY grp, co.company_name
+        GROUP BY grp, co.company_name, lg.group_name
       ) sub
     `, baseParams);
     const total = parseInt(countResult.rows[0].count);
@@ -784,15 +785,17 @@ router.get('/stats/send', authenticate, requireSuperAdmin, async (req: Request, 
         ${groupCol} as "${groupAlias}",
         co.id as company_id,
         co.company_name,
+        lg.group_name as line_group_name,
         COUNT(DISTINCT c.id) as runs,
         COALESCE(SUM(c.sent_count), 0) as sent,
         COALESCE(SUM(c.success_count), 0) as success,
         COALESCE(SUM(c.fail_count), 0) as fail
       FROM campaigns c
       JOIN companies co ON c.company_id = co.id
+      LEFT JOIN sms_line_groups lg ON co.line_group_id = lg.id
       WHERE c.sent_at IS NOT NULL
         AND c.status IN ('completed', 'sent', 'sending') ${dateWhere} ${companyWhere}
-      GROUP BY ${groupCol}, co.id, co.company_name
+      GROUP BY ${groupCol}, co.id, co.company_name, lg.group_name
       ORDER BY "${groupAlias}" DESC, co.company_name
       LIMIT $${paramIdx} OFFSET $${paramIdx + 1}
     `, [...baseParams, limit, offset]);
