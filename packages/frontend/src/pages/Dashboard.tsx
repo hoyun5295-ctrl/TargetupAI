@@ -5,6 +5,7 @@ import { useAuthStore } from '../stores/authStore';
 import { formatDateTime, formatDate } from '../utils/formatDate';
 import ResultsModal from '../components/ResultsModal';
 import SpamFilterTestModal from '../components/SpamFilterTestModal';
+import AiCampaignSendModal from '../components/AiCampaignSendModal';
 import CustomerDBModal from '../components/CustomerDBModal';
 import { Users, CheckCircle, UserCircle, Star, Send, TrendingUp, Rocket, Upload, Calendar, BarChart3, Settings, Ban, LogOut, Sparkles, Clock, LayoutGrid, Lightbulb, PieChart, FileText, Activity } from 'lucide-react';
 
@@ -444,6 +445,7 @@ export default function Dashboard() {
   const [successCampaignId, setSuccessCampaignId] = useState('');
   const [selectedMessage, setSelectedMessage] = useState<any>(null);
   const [selectedAiMsgIdx, setSelectedAiMsgIdx] = useState(0);
+  const [showAiSendModal, setShowAiSendModal] = useState(false);
   const [showSpamFilter, setShowSpamFilter] = useState(false);
   const [spamFilterData, setSpamFilterData] = useState<{sms?: string; lms?: string; callback: string; msgType: 'SMS'|'LMS'|'MMS'}>({callback:'',msgType:'SMS'});
   const [sendTimeOption, setSendTimeOption] = useState<'ai' | 'now' | 'custom'>('now');
@@ -1379,12 +1381,24 @@ const handleAiGenerateChannelMessage = async () => {
       setIsSending(false);
     }
   };
-// AI 캠페인 발송 확정
-const handleAiCampaignSend = async () => {
+// AI 캠페인 발송 확정 (모달에서 호출)
+const handleAiCampaignSend = async (modalData?: {
+  campaignName: string;
+  sendTimeOption: 'ai' | 'now' | 'custom';
+  customSendTime: string;
+  selectedCallback: string;
+  useIndividualCallback: boolean;
+}) => {
   if (isSending) return; // 중복 클릭 방지
   
+  const _sendTimeOption = modalData?.sendTimeOption || sendTimeOption;
+  const _customSendTime = modalData?.customSendTime || customSendTime;
+  const _selectedCallback = modalData?.selectedCallback ?? selectedCallback;
+  const _useIndividualCallback = modalData?.useIndividualCallback ?? useIndividualCallback;
+  const _campaignName = modalData?.campaignName || '';
+
   // 회신번호 검증
-  if (!selectedCallback && !useIndividualCallback) {
+  if (!_selectedCallback && !_useIndividualCallback) {
     alert('회신번호를 선택해주세요');
     return;
   }
@@ -1401,7 +1415,7 @@ const handleAiCampaignSend = async () => {
 
     // 발송시간 계산
     let scheduledAt: string | null = null;
-    if (sendTimeOption === 'ai' && aiResult?.recommendedTime) {
+    if (_sendTimeOption === 'ai' && aiResult?.recommendedTime) {
       // AI 추천시간 파싱 (예: "2024-02-01 19:00" 또는 "2월 1일 오후 7시")
       const timeStr = aiResult.recommendedTime;
       let parsedDate: Date | null = null;
@@ -1428,8 +1442,8 @@ const handleAiCampaignSend = async () => {
       if (parsedDate) {
         scheduledAt = parsedDate.toISOString();
       }
-    } else if (sendTimeOption === 'custom' && customSendTime) {
-      scheduledAt = new Date(customSendTime).toISOString();
+    } else if (_sendTimeOption === 'custom' && _customSendTime) {
+      scheduledAt = new Date(_customSendTime).toISOString();
     }
     // 'now'면 scheduledAt은 null (즉시 발송)
 
@@ -1466,7 +1480,7 @@ const handleAiCampaignSend = async () => {
 const msgContent = selectedMsg.message_text || '';
 const nameMatch = msgContent.match(/\][\s]*(.+?)[\s]*[\n\r]/);
 const extractedName = nameMatch ? nameMatch[1].replace(/[^\w가-힣\s]/g, '').trim().slice(0, 30) : `캠페인_${formatDate(new Date().toISOString())}`;
-const autoName = aiResult?.suggestedCampaignName || extractedName;
+const autoName = _campaignName || aiResult?.suggestedCampaignName || extractedName;
 
 const campaignData = {
   campaignName: autoName,
@@ -1477,13 +1491,13 @@ const campaignData = {
       scheduledAt: scheduledAt,
       eventStartDate: eventStartDate,
       eventEndDate: eventEndDate,
-      callback: useIndividualCallback ? null : selectedCallback,
-      useIndividualCallback: useIndividualCallback,
+      callback: _useIndividualCallback ? null : _selectedCallback,
+      useIndividualCallback: _useIndividualCallback,
       mmsImagePaths: mmsUploadedImages.map(img => img.serverPath),
     };
 
     console.log('=== 발송 디버깅 ===');
-    console.log('sendTimeOption:', sendTimeOption);
+    console.log('sendTimeOption:', _sendTimeOption);
     console.log('scheduledAt:', scheduledAt);
     console.log('campaignData:', campaignData);
 
@@ -1498,12 +1512,13 @@ const campaignData = {
     // 모달 닫기
     setShowPreview(false);
     setShowAiResult(false);
+    setShowAiSendModal(false);
     setAiStep(1);
     setAiCampaignPrompt('');
     // 성공 모달용 발송 정보 저장 (초기화 전에!)
-    const sendInfoText = sendTimeOption === 'now' ? '즉시 발송 완료' : 
-                         sendTimeOption === 'ai' ? `예약 완료 (${aiResult?.recommendedTime || 'AI 추천'})` :
-                         `예약 완료 (${customSendTime ? formatDateTime(customSendTime) : ''})`;
+    const sendInfoText = _sendTimeOption === 'now' ? '즉시 발송 완료' : 
+                         _sendTimeOption === 'ai' ? `예약 완료 (${aiResult?.recommendedTime || 'AI 추천'})` :
+                         `예약 완료 (${_customSendTime ? formatDateTime(_customSendTime) : ''})`;
     setSuccessSendInfo(sendInfoText);
     
     setSendTimeOption('ai');
@@ -1635,6 +1650,29 @@ const campaignData = {
           messageContentLms={spamFilterData.lms}
           callbackNumber={spamFilterData.callback}
           messageType={spamFilterData.msgType}
+        />
+      )}
+
+      {/* AI 캠페인 발송 확정 모달 */}
+      {showAiSendModal && (
+        <AiCampaignSendModal
+          onClose={() => setShowAiSendModal(false)}
+          onSend={(data) => handleAiCampaignSend(data)}
+          isSending={isSending}
+          messageText={aiResult?.messages?.[selectedAiMsgIdx]?.message_text || ''}
+          selectedChannel={selectedChannel}
+          suggestedCampaignName={aiResult?.suggestedCampaignName || ''}
+          recommendedTime={aiResult?.recommendedTime || ''}
+          targetDescription={aiResult?.target?.description || '추천 타겟'}
+          targetCount={aiResult?.target?.count || 0}
+          callbackNumbers={callbackNumbers}
+          defaultCallback={selectedCallback}
+          defaultUseIndividual={useIndividualCallback}
+          isAd={isAd}
+          optOutNumber={optOutNumber}
+          mmsImages={mmsUploadedImages}
+          subject={aiResult?.messages?.[selectedAiMsgIdx]?.subject}
+          usePersonalization={aiResult?.usePersonalization}
         />
       )}
 
@@ -2201,7 +2239,7 @@ const campaignData = {
               <div className="p-6 border-b bg-green-50">
                 <div className="flex justify-between items-center">
                   <h3 className="text-lg font-bold flex items-center gap-2">
-                    <span>✨</span> AI 추천 결과 {aiStep === 1 ? '- 타겟 & 채널' : '- 메시지 & 발송'}
+                    <span>✨</span> AI 추천 결과 {aiStep === 1 ? '- 타겟 & 채널' : '- 캠페인 확정'}
                   </h3>
                   <button onClick={() => { setShowAiResult(false); setAiStep(1); }} className="text-gray-500 hover:text-gray-700 text-xl">✕</button>
                 </div>
@@ -2282,7 +2320,7 @@ const campaignData = {
                 </div>
               )}
 
-              {/* Step 2: 메시지 + 발송시간 */}
+              {/* Step 2: 메시지 + 캠페인 확정 */}
               {aiStep === 2 && (
                 <div className="p-6 space-y-6">
                   {/* 선택된 채널 표시 */}
@@ -2363,140 +2401,8 @@ const campaignData = {
                     </div>
                   </div>
 
-                  {/* 발송시간 */}
-                  <div>
-                    <div className="text-base font-semibold text-gray-700 mb-4">⏰ 발송시간</div>
-                    <div className="flex gap-3 items-stretch">
-                      <label 
-                        onClick={() => setSendTimeOption('ai')}
-                        className={`flex-1 p-3 border-2 rounded-xl cursor-pointer text-center flex flex-col justify-center ${sendTimeOption === 'ai' ? 'border-purple-500 bg-purple-50' : 'border-gray-200 hover:border-purple-300'}`}
-                      >
-                        <div className="font-bold text-base">🤖 AI 추천시간</div>
-                        <div className="text-sm text-gray-500 mt-1">
-                          {aiResult?.recommendedTime || '최적 시간'}
-                          {aiResult?.recommendedTime && (() => {
-                            const t = aiResult.recommendedTime;
-                            let d: Date | null = null;
-                            if (t.includes('T') || t.match(/^\d{4}-\d{2}-\d{2}/)) d = new Date(t);
-                            else { const m = t.match(/(\d+)월\s*(\d+)일.*?(\d{1,2}):?(\d{2})?/); if (m) d = new Date(new Date().getFullYear(), parseInt(m[1])-1, parseInt(m[2]), parseInt(m[3]), parseInt(m[4]||'0')); }
-                            return d && d.getTime() <= Date.now() ? <div className="text-xs text-orange-500 mt-0.5">→ 다음날로 자동 보정</div> : null;
-                          })()}
-                        </div>
-                      </label>
-                      <label 
-                        onClick={() => setSendTimeOption('now')}
-                        className={`flex-1 p-3 border-2 rounded-xl cursor-pointer text-center flex flex-col justify-center ${sendTimeOption === 'now' ? 'border-purple-500 bg-purple-50' : 'border-gray-200 hover:border-purple-300'}`}
-                      >
-                        <div className="font-bold text-base">⚡ 즉시 발송</div>
-                        <div className="text-sm text-gray-500 mt-1">지금 바로</div>
-                      </label>
-                      <label 
-                        onClick={() => setSendTimeOption('custom')}
-                        className={`flex-[1.5] p-3 border-2 rounded-xl cursor-pointer text-center ${sendTimeOption === 'custom' ? 'border-purple-500 bg-purple-50' : 'border-gray-200 hover:border-purple-300'}`}
-                      >
-                        <div className="font-bold text-base mb-2">📅 직접 선택</div>
-                        <div className="flex flex-col gap-2 w-full">
-                          <input 
-                            type="date" 
-                            className="border-2 rounded-lg px-3 py-1.5 text-sm w-full text-center"
-                            value={customSendTime?.split('T')[0] || ''}
-                            min={new Date().toISOString().split('T')[0]}
-                            onClick={(e) => { e.stopPropagation(); setSendTimeOption('custom'); }}
-                            onChange={(e) => {
-                              const time = customSendTime?.split('T')[1] || '09:00';
-                              setCustomSendTime(`${e.target.value}T${time}`);
-                            }}
-                          />
-                          <div className="flex items-center justify-center gap-2">
-                            <select
-                              value={parseInt(customSendTime?.split('T')[1]?.split(':')[0] || '9') >= 12 ? 'PM' : 'AM'}
-                              onClick={(e) => { e.stopPropagation(); setSendTimeOption('custom'); }}
-                              onChange={(e) => {
-                                const currentHour = parseInt(customSendTime?.split('T')[1]?.split(':')[0] || '9');
-                                const hour12 = currentHour === 0 ? 12 : currentHour > 12 ? currentHour - 12 : currentHour;
-                                let hour24 = e.target.value === 'PM' 
-                                  ? (hour12 === 12 ? 12 : hour12 + 12) 
-                                  : (hour12 === 12 ? 0 : hour12);
-                                const date = customSendTime?.split('T')[0] || new Date().toISOString().split('T')[0];
-                                const minute = customSendTime?.split('T')[1]?.split(':')[1] || '00';
-                                setCustomSendTime(`${date}T${hour24.toString().padStart(2, '0')}:${minute}`);
-                              }}
-                              className="border-2 rounded-lg px-2 py-1.5 text-sm font-medium"
-                            >
-                              <option value="AM">오전</option>
-                              <option value="PM">오후</option>
-                            </select>
-                            <input
-                              type="number"
-                              min="1"
-                              max="12"
-                              value={(() => {
-                                const hour = parseInt(customSendTime?.split('T')[1]?.split(':')[0] || '9');
-                                return hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
-                              })()}
-                              onClick={(e) => { e.stopPropagation(); setSendTimeOption('custom'); }}
-                              onChange={(e) => {
-                                let hour12 = Math.min(12, Math.max(1, parseInt(e.target.value) || 1));
-                                const currentHour = parseInt(customSendTime?.split('T')[1]?.split(':')[0] || '9');
-                                const isPM = currentHour >= 12;
-                                let hour24 = isPM ? (hour12 === 12 ? 12 : hour12 + 12) : (hour12 === 12 ? 0 : hour12);
-                                const date = customSendTime?.split('T')[0] || new Date().toISOString().split('T')[0];
-                                const minute = customSendTime?.split('T')[1]?.split(':')[1] || '00';
-                                setCustomSendTime(`${date}T${hour24.toString().padStart(2, '0')}:${minute}`);
-                              }}
-                              className="w-12 border-2 rounded-lg px-2 py-1.5 text-sm text-center"
-                            />
-                            <span className="text-lg font-bold text-gray-400">:</span>
-                            <input
-                              type="number"
-                              min="0"
-                              max="59"
-                              value={parseInt(customSendTime?.split('T')[1]?.split(':')[1] || '0')}
-                              onClick={(e) => { e.stopPropagation(); setSendTimeOption('custom'); }}
-                              onChange={(e) => {
-                                let minute = Math.min(59, Math.max(0, parseInt(e.target.value) || 0));
-                                const date = customSendTime?.split('T')[0] || new Date().toISOString().split('T')[0];
-                                const hour = customSendTime?.split('T')[1]?.split(':')[0] || '09';
-                                setCustomSendTime(`${date}T${hour}:${minute.toString().padStart(2, '0')}`);
-                              }}
-                              className="w-12 border-2 rounded-lg px-2 py-1.5 text-sm text-center"
-                            />
-                          </div>
-                        </div>
-                      </label>
-                    </div>
-                    </div>
 
-{/* 회신번호 선택 */}
-<div>
-  <div className="text-base font-semibold text-gray-700 mb-3">📞 회신번호</div>
-  <div className="flex gap-3 items-center">
-    <select
-      value={useIndividualCallback ? '__individual__' : selectedCallback}
-      onChange={(e) => {
-        if (e.target.value === '__individual__') {
-          setUseIndividualCallback(true);
-          setSelectedCallback('');
-        } else {
-          setUseIndividualCallback(false);
-          setSelectedCallback(e.target.value);
-        }
-      }}
-      className="flex-1 border-2 rounded-lg px-4 py-3 text-sm focus:border-purple-400 focus:outline-none"
-    >
-      <option value="">회신번호 선택</option>
-      <option value="__individual__">📱 개별회신번호 (고객별 매장번호)</option>
-      {callbackNumbers.map((cb) => (
-        <option key={cb.id} value={cb.phone}>
-          {cb.label || cb.phone} {cb.is_default && '(기본)'}
-        </option>
-      ))}
-    </select>
-    {useIndividualCallback && (
-      <span className="text-sm text-blue-600">💡 각 고객의 주이용매장 회신번호로 발송</span>
-    )}
-  </div>
-</div>
+
 
 {/* 하단 버튼 */}
 {testSentResult && (
@@ -2538,11 +2444,10 @@ const campaignData = {
   🛡️ 스팸필터
 </button>
 <button 
-  onClick={handleAiCampaignSend}
-  disabled={isSending}
+  onClick={() => setShowAiSendModal(true)}
   className="flex-1 py-3 bg-green-700 text-white rounded-lg hover:bg-green-800 flex items-center justify-center gap-2"
 >
-{isSending ? '⏳ 발송 중...' : '🚀 발송하기'}
+✅ 캠페인확정
 </button>
                   </div>
                 </div>
@@ -2656,15 +2561,6 @@ const campaignData = {
                   </div>
                 )}
 
-                {/* 발송 시간 */}
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-gray-600">⏰ 발송시간:</span>
-                  <span className="font-medium">
-                    {sendTimeOption === 'ai' ? (aiResult?.recommendedTime || 'AI 추천시간') : 
-                     sendTimeOption === 'now' ? '즉시 발송' : 
-                     customSendTime ? formatDateTime(customSendTime) : '직접 선택'}
-                  </span>
-                </div>
               </div>
 
               <div className="p-6 border-t space-y-3">
@@ -2706,11 +2602,10 @@ const campaignData = {
                     🛡️ 스팸필터
                   </button>
                   <button
-                    onClick={handleAiCampaignSend}
-                    disabled={isSending}
+                    onClick={() => { setShowPreview(false); setShowAiSendModal(true); }}
                     className="flex-1 py-3 bg-green-700 text-white rounded-lg hover:bg-green-800"
                   >
-                    {isSending ? '⏳ 발송 중...' : '🚀 발송 확정'}
+                    ✅ 캠페인확정
                   </button>
                 </div>
               </div>
