@@ -187,9 +187,26 @@ export function normalizePhone(value: any): string | null {
   if (v.startsWith('+82')) v = '0' + v.slice(3);
   // 숫자만 남기기
   v = v.replace(/\D/g, '');
-  // 유효성 검사 (10~11자리, 01로 시작)
-  if (v.length >= 10 && v.length <= 11 && v.startsWith('0')) return v;
-  return v || null;
+  // 유효성 검사: 한국 휴대폰 번호만 허용
+  if (!isValidKoreanPhone(v)) return null;
+  return v;
+}
+
+/**
+ * 한국 전화번호 유효성 검증
+ * - 010: 11자리 (010XXXXXXXX)
+ * - 011/016/017/018/019: 10~11자리 (구번호 허용)
+ * - 01로 시작하지 않거나 자릿수 불일치 → false
+ */
+export function isValidKoreanPhone(phone: string): boolean {
+  if (!phone) return false;
+  const cleaned = phone.replace(/\D/g, '');
+  // 010 → 반드시 11자리
+  if (cleaned.startsWith('010')) return cleaned.length === 11;
+  // 011, 016, 017, 018, 019 → 10~11자리 (구번호)
+  if (/^01[16789]/.test(cleaned)) return cleaned.length >= 10 && cleaned.length <= 11;
+  // 그 외 → 무효
+  return false;
 }
 
 // ============================================================

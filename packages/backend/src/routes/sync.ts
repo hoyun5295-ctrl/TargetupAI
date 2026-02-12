@@ -4,6 +4,7 @@
 
 import { Router, Request, Response } from 'express';
 import { query } from '../config/database';
+import { normalizePhone } from '../utils/normalize';
 
 const router = Router();
 
@@ -213,17 +214,6 @@ router.post('/heartbeat', async (req: SyncAuthRequest, res: Response) => {
 // POST /api/sync/customers - 고객 데이터 벌크 UPSERT
 // ============================================
 
-// 전화번호 검증 (숫자만, 10~11자리)
-function isValidPhone(phone: string): boolean {
-  const cleaned = phone.replace(/[^0-9]/g, '');
-  return cleaned.length >= 10 && cleaned.length <= 11;
-}
-
-// 전화번호 정규화 (숫자만 추출)
-function cleanPhone(phone: string): string {
-  return phone.replace(/[^0-9]/g, '');
-}
-
 router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
   try {
     const { customers, mode, batchIndex, totalBatches } = req.body;
@@ -267,8 +257,8 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
           continue;
         }
 
-        const phone = cleanPhone(c.phone);
-        if (!isValidPhone(phone)) {
+        const phone = normalizePhone(c.phone);
+        if (!phone) {
           failedCount++;
           failures.push({ phone: c.phone, reason: 'invalid phone format' });
           continue;
