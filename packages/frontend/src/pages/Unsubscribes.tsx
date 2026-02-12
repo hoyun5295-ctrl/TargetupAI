@@ -147,6 +147,7 @@ export default function Unsubscribes() {
   };
 
   const sourceLabel: Record<string, string> = {
+    '080_ars': '080 ARS',
     api: '080 자동',
     upload: '파일 업로드',
     manual: '직접 입력',
@@ -267,6 +268,7 @@ export default function Unsubscribes() {
                     <td className="px-4 py-3 font-mono">{formatPhone(item.phone)}</td>
                     <td className="px-4 py-3">
                       <span className={`px-2 py-1 rounded text-xs ${
+                        item.source === '080_ars' ? 'bg-orange-100 text-orange-700' :
                         item.source === 'api' ? 'bg-blue-100 text-blue-700' :
                         item.source === 'upload' ? 'bg-purple-100 text-purple-700' :
                         'bg-gray-100 text-gray-700'

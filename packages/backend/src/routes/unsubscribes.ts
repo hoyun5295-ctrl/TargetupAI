@@ -4,47 +4,59 @@ import { authenticate } from '../middlewares/auth';
 
 const router = Router();
 
-// GET /api/unsubscribe - 나래인터넷 080 콜백 (인증 없음)
-router.get('/unsubscribe', async (req: Request, res: Response) => {
+// GET /api/unsubscribes/080callback - 나래인터넷 080 콜백 (토큰 인증)
+router.get('/080callback', async (req: Request, res: Response) => {
   try {
-    const { cid, fr } = req.query;
-    
+    const { cid, fr, token } = req.query;
+
+    // 토큰 검증
+    const validToken = process.env.OPT_OUT_080_TOKEN;
+    if (!validToken || token !== validToken) {
+      console.log(`[080콜백] 토큰 인증 실패 - token=${token}`);
+      return res.send('0');
+    }
+
     if (!cid || !fr) {
+      console.log(`[080콜백] 필수 파라미터 누락 - cid=${cid}, fr=${fr}`);
       return res.send('0');
     }
-    
+
     const phone = String(cid).replace(/\D/g, '');
-    const rejectNumber = String(fr).replace(/\D/g, '');
-    
-    // 080번호로 회사 찾기 (callback_numbers 또는 companies.reject_number)
-    const companyResult = await query(
-      `SELECT c.id FROM companies c
-       LEFT JOIN callback_numbers cb ON cb.company_id = c.id
-       WHERE REPLACE(c.reject_number, '-', '') = $1
-          OR REPLACE(cb.phone, '-', '') = $1
-       LIMIT 1`,
-      [rejectNumber]
-    );
-    
-    if (companyResult.rows.length === 0) {
-      console.log(`080 수신거부: 회사 못찾음 - fr=${fr}`);
+    const optOut080Number = String(fr).replace(/\D/g, '');
+
+    if (phone.length < 10) {
+      console.log(`[080콜백] 잘못된 전화번호 - cid=${cid}`);
       return res.send('0');
     }
-    
-    const companyId = companyResult.rows[0].id;
-    
+
+    // 080번호로 고객사 찾기 (companies.opt_out_080_number)
+    const companyResult = await query(
+      `SELECT id, company_name FROM companies
+       WHERE REPLACE(REPLACE(opt_out_080_number, '-', ''), ' ', '') = $1
+         AND status = 'active'
+       LIMIT 1`,
+      [optOut080Number]
+    );
+
+    if (companyResult.rows.length === 0) {
+      console.log(`[080콜백] 고객사 못찾음 - fr=${fr} (${optOut080Number})`);
+      return res.send('0');
+    }
+
+    const company = companyResult.rows[0];
+
     // 수신거부 등록 (중복 무시)
     await query(
       `INSERT INTO unsubscribes (company_id, phone, source)
-       VALUES ($1, $2, 'api')
+       VALUES ($1, $2, '080_ars')
        ON CONFLICT (company_id, phone) DO NOTHING`,
-      [companyId, phone]
+      [company.id, phone]
     );
-    
-    console.log(`080 수신거부 등록: ${phone} (회사: ${companyId})`);
+
+    console.log(`[080콜백] 수신거부 등록: ${phone} → ${company.company_name} (080: ${fr})`);
     return res.send('1');
   } catch (error) {
-    console.error('080 수신거부 에러:', error);
+    console.error('[080콜백] 처리 오류:', error);
     return res.send('0');
   }
 });
