@@ -1447,4 +1447,88 @@ router.get('/balance-overview', authenticate, requireSuperAdmin, async (req: Req
   }
 });
 
+// ===== 감사 로그 조회 API =====
+router.get('/audit-logs', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const { page = 1, limit = 25, action, companyId, fromDate, toDate, userId } = req.query;
+    const offset = (Number(page) - 1) * Number(limit);
+
+    let whereClause = 'WHERE 1=1';
+    const params: any[] = [];
+    let paramIndex = 1;
+
+    // 액션 필터
+    if (action && action !== 'all') {
+      whereClause += ` AND al.action LIKE $${paramIndex++}`;
+      params.push(`%${action}%`);
+    }
+
+    // 고객사 필터 (user의 company_id로)
+    if (companyId && companyId !== 'all') {
+      whereClause += ` AND (u.company_id = $${paramIndex} OR al.details->>'companyId' = $${paramIndex})`;
+      params.push(companyId);
+      paramIndex++;
+    }
+
+    // 사용자 필터
+    if (userId && userId !== 'all') {
+      whereClause += ` AND al.user_id = $${paramIndex++}::uuid`;
+      params.push(userId);
+    }
+
+    // 날짜 필터
+    if (fromDate) {
+      whereClause += ` AND al.created_at >= $${paramIndex++}::date`;
+      params.push(String(fromDate));
+    }
+    if (toDate) {
+      whereClause += ` AND al.created_at < ($${paramIndex++}::date + interval '1 day')`;
+      params.push(String(toDate));
+    }
+
+    // 총 건수
+    const countResult = await query(
+      `SELECT COUNT(*) FROM audit_logs al LEFT JOIN users u ON al.user_id = u.id ${whereClause}`,
+      params
+    );
+    const total = parseInt(countResult.rows[0].count);
+
+    // 데이터 조회
+    params.push(Number(limit), offset);
+    const result = await query(
+      `SELECT 
+        al.id, al.user_id, al.action, al.target_type, al.target_id,
+        al.details, al.ip_address, al.user_agent, al.created_at,
+        COALESCE(u.login_id, sa.login_id, '시스템') as login_id,
+        COALESCE(u.name, sa.name, '시스템') as user_name,
+        u.company_id,
+        c.company_name
+       FROM audit_logs al
+       LEFT JOIN users u ON al.user_id = u.id
+       LEFT JOIN super_admins sa ON al.user_id = sa.id
+       LEFT JOIN companies c ON u.company_id = c.id
+       ${whereClause}
+       ORDER BY al.created_at DESC
+       LIMIT $${paramIndex++} OFFSET $${paramIndex}`,
+      params
+    );
+
+    // 액션 유형 목록 (필터용)
+    const actionsResult = await query(
+      `SELECT DISTINCT action FROM audit_logs ORDER BY action`
+    );
+
+    res.json({
+      logs: result.rows,
+      total,
+      page: Number(page),
+      totalPages: Math.ceil(total / Number(limit)),
+      actions: actionsResult.rows.map((r: any) => r.action),
+    });
+  } catch (error) {
+    console.error('감사 로그 조회 실패:', error);
+    res.status(500).json({ error: '감사 로그 조회 실패' });
+  }
+});
+
 export default router;

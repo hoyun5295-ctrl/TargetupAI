@@ -58,7 +58,7 @@ export default function AdminDashboard() {
   const navigate = useNavigate();
   const { user, logout } = useAuthStore();
 
-  const [activeTab, setActiveTab] = useState<'companies' | 'users' | 'scheduled' | 'callbacks' | 'plans' | 'requests' | 'deposits' | 'allCampaigns' | 'stats' | 'billing' | 'syncAgents'>('companies');
+  const [activeTab, setActiveTab] = useState<'companies' | 'users' | 'scheduled' | 'callbacks' | 'plans' | 'requests' | 'deposits' | 'allCampaigns' | 'stats' | 'billing' | 'syncAgents' | 'auditLogs'>('companies');
   const [companies, setCompanies] = useState<Company[]>([]);
   const [plans, setPlans] = useState<Plan[]>([]);
   const [users, setUsers] = useState<User[]>([]);
@@ -256,6 +256,28 @@ const [emailSending, setEmailSending] = useState(false);
   const [showSyncCommandModal, setShowSyncCommandModal] = useState(false);
   const [syncCommandType, setSyncCommandType] = useState<'full_sync' | 'restart'>('full_sync');
 
+  // ===== 감사 로그 =====
+  const [auditLogs, setAuditLogs] = useState<any[]>([]);
+  const [auditLogsLoading, setAuditLogsLoading] = useState(false);
+  const [auditLogsPage, setAuditLogsPage] = useState(1);
+  const [auditLogsTotal, setAuditLogsTotal] = useState(0);
+  const [auditLogsTotalPages, setAuditLogsTotalPages] = useState(0);
+  const [auditActionFilter, setAuditActionFilter] = useState('all');
+  const [auditCompanyFilter, setAuditCompanyFilter] = useState('all');
+  const [auditFromDate, setAuditFromDate] = useState(() => {
+    const d = new Date(); d.setDate(d.getDate() - 7);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  });
+  const [auditToDate, setAuditToDate] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  });
+  const [auditActions, setAuditActions] = useState<string[]>([]);
+
+  // ===== 잔액 변동 이력 (고객사 상세) =====
+  const [balanceTxList, setBalanceTxList] = useState<any[]>([]);
+  const [balanceTxLoading, setBalanceTxLoading] = useState(false);
+
   // 커스텀 모달 상태
   const [modal, setModal] = useState<ModalState>({ type: null, title: '', message: '' });
   const [copied, setCopied] = useState(false);
@@ -291,6 +313,40 @@ useEffect(() => { if (activeTab === 'billing') { loadBillings(); loadInvoices();
 useEffect(() => { if (activeTab === 'billing') loadBillings(); }, [filterYear]);
 useEffect(() => { if (activeTab === 'deposits') loadDepositRequests(1); }, [activeTab, depositStatusFilter, depositMethodFilter]);
 useEffect(() => { if (activeTab === 'syncAgents') loadSyncAgents(); }, [activeTab]);
+useEffect(() => { if (activeTab === 'auditLogs') loadAuditLogs(1); }, [activeTab]);
+
+// 감사 로그 조회
+const loadAuditLogs = async (page: number) => {
+  setAuditLogsLoading(true);
+  try {
+    const token = localStorage.getItem('token');
+    const params = new URLSearchParams({ page: String(page), limit: '25' });
+    if (auditActionFilter !== 'all') params.set('action', auditActionFilter);
+    if (auditCompanyFilter !== 'all') params.set('companyId', auditCompanyFilter);
+    if (auditFromDate) params.set('fromDate', auditFromDate);
+    if (auditToDate) params.set('toDate', auditToDate);
+    const res = await fetch(`/api/admin/audit-logs?${params}`, { headers: { Authorization: `Bearer ${token}` } });
+    const data = await res.json();
+    setAuditLogs(data.logs || []);
+    setAuditLogsTotal(data.total || 0);
+    setAuditLogsTotalPages(data.totalPages || 0);
+    setAuditLogsPage(page);
+    if (data.actions) setAuditActions(data.actions);
+  } catch (e) { console.error('감사 로그 조회 실패:', e); }
+  finally { setAuditLogsLoading(false); }
+};
+
+// 잔액 변동 이력 조회 (고객사 상세)
+const loadBalanceTx = async (companyId: string) => {
+  setBalanceTxLoading(true);
+  try {
+    const token = localStorage.getItem('token');
+    const res = await fetch(`/api/admin/companies/${companyId}/balance-transactions?page=1&limit=10`, { headers: { Authorization: `Bearer ${token}` } });
+    const data = await res.json();
+    setBalanceTxList(data.transactions || []);
+  } catch (e) { console.error('잔액 이력 조회 실패:', e); }
+  finally { setBalanceTxLoading(false); }
+};
 useEffect(() => { if (billingToast) { const t = setTimeout(() => setBillingToast(null), 3000); return () => clearTimeout(t); } }, [billingToast]);
 useEffect(() => {
   if (billingScope === 'user' && billingCompanyId) {
@@ -1671,6 +1727,16 @@ const handleApproveRequest = async (id: string) => {
                 }`}
               >
                 Sync 모니터링
+              </button>
+              <button
+                onClick={() => setActiveTab('auditLogs')}
+                className={`px-4 py-3 text-sm font-medium border-b-2 ${
+                  activeTab === 'auditLogs'
+                    ? 'border-blue-500 text-blue-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                📋 감사 로그
               </button>
             </nav>
           </div>
@@ -3345,6 +3411,7 @@ const handleApproveRequest = async (id: string) => {
                   onClick={() => {
                     setEditCompanyTab(tab.key as any);
                     if (tab.key === 'customers') { setAdminCustSearch(''); loadAdminCustomers(1); }
+                    if (tab.key === 'cost' && editCompany?.billingType === 'prepaid') { loadBalanceTx(editCompany.id); }
                   }}
                   className={`flex-1 px-2 py-3 text-xs font-medium border-b-2 transition-colors ${
                     editCompanyTab === tab.key
@@ -3619,6 +3686,7 @@ const handleApproveRequest = async (id: string) => {
                               const data = await res.json();
                               if (res.ok) {
                                 setEditCompany(prev => ({ ...prev, balance: data.balance, balanceAdjustAmount: '', balanceAdjustReason: '', balanceAdjusting: false }));
+                                loadBalanceTx(editCompany.id);
                                 setModal({ type: 'alert', title: '완료', message: data.message, variant: 'success' });
                               } else {
                                 setEditCompany(prev => ({ ...prev, balanceAdjusting: false }));
@@ -3630,6 +3698,55 @@ const handleApproveRequest = async (id: string) => {
                             editCompany.balanceAdjustType === 'charge' ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'bg-red-600 hover:bg-red-700 text-white'
                           }`}
                         >{editCompany.balanceAdjusting ? '처리 중...' : editCompany.balanceAdjustType === 'charge' ? '충전하기' : '차감하기'}</button>
+                      </div>
+
+                      {/* 잔액 변동 이력 */}
+                      <div className="mt-3 pt-3 border-t border-emerald-200">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-xs font-bold text-gray-700">📊 최근 변동 이력</span>
+                          <button type="button" onClick={() => loadBalanceTx(editCompany.id)}
+                            className="text-[10px] text-emerald-600 hover:underline">새로고침</button>
+                        </div>
+                        {balanceTxLoading ? (
+                          <div className="text-xs text-gray-400 text-center py-2">불러오는 중...</div>
+                        ) : balanceTxList.length === 0 ? (
+                          <div className="text-xs text-gray-400 text-center py-2">
+                            변동 이력이 없습니다.
+                            <button type="button" onClick={() => loadBalanceTx(editCompany.id)} className="ml-1 text-emerald-600 hover:underline">조회</button>
+                          </div>
+                        ) : (
+                          <div className="max-h-[180px] overflow-y-auto space-y-1">
+                            {balanceTxList.map((tx: any) => {
+                              const typeColors: Record<string, string> = {
+                                admin_charge: 'text-emerald-600', charge: 'text-emerald-600', deposit_charge: 'text-emerald-600',
+                                admin_deduct: 'text-red-600', deduct: 'text-red-600',
+                                refund: 'text-blue-600',
+                              };
+                              const typeLabels: Record<string, string> = {
+                                admin_charge: '관리자 충전', charge: '충전', deposit_charge: '입금 충전',
+                                admin_deduct: '관리자 차감', deduct: '발송 차감',
+                                refund: '환불',
+                              };
+                              const isPlus = ['admin_charge', 'charge', 'deposit_charge', 'refund'].includes(tx.type);
+                              return (
+                                <div key={tx.id} className="flex items-center justify-between text-[11px] py-1 px-2 bg-white rounded border">
+                                  <div className="flex-1">
+                                    <span className={`font-medium ${typeColors[tx.type] || 'text-gray-600'}`}>
+                                      {typeLabels[tx.type] || tx.type}
+                                    </span>
+                                    <span className="text-gray-400 ml-2">{tx.description?.slice(0, 30) || ''}</span>
+                                  </div>
+                                  <div className="flex items-center gap-3">
+                                    <span className={`font-bold ${isPlus ? 'text-emerald-600' : 'text-red-600'}`}>
+                                      {isPlus ? '+' : '-'}{Number(tx.amount).toLocaleString()}원
+                                    </span>
+                                    <span className="text-gray-400 w-[55px] text-right">{formatDateTime(tx.created_at).slice(5, 16)}</span>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}
@@ -5321,8 +5438,149 @@ const handleApproveRequest = async (id: string) => {
           )}
         </div>
       )}
+
+      {/* 감사 로그 탭 */}
+      {activeTab === 'auditLogs' && (
+        <div className="bg-white rounded-lg shadow">
+          <div className="px-6 py-4 border-b">
+            <h2 className="text-lg font-semibold">📋 감사 로그</h2>
+            <p className="text-xs text-gray-500 mt-1">로그인, 삭제, 설정 변경 등 주요 활동 기록</p>
+          </div>
+
+          {/* 필터 */}
+          <div className="px-6 py-3 border-b bg-gray-50 flex flex-wrap items-center gap-3">
+            <span className="text-sm text-gray-500 font-medium">기간</span>
+            <input type="date" value={auditFromDate} onChange={(e) => setAuditFromDate(e.target.value)}
+              className="border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200" />
+            <span className="text-gray-400">~</span>
+            <input type="date" value={auditToDate} onChange={(e) => setAuditToDate(e.target.value)}
+              className="border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200" />
+            <div className="w-px h-6 bg-gray-200" />
+            <span className="text-sm text-gray-500 font-medium">액션</span>
+            <select value={auditActionFilter} onChange={(e) => setAuditActionFilter(e.target.value)}
+              className="border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200">
+              <option value="all">전체</option>
+              {auditActions.map(a => <option key={a} value={a}>{a}</option>)}
+            </select>
+            <span className="text-sm text-gray-500 font-medium">고객사</span>
+            <select value={auditCompanyFilter} onChange={(e) => setAuditCompanyFilter(e.target.value)}
+              className="border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200">
+              <option value="all">전체</option>
+              {companies.map(c => <option key={c.id} value={c.id}>{c.companyName}</option>)}
+            </select>
+            <button onClick={() => loadAuditLogs(1)}
+              className="px-4 py-1.5 bg-blue-500 text-white rounded-lg text-sm font-medium hover:bg-blue-600 transition-colors">
+              조회
+            </button>
+          </div>
+
+          {/* 총 건수 */}
+          <div className="px-6 py-2 text-xs text-gray-500">
+            총 {auditLogsTotal.toLocaleString()}건 · {auditLogsPage} / {auditLogsTotalPages} 페이지
+          </div>
+
+          {/* 테이블 */}
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">일시</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 whitespace-nowrap">사용자</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 whitespace-nowrap">고객사</th>
+                  <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">액션</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 whitespace-nowrap">상세</th>
+                  <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">IP</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200">
+                {auditLogsLoading ? (
+                  <tr><td colSpan={6} className="px-6 py-12 text-center text-gray-500">불러오는 중...</td></tr>
+                ) : auditLogs.length === 0 ? (
+                  <tr><td colSpan={6} className="px-6 py-12 text-center text-gray-500">조회된 로그가 없습니다.</td></tr>
+                ) : (
+                  auditLogs.map((log) => {
+                    const actionColors: Record<string, string> = {
+                      login_success: 'bg-green-100 text-green-700',
+                      login_fail: 'bg-red-100 text-red-700',
+                      login_blocked: 'bg-red-200 text-red-800',
+                      customer_delete: 'bg-orange-100 text-orange-700',
+                      customer_bulk_delete: 'bg-orange-100 text-orange-700',
+                      customer_delete_all: 'bg-red-100 text-red-700',
+                    };
+                    const actionLabels: Record<string, string> = {
+                      login_success: '로그인 성공',
+                      login_fail: '로그인 실패',
+                      login_blocked: '로그인 차단',
+                      customer_delete: '고객 삭제',
+                      customer_bulk_delete: '고객 선택삭제',
+                      customer_delete_all: '고객 전체삭제',
+                    };
+                    const details = log.details || {};
+                    let detailText = '';
+                    if (details.deletedCount) detailText += `삭제 ${details.deletedCount}건`;
+                    if (details.login_id) detailText += `ID: ${details.login_id}`;
+                    if (details.reason) detailText += ` (${details.reason})`;
+                    if (details.customerName) detailText += ` 대상: ${details.customerName}`;
+                    if (details.customerPhone) detailText += ` ${details.customerPhone}`;
+                    if (!detailText && details.message) detailText = details.message;
+                    if (!detailText) detailText = JSON.stringify(details).slice(0, 80);
+
+                    return (
+                      <tr key={log.id} className="hover:bg-gray-50">
+                        <td className="px-4 py-3 text-center text-gray-600 whitespace-nowrap text-xs">
+                          {formatDateTime(log.created_at)}
+                        </td>
+                        <td className="px-4 py-3 text-left">
+                          <div className="font-medium text-gray-800 text-xs">{log.user_name || '-'}</div>
+                          <div className="text-[10px] text-gray-400">{log.login_id || ''}</div>
+                        </td>
+                        <td className="px-4 py-3 text-left text-xs text-gray-600">
+                          {log.company_name || '-'}
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <span className={`px-2 py-1 rounded-full text-[11px] font-medium ${actionColors[log.action] || 'bg-gray-100 text-gray-600'}`}>
+                            {actionLabels[log.action] || log.action}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-left text-xs text-gray-500 max-w-[300px] truncate" title={detailText}>
+                          {detailText || '-'}
+                        </td>
+                        <td className="px-4 py-3 text-center text-xs text-gray-400 whitespace-nowrap">
+                          {log.ip_address || '-'}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* 페이지네이션 */}
+          {auditLogsTotalPages > 1 && (
+            <div className="px-6 py-3 border-t flex justify-center gap-1">
+              <button onClick={() => loadAuditLogs(1)} disabled={auditLogsPage === 1}
+                className="px-2 py-1 text-xs border rounded hover:bg-gray-50 disabled:opacity-30">«</button>
+              <button onClick={() => loadAuditLogs(auditLogsPage - 1)} disabled={auditLogsPage === 1}
+                className="px-2 py-1 text-xs border rounded hover:bg-gray-50 disabled:opacity-30">‹</button>
+              {Array.from({ length: auditLogsTotalPages }, (_, i) => i + 1)
+                .filter(p => Math.abs(p - auditLogsPage) <= 2 || p === 1 || p === auditLogsTotalPages)
+                .map((p, idx, arr) => (
+                  <span key={p}>
+                    {idx > 0 && arr[idx - 1] !== p - 1 && <span className="px-1 text-gray-400">…</span>}
+                    <button onClick={() => loadAuditLogs(p)}
+                      className={`px-3 py-1 text-xs border rounded ${p === auditLogsPage ? 'bg-blue-500 text-white' : 'hover:bg-gray-50'}`}>{p}</button>
+                  </span>
+                ))}
+              <button onClick={() => loadAuditLogs(auditLogsPage + 1)} disabled={auditLogsPage === auditLogsTotalPages}
+                className="px-2 py-1 text-xs border rounded hover:bg-gray-50 disabled:opacity-30">›</button>
+              <button onClick={() => loadAuditLogs(auditLogsTotalPages)} disabled={auditLogsPage === auditLogsTotalPages}
+                className="px-2 py-1 text-xs border rounded hover:bg-gray-50 disabled:opacity-30">»</button>
+            </div>
+          )}
+        </div>
+      )}
       </main>
-      {/* Sync Agent 상세 모달 */}
       {showSyncDetailModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl shadow-2xl w-[700px] max-h-[85vh] overflow-hidden animate-in fade-in zoom-in">
