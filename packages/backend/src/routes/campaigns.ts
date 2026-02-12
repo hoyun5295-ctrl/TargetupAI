@@ -977,10 +977,14 @@ router.get('/test-stats', async (req: Request, res: Response) => {
       cost: 0,
     };
 
-    // 비용 계산 (SMS 27원, LMS 81원, MMS 단가 기준)
+    // 비용 계산 (회사 실제 단가 기준)
+    const costResult = await query('SELECT cost_per_sms, cost_per_lms, cost_per_mms FROM companies WHERE id = $1', [companyId]);
+    const costSms = Number(costResult.rows[0]?.cost_per_sms) || 9.9;
+    const costLms = Number(costResult.rows[0]?.cost_per_lms) || 27;
+    const costMms = Number(costResult.rows[0]?.cost_per_mms) || 50;
     allResults.forEach((r: any) => {
       if ([6, 1000, 1800].includes(r.status_code)) {
-        stats.cost += r.msg_type === 'S' ? 27 : r.msg_type === 'M' ? 110 : 81;
+        stats.cost += r.msg_type === 'S' ? costSms : r.msg_type === 'M' ? costMms : costLms;
       }
     });
 
