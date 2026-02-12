@@ -413,6 +413,11 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const { user, logout } = useAuthStore();
 
+  // 기능 제한 체크 헬퍼
+  const isHidden = (feature: string) => (user as any)?.hiddenFeatures?.includes(feature);
+  const hideAi = isHidden('ai_recommend');
+  const hideFileUpload = isHidden('file_upload');
+
   const [stats, setStats] = useState<Stats | null>(null);
   const [planInfo, setPlanInfo] = useState<PlanInfo | null>(null);
   const [balanceInfo, setBalanceInfo] = useState<{billingType: string, balance: number, costPerSms: number, costPerLms: number, costPerMms: number, costPerKakao: number} | null>(null);
@@ -1890,6 +1895,41 @@ const campaignData = {
                         </div>
 
 {/* 우측: AI 프롬프트 입력 */}
+          {hideAi ? (
+          <div className="flex-1 bg-gray-50 rounded-xl p-6 border border-gray-200">
+            <h3 className="text-xl font-bold text-gray-800 mb-2">문자 발송 서비스</h3>
+            <p className="text-sm text-gray-500 mb-5">
+              직접발송 또는 직접 타겟 설정을 통해 문자를 발송할 수 있습니다.
+            </p>
+            <div className={`grid ${hideFileUpload ? 'grid-cols-1 max-w-sm' : 'grid-cols-2'} gap-4 mt-6`}>
+              {/* 고객 DB 업로드 */}
+              {!hideFileUpload && (
+              <button 
+                onClick={() => setShowFileUpload(true)}
+                className="p-6 bg-slate-600 hover:bg-slate-700 rounded-xl transition-all hover:shadow-lg group text-right h-[140px] flex flex-col justify-between"
+              >
+                <div>
+                  <div className="text-lg font-bold text-white mb-1">고객 DB 업로드</div>
+                  <div className="text-sm text-slate-200">엑셀/CSV로 고객 추가</div>
+                </div>
+                <div className="text-2xl text-slate-300 self-end">→</div>
+              </button>
+              )}
+
+              {/* 직접 타겟 설정 */}
+              <button 
+                onClick={() => { setShowDirectTargeting(true); loadEnabledFields(); }}
+                className="p-6 bg-amber-500 hover:bg-amber-600 rounded-xl transition-all hover:shadow-lg group text-right h-[140px] flex flex-col justify-between"
+              >
+                <div>
+                  <div className="text-lg font-bold text-white mb-1">직접 타겟 설정</div>
+                  <div className="text-sm text-amber-100">원하는 고객을 직접 필터링</div>
+                </div>
+                <div className="text-2xl text-amber-200 self-end">→</div>
+              </button>
+            </div>
+          </div>
+          ) : (
           <div className="flex-1 bg-green-50 rounded-xl p-6 border border-green-200">
           <h3 className="text-xl font-bold text-gray-800 mb-2">AI 자동화 마케팅</h3>
             <p className="text-sm text-gray-500 mb-5">
@@ -1962,6 +2002,7 @@ const campaignData = {
               AI는 실수할 수 있습니다. 발송 전 미리보기에서 내용을 꼭 확인해주세요.
             </p>
           </div>
+          )}
         </div>
 
         {/* 탭 */}

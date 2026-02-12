@@ -6,6 +6,7 @@ interface User {
   name: string;
   email: string;
   userType: 'super_admin' | 'company_admin' | 'company_user';
+  hiddenFeatures?: string[];
   company?: {
     id: string;
     name: string;

@@ -77,7 +77,7 @@ router.post('/login', async (req: Request, res: Response) => {
 
     // ===== 고객사 사용자 로그인 =====
     const result = await query(
-      `SELECT u.*, u.must_change_password, c.name as company_name, c.id as company_code
+      `SELECT u.*, u.must_change_password, u.hidden_features, c.name as company_name, c.id as company_code
        FROM users u
        JOIN companies c ON u.company_id = c.id
        WHERE u.login_id = $1`,
@@ -218,6 +218,7 @@ router.post('/login', async (req: Request, res: Response) => {
         email: user.email,
         userType: payload.userType,
         mustChangePassword: user.must_change_password || false,
+        hiddenFeatures: user.hidden_features || [],
         storeCodes: user.store_codes || [],
         company: {
           id: user.company_id,
