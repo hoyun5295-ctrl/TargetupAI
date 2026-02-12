@@ -172,7 +172,7 @@ export default function CustomersTab() {
           </div>
           <div className="flex items-center gap-2">
             {/* ★ 사용자별 필터 (2명 이상일 때만 표시) */}
-            {users.length >= 2 && (
+            {users.length >= 1 && (
               <select
                 value={filterUserId}
                 onChange={(e) => setFilterUserId(e.target.value)}
