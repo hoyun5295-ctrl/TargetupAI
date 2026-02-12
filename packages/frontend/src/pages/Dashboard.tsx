@@ -3413,6 +3413,8 @@ const campaignData = {
                               <option value="last_purchase_date">📅 최근구매일</option>
                               <option value="purchase_count">🛒 구매횟수</option>
                               <option value="callback">📞 회신번호(매장번호)</option>
+                              <option value="store_name">🏬 소속매장명</option>
+                              <option value="store_code">🏷️ 매장코드</option>
                             </select>
                           </div>
                         ))}

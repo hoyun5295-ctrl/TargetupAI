@@ -144,7 +144,9 @@ router.post('/mapping', async (req: Request, res: Response) => {
       total_purchase: '총 구매금액',
       last_purchase_date: '최근 구매일',
       purchase_count: '구매 횟수',
-      callback: '매장번호/회신번호 (발신번호로 사용되는 매장 전화번호)'
+      callback: '매장번호/회신번호 (발신번호로 사용되는 매장 전화번호)',
+      store_name: '소속매장명 (매장/지점 이름)',
+      store_code: '매장코드 (매장 식별 코드)'
     };
 
     // Claude API 호출
@@ -362,18 +364,19 @@ await redis.set(`upload:${fileId}:progress`, JSON.stringify({
           record.grade || null, record.region || null,
           smsOptIn !== null ? smsOptIn : true,
           record.email || null, record.total_purchase || null, record.last_purchase_date || null, record.purchase_count || null,
-          record.callback ? String(record.callback).replace(/-/g, '').trim() : null
+          record.callback ? String(record.callback).replace(/-/g, '').trim() : null,
+          record.store_name || null, record.store_code || null
         );
 
-        placeholders.push(`($${paramIndex}, $${paramIndex + 1}, $${paramIndex + 2}, $${paramIndex + 3}, $${paramIndex + 4}, $${paramIndex + 5}, $${paramIndex + 6}, $${paramIndex + 7}, $${paramIndex + 8}, $${paramIndex + 9}, $${paramIndex + 10}, $${paramIndex + 11}, $${paramIndex + 12}, $${paramIndex + 13}, $${paramIndex + 14}, 'upload', NOW(), NOW())`);
-        paramIndex += 15;
+        placeholders.push(`($${paramIndex}, $${paramIndex + 1}, $${paramIndex + 2}, $${paramIndex + 3}, $${paramIndex + 4}, $${paramIndex + 5}, $${paramIndex + 6}, $${paramIndex + 7}, $${paramIndex + 8}, $${paramIndex + 9}, $${paramIndex + 10}, $${paramIndex + 11}, $${paramIndex + 12}, $${paramIndex + 13}, $${paramIndex + 14}, $${paramIndex + 15}, $${paramIndex + 16}, 'upload', NOW(), NOW())`);
+        paramIndex += 17;
       }
 
       if (placeholders.length === 0) continue;
 
       try {
         const result = await pool.query(`
-          INSERT INTO customers (company_id, phone, name, gender, birth_date, birth_year, birth_month_day, grade, region, sms_opt_in, email, total_purchase, last_purchase_date, purchase_count, callback, source, created_at, updated_at)
+          INSERT INTO customers (company_id, phone, name, gender, birth_date, birth_year, birth_month_day, grade, region, sms_opt_in, email, total_purchase, last_purchase_date, purchase_count, callback, store_name, store_code, source, created_at, updated_at)
           VALUES ${placeholders.join(', ')}
           ON CONFLICT (company_id, phone) 
           DO UPDATE SET 
@@ -390,9 +393,11 @@ await redis.set(`upload:${fileId}:progress`, JSON.stringify({
             last_purchase_date = COALESCE(EXCLUDED.last_purchase_date, customers.last_purchase_date),
             purchase_count = COALESCE(EXCLUDED.purchase_count, customers.purchase_count),
             callback = COALESCE(EXCLUDED.callback, customers.callback),
+            store_name = COALESCE(EXCLUDED.store_name, customers.store_name),
+            store_code = COALESCE(EXCLUDED.store_code, customers.store_code),
             source = CASE WHEN customers.source = 'sync' THEN 'sync' ELSE 'upload' END,
             updated_at = NOW()
-          RETURNING (xmax = 0) as is_insert
+          RETURNING (xmax = 0) as is_insert, phone
         `, values);
 
         result.rows.forEach((r: any) => {
@@ -400,8 +405,21 @@ await redis.set(`upload:${fileId}:progress`, JSON.stringify({
           else duplicateCount++;
         });
 
-        // customer_stores N:N 매핑 (사용자의 store_codes → 업로드 고객에 매핑)
-        if (userStoreCodes.length > 0 && batchPhones.length > 0) {
+        // customer_stores N:N 매핑
+        // 1) 파일에 store_code가 매핑된 경우 → 파일의 store_code 사용
+        const hasFileStoreCode = Object.values(mapping).includes('store_code');
+        if (hasFileStoreCode && batchPhones.length > 0) {
+          // 파일에서 store_code가 있는 고객만 매핑
+          await pool.query(`
+            INSERT INTO customer_stores (company_id, customer_id, store_code)
+            SELECT c.company_id, c.id, c.store_code
+            FROM customers c
+            WHERE c.company_id = $1 AND c.phone = ANY($2::text[]) AND c.store_code IS NOT NULL AND c.store_code != ''
+            ON CONFLICT (customer_id, store_code) DO NOTHING
+          `, [companyId, batchPhones]);
+        }
+        // 2) 파일에 store_code 없으면 → 업로드 사용자의 store_codes 사용
+        if (!hasFileStoreCode && userStoreCodes.length > 0 && batchPhones.length > 0) {
           await pool.query(`
             INSERT INTO customer_stores (company_id, customer_id, store_code)
             SELECT $1, c.id, unnest($2::text[])
