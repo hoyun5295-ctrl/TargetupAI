@@ -167,12 +167,6 @@ export default function AiCampaignSendModal({
                   </div>
                 </div>
               </div>
-              {/* 타겟 요약 - 폰 아래 */}
-              <div className="bg-blue-50 rounded-lg p-2.5 mt-3 text-center">
-                <div className="text-xs text-gray-500">📌 발송 대상</div>
-                <div className="text-blue-600 font-bold text-lg mt-0.5">{targetCount?.toLocaleString()}명</div>
-                <div className="text-[11px] text-gray-500 mt-0.5 leading-tight">{targetDescription}</div>
-              </div>
             </div>
 
             {/* 우측: 발송 설정 */}
@@ -336,7 +330,12 @@ export default function AiCampaignSendModal({
         </div>
 
         {/* 하단 버튼 */}
-        <div className="p-4 border-t bg-gray-50 flex justify-end gap-3">
+        <div className="p-4 border-t bg-gray-50 flex items-center justify-between">
+          <div className="flex items-center gap-2 text-sm">
+            <span className="text-gray-500">📌 발송 대상</span>
+            <span className="font-bold text-blue-600 text-lg">{targetCount?.toLocaleString()}명</span>
+          </div>
+          <div className="flex items-center gap-3">
           <button onClick={onClose} className="px-5 py-2.5 text-gray-600 hover:bg-gray-200 rounded-lg transition-colors">
             취소
           </button>
@@ -347,6 +346,7 @@ export default function AiCampaignSendModal({
           >
             {isSending ? '⏳ 발송 중...' : '🚀 발송하기'}
           </button>
+          </div>
         </div>
       </div>
     </div>
