@@ -173,15 +173,11 @@ router.get('/', async (req: Request, res: Response) => {
       }
     }
 
-    // ★ 고객사관리자: 사용자(ID)별 필터 (해당 사용자의 store_codes로 고객 필터)
+    // ★ 고객사관리자: 사용자(ID)별 필터 → 해당 사용자가 업로드한 고객만
     const filterUserId = req.query.filterUserId as string;
     if (filterUserId && (userType === 'company_admin' || userType === 'super_admin')) {
-      const filterUserResult = await query('SELECT store_codes FROM users WHERE id = $1', [filterUserId]);
-      const filterStoreCodes = filterUserResult.rows[0]?.store_codes;
-      if (filterStoreCodes && filterStoreCodes.length > 0) {
-        whereClause += ` AND store_code = ANY($${paramIndex++}::text[])`;
-        params.push(filterStoreCodes);
-      }
+      whereClause += ` AND uploaded_by = $${paramIndex++}`;
+      params.push(filterUserId);
     }
 
     // 동적 필터 적용

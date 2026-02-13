@@ -365,18 +365,19 @@ await redis.set(`upload:${fileId}:progress`, JSON.stringify({
           smsOptIn !== null ? smsOptIn : true,
           record.email || null, record.total_purchase || null, record.last_purchase_date || null, record.purchase_count || null,
           record.callback ? String(record.callback).replace(/-/g, '').trim() : null,
-          record.store_name || null, record.store_code || null
+          record.store_name || null, record.store_code || null,
+          userId || null
         );
 
-        placeholders.push(`($${paramIndex}, $${paramIndex + 1}, $${paramIndex + 2}, $${paramIndex + 3}, $${paramIndex + 4}, $${paramIndex + 5}, $${paramIndex + 6}, $${paramIndex + 7}, $${paramIndex + 8}, $${paramIndex + 9}, $${paramIndex + 10}, $${paramIndex + 11}, $${paramIndex + 12}, $${paramIndex + 13}, $${paramIndex + 14}, $${paramIndex + 15}, $${paramIndex + 16}, 'upload', NOW(), NOW())`);
-        paramIndex += 17;
+        placeholders.push(`($${paramIndex}, $${paramIndex + 1}, $${paramIndex + 2}, $${paramIndex + 3}, $${paramIndex + 4}, $${paramIndex + 5}, $${paramIndex + 6}, $${paramIndex + 7}, $${paramIndex + 8}, $${paramIndex + 9}, $${paramIndex + 10}, $${paramIndex + 11}, $${paramIndex + 12}, $${paramIndex + 13}, $${paramIndex + 14}, $${paramIndex + 15}, $${paramIndex + 16}, $${paramIndex + 17}, 'upload', NOW(), NOW())`);
+        paramIndex += 18;
       }
 
       if (placeholders.length === 0) continue;
 
       try {
         const result = await pool.query(`
-          INSERT INTO customers (company_id, phone, name, gender, birth_date, birth_year, birth_month_day, grade, region, sms_opt_in, email, total_purchase, last_purchase_date, purchase_count, callback, store_name, store_code, source, created_at, updated_at)
+          INSERT INTO customers (company_id, phone, name, gender, birth_date, birth_year, birth_month_day, grade, region, sms_opt_in, email, total_purchase, last_purchase_date, purchase_count, callback, store_name, store_code, uploaded_by, source, created_at, updated_at)
           VALUES ${placeholders.join(', ')}
           ON CONFLICT (company_id, phone) 
           DO UPDATE SET 
@@ -395,6 +396,7 @@ await redis.set(`upload:${fileId}:progress`, JSON.stringify({
             callback = COALESCE(EXCLUDED.callback, customers.callback),
             store_name = COALESCE(EXCLUDED.store_name, customers.store_name),
             store_code = COALESCE(EXCLUDED.store_code, customers.store_code),
+            uploaded_by = COALESCE(EXCLUDED.uploaded_by, customers.uploaded_by),
             source = CASE WHEN customers.source = 'sync' THEN 'sync' ELSE 'upload' END,
             updated_at = NOW()
           RETURNING (xmax = 0) as is_insert, phone

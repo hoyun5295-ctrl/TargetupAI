@@ -1019,6 +1019,13 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
   const loadRecentCampaigns = async () => {
     try {
       const token = localStorage.getItem('token');
+      // ★ sending 상태 캠페인이 있을 수 있으므로 결과 동기화 먼저 실행
+      try {
+        await fetch('/api/campaigns/sync-results', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        });
+      } catch {}
       const res = await fetch('/api/campaigns?limit=10', {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -2161,8 +2168,8 @@ const campaignData = {
                   <div onClick={() => setShowInsights(true)} className="bg-white/50 shadow-sm rounded-xl p-6 min-h-[140px] cursor-pointer hover:shadow-lg transition-all text-center">
                     <Users className="w-8 h-8 mx-auto mb-3 text-green-600" />
                     <div className="font-semibold text-gray-800 mb-1">고객 인사이트</div>
-                    <div className="text-xs text-gray-500 mb-3">세그먼트 분포</div>
-                    <div className="text-xl font-bold text-green-700">5개</div>
+                    <div className="text-xs text-gray-500 mb-3">고객 현황 분석</div>
+                    <div className="text-xl font-bold text-green-700">{parseInt(stats?.total || '0').toLocaleString()}명</div>
                   </div>
 
                   {/* 오늘의 통계 */}
@@ -4924,33 +4931,33 @@ const campaignData = {
                   <div className="flex-1">
                     <div className="text-xs text-gray-500 mb-2">시간</div>
                     <div className="flex items-center gap-1">
-                      <input
-                        type="number"
-                        min="0"
-                        max="23"
-                        value={parseInt(reserveDateTime?.split('T')[1]?.split(':')[0] || '9')}
+                      <select
+                        value={reserveDateTime?.split('T')[1]?.split(':')[0] || '09'}
                         onChange={(e) => {
-                          let hour = Math.min(23, Math.max(0, parseInt(e.target.value) || 0));
                           const date = reserveDateTime?.split('T')[0] || new Date().toISOString().split('T')[0];
                           const minute = reserveDateTime?.split('T')[1]?.split(':')[1] || '00';
-                          setReserveDateTime(`${date}T${hour.toString().padStart(2, '0')}:${minute}`);
+                          setReserveDateTime(`${date}T${e.target.value}:${minute}`);
                         }}
-                        className="w-14 border-2 border-gray-200 rounded-lg px-2 py-2.5 text-sm text-center focus:border-blue-400 focus:outline-none"
-                      />
+                        className="w-[70px] border-2 border-gray-200 rounded-lg px-1 py-2.5 text-sm text-center focus:border-blue-400 focus:outline-none bg-white cursor-pointer"
+                      >
+                        {Array.from({ length: 24 }, (_, i) => i.toString().padStart(2, '0')).map(h => (
+                          <option key={h} value={h}>{h}시</option>
+                        ))}
+                      </select>
                       <span className="text-lg font-bold text-gray-400">:</span>
-                      <input
-                        type="number"
-                        min="0"
-                        max="59"
-                        value={parseInt(reserveDateTime?.split('T')[1]?.split(':')[1] || '0')}
+                      <select
+                        value={reserveDateTime?.split('T')[1]?.split(':')[1] || '00'}
                         onChange={(e) => {
-                          let minute = Math.min(59, Math.max(0, parseInt(e.target.value) || 0));
                           const date = reserveDateTime?.split('T')[0] || new Date().toISOString().split('T')[0];
                           const hour = reserveDateTime?.split('T')[1]?.split(':')[0] || '09';
-                          setReserveDateTime(`${date}T${hour}:${minute.toString().padStart(2, '0')}`);
+                          setReserveDateTime(`${date}T${hour}:${e.target.value}`);
                         }}
-                        className="w-14 border-2 border-gray-200 rounded-lg px-2 py-2.5 text-sm text-center focus:border-blue-400 focus:outline-none"
-                      />
+                        className="w-[70px] border-2 border-gray-200 rounded-lg px-1 py-2.5 text-sm text-center focus:border-blue-400 focus:outline-none bg-white cursor-pointer"
+                      >
+                        {Array.from({ length: 12 }, (_, i) => (i * 5).toString().padStart(2, '0')).map(m => (
+                          <option key={m} value={m}>{m}분</option>
+                        ))}
+                      </select>
                     </div>
                   </div>
                 </div>
@@ -6490,56 +6497,32 @@ const campaignData = {
                           <div className="flex-1">
                             <div className="text-xs text-gray-500 mb-2">시간</div>
                             <div className="flex items-center gap-1">
-                              <input
-                                type="number"
-                                min="1"
-                                max="12"
-                                value={(() => {
-                                  const h = parseInt(reserveDateTime?.split('T')[1]?.split(':')[0] || '9');
-                                  if (h === 0) return 12;
-                                  if (h > 12) return h - 12;
-                                  return h;
-                                })()}
+                              <select
+                                value={reserveDateTime?.split('T')[1]?.split(':')[0] || '09'}
                                 onChange={(e) => {
-                                  let hour12 = Math.min(12, Math.max(1, parseInt(e.target.value) || 1));
-                                  const currentHour = parseInt(reserveDateTime?.split('T')[1]?.split(':')[0] || '9');
-                                  const isPM = currentHour >= 12;
-                                  let hour24 = isPM ? (hour12 === 12 ? 12 : hour12 + 12) : (hour12 === 12 ? 0 : hour12);
                                   const date = reserveDateTime?.split('T')[0] || new Date().toISOString().split('T')[0];
                                   const minute = reserveDateTime?.split('T')[1]?.split(':')[1] || '00';
-                                  setReserveDateTime(`${date}T${hour24.toString().padStart(2, '0')}:${minute}`);
+                                  setReserveDateTime(`${date}T${e.target.value}:${minute}`);
                                 }}
-                                className="w-12 border-2 border-gray-200 rounded-lg px-1 py-2.5 text-sm text-center focus:border-blue-400 focus:outline-none"
-                              />
+                                className="w-[70px] border-2 border-gray-200 rounded-lg px-1 py-2.5 text-sm text-center focus:border-blue-400 focus:outline-none bg-white cursor-pointer"
+                              >
+                                {Array.from({ length: 24 }, (_, i) => i.toString().padStart(2, '0')).map(h => (
+                                  <option key={h} value={h}>{h}시</option>
+                                ))}
+                              </select>
                               <span className="text-lg font-bold text-gray-400">:</span>
-                              <input
-                                type="number"
-                                min="0"
-                                max="59"
-                                value={parseInt(reserveDateTime?.split('T')[1]?.split(':')[1] || '0')}
+                              <select
+                                value={reserveDateTime?.split('T')[1]?.split(':')[1] || '00'}
                                 onChange={(e) => {
-                                  let minute = Math.min(59, Math.max(0, parseInt(e.target.value) || 0));
                                   const date = reserveDateTime?.split('T')[0] || new Date().toISOString().split('T')[0];
                                   const hour = reserveDateTime?.split('T')[1]?.split(':')[0] || '09';
-                                  setReserveDateTime(`${date}T${hour}:${minute.toString().padStart(2, '0')}`);
+                                  setReserveDateTime(`${date}T${hour}:${e.target.value}`);
                                 }}
-                                className="w-12 border-2 border-gray-200 rounded-lg px-1 py-2.5 text-sm text-center focus:border-blue-400 focus:outline-none"
-                              />
-                              <select
-                                value={parseInt(reserveDateTime?.split('T')[1]?.split(':')[0] || '9') >= 12 ? 'PM' : 'AM'}
-                                onChange={(e) => {
-                                  const currentHour = parseInt(reserveDateTime?.split('T')[1]?.split(':')[0] || '9');
-                                  const hour12 = currentHour === 0 ? 12 : (currentHour > 12 ? currentHour - 12 : currentHour);
-                                  const isPM = e.target.value === 'PM';
-                                  let hour24 = isPM ? (hour12 === 12 ? 12 : hour12 + 12) : (hour12 === 12 ? 0 : hour12);
-                                  const date = reserveDateTime?.split('T')[0] || new Date().toISOString().split('T')[0];
-                                  const minute = reserveDateTime?.split('T')[1]?.split(':')[1] || '00';
-                                  setReserveDateTime(`${date}T${hour24.toString().padStart(2, '0')}:${minute}`);
-                                }}
-                                className="border-2 border-gray-200 rounded-lg px-2 py-2.5 text-sm focus:border-blue-400 focus:outline-none"
+                                className="w-[70px] border-2 border-gray-200 rounded-lg px-1 py-2.5 text-sm text-center focus:border-blue-400 focus:outline-none bg-white cursor-pointer"
                               >
-                                <option value="AM">오전</option>
-                                <option value="PM">오후</option>
+                                {Array.from({ length: 12 }, (_, i) => (i * 5).toString().padStart(2, '0')).map(m => (
+                                  <option key={m} value={m}>{m}분</option>
+                                ))}
                               </select>
                             </div>
                           </div>
