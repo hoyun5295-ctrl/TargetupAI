@@ -1801,6 +1801,15 @@ const campaignData = {
               <Settings className="w-4 h-4 text-gray-600" />
               <span className="text-sm font-medium text-gray-700">설정</span>
             </button>
+            {user?.userType === 'company_admin' && (
+              <button
+                onClick={() => navigate('/manage')}
+                className="flex items-center gap-2 px-4 py-2 border border-blue-300 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+              >
+                <Users className="w-4 h-4" />
+                <span className="text-sm font-medium">관리</span>
+              </button>
+            )}
             <button
               onClick={handleLogout}
               className="flex items-center gap-2 px-4 py-2 border border-red-200 text-red-600 hover:bg-red-50 rounded-lg transition-colors"

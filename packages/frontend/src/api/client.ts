@@ -69,9 +69,7 @@ export const customersApi = {
   deleteOne: (id: string) => api.delete(`/customers/${id}`),
   bulkDelete: (ids: string[]) => api.post('/customers/bulk-delete', { ids }),
 };
-export const manageUsersApi = {
-  list: () => api.get('/companies/users'),
-};
+
 // Campaigns API
 export const campaignsApi = {
   list: (params?: any) => api.get('/campaigns', { params }),
@@ -86,6 +84,7 @@ export const aiApi = {
   recommendTarget: (data: any) => api.post('/ai/recommend-target', data),
 };
 
+// Billing API
 export const billingApi = {
   // 기존 거래내역서
   preview: (params: any) => api.get('/admin/billing/preview', { params }),
@@ -110,4 +109,37 @@ export const billingApi = {
   sendBillingEmail: (id: string, data: { to: string; subject: string; body_html: string }) =>
     api.post(`/admin/billing/${id}/send-email`, data),
 };
+
+// ===== 고객사 관리자 전용 API (manage) =====
+
+// 사용자 관리
+export const manageUsersApi = {
+  list: () => api.get('/manage/users'),
+  create: (data: any) => api.post('/manage/users', data),
+  update: (id: string, data: any) => api.put(`/manage/users/${id}`, data),
+  delete: (id: string) => api.delete(`/manage/users/${id}`),
+  resetPassword: (id: string) => api.post(`/manage/users/${id}/reset-password`),
+};
+
+// 발신번호 관리
+export const manageCallbacksApi = {
+  list: () => api.get('/manage/callbacks'),
+  create: (data: any) => api.post('/manage/callbacks', data),
+  update: (id: string, data: any) => api.put(`/manage/callbacks/${id}`, data),
+  delete: (id: string) => api.delete(`/manage/callbacks/${id}`),
+  setDefault: (id: string) => api.put(`/manage/callbacks/${id}/default`),
+};
+
+// 예약 캠페인 관리
+export const manageScheduledApi = {
+  list: () => api.get('/manage/scheduled'),
+  cancel: (id: string, reason: string) => api.post(`/manage/scheduled/${id}/cancel`, { reason }),
+};
+
+// 발송 통계
+export const manageStatsApi = {
+  send: (params: any) => api.get('/manage/stats/send', { params }),
+  sendDetail: (params: any) => api.get('/manage/stats/send/detail', { params }),
+};
+
 export default api;

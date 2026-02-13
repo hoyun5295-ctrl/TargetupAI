@@ -26,9 +26,9 @@ export default function LoginPage() {
       const { token, user, sessionTimeoutMinutes } = res.data;
       localStorage.setItem('sessionTimeoutMinutes', String(sessionTimeoutMinutes || 30));
 
-      // 슈퍼관리자는 이 프론트에 접속 불가
-      if (user.userType === 'super_admin') {
-        setError('고객사 관리자 전용 페이지입니다.');
+      // 고객사 관리자만 접속 가능
+      if (user.userType !== 'company_admin') {
+        setError('고객사 관리자 권한이 없습니다.');
         return;
       }
 

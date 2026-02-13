@@ -7,6 +7,7 @@ import SessionTimeoutModal from './components/SessionTimeoutModal';
 import LoginPage from './pages/LoginPage';
 import AdminDashboard from './pages/AdminDashboard';
 import Dashboard from './pages/Dashboard';
+import ManagePage from './pages/ManagePage';
 import CalendarPage from './pages/CalendarPage';
 import Settings from './pages/Settings';
 import Unsubscribes from './pages/Unsubscribes';
@@ -153,6 +154,16 @@ function App() {
           element={
             <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
               <Dashboard />
+            </PrivateRoute>
+          }
+        />
+
+        {/* 고객사 관리자 전용 — 관리 페이지 */}
+        <Route
+          path="/manage"
+          element={
+            <PrivateRoute allowedTypes={['company_admin']}>
+              <ManagePage />
             </PrivateRoute>
           }
         />
