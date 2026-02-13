@@ -1315,6 +1315,14 @@ GET  /api/sync/version     ← 최신 버전 정보
 - [x] SMS 상세조회 모달 신규 (MySQL SMSQ_SEND VIEW 직접 조회, 수신/회신번호 검색, 결과필터, 50건 페이징)
 - [x] admin.ts: GET /campaigns/:id/sms-detail API 추가 (예약관리+캠페인관리 공용)
 
+### 직접타겟발송 AI 문구 추천 (2026-02-13)
+- [x] #13 직접타겟발송 메시지 입력 툴바에 ✨AI추천 버튼 추가
+- [x] AI 문구 추천 모달 (프롬프트 입력 → 3개 후보 생성 → 선택 → 메시지 입력란 자동 채움)
+- [x] 기존 POST /api/ai/generate-message 재사용 (백엔드 수정 없음)
+- [x] 브랜드 톤/슬로건 자동 반영 (companies 테이블 참조)
+- [x] 요금제 분기: FREE 허용, STARTER 업그레이드 모달, BASIC 이상 정상 사용
+- [x] 직접발송(showDirectSend)에는 미적용, 직접타겟발송(showTargetSend)에만 적용
+
 ---
 
 ## 🔴 미해결 버그 / 즉시 처리 필요
@@ -1362,6 +1370,3 @@ GET  /api/sync/version     ← 최신 버전 정보
 - [ ] 발신번호 관리 체계 (본인인증, 사업자등록증, 위임장)
 - [ ] 회신번호 권한 분리 (company_admin/user 구조 적용)
 - [ ] 시간 선택 UX 개선 — 드래그/타임피커 (후순위)
-
-**직원 피드백 — 미구현**
-- [ ] #13 직접 타겟 발송에 AI 문구 생성 추가 (베이직 이상)

@@ -130,6 +130,21 @@ function formatRejectNumber(num: string): string {
   return num;
 }
 
+/**
+ * SMS 광고 오버헤드를 제외한 실제 사용 가능 바이트 계산
+ * - 광고 SMS 구조: (광고)본문\n무료거부0807196700
+ * - (광고) = 6바이트, \n = 1바이트, 무료거부 = 8바이트, 번호 = 가변
+ * - 비광고: 90 - 여유 2 = 88바이트
+ * - 광고: 90 - 오버헤드 - 여유 1
+ */
+function getAvailableSmsBytes(isAd: boolean, rejectNumber?: string): number {
+  if (!isAd) return 88; // 비광고: 90 - 여유 2
+  const cleanNumber = (rejectNumber || '0807196700').replace(/-/g, '');
+  // (광고) 6 + \n 1 + 무료거부 8 + 번호길이 + 여유 1
+  const overhead = 6 + 1 + 8 + cleanNumber.length + 1;
+  return 90 - overhead;
+}
+
 // ============================================================
 // 변수 카탈로그 관련 함수 (핵심!)
 // ============================================================
@@ -252,9 +267,10 @@ const BRAND_SYSTEM_PROMPT = `당신은 마케팅 문자 메시지 전문가입�
 
 ## 채널별 작성 규칙
 
-### SMS (90바이트 이하, 한글 약 45자)
+### SMS
 - 짧고 임팩트 있게, 핵심 혜택만
-- 실제 사용 가능한 글자 수: 약 35~40자
+- ⚠️ 바이트 제한은 사용자 메시지에 명시된 값을 반드시 따르세요!
+- 광고성 메시지는 시스템이 (광고)표기+수신거부번호를 자동 추가하므로, 순수 본문 바이트가 제한됩니다
 - 예시: [브랜드]봄세일 20%할인! 2/4~6 매장방문▶
 
 ### LMS (2000바이트 이하, 한글 약 1000자)  
@@ -370,6 +386,7 @@ export async function generateMessages(
   const brandTone = extraContext?.brandTone || '친근함';
   const channel = extraContext?.channel || 'SMS';
   const isAd = extraContext?.isAd !== false;
+  const rejectNumber = extraContext?.rejectNumber || '';
   
   // ★ 개인화 설정 - 변수 카탈로그 기반 (하드코딩 varToTag 제거!)
   const usePersonalization = extraContext?.usePersonalization || false;
@@ -380,14 +397,23 @@ export async function generateMessages(
   // 개인화 태그 생성 (카탈로그 기반 동적 생성)
   const personalizationTags = personalizationVars.map(v => `%${v}%`).join(', ');
   
-  const byteLimit = channel === 'SMS' ? 90 : channel === 'LMS' ? 2000 : channel === 'MMS' ? 2000 : 1000;
+  // ★ SMS 가용 바이트 동적 계산 (광고 오버헤드 반영)
+  const smsAvailableBytes = getAvailableSmsBytes(isAd, rejectNumber);
+  const byteLimit = channel === 'SMS' ? smsAvailableBytes : channel === 'LMS' ? 2000 : channel === 'MMS' ? 2000 : 1000;
   
   // ★ 변수 카탈로그 프롬프트 생성
   const varCatalogPrompt = buildVarCatalogPrompt(varCatalog, availableVars);
+
+  // ★ SMS 바이트 제한 안내 (광고/비광고 구분)
+  const smsByteInstruction = channel === 'SMS'
+    ? isAd
+      ? `- ⚠️ SMS 광고 메시지: 순수 본문을 반드시 ${smsAvailableBytes}바이트 이내로 작성! (시스템이 (광고)표기+수신거부번호를 자동 추가하므로 전체 90바이트 중 본문은 ${smsAvailableBytes}바이트만 사용 가능)\n- 한글 1자=2바이트, 영문/숫자/특수문자=1바이트 기준으로 정확히 계산하세요\n- ${smsAvailableBytes}바이트 초과 시 발송 불가! 짧고 임팩트 있게 작성`
+      : `- SMS 비광고 메시지: 순수 본문을 반드시 ${smsAvailableBytes}바이트 이내로 작성\n- 한글 1자=2바이트, 영문/숫자/특수문자=1바이트 기준으로 정확히 계산하세요`
+    : '';
   
   const userMessage = `## 캠페인 정보
 - 요청: ${prompt}
-- 채널: ${channel} (${byteLimit}바이트 제한)
+- 채널: ${channel}
 - 타겟 고객 수: ${targetInfo.total_count.toLocaleString()}명
 
 ⚠️ 중요: (광고), 무료거부, 무료수신거부, 080번호를 메시지에 절대 포함하지 마세요! 시스템이 자동으로 붙입니다.
@@ -415,7 +441,7 @@ ${brandSlogan ? `- 브랜드 슬로건 "${brandSlogan}"의 느낌을 반영` : '
 - 톤앤매너: ${brandTone}
 - 🚫 (광고), 무료거부, 무료수신거부, 080번호 절대 포함 금지! 순수 본문만 작성!
 - 🚫 사용자가 언급하지 않은 혜택(할인율, 적립금, 사은품 등) 날조 금지!
-${channel === 'SMS' ? '- SMS는 90바이트 제한! 순수 메시지만 90바이트 이내로 (광고표기는 시스템이 별도 처리)' : ''}
+${smsByteInstruction}
 ${channel === 'LMS' ? '- LMS는 줄바꿈, 특수문자로 가독성 좋게 작성 (이모지 금지!)' : ''}
 
 ## 개인화 설정 (⚠️ 중요!)
@@ -587,7 +613,7 @@ ${customKeys.map((k: string) => `- custom_fields.${k}: ${k} 필터`).join('\n')}
 ${varCatalogPrompt}
 
 ## 채널 선택 기준
-- SMS: 간단한 할인 안내, 짧은 알림 (90바이트 제한)
+- SMS: 간단한 할인 안내, 짧은 알림 (광고 시 본문 약 64바이트, 비광고 시 약 88바이트)
 - LMS: 상세한 이벤트 안내, 여러 혜택 설명 필요시 (2000바이트)
 - MMS: 이미지가 중요한 경우 (신상품, 비주얼 강조)
 - 카카오: 예약확인, 배송안내 등 정보성 알림

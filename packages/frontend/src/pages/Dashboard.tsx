@@ -1442,6 +1442,7 @@ const handleAiGenerateChannelMessage = async () => {
       prompt: aiCampaignPrompt,
       brandName: user?.company?.name || '브랜드',
       channel: selectedChannel,
+      isAd: isAd,
       usePersonalization: aiResult?.usePersonalization || false,
       personalizationVars: aiResult?.personalizationVars || [],
     });
