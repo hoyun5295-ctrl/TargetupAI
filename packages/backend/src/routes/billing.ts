@@ -1,6 +1,15 @@
 import { Router, Request, Response } from 'express';
+import nodemailer from 'nodemailer';
 import { authenticate, requireSuperAdmin } from '../middlewares/auth';
 import pool, { mysqlQuery } from '../config/database';
+
+// SMTP transporter (재사용)
+const getTransporter = () => nodemailer.createTransport({
+  host: process.env.SMTP_HOST || 'smtp.hiworks.com',
+  port: Number(process.env.SMTP_PORT) || 465,
+  secure: true,
+  auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+});
 
 const router = Router();
 
@@ -1074,6 +1083,235 @@ router.get('/invoices/:id/pdf', async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('PDF 생성 오류:', error);
     return res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================================
+//  정산서 메일 발송
+// ============================================================
+
+// POST /:id/send-email - 정산서 PDF 메일 발송
+router.post('/:id/send-email', async (req: Request, res: Response) => {
+  try {
+    const fs = require('fs');
+    const path = require('path');
+
+    // 1) 정산 + 회사 정보 조회
+    const result = await pool.query(
+      `SELECT b.*, c.company_name, c.contact_email, c.contact_name
+       FROM billings b
+       JOIN companies c ON c.id = b.company_id
+       WHERE b.id = $1`,
+      [req.params.id]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: '정산을 찾을 수 없습니다' });
+    }
+    const bil = result.rows[0];
+
+    if (!bil.contact_email) {
+      return res.status(400).json({ error: '고객사 담당자 이메일이 등록되어 있지 않습니다.' });
+    }
+
+    // 2) PDF 파일 확인 — 없으면 생성 요청
+    const pdfDir = path.join(__dirname, '../../pdfs');
+    const pdfFilename = `billing_${bil.id.slice(0, 8)}_${bil.billing_year}_${String(bil.billing_month).padStart(2, '0')}.pdf`;
+    const pdfPath = path.join(pdfDir, pdfFilename);
+
+    if (!fs.existsSync(pdfPath)) {
+      return res.status(400).json({ error: 'PDF가 아직 생성되지 않았습니다. 먼저 PDF를 다운로드해주세요.' });
+    }
+
+    const n = (v: any) => Number(v) || 0;
+    const bStart = bil.billing_start instanceof Date ? bil.billing_start.toISOString().slice(0,10) : String(bil.billing_start).slice(0,10);
+    const bEnd = bil.billing_end instanceof Date ? bil.billing_end.toISOString().slice(0,10) : String(bil.billing_end).slice(0,10);
+
+    // 3) 메일 발송
+    const htmlBody = `
+      <div style="font-family: 'Apple SD Gothic Neo', sans-serif; max-width: 600px; margin: 0 auto;">
+        <div style="background: linear-gradient(135deg, #4338ca, #6366F1); padding: 24px; border-radius: 12px 12px 0 0;">
+          <h2 style="color: white; margin: 0; font-size: 20px;">📊 정산서 안내</h2>
+          <p style="color: rgba(255,255,255,0.8); margin: 8px 0 0; font-size: 14px;">${bil.company_name} | ${bil.billing_year}년 ${bil.billing_month}월</p>
+        </div>
+        <div style="background: #ffffff; padding: 24px; border: 1px solid #E5E7EB; border-top: none;">
+          <p style="font-size: 14px; color: #374151; margin: 0 0 16px;">
+            안녕하세요, ${bil.contact_name || bil.company_name} 담당자님.<br/>
+            <strong>${bStart} ~ ${bEnd}</strong> 기간 정산서를 안내드립니다.
+          </p>
+          <table style="width: 100%; border-collapse: collapse; font-size: 14px; margin-bottom: 16px;">
+            <tr style="border-bottom: 1px solid #F3F4F6;">
+              <td style="padding: 8px 0; color: #6B7280;">SMS</td>
+              <td style="padding: 8px 0; text-align: right;">${n(bil.sms_success).toLocaleString()}건 × ₩${n(bil.sms_unit_price).toLocaleString()}</td>
+              <td style="padding: 8px 0; text-align: right; font-weight: 600;">₩${(n(bil.sms_success) * n(bil.sms_unit_price)).toLocaleString()}</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #F3F4F6;">
+              <td style="padding: 8px 0; color: #6B7280;">LMS</td>
+              <td style="padding: 8px 0; text-align: right;">${n(bil.lms_success).toLocaleString()}건 × ₩${n(bil.lms_unit_price).toLocaleString()}</td>
+              <td style="padding: 8px 0; text-align: right; font-weight: 600;">₩${(n(bil.lms_success) * n(bil.lms_unit_price)).toLocaleString()}</td>
+            </tr>
+            ${n(bil.mms_success) > 0 ? `<tr style="border-bottom: 1px solid #F3F4F6;">
+              <td style="padding: 8px 0; color: #6B7280;">MMS</td>
+              <td style="padding: 8px 0; text-align: right;">${n(bil.mms_success).toLocaleString()}건 × ₩${n(bil.mms_unit_price).toLocaleString()}</td>
+              <td style="padding: 8px 0; text-align: right; font-weight: 600;">₩${(n(bil.mms_success) * n(bil.mms_unit_price)).toLocaleString()}</td>
+            </tr>` : ''}
+            ${n(bil.test_sms_count) > 0 ? `<tr style="border-bottom: 1px solid #F3F4F6; background: #FFFBEB;">
+              <td style="padding: 8px 0; color: #6B7280;">테스트 SMS</td>
+              <td style="padding: 8px 0; text-align: right;">${n(bil.test_sms_count).toLocaleString()}건 × ₩${n(bil.test_sms_unit_price).toLocaleString()}</td>
+              <td style="padding: 8px 0; text-align: right; font-weight: 600;">₩${(n(bil.test_sms_count) * n(bil.test_sms_unit_price)).toLocaleString()}</td>
+            </tr>` : ''}
+            ${n(bil.test_lms_count) > 0 ? `<tr style="border-bottom: 1px solid #F3F4F6; background: #FFFBEB;">
+              <td style="padding: 8px 0; color: #6B7280;">테스트 LMS</td>
+              <td style="padding: 8px 0; text-align: right;">${n(bil.test_lms_count).toLocaleString()}건 × ₩${n(bil.test_lms_unit_price).toLocaleString()}</td>
+              <td style="padding: 8px 0; text-align: right; font-weight: 600;">₩${(n(bil.test_lms_count) * n(bil.test_lms_unit_price)).toLocaleString()}</td>
+            </tr>` : ''}
+          </table>
+          <div style="background: #EEF2FF; padding: 16px; border-radius: 8px; text-align: right;">
+            <span style="font-size: 13px; color: #6B7280;">공급가액 ₩${n(bil.subtotal).toLocaleString()} + VAT ₩${n(bil.vat).toLocaleString()}</span><br/>
+            <span style="font-size: 20px; font-weight: 700; color: #4338CA;">합계 ₩${n(bil.total_amount).toLocaleString()}</span>
+          </div>
+          <p style="font-size: 13px; color: #9CA3AF; margin-top: 16px;">
+            상세 내역은 첨부된 PDF를 확인해주세요.<br/>
+            문의사항이 있으시면 1800-8125로 연락 부탁드립니다.
+          </p>
+        </div>
+        <div style="padding: 16px; text-align: center; font-size: 11px; color: #9CA3AF; border: 1px solid #E5E7EB; border-top: none; border-radius: 0 0 12px 12px; background: #F9FAFB;">
+          본 메일은 INVITO 한줄로 시스템에서 자동 발송되었습니다.
+        </div>
+      </div>
+    `;
+
+    const transporter = getTransporter();
+    await transporter.sendMail({
+      from: `"INVITO 정산" <${process.env.SMTP_USER}>`,
+      to: bil.contact_email,
+      bcc: process.env.SMTP_BCC || '',
+      subject: `[INVITO] ${bil.company_name} ${bil.billing_year}년 ${bil.billing_month}월 정산서`,
+      html: htmlBody,
+      attachments: [{ filename: pdfFilename, path: pdfPath }],
+    });
+
+    // 4) 발송 기록
+    await pool.query(
+      'UPDATE billings SET email_sent_at = now(), updated_at = now() WHERE id = $1',
+      [req.params.id]
+    );
+
+    return res.json({ message: '정산서 메일이 발송되었습니다.', sent_to: bil.contact_email });
+  } catch (error: any) {
+    console.error('정산서 메일 발송 오류:', error);
+    return res.status(500).json({ error: '메일 발송에 실패했습니다: ' + error.message });
+  }
+});
+
+// ============================================================
+//  거래내역서 메일 발송 (리터럴 라우트 — /:id 보다 먼저!)
+// ============================================================
+
+// POST /invoices/:id/send-email - 거래내역서 PDF 메일 발송
+router.post('/invoices/:id/send-email', async (req: Request, res: Response) => {
+  try {
+    const fs = require('fs');
+    const path = require('path');
+
+    // 1) 거래내역서 + 회사 정보 조회
+    const result = await pool.query(
+      `SELECT bi.*, c.company_name, c.contact_email, c.contact_name
+       FROM billing_invoices bi
+       JOIN companies c ON c.id = bi.company_id
+       WHERE bi.id = $1`,
+      [req.params.id]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: '거래내역서를 찾을 수 없습니다' });
+    }
+    const inv = result.rows[0];
+
+    if (!inv.contact_email) {
+      return res.status(400).json({ error: '고객사 담당자 이메일이 등록되어 있지 않습니다.' });
+    }
+
+    // 2) PDF 파일 확인
+    const pdfDir = path.join(__dirname, '../../pdfs');
+    const bStart = inv.billing_start instanceof Date ? inv.billing_start.toISOString().slice(0,10) : String(inv.billing_start).slice(0,10);
+    const bEnd = inv.billing_end instanceof Date ? inv.billing_end.toISOString().slice(0,10) : String(inv.billing_end).slice(0,10);
+    const pdfFilename = `invoice_${inv.id.slice(0, 8)}_${bStart}_${bEnd}.pdf`;
+    const pdfPath = path.join(pdfDir, pdfFilename);
+
+    if (!fs.existsSync(pdfPath)) {
+      return res.status(400).json({ error: 'PDF가 아직 생성되지 않았습니다. 먼저 PDF를 다운로드해주세요.' });
+    }
+
+    const n = (v: any) => Number(v) || 0;
+
+    // 3) 메일 발송
+    const htmlBody = `
+      <div style="font-family: 'Apple SD Gothic Neo', sans-serif; max-width: 600px; margin: 0 auto;">
+        <div style="background: linear-gradient(135deg, #4338ca, #6366F1); padding: 24px; border-radius: 12px 12px 0 0;">
+          <h2 style="color: white; margin: 0; font-size: 20px;">📋 거래내역서 안내</h2>
+          <p style="color: rgba(255,255,255,0.8); margin: 8px 0 0; font-size: 14px;">${inv.company_name}${inv.store_name ? ` / ${inv.store_name}` : ''} | ${bStart} ~ ${bEnd}</p>
+        </div>
+        <div style="background: #ffffff; padding: 24px; border: 1px solid #E5E7EB; border-top: none;">
+          <p style="font-size: 14px; color: #374151; margin: 0 0 16px;">
+            안녕하세요, ${inv.contact_name || inv.company_name} 담당자님.<br/>
+            <strong>${bStart} ~ ${bEnd}</strong> 기간 거래내역서를 안내드립니다.
+          </p>
+          <table style="width: 100%; border-collapse: collapse; font-size: 14px; margin-bottom: 16px;">
+            ${n(inv.sms_success_count) > 0 ? `<tr style="border-bottom: 1px solid #F3F4F6;">
+              <td style="padding: 8px 0; color: #6B7280;">SMS</td>
+              <td style="padding: 8px 0; text-align: right;">${n(inv.sms_success_count).toLocaleString()}건</td>
+              <td style="padding: 8px 0; text-align: right; font-weight: 600;">₩${(n(inv.sms_success_count) * n(inv.sms_unit_price)).toLocaleString()}</td>
+            </tr>` : ''}
+            ${n(inv.lms_success_count) > 0 ? `<tr style="border-bottom: 1px solid #F3F4F6;">
+              <td style="padding: 8px 0; color: #6B7280;">LMS</td>
+              <td style="padding: 8px 0; text-align: right;">${n(inv.lms_success_count).toLocaleString()}건</td>
+              <td style="padding: 8px 0; text-align: right; font-weight: 600;">₩${(n(inv.lms_success_count) * n(inv.lms_unit_price)).toLocaleString()}</td>
+            </tr>` : ''}
+            ${n(inv.mms_success_count) > 0 ? `<tr style="border-bottom: 1px solid #F3F4F6;">
+              <td style="padding: 8px 0; color: #6B7280;">MMS</td>
+              <td style="padding: 8px 0; text-align: right;">${n(inv.mms_success_count).toLocaleString()}건</td>
+              <td style="padding: 8px 0; text-align: right; font-weight: 600;">₩${(n(inv.mms_success_count) * n(inv.mms_unit_price)).toLocaleString()}</td>
+            </tr>` : ''}
+            ${n(inv.spam_filter_count) > 0 ? `<tr style="border-bottom: 1px solid #F3F4F6; background: #FFFBEB;">
+              <td style="padding: 8px 0; color: #6B7280;">스팸필터</td>
+              <td style="padding: 8px 0; text-align: right;">${n(inv.spam_filter_count).toLocaleString()}건</td>
+              <td style="padding: 8px 0; text-align: right; font-weight: 600;">₩${(n(inv.spam_filter_count) * n(inv.spam_filter_unit_price)).toLocaleString()}</td>
+            </tr>` : ''}
+          </table>
+          <div style="background: #EEF2FF; padding: 16px; border-radius: 8px; text-align: right;">
+            <span style="font-size: 13px; color: #6B7280;">공급가액 ₩${n(inv.subtotal).toLocaleString()} + VAT ₩${n(inv.vat).toLocaleString()}</span><br/>
+            <span style="font-size: 20px; font-weight: 700; color: #4338CA;">합계 ₩${n(inv.total_amount).toLocaleString()}</span>
+          </div>
+          <p style="font-size: 13px; color: #9CA3AF; margin-top: 16px;">
+            상세 내역은 첨부된 PDF를 확인해주세요.<br/>
+            문의사항이 있으시면 1800-8125로 연락 부탁드립니다.
+          </p>
+        </div>
+        <div style="padding: 16px; text-align: center; font-size: 11px; color: #9CA3AF; border: 1px solid #E5E7EB; border-top: none; border-radius: 0 0 12px 12px; background: #F9FAFB;">
+          본 메일은 INVITO 한줄로 시스템에서 자동 발송되었습니다.
+        </div>
+      </div>
+    `;
+
+    const transporter = getTransporter();
+    await transporter.sendMail({
+      from: `"INVITO 정산" <${process.env.SMTP_USER}>`,
+      to: inv.contact_email,
+      bcc: process.env.SMTP_BCC || '',
+      subject: `[INVITO] ${inv.company_name}${inv.store_name ? ` (${inv.store_name})` : ''} 거래내역서 (${bStart} ~ ${bEnd})`,
+      html: htmlBody,
+      attachments: [{ filename: pdfFilename, path: pdfPath }],
+    });
+
+    // 4) 발송 기록
+    await pool.query(
+      'UPDATE billing_invoices SET email_sent_at = now(), updated_at = now() WHERE id = $1',
+      [req.params.id]
+    );
+
+    return res.json({ message: '거래내역서 메일이 발송되었습니다.', sent_to: inv.contact_email });
+  } catch (error: any) {
+    console.error('거래내역서 메일 발송 오류:', error);
+    return res.status(500).json({ error: '메일 발송에 실패했습니다: ' + error.message });
   }
 });
 
