@@ -531,6 +531,53 @@ export default function Dashboard() {
   const [reserveEnabled, setReserveEnabled] = useState(false);
   const [reserveDateTime, setReserveDateTime] = useState('');
   const [showReservePicker, setShowReservePicker] = useState(false);
+  // AI 문구 추천 (직접발송) — 버튼 클릭 핸들러
+  const handleAiMsgHelper = () => {
+    if (planInfo?.plan_code === 'STARTER') {
+      setShowPlanUpgradeModal(true);
+      return;
+    }
+    setShowAiMsgHelper(true);
+    setAiHelperPrompt('');
+    setAiHelperResults([]);
+    setAiHelperRecommendation('');
+  };
+
+  // AI 문구 추천 — 생성 요청
+  const generateAiDirectMessage = async () => {
+    if (!aiHelperPrompt.trim()) {
+      setToast({ show: true, type: 'error', message: '어떤 메시지를 보낼지 입력해주세요.' });
+      setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
+      return;
+    }
+    setAiHelperLoading(true);
+    setAiHelperResults([]);
+    try {
+      const res = await aiApi.generateMessage({
+        prompt: aiHelperPrompt,
+        channel: directMsgType,
+        isAd: adTextEnabled,
+      });
+      setAiHelperResults(res.data.variants || []);
+      setAiHelperRecommendation(res.data.recommendation || '');
+    } catch (error) {
+      console.error('AI 문구 생성 오류:', error);
+      setToast({ show: true, type: 'error', message: 'AI 문구 생성에 실패했습니다.' });
+      setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
+    } finally {
+      setAiHelperLoading(false);
+    }
+  };
+
+  // AI 문구 추천 — 결과 선택
+  const selectAiMessage = (variant: any) => {
+    const msg = variant.message_text || (directMsgType === 'SMS' ? variant.sms_text : variant.lms_text) || '';
+    setDirectMessage(msg);
+    setShowAiMsgHelper(false);
+    setToast({ show: true, type: 'success', message: 'AI 추천 문구가 적용되었습니다. 자유롭게 수정하세요!' });
+    setTimeout(() => setToast({ show: false, type: 'success', message: '' }), 3000);
+  };
+
   // 직접발송 실행 함수
   const executeDirectSend = async () => {
     setDirectSending(true);
@@ -804,6 +851,13 @@ export default function Dashboard() {
   const [directLoadingProgress, setDirectLoadingProgress] = useState(0);
   const [directSending, setDirectSending] = useState(false);
   const [directShowMapping, setDirectShowMapping] = useState(false);
+  // AI 문구 추천 (직접발송)
+  const [showAiMsgHelper, setShowAiMsgHelper] = useState(false);
+  const [aiHelperPrompt, setAiHelperPrompt] = useState('');
+  const [aiHelperLoading, setAiHelperLoading] = useState(false);
+  const [aiHelperResults, setAiHelperResults] = useState<any[]>([]);
+  const [aiHelperRecommendation, setAiHelperRecommendation] = useState('');
+  const [showPlanUpgradeModal, setShowPlanUpgradeModal] = useState(false);
   const [showDirectInput, setShowDirectInput] = useState(false);
   const [showSpecialChars, setShowSpecialChars] = useState<'target' | 'direct' | null>(null);
   const [showTemplateBox, setShowTemplateBox] = useState<'target' | 'direct' | null>(null);
@@ -5100,7 +5154,8 @@ const campaignData = {
                   
                   {/* 버튼들 + 바이트 표시 */}
                   <div className="px-3 py-1.5 bg-gray-50 border-t flex items-center justify-between">
-                    <div className="flex items-center gap-0.5">
+                  <div className="flex items-center gap-0.5">
+                      <button onClick={handleAiMsgHelper} className="px-2 py-1 text-xs bg-gradient-to-r from-violet-500 to-blue-500 text-white rounded hover:from-violet-600 hover:to-blue-600 flex items-center gap-0.5 shadow-sm"><Sparkles className="w-3 h-3" />AI추천</button>
                       <button onClick={() => setShowSpecialChars('direct')} className="px-2 py-1 text-xs bg-white border rounded hover:bg-gray-100">특수문자</button>
                       <button onClick={() => { loadTemplates(); setShowTemplateBox('direct'); }} className="px-2 py-1 text-xs bg-white border rounded hover:bg-gray-100">보관함</button>
                       <button onClick={() => { if (!directMessage.trim()) { setToast({show: true, type: 'error', message: '저장할 메시지를 먼저 입력해주세요.'}); setTimeout(() => setToast({show: false, type: 'error', message: ''}), 3000); return; } setTemplateSaveName(''); setShowTemplateSave('direct'); }} className="px-2 py-1 text-xs bg-white border rounded hover:bg-gray-100">문자저장</button>
@@ -7105,6 +7160,153 @@ const campaignData = {
                 className="w-full py-3 bg-gray-800 hover:bg-gray-900 text-white rounded-xl font-medium transition-colors"
               >
                 확인
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* AI 문구 추천 모달 (직접발송) */}
+      {showAiMsgHelper && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-[60] animate-[fadeIn_0.2s_ease-out]">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden animate-[zoomIn_0.25s_ease-out]">
+            {/* 헤더 */}
+            <div className="px-6 pt-6 pb-4 flex items-center justify-between border-b">
+              <div className="flex items-center gap-2">
+                <div className="w-9 h-9 bg-gradient-to-br from-violet-500 to-blue-500 rounded-xl flex items-center justify-center">
+                  <Sparkles className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-gray-900">AI 문구 추천</h3>
+                  <p className="text-xs text-gray-400">어떤 내용의 메시지를 보낼지 알려주세요</p>
+                </div>
+              </div>
+              <button onClick={() => setShowAiMsgHelper(false)} className="text-gray-400 hover:text-gray-600 transition-colors">
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
+
+            {/* 프롬프트 입력 */}
+            <div className="px-6 pt-4 pb-3">
+              <textarea
+                value={aiHelperPrompt}
+                onChange={(e) => setAiHelperPrompt(e.target.value)}
+                placeholder="예) 봄 신상 입고 안내, VIP 고객 감사 이벤트, 설 연휴 배송 안내..."
+                className="w-full h-20 px-4 py-3 border-2 border-gray-200 rounded-xl text-sm resize-none focus:outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100 transition-all placeholder-gray-400"
+                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); generateAiDirectMessage(); } }}
+                autoFocus
+              />
+              <div className="flex items-center justify-between mt-2">
+                <span className="text-xs text-gray-400">채널: {directMsgType} · Enter로 생성</span>
+                <button
+                  onClick={generateAiDirectMessage}
+                  disabled={aiHelperLoading || !aiHelperPrompt.trim()}
+                  className="px-4 py-2 bg-gradient-to-r from-violet-500 to-blue-500 text-white text-sm font-medium rounded-xl hover:from-violet-600 hover:to-blue-600 disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center gap-1.5 shadow-sm"
+                >
+                  {aiHelperLoading ? (
+                    <>
+                      <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" className="opacity-25" /><path d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" fill="currentColor" className="opacity-75" /></svg>
+                      생성 중...
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="w-4 h-4" />
+                      문구 생성
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {/* 결과 영역 */}
+            {aiHelperResults.length > 0 && (
+              <div className="px-6 pb-5 space-y-2.5 max-h-[50vh] overflow-y-auto">
+                <p className="text-xs text-gray-500 font-medium">💡 원하는 문구를 선택하세요 (선택 후 자유 수정 가능)</p>
+                {aiHelperResults.map((variant: any, idx: number) => {
+                  const msg = variant.message_text || (directMsgType === 'SMS' ? variant.sms_text : variant.lms_text) || '';
+                  const isRecommended = variant.variant_id === aiHelperRecommendation;
+                  return (
+                    <button
+                      key={idx}
+                      onClick={() => selectAiMessage(variant)}
+                      className={`w-full text-left p-4 rounded-xl border-2 transition-all hover:shadow-md hover:scale-[1.01] ${
+                        isRecommended 
+                          ? 'border-violet-300 bg-violet-50/50 hover:border-violet-400' 
+                          : 'border-gray-200 bg-white hover:border-blue-300'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                          isRecommended ? 'bg-violet-100 text-violet-700' : 'bg-gray-100 text-gray-600'
+                        }`}>
+                          {variant.variant_name || `${String.fromCharCode(65 + idx)}안`}
+                        </span>
+                        {isRecommended && (
+                          <span className="text-xs bg-gradient-to-r from-violet-500 to-blue-500 text-white px-2 py-0.5 rounded-full font-medium">✨ 추천</span>
+                        )}
+                        {variant.score && (
+                          <span className="text-xs text-gray-400 ml-auto">{variant.score}점</span>
+                        )}
+                      </div>
+                      {variant.concept && (
+                        <p className="text-xs text-gray-500 mb-1.5">{variant.concept}</p>
+                      )}
+                      <p className="text-sm text-gray-800 leading-relaxed whitespace-pre-wrap">{msg}</p>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* 로딩 스켈레톤 */}
+            {aiHelperLoading && (
+              <div className="px-6 pb-5 space-y-2.5">
+                {[1, 2, 3].map((i) => (
+                  <div key={i} className="p-4 rounded-xl border-2 border-gray-100 bg-gray-50 animate-pulse">
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className="w-10 h-5 bg-gray-200 rounded-full" />
+                      <div className="w-20 h-4 bg-gray-200 rounded" />
+                    </div>
+                    <div className="space-y-2">
+                      <div className="h-3 bg-gray-200 rounded w-full" />
+                      <div className="h-3 bg-gray-200 rounded w-4/5" />
+                      <div className="h-3 bg-gray-200 rounded w-3/5" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 요금제 업그레이드 모달 */}
+      {showPlanUpgradeModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-[60] animate-[fadeIn_0.2s_ease-out]">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-[zoomIn_0.25s_ease-out]">
+            <div className="px-6 pt-8 pb-2 text-center">
+              <div className="w-14 h-14 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <svg className="w-7 h-7 text-amber-600" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+                </svg>
+              </div>
+              <h3 className="text-lg font-bold text-gray-900">요금제 업그레이드가 필요합니다</h3>
+              <p className="text-sm text-gray-500 mt-2 leading-relaxed">
+                AI 문구 추천 기능은<br /><span className="font-semibold text-violet-600">베이직 이상</span> 요금제에서 사용 가능합니다.
+              </p>
+            </div>
+            <div className="px-6 pb-6 pt-4 space-y-2">
+              <button
+                onClick={() => { setShowPlanUpgradeModal(false); navigate('/pricing'); }}
+                className="w-full bg-gradient-to-r from-violet-500 to-blue-500 hover:from-violet-600 hover:to-blue-600 text-white font-medium py-2.5 rounded-xl text-sm transition-all shadow-sm"
+              >
+                요금제 보기
+              </button>
+              <button
+                onClick={() => setShowPlanUpgradeModal(false)}
+                className="w-full bg-gray-100 hover:bg-gray-200 text-gray-600 font-medium py-2.5 rounded-xl text-sm transition-colors"
+              >
+                닫기
               </button>
             </div>
           </div>
