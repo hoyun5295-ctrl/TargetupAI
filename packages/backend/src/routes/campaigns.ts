@@ -1430,6 +1430,8 @@ router.get('/:id/recipients', async (req: Request, res: Response) => {
     const userType = (req as any).user?.userType;
     const campaignId = req.params.id;
     const { search } = req.query;
+    const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
+    const offset = parseInt(req.query.offset as string) || 0;
 
     // 캠페인 확인
     const campaign = await query(
@@ -1446,22 +1448,27 @@ router.get('/:id/recipients', async (req: Request, res: Response) => {
     // 예약 상태면 먼저 MySQL 회사 라인그룹 테이블에서 조회 시도
     const recipientTables = await getCompanySmsTables(companyId);
     if (camp.status === 'scheduled') {
+      // 검색 조건
+      const searchCondition = search ? ` AND dest_no LIKE ?` : '';
+      const searchParams = search ? [campaignId, `%${String(search).replace(/-/g, '')}%`] : [campaignId];
+
       const mysqlRecipients = await smsSelectAll(recipientTables,
         'seqno as idx, dest_no as phone, call_back as callback, msg_contents as message',
-        'app_etc1 = ? AND status_code = 100',
-        [campaignId],
-        'ORDER BY seqno LIMIT 1000'
+        `app_etc1 = ? AND status_code = 100${searchCondition}`,
+        searchParams,
+        `ORDER BY seqno LIMIT ${limit} OFFSET ${offset}`
       );
 
       // MySQL에 데이터 있으면 그걸 반환
-      if (mysqlRecipients && mysqlRecipients.length > 0) {
-        const totalCount = await smsCountAll(recipientTables, 'app_etc1 = ? AND status_code = 100', [campaignId]);
+      if (mysqlRecipients && (mysqlRecipients.length > 0 || offset > 0 || search)) {
+        const totalCount = await smsCountAll(recipientTables, `app_etc1 = ? AND status_code = 100${searchCondition}`, searchParams);
 
         return res.json({
           success: true,
           campaign: camp,
           recipients: mysqlRecipients,
-          total: totalCount
+          total: totalCount,
+          hasMore: offset + limit < totalCount
         });
       }
     }
@@ -1535,20 +1542,24 @@ router.get('/:id/recipients', async (req: Request, res: Response) => {
     }
 
     // 발송 완료/진행중이면 MySQL 회사 라인그룹 테이블에서 조회
+    const searchCondition2 = search ? ` AND dest_no LIKE ?` : '';
+    const searchParams2 = search ? [campaignId, `%${String(search).replace(/-/g, '')}%`] : [campaignId];
+
     const recipients = await smsSelectAll(recipientTables,
       'seqno as idx, dest_no as phone, call_back as callback, msg_contents as message, sendreq_time, status_code',
-      'app_etc1 = ? AND status_code = 100',
-      [campaignId],
-      'ORDER BY seqno LIMIT 1000'
+      `app_etc1 = ? AND status_code = 100${searchCondition2}`,
+      searchParams2,
+      `ORDER BY seqno LIMIT ${limit} OFFSET ${offset}`
     );
 
-    const totalCount = await smsCountAll(recipientTables, 'app_etc1 = ? AND status_code = 100', [campaignId]);
+    const totalCount = await smsCountAll(recipientTables, `app_etc1 = ? AND status_code = 100${searchCondition2}`, searchParams2);
 
     res.json({
       success: true,
       campaign: camp,
       recipients: recipients,
-      total: totalCount
+      total: totalCount,
+      hasMore: offset + limit < totalCount
     });
   } catch (error) {
     console.error('수신자 조회 실패:', error);
