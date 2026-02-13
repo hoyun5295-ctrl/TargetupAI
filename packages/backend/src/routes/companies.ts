@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
+import nodemailer from 'nodemailer';
 import { query } from '../config/database';
 import { authenticate, requireSuperAdmin } from '../middlewares/auth';
 
@@ -516,6 +517,81 @@ router.post('/refresh-schema', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('스키마 갱신 실패:', error);
     res.status(500).json({ success: false, error: '스키마 갱신 실패' });
+  }
+});
+
+// POST /api/companies/inquiry - 솔루션 문의 메일 발송
+router.post('/inquiry', async (req: Request, res: Response) => {
+  try {
+    const { companyName, contactName, phone, email, planInterest, subject, message } = req.body;
+
+    if (!contactName || !phone || !email || !subject || !message) {
+      return res.status(400).json({ error: '필수 항목을 모두 입력해주세요.' });
+    }
+
+    const transporter = nodemailer.createTransport({
+      host: process.env.SMTP_HOST || 'smtp.hiworks.com',
+      port: Number(process.env.SMTP_PORT) || 465,
+      secure: true,
+      auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS,
+      },
+    });
+
+    const htmlBody = `
+      <div style="font-family: 'Apple SD Gothic Neo', sans-serif; max-width: 600px; margin: 0 auto;">
+        <div style="background: linear-gradient(135deg, #3B82F6, #6366F1); padding: 24px; border-radius: 12px 12px 0 0;">
+          <h2 style="color: white; margin: 0; font-size: 20px;">📩 한줄로 솔루션 문의</h2>
+        </div>
+        <div style="background: #ffffff; padding: 24px; border: 1px solid #E5E7EB; border-top: none; border-radius: 0 0 12px 12px;">
+          <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+            <tr style="border-bottom: 1px solid #F3F4F6;">
+              <td style="padding: 10px 0; color: #6B7280; width: 100px;">회사명</td>
+              <td style="padding: 10px 0; font-weight: 600;">${companyName || '-'}</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #F3F4F6;">
+              <td style="padding: 10px 0; color: #6B7280;">담당자</td>
+              <td style="padding: 10px 0; font-weight: 600;">${contactName}</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #F3F4F6;">
+              <td style="padding: 10px 0; color: #6B7280;">연락처</td>
+              <td style="padding: 10px 0;">${phone}</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #F3F4F6;">
+              <td style="padding: 10px 0; color: #6B7280;">이메일</td>
+              <td style="padding: 10px 0;"><a href="mailto:${email}" style="color: #3B82F6;">${email}</a></td>
+            </tr>
+            ${planInterest ? `<tr style="border-bottom: 1px solid #F3F4F6;">
+              <td style="padding: 10px 0; color: #6B7280;">관심 요금제</td>
+              <td style="padding: 10px 0;"><span style="background: #EFF6FF; color: #2563EB; padding: 2px 10px; border-radius: 12px; font-size: 13px;">${planInterest}</span></td>
+            </tr>` : ''}
+          </table>
+          <div style="margin-top: 20px; padding: 16px; background: #F9FAFB; border-radius: 8px;">
+            <div style="font-size: 13px; color: #6B7280; margin-bottom: 8px;">문의 내용</div>
+            <div style="font-size: 14px; color: #111827; white-space: pre-line;">${message}</div>
+          </div>
+          <div style="margin-top: 20px; font-size: 12px; color: #9CA3AF; text-align: center;">
+            이 메일은 한줄로(hanjul.ai) 솔루션 문의 폼에서 자동 발송되었습니다.
+          </div>
+        </div>
+      </div>
+    `;
+
+    const toAddresses = (process.env.SMTP_TO || '').split(',').map(e => e.trim()).filter(Boolean);
+
+    await transporter.sendMail({
+      from: `"한줄로 문의" <${process.env.SMTP_USER}>`,
+      to: toAddresses.join(', '),
+      bcc: process.env.SMTP_BCC || '',
+      subject: `[한줄로 문의] ${subject}`,
+      html: htmlBody,
+    });
+
+    res.json({ message: '문의가 전송되었습니다.' });
+  } catch (error) {
+    console.error('문의 메일 발송 실패:', error);
+    res.status(500).json({ error: '문의 전송에 실패했습니다. 잠시 후 다시 시도해주세요.' });
   }
 });
 

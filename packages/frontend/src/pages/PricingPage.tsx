@@ -35,6 +35,10 @@ export default function PricingPage() {
   const [submitting, setSubmitting] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showContactModal, setShowContactModal] = useState(false);
+  const [inquiryForm, setInquiryForm] = useState({
+    companyName: '', contactName: '', phone: '', email: '', planInterest: '', subject: '', message: '',
+  });
+  const [inquirySubmitting, setInquirySubmitting] = useState(false);
   const [hasPending, setHasPending] = useState(false);
   const [pendingPlanName, setPendingPlanName] = useState('');
   const [unconfirmedResult, setUnconfirmedResult] = useState<any>(null);
@@ -98,6 +102,41 @@ export default function PricingPage() {
     setSelectedPlan(plan);
     setRequestMessage(`${plan.plan_name} 플랜으로 변경 신청합니다.`);
     setShowRequestModal(true);
+  };
+
+  const openInquiryModal = () => {
+    setInquiryForm({
+      companyName: (companyInfo as any)?.company_name || '',
+      contactName: '', phone: '', email: '', planInterest: '', subject: '', message: '',
+    });
+    setShowContactModal(true);
+  };
+
+  const handleInquirySubmit = async () => {
+    if (!inquiryForm.contactName || !inquiryForm.phone || !inquiryForm.email || !inquiryForm.subject || !inquiryForm.message) {
+      alert('필수 항목을 모두 입력해주세요.');
+      return;
+    }
+    setInquirySubmitting(true);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch('/api/companies/inquiry', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(inquiryForm),
+      });
+      if (res.ok) {
+        setShowContactModal(false);
+        setShowSuccessModal(true);
+      } else {
+        const data = await res.json();
+        alert(data.error || '문의 전송에 실패했습니다.');
+      }
+    } catch {
+      alert('문의 전송 중 오류가 발생했습니다.');
+    } finally {
+      setInquirySubmitting(false);
+    }
   };
 
   const handleSubmitRequest = async () => {
@@ -390,7 +429,7 @@ export default function PricingPage() {
                 <div>1800-8125</div>
               </a>
               <button
-                onClick={() => setShowContactModal(true)}
+                onClick={openInquiryModal}
                 className="px-6 bg-blue-500 text-white rounded-lg font-medium hover:bg-blue-600 transition-colors flex items-center"
               >
                 담당자 문의
@@ -493,57 +532,72 @@ export default function PricingPage() {
 
       {showContactModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
-            <div className="p-8">
-            <div className="w-20 h-20 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-5">
-                <svg className="w-10 h-10 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                </svg>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden animate-[zoomIn_0.2s_ease-out]">
+            <div className="px-6 pt-6 pb-4 bg-gradient-to-r from-blue-50 to-indigo-50">
+              <h3 className="text-lg font-bold text-gray-900">📩 솔루션 문의</h3>
+              <p className="text-sm text-gray-500 mt-1">문의 내용을 작성해주시면 담당자가 연락드립니다.</p>
+            </div>
+            <div className="px-6 py-4 space-y-3 max-h-[60vh] overflow-y-auto">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">회사명</label>
+                  <input value={inquiryForm.companyName} onChange={(e) => setInquiryForm(f => ({ ...f, companyName: e.target.value }))}
+                    className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-gray-50" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">담당자명 *</label>
+                  <input value={inquiryForm.contactName} onChange={(e) => setInquiryForm(f => ({ ...f, contactName: e.target.value }))}
+                    placeholder="홍길동"
+                    className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                </div>
               </div>
-              <h3 className="text-xl font-bold text-center text-gray-900 mb-2">솔루션 문의</h3>
-              <p className="text-center text-gray-500 mb-8">담당자에게 직접 문의하세요</p>
-              
-              <div className="grid grid-cols-2 gap-4">
-                <div className="bg-gray-50 rounded-xl p-5 flex flex-col items-center text-center">
-                  <div className="w-12 h-12 bg-blue-600 rounded-full flex items-center justify-center text-white font-bold text-lg mb-3">
-                    박
-                  </div>
-                  <div className="font-bold text-gray-900 text-base">박성용 팀장</div>
-                  <div className="text-sm text-gray-500 mb-3">기업부설연구소</div>
-                  <a 
-                    href="mailto:psy@invitocorp.com"
-                    className="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 transition-colors mt-auto"
-                  >
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                    </svg>
-                    psy@invitocorp.com
-                  </a>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">연락처 *</label>
+                  <input value={inquiryForm.phone} onChange={(e) => setInquiryForm(f => ({ ...f, phone: e.target.value }))}
+                    placeholder="010-1234-5678"
+                    className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
                 </div>
-                <div className="bg-gray-50 rounded-xl p-5 flex flex-col items-center text-center">
-                  <div className="w-12 h-12 bg-blue-600 rounded-full flex items-center justify-center text-white font-bold text-lg mb-3">
-                    서
-                  </div>
-                  <div className="font-semibold text-gray-900">서수란 팀장</div>
-                  <div className="text-sm text-gray-500 mb-2">기업부설연구소</div>
-                  <a 
-                    href="mailto:suran@invitocorp.com"
-                    className="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 transition-colors mt-auto"
-                  >
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                    </svg>
-                    suran@invitocorp.com
-                  </a>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">이메일 *</label>
+                  <input type="email" value={inquiryForm.email} onChange={(e) => setInquiryForm(f => ({ ...f, email: e.target.value }))}
+                    placeholder="email@company.com"
+                    className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
                 </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">관심 요금제</label>
+                <select value={inquiryForm.planInterest} onChange={(e) => setInquiryForm(f => ({ ...f, planInterest: e.target.value }))}
+                  className="w-full px-3 py-2 border rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none">
+                  <option value="">선택 안함</option>
+                  <option value="스타터">스타터 (150,000원/월)</option>
+                  <option value="베이직">베이직 (350,000원/월)</option>
+                  <option value="프로">프로 (1,000,000원/월)</option>
+                  <option value="비즈니스">비즈니스 (3,000,000원/월)</option>
+                  <option value="엔터프라이즈">엔터프라이즈 (5,500,000원/월)</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">제목 *</label>
+                <input value={inquiryForm.subject} onChange={(e) => setInquiryForm(f => ({ ...f, subject: e.target.value }))}
+                  placeholder="문의 제목을 입력해주세요"
+                  className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">문의 내용 *</label>
+                <textarea value={inquiryForm.message} onChange={(e) => setInquiryForm(f => ({ ...f, message: e.target.value }))}
+                  rows={4} placeholder="문의하실 내용을 자유롭게 작성해주세요."
+                  className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-none" />
               </div>
             </div>
-            <div className="border-t">
-              <button
-                onClick={() => setShowContactModal(false)}
-                className="w-full px-4 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors"
-              >
-                닫기
+            <div className="px-6 pb-6 flex gap-3">
+              <button onClick={() => setShowContactModal(false)}
+                className="flex-1 py-2.5 rounded-lg text-sm font-medium border border-gray-300 text-gray-700 hover:bg-gray-50 transition">
+                취소
+              </button>
+              <button onClick={handleInquirySubmit} disabled={inquirySubmitting}
+                className="flex-1 py-2.5 rounded-lg text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 transition">
+                {inquirySubmitting ? '전송 중...' : '문의 전송'}
               </button>
             </div>
           </div>
