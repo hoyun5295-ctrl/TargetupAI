@@ -450,6 +450,7 @@ export default function Dashboard() {
   const [successCampaignId, setSuccessCampaignId] = useState('');
   const [selectedMessage, setSelectedMessage] = useState<any>(null);
   const [selectedAiMsgIdx, setSelectedAiMsgIdx] = useState(0);
+  const [editingAiMsg, setEditingAiMsg] = useState<number | null>(null);
   const [showAiSendModal, setShowAiSendModal] = useState(false);
   const [showSpamFilter, setShowSpamFilter] = useState(false);
   const [spamFilterData, setSpamFilterData] = useState<{sms?: string; lms?: string; callback: string; msgType: 'SMS'|'LMS'|'MMS'}>({callback:'',msgType:'SMS'});
@@ -604,7 +605,7 @@ export default function Dashboard() {
         region: r.region || '',
         amount: r.total_purchase_amount || '',
         callback: r.callback || null,
-        message: (adTextEnabled ? '(광고)' : '') + 
+        message: (adTextEnabled ? (targetMsgType === 'SMS' ? '(광고)' : '(광고) ') : '') + 
           targetMessage
             .replace(/%이름%/g, r.name || '')
             .replace(/%등급%/g, r.grade || '')
@@ -939,10 +940,11 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
     };
     let fullMsg = getMaxByteMessage(directMessage, directRecipients, directVarMap);
     if (adTextEnabled) {
+      const adPrefix = directMsgType === 'SMS' ? '(광고)' : '(광고) ';
       const optOutText = directMsgType === 'SMS'
         ? `무료거부${optOutNumber.replace(/-/g, '')}`
         : `무료수신거부 ${optOutNumber}`;
-      fullMsg = `(광고) ${fullMsg}\n${optOutText}`;
+      fullMsg = `${adPrefix}${fullMsg}\n${optOutText}`;
     }
     // 한글 2byte, 영문/숫자 1byte 계산
     let bytes = 0;
@@ -967,10 +969,11 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
     };
     let fullMsg = getMaxByteMessage(targetMessage, targetRecipients, targetVarMap);
     if (adTextEnabled) {
+      const adPrefix = targetMsgType === 'SMS' ? '(광고)' : '(광고) ';
       const optOutText = targetMsgType === 'SMS'
         ? `무료거부${optOutNumber.replace(/-/g, '')}`
         : `무료수신거부 ${optOutNumber}`;
-      fullMsg = `(광고)${fullMsg}\n${optOutText}`;
+      fullMsg = `${adPrefix}${fullMsg}\n${optOutText}`;
     }
     let bytes = 0;
     for (let i = 0; i < fullMsg.length; i++) {
@@ -1332,6 +1335,7 @@ const handleAiCampaignGenerate = async () => {
     const result = response.data;
     
     // AI 결과 저장
+    setEditingAiMsg(null);
     setAiResult({
       target: {
         description: result.reasoning || '추천 타겟',
@@ -1551,9 +1555,19 @@ const autoName = _campaignName || aiResult?.suggestedCampaignName || extractedNa
 const campaignData = {
   campaignName: autoName,
       messageType: selectedChannel,
-      messageContent: selectedMsg.message_text,
+      messageContent: (() => {
+        let msg = selectedMsg.message_text;
+        if (isAd) {
+          const prefix = selectedChannel === 'SMS' ? '(광고)' : '(광고) ';
+          const suffix = selectedChannel === 'SMS'
+            ? `\n무료거부${optOutNumber.replace(/-/g, '')}`
+            : `\n무료수신거부 ${formatRejectNumber(optOutNumber)}`;
+          msg = prefix + msg + suffix;
+        }
+        return msg;
+      })(),
       targetFilter: aiResult?.target?.filters || {},
-      isAd: true,
+      isAd: isAd,
       scheduledAt: scheduledAt,
       eventStartDate: eventStartDate,
       eventEndDate: eventEndDate,
@@ -1626,7 +1640,17 @@ const campaignData = {
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          messageContent: selectedMsg.message_text,
+          messageContent: (() => {
+            let msg = selectedMsg.message_text;
+            if (isAd) {
+              const prefix = selectedChannel === 'SMS' ? '(광고)' : '(광고) ';
+              const suffix = selectedChannel === 'SMS'
+                ? `\n무료거부${optOutNumber.replace(/-/g, '')}`
+                : `\n무료수신거부 ${formatRejectNumber(optOutNumber)}`;
+              msg = prefix + msg + suffix;
+            }
+            return msg;
+          })(),
           messageType: selectedChannel,
           mmsImagePaths: mmsUploadedImages.map(img => img.serverPath),
         }),
@@ -1696,10 +1720,11 @@ const campaignData = {
 
   const getFullMessage = (msg: string) => {
     if (!adTextEnabled) return msg;
+    const prefix = directMsgType === 'SMS' ? '(광고)' : '(광고) ';
     const optOutText = directMsgType === 'SMS' 
       ? `무료거부${optOutNumber.replace(/-/g, '')}` 
       : `무료수신거부 ${formatRejectNumber(optOutNumber)}`;
-    return `(광고)${msg}\n${optOutText}`;
+    return `${prefix}${msg}\n${optOutText}`;
   };
 
   const messageBytes = calculateBytes(getFullMessage(directMessage));
@@ -2447,17 +2472,47 @@ const campaignData = {
                       {aiResult?.messages?.length > 0 ? (
                         aiResult.messages.map((msg: any, idx: number) => (
                           <label key={msg.variant_id || idx} className="cursor-pointer group">
-                            <input type="radio" name="message" className="hidden" defaultChecked={idx === 0} onChange={() => setSelectedAiMsgIdx(idx)} />
+                            <input type="radio" name="message" className="hidden" defaultChecked={idx === 0} onChange={() => { setSelectedAiMsgIdx(idx); setEditingAiMsg(null); }} />
                             {/* 모던 폰 프레임 */}
                             <div className="rounded-[1.8rem] p-[3px] transition-all bg-gray-300 group-has-[:checked]:bg-gradient-to-b group-has-[:checked]:from-purple-400 group-has-[:checked]:to-purple-600 group-has-[:checked]:shadow-lg group-has-[:checked]:shadow-purple-200 hover:bg-gray-400">
                               <div className="bg-white rounded-[1.6rem] overflow-hidden flex flex-col" style={{ height: '420px' }}>
-                                {/* 상단 - 타입명 */}
+                                {/* 상단 - 타입명 + 수정 버튼 */}
                                 <div className="px-4 py-2.5 bg-gradient-to-r from-gray-50 to-gray-100 flex justify-between items-center shrink-0 border-b">
                                   <span className="text-[11px] text-gray-400 font-medium">문자메시지</span>
-                                  <span className="text-[11px] font-bold text-purple-600">{msg.variant_id}. {msg.variant_name}</span>
+                                  <div className="flex items-center gap-1.5">
+                                    {selectedAiMsgIdx === idx && editingAiMsg !== idx && (
+                                      <button
+                                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); setEditingAiMsg(idx); }}
+                                        className="text-[10px] px-1.5 py-0.5 bg-purple-100 text-purple-600 rounded hover:bg-purple-200 transition-colors"
+                                      >
+                                        ✏️ 수정
+                                      </button>
+                                    )}
+                                    <span className="text-[11px] font-bold text-purple-600">{msg.variant_id}. {msg.variant_name}</span>
+                                  </div>
                                 </div>
-                                {/* 메시지 영역 - 스크롤 */}
+                                {/* 메시지 영역 */}
                                 <div className="flex-1 overflow-y-auto p-3 bg-gradient-to-b from-purple-50/30 to-white">
+                                  {editingAiMsg === idx ? (
+                                    <div className="h-full flex flex-col gap-2">
+                                      <textarea
+                                        value={msg.message_text}
+                                        onChange={(e) => {
+                                          const updated = [...aiResult.messages];
+                                          updated[idx] = { ...updated[idx], message_text: e.target.value, byte_count: calculateBytes(e.target.value) };
+                                          setAiResult({ ...aiResult, messages: updated });
+                                        }}
+                                        className="flex-1 w-full text-[12px] leading-[1.6] p-2 border border-purple-300 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-purple-400"
+                                        autoFocus
+                                      />
+                                      <button
+                                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); setEditingAiMsg(null); }}
+                                        className="py-1.5 bg-purple-600 text-white text-[11px] font-medium rounded-lg hover:bg-purple-700 transition-colors"
+                                      >
+                                        ✅ 수정 완료
+                                      </button>
+                                    </div>
+                                  ) : (
                                   <div className="flex gap-2">
                                     <div className="w-7 h-7 rounded-full bg-purple-100 flex items-center justify-center shrink-0 text-xs">📱</div>
                                     <div className="bg-white rounded-2xl rounded-tl-sm p-3 shadow-sm border border-gray-100 text-[12px] leading-[1.6] whitespace-pre-wrap text-gray-700 max-w-[95%]">
@@ -2469,10 +2524,11 @@ const campaignData = {
                                       })() : msg.message_text}
                                     </div>
                                   </div>
+                                  )}
                                 </div>
                                 {/* 하단 바이트 */}
                                 <div className="px-3 py-2 border-t bg-gray-50 text-center shrink-0">
-                                  <span className="text-[10px] text-gray-400">{msg.byte_count || '?'} / {selectedChannel === 'SMS' ? 90 : 2000} bytes</span>
+                                  <span className={`text-[10px] ${editingAiMsg === idx ? 'text-purple-600 font-medium' : 'text-gray-400'}`}>{msg.byte_count || calculateBytes(msg.message_text || '')} / {selectedChannel === 'SMS' ? 90 : 2000} bytes</span>
                                 </div>
                               </div>
                             </div>
@@ -2545,8 +2601,8 @@ const campaignData = {
   onClick={() => {
     const msg = aiResult?.messages?.[selectedAiMsgIdx]?.message_text || campaign.messageContent || '';
                           const cb = selectedCallback || '';
-                          const smsMsg = adTextEnabled ? `(광고)${msg}\n무료거부${optOutNumber.replace(/-/g, '')}` : msg;
-                          const lmsMsg = adTextEnabled ? `(광고)${msg}\n무료수신거부 ${optOutNumber}` : msg;
+                          const smsMsg = isAd ? `(광고)${msg}\n무료거부${optOutNumber.replace(/-/g, '')}` : msg;
+                          const lmsMsg = isAd ? `(광고) ${msg}\n무료수신거부 ${formatRejectNumber(optOutNumber)}` : msg;
                           setSpamFilterData({sms: smsMsg, lms: lmsMsg, callback: cb, msgType: 'SMS'});
                           setShowSpamFilter(true);
   }}
@@ -4423,7 +4479,7 @@ const campaignData = {
                         const optOutText = targetMsgType === 'SMS' 
                           ? `무료거부${optOutNumber.replace(/-/g, '')}` 
                           : `무료수신거부 ${formatRejectNumber(optOutNumber)}`;
-                        const fullMsg = adTextEnabled ? `(광고)${targetMessage}\n${optOutText}` : targetMessage;
+                        const fullMsg = adTextEnabled ? `${targetMsgType === 'SMS' ? '(광고)' : '(광고) '}${targetMessage}\n${optOutText}` : targetMessage;
                         const bytes = calculateBytes(fullMsg);
                         const max = targetMsgType === 'SMS' ? 90 : 2000;
                         return bytes > max ? 'text-red-500' : 'text-emerald-600';
@@ -4432,7 +4488,7 @@ const campaignData = {
                           const optOutText = targetMsgType === 'SMS' 
                             ? `무료거부${optOutNumber.replace(/-/g, '')}` 
                             : `무료수신거부 ${formatRejectNumber(optOutNumber)}`;
-                          const fullMsg = adTextEnabled ? `(광고)${targetMessage}\n${optOutText}` : targetMessage;
+                          const fullMsg = adTextEnabled ? `${targetMsgType === 'SMS' ? '(광고)' : '(광고) '}${targetMessage}\n${optOutText}` : targetMessage;
                           return calculateBytes(fullMsg);
                         })()}
                       </span>/{targetMsgType === 'SMS' ? 90 : 2000}byte
@@ -4532,7 +4588,7 @@ const campaignData = {
                           const msg = aiResult?.messages?.[selectedAiMsgIdx]?.message_text || campaign.messageContent || '';
                           const cb = selectedCallback || '';
                           const smsMsg = adTextEnabled ? `(광고)${msg}\n무료거부${optOutNumber.replace(/-/g, '')}` : msg;
-                          const lmsMsg = adTextEnabled ? `(광고)${msg}\n무료수신거부 ${optOutNumber}` : msg;
+                          const lmsMsg = adTextEnabled ? `(광고) ${msg}\n무료수신거부 ${optOutNumber}` : msg;
                           setSpamFilterData({sms: smsMsg, lms: lmsMsg, callback: cb, msgType: 'SMS'});
                           setShowSpamFilter(true);
                         }}
@@ -4637,7 +4693,7 @@ const campaignData = {
                         const optOutText = targetMsgType === 'SMS' 
                           ? `무료거부${optOutNumber.replace(/-/g, '')}` 
                           : `무료수신거부 ${formatRejectNumber(optOutNumber)}`;
-                        const fullMsg = adTextEnabled ? `(광고)${targetMessage}\n${optOutText}` : targetMessage;
+                        const fullMsg = adTextEnabled ? `${targetMsgType === 'SMS' ? '(광고)' : '(광고) '}${targetMessage}\n${optOutText}` : targetMessage;
                         const msgBytes = calculateBytes(fullMsg);
 
                         // SMS인데 90바이트 초과 시 예쁜 모달로 전환 안내
@@ -5109,7 +5165,7 @@ const campaignData = {
                           const msg = directMessage || '';
                           const cb = selectedCallback || '';
                           const smsMsg = adTextEnabled ? `(광고)${msg}\n무료거부${optOutNumber.replace(/-/g, '')}` : msg;
-                          const lmsMsg = adTextEnabled ? `(광고)${msg}\n무료수신거부 ${optOutNumber}` : msg;
+                          const lmsMsg = adTextEnabled ? `(광고) ${msg}\n무료수신거부 ${optOutNumber}` : msg;
                           setSpamFilterData({sms: smsMsg, lms: lmsMsg, callback: cb, msgType: directMsgType});
                           setShowSpamFilter(true);
                         }}
@@ -6214,7 +6270,8 @@ const campaignData = {
           ? `무료거부${optOutNumber.replace(/-/g, '')}`
           : `무료수신거부 ${optOutNumber}`;
         if (adTextEnabled) {
-          fullMsg = `(광고) ${fullMsg}\n${optOutText}`;
+          const adPrefix = activeMsgType === 'SMS' ? '(광고)' : '(광고) ';
+          fullMsg = `${adPrefix}${fullMsg}\n${optOutText}`;
         }
 
         const truncated = truncateToSmsBytes(fullMsg, 90);

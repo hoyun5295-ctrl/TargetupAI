@@ -253,28 +253,23 @@ const BRAND_SYSTEM_PROMPT = `당신은 마케팅 문자 메시지 전문가입�
 ## 채널별 작성 규칙
 
 ### SMS (90바이트 이하, 한글 약 45자)
-- 광고성일 경우: (광고) + 메시지 + 무료거부번호 필수
-- 실제 사용 가능한 글자 수: 약 25~30자 (필수요소 제외)
 - 짧고 임팩트 있게, 핵심 혜택만
-- 예시: (광고)[브랜드]봄세일20%할인!2/4~6 무료거부080-1234-5678
+- 실제 사용 가능한 글자 수: 약 35~40자
+- 예시: [브랜드]봄세일 20%할인! 2/4~6 매장방문▶
 
 ### LMS (2000바이트 이하, 한글 약 1000자)  
-- 광고성일 경우: 맨앞 (광고) + 맨뒤 무료수신거부번호 필수
 - 줄바꿈과 특수문자로 가독성 높게
-- 구성: 인사 → 혜택상세 → 기간/조건 → CTA → 무료거부
+- 구성: 인사 → 혜택상세 → 기간/조건 → CTA
 - 예시:
-(광고)[브랜드명] 봄맞이 특별 이벤트
+[브랜드명] 봄맞이 특별 이벤트
 
 안녕하세요, 고객님!
 따뜻한 봄을 맞아 특별한 혜택을 준비했어요.
 
 ★ 혜택: 전품목 20% 할인
 ★ 기간: 2월 4일(화) ~ 6일(목)
-★ 대상: 기초화장품 전 라인
 
 ▶ 지금 바로 확인하세요!
-
-무료수신거부 080-1234-5678
 
 ### MMS
 - LMS와 동일하되 이미지 첨부 고려
@@ -283,21 +278,23 @@ const BRAND_SYSTEM_PROMPT = `당신은 마케팅 문자 메시지 전문가입�
 ### 카카오 알림톡
 - 템플릿 형식 준수
 - 버튼 텍스트 포함
-- 광고성 표기 규칙 다름
 
-## ⚠️ 중요 규칙
-1. 사용자가 명시한 내용만 포함하세요. 임의로 혜택을 추가하지 마세요.
-   - 예: 사용자가 "40% 할인"만 언급 → "추가 적립금 5%", "사은품 증정" 등 추가 금지
-2. "내일", "모레", "다음주", "N일 뒤", "N일간" 등 상대적 날짜는 반드시 구체적 날짜로 변환하세요.
-   - "내일" → 오늘+1일의 실제 날짜
-   - "모레" → 오늘+2일
-   - "3일 뒤" → 오늘+3일
-   - "N일간" → 시작일~종료일로 변환
-   - 예: 오늘이 2/5(목)이고 "3일 뒤에 2일간 행사" → "2/8(일)~2/9(월)"
-   - 예: 오늘이 2/5(목)이고 "이번 주말" → "2/7(토)~2/8(일)"
-   - 예: 오늘이 2/5(목)이고 "다음주 월요일부터 3일간" → "2/10(월)~2/12(수)"
-3. 사용자 요청에 없는 조건이나 대상을 추가하지 마세요.
-4. 날짜 표기는 반드시 "M/D(요일)" 형식으로! 예: 2/8(일)
+## 🚫 절대 금지 규칙 (최우선!)
+
+### 1. 광고 표기 금지
+(광고), 무료거부, 무료수신거부, 080번호를 메시지에 절대 포함하지 마세요!
+광고 표기와 수신거부 번호는 시스템이 자동으로 붙입니다.
+당신은 순수 메시지 본문만 작성하세요.
+
+### 2. 사용자가 언급하지 않은 혜택/할인/이벤트 날조 금지
+- 사용자가 "설날 이벤트"만 말했으면 → 할인율, 적립금, 사은품, 무료배송 등을 지어내지 마세요!
+- 사용자가 "20% 할인"을 명시했으면 → 정확히 20%만 언급, 추가 혜택 날조 금지!
+- 사용자가 구체적 혜택을 안 말했으면 → "특별한 혜택을 준비했어요", "이벤트를 확인해보세요" 등 포괄적 표현만 사용
+- 절대 하면 안 되는 예시: 사용자가 언급 안 했는데 "전상품 30% 할인", "포인트 10% 적립", "샘플 증정", "무료배송" 등 추가
+
+### 3. 날짜 규칙
+- "내일", "모레", "다음주" 등 상대적 날짜는 반드시 구체적 날짜로 변환
+- 날짜 표기는 반드시 "M/D(요일)" 형식으로! 예: 2/8(일)
 
 ## 특수문자 규칙 (⚠️ 필수!)
 이모지(😀🎁🔥💕 등)는 SMS에서 깨지므로 절대 사용 금지!
@@ -313,7 +310,7 @@ const BRAND_SYSTEM_PROMPT = `당신은 마케팅 문자 메시지 전문가입�
       "variant_id": "A",
       "variant_name": "감성형",
       "concept": "따뜻하고 친근한 톤",
-      "message_text": "채널에 맞는 메시지",
+      "message_text": "채널에 맞는 메시지 (광고표기/수신거부 포함 금지!)",
       "byte_count": 바이트수,
       "score": 점수
     },
@@ -321,7 +318,7 @@ const BRAND_SYSTEM_PROMPT = `당신은 마케팅 문자 메시지 전문가입�
       "variant_id": "B",
       "variant_name": "혜택강조형",
       "concept": "할인/혜택을 직접적으로 강조",
-      "message_text": "채널에 맞는 메시지",
+      "message_text": "채널에 맞는 메시지 (광고표기/수신거부 포함 금지!)",
       "byte_count": 바이트수,
       "score": 점수
     },
@@ -329,7 +326,7 @@ const BRAND_SYSTEM_PROMPT = `당신은 마케팅 문자 메시지 전문가입�
       "variant_id": "C",
       "variant_name": "MZ감성형",
       "concept": "트렌디하고 캐주얼한 톤",
-      "message_text": "채널에 맞는 메시지",
+      "message_text": "채널에 맞는 메시지 (광고표기/수신거부 포함 금지!)",
       "byte_count": 바이트수,
       "score": 점수
     }
@@ -373,10 +370,6 @@ export async function generateMessages(
   const brandTone = extraContext?.brandTone || '친근함';
   const channel = extraContext?.channel || 'SMS';
   const isAd = extraContext?.isAd !== false;
-  const rawRejectNumber = extraContext?.rejectNumber || '080-XXX-XXXX';
-  const rejectText = channel === 'SMS' 
-    ? `무료거부${rawRejectNumber.replace(/-/g, '')}` 
-    : `무료수신거부 ${formatRejectNumber(rawRejectNumber)}`;
   
   // ★ 개인화 설정 - 변수 카탈로그 기반 (하드코딩 varToTag 제거!)
   const usePersonalization = extraContext?.usePersonalization || false;
@@ -395,9 +388,10 @@ export async function generateMessages(
   const userMessage = `## 캠페인 정보
 - 요청: ${prompt}
 - 채널: ${channel} (${byteLimit}바이트 제한)
-- 광고성 메시지: ${isAd ? '예 - (광고)와 무료거부번호 필수 포함' : '아니오'}
-${isAd ? `- 수신거부 표기: ${rejectText}` : ''}
 - 타겟 고객 수: ${targetInfo.total_count.toLocaleString()}명
+
+⚠️ 중요: (광고), 무료거부, 무료수신거부, 080번호를 메시지에 절대 포함하지 마세요! 시스템이 자동으로 붙입니다.
+⚠️ 중요: 사용자가 언급하지 않은 할인율, 적립금, 사은품, 무료배송 등을 절대 지어내지 마세요!
 
 ## 오늘 날짜 (한국 시간)
 ${getKoreanToday()}
@@ -419,7 +413,9 @@ ${channel} 채널에 최적화된 3가지 문안(A/B/C)을 생성해주세요.
 - 브랜드명은 "[${brandName}]" 형태로 정확히 사용
 ${brandSlogan ? `- 브랜드 슬로건 "${brandSlogan}"의 느낌을 반영` : ''}
 - 톤앤매너: ${brandTone}
-${channel === 'SMS' ? '- SMS는 90바이트 제한! (광고)와 무료거부번호 포함하여 반드시 90바이트 이내로!' : ''}
+- 🚫 (광고), 무료거부, 무료수신거부, 080번호 절대 포함 금지! 순수 본문만 작성!
+- 🚫 사용자가 언급하지 않은 혜택(할인율, 적립금, 사은품 등) 날조 금지!
+${channel === 'SMS' ? '- SMS는 90바이트 제한! 순수 메시지만 90바이트 이내로 (광고표기는 시스템이 별도 처리)' : ''}
 ${channel === 'LMS' ? '- LMS는 줄바꿈, 특수문자로 가독성 좋게 작성 (이모지 금지!)' : ''}
 
 ## 개인화 설정 (⚠️ 중요!)
@@ -459,7 +455,16 @@ ${usePersonalization ? `- 사용할 개인화 변수: ${personalizationTags}
     // ★ 생성된 메시지에서 잘못된 변수 검증 + 자동 제거 (안전장치)
     if (result.variants) {
       for (const variant of result.variants) {
-        const msgField = (variant as any).message_text || '';
+        let msgField = (variant as any).message_text || '';
+        
+        // ★ 안전장치: AI가 (광고), 무료거부 등을 포함했으면 자동 제거
+        msgField = msgField.replace(/^\(광고\)\s?/g, '');
+        msgField = msgField.replace(/\n?무료거부\d{8,11}/g, '');
+        msgField = msgField.replace(/\n?무료수신거부\s?\d{3}-?\d{3,4}-?\d{4}/g, '');
+        msgField = msgField.trim();
+        (variant as any).message_text = msgField;
+        
+        // 변수 검증
         const validation = validatePersonalizationVars(msgField, availableVars);
         if (!validation.valid) {
           console.warn(`[AI 변수 검증] 잘못된 변수 발견: ${validation.invalidVars.join(', ')} → 제거`);
@@ -692,10 +697,6 @@ function getFallbackVariants(extraContext?: any): AIRecommendResult {
   const brand = extraContext?.brandName || '브랜드';
   const product = extraContext?.productName || '상품';
   const discount = extraContext?.discountRate ? `${extraContext.discountRate}%` : '특별';
-  const rawRejectNumber = extraContext?.rejectNumber || '080-XXX-XXXX';
-  
-  const smsRejectText = `무료거부${rawRejectNumber.replace(/-/g, '')}`;
-  const lmsRejectText = `무료수신거부 ${formatRejectNumber(rawRejectNumber)}`;
 
   return {
     variants: [
@@ -703,24 +704,24 @@ function getFallbackVariants(extraContext?: any): AIRecommendResult {
         variant_id: 'A',
         variant_name: '혜택 직접형',
         concept: '할인 혜택 직접 전달',
-        sms_text: `(광고)[${brand}] ${product} ${discount} 할인! 지금 확인▶ ${smsRejectText}`,
-        lms_text: `(광고)\n[${brand}] ${product} ${discount} 할인\n\n지금 바로 확인하세요!\n\n▶ 바로가기\n\n${lmsRejectText}`,
+        sms_text: `[${brand}] ${product} ${discount} 할인! 지금 확인▶`,
+        lms_text: `[${brand}] ${product} ${discount} 할인\n\n지금 바로 확인하세요!\n\n▶ 바로가기`,
         score: 70,
       },
       {
         variant_id: 'B',
         variant_name: '긴급/한정',
         concept: '마감 임박 긴급함 강조',
-        sms_text: `(광고)[${brand}] 마감임박! ${product} ${discount} 할인▶ ${smsRejectText}`,
-        lms_text: `(광고)\n[${brand}] 마감 임박!\n\n${product} ${discount} 할인\n\n서두르세요!\n\n▶ 바로가기\n\n${lmsRejectText}`,
+        sms_text: `[${brand}] 마감임박! ${product} ${discount} 할인▶`,
+        lms_text: `[${brand}] 마감 임박!\n\n${product} ${discount} 할인\n\n서두르세요!\n\n▶ 바로가기`,
         score: 65,
       },
       {
         variant_id: 'C',
         variant_name: '재방문 유도',
         concept: '휴면 고객 재활성화',
-        sms_text: `(광고)[${brand}] 오랜만이에요! ${product} ${discount} 할인▶ ${smsRejectText}`,
-        lms_text: `(광고)\n[${brand}] 오랜만이에요!\n\n다시 만나 반가워요!\n${product} ${discount} 할인\n\n▶ 바로가기\n\n${lmsRejectText}`,
+        sms_text: `[${brand}] 오랜만이에요! ${product} ${discount} 할인▶`,
+        lms_text: `[${brand}] 오랜만이에요!\n\n다시 만나 반가워요!\n${product} ${discount} 할인\n\n▶ 바로가기`,
         score: 60,
       },
     ],
