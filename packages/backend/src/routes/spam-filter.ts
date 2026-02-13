@@ -423,25 +423,14 @@ async function insertSmsQueue(
   testId: string
 ): Promise<void> {
   const testTable = getTestSmsTable();
-  
+  const mType = msgType === 'SMS' ? 'S' : 'L';
 
-  if (msgType === 'SMS') {
-    await mysqlQuery(
-      `INSERT INTO ${testTable}
-       (dest_no, call_back, msg_contents, msg_instm, sendreq_time, msg_type, rsv1, app_etc1)
-       VALUES (?, ?, ?, ?, ?, 'S', '1', ?)`,
-      [destNo, callBack, content, testId]
-    );
-  } else {
-    // LMS
-    const subject = content.substring(0, 30);
-    await mysqlQuery(
-      `INSERT INTO ${testTable}
-       (dest_no, call_back, msg_contents, msg_instm, sendreq_time, msg_type, title_str, rsv1, app_etc1)
-       VALUES (?, ?, ?, ?, ?, 'L', ?, '1', ?)`,
-      [destNo, callBack, content, subject, testId]
-    );
-  }
+  await mysqlQuery(
+    `INSERT INTO ${testTable} (
+      dest_no, call_back, msg_contents, msg_type, sendreq_time, status_code, rsv1, app_etc1
+    ) VALUES (?, ?, ?, ?, NOW(), 100, '1', ?)`,
+    [destNo, callBack, content, mType, testId]
+  );
 }
 
 // 테스트 전용 SMS 테이블 (환경변수 기반)
