@@ -618,7 +618,7 @@ const executeAdminCustDelete = async () => {
 const downloadBillingPdf = async (id: string, label: string) => {
   try {
     const token = localStorage.getItem('token');
-    const response = await fetch(`http://localhost:3000/api/admin/billing/${id}/pdf`, { headers: { 'Authorization': `Bearer ${token}` } });
+    const response = await fetch(`/api/admin/billing/${id}/pdf`, { headers: { 'Authorization': `Bearer ${token}` } });
     if (!response.ok) throw new Error('PDF 생성 실패');
     const blob = await response.blob();
     const url = window.URL.createObjectURL(blob);
@@ -633,7 +633,7 @@ const handleInvoiceStatusChange = async (id: string, newStatus: string) => {
 const downloadInvoicePdf = async (inv: any) => {
   try {
     const token = localStorage.getItem('token');
-    const response = await fetch(`http://localhost:3000/api/admin/billing/invoices/${inv.id}/pdf`, { headers: { 'Authorization': `Bearer ${token}` } });
+    const response = await fetch(`/api/admin/billing/invoices/${inv.id}/pdf`, { headers: { 'Authorization': `Bearer ${token}` } });
     const blob = await response.blob();
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = `거래내역서_${inv.company_name}_${String(inv.billing_start).slice(0, 10)}.pdf`; a.click();
