@@ -531,7 +531,7 @@ export default function Dashboard() {
   const [reserveEnabled, setReserveEnabled] = useState(false);
   const [reserveDateTime, setReserveDateTime] = useState('');
   const [showReservePicker, setShowReservePicker] = useState(false);
-  // AI 문구 추천 (직접발송) — 버튼 클릭 핸들러
+  // AI 문구 추천 (직접타겟발송) — 버튼 클릭 핸들러
   const handleAiMsgHelper = () => {
     if (planInfo?.plan_code === 'STARTER') {
       setShowPlanUpgradeModal(true);
@@ -555,7 +555,7 @@ export default function Dashboard() {
     try {
       const res = await aiApi.generateMessage({
         prompt: aiHelperPrompt,
-        channel: directMsgType,
+        channel: targetMsgType,
         isAd: adTextEnabled,
       });
       setAiHelperResults(res.data.variants || []);
@@ -571,8 +571,8 @@ export default function Dashboard() {
 
   // AI 문구 추천 — 결과 선택
   const selectAiMessage = (variant: any) => {
-    const msg = variant.message_text || (directMsgType === 'SMS' ? variant.sms_text : variant.lms_text) || '';
-    setDirectMessage(msg);
+    const msg = variant.message_text || (targetMsgType === 'SMS' ? variant.sms_text : variant.lms_text) || '';
+    setTargetMessage(msg);
     setShowAiMsgHelper(false);
     setToast({ show: true, type: 'success', message: 'AI 추천 문구가 적용되었습니다. 자유롭게 수정하세요!' });
     setTimeout(() => setToast({ show: false, type: 'success', message: '' }), 3000);
@@ -4531,6 +4531,7 @@ const campaignData = {
                   {/* 버튼들 + 바이트 표시 */}
                   <div className="px-3 py-1.5 bg-gray-50 border-t flex items-center justify-between">
                     <div className="flex items-center gap-0.5">
+                      <button onClick={handleAiMsgHelper} className="px-2 py-1 text-xs bg-gradient-to-r from-violet-500 to-blue-500 text-white rounded hover:from-violet-600 hover:to-blue-600 flex items-center gap-0.5 shadow-sm"><Sparkles className="w-3 h-3" />AI추천</button>
                       <button onClick={() => setShowSpecialChars('target')} className="px-2 py-1 text-xs bg-white border rounded hover:bg-gray-100">특수문자</button>
                       <button onClick={() => { loadTemplates(); setShowTemplateBox('target'); }} className="px-2 py-1 text-xs bg-white border rounded hover:bg-gray-100">보관함</button>
                       <button onClick={() => { if (!targetMessage.trim()) { setToast({show: true, type: 'error', message: '저장할 메시지를 먼저 입력해주세요.'}); setTimeout(() => setToast({show: false, type: 'error', message: ''}), 3000); return; } setTemplateSaveName(''); setShowTemplateSave('target'); }} className="px-2 py-1 text-xs bg-white border rounded hover:bg-gray-100">문자저장</button>
@@ -5155,7 +5156,6 @@ const campaignData = {
                   {/* 버튼들 + 바이트 표시 */}
                   <div className="px-3 py-1.5 bg-gray-50 border-t flex items-center justify-between">
                   <div className="flex items-center gap-0.5">
-                      <button onClick={handleAiMsgHelper} className="px-2 py-1 text-xs bg-gradient-to-r from-violet-500 to-blue-500 text-white rounded hover:from-violet-600 hover:to-blue-600 flex items-center gap-0.5 shadow-sm"><Sparkles className="w-3 h-3" />AI추천</button>
                       <button onClick={() => setShowSpecialChars('direct')} className="px-2 py-1 text-xs bg-white border rounded hover:bg-gray-100">특수문자</button>
                       <button onClick={() => { loadTemplates(); setShowTemplateBox('direct'); }} className="px-2 py-1 text-xs bg-white border rounded hover:bg-gray-100">보관함</button>
                       <button onClick={() => { if (!directMessage.trim()) { setToast({show: true, type: 'error', message: '저장할 메시지를 먼저 입력해주세요.'}); setTimeout(() => setToast({show: false, type: 'error', message: ''}), 3000); return; } setTemplateSaveName(''); setShowTemplateSave('direct'); }} className="px-2 py-1 text-xs bg-white border rounded hover:bg-gray-100">문자저장</button>
@@ -7197,7 +7197,7 @@ const campaignData = {
                 autoFocus
               />
               <div className="flex items-center justify-between mt-2">
-                <span className="text-xs text-gray-400">채널: {directMsgType} · Enter로 생성</span>
+                <span className="text-xs text-gray-400">채널: {targetMsgType} · Enter로 생성</span>
                 <button
                   onClick={generateAiDirectMessage}
                   disabled={aiHelperLoading || !aiHelperPrompt.trim()}
@@ -7223,7 +7223,7 @@ const campaignData = {
               <div className="px-6 pb-5 space-y-2.5 max-h-[50vh] overflow-y-auto">
                 <p className="text-xs text-gray-500 font-medium">💡 원하는 문구를 선택하세요 (선택 후 자유 수정 가능)</p>
                 {aiHelperResults.map((variant: any, idx: number) => {
-                  const msg = variant.message_text || (directMsgType === 'SMS' ? variant.sms_text : variant.lms_text) || '';
+                  const msg = variant.message_text || (targetMsgType === 'SMS' ? variant.sms_text : variant.lms_text) || '';
                   const isRecommended = variant.variant_id === aiHelperRecommendation;
                   return (
                     <button
