@@ -2,7 +2,7 @@
 
 ## 프로젝트 개요
 - **서비스명**: 한줄로 (내부 코드명: Target-UP / 타겟업)
-- **서비스**: AI 기반 SMS/LMS 마케팅 자동화 플랫폼
+- **서비스**: AI 기반 SMS/LMS/MMS 마케팅 자동화 플랫폼
 - **회사**: INVITO (인비토) / 대표: Harold
 - **로컬 경로**: `C:\projects\targetup`
 - **서버 경로**: `/home/administrator/targetup-app`
@@ -19,7 +19,7 @@
   - 제42류 (SaaS/IT): 서비스형 소프트웨어업, 클라우드 컴퓨팅, AIaaS 등 22개 항목
   - 출원료: 262,000원 (출원료 184,000 + 지정상품 가산금 78,000)
   - 등록 예상: 14~18개월 소요
-- **로고**: 디자이너 시안 대기 중 (워드마크형 방향, 화해 스타일 참고)
+- **로고**: AI 원본에서 투명배경 추출 → 로그인 페이지 3개 도메인 적용 완료
 
 ## 핵심 원칙
 - **데이터 정확성**: 대상자 수는 AI 추정이 아닌 DB 실제 쿼리 결과로 산출
@@ -41,9 +41,10 @@
 
 | 도메인 | 용도 | 대상 | 프론트엔드 |
 |--------|------|------|------------|
-| **https://hanjul.ai** | 서비스 | 고객사 일반 사용자 | frontend (React) |
-| **https://app.hanjul.ai** | 고객사 관리 | 고객사 관리자 | company-frontend (React) |
+| **https://hanjul.ai** | 서비스 + 고객사관리 | 일반 사용자 + 고객사 관리자 (/manage) | frontend (React) |
 | **https://sys.hanjullo.com** | 시스템 관리 | 슈퍼관리자 (INVITO 내부) | frontend (슈퍼관리자 모드) |
+
+> ※ app.hanjul.ai는 hanjul.ai /manage 라우트로 통합 완료 (2026-02-13)
 
 - 모든 도메인 → IDC 서버 58.227.193.62
 - 모든 도메인 HTTPS (Let's Encrypt 자동갱신)
@@ -56,6 +57,13 @@
 - hostname 기반 조건부 렌더링: `window.location.hostname === 'sys.hanjullo.com'`
 - 푸터: 사업자정보 (주식회사 인비토, 대표이사 유호윤, 사업자등록번호, 통신판매신고, 주소, 문의전화)
 - 개인정보처리방침 / 이용약관 링크 포함
+
+### 사용자 역할별 접근
+| 역할 | 접속 URL | 로그인 방식 | 로그인 후 이동 |
+|------|----------|-------------|----------------|
+| 서비스 사용자 | hanjul.ai | company 로그인 | /dashboard |
+| 고객사 관리자 | hanjul.ai | company_admin 로그인 | /manage |
+| 슈퍼관리자 | sys.hanjullo.com | super_admin 로그인 | /admin |
 
 ---
 
@@ -104,8 +112,6 @@ git pull
 
 # 2. 프론트엔드 빌드 (변경 시)
 cd packages/frontend && npm run build
-# 또는 company-frontend 변경 시
-cd packages/company-frontend && npm run build
 
 # 3. 백엔드 재시작 (변경 시)
 pm2 restart all
@@ -164,7 +170,7 @@ cd C:\projects\qtmsg\bin
 |------|--------|----------------|
 | `/etc/nginx/sites-available/targetup` | hanjul.ai | frontend/dist |
 | `/etc/nginx/sites-available/targetup-company` | sys.hanjullo.com | frontend/dist |
-| `/etc/nginx/sites-available/targetup-app` | app.hanjul.ai | company-frontend/dist |
+| `/etc/nginx/sites-available/targetup-app` | app.hanjul.ai | frontend/dist (통합 완료) |
 
 ### SSL 인증서 (Let's Encrypt)
 | 도메인 | 인증서 경로 | 만료일 |
@@ -185,16 +191,11 @@ C:\projects\targetup\  (로컬)
 │   │       ├── app.ts              ← 백엔드 메인
 │   │       ├── routes/             ← API 라우트
 │   │       └── services/           ← 비즈니스 로직
-│   ├── frontend/                   ← 서비스 사용자 + 슈퍼관리자 UI
-│   │   └── src/
-│   │       ├── components/         ← UI 컴포넌트
-│   │       ├── pages/              ← 페이지 (LoginPage.tsx, PrivacyPage.tsx, TermsPage.tsx)
-│   │       └── services/           ← API 호출
-│   └── company-frontend/           ← 고객사 관리자 UI (app.hanjul.ai)
+│   └── frontend/                   ← 서비스 사용자 + 고객사 관리자 + 슈퍼관리자 UI (통합)
 │       └── src/
-│           ├── components/
-│           ├── pages/
-│           └── services/
+│           ├── components/         ← UI 컴포넌트
+│           ├── pages/              ← 페이지 (LoginPage, ManagePage, PrivacyPage, TermsPage)
+│           └── services/           ← API 호출
 ├── docker-compose.yml
 └── STATUS.md
 ```
@@ -203,37 +204,24 @@ C:\projects\targetup\  (로컬)
 
 ## API 라우트
 ```
-/api/auth          → routes/auth.ts (로그인, 비밀번호 변경)
+/api/auth          → routes/auth.ts (로그인, 비밀번호 변경, 세션 연장)
 /api/campaigns     → routes/campaigns.ts (캠페인 CRUD, 발송, 동기화)
-/api/customers     → routes/customers.ts (고객 조회, 필터, 추출)
-/api/companies     → routes/companies.ts (회사 설정, 발신번호)
+/api/customers     → routes/customers.ts (고객 조회, 필터, 추출, 삭제)
+/api/companies     → routes/companies.ts (회사 설정, 발신번호, 문의폼)
 /api/ai            → routes/ai.ts (타겟 추천, 메시지 생성)
 /api/admin         → routes/admin.ts (슈퍼관리자 전용)
 /api/results       → routes/results.ts (발송 결과/통계)
 /api/upload        → routes/upload.ts (파일 업로드/매핑)
-/api/unsubscribes  → routes/unsubscribes.ts (수신거부)
+/api/unsubscribes  → routes/unsubscribes.ts (수신거부, 080 콜백)
 /api/address-books → routes/address-books.ts (주소록)
 /api/test-contacts → routes/test-contacts.ts (테스트 연락처)
 /api/plans         → routes/plans.ts (요금제)
-/api/billing       → routes/billing.ts (정산/거래내역서)
+/api/billing       → routes/billing.ts (정산/거래내역서, 이메일 발송)
 /api/balance       → routes/balance.ts (선불 잔액 조회/이력/요약)
 /api/sync          → routes/sync.ts (Sync Agent 연동 - register, heartbeat, customers, purchases, log, config, version)
 /api/admin/sync    → routes/admin-sync.ts (슈퍼관리자 Sync Agent 관리)
 /api/spam-filter   → routes/spam-filter.ts (스팸필터 테스트 - 발송요청, 수신리포트, 이력, 디바이스)
 ```
-
-★ 슈퍼관리자(sys.hanjullo.com) / 고객사관리자(app.hanjul.ai) / 서비스사용자(hanjul.ai) 접속주소 완전 분리 완료
-
----
-
-## 접속 구조 상세
-
-### 사용자 역할별 접근
-| 역할 | 접속 URL | 로그인 방식 | 로그인 후 이동 |
-|------|----------|-------------|----------------|
-| 서비스 사용자 | hanjul.ai | company 로그인 | /dashboard |
-| 고객사 관리자 | app.hanjul.ai | company-admin 로그인 | 고객사 관리 대시보드 |
-| 슈퍼관리자 | sys.hanjullo.com | super_admin 로그인 | /admin |
 
 ---
 
@@ -297,36 +285,28 @@ grep "bind ack" /home/administrator/agent*/logs/*mtdeliver.txt
 ```
 
 ### 백엔드 라인그룹 기반 분배 ✅
-- 환경변수: `SMS_TABLES=SMSQ_SEND_1,SMSQ_SEND_2,SMSQ_SEND_3,SMSQ_SEND_4,SMSQ_SEND_5,SMSQ_SEND_6,SMSQ_SEND_7,SMSQ_SEND_8,SMSQ_SEND_9,SMSQ_SEND_10,SMSQ_SEND_11`
+- 환경변수: `SMS_TABLES=SMSQ_SEND_1,SMSQ_SEND_2,...,SMSQ_SEND_11`
 - 서버 `.env`: `packages/backend/.env`에 설정
-- 로컬은 SMS_TABLES 미설정 → 기존 `SMSQ_SEND` 1개로 동작 (변화 없음)
-- campaigns.ts 헬퍼 함수: `getNextSmsTable(tables)`, `smsCountAll(tables, ...)`, `smsAggAll(tables, ...)`, `smsSelectAll(tables, ...)`, `smsMinAll(tables, ...)`, `smsExecAll(tables, ...)`
+- 로컬은 SMS_TABLES 미설정 → 기존 `SMSQ_SEND` 1개로 동작
+- campaigns.ts 헬퍼: `getNextSmsTable()`, `smsCountAll()`, `smsAggAll()`, `smsSelectAll()`, `smsMinAll()`, `smsExecAll()`
 - 모든 헬퍼에 `tables: string[]` 파라미터 → 회사별 라인그룹 테이블 기반 동작
 - `getCompanySmsTables(companyId)`: 회사별 라인그룹 조회 (1분 캐시)
 - `getTestSmsTables()`: 테스트 전용 라인 조회
 - `getAuthSmsTable()`: 인증번호 전용 라인 조회
-- 기동 시 로그: `[QTmsg] ALL_SMS_TABLES: SMSQ_SEND_1, ... (11개 Agent)`
 
 ### 로그 테이블 자동 생성
 - MySQL 이벤트 스케줄러: `auto_create_sms_log_tables`
 - 매월 25일 자동으로 2개월 후 로그 테이블 생성 (SMSQ_SEND_1~11_YYYYMM)
 - 현재 수동 생성 완료: 202602, 202603
 
-- rsv1 상태: 1=발송대기, 2=Agent처리중, 3=서버전송완료, 4=결과수신, 5=월별처리완료
-- 백엔드 캠페인 발송 시 회사 라인그룹 테이블 기반 라운드로빈 분배
-- 테스트 발송 → 테스트 전용 라인 (SMSQ_SEND_10) 격리
-- 결과 조회 시 회사 라인그룹 테이블 합산 조회
-
-### QTmsg 주요 결과 코드
-| 코드 | 의미 |
-|------|------|
-| 6 | SMS 전송 성공 |
-| 1000 | LMS/MMS 전송 성공 |
-| 1800 | 카카오톡 전달 성공 |
-| 7 | 비가입자/결번/서비스정지 |
-| 8 | Power-off |
-| 16 | 스팸 차단 |
-| 100 | 발송 대기 |
+### QTmsg 주요 참고사항
+- `sendreq_time`: **반드시 MySQL NOW() 사용** (서버 UTC, JS에서 KST 넣으면 미래시간 → Agent 예약발송 대기)
+- `rsv1` 상태: 1=발송대기, 2=Agent처리중, 3=서버전송완료, 4=결과수신, 5=월별처리완료
+- `status_code`: 100=대기, 6=SMS성공, 1000=LMS/MMS성공, 1800=카카오성공, 7=비가입자/결번, 8=Power-off, 16=스팸차단
+- Agent는 seqno 기반 폴링 → 이전 seq보다 큰 것만 처리
+- Agent 강제 재시작: `./fkill.sh` → `./startup.sh`
+- 담당자 테스트(campaigns.ts) INSERT 형식을 기준으로 맞출 것
+- SMSQ_SEND VIEW 생성 완료 (11개 에이전트 테이블 UNION ALL, 통합 조회용)
 
 ---
 
@@ -518,6 +498,7 @@ grep "bind ack" /home/administrator/agent*/logs/*mtdeliver.txt
 | api_secret | varchar(100) | |
 | max_users | integer | 최대 사용자 수 (기본 5) |
 | session_timeout_minutes | integer | 세션 타임아웃 분 (기본 30) |
+| line_group_id | uuid FK | 발송 라인그룹 |
 | created_by | uuid | |
 | created_at | timestamp | |
 | updated_at | timestamp | |
@@ -763,6 +744,7 @@ grep "bind ack" /home/administrator/agent*/logs/*mtdeliver.txt
 | admin_note | text |
 | processed_by | uuid |
 | processed_at | timestamp |
+| user_confirmed | boolean |
 | created_at | timestamp |
 
 ### products (상품)
@@ -874,6 +856,23 @@ grep "bind ack" /home/administrator/agent*/logs/*mtdeliver.txt
 | created_at | timestamp |
 | updated_at | timestamp |
 
+### sms_line_groups (발송 라인그룹)
+| 컬럼 | 타입 | 설명 |
+|------|------|------|
+| id | uuid PK | |
+| group_name | varchar(50) | 그룹명 (대량발송(1) 등) |
+| group_type | varchar(20) | bulk/test/auth |
+| sms_tables | text[] | 할당된 테이블 목록 |
+| is_active | boolean | 활성 여부 |
+| sort_order | integer | 정렬 순서 |
+| created_at | timestamptz | |
+| updated_at | timestamptz | |
+
+### spam_filter_tests (스팸필터 테스트)
+| 컬럼 | 타입 |
+|------|------|
+| (spam_filter_tests, spam_filter_test_results, spam_filter_devices 테이블) |
+
 ### standard_fields (표준 필드 정의)
 | 컬럼 | 타입 |
 |------|------|
@@ -984,131 +983,6 @@ grep "bind ack" /home/administrator/agent*/logs/*mtdeliver.txt
 | updated_at | timestamp |
 | last_login_at | timestamp |
 
----
-
-## Sync Agent 연동 시스템
-
-### 개요
-- 고객사 로컬 DB → 한줄로 서버로 고객/구매 데이터 자동 동기화
-- Sync Agent (.exe)를 고객사 PC에 설치 → API 키 인증으로 데이터 전송
-- 기존 upload와 독립적 (source: 'sync' vs 'upload' 구분)
-
-### API 엔드포인트 (Phase 1 ✅ 완료)
-```
-POST /api/sync/register    ← Agent 최초 등록 (api_key로 company_id 바인딩)
-POST /api/sync/heartbeat   ← Agent 상태 보고
-POST /api/sync/customers   ← 고객 데이터 벌크 UPSERT (배치 최대 1000건)
-POST /api/sync/purchases   ← 구매내역 벌크 INSERT (배치 최대 1000건)
-```
-
-### 인증 방식
-- 헤더: `X-Sync-ApiKey` + `X-Sync-Secret`
-- companies 테이블의 api_key/api_secret으로 인증
-- company.status = 'active' && use_db_sync = true 검증
-
-### UPSERT 규칙 (customers)
-- UNIQUE KEY: company_id + phone (idx_customers_company_phone)
-- sms_opt_in, is_opt_out → 기존 한줄로 값 유지 (덮어쓰지 않음)
-- 나머지 필드 → Agent 값으로 덮어쓰기 (COALESCE 처리)
-- source = 'sync' 태깅
-
-### 테스트 계정
-- 회사: 테스트고객사_싱크 (company_code: TEST_SYNC)
-- company_id: `081000cc-ea67-4977-836c-713ace42e913`
-- api_key: `test-sync-api-key-001` / api_secret: `test-sync-api-secret-001`
-- agent_id: `63864d32-91ea-4daf-99bb-74f6642fc81e`
-
-### 서버 배포 시 주의
-1. 서버 DB에 DDL 먼저 실행 (sync_agents, sync_logs 테이블 + idx_customers_company_phone)
-2. git pull
-3. pm2 restart
-
-### sync_agents (Agent 등록 정보)
-| 컬럼 | 타입 |
-|------|------|
-| id | uuid PK |
-| company_id | uuid FK |
-| agent_name | varchar(100) |
-| agent_version | varchar(20) |
-| os_info | varchar(100) |
-| db_type | varchar(20) |
-| status | varchar(20) — active/inactive/error |
-| last_heartbeat_at | timestamptz |
-| last_sync_at | timestamptz |
-| total_customers_synced | integer |
-| total_purchases_synced | integer |
-| queued_items | integer |
-| uptime | integer |
-| ip_address | varchar(50) |
-| created_at | timestamptz |
-| updated_at | timestamptz |
-
-### sms_line_groups (발송 라인그룹)
-| 컬럼 | 타입 | 설명 |
-|------|------|------|
-| id | uuid PK | |
-| group_name | varchar(50) | 그룹명 (대량발송(1) 등) |
-| group_type | varchar(20) | bulk/test/auth |
-| sms_tables | text[] | 할당된 테이블 목록 |
-| is_active | boolean | 활성 여부 |
-| sort_order | integer | 정렬 순서 |
-| created_at | timestamptz | |
-| updated_at | timestamptz | |
-
----
-
-## DB 스키마 (MySQL - QTmsg)
-| 컬럼 | 타입 |
-|------|------|
-| id | uuid PK |
-| agent_id | uuid FK |
-| company_id | uuid FK |
-| sync_type | varchar(20) — customers/purchases |
-| mode | varchar(20) — full/incremental |
-| batch_index | integer |
-| total_batches | integer |
-| total_count | integer |
-| success_count | integer |
-| fail_count | integer |
-| failures | jsonb |
-| started_at | timestamptz |
-| completed_at | timestamptz |
-| created_at | timestamptz |
-
----
-
-## DB 스키마 (MySQL - QTmsg)
-
-### smsdb.SMSQ_SEND_1~11 (SMS 발송 큐 - 11개 Agent 라인그룹 분배)
-> 로컬: SMSQ_SEND (1개), 서버: SMSQ_SEND_1~11 (11개, 환경변수 SMS_TABLES + 라인그룹으로 분기)
-| 컬럼 | 타입 | 설명 |
-|------|------|------|
-| seqno | int PK AUTO_INCREMENT | |
-| dest_no | varchar(20) | 수신번호 |
-| call_back | varchar(20) | 발신번호 |
-| msg_contents | mediumtext | 메시지 내용 |
-| msg_instm | datetime | 입력 시간 |
-| sendreq_time | datetime | 발송 요청 시간 |
-| mobsend_time | datetime | 발송 완료 시간 |
-| repmsg_recvtm | datetime | 결과 수신 시간 |
-| status_code | int | 100=대기, 200+=결과 |
-| mob_company | varchar(10) | 11=SKT, 16=KT, 19=LGU+ |
-| title_str | varchar(200) | LMS 제목 |
-| msg_type | varchar(10) | S=SMS, L=LMS |
-| rsv1 | varchar(10) | 기본 '1' |
-| sender_code | varchar(9) | |
-| bill_id | varchar(40) | |
-| file_name1~5 | varchar(120) | MMS 첨부 |
-| k_template_code | varchar(30) | 카카오 템플릿 |
-| k_next_type | varchar(1) | N=없음 |
-| k_next_contents | text | |
-| k_button_json | varchar(1024) | |
-| k_etc_json | varchar(1024) | |
-| k_oriseq | varchar(20) | |
-| k_resyes | varchar(1) | |
-| app_etc1 | varchar(50) | campaign_run_id 저장 |
-| app_etc2 | varchar(50) | |
-
 ### billing_invoices (거래내역서/정산)
 | 컬럼 | 타입 | 설명 |
 |------|------|------|
@@ -1138,6 +1012,7 @@ POST /api/sync/purchases   ← 구매내역 벌크 INSERT (배치 최대 1000건
 | total_amount | numeric(12,2) | 합계 |
 | status | varchar(20) | draft/confirmed/paid |
 | pdf_path | varchar(500) | 생성된 PDF 경로 |
+| email_sent_at | timestamptz | 메일 발송 시각 |
 | notes | text | 비고 |
 | created_by | uuid | 생성자 |
 | created_at | timestamptz | |
@@ -1154,6 +1029,7 @@ POST /api/sync/purchases   ← 구매내역 벌크 INSERT (배치 최대 1000건
 | description | text | 설명/사유 |
 | reference_type | varchar(30) | campaign/payment/admin 등 |
 | reference_id | uuid | 연관 ID |
+| payment_method | varchar(20) | admin/bank_transfer/card/virtual_account/system |
 | admin_id | uuid | 관리자 수동 조정 시 |
 | created_at | timestamptz | |
 
@@ -1185,6 +1061,119 @@ POST /api/sync/purchases   ← 구매내역 벌크 INSERT (배치 최대 1000건
 | confirmed_at | timestamptz | |
 | admin_note | text | 관리자 메모 |
 | created_at | timestamptz | |
+
+---
+
+## DB 스키마 (MySQL - QTmsg)
+
+### smsdb.SMSQ_SEND_1~11 (SMS 발송 큐 - 11개 Agent 라인그룹 분배)
+> 로컬: SMSQ_SEND (1개), 서버: SMSQ_SEND_1~11 (11개, 환경변수 SMS_TABLES + 라인그룹으로 분기)
+| 컬럼 | 타입 | 설명 |
+|------|------|------|
+| seqno | int PK AUTO_INCREMENT | |
+| dest_no | varchar(20) | 수신번호 |
+| call_back | varchar(20) | 발신번호 |
+| msg_contents | mediumtext | 메시지 내용 |
+| msg_instm | datetime | 입력 시간 |
+| sendreq_time | datetime | 발송 요청 시간 |
+| mobsend_time | datetime | 발송 완료 시간 |
+| repmsg_recvtm | datetime | 결과 수신 시간 |
+| status_code | int | 100=대기, 200+=결과 |
+| mob_company | varchar(10) | 11=SKT, 16=KT, 19=LGU+ |
+| title_str | varchar(200) | LMS 제목 |
+| msg_type | varchar(10) | S=SMS, L=LMS, M=MMS |
+| rsv1 | varchar(10) | 기본 '1' |
+| sender_code | varchar(9) | |
+| bill_id | varchar(40) | |
+| file_name1~5 | varchar(120) | MMS 첨부 |
+| k_template_code | varchar(30) | 카카오 템플릿 |
+| k_next_type | varchar(1) | N=없음 |
+| k_next_contents | text | |
+| k_button_json | varchar(1024) | |
+| k_etc_json | varchar(1024) | |
+| k_oriseq | varchar(20) | |
+| k_resyes | varchar(1) | |
+| app_etc1 | varchar(50) | campaign_run_id 저장 |
+| app_etc2 | varchar(50) | |
+
+### sync_logs (Sync Agent 동기화 로그)
+| 컬럼 | 타입 |
+|------|------|
+| id | uuid PK |
+| agent_id | uuid FK |
+| company_id | uuid FK |
+| sync_type | varchar(20) — customers/purchases |
+| mode | varchar(20) — full/incremental |
+| batch_index | integer |
+| total_batches | integer |
+| total_count | integer |
+| success_count | integer |
+| fail_count | integer |
+| failures | jsonb |
+| duration_ms | integer |
+| error_message | text |
+| started_at | timestamptz |
+| completed_at | timestamptz |
+| created_at | timestamptz |
+
+---
+
+## Sync Agent 연동 시스템
+
+### 개요
+- 고객사 로컬 DB → 한줄로 서버로 고객/구매 데이터 자동 동기화
+- Sync Agent (.exe)를 고객사 PC에 설치 → API 키 인증으로 데이터 전송
+- 기존 upload와 독립적 (source: 'sync' vs 'upload' 구분)
+
+### API 엔드포인트 (Phase 1~2 ✅ 완료)
+```
+POST /api/sync/register    ← Agent 최초 등록 (api_key로 company_id 바인딩)
+POST /api/sync/heartbeat   ← Agent 상태 보고
+POST /api/sync/customers   ← 고객 데이터 벌크 UPSERT (배치 최대 1000건)
+POST /api/sync/purchases   ← 구매내역 벌크 INSERT (배치 최대 1000건)
+POST /api/sync/log         ← 동기화 로그 기록
+GET  /api/sync/config      ← Agent 설정 조회
+GET  /api/sync/version     ← 최신 버전 정보
+```
+
+### 인증 방식
+- 헤더: `X-Sync-ApiKey` + `X-Sync-Secret`
+- companies 테이블의 api_key/api_secret으로 인증
+- company.status = 'active' && use_db_sync = true 검증
+
+### UPSERT 규칙 (customers)
+- UNIQUE KEY: company_id + phone (idx_customers_company_phone)
+- sms_opt_in, is_opt_out → 기존 한줄로 값 유지 (덮어쓰지 않음)
+- 나머지 필드 → Agent 값으로 덮어쓰기 (COALESCE 처리)
+- source = 'sync' 태깅
+
+### 테스트 계정
+- 회사: 테스트고객사_싱크 (company_code: TEST_SYNC)
+- company_id: `081000cc-ea67-4977-836c-713ace42e913`
+- api_key: `test-sync-api-key-001` / api_secret: `test-sync-api-secret-001`
+- agent_id: `63864d32-91ea-4daf-99bb-74f6642fc81e`
+
+### sync_agents (Agent 등록 정보)
+| 컬럼 | 타입 |
+|------|------|
+| id | uuid PK |
+| company_id | uuid FK |
+| agent_name | varchar(100) |
+| agent_version | varchar(20) |
+| os_info | varchar(100) |
+| db_type | varchar(20) |
+| config | jsonb |
+| sync_interval | integer |
+| status | varchar(20) — active/inactive/error |
+| last_heartbeat_at | timestamptz |
+| last_sync_at | timestamptz |
+| total_customers_synced | integer |
+| total_purchases_synced | integer |
+| queued_items | integer |
+| uptime | integer |
+| ip_address | varchar(50) |
+| created_at | timestamptz |
+| updated_at | timestamptz |
 
 ---
 
@@ -1225,496 +1214,118 @@ POST /api/sync/purchases   ← 구매내역 벌크 INSERT (배치 최대 1000건
 - GET /api/balance/transactions → 변동 이력 (페이지네이션, 타입/날짜 필터)
 - GET /api/balance/summary → 월별 충전/차감/환불 요약
 
----
-
-### ✅ 완료된 작업
-
-**서버 인프라**
-- [x] IDC 상용서버 전체 배포 (SSH, Docker, Node.js, PostgreSQL/MySQL/Redis, Nginx, PM2)
-- [x] 도메인 구매 (hanjul.ai, hanjul.co.kr, hanjullo.com, hanjullo.co.kr, hanjullo.ai)
-- [x] DNS 설정 (가비아: hanjul.ai, sys.hanjullo.com, app.hanjul.ai → 58.227.193.62)
-- [x] SSL 인증서 발급 (Let's Encrypt: hanjul.ai, sys.hanjullo.com, app.hanjul.ai)
-- [x] Nginx 리버스 프록시 설정 (3개 도메인 → 각각 프론트엔드 + API)
-- [x] Nginx client_max_body_size 50M 설정 (파일 업로드 413 에러 해결)
-- [x] IP 직접 접속 차단 (SSL 없는 접속 방지)
-- [x] PM2 백엔드 프로세스 관리
-- [x] 상용 PostgreSQL 성능 튜닝 (shared_buffers 4GB, work_mem 64MB 등)
-
-**도메인 분리 & 브랜딩**
-- [x] 서비스명 "한줄로" 확정 (GPT/Gemini 대안 비교 완료)
-- [x] hanjul.ai → 서비스 사용자 전용 (탭 없는 깔끔한 로그인)
-- [x] app.hanjul.ai → 고객사 관리자 전용 (company-frontend)
-- [x] sys.hanjullo.com → 슈퍼관리자 전용 (유추 어려운 URL)
-- [x] 로그인 페이지 hostname 기반 조건부 렌더링
-- [x] 로그인 페이지 디자인 통일 (깔끔한 스타일)
-- [x] Git 소스 서버 동기화
-
-**법률/규정**
-- [x] 개인정보처리방침 작성 (PrivacyPage.tsx, /privacy)
-- [x] 이용약관 작성 (TermsPage.tsx, /terms)
-- [x] 푸터 사업자정보 추가 (주식회사 인비토, 사업자번호, 통신판매업 등)
-- [x] 로그인 페이지 하단 + 대시보드 하단에 링크 반영
-
-**핵심 기능 (로컬 개발 완료)**
-- [x] 캠페인 CRUD + AI 타겟 추출 + 메시지 생성
-- [x] QTmsg 연동 (로컬 Agent 1개)
-- [x] 고객 데이터 업로드 (Excel/CSV + AI 자동 매핑)
-- [x] 슈퍼관리자 대시보드
-- [x] 고객사 관리자 대시보드 (company-frontend)
-- [x] 정산/거래내역서 시스템
-- [x] 데이터 정규화 시스템 (normalize.ts)
-- [x] 자동입력변수 최대길이 기반 SMS/LMS 자동전환 바이트 계산 (getMaxByteMessage)
-- [x] 정산 삭제 버튼 모든 상태에서 표시 + 백엔드 상태 제한 해제
-
-**QTmsg 5개 Agent 서버 설치 (2026-02-10)**
-- [x] QTmsg Agent 리눅스 버전 서버 설치 (Java 8 + 5개 Agent)
-- [x] 5개 Agent 중계서버 연결 완료 (bind ack 성공)
-- [x] MySQL 발송 테이블 5개 생성 (SMSQ_SEND_1~5)
-- [x] MySQL 로그 테이블 수동 생성 (202602, 202603)
-- [x] MySQL 로그 테이블 월별 자동 생성 이벤트 등록
-- [x] MySQL smsuser 인증 방식 변경 (caching_sha2 → mysql_native_password)
-- [x] 서버 타임존 KST 설정 (timedatectl set-timezone Asia/Seoul)
-- [x] 백엔드 라운드로빈 분배 구현 (환경변수 SMS_TABLES 분기)
-- [x] 로컬/서버 환경변수 분기 (로컬: SMSQ_SEND 1개, 서버: 5개)
-
-**Sync Agent 서버 API Phase 1 (2026-02-10)**
-- [x] Sync API 4개 엔드포인트 개발 (register, heartbeat, customers, purchases)
-- [x] sync_agents, sync_logs 테이블 생성
-- [x] customers 테이블 UPSERT용 유니크 인덱스 추가 (company_id + phone)
-- [x] 테스트 계정 생성 (TEST_SYNC, api_key/api_secret)
-- [x] register + customers UPSERT 로컬 테스트 완료
-- [x] X-Sync-ApiKey/Secret 헤더 인증 + company 상태/use_db_sync 검증
-
-**선불/후불 요금제 Phase 1-A (2026-02-10)**
-- [x] DB 마이그레이션 (companies: billing_type/balance/deposit_account_info + balance_transactions/payments/deposit_requests 테이블)
-- [x] campaigns.ts 선불 차감/환불 로직 통합 (prepaidDeduct/prepaidRefund, 8곳 적용)
-- [x] balance.ts 신규 API (잔액 조회/이력/요약)
-- [x] admin.ts 선불 관리 API (billing_type 전환, 수동 충전/차감, 이력, 전체 현황)
-- [x] app.ts 라우트 등록 (/api/balance)
-- [x] Dashboard.tsx: 잔액 표시 카드 (선불일 때만) + 402 잔액 부족 모달 (3개 발송 함수 전부)
-- [x] AdminDashboard.tsx: 단가/요금 탭에 후불↔선불 전환 토글 + 선불 잔액 충전/차감 UI
-
-**선불/후불 요금제 Phase 1-A 추가 + 서버 배포 (2026-02-10)**
-- [x] Phase 1-A 로컬 테스트 완료 (선불 전환→충전→발송→차감→잔액부족 모달 확인)
-- [x] Dashboard.tsx: 잔액 현황 모달 (잔액 + 유형별 단가 + 발송가능 건수)
-- [x] Dashboard.tsx: 잔액 충전 모달 3단계 (카드/가상계좌 준비중 + 무통장입금 폼)
-- [x] POST /api/balance/deposit-request API (무통장입금 요청 저장, 10분 중복방지)
-- [x] 슈퍼관리자 충전 관리 탭 (결제수단/상태 필터, 페이지네이션, 대기 배지)
-- [x] GET /api/admin/deposit-requests (목록 조회 + 필터)
-- [x] PUT /api/admin/deposit-requests/:id/approve (승인 → 잔액 자동 충전 + balance_transactions 기록)
-- [x] PUT /api/admin/deposit-requests/:id/reject (거절)
-- [x] 승인/거절 커스텀 모달 (충전 후 잔액 미리보기, 관리자 메모, animate-in)
-- [x] 서버 DB 마이그레이션 완료 (balance_transactions, payments, deposit_requests, sync_agents, sync_logs 테이블 + companies 컬럼 추가)
-- [x] 서버 배포 완료 (git pull + frontend build + pm2 restart)
-
-**Sync Agent 서버 배포 (2026-02-10)**
-- [x] 서버 배포 완료 (sync_agents, sync_logs DDL + idx_customers_company_phone 인덱스)
-
-**Sync Agent Phase 2 API + 모니터링 (2026-02-11)**
-- [x] Sync API Phase 2: POST /api/sync/log, GET /api/sync/config, GET /api/sync/version
-- [x] Admin Sync API 5개: agents 목록/상세, config 변경, command 전송, logs 조회
-- [x] admin-sync.ts 신규 생성 + app.ts 라우트 등록
-- [x] DB 마이그레이션 (sync_agents: config/sync_interval 컬럼, sync_logs: duration_ms/error_message, sync_releases 테이블)
-- [x] AdminDashboard.tsx Sync 모니터링 탭 추가 (Agent 목록 테이블 + 상세/설정/명령 모달 3개)
-- [x] 서버 배포 완료
-
-**보안 강화 (2026-02-11)**
-- [x] app.hanjul.ai 일반 사용자 로그인 차단 (auth.ts loginSource 체크 + company-frontend 헤더 전송)
-- [x] 로그인 감사 로그 구현 (audit_logs에 login_success/login_fail/login_blocked 기록)
-- [x] 로그인 IP 주소 기록 (Nginx X-Forwarded-For + Express trust proxy 설정)
-- [x] audit_logs FK 제약 제거 (super_admin ID 호환)
-
-**직원 버그 리포트 대응 (2026-02-11)**
-- [x] 고객사별 최대 사용자 수 제한 (companies.max_users, 기본 5명, 슈퍼관리자 조정 가능)
-- [x] 고객사 관리자 사용자 추가 시 max_users 체크 (manage-users.ts + admin.ts)
-- [x] AdminDashboard 기본정보 탭에 최대 사용자 수 설정 필드 추가
-- [x] 시간 표시 KST 통일 (pg types.setTypeParser + formatDateTime 유틸 전체 적용)
-- [x] frontend/company-frontend 공통 formatDate.ts 유틸 생성 (toUTC + Asia/Seoul)
-- [x] AdminDashboard 16곳, Dashboard 12곳, ResultsModal 7곳 등 전체 시간 포맷 수정
-
-**로고 적용 (2026-02-11)**
-- [x] AI 원본 파일에서 투명 배경 로고 추출 (pymupdf + PIL 크롭)
-- [x] 로그인 페이지 로고 이미지 적용 (frontend + company-frontend, h-10)
-
-**세션 타임아웃 구현 (2026-02-11)**
-- [x] useSessionTimeout 훅 개발 (비활동 감지: mousedown/keydown/scroll/touchstart/click)
-- [x] SessionTimeoutModal 컴포넌트 (원형 프로그레스 타이머, 1분 이하 긴급모드, animate-in)
-- [x] auth.ts 로그인 응답에 sessionTimeoutMinutes 추가 (고객사: DB 조회, 슈퍼관리자: 60분 고정)
-- [x] auth.ts POST /extend-session API 추가 (세션 연장 시 DB expires_at 갱신)
-- [x] frontend App.tsx SessionTimeoutGuard 추가
-- [x] company-frontend App.tsx SessionTimeoutGuard 추가
-- [x] 로그인 시 localStorage에 sessionTimeoutMinutes 저장 (frontend + company-frontend)
-- [x] AdminDashboard 기본정보 탭에 세션 타임아웃 설정 필드 추가 (5~480분)
-- [x] admin.ts PUT /companies/:id에 session_timeout_minutes 저장 추가
-- [x] 서버 배포 완료
-
-**요금제 신청 시스템 개선 (2026-02-11)**
-- [x] 중복 신청 방지: pending 상태 신청 존재 시 재신청 차단 (백엔드 409 응답 + 프론트 버튼 비활성화)
-- [x] 대기 중 안내: 요금제 페이지 상단 노란 배너 + 모든 플랜 버튼 "신청 대기 중" 표시
-- [x] 다운그레이드 허용: 낮은 플랜 "다운그레이드 신청" 버튼 활성화 (동일 plan_requests 흐름, 슈퍼관리자 수동 승인)
-- [x] 승인/거절 결과 알림: 요금제 페이지 진입 시 미확인 결과 자동 모달 (승인→"변경 완료", 거절→"반려"+사유 표시)
-- [x] 결과 확인 처리: user_confirmed 플래그로 한 번 확인하면 다시 안 뜸
-- [x] DB 마이그레이션: plan_requests에 user_confirmed 컬럼 추가 (로컬/서버 완료)
-- [x] 신규 API: GET /api/companies/plan-request/status, PUT /api/companies/plan-request/:id/confirm
-
-**SMS 바이트 초과 처리 개선 (2026-02-11)**
-- [x] SMS 90바이트 초과 시 잘린 메시지 미리보기 실시간 표시 (실제 수신 내용 확인 가능)
-- [x] 광고 문자 + 수신거부 번호 잘림 → SMS 발송 차단 + 정보통신망법 제50조 경고 (LMS 전환만 가능)
-- [x] 비광고 문자 → 잘림 경고 표시 후 SMS 유지 발송 허용 (사용자 책임)
-- [x] 메시지 미리보기 바이트 수 버그 수정: 자동입력 변수 치환 후 실제 바이트 수로 표시
-- [x] 미리보기 바이트 초과 시 빨간색 경고 표시
-
-**직원 버그 리포트 대응 2차 + 발송 시스템 수정 (2026-02-12)**
-- [x] 발송정책 저장 안됨: SQL 컬럼명 6개 불일치 수정 (send_hour_start→send_start_hour, daily_limit→daily_limit_per_customer 등)
-- [x] 타겟전략 저장 안됨: PUT /companies/:id에 approval_required, target_strategy 파라미터 추가
-- [x] 선불 충전금액 2~3번 시도 문제: setEditCompany stale closure → 함수형 업데이트로 수정
-- [x] 잠금/휴면 계정 로그인 차단: auth.ts에 status='active' 체크 추가 + 상태별 안내 메시지 (잠금/휴면/비활성)
-- [x] 발송내역 조회 0건: results.ts SMSQ_SEND 하드코딩 → SMS_TABLES 멀티테이블 합산 조회 (5개 Agent 대응)
-- [x] 직접발송 바이트 초과 차단 누락: Dashboard.tsx 직접발송 버튼에 90바이트 초과 체크 추가 + smsOverrideAccepted 플래그
-- [x] 슈퍼관리자 발송통계 0건: campaign_runs만 조회 → campaigns 직접 조회로 변경 (직접발송 포함)
-- [x] 서버 로그인 500 에러: companies.session_timeout_minutes 컬럼 DDL 누락 → 서버 DB 추가
-
-**고객사 관리자 사용자별 필터 추가 (2026-02-12)**
-- [x] 예약캠페인 탭: 사용자별 필터 드롭다운 추가 (사용자 2명 이상 시 표시)
-- [x] 발송통계 탭: 사용자별 필터 드롭다운 추가 (조회/상세 모두 적용)
-- [x] 고객사 관리자 헤더 로고 한줄로 변경
-- [x] 서버 배포 완료
-
-**직원 버그 리포트 3차 — 회신번호 통합 + 대시보드 개선 (2026-02-12)**
-- [x] AI 매핑(upload.ts)에 callback(매장번호/회신번호) 매핑 대상 추가
-- [x] AI 매핑 결과 드롭다운에 '📞 회신번호(매장번호)' option 추가
-- [x] 업로드 저장(upload.ts) INSERT/UPSERT에 callback 컬럼 추가
-- [x] 직접발송 파일등록 컬럼 매핑 모달에 회신번호 필드 추가
-- [x] 직접발송 수신자 테이블에 회신번호 열 추가
-- [x] 직접발송 자동입력 버튼에 %회신번호% 추가
-- [x] AI 타겟발송 자동입력 드롭다운에 %회신번호% 추가
-- [x] campaigns.ts 직접발송 merge 변수 치환에 %회신번호% 추가
-- [x] directVarMap/targetVarMap/activeVarMap/getMaxByteMessage 바이트 계산 반영
-- [x] 헤더 로고 아래 부서명 표시 + 로고 클릭 시 새로고침
-- [x] 예약 대기 카드 실시간 갱신: 발송 성공 콜백 3곳에 loadScheduledCampaigns() 추가
-- [x] 서버 배포 완료
-
-**직원 버그 리포트 3차 — 버그수정 + UI 기능 구현 (2026-02-12)**
-- [x] 테스트 발송 토스트 2회 중복: 미리보기 모달 testSentResult 블록 중복 제거
-- [x] 미발송 캠페인 최근 캠페인 노출: loadRecentCampaigns에서 draft 상태 필터 제외
-- [x] 직접발송 하단 중복제거 버튼 제거 (상단 체크박스 중복제거로 통합)
-- [x] 특수문자 입력 기능: 64개 특수문자 그리드 팝업 (AI 타겟/직접발송 양쪽)
-- [x] 보관함/문자저장 기능: sms-templates.ts 신규 API + app.ts 라우트 등록
-- [x] 문자저장 → 보관함 저장 / 보관함 → 목록 조회 + 적용 + 삭제
-- [x] 서버 배포 완료
-
-**고객 DB 삭제 기능 (2026-02-12)**
-- [x] 백엔드 DELETE API 3개: 개별 삭제, 선택 삭제(bulk-delete), 전체 삭제(delete-all)
-- [x] 권한 분리: 서비스 사용자 ❌ / 고객사 관리자 개별+선택 / 슈퍼관리자 전체 포함 전부
-- [x] 연관 데이터 CASCADE 삭제 (purchases, consents)
-- [x] audit_logs 감사 로그 기록 (삭제 유형, 건수, 대상 정보)
-- [x] 슈퍼관리자 companyId 오버라이드 (다른 회사 고객 조회/삭제 가능)
-- [x] 고객사 관리자 "고객DB" 탭 신규 (CustomersTab.tsx, 25건 페이지네이션, 체크박스 선택/삭제)
-- [x] 슈퍼관리자 고객사 수정 모달 "고객DB" 탭 신규 (목록 조회 + 개별/선택/전체 삭제)
-- [x] 전체 삭제: 회사명 직접 입력 확인 모달 (슈퍼관리자만)
-- [x] company-frontend client.ts에 customersApi 추가 (list, deleteOne, bulkDelete)
-- [x] Dashboard.tsx department 타입 에러 수정 (as any 캐스팅)
-- [x] 서버 배포 완료
-
-**MMS 이미지 첨부 기능 (2026-02-12)**
-- [x] 백엔드: 이미지 업로드 API (multer, JPG만/300KB/최대 3장 규격 검증)
-- [x] 백엔드: campaigns.ts MMS 발송 분기 (msg_type='M', file_name1 경로, cost_per_mms 단가)
-- [x] 백엔드: 업로드 이미지 → 5개 Agent 공유 경로 저장 + mms-images.ts 서빙 엔드포인트
-- [x] 프론트: MMS 업로드 모달 (3칸 슬롯, JPG/300KB 규격 안내, 미리보기/삭제)
-- [x] 프론트: AI 추천발송/타겟직접추출/직접발송 3개 경로 통일 적용
-- [x] 프론트: MMS 미리보기 (이미지+텍스트 통합 스크롤, 바이트 카운터 하단 고정)
-- [x] 서버 배포 완료
-
-**캘린더 · 발송결과 · 스팸필터 (2026-02-12)**
-- [x] 캘린더 상태 색상 구분 (완료=초록, 예약=파랑, 진행=주황, 취소=회색 + 범례)
-- [x] 발송결과 기간 필터: 월 단위 → 시작일~종료일 범위 선택 (results.ts fromDate/toDate 지원)
-- [x] AI 추천발송 스팸필터 테스트 버튼 추가 (step 2 + 미리보기 모달, 현재 준비 중 토스트)
-
-**슈퍼관리자 감사 로그 + 잔액 이력 (2026-02-12)**
-- [x] 백엔드: GET /api/admin/audit-logs API (날짜/액션/고객사/사용자 필터, 10건 페이지네이션)
-- [x] 프론트: 감사 로그 탭 추가 (테이블 + 필터 + 페이지네이션)
-- [x] 액션 필터 한글화 + 상세 컬럼 한글 요약 (JSON → 읽기 쉬운 텍스트)
-- [x] 단가/요금 탭: 선불 잔액 최근 10건 변동 이력 (충전=초록, 차감=빨강, 환불=파랑)
-- [x] 고객 삭제 모달 z-index 버그 수정 (최상위 레벨 이동)
-- [x] GitHub 서버 PAT 설정 (credential.helper store)
-- [x] 서버 배포 완료
-
-**소스맵 비활성화 + 업로드 매핑 확장 (2026-02-12)**
-- [x] vite.config.ts 소스맵 비활성화 (frontend + company-frontend, build: { sourcemap: false })
-- [x] upload.ts AI 매핑 대상에 store_name, store_code 추가
-
-**발송 라인그룹 시스템 (2026-02-12)**
-- [x] QTmsg Agent 6~11 서버 설치 (agent1 복사 + sed 설정 치환)
-- [x] 11개 Agent 중계서버 연결 완료 (bind ack 성공)
-- [x] MySQL SMSQ_SEND_6~11 테이블 + 로그 테이블(202602,202603) 생성
-- [x] MySQL 월별 자동 생성 이벤트 업데이트 (1~11)
-- [x] PostgreSQL sms_line_groups 테이블 생성 (5개 그룹 초기 데이터)
-- [x] PostgreSQL companies.line_group_id 컬럼 추가
-- [x] campaigns.ts 라인그룹 기반 리팩토링 (getCompanySmsTables/getTestSmsTables/getAuthSmsTable + 1분 캐시)
-- [x] 모든 SMS 헬퍼 함수에 tables 파라미터 추가 (20+ 호출 지점 변경)
-- [x] results.ts 회사별 라인그룹 테이블 기반 조회
-- [x] admin.ts 라인그룹 CRUD API 4개 (GET/POST/PUT/DELETE /api/admin/line-groups)
-- [x] admin.ts companies PUT에 lineGroupId 파라미터 추가
-- [x] admin.ts 발송통계 쿼리에 sms_line_groups JOIN → 라인그룹명 응답
-- [x] AdminDashboard 발송라인 독립 탭 → 고객사 수정 기본정보 탭으로 이동 (드롭다운)
-- [x] AdminDashboard 발송통계 "기타" 컬럼 → "발송라인" (라인그룹명 표시)
-- [x] 서버 .env SMS_TABLES 11개로 확장
-- [x] 서버 배포 완료
-
-**테스트 발송 결과 조회 수정 (2026-02-12)**
-- [x] campaigns.ts test-stats: 메인 테이블 + 로그 테이블(SMSQ_SEND_10_YYYYMM) 합산 조회 (Agent 처리 완료 건 누락 해결)
-- [x] campaigns.ts test-stats: 비용 계산 하드코딩(27/81/110원) → 회사 실제 단가(cost_per_sms/lms/mms) DB 조회 적용
-- [x] 서버 배포 완료
-
-**직원 버그 리포트 4차 — 통계KST/취소제외/사용자필터/캘린더/AI시간 (2026-02-12)**
-- [x] manage-stats.ts: WHERE절 날짜 필터 KST 변환 (UTC→AT TIME ZONE 'Asia/Seoul')
-- [x] manage-stats.ts: 취소/draft 캠페인 통계 제외 (요약/페이징/상세 6개 쿼리)
-- [x] manage-stats.ts: MySQL 테스트 통계 테이블 동적화 (SMSQ_SEND→SMSQ_SEND_10)
-- [x] customers.ts: 고객사관리자 사용자(ID)별 필터 추가 (filterUserId→store_codes 매칭)
-- [x] customers.ts: 목록 조회 SELECT에 store_code/store_name 추가
-- [x] customers.ts: 이번달 통계 취소/예약 제외 + success_count 기준 비용 계산 + KST 적용
-- [x] customers.ts: 전화번호 검색 하이픈 제거 매칭 (010-1234→01012345678)
-- [x] campaigns.ts: 개별회신번호 사용 시 callback 없는 고객 발송 제외
-- [x] services/ai.ts: 현재 시각 프롬프트 전달 + 과거 시간 추천 방지 규칙 추가
-- [x] Dashboard.tsx: 캘린더 scheduled_at 기준 표시 + 편집/복제 버튼 활성화
-- [x] Dashboard.tsx: AI 추천시간 과거→다음날 자동 보정 + UI 안내 표시
-- [x] CustomerDBModal.tsx: 검색 시 selectedCustomer 초기화
-- [x] CustomersTab.tsx (company-frontend): 사용자별 드롭다운 필터 + 매장 컬럼 추가
-- [x] CompanyLoginPage.tsx: 하단 푸터(사업자정보) 추가
-- [x] LoginPage.tsx + CompanyLoginPage.tsx: 푸터 오타 수정 (신송→신승빌딩)
-- [x] results.ts: 날짜 필터/그룹핑 KST 변환 + 취소/draft 제외
-- [x] 서버 배포 완료
-
-**충전 관리 통합 뷰 (2026-02-12)**
-- [x] balance_transactions에 payment_method 컬럼 추가 (admin/bank_transfer/card/virtual_account/system)
-- [x] 기존 데이터 백필 (admin 4건, bank_transfer 1건)
-- [x] admin.ts: 통합 API GET /api/admin/charge-management (pending + 전체 이력 + 필터)
-- [x] admin.ts/campaigns.ts: 모든 INSERT에 payment_method 태깅
-- [x] AdminDashboard 충전 관리 탭 전면 교체 (상단 대기건 카드 + 하단 통합 이력 테이블)
-- [x] 필터: 고객사/구분(충전·차감·환불)/결제수단(무통장·카드·가상계좌·관리자·시스템)/날짜범위
-- [x] 토스페이먼츠 PG 연동 시 card/virtual_account 태깅만 하면 바로 표시 가능
-- [x] 서버 배포 완료
-
-**080 수신거부 콜백 연동 (2026-02-12)**
-- [x] unsubscribes.ts: GET /api/unsubscribes/080callback 엔드포인트 신규 (기존 /unsubscribe 교체)
-- [x] 토큰 인증 (OPT_OUT_080_TOKEN 환경변수), 고객사 매칭 (companies.opt_out_080_number)
-- [x] source '080_ars' 태깅 + Unsubscribes.tsx 주황색 배지 추가
-- [x] curl 테스트 성공 (080-719-6700 → 디버깅테스트 고객사 매칭 확인)
-- [x] campaigns.ts 3개 발송 경로 수신거부 필터링 기존 구현 확인 (AI추천/직접타겟/직접발송)
-- [ ] ⏳ 나래인터넷에 콜백 URL + 토큰 전달 (설 연휴 후)
-- [ ] ⏳ 나래에 확인: 콜백 실패 시 재시도 정책, 수신거부 목록 조회 API 제공 여부
-- [ ] ⏳ Nginx 나래 IP 화이트리스트 (121.156.104.161~165, 183.98.207.13)
-- [x] 서버 배포 완료
-
-**manage-stats.ts SMSQ_SEND 에러 수정 (2026-02-12)**
-- [x] dotenv 로드 타이밍 문제: 모듈 로드 시 process.env.SMS_TABLES가 빈 값 → SMSQ_SEND 폴백
-- [x] 상수(const TEST_SMS_TABLE) → 함수(getTestSmsTable()) 변환으로 런타임 env 읽기
-- [x] 서버 에러 로그 해소 확인 완료
-- [x] 서버 배포 완료
-
-**스팸필터 테스트 시스템 (2026-02-13)**
-- [x] DB: spam_filter_tests, spam_filter_test_results, spam_filter_devices 테이블 생성
-- [x] 백엔드: spam-filter.ts 신규 (POST /test, POST /report, GET /tests, GET /tests/:id, POST /devices, GET /admin/devices)
-- [x] 080 전용번호(080-719-6700) 치환으로 테스트 건 식별 (메시지 내용 불변, 스팸필터 정확도 유지)
-- [x] QTmsg 테스트 라인(SMSQ_SEND_10) 사용, SMS/LMS 각각 발송
-- [x] 1분 타임아웃 + 회사당 active 테스트 1건 제한 + 60초 쿨다운
-- [x] Android 앱 "스팸한줄" 개발 (Kotlin, Jetpack Compose, OkHttp)
-- [x] 앱: SMS 수신 감지 → 080 번호 매칭 → 서버 리포트 전송
-- [x] APK 빌드 완료 (C:\spam\app\build\outputs\apk\debug\app-debug.apk)
-- [x] SpamFilterTestModal.tsx 신규 (폰 미리보기 + 통신사별 SMS/LMS 결과 테이블)
-- [x] Dashboard.tsx 4곳 스팸필터 버튼 연동 (AI추천 2곳 + 직접타겟 + 직접발송)
-- [x] 서버 배포 완료 (DB + 백엔드 + 프론트)
-- [x] 디바이스 등록 테스트 성공 (와이프 폰: 갤럭시 Z 플립6, LGU+, 01099078517)
-- [x] insertSmsQueue를 담당자 테스트(campaigns.ts)와 동일 형식으로 통일
-  - sendreq_time: JS KST → NOW() (MySQL이 UTC라 미래시간 문제)
-  - status_code: 미지정 → 100, msg_instm 제거, 파라미터 정리
-- [x] messageType별 발송 (SMS면 SMS만, LMS면 LMS만 — 기존은 둘 다 발송)
-- [x] 프론트 body에 messageType 전달 추가 (SpamFilterTestModal.tsx)
-- [x] Agent 10 강제 재시작 (fkill.sh → startup.sh, shutdown.sh 안 먹을 때)
-- [x] LGU+ SMS 수신 성공 확인 (2026-02-13)
-- [ ] ⏳ 테스트폰 3대 설치 (현재 LGU+ 1대만, SKT/KT 추가 필요)
-
-**AI 추천 캠페인확정 모달 분리 (2026-02-13)**
-- [x] AiCampaignSendModal.tsx 신규 컴포넌트 (좌: 폰 미리보기, 우: 캠페인명/회신번호/발송시간)
-- [x] Step 2 제목: "메시지 & 발송" → "캠페인 확정"
-- [x] Step 2에서 발송시간/회신번호 섹션 제거 (깔끔한 메시지 선택 화면)
-- [x] "발송하기" → "캠페인확정" 버튼 변경 → 새 모달에서 최종 발송
-- [x] handleAiCampaignSend 리팩토링 (모달에서 전달받은 데이터로 발송)
-- [x] 하단 바 좌측에 발송 대상 인원수 표시
-- [x] 서버 배포 완료
-
-**AI 메시지 선택 인덱스 수정 (2026-02-13)**
-- [x] selectedAiMsgIdx state 추가 (카드 클릭 시 인덱스 저장)
-- [x] aiResult?.messages?.[0] → messages?.[selectedAiMsgIdx] 전체 교체
-- [x] 스팸필터/발송/미리보기 모두 선택된 메시지 반영
-- [x] 서버 배포 완료
-
-### 🔴 미해결 — 즉시 처리 필요 (2026-02-13)
-
-**백엔드 tsc 빌드 에러** ✅ 해결됨
-- 원인: `src/utils/app.ts` 구버전 사본이 routes를 찾지 못함
-- 해결: 중복 app.ts 삭제 → 빌드 성공
-
-**campaigns.ts prepaidDeduct UUID 에러** ✅ 해결됨
-- `'test'` → `'00000000-0000-0000-0000-000000000000'`
-
-**company-frontend → frontend 통합 (2026-02-13)** ✅ 완료
-- [x] app.hanjul.ai 기능을 hanjul.ai /manage 라우트로 통합
-- [x] company_admin 전용 관리 버튼 + ManagePage 생성
-- [x] 10개 파일 생성 (ManagePage, UsersTab, CallbacksTab, ScheduledTab, StatsTab, ManageCustomersTab 등)
-- [x] 서버 배포 완료
-
-**요금제 정책 확정 (2026-02-13)** ✅ 완료
+### 요금제 정책
 - 스타터 15만 (DB 10만, AI 제외, 스팸필터테스트만)
 - 베이직 35만 (DB 30만, AI 무제한)
 - 프로 100만 (DB 100만, AI 마케팅분석 기본, API/카카오톡 연동)
 - 비즈니스 300만 (DB 300만, AI 마케팅분석 고급, DB 실시간동기화, 전담매니저, SLA)
 - 엔터프라이즈 550만 (DB 무제한, 온프레미스, 커스텀, 24/7)
 
-**문의폼 모달 + SMTP 메일 발송 (2026-02-13)** ✅ 완료
-- [x] PricingPage 담당자 카드 모달 → 문의 폼 모달 교체 (회사명, 담당자명, 연락처, 이메일, 관심요금제, 제목, 본문)
-- [x] companies.ts에 POST /api/companies/inquiry 엔드포인트 추가
-- [x] nodemailer + 하이웍스 SMTP 연동 (smtps.hiworks.com:465)
-- [x] To: psy@invitocorp.com, suran@invitocorp.com / BCC: ceo@invitocorp.com
-- [x] 서버 .env SMTP 설정 완료
-- [x] 서버 배포 완료
+---
 
-**정산서/거래내역서 메일 발송 API (2026-02-13)** ✅ 완료
-- [x] billing.ts에 POST /:id/send-email (정산서 PDF 첨부 메일)
-- [x] billing.ts에 POST /invoices/:id/send-email (거래내역서 PDF 첨부 메일)
-- [x] To: companies.contact_email / BCC: ceo@invitocorp.com
-- [x] billings, billing_invoices에 email_sent_at 컬럼 추가
-- [x] 정산서 HTML 이메일 템플릿 (요약 테이블 + 합계)
-- [x] 거래내역서 HTML 이메일 템플릿 (항목별 + 합계)
-- [x] 메일 발송 테스트 성공
-- [x] 서버 배포 완료
+## ✅ 완료된 작업 (날짜순)
 
-**PDF 다운로드 수정 (2026-02-13)** ✅ 완료
-- [x] AdminDashboard.tsx: `http://localhost:3000` → 상대경로 `/api/admin/billing/` (621줄, 636줄)
-- [x] 서버 배포 완료
+### 서버 인프라
+- [x] IDC 상용서버 전체 배포 (SSH, Docker, Node.js, PostgreSQL/MySQL/Redis, Nginx, PM2)
+- [x] 도메인 구매 (hanjul.ai, hanjul.co.kr, hanjullo.com, hanjullo.co.kr, hanjullo.ai)
+- [x] DNS + SSL + Nginx 리버스 프록시 설정 완료
+- [x] IP 직접 접속 차단, PM2 프로세스 관리
+- [x] 상용 PostgreSQL 성능 튜닝 완료
 
-**SMSQ_SEND VIEW 생성 (2026-02-13)** ✅ 완료
-- [x] MySQL에 SMSQ_SEND VIEW 생성 (11개 에이전트 테이블 UNION ALL)
-- [x] billing.ts 등에서 SMSQ_SEND 참조 시 전체 에이전트 통합 조회 가능
+### 도메인 분리 & 브랜딩
+- [x] 서비스명 "한줄로" 확정
+- [x] 3개 도메인 분리 (hanjul.ai / app.hanjul.ai / sys.hanjullo.com)
+- [x] company-frontend → frontend 통합 완료 (2026-02-13, /manage 라우트)
+- [x] 로그인 페이지 hostname 기반 조건부 렌더링
+- [x] "한줄로" 로고 적용 완료 (투명배경 추출 → 3개 도메인)
+- [x] 상표 출원 완료 (2026-02-10)
+
+### 법률/규정
+- [x] 개인정보처리방침, 이용약관 작성
+- [x] 푸터 사업자정보 추가 (로그인 + 대시보드)
+
+### 핵심 기능
+- [x] 캠페인 CRUD + AI 타겟 추출 + 메시지 생성
+- [x] QTmsg 연동 (11개 Agent 라인그룹 분배)
+- [x] 고객 데이터 업로드 (Excel/CSV + AI 자동 매핑)
+- [x] 슈퍼관리자 / 고객사 관리자 / 서비스 사용자 대시보드
+- [x] 정산/거래내역서 시스템 (PDF 다운로드 + 이메일 발송)
+- [x] 데이터 정규화 시스템 (normalize.ts)
+- [x] 자동입력변수 최대길이 기반 SMS/LMS 자동전환 바이트 계산
+- [x] MMS 이미지 첨부 기능 (JPG/300KB/최대 3장, 3개 발송 경로 통합)
+- [x] 선불/후불 요금제 Phase 1-A (차감/환불/충전/무통장입금)
+- [x] 고객 DB 삭제 기능 (권한 분리, CASCADE, 감사 로그)
+- [x] 보관함/문자저장 기능 (sms-templates)
+- [x] 특수문자 입력 기능 (64개 그리드 팝업)
+- [x] 세션 타임아웃 구현 (비활동 감지, 원형 프로그레스 타이머)
+- [x] 요금제 신청 시스템 (중복 방지, 다운그레이드, 승인/거절 알림)
+- [x] 캘린더 상태 색상 구분 + 읽기전용
+- [x] 발송결과 기간 필터 (시작일~종료일 범위)
+- [x] 문의폼 모달 + SMTP 메일 발송 (하이웍스)
+
+### QTmsg Agent (2026-02-10 ~ 02-12)
+- [x] 11개 Agent 서버 설치 + 중계서버 연결 완료
+- [x] MySQL 11개 발송 테이블 + 로그 테이블 + 월별 자동 생성 이벤트
+- [x] 백엔드 라인그룹 기반 분배 구현
+- [x] 라인그룹 CRUD API + 고객사별 할당 UI
+
+### Sync Agent (2026-02-10 ~ 02-11)
+- [x] Phase 1: 서버 API 4개 + DB 테이블 + 테스트
+- [x] Phase 2: log/config/version API + Admin 모니터링 탭
+
+### 보안 강화 (2026-02-11)
+- [x] app.hanjul.ai 일반 사용자 로그인 차단
+- [x] 로그인 감사 로그 (audit_logs)
+- [x] 로그인 IP 주소 기록 (X-Forwarded-For)
+- [x] 잠금/휴면 계정 로그인 차단 + 상태별 안내
+
+### 직원 버그 리포트 대응 (1~5차, 2026-02-11 ~ 02-13)
+- [x] 1차: max_users 제한, KST 시간 통일, 로고 적용
+- [x] 2차: 발송정책 저장, 선불 충전, 발송내역 멀티테이블, 바이트 초과 차단
+- [x] 3차: 회신번호 통합 매핑, 보관함, 특수문자, 테스트 토스트 중복 등
+- [x] 4차: 통계 KST, 취소 제외, 사용자 필터, 캘린더, AI 시간 보정
+- [x] 5차: 개별회신번호 매칭, 예약대기 검색/삭제, 접속 차단, 머지 미리보기, 엑셀 카운트, AI 문안, MMS 초기화, 광고 토글, 통계 취소 제외, 상태전환
+
+### 스팸필터 테스트 시스템 (2026-02-13)
+- [x] DB + 백엔드 + 프론트 완료
+- [x] Android 앱 "스팸한줄" 개발 (Kotlin, APK 빌드)
+- [x] 디바이스 등록 + LGU+ SMS 수신 성공 확인
+
+### 추가 개선 (2026-02-13)
+- [x] AI 캠페인확정 모달 분리 (AiCampaignSendModal.tsx)
+- [x] AI 메시지 선택 인덱스 수정 (selectedAiMsgIdx)
+- [x] 매핑 모달 컴팩트 축소 (노트북 대응)
+- [x] 예약대기 수신자 목록 성능 최적화 (서버사이드 페이징 50건)
+- [x] 충전 관리 통합 뷰 (대기건 카드 + 통합 이력 테이블)
+- [x] 080 수신거부 콜백 연동 (토큰 인증, 고객사 매칭)
+- [x] 소스맵 비활성화 (frontend)
+- [x] manage-stats.ts SMSQ_SEND dotenv 타이밍 수정
 
 ---
 
-### 🔴 직원 버그 리포트 5차 — 심각 버그 (2026-02-13)
+## 🔴 미해결 버그 / 즉시 처리 필요
 
-**1. 개별회신번호 매칭 없는 고객 발송됨** 🔴 심각
-- 파일: campaigns.ts (AI추천발송 / 직접타겟발송)
-- 현상: 개별회신번호 선택 시 매칭 안 되는 고객도 발송 처리됨
-- 수정: 회신번호 매칭 없는 고객은 발송 제외 + 경고 표시
+**#9-B AI 문안생성 시 광고문구 포함 문제** 🔴
+- 파일: ai.ts (프롬프트)
+- 현상: 광고 토글 OFF인데 AI가 `(광고)` + 무료거부번호를 메시지 본문에 직접 포함하여 생성
+- 방향: AI는 순수 메시지만 생성, 광고문구는 프론트에서 토글에 따라 붙이도록 프롬프트 수정 필요
 
-**2. 예약대기 수신번호 검색 안 됨** 🔴 심각
-- 파일: Dashboard.tsx (예약대기 모달)
-- 현상: 예약대기 목록에서 수신번호 검색해도 결과 안 나옴
-
-**3. 예약대기 개별 수신자 삭제 안 됨** 🔴 심각
-- 파일: Dashboard.tsx (예약대기 모달) + campaigns.ts
-- 현상: 삭제 버튼 누르면 알림만 뜨고 실제 삭제 안 됨, 번호 그대로 남아있음
-
-**4. 발송 중 전체 사용자 접속 차단** 🔴 심각
-- 파일: auth.ts 또는 campaigns.ts (발송 잠금 로직)
-- 현상: 발송 진행 중이면 전체 사용자(관리자 포함) 로그인 불가
-- 발송은 백그라운드 처리인데 접속 자체를 막으면 안 됨
-- 중간관리자는 시간 지나도 계속 접속 불가, 일반 사용자는 간헐적 접속 가능
-
-**5. 머지(개인화) 미리보기 깨짐** 🔴 심각
-- 파일: Dashboard.tsx (직접발송 미리보기)
-- 현상: %기타1%%기타2%%회신번호%%이름% 등 변수가 치환 안 되고 원본 그대로 노출
-- 머지 기능은 고객들이 가장 많이 사용 → 미리보기에서 10건 리스트 확인 가능하게
-
-### 🟡 직원 버그 리포트 5차 — 수정 필요 (2026-02-13)
-
-**6. 엑셀 업로드 중복/신규 카운트 불일치** 🟡
-- 파일: customers.ts (엑셀 업로드)
-- 현상: 5771건 업로드 → 중복 5750건, 신규 0건 표시 (21건 누락), 총 저장 3126건
-- 데이터 정확성 핵심 원칙 → 우선 체크 필요
-
-**7. AI 다중 문안 개인화 변수 일관성 미적용** 🟡
-- 파일: services/ai.ts (AI 프롬프트)
-- 현상: 3개 문안 중 1개만 개인화 적용 (B: "김민수님 전용 쿠폰"), 나머지는 일반 문구
-- 체크: 김민수가 하드코딩인지 최상단 고객 이름인지 확인
-- 수정: AI 프롬프트에 "모든 문안에 개인화 변수 동일 적용" 지시 강화
-
-**8. 채널 변경/AI 재추천 시 MMS 이미지 초기화 안 됨** 🟡
-- 파일: Dashboard.tsx (MMS 이미지 state)
-- 현상: MMS→LMS 변경 또는 AI 재추천 시 이미지 첨부 그대로 남아있음
-- 수정: 채널 변경/재추천 시 mmsImages state 초기화 + 전체삭제 버튼 추가
-
-**9. 광고성 토글 OFF 시 (광고)+무료거부번호 남아있음** 🟡
-- 파일: Dashboard.tsx (광고성 토글)
-- 현상: 광고성 OFF로 해도 문구에 (광고)와 무료거부번호 남아있음
-- 수정: 토글 변경 시 문구 앞뒤 자동 제거/추가
-
-**10. 이번달 통계에서 취소 캠페인 발송 건수 포함** 🟡
-- 파일: Dashboard.tsx 또는 customers.ts (이번달 통계 쿼리)
-- 현상: 취소된 캠페인 3,126건이 총 발송에 잡힘, 금액은 0원
-- manage-stats.ts는 이미 수정됨, 사용자 화면 쿼리 미수정
-
-**11. 특수문자/이모지 발송 불가** 🟡
+**#11 특수문자/이모지 발송 불가** 🟡
 - 파일: Dashboard.tsx (특수문자 팝업)
 - 현상: 특수문자 중 발송 안 되는 것들 존재 (회의 때 언급됨)
 - 수정: 발송 불가 문자 제거 또는 LMS 자동전환 강화
 
-**12. 발송중 → 발송완료 상태 전환 타이밍** 🟡
-- 파일: campaigns.ts (상태 업데이트 로직)
-- 현상: 40분 지나도 "발송중" 표시 → 사용자 혼란
-- Agent 결과 수신 후 자동 갱신 또는 타임아웃 로직 확인
+---
 
-### ✅ 직원 피드백 — 개발 확정 (2026-02-13)
+## 🔍 확인 후 결정
 
-**13. 직접 타겟 발송에 AI 문구 생성 추가**
-- [ ] 파일: Dashboard.tsx (직접타겟 발송 모달)
-- [ ] 직접 타겟으로 추출 후 AI 문구 생성 버튼 추가
-- [ ] 베이직 이상 요금제 사용자 대상
+**중복 접속 정책** — 허용할지 차단할지 정책 결정 필요
 
-**14. MMS 이미지 다중 선택 한번에 첨부**
-- [ ] 파일: Dashboard.tsx (MMS 이미지 첨부)
-- [ ] 파일 선택 창에서 multiple로 3장 한번에 선택 → 슬롯 자동 채우기
+---
 
-**15. 캘린더 편집/복제 제거 → 읽기전용**
-- [ ] 파일: Dashboard.tsx (캘린더 상세)
-- [ ] 편집/복제 버튼 제거, 읽기전용 (상태/채널/대상/예약시간/메시지)
-- [ ] 예약 상태인 건만 "캠페인 취소" 버튼 유지
+## 🔲 진행 예정 작업
 
-**16. 예약 취소 확인 모달 추가**
-- [ ] 파일: Dashboard.tsx (예약대기)
-- [ ] 취소 버튼 → 커스텀 확인 모달 (실수 방지)
-
-**17. SMS 초과 LMS 전환 모달 닫기(X) 버튼 추가**
-- [ ] 파일: Dashboard.tsx (SMS 길이 초과 모달)
-- [ ] 오른쪽 상단 X 닫기 버튼
-
-### 🔍 확인 후 결정
-
-**18. 중복 접속 정책** — 허용할지 차단할지 정책 결정 필요
-**19. 사용자별 DB 조회 안 됨** — 접속 차단 때문인지 별도 버그인지 분리 체크
-
-### 📋 별도 프로젝트 (고객사 온보딩 시점)
-
-**20. 발신번호 관리 체계**
-- 발신번호 관리자 등록 (본인인증 SMS OTP, 사업자등록증, 위임장)
-- 발신번호 등록 (통신이용증명원, 증빙파일, 휴대폰인증)
-- 권한 분리 (중간관리자만 등록/삭제, 사용자는 리스트 조회만)
-
-**21. 회신번호 권한 분리** — company_admin/user 구조 이미 있음, 적용만
-**22. 시간 선택 UX 개선** — 드래그/타임피커 (후순위)
-
-### QTmsg Agent 참고 (트러블슈팅 교훈)
-
-- `sendreq_time`: **반드시 MySQL NOW() 사용** (서버 UTC, JS에서 KST 넣으면 미래시간 → Agent 예약발송 대기)
-- `rsv1`: 1=발송대기, 2=처리중, 3=전송완료, 4=결과수신, 5=월별처리완료
-- `status_code`: 100=대기, 6=SMS성공, 1000=LMS성공
-- Agent는 seqno 기반 폴링 → 이전 seq보다 큰 것만 처리
-- Agent 강제 재시작: `./fkill.sh` → `./startup.sh`
-- Agent 10 경로: `/home/administrator/agent10/`
-- 담당자 테스트(campaigns.ts) INSERT 형식을 기준으로 맞출 것
-
-### 🔲 진행 예정 작업
-
-**080 수신거부 (설 연휴 후)**
+**080 수신거부 (나래인터넷 연동 잔여)**
 - [ ] 나래인터넷에 콜백 URL + 토큰 키값 전달
 - [ ] 나래에 확인: 콜백 실패 재시도 정책, 수신거부 목록 조회 API 여부
 - [ ] Nginx 080callback 경로 나래 IP 화이트리스트 (121.156.104.161~165, 183.98.207.13)
@@ -1733,16 +1344,18 @@ POST /api/sync/purchases   ← 구매내역 벌크 INSERT (배치 최대 1000건
 - [ ] VPN 접근 제한 검토
 
 **브랜딩**
-- [x] "한줄로" 로고 적용 (AI 원본 → 투명배경 추출 → 로그인 페이지 3개 도메인)
-- [x] 상표 출원 완료 (2026-02-10, 특허로, 문자상표 4개 류: 09/35/38/42, 출원료 262,000원)
 - [ ] 파비콘/OG 이미지 적용
 
 **기능 확장**
-- [ ] 카카오톡 브랜드메시지/알림톡 연동 (단가 세분화: 브랜드메시지/알림톡 별도)
-- [x] MMS 발송 기능 (2026-02-12 완료)
+- [ ] 카카오톡 브랜드메시지/알림톡 연동
 - [ ] PDF 승인 기능 (이메일 링크)
-- [x] Android 앱 개발 완료 (스팸필터 자동 테스트, APK 빌드 완료)
-- [x] 스팸필터 테스트 실제 발송+수신 성공 (2026-02-13, LGU+ SMS)
 - [ ] 테스트폰 3대 설치 (현재 LGU+ 1대만, SKT/KT 추가 필요)
-- [ ] 고객사 관리자 기능 세분화 (슈퍼관리자 기능 축소 버전)
-- [ ] 추천 템플릿 8개 → ❌ 불필요 판정 (한줄로 핵심과 반대 방향, 매장폐업 등 부적절)
+- [ ] 고객사 관리자 기능 세분화
+
+**별도 프로젝트 (고객사 온보딩 시점)**
+- [ ] 발신번호 관리 체계 (본인인증, 사업자등록증, 위임장)
+- [ ] 회신번호 권한 분리 (company_admin/user 구조 적용)
+- [ ] 시간 선택 UX 개선 — 드래그/타임피커 (후순위)
+
+**직원 피드백 — 미구현**
+- [ ] #13 직접 타겟 발송에 AI 문구 생성 추가 (베이직 이상)
