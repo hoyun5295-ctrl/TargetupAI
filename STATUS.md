@@ -1323,6 +1323,14 @@ GET  /api/sync/version     ← 최신 버전 정보
 - [x] 요금제 분기: FREE 허용, STARTER 업그레이드 모달, BASIC 이상 정상 사용
 - [x] 직접발송(showDirectSend)에는 미적용, 직접타겟발송(showTargetSend)에만 적용
 
+### SMS AI 문구 생성 광고 오버헤드 바이트 보정 (2026-02-13)
+- [x] getAvailableSmsBytes() 헬퍼 추가 (광고: 64바이트, 비광고: 88바이트 동적 계산)
+- [x] generateMessages() SMS 가용 바이트 동적 계산 (isAd + rejectNumber 기반)
+- [x] AI 프롬프트에 광고/비광고별 정확한 바이트 제한 명시 (기존 90바이트 하드코딩 제거)
+- [x] BRAND_SYSTEM_PROMPT SMS 규칙 수정 ("사용자 메시지에 명시된 바이트 값을 따르세요")
+- [x] recommendTarget() 채널 선택 기준에 "광고 시 약 64바이트, 비광고 시 약 88바이트" 명시
+- [x] Dashboard.tsx handleAiGenerateChannelMessage()에 isAd 파라미터 추가 (기존 누락)
+
 ---
 
 ## 🔴 미해결 버그 / 즉시 처리 필요
