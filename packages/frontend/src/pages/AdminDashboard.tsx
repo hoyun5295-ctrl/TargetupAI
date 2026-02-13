@@ -131,12 +131,33 @@ const [statsDetailLoading, setStatsDetailLoading] = useState(false);
 const [statsDetailInfo, setStatsDetailInfo] = useState<{ date: string; companyName: string } | null>(null);
   // 예약 캠페인 관리
   const [scheduledCampaigns, setScheduledCampaigns] = useState<any[]>([]);
+  const [scheduledTotal, setScheduledTotal] = useState(0);
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [cancelTarget, setCancelTarget] = useState<{ id: string; name: string } | null>(null);
   const [cancelReason, setCancelReason] = useState('');
   const [scheduledPage, setScheduledPage] = useState(1);
-  const scheduledPerPage = 10;
+  const scheduledPerPage = 20;
   const [scheduledSearch, setScheduledSearch] = useState('');
+  const [scheduledCompanyFilter, setScheduledCompanyFilter] = useState('');
+  const [scheduledStatusFilter, setScheduledStatusFilter] = useState('');
+  const [scheduledStartDate, setScheduledStartDate] = useState('');
+  const [scheduledEndDate, setScheduledEndDate] = useState('');
+  const [scheduledLoginId, setScheduledLoginId] = useState('');
+
+  // SMS 상세 조회 모달
+  const [smsDetailModal, setSmsDetailModal] = useState(false);
+  const [smsDetailCampaign, setSmsDetailCampaign] = useState<any>(null);
+  const [smsDetailRows, setSmsDetailRows] = useState<any[]>([]);
+  const [smsDetailTotal, setSmsDetailTotal] = useState(0);
+  const [smsDetailPage, setSmsDetailPage] = useState(1);
+  const [smsDetailStatus, setSmsDetailStatus] = useState('');
+  const [smsDetailSearchType, setSmsDetailSearchType] = useState('dest_no');
+  const [smsDetailSearchValue, setSmsDetailSearchValue] = useState('');
+  const [smsDetailLoading, setSmsDetailLoading] = useState(false);
+
+  // 전체 캠페인 날짜필터
+  const [allCampaignsStartDate, setAllCampaignsStartDate] = useState('');
+  const [allCampaignsEndDate, setAllCampaignsEndDate] = useState('');
 
   // 사용자 검색/필터
   const [userSearch, setUserSearch] = useState('');
@@ -754,15 +775,24 @@ const handleSendBillingEmail = async () => {
     }
   };
 
-  const loadScheduledCampaigns = async () => {
+  const loadScheduledCampaigns = async (page = 1) => {
     try {
       const token = localStorage.getItem('token');
-      const res = await fetch('/api/admin/campaigns/scheduled', {
+      const params = new URLSearchParams({ page: String(page), limit: String(scheduledPerPage) });
+      if (scheduledSearch) params.set('search', scheduledSearch);
+      if (scheduledCompanyFilter) params.set('companyId', scheduledCompanyFilter);
+      if (scheduledStatusFilter) params.set('status', scheduledStatusFilter);
+      if (scheduledStartDate) params.set('startDate', scheduledStartDate);
+      if (scheduledEndDate) params.set('endDate', scheduledEndDate);
+      if (scheduledLoginId) params.set('loginId', scheduledLoginId);
+      const res = await fetch(`/api/admin/campaigns/scheduled?${params}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.ok) {
         const data = await res.json();
         setScheduledCampaigns(data.campaigns || []);
+        setScheduledTotal(data.total || 0);
+        setScheduledPage(page);
       }
     } catch (error) {
       console.error('예약 캠페인 로드 실패:', error);
@@ -895,6 +925,8 @@ const handleSendBillingEmail = async () => {
       if (allCampaignsSearch) params.set('search', allCampaignsSearch);
       if (allCampaignsStatus) params.set('status', allCampaignsStatus);
       if (allCampaignsCompany) params.set('companyId', allCampaignsCompany);
+      if (allCampaignsStartDate) params.set('startDate', allCampaignsStartDate);
+      if (allCampaignsEndDate) params.set('endDate', allCampaignsEndDate);
       const res = await fetch(`/api/admin/campaigns/all?${params}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -908,6 +940,43 @@ const handleSendBillingEmail = async () => {
       console.error('전체 캠페인 로드 실패:', error);
   }
 };
+
+  // SMS 상세 조회
+  const loadSmsDetail = async (campaignId: string, page = 1) => {
+    setSmsDetailLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      const params = new URLSearchParams({ page: String(page), limit: '50' });
+      if (smsDetailStatus) params.set('status', smsDetailStatus);
+      if (smsDetailSearchType && smsDetailSearchValue) {
+        params.set('searchType', smsDetailSearchType);
+        params.set('searchValue', smsDetailSearchValue);
+      }
+      const res = await fetch(`/api/admin/campaigns/${campaignId}/sms-detail?${params}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setSmsDetailCampaign(data.campaign);
+        setSmsDetailRows(data.detail || []);
+        setSmsDetailTotal(data.total || 0);
+        setSmsDetailPage(page);
+      }
+    } catch (error) {
+      console.error('SMS 상세 조회 실패:', error);
+    } finally {
+      setSmsDetailLoading(false);
+    }
+  };
+
+  const openSmsDetail = (campaignId: string) => {
+    setSmsDetailStatus('');
+    setSmsDetailSearchType('dest_no');
+    setSmsDetailSearchValue('');
+    setSmsDetailPage(1);
+    setSmsDetailModal(true);
+    loadSmsDetail(campaignId, 1);
+  };
 
 const loadSendStats = async (page = 1) => {
   try {
@@ -1715,7 +1784,7 @@ const handleApproveRequest = async (id: string) => {
                     : 'border-transparent text-gray-500 hover:text-gray-700'
                 }`}
               >
-                전체 캠페인
+                캠페인 관리
               </button>
               <button
                 onClick={() => setActiveTab('plans')}
@@ -2093,24 +2162,37 @@ const handleApproveRequest = async (id: string) => {
         {/* 예약 관리 탭 */}
         {activeTab === 'scheduled' && (
           <div className="bg-white rounded-lg shadow">
-            <div className="px-6 py-4 border-b flex justify-between items-center">
+            <div className="px-6 py-4 border-b">
               <h2 className="text-lg font-semibold">예약 캠페인 관리</h2>
-              <span className="text-sm text-gray-500">총 {scheduledCampaigns.length}건</span>
             </div>
 
-            <div className="px-6 py-3 border-b bg-gray-50 flex gap-4 items-center">
-              <input
-                type="text"
-                value={scheduledSearch}
-                onChange={(e) => { setScheduledSearch(e.target.value); setScheduledPage(1); }}
-                placeholder="🔍 고객사명으로 검색..."
-                className="w-full max-w-xs px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-              />
-              {scheduledSearch && (
-                <span className="text-sm text-gray-500">
-                  {scheduledCampaigns.filter(c => (c.company_name || '').toLowerCase().includes(scheduledSearch.toLowerCase())).length}건 검색됨
-                </span>
-              )}
+            {/* 검색 필터 */}
+            <div className="px-6 py-3 border-b bg-gray-50 flex flex-wrap gap-3 items-center">
+              <select value={scheduledCompanyFilter} onChange={(e) => setScheduledCompanyFilter(e.target.value)}
+                className="px-3 py-2 border rounded-lg text-sm bg-white">
+                <option value="">전체 고객사</option>
+                {companies.map(c => <option key={c.id} value={c.id}>{c.company_name}</option>)}
+              </select>
+              <select value={scheduledStatusFilter} onChange={(e) => setScheduledStatusFilter(e.target.value)}
+                className="px-3 py-2 border rounded-lg text-sm bg-white">
+                <option value="">전체 상태</option>
+                <option value="scheduled">예약</option>
+                <option value="cancelled">취소</option>
+              </select>
+              <input type="date" value={scheduledStartDate} onChange={(e) => setScheduledStartDate(e.target.value)}
+                className="px-3 py-2 border rounded-lg text-sm" />
+              <span className="text-gray-400">~</span>
+              <input type="date" value={scheduledEndDate} onChange={(e) => setScheduledEndDate(e.target.value)}
+                className="px-3 py-2 border rounded-lg text-sm" />
+              <input type="text" value={scheduledLoginId} onChange={(e) => setScheduledLoginId(e.target.value)}
+                placeholder="계정(로그인ID)" className="w-36 px-3 py-2 border rounded-lg text-sm"
+                onKeyDown={(e) => e.key === 'Enter' && loadScheduledCampaigns(1)} />
+              <input type="text" value={scheduledSearch} onChange={(e) => setScheduledSearch(e.target.value)}
+                placeholder="캠페인명/회사명 검색" className="w-48 px-3 py-2 border rounded-lg text-sm"
+                onKeyDown={(e) => e.key === 'Enter' && loadScheduledCampaigns(1)} />
+              <button onClick={() => loadScheduledCampaigns(1)}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">조회</button>
+              <span className="text-sm text-gray-500 ml-auto">총 {scheduledTotal}건</span>
             </div>
 
             <div className="overflow-x-auto">
@@ -2120,37 +2202,35 @@ const handleApproveRequest = async (id: string) => {
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 whitespace-nowrap">고객사</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 whitespace-nowrap">캠페인명</th>
                     <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">대상</th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">생성자</th>
                     <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">등록일시</th>
                     <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">예약시간</th>
                     <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">상태</th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">상세</th>
                     <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">관리</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
                   {scheduledCampaigns.length === 0 ? (
-                    <tr>
-                      <td colSpan={6} className="px-6 py-12 text-center text-gray-500">
-                        예약된 캠페인이 없습니다.
-                      </td>
-                    </tr>
-                  ) : (
-                    scheduledCampaigns
-                      .filter(c => !scheduledSearch || (c.company_name || '').toLowerCase().includes(scheduledSearch.toLowerCase()))
-                      .slice((scheduledPage - 1) * scheduledPerPage, scheduledPage * scheduledPerPage)
-                      .map((campaign) => (
+                    <tr><td colSpan={9} className="px-6 py-12 text-center text-gray-500">예약/취소 캠페인이 없습니다.</td></tr>
+                  ) : scheduledCampaigns.map((campaign) => (
                       <tr key={campaign.id} className="hover:bg-gray-50">
                         <td className="px-4 py-3 text-gray-900">
                           {campaign.company_name}
-                          <span className="text-gray-400 ml-1">({campaign.company_code})</span>
+                          <span className="text-gray-400 ml-1 text-xs">({campaign.company_code})</span>
                         </td>
                         <td className="px-4 py-3 text-gray-900">{campaign.campaign_name}</td>
                         <td className="px-4 py-3 text-center text-gray-500 whitespace-nowrap">
                           {campaign.target_count?.toLocaleString() || 0}명
                         </td>
-                        <td className="px-4 py-3 text-center text-gray-500 whitespace-nowrap">
+                        <td className="px-4 py-3 text-center text-xs text-gray-500 whitespace-nowrap">
+                          {campaign.created_by_name || '-'}
+                          {campaign.created_by_login && <span className="text-gray-400 ml-0.5">({campaign.created_by_login})</span>}
+                        </td>
+                        <td className="px-4 py-3 text-center text-gray-500 whitespace-nowrap text-xs">
                           {campaign.created_at ? formatDateTime(campaign.created_at) : '-'}
                         </td>
-                        <td className="px-4 py-3 text-center text-gray-500 whitespace-nowrap">
+                        <td className="px-4 py-3 text-center text-gray-500 whitespace-nowrap text-xs">
                           {campaign.scheduled_at ? formatDateTime(campaign.scheduled_at) : '-'}
                         </td>
                         <td className="px-4 py-3 text-center">
@@ -2158,7 +2238,7 @@ const handleApproveRequest = async (id: string) => {
                             <span className="px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">예약</span>
                           ) : (
                             <div>
-                              <span className="px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">취소됨</span>
+                              <span className="px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">취소</span>
                               {campaign.cancelled_by_type === 'super_admin' && (
                                 <span className="ml-1 text-xs text-red-500">(관리자)</span>
                               )}
@@ -2166,50 +2246,40 @@ const handleApproveRequest = async (id: string) => {
                           )}
                         </td>
                         <td className="px-4 py-3 text-center">
+                          <button onClick={() => openSmsDetail(campaign.id)}
+                            className="text-blue-600 hover:text-blue-800 text-xs font-medium">[조회]</button>
+                        </td>
+                        <td className="px-4 py-3 text-center">
                           {campaign.status === 'scheduled' ? (
-                            <button
-                              onClick={() => openCancelModal(campaign.id, campaign.campaign_name)}
-                              className="text-red-600 hover:text-red-800 text-sm"
-                            >
-                              취소
-                            </button>
+                            <button onClick={() => openCancelModal(campaign.id, campaign.campaign_name)}
+                              className="text-red-600 hover:text-red-800 text-sm">취소</button>
                           ) : (
-                            <span className="text-xs text-gray-400">
-                              {campaign.cancel_reason && `사유: ${campaign.cancel_reason}`}
+                            <span className="text-xs text-gray-400" title={campaign.cancel_reason || ''}>
+                              {campaign.cancel_reason ? `사유: ${campaign.cancel_reason.substring(0, 15)}${campaign.cancel_reason.length > 15 ? '…' : ''}` : '-'}
                             </span>
                           )}
                         </td>
                       </tr>
                     ))
-                  )}
+                  }
                 </tbody>
               </table>
             </div>
 
-            {/* 페이지네이션 */}
-            {(() => {
-              const filtered = scheduledCampaigns.filter(c => !scheduledSearch || (c.company_name || '').toLowerCase().includes(scheduledSearch.toLowerCase()));
-              const totalPages = Math.ceil(filtered.length / scheduledPerPage);
-              if (filtered.length <= scheduledPerPage) return null;
-              return (
-                <div className="px-6 py-4 border-t flex items-center justify-between">
-                  <span className="text-sm text-gray-500">
-                    총 {filtered.length}건 중 {(scheduledPage - 1) * scheduledPerPage + 1}-{Math.min(scheduledPage * scheduledPerPage, filtered.length)}
-                  </span>
-                  <div className="flex gap-1">
-                    <button onClick={() => setScheduledPage(p => Math.max(1, p - 1))} disabled={scheduledPage === 1}
-                      className="px-3 py-1 rounded border text-sm disabled:opacity-40 hover:bg-gray-50">◀ 이전</button>
-                    {Array.from({ length: totalPages }, (_, i) => i + 1).map(p => (
-                      <button key={p} onClick={() => setScheduledPage(p)}
-                        className={`px-3 py-1 rounded border text-sm ${scheduledPage === p ? 'bg-blue-600 text-white border-blue-600' : 'hover:bg-gray-50'}`}>{p}</button>
-                    ))}
-                    <button onClick={() => setScheduledPage(p => Math.min(totalPages, p + 1))}
-                      disabled={scheduledPage >= totalPages}
-                      className="px-3 py-1 rounded border text-sm disabled:opacity-40 hover:bg-gray-50">다음 ▶</button>
-                  </div>
+            {/* 서버사이드 페이징 */}
+            {scheduledTotal > scheduledPerPage && (
+              <div className="px-6 py-4 border-t flex items-center justify-between">
+                <span className="text-sm text-gray-500">총 {scheduledTotal}건</span>
+                <div className="flex gap-1">
+                  <button onClick={() => loadScheduledCampaigns(Math.max(1, scheduledPage - 1))} disabled={scheduledPage === 1}
+                    className="px-3 py-1 rounded border text-sm disabled:opacity-40 hover:bg-gray-50">◀</button>
+                  <span className="px-3 py-1 text-sm text-gray-600">{scheduledPage} / {Math.ceil(scheduledTotal / scheduledPerPage)}</span>
+                  <button onClick={() => loadScheduledCampaigns(Math.min(Math.ceil(scheduledTotal / scheduledPerPage), scheduledPage + 1))}
+                    disabled={scheduledPage >= Math.ceil(scheduledTotal / scheduledPerPage)}
+                    className="px-3 py-1 rounded border text-sm disabled:opacity-40 hover:bg-gray-50">▶</button>
                 </div>
-              );
-            })()}
+              </div>
+            )}
             </div>
         )}
 
@@ -2775,47 +2845,31 @@ const handleApproveRequest = async (id: string) => {
           <div className="bg-white rounded-lg shadow">
             <div className="px-6 py-4 border-b">
               <div className="flex flex-wrap gap-3 items-center">
-                <input
-                  type="text"
-                  placeholder="캠페인명 / 회사명 검색"
-                  value={allCampaignsSearch}
-                  onChange={(e) => setAllCampaignsSearch(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && loadAllCampaigns(1)}
-                  className="px-3 py-2 border rounded-lg text-sm w-60"
-                />
-                <select
-                  value={allCampaignsStatus}
-                  onChange={(e) => { setAllCampaignsStatus(e.target.value); }}
-                  className="px-3 py-2 border rounded-lg text-sm"
-                >
+                <select value={allCampaignsCompany} onChange={(e) => setAllCampaignsCompany(e.target.value)}
+                  className="px-3 py-2 border rounded-lg text-sm">
+                  <option value="">전체 고객사</option>
+                  {companies.map(c => <option key={c.id} value={c.id}>{c.company_name}</option>)}
+                </select>
+                <select value={allCampaignsStatus} onChange={(e) => setAllCampaignsStatus(e.target.value)}
+                  className="px-3 py-2 border rounded-lg text-sm">
                   <option value="">전체 상태</option>
                   <option value="draft">임시저장</option>
                   <option value="scheduled">예약</option>
+                  <option value="sending">발송중</option>
                   <option value="completed">완료</option>
                   <option value="cancelled">취소</option>
                 </select>
-                <select
-                  value={allCampaignsCompany}
-                  onChange={(e) => { setAllCampaignsCompany(e.target.value); }}
-                  className="px-3 py-2 border rounded-lg text-sm"
-                >
-                  <option value="">전체 회사</option>
-                  {companies.map(c => (
-                    <option key={c.id} value={c.id}>{c.company_name}</option>
-                  ))}
-                </select>
-                <button
-                  onClick={() => loadAllCampaigns(1)}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700"
-                >
-                  검색
-                </button>
-                <button
-                  onClick={() => { setAllCampaignsSearch(''); setAllCampaignsStatus(''); setAllCampaignsCompany(''); setTimeout(() => loadAllCampaigns(1), 0); }}
-                  className="px-4 py-2 border rounded-lg text-sm text-gray-600 hover:bg-gray-50"
-                >
-                  초기화
-                </button>
+                <input type="date" value={allCampaignsStartDate} onChange={(e) => setAllCampaignsStartDate(e.target.value)}
+                  className="px-3 py-2 border rounded-lg text-sm" />
+                <span className="text-gray-400">~</span>
+                <input type="date" value={allCampaignsEndDate} onChange={(e) => setAllCampaignsEndDate(e.target.value)}
+                  className="px-3 py-2 border rounded-lg text-sm" />
+                <input type="text" placeholder="캠페인명 / 회사명 / 계정" value={allCampaignsSearch}
+                  onChange={(e) => setAllCampaignsSearch(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && loadAllCampaigns(1)}
+                  className="px-3 py-2 border rounded-lg text-sm w-52" />
+                <button onClick={() => loadAllCampaigns(1)}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">조회</button>
                 <span className="text-sm text-gray-500 ml-auto">총 {allCampaignsTotal}건</span>
               </div>
             </div>
@@ -2824,72 +2878,87 @@ const handleApproveRequest = async (id: string) => {
               <table className="w-full text-sm">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="px-4 py-3 text-left text-gray-600 font-medium">회사</th>
-                    <th className="px-4 py-3 text-left text-gray-600 font-medium">캠페인명</th>
-                    <th className="px-4 py-3 text-center text-gray-600 font-medium">유형</th>
-                    <th className="px-4 py-3 text-center text-gray-600 font-medium">상태</th>
-                    <th className="px-4 py-3 text-center text-gray-600 font-medium">대상</th>
-                    <th className="px-4 py-3 text-center text-gray-600 font-medium">발송</th>
-                    <th className="px-4 py-3 text-center text-gray-600 font-medium">성공</th>
-                    <th className="px-4 py-3 text-center text-gray-600 font-medium">실패</th>
-                    <th className="px-4 py-3 text-center text-gray-600 font-medium">발송일</th>
-                    <th className="px-4 py-3 text-center text-gray-600 font-medium">생성일</th>
+                    <th className="px-3 py-3 text-left text-gray-600 font-medium">회사(계정)</th>
+                    <th className="px-3 py-3 text-left text-gray-600 font-medium">캠페인명</th>
+                    <th className="px-3 py-3 text-center text-gray-600 font-medium">발송시간</th>
+                    <th className="px-3 py-3 text-center text-gray-600 font-medium">유형</th>
+                    <th className="px-3 py-3 text-center text-gray-600 font-medium">문자</th>
+                    <th className="px-3 py-3 text-center text-gray-600 font-medium">총건수</th>
+                    <th className="px-3 py-3 text-center text-gray-600 font-medium">성공</th>
+                    <th className="px-3 py-3 text-center text-gray-600 font-medium">실패</th>
+                    <th className="px-3 py-3 text-center text-gray-600 font-medium">대기</th>
+                    <th className="px-3 py-3 text-center text-gray-600 font-medium">상태</th>
+                    <th className="px-3 py-3 text-center text-gray-600 font-medium">상세</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
                   {allCampaigns.length === 0 ? (
-                    <tr><td colSpan={10} className="px-4 py-12 text-center text-gray-400">캠페인이 없습니다.</td></tr>
-                  ) : allCampaigns.map((c: any) => (
+                    <tr><td colSpan={11} className="px-4 py-12 text-center text-gray-400">캠페인이 없습니다.</td></tr>
+                  ) : allCampaigns.map((c: any) => {
+                    const sent = parseInt(c.total_sent) || 0;
+                    const success = parseInt(c.total_success) || 0;
+                    const fail = parseInt(c.total_fail) || 0;
+                    const pending = Math.max(0, sent - success - fail);
+                    return (
                     <tr key={c.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-3 text-gray-700">{c.company_name || '-'}</td>
-                      <td className="px-4 py-3 font-medium text-gray-900">{c.name}</td>
-                      <td className="px-4 py-3 text-center">
+                      <td className="px-3 py-3 text-gray-700">
+                        <div>{c.company_name || '-'}</div>
+                        {c.created_by_login && <div className="text-xs text-gray-400">{c.created_by_login}</div>}
+                      </td>
+                      <td className="px-3 py-3 font-medium text-gray-900">{c.name}</td>
+                      <td className="px-3 py-3 text-center text-gray-500 text-xs whitespace-nowrap">
+                        {c.last_sent_at ? formatDateTimeShort(c.last_sent_at) : c.scheduled_at ? formatDateTimeShort(c.scheduled_at) : '-'}
+                      </td>
+                      <td className="px-3 py-3 text-center">
                         <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${
                           c.campaign_type === 'ai' ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-700'
-                        }`}>
-                          {c.campaign_type === 'ai' ? 'AI' : '수동'}
-                        </span>
+                        }`}>{c.campaign_type === 'ai' ? 'AI' : '수동'}</span>
                       </td>
-                      <td className="px-4 py-3 text-center">
+                      <td className="px-3 py-3 text-center text-xs text-gray-600">{c.message_type?.toUpperCase() || '-'}</td>
+                      <td className="px-3 py-3 text-center text-gray-700">{sent.toLocaleString()}</td>
+                      <td className="px-3 py-3 text-center text-green-600 font-medium">{success.toLocaleString()}</td>
+                      <td className="px-3 py-3 text-center text-red-600">{fail.toLocaleString()}</td>
+                      <td className="px-3 py-3 text-center text-amber-600">{pending.toLocaleString()}</td>
+                      <td className="px-3 py-3 text-center">
                         <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${
                           c.status === 'completed' ? 'bg-green-100 text-green-700' :
-                          c.status === 'scheduled' ? 'bg-amber-100 text-amber-700' :
+                          c.status === 'sending' ? 'bg-amber-100 text-amber-700' :
+                          c.status === 'scheduled' ? 'bg-blue-100 text-blue-700' :
                           c.status === 'cancelled' ? 'bg-red-100 text-red-700' :
                           'bg-gray-100 text-gray-700'
                         }`}>
-                          {c.status === 'completed' ? '완료' : c.status === 'scheduled' ? '예약' : c.status === 'cancelled' ? '취소' : c.status === 'draft' ? '임시' : c.status}
+                          {c.status === 'completed' ? '완료' : c.status === 'sending' ? '발송중' : c.status === 'scheduled' ? '예약' : c.status === 'cancelled' ? '취소' : c.status === 'draft' ? '임시' : c.status}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-center text-gray-700">{(c.last_target_count || 0).toLocaleString()}</td>
-                      <td className="px-4 py-3 text-center text-gray-700">{(parseInt(c.total_sent) || 0).toLocaleString()}</td>
-                      <td className="px-4 py-3 text-center text-green-600 font-medium">{(parseInt(c.total_success) || 0).toLocaleString()}</td>
-                      <td className="px-4 py-3 text-center text-red-600">{(parseInt(c.total_fail) || 0).toLocaleString()}</td>
-                      <td className="px-4 py-3 text-center text-gray-500 text-xs">
-                        {c.last_sent_at ? formatDateTimeShort(c.last_sent_at) : '-'}
-                      </td>
-                      <td className="px-4 py-3 text-center text-gray-500 text-xs">
-                        {formatDate(c.created_at)}
+                      <td className="px-3 py-3 text-center">
+                        {c.status !== 'draft' && (
+                          <button onClick={() => openSmsDetail(c.id)}
+                            className="text-blue-600 hover:text-blue-800 text-xs font-medium">[조회]</button>
+                        )}
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
 
-            {/* 페이징 */}
             {allCampaignsTotal > 10 && (
-              <div className="px-6 py-4 border-t flex justify-center gap-2">
-                {Array.from({ length: Math.ceil(allCampaignsTotal / 10) }, (_, i) => i + 1).slice(
-                  Math.max(0, allCampaignsPage - 3), Math.min(Math.ceil(allCampaignsTotal / 10), allCampaignsPage + 2)
-                ).map(p => (
-                  <button
-                    key={p}
-                    onClick={() => loadAllCampaigns(p)}
-                    className={`w-8 h-8 rounded text-sm ${p === allCampaignsPage ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}
-                  >
-                    {p}
-                  </button>
-                ))}
+              <div className="px-6 py-4 border-t flex items-center justify-between">
+                <span className="text-sm text-gray-500">총 {allCampaignsTotal}건</span>
+                <div className="flex gap-1">
+                  <button onClick={() => loadAllCampaigns(Math.max(1, allCampaignsPage - 1))} disabled={allCampaignsPage === 1}
+                    className="px-3 py-1 rounded border text-sm disabled:opacity-40 hover:bg-gray-50">◀</button>
+                  {Array.from({ length: Math.ceil(allCampaignsTotal / 10) }, (_, i) => i + 1).slice(
+                    Math.max(0, allCampaignsPage - 3), Math.min(Math.ceil(allCampaignsTotal / 10), allCampaignsPage + 2)
+                  ).map(p => (
+                    <button key={p} onClick={() => loadAllCampaigns(p)}
+                      className={`w-8 h-8 rounded text-sm ${p === allCampaignsPage ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}>{p}</button>
+                  ))}
+                  <button onClick={() => loadAllCampaigns(Math.min(Math.ceil(allCampaignsTotal / 10), allCampaignsPage + 1))}
+                    disabled={allCampaignsPage >= Math.ceil(allCampaignsTotal / 10)}
+                    className="px-3 py-1 rounded border text-sm disabled:opacity-40 hover:bg-gray-50">▶</button>
+                </div>
               </div>
             )}
           </div>
@@ -4256,6 +4325,125 @@ const handleApproveRequest = async (id: string) => {
               </div>
               )}
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* SMS 상세 조회 모달 */}
+      {smsDetailModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl overflow-hidden animate-in fade-in zoom-in" style={{ maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
+            {/* 헤더 */}
+            <div className="px-6 py-4 border-b bg-gradient-to-r from-blue-50 to-white flex items-center justify-between flex-shrink-0">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">📨 발송 상세 내역</h3>
+                {smsDetailCampaign && (
+                  <div className="flex flex-wrap gap-3 mt-1 text-xs text-gray-500">
+                    <span>{smsDetailCampaign.company_name} ({smsDetailCampaign.created_by_login || '-'})</span>
+                    <span>•</span>
+                    <span className="font-medium text-gray-700">{smsDetailCampaign.campaign_name}</span>
+                    <span>•</span>
+                    <span>{smsDetailCampaign.message_type?.toUpperCase() || '-'}</span>
+                    <span>•</span>
+                    <span className={`font-medium ${smsDetailCampaign.status === 'completed' ? 'text-green-600' : smsDetailCampaign.status === 'scheduled' ? 'text-blue-600' : 'text-gray-600'}`}>
+                      {smsDetailCampaign.status === 'completed' ? '완료' : smsDetailCampaign.status === 'scheduled' ? '예약' : smsDetailCampaign.status === 'sending' ? '발송중' : smsDetailCampaign.status === 'cancelled' ? '취소' : smsDetailCampaign.status}
+                    </span>
+                  </div>
+                )}
+              </div>
+              <button onClick={() => setSmsDetailModal(false)}
+                className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors">✕</button>
+            </div>
+
+            {/* 필터 */}
+            <div className="px-6 py-3 border-b bg-gray-50 flex flex-wrap gap-3 items-center flex-shrink-0">
+              <select value={smsDetailStatus} onChange={(e) => setSmsDetailStatus(e.target.value)}
+                className="px-3 py-1.5 border rounded-lg text-sm bg-white">
+                <option value="">전체 결과</option>
+                <option value="success">성공</option>
+                <option value="fail">실패</option>
+                <option value="pending">대기</option>
+              </select>
+              <select value={smsDetailSearchType} onChange={(e) => setSmsDetailSearchType(e.target.value)}
+                className="px-3 py-1.5 border rounded-lg text-sm bg-white">
+                <option value="dest_no">수신번호</option>
+                <option value="call_back">회신번호</option>
+              </select>
+              <input type="text" value={smsDetailSearchValue} onChange={(e) => setSmsDetailSearchValue(e.target.value)}
+                placeholder="번호 검색..." className="w-40 px-3 py-1.5 border rounded-lg text-sm"
+                onKeyDown={(e) => e.key === 'Enter' && smsDetailCampaign && loadSmsDetail(smsDetailCampaign.id, 1)} />
+              <button onClick={() => smsDetailCampaign && loadSmsDetail(smsDetailCampaign.id, 1)}
+                className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">검색</button>
+              <span className="text-sm text-gray-500 ml-auto">총 {smsDetailTotal.toLocaleString()}건</span>
+            </div>
+
+            {/* 테이블 */}
+            <div className="overflow-auto flex-1">
+              {smsDetailLoading ? (
+                <div className="flex items-center justify-center py-20 text-gray-400">
+                  <svg className="animate-spin h-6 w-6 mr-2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" strokeWidth="3" strokeDasharray="60" strokeLinecap="round" /></svg>
+                  조회 중...
+                </div>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 sticky top-0">
+                    <tr>
+                      <th className="px-3 py-2.5 text-center text-xs font-medium text-gray-500 whitespace-nowrap">No.</th>
+                      <th className="px-3 py-2.5 text-center text-xs font-medium text-gray-500 whitespace-nowrap">발송요청</th>
+                      <th className="px-3 py-2.5 text-center text-xs font-medium text-gray-500 whitespace-nowrap">수신번호</th>
+                      <th className="px-3 py-2.5 text-center text-xs font-medium text-gray-500 whitespace-nowrap">회신번호</th>
+                      <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-500 whitespace-nowrap">메시지 내용</th>
+                      <th className="px-3 py-2.5 text-center text-xs font-medium text-gray-500 whitespace-nowrap">타입</th>
+                      <th className="px-3 py-2.5 text-center text-xs font-medium text-gray-500 whitespace-nowrap">통신사</th>
+                      <th className="px-3 py-2.5 text-center text-xs font-medium text-gray-500 whitespace-nowrap">결과</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {smsDetailRows.length === 0 ? (
+                      <tr><td colSpan={8} className="px-4 py-12 text-center text-gray-400">
+                        {smsDetailCampaign?.status === 'scheduled' ? '아직 발송 전입니다.' : '발송 내역이 없습니다.'}
+                      </td></tr>
+                    ) : smsDetailRows.map((r: any, idx: number) => (
+                      <tr key={r.seqno} className="hover:bg-blue-50/30">
+                        <td className="px-3 py-2 text-center text-xs text-gray-400">{(smsDetailPage - 1) * 50 + idx + 1}</td>
+                        <td className="px-3 py-2 text-center text-xs text-gray-500 whitespace-nowrap">{r.sendreqTime ? new Date(r.sendreqTime).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '-'}</td>
+                        <td className="px-3 py-2 text-center text-gray-700 font-mono text-xs">{r.destNo}</td>
+                        <td className="px-3 py-2 text-center text-gray-500 font-mono text-xs">{r.callBack}</td>
+                        <td className="px-3 py-2 text-gray-700 text-xs max-w-xs">
+                          <div className="truncate cursor-pointer" title={r.msgContents}>
+                            {r.msgContents ? (r.msgContents.length > 40 ? r.msgContents.substring(0, 40) + '…' : r.msgContents) : '-'}
+                          </div>
+                        </td>
+                        <td className="px-3 py-2 text-center text-xs text-gray-600">{r.msgType}</td>
+                        <td className="px-3 py-2 text-center text-xs text-gray-600">{r.carrier}</td>
+                        <td className="px-3 py-2 text-center">
+                          <span className={`inline-flex px-1.5 py-0.5 rounded text-xs font-medium ${
+                            [6, 1000, 1800].includes(r.statusCode) ? 'bg-green-100 text-green-700' :
+                            r.statusCode === 100 ? 'bg-amber-100 text-amber-700' :
+                            'bg-red-100 text-red-700'
+                          }`}>{r.statusText}</span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            {/* 하단 페이징 */}
+            {smsDetailTotal > 50 && (
+              <div className="px-6 py-3 border-t bg-gray-50 flex items-center justify-between flex-shrink-0">
+                <span className="text-xs text-gray-500">{smsDetailPage} / {Math.ceil(smsDetailTotal / 50)} 페이지</span>
+                <div className="flex gap-1">
+                  <button onClick={() => smsDetailCampaign && loadSmsDetail(smsDetailCampaign.id, Math.max(1, smsDetailPage - 1))}
+                    disabled={smsDetailPage === 1}
+                    className="px-3 py-1 rounded border text-xs disabled:opacity-40 hover:bg-white">◀ 이전</button>
+                  <button onClick={() => smsDetailCampaign && loadSmsDetail(smsDetailCampaign.id, Math.min(Math.ceil(smsDetailTotal / 50), smsDetailPage + 1))}
+                    disabled={smsDetailPage >= Math.ceil(smsDetailTotal / 50)}
+                    className="px-3 py-1 rounded border text-xs disabled:opacity-40 hover:bg-white">다음 ▶</button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

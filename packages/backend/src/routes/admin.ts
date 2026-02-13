@@ -317,20 +317,73 @@ router.delete('/companies/:id', authenticate, requireSuperAdmin, async (req: Req
 // 예약된 캠페인 목록 조회 (전체 고객사)
 router.get('/campaigns/scheduled', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 20;
+    const offset = (page - 1) * limit;
+    const search = (req.query.search as string) || '';
+    const companyId = (req.query.companyId as string) || '';
+    const status = (req.query.status as string) || '';       // scheduled / cancelled / '' (all)
+    const startDate = (req.query.startDate as string) || '';
+    const endDate = (req.query.endDate as string) || '';
+    const loginId = (req.query.loginId as string) || '';     // 사용자 계정 검색
+
+    let where = `WHERE c.status IN ('scheduled', 'cancelled')`;
+    const params: any[] = [];
+    let paramIdx = 1;
+
+    if (status) {
+      where += ` AND c.status = $${paramIdx}`;
+      params.push(status);
+      paramIdx++;
+    }
+    if (companyId) {
+      where += ` AND c.company_id = $${paramIdx}`;
+      params.push(companyId);
+      paramIdx++;
+    }
+    if (startDate) {
+      where += ` AND COALESCE(c.scheduled_at, c.created_at) >= $${paramIdx}::date`;
+      params.push(startDate);
+      paramIdx++;
+    }
+    if (endDate) {
+      where += ` AND COALESCE(c.scheduled_at, c.created_at) < ($${paramIdx}::date + INTERVAL '1 day')`;
+      params.push(endDate);
+      paramIdx++;
+    }
+    if (search) {
+      where += ` AND (c.campaign_name ILIKE $${paramIdx} OR co.company_name ILIKE $${paramIdx})`;
+      params.push(`%${search}%`);
+      paramIdx++;
+    }
+    if (loginId) {
+      where += ` AND u.login_id ILIKE $${paramIdx}`;
+      params.push(`%${loginId}%`);
+      paramIdx++;
+    }
+
+    const countResult = await query(
+      `SELECT COUNT(*) FROM campaigns c LEFT JOIN companies co ON c.company_id = co.id LEFT JOIN users u ON c.created_by = u.id ${where}`,
+      params
+    );
+    const total = parseInt(countResult.rows[0].count);
+
     const result = await query(`
       SELECT 
         c.id, c.campaign_name, c.status, c.scheduled_at, c.target_count,
         c.created_at, c.cancelled_by, c.cancelled_by_type, c.cancel_reason, c.cancelled_at,
+        c.message_type, c.send_type,
         co.company_name, co.company_code,
-        u.name as created_by_name
+        u.name as created_by_name, u.login_id as created_by_login
       FROM campaigns c
       LEFT JOIN companies co ON c.company_id = co.id
       LEFT JOIN users u ON c.created_by = u.id
-      WHERE c.status IN ('scheduled', 'cancelled')
-      ORDER BY c.created_at DESC
-    `);
+      ${where}
+      ORDER BY CASE WHEN c.status = 'scheduled' THEN 0 ELSE 1 END, c.created_at DESC
+      LIMIT $${paramIdx} OFFSET $${paramIdx + 1}
+    `, [...params, limit, offset]);
     
-    res.json({ campaigns: result.rows });
+    res.json({ campaigns: result.rows, total, page, totalPages: Math.ceil(total / limit) });
   } catch (error) {
     console.error('예약 캠페인 조회 실패:', error);
     res.status(500).json({ error: '예약 캠페인 조회 실패' });
@@ -895,6 +948,8 @@ router.get('/campaigns/all', authenticate, requireSuperAdmin, async (req: Reques
     const search = (req.query.search as string) || '';
     const status = (req.query.status as string) || '';
     const companyId = (req.query.companyId as string) || '';
+    const startDate = (req.query.startDate as string) || '';
+    const endDate = (req.query.endDate as string) || '';
     const offset = (page - 1) * limit;
 
     let where = 'WHERE 1=1';
@@ -902,7 +957,7 @@ router.get('/campaigns/all', authenticate, requireSuperAdmin, async (req: Reques
     let paramIdx = 1;
 
     if (search) {
-      where += ` AND (c.campaign_name ILIKE $${paramIdx} OR co.company_name ILIKE $${paramIdx})`;
+      where += ` AND (c.campaign_name ILIKE $${paramIdx} OR co.company_name ILIKE $${paramIdx} OR u.login_id ILIKE $${paramIdx})`;
       params.push(`%${search}%`);
       paramIdx++;
     }
@@ -916,9 +971,19 @@ router.get('/campaigns/all', authenticate, requireSuperAdmin, async (req: Reques
       params.push(companyId);
       paramIdx++;
     }
+    if (startDate) {
+      where += ` AND COALESCE(c.sent_at, c.scheduled_at, c.created_at) >= $${paramIdx}::date`;
+      params.push(startDate);
+      paramIdx++;
+    }
+    if (endDate) {
+      where += ` AND COALESCE(c.sent_at, c.scheduled_at, c.created_at) < ($${paramIdx}::date + INTERVAL '1 day')`;
+      params.push(endDate);
+      paramIdx++;
+    }
 
     const countResult = await query(
-      `SELECT COUNT(*) FROM campaigns c LEFT JOIN companies co ON c.company_id = co.id ${where}`,
+      `SELECT COUNT(*) FROM campaigns c LEFT JOIN companies co ON c.company_id = co.id LEFT JOIN users u ON c.created_by = u.id ${where}`,
       params
     );
     const total = parseInt(countResult.rows[0].count);
@@ -926,17 +991,17 @@ router.get('/campaigns/all', authenticate, requireSuperAdmin, async (req: Reques
     const result = await query(`
       SELECT 
         c.id, c.campaign_name as name, c.status, c.send_type as campaign_type, c.created_at,
-        c.company_id,
-        co.company_name,
-        (SELECT COUNT(*) FROM campaign_runs cr WHERE cr.campaign_id = c.id) as run_count,
+        c.company_id, c.message_type, c.scheduled_at, c.sent_at,
+        co.company_name, co.company_code,
+        u.name as created_by_name, u.login_id as created_by_login,
         (SELECT COALESCE(SUM(cr.sent_count), 0) FROM campaign_runs cr WHERE cr.campaign_id = c.id) as total_sent,
         (SELECT COALESCE(SUM(cr.success_count), 0) FROM campaign_runs cr WHERE cr.campaign_id = c.id) as total_success,
         (SELECT COALESCE(SUM(cr.fail_count), 0) FROM campaign_runs cr WHERE cr.campaign_id = c.id) as total_fail,
         (SELECT cr.target_count FROM campaign_runs cr WHERE cr.campaign_id = c.id ORDER BY cr.run_number DESC LIMIT 1) as last_target_count,
-        (SELECT cr.status FROM campaign_runs cr WHERE cr.campaign_id = c.id ORDER BY cr.run_number DESC LIMIT 1) as last_run_status,
         (SELECT cr.sent_at FROM campaign_runs cr WHERE cr.campaign_id = c.id ORDER BY cr.run_number DESC LIMIT 1) as last_sent_at
       FROM campaigns c
       LEFT JOIN companies co ON c.company_id = co.id
+      LEFT JOIN users u ON c.created_by = u.id
       ${where}
       ORDER BY c.created_at DESC
       LIMIT $${paramIdx} OFFSET $${paramIdx + 1}
@@ -951,6 +1016,90 @@ router.get('/campaigns/all', authenticate, requireSuperAdmin, async (req: Reques
   } catch (error) {
     console.error('전체 캠페인 조회 실패:', error);
     res.status(500).json({ error: '전체 캠페인 조회 실패' });
+  }
+});
+// ===== SMS 발송 상세 조회 (MySQL) =====
+router.get('/campaigns/:id/sms-detail', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 50;
+    const offset = (page - 1) * limit;
+    const statusFilter = (req.query.status as string) || '';   // success / fail / pending / ''
+    const searchType = (req.query.searchType as string) || ''; // dest_no / call_back
+    const searchValue = (req.query.searchValue as string) || '';
+
+    // 캠페인 기본 정보 (PostgreSQL)
+    const campResult = await query(`
+      SELECT c.id, c.campaign_name, c.message_type, c.send_type, c.status, c.scheduled_at, c.sent_at, c.target_count,
+             c.success_count, c.fail_count,
+             co.company_name, co.company_code,
+             u.name as created_by_name, u.login_id as created_by_login
+      FROM campaigns c
+      LEFT JOIN companies co ON c.company_id = co.id
+      LEFT JOIN users u ON c.created_by = u.id
+      WHERE c.id = $1
+    `, [id]);
+    if (campResult.rows.length === 0) {
+      return res.status(404).json({ error: '캠페인을 찾을 수 없습니다.' });
+    }
+    const campaign = campResult.rows[0];
+
+    // MySQL에서 개별 발송 내역 조회 (SMSQ_SEND VIEW - 11개 테이블 UNION ALL)
+    let mysqlWhere = `WHERE app_etc1 = ?`;
+    const mysqlParams: any[] = [id];
+
+    if (statusFilter === 'success') {
+      mysqlWhere += ` AND status_code IN (6, 1000, 1800)`;
+    } else if (statusFilter === 'fail') {
+      mysqlWhere += ` AND status_code NOT IN (6, 1000, 1800, 100)`;
+    } else if (statusFilter === 'pending') {
+      mysqlWhere += ` AND status_code = 100`;
+    }
+
+    if (searchValue && searchType === 'dest_no') {
+      mysqlWhere += ` AND dest_no LIKE ?`;
+      mysqlParams.push(`%${searchValue.replace(/-/g, '')}%`);
+    } else if (searchValue && searchType === 'call_back') {
+      mysqlWhere += ` AND call_back LIKE ?`;
+      mysqlParams.push(`%${searchValue.replace(/-/g, '')}%`);
+    }
+
+    // 총 건수
+    const countRows = await mysqlQuery(`SELECT COUNT(*) as cnt FROM SMSQ_SEND ${mysqlWhere}`, mysqlParams);
+    const total = (countRows as any[])[0]?.cnt || 0;
+
+    // 페이징 조회
+    const rows = await mysqlQuery(
+      `SELECT seqno, dest_no, call_back, msg_contents, msg_type, status_code, mob_company,
+              sendreq_time, mobsend_time, repmsg_recvtm
+       FROM SMSQ_SEND ${mysqlWhere}
+       ORDER BY seqno DESC
+       LIMIT ? OFFSET ?`,
+      [...mysqlParams, limit, offset]
+    );
+
+    const statusMap: Record<number, string> = { 6: 'SMS성공', 1000: 'LMS성공', 1800: '카카오성공', 100: '대기', 7: '비가입자', 8: 'Power-off', 16: '스팸차단' };
+    const carrierMap: Record<string, string> = { '11': 'SKT', '16': 'KT', '19': 'LGU+' };
+
+    const detail = (rows as any[]).map(r => ({
+      seqno: r.seqno,
+      destNo: r.dest_no,
+      callBack: r.call_back,
+      msgContents: r.msg_contents,
+      msgType: r.msg_type === 'S' ? 'SMS' : r.msg_type === 'L' ? 'LMS' : r.msg_type === 'M' ? 'MMS' : r.msg_type,
+      statusCode: r.status_code,
+      statusText: statusMap[r.status_code] || `코드:${r.status_code}`,
+      carrier: carrierMap[r.mob_company] || r.mob_company || '-',
+      sendreqTime: r.sendreq_time,
+      mobsendTime: r.mobsend_time,
+      recvTime: r.repmsg_recvtm,
+    }));
+
+    res.json({ campaign, detail, total, page, totalPages: Math.ceil(total / limit) });
+  } catch (error) {
+    console.error('SMS 상세 조회 실패:', error);
+    res.status(500).json({ error: 'SMS 상세 조회 실패' });
   }
 });
 // ===== 표준 필드 관리 API =====
