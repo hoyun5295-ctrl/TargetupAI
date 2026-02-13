@@ -277,7 +277,7 @@ export default function PricingPage() {
             return (
               <div
                 key={plan.id}
-                className={`bg-white rounded-xl shadow-sm overflow-hidden ${
+                className={`bg-white rounded-xl shadow-sm overflow-hidden flex flex-col ${
                   isCurrentPlan ? 'ring-2 ring-blue-500' : ''
                 } ${isRecommended ? 'ring-2 ring-purple-500' : ''}`}
               >
@@ -309,7 +309,7 @@ export default function PricingPage() {
                   }`}>VAT 별도</div>
                 </div>
 
-                <div className="p-4">
+                <div className="p-4 flex-1 flex flex-col">
                   <div className="text-sm text-gray-600 mb-3">
                     관리 가능 DB <span className="font-semibold text-gray-900">{plan.plan_code === 'ENTERPRISE' ? '제한없음' : `${formatNumber(plan.max_customers)}명`}</span>
                   </div>
@@ -325,7 +325,7 @@ export default function PricingPage() {
                     ))}
                   </ul>
 
-                  <div className="mt-4">
+                  <div className="mt-auto pt-4">
                     {isCurrentPlan ? (
                       <button
                         disabled
