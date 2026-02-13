@@ -452,8 +452,8 @@ await redis.set(`upload:${fileId}:progress`, JSON.stringify({
       insertCount,
       duplicateCount,
       errorCount,
-      totalProcessed: insertCount + duplicateCount,
-      message: `${insertCount}건 신규 추가, ${duplicateCount}건 중복`
+      totalProcessed: insertCount + duplicateCount + errorCount,
+      message: `총 ${rows.length}건 중 신규 ${insertCount}건, 업데이트 ${duplicateCount}건${errorCount > 0 ? `, 오류 ${errorCount}건 (전화번호 누락/중복)` : ''}`
     });
 
   } catch (error: any) {

@@ -587,6 +587,7 @@ router.get('/stats', async (req: Request, res: Response) => {
     const company = companyResult.rows[0] || {};
 
     // 이번 달 채널별 발송 통계 (취소/초안/예약 제외, 성공 건수 기준)
+    // campaign_runs 기반 (AI추천발송)
     const campaignStats = await query(
       `SELECT
         c.message_type,
@@ -596,8 +597,25 @@ router.get('/stats', async (req: Request, res: Response) => {
        JOIN campaigns c ON cr.campaign_id = c.id
        WHERE c.company_id = $1
          AND c.status NOT IN ('cancelled', 'draft', 'scheduled')
+         AND cr.status NOT IN ('cancelled')
          AND cr.created_at >= date_trunc('month', (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Seoul'))::date::timestamp AT TIME ZONE 'Asia/Seoul'
        GROUP BY c.message_type`,
+      [companyId]
+    );
+
+    // 직접발송(send_type=direct)은 campaign_runs 없을 수 있으므로 campaigns 직접 조회
+    const directStats = await query(
+      `SELECT
+        message_type,
+        COALESCE(SUM(sent_count), 0) as sent,
+        COALESCE(SUM(success_count), 0) as success
+       FROM campaigns
+       WHERE company_id = $1
+         AND send_type = 'direct'
+         AND status NOT IN ('cancelled', 'draft', 'scheduled')
+         AND created_at >= date_trunc('month', (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Seoul'))::date::timestamp AT TIME ZONE 'Asia/Seoul'
+         AND id NOT IN (SELECT DISTINCT campaign_id FROM campaign_runs WHERE campaign_id IS NOT NULL)
+       GROUP BY message_type`,
       [companyId]
     );
 
@@ -605,6 +623,7 @@ router.get('/stats', async (req: Request, res: Response) => {
     let smsSent = 0, lmsSent = 0, mmsSent = 0, kakaoSent = 0;
     let totalSent = 0, totalSuccess = 0;
 
+    // campaign_runs 기반 통계
     campaignStats.rows.forEach((row: any) => {
       const sent = parseInt(row.sent || '0');
       const success = parseInt(row.success || '0');
@@ -612,10 +631,25 @@ router.get('/stats', async (req: Request, res: Response) => {
       totalSuccess += success;
 
       switch (row.message_type) {
-        case 'SMS': smsSent = success; break;
-        case 'LMS': lmsSent = success; break;
-        case 'MMS': mmsSent = success; break;
-        case 'KAKAO': kakaoSent = success; break;
+        case 'SMS': smsSent += success; break;
+        case 'LMS': lmsSent += success; break;
+        case 'MMS': mmsSent += success; break;
+        case 'KAKAO': kakaoSent += success; break;
+      }
+    });
+
+    // 직접발송 통계 합산
+    directStats.rows.forEach((row: any) => {
+      const sent = parseInt(row.sent || '0');
+      const success = parseInt(row.success || '0');
+      totalSent += sent;
+      totalSuccess += success;
+
+      switch (row.message_type) {
+        case 'SMS': smsSent += success; break;
+        case 'LMS': lmsSent += success; break;
+        case 'MMS': mmsSent += success; break;
+        case 'KAKAO': kakaoSent += success; break;
       }
     });
 

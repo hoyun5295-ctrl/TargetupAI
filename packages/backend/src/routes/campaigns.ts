@@ -691,12 +691,13 @@ let filteredCustomers = customers.filter(
 );
 
 // ★ 개별회신번호 사용 시 callback 없는 고객 제외
+let callbackSkippedCount = 0;
 if (useIndividualCallback) {
   const beforeCount = filteredCustomers.length;
   filteredCustomers = filteredCustomers.filter((c: any) => c.callback && c.callback.trim());
-  const skippedCount = beforeCount - filteredCustomers.length;
-  if (skippedCount > 0) {
-    console.log(`[개별회신번호] callback 없는 고객 ${skippedCount}명 제외 (${filteredCustomers.length}명 발송)`);
+  callbackSkippedCount = beforeCount - filteredCustomers.length;
+  if (callbackSkippedCount > 0) {
+    console.log(`[개별회신번호] callback 없는 고객 ${callbackSkippedCount}명 제외 (${filteredCustomers.length}명 발송)`);
   }
 }
 
@@ -784,8 +785,9 @@ await query(
   [isScheduled ? 'scheduled' : 'sending', filteredCustomers.length, filteredCustomers.length, id]
 );
     return res.json({
-      message: `${customers.length}건 발송이 시작되었습니다.`,
-      sentCount: customers.length,
+      message: `${filteredCustomers.length}건 발송이 시작되었습니다.${callbackSkippedCount > 0 ? ` (회신번호 없는 ${callbackSkippedCount}명 제외)` : ''}`,
+      sentCount: filteredCustomers.length,
+      callbackSkippedCount,
       runId: campaignRun.id,
       runNumber: runNumber,
     });
@@ -1072,17 +1074,20 @@ router.post('/sync-results', async (req: Request, res: Response) => {
       const runTables = await getCompanySmsTables(run.company_id);
       const agg = await smsAggAll(runTables,
         `COUNT(CASE WHEN status_code IN (6, 1000, 1800) THEN 1 END) as success_count,
-         COUNT(CASE WHEN status_code NOT IN (6, 1000, 1800, 100) THEN 1 END) as fail_count`,
+         COUNT(CASE WHEN status_code NOT IN (6, 1000, 1800, 100) THEN 1 END) as fail_count,
+         COUNT(CASE WHEN status_code = 100 THEN 1 END) as pending_count`,
         'app_etc1 = ?',
         [run.campaign_id]
       );
 
       const successCount = agg.success_count || 0;
       const failCount = agg.fail_count || 0;
+      const pendingCount = agg.pending_count || 0;
 
       // PostgreSQL 업데이트
       if (successCount > 0 || failCount > 0) {
-        const newStatus = failCount === 0 ? 'completed' : (successCount === 0 ? 'failed' : 'completed');
+        // 대기건이 남아있으면 아직 sending, 0이면 completed
+        const newStatus = pendingCount > 0 ? 'sending' : (failCount === 0 ? 'completed' : (successCount === 0 ? 'failed' : 'completed'));
 
         // campaign_runs 업데이트
         await query(
@@ -1129,16 +1134,18 @@ router.post('/sync-results', async (req: Request, res: Response) => {
       const agg = await smsAggAll(directTables,
         `COUNT(*) as total_count,
          COUNT(CASE WHEN status_code IN (6, 1000, 1800) THEN 1 END) as success_count,
-         COUNT(CASE WHEN status_code NOT IN (6, 1000, 1800, 100) THEN 1 END) as fail_count`,
+         COUNT(CASE WHEN status_code NOT IN (6, 1000, 1800, 100) THEN 1 END) as fail_count,
+         COUNT(CASE WHEN status_code = 100 THEN 1 END) as pending_count`,
         'app_etc1 = ?',
         [campaign.id]
       );
 
       const successCount = agg.success_count || 0;
       const failCount = agg.fail_count || 0;
+      const pendingCount = agg.pending_count || 0;
 
       if (successCount > 0 || failCount > 0) {
-        const newStatus = failCount === 0 ? 'completed' : 'completed';
+        const newStatus = pendingCount > 0 ? 'sending' : 'completed';
 
         await query(
           `UPDATE campaigns SET

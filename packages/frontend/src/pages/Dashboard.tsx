@@ -331,27 +331,27 @@ function CalendarModal({ onClose, token, onEdit }: { onClose: () => void; token:
                     </div>
                   )}
                   
-                  {/* 버튼 */}
-                  <div className="pt-4 space-y-2">
-                    {selectedCampaign.status === 'scheduled' ? (
+                  {/* 버튼 - 예약 상태만 취소 가능 */}
+                  {selectedCampaign.status === 'scheduled' && (
+                    <div className="pt-4">
                       <button 
-                        onClick={() => onEdit?.(selectedCampaign)}
-                        className="w-full py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 text-sm font-medium transition-colors">
-                        ✏️ 편집
+                        onClick={async () => {
+                          const token = localStorage.getItem('token');
+                          const res = await fetch(`/api/campaigns/${selectedCampaign.id}/cancel`, {
+                            method: 'POST',
+                            headers: { Authorization: `Bearer ${token}` }
+                          });
+                          const data = await res.json();
+                          if (data.success) {
+                            fetchCampaigns();
+                            setSelectedCampaign(null);
+                          }
+                        }}
+                        className="w-full py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 text-sm font-medium transition-colors">
+                        🚫 예약 취소
                       </button>
-                    ) : (
-                      <button 
-                        disabled
-                        className="w-full py-2 bg-gray-300 text-gray-500 rounded-lg text-sm font-medium cursor-not-allowed">
-                        ✏️ 편집 ({statusLabels[selectedCampaign.status] || selectedCampaign.status})
-                      </button>
-                    )}
-                    <button 
-                      onClick={() => onEdit?.({ ...selectedCampaign, _clone: true })}
-                      className="w-full py-2 border border-gray-300 rounded-lg hover:bg-gray-100 text-sm font-medium transition-colors">
-                      📋 복제
-                    </button>
-                  </div>
+                    </div>
+                  )}
                 </div>
               </div>
             ) : selectedDate ? (
@@ -491,6 +491,7 @@ export default function Dashboard() {
   const [scheduledLoading, setScheduledLoading] = useState(false);
   const [editScheduleTime, setEditScheduleTime] = useState('');
   const [deleteConfirm, setDeleteConfirm] = useState<{show: boolean, phone: string, idx: number | null}>({show: false, phone: '', idx: null});
+  const [cancelConfirm, setCancelConfirm] = useState<{show: boolean, campaign: any}>({show: false, campaign: null});
   const [messagePreview, setMessagePreview] = useState<{show: boolean, phone: string, message: string}>({show: false, phone: '', message: ''});
   const [messageEditModal, setMessageEditModal] = useState(false);
   const [editMessage, setEditMessage] = useState('');
@@ -721,6 +722,54 @@ export default function Dashboard() {
     setShowMmsUploadModal(true);
   };
 
+  // MMS 이미지 다중 선택 한번에 첨부 (#14)
+  const handleMmsMultiUpload = async (files: FileList) => {
+    const maxSlots = 3;
+    const currentCount = mmsUploadedImages.length;
+    const available = maxSlots - currentCount;
+    if (available <= 0) {
+      setToast({ show: true, type: 'error', message: '최대 3장까지 첨부 가능합니다' });
+      setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
+      return;
+    }
+    const filesToUpload = Array.from(files).slice(0, available);
+    // 검증
+    for (const file of filesToUpload) {
+      if (!file.name.toLowerCase().endsWith('.jpg') && !file.name.toLowerCase().endsWith('.jpeg')) {
+        setToast({ show: true, type: 'error', message: `${file.name}: JPG 파일만 업로드 가능합니다` });
+        setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
+        return;
+      }
+      if (file.size > 300 * 1024) {
+        setToast({ show: true, type: 'error', message: `${file.name}: ${(file.size / 1024).toFixed(0)}KB — 300KB 이하만 가능합니다` });
+        setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
+        return;
+      }
+    }
+    setMmsUploading(true);
+    try {
+      for (const file of filesToUpload) {
+        const formData = new FormData();
+        formData.append('images', file);
+        const token = localStorage.getItem('token');
+        const res = await fetch('/api/mms-images/upload', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+          body: formData,
+        });
+        const data = await res.json();
+        if (res.ok && data.success && data.images.length > 0) {
+          setMmsUploadedImages(prev => [...prev, data.images[0]]);
+        }
+      }
+    } catch {
+      setToast({ show: true, type: 'error', message: '이미지 업로드 중 오류 발생' });
+      setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
+    } finally {
+      setMmsUploading(false);
+    }
+  };
+
   // MMS 이미지 삭제 함수 (슬롯 기반)
   const handleMmsImageRemove = async (index: number) => {
     const img = mmsUploadedImages[index];
@@ -804,6 +853,16 @@ export default function Dashboard() {
   const [selectedRecipients, setSelectedRecipients] = useState<Set<number>>(new Set());
   const [showDirectPreview, setShowDirectPreview] = useState(false);
   const [adTextEnabled, setAdTextEnabled] = useState(true);
+
+  // #9 광고 토글 OFF → 메시지 내 (광고) 접두사/무료거부 라인 자동 제거
+  const handleAdToggle = (enabled: boolean) => {
+    setAdTextEnabled(enabled);
+    if (!enabled) {
+      const stripAd = (msg: string) => msg.replace(/^\(광고\)\s*/g, '').replace(/\n무료거부\d+$/g, '').replace(/\n무료수신거부\s*[\d\-]+$/g, '').trim();
+      setTargetMessage(prev => stripAd(prev));
+      setDirectMessage(prev => stripAd(prev));
+    }
+  };
   const [toast, setToast] = useState<{show: boolean, type: 'success' | 'error', message: string}>({show: false, type: 'success', message: ''});
   const [optOutNumber, setOptOutNumber] = useState('080-000-0000');
   const [fileUploading, setFileUploading] = useState(false);
@@ -1290,6 +1349,7 @@ const handleAiCampaignGenerate = async () => {
     
     // 추천 채널로 기본 설정
     setSelectedChannel(result.recommended_channel || 'SMS');
+    if ((result.recommended_channel || 'SMS') !== 'MMS') setMmsUploadedImages([]);
     setIsAd(result.is_ad !== false);
     
     // 개별회신번호 자동 설정
@@ -2335,7 +2395,7 @@ const campaignData = {
                       {['SMS', 'LMS', 'MMS', '카카오'].map((ch) => (
                         <button
                           key={ch}
-                          onClick={() => setSelectedChannel(ch)}
+                          onClick={() => { setSelectedChannel(ch); if (ch !== 'MMS') setMmsUploadedImages([]); }}
                           className={`p-3 rounded-lg border-2 text-center font-medium transition-all ${
                             selectedChannel === ch
                               ? 'border-purple-500 bg-purple-50 text-purple-700'
@@ -2737,6 +2797,23 @@ const campaignData = {
 
               {/* 3칸 슬롯 */}
               <div className="p-6">
+                {/* 다중 선택 버튼 */}
+                {mmsUploadedImages.length < 3 && (
+                  <label className={`flex items-center justify-center gap-2 mb-4 py-3 border-2 border-dashed border-amber-300 rounded-xl bg-amber-50 cursor-pointer hover:bg-amber-100 transition-colors ${mmsUploading ? 'opacity-50 pointer-events-none' : ''}`}>
+                    <span className="text-lg">📎</span>
+                    <span className="text-sm font-medium text-amber-700">여러 장 한번에 첨부 (최대 {3 - mmsUploadedImages.length}장)</span>
+                    <input
+                      type="file"
+                      accept=".jpg,.jpeg"
+                      multiple
+                      className="hidden"
+                      onChange={(e) => {
+                        if (e.target.files && e.target.files.length > 0) handleMmsMultiUpload(e.target.files);
+                        e.target.value = '';
+                      }}
+                    />
+                  </label>
+                )}
                 <div className="grid grid-cols-3 gap-4">
                   {[0, 1, 2].map(slotIdx => {
                     const img = mmsUploadedImages[slotIdx];
@@ -3802,23 +3879,7 @@ const campaignData = {
                           </div>
                           <div className="flex gap-2">
                             <button
-                              onClick={async () => {
-                                const token = localStorage.getItem('token');
-                                const res = await fetch(`/api/campaigns/${selectedScheduled.id}/cancel`, {
-                                  method: 'POST',
-                                  headers: { Authorization: `Bearer ${token}` }
-                                });
-                                const data = await res.json();
-                                if (data.success) {
-                                  setToast({ show: true, type: 'success', message: '예약이 취소되었습니다' });
-                                  setTimeout(() => setToast({ show: false, type: 'success', message: '' }), 3000);
-                                  setScheduledCampaigns(prev => prev.filter(c => c.id !== selectedScheduled.id));
-                                  setSelectedScheduled(null);
-                                } else {
-                                  setToast({ show: true, type: 'error', message: data.error || '취소 실패' });
-                                  setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
-                                }
-                              }}
+                              onClick={() => setCancelConfirm({ show: true, campaign: selectedScheduled })}
                               disabled={selectedScheduled?.scheduled_at && (new Date(selectedScheduled.scheduled_at).getTime() - Date.now()) < 15 * 60 * 1000}
                               className={`px-3 py-1.5 rounded text-sm ${
                                 selectedScheduled?.scheduled_at && (new Date(selectedScheduled.scheduled_at).getTime() - Date.now()) < 15 * 60 * 1000
@@ -3918,7 +3979,7 @@ const campaignData = {
                             </thead>
                             <tbody>
                               {scheduledRecipients
-                                .filter(r => !scheduledSearch || r.phone?.includes(scheduledSearch))
+                                .filter(r => !scheduledSearch || r.phone?.replace(/-/g, '').includes(scheduledSearch.replace(/-/g, '')))
                                 .map((r: any) => (
                                   <tr key={r.idx} className="border-t hover:bg-gray-50">
                                     <td className="px-3 py-2 font-mono text-xs">{r.phone}</td>
@@ -3971,13 +4032,13 @@ const campaignData = {
                     <button
                       onClick={async () => {
                         const token = localStorage.getItem('token');
-                        const res = await fetch(`/api/campaigns/${selectedScheduled.id}/recipients/${deleteConfirm.idx}`, {
+                        const res = await fetch(`/api/campaigns/${selectedScheduled.id}/recipients/${encodeURIComponent(deleteConfirm.phone)}`, {
                           method: 'DELETE',
                           headers: { Authorization: `Bearer ${token}` }
                         });
                         const data = await res.json();
                         if (data.success) {
-                          setScheduledRecipients(prev => prev.filter(x => x.idx !== deleteConfirm.idx));
+                          setScheduledRecipients(prev => prev.filter(x => x.phone !== deleteConfirm.phone));
                           setScheduledRecipientsTotal(data.remainingCount);
                           setScheduledCampaigns(prev => prev.map(c => 
                             c.id === selectedScheduled.id ? { ...c, target_count: data.remainingCount } : c
@@ -3998,6 +4059,50 @@ const campaignData = {
                           : 'bg-red-500 text-white hover:bg-red-600'
                       }`}
                     >삭제</button>
+                  </div>
+                </div>
+              </div>
+            )}
+            {/* 예약취소 확인 모달 */}
+            {cancelConfirm.show && (
+              <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60]">
+                <div className="bg-white rounded-2xl shadow-2xl w-[380px] overflow-hidden animate-in fade-in zoom-in duration-200">
+                  <div className="p-6 text-center">
+                    <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                      <span className="text-3xl">🚫</span>
+                    </div>
+                    <h3 className="text-lg font-bold text-gray-800 mb-2">예약 취소</h3>
+                    <p className="text-gray-600 mb-1">다음 캠페인을 취소하시겠습니까?</p>
+                    <p className="text-sm font-bold text-red-600 mb-1">{cancelConfirm.campaign?.campaign_name}</p>
+                    <p className="text-xs text-gray-400">👥 {cancelConfirm.campaign?.target_count?.toLocaleString()}명 대상</p>
+                    <p className="text-xs text-red-400 mt-2">취소된 캠페인은 복구할 수 없습니다.</p>
+                  </div>
+                  <div className="flex border-t">
+                    <button
+                      onClick={() => setCancelConfirm({show: false, campaign: null})}
+                      className="flex-1 py-3.5 text-gray-600 hover:bg-gray-50 font-medium transition-colors"
+                    >돌아가기</button>
+                    <button
+                      onClick={async () => {
+                        const token = localStorage.getItem('token');
+                        const res = await fetch(`/api/campaigns/${cancelConfirm.campaign.id}/cancel`, {
+                          method: 'POST',
+                          headers: { Authorization: `Bearer ${token}` }
+                        });
+                        const data = await res.json();
+                        if (data.success) {
+                          setToast({ show: true, type: 'success', message: '예약이 취소되었습니다' });
+                          setTimeout(() => setToast({ show: false, type: 'success', message: '' }), 3000);
+                          setScheduledCampaigns(prev => prev.filter(c => c.id !== cancelConfirm.campaign.id));
+                          setSelectedScheduled(null);
+                        } else {
+                          setToast({ show: true, type: 'error', message: data.error || '취소 실패' });
+                          setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
+                        }
+                        setCancelConfirm({show: false, campaign: null});
+                      }}
+                      className="flex-1 py-3.5 bg-red-500 text-white hover:bg-red-600 font-medium transition-colors"
+                    >취소 확정</button>
                   </div>
                 </div>
               </div>
@@ -4201,13 +4306,13 @@ const campaignData = {
                 {/* SMS/LMS/MMS 탭 */}
                 <div className="flex mb-3 bg-gray-100 rounded-lg p-1">
                   <button 
-                    onClick={() => setTargetMsgType('SMS')}
+                    onClick={() => { setTargetMsgType('SMS'); setMmsUploadedImages([]); }}
                     className={`flex-1 py-2 text-sm font-medium rounded-md transition-colors ${targetMsgType === 'SMS' ? 'bg-white shadow text-emerald-600' : 'text-gray-500 hover:text-gray-700'}`}
                   >
                     SMS
                   </button>
                   <button 
-                    onClick={() => setTargetMsgType('LMS')}
+                    onClick={() => { setTargetMsgType('LMS'); setMmsUploadedImages([]); }}
                     className={`flex-1 py-2 text-sm font-medium rounded-md transition-colors ${targetMsgType === 'LMS' ? 'bg-white shadow text-emerald-600' : 'text-gray-500 hover:text-gray-700'}`}
                   >
                     LMS
@@ -4450,7 +4555,7 @@ const campaignData = {
                           <input 
                             type="checkbox" 
                             checked={adTextEnabled}
-                            onChange={(e) => setAdTextEnabled(e.target.checked)}
+                            onChange={(e) => handleAdToggle(e.target.checked)}
                             className="rounded w-4 h-4"
                           />
                           <span className={`font-medium ${adTextEnabled ? 'text-orange-700' : ''}`}>광고표기</span>
@@ -4806,13 +4911,13 @@ const campaignData = {
                 {/* SMS/LMS/MMS 탭 */}
                 <div className="flex mb-3 bg-gray-100 rounded-lg p-1">
                   <button 
-                    onClick={() => setDirectMsgType('SMS')}
+                    onClick={() => { setDirectMsgType('SMS'); setMmsUploadedImages([]); }}
                     className={`flex-1 py-2.5 text-sm font-medium rounded-md transition-colors ${directMsgType === 'SMS' ? 'bg-white shadow text-emerald-600' : 'text-gray-500 hover:text-gray-700'}`}
                   >
                     SMS
                   </button>
                   <button 
-                    onClick={() => setDirectMsgType('LMS')}
+                    onClick={() => { setDirectMsgType('LMS'); setMmsUploadedImages([]); }}
                     className={`flex-1 py-2.5 text-sm font-medium rounded-md transition-colors ${directMsgType === 'LMS' ? 'bg-white shadow text-emerald-600' : 'text-gray-500 hover:text-gray-700'}`}
                   >
                     LMS
@@ -5027,7 +5132,7 @@ const campaignData = {
                           <input 
                             type="checkbox" 
                             checked={adTextEnabled}
-                            onChange={(e) => setAdTextEnabled(e.target.checked)}
+                            onChange={(e) => handleAdToggle(e.target.checked)}
                             className="rounded w-4 h-4"
                           />
                           <span className={`font-medium ${adTextEnabled ? 'text-orange-700' : ''}`}>광고표기</span>
@@ -6078,7 +6183,8 @@ const campaignData = {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[70]">
           <div className="bg-white rounded-xl shadow-2xl w-[440px] overflow-hidden">
             <div className="p-6 bg-gradient-to-r from-amber-50 to-orange-50 border-b">
-              <div className="text-center">
+              <div className="text-center relative">
+                <button onClick={() => setShowLmsConfirm(false)} className="absolute right-0 top-0 text-gray-400 hover:text-gray-600 text-xl">✕</button>
                 <div className="text-5xl mb-3">📝</div>
                 <h3 className="text-lg font-bold text-gray-800">메시지 길이 초과</h3>
               </div>
@@ -6455,14 +6561,16 @@ const campaignData = {
                       <div className="w-7 h-7 rounded-full bg-emerald-100 flex items-center justify-center shrink-0 text-xs">📱</div>
                       <div className="bg-white rounded-2xl rounded-tl-sm p-3 shadow-sm border border-gray-100 text-[13px] leading-[1.7] whitespace-pre-wrap text-gray-700 max-w-[95%]">
                         {(() => {
+                          const firstR = showTargetSend ? targetRecipients[0] : directRecipients[0];
                           const mergedMsg = getFullMessage(directMessage)
-                            .replace(/%이름%/g, (showTargetSend ? targetRecipients[0]?.name : directRecipients[0]?.name) || '홍길동')
+                            .replace(/%이름%/g, firstR?.name || '홍길동')
                             .replace(/%등급%/g, (showTargetSend ? targetRecipients[0]?.grade : '') || 'VIP')
                             .replace(/%지역%/g, (showTargetSend ? targetRecipients[0]?.region : '') || '서울')
                             .replace(/%구매금액%/g, (showTargetSend ? targetRecipients[0]?.amount : '') || '100,000원')
                             .replace(/%기타1%/g, directRecipients[0]?.extra1 || '기타1')
                             .replace(/%기타2%/g, directRecipients[0]?.extra2 || '기타2')
-                            .replace(/%기타3%/g, directRecipients[0]?.extra3 || '기타3');
+                            .replace(/%기타3%/g, directRecipients[0]?.extra3 || '기타3')
+                            .replace(/%회신번호%/g, firstR?.callback || selectedCallback || '');
                           return mergedMsg;
                         })()}
                       </div>
@@ -6478,7 +6586,8 @@ const campaignData = {
                         .replace(/%구매금액%/g, (showTargetSend ? targetRecipients[0]?.amount : '') || '100,000원')
                         .replace(/%기타1%/g, directRecipients[0]?.extra1 || '기타1')
                         .replace(/%기타2%/g, directRecipients[0]?.extra2 || '기타2')
-                        .replace(/%기타3%/g, directRecipients[0]?.extra3 || '기타3');
+                        .replace(/%기타3%/g, directRecipients[0]?.extra3 || '기타3')
+                        .replace(/%회신번호%/g, (showTargetSend ? targetRecipients[0] : directRecipients[0])?.callback || selectedCallback || '');
                       const mergedBytes = calculateBytes(mergedMsg);
                       const limit = directMsgType === 'SMS' ? 90 : 2000;
                       const isOver = mergedBytes > limit;
@@ -6498,9 +6607,41 @@ const campaignData = {
 
             {/* 치환 안내 */}
             {(directMessage.includes('%이름%') || directMessage.includes('%기타') || directMessage.includes('%등급%') || directMessage.includes('%지역%') || directMessage.includes('%구매금액%') || directMessage.includes('%회신번호%')) && (
-              <div className="mx-6 mb-4 p-3 bg-blue-50 rounded-lg text-xs text-blue-700 text-center">
+              <div className="mx-6 mb-2 p-3 bg-blue-50 rounded-lg text-xs text-blue-700 text-center">
                 💡 자동입력 변수는 첫 번째 수신자 정보로 표시됩니다
                 {(!directRecipients[0] && !targetRecipients[0]) && ' (샘플 데이터)'}
+              </div>
+            )}
+
+            {/* 개인화 10건 리스트 미리보기 */}
+            {(directMessage.includes('%') && (directRecipients.length > 0 || targetRecipients.length > 0)) && (
+              <div className="mx-6 mb-4">
+                <div className="text-sm font-medium text-gray-700 mb-2">📋 수신자별 미리보기 (최대 10건)</div>
+                <div className="border rounded-lg overflow-hidden max-h-48 overflow-y-auto">
+                  <table className="w-full text-xs">
+                    <thead className="bg-gray-100 sticky top-0">
+                      <tr>
+                        <th className="px-2 py-1.5 text-left w-24">수신번호</th>
+                        <th className="px-2 py-1.5 text-left">치환 메시지</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {(showTargetSend ? targetRecipients : directRecipients).slice(0, 10).map((r: any, idx: number) => {
+                        const varMap: Record<string, string> = showTargetSend
+                          ? { '%이름%': r.name || '', '%등급%': r.grade || '', '%지역%': r.region || '', '%구매금액%': r.total_purchase_amount ? Number(r.total_purchase_amount).toLocaleString() + '원' : '', '%회신번호%': r.callback || '' }
+                          : { '%이름%': r.name || '', '%기타1%': r.extra1 || '', '%기타2%': r.extra2 || '', '%기타3%': r.extra3 || '', '%회신번호%': r.callback || '' };
+                        let msg = directMessage;
+                        Object.entries(varMap).forEach(([k, v]) => { msg = msg.replace(new RegExp(k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), v); });
+                        return (
+                          <tr key={idx} className="hover:bg-gray-50">
+                            <td className="px-2 py-1.5 font-mono text-gray-600">{r.phone}</td>
+                            <td className="px-2 py-1.5 text-gray-700 whitespace-pre-wrap leading-snug">{msg}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
             

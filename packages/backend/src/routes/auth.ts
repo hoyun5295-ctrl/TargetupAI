@@ -141,28 +141,7 @@ router.post('/login', async (req: Request, res: Response) => {
     );
 
     if (activeSessions.rows.length > 0) {
-      const lastActivity = new Date(activeSessions.rows[0].last_activity_at);
-      const now = new Date();
-      const minutesSinceActivity = (now.getTime() - lastActivity.getTime()) / (1000 * 60);
-
-      // 30분 이내 활동 + 발송 중 캠페인이 있으면 로그인 차단
-      if (minutesSinceActivity < 30) {
-        const sendingCampaign = await query(
-          `SELECT id, campaign_name FROM campaigns
-           WHERE company_id = $1 AND status = 'sending'
-           LIMIT 1`,
-          [user.company_id]
-        );
-
-        if (sendingCampaign.rows.length > 0) {
-          return res.status(409).json({
-            error: `현재 발송이 진행 중입니다 (${sendingCampaign.rows[0].campaign_name}). 발송 완료 후 다시 시도해주세요.`,
-            reason: 'sending_in_progress'
-          });
-        }
-      }
-
-      // 기존 세션 전부 무효화
+      // 기존 세션 전부 무효화 (발송 중이어도 로그인 허용 — 발송은 백그라운드 처리)
       await query(
         `UPDATE user_sessions SET is_active = false WHERE user_id = $1`,
         [user.id]
