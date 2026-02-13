@@ -5422,33 +5422,33 @@ const campaignData = {
             {/* 파일 매핑 모달 */}
             {directShowMapping && (
               <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60]">
-                <div className="bg-white rounded-2xl shadow-2xl w-[550px] overflow-hidden">
-                  <div className="p-4 border-b bg-blue-50 flex justify-between items-center">
-                    <h3 className="font-bold text-lg">📁 컬럼 매핑</h3>
+                <div className="bg-white rounded-2xl shadow-2xl w-[500px] max-h-[85vh] overflow-hidden flex flex-col">
+                  <div className="p-3 border-b bg-blue-50 flex justify-between items-center shrink-0">
+                    <h3 className="font-bold text-base">📁 컬럼 매핑</h3>
                     <button onClick={() => setDirectShowMapping(false)} className="text-gray-500 hover:text-gray-700 text-xl">✕</button>
                   </div>
                   
-                  <div className="p-6">
+                  <div className="p-4 overflow-y-auto flex-1">
                     {/* 매핑 안내 */}
-                    <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-xl text-sm text-yellow-800">
+                    <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-xl text-sm text-yellow-800">
                       💡 아래 필수 항목에 <strong>엑셀의 어떤 컬럼</strong>을 매핑할지 선택해주세요.
                     </div>
                     
                     {/* 헤더 */}
-                    <div className="flex items-center gap-4 mb-3 px-4">
-                      <span className="w-28 text-xs font-bold text-gray-500">필수 항목</span>
-                      <span className="w-8 text-center text-xs text-gray-400">→</span>
+                    <div className="flex items-center gap-3 mb-2 px-3">
+                      <span className="w-24 text-xs font-bold text-gray-500">필수 항목</span>
+                      <span className="w-6 text-center text-xs text-gray-400">→</span>
                       <span className="flex-1 text-xs font-bold text-gray-500">엑셀 컬럼 선택</span>
                     </div>
                     
                     {/* 매핑 선택 - 5개만 */}
-                    <div className="space-y-3">
+                    <div className="space-y-2">
                       {/* 수신번호 (필수) */}
-                      <div className="flex items-center gap-4 p-4 bg-red-50 rounded-xl border-2 border-red-200">
-                        <span className="w-28 text-sm font-bold text-red-700">📱 수신번호 *</span>
-                        <span className="w-8 text-center text-gray-400">→</span>
+                      <div className="flex items-center gap-3 p-3 bg-red-50 rounded-xl border-2 border-red-200">
+                        <span className="w-24 text-sm font-bold text-red-700">📱 수신번호 *</span>
+                        <span className="w-6 text-center text-gray-400">→</span>
                         <select
-                          className="flex-1 border-2 border-red-300 rounded-lg px-4 py-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-red-500"
+                          className="flex-1 border-2 border-red-300 rounded-lg px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-red-500"
                           value={directColumnMapping.phone || ''}
                           onChange={(e) => setDirectColumnMapping({...directColumnMapping, phone: e.target.value})}
                         >
@@ -5460,11 +5460,11 @@ const campaignData = {
                       </div>
                       
                       {/* 이름 */}
-                      <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-xl">
-                        <span className="w-28 text-sm font-bold text-gray-700">👤 이름</span>
+                      <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl">
+                        <span className="w-24 text-sm font-bold text-gray-700">👤 이름</span>
                         <span className="w-8 text-center text-gray-400">→</span>
                         <select
-                          className="flex-1 border rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                          className="flex-1 border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                           value={directColumnMapping.name || ''}
                           onChange={(e) => setDirectColumnMapping({...directColumnMapping, name: e.target.value})}
                         >
@@ -5476,11 +5476,11 @@ const campaignData = {
                       </div>
                       
                       {/* 기타1 */}
-                      <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-xl">
-                        <span className="w-28 text-sm font-bold text-gray-700">1️⃣ 기타1</span>
+                      <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl">
+                        <span className="w-24 text-sm font-bold text-gray-700">1️⃣ 기타1</span>
                         <span className="w-8 text-center text-gray-400">→</span>
                         <select
-                          className="flex-1 border rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                          className="flex-1 border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                           value={directColumnMapping.extra1 || ''}
                           onChange={(e) => setDirectColumnMapping({...directColumnMapping, extra1: e.target.value})}
                         >
@@ -5492,11 +5492,11 @@ const campaignData = {
                       </div>
                       
                       {/* 기타2 */}
-                      <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-xl">
-                        <span className="w-28 text-sm font-bold text-gray-700">2️⃣ 기타2</span>
+                      <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl">
+                        <span className="w-24 text-sm font-bold text-gray-700">2️⃣ 기타2</span>
                         <span className="w-8 text-center text-gray-400">→</span>
                         <select
-                          className="flex-1 border rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                          className="flex-1 border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                           value={directColumnMapping.extra2 || ''}
                           onChange={(e) => setDirectColumnMapping({...directColumnMapping, extra2: e.target.value})}
                         >
@@ -5508,11 +5508,11 @@ const campaignData = {
                       </div>
                       
                       {/* 기타3 */}
-                      <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-xl">
-                        <span className="w-28 text-sm font-bold text-gray-700">3️⃣ 기타3</span>
+                      <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl">
+                        <span className="w-24 text-sm font-bold text-gray-700">3️⃣ 기타3</span>
                         <span className="w-8 text-center text-gray-400">→</span>
                         <select
-                          className="flex-1 border rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                          className="flex-1 border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                           value={directColumnMapping.extra3 || ''}
                           onChange={(e) => setDirectColumnMapping({...directColumnMapping, extra3: e.target.value})}
                         >
@@ -5524,11 +5524,11 @@ const campaignData = {
                       </div>
                       
                       {/* 회신번호 (매장번호) */}
-                      <div className="flex items-center gap-4 p-4 bg-blue-50 rounded-xl border border-blue-200">
-                        <span className="w-28 text-sm font-bold text-blue-700">📞 회신번호</span>
-                        <span className="w-8 text-center text-gray-400">→</span>
+                      <div className="flex items-center gap-3 p-3 bg-blue-50 rounded-xl border border-blue-200">
+                        <span className="w-24 text-sm font-bold text-blue-700">📞 회신번호</span>
+                        <span className="w-6 text-center text-gray-400">→</span>
                         <select
-                          className="flex-1 border border-blue-300 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          className="flex-1 border border-blue-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                           value={directColumnMapping.callback || ''}
                           onChange={(e) => setDirectColumnMapping({...directColumnMapping, callback: e.target.value})}
                         >
