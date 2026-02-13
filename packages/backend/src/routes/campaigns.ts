@@ -142,13 +142,119 @@ async function smsExecAll(tables: string[], sqlTemplate: string, params: any[]):
 export { getCompanySmsTables, getTestSmsTables, getAuthSmsTable, invalidateLineGroupCache, ALL_SMS_TABLES, smsCountAll, smsAggAll, smsSelectAll, smsExecAll };
 // ===== 라인그룹 헬퍼 끝 =====
 
+// ===== 카카오 브랜드메시지 발송 헬퍼 =====
+// IMC_BM_FREE_BIZ_MSG 테이블에 INSERT (자유형 브랜드메시지)
+async function insertKakaoQueue(params: {
+  bubbleType: string;       // TEXT, IMAGE, WIDE 등
+  senderKey: string;        // 발신 프로필 키
+  phone: string;            // 수신번호
+  targeting: string;        // I/M/N
+  message: string;          // 메시지 내용
+  isAd: boolean;            // 광고 여부
+  reservedDate?: string;    // 예약 시간 (YYYY-MM-DD HH:mm:ss)
+  attachmentJson?: string;  // 버튼/이미지/쿠폰 JSON
+  carouselJson?: string;    // 캐러셀 JSON
+  header?: string;          // 헤더 (강조표기)
+  resendType?: string;      // 대체발송 유형 SM/LM/NO
+  resendFrom?: string;      // 대체발송 발신번호
+  resendMessage?: string;   // 대체발송 메시지 (null이면 카카오 메시지 재사용)
+  resendTitle?: string;     // 대체발송 제목 (LMS)
+  unsubscribePhone?: string;// 080 수신거부 번호
+  unsubscribeAuth?: string; // 080 인증번호
+  requestUid?: string;      // 고유 요청 ID (campaign_id 등)
+}): Promise<void> {
+  const {
+    bubbleType, senderKey, phone, targeting, message, isAd,
+    reservedDate, attachmentJson, carouselJson, header,
+    resendType = 'SM', resendFrom, resendMessage, resendTitle,
+    unsubscribePhone, unsubscribeAuth, requestUid
+  } = params;
+
+  // 예약시간: 없으면 즉시발송 (현재 시간)
+  const reservedDateStr = reservedDate || toKoreaTimeStr(new Date());
+  // 대체발송 메시지 재사용 여부: resendMessage가 없으면 카카오 메시지 그대로 사용
+  const messageReuse = resendMessage ? 'N' : 'Y';
+
+  await mysqlQuery(
+    `INSERT INTO IMC_BM_FREE_BIZ_MSG (
+      CHAT_BUBBLE_TYPE, STATUS, AD_FLAG, RESERVED_DATE,
+      SENDER_KEY, PHONE_NUMBER, TARGETING,
+      HEADER, MESSAGE, ATTACHMENT_JSON, CAROUSEL_JSON,
+      RESEND_MT_TYPE, RESEND_MT_FROM, RESEND_MT_TITLE,
+      RESEND_MT_MESSAGE_REUSE, RESEND_MT_MESSAGE,
+      UNSUBSCRIBE_PHONE_NUMBER, UNSUBSCRIBE_AUTH_NUMBER,
+      REQUEST_UID
+    ) VALUES (?, '1', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      bubbleType,
+      isAd ? 'Y' : 'N',
+      reservedDateStr,
+      senderKey,
+      phone,
+      targeting,
+      header || null,
+      message,
+      attachmentJson || null,
+      carouselJson || null,
+      resendType,
+      resendFrom || null,
+      resendTitle || null,
+      messageReuse,
+      resendMessage || null,
+      unsubscribePhone || null,
+      unsubscribeAuth || null,
+      requestUid || null
+    ]
+  );
+}
+
+// 카카오 발송 결과 집계 (IMC_BM_FREE_BIZ_MSG)
+async function kakaoAgg(whereClause: string, params: any[]): Promise<{ total: number; success: number; fail: number; pending: number }> {
+  const rows = await mysqlQuery(
+    `SELECT
+       COUNT(*) as total,
+       COUNT(CASE WHEN REPORT_CODE = '0000' THEN 1 END) as success,
+       COUNT(CASE WHEN REPORT_CODE IS NOT NULL AND REPORT_CODE != '0000' THEN 1 END) as fail,
+       COUNT(CASE WHEN REPORT_CODE IS NULL AND STATUS = '1' THEN 1 END) as pending
+     FROM IMC_BM_FREE_BIZ_MSG WHERE ${whereClause}`,
+    params
+  ) as any[];
+  return {
+    total: Number(rows[0]?.total || 0),
+    success: Number(rows[0]?.success || 0),
+    fail: Number(rows[0]?.fail || 0),
+    pending: Number(rows[0]?.pending || 0)
+  };
+}
+
+// 카카오 예약 대기 건수
+async function kakaoCountPending(requestUid: string): Promise<number> {
+  const rows = await mysqlQuery(
+    `SELECT COUNT(*) as cnt FROM IMC_BM_FREE_BIZ_MSG WHERE REQUEST_UID = ? AND STATUS = '1'`,
+    [requestUid]
+  ) as any[];
+  return Number(rows[0]?.cnt || 0);
+}
+
+// 카카오 예약 취소 (대기 건 삭제)
+async function kakaoCancelPending(requestUid: string): Promise<number> {
+  const rows = await mysqlQuery(
+    `DELETE FROM IMC_BM_FREE_BIZ_MSG WHERE REQUEST_UID = ? AND STATUS = '1'`,
+    [requestUid]
+  ) as any[];
+  return (rows as any).affectedRows || 0;
+}
+
+export { insertKakaoQueue, kakaoAgg, kakaoCountPending, kakaoCancelPending };
+// ===== 카카오 브랜드메시지 헬퍼 끝 =====
+
 // ===== 선불 잔액 관리 =====
 // 선불 잔액 체크 + 차감 (atomic UPDATE ... WHERE balance >= amount)
 async function prepaidDeduct(
   companyId: string, count: number, messageType: string, referenceId: string
 ): Promise<{ ok: boolean; error?: string; amount?: number; balance?: number; insufficientBalance?: boolean }> {
   const co = await query(
-    'SELECT billing_type, balance, cost_per_sms, cost_per_lms, cost_per_mms FROM companies WHERE id = $1',
+    'SELECT billing_type, balance, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao FROM companies WHERE id = $1',
     [companyId]
   );
   if (co.rows.length === 0) return { ok: false, error: '회사 정보를 찾을 수 없습니다' };
@@ -158,7 +264,8 @@ async function prepaidDeduct(
 
   const unitPrice = messageType === 'SMS' ? Number(c.cost_per_sms || 0)
     : messageType === 'LMS' ? Number(c.cost_per_lms || 0)
-    : messageType === 'MMS' ? Number(c.cost_per_mms || 0) : 0;
+    : messageType === 'MMS' ? Number(c.cost_per_mms || 0)
+    : messageType === 'KAKAO' ? Number(c.cost_per_kakao || 0) : 0;
 
   const totalAmount = unitPrice * count;
   if (totalAmount === 0) return { ok: true, amount: 0 };
@@ -195,7 +302,7 @@ async function prepaidRefund(
   companyId: string, count: number, messageType: string, campaignId: string, reason: string
 ): Promise<{ refunded: number }> {
   const co = await query(
-    'SELECT billing_type, cost_per_sms, cost_per_lms, cost_per_mms FROM companies WHERE id = $1',
+    'SELECT billing_type, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao FROM companies WHERE id = $1',
     [companyId]
   );
   if (co.rows.length === 0 || co.rows[0].billing_type !== 'prepaid') return { refunded: 0 };
@@ -204,7 +311,8 @@ async function prepaidRefund(
   const c = co.rows[0];
   const unitPrice = messageType === 'SMS' ? Number(c.cost_per_sms || 0)
     : messageType === 'LMS' ? Number(c.cost_per_lms || 0)
-    : messageType === 'MMS' ? Number(c.cost_per_mms || 0) : 0;
+    : messageType === 'MMS' ? Number(c.cost_per_mms || 0)
+    : messageType === 'KAKAO' ? Number(c.cost_per_kakao || 0) : 0;
 
   // 이미 환불된 금액 조회 (중복 환불 방지)
   const existing = await query(
@@ -413,6 +521,11 @@ router.post('/test-send', async (req: Request, res: Response) => {
       return res.status(400).json({ error: '메시지 내용이 필요합니다.' });
     }
 
+    // 테스트 채널 (기본 sms)
+    const testChannel = req.body.sendChannel || 'sms';
+    const testKakaoSenderKey = req.body.kakaoSenderKey || '';
+    const testKakaoBubbleType = req.body.kakaoBubbleType || 'TEXT';
+
     // 회사 설정에서 담당자 정보 가져오기
     const companyResult = await query(
       'SELECT manager_phone, manager_contacts FROM companies WHERE id = $1',
@@ -467,13 +580,32 @@ router.post('/test-send', async (req: Request, res: Response) => {
       const testMsg = contact.name
         ? `[테스트] ${contact.name}님, ${messageContent}`
         : `[테스트] ${messageContent}`;
+
+      if (testChannel === 'sms' || testChannel === 'both') {
+        // SMS 테스트 발송
         const table = getNextSmsTable(testTables);
         await mysqlQuery(
           `INSERT INTO ${table} (
             dest_no, call_back, msg_contents, msg_type, sendreq_time, status_code, rsv1, app_etc1, app_etc2, bill_id, file_name1, file_name2, file_name3
           ) VALUES (?, ?, ?, ?, NOW(), 100, '1', ?, ?, ?, ?, ?, ?)`,
           [cleanPhone, callbackNumber, testMsg, msgType, 'test', companyId, userId || '', mmsImagePaths[0] || '', mmsImagePaths[1] || '', mmsImagePaths[2] || '']
-      );
+        );
+      }
+
+      if (testChannel === 'kakao' || testChannel === 'both') {
+        // 카카오 테스트 발송
+        await insertKakaoQueue({
+          bubbleType: testKakaoBubbleType,
+          senderKey: testKakaoSenderKey,
+          phone: cleanPhone,
+          targeting: 'I',
+          message: testMsg,
+          isAd: false,
+          resendType: 'NO',  // 테스트는 대체발송 안함
+          requestUid: 'test',
+        });
+      }
+
       sentCount++;
     }
 
@@ -511,6 +643,14 @@ router.post('/', async (req: Request, res: Response) => {
       eventStartDate,
       eventEndDate,
       mmsImagePaths,
+      // 카카오 브랜드메시지 필드
+      sendChannel,          // sms / kakao / both
+      kakaoBubbleType,      // TEXT, IMAGE, WIDE 등
+      kakaoSenderKey,       // 발신 프로필 키
+      kakaoTargeting,       // I/M/N
+      kakaoAttachmentJson,  // 버튼/이미지 JSON
+      kakaoCarouselJson,    // 캐러셀 JSON
+      kakaoResendType,      // SM/LM/NO
     } = req.body;
 
     if (!campaignName || !messageType || !messageContent) {
@@ -532,14 +672,23 @@ router.post('/', async (req: Request, res: Response) => {
       `INSERT INTO campaigns (
         company_id, campaign_name, message_type, target_filter,
         message_content, scheduled_at, is_ad, target_count, created_by,
-        event_start_date, event_end_date, mms_image_paths
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        event_start_date, event_end_date, mms_image_paths,
+        send_channel, kakao_bubble_type, kakao_sender_key, kakao_targeting,
+        kakao_attachment_json, kakao_carousel_json, kakao_resend_type
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
       RETURNING *`,
       [
         companyId, campaignName, messageType, JSON.stringify(targetFilter),
         messageContent, scheduledAt, isAd ?? false, targetCount, userId,
         eventStartDate || null, eventEndDate || null,
-        mmsImagePaths && mmsImagePaths.length > 0 ? JSON.stringify(mmsImagePaths) : null
+        mmsImagePaths && mmsImagePaths.length > 0 ? JSON.stringify(mmsImagePaths) : null,
+        sendChannel || 'sms',
+        kakaoBubbleType || null,
+        kakaoSenderKey || null,
+        kakaoTargeting || 'I',
+        kakaoAttachmentJson || null,
+        kakaoCarouselJson || null,
+        kakaoResendType || 'SM'
       ]
     );
 
@@ -706,7 +855,10 @@ if (filteredCustomers.length === 0) {
 }
 
 // ★ 선불 잔액 체크 + 차감 (MySQL INSERT 전에 atomic 차감)
-const sendDeduct = await prepaidDeduct(companyId, filteredCustomers.length, campaign.message_type, id);
+// 카카오 채널이면 KAKAO 타입으로 차감
+const sendChannel = campaign.send_channel || 'sms';
+const deductType = sendChannel === 'kakao' ? 'KAKAO' : campaign.message_type;
+const sendDeduct = await prepaidDeduct(companyId, filteredCustomers.length, deductType, id);
 if (!sendDeduct.ok) {
   return res.status(402).json({
     error: sendDeduct.error,
@@ -716,12 +868,28 @@ if (!sendDeduct.ok) {
   });
 }
 
-// MySQL에 INSERT (즉시/예약 공통) — 5개 테이블 라운드로빈 분배
+// MySQL에 INSERT (즉시/예약 공통)
 const sendTime = isScheduled ? toKoreaTimeStr(new Date(campaign.scheduled_at)) : null;
 
 // MMS 이미지 경로 (campaigns 테이블에서 가져옴)
 const campaignMmsImages: string[] = campaign.mms_image_paths || [];
 const aiMsgTypeCode = campaign.message_type === 'SMS' ? 'S' : campaign.message_type === 'LMS' ? 'L' : 'M';
+
+// 카카오 설정 (campaigns 테이블에서)
+const kakaoBubbleType = campaign.kakao_bubble_type || 'TEXT';
+const kakaoSenderKey = campaign.kakao_sender_key || '';
+const kakaoTargeting = campaign.kakao_targeting || 'I';
+const kakaoAttachmentJson = campaign.kakao_attachment_json || null;
+const kakaoCarouselJson = campaign.kakao_carousel_json || null;
+const kakaoResendType = campaign.kakao_resend_type || 'SM';
+
+// 080 수신거부 번호 조회 (카카오 광고 발송 시 필요)
+let opt080Number = '';
+let opt080Auth = '';
+if (sendChannel !== 'sms' && campaign.is_ad) {
+  const optResult = await query('SELECT opt_out_080_number FROM companies WHERE id = $1', [companyId]);
+  opt080Number = optResult.rows[0]?.opt_out_080_number || '';
+}
 
 for (const customer of filteredCustomers) {
   // ★ 동적 변수 치환 (field_mappings 기반 - 하드코딩 완전 제거!)
@@ -755,13 +923,39 @@ for (const customer of filteredCustomers) {
     ? customer.callback.replace(/-/g, '')
     : (campaign.callback_number || defaultCallback).replace(/-/g, '');
 
-  const table = getNextSmsTable(companyTables);
-  await mysqlQuery(
-    `INSERT INTO ${table} (
-      dest_no, call_back, msg_contents, msg_type, sendreq_time, status_code, rsv1, app_etc1, app_etc2, file_name1, file_name2, file_name3
-    ) VALUES (?, ?, ?, ?, ${sendTime ? `'${sendTime}'` : 'NOW()'}, 100, '1', ?, ?, ?, ?, ?)`,
-    [customer.phone.replace(/-/g, ''), customerCallback, personalizedMessage, aiMsgTypeCode, id, companyId, campaignMmsImages[0] || '', campaignMmsImages[1] || '', campaignMmsImages[2] || '']
-  );
+  const cleanPhone = customer.phone.replace(/-/g, '');
+
+  // ★ 채널별 분기: SMS / 카카오 / 동시발송
+  if (sendChannel === 'sms' || sendChannel === 'both') {
+    // SMS/LMS/MMS 발송
+    const table = getNextSmsTable(companyTables);
+    await mysqlQuery(
+      `INSERT INTO ${table} (
+        dest_no, call_back, msg_contents, msg_type, sendreq_time, status_code, rsv1, app_etc1, app_etc2, file_name1, file_name2, file_name3
+      ) VALUES (?, ?, ?, ?, ${sendTime ? `'${sendTime}'` : 'NOW()'}, 100, '1', ?, ?, ?, ?, ?)`,
+      [cleanPhone, customerCallback, personalizedMessage, aiMsgTypeCode, id, companyId, campaignMmsImages[0] || '', campaignMmsImages[1] || '', campaignMmsImages[2] || '']
+    );
+  }
+
+  if (sendChannel === 'kakao' || sendChannel === 'both') {
+    // 카카오 브랜드메시지 발송
+    await insertKakaoQueue({
+      bubbleType: kakaoBubbleType,
+      senderKey: kakaoSenderKey,
+      phone: cleanPhone,
+      targeting: kakaoTargeting,
+      message: personalizedMessage,
+      isAd: campaign.is_ad || false,
+      reservedDate: sendTime || undefined,
+      attachmentJson: kakaoAttachmentJson,
+      carouselJson: kakaoCarouselJson,
+      resendType: sendChannel === 'both' ? 'NO' : kakaoResendType,  // 동시발송이면 대체발송 끔
+      resendFrom: customerCallback,
+      resendMessage: sendChannel === 'both' ? undefined : undefined,  // 기본: 카카오 메시지 재사용
+      unsubscribePhone: opt080Number,
+      requestUid: id,
+    });
+  }
 }
 
 // campaign_runs 상태 업데이트
@@ -1070,9 +1264,9 @@ router.post('/sync-results', async (req: Request, res: Response) => {
 
     let syncCount = 0;
     for (const run of runsResult.rows) {
-      // 캠페인 소속 회사의 라인그룹 테이블에서 합산 집계
+      // SMS: 캠페인 소속 회사의 라인그룹 테이블에서 합산 집계
       const runTables = await getCompanySmsTables(run.company_id);
-      const agg = await smsAggAll(runTables,
+      const smsAgg = await smsAggAll(runTables,
         `COUNT(CASE WHEN status_code IN (6, 1000, 1800) THEN 1 END) as success_count,
          COUNT(CASE WHEN status_code NOT IN (6, 1000, 1800, 100) THEN 1 END) as fail_count,
          COUNT(CASE WHEN status_code = 100 THEN 1 END) as pending_count`,
@@ -1080,9 +1274,12 @@ router.post('/sync-results', async (req: Request, res: Response) => {
         [run.campaign_id]
       );
 
-      const successCount = agg.success_count || 0;
-      const failCount = agg.fail_count || 0;
-      const pendingCount = agg.pending_count || 0;
+      // 카카오: IMC_BM_FREE_BIZ_MSG에서 결과 집계
+      const kakaoResult = await kakaoAgg('REQUEST_UID = ?', [run.campaign_id]);
+
+      const successCount = (smsAgg.success_count || 0) + kakaoResult.success;
+      const failCount = (smsAgg.fail_count || 0) + kakaoResult.fail;
+      const pendingCount = (smsAgg.pending_count || 0) + kakaoResult.pending;
 
       // PostgreSQL 업데이트
       if (successCount > 0 || failCount > 0) {
@@ -1131,7 +1328,7 @@ router.post('/sync-results', async (req: Request, res: Response) => {
 
     for (const campaign of directCampaigns.rows) {
       const directTables = await getCompanySmsTables(campaign.company_id);
-      const agg = await smsAggAll(directTables,
+      const smsDirectAgg = await smsAggAll(directTables,
         `COUNT(*) as total_count,
          COUNT(CASE WHEN status_code IN (6, 1000, 1800) THEN 1 END) as success_count,
          COUNT(CASE WHEN status_code NOT IN (6, 1000, 1800, 100) THEN 1 END) as fail_count,
@@ -1140,9 +1337,12 @@ router.post('/sync-results', async (req: Request, res: Response) => {
         [campaign.id]
       );
 
-      const successCount = agg.success_count || 0;
-      const failCount = agg.fail_count || 0;
-      const pendingCount = agg.pending_count || 0;
+      // 카카오 결과도 합산
+      const kakaoDirectResult = await kakaoAgg('REQUEST_UID = ?', [campaign.id]);
+
+      const successCount = (smsDirectAgg.success_count || 0) + kakaoDirectResult.success;
+      const failCount = (smsDirectAgg.fail_count || 0) + kakaoDirectResult.fail;
+      const pendingCount = (smsDirectAgg.pending_count || 0) + kakaoDirectResult.pending;
 
       if (successCount > 0 || failCount > 0) {
         const newStatus = pendingCount > 0 ? 'sending' : 'completed';
@@ -1197,7 +1397,15 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       splitEnabled,   // 분할전송 여부
       splitCount,     // 분당 발송 건수
       useIndividualCallback,  // 개별회신번호 사용 여부
-      mmsImagePaths   // MMS 이미지 서버 경로 배열
+      mmsImagePaths,  // MMS 이미지 서버 경로 배열
+      // 카카오 브랜드메시지 필드
+      sendChannel,          // sms / kakao / both
+      kakaoBubbleType,      // TEXT, IMAGE, WIDE 등
+      kakaoSenderKey,       // 발신 프로필 키
+      kakaoTargeting,       // I/M/N
+      kakaoAttachmentJson,  // 버튼/이미지 JSON
+      kakaoCarouselJson,    // 캐러셀 JSON
+      kakaoResendType,      // SM/LM/NO
     } = req.body;
 
     if (!recipients || recipients.length === 0) {
@@ -1232,9 +1440,11 @@ router.post('/direct-send', async (req: Request, res: Response) => {
     const excludedCount = recipients.length - filteredRecipients.length;
 
     // 2. 캠페인 레코드 생성 (원본 템플릿도 저장)
+    const directChannel = sendChannel || 'sms';
     const campaignResult = await query(
-      `INSERT INTO campaigns (company_id, campaign_name, message_type, message_content, subject, callback_number, target_count, send_type, status, scheduled_at, message_template, message_subject, created_by, mms_image_paths, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'direct', $8, $9, $10, $11, $12, $13, NOW())
+      `INSERT INTO campaigns (company_id, campaign_name, message_type, message_content, subject, callback_number, target_count, send_type, status, scheduled_at, message_template, message_subject, created_by, mms_image_paths,
+        send_channel, kakao_bubble_type, kakao_sender_key, kakao_targeting, kakao_attachment_json, kakao_carousel_json, kakao_resend_type, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'direct', $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, NOW())
        RETURNING id`,
       [
         companyId,
@@ -1249,13 +1459,21 @@ router.post('/direct-send', async (req: Request, res: Response) => {
         message,  // message_template: 원본 템플릿
         subject || null,  // message_subject: 원본 제목
         userId,  // created_by: 발송자
-        mmsImagePaths && mmsImagePaths.length > 0 ? JSON.stringify(mmsImagePaths) : null
+        mmsImagePaths && mmsImagePaths.length > 0 ? JSON.stringify(mmsImagePaths) : null,
+        directChannel,
+        kakaoBubbleType || null,
+        kakaoSenderKey || null,
+        kakaoTargeting || 'I',
+        kakaoAttachmentJson || null,
+        kakaoCarouselJson || null,
+        kakaoResendType || 'SM'
       ]
     );
     const campaignId = campaignResult.rows[0].id;
 
     // ★ 선불 잔액 체크 + 차감
-    const directDeduct = await prepaidDeduct(companyId, filteredRecipients.length, msgType, campaignId);
+    const directDeductType = directChannel === 'kakao' ? 'KAKAO' : msgType;
+    const directDeduct = await prepaidDeduct(companyId, filteredRecipients.length, directDeductType, campaignId);
     if (!directDeduct.ok) {
       // 캠페인 레코드 롤백
       await query('DELETE FROM campaigns WHERE id = $1', [campaignId]);
@@ -1271,78 +1489,132 @@ router.post('/direct-send', async (req: Request, res: Response) => {
     // 2. MySQL 큐에 메시지 삽입 — 회사 라인그룹 테이블 라운드로빈 분배
     const isScheduledSend = scheduled && scheduledAt;
 
-    // 테이블별 데이터 분배
-    const tableBatches: Record<string, any[][]> = {};
-    for (const t of companyTables) tableBatches[t] = [[]];
-
-    for (let i = 0; i < filteredRecipients.length; i++) {
-      const recipient = filteredRecipients[i];
-      // 변수 치환
-      let finalMessage = message
-        .replace(/%이름%/g, recipient.name || '')
-        .replace(/%기타1%/g, recipient.extra1 || '')
-        .replace(/%기타2%/g, recipient.extra2 || '')
-        .replace(/%기타3%/g, recipient.extra3 || '')
-        .replace(/%회신번호%/g, recipient.callback || '');
-
-      // 분할전송 시간 계산
-      let sendTime: string;
-      if (isScheduledSend) {
-        const baseTime = new Date(scheduledAt);
-        if (splitEnabled && splitCount > 0) {
-          const batchIndex = Math.floor(i / splitCount);
-          baseTime.setMinutes(baseTime.getMinutes() + batchIndex);
-        }
-        sendTime = toKoreaTimeStr(baseTime);
-      } else if (splitEnabled && splitCount > 0) {
-        const baseTime = new Date();
-        const batchIndex = Math.floor(i / splitCount);
-        baseTime.setMinutes(baseTime.getMinutes() + batchIndex);
-        sendTime = toKoreaTimeStr(baseTime);
-      } else {
-        sendTime = toKoreaTimeStr(new Date());
-      }
-
-      // 개별회신번호면 recipient.callback 사용, 아니면 공통 callback 사용
-      const recipientCallback = useIndividualCallback
-        ? (recipient.callback || '').replace(/-/g, '')
-        : callback.replace(/-/g, '');
-
-      // 라운드로빈으로 테이블 선택
-      const table = getNextSmsTable(companyTables);
-      const currentBatch = tableBatches[table];
-      const lastBatch = currentBatch[currentBatch.length - 1];
-
-      if (lastBatch.length >= 1000) {
-        currentBatch.push([]);
-      }
-      const targetBatch = currentBatch[currentBatch.length - 1];
-
-      targetBatch.push([
-        recipient.phone.replace(/-/g, ''),
-        recipientCallback,
-        finalMessage,
-        msgType === 'SMS' ? 'S' : msgType === 'LMS' ? 'L' : 'M',
-        subject || '',
-        sendTime,
-        campaignId,
-        (mmsImagePaths || [])[0] || '',
-        (mmsImagePaths || [])[1] || '',
-        (mmsImagePaths || [])[2] || ''
-      ]);
+    // 080 수신거부 번호 조회 (카카오 광고 발송 시 필요)
+    let directOpt080 = '';
+    if (directChannel !== 'sms' && adEnabled) {
+      const optResult = await query('SELECT opt_out_080_number FROM companies WHERE id = $1', [companyId]);
+      directOpt080 = optResult.rows[0]?.opt_out_080_number || '';
     }
 
-    // Bulk INSERT 실행 (테이블별)
-    for (const [table, batches] of Object.entries(tableBatches)) {
-      for (const batch of batches) {
-        if (batch.length === 0) continue;
-        const placeholders = batch.map(() => '(?, ?, ?, ?, ?, ?, 100, \'1\', ?, ?, ?, ?)').join(', ');
-        const flatValues = batch.flat();
+    // SMS 발송 (sms 또는 both)
+    if (directChannel === 'sms' || directChannel === 'both') {
+      // 테이블별 데이터 분배
+      const tableBatches: Record<string, any[][]> = {};
+      for (const t of companyTables) tableBatches[t] = [[]];
 
-        await mysqlQuery(
-          `INSERT INTO ${table} (dest_no, call_back, msg_contents, msg_type, title_str, sendreq_time, status_code, rsv1, app_etc1, file_name1, file_name2, file_name3) VALUES ${placeholders}`,
-          flatValues
-        );
+      for (let i = 0; i < filteredRecipients.length; i++) {
+        const recipient = filteredRecipients[i];
+        // 변수 치환
+        let finalMessage = message
+          .replace(/%이름%/g, recipient.name || '')
+          .replace(/%기타1%/g, recipient.extra1 || '')
+          .replace(/%기타2%/g, recipient.extra2 || '')
+          .replace(/%기타3%/g, recipient.extra3 || '')
+          .replace(/%회신번호%/g, recipient.callback || '');
+
+        // 분할전송 시간 계산
+        let sendTime: string;
+        if (isScheduledSend) {
+          const baseTime = new Date(scheduledAt);
+          if (splitEnabled && splitCount > 0) {
+            const batchIndex = Math.floor(i / splitCount);
+            baseTime.setMinutes(baseTime.getMinutes() + batchIndex);
+          }
+          sendTime = toKoreaTimeStr(baseTime);
+        } else if (splitEnabled && splitCount > 0) {
+          const baseTime = new Date();
+          const batchIndex = Math.floor(i / splitCount);
+          baseTime.setMinutes(baseTime.getMinutes() + batchIndex);
+          sendTime = toKoreaTimeStr(baseTime);
+        } else {
+          sendTime = toKoreaTimeStr(new Date());
+        }
+
+        // 개별회신번호면 recipient.callback 사용, 아니면 공통 callback 사용
+        const recipientCallback = useIndividualCallback
+          ? (recipient.callback || '').replace(/-/g, '')
+          : callback.replace(/-/g, '');
+
+        // 라운드로빈으로 테이블 선택
+        const table = getNextSmsTable(companyTables);
+        const currentBatch = tableBatches[table];
+        const lastBatch = currentBatch[currentBatch.length - 1];
+
+        if (lastBatch.length >= 1000) {
+          currentBatch.push([]);
+        }
+        const targetBatch = currentBatch[currentBatch.length - 1];
+
+        targetBatch.push([
+          recipient.phone.replace(/-/g, ''),
+          recipientCallback,
+          finalMessage,
+          msgType === 'SMS' ? 'S' : msgType === 'LMS' ? 'L' : 'M',
+          subject || '',
+          sendTime,
+          campaignId,
+          (mmsImagePaths || [])[0] || '',
+          (mmsImagePaths || [])[1] || '',
+          (mmsImagePaths || [])[2] || ''
+        ]);
+      }
+
+      // Bulk INSERT 실행 (테이블별)
+      for (const [table, batches] of Object.entries(tableBatches)) {
+        for (const batch of batches) {
+          if (batch.length === 0) continue;
+          const placeholders = batch.map(() => '(?, ?, ?, ?, ?, ?, 100, \'1\', ?, ?, ?, ?)').join(', ');
+          const flatValues = batch.flat();
+
+          await mysqlQuery(
+            `INSERT INTO ${table} (dest_no, call_back, msg_contents, msg_type, title_str, sendreq_time, status_code, rsv1, app_etc1, file_name1, file_name2, file_name3) VALUES ${placeholders}`,
+            flatValues
+          );
+        }
+      }
+    }
+
+    // 카카오 발송 (kakao 또는 both)
+    if (directChannel === 'kakao' || directChannel === 'both') {
+      for (let i = 0; i < filteredRecipients.length; i++) {
+        const recipient = filteredRecipients[i];
+        let finalMessage = message
+          .replace(/%이름%/g, recipient.name || '')
+          .replace(/%기타1%/g, recipient.extra1 || '')
+          .replace(/%기타2%/g, recipient.extra2 || '')
+          .replace(/%기타3%/g, recipient.extra3 || '')
+          .replace(/%회신번호%/g, recipient.callback || '');
+
+        // 분할전송 시간 계산
+        let kakaoSendTime: string | undefined;
+        if (isScheduledSend) {
+          const baseTime = new Date(scheduledAt);
+          if (splitEnabled && splitCount > 0) {
+            const batchIndex = Math.floor(i / splitCount);
+            baseTime.setMinutes(baseTime.getMinutes() + batchIndex);
+          }
+          kakaoSendTime = toKoreaTimeStr(baseTime);
+        }
+
+        const recipientCallback = useIndividualCallback
+          ? (recipient.callback || '').replace(/-/g, '')
+          : callback.replace(/-/g, '');
+
+        await insertKakaoQueue({
+          bubbleType: kakaoBubbleType || 'TEXT',
+          senderKey: kakaoSenderKey || '',
+          phone: recipient.phone.replace(/-/g, ''),
+          targeting: kakaoTargeting || 'I',
+          message: finalMessage,
+          isAd: adEnabled || false,
+          reservedDate: kakaoSendTime,
+          attachmentJson: kakaoAttachmentJson || undefined,
+          carouselJson: kakaoCarouselJson || undefined,
+          resendType: directChannel === 'both' ? 'NO' : (kakaoResendType || 'SM'),
+          resendFrom: recipientCallback,
+          unsubscribePhone: directOpt080,
+          requestUid: campaignId,
+        });
       }
     }
 
@@ -1397,16 +1669,32 @@ router.post('/:id/cancel', async (req: Request, res: Response) => {
     const cancelTables = await getCompanySmsTables(companyId);
     const cancelCount = await smsCountAll(cancelTables, 'app_etc1 = ? AND status_code = 100', [campaignId]);
 
+    // 카카오 대기 건수도 확인
+    const kakaoCancelCount = await kakaoCountPending(campaignId);
+    const totalCancelCount = cancelCount + kakaoCancelCount;
+
     // 3. 회사 라인그룹 테이블에서 대기 중인 메시지 삭제 (status_code = 100)
     await smsExecAll(cancelTables,
       `DELETE FROM SMSQ_SEND WHERE app_etc1 = ? AND status_code = 100`,
       [campaignId]
     );
 
+    // 카카오 대기건 삭제
+    if (kakaoCancelCount > 0) {
+      await kakaoCancelPending(campaignId);
+    }
+
     // 4. 선불 환불 (예약 취소)
     const camp = campaign.rows[0];
-    if (cancelCount > 0) {
-      await prepaidRefund(companyId, cancelCount, camp.message_type, campaignId, '예약 취소 환불');
+    if (totalCancelCount > 0) {
+      // SMS 환불
+      if (cancelCount > 0) {
+        await prepaidRefund(companyId, cancelCount, camp.message_type, campaignId, '예약 취소 환불');
+      }
+      // 카카오 환불
+      if (kakaoCancelCount > 0) {
+        await prepaidRefund(companyId, kakaoCancelCount, 'KAKAO', campaignId, '카카오 예약 취소 환불');
+      }
     }
 
     // 5. PostgreSQL 캠페인 상태 변경

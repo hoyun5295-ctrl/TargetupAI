@@ -372,7 +372,7 @@ router.get('/campaigns/scheduled', authenticate, requireSuperAdmin, async (req: 
       SELECT 
         c.id, c.campaign_name, c.status, c.scheduled_at, c.target_count,
         c.created_at, c.cancelled_by, c.cancelled_by_type, c.cancel_reason, c.cancelled_at,
-        c.message_type, c.send_type,
+        c.message_type, c.send_type, c.send_channel,
         co.company_name, co.company_code,
         u.name as created_by_name, u.login_id as created_by_login
       FROM campaigns c
@@ -991,7 +991,7 @@ router.get('/campaigns/all', authenticate, requireSuperAdmin, async (req: Reques
     const result = await query(`
       SELECT 
         c.id, c.campaign_name as name, c.status, c.send_type as campaign_type, c.created_at,
-        c.company_id, c.message_type, c.scheduled_at, c.sent_at,
+        c.company_id, c.message_type, c.send_channel, c.scheduled_at, c.sent_at,
         co.company_name, co.company_code,
         u.name as created_by_name, u.login_id as created_by_login,
         (SELECT COALESCE(SUM(cr.sent_count), 0) FROM campaign_runs cr WHERE cr.campaign_id = c.id) as total_sent,
@@ -1018,7 +1018,7 @@ router.get('/campaigns/all', authenticate, requireSuperAdmin, async (req: Reques
     res.status(500).json({ error: '전체 캠페인 조회 실패' });
   }
 });
-// ===== SMS 발송 상세 조회 (MySQL) =====
+// ===== SMS/카카오 발송 상세 조회 (MySQL) =====
 router.get('/campaigns/:id/sms-detail', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
@@ -1028,11 +1028,12 @@ router.get('/campaigns/:id/sms-detail', authenticate, requireSuperAdmin, async (
     const statusFilter = (req.query.status as string) || '';   // success / fail / pending / ''
     const searchType = (req.query.searchType as string) || ''; // dest_no / call_back
     const searchValue = (req.query.searchValue as string) || '';
+    const channelFilter = (req.query.channel as string) || ''; // sms / kakao / '' (all)
 
     // 캠페인 기본 정보 (PostgreSQL)
     const campResult = await query(`
       SELECT c.id, c.campaign_name, c.message_type, c.send_type, c.status, c.scheduled_at, c.sent_at, c.target_count,
-             c.success_count, c.fail_count,
+             c.success_count, c.fail_count, c.send_channel,
              co.company_name, co.company_code,
              u.name as created_by_name, u.login_id as created_by_login
       FROM campaigns c
@@ -1044,59 +1045,126 @@ router.get('/campaigns/:id/sms-detail', authenticate, requireSuperAdmin, async (
       return res.status(404).json({ error: '캠페인을 찾을 수 없습니다.' });
     }
     const campaign = campResult.rows[0];
+    const sendChannel = campaign.send_channel || 'sms';
+    const showSms = (!channelFilter || channelFilter === 'sms') && (sendChannel === 'sms' || sendChannel === 'both');
+    const showKakao = (!channelFilter || channelFilter === 'kakao') && (sendChannel === 'kakao' || sendChannel === 'both');
 
-    // MySQL에서 개별 발송 내역 조회 (SMSQ_SEND VIEW - 11개 테이블 UNION ALL)
-    let mysqlWhere = `WHERE app_etc1 = ?`;
-    const mysqlParams: any[] = [id];
+    let allDetail: any[] = [];
+    let totalSms = 0;
+    let totalKakao = 0;
 
-    if (statusFilter === 'success') {
-      mysqlWhere += ` AND status_code IN (6, 1000, 1800)`;
-    } else if (statusFilter === 'fail') {
-      mysqlWhere += ` AND status_code NOT IN (6, 1000, 1800, 100)`;
-    } else if (statusFilter === 'pending') {
-      mysqlWhere += ` AND status_code = 100`;
+    // ===== SMS 내역 조회 =====
+    if (showSms) {
+      let mysqlWhere = `WHERE app_etc1 = ?`;
+      const mysqlParams: any[] = [id];
+
+      if (statusFilter === 'success') {
+        mysqlWhere += ` AND status_code IN (6, 1000, 1800)`;
+      } else if (statusFilter === 'fail') {
+        mysqlWhere += ` AND status_code NOT IN (6, 1000, 1800, 100)`;
+      } else if (statusFilter === 'pending') {
+        mysqlWhere += ` AND status_code = 100`;
+      }
+
+      if (searchValue && searchType === 'dest_no') {
+        mysqlWhere += ` AND dest_no LIKE ?`;
+        mysqlParams.push(`%${searchValue.replace(/-/g, '')}%`);
+      } else if (searchValue && searchType === 'call_back') {
+        mysqlWhere += ` AND call_back LIKE ?`;
+        mysqlParams.push(`%${searchValue.replace(/-/g, '')}%`);
+      }
+
+      const countRows = await mysqlQuery(`SELECT COUNT(*) as cnt FROM SMSQ_SEND ${mysqlWhere}`, mysqlParams);
+      totalSms = (countRows as any[])[0]?.cnt || 0;
+
+      const rows = await mysqlQuery(
+        `SELECT seqno, dest_no, call_back, msg_contents, msg_type, status_code, mob_company,
+                sendreq_time, mobsend_time, repmsg_recvtm
+         FROM SMSQ_SEND ${mysqlWhere}
+         ORDER BY seqno DESC
+         LIMIT ? OFFSET ?`,
+        [...mysqlParams, limit, offset]
+      );
+
+      const statusMap: Record<number, string> = { 6: 'SMS성공', 1000: 'LMS성공', 1800: '카카오성공', 100: '대기', 7: '비가입자', 8: 'Power-off', 16: '스팸차단' };
+      const carrierMap: Record<string, string> = { '11': 'SKT', '16': 'KT', '19': 'LGU+' };
+
+      (rows as any[]).forEach(r => {
+        allDetail.push({
+          seqno: r.seqno,
+          destNo: r.dest_no,
+          callBack: r.call_back,
+          msgContents: r.msg_contents,
+          msgType: r.msg_type === 'S' ? 'SMS' : r.msg_type === 'L' ? 'LMS' : r.msg_type === 'M' ? 'MMS' : r.msg_type,
+          statusCode: r.status_code,
+          statusText: statusMap[r.status_code] || `코드:${r.status_code}`,
+          carrier: carrierMap[r.mob_company] || r.mob_company || '-',
+          sendreqTime: r.sendreq_time,
+          mobsendTime: r.mobsend_time,
+          recvTime: r.repmsg_recvtm,
+          channel: 'sms',
+        });
+      });
     }
 
-    if (searchValue && searchType === 'dest_no') {
-      mysqlWhere += ` AND dest_no LIKE ?`;
-      mysqlParams.push(`%${searchValue.replace(/-/g, '')}%`);
-    } else if (searchValue && searchType === 'call_back') {
-      mysqlWhere += ` AND call_back LIKE ?`;
-      mysqlParams.push(`%${searchValue.replace(/-/g, '')}%`);
+    // ===== 카카오 내역 조회 =====
+    if (showKakao) {
+      let kakaoWhere = `WHERE REQUEST_UID = ?`;
+      const kakaoParams: any[] = [id];
+
+      if (statusFilter === 'success') {
+        kakaoWhere += ` AND REPORT_CODE = '0000'`;
+      } else if (statusFilter === 'fail') {
+        kakaoWhere += ` AND REPORT_CODE != '0000' AND STATUS IN ('3','4')`;
+      } else if (statusFilter === 'pending') {
+        kakaoWhere += ` AND STATUS IN ('1','2')`;
+      }
+
+      if (searchValue && searchType === 'dest_no') {
+        kakaoWhere += ` AND PHONE_NUMBER LIKE ?`;
+        kakaoParams.push(`%${searchValue.replace(/-/g, '')}%`);
+      }
+
+      const kakaoCountRows = await mysqlQuery(`SELECT COUNT(*) as cnt FROM IMC_BM_FREE_BIZ_MSG ${kakaoWhere}`, kakaoParams);
+      totalKakao = (kakaoCountRows as any[])[0]?.cnt || 0;
+
+      const kakaoRows = await mysqlQuery(
+        `SELECT ID, PHONE_NUMBER, MESSAGE, CHAT_BUBBLE_TYPE, STATUS, REPORT_CODE, REPORT_DATE,
+                REQUEST_DATE, RESPONSE_DATE, RESEND_MT_TYPE, RESEND_REPORT_CODE
+         FROM IMC_BM_FREE_BIZ_MSG ${kakaoWhere}
+         ORDER BY ID DESC
+         LIMIT ? OFFSET ?`,
+        [...kakaoParams, limit, offset]
+      );
+
+      const kakaoStatusMap: Record<string, string> = {
+        '0000': '카카오성공', '': '대기',
+      };
+
+      (kakaoRows as any[]).forEach(r => {
+        allDetail.push({
+          seqno: r.ID,
+          destNo: r.PHONE_NUMBER,
+          callBack: '-',
+          msgContents: r.MESSAGE,
+          msgType: `카카오(${r.CHAT_BUBBLE_TYPE || 'TEXT'})`,
+          statusCode: r.REPORT_CODE === '0000' ? 1800 : (r.STATUS <= '2' ? 100 : 9999),
+          statusText: kakaoStatusMap[r.REPORT_CODE] || `카카오:${r.REPORT_CODE || '처리중'}`,
+          carrier: '카카오',
+          sendreqTime: r.REQUEST_DATE,
+          mobsendTime: r.RESPONSE_DATE,
+          recvTime: r.REPORT_DATE,
+          channel: 'kakao',
+          kakaoReportCode: r.REPORT_CODE,
+          resendType: r.RESEND_MT_TYPE,
+          resendReportCode: r.RESEND_REPORT_CODE,
+        });
+      });
     }
 
-    // 총 건수
-    const countRows = await mysqlQuery(`SELECT COUNT(*) as cnt FROM SMSQ_SEND ${mysqlWhere}`, mysqlParams);
-    const total = (countRows as any[])[0]?.cnt || 0;
+    const total = totalSms + totalKakao;
 
-    // 페이징 조회
-    const rows = await mysqlQuery(
-      `SELECT seqno, dest_no, call_back, msg_contents, msg_type, status_code, mob_company,
-              sendreq_time, mobsend_time, repmsg_recvtm
-       FROM SMSQ_SEND ${mysqlWhere}
-       ORDER BY seqno DESC
-       LIMIT ? OFFSET ?`,
-      [...mysqlParams, limit, offset]
-    );
-
-    const statusMap: Record<number, string> = { 6: 'SMS성공', 1000: 'LMS성공', 1800: '카카오성공', 100: '대기', 7: '비가입자', 8: 'Power-off', 16: '스팸차단' };
-    const carrierMap: Record<string, string> = { '11': 'SKT', '16': 'KT', '19': 'LGU+' };
-
-    const detail = (rows as any[]).map(r => ({
-      seqno: r.seqno,
-      destNo: r.dest_no,
-      callBack: r.call_back,
-      msgContents: r.msg_contents,
-      msgType: r.msg_type === 'S' ? 'SMS' : r.msg_type === 'L' ? 'LMS' : r.msg_type === 'M' ? 'MMS' : r.msg_type,
-      statusCode: r.status_code,
-      statusText: statusMap[r.status_code] || `코드:${r.status_code}`,
-      carrier: carrierMap[r.mob_company] || r.mob_company || '-',
-      sendreqTime: r.sendreq_time,
-      mobsendTime: r.mobsend_time,
-      recvTime: r.repmsg_recvtm,
-    }));
-
-    res.json({ campaign, detail, total, page, totalPages: Math.ceil(total / limit) });
+    res.json({ campaign, detail: allDetail, total, totalSms, totalKakao, page, totalPages: Math.ceil(total / limit) });
   } catch (error) {
     console.error('SMS 상세 조회 실패:', error);
     res.status(500).json({ error: 'SMS 상세 조회 실패' });

@@ -54,6 +54,16 @@ router.post('/generate-message', async (req: Request, res: Response) => {
       avg_total_spent: parseFloat(statsResult.rows[0].avg_total_spent) || 0,
     };
 
+    // 카카오 채널인 경우 sender_key 조회
+    let kakaoSenderKey: string | undefined;
+    if (channel === '카카오') {
+      const kakaoResult = await query(
+        'SELECT profile_key FROM kakao_sender_profiles WHERE company_id = $1 AND is_active = true LIMIT 1',
+        [companyId]
+      );
+      kakaoSenderKey = kakaoResult.rows[0]?.profile_key;
+    }
+
     const result = await generateMessages(prompt, targetInfo, {
       productName,
       discountRate,
@@ -104,6 +114,14 @@ router.post('/recommend-target', async (req: Request, res: Response) => {
     // company_name을 name으로 매핑
     companyInfo.name = companyInfo.company_name;
     console.log('companyInfo:', companyInfo);
+
+    // 카카오 프로필 존재 여부 확인 (AI가 카카오 채널 추천 가능한지 판단용)
+    const kakaoProfileResult = await query(
+      'SELECT COUNT(*) FROM kakao_sender_profiles WHERE company_id = $1 AND is_active = true',
+      [companyId]
+    );
+    const hasKakaoProfile = parseInt(kakaoProfileResult.rows[0].count) > 0;
+    (companyInfo as any).has_kakao_profile = hasKakaoProfile;
 
     // 일반 사용자는 본인 store_codes에 해당하는 고객만
     let storeFilter = '';
@@ -290,6 +308,7 @@ const unsubscribeCount = parseInt(unsubCountResult.rows[0].count);
 
 result.estimated_count = actualCount;
 (result as any).unsubscribe_count = unsubscribeCount;
+(result as any).has_kakao_profile = hasKakaoProfile;
 
 return res.json(result);
   } catch (error) {

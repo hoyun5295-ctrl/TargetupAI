@@ -38,6 +38,13 @@ router.get('/settings', authenticate, async (req: Request, res: Response) => {
     } else {
       row.manager_phones = [];
     }
+
+    // 카카오 발신 프로필 목록도 함께 제공
+    const kakaoProfilesResult = await query(
+      `SELECT id, profile_key, profile_name, is_active FROM kakao_sender_profiles WHERE company_id = $1 AND is_active = true ORDER BY created_at ASC`,
+      [companyId]
+    );
+    row.kakao_profiles = kakaoProfilesResult.rows;
     
     res.json(row);
   } catch (error) {
@@ -592,6 +599,134 @@ router.post('/inquiry', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('문의 메일 발송 실패:', error);
     res.status(500).json({ error: '문의 전송에 실패했습니다. 잠시 후 다시 시도해주세요.' });
+  }
+});
+
+// ===== 카카오 발신 프로필 관리 =====
+
+// GET /api/companies/kakao-profiles — 카카오 발신 프로필 목록
+router.get('/kakao-profiles', async (req: Request, res: Response) => {
+  try {
+    const companyId = (req as any).user?.companyId;
+    if (!companyId) {
+      return res.status(401).json({ success: false, error: '인증 필요' });
+    }
+
+    const result = await query(
+      `SELECT id, profile_key, profile_name, is_active, created_at
+       FROM kakao_sender_profiles
+       WHERE company_id = $1
+       ORDER BY created_at ASC`,
+      [companyId]
+    );
+
+    res.json({ success: true, profiles: result.rows });
+  } catch (error) {
+    console.error('카카오 프로필 조회 실패:', error);
+    res.status(500).json({ success: false, error: '조회 실패' });
+  }
+});
+
+// POST /api/companies/kakao-profiles — 카카오 발신 프로필 등록
+router.post('/kakao-profiles', async (req: Request, res: Response) => {
+  try {
+    const companyId = (req as any).user?.companyId;
+    const userType = (req as any).user?.userType;
+    if (!companyId) {
+      return res.status(401).json({ success: false, error: '인증 필요' });
+    }
+    // 고객사 관리자 또는 슈퍼관리자만 등록 가능
+    if (userType !== 'company_admin' && userType !== 'super_admin') {
+      return res.status(403).json({ success: false, error: '관리자 권한이 필요합니다' });
+    }
+
+    const { profileKey, profileName } = req.body;
+    if (!profileKey || !profileName) {
+      return res.status(400).json({ success: false, error: '프로필키와 프로필명은 필수입니다' });
+    }
+
+    // 중복 체크
+    const existing = await query(
+      'SELECT id FROM kakao_sender_profiles WHERE company_id = $1 AND profile_key = $2',
+      [companyId, profileKey]
+    );
+    if (existing.rows.length > 0) {
+      return res.status(409).json({ success: false, error: '이미 등록된 프로필키입니다' });
+    }
+
+    const result = await query(
+      `INSERT INTO kakao_sender_profiles (company_id, profile_key, profile_name, is_active)
+       VALUES ($1, $2, $3, true)
+       RETURNING id, profile_key, profile_name, is_active, created_at`,
+      [companyId, profileKey, profileName]
+    );
+
+    res.status(201).json({ success: true, profile: result.rows[0], message: '카카오 프로필이 등록되었습니다.' });
+  } catch (error) {
+    console.error('카카오 프로필 등록 실패:', error);
+    res.status(500).json({ success: false, error: '등록 실패' });
+  }
+});
+
+// PUT /api/companies/kakao-profiles/:id — 카카오 발신 프로필 수정
+router.put('/kakao-profiles/:id', async (req: Request, res: Response) => {
+  try {
+    const companyId = (req as any).user?.companyId;
+    const userType = (req as any).user?.userType;
+    const { id } = req.params;
+
+    if (!companyId) return res.status(401).json({ success: false, error: '인증 필요' });
+    if (userType !== 'company_admin' && userType !== 'super_admin') {
+      return res.status(403).json({ success: false, error: '관리자 권한이 필요합니다' });
+    }
+
+    const { profileName, isActive } = req.body;
+
+    const result = await query(
+      `UPDATE kakao_sender_profiles
+       SET profile_name = COALESCE($1, profile_name),
+           is_active = COALESCE($2, is_active)
+       WHERE id = $3 AND company_id = $4
+       RETURNING id, profile_key, profile_name, is_active`,
+      [profileName, isActive, id, companyId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, error: '프로필을 찾을 수 없습니다' });
+    }
+
+    res.json({ success: true, profile: result.rows[0], message: '수정되었습니다.' });
+  } catch (error) {
+    console.error('카카오 프로필 수정 실패:', error);
+    res.status(500).json({ success: false, error: '수정 실패' });
+  }
+});
+
+// DELETE /api/companies/kakao-profiles/:id — 카카오 발신 프로필 삭제
+router.delete('/kakao-profiles/:id', async (req: Request, res: Response) => {
+  try {
+    const companyId = (req as any).user?.companyId;
+    const userType = (req as any).user?.userType;
+    const { id } = req.params;
+
+    if (!companyId) return res.status(401).json({ success: false, error: '인증 필요' });
+    if (userType !== 'company_admin' && userType !== 'super_admin') {
+      return res.status(403).json({ success: false, error: '관리자 권한이 필요합니다' });
+    }
+
+    const result = await query(
+      'DELETE FROM kakao_sender_profiles WHERE id = $1 AND company_id = $2 RETURNING id',
+      [id, companyId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, error: '프로필을 찾을 수 없습니다' });
+    }
+
+    res.json({ success: true, message: '삭제되었습니다.' });
+  } catch (error) {
+    console.error('카카오 프로필 삭제 실패:', error);
+    res.status(500).json({ success: false, error: '삭제 실패' });
   }
 });
 

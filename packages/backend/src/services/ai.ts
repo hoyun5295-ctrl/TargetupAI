@@ -23,6 +23,7 @@ interface MessageVariant {
   concept: string;
   sms_text: string;
   lms_text: string;
+  kakao_text?: string;
   score: number;
 }
 
@@ -291,9 +292,15 @@ const BRAND_SYSTEM_PROMPT = `당신은 마케팅 문자 메시지 전문가입�
 - LMS와 동일하되 이미지 첨부 고려
 - 텍스트는 이미지 보완 역할
 
-### 카카오 알림톡
-- 템플릿 형식 준수
-- 버튼 텍스트 포함
+### 카카오 (친구톡/브랜드메시지)
+- 최대 4,000자 (한글 기준)
+- 발송 가능 시간: 08:00~20:50 (⚠️ 이 시간 밖에 발송 불가!)
+- 광고 표기: 메시지 상단에 "(광고)" 자동 붙음 (시스템 처리, 본문에 넣지 마세요)
+- 수신거부: 하단에 "채널 차단하기" 자동 포함 (본문에 넣지 마세요)
+- 이모지 사용 가능 (SMS와 다르게 카카오는 이모지 지원!)
+- 버튼: 최대 5개 (웹링크, 앱링크, 봇키워드, 메시지전달, 상담톡전환)
+- 구성: 인사 → 혜택/내용 → 기간/조건 → 안내
+- 이모지는 적절히 포인트로만 사용 (과도한 사용 금지)
 
 ## 🚫 절대 금지 규칙 (최우선!)
 
@@ -313,9 +320,11 @@ const BRAND_SYSTEM_PROMPT = `당신은 마케팅 문자 메시지 전문가입�
 - 날짜 표기는 반드시 "M/D(요일)" 형식으로! 예: 2/8(일)
 
 ## 특수문자 규칙 (⚠️ 필수!)
-이모지(😀🎁🔥💕 등)는 SMS에서 깨지므로 절대 사용 금지!
+SMS/LMS/MMS: 이모지(😀🎁🔥💕 등)는 SMS에서 깨지므로 절대 사용 금지!
 대신 아래 특수문자만 사용하세요:
 ★☆●○◎◇◆□■△▲▽▼→←↑↓♠♣♥♡♦※☎▶◀【】「」『』
+
+카카오: 이모지 사용 가능하나 절제하여 포인트로만 활용 (🎉✨💝 등 1~2개 적절히)
 
 ## 출력 형식
 반드시 아래 JSON 형식으로만 응답하세요:
@@ -399,7 +408,7 @@ export async function generateMessages(
   
   // ★ SMS 가용 바이트 동적 계산 (광고 오버헤드 반영)
   const smsAvailableBytes = getAvailableSmsBytes(isAd, rejectNumber);
-  const byteLimit = channel === 'SMS' ? smsAvailableBytes : channel === 'LMS' ? 2000 : channel === 'MMS' ? 2000 : 1000;
+  const byteLimit = channel === 'SMS' ? smsAvailableBytes : channel === 'LMS' ? 2000 : channel === 'MMS' ? 2000 : channel === '카카오' ? 4000 : 1000;
   
   // ★ 변수 카탈로그 프롬프트 생성
   const varCatalogPrompt = buildVarCatalogPrompt(varCatalog, availableVars);
@@ -409,6 +418,15 @@ export async function generateMessages(
     ? isAd
       ? `- ⚠️ SMS 광고 메시지: 순수 본문을 반드시 ${smsAvailableBytes}바이트 이내로 작성! (시스템이 (광고)표기+수신거부번호를 자동 추가하므로 전체 90바이트 중 본문은 ${smsAvailableBytes}바이트만 사용 가능)\n- 한글 1자=2바이트, 영문/숫자/특수문자=1바이트 기준으로 정확히 계산하세요\n- ${smsAvailableBytes}바이트 초과 시 발송 불가! 짧고 임팩트 있게 작성`
       : `- SMS 비광고 메시지: 순수 본문을 반드시 ${smsAvailableBytes}바이트 이내로 작성\n- 한글 1자=2바이트, 영문/숫자/특수문자=1바이트 기준으로 정확히 계산하세요`
+    : '';
+
+  // ★ 카카오 채널 안내
+  const kakaoInstruction = channel === '카카오'
+    ? `- 카카오 메시지: 최대 4,000자 (한글 기준)
+- 이모지 사용 가능! 포인트로 적절히 활용 (1~2개)
+- 줄바꿈과 이모지로 가독성 높게 구성
+- ⚠️ (광고) 표기와 수신거부는 시스템이 처리하므로 본문에 넣지 마세요
+- 발송 가능 시간: 08:00~20:50 (이 시간 밖 발송 불가)`
     : '';
   
   const userMessage = `## 캠페인 정보
@@ -442,6 +460,7 @@ ${brandSlogan ? `- 브랜드 슬로건 "${brandSlogan}"의 느낌을 반영` : '
 - 🚫 (광고), 무료거부, 무료수신거부, 080번호 절대 포함 금지! 순수 본문만 작성!
 - 🚫 사용자가 언급하지 않은 혜택(할인율, 적립금, 사은품 등) 날조 금지!
 ${smsByteInstruction}
+${kakaoInstruction}
 ${channel === 'LMS' ? '- LMS는 줄바꿈, 특수문자로 가독성 좋게 작성 (이모지 금지!)' : ''}
 
 ## 개인화 설정 (⚠️ 중요!)
@@ -518,7 +537,7 @@ export async function recommendTarget(
   companyId: string,
   objective: string,
   customerStats: any,
-  companyInfo?: { business_type?: string; reject_number?: string; brand_name?: string; company_name?: string; customer_schema?: any }
+  companyInfo?: { business_type?: string; reject_number?: string; brand_name?: string; company_name?: string; customer_schema?: any; has_kakao_profile?: boolean }
 ): Promise<{
   filters: any;
   reasoning: string;
@@ -562,6 +581,7 @@ export async function recommendTarget(
 
   const businessType = companyInfo?.business_type || '기타';
   const brandName = companyInfo?.brand_name || companyInfo?.company_name || '브랜드';
+  const hasKakaoProfile = companyInfo?.has_kakao_profile || false;
   
   // 동적 스키마 파싱
   const schema = companyInfo?.customer_schema || {};
@@ -616,7 +636,11 @@ ${varCatalogPrompt}
 - SMS: 간단한 할인 안내, 짧은 알림 (광고 시 본문 약 64바이트, 비광고 시 약 88바이트)
 - LMS: 상세한 이벤트 안내, 여러 혜택 설명 필요시 (2000바이트)
 - MMS: 이미지가 중요한 경우 (신상품, 비주얼 강조)
-- 카카오: 예약확인, 배송안내 등 정보성 알림
+- 카카오: 카카오 채널 친구 대상 발송, 이모지/버튼 활용, 비용 절감 목적, 리치 콘텐츠 필요시 (최대 4,000자)
+  ※ 카카오는 발송 가능 시간 08:00~20:50 제한 있음 (recommended_time 추천 시 반드시 이 범위 내로!)
+  ※ 카카오 추천 시 recommended_channel: "카카오"로 표기
+
+${hasKakaoProfile ? '⚠️ 이 고객사는 카카오 발신 프로필이 등록되어 있어 카카오 채널 추천이 가능합니다.' : '⚠️ 이 고객사는 카카오 발신 프로필이 미등록이므로 카카오 채널은 추천하지 마세요. SMS/LMS/MMS만 추천하세요.'}
 
 ⚠️ 필수 규칙: 개인화 변수(%이름%, %등급%, %매장명% 등)를 사용하는 경우 반드시 LMS 이상을 추천하세요!
 개인화 변수는 치환 시 바이트가 늘어나므로 SMS(90바이트)에서는 초과 위험이 매우 높습니다.
@@ -644,7 +668,7 @@ ${varCatalogPrompt}
   },
   "reasoning": "이 타겟을 추천하는 이유 (한글 1~2문장)",
   "estimated_percentage": 예상 타겟 비율(%),
-  "recommended_channel": "SMS 또는 LMS 또는 MMS 또는 카카오",
+  "recommended_channel": "SMS 또는 LMS 또는 MMS 또는 카카오 (⚠️ 카카오 추천 시 시간은 08:00~20:50 범위 내로!)",
   "channel_reason": "이 채널을 추천하는 이유 (한글 1문장)",
   "is_ad": true 또는 false,
   "recommended_time": "YYYY-MM-DD HH:mm (한국시간 기준)",
@@ -732,6 +756,7 @@ function getFallbackVariants(extraContext?: any): AIRecommendResult {
         concept: '할인 혜택 직접 전달',
         sms_text: `[${brand}] ${product} ${discount} 할인! 지금 확인▶`,
         lms_text: `[${brand}] ${product} ${discount} 할인\n\n지금 바로 확인하세요!\n\n▶ 바로가기`,
+        kakao_text: `${brand}에서 알려드려요 🎉\n\n${product} ${discount} 할인 이벤트가 진행 중이에요!\n\n지금 바로 확인해보세요 ✨`,
         score: 70,
       },
       {
@@ -740,6 +765,7 @@ function getFallbackVariants(extraContext?: any): AIRecommendResult {
         concept: '마감 임박 긴급함 강조',
         sms_text: `[${brand}] 마감임박! ${product} ${discount} 할인▶`,
         lms_text: `[${brand}] 마감 임박!\n\n${product} ${discount} 할인\n\n서두르세요!\n\n▶ 바로가기`,
+        kakao_text: `⏰ 마감 임박!\n\n${brand} ${product} ${discount} 할인이 곧 종료됩니다.\n\n서두르세요!`,
         score: 65,
       },
       {
@@ -748,6 +774,7 @@ function getFallbackVariants(extraContext?: any): AIRecommendResult {
         concept: '휴면 고객 재활성화',
         sms_text: `[${brand}] 오랜만이에요! ${product} ${discount} 할인▶`,
         lms_text: `[${brand}] 오랜만이에요!\n\n다시 만나 반가워요!\n${product} ${discount} 할인\n\n▶ 바로가기`,
+        kakao_text: `오랜만이에요! 💝\n\n${brand}에서 다시 만나 반가워요.\n${product} ${discount} 할인으로 준비했어요.\n\n다시 만나러 와주실 거죠?`,
         score: 60,
       },
     ],

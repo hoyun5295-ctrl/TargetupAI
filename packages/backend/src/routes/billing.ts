@@ -161,6 +161,89 @@ router.post('/generate', async (req: Request, res: Response) => {
       });
     }
 
+    // 6-B) 카카오 브랜드메시지 집계 (IMC_BM_FREE_BIZ_MSG)
+    if (runIds.length > 0) {
+      // campaign_runs → campaigns.id → REQUEST_UID로 매핑
+      const campaignIdsResult = await pool.query(
+        `SELECT DISTINCT c.id as campaign_id
+         FROM campaign_runs cr
+         JOIN campaigns c ON c.id = cr.campaign_id
+         WHERE cr.id = ANY($1::uuid[])
+           AND (c.send_channel = 'kakao' OR c.send_channel = 'both')`,
+        [runIds]
+      );
+      const kakaoCampaignIds = campaignIdsResult.rows.map((r: any) => r.campaign_id);
+
+      if (kakaoCampaignIds.length > 0) {
+        const kph = kakaoCampaignIds.map(() => '?').join(',');
+        const kakaoRows = await mysqlQuery(
+          `SELECT DATE(REQUEST_DATE) as send_date,
+                  COUNT(*) as total_count,
+                  SUM(CASE WHEN REPORT_CODE = '0000' THEN 1 ELSE 0 END) as success_count,
+                  SUM(CASE WHEN REPORT_CODE != '0000' AND STATUS IN ('3','4') THEN 1 ELSE 0 END) as fail_count,
+                  SUM(CASE WHEN STATUS IN ('1','2') THEN 1 ELSE 0 END) as pending_count
+           FROM IMC_BM_FREE_BIZ_MSG
+           WHERE REQUEST_UID IN (${kph})
+             AND REQUEST_DATE >= ? AND REQUEST_DATE < DATE_ADD(?, INTERVAL 1 DAY)
+           GROUP BY DATE(REQUEST_DATE)`,
+          [...kakaoCampaignIds, billing_start, billing_end]
+        );
+
+        (kakaoRows as any[]).forEach((row: any) => {
+          const d = row.send_date instanceof Date
+            ? row.send_date.toISOString().slice(0, 10)
+            : String(row.send_date).slice(0, 10);
+          if (!dayData[d]) dayData[d] = {};
+          if (!dayData[d]['KAKAO']) dayData[d]['KAKAO'] = { total: 0, success: 0, fail: 0, pending: 0 };
+          dayData[d]['KAKAO'].total += Number(row.total_count);
+          dayData[d]['KAKAO'].success += Number(row.success_count);
+          dayData[d]['KAKAO'].fail += Number(row.fail_count);
+          dayData[d]['KAKAO'].pending += Number(row.pending_count);
+        });
+      }
+    }
+
+    // 또한 직접발송(direct-send) 카카오도 집계
+    {
+      const directKakaoResult = await pool.query(
+        `SELECT id FROM campaigns
+         WHERE company_id = $1
+           AND send_type = 'manual'
+           AND (send_channel = 'kakao' OR send_channel = 'both')
+           AND sent_at >= $2::date
+           AND sent_at < ($3::date + interval '1 day')`,
+        [company_id, billing_start, billing_end]
+      );
+      const directKakaoIds = directKakaoResult.rows.map((r: any) => r.id);
+
+      if (directKakaoIds.length > 0) {
+        const dkph = directKakaoIds.map(() => '?').join(',');
+        const dkRows = await mysqlQuery(
+          `SELECT DATE(REQUEST_DATE) as send_date,
+                  COUNT(*) as total_count,
+                  SUM(CASE WHEN REPORT_CODE = '0000' THEN 1 ELSE 0 END) as success_count,
+                  SUM(CASE WHEN REPORT_CODE != '0000' AND STATUS IN ('3','4') THEN 1 ELSE 0 END) as fail_count,
+                  SUM(CASE WHEN STATUS IN ('1','2') THEN 1 ELSE 0 END) as pending_count
+           FROM IMC_BM_FREE_BIZ_MSG
+           WHERE REQUEST_UID IN (${dkph})
+           GROUP BY DATE(REQUEST_DATE)`,
+          directKakaoIds
+        );
+
+        (dkRows as any[]).forEach((row: any) => {
+          const d = row.send_date instanceof Date
+            ? row.send_date.toISOString().slice(0, 10)
+            : String(row.send_date).slice(0, 10);
+          if (!dayData[d]) dayData[d] = {};
+          if (!dayData[d]['KAKAO']) dayData[d]['KAKAO'] = { total: 0, success: 0, fail: 0, pending: 0 };
+          dayData[d]['KAKAO'].total += Number(row.total_count);
+          dayData[d]['KAKAO'].success += Number(row.success_count);
+          dayData[d]['KAKAO'].fail += Number(row.fail_count);
+          dayData[d]['KAKAO'].pending += Number(row.pending_count);
+        });
+      }
+    }
+
     // 7) 합산
     let totalSms = 0, totalLms = 0, totalMms = 0, totalKakao = 0, totalTestSms = 0, totalTestLms = 0;
     Object.values(dayData).forEach(types => {
@@ -717,6 +800,49 @@ router.get('/preview', async (req: Request, res: Response) => {
       [company_id, start, end]
     );
 
+    // 4-B) 카카오 브랜드메시지 집계
+    let kakaoSuccessTotal = 0;
+    if (runIds.length > 0) {
+      // runIds → campaign_id 매핑 (kakao/both 채널만)
+      const kakaoCampResult = await pool.query(
+        `SELECT DISTINCT c.id
+         FROM campaign_runs cr JOIN campaigns c ON c.id = cr.campaign_id
+         WHERE cr.id = ANY($1::uuid[]) AND (c.send_channel = 'kakao' OR c.send_channel = 'both')`,
+        [runIds]
+      );
+      const kakaoCampIds = kakaoCampResult.rows.map((r: any) => r.id);
+
+      if (kakaoCampIds.length > 0) {
+        const kph = kakaoCampIds.map(() => '?').join(',');
+        const kakaoCountRows = await mysqlQuery(
+          `SELECT COUNT(*) as success_count
+           FROM IMC_BM_FREE_BIZ_MSG
+           WHERE REQUEST_UID IN (${kph}) AND REPORT_CODE = '0000'`,
+          kakaoCampIds
+        );
+        kakaoSuccessTotal = Number((kakaoCountRows as any[])[0]?.success_count || 0);
+      }
+    }
+    // 직접발송 카카오도 합산
+    {
+      const directKakaoResult = await pool.query(
+        `SELECT id FROM campaigns
+         WHERE company_id = $1 AND send_type = 'manual'
+           AND (send_channel = 'kakao' OR send_channel = 'both')
+           AND sent_at >= $2::date AND sent_at < ($3::date + interval '1 day')`,
+        [company_id, start, end]
+      );
+      const dkIds = directKakaoResult.rows.map((r: any) => r.id);
+      if (dkIds.length > 0) {
+        const dkph = dkIds.map(() => '?').join(',');
+        const dkCountRows = await mysqlQuery(
+          `SELECT COUNT(*) as success_count FROM IMC_BM_FREE_BIZ_MSG WHERE REQUEST_UID IN (${dkph}) AND REPORT_CODE = '0000'`,
+          dkIds
+        );
+        kakaoSuccessTotal += Number((dkCountRows as any[])[0]?.success_count || 0);
+      }
+    }
+
     // 5) 집계 계산
     if (type === 'brand') {
       const brandMap: Record<string, any> = {};
@@ -729,6 +855,11 @@ router.get('/preview', async (req: Request, res: Response) => {
         if (row.msg_type === 'S') brandMap[key].sms_success += Number(row.success_count);
         if (row.msg_type === 'L') brandMap[key].lms_success += Number(row.success_count);
       });
+      // 카카오는 브랜드 구분 없이 전체 합산 (default에 넣기)
+      if (kakaoSuccessTotal > 0) {
+        if (!brandMap['default']) brandMap['default'] = { store_code: 'default', store_name: '본사', sms_success: 0, lms_success: 0, mms_success: 0, kakao_success: 0 };
+        brandMap['default'].kakao_success += kakaoSuccessTotal;
+      }
 
       const brands = Object.values(brandMap).map((b: any) => ({
         ...b,
@@ -740,7 +871,7 @@ router.get('/preview', async (req: Request, res: Response) => {
 
       return res.json({ type: 'brand', brands, test: buildTestSummary(testRows, company) });
     } else {
-      let sms_success = 0, lms_success = 0, mms_success = 0, kakao_success = 0;
+      let sms_success = 0, lms_success = 0, mms_success = 0, kakao_success = kakaoSuccessTotal;
       normalCounts.forEach((row: any) => {
         if (row.msg_type === 'S') sms_success += Number(row.success_count);
         if (row.msg_type === 'L') lms_success += Number(row.success_count);

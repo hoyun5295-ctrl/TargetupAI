@@ -176,8 +176,11 @@ cd C:\projects\qtmsg\bin
 | 도메인 | 인증서 경로 | 만료일 |
 |--------|------------|--------|
 | hanjul.ai | /etc/letsencrypt/live/hanjul.ai/ | 2026-05-08 |
+| www.hanjul.ai | /etc/letsencrypt/live/www.hanjul.ai/ | 2026-05-14 |
 | sys.hanjullo.com | /etc/letsencrypt/live/sys.hanjullo.com/ | 2026-05-08 |
 | app.hanjul.ai | /etc/letsencrypt/live/app.hanjul.ai/ | 2026-05-08 |
+
+> www.hanjul.ai → hanjul.ai 301 리다이렉트 (HTTP/HTTPS 모두)
 
 ---
 
@@ -412,6 +415,13 @@ grep "bind ack" /home/administrator/agent*/logs/*mtdeliver.txt
 | sender_number_id | uuid FK |
 | kakao_profile_id | uuid FK |
 | kakao_template_id | uuid FK |
+| send_channel | varchar(10) | sms/kakao/both (기본 sms) |
+| kakao_bubble_type | varchar(20) | TEXT/IMAGE/WIDE 등 |
+| kakao_sender_key | varchar(40) | 발신 프로필 키 |
+| kakao_targeting | char(1) | I/M/N (기본 I) |
+| kakao_attachment_json | text | 버튼/이미지/쿠폰/커머스 JSON |
+| kakao_carousel_json | text | 캐러셀 데이터 |
+| kakao_resend_type | varchar(2) | SM/LM/NO (기본 SM) |
 | is_ad | boolean |
 | sent_count | integer |
 | success_count | integer |
@@ -1096,6 +1106,64 @@ grep "bind ack" /home/administrator/agent*/logs/*mtdeliver.txt
 | app_etc1 | varchar(50) | campaign_run_id 저장 |
 | app_etc2 | varchar(50) | |
 
+### smsdb.IMC_BM_FREE_BIZ_MSG (카카오 브랜드메시지 - 자유형)
+> 휴머스온 브랜드메시지 Agent 연동. INSERT → Agent 폴링 → 카카오 발송 (QTmsg와 동일 패턴)
+| 컬럼 | 타입 | 설명 |
+|------|------|------|
+| ID | bigint PK AUTO_INCREMENT | |
+| CHAT_BUBBLE_TYPE | varchar(20) | TEXT/IMAGE/WIDE/WIDE_ITEM_LIST/CAROUSEL_FEED/PREMIUM_VIDEO/COMMERCE/CAROUSEL_COMMERCE |
+| STATUS | char(1) | 1=대기, 2=처리중, 3=전송완료, 4=결과수신 |
+| PRIORITY | char(1) | N=일반 |
+| AD_FLAG | char(1) | Y=광고, N=비광고 |
+| RESERVED_DATE | varchar(19) | 예약시간 (YYYY-MM-DD HH:mm:ss) |
+| SENDER_KEY | varchar(40) | 발신 프로필 키 |
+| PHONE_NUMBER | varchar(64) | 수신번호 |
+| APP_USER_ID | varchar(20) | |
+| TARGETING | char(1) | I=지정대상∩채널친구, M=마수동전체, N=마수동-비친구 |
+| PUSH_ALARM | char(1) | Y |
+| GROUP_TAG_KEY | varchar(40) | |
+| HEADER | varchar(80) | 강조표기 |
+| MESSAGE | varchar(4000) | 메시지 본문 |
+| ADDITIONAL_CONTENT | varchar(128) | 부가정보 |
+| ATTACHMENT_JSON | text | 버튼/이미지/쿠폰/커머스 JSON |
+| CAROUSEL_JSON | text | 캐러셀 데이터 |
+| ADULT | char(1) | N |
+| RESEND_MT_TYPE | varchar(2) | SM=SMS, LM=LMS, NO=미사용 |
+| RESEND_MT_FROM | varchar(16) | 대체발송 발신번호 |
+| RESEND_MT_TO | varchar(64) | |
+| RESEND_MT_TITLE | varchar(100) | 대체발송 제목 |
+| RESEND_MT_MESSAGE_REUSE | char(1) | Y=카카오메시지 재사용 |
+| RESEND_MT_MESSAGE | varchar(3000) | 대체발송 메시지 |
+| RESEND_ATTACH_FILE | varchar(128) | |
+| REQUEST_UID | varchar(40) | campaign_id 저장 |
+| REQUEST_DATE | varchar(19) | |
+| RESPONSE_DATE | varchar(19) | |
+| RESPONSE_CODE | varchar(5) | |
+| REPORT_TYPE | varchar(2) | |
+| REPORT_DATE | varchar(19) | |
+| REPORT_CODE | varchar(5) | 0000=성공 |
+| ARRIVAL_DATE | varchar(19) | |
+| RESEND_REPORT_CODE | varchar(5) | 대체발송 결과 |
+| RESEND_ARRIVAL_DATE | varchar(19) | |
+| BILL_CODE | varchar(5) | |
+| SENDER_CODE | varchar(2) | |
+| BUSINESS_CODE | varchar(9) | |
+| UNSUBSCRIBE_PHONE_NUMBER | varchar(20) | 080 수신거부번호 |
+| UNSUBSCRIBE_AUTH_NUMBER | varchar(10) | 080 인증번호 |
+
+### smsdb.IMC_BM_BASIC_BIZ_MSG (카카오 브랜드메시지 - 기본형/템플릿)
+> IMC_BM_FREE_BIZ_MSG와 동일 + 아래 추가 컬럼
+| 추가 컬럼 | 타입 | 설명 |
+|-----------|------|------|
+| TEMPLATE_CODE | varchar(40) | 템플릿 코드 (필수) |
+| MESSAGE_VARIABLE_JSON | text | 메시지 변수 |
+| BUTTON_VARIABLE_JSON | text | 버튼 변수 |
+| COUPON_VARIABLE_JSON | text | 쿠폰 변수 |
+| IMAGE_VARIABLE_JSON | text | 이미지 변수 |
+| VIDEO_VARIABLE_JSON | text | 비디오 변수 |
+| COMMERCE_VARIABLE_JSON | text | 커머스 변수 |
+| CAROUSEL_VARIABLE_JSON | text | 캐러셀 변수 |
+
 ### sync_logs (Sync Agent 동기화 로그)
 | 컬럼 | 타입 |
 |------|------|
@@ -1331,6 +1399,26 @@ GET  /api/sync/version     ← 최신 버전 정보
 - [x] recommendTarget() 채널 선택 기준에 "광고 시 약 64바이트, 비광고 시 약 88바이트" 명시
 - [x] Dashboard.tsx handleAiGenerateChannelMessage()에 isAd 파라미터 추가 (기존 누락)
 
+### 파비콘 + OG 이미지 (2026-02-13)
+- [x] 로고에서 "한" 글자 추출 → favicon.ico, 16/32/48px PNG, apple-touch-icon, android-chrome 192/512
+- [x] OG 이미지 1200x630 (다크 네이비 배경) 생성
+- [x] index.html: 타이틀 "한줄로 | AI 마케팅 자동화", OG/Twitter Card 메타태그
+- [x] hanjul.ai, sys.hanjullo.com 모두 적용 완료
+
+### www.hanjul.ai SSL + 리다이렉트 (2026-02-13)
+- [x] 가비아 DNS www A레코드 추가 (58.227.193.62)
+- [x] Let's Encrypt 인증서 발급 (만료: 2026-05-14)
+- [x] Nginx: www.hanjul.ai → hanjul.ai 301 리다이렉트 (HTTP/HTTPS)
+
+### 카카오 브랜드메시지 연동 Phase 1 - DB + 백엔드 (2026-02-14)
+- [x] MySQL: IMC_BM_FREE_BIZ_MSG, IMC_BM_BASIC_BIZ_MSG 테이블 생성 (로컬+서버)
+- [x] PostgreSQL: campaigns 테이블 카카오 컬럼 7개 추가 (로컬+서버)
+- [x] campaigns.ts: insertKakaoQueue() 헬퍼 + kakaoAgg/kakaoCountPending/kakaoCancelPending
+- [x] campaigns.ts: /:id/send, /direct-send, /test-send에 send_channel 분기 (sms/kakao/both)
+- [x] campaigns.ts: /:id/cancel 카카오 대기건 삭제 + 환불
+- [x] campaigns.ts: /sync-results 카카오 결과 합산
+- [x] prepaidDeduct/prepaidRefund에 KAKAO 단가 추가
+
 ---
 
 ## 🔴 미해결 버그 / 즉시 처리 필요
@@ -1362,14 +1450,26 @@ GET  /api/sync/version     ← 최신 버전 정보
 
 **보안**
 - [ ] 슈퍼관리자 IP 화이트리스트 설정
-- [ ] www.hanjul.ai SSL 인증서 추가 (DNS 전파 후)
+- [x] www.hanjul.ai SSL 인증서 추가 ✅ (2026-02-13)
 - [ ] VPN 접근 제한 검토
 
 **브랜딩**
-- [ ] 파비콘/OG 이미지 적용
+- [x] 파비콘/OG 이미지 적용 ✅ (2026-02-13)
+
+**카카오 브랜드메시지 연동 (Phase 1 진행 중)**
+- [x] DB: MySQL 테이블 2개 + PostgreSQL campaigns 확장 ✅
+- [x] 백엔드: campaigns.ts 채널 분기 (sms/kakao/both) ✅
+- [ ] 백엔드: ai.ts 카카오 채널 추천 + 메시지 생성
+- [ ] 백엔드: results.ts 카카오 결과 조회 합산
+- [ ] 백엔드: admin.ts 카카오 상세조회 + send_channel 표시
+- [ ] 백엔드: billing.ts 카카오 건수/비용 정산 합산
+- [ ] 백엔드: companies.ts 카카오 sender_key 관리
+- [ ] 프론트: 통합 메시지 작성기 채널 선택 카드
+- [ ] 프론트: AI 캠페인 채널 추천 UI
+- [ ] 휴머스온 Agent 설치 + 중계서버 연결
+- [ ] 테스트 발송 검증
 
 **기능 확장**
-- [ ] 카카오톡 브랜드메시지/알림톡 연동
 - [ ] PDF 승인 기능 (이메일 링크)
 - [ ] 테스트폰 3대 설치 (현재 LGU+ 1대만, SKT/KT 추가 필요)
 - [ ] 고객사 관리자 기능 세분화
@@ -1377,4 +1477,4 @@ GET  /api/sync/version     ← 최신 버전 정보
 **별도 프로젝트 (고객사 온보딩 시점)**
 - [ ] 발신번호 관리 체계 (본인인증, 사업자등록증, 위임장)
 - [ ] 회신번호 권한 분리 (company_admin/user 구조 적용)
-- [ ] 시간 선택 UX 개선 — 드래그/타임피커 (후순위)
+- [x] 시간 선택 UX 개선 — 드래그/타임피커 ✅ (2026-02-13)
