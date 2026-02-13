@@ -451,7 +451,7 @@ router.post('/test-send', async (req: Request, res: Response) => {
 
     // ★ 선불 잔액 체크
     const testMsgType = (messageType || 'SMS') as string;
-    const testDeduct = await prepaidDeduct(companyId, managerContacts.length, testMsgType, 'test');
+    const testDeduct = await prepaidDeduct(companyId, managerContacts.length, testMsgType, '00000000-0000-0000-0000-000000000000');
     if (!testDeduct.ok) {
       return res.status(402).json({ error: testDeduct.error, insufficientBalance: true, balance: testDeduct.balance, requiredAmount: testDeduct.amount });
     }

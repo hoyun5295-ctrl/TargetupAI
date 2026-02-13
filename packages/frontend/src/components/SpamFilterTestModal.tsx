@@ -48,7 +48,7 @@ export default function SpamFilterTestModal({
       const res = await fetch('/api/spam-filter/test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ callbackNumber, messageContentSms: messageContentSms || null, messageContentLms: messageContentLms || null }),
+        body: JSON.stringify({ callbackNumber, messageContentSms: messageContentSms || null, messageContentLms: messageContentLms || null, messageType }),
       });
       const data = await res.json();
       if (!res.ok) {

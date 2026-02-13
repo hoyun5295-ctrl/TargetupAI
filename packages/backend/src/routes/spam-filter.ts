@@ -24,9 +24,9 @@ const SPAM_APP_TOKEN = process.env.SPAM_APP_TOKEN || 'spam-hanjul-secret-2026';
 // ============================================================
 router.post('/test', authenticate, async (req: Request, res: Response) => {
   try {
-    const userId = (req as any).user.id;
+    const userId = (req as any).user.userId;
     const companyId = (req as any).user.companyId;
-    const { callbackNumber, messageContentSms, messageContentLms } = req.body;
+    const { callbackNumber, messageContentSms, messageContentLms, messageType } = req.body;
 
     if (!callbackNumber) {
       return res.status(400).json({ error: '발신번호를 입력해주세요.' });
@@ -89,8 +89,11 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
 
     // 5) 통신사별 × 타입별 결과 행 생성 + SMS 발송
     const messageTypes: string[] = [];
-    if (messageContentSms) messageTypes.push('SMS');
-    if (messageContentLms) messageTypes.push('LMS');
+    if (messageType === 'LMS' || messageType === 'MMS') {
+      if (messageContentLms) messageTypes.push('LMS');
+    } else {
+      if (messageContentSms) messageTypes.push('SMS');
+    }
 
     for (const device of devices.rows) {
       for (const msgType of messageTypes) {
@@ -420,23 +423,23 @@ async function insertSmsQueue(
   testId: string
 ): Promise<void> {
   const testTable = getTestSmsTable();
-  const now = new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Seoul' }).replace('T', ' ');
+  
 
   if (msgType === 'SMS') {
     await mysqlQuery(
       `INSERT INTO ${testTable}
-       (dest_no, call_back, msg_contents, msg_instm, msg_type, rsv1, app_etc1)
-       VALUES (?, ?, ?, ?, 'S', '1', ?)`,
-      [destNo, callBack, content, now, testId]
+       (dest_no, call_back, msg_contents, msg_instm, sendreq_time, msg_type, rsv1, app_etc1)
+       VALUES (?, ?, ?, ?, ?, 'S', '1', ?)`,
+      [destNo, callBack, content, testId]
     );
   } else {
     // LMS
     const subject = content.substring(0, 30);
     await mysqlQuery(
       `INSERT INTO ${testTable}
-       (dest_no, call_back, msg_contents, msg_instm, msg_type, title_str, rsv1, app_etc1)
-       VALUES (?, ?, ?, ?, 'L', ?, '1', ?)`,
-      [destNo, callBack, content, now, subject, testId]
+       (dest_no, call_back, msg_contents, msg_instm, sendreq_time, msg_type, title_str, rsv1, app_etc1)
+       VALUES (?, ?, ?, ?, ?, 'L', ?, '1', ?)`,
+      [destNo, callBack, content, subject, testId]
     );
   }
 }
