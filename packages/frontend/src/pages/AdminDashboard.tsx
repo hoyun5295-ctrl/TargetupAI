@@ -106,6 +106,7 @@ export default function AdminDashboard() {
     newStoreCode: '',
     newExcludedSegment: '',
     lineGroupId: '',
+    kakaoEnabled: false,
   });
   const [editCompanyTab, setEditCompanyTab] = useState<'basic' | 'send' | 'cost' | 'ai' | 'store' | 'fields' | 'customers'>('basic');
   const [standardFields, setStandardFields] = useState<any[]>([]);
@@ -1359,6 +1360,7 @@ const handleApproveRequest = async (id: string) => {
           newStoreCode: '',
           newExcludedSegment: '',
           lineGroupId: c.line_group_id || '',
+          kakaoEnabled: c.kakao_enabled ?? false,
         });
         setEditCompanyTab('basic');
         setShowEditCompanyModal(true);
@@ -3718,6 +3720,24 @@ const handleApproveRequest = async (id: string) => {
                     <input type="text" value={editCompany.rejectNumber}
                       onChange={(e) => setEditCompany({ ...editCompany, rejectNumber: e.target.value })}
                       className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" placeholder="080-000-0000" />
+                  </div>
+                  <div className="flex items-center justify-between bg-yellow-50 rounded-lg p-4 border border-yellow-200">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-lg">💬</span>
+                        <span className="font-semibold text-gray-800">카카오 브랜드메시지</span>
+                      </div>
+                      <p className="text-xs text-gray-500 mt-1">활성화하면 해당 고객사에서 카카오 채널 발송이 가능합니다</p>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={editCompany.kakaoEnabled}
+                        onChange={(e) => setEditCompany({ ...editCompany, kakaoEnabled: e.target.checked })}
+                        className="sr-only peer"
+                      />
+                      <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-yellow-500"></div>
+                    </label>
                   </div>
                 </div>
               )}

@@ -1418,6 +1418,18 @@ GET  /api/sync/version     ← 최신 버전 정보
 - [x] campaigns.ts: /:id/cancel 카카오 대기건 삭제 + 환불
 - [x] campaigns.ts: /sync-results 카카오 결과 합산
 - [x] prepaidDeduct/prepaidRefund에 KAKAO 단가 추가
+- [x] services/ai.ts: BRAND_SYSTEM_PROMPT 카카오 규칙 (4000자, 08:00~20:50, 이모지 허용)
+- [x] services/ai.ts: generateMessages() 카카오 채널 바이트 제한 + 프롬프트 추가
+- [x] services/ai.ts: recommendTarget() 카카오 채널 추천 (has_kakao_profile 기반)
+- [x] routes/ai.ts: 카카오 프로필 존재 여부 조회 → AI 컨텍스트 전달 + 응답에 has_kakao_profile
+- [x] results.ts: IMC_BM_FREE_BIZ_MSG 결과 합산, SMS+카카오 통합 메시지 조회/CSV
+- [x] admin.ts: sms-detail에 카카오 내역 추가, send_channel 컬럼, channel 필터
+- [x] billing.ts: 정산 생성/미리보기에 카카오(IMC_BM_FREE_BIZ_MSG) 집계 합산
+- [x] companies.ts: 카카오 발신 프로필 CRUD 4개 API (GET/POST/PUT/DELETE kakao-profiles)
+- [x] companies.kakao_enabled 컬럼 추가 (로컬+서버, 고객사별 카카오 활성화 제어)
+- [x] auth.ts: 로그인 응답에 company.kakaoEnabled 추가
+- [x] admin.ts: 고객사 수정에 kakaoEnabled 토글 추가
+- [x] campaigns.ts: 발송 3곳(test-send/send/direct-send) kakao_enabled 이중 체크 (KAKAO_NOT_ENABLED)
 
 ---
 
@@ -1456,16 +1468,21 @@ GET  /api/sync/version     ← 최신 버전 정보
 **브랜딩**
 - [x] 파비콘/OG 이미지 적용 ✅ (2026-02-13)
 
-**카카오 브랜드메시지 연동 (Phase 1 진행 중)**
+**카카오 브랜드메시지 연동 (Phase 1 — 백엔드 완료, 프론트 진행 예정)**
 - [x] DB: MySQL 테이블 2개 + PostgreSQL campaigns 확장 ✅
-- [x] 백엔드: campaigns.ts 채널 분기 (sms/kakao/both) ✅
-- [ ] 백엔드: ai.ts 카카오 채널 추천 + 메시지 생성
-- [ ] 백엔드: results.ts 카카오 결과 조회 합산
-- [ ] 백엔드: admin.ts 카카오 상세조회 + send_channel 표시
-- [ ] 백엔드: billing.ts 카카오 건수/비용 정산 합산
-- [ ] 백엔드: companies.ts 카카오 sender_key 관리
-- [ ] 프론트: 통합 메시지 작성기 채널 선택 카드
+- [x] DB: companies.kakao_enabled 고객사별 활성화 제어 ✅
+- [x] 백엔드: campaigns.ts 채널 분기 + kakao_enabled 이중 체크 ✅
+- [x] 백엔드: ai.ts 카카오 채널 추천 + 메시지 생성 ✅
+- [x] 백엔드: results.ts 카카오 결과 조회 합산 ✅
+- [x] 백엔드: admin.ts 카카오 상세조회 + send_channel + kakaoEnabled 토글 ✅
+- [x] 백엔드: billing.ts 카카오 건수/비용 정산 합산 ✅
+- [x] 백엔드: companies.ts 카카오 sender_key 관리 (CRUD) ✅
+- [x] 백엔드: auth.ts 로그인 응답에 kakaoEnabled ✅
+- [ ] 프론트: 채널 선택 카드 (kakaoEnabled=false → "준비중" 뱃지 + 선택 차단)
 - [ ] 프론트: AI 캠페인 채널 추천 UI
+- [ ] 프론트: 발송결과 send_channel 표시
+- [ ] 프론트: 설정 페이지 카카오 프로필 관리
+- [ ] 프론트: 슈퍼관리자 고객사 수정에 kakaoEnabled 토글
 - [ ] 휴머스온 Agent 설치 + 중계서버 연결
 - [ ] 테스트 발송 검증
 

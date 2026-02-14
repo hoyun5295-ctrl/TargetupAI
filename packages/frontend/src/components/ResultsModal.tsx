@@ -351,6 +351,7 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
                       <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500 uppercase">등록일시</th>
                       <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500 uppercase">발송일시</th>
                       <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500 uppercase">타입</th>
+                      <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500 uppercase">채널</th>
                       <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500 uppercase">전송건수</th>
                       <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500 uppercase">성공</th>
                       <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500 uppercase">실패</th>
@@ -361,7 +362,7 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
                   </thead>
                   <tbody>
                     {filteredCampaigns.length === 0 ? (
-                      <tr><td colSpan={12} className="px-4 py-10 text-center text-gray-400">조회된 데이터가 없습니다.</td></tr>
+                      <tr><td colSpan={13} className="px-4 py-10 text-center text-gray-400">조회된 데이터가 없습니다.</td></tr>
                     ) : (
                       filteredCampaigns
                         .slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)
@@ -392,6 +393,13 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
                           </td>
                           <td className="px-3 py-2.5 text-center">
                             <span className="text-xs font-medium">{msgTypeLabel[c.message_type] || c.message_type}</span>
+                          </td>
+                          <td className="px-3 py-2.5 text-center">
+                            <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                              c.send_channel === 'kakao' ? 'bg-yellow-100 text-yellow-700' : 'bg-blue-50 text-blue-600'
+                            }`}>
+                              {c.send_channel === 'kakao' ? '💬 카카오' : c.send_channel === 'both' ? '📱+💬' : '📱 SMS'}
+                            </span>
                           </td>
                           <td className="px-3 py-2.5 text-center font-medium">{(c.target_count || c.sent_count || 0).toLocaleString()}</td>
                           <td className="px-3 py-2.5 text-center text-green-600 font-medium">{(c.success_count || 0).toLocaleString()}</td>

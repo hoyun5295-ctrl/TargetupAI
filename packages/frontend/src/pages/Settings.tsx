@@ -18,6 +18,13 @@ export default function Settings() {
   const callbackPageSize = 5;
   const [callbackAuthPhone, setCallbackAuthPhone] = useState('');
   const [callbackAuthVerified, setCallbackAuthVerified] = useState(false);
+  // 카카오 프로필
+  const kakaoEnabled = !!(user as any)?.company?.kakaoEnabled;
+  const [kakaoProfiles, setKakaoProfiles] = useState<{id: string, profile_key: string, profile_name: string, is_active: boolean}[]>([]);
+  const [kakaoNewKey, setKakaoNewKey] = useState('');
+  const [kakaoNewName, setKakaoNewName] = useState('');
+  const [kakaoAdding, setKakaoAdding] = useState(false);
+  const [kakaoToast, setKakaoToast] = useState<{show: boolean, type: 'success' | 'error', message: string}>({show: false, type: 'success', message: ''});
   const [settings, setSettings] = useState({
     brand_name: '',
     business_type: '',
@@ -72,6 +79,17 @@ export default function Settings() {
       if (cbData.success) {
         setCallbackNumbers(cbData.numbers || []);
       }
+
+      // 카카오 프로필 불러오기
+      try {
+        const kakaoRes = await fetch('/api/companies/kakao-profiles', {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const kakaoData = await kakaoRes.json();
+        if (kakaoData.success) {
+          setKakaoProfiles(kakaoData.profiles || []);
+        }
+      } catch {}
     } catch (error) {
       console.error('설정 로드 실패:', error);
     } finally {
@@ -155,6 +173,78 @@ export default function Settings() {
     } else {
       alert(data.error || '삭제 실패');
     }
+  };
+
+  // 카카오 토스트 헬퍼
+  const showKakaoToast = (type: 'success' | 'error', message: string) => {
+    setKakaoToast({ show: true, type, message });
+    setTimeout(() => setKakaoToast({ show: false, type: 'success', message: '' }), 3000);
+  };
+
+  // 카카오 프로필 추가
+  const handleAddKakaoProfile = async () => {
+    if (!kakaoNewKey.trim() || !kakaoNewName.trim()) {
+      showKakaoToast('error', '발신 프로필 키와 프로필명을 모두 입력해주세요');
+      return;
+    }
+    setKakaoAdding(true);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch('/api/companies/kakao-profiles', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ profileKey: kakaoNewKey.trim(), profileName: kakaoNewName.trim() }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setKakaoProfiles([...kakaoProfiles, data.profile]);
+        setKakaoNewKey('');
+        setKakaoNewName('');
+        showKakaoToast('success', '카카오 프로필이 등록되었습니다');
+      } else {
+        showKakaoToast('error', data.error || '등록 실패');
+      }
+    } catch {
+      showKakaoToast('error', '프로필 등록 중 오류');
+    } finally {
+      setKakaoAdding(false);
+    }
+  };
+
+  // 카카오 프로필 삭제
+  const handleDeleteKakaoProfile = async (id: string) => {
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`/api/companies/kakao-profiles/${id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (data.success) {
+        setKakaoProfiles(kakaoProfiles.filter(p => p.id !== id));
+        showKakaoToast('success', '프로필이 삭제되었습니다');
+      } else {
+        showKakaoToast('error', data.error || '삭제 실패');
+      }
+    } catch {
+      showKakaoToast('error', '삭제 중 오류');
+    }
+  };
+
+  // 카카오 프로필 활성/비활성
+  const handleToggleKakaoProfile = async (id: string, isActive: boolean) => {
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`/api/companies/kakao-profiles/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ isActive: !isActive }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setKakaoProfiles(kakaoProfiles.map(p => p.id === id ? { ...p, is_active: !isActive } : p));
+      }
+    } catch {}
   };
 
   if (loading) return <div className="p-8 text-center">로딩 중...</div>;
@@ -583,6 +673,117 @@ export default function Settings() {
               </label>
             </div>
           </div>
+        </section>
+
+        {/* 카카오 브랜드메시지 프로필 */}
+        <section className="bg-white rounded-lg shadow p-6 min-h-[240px]">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold flex items-center gap-2">
+              💬 카카오 브랜드메시지
+            </h2>
+            {kakaoEnabled ? (
+              <span className="px-2.5 py-1 bg-yellow-100 text-yellow-700 text-xs font-medium rounded-full">활성화됨</span>
+            ) : (
+              <span className="px-2.5 py-1 bg-gray-100 text-gray-500 text-xs font-medium rounded-full">준비중</span>
+            )}
+          </div>
+
+          {kakaoEnabled ? (
+            <>
+              <p className="text-sm text-gray-500 mb-4">
+                카카오 비즈니스 채널의 발신 프로필을 등록하면 카카오 브랜드메시지를 발송할 수 있습니다.
+              </p>
+
+              {/* 등록된 프로필 목록 */}
+              {kakaoProfiles.length > 0 ? (
+                <div className="space-y-2 mb-4">
+                  {kakaoProfiles.map((profile) => (
+                    <div
+                      key={profile.id}
+                      className="flex items-center gap-3 bg-yellow-50 border border-yellow-200 rounded-lg px-4 py-3"
+                    >
+                      <span className="text-lg">💬</span>
+                      <div className="flex-1">
+                        <span className="font-medium text-gray-800">{profile.profile_name}</span>
+                        <span className="ml-2 text-xs text-gray-400 font-mono">{profile.profile_key.slice(0, 8)}...{profile.profile_key.slice(-4)}</span>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={profile.is_active}
+                          onChange={() => handleToggleKakaoProfile(profile.id, profile.is_active)}
+                          className="sr-only peer"
+                        />
+                        <div className="w-9 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-yellow-500"></div>
+                      </label>
+                      <button
+                        onClick={() => handleDeleteKakaoProfile(profile.id)}
+                        className="px-2.5 py-1 text-sm bg-white border border-red-300 text-red-600 rounded-lg hover:bg-red-50"
+                      >
+                        삭제
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-6 text-gray-400 mb-4 bg-gray-50 rounded-lg">
+                  <div className="text-2xl mb-2">💬</div>
+                  <p className="text-sm">등록된 카카오 프로필이 없습니다</p>
+                  <p className="text-xs mt-1">아래에서 발신 프로필을 추가해주세요</p>
+                </div>
+              )}
+
+              {/* 프로필 추가 */}
+              <div className="flex items-end gap-2">
+                <div className="flex-1">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">프로필명</label>
+                  <input
+                    type="text"
+                    value={kakaoNewName}
+                    onChange={(e) => setKakaoNewName(e.target.value)}
+                    className="w-full px-3 py-2 border rounded-lg text-sm"
+                    placeholder="예: 브랜드 공식채널"
+                  />
+                </div>
+                <div className="flex-1">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Sender Key</label>
+                  <input
+                    type="text"
+                    value={kakaoNewKey}
+                    onChange={(e) => setKakaoNewKey(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleAddKakaoProfile(); }}
+                    className="w-full px-3 py-2 border rounded-lg text-sm font-mono"
+                    placeholder="카카오 비즈센터에서 발급"
+                  />
+                </div>
+                <button
+                  onClick={handleAddKakaoProfile}
+                  disabled={kakaoAdding || !kakaoNewKey.trim() || !kakaoNewName.trim()}
+                  className="px-4 py-2 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
+                >
+                  {kakaoAdding ? '등록 중...' : '+ 추가'}
+                </button>
+              </div>
+              <p className="text-xs text-gray-400 mt-2">
+                ※ Sender Key는 카카오 비즈니스 센터 &gt; 발신 프로필 관리에서 확인할 수 있습니다
+              </p>
+            </>
+          ) : (
+            <div className="text-center py-8 text-gray-400">
+              <div className="text-3xl mb-3">🔒</div>
+              <p className="text-sm">카카오 브랜드메시지는 현재 준비 중입니다</p>
+              <p className="text-xs mt-1">활성화가 필요하시면 관리자에게 문의해주세요</p>
+            </div>
+          )}
+
+          {/* 카카오 토스트 */}
+          {kakaoToast.show && (
+            <div className={`fixed top-6 left-1/2 transform -translate-x-1/2 px-6 py-3 rounded-lg shadow-lg z-[100] text-sm font-medium ${
+              kakaoToast.type === 'success' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'
+            }`}>
+              {kakaoToast.message}
+            </div>
+          )}
         </section>
 
         {/* 승인 설정 - 관리자만 */}
