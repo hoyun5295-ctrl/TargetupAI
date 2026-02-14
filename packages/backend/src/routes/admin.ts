@@ -223,7 +223,7 @@ router.put('/companies/:id', authenticate, requireSuperAdmin, async (req: Reques
     storeCodeList,
     businessNumber, ceoName, businessType, businessItem, address,
     allowCallbackSelfRegister, maxUsers, sessionTimeoutMinutes,
-    approvalRequired, targetStrategy, lineGroupId
+    approvalRequired, targetStrategy, lineGroupId, kakaoEnabled
   } = req.body;
   
   try {
@@ -258,10 +258,11 @@ router.put('/companies/:id', authenticate, requireSuperAdmin, async (req: Reques
           approval_required = COALESCE($27, approval_required),
           target_strategy = COALESCE($28, target_strategy),
           line_group_id = COALESCE($29, line_group_id),
+          kakao_enabled = COALESCE($30, kakao_enabled),
           updated_at = NOW()
-      WHERE id = $30
+      WHERE id = $31
       RETURNING *
-    `, [companyName, contactName, contactEmail, contactPhone, status, planId, rejectNumber, brandName, sendHourStart, sendHourEnd, dailyLimit, holidaySend, duplicateDays, costPerSms, costPerLms, costPerMms, costPerKakao, storeCodeList ? JSON.stringify(storeCodeList) : null, businessNumber, ceoName, businessType, businessItem, address, allowCallbackSelfRegister !== undefined ? allowCallbackSelfRegister : null, maxUsers || null, sessionTimeoutMinutes || null, approvalRequired !== undefined ? approvalRequired : null, targetStrategy || null, lineGroupId || null, id]);
+    `, [companyName, contactName, contactEmail, contactPhone, status, planId, rejectNumber, brandName, sendHourStart, sendHourEnd, dailyLimit, holidaySend, duplicateDays, costPerSms, costPerLms, costPerMms, costPerKakao, storeCodeList ? JSON.stringify(storeCodeList) : null, businessNumber, ceoName, businessType, businessItem, address, allowCallbackSelfRegister !== undefined ? allowCallbackSelfRegister : null, maxUsers || null, sessionTimeoutMinutes || null, approvalRequired !== undefined ? approvalRequired : null, targetStrategy || null, lineGroupId || null, kakaoEnabled !== undefined ? kakaoEnabled : null, id]);
     
     if (result.rows.length === 0) {
       return res.status(404).json({ error: '회사를 찾을 수 없습니다.' });

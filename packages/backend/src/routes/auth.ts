@@ -183,10 +183,11 @@ router.post('/login', async (req: Request, res: Response) => {
 
     // 세션 타임아웃 조회
     const timeoutResult = await query(
-      'SELECT session_timeout_minutes FROM companies WHERE id = $1',
+      'SELECT session_timeout_minutes, kakao_enabled FROM companies WHERE id = $1',
       [user.company_id]
     );
     const sessionTimeoutMinutes = timeoutResult.rows[0]?.session_timeout_minutes || 30;
+    const kakaoEnabled = timeoutResult.rows[0]?.kakao_enabled || false;
 
     return res.json({
       token,
@@ -203,6 +204,7 @@ router.post('/login', async (req: Request, res: Response) => {
           id: user.company_id,
           name: user.company_name,
           code: user.company_code,
+          kakaoEnabled,
         },
       },
       sessionTimeoutMinutes,

@@ -526,6 +526,14 @@ router.post('/test-send', async (req: Request, res: Response) => {
     const testKakaoSenderKey = req.body.kakaoSenderKey || '';
     const testKakaoBubbleType = req.body.kakaoBubbleType || 'TEXT';
 
+    // ★ 카카오 활성화 체크 (프론트 우회 방지)
+    if (testChannel === 'kakao' || testChannel === 'both') {
+      const kakaoCheck = await query('SELECT kakao_enabled FROM companies WHERE id = $1', [companyId]);
+      if (!kakaoCheck.rows[0]?.kakao_enabled) {
+        return res.status(403).json({ error: '카카오 브랜드메시지가 활성화되지 않은 고객사입니다.', code: 'KAKAO_NOT_ENABLED' });
+      }
+    }
+
     // 회사 설정에서 담당자 정보 가져오기
     const companyResult = await query(
       'SELECT manager_phone, manager_contacts FROM companies WHERE id = $1',
@@ -857,6 +865,15 @@ if (filteredCustomers.length === 0) {
 // ★ 선불 잔액 체크 + 차감 (MySQL INSERT 전에 atomic 차감)
 // 카카오 채널이면 KAKAO 타입으로 차감
 const sendChannel = campaign.send_channel || 'sms';
+
+// ★ 카카오 활성화 체크 (프론트 우회 방지)
+if (sendChannel === 'kakao' || sendChannel === 'both') {
+  const kakaoCheck = await query('SELECT kakao_enabled FROM companies WHERE id = $1', [companyId]);
+  if (!kakaoCheck.rows[0]?.kakao_enabled) {
+    return res.status(403).json({ error: '카카오 브랜드메시지가 활성화되지 않은 고객사입니다.', code: 'KAKAO_NOT_ENABLED' });
+  }
+}
+
 const deductType = sendChannel === 'kakao' ? 'KAKAO' : campaign.message_type;
 const sendDeduct = await prepaidDeduct(companyId, filteredCustomers.length, deductType, id);
 if (!sendDeduct.ok) {
@@ -1441,6 +1458,15 @@ router.post('/direct-send', async (req: Request, res: Response) => {
 
     // 2. 캠페인 레코드 생성 (원본 템플릿도 저장)
     const directChannel = sendChannel || 'sms';
+
+    // ★ 카카오 활성화 체크 (프론트 우회 방지)
+    if (directChannel === 'kakao' || directChannel === 'both') {
+      const kakaoCheck = await query('SELECT kakao_enabled FROM companies WHERE id = $1', [companyId]);
+      if (!kakaoCheck.rows[0]?.kakao_enabled) {
+        return res.status(403).json({ success: false, error: '카카오 브랜드메시지가 활성화되지 않은 고객사입니다.', code: 'KAKAO_NOT_ENABLED' });
+      }
+    }
+
     const campaignResult = await query(
       `INSERT INTO campaigns (company_id, campaign_name, message_type, message_content, subject, callback_number, target_count, send_type, status, scheduled_at, message_template, message_subject, created_by, mms_image_paths,
         send_channel, kakao_bubble_type, kakao_sender_key, kakao_targeting, kakao_attachment_json, kakao_carousel_json, kakao_resend_type, created_at)
