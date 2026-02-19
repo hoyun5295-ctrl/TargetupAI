@@ -4,12 +4,6 @@ import { authenticate } from '../middlewares/auth';
 
 const router = Router();
 
-// ============================================================
-// 스팸필터 테스트 전용 080 번호 (하이픈 없이 저장)
-// ============================================================
-const SPAM_CHECK_NUMBER = '08071906700';
-const SPAM_CHECK_NUMBER_FORMATTED = '080-719-6700'; // LMS용
-
 // 테스트 타임아웃 (3분)
 const TEST_TIMEOUT_MS = 180 * 1000;
 
@@ -77,13 +71,13 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
       return res.status(400).json({ error: '등록된 테스트폰이 없습니다. 관리자에게 문의하세요.' });
     }
 
-    // 4) 테스트 건 생성
+    // 4) 테스트 건 생성 (080 치환 없이 원본 그대로 저장)
     const testResult = await query(
       `INSERT INTO spam_filter_tests
        (company_id, user_id, callback_number, message_content_sms, message_content_lms, spam_check_number, status)
        VALUES ($1, $2, $3, $4, $5, $6, 'active')
        RETURNING id, created_at`,
-      [companyId, userId, callbackNumber, messageContentSms || null, messageContentLms || null, SPAM_CHECK_NUMBER]
+      [companyId, userId, callbackNumber, messageContentSms || null, messageContentLms || null, null]
     );
     const testId = testResult.rows[0].id;
 
@@ -104,9 +98,8 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
           [testId, device.carrier, msgType, device.phone]
         );
 
-        // 메시지 내용에서 080 번호 치환
-        let content = msgType === 'SMS' ? messageContentSms : messageContentLms;
-        content = replaceOptOutNumber(content, msgType);
+        // ★ 080 치환 없이 원본 메시지 그대로 발송
+        const content = msgType === 'SMS' ? messageContentSms : messageContentLms;
 
         // QTmsg 테스트 라인으로 발송
         await insertSmsQueue(
@@ -139,14 +132,14 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
         if (unreceived.rows.length > 0) {
           // QTmsg 결과 조회 (MySQL)
           const testTable = getTestSmsTable();
-          const mqRows: any[] = await mysqlQuery(
+          const mqRows = await mysqlQuery(
             `SELECT dest_no, msg_type, status_code FROM ${testTable} WHERE app_etc1 = ?`,
             [testId]
-          );
+          ) as any[];
 
           for (const row of unreceived.rows) {
             const mType = row.message_type === 'SMS' ? 'S' : 'L';
-            const mqMatch = (mqRows as any[]).find(
+            const mqMatch = mqRows.find(
               (m: any) => m.dest_no === row.phone && m.msg_type === mType
             );
 
@@ -230,14 +223,7 @@ router.post('/report', async (req: Request, res: Response) => {
     }
     const device = deviceResult.rows[0];
 
-    // 3) 080 번호 포함 여부 확인 (스팸필터 테스트 건인지 판별)
-    const contentDigits = (messageContent || '').replace(/\D/g, '');
-    if (!contentDigits.includes(SPAM_CHECK_NUMBER)) {
-      // 우리 전용 080 번호가 아니면 → 일반 문자, 무시
-      return res.json({ success: true, matched: false, message: '스팸필터 테스트 건이 아닙니다.' });
-    }
-
-    // 4) 발신번호로 active 테스트 매칭
+    // 3) 발신번호로 active 테스트 매칭 (080 체크 제거 → 발신번호 기반 직접 매칭)
     const senderClean = senderNumber.replace(/\D/g, '');
     const testResult = await query(
       `SELECT id FROM spam_filter_tests
@@ -251,10 +237,10 @@ router.post('/report', async (req: Request, res: Response) => {
     }
     const testId = testResult.rows[0].id;
 
-    // 5) SMS/LMS 판별 (하이픈 유무로 자동 구분)
-    const detectedType = (messageContent || '').includes(SPAM_CHECK_NUMBER_FORMATTED) ? 'LMS' : 'SMS';
+    // 4) SMS/LMS 타입: 앱이 보내는 messageType 직접 사용
+    const detectedType = (messageType === 'LMS') ? 'LMS' : 'SMS';
 
-    // 6) 결과 업데이트
+    // 5) 결과 업데이트
     const updateResult = await query(
       `UPDATE spam_filter_test_results
        SET received = true, received_at = NOW(), result = 'received'
@@ -263,7 +249,7 @@ router.post('/report', async (req: Request, res: Response) => {
       [testId, device.carrier, detectedType]
     );
 
-    // 7) 모든 결과 수신 완료 체크
+    // 6) 모든 결과 수신 완료 체크
     const pendingCheck = await query(
       `SELECT COUNT(*) as cnt FROM spam_filter_test_results
        WHERE test_id = $1 AND received = false`,
@@ -289,6 +275,66 @@ router.post('/report', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('[SpamFilter] 리포트 처리 오류:', err);
     res.status(500).json({ error: '리포트 처리 중 오류가 발생했습니다.' });
+  }
+});
+
+// ============================================================
+// [GET] /api/spam-filter/active-test — 진행 중인 테스트 조회 (모달 복원용)
+// ============================================================
+router.get('/active-test', authenticate, async (req: Request, res: Response) => {
+  try {
+    const companyId = (req as any).user.companyId;
+
+    // active 테스트 조회
+    const activeTest = await query(
+      `SELECT t.id, t.callback_number, t.message_content_sms, t.message_content_lms,
+              t.status, t.created_at
+       FROM spam_filter_tests t
+       WHERE t.company_id = $1 AND t.status = 'active'
+       ORDER BY t.created_at DESC LIMIT 1`,
+      [companyId]
+    );
+
+    if (activeTest.rows.length === 0) {
+      return res.json({ active: false });
+    }
+
+    const test = activeTest.rows[0];
+
+    // 타임아웃 체크
+    const elapsed = Date.now() - new Date(test.created_at).getTime();
+    if (elapsed > TEST_TIMEOUT_MS) {
+      // 이미 만료 → 완료 처리
+      await query(
+        `UPDATE spam_filter_tests SET status = 'completed', completed_at = NOW()
+         WHERE id = $1 AND status = 'active'`,
+        [test.id]
+      );
+      return res.json({ active: false });
+    }
+
+    // 결과 조회
+    const results = await query(
+      `SELECT carrier, message_type, received, received_at, result
+       FROM spam_filter_test_results
+       WHERE test_id = $1
+       ORDER BY carrier, message_type`,
+      [test.id]
+    );
+
+    const remainingMs = TEST_TIMEOUT_MS - elapsed;
+
+    res.json({
+      active: true,
+      testId: test.id,
+      createdAt: test.created_at,
+      remainingSeconds: Math.ceil(remainingMs / 1000),
+      results: results.rows
+    });
+
+  } catch (err) {
+    console.error('[SpamFilter] active-test 조회 오류:', err);
+    res.status(500).json({ error: '조회 중 오류가 발생했습니다.' });
   }
 });
 
@@ -442,30 +488,6 @@ router.get('/admin/devices', authenticate, async (req: Request, res: Response) =
     res.status(500).json({ error: '조회 중 오류가 발생했습니다.' });
   }
 });
-
-// ============================================================
-// 헬퍼: 080 수신거부 번호 치환
-// ============================================================
-function replaceOptOutNumber(content: string, messageType: string): string {
-  if (!content) return content;
-
-  // 기존 080 번호 패턴 (하이픈 있는 형태: 080-XXX-XXXX)
-  const formatted080 = /080-\d{3,4}-\d{4}/g;
-  // 기존 080 번호 패턴 (하이픈 없는 형태: 080XXXXXXX)
-  const unformatted080 = /080\d{7,8}/g;
-
-  if (messageType === 'LMS') {
-    // LMS: 하이픈 있는 형태로 치환
-    content = content.replace(formatted080, SPAM_CHECK_NUMBER_FORMATTED);
-    content = content.replace(unformatted080, SPAM_CHECK_NUMBER_FORMATTED);
-  } else {
-    // SMS: 하이픈 없는 형태로 치환
-    content = content.replace(unformatted080, SPAM_CHECK_NUMBER);
-    content = content.replace(formatted080, SPAM_CHECK_NUMBER);
-  }
-
-  return content;
-}
 
 // ============================================================
 // 헬퍼: QTmsg 테스트 라인에 SMS/LMS INSERT

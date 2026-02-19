@@ -4713,11 +4713,11 @@ const campaignData = {
                       </button>
                       <button 
                         onClick={() => {
-                          const msg = aiResult?.messages?.[selectedAiMsgIdx]?.message_text || campaign.messageContent || '';
+                          const msg = targetMessage || '';
                           const cb = selectedCallback || '';
                           const smsMsg = adTextEnabled ? `(광고)${msg}\n무료거부${optOutNumber.replace(/-/g, '')}` : msg;
                           const lmsMsg = adTextEnabled ? `(광고) ${msg}\n무료수신거부 ${optOutNumber}` : msg;
-                          setSpamFilterData({sms: smsMsg, lms: lmsMsg, callback: cb, msgType: 'SMS'});
+                          setSpamFilterData({sms: smsMsg, lms: lmsMsg, callback: cb, msgType: targetMsgType});
                           setShowSpamFilter(true);
                         }}
                         className="py-2.5 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg text-sm font-medium transition-colors"

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useAuthStore } from '../stores/authStore';
 
 interface SpamFilterTestModalProps {
@@ -31,20 +31,85 @@ export default function SpamFilterTestModal({
   const [countdown, setCountdown] = useState(180);
   const [error, setError] = useState('');
   const [totalCount, setTotalCount] = useState(0);
+  const [loading, setLoading] = useState(true);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // 서버 시작 시간 기준 타이머용
+  const serverCreatedAtRef = useRef<number | null>(null);
 
-  useEffect(() => {
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
-      if (countdownRef.current) clearInterval(countdownRef.current);
-    };
+  const clearTimers = useCallback(() => {
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+    if (countdownRef.current) { clearInterval(countdownRef.current); countdownRef.current = null; }
   }, []);
+
+  // 서버 created_at 기준 남은 초 계산
+  const calcRemaining = useCallback(() => {
+    if (!serverCreatedAtRef.current) return 0;
+    const elapsed = Date.now() - serverCreatedAtRef.current;
+    return Math.max(0, Math.ceil((180000 - elapsed) / 1000));
+  }, []);
+
+  // 서버 시간 기반 카운트다운 시작
+  const startServerBasedCountdown = useCallback(() => {
+    // 즉시 한번 계산
+    setCountdown(calcRemaining());
+
+    countdownRef.current = setInterval(() => {
+      const remaining = calcRemaining();
+      setCountdown(remaining);
+      if (remaining <= 0) {
+        clearTimers();
+        setStatus('completed');
+      }
+    }, 1000);
+  }, [calcRemaining, clearTimers]);
+
+  // 폴링 시작
+  const startPolling = useCallback((id: string) => {
+    pollRef.current = setInterval(() => pollResults(id), 2000);
+  }, []);
+
+  // 모달 열릴 때 active 테스트 확인
+  useEffect(() => {
+    checkActiveTest();
+    return () => clearTimers();
+  }, []);
+
+  const checkActiveTest = async () => {
+    try {
+      const res = await fetch('/api/spam-filter/active-test', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+
+      if (data.active && data.testId) {
+        // 진행 중인 테스트 복원
+        setTestId(data.testId);
+        setResults(data.results || []);
+        setTotalCount(data.results?.length || 0);
+        setStatus('testing');
+
+        // 서버 시간 기준 타이머 설정
+        serverCreatedAtRef.current = new Date(data.createdAt).getTime();
+        setCountdown(data.remainingSeconds || calcRemaining());
+
+        // 폴링 + 카운트다운 재개
+        startPolling(data.testId);
+        startServerBasedCountdown();
+      }
+    } catch (err) {
+      console.error('active 테스트 조회 실패:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const startTest = async () => {
     if (!callbackNumber) { setError('발신번호가 선택되지 않았습니다.'); return; }
     if (!messageContentSms && !messageContentLms) { setError('메시지를 입력해주세요.'); return; }
-    setStatus('testing'); setError(''); setCountdown(180);
+    setStatus('testing'); setError('');
+    clearTimers();
+
     try {
       const res = await fetch('/api/spam-filter/test', {
         method: 'POST',
@@ -58,18 +123,16 @@ export default function SpamFilterTestModal({
         else setError(data.error || '테스트 요청에 실패했습니다.');
         setStatus('ready'); return;
       }
-      setTestId(data.testId); setTotalCount(data.totalCount);
-      pollRef.current = setInterval(() => pollResults(data.testId), 2000);
-      countdownRef.current = setInterval(() => {
-        setCountdown((prev) => {
-          if (prev <= 1) {
-            if (pollRef.current) clearInterval(pollRef.current);
-            if (countdownRef.current) clearInterval(countdownRef.current);
-            setStatus('completed'); return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
+      setTestId(data.testId);
+      setTotalCount(data.totalCount);
+
+      // 서버 시간 = 지금
+      serverCreatedAtRef.current = Date.now();
+
+      // 폴링 + 서버 시간 기반 카운트다운
+      startPolling(data.testId);
+      startServerBasedCountdown();
+
     } catch (err) { setError('네트워크 오류가 발생했습니다.'); setStatus('ready'); }
   };
 
@@ -79,8 +142,7 @@ export default function SpamFilterTestModal({
       const data = await res.json();
       if (data.results) setResults(data.results);
       if (data.test?.status === 'completed') {
-        if (pollRef.current) clearInterval(pollRef.current);
-        if (countdownRef.current) clearInterval(countdownRef.current);
+        clearTimers();
         setStatus('completed');
       }
     } catch (err) { console.error('폴링 오류:', err); }
@@ -125,6 +187,18 @@ export default function SpamFilterTestModal({
     if (clean.length === 8) return clean.replace(/(\d{4})(\d{4})/, '$1-$2');
     return clean.replace(/(\d{3,4})(\d{3,4})(\d{4})/, '$1-$2-$3');
   };
+
+  // 로딩 중 표시
+  if (loading) {
+    return (
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60]">
+        <div className="bg-white rounded-2xl shadow-2xl p-8 flex items-center gap-3">
+          <div className="animate-spin w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full" />
+          <span className="text-gray-600">테스트 상태 확인 중...</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60]">
@@ -222,7 +296,7 @@ export default function SpamFilterTestModal({
 
               <div className="mt-3 text-[11px] text-gray-400 space-y-0.5">
                 <div>• 통신사별 테스트폰에 실제 발송하여 수신 여부를 확인합니다</div>
-                <div>• 수신거부번호가 점검용 번호로 자동 치환됩니다</div>
+                <div>• 입력한 메시지 원문 그대로 발송됩니다</div>
                 <div>• 결과는 100% 보장이 아닌 참고용입니다</div>
               </div>
 

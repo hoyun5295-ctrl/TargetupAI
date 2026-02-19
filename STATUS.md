@@ -27,6 +27,8 @@
 - **처음부터 제대로**: "일단 만들고 나중에 업그레이드" 없음
 - **백업 필수**: 컨테이너 작업 전 pg_dump → 작업 → 복원. 작업 완료 후 pg_dump + git commit
 - **UI 품질**: confirm/alert 대신 커스텀 모달(복사 기능 포함), 버튼 쿨다운, 일관된 피드백
+- **⚠️ 배포 전 타입 체크 필수**: 상용 서버 배포 코드는 반드시 TypeScript 타입 에러 없이 컴파일 가능해야 함. 특히 mysqlQuery 등 외부 라이브러리 반환값 타입 캐스팅 주의. 
+- **타입 에러 있는 코드 배포 = 서버 크래시 = 서비스 장애** (2026-02-19 장애 교훈: spam-filter.ts mysqlQuery 반환값 any[] 캐스팅 에러로 상용 서버 반복 크래시)
 
 ## 방향성
 - MVP → 엔터프라이즈급 마케팅 자동화 플랫폼으로 확장
@@ -1322,3 +1324,22 @@ POST /api/sync/purchases   ← 구매내역 벌크 INSERT (배치 최대 1000건
 | 02-13 | 스팸필터 테스트 시스템 (DB + 백엔드 + Android 앱 + LGU+ SMS 실제 발송 성공) |
 | 02-13 | AI 캠페인확정 모달 분리 (좌: 폰미리보기, 우: 캠페인명/회신번호/발송시간) |
 | 02-13 | AI 메시지 선택 인덱스 수정 (selectedAiMsgIdx → 스팸필터/발송/미리보기 전체 반영) |
+**스팸필터 판정 로직 고도화 + 앱 LMS 지원 (2026-02-19)**
+- [x] spam_filter_test_results 테이블에 result 컬럼 추가 (received/blocked/timeout/failed)
+- [x] 타임아웃 60초 → 180초 변경
+- [x] 타임아웃 시 QTmsg MySQL 결과(status_code) 조회하여 판정 세분화
+  - 이통사 성공(6/1000) + 미수신 → blocked (스팸차단 확정)
+  - 이통사 대기(100) → timeout (시간초과)
+  - 이통사 실패 → failed (발송실패)
+- [x] 앱 리포트 수신 시 result = 'received' 저장
+- [x] SpamFilterTestModal.tsx 결과 표시 세분화 (✅수신/🚫스팸차단/⚠️시간초과/❌발송실패)
+- [x] 로컬 DB + 서버 DB ALTER TABLE 완료
+- [x] 서버 배포 시 TypeScript 타입 에러 발생 → 상용 서버 크래시 장애 (mysqlQuery 반환값 any[] 캐스팅)
+- [x] sed로 긴급 수정 배포
+- [x] 스팸한줄 앱 LMS 수신 지원 (APK 빌드 완료)
+  - MmsReceiver.kt 신규 (WAP_PUSH_DELIVER → MMS content provider 읽기 → 080 매칭 → 리포트)
+  - ComposeSmsActivity.kt, HeadlessSmsSendService.kt 더미 컴포넌트 (기본 SMS 앱 필수 요건)
+  - AndroidManifest.xml 기본 SMS 앱 컴포넌트 등록
+  - MainActivity.kt 기본 SMS 앱 설정 요청 다이얼로그 추가
+  - SmsReceiver.kt SMS_DELIVER 액션 추가
+  - [ ] ⏳ 테스트폰 APK 재설치 + 기본 SMS 앱 설정 + LMS 수신 테스트
