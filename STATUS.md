@@ -1262,12 +1262,9 @@ POST /api/sync/purchases   ← 구매내역 벌크 INSERT (배치 최대 1000건
 
 **스팸필터 테스트 시스템**
 - [ ] 테스트폰 3대 설치 (현재 LGU+ 1대만, SKT/KT 추가 필요)
-- [ ] 스팸한줄 앱 업데이트 (LMS 수신 지원)
-  - AndroidManifest 기본 SMS 앱 필수 컴포넌트 추가 (SendTo, DeliverSmsReceiver, ComposeSmsActivity, HeadlessSmsSendService)
-  - 기본 SMS 앱 설정 권한 요청 다이얼로그
-  - MMS/LMS 수신 BroadcastReceiver 추가
-  - APK 재빌드 → 와이프 폰 재설치 → LMS 스팸필터 테스트
+- [ ] 테스트폰 APK 재설치 + 기본 SMS 앱 설정 + 수신 테스트
   - APK 경로: C:\spam\app\build\outputs\apk\debug\app-debug.apk
+  - .\gradlew assembleDebug 로 커맨드라인 빌드 가능 (Android Studio 불필요)
 
 **선불 요금제 Phase 1-B~2**
 - [ ] Phase 1-B: 토스페이먼츠 PG 연동 (카드결제/가상계좌 충전)
@@ -1342,4 +1339,20 @@ POST /api/sync/purchases   ← 구매내역 벌크 INSERT (배치 최대 1000건
   - AndroidManifest.xml 기본 SMS 앱 컴포넌트 등록
   - MainActivity.kt 기본 SMS 앱 설정 요청 다이얼로그 추가
   - SmsReceiver.kt SMS_DELIVER 액션 추가
-  - [ ] ⏳ 테스트폰 APK 재설치 + 기본 SMS 앱 설정 + LMS 수신 테스트
+**스팸필터 080치환 제거 + 모달 복원 + 버그 수정 (2026-02-19)**
+- [x] 080 수신거부번호 치환 로직 완전 제거 (원본 메시지 그대로 발송)
+  - spam-filter.ts: replaceOptOutNumber() 함수 삭제, SPAM_CHECK_NUMBER 상수 삭제
+  - 수신거부번호가 스팸 판정에 영향 주는 문제 해결
+- [x] 앱 수신 매칭 방식 변경 (080번호 → 발신번호 기반)
+  - SmsReceiver.kt: 080 체크 삭제, 모든 수신 SMS 서버 리포트
+  - MmsReceiver.kt: 080 체크 삭제, 모든 수신 LMS 서버 리포트
+  - 백엔드 report API: 080 체크 제거, 앱 messageType 직접 사용
+  - APK 재빌드 완료 (.\gradlew assembleDebug)
+- [x] 스팸필터 모달 백그라운드 복원 기능 추가
+  - /api/spam-filter/active-test API 신규 (진행 중 테스트 조회)
+  - 모달 열릴 때 active 테스트 자동 감지 → 폴링 재개
+  - 타이머: setInterval 카운트다운 → 서버 created_at 기준 절대시간 계산
+- [x] 타겟직접발송 스팸필터 본문 미전달 버그 수정
+  - Dashboard.tsx: aiResult?.messages?... → targetMessage 변경
+  - msgType도 'SMS' 하드코딩 → targetMsgType 동적 반영
+- [ ] ⏳ 테스트폰 APK 재설치 + 기본 SMS 앱 설정 + 수신 테스트

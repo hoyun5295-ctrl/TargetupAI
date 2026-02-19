@@ -510,7 +510,8 @@ export default function Dashboard() {
   const [uploadResult, setUploadResult] = useState({ insertCount: 0, duplicateCount: 0 });
   const [showPlanLimitError, setShowPlanLimitError] = useState(false);
   const [planLimitInfo, setPlanLimitInfo] = useState<any>(null);
-  const [uploadProgress, setUploadProgress] = useState({ total: 0, processed: 0, percent: 0 });
+  const [uploadProgress, setUploadProgress] = useState<any>({ status: 'unknown', total: 0, processed: 0, percent: 0, insertCount: 0, duplicateCount: 0, errorCount: 0, message: '' });
+  const [showUploadProgressModal, setShowUploadProgressModal] = useState(false);
   const [showDirectSend, setShowDirectSend] = useState(false);
   const [showTargetSend, setShowTargetSend] = useState(false);
   // 직접타겟발송 관련 state
@@ -3646,17 +3647,6 @@ const campaignData = {
                       <button onClick={() => setMappingStep('upload')} className="flex-1 py-3 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50">← 이전</button>
                       <button
                         onClick={async () => {
-                          setUploadProgress({ total: 0, processed: 0, percent: 0 });
-                          
-                          // 진행률 폴링 시작
-                          const progressInterval = setInterval(async () => {
-                            try {
-                              const pRes = await fetch(`/api/upload/progress/${fileId}`);
-                              const pData = await pRes.json();
-                              setUploadProgress(pData);
-                            } catch (e) {}
-                          }, 1000);
-                          
                           try {
                             setFileUploading(true);
                             const res = await fetch('/api/upload/save', {
@@ -3671,32 +3661,53 @@ const campaignData = {
                               })
                             });
                             const data = await res.json();
-                            if (data.success) {
+                            
+                            if (data.code === 'PLAN_LIMIT_EXCEEDED') {
+                              setPlanLimitInfo(data);
+                              setShowPlanLimitError(true);
                               setShowFileUpload(false);
-                              setUploadedFile(null);
-                              setFileHeaders([]);
-                              setFilePreview([]);
-                              setFileTotalRows(0);
-                              setFileId('');
-                              setMappingStep('upload');
-                              setColumnMapping({});
-                              setUploadResult({ insertCount: data.insertCount, duplicateCount: data.duplicateCount });
-                              setShowUploadResult(true);
-                              clearInterval(progressInterval);
-                            } else {
-                              clearInterval(progressInterval);
-                              if (data.code === 'PLAN_LIMIT_EXCEEDED') {
-                                setPlanLimitInfo(data);
-                                setShowPlanLimitError(true);
-                                setShowFileUpload(false);
-                              } else {
-                                alert(data.error || '저장 실패');
-                              }
+                              setFileUploading(false);
+                              return;
                             }
+                            
+                            if (!data.success) {
+                              alert(data.error || '저장 실패');
+                              setFileUploading(false);
+                              return;
+                            }
+                            
+                            // 백그라운드 처리 시작됨 → 파일 선택 모달 닫고 프로그레스 모달 표시
+                            setShowFileUpload(false);
+                            setShowUploadProgressModal(true);
+                            setUploadProgress({ status: 'processing', total: data.totalRows || fileTotalRows, processed: 0, percent: 0, insertCount: 0, duplicateCount: 0, errorCount: 0, message: '처리 시작...' });
+                            
+                            // 2초마다 폴링
+                            const progressInterval = setInterval(async () => {
+                              try {
+                                const pRes = await fetch(`/api/upload/progress/${fileId}`);
+                                const pData = await pRes.json();
+                                setUploadProgress(pData);
+                                
+                                if (pData.status === 'completed' || pData.status === 'failed') {
+                                  clearInterval(progressInterval);
+                                  setFileUploading(false);
+                                  // 완료 시 상태 초기화
+                                  if (pData.status === 'completed') {
+                                    setUploadedFile(null);
+                                    setFileHeaders([]);
+                                    setFilePreview([]);
+                                    setFileTotalRows(0);
+                                    setFileId('');
+                                    setMappingStep('upload');
+                                    setColumnMapping({});
+                                    // 고객 목록 새로고침이 필요하면 여기서 호출
+                                  }
+                                }
+                              } catch (e) {}
+                            }, 2000);
+                            
                           } catch (err) {
-                            clearInterval(progressInterval);
-                            alert('저장 중 오류가 발생했습니다.');
-                          } finally {
+                            alert('저장 요청 중 오류가 발생했습니다.');
                             setFileUploading(false);
                           }
                         }}
@@ -3706,7 +3717,7 @@ const campaignData = {
                         {fileUploading ? (
                           <>
                             <span className="animate-spin">⏳</span>
-                            저장 중... {uploadProgress.percent > 0 ? `${uploadProgress.percent}%` : '준비 중'}
+                            요청 중...
                           </>
                         ) : (
                           <>
@@ -3888,7 +3899,102 @@ const campaignData = {
             </div>
           </div>
         )}
+      
 {/* 업로드 결과 모달 */}
+{/* 업로드 프로그레스바 모달 */}
+{showUploadProgressModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[9999] animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden animate-in zoom-in-95 duration-300">
+            {/* 헤더 */}
+            <div className="px-6 pt-6 pb-2">
+              <div className="flex items-center gap-3 mb-1">
+                <div className={`w-10 h-10 rounded-full flex items-center justify-center text-lg ${
+                  uploadProgress.status === 'completed' ? 'bg-green-100' :
+                  uploadProgress.status === 'failed' ? 'bg-red-100' : 'bg-blue-100'
+                }`}>
+                  {uploadProgress.status === 'completed' ? '✅' : uploadProgress.status === 'failed' ? '❌' : '📤'}
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-gray-900">
+                    {uploadProgress.status === 'completed' ? '업로드 완료' :
+                     uploadProgress.status === 'failed' ? '업로드 오류' : '고객 데이터 업로드 중'}
+                  </h3>
+                </div>
+              </div>
+            </div>
+
+            {/* 프로그레스바 */}
+            <div className="px-6 py-3">
+              <div className="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all duration-500 ease-out ${
+                    uploadProgress.status === 'completed' ? 'bg-green-500' :
+                    uploadProgress.status === 'failed' ? 'bg-red-500' : 'bg-blue-500'
+                  }`}
+                  style={{ width: `${uploadProgress.percent || 0}%` }}
+                />
+              </div>
+              <div className="flex justify-between mt-1.5 text-sm text-gray-500">
+                <span>{(uploadProgress.processed || 0).toLocaleString()} / {(uploadProgress.total || 0).toLocaleString()}건</span>
+                <span className="font-semibold">{uploadProgress.percent || 0}%</span>
+              </div>
+            </div>
+
+            {/* 상세 정보 */}
+            <div className="px-6 py-3 space-y-2">
+              {(uploadProgress.insertCount > 0 || uploadProgress.duplicateCount > 0 || uploadProgress.errorCount > 0) && (
+                <div className="flex gap-4 text-sm">
+                  {uploadProgress.insertCount > 0 && (
+                    <span className="text-blue-600">✅ 신규 <strong>{uploadProgress.insertCount.toLocaleString()}</strong>건</span>
+                  )}
+                  {uploadProgress.duplicateCount > 0 && (
+                    <span className="text-green-600">🔄 업데이트 <strong>{uploadProgress.duplicateCount.toLocaleString()}</strong>건</span>
+                  )}
+                  {uploadProgress.errorCount > 0 && (
+                    <span className="text-orange-500">⚠️ 오류 <strong>{uploadProgress.errorCount.toLocaleString()}</strong>건</span>
+                  )}
+                </div>
+              )}
+              
+              {uploadProgress.status === 'processing' && (
+                <div className="flex items-center gap-2 text-sm text-gray-500 bg-blue-50 rounded-lg px-3 py-2">
+                  <span>💡</span>
+                  <span>브라우저를 닫아도 처리는 계속됩니다</span>
+                </div>
+              )}
+              
+              {uploadProgress.status === 'failed' && uploadProgress.message && (
+                <div className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">
+                  {uploadProgress.message}
+                </div>
+              )}
+
+              {uploadProgress.status === 'completed' && uploadProgress.message && (
+                <div className="text-sm text-green-700 bg-green-50 rounded-lg px-3 py-2">
+                  {uploadProgress.message}
+                </div>
+              )}
+            </div>
+
+            {/* 버튼 */}
+            {(uploadProgress.status === 'completed' || uploadProgress.status === 'failed') && (
+              <div className="px-6 pb-6 pt-2">
+                <button
+                  onClick={() => {
+                    setShowUploadProgressModal(false);
+                    setUploadProgress({ status: 'unknown', total: 0, processed: 0, percent: 0, insertCount: 0, duplicateCount: 0, errorCount: 0, message: '' });
+                  }}
+                  className={`w-full py-3 rounded-xl font-semibold text-white transition-colors ${
+                    uploadProgress.status === 'completed' ? 'bg-green-600 hover:bg-green-700' : 'bg-gray-600 hover:bg-gray-700'
+                  }`}
+                >
+                  확인
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 {showUploadResult && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl p-8 max-w-md w-full mx-4 shadow-2xl">
@@ -5818,7 +5924,7 @@ const campaignData = {
                         formData.append('file', file);
                         
                         try {
-                          const res = await fetch('/api/upload/parse', {
+                          const res = await fetch('/api/upload/parse?includeData=true', {
                             method: 'POST',
                             body: formData
                           });
@@ -6399,7 +6505,7 @@ const campaignData = {
                         const formData = new FormData();
                         formData.append('file', file);
                         try {
-                          const res = await fetch('/api/upload/parse', { method: 'POST', body: formData });
+                          const res = await fetch('/api/upload/parse?includeData=true', { method: 'POST', body: formData });
                           const data = await res.json();
                           if (data.success) {
                             setAddressFileHeaders(data.headers || []);

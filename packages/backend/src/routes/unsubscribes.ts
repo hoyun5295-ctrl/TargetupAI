@@ -4,7 +4,10 @@ import { authenticate } from '../middlewares/auth';
 
 const router = Router();
 
+// ================================================================
 // GET /api/unsubscribes/080callback - 나래인터넷 080 콜백 (토큰 인증)
+// 변경: 해당 080번호 사용하는 고객사의 모든 user에게 broadcast INSERT
+// ================================================================
 router.get('/080callback', async (req: Request, res: Response) => {
   try {
     const { cid, fr, token } = req.query;
@@ -29,7 +32,7 @@ router.get('/080callback', async (req: Request, res: Response) => {
       return res.send('0');
     }
 
-    // 080번호로 고객사 찾기 (companies.opt_out_080_number)
+    // 080번호로 고객사 찾기
     const companyResult = await query(
       `SELECT id, company_name FROM companies
        WHERE REPLACE(REPLACE(opt_out_080_number, '-', ''), ' ', '') = $1
@@ -45,15 +48,31 @@ router.get('/080callback', async (req: Request, res: Response) => {
 
     const company = companyResult.rows[0];
 
-    // 수신거부 등록 (중복 무시)
-    await query(
-      `INSERT INTO unsubscribes (company_id, phone, source)
-       VALUES ($1, $2, '080_ars')
-       ON CONFLICT (company_id, phone) DO NOTHING`,
-      [company.id, phone]
+    // 해당 고객사의 모든 활성 사용자 조회
+    const usersResult = await query(
+      `SELECT id FROM users WHERE company_id = $1 AND is_active = true`,
+      [company.id]
     );
 
-    console.log(`[080콜백] 수신거부 등록: ${phone} → ${company.company_name} (080: ${fr})`);
+    if (usersResult.rows.length === 0) {
+      console.log(`[080콜백] 활성 사용자 없음 - ${company.company_name}`);
+      return res.send('0');
+    }
+
+    // 모든 user에게 broadcast INSERT
+    let insertedCount = 0;
+    for (const user of usersResult.rows) {
+      const result = await query(
+        `INSERT INTO unsubscribes (company_id, user_id, phone, source)
+         VALUES ($1, $2, $3, '080_ars')
+         ON CONFLICT (user_id, phone) DO NOTHING
+         RETURNING id`,
+        [company.id, user.id, phone]
+      );
+      if (result.rows.length > 0) insertedCount++;
+    }
+
+    console.log(`[080콜백] 수신거부 등록: ${phone} → ${company.company_name} (${insertedCount}/${usersResult.rows.length}명, 080: ${fr})`);
     return res.send('1');
   } catch (error) {
     console.error('[080콜백] 처리 오류:', error);
@@ -64,19 +83,21 @@ router.get('/080callback', async (req: Request, res: Response) => {
 // 아래부터는 인증 필요
 router.use(authenticate);
 
-// GET /api/unsubscribes - 수신거부 목록 조회
+// ================================================================
+// GET /api/unsubscribes - 수신거부 목록 조회 (user_id 기준)
+// ================================================================
 router.get('/', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    if (!companyId) {
+    const userId = req.user?.userId;
+    if (!userId) {
       return res.status(403).json({ error: '권한이 필요합니다.' });
     }
     
     const { page = 1, limit = 20, search } = req.query;
     const offset = (Number(page) - 1) * Number(limit);
     
-    let whereClause = 'WHERE company_id = $1';
-    const params: any[] = [companyId];
+    let whereClause = 'WHERE user_id = $1';
+    const params: any[] = [userId];
     
     if (search) {
       whereClause += ` AND phone LIKE $2`;
@@ -114,11 +135,14 @@ router.get('/', async (req: Request, res: Response) => {
   }
 });
 
-// POST /api/unsubscribes - 직접 추가
+// ================================================================
+// POST /api/unsubscribes - 직접 추가 (user_id 기준)
+// ================================================================
 router.post('/', async (req: Request, res: Response) => {
   try {
+    const userId = req.user?.userId;
     const companyId = req.user?.companyId;
-    if (!companyId) {
+    if (!userId || !companyId) {
       return res.status(403).json({ error: '권한이 필요합니다.' });
     }
     
@@ -130,10 +154,10 @@ router.post('/', async (req: Request, res: Response) => {
     }
     
     await query(
-      `INSERT INTO unsubscribes (company_id, phone, source)
-       VALUES ($1, $2, 'manual')
-       ON CONFLICT (company_id, phone) DO NOTHING`,
-      [companyId, cleanPhone]
+      `INSERT INTO unsubscribes (company_id, user_id, phone, source)
+       VALUES ($1, $2, $3, 'manual')
+       ON CONFLICT (user_id, phone) DO NOTHING`,
+      [companyId, userId, cleanPhone]
     );
     
     return res.json({ success: true, message: '등록되었습니다.' });
@@ -143,15 +167,18 @@ router.post('/', async (req: Request, res: Response) => {
   }
 });
 
-// POST /api/unsubscribes/upload - 엑셀 업로드
+// ================================================================
+// POST /api/unsubscribes/upload - 엑셀 업로드 (user_id 기준)
+// ================================================================
 router.post('/upload', async (req: Request, res: Response) => {
   try {
+    const userId = req.user?.userId;
     const companyId = req.user?.companyId;
-    if (!companyId) {
+    if (!userId || !companyId) {
       return res.status(403).json({ error: '권한이 필요합니다.' });
     }
     
-    const { phones } = req.body; // 배열로 받음
+    const { phones } = req.body;
     
     if (!phones || !Array.isArray(phones) || phones.length === 0) {
       return res.status(400).json({ error: '전화번호 목록이 필요합니다.' });
@@ -164,11 +191,11 @@ router.post('/upload', async (req: Request, res: Response) => {
       const cleanPhone = String(phone).replace(/\D/g, '');
       if (cleanPhone.length >= 10) {
         const result = await query(
-          `INSERT INTO unsubscribes (company_id, phone, source)
-           VALUES ($1, $2, 'upload')
-           ON CONFLICT (company_id, phone) DO NOTHING
+          `INSERT INTO unsubscribes (company_id, user_id, phone, source)
+           VALUES ($1, $2, $3, 'upload')
+           ON CONFLICT (user_id, phone) DO NOTHING
            RETURNING id`,
-          [companyId, cleanPhone]
+          [companyId, userId, cleanPhone]
         );
         if (result.rows.length > 0) {
           insertCount++;
@@ -190,19 +217,21 @@ router.post('/upload', async (req: Request, res: Response) => {
   }
 });
 
-// DELETE /api/unsubscribes/:id - 삭제
+// ================================================================
+// DELETE /api/unsubscribes/:id - 삭제 (user_id 기준)
+// ================================================================
 router.delete('/:id', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    if (!companyId) {
+    const userId = req.user?.userId;
+    if (!userId) {
       return res.status(403).json({ error: '권한이 필요합니다.' });
     }
     
     const { id } = req.params;
     
     await query(
-      `DELETE FROM unsubscribes WHERE id = $1 AND company_id = $2`,
-      [id, companyId]
+      `DELETE FROM unsubscribes WHERE id = $1 AND user_id = $2`,
+      [id, userId]
     );
     
     return res.json({ success: true, message: '삭제되었습니다.' });
@@ -211,11 +240,14 @@ router.delete('/:id', async (req: Request, res: Response) => {
     return res.status(500).json({ error: '서버 오류' });
   }
 });
-// POST /api/unsubscribes/check - 수신거부 체크 (발송 전 확인용)
+
+// ================================================================
+// POST /api/unsubscribes/check - 수신거부 체크 (user_id 기준)
+// ================================================================
 router.post('/check', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    if (!companyId) {
+    const userId = req.user?.userId;
+    if (!userId) {
       return res.status(403).json({ error: '권한이 필요합니다.' });
     }
 
@@ -226,8 +258,8 @@ router.post('/check', async (req: Request, res: Response) => {
 
     const cleanPhones = phones.map((p: string) => p.replace(/\D/g, ''));
     const result = await query(
-      `SELECT phone FROM unsubscribes WHERE company_id = $1 AND phone = ANY($2)`,
-      [companyId, cleanPhones]
+      `SELECT phone FROM unsubscribes WHERE user_id = $1 AND phone = ANY($2)`,
+      [userId, cleanPhones]
     );
 
     return res.json({

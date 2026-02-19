@@ -282,7 +282,7 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
             $17, $18,
             $19, 'sync', NOW(), NOW()
           )
-          ON CONFLICT (company_id, phone) DO UPDATE SET
+          ON CONFLICT (company_id, COALESCE(store_code, '__NONE__'), phone) DO UPDATE SET
             name = COALESCE(EXCLUDED.name, customers.name),
             gender = COALESCE(EXCLUDED.gender, customers.gender),
             birth_date = COALESCE(EXCLUDED.birth_date, customers.birth_date),

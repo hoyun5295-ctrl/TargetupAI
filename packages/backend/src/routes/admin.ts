@@ -1084,7 +1084,7 @@ router.get('/campaigns/:id/sms-detail', authenticate, requireSuperAdmin, async (
          FROM SMSQ_SEND ${mysqlWhere}
          ORDER BY seqno DESC
          LIMIT ? OFFSET ?`,
-        [...mysqlParams, limit, offset]
+         [...mysqlParams, Number(limit), Number(offset)]
       );
 
       const statusMap: Record<number, string> = { 6: 'SMS성공', 1000: 'LMS성공', 1800: '카카오성공', 100: '대기', 7: '비가입자', 8: 'Power-off', 16: '스팸차단' };
@@ -1135,7 +1135,7 @@ router.get('/campaigns/:id/sms-detail', authenticate, requireSuperAdmin, async (
          FROM IMC_BM_FREE_BIZ_MSG ${kakaoWhere}
          ORDER BY ID DESC
          LIMIT ? OFFSET ?`,
-        [...kakaoParams, limit, offset]
+         [...kakaoParams, Number(limit), Number(offset)]
       );
 
       const kakaoStatusMap: Record<string, string> = {

@@ -383,7 +383,7 @@ router.post('/', async (req: Request, res: Response) => {
         company_id, phone, name, gender, birth_date, email, address,
         grade, points, store_code, store_name, sms_opt_in, custom_fields
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-      ON CONFLICT (company_id, phone) DO UPDATE SET
+      ON CONFLICT (company_id, COALESCE(store_code, '__NONE__'), phone) DO UPDATE SET
         name = EXCLUDED.name,
         gender = EXCLUDED.gender,
         birth_date = EXCLUDED.birth_date,
@@ -485,7 +485,7 @@ router.post('/bulk', async (req: Request, res: Response) => {
             company_id, phone, name, gender, birth_date, email,
             grade, points, sms_opt_in, custom_fields
           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-          ON CONFLICT (company_id, phone) DO UPDATE SET
+          ON CONFLICT (company_id, COALESCE(store_code, '__NONE__'), phone) DO UPDATE SET
             name = EXCLUDED.name,
             gender = EXCLUDED.gender,
             birth_date = EXCLUDED.birth_date,

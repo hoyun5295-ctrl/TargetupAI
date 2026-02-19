@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import Redis from 'ioredis';
 import { normalizePhone, normalizeGender, normalizeGrade, normalizeRegion, normalizeSmsOptIn } from '../utils/normalize';
+import { query } from '../config/database';
 
 const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
 import multer from 'multer';
@@ -40,7 +41,11 @@ const upload = multer({
   }
 });
 
-// 파일 업로드 및 파싱
+// ================================================================
+// POST /parse — 파일 업로드 및 파싱
+// allData는 ?includeData=true일 때만 포함 (직접발송/주소록용)
+// 고객DB 업로드는 allData 불필요 (/save에서 파일 직접 재파싱)
+// ================================================================
 router.post('/parse', upload.single('file'), async (req: Request, res: Response) => {
   try {
     if (!req.file) {
@@ -48,29 +53,28 @@ router.post('/parse', upload.single('file'), async (req: Request, res: Response)
     }
 
     const filePath = req.file.path;
+    const includeData = req.query.includeData === 'true';
+
     const workbook = XLSX.readFile(filePath, {
       type: 'file',
-      cellFormula: false,  // 수식 파싱 안함
-      cellHTML: false,     // HTML 파싱 안함
-      cellStyles: false,   // 스타일 파싱 안함
-      sheetStubs: false,   // 빈 셀 스킵
+      cellFormula: false,
+      cellHTML: false,
+      cellStyles: false,
+      sheetStubs: false,
     });
     const sheetName = workbook.SheetNames[0];
     const worksheet = workbook.Sheets[sheetName];
     
-    // JSON으로 변환
     const data = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][];
     
     if (data.length === 0) {
       return res.status(400).json({ error: '파일이 비어있습니다.' });
     }
 
-    // 첫 행이 헤더인지 데이터인지 판별
-    // 첫 행이 전부 숫자면 헤더 없는 것으로 판단
+    // 첫 행이 헤더인지 판별
     const firstRow = data[0];
     const isFirstRowHeader = firstRow.some((cell: any) => {
       const str = String(cell || '').trim();
-      // 숫자가 아니고 빈 문자열도 아니면 헤더로 판단
       return str && isNaN(Number(str.replace(/-/g, '')));
     });
 
@@ -78,26 +82,15 @@ router.post('/parse', upload.single('file'), async (req: Request, res: Response)
     let dataRows: any[][];
     
     if (isFirstRowHeader) {
-      // 첫 행이 헤더
       headers = firstRow.map((h: any) => String(h || ''));
       dataRows = data.slice(1);
     } else {
-      // 헤더 없음 - 자동 생성 (A, B, C... 또는 컬럼1, 컬럼2...)
       headers = firstRow.map((_: any, idx: number) => `컬럼${idx + 1}`);
-      dataRows = data; // 전체가 데이터
+      dataRows = data;
     }
 
-    // 미리보기 데이터 (최대 5행) - 객체 형태로 변환
+    // 미리보기 (최대 5행)
     const preview = dataRows.slice(0, 5).map(row => {
-      const obj: any = {};
-      headers.forEach((h, idx) => {
-        obj[h] = row[idx];
-      });
-      return obj;
-    });
-    
-    // 전체 데이터도 객체로 변환
-    const allData = dataRows.map(row => {
       const obj: any = {};
       headers.forEach((h, idx) => {
         obj[h] = row[idx];
@@ -106,30 +99,48 @@ router.post('/parse', upload.single('file'), async (req: Request, res: Response)
     });
 
     const totalRows = dataRows.length;
-
-    // 파일 경로 저장 (나중에 매핑 후 저장할 때 사용)
     const fileId = path.basename(filePath);
 
-    return res.json({
+    // Redis에 메타 저장 (/save에서 활용 — 파일 재파싱 없이 totalRows 확인)
+    await redis.set(`upload:${fileId}:meta`, JSON.stringify({
+      totalRows,
+      headers
+    }), 'EX', 600); // 10분
+
+    const response: any = {
       success: true,
       fileId,
       headers,
       preview,
-      allData,
       totalRows
-    });
+    };
+
+    // 직접발송/주소록용: includeData=true일 때만 allData 포함
+    if (includeData) {
+      response.allData = dataRows.map(row => {
+        const obj: any = {};
+        headers.forEach((h, idx) => {
+          obj[h] = row[idx];
+        });
+        return obj;
+      });
+    }
+
+    return res.json(response);
 
   } catch (error: any) {
     console.error('파일 파싱 에러:', error);
     return res.status(500).json({ error: error.message || '파일 처리 중 오류가 발생했습니다.' });
   }
 });
-// AI 컬럼 매핑 (Claude API)
+
+// ================================================================
+// POST /mapping — AI 컬럼 매핑 (변경 없음)
+// ================================================================
 router.post('/mapping', async (req: Request, res: Response) => {
   try {
     const { headers } = req.body;
     
-    // 우리 DB 컬럼 정의
     const dbColumns = {
       phone: '전화번호 (필수)',
       name: '고객 이름',
@@ -149,7 +160,6 @@ router.post('/mapping', async (req: Request, res: Response) => {
       store_code: '매장코드 (매장 식별 코드)'
     };
 
-    // Claude API 호출
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -183,7 +193,6 @@ JSON 형식으로만 응답해줘 (다른 설명 없이):
     const aiResult: any = await response.json();
     const aiText = aiResult.content?.[0]?.text || '{}';
     
-    // JSON 파싱
     let mapping: { [key: string]: string | null } = {};
     try {
       const jsonMatch = aiText.match(/\{[\s\S]*\}/);
@@ -195,7 +204,6 @@ JSON 형식으로만 응답해줘 (다른 설명 없이):
       headers.forEach((h: string) => { mapping[h] = null; });
     }
 
-    // phone 필수 체크
     const hasPhone = Object.values(mapping).includes('phone');
     const unmapped = Object.entries(mapping).filter(([_, v]) => v === null).map(([k, _]) => k);
 
@@ -212,28 +220,119 @@ JSON 형식으로만 응답해줘 (다른 설명 없이):
     return res.status(500).json({ error: error.message || '매핑 중 오류가 발생했습니다.' });
   }
 });
-// 고객 데이터 저장 (source = 'upload')
+
+// ================================================================
+// POST /save — 백그라운드 처리 (즉시 반환)
+// ================================================================
 router.post('/save', authenticate, async (req: Request, res: Response) => {
   try {
     const { fileId, mapping } = req.body;
     const companyId = req.user?.companyId;
+    const userId = (req as any).user?.userId;
     
     if (!fileId || !mapping || !companyId) {
-      console.log('Missing params:', { fileId: !!fileId, mapping: !!mapping, companyId: !!companyId });
       return res.status(400).json({ 
         error: '필수 파라미터가 없습니다.',
         missing: { fileId: !fileId, mapping: !mapping, companyId: !companyId }
       });
     }
 
-    // 파일 읽기
+    // 파일 존재 확인
     const uploadDir = path.join(__dirname, '../../uploads');
     const filePath = path.join(uploadDir, fileId);
     
     if (!fs.existsSync(filePath)) {
-      return res.status(404).json({ error: '파일을 찾을 수 없습니다.' });
+      return res.status(404).json({ error: '파일을 찾을 수 없습니다. 다시 업로드해주세요.' });
     }
 
+    // Redis에서 메타 조회 (파일 재파싱 없이 totalRows 확인)
+    let totalRows = 0;
+    const metaStr = await redis.get(`upload:${fileId}:meta`);
+    if (metaStr) {
+      const meta = JSON.parse(metaStr);
+      totalRows = meta.totalRows || 0;
+    } else {
+      // 메타 만료 시 파일에서 빠르게 확인
+      const workbook = XLSX.readFile(filePath, { type: 'file', cellFormula: false, cellHTML: false, cellStyles: false, sheetStubs: false });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const data = XLSX.utils.sheet_to_json(sheet, { header: 1 }) as any[][];
+      totalRows = Math.max(0, data.length - 1);
+    }
+
+    // 플랜 초과 사전 체크
+    const limitCheck = await query(`
+      SELECT 
+        p.max_customers,
+        p.plan_name,
+        (SELECT COUNT(*) FROM customers WHERE company_id = c.id AND is_active = true) as current_count
+      FROM companies c
+      LEFT JOIN plans p ON c.plan_id = p.id
+      WHERE c.id = $1
+    `, [companyId]);
+
+    if (limitCheck.rows.length > 0) {
+      const { max_customers, current_count, plan_name } = limitCheck.rows[0];
+      const newTotal = Number(current_count) + totalRows;
+      if (max_customers && newTotal > max_customers) {
+        const available = Number(max_customers) - Number(current_count);
+        return res.status(403).json({ 
+          error: '최대 고객 관리 DB를 초과합니다. 플랜을 업그레이드하세요.',
+          code: 'PLAN_LIMIT_EXCEEDED',
+          planName: plan_name,
+          maxCustomers: max_customers,
+          currentCount: Number(current_count),
+          requestedCount: totalRows,
+          availableCount: available > 0 ? available : 0
+        });
+      }
+    }
+
+    const startedAt = new Date().toISOString();
+
+    // Redis 초기 상태
+    await redis.set(`upload:${fileId}:progress`, JSON.stringify({
+      status: 'processing',
+      total: totalRows,
+      processed: 0,
+      percent: 0,
+      insertCount: 0,
+      duplicateCount: 0,
+      errorCount: 0,
+      startedAt,
+      message: '처리 시작...'
+    }), 'EX', 3600);
+
+    // 즉시 응답 (1초 이내)
+    res.json({ success: true, fileId, totalRows, message: '백그라운드 처리 시작' });
+
+    // 백그라운드 처리 (res 반환 이후 실행)
+    processUploadInBackground(fileId, filePath, mapping, companyId, userId, startedAt).catch(err => {
+      console.error('[업로드 백그라운드] 치명적 에러:', err);
+    });
+
+  } catch (error: any) {
+    console.error('저장 요청 에러:', error);
+    return res.status(500).json({ error: error.message || '저장 중 오류가 발생했습니다.' });
+  }
+});
+
+// ================================================================
+// 백그라운드 업로드 처리 함수
+// ================================================================
+async function processUploadInBackground(
+  fileId: string,
+  filePath: string,
+  mapping: Record<string, string>,
+  companyId: string,
+  userId: string | null,
+  startedAt: string
+) {
+  let insertCount = 0;
+  let duplicateCount = 0;
+  let errorCount = 0;
+
+  try {
+    // 파일 읽기
     const workbook = XLSX.readFile(filePath, {
       type: 'file',
       cellFormula: false,
@@ -247,63 +346,18 @@ router.post('/save', authenticate, async (req: Request, res: Response) => {
     
     const headers = data[0] as string[];
     const rows = data.slice(1);
+    const totalRows = rows.length;
 
-    // DB 연결
-    const { Pool } = require('pg');
-    const pool = new Pool({
-      connectionString: process.env.DATABASE_URL
-    });
-
-    // 플랜 초과 체크
-    const limitCheck = await pool.query(`
-      SELECT 
-        c.id,
-        p.max_customers,
-        p.plan_name,
-        (SELECT COUNT(*) FROM customers WHERE company_id = c.id AND is_active = true) as current_count
-      FROM companies c
-      LEFT JOIN plans p ON c.plan_id = p.id
-      WHERE c.id = $1
-    `, [companyId]);
-
-    if (limitCheck.rows.length > 0) {
-      const { max_customers, current_count, plan_name } = limitCheck.rows[0];
-      const newTotal = Number(current_count) + rows.length;
-      if (max_customers && newTotal > max_customers) {
-        const available = Number(max_customers) - Number(current_count);
-        await pool.end();
-        return res.status(403).json({ 
-          error: '최대 고객 관리 DB를 초과합니다. 플랜을 업그레이드하세요.',
-          code: 'PLAN_LIMIT_EXCEEDED',
-          planName: plan_name,
-          maxCustomers: max_customers,
-          currentCount: Number(current_count),
-          requestedCount: rows.length,
-          availableCount: available > 0 ? available : 0
-        });
-      }
-    }
-
-    let insertCount = 0;
-    let duplicateCount = 0;
-    let errorCount = 0;
-
-    // 업로드 사용자의 store_codes 조회 (customer_stores 매핑용)
-    const userId = (req as any).user?.userId;
+    // 업로드 사용자의 store_codes 조회
     let userStoreCodes: string[] = [];
     if (userId) {
-      const userResult = await pool.query('SELECT store_codes FROM users WHERE id = $1', [userId]);
+      const userResult = await query('SELECT store_codes FROM users WHERE id = $1', [userId]);
       userStoreCodes = userResult.rows[0]?.store_codes || [];
     }
 
-    // Bulk INSERT (4000건씩)
-    const BATCH_SIZE = 4000;
-// 진행률 초기화
-await redis.set(`upload:${fileId}:progress`, JSON.stringify({
-  total: rows.length,
-  processed: 0,
-  percent: 0
-}), 'EX', 300);
+    const BATCH_SIZE = 500;
+    const hasFileStoreCode = Object.values(mapping).includes('store_code');
+
     for (let i = 0; i < rows.length; i += BATCH_SIZE) {
       const batch = rows.slice(i, i + BATCH_SIZE);
       const values: any[] = [];
@@ -343,12 +397,13 @@ await redis.set(`upload:${fileId}:progress`, JSON.stringify({
           continue;
         }
 
-        // 배치 내 중복 번호 스킵 (ON CONFLICT 에러 방지)
-        if (seenInBatch.has(record.phone)) {
+        // 배치 내 중복: store_code 포함 dedupe
+        const dedupeKey = `${record.phone}__${record.store_code || '__NONE__'}`;
+        if (seenInBatch.has(dedupeKey)) {
           duplicateCount++;
           continue;
         }
-        seenInBatch.add(record.phone);
+        seenInBatch.add(dedupeKey);
 
         batchPhones.push(record.phone);
 
@@ -373,97 +428,119 @@ await redis.set(`upload:${fileId}:progress`, JSON.stringify({
         paramIndex += 18;
       }
 
-      if (placeholders.length === 0) continue;
+      if (placeholders.length > 0) {
+        try {
+          const result = await query(`
+            INSERT INTO customers (company_id, phone, name, gender, birth_date, birth_year, birth_month_day, grade, region, sms_opt_in, email, total_purchase, last_purchase_date, purchase_count, callback, store_name, store_code, uploaded_by, source, created_at, updated_at)
+            VALUES ${placeholders.join(', ')}
+            ON CONFLICT (company_id, COALESCE(store_code, '__NONE__'), phone) 
+            DO UPDATE SET 
+              name = COALESCE(EXCLUDED.name, customers.name),
+              gender = COALESCE(EXCLUDED.gender, customers.gender),
+              birth_date = COALESCE(EXCLUDED.birth_date, customers.birth_date),
+              birth_year = COALESCE(EXCLUDED.birth_year, customers.birth_year),
+              birth_month_day = COALESCE(EXCLUDED.birth_month_day, customers.birth_month_day),
+              grade = COALESCE(EXCLUDED.grade, customers.grade),
+              region = COALESCE(EXCLUDED.region, customers.region),
+              sms_opt_in = COALESCE(EXCLUDED.sms_opt_in, customers.sms_opt_in),
+              email = COALESCE(EXCLUDED.email, customers.email),
+              total_purchase = COALESCE(EXCLUDED.total_purchase, customers.total_purchase),
+              last_purchase_date = COALESCE(EXCLUDED.last_purchase_date, customers.last_purchase_date),
+              purchase_count = COALESCE(EXCLUDED.purchase_count, customers.purchase_count),
+              callback = COALESCE(EXCLUDED.callback, customers.callback),
+              store_name = COALESCE(EXCLUDED.store_name, customers.store_name),
+              store_code = COALESCE(EXCLUDED.store_code, customers.store_code),
+              uploaded_by = COALESCE(EXCLUDED.uploaded_by, customers.uploaded_by),
+              source = CASE WHEN customers.source = 'sync' THEN 'sync' ELSE 'upload' END,
+              updated_at = NOW()
+            RETURNING (xmax = 0) as is_insert, phone
+          `, values);
 
-      try {
-        const result = await pool.query(`
-          INSERT INTO customers (company_id, phone, name, gender, birth_date, birth_year, birth_month_day, grade, region, sms_opt_in, email, total_purchase, last_purchase_date, purchase_count, callback, store_name, store_code, uploaded_by, source, created_at, updated_at)
-          VALUES ${placeholders.join(', ')}
-          ON CONFLICT (company_id, phone) 
-          DO UPDATE SET 
-            name = COALESCE(EXCLUDED.name, customers.name),
-            gender = COALESCE(EXCLUDED.gender, customers.gender),
-            birth_date = COALESCE(EXCLUDED.birth_date, customers.birth_date),
-            birth_year = COALESCE(EXCLUDED.birth_year, customers.birth_year),
-            birth_month_day = COALESCE(EXCLUDED.birth_month_day, customers.birth_month_day),
-            grade = COALESCE(EXCLUDED.grade, customers.grade),
-            region = COALESCE(EXCLUDED.region, customers.region),
-            sms_opt_in = COALESCE(EXCLUDED.sms_opt_in, customers.sms_opt_in),
-            email = COALESCE(EXCLUDED.email, customers.email),
-            total_purchase = COALESCE(EXCLUDED.total_purchase, customers.total_purchase),
-            last_purchase_date = COALESCE(EXCLUDED.last_purchase_date, customers.last_purchase_date),
-            purchase_count = COALESCE(EXCLUDED.purchase_count, customers.purchase_count),
-            callback = COALESCE(EXCLUDED.callback, customers.callback),
-            store_name = COALESCE(EXCLUDED.store_name, customers.store_name),
-            store_code = COALESCE(EXCLUDED.store_code, customers.store_code),
-            uploaded_by = COALESCE(EXCLUDED.uploaded_by, customers.uploaded_by),
-            source = CASE WHEN customers.source = 'sync' THEN 'sync' ELSE 'upload' END,
-            updated_at = NOW()
-          RETURNING (xmax = 0) as is_insert, phone
-        `, values);
+          result.rows.forEach((r: any) => {
+            if (r.is_insert) insertCount++;
+            else duplicateCount++;
+          });
 
-        result.rows.forEach((r: any) => {
-          if (r.is_insert) insertCount++;
-          else duplicateCount++;
-        });
-
-        // customer_stores N:N 매핑
-        // 1) 파일에 store_code가 매핑된 경우 → 파일의 store_code 사용
-        const hasFileStoreCode = Object.values(mapping).includes('store_code');
-        if (hasFileStoreCode && batchPhones.length > 0) {
-          // 파일에서 store_code가 있는 고객만 매핑
-          await pool.query(`
-            INSERT INTO customer_stores (company_id, customer_id, store_code)
-            SELECT c.company_id, c.id, c.store_code
-            FROM customers c
-            WHERE c.company_id = $1 AND c.phone = ANY($2::text[]) AND c.store_code IS NOT NULL AND c.store_code != ''
-            ON CONFLICT (customer_id, store_code) DO NOTHING
-          `, [companyId, batchPhones]);
+          // customer_stores N:N 매핑
+          if (hasFileStoreCode && batchPhones.length > 0) {
+            await query(`
+              INSERT INTO customer_stores (company_id, customer_id, store_code)
+              SELECT c.company_id, c.id, c.store_code
+              FROM customers c
+              WHERE c.company_id = $1 AND c.phone = ANY($2::text[]) AND c.store_code IS NOT NULL AND c.store_code != ''
+              ON CONFLICT (customer_id, store_code) DO NOTHING
+            `, [companyId, batchPhones]);
+          }
+          if (!hasFileStoreCode && userStoreCodes.length > 0 && batchPhones.length > 0) {
+            await query(`
+              INSERT INTO customer_stores (company_id, customer_id, store_code)
+              SELECT $1, c.id, unnest($2::text[])
+              FROM customers c
+              WHERE c.company_id = $1 AND c.phone = ANY($3::text[])
+              ON CONFLICT (customer_id, store_code) DO NOTHING
+            `, [companyId, userStoreCodes, batchPhones]);
+          }
+        } catch (err) {
+          console.error('[업로드 백그라운드] Batch insert error:', err);
+          errorCount += batch.length;
         }
-        // 2) 파일에 store_code 없으면 → 업로드 사용자의 store_codes 사용
-        if (!hasFileStoreCode && userStoreCodes.length > 0 && batchPhones.length > 0) {
-          await pool.query(`
-            INSERT INTO customer_stores (company_id, customer_id, store_code)
-            SELECT $1, c.id, unnest($2::text[])
-            FROM customers c
-            WHERE c.company_id = $1 AND c.phone = ANY($3::text[])
-            ON CONFLICT (customer_id, store_code) DO NOTHING
-          `, [companyId, userStoreCodes, batchPhones]);
-        }
-      // 진행률 업데이트
-      const processed = Math.min(i + BATCH_SIZE, rows.length);
-      await redis.set(`upload:${fileId}:progress`, JSON.stringify({
-        total: rows.length,
-        processed,
-        percent: Math.round((processed / rows.length) * 100)
-      }), 'EX', 300);
-
-      } catch (err) {
-        console.error('Batch insert error:', err);
-        errorCount += batch.length;
       }
+
+      // 진행률 업데이트
+      const processed = Math.min(i + BATCH_SIZE, totalRows);
+      await redis.set(`upload:${fileId}:progress`, JSON.stringify({
+        status: 'processing',
+        total: totalRows,
+        processed,
+        percent: Math.round((processed / totalRows) * 100),
+        insertCount,
+        duplicateCount,
+        errorCount,
+        startedAt,
+        message: '처리 중...'
+      }), 'EX', 3600);
     }
 
-    await pool.end();
-
-    // 업로드 파일 삭제 (에러 무시)
-    try { fs.unlinkSync(filePath); } catch (e) {}
-
-    return res.json({
-      success: true,
+    // ===== 완료 =====
+    const completedAt = new Date().toISOString();
+    await redis.set(`upload:${fileId}:progress`, JSON.stringify({
+      status: 'completed',
+      total: totalRows,
+      processed: totalRows,
+      percent: 100,
       insertCount,
       duplicateCount,
       errorCount,
-      totalProcessed: insertCount + duplicateCount + errorCount,
-      message: `총 ${rows.length}건 중 신규 ${insertCount}건, 업데이트 ${duplicateCount}건${errorCount > 0 ? `, 오류 ${errorCount}건 (전화번호 누락/중복)` : ''}`
-    });
+      startedAt,
+      completedAt,
+      message: `총 ${totalRows.toLocaleString()}건 중 신규 ${insertCount.toLocaleString()}건, 업데이트 ${duplicateCount.toLocaleString()}건${errorCount > 0 ? `, 오류 ${errorCount.toLocaleString()}건` : ''}`
+    }), 'EX', 3600);
+
+    console.log(`[업로드 완료] fileId=${fileId}, 신규=${insertCount}, 업데이트=${duplicateCount}, 오류=${errorCount}`);
+
+    // 파일 삭제
+    try { fs.unlinkSync(filePath); } catch (e) {}
 
   } catch (error: any) {
-    console.error('저장 에러:', error);
-    return res.status(500).json({ error: error.message || '저장 중 오류가 발생했습니다.' });
+    console.error('[업로드 백그라운드] 처리 에러:', error);
+    await redis.set(`upload:${fileId}:progress`, JSON.stringify({
+      status: 'failed',
+      total: 0,
+      processed: insertCount + duplicateCount + errorCount,
+      percent: 0,
+      insertCount,
+      duplicateCount,
+      errorCount,
+      startedAt,
+      error: error.message || 'DB 처리 오류',
+      message: `오류 발생. ${(insertCount + duplicateCount).toLocaleString()}건까지 처리 완료. 재업로드 시 중복 건은 자동 스킵됩니다.`
+    }), 'EX', 3600);
   }
-});
-// 진행률 조회 API
+}
+
+// ================================================================
+// GET /progress/:fileId — 진행률 조회 (강화)
+// ================================================================
 router.get('/progress/:fileId', async (req: Request, res: Response) => {
   try {
     const { fileId } = req.params;
@@ -472,9 +549,9 @@ router.get('/progress/:fileId', async (req: Request, res: Response) => {
     if (data) {
       return res.json(JSON.parse(data));
     }
-    return res.json({ total: 0, processed: 0, percent: 0 });
+    return res.json({ status: 'unknown', total: 0, processed: 0, percent: 0 });
   } catch (error) {
-    return res.json({ total: 0, processed: 0, percent: 0 });
+    return res.json({ status: 'unknown', total: 0, processed: 0, percent: 0 });
   }
 });
 
