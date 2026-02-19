@@ -1324,3 +1324,4 @@ POST /api/sync/purchases   ← 구매내역 벌크 INSERT (배치 최대 1000건
 | 02-19 | 수신거부 user_id 전환 (unsubscribes/opt_outs 마이그레이션, 080콜백 broadcast) |
 | 02-19 | 브랜드/매장 필터 전체 통합 (AI프롬프트, buildFilterQuery, buildDynamicFilter, 직접타겟UI) |
 | 02-19 | 에러 수정 일괄 (results.ts 타임스탬프, admin.ts MySQL LIMIT, spam_filter NOT NULL) |
+| 02-19 | 직원 버그리포트 5차: 테스트접두사 제거, 광고미리보기 통합(wrapAdText), KST변환 2건, 문의모달 분기, 제목누락, 전화검색 4자리, 카드넘침, AI구분선금지 |
