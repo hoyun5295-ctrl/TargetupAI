@@ -648,6 +648,7 @@ router.post('/', async (req: Request, res: Response) => {
       messageType,
       targetFilter,
       messageContent,
+      subject,
       scheduledAt,
       isAd,
       eventStartDate,
@@ -681,15 +682,15 @@ router.post('/', async (req: Request, res: Response) => {
     const result = await query(
       `INSERT INTO campaigns (
         company_id, campaign_name, message_type, target_filter,
-        message_content, scheduled_at, is_ad, target_count, created_by,
+        message_content, subject, message_subject, scheduled_at, is_ad, target_count, created_by,
         event_start_date, event_end_date, mms_image_paths,
         send_channel, kakao_bubble_type, kakao_sender_key, kakao_targeting,
         kakao_attachment_json, kakao_carousel_json, kakao_resend_type
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
       RETURNING *`,
       [
         companyId, campaignName, messageType, JSON.stringify(targetFilter),
-        messageContent, scheduledAt, isAd ?? false, targetCount, userId,
+        messageContent, subject || null, subject || null, scheduledAt, isAd ?? false, targetCount, userId,
         eventStartDate || null, eventEndDate || null,
         mmsImagePaths && mmsImagePaths.length > 0 ? JSON.stringify(mmsImagePaths) : null,
         sendChannel || 'sms',
@@ -951,9 +952,9 @@ for (const customer of filteredCustomers) {
     const table = getNextSmsTable(companyTables);
     await mysqlQuery(
       `INSERT INTO ${table} (
-        dest_no, call_back, msg_contents, msg_type, sendreq_time, status_code, rsv1, app_etc1, app_etc2, file_name1, file_name2, file_name3
-      ) VALUES (?, ?, ?, ?, ${sendTime ? `'${sendTime}'` : 'NOW()'}, 100, '1', ?, ?, ?, ?, ?)`,
-      [cleanPhone, customerCallback, personalizedMessage, aiMsgTypeCode, id, companyId, campaignMmsImages[0] || '', campaignMmsImages[1] || '', campaignMmsImages[2] || '']
+        dest_no, call_back, msg_contents, msg_type, title_str, sendreq_time, status_code, rsv1, app_etc1, app_etc2, file_name1, file_name2, file_name3
+      ) VALUES (?, ?, ?, ?, ?, ${sendTime ? `'${sendTime}'` : 'NOW()'}, 100, '1', ?, ?, ?, ?, ?)`,
+      [cleanPhone, customerCallback, personalizedMessage, aiMsgTypeCode, campaign.subject || '', id, companyId, campaignMmsImages[0] || '', campaignMmsImages[1] || '', campaignMmsImages[2] || '']
     );
   }
 
