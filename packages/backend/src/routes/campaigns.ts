@@ -469,7 +469,7 @@ router.get('/', async (req: Request, res: Response) => {
         scheduled_at, sent_at, created_at,
         TO_CHAR(event_start_date, 'YYYY-MM-DD') as event_start_date,
         TO_CHAR(event_end_date, 'YYYY-MM-DD') as event_end_date,
-        message_content
+        message_content, message_template, subject, message_subject, is_ad, callback_number
        FROM campaigns
        ${whereClause}
        ORDER BY created_at DESC
@@ -584,37 +584,39 @@ router.post('/test-send', async (req: Request, res: Response) => {
     let sentCount = 0;
 
     for (const contact of managerContacts) {
-      const cleanPhone = contact.phone.replace(/-/g, '');
-      const testMsg = contact.name
-        ? `[테스트] ${contact.name}님, ${messageContent}`
-        : `[테스트] ${messageContent}`;
+      try {
+        const cleanPhone = contact.phone.replace(/-/g, '');
+        const testMsg = messageContent;
 
-      if (testChannel === 'sms' || testChannel === 'both') {
-        // SMS 테스트 발송
-        const table = getNextSmsTable(testTables);
-        await mysqlQuery(
-          `INSERT INTO ${table} (
-            dest_no, call_back, msg_contents, msg_type, sendreq_time, status_code, rsv1, app_etc1, app_etc2, bill_id, file_name1, file_name2, file_name3
-          ) VALUES (?, ?, ?, ?, NOW(), 100, '1', ?, ?, ?, ?, ?, ?)`,
-          [cleanPhone, callbackNumber, testMsg, msgType, 'test', companyId, userId || '', mmsImagePaths[0] || '', mmsImagePaths[1] || '', mmsImagePaths[2] || '']
-        );
+        if (testChannel === 'sms' || testChannel === 'both') {
+          // SMS 테스트 발송
+          const table = getNextSmsTable(testTables);
+          await mysqlQuery(
+            `INSERT INTO ${table} (
+              dest_no, call_back, msg_contents, msg_type, sendreq_time, status_code, rsv1, app_etc1, app_etc2, bill_id, file_name1, file_name2, file_name3
+            ) VALUES (?, ?, ?, ?, NOW(), 100, '1', ?, ?, ?, ?, ?, ?)`,
+            [cleanPhone, callbackNumber, testMsg, msgType, 'test', companyId, userId || '', mmsImagePaths[0] || '', mmsImagePaths[1] || '', mmsImagePaths[2] || '']
+          );
+        }
+
+        if (testChannel === 'kakao' || testChannel === 'both') {
+          // 카카오 테스트 발송
+          await insertKakaoQueue({
+            bubbleType: testKakaoBubbleType,
+            senderKey: testKakaoSenderKey,
+            phone: cleanPhone,
+            targeting: 'I',
+            message: testMsg,
+            isAd: false,
+            resendType: 'NO',  // 테스트는 대체발송 안함
+            requestUid: 'test',
+          });
+        }
+
+        sentCount++;
+      } catch (err) {
+        console.error(`담당자 테스트 발송 실패 (${contact.phone}):`, err);
       }
-
-      if (testChannel === 'kakao' || testChannel === 'both') {
-        // 카카오 테스트 발송
-        await insertKakaoQueue({
-          bubbleType: testKakaoBubbleType,
-          senderKey: testKakaoSenderKey,
-          phone: cleanPhone,
-          targeting: 'I',
-          message: testMsg,
-          isAd: false,
-          resendType: 'NO',  // 테스트는 대체발송 안함
-          requestUid: 'test',
-        });
-      }
-
-      sentCount++;
     }
 
     return res.json({
@@ -2119,9 +2121,14 @@ router.put('/:id/message', async (req: Request, res: Response) => {
       customerMap.set(c.phone, c);
     });
 
-    // 3. 광고 문구 처리
-    const adEnabled = campaign.rows[0].message_content?.startsWith('(광고)');
+    /// 3. 광고 문구 처리 (is_ad 필드 기준, 080번호는 company에서 조회)
+    const adEnabled = campaign.rows[0].is_ad === true;
     const msgType = campaign.rows[0].message_type;
+    let optOut080 = '';
+    if (adEnabled) {
+      const compInfo = await query('SELECT opt_out_080_number FROM companies WHERE id = $1', [companyId]);
+      optOut080 = compInfo.rows[0]?.opt_out_080_number || '';
+    }
 
     // 4. 테이블별로 그룹핑 후 Bulk UPDATE
     const tableGroups: Record<string, any[]> = {};
@@ -2163,12 +2170,13 @@ router.put('/:id/message', async (req: Request, res: Response) => {
             .replace(/%지역%/g, customer.region || '');
 
           // 광고 문구 추가
-          if (adEnabled) {
-            finalMessage = '(광고) ' + finalMessage;
+          if (adEnabled && optOut080) {
+            const adPrefix = msgType === 'SMS' ? '(광고)' : '(광고) ';
+            finalMessage = adPrefix + finalMessage;
             if (msgType === 'SMS') {
-              finalMessage += `\n무료거부${campaign.rows[0].callback_number?.replace(/-/g, '')}`;
+              finalMessage += `\n무료거부${optOut080.replace(/-/g, '')}`;
             } else {
-              finalMessage += `\n무료수신거부 ${campaign.rows[0].callback_number}`;
+              finalMessage += `\n무료수신거부 ${optOut080}`;
             }
           }
 

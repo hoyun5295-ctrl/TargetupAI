@@ -717,15 +717,17 @@ grep "bind ack" /home/administrator/agent*/logs/*mtdeliver.txt
 | created_at | timestamp |
 | completed_at | timestamp |
 
-### opt_outs (수신거부)
+### opt_outs (수신거부 — user_id 기준)
 | 컬럼 | 타입 |
 |------|------|
 | id | uuid PK |
 | company_id | uuid FK |
+| user_id | uuid FK NOT NULL |
 | opt_out_number | varchar(20) |
 | phone | varchar(20) |
 | source | varchar(20) |
 | created_at | timestamp |
+- UNIQUE: (user_id, phone)
 
 ### opt_out_sync_logs (수신거부 동기화 로그)
 | 컬럼 | 타입 |
@@ -926,14 +928,17 @@ grep "bind ack" /home/administrator/agent*/logs/*mtdeliver.txt
 | is_active | boolean |
 | created_at | timestamp |
 
-### unsubscribes (수신거부)
+### unsubscribes (수신거부 — user_id 기준)
 | 컬럼 | 타입 |
 |------|------|
 | id | uuid PK |
 | company_id | uuid FK |
+| user_id | uuid FK NOT NULL |
 | phone | varchar(20) |
 | source | varchar(20) |
 | created_at | timestamp |
+- UNIQUE: (user_id, phone)
+- INDEX: company_id (080 콜백용)
 
 ### user_alarm_phones (사용자 알림 전화번호)
 | 컬럼 | 타입 |
@@ -1230,17 +1235,7 @@ POST /api/sync/purchases   ← 구매내역 벌크 INSERT (배치 최대 1000건
 
 ### 🔴 미해결 — 즉시 처리 필요
 
-**백엔드 tsc 빌드 에러**
-- `npm run build` (tsc) 실행 시 app.ts에서 모듈 13개 못 찾는 에러
-- 원인 추정: tsconfig.json paths/rootDir 설정 또는 파일 구조 불일치
-- 영향: 소스 수정 후 정상 빌드 불가 → dist 직접 수정해야 하는 상황
-- **우선순위 최상** (모든 백엔드 수정의 전제조건)
-
-**campaigns.ts prepaidDeduct UUID 에러 (src 수정 필요)**
-- 파일: `packages/backend/src/routes/campaigns.ts` 454줄
-- 에러: `invalid input syntax for type uuid: "test"`
-- dist만 수정됨, src는 아직 'test' → tsc 빌드 후 덮어씌워짐
-- 수정: `'test'` → `'00000000-0000-0000-0000-000000000000'`
+(현재 없음)
 
 ### QTmsg Agent 참고 (트러블슈팅 교훈)
 
@@ -1321,38 +1316,11 @@ POST /api/sync/purchases   ← 구매내역 벌크 INSERT (배치 최대 1000건
 | 02-13 | 스팸필터 테스트 시스템 (DB + 백엔드 + Android 앱 + LGU+ SMS 실제 발송 성공) |
 | 02-13 | AI 캠페인확정 모달 분리 (좌: 폰미리보기, 우: 캠페인명/회신번호/발송시간) |
 | 02-13 | AI 메시지 선택 인덱스 수정 (selectedAiMsgIdx → 스팸필터/발송/미리보기 전체 반영) |
-**스팸필터 판정 로직 고도화 + 앱 LMS 지원 (2026-02-19)**
-- [x] spam_filter_test_results 테이블에 result 컬럼 추가 (received/blocked/timeout/failed)
-- [x] 타임아웃 60초 → 180초 변경
-- [x] 타임아웃 시 QTmsg MySQL 결과(status_code) 조회하여 판정 세분화
-  - 이통사 성공(6/1000) + 미수신 → blocked (스팸차단 확정)
-  - 이통사 대기(100) → timeout (시간초과)
-  - 이통사 실패 → failed (발송실패)
-- [x] 앱 리포트 수신 시 result = 'received' 저장
-- [x] SpamFilterTestModal.tsx 결과 표시 세분화 (✅수신/🚫스팸차단/⚠️시간초과/❌발송실패)
-- [x] 로컬 DB + 서버 DB ALTER TABLE 완료
-- [x] 서버 배포 시 TypeScript 타입 에러 발생 → 상용 서버 크래시 장애 (mysqlQuery 반환값 any[] 캐스팅)
-- [x] sed로 긴급 수정 배포
-- [x] 스팸한줄 앱 LMS 수신 지원 (APK 빌드 완료)
-  - MmsReceiver.kt 신규 (WAP_PUSH_DELIVER → MMS content provider 읽기 → 080 매칭 → 리포트)
-  - ComposeSmsActivity.kt, HeadlessSmsSendService.kt 더미 컴포넌트 (기본 SMS 앱 필수 요건)
-  - AndroidManifest.xml 기본 SMS 앱 컴포넌트 등록
-  - MainActivity.kt 기본 SMS 앱 설정 요청 다이얼로그 추가
-  - SmsReceiver.kt SMS_DELIVER 액션 추가
-**스팸필터 080치환 제거 + 모달 복원 + 버그 수정 (2026-02-19)**
-- [x] 080 수신거부번호 치환 로직 완전 제거 (원본 메시지 그대로 발송)
-  - spam-filter.ts: replaceOptOutNumber() 함수 삭제, SPAM_CHECK_NUMBER 상수 삭제
-  - 수신거부번호가 스팸 판정에 영향 주는 문제 해결
-- [x] 앱 수신 매칭 방식 변경 (080번호 → 발신번호 기반)
-  - SmsReceiver.kt: 080 체크 삭제, 모든 수신 SMS 서버 리포트
-  - MmsReceiver.kt: 080 체크 삭제, 모든 수신 LMS 서버 리포트
-  - 백엔드 report API: 080 체크 제거, 앱 messageType 직접 사용
-  - APK 재빌드 완료 (.\gradlew assembleDebug)
-- [x] 스팸필터 모달 백그라운드 복원 기능 추가
-  - /api/spam-filter/active-test API 신규 (진행 중 테스트 조회)
-  - 모달 열릴 때 active 테스트 자동 감지 → 폴링 재개
-  - 타이머: setInterval 카운트다운 → 서버 created_at 기준 절대시간 계산
-- [x] 타겟직접발송 스팸필터 본문 미전달 버그 수정
-  - Dashboard.tsx: aiResult?.messages?... → targetMessage 변경
-  - msgType도 'SMS' 하드코딩 → targetMsgType 동적 반영
-- [ ] ⏳ 테스트폰 APK 재설치 + 기본 SMS 앱 설정 + 수신 테스트
+| 02-19 | 스팸필터 판정 고도화 (result 세분화, 타임아웃 180초, QTmsg 결과 조회) |
+| 02-19 | 스팸한줄 앱 LMS 수신 지원 (MmsReceiver.kt, 기본 SMS 앱 컴포넌트) |
+| 02-19 | 스팸필터 080치환 제거 + 모달 복원 + 타겟직접발송 버그 수정 |
+| 02-19 | 업로드 안정화 (BATCH 500, 백그라운드 처리, 프로그레스바 모달) — 11,228건 전량 성공 |
+| 02-19 | customers UNIQUE 키 변경: (company_id, phone) → (company_id, COALESCE(store_code,'__NONE__'), phone) |
+| 02-19 | 수신거부 user_id 전환 (unsubscribes/opt_outs 마이그레이션, 080콜백 broadcast) |
+| 02-19 | 브랜드/매장 필터 전체 통합 (AI프롬프트, buildFilterQuery, buildDynamicFilter, 직접타겟UI) |
+| 02-19 | 에러 수정 일괄 (results.ts 타임스탬프, admin.ts MySQL LIMIT, spam_filter NOT NULL) |

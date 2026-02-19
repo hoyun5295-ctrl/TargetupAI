@@ -1694,7 +1694,7 @@ const campaignData = {
     // 성공 모달용 발송 정보 저장 (초기화 전에!)
     const sendInfoText = _sendTimeOption === 'now' ? '즉시 발송 완료' : 
                          _sendTimeOption === 'ai' ? `예약 완료 (${aiResult?.recommendedTime || 'AI 추천'})` :
-                         `예약 완료 (${_customSendTime ? formatDateTime(_customSendTime) : ''})`;
+                         `예약 완료 (${_customSendTime ? new Date(_customSendTime).toLocaleString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''})`;
     setSuccessSendInfo(sendInfoText);
     
     setSendTimeOption('ai');
@@ -1812,6 +1812,18 @@ const campaignData = {
       return `${clean.slice(0,3)}-${clean.slice(3,6)}-${clean.slice(6)}`;
     }
     return num;
+  };
+
+  // ★ AI추천 미리보기용 광고 문구 래핑
+  const wrapAdText = (msg: string, channel?: string) => {
+    if (!msg) return msg;
+    const ch = channel || selectedChannel;
+    if (!isAd || ch === 'KAKAO') return msg;
+    const adPrefix = ch === 'SMS' ? '(광고)' : '(광고) ';
+    const adSuffix = ch === 'SMS'
+      ? `\n무료거부${optOutNumber.replace(/-/g, '')}`
+      : `\n무료수신거부 ${formatRejectNumber(optOutNumber)}`;
+    return adPrefix + msg + adSuffix;
   };
 
   const getFullMessage = (msg: string) => {
@@ -2621,20 +2633,20 @@ const campaignData = {
                                   ) : (
                                   <div className="flex gap-2">
                                     <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-xs ${selectedChannel === 'KAKAO' ? 'bg-yellow-100' : 'bg-purple-100'}`}>{selectedChannel === 'KAKAO' ? '💬' : '📱'}</div>
-                                    <div className={`rounded-2xl rounded-tl-sm p-3 shadow-sm border text-[12px] leading-[1.6] whitespace-pre-wrap text-gray-700 max-w-[95%] ${selectedChannel === 'KAKAO' ? 'bg-yellow-50 border-yellow-200' : 'bg-white border-gray-100'}`}>
-                                      {aiResult?.usePersonalization ? (() => {
+                                    <div className={`rounded-2xl rounded-tl-sm p-3 shadow-sm border text-[12px] leading-[1.6] whitespace-pre-wrap break-words overflow-hidden text-gray-700 max-w-[95%] ${selectedChannel === 'KAKAO' ? 'bg-yellow-50 border-yellow-200' : 'bg-white border-gray-100'}`}>
+                                    {aiResult?.usePersonalization ? (() => {
                                         const sampleData: Record<string, string> = { '이름': '김민수', '포인트': '12,500', '등급': 'VIP', '매장명': '강남점', '지역': '서울', '구매금액': '350,000', '구매횟수': '8', '평균주문금액': '43,750', 'LTV점수': '85' };
                                         let text = msg.message_text || '';
                                         Object.entries(sampleData).forEach(([k, v]) => { text = text.replace(new RegExp(`%${k}%`, 'g'), v); });
-                                        return text;
-                                      })() : msg.message_text}
+                                        return wrapAdText(text);
+                                      })() : wrapAdText(msg.message_text || '')}
                                     </div>
                                   </div>
                                   )}
                                 </div>
                                 {/* 하단 바이트 */}
                                 <div className="px-3 py-2 border-t bg-gray-50 text-center shrink-0">
-                                  <span className={`text-[10px] ${editingAiMsg === idx ? 'text-purple-600 font-medium' : 'text-gray-400'}`}>{msg.byte_count || calculateBytes(msg.message_text || '')} / {selectedChannel === 'SMS' ? 90 : selectedChannel === 'KAKAO' ? '4000자' : 2000} bytes</span>
+                                <span className={`text-[10px] ${editingAiMsg === idx ? 'text-purple-600 font-medium' : 'text-gray-400'}`}>{calculateBytes(wrapAdText(msg.message_text || ''))} / {selectedChannel === 'SMS' ? 90 : selectedChannel === 'KAKAO' ? '4000자' : 2000} bytes</span>
                                 </div>
                               </div>
                             </div>
@@ -2776,7 +2788,7 @@ const campaignData = {
                           { '이름': '이영희', '포인트': '8,200', '등급': 'GOLD', '매장명': '홍대점', '지역': '경기', '구매금액': '180,000', '구매횟수': '5', '평균주문금액': '36,000', 'LTV점수': '62' },
                           { '이름': '박지현', '포인트': '25,800', '등급': 'VIP', '매장명': '부산센텀점', '지역': '부산', '구매금액': '520,000', '구매횟수': '12', '평균주문금액': '43,300', 'LTV점수': '91' },
                         ].map((sample, idx) => {
-                          let msg = aiResult?.messages?.[selectedAiMsgIdx]?.message_text || '';
+                          let msg = wrapAdText(aiResult?.messages?.[selectedAiMsgIdx]?.message_text || '');
                           Object.entries(sample).forEach(([varName, value]) => {
                             msg = msg.replace(new RegExp(`%${varName}%`, 'g'), value);
                           });
@@ -2793,7 +2805,7 @@ const campaignData = {
                     </div>
                   ) : (
                     <div className="bg-gray-100 rounded-lg p-4 whitespace-pre-wrap text-sm">
-                      {aiResult?.messages?.[selectedAiMsgIdx]?.message_text || '메시지 없음'}
+                      {wrapAdText(aiResult?.messages?.[selectedAiMsgIdx]?.message_text || '') || '메시지 없음'}
                     </div>
                   )}
                 </div>
@@ -2821,7 +2833,7 @@ const campaignData = {
                             <div className="flex gap-2 mt-1">
                               <div className="w-7 h-7 rounded-full bg-purple-100 flex items-center justify-center shrink-0 text-xs">📱</div>
                               <div className="bg-white rounded-2xl rounded-tl-sm p-3 shadow-sm border border-gray-100 text-[13px] leading-[1.7] whitespace-pre-wrap text-gray-700 max-w-[95%]">
-                                {aiResult?.messages?.[selectedAiMsgIdx]?.message_text || '메시지 없음'}
+                              {wrapAdText(aiResult?.messages?.[selectedAiMsgIdx]?.message_text || '') || '메시지 없음'}
                               </div>
                             </div>
                           </div>
@@ -4109,7 +4121,7 @@ const campaignData = {
                               setScheduledRecipients(data.recipients || []);
                               setScheduledRecipientsTotal(data.total || 0);
                               setScheduledHasMore(data.hasMore || false);
-                              setEditScheduleTime(c.scheduled_at ? new Date(c.scheduled_at).toISOString().slice(0, 16) : '');
+                              setEditScheduleTime(c.scheduled_at ? (() => { const d = new Date(c.scheduled_at); const pad = (n: number) => n.toString().padStart(2, '0'); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`; })() : '');
                             }
                           } catch (err) {
                             console.error(err);
@@ -4158,7 +4170,9 @@ const campaignData = {
                             >예약취소</button>
                             <button
                               onClick={() => {
-                                setEditMessage(selectedScheduled?.message_template || selectedScheduled?.message_content || '');
+                                const rawMsg = selectedScheduled?.message_template || selectedScheduled?.message_content || '';
+                                const strippedMsg = rawMsg.replace(/^\(광고\)\s*/g, '').replace(/\n무료거부\d+$/g, '').replace(/\n무료수신거부\s*[\d\-]+$/g, '').trim();
+                                setEditMessage(strippedMsg);
                                 setEditSubject(selectedScheduled?.message_subject || selectedScheduled?.subject || '');
                                 setMessageEditModal(true);
                               }}

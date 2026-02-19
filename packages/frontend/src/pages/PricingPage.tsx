@@ -34,6 +34,7 @@ export default function PricingPage() {
   const [requestMessage, setRequestMessage] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [successModalType, setSuccessModalType] = useState<'plan' | 'inquiry'>('plan');
   const [showContactModal, setShowContactModal] = useState(false);
   const [inquiryForm, setInquiryForm] = useState({
     companyName: '', contactName: '', phone: '', email: '', planInterest: '', subject: '', message: '',
@@ -127,6 +128,7 @@ export default function PricingPage() {
       });
       if (res.ok) {
         setShowContactModal(false);
+        setSuccessModalType('inquiry');
         setShowSuccessModal(true);
       } else {
         const data = await res.json();
@@ -159,6 +161,7 @@ export default function PricingPage() {
       
       if (res.ok) {
         setShowRequestModal(false);
+        setSuccessModalType('plan');
         setShowSuccessModal(true);
         setHasPending(true);
         setPendingPlanName(selectedPlan.plan_name);
@@ -509,9 +512,9 @@ export default function PricingPage() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                 </svg>
               </div>
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">신청 완료!</h3>
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">{successModalType === 'inquiry' ? '문의 접수 완료!' : '신청 완료!'}</h3>
               <p className="text-sm text-gray-600">
-                플랜 변경 신청이 접수되었습니다.<br/>
+                {successModalType === 'inquiry' ? '문의가 정상적으로 접수되었습니다.' : '플랜 변경 신청이 접수되었습니다.'}<br/>
                 담당자가 곧 연락드리겠습니다.
               </p>
             </div>

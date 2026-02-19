@@ -227,8 +227,15 @@ if (smsOptIn === 'true') {
       // 전화번호 검색: 하이픈 제거 후 매칭
       const cleanSearch = searchStr.replace(/-/g, '');
       if (/^\d+$/.test(cleanSearch)) {
-        whereClause += ` AND REPLACE(phone, '-', '') LIKE $${paramIndex}`;
-        params.push(`%${cleanSearch}%`);
+        if (cleanSearch.length === 4) {
+          // 4자리: 가운데 4자리 또는 뒷 4자리 매칭
+          whereClause += ` AND (REPLACE(phone, '-', '') LIKE $${paramIndex} OR REPLACE(phone, '-', '') LIKE $${paramIndex + 1})`;
+          params.push(`___${cleanSearch}____`, `_______${cleanSearch}`);
+          paramIndex++;
+        } else {
+          whereClause += ` AND REPLACE(phone, '-', '') LIKE $${paramIndex}`;
+          params.push(`%${cleanSearch}%`);
+        }
       } else {
         whereClause += ` AND (name ILIKE $${paramIndex} OR phone ILIKE $${paramIndex})`;
         params.push(`%${searchStr}%`);
