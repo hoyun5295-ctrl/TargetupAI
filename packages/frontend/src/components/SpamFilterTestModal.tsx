@@ -14,6 +14,7 @@ interface TestResult {
   message_type: string;
   received: boolean;
   received_at: string | null;
+  result: 'received' | 'blocked' | 'timeout' | 'failed' | null;
 }
 
 export default function SpamFilterTestModal({
@@ -27,7 +28,7 @@ export default function SpamFilterTestModal({
   const [status, setStatus] = useState<'ready' | 'testing' | 'completed'>('ready');
   const [testId, setTestId] = useState<string | null>(null);
   const [results, setResults] = useState<TestResult[]>([]);
-  const [countdown, setCountdown] = useState(60);
+  const [countdown, setCountdown] = useState(180);
   const [error, setError] = useState('');
   const [totalCount, setTotalCount] = useState(0);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -43,7 +44,7 @@ export default function SpamFilterTestModal({
   const startTest = async () => {
     if (!callbackNumber) { setError('발신번호가 선택되지 않았습니다.'); return; }
     if (!messageContentSms && !messageContentLms) { setError('메시지를 입력해주세요.'); return; }
-    setStatus('testing'); setError(''); setCountdown(60);
+    setStatus('testing'); setError(''); setCountdown(180);
     try {
       const res = await fetch('/api/spam-filter/test', {
         method: 'POST',
@@ -87,22 +88,34 @@ export default function SpamFilterTestModal({
 
   const carrierLabel = (c: string) => c === 'LGU' ? 'LG U+' : c;
 
-  const statusIcon = (result: TestResult) => {
+  const statusIcon = (r: TestResult) => {
     if (status === 'ready') return <span className="text-gray-400">—</span>;
-    if (result.received) return <span className="text-green-500 font-bold text-lg">✅</span>;
-    if (status === 'completed') return <span className="text-red-500 font-bold text-lg">❌</span>;
+    if (r.received) return <span className="text-green-500 font-bold text-lg">✅</span>;
+    if (status === 'completed') {
+      if (r.result === 'blocked') return <span className="text-red-500 font-bold text-lg">🚫</span>;
+      if (r.result === 'failed') return <span className="text-red-500 font-bold text-lg">❌</span>;
+      if (r.result === 'timeout') return <span className="text-yellow-500 font-bold text-lg">⚠️</span>;
+      return <span className="text-gray-400 font-bold text-lg">❓</span>;
+    }
     return <span className="animate-pulse text-yellow-500 text-lg">⏳</span>;
   };
 
-  const statusText = (result: TestResult) => {
+  const statusText = (r: TestResult) => {
     if (status === 'ready') return '대기';
-    if (result.received) return '수신 완료';
-    if (status === 'completed') return '스팸 차단';
+    if (r.received) return '수신 완료';
+    if (status === 'completed') {
+      if (r.result === 'blocked') return '스팸 차단';
+      if (r.result === 'failed') return '발송 실패';
+      if (r.result === 'timeout') return '시간 초과';
+      return '판정 중';
+    }
     return '확인 중...';
   };
 
   const receivedCount = results.filter(r => r.received).length;
-  const blockedCount = status === 'completed' ? results.filter(r => !r.received).length : 0;
+  const blockedCount = status === 'completed' ? results.filter(r => r.result === 'blocked').length : 0;
+  const timeoutCount = status === 'completed' ? results.filter(r => r.result === 'timeout').length : 0;
+  const failedCount = status === 'completed' ? results.filter(r => r.result === 'failed').length : 0;
   const previewMessage = messageContentSms || messageContentLms || '';
 
   const formatPhoneNumber = (num: string) => {
@@ -161,15 +174,22 @@ export default function SpamFilterTestModal({
 
             <div className="flex-1 min-w-0">
               {status !== 'ready' && (
-                <div className={`mb-4 p-3 rounded-lg text-sm ${status === 'completed' ? blockedCount > 0 ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700' : 'bg-yellow-50 text-yellow-700'}`}>
+                <div className={`mb-4 p-3 rounded-lg text-sm ${status === 'completed' ? blockedCount > 0 ? 'bg-red-50 text-red-700' : timeoutCount > 0 || failedCount > 0 ? 'bg-yellow-50 text-yellow-700' : 'bg-green-50 text-green-700' : 'bg-yellow-50 text-yellow-700'}`}>
                   {status === 'testing' && (
                     <div className="flex items-center gap-2">
                       <div className="animate-spin w-4 h-4 border-2 border-yellow-500 border-t-transparent rounded-full" />
                       <span>테스트폰 수신 확인 중... ({receivedCount}/{results.length})</span>
                     </div>
                   )}
-                  {status === 'completed' && blockedCount === 0 && <div>✅ 전체 수신 성공! ({receivedCount}/{results.length}건)</div>}
-                  {status === 'completed' && blockedCount > 0 && <div>⚠️ {blockedCount}건 스팸 차단 감지 (수신 {receivedCount}/{results.length}건)</div>}
+                  {status === 'completed' && blockedCount === 0 && timeoutCount === 0 && failedCount === 0 && <div>✅ 전체 수신 성공! ({receivedCount}/{results.length}건)</div>}
+                  {status === 'completed' && (blockedCount > 0 || timeoutCount > 0 || failedCount > 0) && (
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                      {blockedCount > 0 && <span>🚫 스팸차단 {blockedCount}건</span>}
+                      {timeoutCount > 0 && <span>⚠️ 시간초과 {timeoutCount}건</span>}
+                      {failedCount > 0 && <span>❌ 발송실패 {failedCount}건</span>}
+                      <span className="text-gray-500">(수신 {receivedCount}/{results.length}건)</span>
+                    </div>
+                  )}
                 </div>
               )}
 

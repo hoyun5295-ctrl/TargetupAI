@@ -11,7 +11,7 @@ const SPAM_CHECK_NUMBER = '08071906700';
 const SPAM_CHECK_NUMBER_FORMATTED = '080-719-6700'; // LMS용
 
 // 테스트 타임아웃 (3분)
-const TEST_TIMEOUT_MS = 60 * 1000;
+const TEST_TIMEOUT_MS = 180 * 1000;
 
 // 쿨다운 (60초)
 const COOLDOWN_SECONDS = 60;
@@ -119,9 +119,57 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
       }
     }
 
-    // 6) 타임아웃 스케줄 (3분 후 미수신 건 timeout 처리)
+    // 6) 타임아웃 스케줄 (3분 후 미수신 건 QTmsg 결과 기반 판정)
     setTimeout(async () => {
       try {
+        // 아직 active인지 확인
+        const activeCheck2 = await query(
+          `SELECT id FROM spam_filter_tests WHERE id = $1 AND status = 'active'`,
+          [testId]
+        );
+        if (activeCheck2.rows.length === 0) return; // 이미 완료됨
+
+        // 미수신 건 조회
+        const unreceived = await query(
+          `SELECT id, phone, message_type FROM spam_filter_test_results
+           WHERE test_id = $1 AND received = false`,
+          [testId]
+        );
+
+        if (unreceived.rows.length > 0) {
+          // QTmsg 결과 조회 (MySQL)
+          const testTable = getTestSmsTable();
+          const mqRows: any[] = await mysqlQuery(
+            `SELECT dest_no, msg_type, status_code FROM ${testTable} WHERE app_etc1 = ?`,
+            [testId]
+          );
+
+          for (const row of unreceived.rows) {
+            const mType = row.message_type === 'SMS' ? 'S' : 'L';
+            const mqMatch = (mqRows as any[]).find(
+              (m: any) => m.dest_no === row.phone && m.msg_type === mType
+            );
+
+            let result = 'timeout'; // 기본: 시간초과
+            if (mqMatch) {
+              const sc = Number(mqMatch.status_code);
+              if (sc === 6 || sc === 1000) {
+                result = 'blocked'; // 이통사 성공 + 미수신 = 스팸차단
+              } else if (sc === 100) {
+                result = 'timeout'; // 아직 대기중
+              } else {
+                result = 'failed'; // 이통사 실패
+              }
+            }
+
+            await query(
+              `UPDATE spam_filter_test_results SET result = $1 WHERE id = $2`,
+              [result, row.id]
+            );
+          }
+        }
+
+        // 테스트 완료 처리
         await query(
           `UPDATE spam_filter_tests SET status = 'completed', completed_at = NOW()
            WHERE id = $1 AND status = 'active'`,
@@ -129,6 +177,13 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
         );
       } catch (err) {
         console.error('[SpamFilter] 타임아웃 처리 오류:', err);
+        try {
+          await query(
+            `UPDATE spam_filter_tests SET status = 'completed', completed_at = NOW()
+             WHERE id = $1 AND status = 'active'`,
+            [testId]
+          );
+        } catch (e) { /* ignore */ }
       }
     }, TEST_TIMEOUT_MS);
 
@@ -202,7 +257,7 @@ router.post('/report', async (req: Request, res: Response) => {
     // 6) 결과 업데이트
     const updateResult = await query(
       `UPDATE spam_filter_test_results
-       SET received = true, received_at = NOW()
+       SET received = true, received_at = NOW(), result = 'received'
        WHERE test_id = $1 AND carrier = $2 AND message_type = $3 AND received = false
        RETURNING id`,
       [testId, device.carrier, detectedType]
@@ -298,7 +353,7 @@ router.get('/tests/:id', authenticate, async (req: Request, res: Response) => {
     }
 
     const results = await query(
-      `SELECT carrier, message_type, received, received_at
+      `SELECT carrier, message_type, received, received_at, result
        FROM spam_filter_test_results
        WHERE test_id = $1
        ORDER BY carrier, message_type`,
