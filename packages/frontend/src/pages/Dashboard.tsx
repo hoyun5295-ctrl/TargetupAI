@@ -3945,13 +3945,13 @@ const campaignData = {
               {(uploadProgress.insertCount > 0 || uploadProgress.duplicateCount > 0 || uploadProgress.errorCount > 0) && (
                 <div className="flex gap-4 text-sm">
                   {uploadProgress.insertCount > 0 && (
-                    <span className="text-blue-600">✅ 신규 <strong>{uploadProgress.insertCount.toLocaleString()}</strong>건</span>
+                    <span className="text-blue-600">✅ 신규 <strong>{(uploadProgress.insertCount || 0).toLocaleString()}</strong>건</span>
                   )}
                   {uploadProgress.duplicateCount > 0 && (
-                    <span className="text-green-600">🔄 업데이트 <strong>{uploadProgress.duplicateCount.toLocaleString()}</strong>건</span>
+                    <span className="text-green-600">🔄 업데이트 <strong>{(uploadProgress.duplicateCount || 0).toLocaleString()}</strong>건</span>
                   )}
                   {uploadProgress.errorCount > 0 && (
-                    <span className="text-orange-500">⚠️ 오류 <strong>{uploadProgress.errorCount.toLocaleString()}</strong>건</span>
+                    <span className="text-orange-500">⚠️ 오류 <strong>{(uploadProgress.errorCount || 0).toLocaleString()}</strong>건</span>
                   )}
                 </div>
               )}
