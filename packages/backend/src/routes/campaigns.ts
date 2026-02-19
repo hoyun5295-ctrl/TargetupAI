@@ -3,6 +3,7 @@ import { query, mysqlQuery } from '../config/database';
 import { authenticate } from '../middlewares/auth';
 import { extractVarCatalog, validatePersonalizationVars, VarCatalogEntry } from '../services/ai';
 import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getGenderVariants, getGradeVariants, getRegionVariants } from '../utils/normalize';
+import { logTrainingData, updateTrainingMetrics, getSourceRef } from '../utils/training-logger';
 
 // 한국시간 문자열 변환 (MySQL datetime 형식)
 const toKoreaTimeStr = (date: Date) => {
@@ -997,9 +998,27 @@ await query(
     target_count = $3,
     sent_at = CURRENT_TIMESTAMP
    WHERE id = $4`,
-  [isScheduled ? 'scheduled' : 'sending', filteredCustomers.length, filteredCustomers.length, id]
-);
-    return res.json({
+   [isScheduled ? 'scheduled' : 'sending', filteredCustomers.length, filteredCustomers.length, id]
+  );
+  
+      // ★ AI 학습 데이터 적재 (비동기, 실패해도 발송에 영향 없음)
+      const trainingCompanyInfo = await query('SELECT name, brand_tone FROM companies WHERE id = $1', [companyId]);
+      logTrainingData({
+        campaignRunId: campaignRun.id,
+        companyId,
+        companyName: trainingCompanyInfo.rows[0]?.name,
+        brandTone: trainingCompanyInfo.rows[0]?.brand_tone,
+        userPrompt: campaign.user_prompt,
+        targetFilter: campaign.target_filter,
+        targetCount: filteredCustomers.length,
+        messageType: campaign.message_type,
+        isAd: campaign.is_ad || false,
+        finalMessage: campaign.message_content || '',
+        finalSource: (campaign.message_template && campaign.message_template === campaign.message_content) ? 'selected_as_is' : 'edited',
+        sendAt: campaign.scheduled_at ? new Date(campaign.scheduled_at) : new Date(),
+      });
+  
+      return res.json({
       message: `${filteredCustomers.length}건 발송이 시작되었습니다.${callbackSkippedCount > 0 ? ` (회신번호 없는 ${callbackSkippedCount}명 제외)` : ''}`,
       sentCount: filteredCustomers.length,
       callbackSkippedCount,
@@ -1405,6 +1424,14 @@ router.post('/sync-results', async (req: Request, res: Response) => {
           }
         }
 
+        // ★ AI 학습 성과 데이터 업데이트
+        updateTrainingMetrics({
+          sourceRef: getSourceRef(run.id),
+          sentCount: successCount + failCount,
+          successCount,
+          failCount,
+        });
+
         syncCount++;
       }
     }
@@ -1451,6 +1478,14 @@ router.post('/sync-results', async (req: Request, res: Response) => {
             await prepaidRefund(campInfo.rows[0].company_id, failCount, campInfo.rows[0].message_type, campaign.id, '발송 실패 환불');
           }
         }
+
+        // ★ AI 학습 성과 데이터 업데이트 (직접발송)
+        updateTrainingMetrics({
+          sourceRef: getSourceRef(campaign.id),
+          sentCount: successCount + failCount,
+          successCount,
+          failCount,
+        });
 
         syncCount++;
       }
@@ -1722,6 +1757,21 @@ router.post('/direct-send', async (req: Request, res: Response) => {
         [campaignId]
       );
     }
+
+    // ★ AI 학습 데이터 적재 — 직접발송 (비동기, 실패해도 발송에 영향 없음)
+    const directCompanyInfo = await query('SELECT name, brand_tone FROM companies WHERE id = $1', [companyId]);
+    logTrainingData({
+      campaignRunId: campaignId,
+      companyId,
+      companyName: directCompanyInfo.rows[0]?.name,
+      brandTone: directCompanyInfo.rows[0]?.brand_tone,
+      targetCount: filteredRecipients.length,
+      messageType: msgType,
+      isAd: adEnabled || false,
+      finalMessage: message || '',
+      finalSource: 'manual',
+      sendAt: scheduled && scheduledAt ? new Date(scheduledAt) : new Date(),
+    });
 
     res.json({
       success: true,
