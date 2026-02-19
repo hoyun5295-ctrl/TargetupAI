@@ -1669,6 +1669,7 @@ const campaignData = {
       eventEndDate: eventEndDate,
       callback: _useIndividualCallback ? null : _selectedCallback,
       useIndividualCallback: _useIndividualCallback,
+      subject: selectedMsg.subject || '',
       mmsImagePaths: mmsUploadedImages.map(img => img.serverPath),
     };
 
@@ -2609,10 +2610,29 @@ const campaignData = {
                                     <span className="text-[11px] font-bold text-purple-600">{msg.variant_id}. {msg.variant_name}</span>
                                   </div>
                                 </div>
+                                {/* LMS/MMS 제목 */}
+                                {(selectedChannel === 'LMS' || selectedChannel === 'MMS') && msg.subject && (
+                                  <div className="px-4 py-1.5 bg-orange-50 border-b border-orange-200 shrink-0">
+                                    <span className="text-[11px] font-bold text-orange-700">{msg.subject}</span>
+                                  </div>
+                                )}
                                 {/* 메시지 영역 */}
                                 <div className="flex-1 overflow-y-auto p-3 bg-gradient-to-b from-purple-50/30 to-white">
                                   {editingAiMsg === idx ? (
                                     <div className="h-full flex flex-col gap-2">
+                                      {(selectedChannel === 'LMS' || selectedChannel === 'MMS') && (
+                                        <input
+                                          type="text"
+                                          value={msg.subject || ''}
+                                          onChange={(e) => {
+                                            const updated = [...aiResult.messages];
+                                            updated[idx] = { ...updated[idx], subject: e.target.value };
+                                            setAiResult({ ...aiResult, messages: updated });
+                                          }}
+                                          placeholder="LMS 제목"
+                                          className="w-full text-[12px] px-2 py-1.5 border border-orange-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-400"
+                                        />
+                                      )}
                                       <textarea
                                         value={msg.message_text}
                                         onChange={(e) => {

@@ -277,6 +277,8 @@ const BRAND_SYSTEM_PROMPT = `당신은 마케팅 문자 메시지 전문가입�
 - 예시: [브랜드]봄세일 20%할인! 2/4~6 매장방문▶
 
 ### LMS (2000바이트 이하, 한글 약 1000자)  
+- subject(제목) 필수! 40바이트 이내, 핵심 키워드로 짧고 임팩트 있게
+- 제목 예시: "[브랜드명] 봄 세일 안내", "VIP 고객님 특별 혜택"
 - 줄바꿈과 특수문자로 가독성 높게
 - 구성: 인사 → 혜택상세 → 기간/조건 → CTA
 - 예시:
@@ -341,6 +343,8 @@ SMS/LMS/MMS: 이모지(😀🎁🔥💕 등)는 SMS에서 깨지므로 절대 �
       "variant_id": "A",
       "variant_name": "감성형",
       "concept": "따뜻하고 친근한 톤",
+      "subject": "LMS/MMS일 때 제목 (SMS는 빈 문자열)",
+      "subject": "LMS/MMS일 때 제목 (SMS는 빈 문자열)",
       "message_text": "채널에 맞는 메시지 (광고표기/수신거부 포함 금지!)",
       "byte_count": 바이트수,
       "score": 점수
@@ -349,6 +353,7 @@ SMS/LMS/MMS: 이모지(😀🎁🔥💕 등)는 SMS에서 깨지므로 절대 �
       "variant_id": "B",
       "variant_name": "혜택강조형",
       "concept": "할인/혜택을 직접적으로 강조",
+      "subject": "LMS/MMS일 때 제목 (SMS는 빈 문자열)",
       "message_text": "채널에 맞는 메시지 (광고표기/수신거부 포함 금지!)",
       "byte_count": 바이트수,
       "score": 점수
@@ -357,6 +362,7 @@ SMS/LMS/MMS: 이모지(😀🎁🔥💕 등)는 SMS에서 깨지므로 절대 �
       "variant_id": "C",
       "variant_name": "MZ감성형",
       "concept": "트렌디하고 캐주얼한 톤",
+      "subject": "LMS/MMS일 때 제목 (SMS는 빈 문자열)",
       "message_text": "채널에 맞는 메시지 (광고표기/수신거부 포함 금지!)",
       "byte_count": 바이트수,
       "score": 점수
