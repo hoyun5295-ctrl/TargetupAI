@@ -1106,6 +1106,73 @@ function buildFilterQuery(filter: any, companyId: string) {
     }
   });
 
+  // store_code (브랜드)
+  const storeCode = getValue(filter.store_code);
+  if (storeCode) {
+    const storeOp = filter.store_code?.operator || 'eq';
+    if (storeOp === 'in' && Array.isArray(storeCode)) {
+      where += ` AND c.store_code = ANY($${paramIndex++}::text[])`;
+      params.push(storeCode);
+    } else {
+      where += ` AND c.store_code = $${paramIndex++}`;
+      params.push(storeCode);
+    }
+  }
+
+  // store_name (매장명)
+  const storeName = getValue(filter.store_name);
+  if (storeName) {
+    const storeNameOp = filter.store_name?.operator || 'eq';
+    if (storeNameOp === 'in' && Array.isArray(storeName)) {
+      where += ` AND c.store_name = ANY($${paramIndex++}::text[])`;
+      params.push(storeName);
+    } else {
+      where += ` AND c.store_name = $${paramIndex++}`;
+      params.push(storeName);
+    }
+  }
+
+  // total_purchase_amount (총구매금액)
+  const purchaseAmount = getValue(filter.total_purchase_amount);
+  if (purchaseAmount !== null && purchaseAmount !== undefined) {
+    const purchaseOp = filter.total_purchase_amount?.operator || 'gte';
+    if (purchaseOp === 'gte') {
+      where += ` AND c.total_purchase_amount >= $${paramIndex++}`;
+      params.push(Number(purchaseAmount));
+    } else if (purchaseOp === 'lte') {
+      where += ` AND c.total_purchase_amount <= $${paramIndex++}`;
+      params.push(Number(purchaseAmount));
+    } else if (purchaseOp === 'between' && Array.isArray(purchaseAmount)) {
+      where += ` AND c.total_purchase_amount BETWEEN $${paramIndex++} AND $${paramIndex++}`;
+      params.push(Number(purchaseAmount[0]), Number(purchaseAmount[1]));
+    }
+  }
+
+  // recent_purchase_date (최근구매일)
+  const recentDate = getValue(filter.recent_purchase_date);
+  if (recentDate) {
+    const dateOp = filter.recent_purchase_date?.operator || 'days_within';
+    if (dateOp === 'days_within') {
+      where += ` AND c.recent_purchase_date >= NOW() - INTERVAL '${parseInt(recentDate)} days'`;
+    }
+  }
+
+  // points (포인트)
+  const points = getValue(filter.points);
+  if (points !== null && points !== undefined) {
+    const pointsOp = filter.points?.operator || 'gte';
+    if (pointsOp === 'gte') {
+      where += ` AND c.points >= $${paramIndex++}`;
+      params.push(Number(points));
+    } else if (pointsOp === 'lte') {
+      where += ` AND c.points <= $${paramIndex++}`;
+      params.push(Number(points));
+    } else if (pointsOp === 'between' && Array.isArray(points)) {
+      where += ` AND c.points BETWEEN $${paramIndex++} AND $${paramIndex++}`;
+      params.push(Number(points[0]), Number(points[1]));
+    }
+  }
+
   return { where, params };
 }
 

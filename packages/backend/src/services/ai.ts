@@ -55,9 +55,10 @@ export const DEFAULT_FIELD_MAPPINGS: Record<string, VarCatalogEntry> = {
   '구매횟수': { column: 'purchase_count', type: 'number', description: '누적 구매 횟수', sample: 8 },
   '평균주문금액': { column: 'avg_order_value', type: 'number', description: '건당 평균 주문 금액', sample: 43750 },
   'LTV점수': { column: 'ltv_score', type: 'number', description: '고객 생애 가치 점수 (0~100)', sample: 85 },
+  '브랜드': { column: 'store_code', type: 'string', description: '소속 브랜드 코드', sample: 'NARS' },
 };
 
-export const DEFAULT_AVAILABLE_VARS: string[] = ['이름', '포인트', '등급', '매장명', '지역', '구매금액'];
+export const DEFAULT_AVAILABLE_VARS: string[] = ['이름', '포인트', '등급', '매장명', '브랜드', '지역', '구매금액'];
 
 // ============================================================
 // 유틸리티 함수
@@ -226,6 +227,7 @@ function detectPersonalizationVars(
     '포인트': ['포인트', '적립금', '마일리지', '리워드'],
     '등급': ['등급', '멤버십', '회원등급', 'VIP', 'GOLD', 'SILVER', '티어'],
     '매장명': ['매장', '지점', '스토어', '주이용매장'],
+    '브랜드': ['브랜드', '브랜드별', '브랜드명', '브랜드코드'],
     '지역': ['지역', '거주'],
     '구매금액': ['구매금액', '구매액', '총구매', '누적구매'],
     '구매횟수': ['구매횟수', '구매건수', '주문횟수'],
@@ -626,6 +628,8 @@ ${objective}
 - points: 포인트 (gte, lte, between)
 - total_purchase_amount: 총구매금액
 - recent_purchase_date: 최근구매일
+- store_code: 브랜드코드 (eq/in 연산자, 예: "NARS", "CPB")
+- store_name: 매장명 (eq/in 연산자, 예: "강남점", "홍대점")
 ${customKeys.map((k: string) => `- custom_fields.${k}: ${k} 필터`).join('\n')}
 
 ⚠️ 주의: region은 custom_fields.region이 아닌 그냥 "region"으로 사용!

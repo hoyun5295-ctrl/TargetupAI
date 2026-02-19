@@ -64,6 +64,14 @@ function buildDynamicFilter(filters: any, startIndex: number) {
         whereClause += ` AND id IN (SELECT customer_id FROM customer_stores WHERE store_code = ANY($${paramIndex++}::text[]))`;
         params.push(value);
       }
+    } else if (field === 'store_name') {
+      if (operator === 'eq') {
+        whereClause += ` AND store_name = $${paramIndex++}`;
+        params.push(value);
+      } else if (operator === 'in' && Array.isArray(value)) {
+        whereClause += ` AND store_name = ANY($${paramIndex++}::text[])`;
+        params.push(value);
+      }
     } else if (numericFields.includes(field)) {
       if (operator === 'eq') {
         whereClause += ` AND ${field} = $${paramIndex++}`;
