@@ -130,12 +130,33 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
         );
 
         if (unreceived.rows.length > 0) {
-          // QTmsg 결과 조회 (MySQL)
+          // QTmsg 결과 조회 (MySQL) — 현재 큐 + 월별 로그 테이블 양쪽 조회
           const testTable = getTestSmsTable();
-          const mqRows = await mysqlQuery(
+          const now = new Date();
+          const yyyymm = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`;
+          const logTable = `${testTable}_${yyyymm}`;
+
+          let mqRows: any[] = [];
+          // 1) 현재 큐 테이블
+          const mqCurrent = await mysqlQuery(
             `SELECT dest_no, msg_type, status_code FROM ${testTable} WHERE app_etc1 = ?`,
             [testId]
           ) as any[];
+          if (mqCurrent && mqCurrent.length > 0) {
+            mqRows = mqCurrent;
+          }
+          // 2) 월별 로그 테이블 (Agent가 이동 완료한 경우)
+          try {
+            const mqLog = await mysqlQuery(
+              `SELECT dest_no, msg_type, status_code FROM ${logTable} WHERE app_etc1 = ?`,
+              [testId]
+            ) as any[];
+            if (mqLog && mqLog.length > 0) {
+              mqRows = [...mqRows, ...mqLog];
+            }
+          } catch (e) {
+            // 로그 테이블 미존재 시 무시
+          }
 
           for (const row of unreceived.rows) {
             const mType = row.message_type === 'SMS' ? 'S' : 'L';
@@ -223,19 +244,39 @@ router.post('/report', async (req: Request, res: Response) => {
     }
     const device = deviceResult.rows[0];
 
-    // 3) 발신번호로 active 테스트 매칭 (080 체크 제거 → 발신번호 기반 직접 매칭)
+    // 3) 발신번호로 active 테스트 후보 조회 → 복수 건이면 메시지 내용으로 확정
     const senderClean = senderNumber.replace(/\D/g, '');
-    const testResult = await query(
-      `SELECT id FROM spam_filter_tests
+    const candidates = await query(
+      `SELECT id, message_content_sms, message_content_lms FROM spam_filter_tests
        WHERE status = 'active'
          AND REPLACE(callback_number, '-', '') = $1
-       ORDER BY created_at DESC LIMIT 1`,
+       ORDER BY created_at DESC`,
       [senderClean]
     );
-    if (testResult.rows.length === 0) {
+    if (candidates.rows.length === 0) {
       return res.json({ success: true, matched: false, message: '매칭되는 테스트가 없습니다.' });
     }
-    const testId = testResult.rows[0].id;
+
+    let testId: string;
+    if (candidates.rows.length === 1) {
+      // 단일 건 → 바로 매칭
+      testId = candidates.rows[0].id;
+    } else {
+      // 복수 건 → 메시지 내용(공백/줄바꿈 제거)으로 확정
+      const normalize = (s: string) => (s || '').replace(/[\s\r\n]+/g, '');
+      const msgNorm = normalize(messageContent || '');
+      const matched = candidates.rows.find((row: any) =>
+        normalize(row.message_content_sms) === msgNorm ||
+        normalize(row.message_content_lms) === msgNorm
+      );
+      if (!matched) {
+        // 내용 매칭 실패 → 가장 최근 건에 매칭 (fallback)
+        testId = candidates.rows[0].id;
+        console.log(`[SpamFilter] 복수 active 테스트 중 내용 매칭 실패 → 최신 건 ${testId}에 fallback`);
+      } else {
+        testId = matched.id;
+      }
+    }
 
     // 4) SMS/LMS 타입: 앱이 보내는 messageType 직접 사용
     const detectedType = (messageType === 'LMS') ? 'LMS' : 'SMS';

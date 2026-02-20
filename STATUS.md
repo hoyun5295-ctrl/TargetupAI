@@ -1281,6 +1281,12 @@ POST /api/sync/purchases   ← 구매내역 벌크 INSERT (배치 최대 1000건
 - [ ] PDF 승인 기능 (이메일 링크)
 - [ ] 고객사 관리자 기능 세분화 (슈퍼관리자 기능 축소 버전)
 - [ ] 추천 템플릿 8개 → 실용적 활용 예시로 개선 (직원 의견 수렴 후)
+**인비토AI (메시징 특화 모델)**
+- [x] ai_training_logs 테이블 설계 (Claude+GPT+Gemini 3자 토론 확정)
+- [x] training-logger.ts 유틸 (마스킹, 메타계산, 적재, 성과 업데이트)
+- [x] campaigns.ts 연결 (AI발송/직접발송/결과동기화)
+- [ ] 이용약관에 비식별 데이터 활용 조항 추가
+- [ ] 데이터 충분히 축적 후 모델 학습 파이프라인 설계
 
 ### ✅ 완료 마일스톤 요약
 
@@ -1325,3 +1331,4 @@ POST /api/sync/purchases   ← 구매내역 벌크 INSERT (배치 최대 1000건
 | 02-19 | 브랜드/매장 필터 전체 통합 (AI프롬프트, buildFilterQuery, buildDynamicFilter, 직접타겟UI) |
 | 02-19 | 에러 수정 일괄 (results.ts 타임스탬프, admin.ts MySQL LIMIT, spam_filter NOT NULL) |
 | 02-19 | 직원 버그리포트 5차: 테스트접두사 제거, 광고미리보기 통합(wrapAdText), KST변환 2건, 문의모달 분기, 제목누락, 전화검색 4자리, 카드넘침, AI구분선금지 |
+| 02-19 | AI 학습 데이터 수집 시스템 (ai_training_logs DDL + training-logger.ts + campaigns 연결 5곳) |
