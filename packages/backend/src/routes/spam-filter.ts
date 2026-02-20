@@ -112,94 +112,132 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
       }
     }
 
-    // 6) 타임아웃 스케줄 (3분 후 미수신 건 QTmsg 결과 기반 판정)
-    setTimeout(async () => {
+    // 6) 15초 폴링 — QTmsg 성공인데 앱 미수신이면 즉시 blocked 처리
+    const pollInterval = setInterval(async () => {
       try {
         // 아직 active인지 확인
         const activeCheck2 = await query(
-          `SELECT id FROM spam_filter_tests WHERE id = $1 AND status = 'active'`,
+          `SELECT id, created_at FROM spam_filter_tests WHERE id = $1 AND status = 'active'`,
           [testId]
         );
-        if (activeCheck2.rows.length === 0) return; // 이미 완료됨
+        if (activeCheck2.rows.length === 0) {
+          clearInterval(pollInterval);
+          return;
+        }
 
         // 미수신 건 조회
         const unreceived = await query(
           `SELECT id, phone, message_type FROM spam_filter_test_results
-           WHERE test_id = $1 AND received = false`,
+           WHERE test_id = $1 AND received = false AND result IS NULL`,
           [testId]
         );
 
-        if (unreceived.rows.length > 0) {
-          // QTmsg 결과 조회 (MySQL) — 현재 큐 + 월별 로그 테이블 양쪽 조회
-          const testTable = getTestSmsTable();
-          const now = new Date();
-          const yyyymm = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`;
-          const logTable = `${testTable}_${yyyymm}`;
-
-          let mqRows: any[] = [];
-          // 1) 현재 큐 테이블
-          const mqCurrent = await mysqlQuery(
-            `SELECT dest_no, msg_type, status_code FROM ${testTable} WHERE app_etc1 = ?`,
-            [testId]
-          ) as any[];
-          if (mqCurrent && mqCurrent.length > 0) {
-            mqRows = mqCurrent;
-          }
-          // 2) 월별 로그 테이블 (Agent가 이동 완료한 경우)
-          try {
-            const mqLog = await mysqlQuery(
-              `SELECT dest_no, msg_type, status_code FROM ${logTable} WHERE app_etc1 = ?`,
-              [testId]
-            ) as any[];
-            if (mqLog && mqLog.length > 0) {
-              mqRows = [...mqRows, ...mqLog];
-            }
-          } catch (e) {
-            // 로그 테이블 미존재 시 무시
-          }
-
-          for (const row of unreceived.rows) {
-            const mType = row.message_type === 'SMS' ? 'S' : 'L';
-            const mqMatch = mqRows.find(
-              (m: any) => m.dest_no === row.phone && m.msg_type === mType
-            );
-
-            let result = 'timeout'; // 기본: 시간초과
-            if (mqMatch) {
-              const sc = Number(mqMatch.status_code);
-              if (sc === 6 || sc === 1000) {
-                result = 'blocked'; // 이통사 성공 + 미수신 = 스팸차단
-              } else if (sc === 100) {
-                result = 'timeout'; // 아직 대기중
-              } else {
-                result = 'failed'; // 이통사 실패
-              }
-            }
-
-            await query(
-              `UPDATE spam_filter_test_results SET result = $1 WHERE id = $2`,
-              [result, row.id]
-            );
-          }
-        }
-
-        // 테스트 완료 처리
-        await query(
-          `UPDATE spam_filter_tests SET status = 'completed', completed_at = NOW()
-           WHERE id = $1 AND status = 'active'`,
-          [testId]
-        );
-      } catch (err) {
-        console.error('[SpamFilter] 타임아웃 처리 오류:', err);
-        try {
+        if (unreceived.rows.length === 0) {
+          clearInterval(pollInterval);
           await query(
             `UPDATE spam_filter_tests SET status = 'completed', completed_at = NOW()
              WHERE id = $1 AND status = 'active'`,
             [testId]
           );
-        } catch (e) { /* ignore */ }
+          return;
+        }
+
+        // QTmsg 결과 조회 (현재 큐 + 월별 로그 테이블)
+        const testTable = getTestSmsTable();
+        const now2 = new Date();
+        const yyyymm = `${now2.getFullYear()}${String(now2.getMonth() + 1).padStart(2, '0')}`;
+        const logTable = `${testTable}_${yyyymm}`;
+
+        let mqRows: any[] = [];
+        const mqCurrent = await mysqlQuery(
+          `SELECT dest_no, msg_type, status_code FROM ${testTable} WHERE app_etc1 = ?`,
+          [testId]
+        ) as any[];
+        if (mqCurrent && mqCurrent.length > 0) mqRows = mqCurrent;
+
+        try {
+          const mqLog = await mysqlQuery(
+            `SELECT dest_no, msg_type, status_code FROM ${logTable} WHERE app_etc1 = ?`,
+            [testId]
+          ) as any[];
+          if (mqLog && mqLog.length > 0) mqRows = [...mqRows, ...mqLog];
+        } catch (e) { /* 로그 테이블 미존재 시 무시 */ }
+
+        let updatedCount = 0;
+        for (const row of unreceived.rows) {
+          const mType = row.message_type === 'SMS' ? 'S' : 'L';
+          const mqMatch = mqRows.find(
+            (m: any) => m.dest_no === row.phone && m.msg_type === mType
+          );
+
+          if (!mqMatch) continue; // 아직 QTmsg 결과 없음
+
+          const sc = Number(mqMatch.status_code);
+          let result: string | null = null;
+
+          if (sc === 6 || sc === 1000 || sc === 1800) {
+            result = 'blocked'; // 이통사 전달 성공 + 앱 미수신 = 스팸 차단
+          } else if (sc === 100 || sc === 104) {
+            result = null; // 아직 대기 중
+          } else {
+            result = 'failed'; // 이통사 실패
+          }
+
+          if (result) {
+            await query(
+              `UPDATE spam_filter_test_results SET result = $1 WHERE id = $2`,
+              [result, row.id]
+            );
+            updatedCount++;
+          }
+        }
+
+        // 전부 처리됐으면 완료
+        if (updatedCount > 0) {
+          const remaining = await query(
+            `SELECT id FROM spam_filter_test_results
+             WHERE test_id = $1 AND received = false AND result IS NULL`,
+            [testId]
+          );
+          if (remaining.rows.length === 0) {
+            clearInterval(pollInterval);
+            await query(
+              `UPDATE spam_filter_tests SET status = 'completed', completed_at = NOW()
+               WHERE id = $1 AND status = 'active'`,
+              [testId]
+            );
+            return;
+          }
+        }
+
+        // 최종 타임아웃 (3분 초과)
+        const elapsed2 = Date.now() - new Date(activeCheck2.rows[0].created_at).getTime();
+        if (elapsed2 > TEST_TIMEOUT_MS) {
+          clearInterval(pollInterval);
+          const stillUnresolved = await query(
+            `SELECT id FROM spam_filter_test_results
+             WHERE test_id = $1 AND received = false AND result IS NULL`,
+            [testId]
+          );
+          for (const row of stillUnresolved.rows) {
+            await query(
+              `UPDATE spam_filter_test_results SET result = 'timeout' WHERE id = $1`,
+              [row.id]
+            );
+          }
+          await query(
+            `UPDATE spam_filter_tests SET status = 'completed', completed_at = NOW()
+             WHERE id = $1 AND status = 'active'`,
+            [testId]
+          );
+        }
+      } catch (err) {
+        console.error('[SpamFilter] 폴링 처리 오류:', err);
       }
-    }, TEST_TIMEOUT_MS);
+    }, 15000);
+
+    // 안전장치: 4분 후 강제 종료
+    setTimeout(() => { clearInterval(pollInterval); }, TEST_TIMEOUT_MS + 60000);
 
     const totalCount = devices.rows.length * messageTypes.length;
     res.json({
