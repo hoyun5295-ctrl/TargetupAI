@@ -1255,11 +1255,13 @@ POST /api/sync/purchases   ← 구매내역 벌크 INSERT (배치 최대 1000건
 - [ ] Nginx 080callback 경로 나래 IP 화이트리스트 (121.156.104.161~165, 183.98.207.13)
 - [ ] 실제 080 ARS 수신거부 테스트 (080-719-6700)
 
-**스팸필터 테스트 시스템**
-- [ ] 테스트폰 3대 설치 (현재 LGU+ 1대만, SKT/KT 추가 필요)
-- [ ] 테스트폰 APK 재설치 + 기본 SMS 앱 설정 + 수신 테스트
+**스팸필터 테스트 시스템 ✅ 완료**
+- [x] 테스트폰 3대 설치 (SKT/KT/LGU+ 모두 활성)
+- [x] SMS/LMS 수신 테스트 성공 (기본 SMS 앱 설정 불필요)
+- [x] 스팸 판정 15초 폴링 (QTmsg 성공 + 앱 미수신 = 즉시 blocked)
   - APK 경로: C:\spam\app\build\outputs\apk\debug\app-debug.apk
   - .\gradlew assembleDebug 로 커맨드라인 빌드 가능 (Android Studio 불필요)
+  - 상세: SPAM-FILTER-TEST.md 참고
 
 **선불 요금제 Phase 1-B~2**
 - [ ] Phase 1-B: 토스페이먼츠 PG 연동 (카드결제/가상계좌 충전)
@@ -1332,3 +1334,8 @@ POST /api/sync/purchases   ← 구매내역 벌크 INSERT (배치 최대 1000건
 | 02-19 | 에러 수정 일괄 (results.ts 타임스탬프, admin.ts MySQL LIMIT, spam_filter NOT NULL) |
 | 02-19 | 직원 버그리포트 5차: 테스트접두사 제거, 광고미리보기 통합(wrapAdText), KST변환 2건, 문의모달 분기, 제목누락, 전화검색 4자리, 카드넘침, AI구분선금지 |
 | 02-19 | AI 학습 데이터 수집 시스템 (ai_training_logs DDL + training-logger.ts + campaigns 연결 5곳) |
+| 02-20 | 스팸필터 테스트 시스템 완성 (3대 SMS/LMS 수신 성공, 기본 SMS 앱 불필요 확인) |
+| 02-20 | 스팸 판정 15초 폴링 (QTmsg 성공 + 앱 미수신 = 즉시 blocked, 3분 대기 제거) |
+| 02-20 | 스팸필터 MySQL 로그 테이블 양쪽 조회 (SMSQ_SEND_10 + SMSQ_SEND_10_YYYYMM) |
+| 02-20 | 스팸필터 리포트 매칭 개선 (발신번호 + 메시지내용 normalize, 동시 테스트 분리) |
+| 02-20 | MmsReceiver BroadcastReceiver 제약 해결 (registerReceiver 불가, FileProvider URI 필수) |

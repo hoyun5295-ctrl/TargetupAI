@@ -19,7 +19,8 @@
 4. 이통사 → 테스트폰 도달
 5. 스팸한줄 앱이 SMS/LMS 수신 감지 → POST /api/spam-filter/report
 6. 백엔드가 발신번호 기반으로 active 테스트 매칭 → 결과 업데이트
-7. 3분 타임아웃 시 QTmsg 결과코드 기반 자동 판정
+7. 백엔드 15초 폴링: QTmsg 성공(6/1000) + 앱 미수신 → 즉시 blocked 판정
+   - 최종 3분 타임아웃: 남은 미판정 건 → timeout 처리
 ```
 
 ---
@@ -178,8 +179,13 @@ ps aux | grep agent10 | grep -v grep
   - 복수 건(동시 테스트)이면 메시지 내용(공백/줄바꿈 제거 normalize)으로 확정
   - fallback: 내용 매칭 실패 시 가장 최근 건에 매칭
   - ⚠️ 다른 회사가 동일 발신번호로 동시 테스트해도 메시지 내용으로 정확히 분리
-- **타임아웃 판정 (3분)**: 미수신 건에 대해 MySQL 결과코드 조회 → blocked/failed/timeout 판정
-- **타임아웃 시 MySQL 조회 주의**: Agent가 이미 로그 테이블(SMSQ_SEND_10_YYYYMM)로 이동했을 수 있음 → 양쪽 모두 조회 필요
+- **스팸 판정 (15초 폴링, 2026-02-20 개선)**:
+  - 발송 후 15초마다 MySQL 결과 조회 (현재 큐 + 월별 로그 테이블 양쪽)
+  - QTmsg 성공(6/1000/1800) + 앱 미수신 → **즉시 blocked (스팸 차단)** 판정
+  - QTmsg 실패(7/8/55 등) → **즉시 failed (발송 실패)** 판정
+  - QTmsg 대기(100/104) → 다음 폴링에서 재확인
+  - 3분 초과 시 남은 미판정 건 → timeout 처리 후 테스트 완료
+- **MySQL 조회 주의**: Agent가 이미 로그 테이블(SMSQ_SEND_10_YYYYMM)로 이동했을 수 있음 → 양쪽 모두 조회 필요
 - **쿨다운**: 회사당 60초
 - **동시 제한**: 회사당 active/pending 테스트 1건
 
@@ -230,28 +236,30 @@ if (candidates.rows.length === 1) {
 | HeadlessSmsSendService.kt | 기본 SMS 앱 필수 더미 Service |
 | AndroidManifest.xml | receiver/service 등록, 권한 선언 |
 
-### ⚠️ LMS 수신 핵심 (기본 SMS 앱일 때)
-- **기본 SMS 앱으로 설정하면 Android 시스템이 MMS를 자동 다운로드 안 함**
-- **앱이 직접 `SmsManager.downloadMultimediaMessage()`를 호출해야 함**
-- SMS는 intent에 내용이 바로 담겨서 문제없음
-- MmsReceiver에서 WAP Push PDU → Content-Location 추출 → downloadMultimediaMessage() → content://mms 읽기 → 서버 리포트
+### ⚠️ LMS 수신 핵심 (기본 SMS 앱 설정 불필요!)
+- **기본 SMS 앱 설정 없이 LMS 수신 성공 확인됨 (2026-02-20)**
+- 기본 SMS 앱 아닌 상태 → 시스템이 MMS 자동 다운로드 → `WAP_PUSH_RECEIVED` → content://mms에서 읽기 → 서버 리포트
+- 기본 SMS 앱인 상태 → `WAP_PUSH_DELIVER` → 시스템이 다운로드 안 해줌 → BroadcastReceiver 제약으로 직접 다운로드도 어려움
+- **결론: 기본 SMS 앱 설정 안 하는 것이 안정적. 테스트폰 3대 모두 기본 메시지 앱 유지**
+- SMS는 어느 상태든 intent에 내용이 바로 담겨서 문제없음
 
-### MmsReceiver.kt 상세 흐름 (2026-02-20 수정)
+### MmsReceiver.kt 동작 흐름 (2026-02-20 최종)
 ```
+[기본 SMS 앱 아닌 상태 — 권장]
+1. WAP_PUSH_RECEIVED 브로드캐스트 수신
+2. 시스템이 MMS 자동 다운로드 (앱 개입 불필요)
+3. 5초 대기 → content://mms에서 최근 120초 이내 MMS 조회
+4. getMmsSender() → 발신번호 추출 (addr type=137)
+5. getMmsBody() → 본문 추출 (content type=text/plain)
+6. sendReport() → 서버에 POST /api/spam-filter/report
+
+[기본 SMS 앱인 상태 — 비권장]
 1. WAP_PUSH_DELIVER 브로드캐스트 수신
-2. intent.getByteArrayExtra("data")에서 Content-Location URL 추출
-   - PDU 바이너리에서 "http" 시작 위치 찾기 → null terminator까지 URL 추출
-3. SmsManager.downloadMultimediaMessage(contentLocation) 호출
-   - PendingIntent 콜백으로 다운로드 완료 감지
-4. 다운로드 완료 → 3초 대기 → content://mms에서 최근 60초 이내 MMS 조회
-5. getMmsSender() → 발신번호 추출 (addr type=137)
-6. getMmsBody() → 본문 추출 (content type=text/plain)
-7. sendReport() → 서버에 POST /api/spam-filter/report
+2. Content-Location URL 추출 → downloadMultimediaMessage() 호출
+3. 5초 대기 → content://mms 읽기 → 서버 리포트
+※ BroadcastReceiver 내 registerReceiver 불가 → 콜백 방식 사용 불가
+※ FileProvider 설정 필요 (file_paths.xml + AndroidManifest)
 ```
-**안전장치:**
-- Content-Location 추출 실패 → 5초 후 content://mms 직접 읽기 (fallback)
-- 다운로드 15초 타임아웃 → fallback 읽기
-- 다운로드 함수 자체 예외 → fallback 읽기
 
 ### 앱 설정값 (SharedPreferences: spam_hanjul)
 | 키 | 기본값 |
@@ -279,8 +287,13 @@ if (candidates.rows.length === 1) {
 ### 2026-02-20
 | 항목 | 변경 내용 |
 |------|----------|
-| MmsReceiver.kt | `downloadMultimediaMessage()` 추가 — 기본 SMS 앱일 때 시스템이 MMS 자동 다운로드 안 하므로 앱이 직접 다운로드해야 함. WAP Push PDU → Content-Location 추출 → 다운로드 → content://mms 읽기 → 서버 리포트 |
+| spam-filter.ts | 타임아웃 판정 → **15초 폴링으로 변경**. QTmsg 성공 + 앱 미수신 = 즉시 blocked. 3분 기다리지 않음 |
+| spam-filter.ts | MySQL 조회 시 현재 큐(SMSQ_SEND_10) + 월별 로그(SMSQ_SEND_10_YYYYMM) 양쪽 조회 |
 | spam-filter.ts | 리포트 매칭 로직 개선 — 발신번호만 → 발신번호 + 메시지내용(normalize). 동시 테스트 정합성 확보 |
+| MmsReceiver.kt | 기본 SMS 앱 설정 **불필요** 확인. WAP_PUSH_RECEIVED + 시스템 자동 다운로드로 LMS 수신 성공 |
+| MmsReceiver.kt | BroadcastReceiver 내 registerReceiver 불가 (ReceiverCallNotAllowedException) 교훈 |
+| MmsReceiver.kt | downloadMultimediaMessage() contentUri null 불가 — FileProvider URI 필요 교훈 |
+| 테스트폰 | 3대(SKT/KT/LGU+) 모두 기본 SMS 앱 설정 해제, 기본 메시지 앱 유지 상태로 운영 |
 | Agent 10 잔액 | status_code 55 (E_BILL_LIMIT_OVER) 발생 → QTmsg 중계서버 선불 잔액 충전으로 해결 |
 | DB DEFAULT | spam_filter_tests.spam_check_number DEFAULT `08071906700` (잘못된 번호) → NULL로 수정 |
 
@@ -292,11 +305,13 @@ if (candidates.rows.length === 1) {
 | 080 치환 제거 | 메시지 원본 그대로 발송, 앱 필터 제거, 발신번호 기반 매칭으로 전환 |
 
 ### ⚠️ 반복 실수 방지 체크리스트
-- [ ] MmsReceiver에 `downloadMultimediaMessage()` 포함되어 있는지 확인 (빠지면 LMS 수신 불가)
+- [ ] 테스트폰 3대 모두 **기본 SMS 앱 설정 해제** 상태 확인 (기본 메시지 앱으로 유지!)
 - [ ] 앱에 080 번호 하드코딩 필터가 없는지 확인 (있으면 수신 누락)
 - [ ] Agent 10 잔액 충전 상태 확인 (status_code 55 = 잔액부족)
 - [ ] spam_filter_tests.spam_check_number DEFAULT가 NULL인지 확인
-- [ ] 테스트폰 3대 모두 기본 SMS 앱 설정 + 모바일 데이터 켜짐 확인
+- [ ] 테스트폰 모바일 데이터 켜짐 확인 (LMS 다운로드에 필요)
+- [ ] BroadcastReceiver 안에서 registerReceiver 사용 금지 (ReceiverCallNotAllowedException)
+- [ ] downloadMultimediaMessage() 호출 시 contentUri에 FileProvider URI 필수 (null 불가)
 
 ---
 

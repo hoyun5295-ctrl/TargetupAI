@@ -298,7 +298,8 @@ router.post('/filter', async (req: Request, res: Response) => {
     }
 
     const countResult = await query(
-      `SELECT COUNT(*) FROM customers_unified ${whereClause}`,
+      `SELECT COUNT(*) FROM customers_unified c ${whereClause}
+       AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.company_id = c.company_id AND u.phone = c.phone)`,
       params
     );
 
@@ -574,18 +575,20 @@ router.get('/stats', async (req: Request, res: Response) => {
     const result = await query(
       `SELECT
         COUNT(*) as total,
-        COUNT(*) FILTER (WHERE sms_opt_in = true) as sms_opt_in_count,
-        COUNT(*) FILTER (WHERE gender = ANY($${params.length + 1}::text[])) as male_count,
-        COUNT(*) FILTER (WHERE gender = ANY($${params.length + 2}::text[])) as female_count,
-        COUNT(*) FILTER (WHERE grade = 'VIP') as vip_count,
-        COUNT(*) FILTER (WHERE birth_year IS NOT NULL AND (2026 - birth_year) < 20) as age_under20,
-        COUNT(*) FILTER (WHERE birth_year IS NOT NULL AND (2026 - birth_year) BETWEEN 20 AND 29) as age_20s,
-        COUNT(*) FILTER (WHERE birth_year IS NOT NULL AND (2026 - birth_year) BETWEEN 30 AND 39) as age_30s,
-        COUNT(*) FILTER (WHERE birth_year IS NOT NULL AND (2026 - birth_year) BETWEEN 40 AND 49) as age_40s,
-        COUNT(*) FILTER (WHERE birth_year IS NOT NULL AND (2026 - birth_year) BETWEEN 50 AND 59) as age_50s,
-        COUNT(*) FILTER (WHERE birth_year IS NOT NULL AND (2026 - birth_year) >= 60) as age_60plus
-       FROM customers_unified
-       WHERE company_id = $1 AND is_active = true${storeFilter}`,
+        COUNT(*) FILTER (WHERE c.sms_opt_in = true
+          AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.company_id = c.company_id AND u.phone = c.phone)
+        ) as sms_opt_in_count,
+        COUNT(*) FILTER (WHERE c.gender = ANY($${params.length + 1}::text[])) as male_count,
+        COUNT(*) FILTER (WHERE c.gender = ANY($${params.length + 2}::text[])) as female_count,
+        COUNT(*) FILTER (WHERE c.grade = 'VIP') as vip_count,
+        COUNT(*) FILTER (WHERE c.birth_year IS NOT NULL AND (2026 - c.birth_year) < 20) as age_under20,
+        COUNT(*) FILTER (WHERE c.birth_year IS NOT NULL AND (2026 - c.birth_year) BETWEEN 20 AND 29) as age_20s,
+        COUNT(*) FILTER (WHERE c.birth_year IS NOT NULL AND (2026 - c.birth_year) BETWEEN 30 AND 39) as age_30s,
+        COUNT(*) FILTER (WHERE c.birth_year IS NOT NULL AND (2026 - c.birth_year) BETWEEN 40 AND 49) as age_40s,
+        COUNT(*) FILTER (WHERE c.birth_year IS NOT NULL AND (2026 - c.birth_year) BETWEEN 50 AND 59) as age_50s,
+        COUNT(*) FILTER (WHERE c.birth_year IS NOT NULL AND (2026 - c.birth_year) >= 60) as age_60plus
+       FROM customers_unified c
+       WHERE c.company_id = $1 AND c.is_active = true${storeFilter}`,
       [...params, getGenderVariants('M'), getGenderVariants('F')]
     );
 

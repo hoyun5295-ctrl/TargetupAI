@@ -30,7 +30,7 @@ router.post('/generate-message', async (req: Request, res: Response) => {
 
     // 회사 정보 조회 (브랜드 정보 포함)
     const companyResult = await query(
-      'SELECT reject_number, brand_name, brand_slogan, brand_description, brand_tone, customer_schema FROM companies WHERE id = $1',
+      'SELECT COALESCE(reject_number, opt_out_080_number) as reject_number, brand_name, brand_slogan, brand_description, brand_tone, customer_schema FROM companies WHERE id = $1',
       [companyId]
     );
     const companyInfo = companyResult.rows[0] || {};
@@ -107,7 +107,7 @@ router.post('/recommend-target', async (req: Request, res: Response) => {
 
     // 회사 정보 조회 (스키마 포함)
     const companyResult = await query(
-      `SELECT company_name, business_category, reject_number, brand_name, customer_schema FROM companies WHERE id = $1::uuid`,
+      `SELECT company_name, business_category, COALESCE(reject_number, opt_out_080_number) as reject_number, brand_name, customer_schema FROM companies WHERE id = $1::uuid`,
       [companyId]
     );
     const companyInfo = companyResult.rows[0] || {};
