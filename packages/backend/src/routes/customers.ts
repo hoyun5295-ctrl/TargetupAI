@@ -218,7 +218,9 @@ if (grade) {
   paramIndex = grf.nextIndex;
 }
 if (smsOptIn === 'true') {
-  whereClause += ` AND sms_opt_in = true`;
+  whereClause += ` AND sms_opt_in = true AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.company_id = customers_unified.company_id AND u.phone = customers_unified.phone)`;
+} else if (smsOptIn === 'false') {
+  whereClause += ` AND (sms_opt_in = false OR EXISTS (SELECT 1 FROM unsubscribes u WHERE u.company_id = customers_unified.company_id AND u.phone = customers_unified.phone))`;
 }
 
     // 검색어
@@ -254,7 +256,10 @@ if (smsOptIn === 'true') {
     params.push(Number(limit), offset);
     const result = await query(
       `SELECT id, name, phone, gender, birth_date, age, email, grade, region, points,
-              store_code, store_name, sms_opt_in, recent_purchase_date, total_purchase_amount, custom_fields
+              store_code, store_name,
+              CASE WHEN EXISTS (SELECT 1 FROM unsubscribes u WHERE u.company_id = customers_unified.company_id AND u.phone = customers_unified.phone)
+                   THEN false ELSE sms_opt_in END as sms_opt_in,
+              recent_purchase_date, total_purchase_amount, custom_fields
        FROM customers_unified
        ${whereClause}
        ORDER BY created_at DESC
@@ -1251,7 +1256,11 @@ router.get('/:id', async (req: Request, res: Response) => {
     const { id } = req.params;
 
     const result = await query(
-      `SELECT * FROM customers_unified WHERE id = $1 AND company_id = $2 AND is_active = true`,
+      `SELECT c.*,
+              CASE WHEN EXISTS (SELECT 1 FROM unsubscribes u WHERE u.company_id = c.company_id AND u.phone = c.phone)
+                   THEN false ELSE c.sms_opt_in END as sms_opt_in,
+              EXISTS (SELECT 1 FROM unsubscribes u WHERE u.company_id = c.company_id AND u.phone = c.phone) as is_unsubscribed
+       FROM customers_unified c WHERE c.id = $1 AND c.company_id = $2 AND c.is_active = true`,
       [id, companyId]
     );
 
