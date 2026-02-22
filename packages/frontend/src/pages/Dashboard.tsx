@@ -1,4 +1,4 @@
-﻿import { Activity, Ban, BarChart3, Calendar, Clock, FileText, LogOut, Send, Settings, Sparkles, Users } from 'lucide-react';
+﻿import { Ban, BarChart3, Calendar, Clock, FileText, LogOut, Send, Settings, Sparkles, Users } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { aiApi, campaignsApi, customersApi } from '../api/client';
@@ -2176,95 +2176,14 @@ const campaignData = {
 
       {/* 메인 */}
       <main className="max-w-7xl mx-auto px-4 py-8">
-        {/* 통계 카드 */}
-        {/* 통계 + AI 프롬프트 영역 */}
-        <div className="flex gap-6 mb-8">
-          {/* 좌측: 통계 카드 */}
-          <div className="w-72 space-y-4">
-            {/* 플랜 정보 */}
-            <div 
-              onClick={() => navigate('/pricing')}
-              className="flex items-center justify-between p-3 bg-white/50 rounded-xl cursor-pointer hover:bg-white/80 transition-all"
-            >
-              <div className="text-sm text-gray-600">
-                <span className="font-semibold text-gray-800">{planInfo?.plan_name || '로딩...'}</span>
-                {planInfo?.plan_code === 'FREE' && !planInfo?.is_trial_expired && (
-                  <span className="text-orange-500 ml-1 text-xs">
-                    D-{Math.max(0, Math.ceil((new Date(planInfo.trial_expires_at).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)))}
-                  </span>
-                )}
-                {planInfo?.plan_code === 'FREE' && planInfo?.is_trial_expired && (
-                  <span className="text-red-500 ml-1 text-xs">만료</span>
-                )}
-              </div>
-              <span className="text-green-700 text-xs font-medium">요금제 안내 →</span>
-            </div>
-                        {/* 고객 현황 */}
-                        <div className="bg-white/50 rounded-xl p-4">
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-xs text-gray-400 font-medium">고객 현황</span>
-                <button onClick={() => setShowCustomerDB(true)} className="text-green-700 text-xs font-medium hover:text-green-800 transition-colors">DB 정보조회 →</button>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="text-center p-2">
-                  <div className="text-xl font-bold text-gray-800">{parseInt(stats?.total || '0').toLocaleString()}</div>
-                  <div className="text-xs text-gray-400 mt-1">전체</div>
-                </div>
-                <div className="text-center p-2">
-                  <div className="text-xl font-bold text-green-700">{parseInt(stats?.sms_opt_in_count || '0').toLocaleString()}</div>
-                  <div className="text-xs text-gray-400 mt-1">수신동의</div>
-                </div>
-                <div className="text-center p-2">
-                  <div className="text-xl font-bold text-gray-800">{parseInt(stats?.male_count || '0').toLocaleString()}</div>
-                  <div className="text-xs text-gray-400 mt-1">남성</div>
-                </div>
-                <div className="text-center p-2">
-                  <div className="text-xl font-bold text-gray-800">{parseInt(stats?.female_count || '0').toLocaleString()}</div>
-                  <div className="text-xs text-gray-400 mt-1">여성</div>
-                </div>
-              </div>
-            </div>
-
-            {/* 발송 현황 */}
-            <div className="bg-white/50 rounded-xl p-4">
-            <div className="flex items-center justify-between mb-3">
-                <span className="text-xs text-gray-400 font-medium">발송 현황</span>
-                {balanceInfo?.billingType === 'prepaid' && (
-                  <button onClick={() => setShowBalanceModal(true)} className="text-green-700 text-xs font-medium hover:text-green-800 transition-colors">잔액 현황 →</button>
-                )}
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="text-center p-2">
-                  <div className="text-xl font-bold text-gray-800">{(stats?.monthly_sent || 0).toLocaleString()}</div>
-                  <div className="text-xs text-gray-400 mt-1">이번 달</div>
-                </div>
-                <div className="text-center p-2">
-                  <div className="text-xl font-bold text-gray-800">{stats?.success_rate || '0'}%</div>
-                  <div className="text-xs text-gray-400 mt-1">성공률</div>
-                </div>
-                <div className="text-center p-2">
-                  <div className="text-xl font-bold text-amber-600">{parseInt(stats?.vip_count || '0').toLocaleString()}</div>
-                  <div className="text-xs text-gray-400 mt-1">VIP</div>
-                </div>
-                <div className="text-center p-2">
-                  <div className="text-xl font-bold text-gray-800">-</div>
-                  <div className="text-xs text-gray-400 mt-1">30일 매출</div>
-                </div>
-              </div>
-              </div>
-
-            
-                        </div>
-
-{/* 우측: AI 프롬프트 입력 */}
-          {hideAi ? (
-          <div className="flex-1 bg-gray-50 rounded-xl p-6 border border-gray-200">
+        {/* 상단: AI 자동화 마케팅 (전체 너비) */}
+        {hideAi ? (
+          <div className="bg-gray-50 rounded-xl p-6 border border-gray-200 mb-6">
             <h3 className="text-xl font-bold text-gray-800 mb-2">문자 발송 서비스</h3>
             <p className="text-sm text-gray-500 mb-5">
               직접발송 또는 직접 타겟 설정을 통해 문자를 발송할 수 있습니다.
             </p>
-            <div className={`grid ${hideFileUpload ? 'grid-cols-1 max-w-sm' : 'grid-cols-2'} gap-4 mt-6`}>
-              {/* 고객 DB 업로드 */}
+            <div className={`grid ${hideFileUpload ? 'grid-cols-1 max-w-sm' : 'grid-cols-2 max-w-2xl'} gap-4 mt-6`}>
               {!hideFileUpload && (
               <button 
                 onClick={() => setShowFileUpload(true)}
@@ -2277,8 +2196,6 @@ const campaignData = {
                 <div className="text-2xl text-slate-300 self-end">→</div>
               </button>
               )}
-
-              {/* 직접 타겟 설정 */}
               <button 
                 onClick={() => { setShowDirectTargeting(true); loadEnabledFields(); }}
                 className="p-6 bg-amber-500 hover:bg-amber-600 rounded-xl transition-all hover:shadow-lg group text-right h-[140px] flex flex-col justify-between"
@@ -2291,18 +2208,16 @@ const campaignData = {
               </button>
             </div>
           </div>
-          ) : (
-            <div className="flex-1 bg-green-50 rounded-xl p-6 border border-green-200">
+        ) : (
+          <div className="bg-green-50 rounded-xl p-6 border border-green-200 mb-6">
             <h3 className="text-xl font-bold text-gray-800 mb-2">AI 자동화 마케팅</h3>
-              <p className="text-sm text-gray-500 mb-5">
-                AI가 타겟 선정부터 메시지 작성, 발송까지 자동으로 설계합니다. 목적에 맞는 AI 발송 방식을 선택하세요.
-              </p>
-            {/* 3분할 메뉴 카드 */}
+            <p className="text-sm text-gray-500 mb-5">
+              AI가 타겟 선정부터 메시지 작성, 발송까지 자동으로 설계합니다. 목적에 맞는 AI 발송 방식을 선택하세요.
+            </p>
             <div className="grid grid-cols-3 gap-4 mt-6">
-              {/* 고객 DB 업로드 - 슬레이트 블루 */}
               <button 
                 onClick={() => setShowFileUpload(true)}
-                className="p-6 bg-slate-600 hover:bg-slate-700 rounded-xl transition-all hover:shadow-lg group text-right h-[140px] flex flex-col justify-between"
+                className="p-6 bg-slate-600 hover:bg-slate-700 rounded-xl transition-all hover:shadow-lg group text-right h-[160px] flex flex-col justify-between"
               >
                 <div>
                   <div className="text-lg font-bold text-white mb-1">고객 DB 업로드</div>
@@ -2311,10 +2226,9 @@ const campaignData = {
                 <div className="text-2xl text-slate-300 self-end">→</div>
               </button>
 
-              {/* 직접 타겟 설정 - 금색 */}
               <button 
                 onClick={() => { setShowDirectTargeting(true); loadEnabledFields(); }}
-                className="p-6 bg-amber-500 hover:bg-amber-600 rounded-xl transition-all hover:shadow-lg group text-right h-[140px] flex flex-col justify-between"
+                className="p-6 bg-amber-500 hover:bg-amber-600 rounded-xl transition-all hover:shadow-lg group text-right h-[160px] flex flex-col justify-between"
               >
                 <div>
                   <div className="text-lg font-bold text-white mb-1">직접 타겟 설정</div>
@@ -2323,7 +2237,6 @@ const campaignData = {
                 <div className="text-2xl text-amber-200 self-end">→</div>
               </button>
 
-              {/* AI 추천 발송 - 초록 */}
               <button 
                 onClick={async () => {
                   setShowAiSendType(true);
@@ -2350,7 +2263,7 @@ const campaignData = {
                   }
                 }}
                 disabled={aiLoading}
-                className="p-6 bg-green-700 hover:bg-green-800 rounded-xl transition-all hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed text-right h-[140px] flex flex-col justify-between relative"
+                className="p-6 bg-green-700 hover:bg-green-800 rounded-xl transition-all hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed text-right h-[160px] flex flex-col justify-between relative"
               >
                 <div className="absolute -top-2 right-3 bg-white text-green-700 text-xs font-bold px-2 py-0.5 rounded-full shadow">
                   MAIN
@@ -2374,13 +2287,86 @@ const campaignData = {
                 )}
               </button>
             </div>
-
-            {/* AI 안내문구 */}
             <p className="text-xs text-gray-400 text-right mt-2 mb-0">
               AI는 실수할 수 있습니다. 발송 전 미리보기에서 내용을 꼭 확인해주세요.
             </p>
           </div>
-          )}
+        )}
+
+        {/* 중단: 요금제 | 발송현황 | 고객현황 (3분할) */}
+        <div className="grid grid-cols-3 gap-4 mb-8">
+          {/* 요금제 (고정) */}
+          <div 
+            onClick={() => navigate('/pricing')}
+            className="bg-white/50 rounded-xl p-5 cursor-pointer hover:bg-white/80 transition-all flex items-center justify-between"
+          >
+            <div className="text-sm text-gray-600">
+              <span className="font-semibold text-gray-800 text-base">{planInfo?.plan_name || '로딩...'}</span>
+              {planInfo?.plan_code === 'FREE' && !planInfo?.is_trial_expired && (
+                <span className="text-orange-500 ml-1 text-xs">
+                  D-{Math.max(0, Math.ceil((new Date(planInfo.trial_expires_at).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)))}
+                </span>
+              )}
+              {planInfo?.plan_code === 'FREE' && planInfo?.is_trial_expired && (
+                <span className="text-red-500 ml-1 text-xs">만료</span>
+              )}
+            </div>
+            <span className="text-green-700 text-xs font-medium">요금제 안내 →</span>
+          </div>
+
+          {/* 발송 현황 */}
+          <div className="bg-white/50 rounded-xl p-4">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-xs text-gray-400 font-medium">발송 현황</span>
+              {balanceInfo?.billingType === 'prepaid' && (
+                <button onClick={() => setShowBalanceModal(true)} className="text-green-700 text-xs font-medium hover:text-green-800 transition-colors">잔액 현황 →</button>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="text-center p-2">
+                <div className="text-xl font-bold text-gray-800">{(stats?.monthly_sent || 0).toLocaleString()}</div>
+                <div className="text-xs text-gray-400 mt-1">이번 달</div>
+              </div>
+              <div className="text-center p-2">
+                <div className="text-xl font-bold text-gray-800">{stats?.success_rate || '0'}%</div>
+                <div className="text-xs text-gray-400 mt-1">성공률</div>
+              </div>
+              <div className="text-center p-2">
+                <div className="text-xl font-bold text-amber-600">{parseInt(stats?.vip_count || '0').toLocaleString()}</div>
+                <div className="text-xs text-gray-400 mt-1">VIP</div>
+              </div>
+              <div className="text-center p-2">
+                <div className="text-xl font-bold text-gray-800">-</div>
+                <div className="text-xs text-gray-400 mt-1">30일 매출</div>
+              </div>
+            </div>
+          </div>
+
+          {/* 고객 현황 */}
+          <div className="bg-white/50 rounded-xl p-4">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-xs text-gray-400 font-medium">고객 현황</span>
+              <button onClick={() => setShowCustomerDB(true)} className="text-green-700 text-xs font-medium hover:text-green-800 transition-colors">DB 정보조회 →</button>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="text-center p-2">
+                <div className="text-xl font-bold text-gray-800">{parseInt(stats?.total || '0').toLocaleString()}</div>
+                <div className="text-xs text-gray-400 mt-1">전체</div>
+              </div>
+              <div className="text-center p-2">
+                <div className="text-xl font-bold text-green-700">{parseInt(stats?.sms_opt_in_count || '0').toLocaleString()}</div>
+                <div className="text-xs text-gray-400 mt-1">수신동의</div>
+              </div>
+              <div className="text-center p-2">
+                <div className="text-xl font-bold text-gray-800">{parseInt(stats?.male_count || '0').toLocaleString()}</div>
+                <div className="text-xs text-gray-400 mt-1">남성</div>
+              </div>
+              <div className="text-center p-2">
+                <div className="text-xl font-bold text-gray-800">{parseInt(stats?.female_count || '0').toLocaleString()}</div>
+                <div className="text-xs text-gray-400 mt-1">여성</div>
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* 탭 */}
@@ -2423,7 +2409,7 @@ const campaignData = {
             {activeTab === 'target' && (
               <div>
 {/* 5개 기능 카드 */}
-<div className="grid grid-cols-5 gap-4">
+<div className="grid grid-cols-4 gap-4">
                   {/* 최근 캠페인 */}
                   <div onClick={() => { loadRecentCampaigns(); setShowRecentCampaigns(true); }} className="bg-white/50 shadow-sm rounded-xl p-6 min-h-[140px] cursor-pointer hover:shadow-lg transition-all text-center">
                     <BarChart3 className="w-8 h-8 mx-auto mb-3 text-green-700" />
@@ -2446,14 +2432,6 @@ const campaignData = {
                     <div className="font-semibold text-gray-800 mb-1">고객 인사이트</div>
                     <div className="text-xs text-gray-500 mb-3">고객 현황 분석</div>
                     <div className="text-xl font-bold text-green-700">{parseInt(stats?.total || '0').toLocaleString()}명</div>
-                  </div>
-
-                  {/* 오늘의 통계 */}
-                  <div onClick={() => setShowTodayStats(true)} className="bg-white/50 shadow-sm rounded-xl p-6 min-h-[140px] cursor-pointer hover:shadow-lg transition-all text-center">
-                    <Activity className="w-8 h-8 mx-auto mb-3 text-green-600" />
-                    <div className="font-semibold text-gray-800 mb-1">오늘의 통계</div>
-                    <div className="text-xs text-gray-500 mb-3">발송량/성공률</div>
-                    <div className="text-xl font-bold text-green-700">{(stats?.monthly_sent || 0).toLocaleString()}건</div>
                   </div>
 
                   {/* 예약 대기 */}
