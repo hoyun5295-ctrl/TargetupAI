@@ -798,6 +798,355 @@ function getFallbackVariants(extraContext?: any): AIRecommendResult {
 }
 
 // ============================================================
+// 프로모션 브리핑 파싱 (parseBriefing)
+// ============================================================
+
+const PARSE_BRIEFING_SYSTEM = `당신은 마케팅 프로모션 분석 전문가입니다.
+마케터가 자연어로 브리핑한 프로모션 내용을 구조화된 JSON으로 파싱합니다.
+
+## 파싱 규칙
+- 브리핑에서 명시적으로 언급된 정보만 추출
+- 언급되지 않은 항목은 빈 문자열("")로 설정
+- 절대 정보를 지어내거나 추측하지 마세요
+- 할인율, 기간, 조건 등은 브리핑 원문 그대로 반영
+- 여러 혜택이 있으면 benefit에 모두 나열
+
+## 출력 형식
+반드시 아래 JSON 형식으로만 응답하세요 (다른 텍스트 없이):
+
+{
+  "promotionCard": {
+    "name": "프로모션 제목/이름",
+    "benefit": "혜택/할인 내용 (여러 개면 + 로 연결)",
+    "condition": "적용 조건 (없으면 빈 문자열)",
+    "period": "기간 (없으면 빈 문자열)",
+    "target": "대상 고객 (없으면 빈 문자열)",
+    "couponCode": "쿠폰코드 (없으면 빈 문자열)",
+    "extra": "기타 참고 사항 (없으면 빈 문자열)"
+  }
+}`;
+
+export async function parseBriefing(briefing: string): Promise<{
+  promotionCard: {
+    name: string;
+    benefit: string;
+    condition: string;
+    period: string;
+    target: string;
+    couponCode?: string;
+    extra?: string;
+  };
+}> {
+  if (!process.env.ANTHROPIC_API_KEY) {
+    return {
+      promotionCard: {
+        name: '프로모션',
+        benefit: briefing.substring(0, 50),
+        condition: '',
+        period: '',
+        target: '',
+        couponCode: '',
+        extra: '',
+      }
+    };
+  }
+
+  try {
+    const response = await anthropic.messages.create({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 1024,
+      temperature: 0.3,
+      system: PARSE_BRIEFING_SYSTEM,
+      messages: [{ role: 'user', content: `다음 프로모션 브리핑을 구조화해주세요:\n\n${briefing}` }],
+    });
+
+    const text = response.content[0].type === 'text' ? response.content[0].text : '';
+
+    let jsonStr = text;
+    if (text.includes('```json')) {
+      const start = text.indexOf('```json') + 7;
+      const end = text.indexOf('```', start);
+      jsonStr = text.slice(start, end).trim();
+    } else if (text.includes('```')) {
+      const start = text.indexOf('```') + 3;
+      const end = text.indexOf('```', start);
+      jsonStr = text.slice(start, end).trim();
+    }
+
+    const result = JSON.parse(jsonStr);
+    return result;
+  } catch (error) {
+    console.error('브리핑 파싱 오류:', error);
+    return {
+      promotionCard: {
+        name: '프로모션',
+        benefit: briefing.substring(0, 50),
+        condition: '',
+        period: '',
+        target: '',
+        couponCode: '',
+        extra: '',
+      }
+    };
+  }
+}
+
+// ============================================================
+// 개인화 맞춤 문안 생성 (generateCustomMessages)
+// ============================================================
+
+interface CustomMessageOptions {
+  briefing: string;
+  promotionCard: {
+    name: string;
+    benefit: string;
+    condition: string;
+    period: string;
+    target: string;
+    couponCode?: string;
+    extra?: string;
+  };
+  personalFields: string[];
+  url?: string;
+  tone: string;
+  brandName: string;
+  brandTone?: string;
+  channel: string;
+  isAd: boolean;
+  rejectNumber?: string;
+}
+
+const FIELD_TO_VAR: Record<string, string> = {
+  name: '이름',
+  gender: '성별',
+  grade: '등급',
+  store_name: '매장명',
+  region: '지역',
+  birth_date: '생일',
+  birth_month_day: '생일',
+  age: '나이',
+  points: '포인트',
+  total_purchase_amount: '구매금액',
+  purchase_count: '구매횟수',
+  recent_purchase_date: '최근구매일',
+  recent_purchase_store: '최근구매매장',
+  avg_order_value: '평균주문금액',
+  wedding_anniversary: '결혼기념일',
+};
+
+const TONE_MAP: Record<string, string> = {
+  friendly: '친근하고 따뜻한',
+  formal: '격식있고 신뢰감 있는',
+  humorous: '유머러스하고 재미있는',
+  urgent: '긴급하고 행동을 유도하는',
+  premium: '고급스럽고 VIP 대우하는',
+  casual: '편하고 가벼운',
+};
+
+export async function generateCustomMessages(options: CustomMessageOptions): Promise<{
+  variants: Array<{
+    variant_id: string;
+    variant_name: string;
+    concept: string;
+    message_text: string;
+    subject?: string;
+    score: number;
+  }>;
+  recommendation: string;
+}> {
+  const {
+    briefing, promotionCard, personalFields, url, tone,
+    brandName, brandTone, channel, isAd, rejectNumber,
+  } = options;
+
+  const varNames = personalFields
+    .map(f => FIELD_TO_VAR[f] || f)
+    .filter(Boolean);
+  const varTags = varNames.map(v => `%${v}%`).join(', ');
+
+  const smsAvailableBytes = getAvailableSmsBytes(isAd, rejectNumber);
+  const toneDesc = TONE_MAP[tone] || '친근한';
+
+  const cardLines = [
+    promotionCard.name && `- 프로모션명: ${promotionCard.name}`,
+    promotionCard.benefit && `- 혜택: ${promotionCard.benefit}`,
+    promotionCard.condition && `- 조건: ${promotionCard.condition}`,
+    promotionCard.period && `- 기간: ${promotionCard.period}`,
+    promotionCard.target && `- 대상: ${promotionCard.target}`,
+    promotionCard.couponCode && `- 쿠폰코드: ${promotionCard.couponCode}`,
+    promotionCard.extra && `- 기타: ${promotionCard.extra}`,
+  ].filter(Boolean).join('\n');
+
+  const smsByteInstruction = channel === 'SMS'
+    ? isAd
+      ? `- ⚠️ SMS 광고: 순수 본문 ${smsAvailableBytes}바이트 이내 필수! (시스템이 (광고)+수신거부 자동 추가)\n- 한글 1자=2바이트, 영문/숫자=1바이트`
+      : `- SMS 비광고: 순수 본문 ${smsAvailableBytes}바이트 이내`
+    : '';
+
+  const userMessage = `## 프로모션 정보 (마케터 확인 완료)
+${cardLines}
+
+## 원본 브리핑
+${briefing}
+
+## 오늘 날짜
+${getKoreanToday()}
+
+## 브랜드
+- 브랜드명: ${brandName}
+${brandTone ? `- 톤앤매너: ${brandTone}` : ''}
+
+## 개인화 변수 (⚠️ 필수 포함!)
+사용할 변수: ${varTags}
+- 3개 문안(A/B/C) 모두에 위 변수를 반드시 자연스럽게 포함!
+- 변수 형식: %변수명% (예: %이름%님, %등급% 고객님)
+- ⚠️ 위 목록에 없는 변수 생성 절대 금지!
+
+${url ? `## 바로가기 URL\n- URL: ${url}\n- 문안 하단에 "▶ 바로가기 ${url}" 형태로 배치` : ''}
+
+## 톤/분위기
+${toneDesc} 톤으로 작성
+
+## 채널: ${channel}
+${smsByteInstruction}
+${channel === 'LMS' ? '- LMS: subject(제목) 필수, 줄바꿈으로 가독성 높게, 이모지 금지' : ''}
+
+## 요청사항
+${channel} 채널에 최적화된 3가지 맞춤 문안(A/B/C)을 생성해주세요.
+- 브랜드명: "[${brandName}]" 형태 사용
+- 🚫 (광고), 무료거부, 무료수신거부, 080번호 절대 포함 금지! 순수 본문만!
+- 🚫 프로모션 카드에 없는 혜택/할인/이벤트 날조 금지!
+- 개인화 변수(${varTags})를 활용하여 고객별 맞춤 느낌 극대화
+- 각 시안은 서로 다른 컨셉으로 차별화`;
+
+  const systemPrompt = `당신은 개인화 마케팅 문자 메시지 전문가입니다.
+
+## 핵심 임무
+프로모션 정보와 개인화 변수를 활용하여, 고객 한 명 한 명에게 맞춤형으로 느껴지는 마케팅 문안을 작성합니다.
+
+## 채널별 규칙
+
+### SMS
+- 짧고 임팩트 있게, 핵심 혜택만
+- 바이트 제한 엄수 (사용자 메시지에 명시된 값)
+- 이모지 절대 금지, 특수문자만 사용: ★☆●○◎◇◆□■△▲▽▼→←↑↓♠♣♥♡♦※☎▶◀【】「」『』
+
+### LMS (2000바이트 이하)
+- subject(제목) 필수! 40바이트 이내
+- 줄바꿈과 특수문자로 가독성 높게
+- 구성: 인사(개인화) → 혜택상세 → 기간/조건 → CTA
+- 이모지 절대 금지
+
+## 🚫 절대 금지
+1. (광고), 무료거부, 무료수신거부, 080번호 포함 금지
+2. 프로모션 카드에 없는 혜택/할인 날조 금지
+3. 개인화 변수 목록에 없는 변수 생성 금지
+4. 이모지 사용 금지 (SMS/LMS)
+5. 구분선(━━━, ───, ═══) 사용 금지
+
+## 출력 형식
+반드시 아래 JSON 형식으로만 응답 (다른 텍스트 없이):
+
+{
+  "variants": [
+    {
+      "variant_id": "A",
+      "variant_name": "시안 이름",
+      "concept": "컨셉 설명 (1줄)",
+      "subject": "LMS일 때 제목 (SMS는 빈 문자열)",
+      "message_text": "개인화 변수 포함된 완성 문안 (광고표기/수신거부 금지!)",
+      "score": 85
+    },
+    { "variant_id": "B", ... },
+    { "variant_id": "C", ... }
+  ],
+  "recommendation": "A",
+  "recommendation_reason": "추천 이유"
+}`;
+
+  if (!process.env.ANTHROPIC_API_KEY) {
+    return {
+      variants: [
+        {
+          variant_id: 'A',
+          variant_name: '기본형',
+          concept: 'API 키 미설정 - 기본 문안',
+          message_text: `[${brandName}] ${promotionCard.name}\n${promotionCard.benefit}`,
+          score: 70,
+        }
+      ],
+      recommendation: 'A',
+    };
+  }
+
+  try {
+    const response = await anthropic.messages.create({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 2048,
+      temperature: 0.7,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userMessage }],
+    });
+
+    const text = response.content[0].type === 'text' ? response.content[0].text : '';
+
+    let jsonStr = text;
+    if (text.includes('```json')) {
+      const start = text.indexOf('```json') + 7;
+      const end = text.indexOf('```', start);
+      jsonStr = text.slice(start, end).trim();
+    } else if (text.includes('```')) {
+      const start = text.indexOf('```') + 3;
+      const end = text.indexOf('```', start);
+      jsonStr = text.slice(start, end).trim();
+    }
+
+    const result = JSON.parse(jsonStr);
+
+    // 안전장치: 광고표기 자동 제거 + 변수 검증
+    if (result.variants) {
+      for (const variant of result.variants) {
+        let msg = variant.message_text || '';
+        msg = msg.replace(/^\(광고\)\s?/g, '');
+        msg = msg.replace(/\n?무료거부\d{8,11}/g, '');
+        msg = msg.replace(/\n?무료수신거부\s?\d{3}-?\d{3,4}-?\d{4}/g, '');
+        msg = msg.trim();
+        variant.message_text = msg;
+
+        const validation = validatePersonalizationVars(msg, varNames);
+        if (!validation.valid) {
+          console.warn(`[AI 맞춤한줄 변수 검증] 잘못된 변수: ${validation.invalidVars.join(', ')} → 제거`);
+          let cleaned = msg;
+          for (const invalidVar of validation.invalidVars) {
+            cleaned = cleaned.replace(new RegExp(`%${invalidVar}%`, 'g'), '');
+          }
+          variant.message_text = cleaned;
+        }
+      }
+    }
+
+    return {
+      variants: result.variants || [],
+      recommendation: result.recommendation || 'A',
+    };
+  } catch (error) {
+    console.error('맞춤 문안 생성 오류:', error);
+    return {
+      variants: [
+        {
+          variant_id: 'A',
+          variant_name: '기본형',
+          concept: '오류 발생 - 기본 문안',
+          message_text: `[${brandName}] ${promotionCard.name}\n${promotionCard.benefit}`,
+          score: 70,
+        }
+      ],
+      recommendation: 'A',
+    };
+  }
+}
+
+// ============================================================
 // API 상태 확인
 // ============================================================
 

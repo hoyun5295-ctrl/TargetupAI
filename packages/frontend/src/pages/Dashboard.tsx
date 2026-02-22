@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { aiApi, campaignsApi, customersApi } from '../api/client';
 import AiCampaignSendModal from '../components/AiCampaignSendModal';
+import AiCustomSendFlow from '../components/AiCustomSendFlow';
 import AiSendTypeModal from '../components/AiSendTypeModal';
 import CustomerDBModal from '../components/CustomerDBModal';
 import ResultsModal from '../components/ResultsModal';
@@ -454,6 +455,7 @@ export default function Dashboard() {
   const [editingAiMsg, setEditingAiMsg] = useState<number | null>(null);
   const [showAiSendModal, setShowAiSendModal] = useState(false);
   const [showAiSendType, setShowAiSendType] = useState(false);
+const [showAiCustomFlow, setShowAiCustomFlow] = useState(false);
   const [showSpamFilter, setShowSpamFilter] = useState(false);
   const [spamFilterData, setSpamFilterData] = useState<{sms?: string; lms?: string; callback: string; msgType: 'SMS'|'LMS'|'MMS'}>({callback:'',msgType:'SMS'});
   const [sendTimeOption, setSendTimeOption] = useState<'ai' | 'now' | 'custom'>('now');
@@ -1869,8 +1871,20 @@ const campaignData = {
           }}
           onSelectCustom={() => {
             setShowAiSendType(false);
-            // TODO: AI 맞춤한줄 플로우 열기 (AiCustomSendFlow)
+            setShowAiCustomFlow(true);
           }}
+        />
+      )}
+
+      {/* AI 맞춤한줄 플로우 */}
+      {showAiCustomFlow && (
+        <AiCustomSendFlow
+          onClose={() => setShowAiCustomFlow(false)}
+          brandName={user?.company?.name || '브랜드'}
+          callbackNumbers={callbackNumbers}
+          selectedCallback={selectedCallback}
+          isAd={isAd}
+          optOutNumber={optOutNumber}
         />
       )}
 

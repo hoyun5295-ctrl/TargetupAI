@@ -1,8 +1,8 @@
-import { Router, Request, Response } from 'express';
+import { Request, Response, Router } from 'express';
 import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
-import { generateMessages, recommendTarget, checkAPIStatus, extractVarCatalog } from '../services/ai';
-import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getGenderVariants, getGradeVariants, getRegionVariants } from '../utils/normalize';
+import { checkAPIStatus, extractVarCatalog, generateCustomMessages, generateMessages, parseBriefing, recommendTarget } from '../services/ai';
+import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getGenderVariants, getRegionVariants } from '../utils/normalize';
 
 const router = Router();
 
@@ -313,6 +313,67 @@ result.estimated_count = actualCount;
 return res.json(result);
   } catch (error) {
     console.error('AI 타겟 추천 오류:', error);
+    return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+});
+// POST /api/ai/parse-briefing - 프로모션 브리핑 → 구조화 파싱
+router.post('/parse-briefing', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) {
+      return res.status(403).json({ error: '회사 권한이 필요합니다' });
+    }
+
+    const { briefing } = req.body;
+    if (!briefing || briefing.trim().length < 10) {
+      return res.status(400).json({ error: '브리핑 내용을 10자 이상 입력해주세요' });
+    }
+
+    const result = await parseBriefing(briefing.trim());
+    return res.json(result);
+  } catch (error) {
+    console.error('브리핑 파싱 오류:', error);
+    return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// POST /api/ai/generate-custom - 개인화 맞춤 문안 생성
+router.post('/generate-custom', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) {
+      return res.status(403).json({ error: '회사 권한이 필요합니다' });
+    }
+
+    const { briefing, promotionCard, personalFields, url, tone, brandName, channel, isAd } = req.body;
+
+    if (!promotionCard || !personalFields || personalFields.length === 0) {
+      return res.status(400).json({ error: '프로모션 카드와 개인화 필드를 입력해주세요' });
+    }
+
+    // 회사 정보 조회
+    const companyResult = await query(
+      'SELECT COALESCE(reject_number, opt_out_080_number) as reject_number, brand_name, brand_slogan, brand_description, brand_tone FROM companies WHERE id = $1',
+      [companyId]
+    );
+    const companyInfo = companyResult.rows[0] || {};
+
+    const result = await generateCustomMessages({
+      briefing,
+      promotionCard,
+      personalFields,
+      url,
+      tone,
+      brandName: companyInfo.brand_name || brandName || '브랜드',
+      brandTone: companyInfo.brand_tone,
+      channel: channel || 'LMS',
+      isAd,
+      rejectNumber: companyInfo.reject_number,
+    });
+
+    return res.json(result);
+  } catch (error) {
+    console.error('맞춤 문안 생성 오류:', error);
     return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
   }
 });
