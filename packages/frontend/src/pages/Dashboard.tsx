@@ -1,13 +1,14 @@
-﻿import { useState, useEffect } from 'react';
+﻿import { Activity, Ban, BarChart3, Calendar, Clock, FileText, LogOut, Send, Settings, Sparkles, Users } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { customersApi, campaignsApi, aiApi } from '../api/client';
-import { useAuthStore } from '../stores/authStore';
-import { formatDateTime, formatDate } from '../utils/formatDate';
+import { aiApi, campaignsApi, customersApi } from '../api/client';
+import AiCampaignSendModal from '../components/AiCampaignSendModal';
+import AiSendTypeModal from '../components/AiSendTypeModal';
+import CustomerDBModal from '../components/CustomerDBModal';
 import ResultsModal from '../components/ResultsModal';
 import SpamFilterTestModal from '../components/SpamFilterTestModal';
-import AiCampaignSendModal from '../components/AiCampaignSendModal';
-import CustomerDBModal from '../components/CustomerDBModal';
-import { Users, CheckCircle, UserCircle, Star, Send, TrendingUp, Rocket, Upload, Calendar, BarChart3, Settings, Ban, LogOut, Sparkles, Clock, LayoutGrid, Lightbulb, PieChart, FileText, Activity } from 'lucide-react';
+import { useAuthStore } from '../stores/authStore';
+import { formatDate, formatDateTime } from '../utils/formatDate';
 
 interface Stats {
   total: string;
@@ -452,6 +453,7 @@ export default function Dashboard() {
   const [selectedAiMsgIdx, setSelectedAiMsgIdx] = useState(0);
   const [editingAiMsg, setEditingAiMsg] = useState<number | null>(null);
   const [showAiSendModal, setShowAiSendModal] = useState(false);
+  const [showAiSendType, setShowAiSendType] = useState(false);
   const [showSpamFilter, setShowSpamFilter] = useState(false);
   const [spamFilterData, setSpamFilterData] = useState<{sms?: string; lms?: string; callback: string; msgType: 'SMS'|'LMS'|'MMS'}>({callback:'',msgType:'SMS'});
   const [sendTimeOption, setSendTimeOption] = useState<'ai' | 'now' | 'custom'>('now');
@@ -1853,6 +1855,25 @@ const campaignData = {
         />
       )}
 
+      {/* AI 발송 방식 선택 모달 */}
+      {showAiSendType && (
+        <AiSendTypeModal
+          onClose={() => setShowAiSendType(false)}
+          onSelectHanjullo={(prompt) => {
+            setShowAiSendType(false);
+            setAiCampaignPrompt(prompt);
+            // 기존 handleAiCampaignGenerate 로직 실행 (prompt 세팅 후)
+            setTimeout(() => {
+              handleAiCampaignGenerate();
+            }, 0);
+          }}
+          onSelectCustom={() => {
+            setShowAiSendType(false);
+            // TODO: AI 맞춤한줄 플로우 열기 (AiCustomSendFlow)
+          }}
+        />
+      )}
+
       {/* AI 캠페인 발송 확정 모달 */}
       {showAiSendModal && (
         <AiCampaignSendModal
@@ -2134,18 +2155,11 @@ const campaignData = {
             </div>
           </div>
           ) : (
-          <div className="flex-1 bg-green-50 rounded-xl p-6 border border-green-200">
-          <h3 className="text-xl font-bold text-gray-800 mb-2">AI 자동화 마케팅</h3>
-            <p className="text-sm text-gray-500 mb-5">
-              한 줄이면 충분합니다. 타겟 선정부터 메시지 작성, 발송 시간까지 AI가 자동으로 설계해드립니다.
-            </p>
-            <textarea
-              value={aiCampaignPrompt}
-              onChange={(e) => setAiCampaignPrompt(e.target.value)}
-              className="w-full p-4 border border-gray-300 rounded-lg resize-none focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white"
-              rows={4}
-              placeholder="예: 30대 여성 VIP 고객에게 봄 신상품 20% 할인 안내 문자 보내줘"
-            />
+            <div className="flex-1 bg-green-50 rounded-xl p-6 border border-green-200">
+            <h3 className="text-xl font-bold text-gray-800 mb-2">AI 자동화 마케팅</h3>
+              <p className="text-sm text-gray-500 mb-5">
+                AI가 타겟 선정부터 메시지 작성, 발송까지 자동으로 설계합니다. 목적에 맞는 AI 발송 방식을 선택하세요.
+              </p>
             {/* 3분할 메뉴 카드 */}
             <div className="grid grid-cols-3 gap-4 mt-6">
               {/* 고객 DB 업로드 - 슬레이트 블루 */}
@@ -2174,7 +2188,7 @@ const campaignData = {
 
               {/* AI 추천 발송 - 초록 */}
               <button 
-                onClick={handleAiCampaignGenerate}
+                onClick={() => setShowAiSendType(true)}
                 disabled={aiLoading}
                 className="p-6 bg-green-700 hover:bg-green-800 rounded-xl transition-all hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed text-right h-[140px] flex flex-col justify-between relative"
               >
