@@ -1,9 +1,22 @@
-import { useState, useEffect } from 'react';
-import { 
-  X, ChevronRight, ChevronLeft, Sparkles, CheckCircle2, 
-  FileText, Palette, Link2, Loader2, Pencil, Check,
-  User, ShoppingBag, MapPin, Star, Calendar, Hash
+import {
+  Calendar,
+  Check,
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  FileText,
+  Hash,
+  Link2, Loader2,
+  MapPin,
+  Palette,
+  Pencil,
+  ShoppingBag,
+  Sparkles,
+  Star,
+  User,
+  X
 } from 'lucide-react';
+import { useEffect, useState } from 'react';
 
 interface AiCustomSendFlowProps {
   onClose: () => void;
@@ -592,12 +605,13 @@ export default function AiCustomSendFlow({
                     >
                       <div className="flex items-center justify-between mb-2">
                         <div className="flex items-center gap-2">
-                          <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
+                        <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
                             selectedVariant === v.variant_id ? 'bg-violet-600 text-white' : 'bg-gray-200 text-gray-600'
                           }`}>
-                            {v.variant_name}
+                            {v.variant_id}
                           </span>
-                          <span className="text-sm font-medium text-gray-700">{v.concept}</span>
+                          <span className="text-sm font-medium text-gray-700">{v.variant_name}</span>
+                          <span className="text-xs text-gray-400">· {v.concept}</span>
                           {recommendation === v.variant_id && (
                             <span className="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full font-medium">AI 추천</span>
                           )}
@@ -607,7 +621,10 @@ export default function AiCustomSendFlow({
                         </span>
                       </div>
                       <div className="bg-white rounded-lg border border-gray-100 p-3 text-sm text-gray-700 whitespace-pre-wrap leading-relaxed font-mono">
+                        {isAd && channel === 'SMS' && <span className="text-red-400">(광고)</span>}
+                        {isAd && channel === 'LMS' && <><span className="text-red-400">(광고) </span><br/></>}
                         {v.message_text}
+                        {isAd && <><br/><span className="text-red-400">{channel === 'SMS' ? `무료거부${optOutNumber.replace(/-/g, '')}` : `무료수신거부 ${optOutNumber}`}</span></>}
                       </div>
                     </button>
                   ))}
