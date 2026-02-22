@@ -1,5 +1,5 @@
-import { useState } from 'react';
 import { Rocket, Sparkles } from 'lucide-react';
+import { useState } from 'react';
 
 interface AiSendTypeModalProps {
   onClose: () => void;
@@ -38,7 +38,7 @@ export default function AiSendTypeModal({ onClose, onSelectHanjullo, onSelectCus
               }`}
             >
               <div className="absolute -top-2 right-3 bg-white text-green-700 text-[10px] font-bold px-2 py-0.5 rounded-full shadow">
-                기존
+                AUTO
               </div>
               <div>
                 <div className="flex items-center gap-2 mb-2">
@@ -62,7 +62,7 @@ export default function AiSendTypeModal({ onClose, onSelectHanjullo, onSelectCus
               className="relative p-6 bg-violet-600 hover:bg-violet-700 rounded-xl transition-all hover:shadow-lg text-left h-[160px] flex flex-col justify-between"
             >
               <div className="absolute -top-2 right-3 bg-white text-violet-600 text-[10px] font-bold px-2 py-0.5 rounded-full shadow">
-                NEW
+                PRO
               </div>
               <div>
                 <div className="flex items-center gap-2 mb-2">
