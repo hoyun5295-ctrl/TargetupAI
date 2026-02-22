@@ -102,27 +102,20 @@
   - [x] 설계 확정 (네이밍, 플로우, API, 파일 구조)
   - [x] AiSendTypeModal.tsx 생성 (분기 모달)
   - [x] DashboardPage.tsx 수정 (textarea 제거 + 분기 연결)
-  - [x] 배포 확인 (AI 한줄로 기존 플로우 동작 검증)
-  - [x] AiCustomSendFlow.tsx (AI 맞춤한줄 스텝 위자드 Step 1~4)
-  - [x] 백엔드 API (parse-briefing + generate-custom)
-  - [x] parseBriefing → targetFilters 구조화 필터 + 고객 수 산출
-  - [x] buildFilterWhereClause 공통 함수 추출 (recommend-target + parse-briefing 공용)
-  - [x] Step 4 발송 확정 → AiCampaignSendModal 연결 + handleAiCustomSend
-  - [x] AI 추천발송 진입 시 회신번호/080번호 로딩
-  - [ ] 전체 통합 테스트 (실제 발송)
+  - [ ] 배포 확인 (AI 한줄로 기존 플로우 동작 검증)
+  - [ ] AiCustomSendFlow.tsx (AI 맞춤한줄 스텝 위자드)
+  - [ ] 백엔드 API (parse-briefing + generate-custom)
+  - [ ] 전체 통합 테스트
 
 - **완료 기준 (DoD):**
   - [x] AI 추천발송 클릭 → 모달에서 "AI 한줄로" / "AI 맞춤한줄" 분기 동작
   - [x] AI 한줄로 선택 → 기존 AI 추천발송 플로우 그대로 진입 (진행상황 표시 포함)
-  - [x] AI 맞춤한줄 → 개인화 필드 선택 UI (고객사 DB 필드 기반 체크박스)
-  - [x] AI 맞춤한줄 → 프로모션 브리핑 입력 (자연어 + 예시 placeholder)
-  - [x] AI 맞춤한줄 → URL 입력 + 톤/분위기 선택
-  - [x] AI 파싱 → 프로모션 카드 구조화 표시 + 수정 기능
-  - [x] AI 파싱 → targetFilters 구조화 필터 + 대상 고객 수 표시
-  - [x] 확인 후 AI 최종 문안 생성 (개인화 변수 + 프로모션 정보 반영)
-  - [x] SMS/LMS 바이트 제한 고려한 문안 생성
-  - [x] 발송 확정 → AiCampaignSendModal 재활용 → 캠페인 생성 + 발송
-  - [ ] 실제 발송 테스트 (문안 개인화 변수 치환 + 타겟 필터 정확도 검증)
+  - [ ] AI 맞춤한줄 → 개인화 필드 선택 UI (고객사 DB 필드 기반 체크박스)
+  - [ ] AI 맞춤한줄 → 프로모션 브리핑 입력 (자연어 + 예시 placeholder)
+  - [ ] AI 맞춤한줄 → URL 입력 + 톤/분위기 선택
+  - [ ] AI 파싱 → 프로모션 카드 구조화 표시 + 수정 기능
+  - [ ] 확인 후 AI 최종 문안 생성 (개인화 변수 + 프로모션 정보 반영)
+  - [ ] SMS/LMS 바이트 제한 고려한 문안 생성
 
 ---
 
@@ -288,6 +281,11 @@
 ### 🔴 미해결 — 즉시 처리 필요
 (현재 없음)
 
+### 대시보드 고객활동현황 백엔드 연동
+- [ ] stats API 확장: 이번 달 신규가입, 30일 내 구매, 90일+ 미구매, 이번 달 수신거부, 이번 달 재구매
+- [ ] 수신거부 수 stats에 포함
+- [ ] 프론트엔드 `-` → 실제 데이터 연결
+
 ### 카카오 알림톡 템플릿 관리 (Humuson API v2.1.1)
 - [ ] 고객사 관리자(app.hanjul.ai) 템플릿 CRUD + 검수 프로세스 + 발신프로필 조회 + 관리 UI
 - [ ] 슈퍼관리자(sys.hanjullo.com) 고객사별 Humuson 연동 설정 (humuson_user_id, uuid)
@@ -343,7 +341,7 @@
 | D3 | 02-22 | 개인화 필드 = DB 필드 체크박스 선택 방식 | AI에게 명확한 지시 가능, 마케터가 어떤 데이터를 활용하는지 가시적 |
 | D4 | 02-22 | 대시보드 textarea 제거 → 분기 모달 내에서 각각 입력 | 각 플로우가 독립적으로 자기 맥락에 맞는 입력창을 가짐 |
 | D5 | 02-22 | 신규 코드는 별도 컴포넌트로 분리 (대시보드 최소 수정) | 대시보드 7,800줄, 회귀 리스크 최소화. AiCustomSendFlow.tsx 독립 |
-| D6 | 02-22 | parseBriefing이 targetFilters(구조화 필터 JSON) 동시 반환 | 자연어→SQL 2단계 변환 제거. recommend-target과 동일 필터 형식으로 buildFilterWhereClause 공용 함수 재활용 |
+| D6 | 02-22 | 대시보드 좌60%/우40% flex 레이아웃 + 고객활동현황(B+C 융합) | grid-cols-4로는 75:25밖에 안됨. 활동현황=마케터 행동으로 이어지는 핵심 지표(신규/구매/휴면/수신거부/재구매). 백엔드는 추후 연결, 시연용 UI 선확보 |
 
 ---
 
@@ -368,8 +366,8 @@
 
 | 날짜 | 완료 항목 |
 |------|----------|
-| 02-22 | AI 맞춤한줄 Phase 2: targetFilters 구조화 + 고객수 산출 + 발송확정 모달 연결 + 회신번호 로딩 + buildFilterWhereClause 공용화 |
-| 02-22 | AI 맞춤한줄 Phase 1: AiSendTypeModal 분기 모달 + DashboardPage textarea 제거/연결 + Step 1~4 UI + parse-briefing/generate-custom API + AI-CUSTOM-SEND.md |
+| 02-22 | 대시보드 레이아웃 전면 개편: 좌60%/우40% 구조, 고객현황 보강(수신거부+활동현황5지표), 요금제 카드 개선, 하단4카드, 녹색/노란색 테두리, 우측버튼 폰트확대 |
+| 02-22 | AI 맞춤한줄 Phase 1 시작: AiSendTypeModal 분기 모달 + DashboardPage textarea 제거/연결 + AI-CUSTOM-SEND.md 작업문서 |
 | 02-21 | 수신거부 미반영 버그 수정 (대시보드/DB조회/상세/필터/직접타겟 전체 unsubscribes 통합) + AI 080번호 COALESCE 적용 |
 | 02-20 | 스팸필터 테스트 시스템 완성 (3대 SMS/LMS 수신, 15초 폴링, 로그 테이블 양쪽 조회) |
 | 02-19 | 업로드 안정화 (BATCH 500, 백그라운드, 11,228건 전량 성공) + customers UNIQUE 키 변경 |

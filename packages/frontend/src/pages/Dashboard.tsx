@@ -1,4 +1,4 @@
-﻿import { Ban, BarChart3, Calendar, Clock, FileText, LogOut, Send, Settings, Sparkles, Users } from 'lucide-react';
+﻿import { BarChart3, Clock, FileText, Sparkles, Users } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { aiApi, campaignsApi, customersApi } from '../api/client';
@@ -6,6 +6,7 @@ import AiCampaignSendModal from '../components/AiCampaignSendModal';
 import AiCustomSendFlow from '../components/AiCustomSendFlow';
 import AiSendTypeModal from '../components/AiSendTypeModal';
 import CustomerDBModal from '../components/CustomerDBModal';
+import DashboardHeader from '../components/DashboardHeader';
 import ResultsModal from '../components/ResultsModal';
 import SpamFilterTestModal from '../components/SpamFilterTestModal';
 import { useAuthStore } from '../stores/authStore';
@@ -2084,95 +2085,41 @@ const campaignData = {
         </div>
       )}
       {/* 헤더 */}
-      <header className="bg-white shadow">
-        <div className="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
-          <div className="cursor-pointer" onClick={() => window.location.reload()}>
-          <h1 className="text-xl font-bold text-gray-800">{user?.company?.name || '한줄로'}</h1>
-            <p className="text-sm text-gray-500">{user?.name}{(user as any)?.department ? ` · ${(user as any).department}` : ''}</p>
-          </div>
-          <div className="flex items-center gap-4">
-          <button
-              onClick={async () => {
-                setShowDirectSend(true);
-                try {
-                  const token = localStorage.getItem('token');
-                  
-                  // 회사 설정에서 080 번호 가져오기
-                  const settingsRes = await fetch('/api/companies/settings', {
-                    headers: { Authorization: `Bearer ${token}` }
-                  });
-                  if (settingsRes.ok) {
-                    const settingsData = await settingsRes.json();
-                    if (settingsData.reject_number) {
-                      setOptOutNumber(settingsData.reject_number);
-                    }
-                  }
-                  
-                  const res = await fetch('/api/companies/callback-numbers', {
-                    headers: { Authorization: `Bearer ${token}` }
-                  });
-                  const data = await res.json();
-                  if (data.success) {
-                    setCallbackNumbers(data.numbers || []);
-                    const defaultCb = data.numbers?.find((n: any) => n.is_default);
-                    if (defaultCb) setSelectedCallback(defaultCb.phone);
-                  }
-                } catch (err) {
-                  console.error('회신번호 로드 실패:', err);
-                }
-              }}
-              className="flex items-center gap-2 px-4 py-2 bg-green-700 hover:bg-green-800 text-white rounded-lg transition-colors"
-            >
-              <Send className="w-4 h-4" />
-              <span className="text-sm font-medium">직접발송</span>
-            </button>
-            <button
-              onClick={() => setShowCalendar(true)}
-              className="flex items-center gap-2 px-4 py-2 border border-gray-300 hover:bg-gray-50 rounded-lg transition-colors"
-            >
-              <Calendar className="w-4 h-4 text-gray-600" />
-              <span className="text-sm font-medium text-gray-700">캘린더</span>
-            </button>
-            <button
-              onClick={() => setShowResults(true)}
-              className="flex items-center gap-2 px-4 py-2 border border-gray-300 hover:bg-gray-50 rounded-lg transition-colors"
-            >
-              <BarChart3 className="w-4 h-4 text-gray-600" />
-              <span className="text-sm font-medium text-gray-700">발송결과</span>
-            </button>
-            <button
-              onClick={() => navigate('/unsubscribes')}
-              className="flex items-center gap-2 px-4 py-2 border border-gray-300 hover:bg-gray-50 rounded-lg transition-colors"
-            >
-              <Ban className="w-4 h-4 text-gray-600" />
-              <span className="text-sm font-medium text-gray-700">수신거부</span>
-            </button>
-            <button
-              onClick={() => navigate('/settings')}
-              className="flex items-center gap-2 px-4 py-2 border border-gray-300 hover:bg-gray-50 rounded-lg transition-colors"
-            >
-              <Settings className="w-4 h-4 text-gray-600" />
-              <span className="text-sm font-medium text-gray-700">설정</span>
-            </button>
-            {user?.userType === 'company_admin' && (
-              <button
-                onClick={() => navigate('/manage')}
-                className="flex items-center gap-2 px-4 py-2 border border-blue-300 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-              >
-                <Users className="w-4 h-4" />
-                <span className="text-sm font-medium">관리</span>
-              </button>
-            )}
-            <button
-              onClick={handleLogout}
-              className="flex items-center gap-2 px-4 py-2 border border-red-200 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-            >
-              <LogOut className="w-4 h-4" />
-              <span className="text-sm font-medium">로그아웃</span>
-            </button>
-          </div>
-        </div>
-      </header>
+      <DashboardHeader
+        companyName={user?.company?.name || '한줄로'}
+        userName={user?.name || ''}
+        department={(user as any)?.department}
+        isCompanyAdmin={user?.userType === 'company_admin'}
+        onDirectSend={async () => {
+          setShowDirectSend(true);
+          try {
+            const token = localStorage.getItem('token');
+            const settingsRes = await fetch('/api/companies/settings', {
+              headers: { Authorization: `Bearer ${token}` }
+            });
+            if (settingsRes.ok) {
+              const settingsData = await settingsRes.json();
+              if (settingsData.reject_number) {
+                setOptOutNumber(settingsData.reject_number);
+              }
+            }
+            const res = await fetch('/api/companies/callback-numbers', {
+              headers: { Authorization: `Bearer ${token}` }
+            });
+            const data = await res.json();
+            if (data.success) {
+              setCallbackNumbers(data.numbers || []);
+              const defaultCb = data.numbers?.find((n: any) => n.is_default);
+              if (defaultCb) setSelectedCallback(defaultCb.phone);
+            }
+          } catch (err) {
+            console.error('회신번호 로드 실패:', err);
+          }
+        }}
+        onCalendar={() => setShowCalendar(true)}
+        onResults={() => setShowResults(true)}
+        onLogout={handleLogout}
+      />
 
       {/* 메인 */}
       <main className="max-w-7xl mx-auto px-4 py-8">
