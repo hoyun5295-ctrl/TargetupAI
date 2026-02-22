@@ -2176,233 +2176,233 @@ const campaignData = {
 
       {/* 메인 */}
       <main className="max-w-7xl mx-auto px-4 py-8">
-        {/* ===== 메인 대시보드 그리드 (4열 통일) ===== */}
-        <div className="grid grid-cols-4 gap-4 mb-6">
-
-          {/* 고객 현황 — col-span-3, row-span-2 */}
-          <div className="col-span-3 row-span-2 bg-white/50 rounded-xl p-6">
-            <div className="flex items-center justify-between mb-5">
-              <span className="text-sm text-gray-500 font-medium">고객 현황</span>
-              <button onClick={() => setShowCustomerDB(true)} className="text-green-700 text-xs font-medium hover:text-green-800 transition-colors">DB 정보조회 →</button>
-            </div>
-            <div className="grid grid-cols-4 gap-4 mb-6">
-              <div className="text-center p-3 bg-gray-50 rounded-lg">
-                <div className="text-2xl font-bold text-gray-800">{parseInt(stats?.total || '0').toLocaleString()}</div>
-                <div className="text-xs text-gray-400 mt-1">전체</div>
+        {/* ===== 상단: 좌(60%) + 우(40%) 통합 ===== */}
+        <div className="flex gap-4 mb-4">
+          {/* ===== 좌측 60%: 고객현황 + 요금제/발송현황 ===== */}
+          <div className="w-[60%] flex flex-col gap-4">
+            {/* 고객 현황 */}
+            <div className="bg-white/50 rounded-xl p-6 border border-green-200 flex-1">
+              <div className="flex items-center justify-between mb-5">
+                <span className="text-sm text-gray-500 font-medium">고객 현황</span>
+                <button onClick={() => setShowCustomerDB(true)} className="text-green-700 text-xs font-medium hover:text-green-800 transition-colors">DB 정보조회 →</button>
               </div>
-              <div className="text-center p-3 bg-gray-50 rounded-lg">
-                <div className="text-2xl font-bold text-green-700">{parseInt(stats?.sms_opt_in_count || '0').toLocaleString()}</div>
-                <div className="text-xs text-gray-400 mt-1">수신동의</div>
-              </div>
-              <div className="text-center p-3 bg-gray-50 rounded-lg">
-                <div className="text-2xl font-bold text-gray-800">{parseInt(stats?.male_count || '0').toLocaleString()}</div>
-                <div className="text-xs text-gray-400 mt-1">남성</div>
-              </div>
-              <div className="text-center p-3 bg-gray-50 rounded-lg">
-                <div className="text-2xl font-bold text-gray-800">{parseInt(stats?.female_count || '0').toLocaleString()}</div>
-                <div className="text-xs text-gray-400 mt-1">여성</div>
-              </div>
-            </div>
-            {/* 연령대 분포 + VIP */}
-            <div className="border-t pt-4">
-              <span className="text-xs text-gray-400 font-medium mb-3 block">연령대 분포</span>
-              <div className="grid grid-cols-7 gap-2">
-                <div className="text-center p-2 bg-gray-50 rounded-lg">
-                  <div className="text-lg font-bold text-amber-600">{parseInt(stats?.vip_count || '0').toLocaleString()}</div>
-                  <div className="text-xs text-gray-400 mt-1">VIP</div>
+              <div className="grid grid-cols-5 gap-3 mb-5">
+                <div className="text-center p-3 bg-gray-50 rounded-lg">
+                  <div className="text-2xl font-bold text-gray-800">{parseInt(stats?.total || '0').toLocaleString()}</div>
+                  <div className="text-xs text-gray-400 mt-1">전체</div>
                 </div>
-                <div className="text-center p-2 bg-gray-50 rounded-lg">
-                  <div className="text-lg font-bold text-gray-700">{parseInt(stats?.age_under20 || '0').toLocaleString()}</div>
-                  <div className="text-xs text-gray-400 mt-1">~19세</div>
+                <div className="text-center p-3 bg-gray-50 rounded-lg">
+                  <div className="text-2xl font-bold text-green-700">{parseInt(stats?.sms_opt_in_count || '0').toLocaleString()}</div>
+                  <div className="text-xs text-gray-400 mt-1">수신동의</div>
                 </div>
-                <div className="text-center p-2 bg-gray-50 rounded-lg">
-                  <div className="text-lg font-bold text-gray-700">{parseInt(stats?.age_20s || '0').toLocaleString()}</div>
-                  <div className="text-xs text-gray-400 mt-1">20대</div>
+                <div className="text-center p-3 bg-gray-50 rounded-lg">
+                  <div className="text-2xl font-bold text-gray-800">{parseInt(stats?.male_count || '0').toLocaleString()}</div>
+                  <div className="text-xs text-gray-400 mt-1">남성</div>
                 </div>
-                <div className="text-center p-2 bg-gray-50 rounded-lg">
-                  <div className="text-lg font-bold text-gray-700">{parseInt(stats?.age_30s || '0').toLocaleString()}</div>
-                  <div className="text-xs text-gray-400 mt-1">30대</div>
+                <div className="text-center p-3 bg-gray-50 rounded-lg">
+                  <div className="text-2xl font-bold text-gray-800">{parseInt(stats?.female_count || '0').toLocaleString()}</div>
+                  <div className="text-xs text-gray-400 mt-1">여성</div>
                 </div>
-                <div className="text-center p-2 bg-gray-50 rounded-lg">
-                  <div className="text-lg font-bold text-gray-700">{parseInt(stats?.age_40s || '0').toLocaleString()}</div>
-                  <div className="text-xs text-gray-400 mt-1">40대</div>
-                </div>
-                <div className="text-center p-2 bg-gray-50 rounded-lg">
-                  <div className="text-lg font-bold text-gray-700">{parseInt(stats?.age_50s || '0').toLocaleString()}</div>
-                  <div className="text-xs text-gray-400 mt-1">50대</div>
-                </div>
-                <div className="text-center p-2 bg-gray-50 rounded-lg">
-                  <div className="text-lg font-bold text-gray-700">{parseInt(stats?.age_60plus || '0').toLocaleString()}</div>
-                  <div className="text-xs text-gray-400 mt-1">60+</div>
+                <div className="text-center p-3 bg-gray-50 rounded-lg">
+                  <div className="text-2xl font-bold text-red-500">-</div>
+                  <div className="text-xs text-gray-400 mt-1">수신거부</div>
                 </div>
               </div>
-            </div>
-          </div>
-
-          {/* AI 추천 발송 — col-start-4 */}
-          {hideAi ? (
-            <button 
-              onClick={() => { setShowDirectTargeting(true); loadEnabledFields(); }}
-              className="p-5 bg-amber-500 hover:bg-amber-600 rounded-xl transition-all hover:shadow-lg text-right flex flex-col justify-between"
-            >
-              <div>
-                <div className="text-base font-bold text-white mb-1">직접 타겟 발송</div>
-                <div className="text-xs text-amber-100">원하는 고객을 직접 필터링</div>
-              </div>
-              <div className="text-xl text-amber-200 self-end">→</div>
-            </button>
-          ) : (
-            <button 
-              onClick={async () => {
-                setShowAiSendType(true);
-                try {
-                  const token = localStorage.getItem('token');
-                  const settingsRes = await fetch('/api/companies/settings', {
-                    headers: { Authorization: `Bearer ${token}` }
-                  });
-                  if (settingsRes.ok) {
-                    const settingsData = await settingsRes.json();
-                    if (settingsData.reject_number) setOptOutNumber(settingsData.reject_number);
-                  }
-                  const cbRes = await fetch('/api/companies/callback-numbers', {
-                    headers: { Authorization: `Bearer ${token}` }
-                  });
-                  const cbData = await cbRes.json();
-                  if (cbData.success) {
-                    setCallbackNumbers(cbData.numbers || []);
-                    const defaultCb = cbData.numbers?.find((n: any) => n.is_default);
-                    if (defaultCb) setSelectedCallback(defaultCb.phone);
-                  }
-                } catch (err) {
-                  console.error('회신번호 로드 실패:', err);
-                }
-              }}
-              disabled={aiLoading}
-              className="p-5 bg-green-700 hover:bg-green-800 rounded-xl transition-all hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed text-right flex flex-col justify-between relative"
-            >
-              <div className="absolute -top-2 right-3 bg-white text-green-700 text-xs font-bold px-2 py-0.5 rounded-full shadow">
-                MAIN
-              </div>
-              {aiLoading ? (
-                <>
-                  <div>
-                    <div className="text-base font-bold text-white mb-1">AI 분석 중...</div>
-                    <div className="text-xs text-green-200">잠시만 기다려주세요</div>
+              {/* 고객 활동 현황 */}
+              <div className="border-t border-green-100 pt-4">
+                <span className="text-xs text-gray-400 font-medium mb-3 block">고객 활동 현황</span>
+                <div className="grid grid-cols-5 gap-3">
+                  <div className="text-center p-3 bg-gray-50 rounded-lg">
+                    <div className="text-lg font-bold text-green-600">-</div>
+                    <div className="text-xs text-gray-400 mt-1">이번 달 신규</div>
                   </div>
-                  <div className="text-xl text-green-300 self-end animate-pulse">⏳</div>
-                </>
-              ) : (
-                <>
-                  <div>
-                    <div className="text-base font-bold text-white mb-1">AI 추천 발송</div>
-                    <div className="text-xs text-green-200">자연어로 AI가 자동 설계</div>
+                  <div className="text-center p-3 bg-gray-50 rounded-lg">
+                    <div className="text-lg font-bold text-blue-600">-</div>
+                    <div className="text-xs text-gray-400 mt-1">30일 내 구매</div>
                   </div>
-                  <div className="text-xl text-green-300 self-end">→</div>
-                </>
-              )}
-            </button>
-          )}
-
-          {/* 직접 타겟 발송 — col-start-4 */}
-          {hideAi ? (
-            !hideFileUpload && (
-            <button 
-              onClick={() => setShowFileUpload(true)}
-              className="p-5 bg-slate-600 hover:bg-slate-700 rounded-xl transition-all hover:shadow-lg text-right flex flex-col justify-between"
-            >
-              <div>
-                <div className="text-base font-bold text-white mb-1">고객 DB 업로드</div>
-                <div className="text-xs text-slate-200">엑셀/CSV로 고객 추가</div>
+                  <div className="text-center p-3 bg-gray-50 rounded-lg">
+                    <div className="text-lg font-bold text-orange-500">-</div>
+                    <div className="text-xs text-gray-400 mt-1">90일+ 미구매</div>
+                  </div>
+                  <div className="text-center p-3 bg-gray-50 rounded-lg">
+                    <div className="text-lg font-bold text-red-500">-</div>
+                    <div className="text-xs text-gray-400 mt-1">이번 달 수신거부</div>
+                  </div>
+                  <div className="text-center p-3 bg-gray-50 rounded-lg">
+                    <div className="text-lg font-bold text-violet-600">-</div>
+                    <div className="text-xs text-gray-400 mt-1">이번 달 재구매</div>
+                  </div>
+                </div>
               </div>
-              <div className="text-xl text-slate-300 self-end">→</div>
-            </button>
-            )
-          ) : (
-            <button 
-              onClick={() => { setShowDirectTargeting(true); loadEnabledFields(); }}
-              className="p-5 bg-amber-500 hover:bg-amber-600 rounded-xl transition-all hover:shadow-lg text-right flex flex-col justify-between"
-            >
-              <div>
-                <div className="text-base font-bold text-white mb-1">직접 타겟 발송</div>
-                <div className="text-xs text-amber-100">원하는 고객을 직접 필터링</div>
-              </div>
-              <div className="text-xl text-amber-200 self-end">→</div>
-            </button>
-          )}
-
-          {/* 요금제 현황 — col-span-1 */}
-          <div 
-            onClick={() => navigate('/pricing')}
-            className="bg-white/50 rounded-xl p-4 cursor-pointer hover:bg-white/80 transition-all"
-          >
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs text-gray-400 font-medium">요금제 현황</span>
-              <span className="text-green-700 text-xs font-medium">요금제 안내 →</span>
             </div>
-            <div className="text-lg font-bold text-gray-800 mb-1">
-              {planInfo?.plan_name || '로딩...'}
-            </div>
-            {planInfo?.plan_code === 'FREE' && !planInfo?.is_trial_expired && (
-              <div className="text-xs text-orange-500 font-medium">
-                트라이얼 D-{Math.max(0, Math.ceil((new Date(planInfo.trial_expires_at).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)))}
-              </div>
-            )}
-            {planInfo?.plan_code === 'FREE' && planInfo?.is_trial_expired && (
-              <div className="text-xs text-red-500 font-medium">트라이얼 만료</div>
-            )}
-            {planInfo?.plan_code !== 'FREE' && (
-              <div className="text-xs text-gray-400">정상 이용 중</div>
-            )}
-          </div>
 
-          {/* 발송 현황 — col-span-2 */}
-          <div className="col-span-2 bg-white/50 rounded-xl p-4">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs text-gray-400 font-medium">발송 현황</span>
-              {balanceInfo?.billingType === 'prepaid' && (
-                <button onClick={() => setShowBalanceModal(true)} className="text-green-700 text-xs font-medium hover:text-green-800 transition-colors">잔액 현황 →</button>
-              )}
-            </div>
-            <div className="grid grid-cols-4 gap-3">
-              <div className="text-center p-2 bg-gray-50 rounded-lg">
-                <div className="text-lg font-bold text-gray-800">{(stats?.monthly_sent || 0).toLocaleString()}</div>
-                <div className="text-xs text-gray-400 mt-1">이번 달</div>
+            {/* 요금제 + 발송현황 */}
+            <div className="flex gap-4">
+              {/* 요금제 현황 */}
+              <div 
+                onClick={() => navigate('/pricing')}
+                className="w-[40%] bg-white/50 rounded-xl p-5 cursor-pointer hover:bg-white/80 transition-all border border-green-200"
+              >
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-xs text-gray-400 font-medium">요금제 현황</span>
+                  <span className="text-green-700 text-xs font-medium">요금제 안내 →</span>
+                </div>
+                <div className="text-lg font-bold text-gray-800 mb-1">
+                  {planInfo?.plan_name || '로딩...'}
+                </div>
+                {planInfo?.plan_code === 'FREE' && !planInfo?.is_trial_expired && (
+                  <div className="text-xs text-orange-500 font-medium">
+                    트라이얼 D-{Math.max(0, Math.ceil((new Date(planInfo.trial_expires_at).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)))}
+                  </div>
+                )}
+                {planInfo?.plan_code === 'FREE' && planInfo?.is_trial_expired && (
+                  <div className="text-xs text-red-500 font-medium">트라이얼 만료</div>
+                )}
+                {planInfo?.plan_code !== 'FREE' && (
+                  <div className="text-xs text-gray-400">정상 이용 중</div>
+                )}
               </div>
-              <div className="text-center p-2 bg-gray-50 rounded-lg">
-                <div className="text-lg font-bold text-gray-800">{stats?.success_rate || '0'}%</div>
-                <div className="text-xs text-gray-400 mt-1">성공률</div>
-              </div>
-              <div className="text-center p-2 bg-gray-50 rounded-lg">
-                <div className="text-lg font-bold text-amber-600">{parseInt(stats?.vip_count || '0').toLocaleString()}</div>
-                <div className="text-xs text-gray-400 mt-1">VIP</div>
-              </div>
-              <div className="text-center p-2 bg-gray-50 rounded-lg">
-                <div className="text-lg font-bold text-gray-800">-</div>
-                <div className="text-xs text-gray-400 mt-1">30일 매출</div>
+
+              {/* 발송 현황 */}
+              <div className="w-[60%] bg-white/50 rounded-xl p-5 border border-amber-200">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-xs text-gray-400 font-medium">발송 현황</span>
+                  {balanceInfo?.billingType === 'prepaid' && (
+                    <button onClick={() => setShowBalanceModal(true)} className="text-green-700 text-xs font-medium hover:text-green-800 transition-colors">잔액 현황 →</button>
+                  )}
+                </div>
+                <div className="grid grid-cols-4 gap-2">
+                  <div className="text-center p-2 bg-gray-50 rounded-lg">
+                    <div className="text-lg font-bold text-gray-800">{(stats?.monthly_sent || 0).toLocaleString()}</div>
+                    <div className="text-xs text-gray-400 mt-1">이번 달</div>
+                  </div>
+                  <div className="text-center p-2 bg-gray-50 rounded-lg">
+                    <div className="text-lg font-bold text-gray-800">{stats?.success_rate || '0'}%</div>
+                    <div className="text-xs text-gray-400 mt-1">성공률</div>
+                  </div>
+                  <div className="text-center p-2 bg-gray-50 rounded-lg">
+                    <div className="text-lg font-bold text-amber-600">{parseInt(stats?.vip_count || '0').toLocaleString()}</div>
+                    <div className="text-xs text-gray-400 mt-1">VIP</div>
+                  </div>
+                  <div className="text-center p-2 bg-gray-50 rounded-lg">
+                    <div className="text-lg font-bold text-gray-800">-</div>
+                    <div className="text-xs text-gray-400 mt-1">30일 매출</div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
 
-          {/* 고객 DB 업로드 — col-span-1 */}
-          {hideAi ? (
-            <div className="hidden" />
-          ) : (
-            <button 
-              onClick={() => setShowFileUpload(true)}
-              className="p-5 bg-slate-600 hover:bg-slate-700 rounded-xl transition-all hover:shadow-lg text-right flex flex-col justify-between"
-            >
-              <div>
-                <div className="text-base font-bold text-white mb-1">고객 DB 업로드</div>
-                <div className="text-xs text-slate-200">엑셀/CSV로 고객 추가</div>
-              </div>
-              <div className="text-xl text-slate-300 self-end">→</div>
-            </button>
-          )}
+          {/* ===== 우측 40%: 버튼 3개 세로 스택 ===== */}
+          <div className="w-[40%] flex flex-col gap-4">
+            {hideAi ? (
+              <>
+                <button 
+                  onClick={() => { setShowDirectTargeting(true); loadEnabledFields(); }}
+                  className="p-5 bg-amber-500 hover:bg-amber-600 rounded-xl transition-all hover:shadow-lg text-right flex-1 flex flex-col justify-between"
+                >
+                  <div>
+                    <div className="text-base font-bold text-white mb-1">직접 타겟 발송</div>
+                    <div className="text-xs text-amber-100">원하는 고객을 직접 필터링</div>
+                  </div>
+                  <div className="text-xl text-amber-200 self-end">→</div>
+                </button>
+                {!hideFileUpload && (
+                <button 
+                  onClick={() => setShowFileUpload(true)}
+                  className="p-5 bg-slate-600 hover:bg-slate-700 rounded-xl transition-all hover:shadow-lg text-right flex-1 flex flex-col justify-between"
+                >
+                  <div>
+                    <div className="text-base font-bold text-white mb-1">고객 DB 업로드</div>
+                    <div className="text-xs text-slate-200">엑셀/CSV로 고객 추가</div>
+                  </div>
+                  <div className="text-xl text-slate-300 self-end">→</div>
+                </button>
+                )}
+              </>
+            ) : (
+              <>
+                {/* AI 추천 발송 */}
+                <button 
+                  onClick={async () => {
+                    setShowAiSendType(true);
+                    try {
+                      const token = localStorage.getItem('token');
+                      const settingsRes = await fetch('/api/companies/settings', {
+                        headers: { Authorization: `Bearer ${token}` }
+                      });
+                      if (settingsRes.ok) {
+                        const settingsData = await settingsRes.json();
+                        if (settingsData.reject_number) setOptOutNumber(settingsData.reject_number);
+                      }
+                      const cbRes = await fetch('/api/companies/callback-numbers', {
+                        headers: { Authorization: `Bearer ${token}` }
+                      });
+                      const cbData = await cbRes.json();
+                      if (cbData.success) {
+                        setCallbackNumbers(cbData.numbers || []);
+                        const defaultCb = cbData.numbers?.find((n: any) => n.is_default);
+                        if (defaultCb) setSelectedCallback(defaultCb.phone);
+                      }
+                    } catch (err) {
+                      console.error('회신번호 로드 실패:', err);
+                    }
+                  }}
+                  disabled={aiLoading}
+                  className="p-5 bg-green-700 hover:bg-green-800 rounded-xl transition-all hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed text-right flex-1 flex flex-col justify-between relative"
+                >
+                  <div className="absolute -top-2 right-3 bg-white text-green-700 text-xs font-bold px-2 py-0.5 rounded-full shadow">
+                    MAIN
+                  </div>
+                  {aiLoading ? (
+                    <>
+                      <div>
+                        <div className="text-base font-bold text-white mb-1">AI 분석 중...</div>
+                        <div className="text-xs text-green-200">잠시만 기다려주세요</div>
+                      </div>
+                      <div className="text-xl text-green-300 self-end animate-pulse">⏳</div>
+                    </>
+                  ) : (
+                    <>
+                      <div>
+                        <div className="text-base font-bold text-white mb-1">AI 추천 발송</div>
+                        <div className="text-xs text-green-200">자연어로 AI가 자동 설계</div>
+                      </div>
+                      <div className="text-xl text-green-300 self-end">→</div>
+                    </>
+                  )}
+                </button>
 
+                {/* 직접 타겟 발송 */}
+                <button 
+                  onClick={() => { setShowDirectTargeting(true); loadEnabledFields(); }}
+                  className="p-5 bg-amber-500 hover:bg-amber-600 rounded-xl transition-all hover:shadow-lg text-right flex-1 flex flex-col justify-between"
+                >
+                  <div>
+                    <div className="text-base font-bold text-white mb-1">직접 타겟 발송</div>
+                    <div className="text-xs text-amber-100">원하는 고객을 직접 필터링</div>
+                  </div>
+                  <div className="text-xl text-amber-200 self-end">→</div>
+                </button>
+
+                {/* 고객 DB 업로드 */}
+                <button 
+                  onClick={() => setShowFileUpload(true)}
+                  className="p-5 bg-slate-600 hover:bg-slate-700 rounded-xl transition-all hover:shadow-lg text-right flex-1 flex flex-col justify-between"
+                >
+                  <div>
+                    <div className="text-base font-bold text-white mb-1">고객 DB 업로드</div>
+                    <div className="text-xs text-slate-200">엑셀/CSV로 고객 추가</div>
+                  </div>
+                  <div className="text-xl text-slate-300 self-end">→</div>
+                </button>
+              </>
+            )}
+          </div>
         </div>
 
         {/* 탭 */}
-        <div className="bg-transparent rounded-lg -mt-6 mb-8">
+        <div className="bg-transparent rounded-lg mb-4">
         <div className="flex border-b hidden">
             <button
               onClick={() => setActiveTab('target')}
@@ -2443,7 +2443,7 @@ const campaignData = {
 {/* 5개 기능 카드 */}
 <div className="grid grid-cols-4 gap-4">
                   {/* 최근 캠페인 */}
-                  <div onClick={() => { loadRecentCampaigns(); setShowRecentCampaigns(true); }} className="bg-white/50 shadow-sm rounded-xl p-6 min-h-[140px] cursor-pointer hover:shadow-lg transition-all text-center">
+                  <div onClick={() => { loadRecentCampaigns(); setShowRecentCampaigns(true); }} className="bg-white/50 shadow-sm rounded-xl p-6 min-h-[140px] cursor-pointer hover:shadow-lg transition-all text-center border border-green-200">
                     <BarChart3 className="w-8 h-8 mx-auto mb-3 text-green-700" />
                     <div className="font-semibold text-gray-800 mb-1">최근 캠페인</div>
                     <div className="text-xs text-gray-500 mb-3">최근 발송 내역</div>
@@ -2451,7 +2451,7 @@ const campaignData = {
                   </div>
 
                   {/* 추천 템플릿 */}
-                  <div onClick={() => setShowTemplates(true)} className="bg-white/50 shadow-sm rounded-xl p-6 min-h-[140px] cursor-pointer hover:shadow-lg transition-all text-center">
+                  <div onClick={() => setShowTemplates(true)} className="bg-white/50 shadow-sm rounded-xl p-6 min-h-[140px] cursor-pointer hover:shadow-lg transition-all text-center border border-amber-200">
                     <FileText className="w-8 h-8 mx-auto mb-3 text-amber-500" />
                     <div className="font-semibold text-gray-800 mb-1">추천 템플릿</div>
                     <div className="text-xs text-gray-500 mb-3">원클릭 적용</div>
@@ -2459,7 +2459,7 @@ const campaignData = {
                   </div>
 
                   {/* 고객 인사이트 */}
-                  <div onClick={() => setShowInsights(true)} className="bg-white/50 shadow-sm rounded-xl p-6 min-h-[140px] cursor-pointer hover:shadow-lg transition-all text-center">
+                  <div onClick={() => setShowInsights(true)} className="bg-white/50 shadow-sm rounded-xl p-6 min-h-[140px] cursor-pointer hover:shadow-lg transition-all text-center border border-green-200">
                     <Users className="w-8 h-8 mx-auto mb-3 text-green-600" />
                     <div className="font-semibold text-gray-800 mb-1">고객 인사이트</div>
                     <div className="text-xs text-gray-500 mb-3">고객 현황 분석</div>
@@ -2467,7 +2467,7 @@ const campaignData = {
                   </div>
 
                   {/* 예약 대기 */}
-                  <div onClick={() => { loadScheduledCampaigns(); setShowScheduled(true); }} className="bg-white/50 shadow-sm rounded-xl p-6 min-h-[140px] cursor-pointer hover:shadow-lg transition-all text-center">
+                  <div onClick={() => { loadScheduledCampaigns(); setShowScheduled(true); }} className="bg-white/50 shadow-sm rounded-xl p-6 min-h-[140px] cursor-pointer hover:shadow-lg transition-all text-center border border-amber-200">
                     <Clock className="w-8 h-8 mx-auto mb-3 text-amber-500" />
                     <div className="font-semibold text-gray-800 mb-1">예약 대기</div>
                     <div className="text-xs text-gray-500 mb-3">곧 발송될 캠페인</div>
