@@ -2325,7 +2325,30 @@ const campaignData = {
 
               {/* AI 추천 발송 - 초록 */}
               <button 
-                onClick={() => setShowAiSendType(true)}
+                onClick={async () => {
+                  setShowAiSendType(true);
+                  try {
+                    const token = localStorage.getItem('token');
+                    const settingsRes = await fetch('/api/companies/settings', {
+                      headers: { Authorization: `Bearer ${token}` }
+                    });
+                    if (settingsRes.ok) {
+                      const settingsData = await settingsRes.json();
+                      if (settingsData.reject_number) setOptOutNumber(settingsData.reject_number);
+                    }
+                    const cbRes = await fetch('/api/companies/callback-numbers', {
+                      headers: { Authorization: `Bearer ${token}` }
+                    });
+                    const cbData = await cbRes.json();
+                    if (cbData.success) {
+                      setCallbackNumbers(cbData.numbers || []);
+                      const defaultCb = cbData.numbers?.find((n: any) => n.is_default);
+                      if (defaultCb) setSelectedCallback(defaultCb.phone);
+                    }
+                  } catch (err) {
+                    console.error('회신번호 로드 실패:', err);
+                  }
+                }}
                 disabled={aiLoading}
                 className="p-6 bg-green-700 hover:bg-green-800 rounded-xl transition-all hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed text-right h-[140px] flex flex-col justify-between relative"
               >
