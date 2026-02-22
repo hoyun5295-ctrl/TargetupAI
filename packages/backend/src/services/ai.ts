@@ -811,6 +811,15 @@ const PARSE_BRIEFING_SYSTEM = `당신은 마케팅 프로모션 분석 전문가
 - 할인율, 기간, 조건 등은 브리핑 원문 그대로 반영
 - 여러 혜택이 있으면 benefit에 모두 나열
 
+## 타겟 조건 파싱 규칙
+- 브리핑에서 발송 대상/타겟에 대한 언급을 별도로 구조화
+- "VIP 고객", "여성", "3개월 내 구매", "강남점", "20대" 등 타겟 관련 키워드 추출
+- 언급이 없으면 모든 필드를 빈 문자열로 설정 (= 전체 고객 대상)
+- 성별: "남성", "여성" 또는 빈 문자열
+- 등급: "VIP", "GOLD", "SILVER" 등 원문 그대로
+- 연령대: "20대", "30~40대" 등 원문 그대로
+- 구매 기간: "최근 3개월", "6개월 이내" 등 원문 그대로
+
 ## 출력 형식
 반드시 아래 JSON 형식으로만 응답하세요 (다른 텍스트 없이):
 
@@ -820,11 +829,46 @@ const PARSE_BRIEFING_SYSTEM = `당신은 마케팅 프로모션 분석 전문가
     "benefit": "혜택/할인 내용 (여러 개면 + 로 연결)",
     "condition": "적용 조건 (없으면 빈 문자열)",
     "period": "기간 (없으면 빈 문자열)",
-    "target": "대상 고객 (없으면 빈 문자열)",
+    "target": "대상 고객 요약 (없으면 빈 문자열)",
     "couponCode": "쿠폰코드 (없으면 빈 문자열)",
     "extra": "기타 참고 사항 (없으면 빈 문자열)"
+  },
+  "targetCondition": {
+    "description": "타겟 조건 자연어 요약 (예: 3개월 내 구매한 VIP 여성 고객)",
+    "gender": "성별 (남성/여성/빈 문자열)",
+    "grade": "등급 (VIP/GOLD 등, 없으면 빈 문자열)",
+    "ageRange": "연령대 (20대, 30~40대 등, 없으면 빈 문자열)",
+    "region": "지역 (서울, 강남 등, 없으면 빈 문자열)",
+    "purchasePeriod": "구매 기간 조건 (최근 3개월 등, 없으면 빈 문자열)",
+    "storeName": "매장명/브랜드명 (없으면 빈 문자열)",
+    "minPurchaseAmount": "최소 구매금액 조건 (없으면 빈 문자열)",
+    "extra": "기타 타겟 조건 (없으면 빈 문자열)"
   }
 }`;
+
+export interface TargetCondition {
+  description: string;
+  gender: string;
+  grade: string;
+  ageRange: string;
+  region: string;
+  purchasePeriod: string;
+  storeName: string;
+  minPurchaseAmount: string;
+  extra: string;
+}
+
+const EMPTY_TARGET_CONDITION: TargetCondition = {
+  description: '',
+  gender: '',
+  grade: '',
+  ageRange: '',
+  region: '',
+  purchasePeriod: '',
+  storeName: '',
+  minPurchaseAmount: '',
+  extra: '',
+};
 
 export async function parseBriefing(briefing: string): Promise<{
   promotionCard: {
@@ -836,6 +880,7 @@ export async function parseBriefing(briefing: string): Promise<{
     couponCode?: string;
     extra?: string;
   };
+  targetCondition: TargetCondition;
 }> {
   if (!process.env.ANTHROPIC_API_KEY) {
     return {
@@ -847,7 +892,8 @@ export async function parseBriefing(briefing: string): Promise<{
         target: '',
         couponCode: '',
         extra: '',
-      }
+      },
+      targetCondition: { ...EMPTY_TARGET_CONDITION },
     };
   }
 
@@ -874,7 +920,14 @@ export async function parseBriefing(briefing: string): Promise<{
     }
 
     const result = JSON.parse(jsonStr);
-    return result;
+    return {
+      promotionCard: result.promotionCard || {
+        name: '', benefit: '', condition: '', period: '', target: '', couponCode: '', extra: '',
+      },
+      targetCondition: result.targetCondition
+        ? { ...EMPTY_TARGET_CONDITION, ...result.targetCondition }
+        : { ...EMPTY_TARGET_CONDITION },
+    };
   } catch (error) {
     console.error('브리핑 파싱 오류:', error);
     return {
@@ -886,7 +939,8 @@ export async function parseBriefing(briefing: string): Promise<{
         target: '',
         couponCode: '',
         extra: '',
-      }
+      },
+      targetCondition: { ...EMPTY_TARGET_CONDITION },
     };
   }
 }
