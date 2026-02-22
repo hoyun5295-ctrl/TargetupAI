@@ -455,7 +455,9 @@ export default function Dashboard() {
   const [editingAiMsg, setEditingAiMsg] = useState<number | null>(null);
   const [showAiSendModal, setShowAiSendModal] = useState(false);
   const [showAiSendType, setShowAiSendType] = useState(false);
-const [showAiCustomFlow, setShowAiCustomFlow] = useState(false);
+  const [showAiCustomFlow, setShowAiCustomFlow] = useState(false);
+  const [customSendData, setCustomSendData] = useState<any>(null);
+  const [showCustomSendModal, setShowCustomSendModal] = useState(false);
   const [showSpamFilter, setShowSpamFilter] = useState(false);
   const [spamFilterData, setSpamFilterData] = useState<{sms?: string; lms?: string; callback: string; msgType: 'SMS'|'LMS'|'MMS'}>({callback:'',msgType:'SMS'});
   const [sendTimeOption, setSendTimeOption] = useState<'ai' | 'now' | 'custom'>('now');
@@ -1722,6 +1724,101 @@ const campaignData = {
   }
 };
 
+  // AI 맞춤한줄 발송 처리
+  const handleAiCustomSend = async (modalData: {
+    campaignName: string;
+    sendTimeOption: 'ai' | 'now' | 'custom';
+    customSendTime: string;
+    selectedCallback: string;
+    useIndividualCallback: boolean;
+  }) => {
+    if (isSending || !customSendData) return;
+
+    const _sendTimeOption = modalData.sendTimeOption;
+    const _customSendTime = modalData.customSendTime;
+    const _selectedCallback = modalData.selectedCallback;
+    const _useIndividualCallback = modalData.useIndividualCallback;
+    const _campaignName = modalData.campaignName;
+
+    if (!_selectedCallback && !_useIndividualCallback) {
+      alert('회신번호를 선택해주세요');
+      return;
+    }
+
+    setIsSending(true);
+    try {
+      const variant = customSendData.variant;
+      const channelType = customSendData.channel; // SMS or LMS
+
+      // 발송시간 계산
+      let scheduledAt: string | null = null;
+      if (_sendTimeOption === 'custom' && _customSendTime) {
+        scheduledAt = new Date(_customSendTime).toISOString();
+      }
+      // AI 맞춤한줄은 AI 추천시간 없으므로 'ai' 옵션 없음, 'now'면 null
+
+      // 메시지 내용 (광고문구 래핑)
+      let messageContent = variant.message_text || '';
+      if (isAd) {
+        const prefix = channelType === 'SMS' ? '(광고)' : '(광고) ';
+        const suffix = channelType === 'SMS'
+          ? `\n무료거부${optOutNumber.replace(/-/g, '')}`
+          : `\n무료수신거부 ${formatRejectNumber(optOutNumber)}`;
+        messageContent = prefix + messageContent + suffix;
+      }
+
+      const campaignData = {
+        campaignName: _campaignName,
+        messageType: channelType,
+        sendChannel: 'sms',
+        messageContent,
+        targetFilter: customSendData.targetFilters || {},
+        isAd: isAd,
+        scheduledAt,
+        eventStartDate: null,
+        eventEndDate: null,
+        callback: _useIndividualCallback ? null : _selectedCallback,
+        useIndividualCallback: _useIndividualCallback,
+        subject: variant.subject || '',
+        mmsImagePaths: [],
+      };
+
+      console.log('=== AI 맞춤한줄 발송 디버깅 ===');
+      console.log('customSendData:', customSendData);
+      console.log('campaignData:', campaignData);
+
+      const response = await campaignsApi.create(campaignData);
+
+      const campaignId = response.data.campaign?.id;
+      if (campaignId) {
+        await campaignsApi.send(campaignId);
+      }
+
+      // 모달 닫기 + 초기화
+      setShowCustomSendModal(false);
+      setShowAiCustomFlow(false);
+      setCustomSendData(null);
+
+      const sendInfoText = _sendTimeOption === 'now' ? '즉시 발송 완료' :
+        `예약 완료 (${_customSendTime ? new Date(_customSendTime).toLocaleString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''})`;
+      setSuccessSendInfo(sendInfoText);
+      setSuccessCampaignId(response.data.campaign?.id || '');
+      setShowSuccess(true);
+      loadRecentCampaigns();
+      loadScheduledCampaigns();
+
+    } catch (error: any) {
+      console.error('AI 맞춤한줄 발송 실패:', error);
+      if (error.response?.status === 402 && error.response?.data?.insufficientBalance) {
+        setShowInsufficientBalance({ show: true, balance: error.response.data.balance, required: error.response.data.requiredAmount });
+      } else {
+        alert(error.response?.data?.error || '캠페인 생성에 실패했습니다.');
+      }
+    } finally {
+      setIsSending(false);
+    }
+  };
+
   // 담당자 사전수신
   const handleTestSend = async () => {
     setTestSending(true);
@@ -1879,7 +1976,11 @@ const campaignData = {
       {/* AI 맞춤한줄 플로우 */}
       {showAiCustomFlow && (
         <AiCustomSendFlow
-          onClose={() => setShowAiCustomFlow(false)}
+          onClose={() => { setShowAiCustomFlow(false); setCustomSendData(null); }}
+          onConfirmSend={(data) => {
+            setCustomSendData(data);
+            setShowCustomSendModal(true);
+          }}
           brandName={user?.company?.name || '브랜드'}
           callbackNumbers={callbackNumbers}
           selectedCallback={selectedCallback}
@@ -1908,10 +2009,32 @@ const campaignData = {
           mmsImages={mmsUploadedImages}
           subject={aiResult?.messages?.[selectedAiMsgIdx]?.subject}
           usePersonalization={aiResult?.usePersonalization}
-        />
-      )}
-
-      {/* AI 프롬프트 입력 안내 모달 */}
+          />
+        )}
+  
+        {/* AI 맞춤한줄 발송 확정 모달 */}
+        {showCustomSendModal && customSendData && (
+          <AiCampaignSendModal
+            onClose={() => { setShowCustomSendModal(false); setCustomSendData(null); }}
+            onSend={(data) => handleAiCustomSend(data)}
+            isSending={isSending}
+            messageText={customSendData.variant?.message_text || ''}
+            selectedChannel={customSendData.channel}
+            suggestedCampaignName={customSendData.promotionCard?.name || 'AI 맞춤 캠페인'}
+            recommendedTime={''}
+            targetDescription={customSendData.targetCondition?.description || '전체 고객'}
+            targetCount={customSendData.estimatedCount || 0}
+            callbackNumbers={callbackNumbers}
+            defaultCallback={selectedCallback}
+            defaultUseIndividual={useIndividualCallback}
+            isAd={isAd}
+            optOutNumber={optOutNumber}
+            subject={customSendData.variant?.subject}
+            usePersonalization={true}
+          />
+        )}
+  
+        {/* AI 프롬프트 입력 안내 모달 */}
       {showPromptAlert && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">

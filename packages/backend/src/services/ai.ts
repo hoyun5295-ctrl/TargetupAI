@@ -820,6 +820,16 @@ const PARSE_BRIEFING_SYSTEM = `당신은 마케팅 프로모션 분석 전문가
 - 연령대: "20대", "30~40대" 등 원문 그대로
 - 구매 기간: "최근 3개월", "6개월 이내" 등 원문 그대로
 
+## targetFilters 작성 규칙 (DB 쿼리용 구조화 필터)
+- targetCondition과 별도로, 실제 DB 쿼리에 사용할 구조화 필터를 생성
+- 브리핑에서 명시적으로 언급된 조건만 포함 — 언급 안 된 필드는 아예 제외
+- 타겟 조건이 전혀 없으면 빈 객체 {} 반환 (= 전체 고객)
+- 성별: 반드시 "M"(남성) 또는 "F"(여성)로 변환
+- 등급: 배열 형태로 ["VIP"], ["VIP","GOLD"] 등
+- 연령: [최소나이, 최대나이] 범위로 변환 — "20대"→[20,29], "30~40대"→[30,49]
+- 구매 기간: "최근 N개월"은 오늘 날짜(user 메시지에 명시) 기준 ISO 날짜(YYYY-MM-DD)로 변환
+- operator 종류: "eq"(같음), "in"(포함), "gte"(이상), "lte"(이하)
+
 ## 출력 형식
 반드시 아래 JSON 형식으로만 응답하세요 (다른 텍스트 없이):
 
@@ -843,6 +853,16 @@ const PARSE_BRIEFING_SYSTEM = `당신은 마케팅 프로모션 분석 전문가
     "storeName": "매장명/브랜드명 (없으면 빈 문자열)",
     "minPurchaseAmount": "최소 구매금액 조건 (없으면 빈 문자열)",
     "extra": "기타 타겟 조건 (없으면 빈 문자열)"
+  },
+  "targetFilters": {
+    "gender": "F",
+    "grade": { "value": ["VIP"], "operator": "in" },
+    "age": [30, 49],
+    "region": { "value": ["서울"], "operator": "in" },
+    "recent_purchase_date": { "value": "2025-11-22", "operator": "gte" },
+    "total_purchase_amount": { "value": 50000, "operator": "gte" },
+    "points": { "value": 1000, "operator": "gte" },
+    "store_name": { "value": "강남점", "operator": "eq" }
   }
 }`;
 
@@ -881,6 +901,7 @@ export async function parseBriefing(briefing: string): Promise<{
     extra?: string;
   };
   targetCondition: TargetCondition;
+  targetFilters: Record<string, any>;
 }> {
   if (!process.env.ANTHROPIC_API_KEY) {
     return {
@@ -894,6 +915,7 @@ export async function parseBriefing(briefing: string): Promise<{
         extra: '',
       },
       targetCondition: { ...EMPTY_TARGET_CONDITION },
+      targetFilters: {},
     };
   }
 
@@ -903,7 +925,7 @@ export async function parseBriefing(briefing: string): Promise<{
       max_tokens: 1024,
       temperature: 0.3,
       system: PARSE_BRIEFING_SYSTEM,
-      messages: [{ role: 'user', content: `다음 프로모션 브리핑을 구조화해주세요:\n\n${briefing}` }],
+      messages: [{ role: 'user', content: `오늘 날짜: ${getKoreanToday()}\n\n다음 프로모션 브리핑을 구조화해주세요:\n\n${briefing}` }],
     });
 
     const text = response.content[0].type === 'text' ? response.content[0].text : '';
@@ -927,6 +949,7 @@ export async function parseBriefing(briefing: string): Promise<{
       targetCondition: result.targetCondition
         ? { ...EMPTY_TARGET_CONDITION, ...result.targetCondition }
         : { ...EMPTY_TARGET_CONDITION },
+      targetFilters: result.targetFilters || {},
     };
   } catch (error) {
     console.error('브리핑 파싱 오류:', error);
@@ -941,6 +964,7 @@ export async function parseBriefing(briefing: string): Promise<{
         extra: '',
       },
       targetCondition: { ...EMPTY_TARGET_CONDITION },
+      targetFilters: {},
     };
   }
 }

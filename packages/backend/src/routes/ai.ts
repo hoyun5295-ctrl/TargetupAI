@@ -4,6 +4,169 @@ import { authenticate } from '../middlewares/auth';
 import { checkAPIStatus, extractVarCatalog, generateCustomMessages, generateMessages, parseBriefing, recommendTarget } from '../services/ai';
 import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getGenderVariants, getRegionVariants } from '../utils/normalize';
 
+// ============================================================
+// 공통: AI 필터 → SQL WHERE 절 변환 (recommend-target, parse-briefing 공용)
+// ============================================================
+function buildFilterWhereClause(filters: any, startParamIndex: number): {
+  sql: string;
+  params: any[];
+  nextIndex: number;
+} {
+  let filterWhere = '';
+  const filterParams: any[] = [];
+  let paramIndex = startParamIndex;
+
+  const getValue = (field: any) => {
+    if (!field) return null;
+    if (typeof field === 'object' && field.value !== undefined) return field.value;
+    return field;
+  };
+
+  // gender
+  const gender = getValue(filters?.gender);
+  if (gender) {
+    const standardGender = String(gender).toLowerCase();
+    const genderKey = ['m', 'male', '남', '남자', '남성'].includes(standardGender) ? 'M'
+      : ['f', 'female', '여', '여자', '여성'].includes(standardGender) ? 'F' : gender;
+    const genderResult = buildGenderFilter(genderKey, paramIndex);
+    filterWhere += genderResult.sql;
+    filterParams.push(...genderResult.params);
+    paramIndex = genderResult.nextIndex;
+  }
+
+  // age
+  const age = getValue(filters?.age);
+  if (age && Array.isArray(age) && age.length === 2) {
+    const currentYear = new Date().getFullYear();
+    filterWhere += ` AND (${currentYear} - birth_year) >= $${paramIndex++}`;
+    filterParams.push(age[0]);
+    filterWhere += ` AND (${currentYear} - birth_year) <= $${paramIndex++}`;
+    filterParams.push(age[1]);
+  }
+
+  // grade
+  const gradeFilter = filters?.grade;
+  const grade = getValue(gradeFilter);
+  if (grade) {
+    const gradeOp = gradeFilter?.operator || 'eq';
+    if (gradeOp === 'in' && Array.isArray(grade)) {
+      const gradeResult = buildGradeFilter(grade, paramIndex);
+      filterWhere += gradeResult.sql;
+      filterParams.push(...gradeResult.params);
+      paramIndex = gradeResult.nextIndex;
+    } else {
+      const gradeResult = buildGradeFilter(String(grade), paramIndex);
+      filterWhere += gradeResult.sql;
+      filterParams.push(...gradeResult.params);
+      paramIndex = gradeResult.nextIndex;
+    }
+  }
+
+  // region
+  const regionFilter = filters?.region;
+  const region = getValue(regionFilter);
+  if (region) {
+    const regionOp = regionFilter?.operator || 'eq';
+    if (regionOp === 'in' && Array.isArray(region)) {
+      const allVariants = (region as string[]).flatMap(r => getRegionVariants(r));
+      filterWhere += ` AND region = ANY($${paramIndex++}::text[])`;
+      filterParams.push(allVariants);
+    } else {
+      const regionResult = buildRegionFilter(String(region), paramIndex);
+      filterWhere += regionResult.sql;
+      filterParams.push(...regionResult.params);
+      paramIndex = regionResult.nextIndex;
+    }
+  }
+
+  // points
+  const pointsFilter = filters?.points;
+  const points = getValue(pointsFilter);
+  if (points !== null && points !== undefined) {
+    const pointsOp = pointsFilter?.operator || 'gte';
+    if (pointsOp === 'gte') {
+      filterWhere += ` AND points >= $${paramIndex++}`;
+      filterParams.push(points);
+    } else if (pointsOp === 'lte') {
+      filterWhere += ` AND points <= $${paramIndex++}`;
+      filterParams.push(points);
+    } else if (pointsOp === 'between' && Array.isArray(points)) {
+      filterWhere += ` AND points >= $${paramIndex++} AND points <= $${paramIndex++}`;
+      filterParams.push(points[0], points[1]);
+    }
+  }
+
+  // total_purchase_amount
+  const purchaseFilter = filters?.total_purchase_amount;
+  const purchaseAmt = getValue(purchaseFilter);
+  if (purchaseAmt !== null && purchaseAmt !== undefined) {
+    const purchaseOp = purchaseFilter?.operator || 'gte';
+    if (purchaseOp === 'gte') {
+      filterWhere += ` AND total_purchase_amount >= $${paramIndex++}`;
+      filterParams.push(purchaseAmt);
+    } else if (purchaseOp === 'lte') {
+      filterWhere += ` AND total_purchase_amount <= $${paramIndex++}`;
+      filterParams.push(purchaseAmt);
+    }
+  }
+
+  // recent_purchase_date
+  const recentDateFilter = filters?.recent_purchase_date;
+  const recentDate = getValue(recentDateFilter);
+  if (recentDate) {
+    const dateOp = recentDateFilter?.operator || 'gte';
+    if (dateOp === 'lte') {
+      filterWhere += ` AND recent_purchase_date <= $${paramIndex++}`;
+      filterParams.push(recentDate);
+    } else if (dateOp === 'gte') {
+      filterWhere += ` AND recent_purchase_date >= $${paramIndex++}`;
+      filterParams.push(recentDate);
+    }
+  }
+
+  // store_name
+  const storeNameFilter = filters?.store_name;
+  const storeName = getValue(storeNameFilter);
+  if (storeName) {
+    const storeOp = storeNameFilter?.operator || 'eq';
+    if (storeOp === 'eq') {
+      filterWhere += ` AND store_name = $${paramIndex++}`;
+      filterParams.push(storeName);
+    } else if (storeOp === 'in' && Array.isArray(storeName)) {
+      filterWhere += ` AND store_name = ANY($${paramIndex++}::text[])`;
+      filterParams.push(storeName);
+    }
+  }
+
+  // custom_fields
+  Object.keys(filters || {}).forEach(key => {
+    if (key.startsWith('custom_fields.')) {
+      const fieldName = key.replace('custom_fields.', '');
+      const condition = filters[key];
+      const value = getValue(condition);
+      const operator = condition?.operator || 'eq';
+
+      if (value !== null && value !== undefined) {
+        if (operator === 'eq') {
+          filterWhere += ` AND custom_fields->>'${fieldName}' = $${paramIndex++}`;
+          filterParams.push(value);
+        } else if (operator === 'gte') {
+          filterWhere += ` AND (custom_fields->>'${fieldName}')::numeric >= $${paramIndex++}`;
+          filterParams.push(value);
+        } else if (operator === 'lte') {
+          filterWhere += ` AND (custom_fields->>'${fieldName}')::numeric <= $${paramIndex++}`;
+          filterParams.push(value);
+        } else if (operator === 'in' && Array.isArray(value)) {
+          filterWhere += ` AND custom_fields->>'${fieldName}' = ANY($${paramIndex++})`;
+          filterParams.push(value);
+        }
+      }
+    }
+  });
+
+  return { sql: filterWhere, params: filterParams, nextIndex: paramIndex };
+}
+
 const router = Router();
 
 router.use(authenticate);
@@ -152,136 +315,8 @@ router.post('/recommend-target', async (req: Request, res: Response) => {
 
     console.log('AI 필터 결과:', JSON.stringify(result.filters, null, 2));
 
-    // 실제 타겟 수 계산
-    let filterWhere = '';
-    const filterParams: any[] = [];
-    let paramIndex = baseParams.length + 1;
-
-    const getValue = (field: any) => {
-      if (!field) return null;
-      if (typeof field === 'object' && field.value !== undefined) return field.value;
-      return field;
-    };
-
-    const gender = getValue(result.filters?.gender);
-    if (gender) {
-      const standardGender = String(gender).toLowerCase();
-      const genderKey = ['m', 'male', '남', '남자', '남성'].includes(standardGender) ? 'M'
-        : ['f', 'female', '여', '여자', '여성'].includes(standardGender) ? 'F' : gender;
-      const genderResult = buildGenderFilter(genderKey, paramIndex);
-      filterWhere += genderResult.sql;
-      filterParams.push(...genderResult.params);
-      paramIndex = genderResult.nextIndex;
-    }
-
-    const age = getValue(result.filters?.age);
-    if (age && Array.isArray(age) && age.length === 2) {
-      filterWhere += ` AND (2026 - birth_year) >= $${paramIndex++}`;
-      filterParams.push(age[0]);
-      filterWhere += ` AND (2026 - birth_year) <= $${paramIndex++}`;
-      filterParams.push(age[1]);
-    }
-
-    const gradeFilter = result.filters?.grade;
-    const grade = getValue(gradeFilter);
-    if (grade) {
-      const gradeOp = gradeFilter?.operator || 'eq';
-      if (gradeOp === 'in' && Array.isArray(grade)) {
-        const gradeResult = buildGradeFilter(grade, paramIndex);
-        filterWhere += gradeResult.sql;
-        filterParams.push(...gradeResult.params);
-        paramIndex = gradeResult.nextIndex;
-      } else {
-        const gradeResult = buildGradeFilter(String(grade), paramIndex);
-        filterWhere += gradeResult.sql;
-        filterParams.push(...gradeResult.params);
-        paramIndex = gradeResult.nextIndex;
-      }
-    }
-
-    const regionFilter = result.filters?.region;
-    const region = getValue(regionFilter);
-    if (region) {
-      const regionOp = regionFilter?.operator || 'eq';
-      if (regionOp === 'in' && Array.isArray(region)) {
-        const allVariants = (region as string[]).flatMap(r => getRegionVariants(r));
-        filterWhere += ` AND region = ANY($${paramIndex++}::text[])`;
-        filterParams.push(allVariants);
-      } else {
-        const regionResult = buildRegionFilter(String(region), paramIndex);
-        filterWhere += regionResult.sql;
-        filterParams.push(...regionResult.params);
-        paramIndex = regionResult.nextIndex;
-      }
-    }
-
-    const pointsFilter = result.filters?.points;
-    const points = getValue(pointsFilter);
-    if (points !== null && points !== undefined) {
-      const pointsOp = pointsFilter?.operator || 'gte';
-      if (pointsOp === 'gte') {
-        filterWhere += ` AND points >= $${paramIndex++}`;
-        filterParams.push(points);
-      } else if (pointsOp === 'lte') {
-        filterWhere += ` AND points <= $${paramIndex++}`;
-        filterParams.push(points);
-      } else if (pointsOp === 'between' && Array.isArray(points)) {
-        filterWhere += ` AND points >= $${paramIndex++} AND points <= $${paramIndex++}`;
-        filterParams.push(points[0], points[1]);
-      }
-    }
-
-    const purchaseFilter = result.filters?.total_purchase_amount;
-    const purchaseAmt = getValue(purchaseFilter);
-    if (purchaseAmt !== null && purchaseAmt !== undefined) {
-      const purchaseOp = purchaseFilter?.operator || 'gte';
-      if (purchaseOp === 'gte') {
-        filterWhere += ` AND total_purchase_amount >= $${paramIndex++}`;
-        filterParams.push(purchaseAmt);
-      } else if (purchaseOp === 'lte') {
-        filterWhere += ` AND total_purchase_amount <= $${paramIndex++}`;
-        filterParams.push(purchaseAmt);
-      }
-    }
-
-    const recentDateFilter = result.filters?.recent_purchase_date;
-    const recentDate = getValue(recentDateFilter);
-    if (recentDate) {
-      const dateOp = recentDateFilter?.operator || 'lte';
-      if (dateOp === 'lte') {
-        filterWhere += ` AND recent_purchase_date <= $${paramIndex++}`;
-        filterParams.push(recentDate);
-      } else if (dateOp === 'gte') {
-        filterWhere += ` AND recent_purchase_date >= $${paramIndex++}`;
-        filterParams.push(recentDate);
-      }
-    }
-
-    // custom_fields 처리
-    Object.keys(result.filters || {}).forEach(key => {
-      if (key.startsWith('custom_fields.')) {
-        const fieldName = key.replace('custom_fields.', '');
-        const condition = result.filters[key];
-        const value = getValue(condition);
-        const operator = condition?.operator || 'eq';
-
-        if (value !== null && value !== undefined) {
-          if (operator === 'eq') {
-            filterWhere += ` AND custom_fields->>'${fieldName}' = $${paramIndex++}`;
-            filterParams.push(value);
-          } else if (operator === 'gte') {
-            filterWhere += ` AND (custom_fields->>'${fieldName}')::numeric >= $${paramIndex++}`;
-            filterParams.push(value);
-          } else if (operator === 'lte') {
-            filterWhere += ` AND (custom_fields->>'${fieldName}')::numeric <= $${paramIndex++}`;
-            filterParams.push(value);
-          } else if (operator === 'in' && Array.isArray(value)) {
-            filterWhere += ` AND custom_fields->>'${fieldName}' = ANY($${paramIndex++})`;
-            filterParams.push(value);
-          }
-        }
-      }
-    });
+    // 실제 타겟 수 계산 — 공통 함수 사용
+    const { sql: filterWhere, params: filterParams } = buildFilterWhereClause(result.filters, baseParams.length + 1);
 
     const actualCountResult = await query(
       `SELECT COUNT(*) FROM customers c
@@ -311,10 +346,13 @@ router.post('/recommend-target', async (req: Request, res: Response) => {
   }
 });
 
-// POST /api/ai/parse-briefing - 프로모션 브리핑 → 구조화 파싱
+// POST /api/ai/parse-briefing - 프로모션 브리핑 → 구조화 파싱 + 타겟 고객 수 산출
 router.post('/parse-briefing', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
+    const userType = req.user?.userType;
+
     if (!companyId) {
       return res.status(403).json({ error: '회사 권한이 필요합니다' });
     }
@@ -325,7 +363,45 @@ router.post('/parse-briefing', async (req: Request, res: Response) => {
     }
 
     const result = await parseBriefing(briefing.trim());
-    return res.json(result);
+
+    // 사용자 매장 필터 (일반 사용자는 본인 store_codes만)
+    let storeFilter = '';
+    const baseParams: any[] = [companyId];
+
+    if (userType === 'company_user' && userId) {
+      const userResult = await query('SELECT store_codes FROM users WHERE id = $1', [userId]);
+      const storeCodes = userResult.rows[0]?.store_codes;
+      if (storeCodes && storeCodes.length > 0) {
+        storeFilter = ' AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = $1 AND store_code = ANY($2::text[]))';
+        baseParams.push(storeCodes);
+      }
+    }
+
+    // targetFilters 기반 고객 수 산출
+    const targetFilters = result.targetFilters || {};
+    const { sql: filterWhere, params: filterParams } = buildFilterWhereClause(targetFilters, baseParams.length + 1);
+
+    const countResult = await query(
+      `SELECT COUNT(*) FROM customers c
+       WHERE c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true${storeFilter} ${filterWhere}
+       AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.company_id = c.company_id AND u.phone = c.phone)`,
+      [...baseParams, ...filterParams]
+    );
+    const estimatedCount = parseInt(countResult.rows[0].count);
+
+    const unsubResult = await query(
+      `SELECT COUNT(*) FROM customers c
+       WHERE c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true${storeFilter} ${filterWhere}
+       AND EXISTS (SELECT 1 FROM unsubscribes u WHERE u.company_id = c.company_id AND u.phone = c.phone)`,
+      [...baseParams, ...filterParams]
+    );
+    const unsubscribeCount = parseInt(unsubResult.rows[0].count);
+
+    return res.json({
+      ...result,
+      estimatedCount,
+      unsubscribeCount,
+    });
   } catch (error) {
     console.error('브리핑 파싱 오류:', error);
     return res.status(500).json({ error: '서버 오류가 발생했습니다.' });

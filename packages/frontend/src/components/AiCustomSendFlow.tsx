@@ -1,12 +1,39 @@
-import { useState, useEffect } from 'react';
-import { 
-  X, ChevronRight, ChevronLeft, Sparkles, CheckCircle2, 
-  FileText, Palette, Link2, Loader2, Pencil, Check,
-  User, ShoppingBag, MapPin, Star, Calendar, Hash, Users
+import {
+  Calendar,
+  Check,
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  FileText,
+  Hash,
+  Link2, Loader2,
+  MapPin,
+  Palette,
+  Pencil,
+  ShoppingBag,
+  Sparkles,
+  Star,
+  User,
+  Users,
+  X
 } from 'lucide-react';
+import { useEffect, useState } from 'react';
 
 interface AiCustomSendFlowProps {
   onClose: () => void;
+  onConfirmSend?: (data: {
+    variant: MessageVariant;
+    targetFilters: Record<string, any>;
+    targetCondition: TargetCondition;
+    promotionCard: PromotionCard;
+    channel: 'SMS' | 'LMS';
+    tone: string;
+    url: string;
+    briefing: string;
+    personalFields: string[];
+    estimatedCount: number;
+    unsubscribeCount: number;
+  }) => void;
   brandName: string;
   callbackNumbers: { id: string; phone: string; label: string; is_default: boolean }[];
   selectedCallback: string;
@@ -90,7 +117,7 @@ const SAMPLE_DATA: Record<string, string> = {
 };
 
 export default function AiCustomSendFlow({
-  onClose, brandName, callbackNumbers, selectedCallback, isAd, optOutNumber,
+  onClose, onConfirmSend, brandName, callbackNumbers, selectedCallback, isAd, optOutNumber,
 }: AiCustomSendFlowProps) {
   const [currentStep, setCurrentStep] = useState(1);
   const TOTAL_STEPS = 4;
@@ -114,6 +141,9 @@ export default function AiCustomSendFlow({
   const [targetCondition, setTargetCondition] = useState<TargetCondition>(EMPTY_TARGET_CONDITION);
   const [editingTarget, setEditingTarget] = useState(false);
   const [editedTarget, setEditedTarget] = useState<TargetCondition>(EMPTY_TARGET_CONDITION);
+  const [targetFilters, setTargetFilters] = useState<Record<string, any>>({});
+  const [estimatedCount, setEstimatedCount] = useState(0);
+  const [unsubscribeCount, setUnsubscribeCount] = useState(0);
 
   // Step 4
   const [variants, setVariants] = useState<MessageVariant[]>([]);
@@ -186,6 +216,9 @@ export default function AiCustomSendFlow({
         const tc = data.targetCondition || EMPTY_TARGET_CONDITION;
         setTargetCondition(tc);
         setEditedTarget(tc);
+        setTargetFilters(data.targetFilters || {});
+        setEstimatedCount(data.estimatedCount || 0);
+        setUnsubscribeCount(data.unsubscribeCount || 0);
         setCurrentStep(3);
       } else { const err = await res.json(); alert(err.error || '파싱 실패'); }
     } catch (error) { console.error('브리핑 파싱 실패:', error); alert('서버 오류가 발생했습니다.'); }
@@ -480,7 +513,9 @@ export default function AiCustomSendFlow({
                         <div className="text-center py-6">
                           <Users className="w-8 h-8 text-blue-300 mx-auto mb-2" />
                           <div className="text-sm font-medium text-blue-600 mb-1">전체 고객 대상</div>
-                          <div className="text-xs text-gray-400">브리핑에 타겟 조건이 없어 전체 고객에게 발송됩니다.</div>
+                          <div className="text-xs text-gray-400 mb-2">브리핑에 타겟 조건이 없어 전체 고객에게 발송됩니다.</div>
+                          <div className="text-lg font-bold text-blue-700">{estimatedCount.toLocaleString()}명</div>
+                          {unsubscribeCount > 0 && <div className="text-xs text-red-400 mt-0.5">수신거부 {unsubscribeCount.toLocaleString()}명 제외</div>}
                           <button onClick={() => { setEditingTarget(true); setEditedTarget({ ...targetCondition }); }}
                             className="mt-3 text-xs text-blue-500 hover:text-blue-700 underline">타겟 조건 직접 추가</button>
                         </div>
@@ -493,6 +528,10 @@ export default function AiCustomSendFlow({
                         {tc.description && !editingTarget && (
                           <div className="px-3 py-2 bg-blue-100/60 rounded-lg border border-blue-200">
                             <div className="text-xs font-semibold text-blue-700">{tc.description}</div>
+                            <div className="flex items-center gap-2 mt-1.5">
+                              <span className="text-sm font-bold text-blue-800">{estimatedCount.toLocaleString()}명</span>
+                              {unsubscribeCount > 0 && <span className="text-xs text-red-400">(수신거부 {unsubscribeCount.toLocaleString()}명 제외)</span>}
+                            </div>
                           </div>
                         )}
                         {/* 각 필드 */}
@@ -620,9 +659,25 @@ export default function AiCustomSendFlow({
               </button>
             )}
             {currentStep === 4 && (
-              <button onClick={() => { alert('발송 확정 기능은 다음 세션에서 연결합니다.'); }} disabled={variants.length === 0}
+              <button onClick={() => {
+                if (onConfirmSend && variants[selectedVariantIdx]) {
+                  onConfirmSend({
+                    variant: variants[selectedVariantIdx],
+                    targetFilters,
+                    targetCondition: editingTarget ? editedTarget : targetCondition,
+                    promotionCard: (editingCard ? editedCard : promotionCard)!,
+                    channel,
+                    tone,
+                    url: url.trim(),
+                    briefing: briefing.trim(),
+                    personalFields: selectedFields,
+                    estimatedCount,
+                    unsubscribeCount,
+                  });
+                }
+              }} disabled={variants.length === 0}
                 className="flex items-center gap-2 px-5 py-2.5 bg-green-700 hover:bg-green-800 text-white text-sm font-medium rounded-lg disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
-                <CheckCircle2 className="w-4 h-4" /> 발송 확정
+                <CheckCircle2 className="w-4 h-4" /> 발송 확정 ({estimatedCount.toLocaleString()}명)
               </button>
             )}
             {currentStep === 1 && (
