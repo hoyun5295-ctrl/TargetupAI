@@ -13,11 +13,14 @@ const toKoreaTimeStr = (date: Date) => {
 // ===== 라인그룹 기반 Agent 발송 설정 =====
 // 환경변수: 서버에 연결된 전체 테이블 목록 (폴백용)
 const ALL_SMS_TABLES = (process.env.SMS_TABLES || 'SMSQ_SEND').split(',').map(t => t.trim());
+// ★ 대량발송 폴백용: 테스트(10)/인증(11) 라인 제외 — 2차 안전장치
+const BULK_ONLY_TABLES = ALL_SMS_TABLES.filter(t => !['SMSQ_SEND_10', 'SMSQ_SEND_11'].includes(t));
 let rrIndex = 0;
 console.log(`[QTmsg] ALL_SMS_TABLES: ${ALL_SMS_TABLES.join(', ')} (${ALL_SMS_TABLES.length}개 Agent)`);
+console.log(`[QTmsg] BULK_ONLY_TABLES: ${BULK_ONLY_TABLES.join(', ')} (테스트/인증 제외 ${BULK_ONLY_TABLES.length}개)`);
 
 // 라인그룹 캐시 (1분 TTL)
-const lineGroupCache = new Map<string, { tables: string[], expires: number }>();
+const lineGroupCache = new Map<string, { tables: string[], hasDedicatedGroup: boolean, expires: number }>();
 const LINE_GROUP_CACHE_TTL = 60 * 1000;
 
 // 회사별 발송 테이블 조회 (캐시)
@@ -33,12 +36,26 @@ async function getCompanySmsTables(companyId: string): Promise<string[]> {
     WHERE c.id = $1 AND lg.is_active = true AND lg.group_type = 'bulk'
   `, [companyId]);
 
-  const tables = (result.rows.length > 0 && result.rows[0].sms_tables?.length > 0)
+  const hasDedicatedGroup = result.rows.length > 0 && result.rows[0].sms_tables?.length > 0;
+  // ★ 라인그룹 미설정 시 BULK_ONLY_TABLES 폴백 (테스트/인증 라인 절대 제외)
+  const tables = hasDedicatedGroup
     ? result.rows[0].sms_tables
-    : ALL_SMS_TABLES;
+    : BULK_ONLY_TABLES;
 
-  lineGroupCache.set(cacheKey, { tables, expires: Date.now() + LINE_GROUP_CACHE_TTL });
+  lineGroupCache.set(cacheKey, { tables, hasDedicatedGroup, expires: Date.now() + LINE_GROUP_CACHE_TTL });
   return tables;
+}
+
+// ★ 회사 전용 라인그룹 할당 여부 확인 (발송 차단용)
+async function hasCompanyLineGroup(companyId: string): Promise<boolean> {
+  const cacheKey = `company:${companyId}`;
+  const cached = lineGroupCache.get(cacheKey);
+  if (cached && cached.expires > Date.now()) return cached.hasDedicatedGroup;
+
+  // 캐시 미스 시 getCompanySmsTables 호출로 캐시 채움
+  await getCompanySmsTables(companyId);
+  const refreshed = lineGroupCache.get(cacheKey);
+  return refreshed?.hasDedicatedGroup ?? false;
 }
 
 // 테스트 발송 테이블 조회 (캐시)
@@ -47,11 +64,12 @@ async function getTestSmsTables(): Promise<string[]> {
   if (cached && cached.expires > Date.now()) return cached.tables;
 
   const result = await query(`SELECT sms_tables FROM sms_line_groups WHERE group_type = 'test' AND is_active = true LIMIT 1`);
+  // ★ 폴백: SMSQ_SEND_10 고정 (전체 라인 폴백 제거)
   const tables = (result.rows.length > 0 && result.rows[0].sms_tables?.length > 0)
     ? result.rows[0].sms_tables
-    : ALL_SMS_TABLES;
+    : ['SMSQ_SEND_10'];
 
-  lineGroupCache.set('test', { tables, expires: Date.now() + LINE_GROUP_CACHE_TTL });
+  lineGroupCache.set('test', { tables, hasDedicatedGroup: true, expires: Date.now() + LINE_GROUP_CACHE_TTL });
   return tables;
 }
 
@@ -61,11 +79,12 @@ async function getAuthSmsTable(): Promise<string> {
   if (cached && cached.expires > Date.now()) return cached.tables[0];
 
   const result = await query(`SELECT sms_tables FROM sms_line_groups WHERE group_type = 'auth' AND is_active = true LIMIT 1`);
+  // ★ 폴백: SMSQ_SEND_11 고정 (전체 라인 폴백 제거)
   const tables = (result.rows.length > 0 && result.rows[0].sms_tables?.length > 0)
     ? result.rows[0].sms_tables
-    : [ALL_SMS_TABLES[0]];
+    : ['SMSQ_SEND_11'];
 
-  lineGroupCache.set('auth', { tables, expires: Date.now() + LINE_GROUP_CACHE_TTL });
+  lineGroupCache.set('auth', { tables, hasDedicatedGroup: true, expires: Date.now() + LINE_GROUP_CACHE_TTL });
   return tables[0];
 }
 
@@ -140,7 +159,7 @@ async function smsExecAll(tables: string[], sqlTemplate: string, params: any[]):
 }
 
 // export for other modules
-export { ALL_SMS_TABLES, getAuthSmsTable, getCompanySmsTables, getTestSmsTables, invalidateLineGroupCache, smsAggAll, smsCountAll, smsExecAll, smsSelectAll };
+export { ALL_SMS_TABLES, BULK_ONLY_TABLES, getAuthSmsTable, getCompanySmsTables, getTestSmsTables, hasCompanyLineGroup, invalidateLineGroupCache, smsAggAll, smsCountAll, smsExecAll, smsSelectAll };
 // ===== 라인그룹 헬퍼 끝 =====
 
 // ===== 카카오 브랜드메시지 발송 헬퍼 =====
@@ -727,6 +746,15 @@ router.post('/:id/send', async (req: Request, res: Response) => {
     }
 
     const companyTables = await getCompanySmsTables(companyId);
+
+    // ★ 1차 방어: 라인그룹 미설정 발송 차단
+    if (!(await hasCompanyLineGroup(companyId))) {
+      console.warn(`[라인방어] 캠페인 발송 차단 — companyId: ${companyId}, campaignId: ${id}, 라인그룹 미설정`);
+      return res.status(400).json({
+        error: '발송 라인그룹이 설정되지 않았습니다. 관리자에게 문의해주세요.',
+        code: 'LINE_GROUP_NOT_SET'
+      });
+    }
 
     // 일반 사용자는 본인 store_codes에 해당하는 고객만
     let storeFilter = '';
@@ -1507,6 +1535,16 @@ router.post('/direct-send', async (req: Request, res: Response) => {
     }
 
     const companyTables = await getCompanySmsTables(companyId);
+
+    // ★ 1차 방어: 라인그룹 미설정 발송 차단
+    if (!(await hasCompanyLineGroup(companyId))) {
+      console.warn(`[라인방어] 직접발송 차단 — companyId: ${companyId}, 라인그룹 미설정`);
+      return res.status(400).json({
+        success: false,
+        error: '발송 라인그룹이 설정되지 않았습니다. 관리자에게 문의해주세요.',
+        code: 'LINE_GROUP_NOT_SET'
+      });
+    }
 
     const {
       msgType,        // SMS, LMS, MMS

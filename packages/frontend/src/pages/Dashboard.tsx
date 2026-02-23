@@ -32,6 +32,7 @@ import UploadProgressModal from '../components/UploadProgressModal';
 import MmsUploadModal from '../components/MmsUploadModal';
 import AiPreviewModal from '../components/AiPreviewModal';
 import AiCampaignResultPopup from '../components/AiCampaignResultPopup';
+import LineGroupErrorModal from '../components/LineGroupErrorModal';
 
 interface Stats {
   total: string;
@@ -89,6 +90,7 @@ export default function Dashboard() {
   const [depositSubmitting, setDepositSubmitting] = useState(false);
   const [depositSuccess, setDepositSuccess] = useState(false);
   const [showInsufficientBalance, setShowInsufficientBalance] = useState<{show: boolean, balance: number, required: number} | null>(null);
+  const [showLineGroupError, setShowLineGroupError] = useState(false);
   const [loading, setLoading] = useState(true);
   const [isSending, setIsSending] = useState(false);
   const [activeTab, setActiveTab] = useState<'target' | 'campaign' | 'send'>('target');
@@ -295,6 +297,12 @@ export default function Dashboard() {
         setDirectSending(false);
         return;
       }
+      if (data.code === 'LINE_GROUP_NOT_SET') {
+        setSendConfirm({show: false, type: 'immediate', count: 0, unsubscribeCount: 0});
+        setShowLineGroupError(true);
+        setDirectSending(false);
+        return;
+      }
       if (data.success) {
         setToast({show: true, type: 'success', message: data.message});
         setTimeout(() => setToast({show: false, type: 'success', message: ''}), 3000);
@@ -377,6 +385,12 @@ export default function Dashboard() {
       if (res.status === 402 && data.insufficientBalance) {
         setSendConfirm({show: false, type: 'immediate', count: 0, unsubscribeCount: 0});
         setShowInsufficientBalance({show: true, balance: data.balance, required: data.requiredAmount});
+        setTargetSending(false);
+        return;
+      }
+      if (data.code === 'LINE_GROUP_NOT_SET') {
+        setSendConfirm({show: false, type: 'immediate', count: 0, unsubscribeCount: 0});
+        setShowLineGroupError(true);
         setTargetSending(false);
         return;
       }
@@ -1401,7 +1415,9 @@ const campaignData = {
     
   } catch (error: any) {
     console.error('캠페인 생성 실패:', error);
-    if (error.response?.status === 402 && error.response?.data?.insufficientBalance) {
+    if (error.response?.data?.code === 'LINE_GROUP_NOT_SET') {
+      setShowLineGroupError(true);
+    } else if (error.response?.status === 402 && error.response?.data?.insufficientBalance) {
       setShowInsufficientBalance({show: true, balance: error.response.data.balance, required: error.response.data.requiredAmount});
     } else {
       alert(error.response?.data?.error || '캠페인 생성에 실패했습니다.');
@@ -1496,7 +1512,9 @@ const campaignData = {
 
     } catch (error: any) {
       console.error('AI 맞춤한줄 발송 실패:', error);
-      if (error.response?.status === 402 && error.response?.data?.insufficientBalance) {
+      if (error.response?.data?.code === 'LINE_GROUP_NOT_SET') {
+        setShowLineGroupError(true);
+      } else if (error.response?.status === 402 && error.response?.data?.insufficientBalance) {
         setShowInsufficientBalance({ show: true, balance: error.response.data.balance, required: error.response.data.requiredAmount });
       } else {
         alert(error.response?.data?.error || '캠페인 생성에 실패했습니다.');
@@ -4952,6 +4970,8 @@ const campaignData = {
       />
 
       <PlanUpgradeModal show={showPlanUpgradeModal} onClose={() => setShowPlanUpgradeModal(false)} />
+
+      <LineGroupErrorModal show={showLineGroupError} onClose={() => setShowLineGroupError(false)} />
 
       {/* 하단 링크 */}
       <div className="max-w-7xl mx-auto px-4 py-6 mt-8 border-t border-gray-200 text-center text-xs text-gray-400 space-x-3">
