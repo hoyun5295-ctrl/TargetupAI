@@ -1,13 +1,13 @@
-import { Router, Request, Response } from 'express';
+import { Request, Response, Router } from 'express';
+import fs from 'fs';
 import Redis from 'ioredis';
-import { normalizePhone, normalizeGender, normalizeGrade, normalizeRegion, normalizeSmsOptIn } from '../utils/normalize';
+import multer from 'multer';
+import path from 'path';
+import * as XLSX from 'xlsx';
 import { query } from '../config/database';
+import { normalizeGender, normalizeGrade, normalizePhone, normalizeRegion, normalizeSmsOptIn } from '../utils/normalize';
 
 const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
-import multer from 'multer';
-import * as XLSX from 'xlsx';
-import path from 'path';
-import fs from 'fs';
 
 import { authenticate } from '../middlewares/auth';
 
@@ -517,6 +517,27 @@ async function processUploadInBackground(
     }), 'EX', 3600);
 
     console.log(`[업로드 완료] fileId=${fileId}, 신규=${insertCount}, 업데이트=${duplicateCount}, 오류=${errorCount}`);
+
+    // ===== sms_opt_in=false 고객 → unsubscribes 자동 등록 =====
+    if (companyId && userId) {
+      try {
+        const unsubResult = await query(`
+          INSERT INTO unsubscribes (company_id, user_id, phone, source)
+          SELECT $1, $2, phone, 'db_upload'
+          FROM customers
+          WHERE company_id = $1 AND sms_opt_in = false AND is_active = true
+            AND NOT EXISTS (
+              SELECT 1 FROM unsubscribes u WHERE u.company_id = $1 AND u.phone = customers.phone
+            )
+          ON CONFLICT (user_id, phone) DO NOTHING
+        `, [companyId, userId]);
+        if (unsubResult.rowCount && unsubResult.rowCount > 0) {
+          console.log(`[업로드] 수신거부 자동등록: ${unsubResult.rowCount}건 (company: ${companyId})`);
+        }
+      } catch (unsubError) {
+        console.error('[업로드] 수신거부 자동등록 실패:', unsubError);
+      }
+    }
 
     // 파일 삭제
     try { fs.unlinkSync(filePath); } catch (e) {}

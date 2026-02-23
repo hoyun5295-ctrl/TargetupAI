@@ -2,7 +2,7 @@
 // Sync Agent API - Phase 1
 // 기존 코드 수정 없음. 독립 모듈.
 
-import { Router, Request, Response } from 'express';
+import { Request, Response, Router } from 'express';
 import { query } from '../config/database';
 import { normalizePhone } from '../utils/normalize';
 
@@ -351,6 +351,32 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
          WHERE id = $2`,
         [upsertedCount, agentId]
       );
+    }
+
+    // ===== sms_opt_in=false 고객 → unsubscribes 자동 등록 =====
+    try {
+      const userForUnsub = await query(
+        `SELECT id FROM users WHERE company_id = $1 AND is_active = true ORDER BY created_at ASC LIMIT 1`,
+        [companyId]
+      );
+      const syncUserId = userForUnsub.rows[0]?.id;
+      if (syncUserId) {
+        const unsubResult = await query(`
+          INSERT INTO unsubscribes (company_id, user_id, phone, source)
+          SELECT $1, $2, phone, 'sync'
+          FROM customers
+          WHERE company_id = $1 AND sms_opt_in = false AND is_active = true
+            AND NOT EXISTS (
+              SELECT 1 FROM unsubscribes u WHERE u.company_id = $1 AND u.phone = customers.phone
+            )
+          ON CONFLICT (user_id, phone) DO NOTHING
+        `, [companyId, syncUserId]);
+        if (unsubResult.rowCount && unsubResult.rowCount > 0) {
+          console.log(`[Sync] 수신거부 자동등록: ${unsubResult.rowCount}건 (company: ${req.companyName})`);
+        }
+      }
+    } catch (unsubError) {
+      console.error('[Sync] 수신거부 자동등록 실패:', unsubError);
     }
 
     console.log(`[Sync] Customers: ${upsertedCount} upserted, ${failedCount} failed (company: ${req.companyName})`);
