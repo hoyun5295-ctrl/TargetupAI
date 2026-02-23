@@ -2,7 +2,7 @@
 
 > **목적:** 한줄로(Target-UP) 전환 완료 시까지 기존 웹 유지 관리
 > **관련 문서:** STATUS.md | OPS.md | SCHEMA.md
-> **최종 업데이트:** 2026-02-22 (서버 점검 + 디스크 정리 + SSL 적용 완료)
+> **최종 업데이트:** 2026-02-23 (SSL 후속 조치 — Mixed Content 수정 + Tomcat proxy 설정)
 
 ---
 
@@ -58,7 +58,8 @@
 ### 2-4. 서비스 포트 맵
 | 포트 | 서비스 | 비고 |
 |------|--------|------|
-| 80 | Nginx | → Tomcat6_b(8070) 프록시 |
+| 80 | Nginx | → HTTPS 301 리다이렉트 |
+| 443 | Nginx (SSL) | → Tomcat6_b(8070) 프록시 |
 | 8070 | Tomcat6_b | **메인 웹서비스** (invitobiz.com) |
 | 8080 | Tomcat6 | 용도 확인 필요 |
 | 1521 | Oracle | 리스너 |
@@ -77,13 +78,13 @@
 
 ---
 
-## 3) 서버 사양 & 리소스 (2026-02-22 기준)
+## 3) 서버 사양 & 리소스 (2026-02-23 기준)
 
 | 항목 | 값 |
 |------|-----|
 | OS | CentOS 7 (Core) |
-| 메모리 | 31G (가용 17G) |
-| Swap | 15G (3.7G 사용 중) |
+| 메모리 | 31G (가용 19G, Swap 3.6G 사용 중) |
+| Swap | 15G (3.6G 사용 중) |
 | 디스크 | 425G / **249G 사용 / 155G 여유 (62%)** |
 
 ### 디스크 사용 분포
@@ -198,27 +199,50 @@ http {
 
 ---
 
-## 6) ✅ SSL 적용 완료 (2026-02-22)
+## 6) ✅ SSL 적용 완료 (2026-02-22~23)
 
 ### 6-1. 해결된 문제
 - ~~SSL 인증서 미적용 (HTTP만 운영)~~
 - ~~이니시스 PG에서 특정 카드사(비자/마스터 등) 결제창 차단~~
-- **고객 카드결제 복구됨** (이니시스 결제 테스트 필요)
+- ~~Mixed Content: HTTPS 페이지에서 http:// 리소스 차단~~
+- ~~이니시스 승인 API SSL 핸드셰이크 실패 (Java 1.7 cacerts 미신뢰)~~
+- **고객 카드결제 완전 복구 확인됨** (2026-02-23 최종 테스트 완료)
 
 ### 6-2. 적용 내용
-| 작업 | 상태 |
-|------|------|
-| Nginx SSL 모듈 재컴파일 | ✅ |
-| SSL 인증서 발급 (ZeroSSL, acme.sh) | ✅ |
-| HTTPS 설정 + HTTP→HTTPS 301 리다이렉트 | ✅ |
-| 이니시스 PG 콜백 URL https 변경 | ✅ |
-| 브라우저 "이 연결은 안전합니다" 확인 | ✅ |
+| 작업 | 상태 | 날짜 |
+|------|------|------|
+| Nginx SSL 모듈 재컴파일 | ✅ | 02-22 |
+| SSL 인증서 발급 (ZeroSSL, acme.sh) | ✅ | 02-22 |
+| HTTPS 설정 + HTTP→HTTPS 301 리다이렉트 | ✅ | 02-22 |
+| 이니시스 PG 콜백 URL https 변경 | ✅ | 02-22 |
+| 브라우저 "이 연결은 안전합니다" 확인 | ✅ | 02-22 |
+| Tomcat Connector proxy 설정 (scheme/secure/proxyPort) | ✅ | 02-23 |
+| 외부 CSS Mixed Content 수정 (fonts.googleapis, maxcdn) | ✅ | 02-23 |
+| INIStdPayRequest.jsp siteDomain 수정 (localhost→실서버, www 통일) | ✅ | 02-23 |
+| 이니시스 SSL 인증서 Java cacerts 추가 (ksstdpay.inicis.com) | ✅ | 02-23 |
+| 카드결제 승인 정상 동작 최종 확인 | ✅ | 02-23 |
 
-### 6-3. 변경된 JSP 파일 (http → https)
-- `/www/usom/WebContent/WEB-INF/cnp/front/mypage/pg/INIStdPayRequest.jsp` (76행)
-- `/www/usom/WebContent/WEB-INF/cnp/front/mypage/INIsecurestart.jsp` (92행)
+### 6-3. 변경된 파일
+
+**JSP 파일 (http → https):**
+- `/www/usom/WebContent/WEB-INF/cnp/front/mypage/pg/INIStdPayRequest.jsp` (75~76행: siteDomain localhost→`https://www.invitobiz.com` 전환)
+- `/www/usom/WebContent/WEB-INF/cnp/front/mypage/INIsecurestart.jsp` (91~92행)
 - `/www/usom/WebContent/index.jsp`
 - `/www/usom/WebContent/WEB-INF/cnp/front/main/main_noti.jsp`
+
+**CSS 파일 (외부 리소스 http → https):**
+- `/www/usom/WebContent/web/css/new_storysom/default.css` (fonts.googleapis.com, maxcdn.bootstrapcdn.com)
+
+**Tomcat 설정:**
+- `/usr/local/tomcat6_b/conf/server.xml` — Connector에 `scheme="https" secure="true" proxyPort="443"` 추가
+  - Tomcat이 Nginx HTTPS 프록시 뒤에서 올바른 scheme/port로 URL 생성하도록 함
+  - 미적용 시 AJAX 요청이 `http://www.invitobiz.com:80/...`으로 생성 → Mixed Content 차단
+
+**Java cacerts (이니시스 SSL 인증서):**
+- `/usr/java/jdk1.7.0_45/jre/lib/security/cacerts` — `ksstdpay.inicis.com` 인증서 추가 (alias: inicis_ksstdpay)
+  - Java 1.7 cacerts가 이니시스 승인 API(https://ksstdpay.inicis.com) 인증서를 신뢰하지 못해 PKIX 에러 발생
+  - `keytool -import -trustcacerts -keystore cacerts -storepass changeit -alias inicis_ksstdpay -file inicis.crt`
+  - ⚠️ 인증서 만료 시 재추가 필요 (인증서 갱신 주기 확인 필요)
 
 ### 6-4. 롤백 방법 (만약 문제 시)
 ```bash
@@ -226,6 +250,13 @@ http {
 cp /usr/local/nginx/sbin/nginx_backup_20260222 /usr/local/nginx/sbin/nginx
 cp -r /usr/local/nginx/conf_backup_20260222/* /usr/local/nginx/conf/
 /usr/local/nginx/sbin/nginx -s reload
+
+# Tomcat Connector 원복 (proxy 속성 제거)
+sed -i 's| scheme="https" secure="true" proxyPort="443"||' /usr/local/tomcat6_b/conf/server.xml
+/usr/local/tomcat6_b/bin/shutdown.sh && sleep 3 && /usr/local/tomcat6_b/bin/startup.sh
+
+# Java cacerts에서 이니시스 인증서 제거 (필요 시)
+keytool -delete -keystore /usr/java/jdk1.7.0_45/jre/lib/security/cacerts -storepass changeit -alias inicis_ksstdpay
 ```
 
 ---
@@ -237,6 +268,9 @@ cp -r /usr/local/nginx/conf_backup_20260222/* /usr/local/nginx/conf/
 |---------|------|------|--------|------|
 | Tomcat6 | 8080 | /usr/local/tomcat6 | 2G 할당 | 용도 확인 필요 |
 | Tomcat6_b | 8070 | /usr/local/tomcat6_b | 2G 할당 (실사용 2.5G) | **메인 웹서비스** |
+
+> **Tomcat6_b Connector 설정 (2026-02-23 적용):**
+> `scheme="https" secure="true" proxyPort="443"` — Nginx HTTPS 프록시 뒤에서 올바른 URL 생성
 
 ### 7-2. QTmsg Agent (5개)
 | Agent | jar 파일 | 포트 |
@@ -258,8 +292,9 @@ cp -r /usr/local/nginx/conf_backup_20260222/* /usr/local/nginx/conf/
 
 ### 8-1. 테이블스페이스 관리
 - Oracle은 테이블스페이스 풀 차면 INSERT/UPDATE 멈춤 → 서비스 다운
-- 주기적 정리 필요 (오래된 로그 DELETE + PURGE)
-- 직원 전달: "자동 분할 설정되어 있음" → Autoextend 확인 필요
+- **✅ 2026-02-22 확인 완료 — 양호:**
+  - STORYSOM: 52.6% | SYSTEM: 15.9% | SYSAUX: 2.3% | 나머지: 0%
+  - 한줄로 전환(2주 내) 시까지 문제없음
 - 확인 방법 (sqlplus 접속 후):
 ```sql
 sqlplus usom_user/usom_user_7119@orcl
@@ -300,11 +335,12 @@ FROM dba_data_files;
 - [ ] SSH 비밀번호 변경
 - [ ] DB 비밀번호 변경
 - [x] 서버 현황 전체 점검 (2026-02-22 완료)
-- [ ] Oracle 테이블스페이스 사용률 확인
+- [x] Oracle 테이블스페이스 사용률 확인 (2026-02-22 완료, 양호)
 - [x] 디스크 정리 (82% → 62%, 2026-02-22 완료)
 - [x] SSL 적용 작업 (2026-02-22 완료)
+- [x] SSL 후속 조치 — Mixed Content + Tomcat proxy (2026-02-23 완료)
+- [x] 이니시스 카드결제 실제 테스트 (2026-02-22 완료, 정상)
 - [ ] 웹 로그 자동 정리 크론잡 추가
-- [ ] 이니시스 카드결제 실제 테스트
 
 ---
 
@@ -315,6 +351,8 @@ FROM dba_data_files;
 | 1 | 서버 접속 + 현황 파악 | ✅ 완료 (2026-02-22) |
 | 2 | 디스크 정리 | ✅ 완료 (82% → 62%) |
 | 3 | SSL 적용 → 이니시스 결제 복구 | ✅ 완료 (2026-02-22) |
+| 3-1 | SSL 후속 — Mixed Content + Tomcat proxy 수정 | ✅ 완료 (2026-02-23) |
+| 3-2 | 카드결제 완전 복구 — siteDomain 수정 + Java cacerts 이니시스 인증서 추가 | ✅ 완료 (2026-02-23) |
 | 4 | 유지보수 개인 개발자 계약 종료 + 접속정보 인수 | 진행 중 (2월 말) |
 | 5 | 고객사 한줄로 직접발송으로 전환 가속 | 진행 중 |
 | 6 | 전환 완료 확인 (기존 웹 트래픽 0 확인) | 미착수 |

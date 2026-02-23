@@ -991,6 +991,7 @@ export default function Dashboard() {
     loadStats();
     loadRecentCampaigns();
     loadScheduledCampaigns();
+    loadCompanySettings();
   }, []);
 // 자동입력 변수를 수신자 중 가장 긴 값으로 치환하여 최대 바이트 메시지 생성
 const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<string, string>) => {
@@ -1135,6 +1136,33 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
       setScheduledCampaigns(data.campaigns || []);
     } catch (error) {
       console.error('예약 캠페인 로드 실패:', error);
+    }
+  };
+
+  // ★ 회사 설정 로드 (080 수신거부번호 + 회신번호) — 초기 로드
+  const loadCompanySettings = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const settingsRes = await fetch('/api/companies/settings', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (settingsRes.ok) {
+        const settingsData = await settingsRes.json();
+        if (settingsData.reject_number) {
+          setOptOutNumber(settingsData.reject_number);
+        }
+      }
+      const cbRes = await fetch('/api/companies/callback-numbers', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const cbData = await cbRes.json();
+      if (cbData.success) {
+        setCallbackNumbers(cbData.numbers || []);
+        const defaultCb = cbData.numbers?.find((n: any) => n.is_default);
+        if (defaultCb) setSelectedCallback(defaultCb.phone);
+      }
+    } catch (err) {
+      console.error('회사 설정 로드 실패:', err);
     }
   };
 
@@ -2872,7 +2900,7 @@ const campaignData = {
                           const cb = selectedCallback || '';
                           const smsMsg = isAd ? `(광고)${msg}\n무료거부${optOutNumber.replace(/-/g, '')}` : msg;
                           const lmsMsg = isAd ? `(광고) ${msg}\n무료수신거부 ${formatRejectNumber(optOutNumber)}` : msg;
-                          setSpamFilterData({sms: smsMsg, lms: lmsMsg, callback: cb, msgType: 'SMS'});
+                          setSpamFilterData({sms: smsMsg, lms: lmsMsg, callback: cb, msgType: selectedChannel as 'SMS'|'LMS'|'MMS'});
                           setShowSpamFilter(true);
   }}
   className="flex-1 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 flex items-center justify-center gap-2"
