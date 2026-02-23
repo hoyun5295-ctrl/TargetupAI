@@ -1,9 +1,9 @@
-import { Router, Request, Response } from 'express';
-import { query, mysqlQuery } from '../config/database';
+import { Request, Response, Router } from 'express';
+import { mysqlQuery, query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
 import { extractVarCatalog, validatePersonalizationVars, VarCatalogEntry } from '../services/ai';
-import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getGenderVariants, getGradeVariants, getRegionVariants } from '../utils/normalize';
-import { logTrainingData, updateTrainingMetrics, getSourceRef } from '../utils/training-logger';
+import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getRegionVariants } from '../utils/normalize';
+import { getSourceRef, logTrainingData, updateTrainingMetrics } from '../utils/training-logger';
 
 // 한국시간 문자열 변환 (MySQL datetime 형식)
 const toKoreaTimeStr = (date: Date) => {
@@ -140,7 +140,7 @@ async function smsExecAll(tables: string[], sqlTemplate: string, params: any[]):
 }
 
 // export for other modules
-export { getCompanySmsTables, getTestSmsTables, getAuthSmsTable, invalidateLineGroupCache, ALL_SMS_TABLES, smsCountAll, smsAggAll, smsSelectAll, smsExecAll };
+export { ALL_SMS_TABLES, getAuthSmsTable, getCompanySmsTables, getTestSmsTables, invalidateLineGroupCache, smsAggAll, smsCountAll, smsExecAll, smsSelectAll };
 // ===== 라인그룹 헬퍼 끝 =====
 
 // ===== 카카오 브랜드메시지 발송 헬퍼 =====
@@ -246,7 +246,7 @@ async function kakaoCancelPending(requestUid: string): Promise<number> {
   return (rows as any).affectedRows || 0;
 }
 
-export { insertKakaoQueue, kakaoAgg, kakaoCountPending, kakaoCancelPending };
+export { insertKakaoQueue, kakaoAgg, kakaoCancelPending, kakaoCountPending };
 // ===== 카카오 브랜드메시지 헬퍼 끝 =====
 
 // ===== 선불 잔액 관리 =====
@@ -1390,8 +1390,8 @@ router.post('/sync-results', async (req: Request, res: Response) => {
 
       // PostgreSQL 업데이트
       if (successCount > 0 || failCount > 0) {
-        // 대기건이 남아있으면 아직 sending, 0이면 completed
-        const newStatus = pendingCount > 0 ? 'sending' : (failCount === 0 ? 'completed' : (successCount === 0 ? 'failed' : 'completed'));
+        // 대기건이 남아있으면 아직 sending, 0이면 completed (발송 처리 완료 = 완료, 실패는 시스템 에러만)
+        const newStatus = pendingCount > 0 ? 'sending' : ((successCount + failCount) > 0 ? 'completed' : 'failed');
 
         // campaign_runs 업데이트
         await query(
@@ -1804,11 +1804,13 @@ router.post('/:id/cancel', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: '예약 상태가 아닙니다' });
     }
 
-    // 15분 이내 체크
+    // 15분 이내 체크 (단, 유령 예약 = 이미 과거 시간인 건은 강제 취소 허용)
     const scheduledAt = new Date(campaign.rows[0].scheduled_at);
     const now = new Date();
     const diffMinutes = (scheduledAt.getTime() - now.getTime()) / (1000 * 60);
-    if (diffMinutes < 15) {
+    const isGhostSchedule = scheduledAt < now; // 이미 과거 시간인 유령 예약
+    if (diffMinutes < 15 && diffMinutes > 0) {
+      // 미래이지만 15분 이내 → 차단
       return res.status(400).json({ success: false, error: '발송 15분 전에는 취소할 수 없습니다', tooLate: true });
     }
 
@@ -2082,6 +2084,13 @@ router.put('/:id/reschedule', async (req: Request, res: Response) => {
       return res.status(404).json({ success: false, error: '예약 캠페인을 찾을 수 없습니다' });
     }
 
+    // 새 예약 시간 검증: 현재 + 15분 이후만 허용
+    const newScheduledAt = new Date(scheduledAt);
+    const nowCheck = new Date();
+    if ((newScheduledAt.getTime() - nowCheck.getTime()) / (1000 * 60) < 15) {
+      return res.status(400).json({ success: false, error: '현재 시간 + 15분 이후로만 변경 가능합니다' });
+    }
+
     // 15분 이내 체크
     const currentScheduledAt = new Date(campaign.rows[0].scheduled_at);
     const now = new Date();
@@ -2132,6 +2141,12 @@ router.put('/:id/message', async (req: Request, res: Response) => {
 
     if (campaign.rows.length === 0) {
       return res.status(404).json({ success: false, error: '예약 캠페인을 찾을 수 없습니다' });
+    }
+
+    // LMS/MMS는 제목 필수
+    const campMsgType = campaign.rows[0].message_type;
+    if ((campMsgType === 'LMS' || campMsgType === 'MMS') && (!subject || !subject.trim())) {
+      return res.status(400).json({ success: false, error: 'LMS/MMS는 제목이 필수입니다' });
     }
 
     // 15분 이내 체크

@@ -39,6 +39,7 @@ interface Stats {
   male_count: string;
   female_count: string;
   vip_count: string;
+  unsubscribe_count: string;
   monthly_sent: number;
   success_rate: string;
   monthly_budget: number;
@@ -1833,7 +1834,7 @@ const campaignData = {
                   <div className="text-xs text-gray-400 mt-1">여성</div>
                 </div>
                 <div className="text-center p-3 bg-gray-50 rounded-lg">
-                  <div className="text-2xl font-bold text-red-500">-</div>
+                  <div className="text-2xl font-bold text-red-500">{parseInt(stats?.unsubscribe_count || '0').toLocaleString()}</div>
                   <div className="text-xs text-gray-400 mt-1">수신거부</div>
                 </div>
               </div>

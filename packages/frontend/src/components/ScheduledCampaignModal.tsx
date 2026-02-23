@@ -102,6 +102,18 @@ export default function ScheduledCampaignModal({
                       <div className="text-sm text-gray-500 mt-1">
                         {selectedScheduled.message_type} · {selectedScheduled.target_count?.toLocaleString()}명
                       </div>
+                      {/* LMS/MMS 제목 표시 */}
+                      {(selectedScheduled.message_type === 'LMS' || selectedScheduled.message_type === 'MMS') && (selectedScheduled.message_subject || selectedScheduled.subject) && (
+                        <div className="text-sm text-blue-600 mt-1">
+                          📋 제목: {selectedScheduled.message_subject || selectedScheduled.subject}
+                        </div>
+                      )}
+                      {/* 회신번호 표시 */}
+                      {selectedScheduled.callback_number && (
+                        <div className="text-sm text-gray-500 mt-1">
+                          📞 회신번호: {selectedScheduled.callback_number}
+                        </div>
+                      )}
                     </div>
                     <div className="flex gap-2">
                       <button
@@ -137,11 +149,24 @@ export default function ScheduledCampaignModal({
                       type="datetime-local"
                       value={editScheduleTime}
                       onChange={(e) => setEditScheduleTime(e.target.value)}
+                      min={(() => {
+                        const d = new Date(Date.now() + 15 * 60 * 1000);
+                        const pad = (n: number) => n.toString().padStart(2, '0');
+                        return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+                      })()}
                       className="border rounded px-2 py-1 text-sm"
                     />
                     <button
                       onClick={async () => {
                         if (!editScheduleTime) return;
+                        // 과거 시간 체크 (현재 + 15분 이후만 허용)
+                        const newTime = new Date(editScheduleTime);
+                        const minTime = new Date(Date.now() + 15 * 60 * 1000);
+                        if (newTime < minTime) {
+                          setToast({ show: true, type: 'error', message: '현재 시간 + 15분 이후로만 변경 가능합니다' });
+                          setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
+                          return;
+                        }
                         const token = localStorage.getItem('token');
                         const res = await fetch(`/api/campaigns/${selectedScheduled.id}/reschedule`, {
                           method: 'PUT',
@@ -462,6 +487,12 @@ export default function ScheduledCampaignModal({
               onClick={async () => {
                 if (!editMessage.trim()) {
                   setToast({ show: true, type: 'error', message: '메시지를 입력해주세요' });
+                  setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
+                  return;
+                }
+                // LMS/MMS는 제목 필수
+                if ((selectedScheduled?.message_type === 'LMS' || selectedScheduled?.message_type === 'MMS') && !editSubject.trim()) {
+                  setToast({ show: true, type: 'error', message: 'LMS/MMS는 제목이 필수입니다' });
                   setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
                   return;
                 }

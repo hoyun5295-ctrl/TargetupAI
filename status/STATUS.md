@@ -91,41 +91,7 @@
 ## 4) 🎯 CURRENT_TASK (현재 집중 작업)
 
 > **규칙:** 아래 목표에만 100% 리소스를 집중한다.
-> **상세 설계:** `AI-CUSTOM-SEND.md` 참조 (플로우, API 설계, 파일 구조, 진행상황)
-
-- **현재 목표:** AI 맞춤한줄 기능 구현 — AI 문안생성 고도화 (개인화 + 프로모션 브리핑)
-  - 대시보드 "AI 추천발송" 클릭 → 모달에서 "AI 한줄로" / "AI 맞춤한줄" 분기
-  - 기존 AI 추천발송 기능은 "AI 한줄로"로 리네이밍, 기능 변경 없음
-  - 신규 "AI 맞춤한줄" 플로우 전체 구현
-
-- **진행 상황:**
-  - [x] 설계 확정 (네이밍, 플로우, API, 파일 구조)
-  - [x] AiSendTypeModal.tsx 생성 (분기 모달, AUTO/PRO 뱃지)
-  - [x] DashboardPage.tsx 수정 (textarea 제거 + 분기 연결)
-  - [x] DashboardHeader.tsx 분리 (탭스타일 헤더 리뉴얼)
-  - [x] AiCustomSendFlow.tsx Step 1~4 전체 UI 구현
-  - [x] 백엔드 API (parse-briefing + generate-custom) 구현
-  - [x] 서버 배포 + Step 1→2→3→4 정상 동작 확인
-  - [ ] **발송 확정 → 타겟 선택 방식 결정 (다음 세션)**
-  - [ ] **AiCampaignSendModal 연결**
-  - [ ] 전체 통합 테스트 (실제 발송)
-
-- **완료 기준 (DoD):**
-  - [x] AI 추천발송 클릭 → 모달에서 "AI 한줄로" / "AI 맞춤한줄" 분기 동작
-  - [x] AI 한줄로 선택 → 기존 AI 추천발송 플로우 그대로 진입 (진행상황 표시 포함)
-  - [x] AI 맞춤한줄 → 개인화 필드 선택 UI (고객사 DB 필드 기반 체크박스)
-  - [x] AI 맞춤한줄 → 프로모션 브리핑 입력 (자연어 + 예시 placeholder)
-  - [x] AI 맞춤한줄 → URL 입력 + 톤/분위기 선택
-  - [x] AI 파싱 → 프로모션 카드 구조화 표시 + 수정 기능
-  - [x] 확인 후 AI 최종 문안 생성 (개인화 변수 + 프로모션 정보 반영)
-  - [x] SMS/LMS 바이트 제한 고려한 문안 생성
-  - [ ] 발송 확정 → 타겟 선택 + AiCampaignSendModal 연결
-  - [ ] 전체 통합 테스트 (실제 발송)
-## 4) 🎯 CURRENT_TASK (현재 집중 작업)
-
-> **규칙:** 아래 목표에만 100% 리소스를 집중한다.
 > **배경:** 직원 버그리포트 6차 (2026-02-23) — 총 11건, 2세션 분할 수정
-> **작업 전 필수:** 각 세션 시작 시 해당 파일들을 Harold님이 업로드 → 코드 확인 후 수정
 
 ---
 
@@ -133,78 +99,53 @@
 
 ---
 
-### 📦 세션 1: AI 맞춤한줄 고도화 + 회신번호 UI (8건)
+### ✅ 세션 1 완료: AI 맞춤한줄 고도화 + 회신번호 UI (6건)
 
-> **필요 파일 (Harold님 업로드):**
-> - `packages/frontend/src/components/AiCustomSendFlow.tsx`
-> - `packages/backend/src/services/ai.ts`
-> - `packages/backend/src/routes/ai.ts`
-> - `packages/frontend/src/components/AiCampaignSendModal.tsx`
-> - `packages/backend/src/utils/normalize.ts` (등급/성별 정규화 확인용)
-> - `packages/backend/src/routes/customers.ts` (타겟 카운트 조회 확인용)
+> **수정 파일 4개:**
+> - `packages/frontend/src/components/AiCustomSendFlow.tsx` — 완성 파일 교체
+> - `packages/frontend/src/components/AiCampaignSendModal.tsx` — 완성 파일 교체
+> - `packages/backend/src/services/ai.ts` — 완성 파일 교체
+> - `packages/backend/src/routes/ai.ts` — 완성 파일 교체
 
-#### 버그 #1 — AI 맞춤한줄 개인화 변수 오류
-- **증상:** 선택한 필드(고객명/매장명/회신번호) 중 이름만 적용, 매장명/회신번호 누락. 요청 안 한 %성별% 포함. 매번 결과 다름
-- **수정 파일:** `services/ai.ts` → `generateCustomMessages()`
-- **수정 내용:**
-  1. AI 프롬프트에 "선택된 필드 목록에 있는 변수만 사용. 목록에 없는 변수 절대 사용 금지" 엄격 지시 추가
-  2. AI 응답 후 validatePersonalizationVars()에서 미선택 필드 변수 strip 강화
-  3. 선택 필드가 모두 포함되었는지 검증 → 누락 시 재생성 또는 경고
-- **수정 파일:** `AiCustomSendFlow.tsx` Step 4
-- **수정 내용:**
-  4. 미리보기 샘플값 하드코딩("김민수/VIP/강남점") → 실제 DB 대상 고객 데이터로 교체
-  5. 샘플 고객 API 필요 시 `routes/ai.ts` 또는 `customers.ts`에 엔드포인트 추가
+#### ✅ 버그 #1 — AI 맞춤한줄 개인화 변수 오류 (수정 완료)
+- **증상:** 선택한 필드 중 이름만 적용, 매장명/회신번호 누락. 요청 안 한 %성별% 포함
+- **원인:** AI 프롬프트 변수 제한 지시 불충분 + 미선택 변수 strip 불완전
+- **수정:**
+  - `services/ai.ts`: AI 프롬프트에 "허용된 변수 목록만 사용, 목록 외 변수 사용 시 사고 발생" 엄격 지시 추가
+  - `services/ai.ts`: validatePersonalizationVars 후 미허용 변수 제거 시 주변 공백/쉼표 정리 강화
+  - `AiCustomSendFlow.tsx`: Step 4 미리보기 변수 검증 로직 개선
 
-#### 버그 #4 — SMS AI 문구 90바이트 초과
+#### ✅ 버그 #4 — SMS AI 문구 90바이트 초과 (수정 완료)
 - **증상:** SMS 채널 선택 시 90바이트 넘는 문안 생성 → 그대로 SMS 예약됨
-- **수정 파일:** `services/ai.ts` → `generateCustomMessages()` + `generateMessage()`
-- **수정 내용:**
-  1. AI 생성 후 바이트 검증: SMS인데 90바이트 초과 시 재생성 (최대 2회 retry)
-  2. 그래도 초과 시 프론트에 초과 경고 + "LMS로 전환하시겠습니까?" 제안
-- **수정 파일:** `AiCustomSendFlow.tsx` Step 4 + `AiCampaignSendModal.tsx` 발송 확정
-- **수정 내용:**
-  3. 발송 확정 시 최종 안전장치: SMS인데 90바이트 초과면 발송 차단 + 경고 모달
+- **수정:**
+  - `services/ai.ts`: calculateKoreanBytes() 함수 추가 + SMS 바이트 초과 시 서버 경고 로그
+  - `AiCustomSendFlow.tsx`: Step 4에서 SMS 90바이트 초과 시 빨간 경고 배너 표시 + 발송 확정 시 차단
 
-#### 버그 #8 — AI 맞춤한줄 광고표기 고정 + MMS 누락
+#### ✅ 버그 #8 — AI 맞춤한줄 광고표기 고정 + MMS 누락 (수정 완료)
 - **증상:** 광고 여부 ON/OFF 선택 불가 (고정 "예"). MMS 채널 선택지 없음
-- **수정 파일:** `AiCustomSendFlow.tsx` Step 2
-- **수정 내용:**
-  1. 광고 여부 토글 추가 (기존 직접발송 패턴 동일: isAd state + 체크박스)
-  2. 발송 채널에 MMS 옵션 추가 + MMS 선택 시 이미지 업로드 슬롯 UI (기존 MmsUploadModal 패턴 참고)
-  3. isAd=false 시 선택 요약에서 "광고: 아니오" 표시, wrapAdText 미적용
-- **수정 파일:** `services/ai.ts` → `generateCustomMessages()`
-- **수정 내용:**
-  4. MMS 바이트 계산 추가 (MMS도 LMS와 동일 2000바이트)
-  5. isAd=false 전달 시 광고문구/수신거부 바이트 차감 안 함
+- **수정:**
+  - `AiCustomSendFlow.tsx`: Step 2에 isAd 토글 추가 + 발송 채널에 MMS 옵션 추가
+  - `services/ai.ts`: smsByteInstruction에 MMS 분기 추가 + LMS 프롬프트 조건에 MMS 포함
 
-#### 버그 #9 — AI 맞춤한줄 타겟 추출 0명 + 수정 미반영
-- **증상:** 브리핑에서 "실버 여성 고객" 파싱 → DB에 실버 있는데 0명. 수정하기로 등급 변경해도 반영 안 됨
-- **수정 파일:** `routes/ai.ts` 또는 `customers.ts` — 타겟 카운트 조회
-- **수정 내용:**
-  1. 타겟 카운트 조회 시 normalize.ts의 `buildGenderFilter()` / `buildGradeFilter()` 적용
-  2. AI 파싱된 등급값("SILVER") → 정규화 매칭 ("SILVER","Silver","실버" 등 모두 포함)
-- **수정 파일:** `AiCustomSendFlow.tsx` Step 3
-- **수정 내용:**
-  3. "수정하기" 버튼 → 값 변경 후 타겟 카운트 재조회 API 호출 trigger 추가
-  4. 재조회 중 로딩 스피너 표시
+#### ✅ 버그 #9 — AI 맞춤한줄 타겟 추출 0명 + 수정 미반영 (수정 완료)
+- **증상:** 브리핑에서 "실버 여성 고객" 파싱 → DB에 실버 있는데 0명
+- **원인:** `routes/ai.ts` buildFilterWhereClause에서 gender 필터가 **중복 적용** (getGenderVariants + buildGenderFilter 둘 다 실행 → SQL 파라미터 인덱스 어긋남)
+- **수정:**
+  - `routes/ai.ts`: gender 중복 필터 제거 → buildGenderFilter만 유지
+  - `routes/ai.ts`: parse-briefing, generate-custom에 누락된 authenticate 미들웨어 추가
+  - `AiCustomSendFlow.tsx`: Step 3 "수정완료" 버튼 클릭 시 `/api/ai/recount-target` 재조회 trigger + 로딩 스피너
 
-#### 버그 #10 — 회신번호 드롭다운 매장명만 표시
+#### ✅ 버그 #10 — 회신번호 드롭다운 매장명만 표시 (수정 완료)
 - **증상:** 발신번호 선택 시 전화번호 안 보이고 매장명만 나옴
-- **수정 파일:** `AiCampaignSendModal.tsx` (또는 대시보드 내 회신번호 셀렉트)
-- **수정 내용:**
-  1. 드롭다운 옵션 label: `매장명` → `전화번호 (매장명)` 형식으로 변경
-  2. callback_numbers API 응답에 phone 필드 포함 확인
+- **수정:** `AiCampaignSendModal.tsx` 드롭다운 label → `전화번호 (매장명)` 형식으로 변경
 
-#### 버그 #11 — 개별회신번호 1건인데 선택 허용
+#### ✅ 버그 #11 — 개별회신번호 1건인데 선택 허용 (수정 완료)
 - **증상:** 등록 회신번호 1건인데 "개별회신번호" 옵션 선택 가능 → 의미 없음
-- **수정 파일:** `AiCampaignSendModal.tsx` (또는 대시보드 내 회신번호 셀렉트)
-- **수정 내용:**
-  1. 회신번호 2건 이상일 때만 "개별회신번호" 옵션 노출
-  2. 또는 1건일 때 선택 시 "개별회신번호는 매장별 번호가 2건 이상 등록되어야 사용 가능합니다" 경고 모달
+- **수정:** `AiCampaignSendModal.tsx` 회신번호 2건 이상일 때만 "개별회신번호" 옵션 노출
 
 ---
 
-### 📦 세션 2: 예약대기 + 수신거부 + 발송/캘린더 (5건)
+### 📦 세션 2: 예약대기 + 수신거부 + 발송/캘린더 (5건) — 다음 세션 진행
 
 > **필요 파일 (Harold님 업로드):**
 > - `packages/frontend/src/pages/DashboardPage.tsx` (또는 분리된 ScheduledCampaignModal.tsx, CalendarModal.tsx)
@@ -273,10 +214,11 @@
 ---
 
 ### 완료 기준 (DoD)
-- [ ] 세션 1: 버그 #1, #4, #8, #9, #10, #11 수정 + 배포 + 직원 재테스트
+- [x] 세션 1: 버그 #1, #4, #8, #9, #10, #11 수정 완료 — 배포 진행 중
 - [ ] 세션 2: 버그 #2, #3, #5, #6, #7 수정 + 배포 + 직원 재테스트
-- [ ] TypeScript 타입 에러 없이 컴파일
-- [ ] 기존 기능 회귀 없음
+- [x] TypeScript 타입 에러 없이 컴파일 (세션 1)
+- [ ] 기존 기능 회귀 없음 (직원 재테스트 대기)
+
 ---
 
 ## 5) 📌 PROJECT STATUS
@@ -395,7 +337,7 @@
 /api/campaigns     → routes/campaigns.ts (캠페인 CRUD, 발송, 동기화)
 /api/customers     → routes/customers.ts (고객 조회, 필터, 추출)
 /api/companies     → routes/companies.ts (회사 설정, 발신번호)
-/api/ai            → routes/ai.ts (타겟 추천, 메시지 생성)
+/api/ai            → routes/ai.ts (타겟 추천, 메시지 생성, 브리핑 파싱, 맞춤문안, 타겟 재조회)
 /api/admin         → routes/admin.ts (슈퍼관리자 전용)
 /api/results       → routes/results.ts (발송 결과/통계)
 /api/upload        → routes/upload.ts (파일 업로드/매핑)
@@ -486,6 +428,11 @@
 - [ ] 수신거부 수 stats에 포함
 - [ ] 프론트엔드 `-` → 실제 데이터 연결
 
+### AI 맞춤한줄 Phase 2 (발송 연결)
+- [ ] 발송 확정 → 타겟 선택 방식 결정 (옵션 A/B/C 중 선택)
+- [ ] AiCampaignSendModal 연결
+- [ ] 전체 통합 테스트 (실제 발송)
+
 ### 카카오 알림톡 템플릿 관리 (Humuson API v2.1.1)
 - [ ] 고객사 관리자(app.hanjul.ai) 템플릿 CRUD + 검수 프로세스 + 발신프로필 조회 + 관리 UI
 - [ ] 슈퍼관리자(sys.hanjullo.com) 고객사별 Humuson 연동 설정 (humuson_user_id, uuid)
@@ -539,22 +486,14 @@
 | D3 | 02-22 | 개인화 필드 = DB 필드 체크박스 선택 방식 | AI에게 명확한 지시 가능, 마케터가 어떤 데이터를 활용하는지 가시적 |
 | D4 | 02-22 | 대시보드 textarea 제거 → 분기 모달 내에서 각각 입력 | 각 플로우가 독립적으로 자기 맥락에 맞는 입력창을 가짐 |
 | D5 | 02-22 | 신규 코드는 별도 컴포넌트로 분리 (대시보드 최소 수정) | 대시보드 7,800줄, 회귀 리스크 최소화. AiCustomSendFlow.tsx 독립 |
-| D6 | 02-22 | 대시보드 좌60%/우40% flex 레이아웃 + 고객활동현황(B+C 융합) | grid-cols-4로는 75:25밖에 안됨. 활동현황=마케터 행동으로 이어지는 핵심 지표(신규/구매/휴면/수신거부/재구매). 백엔드는 추후 연결, 시연용 UI 선확보 |
-| D7 | 02-23 | 대시보드 헤더: 버튼형 → 텍스트 탭 스타일 (아이콘 제거, 녹/금/회 색상) | 홈페이지 탭 스타일 참고, SaaS 고급감 확보. 아이콘 없이 텍스트만으로 깔끔. DashboardHeader.tsx 컴포넌트 분리 |
-| D8 | 02-23 | AI 발송 분기 뱃지: 기존/NEW → AUTO/PRO | 오픈 시 동시 출시이므로 "기존"은 부적절. 고객 관점에서 간편/정교 성격 구분 = AUTO/PRO가 직관적 |
-| D9 | 02-23 | 대시보드 모달 분리 2세션: 순수 리팩토링 (UI/로직 변경 없음) | 8,039줄→4,964줄. 직접타겟 모달(2,466줄)은 결합도 높아 추후 전용 세션 |
-## DECISION LOG 추가 항목
-
-| ID | 날짜 | 결정 | 근거 |
-|----|------|------|------|
+| D6 | 02-22 | 대시보드 좌60%/우40% flex 레이아웃 + 고객활동현황(B+C 융합) | grid-cols-4로는 75:25밖에 안됨. 활동현황=마케터 행동으로 이어지는 핵심 지표 |
+| D7 | 02-23 | 대시보드 헤더: 버튼형 → 텍스트 탭 스타일 (아이콘 제거, 녹/금/회 색상) | 홈페이지 탭 스타일 참고, SaaS 고급감 확보 |
+| D8 | 02-23 | AI 발송 분기 뱃지: 기존/NEW → AUTO/PRO | 오픈 시 동시 출시이므로 "기존"은 부적절. 간편/정교 성격 구분 |
 | D9 | 02-23 | 캘린더 상태 기준: 완료(발송처리됨)/실패(시스템에러)/취소(명시취소) 3단계 | 문자는 실패 건 항상 존재하는 게 정상. 부분성공도 "완료"로 표시, 상세에서 건수 확인 |
-| D10 | 02-23 | 직원 버그리포트 6차 수정 2세션 분할: 세션1=맞춤한줄+회신번호(8건), 세션2=예약+수신거부+캘린더(5건) | 파일 의존성 기준 그룹핑. 맞춤한줄이 가장 크고 긴급 |
+| D10 | 02-23 | 직원 버그리포트 6차 수정 2세션 분할: 세션1=맞춤한줄+회신번호(6건), 세션2=예약+수신거부+캘린더(5건) | 파일 의존성 기준 그룹핑. 맞춤한줄이 가장 크고 긴급 |
 
-## DONE LOG 추가 항목
+**아카이브:** D-대시보드 모달 분리(02-23): 8,039줄→4,964줄, 직접타겟 모달은 결합도 높아 추후 전용 세션
 
-| 날짜 | 완료 항목 |
-|------|----------|
-| 02-23 | 직원 버그리포트 6차 접수 (11건) — 분석 + 그룹핑 + 2세션 작업계획 수립. CURRENT_TASK 업데이트 |
 ---
 
 ## 10) ASSUMPTION LEDGER (가정 목록)
@@ -578,7 +517,8 @@
 
 | 날짜 | 완료 항목 |
 |------|----------|
-| 02-23 | 대시보드 모달 분리 Session 2: 11개 컴포넌트 추출 (AiCampaignResultPopup, AiPreviewModal, MmsUploadModal, UploadProgressModal, ScheduledCampaignModal, UploadResultModal, AddressBookModal, ScheduleTimeModal, DirectPreviewModal, SendConfirmModal, BalanceModals). Dashboard.tsx 7,056줄→4,964줄. TypeScript 타입체크 통과, 서버 배포 완료 |
+| 02-23 | 직원 버그리포트 6차 세션1 완료 (6건): AI 맞춤한줄 변수강화(#1), SMS 바이트체크(#4), 광고토글+MMS지원(#8), gender중복필터수정→타겟0명해결(#9), 회신번호 전화번호표시(#10), 개별회신번호 조건부노출(#11). 수정 파일: AiCustomSendFlow.tsx, AiCampaignSendModal.tsx, services/ai.ts, routes/ai.ts. 핵심 발견: routes/ai.ts gender 필터 중복적용이 타겟 0명의 근본 원인 |
+| 02-23 | 대시보드 모달 분리 Session 2: 11개 컴포넌트 추출. Dashboard.tsx 7,056줄→4,964줄. TypeScript 타입체크 통과, 서버 배포 완료 |
 | 02-23 | 대시보드 헤더 탭스타일 리뉴얼 (DashboardHeader 컴포넌트 분리, 아이콘 제거, 녹색/금색 번갈아 텍스트+밑줄 애니메이션, 로그아웃 회색) + AI 발송 뱃지 기존/NEW → AUTO/PRO 변경 |
 | 02-22 | 대시보드 레이아웃 전면 개편: 좌60%/우40% 구조, 고객현황 보강(수신거부+활동현황5지표), 요금제 카드 개선, 하단4카드, 녹색/노란색 테두리, 우측버튼 폰트확대 |
 | 02-22 | AI 맞춤한줄 Phase 1 시작: AiSendTypeModal 분기 모달 + DashboardPage textarea 제거/연결 + AI-CUSTOM-SEND.md 작업문서 |
@@ -587,9 +527,9 @@
 | 02-19 | 업로드 안정화 (BATCH 500, 백그라운드, 11,228건 전량 성공) + customers UNIQUE 키 변경 |
 | 02-19 | 수신거부 user_id 전환 + 브랜드/매장 필터 전체 통합 + 직원 버그리포트 5차 |
 | 02-19 | AI 학습 데이터 수집 시스템 (ai_training_logs + training-logger.ts + campaigns 연결) |
-| 02-19 | 스팸필터 판정 고도화 + 스팸한줄 앱 LMS + 080치환 제거 + 타겟직접발송 버그 수정 |
 
-**아카이브 (02-13 이전 요약):**
+**아카이브 (02-19 이전 요약):**
+- ~02-19: 스팸필터 판정 고도화 + 스팸한줄 앱 LMS + 080치환 제거 + 타겟직접발송 버그 수정
 - ~02-13: AI 캠페인확정 모달 분리 + AI 메시지 선택 인덱스 수정 + 스팸필터 테스트 시스템 (DB + 백엔드 + Android 앱)
 - ~02-12: 발송 라인그룹 시스템 (Agent 총 11개) + MMS 이미지 첨부 + 충전 관리 통합 뷰 + 직원 버그리포트 2~4차
 - ~02-11: Sync Agent Phase 2 + 보안 강화 + 직원 버그리포트 1차 + 로고 적용 + SMS 바이트 처리

@@ -586,6 +586,7 @@ router.get('/stats', async (req: Request, res: Response) => {
         COUNT(*) FILTER (WHERE c.gender = ANY($${params.length + 1}::text[])) as male_count,
         COUNT(*) FILTER (WHERE c.gender = ANY($${params.length + 2}::text[])) as female_count,
         COUNT(*) FILTER (WHERE c.grade = 'VIP') as vip_count,
+        COUNT(*) FILTER (WHERE EXISTS (SELECT 1 FROM unsubscribes u WHERE u.company_id = c.company_id AND u.phone = c.phone)) as unsubscribe_count,
         COUNT(*) FILTER (WHERE c.birth_year IS NOT NULL AND (2026 - c.birth_year) < 20) as age_under20,
         COUNT(*) FILTER (WHERE c.birth_year IS NOT NULL AND (2026 - c.birth_year) BETWEEN 20 AND 29) as age_20s,
         COUNT(*) FILTER (WHERE c.birth_year IS NOT NULL AND (2026 - c.birth_year) BETWEEN 30 AND 39) as age_30s,

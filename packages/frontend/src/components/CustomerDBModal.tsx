@@ -61,6 +61,7 @@ export default function CustomerDBModal({ onClose, token }: CustomerDBModalProps
       if (currentGender !== 'all') params.set('gender', currentGender);
       if (currentGrade !== 'all') params.set('grade', currentGrade);
       if (currentSmsOptIn === 'true') params.set('smsOptIn', 'true');
+      if (currentSmsOptIn === 'false') params.set('smsOptIn', 'false');
       // 지역은 기존 API에서 search로 처리되므로 별도 처리 불필요시 검색으로 통합
       // 지역 필터가 필요하면 filters JSON 사용
       if (currentRegion !== 'all') {
