@@ -95,7 +95,15 @@
 
 ---
 
-### 현재 목표: 없음 (대기)
+### 현재 목표: 080 수신거부 운영 연동
+
+**작업 내용:**
+- [ ] 나래인터넷에 콜백 URL + 토큰 키값 전달
+- [ ] 나래에 확인: 콜백 실패 재시도 정책, 수신거부 목록 조회 API 여부
+- [ ] 수신거부 목록 자동 API 긁어오기 (나래 API → unsubscribes 동기화)
+- [ ] Nginx 080callback 경로 나래 IP 화이트리스트 (121.156.104.161~165, 183.98.207.13)
+- [ ] 실제 080 ARS 수신거부 테스트 (080-719-6700)
+- [ ] 수신거부 관리 프론트엔드 고도화 (검색 UX, 일괄삭제, 통계 등)
 
 ---
 
@@ -423,6 +431,7 @@
 | D10 | 02-23 | 직원 버그리포트 6차 수정 2세션 분할: 세션1=맞춤한줄+회신번호(6건), 세션2=예약+수신거부+캘린더(5건) | 파일 의존성 기준 그룹핑. 맞춤한줄이 가장 크고 긴급 |
 | D11 | 02-23 | PG사 토스페이먼츠 → KCP 전환, 가상계좌 제외 (카드결제만) | 토스페이먼츠 SMS/LMS/MMS 별도충전 요구 (사업모델 불일치). KCP는 통합잔액 가능. 자체서버 배포 시 가상계좌 불가 |
 | D12 | 02-23 | 이용약관 선불충전 3개월 유효+소멸, 환불 3개월 제한 | KCP 심사 요건. 제9조 신설(선불충전), 제12조 전면개정(환불정책) |
+| D13 | 02-23 | 수신거부 SoT를 unsubscribes 테이블로 통일 | customers.sms_opt_in=false 분산 → 업로드/Sync 시 unsubscribes 자동등록. 조회도 company_id 기준 전환. 삭제 시 sms_opt_in 복원 |
 
 **아카이브:** D1-AI발송2분기(02-22) | D-대시보드 모달 분리(02-23): 8,039줄→4,964줄, 직접타겟 모달은 결합도 높아 추후 전용 세션
 
@@ -453,6 +462,7 @@
 | 02-23 | 라인그룹 미설정 발송 차단 (이중 방어): 1차 — send/direct-send API 진입 시 hasCompanyLineGroup() 체크→400 차단, 2차 — BULK_ONLY_TABLES 폴백(10,11 제외), 테스트→SMSQ_SEND_10 고정, 인증→SMSQ_SEND_11 고정. LineGroupErrorModal 예쁜 모달 추가. 수정: campaigns.ts, Dashboard.tsx, LineGroupErrorModal.tsx(신규) |
 | 02-23 | 이용약관 개정 배포: 가상계좌 제거(제8조), 선불충전 제9조 신설(3개월 유효+소멸), 환불정책 제12조 전면개정(3개월 환불제한+PG수수료+회사귀책 전액환불). KCP 심사용. 버그리포트 양식 엑셀 제작 (직원 배포용) |
 | 02-23 | 직원 버그리포트 6차 세션2 완료 (5건): 예약대기 LMS제목/회신번호+문안수정 제목필수(#2), 시간변경 과거허용차단+유령예약 강제취소(#3), 캘린더 상태판정 completed/failed 정리(#5), 수신거부 건수 stats+대시보드 연결(#6), 고객DB조회 거부필터 smsOptIn=false 누락수정(#7). 수정 파일: ScheduledCampaignModal.tsx, CalendarModal.tsx, Dashboard.tsx, CustomerDBModal.tsx, campaigns.ts, customers.ts |
+| 02-23 | 수신거부 시스템 통합 정비: ① stats 수신거부 카운트 sms_opt_in=false OR unsubscribes 이중판정, ② 업로드/Sync 시 sms_opt_in=false→unsubscribes 자동등록(source: db_upload/sync), ③ 수신거부 조회 user_id→company_id 기준 전환(DISTINCT ON phone), ④ 삭제 시 customers.sms_opt_in=true 복원, ⑤ 프론트 삭제모달 커스텀+source 뱃지 6종, ⑥ idx_unsubscribes_company_phone 인덱스 추가, ⑦ 기존 sms_opt_in=false 4,172건 마이그레이션. 수정: customers.ts, upload.ts, sync.ts, unsubscribes.ts, Unsubscribes.tsx |
 | 02-23 | 직원 버그리포트 6차 세션1 완료 (6건): AI 맞춤한줄 변수강화(#1), SMS 바이트체크(#4), 광고토글+MMS지원(#8), gender중복필터수정→타겟0명해결(#9), 회신번호 전화번호표시(#10), 개별회신번호 조건부노출(#11). 수정 파일: AiCustomSendFlow.tsx, AiCampaignSendModal.tsx, services/ai.ts, routes/ai.ts. 핵심 발견: routes/ai.ts gender 필터 중복적용이 타겟 0명의 근본 원인 |
 | 02-23 | 대시보드 모달 분리 Session 2: 11개 컴포넌트 추출. Dashboard.tsx 7,056줄→4,964줄. TypeScript 타입체크 통과, 서버 배포 완료 |
 | 02-23 | 대시보드 헤더 탭스타일 리뉴얼 (DashboardHeader 컴포넌트 분리, 아이콘 제거, 녹색/금색 번갈아 텍스트+밑줄 애니메이션, 로그아웃 회색) + AI 발송 뱃지 기존/NEW → AUTO/PRO 변경 |
