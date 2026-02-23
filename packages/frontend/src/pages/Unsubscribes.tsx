@@ -11,6 +11,8 @@ export default function Unsubscribes() {
   const [newPhone, setNewPhone] = useState('');
   const [uploading, setUploading] = useState(false);
   const [toast, setToast] = useState({ show: false, type: '', message: '' });
+  const [deleteModal, setDeleteModal] = useState<{ show: boolean; id: string; phone: string }>({ show: false, id: '', phone: '' });
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     loadUnsubscribes();
@@ -78,22 +80,26 @@ export default function Unsubscribes() {
     setTimeout(() => setToast({ show: false, type: '', message: '' }), 3000);
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm('삭제하시겠습니까?')) return;
+  const handleDeleteConfirm = async () => {
+    if (!deleteModal.id) return;
+    setDeleting(true);
 
     try {
       const token = localStorage.getItem('token');
-      const res = await fetch(`/api/unsubscribes/${id}`, {
+      const res = await fetch(`/api/unsubscribes/${deleteModal.id}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
       if (data.success) {
-        setToast({ show: true, type: 'success', message: '삭제되었습니다' });
+        setToast({ show: true, type: 'success', message: '삭제되었습니다. 수신동의로 복원됩니다.' });
         loadUnsubscribes();
       }
     } catch (error) {
       setToast({ show: true, type: 'error', message: '삭제 실패' });
+    } finally {
+      setDeleting(false);
+      setDeleteModal({ show: false, id: '', phone: '' });
     }
     setTimeout(() => setToast({ show: false, type: '', message: '' }), 3000);
   };
@@ -146,11 +152,13 @@ export default function Unsubscribes() {
     return phone;
   };
 
-  const sourceLabel: Record<string, string> = {
-    '080_ars': '080 ARS',
-    api: '080 자동',
-    upload: '파일 업로드',
-    manual: '직접 입력',
+  const sourceLabel: Record<string, { text: string; color: string }> = {
+    '080_ars': { text: '080 ARS', color: 'bg-orange-100 text-orange-700' },
+    api: { text: '080 자동', color: 'bg-blue-100 text-blue-700' },
+    upload: { text: '파일 업로드', color: 'bg-purple-100 text-purple-700' },
+    manual: { text: '직접 입력', color: 'bg-gray-100 text-gray-700' },
+    db_upload: { text: 'DB 업로드', color: 'bg-teal-100 text-teal-700' },
+    sync: { text: 'Sync 연동', color: 'bg-indigo-100 text-indigo-700' },
   };
 
   return (
@@ -161,6 +169,45 @@ export default function Unsubscribes() {
           toast.type === 'success' ? 'bg-gradient-to-r from-green-500 to-emerald-500' : 'bg-gradient-to-r from-red-500 to-rose-500'
         }`}>
           {toast.message}
+        </div>
+      )}
+
+      {/* 삭제 확인 모달 */}
+      {deleteModal.show && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/40" onClick={() => !deleting && setDeleteModal({ show: false, id: '', phone: '' })} />
+          <div className="relative bg-white rounded-2xl shadow-2xl max-w-sm w-full mx-4 animate-in fade-in zoom-in duration-200">
+            <div className="p-6 text-center">
+              <div className="w-14 h-14 mx-auto mb-4 bg-red-100 rounded-full flex items-center justify-center">
+                <svg className="w-7 h-7 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+              </div>
+              <h3 className="text-lg font-bold text-gray-900 mb-2">수신거부 해제</h3>
+              <p className="text-sm text-gray-600 mb-1">
+                <span className="font-mono font-semibold text-gray-800">{formatPhone(deleteModal.phone)}</span>
+              </p>
+              <p className="text-sm text-gray-500 mb-6">
+                삭제 시 해당 번호의 수신동의가 복원됩니다.
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setDeleteModal({ show: false, id: '', phone: '' })}
+                  disabled={deleting}
+                  className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 font-medium transition-colors"
+                >
+                  취소
+                </button>
+                <button
+                  onClick={handleDeleteConfirm}
+                  disabled={deleting}
+                  className="flex-1 px-4 py-2.5 bg-red-500 text-white rounded-xl hover:bg-red-600 font-medium transition-colors disabled:opacity-50"
+                >
+                  {deleting ? '처리중...' : '삭제'}
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
@@ -245,7 +292,7 @@ export default function Unsubscribes() {
         <div className="bg-white rounded-lg shadow">
           <div className="p-4 border-b flex justify-between items-center">
             <h2 className="font-semibold">수신거부 목록</h2>
-            <span className="text-sm text-gray-500">총 {pagination.total}건</span>
+            <span className="text-sm text-gray-500">총 {pagination.total.toLocaleString()}건</span>
           </div>
 
           {loading ? (
@@ -263,32 +310,30 @@ export default function Unsubscribes() {
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {unsubscribes.map((item) => (
-                  <tr key={item.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-3 font-mono">{formatPhone(item.phone)}</td>
-                    <td className="px-4 py-3">
-                      <span className={`px-2 py-1 rounded text-xs ${
-                        item.source === '080_ars' ? 'bg-orange-100 text-orange-700' :
-                        item.source === 'api' ? 'bg-blue-100 text-blue-700' :
-                        item.source === 'upload' ? 'bg-purple-100 text-purple-700' :
-                        'bg-gray-100 text-gray-700'
-                      }`}>
-                        {sourceLabel[item.source] || item.source}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-sm text-gray-500">
-                    {formatDateTime(item.created_at)}
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      <button
-                        onClick={() => handleDelete(item.id)}
-                        className="text-red-500 hover:text-red-700 text-sm"
-                      >
-                        삭제
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                {unsubscribes.map((item) => {
+                  const src = sourceLabel[item.source] || { text: item.source, color: 'bg-gray-100 text-gray-700' };
+                  return (
+                    <tr key={item.id} className="hover:bg-gray-50">
+                      <td className="px-4 py-3 font-mono">{formatPhone(item.phone)}</td>
+                      <td className="px-4 py-3">
+                        <span className={`px-2 py-1 rounded text-xs ${src.color}`}>
+                          {src.text}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-500">
+                        {formatDateTime(item.created_at)}
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <button
+                          onClick={() => setDeleteModal({ show: true, id: item.id, phone: item.phone })}
+                          className="text-red-500 hover:text-red-700 text-sm"
+                        >
+                          삭제
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           )}
