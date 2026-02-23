@@ -1,4 +1,4 @@
-import { Router, Request, Response } from 'express';
+import { Request, Response, Router } from 'express';
 import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
 
@@ -244,9 +244,19 @@ router.delete('/:id', async (req: Request, res: Response) => {
     );
 
     if (target.rows.length > 0) {
+      const targetPhone = target.rows[0].phone;
+      
+      // unsubscribes에서 삭제
       await query(
         `DELETE FROM unsubscribes WHERE company_id = $1 AND phone = $2`,
-        [companyId, target.rows[0].phone]
+        [companyId, targetPhone]
+      );
+
+      // customers.sms_opt_in = true 복원
+      await query(
+        `UPDATE customers SET sms_opt_in = true, updated_at = NOW()
+         WHERE company_id = $1 AND phone = $2 AND sms_opt_in = false`,
+        [companyId, targetPhone]
       );
     }
     
