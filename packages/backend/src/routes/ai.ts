@@ -4,6 +4,7 @@ import { authenticate } from '../middlewares/auth';
 import { checkAPIStatus, extractVarCatalog, generateCustomMessages, generateMessages, parseBriefing, recommendTarget } from '../services/ai';
 import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getGenderVariants, getRegionVariants } from '../utils/normalize';
 
+
 // ============================================================
 // 공통: AI 필터 → SQL WHERE 절 변환 (recommend-target, parse-briefing 공용)
 // ============================================================
@@ -28,6 +29,7 @@ function buildFilterWhereClause(filters: any, startParamIndex: number): {
     const standardGender = String(gender).toLowerCase();
     const genderKey = ['m', 'male', '남', '남자', '남성'].includes(standardGender) ? 'M'
       : ['f', 'female', '여', '여자', '여성'].includes(standardGender) ? 'F' : gender;
+    // ★ normalize 적용: DB에 어떤 형식으로 저장돼 있든 잡아냄
     const genderResult = buildGenderFilter(genderKey, paramIndex);
     filterWhere += genderResult.sql;
     filterParams.push(...genderResult.params);
@@ -345,9 +347,81 @@ router.post('/recommend-target', async (req: Request, res: Response) => {
     return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
   }
 });
+// ============================================================
+// 타겟 조건 수정 후 재조회 (AI 맞춤한줄 Step 3 수정하기)
+// ============================================================
+router.post('/recount-target', authenticate, async (req: Request, res: Response) => {
+  try {
+    const user = (req as any).user;
+    const { targetCondition } = req.body;
 
+    if (!targetCondition) {
+      return res.status(400).json({ error: 'targetCondition이 필요합니다' });
+    }
+
+    // targetCondition → targetFilters 변환
+    const targetFilters: Record<string, any> = {};
+
+    if (targetCondition.gender) {
+      const g = targetCondition.gender;
+      const gKey = ['남성', '남', '남자', 'male', 'M', 'm'].some(v => g.includes(v)) ? 'M'
+        : ['여성', '여', '여자', 'female', 'F', 'f'].some(v => g.includes(v)) ? 'F' : null;
+      if (gKey) targetFilters.gender = gKey;
+    }
+
+    if (targetCondition.grade) {
+      const grades = targetCondition.grade.split(/[,\/\s]+/).map((g: string) => g.trim().toUpperCase()).filter(Boolean);
+      if (grades.length > 0) targetFilters.grade = { value: grades, operator: 'in' };
+    }
+
+    if (targetCondition.ageRange) {
+      const ageMatch = targetCondition.ageRange.match(/(\d+)/g);
+      if (ageMatch) {
+        const nums = ageMatch.map(Number);
+        if (nums.length === 1) {
+          const decade = nums[0] < 10 ? nums[0] * 10 : nums[0];
+          targetFilters.age = [decade, decade + 9];
+        } else {
+          const minDecade = Math.min(...nums) < 10 ? Math.min(...nums) * 10 : Math.min(...nums);
+          const maxDecade = Math.max(...nums) < 10 ? Math.max(...nums) * 10 + 9 : Math.max(...nums) + 9;
+          targetFilters.age = [minDecade, maxDecade];
+        }
+      }
+    }
+
+    if (targetCondition.region) {
+      targetFilters.region = { value: [targetCondition.region], operator: 'in' };
+    }
+
+    if (targetCondition.storeName) {
+      targetFilters.store_name = { value: targetCondition.storeName, operator: 'eq' };
+    }
+
+    // buildFilterWhereClause 호출
+    const { sql: filterSql, params: filterParams, nextIndex } = buildFilterWhereClause(targetFilters, 2);
+
+    const countQuery = `
+      SELECT COUNT(*) as total FROM customers
+      WHERE company_id = $1 AND (is_opt_out IS NULL OR is_opt_out = false)
+      AND (is_invalid IS NULL OR is_invalid = false) ${filterSql}
+    `;
+    const countResult = await query(countQuery, [user.company_id, ...filterParams]);
+    const estimatedCount = parseInt((countResult.rows[0] as any)?.total || '0');
+
+    const unsubResult = await query(
+      `SELECT COUNT(*) as cnt FROM unsubscribes WHERE company_id = $1`,
+      [user.company_id]
+    );
+    const unsubscribeCount = parseInt((unsubResult.rows[0] as any)?.cnt || '0');
+
+    res.json({ estimatedCount, unsubscribeCount, targetFilters });
+  } catch (error) {
+    console.error('타겟 재조회 오류:', error);
+    res.status(500).json({ error: '타겟 재조회 실패' });
+  }
+});
 // POST /api/ai/parse-briefing - 프로모션 브리핑 → 구조화 파싱 + 타겟 고객 수 산출
-router.post('/parse-briefing', async (req: Request, res: Response) => {
+router.post('/parse-briefing', authenticate, async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
     const userId = req.user?.userId;
@@ -409,7 +483,7 @@ router.post('/parse-briefing', async (req: Request, res: Response) => {
 });
 
 // POST /api/ai/generate-custom - 개인화 맞춤 문안 생성
-router.post('/generate-custom', async (req: Request, res: Response) => {
+router.post('/generate-custom', authenticate, async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
     if (!companyId) {

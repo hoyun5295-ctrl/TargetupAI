@@ -210,10 +210,12 @@ export default function AiCampaignSendModal({
                   className="w-full border-2 rounded-lg px-4 py-2.5 text-sm focus:border-green-400 focus:outline-none"
                 >
                   <option value="">회신번호 선택</option>
-                  <option value="__individual__">📱 개별회신번호 (고객별 매장번호)</option>
+                  {callbackNumbers.length >= 2 && (
+                    <option value="__individual__">📱 개별회신번호 (고객별 매장번호)</option>
+                  )}
                   {callbackNumbers.map((cb) => (
                     <option key={cb.id} value={cb.phone}>
-                      {cb.label || cb.phone} {cb.is_default && '(기본)'}
+                      {cb.phone ? `${cb.phone}${cb.label ? ` (${cb.label})` : ''}` : cb.label}{cb.is_default ? ' ✓기본' : ''}
                     </option>
                   ))}
                 </select>

@@ -816,6 +816,15 @@ function getFallbackVariants(extraContext?: any): AIRecommendResult {
 }
 
 // ============================================================
+// SMS 바이트 계산 (한글 2바이트, 영문/숫자/특수문자 1바이트)
+function calculateKoreanBytes(text: string): number {
+  let bytes = 0;
+  for (let i = 0; i < text.length; i++) {
+    bytes += text.charCodeAt(i) > 127 ? 2 : 1;
+  }
+  return bytes;
+}
+
 // 프로모션 브리핑 파싱 (parseBriefing)
 // ============================================================
 
@@ -1077,7 +1086,9 @@ export async function generateCustomMessages(options: CustomMessageOptions): Pro
     ? isAd
       ? `- ⚠️ SMS 광고: 순수 본문 ${smsAvailableBytes}바이트 이내 필수! (시스템이 (광고)+수신거부 자동 추가)\n- 한글 1자=2바이트, 영문/숫자=1바이트`
       : `- SMS 비광고: 순수 본문 ${smsAvailableBytes}바이트 이내`
-    : '';
+    : channel === 'MMS'
+      ? '- MMS: 2,000바이트 이내, 이미지 첨부 고려한 간결한 문안'
+      : '';
 
   const userMessage = `## 프로모션 정보 (마케터 확인 완료)
 ${cardLines}
@@ -1092,11 +1103,13 @@ ${getKoreanToday()}
 - 브랜드명: ${brandName}
 ${brandTone ? `- 톤앤매너: ${brandTone}` : ''}
 
-## 개인화 변수 (⚠️ 필수 포함!)
-사용할 변수: ${varTags}
+## 개인화 변수 (⚠️ 최우선 규칙!)
+허용된 변수 목록 (이 목록만 사용 가능): ${varTags}
 - 3개 문안(A/B/C) 모두에 위 변수를 반드시 자연스럽게 포함!
 - 변수 형식: %변수명% (예: %이름%님, %등급% 고객님)
-- ⚠️ 위 목록에 없는 변수 생성 절대 금지!
+- ⚠️⚠️⚠️ 절대 금지: 위 목록에 없는 변수 사용! 예를 들어 ${varTags}에 %성별%이 없으면 %성별% 사용 금지!
+- 허용되지 않은 변수 사용 시 고객에게 "%변수명%" 텍스트가 그대로 발송되어 사고 발생!
+- 허용 변수: ${varTags} ← 오직 이것만!
 
 ${url ? `## 바로가기 URL\n- URL: ${url}\n- 문안 하단에 "▶ 바로가기 ${url}" 형태로 배치` : ''}
 
@@ -1105,7 +1118,7 @@ ${toneDesc} 톤으로 작성
 
 ## 채널: ${channel}
 ${smsByteInstruction}
-${channel === 'LMS' ? '- LMS: subject(제목) 필수, 한 줄 최대 17자 이내로 짧게 줄바꿈, 이모지 금지' : ''}
+${(channel === 'LMS' || channel === 'MMS') ? `- ${channel}: subject(제목) 필수, 한 줄 최대 17자 이내로 짧게 줄바꿈, 이모지 금지` : ''}
 
 ## 요청사항
 ${channel} 채널에 최적화된 3가지 맞춤 문안(A/B/C)을 생성해주세요.
@@ -1202,7 +1215,7 @@ ${channel} 채널에 최적화된 3가지 맞춤 문안(A/B/C)을 생성해주�
 
     const result = JSON.parse(jsonStr);
 
-    // 안전장치: 광고표기 자동 제거 + 변수 검증
+    // 안전장치: 광고표기 자동 제거 + 변수 검증 + SMS 바이트 체크
     if (result.variants) {
       for (const variant of result.variants) {
         let msg = variant.message_text || '';
@@ -1215,14 +1228,32 @@ ${channel} 채널에 최적화된 3가지 맞춤 문안(A/B/C)을 생성해주�
         msg = msg.trim();
         variant.message_text = msg;
 
+        // ★ 버그 #1: 미선택 변수 엄격 제거
         const validation = validatePersonalizationVars(msg, varNames);
         if (!validation.valid) {
-          console.warn(`[AI 맞춤한줄 변수 검증] 잘못된 변수: ${validation.invalidVars.join(', ')} → 제거`);
+          console.warn(`[AI 맞춤한줄 변수 검증] 미허용 변수: ${validation.invalidVars.join(', ')} → 제거`);
           let cleaned = msg;
           for (const invalidVar of validation.invalidVars) {
-            cleaned = cleaned.replace(new RegExp(`%${invalidVar}%`, 'g'), '');
+            // 변수 주변 공백/쉼표 정리 (예: "%성별% 고객님" → "고객님")
+            cleaned = cleaned.replace(new RegExp(`%${invalidVar}%\\s*`, 'g'), '');
+            cleaned = cleaned.replace(new RegExp(`\\s*%${invalidVar}%`, 'g'), '');
           }
+          // 이중 공백 정리
+          cleaned = cleaned.replace(/  +/g, ' ').replace(/\n /g, '\n').trim();
           variant.message_text = cleaned;
+        }
+      }
+
+      // ★ 버그 #4: SMS 바이트 초과 시 경고 로그 (프론트에서도 차단하지만 서버 로그용)
+      if (channel === 'SMS') {
+        for (const variant of result.variants) {
+          const msgBytes = calculateKoreanBytes(variant.message_text || '');
+          const totalBytes = isAd
+            ? msgBytes + 6 + 1 + 8 + (rejectNumber || '0807196700').replace(/-/g, '').length
+            : msgBytes;
+          if (totalBytes > 90) {
+            console.warn(`[AI 맞춤한줄 SMS 바이트 초과] ${variant.variant_id}: ${totalBytes}bytes (본문 ${msgBytes}bytes)`);
+          }
         }
       }
     }

@@ -121,7 +121,162 @@
   - [x] SMS/LMS 바이트 제한 고려한 문안 생성
   - [ ] 발송 확정 → 타겟 선택 + AiCampaignSendModal 연결
   - [ ] 전체 통합 테스트 (실제 발송)
+## 4) 🎯 CURRENT_TASK (현재 집중 작업)
 
+> **규칙:** 아래 목표에만 100% 리소스를 집중한다.
+> **배경:** 직원 버그리포트 6차 (2026-02-23) — 총 11건, 2세션 분할 수정
+> **작업 전 필수:** 각 세션 시작 시 해당 파일들을 Harold님이 업로드 → 코드 확인 후 수정
+
+---
+
+### 현재 목표: 직원 버그리포트 6차 수정 (11건)
+
+---
+
+### 📦 세션 1: AI 맞춤한줄 고도화 + 회신번호 UI (8건)
+
+> **필요 파일 (Harold님 업로드):**
+> - `packages/frontend/src/components/AiCustomSendFlow.tsx`
+> - `packages/backend/src/services/ai.ts`
+> - `packages/backend/src/routes/ai.ts`
+> - `packages/frontend/src/components/AiCampaignSendModal.tsx`
+> - `packages/backend/src/utils/normalize.ts` (등급/성별 정규화 확인용)
+> - `packages/backend/src/routes/customers.ts` (타겟 카운트 조회 확인용)
+
+#### 버그 #1 — AI 맞춤한줄 개인화 변수 오류
+- **증상:** 선택한 필드(고객명/매장명/회신번호) 중 이름만 적용, 매장명/회신번호 누락. 요청 안 한 %성별% 포함. 매번 결과 다름
+- **수정 파일:** `services/ai.ts` → `generateCustomMessages()`
+- **수정 내용:**
+  1. AI 프롬프트에 "선택된 필드 목록에 있는 변수만 사용. 목록에 없는 변수 절대 사용 금지" 엄격 지시 추가
+  2. AI 응답 후 validatePersonalizationVars()에서 미선택 필드 변수 strip 강화
+  3. 선택 필드가 모두 포함되었는지 검증 → 누락 시 재생성 또는 경고
+- **수정 파일:** `AiCustomSendFlow.tsx` Step 4
+- **수정 내용:**
+  4. 미리보기 샘플값 하드코딩("김민수/VIP/강남점") → 실제 DB 대상 고객 데이터로 교체
+  5. 샘플 고객 API 필요 시 `routes/ai.ts` 또는 `customers.ts`에 엔드포인트 추가
+
+#### 버그 #4 — SMS AI 문구 90바이트 초과
+- **증상:** SMS 채널 선택 시 90바이트 넘는 문안 생성 → 그대로 SMS 예약됨
+- **수정 파일:** `services/ai.ts` → `generateCustomMessages()` + `generateMessage()`
+- **수정 내용:**
+  1. AI 생성 후 바이트 검증: SMS인데 90바이트 초과 시 재생성 (최대 2회 retry)
+  2. 그래도 초과 시 프론트에 초과 경고 + "LMS로 전환하시겠습니까?" 제안
+- **수정 파일:** `AiCustomSendFlow.tsx` Step 4 + `AiCampaignSendModal.tsx` 발송 확정
+- **수정 내용:**
+  3. 발송 확정 시 최종 안전장치: SMS인데 90바이트 초과면 발송 차단 + 경고 모달
+
+#### 버그 #8 — AI 맞춤한줄 광고표기 고정 + MMS 누락
+- **증상:** 광고 여부 ON/OFF 선택 불가 (고정 "예"). MMS 채널 선택지 없음
+- **수정 파일:** `AiCustomSendFlow.tsx` Step 2
+- **수정 내용:**
+  1. 광고 여부 토글 추가 (기존 직접발송 패턴 동일: isAd state + 체크박스)
+  2. 발송 채널에 MMS 옵션 추가 + MMS 선택 시 이미지 업로드 슬롯 UI (기존 MmsUploadModal 패턴 참고)
+  3. isAd=false 시 선택 요약에서 "광고: 아니오" 표시, wrapAdText 미적용
+- **수정 파일:** `services/ai.ts` → `generateCustomMessages()`
+- **수정 내용:**
+  4. MMS 바이트 계산 추가 (MMS도 LMS와 동일 2000바이트)
+  5. isAd=false 전달 시 광고문구/수신거부 바이트 차감 안 함
+
+#### 버그 #9 — AI 맞춤한줄 타겟 추출 0명 + 수정 미반영
+- **증상:** 브리핑에서 "실버 여성 고객" 파싱 → DB에 실버 있는데 0명. 수정하기로 등급 변경해도 반영 안 됨
+- **수정 파일:** `routes/ai.ts` 또는 `customers.ts` — 타겟 카운트 조회
+- **수정 내용:**
+  1. 타겟 카운트 조회 시 normalize.ts의 `buildGenderFilter()` / `buildGradeFilter()` 적용
+  2. AI 파싱된 등급값("SILVER") → 정규화 매칭 ("SILVER","Silver","실버" 등 모두 포함)
+- **수정 파일:** `AiCustomSendFlow.tsx` Step 3
+- **수정 내용:**
+  3. "수정하기" 버튼 → 값 변경 후 타겟 카운트 재조회 API 호출 trigger 추가
+  4. 재조회 중 로딩 스피너 표시
+
+#### 버그 #10 — 회신번호 드롭다운 매장명만 표시
+- **증상:** 발신번호 선택 시 전화번호 안 보이고 매장명만 나옴
+- **수정 파일:** `AiCampaignSendModal.tsx` (또는 대시보드 내 회신번호 셀렉트)
+- **수정 내용:**
+  1. 드롭다운 옵션 label: `매장명` → `전화번호 (매장명)` 형식으로 변경
+  2. callback_numbers API 응답에 phone 필드 포함 확인
+
+#### 버그 #11 — 개별회신번호 1건인데 선택 허용
+- **증상:** 등록 회신번호 1건인데 "개별회신번호" 옵션 선택 가능 → 의미 없음
+- **수정 파일:** `AiCampaignSendModal.tsx` (또는 대시보드 내 회신번호 셀렉트)
+- **수정 내용:**
+  1. 회신번호 2건 이상일 때만 "개별회신번호" 옵션 노출
+  2. 또는 1건일 때 선택 시 "개별회신번호는 매장별 번호가 2건 이상 등록되어야 사용 가능합니다" 경고 모달
+
+---
+
+### 📦 세션 2: 예약대기 + 수신거부 + 발송/캘린더 (5건)
+
+> **필요 파일 (Harold님 업로드):**
+> - `packages/frontend/src/pages/DashboardPage.tsx` (또는 분리된 ScheduledCampaignModal.tsx, CalendarModal.tsx)
+> - `packages/backend/src/routes/campaigns.ts`
+> - `packages/backend/src/routes/customers.ts`
+> - `packages/frontend/src/components/` — 관련 모달 파일들
+
+#### 버그 #2 — 예약대기 LMS 제목/회신번호 미표시 + 문안수정 제목 삭제 무시
+- **증상:** 예약대기 모달에서 LMS 제목, 회신번호 안 보임. 제목 삭제 후 저장 → 성공 뜨지만 미반영
+- **수정 파일:** 예약대기 모달 (DashboardPage 또는 ScheduledCampaignModal)
+- **수정 내용:**
+  1. 예약 캠페인 상세 영역에 subject(제목), callback_number 표시 추가
+  2. 회신번호 개별화 건: 수신자별 회신번호 확인 UI
+  3. 제목 머지변수 사용 시: 수신자 클릭 → 치환된 제목 미리보기
+- **수정 파일:** 문안수정 핸들러 (프론트 + 백엔드)
+- **수정 내용:**
+  4. LMS/MMS인데 제목 빈칸으로 수정 시도 → "LMS는 제목이 필수입니다" 경고 모달, 저장 차단
+  5. 백엔드에서도 subject 빈 문자열 reject (message_type이 LMS/MMS인 경우)
+
+#### 버그 #3 — 예약 시간변경 과거 시간 허용 → 유령 예약
+- **증상:** 현재 오후 2시인데 오후 1시로 변경 가능. 변경 후 예약 상태지만 발송 안 되고 취소도 안 됨
+- **수정 파일:** 예약시간 변경 UI (프론트)
+- **수정 내용:**
+  1. datetime input의 min값: 현재 시간 + 15분 이후만 선택 가능
+  2. 과거 시간 선택 시 즉시 경고 ("현재 시간 이후로만 변경 가능합니다")
+- **수정 파일:** `routes/campaigns.ts` — 시간변경 API
+- **수정 내용:**
+  3. `scheduled_at < NOW() + interval '15 minutes'` 이면 400 reject
+  4. 이미 과거 시간인 유령 예약 건: 캘린더에서 취소 가능하도록 예외 처리 (강제 취소)
+
+#### 버그 #5 — 캘린더 상태 표기 기준
+- **증상:** 즉시발송 완료인데 "실패"로 표시. 부분 성공 시 상태 불명확
+- **결정 (Harold님 확정):**
+  - 발송 처리 완료 → **"완료"** (문자는 실패 건 항상 존재하는 게 정상, 상세에서 성공/실패 건수 확인)
+  - **"실패"** = 시스템 에러로 발송 자체가 진행 안 된 경우만
+  - **"취소"** = 명확하게 취소 표시
+- **수정 파일:** `routes/campaigns.ts` — 결과 sync 후 상태 판정 로직
+- **수정 내용:**
+  1. 상태 판정: sent_count > 0 이면 → "completed" (완료)
+  2. sent_count = 0 이고 fail_count > 0 → "failed" (실패)
+  3. cancelled_at 있으면 → "cancelled" (취소)
+- **수정 파일:** 캘린더 모달 (CalendarModal 또는 DashboardPage)
+- **수정 내용:**
+  4. 상태 뱃지 색상: 완료=초록, 실패=빨강, 취소=회색, 예약=파랑, 진행=주황
+  5. 상세 패널에 성공/실패 건수 함께 표시 (예: "완료 · 성공 1,500 / 실패 300")
+
+#### 버그 #6 — 대시보드 수신거부 건수 미표시
+- **증상:** 고객 현황에서 수신거부 `-`로 표시 (실제 데이터 있음)
+- **수정 파일:** `routes/customers.ts` 또는 stats API
+- **수정 내용:**
+  1. stats 쿼리에 수신거부 건수 추가: `unsubscribes` 테이블 COUNT 또는 `customers WHERE is_opt_out = true`
+- **수정 파일:** `DashboardPage.tsx`
+- **수정 내용:**
+  2. 수신거부 `-` → 실제 건수 바인딩
+
+#### 버그 #7 — 고객 DB 조회 수신거부 필터 미작동
+- **증상:** "거부" 필터 선택 → 전체 리스트 표시 (필터 안 먹힘)
+- **수정 파일:** `routes/customers.ts` — 목록 조회 API
+- **수정 내용:**
+  1. 수신거부 필터 파라미터(opt_out=true 등) 전달 확인
+  2. WHERE 조건에 `unsubscribes` 조인 또는 `is_opt_out = true` 조건 추가
+- **수정 파일:** 프론트 — 고객 DB 조회 모달
+- **수정 내용:**
+  3. "거부" 버튼 클릭 시 API 파라미터 정확히 전달되는지 확인
+
+---
+
+### 완료 기준 (DoD)
+- [ ] 세션 1: 버그 #1, #4, #8, #9, #10, #11 수정 + 배포 + 직원 재테스트
+- [ ] 세션 2: 버그 #2, #3, #5, #6, #7 수정 + 배포 + 직원 재테스트
+- [ ] TypeScript 타입 에러 없이 컴파일
+- [ ] 기존 기능 회귀 없음
 ---
 
 ## 5) 📌 PROJECT STATUS
@@ -194,6 +349,42 @@
 | 서비스 사용자 | hanjul.ai | company 로그인 | /dashboard |
 | 고객사 관리자 | app.hanjul.ai | company-admin 로그인 | 고객사 관리 대시보드 |
 | 슈퍼관리자 | sys.hanjullo.com | super_admin 로그인 | /admin |
+
+### 5-6. 대시보드 컴포넌트 구조 (리팩토링 완료)
+
+**Dashboard.tsx:** 8,039줄 → **4,964줄** (Session 1+2 합계 3,075줄 절감)
+
+**Session 1 분리 컴포넌트 (10개):**
+| 파일 | 내용 |
+|------|------|
+| CalendarModal.tsx | 캘린더 모달 |
+| ChannelConvertModals.tsx | LMS/SMS 전환 2종 |
+| AiMessageSuggestModal.tsx | AI 문구 추천 |
+| CustomerInsightModal.tsx | 고객 인사이트 |
+| TodayStatsModal.tsx | 이번 달 통계 |
+| PlanLimitModal.tsx | 플랜 초과 에러 |
+| RecentCampaignModal.tsx | 최근 캠페인 |
+| RecommendTemplateModal.tsx | 추천 템플릿 |
+| CampaignSuccessModal.tsx | 캠페인 확정 성공 |
+| PlanUpgradeModal.tsx | 요금제 업그레이드 |
+
+**Session 2 분리 컴포넌트 (11개):**
+| 파일 | 내용 |
+|------|------|
+| AiCampaignResultPopup.tsx | AI 결과 팝업 (Step 1/2) |
+| AiPreviewModal.tsx | AI 미리보기 |
+| MmsUploadModal.tsx | MMS 이미지 업로드 |
+| UploadProgressModal.tsx | 업로드 프로그레스 |
+| ScheduledCampaignModal.tsx | 예약 대기 |
+| UploadResultModal.tsx | 업로드 결과 |
+| AddressBookModal.tsx | 주소록 |
+| ScheduleTimeModal.tsx | 예약전송 달력 |
+| DirectPreviewModal.tsx | 미리보기 공용 |
+| SendConfirmModal.tsx | 발송 확인 |
+| BalanceModals.tsx | 잔액현황+충전+부족 3종 |
+
+**Dashboard에 남은 것:** 핵심 state/handler + 상단 레이아웃 + 탭 영역 + 직접타겟설정 모달(578줄) + 직접타겟발송 모달(1,888줄)
+**추후 분리 대상:** 직접 타겟 발송 모달 (state 결합도 최고, 전용 세션 필요)
 
 ---
 
@@ -286,6 +477,10 @@
 ### 🔴 미해결 — 즉시 처리 필요
 (현재 없음)
 
+### 대시보드 리팩토링 Phase 3 (추후)
+- [ ] 직접 타겟 설정 모달 분리 (578줄, state 30+개 직접 참조)
+- [ ] 직접 타겟 발송 모달 분리 (1,888줄, handler 10+개 깊은 결합, 전용 세션 필요)
+
 ### 대시보드 고객활동현황 백엔드 연동
 - [ ] stats API 확장: 이번 달 신규가입, 30일 내 구매, 90일+ 미구매, 이번 달 수신거부, 이번 달 재구매
 - [ ] 수신거부 수 stats에 포함
@@ -347,8 +542,19 @@
 | D6 | 02-22 | 대시보드 좌60%/우40% flex 레이아웃 + 고객활동현황(B+C 융합) | grid-cols-4로는 75:25밖에 안됨. 활동현황=마케터 행동으로 이어지는 핵심 지표(신규/구매/휴면/수신거부/재구매). 백엔드는 추후 연결, 시연용 UI 선확보 |
 | D7 | 02-23 | 대시보드 헤더: 버튼형 → 텍스트 탭 스타일 (아이콘 제거, 녹/금/회 색상) | 홈페이지 탭 스타일 참고, SaaS 고급감 확보. 아이콘 없이 텍스트만으로 깔끔. DashboardHeader.tsx 컴포넌트 분리 |
 | D8 | 02-23 | AI 발송 분기 뱃지: 기존/NEW → AUTO/PRO | 오픈 시 동시 출시이므로 "기존"은 부적절. 고객 관점에서 간편/정교 성격 구분 = AUTO/PRO가 직관적 |
-| D9 | 02-23 | AI 개인화 판단: AI 응답 무시, 백엔드 확정값만 사용 | AI가 use_personalization을 임의 변경 → 일관성 없음. "개인화" 키워드 포함 시에만 true, 아니면 false 확정 |
+| D9 | 02-23 | 대시보드 모달 분리 2세션: 순수 리팩토링 (UI/로직 변경 없음) | 8,039줄→4,964줄. 직접타겟 모달(2,466줄)은 결합도 높아 추후 전용 세션 |
+## DECISION LOG 추가 항목
 
+| ID | 날짜 | 결정 | 근거 |
+|----|------|------|------|
+| D9 | 02-23 | 캘린더 상태 기준: 완료(발송처리됨)/실패(시스템에러)/취소(명시취소) 3단계 | 문자는 실패 건 항상 존재하는 게 정상. 부분성공도 "완료"로 표시, 상세에서 건수 확인 |
+| D10 | 02-23 | 직원 버그리포트 6차 수정 2세션 분할: 세션1=맞춤한줄+회신번호(8건), 세션2=예약+수신거부+캘린더(5건) | 파일 의존성 기준 그룹핑. 맞춤한줄이 가장 크고 긴급 |
+
+## DONE LOG 추가 항목
+
+| 날짜 | 완료 항목 |
+|------|----------|
+| 02-23 | 직원 버그리포트 6차 접수 (11건) — 분석 + 그룹핑 + 2세션 작업계획 수립. CURRENT_TASK 업데이트 |
 ---
 
 ## 10) ASSUMPTION LEDGER (가정 목록)
@@ -363,7 +569,6 @@
 | R1 | TypeScript 타입 에러 배포 → 서버 크래시 | 2 | 5 | 10 | 배포 전 tsc --noEmit 필수 체크 |
 | R2 | DB 파괴적 작업 시 데이터 유실 | 2 | 5 | 10 | pg_dump 백업 후 작업, 트랜잭션 활용 |
 | R3 | QTmsg sendreq_time UTC/KST 혼동 | 3 | 4 | 12 | 반드시 MySQL NOW() 사용 |
-| R4 | React setState 비동기 후 즉시 참조 | 3 | 3 | 9 | 함수에 직접 파라미터 전달 (promptOverride 패턴) |
 
 ---
 
@@ -373,7 +578,7 @@
 
 | 날짜 | 완료 항목 |
 |------|----------|
-| 02-23 | AI 발송 버그 5건 수정: ①스팸필터 LMS채널 미반영(msgType 하드코딩→selectedChannel) ②LMS 줄넘김(한줄 17자 제한+구분선 자동제거) ③080번호 간헐 누락(페이지 초기로드 시 loadCompanySettings 추가) ④⑤개인화 일관성(AI 응답 무시→백엔드 확정, 기본변수 이름+등급+매장명 자동포함) + AI한줄로 프롬프트 setState 비동기 버그 수정 |
+| 02-23 | 대시보드 모달 분리 Session 2: 11개 컴포넌트 추출 (AiCampaignResultPopup, AiPreviewModal, MmsUploadModal, UploadProgressModal, ScheduledCampaignModal, UploadResultModal, AddressBookModal, ScheduleTimeModal, DirectPreviewModal, SendConfirmModal, BalanceModals). Dashboard.tsx 7,056줄→4,964줄. TypeScript 타입체크 통과, 서버 배포 완료 |
 | 02-23 | 대시보드 헤더 탭스타일 리뉴얼 (DashboardHeader 컴포넌트 분리, 아이콘 제거, 녹색/금색 번갈아 텍스트+밑줄 애니메이션, 로그아웃 회색) + AI 발송 뱃지 기존/NEW → AUTO/PRO 변경 |
 | 02-22 | 대시보드 레이아웃 전면 개편: 좌60%/우40% 구조, 고객현황 보강(수신거부+활동현황5지표), 요금제 카드 개선, 하단4카드, 녹색/노란색 테두리, 우측버튼 폰트확대 |
 | 02-22 | AI 맞춤한줄 Phase 1 시작: AiSendTypeModal 분기 모달 + DashboardPage textarea 제거/연결 + AI-CUSTOM-SEND.md 작업문서 |
@@ -385,8 +590,7 @@
 | 02-19 | 스팸필터 판정 고도화 + 스팸한줄 앱 LMS + 080치환 제거 + 타겟직접발송 버그 수정 |
 
 **아카이브 (02-13 이전 요약):**
-- ~02-13: 스팸필터 테스트 시스템 (DB + 백엔드 + Android 앱 + 실제 발송 성공)
-- ~02-13: AI 캠페인확정 모달 분리 + AI 메시지 선택 인덱스 수정
+- ~02-13: AI 캠페인확정 모달 분리 + AI 메시지 선택 인덱스 수정 + 스팸필터 테스트 시스템 (DB + 백엔드 + Android 앱)
 - ~02-12: 발송 라인그룹 시스템 (Agent 총 11개) + MMS 이미지 첨부 + 충전 관리 통합 뷰 + 직원 버그리포트 2~4차
 - ~02-11: Sync Agent Phase 2 + 보안 강화 + 직원 버그리포트 1차 + 로고 적용 + SMS 바이트 처리
 - ~02-10: 서버 인프라 전체 배포, 도메인 3분리, 법률/규정, 핵심 기능 완성, 슈퍼관리자·고객사관리자 대시보드, 정산 시스템, QTmsg Agent 5개, Sync Agent Phase 1, 선불/후불 요금제 Phase 1-A
