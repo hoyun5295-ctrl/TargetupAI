@@ -159,7 +159,45 @@ async function smsExecAll(tables: string[], sqlTemplate: string, params: any[]):
 }
 
 // export for other modules
-export { ALL_SMS_TABLES, BULK_ONLY_TABLES, getAuthSmsTable, getCompanySmsTables, getTestSmsTables, hasCompanyLineGroup, invalidateLineGroupCache, smsAggAll, smsCountAll, smsExecAll, smsSelectAll };
+// ===== 로그 테이블 포함 조회 (결과 집계용) =====
+// QTmsg Agent가 처리 완료(rsv1=5) 시 LIVE → LOG(SMSQ_SEND_X_YYYYMM) 이동
+// 결과 조회 시 LIVE + LOG 모두 조회해야 정확한 성공/실패 집계 가능
+let _logTableCache: Set<string> | null = null;
+let _logTableCacheTs = 0;
+
+async function getExistingLogTables(): Promise<Set<string>> {
+  const now = Date.now();
+  if (_logTableCache && (now - _logTableCacheTs) < 300000) return _logTableCache;
+  const rows = await mysqlQuery("SHOW TABLES LIKE 'SMSQ_SEND_%_202___'") as any[];
+  const tables = new Set<string>();
+  for (const row of rows) {
+    tables.add(String(Object.values(row)[0]));
+  }
+  _logTableCache = tables;
+  _logTableCacheTs = now;
+  console.log(`[QTmsg] LOG 테이블 캐시 갱신: ${tables.size}개`);
+  return tables;
+}
+
+async function getCompanySmsTablesWithLogs(companyId: string): Promise<string[]> {
+  const liveTables = await getCompanySmsTables(companyId);
+  const existingLogs = await getExistingLogTables();
+  const now = new Date();
+  const curMonth = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const prevMonth = `${prev.getFullYear()}${String(prev.getMonth() + 1).padStart(2, '0')}`;
+
+  const allTables = [...liveTables];
+  for (const t of liveTables) {
+    const cur = `${t}_${curMonth}`;
+    const prv = `${t}_${prevMonth}`;
+    if (existingLogs.has(cur)) allTables.push(cur);
+    if (existingLogs.has(prv)) allTables.push(prv);
+  }
+  return allTables;
+}
+
+export { ALL_SMS_TABLES, BULK_ONLY_TABLES, getAuthSmsTable, getCompanySmsTables, getCompanySmsTablesWithLogs, getTestSmsTables, hasCompanyLineGroup, invalidateLineGroupCache, smsAggAll, smsCountAll, smsExecAll, smsSelectAll };
 // ===== 라인그룹 헬퍼 끝 =====
 
 // ===== 카카오 브랜드메시지 발송 헬퍼 =====
@@ -433,10 +471,11 @@ router.get('/', async (req: Request, res: Response) => {
           }
 
           if (pendingCount === 0) {
-            // 대기 건이 없으면 발송 완료 처리
-            const sentCount = await smsCountAll(companyTables, 'app_etc1 = ?', [camp.id]);
-            const successCount = await smsCountAll(companyTables, 'app_etc1 = ? AND status_code IN (6, 1000, 1800)', [camp.id]);
-            const failCount = await smsCountAll(companyTables, 'app_etc1 = ? AND status_code NOT IN (6, 100, 1000, 1800)', [camp.id]);
+            // 대기 건이 없으면 발송 완료 처리 (LIVE+LOG 조회 — Agent가 완료 후 LOG로 이동)
+            const tablesWithLogs = await getCompanySmsTablesWithLogs(companyId);
+            const sentCount = await smsCountAll(tablesWithLogs, 'app_etc1 = ?', [camp.id]);
+            const successCount = await smsCountAll(tablesWithLogs, 'app_etc1 = ? AND status_code IN (6, 1000, 1800)', [camp.id]);
+            const failCount = await smsCountAll(tablesWithLogs, 'app_etc1 = ? AND status_code NOT IN (6, 100, 1000, 1800)', [camp.id]);
 
             await query(
               `UPDATE campaigns SET status = 'completed', sent_count = $1, success_count = $2, fail_count = $3, sent_at = NOW(), updated_at = NOW() WHERE id = $4`,
@@ -1399,8 +1438,8 @@ router.post('/sync-results', async (req: Request, res: Response) => {
 
     let syncCount = 0;
     for (const run of runsResult.rows) {
-      // SMS: 캠페인 소속 회사의 라인그룹 테이블에서 합산 집계
-      const runTables = await getCompanySmsTables(run.company_id);
+      // SMS: 캠페인 소속 회사의 라인그룹 테이블에서 합산 집계 (LIVE+LOG)
+      const runTables = await getCompanySmsTablesWithLogs(run.company_id);
       const smsAgg = await smsAggAll(runTables,
         `COUNT(CASE WHEN status_code IN (6, 1000, 1800) THEN 1 END) as success_count,
          COUNT(CASE WHEN status_code NOT IN (6, 1000, 1800, 100) THEN 1 END) as fail_count,
@@ -1470,7 +1509,7 @@ router.post('/sync-results', async (req: Request, res: Response) => {
     );
 
     for (const campaign of directCampaigns.rows) {
-      const directTables = await getCompanySmsTables(campaign.company_id);
+      const directTables = await getCompanySmsTablesWithLogs(campaign.company_id);
       const smsDirectAgg = await smsAggAll(directTables,
         `COUNT(*) as total_count,
          COUNT(CASE WHEN status_code IN (6, 1000, 1800) THEN 1 END) as success_count,

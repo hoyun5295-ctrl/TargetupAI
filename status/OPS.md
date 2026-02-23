@@ -46,6 +46,11 @@ cd C:\projects\targetup\packages\frontend && npm run dev
 git add -A
 git commit -m "설명"
 git push
+
+# 5. 배포 자동화 (PowerShell 프로필 함수)
+tp-push "커밋메시지"     # 타입체크 → git add → commit → push (메시지 생략 시 자동 타임스탬프)
+tp-deploy               # 서버 git pull → pm2 restart all (백엔드만)
+tp-deploy-full          # 서버 git pull → frontend build → pm2 restart all
 ```
 
 ### 2-2. 서버 배포 (SSH 접속 후)

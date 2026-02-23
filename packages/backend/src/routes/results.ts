@@ -1,7 +1,7 @@
-import { Router, Request, Response } from 'express';
-import { query, mysqlQuery } from '../config/database';
+import { Request, Response, Router } from 'express';
+import { mysqlQuery, query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
-import { getCompanySmsTables, ALL_SMS_TABLES } from './campaigns';
+import { getCompanySmsTablesWithLogs } from './campaigns';
 
 const router = Router();
 
@@ -268,7 +268,7 @@ router.get('/campaigns/:id', async (req: Request, res: Response) => {
       return res.status(403).json({ error: '권한이 필요합니다.' });
     }
 
-    const companyTables = await getCompanySmsTables(companyId);
+    const companyTables = await getCompanySmsTablesWithLogs(companyId);
 
     // 캠페인 기본 정보
     const campaignResult = await query(
@@ -416,7 +416,7 @@ router.get('/campaigns/:id/messages', async (req: Request, res: Response) => {
       return res.status(403).json({ error: '권한이 필요합니다.' });
     }
 
-    const msgTables = await getCompanySmsTables(companyId);
+    const msgTables = await getCompanySmsTablesWithLogs(companyId);
     const runIds = [id];
     const offset = (Number(page) - 1) * Number(limit);
 
@@ -570,7 +570,7 @@ router.get('/campaigns/:id/export', async (req: Request, res: Response) => {
 
     // SMS 내역
     if (sendChannel === 'sms' || sendChannel === 'both') {
-      const exportTables = await getCompanySmsTables(companyId);
+      const exportTables = await getCompanySmsTablesWithLogs(companyId);
       const messages = await smsSelectAllWhere(exportTables,
         'seqno, dest_no, call_back, msg_type, msg_contents, status_code, mob_company, sendreq_time, mobsend_time, repmsg_recvtm',
         'WHERE app_etc1 = ?',
