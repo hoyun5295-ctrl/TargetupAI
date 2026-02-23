@@ -1445,15 +1445,16 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
     }
   };
 // AI 캠페인 생성 (프롬프트 한 방)
-const handleAiCampaignGenerate = async () => {
-  if (!aiCampaignPrompt.trim()) {
+const handleAiCampaignGenerate = async (promptOverride?: string) => {
+  const prompt = promptOverride || aiCampaignPrompt;
+  if (!prompt.trim()) {
     setShowPromptAlert(true);
     return;
   }
   setAiLoading(true);
   try {
     // 1. 타겟 + 채널 추천 받기
-    const response = await aiApi.recommendTarget({ objective: aiCampaignPrompt });
+    const response = await aiApi.recommendTarget({ objective: prompt });
     const result = response.data;
     
     // AI 결과 저장
@@ -1990,10 +1991,7 @@ const campaignData = {
           onSelectHanjullo={(prompt) => {
             setShowAiSendType(false);
             setAiCampaignPrompt(prompt);
-            // 기존 handleAiCampaignGenerate 로직 실행 (prompt 세팅 후)
-            setTimeout(() => {
-              handleAiCampaignGenerate();
-            }, 0);
+            handleAiCampaignGenerate(prompt);
           }}
           onSelectCustom={() => {
             setShowAiSendType(false);
