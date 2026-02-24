@@ -226,11 +226,11 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
       });
     }
 
-    // 배치 크기 제한 (한 번에 최대 1000건)
-    if (customers.length > 1000) {
+    // 배치 크기 제한 (한 번에 최대 5000건)
+    if (customers.length > 5000) {
       return res.status(400).json({
         success: false,
-        error: 'Maximum 1000 customers per batch'
+        error: 'Maximum 5000 customers per batch'
       });
     }
 
@@ -442,10 +442,10 @@ router.post('/purchases', async (req: SyncAuthRequest, res: Response) => {
       });
     }
 
-    if (purchases.length > 1000) {
+    if (purchases.length > 5000) {
       return res.status(400).json({
         success: false,
-        error: 'Maximum 1000 purchases per batch'
+        error: 'Maximum 5000 purchases per batch'
       });
     }
 
@@ -685,7 +685,7 @@ router.get('/config', async (req: SyncAuthRequest, res: Response) => {
       config: {
         sync_interval_customers: config.sync_interval_customers ?? agent.sync_interval_customers ?? 60,
         sync_interval_purchases: config.sync_interval_purchases ?? agent.sync_interval_purchases ?? 30,
-        batch_size: config.batch_size ?? 4000,
+        batch_size: config.batch_size ?? 5000,
         column_mapping: config.column_mapping ?? null,
         commands: config.commands ?? []
       }
