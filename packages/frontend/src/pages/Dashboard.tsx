@@ -1912,8 +1912,8 @@ const campaignData = {
                 {planInfo?.plan_code !== 'FREE' && planInfo?.max_customers && (
                   <div className="mt-1">
                     <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs text-gray-400">
-                        {(planInfo.current_customers || 0).toLocaleString()} / {planInfo.max_customers.toLocaleString()}명
+                    <span className="text-xs text-gray-400">
+                        {Number(planInfo.current_customers || 0).toLocaleString()} / {Number(planInfo.max_customers).toLocaleString()}명
                       </span>
                       <span className="text-xs text-gray-400">
                         {Math.round(((planInfo.current_customers || 0) / planInfo.max_customers) * 100)}%
