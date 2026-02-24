@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { formatDate } from '../utils/formatDate';
 
 interface CustomerDBModalProps {
@@ -161,7 +161,7 @@ export default function CustomerDBModal({ onClose, token }: CustomerDBModalProps
   const baseKeys = new Set(baseDetailFields.map(f => f.key));
   const extraDetailFields = fieldColumns
     .filter(f => f.is_custom && !baseKeys.has(f.field_key))
-    .map(f => ({ key: f.field_key, label: f.field_label || f.display_name || f.field_key }));
+    .map(f => ({ key: f.field_key, label: f.field_label || f.display_name || f.field_key, format: undefined as ((v: any) => string) | undefined }));
   const detailFields = [...baseDetailFields, ...extraDetailFields];
 
   return (
