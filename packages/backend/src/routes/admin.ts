@@ -865,8 +865,75 @@ router.get('/stats/send', authenticate, requireSuperAdmin, async (req: Request, 
       LIMIT $${paramIdx} OFFSET $${paramIdx + 1}
     `, [...baseParams, limit, offset]);
 
+    // ===== 테스트 발송 통계 (담당자 + 스팸필터) =====
+    let testSummary = { total: 0, success: 0, fail: 0, pending: 0, sms: 0, lms: 0, cost: 0 };
+    const targetCompanyId = companyId || null;
+    if (targetCompanyId) {
+      try {
+        // 1) 담당자 테스트 (MySQL)
+        const testTable = (process.env.SMS_TABLES || 'SMSQ_SEND').split(',').map((t: string) => t.trim()).find((t: string) => t.includes('_10')) || 'SMSQ_SEND';
+        let mysqlDateWhere = '';
+        const mysqlParams: any[] = [targetCompanyId];
+        if (startDate) { mysqlDateWhere += ` AND msg_instm >= ?`; mysqlParams.push(startDate); }
+        if (endDate) { mysqlDateWhere += ` AND msg_instm < DATE_ADD(?, INTERVAL 1 DAY)`; mysqlParams.push(endDate); }
+
+        const testRows = await mysqlQuery(
+          `SELECT COUNT(*) as total,
+            SUM(CASE WHEN status_code IN (6,1000,1800) THEN 1 ELSE 0 END) as success,
+            SUM(CASE WHEN status_code NOT IN (6,1000,1800,100) THEN 1 ELSE 0 END) as fail,
+            SUM(CASE WHEN status_code = 100 THEN 1 ELSE 0 END) as pending,
+            SUM(CASE WHEN msg_type = 'S' THEN 1 ELSE 0 END) as sms,
+            SUM(CASE WHEN msg_type = 'L' THEN 1 ELSE 0 END) as lms
+          FROM ${testTable} WHERE app_etc1 = 'test' AND app_etc2 = ? ${mysqlDateWhere}`,
+          mysqlParams
+        );
+        if (testRows && (testRows as any[]).length > 0) {
+          const t = (testRows as any[])[0];
+          testSummary.total += Number(t.total) || 0;
+          testSummary.success += Number(t.success) || 0;
+          testSummary.fail += Number(t.fail) || 0;
+          testSummary.pending += Number(t.pending) || 0;
+          testSummary.sms += Number(t.sms) || 0;
+          testSummary.lms += Number(t.lms) || 0;
+        }
+
+        // 2) 스팸필터 테스트 (PostgreSQL)
+        let sfDateWhere = '';
+        const sfParams: any[] = [targetCompanyId];
+        let sfIdx = 2;
+        if (startDate) { sfDateWhere += ` AND t.created_at >= $${sfIdx}::date AT TIME ZONE 'Asia/Seoul'`; sfParams.push(startDate); sfIdx++; }
+        if (endDate) { sfDateWhere += ` AND t.created_at < ($${sfIdx}::date + INTERVAL '1 day') AT TIME ZONE 'Asia/Seoul'`; sfParams.push(endDate); sfIdx++; }
+
+        const sfAgg = await query(`
+          SELECT COUNT(*) as total,
+            SUM(CASE WHEN r.message_type = 'SMS' THEN 1 ELSE 0 END) as sms,
+            SUM(CASE WHEN r.message_type = 'LMS' THEN 1 ELSE 0 END) as lms,
+            SUM(CASE WHEN r.result IS NOT NULL THEN 1 ELSE 0 END) as completed,
+            SUM(CASE WHEN r.result IS NULL AND t.status IN ('active','pending') THEN 1 ELSE 0 END) as pending
+          FROM spam_filter_test_results r
+          JOIN spam_filter_tests t ON r.test_id = t.id
+          WHERE t.company_id = $1 ${sfDateWhere}
+        `, sfParams);
+        const sf = sfAgg.rows[0];
+        testSummary.total += Number(sf.total) || 0;
+        testSummary.success += Number(sf.completed) || 0;
+        testSummary.pending += Number(sf.pending) || 0;
+        testSummary.sms += Number(sf.sms) || 0;
+        testSummary.lms += Number(sf.lms) || 0;
+
+        // 비용 계산
+        const costRes = await query('SELECT cost_per_sms, cost_per_lms FROM companies WHERE id = $1', [targetCompanyId]);
+        const cSms = Number(costRes.rows[0]?.cost_per_sms) || 9.9;
+        const cLms = Number(costRes.rows[0]?.cost_per_lms) || 27;
+        testSummary.cost = Math.round((testSummary.sms * cSms + testSummary.lms * cLms) * 10) / 10;
+      } catch (err) {
+        console.error('테스트 통계 조회 실패:', err);
+      }
+    }
+
     res.json({
       summary: summaryResult.rows[0],
+      testSummary,
       rows: rowsResult.rows,
       total,
       page,
@@ -940,9 +1007,70 @@ router.get('/stats/send/detail', authenticate, requireSuperAdmin, async (req: Re
       ORDER BY c.sent_at DESC
     `, [dateVal, companyId]);
 
+    // ===== 테스트 발송 상세 (담당자 + 스팸필터) =====
+    let testDetail: any[] = [];
+    try {
+      // 1) 담당자 테스트 (MySQL)
+      const testTable = (process.env.SMS_TABLES || 'SMSQ_SEND').split(',').map((t: string) => t.trim()).find((t: string) => t.includes('_10')) || 'SMSQ_SEND';
+      let mysqlDateWhere2 = '';
+      const mysqlParams2: any[] = [companyId];
+      if (view === 'monthly') {
+        mysqlDateWhere2 = ` AND DATE_FORMAT(msg_instm, '%Y-%m') = ?`;
+      } else {
+        mysqlDateWhere2 = ` AND DATE_FORMAT(msg_instm, '%Y-%m-%d') = ?`;
+      }
+      mysqlParams2.push(dateVal);
+
+      const testRows2 = await mysqlQuery(
+        `SELECT dest_no as phone, msg_type, status_code, msg_instm as sent_at, bill_id as sender_id
+        FROM ${testTable}
+        WHERE app_etc1 = 'test' AND app_etc2 = ? ${mysqlDateWhere2}
+        ORDER BY msg_instm DESC LIMIT 50`,
+        mysqlParams2
+      );
+      testDetail = (testRows2 as any[]).map(r => ({
+        phone: r.phone,
+        msgType: r.msg_type === 'S' ? 'SMS' : 'LMS',
+        status: [6, 1000, 1800].includes(r.status_code) ? 'success' : r.status_code === 100 ? 'pending' : 'fail',
+        sentAt: r.sent_at,
+        testType: 'manager',
+      }));
+
+      // 2) 스팸필터 테스트 (PostgreSQL)
+      let sfDateCond = '';
+      if (view === 'monthly') {
+        sfDateCond = `AND TO_CHAR(t.created_at AT TIME ZONE 'Asia/Seoul', 'YYYY-MM') = $2`;
+      } else {
+        sfDateCond = `AND TO_CHAR(t.created_at AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD') = $2`;
+      }
+      const sfDetail = await query(`
+        SELECT r.phone, r.carrier, r.message_type, r.result,
+               t.created_at as sent_at
+        FROM spam_filter_test_results r
+        JOIN spam_filter_tests t ON r.test_id = t.id
+        WHERE t.company_id = $1 ${sfDateCond}
+        ORDER BY t.created_at DESC LIMIT 50
+      `, [companyId, dateVal]);
+
+      sfDetail.rows.forEach((r: any) => {
+        testDetail.push({
+          phone: r.phone,
+          msgType: r.message_type || 'SMS',
+          status: r.result ? 'success' : 'pending',
+          result: r.result || 'pending',
+          carrier: r.carrier,
+          sentAt: r.sent_at,
+          testType: 'spam_filter',
+        });
+      });
+    } catch (err) {
+      console.error('테스트 상세 조회 실패:', err);
+    }
+
     res.json({
       userStats: result.rows,
       campaigns: campaignsResult.rows,
+      testDetail,
     });
   } catch (error) {
     console.error('발송 통계 상세 조회 실패:', error);

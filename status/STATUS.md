@@ -91,71 +91,39 @@
 ## 4) 🎯 CURRENT_TASK (현재 집중 작업)
 
 > **규칙:** 아래 목표에만 100% 리소스를 집중한다.
-> **배경:** 직원 버그리포트 7차 (9건) — 동적 필드 시스템 전환 + 스팸필터 동시성 + 발송 엔진 수정
 
 ---
 
-### 현재 목표: 직원 버그리포트 7차 수정 (전체 9건, 3세션 분할)
-
-> **근본 문제:** 고객사가 업로드/Sync한 데이터 필드가 하드코딩 화이트리스트로 제한되어 UI에 일부만 표시됨.
-> customer_field_definitions + custom_fields(jsonb) 기반 동적 필드 시스템으로 전환 필요.
-> 스팸필터는 테스트폰 3대 공유 구조에서 동시 테스트 시 결과 충돌 — 메시지 내용 기반 세션 격리 필요.
+### 현재 목표: (없음 — 다음 작업 대기)
 
 ---
 
-#### 세션 1: 동적 필드 시스템 전환 (버그 #1, #2, #5, #7, #8) ✅ 완료
+### ✅ 이전 완료: 직원 버그리포트 7차 수정 (전체 9건, 3세션 완료)
 
-> **핵심:** 하드코딩 필드 목록 → customer_field_definitions 기반 동적 렌더링
-> **수정 대상 파일:**
-> - `packages/frontend/src/components/CustomerDBModal.tsx` — 동적 컬럼 + 가로 스크롤
-> - `packages/frontend/src/components/AiCustomSendFlow.tsx` — PERSONALIZATION_FIELDS 화이트리스트 제거 → field_definitions 전체 노출
-> - `packages/frontend/src/components/Dashboard.tsx` — 직접타겟설정 수신번호 필드 중복 제거
-> - `packages/backend/src/routes/customers.ts` — enabled-fields API 확장 (custom_fields 포함)
-> - `packages/backend/src/services/ai.ts` — 미리보기 샘플 실제 DB 조회로 교체
-> - 발송결과 컴포넌트 — 채널 컬럼 message_type 기준 표시
+#### 세션 1: 동적 필드 시스템 전환 (버그 #1, #2, #5, #7, #8) ✅
 
-| # | 버그 | 내용 | 상태 |
-|---|------|------|------|
-| #5 | AI 맞춤한줄 개인화 필드 고정 | PERSONALIZATION_FIELDS 화이트리스트 삭제 → field_definitions + custom_fields 전체 노출 | ✅ |
-| #7 | 등급 필터 정규화값 표시 | normalizeGrade() 제거 → 원본값 trim만 저장 | ✅ |
-| #8 | AI 맞춤한줄 미리보기 샘플 고정 | SAMPLE_DATA 하드코딩 삭제 → enabled-fields API에서 실제 고객 1건 샘플 반환 | ✅ |
-| #2 | 수신번호 필드 중복 | phone/mobile/phone_number 드롭다운 → phone 고정 표시 | ✅ |
-| #1 | 발송결과 채널 전부 SMS | msgTypeLabel[c.message_type] 기반 SMS/LMS/MMS 표시 | ✅ |
-| 추가 | 고객DB 조회 동적 컬럼 | field_definitions 기반 동적 컬럼 + custom_fields + 가로 스크롤 + 상세보기 통합 | ✅ |
+> 수정 파일: CustomerDBModal.tsx, AiCustomSendFlow.tsx, Dashboard.tsx, customers.ts, services/ai.ts, ResultsModal.tsx
 
-#### 세션 2: 스팸필터 동시성 해결 (버그 #3, #4) ✅ 완료
+- ✅ #5 — 개인화 필드 화이트리스트 삭제 → field_definitions 전체 노출
+- ✅ #7 — normalizeGrade() 제거 → 원본값 저장
+- ✅ #8 — SAMPLE_DATA 삭제 → 실제 DB 고객 샘플
+- ✅ #2 — 수신번호 phone 고정
+- ✅ #1 — 채널 message_type 기반 표시
+- ✅ 추가 — 고객DB 동적 컬럼 + 가로 스크롤
 
-> **핵심:** 테스트폰 3대 공유 환경에서 복수 사용자 동시 테스트 시 결과 충돌 해결
-> **수정 파일:**
-> - `packages/backend/src/routes/spam-filter.ts` — 쿨다운 제거, user_id 기준 active 체크, 해시 세션 격리, fallback 제거
-> - `packages/frontend/src/components/SpamFilterTestModal.tsx` — 재테스트 버튼 추가, 429 핸들링 제거
-> - Android 앱 — 변경 없음 (기존 리포트 API 그대로 사용)
-> - DB: spam_filter_tests.message_hash 컬럼 + 인덱스 2개 추가
+#### 세션 2: 스팸필터 동시성 해결 (버그 #3, #4) ✅
 
-| # | 버그 | 내용 | 상태 |
-|---|------|------|------|
-| #3 | 스팸필터 쿨다운 미리셋 | 60초 쿨다운 완전 제거 → 완료 즉시 재테스트 버튼 | ✅ |
-| #4 | 동시 테스트 결과 엇갈림 | SHA-256 해시 세션 격리 + fallback 제거 + user_id 기준 active 체크 | ✅ |
+> 수정 파일: spam-filter.ts, SpamFilterTestModal.tsx. DB: message_hash 컬럼+인덱스 추가
 
-#### 세션 3: 발송 엔진 + 타겟 재검증 (버그 #6, #9) ⬜ 미착수
+- ✅ #3 — 쿨다운 제거 → 재테스트 버튼
+- ✅ #4 — SHA-256 해시 세션 격리 + fallback 제거
 
-> **수정 대상 파일:**
-> - `packages/backend/src/routes/campaigns.ts` — LMS 제목 머지 치환 추가
-> - `packages/backend/src/routes/ai.ts` — 타겟 추출 쿼리 검증 (세션1 동적 필드 적용 후)
+#### 세션 3: 발송 엔진 + 타겟 재검증 (버그 #6, #9) ✅
 
-| # | 버그 | 내용 | 상태 |
-|---|------|------|------|
-| #9 | LMS 제목 머지 미치환 | subject(title_str)에 %이름% 그대로 발송 → 본문과 동일한 머지 치환 적용 | ⬜ |
-| #6 | AI 맞춤한줄 타겟 추출 0명 | 세션1 동적 필드 + 정규화 매칭 수정 후 재검증. 6차 #9 수정 후에도 재발 가능성 있음 | ⬜ |
+> 수정 파일: campaigns.ts, ai.ts
 
----
-
-### 완료 기준 (DoD)
-- [ ] 세션 1: 고객DB 조회 동적 컬럼 + AI 맞춤한줄 필드 확장 + 수신번호 중복 제거 + 발송결과 채널 수정 + 등급 원본값 표시 + 미리보기 실제 DB 샘플
-- [x] 세션 2: 스팸필터 동시 테스트 지원 + 쿨다운 제거 + 해시 세션 격리 + 결과 정확도 100%
-- [ ] 세션 3: LMS 제목 머지 치환 + 타겟 추출 재검증
-- [ ] 전 세션 TypeScript 타입 에러 없이 배포
-- [ ] 수정 완료 시 영향 범위 체크리스트 작성 (동일 로직 사용하는 모든 경로 확인)
+- ✅ #9 — LMS 제목 머지 치환 (AI발송 personalizedSubject + 직접발송 finalSubject)
+- ✅ #6 — recount-target companyId 수정 + WHERE 통일 + storeFilter 추가
 
 ---
 
@@ -469,6 +437,7 @@
 | D12 | 02-23 | 이용약관 선불충전 3개월 유효+소멸, 환불 3개월 제한 | KCP 심사 요건. 제9조 신설(선불충전), 제12조 전면개정(환불정책) |
 | D13 | 02-23 | 수신거부 SoT를 unsubscribes 테이블로 통일 | customers.sms_opt_in=false 분산 → 업로드/Sync 시 unsubscribes 자동등록. 조회도 company_id 기준 전환. 삭제 시 sms_opt_in 복원 |
 | D14 | 02-24 | 직원 버그리포트 7차 3세션 분할 + 동적 필드 시스템 전환 결정 | 근본 원인: 하드코딩 필드 화이트리스트. 세션1=동적필드(#1,2,5,7,8+고객DB), 세션2=스팸필터동시성(#3,4), 세션3=발송엔진+타겟(#6,9). 스팸필터는 메시지 내용 기반 매칭으로 동시 테스트 지원 (원본 수정 없음) |
+| D15 | 02-25 | LMS 제목 머지 치환 가능 → 구현 | AI발송=고객별 개별INSERT, 직접발송=row별 개별값. 예약수정은 이미 구현됨. 3곳 모두 제목 머지 적용 |
 
 **아카이브:** D1-AI발송2분기(02-22) | D-대시보드 모달 분리(02-23): 8,039줄→4,964줄 | D2-브리핑방식(02-22) | D3-개인화필드체크박스(02-22) | D4-textarea제거(02-22) | D5-별도컴포넌트분리(02-22)
 
@@ -490,6 +459,7 @@
 | R5 | QTmsg LIVE→LOG 이동 후 결과 조회 불가 | 1 | 4 | 4 | ✅ 해결: getCompanySmsTablesWithLogs()로 LIVE+LOG 통합 조회 |
 | R6 | 스팸필터 동시 테스트 시 결과 충돌 (테스트폰 3대 공유) | 1 | 4 | 4 | ✅ 해결: SHA-256 해시 세션 격리 + fallback 제거 + user_id 기준 active 체크 (7차 세션2) |
 | R7 | 하드코딩 필드로 인한 반복 버그 재발 | 5 | 3 | 15 | ✅ 해결: 동적 필드 시스템 전환 완료 (7차 세션1) |
+| R8 | recount-target companyId undefined → 타겟 0명 | 3 | 4 | 12 | ✅ 해결: snake_case→camelCase 수정 + WHERE 조건 통일 (7차 세션3) |
 
 ---
 
@@ -499,6 +469,7 @@
 
 | 날짜 | 완료 항목 |
 |------|----------|
+| 02-25 | 직원 버그리포트 7차 세션3 완료 (2건) + 7차 전체 완료: ① LMS 제목 머지 치환 — AI발송(personalizedSubject+fieldMappings 동시치환+잔여변수 제거), 직접발송(finalSubject+replace 체인). 제목에도 %이름% 등 개인화 변수 정상 치환(#9). ② recount-target 근본 수정 — user.company_id→req.user?.companyId(undefined 해결), WHERE 조건 recommend-target과 통일(is_active+sms_opt_in+NOT EXISTS unsubscribes), storeFilter 추가(#6). 수정 파일: campaigns.ts, ai.ts |
 | 02-25 | 직원 버그리포트 7차 세션2 완료 (2건): 스팸필터 동시성 해결. ① 60초 쿨다운 완전 제거→완료 즉시 재테스트 버튼(#3), ② SHA-256 해시 세션 격리+fallback 제거+user_id 기준 active 체크(#4). DB: spam_filter_tests.message_hash varchar(32) 컬럼+인덱스 2개 추가. 수정 파일: spam-filter.ts, SpamFilterTestModal.tsx |
 | 02-24 | 직원 버그리포트 7차 세션1 완료 (6건): 동적 필드 시스템 전환. ① enabled-fields API 전면 개편(customer_field_definitions+custom_fields JSONB+실제 고객 샘플 반환), ② PERSONALIZATION_FIELDS 화이트리스트 삭제→전체 필드 노출(#5), ③ normalizeGrade() 제거→원본값 저장(#7), ④ SAMPLE_DATA→실제 DB 샘플(#8), ⑤ 수신번호 phone 고정(#2), ⑥ 채널 message_type 기반 표시(#1), ⑦ 고객DB 동적 컬럼+가로 스크롤. 수정 파일: normalize.ts, customers.ts, services/ai.ts, routes/ai.ts, AiCustomSendFlow.tsx, CustomerDBModal.tsx, ResultsModal.tsx, Dashboard.tsx |
 | 02-24 | 요금제 현황 게이지바 적용: "정상 이용 중" 텍스트→고객 수 프로그레스바(9,999/100,000명 10%) 전환. 80%미만 녹색, 80~95% 주황, 95%+ 빨강. max_customers 없는 요금제는 "정상 이용 중" 폴백. PlanInfo 인터페이스 확장(max_customers, current_customers). 수정: Dashboard.tsx |

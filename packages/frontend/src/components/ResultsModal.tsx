@@ -33,6 +33,8 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
   const [activeTab, setActiveTab] = useState<'summary' | 'test' | 'ai'>('summary');
   const [testStats, setTestStats] = useState<any>(null);
   const [testList, setTestList] = useState<any[]>([]);
+  const [spamFilterList, setSpamFilterList] = useState<any[]>([]);
+  const [spamFilterStats, setSpamFilterStats] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [summary, setSummary] = useState<any>(null);
   const [campaigns, setCampaigns] = useState<any[]>([]);
@@ -120,6 +122,8 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
       const data = await res.json();
       setTestStats(data.stats);
       setTestList(data.list);
+      setSpamFilterStats(data.spamFilterStats || null);
+      setSpamFilterList(data.spamFilterList || []);
     } catch (error) {
       console.error('테스트 통계 조회 실패:', error);
     }
@@ -350,7 +354,6 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
                       <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase">메시지 내용</th>
                       <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500 uppercase">등록일시</th>
                       <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500 uppercase">발송일시</th>
-                      <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500 uppercase">타입</th>
                       <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500 uppercase">채널</th>
                       <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500 uppercase">전송건수</th>
                       <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500 uppercase">성공</th>
@@ -362,7 +365,7 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
                   </thead>
                   <tbody>
                     {filteredCampaigns.length === 0 ? (
-                      <tr><td colSpan={13} className="px-4 py-10 text-center text-gray-400">조회된 데이터가 없습니다.</td></tr>
+                      <tr><td colSpan={12} className="px-4 py-10 text-center text-gray-400">조회된 데이터가 없습니다.</td></tr>
                     ) : (
                       filteredCampaigns
                         .slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)
@@ -390,9 +393,6 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
                             ) : c.sent_at ? (
                               <span className="text-gray-500">{new Date(c.sent_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
                             ) : '-'}
-                          </td>
-                          <td className="px-3 py-2.5 text-center">
-                            <span className="text-xs font-medium">{msgTypeLabel[c.message_type] || c.message_type}</span>
                           </td>
                           <td className="px-3 py-2.5 text-center">
                             <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${
@@ -504,32 +504,54 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
               </div>
 
               {/* 요약 카드 */}
-              <div className="grid grid-cols-2 gap-4">
-                <div className="bg-orange-50 border border-orange-100 rounded-lg p-4">
-                  <div className="font-medium text-gray-700 mb-2">담당자 테스트</div>
+              <div className="grid grid-cols-3 gap-4">
+                <div className="bg-amber-50 border border-amber-100 rounded-lg p-4">
+                  <div className="font-medium text-gray-700 mb-2">전체 테스트</div>
                   <div className="flex justify-between items-end">
                     <div>
-                      <span className="text-2xl font-bold text-orange-600">{testStats?.total || 0}</span>
+                      <span className="text-2xl font-bold text-amber-600">{testStats?.total || 0}</span>
                       <span className="text-sm text-gray-500 ml-1">건</span>
                     </div>
                     <div className="text-right">
                       <div className="text-sm text-gray-500">성공 {testStats?.success || 0} / 실패 {testStats?.fail || 0}</div>
-                      <div className="text-lg font-bold text-orange-600">{(testStats?.cost || 0).toLocaleString()}원</div>
+                      <div className="text-lg font-bold text-amber-600">{(testStats?.cost || 0).toLocaleString()}원</div>
                     </div>
                   </div>
                 </div>
-                <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                <div className="bg-orange-50 border border-orange-100 rounded-lg p-4">
+                  <div className="font-medium text-gray-700 mb-2">담당자 테스트</div>
+                  <div className="flex justify-between items-end">
+                    <div>
+                      <span className="text-xl font-bold text-orange-600">{(testList || []).length}</span>
+                      <span className="text-sm text-gray-500 ml-1">건</span>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-xs text-gray-400">담당자 발송 테스트</div>
+                    </div>
+                  </div>
+                </div>
+                <div className="bg-violet-50 border border-violet-100 rounded-lg p-4">
                   <div className="font-medium text-gray-700 mb-2">스팸필터 테스트</div>
-                  <div className="flex justify-between items-center h-[52px]">
-                    <span className="text-gray-400 text-sm">준비중</span>
+                  <div className="flex justify-between items-end">
+                    <div>
+                      <span className="text-xl font-bold text-violet-600">{spamFilterStats?.total || 0}</span>
+                      <span className="text-sm text-gray-500 ml-1">건</span>
+                    </div>
+                    <div className="text-right">
+                      {spamFilterStats && spamFilterStats.total > 0 ? (
+                        <div className="text-xs text-gray-400">SMS {spamFilterStats.sms} · LMS {spamFilterStats.lms}</div>
+                      ) : (
+                        <div className="text-xs text-gray-400">통신사별 스팸 판정</div>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
 
-              {/* 테스트 리스트 */}
+              {/* 담당자 테스트 리스트 */}
               <div className="border border-gray-200 rounded-lg overflow-hidden">
                 <div className="bg-gray-50 px-4 py-2.5 font-medium text-sm text-gray-700 border-b">담당자 테스트 이력</div>
-                <div className="max-h-[400px] overflow-y-auto">
+                <div className="max-h-[300px] overflow-y-auto">
                   <table className="w-full text-sm">
                     <thead className="bg-gray-50 sticky top-0">
                       <tr>
@@ -580,6 +602,53 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
                     <button onClick={() => setTestCurrentPage(p => Math.min(Math.ceil(testList.length / itemsPerPage), p + 1))} disabled={testCurrentPage >= Math.ceil(testList.length / itemsPerPage)} className="px-3 py-1 text-sm rounded-md border bg-white hover:bg-gray-50 disabled:opacity-40">다음</button>
                   </div>
                 )}
+              </div>
+
+              {/* 스팸필터 테스트 리스트 */}
+              <div className="border border-gray-200 rounded-lg overflow-hidden">
+                <div className="bg-violet-50 px-4 py-2.5 font-medium text-sm text-violet-700 border-b">스팸필터 테스트 이력</div>
+                <div className="max-h-[300px] overflow-y-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 sticky top-0">
+                      <tr>
+                        <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500">날짜</th>
+                        <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500">발송자</th>
+                        <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500">유형</th>
+                        <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500">통신사</th>
+                        <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500">수신번호</th>
+                        <th className="px-3 py-2 text-center text-xs font-semibold text-gray-500">판정</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(!spamFilterList || spamFilterList.length === 0) ? (
+                        <tr><td colSpan={6} className="px-3 py-8 text-center text-gray-400">스팸필터 테스트 이력이 없습니다</td></tr>
+                      ) : (
+                        spamFilterList.slice(0, 50).map((t: any, idx: number) => (
+                          <tr key={t.id || idx} className="border-t hover:bg-gray-50">
+                            <td className="px-3 py-2 text-xs text-gray-500">
+                              {new Date(t.sentAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                            </td>
+                            <td className="px-3 py-2 text-xs text-gray-700">{t.senderName || '-'}</td>
+                            <td className="px-3 py-2">
+                              <span className={`px-2 py-0.5 rounded text-xs font-medium ${t.type === 'SMS' ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'bg-violet-50 text-violet-700 border border-violet-200'}`}>
+                                {t.type}
+                              </span>
+                            </td>
+                            <td className="px-3 py-2 text-xs font-medium">{t.carrier || '-'}</td>
+                            <td className="px-3 py-2 font-mono text-xs">{t.phone}</td>
+                            <td className="px-3 py-2 text-center">
+                              <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                                t.result === 'pass' ? 'bg-green-50 text-green-700' : t.result === 'blocked' ? 'bg-red-50 text-red-700' : 'bg-yellow-50 text-yellow-700'
+                              }`}>
+                                {t.result === 'pass' ? '정상' : t.result === 'blocked' ? '차단' : '대기'}
+                              </span>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           )}

@@ -10,9 +10,7 @@ const router = Router();
 //  슈퍼관리자: 전체 회사 통계 (회사별 필터 가능)
 //  고객사관리자: 자사 통계만
 // ============================================================
-// ★ 2026-02-24 수정: campaign_runs → campaigns 직접 조회
-//   - 직접발송(direct-send)은 campaign_runs 미생성 → 통계 누락 버그 수정
-//   - 상태 필터: NOT IN ('cancelled', 'draft') 블랙리스트 방식 통일
+// ★ 2026-02-25 수정: 테스트 통계에 스팸필터 합산 + 비용 계산 추가
 
 // SMS 테이블 설정 (런타임에 읽어야 dotenv 로드 후 적용됨)
 function getTestSmsTable(): string {
@@ -93,10 +91,11 @@ router.get('/send', async (req: Request, res: Response) => {
         ${dateWhere} ${companyWhere} ${userWhere}
     `, baseParams);
 
-    // 2) 테스트 발송 통계 (MySQL — 동적 테이블)
-    let testSummary = { total: 0, success: 0, fail: 0, pending: 0, sms: 0, lms: 0 };
+    // 2) 테스트 발송 통계 (담당자 MySQL + 스팸필터 PostgreSQL)
+    let testSummary = { total: 0, success: 0, fail: 0, pending: 0, sms: 0, lms: 0, cost: 0 };
     if (companyScope) {
       try {
+        // 2-1) 담당자 테스트 (MySQL)
         let mysqlDateWhere = '';
         const mysqlParams: any[] = [companyScope];
         if (startDate) {
@@ -122,17 +121,58 @@ router.get('/send', async (req: Request, res: Response) => {
         );
         if (testRows && (testRows as any[]).length > 0) {
           const t = (testRows as any[])[0];
-          testSummary = {
-            total: Number(t.total) || 0,
-            success: Number(t.success) || 0,
-            fail: Number(t.fail) || 0,
-            pending: Number(t.pending) || 0,
-            sms: Number(t.sms) || 0,
-            lms: Number(t.lms) || 0,
-          };
+          testSummary.total += Number(t.total) || 0;
+          testSummary.success += Number(t.success) || 0;
+          testSummary.fail += Number(t.fail) || 0;
+          testSummary.pending += Number(t.pending) || 0;
+          testSummary.sms += Number(t.sms) || 0;
+          testSummary.lms += Number(t.lms) || 0;
         }
+
+        // 2-2) 스팸필터 테스트 (PostgreSQL)
+        let sfDateWhere = '';
+        const sfParams: any[] = [companyScope];
+        let sfIdx = 2;
+        if (startDate) {
+          sfDateWhere += ` AND t.created_at >= $${sfIdx}::date AT TIME ZONE 'Asia/Seoul'`;
+          sfParams.push(startDate);
+          sfIdx++;
+        }
+        if (endDate) {
+          sfDateWhere += ` AND t.created_at < ($${sfIdx}::date + INTERVAL '1 day') AT TIME ZONE 'Asia/Seoul'`;
+          sfParams.push(endDate);
+          sfIdx++;
+        }
+
+        const sfAgg = await pool.query(`
+          SELECT
+            COUNT(*) as total,
+            SUM(CASE WHEN r.message_type = 'SMS' THEN 1 ELSE 0 END) as sms,
+            SUM(CASE WHEN r.message_type = 'LMS' THEN 1 ELSE 0 END) as lms,
+            SUM(CASE WHEN r.result IS NOT NULL THEN 1 ELSE 0 END) as completed,
+            SUM(CASE WHEN r.result IS NULL AND t.status IN ('active','pending') THEN 1 ELSE 0 END) as pending
+          FROM spam_filter_test_results r
+          JOIN spam_filter_tests t ON r.test_id = t.id
+          WHERE t.company_id = $1 ${sfDateWhere}
+        `, sfParams);
+        const sf = sfAgg.rows[0];
+        testSummary.total += Number(sf.total) || 0;
+        testSummary.success += Number(sf.completed) || 0;
+        testSummary.pending += Number(sf.pending) || 0;
+        testSummary.sms += Number(sf.sms) || 0;
+        testSummary.lms += Number(sf.lms) || 0;
+
+        // 비용 계산 (회사 단가 기준)
+        const costRes = await pool.query('SELECT cost_per_sms, cost_per_lms FROM companies WHERE id = $1', [companyScope]);
+        const cSms = Number(costRes.rows[0]?.cost_per_sms) || 9.9;
+        const cLms = Number(costRes.rows[0]?.cost_per_lms) || 27;
+        testSummary.cost = Math.round(((testSummary.sms - testSummary.pending) * cSms + testSummary.lms * cLms) * 10) / 10;
+        // 더 정확하게: 성공 건만 과금 (sms 성공 개수 × 단가)
+        // 담당자 성공 sms/lms 분리는 MySQL에서 이미 구분됨
+        // 스팸필터는 completed 건 전체 과금 (SMS/LMS 비율로)
+        testSummary.cost = Math.round((testSummary.sms * cSms + testSummary.lms * cLms) * 10) / 10;
       } catch (mysqlErr) {
-        console.error('테스트 통계 MySQL 조회 실패:', mysqlErr);
+        console.error('테스트 통계 조회 실패:', mysqlErr);
       }
     }
 
@@ -210,6 +250,11 @@ router.get('/send/detail', async (req: Request, res: Response) => {
     const userFilter = filterUserId ? ` AND c.created_by = $3` : '';
     const detailParams = filterUserId ? [dateVal, targetCompanyId, filterUserId] : [dateVal, targetCompanyId];
 
+    // 비용 계산용 단가
+    const costRes = await pool.query('SELECT cost_per_sms, cost_per_lms FROM companies WHERE id = $1', [targetCompanyId]);
+    const cSms = Number(costRes.rows[0]?.cost_per_sms) || 9.9;
+    const cLms = Number(costRes.rows[0]?.cost_per_lms) || 27;
+
     // 사용자별 통계 (campaigns 직접 조회 — 직접발송 포함)
     const result = await pool.query(`
       SELECT 
@@ -221,7 +266,9 @@ router.get('/send/detail', async (req: Request, res: Response) => {
         COUNT(DISTINCT c.id) as runs,
         COALESCE(SUM(c.sent_count), 0) as sent,
         COALESCE(SUM(c.success_count), 0) as success,
-        COALESCE(SUM(c.fail_count), 0) as fail
+        COALESCE(SUM(c.fail_count), 0) as fail,
+        COALESCE(SUM(CASE WHEN c.message_type IN ('SMS','S') THEN c.success_count ELSE 0 END), 0) as sms_success,
+        COALESCE(SUM(CASE WHEN c.message_type IN ('LMS','L','MMS','M') THEN c.success_count ELSE 0 END), 0) as lms_success
       FROM campaigns c
       LEFT JOIN users u ON c.created_by = u.id
       WHERE c.sent_at IS NOT NULL
@@ -232,6 +279,12 @@ router.get('/send/detail', async (req: Request, res: Response) => {
       GROUP BY u.id, u.name, u.login_id, u.department, u.store_codes
       ORDER BY sent DESC
     `, detailParams);
+
+    // 사용자별 비용 계산
+    const userStats = result.rows.map((u: any) => ({
+      ...u,
+      cost: Math.round((Number(u.sms_success) * cSms + Number(u.lms_success) * cLms) * 10) / 10,
+    }));
 
     // 캠페인 상세 목록 (campaigns 직접 조회 — 직접발송 포함)
     const campaignsResult = await pool.query(`
@@ -259,9 +312,10 @@ router.get('/send/detail', async (req: Request, res: Response) => {
       ORDER BY c.sent_at DESC
     `, detailParams);
 
-    // 테스트 발송 상세 (MySQL — 동적 테이블)
+    // ===== 테스트 발송 상세 (담당자 MySQL + 스팸필터 PostgreSQL) =====
     let testDetail: any[] = [];
     try {
+      // 1) 담당자 테스트 (MySQL)
       let mysqlDateWhere = '';
       const mysqlParams: any[] = [targetCompanyId];
       if (view === 'monthly') {
@@ -289,15 +343,45 @@ router.get('/send/detail', async (req: Request, res: Response) => {
         msgType: r.msg_type === 'S' ? 'SMS' : 'LMS',
         status: [6, 1000, 1800].includes(r.status_code) ? 'success' : r.status_code === 100 ? 'pending' : 'fail',
         sentAt: r.sent_at,
+        testType: 'manager',
       }));
+
+      // 2) 스팸필터 테스트 (PostgreSQL)
+      let sfDateCond = '';
+      if (view === 'monthly') {
+        sfDateCond = `AND TO_CHAR(t.created_at AT TIME ZONE 'Asia/Seoul', 'YYYY-MM') = $2`;
+      } else {
+        sfDateCond = `AND TO_CHAR(t.created_at AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD') = $2`;
+      }
+      const sfDetail = await pool.query(`
+        SELECT r.phone, r.carrier, r.message_type, r.result,
+               t.created_at as sent_at
+        FROM spam_filter_test_results r
+        JOIN spam_filter_tests t ON r.test_id = t.id
+        WHERE t.company_id = $1 ${sfDateCond}
+        ORDER BY t.created_at DESC LIMIT 50
+      `, [targetCompanyId, dateVal]);
+
+      sfDetail.rows.forEach((r: any) => {
+        testDetail.push({
+          phone: r.phone,
+          msgType: r.message_type || 'SMS',
+          status: r.result ? 'success' : 'pending',
+          result: r.result || 'pending',
+          carrier: r.carrier,
+          sentAt: r.sent_at,
+          testType: 'spam_filter',
+        });
+      });
     } catch (mysqlErr) {
       console.error('테스트 상세 MySQL 조회 실패:', mysqlErr);
     }
 
     res.json({
-      userStats: result.rows,
+      userStats,
       campaigns: campaignsResult.rows,
       testDetail,
+      unitCost: { sms: cSms, lms: cLms },
     });
   } catch (error) {
     console.error('발송 통계 상세 조회 실패:', error);

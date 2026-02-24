@@ -1381,9 +1381,109 @@ router.get('/test-stats', async (req: Request, res: Response) => {
       senderName: senderMap[r.bill_id] || '-',
     }));
 
+    // ========== 스팸필터 테스트 통합 ==========
+    let spamDateWhere = '';
+    const spamParams: any[] = [companyId];
+    let spamIdx = 2;
+    if (fromDate) {
+      spamDateWhere += ` AND t.created_at >= $${spamIdx}::date AT TIME ZONE 'Asia/Seoul'`;
+      spamParams.push(fromDate);
+      spamIdx++;
+    }
+    if (toDate) {
+      spamDateWhere += ` AND t.created_at < ($${spamIdx}::date + INTERVAL '1 day') AT TIME ZONE 'Asia/Seoul'`;
+      spamParams.push(toDate);
+      spamIdx++;
+    }
+    let spamUserWhere = '';
+    if (userType === 'company_user' && userId) {
+      spamUserWhere = ` AND t.user_id = $${spamIdx}`;
+      spamParams.push(userId);
+      spamIdx++;
+    }
+
+    const spamAgg = await query(`
+      SELECT
+        COUNT(*) as total,
+        SUM(CASE WHEN r.message_type = 'SMS' THEN 1 ELSE 0 END) as sms,
+        SUM(CASE WHEN r.message_type = 'LMS' THEN 1 ELSE 0 END) as lms,
+        SUM(CASE WHEN r.result IS NOT NULL THEN 1 ELSE 0 END) as completed,
+        SUM(CASE WHEN r.result IS NULL AND t.status IN ('active','pending') THEN 1 ELSE 0 END) as pending
+      FROM spam_filter_test_results r
+      JOIN spam_filter_tests t ON r.test_id = t.id
+      WHERE t.company_id = $1 ${spamDateWhere} ${spamUserWhere}
+    `, spamParams);
+
+    const sf = spamAgg.rows[0];
+    const sfTotal = Number(sf.total) || 0;
+    const sfCompleted = Number(sf.completed) || 0;
+    const sfPending = Number(sf.pending) || 0;
+    const sfSms = Number(sf.sms) || 0;
+    const sfLms = Number(sf.lms) || 0;
+    const sfCost = sfCompleted > 0 ? (sfSms > sfLms ? sfSms * costSms + sfLms * costLms : sfLms * costLms + sfSms * costSms) : 0;
+    // 정확한 비용: completed 건에 대해 SMS/LMS 구분하여 계산
+    let sfCostCalc = 0;
+
+    // 스팸필터 리스트 (최근 100건)
+    const spamListResult = await query(`
+      SELECT
+        r.id, r.phone, r.carrier, r.message_type, r.result, r.received,
+        t.created_at as sent_at, t.user_id, t.callback_number,
+        t.message_content_sms, t.message_content_lms,
+        u.name as sender_name
+      FROM spam_filter_test_results r
+      JOIN spam_filter_tests t ON r.test_id = t.id
+      LEFT JOIN users u ON t.user_id = u.id
+      WHERE t.company_id = $1 ${spamDateWhere} ${spamUserWhere}
+      ORDER BY t.created_at DESC
+      LIMIT 100
+    `, spamParams);
+
+    const spamFilterList = spamListResult.rows.map((r: any) => {
+      const msgType = r.message_type || 'SMS';
+      const isCompleted = r.result !== null;
+      if (isCompleted) {
+        sfCostCalc += msgType === 'SMS' ? costSms : costLms;
+      }
+      return {
+        id: r.id,
+        phone: r.phone,
+        content: msgType === 'LMS' ? (r.message_content_lms || '') : (r.message_content_sms || ''),
+        type: msgType,
+        sentAt: r.sent_at,
+        status: isCompleted ? 'success' : 'pending',
+        result: r.result || 'pending',
+        carrier: r.carrier,
+        testType: 'spam_filter',
+        senderName: r.sender_name || '-',
+      };
+    });
+
+    const spamFilterStats = {
+      total: sfTotal,
+      success: sfCompleted,
+      fail: 0,
+      pending: sfPending,
+      sms: sfSms,
+      lms: sfLms,
+      cost: Math.round(sfCostCalc * 10) / 10,
+    };
+
+    // 합산 통계
+    const combinedStats = {
+      total: stats.total + spamFilterStats.total,
+      success: stats.success + spamFilterStats.success,
+      fail: stats.fail + spamFilterStats.fail,
+      pending: stats.pending + spamFilterStats.pending,
+      cost: Math.round((stats.cost + spamFilterStats.cost) * 10) / 10,
+    };
+
     res.json({
-      stats,
+      stats: combinedStats,
+      managerStats: stats,
+      spamFilterStats,
       list,
+      spamFilterList,
     });
   } catch (error) {
     console.error('테스트 통계 조회 실패:', error);

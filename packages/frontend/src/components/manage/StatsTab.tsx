@@ -123,7 +123,7 @@ export default function StatsTab() {
           </button>
         </div>
 
-        {/* 요약 카드 — 실발송 3개 + 테스트 1개 */}
+        {/* 요약 카드 — 실발송 3개 + 테스트 1개 (비용 포함) */}
         {stats?.summary && (
           <div className="px-6 py-4 grid grid-cols-4 gap-4 border-b">
             <div className="bg-blue-50 rounded-xl p-4 text-center">
@@ -142,9 +142,14 @@ export default function StatsTab() {
               <p className="text-xs text-gray-500 mb-1">🧪 테스트</p>
               <p className="text-xl font-bold text-amber-700">{formatNum(testSummary?.total || 0)}</p>
               {testSummary && testSummary.total > 0 && (
-                <p className="text-[10px] text-gray-400 mt-0.5">
-                  SMS {testSummary.sms} · LMS {testSummary.lms}
-                </p>
+                <>
+                  <p className="text-[10px] text-gray-400 mt-0.5">
+                    SMS {testSummary.sms} · LMS {testSummary.lms}
+                  </p>
+                  <p className="text-xs font-bold text-amber-600 mt-0.5">
+                    {(testSummary.cost || 0).toLocaleString()}원
+                  </p>
+                </>
               )}
             </div>
           </div>
@@ -238,7 +243,7 @@ export default function StatsTab() {
               <div className="p-8 text-center text-gray-500">로딩 중...</div>
             ) : detail ? (
               <div className="p-6 space-y-6">
-                {/* 사용자별 통계 */}
+                {/* 사용자별 통계 (비용 포함) */}
                 {detail.userStats?.length > 0 && (
                   <div>
                     <h4 className="text-sm font-semibold text-gray-700 mb-2">👤 사용자별</h4>
@@ -250,6 +255,7 @@ export default function StatsTab() {
                           <th className="px-3 py-2 text-right font-medium text-gray-600">발송</th>
                           <th className="px-3 py-2 text-right font-medium text-gray-600">성공</th>
                           <th className="px-3 py-2 text-right font-medium text-gray-600">실패</th>
+                          <th className="px-3 py-2 text-right font-medium text-gray-600">비용</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y">
@@ -260,6 +266,9 @@ export default function StatsTab() {
                             <td className="px-3 py-2 text-right">{formatNum(u.sent)}</td>
                             <td className="px-3 py-2 text-right text-green-600">{formatNum(u.success)}</td>
                             <td className="px-3 py-2 text-right text-red-600">{formatNum(u.fail)}</td>
+                            <td className="px-3 py-2 text-right text-amber-600 font-medium">
+                              {(u.cost || 0).toLocaleString()}원
+                            </td>
                           </tr>
                         ))}
                       </tbody>
@@ -279,6 +288,7 @@ export default function StatsTab() {
                           <th className="px-3 py-2 text-left font-medium text-gray-600">담당자</th>
                           <th className="px-3 py-2 text-right font-medium text-gray-600">발송</th>
                           <th className="px-3 py-2 text-right font-medium text-gray-600">성공</th>
+                          <th className="px-3 py-2 text-right font-medium text-gray-600">실패</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y">
@@ -293,6 +303,7 @@ export default function StatsTab() {
                             <td className="px-3 py-2 text-gray-600">{c.user_name || '-'}</td>
                             <td className="px-3 py-2 text-right">{formatNum(c.sent_count)}</td>
                             <td className="px-3 py-2 text-right text-green-600">{formatNum(c.success_count)}</td>
+                            <td className="px-3 py-2 text-right text-red-600">{formatNum(c.fail_count)}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -300,13 +311,14 @@ export default function StatsTab() {
                   </div>
                 )}
 
-                {/* 테스트 발송 내역 */}
+                {/* 테스트 발송 내역 (담당자 + 스팸필터 통합) */}
                 {detail.testDetail?.length > 0 && (
                   <div>
                     <h4 className="text-sm font-semibold text-gray-700 mb-2">🧪 테스트 발송 ({detail.testDetail.length}건)</h4>
                     <table className="w-full text-sm">
                       <thead className="bg-amber-50">
                         <tr>
+                          <th className="px-3 py-2 text-left font-medium text-gray-600">구분</th>
                           <th className="px-3 py-2 text-left font-medium text-gray-600">수신번호</th>
                           <th className="px-3 py-2 text-left font-medium text-gray-600">유형</th>
                           <th className="px-3 py-2 text-left font-medium text-gray-600">상태</th>
@@ -316,6 +328,13 @@ export default function StatsTab() {
                       <tbody className="divide-y">
                         {detail.testDetail.map((t: any, i: number) => (
                           <tr key={i} className="hover:bg-gray-50">
+                            <td className="px-3 py-2">
+                              <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${
+                                t.testType === 'spam_filter' ? 'bg-violet-100 text-violet-700' : 'bg-orange-100 text-orange-700'
+                              }`}>
+                                {t.testType === 'spam_filter' ? '스팸필터' : '담당자'}
+                              </span>
+                            </td>
                             <td className="px-3 py-2 font-mono text-xs">{t.phone}</td>
                             <td className="px-3 py-2">
                               <span className="px-1.5 py-0.5 bg-amber-100 text-amber-700 text-xs rounded">
@@ -323,16 +342,26 @@ export default function StatsTab() {
                               </span>
                             </td>
                             <td className="px-3 py-2">
-                              <span className={`px-1.5 py-0.5 rounded text-xs ${
-                                t.status === 'success' ? 'bg-green-100 text-green-700' :
-                                t.status === 'pending' ? 'bg-gray-100 text-gray-600' :
-                                'bg-red-100 text-red-700'
-                              }`}>
-                                {t.status === 'success' ? '성공' : t.status === 'pending' ? '대기' : '실패'}
-                              </span>
+                              {t.testType === 'spam_filter' ? (
+                                <span className={`px-1.5 py-0.5 rounded text-xs ${
+                                  t.result === 'pass' ? 'bg-green-100 text-green-700' :
+                                  t.result === 'blocked' ? 'bg-red-100 text-red-700' :
+                                  'bg-gray-100 text-gray-600'
+                                }`}>
+                                  {t.result === 'pass' ? '정상' : t.result === 'blocked' ? '차단' : '대기'}
+                                </span>
+                              ) : (
+                                <span className={`px-1.5 py-0.5 rounded text-xs ${
+                                  t.status === 'success' ? 'bg-green-100 text-green-700' :
+                                  t.status === 'pending' ? 'bg-gray-100 text-gray-600' :
+                                  'bg-red-100 text-red-700'
+                                }`}>
+                                  {t.status === 'success' ? '성공' : t.status === 'pending' ? '대기' : '실패'}
+                                </span>
+                              )}
                             </td>
                             <td className="px-3 py-2 text-gray-500 text-xs">
-                            {formatDateTime(t.sentAt)}
+                              {formatDateTime(t.sentAt)}
                             </td>
                           </tr>
                         ))}
