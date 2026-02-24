@@ -32,8 +32,19 @@ function getCompanyScope(req: Request): string | null {
 router.get('/send', async (req: Request, res: Response) => {
   try {
     const view = (req.query.view as string) || 'daily';
-    const startDate = (req.query.startDate as string) || '';
-    const endDate = (req.query.endDate as string) || '';
+    let startDate = (req.query.startDate as string) || '';
+    let endDate = (req.query.endDate as string) || '';
+
+    // 월별 조회 시 날짜를 월 단위로 자동 확장
+    if (view === 'monthly') {
+      if (startDate) startDate = startDate.substring(0, 7) + '-01';
+      if (endDate) {
+        const d = new Date(endDate);
+        d.setMonth(d.getMonth() + 1, 0);
+        endDate = d.toISOString().split('T')[0];
+      }
+    }
+
     const companyScope = getCompanyScope(req);
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 10;
