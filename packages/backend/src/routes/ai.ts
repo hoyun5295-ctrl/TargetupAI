@@ -352,7 +352,14 @@ router.post('/recommend-target', async (req: Request, res: Response) => {
 // ============================================================
 router.post('/recount-target', authenticate, async (req: Request, res: Response) => {
   try {
-    const user = (req as any).user;
+    const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
+    const userType = req.user?.userType;
+
+    if (!companyId) {
+      return res.status(403).json({ error: '회사 권한이 필요합니다' });
+    }
+
     const { targetCondition } = req.body;
 
     if (!targetCondition) {
@@ -397,22 +404,37 @@ router.post('/recount-target', authenticate, async (req: Request, res: Response)
       targetFilters.store_name = { value: targetCondition.storeName, operator: 'eq' };
     }
 
-    // buildFilterWhereClause 호출
-    const { sql: filterSql, params: filterParams, nextIndex } = buildFilterWhereClause(targetFilters, 2);
+    // 사용자 매장 필터 (일반 사용자는 본인 store_codes만)
+    let storeFilter = '';
+    const baseParams: any[] = [companyId];
 
-    const countQuery = `
-      SELECT COUNT(*) as total FROM customers
-      WHERE company_id = $1 AND (is_opt_out IS NULL OR is_opt_out = false)
-      AND (is_invalid IS NULL OR is_invalid = false) ${filterSql}
-    `;
-    const countResult = await query(countQuery, [user.company_id, ...filterParams]);
-    const estimatedCount = parseInt((countResult.rows[0] as any)?.total || '0');
+    if (userType === 'company_user' && userId) {
+      const userResult = await query('SELECT store_codes FROM users WHERE id = $1', [userId]);
+      const storeCodes = userResult.rows[0]?.store_codes;
+      if (storeCodes && storeCodes.length > 0) {
+        storeFilter = ' AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = $1 AND store_code = ANY($2::text[]))';
+        baseParams.push(storeCodes);
+      }
+    }
+
+    // buildFilterWhereClause 호출 (recommend-target과 동일한 조건)
+    const { sql: filterSql, params: filterParams } = buildFilterWhereClause(targetFilters, baseParams.length + 1);
+
+    const countResult = await query(
+      `SELECT COUNT(*) FROM customers c
+       WHERE c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true${storeFilter} ${filterSql}
+       AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.company_id = c.company_id AND u.phone = c.phone)`,
+      [...baseParams, ...filterParams]
+    );
+    const estimatedCount = parseInt(countResult.rows[0].count);
 
     const unsubResult = await query(
-      `SELECT COUNT(*) as cnt FROM unsubscribes WHERE company_id = $1`,
-      [user.company_id]
+      `SELECT COUNT(*) FROM customers c
+       WHERE c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true${storeFilter} ${filterSql}
+       AND EXISTS (SELECT 1 FROM unsubscribes u WHERE u.company_id = c.company_id AND u.phone = c.phone)`,
+      [...baseParams, ...filterParams]
     );
-    const unsubscribeCount = parseInt((unsubResult.rows[0] as any)?.cnt || '0');
+    const unsubscribeCount = parseInt(unsubResult.rows[0].count);
 
     res.json({ estimatedCount, unsubscribeCount, targetFilters });
   } catch (error) {

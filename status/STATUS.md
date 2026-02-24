@@ -123,23 +123,19 @@
 | #1 | 발송결과 채널 전부 SMS | msgTypeLabel[c.message_type] 기반 SMS/LMS/MMS 표시 | ✅ |
 | 추가 | 고객DB 조회 동적 컬럼 | field_definitions 기반 동적 컬럼 + custom_fields + 가로 스크롤 + 상세보기 통합 | ✅ |
 
-#### 세션 2: 스팸필터 동시성 해결 (버그 #3, #4) ⬜ 미착수
+#### 세션 2: 스팸필터 동시성 해결 (버그 #3, #4) ✅ 완료
 
 > **핵심:** 테스트폰 3대 공유 환경에서 복수 사용자 동시 테스트 시 결과 충돌 해결
-> **수정 대상 파일:**
-> - `packages/backend/src/routes/spam-filter.ts` — 세션 격리 + 쿨다운 리셋
-> - 프론트엔드 스팸필터 모달 — 대기 UI 개선
-> - Android 앱 리포트 API 확인 필요
+> **수정 파일:**
+> - `packages/backend/src/routes/spam-filter.ts` — 쿨다운 제거, user_id 기준 active 체크, 해시 세션 격리, fallback 제거
+> - `packages/frontend/src/components/SpamFilterTestModal.tsx` — 재테스트 버튼 추가, 429 핸들링 제거
+> - Android 앱 — 변경 없음 (기존 리포트 API 그대로 사용)
+> - DB: spam_filter_tests.message_hash 컬럼 + 인덱스 2개 추가
 
 | # | 버그 | 내용 | 상태 |
 |---|------|------|------|
-| #3 | 스팸필터 쿨다운 미리셋 | 테스트 완료(3사 결과 수신) 후에도 180초 카운트 계속 → 완료 즉시 리셋 | ⬜ |
-| #4 | 동시 테스트 결과 엇갈림 | 2명 동시 테스트 시 A 결과가 B에게 매칭됨 → 메시지 내용 기반 세션 격리로 동시 테스트 지원 | ⬜ |
-
-**동시성 해결 방향 (확정):**
-- 메시지 내용(해시) + 발신번호 조합으로 수신 리포트 매칭 → 사용자별 독립 세션
-- 동일 메시지+동일 발신번호 동시 테스트만 순차 큐 처리 (극히 드문 케이스)
-- 테스트 완료(3사 수신 또는 타임아웃) 시 즉시 세션 해제, 고정 쿨다운 제거
+| #3 | 스팸필터 쿨다운 미리셋 | 60초 쿨다운 완전 제거 → 완료 즉시 재테스트 버튼 | ✅ |
+| #4 | 동시 테스트 결과 엇갈림 | SHA-256 해시 세션 격리 + fallback 제거 + user_id 기준 active 체크 | ✅ |
 
 #### 세션 3: 발송 엔진 + 타겟 재검증 (버그 #6, #9) ⬜ 미착수
 
@@ -156,7 +152,7 @@
 
 ### 완료 기준 (DoD)
 - [ ] 세션 1: 고객DB 조회 동적 컬럼 + AI 맞춤한줄 필드 확장 + 수신번호 중복 제거 + 발송결과 채널 수정 + 등급 원본값 표시 + 미리보기 실제 DB 샘플
-- [ ] 세션 2: 스팸필터 동시 테스트 지원 + 쿨다운 리셋 + 결과 정확도 100%
+- [x] 세션 2: 스팸필터 동시 테스트 지원 + 쿨다운 제거 + 해시 세션 격리 + 결과 정확도 100%
 - [ ] 세션 3: LMS 제목 머지 치환 + 타겟 추출 재검증
 - [ ] 전 세션 TypeScript 타입 에러 없이 배포
 - [ ] 수정 완료 시 영향 범위 체크리스트 작성 (동일 로직 사용하는 모든 경로 확인)
@@ -492,7 +488,7 @@
 | R3 | QTmsg sendreq_time UTC/KST 혼동 | 3 | 4 | 12 | 반드시 MySQL NOW() 사용 |
 | R4 | 라인그룹 미설정 고객사 → 전체 라인 폴백 오발송 | 1 | 5 | 5 | ✅ 해결: 이중 방어 적용 — 1차 발송 차단(LINE_GROUP_NOT_SET) + 2차 BULK_ONLY_TABLES 폴백(10,11 제외) |
 | R5 | QTmsg LIVE→LOG 이동 후 결과 조회 불가 | 1 | 4 | 4 | ✅ 해결: getCompanySmsTablesWithLogs()로 LIVE+LOG 통합 조회 |
-| R6 | 스팸필터 동시 테스트 시 결과 충돌 (테스트폰 3대 공유) | 4 | 4 | 16 | 메시지 내용 기반 세션 격리로 해결 예정 (7차 세션2) |
+| R6 | 스팸필터 동시 테스트 시 결과 충돌 (테스트폰 3대 공유) | 1 | 4 | 4 | ✅ 해결: SHA-256 해시 세션 격리 + fallback 제거 + user_id 기준 active 체크 (7차 세션2) |
 | R7 | 하드코딩 필드로 인한 반복 버그 재발 | 5 | 3 | 15 | ✅ 해결: 동적 필드 시스템 전환 완료 (7차 세션1) |
 
 ---
@@ -503,6 +499,7 @@
 
 | 날짜 | 완료 항목 |
 |------|----------|
+| 02-25 | 직원 버그리포트 7차 세션2 완료 (2건): 스팸필터 동시성 해결. ① 60초 쿨다운 완전 제거→완료 즉시 재테스트 버튼(#3), ② SHA-256 해시 세션 격리+fallback 제거+user_id 기준 active 체크(#4). DB: spam_filter_tests.message_hash varchar(32) 컬럼+인덱스 2개 추가. 수정 파일: spam-filter.ts, SpamFilterTestModal.tsx |
 | 02-24 | 직원 버그리포트 7차 세션1 완료 (6건): 동적 필드 시스템 전환. ① enabled-fields API 전면 개편(customer_field_definitions+custom_fields JSONB+실제 고객 샘플 반환), ② PERSONALIZATION_FIELDS 화이트리스트 삭제→전체 필드 노출(#5), ③ normalizeGrade() 제거→원본값 저장(#7), ④ SAMPLE_DATA→실제 DB 샘플(#8), ⑤ 수신번호 phone 고정(#2), ⑥ 채널 message_type 기반 표시(#1), ⑦ 고객DB 동적 컬럼+가로 스크롤. 수정 파일: normalize.ts, customers.ts, services/ai.ts, routes/ai.ts, AiCustomSendFlow.tsx, CustomerDBModal.tsx, ResultsModal.tsx, Dashboard.tsx |
 | 02-24 | 요금제 현황 게이지바 적용: "정상 이용 중" 텍스트→고객 수 프로그레스바(9,999/100,000명 10%) 전환. 80%미만 녹색, 80~95% 주황, 95%+ 빨강. max_customers 없는 요금제는 "정상 이용 중" 폴백. PlanInfo 인터페이스 확장(max_customers, current_customers). 수정: Dashboard.tsx |
 | 02-24 | 소스 보호 적용: 우클릭/F12/Ctrl+Shift+I,J,C/Ctrl+U 차단 + 텍스트 드래그 선택 차단 (input/textarea 제외). hanjul.ai, app.hanjul.ai, sys.hanjullo.com 전체 적용. 프론트엔드 난독화(vite-plugin-obfuscator)는 런칭 직전 적용 예정. 수정: packages/frontend/index.html, packages/company-frontend/index.html |

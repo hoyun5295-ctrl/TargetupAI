@@ -983,6 +983,7 @@ if (sendChannel !== 'sms' && campaign.is_ad) {
 for (const customer of filteredCustomers) {
   // ★ 동적 변수 치환 (field_mappings 기반 - 하드코딩 완전 제거!)
   let personalizedMessage = campaign.message_content || '';
+  let personalizedSubject = campaign.subject || '';
 
   for (const [varName, mapping] of Object.entries(fieldMappings) as [string, VarCatalogEntry][]) {
     const value = customer[mapping.column];
@@ -998,14 +999,14 @@ for (const customer of filteredCustomers) {
       displayValue = String(value);
     }
 
-    personalizedMessage = personalizedMessage.replace(
-      new RegExp(`%${varName}%`, 'g'),
-      displayValue
-    );
+    const varRegex = new RegExp(`%${varName}%`, 'g');
+    personalizedMessage = personalizedMessage.replace(varRegex, displayValue);
+    personalizedSubject = personalizedSubject.replace(varRegex, displayValue);
   }
 
   // 검증에서 발견된 잘못된 변수 잔여분 제거 (안전장치)
   personalizedMessage = personalizedMessage.replace(/%[^%\s]{1,20}%/g, '');
+  personalizedSubject = personalizedSubject.replace(/%[^%\s]{1,20}%/g, '');
 
   // 개별회신번호: customer.callback 있으면 사용, 없으면 캠페인 설정 또는 기본값
   const customerCallback = useIndividualCallback && customer.callback
@@ -1022,7 +1023,7 @@ for (const customer of filteredCustomers) {
       `INSERT INTO ${table} (
         dest_no, call_back, msg_contents, msg_type, title_str, sendreq_time, status_code, rsv1, app_etc1, app_etc2, file_name1, file_name2, file_name3
       ) VALUES (?, ?, ?, ?, ?, ${sendTime ? `'${sendTime}'` : 'NOW()'}, 100, '1', ?, ?, ?, ?, ?)`,
-      [cleanPhone, customerCallback, personalizedMessage, aiMsgTypeCode, campaign.subject || '', id, companyId, campaignMmsImages[0] || '', campaignMmsImages[1] || '', campaignMmsImages[2] || '']
+      [cleanPhone, customerCallback, personalizedMessage, aiMsgTypeCode, personalizedSubject, id, companyId, campaignMmsImages[0] || '', campaignMmsImages[1] || '', campaignMmsImages[2] || '']
     );
   }
 
@@ -1721,6 +1722,14 @@ router.post('/direct-send', async (req: Request, res: Response) => {
           .replace(/%기타3%/g, recipient.extra3 || '')
           .replace(/%회신번호%/g, recipient.callback || '');
 
+        // LMS/MMS 제목 머지 치환
+        const finalSubject = (subject || '')
+          .replace(/%이름%/g, recipient.name || '')
+          .replace(/%기타1%/g, recipient.extra1 || '')
+          .replace(/%기타2%/g, recipient.extra2 || '')
+          .replace(/%기타3%/g, recipient.extra3 || '')
+          .replace(/%회신번호%/g, recipient.callback || '');
+
         // 분할전송 시간 계산
         let sendTime: string;
         if (isScheduledSend) {
@@ -1759,7 +1768,7 @@ router.post('/direct-send', async (req: Request, res: Response) => {
           recipientCallback,
           finalMessage,
           msgType === 'SMS' ? 'S' : msgType === 'LMS' ? 'L' : 'M',
-          subject || '',
+          finalSubject,
           sendTime,
           campaignId,
           (mmsImagePaths || [])[0] || '',
