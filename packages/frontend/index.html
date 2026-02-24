@@ -33,7 +33,45 @@
 
     <!-- Font -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css" />
-  </head>
+
+    <!-- 소스 보호: 우클릭/개발자도구/텍스트선택 차단 (sys.hanjullo.com 제외) -->
+    <script>
+      (function() {
+        // 우클릭 차단
+        document.addEventListener('contextmenu', function(e) { e.preventDefault(); });
+
+        // 키보드 단축키 차단
+        document.addEventListener('keydown', function(e) {
+          // F12
+          if (e.key === 'F12') { e.preventDefault(); return; }
+          // Ctrl+Shift+I (개발자도구)
+          if (e.ctrlKey && e.shiftKey && e.key === 'I') { e.preventDefault(); return; }
+          // Ctrl+Shift+J (콘솔)
+          if (e.ctrlKey && e.shiftKey && e.key === 'J') { e.preventDefault(); return; }
+          // Ctrl+Shift+C (요소 선택)
+          if (e.ctrlKey && e.shiftKey && e.key === 'C') { e.preventDefault(); return; }
+          // Ctrl+U (소스보기)
+          if (e.ctrlKey && e.key === 'u') { e.preventDefault(); return; }
+        });
+      })();
+    </script>
+    <style>
+      /* 텍스트 드래그 선택 차단 (sys.hanjullo.com에서는 JS로 제거) */
+      body {
+        -webkit-user-select: none;
+        -moz-user-select: none;
+        -ms-user-select: none;
+        user-select: none;
+      }
+      /* input, textarea는 선택 허용 */
+      input, textarea, [contenteditable="true"] {
+        -webkit-user-select: text;
+        -moz-user-select: text;
+        -ms-user-select: text;
+        user-select: text;
+      }
+    </style>
+      </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
