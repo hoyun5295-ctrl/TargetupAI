@@ -234,6 +234,35 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
       });
     }
 
+    // 요금제 고객 수 제한 체크
+    const limitCheck = await query(`
+      SELECT
+        p.max_customers,
+        p.plan_name,
+        (SELECT COUNT(*) FROM customers WHERE company_id = c.id AND is_active = true) as current_count
+      FROM companies c
+      LEFT JOIN plans p ON c.plan_id = p.id
+      WHERE c.id = $1
+    `, [companyId]);
+
+    if (limitCheck.rows.length > 0) {
+      const { max_customers, current_count, plan_name } = limitCheck.rows[0];
+      const newTotal = Number(current_count) + customers.length;
+      if (max_customers && newTotal > max_customers) {
+        const available = Number(max_customers) - Number(current_count);
+        return res.status(403).json({
+          success: false,
+          error: '최대 고객 관리 DB를 초과합니다. 플랜을 업그레이드하세요.',
+          code: 'PLAN_LIMIT_EXCEEDED',
+          planName: plan_name,
+          maxCustomers: max_customers,
+          currentCount: Number(current_count),
+          requestedCount: customers.length,
+          availableCount: available > 0 ? available : 0
+        });
+      }
+    }
+
     // agentId 조회 (heartbeat 기록용)
     const agentResult = await query(
       `SELECT id FROM sync_agents WHERE company_id = $1 AND status = 'active' ORDER BY updated_at DESC LIMIT 1`,
