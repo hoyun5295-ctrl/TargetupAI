@@ -389,6 +389,8 @@
 - [ ] Sync Agent 코어 완성 (로컬 큐, 스케줄러, Heartbeat 남음)
 
 ### 보안
+- [x] 소스 보호: 우클릭/F12/개발자도구/드래그 차단 (3개 도메인 전체 적용)
+- [ ] 프론트엔드 난독화 (vite-plugin-obfuscator, 런칭 직전 적용)
 - [ ] 슈퍼관리자 IP 화이트리스트 설정
 - [ ] www.hanjul.ai SSL 인증서 추가 (DNS 전파 후)
 - [ ] VPN 접근 제한 검토
@@ -456,6 +458,7 @@
 
 | 날짜 | 완료 항목 |
 |------|----------|
+| 02-24 | 소스 보호 적용: 우클릭/F12/Ctrl+Shift+I,J,C/Ctrl+U 차단 + 텍스트 드래그 선택 차단 (input/textarea 제외). hanjul.ai, app.hanjul.ai, sys.hanjullo.com 전체 적용. 프론트엔드 난독화(vite-plugin-obfuscator)는 런칭 직전 적용 예정. 수정: packages/frontend/index.html, packages/company-frontend/index.html |
 | 02-24 | 어드민/고객사 통계 발송수량 전면 수정: ① campaign_runs→campaigns 직접 조회로 전환(직접발송 누락 해결), ② KST 날짜 필터 적용(AT TIME ZONE), ③ 상태 필터 화이트→블랙리스트 통일(NOT IN cancelled/draft), ④ 월별 조회 날짜 자동 확장(startDate→월1일, endDate→월말일). Agent 대량발송(1) 라인그룹 정상 발송 확인(1,001건→LOG 이동 완료). 수정: routes/manage-stats.ts, routes/admin.ts |
 | 02-24 | 080 수신거부 운영 연동: 서버 .env OPT_OUT_080_TOKEN 설정, Nginx 080callback 나래 IP 화이트리스트(121.156.104.161~165, 183.98.207.13) 적용, 나래에 콜백 URL+토큰 전달 완료(직원 경유). 나래 응답 대기 중. 수정: Nginx sites-available/targetup, .env |
 | 02-24 | 대시보드 빠른 발송 예시 전환: 추천 템플릿(8개 모달)→빠른 발송 예시(4개) 전환. 클릭 시 AiSendTypeModal 자동 오픈+AI 한줄로에 프롬프트 자동 입력. AiSendTypeModal에 initialPrompt prop 추가. 수정: RecommendTemplateModal.tsx, AiSendTypeModal.tsx, Dashboard.tsx. 서울형 R&D AI+X 산학협력 과제 제안서(워드) 작성 — 융복합산업R&D 인공지능 AI+X(2억/1년), 대학 7곳 제안 발송 |

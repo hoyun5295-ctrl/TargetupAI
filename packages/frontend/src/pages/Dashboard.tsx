@@ -1,38 +1,38 @@
-﻿import { BarChart3, Clock, FileText, Rocket, Sparkles, Users } from 'lucide-react';
+﻿import { BarChart3, Clock, Rocket, Sparkles, Users } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { aiApi, campaignsApi, customersApi } from '../api/client';
+import AddressBookModal from '../components/AddressBookModal';
+import AiCampaignResultPopup from '../components/AiCampaignResultPopup';
 import AiCampaignSendModal from '../components/AiCampaignSendModal';
 import AiCustomSendFlow from '../components/AiCustomSendFlow';
+import AiMessageSuggestModal from '../components/AiMessageSuggestModal';
+import AiPreviewModal from '../components/AiPreviewModal';
 import AiSendTypeModal from '../components/AiSendTypeModal';
-import CustomerDBModal from '../components/CustomerDBModal';
-import DashboardHeader from '../components/DashboardHeader';
-import ResultsModal from '../components/ResultsModal';
-import SpamFilterTestModal from '../components/SpamFilterTestModal';
+import BalanceModals from '../components/BalanceModals';
 import CalendarModal from '../components/CalendarModal';
+import CampaignSuccessModal from '../components/CampaignSuccessModal';
+import { LmsConvertModal, SmsConvertModal } from '../components/ChannelConvertModals';
+import CustomerDBModal from '../components/CustomerDBModal';
+import CustomerInsightModal from '../components/CustomerInsightModal';
+import DashboardHeader from '../components/DashboardHeader';
+import DirectPreviewModal from '../components/DirectPreviewModal';
+import LineGroupErrorModal from '../components/LineGroupErrorModal';
+import MmsUploadModal from '../components/MmsUploadModal';
+import PlanLimitModal from '../components/PlanLimitModal';
+import PlanUpgradeModal from '../components/PlanUpgradeModal';
 import RecentCampaignModal from '../components/RecentCampaignModal';
 import RecommendTemplateModal from '../components/RecommendTemplateModal';
-import CustomerInsightModal from '../components/CustomerInsightModal';
-import TodayStatsModal from '../components/TodayStatsModal';
-import CampaignSuccessModal from '../components/CampaignSuccessModal';
-import PlanLimitModal from '../components/PlanLimitModal';
-import { LmsConvertModal, SmsConvertModal } from '../components/ChannelConvertModals';
-import AiMessageSuggestModal from '../components/AiMessageSuggestModal';
-import PlanUpgradeModal from '../components/PlanUpgradeModal';
-import { useAuthStore } from '../stores/authStore';
-import { formatDate, formatDateTime } from '../utils/formatDate';
-import BalanceModals from '../components/BalanceModals';
-import SendConfirmModal from '../components/SendConfirmModal';
-import DirectPreviewModal from '../components/DirectPreviewModal';
-import ScheduleTimeModal from '../components/ScheduleTimeModal';
-import AddressBookModal from '../components/AddressBookModal';
-import UploadResultModal from '../components/UploadResultModal';
+import ResultsModal from '../components/ResultsModal';
 import ScheduledCampaignModal from '../components/ScheduledCampaignModal';
+import ScheduleTimeModal from '../components/ScheduleTimeModal';
+import SendConfirmModal from '../components/SendConfirmModal';
+import SpamFilterTestModal from '../components/SpamFilterTestModal';
+import TodayStatsModal from '../components/TodayStatsModal';
 import UploadProgressModal from '../components/UploadProgressModal';
-import MmsUploadModal from '../components/MmsUploadModal';
-import AiPreviewModal from '../components/AiPreviewModal';
-import AiCampaignResultPopup from '../components/AiCampaignResultPopup';
-import LineGroupErrorModal from '../components/LineGroupErrorModal';
+import UploadResultModal from '../components/UploadResultModal';
+import { useAuthStore } from '../stores/authStore';
+import { formatDate } from '../utils/formatDate';
 
 interface Stats {
   total: string;
@@ -66,6 +66,8 @@ interface Stats {
 interface PlanInfo {
   plan_name: string;
   plan_code: string;
+  max_customers: number;
+  current_customers: number;
   trial_expires_at: string;
   is_trial_expired: boolean;
 }
@@ -1907,7 +1909,31 @@ const campaignData = {
                 {planInfo?.plan_code === 'FREE' && planInfo?.is_trial_expired && (
                   <div className="text-xs text-red-500 font-medium">트라이얼 만료</div>
                 )}
-                {planInfo?.plan_code !== 'FREE' && (
+                {planInfo?.plan_code !== 'FREE' && planInfo?.max_customers && (
+                  <div className="mt-1">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs text-gray-400">
+                        {(planInfo.current_customers || 0).toLocaleString()} / {planInfo.max_customers.toLocaleString()}명
+                      </span>
+                      <span className="text-xs text-gray-400">
+                        {Math.round(((planInfo.current_customers || 0) / planInfo.max_customers) * 100)}%
+                      </span>
+                    </div>
+                    <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all ${
+                          ((planInfo.current_customers || 0) / planInfo.max_customers) >= 0.95
+                            ? 'bg-red-500'
+                            : ((planInfo.current_customers || 0) / planInfo.max_customers) >= 0.8
+                              ? 'bg-orange-400'
+                              : 'bg-green-500'
+                        }`}
+                        style={{ width: `${Math.min(100, ((planInfo.current_customers || 0) / planInfo.max_customers) * 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+                {planInfo?.plan_code !== 'FREE' && !planInfo?.max_customers && (
                   <div className="text-xs text-gray-400">정상 이용 중</div>
                 )}
               </div>
