@@ -274,28 +274,66 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
     let failedCount = 0;
     const failures: Array<{ phone: string; reason: string }> = [];
 
-    // full 모드: 첫 번째 배치에서 기존 sync 데이터 비활성화 (선택적)
-    // → 현재는 UPSERT만 수행, 삭제는 하지 않음
+    // 1단계: JS에서 phone validation + normalize 먼저 필터링
+    const validRows: Array<{
+      phone: string; name: string | null; gender: string | null;
+      birth_date: string | null; birth_year: number | null; age: number | null;
+      email: string | null; address: string | null; region: string | null;
+      grade: string | null; points: number | null;
+      store_code: string | null; store_name: string | null;
+      recent_purchase_date: string | null; recent_purchase_amount: number | null;
+      total_purchase_amount: number | null; purchase_count: number | null;
+      custom_fields: string | null;
+    }> = [];
 
     for (const c of customers) {
+      if (!c.phone) {
+        failedCount++;
+        failures.push({ phone: c.phone || 'empty', reason: 'phone is required' });
+        continue;
+      }
+      const phone = normalizePhone(c.phone);
+      if (!phone) {
+        failedCount++;
+        failures.push({ phone: c.phone, reason: 'invalid phone format' });
+        continue;
+      }
+      validRows.push({
+        phone, name: c.name || null, gender: c.gender || null,
+        birth_date: c.birth_date || null, birth_year: c.birth_year || null, age: c.age || null,
+        email: c.email || null, address: c.address || null, region: c.region || null,
+        grade: c.grade || null, points: c.points || null,
+        store_code: c.store_code || null, store_name: c.store_name || null,
+        recent_purchase_date: c.recent_purchase_date || null, recent_purchase_amount: c.recent_purchase_amount || null,
+        total_purchase_amount: c.total_purchase_amount || null, purchase_count: c.purchase_count || null,
+        custom_fields: c.custom_fields ? JSON.stringify(c.custom_fields) : null
+      });
+    }
+
+    // 2단계: 벌크 UPSERT (500건씩 청크)
+    const CHUNK_SIZE = 500;
+    for (let i = 0; i < validRows.length; i += CHUNK_SIZE) {
+      const chunk = validRows.slice(i, i + CHUNK_SIZE);
       try {
-        // 전화번호 필수 검증
-        if (!c.phone) {
-          failedCount++;
-          failures.push({ phone: c.phone || 'empty', reason: 'phone is required' });
-          continue;
+        const COLS = 19; // 파라미터 개수 per row
+        const values: any[] = [];
+        const valueClauses: string[] = [];
+
+        for (let j = 0; j < chunk.length; j++) {
+          const offset = j * COLS;
+          valueClauses.push(`($${offset+1},$${offset+2},$${offset+3},$${offset+4},$${offset+5},$${offset+6},$${offset+7},$${offset+8},$${offset+9},$${offset+10},$${offset+11},$${offset+12},$${offset+13},$${offset+14},$${offset+15},$${offset+16},$${offset+17},$${offset+18},$${offset+19},'sync',NOW(),NOW())`);
+          const r = chunk[j];
+          values.push(
+            companyId, r.phone, r.name, r.gender, r.birth_date, r.birth_year, r.age,
+            r.email, r.address, r.region, r.grade, r.points,
+            r.store_code, r.store_name,
+            r.recent_purchase_date, r.recent_purchase_amount,
+            r.total_purchase_amount, r.purchase_count,
+            r.custom_fields
+          );
         }
 
-        const phone = normalizePhone(c.phone);
-        if (!phone) {
-          failedCount++;
-          failures.push({ phone: c.phone, reason: 'invalid phone format' });
-          continue;
-        }
-
-        // UPSERT: company_id + phone 기준
-        // sms_opt_in, is_opt_out → 기존 값 유지 (EXCLUDED에서 제외)
-        await query(
+        const result = await query(
           `INSERT INTO customers (
             company_id, phone, name, gender, birth_date, birth_year, age,
             email, address, region, grade, points,
@@ -303,14 +341,7 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
             recent_purchase_date, recent_purchase_amount,
             total_purchase_amount, purchase_count,
             custom_fields, source, created_at, updated_at
-          ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7,
-            $8, $9, $10, $11, $12,
-            $13, $14,
-            $15, $16,
-            $17, $18,
-            $19, 'sync', NOW(), NOW()
-          )
+          ) VALUES ${valueClauses.join(',')}
           ON CONFLICT (company_id, COALESCE(store_code, '__NONE__'), phone) DO UPDATE SET
             name = COALESCE(EXCLUDED.name, customers.name),
             gender = COALESCE(EXCLUDED.gender, customers.gender),
@@ -331,35 +362,34 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
             custom_fields = COALESCE(EXCLUDED.custom_fields, customers.custom_fields),
             source = 'sync',
             updated_at = NOW()`,
-          [
-            companyId, phone, c.name || null, c.gender || null,
-            c.birth_date || null, c.birth_year || null, c.age || null,
-            c.email || null, c.address || null, c.region || null,
-            c.grade || null, c.points || null,
-            c.store_code || null, c.store_name || null,
-            c.recent_purchase_date || null, c.recent_purchase_amount || null,
-            c.total_purchase_amount || null, c.purchase_count || null,
-            c.custom_fields ? JSON.stringify(c.custom_fields) : null
-          ]
+          values
         );
 
-        upsertedCount++;
+        upsertedCount += result.rowCount || chunk.length;
 
-        // customer_stores N:N 매핑 (store_code가 있을 때만)
-        if (c.store_code) {
+        // customer_stores 벌크 처리
+        const storeRows = chunk.filter(r => r.store_code);
+        if (storeRows.length > 0) {
+          const storeValues: any[] = [];
+          const storeValueClauses: string[] = [];
+          for (let j = 0; j < storeRows.length; j++) {
+            const offset = j * 3;
+            storeValueClauses.push(`($${offset+1}, (SELECT id FROM customers WHERE company_id = $${offset+1} AND phone = $${offset+2} LIMIT 1), $${offset+3})`);
+            storeValues.push(companyId, storeRows[j].phone, storeRows[j].store_code);
+          }
           await query(
             `INSERT INTO customer_stores (company_id, customer_id, store_code)
-             SELECT $1, id, $2 FROM customers WHERE company_id = $1 AND phone = $3
+             VALUES ${storeValueClauses.join(',')}
              ON CONFLICT (customer_id, store_code) DO NOTHING`,
-            [companyId, c.store_code, phone]
+            storeValues
           );
         }
-      } catch (rowError: any) {
-        failedCount++;
-        failures.push({
-          phone: c.phone || 'unknown',
-          reason: rowError.message || 'Unknown error'
-        });
+      } catch (chunkError: any) {
+        // 청크 실패 시 개별 건으로 폴백하지 않고 전체 실패 처리
+        failedCount += chunk.length;
+        for (const r of chunk) {
+          failures.push({ phone: r.phone, reason: chunkError.message || 'Bulk insert failed' });
+        }
       }
     }
 
@@ -460,50 +490,84 @@ router.post('/purchases', async (req: SyncAuthRequest, res: Response) => {
     let failedCount = 0;
     const failures: Array<{ phone: string; reason: string }> = [];
 
+    // 1단계: JS에서 phone validation + normalize 먼저 필터링
+    const validPurchases: Array<{
+      phone: string; purchase_date: string | null;
+      store_code: string | null; store_name: string | null;
+      product_code: string | null; product_name: string | null;
+      quantity: number | null; unit_price: number | null; total_amount: number | null;
+    }> = [];
+
     for (const p of purchases) {
+      if (!p.customer_phone) {
+        failedCount++;
+        failures.push({ phone: p.customer_phone || 'empty', reason: 'customer_phone is required' });
+        continue;
+      }
+      const phone = normalizePhone(p.customer_phone);
+      if (!phone) {
+        failedCount++;
+        failures.push({ phone: p.customer_phone, reason: 'invalid phone format' });
+        continue;
+      }
+      validPurchases.push({
+        phone, purchase_date: p.purchase_date || null,
+        store_code: p.store_code || null, store_name: p.store_name || null,
+        product_code: p.product_code || null, product_name: p.product_name || null,
+        quantity: p.quantity || null, unit_price: p.unit_price || null, total_amount: p.total_amount || null
+      });
+    }
+
+    // 2단계: 전체 phone 목록으로 customer_id 벌크 조회
+    const allPhones = [...new Set(validPurchases.map(r => r.phone))];
+    const phoneToCustomerId: Record<string, string | null> = {};
+
+    if (allPhones.length > 0) {
+      const cidResult = await query(
+        `SELECT id, phone FROM customers WHERE company_id = $1 AND phone = ANY($2)`,
+        [companyId, allPhones]
+      );
+      for (const row of cidResult.rows) {
+        phoneToCustomerId[row.phone] = row.id;
+      }
+    }
+
+    // 3단계: 벌크 INSERT (500건씩 청크)
+    const P_CHUNK = 500;
+    for (let i = 0; i < validPurchases.length; i += P_CHUNK) {
+      const chunk = validPurchases.slice(i, i + P_CHUNK);
       try {
-        if (!p.customer_phone) {
-          failedCount++;
-          failures.push({ phone: p.customer_phone || 'empty', reason: 'customer_phone is required' });
-          continue;
+        const COLS = 11; // 파라미터 개수 per row
+        const values: any[] = [];
+        const valueClauses: string[] = [];
+
+        for (let j = 0; j < chunk.length; j++) {
+          const offset = j * COLS;
+          valueClauses.push(`($${offset+1},$${offset+2},$${offset+3},$${offset+4},$${offset+5},$${offset+6},$${offset+7},$${offset+8},$${offset+9},$${offset+10},$${offset+11},NOW())`);
+          const r = chunk[j];
+          values.push(
+            companyId, phoneToCustomerId[r.phone] || null, r.phone,
+            r.purchase_date, r.store_code, r.store_name,
+            r.product_code, r.product_name,
+            r.quantity, r.unit_price, r.total_amount
+          );
         }
 
-        const phone = normalizePhone(p.customer_phone);
-        if (!phone) {
-          failedCount++;
-          failures.push({ phone: p.customer_phone, reason: 'invalid phone format' });
-          continue;
-        }
-
-        // customer_id 조회 (company_id + phone 기준)
-        const customerResult = await query(
-          `SELECT id FROM customers WHERE company_id = $1 AND phone = $2`,
-          [companyId, phone]
-        );
-        const customerId = customerResult.rows[0]?.id || null;
-
-        await query(
+        const result = await query(
           `INSERT INTO purchases (
             company_id, customer_id, customer_phone, purchase_date,
             store_code, store_name, product_code, product_name,
             quantity, unit_price, total_amount, created_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())`,
-          [
-            companyId, customerId, phone,
-            p.purchase_date || null,
-            p.store_code || null, p.store_name || null,
-            p.product_code || null, p.product_name || null,
-            p.quantity || null, p.unit_price || null, p.total_amount || null
-          ]
+          ) VALUES ${valueClauses.join(',')}`,
+          values
         );
 
-        insertedCount++;
-      } catch (rowError: any) {
-        failedCount++;
-        failures.push({
-          phone: p.customer_phone || 'unknown',
-          reason: rowError.message || 'Unknown error'
-        });
+        insertedCount += result.rowCount || chunk.length;
+      } catch (chunkError: any) {
+        failedCount += chunk.length;
+        for (const r of chunk) {
+          failures.push({ phone: r.phone, reason: chunkError.message || 'Bulk insert failed' });
+        }
       }
     }
 
