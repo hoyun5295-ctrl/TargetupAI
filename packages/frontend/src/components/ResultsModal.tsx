@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 
 interface ResultsModalProps {
   onClose: () => void;
@@ -35,6 +35,7 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
   const [testList, setTestList] = useState<any[]>([]);
   const [spamFilterList, setSpamFilterList] = useState<any[]>([]);
   const [spamFilterStats, setSpamFilterStats] = useState<any>(null);
+  const [spamCurrentPage, setSpamCurrentPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [summary, setSummary] = useState<any>(null);
   const [campaigns, setCampaigns] = useState<any[]>([]);
@@ -620,10 +621,12 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
                       </tr>
                     </thead>
                     <tbody>
-                      {(!spamFilterList || spamFilterList.length === 0) ? (
+                    {(!spamFilterList || spamFilterList.length === 0) ? (
                         <tr><td colSpan={6} className="px-3 py-8 text-center text-gray-400">스팸필터 테스트 이력이 없습니다</td></tr>
                       ) : (
-                        spamFilterList.slice(0, 50).map((t: any, idx: number) => (
+                        spamFilterList
+                          .slice((spamCurrentPage - 1) * itemsPerPage, spamCurrentPage * itemsPerPage)
+                          .map((t: any, idx: number) => (
                           <tr key={t.id || idx} className="border-t hover:bg-gray-50">
                             <td className="px-3 py-2 text-xs text-gray-500">
                               {new Date(t.sentAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
@@ -648,7 +651,14 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
                       )}
                     </tbody>
                   </table>
-                </div>
+                  </div>
+                {spamFilterList && spamFilterList.length > itemsPerPage && (
+                  <div className="flex justify-center items-center gap-2 py-3 border-t bg-gray-50">
+                    <button onClick={() => setSpamCurrentPage(p => Math.max(1, p - 1))} disabled={spamCurrentPage === 1} className="px-3 py-1 text-sm rounded-md border bg-white hover:bg-gray-50 disabled:opacity-40">이전</button>
+                    <span className="text-sm text-gray-500">{spamCurrentPage} / {Math.ceil(spamFilterList.length / itemsPerPage)}</span>
+                    <button onClick={() => setSpamCurrentPage(p => Math.min(Math.ceil(spamFilterList.length / itemsPerPage), p + 1))} disabled={spamCurrentPage >= Math.ceil(spamFilterList.length / itemsPerPage)} className="px-3 py-1 text-sm rounded-md border bg-white hover:bg-gray-50 disabled:opacity-40">다음</button>
+                  </div>
+                )}
               </div>
             </div>
           )}
