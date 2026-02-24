@@ -80,15 +80,10 @@ const EMPTY_TARGET_CONDITION: TargetCondition = {
 
 const CATEGORY_ICONS: Record<string, any> = {
   '기본정보': User, '구매정보': ShoppingBag, '지역정보': MapPin,
-  '등급/포인트': Star, '날짜정보': Calendar, '기타': Hash,
+  '등급/포인트': Star, '날짜정보': Calendar, '매장정보': MapPin,
+  '수신정보': Hash, '추가정보': Hash, '기타': Hash,
 };
 
-const PERSONALIZATION_FIELDS = [
-  'name', 'gender', 'grade', 'store_name', 'region', 
-  'birth_date', 'birth_month_day', 'age', 'points',
-  'total_purchase_amount', 'purchase_count', 'recent_purchase_date',
-  'recent_purchase_store', 'avg_order_value', 'wedding_anniversary',
-];
 
 const FIELD_CATEGORIES: Record<string, string> = {
   name: '기본정보', gender: '기본정보', age: '기본정보',
@@ -109,13 +104,6 @@ const TONE_OPTIONS = [
   { value: 'casual', label: '💬 캐주얼', desc: '편하고 가벼운 톤' },
 ];
 
-const SAMPLE_DATA: Record<string, string> = {
-  '이름': '김민수', '성별': '여성', '등급': 'VIP', '매장명': '강남점',
-  '지역': '서울', '생일': '03-15', '나이': '32',
-  '포인트': '12,500', '구매금액': '350,000', '구매횟수': '8',
-  '최근구매일': '2026-02-10', '최근구매매장': '강남점',
-  '평균주문금액': '43,750', '결혼기념일': '06-20',
-};
 
 export default function AiCustomSendFlow({
   onClose, onConfirmSend, brandName, callbackNumbers, selectedCallback, isAd, optOutNumber,
@@ -127,6 +115,7 @@ export default function AiCustomSendFlow({
   const [availableFields, setAvailableFields] = useState<any[]>([]);
   const [selectedFields, setSelectedFields] = useState<string[]>(['name']);
   const [fieldsLoading, setFieldsLoading] = useState(true);
+  const [sampleData, setSampleData] = useState<Record<string, any>>({});
 
   // Step 2
   const [briefing, setBriefing] = useState('');
@@ -165,7 +154,8 @@ export default function AiCustomSendFlow({
       });
       if (res.ok) {
         const data = await res.json();
-        setAvailableFields((data.fields || []).filter((f: any) => PERSONALIZATION_FIELDS.includes(f.field_key)));
+        setAvailableFields(data.fields || []);
+        if (data.sample) setSampleData(data.sample);
       }
     } catch (error) { console.error('필드 로드 실패:', error); }
     finally { setFieldsLoading(false); }
@@ -198,7 +188,20 @@ export default function AiCustomSendFlow({
 
   const replaceSampleVars = (text: string) => {
     let result = text;
-    Object.entries(SAMPLE_DATA).forEach(([k, v]) => { result = result.replace(new RegExp(`%${k}%`, 'g'), v); });
+    // field_key → field_label 매핑 (API에서 받은 필드 정의 기반)
+    const fieldLabelMap: Record<string, string> = {};
+    for (const f of availableFields) {
+      fieldLabelMap[f.field_key] = f.field_label || f.display_name || f.field_key;
+    }
+    // %한글변수% → 실제 샘플값으로 치환
+    for (const f of availableFields) {
+      const label = fieldLabelMap[f.field_key];
+      const sampleVal = sampleData[f.field_key];
+      if (label && sampleVal != null) {
+        const displayVal = typeof sampleVal === 'number' ? sampleVal.toLocaleString() : String(sampleVal);
+        result = result.replace(new RegExp(`%${label}%`, 'g'), displayVal);
+      }
+    }
     return result;
   };
 
@@ -240,6 +243,7 @@ export default function AiCustomSendFlow({
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           briefing: briefing.trim(), promotionCard: card, personalFields: selectedFields,
+          fieldLabels: Object.fromEntries(availableFields.map((f: any) => [f.field_key, f.field_label || f.display_name || f.field_key])),
           url: url.trim() || undefined, tone, brandName, channel, isAd: isAdLocal,
         })
       });
@@ -273,7 +277,7 @@ export default function AiCustomSendFlow({
   };
 
   const groupedFields = availableFields.reduce((acc: Record<string, any[]>, field: any) => {
-    const cat = FIELD_CATEGORIES[field.field_key] || '기타';
+    const cat = field.category || FIELD_CATEGORIES[field.field_key] || '기타';
     if (!acc[cat]) acc[cat] = [];
     acc[cat].push(field);
     return acc;

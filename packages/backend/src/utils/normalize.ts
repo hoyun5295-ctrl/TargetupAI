@@ -318,7 +318,7 @@ export function normalizeCustomerRecord(raw: Record<string, any>): NormalizedCus
     birth_date: normalizeDate(raw.birth_date || raw.birthday || raw.birthdate || raw.생년월일),
     age: normalizeAge(raw.age || raw.나이),
     email: raw.email ? String(raw.email).trim().toLowerCase() : null,
-    grade: normalizeGrade(raw.grade || raw.등급 || raw.membership || raw.level || raw.회원등급),
+    grade: (raw.grade || raw.등급 || raw.membership || raw.level || raw.회원등급) ? String(raw.grade || raw.등급 || raw.membership || raw.level || raw.회원등급).trim() : null,
     region: normalizeRegion(raw.region || raw.지역 || raw.area || raw.city || raw.도시),
     points: raw.points != null ? Number(raw.points) || null : null,
     total_purchase_amount: normalizeAmount(raw.total_purchase_amount || raw.총구매금액 || raw.total_spent),

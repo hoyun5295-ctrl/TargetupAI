@@ -2447,18 +2447,12 @@ const campaignData = {
 
               {/* 필터 영역 */}
               <div className="p-6 space-y-4 overflow-y-auto max-h-[65vh]">
-                {/* 수신번호 필드 선택 */}
+                {/* 수신번호 필드 (phone 고정) */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">수신번호 필드</label>
-                  <select 
-                    value={targetPhoneField}
-                    onChange={(e) => setTargetPhoneField(e.target.value)}
-                    className="w-full px-4 py-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white text-gray-700"
-                  >
-                    <option value="phone">phone (전화번호)</option>
-                    <option value="mobile">mobile</option>
-                    <option value="phone_number">phone_number</option>
-                  </select>
+                  <div className="w-full px-4 py-2.5 border border-gray-200 rounded-lg bg-gray-50 text-gray-700 text-sm">
+                    📱 phone (전화번호)
+                  </div>
                 </div>
 
                 <div className="border-t border-gray-100"></div>

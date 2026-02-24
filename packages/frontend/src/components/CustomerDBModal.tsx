@@ -30,10 +30,24 @@ export default function CustomerDBModal({ onClose, token }: CustomerDBModalProps
   const [selectedCustomer, setSelectedCustomer] = useState<any>(null);
   const [detailLoading, setDetailLoading] = useState(false);
 
+  // 동적 컬럼 (field_definitions 기반)
+  const [fieldColumns, setFieldColumns] = useState<any[]>([]);
+
   useEffect(() => {
     fetchFilterOptions();
+    fetchFieldDefinitions();
     fetchCustomers(1);
   }, []);
+
+  const fetchFieldDefinitions = async () => {
+    try {
+      const res = await fetch('/api/customers/enabled-fields', { headers: { Authorization: `Bearer ${token}` } });
+      const data = await res.json();
+      setFieldColumns(data.fields || []);
+    } catch (error) {
+      console.error('필드 정의 조회 에러:', error);
+    }
+  };
 
   const fetchFilterOptions = async () => {
     try {
@@ -124,8 +138,8 @@ export default function CustomerDBModal({ onClose, token }: CustomerDBModalProps
 
   const totalPages = Math.ceil(total / limit);
 
-  // 상세보기 필드
-  const detailFields: { key: string; label: string; format?: (v: any) => string }[] = [
+  // 상세보기 필드 (기본 + field_definitions 동적 확장)
+  const baseDetailFields: { key: string; label: string; format?: (v: any) => string }[] = [
     { key: 'name', label: '이름' },
     { key: 'phone', label: '전화번호', format: formatPhone },
     { key: 'gender', label: '성별', format: (v) => v === 'M' || v === '남' ? '남성' : v === 'F' || v === '여' ? '여성' : v || '-' },
@@ -134,13 +148,21 @@ export default function CustomerDBModal({ onClose, token }: CustomerDBModalProps
     { key: 'email', label: '이메일' },
     { key: 'grade', label: '등급' },
     { key: 'region', label: '지역' },
+    { key: 'store_name', label: '매장명' },
     { key: 'store_code', label: '매장코드' },
     { key: 'points', label: '포인트', format: (v) => v != null ? Number(v).toLocaleString() : '-' },
     { key: 'total_purchase_amount', label: '총구매금액', format: (v) => v != null ? `${Number(v).toLocaleString()}원` : '-' },
+    { key: 'purchase_count', label: '구매횟수', format: (v) => v != null ? `${Number(v).toLocaleString()}회` : '-' },
     { key: 'recent_purchase_date', label: '최근구매일', format: (v) => formatDate(v) },
     { key: 'sms_opt_in', label: '수신동의', format: (v) => v === true || v === 'Y' ? '동의' : '거부' },
     { key: 'created_at', label: '등록일', format: (v) => formatDate(v) },
   ];
+  // field_definitions에 있지만 baseDetailFields에 없는 커스텀 필드 추가
+  const baseKeys = new Set(baseDetailFields.map(f => f.key));
+  const extraDetailFields = fieldColumns
+    .filter(f => f.is_custom && !baseKeys.has(f.field_key))
+    .map(f => ({ key: f.field_key, label: f.field_label || f.display_name || f.field_key }));
+  const detailFields = [...baseDetailFields, ...extraDetailFields];
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[50]">
@@ -210,25 +232,26 @@ export default function CustomerDBModal({ onClose, token }: CustomerDBModalProps
         {/* 테이블 + 상세 패널 */}
         <div className="flex-1 overflow-hidden flex">
           {/* 테이블 영역 */}
-          <div className={`overflow-y-auto transition-all ${selectedCustomer ? 'flex-[65]' : 'flex-1'}`}>
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 sticky top-0">
+          <div className={`overflow-auto transition-all ${selectedCustomer ? 'flex-[65]' : 'flex-1'}`}>
+            <table className="w-full text-sm" style={{ minWidth: `${Math.max(700, 100 + fieldColumns.length * 120)}px` }}>
+              <thead className="bg-gray-50 sticky top-0 z-10">
                 <tr>
-                  <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500 w-12">#</th>
-                  <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-500">이름</th>
-                  <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-500">전화번호</th>
-                  <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500">성별</th>
-                  <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500">나이</th>
-                  <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500">등급</th>
-                  <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-500">지역</th>
-                  <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500">수신</th>
+                  <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500 w-12 whitespace-nowrap">#</th>
+                  <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-500 whitespace-nowrap">이름</th>
+                  <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-500 whitespace-nowrap">전화번호</th>
+                  {fieldColumns.filter(f => !['name', 'phone'].includes(f.field_key)).map(f => (
+                    <th key={f.field_key} className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500 whitespace-nowrap">
+                      {f.field_label || f.display_name || f.field_key}
+                    </th>
+                  ))}
+                  <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500 whitespace-nowrap">수신</th>
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
-                  <tr><td colSpan={8} className="py-16 text-center text-gray-400">조회 중...</td></tr>
+                  <tr><td colSpan={3 + fieldColumns.filter(f => !['name', 'phone'].includes(f.field_key)).length + 1} className="py-16 text-center text-gray-400">조회 중...</td></tr>
                 ) : customers.length === 0 ? (
-                  <tr><td colSpan={8} className="py-16 text-center text-gray-400">
+                  <tr><td colSpan={3 + fieldColumns.filter(f => !['name', 'phone'].includes(f.field_key)).length + 1} className="py-16 text-center text-gray-400">
                     {searchValue ? '검색 결과가 없습니다.' : '고객 데이터가 없습니다.'}
                   </td></tr>
                 ) : (
@@ -237,21 +260,33 @@ export default function CustomerDBModal({ onClose, token }: CustomerDBModalProps
                       onClick={() => fetchDetail(c.id)}
                       className={`border-t cursor-pointer transition-colors ${selectedCustomer?.id === c.id ? 'bg-emerald-50' : 'hover:bg-gray-50'}`}>
                       <td className="px-3 py-2.5 text-center text-xs text-gray-400">{(page - 1) * limit + idx + 1}</td>
-                      <td className="px-3 py-2.5 text-sm font-medium text-gray-800">{c.name || '-'}</td>
-                      <td className="px-3 py-2.5 font-mono text-xs text-gray-600">{formatPhone(c.phone)}</td>
-                      <td className="px-3 py-2.5 text-center text-xs">{c.gender === 'M' || c.gender === '남' || c.gender === '남성' ? '남' : c.gender === 'F' || c.gender === '여' || c.gender === '여성' ? '여' : '-'}</td>
-                      <td className="px-3 py-2.5 text-center text-xs text-gray-600">{c.age || '-'}</td>
-                      <td className="px-3 py-2.5 text-center">
-                        {c.grade ? (
-                          <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${
-                            c.grade === 'VIP' ? 'bg-amber-50 text-amber-700' :
-                            c.grade === 'VVIP' ? 'bg-purple-50 text-purple-700' :
-                            'bg-gray-100 text-gray-600'
-                          }`}>{c.grade}</span>
-                        ) : '-'}
-                      </td>
-                      <td className="px-3 py-2.5 text-xs text-gray-600">{c.region || '-'}</td>
-                      <td className="px-3 py-2.5 text-center">
+                      <td className="px-3 py-2.5 text-sm font-medium text-gray-800 whitespace-nowrap">{c.name || '-'}</td>
+                      <td className="px-3 py-2.5 font-mono text-xs text-gray-600 whitespace-nowrap">{formatPhone(c.phone)}</td>
+                      {fieldColumns.filter(f => !['name', 'phone'].includes(f.field_key)).map(f => {
+                        const val = f.is_custom ? c.custom_fields?.[f.field_key] : c[f.field_key];
+                        let display: string;
+                        if (f.field_key === 'gender') {
+                          display = val === 'M' || val === '남' || val === '남성' ? '남' : val === 'F' || val === '여' || val === '여성' ? '여' : val || '-';
+                        } else if (f.field_key === 'total_purchase_amount' || f.field_key === 'recent_purchase_amount' || f.field_key === 'avg_order_value') {
+                          display = val != null ? `${Number(val).toLocaleString()}` : '-';
+                        } else if (f.field_key === 'grade') {
+                          return (
+                            <td key={f.field_key} className="px-3 py-2.5 text-center whitespace-nowrap">
+                              {val ? (
+                                <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${
+                                  String(val).toUpperCase() === 'VIP' ? 'bg-amber-50 text-amber-700' :
+                                  String(val).toUpperCase() === 'VVIP' ? 'bg-purple-50 text-purple-700' :
+                                  'bg-gray-100 text-gray-600'
+                                }`}>{val}</span>
+                              ) : '-'}
+                            </td>
+                          );
+                        } else {
+                          display = val != null ? String(val) : '-';
+                        }
+                        return <td key={f.field_key} className="px-3 py-2.5 text-center text-xs text-gray-600 whitespace-nowrap">{display}</td>;
+                      })}
+                      <td className="px-3 py-2.5 text-center whitespace-nowrap">
                         <span className={`inline-block w-2 h-2 rounded-full ${c.sms_opt_in ? 'bg-green-400' : 'bg-gray-300'}`} />
                       </td>
                     </tr>

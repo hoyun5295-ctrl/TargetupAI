@@ -490,7 +490,7 @@ router.post('/generate-custom', authenticate, async (req: Request, res: Response
       return res.status(403).json({ error: '회사 권한이 필요합니다' });
     }
 
-    const { briefing, promotionCard, personalFields, url, tone, brandName, channel, isAd } = req.body;
+    const { briefing, promotionCard, personalFields, fieldLabels, url, tone, brandName, channel, isAd } = req.body;
 
     if (!promotionCard || !personalFields || personalFields.length === 0) {
       return res.status(400).json({ error: '프로모션 카드와 개인화 필드를 입력해주세요' });
@@ -507,6 +507,7 @@ router.post('/generate-custom', authenticate, async (req: Request, res: Response
       briefing,
       promotionCard,
       personalFields,
+      fieldLabels,
       url,
       tone,
       brandName: companyInfo.brand_name || brandName || '브랜드',

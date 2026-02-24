@@ -398,7 +398,7 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
                             <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${
                               c.send_channel === 'kakao' ? 'bg-yellow-100 text-yellow-700' : 'bg-blue-50 text-blue-600'
                             }`}>
-                              {c.send_channel === 'kakao' ? '💬 카카오' : c.send_channel === 'both' ? '📱+💬' : '📱 SMS'}
+                              {c.send_channel === 'kakao' ? '💬 카카오' : c.send_channel === 'both' ? '📱+💬' : `📱 ${msgTypeLabel[c.message_type] || 'SMS'}`}
                             </span>
                           </td>
                           <td className="px-3 py-2.5 text-center font-medium">{(c.target_count || c.sent_count || 0).toLocaleString()}</td>

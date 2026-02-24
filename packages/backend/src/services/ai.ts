@@ -1012,6 +1012,7 @@ interface CustomMessageOptions {
     extra?: string;
   };
   personalFields: string[];
+  fieldLabels?: Record<string, string>;
   url?: string;
   tone: string;
   brandName: string;
@@ -1060,12 +1061,12 @@ export async function generateCustomMessages(options: CustomMessageOptions): Pro
   recommendation: string;
 }> {
   const {
-    briefing, promotionCard, personalFields, url, tone,
+    briefing, promotionCard, personalFields, fieldLabels, url, tone,
     brandName, brandTone, channel, isAd, rejectNumber,
   } = options;
 
   const varNames = personalFields
-    .map(f => FIELD_TO_VAR[f] || f)
+    .map(f => (fieldLabels && fieldLabels[f]) || FIELD_TO_VAR[f] || f)
     .filter(Boolean);
   const varTags = varNames.map(v => `%${v}%`).join(', ');
 

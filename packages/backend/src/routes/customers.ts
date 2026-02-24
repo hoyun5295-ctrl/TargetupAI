@@ -974,64 +974,148 @@ router.get('/filter-options', async (req: Request, res: Response) => {
   }
 });
 
-// GET /api/customers/enabled-fields - 회사별 활성 필터 필드 + 드롭다운 옵션
+// GET /api/customers/enabled-fields - 회사별 전체 필드 + 커스텀 필드 + 샘플 데이터
 router.get('/enabled-fields', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다' });
 
-    const companyResult = await query('SELECT enabled_fields FROM companies WHERE id = $1', [companyId]);
-    
-    const DEFAULT_FIELDS = ['gender', 'age_group', 'grade', 'region', 'total_purchase_amount', 'last_purchase_date'];
-    const enabledKeys = companyResult.rows[0]?.enabled_fields?.length > 0 
-      ? companyResult.rows[0].enabled_fields 
-      : DEFAULT_FIELDS;
+    // 표준 customers 테이블 컬럼 Set (custom_fields가 아닌 것들)
+    const STANDARD_COLUMNS = new Set([
+      'name', 'phone', 'gender', 'birth_date', 'birth_year', 'birth_month_day', 'age',
+      'email', 'address', 'region', 'grade', 'points', 'store_code', 'store_name',
+      'registered_store', 'registered_store_number', 'registration_type', 'callback',
+      'recent_purchase_date', 'recent_purchase_amount', 'recent_purchase_store',
+      'total_purchase_amount', 'total_purchase', 'purchase_count', 'avg_order_value',
+      'ltv_score', 'wedding_anniversary', 'is_married', 'sms_opt_in',
+    ]);
 
-    if (enabledKeys.length === 0) {
-      return res.json({ fields: [], options: {} });
-    }
+    // 필드 카테고리 자동 분류
+    const CATEGORY_MAP: Record<string, string> = {
+      name: '기본정보', phone: '기본정보', gender: '기본정보', age: '기본정보',
+      birth_date: '기본정보', birth_year: '기본정보', birth_month_day: '기본정보',
+      email: '기본정보', address: '기본정보',
+      grade: '등급/포인트', points: '등급/포인트', ltv_score: '등급/포인트',
+      store_name: '매장정보', store_code: '매장정보', registered_store: '매장정보',
+      registered_store_number: '매장정보', registration_type: '매장정보', callback: '매장정보',
+      region: '지역정보', recent_purchase_store: '지역정보',
+      total_purchase_amount: '구매정보', total_purchase: '구매정보', purchase_count: '구매정보',
+      recent_purchase_date: '구매정보', recent_purchase_amount: '구매정보', avg_order_value: '구매정보',
+      wedding_anniversary: '날짜정보', is_married: '날짜정보',
+      sms_opt_in: '수신정보',
+    };
 
-    const fieldsResult = await query(
-      `SELECT field_key, display_name, category, data_type, description, sort_order 
-       FROM standard_fields 
-       WHERE is_active = true AND field_key = ANY($1) 
-       ORDER BY sort_order`,
-      [enabledKeys]
+    const fields: any[] = [];
+    const existingKeys = new Set<string>();
+
+    // 1. customer_field_definitions 조회 (회사별 필드 정의가 있으면 우선 사용)
+    const fieldDefsResult = await query(
+      `SELECT field_key, field_label, field_type, display_order
+       FROM customer_field_definitions 
+       WHERE company_id = $1 AND is_hidden = false
+       ORDER BY display_order`,
+      [companyId]
     );
 
+    if (fieldDefsResult.rows.length > 0) {
+      for (const f of fieldDefsResult.rows) {
+        fields.push({
+          field_key: f.field_key,
+          display_name: f.field_label,
+          field_label: f.field_label,
+          data_type: f.field_type || 'string',
+          category: CATEGORY_MAP[f.field_key] || '추가정보',
+          sort_order: f.display_order,
+          is_custom: !STANDARD_COLUMNS.has(f.field_key),
+        });
+        existingKeys.add(f.field_key);
+      }
+    } else {
+      // field_definitions가 없으면 standard_fields 테이블 사용 (폴백)
+      const standardResult = await query(
+        `SELECT field_key, display_name, category, data_type, sort_order
+         FROM standard_fields WHERE is_active = true ORDER BY sort_order`,
+        []
+      );
+      for (const f of standardResult.rows) {
+        fields.push({
+          ...f,
+          field_label: f.display_name,
+          is_custom: false,
+        });
+        existingKeys.add(f.field_key);
+      }
+    }
+
+    // 2. custom_fields JSONB 키 조회 (field_definitions에 없지만 실제 데이터에 존재하는 커스텀 필드)
+    try {
+      const customKeysResult = await query(
+        `SELECT DISTINCT jsonb_object_keys(custom_fields) as field_key
+         FROM customers
+         WHERE company_id = $1 AND custom_fields IS NOT NULL AND custom_fields != '{}'::jsonb`,
+        [companyId]
+      );
+      for (const row of customKeysResult.rows) {
+        if (!existingKeys.has(row.field_key)) {
+          const defResult = await query(
+            `SELECT field_label FROM customer_field_definitions WHERE company_id = $1 AND field_key = $2`,
+            [companyId, row.field_key]
+          );
+          fields.push({
+            field_key: row.field_key,
+            display_name: defResult.rows[0]?.field_label || row.field_key,
+            field_label: defResult.rows[0]?.field_label || row.field_key,
+            data_type: 'string',
+            category: '추가정보',
+            sort_order: 900,
+            is_custom: true,
+          });
+          existingKeys.add(row.field_key);
+        }
+      }
+    } catch (e) { /* custom_fields 없으면 무시 */ }
+
+    // 3. 드롭다운 옵션 (gender, grade, region — 실제 DB 값 기반)
     const OPTION_COLUMNS: Record<string, string> = {
       'gender': 'gender', 'grade': 'grade', 'region': 'region',
     };
-
     const options: Record<string, string[]> = {};
-    for (const field of fieldsResult.rows) {
-      if (field.data_type === 'string' && OPTION_COLUMNS[field.field_key]) {
-        const col = OPTION_COLUMNS[field.field_key];
-        try {
-          const optResult = await query(
-            `SELECT DISTINCT ${col} FROM customers_unified WHERE company_id = $1 AND is_active = true AND ${col} IS NOT NULL AND ${col} != '' ORDER BY ${col} LIMIT 100`,
-            [companyId]
-          );
-          if (optResult.rows.length > 0) {
-            options[field.field_key] = optResult.rows.map((r: any) => r[col]);
-          }
-        } catch (e) { /* 컬럼 없으면 무시 */ }
-      }
-      // store_code는 customer_stores 테이블에서 조회
-      if (field.field_key === 'store_code') {
-        try {
-          const storeResult = await query(
-            `SELECT DISTINCT store_code FROM customer_stores WHERE company_id = $1 ORDER BY store_code LIMIT 100`,
-            [companyId]
-          );
-          if (storeResult.rows.length > 0) {
-            options['store_code'] = storeResult.rows.map((r: any) => r.store_code);
-          }
-        } catch (e) { /* 테이블 없으면 무시 */ }
-      }
+    for (const [key, col] of Object.entries(OPTION_COLUMNS)) {
+      try {
+        const optResult = await query(
+          `SELECT DISTINCT ${col} FROM customers_unified WHERE company_id = $1 AND is_active = true AND ${col} IS NOT NULL AND ${col} != '' ORDER BY ${col} LIMIT 100`,
+          [companyId]
+        );
+        if (optResult.rows.length > 0) {
+          options[key] = optResult.rows.map((r: any) => r[col]);
+        }
+      } catch (e) { /* 컬럼 없으면 무시 */ }
     }
 
-    res.json({ fields: fieldsResult.rows, options });
+    // 4. 실제 고객 1건 샘플 데이터 (AI 맞춤한줄 미리보기용)
+    let sample: Record<string, any> = {};
+    try {
+      const sampleResult = await query(
+        `SELECT * FROM customers
+         WHERE company_id = $1 AND is_active = true AND name IS NOT NULL AND name != ''
+         ORDER BY updated_at DESC LIMIT 1`,
+        [companyId]
+      );
+      if (sampleResult.rows.length > 0) {
+        const row = sampleResult.rows[0];
+        // 표준 필드 + custom_fields flat merge
+        for (const f of fields) {
+          const key = f.field_key;
+          if (f.is_custom && row.custom_fields && row.custom_fields[key] != null) {
+            sample[key] = row.custom_fields[key];
+          } else if (row[key] != null) {
+            sample[key] = row[key];
+          }
+        }
+      }
+    } catch (e) { /* 샘플 조회 실패 시 빈 객체 */ }
+
+    res.json({ fields, options, sample });
   } catch (error) {
     console.error('활성 필드 조회 실패:', error);
     res.status(500).json({ error: '조회 실패' });
