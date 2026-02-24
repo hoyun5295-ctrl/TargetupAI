@@ -104,6 +104,18 @@ export default function SpamFilterTestModal({
     }
   };
 
+  // 상태 초기화 (재테스트용)
+  const resetForRetest = useCallback(() => {
+    clearTimers();
+    setStatus('ready');
+    setTestId(null);
+    setResults([]);
+    setCountdown(180);
+    setError('');
+    setTotalCount(0);
+    serverCreatedAtRef.current = null;
+  }, [clearTimers]);
+
   const startTest = async () => {
     if (!callbackNumber) { setError('발신번호가 선택되지 않았습니다.'); return; }
     if (!messageContentSms && !messageContentLms) { setError('메시지를 입력해주세요.'); return; }
@@ -118,8 +130,7 @@ export default function SpamFilterTestModal({
       });
       const data = await res.json();
       if (!res.ok) {
-        if (res.status === 429) setError(data.message || '잠시 후 다시 시도해주세요.');
-        else if (res.status === 409) setError('이미 진행 중인 테스트가 있습니다.');
+        if (res.status === 409) setError(data.message || data.error || '이미 진행 중인 테스트가 있습니다.');
         else setError(data.error || '테스트 요청에 실패했습니다.');
         setStatus('ready'); return;
       }
@@ -311,7 +322,12 @@ export default function SpamFilterTestModal({
             <button onClick={startTest} className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors flex items-center gap-2">🛡️ 점검 시작</button>
           </>)}
           {status === 'testing' && <button onClick={onClose} className="px-5 py-2.5 text-gray-600 hover:bg-gray-200 rounded-lg transition-colors">백그라운드로 전환</button>}
-          {status === 'completed' && <button onClick={onClose} className="px-6 py-2.5 bg-gray-700 hover:bg-gray-800 text-white rounded-lg font-medium transition-colors">확인</button>}
+          {status === 'completed' && (<>
+            <button onClick={resetForRetest} className="px-5 py-2.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors font-medium flex items-center gap-1.5">
+              <span className="text-sm">🔄</span> 재테스트
+            </button>
+            <button onClick={onClose} className="px-6 py-2.5 bg-gray-700 hover:bg-gray-800 text-white rounded-lg font-medium transition-colors">확인</button>
+          </>)}
         </div>
       </div>
     </div>

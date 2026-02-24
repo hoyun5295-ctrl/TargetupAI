@@ -103,7 +103,7 @@
 
 ---
 
-#### 세션 1: 동적 필드 시스템 전환 (버그 #1, #2, #5, #7, #8) ⬜ 미착수
+#### 세션 1: 동적 필드 시스템 전환 (버그 #1, #2, #5, #7, #8) ✅ 완료
 
 > **핵심:** 하드코딩 필드 목록 → customer_field_definitions 기반 동적 렌더링
 > **수정 대상 파일:**
@@ -116,12 +116,12 @@
 
 | # | 버그 | 내용 | 상태 |
 |---|------|------|------|
-| #5 | AI 맞춤한줄 개인화 필드 고정 | 성별/지역/등급/총구매금액 4개만 표시 → field_definitions 전체 노출 (매장명, 마일리지 등 custom_fields 포함). name 삭제 후 복원 불가 문제도 수정 | ⬜ |
-| #7 | 등급 필터 정규화값 표시 | DB 원본값(플래티넘/수프림/레디언스) 대신 정규화값(VIP/SILVER) 표시 → 원본값 그대로 표시 | ⬜ |
-| #8 | AI 맞춤한줄 미리보기 샘플 고정 | 항상 '김민수', 'VIP' → 실제 고객 DB에서 1건 조회하여 샘플 표시 | ⬜ |
-| #2 | 수신번호 필드 중복 | phone/mobile/phone_number 3개 중복 표시 → field_definitions 기준 1개만 | ⬜ |
-| #1 | 발송결과 채널 전부 SMS | LMS 캠페인도 채널=SMS 표시 → campaigns.message_type 기준 표시 | ⬜ |
-| 추가 | 고객DB 조회 동적 컬럼 | 고정 7컬럼 → field_definitions 기반 동적 컬럼 + custom_fields 전부 표시 + 가로 스크롤 | ⬜ |
+| #5 | AI 맞춤한줄 개인화 필드 고정 | PERSONALIZATION_FIELDS 화이트리스트 삭제 → field_definitions + custom_fields 전체 노출 | ✅ |
+| #7 | 등급 필터 정규화값 표시 | normalizeGrade() 제거 → 원본값 trim만 저장 | ✅ |
+| #8 | AI 맞춤한줄 미리보기 샘플 고정 | SAMPLE_DATA 하드코딩 삭제 → enabled-fields API에서 실제 고객 1건 샘플 반환 | ✅ |
+| #2 | 수신번호 필드 중복 | phone/mobile/phone_number 드롭다운 → phone 고정 표시 | ✅ |
+| #1 | 발송결과 채널 전부 SMS | msgTypeLabel[c.message_type] 기반 SMS/LMS/MMS 표시 | ✅ |
+| 추가 | 고객DB 조회 동적 컬럼 | field_definitions 기반 동적 컬럼 + custom_fields + 가로 스크롤 + 상세보기 통합 | ✅ |
 
 #### 세션 2: 스팸필터 동시성 해결 (버그 #3, #4) ⬜ 미착수
 
@@ -493,7 +493,7 @@
 | R4 | 라인그룹 미설정 고객사 → 전체 라인 폴백 오발송 | 1 | 5 | 5 | ✅ 해결: 이중 방어 적용 — 1차 발송 차단(LINE_GROUP_NOT_SET) + 2차 BULK_ONLY_TABLES 폴백(10,11 제외) |
 | R5 | QTmsg LIVE→LOG 이동 후 결과 조회 불가 | 1 | 4 | 4 | ✅ 해결: getCompanySmsTablesWithLogs()로 LIVE+LOG 통합 조회 |
 | R6 | 스팸필터 동시 테스트 시 결과 충돌 (테스트폰 3대 공유) | 4 | 4 | 16 | 메시지 내용 기반 세션 격리로 해결 예정 (7차 세션2) |
-| R7 | 하드코딩 필드로 인한 반복 버그 재발 | 5 | 3 | 15 | 동적 필드 시스템 전환으로 근본 해결 예정 (7차 세션1) |
+| R7 | 하드코딩 필드로 인한 반복 버그 재발 | 5 | 3 | 15 | ✅ 해결: 동적 필드 시스템 전환 완료 (7차 세션1) |
 
 ---
 
@@ -503,6 +503,7 @@
 
 | 날짜 | 완료 항목 |
 |------|----------|
+| 02-24 | 직원 버그리포트 7차 세션1 완료 (6건): 동적 필드 시스템 전환. ① enabled-fields API 전면 개편(customer_field_definitions+custom_fields JSONB+실제 고객 샘플 반환), ② PERSONALIZATION_FIELDS 화이트리스트 삭제→전체 필드 노출(#5), ③ normalizeGrade() 제거→원본값 저장(#7), ④ SAMPLE_DATA→실제 DB 샘플(#8), ⑤ 수신번호 phone 고정(#2), ⑥ 채널 message_type 기반 표시(#1), ⑦ 고객DB 동적 컬럼+가로 스크롤. 수정 파일: normalize.ts, customers.ts, services/ai.ts, routes/ai.ts, AiCustomSendFlow.tsx, CustomerDBModal.tsx, ResultsModal.tsx, Dashboard.tsx |
 | 02-24 | 요금제 현황 게이지바 적용: "정상 이용 중" 텍스트→고객 수 프로그레스바(9,999/100,000명 10%) 전환. 80%미만 녹색, 80~95% 주황, 95%+ 빨강. max_customers 없는 요금제는 "정상 이용 중" 폴백. PlanInfo 인터페이스 확장(max_customers, current_customers). 수정: Dashboard.tsx |
 | 02-24 | 소스 보호 적용: 우클릭/F12/Ctrl+Shift+I,J,C/Ctrl+U 차단 + 텍스트 드래그 선택 차단 (input/textarea 제외). hanjul.ai, app.hanjul.ai, sys.hanjullo.com 전체 적용. 프론트엔드 난독화(vite-plugin-obfuscator)는 런칭 직전 적용 예정. 수정: packages/frontend/index.html, packages/company-frontend/index.html |
 | 02-24 | 어드민/고객사 통계 발송수량 전면 수정: ① campaign_runs→campaigns 직접 조회로 전환(직접발송 누락 해결), ② KST 날짜 필터 적용(AT TIME ZONE), ③ 상태 필터 화이트→블랙리스트 통일(NOT IN cancelled/draft), ④ 월별 조회 날짜 자동 확장(startDate→월1일, endDate→월말일). Agent 대량발송(1) 라인그룹 정상 발송 확인(1,001건→LOG 이동 완료). 수정: routes/manage-stats.ts, routes/admin.ts |

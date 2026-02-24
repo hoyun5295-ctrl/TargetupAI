@@ -1,17 +1,31 @@
 import { Router, Request, Response } from 'express';
 import { query, mysqlQuery } from '../config/database';
 import { authenticate } from '../middlewares/auth';
+import { createHash } from 'crypto';
 
 const router = Router();
 
 // 테스트 타임아웃 (3분)
 const TEST_TIMEOUT_MS = 180 * 1000;
 
-// 쿨다운 (60초)
-const COOLDOWN_SECONDS = 60;
-
 // 앱 인증 토큰 (환경변수)
 const SPAM_APP_TOKEN = process.env.SPAM_APP_TOKEN || 'spam-hanjul-secret-2026';
+
+// ============================================================
+// 헬퍼: 메시지 내용 정규화 (공백/줄바꿈 제거)
+// ============================================================
+function normalizeContent(s: string): string {
+  return (s || '').replace(/[\s\r\n]+/g, '');
+}
+
+// ============================================================
+// 헬퍼: 메시지 내용 해시 (SHA-256 앞 16자)
+// ============================================================
+function computeMessageHash(content: string): string {
+  const normalized = normalizeContent(content);
+  if (!normalized) return '';
+  return createHash('sha256').update(normalized, 'utf8').digest('hex').substring(0, 16);
+}
 
 // ============================================================
 // [POST] /api/spam-filter/test — 스팸필터 테스트 요청
@@ -29,31 +43,11 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
       return res.status(400).json({ error: '테스트할 메시지를 입력해주세요.' });
     }
 
-    // 1) 쿨다운 체크 (회사 기준 60초)
-    const cooldownCheck = await query(
-      `SELECT created_at FROM spam_filter_tests
-       WHERE company_id = $1
-       ORDER BY created_at DESC LIMIT 1`,
-      [companyId]
-    );
-    if (cooldownCheck.rows.length > 0) {
-      const lastTest = new Date(cooldownCheck.rows[0].created_at);
-      const elapsed = Date.now() - lastTest.getTime();
-      if (elapsed < COOLDOWN_SECONDS * 1000) {
-        const remaining = Math.ceil((COOLDOWN_SECONDS * 1000 - elapsed) / 1000);
-        return res.status(429).json({
-          error: `테스트 간격 제한`,
-          message: `${remaining}초 후에 다시 시도해주세요.`,
-          remainingSeconds: remaining
-        });
-      }
-    }
-
-    // 2) 회사당 active/pending 테스트 1건 제한
+    // 1) 사용자별 active/pending 테스트 1건 제한
     const activeCheck = await query(
       `SELECT id FROM spam_filter_tests
-       WHERE company_id = $1 AND status IN ('pending', 'active')`,
-      [companyId]
+       WHERE user_id = $1 AND status IN ('pending', 'active')`,
+      [userId]
     );
     if (activeCheck.rows.length > 0) {
       return res.status(409).json({
@@ -62,7 +56,30 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
       });
     }
 
-    // 3) 활성 테스트폰 조회
+    // 2) 실제 발송될 메시지 내용 결정 + 해시 계산
+    const isLmsType = messageType === 'LMS' || messageType === 'MMS';
+    const actualContent = isLmsType ? (messageContentLms || '') : (messageContentSms || '');
+    const messageHash = computeMessageHash(actualContent);
+
+    // 3) 동일 발신번호 + 동일 메시지 해시로 진행 중인 테스트 차단 (세션 격리)
+    if (messageHash) {
+      const callbackClean = callbackNumber.replace(/-/g, '');
+      const duplicateCheck = await query(
+        `SELECT id FROM spam_filter_tests
+         WHERE status = 'active'
+           AND REPLACE(callback_number, '-', '') = $1
+           AND message_hash = $2`,
+        [callbackClean, messageHash]
+      );
+      if (duplicateCheck.rows.length > 0) {
+        return res.status(409).json({
+          error: '동일한 발신번호와 메시지로 진행 중인 테스트가 있습니다.',
+          message: '해당 테스트가 완료된 후 다시 시도해주세요.'
+        });
+      }
+    }
+
+    // 4) 활성 테스트폰 조회
     const devices = await query(
       `SELECT id, carrier, phone FROM spam_filter_devices
        WHERE is_active = true ORDER BY carrier`
@@ -71,19 +88,19 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
       return res.status(400).json({ error: '등록된 테스트폰이 없습니다. 관리자에게 문의하세요.' });
     }
 
-    // 4) 테스트 건 생성 (080 치환 없이 원본 그대로 저장)
+    // 5) 테스트 건 생성 (message_hash 포함)
     const testResult = await query(
       `INSERT INTO spam_filter_tests
-       (company_id, user_id, callback_number, message_content_sms, message_content_lms, spam_check_number, status)
-       VALUES ($1, $2, $3, $4, $5, $6, 'active')
+       (company_id, user_id, callback_number, message_content_sms, message_content_lms, message_hash, spam_check_number, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'active')
        RETURNING id, created_at`,
-      [companyId, userId, callbackNumber, messageContentSms || null, messageContentLms || null, null]
+      [companyId, userId, callbackNumber, messageContentSms || null, messageContentLms || null, messageHash || null, null]
     );
     const testId = testResult.rows[0].id;
 
-    // 5) 통신사별 × 타입별 결과 행 생성 + SMS 발송
+    // 6) 통신사별 × 타입별 결과 행 생성 + SMS 발송
     const messageTypes: string[] = [];
-    if (messageType === 'LMS' || messageType === 'MMS') {
+    if (isLmsType) {
       if (messageContentLms) messageTypes.push('LMS');
     } else {
       if (messageContentSms) messageTypes.push('SMS');
@@ -112,7 +129,7 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
       }
     }
 
-    // 6) 15초 폴링 — QTmsg 성공인데 앱 미수신이면 즉시 blocked 처리
+    // 7) 15초 폴링 — QTmsg 성공인데 앱 미수신이면 즉시 blocked 처리
     const pollInterval = setInterval(async () => {
       try {
         // 아직 active인지 확인
@@ -282,10 +299,10 @@ router.post('/report', async (req: Request, res: Response) => {
     }
     const device = deviceResult.rows[0];
 
-    // 3) 발신번호로 active 테스트 후보 조회 → 복수 건이면 메시지 내용으로 확정
+    // 3) 발신번호로 active 테스트 후보 조회
     const senderClean = senderNumber.replace(/\D/g, '');
     const candidates = await query(
-      `SELECT id, message_content_sms, message_content_lms FROM spam_filter_tests
+      `SELECT id, message_content_sms, message_content_lms, message_hash FROM spam_filter_tests
        WHERE status = 'active'
          AND REPLACE(callback_number, '-', '') = $1
        ORDER BY created_at DESC`,
@@ -295,24 +312,37 @@ router.post('/report', async (req: Request, res: Response) => {
       return res.json({ success: true, matched: false, message: '매칭되는 테스트가 없습니다.' });
     }
 
-    let testId: string;
+    let testId: string | null = null;
+
     if (candidates.rows.length === 1) {
       // 단일 건 → 바로 매칭
       testId = candidates.rows[0].id;
     } else {
-      // 복수 건 → 메시지 내용(공백/줄바꿈 제거)으로 확정
-      const normalize = (s: string) => (s || '').replace(/[\s\r\n]+/g, '');
-      const msgNorm = normalize(messageContent || '');
-      const matched = candidates.rows.find((row: any) =>
-        normalize(row.message_content_sms) === msgNorm ||
-        normalize(row.message_content_lms) === msgNorm
-      );
-      if (!matched) {
-        // 내용 매칭 실패 → 가장 최근 건에 매칭 (fallback)
-        testId = candidates.rows[0].id;
-        console.log(`[SpamFilter] 복수 active 테스트 중 내용 매칭 실패 → 최신 건 ${testId}에 fallback`);
-      } else {
-        testId = matched.id;
+      // 복수 건 → 1차: 메시지 해시 매칭
+      const reportHash = computeMessageHash(messageContent || '');
+      if (reportHash) {
+        const hashMatched = candidates.rows.find((row: any) => row.message_hash === reportHash);
+        if (hashMatched) {
+          testId = hashMatched.id;
+        }
+      }
+
+      // 2차: 정규화 문자열 매칭
+      if (!testId) {
+        const msgNorm = normalizeContent(messageContent || '');
+        const normMatched = candidates.rows.find((row: any) =>
+          normalizeContent(row.message_content_sms) === msgNorm ||
+          normalizeContent(row.message_content_lms) === msgNorm
+        );
+        if (normMatched) {
+          testId = normMatched.id;
+        }
+      }
+
+      // ★ fallback 제거 — 매칭 실패 시 잘못된 테스트에 배정하지 않음
+      if (!testId) {
+        console.log(`[SpamFilter] 복수 active 테스트 중 매칭 실패 — sender=${senderClean}, 무시 처리`);
+        return res.json({ success: true, matched: false, message: '메시지 내용 매칭 실패 (무시)' });
       }
     }
 
@@ -328,10 +358,10 @@ router.post('/report', async (req: Request, res: Response) => {
       [testId, device.carrier, detectedType]
     );
 
-    // 6) 모든 결과 수신 완료 체크
+    // 6) 모든 결과 수신 완료 체크 → 즉시 completed 전환
     const pendingCheck = await query(
       `SELECT COUNT(*) as cnt FROM spam_filter_test_results
-       WHERE test_id = $1 AND received = false`,
+       WHERE test_id = $1 AND received = false AND result IS NULL`,
       [testId]
     );
     if (parseInt(pendingCheck.rows[0].cnt) === 0) {
@@ -362,16 +392,16 @@ router.post('/report', async (req: Request, res: Response) => {
 // ============================================================
 router.get('/active-test', authenticate, async (req: Request, res: Response) => {
   try {
-    const companyId = (req as any).user.companyId;
+    const userId = (req as any).user.userId;
 
-    // active 테스트 조회
+    // 사용자별 active 테스트 조회
     const activeTest = await query(
       `SELECT t.id, t.callback_number, t.message_content_sms, t.message_content_lms,
               t.status, t.created_at
        FROM spam_filter_tests t
-       WHERE t.company_id = $1 AND t.status = 'active'
+       WHERE t.user_id = $1 AND t.status = 'active'
        ORDER BY t.created_at DESC LIMIT 1`,
-      [companyId]
+      [userId]
     );
 
     if (activeTest.rows.length === 0) {
@@ -383,7 +413,18 @@ router.get('/active-test', authenticate, async (req: Request, res: Response) => 
     // 타임아웃 체크
     const elapsed = Date.now() - new Date(test.created_at).getTime();
     if (elapsed > TEST_TIMEOUT_MS) {
-      // 이미 만료 → 완료 처리
+      // 이미 만료 → 완료 처리 (미판정 건 timeout 처리)
+      const stillUnresolved = await query(
+        `SELECT id FROM spam_filter_test_results
+         WHERE test_id = $1 AND received = false AND result IS NULL`,
+        [test.id]
+      );
+      for (const row of stillUnresolved.rows) {
+        await query(
+          `UPDATE spam_filter_test_results SET result = 'timeout' WHERE id = $1`,
+          [row.id]
+        );
+      }
       await query(
         `UPDATE spam_filter_tests SET status = 'completed', completed_at = NOW()
          WHERE id = $1 AND status = 'active'`,
@@ -490,6 +531,18 @@ router.get('/tests/:id', authenticate, async (req: Request, res: Response) => {
     if (testData.status === 'active') {
       const elapsed = Date.now() - new Date(testData.created_at).getTime();
       if (elapsed > TEST_TIMEOUT_MS) {
+        // 미판정 건 timeout 처리
+        const stillUnresolved = await query(
+          `SELECT id FROM spam_filter_test_results
+           WHERE test_id = $1 AND received = false AND result IS NULL`,
+          [testId]
+        );
+        for (const row of stillUnresolved.rows) {
+          await query(
+            `UPDATE spam_filter_test_results SET result = 'timeout' WHERE id = $1`,
+            [row.id]
+          );
+        }
         await query(
           `UPDATE spam_filter_tests SET status = 'completed', completed_at = NOW()
            WHERE id = $1`,
