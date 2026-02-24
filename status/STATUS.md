@@ -91,19 +91,16 @@
 ## 4) 🎯 CURRENT_TASK (현재 집중 작업)
 
 > **규칙:** 아래 목표에만 100% 리소스를 집중한다.
-> **배경:** 직원 버그리포트 6차 (2026-02-23) — 총 11건, 2세션 분할 수정
+> **배경:** 어드민/고객사 통계 발송수량 조회 미작동
 
 ---
 
-### 현재 목표: 080 수신거부 운영 연동
+### 현재 목표: 어드민 통계 + 고객사 통계 발송수량 조회 수정
 
 **작업 내용:**
-- [ ] 나래인터넷에 콜백 URL + 토큰 키값 전달
-- [ ] 나래에 확인: 콜백 실패 재시도 정책, 수신거부 목록 조회 API 여부
-- [ ] 수신거부 목록 자동 API 긁어오기 (나래 API → unsubscribes 동기화)
-- [ ] Nginx 080callback 경로 나래 IP 화이트리스트 (121.156.104.161~165, 183.98.207.13)
-- [ ] 실제 080 ARS 수신거부 테스트 (080-719-6700)
-- [ ] 수신거부 관리 프론트엔드 고도화 (검색 UX, 일괄삭제, 통계 등)
+- [ ] 슈퍼관리자(sys.hanjullo.com) 통계 페이지 — 발송수량 조회 안되는 문제 파악 및 수정
+- [ ] 고객사관리자(app.hanjul.ai) 통계 페이지 — 발송수량 조회 안되는 문제 파악 및 수정
+- [ ] 관련 API/쿼리 점검 (messages 파티션 테이블, QTmsg LOG 테이블 연동 등)
 
 ---
 
@@ -404,7 +401,7 @@
 - [ ] 카카오톡 브랜드메시지/알림톡 연동 (단가 세분화: 브랜드메시지/알림톡 별도)
 - [ ] PDF 승인 기능 (이메일 링크)
 - [ ] 고객사 관리자 기능 세분화 (슈퍼관리자 기능 축소 버전)
-- [ ] 추천 템플릿 8개 → 실용적 활용 예시로 개선 (직원 의견 수렴 후)
+- [x] 추천 템플릿 → 빠른 발송 예시 4개로 전환 (클릭 시 AI 한줄로 자동 실행)
 
 ### 인비토AI (메시징 특화 모델)
 - [x] ai_training_logs 테이블 설계 (Claude+GPT+Gemini 3자 토론 확정)
@@ -450,6 +447,7 @@
 | R2 | DB 파괴적 작업 시 데이터 유실 | 2 | 5 | 10 | pg_dump 백업 후 작업, 트랜잭션 활용 |
 | R3 | QTmsg sendreq_time UTC/KST 혼동 | 3 | 4 | 12 | 반드시 MySQL NOW() 사용 |
 | R4 | 라인그룹 미설정 고객사 → 전체 라인 폴백 오발송 | 1 | 5 | 5 | ✅ 해결: 이중 방어 적용 — 1차 발송 차단(LINE_GROUP_NOT_SET) + 2차 BULK_ONLY_TABLES 폴백(10,11 제외) |
+| R5 | QTmsg LIVE→LOG 이동 후 결과 조회 불가 | 1 | 4 | 4 | ✅ 해결: getCompanySmsTablesWithLogs()로 LIVE+LOG 통합 조회 |
 
 ---
 
@@ -459,6 +457,8 @@
 
 | 날짜 | 완료 항목 |
 |------|----------|
+| 02-24 | 대시보드 빠른 발송 예시 전환: 추천 템플릿(8개 모달)→빠른 발송 예시(4개) 전환. 클릭 시 AiSendTypeModal 자동 오픈+AI 한줄로에 프롬프트 자동 입력. AiSendTypeModal에 initialPrompt prop 추가. 수정: RecommendTemplateModal.tsx, AiSendTypeModal.tsx, Dashboard.tsx. 서울형 R&D AI+X 산학협력 과제 제안서(워드) 작성 — 융복합산업R&D 인공지능 AI+X(2억/1년), 대학 7곳 제안 발송 |
+| 02-24 | QTmsg 결과 조회 LOG 테이블 통합: Agent 처리 완료(rsv1=5) 시 LIVE→LOG(SMSQ_SEND_X_YYYYMM) 이동하여 결과 조회 불가 버그 수정. getCompanySmsTablesWithLogs() 헬퍼 추가(LIVE+현재월+전월 LOG 통합, 5분 캐시). 적용: sync-results, 캠페인 인라인싱크, results.ts(상세/메시지/CSV). 유령 예약 1건(42f596ba) + 취소 캠페인 MySQL 잔여 3,032건 수동 정리. 수정: campaigns.ts, results.ts |
 | 02-23 | 라인그룹 미설정 발송 차단 (이중 방어): 1차 — send/direct-send API 진입 시 hasCompanyLineGroup() 체크→400 차단, 2차 — BULK_ONLY_TABLES 폴백(10,11 제외), 테스트→SMSQ_SEND_10 고정, 인증→SMSQ_SEND_11 고정. LineGroupErrorModal 예쁜 모달 추가. 수정: campaigns.ts, Dashboard.tsx, LineGroupErrorModal.tsx(신규) |
 | 02-23 | 이용약관 개정 배포: 가상계좌 제거(제8조), 선불충전 제9조 신설(3개월 유효+소멸), 환불정책 제12조 전면개정(3개월 환불제한+PG수수료+회사귀책 전액환불). KCP 심사용. 버그리포트 양식 엑셀 제작 (직원 배포용) |
 | 02-23 | 직원 버그리포트 6차 세션2 완료 (5건): 예약대기 LMS제목/회신번호+문안수정 제목필수(#2), 시간변경 과거허용차단+유령예약 강제취소(#3), 캘린더 상태판정 completed/failed 정리(#5), 수신거부 건수 stats+대시보드 연결(#6), 고객DB조회 거부필터 smsOptIn=false 누락수정(#7). 수정 파일: ScheduledCampaignModal.tsx, CalendarModal.tsx, Dashboard.tsx, CustomerDBModal.tsx, campaigns.ts, customers.ts |

@@ -5,11 +5,12 @@ interface AiSendTypeModalProps {
   onClose: () => void;
   onSelectHanjullo: (prompt: string) => void;
   onSelectCustom: () => void;
+  initialPrompt?: string;
 }
 
-export default function AiSendTypeModal({ onClose, onSelectHanjullo, onSelectCustom }: AiSendTypeModalProps) {
-  const [selected, setSelected] = useState<'hanjullo' | 'custom' | null>(null);
-  const [prompt, setPrompt] = useState('');
+export default function AiSendTypeModal({ onClose, onSelectHanjullo, onSelectCustom, initialPrompt }: AiSendTypeModalProps) {
+  const [selected, setSelected] = useState<'hanjullo' | 'custom' | null>(initialPrompt ? 'hanjullo' : null);
+  const [prompt, setPrompt] = useState(initialPrompt || '');
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
