@@ -788,12 +788,12 @@ router.get('/stats/send', authenticate, requireSuperAdmin, async (req: Request, 
     let paramIdx = 1;
 
     if (startDate) {
-      dateWhere += ` AND c.sent_at >= $${paramIdx}::date`;
+      dateWhere += ` AND c.sent_at >= $${paramIdx}::date AT TIME ZONE 'Asia/Seoul'`;
       baseParams.push(startDate);
       paramIdx++;
     }
     if (endDate) {
-      dateWhere += ` AND c.sent_at < ($${paramIdx}::date + INTERVAL '1 day')`;
+      dateWhere += ` AND c.sent_at < ($${paramIdx}::date + INTERVAL '1 day') AT TIME ZONE 'Asia/Seoul'`;
       baseParams.push(endDate);
       paramIdx++;
     }
@@ -812,7 +812,7 @@ router.get('/stats/send', authenticate, requireSuperAdmin, async (req: Request, 
         COALESCE(SUM(c.fail_count), 0) as total_fail
       FROM campaigns c
       WHERE c.sent_at IS NOT NULL
-        AND c.status IN ('completed', 'sent', 'sending') ${dateWhere} ${companyWhere}
+        AND c.status NOT IN ('cancelled', 'draft') ${dateWhere} ${companyWhere}
     `, baseParams);
 
     // 2) 페이징된 일별/월별
@@ -828,7 +828,7 @@ router.get('/stats/send', authenticate, requireSuperAdmin, async (req: Request, 
         JOIN companies co ON c.company_id = co.id
         LEFT JOIN sms_line_groups lg ON co.line_group_id = lg.id
         WHERE c.sent_at IS NOT NULL
-          AND c.status IN ('completed', 'sent', 'sending') ${dateWhere} ${companyWhere}
+          AND c.status NOT IN ('cancelled', 'draft') ${dateWhere} ${companyWhere}
         GROUP BY grp, co.company_name, lg.group_name
       ) sub
     `, baseParams);
@@ -848,7 +848,7 @@ router.get('/stats/send', authenticate, requireSuperAdmin, async (req: Request, 
       JOIN companies co ON c.company_id = co.id
       LEFT JOIN sms_line_groups lg ON co.line_group_id = lg.id
       WHERE c.sent_at IS NOT NULL
-        AND c.status IN ('completed', 'sent', 'sending') ${dateWhere} ${companyWhere}
+        AND c.status NOT IN ('cancelled', 'draft') ${dateWhere} ${companyWhere}
       GROUP BY ${groupCol}, co.id, co.company_name, lg.group_name
       ORDER BY "${groupAlias}" DESC, co.company_name
       LIMIT $${paramIdx} OFFSET $${paramIdx + 1}
@@ -897,7 +897,7 @@ router.get('/stats/send/detail', authenticate, requireSuperAdmin, async (req: Re
       FROM campaigns c
       LEFT JOIN users u ON c.created_by = u.id
       WHERE c.sent_at IS NOT NULL
-        AND c.status IN ('completed', 'sent', 'sending')
+        AND c.status NOT IN ('cancelled', 'draft')
         AND ${groupCol} = $1
         AND c.company_id = $2
       GROUP BY u.id, u.name, u.login_id, u.department, u.store_codes
@@ -923,7 +923,7 @@ router.get('/stats/send/detail', authenticate, requireSuperAdmin, async (req: Re
       FROM campaigns c
       LEFT JOIN users u ON c.created_by = u.id
       WHERE c.sent_at IS NOT NULL
-        AND c.status IN ('completed', 'sent', 'sending')
+        AND c.status NOT IN ('cancelled', 'draft')
         AND ${groupCol} = $1
         AND c.company_id = $2
       ORDER BY c.sent_at DESC

@@ -375,11 +375,14 @@
 - [ ] 기술: 백엔드 프록시 /api/kakao-templates/*, DB kakao_templates 확장, 상태 전이 규칙
 - [ ] Phase 2: 이미지 업로드, 알림 수신자 관리, 발신프로필 그룹
 
-### 080 수신거부
-- [ ] 나래인터넷에 콜백 URL + 토큰 키값 전달
-- [ ] 나래에 확인: 콜백 실패 재시도 정책, 수신거부 목록 조회 API 여부
-- [ ] Nginx 080callback 경로 나래 IP 화이트리스트 (121.156.104.161~165, 183.98.207.13)
-- [ ] 실제 080 ARS 수신거부 테스트 (080-719-6700)
+### 080 수신거부 (⏸️ 나래인터넷 응답 대기)
+- [x] 콜백 엔드포인트 구현 (토큰 인증, 고객사별 080번호 자동 매칭)
+- [x] 서버 .env OPT_OUT_080_TOKEN 설정 + PM2 재시작
+- [x] Nginx 080callback 경로 나래 IP 화이트리스트 적용 (121.156.104.161~165, 183.98.207.13)
+- [x] 나래인터넷에 콜백 URL + 토큰 키값 전달 (직원 경유)
+- [ ] 나래 응답 후: 실제 080 ARS 수신거부 테스트 (080-719-6700)
+- [ ] 기존 누적 수신거부 목록 초기 동기화 (벌크 API 또는 엑셀)
+- [ ] 수신거부 관리 프론트엔드 고도화 (검색 UX, 일괄삭제, 통계 등)
 
 ### 선불 요금제 Phase 1-B~2
 - [ ] Phase 1-B: KCP PG 연동 (카드결제만, 가상계좌 제외)
@@ -457,6 +460,7 @@
 
 | 날짜 | 완료 항목 |
 |------|----------|
+| 02-24 | 080 수신거부 운영 연동: 서버 .env OPT_OUT_080_TOKEN 설정, Nginx 080callback 나래 IP 화이트리스트(121.156.104.161~165, 183.98.207.13) 적용, 나래에 콜백 URL+토큰 전달 완료(직원 경유). 나래 응답 대기 중. 수정: Nginx sites-available/targetup, .env |
 | 02-24 | 대시보드 빠른 발송 예시 전환: 추천 템플릿(8개 모달)→빠른 발송 예시(4개) 전환. 클릭 시 AiSendTypeModal 자동 오픈+AI 한줄로에 프롬프트 자동 입력. AiSendTypeModal에 initialPrompt prop 추가. 수정: RecommendTemplateModal.tsx, AiSendTypeModal.tsx, Dashboard.tsx. 서울형 R&D AI+X 산학협력 과제 제안서(워드) 작성 — 융복합산업R&D 인공지능 AI+X(2억/1년), 대학 7곳 제안 발송 |
 | 02-24 | QTmsg 결과 조회 LOG 테이블 통합: Agent 처리 완료(rsv1=5) 시 LIVE→LOG(SMSQ_SEND_X_YYYYMM) 이동하여 결과 조회 불가 버그 수정. getCompanySmsTablesWithLogs() 헬퍼 추가(LIVE+현재월+전월 LOG 통합, 5분 캐시). 적용: sync-results, 캠페인 인라인싱크, results.ts(상세/메시지/CSV). 유령 예약 1건(42f596ba) + 취소 캠페인 MySQL 잔여 3,032건 수동 정리. 수정: campaigns.ts, results.ts |
 | 02-23 | 라인그룹 미설정 발송 차단 (이중 방어): 1차 — send/direct-send API 진입 시 hasCompanyLineGroup() 체크→400 차단, 2차 — BULK_ONLY_TABLES 폴백(10,11 제외), 테스트→SMSQ_SEND_10 고정, 인증→SMSQ_SEND_11 고정. LineGroupErrorModal 예쁜 모달 추가. 수정: campaigns.ts, Dashboard.tsx, LineGroupErrorModal.tsx(신규) |

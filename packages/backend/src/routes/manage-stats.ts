@@ -10,6 +10,9 @@ const router = Router();
 //  슈퍼관리자: 전체 회사 통계 (회사별 필터 가능)
 //  고객사관리자: 자사 통계만
 // ============================================================
+// ★ 2026-02-24 수정: campaign_runs → campaigns 직접 조회
+//   - 직접발송(direct-send)은 campaign_runs 미생성 → 통계 누락 버그 수정
+//   - 상태 필터: NOT IN ('cancelled', 'draft') 블랙리스트 방식 통일
 
 // SMS 테이블 설정 (런타임에 읽어야 dotenv 로드 후 적용됨)
 function getTestSmsTable(): string {
@@ -40,14 +43,14 @@ router.get('/send', async (req: Request, res: Response) => {
     const baseParams: any[] = [];
     let paramIdx = 1;
 
-    // ★ KST 기준 날짜 필터 (UTC가 아닌 한국시간 자정 기준)
+    // ★ KST 기준 날짜 필터
     if (startDate) {
-      dateWhere += ` AND cr.sent_at >= $${paramIdx}::date AT TIME ZONE 'Asia/Seoul'`;
+      dateWhere += ` AND c.sent_at >= $${paramIdx}::date AT TIME ZONE 'Asia/Seoul'`;
       baseParams.push(startDate);
       paramIdx++;
     }
     if (endDate) {
-      dateWhere += ` AND cr.sent_at < ($${paramIdx}::date + INTERVAL '1 day') AT TIME ZONE 'Asia/Seoul'`;
+      dateWhere += ` AND c.sent_at < ($${paramIdx}::date + INTERVAL '1 day') AT TIME ZONE 'Asia/Seoul'`;
       baseParams.push(endDate);
       paramIdx++;
     }
@@ -67,15 +70,14 @@ router.get('/send', async (req: Request, res: Response) => {
       paramIdx++;
     }
 
-    // 1) 요약 (실발송만 — campaign_runs 기반, 취소/draft 제외)
+    // 1) 요약 (campaigns 직접 조회 — 직접발송 포함)
     const summaryResult = await pool.query(`
       SELECT 
-        COALESCE(SUM(cr.sent_count), 0) as total_sent,
-        COALESCE(SUM(cr.success_count), 0) as total_success,
-        COALESCE(SUM(cr.fail_count), 0) as total_fail
-      FROM campaign_runs cr
-      JOIN campaigns c ON cr.campaign_id = c.id
-      WHERE cr.sent_at IS NOT NULL
+        COALESCE(SUM(c.sent_count), 0) as total_sent,
+        COALESCE(SUM(c.success_count), 0) as total_success,
+        COALESCE(SUM(c.fail_count), 0) as total_fail
+      FROM campaigns c
+      WHERE c.sent_at IS NOT NULL
         AND c.status NOT IN ('cancelled', 'draft')
         ${dateWhere} ${companyWhere} ${userWhere}
     `, baseParams);
@@ -95,7 +97,6 @@ router.get('/send', async (req: Request, res: Response) => {
           mysqlParams.push(endDate);
         }
 
-        // ★ 동적 테이블 (로컬: SMSQ_SEND, 서버: SMSQ_SEND_10)
         const testRows = await mysqlQuery(
           `SELECT 
             COUNT(*) as total,
@@ -124,18 +125,17 @@ router.get('/send', async (req: Request, res: Response) => {
       }
     }
 
-    // 3) 페이징된 일별/월별 (KST 그룹핑, 취소/draft 제외)
+    // 3) 페이징된 일별/월별 (KST 그룹핑)
     const groupCol = view === 'monthly'
-      ? `TO_CHAR(cr.sent_at AT TIME ZONE 'Asia/Seoul', 'YYYY-MM')`
-      : `TO_CHAR(cr.sent_at AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD')`;
+      ? `TO_CHAR(c.sent_at AT TIME ZONE 'Asia/Seoul', 'YYYY-MM')`
+      : `TO_CHAR(c.sent_at AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD')`;
     const groupAlias = view === 'monthly' ? 'month' : 'date';
 
     const countResult = await pool.query(`
       SELECT COUNT(*) FROM (
         SELECT ${groupCol} as grp
-        FROM campaign_runs cr
-        JOIN campaigns c ON cr.campaign_id = c.id
-        WHERE cr.sent_at IS NOT NULL
+        FROM campaigns c
+        WHERE c.sent_at IS NOT NULL
           AND c.status NOT IN ('cancelled', 'draft')
           ${dateWhere} ${companyWhere} ${userWhere}
         GROUP BY grp
@@ -146,13 +146,12 @@ router.get('/send', async (req: Request, res: Response) => {
     const rowsResult = await pool.query(`
       SELECT 
         ${groupCol} as "${groupAlias}",
-        COUNT(DISTINCT cr.id) as runs,
-        COALESCE(SUM(cr.sent_count), 0) as sent,
-        COALESCE(SUM(cr.success_count), 0) as success,
-        COALESCE(SUM(cr.fail_count), 0) as fail
-      FROM campaign_runs cr
-      JOIN campaigns c ON cr.campaign_id = c.id
-      WHERE cr.sent_at IS NOT NULL
+        COUNT(DISTINCT c.id) as runs,
+        COALESCE(SUM(c.sent_count), 0) as sent,
+        COALESCE(SUM(c.success_count), 0) as success,
+        COALESCE(SUM(c.fail_count), 0) as fail
+      FROM campaigns c
+      WHERE c.sent_at IS NOT NULL
         AND c.status NOT IN ('cancelled', 'draft')
         ${dateWhere} ${companyWhere} ${userWhere}
       GROUP BY ${groupCol}
@@ -192,15 +191,15 @@ router.get('/send/detail', async (req: Request, res: Response) => {
     }
 
     const groupCol = view === 'monthly'
-      ? `TO_CHAR(cr.sent_at AT TIME ZONE 'Asia/Seoul', 'YYYY-MM')`
-      : `TO_CHAR(cr.sent_at AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD')`;
+      ? `TO_CHAR(c.sent_at AT TIME ZONE 'Asia/Seoul', 'YYYY-MM')`
+      : `TO_CHAR(c.sent_at AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD')`;
 
     // 사용자 필터 (고객사관리자용)
     const filterUserId = req.query.filterUserId as string;
     const userFilter = filterUserId ? ` AND c.created_by = $3` : '';
     const detailParams = filterUserId ? [dateVal, targetCompanyId, filterUserId] : [dateVal, targetCompanyId];
 
-    // 사용자별 통계 (취소/draft 제외)
+    // 사용자별 통계 (campaigns 직접 조회 — 직접발송 포함)
     const result = await pool.query(`
       SELECT 
         u.id as user_id,
@@ -208,14 +207,13 @@ router.get('/send/detail', async (req: Request, res: Response) => {
         u.login_id,
         u.department,
         u.store_codes,
-        COUNT(DISTINCT cr.id) as runs,
-        COALESCE(SUM(cr.sent_count), 0) as sent,
-        COALESCE(SUM(cr.success_count), 0) as success,
-        COALESCE(SUM(cr.fail_count), 0) as fail
-      FROM campaign_runs cr
-      JOIN campaigns c ON cr.campaign_id = c.id
+        COUNT(DISTINCT c.id) as runs,
+        COALESCE(SUM(c.sent_count), 0) as sent,
+        COALESCE(SUM(c.success_count), 0) as success,
+        COALESCE(SUM(c.fail_count), 0) as fail
+      FROM campaigns c
       LEFT JOIN users u ON c.created_by = u.id
-      WHERE cr.sent_at IS NOT NULL
+      WHERE c.sent_at IS NOT NULL
         AND ${groupCol} = $1
         AND c.company_id = $2
         AND c.status NOT IN ('cancelled', 'draft')
@@ -224,7 +222,7 @@ router.get('/send/detail', async (req: Request, res: Response) => {
       ORDER BY sent DESC
     `, detailParams);
 
-    // 캠페인 상세 목록 (취소/draft 제외)
+    // 캠페인 상세 목록 (campaigns 직접 조회 — 직접발송 포함)
     const campaignsResult = await pool.query(`
       SELECT 
         c.id as campaign_id,
@@ -232,23 +230,22 @@ router.get('/send/detail', async (req: Request, res: Response) => {
         c.send_type,
         u.name as user_name,
         u.login_id,
-        cr.id as run_id,
-        cr.run_number,
-        cr.sent_count,
-        cr.success_count,
-        cr.fail_count,
-        cr.target_count,
-        cr.message_type,
-        cr.sent_at
-      FROM campaign_runs cr
-      JOIN campaigns c ON cr.campaign_id = c.id
+        c.id as run_id,
+        1 as run_number,
+        c.sent_count,
+        c.success_count,
+        c.fail_count,
+        c.target_count,
+        c.message_type,
+        c.sent_at
+      FROM campaigns c
       LEFT JOIN users u ON c.created_by = u.id
-      WHERE cr.sent_at IS NOT NULL
+      WHERE c.sent_at IS NOT NULL
         AND ${groupCol} = $1
         AND c.company_id = $2
         AND c.status NOT IN ('cancelled', 'draft')
         ${userFilter}
-      ORDER BY cr.sent_at DESC
+      ORDER BY c.sent_at DESC
     `, detailParams);
 
     // 테스트 발송 상세 (MySQL — 동적 테이블)
@@ -263,7 +260,6 @@ router.get('/send/detail', async (req: Request, res: Response) => {
       }
       mysqlParams.push(dateVal);
 
-      // ★ 동적 테이블
       const testRows = await mysqlQuery(
         `SELECT 
           dest_no as phone,
