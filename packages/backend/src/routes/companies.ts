@@ -124,6 +124,7 @@ router.get('/my-plan', async (req: Request, res: Response) => {
         p.plan_code,
         p.monthly_price,
         p.max_customers,
+        c.subscription_status,
         c.created_at,
         c.created_at + INTERVAL '7 days' as trial_expires_at,
         NOW() > c.created_at + INTERVAL '7 days' as is_trial_expired,
