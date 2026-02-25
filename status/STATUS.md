@@ -578,6 +578,8 @@
 | D18 | 02-25 | 정산 billing.ts 자체 헬퍼 함수 구현 (순환참조 방지) | campaigns.ts에서 import 시 순환참조 발생. 정산 전용 getBillingCompanyTables/getBillingTestTables/getTablesForBillingPeriod 등 자체 구현 |
 | D19 | 02-25 | 요금제 미사용 시 기능 제한: subscription_status 필드 추가 (trial/active/expired/suspended) | plan_id+trial_expires_at 조합보다 확장성 우수. 해지/미결제 정지/관리자 정지 등 다양한 상태 관리 가능 |
 | D20 | 02-25 | AI 분석 요금제별 차별화: 프로=기본(집계값, 1~2회 호출, 기본PDF), 비즈니스=고급(로우데이터, 5~8회 호출, 상세PDF) | 프로=What happened(과거 회고), 비즈니스=Why+What next(예측+액션). API 토큰 소모량으로 원가 차별화 |
+| D21 | 02-25 | isSubscriptionLocked를 로그인 캐시가 아닌 planInfo(my-plan API) 기반 실시간 판별로 전환 | 슈퍼관리자가 구독 승인해도 재로그인 전까지 잠금 안 풀리는 문제. planInfo 로드 시 DB 최신 subscription_status 반영 |
+| D22 | 02-25 | 스팸필터 잠금은 직접발송 영역만 적용. AI 발송 영역은 이미 isSubscriptionLocked로 진입 차단되어 중복 잠금 불필요 | 기능 잠금 시 상위 잠금이 있으면 하위에 중복 적용하지 않는다 |
 
 **아카이브:** D1-AI발송2분기(02-22) | D-대시보드 모달 분리(02-23): 8,039줄→4,964줄 | D2-브리핑방식(02-22) | D3-개인화필드체크박스(02-22) | D4-textarea제거(02-22) | D5-별도컴포넌트분리(02-22)
 
@@ -601,6 +603,7 @@
 | R7 | 하드코딩 필드로 인한 반복 버그 재발 | 5 | 3 | 15 | ✅ 해결: 동적 필드 시스템 전환 완료 (7차 세션1) |
 | R8 | recount-target companyId undefined → 타겟 0명 | 3 | 4 | 12 | ✅ 해결: snake_case→camelCase 수정 + WHERE 조건 통일 (7차 세션3) |
 | R9 | 정산 SMSQ_SEND 단일테이블 조회 → 멀티Agent 환경에서 0건 집계 | 3 | 4 | 12 | ✅ 해결: 회사별 라인그룹 멀티테이블 + LOG 테이블 통합 조회 (billing.ts 자체 헬퍼) |
+| R10 | 로그인 캐시 기반 상태 판별 → DB 변경 후 재로그인 전까지 미반영 | 3 | 4 | 12 | ✅ 해결: isSubscriptionLocked를 planInfo(my-plan API) 실시간 판별로 전환 |
 
 ---
 
@@ -611,7 +614,7 @@
 | 날짜 | 완료 항목 |
 |------|----------|
 | 02-25 | Task A 요금제 기능 제한 구현 완료: ① DDL subscription_status varchar(20) DEFAULT 'trial' + 마이그레이션 SQL, ② auth.ts 로그인 쿼리+응답에 subscriptionStatus 포함, ③ Dashboard.tsx isSubscriptionLocked 헬퍼+10군데 잠금(AI추천발송/직접타겟/DB업로드/최근캠페인/발송예시/고객인사이트/예약대기/고객DB조회)+opacity+🔒아이콘, ④ SubscriptionLockModal.tsx 신규(예쁜 커스텀 모달, Lock+Crown 아이콘, 요금제안내 링크), ⑤ AdminDashboard.tsx 구독상태 드롭다운(trial/active/expired/suspended)+안내문구, ⑥ admin.ts PUT API $31 subscription_status 추가. 수정 5파일+신규 1파일 |
-| 02-25 | Task A 스팸필터 잠금 추가 완료: ① companies.ts my-plan API에 monthly_price 반환 추가, ② Dashboard.tsx PlanInfo에 monthly_price+isSpamFilterLocked 헬퍼(15만원 미만 잠금)+직접발송 스팸필터 버튼 잠금(opacity+🔒), ③ SpamFilterLockModal.tsx 신규(indigo 톤, ShieldOff 아이콘, 프로 요금제 안내). 수정 2파일+신규 1파일. Task A 전체 완료 |
+| 02-25 | Task A 스팸필터 잠금 + 구독 실시간 반영 완료: ① companies.ts my-plan API에 monthly_price+subscription_status 반환 추가, ② Dashboard.tsx isSpamFilterLocked(15만원 미만)+직접발송 스팸필터 버튼 잠금, ③ SpamFilterLockModal.tsx 신규(indigo, ShieldOff), ④ isSubscriptionLocked를 planInfo 기반 실시간 판별로 전환(로그인 캐시→DB 실시간), ⑤ 요금제 승인 시 subscription_status 자동 'active'(admin.ts), ⑥ PlanApprovalModal.tsx 신규+plan-request/status API 연동(승인 알림+confirm). 수정: companies.ts, Dashboard.tsx, admin.ts. 신규: SpamFilterLockModal.tsx, PlanApprovalModal.tsx. Task A 전체 완료 |
 | 02-25 | 요금제 기능 제한 + AI 분석 기능 설계 의논: ① subscription_status 필드 추가 결정(trial/active/expired/suspended), 무료 종료 후 대시보드 잠금+직접발송/탑메뉴/충전 허용, ② AI 분석 요금제별 차별화 설계 — 프로(기본, 집계값, 1~2회 호출, 기본PDF 1~2p) / 비즈니스(고급, 로우데이터, 5~8회 호출, 상세PDF 5~10p, 세그먼트+이탈예측+ROI+액션제안). CURRENT_TASK 반영 완료 |
 | 02-25 | Sync Agent 서버 보안 구현:: ① rate limit — ipRateLimit(인증 실패 IP 10회/분 차단)+companyRateLimit(회사 60회/분) 인메모리 Map+5분 정리, ② 동시 full sync 제한 — activeSyncs Map+429+finally 해제+30분 stuck 자동 정리, ③ version API checksum 포함 확인. 매뉴얼 최종 점검: sys.hanjullo.com 삭제+Target-UP 삭제+API 경로 삭제 확인 완료. 수정: sync.ts |
 | 02-25 | 정산 멀티테이블+스팸필터 통합: ① billing.ts SMSQ_SEND 단일→회사별 라인그룹 멀티테이블 전환(getBillingCompanyTables+smsAggByDateType 자체 헬퍼, campaigns.ts 순환참조 방지), ② LOG 테이블(SMSQ_SEND_X_YYYYMM) 정산기간별 자동탐색+통합조회(getTablesForBillingPeriod), ③ 스팸필터 테스트 PostgreSQL 집계 추가(spam_filter_tests+results JOIN), ④ DDL: billing_invoices에 spam_filter_sms/lms_count+unit_price 4컬럼 추가, ⑤ preview API spam 섹션 추가, ⑥ PDF 스팸필터행 배경색(#fef3c7)+일별상세 SPAM_SMS/SPAM_LMS 라벨, ⑦ 메일 HTML 스팸필터 비용 표시. 수정 파일: billing.ts (1450→1616줄) |
