@@ -24,6 +24,7 @@ import adminRoutes from './routes/admin';
 import smsTemplatesRoutes from './routes/sms-templates';
 import mmsImagesRoutes from './routes/mms-images';
 import spamFilterRoutes from './routes/spam-filter';
+import analysisRoutes from './routes/analysis';
 
 // 공용 관리 라우트 (슈퍼관리자 + 고객사관리자)
 import manageUsersRoutes from './routes/manage-users';
@@ -77,6 +78,7 @@ app.use('/api/plans', plansRoutes);
 app.use('/api/customers', customersRoutes);
 app.use('/api/campaigns', campaignsRoutes);
 app.use('/api/ai', aiRoutes);
+app.use('/api/analysis', analysisRoutes);
 app.use('/api/v1/results', resultsRoutes);
 app.use('/api/unsubscribes', unsubscribesRoutes);
 app.use('/api/address-books', addressBooksRoutes);
