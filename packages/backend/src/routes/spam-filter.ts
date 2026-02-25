@@ -58,8 +58,18 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
 
     // 2) 실제 발송될 메시지 내용 결정 + 해시 계산
     const isLmsType = messageType === 'LMS' || messageType === 'MMS';
-    const actualContent = isLmsType ? (messageContentLms || '') : (messageContentSms || '');
-    const messageHash = computeMessageHash(actualContent);
+    const rawActualContent = isLmsType ? (messageContentLms || '') : (messageContentSms || '');
+    // ★ #3: 해시는 치환 후 내용으로 계산 (앱이 리포트하는 내용과 일치시킴)
+    const SAMPLE_HASH_DATA: Record<string, string> = {
+      '이름': '김민수', '포인트': '12,500', '등급': 'VIP', '매장명': '강남점',
+      '지역': '서울', '구매금액': '350,000', '구매횟수': '8', '성별': '남성',
+      '나이': '35', '평균주문금액': '43,750', '최근구매일': '2026-02-10',
+      '최근구매매장': '강남점', '생일': '3월 15일', '결혼기념일': '5월 20일',
+    };
+    let personalizedForHash = rawActualContent;
+    Object.entries(SAMPLE_HASH_DATA).forEach(([k, v]) => { personalizedForHash = personalizedForHash.replace(new RegExp(`%${k}%`, 'g'), v); });
+    personalizedForHash = personalizedForHash.replace(/%[^%\s]{1,20}%/g, '');
+    const messageHash = computeMessageHash(personalizedForHash);
 
     // 3) 동일 발신번호 + 동일 메시지 해시로 진행 중인 테스트 차단 (세션 격리)
     if (messageHash) {
@@ -106,6 +116,23 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
       if (messageContentSms) messageTypes.push('SMS');
     }
 
+    // ★ #3: 스팸테스트 시 개인화 변수를 샘플 데이터로 치환 (실제 발송과 유사한 메시지로 테스트)
+    const SAMPLE_DATA: Record<string, string> = {
+      '이름': '김민수', '포인트': '12,500', '등급': 'VIP', '매장명': '강남점',
+      '지역': '서울', '구매금액': '350,000', '구매횟수': '8', '성별': '남성',
+      '나이': '35', '평균주문금액': '43,750', '최근구매일': '2026-02-10',
+      '최근구매매장': '강남점', '생일': '3월 15일', '결혼기념일': '5월 20일',
+    };
+    const applySampleVars = (text: string): string => {
+      let result = text;
+      Object.entries(SAMPLE_DATA).forEach(([key, val]) => {
+        result = result.replace(new RegExp(`%${key}%`, 'g'), val);
+      });
+      // 남은 미치환 변수 제거 (커스텀 필드 등)
+      result = result.replace(/%[^%\s]{1,20}%/g, '');
+      return result;
+    };
+
     for (const device of devices.rows) {
       for (const msgType of messageTypes) {
         // 결과 행 생성
@@ -115,8 +142,9 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
           [testId, device.carrier, msgType, device.phone]
         );
 
-        // ★ 080 치환 없이 원본 메시지 그대로 발송
-        const content = msgType === 'SMS' ? messageContentSms : messageContentLms;
+        // ★ #3: 개인화 변수를 샘플 데이터로 치환하여 발송 (원본은 DB에 보관)
+        const rawContent = msgType === 'SMS' ? messageContentSms : messageContentLms;
+        const content = applySampleVars(rawContent || '');
 
         // QTmsg 테스트 라인으로 발송
         await insertSmsQueue(
@@ -193,7 +221,9 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
           let result: string | null = null;
 
           if (sc === 6 || sc === 1000 || sc === 1800) {
-            result = 'blocked'; // 이통사 전달 성공 + 앱 미수신 = 스팸 차단
+            // ★ #1 수정: 이통사 전달 성공이지만 앱 미수신 → 아직 대기 (앱이 감지할 시간 필요)
+            // blocked 판정은 타임아웃(3분) 시점에서만 확정
+            result = null; // 계속 대기
           } else if (sc === 100 || sc === 104) {
             result = null; // 아직 대기 중
           } else {
@@ -227,19 +257,44 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
           }
         }
 
-        // 최종 타임아웃 (3분 초과)
+        // 최종 타임아웃 (3분 초과) — ★ #1: QTmsg 상태 기반 blocked/timeout 분류
         const elapsed2 = Date.now() - new Date(activeCheck2.rows[0].created_at).getTime();
         if (elapsed2 > TEST_TIMEOUT_MS) {
           clearInterval(pollInterval);
           const stillUnresolved = await query(
-            `SELECT id FROM spam_filter_test_results
+            `SELECT id, phone, message_type FROM spam_filter_test_results
              WHERE test_id = $1 AND received = false AND result IS NULL`,
             [testId]
           );
+
+          // QTmsg 결과 한 번 더 조회
+          const testTable2 = getTestSmsTable();
+          const now3 = new Date();
+          const yyyymm2 = `${now3.getFullYear()}${String(now3.getMonth() + 1).padStart(2, '0')}`;
+          const logTable2 = `${testTable2}_${yyyymm2}`;
+          let mqFinal: any[] = [];
+          const mqF1 = await mysqlQuery(`SELECT dest_no, msg_type, status_code FROM ${testTable2} WHERE app_etc1 = ?`, [testId]) as any[];
+          if (mqF1?.length > 0) mqFinal = mqF1;
+          try {
+            const mqF2 = await mysqlQuery(`SELECT dest_no, msg_type, status_code FROM ${logTable2} WHERE app_etc1 = ?`, [testId]) as any[];
+            if (mqF2?.length > 0) mqFinal = [...mqFinal, ...mqF2];
+          } catch (e) { /* 로그 테이블 미존재 시 무시 */ }
+
           for (const row of stillUnresolved.rows) {
+            const mType = row.message_type === 'SMS' ? 'S' : 'L';
+            const mqMatch = mqFinal.find((m: any) => m.dest_no === row.phone && m.msg_type === mType);
+            const sc = mqMatch ? Number(mqMatch.status_code) : 0;
+
+            let finalResult = 'timeout';
+            if (sc === 6 || sc === 1000 || sc === 1800) {
+              finalResult = 'blocked'; // 이통사 전달 성공 + 앱 미수신 = 스팸 차단
+            } else if (sc && sc !== 100 && sc !== 104) {
+              finalResult = 'failed'; // 이통사 실패
+            }
+
             await query(
-              `UPDATE spam_filter_test_results SET result = 'timeout' WHERE id = $1`,
-              [row.id]
+              `UPDATE spam_filter_test_results SET result = $1 WHERE id = $2`,
+              [finalResult, row.id]
             );
           }
           await query(

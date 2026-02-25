@@ -650,11 +650,13 @@ router.post('/test-send', async (req: Request, res: Response) => {
         if (testChannel === 'sms' || testChannel === 'both') {
           // SMS 테스트 발송
           const table = getNextSmsTable(testTables);
+          // ★ #7: title_str 추가 (LMS/MMS 제목 누락 수정)
+          const testSubject = req.body.subject || '';
           await mysqlQuery(
             `INSERT INTO ${table} (
-              dest_no, call_back, msg_contents, msg_type, sendreq_time, status_code, rsv1, app_etc1, app_etc2, bill_id, file_name1, file_name2, file_name3
-            ) VALUES (?, ?, ?, ?, NOW(), 100, '1', ?, ?, ?, ?, ?, ?)`,
-            [cleanPhone, callbackNumber, testMsg, msgType, 'test', companyId, userId || '', mmsImagePaths[0] || '', mmsImagePaths[1] || '', mmsImagePaths[2] || '']
+              dest_no, call_back, msg_contents, msg_type, title_str, sendreq_time, status_code, rsv1, app_etc1, app_etc2, bill_id, file_name1, file_name2, file_name3
+            ) VALUES (?, ?, ?, ?, ?, NOW(), 100, '1', ?, ?, ?, ?, ?, ?)`,
+            [cleanPhone, callbackNumber, testMsg, msgType, testSubject, 'test', companyId, userId || '', mmsImagePaths[0] || '', mmsImagePaths[1] || '', mmsImagePaths[2] || '']
           );
         }
 
@@ -741,15 +743,15 @@ router.post('/', async (req: Request, res: Response) => {
     const result = await query(
       `INSERT INTO campaigns (
         company_id, campaign_name, message_type, target_filter,
-        message_content, subject, message_subject, scheduled_at, is_ad, target_count, created_by,
+        message_content, subject, message_subject, message_template, scheduled_at, is_ad, target_count, created_by,
         event_start_date, event_end_date, mms_image_paths,
         send_channel, kakao_bubble_type, kakao_sender_key, kakao_targeting,
         kakao_attachment_json, kakao_carousel_json, kakao_resend_type
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
       RETURNING *`,
       [
         companyId, campaignName, messageType, JSON.stringify(targetFilter),
-        messageContent, subject || null, subject || null, scheduledAt, isAd ?? false, targetCount, userId,
+        messageContent, subject || null, subject || null, messageContent, scheduledAt, isAd ?? false, targetCount, userId,
         eventStartDate || null, eventEndDate || null,
         mmsImagePaths && mmsImagePaths.length > 0 ? JSON.stringify(mmsImagePaths) : null,
         sendChannel || 'sms',
@@ -830,6 +832,18 @@ router.post('/:id/send', async (req: Request, res: Response) => {
 
     // 개별회신번호 사용 여부
     const useIndividualCallback = campaign.use_individual_callback || false;
+
+    // ★ #4: 회신번호 등록 여부 검증 (개별회신번호가 아닌 경우)
+    if (!useIndividualCallback) {
+      const senderCallback = (campaign.callback_number || defaultCallback).replace(/-/g, '');
+      const senderCheck = await query(
+        'SELECT id FROM sender_numbers WHERE company_id = $1 AND REPLACE(phone_number, \'-\', \'\') = $2 AND is_active = true LIMIT 1',
+        [companyId, senderCallback]
+      );
+      if (senderCheck.rows.length === 0) {
+        return res.status(400).json({ error: '등록되지 않은 회신번호입니다. 발신번호 관리에서 번호를 등록해주세요.', code: 'INVALID_SENDER_NUMBER' });
+      }
+    }
 
     // ★ 회사 스키마 조회 → 동적 변수 치환을 위한 field_mappings
     const companySchemaResult = await query(
@@ -983,7 +997,8 @@ if (sendChannel !== 'sms' && campaign.is_ad) {
 for (const customer of filteredCustomers) {
   // ★ 동적 변수 치환 (field_mappings 기반 - 하드코딩 완전 제거!)
   let personalizedMessage = campaign.message_content || '';
-  let personalizedSubject = campaign.subject || '';
+  // ★ D28: 제목은 고정값 그대로 사용 (머지 치환 완전 제거)
+  const personalizedSubject = campaign.subject || '';
 
   for (const [varName, mapping] of Object.entries(fieldMappings) as [string, VarCatalogEntry][]) {
     const value = customer[mapping.column];
@@ -1001,12 +1016,10 @@ for (const customer of filteredCustomers) {
 
     const varRegex = new RegExp(`%${varName}%`, 'g');
     personalizedMessage = personalizedMessage.replace(varRegex, displayValue);
-    personalizedSubject = personalizedSubject.replace(varRegex, displayValue);
   }
 
-  // 검증에서 발견된 잘못된 변수 잔여분 제거 (안전장치)
+  // 검증에서 발견된 잘못된 변수 잔여분 제거 (안전장치) — 본문만 적용
   personalizedMessage = personalizedMessage.replace(/%[^%\s]{1,20}%/g, '');
-  personalizedSubject = personalizedSubject.replace(/%[^%\s]{1,20}%/g, '');
 
   // 개별회신번호: customer.callback 있으면 사용, 없으면 캠페인 설정 또는 기본값
   const customerCallback = useIndividualCallback && customer.callback
@@ -1049,22 +1062,25 @@ for (const customer of filteredCustomers) {
 }
 
 // campaign_runs 상태 업데이트
+// ★ #6: 예약 캠페인은 sent_at 설정하지 않음
 await query(
   `UPDATE campaign_runs SET
     sent_count = $1,
-    status = $2,
-    sent_at = CURRENT_TIMESTAMP
+    status = $2
+    ${isScheduled ? '' : ', sent_at = CURRENT_TIMESTAMP'}
    WHERE id = $3`,
   [filteredCustomers.length, isScheduled ? 'scheduled' : 'sending', campaignRun.id]
 );
 
 // 캠페인 상태 업데이트
+// ★ #6: 예약 캠페인은 sent_at 설정하지 않음 (sync-results에서 실제 발송 완료 시 설정)
+// 예약건의 "발송일시"는 scheduled_at으로 표시해야 함
 await query(
   `UPDATE campaigns SET
     status = $1,
     sent_count = COALESCE(sent_count, 0) + $2,
-    target_count = $3,
-    sent_at = CURRENT_TIMESTAMP
+    target_count = $3
+    ${isScheduled ? '' : ', sent_at = CURRENT_TIMESTAMP'}
    WHERE id = $4`,
    [isScheduled ? 'scheduled' : 'sending', filteredCustomers.length, filteredCustomers.length, id]
   );
@@ -1717,6 +1733,17 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: '회신번호를 선택해주세요' });
     }
 
+    // ★ #4: 회신번호 등록 여부 검증 (개별회신번호가 아닌 경우)
+    if (!useIndividualCallback && callback) {
+      const senderCheck = await query(
+        'SELECT id FROM sender_numbers WHERE company_id = $1 AND REPLACE(phone_number, \'-\', \'\') = $2 AND is_active = true LIMIT 1',
+        [companyId, callback.replace(/-/g, '')]
+      );
+      if (senderCheck.rows.length === 0) {
+        return res.status(400).json({ success: false, error: '등록되지 않은 회신번호입니다. 발신번호 관리에서 번호를 등록해주세요.', code: 'INVALID_SENDER_NUMBER' });
+      }
+    }
+
     // 개별회신번호 사용 시 모든 수신자에게 callback 있는지 확인
     if (useIndividualCallback) {
       const missingCallback = recipients.filter((r: any) => !r.callback);
@@ -1814,7 +1841,7 @@ router.post('/direct-send', async (req: Request, res: Response) => {
 
       for (let i = 0; i < filteredRecipients.length; i++) {
         const recipient = filteredRecipients[i];
-        // 변수 치환
+        // 변수 치환 — 본문만
         let finalMessage = message
           .replace(/%이름%/g, recipient.name || '')
           .replace(/%기타1%/g, recipient.extra1 || '')
@@ -1822,13 +1849,8 @@ router.post('/direct-send', async (req: Request, res: Response) => {
           .replace(/%기타3%/g, recipient.extra3 || '')
           .replace(/%회신번호%/g, recipient.callback || '');
 
-        // LMS/MMS 제목 머지 치환
-        const finalSubject = (subject || '')
-          .replace(/%이름%/g, recipient.name || '')
-          .replace(/%기타1%/g, recipient.extra1 || '')
-          .replace(/%기타2%/g, recipient.extra2 || '')
-          .replace(/%기타3%/g, recipient.extra3 || '')
-          .replace(/%회신번호%/g, recipient.callback || '');
+        // ★ D28: 제목은 고정값 그대로 사용 (머지 치환 완전 제거)
+        const finalSubject = subject || '';
 
         // 분할전송 시간 계산
         let sendTime: string;
@@ -1936,11 +1958,11 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       }
     }
 
-    // 3. 즉시발송이면 상태 업데이트
+    // 3. 즉시발송이면 상태 업데이트 (★ #5: sending으로 설정 → sync-results에서 Agent 완료 후 completed 전환)
     if (!scheduled) {
       await query(
-        `UPDATE campaigns SET status = 'completed', sent_at = NOW() WHERE id = $1`,
-        [campaignId]
+        `UPDATE campaigns SET status = 'sending', sent_count = $1, sent_at = NOW() WHERE id = $2`,
+        [filteredRecipients.length, campaignId]
       );
     }
 
@@ -2436,13 +2458,9 @@ router.put('/:id/message', async (req: Request, res: Response) => {
           const escapedMessage = finalMessage.replace(/'/g, "''");
           cases.push(`WHEN seqno = ${recipient.seqno} THEN '${escapedMessage}'`);
 
-          // 제목 처리 (LMS/MMS)
+          // ★ D28: 제목은 고정값 그대로 사용 (머지 치환 완전 제거)
           if (subject && (msgType === 'LMS' || msgType === 'MMS')) {
-            let finalSubject = subject
-              .replace(/%이름%/g, customer.name || '고객')
-              .replace(/%등급%/g, customer.grade || '')
-              .replace(/%지역%/g, customer.region || '');
-            const escapedSubject = finalSubject.replace(/'/g, "''");
+            const escapedSubject = subject.replace(/'/g, "''");
             titleCases.push(`WHEN seqno = ${recipient.seqno} THEN '${escapedSubject}'`);
           }
 

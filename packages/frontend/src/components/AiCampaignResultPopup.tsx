@@ -193,7 +193,7 @@ export default function AiCampaignResultPopup({
                 {aiResult?.messages?.length > 0 ? (
                   aiResult.messages.map((msg: any, idx: number) => (
                     <label key={msg.variant_id || idx} className="cursor-pointer group">
-                      <input type="radio" name="message" className="hidden" defaultChecked={idx === 0} onChange={() => { setSelectedAiMsgIdx(idx); setEditingAiMsg(null); }} />
+                      <input type="radio" name="message" className="hidden" checked={selectedAiMsgIdx === idx} onChange={() => { setSelectedAiMsgIdx(idx); setEditingAiMsg(null); }} />
                       {/* 모던 폰 프레임 */}
                       <div className="rounded-[1.8rem] p-[3px] transition-all bg-gray-300 group-has-[:checked]:bg-gradient-to-b group-has-[:checked]:from-purple-400 group-has-[:checked]:to-purple-600 group-has-[:checked]:shadow-lg group-has-[:checked]:shadow-purple-200 hover:bg-gray-400">
                         <div className="bg-white rounded-[1.6rem] overflow-hidden flex flex-col" style={{ height: '420px' }}>

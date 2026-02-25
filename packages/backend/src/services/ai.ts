@@ -282,6 +282,7 @@ const BRAND_SYSTEM_PROMPT = `당신은 마케팅 문자 메시지 전문가입�
 
 ### LMS (2000바이트 이하, 한글 약 1000자)  
 - subject(제목) 필수! 40바이트 이내, 핵심 키워드로 짧고 임팩트 있게
+- ⚠️ subject(제목)에는 %변수% 절대 사용 금지! 고정 텍스트만! (예: "[브랜드명] 봄 세일 안내")
 - 제목 예시: "[브랜드명] 봄 세일 안내", "VIP 고객님 특별 혜택"
 - ⚠️ 한 줄은 반드시 한글 기준 최대 17자(영문/숫자 포함 34바이트) 이내로 작성! 모바일 화면에서 줄이 넘어가면 가독성이 크게 떨어집니다
 - 긴 문장은 반드시 줄바꿈으로 나눠서 한 줄이 짧게 유지되도록 작성
@@ -480,7 +481,7 @@ ${brandSlogan ? `- 브랜드 슬로건 "${brandSlogan}"의 느낌을 반영` : '
 - 🚫 사용자가 언급하지 않은 혜택(할인율, 적립금, 사은품 등) 날조 금지!
 ${smsByteInstruction}
 ${kakaoInstruction}
-${channel === 'LMS' ? '- LMS는 한 줄 최대 17자 이내로 짧게, 줄바꿈으로 가독성 좋게 작성 (이모지 금지!)' : ''}
+${channel === 'LMS' ? '- LMS는 한 줄 최대 17자 이내로 짧게, 줄바꿈으로 가독성 좋게 작성 (이모지 금지!)\n- ⚠️ subject(제목)에는 %변수% 절대 사용 금지! 고정 텍스트만!' : ''}
 
 ## 개인화 설정 (⚠️ 중요!)
 - 개인화 사용: ${usePersonalization ? '예' : '아니오'}
@@ -531,15 +532,38 @@ ${usePersonalization ? `- 사용할 개인화 변수: ${personalizationTags}
         msgField = msgField.trim();
         (variant as any).message_text = msgField;
         
-        // 변수 검증
-        const validation = validatePersonalizationVars(msgField, availableVars);
+        // ★ D28: 제목에서 %변수% 강제 제거 (AI가 프롬프트 무시 시 안전장치)
+        if ((variant as any).subject) {
+          (variant as any).subject = ((variant as any).subject as string).replace(/%[^%\s]{1,20}%/g, '').replace(/  +/g, ' ').trim();
+        }
+        
+        // ★ #11 수정: 개인화 모드일 때 personalizationVars(선택된 변수)만 허용, 비선택 변수 제거
+        const validationTarget = usePersonalization && personalizationVars.length > 0
+          ? personalizationVars  // 사용자가 선택한 변수만
+          : availableVars;       // 비개인화 모드면 전체 (혹시 AI가 변수를 넣었을 경우 대비)
+        const validation = validatePersonalizationVars(msgField, validationTarget);
         if (!validation.valid) {
           console.warn(`[AI 변수 검증] 잘못된 변수 발견: ${validation.invalidVars.join(', ')} → 제거`);
           let cleaned = msgField;
           for (const invalidVar of validation.invalidVars) {
-            cleaned = cleaned.replace(new RegExp(`%${invalidVar}%`, 'g'), '');
+            cleaned = cleaned.replace(new RegExp(`%${invalidVar}%\\s*`, 'g'), '');
+            cleaned = cleaned.replace(new RegExp(`\\s*%${invalidVar}%`, 'g'), '');
           }
+          cleaned = cleaned.replace(/  +/g, ' ').replace(/\n /g, '\n').trim();
           (variant as any).message_text = cleaned;
+        }
+      }
+
+      // ★ #9: SMS 바이트 초과 시 경고 로그
+      if (channel === 'SMS') {
+        for (const variant of result.variants) {
+          const msgBytes = calculateKoreanBytes((variant as any).message_text || '');
+          const totalBytes = isAd
+            ? msgBytes + 6 + 1 + 8 + (rejectNumber || '0807196700').replace(/-/g, '').length
+            : msgBytes;
+          if (totalBytes > 90) {
+            console.warn(`[AI 한줄로 SMS 바이트 초과] ${variant.variant_id}: ${totalBytes}bytes (본문 ${msgBytes}bytes)`);
+          }
         }
       }
     }
@@ -1119,7 +1143,7 @@ ${toneDesc} 톤으로 작성
 
 ## 채널: ${channel}
 ${smsByteInstruction}
-${(channel === 'LMS' || channel === 'MMS') ? `- ${channel}: subject(제목) 필수, 한 줄 최대 17자 이내로 짧게 줄바꿈, 이모지 금지` : ''}
+${(channel === 'LMS' || channel === 'MMS') ? `- ${channel}: subject(제목) 필수, 한 줄 최대 17자 이내로 짧게 줄바꿈, 이모지 금지\n- ⚠️ subject(제목)에는 %변수% 절대 사용 금지! 고정 텍스트만! 개인화는 본문에서만!` : ''}
 
 ## 요청사항
 ${channel} 채널에 최적화된 3가지 맞춤 문안(A/B/C)을 생성해주세요.
@@ -1143,6 +1167,7 @@ ${channel} 채널에 최적화된 3가지 맞춤 문안(A/B/C)을 생성해주�
 
 ### LMS (2000바이트 이하)
 - subject(제목) 필수! 40바이트 이내
+- ⚠️ subject(제목)에는 %변수% 절대 사용 금지! 고정 텍스트만! (개인화는 본문에서만)
 - ⚠️ 한 줄은 반드시 한글 기준 최대 17자(영문/숫자 포함 34바이트) 이내로 작성! 모바일 화면에서 줄이 넘어가면 가독성이 크게 떨어집니다
 - 긴 문장은 반드시 줄바꿈으로 나눠서 한 줄이 짧게 유지되도록 작성
 - 줄바꿈과 특수문자로 가독성 높게
@@ -1228,6 +1253,11 @@ ${channel} 채널에 최적화된 3가지 맞춤 문안(A/B/C)을 생성해주�
         msg = msg.replace(/\n{3,}/g, '\n\n');
         msg = msg.trim();
         variant.message_text = msg;
+
+        // ★ D28: 제목에서 %변수% 강제 제거 (AI가 프롬프트 무시 시 안전장치)
+        if (variant.subject) {
+          variant.subject = variant.subject.replace(/%[^%\s]{1,20}%/g, '').replace(/  +/g, ' ').trim();
+        }
 
         // ★ 버그 #1: 미선택 변수 엄격 제거
         const validation = validatePersonalizationVars(msg, varNames);

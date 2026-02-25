@@ -52,6 +52,7 @@
 | 41 | balance_transactions | 잔액 변동 이력 |
 | 42 | payments | PG 결제 내역 |
 | 43 | deposit_requests | 무통장입금 요청 |
+| 44 | analysis_results | AI 분석 결과 캐시 |
 
 ---
 
@@ -861,3 +862,17 @@
 | confirmed_at | timestamptz | |
 | admin_note | text | 관리자 메모 |
 | created_at | timestamptz | |
+
+### analysis_results (AI 분석 결과 캐시)
+| 컬럼 | 타입 | 설명 |
+|------|------|------|
+| id | uuid PK | |
+| company_id | uuid FK | 고객사 |
+| analysis_level | varchar(20) | basic/advanced |
+| period_from | date | 분석 시작일 |
+| period_to | date | 분석 종료일 |
+| insights | jsonb | Claude 분석 인사이트 배열 |
+| collected_data | jsonb | 원본 수집 데이터 (PDF 재생성용) |
+| created_at | timestamptz | |
+- UNIQUE: (company_id, analysis_level, period_from, period_to)
+- INDEX: idx_analysis_results_company (company_id, created_at DESC)

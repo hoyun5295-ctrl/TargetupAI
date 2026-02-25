@@ -6,9 +6,9 @@ interface SendConfirmModalProps {
     unsubscribeCount: number;
     dateTime?: string;
     from?: 'direct' | 'target';
+    msgType?: string;
   };
   setSendConfirm: (v: any) => void;
-  directMsgType: string;
   directSending: boolean;
   executeDirectSend: () => void;
   executeTargetSend: () => void;
@@ -16,7 +16,7 @@ interface SendConfirmModalProps {
 
 export default function SendConfirmModal({
   sendConfirm, setSendConfirm,
-  directMsgType, directSending,
+  directSending,
   executeDirectSend, executeTargetSend,
 }: SendConfirmModalProps) {
   if (!sendConfirm.show) return null;
@@ -63,7 +63,7 @@ export default function SendConfirmModal({
             )}
             <div className="flex justify-between">
               <span className="text-gray-500">메시지 타입</span>
-              <span className="font-medium">{directMsgType}</span>
+              <span className="font-medium">{sendConfirm.msgType || 'SMS'}</span>
             </div>
             {sendConfirm.type === 'scheduled' && (
               <div className="mt-3 pt-3 border-t border-gray-200">

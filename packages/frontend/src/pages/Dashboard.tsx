@@ -593,7 +593,7 @@ export default function Dashboard() {
   const [callbackNumbers, setCallbackNumbers] = useState<{id: string, phone: string, label: string, is_default: boolean}[]>([]);
   const [selectedCallback, setSelectedCallback] = useState('');
   const [useIndividualCallback, setUseIndividualCallback] = useState(false);
-  const [sendConfirm, setSendConfirm] = useState<{show: boolean, type: 'immediate' | 'scheduled', count: number, unsubscribeCount: number, dateTime?: string, from?: 'direct' | 'target'}>({show: false, type: 'immediate', count: 0, unsubscribeCount: 0});
+  const [sendConfirm, setSendConfirm] = useState<{show: boolean, type: 'immediate' | 'scheduled', count: number, unsubscribeCount: number, dateTime?: string, from?: 'direct' | 'target', msgType?: string}>({show: false, type: 'immediate', count: 0, unsubscribeCount: 0});
 
   // 전화번호 포맷팅 함수
   const formatPhoneNumber = (phone: string) => {
@@ -3448,7 +3448,8 @@ const campaignData = {
                           count: targetRecipients.length - unsubCount,
                           unsubscribeCount: unsubCount,
                           dateTime: reserveEnabled && reserveDateTime ? reserveDateTime : undefined,
-                          from: 'target'
+                          from: 'target',
+                          msgType: targetMsgType
                         });
                         return;
                       }}
@@ -3551,7 +3552,7 @@ const campaignData = {
                           const checkRes = await fetch('/api/unsubscribes/check', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ phones }) });
                           const checkData = await checkRes.json();
                           const unsubCount = checkData.unsubscribeCount || 0;
-                          setSendConfirm({ show: true, type: reserveEnabled ? 'scheduled' : 'immediate', count: targetRecipients.length - unsubCount, unsubscribeCount: unsubCount, dateTime: reserveEnabled && reserveDateTime ? reserveDateTime : undefined, from: 'target' });
+                          setSendConfirm({ show: true, type: reserveEnabled ? 'scheduled' : 'immediate', count: targetRecipients.length - unsubCount, unsubscribeCount: unsubCount, dateTime: reserveEnabled && reserveDateTime ? reserveDateTime : undefined, from: 'target', msgType: '카카오' });
                         }}
                         disabled={targetSending || (!kakaoEnabled)}
                         className={`w-full py-2.5 rounded-xl font-bold text-base transition-colors disabled:opacity-50 ${
@@ -4220,7 +4221,8 @@ const campaignData = {
                           count: directRecipients.length - unsubCount,
                           unsubscribeCount: unsubCount,
                           dateTime: reserveEnabled && reserveDateTime ? reserveDateTime : undefined,
-                          from: 'direct'
+                          from: 'direct',
+                          msgType: directMsgType
                         });
                         return;
                       }}
@@ -4305,7 +4307,7 @@ const campaignData = {
                           const checkRes = await fetch('/api/unsubscribes/check', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ phones }) });
                           const checkData = await checkRes.json();
                           const unsubCount = checkData.unsubscribeCount || 0;
-                          setSendConfirm({ show: true, type: reserveEnabled ? 'scheduled' : 'immediate', count: directRecipients.length - unsubCount, unsubscribeCount: unsubCount, dateTime: reserveEnabled && reserveDateTime ? reserveDateTime : undefined, from: 'direct' });
+                          setSendConfirm({ show: true, type: reserveEnabled ? 'scheduled' : 'immediate', count: directRecipients.length - unsubCount, unsubscribeCount: unsubCount, dateTime: reserveEnabled && reserveDateTime ? reserveDateTime : undefined, from: 'direct', msgType: '카카오' });
                         }}
                         disabled={!kakaoEnabled}
                         className={`w-full py-3 rounded-xl font-bold text-base transition-colors ${
@@ -5019,7 +5021,6 @@ const campaignData = {
       <SendConfirmModal
         sendConfirm={sendConfirm}
         setSendConfirm={setSendConfirm}
-        directMsgType={directMsgType}
         directSending={directSending}
         executeDirectSend={executeDirectSend}
         executeTargetSend={executeTargetSend}

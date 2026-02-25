@@ -91,186 +91,177 @@
 ## 4) 🎯 CURRENT_TASK (현재 집중 작업)
 
 > **규칙:** 아래 목표에만 100% 리소스를 집중한다.
+> **⚠️ 크리티컬:** 이 작업은 오늘(02-25) 반드시 전부 완료. 모든 버그가 완벽히 해결될 때까지 다른 작업 불가.
 
 ---
 
-### 현재 목표: 요금제 기능 제한 + AI 분석 기능 구현
+### 🔴 현재 목표: 직원 버그리포트 8차 — 발송 파이프라인 근절 (12건, 3세션)
 
-> **배경:** 2026-02-25 Harold님 의논 결정사항. 런칭 전 요금제 체계 정비 + AI 분석 차별화.
+> **배경:** 2026-02-25 PPT 버그리포트 수신. 6차/7차에서 "완료" 처리한 버그 5건이 재발.
+> **근본 원인:** 발송 경로가 5개인데 신고된 1개 경로만 패치하고 나머지 4개를 점검하지 않음.
+> **Harold님 결정:** 제목 머지(제목의 %변수% 치환) 완전 제거. 기본 기능 안정성에 집중.
 
-#### Task A. 요금제 미사용 시 기능 제한 ✅ 완료
+#### ⛔ 재발 방지 — 8차부터 의무 적용 규칙
 
-**DB 변경:**
-- [x] companies 테이블에 `subscription_status` 필드 추가 (varchar(20))
-- [x] 값: `trial` / `active` / `expired` / `suspended`
+**발송 관련 수정 시 "5개 경로 전수 점검" 필수:**
+1. 발송 5개 경로: `/:id/send` (AI), `/direct-send` (직접), `/test-send` (담당자테스트), `spam-filter/test` (스팸테스트), 예약발송(scheduled)
+2. 코드 수정 시 5개 경로 모두 동일 로직 적용 확인 → 매트릭스 체크
+3. MySQL INSERT 쿼리의 컬럼 목록이 5개 경로에서 동일한지 diff 확인
+4. 프론트엔드 미리보기 ↔ 실제 발송 데이터 ↔ 상세보기 조회가 동일 소스인지 확인
 
-**잠금 조건:** `subscription_status`가 `expired` 또는 `suspended`일 때
-
-**허용 영역:**
-- 상단 탑메뉴바 전체 (발송결과, 수신거부, 설정 등)
-- 잔액충전
-- 직접발송
-
-**잠금 영역:**
-- 대시보드 영역의 모든 기능 (AI 한줄로, AI 맞춤한줄, 고객 인사이트, 캘린더, 고객DB 조회 등)
-- 클릭 시 "요금제 가입이 필요합니다" 업그레이드 모달 표시
-
-**구현 완료:**
-- [x] DDL: ALTER TABLE companies ADD COLUMN subscription_status varchar(20) DEFAULT 'trial'
-- [x] 기존 고객사 마이그레이션 (plan_id 있으면 active, trial_expires_at 지났으면 expired 등)
-- [x] 백엔드: 로그인 쿼리+응답에 subscriptionStatus 포함 (auth.ts)
-- [x] 프론트엔드: isSubscriptionLocked 헬퍼 + 대시보드 10군데 잠금 처리 + SubscriptionLockModal.tsx 신규 생성
-- [x] 슈퍼관리자: AdminDashboard.tsx 구독 상태 드롭다운 추가 + admin.ts PUT API에 subscription_status 저장
-
-**수정 파일:** auth.ts, Dashboard.tsx, SubscriptionLockModal.tsx(신규), AdminDashboard.tsx, admin.ts
-
-**잔여 TODO:** 없음 (전체 완료)
-
-#### Task B. AI 분석 기능 (요금제별 차별화)
-
-**요금제 구조:**
-- 베이직: AI 분석 없음
-- 프로 (100만원): AI 분석 (기본)
-- 비즈니스 (300만원): AI 분석 (고급)
-
-**프로 — AI 분석 (기본) | What happened:**
-- API에 집계값 위주 전달 (토큰 소모 적음, 호출 1~2회)
-- 캠페인 성과 분석: 성공률/실패율 추이, 채널별 비교, 요일/시간대별 패턴, 최적 발송 시간 추천
-- 고객 기본 통계: 성별/등급/지역 분포, 수신거부 추이 (월별 증감 + 원인 분석)
-- 월간 요약 리포트: 총 발송, 성공률, 전월 대비, 성과 TOP 3 캠페인
-- 기본 PDF 출력 (1~2페이지, 핵심 수치 + 간단 차트)
-
-**비즈니스 — AI 분석 (고급) | Why + What to do next:**
-- API에 로우 데이터 전달 (토큰 소모 많음, 호출 5~8회)
-- 프로의 모든 기능 포함 +
-- 고객 세그먼트 자동 분류: RFM 기반 고객군 식별 + 군별 특성/추천 전략
-- 이탈 위험 분석: 구매주기 대비 미구매 고객 추출 + 재활성화 메시지 AI 제안
-- 캠페인 심층 비교: 동일 타겟 다른 메시지 성과 비교 + 톤/내용 패턴 분석
-- 구매 전환 분석: 캠페인 발송 후 7일 내 구매 추적 + ROI 추정 (purchases 데이터 보유 고객사)
-- 맞춤 액션 제안: 타겟군 + 메시지 방향 + 발송 시기 패키지 추천
-- 상세 PDF 보고서 (5~10페이지, 차트/세그먼트/전략, 회사 로고 + 기간 설정)
-
-**구현 TODO:**
-- [x] plans 테이블에 ai_analysis_level 필드 추가 (none/basic/advanced) ✅ 세션1
-- [x] AI 분석 백엔드 API 설계 + 구현 (preview 완전, run 데이터수집, pdf 뼈대) ✅ 세션1
-- [x] 요금제별 접근 제어 (plan의 ai_analysis_level 기반) ✅ 세션1
-- [x] AI 분석 프론트엔드 UI (AnalysisModal.tsx) ✅ 세션2
-- [ ] AI 프롬프트 정교화 + PDF 생성 (기본/상세 분기) → 세션3
-- [ ] 데모 데이터 SQL INSERT (가상 고객사 고객/캠페인/구매 데이터) → 세션4
+**AI 문안 관련 수정 시:**
+1. AI 한줄로 + AI 맞춤한줄 양쪽 모두 적용 확인
+2. 프롬프트 변경 시 실제 응답 검증 (바이트 초과 / 미허용 변수 등)
 
 ---
 
-### ✅ 이전 완료: Sync Agent 서버측 보안 + 코드 수정
+#### Harold님 결정사항: 제목 머지 완전 제거
 
-- ✅ sync_logs/sync_releases/sync_agents DDL 적용
-- ✅ sync.ts version API checksum 필드 포함 확인
-- ✅ `/api/sync/*` rate limit (IP + 회사별)
-- ✅ 동시 full sync 제한 (activeSyncs + 429 + 30분 자동 정리)
-- ✅ 매뉴얼 최종 점검 완료
-- ⏳ sync_releases v1.3.0 등록 — 비토 최종 빌드 후
-- ⏳ 비토측 보안 수정 (B-1~B-3) — 전달 완료, 비토 작업 대기
+| 영역 | 변경 |
+|------|------|
+| AI 발송 제목 (campaigns.ts /:id/send) | personalizedSubject 머지 치환 코드 삭제 → campaign.subject 고정값 사용 |
+| 직접발송 제목 (campaigns.ts /direct-send) | finalSubject replace 체인 삭제 → req.body.subject 고정값 사용 |
+| 스팸테스트 제목 (spam-filter.ts) | 제목 머지 없이 입력값 그대로 전달 |
+| AI 프롬프트 (services/ai.ts) | 제목에 %변수% 넣지 않도록 프롬프트 수정, subject 생성 시 고정 텍스트만 |
+| 프론트엔드 | 제목 입력란에 "개인화 변수 미지원" 안내, 미리보기도 원본 그대로 |
 
----
-
-### ✅ 이전 완료: 정산 멀티테이블 + 스팸필터 통합 (1세션)
-
-> 수정 파일 1개 + DDL:
-> - `packages/backend/src/routes/billing.ts` — 멀티테이블 헬퍼 + 스팸필터 집계 + PDF/메일 반영
-> - DDL: billing_invoices에 spam_filter 4컬럼 추가
-
-- ✅ 정산 MySQL 조회를 SMSQ_SEND 단일 → 회사별 라인그룹 멀티테이블로 전환
-- ✅ LOG 테이블(SMSQ_SEND_X_YYYYMM) 통합 조회 (정산 기간별 자동 탐색)
-- ✅ 스팸필터 테스트 발송 PostgreSQL 집계 추가 (spam_filter_tests + results JOIN)
-- ✅ 순환참조 방지: campaigns.ts import 대신 billing.ts 자체 헬퍼 함수 구현
-- ✅ preview API에 spam 섹션 추가 (spamSummary)
-- ✅ 정산서 PDF에 스팸필터 SMS/LMS 행 추가 (배경색 #fef3c7 구분)
-- ✅ 정산서 메일 HTML에 스팸필터 비용 표시
-- ✅ 일별 상세 PDF에 SPAM_SMS/SPAM_LMS 타입 라벨 + 배경색 구분
+→ 이 결정으로 8차 #2(제목 머지 미적용), #7(LMS 제목 미표시)의 제목 치환 관련 부분이 구조적으로 사라짐.
+→ D15 결정(LMS 제목 머지 치환 가능 → 구현) 번복. D28로 대체.
 
 ---
 
-### ✅ 이전 완료: 발송 통계 고도화 + 스팸필터 테스트 통합 (1세션)
+#### 📋 8차 버그 전체 목록 (12건)
 
-> 수정 파일 6개:
-> - `packages/backend/src/routes/campaigns.ts` — test-stats 스팸필터 합산
-> - `packages/backend/src/routes/manage-stats.ts` — 고객사관리자/슈퍼관리자 통계 스팸필터 합산 + 비용
-> - `packages/backend/src/routes/admin.ts` — 슈퍼관리자 통계 testSummary + testDetail
-> - `packages/frontend/src/components/ResultsModal.tsx` — 타입 컬럼 제거 + 스팸필터 이력
-> - `packages/company-frontend/src/components/StatsTab.tsx` — 비용 + 스팸필터 + 페이징
-> - `packages/frontend/src/components/admin/StatsTab.tsx` — 비용 + 스팸필터 + 페이징
-
-- ✅ 채널통합조회 "타입" 컬럼 제거 (채널 뱃지와 중복)
-- ✅ 테스트 통계에 스팸필터 테스트 합산 (담당자 MySQL + 스팸필터 PostgreSQL)
-- ✅ 고객사 관리자 발송통계 비용 표시 (요약카드 + 상세 사용자별)
-- ✅ 슈퍼관리자 통계에 테스트+스팸필터 건 표시 (요약 + 상세)
-- ✅ 일반 사용자 발송결과 테스트 탭: 전체/담당자/스팸필터 3카드 + 스팸필터 이력 리스트
-- ✅ 테스트 발송 이력 페이징 10건 (ResultsModal + StatsTab 양쪽)
-
----
-
-### ✅ 이전 완료: 직원 버그리포트 7차 수정 (전체 9건, 3세션 완료)
-
-#### 세션 1: 동적 필드 시스템 전환 (버그 #1, #2, #5, #7, #8) ✅
-
-> 수정 파일: CustomerDBModal.tsx, AiCustomSendFlow.tsx, Dashboard.tsx, customers.ts, services/ai.ts, ResultsModal.tsx
-
-- ✅ #5 — 개인화 필드 화이트리스트 삭제 → field_definitions 전체 노출
-- ✅ #7 — normalizeGrade() 제거 → 원본값 저장
-- ✅ #8 — SAMPLE_DATA 삭제 → 실제 DB 고객 샘플
-- ✅ #2 — 수신번호 phone 고정
-- ✅ #1 — 채널 message_type 기반 표시
-- ✅ 추가 — 고객DB 동적 컬럼 + 가로 스크롤
-
-#### 세션 2: 스팸필터 동시성 해결 (버그 #3, #4) ✅
-
-> 수정 파일: spam-filter.ts, SpamFilterTestModal.tsx. DB: message_hash 컬럼+인덱스 추가
-
-- ✅ #3 — 쿨다운 제거 → 재테스트 버튼
-- ✅ #4 — SHA-256 해시 세션 격리 + fallback 제거
-
-#### 세션 3: 발송 엔진 + 타겟 재검증 (버그 #6, #9) ✅
-
-> 수정 파일: campaigns.ts, ai.ts
-
-- ✅ #9 — LMS 제목 머지 치환 (AI발송 personalizedSubject + 직접발송 finalSubject)
-- ✅ #6 — recount-target companyId 수정 + WHERE 통일 + storeFilter 추가
+| # | 슬라이드 | 증상 | 심각도 | 세션 | 상태 |
+|---|---------|------|--------|------|------|
+| 1 | 1 | 스팸테스트 결과 전부 "스팸차단" 표시 (실제 단말은 정상 수신) | 🟠 | 2 | ⬜ |
+| 2 | 2-3 | 제목 머지 미적용 (%고객명% 그대로 발송) | 🔴 | - | ✅ 제목머지 제거(D28)로 해결 |
+| 3 | 3 | 스팸테스트 시 개인화 안 된 원본 문안 그대로 발송 (테스트 무의미) | 🟠 | 2 | ⬜ |
+| 4 | 4 | 미등록 회신번호인데 발송 진행됨 (차단 안 됨) | 🔴 | 1 | ✅ sender_numbers 검증 추가 (AI발송+직접발송) |
+| 5 | 5 | 즉시/예약 모두 발송 안 됨 — 캘린더 "완료"인데 실제 미발송, 발송결과는 "대기" | 🔴🔴 | 1 | ✅ 직접발송 즉시 completed→sending 전환 (sync-results가 완료 처리) |
+| 6 | 6 | 예약건 발송일시가 등록일시와 동일하게 표시 (예약시간 미반영) | 🟡 | 3 | ⬜ |
+| 7 | 7 | LMS 제목 미표시 (스팸테스트/예약 상세보기 모두 제목 없음) | 🔴 | 1 | ✅ test-send INSERT에 title_str 컬럼 추가 |
+| 8 | 8 | 캠페인 확정 알림창 대상 0명 + 채널타입 무조건 SMS | 🟠 | 3 | ⬜ |
+| 9 | 9 | AI 미리보기에서 SMS 90바이트 초과 수정 가능 + AI가 초과 추천 | 🟠 | 2 | ⬜ |
+| 10 | 10 | DB 업로드 시 Excel 날짜가 시리얼넘버(34786)로 인식 | 🟡 | 3 | ⬜ |
+| 11 | 11 | AI 맞춤한줄에서 요청 안 한 변수(연령대, 성별) 혼입 | 🟠 | 2 | ⬜ |
+| 12 | 12 | 예약 상세보기에서 선택한 문안과 전혀 다른 문안 저장됨 | 🔴🔴 | 1 | ⬜ **← 세션1 잔여. ai.ts 확인 필요** |
 
 ---
 
-### ✅ 이전 완료: 직원 버그리포트 6차 수정 (전체 11건)
+#### 세션 1: 🔴 발송 엔진 근본 수정 + 제목 머지 제거 (치명 2건 + 관련 3건)
 
-#### 세션 1 완료: AI 맞춤한줄 고도화 + 회신번호 UI (6건)
+> **대상:** #5(발송 안 됨), #12(다른 문안 저장), #4(회신번호 미검증), #7(LMS 제목 미저장) + 제목 머지 전체 제거
+> **핵심 파일:** campaigns.ts, ai.ts, services/ai.ts, Dashboard.tsx (확정 모달 영역)
+> **방식:** 코드 수정 전 5개 발송 경로 전수 읽기 → 매트릭스 채우기 → 누락 지점만 수정
+> **진행률:** campaigns.ts 4건 완료, #12(ai.ts) 잔여 → 다음 채팅에서 이어서 진행
 
-> **수정 파일 4개:**
-> - `packages/frontend/src/components/AiCustomSendFlow.tsx` — 완성 파일 교체
-> - `packages/frontend/src/components/AiCampaignSendModal.tsx` — 완성 파일 교체
-> - `packages/backend/src/services/ai.ts` — 완성 파일 교체
-> - `packages/backend/src/routes/ai.ts` — 완성 파일 교체
+**⚠️ 5개 경로 전수 점검 매트릭스 (campaigns.ts 기준 완료):**
 
-- ✅ 버그 #1 — AI 맞춤한줄 개인화 변수 오류 (AI 프롬프트 변수 제한 강화 + 미허용 변수 strip)
-- ✅ 버그 #4 — SMS AI 문구 90바이트 초과 (calculateKoreanBytes + 프론트 경고/차단)
-- ✅ 버그 #8 — AI 맞춤한줄 광고표기 고정 + MMS 누락 (isAd 토글 + MMS 옵션 추가)
-- ✅ 버그 #9 — AI 맞춤한줄 타겟 추출 0명 (gender 중복 필터 제거 + recount-target)
-- ✅ 버그 #10 — 회신번호 드롭다운 매장명만 표시 (전화번호(매장명) 형식)
-- ✅ 버그 #11 — 개별회신번호 1건인데 선택 허용 (2건 이상일 때만 노출)
+| 체크 항목 | /:id/send (AI) | /direct-send | /test-send | spam-filter | 예약수정 |
+|-----------|:-:|:-:|:-:|:-:|:-:|
+| 회신번호 등록 여부 검증 | ✅ 추가 | ✅ 추가 | - (기본번호) | 별도파일 | - |
+| MySQL INSERT 시 title_str 정상 전달 | ✅ 기존OK | ✅ 기존OK | ✅ **추가** | 별도파일 | ✅ 기존OK |
+| 제목 머지 치환 코드 → 삭제 | ✅ **삭제** | ✅ **삭제** | - (없었음) | 별도파일 | ✅ **삭제** |
+| 본문 개인화 변수 치환 정상 | ✅ 동적 | ✅ 하드코딩 | ❌ 없음 | 별도파일 | ✅ |
+| sendreq_time MySQL NOW() 사용 | ✅ | ✅ | ✅ | 별도파일 | ✅ |
+| campaign 상태 업데이트 정확성 | ✅ | ✅ **수정** (sending) | - | - | ✅ |
+| 선택 문안 = 실제 INSERT 문안 일치 | ✅ | ✅ | ✅ | 별도파일 | - |
+| msg_type S/L 정확한 분기 | ✅ | ✅ | ✅ | 별도파일 | - |
 
-#### 세션 2 완료: 예약대기 + 수신거부 + 발송/캘린더 (5건)
+> ⚠️ spam-filter 경로는 spam-filter.ts 별도 파일 — 세션2에서 점검
+> ⚠️ test-send 본문 개인화 없음 — 세션2 #3에서 처리 예정
 
-> **수정 파일 6개:**
-> - `packages/frontend/src/components/ScheduledCampaignModal.tsx`
-> - `packages/frontend/src/components/CalendarModal.tsx`
-> - `packages/frontend/src/components/Dashboard.tsx`
-> - `packages/frontend/src/components/CustomerDBModal.tsx`
-> - `packages/backend/src/routes/campaigns.ts`
-> - `packages/backend/src/routes/customers.ts`
+**#12 다른 문안 저장 — 다음 채팅에서 확인 필요:**
+- [ ] ai.ts에서 AI 추천 문안 variants[] 인덱스가 캠페인 저장 시 뒤바뀌는지 확인
+- [ ] campaign_runs.message_text vs 프론트에서 선택한 variant 비교
+- [ ] AI 발송 시 고객별 개별 INSERT에서 variants 중 잘못된 것이 들어가는지 확인
+- **필요 파일:** ai.ts, services/ai.ts, 프론트엔드(AiCampaignSendModal.tsx 또는 관련 컴포넌트)
 
-- ✅ 버그 #2 — 예약대기 LMS 제목/회신번호 미표시 + 문안수정 제목 삭제 무시
-- ✅ 버그 #3 — 예약 시간변경 과거 시간 허용 → 유령 예약
-- ✅ 버그 #5 — 캘린더 상태 표기 기준
-- ✅ 버그 #6 — 대시보드 수신거부 건수 미표시
-- ✅ 버그 #7 — 고객 DB 조회 수신거부 필터 미작동
+**세션 1 완료 조건:**
+- [x] 매트릭스 campaigns.ts 기준 전체 ✅ 채움
+- [x] 제목 머지 코드 campaigns.ts 3곳에서 전부 제거 확인 (D28)
+- [x] #5 원인 특정(직접발송 즉시 completed) + 수정(sending 전환)
+- [ ] **#12 원인 특정 + 수정 ← 다음 채팅 (ai.ts 필요)**
+- [x] #4 회신번호 검증 AI발송+직접발송 적용 확인
+- [x] #7 title_str test-send에 추가 확인
 
 ---
+
+#### 🔜 다음 채팅 시작 가이드
+
+> **1단계:** #12(다른 문안 저장) 처리 — ai.ts 파일 필요. variants[] 인덱스 추적.
+> **2단계:** 세션 2 진입 — spam-filter.ts, services/ai.ts, AiCustomSendFlow.tsx, AiPreviewModal.tsx 필요.
+> **3단계:** 세션 3 진입 — campaigns.ts(조회 쿼리), Dashboard.tsx/SendConfirmModal.tsx, upload.ts 필요.
+> **⚠️ 배포:** campaigns.ts는 D28+#7+#4+#5 4건 수정 완료 상태. TypeScript 타입체크 후 배포 가능.
+> **⚠️ 미배포 상태:** campaigns.ts 수정사항 아직 서버 미배포. 다음 채팅에서 #12 수정 후 일괄 배포 권장.
+
+---
+
+#### 세션 2: 🟠 스팸필터 + AI 문안 품질 (4건)
+
+> **대상:** #1(결과 전부 스팸차단), #3(테스트 시 개인화 미적용), #9(SMS 바이트 초과), #11(불필요 변수 혼입)
+> **핵심 파일:** spam-filter.ts, SpamFilterTestModal.tsx, services/ai.ts, AiCustomSendFlow.tsx, AiPreviewModal.tsx
+
+| # | 버그 | 수정 방향 |
+|---|------|----------|
+| 1 | 스팸테스트 전부 "스팸차단" | 결과 매칭/판정 로직 전수 점검 — 수신확인 타이밍 vs 폴링 타이밍 비교, 해시 매칭 정확도 확인 |
+| 3 | 스팸테스트 개인화 미적용 | 스팸테스트 발송 시 타겟 리스트 상단 고객 데이터로 변수 치환 후 발송 → 안내 UI 추가 |
+| 9 | SMS 90바이트 초과 | AI 미리보기/수정 영역에 calculateKoreanBytes 적용 + AI 프롬프트 바이트 제한 재강화 |
+| 11 | 미요청 변수 혼입 | validatePersonalizationVars() strip 로직 점검 + 프롬프트에 "체크된 필드 외 변수 사용 절대 금지" 재강조 |
+
+**세션 2 완료 조건:**
+- [ ] #1 스팸테스트 결과가 실제 수신 상태와 일치하는지 로직 확인
+- [ ] #3 스팸테스트 발송 시 개인화 치환된 문안으로 발송되는지 확인
+- [ ] #9 AI 미리보기 수정 시 바이트 초과 차단 + AI 추천 90바이트 이내 확인
+- [ ] #11 체크 안 한 필드 변수가 문안에 포함 안 되는지 확인
+
+---
+
+#### 세션 3: 🟡 UI/데이터 표시 + 업로드 (3건)
+
+> **대상:** #6(예약 발송일시 표시 오류), #8(확정 알림 0명 + SMS 고정), #10(Excel 날짜 시리얼)
+> **핵심 파일:** campaigns.ts (조회 쿼리), Dashboard.tsx/SendConfirmModal.tsx (확정 알림), upload.ts (Excel)
+
+| # | 버그 | 수정 방향 |
+|---|------|----------|
+| 6 | 예약건 발송일시 = 등록일시 | 발송결과 조회 시 scheduled_at(예약시간)을 발송일시로 사용하도록 수정 |
+| 8 | 확정 알림 0명 + SMS 고정 | 확정 모달에 실제 target_count + message_type(SMS/LMS/MMS) 전달 |
+| 10 | Excel 날짜 시리얼넘버 | Excel 시리얼넘버 감지 로직 추가 (숫자 30000~60000 범위 + 날짜 컬럼 → Date 변환) |
+
+**세션 3 완료 조건:**
+- [ ] #6 예약발송 후 발송결과에서 예약시간이 정상 표시되는지 확인
+- [ ] #8 캠페인 확정 알림에 정확한 대상 수 + 채널 타입 표시 확인
+- [ ] #10 Excel 날짜(1995-03-03) 업로드 시 정상 인식 확인
+
+---
+
+#### 이전 6차/7차 재발 버그 교훈 (세션 넘어갈 때 반드시 확인)
+
+| 6차/7차 "완료" 기록 | 8차 재발 증상 | 근본 원인 |
+|-------------------|-------------|----------|
+| 7차#9 "LMS 제목 머지 치환 완료" | 제목 %고객명% 그대로 발송 | → 제목 머지 자체를 제거하여 구조적 해결 |
+| 6차#4 "SMS 바이트 체크 완료" | AI 미리보기에서 초과 가능 | → 직접발송만 적용, AI 미리보기 컴포넌트 누락 |
+| 6차#1 "변수 strip 완료" | 미요청 변수 혼입 | → strip 로직 또는 프롬프트 누수 재점검 |
+| 7차#3,4 "스팸필터 동시성 해결" | 결과 전부 스팸차단 | → 동시성은 해결했지만 결과 판정 로직 자체 미점검 |
+
+---
+
+### ✅ 이전 완료: 요금제 기능 제한 + AI 분석 기능 구현 (02-25)
+
+> Task A(구독상태 잠금) + Task B(AI 분석 4세션) 전체 완료.
+> 수정: auth.ts, Dashboard.tsx, SubscriptionLockModal.tsx, AdminDashboard.tsx, admin.ts, companies.ts, SpamFilterLockModal.tsx, PlanApprovalModal.tsx, DashboardHeader.tsx, AnalysisModal.tsx, analysis.ts, app.ts
+> DDL: subscription_status, ai_analysis_level, analysis_results
+
+### ✅ 이전 완료: Sync Agent 보안 + 정산 멀티테이블 + 통계 고도화 (02-25)
+
+> Sync 보안(rate limit+동시제한+매뉴얼) + 정산 멀티테이블(billing.ts 자체 헬퍼) + 스팸필터 통합 + 통계 고도화. 전체 완료.
+
+### ✅ 이전 완료: 직원 버그리포트 7차 (9건, 3세션) + 6차 (11건, 2세션)
+
+> 7차: 동적필드(세션1, 6건) + 스팸필터 동시성(세션2, 2건) + 발송엔진+타겟(세션3, 2건). 총 9건 완료.
+> 6차: 맞춤한줄+회신번호(세션1, 6건) + 예약+수신거부+캘린더(세션2, 5건). 총 11건 완료.
+> ⚠️ 단, 이 중 5건이 8차에서 재발 — 경로별 패치만 하고 전수 점검 안 한 것이 원인.
 
 ## 5) 📌 PROJECT STATUS
 
@@ -563,27 +554,25 @@
 
 | ID | 날짜 | 결정 | 근거 |
 |----|------|------|------|
-| D6 | 02-22 | 대시보드 좌60%/우40% flex 레이아웃 + 고객활동현황(B+C 융합) | grid-cols-4로는 75:25밖에 안됨. 활동현황=마케터 행동으로 이어지는 핵심 지표 |
-| D7 | 02-23 | 대시보드 헤더: 버튼형 → 텍스트 탭 스타일 (아이콘 제거, 녹/금/회 색상) | 홈페이지 탭 스타일 참고, SaaS 고급감 확보 |
-| D8 | 02-23 | AI 발송 분기 뱃지: 기존/NEW → AUTO/PRO | 오픈 시 동시 출시이므로 "기존"은 부적절. 간편/정교 성격 구분 |
-| D9 | 02-23 | 캘린더 상태 기준: 완료(발송처리됨)/실패(시스템에러)/취소(명시취소) 3단계 | 문자는 실패 건 항상 존재하는 게 정상. 부분성공도 "완료"로 표시, 상세에서 건수 확인 |
-| D10 | 02-23 | 직원 버그리포트 6차 수정 2세션 분할: 세션1=맞춤한줄+회신번호(6건), 세션2=예약+수신거부+캘린더(5건) | 파일 의존성 기준 그룹핑. 맞춤한줄이 가장 크고 긴급 |
-| D11 | 02-23 | PG사 토스페이먼츠 → KCP 전환, 가상계좌 제외 (카드결제만) | 토스페이먼츠 SMS/LMS/MMS 별도충전 요구 (사업모델 불일치). KCP는 통합잔액 가능. 자체서버 배포 시 가상계좌 불가 |
-| D12 | 02-23 | 이용약관 선불충전 3개월 유효+소멸, 환불 3개월 제한 | KCP 심사 요건. 제9조 신설(선불충전), 제12조 전면개정(환불정책) |
-| D13 | 02-23 | 수신거부 SoT를 unsubscribes 테이블로 통일 | customers.sms_opt_in=false 분산 → 업로드/Sync 시 unsubscribes 자동등록. 조회도 company_id 기준 전환. 삭제 시 sms_opt_in 복원 |
-| D14 | 02-24 | 직원 버그리포트 7차 3세션 분할 + 동적 필드 시스템 전환 결정 | 근본 원인: 하드코딩 필드 화이트리스트. 세션1=동적필드(#1,2,5,7,8+고객DB), 세션2=스팸필터동시성(#3,4), 세션3=발송엔진+타겟(#6,9). 스팸필터는 메시지 내용 기반 매칭으로 동시 테스트 지원 (원본 수정 없음) |
-| D15 | 02-25 | LMS 제목 머지 치환 가능 → 구현 | AI발송=고객별 개별INSERT, 직접발송=row별 개별값. 예약수정은 이미 구현됨. 3곳 모두 제목 머지 적용 |
-| D16 | 02-25 | 스팸필터 테스트 과금=일반 단가 동일 적용 | cost_per_sms/lms 단가 그대로 사용. billing_invoices에 spam_filter_unit_price 컬럼 있으나 정산서 생성 시 별도 처리 |
-| D17 | 02-25 | 테스트 통계 응답 구조 확장 (하위호환) | campaigns.ts test-stats: 기존 stats/list 유지 + managerStats/spamFilterStats/spamFilterList 추가 |
-| D18 | 02-25 | 정산 billing.ts 자체 헬퍼 함수 구현 (순환참조 방지) | campaigns.ts에서 import 시 순환참조 발생. 정산 전용 getBillingCompanyTables/getBillingTestTables/getTablesForBillingPeriod 등 자체 구현 |
-| D19 | 02-25 | 요금제 미사용 시 기능 제한: subscription_status 필드 추가 (trial/active/expired/suspended) | plan_id+trial_expires_at 조합보다 확장성 우수. 해지/미결제 정지/관리자 정지 등 다양한 상태 관리 가능 |
-| D20 | 02-25 | AI 분석 요금제별 차별화: 프로=기본(집계값, 1~2회 호출, 기본PDF), 비즈니스=고급(로우데이터, 5~8회 호출, 상세PDF) | 프로=What happened(과거 회고), 비즈니스=Why+What next(예측+액션). API 토큰 소모량으로 원가 차별화 |
-| D21 | 02-25 | isSubscriptionLocked를 로그인 캐시가 아닌 planInfo(my-plan API) 기반 실시간 판별로 전환 | 슈퍼관리자가 구독 승인해도 재로그인 전까지 잠금 안 풀리는 문제. planInfo 로드 시 DB 최신 subscription_status 반영 |
-| D22 | 02-25 | 스팸필터 잠금은 직접발송 영역만 적용. AI 발송 영역은 이미 isSubscriptionLocked로 진입 차단되어 중복 잠금 불필요 | 기능 잠금 시 상위 잠금이 있으면 하위에 중복 적용하지 않는다 |
-| D23 | 02-25 | preview API none일 때 백엔드에서 상세 필드 제거 반환 (프론트 블러만 X) | DevTools 노출 방지. 보안 우선 |
-| D24 | 02-25 | run API 세션1에서 데이터수집까지 완전 구현, Claude 호출/PDF는 세션3 | 프론트 연결(세션2) 시 실제 데이터로 UI 검증 가능. 세션 분리 효율 |
+| D14 | 02-24 | 직원 버그리포트 7차 3세션 분할 + 동적 필드 시스템 전환 결정 | 근본 원인: 하드코딩 필드 화이트리스트 |
+| D15 | 02-25 | ~~LMS 제목 머지 치환 구현~~ → D28로 번복 | 8차에서 다경로 불일치 유발 확인 |
+| D16 | 02-25 | 스팸필터 테스트 과금=일반 단가 동일 적용 | cost_per_sms/lms 단가 그대로 사용 |
+| D17 | 02-25 | 테스트 통계 응답 구조 확장 (하위호환) | 기존 stats/list 유지 + managerStats/spamFilterStats 추가 |
+| D18 | 02-25 | 정산 billing.ts 자체 헬퍼 함수 구현 (순환참조 방지) | campaigns.ts import 시 순환참조 |
+| D19 | 02-25 | 요금제 미사용 시 기능 제한: subscription_status 필드 추가 | plan_id+trial_expires_at보다 확장성 우수 |
+| D20 | 02-25 | AI 분석 요금제별 차별화: 프로=기본, 비즈니스=고급 | API 토큰 소모량으로 원가 차별화 |
+| D21 | 02-25 | isSubscriptionLocked를 planInfo 기반 실시간 판별로 전환 | 재로그인 전까지 잠금 안 풀리는 문제 |
+| D22 | 02-25 | 스팸필터 잠금은 직접발송 영역만 적용 | 상위 잠금 있으면 하위 중복 불필요 |
+| D23 | 02-25 | preview API none일 때 백엔드에서 상세 필드 제거 반환 | DevTools 노출 방지 |
+| D24 | 02-25 | run API 세션1에서 데이터수집까지 완전 구현 | 세션 분리 효율 |
+| D25 | 02-25 | PDF 라이브러리 pdfkit 선택 | billing.ts와 동일 패턴 |
+| D26 | 02-25 | 분석 결과 DB 캐싱 (24시간 유효) | Claude API 비용 절약 |
+| D27 | 02-25 | 비즈니스 멀티턴 5~8회→3회 최적화 | 토큰 효율+응답 속도 |
+| D28 | 02-25 | 제목 머지 완전 제거 — 본문만 개인화, 제목은 고정 텍스트 | 8차: 5개 경로 불일치로 3회 반복 재발. 안정성 우선 |
+| D29 | 02-25 | 8차부터 "5개 경로 전수 점검 매트릭스" 의무화 | 6~8차 재발 근본 원인=1경로만 패치 |
+| D30 | 02-25 | 직접발송 즉시 completed→sending 전환 | #5: MySQL INSERT 직후 completed 설정 → Agent 미처리 상태에서 "완료" 표시. sync-results가 Agent 완료 후 전환 |
 
-**아카이브:** D1-AI발송2분기(02-22) | D-대시보드 모달 분리(02-23): 8,039줄→4,964줄 | D2-브리핑방식(02-22) | D3-개인화필드체크박스(02-22) | D4-textarea제거(02-22) | D5-별도컴포넌트분리(02-22)
+**아카이브:** D1-AI발송2분기(02-22) | D2-브리핑방식(02-22) | D3-개인화필드체크박스(02-22) | D4-textarea제거(02-22) | D5-별도컴포넌트분리(02-22) | D6-대시보드레이아웃(02-22) | D7-헤더탭스타일(02-23) | D8-AUTO/PRO뱃지(02-23) | D9-캘린더상태기준(02-23) | D10-6차세션분할(02-23) | D11-KCP전환(02-23) | D12-이용약관(02-23) | D13-수신거부SoT(02-23) | D-대시보드모달분리(02-23): 8,039줄→4,964줄
 
 ---
 
@@ -606,7 +595,9 @@
 | R8 | recount-target companyId undefined → 타겟 0명 | 3 | 4 | 12 | ✅ 해결: snake_case→camelCase 수정 + WHERE 조건 통일 (7차 세션3) |
 | R9 | 정산 SMSQ_SEND 단일테이블 조회 → 멀티Agent 환경에서 0건 집계 | 3 | 4 | 12 | ✅ 해결: 회사별 라인그룹 멀티테이블 + LOG 테이블 통합 조회 (billing.ts 자체 헬퍼) |
 | R10 | 로그인 캐시 기반 상태 판별 → DB 변경 후 재로그인 전까지 미반영 | 3 | 4 | 12 | ✅ 해결: isSubscriptionLocked를 planInfo(my-plan API) 실시간 판별로 전환 |
-
+| R11 | 발송 5개 경로 수정 불일치 → 동일 버그 반복 재발 | 2 | 4 | 8 | ⚠️ 진행 중: 8차 세션1에서 campaigns.ts 전수 점검 매트릭스 완료. spam-filter.ts는 세션2에서 점검 예정 (D29) |
+| R12 | AI 프롬프트 무시 → 미허용 변수/바이트 초과 생성 | 3 | 3 | 9 | 대응: validatePersonalizationVars() strip + calculateKoreanBytes 이중 방어. AI 미리보기에도 적용 |
+| R13 | AI 문안 선택 인덱스 불일치 → 다른 문안 발송 | 3 | 5 | 15 | ⬜ 미확인: #12 버그. ai.ts variants[] 인덱스 추적 필요. 다음 채팅에서 확인 |
 ---
 
 ## 12) ✅ DONE LOG (완료 기록)
@@ -615,6 +606,8 @@
 
 | 날짜 | 완료 항목 |
 |------|----------|
+| 02-25 | 8차 세션1 부분 완료 (campaigns.ts 4건, #12 잔여): ① D28 제목 머지 완전 제거 — AI발송(personalizedSubject→const, 치환 루프에서 제거), 직접발송(finalSubject replace 체인 삭제→고정값), 예약수정(titleCases 치환 삭제→고정값) 3곳 일괄 적용. ② #7 test-send title_str 누락 — INSERT 컬럼+값 추가(req.body.subject). ③ #4 회신번호 미검증 — AI발송+직접발송 2곳에 sender_numbers 등록 여부 검증 추가(INVALID_SENDER_NUMBER). ④ #5 직접발송 즉시 completed→sending 전환(sync-results가 Agent 완료 후 completed 처리). 매트릭스 campaigns.ts 기준 전체 점검 완료. 수정: campaigns.ts. **#12(다른 문안 저장)은 ai.ts 확인 필요 → 다음 채팅에서 이어서 진행** |
+| 02-25 | AI 분석 세션3+4 완료 (프롬프트+캐싱+PDF+데모데이터): ① analysis_results 캐싱 테이블 DDL(UNIQUE+인덱스), ② 프로용 프롬프트(집계값, 1회 호출, 인사이트 6개), 비즈니스용 멀티턴(3회, 인사이트 11개), ③ Claude 호출 로직(재시도 2회, temperature 0.3), ④ 캐시 UPSERT(24시간 유효, forceRefresh), ⑤ PDF(pdfkit, 인디고 커버+목차+인사이트 카테고리8색+자동페이지넘김+푸터), ⑥ 데모데이터: 유호윤 고객사에 고객30만+캠페인500+구매5만+수신거부3천 INSERT, 요금제 ai_analysis_level='basic'. 수정: analysis.ts(524→1,121줄). 신규DDL: analysis_results |
 | 02-25 | AI 분석 세션2 완료 (프론트엔드 AnalysisModal+연결): ① DashboardHeader.tsx — Sparkles 아이콘+AI 분석 메뉴 추가(발송결과↔수신거부 사이, gold+emphasized), onAnalysis prop, 버튼에 icon 지원(flex+gap), ② Dashboard.tsx — PlanInfo에 ai_analysis_level 추가, showAnalysis state, AnalysisModal import+렌더링(planInfo?.ai_analysis_level 전달), ③ AnalysisModal.tsx 신규 생성(530줄) — 베이직 프리뷰(실제 데이터 4카드+프로 블러+AI 텍스트 그라데이션 페이드아웃+비즈니스 강한 블러+업그레이드 CTA), 프로 분석(기간 선택 30d/90d/custom+분석 실행+4단계 로딩 애니메이션+인사이트 카드 아코디언+비즈니스 카드 블러 업셀+PDF 다운로드), 비즈니스 분석(전체 카드 언락). 모달 디자인: animate-in+fade-up, dark 헤더, 카테고리별 색상 10종. 수정: DashboardHeader.tsx, Dashboard.tsx. 신규: AnalysisModal.tsx |
 | 02-25 | AI 분석 세션1 완료 (DDL+백엔드API): ① plans.ai_analysis_level 컬럼 추가(none/basic/advanced, plan_code 대문자 주의), ② companies.ts my-plan API에 p.ai_analysis_level 반환 추가, ③ analysis.ts 신규 생성 — GET /preview(none:기본4개만 반환+상세필드 제거 보안, basic/advanced:전체11개), POST /run(기간별 데이터수집 — basic:집계7종, advanced:+로우4종 총11종, Claude 호출은 세션3), GET /pdf(요금제체크+501 뼈대, PDF 생성은 세션3), ④ app.ts 라우트 등록(/api/analysis). 수정: companies.ts, app.ts. 신규: analysis.ts |
 | 02-25 | Task A 요금제 기능 제한 구현 완료: ① DDL subscription_status varchar(20) DEFAULT 'trial' + 마이그레이션 SQL, ② auth.ts 로그인 쿼리+응답에 subscriptionStatus 포함, ③ Dashboard.tsx isSubscriptionLocked 헬퍼+10군데 잠금(AI추천발송/직접타겟/DB업로드/최근캠페인/발송예시/고객인사이트/예약대기/고객DB조회)+opacity+🔒아이콘, ④ SubscriptionLockModal.tsx 신규(예쁜 커스텀 모달, Lock+Crown 아이콘, 요금제안내 링크), ⑤ AdminDashboard.tsx 구독상태 드롭다운(trial/active/expired/suspended)+안내문구, ⑥ admin.ts PUT API $31 subscription_status 추가. 수정 5파일+신규 1파일 |
@@ -625,6 +618,7 @@
 | 02-25 | 발송 통계 고도화 + 스팸필터 테스트 통합: ① 채널통합조회 타입컬럼 제거(채널뱃지 중복), ② 테스트 통계 스팸필터 합산(담당자 MySQL+스팸필터 PostgreSQL, 3곳: campaigns.ts/manage-stats.ts/admin.ts), ③ 고객사관리자 발송통계에 비용 표시(요약카드+상세 사용자별), ④ 슈퍼관리자 통계에 testSummary+testDetail 추가, ⑤ ResultsModal 테스트탭 3카드(전체/담당자/스팸필터)+스팸필터 이력 리스트("준비중" 제거), ⑥ 테스트 이력 페이징 10건(ResultsModal+StatsTab 양쪽). 수정 파일: campaigns.ts, manage-stats.ts, admin.ts, ResultsModal.tsx, StatsTab.tsx(company-frontend), StatsTab.tsx(frontend/admin) |
 | 02-25 | 직원 버그리포트 7차 세션3 완료 (2건) + 7차 전체 완료: ① LMS 제목 머지 치환 — AI발송(personalizedSubject+fieldMappings 동시치환+잔여변수 제거), 직접발송(finalSubject+replace 체인). 제목에도 %이름% 등 개인화 변수 정상 치환(#9). ② recount-target 근본 수정 — user.company_id→req.user?.companyId(undefined 해결), WHERE 조건 recommend-target과 통일(is_active+sms_opt_in+NOT EXISTS unsubscribes), storeFilter 추가(#6). 수정 파일: campaigns.ts, ai.ts |
 | 02-25 | 직원 버그리포트 7차 세션2 완료 (2건): 스팸필터 동시성 해결. ① 60초 쿨다운 완전 제거→완료 즉시 재테스트 버튼(#3), ② SHA-256 해시 세션 격리+fallback 제거+user_id 기준 active 체크(#4). DB: spam_filter_tests.message_hash varchar(32) 컬럼+인덱스 2개 추가. 수정 파일: spam-filter.ts, SpamFilterTestModal.tsx |
+| 02-25 | 8차 버그리포트 분석+세션설계: PPT 12슬라이드→12건 분류, 재발 5건 근본원인(5경로 패치 불일치), 제목 머지 완전 제거(D28), 전수 점검 매트릭스 의무화(D29), 3세션 분할(세션1=발송엔진5건, 세션2=스팸+AI4건, 세션3=UI+업로드3건). STATUS.md CURRENT_TASK 전면 교체 |
 | 02-24 | 직원 버그리포트 7차 세션1 완료 (6건): 동적 필드 시스템 전환. ① enabled-fields API 전면 개편(customer_field_definitions+custom_fields JSONB+실제 고객 샘플 반환), ② PERSONALIZATION_FIELDS 화이트리스트 삭제→전체 필드 노출(#5), ③ normalizeGrade() 제거→원본값 저장(#7), ④ SAMPLE_DATA→실제 DB 샘플(#8), ⑤ 수신번호 phone 고정(#2), ⑥ 채널 message_type 기반 표시(#1), ⑦ 고객DB 동적 컬럼+가로 스크롤. 수정 파일: normalize.ts, customers.ts, services/ai.ts, routes/ai.ts, AiCustomSendFlow.tsx, CustomerDBModal.tsx, ResultsModal.tsx, Dashboard.tsx |
 | 02-24 | 요금제 현황 게이지바 적용: "정상 이용 중" 텍스트→고객 수 프로그레스바(9,999/100,000명 10%) 전환. 80%미만 녹색, 80~95% 주황, 95%+ 빨강. max_customers 없는 요금제는 "정상 이용 중" 폴백. PlanInfo 인터페이스 확장(max_customers, current_customers). 수정: Dashboard.tsx |
 | 02-24 | 소스 보호 적용: 우클릭/F12/Ctrl+Shift+I,J,C/Ctrl+U 차단 + 텍스트 드래그 선택 차단 (input/textarea 제외). hanjul.ai, app.hanjul.ai, sys.hanjullo.com 전체 적용. 프론트엔드 난독화(vite-plugin-obfuscator)는 런칭 직전 적용 예정. 수정: packages/frontend/index.html, packages/company-frontend/index.html |

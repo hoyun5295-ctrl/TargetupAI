@@ -7,6 +7,34 @@ import * as XLSX from 'xlsx';
 import { query } from '../config/database';
 import { normalizeGender, normalizeGrade, normalizePhone, normalizeRegion, normalizeSmsOptIn } from '../utils/normalize';
 
+// Excel 시리얼넘버 → YYYY-MM-DD 변환
+function excelSerialToDateStr(serial: number): string | null {
+  if (serial < 1 || serial > 73050) return null;
+  const excelEpoch = new Date(1899, 11, 30);
+  const converted = new Date(excelEpoch.getTime() + serial * 86400000);
+  const yyyy = converted.getFullYear();
+  if (yyyy < 1900 || yyyy > 2099) return null;
+  const mm = String(converted.getMonth() + 1).padStart(2, '0');
+  const dd = String(converted.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+// 범용 날짜 정규화: 시리얼넘버, YYYYMMDD, YYYY-MM-DD 모두 처리
+function normalizeDateValue(value: any): string | null {
+  if (value === undefined || value === null || value === '') return null;
+  const str = String(value).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+  if (/^\d{4}\/\d{2}\/\d{2}$/.test(str)) return str.replace(/\//g, '-');
+  if (/^\d{8}$/.test(str)) {
+    return `${str.substring(0, 4)}-${str.substring(4, 6)}-${str.substring(6, 8)}`;
+  }
+  const num = Number(str);
+  if (!isNaN(num) && num >= 1 && num <= 73050 && Number.isInteger(num)) {
+    return excelSerialToDateStr(num);
+  }
+  return null;
+}
+
 const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
 
 import { authenticate } from '../middlewares/auth';
@@ -378,16 +406,29 @@ async function processUploadInBackground(
 
         // birth_date 파싱 → birth_year, birth_month_day 분리
         if (record.birth_date) {
-          const bd = String(record.birth_date);
-          if (bd.length === 10 && bd.includes('-')) {
-            record.birth_year = parseInt(bd.substring(0, 4));
-            record.birth_month_day = bd.substring(5, 10);
-          } else if (bd.length === 4 && !isNaN(Number(bd))) {
+          const bd = String(record.birth_date).trim();
+          // 4자리 연도만 입력된 경우 (예: 1990)
+          if (/^\d{4}$/.test(bd) && parseInt(bd) >= 1900 && parseInt(bd) <= 2099) {
             record.birth_year = parseInt(bd);
+          } else {
+            const normalized = normalizeDateValue(bd);
+            if (normalized) {
+              record.birth_date = normalized;
+              record.birth_year = parseInt(normalized.substring(0, 4));
+              record.birth_month_day = normalized.substring(5, 10);
+            }
           }
         }
         if (record.birth_year && !record.birth_date) {
           record.birth_year = parseInt(String(record.birth_year));
+        }
+
+        // last_purchase_date 시리얼넘버/형식 정규화
+        if (record.last_purchase_date) {
+          const normalized = normalizeDateValue(record.last_purchase_date);
+          if (normalized) {
+            record.last_purchase_date = normalized;
+          }
         }
 
         // phone 정규화 + 필수 체크
