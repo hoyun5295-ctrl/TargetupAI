@@ -11,6 +11,110 @@ const getTransporter = () => nodemailer.createTransport({
   auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
 });
 
+// ============================================================
+//  정산 전용 헬퍼 (campaigns.ts 순환참조 방지)
+// ============================================================
+
+async function getBillingCompanyTables(companyId: string): Promise<string[]> {
+  const result = await pool.query(`
+    SELECT lg.sms_tables
+    FROM sms_line_groups lg
+    JOIN companies c ON c.line_group_id = lg.id
+    WHERE c.id = $1 AND lg.is_active = true AND lg.group_type = 'bulk'
+  `, [companyId]);
+  if (result.rows.length > 0 && result.rows[0].sms_tables?.length > 0) {
+    return result.rows[0].sms_tables;
+  }
+  const all = (process.env.SMS_TABLES || 'SMSQ_SEND').split(',').map(t => t.trim());
+  return all.filter(t => !['SMSQ_SEND_10', 'SMSQ_SEND_11'].includes(t));
+}
+
+async function getBillingTestTables(): Promise<string[]> {
+  const result = await pool.query(`SELECT sms_tables FROM sms_line_groups WHERE group_type = 'test' AND is_active = true LIMIT 1`);
+  if (result.rows.length > 0 && result.rows[0].sms_tables?.length > 0) {
+    return result.rows[0].sms_tables;
+  }
+  return ['SMSQ_SEND_10'];
+}
+
+async function getBillingLogTables(): Promise<Set<string>> {
+  const rows = await mysqlQuery("SHOW TABLES LIKE 'SMSQ_SEND_%_202___'") as any[];
+  const tables = new Set<string>();
+  for (const row of rows) {
+    tables.add(String(Object.values(row)[0]));
+  }
+  return tables;
+}
+
+async function getTablesForBillingPeriod(baseTables: string[], startDate: string, endDate: string): Promise<string[]> {
+  const existingLogs = await getBillingLogTables();
+  const allTables = [...baseTables];
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+  const cur = new Date(start.getFullYear(), start.getMonth(), 1);
+  while (cur <= end) {
+    const ym = `${cur.getFullYear()}${String(cur.getMonth() + 1).padStart(2, '0')}`;
+    for (const t of baseTables) {
+      const logTable = `${t}_${ym}`;
+      if (existingLogs.has(logTable) && !allTables.includes(logTable)) {
+        allTables.push(logTable);
+      }
+    }
+    cur.setMonth(cur.getMonth() + 1);
+  }
+  return allTables;
+}
+
+async function smsAggByDateType(tables: string[], whereClause: string, params: any[]): Promise<any[]> {
+  const allRows: any[] = [];
+  for (const t of tables) {
+    const rows = await mysqlQuery(
+      `SELECT msg_type, DATE(sendreq_time) as send_date,
+              COUNT(*) as total_count,
+              SUM(CASE WHEN status_code IN (6, 1000, 1800) THEN 1 ELSE 0 END) as success_count,
+              SUM(CASE WHEN status_code NOT IN (6, 100, 1000, 1800) AND status_code >= 200 THEN 1 ELSE 0 END) as fail_count,
+              SUM(CASE WHEN status_code = 100 THEN 1 ELSE 0 END) as pending_count
+       FROM ${t} WHERE ${whereClause}
+       GROUP BY msg_type, DATE(sendreq_time)`,
+      params
+    ) as any[];
+    allRows.push(...rows);
+  }
+  return allRows;
+}
+
+async function smsAggByRunAndType(tables: string[], whereClause: string, params: any[]): Promise<any[]> {
+  const allRows: any[] = [];
+  for (const t of tables) {
+    const rows = await mysqlQuery(
+      `SELECT app_etc1 as run_id, msg_type,
+              COUNT(*) as total_count,
+              SUM(CASE WHEN status_code IN (6, 1000, 1800) THEN 1 ELSE 0 END) as success_count
+       FROM ${t} WHERE ${whereClause}
+       GROUP BY app_etc1, msg_type`,
+      params
+    ) as any[];
+    allRows.push(...rows);
+  }
+  return allRows;
+}
+
+async function smsAggTestByType(tables: string[], whereClause: string, params: any[]): Promise<any[]> {
+  const allRows: any[] = [];
+  for (const t of tables) {
+    const rows = await mysqlQuery(
+      `SELECT msg_type,
+              COUNT(*) as total_count,
+              SUM(CASE WHEN status_code IN (6, 1000, 1800) THEN 1 ELSE 0 END) as success_count
+       FROM ${t} WHERE ${whereClause}
+       GROUP BY msg_type`,
+      params
+    ) as any[];
+    allRows.push(...rows);
+  }
+  return allRows;
+}
+
 const router = Router();
 
 // ============================================================
@@ -103,22 +207,14 @@ router.post('/generate', async (req: Request, res: Response) => {
     interface DayCounts { total: number; success: number; fail: number; pending: number }
     const dayData: Record<string, Record<string, DayCounts>> = {};
 
-    // 5) 일반발송 집계
+    // 5) 일반발송 집계 — 회사 라인그룹 + LOG 테이블 통합
     if (runIds.length > 0) {
+      const companyTables = await getBillingCompanyTables(company_id);
+      const billingTables = await getTablesForBillingPeriod(companyTables, billing_start, billing_end);
       const ph = runIds.map(() => '?').join(',');
-      const rows = await mysqlQuery(
-        `SELECT msg_type, DATE(sendreq_time) as send_date,
-                COUNT(*) as total_count,
-                SUM(CASE WHEN status_code IN (6, 1000, 1800) THEN 1 ELSE 0 END) as success_count,
-                SUM(CASE WHEN status_code NOT IN (6, 100, 1000, 1800) AND status_code >= 200 THEN 1 ELSE 0 END) as fail_count,
-                SUM(CASE WHEN status_code = 100 THEN 1 ELSE 0 END) as pending_count
-         FROM SMSQ_SEND
-         WHERE app_etc1 IN (${ph})
-         GROUP BY msg_type, DATE(sendreq_time)`,
-        runIds
-      );
+      const rows = await smsAggByDateType(billingTables, `app_etc1 IN (${ph})`, runIds);
 
-      (rows as any[]).forEach((row: any) => {
+      rows.forEach((row: any) => {
         const d = row.send_date instanceof Date
           ? row.send_date.toISOString().slice(0, 10)
           : String(row.send_date).slice(0, 10);
@@ -132,22 +228,17 @@ router.post('/generate', async (req: Request, res: Response) => {
       });
     }
 
-    // 6) 테스트발송 집계 (고객사 전체일 때만 — 사용자별은 추적 불가)
+    // 6) 테스트발송 집계 — 테스트 전용 라인 + LOG 테이블 통합
     if (!user_id) {
-      const testRows = await mysqlQuery(
-        `SELECT msg_type, DATE(sendreq_time) as send_date,
-                COUNT(*) as total_count,
-                SUM(CASE WHEN status_code IN (6, 1000, 1800) THEN 1 ELSE 0 END) as success_count,
-                SUM(CASE WHEN status_code NOT IN (6, 100, 1000, 1800) AND status_code >= 200 THEN 1 ELSE 0 END) as fail_count,
-                SUM(CASE WHEN status_code = 100 THEN 1 ELSE 0 END) as pending_count
-         FROM SMSQ_SEND
-         WHERE app_etc1 = 'test' AND app_etc2 = ?
-           AND sendreq_time >= ? AND sendreq_time < DATE_ADD(?, INTERVAL 1 DAY)
-         GROUP BY msg_type, DATE(sendreq_time)`,
-         [company_id, billing_start, billing_end]
+      const testBaseTables = await getBillingTestTables();
+      const testTables = await getTablesForBillingPeriod(testBaseTables, billing_start, billing_end);
+      const testRows = await smsAggByDateType(
+        testTables,
+        `app_etc1 = 'test' AND app_etc2 = ? AND sendreq_time >= ? AND sendreq_time < DATE_ADD(?, INTERVAL 1 DAY)`,
+        [company_id, billing_start, billing_end]
       );
 
-      (testRows as any[]).forEach((row: any) => {
+      testRows.forEach((row: any) => {
         const d = row.send_date instanceof Date
           ? row.send_date.toISOString().slice(0, 10)
           : String(row.send_date).slice(0, 10);
@@ -158,6 +249,34 @@ router.post('/generate', async (req: Request, res: Response) => {
         dayData[d][t].success += Number(row.success_count);
         dayData[d][t].fail += Number(row.fail_count);
         dayData[d][t].pending += Number(row.pending_count);
+      });
+    }
+
+    // 6-A) 스팸필터 테스트 집계 (PostgreSQL)
+    if (!user_id) {
+      const spamResult = await pool.query(`
+        SELECT
+          r.message_type,
+          DATE(t.created_at AT TIME ZONE 'Asia/Seoul') as send_date,
+          COUNT(*) as total_count,
+          SUM(CASE WHEN r.result IS NOT NULL THEN 1 ELSE 0 END) as success_count
+        FROM spam_filter_test_results r
+        JOIN spam_filter_tests t ON r.test_id = t.id
+        WHERE t.company_id = $1
+          AND t.created_at >= ($2::date) AT TIME ZONE 'Asia/Seoul'
+          AND t.created_at < (($3::date) + INTERVAL '1 day') AT TIME ZONE 'Asia/Seoul'
+        GROUP BY r.message_type, DATE(t.created_at AT TIME ZONE 'Asia/Seoul')
+      `, [company_id, billing_start, billing_end]);
+
+      spamResult.rows.forEach((row: any) => {
+        const d = row.send_date instanceof Date
+          ? row.send_date.toISOString().slice(0, 10)
+          : String(row.send_date).slice(0, 10);
+        const t = row.message_type === 'LMS' ? 'SPAM_LMS' : 'SPAM_SMS';
+        if (!dayData[d]) dayData[d] = {};
+        if (!dayData[d][t]) dayData[d][t] = { total: 0, success: 0, fail: 0, pending: 0 };
+        dayData[d][t].total += Number(row.total_count);
+        dayData[d][t].success += Number(row.success_count);
       });
     }
 
@@ -245,7 +364,9 @@ router.post('/generate', async (req: Request, res: Response) => {
     }
 
     // 7) 합산
-    let totalSms = 0, totalLms = 0, totalMms = 0, totalKakao = 0, totalTestSms = 0, totalTestLms = 0;
+    let totalSms = 0, totalLms = 0, totalMms = 0, totalKakao = 0;
+    let totalTestSms = 0, totalTestLms = 0;
+    let totalSpamSms = 0, totalSpamLms = 0;
     Object.values(dayData).forEach(types => {
       if (types.SMS) totalSms += types.SMS.success;
       if (types.LMS) totalLms += types.LMS.success;
@@ -253,12 +374,19 @@ router.post('/generate', async (req: Request, res: Response) => {
       if (types.KAKAO) totalKakao += types.KAKAO.success;
       if (types.TEST_SMS) totalTestSms += types.TEST_SMS.success;
       if (types.TEST_LMS) totalTestLms += types.TEST_LMS.success;
+      if (types.SPAM_SMS) totalSpamSms += types.SPAM_SMS.success;
+      if (types.SPAM_LMS) totalSpamLms += types.SPAM_LMS.success;
     });
+
+    // 스팸필터 단가 = 일반 단가와 동일 (D16 결정)
+    const spamSmsCost = prices.SMS;
+    const spamLmsCost = prices.LMS;
 
     const subtotal =
       (totalSms * prices.SMS) + (totalLms * prices.LMS) +
       (totalMms * prices.MMS) + (totalKakao * prices.KAKAO) +
-      (totalTestSms * prices.TEST_SMS) + (totalTestLms * prices.TEST_LMS);
+      (totalTestSms * prices.TEST_SMS) + (totalTestLms * prices.TEST_LMS) +
+      (totalSpamSms * spamSmsCost) + (totalSpamLms * spamLmsCost);
     const vat = Math.round(subtotal * 0.1);
     const totalAmount = subtotal + vat;
 
@@ -269,14 +397,16 @@ router.post('/generate', async (req: Request, res: Response) => {
         sms_success, lms_success, mms_success, kakao_success,
         sms_unit_price, lms_unit_price, mms_unit_price, kakao_unit_price,
         test_sms_count, test_lms_count, test_sms_unit_price, test_lms_unit_price,
+        spam_filter_sms_count, spam_filter_lms_count, spam_filter_sms_unit_price, spam_filter_lms_unit_price,
         subtotal, vat, total_amount, created_by
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)
       RETURNING *`,
       [
         company_id, user_id || null, billing_year, billing_month, billing_start, billing_end,
         totalSms, totalLms, totalMms, totalKakao,
         prices.SMS, prices.LMS, prices.MMS, prices.KAKAO,
         totalTestSms, totalTestLms, prices.TEST_SMS, prices.TEST_LMS,
+        totalSpamSms, totalSpamLms, spamSmsCost, spamLmsCost,
         subtotal, vat, totalAmount, adminId
       ]
     );
@@ -284,9 +414,10 @@ router.post('/generate', async (req: Request, res: Response) => {
 
     // 9) billing_items INSERT (일자별 상세)
     const itemValues: any[][] = [];
+    const allPrices: Record<string, number> = { ...prices, SPAM_SMS: spamSmsCost, SPAM_LMS: spamLmsCost };
     Object.entries(dayData).forEach(([dateStr, types]) => {
       Object.entries(types).forEach(([msgType, counts]) => {
-        const up = prices[msgType] || 0;
+        const up = allPrices[msgType] || 0;
         itemValues.push([
           billing.id, company_id, user_id || null, null,
           dateStr, msgType,
@@ -316,7 +447,7 @@ router.post('/generate', async (req: Request, res: Response) => {
     return res.json({
       billing,
       items_count: itemValues.length,
-      summary: { totalSms, totalLms, totalMms, totalKakao, totalTestSms, totalTestLms, subtotal, vat, totalAmount }
+      summary: { totalSms, totalLms, totalMms, totalKakao, totalTestSms, totalTestLms, totalSpamSms, totalSpamLms, subtotal, vat, totalAmount }
     });
   } catch (error: any) {
     console.error('정산 생성 오류:', error);
@@ -578,6 +709,8 @@ router.get('/:id/pdf', async (req: Request, res: Response) => {
     drawRow('카카오', n(bil.kakao_success), n(bil.kakao_unit_price), n(bil.kakao_success) * n(bil.kakao_unit_price));
     drawRow('테스트 SMS', n(bil.test_sms_count), n(bil.test_sms_unit_price), n(bil.test_sms_count) * n(bil.test_sms_unit_price), '#fefce8');
     drawRow('테스트 LMS', n(bil.test_lms_count), n(bil.test_lms_unit_price), n(bil.test_lms_count) * n(bil.test_lms_unit_price), '#fefce8');
+    drawRow('스팸필터 SMS', n(bil.spam_filter_sms_count), n(bil.spam_filter_sms_unit_price), n(bil.spam_filter_sms_count) * n(bil.spam_filter_sms_unit_price), '#fef3c7');
+    drawRow('스팸필터 LMS', n(bil.spam_filter_lms_count), n(bil.spam_filter_lms_unit_price), n(bil.spam_filter_lms_count) * n(bil.spam_filter_lms_unit_price), '#fef3c7');
 
     // 합계
     y += 15;
@@ -656,7 +789,8 @@ router.get('/:id/pdf', async (req: Request, res: Response) => {
 
       const typeLabel: Record<string, string> = {
         SMS: 'SMS', LMS: 'LMS', MMS: 'MMS', KAKAO: '카카오',
-        TEST_SMS: '테스트SMS', TEST_LMS: '테스트LMS'
+        TEST_SMS: '테스트SMS', TEST_LMS: '테스트LMS',
+        SPAM_SMS: '스팸SMS', SPAM_LMS: '스팸LMS'
       };
 
       let detailSubtotal = 0;
@@ -674,7 +808,9 @@ router.get('/:id/pdf', async (req: Request, res: Response) => {
         }
 
         const isTest = item.message_type.startsWith('TEST');
-        if (isTest) doc.rect(50, iy, 495, rowH).fill('#fefce8');
+        const isSpam = item.message_type.startsWith('SPAM');
+        if (isSpam) doc.rect(50, iy, 495, rowH).fill('#fef3c7');
+        else if (isTest) doc.rect(50, iy, 495, rowH).fill('#fefce8');
         else if (idx % 2 === 0) doc.rect(50, iy, 495, rowH).fill('#fafafa');
 
         setFont(false);
@@ -771,34 +907,48 @@ router.get('/preview', async (req: Request, res: Response) => {
       };
     });
 
-    // 3) MySQL에서 일반발송 성공 집계
+    // 3) MySQL에서 일반발송 성공 집계 — 멀티테이블
     let normalCounts: any[] = [];
     if (runIds.length > 0) {
+      const companyTables = await getBillingCompanyTables(company_id as string);
+      const billingTables = await getTablesForBillingPeriod(companyTables, start as string, end as string);
       const placeholders = runIds.map(() => '?').join(',');
-      const rows = await mysqlQuery(
-        `SELECT app_etc1 as run_id, msg_type,
-                COUNT(*) as total_count,
-                SUM(CASE WHEN status_code IN (6, 1000, 1800) THEN 1 ELSE 0 END) as success_count
-         FROM SMSQ_SEND
-         WHERE app_etc1 IN (${placeholders})
-           AND sendreq_time >= ? AND sendreq_time < DATE_ADD(?, INTERVAL 1 DAY)
-         GROUP BY app_etc1, msg_type`,
+      normalCounts = await smsAggByRunAndType(
+        billingTables,
+        `app_etc1 IN (${placeholders}) AND sendreq_time >= ? AND sendreq_time < DATE_ADD(?, INTERVAL 1 DAY)`,
         [...runIds, start, end]
       );
-      normalCounts = rows as any[];
     }
 
-    // 4) MySQL에서 테스트발송 집계
-    const testRows = await mysqlQuery(
-      `SELECT msg_type,
-              COUNT(*) as total_count,
-              SUM(CASE WHEN status_code IN (6, 1000, 1800) THEN 1 ELSE 0 END) as success_count
-       FROM SMSQ_SEND
-       WHERE app_etc1 = 'test' AND app_etc2 = ?
-         AND sendreq_time >= ? AND sendreq_time < DATE_ADD(?, INTERVAL 1 DAY)
-       GROUP BY msg_type`,
+    // 4) MySQL에서 테스트발송 집계 — 멀티테이블
+    const testBaseTables = await getBillingTestTables();
+    const testTables = await getTablesForBillingPeriod(testBaseTables, start as string, end as string);
+    const testRows = await smsAggTestByType(
+      testTables,
+      `app_etc1 = 'test' AND app_etc2 = ? AND sendreq_time >= ? AND sendreq_time < DATE_ADD(?, INTERVAL 1 DAY)`,
       [company_id, start, end]
     );
+
+    // 4-A) 스팸필터 테스트 집계 (PostgreSQL)
+    const spamResult = await pool.query(`
+      SELECT
+        r.message_type,
+        COUNT(*) as total_count,
+        SUM(CASE WHEN r.result IS NOT NULL THEN 1 ELSE 0 END) as success_count
+      FROM spam_filter_test_results r
+      JOIN spam_filter_tests t ON r.test_id = t.id
+      WHERE t.company_id = $1
+        AND t.created_at >= ($2::date) AT TIME ZONE 'Asia/Seoul'
+        AND t.created_at < (($3::date) + INTERVAL '1 day') AT TIME ZONE 'Asia/Seoul'
+      GROUP BY r.message_type
+    `, [company_id, start, end]);
+
+    let spam_sms = 0, spam_lms = 0;
+    spamResult.rows.forEach((row: any) => {
+      const cnt = Number(row.success_count) || 0;
+      if (row.message_type === 'LMS') spam_lms += cnt;
+      else spam_sms += cnt;
+    });
 
     // 4-B) 카카오 브랜드메시지 집계
     let kakaoSuccessTotal = 0;
@@ -844,6 +994,8 @@ router.get('/preview', async (req: Request, res: Response) => {
     }
 
     // 5) 집계 계산
+    const spamSummary = buildSpamSummary(spam_sms, spam_lms, company);
+
     if (type === 'brand') {
       const brandMap: Record<string, any> = {};
       normalCounts.forEach((row: any) => {
@@ -869,7 +1021,7 @@ router.get('/preview', async (req: Request, res: Response) => {
         kakao_amount: b.kakao_success * (Number(company.cost_per_kakao) || 0),
       }));
 
-      return res.json({ type: 'brand', brands, test: buildTestSummary(testRows, company) });
+      return res.json({ type: 'brand', brands, test: buildTestSummary(testRows, company), spam: spamSummary });
     } else {
       let sms_success = 0, lms_success = 0, mms_success = 0, kakao_success = kakaoSuccessTotal;
       normalCounts.forEach((row: any) => {
@@ -885,7 +1037,7 @@ router.get('/preview', async (req: Request, res: Response) => {
         kakao_amount: kakao_success * (Number(company.cost_per_kakao) || 0),
       };
 
-      return res.json({ type: 'combined', summary, test: buildTestSummary(testRows, company) });
+      return res.json({ type: 'combined', summary, test: buildTestSummary(testRows, company), spam: spamSummary });
     }
   } catch (error: any) {
     console.error('정산 미리보기 오류:', error);
@@ -903,6 +1055,16 @@ function buildTestSummary(testRows: any, company: any) {
     test_sms, test_lms,
     test_sms_amount: test_sms * (Number(company.cost_per_test_sms) || Number(company.cost_per_sms) || 0),
     test_lms_amount: test_lms * (Number(company.cost_per_test_lms) || Number(company.cost_per_lms) || 0),
+  };
+}
+
+function buildSpamSummary(spam_sms: number, spam_lms: number, company: any) {
+  const smsPrice = Number(company.cost_per_sms) || 0;
+  const lmsPrice = Number(company.cost_per_lms) || 0;
+  return {
+    spam_sms, spam_lms,
+    spam_sms_amount: spam_sms * smsPrice,
+    spam_lms_amount: spam_lms * lmsPrice,
   };
 }
 
@@ -1163,7 +1325,7 @@ router.get('/invoices/:id/pdf', async (req: Request, res: Response) => {
     drawInvRow('카카오', n(inv.kakao_success_count), n(inv.kakao_unit_price), n(inv.kakao_success_count) * n(inv.kakao_unit_price));
     drawInvRow('테스트 SMS', n(inv.test_sms_count), n(inv.test_sms_unit_price), n(inv.test_sms_count) * n(inv.test_sms_unit_price), '#fefce8');
     drawInvRow('테스트 LMS', n(inv.test_lms_count), n(inv.test_lms_unit_price), n(inv.test_lms_count) * n(inv.test_lms_unit_price), '#fefce8');
-    drawInvRow('스팸필터', n(inv.spam_filter_count), n(inv.spam_filter_unit_price), n(inv.spam_filter_count) * n(inv.spam_filter_unit_price), '#fefce8');
+    drawInvRow('스팸필터', n(inv.spam_filter_count), n(inv.spam_filter_unit_price), n(inv.spam_filter_count) * n(inv.spam_filter_unit_price), '#fef3c7');
 
     // 합계
     iy += 15;
@@ -1295,6 +1457,11 @@ router.post('/:id/send-email', async (req: Request, res: Response) => {
               <td style="padding: 8px 0; text-align: right;">${n(bil.test_lms_count).toLocaleString()}건 × ₩${n(bil.test_lms_unit_price).toLocaleString()}</td>
               <td style="padding: 8px 0; text-align: right; font-weight: 600;">₩${(n(bil.test_lms_count) * n(bil.test_lms_unit_price)).toLocaleString()}</td>
             </tr>` : ''}
+            ${(n(bil.spam_filter_sms_count) + n(bil.spam_filter_lms_count)) > 0 ? `<tr style="border-bottom: 1px solid #F3F4F6; background: #FEF3C7;">
+              <td style="padding: 8px 0; color: #6B7280;">스팸필터</td>
+              <td style="padding: 8px 0; text-align: right;">SMS ${n(bil.spam_filter_sms_count).toLocaleString()}건 + LMS ${n(bil.spam_filter_lms_count).toLocaleString()}건</td>
+              <td style="padding: 8px 0; text-align: right; font-weight: 600;">₩${(n(bil.spam_filter_sms_count) * n(bil.spam_filter_sms_unit_price) + n(bil.spam_filter_lms_count) * n(bil.spam_filter_lms_unit_price)).toLocaleString()}</td>
+            </tr>` : ''}
           </table>
           <div style="background: #EEF2FF; padding: 16px; border-radius: 8px; text-align: right;">
             <span style="font-size: 13px; color: #6B7280;">공급가액 ₩${n(bil.subtotal).toLocaleString()} + VAT ₩${n(bil.vat).toLocaleString()}</span><br/>
@@ -1402,7 +1569,7 @@ router.post('/invoices/:id/send-email', async (req: Request, res: Response) => {
               <td style="padding: 8px 0; text-align: right;">${n(inv.mms_success_count).toLocaleString()}건</td>
               <td style="padding: 8px 0; text-align: right; font-weight: 600;">₩${(n(inv.mms_success_count) * n(inv.mms_unit_price)).toLocaleString()}</td>
             </tr>` : ''}
-            ${n(inv.spam_filter_count) > 0 ? `<tr style="border-bottom: 1px solid #F3F4F6; background: #FFFBEB;">
+            ${n(inv.spam_filter_count) > 0 ? `<tr style="border-bottom: 1px solid #F3F4F6; background: #FEF3C7;">
               <td style="padding: 8px 0; color: #6B7280;">스팸필터</td>
               <td style="padding: 8px 0; text-align: right;">${n(inv.spam_filter_count).toLocaleString()}건</td>
               <td style="padding: 8px 0; text-align: right; font-weight: 600;">₩${(n(inv.spam_filter_count) * n(inv.spam_filter_unit_price)).toLocaleString()}</td>

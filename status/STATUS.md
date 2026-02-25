@@ -98,6 +98,25 @@
 
 ---
 
+### ✅ 이전 완료: 발송 통계 고도화 + 스팸필터 테스트 통합 (1세션)
+
+> 수정 파일 6개:
+> - `packages/backend/src/routes/campaigns.ts` — test-stats 스팸필터 합산
+> - `packages/backend/src/routes/manage-stats.ts` — 고객사관리자/슈퍼관리자 통계 스팸필터 합산 + 비용
+> - `packages/backend/src/routes/admin.ts` — 슈퍼관리자 통계 testSummary + testDetail
+> - `packages/frontend/src/components/ResultsModal.tsx` — 타입 컬럼 제거 + 스팸필터 이력
+> - `packages/company-frontend/src/components/StatsTab.tsx` — 비용 + 스팸필터 + 페이징
+> - `packages/frontend/src/components/admin/StatsTab.tsx` — 비용 + 스팸필터 + 페이징
+
+- ✅ 채널통합조회 "타입" 컬럼 제거 (채널 뱃지와 중복)
+- ✅ 테스트 통계에 스팸필터 테스트 합산 (담당자 MySQL + 스팸필터 PostgreSQL)
+- ✅ 고객사 관리자 발송통계 비용 표시 (요약카드 + 상세 사용자별)
+- ✅ 슈퍼관리자 통계에 테스트+스팸필터 건 표시 (요약 + 상세)
+- ✅ 일반 사용자 발송결과 테스트 탭: 전체/담당자/스팸필터 3카드 + 스팸필터 이력 리스트
+- ✅ 테스트 발송 이력 페이징 10건 (ResultsModal + StatsTab 양쪽)
+
+---
+
 ### ✅ 이전 완료: 직원 버그리포트 7차 수정 (전체 9건, 3세션 완료)
 
 #### 세션 1: 동적 필드 시스템 전환 (버그 #1, #2, #5, #7, #8) ✅
@@ -269,6 +288,25 @@
 **Dashboard에 남은 것:** 핵심 state/handler + 상단 레이아웃 + 탭 영역 + 직접타겟설정 모달(578줄) + 직접타겟발송 모달(1,888줄)
 **추후 분리 대상:** 직접 타겟 발송 모달 (state 결합도 최고, 전용 세션 필요)
 
+### 5-7. 통계/발송결과 관련 컴포넌트 매핑
+
+| 도메인 | 컴포넌트 | 경로 | 용도 |
+|--------|----------|------|------|
+| hanjul.ai | ResultsModal.tsx | `packages/frontend/src/components/` | 발송 결과 (요약+채널통합조회+테스트발송+AI분석) |
+| app.hanjul.ai | StatsTab.tsx | `packages/company-frontend/src/components/` | 고객사 관리자 발송통계 (일별/월별+상세 모달) |
+| app.hanjul.ai | CompanyDashboard.tsx | `packages/company-frontend/src/pages/` | 고객사 관리자 메인 (탭: 사용자/발신번호/예약/통계/고객DB) |
+| sys.hanjullo.com | StatsTab.tsx | `packages/frontend/src/components/admin/` | 슈퍼관리자 발송통계 (고객사 관리자와 동일 구조, import 경로만 다름) |
+
+**백엔드 통계 API 매핑:**
+| API | 라우트 파일 | 호출처 |
+|-----|-----------|--------|
+| GET /api/manage/stats/send | manage-stats.ts | 고객사관리자 StatsTab + 슈퍼관리자 StatsTab |
+| GET /api/manage/stats/send/detail | manage-stats.ts | 위 컴포넌트 상세 모달 |
+| GET /api/admin/stats/send | admin.ts | 슈퍼관리자 전용 (회사별 그룹핑) |
+| GET /api/admin/stats/send/detail | admin.ts | 슈퍼관리자 상세 |
+| GET /api/campaigns/test-stats | campaigns.ts | ResultsModal 테스트 탭 |
+| GET /api/v1/results/campaigns | results.ts | ResultsModal 채널통합조회 |
+
 ---
 
 ## 6) API 라우트
@@ -438,6 +476,8 @@
 | D13 | 02-23 | 수신거부 SoT를 unsubscribes 테이블로 통일 | customers.sms_opt_in=false 분산 → 업로드/Sync 시 unsubscribes 자동등록. 조회도 company_id 기준 전환. 삭제 시 sms_opt_in 복원 |
 | D14 | 02-24 | 직원 버그리포트 7차 3세션 분할 + 동적 필드 시스템 전환 결정 | 근본 원인: 하드코딩 필드 화이트리스트. 세션1=동적필드(#1,2,5,7,8+고객DB), 세션2=스팸필터동시성(#3,4), 세션3=발송엔진+타겟(#6,9). 스팸필터는 메시지 내용 기반 매칭으로 동시 테스트 지원 (원본 수정 없음) |
 | D15 | 02-25 | LMS 제목 머지 치환 가능 → 구현 | AI발송=고객별 개별INSERT, 직접발송=row별 개별값. 예약수정은 이미 구현됨. 3곳 모두 제목 머지 적용 |
+| D16 | 02-25 | 스팸필터 테스트 과금=일반 단가 동일 적용 | cost_per_sms/lms 단가 그대로 사용. billing_invoices에 spam_filter_unit_price 컬럼 있으나 정산서 생성 시 별도 처리 |
+| D17 | 02-25 | 테스트 통계 응답 구조 확장 (하위호환) | campaigns.ts test-stats: 기존 stats/list 유지 + managerStats/spamFilterStats/spamFilterList 추가 |
 
 **아카이브:** D1-AI발송2분기(02-22) | D-대시보드 모달 분리(02-23): 8,039줄→4,964줄 | D2-브리핑방식(02-22) | D3-개인화필드체크박스(02-22) | D4-textarea제거(02-22) | D5-별도컴포넌트분리(02-22)
 
@@ -469,6 +509,7 @@
 
 | 날짜 | 완료 항목 |
 |------|----------|
+| 02-25 | 발송 통계 고도화 + 스팸필터 테스트 통합: ① 채널통합조회 타입컬럼 제거(채널뱃지 중복), ② 테스트 통계 스팸필터 합산(담당자 MySQL+스팸필터 PostgreSQL, 3곳: campaigns.ts/manage-stats.ts/admin.ts), ③ 고객사관리자 발송통계에 비용 표시(요약카드+상세 사용자별), ④ 슈퍼관리자 통계에 testSummary+testDetail 추가, ⑤ ResultsModal 테스트탭 3카드(전체/담당자/스팸필터)+스팸필터 이력 리스트("준비중" 제거), ⑥ 테스트 이력 페이징 10건(ResultsModal+StatsTab 양쪽). 수정 파일: campaigns.ts, manage-stats.ts, admin.ts, ResultsModal.tsx, StatsTab.tsx(company-frontend), StatsTab.tsx(frontend/admin) |
 | 02-25 | 직원 버그리포트 7차 세션3 완료 (2건) + 7차 전체 완료: ① LMS 제목 머지 치환 — AI발송(personalizedSubject+fieldMappings 동시치환+잔여변수 제거), 직접발송(finalSubject+replace 체인). 제목에도 %이름% 등 개인화 변수 정상 치환(#9). ② recount-target 근본 수정 — user.company_id→req.user?.companyId(undefined 해결), WHERE 조건 recommend-target과 통일(is_active+sms_opt_in+NOT EXISTS unsubscribes), storeFilter 추가(#6). 수정 파일: campaigns.ts, ai.ts |
 | 02-25 | 직원 버그리포트 7차 세션2 완료 (2건): 스팸필터 동시성 해결. ① 60초 쿨다운 완전 제거→완료 즉시 재테스트 버튼(#3), ② SHA-256 해시 세션 격리+fallback 제거+user_id 기준 active 체크(#4). DB: spam_filter_tests.message_hash varchar(32) 컬럼+인덱스 2개 추가. 수정 파일: spam-filter.ts, SpamFilterTestModal.tsx |
 | 02-24 | 직원 버그리포트 7차 세션1 완료 (6건): 동적 필드 시스템 전환. ① enabled-fields API 전면 개편(customer_field_definitions+custom_fields JSONB+실제 고객 샘플 반환), ② PERSONALIZATION_FIELDS 화이트리스트 삭제→전체 필드 노출(#5), ③ normalizeGrade() 제거→원본값 저장(#7), ④ SAMPLE_DATA→실제 DB 샘플(#8), ⑤ 수신번호 phone 고정(#2), ⑥ 채널 message_type 기반 표시(#1), ⑦ 고객DB 동적 컬럼+가로 스크롤. 수정 파일: normalize.ts, customers.ts, services/ai.ts, routes/ai.ts, AiCustomSendFlow.tsx, CustomerDBModal.tsx, ResultsModal.tsx, Dashboard.tsx |
