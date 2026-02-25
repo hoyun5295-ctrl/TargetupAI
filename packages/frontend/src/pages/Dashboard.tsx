@@ -19,7 +19,6 @@ import DashboardHeader from '../components/DashboardHeader';
 import DirectPreviewModal from '../components/DirectPreviewModal';
 import LineGroupErrorModal from '../components/LineGroupErrorModal';
 import MmsUploadModal from '../components/MmsUploadModal';
-import PlanApprovalModal from '../components/PlanApprovalModal';
 import PlanLimitModal from '../components/PlanLimitModal';
 import PlanUpgradeModal from '../components/PlanUpgradeModal';
 import RecentCampaignModal from '../components/RecentCampaignModal';
@@ -28,8 +27,9 @@ import ResultsModal from '../components/ResultsModal';
 import ScheduledCampaignModal from '../components/ScheduledCampaignModal';
 import ScheduleTimeModal from '../components/ScheduleTimeModal';
 import SendConfirmModal from '../components/SendConfirmModal';
-import SpamFilterLockModal from '../components/SpamFilterLockModal';
 import SpamFilterTestModal from '../components/SpamFilterTestModal';
+import SpamFilterLockModal from '../components/SpamFilterLockModal';
+import PlanApprovalModal from '../components/PlanApprovalModal';
 import SubscriptionLockModal from '../components/SubscriptionLockModal';
 import TodayStatsModal from '../components/TodayStatsModal';
 import UploadProgressModal from '../components/UploadProgressModal';
@@ -70,6 +70,7 @@ interface PlanInfo {
   plan_name: string;
   plan_code: string;
   monthly_price: number;
+  subscription_status: string;
   max_customers: number;
   current_customers: number;
   trial_expires_at: string;
@@ -87,7 +88,6 @@ export default function Dashboard() {
 
   // 요금제 잠금 체크
   const subscriptionStatus = (user as any)?.company?.subscriptionStatus || 'trial';
-  const isSubscriptionLocked = subscriptionStatus === 'expired' || subscriptionStatus === 'suspended';
   const [showSubscriptionLock, setShowSubscriptionLock] = useState(false);
   const [showSpamFilterLock, setShowSpamFilterLock] = useState(false);
   const [showPlanApproval, setShowPlanApproval] = useState(false);
@@ -95,6 +95,9 @@ export default function Dashboard() {
 
   const [stats, setStats] = useState<Stats | null>(null);
   const [planInfo, setPlanInfo] = useState<PlanInfo | null>(null);
+  const isSubscriptionLocked = planInfo
+    ? (planInfo.subscription_status === 'expired' || planInfo.subscription_status === 'suspended')
+    : (subscriptionStatus === 'expired' || subscriptionStatus === 'suspended');
   const isSpamFilterLocked = !planInfo || (Number(planInfo.monthly_price) || 0) < 150000;
   const [balanceInfo, setBalanceInfo] = useState<{billingType: string, balance: number, costPerSms: number, costPerLms: number, costPerMms: number, costPerKakao: number} | null>(null);
   const [showBalanceModal, setShowBalanceModal] = useState(false);
@@ -773,15 +776,6 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
       if (planRes.ok) {
         const planData = await planRes.json();
         setPlanInfo(planData);
-        // DB 실시간 구독 상태 반영 (로그인 후 승인된 경우 대응)
-        if (planData.subscription_status) {
-          const stored = JSON.parse(localStorage.getItem('user') || '{}');
-          if (stored?.company?.subscriptionStatus !== planData.subscription_status) {
-            stored.company = { ...stored.company, subscriptionStatus: planData.subscription_status };
-            localStorage.setItem('user', JSON.stringify(stored));
-            window.location.reload();
-          }
-        }
       }
 
       // 잔액 정보 조회
