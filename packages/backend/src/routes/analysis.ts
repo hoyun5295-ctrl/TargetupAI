@@ -2,11 +2,13 @@ import { Request, Response, Router } from 'express';
 import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
 import Anthropic from '@anthropic-ai/sdk';
+import OpenAI from 'openai';
 import * as fs from 'fs';
 import * as path from 'path';
 
 const router = Router();
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY || '' });
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY || '' });
 
 // 모든 라우트에 인증 필요
 router.use(authenticate);
@@ -288,6 +290,7 @@ function parseClaudeResponse(text: string): AnalysisInsight[] {
 // 헬퍼: Claude API 호출 (재시도 포함)
 // ============================================================
 async function callClaude(userMessage: string, maxRetries = 2): Promise<AnalysisInsight[]> {
+  // 1차: Claude 재시도
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       const response = await anthropic.messages.create({
@@ -299,14 +302,39 @@ async function callClaude(userMessage: string, maxRetries = 2): Promise<Analysis
       });
 
       const text = response.content[0].type === 'text' ? response.content[0].text : '';
+      console.log(`[AI 분석] Claude 호출 성공 (시도 ${attempt + 1})`);
       return parseClaudeResponse(text);
     } catch (error: any) {
-      console.error(`Claude 호출 실패 (시도 ${attempt + 1}/${maxRetries + 1}):`, error.message);
-      if (attempt === maxRetries) throw error;
-      await new Promise(resolve => setTimeout(resolve, 2000)); // 2초 대기 후 재시도
+      console.error(`[AI 분석] Claude 실패 (시도 ${attempt + 1}/${maxRetries + 1}):`, error.message);
+      if (attempt < maxRetries) {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
     }
   }
-  return [];
+
+  // 2차: GPT-4o fallback
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error('Claude 실패 + OPENAI_API_KEY 미설정');
+  }
+
+  console.warn('[AI 분석] Claude 전부 실패 → GPT-4o fallback');
+  try {
+    const gptResponse = await openai.chat.completions.create({
+      model: 'gpt-4o',
+      max_tokens: 4096,
+      temperature: 0.3,
+      messages: [
+        { role: 'system', content: ANALYSIS_SYSTEM_PROMPT },
+        { role: 'user', content: userMessage },
+      ],
+    });
+    const text = gptResponse.choices[0]?.message?.content || '';
+    console.log('[AI 분석] GPT-4o fallback 성공');
+    return parseClaudeResponse(text);
+  } catch (gptError: any) {
+    console.error(`[AI 분석] GPT-4o도 실패:`, gptError.message);
+    throw new Error('AI 서비스 일시 장애 (Claude + GPT 모두 실패)');
+  }
 }
 
 // ============================================================

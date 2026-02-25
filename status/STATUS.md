@@ -1,6 +1,6 @@
 # 한줄로 (Target-UP) — 프로젝트 운영 문서
 
-> **관련 문서:** DB 스키마 → `SCHEMA.md` | 운영/인프라 → `OPS.md` | 버그 추적 → `BUGS.md`
+> 관련 문서: DB 스키마 → SCHEMA.md | 운영/인프라 → OPS.md | 버그 추적 → BUGS.md | 확장 로드맵 → SCALING.md
 > **SoT(진실의 원천):** 이 문서 + CURRENT_TASK. 대화 중 가정은 여기에 반영되기 전까지 "임시"다.
 
 ---
@@ -466,6 +466,7 @@
 
 | 날짜 | 완료 항목 |
 |------|----------|
+| 02-25 | 대시보드 반응속도 개선: ① Nginx gzip 압축 활성화(992KB→229KB, 77% 절감), ② customers/stats API Redis 60초 캐싱 적용(첫 호출 1.2초→이후 즉시), ③ customers 복합 인덱스 추가(idx_customers_company_active). LEFT JOIN 전환은 39초 악화로 즉시 롤백→NOT EXISTS 원복+캐싱 유지. 수정: customers.ts, nginx.conf |
 | 02-25 | **8차 버그리포트 13건 전체 수정완료 + 1단계 코드 검증 통과 (3세션+추가세션+2차전수점검).** Blocker 2건 + Critical 3건 + Major 5건 + Minor 2건. 수정파일 10개. CampaignSuccessModal 완료 + B8-12 인덱스 초기화 보완. 2단계 실동작 검증 대기. **상세 → BUGS.md** |
 | 02-25 | AI 분석 세션3+4 완료 (프롬프트+캐싱+PDF+데모데이터): ① analysis_results 캐싱 테이블 DDL(UNIQUE+인덱스), ② 프로용 프롬프트(집계값, 1회 호출, 인사이트 6개), 비즈니스용 멀티턴(3회, 인사이트 11개), ③ Claude 호출 로직(재시도 2회, temperature 0.3), ④ 캐시 UPSERT(24시간 유효, forceRefresh), ⑤ PDF(pdfkit, 인디고 커버+목차+인사이트 카테고리8색+자동페이지넘김+푸터), ⑥ 데모데이터: 유호윤 고객사에 고객30만+캠페인500+구매5만+수신거부3천 INSERT, 요금제 ai_analysis_level='basic'. 수정: analysis.ts(524→1,121줄). 신규DDL: analysis_results |
 | 02-25 | AI 분석 세션2 완료 (프론트엔드 AnalysisModal+연결): ① DashboardHeader.tsx — Sparkles 아이콘+AI 분석 메뉴 추가(발송결과↔수신거부 사이, gold+emphasized), onAnalysis prop, 버튼에 icon 지원(flex+gap), ② Dashboard.tsx — PlanInfo에 ai_analysis_level 추가, showAnalysis state, AnalysisModal import+렌더링(planInfo?.ai_analysis_level 전달), ③ AnalysisModal.tsx 신규 생성(530줄) — 베이직 프리뷰(실제 데이터 4카드+프로 블러+AI 텍스트 그라데이션 페이드아웃+비즈니스 강한 블러+업그레이드 CTA), 프로 분석(기간 선택 30d/90d/custom+분석 실행+4단계 로딩 애니메이션+인사이트 카드 아코디언+비즈니스 카드 블러 업셀+PDF 다운로드), 비즈니스 분석(전체 카드 언락). 모달 디자인: animate-in+fade-up, dark 헤더, 카테고리별 색상 10종. 수정: DashboardHeader.tsx, Dashboard.tsx. 신규: AnalysisModal.tsx |

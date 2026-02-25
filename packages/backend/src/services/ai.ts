@@ -1,8 +1,62 @@
 import Anthropic from '@anthropic-ai/sdk';
+import OpenAI from 'openai';
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY || '',
 });
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY || '',
+});
+
+// ============================================================
+// AI 호출 (Claude → GPT-4o 자동 fallback)
+// ============================================================
+async function callAIWithFallback(params: {
+  system: string;
+  userMessage: string;
+  maxTokens: number;
+  temperature: number;
+}): Promise<string> {
+  // 1차: Claude Sonnet
+  try {
+    const response = await anthropic.messages.create({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: params.maxTokens,
+      temperature: params.temperature,
+      system: params.system,
+      messages: [{ role: 'user', content: params.userMessage }],
+    });
+    const text = response.content[0].type === 'text' ? response.content[0].text : '';
+    console.log('[AI] Claude 호출 성공');
+    return text;
+  } catch (claudeError: any) {
+    console.warn(`[AI] Claude 실패 (${claudeError.status || claudeError.message}) → GPT-4o fallback`);
+  }
+
+  // 2차: GPT-4o fallback
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error('Claude 실패 + OPENAI_API_KEY 미설정');
+  }
+
+  try {
+    const gptResponse = await openai.chat.completions.create({
+      model: 'gpt-4o',
+      max_tokens: params.maxTokens,
+      temperature: params.temperature,
+      messages: [
+        { role: 'system', content: params.system },
+        { role: 'user', content: params.userMessage },
+      ],
+    });
+    const text = gptResponse.choices[0]?.message?.content || '';
+    console.log('[AI] GPT-4o fallback 성공');
+    return text;
+  } catch (gptError: any) {
+    console.error(`[AI] GPT-4o도 실패 (${gptError.message})`);
+    throw new Error('AI 서비스 일시 장애 (Claude + GPT 모두 실패)');
+  }
+}
 
 // ============================================================
 // 타입 정의
@@ -494,15 +548,12 @@ ${usePersonalization ? `- 사용할 개인화 변수: ${personalizationTags}
 - ⚠️ 위 "사용 가능한 개인화 변수" 목록에 있는 것만 사용! 다른 변수 생성 금지!` : '- 개인화 변수 없이 일반 문안으로 작성\n- %...% 형태의 변수를 사용하지 마세요.'}`;
 
   try {
-    const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 2048,
-      temperature: 0.7,
+    const text = await callAIWithFallback({
       system: BRAND_SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: userMessage }],
+      userMessage,
+      maxTokens: 2048,
+      temperature: 0.7,
     });
-
-    const text = response.content[0].type === 'text' ? response.content[0].text : '';
     
     let jsonStr = text;
     if (text.includes('```json')) {
@@ -729,15 +780,12 @@ ${hasKakaoProfile ? '⚠️ 이 고객사는 카카오 발신 프로필이 등�
 연산자: eq(같음), gte(이상), lte(이하), between([최소,최대]), in([배열])`;
 
   try {
-    const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 1024,
-      temperature: 0.3,
+    const text = await callAIWithFallback({
       system: '당신은 CRM 마케팅 타겟팅 전문가입니다. 주어진 목표에 최적화된 고객 세그먼트와 최적의 발송 채널을 추천해주세요. recommended_time은 반드시 현재 시각 이후의 미래 시간이어야 합니다. JSON 형식으로만 응답하세요.',
-      messages: [{ role: 'user', content: userMessage }],
+      userMessage,
+      maxTokens: 1024,
+      temperature: 0.3,
     });
-
-    const text = response.content[0].type === 'text' ? response.content[0].text : '';
     
     let jsonStr = text;
     if (text.includes('```json')) {
@@ -971,15 +1019,12 @@ export async function parseBriefing(briefing: string): Promise<{
   }
 
   try {
-    const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 1024,
-      temperature: 0.3,
+    const text = await callAIWithFallback({
       system: PARSE_BRIEFING_SYSTEM,
-      messages: [{ role: 'user', content: `오늘 날짜: ${getKoreanToday()}\n\n다음 프로모션 브리핑을 구조화해주세요:\n\n${briefing}` }],
+      userMessage: `오늘 날짜: ${getKoreanToday()}\n\n다음 프로모션 브리핑을 구조화해주세요:\n\n${briefing}`,
+      maxTokens: 1024,
+      temperature: 0.3,
     });
-
-    const text = response.content[0].type === 'text' ? response.content[0].text : '';
 
     let jsonStr = text;
     if (text.includes('```json')) {
@@ -1218,15 +1263,12 @@ ${channel} 채널에 최적화된 3가지 맞춤 문안(A/B/C)을 생성해주�
   }
 
   try {
-    const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 2048,
-      temperature: 0.7,
+    const text = await callAIWithFallback({
       system: systemPrompt,
-      messages: [{ role: 'user', content: userMessage }],
+      userMessage,
+      maxTokens: 2048,
+      temperature: 0.7,
     });
-
-    const text = response.content[0].type === 'text' ? response.content[0].text : '';
 
     let jsonStr = text;
     if (text.includes('```json')) {
@@ -1314,10 +1356,14 @@ ${channel} 채널에 최적화된 3가지 맞춤 문안(A/B/C)을 생성해주�
 // API 상태 확인
 // ============================================================
 
-export function checkAPIStatus(): { available: boolean; message: string } {
-  const hasKey = !!process.env.ANTHROPIC_API_KEY;
+export function checkAPIStatus(): { available: boolean; message: string; fallback: boolean } {
+  const hasClaude = !!process.env.ANTHROPIC_API_KEY;
+  const hasGPT = !!process.env.OPENAI_API_KEY;
   return {
-    available: hasKey,
-    message: hasKey ? 'Claude API 준비 완료' : 'ANTHROPIC_API_KEY가 설정되지 않았습니다.',
+    available: hasClaude || hasGPT,
+    message: hasClaude
+      ? hasGPT ? 'Claude API 준비 완료 (GPT fallback 대기)' : 'Claude API 준비 완료 (fallback 없음)'
+      : hasGPT ? 'GPT-4o만 사용 가능 (Claude 키 없음)' : 'AI API 키가 설정되지 않았습니다.',
+    fallback: hasGPT,
   };
 }
