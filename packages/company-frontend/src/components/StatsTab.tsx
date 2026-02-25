@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { manageStatsApi, manageUsersApi } from '../api/client';
-import { formatDateTime } from '../utils/formatDate';
 import Toast from './Toast';
+import { formatDateTime } from '../utils/formatDate';
 
 export default function StatsTab() {
   const [view, setView] = useState<'daily' | 'monthly'>('daily');
@@ -328,7 +328,7 @@ export default function StatsTab() {
                         </tr>
                       </thead>
                       <tbody className="divide-y">
-                      {detail.testDetail
+                        {detail.testDetail
                           .slice((testDetailPage - 1) * 10, testDetailPage * 10)
                           .map((t: any, i: number) => (
                           <tr key={i} className="hover:bg-gray-50">
@@ -370,7 +370,7 @@ export default function StatsTab() {
                           </tr>
                         ))}
                       </tbody>
-                      </table>
+                    </table>
                     {detail.testDetail.length > 10 && (
                       <div className="flex justify-center items-center gap-2 py-3 border-t bg-gray-50">
                         <button onClick={() => setTestDetailPage(p => Math.max(1, p - 1))} disabled={testDetailPage === 1} className="px-3 py-1 text-sm rounded-md border bg-white hover:bg-gray-50 disabled:opacity-40">이전</button>
