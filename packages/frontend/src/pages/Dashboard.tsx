@@ -7,6 +7,7 @@ import AiCampaignResultPopup from '../components/AiCampaignResultPopup';
 import AiCampaignSendModal from '../components/AiCampaignSendModal';
 import AiCustomSendFlow from '../components/AiCustomSendFlow';
 import AiMessageSuggestModal from '../components/AiMessageSuggestModal';
+import AnalysisModal from '../components/AnalysisModal';
 import AiPreviewModal from '../components/AiPreviewModal';
 import AiSendTypeModal from '../components/AiSendTypeModal';
 import BalanceModals from '../components/BalanceModals';
@@ -19,6 +20,7 @@ import DashboardHeader from '../components/DashboardHeader';
 import DirectPreviewModal from '../components/DirectPreviewModal';
 import LineGroupErrorModal from '../components/LineGroupErrorModal';
 import MmsUploadModal from '../components/MmsUploadModal';
+import PlanApprovalModal from '../components/PlanApprovalModal';
 import PlanLimitModal from '../components/PlanLimitModal';
 import PlanUpgradeModal from '../components/PlanUpgradeModal';
 import RecentCampaignModal from '../components/RecentCampaignModal';
@@ -27,9 +29,8 @@ import ResultsModal from '../components/ResultsModal';
 import ScheduledCampaignModal from '../components/ScheduledCampaignModal';
 import ScheduleTimeModal from '../components/ScheduleTimeModal';
 import SendConfirmModal from '../components/SendConfirmModal';
-import SpamFilterTestModal from '../components/SpamFilterTestModal';
 import SpamFilterLockModal from '../components/SpamFilterLockModal';
-import PlanApprovalModal from '../components/PlanApprovalModal';
+import SpamFilterTestModal from '../components/SpamFilterTestModal';
 import SubscriptionLockModal from '../components/SubscriptionLockModal';
 import TodayStatsModal from '../components/TodayStatsModal';
 import UploadProgressModal from '../components/UploadProgressModal';
@@ -74,7 +75,8 @@ interface PlanInfo {
   max_customers: number;
   current_customers: number;
   trial_expires_at: string;
-  is_trial_expired: boolean;
+is_trial_expired: boolean;
+ai_analysis_level?: string;
 }
 
 export default function Dashboard() {
@@ -146,6 +148,7 @@ export default function Dashboard() {
   const [testSentResult, setTestSentResult] = useState<string | null>(null);
   const [showResults, setShowResults] = useState(false);
   const [showCustomerDB, setShowCustomerDB] = useState(false);
+  const [showAnalysis, setShowAnalysis] = useState(false);
   // 5개 카드 모달 state
   const [showRecentCampaigns, setShowRecentCampaigns] = useState(false);
   const [showFileUpload, setShowFileUpload] = useState(false);
@@ -1872,6 +1875,7 @@ const campaignData = {
         }}
         onCalendar={() => setShowCalendar(true)}
         onResults={() => setShowResults(true)}
+        onAnalysis={() => setShowAnalysis(true)}
         onLogout={handleLogout}
       />
 
@@ -5047,6 +5051,12 @@ const campaignData = {
       <LineGroupErrorModal show={showLineGroupError} onClose={() => setShowLineGroupError(false)} />
 
       <SubscriptionLockModal show={showSubscriptionLock} onClose={() => setShowSubscriptionLock(false)} />
+
+      <AnalysisModal
+        show={showAnalysis}
+        onClose={() => setShowAnalysis(false)}
+        analysisLevel={planInfo?.ai_analysis_level || 'none'}
+      />
 
       {/* 하단 링크 */}
       <div className="max-w-7xl mx-auto px-4 py-6 mt-8 border-t border-gray-200 text-center text-xs text-gray-400 space-x-3">
