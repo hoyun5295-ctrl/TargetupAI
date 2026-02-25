@@ -1,6 +1,5 @@
-import { Router, Request, Response } from 'express';
-import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
+import { Request, Response, Router } from 'express';
 import nodemailer from 'nodemailer';
 import { query } from '../config/database';
 import { authenticate, requireSuperAdmin } from '../middlewares/auth';
@@ -123,6 +122,7 @@ router.get('/my-plan', async (req: Request, res: Response) => {
         c.plan_id,
         p.plan_name,
         p.plan_code,
+        p.monthly_price,
         p.max_customers,
         c.created_at,
         c.created_at + INTERVAL '7 days' as trial_expires_at,

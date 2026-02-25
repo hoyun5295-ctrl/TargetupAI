@@ -27,6 +27,8 @@ interface AiCampaignResultPopupProps {
   setShowAiSendModal: (v: boolean) => void;
   setShowSpamFilter: (v: boolean) => void;
   setSpamFilterData: (data: any) => void;
+  isSpamFilterLocked: boolean;
+  setShowSpamFilterLock: (v: boolean) => void;
   setShowMmsUploadModal: (v: boolean) => void;
   // MMS
   mmsUploadedImages: {serverPath: string; url: string; filename: string; size: number}[];
@@ -66,6 +68,8 @@ export default function AiCampaignResultPopup({
   setShowAiSendModal,
   setShowSpamFilter,
   setSpamFilterData,
+  isSpamFilterLocked,
+  setShowSpamFilterLock,
   setShowMmsUploadModal,
   mmsUploadedImages,
   setMmsUploadedImages,
@@ -336,6 +340,7 @@ className="flex-1 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex 
 </button>
 <button 
 onClick={() => {
+  if (isSpamFilterLocked) { setShowSpamFilterLock(true); return; }
   const msg = aiResult?.messages?.[selectedAiMsgIdx]?.message_text || campaign.messageContent || '';
                     const cb = selectedCallback || '';
                     const smsMsg = isAd ? `(광고)${msg}\n무료거부${optOutNumber.replace(/-/g, '')}` : msg;
@@ -343,9 +348,9 @@ onClick={() => {
                     setSpamFilterData({sms: smsMsg, lms: lmsMsg, callback: cb, msgType: selectedChannel as 'SMS'|'LMS'|'MMS'});
                     setShowSpamFilter(true);
 }}
-className="flex-1 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 flex items-center justify-center gap-2"
+className={`flex-1 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 flex items-center justify-center gap-2 ${isSpamFilterLocked ? 'opacity-60' : ''}`}
 >
-🛡️ 스팸필터
+{isSpamFilterLocked ? '🔒' : '🛡️'} 스팸필터
 </button>
 <button 
 onClick={() => setShowAiSendModal(true)}

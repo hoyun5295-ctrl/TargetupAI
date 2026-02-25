@@ -124,6 +124,8 @@
 
 **수정 파일:** auth.ts, Dashboard.tsx, SubscriptionLockModal.tsx(신규), AdminDashboard.tsx, admin.ts
 
+**잔여 TODO:** 없음 (전체 완료)
+
 #### Task B. AI 분석 기능 (요금제별 차별화)
 
 **요금제 구조:**
@@ -609,6 +611,7 @@
 | 날짜 | 완료 항목 |
 |------|----------|
 | 02-25 | Task A 요금제 기능 제한 구현 완료: ① DDL subscription_status varchar(20) DEFAULT 'trial' + 마이그레이션 SQL, ② auth.ts 로그인 쿼리+응답에 subscriptionStatus 포함, ③ Dashboard.tsx isSubscriptionLocked 헬퍼+10군데 잠금(AI추천발송/직접타겟/DB업로드/최근캠페인/발송예시/고객인사이트/예약대기/고객DB조회)+opacity+🔒아이콘, ④ SubscriptionLockModal.tsx 신규(예쁜 커스텀 모달, Lock+Crown 아이콘, 요금제안내 링크), ⑤ AdminDashboard.tsx 구독상태 드롭다운(trial/active/expired/suspended)+안내문구, ⑥ admin.ts PUT API $31 subscription_status 추가. 수정 5파일+신규 1파일 |
+| 02-25 | Task A 스팸필터 잠금 추가 완료: ① companies.ts my-plan API에 monthly_price 반환 추가, ② Dashboard.tsx PlanInfo에 monthly_price+isSpamFilterLocked 헬퍼(15만원 미만 잠금)+직접발송 스팸필터 버튼 잠금(opacity+🔒), ③ SpamFilterLockModal.tsx 신규(indigo 톤, ShieldOff 아이콘, 프로 요금제 안내). 수정 2파일+신규 1파일. Task A 전체 완료 |
 | 02-25 | 요금제 기능 제한 + AI 분석 기능 설계 의논: ① subscription_status 필드 추가 결정(trial/active/expired/suspended), 무료 종료 후 대시보드 잠금+직접발송/탑메뉴/충전 허용, ② AI 분석 요금제별 차별화 설계 — 프로(기본, 집계값, 1~2회 호출, 기본PDF 1~2p) / 비즈니스(고급, 로우데이터, 5~8회 호출, 상세PDF 5~10p, 세그먼트+이탈예측+ROI+액션제안). CURRENT_TASK 반영 완료 |
 | 02-25 | Sync Agent 서버 보안 구현:: ① rate limit — ipRateLimit(인증 실패 IP 10회/분 차단)+companyRateLimit(회사 60회/분) 인메모리 Map+5분 정리, ② 동시 full sync 제한 — activeSyncs Map+429+finally 해제+30분 stuck 자동 정리, ③ version API checksum 포함 확인. 매뉴얼 최종 점검: sys.hanjullo.com 삭제+Target-UP 삭제+API 경로 삭제 확인 완료. 수정: sync.ts |
 | 02-25 | 정산 멀티테이블+스팸필터 통합: ① billing.ts SMSQ_SEND 단일→회사별 라인그룹 멀티테이블 전환(getBillingCompanyTables+smsAggByDateType 자체 헬퍼, campaigns.ts 순환참조 방지), ② LOG 테이블(SMSQ_SEND_X_YYYYMM) 정산기간별 자동탐색+통합조회(getTablesForBillingPeriod), ③ 스팸필터 테스트 PostgreSQL 집계 추가(spam_filter_tests+results JOIN), ④ DDL: billing_invoices에 spam_filter_sms/lms_count+unit_price 4컬럼 추가, ⑤ preview API spam 섹션 추가, ⑥ PDF 스팸필터행 배경색(#fef3c7)+일별상세 SPAM_SMS/SPAM_LMS 라벨, ⑦ 메일 HTML 스팸필터 비용 표시. 수정 파일: billing.ts (1450→1616줄) |

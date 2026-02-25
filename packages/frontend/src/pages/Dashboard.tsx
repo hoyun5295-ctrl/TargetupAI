@@ -28,6 +28,7 @@ import ScheduledCampaignModal from '../components/ScheduledCampaignModal';
 import ScheduleTimeModal from '../components/ScheduleTimeModal';
 import SendConfirmModal from '../components/SendConfirmModal';
 import SpamFilterTestModal from '../components/SpamFilterTestModal';
+import SpamFilterLockModal from '../components/SpamFilterLockModal';
 import SubscriptionLockModal from '../components/SubscriptionLockModal';
 import TodayStatsModal from '../components/TodayStatsModal';
 import UploadProgressModal from '../components/UploadProgressModal';
@@ -67,6 +68,7 @@ interface Stats {
 interface PlanInfo {
   plan_name: string;
   plan_code: string;
+  monthly_price: number;
   max_customers: number;
   current_customers: number;
   trial_expires_at: string;
@@ -86,9 +88,11 @@ export default function Dashboard() {
   const subscriptionStatus = (user as any)?.company?.subscriptionStatus || 'trial';
   const isSubscriptionLocked = subscriptionStatus === 'expired' || subscriptionStatus === 'suspended';
   const [showSubscriptionLock, setShowSubscriptionLock] = useState(false);
+  const [showSpamFilterLock, setShowSpamFilterLock] = useState(false);
 
   const [stats, setStats] = useState<Stats | null>(null);
   const [planInfo, setPlanInfo] = useState<PlanInfo | null>(null);
+  const isSpamFilterLocked = !planInfo || (Number(planInfo.monthly_price) || 0) < 150000;
   const [balanceInfo, setBalanceInfo] = useState<{billingType: string, balance: number, costPerSms: number, costPerLms: number, costPerMms: number, costPerKakao: number} | null>(null);
   const [showBalanceModal, setShowBalanceModal] = useState(false);
   const [showChargeModal, setShowChargeModal] = useState(false);
@@ -1656,6 +1660,9 @@ const campaignData = {
 
   return (
     <div className="min-h-screen bg-gray-100">
+      {/* 스팸필터 잠금 모달 */}
+      <SpamFilterLockModal show={showSpamFilterLock} onClose={() => setShowSpamFilterLock(false)} />
+
       {/* 스팸필터 테스트 모달 */}
       {showSpamFilter && (
         <SpamFilterTestModal
@@ -4031,6 +4038,7 @@ const campaignData = {
                       </button>
                       <button 
                         onClick={() => {
+                          if (isSpamFilterLocked) { setShowSpamFilterLock(true); return; }
                           const msg = directMessage || '';
                           const cb = selectedCallback || '';
                           const smsMsg = adTextEnabled ? `(광고)${msg}\n무료거부${optOutNumber.replace(/-/g, '')}` : msg;
@@ -4038,9 +4046,9 @@ const campaignData = {
                           setSpamFilterData({sms: smsMsg, lms: lmsMsg, callback: cb, msgType: directMsgType});
                           setShowSpamFilter(true);
                         }}
-                        className="py-2.5 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg text-sm font-medium transition-colors"
+                        className={`py-2.5 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg text-sm font-medium transition-colors ${isSpamFilterLocked ? 'opacity-60' : ''}`}
                       >
-                        🛡️ 스팸필터테스트
+                        {isSpamFilterLocked ? '🔒' : '🛡️'} 스팸필터테스트
                       </button>
                     </div>
                   </div>
