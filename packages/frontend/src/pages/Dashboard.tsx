@@ -29,6 +29,7 @@ import ScheduleTimeModal from '../components/ScheduleTimeModal';
 import SendConfirmModal from '../components/SendConfirmModal';
 import SpamFilterTestModal from '../components/SpamFilterTestModal';
 import SpamFilterLockModal from '../components/SpamFilterLockModal';
+import PlanApprovalModal from '../components/PlanApprovalModal';
 import SubscriptionLockModal from '../components/SubscriptionLockModal';
 import TodayStatsModal from '../components/TodayStatsModal';
 import UploadProgressModal from '../components/UploadProgressModal';
@@ -89,6 +90,8 @@ export default function Dashboard() {
   const isSubscriptionLocked = subscriptionStatus === 'expired' || subscriptionStatus === 'suspended';
   const [showSubscriptionLock, setShowSubscriptionLock] = useState(false);
   const [showSpamFilterLock, setShowSpamFilterLock] = useState(false);
+  const [showPlanApproval, setShowPlanApproval] = useState(false);
+  const [planApproval, setPlanApproval] = useState<{requestId: string; planName: string} | null>(null);
 
   const [stats, setStats] = useState<Stats | null>(null);
   const [planInfo, setPlanInfo] = useState<PlanInfo | null>(null);
@@ -779,6 +782,18 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
       if (balanceRes.ok) {
         const balanceData = await balanceRes.json();
         setBalanceInfo(balanceData);
+      }
+
+      // 요금제 승인 알림 체크
+      const approvalRes = await fetch('/api/companies/plan-request/status', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (approvalRes.ok) {
+        const approvalData = await approvalRes.json();
+        if (approvalData.unconfirmed?.status === 'approved') {
+          setPlanApproval({ requestId: approvalData.unconfirmed.id, planName: approvalData.unconfirmed.requested_plan_name });
+          setShowPlanApproval(true);
+        }
       }
     } catch (error) {
       console.error('통계 로드 실패:', error);
@@ -1662,6 +1677,25 @@ const campaignData = {
     <div className="min-h-screen bg-gray-100">
       {/* 스팸필터 잠금 모달 */}
       <SpamFilterLockModal show={showSpamFilterLock} onClose={() => setShowSpamFilterLock(false)} />
+
+      {/* 요금제 승인 알림 모달 */}
+      <PlanApprovalModal
+        show={showPlanApproval}
+        planName={planApproval?.planName || ''}
+        onClose={async () => {
+          setShowPlanApproval(false);
+          if (planApproval?.requestId) {
+            const token = localStorage.getItem('token');
+            await fetch(`/api/companies/plan-request/${planApproval.requestId}/confirm`, {
+              method: 'PUT',
+              headers: { Authorization: `Bearer ${token}` },
+            });
+          }
+          setPlanApproval(null);
+          // 잠금 해제 반영을 위해 페이지 새로고침
+          window.location.reload();
+        }}
+      />
 
       {/* 스팸필터 테스트 모달 */}
       {showSpamFilter && (

@@ -705,9 +705,9 @@ router.put('/plan-requests/:id/approve', authenticate, requireSuperAdmin, async 
       return res.status(400).json({ error: '이미 처리된 신청입니다.' });
     }
     
-    // 회사 플랜 변경
+    // 회사 플랜 변경 + 구독 활성화
     await query(
-      'UPDATE companies SET plan_id = $1, updated_at = NOW() WHERE id = $2',
+      `UPDATE companies SET plan_id = $1, subscription_status = 'active', updated_at = NOW() WHERE id = $2`,
       [request.requested_plan_id, request.company_id]
     );
     
