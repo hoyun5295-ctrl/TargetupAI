@@ -94,7 +94,30 @@
 
 ---
 
-### 현재 목표: (없음 — 다음 작업 대기)
+### 현재 목표: Sync Agent 서버측 보안 + 코드 수정
+
+> **배경:** Sync Agent v1.3.0 매뉴얼 & 보안 리뷰 완료 (2026-02-25)
+> **참고 문서:** SYNC-AGENT-REVIEW.md (비토 전달용)
+
+**서버 이슈 2건 (DDL 적용 완료 2026-02-25):**
+- ✅ POST /api/sync/log → 500: sync_logs에 duration_ms, error_message 컬럼 추가
+- ✅ GET /api/sync/version → 500: sync_releases 테이블 생성
+- ✅ GET /api/sync/config용: sync_agents에 config, sync_interval_customers, sync_interval_purchases 컬럼 추가
+
+**서버 코드 수정 (미배포):**
+- [ ] sync.ts version API SELECT/응답에 checksum 필드 추가 → tp-push + tp-deploy
+
+**서버 보안 추가 개발:**
+- [ ] C-1. `/api/sync/*` rate limit 추가 (우선) — 인증 실패 IP당 분당 10회 차단, 성공 회사당 분당 60회 제한
+- [ ] C-2. 고객사별 동시 full sync 1개 제한 — 진행 중이면 429 응답
+- [ ] C-3. sync_releases 릴리스 등록 — 비토 v1.3.0 최종 빌드 후 INSERT
+
+**비토측 수정 요청 (전달 완료):**
+- [ ] A-1. 매뉴얼에서 sys.hanjullo.com → "고객사 관리자 페이지" 로 변경
+- [ ] B-1. 웹 UI 마법사 127.0.0.1 바인딩 확인
+- [ ] B-2. .env 프로덕션 사용 경고
+- [ ] B-3. 자동 업데이트 download_url 도메인 화이트리스트 + checksum 필수화
+- [ ] B-4. 배치 사이즈 4,000 vs 서버 5,000 불일치 확인
 
 ---
 
@@ -451,7 +474,12 @@
 - [ ] Phase 2: 입금감지 API 자동화
 
 ### Sync Agent
-- [ ] Sync Agent 코어 완성 (로컬 큐, 스케줄러, Heartbeat 남음)
+- [x] Sync Agent 코어 완성 (비토 v1.3.0 개발 완료 — 설정 편집 + 테이블별 timestamp 분리)
+- [x] 서버 DDL 수정: sync_logs 컬럼 추가 + sync_releases 테이블 생성 + sync_agents config 컬럼 (2026-02-25)
+- [ ] sync.ts version API checksum 필드 추가 (코드 수정 후 배포)
+- [ ] `/api/sync/*` rate limit 추가 (브루트포스 방어)
+- [ ] 고객사별 동시 full sync 제한
+- [ ] sync_releases에 v1.3.0 릴리스 레코드 등록 (비토 최종 빌드 후)
 
 ### 보안
 - [x] 소스 보호: 우클릭/F12/개발자도구/드래그 차단 (3개 도메인 전체 적용)

@@ -9,6 +9,87 @@ import { normalizePhone } from '../utils/normalize';
 const router = Router();
 
 // ============================================
+// Rate Limit & 동시 동기화 제한 (인메모리)
+// ============================================
+
+// --- IP별 인증 실패 카운트 (C-1: 브루트포스 방어) ---
+const ipFailures = new Map<string, { count: number; resetAt: number }>();
+
+// --- 회사별 요청 카운트 (C-1: 인증 성공 후 분당 60회) ---
+const companyRequests = new Map<string, { count: number; resetAt: number }>();
+
+// --- 회사별 동시 full sync 진행 추적 (C-2) ---
+const activeSyncs = new Map<string, { syncType: string; startedAt: number }>();
+
+// 만료 레코드 정리 (5분 주기, 메모리 누수 방지)
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, val] of ipFailures) {
+    if (now > val.resetAt) ipFailures.delete(key);
+  }
+  for (const [key, val] of companyRequests) {
+    if (now > val.resetAt) companyRequests.delete(key);
+  }
+  // activeSyncs: 30분 이상 stuck된 항목 정리 (Agent 크래시 대비)
+  for (const [key, val] of activeSyncs) {
+    if (now - val.startedAt > 30 * 60 * 1000) {
+      console.warn(`[Sync RateLimit] Stale activeSyncs removed: company=${key}, type=${val.syncType}`);
+      activeSyncs.delete(key);
+    }
+  }
+}, 5 * 60 * 1000);
+
+/** IP 실패 카운트 증가 (syncAuth에서 호출) */
+function recordIpFailure(ip: string) {
+  const now = Date.now();
+  const entry = ipFailures.get(ip);
+  if (entry && now < entry.resetAt) {
+    entry.count++;
+  } else {
+    ipFailures.set(ip, { count: 1, resetAt: now + 60_000 });
+  }
+}
+
+/** IP Rate Limit 미들웨어 — syncAuth 앞에서 차단 */
+function ipRateLimit(req: Request, res: Response, next: Function) {
+  const ip = req.ip || req.headers['x-forwarded-for'] as string || 'unknown';
+  const entry = ipFailures.get(ip);
+  if (entry && Date.now() < entry.resetAt && entry.count >= 10) {
+    console.warn(`[Sync RateLimit] IP blocked (auth failures): ${ip} (${entry.count} failures)`);
+    return res.status(429).json({
+      success: false,
+      error: 'Too many authentication failures. Try again later.',
+      retry_after_seconds: Math.ceil((entry.resetAt - Date.now()) / 1000)
+    });
+  }
+  next();
+}
+
+/** 회사 Rate Limit 미들웨어 — syncAuth 뒤에서 적용 */
+function companyRateLimit(req: SyncAuthRequest, res: Response, next: Function) {
+  const companyId = req.companyId;
+  if (!companyId) return next(); // syncAuth 통과 못했으면 skip
+
+  const now = Date.now();
+  const entry = companyRequests.get(companyId);
+  if (entry && now < entry.resetAt) {
+    if (entry.count >= 60) {
+      console.warn(`[Sync RateLimit] Company rate limited: ${req.companyName} (${entry.count} req/min)`);
+      return res.status(429).json({
+        success: false,
+        error: 'Rate limit exceeded. Maximum 60 requests per minute.',
+        retry_after_seconds: Math.ceil((entry.resetAt - now) / 1000)
+      });
+    }
+    entry.count++;
+  } else {
+    companyRequests.set(companyId, { count: 1, resetAt: now + 60_000 });
+  }
+  next();
+}
+
+
+// ============================================
 // 미들웨어: Sync API 인증 (X-Sync-ApiKey / X-Sync-Secret)
 // ============================================
 interface SyncAuthRequest extends Request {
@@ -22,6 +103,8 @@ async function syncAuth(req: SyncAuthRequest, res: Response, next: Function) {
     const apiSecret = req.headers['x-sync-secret'] as string;
 
     if (!apiKey || !apiSecret) {
+      const ip = req.ip || req.headers['x-forwarded-for'] as string || 'unknown';
+      recordIpFailure(ip);
       return res.status(401).json({
         success: false,
         error: 'Missing X-Sync-ApiKey or X-Sync-Secret header'
@@ -36,6 +119,8 @@ async function syncAuth(req: SyncAuthRequest, res: Response, next: Function) {
     );
 
     if (result.rows.length === 0) {
+      const ip = req.ip || req.headers['x-forwarded-for'] as string || 'unknown';
+      recordIpFailure(ip);
       return res.status(401).json({
         success: false,
         error: 'Invalid API credentials'
@@ -70,8 +155,8 @@ async function syncAuth(req: SyncAuthRequest, res: Response, next: Function) {
   }
 }
 
-// 모든 sync 라우트에 인증 적용
-router.use(syncAuth);
+// 모든 sync 라우트에 인증 + rate limit 적용
+router.use(ipRateLimit, syncAuth, companyRateLimit);
 
 // ============================================
 // POST /api/sync/register - Agent 최초 등록
@@ -215,9 +300,24 @@ router.post('/heartbeat', async (req: SyncAuthRequest, res: Response) => {
 // ============================================
 
 router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
+  const companyId = req.companyId!;
+  const mode = req.body.mode;
+
+  // C-2: full sync 동시 실행 제한
+  if (mode === 'full') {
+    const existing = activeSyncs.get(companyId);
+    if (existing) {
+      return res.status(429).json({
+        success: false,
+        error: `Full sync already in progress (${existing.syncType}). Please wait for completion.`,
+        code: 'SYNC_IN_PROGRESS'
+      });
+    }
+    activeSyncs.set(companyId, { syncType: 'customers', startedAt: Date.now() });
+  }
+
   try {
-    const { customers, mode, batchIndex, totalBatches } = req.body;
-    const companyId = req.companyId!;
+    const { customers, batchIndex, totalBatches } = req.body;
 
     if (!customers || !Array.isArray(customers) || customers.length === 0) {
       return res.status(400).json({
@@ -454,6 +554,11 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
       success: false,
       error: 'Failed to process customers'
     });
+  } finally {
+    // C-2: full sync 완료 시 activeSyncs에서 제거
+    if (mode === 'full') {
+      activeSyncs.delete(companyId);
+    }
   }
 });
 
@@ -461,9 +566,24 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
 // POST /api/sync/purchases - 구매내역 벌크 INSERT
 // ============================================
 router.post('/purchases', async (req: SyncAuthRequest, res: Response) => {
+  const companyId = req.companyId!;
+  const mode = req.body.mode;
+
+  // C-2: full sync 동시 실행 제한
+  if (mode === 'full') {
+    const existing = activeSyncs.get(companyId);
+    if (existing) {
+      return res.status(429).json({
+        success: false,
+        error: `Full sync already in progress (${existing.syncType}). Please wait for completion.`,
+        code: 'SYNC_IN_PROGRESS'
+      });
+    }
+    activeSyncs.set(companyId, { syncType: 'purchases', startedAt: Date.now() });
+  }
+
   try {
-    const { purchases, mode, batchIndex, totalBatches } = req.body;
-    const companyId = req.companyId!;
+    const { purchases, batchIndex, totalBatches } = req.body;
 
     if (!purchases || !Array.isArray(purchases) || purchases.length === 0) {
       return res.status(400).json({
@@ -606,6 +726,11 @@ router.post('/purchases', async (req: SyncAuthRequest, res: Response) => {
       success: false,
       error: 'Failed to process purchases'
     });
+  } finally {
+    // C-2: full sync 완료 시 activeSyncs에서 제거
+    if (mode === 'full') {
+      activeSyncs.delete(companyId);
+    }
   }
 });
 // ============================================================================
