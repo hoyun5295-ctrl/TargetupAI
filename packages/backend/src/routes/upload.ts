@@ -228,9 +228,9 @@ JSON 형식으로만 응답해줘 (다른 설명 없이):
       aiText = aiResult.content?.[0]?.text || '{}';
       console.log('[AI 매핑] Claude 호출 성공');
     } catch (claudeErr: any) {
-      console.warn(`[AI 매핑] Claude 실패 (${claudeErr.message}) → GPT-4o fallback`);
+      console.warn(`[AI 매핑] Claude 실패 (${claudeErr.message}) → gpt-5.1 fallback`);
 
-      // 2차: GPT-4o fallback
+      // 2차: gpt-5.1 fallback
       if (!process.env.OPENAI_API_KEY) throw new Error('Claude 실패 + OPENAI_API_KEY 미설정');
       const gptResponse = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
@@ -239,14 +239,14 @@ JSON 형식으로만 응답해줘 (다른 설명 없이):
           'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`
         },
         body: JSON.stringify({
-          model: 'gpt-4o',
+          model: 'gpt-5.1',
           max_tokens: 1024,
           messages: [{ role: 'user', content: mappingPrompt }]
         })
       });
       const gptResult: any = await gptResponse.json();
       aiText = gptResult.choices?.[0]?.message?.content || '{}';
-      console.log('[AI 매핑] GPT-4o fallback 성공');
+      console.log('[AI 매핑] gpt-5.1 fallback 성공');
     }
     
     let mapping: { [key: string]: string | null } = {};

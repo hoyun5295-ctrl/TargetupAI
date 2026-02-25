@@ -1,10 +1,10 @@
+import Anthropic from '@anthropic-ai/sdk';
 import { Request, Response, Router } from 'express';
+import * as fs from 'fs';
+import OpenAI from 'openai';
+import * as path from 'path';
 import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
-import Anthropic from '@anthropic-ai/sdk';
-import OpenAI from 'openai';
-import * as fs from 'fs';
-import * as path from 'path';
 
 const router = Router();
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY || '' });
@@ -312,15 +312,15 @@ async function callClaude(userMessage: string, maxRetries = 2): Promise<Analysis
     }
   }
 
-  // 2차: GPT-4o fallback
+  // 2차: gpt-5.1 fallback
   if (!process.env.OPENAI_API_KEY) {
     throw new Error('Claude 실패 + OPENAI_API_KEY 미설정');
   }
 
-  console.warn('[AI 분석] Claude 전부 실패 → GPT-4o fallback');
+  console.warn('[AI 분석] Claude 전부 실패 → gpt-5.1 fallback');
   try {
     const gptResponse = await openai.chat.completions.create({
-      model: 'gpt-4o',
+      model: 'gpt-5.1',
       max_tokens: 4096,
       temperature: 0.3,
       messages: [
@@ -329,10 +329,10 @@ async function callClaude(userMessage: string, maxRetries = 2): Promise<Analysis
       ],
     });
     const text = gptResponse.choices[0]?.message?.content || '';
-    console.log('[AI 분석] GPT-4o fallback 성공');
+    console.log('[AI 분석] gpt-5.1 fallback 성공');
     return parseClaudeResponse(text);
   } catch (gptError: any) {
-    console.error(`[AI 분석] GPT-4o도 실패:`, gptError.message);
+    console.error(`[AI 분석] gpt-5.1도 실패:`, gptError.message);
     throw new Error('AI 서비스 일시 장애 (Claude + GPT 모두 실패)');
   }
 }

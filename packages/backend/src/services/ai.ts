@@ -10,7 +10,7 @@ const openai = new OpenAI({
 });
 
 // ============================================================
-// AI 호출 (Claude → GPT-4o 자동 fallback)
+// AI 호출 (Claude → gpt-5.1 자동 fallback)
 // ============================================================
 async function callAIWithFallback(params: {
   system: string;
@@ -31,17 +31,17 @@ async function callAIWithFallback(params: {
     console.log('[AI] Claude 호출 성공');
     return text;
   } catch (claudeError: any) {
-    console.warn(`[AI] Claude 실패 (${claudeError.status || claudeError.message}) → GPT-4o fallback`);
+    console.warn(`[AI] Claude 실패 (${claudeError.status || claudeError.message}) → gpt-5.1 fallback`);
   }
 
-  // 2차: GPT-4o fallback
+  // 2차: gpt-5.1 fallback
   if (!process.env.OPENAI_API_KEY) {
     throw new Error('Claude 실패 + OPENAI_API_KEY 미설정');
   }
 
   try {
     const gptResponse = await openai.chat.completions.create({
-      model: 'gpt-4o',
+      model: 'gpt-5.1',
       max_tokens: params.maxTokens,
       temperature: params.temperature,
       messages: [
@@ -50,10 +50,10 @@ async function callAIWithFallback(params: {
       ],
     });
     const text = gptResponse.choices[0]?.message?.content || '';
-    console.log('[AI] GPT-4o fallback 성공');
+    console.log('[AI] gpt-5.1 fallback 성공');
     return text;
   } catch (gptError: any) {
-    console.error(`[AI] GPT-4o도 실패 (${gptError.message})`);
+    console.error(`[AI] gpt-5.1도 실패 (${gptError.message})`);
     throw new Error('AI 서비스 일시 장애 (Claude + GPT 모두 실패)');
   }
 }
@@ -1363,7 +1363,7 @@ export function checkAPIStatus(): { available: boolean; message: string; fallbac
     available: hasClaude || hasGPT,
     message: hasClaude
       ? hasGPT ? 'Claude API 준비 완료 (GPT fallback 대기)' : 'Claude API 준비 완료 (fallback 없음)'
-      : hasGPT ? 'GPT-4o만 사용 가능 (Claude 키 없음)' : 'AI API 키가 설정되지 않았습니다.',
+      : hasGPT ? 'gpt-5.1만 사용 가능 (Claude 키 없음)' : 'AI API 키가 설정되지 않았습니다.',
     fallback: hasGPT,
   };
 }
