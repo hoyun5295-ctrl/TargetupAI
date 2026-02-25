@@ -1,4 +1,4 @@
-import { ShieldOff, Crown, X } from 'lucide-react';
+import { Crown, ShieldOff, X } from 'lucide-react';
 
 interface SpamFilterLockModalProps {
   show: boolean;
@@ -9,7 +9,7 @@ export default function SpamFilterLockModal({ show, onClose }: SpamFilterLockMod
   if (!show) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60]" onClick={onClose}>
       <div
         className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in fade-in zoom-in duration-200"
         onClick={(e) => e.stopPropagation()}
