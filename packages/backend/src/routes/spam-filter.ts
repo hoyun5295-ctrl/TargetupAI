@@ -36,7 +36,7 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
   try {
     const userId = (req as any).user.userId;
     const companyId = (req as any).user.companyId;
-    const { callbackNumber, messageContentSms, messageContentLms, messageType, firstCustomerData } = req.body;
+    const { callbackNumber, messageContentSms, messageContentLms, messageType } = req.body;
 
     if (!callbackNumber) {
       return res.status(400).json({ error: '발신번호를 입력해주세요.' });
@@ -62,11 +62,16 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
     const isLmsType = messageType === 'LMS' || messageType === 'MMS';
     const rawActualContent = isLmsType ? (messageContentLms || '') : (messageContentSms || '');
 
-    // ★ D32: 회사 스키마에서 fieldMappings 조회 + 실제 타겟 첫 번째 고객으로 치환
+    // ★ 서버가 DB에서 직접 첫 번째 활성 고객 조회 (프론트 의존 완전 제거)
     const companySchemaResult = await query('SELECT customer_schema FROM companies WHERE id = $1', [companyId]);
     const spamFieldMappings = extractVarCatalog(companySchemaResult.rows[0]?.customer_schema).fieldMappings;
-    // firstCustomerData: 프론트에서 전달하는 실제 타겟 최상단 고객 데이터
-    const firstCustomer: Record<string, any> = firstCustomerData || {};
+    const spamMappingCols = Object.values(spamFieldMappings).map((m: any) => m.column);
+    const spamSelectCols = [...new Set(['phone', ...spamMappingCols])].join(', ');
+    const firstCustomerResult = await query(
+      `SELECT ${spamSelectCols} FROM customers WHERE company_id = $1 AND is_active = true AND sms_opt_in = true ORDER BY created_at DESC LIMIT 1`,
+      [companyId]
+    );
+    const firstCustomer: Record<string, any> = firstCustomerResult.rows[0] || {};
 
     // 해시는 치환 후 내용으로 계산 (앱이 리포트하는 내용과 일치시킴)
     const personalizedForHash = replaceVariables(rawActualContent, firstCustomer, spamFieldMappings);
@@ -647,7 +652,7 @@ router.post('/devices', async (req: Request, res: Response) => {
 // ============================================================
 router.get('/admin/devices', authenticate, async (req: Request, res: Response) => {
   try {
-    if ((req as any).user.role !== 'super_admin') {
+    if ((req as any).user.userType !== 'super_admin') {
       return res.status(403).json({ error: '권한이 없습니다.' });
     }
 

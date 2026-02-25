@@ -11,6 +11,18 @@ const toKoreaTimeStr = (date: Date) => {
   return date.toLocaleString('sv-SE', { timeZone: 'Asia/Seoul' }).replace('T', ' ');
 };
 
+// ★ P0-4: MySQL 세션 타임존 KST 고정 (예약/분할 발송 시간 정확성 보장)
+// Agent가 KST 기준으로 sendreq_time을 처리하므로, MySQL도 KST여야 함
+mysqlQuery("SET time_zone = '+09:00'").then(() => {
+  console.log('[MySQL TZ] 세션 타임존 KST(+09:00) 설정 완료');
+}).catch(err => {
+  console.error('[MySQL TZ] 세션 타임존 설정 실패:', err);
+});
+// 서버 시작 시 MySQL 시간 확인 로그
+mysqlQuery("SELECT NOW() as mysql_now, @@session.time_zone as tz").then((rows: any) => {
+  if (rows && rows[0]) console.log(`[MySQL TZ] NOW()=${rows[0].mysql_now}, time_zone=${rows[0].tz}`);
+}).catch(() => {});
+
 // ===== 라인그룹 기반 Agent 발송 설정 =====
 // 환경변수: 서버에 연결된 전체 테이블 목록 (폴백용)
 const ALL_SMS_TABLES = (process.env.SMS_TABLES || 'SMSQ_SEND').split(',').map(t => t.trim());
@@ -604,9 +616,15 @@ router.post('/test-send', async (req: Request, res: Response) => {
       return res.status(404).json({ error: '회사 정보를 찾을 수 없습니다.' });
     }
 
-    // ★ D32: 테스트도 실제 타겟 최상단 고객으로 치환 (프론트에서 firstCustomerData 전달)
-    const testFirstCustomer: Record<string, any> = req.body.firstCustomerData || {};
+    // ★ 서버가 DB에서 직접 첫 번째 활성 고객 조회 (프론트 의존 완전 제거)
     const testFieldMappings = extractVarCatalog(companyResult.rows[0]?.customer_schema).fieldMappings;
+    const testMappingCols = Object.values(testFieldMappings).map((m: any) => m.column);
+    const testSelectCols = [...new Set(['phone', ...testMappingCols])].join(', ');
+    const testFirstCustomerResult = await query(
+      `SELECT ${testSelectCols} FROM customers WHERE company_id = $1 AND is_active = true AND sms_opt_in = true ORDER BY created_at DESC LIMIT 1`,
+      [companyId]
+    );
+    const testFirstCustomer: Record<string, any> = testFirstCustomerResult.rows[0] || {};
 
     // 회신번호 가져오기 (callback_numbers 테이블에서)
     const callbackResult = await query(
@@ -684,6 +702,12 @@ router.post('/test-send', async (req: Request, res: Response) => {
       } catch (err) {
         console.error(`담당자 테스트 발송 실패 (${contact.phone}):`, err);
       }
+    }
+
+    // ★ P0-3: 테스트 발송 실패건 환불 (차감은 전원 기준, 실패분 돌려줌)
+    const testFailCount = managerContacts.length - sentCount;
+    if (testFailCount > 0) {
+      await prepaidRefund(companyId, testFailCount, testMsgType, '00000000-0000-0000-0000-000000000000', '테스트 발송 실패 자동 환불');
     }
 
     return res.json({
@@ -996,6 +1020,9 @@ if (!sendDeduct.ok) {
   });
 }
 
+// ★ P0-3: 차감 성공 후 발송 실패 시 자동 환불 보장
+try {
+
 // MySQL에 INSERT (즉시/예약 공통)
 const sendTime = isScheduled ? toKoreaTimeStr(new Date(campaign.scheduled_at)) : null;
 
@@ -1113,6 +1140,19 @@ await query(
       runId: campaignRun.id,
       runNumber: runNumber,
     });
+
+    } catch (sendError) {
+      // ★ P0-3: MySQL INSERT 실패 시 차감 금액 자동 환불
+      console.error('[AI발송] 큐 INSERT 실패 — 차감 환불 처리:', sendError);
+      try {
+        await prepaidRefund(companyId, filteredCustomers.length, deductType, id, '발송 실패 자동 환불');
+        await query(`UPDATE campaigns SET status = 'failed', updated_at = NOW() WHERE id = $1`, [id]);
+      } catch (refundErr) {
+        console.error('[AI발송] 환불 처리 중 추가 오류:', refundErr);
+      }
+      return res.status(500).json({ error: '발송 처리 중 오류가 발생했습니다. 차감된 금액은 자동 환불됩니다.' });
+    }
+
   } catch (error) {
     console.error('캠페인 발송 에러:', error);
     return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
@@ -1858,6 +1898,9 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       });
     }
 
+    // ★ P0-3: 차감 성공 후 발송 실패 시 자동 환불 보장
+    try {
+
     // 2. MySQL 큐에 메시지 삽입 — 회사 라인그룹 테이블 라운드로빈 분배
     const isScheduledSend = scheduled && scheduledAt;
 
@@ -1867,6 +1910,21 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       const optResult = await query('SELECT opt_out_080_number FROM companies WHERE id = $1', [companyId]);
       directOpt080 = optResult.rows[0]?.opt_out_080_number || '';
     }
+
+    // ★ 회사 스키마 + DB 고객 데이터 조회 (replaceVariables 폴백용)
+    const directSchemaResult = await query('SELECT customer_schema FROM companies WHERE id = $1', [companyId]);
+    const directFieldMappings = extractVarCatalog(directSchemaResult.rows[0]?.customer_schema).fieldMappings;
+    const directMappingCols = Object.values(directFieldMappings).map((m: any) => m.column);
+    const directSelectCols = [...new Set(['phone', ...directMappingCols])].join(', ');
+    const directPhoneList = filteredRecipients.map((r: any) => r.phone.replace(/-/g, ''));
+    const directCustomersResult = await query(
+      `SELECT ${directSelectCols} FROM customers WHERE company_id = $1 AND phone = ANY($2)`,
+      [companyId, directPhoneList]
+    );
+    const directCustomerMap = new Map<string, Record<string, any>>();
+    directCustomersResult.rows.forEach((c: any) => {
+      directCustomerMap.set(c.phone, c);
+    });
 
     // SMS 발송 (sms 또는 both)
     if (directChannel === 'sms' || directChannel === 'both') {
@@ -1880,14 +1938,23 @@ router.post('/direct-send', async (req: Request, res: Response) => {
         const cleanPhone = recipient.phone.replace(/-/g, '');
         let finalMessage: string;
         if (customMessageMap.has(cleanPhone)) {
+          // 프론트 치환 완료 메시지 (직접타겟추출 경로)
           finalMessage = customMessageMap.get(cleanPhone)!;
         } else {
-          finalMessage = message
-            .replace(/%이름%/g, recipient.name || '')
-            .replace(/%기타1%/g, recipient.extra1 || '')
-            .replace(/%기타2%/g, recipient.extra2 || '')
-            .replace(/%기타3%/g, recipient.extra3 || '')
-            .replace(/%회신번호%/g, recipient.callback || '');
+          // ★ DB 고객 데이터로 동적 치환 (하드코딩 제거)
+          const dbCustomer = directCustomerMap.get(cleanPhone);
+          if (dbCustomer) {
+            finalMessage = replaceVariables(message, dbCustomer, directFieldMappings);
+          } else {
+            // DB에 없는 수신자 (직접입력) — 최후 안전망
+            finalMessage = message
+              .replace(/%이름%/g, recipient.name || '')
+              .replace(/%기타1%/g, recipient.extra1 || '')
+              .replace(/%기타2%/g, recipient.extra2 || '')
+              .replace(/%기타3%/g, recipient.extra3 || '')
+              .replace(/%회신번호%/g, recipient.callback || '')
+              .replace(/%[^%\s]{1,20}%/g, '');
+          }
         }
 
         // ★ D28: 제목은 고정값 그대로 사용 (머지 치환 완전 제거)
@@ -1976,12 +2043,19 @@ router.post('/direct-send', async (req: Request, res: Response) => {
         if (customMessageMap.has(cleanPhone)) {
           finalMessage = customMessageMap.get(cleanPhone)!;
         } else {
-          finalMessage = message
-            .replace(/%이름%/g, recipient.name || '')
-            .replace(/%기타1%/g, recipient.extra1 || '')
-            .replace(/%기타2%/g, recipient.extra2 || '')
-            .replace(/%기타3%/g, recipient.extra3 || '')
-            .replace(/%회신번호%/g, recipient.callback || '');
+          // ★ DB 고객 데이터로 동적 치환 (하드코딩 제거)
+          const dbCustomer = directCustomerMap.get(cleanPhone);
+          if (dbCustomer) {
+            finalMessage = replaceVariables(message, dbCustomer, directFieldMappings);
+          } else {
+            finalMessage = message
+              .replace(/%이름%/g, recipient.name || '')
+              .replace(/%기타1%/g, recipient.extra1 || '')
+              .replace(/%기타2%/g, recipient.extra2 || '')
+              .replace(/%기타3%/g, recipient.extra3 || '')
+              .replace(/%회신번호%/g, recipient.callback || '')
+              .replace(/%[^%\s]{1,20}%/g, '');
+          }
         }
 
         // 분할전송 시간 계산
@@ -2045,6 +2119,19 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       campaignId,
       message: `${filteredRecipients.length}건 발송 ${scheduled ? '예약' : '완료'}${excludedCount > 0 ? ` (수신거부 ${excludedCount}건 제외)` : ''}`
     });
+
+    } catch (sendError) {
+      // ★ P0-3: MySQL INSERT 실패 시 차감 금액 자동 환불
+      console.error('[직접발송] 큐 INSERT 실패 — 차감 환불 처리:', sendError);
+      try {
+        await prepaidRefund(companyId, filteredRecipients.length, directDeductType, campaignId, '발송 실패 자동 환불');
+        await query(`UPDATE campaigns SET status = 'failed', updated_at = NOW() WHERE id = $1`, [campaignId]);
+      } catch (refundErr) {
+        console.error('[직접발송] 환불 처리 중 추가 오류:', refundErr);
+      }
+      return res.status(500).json({ success: false, error: '발송 처리 중 오류가 발생했습니다. 차감된 금액은 자동 환불됩니다.' });
+    }
+
   } catch (error) {
     console.error('직접발송 실패:', error);
     res.status(500).json({ success: false, error: '발송 실패' });

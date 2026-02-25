@@ -3,7 +3,7 @@
 > **목적:** 버그의 발견→분석→수정→교차검증→완료를 체계적으로 관리하여 재발을 방지한다.  
 > **원칙:** (1) 추측성 땜질 금지 (2) 근본 원인 3줄 이내 특정 (3) 교차검증 통과 전까지 Closed 금지 (4) 재발 패턴 기록  
 > **SoT(진실의 원천):** STATUS.md + 이 문서. 채팅에서 떠도는 "수정 완료"는 교차검증 전까지 "임시"다.
-> **현황:** 8차 13건 수정완료(2단계 대기) + **9차 구조적 결함 8건 Open (최우선 복구 대상)**
+> **현황:** 8차 13건 수정완료(2단계 대기) + **9차: S9-01/02/03 수정완료-검증대기, S9-06 Closed, S9-04/05/07/08 Open** + **GPT P0: GP-01/03/04/05 수정완료-검증대기, GP-02 Open**
 
 ---
 
@@ -143,7 +143,7 @@
 
 | 단계 | 점검 항목 | 결과 |
 |------|----------|------|
-| 1단계 코드 | spam-filter.ts applySampleVars() 함수 존재(L126) + 호출 위치(L147) 확인 | ✅ |
+| 1단계 코드 | spam-filter.ts applySampleVars() 함수 존재(L126) + 호출 위치(L147) 확인 | ✅ (⚠️ D32에서 applySampleVars→replaceVariables 공통 함수로 교체됨. S9-02 참조) |
 | 1단계 코드 | Dashboard.tsx 직접타겟추출+직접발송에서 첫번째 고객 데이터 치환 로직 확인 | ✅ |
 | 1단계 코드 | 해시 계산이 치환 후 내용 기준인지 확인 (L62-72) | ✅ |
 | 2단계 실동작 | 스팸필터 테스트 → 발송된 문자에 샘플 데이터 치환되어 있는지 (%이름%→실제이름) | ⬜ |
@@ -396,7 +396,7 @@
 > **근본 원인:** 발송 5개 경로(`/:id/send`, `/direct-send`, `/test-send`, `spam-filter/test`, 예약)에 변수 치환 로직이 각각 다른 방식으로 분산 구현되어 있음. 한 곳 수정하면 나머지 4곳에서 재발하는 구조.
 > **해결 전략:** 공통 치환 함수 `replaceVariables()` 하나로 5개 경로 통합 (D32)
 > **GPT 크로스체크:** (1)(2)(3)(5) 동일 지적 + (4) results.ts 성능 병목 추가 확인. GPT가 못 잡은 것: sent_at 경쟁 조건, 공통 함수 통합 해결책
-> **현재 상태:** 전체 🔵 Open — 설계 컨펌 전
+> **현재 상태:** S9-01/02/03 🟡 수정완료-검증대기 (공통 함수 통합 + 서버 DB 직접 조회 전환), S9-06 ✅ Closed. S9-04/05/07/08 🔵 Open
 
 ---
 
@@ -405,12 +405,13 @@
 | 항목 | 내용 |
 |------|------|
 | **심각도** | 🔴 Critical |
-| **상태** | 🔵 Open |
+| **상태** | 🟡 수정완료-검증대기 |
 | **도메인** | hanjul.ai — 직접타겟발송 |
 | **기대 결과** | 프론트에서 수신자별 치환 완료된 customMessages를 백엔드가 수용하여 발송 |
 | **실제 결과** | 백엔드 /direct-send가 customMessages를 전혀 사용하지 않음. 빈값으로 자체 치환 → 개인화 깨짐 |
 | **근본 원인** | 프론트는 `recipients: {name:'', var1..}` 형태로 보내고, 백엔드는 `{name, extra1..3}`를 치환. customMessages 배열 자체가 무시됨 |
-| **해결 방향** | A안(채택): 백엔드에 customMessages 지원 추가 — 수신자별 message를 그대로 MySQL INSERT. 공통 치환 함수 통합 시 함께 처리 |
+| **수정 내용** | ① campaigns.ts `/direct-send`에 `customMessages: [{phone, message}]` req.body 수용 추가. ② customMessageMap(Map<phone,message>) 구성 → SMS+카카오 양쪽에서 customMessages 있으면 프론트 치환값 그대로 INSERT, 없으면 replaceVariables() 서버 치환 폴백 |
+| **수정 파일** | campaigns.ts |
 | **Harold님 컨펌** | ✅ 프론트 치환 유지 + 백엔드가 customMessages 수용하는 방향 확정 |
 
 ---
@@ -420,12 +421,13 @@
 | 항목 | 내용 |
 |------|------|
 | **심각도** | 🔴 Critical |
-| **상태** | 🔵 Open |
+| **상태** | 🟡 수정완료-검증대기 |
 | **도메인** | hanjul.ai — 스팸필터 테스트 |
 | **기대 결과** | 스팸필터 테스트 시 실제 발송 대상 첫 번째 고객 데이터로 치환 후 테스트 |
 | **실제 결과** | applySampleVars()가 "김민수/VIP/강남점" 하드코딩 샘플 사용. 실제 발송될 문안과 다른 내용으로 테스트 |
-| **근본 원인** | Harold님이 "맨 위 고객 데이터로 테스트하라"고 여러 차례 지시했으나 미반영. 타겟추출은 `targetRecipients[0]`, 직접발송은 `directRecipients[0]`을 이미 사용 중인데 AI한줄로만 하드코딩 |
-| **해결 방향** | `aiResult.target.customers[0]` 또는 동등한 첫 번째 고객 데이터로 치환. 공통 치환 함수에서 통일 |
+| **근본 원인** | Harold님이 "맨 위 고객 데이터로 테스트하라"고 여러 차례 지시했으나 미반영. 프론트 의존 구조 자체가 문제 |
+| **수정 내용 (수정 전→후)** | **[수정 전]** ① applySampleVars() 하드코딩("김민수/VIP/강남점"), ② 프론트 Dashboard.tsx에서 `%이름%→'고객'`, `%등급%→'VIP'` 등 14줄 하드코딩 치환 후 서버에 전달, ③ spam-filter.ts가 프론트에서 받은 firstCustomerData(빈 객체)로 치환 시도→실패 **[수정 후]** ① applySampleVars() 전량 삭제, ② 프론트 하드코딩 치환 14줄 전량 삭제→원본 메시지 그대로 서버 전달, ③ spam-filter.ts가 DB에서 직접 `SELECT ... FROM customers WHERE company_id=$1 AND is_active=true AND sms_opt_in=true ORDER BY created_at DESC LIMIT 1` 조회하여 실제 고객 데이터로 치환, ④ test-send도 동일하게 DB 직접 조회 전환 |
+| **수정 파일** | spam-filter.ts, campaigns.ts, Dashboard.tsx |
 
 ---
 
@@ -434,12 +436,13 @@
 | 항목 | 내용 |
 |------|------|
 | **심각도** | 🟠 Major |
-| **상태** | 🔵 Open |
+| **상태** | 🟡 수정완료-검증대기 |
 | **도메인** | 백엔드 — 타겟 추출 필터 |
 | **기대 결과** | 나이 필터가 현재 연도 기준으로 동적 계산 |
 | **실제 결과** | `AND (2026 - birth_year)` 하드코딩 → 2027년부터 필터 오작동 |
 | **근본 원인** | 하드코딩. SQL에서 `EXTRACT(YEAR FROM CURRENT_DATE AT TIME ZONE 'Asia/Seoul')` 사용해야 함 |
-| **해결 방향** | 현재 연도 동적 계산으로 전환 |
+| **수정 내용** | campaigns.ts 내 `(2026 - birth_year)` 4곳 전부 `(EXTRACT(YEAR FROM CURRENT_DATE AT TIME ZONE 'Asia/Seoul') - birth_year)` 교체. 하드코딩 잔존 0건 확인 |
+| **수정 파일** | campaigns.ts |
 
 ---
 
@@ -476,12 +479,12 @@
 | 항목 | 내용 |
 |------|------|
 | **심각도** | 🟡 Minor |
-| **상태** | 🔵 Open |
+| **상태** | ✅ Closed (현상 아님) |
 | **도메인** | 백엔드 — 스팸필터 테스트 |
 | **기대 결과** | 스팸필터 테스트와 실제 발송이 동일한 라인 선택 로직 사용 |
 | **실제 결과** | campaigns.ts는 DB sms_line_groups 기반, spam-filter.ts는 환경변수 SMSQ_SEND_10 고정 |
 | **근본 원인** | 두 파일이 독립적으로 라인 선택 로직을 구현 |
-| **해결 방향** | 공통 라인 선택 함수로 통일 (공통 치환 함수 통합 시 함께 처리) |
+| **종결 사유** | Harold님 확인: 테스트 10번, 담당자 11번 고정은 정상 운영 구조. 스팸필터는 테스트 전용 라인(10번) 사용이 맞음 |
 
 ---
 
@@ -513,23 +516,109 @@
 
 ---
 
+## 3-1) 🔴 GPT P0 결함 — 보안/정산/시간대 (GPT 크로스체크 2026-02-26 발견)
+
+> **발견 경위:** Harold님이 코드 6개 파일을 GPT에게 한 번 보여주고 즉시 P0급 결함 5건 발견. Claude는 수십 세션 동안 같은 파일을 보면서 미발견.
+> **교훈:** Claude 단독 검증 불가. 모든 수정 결과 GPT 교차검증 필수.
+> **현재 상태:** GP-01/03/04/05 🟡 수정완료-검증대기, GP-02 🔵 Open
+
+---
+
+### GP-01: spam-filter.ts 권한 체크 불일치 (req.user.role vs userType)
+
+| 항목 | 내용 |
+|------|------|
+| **심각도** | 🔴 Critical (보안) |
+| **상태** | 🟡 수정완료-검증대기 |
+| **도메인** | sys.hanjullo.com — 스팸필터 디바이스 관리 |
+| **기대 결과** | 슈퍼관리자만 `/admin/devices` 접근 가능 |
+| **실제 결과** | JWT payload는 `userType` 기반인데 코드에서 `req.user.role`로 체크 → 슈퍼관리자도 403 |
+| **근본 원인** | JWT 토큰 구조와 코드의 필드명 불일치 |
+| **수정 내용 (수정 전→후)** | **[수정 전]** `if ((req as any).user.role !== 'super_admin')` **[수정 후]** `if ((req as any).user.userType !== 'super_admin')` |
+| **수정 파일** | spam-filter.ts L655 |
+
+---
+
+### GP-02: /uploads 정적 서빙 인증 없음 (PII 노출)
+
+| 항목 | 내용 |
+|------|------|
+| **심각도** | 🔴🔴 Blocker (보안) |
+| **상태** | 🔵 Open |
+| **도메인** | 전체 — 파일 업로드 |
+| **기대 결과** | 업로드된 파일(고객 PII 포함 가능)은 인증된 요청만 다운로드 가능 |
+| **실제 결과** | `/uploads` 경로가 정적 서빙으로 인증 없이 접근 가능 → URL 알면 누구나 다운로드 |
+| **근본 원인** | Express static middleware 또는 Nginx 설정에서 `/uploads` 디렉토리 무인증 서빙 |
+| **해결 방향** | ① 인증 미들웨어 추가 (JWT 검증), ② 파일명 UUID 난독화, ③ TTL 기반 자동 정리, ④ 파일 위치 확인 필요 (app.ts 또는 Nginx 설정) |
+
+---
+
+### GP-03: 선불 차감 후 발송 실패 시 환불 미보장 (🔴🔴 치명 정산 이슈)
+
+| 항목 | 내용 |
+|------|------|
+| **심각도** | 🔴🔴 Blocker (정산) |
+| **상태** | 🟡 수정완료-검증대기 |
+| **도메인** | hanjul.ai — 발송 전체 |
+| **기대 결과** | prepaidDeduct() 차감 후 MySQL INSERT 실패 시 즉시 환불 |
+| **실제 결과** | catch 블록에서 500만 반환하고 차감 금액 미환불 → 돈은 빠졌는데 발송 안 됨 → 고객 클레임 |
+| **근본 원인** | prepaidDeduct()와 MySQL INSERT 사이에 트랜잭션 보장 없음. catch에 환불 로직 없음 |
+| **수정 내용 (수정 전→후)** | **[수정 전]** ① /:id/send — 차감 후 MySQL INSERT 실패 시 catch에서 500만 반환 ② /direct-send — 동일 ③ /test-send — 동일 **[수정 후]** ① /:id/send — 차감 성공 후 내부 try-catch 추가. sendError 시 prepaidRefund(companyId, count, type, id, '발송 실패 자동 환불') + 캠페인 status='failed' 마킹 ② /direct-send — 동일 구조 ③ /test-send — 실패건수(managerContacts.length - sentCount)만큼 prepaidRefund |
+| **수정 파일** | campaigns.ts L707(테스트), L1144(AI발송), L2123(직접발송) |
+| **⚠️ 전제조건** | `prepaidRefund` 함수 존재 여부 확인 필요. 없으면 신규 생성 필수 |
+
+---
+
+### GP-04: 예약/분할 발송 UTC/KST 불일치
+
+| 항목 | 내용 |
+|------|------|
+| **심각도** | 🟠 Major (시간대) |
+| **상태** | 🟡 수정완료-검증대기 |
+| **도메인** | hanjul.ai — 예약/분할 발송 |
+| **기대 결과** | MySQL의 NOW()와 toKoreaTimeStr()이 동일 시간대 기준 |
+| **실제 결과** | 즉시발송은 NOW()로 해결되지만, 예약/분할은 toKoreaTimeStr() 기반. MySQL 세션 TZ가 UTC면 9시간 밀림 |
+| **근본 원인** | MySQL 세션 타임존 미설정. 서버(Node.js)와 MySQL 시간대 불일치 가능 |
+| **수정 내용 (수정 전→후)** | **[수정 전]** MySQL 세션 타임존 미설정, toKoreaTimeStr() 결과가 MySQL TZ와 불일치 가능 **[수정 후]** ① campaigns.ts 최상단에 `mysqlQuery("SET time_zone = '+09:00'")` 서버 시작 시 실행 ② 시작 시 `SELECT NOW(), @@session.time_zone` 확인 로그 출력 |
+| **수정 파일** | campaigns.ts L14-24 |
+| **⚠️ 주의** | 커넥션 풀 환경에서 세션 단위 설정이 풀 전체에 적용되는지 확인 필요 |
+
+---
+
+### GP-05: 직접발송 잔여 %변수% strip 누락
+
+| 항목 | 내용 |
+|------|------|
+| **심각도** | 🟠 Major (치환) |
+| **상태** | ✅ Closed (이번 수정에서 해결) |
+| **도메인** | hanjul.ai — 직접발송 |
+| **기대 결과** | 치환 안 된 잔여 %변수%가 strip되어 발송 |
+| **실제 결과** | /:id/send는 `/%[^%\s]{1,20}%/g` strip 있으나, /direct-send는 %이름%/%기타1~3%만 replace → 나머지 변수 그대로 발송 |
+| **수정 내용** | /direct-send 최후 안전망(DB에 없는 수신자)에 `.replace(/%[^%\s]{1,20}%/g, '')` strip 추가 |
+| **수정 파일** | campaigns.ts |
+
+---
+
 ## 4) 🔄 5개 경로 전수 점검 매트릭스 (D29 의무화)
 
 > **규칙:** 발송 관련 코드 수정 시 이 매트릭스를 반드시 채워야 한다.  
 > **5개 경로:** /:id/send(AI), /direct-send(직접), /test-send(테스트), spam-filter/test(스팸), 예약(scheduled)
 
-### 8차 최종 매트릭스 (campaigns.ts + spam-filter.ts 통합) — 2차 전수점검 확인
+### 8차+9차+GPT 통합 매트릭스 (campaigns.ts + spam-filter.ts + Dashboard.tsx) — 2026-02-26 업데이트
 
 | 체크 항목 | /:id/send (AI) | /direct-send | /test-send | spam-filter | 예약수정 |
 |-----------|:-:|:-:|:-:|:-:|:-:|
 | 회신번호 등록 여부 검증 | ✅ L836+L946 | ✅ L1755+L1773 | - (기본번호) | - (기본번호) | - |
 | MySQL INSERT 시 title_str 정상 전달 | ✅ L1058 | ✅ L1952 | ✅ L657 | ✅ 별도파일 | ✅ L2528 |
 | 제목 머지 치환 코드 → 삭제 (D28) | ✅ L1019 | ✅ L1891 | - (없었음) | ✅ (없음) | ✅ L2512 |
-| 본문 개인화 변수 치환 정상 | ✅ 동적 | ✅ 하드코딩 | ✅ 추가(#3) | ✅ applySampleVars | ✅ |
+| 본문 개인화 변수 치환 정상 | ✅ replaceVariables() | ✅ customMsg→DB폴백→안전망 | ✅ DB 직접조회+replaceVariables() | ✅ DB 직접조회+replaceVariables() | ✅ replaceVariables() |
+| 고객 데이터 소스 | DB 직접 조회 | customMsg우선→DB폴백→안전망 | ✅ DB 직접 조회 (서버) | ✅ DB 직접 조회 (서버) | DB 직접 조회 |
+| 프론트 하드코딩 치환 | 없음 | 없음 | 없음 | ✅ 제거 (D34) | 없음 |
+| 잔여변수 strip | ✅ | ✅ 모든 경로 (GP-05) | ✅ | ✅ | ✅ |
 | sendreq_time MySQL NOW() 사용 | ✅ | ✅ L1909 | ✅ | ✅ | ✅ |
 | campaign 상태 업데이트 정확성 | ✅ | ✅ L2015 sending | - | - | ✅ |
-| 선택 문안 = 실제 INSERT 문안 일치 | ✅ | ✅ | ✅ | ✅ | - |
-| msg_type S/L 정확한 분기 | ✅ | ✅ L1931 | ✅ | ✅ | - |
+| 선불 차감 후 실패 시 환불 (GP-03) | ✅ L1144 sendError→refund | ✅ L2123 sendError→refund | ✅ L707 실패건 환불 | - (비과금) | - |
+| firstCustomerData 프론트 의존 | 없음 | 없음 | ✅ 제거→서버 DB 조회 | ✅ 제거→서버 DB 조회 | 없음 |
 
 ---
 
@@ -584,6 +673,15 @@
 | AiCustomSendFlow.tsx | frontend/components/ | 추가세션 | #9 |
 | CampaignSuccessModal.tsx | frontend/components/ | 2차 전수점검 세션 | #8 |
 
+## 7-1) 📦 9차+GPT P0 수정 파일 총괄
+
+| 파일 | 위치 | 수정 내용 | 관련 버그 | 라인 변화 |
+|------|------|----------|----------|----------|
+| campaigns.ts | backend/routes/ | DB 직접 조회 전환, 환불 보장, MySQL TZ | S9-01/02, GP-03/04/05 | 2598→2685줄 (+87) |
+| spam-filter.ts | backend/routes/ | DB 직접 조회 전환, 권한 체크 수정 | S9-02, GP-01 | 693→698줄 (+5) |
+| Dashboard.tsx | frontend/components/ | 하드코딩 치환 전면 제거 | S9-02 | 5110→5087줄 (-23) |
+| messageUtils.ts | backend/utils/ | 신규: 공통 치환 함수 | 전체 | 신규 114줄 |
+
 ---
 
 ## 8) 반복 패턴 메모
@@ -603,6 +701,14 @@
 - **발생 횟수:** 2회 전수점검 모두 동일한 얕은 검증
 - **구조적 대응:** 검증 기준 변경 — "라인 존재 확인" → "실행 흐름 추적 + 입력→출력 시뮬레이션" (메모리 #14)
 - **효과 측정:** 9차 이후 1단계→2단계 통과율 추적
+
+### 패턴 P4: "Claude 단독 검증 한계" — GPT가 한 번에 잡는 결함을 수십 세션 동안 미발견
+
+- **증상:** GPT가 파일 6개를 한 번 보고 P0 5건 즉시 발견. Claude는 동일 파일 수십 세션 작업하면서 미발견
+- **발생 항목:** GP-01(권한체크), GP-02(파일보안), GP-03(정산환불), GP-04(시간대), GP-05(변수strip)
+- **근본 원인:** Claude가 자기 코드에 대해 확증편향(confirmation bias). "내가 짠 코드니까 맞을 것"이라는 전제
+- **구조적 대응:** 모든 수정 결과 GPT 교차검증 의무화. Harold님 결정: "Claude 못 믿겠다"
+- **효과 측정:** 향후 배포 전 GPT 교차검증으로 발견되는 결함 수 추적
 
 - **증상:** 제목의 %변수%가 일부 경로에서 미치환
 - **발생 횟수:** 3회 반복 재발
@@ -649,4 +755,4 @@
 
 ---
 
-*최종 업데이트: 2026-02-26 | 8차 13건 수정완료(2단계 검증 대기) + 9차 구조적 결함 8건 Open (발송 파이프라인 전면 복구 진행중)*
+*최종 업데이트: 2026-02-26 | 8차 13건 수정완료(2단계 검증 대기) + 9차: S9-01/02/03 수정완료(서버 DB 직접 조회 전환), S9-06 Closed, S9-04/05/07/08 Open + GPT P0: GP-01/03/04/05 수정완료(권한/환불/TZ/strip), GP-02 Open(파일보안)*

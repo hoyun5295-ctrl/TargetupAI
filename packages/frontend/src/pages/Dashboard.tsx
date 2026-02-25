@@ -3315,20 +3315,8 @@ const campaignData = {
                       </button>
                       <button 
                         onClick={() => {
-                          // ★ #3 수정: 스팸테스트 전 머지변수를 샘플 고객 데이터로 치환
-                          let msg = targetMessage || '';
-                          if (targetRecipients.length > 0) {
-                            const s = targetRecipients[0];
-                            msg = msg.replace(/%이름%/g, s.name || '고객')
-                              .replace(/%등급%/g, s.grade || 'VIP')
-                              .replace(/%지역%/g, s.region || '서울')
-                              .replace(/%구매금액%/g, s.total_purchase_amount ? Number(s.total_purchase_amount).toLocaleString() : '100,000')
-                              .replace(/%포인트%/g, s.points ? Number(s.points).toLocaleString() : '5,000')
-                              .replace(/%회신번호%/g, s.callback || '')
-                              .replace(/%[^%\s]{1,20}%/g, '');
-                          } else {
-                            msg = msg.replace(/%이름%/g, '고객님').replace(/%등급%/g, 'VIP').replace(/%[^%\s]{1,20}%/g, '');
-                          }
+                          // ★ 원본 메시지 그대로 전달 — 서버가 DB에서 고객 조회 후 치환
+                          const msg = targetMessage || '';
                           const cb = selectedCallback || '';
                           const smsMsg = adTextEnabled ? `(광고)${msg}\n무료거부${optOutNumber.replace(/-/g, '')}` : msg;
                           const lmsMsg = adTextEnabled ? `(광고) ${msg}\n무료수신거부 ${optOutNumber}` : msg;
@@ -4108,19 +4096,8 @@ const campaignData = {
                       <button 
                         onClick={() => {
                           if (isSpamFilterLocked) { setShowSpamFilterLock(true); return; }
-                          // ★ #3 수정: 스팸테스트 전 머지변수를 샘플 데이터로 치환
-                          let msg = directMessage || '';
-                          if (directRecipients.length > 0) {
-                            const s = directRecipients[0];
-                            msg = msg.replace(/%이름%/g, s.name || '고객')
-                              .replace(/%기타1%/g, s.extra1 || '')
-                              .replace(/%기타2%/g, s.extra2 || '')
-                              .replace(/%기타3%/g, s.extra3 || '')
-                              .replace(/%회신번호%/g, s.callback || '')
-                              .replace(/%[^%\s]{1,20}%/g, '');
-                          } else {
-                            msg = msg.replace(/%이름%/g, '고객님').replace(/%[^%\s]{1,20}%/g, '');
-                          }
+                          // ★ 원본 메시지 그대로 전달 — 서버가 DB에서 고객 조회 후 치환
+                          const msg = directMessage || '';
                           const cb = selectedCallback || '';
                           const smsMsg = adTextEnabled ? `(광고)${msg}\n무료거부${optOutNumber.replace(/-/g, '')}` : msg;
                           const lmsMsg = adTextEnabled ? `(광고) ${msg}\n무료수신거부 ${optOutNumber}` : msg;
