@@ -1,7 +1,9 @@
-import { Router, Request, Response } from 'express';
-import { query, mysqlQuery } from '../config/database';
-import { authenticate } from '../middlewares/auth';
 import { createHash } from 'crypto';
+import { Request, Response, Router } from 'express';
+import { mysqlQuery, query } from '../config/database';
+import { authenticate } from '../middlewares/auth';
+import { extractVarCatalog } from '../services/ai';
+import { replaceVariables } from '../utils/messageUtils';
 
 const router = Router();
 
@@ -34,7 +36,7 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
   try {
     const userId = (req as any).user.userId;
     const companyId = (req as any).user.companyId;
-    const { callbackNumber, messageContentSms, messageContentLms, messageType } = req.body;
+    const { callbackNumber, messageContentSms, messageContentLms, messageType, firstCustomerData } = req.body;
 
     if (!callbackNumber) {
       return res.status(400).json({ error: '발신번호를 입력해주세요.' });
@@ -59,16 +61,15 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
     // 2) 실제 발송될 메시지 내용 결정 + 해시 계산
     const isLmsType = messageType === 'LMS' || messageType === 'MMS';
     const rawActualContent = isLmsType ? (messageContentLms || '') : (messageContentSms || '');
-    // ★ #3: 해시는 치환 후 내용으로 계산 (앱이 리포트하는 내용과 일치시킴)
-    const SAMPLE_HASH_DATA: Record<string, string> = {
-      '이름': '김민수', '포인트': '12,500', '등급': 'VIP', '매장명': '강남점',
-      '지역': '서울', '구매금액': '350,000', '구매횟수': '8', '성별': '남성',
-      '나이': '35', '평균주문금액': '43,750', '최근구매일': '2026-02-10',
-      '최근구매매장': '강남점', '생일': '3월 15일', '결혼기념일': '5월 20일',
-    };
-    let personalizedForHash = rawActualContent;
-    Object.entries(SAMPLE_HASH_DATA).forEach(([k, v]) => { personalizedForHash = personalizedForHash.replace(new RegExp(`%${k}%`, 'g'), v); });
-    personalizedForHash = personalizedForHash.replace(/%[^%\s]{1,20}%/g, '');
+
+    // ★ D32: 회사 스키마에서 fieldMappings 조회 + 실제 타겟 첫 번째 고객으로 치환
+    const companySchemaResult = await query('SELECT customer_schema FROM companies WHERE id = $1', [companyId]);
+    const spamFieldMappings = extractVarCatalog(companySchemaResult.rows[0]?.customer_schema).fieldMappings;
+    // firstCustomerData: 프론트에서 전달하는 실제 타겟 최상단 고객 데이터
+    const firstCustomer: Record<string, any> = firstCustomerData || {};
+
+    // 해시는 치환 후 내용으로 계산 (앱이 리포트하는 내용과 일치시킴)
+    const personalizedForHash = replaceVariables(rawActualContent, firstCustomer, spamFieldMappings);
     const messageHash = computeMessageHash(personalizedForHash);
 
     // 3) 동일 발신번호 + 동일 메시지 해시로 진행 중인 테스트 차단 (세션 격리)
@@ -116,22 +117,8 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
       if (messageContentSms) messageTypes.push('SMS');
     }
 
-    // ★ #3: 스팸테스트 시 개인화 변수를 샘플 데이터로 치환 (실제 발송과 유사한 메시지로 테스트)
-    const SAMPLE_DATA: Record<string, string> = {
-      '이름': '김민수', '포인트': '12,500', '등급': 'VIP', '매장명': '강남점',
-      '지역': '서울', '구매금액': '350,000', '구매횟수': '8', '성별': '남성',
-      '나이': '35', '평균주문금액': '43,750', '최근구매일': '2026-02-10',
-      '최근구매매장': '강남점', '생일': '3월 15일', '결혼기념일': '5월 20일',
-    };
-    const applySampleVars = (text: string): string => {
-      let result = text;
-      Object.entries(SAMPLE_DATA).forEach(([key, val]) => {
-        result = result.replace(new RegExp(`%${key}%`, 'g'), val);
-      });
-      // 남은 미치환 변수 제거 (커스텀 필드 등)
-      result = result.replace(/%[^%\s]{1,20}%/g, '');
-      return result;
-    };
+    // ★ D32: 실제 타겟 최상단 고객 데이터로 치환 (하드코딩 완전 제거)
+    // replaceVariables가 타입포맷+잔여변수 strip 모두 처리
 
     for (const device of devices.rows) {
       for (const msgType of messageTypes) {
@@ -144,7 +131,7 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
 
         // ★ #3: 개인화 변수를 샘플 데이터로 치환하여 발송 (원본은 DB에 보관)
         const rawContent = msgType === 'SMS' ? messageContentSms : messageContentLms;
-        const content = applySampleVars(rawContent || '');
+        const content = replaceVariables(rawContent || '', firstCustomer, spamFieldMappings);
 
         // QTmsg 테스트 라인으로 발송
         await insertSmsQueue(

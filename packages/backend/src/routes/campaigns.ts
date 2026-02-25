@@ -4,6 +4,7 @@ import { authenticate } from '../middlewares/auth';
 import { extractVarCatalog, validatePersonalizationVars, VarCatalogEntry } from '../services/ai';
 import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getRegionVariants } from '../utils/normalize';
 import { getSourceRef, logTrainingData, updateTrainingMetrics } from '../utils/training-logger';
+import { replaceVariables } from '../utils/messageUtils';
 
 // 한국시간 문자열 변환 (MySQL datetime 형식)
 const toKoreaTimeStr = (date: Date) => {
@@ -593,15 +594,19 @@ router.post('/test-send', async (req: Request, res: Response) => {
       }
     }
 
-    // 회사 설정에서 담당자 정보 가져오기
+    // 회사 설정에서 담당자 정보 + 스키마 가져오기
     const companyResult = await query(
-      'SELECT manager_phone, manager_contacts FROM companies WHERE id = $1',
+      'SELECT manager_phone, manager_contacts, customer_schema FROM companies WHERE id = $1',
       [companyId]
     );
 
     if (companyResult.rows.length === 0) {
       return res.status(404).json({ error: '회사 정보를 찾을 수 없습니다.' });
     }
+
+    // ★ D32: 테스트도 실제 타겟 최상단 고객으로 치환 (프론트에서 firstCustomerData 전달)
+    const testFirstCustomer: Record<string, any> = req.body.firstCustomerData || {};
+    const testFieldMappings = extractVarCatalog(companyResult.rows[0]?.customer_schema).fieldMappings;
 
     // 회신번호 가져오기 (callback_numbers 테이블에서)
     const callbackResult = await query(
@@ -645,7 +650,8 @@ router.post('/test-send', async (req: Request, res: Response) => {
     for (const contact of managerContacts) {
       try {
         const cleanPhone = contact.phone.replace(/-/g, '');
-        const testMsg = messageContent;
+        // ★ D32: 공통 치환 함수로 실제 타겟 첫 번째 고객 데이터 치환
+        const testMsg = replaceVariables(messageContent, testFirstCustomer, testFieldMappings);
 
         if (testChannel === 'sms' || testChannel === 'both') {
           // SMS 테스트 발송
@@ -1014,31 +1020,10 @@ if (sendChannel !== 'sms' && campaign.is_ad) {
 }
 
 for (const customer of filteredCustomers) {
-  // ★ 동적 변수 치환 (field_mappings 기반 - 하드코딩 완전 제거!)
-  let personalizedMessage = campaign.message_content || '';
+  // ★ D32: 공통 치환 함수 사용 (messageUtils.ts)
+  const personalizedMessage = replaceVariables(campaign.message_content || '', customer, fieldMappings);
   // ★ D28: 제목은 고정값 그대로 사용 (머지 치환 완전 제거)
   const personalizedSubject = campaign.subject || '';
-
-  for (const [varName, mapping] of Object.entries(fieldMappings) as [string, VarCatalogEntry][]) {
-    const value = customer[mapping.column];
-    let displayValue = '';
-
-    if (value === null || value === undefined) {
-      displayValue = '';
-    } else if (mapping.type === 'number' && typeof value === 'number') {
-      displayValue = value.toLocaleString();
-    } else if (mapping.type === 'date' && value) {
-      displayValue = new Date(value).toLocaleDateString('ko-KR');
-    } else {
-      displayValue = String(value);
-    }
-
-    const varRegex = new RegExp(`%${varName}%`, 'g');
-    personalizedMessage = personalizedMessage.replace(varRegex, displayValue);
-  }
-
-  // 검증에서 발견된 잘못된 변수 잔여분 제거 (안전장치) — 본문만 적용
-  personalizedMessage = personalizedMessage.replace(/%[^%\s]{1,20}%/g, '');
 
   // 개별회신번호: customer.callback 있으면 사용, 없으면 캠페인 설정 또는 기본값
   const customerCallback = useIndividualCallback && customer.callback
@@ -1160,22 +1145,22 @@ function buildFilterQuery(filter: any, companyId: string) {
   // age (배열: [30, 39])
   const age = getValue(filter.age);
   if (age && Array.isArray(age) && age.length === 2) {
-    where += ` AND (2026 - birth_year) >= $${paramIndex++}`;
+    where += ` AND (EXTRACT(YEAR FROM CURRENT_DATE AT TIME ZONE 'Asia/Seoul') - birth_year) >= $${paramIndex++}`;
     params.push(age[0]);
-    where += ` AND (2026 - birth_year) <= $${paramIndex++}`;
+    where += ` AND (EXTRACT(YEAR FROM CURRENT_DATE AT TIME ZONE 'Asia/Seoul') - birth_year) <= $${paramIndex++}`;
     params.push(age[1]);
   }
 
   // minAge/maxAge (기존 호환)
   const minAge = getValue(filter.minAge) || getValue(filter.min_age);
   if (minAge) {
-    where += ` AND (2026 - birth_year) >= $${paramIndex++}`;
+    where += ` AND (EXTRACT(YEAR FROM CURRENT_DATE AT TIME ZONE 'Asia/Seoul') - birth_year) >= $${paramIndex++}`;
     params.push(minAge);
   }
 
   const maxAge = getValue(filter.maxAge) || getValue(filter.max_age);
   if (maxAge) {
-    where += ` AND (2026 - birth_year) <= $${paramIndex++}`;
+    where += ` AND (EXTRACT(YEAR FROM CURRENT_DATE AT TIME ZONE 'Asia/Seoul') - birth_year) <= $${paramIndex++}`;
     params.push(maxAge);
   }
 
@@ -1727,6 +1712,7 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       message,        // 메시지 내용 (광고문구 포함된 최종 메시지)
       callback,       // 회신번호
       recipients,     // [{phone, name, extra1, extra2, extra3}]
+      customMessages, // ★ S9-01: [{phone, message}] — 프론트에서 치환 완료된 개인화 메시지
       adEnabled,      // 광고문구 포함 여부
       scheduled,      // 예약 여부
       scheduledAt,    // 예약 시간
@@ -1743,6 +1729,16 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       kakaoCarouselJson,    // 캐러셀 JSON
       kakaoResendType,      // SM/LM/NO
     } = req.body;
+
+    // ★ S9-01: 프론트 치환 완료 메시지 맵 구성 (phone → message)
+    const customMessageMap = new Map<string, string>();
+    if (customMessages && Array.isArray(customMessages)) {
+      for (const cm of customMessages) {
+        if (cm.phone && cm.message) {
+          customMessageMap.set(cm.phone.replace(/-/g, ''), cm.message);
+        }
+      }
+    }
 
     if (!recipients || recipients.length === 0) {
       return res.status(400).json({ success: false, error: '수신자가 없습니다' });
@@ -1880,13 +1876,19 @@ router.post('/direct-send', async (req: Request, res: Response) => {
 
       for (let i = 0; i < filteredRecipients.length; i++) {
         const recipient = filteredRecipients[i];
-        // 변수 치환 — 본문만
-        let finalMessage = message
-          .replace(/%이름%/g, recipient.name || '')
-          .replace(/%기타1%/g, recipient.extra1 || '')
-          .replace(/%기타2%/g, recipient.extra2 || '')
-          .replace(/%기타3%/g, recipient.extra3 || '')
-          .replace(/%회신번호%/g, recipient.callback || '');
+        // ★ S9-01: customMessages 있으면 프론트 치환값 사용, 없으면 서버 치환
+        const cleanPhone = recipient.phone.replace(/-/g, '');
+        let finalMessage: string;
+        if (customMessageMap.has(cleanPhone)) {
+          finalMessage = customMessageMap.get(cleanPhone)!;
+        } else {
+          finalMessage = message
+            .replace(/%이름%/g, recipient.name || '')
+            .replace(/%기타1%/g, recipient.extra1 || '')
+            .replace(/%기타2%/g, recipient.extra2 || '')
+            .replace(/%기타3%/g, recipient.extra3 || '')
+            .replace(/%회신번호%/g, recipient.callback || '');
+        }
 
         // ★ D28: 제목은 고정값 그대로 사용 (머지 치환 완전 제거)
         const finalSubject = subject || '';
@@ -1969,12 +1971,18 @@ router.post('/direct-send', async (req: Request, res: Response) => {
     if (directChannel === 'kakao' || directChannel === 'both') {
       for (let i = 0; i < filteredRecipients.length; i++) {
         const recipient = filteredRecipients[i];
-        let finalMessage = message
-          .replace(/%이름%/g, recipient.name || '')
-          .replace(/%기타1%/g, recipient.extra1 || '')
-          .replace(/%기타2%/g, recipient.extra2 || '')
-          .replace(/%기타3%/g, recipient.extra3 || '')
-          .replace(/%회신번호%/g, recipient.callback || '');
+        const cleanPhone = recipient.phone.replace(/-/g, '');
+        let finalMessage: string;
+        if (customMessageMap.has(cleanPhone)) {
+          finalMessage = customMessageMap.get(cleanPhone)!;
+        } else {
+          finalMessage = message
+            .replace(/%이름%/g, recipient.name || '')
+            .replace(/%기타1%/g, recipient.extra1 || '')
+            .replace(/%기타2%/g, recipient.extra2 || '')
+            .replace(/%기타3%/g, recipient.extra3 || '')
+            .replace(/%회신번호%/g, recipient.callback || '');
+        }
 
         // 분할전송 시간 계산
         let kakaoSendTime: string | undefined;
@@ -2433,10 +2441,19 @@ router.put('/:id/message', async (req: Request, res: Response) => {
       return res.json({ success: true, message: '문안이 수정되었습니다 (발송 시 적용)' });
     }
 
-    // 2. 전화번호로 고객 정보 조회 (PostgreSQL)
+    // 2. 회사 스키마 조회 + 전화번호로 고객 정보 조회 (PostgreSQL)
+    const companySchemaResult = await query('SELECT customer_schema FROM companies WHERE id = $1', [companyId]);
+    const customerSchema = companySchemaResult.rows[0]?.customer_schema || {};
+    const { fieldMappings: editFieldMappings } = extractVarCatalog(customerSchema);
+
+    // ★ D32: 동적 컬럼 SELECT — fieldMappings에서 필요한 컬럼 자동 추출
+    const editBaseColumns = ['phone'];
+    const editMappingColumns = Object.values(editFieldMappings).map((m: VarCatalogEntry) => m.column);
+    const editSelectColumns = [...new Set([...editBaseColumns, ...editMappingColumns])].join(', ');
+
     const phones = recipients.map((r: any) => r.dest_no);
     const customersResult = await query(
-      `SELECT phone, name, grade, region FROM customers WHERE company_id = $1 AND phone = ANY($2)`,
+      `SELECT ${editSelectColumns} FROM customers WHERE company_id = $1 AND phone = ANY($2)`,
       [companyId, phones]
     );
 
@@ -2488,11 +2505,8 @@ router.put('/:id/message', async (req: Request, res: Response) => {
         for (const recipient of batch) {
           const customer = customerMap.get(recipient.dest_no) || {};
 
-          // 변수 치환
-          let finalMessage = message
-            .replace(/%이름%/g, customer.name || '고객')
-            .replace(/%등급%/g, customer.grade || '')
-            .replace(/%지역%/g, customer.region || '');
+          // ★ D32: 공통 치환 함수 사용
+          let finalMessage = replaceVariables(message, customer, editFieldMappings);
 
           // 광고 문구 추가
           if (adEnabled && optOut080) {
