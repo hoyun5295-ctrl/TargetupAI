@@ -942,6 +942,25 @@ if (useIndividualCallback) {
   if (callbackSkippedCount > 0) {
     console.log(`[개별회신번호] callback 없는 고객 ${callbackSkippedCount}명 제외 (${filteredCustomers.length}명 발송)`);
   }
+
+  // ★ #4 수정: 개별회신번호 등록 여부 검증
+  const callbackPhones = [...new Set(filteredCustomers.map((c: any) => (c.callback || '').replace(/-/g, '')).filter(Boolean))];
+  if (callbackPhones.length > 0) {
+    const registeredResult = await query(
+      `SELECT REPLACE(phone_number, '-', '') as phone FROM sender_numbers WHERE company_id = $1 AND is_active = true
+       UNION SELECT REPLACE(phone, '-', '') as phone FROM callback_numbers WHERE company_id = $1`,
+      [companyId]
+    );
+    const registeredSet = new Set((registeredResult.rows as any[]).map((r: any) => r.phone));
+    const unregistered = callbackPhones.filter(p => !registeredSet.has(p));
+    if (unregistered.length > 0) {
+      return res.status(400).json({
+        error: `미등록 회신번호 ${unregistered.length}건이 있습니다. 발신번호 관리에서 등록 후 다시 시도해주세요.`,
+        code: 'INVALID_SENDER_NUMBER',
+        unregisteredNumbers: unregistered.slice(0, 5)
+      });
+    }
+  }
 }
 
 if (filteredCustomers.length === 0) {
@@ -1750,6 +1769,26 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       if (missingCallback.length > 0) {
         return res.status(400).json({ success: false, error: `개별회신번호가 없는 수신자가 ${missingCallback.length}명 있습니다` });
       }
+
+      // ★ #4 수정: 개별회신번호 등록 여부 검증
+      const callbackPhones = [...new Set(recipients.map((r: any) => (r.callback || '').replace(/-/g, '')).filter(Boolean))];
+      if (callbackPhones.length > 0) {
+        const registeredResult = await query(
+          `SELECT REPLACE(phone_number, '-', '') as phone FROM sender_numbers WHERE company_id = $1 AND is_active = true
+           UNION SELECT REPLACE(phone, '-', '') as phone FROM callback_numbers WHERE company_id = $1`,
+          [companyId]
+        );
+        const registeredSet = new Set((registeredResult.rows as any[]).map((r: any) => r.phone));
+        const unregistered = callbackPhones.filter(p => !registeredSet.has(p));
+        if (unregistered.length > 0) {
+          return res.status(400).json({
+            success: false,
+            error: `미등록 회신번호 ${unregistered.length}건이 있습니다. 발신번호 관리에서 등록 후 다시 시도해주세요.`,
+            code: 'INVALID_SENDER_NUMBER',
+            unregisteredNumbers: unregistered.slice(0, 5)
+          });
+        }
+      }
     }
 
     // 1. 수신거부 필터링
@@ -1867,7 +1906,7 @@ router.post('/direct-send', async (req: Request, res: Response) => {
           baseTime.setMinutes(baseTime.getMinutes() + batchIndex);
           sendTime = toKoreaTimeStr(baseTime);
         } else {
-          sendTime = toKoreaTimeStr(new Date());
+          sendTime = '__NOW__';  // ★ #5 수정: 즉시발송은 MySQL NOW() 직접 사용
         }
 
         // 개별회신번호면 recipient.callback 사용, 아니면 공통 callback 사용
@@ -1900,16 +1939,28 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       }
 
       // Bulk INSERT 실행 (테이블별)
+      // ★ #5 수정: 즉시발송(비예약·비분할)은 sendreq_time에 MySQL NOW() 직접 사용
+      const useNow = !isScheduledSend && !(splitEnabled && splitCount > 0);
       for (const [table, batches] of Object.entries(tableBatches)) {
         for (const batch of batches) {
           if (batch.length === 0) continue;
-          const placeholders = batch.map(() => '(?, ?, ?, ?, ?, ?, 100, \'1\', ?, ?, ?, ?)').join(', ');
-          const flatValues = batch.flat();
-
-          await mysqlQuery(
-            `INSERT INTO ${table} (dest_no, call_back, msg_contents, msg_type, title_str, sendreq_time, status_code, rsv1, app_etc1, file_name1, file_name2, file_name3) VALUES ${placeholders}`,
-            flatValues
-          );
+          if (useNow) {
+            // 즉시발송: row[5](sendTime) 제외, NOW() SQL 직접 삽입
+            const placeholders = batch.map(() => '(?, ?, ?, ?, ?, NOW(), 100, \'1\', ?, ?, ?, ?)').join(', ');
+            const flatValues = batch.map(row => [row[0], row[1], row[2], row[3], row[4], row[6], row[7], row[8], row[9]]).flat();
+            await mysqlQuery(
+              `INSERT INTO ${table} (dest_no, call_back, msg_contents, msg_type, title_str, sendreq_time, status_code, rsv1, app_etc1, file_name1, file_name2, file_name3) VALUES ${placeholders}`,
+              flatValues
+            );
+          } else {
+            // 예약/분할: sendTime 파라미터 그대로 사용
+            const placeholders = batch.map(() => '(?, ?, ?, ?, ?, ?, 100, \'1\', ?, ?, ?, ?)').join(', ');
+            const flatValues = batch.flat();
+            await mysqlQuery(
+              `INSERT INTO ${table} (dest_no, call_back, msg_contents, msg_type, title_str, sendreq_time, status_code, rsv1, app_etc1, file_name1, file_name2, file_name3) VALUES ${placeholders}`,
+              flatValues
+            );
+          }
         }
       }
     }

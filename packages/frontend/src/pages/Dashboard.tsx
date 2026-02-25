@@ -7,9 +7,9 @@ import AiCampaignResultPopup from '../components/AiCampaignResultPopup';
 import AiCampaignSendModal from '../components/AiCampaignSendModal';
 import AiCustomSendFlow from '../components/AiCustomSendFlow';
 import AiMessageSuggestModal from '../components/AiMessageSuggestModal';
-import AnalysisModal from '../components/AnalysisModal';
 import AiPreviewModal from '../components/AiPreviewModal';
 import AiSendTypeModal from '../components/AiSendTypeModal';
+import AnalysisModal from '../components/AnalysisModal';
 import BalanceModals from '../components/BalanceModals';
 import CalendarModal from '../components/CalendarModal';
 import CampaignSuccessModal from '../components/CampaignSuccessModal';
@@ -142,6 +142,9 @@ export default function Dashboard() {
   const [spamFilterData, setSpamFilterData] = useState<{sms?: string; lms?: string; callback: string; msgType: 'SMS'|'LMS'|'MMS'}>({callback:'',msgType:'SMS'});
   const [sendTimeOption, setSendTimeOption] = useState<'ai' | 'now' | 'custom'>('now');
   const [successSendInfo, setSuccessSendInfo] = useState<string>('');  // 성공 모달용 발송 정보
+  const [successChannel, setSuccessChannel] = useState<string>('');  // ★ #8 수정: 성공모달 전용 채널
+  const [successTargetCount, setSuccessTargetCount] = useState<number>(0);  // ★ #8 수정: 성공모달 전용 인원수
+  const [successUnsubscribeCount, setSuccessUnsubscribeCount] = useState<number>(0);  // ★ B8-08 수정: 성공모달 전용 수신거부
   const [customSendTime, setCustomSendTime] = useState('');
   const [testSending, setTestSending] = useState(false);
   const [testCooldown, setTestCooldown] = useState(false);
@@ -1224,6 +1227,7 @@ const handleAiGenerateChannelMessage = async () => {
       ...prev,
       messages: response.data.variants || [],
     }));
+    setSelectedAiMsgIdx(0);  // ★ B8-12: 재생성 시 인덱스 초기화
     
     // 2단계로 이동
     setAiStep(2);
@@ -1437,6 +1441,9 @@ const campaignData = {
                          _sendTimeOption === 'ai' ? `예약 완료 (${aiResult?.recommendedTime || 'AI 추천'})` :
                          `예약 완료 (${_customSendTime ? new Date(_customSendTime).toLocaleString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''})`;
     setSuccessSendInfo(sendInfoText);
+    setSuccessChannel(selectedChannel);  // ★ #8 수정
+    setSuccessTargetCount(aiResult?.target?.count || 0);  // ★ #8 수정
+    setSuccessUnsubscribeCount(aiResult?.target?.unsubscribeCount || 0);  // ★ B8-08 수정
     
     setSendTimeOption('ai');
     setCustomSendTime('');
@@ -1533,6 +1540,10 @@ const campaignData = {
       // 모달 닫기 + 초기화
       setShowCustomSendModal(false);
       setShowAiCustomFlow(false);
+      // ★ #8 수정: customSendData null 전에 채널/인원수 저장
+      setSuccessChannel(customSendData?.channel || 'LMS');
+      setSuccessTargetCount(customSendData?.estimatedCount || 0);
+      setSuccessUnsubscribeCount(customSendData?.unsubscribeCount || 0);  // ★ B8-08 수정
       setCustomSendData(null);
 
       const sendInfoText = _sendTimeOption === 'now' ? '즉시 발송 완료' :
@@ -1588,6 +1599,7 @@ const campaignData = {
             return msg;
           })(),
           messageType: selectedChannel,
+          subject: selectedMsg.subject || '',  // ★ #7 수정: LMS/MMS 제목 누락 수정
           mmsImagePaths: mmsUploadedImages.map(img => img.serverPath),
         }),
       });
@@ -2446,9 +2458,11 @@ const campaignData = {
           show={showSuccess}
           onClose={() => setShowSuccess(false)}
           onShowCalendar={() => { setShowSuccess(false); setShowCalendar(true); }}
-          selectedChannel={selectedChannel}
+          selectedChannel={successChannel || selectedChannel}
           aiResult={aiResult}
           successSendInfo={successSendInfo}
+          overrideTargetCount={successTargetCount || undefined}
+          overrideUnsubscribeCount={successUnsubscribeCount || undefined}
         />
         {showResults && <ResultsModal onClose={() => setShowResults(false)} token={localStorage.getItem('token')} />}
         {showCustomerDB && <CustomerDBModal onClose={() => setShowCustomerDB(false)} token={localStorage.getItem('token')} />}
@@ -3301,7 +3315,20 @@ const campaignData = {
                       </button>
                       <button 
                         onClick={() => {
-                          const msg = targetMessage || '';
+                          // ★ #3 수정: 스팸테스트 전 머지변수를 샘플 고객 데이터로 치환
+                          let msg = targetMessage || '';
+                          if (targetRecipients.length > 0) {
+                            const s = targetRecipients[0];
+                            msg = msg.replace(/%이름%/g, s.name || '고객')
+                              .replace(/%등급%/g, s.grade || 'VIP')
+                              .replace(/%지역%/g, s.region || '서울')
+                              .replace(/%구매금액%/g, s.total_purchase_amount ? Number(s.total_purchase_amount).toLocaleString() : '100,000')
+                              .replace(/%포인트%/g, s.points ? Number(s.points).toLocaleString() : '5,000')
+                              .replace(/%회신번호%/g, s.callback || '')
+                              .replace(/%[^%\s]{1,20}%/g, '');
+                          } else {
+                            msg = msg.replace(/%이름%/g, '고객님').replace(/%등급%/g, 'VIP').replace(/%[^%\s]{1,20}%/g, '');
+                          }
                           const cb = selectedCallback || '';
                           const smsMsg = adTextEnabled ? `(광고)${msg}\n무료거부${optOutNumber.replace(/-/g, '')}` : msg;
                           const lmsMsg = adTextEnabled ? `(광고) ${msg}\n무료수신거부 ${optOutNumber}` : msg;
@@ -4081,7 +4108,19 @@ const campaignData = {
                       <button 
                         onClick={() => {
                           if (isSpamFilterLocked) { setShowSpamFilterLock(true); return; }
-                          const msg = directMessage || '';
+                          // ★ #3 수정: 스팸테스트 전 머지변수를 샘플 데이터로 치환
+                          let msg = directMessage || '';
+                          if (directRecipients.length > 0) {
+                            const s = directRecipients[0];
+                            msg = msg.replace(/%이름%/g, s.name || '고객')
+                              .replace(/%기타1%/g, s.extra1 || '')
+                              .replace(/%기타2%/g, s.extra2 || '')
+                              .replace(/%기타3%/g, s.extra3 || '')
+                              .replace(/%회신번호%/g, s.callback || '')
+                              .replace(/%[^%\s]{1,20}%/g, '');
+                          } else {
+                            msg = msg.replace(/%이름%/g, '고객님').replace(/%[^%\s]{1,20}%/g, '');
+                          }
                           const cb = selectedCallback || '';
                           const smsMsg = adTextEnabled ? `(광고)${msg}\n무료거부${optOutNumber.replace(/-/g, '')}` : msg;
                           const lmsMsg = adTextEnabled ? `(광고) ${msg}\n무료수신거부 ${optOutNumber}` : msg;

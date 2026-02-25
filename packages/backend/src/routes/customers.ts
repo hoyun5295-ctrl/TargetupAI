@@ -1,8 +1,10 @@
 // customers.ts 전체 교체
 import { Request, Response, Router } from 'express';
+import Redis from 'ioredis';
 import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
 import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getGenderVariants } from '../utils/normalize';
+const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
 
 const router = Router();
 
@@ -557,6 +559,13 @@ router.post('/bulk', async (req: Request, res: Response) => {
 router.get('/stats', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
+    
+    // ★ Redis 캐싱 (60초) — 30만건 이상 집계 쿼리 최적화
+    const cacheKey = `stats:${companyId}`;
+    try {
+      const cached = await redis.get(cacheKey);
+      if (cached) return res.json(JSON.parse(cached));
+    } catch (e) { /* Redis 실패 시 DB 직접 조회 */ }
     const userId = req.user?.userId;
     const userType = req.user?.userType;
 
@@ -580,13 +589,11 @@ router.get('/stats', async (req: Request, res: Response) => {
     const result = await query(
       `SELECT
         COUNT(*) as total,
-        COUNT(*) FILTER (WHERE c.sms_opt_in = true
-          AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.company_id = c.company_id AND u.phone = c.phone)
-        ) as sms_opt_in_count,
+        COUNT(*) FILTER (WHERE c.sms_opt_in = true AND u.phone IS NULL) as sms_opt_in_count,
         COUNT(*) FILTER (WHERE c.gender = ANY($${params.length + 1}::text[])) as male_count,
         COUNT(*) FILTER (WHERE c.gender = ANY($${params.length + 2}::text[])) as female_count,
         COUNT(*) FILTER (WHERE c.grade = 'VIP') as vip_count,
-        COUNT(*) FILTER (WHERE c.sms_opt_in = false OR EXISTS (SELECT 1 FROM unsubscribes u WHERE u.company_id = c.company_id AND u.phone = c.phone)) as unsubscribe_count,
+        COUNT(*) FILTER (WHERE c.sms_opt_in = false OR u.phone IS NOT NULL) as unsubscribe_count,
         COUNT(*) FILTER (WHERE c.birth_year IS NOT NULL AND (2026 - c.birth_year) < 20) as age_under20,
         COUNT(*) FILTER (WHERE c.birth_year IS NOT NULL AND (2026 - c.birth_year) BETWEEN 20 AND 29) as age_20s,
         COUNT(*) FILTER (WHERE c.birth_year IS NOT NULL AND (2026 - c.birth_year) BETWEEN 30 AND 39) as age_30s,
@@ -594,6 +601,8 @@ router.get('/stats', async (req: Request, res: Response) => {
         COUNT(*) FILTER (WHERE c.birth_year IS NOT NULL AND (2026 - c.birth_year) BETWEEN 50 AND 59) as age_50s,
         COUNT(*) FILTER (WHERE c.birth_year IS NOT NULL AND (2026 - c.birth_year) >= 60) as age_60plus
        FROM customers_unified c
+       LEFT JOIN (SELECT DISTINCT ON (phone) company_id, phone FROM unsubscribes WHERE company_id = $1) u
+         ON u.company_id = c.company_id AND u.phone = c.phone
        WHERE c.company_id = $1 AND c.is_active = true${storeFilter}`,
       [...params, getGenderVariants('M'), getGenderVariants('F')]
     );
@@ -682,7 +691,7 @@ router.get('/stats', async (req: Request, res: Response) => {
 
     const successRate = totalSent > 0 ? ((totalSuccess / totalSent) * 100).toFixed(1) : '0';
 
-    return res.json({ 
+    const responseData = { 
       stats: {
         ...result.rows[0],
         monthly_sent: totalSent,
@@ -700,7 +709,10 @@ router.get('/stats', async (req: Request, res: Response) => {
         use_db_sync: company.use_db_sync ?? true,
         use_file_upload: company.use_file_upload ?? true
       }
-    });
+    };
+    // ★ Redis 캐시 저장 (60초)
+    try { await redis.setex(cacheKey, 60, JSON.stringify(responseData)); } catch (e) { /* 캐시 실패 무시 */ }
+    return res.json(responseData);
   } catch (error) {
     console.error('고객 통계 조회 오류:', error);
     return res.status(500).json({ error: '서버 오류가 발생했습니다.' });

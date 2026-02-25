@@ -665,7 +665,21 @@ export default function AiCustomSendFlow({
                                 )}
                                 <textarea value={msg.message_text} onChange={(e) => { const u = [...variants]; u[idx] = { ...u[idx], message_text: e.target.value }; setVariants(u); }}
                                   className="flex-1 w-full text-[12px] leading-[1.6] p-2 border border-purple-300 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-purple-400" autoFocus />
-                                <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); setEditingIdx(null); }}
+                                <button onClick={(e) => { 
+                                  e.preventDefault(); e.stopPropagation(); 
+                                  // ★ #9 수정: SMS 편집 완료 시 바이트 초과 경고
+                                  if (channel === 'SMS') {
+                                    const editedBytes = calculateBytes(wrapAdText(msg.message_text || ''));
+                                    if (editedBytes > 90) {
+                                      if (!confirm(`수정한 문안이 SMS 90바이트를 초과합니다 (${editedBytes}바이트).\nLMS로 전환하거나 추가 수정하시겠습니까?\n\n[확인] 계속 수정  [취소] 그대로 저장`)) {
+                                        setEditingIdx(null);
+                                        return;
+                                      }
+                                      return; // 계속 수정
+                                    }
+                                  }
+                                  setEditingIdx(null); 
+                                }}
                                   className="py-1.5 bg-purple-600 text-white text-[11px] font-medium rounded-lg hover:bg-purple-700 transition-colors">✅ 수정 완료</button>
                               </div>
                             ) : (
