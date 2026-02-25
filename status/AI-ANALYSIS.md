@@ -20,8 +20,9 @@
 - 분석 항목은 AI 프롬프트 수정만으로 업데이트 가능한 구조
 
 ### UI 배치 결정
-- **탑메뉴(DashboardHeader)에 📊 AI 분석 아이콘 추가** (대시보드 내부에 넣지 않음)
-- 클릭 → AnalysisModal.tsx (독립 풀 모달)
+- **탑메뉴(DashboardHeader)에 Sparkles 아이콘 + AI 분석 메뉴 추가** (대시보드 내부에 넣지 않음)
+- 위치: 발송결과 다음, 수신거부 앞 (gold + emphasized)
+- 클릭 → AnalysisModal.tsx (독립 풀 모달, max-w-[900px])
 - 분석은 "주기적 리포팅" 성격 → 탑메뉴 진입이 UX상 자연스러움
 
 ---
@@ -269,7 +270,7 @@ AnalysisModal
 ## 7) 세션 진행 현황
 
 ### 세션 1: DDL + 백엔드 API
-**상태:** ✅ 완료 (타입체크+배포 대기)
+**상태:** ✅ 완료 (배포 완료)
 
 **체크리스트:**
 - [x] DDL 실행 (plans.ai_analysis_level) — plan_code 대문자 주의
@@ -279,7 +280,7 @@ AnalysisModal
 - [x] POST /api/analysis/run 구현 (요금제 체크 + 데이터 수집 11종 쿼리, Claude 호출은 세션3)
 - [x] GET /api/analysis/pdf 구현 (요금제 체크 + 501 뼈대, PDF 생성은 세션3)
 - [x] app.ts에 analysis 라우트 등록
-- [ ] TypeScript 타입 체크 통과 → 배포 시 확인
+- [x] TypeScript 타입 체크 통과 + 배포 완료
 
 **수정 파일:** companies.ts, app.ts
 **신규 파일:** analysis.ts
@@ -287,19 +288,19 @@ AnalysisModal
 ---
 
 ### 세션 2: 프론트엔드 AnalysisModal + 연결
-**상태:** 🔜 다음
+**상태:** ✅ 완료 (타입체크+배포 완료)
 
 **체크리스트:**
-- [ ] DashboardHeader.tsx에 📊 AI 분석 버튼 + onAnalysis prop
-- [ ] Dashboard.tsx에 showAnalysis state + AnalysisModal import + 렌더링
-- [ ] AnalysisModal.tsx 신규 생성
-  - [ ] 베이직 프리뷰 화면 (실제 데이터 + 블러 + 페이드아웃 + CTA)
-  - [ ] 프로 분석 화면 (기간 선택 + 분석 실행 + 인사이트 카드 + PDF)
-  - [ ] 비즈니스 분석 화면 (프로 + 추가 카드 전체 언락)
-  - [ ] 비즈니스 전용 카드 블러 (프로 사용자용 업셀)
-- [ ] 로딩 애니메이션 (단계별 메시지)
-- [ ] 모달 디자인: animate-in, fade-in, max-w-4xl, 아이콘+제목 구조
-- [ ] TypeScript 타입 체크 통과
+- [x] DashboardHeader.tsx에 Sparkles 아이콘 + AI 분석 버튼 + onAnalysis prop
+- [x] Dashboard.tsx에 showAnalysis state + AnalysisModal import + 렌더링
+- [x] AnalysisModal.tsx 신규 생성 (530줄)
+  - [x] 베이직 프리뷰 화면 (실제 데이터 4카드 + 블러 + 페이드아웃 + CTA)
+  - [x] 프로 분석 화면 (기간 선택 + 분석 실행 + 인사이트 카드 + PDF)
+  - [x] 비즈니스 분석 화면 (프로 + 추가 카드 전체 언락)
+  - [x] 비즈니스 전용 카드 블러 (프로 사용자용 업셀)
+- [x] 로딩 애니메이션 (4단계 메시지 + 도트 펄스)
+- [x] 모달 디자인: animate-in, fade-up, dark 헤더, max-w-[900px], 카테고리별 색상 10종
+- [x] TypeScript 타입 체크 통과 + 배포 완료
 
 **수정 파일:** DashboardHeader.tsx, Dashboard.tsx
 **신규 파일:** AnalysisModal.tsx
@@ -307,7 +308,7 @@ AnalysisModal
 ---
 
 ### 세션 3: AI 프롬프트 정교화 + PDF
-**상태:** ⬜ 대기
+**상태:** 🔜 다음
 
 **체크리스트:**
 - [ ] 프로용 프롬프트 작성 (집계값 기반, 한국어, 마케팅 전문가 톤)
@@ -342,7 +343,8 @@ AnalysisModal
 | A4 | 02-25 | 프로 사용자에게도 비즈니스 카드 블러 표시 (동일한 업셀 전략) | 프로→비즈니스 업그레이드 유도. 단계적 요금제 상승 동기 |
 | A5 | 02-25 | 분석 항목은 AI 프롬프트 수정만으로 업데이트 가능한 구조 | 코드 수정 없이 분석 관점 추가/변경. 추후 상황 봐서 업데이트 |
 | A6 | 02-25 | 3~4세션 분할, AI-ANALYSIS.md로 세션간 컨텍스트 유지 | 새 채팅에서도 이 파일만 읽으면 바로 이어갈 수 있음 |
-| A7 | 02-25 | preview API none일 때 백엔드에서 상세 필드 제거 반환 (프론트 블러만 X) | DevTools 노출 방지. 보안 우선 |
+| A7 | 02-25 | preview API none일 때 백엔드에서 상세 필드 제거 반환 (프론트 블러만 X) | DevTools 노출 방지.
+| A8 | 02-25 | AI 분석 아이콘으로 Sparkles(lucide-react) 선택, 메뉴 위치는 발송결과↔수신거부 사이 | AI/매직 느낌 + 기존 텍스트 메뉴와 차별화. gold+emphasized로 프리미엄 느낌 | 보안 우선 |
 
 ---
 
