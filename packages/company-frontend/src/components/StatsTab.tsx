@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { manageStatsApi, manageUsersApi } from '../api/client';
-import Toast from './Toast';
 import { formatDateTime } from '../utils/formatDate';
+import Toast from './Toast';
 
 export default function StatsTab() {
   const [view, setView] = useState<'daily' | 'monthly'>('daily');
@@ -20,6 +20,7 @@ export default function StatsTab() {
   const [detail, setDetail] = useState<any>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailInfo, setDetailInfo] = useState<{ date: string } | null>(null);
+  const [testDetailPage, setTestDetailPage] = useState(1);
 
   const perPage = 10;
 
@@ -47,6 +48,7 @@ export default function StatsTab() {
   const loadDetail = async (date: string) => {
     setDetailLoading(true);
     setDetailInfo({ date });
+    setTestDetailPage(1);
     try {
       const res = await manageStatsApi.sendDetail({ view, date, filterUserId: filterUserId || undefined });
       setDetail(res.data);
@@ -326,7 +328,9 @@ export default function StatsTab() {
                         </tr>
                       </thead>
                       <tbody className="divide-y">
-                        {detail.testDetail.map((t: any, i: number) => (
+                      {detail.testDetail
+                          .slice((testDetailPage - 1) * 10, testDetailPage * 10)
+                          .map((t: any, i: number) => (
                           <tr key={i} className="hover:bg-gray-50">
                             <td className="px-3 py-2">
                               <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${
@@ -366,7 +370,14 @@ export default function StatsTab() {
                           </tr>
                         ))}
                       </tbody>
-                    </table>
+                      </table>
+                    {detail.testDetail.length > 10 && (
+                      <div className="flex justify-center items-center gap-2 py-3 border-t bg-gray-50">
+                        <button onClick={() => setTestDetailPage(p => Math.max(1, p - 1))} disabled={testDetailPage === 1} className="px-3 py-1 text-sm rounded-md border bg-white hover:bg-gray-50 disabled:opacity-40">이전</button>
+                        <span className="text-sm text-gray-500">{testDetailPage} / {Math.ceil(detail.testDetail.length / 10)}</span>
+                        <button onClick={() => setTestDetailPage(p => Math.min(Math.ceil(detail.testDetail.length / 10), p + 1))} disabled={testDetailPage >= Math.ceil(detail.testDetail.length / 10)} className="px-3 py-1 text-sm rounded-md border bg-white hover:bg-gray-50 disabled:opacity-40">다음</button>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
