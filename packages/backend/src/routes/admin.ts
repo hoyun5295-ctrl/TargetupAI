@@ -228,6 +228,8 @@ router.put('/companies/:id', authenticate, requireSuperAdmin, async (req: Reques
   } = req.body;
   
   try {
+    const finalSubscriptionStatus = planId ? 'active' : (subscriptionStatus || null);
+
     const result = await query(`
       UPDATE companies 
       SET company_name = COALESCE($1, company_name),
@@ -236,6 +238,7 @@ router.put('/companies/:id', authenticate, requireSuperAdmin, async (req: Reques
           contact_phone = COALESCE($4, contact_phone),
           status = COALESCE($5, status),
           plan_id = COALESCE($6, plan_id),
+          subscription_status = CASE WHEN $6 IS NOT NULL THEN 'active' ELSE COALESCE($31, subscription_status) END,
           reject_number = COALESCE($7, reject_number),
           brand_name = COALESCE($8, brand_name),
           send_start_hour = COALESCE($9, send_start_hour),
@@ -260,11 +263,11 @@ router.put('/companies/:id', authenticate, requireSuperAdmin, async (req: Reques
           target_strategy = COALESCE($28, target_strategy),
           line_group_id = COALESCE($29, line_group_id),
           kakao_enabled = COALESCE($30, kakao_enabled),
-          subscription_status = COALESCE($31, subscription_status),
+          -- subscription_status는 위 plan_id CASE문에서 처리
           updated_at = NOW()
       WHERE id = $32
       RETURNING *
-    `, [companyName, contactName, contactEmail, contactPhone, status, planId, rejectNumber, brandName, sendHourStart, sendHourEnd, dailyLimit, holidaySend, duplicateDays, costPerSms, costPerLms, costPerMms, costPerKakao, storeCodeList ? JSON.stringify(storeCodeList) : null, businessNumber, ceoName, businessType, businessItem, address, allowCallbackSelfRegister !== undefined ? allowCallbackSelfRegister : null, maxUsers || null, sessionTimeoutMinutes || null, approvalRequired !== undefined ? approvalRequired : null, targetStrategy || null, lineGroupId || null, kakaoEnabled !== undefined ? kakaoEnabled : null, subscriptionStatus || null, id]);
+    `, [companyName, contactName, contactEmail, contactPhone, status, planId, rejectNumber, brandName, sendHourStart, sendHourEnd, dailyLimit, holidaySend, duplicateDays, costPerSms, costPerLms, costPerMms, costPerKakao, storeCodeList ? JSON.stringify(storeCodeList) : null, businessNumber, ceoName, businessType, businessItem, address, allowCallbackSelfRegister !== undefined ? allowCallbackSelfRegister : null, maxUsers || null, sessionTimeoutMinutes || null, approvalRequired !== undefined ? approvalRequired : null, targetStrategy || null, lineGroupId || null, kakaoEnabled !== undefined ? kakaoEnabled : null, finalSubscriptionStatus, id]);
     
     if (result.rows.length === 0) {
       return res.status(404).json({ error: '회사를 찾을 수 없습니다.' });
