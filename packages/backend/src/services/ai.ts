@@ -42,7 +42,7 @@ async function callAIWithFallback(params: {
   try {
     const gptResponse = await openai.chat.completions.create({
       model: 'gpt-5.1',
-      max_tokens: params.maxTokens,
+      max_completion_tokens: params.maxTokens,
       temperature: params.temperature,
       messages: [
         { role: 'system', content: params.system },

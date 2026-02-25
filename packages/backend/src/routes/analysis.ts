@@ -321,7 +321,7 @@ async function callClaude(userMessage: string, maxRetries = 2): Promise<Analysis
   try {
     const gptResponse = await openai.chat.completions.create({
       model: 'gpt-5.1',
-      max_tokens: 4096,
+      max_completion_tokens: 4096,
       temperature: 0.3,
       messages: [
         { role: 'system', content: ANALYSIS_SYSTEM_PROMPT },

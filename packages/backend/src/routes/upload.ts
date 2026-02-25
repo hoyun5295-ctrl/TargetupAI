@@ -240,7 +240,7 @@ JSON 형식으로만 응답해줘 (다른 설명 없이):
         },
         body: JSON.stringify({
           model: 'gpt-5.1',
-          max_tokens: 1024,
+          max_completion_tokens: 1024,
           messages: [{ role: 'user', content: mappingPrompt }]
         })
       });
