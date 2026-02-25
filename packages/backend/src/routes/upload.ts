@@ -201,7 +201,10 @@ ${Object.entries(dbColumns).map(([k, v]) => `- ${k}: ${v}`).join('\n')}
 3. phone(전화번호)은 반드시 찾아서 매핑해줘
 
 JSON 형식으로만 응답해줘 (다른 설명 없이):
-{"엑셀컬럼명": "DB컬럼명 또는 null", ...}`;
+{"엑셀컬럼명": "DB컬럼명(영문 key) 또는 null", ...}
+
+예시: {"고객번호": null, "휴대폰": "phone", "이름": "name", "성별코드": "gender", "등급": "grade"}
+⚠️ 반드시 DB컬럼의 영문 key(phone, name, gender 등)를 값으로 넣어야 합니다. 한글 설명을 넣지 마세요!`;
 
     let aiText = '{}';
 
