@@ -802,8 +802,12 @@
 | test_sms_unit_price | numeric(6,2) | 테스트 SMS 단가 |
 | test_lms_count | integer | 테스트 LMS 수량 |
 | test_lms_unit_price | numeric(6,2) | 테스트 LMS 단가 |
-| spam_filter_count | integer | 스팸필터 테스트 수량 |
-| spam_filter_unit_price | numeric(6,2) | 스팸필터 단가 |
+| spam_filter_count | integer | 스팸필터 테스트 수량 (레거시, 미사용) |
+| spam_filter_unit_price | numeric(6,2) | 스팸필터 단가 (레거시, 미사용) |
+| spam_filter_sms_count | integer | 스팸필터 SMS 수량 |
+| spam_filter_sms_unit_price | numeric(6,2) | 스팸필터 SMS 단가 |
+| spam_filter_lms_count | integer | 스팸필터 LMS 수량 |
+| spam_filter_lms_unit_price | numeric(6,2) | 스팸필터 LMS 단가 |
 | subtotal | numeric(12,2) | 공급가액 |
 | vat | numeric(12,2) | 부가세 |
 | total_amount | numeric(12,2) | 합계 |

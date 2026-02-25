@@ -790,7 +790,7 @@ router.get('/version', async (req: SyncAuthRequest, res: Response) => {
 
     // 최신 활성 릴리스 조회
     const result = await query(
-      `SELECT version, download_url, release_notes, force_update, released_at
+      `SELECT version, download_url, checksum, release_notes, force_update, released_at
        FROM sync_releases
        WHERE is_active = true
        ORDER BY released_at DESC
@@ -818,6 +818,7 @@ router.get('/version', async (req: SyncAuthRequest, res: Response) => {
       ...(updateAvailable && {
         force_update: latest.force_update,
         download_url: latest.download_url,
+        checksum: latest.checksum,
         release_notes: latest.release_notes,
         released_at: latest.released_at
       })

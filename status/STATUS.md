@@ -98,6 +98,23 @@
 
 ---
 
+### ✅ 이전 완료: 정산 멀티테이블 + 스팸필터 통합 (1세션)
+
+> 수정 파일 1개 + DDL:
+> - `packages/backend/src/routes/billing.ts` — 멀티테이블 헬퍼 + 스팸필터 집계 + PDF/메일 반영
+> - DDL: billing_invoices에 spam_filter 4컬럼 추가
+
+- ✅ 정산 MySQL 조회를 SMSQ_SEND 단일 → 회사별 라인그룹 멀티테이블로 전환
+- ✅ LOG 테이블(SMSQ_SEND_X_YYYYMM) 통합 조회 (정산 기간별 자동 탐색)
+- ✅ 스팸필터 테스트 발송 PostgreSQL 집계 추가 (spam_filter_tests + results JOIN)
+- ✅ 순환참조 방지: campaigns.ts import 대신 billing.ts 자체 헬퍼 함수 구현
+- ✅ preview API에 spam 섹션 추가 (spamSummary)
+- ✅ 정산서 PDF에 스팸필터 SMS/LMS 행 추가 (배경색 #fef3c7 구분)
+- ✅ 정산서 메일 HTML에 스팸필터 비용 표시
+- ✅ 일별 상세 PDF에 SPAM_SMS/SPAM_LMS 타입 라벨 + 배경색 구분
+
+---
+
 ### ✅ 이전 완료: 발송 통계 고도화 + 스팸필터 테스트 통합 (1세션)
 
 > 수정 파일 6개:
@@ -478,6 +495,7 @@
 | D15 | 02-25 | LMS 제목 머지 치환 가능 → 구현 | AI발송=고객별 개별INSERT, 직접발송=row별 개별값. 예약수정은 이미 구현됨. 3곳 모두 제목 머지 적용 |
 | D16 | 02-25 | 스팸필터 테스트 과금=일반 단가 동일 적용 | cost_per_sms/lms 단가 그대로 사용. billing_invoices에 spam_filter_unit_price 컬럼 있으나 정산서 생성 시 별도 처리 |
 | D17 | 02-25 | 테스트 통계 응답 구조 확장 (하위호환) | campaigns.ts test-stats: 기존 stats/list 유지 + managerStats/spamFilterStats/spamFilterList 추가 |
+| D18 | 02-25 | 정산 billing.ts 자체 헬퍼 함수 구현 (순환참조 방지) | campaigns.ts에서 import 시 순환참조 발생. 정산 전용 getBillingCompanyTables/getBillingTestTables/getTablesForBillingPeriod 등 자체 구현 |
 
 **아카이브:** D1-AI발송2분기(02-22) | D-대시보드 모달 분리(02-23): 8,039줄→4,964줄 | D2-브리핑방식(02-22) | D3-개인화필드체크박스(02-22) | D4-textarea제거(02-22) | D5-별도컴포넌트분리(02-22)
 
@@ -500,6 +518,7 @@
 | R6 | 스팸필터 동시 테스트 시 결과 충돌 (테스트폰 3대 공유) | 1 | 4 | 4 | ✅ 해결: SHA-256 해시 세션 격리 + fallback 제거 + user_id 기준 active 체크 (7차 세션2) |
 | R7 | 하드코딩 필드로 인한 반복 버그 재발 | 5 | 3 | 15 | ✅ 해결: 동적 필드 시스템 전환 완료 (7차 세션1) |
 | R8 | recount-target companyId undefined → 타겟 0명 | 3 | 4 | 12 | ✅ 해결: snake_case→camelCase 수정 + WHERE 조건 통일 (7차 세션3) |
+| R9 | 정산 SMSQ_SEND 단일테이블 조회 → 멀티Agent 환경에서 0건 집계 | 3 | 4 | 12 | ✅ 해결: 회사별 라인그룹 멀티테이블 + LOG 테이블 통합 조회 (billing.ts 자체 헬퍼) |
 
 ---
 
@@ -509,6 +528,7 @@
 
 | 날짜 | 완료 항목 |
 |------|----------|
+| 02-25 | 정산 멀티테이블+스팸필터 통합: ① billing.ts SMSQ_SEND 단일→회사별 라인그룹 멀티테이블 전환(getBillingCompanyTables+smsAggByDateType 자체 헬퍼, campaigns.ts 순환참조 방지), ② LOG 테이블(SMSQ_SEND_X_YYYYMM) 정산기간별 자동탐색+통합조회(getTablesForBillingPeriod), ③ 스팸필터 테스트 PostgreSQL 집계 추가(spam_filter_tests+results JOIN), ④ DDL: billing_invoices에 spam_filter_sms/lms_count+unit_price 4컬럼 추가, ⑤ preview API spam 섹션 추가, ⑥ PDF 스팸필터행 배경색(#fef3c7)+일별상세 SPAM_SMS/SPAM_LMS 라벨, ⑦ 메일 HTML 스팸필터 비용 표시. 수정 파일: billing.ts (1450→1616줄) |
 | 02-25 | 발송 통계 고도화 + 스팸필터 테스트 통합: ① 채널통합조회 타입컬럼 제거(채널뱃지 중복), ② 테스트 통계 스팸필터 합산(담당자 MySQL+스팸필터 PostgreSQL, 3곳: campaigns.ts/manage-stats.ts/admin.ts), ③ 고객사관리자 발송통계에 비용 표시(요약카드+상세 사용자별), ④ 슈퍼관리자 통계에 testSummary+testDetail 추가, ⑤ ResultsModal 테스트탭 3카드(전체/담당자/스팸필터)+스팸필터 이력 리스트("준비중" 제거), ⑥ 테스트 이력 페이징 10건(ResultsModal+StatsTab 양쪽). 수정 파일: campaigns.ts, manage-stats.ts, admin.ts, ResultsModal.tsx, StatsTab.tsx(company-frontend), StatsTab.tsx(frontend/admin) |
 | 02-25 | 직원 버그리포트 7차 세션3 완료 (2건) + 7차 전체 완료: ① LMS 제목 머지 치환 — AI발송(personalizedSubject+fieldMappings 동시치환+잔여변수 제거), 직접발송(finalSubject+replace 체인). 제목에도 %이름% 등 개인화 변수 정상 치환(#9). ② recount-target 근본 수정 — user.company_id→req.user?.companyId(undefined 해결), WHERE 조건 recommend-target과 통일(is_active+sms_opt_in+NOT EXISTS unsubscribes), storeFilter 추가(#6). 수정 파일: campaigns.ts, ai.ts |
 | 02-25 | 직원 버그리포트 7차 세션2 완료 (2건): 스팸필터 동시성 해결. ① 60초 쿨다운 완전 제거→완료 즉시 재테스트 버튼(#3), ② SHA-256 해시 세션 격리+fallback 제거+user_id 기준 active 체크(#4). DB: spam_filter_tests.message_hash varchar(32) 컬럼+인덱스 2개 추가. 수정 파일: spam-filter.ts, SpamFilterTestModal.tsx |
