@@ -457,6 +457,7 @@
 | monthly_price | numeric(12,2) |
 | is_active | boolean |
 | trial_days | integer |
+| ai_analysis_level | varchar(20) | none/basic/advanced (기본 none) |
 | created_at | timestamp |
 
 ### plan_requests (요금제 변경 요청)

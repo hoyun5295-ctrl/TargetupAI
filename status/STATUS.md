@@ -151,12 +151,12 @@
 - 상세 PDF 보고서 (5~10페이지, 차트/세그먼트/전략, 회사 로고 + 기간 설정)
 
 **구현 TODO:**
-- [ ] plans 테이블에 ai_analysis_level 필드 추가 (none/basic/advanced)
-- [ ] AI 분석 백엔드 API 설계 (프로용 집계 엔드포인트 + 비즈니스용 상세 엔드포인트)
-- [ ] AI 분석 프론트엔드 UI (대시보드 내 분석 탭 또는 별도 메뉴)
-- [ ] PDF 생성 (기본/상세 분기)
-- [ ] 요금제별 접근 제어 (plan의 ai_analysis_level 기반)
-- [ ] 데모 데이터 SQL INSERT (가상 고객사 고객/캠페인/구매 데이터) → 중진공 시연용 (02-27)
+- [x] plans 테이블에 ai_analysis_level 필드 추가 (none/basic/advanced) ✅ 세션1
+- [x] AI 분석 백엔드 API 설계 + 구현 (preview 완전, run 데이터수집, pdf 뼈대) ✅ 세션1
+- [x] 요금제별 접근 제어 (plan의 ai_analysis_level 기반) ✅ 세션1
+- [ ] AI 분석 프론트엔드 UI (AnalysisModal.tsx) → 세션2
+- [ ] AI 프롬프트 정교화 + PDF 생성 (기본/상세 분기) → 세션3
+- [ ] 데모 데이터 SQL INSERT (가상 고객사 고객/캠페인/구매 데이터) → 세션4
 
 ---
 
@@ -580,6 +580,8 @@
 | D20 | 02-25 | AI 분석 요금제별 차별화: 프로=기본(집계값, 1~2회 호출, 기본PDF), 비즈니스=고급(로우데이터, 5~8회 호출, 상세PDF) | 프로=What happened(과거 회고), 비즈니스=Why+What next(예측+액션). API 토큰 소모량으로 원가 차별화 |
 | D21 | 02-25 | isSubscriptionLocked를 로그인 캐시가 아닌 planInfo(my-plan API) 기반 실시간 판별로 전환 | 슈퍼관리자가 구독 승인해도 재로그인 전까지 잠금 안 풀리는 문제. planInfo 로드 시 DB 최신 subscription_status 반영 |
 | D22 | 02-25 | 스팸필터 잠금은 직접발송 영역만 적용. AI 발송 영역은 이미 isSubscriptionLocked로 진입 차단되어 중복 잠금 불필요 | 기능 잠금 시 상위 잠금이 있으면 하위에 중복 적용하지 않는다 |
+| D23 | 02-25 | preview API none일 때 백엔드에서 상세 필드 제거 반환 (프론트 블러만 X) | DevTools 노출 방지. 보안 우선 |
+| D24 | 02-25 | run API 세션1에서 데이터수집까지 완전 구현, Claude 호출/PDF는 세션3 | 프론트 연결(세션2) 시 실제 데이터로 UI 검증 가능. 세션 분리 효율 |
 
 **아카이브:** D1-AI발송2분기(02-22) | D-대시보드 모달 분리(02-23): 8,039줄→4,964줄 | D2-브리핑방식(02-22) | D3-개인화필드체크박스(02-22) | D4-textarea제거(02-22) | D5-별도컴포넌트분리(02-22)
 
@@ -613,6 +615,7 @@
 
 | 날짜 | 완료 항목 |
 |------|----------|
+| 02-25 | AI 분석 세션1 완료 (DDL+백엔드API): ① plans.ai_analysis_level 컬럼 추가(none/basic/advanced, plan_code 대문자 주의), ② companies.ts my-plan API에 p.ai_analysis_level 반환 추가, ③ analysis.ts 신규 생성 — GET /preview(none:기본4개만 반환+상세필드 제거 보안, basic/advanced:전체11개), POST /run(기간별 데이터수집 — basic:집계7종, advanced:+로우4종 총11종, Claude 호출은 세션3), GET /pdf(요금제체크+501 뼈대, PDF 생성은 세션3), ④ app.ts 라우트 등록(/api/analysis). 수정: companies.ts, app.ts. 신규: analysis.ts |
 | 02-25 | Task A 요금제 기능 제한 구현 완료: ① DDL subscription_status varchar(20) DEFAULT 'trial' + 마이그레이션 SQL, ② auth.ts 로그인 쿼리+응답에 subscriptionStatus 포함, ③ Dashboard.tsx isSubscriptionLocked 헬퍼+10군데 잠금(AI추천발송/직접타겟/DB업로드/최근캠페인/발송예시/고객인사이트/예약대기/고객DB조회)+opacity+🔒아이콘, ④ SubscriptionLockModal.tsx 신규(예쁜 커스텀 모달, Lock+Crown 아이콘, 요금제안내 링크), ⑤ AdminDashboard.tsx 구독상태 드롭다운(trial/active/expired/suspended)+안내문구, ⑥ admin.ts PUT API $31 subscription_status 추가. 수정 5파일+신규 1파일 |
 | 02-25 | Task A 스팸필터 잠금 + 구독 실시간 반영 완료: ① companies.ts my-plan API에 monthly_price+subscription_status 반환 추가, ② Dashboard.tsx isSpamFilterLocked(15만원 미만)+직접발송 스팸필터 버튼 잠금, ③ SpamFilterLockModal.tsx 신규(indigo, ShieldOff), ④ isSubscriptionLocked를 planInfo 기반 실시간 판별로 전환(로그인 캐시→DB 실시간), ⑤ 요금제 승인 시 subscription_status 자동 'active'(admin.ts), ⑥ PlanApprovalModal.tsx 신규+plan-request/status API 연동(승인 알림+confirm). 수정: companies.ts, Dashboard.tsx, admin.ts. 신규: SpamFilterLockModal.tsx, PlanApprovalModal.tsx. Task A 전체 완료 |
 | 02-25 | 요금제 기능 제한 + AI 분석 기능 설계 의논: ① subscription_status 필드 추가 결정(trial/active/expired/suspended), 무료 종료 후 대시보드 잠금+직접발송/탑메뉴/충전 허용, ② AI 분석 요금제별 차별화 설계 — 프로(기본, 집계값, 1~2회 호출, 기본PDF 1~2p) / 비즈니스(고급, 로우데이터, 5~8회 호출, 상세PDF 5~10p, 세그먼트+이탈예측+ROI+액션제안). CURRENT_TASK 반영 완료 |
