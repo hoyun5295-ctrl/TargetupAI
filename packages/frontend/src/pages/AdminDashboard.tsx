@@ -107,6 +107,7 @@ export default function AdminDashboard() {
     newExcludedSegment: '',
     lineGroupId: '',
     kakaoEnabled: false,
+    subscriptionStatus: 'trial',
   });
   const [editCompanyTab, setEditCompanyTab] = useState<'basic' | 'send' | 'cost' | 'ai' | 'store' | 'fields' | 'customers'>('basic');
   const [standardFields, setStandardFields] = useState<any[]>([]);
@@ -1361,6 +1362,7 @@ const handleApproveRequest = async (id: string) => {
           newExcludedSegment: '',
           lineGroupId: c.line_group_id || '',
           kakaoEnabled: c.kakao_enabled ?? false,
+          subscriptionStatus: c.subscription_status || 'trial',
         });
         setEditCompanyTab('basic');
         setShowEditCompanyModal(true);
@@ -3682,6 +3684,18 @@ const handleApproveRequest = async (id: string) => {
                       <option value="suspended">정지</option>
                       <option value="terminated">해지</option>
                     </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">구독 상태 *</label>
+                    <select value={editCompany.subscriptionStatus}
+                      onChange={(e) => setEditCompany({ ...editCompany, subscriptionStatus: e.target.value })}
+                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
+                      <option value="trial">체험 (trial)</option>
+                      <option value="active">정상 구독 (active)</option>
+                      <option value="expired">만료 (expired)</option>
+                      <option value="suspended">정지 (suspended)</option>
+                    </select>
+                    <p className="text-xs text-gray-400 mt-1">expired/suspended 시 대시보드 AI 기능이 잠깁니다 (직접발송·충전은 허용)</p>
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">최대 사용자 수</label>

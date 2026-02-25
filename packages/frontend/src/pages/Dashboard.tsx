@@ -28,6 +28,7 @@ import ScheduledCampaignModal from '../components/ScheduledCampaignModal';
 import ScheduleTimeModal from '../components/ScheduleTimeModal';
 import SendConfirmModal from '../components/SendConfirmModal';
 import SpamFilterTestModal from '../components/SpamFilterTestModal';
+import SubscriptionLockModal from '../components/SubscriptionLockModal';
 import TodayStatsModal from '../components/TodayStatsModal';
 import UploadProgressModal from '../components/UploadProgressModal';
 import UploadResultModal from '../components/UploadResultModal';
@@ -80,6 +81,11 @@ export default function Dashboard() {
   const isHidden = (feature: string) => (user as any)?.hiddenFeatures?.includes(feature);
   const hideAi = isHidden('ai_recommend');
   const hideFileUpload = isHidden('file_upload');
+
+  // 요금제 잠금 체크
+  const subscriptionStatus = (user as any)?.company?.subscriptionStatus || 'trial';
+  const isSubscriptionLocked = subscriptionStatus === 'expired' || subscriptionStatus === 'suspended';
+  const [showSubscriptionLock, setShowSubscriptionLock] = useState(false);
 
   const [stats, setStats] = useState<Stats | null>(null);
   const [planInfo, setPlanInfo] = useState<PlanInfo | null>(null);
@@ -1835,7 +1841,7 @@ const campaignData = {
             <div className="bg-white/50 rounded-xl p-6 border border-green-200 flex-1">
               <div className="flex items-center justify-between mb-5">
                 <span className="text-sm text-gray-500 font-medium">고객 현황</span>
-                <button onClick={() => setShowCustomerDB(true)} className="text-green-700 text-xs font-medium hover:text-green-800 transition-colors">DB 정보조회 →</button>
+                <button onClick={() => isSubscriptionLocked ? setShowSubscriptionLock(true) : setShowCustomerDB(true)} className="text-green-700 text-xs font-medium hover:text-green-800 transition-colors">DB 정보조회 →</button>
               </div>
               <div className="grid grid-cols-5 gap-3 mb-5">
                 <div className="text-center p-3 bg-gray-50 rounded-lg">
@@ -2000,6 +2006,7 @@ const campaignData = {
                 {/* AI 추천 발송 */}
                 <button 
                   onClick={async () => {
+                    if (isSubscriptionLocked) { setShowSubscriptionLock(true); return; }
                     setShowAiSendType(true);
                     try {
                       const token = localStorage.getItem('token');
@@ -2050,11 +2057,11 @@ const campaignData = {
 
                 {/* 직접 타겟 발송 */}
                 <button 
-                  onClick={() => { setShowDirectTargeting(true); loadEnabledFields(); }}
-                  className="p-5 bg-amber-500 hover:bg-amber-600 rounded-xl transition-all hover:shadow-lg text-right flex-1 flex flex-col justify-between"
+                  onClick={() => { if (isSubscriptionLocked) { setShowSubscriptionLock(true); return; } setShowDirectTargeting(true); loadEnabledFields(); }}
+                  className={`p-5 bg-amber-500 hover:bg-amber-600 rounded-xl transition-all hover:shadow-lg text-right flex-1 flex flex-col justify-between ${isSubscriptionLocked ? 'opacity-60' : ''}`}
                 >
                   <div>
-                    <div className="text-xl font-bold text-white mb-1">직접 타겟 발송</div>
+                    <div className="text-xl font-bold text-white mb-1">{isSubscriptionLocked ? '🔒 ' : ''}직접 타겟 발송</div>
                     <div className="text-sm text-amber-100">원하는 고객을 직접 필터링</div>
                   </div>
                   <div className="text-3xl text-amber-200 self-end">→</div>
@@ -2062,11 +2069,11 @@ const campaignData = {
 
                 {/* 고객 DB 업로드 */}
                 <button 
-                  onClick={() => setShowFileUpload(true)}
-                  className="p-5 bg-slate-600 hover:bg-slate-700 rounded-xl transition-all hover:shadow-lg text-right flex-1 flex flex-col justify-between"
+                  onClick={() => { if (isSubscriptionLocked) { setShowSubscriptionLock(true); return; } setShowFileUpload(true); }}
+                  className={`p-5 bg-slate-600 hover:bg-slate-700 rounded-xl transition-all hover:shadow-lg text-right flex-1 flex flex-col justify-between ${isSubscriptionLocked ? 'opacity-60' : ''}`}
                 >
                   <div>
-                    <div className="text-xl font-bold text-white mb-1">고객 DB 업로드</div>
+                    <div className="text-xl font-bold text-white mb-1">{isSubscriptionLocked ? '🔒 ' : ''}고객 DB 업로드</div>
                     <div className="text-sm text-slate-200">엑셀/CSV로 고객 추가</div>
                   </div>
                   <div className="text-3xl text-slate-300 self-end">→</div>
@@ -2118,33 +2125,33 @@ const campaignData = {
 {/* 5개 기능 카드 */}
 <div className="grid grid-cols-4 gap-4">
                   {/* 최근 캠페인 */}
-                  <div onClick={() => { loadRecentCampaigns(); setShowRecentCampaigns(true); }} className="bg-white/50 shadow-sm rounded-xl p-6 min-h-[140px] cursor-pointer hover:shadow-lg transition-all text-center border border-green-200">
+                  <div onClick={() => { if (isSubscriptionLocked) { setShowSubscriptionLock(true); return; } loadRecentCampaigns(); setShowRecentCampaigns(true); }} className={`bg-white/50 shadow-sm rounded-xl p-6 min-h-[140px] cursor-pointer hover:shadow-lg transition-all text-center border border-green-200 ${isSubscriptionLocked ? 'opacity-60' : ''}`}>
                     <BarChart3 className="w-8 h-8 mx-auto mb-3 text-green-700" />
-                    <div className="font-semibold text-gray-800 mb-1">최근 캠페인</div>
+                    <div className="font-semibold text-gray-800 mb-1">{isSubscriptionLocked ? '🔒 ' : ''}최근 캠페인</div>
                     <div className="text-xs text-gray-500 mb-3">최근 발송 내역</div>
                     <div className="text-xl font-bold text-green-700">{recentCampaigns.length}건</div>
                   </div>
 
                   {/* 빠른 발송 예시 */}
-                  <div onClick={() => setShowTemplates(true)} className="bg-white/50 shadow-sm rounded-xl p-6 min-h-[140px] cursor-pointer hover:shadow-lg transition-all text-center border border-green-200">
+                  <div onClick={() => { if (isSubscriptionLocked) { setShowSubscriptionLock(true); return; } setShowTemplates(true); }} className={`bg-white/50 shadow-sm rounded-xl p-6 min-h-[140px] cursor-pointer hover:shadow-lg transition-all text-center border border-green-200 ${isSubscriptionLocked ? 'opacity-60' : ''}`}>
                     <Rocket className="w-8 h-8 mx-auto mb-3 text-green-600" />
-                    <div className="font-semibold text-gray-800 mb-1">발송 예시</div>
+                    <div className="font-semibold text-gray-800 mb-1">{isSubscriptionLocked ? '🔒 ' : ''}발송 예시</div>
                     <div className="text-xs text-gray-500 mb-3">클릭하면 바로 실행</div>
                     <div className="text-xl font-bold text-green-700">4개</div>
                   </div>
 
                   {/* 고객 인사이트 */}
-                  <div onClick={() => setShowInsights(true)} className="bg-white/50 shadow-sm rounded-xl p-6 min-h-[140px] cursor-pointer hover:shadow-lg transition-all text-center border border-green-200">
+                  <div onClick={() => { if (isSubscriptionLocked) { setShowSubscriptionLock(true); return; } setShowInsights(true); }} className={`bg-white/50 shadow-sm rounded-xl p-6 min-h-[140px] cursor-pointer hover:shadow-lg transition-all text-center border border-green-200 ${isSubscriptionLocked ? 'opacity-60' : ''}`}>
                     <Users className="w-8 h-8 mx-auto mb-3 text-green-600" />
-                    <div className="font-semibold text-gray-800 mb-1">고객 인사이트</div>
+                    <div className="font-semibold text-gray-800 mb-1">{isSubscriptionLocked ? '🔒 ' : ''}고객 인사이트</div>
                     <div className="text-xs text-gray-500 mb-3">고객 현황 분석</div>
                     <div className="text-xl font-bold text-green-700">{parseInt(stats?.total || '0').toLocaleString()}명</div>
                   </div>
 
                   {/* 예약 대기 */}
-                  <div onClick={() => { loadScheduledCampaigns(); setShowScheduled(true); }} className="bg-white/50 shadow-sm rounded-xl p-6 min-h-[140px] cursor-pointer hover:shadow-lg transition-all text-center border border-amber-200">
+                  <div onClick={() => { if (isSubscriptionLocked) { setShowSubscriptionLock(true); return; } loadScheduledCampaigns(); setShowScheduled(true); }} className={`bg-white/50 shadow-sm rounded-xl p-6 min-h-[140px] cursor-pointer hover:shadow-lg transition-all text-center border border-amber-200 ${isSubscriptionLocked ? 'opacity-60' : ''}`}>
                     <Clock className="w-8 h-8 mx-auto mb-3 text-amber-500" />
-                    <div className="font-semibold text-gray-800 mb-1">예약 대기</div>
+                    <div className="font-semibold text-gray-800 mb-1">{isSubscriptionLocked ? '🔒 ' : ''}예약 대기</div>
                     <div className="text-xs text-gray-500 mb-3">곧 발송될 캠페인</div>
                     <div className="text-xl font-bold text-amber-600">{scheduledCampaigns.length}건</div>
                   </div>
@@ -4993,6 +5000,8 @@ const campaignData = {
       <PlanUpgradeModal show={showPlanUpgradeModal} onClose={() => setShowPlanUpgradeModal(false)} />
 
       <LineGroupErrorModal show={showLineGroupError} onClose={() => setShowLineGroupError(false)} />
+
+      <SubscriptionLockModal show={showSubscriptionLock} onClose={() => setShowSubscriptionLock(false)} />
 
       {/* 하단 링크 */}
       <div className="max-w-7xl mx-auto px-4 py-6 mt-8 border-t border-gray-200 text-center text-xs text-gray-400 space-x-3">

@@ -94,30 +94,79 @@
 
 ---
 
-### 현재 목표: Sync Agent 서버측 보안 + 코드 수정
+### 현재 목표: 요금제 기능 제한 + AI 분석 기능 구현
 
-> **배경:** Sync Agent v1.3.0 매뉴얼 & 보안 리뷰 완료 (2026-02-25)
-> **참고 문서:** SYNC-AGENT-REVIEW.md (비토 전달용)
+> **배경:** 2026-02-25 Harold님 의논 결정사항. 런칭 전 요금제 체계 정비 + AI 분석 차별화.
 
-**서버 이슈 2건 (DDL 적용 완료 2026-02-25):**
-- ✅ POST /api/sync/log → 500: sync_logs에 duration_ms, error_message 컬럼 추가
-- ✅ GET /api/sync/version → 500: sync_releases 테이블 생성
-- ✅ GET /api/sync/config용: sync_agents에 config, sync_interval_customers, sync_interval_purchases 컬럼 추가
+#### Task A. 요금제 미사용 시 기능 제한 ✅ 완료
 
-**서버 코드 수정 (미배포):**
-- [ ] sync.ts version API SELECT/응답에 checksum 필드 추가 → tp-push + tp-deploy
+**DB 변경:**
+- [x] companies 테이블에 `subscription_status` 필드 추가 (varchar(20))
+- [x] 값: `trial` / `active` / `expired` / `suspended`
 
-**서버 보안 추가 개발:**
-- [ ] C-1. `/api/sync/*` rate limit 추가 (우선) — 인증 실패 IP당 분당 10회 차단, 성공 회사당 분당 60회 제한
-- [ ] C-2. 고객사별 동시 full sync 1개 제한 — 진행 중이면 429 응답
-- [ ] C-3. sync_releases 릴리스 등록 — 비토 v1.3.0 최종 빌드 후 INSERT
+**잠금 조건:** `subscription_status`가 `expired` 또는 `suspended`일 때
 
-**비토측 수정 요청 (전달 완료):**
-- [ ] A-1. 매뉴얼에서 sys.hanjullo.com → "고객사 관리자 페이지" 로 변경
-- [ ] B-1. 웹 UI 마법사 127.0.0.1 바인딩 확인
-- [ ] B-2. .env 프로덕션 사용 경고
-- [ ] B-3. 자동 업데이트 download_url 도메인 화이트리스트 + checksum 필수화
-- [ ] B-4. 배치 사이즈 4,000 vs 서버 5,000 불일치 확인
+**허용 영역:**
+- 상단 탑메뉴바 전체 (발송결과, 수신거부, 설정 등)
+- 잔액충전
+- 직접발송
+
+**잠금 영역:**
+- 대시보드 영역의 모든 기능 (AI 한줄로, AI 맞춤한줄, 고객 인사이트, 캘린더, 고객DB 조회 등)
+- 클릭 시 "요금제 가입이 필요합니다" 업그레이드 모달 표시
+
+**구현 완료:**
+- [x] DDL: ALTER TABLE companies ADD COLUMN subscription_status varchar(20) DEFAULT 'trial'
+- [x] 기존 고객사 마이그레이션 (plan_id 있으면 active, trial_expires_at 지났으면 expired 등)
+- [x] 백엔드: 로그인 쿼리+응답에 subscriptionStatus 포함 (auth.ts)
+- [x] 프론트엔드: isSubscriptionLocked 헬퍼 + 대시보드 10군데 잠금 처리 + SubscriptionLockModal.tsx 신규 생성
+- [x] 슈퍼관리자: AdminDashboard.tsx 구독 상태 드롭다운 추가 + admin.ts PUT API에 subscription_status 저장
+
+**수정 파일:** auth.ts, Dashboard.tsx, SubscriptionLockModal.tsx(신규), AdminDashboard.tsx, admin.ts
+
+#### Task B. AI 분석 기능 (요금제별 차별화)
+
+**요금제 구조:**
+- 베이직: AI 분석 없음
+- 프로 (100만원): AI 분석 (기본)
+- 비즈니스 (300만원): AI 분석 (고급)
+
+**프로 — AI 분석 (기본) | What happened:**
+- API에 집계값 위주 전달 (토큰 소모 적음, 호출 1~2회)
+- 캠페인 성과 분석: 성공률/실패율 추이, 채널별 비교, 요일/시간대별 패턴, 최적 발송 시간 추천
+- 고객 기본 통계: 성별/등급/지역 분포, 수신거부 추이 (월별 증감 + 원인 분석)
+- 월간 요약 리포트: 총 발송, 성공률, 전월 대비, 성과 TOP 3 캠페인
+- 기본 PDF 출력 (1~2페이지, 핵심 수치 + 간단 차트)
+
+**비즈니스 — AI 분석 (고급) | Why + What to do next:**
+- API에 로우 데이터 전달 (토큰 소모 많음, 호출 5~8회)
+- 프로의 모든 기능 포함 +
+- 고객 세그먼트 자동 분류: RFM 기반 고객군 식별 + 군별 특성/추천 전략
+- 이탈 위험 분석: 구매주기 대비 미구매 고객 추출 + 재활성화 메시지 AI 제안
+- 캠페인 심층 비교: 동일 타겟 다른 메시지 성과 비교 + 톤/내용 패턴 분석
+- 구매 전환 분석: 캠페인 발송 후 7일 내 구매 추적 + ROI 추정 (purchases 데이터 보유 고객사)
+- 맞춤 액션 제안: 타겟군 + 메시지 방향 + 발송 시기 패키지 추천
+- 상세 PDF 보고서 (5~10페이지, 차트/세그먼트/전략, 회사 로고 + 기간 설정)
+
+**구현 TODO:**
+- [ ] plans 테이블에 ai_analysis_level 필드 추가 (none/basic/advanced)
+- [ ] AI 분석 백엔드 API 설계 (프로용 집계 엔드포인트 + 비즈니스용 상세 엔드포인트)
+- [ ] AI 분석 프론트엔드 UI (대시보드 내 분석 탭 또는 별도 메뉴)
+- [ ] PDF 생성 (기본/상세 분기)
+- [ ] 요금제별 접근 제어 (plan의 ai_analysis_level 기반)
+- [ ] 데모 데이터 SQL INSERT (가상 고객사 고객/캠페인/구매 데이터) → 중진공 시연용 (02-27)
+
+---
+
+### ✅ 이전 완료: Sync Agent 서버측 보안 + 코드 수정
+
+- ✅ sync_logs/sync_releases/sync_agents DDL 적용
+- ✅ sync.ts version API checksum 필드 포함 확인
+- ✅ `/api/sync/*` rate limit (IP + 회사별)
+- ✅ 동시 full sync 제한 (activeSyncs + 429 + 30분 자동 정리)
+- ✅ 매뉴얼 최종 점검 완료
+- ⏳ sync_releases v1.3.0 등록 — 비토 최종 빌드 후
+- ⏳ 비토측 보안 수정 (B-1~B-3) — 전달 완료, 비토 작업 대기
 
 ---
 
@@ -476,9 +525,10 @@
 ### Sync Agent
 - [x] Sync Agent 코어 완성 (비토 v1.3.0 개발 완료 — 설정 편집 + 테이블별 timestamp 분리)
 - [x] 서버 DDL 수정: sync_logs 컬럼 추가 + sync_releases 테이블 생성 + sync_agents config 컬럼 (2026-02-25)
-- [ ] sync.ts version API checksum 필드 추가 (코드 수정 후 배포)
-- [ ] `/api/sync/*` rate limit 추가 (브루트포스 방어)
-- [ ] 고객사별 동시 full sync 제한
+- [x] sync.ts version API checksum 필드 포함 확인 (2026-02-25)
+- [x] `/api/sync/*` rate limit — IP 브루트포스 차단 + 회사별 요청 제한 (2026-02-25)
+- [x] 고객사별 동시 full sync 제한 — activeSyncs + 429 + 30분 자동 정리 (2026-02-25)
+- [x] 매뉴얼 최종 점검 — 내부 URL/코드명/API경로 노출 제거 확인 (2026-02-25)
 - [ ] sync_releases에 v1.3.0 릴리스 레코드 등록 (비토 최종 빌드 후)
 
 ### 보안
@@ -524,6 +574,8 @@
 | D16 | 02-25 | 스팸필터 테스트 과금=일반 단가 동일 적용 | cost_per_sms/lms 단가 그대로 사용. billing_invoices에 spam_filter_unit_price 컬럼 있으나 정산서 생성 시 별도 처리 |
 | D17 | 02-25 | 테스트 통계 응답 구조 확장 (하위호환) | campaigns.ts test-stats: 기존 stats/list 유지 + managerStats/spamFilterStats/spamFilterList 추가 |
 | D18 | 02-25 | 정산 billing.ts 자체 헬퍼 함수 구현 (순환참조 방지) | campaigns.ts에서 import 시 순환참조 발생. 정산 전용 getBillingCompanyTables/getBillingTestTables/getTablesForBillingPeriod 등 자체 구현 |
+| D19 | 02-25 | 요금제 미사용 시 기능 제한: subscription_status 필드 추가 (trial/active/expired/suspended) | plan_id+trial_expires_at 조합보다 확장성 우수. 해지/미결제 정지/관리자 정지 등 다양한 상태 관리 가능 |
+| D20 | 02-25 | AI 분석 요금제별 차별화: 프로=기본(집계값, 1~2회 호출, 기본PDF), 비즈니스=고급(로우데이터, 5~8회 호출, 상세PDF) | 프로=What happened(과거 회고), 비즈니스=Why+What next(예측+액션). API 토큰 소모량으로 원가 차별화 |
 
 **아카이브:** D1-AI발송2분기(02-22) | D-대시보드 모달 분리(02-23): 8,039줄→4,964줄 | D2-브리핑방식(02-22) | D3-개인화필드체크박스(02-22) | D4-textarea제거(02-22) | D5-별도컴포넌트분리(02-22)
 
@@ -556,6 +608,9 @@
 
 | 날짜 | 완료 항목 |
 |------|----------|
+| 02-25 | Task A 요금제 기능 제한 구현 완료: ① DDL subscription_status varchar(20) DEFAULT 'trial' + 마이그레이션 SQL, ② auth.ts 로그인 쿼리+응답에 subscriptionStatus 포함, ③ Dashboard.tsx isSubscriptionLocked 헬퍼+10군데 잠금(AI추천발송/직접타겟/DB업로드/최근캠페인/발송예시/고객인사이트/예약대기/고객DB조회)+opacity+🔒아이콘, ④ SubscriptionLockModal.tsx 신규(예쁜 커스텀 모달, Lock+Crown 아이콘, 요금제안내 링크), ⑤ AdminDashboard.tsx 구독상태 드롭다운(trial/active/expired/suspended)+안내문구, ⑥ admin.ts PUT API $31 subscription_status 추가. 수정 5파일+신규 1파일 |
+| 02-25 | 요금제 기능 제한 + AI 분석 기능 설계 의논: ① subscription_status 필드 추가 결정(trial/active/expired/suspended), 무료 종료 후 대시보드 잠금+직접발송/탑메뉴/충전 허용, ② AI 분석 요금제별 차별화 설계 — 프로(기본, 집계값, 1~2회 호출, 기본PDF 1~2p) / 비즈니스(고급, 로우데이터, 5~8회 호출, 상세PDF 5~10p, 세그먼트+이탈예측+ROI+액션제안). CURRENT_TASK 반영 완료 |
+| 02-25 | Sync Agent 서버 보안 구현:: ① rate limit — ipRateLimit(인증 실패 IP 10회/분 차단)+companyRateLimit(회사 60회/분) 인메모리 Map+5분 정리, ② 동시 full sync 제한 — activeSyncs Map+429+finally 해제+30분 stuck 자동 정리, ③ version API checksum 포함 확인. 매뉴얼 최종 점검: sys.hanjullo.com 삭제+Target-UP 삭제+API 경로 삭제 확인 완료. 수정: sync.ts |
 | 02-25 | 정산 멀티테이블+스팸필터 통합: ① billing.ts SMSQ_SEND 단일→회사별 라인그룹 멀티테이블 전환(getBillingCompanyTables+smsAggByDateType 자체 헬퍼, campaigns.ts 순환참조 방지), ② LOG 테이블(SMSQ_SEND_X_YYYYMM) 정산기간별 자동탐색+통합조회(getTablesForBillingPeriod), ③ 스팸필터 테스트 PostgreSQL 집계 추가(spam_filter_tests+results JOIN), ④ DDL: billing_invoices에 spam_filter_sms/lms_count+unit_price 4컬럼 추가, ⑤ preview API spam 섹션 추가, ⑥ PDF 스팸필터행 배경색(#fef3c7)+일별상세 SPAM_SMS/SPAM_LMS 라벨, ⑦ 메일 HTML 스팸필터 비용 표시. 수정 파일: billing.ts (1450→1616줄) |
 | 02-25 | 발송 통계 고도화 + 스팸필터 테스트 통합: ① 채널통합조회 타입컬럼 제거(채널뱃지 중복), ② 테스트 통계 스팸필터 합산(담당자 MySQL+스팸필터 PostgreSQL, 3곳: campaigns.ts/manage-stats.ts/admin.ts), ③ 고객사관리자 발송통계에 비용 표시(요약카드+상세 사용자별), ④ 슈퍼관리자 통계에 testSummary+testDetail 추가, ⑤ ResultsModal 테스트탭 3카드(전체/담당자/스팸필터)+스팸필터 이력 리스트("준비중" 제거), ⑥ 테스트 이력 페이징 10건(ResultsModal+StatsTab 양쪽). 수정 파일: campaigns.ts, manage-stats.ts, admin.ts, ResultsModal.tsx, StatsTab.tsx(company-frontend), StatsTab.tsx(frontend/admin) |
 | 02-25 | 직원 버그리포트 7차 세션3 완료 (2건) + 7차 전체 완료: ① LMS 제목 머지 치환 — AI발송(personalizedSubject+fieldMappings 동시치환+잔여변수 제거), 직접발송(finalSubject+replace 체인). 제목에도 %이름% 등 개인화 변수 정상 치환(#9). ② recount-target 근본 수정 — user.company_id→req.user?.companyId(undefined 해결), WHERE 조건 recommend-target과 통일(is_active+sms_opt_in+NOT EXISTS unsubscribes), storeFilter 추가(#6). 수정 파일: campaigns.ts, ai.ts |

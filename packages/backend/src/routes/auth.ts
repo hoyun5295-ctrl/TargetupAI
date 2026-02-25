@@ -1,9 +1,9 @@
-import { Router, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
+import { Request, Response, Router } from 'express';
 import { query } from '../config/database';
 // 새코드
-import { generateToken, JwtPayload, authenticate } from '../middlewares/auth';
+import { authenticate, generateToken, JwtPayload } from '../middlewares/auth';
 
 const router = Router();
 
@@ -77,7 +77,7 @@ router.post('/login', async (req: Request, res: Response) => {
 
     // ===== 고객사 사용자 로그인 =====
     const result = await query(
-      `SELECT u.*, u.must_change_password, u.hidden_features, c.name as company_name, c.id as company_code
+      `SELECT u.*, u.must_change_password, u.hidden_features, c.name as company_name, c.id as company_code, c.subscription_status
        FROM users u
        JOIN companies c ON u.company_id = c.id
        WHERE u.login_id = $1`,
@@ -205,6 +205,7 @@ router.post('/login', async (req: Request, res: Response) => {
           name: user.company_name,
           code: user.company_code,
           kakaoEnabled,
+          subscriptionStatus: user.subscription_status || 'trial',
         },
       },
       sessionTimeoutMinutes,
