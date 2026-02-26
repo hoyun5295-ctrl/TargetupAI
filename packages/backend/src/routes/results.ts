@@ -5,70 +5,71 @@ import { getCompanySmsTablesWithLogs } from './campaigns';
 
 const router = Router();
 
-async function smsQueryAll(tables: string[], sql: string, params: any[]): Promise<any[]> {
-  let all: any[] = [];
-  for (const t of tables) {
-    const rows = await mysqlQuery(sql.replace(/SMSQ_SEND/g, t), params) as any[];
-    all = all.concat(rows);
-  }
-  return all;
+// ===== UNION ALL 기반 MySQL 헬퍼 (서버측 정렬/페이지네이션) =====
+// [S9-08] 기존: N개 테이블 순차 쿼리 → 메모리 concat → JS 정렬 → slice (30만건 OOM 위험)
+// 개선: UNION ALL 단일 쿼리 → MySQL이 정렬+페이징 처리 (페이지 분량만 메모리 로드)
+
+/** 파라미터를 테이블 수만큼 반복 (UNION ALL 각 서브쿼리에 동일 WHERE 파라미터 필요) */
+function repeatParams(params: any[], count: number): any[] {
+  const result: any[] = [];
+  for (let i = 0; i < count; i++) result.push(...params);
+  return result;
 }
 
-async function smsCountAllWhere(tables: string[], whereClause: string, params: any[]): Promise<number> {
-  let total = 0;
-  for (const t of tables) {
-    const rows = await mysqlQuery(`SELECT COUNT(*) as cnt FROM ${t} ${whereClause}`, params) as any[];
-    total += parseInt(rows[0]?.cnt || '0');
-  }
-  return total;
+/** UNION ALL COUNT: 여러 테이블의 COUNT를 SUM으로 합산 — 단일 쿼리 */
+async function smsUnionCount(tables: string[], whereClause: string, params: any[]): Promise<number> {
+  if (tables.length === 0) return 0;
+  const sql = `SELECT SUM(cnt) AS total FROM (${
+    tables.map(t => `SELECT COUNT(*) AS cnt FROM ${t} ${whereClause}`).join(' UNION ALL ')
+  }) AS _u`;
+  const rows = await mysqlQuery(sql, repeatParams(params, tables.length)) as any[];
+  return parseInt(rows[0]?.total || '0');
 }
 
-async function smsSelectAllWhere(tables: string[], selectFields: string, whereClause: string, params: any[], suffix?: string): Promise<any[]> {
-  let all: any[] = [];
-  for (const t of tables) {
-    const rows = await mysqlQuery(`SELECT ${selectFields} FROM ${t} ${whereClause} ${suffix || ''}`, params) as any[];
-    all = all.concat(rows);
-  }
-  return all;
+/** UNION ALL SELECT: ORDER BY + LIMIT/OFFSET을 MySQL에서 처리 */
+async function smsUnionSelect(
+  tables: string[], fields: string, whereClause: string, params: any[],
+  orderBy?: string, limit?: number, offset?: number
+): Promise<any[]> {
+  if (tables.length === 0) return [];
+  let sql = tables.map(t => `(SELECT ${fields} FROM ${t} ${whereClause})`).join(' UNION ALL ');
+  const allParams = repeatParams(params, tables.length);
+  if (orderBy) sql += ` ORDER BY ${orderBy}`;
+  if (limit !== undefined) { sql += ` LIMIT ?`; allParams.push(limit); }
+  if (offset !== undefined) { sql += ` OFFSET ?`; allParams.push(offset); }
+  return await mysqlQuery(sql, allParams) as any[];
 }
 
-async function smsAggAllWhere(tables: string[], selectFields: string, whereClause: string, params: any[]): Promise<any> {
-  const results: any[] = [];
-  for (const t of tables) {
-    const rows = await mysqlQuery(`SELECT ${selectFields} FROM ${t} ${whereClause}`, params) as any[];
-    results.push(rows[0]);
-  }
-  // 숫자 필드 합산
-  const merged: any = {};
-  for (const row of results) {
-    if (!row) continue;
-    for (const key of Object.keys(row)) {
-      merged[key] = (merged[key] || 0) + (parseInt(row[key]) || 0);
-    }
-  }
-  return merged;
+/** UNION ALL GROUP BY: 여러 테이블 통합 후 단일 GROUP BY 집계 — 기존 N회→1회 */
+async function smsUnionGroupBy(
+  tables: string[], rawField: string, whereClause: string, params: any[]
+): Promise<Record<string, number>> {
+  if (tables.length === 0) return {};
+  const sql = `SELECT _grp, COUNT(*) AS cnt FROM (${
+    tables.map(t => `(SELECT ${rawField} AS _grp FROM ${t} ${whereClause})`).join(' UNION ALL ')
+  }) AS _u GROUP BY _grp`;
+  const rows = await mysqlQuery(sql, repeatParams(params, tables.length)) as any[];
+  const result: Record<string, number> = {};
+  for (const r of rows) result[String(r._grp ?? '')] = parseInt(r.cnt);
+  return result;
 }
 
-// ===== 카카오 브랜드메시지 결과 조회 헬퍼 =====
+// ===== 카카오 브랜드메시지 헬퍼 (단일 테이블 — 변경 불필요) =====
 
 async function kakaoCountWhere(whereClause: string, params: any[]): Promise<number> {
-  const rows = await mysqlQuery(`SELECT COUNT(*) as cnt FROM IMC_BM_FREE_BIZ_MSG ${whereClause}`, params) as any[];
+  const rows = await mysqlQuery(`SELECT COUNT(*) AS cnt FROM IMC_BM_FREE_BIZ_MSG ${whereClause}`, params) as any[];
   return parseInt(rows[0]?.cnt || '0');
 }
 
-async function kakaoSelectWhere(selectFields: string, whereClause: string, params: any[], suffix?: string): Promise<any[]> {
-  const rows = await mysqlQuery(`SELECT ${selectFields} FROM IMC_BM_FREE_BIZ_MSG ${whereClause} ${suffix || ''}`, params) as any[];
-  return rows;
-}
-
-async function kakaoAggWhere(selectFields: string, whereClause: string, params: any[]): Promise<any> {
-  const rows = await mysqlQuery(`SELECT ${selectFields} FROM IMC_BM_FREE_BIZ_MSG ${whereClause}`, params) as any[];
-  return rows[0] || {};
+async function kakaoSelectWhere(fields: string, whereClause: string, params: any[], suffix?: string): Promise<any[]> {
+  return await mysqlQuery(`SELECT ${fields} FROM IMC_BM_FREE_BIZ_MSG ${whereClause} ${suffix || ''}`, params) as any[];
 }
 
 router.use(authenticate);
 
-// GET /api/v1/results/summary - 요약 + 비용
+// ======================================================================
+// GET /api/v1/results/summary — 캠페인 요약 + 비용 (PostgreSQL — 변경 없음)
+// ======================================================================
 router.get('/summary', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
@@ -82,7 +83,6 @@ router.get('/summary', async (req: Request, res: Response) => {
     const userId = req.user?.userId;
     const userType = req.user?.userType;
     
-    // PostgreSQL에서 캠페인 집계 조회
     let summaryQuery = `SELECT 
         COUNT(*) as total_campaigns,
         SUM(target_count) as total_target,
@@ -94,10 +94,8 @@ router.get('/summary', async (req: Request, res: Response) => {
     
     const summaryParams: any[] = [companyId];
 
-    // 취소/초안 캠페인 제외
     summaryQuery += ` AND status NOT IN ('cancelled', 'draft')`;
 
-    // 일자 범위 필터 (fromDate/toDate 우선, 없으면 월 단위) — KST 기준
     if (fromDate && toDate) {
       summaryQuery += ` AND created_at >= $2::date::timestamp AT TIME ZONE 'Asia/Seoul' AND created_at < ($3::date + interval '1 day')::timestamp AT TIME ZONE 'Asia/Seoul'`;
       summaryParams.push(String(fromDate), String(toDate));
@@ -106,13 +104,11 @@ router.get('/summary', async (req: Request, res: Response) => {
       summaryParams.push(`${yearMonth.slice(0,4)}-${yearMonth.slice(4,6)}-01`);
     }
     
-    // 일반 사용자는 본인 캠페인만
     if (userType === 'company_user') {
       summaryQuery += ` AND created_by = $${summaryParams.length + 1}`;
       summaryParams.push(userId);
     }
 
-    // 고객사 관리자: 특정 사용자 필터
     if (userType === 'company_admin' && req.query.filter_user_id) {
       summaryQuery += ` AND created_by = $${summaryParams.length + 1}`;
       summaryParams.push(req.query.filter_user_id);
@@ -120,11 +116,8 @@ router.get('/summary', async (req: Request, res: Response) => {
     
     const campaignStats = await query(summaryQuery, summaryParams);
 
-    // 비용 계산
     const costResult = await query(
-      `SELECT 
-        cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao
-       FROM companies WHERE id = $1`,
+      `SELECT cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao FROM companies WHERE id = $1`,
       [companyId]
     );
     const costs = costResult.rows[0] || {};
@@ -156,7 +149,9 @@ router.get('/summary', async (req: Request, res: Response) => {
   }
 });
 
-// GET /api/v1/results/campaigns - 캠페인 목록 (채널통합조회)
+// ======================================================================
+// GET /api/v1/results/campaigns — 캠페인 목록 (PostgreSQL — 변경 없음)
+// ======================================================================
 router.get('/campaigns', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
@@ -174,19 +169,16 @@ router.get('/campaigns', async (req: Request, res: Response) => {
     const params: any[] = [companyId];
     let paramIndex = 2;
     
-    // 일반 사용자는 본인이 만든 캠페인만 조회
     if (userType === 'company_user') {
       whereClause += ` AND created_by = $${paramIndex++}`;
       params.push(userId);
     }
 
-    // 고객사 관리자: 특정 사용자 필터
     if (userType === 'company_admin' && req.query.filter_user_id) {
       whereClause += ` AND created_by = $${paramIndex++}`;
       params.push(req.query.filter_user_id);
     }
 
-    // 기간 필터 (fromDate/toDate 일자 범위 우선, 없으면 from/to 월 단위) — KST 기준
     if (fromDate && toDate) {
       whereClause += ` AND created_at >= $${paramIndex++}::date::timestamp AT TIME ZONE 'Asia/Seoul'`;
       params.push(String(fromDate));
@@ -203,7 +195,6 @@ router.get('/campaigns', async (req: Request, res: Response) => {
       }
     }
 
-    // 채널 필터
     if (channel && channel !== 'all') {
       whereClause += ` AND message_type = $${paramIndex++}`;
       params.push(channel);
@@ -216,7 +207,6 @@ router.get('/campaigns', async (req: Request, res: Response) => {
     const total = parseInt(countResult.rows[0].count);
 
     params.push(Number(limit), offset);
-    // whereClause에 테이블 별칭 적용
     const aliasedWhere = whereClause
       .replace(/company_id/g, 'c.company_id')
       .replace(/created_by/g, 'c.created_by')
@@ -258,7 +248,10 @@ router.get('/campaigns', async (req: Request, res: Response) => {
   }
 });
 
-// GET /api/v1/results/campaigns/:id - 캠페인 상세 (차트 데이터 포함)
+// ======================================================================
+// GET /api/v1/results/campaigns/:id — 캠페인 상세 (차트 데이터)
+// [S9-08] 기존: 27테이블 × 2집계 = 54쿼리 → UNION ALL GROUP BY 단일 쿼리 2개
+// ======================================================================
 router.get('/campaigns/:id', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
@@ -270,7 +263,6 @@ router.get('/campaigns/:id', async (req: Request, res: Response) => {
 
     const companyTables = await getCompanySmsTablesWithLogs(companyId);
 
-    // 캠페인 기본 정보
     const campaignResult = await query(
       `SELECT * FROM campaigns WHERE id = $1 AND company_id = $2`,
       [id, companyId]
@@ -282,108 +274,87 @@ router.get('/campaigns/:id', async (req: Request, res: Response) => {
 
     const campaign = campaignResult.rows[0];
 
-    // campaign_runs 조회
     const runsResult = await query(
       `SELECT * FROM campaign_runs WHERE campaign_id = $1 ORDER BY created_at DESC`,
       [id]
     );
 
-    // 직접발송은 campaign_runs가 없으므로 campaign.id 사용
-    const queryIds = [id];
     const sendChannel = campaign.send_channel || 'sms';
 
-    // MySQL에서 실패사유별 집계 조회
     let errorStats: Record<string, number> = {};
     let carrierStats: Record<string, number> = {};
-    
-    if (queryIds.length > 0) {
-      // ===== SMS 결과 집계 (sms/both 채널) =====
-      if (sendChannel === 'sms' || sendChannel === 'both') {
-        // 실패사유별 집계 (회사 라인그룹 테이블 합산)
-        const errorResult = await smsSelectAllWhere(companyTables,
-          'status_code, COUNT(*) as cnt',
-          `WHERE app_etc1 IN (${queryIds.map(() => '?').join(',')})`,
-          queryIds,
-          'GROUP BY status_code'
-        );
-        const errorAgg: Record<number, number> = {};
-        errorResult.forEach((row: any) => {
-          errorAgg[row.status_code] = (errorAgg[row.status_code] || 0) + parseInt(row.cnt);
-        });
 
-        const statusCodeMap: Record<number, string> = {
-          6: 'SMS 성공', 1000: 'LMS 성공', 1800: '카카오 성공', 100: '발송 대기',
-          55: '요금 부족', 2008: '비가입자/결번', 23: '식별코드 오류', 2323: '식별코드 오류',
-          3000: '메시지 형식 오류', 3001: '발신번호 오류', 3002: '수신번호 오류',
-          3003: '메시지 길이 초과', 3004: '스팸 차단', 4000: '전송 시간 초과', 9999: '기타 오류',
-        };
+    // ===== SMS 결과 집계 — UNION ALL + GROUP BY (단일 쿼리 2개) =====
+    if (sendChannel === 'sms' || sendChannel === 'both') {
+      // 실패사유별 집계
+      const statusAgg = await smsUnionGroupBy(
+        companyTables, 'status_code', 'WHERE app_etc1 = ?', [id]
+      );
 
-        Object.entries(errorAgg).forEach(([codeStr, cnt]) => {
-          const code = parseInt(codeStr);
+      const statusCodeMap: Record<number, string> = {
+        6: 'SMS 성공', 1000: 'LMS 성공', 1800: '카카오 성공', 100: '발송 대기',
+        55: '요금 부족', 2008: '비가입자/결번', 23: '식별코드 오류', 2323: '식별코드 오류',
+        3000: '메시지 형식 오류', 3001: '발신번호 오류', 3002: '수신번호 오류',
+        3003: '메시지 길이 초과', 3004: '스팸 차단', 4000: '전송 시간 초과', 9999: '기타 오류',
+      };
+
+      for (const [codeStr, cnt] of Object.entries(statusAgg)) {
+        const code = parseInt(codeStr);
+        if (![6, 1000, 1800, 100].includes(code)) {
           const label = statusCodeMap[code] || `오류 코드 ${code}`;
-          if (![6, 1000, 1800, 100].includes(code)) {
-            errorStats[label] = (errorStats[label] || 0) + cnt;
-          }
-        });
-
-        // 통신사별 집계
-        const carrierResult = await smsSelectAllWhere(companyTables,
-          'mob_company, COUNT(*) as cnt',
-          `WHERE app_etc1 IN (${queryIds.map(() => '?').join(',')}) AND status_code IN (6, 1000, 1800)`,
-          queryIds,
-          'GROUP BY mob_company'
-        );
-        const carrierAgg: Record<string, number> = {};
-        carrierResult.forEach((row: any) => {
-          const key = row.mob_company || '';
-          carrierAgg[key] = (carrierAgg[key] || 0) + parseInt(row.cnt);
-        });
-
-        const carrierMap: Record<string, string> = {
-          '11': 'SKT', '16': 'KT', '19': 'LG U+',
-          '12': 'SKT 알뜰폰', '17': 'KT 알뜰폰', '20': 'LG 알뜰폰',
-          'SKT': 'SKT', 'KTF': 'KT', 'LGT': 'LG U+',
-        };
-
-        Object.entries(carrierAgg).forEach(([carrier, cnt]) => {
-          const label = carrierMap[carrier] || carrier || '알 수 없음';
-          carrierStats[label] = (carrierStats[label] || 0) + cnt;
-        });
+          errorStats[label] = (errorStats[label] || 0) + cnt;
+        }
       }
 
-      // ===== 카카오 결과 집계 (kakao/both 채널) =====
-      if (sendChannel === 'kakao' || sendChannel === 'both') {
-        const kakaoErrorResult = await kakaoSelectWhere(
-          'REPORT_CODE, COUNT(*) as cnt',
-          `WHERE REQUEST_UID = ?`,
-          [id],
-          'GROUP BY REPORT_CODE'
-        );
-        kakaoErrorResult.forEach((row: any) => {
-          const code = row.REPORT_CODE || '';
-          const cnt = parseInt(row.cnt);
-          if (code === '0000') {
-            carrierStats['카카오'] = (carrierStats['카카오'] || 0) + cnt;
-          } else if (code !== '' && row.REPORT_CODE !== null) {
-            const label = `카카오 오류 (${code})`;
-            errorStats[label] = (errorStats[label] || 0) + cnt;
-          }
-        });
+      // 통신사별 집계 (성공 건만)
+      const carrierAgg = await smsUnionGroupBy(
+        companyTables, 'mob_company',
+        'WHERE app_etc1 = ? AND status_code IN (6, 1000, 1800)', [id]
+      );
 
-        // 카카오 대체발송(SMS) 결과도 집계
-        const kakaoResendResult = await kakaoSelectWhere(
-          'RESEND_REPORT_CODE, COUNT(*) as cnt',
-          `WHERE REQUEST_UID = ? AND RESEND_MT_TYPE != 'NO' AND RESEND_REPORT_CODE IS NOT NULL AND RESEND_REPORT_CODE != ''`,
-          [id],
-          'GROUP BY RESEND_REPORT_CODE'
-        );
-        kakaoResendResult.forEach((row: any) => {
-          const cnt = parseInt(row.cnt);
-          if (row.RESEND_REPORT_CODE === '0000') {
-            carrierStats['카카오→SMS대체'] = (carrierStats['카카오→SMS대체'] || 0) + cnt;
-          }
-        });
+      const carrierMap: Record<string, string> = {
+        '11': 'SKT', '16': 'KT', '19': 'LG U+',
+        '12': 'SKT 알뜰폰', '17': 'KT 알뜰폰', '20': 'LG 알뜰폰',
+        'SKT': 'SKT', 'KTF': 'KT', 'LGT': 'LG U+',
+      };
+
+      for (const [carrier, cnt] of Object.entries(carrierAgg)) {
+        const label = carrierMap[carrier] || carrier || '알 수 없음';
+        carrierStats[label] = (carrierStats[label] || 0) + cnt;
       }
+    }
+
+    // ===== 카카오 결과 집계 =====
+    if (sendChannel === 'kakao' || sendChannel === 'both') {
+      const kakaoErrorResult = await kakaoSelectWhere(
+        'REPORT_CODE, COUNT(*) as cnt',
+        `WHERE REQUEST_UID = ?`,
+        [id],
+        'GROUP BY REPORT_CODE'
+      );
+      kakaoErrorResult.forEach((row: any) => {
+        const code = row.REPORT_CODE || '';
+        const cnt = parseInt(row.cnt);
+        if (code === '0000') {
+          carrierStats['카카오'] = (carrierStats['카카오'] || 0) + cnt;
+        } else if (code !== '' && row.REPORT_CODE !== null) {
+          const label = `카카오 오류 (${code})`;
+          errorStats[label] = (errorStats[label] || 0) + cnt;
+        }
+      });
+
+      const kakaoResendResult = await kakaoSelectWhere(
+        'RESEND_REPORT_CODE, COUNT(*) as cnt',
+        `WHERE REQUEST_UID = ? AND RESEND_MT_TYPE != 'NO' AND RESEND_REPORT_CODE IS NOT NULL AND RESEND_REPORT_CODE != ''`,
+        [id],
+        'GROUP BY RESEND_REPORT_CODE'
+      );
+      kakaoResendResult.forEach((row: any) => {
+        const cnt = parseInt(row.cnt);
+        if (row.RESEND_REPORT_CODE === '0000') {
+          carrierStats['카카오→SMS대체'] = (carrierStats['카카오→SMS대체'] || 0) + cnt;
+        }
+      });
     }
 
     return res.json({
@@ -405,137 +376,118 @@ router.get('/campaigns/:id', async (req: Request, res: Response) => {
   }
 });
 
-// GET /api/v1/results/campaigns/:id/messages - 개별 발송 건 목록 (SMS+카카오 통합)
+// ======================================================================
+// GET /api/v1/results/campaigns/:id/messages — 개별 발송 건 목록
+// [S9-08 핵심] 기존: 27테이블 전체 SELECT → 메모리 concat → sort → slice (30만건 OOM)
+// 개선: SMS+카카오 UNION ALL 단일 쿼리 → MySQL ORDER BY + LIMIT/OFFSET (페이지 분량만 로드)
+// ======================================================================
 router.get('/campaigns/:id/messages', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
     const { id } = req.params;
     const { searchType, searchValue, status, page = 1, limit = 100 } = req.query;
+    const pageNum = Number(page);
+    const limitNum = Number(limit);
+    const offset = (pageNum - 1) * limitNum;
 
     if (!companyId) {
       return res.status(403).json({ error: '권한이 필요합니다.' });
     }
 
     const msgTables = await getCompanySmsTablesWithLogs(companyId);
-    const runIds = [id];
-    const offset = (Number(page) - 1) * Number(limit);
 
     // 캠페인 채널 확인
     const campResult = await query('SELECT send_channel FROM campaigns WHERE id = $1 AND company_id = $2', [id, companyId]);
     const sendChannel = campResult.rows[0]?.send_channel || 'sms';
 
-    let allMessages: any[] = [];
-    let total = 0;
+    // ===== UNION ALL 서브쿼리 빌드 =====
+    const dataSubqueries: string[] = [];
+    const countSubqueries: string[] = [];
+    const dataParams: any[] = [];
+    const countParams: any[] = [];
 
-    // ===== SMS 메시지 조회 (sms/both) =====
+    // ----- SMS 서브쿼리 (테이블 수만큼 UNION ALL) -----
     if (sendChannel === 'sms' || sendChannel === 'both') {
-      let whereClause = `WHERE app_etc1 IN (${runIds.map(() => '?').join(',')})`;
-      const params: any[] = [...runIds];
+      let smsWhere = 'WHERE app_etc1 = ?';
+      const smsBaseParams: any[] = [id];
 
       if (searchType && searchValue) {
-        switch (searchType) {
-          case 'phone':
-            whereClause += ` AND dest_no LIKE ?`;
-            params.push(`%${searchValue}%`);
-            break;
-          case 'callback':
-            whereClause += ` AND call_back LIKE ?`;
-            params.push(`%${searchValue}%`);
-            break;
-          case 'content':
-            whereClause += ` AND msg_contents LIKE ?`;
-            params.push(`%${searchValue}%`);
-            break;
-        }
+        const sv = `%${String(searchValue).trim()}%`;
+        if (searchType === 'phone') { smsWhere += ' AND dest_no LIKE ?'; smsBaseParams.push(sv); }
+        else if (searchType === 'callback') { smsWhere += ' AND call_back LIKE ?'; smsBaseParams.push(sv); }
+        else if (searchType === 'content') { smsWhere += ' AND msg_contents LIKE ?'; smsBaseParams.push(sv); }
       }
 
-      if (status === 'success') {
-        whereClause += ` AND status_code IN (6, 1000, 1800)`;
-      } else if (status === 'fail') {
-        whereClause += ` AND status_code NOT IN (6, 1000, 1800, 100)`;
+      if (status === 'success') smsWhere += ' AND status_code IN (6, 1000, 1800)';
+      else if (status === 'fail') smsWhere += ' AND status_code NOT IN (6, 1000, 1800, 100)';
+
+      // SMS 통합 필드 (카카오와 UNION ALL 호환 — 컬럼 수/순서 동일)
+      const smsFields = `seqno, dest_no, call_back, msg_type, msg_contents, status_code, mob_company,
+        sendreq_time, mobsend_time, repmsg_recvtm,
+        'sms' AS _channel, sendreq_time AS _sort_time,
+        NULL AS kakao_bubble_type, NULL AS kakao_report_code,
+        NULL AS resend_type, NULL AS resend_report_code`;
+
+      for (const t of msgTables) {
+        dataSubqueries.push(`(SELECT ${smsFields} FROM ${t} ${smsWhere})`);
+        countSubqueries.push(`SELECT COUNT(*) AS cnt FROM ${t} ${smsWhere}`);
+        dataParams.push(...smsBaseParams);
+        countParams.push(...smsBaseParams);
       }
-
-      total += await smsCountAllWhere(msgTables, whereClause, params);
-
-      const smsMessages = await smsSelectAllWhere(msgTables,
-        'seqno, dest_no, call_back, msg_type, msg_contents, status_code, mob_company, sendreq_time, mobsend_time, repmsg_recvtm',
-        whereClause,
-        params
-      );
-      // SMS 메시지에 channel 태그
-      smsMessages.forEach((m: any) => { m._channel = 'sms'; m._sort_time = m.sendreq_time; });
-      allMessages = allMessages.concat(smsMessages);
     }
 
-    // ===== 카카오 메시지 조회 (kakao/both) =====
+    // ----- 카카오 서브쿼리 (단일 테이블) -----
     if (sendChannel === 'kakao' || sendChannel === 'both') {
-      let kakaoWhere = `WHERE REQUEST_UID = ?`;
-      const kakaoParams: any[] = [id];
+      let kakaoWhere = 'WHERE REQUEST_UID = ?';
+      const kakaoBaseParams: any[] = [id];
 
       if (searchType && searchValue) {
-        switch (searchType) {
-          case 'phone':
-            kakaoWhere += ` AND PHONE_NUMBER LIKE ?`;
-            kakaoParams.push(`%${searchValue}%`);
-            break;
-          case 'content':
-            kakaoWhere += ` AND MESSAGE LIKE ?`;
-            kakaoParams.push(`%${searchValue}%`);
-            break;
-        }
+        const sv = `%${String(searchValue).trim()}%`;
+        if (searchType === 'phone') { kakaoWhere += ' AND PHONE_NUMBER LIKE ?'; kakaoBaseParams.push(sv); }
+        else if (searchType === 'content') { kakaoWhere += ' AND MESSAGE LIKE ?'; kakaoBaseParams.push(sv); }
+        // callback 검색은 카카오에 미적용 (원래 동작과 동일)
       }
 
-      if (status === 'success') {
-        kakaoWhere += ` AND REPORT_CODE = '0000'`;
-      } else if (status === 'fail') {
-        kakaoWhere += ` AND REPORT_CODE != '0000' AND STATUS IN ('3','4')`;
-      }
+      if (status === 'success') kakaoWhere += ` AND REPORT_CODE = '0000'`;
+      else if (status === 'fail') kakaoWhere += ` AND REPORT_CODE != '0000' AND STATUS IN ('3','4')`;
 
-      const kakaoTotal = await kakaoCountWhere(kakaoWhere, kakaoParams);
-      total += kakaoTotal;
+      // 카카오 통합 필드 (SMS와 UNION ALL 호환 — 동일 컬럼 이름으로 매핑)
+      const kakaoFields = `ID AS seqno, PHONE_NUMBER AS dest_no, '-' AS call_back, 'KAKAO' AS msg_type,
+        MESSAGE AS msg_contents,
+        CASE WHEN REPORT_CODE='0000' THEN 1800 WHEN STATUS='1' THEN 100 ELSE 9999 END AS status_code,
+        '카카오' AS mob_company,
+        REQUEST_DATE AS sendreq_time, RESPONSE_DATE AS mobsend_time, REPORT_DATE AS repmsg_recvtm,
+        'kakao' AS _channel, REQUEST_DATE AS _sort_time,
+        CHAT_BUBBLE_TYPE AS kakao_bubble_type, REPORT_CODE AS kakao_report_code,
+        RESEND_MT_TYPE AS resend_type, RESEND_REPORT_CODE AS resend_report_code`;
 
-      const kakaoMessages = await kakaoSelectWhere(
-        'ID, PHONE_NUMBER, MESSAGE, CHAT_BUBBLE_TYPE, STATUS, REPORT_CODE, REPORT_DATE, REQUEST_DATE, RESPONSE_DATE, RESEND_MT_TYPE, RESEND_REPORT_CODE',
-        kakaoWhere,
-        kakaoParams
-      );
-      // 카카오 메시지를 SMS와 같은 형태로 변환
-      kakaoMessages.forEach((m: any) => {
-        allMessages.push({
-          seqno: m.ID,
-          dest_no: m.PHONE_NUMBER,
-          call_back: '-',
-          msg_type: 'KAKAO',
-          msg_contents: m.MESSAGE,
-          status_code: m.REPORT_CODE === '0000' ? 1800 : (m.STATUS === '1' ? 100 : 9999),
-          mob_company: '카카오',
-          sendreq_time: m.REQUEST_DATE,
-          mobsend_time: m.RESPONSE_DATE,
-          repmsg_recvtm: m.REPORT_DATE,
-          _channel: 'kakao',
-          _sort_time: m.REQUEST_DATE,
-          kakao_bubble_type: m.CHAT_BUBBLE_TYPE,
-          kakao_report_code: m.REPORT_CODE,
-          resend_type: m.RESEND_MT_TYPE,
-          resend_report_code: m.RESEND_REPORT_CODE,
-        });
-      });
+      dataSubqueries.push(`(SELECT ${kakaoFields} FROM IMC_BM_FREE_BIZ_MSG ${kakaoWhere})`);
+      countSubqueries.push(`SELECT COUNT(*) AS cnt FROM IMC_BM_FREE_BIZ_MSG ${kakaoWhere}`);
+      dataParams.push(...kakaoBaseParams);
+      countParams.push(...kakaoBaseParams);
     }
 
-    // 정렬 + 페이지네이션
-    allMessages.sort((a: any, b: any) => {
-      const ta = new Date(a._sort_time || 0).getTime();
-      const tb = new Date(b._sort_time || 0).getTime();
-      return tb - ta;
-    });
-    const messages = allMessages.slice(offset, offset + Number(limit));
+    // 서브쿼리가 없으면 빈 결과
+    if (dataSubqueries.length === 0) {
+      return res.json({ messages: [], pagination: { total: 0, page: pageNum, limit: limitNum } });
+    }
+
+    // ===== COUNT — 단일 쿼리 (기존: N+1쿼리 → 1쿼리) =====
+    const countSql = `SELECT SUM(cnt) AS total FROM (${countSubqueries.join(' UNION ALL ')}) AS _c`;
+    const countRows = await mysqlQuery(countSql, countParams) as any[];
+    const total = parseInt(countRows[0]?.total || '0');
+
+    // ===== DATA — 단일 쿼리, MySQL이 정렬+페이징 (기존: 30만건 메모리 로드 → 페이지 분량만) =====
+    const dataSql = `${dataSubqueries.join(' UNION ALL ')} ORDER BY _sort_time DESC LIMIT ? OFFSET ?`;
+    dataParams.push(limitNum, offset);
+    const messages = await mysqlQuery(dataSql, dataParams) as any[];
 
     return res.json({
       messages,
       pagination: {
         total,
-        page: Number(page),
-        limit: Number(limit),
+        page: pageNum,
+        limit: limitNum,
       },
     });
   } catch (error) {
@@ -543,7 +495,12 @@ router.get('/campaigns/:id/messages', async (req: Request, res: Response) => {
     return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
   }
 });
-// GET /api/v1/results/campaigns/:id/export - 발송내역 CSV 다운로드 (SMS+카카오 통합)
+
+// ======================================================================
+// GET /api/v1/results/campaigns/:id/export — 발송내역 CSV 다운로드
+// [S9-08] 기존: 30만건 전체 메모리 로드 → join → res.send (OOM/타임아웃)
+// 개선: UNION ALL + 청크 단위 스트리밍 (10,000건씩 쿼리→즉시 write→다음 청크)
+// ======================================================================
 router.get('/campaigns/:id/export', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
@@ -566,60 +523,95 @@ router.get('/campaigns/:id/export', async (req: Request, res: Response) => {
       '11':'SKT', '16':'KT', '19':'LG U+', '12':'SKT알뜰폰', '17':'KT알뜰폰', '20':'LG알뜰폰', 'SKT':'SKT', 'KTF':'KT', 'LGT':'LG U+'
     };
 
-    let allRows: string[] = [];
+    // ===== UNION ALL 서브쿼리 빌드 =====
+    const subqueries: string[] = [];
+    const baseParams: any[] = [];
 
-    // SMS 내역
     if (sendChannel === 'sms' || sendChannel === 'both') {
       const exportTables = await getCompanySmsTablesWithLogs(companyId);
-      const messages = await smsSelectAllWhere(exportTables,
-        'seqno, dest_no, call_back, msg_type, msg_contents, status_code, mob_company, sendreq_time, mobsend_time, repmsg_recvtm',
-        'WHERE app_etc1 = ?',
-        [id]
-      );
-      messages.sort((a: any, b: any) => a.seqno - b.seqno);
-
-      messages.forEach((m: any) => {
-        allRows.push([
-          m.dest_no, m.call_back,
-          m.msg_type === 'S' ? 'SMS' : m.msg_type === 'L' ? 'LMS' : m.msg_type,
-          `"${(m.msg_contents || '').replace(/"/g, '""')}"`,
-          statusMap[m.status_code] || `코드${m.status_code}`, m.status_code,
-          carrierMap[m.mob_company] || m.mob_company || '',
-          m.sendreq_time || '', m.mobsend_time || '', m.repmsg_recvtm || ''
-        ].join(','));
-      });
+      const smsFields = `dest_no, call_back, msg_type, msg_contents, status_code, mob_company,
+        sendreq_time, mobsend_time, repmsg_recvtm, 'sms' AS _channel, NULL AS report_code_raw`;
+      for (const t of exportTables) {
+        subqueries.push(`(SELECT ${smsFields} FROM ${t} WHERE app_etc1 = ?)`);
+        baseParams.push(id);
+      }
     }
 
-    // 카카오 내역
     if (sendChannel === 'kakao' || sendChannel === 'both') {
-      const kakaoMessages = await kakaoSelectWhere(
-        'ID, PHONE_NUMBER, MESSAGE, CHAT_BUBBLE_TYPE, REPORT_CODE, REQUEST_DATE, RESPONSE_DATE, REPORT_DATE',
-        'WHERE REQUEST_UID = ?',
-        [id]
-      );
-
-      kakaoMessages.forEach((m: any) => {
-        const kakaoStatus = m.REPORT_CODE === '0000' ? '카카오성공' : `카카오실패(${m.REPORT_CODE || '미수신'})`;
-        allRows.push([
-          m.PHONE_NUMBER, '-',
-          `카카오(${m.CHAT_BUBBLE_TYPE || 'TEXT'})`,
-          `"${(m.MESSAGE || '').replace(/"/g, '""')}"`,
-          kakaoStatus, m.REPORT_CODE || '',
-          '카카오',
-          m.REQUEST_DATE || '', m.RESPONSE_DATE || '', m.REPORT_DATE || ''
-        ].join(','));
-      });
+      const kakaoFields = `PHONE_NUMBER AS dest_no, '-' AS call_back,
+        CONCAT('카카오(', COALESCE(CHAT_BUBBLE_TYPE, 'TEXT'), ')') AS msg_type,
+        MESSAGE AS msg_contents,
+        CASE WHEN REPORT_CODE='0000' THEN 1800 WHEN STATUS='1' THEN 100 ELSE 9999 END AS status_code,
+        '카카오' AS mob_company,
+        REQUEST_DATE AS sendreq_time, RESPONSE_DATE AS mobsend_time, REPORT_DATE AS repmsg_recvtm,
+        'kakao' AS _channel, REPORT_CODE AS report_code_raw`;
+      subqueries.push(`(SELECT ${kakaoFields} FROM IMC_BM_FREE_BIZ_MSG WHERE REQUEST_UID = ?)`);
+      baseParams.push(id);
     }
 
+    // CSV 헤더 스트리밍 시작
     const BOM = '\uFEFF';
     const headers = '수신번호,회신번호,메시지유형,메시지내용,전송결과,결과코드,통신사,전송요청시간,발송시간,수신확인시간';
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename=send_detail_${id}.csv`);
-    res.send(BOM + headers + '\n' + allRows.join('\n'));
+    res.write(BOM + headers + '\n');
+
+    if (subqueries.length === 0) { res.end(); return; }
+
+    // ===== 청크 단위 스트리밍 — 10,000건씩 쿼리 → 즉시 write → 다음 청크 =====
+    const CHUNK_SIZE = 10000;
+    const baseSql = subqueries.join(' UNION ALL ');
+    let chunkOffset = 0;
+
+    while (true) {
+      const chunkParams = [...baseParams, CHUNK_SIZE, chunkOffset];
+      const rows = await mysqlQuery(
+        `${baseSql} ORDER BY sendreq_time ASC LIMIT ? OFFSET ?`,
+        chunkParams
+      ) as any[];
+
+      if (rows.length === 0) break;
+
+      for (const m of rows) {
+        const channel = m._channel;
+        let msgTypeDisplay: string;
+        let statusDisplay: string;
+        let carrierDisplay: string;
+
+        if (channel === 'kakao') {
+          msgTypeDisplay = m.msg_type;
+          statusDisplay = m.status_code === 1800
+            ? '카카오성공'
+            : `카카오실패(${m.report_code_raw || '미수신'})`;
+          carrierDisplay = '카카오';
+        } else {
+          msgTypeDisplay = m.msg_type === 'S' ? 'SMS' : m.msg_type === 'L' ? 'LMS' : m.msg_type;
+          statusDisplay = statusMap[m.status_code] || `코드${m.status_code}`;
+          carrierDisplay = carrierMap[m.mob_company] || m.mob_company || '';
+        }
+
+        res.write([
+          m.dest_no, m.call_back, msgTypeDisplay,
+          `"${(m.msg_contents || '').replace(/"/g, '""')}"`,
+          statusDisplay, m.status_code,
+          carrierDisplay,
+          m.sendreq_time || '', m.mobsend_time || '', m.repmsg_recvtm || ''
+        ].join(',') + '\n');
+      }
+
+      chunkOffset += rows.length;
+      if (rows.length < CHUNK_SIZE) break;
+    }
+
+    res.end();
   } catch (error) {
     console.error('내보내기 에러:', error);
-    res.status(500).json({ error: '내보내기 실패' });
+    if (!res.headersSent) {
+      res.status(500).json({ error: '내보내기 실패' });
+    } else {
+      res.end();
+    }
   }
 });
 
