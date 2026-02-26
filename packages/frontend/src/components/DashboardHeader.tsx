@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Sparkles } from 'lucide-react';
 
 interface DashboardHeaderProps {
   companyName: string;
@@ -21,7 +20,6 @@ interface MenuItem {
   onClick: () => void;
   color: MenuColor;
   emphasized?: boolean;
-  icon?: React.ReactNode;
 }
 
 const COLOR_CONFIG: Record<MenuColor, { normal: string; hover: string; bar: string }> = {
@@ -50,10 +48,10 @@ export default function DashboardHeader({
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
 
   const menuItems: MenuItem[] = [
+    { label: 'AI 분석', onClick: onAnalysis, color: 'gold', emphasized: true },
     { label: '직접발송', onClick: onDirectSend, color: 'green', emphasized: true },
     { label: '캘린더', onClick: onCalendar, color: 'gold' },
     { label: '발송결과', onClick: onResults, color: 'green' },
-    { label: 'AI 분석', onClick: onAnalysis, color: 'gold', emphasized: true, icon: <Sparkles size={14} /> },
     { label: '수신거부', onClick: () => navigate('/unsubscribes'), color: 'gold' },
     { label: '설정', onClick: () => navigate('/settings'), color: 'green' },
     ...(isCompanyAdmin
@@ -103,7 +101,6 @@ export default function DashboardHeader({
                   fontWeight: isEmphasized ? 600 : 400,
                 }}
               >
-                {item.icon && <span className="inline-flex">{item.icon}</span>}
                 {item.label}
                 {/* 밑줄 애니메이션 */}
                 <span
