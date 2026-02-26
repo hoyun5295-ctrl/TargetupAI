@@ -74,7 +74,7 @@ const upload = multer({
 // allData는 ?includeData=true일 때만 포함 (직접발송/주소록용)
 // 고객DB 업로드는 allData 불필요 (/save에서 파일 직접 재파싱)
 // ================================================================
-router.post('/parse', upload.single('file'), async (req: Request, res: Response) => {
+router.post('/parse', authenticate, upload.single('file'), async (req: Request, res: Response) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: '파일이 없습니다.' });
@@ -165,7 +165,7 @@ router.post('/parse', upload.single('file'), async (req: Request, res: Response)
 // ================================================================
 // POST /mapping — AI 컬럼 매핑 (변경 없음)
 // ================================================================
-router.post('/mapping', async (req: Request, res: Response) => {
+router.post('/mapping', authenticate, async (req: Request, res: Response) => {
   try {
     const { headers } = req.body;
     
@@ -631,7 +631,7 @@ async function processUploadInBackground(
 // ================================================================
 // GET /progress/:fileId — 진행률 조회 (강화)
 // ================================================================
-router.get('/progress/:fileId', async (req: Request, res: Response) => {
+router.get('/progress/:fileId', authenticate, async (req: Request, res: Response) => {
   try {
     const { fileId } = req.params;
     const data = await redis.get(`upload:${fileId}:progress`);

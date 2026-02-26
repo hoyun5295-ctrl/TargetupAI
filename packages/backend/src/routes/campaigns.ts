@@ -11,17 +11,8 @@ const toKoreaTimeStr = (date: Date) => {
   return date.toLocaleString('sv-SE', { timeZone: 'Asia/Seoul' }).replace('T', ' ');
 };
 
-// ★ P0-4: MySQL 세션 타임존 KST 고정 (예약/분할 발송 시간 정확성 보장)
-// Agent가 KST 기준으로 sendreq_time을 처리하므로, MySQL도 KST여야 함
-mysqlQuery("SET time_zone = '+09:00'").then(() => {
-  console.log('[MySQL TZ] 세션 타임존 KST(+09:00) 설정 완료');
-}).catch(err => {
-  console.error('[MySQL TZ] 세션 타임존 설정 실패:', err);
-});
-// 서버 시작 시 MySQL 시간 확인 로그
-mysqlQuery("SELECT NOW() as mysql_now, @@session.time_zone as tz").then((rows: any) => {
-  if (rows && rows[0]) console.log(`[MySQL TZ] NOW()=${rows[0].mysql_now}, time_zone=${rows[0].tz}`);
-}).catch(() => {});
+// ★ GP-04: MySQL TZ는 database.ts의 mysqlQuery 헬퍼에서 매 커넥션마다 자동 설정
+// (커넥션 풀 전체 보장 — 단일 SET으로는 1개 커넥션에만 적용되므로 제거)
 
 // ===== 라인그룹 기반 Agent 발송 설정 =====
 // 환경변수: 서버에 연결된 전체 테이블 목록 (폴백용)
