@@ -45,7 +45,27 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
       return res.status(400).json({ error: '테스트할 메시지를 입력해주세요.' });
     }
 
-    // 1) 사용자별 active/pending 테스트 1건 제한
+    // 1) stale 테스트 자동 정리 (3분 초과 active → completed/timeout 처리)
+    const staleTests = await query(
+      `SELECT id FROM spam_filter_tests
+       WHERE status = 'active' AND created_at < NOW() - INTERVAL '3 minutes'`
+    );
+    if (staleTests.rows.length > 0) {
+      const staleIds = staleTests.rows.map((r: any) => r.id);
+      await query(
+        `UPDATE spam_filter_test_results SET result = 'timeout'
+         WHERE test_id = ANY($1::uuid[]) AND received = false AND result IS NULL`,
+        [staleIds]
+      );
+      await query(
+        `UPDATE spam_filter_tests SET status = 'completed', completed_at = NOW()
+         WHERE id = ANY($1::uuid[])`,
+        [staleIds]
+      );
+      console.log(`[SpamFilter] stale 테스트 ${staleIds.length}건 자동 정리`);
+    }
+
+    // 2) 사용자별 active/pending 테스트 1건 제한
     const activeCheck = await query(
       `SELECT id FROM spam_filter_tests
        WHERE user_id = $1 AND status IN ('pending', 'active')`,
@@ -348,6 +368,9 @@ router.post('/report', async (req: Request, res: Response) => {
 
     // 3) 발신번호로 active 테스트 후보 조회
     const senderClean = senderNumber.replace(/\D/g, '');
+
+    console.log(`[SpamFilter] 리포트 수신 — device=${device.phone}(${device.carrier}), sender=${senderClean}`);
+
     const candidates = await query(
       `SELECT id, message_content_sms, message_content_lms, message_hash FROM spam_filter_tests
        WHERE status = 'active'
@@ -374,27 +397,37 @@ router.post('/report', async (req: Request, res: Response) => {
         }
       }
 
-      // 2차: 정규화 문자열 매칭
+      // 2차: 디바이스(phone+carrier) 기반 매칭 — test_results에서 이 디바이스로 발송된 미수신 테스트 조회
       if (!testId) {
-        const msgNorm = normalizeContent(messageContent || '');
-        const normMatched = candidates.rows.find((row: any) =>
-          normalizeContent(row.message_content_sms) === msgNorm ||
-          normalizeContent(row.message_content_lms) === msgNorm
+        const candidateIds = candidates.rows.map((r: any) => r.id);
+        const deviceMatch = await query(
+          `SELECT tr.test_id FROM spam_filter_test_results tr
+           JOIN spam_filter_tests t ON t.id = tr.test_id
+           WHERE tr.test_id = ANY($1::uuid[])
+             AND tr.phone = $2 AND tr.carrier = $3
+             AND tr.received = false AND tr.result IS NULL
+           ORDER BY t.created_at DESC`,
+          [candidateIds, device.phone, device.carrier]
         );
-        if (normMatched) {
-          testId = normMatched.id;
+        if (deviceMatch.rows.length === 1) {
+          testId = deviceMatch.rows[0].test_id;
+        } else if (deviceMatch.rows.length > 1) {
+          // 여러 건이면 가장 최근 테스트 매칭
+          testId = deviceMatch.rows[0].test_id;
         }
       }
 
-      // ★ fallback 제거 — 매칭 실패 시 잘못된 테스트에 배정하지 않음
+      // 3차: 그래도 실패 시 로그 남기고 무시
       if (!testId) {
-        console.log(`[SpamFilter] 복수 active 테스트 중 매칭 실패 — sender=${senderClean}, 무시 처리`);
+        console.log(`[SpamFilter] 복수 active 테스트 매칭 실패 — sender=${senderClean}, device=${device.phone}, carrier=${device.carrier}`);
         return res.json({ success: true, matched: false, message: '메시지 내용 매칭 실패 (무시)' });
       }
     }
 
     // 4) SMS/LMS 타입: 앱이 보내는 messageType 직접 사용
     const detectedType = (messageType === 'LMS') ? 'LMS' : 'SMS';
+
+    console.log(`[SpamFilter] 리포트 매칭 성공 — testId=${testId}, carrier=${device.carrier}, type=${detectedType}`);
 
     // 5) 결과 업데이트
     const updateResult = await query(

@@ -2799,8 +2799,10 @@ const campaignData = {
                               const formData = new FormData();
                               formData.append('file', file);
                               try {
+                                const token = localStorage.getItem('token');
                                 const res = await fetch('/api/upload/parse', {
                                   method: 'POST',
+                                  headers: { Authorization: `Bearer ${token}` },
                                   body: formData
                                 });
                                 const data = await res.json();
@@ -4425,8 +4427,10 @@ const campaignData = {
                         formData.append('file', file);
                         
                         try {
+                          const token = localStorage.getItem('token');
                           const res = await fetch('/api/upload/parse?includeData=true', {
                             method: 'POST',
+                            headers: { Authorization: `Bearer ${token}` },
                             body: formData
                           });
                           const data = await res.json();
