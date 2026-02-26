@@ -214,16 +214,16 @@ campaigns.ts, spam-filter.ts, messageUtils.ts, results.ts, billing.ts, database.
 | 1-10 | Dashboard.tsx: /mapping, /progress Authorization 토큰 누락 수정 | ✅ |
 | 검증 | 입력→출력 시뮬레이션 + INSERT 컬럼/파라미터 정합성 확인 | ✅ |
 
-### 세션 2: 조회 + AI 정상화
+### ✅ 세션 2: 조회 + AI 정상화 (완료 2026-02-27)
 
 | # | 작업 | 상태 |
 |---|------|------|
-| 2-1 | customers.ts: 하드코딩 3곳 삭제 → FIELD_MAP 기반 | ⬜ |
-| 2-2 | customers.ts: 카테고리 영문 반환 통일 | ⬜ |
-| 2-3 | Dashboard.tsx: CAT_LABELS 삭제 → 영문 카테고리 매칭 | ⬜ |
-| 2-4 | services/ai.ts: 3곳 하드코딩 삭제 → 고객사 보유 필드 동적 | ⬜ |
-| 2-5 | AiCustomSendFlow.tsx: FIELD_CATEGORIES 삭제 | ⬜ |
-| 검증 | 필터 UI 정상 + AI가 보유 필드만 사용 | ⬜ |
+| 2-1 | customers.ts: STANDARD_COLUMNS/CATEGORY_MAP/DETECTABLE_FIELDS 삭제 → FIELD_MAP 기반 동적 생성 | ✅ |
+| 2-2 | customers.ts: 카테고리 영문 반환 통일 + enabled-fields 응답에 categories: CATEGORY_LABELS 추가 | ✅ |
+| 2-3 | Dashboard.tsx: CAT_LABELS 삭제 → 백엔드 categories 응답 사용 (categoryLabels state) | ✅ |
+| 2-4 | services/ai.ts: DEFAULT_FIELD_MAPPINGS/DEFAULT_AVAILABLE_VARS/FIELD_TO_VAR 삭제 → buildVarCatalogFromFieldMap() + fieldKeyToVarName() | ✅ |
+| 2-5 | AiCustomSendFlow.tsx: FIELD_CATEGORIES 삭제 + CATEGORY_ICONS 영문 키 전환 → 백엔드 category 사용 | ✅ |
+| 검증 | 필터 UI 정상 + AI가 보유 필드만 사용 | ⬜ 실동작 검증 대기 |
 
 ---
 
@@ -239,6 +239,16 @@ campaigns.ts, spam-filter.ts, messageUtils.ts, results.ts, billing.ts, database.
 
 ---
 
+## 6-2) 세션 2 결정사항 (Harold님 확정 2026-02-27)
+
+| 항목 | 결정 |
+|------|------|
+| 카테고리 라벨 | **백엔드가 CATEGORY_LABELS를 응답에 포함.** 프론트는 별도 하드코딩 없이 백엔드 응답 그대로 사용. 카테고리 정의의 유일한 기준은 standard-field-map.ts |
+| ai.ts 폴백 | **하드코딩 폴백 전면 삭제.** customer_schema 없으면 FIELD_MAP 기반 동적 생성 (buildVarCatalogFromFieldMap). 고객사 실제 보유 데이터만 AI에 전달 |
+| 프론트 카테고리 아이콘 | 영문 키(basic, purchase, store, membership, marketing, custom)로 직접 매핑. UI 표시 전용, 비즈니스 로직 아님 |
+
+---
+
 ## 7) 정상 동작 (건드리면 안 됨)
 
 - ✅ AI 자동매핑 (/api/upload/mapping)
@@ -251,4 +261,4 @@ campaigns.ts, spam-filter.ts, messageUtils.ts, results.ts, billing.ts, database.
 
 ---
 
-*최종 업데이트: 2026-02-26 — 세션0 DDL+재정의 완료, 세션1 입구 정상화 완료(upload.ts/normalize.ts/Dashboard.tsx). 옵션A 확정(레거시 컬럼 미사용). 세션2 조회+AI 정상화 대기.*
+*최종 업데이트: 2026-02-27 — 세션0~2 전체 완료. 세션2: customers.ts 하드코딩 4곳(STANDARD_COLUMNS/CATEGORY_MAP/DETECTABLE_FIELDS/dataCheck) 삭제→FIELD_MAP 동적, ai.ts 3곳(DEFAULT_FIELD_MAPPINGS/DEFAULT_AVAILABLE_VARS/FIELD_TO_VAR) 삭제→FIELD_MAP 동적, Dashboard.tsx CAT_LABELS 삭제→백엔드 categories 사용, AiCustomSendFlow.tsx FIELD_CATEGORIES 삭제→백엔드 category 사용. 실동작 검증 대기.*

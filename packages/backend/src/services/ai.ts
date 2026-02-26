@@ -1109,7 +1109,7 @@ interface CustomMessageOptions {
   personalFields: string[];
   fieldLabels?: Record<string, string>;
   url?: string;
-  tone: string;
+  tone?: string;
   brandName: string;
   brandTone?: string;
   channel: string;
@@ -1157,7 +1157,7 @@ export async function generateCustomMessages(options: CustomMessageOptions): Pro
   const varTags = varNames.map(v => `%${v}%`).join(', ');
 
   const smsAvailableBytes = getAvailableSmsBytes(isAd, rejectNumber);
-  const toneDesc = TONE_MAP[tone] || '친근한';
+  const toneDesc = TONE_MAP[tone || 'friendly'] || '친근하고 자연스러운';
 
   const cardLines = [
     promotionCard.name && `- 프로모션명: ${promotionCard.name}`,

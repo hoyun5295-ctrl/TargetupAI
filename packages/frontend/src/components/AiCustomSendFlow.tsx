@@ -8,7 +8,6 @@ import {
   Hash,
   Link2, Loader2,
   MapPin,
-  Palette,
   Pencil,
   ShoppingBag,
   Sparkles,
@@ -84,14 +83,7 @@ const CATEGORY_ICONS: Record<string, any> = {
   membership: Star, marketing: Hash, custom: Hash,
 };
 
-const TONE_OPTIONS = [
-  { value: 'friendly', label: '😊 친근한', desc: '이웃에게 말하듯 따뜻하게' },
-  { value: 'formal', label: '👔 격식있는', desc: '비즈니스 톤으로 신뢰감 있게' },
-  { value: 'humorous', label: '😄 유머러스한', desc: '재미있고 기억에 남게' },
-  { value: 'urgent', label: '🔥 긴급한', desc: '지금 바로 행동을 유도' },
-  { value: 'premium', label: '✨ 프리미엄', desc: 'VIP를 위한 고급스러운 톤' },
-  { value: 'casual', label: '💬 캐주얼', desc: '편하고 가벼운 톤' },
-];
+
 
 
 export default function AiCustomSendFlow({
@@ -110,7 +102,7 @@ export default function AiCustomSendFlow({
   // Step 2
   const [briefing, setBriefing] = useState('');
   const [url, setUrl] = useState('');
-  const [tone, setTone] = useState('friendly');
+  const tone = 'friendly'; // AI 내부 기본값 (UI 미노출)
   const [channel, setChannel] = useState<'SMS' | 'LMS' | 'MMS'>('LMS');
   const [isAdLocal, setIsAdLocal] = useState(isAd);
 
@@ -445,15 +437,22 @@ export default function AiCustomSendFlow({
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1.5"><Palette className="w-4 h-4 inline mr-1 text-violet-500" />톤 / 분위기</label>
-                  <div className="space-y-1.5">
-                    {TONE_OPTIONS.map(opt => (
-                      <button key={opt.value} onClick={() => setTone(opt.value)}
-                        className={`w-full px-3 py-2 rounded-lg border text-left text-sm transition-all ${tone === opt.value ? 'border-violet-400 bg-violet-50 text-violet-700' : 'border-gray-200 text-gray-600 hover:border-gray-300'}`}>
-                        <span className="font-medium">{opt.label}</span><span className="text-xs text-gray-400 ml-1.5">{opt.desc}</span>
-                      </button>
-                    ))}
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5"><User className="w-4 h-4 inline mr-1 text-violet-500" />선택한 개인화 필드</label>
+                  <div className="bg-violet-50 border border-violet-200 rounded-xl p-3">
+                    <div className="flex flex-wrap gap-1.5">
+                      {selectedFields.map(key => {
+                        const field = availableFields.find((f: any) => f.field_key === key);
+                        const label = field?.field_label || field?.display_name || key;
+                        return (
+                          <span key={key} className="inline-flex items-center gap-1 px-2.5 py-1 bg-white border border-violet-300 rounded-full text-xs font-medium text-violet-700">
+                            <Check className="w-3 h-3" />{label}
+                          </span>
+                        );
+                      })}
+                    </div>
+                    <p className="text-xs text-violet-500 mt-2">위 필드를 활용해 AI가 고객별 1:1 맞춤 문안을 생성합니다</p>
                   </div>
+                  <p className="text-xs text-gray-400 mt-2">💡 브리핑에 위 필드 관련 내용을 적으면 더 정확한 문안이 생성됩니다</p>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">📱 발송 채널</label>
@@ -480,8 +479,10 @@ export default function AiCustomSendFlow({
                   <div className="mt-4 p-3 bg-gray-50 rounded-lg border border-gray-100">
                     <div className="text-xs font-medium text-gray-500 mb-2">선택 요약</div>
                     <div className="space-y-1 text-xs text-gray-600">
-                      <div>• 개인화 필드: <b className="text-violet-600">{selectedFields.length}개</b></div>
-                      <div>• 톤: <b>{TONE_OPTIONS.find(t => t.value === tone)?.label}</b></div>
+                      <div>• 개인화 필드: <b className="text-violet-600">{selectedFields.map(key => {
+                        const f = availableFields.find((ff: any) => ff.field_key === key);
+                        return f?.field_label || f?.display_name || key;
+                      }).join(', ')}</b></div>
                       <div>• 채널: <b>{channel}</b></div>
                       {url && <div>• URL: <b className="text-blue-500">{url.length > 30 ? url.substring(0, 30) + '...' : url}</b></div>}
                       <div>• 광고: <b>{isAdLocal ? '예 (법정문구 자동삽입)' : '아니오'}</b></div>

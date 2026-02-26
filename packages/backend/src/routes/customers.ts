@@ -1012,7 +1012,7 @@ router.get('/enabled-fields', async (req: Request, res: Response) => {
     const fields: any[] = [];
     const existingKeys = new Set<string>();
 
-    // 1. customer_field_definitions 조회 (회사별 필드 정의가 있으면 우선 사용)
+    // 0. customer_field_definitions 라벨 맵 조회 (라벨 오버라이드용)
     const fieldDefsResult = await query(
       `SELECT field_key, field_label, field_type, display_order
        FROM customer_field_definitions 
@@ -1020,71 +1020,60 @@ router.get('/enabled-fields', async (req: Request, res: Response) => {
        ORDER BY display_order`,
       [companyId]
     );
+    const fieldDefLabels: Record<string, string> = {};
+    for (const fd of fieldDefsResult.rows) {
+      fieldDefLabels[fd.field_key] = fd.field_label;
+    }
 
-    if (fieldDefsResult.rows.length > 0) {
-      for (const f of fieldDefsResult.rows) {
-        const mapped = getFieldByKey(f.field_key);
-        fields.push({
-          field_key: f.field_key,
-          display_name: f.field_label,
-          field_label: f.field_label,
-          data_type: f.field_type || mapped?.dataType || 'string',
-          category: mapped?.category || 'custom',
-          sort_order: f.display_order,
-          is_custom: mapped?.storageType === 'custom_fields' || !mapped,
-        });
-        existingKeys.add(f.field_key);
+    // 1. 직접 컬럼 필드 — 항상 FIELD_MAP + 실제 데이터 감지 (단일 경로)
+    // name, phone은 필수 — 항상 포함
+    fields.push(
+      { field_key: 'name', display_name: fieldDefLabels['name'] || '고객명', field_label: fieldDefLabels['name'] || '고객명', data_type: 'string', category: 'basic', sort_order: 1, is_custom: false },
+      { field_key: 'phone', display_name: fieldDefLabels['phone'] || '고객전화번호', field_label: fieldDefLabels['phone'] || '고객전화번호', data_type: 'string', category: 'basic', sort_order: 2, is_custom: false },
+    );
+    existingKeys.add('name');
+    existingKeys.add('phone');
+
+    // FIELD_MAP에서 직접 컬럼 필드 중 name, phone 제외한 나머지를 동적 감지
+    const detectableFields = getColumnFields().filter(f => f.fieldKey !== 'name' && f.fieldKey !== 'phone');
+
+    // 동적 COUNT FILTER 쿼리 생성
+    const countFilters = detectableFields.map(f => {
+      const col = f.columnName;
+      if (f.dataType === 'boolean') {
+        return `COUNT(*) FILTER (WHERE ${col} IS NOT NULL) as cnt_${f.fieldKey}`;
+      } else if (f.dataType === 'number') {
+        return `COUNT(*) FILTER (WHERE ${col} IS NOT NULL AND ${col} > 0) as cnt_${f.fieldKey}`;
+      } else if (f.dataType === 'date') {
+        return `COUNT(*) FILTER (WHERE ${col} IS NOT NULL) as cnt_${f.fieldKey}`;
+      } else {
+        return `COUNT(*) FILTER (WHERE ${col} IS NOT NULL AND ${col} != '') as cnt_${f.fieldKey}`;
       }
-    } else {
-      // field_definitions가 없으면 FIELD_MAP 기반 동적 감지 (실제 데이터 있는 필드만 표시)
-      // name, phone은 필수 — 항상 포함
-      fields.push(
-        { field_key: 'name', display_name: '고객명', field_label: '고객명', data_type: 'string', category: 'basic', sort_order: 1, is_custom: false },
-        { field_key: 'phone', display_name: '고객전화번호', field_label: '고객전화번호', data_type: 'string', category: 'basic', sort_order: 2, is_custom: false },
-      );
-      existingKeys.add('name');
-      existingKeys.add('phone');
+    });
 
-      // FIELD_MAP에서 직접 컬럼 필드 중 name, phone 제외한 나머지를 동적 감지
-      const detectableFields = getColumnFields().filter(f => f.fieldKey !== 'name' && f.fieldKey !== 'phone');
+    const dataCheckResult = await query(
+      `SELECT ${countFilters.join(', ')} FROM customers WHERE ${scopeWhere}`,
+      scopeParams
+    );
+    const dc = dataCheckResult.rows[0] || {};
 
-      // 동적 COUNT FILTER 쿼리 생성
-      const countFilters = detectableFields.map(f => {
-        const col = f.columnName;
-        if (f.dataType === 'boolean') {
-          return `COUNT(*) FILTER (WHERE ${col} IS NOT NULL) as cnt_${f.fieldKey}`;
-        } else if (f.dataType === 'number') {
-          return `COUNT(*) FILTER (WHERE ${col} IS NOT NULL AND ${col} > 0) as cnt_${f.fieldKey}`;
-        } else if (f.dataType === 'date') {
-          return `COUNT(*) FILTER (WHERE ${col} IS NOT NULL) as cnt_${f.fieldKey}`;
-        } else {
-          return `COUNT(*) FILTER (WHERE ${col} IS NOT NULL AND ${col} != '') as cnt_${f.fieldKey}`;
-        }
-      });
-
-      const dataCheckResult = await query(
-        `SELECT ${countFilters.join(', ')} FROM customers WHERE ${scopeWhere}`,
-        scopeParams
-      );
-      const dc = dataCheckResult.rows[0] || {};
-
-      for (const f of detectableFields) {
-        if (parseInt(dc[`cnt_${f.fieldKey}`] || '0') > 0) {
-          fields.push({
-            field_key: f.fieldKey,
-            display_name: f.displayName,
-            field_label: f.displayName,
-            data_type: f.dataType,
-            category: f.category,
-            sort_order: f.sortOrder,
-            is_custom: false,
-          });
-          existingKeys.add(f.fieldKey);
-        }
+    for (const f of detectableFields) {
+      if (parseInt(dc[`cnt_${f.fieldKey}`] || '0') > 0) {
+        const label = fieldDefLabels[f.fieldKey] || f.displayName;
+        fields.push({
+          field_key: f.fieldKey,
+          display_name: label,
+          field_label: label,
+          data_type: f.dataType,
+          category: f.category,
+          sort_order: f.sortOrder,
+          is_custom: false,
+        });
+        existingKeys.add(f.fieldKey);
       }
     }
 
-    // 2. custom_fields JSONB 키 조회 (field_definitions에 없지만 실제 데이터에 존재하는 커스텀 필드)
+    // 2. 커스텀 필드 — custom_fields JSONB에 실제 데이터 있는 것만 + field_definitions 라벨 적용
     try {
       const customKeysResult = await query(
         `SELECT DISTINCT jsonb_object_keys(custom_fields) as field_key
@@ -1095,11 +1084,7 @@ router.get('/enabled-fields', async (req: Request, res: Response) => {
       for (const row of customKeysResult.rows) {
         if (!existingKeys.has(row.field_key)) {
           const mapped = getFieldByKey(row.field_key);
-          const defResult = await query(
-            `SELECT field_label FROM customer_field_definitions WHERE company_id = $1 AND field_key = $2`,
-            [companyId, row.field_key]
-          );
-          const label = defResult.rows[0]?.field_label || mapped?.displayName || row.field_key;
+          const label = fieldDefLabels[row.field_key] || mapped?.displayName || row.field_key;
           fields.push({
             field_key: row.field_key,
             display_name: label,

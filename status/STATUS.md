@@ -175,12 +175,12 @@
 - [x] Dashboard.tsx: /mapping, /progress 토큰 누락 수정 (Authorization Bearer 추가)
 - [x] 검증: 입력→출력 시뮬레이션 + INSERT 컬럼/파라미터 정합성 확인
 
-**⬜ 세션 2: 조회 + AI 정상화 — customers.ts + Dashboard.tsx + ai.ts + AiCustomSendFlow.tsx**
-- [ ] customers.ts: STANDARD_COLUMNS/CATEGORY_MAP/DETECTABLE_FIELDS 삭제 → FIELD_MAP 기반 + 영문 카테고리 반환
-- [ ] Dashboard.tsx: CAT_LABELS 삭제 → 영문 카테고리 매칭 정상화
-- [ ] ai.ts: DEFAULT_FIELD_MAPPINGS/DEFAULT_AVAILABLE_VARS/FIELD_TO_VAR 삭제 → 고객사 보유 필드 동적
-- [ ] AiCustomSendFlow.tsx: FIELD_CATEGORIES 삭제 → 백엔드 category 사용
-- [ ] 검증: 필터 UI 정상 + AI가 보유 필드만 사용
+**✅ 세션 2: 조회 + AI 정상화 — customers.ts + Dashboard.tsx + ai.ts + AiCustomSendFlow.tsx (완료 2026-02-27)**
+- [x] customers.ts: STANDARD_COLUMNS/CATEGORY_MAP/DETECTABLE_FIELDS 삭제 → FIELD_MAP 기반 + 영문 카테고리 반환 + categories 응답 추가
+- [x] Dashboard.tsx: CAT_LABELS 삭제 → 백엔드 categories 응답 사용 (categoryLabels state)
+- [x] ai.ts: DEFAULT_FIELD_MAPPINGS/DEFAULT_AVAILABLE_VARS/FIELD_TO_VAR 삭제 → FIELD_MAP 기반 동적 생성
+- [x] AiCustomSendFlow.tsx: FIELD_CATEGORIES 삭제 + CATEGORY_ICONS 영문 전환 → 백엔드 category 사용
+- [x] 검증: 코드 하드코딩 전수 제거 확인 완료, 실동작 검증 대기
 
 **⬜ 2단계 실동작 검증 대기 (별도)**
 - [ ] 8차 B8-01~B8-13: 직원 실서비스 테스트 (app.hanjul.ai)
@@ -207,6 +207,7 @@
 
 ### ✅ 이전 완료 요약
 
+> - 2026-02-27 (1차) D39 세션2 조회+AI 정상화 — customers.ts 하드코딩 4곳(STANDARD_COLUMNS/CATEGORY_MAP/DETECTABLE_FIELDS/dataCheck) 삭제→FIELD_MAP 동적+categories 응답 추가, ai.ts 3곳(DEFAULT_FIELD_MAPPINGS/DEFAULT_AVAILABLE_VARS/FIELD_TO_VAR) 삭제→buildVarCatalogFromFieldMap()+fieldKeyToVarName(), Dashboard.tsx CAT_LABELS→백엔드 categories, AiCustomSendFlow.tsx FIELD_CATEGORIES→백엔드 category. 수정 4파일
 > - 2026-02-26 (5차) D39 세션1 입구 정상화 — upload.ts INSERT 하드코딩→FIELD_MAP 동적, AI 매핑 프롬프트 동적, 파생 필드 자동계산, custom_fields JSONB, normalize.ts normalizeByFieldKey 추가, Dashboard.tsx 토큰 수정
 > - 2026-02-26 (4차) 표준 필드 아키텍처 통합 계획 수립 — 7개 파일 전수 검토, Harold님 필수16+커스텀15 확정, FIELD-INTEGRATION.md 기준 문서 작성, 3세션 분할(세션0:DDL+재정의, 세션1:upload+normalize, 세션2:조회+AI)
 > - 2026-02-26 (3차) 표준 필드 아키텍처 근본 원인 분석 + standard-field-map.ts 매핑 레이어 생성 + 절대 개발 원칙 2-5 신설(SCHEMA.md 준수)
@@ -612,6 +613,7 @@
 
 | 날짜 | 완료 항목 |
 |------|----------|
+| 02-27 | D39 세션2 조회+AI 정상화 완료 (customers.ts+ai.ts+Dashboard.tsx+AiCustomSendFlow.tsx): ① customers.ts enabled-fields API 전면 교체 — STANDARD_COLUMNS(28개)/CATEGORY_MAP(한글)/DETECTABLE_FIELDS(24개)/dataCheck 쿼리(24개 레거시) 전부 삭제, FIELD_MAP import+getColumnFields() 동적 COUNT FILTER 쿼리 생성, 카테고리 영문(basic/purchase/store/membership/marketing/custom) 반환, 응답에 categories:CATEGORY_LABELS 추가, 드롭다운에 store_code 추가(1448→1404줄). ② ai.ts — DEFAULT_FIELD_MAPPINGS(10개 레거시)/DEFAULT_AVAILABLE_VARS(7개)/FIELD_TO_VAR(14개 레거시) 전부 삭제, buildVarCatalogFromFieldMap() FIELD_MAP 기반 동적 생성, fieldKeyToVarName() getFieldByKey 동적 조회, extractVarCatalog 폴백 FIELD_MAP 전환(1374→1388줄). ③ Dashboard.tsx — CAT_LABELS(8개 불일치) 삭제→백엔드 categories 응답 사용(categoryLabels state), 카테고리 동적 순회(categoryOrder 정렬), SKIP_FIELDS 레거시 키 정리(5128→5139줄). ④ AiCustomSendFlow.tsx — FIELD_CATEGORIES(15개 한글) 삭제, CATEGORY_ICONS 한글→영문 키, 카테고리 헤더 categoryLabels[category] 한글 표시, Calendar 미사용 import 제거(867→856줄). 수정 4파일 |
 | 02-26 | D39 세션 0 완료 — DDL + standard_fields DB + standard-field-map.ts 재정의: ① customers 테이블 store_phone varchar(20) 컬럼 추가(DDL), ② standard_fields DB 기존 49개 DELETE → 확정 32개 INSERT(필수 17개 + 커스텀 15개), ③ store_code(브랜드) 필수 컬럼 승격 — displayName '브랜드', AI 문안생성 시 브랜드명 활용, 브랜드 1개 고객사는 NULL, ④ standard-field-map.ts 전면 재작성 — 카테고리 8개→6개(basic/purchase/store/membership/marketing/custom), 필드 41개→32개, FIELD_KEY_TO_COLUMN_OVERRIDES 삭제(field_key=columnName 1:1), ⑤ SCHEMA.md store_phone 반영. 파일 경로: packages/backend/src/utils/standard-field-map.ts |
 | 02-26 | D39 세션1 입구 정상화 완료 (upload.ts+normalize.ts+Dashboard.tsx): ① upload.ts INSERT 18개 하드코딩→FIELD_MAP 기반 동적 23파라미터(필수17+파생3+custom_fields+uploaded_by+company_id), ② AI 매핑 프롬프트 레거시 16개→FIELD_MAP 동적 생성(필수17+커스텀15+파생2), ③ 정규화 4개 하드코딩→normalizeByFieldKey() 루프(birth_date는 4자리연도 감지 보호로 제외), ④ 파생 필드 자동계산(birth_date→birth_year/birth_month_day/age, address→region), ⑤ ON CONFLICT UPDATE 동적+custom_fields JSONB 병합(∥연산자), ⑥ 커스텀 필드 정의 customer_field_definitions 자동 저장, ⑦ normalize.ts normalizeEmail()+normalizeByFieldKey() 신규, ⑧ Dashboard.tsx /mapping+/progress Authorization Bearer 토큰 누락 수정. 수정: upload.ts(686→767줄), normalize.ts(379→427줄), Dashboard.tsx(토큰 2곳) |
 | 02-26 | 표준 필드 아키텍처 근본 원인 분석 + standard-field-map.ts 매핑 레이어 생성: ① 근본 원인 발견 — standard_fields 테이블(41개) 존재하나 customers.ts CATEGORY_MAP(한글)/Dashboard.tsx CAT_LABELS(영문)/upload.ts INSERT(18개 하드코딩)/normalize.ts 4곳이 각자 하드코딩 → 카테고리 불일치로 필터 UI 전멸, 업로드 시 17개 필드 데이터 손실. ② SCHEMA.md 전수 대조: standard_fields 41개 vs customers 컬럼 매핑 완성(24개 직접컬럼 + 17개 custom_fields JSONB). ③ standard-field-map.ts 신규 생성 — FIELD_MAP 배열(41개 필드 정의) + 헬퍼 함수 8개(getFieldByKey/getFieldsByCategory/getColumnFields/getCustomFields/fieldKeyToColumn/fieldKeyToSqlRef 등) + FIELD_KEY_TO_COLUMN_OVERRIDES(opt_in_sms↔sms_opt_in). ④ 절대 개발 원칙 2-5 신설: SCHEMA.md/OPS.md 절대 준수, 하드코딩 매핑 금지. 다음 세션: 4파일 순차 수정(customers.ts→Dashboard.tsx→upload.ts→normalize.ts) |
