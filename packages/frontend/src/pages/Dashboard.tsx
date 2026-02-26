@@ -2005,22 +2005,18 @@ const campaignData = {
                     <button onClick={() => setShowBalanceModal(true)} className="text-green-700 text-xs font-medium hover:text-green-800 transition-colors">잔액 현황 →</button>
                   )}
                 </div>
-                <div className="grid grid-cols-4 gap-2">
+                <div className="grid grid-cols-3 gap-2">
                   <div className="text-center p-2 bg-gray-50 rounded-lg">
                     <div className="text-lg font-bold text-gray-800">{(stats?.monthly_sent || 0).toLocaleString()}</div>
-                    <div className="text-xs text-gray-400 mt-1">이번 달</div>
+                    <div className="text-xs text-gray-400 mt-1">성공건수</div>
                   </div>
                   <div className="text-center p-2 bg-gray-50 rounded-lg">
                     <div className="text-lg font-bold text-gray-800">{stats?.success_rate || '0'}%</div>
-                    <div className="text-xs text-gray-400 mt-1">성공률</div>
+                    <div className="text-xs text-gray-400 mt-1">평균성공률</div>
                   </div>
                   <div className="text-center p-2 bg-gray-50 rounded-lg">
-                    <div className="text-lg font-bold text-amber-600">{parseInt(stats?.vip_count || '0').toLocaleString()}</div>
-                    <div className="text-xs text-gray-400 mt-1">VIP</div>
-                  </div>
-                  <div className="text-center p-2 bg-gray-50 rounded-lg">
-                    <div className="text-lg font-bold text-gray-800">-</div>
-                    <div className="text-xs text-gray-400 mt-1">30일 매출</div>
+                    <div className="text-lg font-bold text-gray-800">{(stats?.monthly_cost || 0).toLocaleString()}<span className="text-xs font-normal text-gray-400">원</span></div>
+                    <div className="text-xs text-gray-400 mt-1">총 사용금액</div>
                   </div>
                 </div>
               </div>
