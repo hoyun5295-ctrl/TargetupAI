@@ -122,13 +122,12 @@
 | P0-5 | 직접발송 잔여변수 strip | GP-05 | ✅ 수정됨 | L1956 SMS strip + L2057 카카오 strip + messageUtils.ts L76 공통 strip |
 | 2-1 | 나이 필터 동적 연도 | S9-03 | ✅ 수정됨 | L1188,1190,1197,1203 EXTRACT(YEAR FROM CURRENT_DATE AT TIME ZONE 'Asia/Seoul') |
 | 보안 | upload.ts 인증 추가 | GPT 신규 | ✅ 이번 세션 수정 | /parse, /mapping, /progress 3곳 authenticate 추가 |
+| 1-3 | sent_at 경쟁 조건 해결 | S9-04 | ✅ 이번 세션 수정 | sync-results 3곳 + 인라인 sync + 직접예약 WHERE 총 5곳. COALESCE(sent_at, scheduled_at, NOW()) |
 
 #### 🔵 잔여 미해결 이슈
 
 | 순번 | 작업 | 관련 버그 | 상태 |
 |------|------|----------|------|
-| 1-3 | sent_at 경쟁 조건 해결 | S9-04 (🟠중요) | ⬜ 미확인 |
-| 1-2b | S9-02 프론트 미리보기 치환 | S9-02 | 🟡 Dashboard.tsx 검증 필요 |
 | 2-2 | results.ts 대량 캠페인 서버측 페이지네이션 | S9-08 (🟠중요) | ⬜ |
 | 3-1 | AiCustomSendFlow.tsx alert/confirm → 커스텀 모달 | S9-07 (🟡UI) | ⬜ |
 | 보안 | GP-02 /uploads Nginx 서빙 여부 확인 | GP-02 | 🟡 Nginx 설정 확인 필요 |
@@ -145,13 +144,12 @@
 > 직원 버그리포트 재점검 (8차 2단계 실동작 검증) + 잔여 이슈
 
 **🟡 확인/수정 필요**
-- [ ] S9-02 프론트: Dashboard.tsx 스팸필터 미리보기에서 %이름% → 실제 고객 치환 표시 (파일 확인 필요)
-- [ ] S9-04: sent_at 경쟁 조건 — sync-results 재점검
 - [ ] GP-02: Nginx 설정에서 /uploads 직접 서빙 여부 확인 (Express에는 없음)
 - [ ] S9-07: AiCustomSendFlow.tsx alert/confirm → 커스텀 모달 교체
 - [ ] S9-08: results.ts 대량 캠페인 서버측 페이지네이션
 
 **✅ 이번 세션 완료**
+- [x] S9-04: sent_at 경쟁 조건 근본 해결 — campaigns.ts sync-results 3곳 + 인라인 sync 1곳 + 직접예약 WHERE 1곳 (총 5곳). sent_at = COALESCE(sent_at, scheduled_at, NOW()) 통일. 즉시=클릭시점, 예약=scheduled_at
 - [x] GP-04: database.ts MySQL 커넥션 풀 레벨 TZ 설정 (매 쿼리마다 KST 보장)
 - [x] campaigns.ts 단일 커넥션 SET 제거 (풀 레벨로 대체)
 - [x] upload.ts /parse, /mapping, /progress 3곳 authenticate 추가
@@ -162,6 +160,7 @@
 
 ### ✅ 이전 완료 요약
 
+> - 2026-02-26 S9-04 sent_at 경쟁 조건 근본 해결: sync-results 3곳 + 인라인 sync + 직접예약 WHERE 총 5곳 수정. 즉시=클릭시점, 예약=scheduled_at 통일.
 > - 2026-02-26 코드 실물 검증: GPT "미수정" 지적 5건 중 4건(GP-01/03/05, S9-01/03)은 실제 코드에 반영됨 확인. GP-04만 이번 세션에서 풀 레벨로 보강. upload.ts 인증 3곳 추가.
 > - ai.ts 프롬프트 수정: 날짜/기간/가격 날조 금지 + subject 중복 키 제거
 > - GPT-5.1 fallback 구현 (D31) — Claude API 장애 대응
@@ -532,6 +531,7 @@
 | R17 | 선불 차감 후 MySQL INSERT 실패 → 돈만 빠지고 발송 안 됨 (GPT P0-3) | 1 | 5 | 5 | ✅ 해결: AI발송 L1144 + 직접발송 L2123 + 테스트 L707 — 3경로 모두 내부 try-catch + prepaidRefund 자동 환불 + 캠페인 failed 마킹. 코드 실물 검증 완료 |
 | R18 | /uploads 정적 서빙 인증 없음 → PII 노출 (GPT P0-2) | 2 | 5 | 10 | 🟡 Express(app.ts)에는 /uploads 정적 서빙 없음 확인. Nginx 설정에서 직접 서빙 여부 미확인 |
 | R19 | MySQL 세션 타임존 UTC → 예약/분할 발송 9시간 밀림 (GPT P0-4) | 1 | 4 | 4 | ✅ 해결: database.ts mysqlQuery 헬퍼가 매 커넥션마다 SET time_zone='+09:00'. campaigns.ts 단일 SET 제거. 풀 전체 보장 |
+| R20 | sent_at 경쟁 조건 — 예약발송 sent_at=NULL 고착, 직접예약 sync-results 누락 (S9-04) | 1 | 3 | 3 | ✅ 해결: sync-results 3곳+인라인 sync COALESCE(sent_at, scheduled_at, NOW()). 직접예약 WHERE에 'scheduled' 추가. 즉시=클릭시점, 예약=scheduled_at |
 ---
 
 ## 12) ✅ DONE LOG (완료 기록)
@@ -540,6 +540,7 @@
 
 | 날짜 | 완료 항목 |
 |------|----------|
+| 02-26 | S9-04 sent_at 경쟁 조건 근본 해결: campaigns.ts 5곳 수정. ① sync-results campaign_runs(L1616) completed 전환 시 sent_at=COALESCE(sent_at,scheduled_at,NOW()), ② sync-results campaigns AI(L1628) 동일, ③ sync-results campaigns 직접(L1684) 동일, ④ 인라인 sync(L485) sent_at=NOW()→COALESCE(sent_at,scheduled_at,NOW()), ⑤ sync-results 직접발송 WHERE(L1660) scheduled 조건 추가(예약시간 경과 체크). 원칙: 즉시발송=클릭시점, 예약발송=scheduled_at. 직접 예약건이 sync-results에서 안 잡히던 구조적 버그도 함께 해결. 수정: campaigns.ts |
 | 02-26 | 스팸필터 미리보기+리포트매칭+파일업로드 인증: ① S9-02 프론트 미리보기 완료 — 스팸필터 버튼 클릭 시 replaceVars() 인라인 치환(Dashboard L4101 직접발송+L3320 AI한줄로+AiCampaignResultPopup L340), SpamFilterTestModal replaceAll→split.join TS호환, ② 스팸필터 리포트 매칭 — 해시 실패 시 phone+carrier 디바이스 기반 fallback+stale 테스트 3분 자동 정리, ③ Dashboard.tsx 파일업로드 2곳 Authorization Bearer 토큰 추가(고객DB L2802+직접발송 L4428). 수정: Dashboard.tsx, AiCampaignResultPopup.tsx, SpamFilterTestModal.tsx, spam-filter.ts |
 | 02-26 | 코드 실물 검증 + GP-04 풀 레벨 수정 + upload.ts 인증 + 문서 정정: ① GPT "미수정" 지적 5건 실제 코드 검증 → GP-01/03/05, S9-01/03, messageUtils 연결 전부 이미 반영 확인, ② GP-04 database.ts mysqlQuery 헬퍼를 매 커넥션 SET time_zone 방식으로 보강 + campaigns.ts 단일 SET 제거, ③ upload.ts /parse+/mapping+/progress 3곳 authenticate 추가 (GPT 보안 지적), ④ STATUS.md+BUGS.md 허위 "❌ 미수정" 표기 전면 정정. 수정: database.ts, campaigns.ts, upload.ts |
 | 02-26 | GPT P0 결함 4건 수정 + 발송 5개 경로 프론트→서버 전환: ① GP-01 spam-filter.ts 권한 체크 role→userType 수정, ② GP-03 선불 차감 후 발송 실패 시 자동 환불(prepaidRefund) — AI발송/직접발송 내부 try-catch + 테스트 실패건 환불, ③ GP-04 MySQL 세션 타임존 KST +09:00 고정 + 시작 시 확인 로그, ④ GP-05 직접발송 잔여변수 strip 추가. 프론트 하드코딩 치환 전면 제거(Dashboard.tsx AI한줄로+직접발송 스팸필터 2곳 14줄→2줄), 서버 DB 직접 SELECT로 전환(spam-filter.ts/campaigns.ts test-send/direct-send 3곳). 수정: campaigns.ts(+50줄), spam-filter.ts(+5줄), Dashboard.tsx(-23줄) |

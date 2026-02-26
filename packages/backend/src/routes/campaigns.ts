@@ -1939,7 +1939,7 @@ router.post('/direct-send', async (req: Request, res: Response) => {
         let finalMessage: string;
         if (customMessageMap.has(cleanPhone)) {
           // 프론트 치환 완료 메시지 (직접타겟추출 경로)
-          finalMessage = customMessageMap.get(cleanPhone)!;
+          finalMessage = customMessageMap.get(cleanPhone)!.replace(/%[^%\s]{1,20}%/g, '');
         } else {
           // ★ DB 고객 데이터로 동적 치환 (하드코딩 제거)
           const dbCustomer = directCustomerMap.get(cleanPhone);
@@ -2041,7 +2041,7 @@ router.post('/direct-send', async (req: Request, res: Response) => {
         const cleanPhone = recipient.phone.replace(/-/g, '');
         let finalMessage: string;
         if (customMessageMap.has(cleanPhone)) {
-          finalMessage = customMessageMap.get(cleanPhone)!;
+          finalMessage = customMessageMap.get(cleanPhone)!.replace(/%[^%\s]{1,20}%/g, '');
         } else {
           // ★ DB 고객 데이터로 동적 치환 (하드코딩 제거)
           const dbCustomer = directCustomerMap.get(cleanPhone);

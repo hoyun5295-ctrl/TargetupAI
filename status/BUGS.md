@@ -3,7 +3,7 @@
 > **목적:** 버그의 발견→분석→수정→교차검증→완료를 체계적으로 관리하여 재발을 방지한다.  
 > **원칙:** (1) 추측성 땜질 금지 (2) 근본 원인 3줄 이내 특정 (3) 교차검증 통과 전까지 Closed 금지 (4) 재발 패턴 기록  
 > **SoT(진실의 원천):** STATUS.md + 이 문서. 채팅에서 떠도는 "수정 완료"는 교차검증 전까지 "임시"다.
-> **현황:** 8차 13건 수정완료(2단계 대기) + **9차: S9-05/06 Closed, S9-01/02/03 ✅완료, S9-04/07/08 Open** + **GPT P0: GP-01/03/05 ✅코드확인, GP-04 ✅풀레벨수정, GP-02 🟡Nginx확인필요** + 스팸필터 리포트 매칭 개선 + 파일업로드 프론트 인증 수정
+> **현황:** 8차 13건 수정완료(2단계 대기) + **9차: S9-04 🟡수정완료, S9-05/06 Closed, S9-01/02/03 ✅완료, S9-07/08 Open** + **GPT P0: GP-01/03/05 ✅코드확인, GP-04 ✅풀레벨수정, GP-02 🟡Nginx확인필요** + 스팸필터 리포트 매칭 개선 + 파일업로드 프론트 인증 수정
 > **⚠️ 2026-02-26 코드 실물 검증:** GPT "미수정" 지적 5건 중 GP-01/03/05는 이미 코드에 반영됨 확인. GP-04는 풀 레벨로 보강. 문서의 "❌ 미수정" 표기가 실제 코드보다 뒤떨어져 있었음.
 
 ---
@@ -397,7 +397,7 @@
 > **근본 원인:** 발송 5개 경로(`/:id/send`, `/direct-send`, `/test-send`, `spam-filter/test`, 예약)에 변수 치환 로직이 각각 다른 방식으로 분산 구현되어 있음. 한 곳 수정하면 나머지 4곳에서 재발하는 구조.
 > **해결 전략:** 공통 치환 함수 `replaceVariables()` 하나로 5개 경로 통합 (D32)
 > **GPT 크로스체크:** (1)(2)(3)(5) 동일 지적 + (4) results.ts 성능 병목 추가 확인. GPT가 못 잡은 것: sent_at 경쟁 조건, 공통 함수 통합 해결책
-> **현재 상태:** S9-01/03 ✅ 코드확인, S9-05/06 ✅ Closed. S9-02 🟡부분(프론트미리보기). S9-04/07/08 🔵 Open
+> **현재 상태:** S9-01/03 ✅ 코드확인, S9-04 🟡수정완료-검증대기, S9-05/06 ✅ Closed. S9-02 🟡부분(프론트미리보기). S9-07/08 🔵 Open
 
 ---
 
@@ -452,12 +452,26 @@
 | 항목 | 내용 |
 |------|------|
 | **심각도** | 🟠 Major |
-| **상태** | 🔵 Open |
+| **상태** | 🟡 수정완료-검증대기 |
 | **도메인** | 백엔드 — 발송결과 표시 |
-| **기대 결과** | 발송결과에서 실제 발송 완료 시점이 표시 |
-| **실제 결과** | MySQL INSERT 직후 시점이 sent_at에 기록되어 Agent 처리 전에 "완료"로 보임 |
-| **근본 원인** | 8차 B8-05/B8-06에서 부분 수정했으나, 경쟁 조건 자체가 완전히 해소되지 않음 |
-| **해결 방향** | sync-results에서 실제 Agent 완료 확인 후 sent_at 업데이트하는 흐름 재점검 |
+| **기대 결과** | 발송결과에서 실제 발송 시작 시점이 표시 (즉시=클릭시점, 예약=scheduled_at) |
+| **실제 결과** | ① 예약발송 sent_at=NULL 영구 고착, ② 직접 예약건 sync-results WHERE 누락 → 캘린더 열어야만 처리, ③ 인라인 sync에서 무조건 NOW() → 사용자가 조회한 시점이 sent_at에 찍힘 |
+| **근본 원인** | ① sync-results에서 completed 전환 시 sent_at 업데이트 없음, ② sync-results 직접발송 WHERE에 status='scheduled' 미포함, ③ 인라인 sync에서 sent_at=NOW() 무조건 덮어쓰기 |
+| **수정 내용** | campaigns.ts 5곳 수정: ① sync-results campaign_runs(L1616) completed 시 sent_at=COALESCE(sent_at,scheduled_at,NOW()), ② sync-results campaigns AI(L1628) 동일, ③ sync-results campaigns 직접(L1684) 동일, ④ 인라인 sync(L485) sent_at=COALESCE(sent_at,scheduled_at,NOW()), ⑤ sync-results 직접발송 WHERE(L1660) scheduled 조건+예약시간 경과 체크 추가 |
+| **수정 파일** | campaigns.ts |
+
+**교차검증:**
+
+| 단계 | 점검 항목 | 결과 |
+|------|----------|------|
+| 1단계 코드 | sync-results campaign_runs(L1616) completed 시 COALESCE(sent_at,scheduled_at,NOW()) | ✅ |
+| 1단계 코드 | sync-results campaigns AI(L1628) 동일 패턴 | ✅ |
+| 1단계 코드 | sync-results campaigns 직접(L1684) 동일 패턴 | ✅ |
+| 1단계 코드 | 인라인 sync(L485) COALESCE(sent_at,scheduled_at,NOW()) | ✅ |
+| 1단계 코드 | sync-results 직접발송 WHERE(L1660) scheduled+시간경과 조건 | ✅ |
+| 1단계 코드 | 시나리오 시뮬레이션: AI즉시→sent_at=클릭시점 유지 ✅, AI예약→scheduled_at ✅, 직접즉시→유지 ✅, 직접예약→scheduled_at ✅ | ✅ |
+| 2단계 실동작 | 즉시발송 → 발송결과에서 클릭 시점이 발송일시로 표시 | ⬜ |
+| 2단계 실동작 | 예약발송 → 발송결과에서 예약 시간이 발송일시로 표시 | ⬜ |
 
 ---
 
@@ -639,11 +653,14 @@
 | 우선순위 | 수정 대상 | 파일 | 상태 |
 |---------|----------|------|------|
 | 🟡 | GP-02 /uploads Nginx 서빙 | Nginx 설정 | 🟡 Express에 없음. Nginx 확인 필요 |
-| 🟡 | S9-04 sent_at 경쟁 조건 | campaigns.ts / sync-results | ⬜ Open |
 | 🟡 | S9-07 alert/confirm 모달 | AiCustomSendFlow.tsx | ⬜ Open (UI) |
 | 🟠 | S9-08 대량 페이지네이션 | results.ts | ⬜ Open (30만건+ 성능) |
 | 🟡 | 파일명 sanitize | upload.ts | ⬜ Minor |
 | 🟡 | /parse 파일 잔존 정리 | upload.ts | ⬜ Minor |
+
+| 완료 | 수정 대상 | 상태 |
+|------|----------|------|
+| ✅ | S9-04 sent_at 경쟁 조건 | sync-results 3곳+인라인sync+직접예약WHERE 5곳 수정. COALESCE(sent_at,scheduled_at,NOW()) |
 
 | 완료 | 수정 대상 | 상태 |
 |------|----------|------|
@@ -820,4 +837,4 @@
 
 ---
 
-*최종 업데이트: 2026-02-26 S9-02 프론트 미리보기 완료 + 스팸필터 리포트 매칭 개선 + 파일업로드 프론트 인증 수정*
+*최종 업데이트: 2026-02-26 S9-04 sent_at 경쟁 조건 근본 해결 (campaigns.ts 5곳 수정)*
