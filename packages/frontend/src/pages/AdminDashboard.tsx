@@ -1350,7 +1350,7 @@ const handleApproveRequest = async (id: string) => {
         // D41 카드 설정 로드
         if (cardsRes.ok) {
           const cardsData = await cardsRes.json();
-          setDashboardCardIds(cardsData.cardIds || []);
+          setDashboardCardIds(cardsData.selectedCards || []);
           setDashboardCardCount(cardsData.cardCount === 8 ? 8 : 4);
         } else {
           setDashboardCardIds([]);
@@ -1433,7 +1433,7 @@ const handleApproveRequest = async (id: string) => {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${token}`
           },
-          body: JSON.stringify({ cardIds: dashboardCardIds, cardCount: dashboardCardCount })
+          body: JSON.stringify({ cards: dashboardCardIds, cardCount: dashboardCardCount })
         })
       ]);
       
