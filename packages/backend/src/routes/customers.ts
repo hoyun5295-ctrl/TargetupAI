@@ -172,14 +172,10 @@ router.get('/', async (req: Request, res: Response) => {
     const params: any[] = [companyId];
     let paramIndex = 2;
 
-    // 일반 사용자는 본인 store_codes에 해당하는 고객만 조회
+    // 일반 사용자(브랜드 담당자)는 본인이 업로드한 고객만 조회
     if (userType === 'company_user' && userId) {
-      const userResult = await query('SELECT store_codes FROM users WHERE id = $1', [userId]);
-      const storeCodes = userResult.rows[0]?.store_codes;
-      if (storeCodes && storeCodes.length > 0) {
-        whereClause += ` AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = $1 AND store_code = ANY($${paramIndex++}::text[]))`;
-        params.push(storeCodes);
-      }
+      whereClause += ` AND uploaded_by = $${paramIndex++}`;
+      params.push(userId);
     }
 
     // ★ 고객사관리자: 사용자(ID)별 필터 → 해당 사용자가 업로드한 고객만
@@ -964,15 +960,25 @@ router.post('/extract', async (req: Request, res: Response) => {
 router.get('/filter-options', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
+    const userType = req.user?.userType;
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다' });
 
+    // company_user는 본인 업로드 데이터 기준 옵션만
+    let scopeWhere = 'company_id = $1 AND is_active = true';
+    const scopeParams: any[] = [companyId];
+    if (userType === 'company_user' && userId) {
+      scopeWhere += ' AND uploaded_by = $2';
+      scopeParams.push(userId);
+    }
+
     const gradesResult = await query(
-      `SELECT DISTINCT grade FROM customers_unified WHERE company_id = $1 AND is_active = true AND grade IS NOT NULL AND grade != '' ORDER BY grade`,
-      [companyId]
+      `SELECT DISTINCT grade FROM customers WHERE ${scopeWhere} AND grade IS NOT NULL AND grade != '' ORDER BY grade`,
+      scopeParams
     );
     const regionsResult = await query(
-      `SELECT DISTINCT region FROM customers_unified WHERE company_id = $1 AND is_active = true AND region IS NOT NULL AND region != '' ORDER BY region`,
-      [companyId]
+      `SELECT DISTINCT region FROM customers WHERE ${scopeWhere} AND region IS NOT NULL AND region != '' ORDER BY region`,
+      scopeParams
     );
 
     res.json({
@@ -989,7 +995,17 @@ router.get('/filter-options', async (req: Request, res: Response) => {
 router.get('/enabled-fields', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
+    const userType = req.user?.userType;
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다' });
+
+    // 데이터 범위: company_user는 본인 업로드만, 그 외는 회사 전체
+    let scopeWhere = 'company_id = $1 AND is_active = true';
+    const scopeParams: any[] = [companyId];
+    if (userType === 'company_user' && userId) {
+      scopeWhere += ' AND uploaded_by = $2';
+      scopeParams.push(userId);
+    }
 
     // 표준 customers 테이블 컬럼 Set (custom_fields가 아닌 것들)
     const STANDARD_COLUMNS = new Set([
@@ -1042,19 +1058,78 @@ router.get('/enabled-fields', async (req: Request, res: Response) => {
         existingKeys.add(f.field_key);
       }
     } else {
-      // field_definitions가 없으면 standard_fields 테이블 사용 (폴백)
-      const standardResult = await query(
-        `SELECT field_key, display_name, category, data_type, sort_order
-         FROM standard_fields WHERE is_active = true ORDER BY sort_order`,
-        []
-      );
-      for (const f of standardResult.rows) {
-        fields.push({
-          ...f,
-          field_label: f.display_name,
-          is_custom: false,
-        });
-        existingKeys.add(f.field_key);
+      // field_definitions가 없으면 실제 데이터 기반 동적 감지 (데이터 있는 컬럼만 표시)
+      const dataCheckResult = await query(`
+        SELECT
+          COUNT(*) FILTER (WHERE gender IS NOT NULL AND gender != '') as cnt_gender,
+          COUNT(*) FILTER (WHERE birth_date IS NOT NULL) as cnt_birth_date,
+          COUNT(*) FILTER (WHERE age IS NOT NULL AND age > 0) as cnt_age,
+          COUNT(*) FILTER (WHERE email IS NOT NULL AND email != '') as cnt_email,
+          COUNT(*) FILTER (WHERE address IS NOT NULL AND address != '') as cnt_address,
+          COUNT(*) FILTER (WHERE region IS NOT NULL AND region != '') as cnt_region,
+          COUNT(*) FILTER (WHERE grade IS NOT NULL AND grade != '') as cnt_grade,
+          COUNT(*) FILTER (WHERE points IS NOT NULL AND points > 0) as cnt_points,
+          COUNT(*) FILTER (WHERE store_name IS NOT NULL AND store_name != '') as cnt_store_name,
+          COUNT(*) FILTER (WHERE store_code IS NOT NULL AND store_code != '') as cnt_store_code,
+          COUNT(*) FILTER (WHERE registered_store IS NOT NULL AND registered_store != '') as cnt_registered_store,
+          COUNT(*) FILTER (WHERE registered_store_number IS NOT NULL AND registered_store_number != '') as cnt_reg_store_num,
+          COUNT(*) FILTER (WHERE registration_type IS NOT NULL AND registration_type != '') as cnt_registration_type,
+          COUNT(*) FILTER (WHERE callback IS NOT NULL AND callback != '') as cnt_callback,
+          COUNT(*) FILTER (WHERE total_purchase_amount IS NOT NULL AND total_purchase_amount > 0) as cnt_total_purchase_amount,
+          COUNT(*) FILTER (WHERE total_purchase IS NOT NULL AND total_purchase > 0) as cnt_total_purchase,
+          COUNT(*) FILTER (WHERE purchase_count IS NOT NULL AND purchase_count > 0) as cnt_purchase_count,
+          COUNT(*) FILTER (WHERE recent_purchase_date IS NOT NULL) as cnt_recent_purchase_date,
+          COUNT(*) FILTER (WHERE recent_purchase_amount IS NOT NULL AND recent_purchase_amount > 0) as cnt_recent_purchase_amount,
+          COUNT(*) FILTER (WHERE recent_purchase_store IS NOT NULL AND recent_purchase_store != '') as cnt_recent_purchase_store,
+          COUNT(*) FILTER (WHERE avg_order_value IS NOT NULL AND avg_order_value > 0) as cnt_avg_order_value,
+          COUNT(*) FILTER (WHERE ltv_score IS NOT NULL AND ltv_score > 0) as cnt_ltv_score,
+          COUNT(*) FILTER (WHERE wedding_anniversary IS NOT NULL) as cnt_wedding,
+          COUNT(*) FILTER (WHERE is_married IS NOT NULL) as cnt_married
+        FROM customers WHERE ${scopeWhere}
+      `, scopeParams);
+
+      const dc = dataCheckResult.rows[0] || {};
+
+      const DETECTABLE_FIELDS = [
+        { field_key: 'gender', display_name: '성별', data_type: 'string', cnt_key: 'cnt_gender', sort_order: 10 },
+        { field_key: 'birth_date', display_name: '생년월일', data_type: 'date', cnt_key: 'cnt_birth_date', sort_order: 20 },
+        { field_key: 'age', display_name: '연령대', data_type: 'number', cnt_key: 'cnt_age', sort_order: 25 },
+        { field_key: 'email', display_name: '이메일', data_type: 'string', cnt_key: 'cnt_email', sort_order: 30 },
+        { field_key: 'address', display_name: '주소', data_type: 'string', cnt_key: 'cnt_address', sort_order: 35 },
+        { field_key: 'region', display_name: '지역', data_type: 'string', cnt_key: 'cnt_region', sort_order: 40 },
+        { field_key: 'grade', display_name: '등급', data_type: 'string', cnt_key: 'cnt_grade', sort_order: 50 },
+        { field_key: 'points', display_name: '포인트', data_type: 'number', cnt_key: 'cnt_points', sort_order: 55 },
+        { field_key: 'store_name', display_name: '매장명', data_type: 'string', cnt_key: 'cnt_store_name', sort_order: 60 },
+        { field_key: 'store_code', display_name: '매장코드', data_type: 'string', cnt_key: 'cnt_store_code', sort_order: 65 },
+        { field_key: 'registered_store', display_name: '등록매장', data_type: 'string', cnt_key: 'cnt_registered_store', sort_order: 67 },
+        { field_key: 'registered_store_number', display_name: '등록매장번호', data_type: 'string', cnt_key: 'cnt_reg_store_num', sort_order: 68 },
+        { field_key: 'registration_type', display_name: '가입유형', data_type: 'string', cnt_key: 'cnt_registration_type', sort_order: 69 },
+        { field_key: 'callback', display_name: '회신번호', data_type: 'string', cnt_key: 'cnt_callback', sort_order: 70 },
+        { field_key: 'total_purchase_amount', display_name: '총구매금액', data_type: 'number', cnt_key: 'cnt_total_purchase_amount', sort_order: 80 },
+        { field_key: 'total_purchase', display_name: '총구매', data_type: 'number', cnt_key: 'cnt_total_purchase', sort_order: 81 },
+        { field_key: 'purchase_count', display_name: '구매횟수', data_type: 'number', cnt_key: 'cnt_purchase_count', sort_order: 85 },
+        { field_key: 'recent_purchase_date', display_name: '최근구매일', data_type: 'date', cnt_key: 'cnt_recent_purchase_date', sort_order: 90 },
+        { field_key: 'recent_purchase_amount', display_name: '최근구매금액', data_type: 'number', cnt_key: 'cnt_recent_purchase_amount', sort_order: 91 },
+        { field_key: 'recent_purchase_store', display_name: '최근구매매장', data_type: 'string', cnt_key: 'cnt_recent_purchase_store', sort_order: 92 },
+        { field_key: 'avg_order_value', display_name: '평균구매금액', data_type: 'number', cnt_key: 'cnt_avg_order_value', sort_order: 95 },
+        { field_key: 'ltv_score', display_name: 'LTV점수', data_type: 'number', cnt_key: 'cnt_ltv_score', sort_order: 100 },
+        { field_key: 'wedding_anniversary', display_name: '결혼기념일', data_type: 'date', cnt_key: 'cnt_wedding', sort_order: 110 },
+        { field_key: 'is_married', display_name: '결혼여부', data_type: 'boolean', cnt_key: 'cnt_married', sort_order: 115 },
+      ];
+
+      for (const fd of DETECTABLE_FIELDS) {
+        if (parseInt(dc[fd.cnt_key] || '0') > 0) {
+          fields.push({
+            field_key: fd.field_key,
+            display_name: fd.display_name,
+            field_label: fd.display_name,
+            data_type: fd.data_type,
+            category: CATEGORY_MAP[fd.field_key] || '추가정보',
+            sort_order: fd.sort_order,
+            is_custom: false,
+          });
+          existingKeys.add(fd.field_key);
+        }
       }
     }
 
@@ -1063,8 +1138,8 @@ router.get('/enabled-fields', async (req: Request, res: Response) => {
       const customKeysResult = await query(
         `SELECT DISTINCT jsonb_object_keys(custom_fields) as field_key
          FROM customers
-         WHERE company_id = $1 AND custom_fields IS NOT NULL AND custom_fields != '{}'::jsonb`,
-        [companyId]
+         WHERE ${scopeWhere} AND custom_fields IS NOT NULL AND custom_fields != '{}'::jsonb`,
+        scopeParams
       );
       for (const row of customKeysResult.rows) {
         if (!existingKeys.has(row.field_key)) {
@@ -1094,8 +1169,8 @@ router.get('/enabled-fields', async (req: Request, res: Response) => {
     for (const [key, col] of Object.entries(OPTION_COLUMNS)) {
       try {
         const optResult = await query(
-          `SELECT DISTINCT ${col} FROM customers_unified WHERE company_id = $1 AND is_active = true AND ${col} IS NOT NULL AND ${col} != '' ORDER BY ${col} LIMIT 100`,
-          [companyId]
+          `SELECT DISTINCT ${col} FROM customers WHERE ${scopeWhere} AND ${col} IS NOT NULL AND ${col} != '' ORDER BY ${col} LIMIT 100`,
+          scopeParams
         );
         if (optResult.rows.length > 0) {
           options[key] = optResult.rows.map((r: any) => r[col]);
@@ -1108,9 +1183,9 @@ router.get('/enabled-fields', async (req: Request, res: Response) => {
     try {
       const sampleResult = await query(
         `SELECT * FROM customers
-         WHERE company_id = $1 AND is_active = true AND name IS NOT NULL AND name != ''
+         WHERE ${scopeWhere} AND name IS NOT NULL AND name != ''
          ORDER BY updated_at DESC LIMIT 1`,
-        [companyId]
+        scopeParams
       );
       if (sampleResult.rows.length > 0) {
         const row = sampleResult.rows[0];
