@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
+import { FIELD_MAP, getFieldByKey } from '../utils/standard-field-map';
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY || '',
@@ -96,23 +97,37 @@ interface TargetInfo {
 }
 
 // ============================================================
-// 기본 스키마 정의 (하드코딩 기본값 - 고객사 스키마 없을 때 폴백)
+// 변수 카탈로그 동적 생성 (FIELD_MAP 기반 — 하드코딩 금지)
 // ============================================================
 
-export const DEFAULT_FIELD_MAPPINGS: Record<string, VarCatalogEntry> = {
-  '이름': { column: 'name', type: 'string', description: '고객 이름', sample: '김민수' },
-  '포인트': { column: 'points', type: 'number', description: '보유 적립 포인트', sample: 12500 },
-  '등급': { column: 'grade', type: 'string', description: '멤버십 등급', sample: 'VIP', values: ['VIP', 'GOLD', 'SILVER', 'BRONZE'] },
-  '매장명': { column: 'store_name', type: 'string', description: '고객 주이용 매장', sample: '강남점' },
-  '지역': { column: 'region', type: 'string', description: '거주 지역', sample: '서울' },
-  '구매금액': { column: 'total_purchase_amount', type: 'number', description: '총 누적 구매금액', sample: 350000 },
-  '구매횟수': { column: 'purchase_count', type: 'number', description: '누적 구매 횟수', sample: 8 },
-  '평균주문금액': { column: 'avg_order_value', type: 'number', description: '건당 평균 주문 금액', sample: 43750 },
-  'LTV점수': { column: 'ltv_score', type: 'number', description: '고객 생애 가치 점수 (0~100)', sample: 85 },
-  '브랜드': { column: 'store_code', type: 'string', description: '소속 브랜드 코드', sample: 'NARS' },
-};
+/**
+ * FIELD_MAP에서 필수 직접 컬럼 기반 VarCatalog 생성
+ * - phone, sms_opt_in은 변수로 불필요하므로 제외
+ * - 커스텀 필드는 고객사별로 다르므로 제외 (실제 데이터 기반으로 별도 추가)
+ */
+function buildVarCatalogFromFieldMap(): {
+  fieldMappings: Record<string, VarCatalogEntry>;
+  availableVars: string[];
+} {
+  const fieldMappings: Record<string, VarCatalogEntry> = {};
+  const availableVars: string[] = [];
 
-export const DEFAULT_AVAILABLE_VARS: string[] = ['이름', '포인트', '등급', '매장명', '브랜드', '지역', '구매금액'];
+  for (const f of FIELD_MAP) {
+    if (f.storageType === 'custom_fields') continue;
+    if (f.fieldKey === 'phone' || f.fieldKey === 'sms_opt_in') continue;
+
+    const varName = f.displayName;
+    fieldMappings[varName] = {
+      column: f.columnName,
+      type: f.dataType === 'boolean' ? 'string' : f.dataType as 'string' | 'number' | 'date',
+      description: f.displayName,
+      sample: f.dataType === 'number' ? 0 : f.dataType === 'date' ? '' : '',
+    };
+    availableVars.push(varName);
+  }
+
+  return { fieldMappings, availableVars };
+}
 
 // ============================================================
 // 유틸리티 함수
@@ -252,16 +267,23 @@ function buildVarCatalogPrompt(
 }
 
 /**
- * customer_schema에서 field_mappings, available_vars 추출 (폴백 포함)
+ * customer_schema에서 field_mappings, available_vars 추출
+ * - customer_schema에 있으면 그대로 사용
+ * - 없으면 FIELD_MAP(standard-field-map.ts) 기반 동적 생성
  */
 export function extractVarCatalog(customerSchema: any): {
   fieldMappings: Record<string, VarCatalogEntry>;
   availableVars: string[];
 } {
   const schema = customerSchema || {};
-  const fieldMappings = schema.field_mappings || DEFAULT_FIELD_MAPPINGS;
-  const availableVars = schema.available_vars || DEFAULT_AVAILABLE_VARS;
-  return { fieldMappings, availableVars };
+
+  // customer_schema에 field_mappings가 있으면 우선 사용
+  if (schema.field_mappings && Object.keys(schema.field_mappings).length > 0 && schema.available_vars?.length > 0) {
+    return { fieldMappings: schema.field_mappings, availableVars: schema.available_vars };
+  }
+
+  // 없으면 FIELD_MAP 기반 동적 생성
+  return buildVarCatalogFromFieldMap();
 }
 
 /**
@@ -472,11 +494,12 @@ export async function generateMessages(
   const isAd = extraContext?.isAd !== false;
   const rejectNumber = extraContext?.rejectNumber || '';
   
-  // ★ 개인화 설정 - 변수 카탈로그 기반 (하드코딩 varToTag 제거!)
+  // ★ 개인화 설정 - 변수 카탈로그 기반 (FIELD_MAP 동적 생성)
   const usePersonalization = extraContext?.usePersonalization || false;
   const personalizationVars = extraContext?.personalizationVars || [];
-  const varCatalog = extraContext?.availableVarsCatalog || DEFAULT_FIELD_MAPPINGS;
-  const availableVars = extraContext?.availableVars || DEFAULT_AVAILABLE_VARS;
+  const defaultCatalog = buildVarCatalogFromFieldMap();
+  const varCatalog = extraContext?.availableVarsCatalog || defaultCatalog.fieldMappings;
+  const availableVars = extraContext?.availableVars || defaultCatalog.availableVars;
   
   // 개인화 태그 생성 (카탈로그 기반 동적 생성)
   const personalizationTags = personalizationVars.map(v => `%${v}%`).join(', ');
@@ -667,7 +690,7 @@ export async function recommendTarget(
     };
   }
 
-  // ★ 변수 카탈로그 추출 (customer_schema 기반, 없으면 DEFAULT 폴백)
+  // ★ 변수 카탈로그 추출 (customer_schema 기반, 없으면 FIELD_MAP 동적 생성)
   const { fieldMappings, availableVars } = extractVarCatalog(companyInfo?.customer_schema);
 
   // 키워드 감지: 개별회신번호
@@ -1094,23 +1117,14 @@ interface CustomMessageOptions {
   rejectNumber?: string;
 }
 
-const FIELD_TO_VAR: Record<string, string> = {
-  name: '이름',
-  gender: '성별',
-  grade: '등급',
-  store_name: '매장명',
-  region: '지역',
-  birth_date: '생일',
-  birth_month_day: '생일',
-  age: '나이',
-  points: '포인트',
-  total_purchase_amount: '구매금액',
-  purchase_count: '구매횟수',
-  recent_purchase_date: '최근구매일',
-  recent_purchase_store: '최근구매매장',
-  avg_order_value: '평균주문금액',
-  wedding_anniversary: '결혼기념일',
-};
+/**
+ * field_key → 한글 변수명 변환 (FIELD_MAP 기반 동적 조회)
+ * generateCustomMessages에서 개인화 필드를 AI 프롬프트 변수명으로 변환 시 사용
+ */
+function fieldKeyToVarName(fieldKey: string): string {
+  const mapped = getFieldByKey(fieldKey);
+  return mapped?.displayName || fieldKey;
+}
 
 const TONE_MAP: Record<string, string> = {
   friendly: '친근하고 따뜻한',
@@ -1138,7 +1152,7 @@ export async function generateCustomMessages(options: CustomMessageOptions): Pro
   } = options;
 
   const varNames = personalFields
-    .map(f => (fieldLabels && fieldLabels[f]) || FIELD_TO_VAR[f] || f)
+    .map(f => (fieldLabels && fieldLabels[f]) || fieldKeyToVarName(f))
     .filter(Boolean);
   const varTags = varNames.map(v => `%${v}%`).join(', ');
 

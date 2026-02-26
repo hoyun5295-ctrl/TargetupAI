@@ -1,6 +1,5 @@
 import {
   AlertTriangle,
-  Calendar,
   Check,
   CheckCircle2,
   ChevronLeft,
@@ -81,20 +80,8 @@ const EMPTY_TARGET_CONDITION: TargetCondition = {
 };
 
 const CATEGORY_ICONS: Record<string, any> = {
-  '기본정보': User, '구매정보': ShoppingBag, '지역정보': MapPin,
-  '등급/포인트': Star, '날짜정보': Calendar, '매장정보': MapPin,
-  '수신정보': Hash, '추가정보': Hash, '기타': Hash,
-};
-
-
-const FIELD_CATEGORIES: Record<string, string> = {
-  name: '기본정보', gender: '기본정보', age: '기본정보',
-  birth_date: '기본정보', birth_month_day: '기본정보',
-  grade: '등급/포인트', points: '등급/포인트',
-  store_name: '지역정보', region: '지역정보', recent_purchase_store: '지역정보',
-  total_purchase_amount: '구매정보', purchase_count: '구매정보',
-  recent_purchase_date: '구매정보', avg_order_value: '구매정보',
-  wedding_anniversary: '날짜정보',
+  basic: User, purchase: ShoppingBag, store: MapPin,
+  membership: Star, marketing: Hash, custom: Hash,
 };
 
 const TONE_OPTIONS = [
@@ -118,6 +105,7 @@ export default function AiCustomSendFlow({
   const [selectedFields, setSelectedFields] = useState<string[]>(['name']);
   const [fieldsLoading, setFieldsLoading] = useState(true);
   const [sampleData, setSampleData] = useState<Record<string, any>>({});
+  const [categoryLabels, setCategoryLabels] = useState<Record<string, string>>({});
 
   // Step 2
   const [briefing, setBriefing] = useState('');
@@ -173,6 +161,7 @@ export default function AiCustomSendFlow({
         const data = await res.json();
         setAvailableFields(data.fields || []);
         if (data.sample) setSampleData(data.sample);
+        if (data.categories) setCategoryLabels(data.categories);
       }
     } catch (error) { console.error('필드 로드 실패:', error); }
     finally { setFieldsLoading(false); }
@@ -299,7 +288,7 @@ export default function AiCustomSendFlow({
   };
 
   const groupedFields = availableFields.reduce((acc: Record<string, any[]>, field: any) => {
-    const cat = field.category || FIELD_CATEGORIES[field.field_key] || '기타';
+    const cat = field.category || 'custom';
     if (!acc[cat]) acc[cat] = [];
     acc[cat].push(field);
     return acc;
@@ -392,7 +381,7 @@ export default function AiCustomSendFlow({
                     const IconComp = CATEGORY_ICONS[category] || Hash;
                     return (
                       <div key={category}>
-                        <div className="flex items-center gap-1.5 mb-2"><IconComp className="w-3.5 h-3.5 text-gray-400" /><span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{category}</span></div>
+                        <div className="flex items-center gap-1.5 mb-2"><IconComp className="w-3.5 h-3.5 text-gray-400" /><span className="text-xs font-semibold text-gray-500 tracking-wide">{categoryLabels[category] || category}</span></div>
                         <div className="grid grid-cols-3 gap-2">
                           {(fields as any[]).map((field: any) => {
                             const isSelected = selectedFields.includes(field.field_key);

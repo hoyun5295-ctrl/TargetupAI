@@ -9,7 +9,7 @@
 
 ## 0) 기조 (Harold님 확정)
 
-1. **필수 직접 컬럼(16개) + 커스텀 15개 슬롯 = 최대 31개의 그릇**을 갖추고 있다
+1. **필수 직접 컬럼(17개, store_code 포함) + 커스텀 15개 슬롯 = 최대 32개의 그릇**을 갖추고 있다
 2. **고객사가 어떤 스키마를 가지고 있든** AI 자동매핑 또는 수동매핑으로 우리 표준에 맞춘다
 3. **잘못 매핑해도 수동으로 바로잡을 수 있다** (자동 + 수동 두 가지 모두 지원)
 4. **고객DB현황은 고객사가 실제로 올린 데이터에 있는 필드만** 동적으로 보여준다
@@ -190,25 +190,29 @@ campaigns.ts, spam-filter.ts, messageUtils.ts, results.ts, billing.ts, database.
 
 ---
 
-### 세션 0: DDL + standard-field-map.ts 재정의 (현재 세션)
+### 세션 0: DDL + standard-field-map.ts 재정의 (완료 2026-02-26)
 
 | # | 작업 | 상태 |
 |---|------|------|
-| 0-1 | customers 테이블 store_phone 컬럼 추가 DDL | ⬜ |
-| 0-2 | SCHEMA.md 업데이트 | ⬜ |
-| 0-3 | standard-field-map.ts 재작성 (필수16 + 시스템 + 커스텀15) | ⬜ |
+| 0-1 | customers 테이블 store_phone 컬럼 추가 DDL | ✅ |
+| 0-2 | SCHEMA.md 업데이트 | ✅ |
+| 0-3 | standard-field-map.ts 재작성 (필수17 + 시스템 + 커스텀15) | ✅ |
 
-### 세션 1: 입구 정상화 — upload.ts + normalize.ts
+### ✅ 세션 1: 입구 정상화 — upload.ts + normalize.ts (완료 2026-02-26)
 
 | # | 작업 | 상태 |
 |---|------|------|
-| 1-1 | upload.ts: standard-field-map.ts import | ⬜ |
-| 1-2 | upload.ts: INSERT 하드코딩 → 동적 컬럼 목록 | ⬜ |
-| 1-3 | upload.ts: custom_fields JSONB 빌드 + 저장 | ⬜ |
-| 1-4 | upload.ts: ON CONFLICT UPDATE 동적 생성 | ⬜ |
-| 1-5 | upload.ts: 정규화 동적 호출 | ⬜ |
-| 1-6 | normalize.ts: standard-field-map.ts import + normalizeByFieldKey() | ⬜ |
-| 검증 | 업로드 → 필수 컬럼 + custom_fields 정상 저장 | ⬜ |
+| 1-1 | upload.ts: standard-field-map.ts import | ✅ |
+| 1-2 | upload.ts: INSERT 하드코딩 → 동적 컬럼 목록 (FIELD_MAP 기반 23파라미터) | ✅ |
+| 1-3 | upload.ts: custom_fields JSONB 빌드 + 저장 | ✅ |
+| 1-4 | upload.ts: ON CONFLICT UPDATE 동적 생성 + JSONB 병합 | ✅ |
+| 1-5 | upload.ts: 정규화 → normalizeByFieldKey() 루프 (birth_date 특별 처리) | ✅ |
+| 1-6 | upload.ts: AI 매핑 프롬프트 FIELD_MAP 기반 동적 생성 | ✅ |
+| 1-7 | upload.ts: 파생 필드 자동 계산 (birth→year/monthday/age, address→region) | ✅ |
+| 1-8 | upload.ts: 커스텀 필드 정의 customer_field_definitions 자동 저장 | ✅ |
+| 1-9 | normalize.ts: standard-field-map.ts import + normalizeByFieldKey() + normalizeEmail() | ✅ |
+| 1-10 | Dashboard.tsx: /mapping, /progress Authorization 토큰 누락 수정 | ✅ |
+| 검증 | 입력→출력 시뮬레이션 + INSERT 컬럼/파라미터 정합성 확인 | ✅ |
 
 ### 세션 2: 조회 + AI 정상화
 
@@ -220,6 +224,18 @@ campaigns.ts, spam-filter.ts, messageUtils.ts, results.ts, billing.ts, database.
 | 2-4 | services/ai.ts: 3곳 하드코딩 삭제 → 고객사 보유 필드 동적 | ⬜ |
 | 2-5 | AiCustomSendFlow.tsx: FIELD_CATEGORIES 삭제 | ⬜ |
 | 검증 | 필터 UI 정상 + AI가 보유 필드만 사용 | ⬜ |
+
+---
+
+## 6-1) 세션 1 결정사항 (Harold님 확정 2026-02-26)
+
+| 항목 | 결정 |
+|------|------|
+| 레거시 컬럼 | **옵션 A — 미사용.** total_purchase, callback, store_name, last_purchase_date, purchase_count는 신규 업로드에서 사용하지 않음. 기존 데이터 보존, 신규는 필수 17개 + custom_fields만 |
+| 파생 필드 | birth_date에서 birth_year/birth_month_day/age 자동 계산. address에서 region 파생 |
+| birth_date 특별 처리 | normalizeByFieldKey 루프에서 제외 — 4자리 연도(예: 1983) 감지를 위해 파생 로직에서 직접 처리 |
+| AI 매핑 커스텀 자동 배정 | 필수 17개에 매핑 안 되는 필드 → custom_1~15 순서 배정, 원본 라벨 customer_field_definitions에 저장 |
+| custom_fields JSONB 병합 | ON CONFLICT 시 기존 custom_fields에 || 연산자로 병합 (기존 값 유지 + 신규 추가) |
 
 ---
 
@@ -235,4 +251,4 @@ campaigns.ts, spam-filter.ts, messageUtils.ts, results.ts, billing.ts, database.
 
 ---
 
-*최종 업데이트: 2026-02-26 — Harold님 필수 16개 + 커스텀 15개 확정, store_phone 신규 DDL 필요*
+*최종 업데이트: 2026-02-26 — 세션0 DDL+재정의 완료, 세션1 입구 정상화 완료(upload.ts/normalize.ts/Dashboard.tsx). 옵션A 확정(레거시 컬럼 미사용). 세션2 조회+AI 정상화 대기.*

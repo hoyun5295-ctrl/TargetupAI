@@ -3,6 +3,7 @@ import Redis from 'ioredis';
 import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
 import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getGenderVariants } from '../utils/normalize';
+import { FIELD_MAP, getFieldByKey, getColumnFields, CATEGORY_LABELS } from '../utils/standard-field-map';
 const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
 
 const router = Router();
@@ -992,6 +993,7 @@ router.get('/filter-options', async (req: Request, res: Response) => {
 });
 
 // GET /api/customers/enabled-fields - 회사별 전체 필드 + 커스텀 필드 + 샘플 데이터
+// ★ FIELD_MAP(standard-field-map.ts) 기반 동적 생성 — 하드코딩 금지
 router.get('/enabled-fields', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
@@ -1007,31 +1009,6 @@ router.get('/enabled-fields', async (req: Request, res: Response) => {
       scopeParams.push(userId);
     }
 
-    // 표준 customers 테이블 컬럼 Set (custom_fields가 아닌 것들)
-    const STANDARD_COLUMNS = new Set([
-      'name', 'phone', 'gender', 'birth_date', 'birth_year', 'birth_month_day', 'age',
-      'email', 'address', 'region', 'grade', 'points', 'store_code', 'store_name',
-      'registered_store', 'registered_store_number', 'registration_type', 'callback',
-      'recent_purchase_date', 'recent_purchase_amount', 'recent_purchase_store',
-      'total_purchase_amount', 'total_purchase', 'purchase_count', 'avg_order_value',
-      'ltv_score', 'wedding_anniversary', 'is_married', 'sms_opt_in',
-    ]);
-
-    // 필드 카테고리 자동 분류
-    const CATEGORY_MAP: Record<string, string> = {
-      name: '기본정보', phone: '기본정보', gender: '기본정보', age: '기본정보',
-      birth_date: '기본정보', birth_year: '기본정보', birth_month_day: '기본정보',
-      email: '기본정보', address: '기본정보',
-      grade: '등급/포인트', points: '등급/포인트', ltv_score: '등급/포인트',
-      store_name: '매장정보', store_code: '매장정보', registered_store: '매장정보',
-      registered_store_number: '매장정보', registration_type: '매장정보', callback: '매장정보',
-      region: '지역정보', recent_purchase_store: '지역정보',
-      total_purchase_amount: '구매정보', total_purchase: '구매정보', purchase_count: '구매정보',
-      recent_purchase_date: '구매정보', recent_purchase_amount: '구매정보', avg_order_value: '구매정보',
-      wedding_anniversary: '날짜정보', is_married: '날짜정보',
-      sms_opt_in: '수신정보',
-    };
-
     const fields: any[] = [];
     const existingKeys = new Set<string>();
 
@@ -1046,89 +1023,63 @@ router.get('/enabled-fields', async (req: Request, res: Response) => {
 
     if (fieldDefsResult.rows.length > 0) {
       for (const f of fieldDefsResult.rows) {
+        const mapped = getFieldByKey(f.field_key);
         fields.push({
           field_key: f.field_key,
           display_name: f.field_label,
           field_label: f.field_label,
-          data_type: f.field_type || 'string',
-          category: CATEGORY_MAP[f.field_key] || '추가정보',
+          data_type: f.field_type || mapped?.dataType || 'string',
+          category: mapped?.category || 'custom',
           sort_order: f.display_order,
-          is_custom: !STANDARD_COLUMNS.has(f.field_key),
+          is_custom: mapped?.storageType === 'custom_fields' || !mapped,
         });
         existingKeys.add(f.field_key);
       }
     } else {
-      // field_definitions가 없으면 실제 데이터 기반 동적 감지 (데이터 있는 컬럼만 표시)
-      const dataCheckResult = await query(`
-        SELECT
-          COUNT(*) FILTER (WHERE gender IS NOT NULL AND gender != '') as cnt_gender,
-          COUNT(*) FILTER (WHERE birth_date IS NOT NULL) as cnt_birth_date,
-          COUNT(*) FILTER (WHERE age IS NOT NULL AND age > 0) as cnt_age,
-          COUNT(*) FILTER (WHERE email IS NOT NULL AND email != '') as cnt_email,
-          COUNT(*) FILTER (WHERE address IS NOT NULL AND address != '') as cnt_address,
-          COUNT(*) FILTER (WHERE region IS NOT NULL AND region != '') as cnt_region,
-          COUNT(*) FILTER (WHERE grade IS NOT NULL AND grade != '') as cnt_grade,
-          COUNT(*) FILTER (WHERE points IS NOT NULL AND points > 0) as cnt_points,
-          COUNT(*) FILTER (WHERE store_name IS NOT NULL AND store_name != '') as cnt_store_name,
-          COUNT(*) FILTER (WHERE store_code IS NOT NULL AND store_code != '') as cnt_store_code,
-          COUNT(*) FILTER (WHERE registered_store IS NOT NULL AND registered_store != '') as cnt_registered_store,
-          COUNT(*) FILTER (WHERE registered_store_number IS NOT NULL AND registered_store_number != '') as cnt_reg_store_num,
-          COUNT(*) FILTER (WHERE registration_type IS NOT NULL AND registration_type != '') as cnt_registration_type,
-          COUNT(*) FILTER (WHERE callback IS NOT NULL AND callback != '') as cnt_callback,
-          COUNT(*) FILTER (WHERE total_purchase_amount IS NOT NULL AND total_purchase_amount > 0) as cnt_total_purchase_amount,
-          COUNT(*) FILTER (WHERE total_purchase IS NOT NULL AND total_purchase > 0) as cnt_total_purchase,
-          COUNT(*) FILTER (WHERE purchase_count IS NOT NULL AND purchase_count > 0) as cnt_purchase_count,
-          COUNT(*) FILTER (WHERE recent_purchase_date IS NOT NULL) as cnt_recent_purchase_date,
-          COUNT(*) FILTER (WHERE recent_purchase_amount IS NOT NULL AND recent_purchase_amount > 0) as cnt_recent_purchase_amount,
-          COUNT(*) FILTER (WHERE recent_purchase_store IS NOT NULL AND recent_purchase_store != '') as cnt_recent_purchase_store,
-          COUNT(*) FILTER (WHERE avg_order_value IS NOT NULL AND avg_order_value > 0) as cnt_avg_order_value,
-          COUNT(*) FILTER (WHERE ltv_score IS NOT NULL AND ltv_score > 0) as cnt_ltv_score,
-          COUNT(*) FILTER (WHERE wedding_anniversary IS NOT NULL) as cnt_wedding,
-          COUNT(*) FILTER (WHERE is_married IS NOT NULL) as cnt_married
-        FROM customers WHERE ${scopeWhere}
-      `, scopeParams);
+      // field_definitions가 없으면 FIELD_MAP 기반 동적 감지 (실제 데이터 있는 필드만 표시)
+      // name, phone은 필수 — 항상 포함
+      fields.push(
+        { field_key: 'name', display_name: '고객명', field_label: '고객명', data_type: 'string', category: 'basic', sort_order: 1, is_custom: false },
+        { field_key: 'phone', display_name: '고객전화번호', field_label: '고객전화번호', data_type: 'string', category: 'basic', sort_order: 2, is_custom: false },
+      );
+      existingKeys.add('name');
+      existingKeys.add('phone');
 
+      // FIELD_MAP에서 직접 컬럼 필드 중 name, phone 제외한 나머지를 동적 감지
+      const detectableFields = getColumnFields().filter(f => f.fieldKey !== 'name' && f.fieldKey !== 'phone');
+
+      // 동적 COUNT FILTER 쿼리 생성
+      const countFilters = detectableFields.map(f => {
+        const col = f.columnName;
+        if (f.dataType === 'boolean') {
+          return `COUNT(*) FILTER (WHERE ${col} IS NOT NULL) as cnt_${f.fieldKey}`;
+        } else if (f.dataType === 'number') {
+          return `COUNT(*) FILTER (WHERE ${col} IS NOT NULL AND ${col} > 0) as cnt_${f.fieldKey}`;
+        } else if (f.dataType === 'date') {
+          return `COUNT(*) FILTER (WHERE ${col} IS NOT NULL) as cnt_${f.fieldKey}`;
+        } else {
+          return `COUNT(*) FILTER (WHERE ${col} IS NOT NULL AND ${col} != '') as cnt_${f.fieldKey}`;
+        }
+      });
+
+      const dataCheckResult = await query(
+        `SELECT ${countFilters.join(', ')} FROM customers WHERE ${scopeWhere}`,
+        scopeParams
+      );
       const dc = dataCheckResult.rows[0] || {};
 
-      const DETECTABLE_FIELDS = [
-        { field_key: 'gender', display_name: '성별', data_type: 'string', cnt_key: 'cnt_gender', sort_order: 10 },
-        { field_key: 'birth_date', display_name: '생년월일', data_type: 'date', cnt_key: 'cnt_birth_date', sort_order: 20 },
-        { field_key: 'age', display_name: '연령대', data_type: 'number', cnt_key: 'cnt_age', sort_order: 25 },
-        { field_key: 'email', display_name: '이메일', data_type: 'string', cnt_key: 'cnt_email', sort_order: 30 },
-        { field_key: 'address', display_name: '주소', data_type: 'string', cnt_key: 'cnt_address', sort_order: 35 },
-        { field_key: 'region', display_name: '지역', data_type: 'string', cnt_key: 'cnt_region', sort_order: 40 },
-        { field_key: 'grade', display_name: '등급', data_type: 'string', cnt_key: 'cnt_grade', sort_order: 50 },
-        { field_key: 'points', display_name: '포인트', data_type: 'number', cnt_key: 'cnt_points', sort_order: 55 },
-        { field_key: 'store_name', display_name: '매장명', data_type: 'string', cnt_key: 'cnt_store_name', sort_order: 60 },
-        { field_key: 'store_code', display_name: '매장코드', data_type: 'string', cnt_key: 'cnt_store_code', sort_order: 65 },
-        { field_key: 'registered_store', display_name: '등록매장', data_type: 'string', cnt_key: 'cnt_registered_store', sort_order: 67 },
-        { field_key: 'registered_store_number', display_name: '등록매장번호', data_type: 'string', cnt_key: 'cnt_reg_store_num', sort_order: 68 },
-        { field_key: 'registration_type', display_name: '가입유형', data_type: 'string', cnt_key: 'cnt_registration_type', sort_order: 69 },
-        { field_key: 'callback', display_name: '회신번호', data_type: 'string', cnt_key: 'cnt_callback', sort_order: 70 },
-        { field_key: 'total_purchase_amount', display_name: '총구매금액', data_type: 'number', cnt_key: 'cnt_total_purchase_amount', sort_order: 80 },
-        { field_key: 'total_purchase', display_name: '총구매', data_type: 'number', cnt_key: 'cnt_total_purchase', sort_order: 81 },
-        { field_key: 'purchase_count', display_name: '구매횟수', data_type: 'number', cnt_key: 'cnt_purchase_count', sort_order: 85 },
-        { field_key: 'recent_purchase_date', display_name: '최근구매일', data_type: 'date', cnt_key: 'cnt_recent_purchase_date', sort_order: 90 },
-        { field_key: 'recent_purchase_amount', display_name: '최근구매금액', data_type: 'number', cnt_key: 'cnt_recent_purchase_amount', sort_order: 91 },
-        { field_key: 'recent_purchase_store', display_name: '최근구매매장', data_type: 'string', cnt_key: 'cnt_recent_purchase_store', sort_order: 92 },
-        { field_key: 'avg_order_value', display_name: '평균구매금액', data_type: 'number', cnt_key: 'cnt_avg_order_value', sort_order: 95 },
-        { field_key: 'ltv_score', display_name: 'LTV점수', data_type: 'number', cnt_key: 'cnt_ltv_score', sort_order: 100 },
-        { field_key: 'wedding_anniversary', display_name: '결혼기념일', data_type: 'date', cnt_key: 'cnt_wedding', sort_order: 110 },
-        { field_key: 'is_married', display_name: '결혼여부', data_type: 'boolean', cnt_key: 'cnt_married', sort_order: 115 },
-      ];
-
-      for (const fd of DETECTABLE_FIELDS) {
-        if (parseInt(dc[fd.cnt_key] || '0') > 0) {
+      for (const f of detectableFields) {
+        if (parseInt(dc[`cnt_${f.fieldKey}`] || '0') > 0) {
           fields.push({
-            field_key: fd.field_key,
-            display_name: fd.display_name,
-            field_label: fd.display_name,
-            data_type: fd.data_type,
-            category: CATEGORY_MAP[fd.field_key] || '추가정보',
-            sort_order: fd.sort_order,
+            field_key: f.fieldKey,
+            display_name: f.displayName,
+            field_label: f.displayName,
+            data_type: f.dataType,
+            category: f.category,
+            sort_order: f.sortOrder,
             is_custom: false,
           });
-          existingKeys.add(fd.field_key);
+          existingKeys.add(f.fieldKey);
         }
       }
     }
@@ -1143,17 +1094,19 @@ router.get('/enabled-fields', async (req: Request, res: Response) => {
       );
       for (const row of customKeysResult.rows) {
         if (!existingKeys.has(row.field_key)) {
+          const mapped = getFieldByKey(row.field_key);
           const defResult = await query(
             `SELECT field_label FROM customer_field_definitions WHERE company_id = $1 AND field_key = $2`,
             [companyId, row.field_key]
           );
+          const label = defResult.rows[0]?.field_label || mapped?.displayName || row.field_key;
           fields.push({
             field_key: row.field_key,
-            display_name: defResult.rows[0]?.field_label || row.field_key,
-            field_label: defResult.rows[0]?.field_label || row.field_key,
-            data_type: 'string',
-            category: '추가정보',
-            sort_order: 900,
+            display_name: label,
+            field_label: label,
+            data_type: mapped?.dataType || 'string',
+            category: mapped?.category || 'custom',
+            sort_order: mapped?.sortOrder || 900,
             is_custom: true,
           });
           existingKeys.add(row.field_key);
@@ -1161,9 +1114,9 @@ router.get('/enabled-fields', async (req: Request, res: Response) => {
       }
     } catch (e) { /* custom_fields 없으면 무시 */ }
 
-    // 3. 드롭다운 옵션 (gender, grade, region — 실제 DB 값 기반)
+    // 3. 드롭다운 옵션 (실제 DB 값 기반)
     const OPTION_COLUMNS: Record<string, string> = {
-      'gender': 'gender', 'grade': 'grade', 'region': 'region',
+      'gender': 'gender', 'grade': 'grade', 'region': 'region', 'store_code': 'store_code',
     };
     const options: Record<string, string[]> = {};
     for (const [key, col] of Object.entries(OPTION_COLUMNS)) {
@@ -1189,10 +1142,13 @@ router.get('/enabled-fields', async (req: Request, res: Response) => {
       );
       if (sampleResult.rows.length > 0) {
         const row = sampleResult.rows[0];
-        // 표준 필드 + custom_fields flat merge
         for (const f of fields) {
           const key = f.field_key;
-          if (f.is_custom && row.custom_fields && row.custom_fields[key] != null) {
+          const mapped = getFieldByKey(key);
+          if (mapped?.storageType === 'custom_fields' && row.custom_fields && row.custom_fields[key] != null) {
+            sample[key] = row.custom_fields[key];
+          } else if (!mapped && row.custom_fields && row.custom_fields[key] != null) {
+            // FIELD_MAP에 없는 커스텀 필드 (레거시 등)
             sample[key] = row.custom_fields[key];
           } else if (row[key] != null) {
             sample[key] = row[key];
@@ -1201,7 +1157,7 @@ router.get('/enabled-fields', async (req: Request, res: Response) => {
       }
     } catch (e) { /* 샘플 조회 실패 시 빈 객체 */ }
 
-    res.json({ fields, options, sample });
+    res.json({ fields, options, sample, categories: CATEGORY_LABELS });
   } catch (error) {
     console.error('활성 필드 조회 실패:', error);
     res.status(500).json({ error: '조회 실패' });

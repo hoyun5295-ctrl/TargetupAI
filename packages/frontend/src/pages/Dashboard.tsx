@@ -167,6 +167,7 @@ export default function Dashboard() {
    const [enabledFields, setEnabledFields] = useState<any[]>([]);
    const [targetFilters, setTargetFilters] = useState<Record<string, string>>({});
    const [filterOptions, setFilterOptions] = useState<Record<string, string[]>>({});
+   const [categoryLabels, setCategoryLabels] = useState<Record<string, string>>({});
    const [expandedCats, setExpandedCats] = useState<Record<string, boolean>>({ basic: true });
   const [showTemplates, setShowTemplates] = useState(false);
   const [showInsights, setShowInsights] = useState(false);
@@ -960,6 +961,7 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
         const data = await res.json();
         setEnabledFields(data.fields || []);
         setFilterOptions(data.options || {});
+        if (data.categories) setCategoryLabels(data.categories);
       }
     } catch (error) {
       console.error('필드 로드 실패:', error);
@@ -2548,13 +2550,13 @@ const campaignData = {
                   </div>
                 ) : (
                   (() => {
-                    const CAT_LABELS: Record<string, string> = {
-                      basic: '📋 기본정보', segment: '🏷️ 등급/세그먼트', purchase: '💰 구매/거래',
-                      loyalty: '⭐ 충성도/활동', store: '🏪 소속/채널', preference: '❤️ 선호/관심',
-                      marketing: '📱 마케팅수신', custom: '🔧 커스텀'
+                    // 카테고리 아이콘 (UI 표시용, 영문 키 기준)
+                    const CAT_ICONS: Record<string, string> = {
+                      basic: '📋', purchase: '💰', store: '🏪',
+                      membership: '🏷️', marketing: '📱', custom: '🔧',
                     };
                     // 필터 대상에서 제외할 필드 (식별용/수신동의는 별도 처리)
-                    const SKIP_FIELDS = ['name', 'phone', 'email', 'address', 'opt_in_sms', 'opt_in_date', 'opt_out_date'];
+                    const SKIP_FIELDS = ['name', 'phone', 'email', 'address', 'sms_opt_in'];
                     const filterableFields = enabledFields.filter((f: any) => !SKIP_FIELDS.includes(f.field_key));
                     
                     // 연령대 프리셋
@@ -2654,8 +2656,16 @@ const campaignData = {
 
                     return (
                       <div className="space-y-2">
-                        {Object.entries(CAT_LABELS).map(([cat, label]) => {
-                          const catFields = filterableFields.filter((f: any) => f.category === cat);
+                        {(() => {
+                          // 실제 필드에 있는 카테고리만 순서대로 표시
+                          const categoryOrder = ['basic', 'purchase', 'store', 'membership', 'marketing', 'custom'];
+                          const usedCategories = [...new Set(filterableFields.map((f: any) => f.category))];
+                          const orderedCategories = categoryOrder.filter(c => usedCategories.includes(c));
+                          // categoryOrder에 없는 카테고리도 표시
+                          const extraCategories = usedCategories.filter(c => !categoryOrder.includes(c));
+                          return [...orderedCategories, ...extraCategories].map(cat => {
+                            const label = `${CAT_ICONS[cat] || '📌'} ${categoryLabels[cat] || cat}`;
+                            const catFields = filterableFields.filter((f: any) => f.category === cat);
                           if (catFields.length === 0) return null;
                           const activeCount = catFields.filter((f: any) => targetFilters[f.field_key]).length;
                           const isExpanded = expandedCats[cat] ?? false;
@@ -2690,7 +2700,8 @@ const campaignData = {
                               )}
                             </div>
                           );
-                        })}
+                          });
+                        })()}
                       </div>
                     );
                   })()
