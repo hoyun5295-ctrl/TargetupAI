@@ -3319,12 +3319,27 @@ const campaignData = {
                       </button>
                       <button 
                         onClick={() => {
-                          // ★ 원본 메시지 그대로 전달 — 서버가 DB에서 고객 조회 후 치환
                           const msg = targetMessage || '';
                           const cb = selectedCallback || '';
-                          const smsMsg = adTextEnabled ? `(광고)${msg}\n무료거부${optOutNumber.replace(/-/g, '')}` : msg;
-                          const lmsMsg = adTextEnabled ? `(광고) ${msg}\n무료수신거부 ${optOutNumber}` : msg;
-                          setSpamFilterData({sms: smsMsg, lms: lmsMsg, callback: cb, msgType: targetMsgType, firstRecipient: targetRecipients[0] || undefined});
+                          // ★ 리스트 최상단 고객 데이터로 미리보기 치환
+                          const firstR = targetRecipients[0];
+                          const replaceVars = (text: string) => {
+                            if (!text || !firstR) return text;
+                            return text
+                              .replace(/%이름%/g, firstR.name || '')
+                              .replace(/%등급%/g, firstR.grade || '')
+                              .replace(/%지역%/g, firstR.region || '')
+                              .replace(/%매장명%/g, firstR.store_name || '')
+                              .replace(/%포인트%/g, firstR.point != null ? String(firstR.point) : '')
+                              .replace(/%기타1%/g, firstR.extra1 || '')
+                              .replace(/%기타2%/g, firstR.extra2 || '')
+                              .replace(/%기타3%/g, firstR.extra3 || '');
+                          };
+                          const smsRaw = adTextEnabled ? `(광고)${msg}\n무료거부${optOutNumber.replace(/-/g, '')}` : msg;
+                          const lmsRaw = adTextEnabled ? `(광고) ${msg}\n무료수신거부 ${optOutNumber}` : msg;
+                          const smsMsg = replaceVars(smsRaw);
+                          const lmsMsg = replaceVars(lmsRaw);
+                          setSpamFilterData({sms: smsMsg, lms: lmsMsg, callback: cb, msgType: targetMsgType, firstRecipient: firstR || undefined});
                           setShowSpamFilter(true);
                         }}
                         className="py-2.5 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg text-sm font-medium transition-colors"
@@ -4100,12 +4115,27 @@ const campaignData = {
                       <button 
                         onClick={() => {
                           if (isSpamFilterLocked) { setShowSpamFilterLock(true); return; }
-                          // ★ 원본 메시지 그대로 전달 — 서버가 DB에서 고객 조회 후 치환
                           const msg = directMessage || '';
                           const cb = selectedCallback || '';
-                          const smsMsg = adTextEnabled ? `(광고)${msg}\n무료거부${optOutNumber.replace(/-/g, '')}` : msg;
-                          const lmsMsg = adTextEnabled ? `(광고) ${msg}\n무료수신거부 ${optOutNumber}` : msg;
-                          setSpamFilterData({sms: smsMsg, lms: lmsMsg, callback: cb, msgType: directMsgType, firstRecipient: directRecipients[0] || undefined});
+                          // ★ 리스트 최상단 고객 데이터로 미리보기 치환
+                          const firstR = directRecipients[0];
+                          const replaceVars = (text: string) => {
+                            if (!text || !firstR) return text;
+                            return text
+                              .replace(/%이름%/g, firstR.name || '')
+                              .replace(/%등급%/g, firstR.grade || '')
+                              .replace(/%지역%/g, firstR.region || '')
+                              .replace(/%매장명%/g, firstR.store_name || '')
+                              .replace(/%포인트%/g, firstR.point != null ? String(firstR.point) : '')
+                              .replace(/%기타1%/g, firstR.extra1 || '')
+                              .replace(/%기타2%/g, firstR.extra2 || '')
+                              .replace(/%기타3%/g, firstR.extra3 || '');
+                          };
+                          const smsRaw = adTextEnabled ? `(광고)${msg}\n무료거부${optOutNumber.replace(/-/g, '')}` : msg;
+                          const lmsRaw = adTextEnabled ? `(광고) ${msg}\n무료수신거부 ${optOutNumber}` : msg;
+                          const smsMsg = replaceVars(smsRaw);
+                          const lmsMsg = replaceVars(lmsRaw);
+                          setSpamFilterData({sms: smsMsg, lms: lmsMsg, callback: cb, msgType: directMsgType, firstRecipient: firstR || undefined});
                           setShowSpamFilter(true);
                         }}
                         className={`py-2.5 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg text-sm font-medium transition-colors ${isSpamFilterLocked ? 'opacity-60' : ''}`}

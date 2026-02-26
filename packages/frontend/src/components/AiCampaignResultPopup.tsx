@@ -340,9 +340,24 @@ className="flex-1 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex 
 onClick={() => {
   const msg = aiResult?.messages?.[selectedAiMsgIdx]?.message_text || campaign.messageContent || '';
                     const cb = selectedCallback || '';
-                    const smsMsg = isAd ? `(광고)${msg}\n무료거부${optOutNumber.replace(/-/g, '')}` : msg;
-                    const lmsMsg = isAd ? `(광고) ${msg}\n무료수신거부 ${formatRejectNumber(optOutNumber)}` : msg;
-                    setSpamFilterData({sms: smsMsg, lms: lmsMsg, callback: cb, msgType: selectedChannel as 'SMS'|'LMS'|'MMS', firstRecipient: targetRecipients?.[0] || undefined});
+                    const firstR = targetRecipients?.[0];
+                    const replaceVars = (text: string) => {
+                      if (!text || !firstR) return text;
+                      return text
+                        .replace(/%이름%/g, firstR.name || '')
+                        .replace(/%등급%/g, firstR.grade || '')
+                        .replace(/%지역%/g, firstR.region || '')
+                        .replace(/%매장명%/g, firstR.store_name || '')
+                        .replace(/%포인트%/g, firstR.point != null ? String(firstR.point) : '')
+                        .replace(/%기타1%/g, firstR.extra1 || '')
+                        .replace(/%기타2%/g, firstR.extra2 || '')
+                        .replace(/%기타3%/g, firstR.extra3 || '');
+                    };
+                    const smsRaw = isAd ? `(광고)${msg}\n무료거부${optOutNumber.replace(/-/g, '')}` : msg;
+                    const lmsRaw = isAd ? `(광고) ${msg}\n무료수신거부 ${formatRejectNumber(optOutNumber)}` : msg;
+                    const smsMsg = replaceVars(smsRaw);
+                    const lmsMsg = replaceVars(lmsRaw);
+                    setSpamFilterData({sms: smsMsg, lms: lmsMsg, callback: cb, msgType: selectedChannel as 'SMS'|'LMS'|'MMS', firstRecipient: firstR || undefined});
                     setShowSpamFilter(true);
 }}
 className="flex-1 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 flex items-center justify-center gap-2"
