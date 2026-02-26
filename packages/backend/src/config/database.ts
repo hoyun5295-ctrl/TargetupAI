@@ -41,28 +41,23 @@ export const mysqlPool = mysql.createPool({
   charset: 'utf8mb4',
 });
 
-// MySQL 연결 테스트 + TZ 확인
+// MySQL 연결 테스트 + TZ 확인 (서버 레벨 KST 영구 적용됨 — timezone.cnf)
 mysqlPool.getConnection()
   .then(async conn => {
     console.log('✅ MySQL(QTmsg) 연결됨');
-    // 시작 시 TZ 확인 로그
-    await conn.query("SET time_zone = '+09:00'");
-    const [rows] = await conn.execute("SELECT NOW() as mysql_now, @@session.time_zone as tz");
+    const [rows] = await conn.execute("SELECT NOW() as mysql_now, @@global.time_zone as tz");
     const row = (rows as any[])[0];
-    if (row) console.log(`[MySQL TZ] NOW()=${row.mysql_now}, session_tz=${row.tz}`);
+    if (row) console.log(`[MySQL TZ] NOW()=${row.mysql_now}, global_tz=${row.tz}`);
     conn.release();
   })
   .catch(err => {
     console.error('❌ MySQL 연결 실패:', err.message);
   });
 
-// ★ GP-04: MySQL 쿼리 헬퍼 — 매 커넥션마다 KST 타임존 보장
-// 풀에서 커넥션을 꺼낼 때마다 SET time_zone 실행 → 어떤 커넥션이든 KST 보장
-// SET time_zone은 매우 가벼운 명령이므로 실무 오버헤드 무시 가능
+// MySQL 쿼리 헬퍼 (서버 레벨 KST이므로 세션 SET 불필요)
 export const mysqlQuery = async (sql: string, params?: any[]) => {
   const conn = await mysqlPool.getConnection();
   try {
-    await conn.query("SET time_zone = '+09:00'");
     const [rows] = await conn.execute(sql, params);
     return rows;
   } finally {
