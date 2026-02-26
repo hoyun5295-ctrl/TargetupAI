@@ -52,7 +52,8 @@ const storage = multer.diskStorage({
   },
   filename: (req, file, cb) => {
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, uniqueSuffix + '-' + file.originalname);
+    const ext = path.extname(file.originalname).toLowerCase();
+    cb(null, uniqueSuffix + ext);
   }
 });
 
@@ -608,9 +609,6 @@ async function processUploadInBackground(
       }
     }
 
-    // 파일 삭제
-    try { fs.unlinkSync(filePath); } catch (e) {}
-
   } catch (error: any) {
     console.error('[업로드 백그라운드] 처리 에러:', error);
     await redis.set(`upload:${fileId}:progress`, JSON.stringify({
@@ -625,6 +623,9 @@ async function processUploadInBackground(
       error: error.message || 'DB 처리 오류',
       message: `오류 발생. ${(insertCount + duplicateCount).toLocaleString()}건까지 처리 완료. 재업로드 시 중복 건은 자동 스킵됩니다.`
     }), 'EX', 3600);
+  } finally {
+    // 파일 삭제 (성공/실패 무관하게 반드시 실행)
+    try { fs.unlinkSync(filePath); } catch (e) {}
   }
 }
 
@@ -644,5 +645,41 @@ router.get('/progress/:fileId', authenticate, async (req: Request, res: Response
     return res.json({ status: 'unknown', total: 0, processed: 0, percent: 0 });
   }
 });
+
+// ================================================================
+// 잔존 업로드 파일 자동 정리 (1시간 초과 파일 삭제)
+// /parse 후 /save를 타지 않은 파일, 에러로 누락된 파일 정리
+// ================================================================
+function cleanupStaleUploads() {
+  const uploadDir = path.join(__dirname, '../../uploads');
+  if (!fs.existsSync(uploadDir)) return;
+
+  const ONE_HOUR_MS = 60 * 60 * 1000;
+  const now = Date.now();
+  let cleaned = 0;
+
+  try {
+    const files = fs.readdirSync(uploadDir);
+    for (const file of files) {
+      const filePath = path.join(uploadDir, file);
+      try {
+        const stat = fs.statSync(filePath);
+        if (stat.isFile() && (now - stat.mtimeMs) > ONE_HOUR_MS) {
+          fs.unlinkSync(filePath);
+          cleaned++;
+        }
+      } catch (e) { /* 개별 파일 에러 무시 */ }
+    }
+    if (cleaned > 0) {
+      console.log(`[업로드 정리] 잔존 파일 ${cleaned}개 삭제 완료`);
+    }
+  } catch (err) {
+    console.error('[업로드 정리] 디렉토리 스캔 실패:', err);
+  }
+}
+
+// 서버 시작 시 1회 정리 + 1시간 간격 반복
+cleanupStaleUploads();
+setInterval(cleanupStaleUploads, 60 * 60 * 1000);
 
 export default router;

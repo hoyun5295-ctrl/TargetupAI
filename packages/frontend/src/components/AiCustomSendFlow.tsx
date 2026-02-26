@@ -1,4 +1,5 @@
 import {
+  AlertTriangle,
   Calendar,
   Check,
   CheckCircle2,
@@ -15,9 +16,10 @@ import {
   Star,
   User,
   Users,
-  X
+  X,
+  XCircle
 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 interface AiCustomSendFlowProps {
   onClose: () => void;
@@ -143,6 +145,21 @@ export default function AiCustomSendFlow({
   const [selectedVariantIdx, setSelectedVariantIdx] = useState(0);
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
 
+  // 커스텀 모달 state
+  const [alertModal, setAlertModal] = useState<{
+    title: string;
+    message: string;
+    type: 'error' | 'warning' | 'info';
+  } | null>(null);
+  const [confirmModal, setConfirmModal] = useState<{
+    title: string;
+    message: string;
+    confirmText: string;
+    cancelText: string;
+    onConfirm: () => void;
+    onCancel: () => void;
+  } | null>(null);
+
   useEffect(() => { loadFields(); }, []);
 
   const loadFields = async () => {
@@ -205,6 +222,11 @@ export default function AiCustomSendFlow({
     return result;
   };
 
+  // 커스텀 alert 표시
+  const showAlert = (title: string, message: string, type: 'error' | 'warning' | 'info' = 'error') => {
+    setAlertModal({ title, message, type });
+  };
+
   const handleParseBriefing = async () => {
     if (!briefing.trim()) return;
     setIsParsing(true);
@@ -226,8 +248,8 @@ export default function AiCustomSendFlow({
         setEstimatedCount(data.estimatedCount || 0);
         setUnsubscribeCount(data.unsubscribeCount || 0);
         setCurrentStep(3);
-      } else { const err = await res.json(); alert(err.error || '파싱 실패'); }
-    } catch (error) { console.error('브리핑 파싱 실패:', error); alert('서버 오류가 발생했습니다.'); }
+      } else { const err = await res.json(); showAlert('AI 분석 실패', err.error || '브리핑 파싱에 실패했습니다. 내용을 확인 후 다시 시도해주세요.', 'error'); }
+    } catch (error) { console.error('브리핑 파싱 실패:', error); showAlert('서버 오류', '서버와의 통신 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.', 'error'); }
     finally { setIsParsing(false); }
   };
 
@@ -251,8 +273,8 @@ export default function AiCustomSendFlow({
         const data = await res.json();
         setVariants(data.variants || []);
         setSelectedVariantIdx(0);
-      } else { const err = await res.json(); alert(err.error || '문안 생성 실패'); setCurrentStep(3); }
-    } catch (error) { console.error('문안 생성 실패:', error); alert('서버 오류가 발생했습니다.'); setCurrentStep(3); }
+      } else { const err = await res.json(); showAlert('문안 생성 실패', err.error || '맞춤 문안 생성에 실패했습니다. 프로모션 카드를 확인 후 다시 시도해주세요.', 'error'); setCurrentStep(3); }
+    } catch (error) { console.error('문안 생성 실패:', error); showAlert('서버 오류', '서버와의 통신 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.', 'error'); setCurrentStep(3); }
     finally { setIsGenerating(false); }
   };
 
@@ -671,11 +693,15 @@ export default function AiCustomSendFlow({
                                   if (channel === 'SMS') {
                                     const editedBytes = calculateBytes(wrapAdText(msg.message_text || ''));
                                     if (editedBytes > 90) {
-                                      if (!confirm(`수정한 문안이 SMS 90바이트를 초과합니다 (${editedBytes}바이트).\nLMS로 전환하거나 추가 수정하시겠습니까?\n\n[확인] 계속 수정  [취소] 그대로 저장`)) {
-                                        setEditingIdx(null);
-                                        return;
-                                      }
-                                      return; // 계속 수정
+                                      setConfirmModal({
+                                        title: 'SMS 바이트 초과',
+                                        message: `수정한 문안이 SMS 90바이트를 초과합니다 (${editedBytes}바이트).\nLMS로 전환하거나 추가 수정하시겠습니까?`,
+                                        confirmText: '계속 수정',
+                                        cancelText: '그대로 저장',
+                                        onConfirm: () => { setConfirmModal(null); },
+                                        onCancel: () => { setConfirmModal(null); setEditingIdx(null); },
+                                      });
+                                      return;
                                     }
                                   }
                                   setEditingIdx(null); 
@@ -742,7 +768,7 @@ export default function AiCustomSendFlow({
                   const selectedMsg = variants[selectedVariantIdx].message_text || '';
                   const totalBytes = calculateBytes(wrapAdText(selectedMsg));
                   if (channel === 'SMS' && totalBytes > 90) {
-                    alert(`선택한 문안이 SMS 90바이트를 초과합니다 (${totalBytes}바이트).\nLMS로 전환하거나 문안을 수정해주세요.`);
+                    showAlert('SMS 바이트 초과', `선택한 문안이 SMS 90바이트를 초과합니다 (${totalBytes}바이트).\nLMS로 전환하거나 문안을 수정해주세요.`, 'warning');
                     return;
                   }
                   onConfirmSend({
@@ -774,6 +800,68 @@ export default function AiCustomSendFlow({
           </div>
         </div>
       </div>
+
+      {/* 커스텀 Alert 모달 */}
+      {alertModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[60] animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full mx-4 overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="p-6 text-center">
+              <div className={`w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-3 ${
+                alertModal.type === 'error' ? 'bg-red-100' : alertModal.type === 'warning' ? 'bg-amber-100' : 'bg-blue-100'
+              }`}>
+                {alertModal.type === 'error' ? (
+                  <XCircle className="w-6 h-6 text-red-600" />
+                ) : (
+                  <AlertTriangle className={`w-6 h-6 ${alertModal.type === 'warning' ? 'text-amber-600' : 'text-blue-600'}`} />
+                )}
+              </div>
+              <h4 className="text-base font-bold text-gray-800 mb-2">{alertModal.title}</h4>
+              <p className="text-sm text-gray-600 whitespace-pre-wrap leading-relaxed">{alertModal.message}</p>
+            </div>
+            <div className="px-6 pb-5">
+              <button
+                onClick={() => setAlertModal(null)}
+                className={`w-full py-2.5 rounded-xl text-sm font-semibold text-white transition-colors ${
+                  alertModal.type === 'error' ? 'bg-red-600 hover:bg-red-700' : alertModal.type === 'warning' ? 'bg-amber-600 hover:bg-amber-700' : 'bg-blue-600 hover:bg-blue-700'
+                }`}
+                autoFocus
+              >
+                확인
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 커스텀 Confirm 모달 */}
+      {confirmModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[60] animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full mx-4 overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="p-6 text-center">
+              <div className="w-12 h-12 rounded-full bg-amber-100 flex items-center justify-center mx-auto mb-3">
+                <AlertTriangle className="w-6 h-6 text-amber-600" />
+              </div>
+              <h4 className="text-base font-bold text-gray-800 mb-2">{confirmModal.title}</h4>
+              <p className="text-sm text-gray-600 whitespace-pre-wrap leading-relaxed">{confirmModal.message}</p>
+            </div>
+            <div className="px-6 pb-5 flex gap-3">
+              <button
+                onClick={confirmModal.onCancel}
+                className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-gray-700 bg-gray-100 hover:bg-gray-200 transition-colors"
+              >
+                {confirmModal.cancelText}
+              </button>
+              <button
+                onClick={confirmModal.onConfirm}
+                className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white bg-violet-600 hover:bg-violet-700 transition-colors"
+                autoFocus
+              >
+                {confirmModal.confirmText}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

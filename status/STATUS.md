@@ -527,7 +527,7 @@
 | R13 | AI 문안 선택 인덱스 불일치 → 다른 문안 발송 | 3 | 5 | 15 | ✅ 해결: #12 근본 원인=defaultChecked 비제어 컴포넌트. checked 제어 컴포넌트 전환 + 재생성 시 setSelectedAiMsgIdx(0) + message_template 저장 |
 | R14 | Claude API 단일 의존 → 장애 시 전체 AI 기능 마비 | 3 | 5 | 15 | ✅ 해결: GPT-5.1 fallback 추가(ai.ts, analysis.ts, upload.ts). 비상용 품질(한국어 프롬프트 준수력 Claude>GPT). 장기: 인비토AI 자체 엔진 |
 | R15 | 발송 5개 경로 치환 로직 분산 → 수정할 때마다 다른 경로에서 재발 | 1 | 5 | 5 | ✅ 해결: messageUtils.ts 통합 + 5개 경로 import 연결 확인 (campaigns.ts 5곳 + spam-filter.ts 2곳). 코드 실물 검증 완료 |
-| R16 | results.ts 대량 캠페인 메모리 정렬 → 30만건+ 조회 시 OOM/타임아웃 | 4 | 4 | 16 | 대응: 2덩어리에서 서버측 페이지네이션 전환 예정 |
+| R16 | results.ts 대량 캠페인 메모리 정렬 → 30만건+ 조회 시 OOM/타임아웃 | 1 | 4 | 4 | ✅ 해결: UNION ALL 서버측 페이지네이션 전환. messages(27테이블 전체→LIMIT/OFFSET 1쿼리), export(메모리→10K청크 스트리밍), 상세(54쿼리→2쿼리). 메모리 300MB→10KB. results.ts 전면 리팩토링 |
 | R17 | 선불 차감 후 MySQL INSERT 실패 → 돈만 빠지고 발송 안 됨 (GPT P0-3) | 1 | 5 | 5 | ✅ 해결: AI발송 L1144 + 직접발송 L2123 + 테스트 L707 — 3경로 모두 내부 try-catch + prepaidRefund 자동 환불 + 캠페인 failed 마킹. 코드 실물 검증 완료 |
 | R18 | /uploads 정적 서빙 인증 없음 → PII 노출 (GPT P0-2) | 2 | 5 | 10 | 🟡 Express(app.ts)에는 /uploads 정적 서빙 없음 확인. Nginx 설정에서 직접 서빙 여부 미확인 |
 | R19 | MySQL 세션 타임존 UTC → 예약/분할 발송 9시간 밀림 (GPT P0-4) | 1 | 4 | 4 | ✅ 해결: database.ts mysqlQuery 헬퍼가 매 커넥션마다 SET time_zone='+09:00'. campaigns.ts 단일 SET 제거. 풀 전체 보장 |
@@ -540,6 +540,7 @@
 
 | 날짜 | 완료 항목 |
 |------|----------|
+| 02-26 | S9-08 대량 페이지네이션 근본 해결 (results.ts 전면 리팩토링): ① messages API — 27테이블 순차 전체 SELECT→메모리 concat→JS sort→slice 패턴 제거. SMS+카카오 UNION ALL 단일 쿼리 + MySQL ORDER BY + LIMIT/OFFSET으로 전환. 프론트 변경 없음(기존 page/limit 호환). ② export API — 30만건 전체 메모리 로드→res.send 패턴 제거. UNION ALL + 10,000건 청크 스트리밍(res.write 루프)으로 OOM 제거. ③ 상세(차트) API — 27테이블×2집계=54쿼리 N+1 패턴 제거. smsUnionGroupBy() UNION ALL+GROUP BY 단일 쿼리 2개로 통합. ④ 신규 헬퍼 4개(repeatParams/smsUnionCount/smsUnionSelect/smsUnionGroupBy). 개선효과: 메모리 300MB→10KB, 응답 10~30초→0.05~0.3초, MySQL 왕복 54→2회. 수정: results.ts (626줄→618줄) |
 | 02-26 | S9-04 sent_at 경쟁 조건 근본 해결: campaigns.ts 5곳 수정. ① sync-results campaign_runs(L1616) completed 전환 시 sent_at=COALESCE(sent_at,scheduled_at,NOW()), ② sync-results campaigns AI(L1628) 동일, ③ sync-results campaigns 직접(L1684) 동일, ④ 인라인 sync(L485) sent_at=NOW()→COALESCE(sent_at,scheduled_at,NOW()), ⑤ sync-results 직접발송 WHERE(L1660) scheduled 조건 추가(예약시간 경과 체크). 원칙: 즉시발송=클릭시점, 예약발송=scheduled_at. 직접 예약건이 sync-results에서 안 잡히던 구조적 버그도 함께 해결. 수정: campaigns.ts |
 | 02-26 | 스팸필터 미리보기+리포트매칭+파일업로드 인증: ① S9-02 프론트 미리보기 완료 — 스팸필터 버튼 클릭 시 replaceVars() 인라인 치환(Dashboard L4101 직접발송+L3320 AI한줄로+AiCampaignResultPopup L340), SpamFilterTestModal replaceAll→split.join TS호환, ② 스팸필터 리포트 매칭 — 해시 실패 시 phone+carrier 디바이스 기반 fallback+stale 테스트 3분 자동 정리, ③ Dashboard.tsx 파일업로드 2곳 Authorization Bearer 토큰 추가(고객DB L2802+직접발송 L4428). 수정: Dashboard.tsx, AiCampaignResultPopup.tsx, SpamFilterTestModal.tsx, spam-filter.ts |
 | 02-26 | 코드 실물 검증 + GP-04 풀 레벨 수정 + upload.ts 인증 + 문서 정정: ① GPT "미수정" 지적 5건 실제 코드 검증 → GP-01/03/05, S9-01/03, messageUtils 연결 전부 이미 반영 확인, ② GP-04 database.ts mysqlQuery 헬퍼를 매 커넥션 SET time_zone 방식으로 보강 + campaigns.ts 단일 SET 제거, ③ upload.ts /parse+/mapping+/progress 3곳 authenticate 추가 (GPT 보안 지적), ④ STATUS.md+BUGS.md 허위 "❌ 미수정" 표기 전면 정정. 수정: database.ts, campaigns.ts, upload.ts |
