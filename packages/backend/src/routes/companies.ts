@@ -3,6 +3,7 @@ import { Request, Response, Router } from 'express';
 import nodemailer from 'nodemailer';
 import { query } from '../config/database';
 import { authenticate, requireSuperAdmin } from '../middlewares/auth';
+import { getCardDef } from '../utils/dashboard-card-pool';
 
 const router = Router();
 
@@ -274,6 +275,328 @@ router.get('/callback-numbers', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('회신번호 조회 실패:', error);
     res.status(500).json({ success: false, error: '조회 실패' });
+  }
+});
+
+// ===== 대시보드 동적 카드 API (D41) =====
+
+interface CardDataResult {
+  cardId: string;
+  label: string;
+  type: string;
+  icon: string;
+  value: number | { label: string; count: number }[];
+  hasData: boolean;
+}
+
+/**
+ * 대시보드 카드 집계 함수
+ * 설정된 카드만 효율적으로 집계 (단일 customers 쿼리 + 필요한 외부 테이블만)
+ */
+async function aggregateDashboardCards(companyId: string, cardIds: string[]): Promise<CardDataResult[]> {
+  const results: CardDataResult[] = [];
+
+  // ── 1단계: customers 통합 집계 (데이터 존재 여부 포함) ──
+  const month = (new Date().getMonth() + 1).toString().padStart(2, '0');
+  const baseResult = await query(`
+    SELECT
+      COUNT(*)::int                                                                          as total_customers,
+      COUNT(*) FILTER (WHERE gender = 'M')::int                                              as gender_male,
+      COUNT(*) FILTER (WHERE gender = 'F')::int                                              as gender_female,
+      COUNT(*) FILTER (WHERE gender IS NOT NULL)::int                                        as has_gender_data,
+      COUNT(*) FILTER (WHERE birth_month_day LIKE $2)::int                                   as birthday_this_month,
+      COUNT(*) FILTER (WHERE birth_month_day IS NOT NULL)::int                               as has_birthday_data,
+      COUNT(*) FILTER (WHERE email IS NOT NULL)::int                                         as email_has,
+      COUNT(*) FILTER (WHERE sms_opt_in = true)::int                                         as opt_in_count,
+      COUNT(*) FILTER (WHERE sms_opt_in IS NOT NULL)::int                                    as has_opt_in_data,
+      COUNT(*) FILTER (WHERE created_at >= date_trunc('month', NOW()))::int                  as new_this_month,
+      COALESCE(SUM(total_purchase_amount), 0)::numeric                                       as total_purchase_sum,
+      COUNT(*) FILTER (WHERE total_purchase_amount IS NOT NULL AND total_purchase_amount > 0)::int as has_purchase_data,
+      COUNT(*) FILTER (WHERE recent_purchase_date >= (NOW() - INTERVAL '30 days')::date)::int     as recent_30d_purchase,
+      COUNT(*) FILTER (WHERE recent_purchase_date IS NOT NULL)::int                               as has_recent_purchase_data,
+      COUNT(*) FILTER (WHERE recent_purchase_date IS NOT NULL AND recent_purchase_date < (NOW() - INTERVAL '90 days')::date)::int as inactive_90d,
+      COUNT(*) FILTER (WHERE age IS NOT NULL)::int                                           as has_age_data,
+      COUNT(*) FILTER (WHERE grade IS NOT NULL)::int                                         as has_grade_data,
+      COUNT(*) FILTER (WHERE region IS NOT NULL)::int                                        as has_region_data,
+      COUNT(*) FILTER (WHERE store_name IS NOT NULL)::int                                    as has_store_data
+    FROM customers
+    WHERE company_id = $1
+  `, [companyId, `${month}-%`]);
+
+  const base = baseResult.rows[0];
+  const totalCustomers = parseInt(base.total_customers);
+
+  // ── 2단계: 각 카드별 결과 조립 ──
+  for (const cardId of cardIds) {
+    const def = getCardDef(cardId);
+    if (!def) continue;
+
+    let value: number | { label: string; count: number }[] = 0;
+    let hasData = true;
+
+    switch (cardId) {
+      // ── 단순 집계 (customers 통합 쿼리 결과 사용) ──
+      case 'total_customers':
+        value = totalCustomers;
+        hasData = totalCustomers > 0;
+        break;
+
+      case 'gender_male':
+        value = parseInt(base.gender_male);
+        hasData = parseInt(base.has_gender_data) > 0;
+        break;
+
+      case 'gender_female':
+        value = parseInt(base.gender_female);
+        hasData = parseInt(base.has_gender_data) > 0;
+        break;
+
+      case 'birthday_this_month':
+        value = parseInt(base.birthday_this_month);
+        hasData = parseInt(base.has_birthday_data) > 0;
+        break;
+
+      case 'email_rate': {
+        const emailHas = parseInt(base.email_has);
+        value = totalCustomers > 0 ? Math.round((emailHas / totalCustomers) * 100) : 0;
+        hasData = totalCustomers > 0;
+        break;
+      }
+
+      case 'opt_in_count':
+        value = parseInt(base.opt_in_count);
+        hasData = parseInt(base.has_opt_in_data) > 0;
+        break;
+
+      case 'new_this_month':
+        value = parseInt(base.new_this_month);
+        hasData = totalCustomers > 0;
+        break;
+
+      case 'total_purchase_sum':
+        value = parseFloat(base.total_purchase_sum);
+        hasData = parseInt(base.has_purchase_data) > 0;
+        break;
+
+      case 'recent_30d_purchase':
+        value = parseInt(base.recent_30d_purchase);
+        hasData = parseInt(base.has_recent_purchase_data) > 0;
+        break;
+
+      case 'inactive_90d':
+        value = parseInt(base.inactive_90d);
+        hasData = parseInt(base.has_recent_purchase_data) > 0;
+        break;
+
+      // ── 분포형 카드 (데이터 존재 시에만 별도 쿼리) ──
+      case 'age_distribution': {
+        if (parseInt(base.has_age_data) === 0) {
+          value = [];
+          hasData = false;
+          break;
+        }
+        const ageResult = await query(`
+          SELECT
+            CASE
+              WHEN age < 20 THEN '10대 이하'
+              WHEN age < 30 THEN '20대'
+              WHEN age < 40 THEN '30대'
+              WHEN age < 50 THEN '40대'
+              WHEN age < 60 THEN '50대'
+              ELSE '60대 이상'
+            END as label,
+            COUNT(*)::int as count
+          FROM customers
+          WHERE company_id = $1 AND age IS NOT NULL
+          GROUP BY 1
+          ORDER BY MIN(age)
+        `, [companyId]);
+        value = ageResult.rows as { label: string; count: number }[];
+        hasData = true;
+        break;
+      }
+
+      case 'grade_distribution': {
+        if (parseInt(base.has_grade_data) === 0) {
+          value = [];
+          hasData = false;
+          break;
+        }
+        const gradeResult = await query(`
+          SELECT grade as label, COUNT(*)::int as count
+          FROM customers
+          WHERE company_id = $1 AND grade IS NOT NULL
+          GROUP BY grade
+          ORDER BY count DESC
+        `, [companyId]);
+        value = gradeResult.rows as { label: string; count: number }[];
+        hasData = true;
+        break;
+      }
+
+      case 'region_top': {
+        if (parseInt(base.has_region_data) === 0) {
+          value = [];
+          hasData = false;
+          break;
+        }
+        const regionResult = await query(`
+          SELECT region as label, COUNT(*)::int as count
+          FROM customers
+          WHERE company_id = $1 AND region IS NOT NULL
+          GROUP BY region
+          ORDER BY count DESC
+          LIMIT 5
+        `, [companyId]);
+        value = regionResult.rows as { label: string; count: number }[];
+        hasData = true;
+        break;
+      }
+
+      case 'store_distribution': {
+        if (parseInt(base.has_store_data) === 0) {
+          value = [];
+          hasData = false;
+          break;
+        }
+        const storeResult = await query(`
+          SELECT store_name as label, COUNT(*)::int as count
+          FROM customers
+          WHERE company_id = $1 AND store_name IS NOT NULL
+          GROUP BY store_name
+          ORDER BY count DESC
+          LIMIT 10
+        `, [companyId]);
+        value = storeResult.rows as { label: string; count: number }[];
+        hasData = true;
+        break;
+      }
+
+      // ── 외부 테이블 카드 ──
+      case 'opt_out_count': {
+        const optOutResult = await query(
+          `SELECT COUNT(DISTINCT phone)::int as count FROM opt_outs WHERE company_id = $1`,
+          [companyId]
+        );
+        value = parseInt(optOutResult.rows[0]?.count ?? 0);
+        hasData = totalCustomers > 0;
+        break;
+      }
+
+      case 'active_campaigns': {
+        const campResult = await query(
+          `SELECT COUNT(*)::int as count FROM campaigns WHERE company_id = $1 AND status IN ('sending', 'scheduled')`,
+          [companyId]
+        );
+        value = parseInt(campResult.rows[0]?.count ?? 0);
+        hasData = true;
+        break;
+      }
+
+      case 'monthly_spend': {
+        const spendResult = await query(
+          `SELECT COALESCE(SUM(amount), 0)::numeric as total
+           FROM balance_transactions
+           WHERE company_id = $1 AND type = 'deduct' AND created_at >= date_trunc('month', NOW())`,
+          [companyId]
+        );
+        value = parseFloat(spendResult.rows[0]?.total ?? 0);
+        hasData = true;
+        break;
+      }
+    }
+
+    results.push({
+      cardId: def.cardId,
+      label: def.label,
+      type: def.type,
+      icon: def.icon,
+      value,
+      hasData,
+    });
+  }
+
+  return results;
+}
+
+// GET /api/companies/dashboard-cards — 고객사별 대시보드 카드 데이터
+router.get('/dashboard-cards', async (req: Request, res: Response) => {
+  try {
+    const companyId = (req as any).user?.companyId;
+    if (!companyId) {
+      return res.status(401).json({ error: '인증 필요' });
+    }
+
+    // company_settings에서 카드 설정 조회
+    const settingsResult = await query(
+      `SELECT setting_key, setting_value
+       FROM company_settings
+       WHERE company_id = $1 AND setting_key IN ('dashboard_cards', 'dashboard_card_count')`,
+      [companyId]
+    );
+
+    const settings: Record<string, string> = {};
+    for (const row of settingsResult.rows as any[]) {
+      settings[row.setting_key] = row.setting_value;
+    }
+
+    const cardCount = parseInt(settings.dashboard_card_count || '0');
+    let cardIds: string[] = [];
+
+    try {
+      cardIds = settings.dashboard_cards ? JSON.parse(settings.dashboard_cards) : [];
+    } catch {
+      cardIds = [];
+    }
+
+    // 카드 미설정 시
+    if (cardIds.length === 0) {
+      return res.json({
+        configured: false,
+        cardCount: 0,
+        cards: [],
+      });
+    }
+
+    // DB에 고객 데이터 존재 여부 확인 (전체 블러 처리용)
+    const customerCheck = await query(
+      'SELECT COUNT(*)::int as count FROM customers WHERE company_id = $1 LIMIT 1',
+      [companyId]
+    );
+    const hasCustomers = parseInt(customerCheck.rows[0].count) > 0;
+
+    if (!hasCustomers) {
+      // DB 미업로드 → 프론트에서 전체 블러 + CTA 표시
+      return res.json({
+        configured: true,
+        cardCount,
+        hasCustomerData: false,
+        cards: cardIds.map(id => {
+          const def = getCardDef(id);
+          return {
+            cardId: id,
+            label: def?.label ?? id,
+            type: def?.type ?? 'count',
+            icon: def?.icon ?? 'HelpCircle',
+            value: 0,
+            hasData: false,
+          };
+        }),
+      });
+    }
+
+    // 집계 실행
+    const cards = await aggregateDashboardCards(companyId, cardIds);
+
+    res.json({
+      configured: true,
+      cardCount,
+      hasCustomerData: true,
+      cards,
+    });
+  } catch (error) {
+    console.error('대시보드 카드 조회 실패:', error);
+    res.status(500).json({ error: '대시보드 카드 조회 실패' });
   }
 });
 

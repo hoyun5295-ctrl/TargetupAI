@@ -3,6 +3,7 @@ import { Request, Response, Router } from 'express';
 import { mysqlQuery, query } from '../config/database';
 import { authenticate, requireSuperAdmin } from '../middlewares/auth';
 import { ALL_SMS_TABLES, invalidateLineGroupCache } from './campaigns';
+import { DASHBOARD_CARD_POOL, validateCardIds } from '../utils/dashboard-card-pool';
 
 const router = Router();
 
@@ -315,6 +316,122 @@ router.delete('/companies/:id', authenticate, requireSuperAdmin, async (req: Req
   } catch (error) {
     console.error('회사 해지 실패:', error);
     res.status(500).json({ error: '회사 해지 실패' });
+  }
+});
+
+// ===== 대시보드 카드 설정 API (D41) =====
+
+// company_settings UPSERT 헬퍼 (UNIQUE 제약 없이도 안전)
+async function upsertCompanySetting(
+  companyId: string, settingKey: string, settingValue: string,
+  settingType: string = 'string', description: string = ''
+): Promise<void> {
+  const existing = await query(
+    'SELECT id FROM company_settings WHERE company_id = $1 AND setting_key = $2',
+    [companyId, settingKey]
+  );
+  if (existing.rows.length > 0) {
+    await query(
+      'UPDATE company_settings SET setting_value = $1, updated_at = NOW() WHERE company_id = $2 AND setting_key = $3',
+      [settingValue, companyId, settingKey]
+    );
+  } else {
+    await query(
+      'INSERT INTO company_settings (company_id, setting_key, setting_value, setting_type, description) VALUES ($1, $2, $3, $4, $5)',
+      [companyId, settingKey, settingValue, settingType, description]
+    );
+  }
+}
+
+// GET /api/admin/companies/:id/dashboard-cards — 고객사 카드 설정 조회
+router.get('/companies/:id/dashboard-cards', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    // 회사 존재 확인
+    const companyCheck = await query('SELECT id, company_name FROM companies WHERE id = $1', [id]);
+    if (companyCheck.rows.length === 0) {
+      return res.status(404).json({ error: '회사를 찾을 수 없습니다.' });
+    }
+
+    // 현재 설정 조회
+    const settingsResult = await query(
+      `SELECT setting_key, setting_value
+       FROM company_settings
+       WHERE company_id = $1 AND setting_key IN ('dashboard_cards', 'dashboard_card_count')`,
+      [id]
+    );
+
+    const settings: Record<string, string> = {};
+    for (const row of settingsResult.rows as any[]) {
+      settings[row.setting_key] = row.setting_value;
+    }
+
+    let selectedCards: string[] = [];
+    try {
+      selectedCards = settings.dashboard_cards ? JSON.parse(settings.dashboard_cards) : [];
+    } catch {
+      selectedCards = [];
+    }
+
+    res.json({
+      companyName: companyCheck.rows[0].company_name,
+      pool: DASHBOARD_CARD_POOL,
+      selectedCards,
+      cardCount: parseInt(settings.dashboard_card_count || '0'),
+    });
+  } catch (error) {
+    console.error('대시보드 카드 설정 조회 실패:', error);
+    res.status(500).json({ error: '대시보드 카드 설정 조회 실패' });
+  }
+});
+
+// PUT /api/admin/companies/:id/dashboard-cards — 카드 설정 저장
+router.put('/companies/:id/dashboard-cards', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { cards, cardCount } = req.body;
+
+    // 입력 검증
+    if (!Array.isArray(cards)) {
+      return res.status(400).json({ error: 'cards는 배열이어야 합니다.' });
+    }
+    if (cardCount !== 4 && cardCount !== 8) {
+      return res.status(400).json({ error: 'cardCount는 4 또는 8이어야 합니다.' });
+    }
+    if (cards.length !== cardCount) {
+      return res.status(400).json({ error: `카드 ${cardCount}개를 선택해주세요. (현재 ${cards.length}개)` });
+    }
+
+    // 카드 ID 유효성
+    const validation = validateCardIds(cards);
+    if (!validation.valid) {
+      return res.status(400).json({ error: `유효하지 않은 카드 ID: ${validation.invalid.join(', ')}` });
+    }
+
+    // 중복 검사
+    if (new Set(cards).size !== cards.length) {
+      return res.status(400).json({ error: '중복된 카드가 있습니다.' });
+    }
+
+    // 회사 존재 확인
+    const companyCheck = await query('SELECT id FROM companies WHERE id = $1', [id]);
+    if (companyCheck.rows.length === 0) {
+      return res.status(404).json({ error: '회사를 찾을 수 없습니다.' });
+    }
+
+    // UPSERT
+    await upsertCompanySetting(id, 'dashboard_cards', JSON.stringify(cards), 'json', '대시보드 표시 카드 목록');
+    await upsertCompanySetting(id, 'dashboard_card_count', cardCount.toString(), 'string', '대시보드 카드 칸 수 (4 또는 8)');
+
+    res.json({
+      message: '대시보드 카드 설정이 저장되었습니다.',
+      cards,
+      cardCount,
+    });
+  } catch (error) {
+    console.error('대시보드 카드 설정 저장 실패:', error);
+    res.status(500).json({ error: '대시보드 카드 설정 저장 실패' });
   }
 });
 
