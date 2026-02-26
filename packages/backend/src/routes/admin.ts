@@ -399,8 +399,8 @@ router.put('/companies/:id/dashboard-cards', authenticate, requireSuperAdmin, as
     if (cardCount !== 4 && cardCount !== 8) {
       return res.status(400).json({ error: 'cardCount는 4 또는 8이어야 합니다.' });
     }
-    if (cards.length !== cardCount) {
-      return res.status(400).json({ error: `카드 ${cardCount}개를 선택해주세요. (현재 ${cards.length}개)` });
+    if (cards.length > cardCount) {
+      return res.status(400).json({ error: `카드는 최대 ${cardCount}개까지 선택 가능합니다. (현재 ${cards.length}개)` });
     }
 
     // 카드 ID 유효성
