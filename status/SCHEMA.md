@@ -289,6 +289,7 @@
 | address | text |
 | region | varchar(100) |
 | grade | varchar(50) |
+| store_phone | varchar(20) |
 | points | integer |
 | store_code | varchar(50) |
 | store_name | varchar(100) |

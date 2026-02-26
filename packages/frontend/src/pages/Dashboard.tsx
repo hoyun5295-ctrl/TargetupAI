@@ -2890,7 +2890,10 @@ const campaignData = {
                               setFileUploading(true);
                               const res = await fetch('/api/upload/mapping', {
                                 method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
+                                headers: { 
+                                  'Content-Type': 'application/json',
+                                  'Authorization': `Bearer ${localStorage.getItem('token')}`
+                                },
                                 body: JSON.stringify({ headers: fileHeaders })
                               });
                               const data = await res.json();
@@ -3015,7 +3018,9 @@ const campaignData = {
                             // 2초마다 폴링
                             const progressInterval = setInterval(async () => {
                               try {
-                                const pRes = await fetch(`/api/upload/progress/${fileId}`);
+                                const pRes = await fetch(`/api/upload/progress/${fileId}`, {
+                                  headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+                                });
                                 const pData = await pRes.json();
                                 setUploadProgress(pData);
                                 

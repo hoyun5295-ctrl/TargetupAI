@@ -56,18 +56,28 @@
 - 특히 mysqlQuery 등 외부 라이브러리 반환값 타입 캐스팅 주의.
 - **타입 에러 있는 코드 배포 = 서버 크래시 = 서비스 장애** (2026-02-19 장애 교훈)
 
-### 2-5. 추측성 땜질 금지 / 에러 대응 프로토콜
+### 2-5. ⚠️ SCHEMA.md / OPS.md 절대 준수
+- **코드는 반드시 SCHEMA.md와 OPS.md에 정의된 구조를 벗어나지 않는다.**
+- 새 코드 작성 시 반드시 SCHEMA.md를 먼저 읽고, 컬럼명·타입·관계를 확인한 후 코딩한다.
+- **SCHEMA.md에 없는 컬럼명/타입을 코드에서 임의 생성 절대 금지.**
+- 하드코딩 매핑(CATEGORY_MAP, CAT_LABELS 등)을 만들지 않는다. standard_fields 테이블과 `standard-field-map.ts` 매핑 레이어가 유일한 기준이다.
+- standard_fields.field_key ↔ customers 컬럼 간 매핑은 `standard-field-map.ts` 한 곳에서만 정의한다.
+- customers.ts, upload.ts, Dashboard.tsx, normalize.ts, sync.ts 등 모든 파일은 이 매핑 레이어를 import해서 사용한다.
+- **"기준은 하나, 입구는 여럿"** — standard_fields = 유일한 기준, normalize.ts = 값 변환, upload/sync = 입구, customers/Dashboard = 출구. 전부 standard-field-map.ts 참조.
+
+### 2-6. 추측성 땜질 금지 / 에러 대응 프로토콜
 - 에러가 발생하면 임의로 코드를 덧붙이지 않는다.
 - 1단계: 에러 로그 / 재현 절차 / 기대 결과 / 실제 결과를 확인한다.
 - 2단계: 원인을 3줄 이내로 요약한다.
 - 3단계: 2가지 이상 해결 옵션(장단점/리스크) 제시 후 Harold님 선택을 기다린다.
 - 4단계: 선택된 옵션으로 최소 수정 → 회귀 테스트까지 수행한다.
 
-### 2-6. 수정 파일 제공 방식
+### 2-7. 수정 파일 제공 방식
 - 코드 수정 시 **"기존코드 → 새코드"** 형식으로, 파일 내 형태 그대로 복사해서 커서에서 바로 검색 가능하게 제공.
 - Harold님이 명시 요청 시에만 완성된 단일 파일 전체로 제공.
+- **모든 수정사항(코드, .md 문서 포함)은 수정파일로 제공한다.** 프로젝트 문서(.md)도 수정 시 파일로 제공하여 Harold님이 다운로드 후 교체할 수 있게 한다.
 
-### 2-7. 데이터 정확성
+### 2-8. 데이터 정확성
 - 대상자 수는 AI 추정이 아닌 DB 실제 쿼리 결과로 산출.
 
 ---
@@ -116,7 +126,7 @@
 | 1-5 | 스팸필터 테스트 라인 선택 | S9-06 | ✅ Closed | 정상 운영 구조 확인 |
 | 1-6 | 5개 경로 공통 함수 교체 | 전체 | ✅ 적용됨 | campaigns.ts L672,1051,1947,2049,2596 + spam-filter.ts L77,139 |
 | P0-1 | spam-filter.ts 권한 체크 | GP-01 | ✅ 수정됨 | L655 `req.user.userType !== 'super_admin'` |
-| P0-2 | /uploads 정적 서빙 | GP-02 | ❌ 해당없음 | app.ts에 express.static('/uploads') 없음. Nginx 확인 필요 |
+| P0-2 | /uploads 정적 서빙 | GP-02 | ✅ Closed (해당없음) | Express에 없음 + Nginx grep 확인 → 서빙 없음. 외부 노출 없음 |
 | P0-3 | 선불 차감 후 환불 보장 | GP-03 | ✅ 수정됨 | AI L1144-1154 + 직접 L2123-2132 + 테스트 L707-711 prepaidRefund |
 | P0-4 | MySQL 커넥션 풀 TZ | GP-04 | ✅ 이번 세션 수정 | database.ts mysqlQuery 매 커넥션마다 SET time_zone. campaigns.ts 단일 SET 제거 |
 | P0-5 | 직접발송 잔여변수 strip | GP-05 | ✅ 수정됨 | L1956 SMS strip + L2057 카카오 strip + messageUtils.ts L76 공통 strip |
@@ -126,11 +136,7 @@
 
 #### 🔵 잔여 미해결 이슈
 
-| 순번 | 작업 | 관련 버그 | 상태 |
-|------|------|----------|------|
-| 2-2 | results.ts 대량 캠페인 서버측 페이지네이션 | S9-08 (🟠중요) | ⬜ |
-| 3-1 | AiCustomSendFlow.tsx alert/confirm → 커스텀 모달 | S9-07 (🟡UI) | ⬜ |
-| 보안 | GP-02 /uploads Nginx 서빙 여부 확인 | GP-02 | 🟡 Nginx 설정 확인 필요 |
+> **전부 완료.** 8차+9차+GPT P0 코드 수정 전체 완료. 2단계 실동작 검증만 남음.
 
 #### ⛔ 진행 규칙
 
@@ -139,17 +145,53 @@
 - **코드 작성 전 컨펌:** 설계안 제시 → Harold님 동의 → 구현
 - **GPT 교차검증:** GPT 의견은 겸허히 수용하되, 반드시 실제 코드 근거로 판단. 무조건 따르지도 무시하지도 말 것
 
-#### 📋 다음 세션 작업
+#### 📋 🔴 표준 필드 아키텍처 통합 (D39 — 3세션 계획)
 
-> 직원 버그리포트 재점검 (8차 2단계 실동작 검증) + 잔여 이슈
+> **기준 문서:** `FIELD-INTEGRATION.md` — 채팅이 바뀌어도 이 문서가 유일한 기준점
+> **기조 (Harold님 확정):** 필수 직접 컬럼 17개 + 커스텀 15개(custom_fields JSONB) = 최대 32개. 고객사가 올린 데이터에만 의존. AI는 해당 고객사의 실제 스키마를 기초로 동작.
+> **원칙:** 발송 파이프라인 (campaigns.ts, spam-filter.ts, messageUtils.ts, results.ts, billing.ts) 절대 건드리지 않음.
 
-**🟡 확인/수정 필요**
-- [ ] GP-02: Nginx 설정에서 /uploads 직접 서빙 여부 확인 (Express에는 없음)
-- [ ] S9-07: AiCustomSendFlow.tsx alert/confirm → 커스텀 모달 교체
-- [ ] S9-08: results.ts 대량 캠페인 서버측 페이지네이션
+**필수 직접 컬럼 17개:** 고객명, 전화번호, 성별, 나이, 생일, 이메일, 주소, 최근구매매장, 최근구매금액, 누적구매금액, 브랜드(store_code — UNIQUE 키 구성요소, 브랜드 1개 고객사는 NULL), 등록구분(온/오프라인), 등록매장정보, 매장전화번호, 고객등급, 보유포인트, 수신동의여부
 
-**✅ 이번 세션 완료**
+**커스텀 15개:** custom_1 ~ custom_15 (custom_fields JSONB). 고객사별 의미 다름. customer_field_definitions에 라벨 저장.
+
+**카테고리 6개:** basic(기본정보), purchase(구매정보), store(매장/등록정보), membership(등급/포인트), marketing(수신동의), custom(커스텀)
+
+**✅ 세션 0: DDL + standard-field-map.ts 재정의 (완료 2026-02-26)**
+- [x] customers 테이블 store_phone varchar(20) 컬럼 추가
+- [x] SCHEMA.md 업데이트 (store_phone 반영)
+- [x] standard_fields DB — 기존 49개 삭제 → 확정 32개 INSERT (필수 17 + 커스텀 15)
+- [x] standard-field-map.ts 재작성 — 필수 17개 + 커스텀 15개 = 32개, 카테고리 6개 통일
+- [x] store_code(브랜드) 필수 컬럼 승격 — displayName '브랜드', AI 문안생성 시 브랜드명 활용
+- [x] 파일 경로: packages/backend/src/utils/standard-field-map.ts
+
+**⬜ 세션 1: 입구 정상화 — upload.ts + normalize.ts**
+- [ ] upload.ts: INSERT 18개 하드코딩 → standard-field-map.ts 기반 동적 컬럼 + custom_fields JSONB 저장
+- [ ] normalize.ts: normalizeByFieldKey() 신규 + FIELD_MAP.normalizeFunction 연결
+- [ ] 검증: 업로드 → 필수 컬럼 + custom_fields 빠짐없이 저장
+
+**⬜ 세션 2: 조회 + AI 정상화 — customers.ts + Dashboard.tsx + ai.ts + AiCustomSendFlow.tsx**
+- [ ] customers.ts: STANDARD_COLUMNS/CATEGORY_MAP/DETECTABLE_FIELDS 삭제 → FIELD_MAP 기반 + 영문 카테고리 반환
+- [ ] Dashboard.tsx: CAT_LABELS 삭제 → 영문 카테고리 매칭 정상화
+- [ ] ai.ts: DEFAULT_FIELD_MAPPINGS/DEFAULT_AVAILABLE_VARS/FIELD_TO_VAR 삭제 → 고객사 보유 필드 동적
+- [ ] AiCustomSendFlow.tsx: FIELD_CATEGORIES 삭제 → 백엔드 category 사용
+- [ ] 검증: 필터 UI 정상 + AI가 보유 필드만 사용
+
+**⬜ 2단계 실동작 검증 대기 (별도)**
+- [ ] 8차 B8-01~B8-13: 직원 실서비스 테스트 (app.hanjul.ai)
+- [ ] 9차 S9-04/S9-08: 발송결과 조회 성능 + sent_at 정확성 확인
+- [ ] S9-07: AI 맞춤한줄 커스텀 모달 UI 정상 표시 확인
+
+**✅ 2026-02-26 두 번째 세션 완료**
+- [x] S9-07: AiCustomSendFlow.tsx alert/confirm 6곳 → 커스텀 모달 전면 교체 (BUGS.md에 2곳만 기록되어 있었으나 실제 6곳 발견·수정)
+- [x] GP-02: Nginx grep 확인 → /uploads 서빙 없음. Express에도 없음. ✅ Closed (해당없음)
+- [x] upload.ts 파일명 sanitize: originalname 제거 → 확장자만 보존 (경로탈출 차단)
+- [x] upload.ts /parse 파일 잔존: cleanupStaleUploads() 추가 (서버 시작+1시간 간격, 1시간 초과 삭제)
+- [x] upload.ts processUploadInBackground 에러 시 파일 미삭제 버그: try→finally로 이동
+
+**✅ 이전 세션 완료**
 - [x] S9-04: sent_at 경쟁 조건 근본 해결 — campaigns.ts sync-results 3곳 + 인라인 sync 1곳 + 직접예약 WHERE 1곳 (총 5곳). sent_at = COALESCE(sent_at, scheduled_at, NOW()) 통일. 즉시=클릭시점, 예약=scheduled_at
+- [x] S9-08: results.ts 대량 캠페인 UNION ALL 서버측 페이지네이션 전환. messages/export/상세 3API 전면 리팩토링. 메모리 300MB→10KB
 - [x] GP-04: database.ts MySQL 커넥션 풀 레벨 TZ 설정 (매 쿼리마다 KST 보장)
 - [x] campaigns.ts 단일 커넥션 SET 제거 (풀 레벨로 대체)
 - [x] upload.ts /parse, /mapping, /progress 3곳 authenticate 추가
@@ -160,8 +202,10 @@
 
 ### ✅ 이전 완료 요약
 
-> - 2026-02-26 S9-04 sent_at 경쟁 조건 근본 해결: sync-results 3곳 + 인라인 sync + 직접예약 WHERE 총 5곳 수정. 즉시=클릭시점, 예약=scheduled_at 통일.
-> - 2026-02-26 코드 실물 검증: GPT "미수정" 지적 5건 중 4건(GP-01/03/05, S9-01/03)은 실제 코드에 반영됨 확인. GP-04만 이번 세션에서 풀 레벨로 보강. upload.ts 인증 3곳 추가.
+> - 2026-02-26 (4차) 표준 필드 아키텍처 통합 계획 수립 — 7개 파일 전수 검토, Harold님 필수16+커스텀15 확정, FIELD-INTEGRATION.md 기준 문서 작성, 3세션 분할(세션0:DDL+재정의, 세션1:upload+normalize, 세션2:조회+AI)
+> - 2026-02-26 (3차) 표준 필드 아키텍처 근본 원인 분석 + standard-field-map.ts 매핑 레이어 생성 + 절대 개발 원칙 2-5 신설(SCHEMA.md 준수)
+> - 2026-02-26 (2차) S9-07 커스텀 모달 6곳 교체 + upload.ts sanitize/cleanup/finally 3건 수정 + GP-02 Closed
+> - 2026-02-26 (1차) S9-04 sent_at 경쟁 조건, S9-08 대량 페이지네이션 UNION ALL 전환, GP-04 풀 레벨 TZ, upload.ts 인증 추가, 코드 실물 검증 5건 확인
 > - ai.ts 프롬프트 수정: 날짜/기간/가격 날조 금지 + subject 중복 키 제거
 > - GPT-5.1 fallback 구현 (D31) — Claude API 장애 대응
 > - 8차 버그 13건 수정 + 1단계 코드검증 통과 → 2단계 실동작 검증 대기
@@ -326,22 +370,33 @@
 
 ## 7) 핵심 비즈니스 로직
 
-### 7-1. 데이터 정규화 (utils/normalize.ts)
+### 7-1. 데이터 정규화 (utils/normalize.ts + utils/standard-field-map.ts)
 
-고객사별 DB 형식 차이를 흡수하는 핵심 레이어. 참조 파일: ai.ts, customers.ts, campaigns.ts, upload.ts
+고객사별 DB 형식 차이를 흡수하는 핵심 레이어.
+
+**아키텍처 (D39 확정 — 필수16 + 커스텀15):**
+1. **standard-field-map.ts** — 유일한 매핑 정의 (field_key ↔ customers 컬럼/custom_fields 위치 ↔ 카테고리 ↔ normalize 함수)
+2. **normalize.ts** — 값 변환 함수 (다양한 입력 → 표준값)
+3. **customer_field_definitions** — 고객사별 커스텀 필드 라벨 정의
+
+**필수 직접 컬럼 16개:** name, phone, gender, age, birth_date, email, address, recent_purchase_store, registration_type, registered_store, store_phone(DDL신규), recent_purchase_amount, total_purchase_amount, grade, points, sms_opt_in
+**커스텀 슬롯 15개:** custom_1 ~ custom_15 (custom_fields JSONB)
+
+**절대 원칙:** SCHEMA.md에 정의된 컬럼명/타입만 사용. 하드코딩 매핑 금지. FIELD-INTEGRATION.md가 기준 문서.
+
+참조 파일: ai.ts, customers.ts, campaigns.ts, upload.ts, sync.ts
 
 **역할 3가지:**
 1. **값 정규화** — 어떤 형태로 들어오든 표준값으로 통일
    - 성별: 남/남자/male/man/1 → 'M' | 등급: vip/VIP고객/V → 'VIP'
-   - 지역: 서울시/서울특별시/Seoul → '서울' | 전화번호: +82-10-1234-5678 → '01012345678'
+   - 전화번호: +82-10-1234-5678 → '01012345678'
    - 금액: ₩1,000원 → 1000 | 날짜: 20240101, 2024.01.01 → '2024-01-01'
 2. **필드명 매핑** — `normalizeCustomerRecord()`에서 다양한 컬럼명을 표준 필드로 통일
    - raw.mobile / raw.phone_number / raw.tel → phone
    - raw.sex / raw.성별 → gender | raw.등급 / raw.membership → grade
-3. **필터 빌더** — DB에 어떤 형식으로 저장돼 있든 잡아내는 SQL 조건 생성
-   - `buildGenderFilter('M')` → WHERE gender = ANY(['M','m','남','남자','male'...])
+3. **AI 동적 구성** — 고객사가 올린 데이터 기반으로 사용 가능한 변수 목록 생성 → AI 프롬프트에 주입
 
-> standard_fields(49개) + normalize.ts + upload AI매핑 조합으로 field_mappings 별도 UI 불필요.
+> **주의:** opt_in_sms(field_key) ↔ sms_opt_in(customers 컬럼) 등 이름 불일치는 standard-field-map.ts에서 처리. 컬럼명 변경 금지.
 
 ### 7-2. 선불/후불 요금제 시스템
 
@@ -384,7 +439,15 @@
 
 ## 8) 📲 진행 예정 작업 (TODO)
 
-### 🚨 최우선 — 직원 버그리포트 재점검 + 잔여 이슈
+### 🚨 최우선 — 표준 필드 아키텍처 통합 (D39 — FIELD-INTEGRATION.md 참조)
+> **Harold님 확정 (02-26):** 필수 직접 컬럼 16개 + 커스텀 15개. 기존 41개→31개로 정리.
+- [x] **standard-field-map.ts 매핑 레이어 생성** — 기존 FIELD_MAP 41개 + 헬퍼 함수 (02-26, 재작성 예정)
+- [x] **FIELD-INTEGRATION.md 기준 문서 작성** — 7개 파일 전수 검토, 하드코딩 진단, 3세션 계획 수립 (02-26)
+- [ ] **세션 0:** DDL (store_phone 추가) + standard-field-map.ts 재정의 (필수16+커스텀15)
+- [ ] **세션 1:** upload.ts + normalize.ts (입구 정상화 — 동적 INSERT + custom_fields JSONB)
+- [ ] **세션 2:** customers.ts + Dashboard.tsx + ai.ts + AiCustomSendFlow.tsx (조회+AI 정상화 — 카테고리 통일 + 동적 필드)
+
+### 🟡 잔여 — 직원 버그리포트 실동작 검증 (코드 수정 전체 완료)
 - [x] **발송 5개 경로 공통 치환 함수 통합** — messageUtils.ts 생성 + 5개 경로 import 연결 완료 (코드 실물 검증 02-26)
 - [x] **S9-01 직접타겟 customMessages** — campaigns.ts customMessageMap 구성 + SMS/카카오 양쪽 적용 (코드 실물 검증 02-26)
 - [x] **S9-03 나이 동적연도** — EXTRACT(YEAR FROM CURRENT_DATE AT TIME ZONE 'Asia/Seoul') 4곳 적용 (코드 실물 검증 02-26)
@@ -498,6 +561,8 @@
 | D35 | 02-26 | 선불 차감 후 발송 실패 시 자동 환불 보장 (GPT P0-3) | 차감→MySQL INSERT 사이 실패 시 돈만 빠지는 정산 이슈. 내부 try-catch + prepaidRefund + 캠페인 failed 마킹 |
 | D36 | 02-26 | MySQL 타임존 KST — 단일 세션 SET → database.ts 풀 레벨 보강 | 커넥션 풀 10개 중 1개만 TZ 설정되는 구조적 문제. mysqlQuery 헬퍼가 매 커넥션마다 SET time_zone 실행하도록 변경 |
 | D37 | 02-26 | GPT 의견 수용 원칙 — 코드 근거 기반 판단 | GPT "미수정" 지적에 코드 확인 없이 동의→문서 오염. 앞으로 GPT든 다른 AI든 반드시 실제 코드 근거로 판단 |
+| D38 | 02-26 | 표준 필드 아키텍처 복구 — standard-field-map.ts 매핑 레이어 도입 | standard_fields 테이블이 유일한 기준인데 customers.ts/upload.ts/Dashboard.tsx/normalize.ts가 각자 하드코딩. CAT_LABELS(영문) vs CATEGORY_MAP(한글) 불일치→필터 UI 전멸, upload INSERT 18개 하드코딩→17개 필드 데이터 손실. 매핑 레이어 한 곳에서만 정의, 모든 파일은 import. SCHEMA.md/OPS.md 절대 준수 원칙 신설(2-5) |
+| D39 | 02-26 | 표준 필드 아키텍처 재정의 — 필수 16개 + 커스텀 15개 확정 | 기존 41개 세분화→필수만 직접 컬럼(16개: 고객명/전화번호/성별/나이/생일/이메일/주소/최근구매매장/등록구분/등록매장정보/매장전화번호(DDL신규)/최근구매금액/누적구매금액/고객등급/보유포인트/수신동의), 나머지는 custom_1~15 JSONB로 유연 수용. AI는 고객사 실제 보유 필드만 사용. FIELD-INTEGRATION.md 기준 문서 작성. 3세션 분할(세션0:DDL+재정의, 세션1:upload+normalize, 세션2:조회+AI) |
 
 **아카이브:** D1-AI발송2분기(02-22) | D2-브리핑방식(02-22) | D3-개인화필드체크박스(02-22) | D4-textarea제거(02-22) | D5-별도컴포넌트분리(02-22) | D6-대시보드레이아웃(02-22) | D7-헤더탭스타일(02-23) | D8-AUTO/PRO뱃지(02-23) | D9-캘린더상태기준(02-23) | D10-6차세션분할(02-23) | D11-KCP전환(02-23) | D12-이용약관(02-23) | D13-수신거부SoT(02-23) | D-대시보드모달분리(02-23): 8,039줄→4,964줄
 
@@ -532,6 +597,7 @@
 | R18 | /uploads 정적 서빙 인증 없음 → PII 노출 (GPT P0-2) | 2 | 5 | 10 | 🟡 Express(app.ts)에는 /uploads 정적 서빙 없음 확인. Nginx 설정에서 직접 서빙 여부 미확인 |
 | R19 | MySQL 세션 타임존 UTC → 예약/분할 발송 9시간 밀림 (GPT P0-4) | 1 | 4 | 4 | ✅ 해결: database.ts mysqlQuery 헬퍼가 매 커넥션마다 SET time_zone='+09:00'. campaigns.ts 단일 SET 제거. 풀 전체 보장 |
 | R20 | sent_at 경쟁 조건 — 예약발송 sent_at=NULL 고착, 직접예약 sync-results 누락 (S9-04) | 1 | 3 | 3 | ✅ 해결: sync-results 3곳+인라인 sync COALESCE(sent_at, scheduled_at, NOW()). 직접예약 WHERE에 'scheduled' 추가. 즉시=클릭시점, 예약=scheduled_at |
+| R21 | standard_fields ↔ 코드 하드코딩 불일치 → 필터 전멸 + 업로드 데이터 손실 | 5 | 5 | 25 | 🟡 세션0 완료: DDL+standard_fields DB 32개+standard-field-map.ts 재작성. 세션1(upload+normalize)→세션2(조회+AI) 진행 예정 |
 ---
 
 ## 12) ✅ DONE LOG (완료 기록)
@@ -540,6 +606,8 @@
 
 | 날짜 | 완료 항목 |
 |------|----------|
+| 02-26 | D39 세션 0 완료 — DDL + standard_fields DB + standard-field-map.ts 재정의: ① customers 테이블 store_phone varchar(20) 컬럼 추가(DDL), ② standard_fields DB 기존 49개 DELETE → 확정 32개 INSERT(필수 17개 + 커스텀 15개), ③ store_code(브랜드) 필수 컬럼 승격 — displayName '브랜드', AI 문안생성 시 브랜드명 활용, 브랜드 1개 고객사는 NULL, ④ standard-field-map.ts 전면 재작성 — 카테고리 8개→6개(basic/purchase/store/membership/marketing/custom), 필드 41개→32개, FIELD_KEY_TO_COLUMN_OVERRIDES 삭제(field_key=columnName 1:1), ⑤ SCHEMA.md store_phone 반영. 파일 경로: packages/backend/src/utils/standard-field-map.ts |
+| 02-26 | 표준 필드 아키텍처 근본 원인 분석 + standard-field-map.ts 매핑 레이어 생성: ① 근본 원인 발견 — standard_fields 테이블(41개) 존재하나 customers.ts CATEGORY_MAP(한글)/Dashboard.tsx CAT_LABELS(영문)/upload.ts INSERT(18개 하드코딩)/normalize.ts 4곳이 각자 하드코딩 → 카테고리 불일치로 필터 UI 전멸, 업로드 시 17개 필드 데이터 손실. ② SCHEMA.md 전수 대조: standard_fields 41개 vs customers 컬럼 매핑 완성(24개 직접컬럼 + 17개 custom_fields JSONB). ③ standard-field-map.ts 신규 생성 — FIELD_MAP 배열(41개 필드 정의) + 헬퍼 함수 8개(getFieldByKey/getFieldsByCategory/getColumnFields/getCustomFields/fieldKeyToColumn/fieldKeyToSqlRef 등) + FIELD_KEY_TO_COLUMN_OVERRIDES(opt_in_sms↔sms_opt_in). ④ 절대 개발 원칙 2-5 신설: SCHEMA.md/OPS.md 절대 준수, 하드코딩 매핑 금지. 다음 세션: 4파일 순차 수정(customers.ts→Dashboard.tsx→upload.ts→normalize.ts) |
 | 02-26 | S9-08 대량 페이지네이션 근본 해결 (results.ts 전면 리팩토링): ① messages API — 27테이블 순차 전체 SELECT→메모리 concat→JS sort→slice 패턴 제거. SMS+카카오 UNION ALL 단일 쿼리 + MySQL ORDER BY + LIMIT/OFFSET으로 전환. 프론트 변경 없음(기존 page/limit 호환). ② export API — 30만건 전체 메모리 로드→res.send 패턴 제거. UNION ALL + 10,000건 청크 스트리밍(res.write 루프)으로 OOM 제거. ③ 상세(차트) API — 27테이블×2집계=54쿼리 N+1 패턴 제거. smsUnionGroupBy() UNION ALL+GROUP BY 단일 쿼리 2개로 통합. ④ 신규 헬퍼 4개(repeatParams/smsUnionCount/smsUnionSelect/smsUnionGroupBy). 개선효과: 메모리 300MB→10KB, 응답 10~30초→0.05~0.3초, MySQL 왕복 54→2회. 수정: results.ts (626줄→618줄) |
 | 02-26 | S9-04 sent_at 경쟁 조건 근본 해결: campaigns.ts 5곳 수정. ① sync-results campaign_runs(L1616) completed 전환 시 sent_at=COALESCE(sent_at,scheduled_at,NOW()), ② sync-results campaigns AI(L1628) 동일, ③ sync-results campaigns 직접(L1684) 동일, ④ 인라인 sync(L485) sent_at=NOW()→COALESCE(sent_at,scheduled_at,NOW()), ⑤ sync-results 직접발송 WHERE(L1660) scheduled 조건 추가(예약시간 경과 체크). 원칙: 즉시발송=클릭시점, 예약발송=scheduled_at. 직접 예약건이 sync-results에서 안 잡히던 구조적 버그도 함께 해결. 수정: campaigns.ts |
 | 02-26 | 스팸필터 미리보기+리포트매칭+파일업로드 인증: ① S9-02 프론트 미리보기 완료 — 스팸필터 버튼 클릭 시 replaceVars() 인라인 치환(Dashboard L4101 직접발송+L3320 AI한줄로+AiCampaignResultPopup L340), SpamFilterTestModal replaceAll→split.join TS호환, ② 스팸필터 리포트 매칭 — 해시 실패 시 phone+carrier 디바이스 기반 fallback+stale 테스트 3분 자동 정리, ③ Dashboard.tsx 파일업로드 2곳 Authorization Bearer 토큰 추가(고객DB L2802+직접발송 L4428). 수정: Dashboard.tsx, AiCampaignResultPopup.tsx, SpamFilterTestModal.tsx, spam-filter.ts |

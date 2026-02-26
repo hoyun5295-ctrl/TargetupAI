@@ -5,7 +5,8 @@ import multer from 'multer';
 import path from 'path';
 import * as XLSX from 'xlsx';
 import { query } from '../config/database';
-import { normalizeGender, normalizeGrade, normalizePhone, normalizeRegion, normalizeSmsOptIn } from '../utils/normalize';
+import { normalizeByFieldKey, normalizeRegion } from '../utils/normalize';
+import { FIELD_MAP, getColumnFields, getCustomFields, getFieldByKey } from '../utils/standard-field-map';
 
 // Excel 시리얼넘버 → YYYY-MM-DD 변환
 function excelSerialToDateStr(serial: number): string | null {
@@ -170,41 +171,34 @@ router.post('/mapping', authenticate, async (req: Request, res: Response) => {
   try {
     const { headers } = req.body;
     
-    const dbColumns = {
-      phone: '전화번호 (필수)',
-      name: '고객 이름',
-      gender: '성별 (M/F)',
-      birth_year: '출생연도 (예: 1990)',
-      birth_month_day: '생일 월일 (예: 03-15)',
-      birth_date: '생년월일 전체 (예: 1990-03-15)',
-      grade: '고객 등급 (VIP, 일반 등)',
-      region: '지역',
-      sms_opt_in: '마케팅 수신동의 여부',
-      email: '이메일',
-      total_purchase: '총 구매금액',
-      last_purchase_date: '최근 구매일',
-      purchase_count: '구매 횟수',
-      callback: '매장번호/회신번호 (발신번호로 사용되는 매장 전화번호)',
-      store_name: '소속매장명 (매장/지점 이름)',
-      store_code: '매장코드 (매장 식별 코드)'
-    };
+    // FIELD_MAP 기반 동적 매핑 대상 생성
+    const mappingTargets: Record<string, string> = {};
+    for (const field of FIELD_MAP) {
+      const desc = field.fieldKey === 'phone' ? `${field.displayName} (필수)` : field.displayName;
+      mappingTargets[field.fieldKey] = desc;
+    }
+    // 파생 필드 — DB 컬럼에 존재하지만 FIELD_MAP에는 없는 인식 대상
+    mappingTargets['birth_year'] = '출생연도 (4자리 연도만 있을 때. 생년월일 전체는 birth_date에)';
+    mappingTargets['region'] = '지역 (별도의 지역 컬럼이 있을 때)';
 
     const mappingPrompt = `엑셀 파일의 컬럼명을 데이터베이스 컬럼에 매핑해줘.
 
 엑셀 컬럼명: ${JSON.stringify(headers)}
 
 DB 컬럼 (매핑 대상):
-${Object.entries(dbColumns).map(([k, v]) => `- ${k}: ${v}`).join('\n')}
+${Object.entries(mappingTargets).map(([k, v]) => `- ${k}: ${v}`).join('\n')}
 
 규칙:
-1. 의미가 비슷하면 매핑해줘 (예: tier → grade, marketing_opt_in → sms_opt_in)
-2. 매핑할 DB 컬럼이 없으면 null
+1. 의미가 비슷하면 매핑해줘 (예: tier → grade, marketing_opt_in → sms_opt_in, total_spend → total_purchase_amount, 매장번호 → store_phone)
+2. 위 필드에 해당하지 않는 컬럼은 custom_1부터 순서대로 배정 (최대 custom_15까지)
 3. phone(전화번호)은 반드시 찾아서 매핑해줘
+4. customer_id, created_at 등 시스템 컬럼은 null
+5. age는 정수 나이만 매핑. 연령대(20대 등)는 custom 필드로 배정
 
 JSON 형식으로만 응답해줘 (다른 설명 없이):
 {"엑셀컬럼명": "DB컬럼명(영문 key) 또는 null", ...}
 
-예시: {"고객번호": null, "휴대폰": "phone", "이름": "name", "성별코드": "gender", "등급": "grade"}
+예시: {"고객번호": null, "휴대폰": "phone", "이름": "name", "성별코드": "gender", "등급": "grade", "구매횟수": "custom_1"}
 ⚠️ 반드시 DB컬럼의 영문 key(phone, name, gender 등)를 값으로 넣어야 합니다. 한글 설명을 넣지 마세요!`;
 
     let aiText = '{}';
@@ -427,41 +421,22 @@ async function processUploadInBackground(
         const record: any = {};
         
         headers.forEach((header, idx) => {
-          const dbColumn = mapping[header];
-          if (dbColumn && row[idx] !== undefined && row[idx] !== null && row[idx] !== '') {
-            record[dbColumn] = row[idx];
+          const fieldKey = mapping[header];
+          if (fieldKey && row[idx] !== undefined && row[idx] !== null && row[idx] !== '') {
+            record[fieldKey] = row[idx];
           }
         });
 
-        // birth_date 파싱 → birth_year, birth_month_day 분리
-        if (record.birth_date) {
-          const bd = String(record.birth_date).trim();
-          // 4자리 연도만 입력된 경우 (예: 1990)
-          if (/^\d{4}$/.test(bd) && parseInt(bd) >= 1900 && parseInt(bd) <= 2099) {
-            record.birth_year = parseInt(bd);
-          } else {
-            const normalized = normalizeDateValue(bd);
-            if (normalized) {
-              record.birth_date = normalized;
-              record.birth_year = parseInt(normalized.substring(0, 4));
-              record.birth_month_day = normalized.substring(5, 10);
-            }
-          }
-        }
-        if (record.birth_year && !record.birth_date) {
-          record.birth_year = parseInt(String(record.birth_year));
-        }
-
-        // last_purchase_date 시리얼넘버/형식 정규화
-        if (record.last_purchase_date) {
-          const normalized = normalizeDateValue(record.last_purchase_date);
-          if (normalized) {
-            record.last_purchase_date = normalized;
+        // ── FIELD_MAP 기반 정규화 ──
+        // birth_date는 파생 필드 계산에서 특별 처리 (4자리 연도, Excel 시리얼넘버 등)
+        for (const key of Object.keys(record)) {
+          if (key === 'birth_date') continue;
+          if (getFieldByKey(key)) {
+            record[key] = normalizeByFieldKey(key, record[key]);
           }
         }
 
-        // phone 정규화 + 필수 체크
-        record.phone = normalizePhone(record.phone);
+        // phone 필수 체크 (normalizeByFieldKey에서 normalizePhone 적용됨)
         if (!record.phone) {
           errorCount++;
           continue;
@@ -474,55 +449,128 @@ async function processUploadInBackground(
           continue;
         }
         seenInBatch.add(dedupeKey);
-
         batchPhones.push(record.phone);
 
-        // 데이터 정규화
-        record.gender = normalizeGender(record.gender);
-        record.grade = normalizeGrade(record.grade);
-        record.region = normalizeRegion(record.region);
-        const smsOptIn = normalizeSmsOptIn(record.sms_opt_in);
+        // ── 파생 필드 계산 ──
+        let derivedBirthYear: number | null = null;
+        let derivedBirthMonthDay: string | null = null;
+        let derivedAge: number | null = null;
+        let derivedRegion: string | null = null;
+        const currentYear = new Date().getFullYear();
 
-        values.push(
-          companyId, record.phone, record.name || null, record.gender || null,
-          record.birth_date || null, record.birth_year || null, record.birth_month_day || null,
-          record.grade || null, record.region || null,
-          smsOptIn !== null ? smsOptIn : true,
-          record.email || null, record.total_purchase || null, record.last_purchase_date || null, record.purchase_count || null,
-          record.callback ? String(record.callback).replace(/-/g, '').trim() : null,
-          record.store_name || null, record.store_code || null,
-          userId || null
-        );
+        // birth_date → birth_year, birth_month_day, age 파생
+        if (record.birth_date) {
+          const bd = String(record.birth_date).trim();
+          if (/^\d{4}$/.test(bd) && parseInt(bd) >= 1900 && parseInt(bd) <= 2099) {
+            // 4자리 연도만 입력 (예: 1983)
+            derivedBirthYear = parseInt(bd);
+            derivedAge = currentYear - derivedBirthYear;
+            record.birth_date = null; // date 타입에 연도만 넣으면 에러
+          } else {
+            const normalized = normalizeDateValue(bd);
+            if (normalized) {
+              record.birth_date = normalized;
+              derivedBirthYear = parseInt(normalized.substring(0, 4));
+              derivedBirthMonthDay = normalized.substring(5, 10);
+              derivedAge = currentYear - derivedBirthYear;
+            }
+          }
+        }
 
-        placeholders.push(`($${paramIndex}, $${paramIndex + 1}, $${paramIndex + 2}, $${paramIndex + 3}, $${paramIndex + 4}, $${paramIndex + 5}, $${paramIndex + 6}, $${paramIndex + 7}, $${paramIndex + 8}, $${paramIndex + 9}, $${paramIndex + 10}, $${paramIndex + 11}, $${paramIndex + 12}, $${paramIndex + 13}, $${paramIndex + 14}, $${paramIndex + 15}, $${paramIndex + 16}, $${paramIndex + 17}, 'upload', NOW(), NOW())`);
-        paramIndex += 18;
+        // birth_year 직접 매핑 (birth_date가 없을 때)
+        if (record.birth_year && !derivedBirthYear) {
+          const by = parseInt(String(record.birth_year));
+          if (!isNaN(by) && by >= 1900 && by <= 2099) {
+            derivedBirthYear = by;
+            derivedAge = currentYear - by;
+          }
+        }
+
+        // age: 파생값 우선, 없으면 직접 매핑값
+        if (derivedAge) {
+          record.age = derivedAge;
+        }
+
+        // region: 직접 매핑 우선, 없으면 address에서 파생
+        if (record.region) {
+          derivedRegion = normalizeRegion(record.region);
+        } else if (record.address && typeof record.address === 'string') {
+          const firstToken = record.address.split(/[\s,]/)[0];
+          if (firstToken) derivedRegion = normalizeRegion(firstToken);
+        }
+
+        // ── INSERT 값 빌드 (FIELD_MAP 기반 동적) ──
+        const columnFieldDefs = getColumnFields(); // 필수 17개 (sortOrder 순)
+        const rowValues: any[] = [companyId]; // company_id
+
+        for (const field of columnFieldDefs) {
+          if (field.fieldKey === 'sms_opt_in') {
+            // 수신동의: 미제공 시 기본 true
+            const val = record[field.fieldKey];
+            rowValues.push(val !== null && val !== undefined ? val : true);
+          } else {
+            rowValues.push(record[field.fieldKey] ?? null);
+          }
+        }
+
+        // 파생 컬럼
+        rowValues.push(derivedBirthYear);
+        rowValues.push(derivedBirthMonthDay);
+        rowValues.push(derivedRegion);
+
+        // custom_fields JSONB 빌드
+        const customObj: Record<string, any> = {};
+        for (const cf of getCustomFields()) {
+          if (record[cf.fieldKey] != null && record[cf.fieldKey] !== '') {
+            customObj[cf.columnName] = String(record[cf.fieldKey]);
+          }
+        }
+        rowValues.push(Object.keys(customObj).length > 0 ? JSON.stringify(customObj) : null);
+
+        // uploaded_by
+        rowValues.push(userId || null);
+
+        values.push(...rowValues);
+
+        // 플레이스홀더: 파라미터 23개 + 리터럴 3개 ('upload', NOW(), NOW())
+        const paramCount = rowValues.length; // 23
+        const paramList = Array.from({ length: paramCount }, (_, j) => `$${paramIndex + j}`).join(', ');
+        placeholders.push(`(${paramList}, 'upload', NOW(), NOW())`);
+        paramIndex += paramCount;
       }
 
       if (placeholders.length > 0) {
         try {
+          // ── 동적 INSERT + ON CONFLICT ──
+          const columnFieldDefs = getColumnFields();
+          const columnNames = columnFieldDefs.map(f => f.columnName);
+          const insertCols = [
+            'company_id', ...columnNames,
+            'birth_year', 'birth_month_day', 'region', 'custom_fields',
+            'uploaded_by', 'source', 'created_at', 'updated_at'
+          ].join(', ');
+
+          // ON CONFLICT UPDATE: phone, store_code 제외 (UNIQUE 키)
+          const updateExclusions = new Set(['phone', 'store_code']);
+          const updateClauses = [
+            ...columnNames
+              .filter(c => !updateExclusions.has(c))
+              .map(c => `${c} = COALESCE(EXCLUDED.${c}, customers.${c})`),
+            'birth_year = COALESCE(EXCLUDED.birth_year, customers.birth_year)',
+            'birth_month_day = COALESCE(EXCLUDED.birth_month_day, customers.birth_month_day)',
+            'region = COALESCE(EXCLUDED.region, customers.region)',
+            `custom_fields = CASE WHEN EXCLUDED.custom_fields IS NOT NULL THEN COALESCE(customers.custom_fields, '{}'::jsonb) || EXCLUDED.custom_fields ELSE customers.custom_fields END`,
+            'uploaded_by = COALESCE(EXCLUDED.uploaded_by, customers.uploaded_by)',
+            `source = CASE WHEN customers.source = 'sync' THEN 'sync' ELSE 'upload' END`,
+            'updated_at = NOW()'
+          ].join(',\n              ');
+
           const result = await query(`
-            INSERT INTO customers (company_id, phone, name, gender, birth_date, birth_year, birth_month_day, grade, region, sms_opt_in, email, total_purchase, last_purchase_date, purchase_count, callback, store_name, store_code, uploaded_by, source, created_at, updated_at)
+            INSERT INTO customers (${insertCols})
             VALUES ${placeholders.join(', ')}
             ON CONFLICT (company_id, COALESCE(store_code, '__NONE__'), phone) 
             DO UPDATE SET 
-              name = COALESCE(EXCLUDED.name, customers.name),
-              gender = COALESCE(EXCLUDED.gender, customers.gender),
-              birth_date = COALESCE(EXCLUDED.birth_date, customers.birth_date),
-              birth_year = COALESCE(EXCLUDED.birth_year, customers.birth_year),
-              birth_month_day = COALESCE(EXCLUDED.birth_month_day, customers.birth_month_day),
-              grade = COALESCE(EXCLUDED.grade, customers.grade),
-              region = COALESCE(EXCLUDED.region, customers.region),
-              sms_opt_in = COALESCE(EXCLUDED.sms_opt_in, customers.sms_opt_in),
-              email = COALESCE(EXCLUDED.email, customers.email),
-              total_purchase = COALESCE(EXCLUDED.total_purchase, customers.total_purchase),
-              last_purchase_date = COALESCE(EXCLUDED.last_purchase_date, customers.last_purchase_date),
-              purchase_count = COALESCE(EXCLUDED.purchase_count, customers.purchase_count),
-              callback = COALESCE(EXCLUDED.callback, customers.callback),
-              store_name = COALESCE(EXCLUDED.store_name, customers.store_name),
-              store_code = COALESCE(EXCLUDED.store_code, customers.store_code),
-              uploaded_by = COALESCE(EXCLUDED.uploaded_by, customers.uploaded_by),
-              source = CASE WHEN customers.source = 'sync' THEN 'sync' ELSE 'upload' END,
-              updated_at = NOW()
+              ${updateClauses}
             RETURNING (xmax = 0) as is_insert, phone
           `, values);
 
@@ -587,6 +635,42 @@ async function processUploadInBackground(
     }), 'EX', 3600);
 
     console.log(`[업로드 완료] fileId=${fileId}, 신규=${insertCount}, 업데이트=${duplicateCount}, 오류=${errorCount}`);
+
+    // ===== 커스텀 필드 정의 저장 (customer_field_definitions) =====
+    // AI/수동 매핑에서 custom_1~15에 배정된 원본 컬럼명을 라벨로 저장
+    if (companyId) {
+      try {
+        const customMappings: Array<{ fieldKey: string; label: string }> = [];
+        for (const [header, fieldKey] of Object.entries(mapping)) {
+          if (typeof fieldKey === 'string' && fieldKey.startsWith('custom_')) {
+            customMappings.push({ fieldKey, label: header });
+          }
+        }
+        for (const cm of customMappings) {
+          const existing = await query(
+            'SELECT id FROM customer_field_definitions WHERE company_id = $1 AND field_key = $2',
+            [companyId, cm.fieldKey]
+          );
+          if (existing.rows.length > 0) {
+            await query(
+              'UPDATE customer_field_definitions SET field_label = $1 WHERE company_id = $2 AND field_key = $3',
+              [cm.label, companyId, cm.fieldKey]
+            );
+          } else {
+            await query(
+              `INSERT INTO customer_field_definitions (id, company_id, field_key, field_label, field_type, display_order, created_at)
+               VALUES (gen_random_uuid(), $1, $2, $3, 'text', $4, NOW())`,
+              [companyId, cm.fieldKey, cm.label, parseInt(cm.fieldKey.replace('custom_', ''))]
+            );
+          }
+        }
+        if (customMappings.length > 0) {
+          console.log(`[업로드] 커스텀 필드 정의 ${customMappings.length}개 저장 (company: ${companyId})`);
+        }
+      } catch (defErr) {
+        console.error('[업로드] 커스텀 필드 정의 저장 실패:', defErr);
+      }
+    }
 
     // ===== sms_opt_in=false 고객 → unsubscribes 자동 등록 =====
     if (companyId && userId) {

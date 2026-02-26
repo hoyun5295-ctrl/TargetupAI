@@ -7,6 +7,8 @@
  * 사용처: customers.ts, ai.ts, upload.ts, sync agent 등
  */
 
+import { getFieldByKey } from './standard-field-map';
+
 // ============================================================
 // 성별 정규화
 // 표준값: 'M' (남성), 'F' (여성)
@@ -375,4 +377,51 @@ export function buildGradeFilter(value: string | string[], paramIndex: number): 
     params: [variants],
     nextIndex: paramIndex + 1,
   };
+}
+
+// ============================================================
+// 이메일 정규화
+// 표준값: 소문자 trim
+// ============================================================
+export function normalizeEmail(value: any): string | null {
+  if (value == null || value === '') return null;
+  return String(value).trim().toLowerCase();
+}
+
+// ============================================================
+// 필드키 기반 정규화 디스패처
+// standard-field-map.ts의 normalizeFunction 값에 따라 호출
+// ============================================================
+export function normalizeByFieldKey(fieldKey: string, value: any): any {
+  if (value == null || value === '') return null;
+
+  const field = getFieldByKey(fieldKey);
+  if (!field || !field.normalizeFunction) {
+    return String(value).trim();
+  }
+
+  switch (field.normalizeFunction) {
+    case 'trim':
+      return String(value).trim();
+    case 'normalizePhone':
+      return normalizePhone(value);
+    case 'normalizeGender':
+      return normalizeGender(value);
+    case 'parseInt': {
+      const num = parseInt(String(value), 10);
+      return isNaN(num) ? null : num;
+    }
+    case 'normalizeDate':
+      return normalizeDate(value);
+    case 'normalizeEmail':
+      return normalizeEmail(value);
+    case 'normalizeAmount':
+      return normalizeAmount(value);
+    case 'normalizeGrade':
+      return normalizeGrade(value);
+    case 'normalizeSmsOptIn':
+      return normalizeSmsOptIn(value);
+    default:
+      return String(value).trim();
+  }
 }
