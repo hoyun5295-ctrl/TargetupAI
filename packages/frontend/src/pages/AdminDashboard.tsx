@@ -109,10 +109,32 @@ export default function AdminDashboard() {
     kakaoEnabled: false,
     subscriptionStatus: 'trial',
   });
-  const [editCompanyTab, setEditCompanyTab] = useState<'basic' | 'send' | 'cost' | 'ai' | 'store' | 'fields' | 'customers'>('basic');
+  const [editCompanyTab, setEditCompanyTab] = useState<'basic' | 'send' | 'cost' | 'ai' | 'store' | 'fields' | 'cards' | 'customers'>('basic');
   const [standardFields, setStandardFields] = useState<any[]>([]);
   const [enabledFields, setEnabledFields] = useState<string[]>([]);
   const [fieldDataCheck, setFieldDataCheck] = useState<Record<string, { hasData: boolean; count: number }>>({});
+  // D41 대시보드 카드 설정
+  const [dashboardCardIds, setDashboardCardIds] = useState<string[]>([]);
+  const [dashboardCardCount, setDashboardCardCount] = useState<4 | 8>(4);
+  const DASHBOARD_CARD_POOL = [
+    { cardId: 'total_customers',     label: '전체 고객 수',      icon: '👥', description: '전체 등록 고객 수' },
+    { cardId: 'gender_male',         label: '남성 수',           icon: '👨', description: '성별이 남성인 고객 수' },
+    { cardId: 'gender_female',       label: '여성 수',           icon: '👩', description: '성별이 여성인 고객 수' },
+    { cardId: 'birthday_this_month', label: '이번달 생일 고객',  icon: '🎂', description: '이번 달 생일인 고객 수' },
+    { cardId: 'age_distribution',    label: '연령대별 분포',     icon: '📊', description: '연령대별 고객 분포' },
+    { cardId: 'grade_distribution',  label: '등급별 고객 수',    icon: '🏆', description: '고객 등급별 분포' },
+    { cardId: 'region_top',          label: '지역별 TOP',        icon: '📍', description: '지역별 고객 수 상위' },
+    { cardId: 'store_distribution',  label: '매장별 고객 수',    icon: '🏪', description: '매장별 고객 분포' },
+    { cardId: 'email_rate',          label: '이메일 보유율',     icon: '📧', description: '이메일 주소 보유 비율 (%)' },
+    { cardId: 'total_purchase_sum',  label: '총 구매금액',       icon: '💰', description: '전체 고객 누적 구매금액 합계' },
+    { cardId: 'recent_30d_purchase', label: '30일 내 구매',      icon: '🛒', description: '최근 30일 내 구매 이력이 있는 고객 수' },
+    { cardId: 'inactive_90d',        label: '90일+ 미구매',      icon: '⚠️', description: '최근 90일간 구매 이력이 없는 고객 수' },
+    { cardId: 'new_this_month',      label: '신규고객 (이번달)', icon: '🆕', description: '이번 달 신규 등록된 고객 수' },
+    { cardId: 'opt_out_count',       label: '수신거부 수',       icon: '🔕', description: '수신거부 등록 건수' },
+    { cardId: 'opt_in_count',        label: '수신동의 수',       icon: '🔔', description: 'SMS 수신동의 고객 수' },
+    { cardId: 'active_campaigns',    label: '진행 캠페인 수',    icon: '📤', description: '현재 진행 중인 캠페인 수' },
+    { cardId: 'monthly_spend',       label: '이번달 사용금액',   icon: '💳', description: '이번 달 발송 사용 금액' },
+  ];
   // 전체 캠페인
 const [allCampaigns, setAllCampaigns] = useState<any[]>([]);
 const [allCampaignsTotal, setAllCampaignsTotal] = useState(0);
@@ -1297,7 +1319,7 @@ const handleApproveRequest = async (id: string) => {
   const handleEditCompany = async (company: Company) => {
     try {
       const token = localStorage.getItem('token');
-      const [res, fieldsRes, enabledRes, dataCheckRes] = await Promise.all([
+      const [res, fieldsRes, enabledRes, dataCheckRes, cardsRes] = await Promise.all([
         fetch(`/api/admin/companies/${company.id}`, {
           headers: { 'Authorization': `Bearer ${token}` }
         }),
@@ -1308,6 +1330,9 @@ const handleApproveRequest = async (id: string) => {
           headers: { 'Authorization': `Bearer ${token}` }
         }),
         fetch(`/api/admin/companies/${company.id}/field-data-check`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        }),
+        fetch(`/api/admin/companies/${company.id}/dashboard-cards`, {
           headers: { 'Authorization': `Bearer ${token}` }
         })
       ]);
@@ -1321,6 +1346,15 @@ const handleApproveRequest = async (id: string) => {
         if (dataCheckRes.ok) {
           const dcData = await dataCheckRes.json();
           setFieldDataCheck(dcData.dataCheck || {});
+        }
+        // D41 카드 설정 로드
+        if (cardsRes.ok) {
+          const cardsData = await cardsRes.json();
+          setDashboardCardIds(cardsData.cardIds || []);
+          setDashboardCardCount(cardsData.cardCount === 8 ? 8 : 4);
+        } else {
+          setDashboardCardIds([]);
+          setDashboardCardCount(4);
         }
         setEditCompany({
           id: c.id,
@@ -1376,7 +1410,7 @@ const handleApproveRequest = async (id: string) => {
     e.preventDefault();
     try {
       const token = localStorage.getItem('token');
-      const [res, fieldsRes] = await Promise.all([
+      const [res, fieldsRes, cardsRes] = await Promise.all([
         fetch(`/api/admin/companies/${editCompany.id}`, {
           method: 'PUT',
           headers: {
@@ -1392,6 +1426,14 @@ const handleApproveRequest = async (id: string) => {
             'Authorization': `Bearer ${token}`
           },
           body: JSON.stringify({ enabledFields })
+        }),
+        fetch(`/api/admin/companies/${editCompany.id}/dashboard-cards`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ cardIds: dashboardCardIds, cardCount: dashboardCardCount })
         })
       ]);
       
@@ -3566,7 +3608,7 @@ const handleApproveRequest = async (id: string) => {
       {/* 고객사 수정 모달 */}
       {showEditCompanyModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className={`bg-white rounded-lg shadow-xl w-full ${editCompanyTab === 'customers' ? 'max-w-3xl' : 'max-w-lg'} max-h-[90vh] flex flex-col transition-all`}>
+          <div className={`bg-white rounded-lg shadow-xl w-full ${editCompanyTab === 'customers' || editCompanyTab === 'cards' ? 'max-w-3xl' : 'max-w-lg'} max-h-[90vh] flex flex-col transition-all`}>
             <div className="px-6 py-4 border-b">
               <h3 className="text-lg font-semibold">고객사 상세 설정</h3>
               <p className="text-xs text-gray-500 mt-1">{editCompany.companyName}</p>
@@ -3581,6 +3623,7 @@ const handleApproveRequest = async (id: string) => {
                 { key: 'ai', label: 'AI설정', icon: '🤖' },
                 { key: 'store', label: '분류코드', icon: '🏷️' },
                 { key: 'fields', label: '필터항목', icon: '🔍' },
+                { key: 'cards', label: '대시보드', icon: '📊' },
                 { key: 'customers', label: '고객DB', icon: '👥' },
               ].map((tab) => (
                 <button
@@ -4220,6 +4263,70 @@ const handleApproveRequest = async (id: string) => {
                       </div>
                     );
                   })}
+                </div>
+              )}
+
+              {/* D41 대시보드 카드 설정 탭 */}
+              {editCompanyTab === 'cards' && (
+                <div className="space-y-4">
+                  <p className="text-sm text-gray-600">이 고객사의 대시보드에 표시할 카드를 선택하세요.</p>
+
+                  {/* 모드 선택: 4칸 / 8칸 */}
+                  <div className="flex items-center gap-3 p-3 bg-blue-50 rounded-lg border border-blue-200">
+                    <span className="text-sm font-medium text-gray-700">표시 모드:</span>
+                    <button type="button"
+                      onClick={() => { setDashboardCardCount(4); if (dashboardCardIds.length > 4) setDashboardCardIds(dashboardCardIds.slice(0, 4)); }}
+                      className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${dashboardCardCount === 4 ? 'bg-blue-600 text-white shadow' : 'bg-white text-gray-600 border hover:bg-gray-50'}`}>
+                      4칸
+                    </button>
+                    <button type="button"
+                      onClick={() => setDashboardCardCount(8)}
+                      className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${dashboardCardCount === 8 ? 'bg-blue-600 text-white shadow' : 'bg-white text-gray-600 border hover:bg-gray-50'}`}>
+                      8칸
+                    </button>
+                    <span className="text-xs text-gray-400 ml-2">
+                      선택: <span className={`font-bold ${dashboardCardIds.length > dashboardCardCount ? 'text-red-500' : 'text-blue-600'}`}>{dashboardCardIds.length}</span> / {dashboardCardCount}개
+                    </span>
+                  </div>
+
+                  {/* 카드 풀 체크박스 */}
+                  <div className="grid grid-cols-1 gap-1.5">
+                    {DASHBOARD_CARD_POOL.map((card) => {
+                      const isChecked = dashboardCardIds.includes(card.cardId);
+                      const isFull = dashboardCardIds.length >= dashboardCardCount && !isChecked;
+                      return (
+                        <label
+                          key={card.cardId}
+                          className={`flex items-center gap-3 p-2.5 rounded-lg border cursor-pointer transition-all ${
+                            isChecked ? 'bg-blue-50 border-blue-300' : isFull ? 'opacity-40 cursor-not-allowed bg-gray-50 border-gray-200' : 'bg-white border-gray-200 hover:bg-gray-50'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            disabled={isFull}
+                            onChange={() => {
+                              if (isChecked) {
+                                setDashboardCardIds(dashboardCardIds.filter(id => id !== card.cardId));
+                              } else if (dashboardCardIds.length < dashboardCardCount) {
+                                setDashboardCardIds([...dashboardCardIds, card.cardId]);
+                              }
+                            }}
+                            className="w-4 h-4 text-blue-600 rounded"
+                          />
+                          <span className="text-lg">{card.icon}</span>
+                          <div className="flex-1 min-w-0">
+                            <span className="text-sm font-medium text-gray-800">{card.label}</span>
+                            <span className="text-xs text-gray-400 ml-2">{card.description}</span>
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
+
+                  {dashboardCardIds.length === 0 && (
+                    <p className="text-xs text-amber-600 bg-amber-50 p-2 rounded-lg">⚠️ 카드를 선택하지 않으면 고객사 대시보드에 DB현황이 표시되지 않습니다.</p>
+                  )}
                 </div>
               )}
 

@@ -1,4 +1,4 @@
-﻿import { BarChart3, Clock, Rocket, Sparkles, Users } from 'lucide-react';
+﻿import { Award, BarChart3, Bell, BellOff, Cake, Clock, CreditCard, DollarSign, HelpCircle, Mail, MapPin, Rocket, Send, ShoppingCart, Sparkles, Store, User, UserPlus, Users, UserX } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { aiApi, campaignsApi, customersApi } from '../api/client';
@@ -79,6 +79,39 @@ is_trial_expired: boolean;
 ai_analysis_level?: string;
 }
 
+// D41 대시보드 동적 카드 아이콘 맵
+const CARD_ICON_MAP: Record<string, any> = {
+  Users, User, Cake, BarChart3, Award, MapPin, Store, Mail, DollarSign, ShoppingCart, UserX, UserPlus, BellOff, Bell, Send, CreditCard, HelpCircle,
+};
+
+// D41 카드 색상 로테이션
+const CARD_COLORS = [
+  { bg: 'bg-emerald-50', border: 'border-emerald-200', text: 'text-emerald-700', accent: 'text-emerald-500' },
+  { bg: 'bg-blue-50', border: 'border-blue-200', text: 'text-blue-700', accent: 'text-blue-500' },
+  { bg: 'bg-amber-50', border: 'border-amber-200', text: 'text-amber-700', accent: 'text-amber-500' },
+  { bg: 'bg-violet-50', border: 'border-violet-200', text: 'text-violet-700', accent: 'text-violet-500' },
+  { bg: 'bg-rose-50', border: 'border-rose-200', text: 'text-rose-700', accent: 'text-rose-500' },
+  { bg: 'bg-cyan-50', border: 'border-cyan-200', text: 'text-cyan-700', accent: 'text-cyan-500' },
+  { bg: 'bg-orange-50', border: 'border-orange-200', text: 'text-orange-700', accent: 'text-orange-500' },
+  { bg: 'bg-teal-50', border: 'border-teal-200', text: 'text-teal-700', accent: 'text-teal-500' },
+];
+
+interface DashboardCardData {
+  cardId: string;
+  label: string;
+  type: string;
+  icon: string;
+  value: number | { label: string; count: number }[];
+  hasData: boolean;
+}
+
+interface DashboardCardsResponse {
+  configured: boolean;
+  cardCount: number;
+  hasCustomerData?: boolean;
+  cards: DashboardCardData[];
+}
+
 export default function Dashboard() {
   const navigate = useNavigate();
   const { user, logout } = useAuthStore();
@@ -152,6 +185,8 @@ export default function Dashboard() {
   const [showResults, setShowResults] = useState(false);
   const [showCustomerDB, setShowCustomerDB] = useState(false);
   const [showAnalysis, setShowAnalysis] = useState(false);
+  // D41 동적 카드
+  const [dashboardCards, setDashboardCards] = useState<DashboardCardsResponse | null>(null);
   // 5개 카드 모달 state
   const [showRecentCampaigns, setShowRecentCampaigns] = useState(false);
   const [showFileUpload, setShowFileUpload] = useState(false);
@@ -793,6 +828,17 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
         const balanceData = await balanceRes.json();
         setBalanceInfo(balanceData);
       }
+
+      // D41 대시보드 동적 카드 조회
+      try {
+        const cardsRes = await fetch('/api/companies/dashboard-cards', {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (cardsRes.ok) {
+          const cardsData = await cardsRes.json();
+          setDashboardCards(cardsData);
+        }
+      } catch {}
 
       // 요금제 승인 알림 체크
       const approvalRes = await fetch('/api/companies/plan-request/status', {
@@ -1898,65 +1944,9 @@ const campaignData = {
       <main className="max-w-7xl mx-auto px-4 py-8">
         {/* ===== 상단: 좌(60%) + 우(40%) 통합 ===== */}
         <div className="flex gap-4 mb-4">
-          {/* ===== 좌측 60%: 고객현황 + 요금제/발송현황 ===== */}
+          {/* ===== 좌측 60%: 요금제/발송현황 + 동적카드 ===== */}
           <div className="w-[60%] flex flex-col gap-4">
-            {/* 고객 현황 */}
-            <div className="bg-white/50 rounded-xl p-6 border border-green-200 flex-1">
-              <div className="flex items-center justify-between mb-5">
-                <span className="text-sm text-gray-500 font-medium">고객 현황</span>
-                <button onClick={() => isSubscriptionLocked ? setShowSubscriptionLock(true) : setShowCustomerDB(true)} className="text-green-700 text-xs font-medium hover:text-green-800 transition-colors">DB 정보조회 →</button>
-              </div>
-              <div className="grid grid-cols-5 gap-3 mb-5">
-                <div className="text-center p-3 bg-gray-50 rounded-lg">
-                  <div className="text-2xl font-bold text-gray-800">{parseInt(stats?.total || '0').toLocaleString()}</div>
-                  <div className="text-xs text-gray-400 mt-1">전체</div>
-                </div>
-                <div className="text-center p-3 bg-gray-50 rounded-lg">
-                  <div className="text-2xl font-bold text-green-700">{parseInt(stats?.sms_opt_in_count || '0').toLocaleString()}</div>
-                  <div className="text-xs text-gray-400 mt-1">수신동의</div>
-                </div>
-                <div className="text-center p-3 bg-gray-50 rounded-lg">
-                  <div className="text-2xl font-bold text-gray-800">{parseInt(stats?.male_count || '0').toLocaleString()}</div>
-                  <div className="text-xs text-gray-400 mt-1">남성</div>
-                </div>
-                <div className="text-center p-3 bg-gray-50 rounded-lg">
-                  <div className="text-2xl font-bold text-gray-800">{parseInt(stats?.female_count || '0').toLocaleString()}</div>
-                  <div className="text-xs text-gray-400 mt-1">여성</div>
-                </div>
-                <div className="text-center p-3 bg-gray-50 rounded-lg">
-                  <div className="text-2xl font-bold text-red-500">{parseInt(stats?.unsubscribe_count || '0').toLocaleString()}</div>
-                  <div className="text-xs text-gray-400 mt-1">수신거부</div>
-                </div>
-              </div>
-              {/* 고객 활동 현황 */}
-              <div className="border-t border-green-100 pt-4">
-                <span className="text-xs text-gray-400 font-medium mb-3 block">고객 활동 현황</span>
-                <div className="grid grid-cols-5 gap-3">
-                  <div className="text-center p-3 bg-gray-50 rounded-lg">
-                    <div className="text-lg font-bold text-green-600">-</div>
-                    <div className="text-xs text-gray-400 mt-1">이번 달 신규</div>
-                  </div>
-                  <div className="text-center p-3 bg-gray-50 rounded-lg">
-                    <div className="text-lg font-bold text-blue-600">-</div>
-                    <div className="text-xs text-gray-400 mt-1">30일 내 구매</div>
-                  </div>
-                  <div className="text-center p-3 bg-gray-50 rounded-lg">
-                    <div className="text-lg font-bold text-orange-500">-</div>
-                    <div className="text-xs text-gray-400 mt-1">90일+ 미구매</div>
-                  </div>
-                  <div className="text-center p-3 bg-gray-50 rounded-lg">
-                    <div className="text-lg font-bold text-red-500">-</div>
-                    <div className="text-xs text-gray-400 mt-1">이번 달 수신거부</div>
-                  </div>
-                  <div className="text-center p-3 bg-gray-50 rounded-lg">
-                    <div className="text-lg font-bold text-violet-600">-</div>
-                    <div className="text-xs text-gray-400 mt-1">이번 달 재구매</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* 요금제 + 발송현황 */}
+            {/* 1행: 요금제 + 발송현황 */}
             <div className="flex gap-4">
               {/* 요금제 현황 */}
               <div 
@@ -2034,6 +2024,116 @@ const campaignData = {
                   </div>
                 </div>
               </div>
+            </div>
+
+            {/* 2행: DB현황 — 동적 카드 (D41) */}
+            <div className="bg-white/50 rounded-xl p-5 border border-green-200 flex-1">
+              <div className="flex items-center justify-between mb-4">
+                <span className="text-sm text-gray-500 font-medium">DB 현황</span>
+                <button onClick={() => isSubscriptionLocked ? setShowSubscriptionLock(true) : setShowCustomerDB(true)} className="text-green-700 text-xs font-medium hover:text-green-800 transition-colors">DB 정보조회 →</button>
+              </div>
+
+              {/* 카드 미설정 */}
+              {(!dashboardCards || !dashboardCards.configured) && (
+                <div className="flex items-center justify-center py-8 text-gray-400">
+                  <div className="text-center">
+                    <div className="text-3xl mb-2">📊</div>
+                    <div className="text-sm">관리자가 대시보드 카드를 설정하면 표시됩니다</div>
+                  </div>
+                </div>
+              )}
+
+              {/* 고객 DB 미업로드 — 전체 블러 + CTA */}
+              {dashboardCards?.configured && dashboardCards?.hasCustomerData === false && (
+                <div className="relative">
+                  <div className="grid grid-cols-4 gap-3 filter blur-sm pointer-events-none select-none">
+                    {dashboardCards.cards.map((card, i) => (
+                      <div key={card.cardId} className="text-center p-3 bg-gray-50 rounded-lg">
+                        <div className="text-xl font-bold text-gray-300">0</div>
+                        <div className="text-xs text-gray-300 mt-1">{card.label}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="absolute inset-0 flex items-center justify-center bg-white/60 rounded-lg">
+                    <div className="text-center">
+                      <div className="text-3xl mb-2">📂</div>
+                      <div className="text-sm text-gray-600 font-medium mb-2">고객 DB를 업로드하면 현황을 확인할 수 있습니다</div>
+                      <button
+                        onClick={() => { if (isSubscriptionLocked) { setShowSubscriptionLock(true); return; } setShowFileUpload(true); }}
+                        className="px-4 py-1.5 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700 transition-colors"
+                      >
+                        고객 DB 업로드
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* 정상 표시: 동적 카드 렌더링 */}
+              {dashboardCards?.configured && dashboardCards?.hasCustomerData && (
+                <div className={`grid ${dashboardCards.cardCount === 8 ? 'grid-cols-4 gap-3' : 'grid-cols-4 gap-3'}`}>
+                  {dashboardCards.cards.map((card, i) => {
+                    const color = CARD_COLORS[i % CARD_COLORS.length];
+                    const IconComp = CARD_ICON_MAP[card.icon] || HelpCircle;
+
+                    // 데이터 없는 카드 — 블러 처리
+                    if (!card.hasData) {
+                      return (
+                        <div key={card.cardId} className="relative text-center p-3 bg-gray-50 rounded-lg border border-gray-200">
+                          <div className="filter blur-sm">
+                            <div className="text-xl font-bold text-gray-300">-</div>
+                          </div>
+                          <div className="text-xs text-gray-400 mt-1">{card.label}</div>
+                          <div className="absolute inset-0 flex items-center justify-center">
+                            <span className="text-[10px] text-gray-400 bg-white/80 px-1.5 py-0.5 rounded">데이터 없음</span>
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    // distribution 타입 — 분포 표시
+                    if (card.type === 'distribution' && Array.isArray(card.value)) {
+                      const items = card.value.slice(0, 3);
+                      return (
+                        <div key={card.cardId} className={`p-3 rounded-lg border ${color.border} ${color.bg}`}>
+                          <div className="flex items-center gap-1.5 mb-2">
+                            <IconComp className={`w-3.5 h-3.5 ${color.accent}`} />
+                            <span className="text-xs text-gray-500 font-medium">{card.label}</span>
+                          </div>
+                          <div className="space-y-1">
+                            {items.map((item, j) => (
+                              <div key={j} className="flex justify-between text-xs">
+                                <span className="text-gray-600 truncate">{item.label}</span>
+                                <span className={`font-bold ${color.text}`}>{item.count.toLocaleString()}</span>
+                              </div>
+                            ))}
+                            {items.length === 0 && <div className="text-xs text-gray-400 text-center">-</div>}
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    // count / rate / sum 타입 — 숫자 표시
+                    const numVal = typeof card.value === 'number' ? card.value : 0;
+                    let displayVal = numVal.toLocaleString();
+                    let suffix = '';
+                    if (card.type === 'rate') { displayVal = numVal.toFixed(1); suffix = '%'; }
+                    else if (card.type === 'sum') { displayVal = numVal >= 10000 ? `${(numVal / 10000).toFixed(0)}만` : numVal.toLocaleString(); suffix = '원'; }
+                    else if (card.cardId === 'active_campaigns') { suffix = '건'; }
+                    else { suffix = '명'; }
+
+                    return (
+                      <div key={card.cardId} className={`text-center p-3 rounded-lg border ${color.border} ${color.bg}`}>
+                        <IconComp className={`w-5 h-5 mx-auto mb-1.5 ${color.accent}`} />
+                        <div className={`text-xl font-bold ${color.text}`}>
+                          {displayVal}<span className="text-xs font-normal text-gray-400 ml-0.5">{suffix}</span>
+                        </div>
+                        <div className="text-xs text-gray-500 mt-1">{card.label}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </div>
 

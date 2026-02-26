@@ -158,22 +158,23 @@
 - AI 분석 메뉴: 맨 앞 이동, Sparkles 아이콘 제거, gold+emphasized 유지
 - 모든 요금제에서 표시 (베이직→블러 프리뷰, 프로/비즈니스→분석 실행)
 
-**5. plans 테이블 수정 필요**
-- `UPDATE plans SET ai_analysis_level = 'none' WHERE plan_code IN ('BASIC', 'STARTER');`
-- 세션 4 데모 데이터 삽입 시 BASIC plan row 오염 발견
+**5. plans 테이블 수정 완료 ✅**
+- BASIC/STARTER ai_analysis_level='none' 수정 완료
 
 #### 세션 계획
 
-**세션 1: 설정 구조 + 백엔드 API**
-- [ ] company_settings에 dashboard_cards / dashboard_card_count 저장 구조
-- [ ] GET /api/companies/dashboard-cards — 고객사별 설정된 카드 목록 + 집계 데이터 반환
-- [ ] 슈퍼관리자 API: GET/PUT /api/admin/companies/:id/dashboard-cards — 카드 설정 조회/저장
+**✅ 세션 1: 설정 구조 + 백엔드 API (완료 2026-02-27)**
+- [x] dashboard-card-pool.ts — 카드 풀 17종 정의 (신규 파일)
+- [x] company_settings UPSERT 헬퍼 + UNIQUE 인덱스(idx_company_settings_unique)
+- [x] GET /api/companies/dashboard-cards — 고객사별 설정된 카드 목록 + 집계 데이터 반환
+- [x] 슈퍼관리자 API: GET/PUT /api/admin/companies/:id/dashboard-cards — 카드 설정 조회/저장
+- [x] 집계 최적화: customers 통합 쿼리 1회 + 분포형/외부 테이블 카드 조건부 쿼리
 
-**세션 2: 슈퍼관리자 UI + 프론트엔드 Dashboard.tsx 개편**
-- [ ] AdminDashboard.tsx (또는 별도 모달) — 고객사별 카드 체크 설정 UI (4/8 모드 선택 + 카드 체크박스)
-- [ ] Dashboard.tsx — 기존 하드코딩 "고객 현황" 제거 → 동적 카드 렌더링
-- [ ] 블러 처리 (데이터 없는 카드)
-- [ ] plans 테이블 수정 적용
+**🎯 세션 2: 슈퍼관리자 UI + 프론트엔드 Dashboard.tsx 개편 (다음)**
+- [ ] 슈퍼관리자 회사 상세 — 고객사별 카드 체크 설정 UI (4/8 모드 선택 + 카드 체크박스)
+- [ ] Dashboard.tsx — 1행 레이아웃 변경 (요금제+발송현황 1행으로 올리기)
+- [ ] Dashboard.tsx — 기존 하드코딩 "고객 현황"+"고객 활동 현황" 제거 → 2행 동적 카드 렌더링
+- [ ] 블러 처리 (데이터 없는 카드 / DB 미업로드 전체 블러 + CTA)
 
 #### ⛔ 진행 규칙
 - 코드 작성 전 Harold님 컨펌 필수
@@ -185,7 +186,8 @@
 
 ### ✅ 이전 완료 요약
 
-> - 2026-02-27 (3차) DashboardHeader.tsx AI 분석 메뉴 스타일 변경 — 맨 앞 이동, Sparkles 제거, gold+emphasized 유지. plans 테이블 오염 발견(BASIC의 ai_analysis_level='basic'→'none' 수정 필요)
+> - 2026-02-27 (4차) D41 세션1 백엔드 API 완료 — dashboard-card-pool.ts 신규 + companies.ts dashboard-cards API + admin.ts 카드 설정 API + UNIQUE 인덱스 + plans 테이블 오염 수정
+> - 2026-02-27 (3차) DashboardHeader.tsx AI 분석 메뉴 스타일 변경 — 맨 앞 이동, Sparkles 제거, gold+emphasized 유지
 > - 2026-02-27 (2차) AI 맞춤한줄 동적 필드 + Step 2 UX 개선 — customers.ts enabled-fields API 단일 경로 전환, AiCustomSendFlow.tsx 톤 제거+필드명 태그, ai.ts tone optional
 > - 2026-02-27 (1차) D39 세션2 조회+AI 정상화 — customers.ts/ai.ts/Dashboard.tsx/AiCustomSendFlow.tsx 하드코딩 전수 제거
 > - 2026-02-26 (5차) D39 세션1 입구 정상화 — upload.ts+normalize.ts FIELD_MAP 기반 동적 전환
@@ -523,7 +525,8 @@
 
 | 날짜 | 완료 항목 |
 |------|----------|
-| 02-27 | DashboardHeader.tsx AI 분석 메뉴 스타일 변경: 맨 앞 이동, Sparkles 아이콘 제거, gold+emphasized 유지. plans 테이블 BASIC ai_analysis_level 오염 발견→수정 필요 |
+| 02-27 | D41 세션1 백엔드 API: dashboard-card-pool.ts(카드풀17종)+companies.ts(dashboard-cards 집계API)+admin.ts(카드설정 GET/PUT)+idx_company_settings_unique+plans 오염 수정. 신규1+수정2파일 |
+| 02-27 | DashboardHeader.tsx AI 분석 메뉴 스타일 변경: 맨 앞 이동, Sparkles 아이콘 제거, gold+emphasized 유지 |
 | 02-27 | AI 맞춤한줄 동적 필드 + Step 2 UX 개선 (D40): customers.ts enabled-fields 단일 경로, AiCustomSendFlow.tsx 톤 제거+필드명 태그, ai.ts tone optional. 수정 3파일 |
 | 02-27 | D39 세션2 조회+AI 정상화 완료: customers.ts/ai.ts/Dashboard.tsx/AiCustomSendFlow.tsx 하드코딩 4곳 전수 제거→FIELD_MAP 동적. 수정 4파일 |
 | 02-26 | D39 세션0+세션1 완료: DDL(store_phone)+standard_fields 32개+standard-field-map.ts 재작성+upload.ts+normalize.ts FIELD_MAP 기반 동적 전환 |
