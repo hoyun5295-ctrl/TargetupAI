@@ -482,7 +482,7 @@ router.get('/', async (req: Request, res: Response) => {
             const failCount = await smsCountAll(tablesWithLogs, 'app_etc1 = ? AND status_code NOT IN (6, 100, 1000, 1800)', [camp.id]);
 
             await query(
-              `UPDATE campaigns SET status = 'completed', sent_count = $1, success_count = $2, fail_count = $3, sent_at = NOW(), updated_at = NOW() WHERE id = $4`,
+              `UPDATE campaigns SET status = 'completed', sent_count = $1, success_count = $2, fail_count = $3, sent_at = COALESCE(sent_at, scheduled_at, NOW()), updated_at = NOW() WHERE id = $4`,
               [sentCount, successCount, failCount, camp.id]
             );
 
@@ -1617,7 +1617,10 @@ router.post('/sync-results', async (req: Request, res: Response) => {
           `UPDATE campaign_runs SET
             success_count = $1,
             fail_count = $2,
-            status = $3
+            status = $3,
+            sent_at = CASE WHEN $3 = 'completed' AND sent_at IS NULL
+              THEN COALESCE(scheduled_at, NOW())
+              ELSE sent_at END
            WHERE id = $4`,
           [successCount, failCount, newStatus, run.id]
         );
@@ -1629,7 +1632,10 @@ router.post('/sync-results', async (req: Request, res: Response) => {
             `UPDATE campaigns SET
               success_count = $1,
               fail_count = $2,
-              status = $3
+              status = $3,
+              sent_at = CASE WHEN $3 = 'completed' AND sent_at IS NULL
+                THEN COALESCE(scheduled_at, NOW())
+                ELSE sent_at END
              WHERE id = $4`,
             [successCount, failCount, newStatus, runInfo.rows[0].campaign_id]
           );
@@ -1657,7 +1663,7 @@ router.post('/sync-results', async (req: Request, res: Response) => {
 
     // 직접발송 동기화 (send_type='direct'인 campaigns)
     const directCampaigns = await query(
-      `SELECT id, company_id FROM campaigns WHERE send_type = 'direct' AND status IN ('sending', 'completed') AND (success_count IS NULL OR success_count = 0)`
+      `SELECT id, company_id, scheduled_at FROM campaigns WHERE send_type = 'direct' AND (status IN ('sending', 'completed') OR (status = 'scheduled' AND scheduled_at <= NOW())) AND (success_count IS NULL OR success_count = 0)`
     );
 
     for (const campaign of directCampaigns.rows) {
@@ -1685,7 +1691,10 @@ router.post('/sync-results', async (req: Request, res: Response) => {
           `UPDATE campaigns SET
             success_count = $1,
             fail_count = $2,
-            status = $3
+            status = $3,
+            sent_at = CASE WHEN $3 = 'completed' AND sent_at IS NULL
+              THEN COALESCE(scheduled_at, NOW())
+              ELSE sent_at END
            WHERE id = $4`,
           [successCount, failCount, newStatus, campaign.id]
         );

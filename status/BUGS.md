@@ -3,7 +3,7 @@
 > **목적:** 버그의 발견→분석→수정→교차검증→완료를 체계적으로 관리하여 재발을 방지한다.  
 > **원칙:** (1) 추측성 땜질 금지 (2) 근본 원인 3줄 이내 특정 (3) 교차검증 통과 전까지 Closed 금지 (4) 재발 패턴 기록  
 > **SoT(진실의 원천):** STATUS.md + 이 문서. 채팅에서 떠도는 "수정 완료"는 교차검증 전까지 "임시"다.
-> **현황:** 8차 13건 수정완료(2단계 대기) + **9차: S9-05/06 Closed, S9-01/03 ✅코드확인, S9-02 🟡부분(프론트미리보기), S9-04/07/08 Open** + **GPT P0: GP-01/03/05 ✅코드확인, GP-04 ✅풀레벨수정, GP-02 🟡Nginx확인필요**
+> **현황:** 8차 13건 수정완료(2단계 대기) + **9차: S9-05/06 Closed, S9-01/02/03 ✅완료, S9-04/07/08 Open** + **GPT P0: GP-01/03/05 ✅코드확인, GP-04 ✅풀레벨수정, GP-02 🟡Nginx확인필요** + 스팸필터 리포트 매칭 개선 + 파일업로드 프론트 인증 수정
 > **⚠️ 2026-02-26 코드 실물 검증:** GPT "미수정" 지적 5건 중 GP-01/03/05는 이미 코드에 반영됨 확인. GP-04는 풀 레벨로 보강. 문서의 "❌ 미수정" 표기가 실제 코드보다 뒤떨어져 있었음.
 
 ---
@@ -621,7 +621,7 @@
 
 | # | 버그ID | 문제 | 상태 | 근거 |
 |---|--------|------|------|------|
-| 1 | S9-02 | 스팸테스트 치환 | 🟡 서버 정상, 프론트 미리보기 미검증 | spam-filter.ts DB 직접 조회+replaceVariables 정상. Dashboard.tsx 미확인 |
+| 1 | S9-02 | 스팸테스트 치환 | ✅ 서버+프론트 모두 완료 | 서버: DB 직접 조회+replaceVariables. 프론트: 스팸필터 버튼 클릭 시 replaceVars() 치환 (Dashboard L4101 직접발송, L3320 AI한줄로, AiCampaignResultPopup L340) |
 | 2 | - | messageUtils.ts 공통 함수 | ✅ 연결 완료 | campaigns.ts L7 import + 5곳 호출. spam-filter.ts L6 import + 2곳 호출 |
 
 ### 📝 추가 위험 (GPT 2차 신규 발견)
@@ -639,7 +639,6 @@
 | 우선순위 | 수정 대상 | 파일 | 상태 |
 |---------|----------|------|------|
 | 🟡 | GP-02 /uploads Nginx 서빙 | Nginx 설정 | 🟡 Express에 없음. Nginx 확인 필요 |
-| 🟡 | S9-02 프론트 미리보기 치환 | Dashboard.tsx | 🟡 서버 정상. 프론트 미검증 |
 | 🟡 | S9-04 sent_at 경쟁 조건 | campaigns.ts / sync-results | ⬜ Open |
 | 🟡 | S9-07 alert/confirm 모달 | AiCustomSendFlow.tsx | ⬜ Open (UI) |
 | 🟠 | S9-08 대량 페이지네이션 | results.ts | ⬜ Open (30만건+ 성능) |
@@ -653,10 +652,13 @@
 | ✅ | GP-04 MySQL TZ | database.ts 풀 레벨 수정 |
 | ✅ | GP-05 잔여변수 strip | 코드 확인됨 L1956+L2057 |
 | ✅ | S9-01 customMessages | 코드 확인됨 L1773-1781 |
+| ✅ | S9-02 프론트 미리보기 치환 | 서버 DB조회+replaceVariables + 프론트 replaceVars() 3곳(Dashboard+AiCampaignResultPopup+SpamFilterTestModal) |
 | ✅ | S9-03 나이 동적연도 | 코드 확인됨 L1188-1203 |
 | ✅ | S9-05 subject 중복 | ai.ts 별도 수정 |
 | ✅ | upload.ts 인증 | /parse, /mapping, /progress authenticate 추가 |
 | ✅ | messageUtils.ts 연결 | campaigns.ts 5곳 + spam-filter.ts 2곳 import+호출 |
+| ✅ | 파일업로드 프론트 인증 | Dashboard.tsx 2곳 Authorization Bearer 토큰 추가 (고객DB+직접발송) |
+| ✅ | 스팸필터 리포트 매칭 | 디바이스 기반 fallback + stale 테스트 자동 정리 |
 
 ---
 
@@ -818,4 +820,4 @@
 
 ---
 
-*최종 업데이트: 2026-02-26 코드 실물 검증 반영 | GP-01/03/05, S9-01/03 ✅코드확인. GP-04 ✅풀레벨수정. upload.ts 인증 추가. 문서 허위 "미수정" 표기 전면 정정.*
+*최종 업데이트: 2026-02-26 S9-02 프론트 미리보기 완료 + 스팸필터 리포트 매칭 개선 + 파일업로드 프론트 인증 수정*

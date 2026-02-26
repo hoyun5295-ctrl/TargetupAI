@@ -518,7 +518,7 @@
 | R3 | QTmsg sendreq_time UTC/KST 혼동 | 1 | 4 | 4 | ✅ 해결: database.ts mysqlQuery 헬퍼가 매 커넥션마다 SET time_zone='+09:00' 실행. 풀 전체 KST 보장 |
 | R4 | 라인그룹 미설정 고객사 → 전체 라인 폴백 오발송 | 1 | 5 | 5 | ✅ 해결: 이중 방어 적용 — 1차 발송 차단(LINE_GROUP_NOT_SET) + 2차 BULK_ONLY_TABLES 폴백(10,11 제외) |
 | R5 | QTmsg LIVE→LOG 이동 후 결과 조회 불가 | 1 | 4 | 4 | ✅ 해결: getCompanySmsTablesWithLogs()로 LIVE+LOG 통합 조회 |
-| R6 | 스팸필터 동시 테스트 시 결과 충돌 (테스트폰 3대 공유) | 1 | 4 | 4 | ✅ 해결: SHA-256 해시 세션 격리 + fallback 제거 + user_id 기준 active 체크 (7차 세션2) |
+| R6 | 스팸필터 동시 테스트 시 결과 충돌 (테스트폰 3대 공유) | 1 | 4 | 4 | ✅ 해결: SHA-256 해시 세션 격리 + user_id 기준 active 체크 (7차 세션2) + 디바이스 기반 매칭 fallback + stale 자동 정리 (10차) |
 | R7 | 하드코딩 필드로 인한 반복 버그 재발 | 5 | 3 | 15 | ✅ 해결: 동적 필드 시스템 전환 완료 (7차 세션1) |
 | R8 | recount-target companyId undefined → 타겟 0명 | 3 | 4 | 12 | ✅ 해결: snake_case→camelCase 수정 + WHERE 조건 통일 (7차 세션3) |
 | R9 | 정산 SMSQ_SEND 단일테이블 조회 → 멀티Agent 환경에서 0건 집계 | 3 | 4 | 12 | ✅ 해결: 회사별 라인그룹 멀티테이블 + LOG 테이블 통합 조회 (billing.ts 자체 헬퍼) |
@@ -540,6 +540,7 @@
 
 | 날짜 | 완료 항목 |
 |------|----------|
+| 02-26 | 스팸필터 미리보기+리포트매칭+파일업로드 인증: ① S9-02 프론트 미리보기 완료 — 스팸필터 버튼 클릭 시 replaceVars() 인라인 치환(Dashboard L4101 직접발송+L3320 AI한줄로+AiCampaignResultPopup L340), SpamFilterTestModal replaceAll→split.join TS호환, ② 스팸필터 리포트 매칭 — 해시 실패 시 phone+carrier 디바이스 기반 fallback+stale 테스트 3분 자동 정리, ③ Dashboard.tsx 파일업로드 2곳 Authorization Bearer 토큰 추가(고객DB L2802+직접발송 L4428). 수정: Dashboard.tsx, AiCampaignResultPopup.tsx, SpamFilterTestModal.tsx, spam-filter.ts |
 | 02-26 | 코드 실물 검증 + GP-04 풀 레벨 수정 + upload.ts 인증 + 문서 정정: ① GPT "미수정" 지적 5건 실제 코드 검증 → GP-01/03/05, S9-01/03, messageUtils 연결 전부 이미 반영 확인, ② GP-04 database.ts mysqlQuery 헬퍼를 매 커넥션 SET time_zone 방식으로 보강 + campaigns.ts 단일 SET 제거, ③ upload.ts /parse+/mapping+/progress 3곳 authenticate 추가 (GPT 보안 지적), ④ STATUS.md+BUGS.md 허위 "❌ 미수정" 표기 전면 정정. 수정: database.ts, campaigns.ts, upload.ts |
 | 02-26 | GPT P0 결함 4건 수정 + 발송 5개 경로 프론트→서버 전환: ① GP-01 spam-filter.ts 권한 체크 role→userType 수정, ② GP-03 선불 차감 후 발송 실패 시 자동 환불(prepaidRefund) — AI발송/직접발송 내부 try-catch + 테스트 실패건 환불, ③ GP-04 MySQL 세션 타임존 KST +09:00 고정 + 시작 시 확인 로그, ④ GP-05 직접발송 잔여변수 strip 추가. 프론트 하드코딩 치환 전면 제거(Dashboard.tsx AI한줄로+직접발송 스팸필터 2곳 14줄→2줄), 서버 DB 직접 SELECT로 전환(spam-filter.ts/campaigns.ts test-send/direct-send 3곳). 수정: campaigns.ts(+50줄), spam-filter.ts(+5줄), Dashboard.tsx(-23줄) |
 | 02-26 | D32 1덩어리+2-1 코드 완료 — 공통 치환 함수 통합: messageUtils.ts 신규 생성(replaceVariables/bulkReplaceVariables/replaceWithFirstCustomer). 5개 경로 전부 공통 함수로 교체(campaigns.ts AI발송/직접발송/테스트/예약수정 + spam-filter.ts). S9-01(직접타겟 customMessages 수용), S9-02(스팸필터 하드코딩→실데이터), S9-03(나이 2026→동적연도), S9-06(정상확인→Closed) 처리. 수정: messageUtils.ts(신규114줄), campaigns.ts, spam-filter.ts |

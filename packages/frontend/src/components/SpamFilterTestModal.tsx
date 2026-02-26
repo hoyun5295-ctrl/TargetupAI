@@ -207,7 +207,7 @@ export default function SpamFilterTestModal({
       '%기타3%': firstRecipient.extra3 || firstRecipient['기타3'] || '',
     };
     for (const [varName, value] of Object.entries(varMap)) {
-      if (value) result = result.replaceAll(varName, value);
+      if (value) result = result.split(varName).join(value);
     }
     return result;
   };
