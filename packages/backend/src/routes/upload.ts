@@ -218,7 +218,7 @@ JSON 형식으로만 응답해줘 (다른 설명 없이):
           'anthropic-version': '2023-06-01'
         },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
+          model: 'claude-sonnet-4-5-20250929',
           max_tokens: 1024,
           messages: [{ role: 'user', content: mappingPrompt }]
         })
