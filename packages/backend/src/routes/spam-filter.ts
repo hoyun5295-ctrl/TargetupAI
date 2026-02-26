@@ -36,7 +36,7 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
   try {
     const userId = (req as any).user.userId;
     const companyId = (req as any).user.companyId;
-    const { callbackNumber, messageContentSms, messageContentLms, messageType } = req.body;
+    const { callbackNumber, messageContentSms, messageContentLms, messageType, firstRecipient: clientFirstRecipient } = req.body;
 
     if (!callbackNumber) {
       return res.status(400).json({ error: '발신번호를 입력해주세요.' });
@@ -82,16 +82,22 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
     const isLmsType = messageType === 'LMS' || messageType === 'MMS';
     const rawActualContent = isLmsType ? (messageContentLms || '') : (messageContentSms || '');
 
-    // ★ 서버가 DB에서 직접 첫 번째 활성 고객 조회 (프론트 의존 완전 제거)
+    // ★ 프론트에서 리스트 최상단 고객 전달 시 우선 사용, 없으면 DB fallback
     const companySchemaResult = await query('SELECT customer_schema FROM companies WHERE id = $1', [companyId]);
     const spamFieldMappings = extractVarCatalog(companySchemaResult.rows[0]?.customer_schema).fieldMappings;
-    const spamMappingCols = Object.values(spamFieldMappings).map((m: any) => m.column);
-    const spamSelectCols = [...new Set(['phone', ...spamMappingCols])].join(', ');
-    const firstCustomerResult = await query(
-      `SELECT ${spamSelectCols} FROM customers WHERE company_id = $1 AND is_active = true AND sms_opt_in = true ORDER BY created_at DESC LIMIT 1`,
-      [companyId]
-    );
-    const firstCustomer: Record<string, any> = firstCustomerResult.rows[0] || {};
+
+    let firstCustomer: Record<string, any>;
+    if (clientFirstRecipient && typeof clientFirstRecipient === 'object' && Object.keys(clientFirstRecipient).length > 0) {
+      firstCustomer = clientFirstRecipient;
+    } else {
+      const spamMappingCols = Object.values(spamFieldMappings).map((m: any) => m.column);
+      const spamSelectCols = [...new Set(['phone', ...spamMappingCols])].join(', ');
+      const firstCustomerResult = await query(
+        `SELECT ${spamSelectCols} FROM customers WHERE company_id = $1 AND is_active = true AND sms_opt_in = true ORDER BY created_at DESC LIMIT 1`,
+        [companyId]
+      );
+      firstCustomer = firstCustomerResult.rows[0] || {};
+    }
 
     // 해시는 치환 후 내용으로 계산 (앱이 리포트하는 내용과 일치시킴)
     const personalizedForHash = replaceVariables(rawActualContent, firstCustomer, spamFieldMappings);

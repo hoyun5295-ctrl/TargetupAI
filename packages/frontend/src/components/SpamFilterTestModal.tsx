@@ -7,6 +7,7 @@ interface SpamFilterTestModalProps {
   messageContentLms?: string;
   callbackNumber: string;
   messageType: 'SMS' | 'LMS' | 'MMS';
+  firstRecipient?: Record<string, any>;
 }
 
 interface TestResult {
@@ -22,7 +23,8 @@ export default function SpamFilterTestModal({
   messageContentSms,
   messageContentLms,
   callbackNumber,
-  messageType
+  messageType,
+  firstRecipient
 }: SpamFilterTestModalProps) {
   const token = useAuthStore((s) => s.token);
   const [status, setStatus] = useState<'ready' | 'testing' | 'completed'>('ready');
@@ -126,7 +128,7 @@ export default function SpamFilterTestModal({
       const res = await fetch('/api/spam-filter/test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ callbackNumber, messageContentSms: messageContentSms || null, messageContentLms: messageContentLms || null, messageType }),
+        body: JSON.stringify({ callbackNumber, messageContentSms: messageContentSms || null, messageContentLms: messageContentLms || null, messageType, firstRecipient: firstRecipient || null }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -189,7 +191,29 @@ export default function SpamFilterTestModal({
   const blockedCount = status === 'completed' ? results.filter(r => r.result === 'blocked').length : 0;
   const timeoutCount = status === 'completed' ? results.filter(r => r.result === 'timeout').length : 0;
   const failedCount = status === 'completed' ? results.filter(r => r.result === 'failed').length : 0;
-  const previewMessage = messageContentSms || messageContentLms || '';
+
+  // 미리보기: firstRecipient 데이터로 %변수% 치환
+  const replacePreviewVars = (msg: string): string => {
+    if (!msg || !firstRecipient) return msg;
+    let result = msg;
+    const varMap: Record<string, string> = {
+      '%이름%': firstRecipient.name || firstRecipient['이름'] || '',
+      '%등급%': firstRecipient.grade || firstRecipient['등급'] || '',
+      '%지역%': firstRecipient.region || firstRecipient['지역'] || '',
+      '%포인트%': firstRecipient.point != null ? String(firstRecipient.point) : (firstRecipient['포인트'] || ''),
+      '%매장명%': firstRecipient.store_name || firstRecipient['매장명'] || '',
+      '%기타1%': firstRecipient.extra1 || firstRecipient['기타1'] || '',
+      '%기타2%': firstRecipient.extra2 || firstRecipient['기타2'] || '',
+      '%기타3%': firstRecipient.extra3 || firstRecipient['기타3'] || '',
+    };
+    for (const [varName, value] of Object.entries(varMap)) {
+      if (value) result = result.replaceAll(varName, value);
+    }
+    return result;
+  };
+
+  const rawPreview = messageContentSms || messageContentLms || '';
+  const previewMessage = replacePreviewVars(rawPreview);
 
   const formatPhoneNumber = (num: string) => {
     if (!num) return '';

@@ -38,6 +38,7 @@ interface AiCampaignResultPopupProps {
   selectedCallback: string;
   campaign: any;
   formatRejectNumber: (num: string) => string;
+  targetRecipients?: any[];
 }
 
 export default function AiCampaignResultPopup({
@@ -75,6 +76,7 @@ export default function AiCampaignResultPopup({
   selectedCallback,
   campaign,
   formatRejectNumber,
+  targetRecipients,
 }: AiCampaignResultPopupProps) {
   if (!show) return null;
 
@@ -340,7 +342,7 @@ onClick={() => {
                     const cb = selectedCallback || '';
                     const smsMsg = isAd ? `(광고)${msg}\n무료거부${optOutNumber.replace(/-/g, '')}` : msg;
                     const lmsMsg = isAd ? `(광고) ${msg}\n무료수신거부 ${formatRejectNumber(optOutNumber)}` : msg;
-                    setSpamFilterData({sms: smsMsg, lms: lmsMsg, callback: cb, msgType: selectedChannel as 'SMS'|'LMS'|'MMS'});
+                    setSpamFilterData({sms: smsMsg, lms: lmsMsg, callback: cb, msgType: selectedChannel as 'SMS'|'LMS'|'MMS', firstRecipient: targetRecipients?.[0] || undefined});
                     setShowSpamFilter(true);
 }}
 className="flex-1 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 flex items-center justify-center gap-2"

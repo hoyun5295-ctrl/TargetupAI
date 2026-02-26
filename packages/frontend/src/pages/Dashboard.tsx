@@ -139,7 +139,7 @@ export default function Dashboard() {
   const [customSendData, setCustomSendData] = useState<any>(null);
   const [showCustomSendModal, setShowCustomSendModal] = useState(false);
   const [showSpamFilter, setShowSpamFilter] = useState(false);
-  const [spamFilterData, setSpamFilterData] = useState<{sms?: string; lms?: string; callback: string; msgType: 'SMS'|'LMS'|'MMS'}>({callback:'',msgType:'SMS'});
+  const [spamFilterData, setSpamFilterData] = useState<{sms?: string; lms?: string; callback: string; msgType: 'SMS'|'LMS'|'MMS'; firstRecipient?: Record<string, any>}>({callback:'',msgType:'SMS'});
   const [sendTimeOption, setSendTimeOption] = useState<'ai' | 'now' | 'custom'>('now');
   const [successSendInfo, setSuccessSendInfo] = useState<string>('');  // 성공 모달용 발송 정보
   const [successChannel, setSuccessChannel] = useState<string>('');  // ★ #8 수정: 성공모달 전용 채널
@@ -1723,6 +1723,7 @@ const campaignData = {
           messageContentLms={spamFilterData.lms}
           callbackNumber={spamFilterData.callback}
           messageType={spamFilterData.msgType}
+          firstRecipient={spamFilterData.firstRecipient}
         />
       )}
 
@@ -2436,6 +2437,7 @@ const campaignData = {
           selectedCallback={selectedCallback}
           campaign={campaign}
           formatRejectNumber={formatRejectNumber}
+          targetRecipients={targetRecipients}
         />
         <AiPreviewModal
           show={showPreview}
@@ -3322,7 +3324,7 @@ const campaignData = {
                           const cb = selectedCallback || '';
                           const smsMsg = adTextEnabled ? `(광고)${msg}\n무료거부${optOutNumber.replace(/-/g, '')}` : msg;
                           const lmsMsg = adTextEnabled ? `(광고) ${msg}\n무료수신거부 ${optOutNumber}` : msg;
-                          setSpamFilterData({sms: smsMsg, lms: lmsMsg, callback: cb, msgType: targetMsgType});
+                          setSpamFilterData({sms: smsMsg, lms: lmsMsg, callback: cb, msgType: targetMsgType, firstRecipient: targetRecipients[0] || undefined});
                           setShowSpamFilter(true);
                         }}
                         className="py-2.5 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg text-sm font-medium transition-colors"
@@ -4103,7 +4105,7 @@ const campaignData = {
                           const cb = selectedCallback || '';
                           const smsMsg = adTextEnabled ? `(광고)${msg}\n무료거부${optOutNumber.replace(/-/g, '')}` : msg;
                           const lmsMsg = adTextEnabled ? `(광고) ${msg}\n무료수신거부 ${optOutNumber}` : msg;
-                          setSpamFilterData({sms: smsMsg, lms: lmsMsg, callback: cb, msgType: directMsgType});
+                          setSpamFilterData({sms: smsMsg, lms: lmsMsg, callback: cb, msgType: directMsgType, firstRecipient: directRecipients[0] || undefined});
                           setShowSpamFilter(true);
                         }}
                         className={`py-2.5 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg text-sm font-medium transition-colors ${isSpamFilterLocked ? 'opacity-60' : ''}`}
