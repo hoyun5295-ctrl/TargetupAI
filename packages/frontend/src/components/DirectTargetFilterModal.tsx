@@ -1,10 +1,20 @@
 import { Filter, RotateCcw, Search, Users } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
+// ★ D43-3c: 필드 메타 인터페이스 (TargetSendModal에서도 사용)
+export interface FieldMeta {
+  field_key: string;
+  display_name: string;
+  variable: string;       // '%고객명%' 등
+  data_type: string;
+  category: string;
+}
+
 interface DirectTargetFilterModalProps {
   show: boolean;
   onClose: () => void;
-  onExtracted: (recipients: any[], count: number) => void;
+  // ★ D43-3c: fieldsMeta 추가
+  onExtracted: (recipients: any[], count: number, fieldsMeta: FieldMeta[]) => void;
 }
 
 export default function DirectTargetFilterModal({ show, onClose, onExtracted }: DirectTargetFilterModalProps) {
@@ -281,7 +291,7 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
     }
   };
 
-  // 타겟 추출
+  // ★ D43-3c: 타겟 추출 — fieldsMeta 구성하여 전달
   const handleExtract = async () => {
     if (targetCount === 0) return;
     setExtracting(true);
@@ -300,7 +310,19 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
       }
       const data = await res.json();
       if (data.success && data.recipients) {
-        onExtracted(data.recipients, data.count);
+        // ★ 선택된 필드의 메타 정보 구성 (phone은 항상 포함)
+        const selectedKeys = new Set(selectedFields);
+        selectedKeys.add('phone'); // phone 항상 포함
+        const meta: FieldMeta[] = enabledFields
+          .filter((f: any) => selectedKeys.has(f.field_key))
+          .map((f: any) => ({
+            field_key: f.field_key,
+            display_name: f.display_name || f.field_key,
+            variable: `%${f.display_name || f.field_key}%`,
+            data_type: f.data_type || 'string',
+            category: f.category || 'basic',
+          }));
+        onExtracted(data.recipients, data.count, meta);
       } else {
         showAlert('타겟 추출 실패', data.error || '데이터를 추출하지 못했습니다. 조건을 확인해주세요.', 'warning');
       }
