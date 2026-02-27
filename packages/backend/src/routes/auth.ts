@@ -77,7 +77,7 @@ router.post('/login', async (req: Request, res: Response) => {
 
     // ===== 고객사 사용자 로그인 =====
     const result = await query(
-      `SELECT u.*, u.must_change_password, u.hidden_features, c.name as company_name, c.id as company_code, c.subscription_status
+      `SELECT u.*, u.must_change_password, u.hidden_features, c.company_name as company_name, c.id as company_code, c.subscription_status
        FROM users u
        JOIN companies c ON u.company_id = c.id
        WHERE u.login_id = $1`,

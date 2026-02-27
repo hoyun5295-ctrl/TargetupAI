@@ -144,6 +144,7 @@ export default function Dashboard() {
   const [depositSuccess, setDepositSuccess] = useState(false);
   const [showInsufficientBalance, setShowInsufficientBalance] = useState<{show: boolean, balance: number, required: number} | null>(null);
   const [showLineGroupError, setShowLineGroupError] = useState(false);
+  const [companyNameFromDB, setCompanyNameFromDB] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [isSending, setIsSending] = useState(false);
   const [activeTab, setActiveTab] = useState<'target' | 'campaign' | 'send'>('target');
@@ -904,6 +905,9 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
         const settingsData = await settingsRes.json();
         if (settingsData.reject_number) {
           setOptOutNumber(settingsData.reject_number);
+        }
+        if (settingsData.company_name) {
+          setCompanyNameFromDB(settingsData.company_name);
         }
       }
       const cbRes = await fetch('/api/companies/callback-numbers', {
@@ -1904,7 +1908,7 @@ const campaignData = {
       )}
       {/* 헤더 */}
       <DashboardHeader
-        companyName={user?.company?.name || '한줄로'}
+        companyName={companyNameFromDB || user?.company?.name || '한줄로'}
         userName={user?.name || ''}
         department={(user as any)?.department}
         isCompanyAdmin={user?.userType === 'company_admin'}

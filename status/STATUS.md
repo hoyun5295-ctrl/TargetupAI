@@ -105,91 +105,87 @@
 
 ---
 
-### ✅ 완료 — 대시보드 동적 카드 시스템 개편 (D41 — 2026-02-27)
+### 🔧 D43 — 기능 정상화 및 DB 동적 기준 정립 (2026-02-27~)
 
-> **배경:** 현재 대시보드 "고객 현황" 섹션이 하드코딩 고정 항목(전체/수신동의/남성/여성/수신거부)으로 구성. 고객사마다 보유 데이터가 다른데 동일한 화면을 보여줌.
-> **목표:** 슈퍼관리자가 고객사별로 표시할 카드를 체크로 설정 → 대시보드에 동적 표시. FIELD_MAP 필수 17개 필드 기반 카드 풀.
-> **원칙:** 발송 파이프라인(campaigns.ts, spam-filter.ts, messageUtils.ts) 절대 건드리지 않음.
-> **결과:** 세션 1(백엔드) + 세션 2(프론트) 전체 완료. 발송현황 하드코딩(VIP/30일매출)도 제거(D42).
+> **배경:** D39 표준 필드 아키텍처 확립 후 아직 반영되지 않은 부분들이 존재. 기존 발송 파이프라인(campaigns.ts, spam-filter.ts, messageUtils.ts, results.ts, billing.ts)은 절대 건드리지 않음.
+> **목표:** DB 기준에 맞게 기능을 정상화하고, 동적 데이터 흐름을 확립한다.
+> **원칙:** 스키마 벗어나는 하드코딩 금지. 의논 → 검증 → 실행.
 
-#### 레이아웃 (와이어프레임 확정)
+#### 안건 목록
 
-| 행 | 좌 | 중 | 우 |
-|---|---|---|---|
-| **1행** | 요금제 현황 | 발송현황 (성공건수 + 평균성공률 + 총사용금액) | AI추천발송 |
-| **2행** | 고객사별 커스텀 DB현황 (4칸 or 8칸, 동적) | — | 직접타겟발송 / 고객DB업로드 |
-| **3행** | 최근캠페인 | 발송예시 | 인사이트(기존) | 예약대기 |
+| # | 안건 | 성격 | 난이도 | 상태 |
+|---|------|------|--------|------|
+| 1 | 대시보드 회사명 — 슈퍼관리자 수정이 반영 안 됨 | 버그 | 낮음 | 대기 |
+| 2 | AI 매핑 화면 개편 — 표준 17개 명확 나열 + 커스텀 필드 라벨 지정 | 기능개편 | 중간 | 대기 |
+| 3 | 직접 타겟 설정 — enabled-fields 기반 동적 필터 조건 | 기능개발 | 중간 | 대기 |
+| 4 | 수신거부 양방향 동기화 (독립 관리 vs DB 연동) | 설계토의 | 높음 | 대기 |
+| 5 | AI 한줄로 입력 포맷 강제화 — "개인화 필수: 필드1, 필드2" | 기능개선 | 낮~중간 | 대기 |
 
-#### 핵심 설계
+#### 안건 #1: 대시보드 회사명 미반영
 
-**1. 카드 풀 — FIELD_MAP 필수 17개 기반**
+- **증상:** 슈퍼관리자에서 회사명 → "테스트계정" 수정 완료했으나, 대시보드 좌측 상단에 "디버깅테스트" 표시
+- **원인 추정:** Dashboard.tsx가 companies 테이블 실시간 조회가 아닌 로그인 시점 세션/토큰 저장값 사용
+- **수정 방향:** companies 테이블에서 실시간 조회 또는 세션 갱신 로직 추가
 
-슈퍼관리자가 체크 가능한 카드 후보 (필수 17개 필드에서 파생):
+#### 안건 #2: AI 매핑 결과 화면 개편
 
-| # | 카드 | 데이터 소스 | 집계 방식 |
-|---|------|-----------|----------|
-| 1 | 전체 고객 수 | customers | COUNT |
-| 2 | 남성 수 | customers.gender | gender='M' COUNT |
-| 3 | 여성 수 | customers.gender | gender='F' COUNT |
-| 4 | 이번달 생일 고객 | customers.birth_month_day | 현재 월 매칭 COUNT |
-| 5 | 연령대별 분포 | customers.age | 구간 집계 |
-| 6 | 등급별 고객 수 | customers.grade | grade 집계 |
-| 7 | 지역별 TOP | customers.region | region 집계 |
-| 8 | 매장별 고객 수 | customers.store_name | store_name 집계 |
-| 9 | 이메일 보유율 | customers.email | IS NOT NULL 비율 |
-| 10 | 총 구매금액 | customers.total_purchase_amount | SUM |
-| 11 | 30일 내 구매 | customers.recent_purchase_amount | 기간 필터 COUNT |
-| 12 | 90일+ 미구매 | purchases.purchase_date | 기간 필터 COUNT |
-| 13 | 신규고객 (이번달) | customers.created_at | 이번달 COUNT |
-| 14 | 수신거부 수 | opt_outs | COUNT |
-| 15 | 수신동의 수 | customers.sms_opt_in | true COUNT |
-| 16 | 진행 캠페인 수 | campaigns | 진행중 COUNT |
-| 17 | 이번달 사용금액 | balance_transactions | 이번달 SUM |
+- **현재 문제:** 칸이 크고 공간 활용 부족, 표준 17개 기준 불명확, 커스텀 필드 배정 불가
+- **수정 방향:**
+  - 상단: 표준 필수 17개 필드 기준 나열 → 엑셀 컬럼 매핑
+  - 하단: 17개에 안 맞는 나머지 → custom_1~15 슬롯 배정 + **라벨명 직접 입력** (예: "마일리지")
+  - 레이아웃 컴팩트하게 재설계
+- **저장:** customers.custom_fields JSONB + `customer_field_definitions` 테이블에 라벨 저장
 
-**2. 슈퍼관리자 설정**
-- 고객사별로 4개 or 8개 체크 (2가지 모드)
-- 저장: `company_settings` 테이블 (setting_key = 'dashboard_cards', setting_value = JSON 배열)
-- 모드 저장: `company_settings` (setting_key = 'dashboard_card_count', setting_value = '4' or '8')
+#### 안건 #3: 직접 타겟 설정 동적 필터
 
-**3. 데이터 없는 카드 처리**
-- 카드가 설정됐지만 해당 필드 데이터 없음 → **블러 + "데이터 업로드 필요" 안내**
-- DB 자체 미업로드 → **전체 영역 블러 + "고객 DB를 업로드하면 현황을 확인할 수 있습니다" CTA**
+- **현재 문제:** 필터 조건이 "수신동의 고객만 포함" 체크박스 하나뿐, 실제 DB 필터링 안 먹음
+- **수정 방향:**
+  - enabled-fields API로 해당 고객사의 실제 업로드 필드 목록 조회
+  - 필드별 필터 조건 설정 (예: 성별=여성, 등급=GOLD, 지역=서울)
+  - 조건 조합 → 대상 인원 조회 (실제 DB 쿼리)
+  - 수신동의 체크 기본 유지
 
-**4. DashboardHeader.tsx 메뉴 변경 (이미 완료)**
-- AI 분석 메뉴: 맨 앞 이동, Sparkles 아이콘 제거, gold+emphasized 유지
-- 모든 요금제에서 표시 (베이직→블러 프리뷰, 프로/비즈니스→분석 실행)
+#### 안건 #4: 수신거부 양방향 동기화 (설계 토의 필요)
 
-**5. plans 테이블 수정 완료 ✅**
-- BASIC/STARTER ai_analysis_level='none' 수정 완료
+- **시나리오 A (DB 미저장 업체):** 수신거부자를 독립 등록/관리, 직접발송 시 자동 제외
+- **시나리오 B (DB 업로드 업체):**
+  - 업로드 시 sms_opt_in=false → opt_outs에 자동 등록
+  - opt_outs에서 제거 → customers.sms_opt_in=true 양방향 동기화
+- **핵심 과제:** 두 시나리오가 공존해야 함. 고객 DB 삭제 시 수신거부 데이터 처리 기준 필요
+- **관련 테이블:** opt_outs, customers.sms_opt_in, unsubscribes
 
-#### 세션 계획
+#### 안건 #5: AI 한줄로 입력 포맷 강제화
 
-**✅ 세션 1: 설정 구조 + 백엔드 API (완료 2026-02-27)**
-- [x] dashboard-card-pool.ts — 카드 풀 17종 정의 (신규 파일)
-- [x] company_settings UPSERT 헬퍼 + UNIQUE 인덱스(idx_company_settings_unique)
-- [x] GET /api/companies/dashboard-cards — 고객사별 설정된 카드 목록 + 집계 데이터 반환
-- [x] 슈퍼관리자 API: GET/PUT /api/admin/companies/:id/dashboard-cards — 카드 설정 조회/저장
-- [x] 집계 최적화: customers 통합 쿼리 1회 + 분포형/외부 테이블 카드 조건부 쿼리
+- **현재 문제:** AI 한줄로(일반)가 고객사 DB 전체 필드를 통으로 바라봄 → 오류 확률 높음
+- **Harold님 방향 확정:**
+  - 입력 포맷: `[프로모션 내용] + 개인화 필수: 필드1, 필드2, ...`
+  - 예시: `전체고객 30%할인행사 2월27일~3월1일 개인화 필수: 고객명, 등급`
+  - "개인화 필수:" 뒤 쉼표 구분 필드만 파싱 → AI 프롬프트에 허용 변수로 전달
+  - AI는 해당 변수만 사용하여 문안 생성 + 치환
+- **효과:** 맞춤한줄과 동일 수준의 변수 제한, "한 줄로 쓰기" UX 유지
 
-**✅ 세션 2: 슈퍼관리자 UI + 프론트엔드 Dashboard.tsx 개편 (완료 2026-02-27)**
-- [x] AdminDashboard.tsx — 📊 대시보드 탭 추가 (4/8 모드 선택 + 17종 카드 체크박스)
-- [x] AdminDashboard.tsx — handleEditCompany/handleUpdateCompany에 카드 설정 API 병렬 로드/저장
-- [x] Dashboard.tsx — 기존 하드코딩 "고객 현황"(5칸) + "고객 활동 현황"(5칸) 제거
-- [x] Dashboard.tsx — 1행 요금제+발송현황 / 2행 동적카드 레이아웃 구성
-- [x] Dashboard.tsx — 동적 카드: count/rate/sum/distribution 4타입 렌더링 + 8색 로테이션
-- [x] Dashboard.tsx — 블러 처리: 카드 미설정 안내 / DB 미업로드 전체 블러+CTA / 데이터 없는 개별 카드 블러
-- [x] Dashboard.tsx — 발송현황 하드코딩 제거: VIP/30일매출 → 성공건수/평균성공률/총사용금액 (D42)
+#### 진행 순서 (Harold님 확정)
+
+1. **#1** 대시보드 회사명 (빠른 해결)
+2. **#5** AI 한줄로 포맷 강제화 (백엔드 프롬프트 수정 위주)
+3. **#2** AI 매핑 화면 개편 (프론트 UI 핵심)
+4. **#3** 직접 타겟 설정 (enabled-fields + 동적 쿼리)
+5. **#4** 수신거부 동기화 (설계 깊이 논의 후 구현)
+
+→ 각 안건을 별도 채팅 세션에서 설계→컨펌→구현→테스트→정립 후 다음으로 진행
 
 #### ⛔ 진행 규칙
+- 기존 발송 파이프라인 절대 건드리지 않음
 - 코드 작성 전 Harold님 컨펌 필수
 - SCHEMA.md에 없는 컬럼 임의 생성 금지
-- 발송 파이프라인 절대 건드리지 않음
-- company_settings 테이블 활용 (신규 테이블 생성 최소화)
+- standard-field-map.ts가 유일한 매핑 기준
+- 의논 → 검증 → 실행 순서 엄수
 
 ---
 
 ### ✅ 이전 완료 요약
 
+> - 2026-02-27 (7차) D41+D42 완료 — 대시보드 동적 카드 시스템 전체 개편 + 발송현황 하드코딩 제거
 > - 2026-02-27 (6차) D41 세션2 완료 + D42 발송현황 하드코딩 제거 — AdminDashboard.tsx 대시보드탭 추가, Dashboard.tsx 고객현황 하드코딩 제거→동적카드+블러, 발송현황 VIP/30일매출→성공건수/평균성공률/총사용금액
 > - 2026-02-27 (5차) 중진공 실사 대비 데모 고객DB 10,000명 엑셀 생성
 > - 2026-02-27 (4차) D41 세션1 백엔드 API 완료 — dashboard-card-pool.ts 신규 + companies.ts dashboard-cards API + admin.ts 카드 설정 API + UNIQUE 인덱스 + plans 테이블 오염 수정
@@ -228,134 +224,57 @@
 - **로고:** 디자이너 시안 대기 중 (워드마크형 방향, 화해 스타일 참고)
 
 ### 5-3. 방향성
-- MVP → 엔터프라이즈급 마케팅 자동화 플랫폼으로 확장
-- SMS/LMS → MMS, 카카오톡 등 멀티채널 확장 예정
-- 고객 데이터 동기화: Sync Agent(범용 exe) + Excel/CSV 업로드(AI 자동 컬럼 매핑)
-- 소스 보호: 핵심 로직 별도 서버 분리, 빌드 시 난독화, 라이선스 서버 검토
-- 프로덕션 배포: IDC 서버 ✅ 완료 (HTTPS, Let's Encrypt, Nginx, PM2)
+- **Phase 1 (현재):** SMS/LMS/MMS 실발송 안정화 + 슈퍼관리자 + 서비스 사용자 대시보드
+- **Phase 2:** 카카오톡 알림톡/친구톡 통합, 결제 시스템(KCP), 요금제 구독 플로우
+- **Phase 3:** Sync Agent 연동, RCS, 이메일, 푸시알림 멀티채널 확장, AI 고도화
 
-### 5-4. 기술 스택
-| 구분 | 기술 |
-|------|------|
-| 프론트엔드 | React + TypeScript |
-| 백엔드 | Node.js / Express + JWT 인증 |
-| 캠페인 DB | PostgreSQL (Docker) |
-| SMS 큐 DB | MySQL (Docker) |
-| 캐싱 | Redis (Docker) |
-| AI | Claude API |
-| SMS 발송 | QTmsg (통신사: 11=SKT, 16=KT, 19=LG U+) |
-| DB 관리 | pgAdmin |
-| 웹서버 | Nginx (리버스 프록시 + SSL) |
-| 프로세스 관리 | PM2 |
-
-### 5-5. 도메인 & 접속 구조
-
-| 도메인 | 용도 | 대상 | 프론트엔드 |
-|--------|------|------|------------|
-| **https://hanjul.ai** | 서비스 | 고객사 일반 사용자 | frontend (React) |
-| **https://app.hanjul.ai** | 고객사 관리 | 고객사 관리자 | company-frontend (React) |
-| **https://sys.hanjullo.com** | 시스템 관리 | 슈퍼관리자 (INVITO 내부) | frontend (슈퍼관리자 모드) |
-
-- 모든 도메인 → IDC 서버 58.227.193.62
-- 모든 도메인 HTTPS (Let's Encrypt 자동갱신)
-- IP 직접 접속 차단 (SSL 없는 접속 방지)
-- 슈퍼관리자 URL은 hanjullo.com 서브도메인으로 분리 → 유추 어려움
-
-**로그인 페이지 분기 (LoginPage.tsx):**
-- **hanjul.ai**: "한줄로 / AI 마케팅 자동화" 브랜딩, 탭 없음 (서비스 사용자 전용)
-- **sys.hanjullo.com**: "Target-UP / 시스템 관리자" 브랜딩, 탭 없음 (슈퍼관리자 전용)
-- hostname 기반 조건부 렌더링: `window.location.hostname === 'sys.hanjullo.com'`
-- 푸터: 사업자정보 (주식회사 인비토, 대표이사 유호윤, 사업자등록번호, 통신판매신고, 주소, 문의전화)
-- 개인정보처리방침 / 이용약관 링크 포함
-
-**사용자 역할별 접근:**
-| 역할 | 접속 URL | 로그인 방식 | 로그인 후 이동 |
-|------|----------|-------------|----------------|
-| 서비스 사용자 | hanjul.ai | company 로그인 | /dashboard |
-| 고객사 관리자 | app.hanjul.ai | company-admin 로그인 | 고객사 관리 대시보드 |
-| 슈퍼관리자 | sys.hanjullo.com | super_admin 로그인 | /admin |
-
-### 5-6. 대시보드 컴포넌트 구조 (리팩토링 완료)
-
-**Dashboard.tsx:** 8,039줄 → **4,964줄** (Session 1+2 합계 3,075줄 절감)
-
-**Session 1 분리 컴포넌트 (10개):**
-| 파일 | 내용 |
-|------|------|
-| CalendarModal.tsx | 캘린더 모달 |
-| ChannelConvertModals.tsx | LMS/SMS 전환 2종 |
-| AiMessageSuggestModal.tsx | AI 문구 추천 |
-| CustomerInsightModal.tsx | 고객 인사이트 |
-| TodayStatsModal.tsx | 이번 달 통계 |
-| PlanLimitModal.tsx | 플랜 초과 에러 |
-| RecentCampaignModal.tsx | 최근 캠페인 |
-| RecommendTemplateModal.tsx | 추천 템플릿 |
-| CampaignSuccessModal.tsx | 캠페인 확정 성공 |
-| PlanUpgradeModal.tsx | 요금제 업그레이드 |
-
-**Session 2 분리 컴포넌트 (11개):**
-| 파일 | 내용 |
-|------|------|
-| AiCampaignResultPopup.tsx | AI 결과 팝업 (Step 1/2) |
-| AiPreviewModal.tsx | AI 미리보기 |
-| MmsUploadModal.tsx | MMS 이미지 업로드 |
-| UploadProgressModal.tsx | 업로드 프로그레스 |
-| ScheduledCampaignModal.tsx | 예약 대기 |
-| UploadResultModal.tsx | 업로드 결과 |
-| AddressBookModal.tsx | 주소록 |
-| ScheduleTimeModal.tsx | 예약전송 달력 |
-| DirectPreviewModal.tsx | 미리보기 공용 |
-| SendConfirmModal.tsx | 발송 확인 |
-| BalanceModals.tsx | 잔액현황+충전+부족 3종 |
-
-**Dashboard에 남은 것:** 핵심 state/handler + 상단 레이아웃 + 탭 영역 + 직접타겟설정 모달(578줄) + 직접타겟발송 모달(1,888줄)
-**추후 분리 대상:** 직접 타겟 발송 모달 (state 결합도 최고, 전용 세션 필요)
-
-### 5-7. 통계/발송결과 관련 컴포넌트 매핑
-
-| 도메인 | 컴포넌트 | 경로 | 용도 |
-|--------|----------|------|------|
-| hanjul.ai | ResultsModal.tsx | `packages/frontend/src/components/` | 발송 결과 (요약+채널통합조회+테스트발송+AI분석) |
-| app.hanjul.ai | StatsTab.tsx | `packages/company-frontend/src/components/` | 고객사 관리자 발송통계 (일별/월별+상세 모달) |
-| app.hanjul.ai | CompanyDashboard.tsx | `packages/company-frontend/src/pages/` | 고객사 관리자 메인 (탭: 사용자/발신번호/예약/통계/고객DB) |
-| sys.hanjullo.com | StatsTab.tsx | `packages/frontend/src/components/admin/` | 슈퍼관리자 발송통계 (고객사 관리자와 동일 구조, import 경로만 다름) |
-
-**백엔드 통계 API 매핑:**
-| API | 라우트 파일 | 호출처 |
-|-----|-----------|--------|
-| GET /api/manage/stats/send | manage-stats.ts | 고객사관리자 StatsTab + 슈퍼관리자 StatsTab |
-| GET /api/manage/stats/send/detail | manage-stats.ts | 위 컴포넌트 상세 모달 |
-| GET /api/admin/stats/send | admin.ts | 슈퍼관리자 전용 (회사별 그룹핑) |
-| GET /api/admin/stats/send/detail | admin.ts | 슈퍼관리자 상세 |
-| GET /api/campaigns/test-stats | campaigns.ts | ResultsModal 테스트 탭 |
-| GET /api/v1/results/campaigns | results.ts | ResultsModal 채널통합조회 |
+### 5-4. 핵심 경쟁력 (특허 + 인프라)
+- **통신사 인프라:** 11개 QTmsg Agent + 3대 통신사 직접 연동
+- **AI 타겟팅:** 자연어 → DB 쿼리 → 자동 발송 파이프라인 (특허 출원)
+- **스팸필터 검증:** Android 앱 기반 3사 자동 스팸 판정 시스템 (특허 출원)
+- **9년 도메인 전문성:** 209B+ 누적 매출, 150+ 기업 고객
 
 ---
 
-## 6) API 라우트
+## 6) 🏗️ 시스템 아키텍처
 
-```
-/api/auth          → routes/auth.ts (로그인, 비밀번호 변경)
-/api/campaigns     → routes/campaigns.ts (캠페인 CRUD, 발송, 동기화)
-/api/customers     → routes/customers.ts (고객 조회, 필터, 추출)
-/api/companies     → routes/companies.ts (회사 설정, 발신번호)
-/api/ai            → routes/ai.ts (타겟 추천, 메시지 생성, 브리핑 파싱, 맞춤문안, 타겟 재조회)
-/api/admin         → routes/admin.ts (슈퍼관리자 전용)
-/api/results       → routes/results.ts (발송 결과/통계)
-/api/upload        → routes/upload.ts (파일 업로드/매핑)
-/api/unsubscribes  → routes/unsubscribes.ts (수신거부)
-/api/address-books → routes/address-books.ts (주소록)
-/api/test-contacts → routes/test-contacts.ts (테스트 연락처)
-/api/plans         → routes/plans.ts (요금제)
-/api/billing       → routes/billing.ts (정산/거래내역서)
-/api/balance       → routes/balance.ts (선불 잔액 조회/이력/요약)
-/api/sync          → routes/sync.ts (Sync Agent 연동 - register, heartbeat, customers, purchases, log, config, version)
-/api/admin/sync    → routes/admin-sync.ts (슈퍼관리자 Sync Agent 관리)
-/api/spam-filter   → routes/spam-filter.ts (스팸필터 테스트 - 발송요청, 수신리포트, 이력, 디바이스)
-/api/analysis      → routes/analysis.ts (AI 분석 - preview, run, pdf)
-```
+### 6-1. 도메인 구조
 
-★ 슈퍼관리자(sys.hanjullo.com) / 고객사관리자(app.hanjul.ai) / 서비스사용자(hanjul.ai) 접속주소 완전 분리 완료
+| 도메인 | 용도 | 기술 |
+|--------|------|------|
+| hanjul.ai | 서비스 사용자 (메인) | React SPA |
+| app.hanjul.ai | 고객사 관리자 | React SPA |
+| sys.hanjullo.com | 슈퍼관리자 | React SPA |
+
+### 6-2. 기술 스택
+
+| 구분 | 기술 |
+|------|------|
+| 프론트엔드 | React 18 + TypeScript + Vite + Tailwind CSS |
+| 백엔드 | Node.js + Express + TypeScript |
+| DB (앱) | PostgreSQL 15 (Docker) |
+| DB (발송) | MySQL 5.7 (QTmsg Agent별) |
+| 캐시 | Redis |
+| AI | Claude API (claude-sonnet-4-20250514) |
+| 결제 | TossPayments + KCP |
+| SMS | QTmsg (11개 Agent) |
+| 카카오 | Humuson API v2.1.1 |
+| 프로세스 | PM2 |
+| 컨테이너 | Docker (PostgreSQL/Redis) |
+
+### 6-3. 발송 파이프라인 (5개 경로)
+
+> ⚠️ **D43 진행 중에도 아래 5개 경로는 절대 건드리지 않음**
+
+| 경로 | 엔드포인트 | 용도 |
+|------|-----------|------|
+| AI 발송 | POST /:id/send | AI 캠페인 발송 |
+| 직접발송 | POST /direct-send | 직접 타겟 발송 |
+| 테스트 | POST /test-send | 테스트 발송 |
+| 스팸필터 | spam-filter/test | 스팸 판정 |
+| 예약 | scheduled | 예약 발송 수정 |
+
+공통 치환: `messageUtils.ts` — extractVarCatalog() + replaceVariables()
 
 ---
 
@@ -488,8 +407,6 @@
 
 | ID | 날짜 | 결정 | 근거 |
 |----|------|------|------|
-| D32 | 02-26 | 발송 파이프라인 전면 복구 — 공통 치환 함수 통합 | 5개 경로 분산 치환이 모든 발송 버그의 근본 원인 |
-| D33 | 02-26 | messageUtils.ts 공통 치환 함수 채택 | extractVarCatalog()+replaceVariables() 조합으로 5개 경로 통일 |
 | D34 | 02-26 | 스팸필터/테스트 서버 DB 직접 조회 전환 | 프론트 하드코딩 치환이 근본 원인 |
 | D35 | 02-26 | 선불 차감 후 발송 실패 시 자동 환불 보장 | 차감→MySQL INSERT 사이 실패 시 정산 이슈 |
 | D36 | 02-26 | MySQL 타임존 KST — 풀 레벨 보강 | 커넥션 풀 10개 중 1개만 TZ 설정되는 구조적 문제 |
@@ -499,8 +416,9 @@
 | D40 | 02-27 | AI 맞춤한줄 동적 필드 + UX 개선 — 커스텀 실데이터만 노출 + 톤 제거 + 필드명 표시 | enabled-fields 단일 경로+JSONB 실데이터만 반환 |
 | D41 | 02-27 | 대시보드 동적 카드 시스템 — 슈퍼관리자 체크 설정 + FIELD_MAP 17개 기반 카드 풀 | 고객사마다 보유 데이터 다름. 하드코딩 고정→동적 전환. company_settings 활용, 4칸/8칸 모드 |
 | D42 | 02-27 | 발송현황 하드코딩 제거 — VIP/30일매출 → 성공건수/평균성공률/총사용금액 | 발송현황 영역에 VIP·매출은 맥락 불일치. 발송 관련 지표로 통일 |
+| D43 | 02-27 | 기능 정상화 및 DB 동적 기준 정립 — 5개 안건 (회사명/매핑UI/타겟필터/수신거부동기화/AI포맷) | D39 이후 미반영 기능 정상화. 발송 파이프라인 미접촉 |
 
-**아카이브:** D1-AI발송2분기(02-22) | D2-브리핑방식(02-22) | D3-개인화필드체크박스(02-22) | D4-textarea제거(02-22) | D5-별도컴포넌트분리(02-22) | D6-대시보드레이아웃(02-22) | D7-헤더탭스타일(02-23) | D8-AUTO/PRO뱃지(02-23) | D9-캘린더상태기준(02-23) | D10-6차세션분할(02-23) | D11-KCP전환(02-23) | D12-이용약관(02-23) | D13-수신거부SoT(02-23) | D14-7차3세션분할(02-24) | D15-제목머지→D28번복(02-25) | D16-스팸테스트과금(02-25) | D17-테스트통계확장(02-25) | D18-정산자체헬퍼(02-25) | D19-구독상태필드(02-25) | D20-AI분석차별화(02-25) | D21-planInfo실시간(02-25) | D22-스팸잠금직접발송만(02-25) | D23-preview보안(02-25) | D24-run세션1완전구현(02-25) | D25-pdfkit선택(02-25) | D26-분석캐싱24h(02-25) | D27-비즈니스3회최적화(02-25) | D28-제목머지제거(02-25) | D29-5경로전수점검(02-25) | D30-즉시sending전환(02-25) | D31-GPT fallback(02-25) | D-대시보드모달분리(02-23): 8,039줄→4,964줄
+**아카이브:** D1-AI발송2분기(02-22) | D2-브리핑방식(02-22) | D3-개인화필드체크박스(02-22) | D4-textarea제거(02-22) | D5-별도컴포넌트분리(02-22) | D6-대시보드레이아웃(02-22) | D7-헤더탭스타일(02-23) | D8-AUTO/PRO뱃지(02-23) | D9-캘린더상태기준(02-23) | D10-6차세션분할(02-23) | D11-KCP전환(02-23) | D12-이용약관(02-23) | D13-수신거부SoT(02-23) | D14-7차3세션분할(02-24) | D15-제목머지→D28번복(02-25) | D16-스팸테스트과금(02-25) | D17-테스트통계확장(02-25) | D18-정산자체헬퍼(02-25) | D19-구독상태필드(02-25) | D20-AI분석차별화(02-25) | D21-planInfo실시간(02-25) | D22-스팸잠금직접발송만(02-25) | D23-preview보안(02-25) | D24-run세션1완전구현(02-25) | D25-pdfkit선택(02-25) | D26-분석캐싱24h(02-25) | D27-비즈니스3회최적화(02-25) | D28-제목머지제거(02-25) | D29-5경로전수점검(02-25) | D30-즉시sending전환(02-25) | D31-GPT fallback(02-25) | D32-발송파이프라인복구(02-26) | D33-messageUtils통합(02-26) | D-대시보드모달분리(02-23): 8,039줄→4,964줄
 
 ---
 

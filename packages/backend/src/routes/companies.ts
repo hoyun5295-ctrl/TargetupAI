@@ -17,7 +17,7 @@ router.get('/settings', authenticate, async (req: Request, res: Response) => {
     const companyId = (req as any).user?.companyId;
     const result = await query(`
       SELECT 
-        brand_name, business_type, reject_number, manager_phone, manager_contacts,
+        company_name, brand_name, business_type, reject_number, manager_phone, manager_contacts,
         monthly_budget, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao,
         send_start_hour, send_end_hour, daily_limit_per_customer,
         holiday_send_allowed, duplicate_prevention_days,
@@ -750,6 +750,7 @@ router.put('/:id', requireSuperAdmin, async (req: Request, res: Response) => {
     const result = await query(
       `UPDATE companies SET
         company_name = COALESCE($1, company_name),
+        name = COALESCE($1, name),
         business_number = COALESCE($2, business_number),
         ceo_name = COALESCE($3, ceo_name),
         contact_name = COALESCE($4, contact_name),
