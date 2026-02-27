@@ -29,7 +29,7 @@ function buildDynamicFilter(filters: any, startIndex: number) {
     // 기본 필드 처리
     const basicFields = ['gender', 'grade', 'sms_opt_in', 'region'];
     const storeField = 'store_code';
-    const numericFields = ['points', 'total_purchase_amount', 'purchase_count', 'avg_order_value', 'ltv_score', 'visit_count', 'coupon_usage_count', 'return_count'];
+    const numericFields = ['points', 'total_purchase_amount', 'recent_purchase_amount', 'purchase_count', 'avg_order_value', 'ltv_score', 'visit_count', 'coupon_usage_count', 'return_count'];
     const dateFields = ['birth_date', 'recent_purchase_date', 'created_at'];
 
     if (basicFields.includes(field)) {
@@ -115,6 +115,19 @@ function buildDynamicFilter(filters: any, startIndex: number) {
       } else if (operator === 'between' && Array.isArray(value)) {
         whereClause += ` AND EXTRACT(YEAR FROM AGE(birth_date)) BETWEEN $${paramIndex++} AND $${paramIndex++}`;
         params.push(Number(value[0]), Number(value[1]));
+      }
+    } else if (['name', 'email', 'address', 'registration_type', 'registered_store', 'recent_purchase_store', 'store_phone'].includes(field)) {
+      // 직접 컬럼 문자열 필드 (D43-3: contains 검색 지원)
+      if (operator === 'eq') {
+        whereClause += ` AND ${field} = $${paramIndex++}`;
+        params.push(String(value));
+      } else if (operator === 'in' && Array.isArray(value)) {
+        const placeholders = value.map(() => `$${paramIndex++}`).join(', ');
+        whereClause += ` AND ${field} IN (${placeholders})`;
+        params.push(...value.map(String));
+      } else if (operator === 'contains') {
+        whereClause += ` AND ${field} ILIKE $${paramIndex++}`;
+        params.push(`%${value}%`);
       }
     } else {
       // custom_fields (JSONB) 처리
