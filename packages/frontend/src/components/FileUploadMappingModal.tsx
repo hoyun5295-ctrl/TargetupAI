@@ -505,30 +505,29 @@ export default function FileUploadMappingModal({ show, onClose, onSaveStart, onP
                             ({fields.filter(f => fieldKeyToHeader[f.fieldKey]).length}/{fields.length})
                           </span>
                         </div>
-                        {/* 필드 목록 */}
-                        <div className="divide-y divide-gray-100">
-                          {fields.map(field => {
+                        {/* 필드 목록 — 2열 그리드 */}
+                        <div className="grid grid-cols-2 divide-x divide-gray-100">
+                          {fields.map((field, idx) => {
                             const mapped = fieldKeyToHeader[field.fieldKey];
                             return (
-                              <div key={field.fieldKey} className="grid grid-cols-[180px_32px_1fr] items-center px-4 py-2.5 hover:bg-gray-50 transition-colors">
+                              <div key={field.fieldKey} className={`flex items-center gap-2 px-3 py-2 hover:bg-gray-50 transition-colors ${idx >= 2 ? 'border-t border-gray-100' : ''}`}>
                                 {/* 표준 필드명 */}
-                                <span className="text-sm font-medium text-gray-700">{field.displayName}</span>
+                                <span className="text-sm font-medium text-gray-700 w-[80px] shrink-0 truncate">{field.displayName}</span>
                                 {/* 화살표 */}
-                                <span className="text-gray-300 text-center text-xs">←</span>
-                                {/* 매핑 영역 (태그 or 선택 버튼) */}
-                                <div className="relative">
+                                <span className="text-gray-300 text-xs shrink-0">←</span>
+                                {/* 매핑 영역 */}
+                                <div className="relative flex-1 min-w-0">
                                   {mapped ? (
-                                    <div className="inline-flex items-center gap-1.5">
+                                    <div className="inline-flex items-center gap-1">
                                       <button
                                         onClick={() => setActivePopup(activePopup === field.fieldKey ? null : field.fieldKey)}
-                                        className="px-3 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-md text-sm hover:bg-emerald-100 transition-colors"
+                                        className="px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded text-xs hover:bg-emerald-100 transition-colors truncate max-w-[120px]"
                                       >
                                         {mapped}
                                       </button>
                                       <button
                                         onClick={() => unassignStandardField(field.fieldKey)}
                                         className="text-gray-400 hover:text-red-500 text-xs transition-colors"
-                                        title="매핑 해제"
                                       >
                                         ✕
                                       </button>
@@ -536,12 +535,11 @@ export default function FileUploadMappingModal({ show, onClose, onSaveStart, onP
                                   ) : (
                                     <button
                                       onClick={() => setActivePopup(activePopup === field.fieldKey ? null : field.fieldKey)}
-                                      className="px-3 py-1 bg-gray-50 text-gray-400 border border-dashed border-gray-300 rounded-md text-sm hover:border-blue-400 hover:text-blue-500 hover:bg-blue-50 transition-colors"
+                                      className="px-2 py-0.5 bg-gray-50 text-gray-400 border border-dashed border-gray-300 rounded text-xs hover:border-blue-400 hover:text-blue-500 hover:bg-blue-50 transition-colors"
                                     >
                                       클릭하여 선택
                                     </button>
                                   )}
-                                  {/* 팝업 */}
                                   {renderColumnPopup(
                                     field.fieldKey,
                                     (h) => assignStandardField(field.fieldKey, h),
@@ -566,28 +564,28 @@ export default function FileUploadMappingModal({ show, onClose, onSaveStart, onP
                 </h4>
 
                 {customSlots.length > 0 && (
-                  <div className="space-y-2 mb-3">
+                  <div className="space-y-1.5 mb-3">
                     {customSlots.map((slot, index) => (
-                      <div key={slot.fieldKey} className="flex items-center gap-2 p-3 bg-white border border-gray-200 rounded-lg">
+                      <div key={slot.fieldKey} className="flex items-center gap-2 p-2 bg-white border border-gray-200 rounded-lg">
                         {/* 슬롯 번호 */}
-                        <span className="text-xs text-gray-400 w-8 shrink-0 text-center">{slot.fieldKey.replace('custom_', '#')}</span>
+                        <span className="text-xs text-gray-400 w-6 shrink-0 text-center">{slot.fieldKey.replace('custom_', '#')}</span>
                         {/* 라벨 입력 */}
                         <input
                           type="text"
                           value={slot.label}
                           onChange={(e) => updateCustomLabel(index, e.target.value)}
-                          placeholder="라벨명 입력 (예: 마일리지)"
-                          className="px-3 py-1.5 border border-gray-300 rounded-md text-sm w-[160px] focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-200"
+                          placeholder="라벨명 (예: 마일리지)"
+                          className="px-2 py-1 border border-gray-300 rounded text-xs w-[130px] focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-200"
                         />
                         {/* 화살표 */}
                         <span className="text-gray-300 text-xs">←</span>
                         {/* 엑셀 컬럼 매핑 */}
                         <div className="relative flex-1">
                           {slot.excelColumn ? (
-                            <div className="inline-flex items-center gap-1.5">
+                            <div className="inline-flex items-center gap-1">
                               <button
                                 onClick={() => setActivePopup(activePopup === `custom_slot_${index}` ? null : `custom_slot_${index}`)}
-                                className="px-3 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-md text-sm hover:bg-emerald-100 transition-colors"
+                                className="px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded text-xs hover:bg-emerald-100 transition-colors truncate max-w-[120px]"
                               >
                                 {slot.excelColumn}
                               </button>
@@ -601,7 +599,7 @@ export default function FileUploadMappingModal({ show, onClose, onSaveStart, onP
                           ) : (
                             <button
                               onClick={() => setActivePopup(activePopup === `custom_slot_${index}` ? null : `custom_slot_${index}`)}
-                              className="px-3 py-1 bg-gray-50 text-gray-400 border border-dashed border-gray-300 rounded-md text-sm hover:border-blue-400 hover:text-blue-500 hover:bg-blue-50 transition-colors"
+                              className="px-2 py-0.5 bg-gray-50 text-gray-400 border border-dashed border-gray-300 rounded text-xs hover:border-blue-400 hover:text-blue-500 hover:bg-blue-50 transition-colors"
                             >
                               클릭하여 선택
                             </button>
@@ -615,8 +613,8 @@ export default function FileUploadMappingModal({ show, onClose, onSaveStart, onP
                         {/* 삭제 */}
                         <button
                           onClick={() => removeCustomSlot(index)}
-                          className="p-1 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors shrink-0"
-                          title="커스텀 필드 삭제"
+                          className="p-0.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors shrink-0 text-xs"
+                          title="삭제"
                         >
                           🗑️
                         </button>
@@ -628,7 +626,7 @@ export default function FileUploadMappingModal({ show, onClose, onSaveStart, onP
                 {customSlots.length < 15 && (
                   <button
                     onClick={addCustomSlot}
-                    className="w-full py-2.5 border-2 border-dashed border-gray-300 rounded-lg text-sm text-gray-500 hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50 transition-colors flex items-center justify-center gap-1"
+                    className="w-full py-2 border-2 border-dashed border-gray-300 rounded-lg text-xs text-gray-500 hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50 transition-colors flex items-center justify-center gap-1"
                   >
                     <span className="text-lg leading-none">+</span> 커스텀 필드 추가
                   </button>
