@@ -28,6 +28,12 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
   // 아코디언
   const [expandedCats, setExpandedCats] = useState<Record<string, boolean>>({ basic: true });
 
+  // 에러 알림 모달
+  const [alertModal, setAlertModal] = useState<{ show: boolean; title: string; message: string; type: 'error' | 'warning' | 'info' }>({ show: false, title: '', message: '', type: 'error' });
+  const showAlert = (title: string, message: string, type: 'error' | 'warning' | 'info' = 'error') => {
+    setAlertModal({ show: true, title, message, type });
+  };
+
   // 카테고리 아이콘
   const CAT_ICONS: Record<string, string> = {
     basic: '📋', purchase: '💰', store: '🏪',
@@ -260,10 +266,16 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ dynamicFilters, smsOptIn })
       });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        showAlert('조회 실패', errData.error || `서버 오류가 발생했습니다 (${res.status})`, 'error');
+        return;
+      }
       const data = await res.json();
       setTargetCount(data.count || 0);
     } catch (error) {
       console.error('카운트 조회 실패:', error);
+      showAlert('네트워크 오류', '서버에 연결할 수 없습니다. 잠시 후 다시 시도해주세요.', 'error');
     } finally {
       setCountLoading(false);
     }
@@ -281,12 +293,20 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ dynamicFilters, smsOptIn, phoneField: 'phone' })
       });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        showAlert('타겟 추출 실패', errData.error || `서버 오류가 발생했습니다 (${res.status})`, 'error');
+        return;
+      }
       const data = await res.json();
       if (data.success && data.recipients) {
         onExtracted(data.recipients, data.count);
+      } else {
+        showAlert('타겟 추출 실패', data.error || '데이터를 추출하지 못했습니다. 조건을 확인해주세요.', 'warning');
       }
     } catch (error) {
       console.error('타겟 추출 실패:', error);
+      showAlert('네트워크 오류', '서버에 연결할 수 없습니다. 잠시 후 다시 시도해주세요.', 'error');
     } finally {
       setExtracting(false);
     }
@@ -476,6 +496,7 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
   const allCategories = [...orderedCategories, ...extraCategories];
 
   return (
+    <>
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 animate-in fade-in duration-200">
       <div className="bg-white rounded-2xl shadow-2xl w-[720px] max-h-[95vh] overflow-hidden animate-in zoom-in-95 duration-200">
         {/* 헤더 */}
@@ -642,5 +663,45 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
         </div>
       </div>
     </div>
+
+    {/* 커스텀 알림 모달 */}
+    {alertModal.show && (
+      <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[60] animate-in fade-in duration-150">
+        <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full mx-4 animate-in zoom-in-95 duration-200 overflow-hidden">
+          <div className="p-6 text-center">
+            <div className={`w-12 h-12 mx-auto mb-3 rounded-full flex items-center justify-center ${
+              alertModal.type === 'error' ? 'bg-red-100' : alertModal.type === 'warning' ? 'bg-amber-100' : 'bg-blue-100'
+            }`}>
+              {alertModal.type === 'error' ? (
+                <svg className="w-6 h-6 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              ) : alertModal.type === 'warning' ? (
+                <svg className="w-6 h-6 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                </svg>
+              ) : (
+                <svg className="w-6 h-6 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              )}
+            </div>
+            <h4 className="text-base font-bold text-gray-800 mb-1.5">{alertModal.title}</h4>
+            <p className="text-sm text-gray-500 leading-relaxed">{alertModal.message}</p>
+          </div>
+          <div className="px-6 pb-5">
+            <button
+              onClick={() => setAlertModal(prev => ({ ...prev, show: false }))}
+              className={`w-full py-2.5 rounded-xl font-semibold text-sm transition-colors ${
+                alertModal.type === 'error' ? 'bg-red-600 hover:bg-red-700 text-white'
+                : alertModal.type === 'warning' ? 'bg-amber-500 hover:bg-amber-600 text-white'
+                : 'bg-blue-600 hover:bg-blue-700 text-white'
+              }`}
+            >확인</button>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 }

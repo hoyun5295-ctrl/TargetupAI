@@ -117,7 +117,7 @@
 |---|------|------|--------|------|
 | 1 | 대시보드 회사명 — 슈퍼관리자 수정이 반영 안 됨 | 버그 | 낮음 | ✅ 완료 |
 | 2 | AI 매핑 화면 개편 — 표준 17개 명확 나열 + 커스텀 필드 라벨 지정 | 기능개편 | 중간 | ✅ 완료 |
-| 3 | 직접 타겟 설정 — enabled-fields 기반 동적 필터 조건 | 기능개발 | 중간 | 대기 |
+| 3 | 직접 타겟 설정 — enabled-fields 기반 동적 필터 조건 | 기능개발 | 중간 | 🔧 코드 배포 · 버그 수정 필요 |
 | 4 | 수신거부 양방향 동기화 (독립 관리 vs DB 연동) | 설계토의 | 높음 | 대기 |
 | 5 | AI 한줄로 입력 포맷 강제화 + 샘플 고객 미리보기 + 이모지 제거 | 기능개선 | 중간 | ✅ 완료 |
 
@@ -142,14 +142,42 @@
   - **팝업 overflow 수정:** absolute→fixed 포지션, 클릭 위치 기반 좌표 계산, 하단 공간 부족 시 위로 자동 조정
 - **수정 파일 3개:** upload.ts, Dashboard.tsx, FileUploadMappingModal.tsx(신규)
 
-#### 안건 #3: 직접 타겟 설정 동적 필터
+#### 안건 #3: 직접 타겟 설정 동적 필터 — 🔧 코드 배포 · 버그 수정 필요
 
-- **현재 문제:** 필터 조건이 "수신동의 고객만 포함" 체크박스 하나뿐, 실제 DB 필터링 안 먹음
-- **수정 방향:**
-  - enabled-fields API로 해당 고객사의 실제 업로드 필드 목록 조회
-  - 필드별 필터 조건 설정 (예: 성별=여성, 등급=GOLD, 지역=서울)
-  - 조건 조합 → 대상 인원 조회 (실제 DB 쿼리)
-  - 수신동의 체크 기본 유지
+- **작업 완료 (D43-3, 2026-02-27):**
+  - **컴포넌트 분리:** Dashboard.tsx에서 직접타겟 모달 265줄 분리 → DirectTargetFilterModal.tsx 신규 (4,952줄→4,547줄)
+  - **모달 전면 리팩토링:**
+    - SKIP_FIELDS 제거 → **전체 필드 노출** (Harold님 확정: 사용자가 선택하게)
+    - 2열 컴팩트 그리드 (체크+조건 인라인)
+    - 연령: 다중 체크(20대+30대) + 직접 범위 입력(25~35세) 전환
+    - 문자열 필드: 단일 드롭다운 → **다중 태그 선택** (☑VIP ☑GOLD → OR 조건)
+    - 금액/포인트/날짜: 드롭다운 → **프리셋 태그 토글**
+    - sms_opt_in: 별도 체크박스 → 마케팅 카테고리 통합 (기본 ON)
+  - **백엔드 개선 (customers.ts):**
+    - enabled-fields 옵션: 4개 하드코딩 → **모든 string 필드 DISTINCT 동적 조회** (커스텀 포함)
+    - buildDynamicFilter: `name`, `email`, `address` 등 직접 컬럼 → contains 검색 지원
+    - numericFields: `recent_purchase_amount` 추가
+    - extract SELECT: 6개 → 표준 필드 전체 반환
+  - **Dashboard.tsx 연결:**
+    - 기존 직접타겟 state 10개 + 함수 5개 제거
+    - `handleTargetExtracted` 콜백으로 기존 발송 흐름 연결
+- **수정 파일 3개:** DirectTargetFilterModal.tsx(신규), Dashboard.tsx, customers.ts
+
+- **🚨 버그: 타겟 추출 후 발송 모달 미표시**
+  - **증상:** 대상 인원 10,000명 조회 성공 → "타겟 추출" 클릭 → 아무 반응 없음 (발송 모달 안 뜸)
+  - **추정 원인 (다음 세션에서 확인 필요):**
+    1. **extract API 500 에러 가능성** — SELECT 컬럼 확장(6→17개)으로 customers_unified 뷰에 없는 컬럼 참조 시 SQL 에러. 특히 `store_phone`, `registration_type`, `registered_store`, `recent_purchase_store` 등이 뷰에 미포함일 수 있음
+    2. **smsOptIn 파라미터 변경** — 기존: `smsOptIn: true` 고정 전달 → 신규: sms_opt_in 필드가 selectedFields에 없으면 `smsOptIn: false`로 전달되어 filter-count와 extract 결과 불일치 가능
+    3. **handleTargetExtracted 에러 핸들링 부재** — extract API가 실패해도 catch 없이 조용히 실패 (DirectTargetFilterModal에는 catch 있지만 toast 알림 없음)
+  - **디버깅 순서:**
+    1. 브라우저 Network 탭에서 `/api/customers/extract` 응답 확인 (200 vs 500)
+    2. 500이면 서버 로그에서 SQL 에러 확인 → customers_unified 뷰의 컬럼 목록과 extract SELECT 대조
+    3. 200이면 응답 body에 `success: true`와 `recipients` 배열 존재 확인
+    4. DirectTargetFilterModal의 `onExtracted` 호출 여부 확인 (console.log 추가)
+  - **수정 방향:**
+    - extract SELECT를 customers_unified 뷰에 실제 존재하는 컬럼만으로 제한
+    - DirectTargetFilterModal에 에러 toast 추가
+    - smsOptIn 기본값 처리 검증
 
 #### 안건 #4: 수신거부 양방향 동기화 (설계 토의 필요)
 
@@ -179,7 +207,7 @@
 1. ~~**#1** 대시보드 회사명 (빠른 해결)~~ ✅ 완료
 2. ~~**#2** AI 매핑 화면 개편 (컴포넌트 분리 + 태그 클릭 UI)~~ ✅ 완료
 3. ~~**#5** AI 한줄로 포맷 강제화 + 미리보기 + 이모지 제거~~ ✅ 완료
-4. **#3** 직접 타겟 설정 (enabled-fields + 동적 쿼리) ← 다음
+4. **#3** 직접 타겟 설정 — 🔧 코드 배포 완료, **타겟 추출→발송모달 연결 버그 수정 필요** ← 다음 세션 최우선
 5. **#4** 수신거부 동기화 (설계 깊이 논의 후 구현)
 
 → 각 안건을 별도 채팅 세션에서 설계→컨펌→구현→테스트→정립 후 다음으로 진행
@@ -203,6 +231,7 @@
 | D42 발송현황 하드코딩 제거 | ✅ 완료 |
 | D43 안건#1 회사명 | ✅ 완료 |
 | D43 안건#2 매핑 UI 개편 | ✅ 완료 |
+| D43 안건#3 직접타겟 리팩토링 | 🔧 코드 배포 · 발송모달 연결 버그 수정 필요 |
 | D43 안건#5 AI 포맷+미리보기+이모지 | ✅ 완료 |
 | AI 맞춤한줄 Phase 1 (AI-CUSTOM-SEND.md) | ✅ 8단계 전체 완료 |
 | 선불 요금제 Phase 1-A | ✅ 완료 |
@@ -383,6 +412,7 @@
 | D43 | 02-27 | 기능 정상화 및 DB 동적 기준 정립 — 5개 안건 (회사명/매핑UI/타겟필터/수신거부동기화/AI포맷) | D39 이후 미반영 기능 정상화. 발송 파이프라인 미접촉 |
 | D44 | 02-27 | AI 매핑 화면 개편 — 컴포넌트 분리 + 태그 클릭 2열 그리드 + 커스텀 +/- | 하드코딩 드롭다운 16개→FIELD_MAP 동적 20개, Dashboard.tsx 310줄 분리 경량화 |
 | D45 | 02-27 | AI 한줄로 3종 개선 — 개인화 필수 파싱 + 샘플 고객 미리보기 + 이모지 강제 제거 | 변수 오류 방지+미리보기 실감+SMS 깨짐 방지. 발송 파이프라인 무접촉 |
+| D46 | 02-27 | 직접 타겟 설정 전면 리팩토링 — 컴포넌트 분리 + 전체 필드 노출 + 2열 컴팩트 + 다중선택 + 연령범위 | SKIP_FIELDS 제거(Harold님 확정), 사용자에게 필드 선택 위임. Dashboard 405줄 감소 |
 
 **아카이브:** D1-AI발송2분기(02-22) | D2-브리핑방식(02-22) | D3-개인화필드체크박스(02-22) | D4-textarea제거(02-22) | D5-별도컴포넌트분리(02-22) | D6-대시보드레이아웃(02-22) | D7-헤더탭스타일(02-23) | D8-AUTO/PRO뱃지(02-23) | D9-캘린더상태기준(02-23) | D10-6차세션분할(02-23) | D11-KCP전환(02-23) | D12-이용약관(02-23) | D13-수신거부SoT(02-23) | D14-7차3세션분할(02-24) | D15-제목머지→D28번복(02-25) | D16-스팸테스트과금(02-25) | D17-테스트통계확장(02-25) | D18-정산자체헬퍼(02-25) | D19-구독상태필드(02-25) | D20-AI분석차별화(02-25) | D21-planInfo실시간(02-25) | D22-스팸잠금직접발송만(02-25) | D23-preview보안(02-25) | D24-run세션1완전구현(02-25) | D25-pdfkit선택(02-25) | D26-분석캐싱24h(02-25) | D27-비즈니스3회최적화(02-25) | D28-제목머지제거(02-25) | D29-5경로전수점검(02-25) | D30-즉시sending전환(02-25) | D31-GPT fallback(02-25) | D32-발송파이프라인복구(02-26) | D33-messageUtils통합(02-26) | D34-스팸필터DB직접조회(02-26) | D35-선불환불보장(02-26) | D-대시보드모달분리(02-23): 8,039줄→4,964줄
 
@@ -416,6 +446,7 @@
 
 | 날짜 | 완료 항목 |
 |------|----------|
+| 02-27 | D43 안건#3 직접타겟 리팩토링: DirectTargetFilterModal.tsx 신규(646줄)+Dashboard.tsx 405줄 감소+customers.ts 옵션 동적화+extract SELECT 확장+buildDynamicFilter contains 지원. **🚨 타겟추출→발송모달 연결 버그 미해결 (다음 세션)** |
 | 02-27 | D43 안건#5 AI 한줄로 3종 개선: ①개인화필수 파싱(services/ai.ts parsePersonalizationDirective) ②샘플고객 미리보기(routes/ai.ts sample_customer+Dashboard+AiCampaignResultPopup 동적 치환) ③이모지 강제제거(services/ai.ts stripEmojis, SMS/LMS/MMS 후처리). 수정 5파일 |
 | 02-27 | D43 안건#2 AI 매핑 화면 개편: 컴포넌트 분리(FileUploadMappingModal.tsx 신규)+태그클릭 2열 그리드+커스텀 +/- 슬롯+upload.ts 백엔드 지원. 수정 3파일 |
 | 02-27 | D43 안건#1 회사명 미반영 해결: auth.ts c.name→c.company_name 통일, companies.ts name동기수정+settings company_name추가, Dashboard.tsx DB실시간조회 우선표시. 수정 3파일 |

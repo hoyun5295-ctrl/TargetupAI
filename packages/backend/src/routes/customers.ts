@@ -853,7 +853,7 @@ router.post('/filter-count', async (req: Request, res: Response) => {
     }
 
     const result = await query(
-      `SELECT COUNT(*) FROM customers_unified ${whereClause}`,
+      `SELECT COUNT(*) FROM customers ${whereClause}`,
       params
     );
 
@@ -937,30 +937,24 @@ router.post('/extract', async (req: Request, res: Response) => {
       }
     }
 
-    // 데이터 추출 (표준 필드 전체 + custom_fields 포함)
+    // 데이터 추출 (FIELD_MAP 기반 동적 SELECT — D43-3 동적화)
     const phoneColumn = phoneField || 'phone';
+    
+    // FIELD_MAP에서 직접 컬럼 동적 생성
+    const columnFields = getColumnFields();
+    const selectParts = columnFields.map(f => {
+      // phone은 phoneField 파라미터에 따라 별칭 처리
+      if (f.columnName === 'phone') return `${phoneColumn} as phone`;
+      return f.columnName;
+    });
+    // 시스템/파생/레거시 필드 추가 (FIELD_MAP 외, 기존 흐름 호환)
+    selectParts.push('region', 'custom_fields', 'callback');
+    const selectClause = selectParts.join(', ');
     
     params.push(parseInt(limit as string));
     const result = await query(
-      `SELECT 
-        ${phoneColumn} as phone,
-        name,
-        gender,
-        age,
-        grade,
-        region,
-        points,
-        store_code,
-        registration_type,
-        registered_store,
-        store_phone,
-        recent_purchase_store,
-        recent_purchase_amount,
-        total_purchase_amount,
-        recent_purchase_date,
-        custom_fields,
-        callback
-      FROM customers_unified 
+      `SELECT ${selectClause}
+      FROM customers 
       ${whereClause}
       ORDER BY created_at DESC
       LIMIT $${paramIndex}`,
