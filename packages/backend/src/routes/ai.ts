@@ -3,6 +3,7 @@ import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
 import { checkAPIStatus, extractVarCatalog, generateCustomMessages, generateMessages, parseBriefing, recommendTarget } from '../services/ai';
 import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getGenderVariants, getRegionVariants } from '../utils/normalize';
+import { FIELD_MAP } from '../utils/standard-field-map';
 
 
 // ============================================================
@@ -340,6 +341,52 @@ router.post('/recommend-target', async (req: Request, res: Response) => {
     result.estimated_count = actualCount;
     (result as any).unsubscribe_count = unsubscribeCount;
     (result as any).has_kakao_profile = hasKakaoProfile;
+
+    // ★ 샘플 고객 1명 조회 (미리보기 치환용 — displayName 키 기반)
+    let sampleCustomer: Record<string, string> = {};
+    try {
+      const sampleResult = await query(
+        `SELECT name, gender, age, grade, points, email, address,
+                recent_purchase_store, registered_store, registration_type,
+                store_phone, recent_purchase_amount, total_purchase_amount,
+                birth_date, custom_fields
+         FROM customers c
+         WHERE c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true${storeFilter} ${filterWhere}
+         AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.company_id = c.company_id AND u.phone = c.phone)
+         ORDER BY name ASC NULLS LAST LIMIT 1`,
+        [...baseParams, ...filterParams]
+      );
+
+      if (sampleResult.rows[0]) {
+        const row = sampleResult.rows[0];
+        // 표준 필드 → displayName 매핑
+        for (const f of FIELD_MAP) {
+          if (f.storageType === 'custom_fields' || f.fieldKey === 'phone' || f.fieldKey === 'sms_opt_in') continue;
+          const val = row[f.columnName];
+          if (val !== null && val !== undefined && val !== '') {
+            sampleCustomer[f.displayName] = f.dataType === 'number' && !isNaN(Number(val))
+              ? Number(val).toLocaleString()
+              : String(val);
+          }
+        }
+        // 커스텀 필드 → 실제 라벨명 매핑
+        if (row.custom_fields && typeof row.custom_fields === 'object') {
+          const defResult = await query(
+            'SELECT field_key, label FROM customer_field_definitions WHERE company_id = $1',
+            [companyId]
+          );
+          for (const def of defResult.rows) {
+            const val = row.custom_fields[def.field_key];
+            if (val !== null && val !== undefined && val !== '') {
+              sampleCustomer[def.label] = String(val);
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[AI] 샘플 고객 조회 실패 (무시)', e);
+    }
+    (result as any).sample_customer = sampleCustomer;
 
     return res.json(result);
   } catch (error) {

@@ -39,6 +39,7 @@ interface AiCampaignResultPopupProps {
   campaign: any;
   formatRejectNumber: (num: string) => string;
   targetRecipients?: any[];
+  sampleCustomer?: Record<string, string>;
 }
 
 export default function AiCampaignResultPopup({
@@ -77,6 +78,7 @@ export default function AiCampaignResultPopup({
   campaign,
   formatRejectNumber,
   targetRecipients,
+  sampleCustomer,
 }: AiCampaignResultPopupProps) {
   if (!show) return null;
 
@@ -258,12 +260,14 @@ export default function AiCampaignResultPopup({
                             <div className="flex gap-2">
                               <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-xs ${selectedChannel === 'KAKAO' ? 'bg-yellow-100' : 'bg-purple-100'}`}>{selectedChannel === 'KAKAO' ? '💬' : '📱'}</div>
                               <div className={`rounded-2xl rounded-tl-sm p-3 shadow-sm border text-[12px] leading-[1.6] whitespace-pre-wrap break-all overflow-hidden text-gray-700 max-w-[95%] ${selectedChannel === 'KAKAO' ? 'bg-yellow-50 border-yellow-200' : 'bg-white border-gray-100'}`}>
-                              {aiResult?.usePersonalization ? (() => {
-                                  const sampleData: Record<string, string> = { '이름': '김민수', '포인트': '12,500', '등급': 'VIP', '매장명': '강남점', '지역': '서울', '구매금액': '350,000', '구매횟수': '8', '평균주문금액': '43,750', 'LTV점수': '85' };
+                              {(() => {
                                   let text = msg.message_text || '';
-                                  Object.entries(sampleData).forEach(([k, v]) => { text = text.replace(new RegExp(`%${k}%`, 'g'), v); });
+                                  const sc = sampleCustomer || {};
+                                  if (Object.keys(sc).length > 0) {
+                                    Object.entries(sc).forEach(([k, v]) => { text = text.replace(new RegExp(`%${k}%`, 'g'), v); });
+                                  }
                                   return wrapAdText(text);
-                                })() : wrapAdText(msg.message_text || '')}
+                                })()}
                               </div>
                             </div>
                             )}
@@ -340,24 +344,20 @@ className="flex-1 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex 
 onClick={() => {
   const msg = aiResult?.messages?.[selectedAiMsgIdx]?.message_text || campaign.messageContent || '';
                     const cb = selectedCallback || '';
-                    const firstR = targetRecipients?.[0];
+                    const sc = sampleCustomer || {};
                     const replaceVars = (text: string) => {
-                      if (!text || !firstR) return text;
-                      return text
-                        .replace(/%이름%/g, firstR.name || '')
-                        .replace(/%등급%/g, firstR.grade || '')
-                        .replace(/%지역%/g, firstR.region || '')
-                        .replace(/%매장명%/g, firstR.store_name || '')
-                        .replace(/%포인트%/g, firstR.point != null ? String(firstR.point) : '')
-                        .replace(/%기타1%/g, firstR.extra1 || '')
-                        .replace(/%기타2%/g, firstR.extra2 || '')
-                        .replace(/%기타3%/g, firstR.extra3 || '');
+                      if (!text) return text;
+                      let result = text;
+                      Object.entries(sc).forEach(([k, v]) => { result = result.replace(new RegExp(`%${k}%`, 'g'), v); });
+                      // 치환 안 된 %변수% 제거 (sampleCustomer에 없는 경우)
+                      result = result.replace(/%[^%\s]{1,20}%/g, '');
+                      return result;
                     };
                     const smsRaw = isAd ? `(광고)${msg}\n무료거부${optOutNumber.replace(/-/g, '')}` : msg;
                     const lmsRaw = isAd ? `(광고) ${msg}\n무료수신거부 ${formatRejectNumber(optOutNumber)}` : msg;
                     const smsMsg = replaceVars(smsRaw);
                     const lmsMsg = replaceVars(lmsRaw);
-                    setSpamFilterData({sms: smsMsg, lms: lmsMsg, callback: cb, msgType: selectedChannel as 'SMS'|'LMS'|'MMS', firstRecipient: firstR || undefined});
+                    setSpamFilterData({sms: smsMsg, lms: lmsMsg, callback: cb, msgType: selectedChannel as 'SMS'|'LMS'|'MMS'});
                     setShowSpamFilter(true);
 }}
 className="flex-1 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 flex items-center justify-center gap-2"

@@ -175,6 +175,7 @@ export default function Dashboard() {
   const [showCustomSendModal, setShowCustomSendModal] = useState(false);
   const [showSpamFilter, setShowSpamFilter] = useState(false);
   const [spamFilterData, setSpamFilterData] = useState<{sms?: string; lms?: string; callback: string; msgType: 'SMS'|'LMS'|'MMS'; firstRecipient?: Record<string, any>}>({callback:'',msgType:'SMS'});
+  const [sampleCustomer, setSampleCustomer] = useState<Record<string, string>>({});
   const [sendTimeOption, setSendTimeOption] = useState<'ai' | 'now' | 'custom'>('now');
   const [successSendInfo, setSuccessSendInfo] = useState<string>('');  // 성공 모달용 발송 정보
   const [successChannel, setSuccessChannel] = useState<string>('');  // ★ #8 수정: 성공모달 전용 채널
@@ -1251,6 +1252,7 @@ const handleAiCampaignGenerate = async (promptOverride?: string) => {
       usePersonalization: result.use_personalization || false,
       personalizationVars: result.personalization_vars || [],
     });
+    setSampleCustomer(result.sample_customer || {});
     
     // 추천 채널로 기본 설정
     const kakaoEnabled = !!(user as any)?.company?.kakaoEnabled;
@@ -2558,6 +2560,7 @@ const campaignData = {
           campaign={campaign}
           formatRejectNumber={formatRejectNumber}
           targetRecipients={targetRecipients}
+          sampleCustomer={sampleCustomer}
         />
         <AiPreviewModal
           show={showPreview}
