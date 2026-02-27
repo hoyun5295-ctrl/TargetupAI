@@ -117,7 +117,7 @@
 |---|------|------|--------|------|
 | 1 | 대시보드 회사명 — 슈퍼관리자 수정이 반영 안 됨 | 버그 | 낮음 | ✅ 완료 |
 | 2 | AI 매핑 화면 개편 — 표준 17개 명확 나열 + 커스텀 필드 라벨 지정 | 기능개편 | 중간 | ✅ 완료 |
-| 3 | 직접 타겟 설정 — enabled-fields 기반 동적 필터 조건 | 기능개발 | 중간 | 🔧 코드 배포 · 버그 수정 필요 |
+| 3 | 직접 타겟 설정 — enabled-fields 기반 동적 필터 조건 | 기능개발 | 중간 | 🔧 백엔드 버그 수정 완료 · 발송창 수정 필요 |
 | 4 | 수신거부 양방향 동기화 (독립 관리 vs DB 연동) | 설계토의 | 높음 | 대기 |
 | 5 | AI 한줄로 입력 포맷 강제화 + 샘플 고객 미리보기 + 이모지 제거 | 기능개선 | 중간 | ✅ 완료 |
 
@@ -163,21 +163,24 @@
     - `handleTargetExtracted` 콜백으로 기존 발송 흐름 연결
 - **수정 파일 3개:** DirectTargetFilterModal.tsx(신규), Dashboard.tsx, customers.ts
 
-- **🚨 버그: 타겟 추출 후 발송 모달 미표시**
+- **🚨 버그: 타겟 추출 후 발송 모달 미표시 — ✅ 수정 완료 (D43-3b, 2026-02-27)**
   - **증상:** 대상 인원 10,000명 조회 성공 → "타겟 추출" 클릭 → 아무 반응 없음 (발송 모달 안 뜸)
-  - **추정 원인 (다음 세션에서 확인 필요):**
-    1. **extract API 500 에러 가능성** — SELECT 컬럼 확장(6→17개)으로 customers_unified 뷰에 없는 컬럼 참조 시 SQL 에러. 특히 `store_phone`, `registration_type`, `registered_store`, `recent_purchase_store` 등이 뷰에 미포함일 수 있음
-    2. **smsOptIn 파라미터 변경** — 기존: `smsOptIn: true` 고정 전달 → 신규: sms_opt_in 필드가 selectedFields에 없으면 `smsOptIn: false`로 전달되어 filter-count와 extract 결과 불일치 가능
-    3. **handleTargetExtracted 에러 핸들링 부재** — extract API가 실패해도 catch 없이 조용히 실패 (DirectTargetFilterModal에는 catch 있지만 toast 알림 없음)
-  - **디버깅 순서:**
-    1. 브라우저 Network 탭에서 `/api/customers/extract` 응답 확인 (200 vs 500)
-    2. 500이면 서버 로그에서 SQL 에러 확인 → customers_unified 뷰의 컬럼 목록과 extract SELECT 대조
-    3. 200이면 응답 body에 `success: true`와 `recipients` 배열 존재 확인
-    4. DirectTargetFilterModal의 `onExtracted` 호출 여부 확인 (console.log 추가)
-  - **수정 방향:**
-    - extract SELECT를 customers_unified 뷰에 실제 존재하는 컬럼만으로 제한
-    - DirectTargetFilterModal에 에러 toast 추가
-    - smsOptIn 기본값 처리 검증
+  - **확정 원인 3가지:**
+    1. **extract SELECT 하드코딩 + customers_unified 뷰 불일치** — SELECT 컬럼 17개 하드코딩으로 나열 + `FROM customers_unified` 사용 → DDL 이후 뷰 미갱신으로 `store_phone`, `registration_type` 등 컬럼 참조 시 SQL 에러 → 500 반환 → `data.success` undefined → `onExtracted` 미호출
+    2. **age 필터 birth_date 역산** — `buildDynamicFilter`에서 age 조건을 `EXTRACT(YEAR FROM AGE(birth_date))`로 처리 → `birth_date` NULL인 고객 전부 탈락 → 연령대 필터 시 0명
+    3. **에러 핸들링 부재** — extract API 500 에러 시 DirectTargetFilterModal에서 `!res.ok` 체크 없이 `res.json()` 시도 → 파싱 실패하거나 success 없어서 조용히 실패
+  - **수정 내용 (customers.ts + DirectTargetFilterModal.tsx):**
+    - **extract SELECT 동적화:** 하드코딩 17개 컬럼 → `getColumnFields()` (FIELD_MAP 기반) + region/custom_fields/callback 추가. 필드 변경 시 FIELD_MAP만 수정하면 자동 반영
+    - **customers_unified → customers 테이블 직접 조회:** extract + filter-count 모두 뷰 의존 제거
+    - **age 필터 수정:** `EXTRACT(YEAR FROM AGE(birth_date))` → `age` 컬럼 직접 사용 (birth_date NULL인 고객도 필터 가능)
+    - **에러 핸들링 추가:** `!res.ok` 체크 + `!data.success` 체크 + catch 네트워크 에러 → 모두 커스텀 알림 모달 표시 (animate-in zoom-in-95, error/warning/info 아이콘 분기)
+    - **loadTargetCount에도 동일 에러 핸들링 적용**
+  - **수정 파일 2개:** customers.ts, DirectTargetFilterModal.tsx
+  - **기간계 미접촉:** campaigns.ts, spam-filter.ts, messageUtils.ts, results.ts, billing.ts, Dashboard.tsx 전부 미수정
+
+- **📋 다음: 직접타겟발송 발송창 내부 수정사항 (D43-3c)**
+  - Harold님 확인 후 구체적 수정 내용 정리 예정
+  - 발송 모달 표시까지는 정상 동작 확인 후 진행
 
 #### 안건 #4: 수신거부 양방향 동기화 (설계 토의 필요)
 
@@ -207,7 +210,7 @@
 1. ~~**#1** 대시보드 회사명 (빠른 해결)~~ ✅ 완료
 2. ~~**#2** AI 매핑 화면 개편 (컴포넌트 분리 + 태그 클릭 UI)~~ ✅ 완료
 3. ~~**#5** AI 한줄로 포맷 강제화 + 미리보기 + 이모지 제거~~ ✅ 완료
-4. **#3** 직접 타겟 설정 — 🔧 코드 배포 완료, **타겟 추출→발송모달 연결 버그 수정 필요** ← 다음 세션 최우선
+4. **#3** 직접 타겟 설정 — 백엔드 버그 수정 완료, **직접타겟발송 발송창 내부 수정사항 해결** ← 다음 세션 최우선
 5. **#4** 수신거부 동기화 (설계 깊이 논의 후 구현)
 
 → 각 안건을 별도 채팅 세션에서 설계→컨펌→구현→테스트→정립 후 다음으로 진행
@@ -231,7 +234,7 @@
 | D42 발송현황 하드코딩 제거 | ✅ 완료 |
 | D43 안건#1 회사명 | ✅ 완료 |
 | D43 안건#2 매핑 UI 개편 | ✅ 완료 |
-| D43 안건#3 직접타겟 리팩토링 | 🔧 코드 배포 · 발송모달 연결 버그 수정 필요 |
+| D43 안건#3 직접타겟 리팩토링 | 🔧 백엔드 버그 수정 완료 · 발송창 내부 수정 필요 |
 | D43 안건#5 AI 포맷+미리보기+이모지 | ✅ 완료 |
 | AI 맞춤한줄 Phase 1 (AI-CUSTOM-SEND.md) | ✅ 8단계 전체 완료 |
 | 선불 요금제 Phase 1-A | ✅ 완료 |
@@ -446,6 +449,7 @@
 
 | 날짜 | 완료 항목 |
 |------|----------|
+| 02-27 | D43-3b 직접타겟 백엔드 버그 3건 수정: ①extract SELECT 하드코딩→getColumnFields() FIELD_MAP 동적+customers_unified→customers 직접조회 ②filter-count도 customers_unified→customers 전환 ③buildDynamicFilter age 필터 EXTRACT(birth_date)→age 컬럼 직접사용 ④DirectTargetFilterModal 에러핸들링+커스텀알림모달 추가. 수정 2파일(customers.ts, DirectTargetFilterModal.tsx) |
 | 02-27 | D43 안건#3 직접타겟 리팩토링: DirectTargetFilterModal.tsx 신규(646줄)+Dashboard.tsx 405줄 감소+customers.ts 옵션 동적화+extract SELECT 확장+buildDynamicFilter contains 지원. **🚨 타겟추출→발송모달 연결 버그 미해결 (다음 세션)** |
 | 02-27 | D43 안건#5 AI 한줄로 3종 개선: ①개인화필수 파싱(services/ai.ts parsePersonalizationDirective) ②샘플고객 미리보기(routes/ai.ts sample_customer+Dashboard+AiCampaignResultPopup 동적 치환) ③이모지 강제제거(services/ai.ts stripEmojis, SMS/LMS/MMS 후처리). 수정 5파일 |
 | 02-27 | D43 안건#2 AI 매핑 화면 개편: 컴포넌트 분리(FileUploadMappingModal.tsx 신규)+태그클릭 2열 그리드+커스텀 +/- 슬롯+upload.ts 백엔드 지원. 수정 3파일 |

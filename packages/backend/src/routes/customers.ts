@@ -105,15 +105,15 @@ function buildDynamicFilter(filters: any, startIndex: number) {
         params.push(daysAgo.toISOString().split('T')[0]);
       }
     } else if (field === 'age') {
-      // 나이는 birth_date로 계산
+      // age 컬럼 직접 사용 (birth_date 없는 고객도 필터 가능)
       if (operator === 'gte') {
-        whereClause += ` AND EXTRACT(YEAR FROM AGE(birth_date)) >= $${paramIndex++}`;
+        whereClause += ` AND age >= $${paramIndex++}`;
         params.push(Number(value));
       } else if (operator === 'lte') {
-        whereClause += ` AND EXTRACT(YEAR FROM AGE(birth_date)) <= $${paramIndex++}`;
+        whereClause += ` AND age <= $${paramIndex++}`;
         params.push(Number(value));
       } else if (operator === 'between' && Array.isArray(value)) {
-        whereClause += ` AND EXTRACT(YEAR FROM AGE(birth_date)) BETWEEN $${paramIndex++} AND $${paramIndex++}`;
+        whereClause += ` AND age BETWEEN $${paramIndex++} AND $${paramIndex++}`;
         params.push(Number(value[0]), Number(value[1]));
       }
     } else if (['name', 'email', 'address', 'registration_type', 'registered_store', 'recent_purchase_store', 'store_phone'].includes(field)) {
