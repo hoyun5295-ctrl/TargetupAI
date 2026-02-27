@@ -641,6 +641,10 @@ ${usePersonalization ? `- 사용할 개인화 변수: ${personalizationTags}
         // ★ 안전장치: 구분선 자동 제거 (모바일 줄넘김 방지)
         msgField = msgField.replace(/[━─═＿_~\-]{3,}/g, '');
         msgField = msgField.replace(/\n{3,}/g, '\n\n'); // 빈줄 3개 이상 → 2개로
+        // ★ 안전장치: SMS/LMS/MMS 이모지 강제 제거 (카카오만 허용)
+        if (channel !== '카카오' && channel !== 'KAKAO') {
+          msgField = stripEmojis(msgField);
+        }
         msgField = msgField.trim();
         (variant as any).message_text = msgField;
         
@@ -973,6 +977,76 @@ function calculateKoreanBytes(text: string): number {
     bytes += text.charCodeAt(i) > 127 ? 2 : 1;
   }
   return bytes;
+}
+
+/**
+ * SMS/LMS/MMS 이모지 강제 제거 안전장치
+ * - AI가 프롬프트 무시하고 이모지를 넣는 경우 후처리로 제거
+ * - 허용: ★☆●○◎◇◆□■△▲▽▼→←↑↓♠♣♥♡♦※☎▶◀【】「」『』 등 KS X 1001 특수문자
+ * - 제거: 유니코드 이모지 (Emoticons, Pictographs, Transport, Flags 등)
+ * - 카카오 채널은 이모지 허용이므로 호출하지 않음
+ */
+function stripEmojis(text: string): string {
+  return text
+    // Surrogate pair 이모지 (U+1F000 이상) — 대부분의 컬러 이모지
+    .replace(/[\u{1F600}-\u{1F64F}]/gu, '')   // Emoticons
+    .replace(/[\u{1F300}-\u{1F5FF}]/gu, '')   // Misc Symbols & Pictographs
+    .replace(/[\u{1F680}-\u{1F6FF}]/gu, '')   // Transport & Map
+    .replace(/[\u{1F700}-\u{1F77F}]/gu, '')   // Alchemical
+    .replace(/[\u{1F780}-\u{1F7FF}]/gu, '')   // Geometric Extended
+    .replace(/[\u{1F800}-\u{1F8FF}]/gu, '')   // Supplemental Arrows
+    .replace(/[\u{1F900}-\u{1F9FF}]/gu, '')   // Supplemental Symbols
+    .replace(/[\u{1FA00}-\u{1FA6F}]/gu, '')   // Chess Symbols
+    .replace(/[\u{1FA70}-\u{1FAFF}]/gu, '')   // Symbols Extended-A
+    .replace(/[\u{1F1E0}-\u{1F1FF}]/gu, '')   // Regional Indicators (Flags)
+    .replace(/[\u{231A}-\u{231B}]/gu, '')     // ⌚⌛
+    .replace(/[\u{23E9}-\u{23F3}]/gu, '')     // ⏩~⏳
+    .replace(/[\u{23F8}-\u{23FA}]/gu, '')     // ⏸~⏺
+    .replace(/[\u{25FB}-\u{25FE}]/gu, '')     // ◻◼◽◾
+    .replace(/[\u{2614}-\u{2615}]/gu, '')     // ☔☕
+    .replace(/[\u{2648}-\u{2653}]/gu, '')     // ♈~♓ (별자리)
+    .replace(/[\u{267F}]/gu, '')              // ♿
+    .replace(/[\u{2693}]/gu, '')              // ⚓
+    .replace(/[\u{26A1}]/gu, '')              // ⚡
+    .replace(/[\u{26AA}-\u{26AB}]/gu, '')     // ⚪⚫
+    .replace(/[\u{26BD}-\u{26BE}]/gu, '')     // ⚽⚾
+    .replace(/[\u{26C4}-\u{26C5}]/gu, '')     // ⛄⛅
+    .replace(/[\u{26D4}]/gu, '')              // ⛔
+    .replace(/[\u{26EA}]/gu, '')              // ⛪
+    .replace(/[\u{26F2}-\u{26F3}]/gu, '')     // ⛲⛳
+    .replace(/[\u{26F5}]/gu, '')              // ⛵
+    .replace(/[\u{26FA}]/gu, '')              // ⛺
+    .replace(/[\u{26FD}]/gu, '')              // ⛽
+    .replace(/[\u{2702}]/gu, '')              // ✂
+    .replace(/[\u{2705}]/gu, '')              // ✅
+    .replace(/[\u{2708}-\u{270D}]/gu, '')     // ✈~✍
+    .replace(/[\u{270F}]/gu, '')              // ✏
+    .replace(/[\u{2712}]/gu, '')              // ✒
+    .replace(/[\u{2714}]/gu, '')              // ✔
+    .replace(/[\u{2716}]/gu, '')              // ✖
+    .replace(/[\u{271D}]/gu, '')              // ✝
+    .replace(/[\u{2721}]/gu, '')              // ✡
+    .replace(/[\u{2728}]/gu, '')              // ✨
+    .replace(/[\u{2733}-\u{2734}]/gu, '')     // ✳✴
+    .replace(/[\u{2744}]/gu, '')              // ❄
+    .replace(/[\u{2747}]/gu, '')              // ❇
+    .replace(/[\u{274C}]/gu, '')              // ❌
+    .replace(/[\u{274E}]/gu, '')              // ❎
+    .replace(/[\u{2753}-\u{2755}]/gu, '')     // ❓❔❕
+    .replace(/[\u{2757}]/gu, '')              // ❗
+    .replace(/[\u{2763}-\u{2764}]/gu, '')     // ❣❤
+    .replace(/[\u{2795}-\u{2797}]/gu, '')     // ➕➖➗
+    .replace(/[\u{27A1}]/gu, '')              // ➡
+    .replace(/[\u{27B0}]/gu, '')              // ➰
+    .replace(/[\u{27BF}]/gu, '')              // ➿
+    .replace(/[\u{FE0F}]/gu, '')              // Variation Selector-16
+    .replace(/[\u{200D}]/gu, '')              // Zero Width Joiner
+    .replace(/[\u{20E3}]/gu, '')              // Combining Enclosing Keycap
+    // 연속 공백 정리
+    .replace(/  +/g, ' ')
+    .replace(/ *\n/g, '\n')    // 줄 끝 공백 제거
+    .replace(/\n /g, '\n')     // 줄 시작 공백 제거
+    .trim();
 }
 
 // 프로모션 브리핑 파싱 (parseBriefing)
@@ -1364,6 +1438,10 @@ ${channel} 채널에 최적화된 3가지 맞춤 문안(A/B/C)을 생성해주�
         // ★ 안전장치: 구분선 자동 제거 (모바일 줄넘김 방지)
         msg = msg.replace(/[━─═＿_~\-]{3,}/g, '');
         msg = msg.replace(/\n{3,}/g, '\n\n');
+        // ★ 안전장치: SMS/LMS/MMS 이모지 강제 제거 (카카오만 허용)
+        if (channel !== '카카오' && channel !== 'KAKAO') {
+          msg = stripEmojis(msg);
+        }
         msg = msg.trim();
         variant.message_text = msg;
 
