@@ -6,7 +6,7 @@ import path from 'path';
 import * as XLSX from 'xlsx';
 import { query } from '../config/database';
 import { normalizeByFieldKey, normalizeRegion } from '../utils/normalize';
-import { FIELD_MAP, getColumnFields, getCustomFields, getFieldByKey } from '../utils/standard-field-map';
+import { CATEGORY_LABELS, FIELD_MAP, getColumnFields, getCustomFields, getFieldByKey } from '../utils/standard-field-map';
 
 // Excel 시리얼넘버 → YYYY-MM-DD 변환
 function excelSerialToDateStr(serial: number): string | null {
@@ -258,11 +258,29 @@ JSON 형식으로만 응답해줘 (다른 설명 없이):
     const hasPhone = Object.values(mapping).includes('phone');
     const unmapped = Object.entries(mapping).filter(([_, v]) => v === null).map(([k, _]) => k);
 
+    // 표준 필드 정보 (프론트엔드 동적 렌더링용 — 필수 17개 + 파생 필드)
+    const standardFields = FIELD_MAP.filter(f => f.storageType === 'column').map(f => ({
+      fieldKey: f.fieldKey,
+      displayName: f.displayName,
+      category: f.category,
+      dataType: f.dataType,
+      sortOrder: f.sortOrder
+    }));
+    // 파생 필드 추가 (DB 컬럼 존재, FIELD_MAP 미포함이지만 AI 매핑 대상)
+    standardFields.push(
+      { fieldKey: 'birth_year', displayName: '출생연도', category: 'basic', dataType: 'number', sortOrder: 5.1 },
+      { fieldKey: 'birth_month_day', displayName: '생일(월-일)', category: 'basic', dataType: 'string', sortOrder: 5.2 },
+      { fieldKey: 'region', displayName: '지역', category: 'basic', dataType: 'string', sortOrder: 7.1 }
+    );
+    standardFields.sort((a: any, b: any) => a.sortOrder - b.sortOrder);
+
     return res.json({
       success: true,
       mapping,
       unmapped,
       hasPhone,
+      standardFields,
+      categoryLabels: CATEGORY_LABELS,
       message: hasPhone ? 'AI 매핑 완료' : '전화번호 컬럼을 찾을 수 없습니다.'
     });
 
@@ -277,7 +295,7 @@ JSON 형식으로만 응답해줘 (다른 설명 없이):
 // ================================================================
 router.post('/save', authenticate, async (req: Request, res: Response) => {
   try {
-    const { fileId, mapping } = req.body;
+    const { fileId, mapping, customLabels } = req.body;
     const companyId = req.user?.companyId;
     const userId = (req as any).user?.userId;
     
@@ -357,7 +375,7 @@ router.post('/save', authenticate, async (req: Request, res: Response) => {
     res.json({ success: true, fileId, totalRows, message: '백그라운드 처리 시작' });
 
     // 백그라운드 처리 (res 반환 이후 실행)
-    processUploadInBackground(fileId, filePath, mapping, companyId, userId, startedAt).catch(err => {
+    processUploadInBackground(fileId, filePath, mapping, companyId, userId, startedAt, customLabels).catch(err => {
       console.error('[업로드 백그라운드] 치명적 에러:', err);
     });
 
@@ -376,7 +394,8 @@ async function processUploadInBackground(
   mapping: Record<string, string>,
   companyId: string,
   userId: string | null,
-  startedAt: string
+  startedAt: string,
+  customLabels?: Record<string, string>
 ) {
   let insertCount = 0;
   let duplicateCount = 0;
@@ -643,7 +662,8 @@ async function processUploadInBackground(
         const customMappings: Array<{ fieldKey: string; label: string }> = [];
         for (const [header, fieldKey] of Object.entries(mapping)) {
           if (typeof fieldKey === 'string' && fieldKey.startsWith('custom_')) {
-            customMappings.push({ fieldKey, label: header });
+            const label = customLabels?.[fieldKey] || header;
+            customMappings.push({ fieldKey, label });
           }
         }
         for (const cm of customMappings) {

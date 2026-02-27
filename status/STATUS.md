@@ -115,17 +115,21 @@
 
 | # | 안건 | 성격 | 난이도 | 상태 |
 |---|------|------|--------|------|
-| 1 | 대시보드 회사명 — 슈퍼관리자 수정이 반영 안 됨 | 버그 | 낮음 | 대기 |
+| 1 | 대시보드 회사명 — 슈퍼관리자 수정이 반영 안 됨 | 버그 | 낮음 | ✅ 완료 |
 | 2 | AI 매핑 화면 개편 — 표준 17개 명확 나열 + 커스텀 필드 라벨 지정 | 기능개편 | 중간 | 대기 |
 | 3 | 직접 타겟 설정 — enabled-fields 기반 동적 필터 조건 | 기능개발 | 중간 | 대기 |
 | 4 | 수신거부 양방향 동기화 (독립 관리 vs DB 연동) | 설계토의 | 높음 | 대기 |
 | 5 | AI 한줄로 입력 포맷 강제화 — "개인화 필수: 필드1, 필드2" | 기능개선 | 낮~중간 | 대기 |
 
-#### 안건 #1: 대시보드 회사명 미반영
+#### 안건 #1: 대시보드 회사명 미반영 — ✅ 완료
 
 - **증상:** 슈퍼관리자에서 회사명 → "테스트계정" 수정 완료했으나, 대시보드 좌측 상단에 "디버깅테스트" 표시
-- **원인 추정:** Dashboard.tsx가 companies 테이블 실시간 조회가 아닌 로그인 시점 세션/토큰 저장값 사용
-- **수정 방향:** companies 테이블에서 실시간 조회 또는 세션 갱신 로직 추가
+- **원인:** 이중 문제 — ① auth.ts가 `c.name`(구 컬럼) 조회, 슈퍼관리자는 `company_name` 수정 → 컬럼 불일치 ② authStore가 로그인 시점 localStorage 캐시 사용
+- **해결 (D43-1, 2026-02-27):**
+  - auth.ts: 로그인 쿼리 `c.name` → `c.company_name` 통일
+  - companies.ts: GET /settings에 `company_name` 추가, PUT /:id에서 `name`도 동기 수정
+  - Dashboard.tsx: `companyNameFromDB` state 추가 → loadCompanySettings에서 DB 실시간 조회값 우선 표시
+- **수정 파일 3개:** auth.ts, companies.ts, Dashboard.tsx
 
 #### 안건 #2: AI 매핑 결과 화면 개편
 
@@ -166,8 +170,8 @@
 
 #### 진행 순서 (Harold님 확정)
 
-1. **#1** 대시보드 회사명 (빠른 해결)
-2. **#5** AI 한줄로 포맷 강제화 (백엔드 프롬프트 수정 위주)
+1. ~~**#1** 대시보드 회사명 (빠른 해결)~~ ✅ 완료
+2. **#5** AI 한줄로 포맷 강제화 (백엔드 프롬프트 수정 위주) ← 다음
 3. **#2** AI 매핑 화면 개편 (프론트 UI 핵심)
 4. **#3** 직접 타겟 설정 (enabled-fields + 동적 쿼리)
 5. **#4** 수신거부 동기화 (설계 깊이 논의 후 구현)
@@ -185,6 +189,7 @@
 
 ### ✅ 이전 완료 요약
 
+> - 2026-02-27 (8차) D43 안건#1 완료 — 대시보드 회사명 미반영 해결: auth.ts c.name→c.company_name 통일, companies.ts name 동기수정+settings에 company_name 추가, Dashboard.tsx DB 실시간 조회 우선 표시. 수정 3파일
 > - 2026-02-27 (7차) D41+D42 완료 — 대시보드 동적 카드 시스템 전체 개편 + 발송현황 하드코딩 제거
 > - 2026-02-27 (6차) D41 세션2 완료 + D42 발송현황 하드코딩 제거 — AdminDashboard.tsx 대시보드탭 추가, Dashboard.tsx 고객현황 하드코딩 제거→동적카드+블러, 발송현황 VIP/30일매출→성공건수/평균성공률/총사용금액
 > - 2026-02-27 (5차) 중진공 실사 대비 데모 고객DB 10,000명 엑셀 생성
@@ -450,6 +455,7 @@
 
 | 날짜 | 완료 항목 |
 |------|----------|
+| 02-27 | D43 안건#1 회사명 미반영 해결: auth.ts c.name→c.company_name 통일, companies.ts name동기수정+settings company_name추가, Dashboard.tsx DB실시간조회 우선표시. 수정 3파일 |
 | 02-27 | D41 세션2 대시보드 대개편 완료 + D42 발송현황 수정: AdminDashboard.tsx 대시보드탭(4/8모드+17종체크)+Dashboard.tsx 고객현황 하드코딩 제거→동적카드+블러+발송현황 3칸(성공건수/성공률/사용금액). 수정 2파일 |
 | 02-27 | D41 세션1 백엔드 API: dashboard-card-pool.ts(카드풀17종)+companies.ts(dashboard-cards 집계API)+admin.ts(카드설정 GET/PUT)+idx_company_settings_unique+plans 오염 수정. 신규1+수정2파일 |
 | 02-27 | DashboardHeader.tsx AI 분석 메뉴 스타일 변경: 맨 앞 이동, Sparkles 아이콘 제거, gold+emphasized 유지 |

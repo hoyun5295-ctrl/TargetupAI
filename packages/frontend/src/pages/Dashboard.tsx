@@ -18,6 +18,7 @@ import CustomerDBModal from '../components/CustomerDBModal';
 import CustomerInsightModal from '../components/CustomerInsightModal';
 import DashboardHeader from '../components/DashboardHeader';
 import DirectPreviewModal from '../components/DirectPreviewModal';
+import FileUploadMappingModal from '../components/FileUploadMappingModal';
 import LineGroupErrorModal from '../components/LineGroupErrorModal';
 import MmsUploadModal from '../components/MmsUploadModal';
 import PlanApprovalModal from '../components/PlanApprovalModal';
@@ -228,11 +229,6 @@ export default function Dashboard() {
   const [messageEditProgress, setMessageEditProgress] = useState(0);
   const [messageEditing, setMessageEditing] = useState(false);
   // 파일 업로드 관련
-  const [uploadedFile, setUploadedFile] = useState<any>(null);
-  const [fileHeaders, setFileHeaders] = useState<string[]>([]);
-  const [filePreview, setFilePreview] = useState<any[]>([]);
-  const [fileTotalRows, setFileTotalRows] = useState(0);
-  const [fileId, setFileId] = useState('');
   const [showUploadResult, setShowUploadResult] = useState(false);
   const [uploadResult, setUploadResult] = useState({ insertCount: 0, duplicateCount: 0 });
   const [showPlanLimitError, setShowPlanLimitError] = useState(false);
@@ -686,9 +682,31 @@ export default function Dashboard() {
   };
   const [toast, setToast] = useState<{show: boolean, type: 'success' | 'error', message: string}>({show: false, type: 'success', message: ''});
   const [optOutNumber, setOptOutNumber] = useState('080-000-0000');
-  const [fileUploading, setFileUploading] = useState(false);
-  const [columnMapping, setColumnMapping] = useState<{[key: string]: string | null}>({});
-  const [mappingStep, setMappingStep] = useState<'upload' | 'mapping' | 'confirm'>('upload');
+
+  // 업로드 저장 시작 → 프로그레스 모달 표시 + 폴링
+  const handleUploadSaveStart = (savedFileId: string, totalRows: number) => {
+    setShowFileUpload(false);
+    setShowUploadProgressModal(true);
+    setUploadProgress({ status: 'processing', total: totalRows, processed: 0, percent: 0, insertCount: 0, duplicateCount: 0, errorCount: 0, message: '처리 시작...' });
+    const progressInterval = setInterval(async () => {
+      try {
+        const pRes = await fetch(`/api/upload/progress/${savedFileId}`, {
+          headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+        });
+        const pData = await pRes.json();
+        setUploadProgress(pData);
+        if (pData.status === 'completed' || pData.status === 'failed') {
+          clearInterval(progressInterval);
+        }
+      } catch (e) { /* ignore */ }
+    }, 2000);
+  };
+
+  const handleUploadPlanLimit = (data: any) => {
+    setPlanLimitInfo(data);
+    setShowPlanLimitError(true);
+  };
+
   // 타겟 필터
   const [filter, setFilter] = useState({
     gender: '',
@@ -2866,321 +2884,12 @@ const campaignData = {
           </div>
         )}
 
-        {showFileUpload && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-xl shadow-2xl w-[900px] max-h-[90vh] overflow-hidden">
-              
-              {/* Step 1: 파일 업로드 */}
-              {mappingStep === 'upload' && (
-                <>
-                  <div className="p-4 border-b bg-gradient-to-r from-green-50 to-emerald-50 flex justify-between items-center">
-                    <h3 className="font-bold text-lg flex items-center gap-2">
-                      <span>📤</span> 파일 업로드 캠페인 생성
-                    </h3>
-                    <button onClick={() => { 
-                      setShowFileUpload(false); 
-                      setUploadedFile(null);
-                      setFileHeaders([]);
-                      setFilePreview([]);
-                      setFileTotalRows(0);
-                      setFileId('');
-                      setMappingStep('upload');
-                      setColumnMapping({});
-                    }} className="text-gray-500 hover:text-gray-700 text-xl">✕</button>
-                  </div>
-                  <div className="p-6 space-y-6 overflow-y-auto max-h-[80vh]">
-                    {!fileHeaders.length ? (
-                      <div className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center hover:border-green-400 transition-colors relative">
-                        {fileUploading && (
-                          <div className="absolute inset-0 bg-white bg-opacity-90 flex flex-col items-center justify-center rounded-xl z-10">
-                            <div className="text-4xl mb-4 animate-bounce">📊</div>
-                            <div className="text-lg font-semibold text-green-600">파일 분석 중...</div>
-                            <div className="text-sm text-gray-500 mt-2">잠시만 기다려주세요</div>
-                          </div>
-                        )}
-                        <div className="text-4xl mb-4">📁</div>
-                        <p className="text-gray-600 mb-2">엑셀 또는 CSV 파일을 드래그하거나 클릭하여 업로드</p>
-                        <p className="text-sm text-gray-400 mb-4">지원 형식: .xlsx, .xls, .csv</p>
-                        <input
-                          type="file"
-                          accept=".xlsx,.xls,.csv"
-                          onChange={async (e) => {
-                            const file = e.target.files?.[0];
-                            if (file) {
-                              setUploadedFile(file);
-                              setFileUploading(true);
-                              const formData = new FormData();
-                              formData.append('file', file);
-                              try {
-                                const token = localStorage.getItem('token');
-                                const res = await fetch('/api/upload/parse', {
-                                  method: 'POST',
-                                  headers: { Authorization: `Bearer ${token}` },
-                                  body: formData
-                                });
-                                const data = await res.json();
-                                if (data.success) {
-                                  setFileHeaders(data.headers);
-                                  setFilePreview(data.preview);
-                                  setFileTotalRows(data.totalRows);
-                                  setFileId(data.fileId);
-                                } else {
-                                  alert(data.error || '파일 처리 실패');
-                                }
-                              } catch (err) {
-                                alert('파일 업로드 중 오류가 발생했습니다.');
-                              } finally {
-                                setFileUploading(false);
-                              }
-                            }
-                          }}
-                          className="hidden"
-                          id="file-upload"
-                        />
-                        <label
-                          htmlFor="file-upload"
-                          className={`inline-block px-6 py-3 text-white rounded-lg transition-colors ${fileUploading ? 'bg-gray-400 cursor-wait' : 'bg-green-600 cursor-pointer hover:bg-green-700'}`}
-                        >
-                          {fileUploading ? '⏳ 파일 분석 중...' : '파일 선택'}
-                        </label>
-                        <div className="mt-6 bg-gray-50 rounded-lg p-4 text-left">
-                          <h4 className="font-semibold text-gray-700 mb-2">📋 업로드 안내</h4>
-                          <ul className="text-sm text-gray-600 space-y-1">
-                            <li>• 첫 번째 행은 컬럼명으로 인식됩니다</li>
-                            <li>• 전화번호 컬럼은 필수입니다</li>
-                            <li>• AI가 자동으로 컬럼을 매핑합니다</li>
-                          </ul>
-                        </div>
-                      </div>
-                    ) : (
-                      <>
-                        <div className="bg-green-50 border border-green-200 rounded-lg p-4 flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                            <span className="text-2xl">📄</span>
-                            <div>
-                              <div className="font-semibold text-gray-800">{uploadedFile?.name}</div>
-                              <div className="text-sm text-gray-500">총 {fileTotalRows.toLocaleString()}건의 데이터</div>
-                            </div>
-                          </div>
-                          <button onClick={() => { setUploadedFile(null); setFileHeaders([]); setFilePreview([]); setFileTotalRows(0); setFileId(''); }} className="text-gray-400 hover:text-red-500">✕ 다시 선택</button>
-                        </div>
-                        <div>
-                          <h4 className="font-semibold text-gray-700 mb-3">📋 감지된 컬럼 ({fileHeaders.length}개)</h4>
-                          <div className="flex flex-wrap gap-2">
-                            {fileHeaders.map((h, i) => (
-                              <span key={i} className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm">{h}</span>
-                            ))}
-                          </div>
-                        </div>
-                        <div>
-                          <h4 className="font-semibold text-gray-700 mb-3">👀 데이터 미리보기 (상위 5건)</h4>
-                          <div className="overflow-x-auto border rounded-lg">
-                            <table className="w-full text-sm">
-                              <thead className="bg-gray-50">
-                                <tr>
-                                  {fileHeaders.map((h, i) => (
-                                    <th key={i} className="px-3 py-2 text-left font-medium text-gray-600 border-b whitespace-nowrap">{h}</th>
-                                  ))}
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {filePreview.map((row: any, rowIdx) => (
-                                  <tr key={rowIdx} className="hover:bg-gray-50">
-                                    {fileHeaders.map((_, colIdx) => (
-                                      <td key={colIdx} className="px-3 py-2 border-b text-gray-700 whitespace-nowrap">{row[fileHeaders[colIdx]] ?? '-'}</td>
-                                    ))}
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        </div>
-                        <button
-                          onClick={async () => {
-                            try {
-                              setFileUploading(true);
-                              const res = await fetch('/api/upload/mapping', {
-                                method: 'POST',
-                                headers: { 
-                                  'Content-Type': 'application/json',
-                                  'Authorization': `Bearer ${localStorage.getItem('token')}`
-                                },
-                                body: JSON.stringify({ headers: fileHeaders })
-                              });
-                              const data = await res.json();
-                              if (data.success) {
-                                setColumnMapping(data.mapping);
-                                setMappingStep('mapping');
-                              } else {
-                                alert(data.error || '매핑 실패');
-                              }
-                            } catch (err) {
-                              alert('매핑 중 오류가 발생했습니다.');
-                            } finally {
-                              setFileUploading(false);
-                            }
-                          }}
-                          disabled={fileUploading}
-                          className="w-full py-4 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-lg font-medium hover:from-green-700 hover:to-emerald-700 flex items-center justify-center gap-2 text-lg disabled:opacity-50"
-                        >
-                          {fileUploading ? (<><span className="animate-spin">⏳</span>AI가 컬럼을 분석하고 있습니다...</>) : (<><span>🤖</span>AI 자동 매핑 시작</>)}
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </>
-              )}
-
-              {/* Step 2: AI 매핑 결과 */}
-              {mappingStep === 'mapping' && (
-                <>
-                  <div className="p-4 border-b bg-green-50 flex justify-between items-center">
-                    <h3 className="font-bold text-lg flex items-center gap-2">
-                      <span>🤖</span> AI 매핑 결과
-                    </h3>
-                    <button onClick={() => { setShowFileUpload(false); setUploadedFile(null); setFileHeaders([]); setFilePreview([]); setFileTotalRows(0); setFileId(''); setMappingStep('upload'); setColumnMapping({}); }} className="text-gray-500 hover:text-gray-700 text-xl">✕</button>
-                  </div>
-                  <div className="p-6 space-y-6 overflow-y-auto max-h-[80vh]">
-                  <div className="bg-green-50 border border-green-200 rounded-lg p-4 flex items-center justify-center gap-3">
-                      <span className="text-2xl">📄</span>
-                      <div className="text-center">
-                        <div className="font-semibold text-gray-800">{uploadedFile?.name}</div>
-                        <div className="text-sm text-gray-500">총 {fileTotalRows.toLocaleString()}건의 데이터</div>
-                      </div>
-                    </div>
-                    <div>
-                      <h4 className="font-semibold text-gray-700 mb-3">📋 컬럼 매핑 (수정 가능)</h4>
-                      <div className="space-y-2 max-h-[400px] overflow-y-auto">
-                        {Object.entries(columnMapping).map(([header, dbCol]) => (
-                          <div key={header} className="grid grid-cols-[1fr_40px_1fr] items-center p-3 bg-white rounded-lg border gap-2">
-                          <span className="text-sm font-medium text-gray-700">{header}</span>
-                          <span className="text-gray-400 text-center">→</span>
-                          <select
-                            value={dbCol || ''}
-                            onChange={(e) => setColumnMapping({...columnMapping, [header]: e.target.value || null})}
-                            className={`px-3 py-2 rounded-lg border text-sm w-full ${dbCol ? 'bg-green-50 border-green-300' : 'bg-gray-50 border-gray-300'}`}
-                          >
-                              <option value="">매핑 안함</option>
-                              <option value="phone">📱 전화번호</option>
-                              <option value="name">👤 이름</option>
-                              <option value="gender">⚧ 성별</option>
-                              <option value="birth_year">🎂 출생연도</option>
-                              <option value="birth_month_day">🎁 생일(월-일)</option>
-                              <option value="birth_date">📅 생년월일 전체</option>
-                              <option value="grade">⭐ 등급</option>
-                              <option value="region">📍 지역</option>
-                              <option value="sms_opt_in">✅ 수신동의</option>
-                              <option value="email">📧 이메일</option>
-                              <option value="total_purchase">💰 총구매액</option>
-                              <option value="last_purchase_date">📅 최근구매일</option>
-                              <option value="purchase_count">🛒 구매횟수</option>
-                              <option value="callback">📞 회신번호(매장번호)</option>
-                              <option value="store_name">🏬 소속매장명</option>
-                              <option value="store_code">🏷️ 매장코드</option>
-                            </select>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                    {!Object.values(columnMapping).includes('phone') && (
-                      <div className="p-4 bg-red-50 border border-red-200 rounded-lg text-red-600 flex items-center gap-2">
-                        <span>⚠️</span>
-                        <span>전화번호 컬럼을 매핑해주세요 (필수)</span>
-                      </div>
-                    )}
-                    <div className="flex gap-3">
-                      <button onClick={() => setMappingStep('upload')} className="flex-1 py-3 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50">← 이전</button>
-                      <button
-                        onClick={async () => {
-                          try {
-                            setFileUploading(true);
-                            const res = await fetch('/api/upload/save', {
-                              method: 'POST',
-                              headers: { 
-                                'Content-Type': 'application/json',
-                                'Authorization': `Bearer ${localStorage.getItem('token')}`
-                              },
-                              body: JSON.stringify({ 
-                                fileId, 
-                                mapping: columnMapping
-                              })
-                            });
-                            const data = await res.json();
-                            
-                            if (data.code === 'PLAN_LIMIT_EXCEEDED') {
-                              setPlanLimitInfo(data);
-                              setShowPlanLimitError(true);
-                              setShowFileUpload(false);
-                              setFileUploading(false);
-                              return;
-                            }
-                            
-                            if (!data.success) {
-                              alert(data.error || '저장 실패');
-                              setFileUploading(false);
-                              return;
-                            }
-                            
-                            // 백그라운드 처리 시작됨 → 파일 선택 모달 닫고 프로그레스 모달 표시
-                            setShowFileUpload(false);
-                            setShowUploadProgressModal(true);
-                            setUploadProgress({ status: 'processing', total: data.totalRows || fileTotalRows, processed: 0, percent: 0, insertCount: 0, duplicateCount: 0, errorCount: 0, message: '처리 시작...' });
-                            
-                            // 2초마다 폴링
-                            const progressInterval = setInterval(async () => {
-                              try {
-                                const pRes = await fetch(`/api/upload/progress/${fileId}`, {
-                                  headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
-                                });
-                                const pData = await pRes.json();
-                                setUploadProgress(pData);
-                                
-                                if (pData.status === 'completed' || pData.status === 'failed') {
-                                  clearInterval(progressInterval);
-                                  setFileUploading(false);
-                                  // 완료 시 상태 초기화
-                                  if (pData.status === 'completed') {
-                                    setUploadedFile(null);
-                                    setFileHeaders([]);
-                                    setFilePreview([]);
-                                    setFileTotalRows(0);
-                                    setFileId('');
-                                    setMappingStep('upload');
-                                    setColumnMapping({});
-                                    // 고객 목록 새로고침이 필요하면 여기서 호출
-                                  }
-                                }
-                              } catch (e) {}
-                            }, 2000);
-                            
-                          } catch (err) {
-                            alert('저장 요청 중 오류가 발생했습니다.');
-                            setFileUploading(false);
-                          }
-                        }}
-                        disabled={!Object.values(columnMapping).includes('phone') || fileUploading}
-                        className="flex-1 py-4 bg-green-700 text-white rounded-lg font-medium hover:bg-green-800 flex items-center justify-center gap-2 text-lg disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        {fileUploading ? (
-                          <>
-                            <span className="animate-spin">⏳</span>
-                            요청 중...
-                          </>
-                        ) : (
-                          <>
-                            <span>💾</span>
-                            고객 데이터 저장 ({fileTotalRows.toLocaleString()}건)
-                          </>
-                        )}
-                      </button>
-                    </div>
-                  </div>
-                </>
-              )}
-
-            </div>
-          </div>
-        )}
+        <FileUploadMappingModal
+          show={showFileUpload}
+          onClose={() => setShowFileUpload(false)}
+          onSaveStart={handleUploadSaveStart}
+          onPlanLimitExceeded={handleUploadPlanLimit}
+        />
         <CustomerInsightModal show={showInsights} onClose={() => setShowInsights(false)} stats={stats} />
 
         <TodayStatsModal show={showTodayStats} onClose={() => setShowTodayStats(false)} stats={stats} recentCampaignsCount={recentCampaigns.length} />
