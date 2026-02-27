@@ -57,8 +57,22 @@ export default function FileUploadMappingModal({ show, onClose, onSaveStart, onP
   // 커스텀 슬롯
   const [customSlots, setCustomSlots] = useState<CustomSlot[]>([]);
 
-  // 팝업 (어떤 필드의 선택 팝업이 열려 있는지)
+  // 팝업 (어떤 필드의 선택 팝업이 열려 있는지 + 위치)
   const [activePopup, setActivePopup] = useState<string | null>(null);
+  const [popupPos, setPopupPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
+
+  // 팝업 열기 (클릭 위치 기반)
+  const openPopup = (key: string, e: React.MouseEvent) => {
+    if (activePopup === key) {
+      setActivePopup(null);
+      return;
+    }
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const top = spaceBelow < 200 ? rect.top - 200 : rect.bottom + 4;
+    setPopupPos({ top, left: Math.min(rect.left, window.innerWidth - 320) });
+    setActivePopup(key);
+  };
 
   // ── 모달 닫힐 때 상태 초기화 ──
   useEffect(() => {
@@ -301,7 +315,7 @@ export default function FileUploadMappingModal({ show, onClose, onSaveStart, onP
     onClose();
   };
 
-  // ── 미배정 컬럼 선택 팝업 렌더링 ──
+  // ── 미배정 컬럼 선택 팝업 렌더링 (fixed 포지션) ──
   const renderColumnPopup = (
     targetKey: string,
     onSelect: (header: string) => void,
@@ -311,13 +325,16 @@ export default function FileUploadMappingModal({ show, onClose, onSaveStart, onP
     return (
       <>
         {/* 클릭 외부 오버레이 */}
-        <div className="fixed inset-0 z-40" onClick={() => setActivePopup(null)} />
-        {/* 팝업 */}
-        <div className="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-xl p-3 z-50 min-w-[220px] max-w-[400px]">
+        <div className="fixed inset-0 z-[60]" onClick={() => setActivePopup(null)} />
+        {/* 팝업 (fixed — overflow에 안 가림) */}
+        <div
+          className="fixed bg-white border border-gray-200 rounded-lg shadow-xl p-3 z-[70] min-w-[240px] max-w-[360px]"
+          style={{ top: popupPos.top, left: popupPos.left }}
+        >
           {unassignedHeaders.length > 0 ? (
             <>
               <p className="text-xs text-gray-500 mb-2 font-medium">미배정 엑셀 컬럼</p>
-              <div className="flex flex-wrap gap-1.5 max-h-[160px] overflow-y-auto">
+              <div className="flex flex-wrap gap-1.5 max-h-[180px] overflow-y-auto">
                 {unassignedHeaders.map(h => (
                   <button
                     key={h}
@@ -520,7 +537,7 @@ export default function FileUploadMappingModal({ show, onClose, onSaveStart, onP
                                   {mapped ? (
                                     <div className="inline-flex items-center gap-1">
                                       <button
-                                        onClick={() => setActivePopup(activePopup === field.fieldKey ? null : field.fieldKey)}
+                                        onClick={(e) => openPopup(field.fieldKey, e)}
                                         className="px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded text-xs hover:bg-emerald-100 transition-colors truncate max-w-[120px]"
                                       >
                                         {mapped}
@@ -534,7 +551,7 @@ export default function FileUploadMappingModal({ show, onClose, onSaveStart, onP
                                     </div>
                                   ) : (
                                     <button
-                                      onClick={() => setActivePopup(activePopup === field.fieldKey ? null : field.fieldKey)}
+                                      onClick={(e) => openPopup(field.fieldKey, e)}
                                       className="px-2 py-0.5 bg-gray-50 text-gray-400 border border-dashed border-gray-300 rounded text-xs hover:border-blue-400 hover:text-blue-500 hover:bg-blue-50 transition-colors"
                                     >
                                       클릭하여 선택
@@ -584,7 +601,7 @@ export default function FileUploadMappingModal({ show, onClose, onSaveStart, onP
                           {slot.excelColumn ? (
                             <div className="inline-flex items-center gap-1">
                               <button
-                                onClick={() => setActivePopup(activePopup === `custom_slot_${index}` ? null : `custom_slot_${index}`)}
+                                onClick={(e) => openPopup(`custom_slot_${index}`, e)}
                                 className="px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded text-xs hover:bg-emerald-100 transition-colors truncate max-w-[120px]"
                               >
                                 {slot.excelColumn}
@@ -598,7 +615,7 @@ export default function FileUploadMappingModal({ show, onClose, onSaveStart, onP
                             </div>
                           ) : (
                             <button
-                              onClick={() => setActivePopup(activePopup === `custom_slot_${index}` ? null : `custom_slot_${index}`)}
+                              onClick={(e) => openPopup(`custom_slot_${index}`, e)}
                               className="px-2 py-0.5 bg-gray-50 text-gray-400 border border-dashed border-gray-300 rounded text-xs hover:border-blue-400 hover:text-blue-500 hover:bg-blue-50 transition-colors"
                             >
                               클릭하여 선택
