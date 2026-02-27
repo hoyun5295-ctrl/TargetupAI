@@ -129,6 +129,34 @@ function buildVarCatalogFromFieldMap(): {
   return { fieldMappings, availableVars };
 }
 
+/**
+ * "개인화 필수: 필드1, 필드2" 파싱 유틸
+ * - 입력 문자열에서 "개인화 필수:" 키워드 감지 및 필드명 추출
+ * - availableVars(displayName 기반)에 매칭되는 변수만 반환
+ * - "개인화 필수:" 없으면 null 반환 → 기존 AI 자체 판단 로직 유지 (하위호환)
+ * - 매칭 안 되는 필드명은 무시 (로그만 출력)
+ */
+function parsePersonalizationDirective(
+  input: string,
+  availableVars: string[]
+): { cleanPrompt: string; requestedVars: string[] } | null {
+  const match = input.match(/개인화\s*필수\s*[:：]\s*(.+)$/);
+  if (!match || match.index === undefined) return null;
+
+  const cleanPrompt = input.substring(0, match.index).trim();
+  const fieldNames = match[1].split(/[,，、]+/).map(s => s.trim()).filter(Boolean);
+
+  const matchedVars: string[] = [];
+  for (const name of fieldNames) {
+    if (availableVars.includes(name) && !matchedVars.includes(name)) {
+      matchedVars.push(name);
+    }
+  }
+
+  console.log(`[AI] 개인화 필수 파싱: 요청=${fieldNames.join(', ')} → 매칭=${matchedVars.join(', ') || '없음'}`);
+  return { cleanPrompt, requestedVars: matchedVars };
+}
+
 // ============================================================
 // 유틸리티 함수
 // ============================================================
@@ -500,6 +528,10 @@ export async function generateMessages(
   const defaultCatalog = buildVarCatalogFromFieldMap();
   const varCatalog = extraContext?.availableVarsCatalog || defaultCatalog.fieldMappings;
   const availableVars = extraContext?.availableVars || defaultCatalog.availableVars;
+
+  // ★ "개인화 필수:" 파싱 — AI에는 프로모션 내용만 전달, 개인화 지시는 분리
+  const personalizationDirective = parsePersonalizationDirective(prompt, availableVars);
+  const cleanPrompt = personalizationDirective?.cleanPrompt || prompt;
   
   // 개인화 태그 생성 (카탈로그 기반 동적 생성)
   const personalizationTags = personalizationVars.map(v => `%${v}%`).join(', ');
@@ -508,8 +540,11 @@ export async function generateMessages(
   const smsAvailableBytes = getAvailableSmsBytes(isAd, rejectNumber);
   const byteLimit = channel === 'SMS' ? smsAvailableBytes : channel === 'LMS' ? 2000 : channel === 'MMS' ? 2000 : channel === '카카오' ? 4000 : 1000;
   
-  // ★ 변수 카탈로그 프롬프트 생성
-  const varCatalogPrompt = buildVarCatalogPrompt(varCatalog, availableVars);
+  // ★ 변수 카탈로그 프롬프트 — 개인화 지정 시 해당 변수만 표시 (AI 오류 최소화 핵심)
+  const effectiveVars = (usePersonalization && personalizationVars.length > 0)
+    ? personalizationVars
+    : availableVars;
+  const varCatalogPrompt = buildVarCatalogPrompt(varCatalog, effectiveVars);
 
   // ★ SMS 바이트 제한 안내 (광고/비광고 구분)
   const smsByteInstruction = channel === 'SMS'
@@ -528,7 +563,7 @@ export async function generateMessages(
     : '';
   
   const userMessage = `## 캠페인 정보
-- 요청: ${prompt}
+- 요청: ${cleanPrompt}
 - 채널: ${channel}
 - 타겟 고객 수: ${targetInfo.total_count.toLocaleString()}명
 
@@ -696,11 +731,22 @@ export async function recommendTarget(
   // 키워드 감지: 개별회신번호
   const useIndividualCallback = /매장번호|각 매장|주이용매장|개별번호|각자 번호/.test(objective);
   
-  // 개인화 키워드 감지
-  const usePersonalization = /개인화/.test(objective);
-  
-  // ★ 개인화 변수 동적 감지 (field_mappings 기반 - 하드코딩 제거!)
-  const personalizationVars = detectPersonalizationVars(objective, fieldMappings, availableVars);
+  // ★ "개인화 필수:" 명시적 파싱 우선, 없으면 기존 자동 감지 (하위호환)
+  const personalizationDirective = parsePersonalizationDirective(objective, availableVars);
+  const cleanObjective = personalizationDirective?.cleanPrompt || objective;
+
+  let usePersonalization: boolean;
+  let personalizationVars: string[];
+
+  if (personalizationDirective && personalizationDirective.requestedVars.length > 0) {
+    // 명시적 "개인화 필수:" 지정 → 해당 변수만
+    usePersonalization = true;
+    personalizationVars = personalizationDirective.requestedVars;
+  } else {
+    // 기존 로직: "개인화" 키워드 감지 + 동적 변수 감지
+    usePersonalization = /개인화/.test(objective);
+    personalizationVars = detectPersonalizationVars(objective, fieldMappings, availableVars);
+  }
 
   const businessType = companyInfo?.business_type || '기타';
   const brandName = companyInfo?.brand_name || companyInfo?.company_name || '브랜드';
@@ -713,8 +759,11 @@ export async function recommendTarget(
   const regions = schema.regions?.join(', ') || '서울, 경기, 부산, 대구, 인천, 울산, 대전, 광주, 제주, 전북, 전남, 경북, 경남, 충북, 충남, 강원, 세종';
   const customKeys = schema.custom_field_keys || [];
   
-  // ★ 변수 카탈로그 프롬프트 (AI가 문안 추천 시 참조)
-  const varCatalogPrompt = buildVarCatalogPrompt(fieldMappings, availableVars);
+  // ★ 변수 카탈로그 프롬프트 — 개인화 필수 지정 시 해당 변수만 표시
+  const effectiveVars = (personalizationDirective?.requestedVars.length)
+    ? personalizationDirective.requestedVars
+    : availableVars;
+  const varCatalogPrompt = buildVarCatalogPrompt(fieldMappings, effectiveVars);
 
   const userMessage = `## 회사 정보
 - 업종: ${businessType}
@@ -732,7 +781,7 @@ ${getKoreanCalendar()}
 이벤트 기간 작성 시 반드시 위 달력의 요일을 확인하세요!
 
 ## 마케팅 목표
-${objective}
+${cleanObjective}
 
 ## 현재 고객 데이터 통계
 - 전체 고객: ${customerStats.total}명
@@ -831,11 +880,14 @@ ${hasKakaoProfile ? '⚠️ 이 고객사는 카카오 발신 프로필이 등�
     aiPersonalizationVars = aiPersonalizationVars.filter((v: string) => availableVars.includes(v));
     
     // ★ 개인화 판단: 백엔드 확정값 우선 (AI가 지맘대로 바꾸는 문제 방지)
-    // - "개인화" 키워드 있으면 → 무조건 true (AI 응답 무시)
-    // - "개인화" 키워드 없으면 → 무조건 false (AI가 임의로 켜는 것 방지)
+    // - "개인화 필수:" 명시 → 사용자 지정 변수 강제 (AI 응답 무시)
+    // - "개인화" 키워드만 있으면 → AI 감지 + 자동 감지 결합
+    // - 둘 다 없으면 → false
     const finalUsePersonalization = usePersonalization;
     const finalPersonalizationVars = finalUsePersonalization
-      ? (aiPersonalizationVars.length > 0 ? aiPersonalizationVars : personalizationVars)
+      ? (personalizationDirective?.requestedVars.length
+        ? personalizationDirective.requestedVars
+        : (aiPersonalizationVars.length > 0 ? aiPersonalizationVars : personalizationVars))
       : [];
     
     return {

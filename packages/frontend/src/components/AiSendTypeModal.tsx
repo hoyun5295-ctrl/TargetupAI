@@ -88,7 +88,7 @@ export default function AiSendTypeModal({ onClose, onSelectHanjullo, onSelectCus
               <textarea
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
-                placeholder="예: 30대 여성 VIP 고객에게 봄 신상품 20% 할인 안내 문자 보내줘"
+                placeholder="예: 전체고객 30%할인행사 2월27일~3월1일 개인화 필수: 고객명, 등급"
                 className="w-full h-20 px-4 py-3 border border-gray-300 rounded-lg text-sm resize-none focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white placeholder-gray-400"
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey) {
@@ -99,7 +99,10 @@ export default function AiSendTypeModal({ onClose, onSelectHanjullo, onSelectCus
                 autoFocus
               />
               <div className="flex items-center justify-between mt-3">
-                <span className="text-xs text-gray-400">Enter로 바로 실행</span>
+                <div className="flex flex-col gap-0.5">
+                  <span className="text-xs text-gray-400">Enter로 바로 실행</span>
+                  <span className="text-[11px] text-gray-400">💡 <span className="text-gray-500 font-medium">개인화 필수:</span> 뒤에 업로드된 필드명을 쓰면 맞춤 변수로 활용됩니다</span>
+                </div>
                 <button
                   onClick={() => { if (prompt.trim()) onSelectHanjullo(prompt.trim()); }}
                   disabled={!prompt.trim()}
