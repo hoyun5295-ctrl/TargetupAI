@@ -3855,6 +3855,7 @@ const campaignData = {
         formatPhoneNumber={formatPhoneNumber}
         calculateBytes={calculateBytes}
         getFullMessage={getFullMessage}
+        targetFieldsMeta={targetFieldsMeta}
       />
       <SendConfirmModal
         sendConfirm={sendConfirm}

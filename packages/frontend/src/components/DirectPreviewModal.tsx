@@ -1,3 +1,8 @@
+import type { FieldMeta } from './DirectTargetFilterModal';
+
+// ★ 정규식 특수문자 이스케이프
+const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 interface DirectPreviewModalProps {
   show: boolean;
   onClose: () => void;
@@ -12,7 +17,34 @@ interface DirectPreviewModalProps {
   formatPhoneNumber: (phone: string) => string;
   calculateBytes: (text: string) => number;
   getFullMessage: (msg: string) => string;
+  // ★ D43-3c: 타겟발송 동적 필드 메타
+  targetFieldsMeta: FieldMeta[];
 }
+
+// ★ D43-3c: 동적 변수 치환 함수
+const replaceVarsWithMeta = (text: string, recipient: any, fieldsMeta: FieldMeta[], fallback: boolean = false) => {
+  if (!text || !recipient) return text;
+  let result = text;
+  fieldsMeta.forEach(fm => {
+    if (fm.field_key === 'phone' || fm.field_key === 'sms_opt_in') return;
+    const pattern = new RegExp(escapeRegExp(fm.variable), 'g');
+    const val = recipient[fm.field_key];
+    const display = val != null && val !== '' ? String(val) : (fallback ? fm.display_name : '');
+    result = result.replace(pattern, display);
+  });
+  return result;
+};
+
+// 직접발송용 하드코딩 치환 (직접발송은 기존 유지)
+const replaceVarsDirect = (text: string, recipient: any, selectedCallback: string, fallback: boolean = false) => {
+  if (!text || !recipient) return text;
+  return text
+    .replace(/%이름%/g, recipient.name || (fallback ? '홍길동' : ''))
+    .replace(/%기타1%/g, recipient.extra1 || (fallback ? '기타1' : ''))
+    .replace(/%기타2%/g, recipient.extra2 || (fallback ? '기타2' : ''))
+    .replace(/%기타3%/g, recipient.extra3 || (fallback ? '기타3' : ''))
+    .replace(/%회신번호%/g, recipient.callback || selectedCallback || '');
+};
 
 export default function DirectPreviewModal({
   show, onClose,
@@ -20,6 +52,7 @@ export default function DirectPreviewModal({
   directRecipients, targetRecipients, showTargetSend,
   selectedCallback, mmsUploadedImages,
   formatPhoneNumber, calculateBytes, getFullMessage,
+  targetFieldsMeta,
 }: DirectPreviewModalProps) {
   if (!show) return null;
 
@@ -55,34 +88,27 @@ export default function DirectPreviewModal({
                   <div className="flex gap-2 mt-1">
                     <div className="w-7 h-7 rounded-full bg-emerald-100 flex items-center justify-center shrink-0 text-xs">📱</div>
                     <div className="bg-white rounded-2xl rounded-tl-sm p-3 shadow-sm border border-gray-100 text-[13px] leading-[1.7] whitespace-pre-wrap text-gray-700 max-w-[95%]">
+                      {/* ★ D43-3c: 동적 변수 치환 (폰 프레임) */}
                       {(() => {
                         const firstR = showTargetSend ? targetRecipients[0] : directRecipients[0];
-                        const mergedMsg = getFullMessage(directMessage)
-                          .replace(/%이름%/g, firstR?.name || '홍길동')
-                          .replace(/%등급%/g, (showTargetSend ? targetRecipients[0]?.grade : '') || 'VIP')
-                          .replace(/%지역%/g, (showTargetSend ? targetRecipients[0]?.region : '') || '서울')
-                          .replace(/%구매금액%/g, (showTargetSend ? targetRecipients[0]?.amount : '') || '100,000원')
-                          .replace(/%기타1%/g, directRecipients[0]?.extra1 || '기타1')
-                          .replace(/%기타2%/g, directRecipients[0]?.extra2 || '기타2')
-                          .replace(/%기타3%/g, directRecipients[0]?.extra3 || '기타3')
-                          .replace(/%회신번호%/g, firstR?.callback || selectedCallback || '');
-                        return mergedMsg;
+                        const fullMsg = getFullMessage(directMessage);
+                        if (showTargetSend && targetFieldsMeta.length > 0) {
+                          return replaceVarsWithMeta(fullMsg, firstR, targetFieldsMeta, true);
+                        }
+                        return replaceVarsDirect(fullMsg, firstR, selectedCallback, true);
                       })()}
                     </div>
                   </div>
                 </div>
                 {/* 하단 바이트 */}
                 <div className="px-3 py-2 border-t bg-gray-50 text-center shrink-0">
+                  {/* ★ D43-3c: 동적 변수 치환 (바이트 계산) */}
                   {(() => {
-                    const mergedMsg = getFullMessage(directMessage)
-                      .replace(/%이름%/g, (showTargetSend ? targetRecipients[0]?.name : directRecipients[0]?.name) || '홍길동')
-                      .replace(/%등급%/g, (showTargetSend ? targetRecipients[0]?.grade : '') || 'VIP')
-                      .replace(/%지역%/g, (showTargetSend ? targetRecipients[0]?.region : '') || '서울')
-                      .replace(/%구매금액%/g, (showTargetSend ? targetRecipients[0]?.amount : '') || '100,000원')
-                      .replace(/%기타1%/g, directRecipients[0]?.extra1 || '기타1')
-                      .replace(/%기타2%/g, directRecipients[0]?.extra2 || '기타2')
-                      .replace(/%기타3%/g, directRecipients[0]?.extra3 || '기타3')
-                      .replace(/%회신번호%/g, (showTargetSend ? targetRecipients[0] : directRecipients[0])?.callback || selectedCallback || '');
+                    const firstR = showTargetSend ? targetRecipients[0] : directRecipients[0];
+                    const fullMsg = getFullMessage(directMessage);
+                    const mergedMsg = (showTargetSend && targetFieldsMeta.length > 0)
+                      ? replaceVarsWithMeta(fullMsg, firstR, targetFieldsMeta, true)
+                      : replaceVarsDirect(fullMsg, firstR, selectedCallback, true);
                     const mergedBytes = calculateBytes(mergedMsg);
                     const limit = directMsgType === 'SMS' ? 90 : 2000;
                     const isOver = mergedBytes > limit;
@@ -118,12 +144,14 @@ export default function DirectPreviewModal({
                     </tr>
                   </thead>
                   <tbody className="divide-y">
+                    {/* ★ D43-3c: 동적 변수 치환 (수신자별 테이블) */}
                     {(showTargetSend ? targetRecipients : directRecipients).slice(0, 10).map((r: any, idx: number) => {
-                      const varMap: Record<string, string> = showTargetSend
-                        ? { '%이름%': r.name || '', '%등급%': r.grade || '', '%지역%': r.region || '', '%구매금액%': r.total_purchase_amount ? Number(r.total_purchase_amount).toLocaleString() + '원' : '', '%회신번호%': r.callback || '' }
-                        : { '%이름%': r.name || '', '%기타1%': r.extra1 || '', '%기타2%': r.extra2 || '', '%기타3%': r.extra3 || '', '%회신번호%': r.callback || '' };
                       let msg = directMessage;
-                      Object.entries(varMap).forEach(([k, v]) => { msg = msg.replace(new RegExp(k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), v); });
+                      if (showTargetSend && targetFieldsMeta.length > 0) {
+                        msg = replaceVarsWithMeta(msg, r, targetFieldsMeta, false);
+                      } else {
+                        msg = replaceVarsDirect(msg, r, selectedCallback, false);
+                      }
                       return (
                         <tr key={idx} className="hover:bg-gray-50">
                           <td className="px-2 py-1.5 font-mono text-gray-600">{r.phone}</td>
