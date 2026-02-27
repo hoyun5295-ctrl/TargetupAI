@@ -87,10 +87,10 @@ interface TargetSendModalProps {
   handleAiMsgHelper: () => void;
 
   // 특수문자/보관함/저장
-  setShowSpecialChars: (s: string) => void;
+  setShowSpecialChars: (s: 'target' | 'direct' | null) => void;
   loadTemplates: () => void;
-  setShowTemplateBox: (s: string) => void;
-  setShowTemplateSave: (s: string) => void;
+  setShowTemplateBox: (s: 'target' | 'direct' | null) => void;
+  setShowTemplateSave: (s: 'target' | 'direct' | null) => void;
   setTemplateSaveName: (n: string) => void;
 
   // LMS/SMS 전환
