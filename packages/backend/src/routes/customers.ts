@@ -924,7 +924,7 @@ router.post('/extract', async (req: Request, res: Response) => {
       }
     }
 
-    // 데이터 추출 (전화번호 필드 동적 선택)
+    // 데이터 추출 (표준 필드 전체 + custom_fields 포함)
     const phoneColumn = phoneField || 'phone';
     
     params.push(parseInt(limit as string));
@@ -933,8 +933,16 @@ router.post('/extract', async (req: Request, res: Response) => {
         ${phoneColumn} as phone,
         name,
         gender,
+        age,
         grade,
         region,
+        points,
+        store_code,
+        registration_type,
+        registered_store,
+        store_phone,
+        recent_purchase_store,
+        recent_purchase_amount,
         total_purchase_amount,
         recent_purchase_date,
         custom_fields,
@@ -1099,21 +1107,39 @@ router.get('/enabled-fields', async (req: Request, res: Response) => {
       }
     } catch (e) { /* custom_fields 없으면 무시 */ }
 
-    // 3. 드롭다운 옵션 (실제 DB 값 기반)
-    const OPTION_COLUMNS: Record<string, string> = {
-      'gender': 'gender', 'grade': 'grade', 'region': 'region', 'store_code': 'store_code',
-    };
+    // 3. 드롭다운 옵션 (실제 DB 값 기반 — 동적 감지)
+    // 고카디널리티 필드 제외 (이름, 전화번호, 이메일, 주소는 DISTINCT 의미 없음)
+    const HIGH_CARDINALITY = ['name', 'phone', 'email', 'address'];
     const options: Record<string, string[]> = {};
-    for (const [key, col] of Object.entries(OPTION_COLUMNS)) {
+
+    // 3-1. 직접 컬럼 string 필드 → DISTINCT 조회
+    for (const f of fields) {
+      if (f.is_custom || f.data_type !== 'string' || HIGH_CARDINALITY.includes(f.field_key)) continue;
+      const mapped = getFieldByKey(f.field_key);
+      const col = mapped?.columnName || f.field_key;
       try {
         const optResult = await query(
           `SELECT DISTINCT ${col} FROM customers WHERE ${scopeWhere} AND ${col} IS NOT NULL AND ${col} != '' ORDER BY ${col} LIMIT 100`,
           scopeParams
         );
-        if (optResult.rows.length > 0) {
-          options[key] = optResult.rows.map((r: any) => r[col]);
+        if (optResult.rows.length > 0 && optResult.rows.length <= 100) {
+          options[f.field_key] = optResult.rows.map((r: any) => r[col]);
         }
       } catch (e) { /* 컬럼 없으면 무시 */ }
+    }
+
+    // 3-2. 커스텀 필드 (JSONB) string 타입 → DISTINCT 조회
+    for (const f of fields) {
+      if (!f.is_custom || f.data_type !== 'string') continue;
+      try {
+        const optResult = await query(
+          `SELECT DISTINCT custom_fields->>'${f.field_key}' as val FROM customers WHERE ${scopeWhere} AND custom_fields->>'${f.field_key}' IS NOT NULL AND custom_fields->>'${f.field_key}' != '' ORDER BY val LIMIT 100`,
+          scopeParams
+        );
+        if (optResult.rows.length > 0 && optResult.rows.length <= 100) {
+          options[f.field_key] = optResult.rows.map((r: any) => r.val);
+        }
+      } catch (e) { /* 커스텀 필드 옵션 조회 실패 무시 */ }
     }
 
     // 4. 실제 고객 1건 샘플 데이터 (AI 맞춤한줄 미리보기용)

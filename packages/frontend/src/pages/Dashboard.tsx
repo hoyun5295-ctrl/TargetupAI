@@ -18,6 +18,7 @@ import CustomerDBModal from '../components/CustomerDBModal';
 import CustomerInsightModal from '../components/CustomerInsightModal';
 import DashboardHeader from '../components/DashboardHeader';
 import DirectPreviewModal from '../components/DirectPreviewModal';
+import DirectTargetFilterModal from '../components/DirectTargetFilterModal';
 import FileUploadMappingModal from '../components/FileUploadMappingModal';
 import LineGroupErrorModal from '../components/LineGroupErrorModal';
 import MmsUploadModal from '../components/MmsUploadModal';
@@ -194,19 +195,7 @@ export default function Dashboard() {
   const [showRecentCampaigns, setShowRecentCampaigns] = useState(false);
   const [showFileUpload, setShowFileUpload] = useState(false);
   const [showDirectTargeting, setShowDirectTargeting] = useState(false);
-  // 직접 타겟 설정 관련 state
-   // 직접 타겟 설정 관련 state
-   const [targetPhoneField, setTargetPhoneField] = useState('phone');
-   const [targetSmsOptIn, setTargetSmsOptIn] = useState(true);
-   const [targetCount, setTargetCount] = useState(0);
-   const [targetCountLoading, setTargetCountLoading] = useState(false);
-   const [targetSchemaFields, setTargetSchemaFields] = useState<{name: string, label: string, type: string}[]>([]);
-   // 동적 필터 state
-   const [enabledFields, setEnabledFields] = useState<any[]>([]);
-   const [targetFilters, setTargetFilters] = useState<Record<string, string>>({});
-   const [filterOptions, setFilterOptions] = useState<Record<string, string[]>>({});
-   const [categoryLabels, setCategoryLabels] = useState<Record<string, string>>({});
-   const [expandedCats, setExpandedCats] = useState<Record<string, boolean>>({ basic: true });
+  // 직접 타겟 관련 state → DirectTargetFilterModal로 이동 (D43-3)
   const [showTemplates, setShowTemplates] = useState(false);
   const [showInsights, setShowInsights] = useState(false);
   const [showTodayStats, setShowTodayStats] = useState(false);
@@ -943,22 +932,8 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
     }
   };
 
-  // 직접 타겟 설정 - 스키마 로드
-  // 직접 타겟 설정 - 스키마 로드 (기존 유지)
-  const loadTargetSchema = async () => {
-    try {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/customers/schema', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await res.json();
-      if (data.fields) {
-        setTargetSchemaFields(data.fields);
-      }
-    } catch (error) {
-      console.error('스키마 로드 실패:', error);
-    }
-  };
+  // (D43-3) loadTargetSchema → 사용처 없음, 삭제됨
+  // (D43-3) loadEnabledFields, buildDynamicFiltersForAPI, loadTargetCount, handleTargetExtract, resetTargetFilters → DirectTargetFilterModal로 이동
 
   // SMS 템플릿 로드
   const loadTemplates = async () => {
@@ -1019,91 +994,10 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
     }
   };
 
-  // 동적 필터 - 활성 필드 로드
-  const loadEnabledFields = async () => {
+  // 직접 타겟 추출 완료 콜백 (DirectTargetFilterModal → Dashboard)
+  const handleTargetExtracted = async (recipients: any[], count: number) => {
     try {
       const token = localStorage.getItem('token');
-      const res = await fetch('/api/customers/enabled-fields', {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setEnabledFields(data.fields || []);
-        setFilterOptions(data.options || {});
-        if (data.categories) setCategoryLabels(data.categories);
-      }
-    } catch (error) {
-      console.error('필드 로드 실패:', error);
-    }
-  };
-
-  // 동적 필터 → API 포맷 변환
-  const buildDynamicFiltersForAPI = () => {
-    const filters: Record<string, any> = {};
-    for (const [fieldKey, value] of Object.entries(targetFilters)) {
-      if (!value) continue;
-      const field = enabledFields.find((f: any) => f.field_key === fieldKey);
-      if (!field) continue;
-
-      // 특수 필드 변환
-      if (fieldKey === 'age_group') {
-        const ageVal = parseInt(value);
-        if (ageVal >= 60) { filters['age'] = { operator: 'gte', value: 60 }; }
-        else { filters['age'] = { operator: 'between', value: [ageVal, ageVal + 9] }; }
-        continue;
-      }
-      if (fieldKey === 'last_purchase_date' || fieldKey === 'first_purchase_date' || fieldKey === 'last_visit_date') {
-        const dbCol = fieldKey === 'last_purchase_date' ? 'recent_purchase_date' : fieldKey;
-        filters[dbCol] = { operator: 'days_within', value: parseInt(value) };
-        continue;
-      }
-
-      const dbFieldMap: Record<string, string> = { 'opt_in_sms': 'sms_opt_in' };
-      const dbField = dbFieldMap[fieldKey] || fieldKey;
-
-      if (field.data_type === 'string') {
-        filters[dbField] = { operator: 'eq', value };
-      } else if (field.data_type === 'number') {
-        filters[dbField] = { operator: 'gte', value: Number(value) };
-      } else if (field.data_type === 'date') {
-        filters[dbField] = { operator: 'days_within', value: parseInt(value) };
-      } else if (field.data_type === 'boolean') {
-        filters[dbField] = { operator: 'eq', value: value === 'true' };
-      }
-    }
-    return filters;
-  };
-
-  // 직접 타겟 설정 - 필터 카운트
-  const loadTargetCount = async () => {
-    setTargetCountLoading(true);
-    try {
-      const token = localStorage.getItem('token');
-      const dynamicFilters = buildDynamicFiltersForAPI();
-      const res = await fetch('/api/customers/filter-count', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ dynamicFilters, smsOptIn: targetSmsOptIn })
-      });
-      const data = await res.json();
-      setTargetCount(data.count || 0);
-    } catch (error) {
-      console.error('카운트 조회 실패:', error);
-    } finally {
-      setTargetCountLoading(false);
-    }
-  };
-
-  // 직접 타겟 설정 - 타겟 추출 후 발송화면 이동
-  const handleTargetExtract = async () => {
-    if (targetCount === 0) {
-      setToast({show: true, type: 'error', message: '추출할 대상이 없습니다'});
-      setTimeout(() => setToast({show: false, type: 'error', message: ''}), 3000);
-      return;
-    }
-    try {
-      const token = localStorage.getItem('token');
-      
       // 080 수신거부번호 로드
       const settingsRes = await fetch('/api/companies/settings', {
         headers: { Authorization: `Bearer ${token}` }
@@ -1114,7 +1008,6 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
           setOptOutNumber(settingsData.reject_number);
         }
       }
-      
       // 회신번호 로드
       const cbRes = await fetch('/api/companies/callback-numbers', {
         headers: { Authorization: `Bearer ${token}` }
@@ -1125,63 +1018,27 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
         const defaultCb = cbData.numbers?.find((n: any) => n.is_default);
         if (defaultCb) setSelectedCallback(defaultCb.phone);
       }
-      
-      const dynamicFilters = buildDynamicFiltersForAPI();
-      const res = await fetch('/api/customers/extract', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({
-          dynamicFilters,
-          smsOptIn: targetSmsOptIn,
-          phoneField: targetPhoneField
-        })
-      });
-      const data = await res.json();
-      if (data.success && data.recipients) {
-        const recipients = data.recipients.map((r: any) => ({
-          phone: r.phone,
-          name: r.name || '',
-          grade: r.grade || '',
-          region: r.region || '',
-          amount: r.total_purchase_amount ? Math.floor(r.total_purchase_amount).toLocaleString() + '원' : '',
-          callback: r.callback || ''
-        }));
-        setTargetRecipients(recipients);
-        setShowDirectTargeting(false);
-        setShowTargetSend(true);
-        setToast({show: true, type: 'success', message: `${data.count}명 추출 완료`});
-        setTimeout(() => setToast({show: false, type: 'success', message: ''}), 3000);
-      }
-    } catch (error) {
-      console.error('타겟 추출 실패:', error);
-      setToast({show: true, type: 'error', message: '타겟 추출 실패'});
-      setTimeout(() => setToast({show: false, type: 'error', message: ''}), 3000);
+    } catch (err) {
+      console.error('설정 로드 실패:', err);
     }
+
+    // 수신자 매핑
+    const mapped = recipients.map((r: any) => ({
+      phone: r.phone,
+      name: r.name || '',
+      grade: r.grade || '',
+      region: r.region || '',
+      amount: r.total_purchase_amount ? Math.floor(r.total_purchase_amount).toLocaleString() + '원' : '',
+      callback: r.callback || ''
+    }));
+    setTargetRecipients(mapped);
+    setShowDirectTargeting(false);
+    setShowTargetSend(true);
+    setToast({ show: true, type: 'success', message: `${count}명 추출 완료` });
+    setTimeout(() => setToast({ show: false, type: 'success', message: '' }), 3000);
   };
 
-  // 직접 타겟 설정 - 필터 초기화
-  const resetTargetFilters = () => {
-    setTargetFilters({});
-    setTargetSmsOptIn(true);
-    setTargetCount(0);
-  };
-
-  const handleExtractTarget = async () => {
-    try {
-      const params: any = {};
-      if (filter.gender) params.gender = filter.gender;
-      if (filter.minAge) params.minAge = filter.minAge;
-      if (filter.maxAge) params.maxAge = filter.maxAge;
-      if (filter.grade) params.grade = filter.grade;
-      if (filter.smsOptIn) params.smsOptIn = 'true';
-
-      console.log('API 호출 params:', params);
-      const response = await customersApi.list({ ...params, limit: 100 });
-      setTargetResult(response.data);
-    } catch (error) {
-      console.error('타겟 추출 실패:', error);
-    }
-  };
+  // (D43-3) handleExtractTarget 레거시 제거 (미사용)
 
   // AI 타겟 추천
   const handleAiRecommendTarget = async () => {
@@ -2162,7 +2019,7 @@ const campaignData = {
             {hideAi ? (
               <>
                 <button 
-                  onClick={() => { setShowDirectTargeting(true); loadEnabledFields(); }}
+                  onClick={() => { setShowDirectTargeting(true); }}
                   className="p-5 bg-amber-500 hover:bg-amber-600 rounded-xl transition-all hover:shadow-lg text-right flex-1 flex flex-col justify-between"
                 >
                   <div>
@@ -2240,7 +2097,7 @@ const campaignData = {
 
                 {/* 직접 타겟 발송 */}
                 <button 
-                  onClick={() => { if (isSubscriptionLocked) { setShowSubscriptionLock(true); return; } setShowDirectTargeting(true); loadEnabledFields(); }}
+                  onClick={() => { if (isSubscriptionLocked) { setShowSubscriptionLock(true); return; } setShowDirectTargeting(true); }}
                   className={`p-5 bg-amber-500 hover:bg-amber-600 rounded-xl transition-all hover:shadow-lg text-right flex-1 flex flex-col justify-between ${isSubscriptionLocked ? 'opacity-60' : ''}`}
                 >
                   <div>
@@ -2619,273 +2476,12 @@ const campaignData = {
 
         <RecommendTemplateModal show={showTemplates} onClose={() => setShowTemplates(false)} onSelectTemplate={(prompt) => { setAiCampaignPrompt(prompt); setShowTemplates(false); setShowAiSendType(true); }} />
                             {/* 파일 업로드 캠페인 모달 */}
-        {/* 직접 타겟 설정 모달 */}
-        {showDirectTargeting && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-2xl shadow-2xl w-[700px] max-h-[95vh] overflow-hidden">
-              {/* 헤더 */}
-              <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center">
-                <div>
-                  <h3 className="text-lg font-bold text-gray-800">직접 타겟 설정</h3>
-                  <p className="text-sm text-gray-500 mt-0.5">필터 조건으로 대상 고객을 선택하세요</p>
-                </div>
-                <button 
-                  onClick={() => { setShowDirectTargeting(false); resetTargetFilters(); }}
-                  className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 transition-colors text-gray-400 hover:text-gray-600"
-                >
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-
-              {/* 필터 영역 */}
-              <div className="p-6 space-y-4 overflow-y-auto max-h-[65vh]">
-                {/* 수신번호 필드 (phone 고정) */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">수신번호 필드</label>
-                  <div className="w-full px-4 py-2.5 border border-gray-200 rounded-lg bg-gray-50 text-gray-700 text-sm">
-                    📱 phone (전화번호)
-                  </div>
-                </div>
-
-                <div className="border-t border-gray-100"></div>
-
-                {/* 필터 조건 헤더 */}
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-gray-700">필터 조건</span>
-                    {Object.keys(targetFilters).length > 0 && (
-                      <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full font-medium">
-                        {Object.values(targetFilters).filter(v => v).length}개 적용
-                      </span>
-                    )}
-                  </div>
-                  <button onClick={resetTargetFilters} className="text-xs text-green-600 hover:text-green-700 font-medium">초기화</button>
-                </div>
-
-                {/* 아코디언 필터 */}
-                {enabledFields.length === 0 ? (
-                  <div className="text-center py-8 text-gray-400 text-sm">
-                    필터 항목을 로딩 중...
-                  </div>
-                ) : (
-                  (() => {
-                    // 카테고리 아이콘 (UI 표시용, 영문 키 기준)
-                    const CAT_ICONS: Record<string, string> = {
-                      basic: '📋', purchase: '💰', store: '🏪',
-                      membership: '🏷️', marketing: '📱', custom: '🔧',
-                    };
-                    // 필터 대상에서 제외할 필드 (식별용/수신동의는 별도 처리)
-                    const SKIP_FIELDS = ['name', 'phone', 'email', 'address', 'sms_opt_in'];
-                    const filterableFields = enabledFields.filter((f: any) => !SKIP_FIELDS.includes(f.field_key));
-                    
-                    // 연령대 프리셋
-                    const AGE_OPTIONS = [
-                      { label: '20대', value: '20' }, { label: '30대', value: '30' },
-                      { label: '40대', value: '40' }, { label: '50대', value: '50' },
-                      { label: '60대 이상', value: '60' },
-                    ];
-                    // 금액 프리셋
-                    const AMOUNT_OPTIONS = [
-                      { label: '5만원 이상', value: '50000' }, { label: '10만원 이상', value: '100000' },
-                      { label: '50만원 이상', value: '500000' }, { label: '100만원 이상', value: '1000000' },
-                      { label: '500만원 이상', value: '5000000' },
-                    ];
-                    // 일수 프리셋
-                    const DAYS_OPTIONS = [
-                      { label: '7일 이내', value: '7' }, { label: '30일 이내', value: '30' },
-                      { label: '90일 이내', value: '90' }, { label: '180일 이내', value: '180' },
-                      { label: '1년 이내', value: '365' },
-                    ];
-
-                    const renderInput = (field: any) => {
-                      const val = targetFilters[field.field_key] || '';
-                      const set = (v: string) => setTargetFilters(prev => {
-                        if (!v) { const next = {...prev}; delete next[field.field_key]; return next; }
-                        return {...prev, [field.field_key]: v};
-                      });
-                      const selectClass = "w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent text-sm bg-white";
-
-                      // 연령대 특수 처리
-                      if (field.field_key === 'age_group') {
-                        return (
-                          <select value={val} onChange={e => set(e.target.value)} className={selectClass}>
-                            <option value="">전체</option>
-                            {AGE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                          </select>
-                        );
-                      }
-
-                      // 문자열 + DB 옵션 → 드롭다운
-                      if (field.data_type === 'string' && filterOptions[field.field_key]?.length) {
-                        return (
-                          <select value={val} onChange={e => set(e.target.value)} className={selectClass}>
-                            <option value="">전체</option>
-                            {filterOptions[field.field_key].map((opt: string) => (
-                              <option key={opt} value={opt}>{opt}</option>
-                            ))}
-                          </select>
-                        );
-                      }
-
-                      // 금액 필드 → 프리셋 드롭다운
-                      if (field.data_type === 'number' && ['total_purchase_amount', 'avg_order_value'].includes(field.field_key)) {
-                        return (
-                          <select value={val} onChange={e => set(e.target.value)} className={selectClass}>
-                            <option value="">전체</option>
-                            {AMOUNT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                          </select>
-                        );
-                      }
-
-                      // 숫자 필드 → 직접 입력
-                      if (field.data_type === 'number') {
-                        return (
-                          <input type="number" value={val} onChange={e => set(e.target.value)}
-                            placeholder="이상" className={selectClass} />
-                        );
-                      }
-
-                      // 날짜 필드 → 일수 드롭다운
-                      if (field.data_type === 'date') {
-                        return (
-                          <select value={val} onChange={e => set(e.target.value)} className={selectClass}>
-                            <option value="">전체</option>
-                            {DAYS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                          </select>
-                        );
-                      }
-
-                      // 불리언
-                      if (field.data_type === 'boolean') {
-                        return (
-                          <select value={val} onChange={e => set(e.target.value)} className={selectClass}>
-                            <option value="">전체</option>
-                            <option value="true">예</option>
-                            <option value="false">아니오</option>
-                          </select>
-                        );
-                      }
-
-                      // 기본: 텍스트 입력
-                      return (
-                        <input type="text" value={val} onChange={e => set(e.target.value)}
-                          placeholder="입력" className={selectClass} />
-                      );
-                    };
-
-                    return (
-                      <div className="space-y-2">
-                        {(() => {
-                          // 실제 필드에 있는 카테고리만 순서대로 표시
-                          const categoryOrder = ['basic', 'purchase', 'store', 'membership', 'marketing', 'custom'];
-                          const usedCategories = [...new Set(filterableFields.map((f: any) => f.category))];
-                          const orderedCategories = categoryOrder.filter(c => usedCategories.includes(c));
-                          // categoryOrder에 없는 카테고리도 표시
-                          const extraCategories = usedCategories.filter(c => !categoryOrder.includes(c));
-                          return [...orderedCategories, ...extraCategories].map(cat => {
-                            const label = `${CAT_ICONS[cat] || '📌'} ${categoryLabels[cat] || cat}`;
-                            const catFields = filterableFields.filter((f: any) => f.category === cat);
-                          if (catFields.length === 0) return null;
-                          const activeCount = catFields.filter((f: any) => targetFilters[f.field_key]).length;
-                          const isExpanded = expandedCats[cat] ?? false;
-
-                          return (
-                            <div key={cat} className="border border-gray-200 rounded-lg overflow-hidden">
-                              <button
-                                type="button"
-                                onClick={() => setExpandedCats(prev => ({ ...prev, [cat]: !prev[cat] }))}
-                                className="w-full px-4 py-3 flex items-center justify-between bg-gray-50 hover:bg-gray-100 transition-colors"
-                              >
-                                <div className="flex items-center gap-2">
-                                  <span className="text-sm font-medium text-gray-700">{label}</span>
-                                  <span className="text-xs text-gray-400">({catFields.length})</span>
-                                  {activeCount > 0 && (
-                                    <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full font-semibold">{activeCount}</span>
-                                  )}
-                                </div>
-                                <svg className={`w-4 h-4 text-gray-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                                </svg>
-                              </button>
-                              {isExpanded && (
-                                <div className="p-4 bg-white grid grid-cols-2 gap-3 border-t border-gray-100">
-                                  {catFields.map((field: any) => (
-                                    <div key={field.field_key}>
-                                      <label className="block text-xs text-gray-500 mb-1.5">{field.display_name}</label>
-                                      {renderInput(field)}
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          );
-                          });
-                        })()}
-                      </div>
-                    );
-                  })()
-                )}
-
-                {/* 수신동의 */}
-                <div className="flex items-center gap-2 p-3 bg-gray-50 rounded-lg">
-                  <input 
-                    type="checkbox" 
-                    id="targetSmsOptIn" 
-                    checked={targetSmsOptIn}
-                    onChange={(e) => setTargetSmsOptIn(e.target.checked)}
-                    className="w-4 h-4 text-green-600 rounded focus:ring-green-500" 
-                  />
-                  <label htmlFor="targetSmsOptIn" className="text-sm text-gray-700">수신동의 고객만 포함</label>
-                </div>
-
-                {/* 조회 버튼 */}
-                <button
-                  onClick={loadTargetCount}
-                  disabled={targetCountLoading}
-                  className="w-full py-2.5 border border-green-600 text-green-700 rounded-lg hover:bg-green-50 transition-colors font-medium disabled:opacity-50"
-                >
-                  {targetCountLoading ? '조회 중...' : '대상 인원 조회'}
-                </button>
-              </div>
-
-              {/* 푸터 - 대상 인원 + 버튼 */}
-              <div className="px-6 py-4 border-t border-gray-100 bg-gray-50">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center">
-                      <Users className="w-5 h-5 text-green-600" />
-                    </div>
-                    <div>
-                      <div className="text-sm text-gray-500">대상 인원</div>
-                      <div className="text-2xl font-bold text-green-700">
-                        {targetCountLoading ? '...' : targetCount.toLocaleString()}
-                        <span className="text-base font-normal text-gray-500 ml-1">명</span>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex gap-3">
-                    <button
-                      onClick={() => { setShowDirectTargeting(false); resetTargetFilters(); }}
-                      className="px-5 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-100 transition-colors font-medium"
-                    >
-                      취소
-                    </button>
-                    <button
-                      onClick={handleTargetExtract}
-                      disabled={targetCount === 0}
-                      className="px-6 py-2.5 bg-green-700 text-white rounded-lg hover:bg-green-800 transition-colors font-medium flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      <Users className="w-4 h-4" />
-                      타겟 추출
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
+        {/* 직접 타겟 설정 모달 (D43-3: 컴포넌트 분리) */}
+        <DirectTargetFilterModal
+          show={showDirectTargeting}
+          onClose={() => setShowDirectTargeting(false)}
+          onExtracted={handleTargetExtracted}
+        />
 
         <FileUploadMappingModal
           show={showFileUpload}
