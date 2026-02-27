@@ -5,8 +5,44 @@ import { authenticate } from '../middlewares/auth';
 const router = Router();
 
 // ================================================================
+// 공통 헬퍼: 유료 플랜 업체의 customers.sms_opt_in 동기화
+// plan_id가 있는 업체만 customers 테이블 연동 (플랜 없으면 스킵)
+// ================================================================
+async function syncCustomerOptIn(companyId: string, phone: string, optIn: boolean): Promise<void> {
+  const planResult = await query(
+    `SELECT plan_id FROM companies WHERE id = $1`,
+    [companyId]
+  );
+  if (!planResult.rows[0]?.plan_id) return; // 플랜 없으면 스킵
+
+  await query(
+    `UPDATE customers SET sms_opt_in = $1, updated_at = NOW()
+     WHERE company_id = $2 AND phone = $3 AND sms_opt_in = $4`,
+    [optIn, companyId, phone, !optIn]
+  );
+}
+
+// 벌크 버전 (업로드용)
+async function syncCustomerOptInBulk(companyId: string, phones: string[], optIn: boolean): Promise<void> {
+  const planResult = await query(
+    `SELECT plan_id FROM companies WHERE id = $1`,
+    [companyId]
+  );
+  if (!planResult.rows[0]?.plan_id) return; // 플랜 없으면 스킵
+
+  if (phones.length === 0) return;
+
+  await query(
+    `UPDATE customers SET sms_opt_in = $1, updated_at = NOW()
+     WHERE company_id = $2 AND phone = ANY($3) AND sms_opt_in = $4`,
+    [optIn, companyId, phones, !optIn]
+  );
+}
+
+// ================================================================
 // GET /api/unsubscribes/080callback - 나래인터넷 080 콜백 (토큰 인증)
-// 변경: 해당 080번호 사용하는 고객사의 모든 user에게 broadcast INSERT
+// D43-4: opt_out_auto_sync = true인 업체만 콜백 처리
+// D43-4: 유료 플랜 업체는 customers.sms_opt_in = false 동시 업데이트
 // ================================================================
 router.get('/080callback', async (req: Request, res: Response) => {
   try {
@@ -32,9 +68,9 @@ router.get('/080callback', async (req: Request, res: Response) => {
       return res.send('0');
     }
 
-    // 080번호로 고객사 찾기
+    // D43-4: 080번호로 고객사 찾기 + opt_out_auto_sync 체크
     const companyResult = await query(
-      `SELECT id, company_name FROM companies
+      `SELECT id, company_name, opt_out_auto_sync FROM companies
        WHERE REPLACE(REPLACE(opt_out_080_number, '-', ''), ' ', '') = $1
          AND status = 'active'
        LIMIT 1`,
@@ -47,6 +83,12 @@ router.get('/080callback', async (req: Request, res: Response) => {
     }
 
     const company = companyResult.rows[0];
+
+    // D43-4: 자동동기화 미사용 업체면 콜백 무시
+    if (!company.opt_out_auto_sync) {
+      console.log(`[080콜백] 자동동기화 미사용 업체 - ${company.company_name} (${phone})`);
+      return res.send('0');
+    }
 
     // 해당 고객사의 모든 활성 사용자 조회
     const usersResult = await query(
@@ -72,6 +114,9 @@ router.get('/080callback', async (req: Request, res: Response) => {
       if (result.rows.length > 0) insertedCount++;
     }
 
+    // D43-4: 유료 플랜 업체면 customers.sms_opt_in = false 동시 업데이트
+    await syncCustomerOptIn(company.id, phone, false);
+
     console.log(`[080콜백] 수신거부 등록: ${phone} → ${company.company_name} (${insertedCount}/${usersResult.rows.length}명, 080: ${fr})`);
     return res.send('1');
   } catch (error) {
@@ -85,6 +130,7 @@ router.use(authenticate);
 
 // ================================================================
 // GET /api/unsubscribes - 수신거부 목록 조회 (company_id 기준, 중복 제거)
+// D43-4: opt_out_080_number, opt_out_auto_sync 응답에 추가
 // ================================================================
 router.get('/', async (req: Request, res: Response) => {
   try {
@@ -126,6 +172,14 @@ router.get('/', async (req: Request, res: Response) => {
       new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     );
     const paged = sorted.slice(offset, offset + Number(limit));
+
+    // D43-4: 회사의 080 설정 정보 조회
+    const companyInfo = await query(
+      `SELECT opt_out_080_number, opt_out_auto_sync FROM companies WHERE id = $1`,
+      [companyId]
+    );
+    const opt080Number = companyInfo.rows[0]?.opt_out_080_number || '';
+    const optOutAutoSync = companyInfo.rows[0]?.opt_out_auto_sync || false;
     
     return res.json({
       success: true,
@@ -136,6 +190,8 @@ router.get('/', async (req: Request, res: Response) => {
         limit: Number(limit),
         totalPages: Math.ceil(total / Number(limit)),
       },
+      opt080Number,
+      optOutAutoSync,
     });
   } catch (error) {
     console.error('수신거부 목록 조회 에러:', error);
@@ -145,6 +201,7 @@ router.get('/', async (req: Request, res: Response) => {
 
 // ================================================================
 // POST /api/unsubscribes - 직접 추가 (user_id 기준)
+// D43-4: 유료 플랜 업체는 customers.sms_opt_in = false 동시 업데이트
 // ================================================================
 router.post('/', async (req: Request, res: Response) => {
   try {
@@ -167,6 +224,9 @@ router.post('/', async (req: Request, res: Response) => {
        ON CONFLICT (user_id, phone) DO NOTHING`,
       [companyId, userId, cleanPhone]
     );
+
+    // D43-4: 유료 플랜 업체면 customers.sms_opt_in = false 동시 업데이트
+    await syncCustomerOptIn(companyId, cleanPhone, false);
     
     return res.json({ success: true, message: '등록되었습니다.' });
   } catch (error) {
@@ -177,6 +237,7 @@ router.post('/', async (req: Request, res: Response) => {
 
 // ================================================================
 // POST /api/unsubscribes/upload - 엑셀 업로드 (user_id 기준)
+// D43-4: 유료 플랜 업체는 customers.sms_opt_in = false 벌크 업데이트
 // ================================================================
 router.post('/upload', async (req: Request, res: Response) => {
   try {
@@ -194,6 +255,7 @@ router.post('/upload', async (req: Request, res: Response) => {
     
     let insertCount = 0;
     let skipCount = 0;
+    const insertedPhones: string[] = [];
     
     for (const phone of phones) {
       const cleanPhone = String(phone).replace(/\D/g, '');
@@ -207,10 +269,16 @@ router.post('/upload', async (req: Request, res: Response) => {
         );
         if (result.rows.length > 0) {
           insertCount++;
+          insertedPhones.push(cleanPhone);
         } else {
           skipCount++;
         }
       }
+    }
+
+    // D43-4: 유료 플랜 업체면 새로 등록된 번호들 벌크 sms_opt_in = false
+    if (insertedPhones.length > 0) {
+      await syncCustomerOptInBulk(companyId, insertedPhones, false);
     }
     
     return res.json({
@@ -227,6 +295,7 @@ router.post('/upload', async (req: Request, res: Response) => {
 
 // ================================================================
 // DELETE /api/unsubscribes/:id - 삭제 (company_id 기준)
+// D43-4: 유료 플랜 업체만 customers.sms_opt_in = true 복원
 // ================================================================
 router.delete('/:id', async (req: Request, res: Response) => {
   try {
@@ -252,12 +321,8 @@ router.delete('/:id', async (req: Request, res: Response) => {
         [companyId, targetPhone]
       );
 
-      // customers.sms_opt_in = true 복원
-      await query(
-        `UPDATE customers SET sms_opt_in = true, updated_at = NOW()
-         WHERE company_id = $1 AND phone = $2 AND sms_opt_in = false`,
-        [companyId, targetPhone]
-      );
+      // D43-4: 유료 플랜 업체만 customers.sms_opt_in = true 복원
+      await syncCustomerOptIn(companyId, targetPhone, true);
     }
     
     return res.json({ success: true, message: '삭제되었습니다.' });

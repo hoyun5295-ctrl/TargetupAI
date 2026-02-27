@@ -13,6 +13,11 @@ export default function Unsubscribes() {
   const [toast, setToast] = useState({ show: false, type: '', message: '' });
   const [deleteModal, setDeleteModal] = useState<{ show: boolean; id: string; phone: string }>({ show: false, id: '', phone: '' });
   const [deleting, setDeleting] = useState(false);
+  // D43-4: 080 연동 상태
+  const [opt080Number, setOpt080Number] = useState('');
+  const [optOutAutoSync, setOptOutAutoSync] = useState(false);
+  const [syncTesting, setSyncTesting] = useState(false);
+  const [syncTestModal, setSyncTestModal] = useState(false);
 
   useEffect(() => {
     loadUnsubscribes();
@@ -35,6 +40,9 @@ export default function Unsubscribes() {
       if (data.success) {
         setUnsubscribes(data.unsubscribes || []);
         setPagination(prev => ({ ...prev, ...data.pagination }));
+        // D43-4: 080 설정 정보 수신
+        setOpt080Number(data.opt080Number || '');
+        setOptOutAutoSync(data.optOutAutoSync || false);
       }
     } catch (error) {
       console.error('수신거부 목록 로드 실패:', error);
@@ -145,6 +153,40 @@ export default function Unsubscribes() {
     setTimeout(() => setToast({ show: false, type: '', message: '' }), 3000);
   };
 
+  // D43-4: 080 연동 테스트 — 목록 새로고침 후 최근 080_ars 건 확인
+  const handleSyncTest = async () => {
+    setSyncTesting(true);
+    await loadUnsubscribes();
+    setSyncTesting(false);
+
+    // 최근 5분 내 080_ars 소스 건 확인
+    const recent080 = unsubscribes.filter(
+      (item) => item.source === '080_ars' && 
+      new Date(item.created_at).getTime() > Date.now() - 5 * 60 * 1000
+    );
+
+    if (recent080.length > 0) {
+      setToast({ show: true, type: 'success', message: `080 연동 정상! 최근 ${recent080.length}건 수신거부 감지` });
+    } else {
+      setToast({ show: true, type: 'info', message: '최근 5분 내 080 수신거부 건이 없습니다. 080 전화 후 다시 확인해주세요.' });
+    }
+    setTimeout(() => setToast({ show: false, type: '', message: '' }), 5000);
+  };
+
+  // D43-4: 080번호 포맷팅 (동적)
+  const format080Number = (num: string) => {
+    const cleaned = num.replace(/\D/g, '');
+    if (cleaned.length === 11) {
+      return `${cleaned.slice(0, 3)}-${cleaned.slice(3, 6)}-${cleaned.slice(6)}`;
+    }
+    if (cleaned.length === 12) {
+      return `${cleaned.slice(0, 3)}-${cleaned.slice(3, 7)}-${cleaned.slice(7)}`;
+    }
+    // 이미 포맷팅 되어있으면 그대로
+    if (num.includes('-')) return num;
+    return num;
+  };
+
   const formatPhone = (phone: string) => {
     if (phone.length === 11) {
       return `${phone.slice(0, 3)}-${phone.slice(3, 7)}-${phone.slice(7)}`;
@@ -166,7 +208,9 @@ export default function Unsubscribes() {
       {/* 토스트 */}
       {toast.show && (
         <div className={`fixed top-4 right-4 z-50 px-6 py-3 rounded-lg shadow-lg text-white ${
-          toast.type === 'success' ? 'bg-gradient-to-r from-green-500 to-emerald-500' : 'bg-gradient-to-r from-red-500 to-rose-500'
+          toast.type === 'success' ? 'bg-gradient-to-r from-green-500 to-emerald-500' 
+          : toast.type === 'info' ? 'bg-gradient-to-r from-blue-500 to-cyan-500'
+          : 'bg-gradient-to-r from-red-500 to-rose-500'
         }`}>
           {toast.message}
         </div>
@@ -204,6 +248,53 @@ export default function Unsubscribes() {
                   className="flex-1 px-4 py-2.5 bg-red-500 text-white rounded-xl hover:bg-red-600 font-medium transition-colors disabled:opacity-50"
                 >
                   {deleting ? '처리중...' : '삭제'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* D43-4: 080 연동 테스트 안내 모달 — opt_out_auto_sync=true일 때만 열림 */}
+      {syncTestModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setSyncTestModal(false)} />
+          <div className="relative bg-white rounded-2xl shadow-2xl max-w-sm w-full mx-4 animate-in fade-in zoom-in duration-200">
+            <div className="p-6 text-center">
+              <div className="w-14 h-14 mx-auto mb-4 bg-blue-100 rounded-full flex items-center justify-center">
+                <svg className="w-7 h-7 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+                </svg>
+              </div>
+              <h3 className="text-lg font-bold text-gray-900 mb-2">080 연동 테스트</h3>
+              <div className="text-sm text-gray-600 mb-4 leading-relaxed">
+                <p className="mb-3">아래 번호로 전화하여 수신거부를 등록하세요.</p>
+                <div className="bg-gray-50 rounded-xl py-3 px-4 mb-3">
+                  <p className="text-2xl font-bold text-gray-900 font-mono tracking-wider">
+                    {format080Number(opt080Number)}
+                  </p>
+                </div>
+                <p className="text-xs text-gray-400">
+                  ARS 안내에 따라 수신거부 등록 후<br />
+                  아래 버튼을 눌러 연동 상태를 확인하세요.
+                </p>
+              </div>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setSyncTestModal(false)}
+                  className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 font-medium transition-colors"
+                >
+                  닫기
+                </button>
+                <button
+                  onClick={() => {
+                    setSyncTestModal(false);
+                    handleSyncTest();
+                  }}
+                  disabled={syncTesting}
+                  className="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 font-medium transition-colors disabled:opacity-50"
+                >
+                  {syncTesting ? '확인중...' : '연동 확인'}
                 </button>
               </div>
             </div>
@@ -281,10 +372,30 @@ export default function Unsubscribes() {
                 />
               </label>
             </div>
+
+            {/* D43-4: 080 연동 테스트 — opt_out_auto_sync=true일 때만 표시 */}
+            {optOutAutoSync && opt080Number && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">080 연동</label>
+                <button
+                  onClick={() => setSyncTestModal(true)}
+                  disabled={syncTesting}
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors disabled:opacity-50"
+                >
+                  <svg className={`w-4 h-4 ${syncTesting ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  <span>{syncTesting ? '확인중...' : '연동 테스트'}</span>
+                </button>
+              </div>
+            )}
           </div>
 
           <p className="text-xs text-gray-400 mt-3">
-            ※ 080 수신거부 시 자동 등록됩니다. 파일 업로드는 한 줄에 하나의 전화번호 형식입니다.
+            {optOutAutoSync
+              ? `※ 080 수신거부(${format080Number(opt080Number)}) 시 자동 등록됩니다. 유료 요금제 업체는 고객 DB의 수신동의 상태도 자동 연동됩니다.`
+              : '※ 파일 업로드는 한 줄에 하나의 전화번호 형식입니다.'
+            }
           </p>
         </div>
 
