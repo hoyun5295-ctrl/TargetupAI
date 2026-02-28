@@ -161,15 +161,7 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
   const msgTypeLabel: Record<string, string> = { SMS: 'SMS', LMS: 'LMS', MMS: 'MMS', S: 'SMS', L: 'LMS', M: 'MMS', K: '알림톡', F: '친구톡' };
   const getStatusBadge = (rate: number) => rate >= 98 ? 'bg-green-100 text-green-700' : rate >= 95 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700';
 
-  const getPreviewText = (content: string) => {
-    const sampleData: Record<string, string> = {
-      '이름': '김민수', '포인트': '12,500', '등급': 'VIP', '매장명': '강남점',
-      '지역': '서울', '구매금액': '350,000', '구매횟수': '8', '평균주문금액': '43,750', 'LTV점수': '85'
-    };
-    let text = content || '';
-    Object.entries(sampleData).forEach(([k, v]) => { text = text.replace(new RegExp(`%${k}%`, 'g'), v); });
-    return text;
-  };
+
 
   const formatDateTime = (dt: string) => {
     if (!dt) return '-';
@@ -729,7 +721,7 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
                           <div className="flex gap-2">
                             <div className="w-7 h-7 rounded-full bg-emerald-100 flex items-center justify-center shrink-0 text-[10px] font-bold text-emerald-600">T</div>
                             <div className="bg-white rounded-2xl rounded-tl-sm p-3 shadow-sm border border-gray-100 text-[11.5px] leading-[1.7] whitespace-pre-wrap text-gray-700 max-w-[95%]">
-                              {getPreviewText(selectedCampaign.message_content || '')}
+                              {messages[0]?.msg_contents || selectedCampaign.message_content || ''}
                             </div>
                           </div>
                         </div>
@@ -897,7 +889,7 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
                                           <div className="flex gap-1.5">
                                             <div className="w-5 h-5 rounded-full bg-emerald-100 flex items-center justify-center shrink-0 text-[8px] font-bold text-emerald-600">T</div>
                                             <div className="bg-white rounded-xl rounded-tl-sm p-2 shadow-sm border border-gray-100 text-[10px] leading-[1.6] whitespace-pre-wrap text-gray-700 max-w-[95%]">
-                                              {getPreviewText(m.msg_contents || '')}
+                                              {m.msg_contents || ''}
                                             </div>
                                           </div>
                                         </div>
