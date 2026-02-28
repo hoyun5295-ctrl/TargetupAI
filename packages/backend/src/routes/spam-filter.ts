@@ -4,6 +4,7 @@ import { mysqlQuery, query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
 import { extractVarCatalog } from '../services/ai';
 import { replaceVariables } from '../utils/messageUtils';
+import { SUCCESS_CODES, PENDING_CODES, SPAM_RESULT } from '../utils/sms-result-map';
 
 const router = Router();
 
@@ -53,9 +54,9 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
     if (staleTests.rows.length > 0) {
       const staleIds = staleTests.rows.map((r: any) => r.id);
       await query(
-        `UPDATE spam_filter_test_results SET result = 'timeout'
+        `UPDATE spam_filter_test_results SET result = $2
          WHERE test_id = ANY($1::uuid[]) AND received = false AND result IS NULL`,
-        [staleIds]
+        [staleIds, SPAM_RESULT.TIMEOUT]
       );
       await query(
         `UPDATE spam_filter_tests SET status = 'completed', completed_at = NOW()
@@ -238,14 +239,14 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
           const sc = Number(mqMatch.status_code);
           let result: string | null = null;
 
-          if (sc === 6 || sc === 1000 || sc === 1800) {
-            // ★ #1 수정: 이통사 전달 성공이지만 앱 미수신 → 아직 대기 (앱이 감지할 시간 필요)
+          if (SUCCESS_CODES.includes(sc)) {
+            // 이통사 전달 성공이지만 앱 미수신 → 아직 대기 (앱이 감지할 시간 필요)
             // blocked 판정은 타임아웃(3분) 시점에서만 확정
             result = null; // 계속 대기
-          } else if (sc === 100 || sc === 104) {
+          } else if (PENDING_CODES.includes(sc)) {
             result = null; // 아직 대기 중
           } else {
-            result = 'failed'; // 이통사 실패
+            result = SPAM_RESULT.FAILED; // 이통사 실패
           }
 
           if (result) {
@@ -303,11 +304,11 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
             const mqMatch = mqFinal.find((m: any) => m.dest_no === row.phone && m.msg_type === mType);
             const sc = mqMatch ? Number(mqMatch.status_code) : 0;
 
-            let finalResult = 'timeout';
-            if (sc === 6 || sc === 1000 || sc === 1800) {
-              finalResult = 'blocked'; // 이통사 전달 성공 + 앱 미수신 = 스팸 차단
-            } else if (sc && sc !== 100 && sc !== 104) {
-              finalResult = 'failed'; // 이통사 실패
+            let finalResult: string = SPAM_RESULT.TIMEOUT;
+            if (SUCCESS_CODES.includes(sc)) {
+              finalResult = SPAM_RESULT.BLOCKED; // 이통사 전달 성공 + 앱 미수신 = 스팸 차단
+            } else if (sc && !PENDING_CODES.includes(sc)) {
+              finalResult = SPAM_RESULT.FAILED; // 이통사 실패
             }
 
             await query(
@@ -438,10 +439,10 @@ router.post('/report', async (req: Request, res: Response) => {
     // 5) 결과 업데이트
     const updateResult = await query(
       `UPDATE spam_filter_test_results
-       SET received = true, received_at = NOW(), result = 'received'
+       SET received = true, received_at = NOW(), result = $4
        WHERE test_id = $1 AND carrier = $2 AND message_type = $3 AND received = false
        RETURNING id`,
-      [testId, device.carrier, detectedType]
+      [testId, device.carrier, detectedType, SPAM_RESULT.PASS]
     );
 
     // 6) 모든 결과 수신 완료 체크 → 즉시 completed 전환
@@ -507,8 +508,8 @@ router.get('/active-test', authenticate, async (req: Request, res: Response) => 
       );
       for (const row of stillUnresolved.rows) {
         await query(
-          `UPDATE spam_filter_test_results SET result = 'timeout' WHERE id = $1`,
-          [row.id]
+          `UPDATE spam_filter_test_results SET result = $2 WHERE id = $1`,
+          [row.id, SPAM_RESULT.TIMEOUT]
         );
       }
       await query(
@@ -625,8 +626,8 @@ router.get('/tests/:id', authenticate, async (req: Request, res: Response) => {
         );
         for (const row of stillUnresolved.rows) {
           await query(
-            `UPDATE spam_filter_test_results SET result = 'timeout' WHERE id = $1`,
-            [row.id]
+            `UPDATE spam_filter_test_results SET result = $2 WHERE id = $1`,
+            [row.id, SPAM_RESULT.TIMEOUT]
           );
         }
         await query(

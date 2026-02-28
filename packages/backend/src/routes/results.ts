@@ -2,6 +2,7 @@ import { Request, Response, Router } from 'express';
 import { mysqlQuery, query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
 import { getCompanySmsTablesWithLogs } from './campaigns';
+import { STATUS_CODE_MAP, CARRIER_MAP, SUCCESS_CODES, PENDING_CODES, getStatusLabel, getCarrierLabel } from '../utils/sms-result-map';
 
 const router = Router();
 
@@ -291,35 +292,24 @@ router.get('/campaigns/:id', async (req: Request, res: Response) => {
         companyTables, 'status_code', 'WHERE app_etc1 = ?', [id]
       );
 
-      const statusCodeMap: Record<number, string> = {
-        6: 'SMS 성공', 1000: 'LMS 성공', 1800: '카카오 성공', 100: '발송 대기',
-        55: '요금 부족', 2008: '비가입자/결번', 23: '식별코드 오류', 2323: '식별코드 오류',
-        3000: '메시지 형식 오류', 3001: '발신번호 오류', 3002: '수신번호 오류',
-        3003: '메시지 길이 초과', 3004: '스팸 차단', 4000: '전송 시간 초과', 9999: '기타 오류',
-      };
+      // statusCodeMap → sms-result-map.ts의 STATUS_CODE_MAP 사용
 
       for (const [codeStr, cnt] of Object.entries(statusAgg)) {
         const code = parseInt(codeStr);
-        if (![6, 1000, 1800, 100].includes(code)) {
-          const label = statusCodeMap[code] || `오류 코드 ${code}`;
+        if (![...SUCCESS_CODES, ...PENDING_CODES].includes(code)) {
+          const label = getStatusLabel(code);
           errorStats[label] = (errorStats[label] || 0) + cnt;
         }
       }
 
-      // 통신사별 집계 (성공 건만)
+      // 통신사별 집계 (성공 건만) — sms-result-map.ts 상수 사용
       const carrierAgg = await smsUnionGroupBy(
         companyTables, 'mob_company',
-        'WHERE app_etc1 = ? AND status_code IN (6, 1000, 1800)', [id]
+        `WHERE app_etc1 = ? AND status_code IN (${SUCCESS_CODES.join(',')})`, [id]
       );
 
-      const carrierMap: Record<string, string> = {
-        '11': 'SKT', '16': 'KT', '19': 'LG U+',
-        '12': 'SKT 알뜰폰', '17': 'KT 알뜰폰', '20': 'LG 알뜰폰',
-        'SKT': 'SKT', 'KTF': 'KT', 'LGT': 'LG U+',
-      };
-
       for (const [carrier, cnt] of Object.entries(carrierAgg)) {
-        const label = carrierMap[carrier] || carrier || '알 수 없음';
+        const label = getCarrierLabel(carrier);
         carrierStats[label] = (carrierStats[label] || 0) + cnt;
       }
     }
@@ -418,8 +408,8 @@ router.get('/campaigns/:id/messages', async (req: Request, res: Response) => {
         else if (searchType === 'content') { smsWhere += ' AND msg_contents LIKE ?'; smsBaseParams.push(sv); }
       }
 
-      if (status === 'success') smsWhere += ' AND status_code IN (6, 1000, 1800)';
-      else if (status === 'fail') smsWhere += ' AND status_code NOT IN (6, 1000, 1800, 100)';
+      if (status === 'success') smsWhere += ` AND status_code IN (${SUCCESS_CODES.join(',')})`;
+      else if (status === 'fail') smsWhere += ` AND status_code NOT IN (${[...SUCCESS_CODES, ...PENDING_CODES].join(',')})`;
 
       // SMS 통합 필드 (카카오와 UNION ALL 호환 — 컬럼 수/순서 동일)
       const smsFields = `seqno, dest_no, call_back, msg_type, msg_contents, status_code, mob_company,
@@ -514,14 +504,7 @@ router.get('/campaigns/:id/export', async (req: Request, res: Response) => {
     if (campaignResult.rows.length === 0) return res.status(404).json({ error: '캠페인을 찾을 수 없습니다.' });
     const sendChannel = campaignResult.rows[0].send_channel || 'sms';
 
-    const statusMap: Record<number, string> = {
-      6:'SMS성공', 1000:'LMS성공', 1800:'카카오성공', 100:'대기',
-      55:'요금부족', 2008:'비가입자/결번', 23:'식별코드오류', 2323:'식별코드오류',
-      3000:'형식오류', 3001:'발신번호오류', 3002:'수신번호오류', 3003:'길이초과', 3004:'스팸차단', 4000:'시간초과', 9999:'기타오류'
-    };
-    const carrierMap: Record<string, string> = {
-      '11':'SKT', '16':'KT', '19':'LG U+', '12':'SKT알뜰폰', '17':'KT알뜰폰', '20':'LG알뜰폰', 'SKT':'SKT', 'KTF':'KT', 'LGT':'LG U+'
-    };
+    // statusMap, carrierMap → sms-result-map.ts의 getStatusLabel(), getCarrierLabel() 사용
 
     // ===== UNION ALL 서브쿼리 빌드 =====
     const subqueries: string[] = [];
@@ -587,8 +570,8 @@ router.get('/campaigns/:id/export', async (req: Request, res: Response) => {
           carrierDisplay = '카카오';
         } else {
           msgTypeDisplay = m.msg_type === 'S' ? 'SMS' : m.msg_type === 'L' ? 'LMS' : m.msg_type;
-          statusDisplay = statusMap[m.status_code] || `코드${m.status_code}`;
-          carrierDisplay = carrierMap[m.mob_company] || m.mob_company || '';
+          statusDisplay = getStatusLabel(m.status_code);
+          carrierDisplay = getCarrierLabel(m.mob_company);
         }
 
         res.write([

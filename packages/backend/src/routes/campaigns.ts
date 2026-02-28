@@ -5,6 +5,7 @@ import { extractVarCatalog, validatePersonalizationVars, VarCatalogEntry } from 
 import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getRegionVariants } from '../utils/normalize';
 import { getSourceRef, logTrainingData, updateTrainingMetrics } from '../utils/training-logger';
 import { replaceVariables } from '../utils/messageUtils';
+import { SUCCESS_CODES, PENDING_CODES, isSuccess, isFail, SPAM_RESULT } from '../utils/sms-result-map';
 
 // 한국시간 문자열 변환 (MySQL datetime 형식)
 const toKoreaTimeStr = (date: Date) => {
@@ -465,7 +466,7 @@ router.get('/', async (req: Request, res: Response) => {
         const scheduledCampaigns = await query(scheduleQuery, scheduleParams);
 
         for (const camp of scheduledCampaigns.rows) {
-          const pendingCount = await smsCountAll(companyTables, 'app_etc1 = ? AND status_code = 100', [camp.id]);
+          const pendingCount = await smsCountAll(companyTables, `app_etc1 = ? AND status_code IN (${PENDING_CODES.join(',')})`, [camp.id]);
 
           // 예약 시간이 아직 안 됐으면 스킵 (MySQL에 데이터 없는게 정상)
           const campDetail = await query(`SELECT scheduled_at FROM campaigns WHERE id = $1`, [camp.id]);
@@ -478,8 +479,8 @@ router.get('/', async (req: Request, res: Response) => {
             // 대기 건이 없으면 발송 완료 처리 (LIVE+LOG 조회 — Agent가 완료 후 LOG로 이동)
             const tablesWithLogs = await getCompanySmsTablesWithLogs(companyId);
             const sentCount = await smsCountAll(tablesWithLogs, 'app_etc1 = ?', [camp.id]);
-            const successCount = await smsCountAll(tablesWithLogs, 'app_etc1 = ? AND status_code IN (6, 1000, 1800)', [camp.id]);
-            const failCount = await smsCountAll(tablesWithLogs, 'app_etc1 = ? AND status_code NOT IN (6, 100, 1000, 1800)', [camp.id]);
+            const successCount = await smsCountAll(tablesWithLogs, `app_etc1 = ? AND status_code IN (${SUCCESS_CODES.join(',')})`, [camp.id]);
+            const failCount = await smsCountAll(tablesWithLogs, `app_etc1 = ? AND status_code NOT IN (${[...SUCCESS_CODES, ...PENDING_CODES].join(',')})`, [camp.id]);
 
             await query(
               `UPDATE campaigns SET status = 'completed', sent_count = $1, success_count = $2, fail_count = $3, sent_at = COALESCE(sent_at, scheduled_at, NOW()), updated_at = NOW() WHERE id = $4`,
@@ -1403,9 +1404,9 @@ router.get('/test-stats', async (req: Request, res: Response) => {
     // 통계 계산 (전체 결과 기준)
     const stats = {
       total: allResults.length,
-      success: allResults.filter((r: any) => [6, 1000, 1800].includes(r.status_code)).length,
-      fail: allResults.filter((r: any) => ![6, 1000, 1800, 100].includes(r.status_code)).length,
-      pending: allResults.filter((r: any) => r.status_code === 100).length,
+      success: allResults.filter((r: any) => isSuccess(r.status_code)).length,
+      fail: allResults.filter((r: any) => isFail(r.status_code)).length,
+      pending: allResults.filter((r: any) => PENDING_CODES.includes(r.status_code)).length,
       cost: 0,
     };
 
@@ -1415,7 +1416,7 @@ router.get('/test-stats', async (req: Request, res: Response) => {
     const costLms = Number(costResult.rows[0]?.cost_per_lms) || 27;
     const costMms = Number(costResult.rows[0]?.cost_per_mms) || 50;
     allResults.forEach((r: any) => {
-      if ([6, 1000, 1800].includes(r.status_code)) {
+      if (isSuccess(r.status_code)) {
         stats.cost += r.msg_type === 'S' ? costSms : r.msg_type === 'M' ? costMms : costLms;
       }
     });
@@ -1427,7 +1428,8 @@ router.get('/test-stats', async (req: Request, res: Response) => {
       content: r.msg_contents,
       type: r.msg_type === 'S' ? 'SMS' : r.msg_type === 'M' ? 'MMS' : 'LMS',
       sentAt: r.sendreq_time,
-      status: [6, 1000, 1800].includes(r.status_code) ? 'success' : r.status_code === 100 ? 'pending' : 'fail',
+      status: isSuccess(r.status_code) ? 'success' : PENDING_CODES.includes(r.status_code) ? 'pending' : 'fail',
+
       testType: 'manager',
       senderName: senderMap[r.bill_id] || '-',
     }));
@@ -1503,7 +1505,7 @@ router.get('/test-stats', async (req: Request, res: Response) => {
         type: msgType,
         sentAt: r.sent_at,
         status: isCompleted ? 'success' : 'pending',
-        result: r.result || 'pending',
+        result: r.result || SPAM_RESULT.PASS,
         carrier: r.carrier,
         testType: 'spam_filter',
         senderName: r.sender_name || '-',
@@ -1593,9 +1595,9 @@ router.post('/sync-results', async (req: Request, res: Response) => {
       // SMS: 캠페인 소속 회사의 라인그룹 테이블에서 합산 집계 (LIVE+LOG)
       const runTables = await getCompanySmsTablesWithLogs(run.company_id);
       const smsAgg = await smsAggAll(runTables,
-        `COUNT(CASE WHEN status_code IN (6, 1000, 1800) THEN 1 END) as success_count,
-         COUNT(CASE WHEN status_code NOT IN (6, 1000, 1800, 100) THEN 1 END) as fail_count,
-         COUNT(CASE WHEN status_code = 100 THEN 1 END) as pending_count`,
+        `COUNT(CASE WHEN status_code IN (${SUCCESS_CODES.join(',')}) THEN 1 END) as success_count,
+         COUNT(CASE WHEN status_code NOT IN (${[...SUCCESS_CODES, ...PENDING_CODES].join(',')}) THEN 1 END) as fail_count,
+         COUNT(CASE WHEN status_code IN (${PENDING_CODES.join(',')}) THEN 1 END) as pending_count`,
         'app_etc1 = ?',
         [run.campaign_id]
       );
@@ -1670,9 +1672,9 @@ router.post('/sync-results', async (req: Request, res: Response) => {
       const directTables = await getCompanySmsTablesWithLogs(campaign.company_id);
       const smsDirectAgg = await smsAggAll(directTables,
         `COUNT(*) as total_count,
-         COUNT(CASE WHEN status_code IN (6, 1000, 1800) THEN 1 END) as success_count,
-         COUNT(CASE WHEN status_code NOT IN (6, 1000, 1800, 100) THEN 1 END) as fail_count,
-         COUNT(CASE WHEN status_code = 100 THEN 1 END) as pending_count`,
+         COUNT(CASE WHEN status_code IN (${SUCCESS_CODES.join(',')}) THEN 1 END) as success_count,
+         COUNT(CASE WHEN status_code NOT IN (${[...SUCCESS_CODES, ...PENDING_CODES].join(',')}) THEN 1 END) as fail_count,
+         COUNT(CASE WHEN status_code IN (${PENDING_CODES.join(',')}) THEN 1 END) as pending_count`,
         'app_etc1 = ?',
         [campaign.id]
       );

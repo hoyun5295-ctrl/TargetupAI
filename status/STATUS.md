@@ -50,6 +50,7 @@
 - 컨테이너 작업 전 pg_dump 백업 → 작업 → 복원.
 - 작업 완료 후 pg_dump + git commit.
 - DB 파괴적 작업 절대 신중. **데이터 손실 = 매출 손실.**
+- **Docker 컨테이너 재생성 시 포트 바인딩 반드시 `127.0.0.1` 확인.** `0.0.0.0` 바인딩 절대 금지. (2026-02-28 MySQL 랜섬웨어 교훈)
 
 ### 2-4. ⚠️ 배포 전 TypeScript 타입 체크 필수
 - 상용 서버 배포 코드는 반드시 TypeScript 타입 에러 없이 컴파일 가능해야 함.
@@ -118,8 +119,9 @@
 | 1 | 대시보드 회사명 — 슈퍼관리자 수정이 반영 안 됨 | 버그 | 낮음 | ✅ 완료 |
 | 2 | AI 매핑 화면 개편 — 표준 17개 명확 나열 + 커스텀 필드 라벨 지정 | 기능개편 | 중간 | ✅ 완료 |
 | 3 | 직접 타겟 설정 — enabled-fields 기반 동적 필터 조건 | 기능개발 | 중간 | ✅ 완료 |
-| 4 | 수신거부 양방향 동기화 (독립 관리 vs DB 연동) | 설계토의 | 높음 | 대기 |
+| 4 | 수신거부 양방향 동기화 (독립 관리 vs DB 연동) | 설계+구현 | 높음 | ⏸️ 나래 콜백 미수신 |
 | 5 | AI 한줄로 입력 포맷 강제화 + 샘플 고객 미리보기 + 이모지 제거 | 기능개선 | 중간 | ✅ 완료 |
+| 6 | 🚨 긴급: 스팸필터 테스트 안됨 (원인: MySQL 랜섬웨어) | 인프라/보안 | 높음 | ✅ 완료 |
 
 #### 안건 #1: 대시보드 회사명 미반영 — ✅ 완료
 
@@ -200,14 +202,54 @@
   - Harold님 확인 후 구체적 수정 내용 정리 예정
   - 발송 모달 표시까지는 정상 동작 확인 후 진행
 
-#### 안건 #4: 수신거부 양방향 동기화 (설계 토의 필요)
+#### 안건 #4: 수신거부 양방향 동기화 — ⏸️ 나래 콜백 미수신 (D43-4, 2026-02-27)
 
-- **시나리오 A (DB 미저장 업체):** 수신거부자를 독립 등록/관리, 직접발송 시 자동 제외
-- **시나리오 B (DB 업로드 업체):**
-  - 업로드 시 sms_opt_in=false → opt_outs에 자동 등록
-  - opt_outs에서 제거 → customers.sms_opt_in=true 양방향 동기화
-- **핵심 과제:** 두 시나리오가 공존해야 함. 고객 DB 삭제 시 수신거부 데이터 처리 기준 필요
-- **관련 테이블:** opt_outs, customers.sms_opt_in, unsubscribes
+- **설계 확정 내용:**
+  - opt_outs 테이블 미사용 확인 (레거시) → **unsubscribes 테이블이 SoT**
+  - 발송 파이프라인 이중 체크 유지: `sms_opt_in = true AND NOT EXISTS (SELECT 1 FROM unsubscribes ...)`
+  - plan_id 기준 단순화: 플랜 있는 업체만 customers.sms_opt_in 동시 UPDATE, 없으면 unsubscribes만
+  - `syncCustomerOptIn()` / `syncCustomerOptInBulk()` 공통 헬퍼 도입 (중복 제거)
+- **DDL 완료:**
+  - `ALTER TABLE companies ADD COLUMN opt_out_auto_sync boolean DEFAULT false;`
+  - 테스트계정 opt_out_auto_sync = true 설정 완료
+- **코드 배포 완료 (수정 2파일):**
+  - **unsubscribes.ts:** 080콜백 opt_out_auto_sync 체크 추가, 직접추가/업로드/삭제 4곳 syncCustomerOptIn 적용, GET / 응답에 opt080Number+optOutAutoSync 추가
+  - **Unsubscribes.tsx:** 080번호 하드코딩 제거→API 동적 표시, 연동테스트 버튼 optOutAutoSync=true일 때만 노출, 080 안내 모달
+- **미해결 — 나래인터넷 콜백 미수신:**
+  - curl 로컬 테스트: ✅ 정상 (`1` 반환)
+  - Nginx 화이트리스트: ✅ 정상 (나래 IP 6개 등록)
+  - 나래에서 콜백 요청 자체가 서버에 안 옴 (Nginx access.log 무기록)
+  - **월요일 확인 필요:** 나래 담당자에게 콜백 URL 등록 완료 여부 + 현재 등록된 URL 확인
+  - 등록 요청 URL: `https://hanjul.ai/api/unsubscribes/080callback` + 파라미터 cid/fr/token
+- **기간계 미접촉:** campaigns.ts 발송 파이프라인 전체 미수정
+
+#### 안건 #6: 🚨 긴급 — 스팸필터 테스트 안됨 → ✅ 완료 (원인: MySQL 랜섬웨어 공격)
+
+- **증상 (2026-02-27 오전~):** 스팸필터 테스트 버튼 클릭 시 500 에러. PM2 로그: `Table 'smsdb.SMSQ_SEND_10' doesn't exist`
+- **원인 — MySQL 랜섬웨어 공격:**
+  - MySQL 컨테이너가 `0.0.0.0:3306`으로 외부에 노출된 상태 + 취약한 비밀번호(`sms123`/`root123`)
+  - 2026-02-25~26 MySQL 타임존 설정 작업 중 컨테이너 3회 재생성하면서 포트가 `0.0.0.0`으로 바인딩됨
+  - 자동화 봇이 3306 포트 스캔 → 딕셔너리 공격으로 비밀번호 탈취 → SMSQ_SEND_1~11 테이블 전체 삭제 → `RECOVER_YOUR_DATA_info` 랜섬 메시지 테이블 삽입
+  - root 비밀번호 변경됨 (smsuser는 권한 제한으로 무사)
+  - **PostgreSQL 무사** (처음부터 127.0.0.1 바인딩) — 핵심 데이터(고객/캠페인/정산) 전부 안전
+- **복구 조치 (2026-02-28, D49):**
+  1. ✅ MySQL 포트 `0.0.0.0:3306` → `127.0.0.1:3306` (외부 접근 원천 차단)
+  2. ✅ root 비밀번호 강화 (취약 비밀번호 → 강화 비밀번호)
+  3. ✅ smsuser 비밀번호 강화 + QTmsg Agent 11개 `encrypt_pass` 동기 변경 (DES 암호화 도구 자체 제작: EncryptPass.java)
+  4. ✅ smsuser 권한 최소화: `ALL PRIVILEGES` → `SELECT, INSERT, UPDATE, DELETE` (DROP TABLE 불가)
+  5. ✅ SMSQ_SEND_1~11 테이블 재생성 (SMSQ_SEND 뷰 기반 스키마 복원)
+  6. ✅ 로그 테이블 SMSQ_SEND_*_202602 / 202603 재생성
+  7. ✅ 이벤트 스케줄러 `auto_create_sms_log_tables` 정상 확인
+  8. ✅ `RECOVER_YOUR_DATA_info` 랜섬 테이블 삭제
+  9. ✅ QTmsg Agent 11개 재시작 + 통신사 바인딩 확인 (bind ack 성공)
+  10. ✅ 스팸필터 테스트 정상화 확인 (LG U+ 수신 완료)
+- **보안 강화 조치:**
+  1. ✅ UFW 불필요 포트 차단: 3000(Node.js), 9001~9011(QTmsg Agent 관리) DENY
+  2. ✅ SSH root 로그인 비활성화 (`PermitRootLogin no`)
+  3. ✅ fail2ban 강화: 10분 내 3회 실패 → 1시간 자동 밴 (설정 직후 5개 IP 차단)
+  4. ✅ MySQL smsuser DROP 권한 제거 (설령 뚫려도 테이블 삭제 불가)
+- **피해 범위:** MySQL SMSQ 발송 큐 테이블 삭제 (임시 데이터). **고객 개인정보 유출 없음** (PostgreSQL 무사)
+- **교훈:** Docker 컨테이너 재생성 시 포트 바인딩 반드시 127.0.0.1 확인. 외부 노출 DB는 강력한 비밀번호 + 권한 분리 필수
 
 #### 안건 #5: AI 한줄로 입력 포맷 강제화 + 샘플 고객 미리보기 + 이모지 제거 — ✅ 완료
 
@@ -228,8 +270,9 @@
 1. ~~**#1** 대시보드 회사명 (빠른 해결)~~ ✅ 완료
 2. ~~**#2** AI 매핑 화면 개편 (컴포넌트 분리 + 태그 클릭 UI)~~ ✅ 완료
 3. ~~**#5** AI 한줄로 포맷 강제화 + 미리보기 + 이모지 제거~~ ✅ 완료
-4. **#3** 직접 타겟 설정 — 백엔드 버그 수정 완료, **직접타겟발송 발송창 내부 수정사항 해결** ← 다음 세션 최우선
-5. **#4** 수신거부 동기화 (설계 깊이 논의 후 구현)
+4. **#3** 직접 타겟 설정 — 백엔드 버그 수정 완료, **직접타겟발송 발송창 내부 수정사항 해결** ← 다음 세션
+5. ~~**#4** 수신거부 동기화~~ ⏸️ 코드 완료, 나래 콜백 미수신 → 월요일 나래 확인
+6. ~~**🚨 #6 긴급: 스팸필터 테스트 안됨**~~ ✅ 완료 — 원인: MySQL 랜섬웨어 공격 (D49 보안 대응)
 
 → 각 안건을 별도 채팅 세션에서 설계→컨펌→구현→테스트→정립 후 다음으로 진행
 
@@ -253,6 +296,7 @@
 | D43 안건#1 회사명 | ✅ 완료 |
 | D43 안건#2 매핑 UI 개편 | ✅ 완료 |
 | D43 안건#3 직접타겟 리팩토링 | 🔧 백엔드 버그 수정 완료 · 발송창 내부 수정 필요 |
+| D43 안건#4 수신거부 동기화 | ⏸️ 코드 완료 · 나래 콜백 미수신 → 월요일 확인 |
 | D43 안건#5 AI 포맷+미리보기+이모지 | ✅ 완료 |
 | AI 맞춤한줄 Phase 1 (AI-CUSTOM-SEND.md) | ✅ 8단계 전체 완료 |
 | 선불 요금제 Phase 1-A | ✅ 완료 |
@@ -392,11 +436,15 @@
 - [ ] 기술: 백엔드 프록시 /api/kakao-templates/*, DB kakao_templates 확장, 상태 전이 규칙
 - [ ] Phase 2: 이미지 업로드, 알림 수신자 관리, 발신프로필 그룹
 
-### 080 수신거부 (⏸️ 나래인터넷 응답 대기)
+### 080 수신거부 (⏸️ 나래인터넷 콜백 미수신 — 월요일 확인)
 - [x] 콜백 엔드포인트 구현 (토큰 인증, 고객사별 080번호 자동 매칭)
 - [x] 서버 .env OPT_OUT_080_TOKEN 설정 + PM2 재시작
 - [x] Nginx 080callback 경로 나래 IP 화이트리스트 적용
-- [ ] 나래 응답 후: 실제 080 ARS 수신거부 테스트 (080-719-6700)
+- [x] D43-4 양방향 동기화: opt_out_auto_sync DDL + syncCustomerOptIn 헬퍼 + 4곳 적용
+- [x] D43-4 프론트: 080번호 동적 표시 + 연동테스트 버튼 (auto_sync=true 조건부)
+- [x] curl 로컬 테스트 정상 확인 (서버 `1` 반환)
+- [ ] **나래 담당자에게 콜백 URL 등록 완료 여부 확인** (월요일)
+- [ ] 실제 080 ARS 수신거부 테스트 (080-719-6700)
 - [ ] 기존 누적 수신거부 목록 초기 동기화 (벌크 API 또는 엑셀)
 
 ### 선불 요금제 Phase 1-B~2
@@ -409,8 +457,12 @@
 
 ### 보안
 - [x] 소스 보호: 우클릭/F12/개발자도구/드래그 차단 (3개 도메인 전체 적용)
+- [x] 🔴 MySQL 랜섬웨어 대응 (2026-02-28, D49): 외부 차단+비밀번호 강화+권한분리+fail2ban+포트차단 — 상세 내용 D43 안건#6 참조
 - [ ] 프론트엔드 난독화 (vite-plugin-obfuscator, 런칭 직전 적용)
 - [ ] 슈퍼관리자 IP 화이트리스트 설정
+- [ ] 외부 자동 백업 구축 (3-2-1 법칙: 3복사본, 2매체, 1오프라인)
+- [ ] 웹 애플리케이션 SQL Injection 점검 (SSRF 포함)
+- [ ] SSH 키 인증 전용 전환 (비밀번호 로그인 비활성화) — 선택
 
 ### 인비토AI (메시징 특화 모델)
 - [x] ai_training_logs 테이블 + training-logger.ts + campaigns.ts 연결
@@ -436,6 +488,8 @@
 | D45 | 02-27 | AI 한줄로 3종 개선 — 개인화 필수 파싱 + 샘플 고객 미리보기 + 이모지 강제 제거 | 변수 오류 방지+미리보기 실감+SMS 깨짐 방지. 발송 파이프라인 무접촉 |
 | D46 | 02-27 | 직접 타겟 설정 전면 리팩토링 — 컴포넌트 분리 + 전체 필드 노출 + 2열 컴팩트 + 다중선택 + 연령범위 | SKIP_FIELDS 제거(Harold님 확정), 사용자에게 필드 선택 위임. Dashboard 405줄 감소 |
 | D47 | 02-27 | 직접 타겟 발송 모달 분리 + 하드코딩 8곳 동적화 + 커서위치 버그 수정 — TargetSendModal.tsx 신규 | fieldsMeta 기반 동적(자동입력/테이블/치환/바이트체크/미리보기). Dashboard 638줄 감소 |
+| D48 | 02-27 | 수신거부 양방향 동기화 — plan_id 기준 customers.sms_opt_in 동시 UPDATE + opt_out_auto_sync 플래그 | unsubscribes=SoT, opt_outs 레거시 확인, 나래인터넷 전용 auto_sync 분기. 080번호 하드코딩 제거→동적 |
+| D49 | 02-28 | 🔴 MySQL 랜섬웨어 긴급 대응 — 외부 차단+비밀번호 강화+권한 분리+보안 강화 | 3306 외부 노출→봇 공격→SMSQ 테이블 삭제. 127.0.0.1 바인딩+smsuser DROP 권한 제거+fail2ban+UFW 포트 차단. PostgreSQL 무사, 고객 데이터 유출 없음 |
 
 **아카이브:** D1-AI발송2분기(02-22) | D2-브리핑방식(02-22) | D3-개인화필드체크박스(02-22) | D4-textarea제거(02-22) | D5-별도컴포넌트분리(02-22) | D6-대시보드레이아웃(02-22) | D7-헤더탭스타일(02-23) | D8-AUTO/PRO뱃지(02-23) | D9-캘린더상태기준(02-23) | D10-6차세션분할(02-23) | D11-KCP전환(02-23) | D12-이용약관(02-23) | D13-수신거부SoT(02-23) | D14-7차3세션분할(02-24) | D15-제목머지→D28번복(02-25) | D16-스팸테스트과금(02-25) | D17-테스트통계확장(02-25) | D18-정산자체헬퍼(02-25) | D19-구독상태필드(02-25) | D20-AI분석차별화(02-25) | D21-planInfo실시간(02-25) | D22-스팸잠금직접발송만(02-25) | D23-preview보안(02-25) | D24-run세션1완전구현(02-25) | D25-pdfkit선택(02-25) | D26-분석캐싱24h(02-25) | D27-비즈니스3회최적화(02-25) | D28-제목머지제거(02-25) | D29-5경로전수점검(02-25) | D30-즉시sending전환(02-25) | D31-GPT fallback(02-25) | D32-발송파이프라인복구(02-26) | D33-messageUtils통합(02-26) | D34-스팸필터DB직접조회(02-26) | D35-선불환불보장(02-26) | D-대시보드모달분리(02-23): 8,039줄→4,964줄
 
@@ -460,6 +514,10 @@
 | R16 | results.ts 대량 캠페인 OOM | 1 | 4 | 4 | ✅ 해결: UNION ALL 서버측 페이지네이션 |
 | R17 | 선불 차감 후 발송 실패 → 정산 이슈 | 1 | 5 | 5 | ✅ 해결: 3경로 prepaidRefund |
 | R21 | standard_fields ↔ 코드 하드코딩 불일치 | 1 | 5 | 5 | ✅ 해결: D39 3세션 완료 — FIELD_MAP 단일 기준 |
+| R22 | MySQL 외부 노출 → 랜섬웨어/데이터 삭제 | 1 | 5 | 5 | ✅ 해결: D49 — 127.0.0.1 바인딩+smsuser DROP 제거+비밀번호 강화+fail2ban+UFW |
+| R23 | Docker 컨테이너 재생성 시 포트 바인딩 0.0.0.0 실수 | 2 | 5 | 10 | ⚠️ 운영: 컨테이너 작업 시 반드시 `docker ps --format` 포트 확인. OPS.md에 안전 명령어 기록 |
+| R24 | SQL Injection → 내부 DB 공격 (127.0.0.1 우회) | 2 | 5 | 10 | ⬜ 미조치: 웹 애플리케이션 SQLi 점검 필요 |
+| R25 | 백업 부재 → 랜섬웨어 시 복구 불가 | 3 | 5 | 15 | ⬜ 미조치: 외부 자동 백업(3-2-1 법칙) 구축 필요 |
 
 ---
 
@@ -469,6 +527,8 @@
 
 | 날짜 | 완료 항목 |
 |------|----------|
+| 02-28 | 🔴 D49 MySQL 랜섬웨어 긴급 대응: 원인(3306 외부 노출+취약 비밀번호→봇 공격→SMSQ_SEND_1~11 삭제). 복구(127.0.0.1 바인딩+테이블 재생성+로그 테이블 복구+Agent 재시작+이벤트 스케줄러 확인). 보안 강화(root/smsuser 비밀번호 강화+Agent encrypt_pass DES 암호화 동기 변경+smsuser DROP 권한 제거+UFW 3000/9001~9011 차단+SSH root 로그인 차단+fail2ban 3회→1h밴). 피해: SMSQ 큐만 삭제(복구 완료), PostgreSQL/고객 데이터 무사. 스팸필터 테스트 LG U+ 수신 확인 |
+| 02-27 | D43-4 수신거부 양방향 동기화: unsubscribes=SoT 확정, opt_outs 레거시 확인. syncCustomerOptIn 헬퍼+4곳(080콜백/직접추가/업로드/삭제) 적용. DDL opt_out_auto_sync 추가. 프론트 080번호 동적+연동테스트 조건부. curl 테스트 정상. **나래 콜백 미수신→월요일 확인.** 수정 2파일(unsubscribes.ts, Unsubscribes.tsx)+DDL 1건 |
 | 02-27 | D43-3c 직접타겟 발송창 하드코딩 전면 제거 + 컴포넌트 분리: TargetSendModal.tsx 신규(901줄)+DirectTargetFilterModal.tsx FieldMeta export+onExtracted fieldsMeta 추가+Dashboard.tsx 638줄 감소(4548→3910)+DirectPreviewModal.tsx 동적치환. 하드코딩 8곳→fieldsMeta 동적. 커서위치 삽입 버그 수정(selectionStart). 발송파이프라인 미접촉 |
 | 02-27 | D43-3b 직접타겟 백엔드 버그 3건 수정: ①extract SELECT 하드코딩→getColumnFields() FIELD_MAP 동적+customers_unified→customers 직접조회 ②filter-count도 customers_unified→customers 전환 ③buildDynamicFilter age 필터 EXTRACT(birth_date)→age 컬럼 직접사용 ④DirectTargetFilterModal 에러핸들링+커스텀알림모달 추가. 수정 2파일(customers.ts, DirectTargetFilterModal.tsx) |
 | 02-27 | D43 안건#3 직접타겟 리팩토링: DirectTargetFilterModal.tsx 신규(646줄)+Dashboard.tsx 405줄 감소+customers.ts 옵션 동적화+extract SELECT 확장+buildDynamicFilter contains 지원. **🚨 타겟추출→발송모달 연결 버그 미해결 (다음 세션)** |

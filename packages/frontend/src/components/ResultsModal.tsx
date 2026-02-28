@@ -30,7 +30,7 @@ const CARRIER_MAP: Record<string, string> = {
 };
 
 export default function ResultsModal({ onClose, token }: ResultsModalProps) {
-  const [activeTab, setActiveTab] = useState<'summary' | 'test' | 'ai'>('summary');
+  const [activeTab, setActiveTab] = useState<'summary' | 'test'>('summary');
   const [testStats, setTestStats] = useState<any>(null);
   const [testList, setTestList] = useState<any[]>([]);
   const [spamFilterList, setSpamFilterList] = useState<any[]>([]);
@@ -249,7 +249,6 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
           {[
             { key: 'summary', label: '요약 및 비용현황', color: 'emerald' },
             { key: 'test', label: '테스트 발송', color: 'orange' },
-            { key: 'ai', label: 'AI분석', color: 'violet' },
           ].map(tab => (
             <button
               key={tab.key}
@@ -616,13 +615,12 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
                         <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500">발송자</th>
                         <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500">유형</th>
                         <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500">통신사</th>
-                        <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500">수신번호</th>
                         <th className="px-3 py-2 text-center text-xs font-semibold text-gray-500">판정</th>
                       </tr>
                     </thead>
                     <tbody>
                     {(!spamFilterList || spamFilterList.length === 0) ? (
-                        <tr><td colSpan={6} className="px-3 py-8 text-center text-gray-400">스팸필터 테스트 이력이 없습니다</td></tr>
+                        <tr><td colSpan={5} className="px-3 py-8 text-center text-gray-400">스팸필터 테스트 이력이 없습니다</td></tr>
                       ) : (
                         spamFilterList
                           .slice((spamCurrentPage - 1) * itemsPerPage, spamCurrentPage * itemsPerPage)
@@ -638,12 +636,18 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
                               </span>
                             </td>
                             <td className="px-3 py-2 text-xs font-medium">{t.carrier || '-'}</td>
-                            <td className="px-3 py-2 font-mono text-xs">{t.phone}</td>
                             <td className="px-3 py-2 text-center">
                               <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                                t.result === 'pass' ? 'bg-green-50 text-green-700' : t.result === 'blocked' ? 'bg-red-50 text-red-700' : 'bg-yellow-50 text-yellow-700'
+                                (t.result === 'pass' || t.result === 'received') ? 'bg-green-50 text-green-700'
+                                : t.result === 'blocked' ? 'bg-red-50 text-red-700'
+                                : (t.result === 'failed' || t.result === 'timeout') ? 'bg-orange-50 text-orange-700'
+                                : 'bg-yellow-50 text-yellow-700'
                               }`}>
-                                {t.result === 'pass' ? '정상' : t.result === 'blocked' ? '차단' : '대기'}
+                                {(t.result === 'pass' || t.result === 'received') ? '정상'
+                                  : t.result === 'blocked' ? '차단'
+                                  : t.result === 'failed' ? '실패'
+                                  : t.result === 'timeout' ? '시간초과'
+                                  : '대기'}
                               </span>
                             </td>
                           </tr>
@@ -663,24 +667,6 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
             </div>
           )}
 
-          {activeTab === 'ai' && (
-            <div className="space-y-4">
-              <div className="border border-gray-200 rounded-lg p-5">
-                <div className="font-medium text-gray-700 mb-2">실패건 재발송</div>
-                <p className="text-sm text-gray-500 mb-3">선택한 캠페인의 실패 건을 대상으로 재발송 캠페인을 생성합니다.</p>
-                <button className="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 text-sm font-medium transition-colors">재발송 캠페인 생성</button>
-              </div>
-              <div className="border border-gray-200 rounded-lg p-5">
-                <div className="font-medium text-gray-700 mb-2">미구매자 리마케팅</div>
-                <p className="text-sm text-gray-500 mb-3">메시지 수신 성공자 중 아직 구매하지 않은 고객을 대상으로 리마케팅 캠페인을 생성합니다.</p>
-                <div className="bg-violet-50 border border-violet-100 rounded-lg p-3 mb-3">
-                  <div className="text-xs text-violet-500">AI 추천 문구</div>
-                  <div className="text-sm font-medium text-violet-700">"오늘이 마지막! 마감 임박"</div>
-                </div>
-                <button className="px-4 py-2 bg-violet-500 text-white rounded-lg hover:bg-violet-600 text-sm font-medium transition-colors">리마케팅 캠페인 생성</button>
-              </div>
-            </div>
-          )}
         </div>
 
         {/* ==================== 캠페인 상세 모달 ==================== */}
