@@ -91,7 +91,12 @@ C:\projects\targetup\  (로컬)
 │   │   └── src/
 │   │       ├── app.ts              ← 백엔드 메인
 │   │       ├── routes/             ← API 라우트
-│   │       └── services/           ← 비즈니스 로직
+│   │       ├── services/           ← 비즈니스 로직
+│   │       └── utils/              ← 공통 유틸리티
+│   │           ├── standard-field-map.ts  ← 표준 필드 매핑 (유일한 필드 기준)
+│   │           ├── sms-result-map.ts      ← 발송 결과값 매핑 (유일한 결과값 기준)
+│   │           ├── normalize.ts           ← 데이터 정규화 (값 변환)
+│   │           └── messageUtils.ts        ← 공통 변수 치환 (replaceVariables)
 │   ├── frontend/                   ← 서비스 사용자 + 슈퍼관리자 UI
 │   │   └── src/
 │   │       ├── components/         ← UI 컴포넌트

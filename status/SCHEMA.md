@@ -53,6 +53,8 @@
 | 42 | payments | PG 결제 내역 |
 | 43 | deposit_requests | 무통장입금 요청 |
 | 44 | analysis_results | AI 분석 결과 캐시 |
+| 45 | spam_filter_tests | 스팸필터 테스트 |
+| 46 | spam_filter_test_results | 스팸필터 테스트 결과 |
 
 ---
 
@@ -877,3 +879,41 @@
 | created_at | timestamptz | |
 - UNIQUE: (company_id, analysis_level, period_from, period_to)
 - INDEX: idx_analysis_results_company (company_id, created_at DESC)
+
+### spam_filter_tests (스팸필터 테스트)
+| 컬럼 | 타입 | 설명 |
+|------|------|------|
+| id | uuid PK | |
+| company_id | uuid FK | 고객사 |
+| user_id | uuid FK | 실행 사용자 |
+| campaign_id | uuid FK (nullable) | 연결 캠페인 (없으면 직접 테스트) |
+| message | text | 테스트 메시지 본문 |
+| subject | varchar(200) | LMS 제목 (nullable) |
+| callback_number | varchar(20) | 발신번호 |
+| message_type | varchar(10) | SMS/LMS |
+| status | varchar(20) | active/completed |
+| started_at | timestamptz | 테스트 시작 |
+| completed_at | timestamptz (nullable) | 테스트 완료 |
+| created_at | timestamptz | |
+- INDEX: idx_spam_filter_tests_company (company_id, created_at DESC)
+- INDEX: idx_spam_filter_tests_status (status) WHERE status = 'active'
+
+### spam_filter_test_results (스팸필터 테스트 결과)
+| 컬럼 | 타입 | 설명 |
+|------|------|------|
+| id | uuid PK | |
+| test_id | uuid FK | spam_filter_tests.id |
+| carrier | varchar(20) | 통신사 (SKT/KT/LGU) |
+| message_type | varchar(10) | SMS/LMS |
+| phone | varchar(20) | 수신 단말 번호 |
+| sms_table | varchar(50) | MySQL 발송 테이블명 |
+| sms_msgkey | varchar(100) | MySQL 메시지 키 |
+| message_hash | varchar(64) | 메시지 해시 (앱 매칭용) |
+| received | boolean DEFAULT false | 앱 수신 여부 |
+| received_at | timestamptz (nullable) | 앱 수신 시각 |
+| result | varchar(20) (nullable) | 판정: pass/blocked/failed/timeout (D43-7에서 received→pass 전환) |
+| created_at | timestamptz | |
+- INDEX: idx_spam_filter_results_test (test_id)
+- INDEX: idx_spam_filter_results_pending (test_id, received) WHERE received = false
+- **result 허용값:** pass(정상수신), blocked(스팸차단), failed(발송실패), timeout(시간초과), NULL(판정 대기)
+- **참조:** sms-result-map.ts의 SPAM_RESULT 상수가 유일한 정의

@@ -2,7 +2,7 @@ import { Request, Response, Router } from 'express';
 import { mysqlQuery, query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
 import { getCompanySmsTablesWithLogs } from './campaigns';
-import { STATUS_CODE_MAP, CARRIER_MAP, SUCCESS_CODES, PENDING_CODES, getStatusLabel, getCarrierLabel } from '../utils/sms-result-map';
+import { STATUS_CODE_MAP, CARRIER_MAP, SUCCESS_CODES, PENDING_CODES, getStatusLabel, getStatusType, getCarrierLabel, isSuccess } from '../utils/sms-result-map';
 
 const router = Router();
 
@@ -472,8 +472,16 @@ router.get('/campaigns/:id/messages', async (req: Request, res: Response) => {
     dataParams.push(limitNum, offset);
     const messages = await mysqlQuery(dataSql, dataParams) as any[];
 
+    // sms-result-map.ts 기반 해석값 추가 (프론트 하드코딩 제거용)
+    const enrichedMessages = messages.map((m: any) => ({
+      ...m,
+      status_label: getStatusLabel(m.status_code),
+      status_type: getStatusType(m.status_code),
+      carrier_label: m._channel === 'kakao' ? '카카오' : getCarrierLabel(m.mob_company),
+    }));
+
     return res.json({
-      messages,
+      messages: enrichedMessages,
       pagination: {
         total,
         page: pageNum,
@@ -564,7 +572,7 @@ router.get('/campaigns/:id/export', async (req: Request, res: Response) => {
 
         if (channel === 'kakao') {
           msgTypeDisplay = m.msg_type;
-          statusDisplay = m.status_code === 1800
+          statusDisplay = isSuccess(m.status_code)
             ? '카카오성공'
             : `카카오실패(${m.report_code_raw || '미수신'})`;
           carrierDisplay = '카카오';

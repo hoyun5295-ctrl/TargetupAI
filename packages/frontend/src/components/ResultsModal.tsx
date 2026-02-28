@@ -5,29 +5,10 @@ interface ResultsModalProps {
   token: string | null;
 }
 
-const STATUS_CODE_MAP: Record<number, { label: string; type: 'success' | 'fail' | 'pending' }> = {
-  6: { label: 'SMS 성공', type: 'success' },
-  1000: { label: 'LMS 성공', type: 'success' },
-  1800: { label: '카카오 성공', type: 'success' },
-  100: { label: '발송 대기', type: 'pending' },
-  55: { label: '요금 부족', type: 'fail' },
-  2008: { label: '비가입자/결번', type: 'fail' },
-  23: { label: '식별코드 오류', type: 'fail' },
-  2323: { label: '식별코드 오류', type: 'fail' },
-  3000: { label: '메시지 형식 오류', type: 'fail' },
-  3001: { label: '발신번호 오류', type: 'fail' },
-  3002: { label: '수신번호 오류', type: 'fail' },
-  3003: { label: '메시지 길이 초과', type: 'fail' },
-  3004: { label: '스팸 차단', type: 'fail' },
-  4000: { label: '전송 시간 초과', type: 'fail' },
-  9999: { label: '기타 오류', type: 'fail' },
-};
+// STATUS_CODE_MAP 삭제 — 백엔드 API가 status_label, status_type, carrier_label을 직접 전달
+// (sms-result-map.ts가 유일한 정의, 프론트 하드코딩 금지)
 
-const CARRIER_MAP: Record<string, string> = {
-  '11': 'SKT', '16': 'KT', '19': 'LG U+',
-  '12': 'SKT 알뜰폰', '17': 'KT 알뜰폰', '20': 'LG 알뜰폰',
-  'SKT': 'SKT', 'KTF': 'KT', 'LGT': 'LG U+',
-};
+// CARRIER_MAP 삭제 — 백엔드 API가 carrier_label 직접 전달
 
 export default function ResultsModal({ onClose, token }: ResultsModalProps) {
   const [activeTab, setActiveTab] = useState<'summary' | 'test'>('summary');
@@ -894,8 +875,8 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
                       </td></tr>
                     ) : (
                       messages.map((m: any, idx: number) => {
-                        const statusInfo = STATUS_CODE_MAP[m.status_code] || { label: `코드 ${m.status_code}`, type: 'fail' as const };
-                        const carrier = CARRIER_MAP[m.mob_company] || m.mob_company || '-';
+                        const statusInfo = { label: m.status_label || `코드 ${m.status_code}`, type: (m.status_type || 'fail') as 'success' | 'fail' | 'pending' };
+                        const carrier = m.carrier_label || '-';
                         return (
                           <tr key={m.seqno} className="border-t hover:bg-gray-50 transition-colors">
                             <td className="px-3 py-2.5 text-center text-xs text-gray-400">{(messagePage - 1) * messagePerPage + idx + 1}</td>
