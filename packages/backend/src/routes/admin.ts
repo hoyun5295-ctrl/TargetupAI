@@ -4,6 +4,7 @@ import { mysqlQuery, query } from '../config/database';
 import { authenticate, requireSuperAdmin } from '../middlewares/auth';
 import { ALL_SMS_TABLES, invalidateLineGroupCache } from './campaigns';
 import { DASHBOARD_CARD_POOL, validateCardIds } from '../utils/dashboard-card-pool';
+import { SUCCESS_CODES_SQL, PENDING_CODES_SQL, getStatusLabel, getStatusType, getCarrierLabel, isSuccess, isPending } from '../utils/sms-result-map';
 
 const router = Router();
 
@@ -1001,9 +1002,9 @@ router.get('/stats/send', authenticate, requireSuperAdmin, async (req: Request, 
 
         const testRows = await mysqlQuery(
           `SELECT COUNT(*) as total,
-            SUM(CASE WHEN status_code IN (6,1000,1800) THEN 1 ELSE 0 END) as success,
-            SUM(CASE WHEN status_code NOT IN (6,1000,1800,100) THEN 1 ELSE 0 END) as fail,
-            SUM(CASE WHEN status_code = 100 THEN 1 ELSE 0 END) as pending,
+            SUM(CASE WHEN status_code IN (${SUCCESS_CODES_SQL}) THEN 1 ELSE 0 END) as success,
+            SUM(CASE WHEN status_code NOT IN (${SUCCESS_CODES_SQL},${PENDING_CODES_SQL}) THEN 1 ELSE 0 END) as fail,
+            SUM(CASE WHEN status_code IN (${PENDING_CODES_SQL}) THEN 1 ELSE 0 END) as pending,
             SUM(CASE WHEN msg_type = 'S' THEN 1 ELSE 0 END) as sms,
             SUM(CASE WHEN msg_type = 'L' THEN 1 ELSE 0 END) as lms
           FROM ${testTable} WHERE app_etc1 = 'test' AND app_etc2 = ? ${mysqlDateWhere}`,
@@ -1153,7 +1154,7 @@ router.get('/stats/send/detail', authenticate, requireSuperAdmin, async (req: Re
       testDetail = (testRows2 as any[]).map(r => ({
         phone: r.phone,
         msgType: r.msg_type === 'S' ? 'SMS' : 'LMS',
-        status: [6, 1000, 1800].includes(r.status_code) ? 'success' : r.status_code === 100 ? 'pending' : 'fail',
+        status: isSuccess(r.status_code) ? 'success' : isPending(r.status_code) ? 'pending' : 'fail',
         sentAt: r.sent_at,
         testType: 'manager',
       }));
@@ -1321,11 +1322,11 @@ router.get('/campaigns/:id/sms-detail', authenticate, requireSuperAdmin, async (
       const mysqlParams: any[] = [id];
 
       if (statusFilter === 'success') {
-        mysqlWhere += ` AND status_code IN (6, 1000, 1800)`;
+        mysqlWhere += ` AND status_code IN (${SUCCESS_CODES_SQL})`;
       } else if (statusFilter === 'fail') {
-        mysqlWhere += ` AND status_code NOT IN (6, 1000, 1800, 100)`;
+        mysqlWhere += ` AND status_code NOT IN (${SUCCESS_CODES_SQL},${PENDING_CODES_SQL})`;
       } else if (statusFilter === 'pending') {
-        mysqlWhere += ` AND status_code = 100`;
+        mysqlWhere += ` AND status_code IN (${PENDING_CODES_SQL})`;
       }
 
       if (searchValue && searchType === 'dest_no') {
@@ -1348,9 +1349,6 @@ router.get('/campaigns/:id/sms-detail', authenticate, requireSuperAdmin, async (
          [...mysqlParams, Number(limit), Number(offset)]
       );
 
-      const statusMap: Record<number, string> = { 6: 'SMS성공', 1000: 'LMS성공', 1800: '카카오성공', 100: '대기', 7: '비가입자', 8: 'Power-off', 16: '스팸차단' };
-      const carrierMap: Record<string, string> = { '11': 'SKT', '16': 'KT', '19': 'LGU+' };
-
       (rows as any[]).forEach(r => {
         allDetail.push({
           seqno: r.seqno,
@@ -1359,8 +1357,9 @@ router.get('/campaigns/:id/sms-detail', authenticate, requireSuperAdmin, async (
           msgContents: r.msg_contents,
           msgType: r.msg_type === 'S' ? 'SMS' : r.msg_type === 'L' ? 'LMS' : r.msg_type === 'M' ? 'MMS' : r.msg_type,
           statusCode: r.status_code,
-          statusText: statusMap[r.status_code] || `코드:${r.status_code}`,
-          carrier: carrierMap[r.mob_company] || r.mob_company || '-',
+          statusText: getStatusLabel(r.status_code),
+          statusType: getStatusType(r.status_code),
+          carrier: getCarrierLabel(r.mob_company),
           sendreqTime: r.sendreq_time,
           mobsendTime: r.mobsend_time,
           recvTime: r.repmsg_recvtm,
@@ -1412,6 +1411,7 @@ router.get('/campaigns/:id/sms-detail', authenticate, requireSuperAdmin, async (
           msgType: `카카오(${r.CHAT_BUBBLE_TYPE || 'TEXT'})`,
           statusCode: r.REPORT_CODE === '0000' ? 1800 : (r.STATUS <= '2' ? 100 : 9999),
           statusText: kakaoStatusMap[r.REPORT_CODE] || `카카오:${r.REPORT_CODE || '처리중'}`,
+          statusType: r.REPORT_CODE === '0000' ? 'success' : (r.STATUS <= '2' ? 'pending' : 'fail'),
           carrier: '카카오',
           sendreqTime: r.REQUEST_DATE,
           mobsendTime: r.RESPONSE_DATE,

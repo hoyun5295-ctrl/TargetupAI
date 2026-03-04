@@ -37,7 +37,7 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
   try {
     const userId = (req as any).user.userId;
     const companyId = (req as any).user.companyId;
-    const { callbackNumber, messageContentSms, messageContentLms, messageType, firstRecipient: clientFirstRecipient } = req.body;
+    const { callbackNumber, messageContentSms, messageContentLms, messageType, subject, firstRecipient: clientFirstRecipient } = req.body;
 
     if (!callbackNumber) {
       return res.status(400).json({ error: '발신번호를 입력해주세요.' });
@@ -134,10 +134,10 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
     // 5) 테스트 건 생성 (message_hash 포함)
     const testResult = await query(
       `INSERT INTO spam_filter_tests
-       (company_id, user_id, callback_number, message_content_sms, message_content_lms, message_hash, spam_check_number, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'active')
+       (company_id, user_id, callback_number, message_content_sms, message_content_lms, subject, message_type, message_hash, spam_check_number, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'active')
        RETURNING id, created_at`,
-      [companyId, userId, callbackNumber, messageContentSms || null, messageContentLms || null, messageHash || null, null]
+      [companyId, userId, callbackNumber, messageContentSms || null, messageContentLms || null, subject || null, messageType || 'SMS', messageHash || null, null]
     );
     const testId = testResult.rows[0].id;
 
@@ -166,12 +166,14 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
         const content = replaceVariables(rawContent || '', firstCustomer, spamFieldMappings);
 
         // QTmsg 테스트 라인으로 발송
+        const titleStr = (msgType === 'LMS' || msgType === 'MMS') ? (subject || '') : '';
         await insertSmsQueue(
           device.phone,
           callbackNumber,
           content,
           msgType,
-          testId
+          testId,
+          titleStr
         );
       }
     }
@@ -716,16 +718,17 @@ async function insertSmsQueue(
   callBack: string,
   content: string,
   msgType: string,
-  testId: string
+  testId: string,
+  subject: string
 ): Promise<void> {
   const testTable = getTestSmsTable();
   const mType = msgType === 'SMS' ? 'S' : 'L';
 
   await mysqlQuery(
     `INSERT INTO ${testTable} (
-      dest_no, call_back, msg_contents, msg_type, sendreq_time, status_code, rsv1, app_etc1
-    ) VALUES (?, ?, ?, ?, NOW(), 100, '1', ?)`,
-    [destNo, callBack, content, mType, testId]
+      dest_no, call_back, msg_contents, msg_type, title_str, sendreq_time, status_code, rsv1, app_etc1
+    ) VALUES (?, ?, ?, ?, ?, NOW(), 100, '1', ?)`,
+    [destNo, callBack, content, mType, subject || '', testId]
   );
 }
 

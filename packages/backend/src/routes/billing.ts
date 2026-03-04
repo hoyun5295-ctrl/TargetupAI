@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import nodemailer from 'nodemailer';
 import { authenticate, requireSuperAdmin } from '../middlewares/auth';
 import pool, { mysqlQuery } from '../config/database';
+import { SUCCESS_CODES_SQL, PENDING_CODES_SQL } from '../utils/sms-result-map';
 
 // SMTP transporter (재사용)
 const getTransporter = () => nodemailer.createTransport({
@@ -71,9 +72,9 @@ async function smsAggByDateType(tables: string[], whereClause: string, params: a
     const rows = await mysqlQuery(
       `SELECT msg_type, DATE(sendreq_time) as send_date,
               COUNT(*) as total_count,
-              SUM(CASE WHEN status_code IN (6, 1000, 1800) THEN 1 ELSE 0 END) as success_count,
-              SUM(CASE WHEN status_code NOT IN (6, 100, 1000, 1800) AND status_code >= 200 THEN 1 ELSE 0 END) as fail_count,
-              SUM(CASE WHEN status_code = 100 THEN 1 ELSE 0 END) as pending_count
+              SUM(CASE WHEN status_code IN (${SUCCESS_CODES_SQL}) THEN 1 ELSE 0 END) as success_count,
+              SUM(CASE WHEN status_code NOT IN (${SUCCESS_CODES_SQL},${PENDING_CODES_SQL}) THEN 1 ELSE 0 END) as fail_count,
+              SUM(CASE WHEN status_code IN (${PENDING_CODES_SQL}) THEN 1 ELSE 0 END) as pending_count
        FROM ${t} WHERE ${whereClause}
        GROUP BY msg_type, DATE(sendreq_time)`,
       params
@@ -89,7 +90,7 @@ async function smsAggByRunAndType(tables: string[], whereClause: string, params:
     const rows = await mysqlQuery(
       `SELECT app_etc1 as run_id, msg_type,
               COUNT(*) as total_count,
-              SUM(CASE WHEN status_code IN (6, 1000, 1800) THEN 1 ELSE 0 END) as success_count
+              SUM(CASE WHEN status_code IN (${SUCCESS_CODES_SQL}) THEN 1 ELSE 0 END) as success_count
        FROM ${t} WHERE ${whereClause}
        GROUP BY app_etc1, msg_type`,
       params
@@ -105,7 +106,7 @@ async function smsAggTestByType(tables: string[], whereClause: string, params: a
     const rows = await mysqlQuery(
       `SELECT msg_type,
               COUNT(*) as total_count,
-              SUM(CASE WHEN status_code IN (6, 1000, 1800) THEN 1 ELSE 0 END) as success_count
+              SUM(CASE WHEN status_code IN (${SUCCESS_CODES_SQL}) THEN 1 ELSE 0 END) as success_count
        FROM ${t} WHERE ${whereClause}
        GROUP BY msg_type`,
       params

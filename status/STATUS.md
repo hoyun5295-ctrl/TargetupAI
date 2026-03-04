@@ -122,7 +122,7 @@
 | 4 | 수신거부 양방향 동기화 (독립 관리 vs DB 연동) | 설계+구현 | 높음 | ⏸️ 나래 콜백 미수신 |
 | 5 | AI 한줄로 입력 포맷 강제화 + 샘플 고객 미리보기 + 이모지 제거 | 기능개선 | 중간 | ✅ 완료 |
 | 6 | 🚨 긴급: 스팸필터 테스트 안됨 (원인: MySQL 랜섬웨어) | 인프라/보안 | 높음 | ✅ 완료 |
-| 7 | 결과값 매핑 중앙화 — sms-result-map.ts 컨트롤타워 | 구조개선 | 높음 | 🔧 백엔드 완료 · 프론트 잔여 |
+| 7 | 결과값 매핑 중앙화 — sms-result-map.ts 컨트롤타워 | 구조개선 | 높음 | ✅ 완료 (3-Tier 전수 점검) |
 
 #### 안건 #1: 대시보드 회사명 미반영 — ✅ 완료
 
@@ -264,7 +264,7 @@
 - **수정 파일 4개:** services/ai.ts, routes/ai.ts, Dashboard.tsx, AiCampaignResultPopup.tsx
 - **UI 힌트 추가:** AiSendTypeModal.tsx placeholder + 개인화 안내 힌트
 
-#### 안건 #7: 결과값 매핑 중앙화 — sms-result-map.ts 컨트롤타워 — 🔧 Phase 3 완료 · spam-filter.ts 실코드 확인 잔여 (D43-7, 2026-02-28)
+#### 안건 #7: 결과값 매핑 중앙화 — sms-result-map.ts 컨트롤타워 — ✅ 완료 (3-Tier 전수 점검 · Phase 4) (D43-7, 2026-02-28)
 
 - **문제:** QTmsg status_code 해석, 통신사 코드, 스팸필터 판정 결과가 12곳에서 각자 하드코딩 → standard-field-map.ts 이전의 필드 매핑 문제와 동일 패턴
   - 스팸필터 테스트 결과 전부 "대기" 고착 (근본 원인: 백엔드 `'received'` 저장 → 프론트 `'pass'`만 정상 처리)
@@ -284,13 +284,15 @@
   - **campaigns.ts 실코드 검증 완료:** 8곳 모두 sms-result-map.ts import 정상 사용 확인. `status_code = 100` (14곳)은 큐 관리용 초기 상태 특정이므로 정확 (PENDING_CODES로 바꾸면 104 처리중 건까지 삭제 위험)
   - **results.ts 3곳 추가 수정:** ① import에 `getStatusType`, `isSuccess` 추가 ② `/campaigns/:id/messages` 응답에 `status_label`/`status_type`/`carrier_label` 해석값 3개 필드 추가 (원본 유지+해석값 추가 → 하위호환 100%) ③ CSV export 카카오 분기 `m.status_code === 1800` → `isSuccess(m.status_code)` 헬퍼 사용
   - **ResultsModal.tsx 3곳 수정:** ① `STATUS_CODE_MAP` 14개 하드코딩 전체 삭제 (백엔드 22개와 8개 누락 불일치 해소) ② `CARRIER_MAP` 9개 하드코딩 전체 삭제 ③ 메시지 렌더링에서 백엔드 응답 `m.status_label`/`m.status_type`/`m.carrier_label` 직접 사용
-- **잔여 작업:**
-  - spam-filter.ts 실코드 확인 (Phase 2에서 가이드 기반 Harold님 수정 — 실코드 검증 미실시)
-  - 기타 프론트 파일 결과코드 하드코딩 잔존 여부 전수 점검 (Dashboard.tsx, CampaignSuccessModal.tsx 등)
-  - ResultsModal.tsx `getPreviewText` sampleData 9개 레거시 (우선순위 낮음 — 이미 치환 완료된 msg_contents 표시용)
-  - 2단계 실동작 검증 (Harold님)
-- **수정 파일:** sms-result-map.ts(신규), campaigns.ts, results.ts, spam-filter.ts, ResultsModal.tsx
-- **기간계 미접촉:** results.ts는 INSERT/UPDATE/DELETE 0건 순수 조회 전용. campaigns.ts/spam-filter.ts는 결과값 해석 로직만 변경 (발송 흐름/차감/환불 로직 미접촉)
+- **해결 Phase 4 — 3-Tier 전수 점검 + admin.ts/billing.ts 전환 (2026-02-28):**
+  - **서비스 프론트 (hanjul.ai) 7파일 점검 완료:** Dashboard.tsx, CampaignSuccessModal.tsx, AiCampaignResultPopup.tsx, AnalysisModal.tsx, TargetSendModal.tsx, DashboardHeader.tsx — 하드코딩 0건. ResultsModal.tsx getPreviewText sampleData 9개 레거시 삭제 → messages[0].msg_contents 동적 치환으로 전환
+  - **슈퍼관리자 프론트 (sys.hanjullo.com) 1파일:** AdminDashboard.tsx 4562번 `[6,1000,1800].includes(r.statusCode)` → `r.statusType === 'success'` 동적 분기로 전환
+  - **관리자 프론트 (app.hanjul.ai) 4파일 점검 완료:** CompanyDashboard.tsx, StatsTab.tsx, ScheduledTab.tsx, (UsersTab/CallbacksTab/CustomersTab 무관) — 하드코딩 0건
+  - **admin.ts 5곳 전환:** ① import 추가 ② 테스트 통계 SQL `IN (6,1000,1800)` → `SUCCESS_CODES_SQL`/`PENDING_CODES_SQL` ③ 테스트 상세 `[6,1000,1800].includes()` → `isSuccess()`/`isPending()` ④ sms-detail 필터 SQL → 상수 참조 ⑤ statusMap 7개 + carrierMap 3개 로컬 하드코딩 삭제 → `getStatusLabel()`(22개)/`getCarrierLabel()`(9개) + statusType 필드 추가
+  - **billing.ts 5곳 전환 + 버그 수정:** ① import 추가 ② smsAggByDateType 성공/실패/대기 3곳 → 상수 참조 ③ smsAggByRunAndType 성공 1곳 ④ smsAggTestByType 성공 1곳. **🐛 `>= 200` 버그 발견·수정:** 실패 판정에 `status_code >= 200` 조건이 있어 비가입자(7)/Power-off(8)/스팸차단(16)/기타실패(55) 등 200 미만 실패 코드가 정산 실패 건수에서 누락. 다른 파일과 통일하여 `NOT IN (성공, 대기) = 실패`로 수정
+- **수정 파일 (전체):** sms-result-map.ts(신규), campaigns.ts, results.ts, spam-filter.ts, admin.ts, billing.ts, ResultsModal.tsx, AdminDashboard.tsx
+- **기간계 미접촉:** 발송 흐름/차감/환불 로직 전부 미수정. 결과값 해석 로직만 sms-result-map.ts 중앙화 전환
+- **3-Tier 전수 점검 결과:** 백엔드 6파일 + 프론트 12파일 = **18파일 점검, 하드코딩 잔존 0건**
 
 #### 진행 순서 (Harold님 확정)
 
@@ -300,7 +302,7 @@
 4. ~~**#3** 직접 타겟 설정~~ ✅ 완료 (백엔드 버그 수정 + 발송창 하드코딩 전면 제거)
 5. ~~**#4** 수신거부 동기화~~ ⏸️ 코드 완료, 나래 콜백 미수신 → 월요일 나래 확인
 6. ~~**🚨 #6 긴급: 스팸필터 테스트 안됨**~~ ✅ 완료 — 원인: MySQL 랜섬웨어 공격 (D49 보안 대응)
-7. **#7** 결과값 매핑 중앙화 — Phase 3 완료 · **spam-filter.ts 실코드 확인 + 프론트 전수 점검 잔여**
+7. ~~**#7** 결과값 매핑 중앙화~~ ✅ 완료 — Phase 4: 3-Tier 전수 점검 + admin.ts/billing.ts 전환 + `>= 200` 버그 수정
 
 → 각 안건을 별도 채팅 세션에서 설계→컨펌→구현→테스트→정립 후 다음으로 진행
 
@@ -327,7 +329,7 @@
 | D43 안건#3 직접타겟 리팩토링 | ✅ 완료 (백엔드 버그 + 발송창 하드코딩 전면 제거) |
 | D43 안건#4 수신거부 동기화 | ⏸️ 코드 완료 · 나래 콜백 미수신 → 월요일 확인 |
 | D43 안건#5 AI 포맷+미리보기+이모지 | ✅ 완료 |
-| D43 안건#7 결과값 매핑 중앙화 | 🔧 Phase 3 완료 · spam-filter.ts 실코드 확인 + 프론트 전수 점검 잔여 |
+| D43 안건#7 결과값 매핑 중앙화 | ✅ 완료 — Phase 4: 3-Tier 18파일 전수 점검, 백엔드 6파일+프론트 12파일 하드코딩 0건, billing.ts `>=200` 버그 수정 |
 | AI 맞춤한줄 Phase 1 (AI-CUSTOM-SEND.md) | ✅ 8단계 전체 완료 |
 | 선불 요금제 Phase 1-A | ✅ 완료 |
 | 8차 버그 13건 수정 | ✅ 코드 수정 완료 · 실동작 검증 대기 |
@@ -346,7 +348,7 @@
 | spam-filter.ts | 스팸필터 테스트 (Android 앱 연동) | D43-7: 판정 로직 6곳 → SPAM_RESULT 상수 전환, 'received'→'pass' |
 | messageUtils.ts | 공통 변수 치환 (`replaceVariables`) | 미수정 |
 | results.ts | 발송 결과 조회 + MySQL LIVE/LOG 통합 | D43-7: statusCodeMap/carrierMap 6곳 → sms-result-map.ts import + messages API에 해석값 3필드(status_label/status_type/carrier_label) 추가 |
-| billing.ts | 정산·거래내역서 PDF | 미수정 |
+| billing.ts | 정산·거래내역서 PDF | D43-7: 3개 집계함수 5곳 → SUCCESS_CODES_SQL/PENDING_CODES_SQL 참조. `>=200` 버그 수정(비가입자/Power-off/스팸차단 등 200 미만 실패코드 정산 누락 해소) |
 | direct-send (campaigns.ts 내) | 직접 타겟 발송 | D43-7: 결과값 해석 동일 전환 |
 
 ---
@@ -398,7 +400,7 @@ QTmsg status_code, 통신사 코드, 스팸필터 판정 결과를 한 곳에서
 **헬퍼 함수:** isSuccess(), isFail(), isPending(), getStatusLabel(), getCarrierLabel(), getSpamResultLabel(), getSpamResultType()
 **SQL용 상수:** SUCCESS_CODES_SQL, PENDING_CODES_SQL (IN 절 문자열)
 
-**참조 파일:** campaigns.ts, results.ts, spam-filter.ts (백엔드 전환 완료), ResultsModal.tsx (프론트 잔여 2곳)
+**참조 파일 (전환 완료):** campaigns.ts, results.ts, spam-filter.ts, admin.ts, billing.ts (백엔드 6파일) / ResultsModal.tsx, AdminDashboard.tsx (프론트 2파일)
 
 **절대 원칙:** 새로운 status_code 추가/변경 시 sms-result-map.ts만 수정. 개별 파일에 하드코딩 금지.
 
@@ -537,6 +539,7 @@ QTmsg status_code, 통신사 코드, 스팸필터 판정 결과를 한 곳에서
 | D48 | 02-27 | 수신거부 양방향 동기화 — plan_id 기준 customers.sms_opt_in 동시 UPDATE + opt_out_auto_sync 플래그 | unsubscribes=SoT, opt_outs 레거시 확인, 나래인터넷 전용 auto_sync 분기. 080번호 하드코딩 제거→동적 |
 | D49 | 02-28 | 🔴 MySQL 랜섬웨어 긴급 대응 — 외부 차단+비밀번호 강화+권한 분리+보안 강화 | 3306 외부 노출→봇 공격→SMSQ 테이블 삭제. 127.0.0.1 바인딩+smsuser DROP 권한 제거+fail2ban+UFW 포트 차단. PostgreSQL 무사, 고객 데이터 유출 없음 |
 | D50 | 02-28 | 결과코드 매핑 Phase 3 — 프론트 하드코딩 제거 + 백엔드 해석값 전달 | ResultsModal.tsx STATUS_CODE_MAP(14개)/CARRIER_MAP(9개) 하드코딩 삭제→백엔드 API가 sms-result-map.ts 기반 해석값 직접 전달. 프론트에 결과코드 매핑 로직 없음=불일치 불가 |
+| D51 | 02-28 | 결과코드 매핑 Phase 4 — 3-Tier 전수 점검 완료 + admin.ts/billing.ts 전환 | admin.ts 5곳(statusMap7개+carrierMap3개 로컬 삭제→헬퍼 사용+statusType 추가) + billing.ts 5곳(3개 집계함수→상수참조) + `>=200` 버그 수정(실패 건수 누락). AdminDashboard.tsx statusType 동적 분기. ResultsModal.tsx sampleData 동적 치환. **18파일 점검, 하드코딩 잔존 0건** |
 
 **아카이브:** D1-AI발송2분기(02-22) | D2-브리핑방식(02-22) | D3-개인화필드체크박스(02-22) | D4-textarea제거(02-22) | D5-별도컴포넌트분리(02-22) | D6-대시보드레이아웃(02-22) | D7-헤더탭스타일(02-23) | D8-AUTO/PRO뱃지(02-23) | D9-캘린더상태기준(02-23) | D10-6차세션분할(02-23) | D11-KCP전환(02-23) | D12-이용약관(02-23) | D13-수신거부SoT(02-23) | D14-7차3세션분할(02-24) | D15-제목머지→D28번복(02-25) | D16-스팸테스트과금(02-25) | D17-테스트통계확장(02-25) | D18-정산자체헬퍼(02-25) | D19-구독상태필드(02-25) | D20-AI분석차별화(02-25) | D21-planInfo실시간(02-25) | D22-스팸잠금직접발송만(02-25) | D23-preview보안(02-25) | D24-run세션1완전구현(02-25) | D25-pdfkit선택(02-25) | D26-분석캐싱24h(02-25) | D27-비즈니스3회최적화(02-25) | D28-제목머지제거(02-25) | D29-5경로전수점검(02-25) | D30-즉시sending전환(02-25) | D31-GPT fallback(02-25) | D32-발송파이프라인복구(02-26) | D33-messageUtils통합(02-26) | D34-스팸필터DB직접조회(02-26) | D35-선불환불보장(02-26) | D-대시보드모달분리(02-23): 8,039줄→4,964줄
 
@@ -574,7 +577,7 @@ QTmsg status_code, 통신사 코드, 스팸필터 판정 결과를 한 곳에서
 
 | 날짜 | 완료 항목 |
 |------|----------|
-| 02-28 | D43-7 Phase 3 결과코드 매핑 프론트 하드코딩 제거: results.ts messages API에 status_label/status_type/carrier_label 해석값 추가+CSV export 카카오 `isSuccess()` 전환. ResultsModal.tsx STATUS_CODE_MAP 14개+CARRIER_MAP 9개 하드코딩 완전 삭제→백엔드 해석값 사용. campaigns.ts 실코드 검증 완료(8곳 정상+status_code=100 큐관리용 14곳 정확). 기간계 미접촉(results.ts INSERT/UPDATE/DELETE 0건). 수정 2파일(results.ts, ResultsModal.tsx) |
+| 02-28 | D43-7 Phase 4 결과코드 매핑 3-Tier 전수 점검 완료: **18파일 점검, 하드코딩 잔존 0건.** admin.ts 5곳 전환(statusMap7개+carrierMap3개 로컬삭제→getStatusLabel(22개)/getCarrierLabel(9개)+statusType 추가) + billing.ts 5곳 전환(3개 집계함수→SUCCESS_CODES_SQL/PENDING_CODES_SQL) + **billing.ts `>=200` 버그 수정**(비가입자7/Power-off8/스팸차단16 등 200미만 실패코드 정산 누락 해소). AdminDashboard.tsx statusType 동적분기. ResultsModal.tsx sampleData9개 삭제→messages[0].msg_contents 동적치환. 서비스/관리자/슈퍼관리자 프론트 12파일 점검 깨끗. 수정 4파일(admin.ts, billing.ts, AdminDashboard.tsx, ResultsModal.tsx) |
 | 02-28 | 🔴 D49 MySQL 랜섬웨어 긴급 대응: 원인(3306 외부 노출+취약 비밀번호→봇 공격→SMSQ_SEND_1~11 삭제). 복구(127.0.0.1 바인딩+테이블 재생성+로그 테이블 복구+Agent 재시작+이벤트 스케줄러 확인). 보안 강화(root/smsuser 비밀번호 강화+Agent encrypt_pass DES 암호화 동기 변경+smsuser DROP 권한 제거+UFW 3000/9001~9011 차단+SSH root 로그인 차단+fail2ban 3회→1h밴). 피해: SMSQ 큐만 삭제(복구 완료), PostgreSQL/고객 데이터 무사. 스팸필터 테스트 LG U+ 수신 확인 |
 | 02-27 | D43-4 수신거부 양방향 동기화: unsubscribes=SoT 확정, opt_outs 레거시 확인. syncCustomerOptIn 헬퍼+4곳(080콜백/직접추가/업로드/삭제) 적용. DDL opt_out_auto_sync 추가. 프론트 080번호 동적+연동테스트 조건부. curl 테스트 정상. **나래 콜백 미수신→월요일 확인.** 수정 2파일(unsubscribes.ts, Unsubscribes.tsx)+DDL 1건 |
 | 02-27 | D43-3c 직접타겟 발송창 하드코딩 전면 제거 + 컴포넌트 분리: TargetSendModal.tsx 신규(901줄)+DirectTargetFilterModal.tsx FieldMeta export+onExtracted fieldsMeta 추가+Dashboard.tsx 638줄 감소(4548→3910)+DirectPreviewModal.tsx 동적치환. 하드코딩 8곳→fieldsMeta 동적. 커서위치 삽입 버그 수정(selectionStart). 발송파이프라인 미접촉 |

@@ -176,7 +176,7 @@ export default function Dashboard() {
   const [customSendData, setCustomSendData] = useState<any>(null);
   const [showCustomSendModal, setShowCustomSendModal] = useState(false);
   const [showSpamFilter, setShowSpamFilter] = useState(false);
-  const [spamFilterData, setSpamFilterData] = useState<{sms?: string; lms?: string; callback: string; msgType: 'SMS'|'LMS'|'MMS'; firstRecipient?: Record<string, any>}>({callback:'',msgType:'SMS'});
+  const [spamFilterData, setSpamFilterData] = useState<{sms?: string; lms?: string; callback: string; msgType: 'SMS'|'LMS'|'MMS'; subject?: string; firstRecipient?: Record<string, any>}>({callback:'',msgType:'SMS'});
   const [sampleCustomer, setSampleCustomer] = useState<Record<string, string>>({});
   const [sendTimeOption, setSendTimeOption] = useState<'ai' | 'now' | 'custom'>('now');
   const [successSendInfo, setSuccessSendInfo] = useState<string>('');  // 성공 모달용 발송 정보
@@ -1653,6 +1653,7 @@ const campaignData = {
           messageContentLms={spamFilterData.lms}
           callbackNumber={spamFilterData.callback}
           messageType={spamFilterData.msgType}
+          subject={spamFilterData.subject}
           firstRecipient={spamFilterData.firstRecipient}
         />
       )}
@@ -2921,7 +2922,7 @@ const campaignData = {
                           const lmsRaw = adTextEnabled ? `(광고) ${msg}\n무료수신거부 ${optOutNumber}` : msg;
                           const smsMsg = replaceVars(smsRaw);
                           const lmsMsg = replaceVars(lmsRaw);
-                          setSpamFilterData({sms: smsMsg, lms: lmsMsg, callback: cb, msgType: directMsgType, firstRecipient: firstR || undefined});
+                          setSpamFilterData({sms: smsMsg, lms: lmsMsg, callback: cb, msgType: directMsgType, subject: directSubject || '', firstRecipient: firstR || undefined});
                           setShowSpamFilter(true);
                         }}
                         className={`py-2.5 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg text-sm font-medium transition-colors ${isSpamFilterLocked ? 'opacity-60' : ''}`}

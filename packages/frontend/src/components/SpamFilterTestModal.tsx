@@ -7,6 +7,7 @@ interface SpamFilterTestModalProps {
   messageContentLms?: string;
   callbackNumber: string;
   messageType: 'SMS' | 'LMS' | 'MMS';
+  subject?: string;
   firstRecipient?: Record<string, any>;
 }
 
@@ -24,6 +25,7 @@ export default function SpamFilterTestModal({
   messageContentLms,
   callbackNumber,
   messageType,
+  subject,
   firstRecipient
 }: SpamFilterTestModalProps) {
   const token = useAuthStore((s) => s.token);
@@ -128,7 +130,7 @@ export default function SpamFilterTestModal({
       const res = await fetch('/api/spam-filter/test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ callbackNumber, messageContentSms: messageContentSms || null, messageContentLms: messageContentLms || null, messageType, firstRecipient: firstRecipient || null }),
+        body: JSON.stringify({ callbackNumber, messageContentSms: messageContentSms || null, messageContentLms: messageContentLms || null, messageType, subject: subject || null, firstRecipient: firstRecipient || null }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -270,6 +272,9 @@ export default function SpamFilterTestModal({
                     <div className="flex gap-2 mt-1">
                       <div className="w-7 h-7 rounded-full bg-blue-100 flex items-center justify-center shrink-0 text-xs">📱</div>
                       <div className="bg-white rounded-2xl rounded-tl-sm p-3 shadow-sm border border-gray-100 text-[12px] leading-[1.7] whitespace-pre-wrap break-all text-gray-700 max-w-[95%]">
+                        {subject && (messageType === 'LMS' || messageType === 'MMS') && (
+                          <div className="font-bold text-gray-800 mb-1 pb-1 border-b border-gray-100">{subject}</div>
+                        )}
                         {previewMessage || '메시지 없음'}
                       </div>
                     </div>

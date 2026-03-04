@@ -4559,8 +4559,8 @@ const handleApproveRequest = async (id: string) => {
                         <td className="px-3 py-2 text-center text-xs text-gray-600">{r.carrier}</td>
                         <td className="px-3 py-2 text-center">
                           <span className={`inline-flex px-1.5 py-0.5 rounded text-xs font-medium ${
-                            [6, 1000, 1800].includes(r.statusCode) ? 'bg-green-100 text-green-700' :
-                            r.statusCode === 100 ? 'bg-amber-100 text-amber-700' :
+                            r.statusType === 'success' ? 'bg-green-100 text-green-700' :
+                            r.statusType === 'pending' ? 'bg-amber-100 text-amber-700' :
                             'bg-red-100 text-red-700'
                           }`}>{r.statusText}</span>
                         </td>
