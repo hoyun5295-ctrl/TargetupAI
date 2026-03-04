@@ -1,10 +1,10 @@
 import { Request, Response, Router } from 'express';
 import fs from 'fs';
-import Redis from 'ioredis';
 import multer from 'multer';
 import path from 'path';
 import * as XLSX from 'xlsx';
 import { query } from '../config/database';
+import { redis, AI_MODELS, AI_MAX_TOKENS, CACHE_TTL, TIMEOUTS, BATCH_SIZES } from '../config/defaults';
 import { normalizeByFieldKey, normalizeRegion } from '../utils/normalize';
 import { CATEGORY_LABELS, FIELD_MAP, getColumnFields, getCustomFields, getFieldByKey } from '../utils/standard-field-map';
 
@@ -35,8 +35,6 @@ function normalizeDateValue(value: any): string | null {
   }
   return null;
 }
-
-const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
 
 import { authenticate } from '../middlewares/auth';
 
@@ -78,6 +76,23 @@ const upload = multer({
 // ================================================================
 router.post('/parse', authenticate, upload.single('file'), async (req: Request, res: Response) => {
   try {
+    // ★ D53: 요금제 게이팅 — customer_db_enabled 체크
+    const companyIdForGating = req.user?.companyId;
+    if (companyIdForGating) {
+      const planCheck = await query(
+        `SELECT p.customer_db_enabled FROM companies c
+         LEFT JOIN plans p ON c.plan_id = p.id
+         WHERE c.id = $1`,
+        [companyIdForGating]
+      );
+      if (!planCheck.rows[0]?.customer_db_enabled) {
+        return res.status(403).json({
+          error: '고객 DB 관리는 스타터 이상 요금제에서 이용 가능합니다.',
+          code: 'PLAN_FEATURE_LOCKED'
+        });
+      }
+    }
+
     if (!req.file) {
       return res.status(400).json({ error: '파일이 없습니다.' });
     }
@@ -135,7 +150,7 @@ router.post('/parse', authenticate, upload.single('file'), async (req: Request, 
     await redis.set(`upload:${fileId}:meta`, JSON.stringify({
       totalRows,
       headers
-    }), 'EX', 600); // 10분
+    }), 'EX', CACHE_TTL.uploadMeta); // 10분
 
     const response: any = {
       success: true,
@@ -189,11 +204,17 @@ DB 컬럼 (매핑 대상):
 ${Object.entries(mappingTargets).map(([k, v]) => `- ${k}: ${v}`).join('\n')}
 
 규칙:
-1. 의미가 비슷하면 매핑해줘 (예: tier → grade, marketing_opt_in → sms_opt_in, total_spend → total_purchase_amount, 매장번호 → store_phone)
+1. 의미가 비슷하면 매핑해줘 (예: tier → grade, marketing_opt_in → sms_opt_in, total_spend → total_purchase_amount)
 2. 위 필드에 해당하지 않는 컬럼은 custom_1부터 순서대로 배정 (최대 custom_15까지)
 3. phone(전화번호)은 반드시 찾아서 매핑해줘
 4. customer_id, created_at 등 시스템 컬럼은 null
 5. age는 정수 나이만 매핑. 연령대(20대 등)는 custom 필드로 배정
+6. ⚠️ 매장 관련 필드 구분 (반드시 정확히 매핑!):
+   - registered_store: 등록매장, 가입매장, 소속매장, 주이용매장 등 고객이 등록된/소속된 매장명
+   - recent_purchase_store: 최근구매매장, 최종구매매장, 마지막구매매장 등 가장 최근에 구매한 매장명
+   - store_code: 브랜드코드, 구분코드, 분류코드 등 브랜드 식별 코드 (CPB, NARS 등)
+   - store_phone: 매장전화번호, 매장번호 등 매장의 전화번호
+   ※ "매장명"만 있을 때 → 문맥상 등록/소속 매장이면 registered_store, 구매 매장이면 recent_purchase_store
 
 JSON 형식으로만 응답해줘 (다른 설명 없이):
 {"엑셀컬럼명": "DB컬럼명(영문 key) 또는 null", ...}
@@ -213,8 +234,8 @@ JSON 형식으로만 응답해줘 (다른 설명 없이):
           'anthropic-version': '2023-06-01'
         },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-5-20250929',
-          max_tokens: 1024,
+          model: AI_MODELS.claude,
+          max_tokens: AI_MAX_TOKENS.fieldMapping,
           messages: [{ role: 'user', content: mappingPrompt }]
         })
       });
@@ -234,8 +255,8 @@ JSON 형식으로만 응답해줘 (다른 설명 없이):
           'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`
         },
         body: JSON.stringify({
-          model: 'gpt-5.1',
-          max_completion_tokens: 1024,
+          model: AI_MODELS.gpt,
+          max_completion_tokens: AI_MAX_TOKENS.fieldMapping,
           messages: [{ role: 'user', content: mappingPrompt }]
         })
       });
@@ -298,7 +319,23 @@ router.post('/save', authenticate, async (req: Request, res: Response) => {
     const { fileId, mapping, customLabels } = req.body;
     const companyId = req.user?.companyId;
     const userId = (req as any).user?.userId;
-    
+
+    // ★ D53: 요금제 게이팅 — customer_db_enabled 체크
+    if (companyId) {
+      const planCheck = await query(
+        `SELECT p.customer_db_enabled FROM companies c
+         LEFT JOIN plans p ON c.plan_id = p.id
+         WHERE c.id = $1`,
+        [companyId]
+      );
+      if (!planCheck.rows[0]?.customer_db_enabled) {
+        return res.status(403).json({
+          error: '고객 DB 관리는 스타터 이상 요금제에서 이용 가능합니다.',
+          code: 'PLAN_FEATURE_LOCKED'
+        });
+      }
+    }
+
     if (!fileId || !mapping || !companyId) {
       return res.status(400).json({ 
         error: '필수 파라미터가 없습니다.',
@@ -369,7 +406,7 @@ router.post('/save', authenticate, async (req: Request, res: Response) => {
       errorCount: 0,
       startedAt,
       message: '처리 시작...'
-    }), 'EX', 3600);
+    }), 'EX', CACHE_TTL.uploadProgress);
 
     // 즉시 응답 (1초 이내)
     res.json({ success: true, fileId, totalRows, message: '백그라운드 처리 시작' });
@@ -425,7 +462,7 @@ async function processUploadInBackground(
       userStoreCodes = userResult.rows[0]?.store_codes || [];
     }
 
-    const BATCH_SIZE = 500;
+    const BATCH_SIZE = BATCH_SIZES.customerUpload;
     const hasFileStoreCode = Object.values(mapping).includes('store_code');
 
     for (let i = 0; i < rows.length; i += BATCH_SIZE) {
@@ -635,7 +672,7 @@ async function processUploadInBackground(
         errorCount,
         startedAt,
         message: '처리 중...'
-      }), 'EX', 3600);
+      }), 'EX', CACHE_TTL.uploadProgress);
     }
 
     // ===== 완료 =====
@@ -651,7 +688,7 @@ async function processUploadInBackground(
       startedAt,
       completedAt,
       message: `총 ${totalRows.toLocaleString()}건 중 신규 ${insertCount.toLocaleString()}건, 업데이트 ${duplicateCount.toLocaleString()}건${errorCount > 0 ? `, 오류 ${errorCount.toLocaleString()}건` : ''}`
-    }), 'EX', 3600);
+    }), 'EX', CACHE_TTL.uploadProgress);
 
     console.log(`[업로드 완료] fileId=${fileId}, 신규=${insertCount}, 업데이트=${duplicateCount}, 오류=${errorCount}`);
 
@@ -726,7 +763,7 @@ async function processUploadInBackground(
       startedAt,
       error: error.message || 'DB 처리 오류',
       message: `오류 발생. ${(insertCount + duplicateCount).toLocaleString()}건까지 처리 완료. 재업로드 시 중복 건은 자동 스킵됩니다.`
-    }), 'EX', 3600);
+    }), 'EX', CACHE_TTL.uploadProgress);
   } finally {
     // 파일 삭제 (성공/실패 무관하게 반드시 실행)
     try { fs.unlinkSync(filePath); } catch (e) {}
@@ -784,6 +821,6 @@ function cleanupStaleUploads() {
 
 // 서버 시작 시 1회 정리 + 1시간 간격 반복
 cleanupStaleUploads();
-setInterval(cleanupStaleUploads, 60 * 60 * 1000);
+setInterval(cleanupStaleUploads, TIMEOUTS.uploadCleanup);
 
 export default router;

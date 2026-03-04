@@ -11,6 +11,9 @@ interface DashboardHeaderProps {
   onResults: () => void;
   onAnalysis: () => void;
   onLogout: () => void;
+  // D53: 게이팅 콜백 — 잠긴 기능 클릭 시 업그레이드 모달
+  onFeatureLocked?: (featureName: string, requiredPlan: string) => void;
+  customerDbEnabled?: boolean;
 }
 
 type MenuColor = 'green' | 'gold' | 'gray';
@@ -20,6 +23,7 @@ interface MenuItem {
   onClick: () => void;
   color: MenuColor;
   emphasized?: boolean;
+  locked?: boolean;
 }
 
 const COLOR_CONFIG: Record<MenuColor, { normal: string; hover: string; bar: string }> = {
@@ -43,14 +47,21 @@ export default function DashboardHeader({
   onResults,
   onAnalysis,
   onLogout,
+  onFeatureLocked,
+  customerDbEnabled,
 }: DashboardHeaderProps) {
   const navigate = useNavigate();
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
 
+  // D53: 캘린더 게이팅 — customer_db_enabled 필요
+  const isCalendarLocked = customerDbEnabled === false;
+
   const menuItems: MenuItem[] = [
     { label: 'AI 분석', onClick: onAnalysis, color: 'gold', emphasized: true },
     { label: '직접발송', onClick: onDirectSend, color: 'green', emphasized: true },
-    { label: '캘린더', onClick: onCalendar, color: 'gold' },
+    { label: '캘린더', onClick: isCalendarLocked
+        ? () => onFeatureLocked?.('캘린더', '스타터')
+        : onCalendar, color: 'gold', locked: isCalendarLocked },
     { label: '발송결과', onClick: onResults, color: 'green' },
     { label: '수신거부', onClick: () => navigate('/unsubscribes'), color: 'gold' },
     { label: '설정', onClick: () => navigate('/settings'), color: 'green' },
@@ -80,11 +91,13 @@ export default function DashboardHeader({
             const isEmphasized = !!item.emphasized;
 
             // 텍스트 색상: 강조→항상 색상, 호버→hover색, 기본→normal색
-            const textColor = isHovered
-              ? cfg.hover
-              : isEmphasized
-                ? EMPHASIZED_COLOR[item.color] || cfg.normal
-                : cfg.normal;
+            const textColor = item.locked
+              ? '#d1d5db'
+              : isHovered
+                ? cfg.hover
+                : isEmphasized
+                  ? EMPHASIZED_COLOR[item.color] || cfg.normal
+                  : cfg.normal;
 
             // 밑줄 너비: 강조→항상 표시, 호버→표시
             const barWidth = isEmphasized || isHovered ? '60%' : '0%';
@@ -101,6 +114,7 @@ export default function DashboardHeader({
                   fontWeight: isEmphasized ? 600 : 400,
                 }}
               >
+                {item.locked && <span className="text-xs">🔒</span>}
                 {item.label}
                 {/* 밑줄 애니메이션 */}
                 <span

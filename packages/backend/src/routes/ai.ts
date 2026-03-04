@@ -265,6 +265,20 @@ router.post('/recommend-target', async (req: Request, res: Response) => {
       return res.status(403).json({ error: '회사 권한이 필요합니다' });
     }
 
+    // ★ D53: 요금제 게이팅 — ai_messaging_enabled 체크
+    const planCheck = await query(
+      `SELECT p.ai_messaging_enabled FROM companies c
+       LEFT JOIN plans p ON c.plan_id = p.id
+       WHERE c.id = $1`,
+      [companyId]
+    );
+    if (!planCheck.rows[0]?.ai_messaging_enabled) {
+      return res.status(403).json({
+        error: 'AI 추천 발송은 베이직 이상 요금제에서 이용 가능합니다.',
+        code: 'PLAN_FEATURE_LOCKED'
+      });
+    }
+
     const { objective } = req.body;
 
     if (!objective) {
@@ -500,6 +514,20 @@ router.post('/parse-briefing', authenticate, async (req: Request, res: Response)
       return res.status(403).json({ error: '회사 권한이 필요합니다' });
     }
 
+    // ★ D53: 요금제 게이팅 — ai_messaging_enabled 체크
+    const planCheck = await query(
+      `SELECT p.ai_messaging_enabled FROM companies c
+       LEFT JOIN plans p ON c.plan_id = p.id
+       WHERE c.id = $1`,
+      [companyId]
+    );
+    if (!planCheck.rows[0]?.ai_messaging_enabled) {
+      return res.status(403).json({
+        error: 'AI 맞춤한줄은 베이직 이상 요금제에서 이용 가능합니다.',
+        code: 'PLAN_FEATURE_LOCKED'
+      });
+    }
+
     const { briefing } = req.body;
     if (!briefing || briefing.trim().length < 10) {
       return res.status(400).json({ error: '브리핑 내용을 10자 이상 입력해주세요' });
@@ -557,6 +585,20 @@ router.post('/generate-custom', authenticate, async (req: Request, res: Response
     const companyId = req.user?.companyId;
     if (!companyId) {
       return res.status(403).json({ error: '회사 권한이 필요합니다' });
+    }
+
+    // ★ D53: 요금제 게이팅 — ai_messaging_enabled 체크
+    const planCheck = await query(
+      `SELECT p.ai_messaging_enabled FROM companies c
+       LEFT JOIN plans p ON c.plan_id = p.id
+       WHERE c.id = $1`,
+      [companyId]
+    );
+    if (!planCheck.rows[0]?.ai_messaging_enabled) {
+      return res.status(403).json({
+        error: 'AI 맞춤한줄은 베이직 이상 요금제에서 이용 가능합니다.',
+        code: 'PLAN_FEATURE_LOCKED'
+      });
     }
 
     const { briefing, promotionCard, personalFields, fieldLabels, url, tone, brandName, channel, isAd } = req.body;

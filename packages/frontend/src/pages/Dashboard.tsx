@@ -78,8 +78,12 @@ interface PlanInfo {
   max_customers: number;
   current_customers: number;
   trial_expires_at: string;
-is_trial_expired: boolean;
-ai_analysis_level?: string;
+  is_trial_expired: boolean;
+  ai_analysis_level?: string;
+  // D53: 요금제별 기능 게이팅 플래그
+  customer_db_enabled?: boolean;
+  spam_filter_enabled?: boolean;
+  ai_messaging_enabled?: boolean;
 }
 
 // D41 대시보드 동적 카드 아이콘 맵
@@ -136,7 +140,10 @@ export default function Dashboard() {
   const isSubscriptionLocked = planInfo
     ? (planInfo.subscription_status === 'expired' || planInfo.subscription_status === 'suspended')
     : (subscriptionStatus === 'expired' || subscriptionStatus === 'suspended');
-  const isSpamFilterLocked = !planInfo || (Number(planInfo.monthly_price) || 0) < 150000;
+  // D53: DB 플래그 기반 게이팅 (하드코딩 가격 체크 제거)
+  const isSpamFilterLocked = !planInfo?.spam_filter_enabled;
+  const isCustomerDbLocked = !planInfo?.customer_db_enabled;
+  const isAiMessagingLocked = !planInfo?.ai_messaging_enabled;
   const [balanceInfo, setBalanceInfo] = useState<{billingType: string, balance: number, costPerSms: number, costPerLms: number, costPerMms: number, costPerKakao: number} | null>(null);
   const [showBalanceModal, setShowBalanceModal] = useState(false);
   const [showChargeModal, setShowChargeModal] = useState(false);
@@ -269,7 +276,8 @@ export default function Dashboard() {
   };
   // AI 문구 추천 (직접타겟발송) — 버튼 클릭 핸들러
   const handleAiMsgHelper = () => {
-    if (planInfo?.plan_code === 'STARTER') {
+    // D53: DB 플래그 기반 게이팅
+    if (isAiMessagingLocked) {
       setShowPlanUpgradeModal(true);
       return;
     }
@@ -613,6 +621,9 @@ export default function Dashboard() {
   const [aiHelperResults, setAiHelperResults] = useState<any[]>([]);
   const [aiHelperRecommendation, setAiHelperRecommendation] = useState('');
   const [showPlanUpgradeModal, setShowPlanUpgradeModal] = useState(false);
+  // D53: 범용 업그레이드 모달 — featureName/requiredPlan
+  const [planUpgradeFeature, setPlanUpgradeFeature] = useState('');
+  const [planUpgradeRequired, setPlanUpgradeRequired] = useState('');
   const [showDirectInput, setShowDirectInput] = useState(false);
   const [showSpecialChars, setShowSpecialChars] = useState<'target' | 'direct' | null>(null);
   const [showTemplateBox, setShowTemplateBox] = useState<'target' | 'direct' | null>(null);
@@ -1044,7 +1055,7 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
   // AI 타겟 추천
   const handleAiRecommendTarget = async () => {
     if (!aiObjective.trim()) {
-      alert('마케팅 목표를 입력해주세요');
+      setToast({ show: true, type: 'error', message: '마케팅 목표를 입력해주세요' });
       return;
     }
     setAiLoading(true);
@@ -1070,12 +1081,12 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
       // 캠페인 컨텍스트 저장 (메시지 생성에 사용)
       setCampaignContext(aiObjective);
       
-      alert(`AI 추천 완료!\n\n${result.reasoning}\n\n예상 타겟: ${result.estimated_count.toLocaleString()}명${result.unsubscribe_count > 0 ? `\n수신거부 제외: ${result.unsubscribe_count.toLocaleString()}명` : ''}`);
+      setToast({ show: true, type: 'success', message: `AI 추천 완료! 예상 타겟: ${result.estimated_count.toLocaleString()}명${result.unsubscribe_count > 0 ? ` (수신거부 제외: ${result.unsubscribe_count.toLocaleString()}명)` : ''}` });
       setShowAiTarget(false);
       setAiObjective('');
     } catch (error) {
       console.error('AI 타겟 추천 실패:', error);
-      alert('AI 추천 중 오류가 발생했습니다.');
+      setToast({ show: true, type: 'error', message: 'AI 추천 중 오류가 발생했습니다.' });
     } finally {
       setAiLoading(false);
     }
@@ -1133,7 +1144,7 @@ const handleAiCampaignGenerate = async (promptOverride?: string) => {
     setAiStep(1);
   } catch (error) {
     console.error('AI 캠페인 생성 실패:', error);
-    alert('AI 추천 중 오류가 발생했습니다.');
+    setToast({ show: true, type: 'error', message: 'AI 추천 중 오류가 발생했습니다.' });
   } finally {
     setAiLoading(false);
   }
@@ -1163,7 +1174,7 @@ const handleAiGenerateChannelMessage = async () => {
     setAiStep(2);
   } catch (error) {
     console.error('AI 메시지 생성 실패:', error);
-    alert('메시지 생성 중 오류가 발생했습니다.');
+    setToast({ show: true, type: 'error', message: '메시지 생성 중 오류가 발생했습니다.' });
   } finally {
     setAiLoading(false);
   }
@@ -1173,7 +1184,7 @@ const handleAiGenerateChannelMessage = async () => {
   const handleAiGenerateMessage = async () => {
     const prompt = aiPrompt.trim() || campaignContext;
     if (!prompt) {
-      alert('메시지 요청 내용을 입력해주세요');
+      setToast({ show: true, type: 'error', message: '메시지 요청 내용을 입력해주세요' });
       return;
     }
     setAiLoading(true);
@@ -1185,7 +1196,7 @@ const handleAiGenerateChannelMessage = async () => {
       setAiMessages(response.data.variants || []);
     } catch (error) {
       console.error('AI 메시지 생성 실패:', error);
-      alert('AI 메시지 생성 중 오류가 발생했습니다.');
+      setToast({ show: true, type: 'error', message: 'AI 메시지 생성 중 오류가 발생했습니다.' });
     } finally {
       setAiLoading(false);
     }
@@ -1202,7 +1213,7 @@ const handleAiGenerateChannelMessage = async () => {
 
   const handleCreateCampaign = async () => {
     if (!campaign.campaignName || !campaign.messageContent) {
-      alert('캠페인명과 메시지 내용을 입력하세요');
+      setToast({ show: true, type: 'error', message: '캠페인명과 메시지 내용을 입력하세요' });
       return;
     }
 
@@ -1211,10 +1222,10 @@ const handleAiGenerateChannelMessage = async () => {
         ...campaign,
         targetFilter: filter,
       });
-      alert('캠페인이 생성되었습니다');
+      setToast({ show: true, type: 'success', message: '캠페인이 생성되었습니다' });
       setActiveTab('send');
     } catch (error: any) {
-      alert(error.response?.data?.error || '캠페인 생성 실패');
+      setToast({ show: true, type: 'error', message: error.response?.data?.error || '캠페인 생성 실패' });
     } finally {
       setIsSending(false);
     }
@@ -1237,16 +1248,16 @@ const handleAiCampaignSend = async (modalData?: {
 
   // 회신번호 검증
   if (!_selectedCallback && !_useIndividualCallback) {
-    alert('회신번호를 선택해주세요');
+    setToast({ show: true, type: 'error', message: '회신번호를 선택해주세요' });
     return;
   }
-  
+
   setIsSending(true);
   try {
     // 선택된 메시지 가져오기 (첫번째 메시지 사용, 나중에 라디오 선택값으로 변경 가능)
     const selectedMsg = aiResult?.messages?.[selectedAiMsgIdx];
     if (!selectedMsg) {
-      alert('메시지를 선택해주세요');
+      setToast({ show: true, type: 'error', message: '메시지를 선택해주세요' });
       setIsSending(false);
       return;
     }
@@ -1390,7 +1401,7 @@ const campaignData = {
     } else if (error.response?.status === 402 && error.response?.data?.insufficientBalance) {
       setShowInsufficientBalance({show: true, balance: error.response.data.balance, required: error.response.data.requiredAmount});
     } else {
-      alert(error.response?.data?.error || '캠페인 생성에 실패했습니다.');
+      setToast({ show: true, type: 'error', message: error.response?.data?.error || '캠페인 생성에 실패했습니다.' });
     }
   } finally {
     setIsSending(false);
@@ -1414,7 +1425,7 @@ const campaignData = {
     const _campaignName = modalData.campaignName;
 
     if (!_selectedCallback && !_useIndividualCallback) {
-      alert('회신번호를 선택해주세요');
+      setToast({ show: true, type: 'error', message: '회신번호를 선택해주세요' });
       return;
     }
 
@@ -1491,7 +1502,7 @@ const campaignData = {
       } else if (error.response?.status === 402 && error.response?.data?.insufficientBalance) {
         setShowInsufficientBalance({ show: true, balance: error.response.data.balance, required: error.response.data.requiredAmount });
       } else {
-        alert(error.response?.data?.error || '캠페인 생성에 실패했습니다.');
+        setToast({ show: true, type: 'error', message: error.response?.data?.error || '캠페인 생성에 실패했습니다.' });
       }
     } finally {
       setIsSending(false);
@@ -1505,7 +1516,7 @@ const campaignData = {
     try {
       const selectedMsg = aiResult?.messages?.[selectedAiMsgIdx];
       if (!selectedMsg) {
-        alert('메시지를 선택해주세요');
+        setToast({ show: true, type: 'error', message: '메시지를 선택해주세요' });
         setTestSending(false);
         return;
       }
@@ -1821,6 +1832,12 @@ const campaignData = {
         onResults={() => setShowResults(true)}
         onAnalysis={() => setShowAnalysis(true)}
         onLogout={handleLogout}
+        customerDbEnabled={planInfo?.customer_db_enabled}
+        onFeatureLocked={(feature, required) => {
+          setPlanUpgradeFeature(feature);
+          setPlanUpgradeRequired(required);
+          setShowPlanUpgradeModal(true);
+        }}
       />
 
       {/* 메인 */}
@@ -2046,9 +2063,11 @@ const campaignData = {
             ) : (
               <>
                 {/* AI 추천 발송 */}
-                <button 
+                <button
                   onClick={async () => {
                     if (isSubscriptionLocked) { setShowSubscriptionLock(true); return; }
+                    // D53: AI 발송 게이팅
+                    if (isAiMessagingLocked) { setPlanUpgradeFeature('AI 추천 발송'); setPlanUpgradeRequired('베이직'); setShowPlanUpgradeModal(true); return; }
                     setShowAiSendType(true);
                     try {
                       const token = localStorage.getItem('token');
@@ -2098,24 +2117,34 @@ const campaignData = {
                 </button>
 
                 {/* 직접 타겟 발송 */}
-                <button 
-                  onClick={() => { if (isSubscriptionLocked) { setShowSubscriptionLock(true); return; } setShowDirectTargeting(true); }}
-                  className={`p-5 bg-amber-500 hover:bg-amber-600 rounded-xl transition-all hover:shadow-lg text-right flex-1 flex flex-col justify-between ${isSubscriptionLocked ? 'opacity-60' : ''}`}
+                <button
+                  onClick={() => {
+                    if (isSubscriptionLocked) { setShowSubscriptionLock(true); return; }
+                    // D53: 고객DB 게이팅 (직접타겟은 고객DB 필요)
+                    if (isCustomerDbLocked) { setPlanUpgradeFeature('직접 타겟 발송'); setPlanUpgradeRequired('스타터'); setShowPlanUpgradeModal(true); return; }
+                    setShowDirectTargeting(true);
+                  }}
+                  className={`p-5 bg-amber-500 hover:bg-amber-600 rounded-xl transition-all hover:shadow-lg text-right flex-1 flex flex-col justify-between ${isSubscriptionLocked || isCustomerDbLocked ? 'opacity-60' : ''}`}
                 >
                   <div>
-                    <div className="text-xl font-bold text-white mb-1">{isSubscriptionLocked ? '🔒 ' : ''}직접 타겟 발송</div>
+                    <div className="text-xl font-bold text-white mb-1">{(isSubscriptionLocked || isCustomerDbLocked) ? '🔒 ' : ''}직접 타겟 발송</div>
                     <div className="text-sm text-amber-100">원하는 고객을 직접 필터링</div>
                   </div>
                   <div className="text-3xl text-amber-200 self-end">→</div>
                 </button>
 
                 {/* 고객 DB 업로드 */}
-                <button 
-                  onClick={() => { if (isSubscriptionLocked) { setShowSubscriptionLock(true); return; } setShowFileUpload(true); }}
-                  className={`p-5 bg-slate-600 hover:bg-slate-700 rounded-xl transition-all hover:shadow-lg text-right flex-1 flex flex-col justify-between ${isSubscriptionLocked ? 'opacity-60' : ''}`}
+                <button
+                  onClick={() => {
+                    if (isSubscriptionLocked) { setShowSubscriptionLock(true); return; }
+                    // D53: 고객DB 게이팅
+                    if (isCustomerDbLocked) { setPlanUpgradeFeature('고객 DB 업로드'); setPlanUpgradeRequired('스타터'); setShowPlanUpgradeModal(true); return; }
+                    setShowFileUpload(true);
+                  }}
+                  className={`p-5 bg-slate-600 hover:bg-slate-700 rounded-xl transition-all hover:shadow-lg text-right flex-1 flex flex-col justify-between ${isSubscriptionLocked || isCustomerDbLocked ? 'opacity-60' : ''}`}
                 >
                   <div>
-                    <div className="text-xl font-bold text-white mb-1">{isSubscriptionLocked ? '🔒 ' : ''}고객 DB 업로드</div>
+                    <div className="text-xl font-bold text-white mb-1">{(isSubscriptionLocked || isCustomerDbLocked) ? '🔒 ' : ''}고객 DB 업로드</div>
                     <div className="text-sm text-slate-200">엑셀/CSV로 고객 추가</div>
                   </div>
                   <div className="text-3xl text-slate-300 self-end">→</div>
@@ -2374,7 +2403,7 @@ const campaignData = {
                   캠페인 목록에서 발송할 캠페인을 선택하세요
                 </p>
                 <button
-                  onClick={() => alert('캠페인 목록 페이지로 이동 (개발 예정)')}
+                  onClick={() => setToast({ show: true, type: 'error', message: '캠페인 목록 페이지로 이동 (개발 예정)' })}
                   className="bg-green-600 hover:bg-green-700 text-white px-8 py-3 rounded-lg font-medium"
                 >
                   캠페인 발송하기
@@ -2457,7 +2486,7 @@ const campaignData = {
             setAiCampaignPrompt(campaign.description || campaign.campaign_name || '');
           } else {
             // 편집: 예약 캠페인이면 취소 안내
-            alert(`예약 캠페인을 편집하려면 예약 대기 목록에서 취소 후 재생성해주세요.\n\n캠페인: ${campaign.campaign_name}`);
+            setToast({ show: true, type: 'error', message: `예약 캠페인을 편집하려면 예약 대기 목록에서 취소 후 재생성해주세요. (캠페인: ${campaign.campaign_name})` });
           }
         }} />}
 
@@ -2703,7 +2732,7 @@ const campaignData = {
               <button
                 onClick={() => {
                   if (!reserveDateTime) {
-                    alert('예약 시간을 선택해주세요');
+                    setToast({ show: true, type: 'error', message: '예약 시간을 선택해주세요' });
                     return;
                   }
                   setShowReservePicker(false);
@@ -2890,7 +2919,7 @@ const campaignData = {
                     <button 
                         onClick={() => {
                           if (!directMessage.trim()) {
-                            alert('메시지를 입력해주세요');
+                            setToast({ show: true, type: 'error', message: '메시지를 입력해주세요' });
                             return;
                           }
                           setShowDirectPreview(true);
@@ -3003,23 +3032,23 @@ const campaignData = {
                       onClick={async () => {
                         // 유효성 검사
                         if (directRecipients.length === 0) {
-                          alert('수신자를 추가해주세요');
+                          setToast({ show: true, type: 'error', message: '수신자를 추가해주세요' });
                           return;
                         }
                         if (!directMessage.trim()) {
-                          alert('메시지를 입력해주세요');
+                          setToast({ show: true, type: 'error', message: '메시지를 입력해주세요' });
                           return;
                         }
                         if (!selectedCallback && !useIndividualCallback) {
-                          alert('회신번호를 선택해주세요');
+                          setToast({ show: true, type: 'error', message: '회신번호를 선택해주세요' });
                           return;
                         }
                         if (useIndividualCallback && directRecipients.some((r: any) => !r.callback)) {
-                          alert('개별회신번호가 없는 수신자가 있습니다.\n일반 회신번호를 선택해주세요.');
+                          setToast({ show: true, type: 'error', message: '개별회신번호가 없는 수신자가 있습니다. 일반 회신번호를 선택해주세요.' });
                           return;
                         }
                         if ((directMsgType === 'LMS' || directMsgType === 'MMS') && !directSubject.trim()) {
-                          alert('제목을 입력해주세요');
+                          setToast({ show: true, type: 'error', message: '제목을 입력해주세요' });
                           return;
                         }
 
@@ -3135,10 +3164,10 @@ const campaignData = {
                     <div className="px-3 py-2 border-t">
                       <button
                         onClick={async () => {
-                          if (directRecipients.length === 0) { alert('수신자를 추가해주세요'); return; }
-                          if (!kakaoMessage.trim()) { alert('메시지를 입력해주세요'); return; }
-                          if (kakaoMessage.length > 4000) { alert('카카오 메시지는 4,000자 이내로 입력해주세요'); return; }
-                          if (!kakaoEnabled) { alert('카카오 발송이 활성화되지 않았습니다. 관리자에게 문의해주세요.'); return; }
+                          if (directRecipients.length === 0) { setToast({ show: true, type: 'error', message: '수신자를 추가해주세요' }); return; }
+                          if (!kakaoMessage.trim()) { setToast({ show: true, type: 'error', message: '메시지를 입력해주세요' }); return; }
+                          if (kakaoMessage.length > 4000) { setToast({ show: true, type: 'error', message: '카카오 메시지는 4,000자 이내로 입력해주세요' }); return; }
+                          if (!kakaoEnabled) { setToast({ show: true, type: 'error', message: '카카오 발송이 활성화되지 않았습니다. 관리자에게 문의해주세요.' }); return; }
                           const token = localStorage.getItem('token');
                           const phones = directRecipients.map((r: any) => r.phone);
                           const checkRes = await fetch('/api/unsubscribes/check', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ phones }) });
@@ -3261,10 +3290,10 @@ const campaignData = {
                             setDirectShowMapping(true);
                             setDirectColumnMapping({});
                           } else {
-                            alert(data.error || '파일 파싱 실패');
+                            setToast({ show: true, type: 'error', message: data.error || '파일 파싱 실패' });
                           }
                         } catch (err) {
-                          alert('파일 업로드 중 오류가 발생했습니다.');
+                          setToast({ show: true, type: 'error', message: '파일 업로드 중 오류가 발생했습니다.' });
                         } finally {
                           setDirectFileLoading(false);
                         }
@@ -3393,7 +3422,7 @@ const campaignData = {
                   <button 
                     onClick={() => {
                       if (selectedRecipients.size === 0) {
-                        alert('선택된 항목이 없습니다');
+                        setToast({ show: true, type: 'error', message: '선택된 항목이 없습니다' });
                         return;
                       }
                       const newList = directRecipients.filter((_, idx) => !selectedRecipients.has(idx));
@@ -3559,7 +3588,7 @@ const campaignData = {
                       <button 
                         onClick={async () => {
                           if (!directColumnMapping.phone) {
-                            alert('수신번호는 필수입니다.');
+                            setToast({ show: true, type: 'error', message: '수신번호는 필수입니다.' });
                             return;
                           }
                           
@@ -3887,7 +3916,7 @@ const campaignData = {
         msgType={targetMsgType}
       />
 
-      <PlanUpgradeModal show={showPlanUpgradeModal} onClose={() => setShowPlanUpgradeModal(false)} />
+      <PlanUpgradeModal show={showPlanUpgradeModal} onClose={() => setShowPlanUpgradeModal(false)} featureName={planUpgradeFeature} requiredPlan={planUpgradeRequired} />
 
       <LineGroupErrorModal show={showLineGroupError} onClose={() => setShowLineGroupError(false)} />
 

@@ -1,6 +1,7 @@
 import { createHash } from 'crypto';
 import { Request, Response, Router } from 'express';
 import { mysqlQuery, query } from '../config/database';
+import { TIMEOUTS } from '../config/defaults';
 import { authenticate } from '../middlewares/auth';
 import { extractVarCatalog } from '../services/ai';
 import { replaceVariables } from '../utils/messageUtils';
@@ -8,8 +9,8 @@ import { SUCCESS_CODES, PENDING_CODES, SPAM_RESULT } from '../utils/sms-result-m
 
 const router = Router();
 
-// 테스트 타임아웃 (3분)
-const TEST_TIMEOUT_MS = 180 * 1000;
+// 테스트 타임아웃 (3분) — config/defaults.ts 중앙관리
+const TEST_TIMEOUT_MS = TIMEOUTS.spamFilterTest;
 
 // 앱 인증 토큰 (환경변수)
 const SPAM_APP_TOKEN = process.env.SPAM_APP_TOKEN || 'spam-hanjul-secret-2026';
@@ -44,6 +45,20 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
     }
     if (!messageContentSms && !messageContentLms) {
       return res.status(400).json({ error: '테스트할 메시지를 입력해주세요.' });
+    }
+
+    // ★ D53: 요금제 게이팅 — spam_filter_enabled 체크
+    const planCheck = await query(
+      `SELECT p.spam_filter_enabled FROM companies c
+       LEFT JOIN plans p ON c.plan_id = p.id
+       WHERE c.id = $1`,
+      [companyId]
+    );
+    if (!planCheck.rows[0]?.spam_filter_enabled) {
+      return res.status(403).json({
+        error: '스팸필터 테스트는 스타터 이상 요금제에서 이용 가능합니다.',
+        code: 'PLAN_FEATURE_LOCKED'
+      });
     }
 
     // 1) stale 테스트 자동 정리 (3분 초과 active → completed/timeout 처리)
@@ -330,7 +345,7 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
     }, 15000);
 
     // 안전장치: 4분 후 강제 종료
-    setTimeout(() => { clearInterval(pollInterval); }, TEST_TIMEOUT_MS + 60000);
+    setTimeout(() => { clearInterval(pollInterval); }, TIMEOUTS.spamFilterSafety);
 
     const totalCount = devices.rows.length * messageTypes.length;
     res.json({

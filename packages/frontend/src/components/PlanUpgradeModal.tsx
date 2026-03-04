@@ -3,12 +3,18 @@ import { useNavigate } from 'react-router-dom';
 interface PlanUpgradeModalProps {
   show: boolean;
   onClose: () => void;
+  // D53: 범용화 — 잠긴 기능명 + 필요 요금제 (기본값: AI 문구 추천 / 베이직)
+  featureName?: string;
+  requiredPlan?: string;
 }
 
-export default function PlanUpgradeModal({ show, onClose }: PlanUpgradeModalProps) {
+export default function PlanUpgradeModal({ show, onClose, featureName, requiredPlan }: PlanUpgradeModalProps) {
   const navigate = useNavigate();
 
   if (!show) return null;
+
+  const displayFeature = featureName || 'AI 문구 추천';
+  const displayPlan = requiredPlan || '베이직';
 
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-[60] animate-[fadeIn_0.2s_ease-out]">
@@ -21,7 +27,7 @@ export default function PlanUpgradeModal({ show, onClose }: PlanUpgradeModalProp
           </div>
           <h3 className="text-lg font-bold text-gray-900">요금제 업그레이드가 필요합니다</h3>
           <p className="text-sm text-gray-500 mt-2 leading-relaxed">
-            AI 문구 추천 기능은<br /><span className="font-semibold text-violet-600">베이직 이상</span> 요금제에서 사용 가능합니다.
+            {displayFeature} 기능은<br /><span className="font-semibold text-violet-600">{displayPlan} 이상</span> 요금제에서 사용 가능합니다.
           </p>
         </div>
         <div className="px-6 pb-6 pt-4 space-y-2">

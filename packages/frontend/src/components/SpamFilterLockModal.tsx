@@ -26,7 +26,7 @@ export default function SpamFilterLockModal({ show, onClose }: SpamFilterLockMod
             <ShieldOff className="w-8 h-8 text-indigo-600" />
           </div>
           <h3 className="text-xl font-bold text-gray-800 mb-1">스팸필터 테스트</h3>
-          <p className="text-sm text-gray-500">프로 요금제 이상에서 이용 가능합니다</p>
+          <p className="text-sm text-gray-500">스타터 이상 요금제에서 이용 가능합니다</p>
         </div>
 
         {/* 본문 */}
@@ -37,7 +37,7 @@ export default function SpamFilterLockModal({ show, onClose }: SpamFilterLockMod
               <div className="text-sm text-gray-600 leading-relaxed">
                 스팸필터 테스트는 SKT·KT·LG U+ 3사의<br />
                 <span className="font-medium text-gray-800">실제 스팸 차단 여부</span>를 확인하는 기능으로<br />
-                <span className="font-medium text-indigo-600">프로 요금제(15만원/월)</span> 이상 이용 가능합니다.
+                <span className="font-medium text-indigo-600">스타터 요금제</span> 이상 이용 가능합니다.
               </div>
             </div>
           </div>

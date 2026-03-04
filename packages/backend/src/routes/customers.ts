@@ -1,10 +1,9 @@
 import { Request, Response, Router } from 'express';
-import Redis from 'ioredis';
 import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
 import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getGenderVariants } from '../utils/normalize';
 import { FIELD_MAP, getFieldByKey, getColumnFields, CATEGORY_LABELS } from '../utils/standard-field-map';
-const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
+import { DEFAULT_COSTS, redis, CACHE_TTL } from '../config/defaults';
 
 const router = Router();
 
@@ -186,10 +185,14 @@ router.get('/', async (req: Request, res: Response) => {
     const params: any[] = [companyId];
     let paramIndex = 2;
 
-    // 일반 사용자(브랜드 담당자)는 본인이 업로드한 고객만 조회
+    // 일반 사용자(브랜드 담당자)는 본인 store_codes에 해당하는 고객만 조회
     if (userType === 'company_user' && userId) {
-      whereClause += ` AND uploaded_by = $${paramIndex++}`;
-      params.push(userId);
+      const userResult = await query('SELECT store_codes FROM users WHERE id = $1', [userId]);
+      const storeCodes = userResult.rows[0]?.store_codes;
+      if (storeCodes && storeCodes.length > 0) {
+        whereClause += ` AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = $1 AND store_code = ANY($${paramIndex++}::text[]))`;
+        params.push(storeCodes);
+      }
     }
 
     // ★ 고객사관리자: 사용자(ID)별 필터 → 해당 사용자가 업로드한 고객만
@@ -297,6 +300,8 @@ if (smsOptIn === 'true') {
 router.post('/filter', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
+    const userType = req.user?.userType;
 
     if (!companyId) {
       return res.status(403).json({ error: '회사 권한이 필요합니다' });
@@ -306,9 +311,20 @@ router.post('/filter', async (req: Request, res: Response) => {
 
     let whereClause = 'WHERE company_id = $1 AND is_active = true AND sms_opt_in = true';
     const params: any[] = [companyId];
+    let paramIndex = 2;
+
+    // 일반 사용자는 본인 store_codes에 해당하는 고객만
+    if (userType === 'company_user' && userId) {
+      const userResult = await query('SELECT store_codes FROM users WHERE id = $1', [userId]);
+      const storeCodes = userResult.rows[0]?.store_codes;
+      if (storeCodes && storeCodes.length > 0) {
+        whereClause += ` AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = $1 AND store_code = ANY($${paramIndex++}::text[]))`;
+        params.push(storeCodes);
+      }
+    }
 
     if (filters) {
-      const filterResult = buildDynamicFilter(filters, 2);
+      const filterResult = buildDynamicFilter(filters, paramIndex);
       whereClause += filterResult.where;
       params.push(...filterResult.params);
     }
@@ -691,12 +707,12 @@ router.get('/stats', async (req: Request, res: Response) => {
       }
     });
 
-    // 월 사용금액 계산
-    const monthlyCost = 
-      smsSent * parseFloat(company.cost_per_sms || '9.9') +
-      lmsSent * parseFloat(company.cost_per_lms || '27') +
-      mmsSent * parseFloat(company.cost_per_mms || '50') +
-      kakaoSent * parseFloat(company.cost_per_kakao || '7.5');
+    // 월 사용금액 계산 (고객사 DB 단가 우선, 없으면 환경변수 기본단가)
+    const monthlyCost =
+      smsSent * (parseFloat(company.cost_per_sms) || DEFAULT_COSTS.sms) +
+      lmsSent * (parseFloat(company.cost_per_lms) || DEFAULT_COSTS.lms) +
+      mmsSent * (parseFloat(company.cost_per_mms) || DEFAULT_COSTS.mms) +
+      kakaoSent * (parseFloat(company.cost_per_kakao) || DEFAULT_COSTS.kakao);
 
     const successRate = totalSent > 0 ? ((totalSuccess / totalSent) * 100).toFixed(1) : '0';
 
@@ -711,16 +727,16 @@ router.get('/stats', async (req: Request, res: Response) => {
         lms_sent: lmsSent,
         mms_sent: mmsSent,
         kakao_sent: kakaoSent,
-        cost_per_sms: parseFloat(company.cost_per_sms || '9.9'),
-        cost_per_lms: parseFloat(company.cost_per_lms || '27'),
-        cost_per_mms: parseFloat(company.cost_per_mms || '50'),
-        cost_per_kakao: parseFloat(company.cost_per_kakao || '7.5'),
+        cost_per_sms: parseFloat(company.cost_per_sms) || DEFAULT_COSTS.sms,
+        cost_per_lms: parseFloat(company.cost_per_lms) || DEFAULT_COSTS.lms,
+        cost_per_mms: parseFloat(company.cost_per_mms) || DEFAULT_COSTS.mms,
+        cost_per_kakao: parseFloat(company.cost_per_kakao) || DEFAULT_COSTS.kakao,
         use_db_sync: company.use_db_sync ?? true,
         use_file_upload: company.use_file_upload ?? true
       }
     };
     // ★ Redis 캐시 저장 (60초)
-    try { await redis.setex(cacheKey, 60, JSON.stringify(responseData)); } catch (e) { /* 캐시 실패 무시 */ }
+    try { await redis.setex(cacheKey, CACHE_TTL.customerStats, JSON.stringify(responseData)); } catch (e) { /* 캐시 실패 무시 */ }
     return res.json(responseData);
   } catch (error) {
     console.error('고객 통계 조회 오류:', error);
@@ -875,6 +891,20 @@ router.post('/extract', async (req: Request, res: Response) => {
       return res.status(403).json({ error: '회사 권한이 필요합니다' });
     }
 
+    // ★ D53: 요금제 게이팅 — customer_db_enabled 체크
+    const planCheck = await query(
+      `SELECT p.customer_db_enabled FROM companies c
+       LEFT JOIN plans p ON c.plan_id = p.id
+       WHERE c.id = $1`,
+      [companyId]
+    );
+    if (!planCheck.rows[0]?.customer_db_enabled) {
+      return res.status(403).json({
+        error: '고객 DB 관리는 스타터 이상 요금제에서 이용 가능합니다.',
+        code: 'PLAN_FEATURE_LOCKED'
+      });
+    }
+
     const { gender, ageRange, grade, region, minPurchase, recentDays, smsOptIn, phoneField, limit = 10000, dynamicFilters } = req.body;
 
     let whereClause = 'WHERE company_id = $1 AND is_active = true';
@@ -980,12 +1010,16 @@ router.get('/filter-options', async (req: Request, res: Response) => {
     const userType = req.user?.userType;
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다' });
 
-    // company_user는 본인 업로드 데이터 기준 옵션만
+    // company_user는 본인 store_codes 데이터 기준 옵션만
     let scopeWhere = 'company_id = $1 AND is_active = true';
     const scopeParams: any[] = [companyId];
     if (userType === 'company_user' && userId) {
-      scopeWhere += ' AND uploaded_by = $2';
-      scopeParams.push(userId);
+      const userResult = await query('SELECT store_codes FROM users WHERE id = $1', [userId]);
+      const storeCodes = userResult.rows[0]?.store_codes;
+      if (storeCodes && storeCodes.length > 0) {
+        scopeWhere += ' AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = $1 AND store_code = ANY($2::text[]))';
+        scopeParams.push(storeCodes);
+      }
     }
 
     const gradesResult = await query(
@@ -1016,12 +1050,16 @@ router.get('/enabled-fields', async (req: Request, res: Response) => {
     const userType = req.user?.userType;
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다' });
 
-    // 데이터 범위: company_user는 본인 업로드만, 그 외는 회사 전체
+    // 데이터 범위: company_user는 본인 store_codes만, 그 외는 회사 전체
     let scopeWhere = 'company_id = $1 AND is_active = true';
     const scopeParams: any[] = [companyId];
     if (userType === 'company_user' && userId) {
-      scopeWhere += ' AND uploaded_by = $2';
-      scopeParams.push(userId);
+      const userResult = await query('SELECT store_codes FROM users WHERE id = $1', [userId]);
+      const storeCodes = userResult.rows[0]?.store_codes;
+      if (storeCodes && storeCodes.length > 0) {
+        scopeWhere += ' AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = $1 AND store_code = ANY($2::text[]))';
+        scopeParams.push(storeCodes);
+      }
     }
 
     const fields: any[] = [];
