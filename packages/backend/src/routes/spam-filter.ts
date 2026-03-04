@@ -134,10 +134,10 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
     // 5) 테스트 건 생성 (message_hash 포함)
     const testResult = await query(
       `INSERT INTO spam_filter_tests
-       (company_id, user_id, callback_number, message_content_sms, message_content_lms, subject, message_type, message_hash, spam_check_number, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'active')
+       (company_id, user_id, callback_number, message_content_sms, message_content_lms, message_hash, spam_check_number, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'active')
        RETURNING id, created_at`,
-      [companyId, userId, callbackNumber, messageContentSms || null, messageContentLms || null, subject || null, messageType || 'SMS', messageHash || null, null]
+      [companyId, userId, callbackNumber, messageContentSms || null, messageContentLms || null, messageHash || null, null]
     );
     const testId = testResult.rows[0].id;
 
