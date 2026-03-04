@@ -21,7 +21,7 @@ declare global {
 
 export const generateToken = (payload: JwtPayload): string => {
   const secret = process.env.JWT_SECRET || (() => { console.warn('[보안경고] JWT_SECRET 환경변수 미설정 — 기본값 사용 중. 운영서버에서는 반드시 설정 필요'); return 'dev-only-secret'; })();
-  return jwt.sign(payload, secret, { expiresIn: LIMITS.jwtExpiry as string });
+  return jwt.sign(payload as object, secret, { expiresIn: LIMITS.jwtExpiry } as any);
 };
 
 // last_activity_at 갱신 주기 (5분)
