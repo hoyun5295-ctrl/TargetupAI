@@ -3,6 +3,7 @@ import { mysqlQuery, query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
 import { getCompanySmsTablesWithLogs } from './campaigns';
 import { STATUS_CODE_MAP, CARRIER_MAP, SUCCESS_CODES, PENDING_CODES, getStatusLabel, getStatusType, getCarrierLabel, isSuccess } from '../utils/sms-result-map';
+import { DEFAULT_COSTS } from '../config/defaults';
 
 const router = Router();
 
@@ -138,10 +139,10 @@ router.get('/summary', async (req: Request, res: Response) => {
         successRate: parseFloat(successRate),
       },
       costs: {
-        perSms: parseFloat(costs.cost_per_sms) || 9.9,
-        perLms: parseFloat(costs.cost_per_lms) || 27,
-        perMms: parseFloat(costs.cost_per_mms) || 50,
-        perKakao: parseFloat(costs.cost_per_kakao) || 7.5,
+        perSms: parseFloat(costs.cost_per_sms) || DEFAULT_COSTS.sms,
+        perLms: parseFloat(costs.cost_per_lms) || DEFAULT_COSTS.lms,
+        perMms: parseFloat(costs.cost_per_mms) || DEFAULT_COSTS.mms,
+        perKakao: parseFloat(costs.cost_per_kakao) || DEFAULT_COSTS.kakao,
       },
     });
   } catch (error) {

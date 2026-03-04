@@ -35,7 +35,7 @@ export const mysqlPool = mysql.createPool({
   port: Number(process.env.MYSQL_PORT) || 3306,
   database: process.env.MYSQL_DATABASE || 'smsdb',
   user: process.env.MYSQL_USER || 'smsuser',
-  password: process.env.MYSQL_PASSWORD || 'sms123',
+  password: process.env.MYSQL_PASSWORD || (() => { console.warn('[보안경고] MYSQL_PASSWORD 환경변수 미설정 — 기본값 사용 중. 운영서버에서는 반드시 설정 필요'); return 'sms123'; })(),
   waitForConnections: true,
   connectionLimit: 10,
   charset: 'utf8mb4',

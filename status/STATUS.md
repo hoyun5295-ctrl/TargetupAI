@@ -106,7 +106,122 @@
 
 ---
 
-### 🔧 D43 — 기능 정상화 및 DB 동적 기준 정립 (2026-02-27~)
+### 🔧 D53 — 요금제별 기능 게이팅 구현 (2026-03-04~)
+
+> **배경:** 상용화 직전, 레거시 웹 업체를 무료요금제로 강제이관 후 유료 전환 유도 전략. 기존 plans 테이블에 5단계 요금제 존재하나, 기능별 잠금이 AI 분석(`ai_analysis_level`)과 고객DB 한도(`max_customers`)에만 적용됨. 스팸필터·AI메시징·고객DB/타겟팅 등 핵심 기능에 요금제별 게이팅이 필요.
+> **목표:** 요금제별로 기능 접근을 제어하여 무료→스타터→베이직 단계별 업셀 구조 완성.
+> **원칙:** 기간계(발송/DB/인증) 무접촉. plans 테이블 컬럼 추가 + 백엔드 미들웨어 + 프론트 UI 잠금.
+
+#### 요금제별 기능 매트릭스 (Harold님 확정 2026-03-04)
+
+| 기능 | 무료(체험후) | 스타터(15만) | 베이직(35만) | 프로 | 비즈니스 |
+|------|:-----------:|:-----------:|:-----------:|:----:|:--------:|
+| 직접발송 (상단메뉴) | O | O | O | O | O |
+| 발송결과 (상단메뉴) | O | O | O | O | O |
+| 수신거부 (상단메뉴) | O | O | O | O | O |
+| 설정 (상단메뉴) | O | O | O | O | O |
+| 고객 DB 업로드 | X | O | O | O | O |
+| 직접 타겟 발송 | X | O | O | O | O |
+| 스팸필터 테스트 | X | O | O | O | O |
+| 캘린더 | X | O | O | O | O |
+| AI 추천 발송 (한줄로/맞춤한줄) | X | X | O | O | O |
+| AI 분석 | X | X | X | basic | advanced |
+
+#### 안건 목록
+
+| # | 안건 | 성격 | 난이도 | 상태 |
+|---|------|------|--------|------|
+| 1 | plans 테이블 컬럼 추가 — `spam_filter_enabled`, `ai_messaging_enabled`, `customer_db_enabled` | DB/DDL | 낮음 | ✅ 완료 (SQL 작성, DB 실행 대기) |
+| 2 | plans 테이블 데이터 업데이트 — 5개 요금제별 플래그값 설정 | DB/DML | 낮음 | ✅ 완료 (SQL 작성, DB 실행 대기) |
+| 3 | 백엔드: /api/companies/my-plan 응답에 새 플래그 포함 | 백엔드 | 낮음 | ✅ 완료 |
+| 4 | 백엔드: 스팸필터 API 게이팅 — spam-filter.ts에서 `spam_filter_enabled` 체크 | 백엔드 | 낮음 | ✅ 완료 |
+| 5 | 백엔드: AI 발송 API 게이팅 — ai.ts에서 `ai_messaging_enabled` 체크 (recommend-target, parse-briefing, generate-custom) | 백엔드 | 낮음 | ✅ 완료 |
+| 6 | 백엔드: 고객DB/타겟팅 API 게이팅 — upload.ts(parse/save)/customers.ts(extract)에서 `customer_db_enabled` 체크 | 백엔드 | 낮음 | ✅ 완료 |
+| 7 | 프론트: Dashboard.tsx — PlanInfo 인터페이스 확장 + 3개 카드 잠금 UI (🔒 + opacity) | 프론트 | 중간 | ✅ 완료 |
+| 8 | 프론트: 상단메뉴 게이팅 — 캘린더 메뉴 customer_db_enabled 체크 + 🔒 표시 | 프론트 | 낮음 | ✅ 완료 |
+| 9 | 프론트: 업그레이드 유도 모달 — PlanUpgradeModal 범용화 (featureName/requiredPlan props) + SpamFilterLockModal 텍스트 수정 | 프론트 | 중간 | ✅ 완료 |
+| 10 | 검증: 코드 검증 완료, DB 실행 + 실서버 테스트 대기 | 검증 | 중간 | 🟡 코드검증완료-DB실행대기 |
+
+#### 상세 구현 계획
+
+**안건 #1-2: DB 변경**
+```sql
+-- plans 테이블 컬럼 추가
+ALTER TABLE plans ADD COLUMN customer_db_enabled boolean DEFAULT false;
+ALTER TABLE plans ADD COLUMN spam_filter_enabled boolean DEFAULT false;
+ALTER TABLE plans ADD COLUMN ai_messaging_enabled boolean DEFAULT false;
+
+-- 요금제별 플래그 설정
+UPDATE plans SET customer_db_enabled = false, spam_filter_enabled = false, ai_messaging_enabled = false WHERE plan_code = 'FREE';
+UPDATE plans SET customer_db_enabled = true,  spam_filter_enabled = true,  ai_messaging_enabled = false WHERE plan_code = 'STARTER';
+UPDATE plans SET customer_db_enabled = true,  spam_filter_enabled = true,  ai_messaging_enabled = true  WHERE plan_code = 'BASIC';
+UPDATE plans SET customer_db_enabled = true,  spam_filter_enabled = true,  ai_messaging_enabled = true  WHERE plan_code = 'PRO';
+UPDATE plans SET customer_db_enabled = true,  spam_filter_enabled = true,  ai_messaging_enabled = true  WHERE plan_code = 'BUSINESS';
+```
+
+**안건 #3: 백엔드 my-plan 응답 확장**
+- 파일: `companies.ts` GET `/my-plan`
+- 기존 `ai_analysis_level` 외에 `customer_db_enabled`, `spam_filter_enabled`, `ai_messaging_enabled` 추가
+- PlanInfo 인터페이스에 3개 boolean 필드 추가
+
+**안건 #4: 스팸필터 게이팅**
+- 파일: `spam-filter.ts` POST `/test`
+- 발송 전 company의 plan → `spam_filter_enabled` 체크
+- false면 403 + `{ error: '스팸필터 테스트는 스타터 이상 요금제에서 이용 가능합니다', code: 'PLAN_FEATURE_LOCKED' }`
+- 기존 SpamFilterLockModal.tsx가 이미 존재 (monthly_price >= 150,000 체크) → plan 필드 기반으로 전환
+
+**안건 #5: AI 발송 게이팅**
+- 파일: `routes/ai.ts` POST `/recommend-target` (AI 한줄로), POST `/custom-send` (AI 맞춤한줄)
+- 파일: `campaigns.ts` POST `/ai-send`
+- company의 plan → `ai_messaging_enabled` 체크
+- false면 403 + `{ error: 'AI 추천 발송은 베이직 이상 요금제에서 이용 가능합니다', code: 'PLAN_FEATURE_LOCKED' }`
+
+**안건 #6: 고객DB/타겟팅 게이팅**
+- 파일: `upload.ts` POST `/validate`, POST `/save`
+- 파일: `customers.ts` POST `/extract` (타겟 추출)
+- company의 plan → `customer_db_enabled` 체크
+- false면 403 + `{ error: '고객 DB 관리는 스타터 이상 요금제에서 이용 가능합니다', code: 'PLAN_FEATURE_LOCKED' }`
+
+**안건 #7: 대시보드 카드 잠금**
+- 파일: `Dashboard.tsx`
+- PlanInfo 인터페이스에 새 필드 추가
+- 3개 메인 카드(AI 추천 발송, 직접 타겟 발송, 고객 DB 업로드)에 잠금 오버레이:
+  - `ai_messaging_enabled = false` → AI 추천 발송 카드에 🔒 + "베이직 이상"
+  - `customer_db_enabled = false` → 직접 타겟 발송 카드, 고객 DB 업로드 카드에 🔒 + "스타터 이상"
+- 클릭 시 업그레이드 유도 모달 표시 (기존 PlanUpgradeModal 활용/확장)
+
+**안건 #8: 상단메뉴 게이팅**
+- 파일: `DashboardHeader.tsx`
+- AI 분석 메뉴: `ai_analysis_level === 'none'`이면 클릭 시 업그레이드 모달 (기존 로직 유지)
+- 캘린더 메뉴: `customer_db_enabled = false`면 클릭 시 업그레이드 모달
+
+**안건 #9: 업그레이드 유도 모달**
+- 기존 PlanUpgradeModal.tsx 확장 또는 범용화
+- props: `requiredPlan` ('STARTER' | 'BASIC' | 'PRO') + `featureName` (잠긴 기능명)
+- "이 기능은 {requiredPlan} 이상 요금제에서 이용 가능합니다" + [요금제 안내] 버튼 → /pricing
+
+#### 수정 대상 파일 목록
+
+**백엔드 (5파일):**
+1. `routes/companies.ts` — my-plan 응답 확장
+2. `routes/spam-filter.ts` — spam_filter_enabled 게이팅
+3. `routes/ai.ts` — ai_messaging_enabled 게이팅
+4. `routes/campaigns.ts` — ai-send ai_messaging_enabled 게이팅
+5. `routes/upload.ts` — customer_db_enabled 게이팅
+6. `routes/customers.ts` — extract customer_db_enabled 게이팅
+
+**프론트엔드 (4~5파일):**
+1. `pages/Dashboard.tsx` — PlanInfo 인터페이스 + 카드 잠금 UI
+2. `components/DashboardHeader.tsx` — 메뉴 게이팅
+3. `components/PlanUpgradeModal.tsx` — 범용 업그레이드 모달 확장
+4. `components/SpamFilterLockModal.tsx` — plan 필드 기반 전환 (기존 price 기반→boolean 기반)
+5. `components/DirectTargetFilterModal.tsx` — customer_db_enabled 체크 (선택적)
+
+**기간계 무접촉:** 발송 파이프라인(campaigns.ts send/direct-send), 차감/환불(billing.ts), 인증(auth.ts), DB(database.ts) 전부 미수정.
+
+---
+
+### 🔧 D43 — 기능 정상화 및 DB 동적 기준 정립 (2026-02-27~) — ✅ 전체 완료
 
 > **배경:** D39 표준 필드 아키텍처 확립 후 아직 반영되지 않은 부분들이 존재. 기존 발송 파이프라인의 발송 흐름/차감/환불 로직은 절대 건드리지 않음 (D43-7에서 결과값 해석 로직만 sms-result-map.ts 중앙화 전환).
 > **목표:** DB 기준에 맞게 기능을 정상화하고, 동적 데이터 흐름을 확립한다.
@@ -541,6 +656,9 @@ QTmsg status_code, 통신사 코드, 스팸필터 판정 결과를 한 곳에서
 | D50 | 02-28 | 결과코드 매핑 Phase 3 — 프론트 하드코딩 제거 + 백엔드 해석값 전달 | ResultsModal.tsx STATUS_CODE_MAP(14개)/CARRIER_MAP(9개) 하드코딩 삭제→백엔드 API가 sms-result-map.ts 기반 해석값 직접 전달. 프론트에 결과코드 매핑 로직 없음=불일치 불가 |
 | D51 | 02-28 | 결과코드 매핑 Phase 4 — 3-Tier 전수 점검 완료 + admin.ts/billing.ts 전환 | admin.ts 5곳(statusMap7개+carrierMap3개 로컬 삭제→헬퍼 사용+statusType 추가) + billing.ts 5곳(3개 집계함수→상수참조) + `>=200` 버그 수정(실패 건수 누락). AdminDashboard.tsx statusType 동적 분기. ResultsModal.tsx sampleData 동적 치환. **18파일 점검, 하드코딩 잔존 0건** |
 
+| D52 | 03-04 | 하드코딩 전수조사 + 동적 전환 + 설정 중앙집중화 (B11-01~05) |
+| D53 | 03-04 | 요금제별 기능 게이팅 — 무료/스타터/베이직/프로/비즈니스 5단계 기능 잠금 | plans 테이블 3컬럼 추가(customer_db_enabled/spam_filter_enabled/ai_messaging_enabled). 백엔드 6파일 API 게이팅 + 프론트 5파일 UI 잠금. 무료=직접발송만, 스타터=+스팸필터+고객DB+타겟팅, 베이직=+AI발송, 프로=+AI분석basic, 비즈니스=+AI분석advanced. **기간계 무접촉** | (1) campaigns.ts `'18008125'` 폴백→DB 필수화 (2) alert()→setToast 전면교체(40+곳) (3) ai.ts `'0807196700'`→DB 동적조회 (4) 단가 5파일→defaults.ts (5) AI모델명 4파일→AI_MODELS (6) Redis 4곳→공유인스턴스 (7) 타임아웃/배치/캐시TTL/RateLimit 12파일→중앙상수. **총 21건 전체 해소, 12파일 수정, 기간계 무접촉** |
+
 **아카이브:** D1-AI발송2분기(02-22) | D2-브리핑방식(02-22) | D3-개인화필드체크박스(02-22) | D4-textarea제거(02-22) | D5-별도컴포넌트분리(02-22) | D6-대시보드레이아웃(02-22) | D7-헤더탭스타일(02-23) | D8-AUTO/PRO뱃지(02-23) | D9-캘린더상태기준(02-23) | D10-6차세션분할(02-23) | D11-KCP전환(02-23) | D12-이용약관(02-23) | D13-수신거부SoT(02-23) | D14-7차3세션분할(02-24) | D15-제목머지→D28번복(02-25) | D16-스팸테스트과금(02-25) | D17-테스트통계확장(02-25) | D18-정산자체헬퍼(02-25) | D19-구독상태필드(02-25) | D20-AI분석차별화(02-25) | D21-planInfo실시간(02-25) | D22-스팸잠금직접발송만(02-25) | D23-preview보안(02-25) | D24-run세션1완전구현(02-25) | D25-pdfkit선택(02-25) | D26-분석캐싱24h(02-25) | D27-비즈니스3회최적화(02-25) | D28-제목머지제거(02-25) | D29-5경로전수점검(02-25) | D30-즉시sending전환(02-25) | D31-GPT fallback(02-25) | D32-발송파이프라인복구(02-26) | D33-messageUtils통합(02-26) | D34-스팸필터DB직접조회(02-26) | D35-선불환불보장(02-26) | D-대시보드모달분리(02-23): 8,039줄→4,964줄
 
 ---
@@ -577,6 +695,9 @@ QTmsg status_code, 통신사 코드, 스팸필터 판정 결과를 한 곳에서
 
 | 날짜 | 완료 항목 |
 |------|----------|
+| 03-04 | **프로젝트 루트 정리 (~1.51GB 확보):** 오래된 DB 백업 8개 삭제(backup_docker/for_server/utf8/before_sync/before_billing/before_maxusers/sync_phase4/20260214_kakao_enabled.sql, 총 1.46GB) + 일회성 SQL 패치 8개 삭제(fix_admin/fix_password/add_columns/update_schema/seed_customers/migration-phase1a/migration_plan_requests/sync_ddl.sql) + qtmsg_5agents.tgz(48MB) 삭제 + 빈 폴더 2개 삭제(files/, targetup-app/). git 히스토리 정리는 추후 결정 예정 |
+| 03-04 | **10차 버그리포트 7건 전체 수정 (B10-01~07):** 직원 PDF 버그리포팅 기반. ①B10-01 🔴 customers.ts store_code 격리 누락 — GET `/`, POST `/filter`, GET `/filter-options`, GET `/enabled-fields` 4개 엔드포인트 `uploaded_by`→`store_codes` JOIN 패턴 통일 ②B10-07 🔴 campaigns.ts 회신번호 검증 UNION 누락 — `/:id/send`+`/direct-send` 2곳에 `sender_numbers UNION callback_numbers` 적용 ③B10-06 ai.ts 등급 하드코딩(`VIP,GOLD,SILVER,BRONZE`)→`SELECT DISTINCT` 실시간 조회+키워드맵 정리 ④B10-04 normalize.ts `normalizeDate()` 엑셀 시리얼넘버 변환 추가 ⑤B10-05 normalize.ts `isValidKoreanPhone()` 050x 안심번호 허용 ⑥B10-03 upload.ts AI 매핑 프롬프트 매장4필드 구분규칙 추가 ⑦B10-02 CustomerDBModal.tsx 커스텀필드 라벨 `fieldColumns` 조회 표시. **기간계 무접촉 확인.** 수정 6파일(campaigns.ts, normalize.ts, ai.ts, customers.ts, upload.ts, CustomerDBModal.tsx) |
+| 03-04 | 스팸필터 테스트 LMS 제목 누락 수정: 전 구간(프론트→백엔드→MySQL)에서 subject가 빠져있던 문제. ①Dashboard.tsx spamFilterData 타입에 subject 추가+직접발송 스팸필터 호출에 directSubject 전달 ②SpamFilterTestModal.tsx subject prop 추가+API body에 subject 전달+LMS 미리보기에 제목 표시 ③spam-filter.ts req.body에서 subject 추출+insertSmsQueue에 title_str 컬럼 추가. ⚠️ PG spam_filter_tests에 subject/message_type 컬럼 미존재 확인(SCHEMA.md와 실제 DB 불일치) — PG INSERT는 기존 유지, MySQL title_str만 추가. 수정 3파일(spam-filter.ts, SpamFilterTestModal.tsx, Dashboard.tsx) |
 | 02-28 | D43-7 Phase 4 결과코드 매핑 3-Tier 전수 점검 완료: **18파일 점검, 하드코딩 잔존 0건.** admin.ts 5곳 전환(statusMap7개+carrierMap3개 로컬삭제→getStatusLabel(22개)/getCarrierLabel(9개)+statusType 추가) + billing.ts 5곳 전환(3개 집계함수→SUCCESS_CODES_SQL/PENDING_CODES_SQL) + **billing.ts `>=200` 버그 수정**(비가입자7/Power-off8/스팸차단16 등 200미만 실패코드 정산 누락 해소). AdminDashboard.tsx statusType 동적분기. ResultsModal.tsx sampleData9개 삭제→messages[0].msg_contents 동적치환. 서비스/관리자/슈퍼관리자 프론트 12파일 점검 깨끗. 수정 4파일(admin.ts, billing.ts, AdminDashboard.tsx, ResultsModal.tsx) |
 | 02-28 | 🔴 D49 MySQL 랜섬웨어 긴급 대응: 원인(3306 외부 노출+취약 비밀번호→봇 공격→SMSQ_SEND_1~11 삭제). 복구(127.0.0.1 바인딩+테이블 재생성+로그 테이블 복구+Agent 재시작+이벤트 스케줄러 확인). 보안 강화(root/smsuser 비밀번호 강화+Agent encrypt_pass DES 암호화 동기 변경+smsuser DROP 권한 제거+UFW 3000/9001~9011 차단+SSH root 로그인 차단+fail2ban 3회→1h밴). 피해: SMSQ 큐만 삭제(복구 완료), PostgreSQL/고객 데이터 무사. 스팸필터 테스트 LG U+ 수신 확인 |
 | 02-27 | D43-4 수신거부 양방향 동기화: unsubscribes=SoT 확정, opt_outs 레거시 확인. syncCustomerOptIn 헬퍼+4곳(080콜백/직접추가/업로드/삭제) 적용. DDL opt_out_auto_sync 추가. 프론트 080번호 동적+연동테스트 조건부. curl 테스트 정상. **나래 콜백 미수신→월요일 확인.** 수정 2파일(unsubscribes.ts, Unsubscribes.tsx)+DDL 1건 |

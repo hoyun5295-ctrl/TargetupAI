@@ -5,6 +5,7 @@ import { authenticate, requireSuperAdmin } from '../middlewares/auth';
 import { ALL_SMS_TABLES, invalidateLineGroupCache } from './campaigns';
 import { DASHBOARD_CARD_POOL, validateCardIds } from '../utils/dashboard-card-pool';
 import { SUCCESS_CODES_SQL, PENDING_CODES_SQL, getStatusLabel, getStatusType, getCarrierLabel, isSuccess, isPending } from '../utils/sms-result-map';
+import { DEFAULT_COSTS } from '../config/defaults';
 
 const router = Router();
 
@@ -1046,8 +1047,8 @@ router.get('/stats/send', authenticate, requireSuperAdmin, async (req: Request, 
 
         // 비용 계산
         const costRes = await query('SELECT cost_per_sms, cost_per_lms FROM companies WHERE id = $1', [targetCompanyId]);
-        const cSms = Number(costRes.rows[0]?.cost_per_sms) || 9.9;
-        const cLms = Number(costRes.rows[0]?.cost_per_lms) || 27;
+        const cSms = Number(costRes.rows[0]?.cost_per_sms) || DEFAULT_COSTS.sms;
+        const cLms = Number(costRes.rows[0]?.cost_per_lms) || DEFAULT_COSTS.lms;
         testSummary.cost = Math.round((testSummary.sms * cSms + testSummary.lms * cLms) * 10) / 10;
       } catch (err) {
         console.error('테스트 통계 조회 실패:', err);

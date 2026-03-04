@@ -11,10 +11,10 @@
 docker start targetup-postgres targetup-redis targetup-mysql
 
 # 2. 백엔드 (터미널 1)
-cd C:\projects\targetup\packages\backend && npm run dev
+cd C:\Users\ceo\OneDrive\바탕 화면\projects\targetup\packages\backend && npm run dev
 
 # 3. 프론트엔드 (터미널 2)
-cd C:\projects\targetup\packages\frontend && npm run dev
+cd C:\Users\ceo\OneDrive\바탕 화면\projects\targetup\packages\frontend && npm run dev
 
 # 4. QTmsg (필요시)
 cd C:\projects\qtmsg\bin && .\test_in_cmd_win.bat

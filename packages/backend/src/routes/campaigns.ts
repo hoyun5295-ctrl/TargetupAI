@@ -6,6 +6,7 @@ import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getRegionVarian
 import { getSourceRef, logTrainingData, updateTrainingMetrics } from '../utils/training-logger';
 import { replaceVariables } from '../utils/messageUtils';
 import { SUCCESS_CODES, PENDING_CODES, isSuccess, isFail, SPAM_RESULT } from '../utils/sms-result-map';
+import { DEFAULT_COSTS, redis, CACHE_TTL, BATCH_SIZES } from '../config/defaults';
 
 // 한국시간 문자열 변환 (MySQL datetime 형식)
 const toKoreaTimeStr = (date: Date) => {
@@ -26,7 +27,7 @@ console.log(`[QTmsg] BULK_ONLY_TABLES: ${BULK_ONLY_TABLES.join(', ')} (테스트
 
 // 라인그룹 캐시 (1분 TTL)
 const lineGroupCache = new Map<string, { tables: string[], hasDedicatedGroup: boolean, expires: number }>();
-const LINE_GROUP_CACHE_TTL = 60 * 1000;
+const LINE_GROUP_CACHE_TTL = CACHE_TTL.lineGroup * 1000; // CACHE_TTL은 초 단위, Map 캐시는 ms 단위
 
 // 회사별 발송 테이블 조회 (캐시)
 async function getCompanySmsTables(companyId: string): Promise<string[]> {
@@ -623,7 +624,10 @@ router.post('/test-send', async (req: Request, res: Response) => {
       'SELECT phone FROM callback_numbers WHERE company_id = $1 AND is_default = true LIMIT 1',
       [companyId]
     );
-    const callbackNumber = callbackResult.rows[0]?.phone?.replace(/-/g, '') || '18008125';
+    const callbackNumber = callbackResult.rows[0]?.phone?.replace(/-/g, '');
+    if (!callbackNumber) {
+      return res.status(400).json({ error: '기본 회신번호가 설정되지 않았습니다. 회사 설정에서 기본 회신번호를 등록해주세요.', code: 'NO_DEFAULT_CALLBACK' });
+    }
 
     // 새 형식 (manager_contacts) 우선, 없으면 기존 형식 (manager_phone)
     let managerContacts: {phone: string, name?: string}[] = [];
@@ -850,16 +854,23 @@ router.post('/:id/send', async (req: Request, res: Response) => {
       [companyId]
     );
     // campaign에 설정된 회신번호 우선, 없으면 기본 회신번호
-    const defaultCallback = callbackResult.rows[0]?.phone || '18008125';
+    const defaultCallback = callbackResult.rows[0]?.phone;
 
     // 개별회신번호 사용 여부
     const useIndividualCallback = campaign.use_individual_callback || false;
+
+    if (!defaultCallback && !campaign.callback_number && !useIndividualCallback) {
+      return res.status(400).json({ error: '기본 회신번호가 설정되지 않았습니다. 회사 설정에서 기본 회신번호를 등록해주세요.', code: 'NO_DEFAULT_CALLBACK' });
+    }
 
     // ★ #4: 회신번호 등록 여부 검증 (개별회신번호가 아닌 경우)
     if (!useIndividualCallback) {
       const senderCallback = (campaign.callback_number || defaultCallback).replace(/-/g, '');
       const senderCheck = await query(
-        'SELECT id FROM sender_numbers WHERE company_id = $1 AND REPLACE(phone_number, \'-\', \'\') = $2 AND is_active = true LIMIT 1',
+        `SELECT phone FROM (
+          SELECT REPLACE(phone_number, '-', '') as phone FROM sender_numbers WHERE company_id = $1 AND is_active = true
+          UNION SELECT REPLACE(phone, '-', '') as phone FROM callback_numbers WHERE company_id = $1
+        ) t WHERE phone = $2 LIMIT 1`,
         [companyId, senderCallback]
       );
       if (senderCheck.rows.length === 0) {
@@ -1412,9 +1423,9 @@ router.get('/test-stats', async (req: Request, res: Response) => {
 
     // 비용 계산 (회사 실제 단가 기준)
     const costResult = await query('SELECT cost_per_sms, cost_per_lms, cost_per_mms FROM companies WHERE id = $1', [companyId]);
-    const costSms = Number(costResult.rows[0]?.cost_per_sms) || 9.9;
-    const costLms = Number(costResult.rows[0]?.cost_per_lms) || 27;
-    const costMms = Number(costResult.rows[0]?.cost_per_mms) || 50;
+    const costSms = Number(costResult.rows[0]?.cost_per_sms) || DEFAULT_COSTS.sms;
+    const costLms = Number(costResult.rows[0]?.cost_per_lms) || DEFAULT_COSTS.lms;
+    const costMms = Number(costResult.rows[0]?.cost_per_mms) || DEFAULT_COSTS.mms;
     allResults.forEach((r: any) => {
       if (isSuccess(r.status_code)) {
         stats.cost += r.msg_type === 'S' ? costSms : r.msg_type === 'M' ? costMms : costLms;
@@ -1793,7 +1804,10 @@ router.post('/direct-send', async (req: Request, res: Response) => {
     // ★ #4: 회신번호 등록 여부 검증 (개별회신번호가 아닌 경우)
     if (!useIndividualCallback && callback) {
       const senderCheck = await query(
-        'SELECT id FROM sender_numbers WHERE company_id = $1 AND REPLACE(phone_number, \'-\', \'\') = $2 AND is_active = true LIMIT 1',
+        `SELECT phone FROM (
+          SELECT REPLACE(phone_number, '-', '') as phone FROM sender_numbers WHERE company_id = $1 AND is_active = true
+          UNION SELECT REPLACE(phone, '-', '') as phone FROM callback_numbers WHERE company_id = $1
+        ) t WHERE phone = $2 LIMIT 1`,
         [companyId, callback.replace(/-/g, '')]
       );
       if (senderCheck.rows.length === 0) {
@@ -2569,18 +2583,15 @@ router.put('/:id/message', async (req: Request, res: Response) => {
       tableGroups[table].push(r);
     }
 
-    const batchSize = 1000;
+    const batchSize = BATCH_SIZES.messageUpdate;
     let processedCount = 0;
 
-    // Redis에 진행률 저장
-    const redis = require('ioredis');
-    const redisClient = new redis(process.env.REDIS_URL || 'redis://localhost:6379');
-
-    await redisClient.set(`message_edit:${campaignId}:progress`, JSON.stringify({
+    // Redis에 진행률 저장 (공유 인스턴스 사용)
+    await redis.set(`message_edit:${campaignId}:progress`, JSON.stringify({
       total: recipients.length,
       processed: 0,
       percent: 0
-    }), 'EX', 600);
+    }), 'EX', CACHE_TTL.messageEditProgress);
 
     for (const [table, tableRecipients] of Object.entries(tableGroups)) {
       for (let i = 0; i < tableRecipients.length; i += batchSize) {
@@ -2638,11 +2649,11 @@ router.put('/:id/message', async (req: Request, res: Response) => {
         processedCount += batch.length;
 
         // 진행률 업데이트
-        await redisClient.set(`message_edit:${campaignId}:progress`, JSON.stringify({
+        await redis.set(`message_edit:${campaignId}:progress`, JSON.stringify({
           total: recipients.length,
           processed: processedCount,
           percent: Math.round((processedCount / recipients.length) * 100)
-        }), 'EX', 600);
+        }), 'EX', CACHE_TTL.messageEditProgress);
       }
     }
 
@@ -2651,8 +2662,6 @@ router.put('/:id/message', async (req: Request, res: Response) => {
       `UPDATE campaigns SET message_template = $1, message_subject = $2, message_content = $3, updated_at = NOW() WHERE id = $4`,
       [message, subject || null, message, campaignId]
     );
-
-    await redisClient.quit();
 
     res.json({
       success: true,
@@ -2669,11 +2678,7 @@ router.put('/:id/message', async (req: Request, res: Response) => {
 router.get('/:id/message/progress', async (req: Request, res: Response) => {
   try {
     const campaignId = req.params.id;
-    const redis = require('ioredis');
-    const redisClient = new redis(process.env.REDIS_URL || 'redis://localhost:6379');
-
-    const data = await redisClient.get(`message_edit:${campaignId}:progress`);
-    await redisClient.quit();
+    const data = await redis.get(`message_edit:${campaignId}:progress`);
 
     if (data) {
       return res.json(JSON.parse(data));

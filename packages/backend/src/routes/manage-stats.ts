@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { authenticate, requireCompanyAdmin } from '../middlewares/auth';
 import pool, { mysqlQuery } from '../config/database';
+import { DEFAULT_COSTS } from '../config/defaults';
 
 const router = Router();
 
@@ -164,8 +165,8 @@ router.get('/send', async (req: Request, res: Response) => {
 
         // 비용 계산 (회사 단가 기준)
         const costRes = await pool.query('SELECT cost_per_sms, cost_per_lms FROM companies WHERE id = $1', [companyScope]);
-        const cSms = Number(costRes.rows[0]?.cost_per_sms) || 9.9;
-        const cLms = Number(costRes.rows[0]?.cost_per_lms) || 27;
+        const cSms = Number(costRes.rows[0]?.cost_per_sms) || DEFAULT_COSTS.sms;
+        const cLms = Number(costRes.rows[0]?.cost_per_lms) || DEFAULT_COSTS.lms;
         testSummary.cost = Math.round(((testSummary.sms - testSummary.pending) * cSms + testSummary.lms * cLms) * 10) / 10;
         // 더 정확하게: 성공 건만 과금 (sms 성공 개수 × 단가)
         // 담당자 성공 sms/lms 분리는 MySQL에서 이미 구분됨
@@ -252,8 +253,8 @@ router.get('/send/detail', async (req: Request, res: Response) => {
 
     // 비용 계산용 단가
     const costRes = await pool.query('SELECT cost_per_sms, cost_per_lms FROM companies WHERE id = $1', [targetCompanyId]);
-    const cSms = Number(costRes.rows[0]?.cost_per_sms) || 9.9;
-    const cLms = Number(costRes.rows[0]?.cost_per_lms) || 27;
+    const cSms = Number(costRes.rows[0]?.cost_per_sms) || DEFAULT_COSTS.sms;
+    const cLms = Number(costRes.rows[0]?.cost_per_lms) || DEFAULT_COSTS.lms;
 
     // 사용자별 통계 (campaigns 직접 조회 — 직접발송 포함)
     const result = await pool.query(`

@@ -204,7 +204,8 @@ export function normalizePhone(value: any): string | null {
  * 한국 전화번호 유효성 검증
  * - 010: 11자리 (010XXXXXXXX)
  * - 011/016/017/018/019: 10~11자리 (구번호 허용)
- * - 01로 시작하지 않거나 자릿수 불일치 → false
+ * - 050x: 안심번호 (0502, 0503, 0504, 0505, 0506, 0507, 0508) → 11~12자리
+ * - 01/050x 외 → false
  */
 export function isValidKoreanPhone(phone: string): boolean {
   if (!phone) return false;
@@ -213,6 +214,8 @@ export function isValidKoreanPhone(phone: string): boolean {
   if (cleaned.startsWith('010')) return cleaned.length === 11;
   // 011, 016, 017, 018, 019 → 10~11자리 (구번호)
   if (/^01[16789]/.test(cleaned)) return cleaned.length >= 10 && cleaned.length <= 11;
+  // 050x 안심번호 (0502~0508) → 11~12자리
+  if (/^050[2-8]/.test(cleaned)) return cleaned.length >= 11 && cleaned.length <= 12;
   // 그 외 → 무효
   return false;
 }
@@ -269,8 +272,22 @@ export function normalizeAmount(value: any): number | null {
 // ============================================================
 export function normalizeDate(value: any): string | null {
   if (value == null || value === '') return null;
+
+  // 엑셀 시리얼넘버 (숫자형 또는 정수형 문자열 — 1~73050 범위)
+  const numVal = typeof value === 'number' ? value : Number(value);
+  if (!isNaN(numVal) && Number.isInteger(numVal) && numVal >= 1 && numVal <= 73050) {
+    const excelEpoch = new Date(1899, 11, 30);
+    const converted = new Date(excelEpoch.getTime() + numVal * 86400000);
+    const yyyy = converted.getFullYear();
+    if (yyyy >= 1900 && yyyy <= 2099) {
+      const mm = String(converted.getMonth() + 1).padStart(2, '0');
+      const dd = String(converted.getDate()).padStart(2, '0');
+      return `${yyyy}-${mm}-${dd}`;
+    }
+  }
+
   const v = String(value).trim();
-  
+
   // 이미 ISO 형식
   if (/^\d{4}-\d{2}-\d{2}/.test(v)) return v.slice(0, 10);
   // YYYYMMDD
@@ -282,13 +299,13 @@ export function normalizeDate(value: any): string | null {
   // MM/DD/YYYY (미국식)
   const usMatch = v.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
   if (usMatch) return `${usMatch[3]}-${usMatch[1]}-${usMatch[2]}`;
-  
+
   // Date 파싱 시도
   try {
     const d = new Date(v);
     if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
   } catch {}
-  
+
   return null;
 }
 

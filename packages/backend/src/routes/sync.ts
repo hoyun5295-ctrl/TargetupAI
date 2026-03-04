@@ -4,6 +4,7 @@
 
 import { Request, Response, Router } from 'express';
 import { query } from '../config/database';
+import { TIMEOUTS, RATE_LIMITS, BATCH_SIZES } from '../config/defaults';
 import { normalizePhone } from '../utils/normalize';
 
 const router = Router();
@@ -32,12 +33,12 @@ setInterval(() => {
   }
   // activeSyncs: 30분 이상 stuck된 항목 정리 (Agent 크래시 대비)
   for (const [key, val] of activeSyncs) {
-    if (now - val.startedAt > 30 * 60 * 1000) {
+    if (now - val.startedAt > TIMEOUTS.syncStaleThreshold) {
       console.warn(`[Sync RateLimit] Stale activeSyncs removed: company=${key}, type=${val.syncType}`);
       activeSyncs.delete(key);
     }
   }
-}, 5 * 60 * 1000);
+}, TIMEOUTS.syncCleanupInterval);
 
 /** IP 실패 카운트 증가 (syncAuth에서 호출) */
 function recordIpFailure(ip: string) {
@@ -46,7 +47,7 @@ function recordIpFailure(ip: string) {
   if (entry && now < entry.resetAt) {
     entry.count++;
   } else {
-    ipFailures.set(ip, { count: 1, resetAt: now + 60_000 });
+    ipFailures.set(ip, { count: 1, resetAt: now + RATE_LIMITS.windowMs });
   }
 }
 
@@ -54,7 +55,7 @@ function recordIpFailure(ip: string) {
 function ipRateLimit(req: Request, res: Response, next: Function) {
   const ip = req.ip || req.headers['x-forwarded-for'] as string || 'unknown';
   const entry = ipFailures.get(ip);
-  if (entry && Date.now() < entry.resetAt && entry.count >= 10) {
+  if (entry && Date.now() < entry.resetAt && entry.count >= RATE_LIMITS.ipFailThreshold) {
     console.warn(`[Sync RateLimit] IP blocked (auth failures): ${ip} (${entry.count} failures)`);
     return res.status(429).json({
       success: false,
@@ -73,7 +74,7 @@ function companyRateLimit(req: SyncAuthRequest, res: Response, next: Function) {
   const now = Date.now();
   const entry = companyRequests.get(companyId);
   if (entry && now < entry.resetAt) {
-    if (entry.count >= 60) {
+    if (entry.count >= RATE_LIMITS.companyMaxPerMinute) {
       console.warn(`[Sync RateLimit] Company rate limited: ${req.companyName} (${entry.count} req/min)`);
       return res.status(429).json({
         success: false,
@@ -327,7 +328,7 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
     }
 
     // 배치 크기 제한 (한 번에 최대 5000건)
-    if (customers.length > 5000) {
+    if (customers.length > BATCH_SIZES.syncCustomer) {
       return res.status(400).json({
         success: false,
         error: 'Maximum 5000 customers per batch'
@@ -592,7 +593,7 @@ router.post('/purchases', async (req: SyncAuthRequest, res: Response) => {
       });
     }
 
-    if (purchases.length > 5000) {
+    if (purchases.length > BATCH_SIZES.syncPurchase) {
       return res.status(400).json({
         success: false,
         error: 'Maximum 5000 purchases per batch'
@@ -874,7 +875,7 @@ router.get('/config', async (req: SyncAuthRequest, res: Response) => {
       config: {
         sync_interval_customers: config.sync_interval_customers ?? agent.sync_interval_customers ?? 60,
         sync_interval_purchases: config.sync_interval_purchases ?? agent.sync_interval_purchases ?? 30,
-        batch_size: config.batch_size ?? 5000,
+        batch_size: config.batch_size ?? BATCH_SIZES.syncCustomer,
         column_mapping: config.column_mapping ?? null,
         commands: config.commands ?? []
       }

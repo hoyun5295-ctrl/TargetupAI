@@ -212,23 +212,23 @@ export default function TargetSendModal({
   // ====== SMS 전송하기 핸들러 ======
   const handleSmsSend = async () => {
     if (targetRecipients.length === 0) {
-      alert('수신자가 없습니다');
+      setToast({ show: true, type: 'error', message: '수신자가 없습니다' });
       return;
     }
     if (!targetMessage.trim()) {
-      alert('메시지를 입력해주세요');
+      setToast({ show: true, type: 'error', message: '메시지를 입력해주세요' });
       return;
     }
     if (!selectedCallback && !useIndividualCallback) {
-      alert('회신번호를 선택해주세요');
+      setToast({ show: true, type: 'error', message: '회신번호를 선택해주세요' });
       return;
     }
     if (useIndividualCallback && targetRecipients.some((r: any) => !r.callback)) {
-      alert('개별회신번호가 없는 고객이 있습니다.\n일반 회신번호를 선택하거나 고객 데이터를 확인해주세요.');
+      setToast({ show: true, type: 'error', message: '개별회신번호가 없는 고객이 있습니다. 일반 회신번호를 선택하거나 고객 데이터를 확인해주세요.' });
       return;
     }
     if ((targetMsgType === 'LMS' || targetMsgType === 'MMS') && !targetSubject.trim()) {
-      alert('제목을 입력해주세요');
+      setToast({ show: true, type: 'error', message: '제목을 입력해주세요' });
       return;
     }
 
@@ -282,10 +282,10 @@ export default function TargetSendModal({
 
   // ====== 카카오 전송하기 핸들러 ======
   const handleKakaoSend = async () => {
-    if (targetRecipients.length === 0) { alert('수신자가 없습니다'); return; }
-    if (!kakaoMessage.trim()) { alert('메시지를 입력해주세요'); return; }
-    if (kakaoMessage.length > 4000) { alert('카카오 메시지는 4,000자 이내로 입력해주세요'); return; }
-    if (!kakaoEnabled) { alert('카카오 발송이 활성화되지 않았습니다. 관리자에게 문의해주세요.'); return; }
+    if (targetRecipients.length === 0) { setToast({ show: true, type: 'error', message: '수신자가 없습니다' }); return; }
+    if (!kakaoMessage.trim()) { setToast({ show: true, type: 'error', message: '메시지를 입력해주세요' }); return; }
+    if (kakaoMessage.length > 4000) { setToast({ show: true, type: 'error', message: '카카오 메시지는 4,000자 이내로 입력해주세요' }); return; }
+    if (!kakaoEnabled) { setToast({ show: true, type: 'error', message: '카카오 발송이 활성화되지 않았습니다. 관리자에게 문의해주세요.' }); return; }
     const token = localStorage.getItem('token');
     const phones = targetRecipients.map((r: any) => r.phone);
     const checkRes = await fetch('/api/unsubscribes/check', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ phones }) });
@@ -297,7 +297,7 @@ export default function TargetSendModal({
   // ====== 미리보기 핸들러 ======
   const handlePreview = () => {
     if (!targetMessage.trim()) {
-      alert('메시지를 입력해주세요');
+      setToast({ show: true, type: 'error', message: '메시지를 입력해주세요' });
       return;
     }
     setDirectMessage(targetMessage);

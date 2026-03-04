@@ -34,6 +34,7 @@ import manageStatsRoutes from './routes/manage-stats';
 
 // DB 연결
 import './config/database';
+import { LIMITS } from './config/defaults';
 
 dotenv.config();
 
@@ -45,7 +46,7 @@ const PORT = process.env.PORT || 3000;
 app.use(helmet());
 app.use(cors());
 app.use(morgan('dev'));
-app.use(express.json({ limit: '50mb' }));
+app.use(express.json({ limit: LIMITS.requestBodySize }));
 app.use('/api/upload', uploadRoutes);
 app.use('/api/sync', syncRoutes);
 app.use('/api/spam-filter', spamFilterRoutes);

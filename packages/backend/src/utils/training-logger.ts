@@ -17,6 +17,7 @@
 
 import pool from '../config/database';
 import crypto from 'crypto';
+import { AI_MODELS } from '../config/defaults';
 
 // ============================================================
 // HMAC 비밀키 (환경변수 또는 기본값)
@@ -320,7 +321,7 @@ export async function logTrainingData(params: TrainingLogParams): Promise<void> 
       TRAINING_VERSIONS.prompt,
       TRAINING_VERSIONS.persona,
       TRAINING_VERSIONS.policy,
-      params.modelId || 'claude-sonnet-4-20250514',
+      params.modelId || AI_MODELS.claude,
       params.modelParams ? JSON.stringify(params.modelParams) : null,
       JSON.stringify(guardrailActions),
       TRAINING_VERSIONS.redaction,

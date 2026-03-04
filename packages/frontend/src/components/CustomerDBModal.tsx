@@ -334,12 +334,17 @@ export default function CustomerDBModal({ onClose, token }: CustomerDBModalProps
                   {selectedCustomer.custom_fields && Object.keys(selectedCustomer.custom_fields).length > 0 && (
                     <>
                       <div className="text-xs text-gray-400 font-medium mt-4 mb-2">추가 정보</div>
-                      {Object.entries(selectedCustomer.custom_fields).map(([key, value]) => (
-                        <div key={key} className="flex items-center py-2.5 border-b border-gray-100">
-                          <span className="w-24 flex-shrink-0 text-xs text-gray-400">{key}</span>
-                          <span className="text-sm text-gray-800 font-medium">{String(value) || '-'}</span>
-                        </div>
-                      ))}
+                      {Object.entries(selectedCustomer.custom_fields).map(([key, value]) => {
+                        // fieldColumns에서 커스텀 필드 라벨 조회 (custom_1 → 사용자 정의 라벨)
+                        const fieldDef = fieldColumns.find((f: any) => f.field_key === key);
+                        const displayLabel = fieldDef?.field_label || fieldDef?.display_name || key;
+                        return (
+                          <div key={key} className="flex items-center py-2.5 border-b border-gray-100">
+                            <span className="w-24 flex-shrink-0 text-xs text-gray-400">{displayLabel}</span>
+                            <span className="text-sm text-gray-800 font-medium">{String(value) || '-'}</span>
+                          </div>
+                        );
+                      })}
                     </>
                   )}
                 </div>

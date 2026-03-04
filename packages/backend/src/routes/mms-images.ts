@@ -3,6 +3,7 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import { v4 as uuidv4 } from 'uuid';
+import { LIMITS } from '../config/defaults';
 
 const router = express.Router();
 
@@ -29,8 +30,8 @@ function authMiddleware(req: any, res: any, next: any) {
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 300 * 1024, // 300KB 제한
-    files: 3,             // 최대 3개
+    fileSize: LIMITS.mmsImageSize, // 300KB 제한
+    files: LIMITS.mmsImageCount,   // 최대 3개
   },
   fileFilter: (req, file, cb) => {
     // JPG/JPEG만 허용
@@ -82,7 +83,7 @@ router.post('/upload', authMiddleware, (req: any, res: any) => {
 
       for (const file of files) {
         // 파일 크기 재검증 (안전장치)
-        if (file.size > 300 * 1024) {
+        if (file.size > LIMITS.mmsImageSize) {
           return res.status(400).json({ error: `${file.originalname}: 300KB 초과 (${(file.size / 1024).toFixed(0)}KB)` });
         }
 

@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import OpenAI from 'openai';
 import * as path from 'path';
 import { query } from '../config/database';
+import { AI_MODELS, AI_MAX_TOKENS, TIMEOUTS } from '../config/defaults';
 import { authenticate } from '../middlewares/auth';
 
 const router = Router();
@@ -294,8 +295,8 @@ async function callClaude(userMessage: string, maxRetries = 2): Promise<Analysis
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       const response = await anthropic.messages.create({
-        model: 'claude-sonnet-4-5-20250929',
-        max_tokens: 4096,
+        model: AI_MODELS.claude,
+        max_tokens: AI_MAX_TOKENS.analysis,
         temperature: 0.3,
         system: ANALYSIS_SYSTEM_PROMPT,
         messages: [{ role: 'user', content: userMessage }],
@@ -307,7 +308,7 @@ async function callClaude(userMessage: string, maxRetries = 2): Promise<Analysis
     } catch (error: any) {
       console.error(`[AI 분석] Claude 실패 (시도 ${attempt + 1}/${maxRetries + 1}):`, error.message);
       if (attempt < maxRetries) {
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        await new Promise(resolve => setTimeout(resolve, TIMEOUTS.aiRetryDelay));
       }
     }
   }
@@ -320,8 +321,8 @@ async function callClaude(userMessage: string, maxRetries = 2): Promise<Analysis
   console.warn('[AI 분석] Claude 전부 실패 → gpt-5.1 fallback');
   try {
     const gptResponse = await openai.chat.completions.create({
-      model: 'gpt-5.1',
-      max_completion_tokens: 4096,
+      model: AI_MODELS.gpt,
+      max_completion_tokens: AI_MAX_TOKENS.analysis,
       temperature: 0.3,
       messages: [
         { role: 'system', content: ANALYSIS_SYSTEM_PROMPT },
