@@ -625,7 +625,7 @@ QTmsg status_code, 통신사 코드, 스팸필터 판정 결과를 한 곳에서
 - [ ] 프론트엔드 난독화 (vite-plugin-obfuscator, 런칭 직전 적용)
 - [ ] 슈퍼관리자 IP 화이트리스트 설정
 - [x] 외부 자동 백업 구축 — ✅ 2026-03-05 완료: pg_dump+mysqldump → 59번 서버(58.227.193.59) SCP 전송, SSH 키 인증, crontab 매일 03:00 KST, 7일 로컬 보관. 스크립트: /home/administrator/backups/backup.sh
-- [ ] 웹 애플리케이션 SQL Injection 점검 (SSRF 포함)
+- [x] 웹 애플리케이션 SQL Injection 점검 — ✅ D56 테이블명 화이트리스트 + D57-C4 sendTime 파라미터화 완료 (SSRF 별도)
 - [ ] SSH 키 인증 전용 전환 (비밀번호 로그인 비활성화) — 선택
 
 ### 인비토AI (메시징 특화 모델)

@@ -46,14 +46,8 @@ async function syncCustomerOptInBulk(companyId: string, phones: string[], optIn:
 // ================================================================
 router.get('/080callback', async (req: Request, res: Response) => {
   try {
-    const { cid, fr, token } = req.query;
-
-    // 토큰 검증
-    const validToken = process.env.OPT_OUT_080_TOKEN;
-    if (!validToken || token !== validToken) {
-      console.log(`[080콜백] 토큰 인증 실패 - token=${token}`);
-      return res.send('0');
-    }
+    const { cid, fr } = req.query;
+    // ★ 토큰 검증 제거 — Nginx IP 화이트리스트(나래 6개 IP)로 보안 보장
 
     if (!cid || !fr) {
       console.log(`[080콜백] 필수 파라미터 누락 - cid=${cid}, fr=${fr}`);
