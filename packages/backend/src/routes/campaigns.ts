@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { Request, Response, Router } from 'express';
 import { mysqlQuery, query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
@@ -6,13 +7,55 @@ import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getRegionVarian
 import { getSourceRef, logTrainingData, updateTrainingMetrics } from '../utils/training-logger';
 import { replaceVariables } from '../utils/messageUtils';
 import { SUCCESS_CODES, PENDING_CODES, isSuccess, isFail, SPAM_RESULT } from '../utils/sms-result-map';
-import { DEFAULT_COSTS, redis, CACHE_TTL, BATCH_SIZES } from '../config/defaults';
+import { DEFAULT_COSTS, redis, CACHE_TTL, BATCH_SIZES, SEND_HOURS } from '../config/defaults';
 import { isValidSmsTable } from '../utils/sms-table-validator';
+import { normalizePhone } from '../utils/normalize-phone';
 
 // 한국시간 문자열 변환 (MySQL datetime 형식)
 const toKoreaTimeStr = (date: Date) => {
   return date.toLocaleString('sv-SE', { timeZone: 'Asia/Seoul' }).replace('T', ' ');
 };
+
+/**
+ * ★ C3: 분할발송 시간 계산 (오버플로우 방지)
+ * batchIndex분 만큼 baseTime에서 앞으로 밀되,
+ * SEND_HOURS.end를 초과하면 다음날 SEND_HOURS.start로 이월
+ *
+ * @param baseTime - 발송 시작 시간
+ * @param batchIndex - 현재 배치 인덱스 (0부터)
+ * @param sendStartHour - 발송 시작 시각 (회사별 또는 기본값)
+ * @param sendEndHour - 발송 종료 시각 (회사별 또는 기본값)
+ * @returns 조정된 발송 시간
+ */
+function calcSplitSendTime(
+  baseTime: Date,
+  batchIndex: number,
+  sendStartHour: number = SEND_HOURS.start,
+  sendEndHour: number = SEND_HOURS.end
+): Date {
+  const result = new Date(baseTime.getTime());
+  result.setMinutes(result.getMinutes() + batchIndex);
+
+  // 한국시간 기준으로 시각 확인 (KST = UTC+9)
+  const kstHour = parseInt(
+    result.toLocaleString('en-US', { timeZone: 'Asia/Seoul', hour: '2-digit', hour12: false })
+  );
+
+  if (kstHour >= sendEndHour) {
+    // 종료 시각 초과 → 다음날 시작 시각으로 이월
+    // 초과한 분수 계산
+    const kstMinutes = parseInt(
+      result.toLocaleString('en-US', { timeZone: 'Asia/Seoul', minute: '2-digit' })
+    );
+    const overflowMinutes = (kstHour - sendEndHour) * 60 + kstMinutes;
+    // 다음날 시작 시각 기준으로 재설정
+    result.setDate(result.getDate() + 1);
+    result.setHours(result.getHours() - kstHour + sendStartHour);
+    result.setMinutes(overflowMinutes);
+  }
+
+  return result;
+}
 
 // ★ GP-04: MySQL TZ는 database.ts의 mysqlQuery 헬퍼에서 매 커넥션마다 자동 설정
 // (커넥션 풀 전체 보장 — 단일 SET으로는 1개 커넥션에만 적용되므로 제거)
@@ -350,7 +393,7 @@ async function prepaidDeduct(
     : messageType === 'MMS' ? Number(c.cost_per_mms || 0)
     : messageType === 'KAKAO' ? Number(c.cost_per_kakao || 0) : 0;
 
-  const totalAmount = unitPrice * count;
+  const totalAmount = Math.round(unitPrice * count * 100) / 100; // 부동소수점 보정
   if (totalAmount === 0) return { ok: true, amount: 0 };
 
   // Atomic 차감: balance >= totalAmount 일 때만 성공
@@ -413,7 +456,7 @@ async function prepaidRefund(
   );
   const totalDeducted = Number(deducted.rows[0].total);
 
-  const refundAmount = Math.min(unitPrice * count, totalDeducted - alreadyRefunded);
+  const refundAmount = Math.round(Math.min(unitPrice * count, totalDeducted - alreadyRefunded) * 100) / 100; // 부동소수점 보정
   if (refundAmount <= 0) return { refunded: 0 };
 
   const result = await query(
@@ -644,7 +687,7 @@ router.post('/test-send', async (req: Request, res: Response) => {
       'SELECT phone FROM callback_numbers WHERE company_id = $1 AND is_default = true LIMIT 1',
       [companyId]
     );
-    const callbackNumber = callbackResult.rows[0]?.phone?.replace(/-/g, '');
+    const callbackNumber = normalizePhone(callbackResult.rows[0]?.phone || '');
     if (!callbackNumber) {
       return res.status(400).json({ error: '기본 회신번호가 설정되지 않았습니다. 회사 설정에서 기본 회신번호를 등록해주세요.', code: 'NO_DEFAULT_CALLBACK' });
     }
@@ -679,11 +722,14 @@ router.post('/test-send', async (req: Request, res: Response) => {
     const testTables = await getTestSmsTables();
     const msgType = (messageType || 'SMS') === 'SMS' ? 'S' : (messageType || 'SMS') === 'LMS' ? 'L' : 'M';
     const mmsImagePaths: string[] = req.body.mmsImagePaths || [];
+    // ★ C5: 테스트 발송 고유 추적 ID — bill_id에 저장하여 결과 조회 시 정확한 매칭 보장
+    const testRequestUid = randomUUID();
     let sentCount = 0;
+    const failedContacts: { phone: string; error: string }[] = [];
 
     for (const contact of managerContacts) {
       try {
-        const cleanPhone = contact.phone.replace(/-/g, '');
+        const cleanPhone = normalizePhone(contact.phone);
         // ★ D32: 공통 치환 함수로 실제 타겟 첫 번째 고객 데이터 치환
         const testMsg = replaceVariables(messageContent, testFirstCustomer, testFieldMappings);
 
@@ -696,7 +742,7 @@ router.post('/test-send', async (req: Request, res: Response) => {
             `INSERT INTO ${table} (
               dest_no, call_back, msg_contents, msg_type, title_str, sendreq_time, status_code, rsv1, app_etc1, app_etc2, bill_id, file_name1, file_name2, file_name3
             ) VALUES (?, ?, ?, ?, ?, NOW(), 100, '1', ?, ?, ?, ?, ?, ?)`,
-            [cleanPhone, callbackNumber, testMsg, msgType, testSubject, 'test', companyId, userId || '', mmsImagePaths[0] || '', mmsImagePaths[1] || '', mmsImagePaths[2] || '']
+            [cleanPhone, callbackNumber, testMsg, msgType, testSubject, 'test', companyId, testRequestUid, mmsImagePaths[0] || '', mmsImagePaths[1] || '', mmsImagePaths[2] || '']
           );
         }
 
@@ -710,13 +756,18 @@ router.post('/test-send', async (req: Request, res: Response) => {
             message: testMsg,
             isAd: false,
             resendType: 'NO',  // 테스트는 대체발송 안함
-            requestUid: 'test',
+            requestUid: testRequestUid,
           });
         }
 
         sentCount++;
       } catch (err) {
         console.error(`담당자 테스트 발송 실패 (${contact.phone}):`, err);
+        // ★ C5: 실패 건 기록
+        failedContacts.push({
+          phone: contact.phone,
+          error: err instanceof Error ? err.message : String(err)
+        });
       }
     }
 
@@ -726,12 +777,27 @@ router.post('/test-send', async (req: Request, res: Response) => {
       await prepaidRefund(companyId, testFailCount, testMsgType, '00000000-0000-0000-0000-000000000000', '테스트 발송 실패 자동 환불');
     }
 
+    // ★ C5: 실패 건 DB 기록 (비동기, 발송 응답에 영향 없음)
+    if (failedContacts.length > 0) {
+      try {
+        await query(
+          `INSERT INTO campaign_runs (campaign_id, run_number, target_count, sent_count, status, created_at)
+           VALUES ($1, 0, $2, $3, 'failed', NOW())`,
+          [testRequestUid, managerContacts.length, sentCount]
+        );
+      } catch (logErr) {
+        console.error('[테스트발송] 실패 기록 저장 오류 (발송에는 영향 없음):', logErr);
+      }
+    }
+
     return res.json({
       message: `담당자 ${sentCount}명에게 테스트 문자를 발송했습니다.`,
       sentCount,
+      // ★ C5: 추적 ID — 프론트에서 결과 조회 시 사용
+      testRequestUid,
       contacts: managerContacts.map(c => ({
         name: c.name || '이름없음',
-        phone: `${c.phone.replace(/\D/g, '').slice(0, 3)}-****-${c.phone.replace(/\D/g, '').slice(-4)}`
+        phone: `${normalizePhone(c.phone).slice(0, 3)}-****-${normalizePhone(c.phone).slice(-4)}`
       })),
     });
   } catch (error) {
@@ -885,7 +951,7 @@ router.post('/:id/send', async (req: Request, res: Response) => {
 
     // ★ #4: 회신번호 등록 여부 검증 (개별회신번호가 아닌 경우)
     if (!useIndividualCallback) {
-      const senderCallback = (campaign.callback_number || defaultCallback).replace(/-/g, '');
+      const senderCallback = normalizePhone(campaign.callback_number || defaultCallback);
       const senderCheck = await query(
         `SELECT phone FROM (
           SELECT REPLACE(phone_number, '-', '') as phone FROM sender_numbers WHERE company_id = $1 AND is_active = true
@@ -983,7 +1049,7 @@ const excludedPhones = campaign.excluded_phones || [];
 
 // 제외 대상 필터링
 let filteredCustomers = customers.filter(
-  (c: any) => !excludedPhones.includes(c.phone.replace(/-/g, ''))
+  (c: any) => !excludedPhones.includes(normalizePhone(c.phone))
 );
 
 // ★ 개별회신번호 사용 시 callback 없는 고객 제외
@@ -997,7 +1063,7 @@ if (useIndividualCallback) {
   }
 
   // ★ #4 수정: 개별회신번호 등록 여부 검증
-  const callbackPhones = [...new Set(filteredCustomers.map((c: any) => (c.callback || '').replace(/-/g, '')).filter(Boolean))];
+  const callbackPhones = [...new Set(filteredCustomers.map((c: any) => normalizePhone(c.callback || '')).filter(Boolean))];
   if (callbackPhones.length > 0) {
     const registeredResult = await query(
       `SELECT REPLACE(phone_number, '-', '') as phone FROM sender_numbers WHERE company_id = $1 AND is_active = true
@@ -1047,7 +1113,10 @@ if (!sendDeduct.ok) {
 try {
 
 // MySQL에 INSERT (즉시/예약 공통)
-const sendTime = isScheduled ? toKoreaTimeStr(new Date(campaign.scheduled_at)) : null;
+// ★ C4: sendTime은 항상 문자열로 생성 → SQL 파라미터로 전달 (SQL Injection 방지)
+const sendTime = isScheduled
+  ? toKoreaTimeStr(new Date(campaign.scheduled_at))
+  : toKoreaTimeStr(new Date());  // 즉시발송도 JS 타임스탬프를 파라미터로 전달
 
 // MMS 이미지 경로 (campaigns 테이블에서 가져옴)
 const campaignMmsImages: string[] = campaign.mms_image_paths || [];
@@ -1069,66 +1138,89 @@ if (sendChannel !== 'sms' && campaign.is_ad) {
   opt080Number = optResult.rows[0]?.opt_out_080_number || '';
 }
 
+// ★ C1: per-customer try/catch로 부분 실패 추적 — 선별적 환불 보장
+let aiSentCount = 0;
+
 for (const customer of filteredCustomers) {
-  // ★ D32: 공통 치환 함수 사용 (messageUtils.ts)
-  const personalizedMessage = replaceVariables(campaign.message_content || '', customer, fieldMappings);
-  // ★ D28: 제목은 고정값 그대로 사용 (머지 치환 완전 제거)
-  const personalizedSubject = campaign.subject || '';
+  try {
+    // ★ D32: 공통 치환 함수 사용 (messageUtils.ts)
+    const personalizedMessage = replaceVariables(campaign.message_content || '', customer, fieldMappings);
+    // ★ D28: 제목은 고정값 그대로 사용 (머지 치환 완전 제거)
+    const personalizedSubject = campaign.subject || '';
 
-  // 개별회신번호: customer.callback 있으면 사용, 없으면 캠페인 설정 또는 기본값
-  const customerCallback = useIndividualCallback && customer.callback
-    ? customer.callback.replace(/-/g, '')
-    : (campaign.callback_number || defaultCallback).replace(/-/g, '');
+    // 개별회신번호: customer.callback 있으면 사용, 없으면 캠페인 설정 또는 기본값
+    const customerCallback = useIndividualCallback && customer.callback
+      ? normalizePhone(customer.callback)
+      : normalizePhone(campaign.callback_number || defaultCallback);
 
-  const cleanPhone = customer.phone.replace(/-/g, '');
+    const cleanPhone = normalizePhone(customer.phone);
 
-  // ★ 채널별 분기: SMS / 카카오 / 동시발송
-  if (sendChannel === 'sms' || sendChannel === 'both') {
-    // SMS/LMS/MMS 발송
-    const table = getNextSmsTable(companyTables);
-    await mysqlQuery(
-      `INSERT INTO ${table} (
-        dest_no, call_back, msg_contents, msg_type, title_str, sendreq_time, status_code, rsv1, app_etc1, app_etc2, file_name1, file_name2, file_name3
-      ) VALUES (?, ?, ?, ?, ?, ${sendTime ? `'${sendTime}'` : 'NOW()'}, 100, '1', ?, ?, ?, ?, ?)`,
-      [cleanPhone, customerCallback, personalizedMessage, aiMsgTypeCode, personalizedSubject, id, companyId, campaignMmsImages[0] || '', campaignMmsImages[1] || '', campaignMmsImages[2] || '']
-    );
+    // ★ 채널별 분기: SMS / 카카오 / 동시발송
+    if (sendChannel === 'sms' || sendChannel === 'both') {
+      // SMS/LMS/MMS 발송
+      const table = getNextSmsTable(companyTables);
+      // ★ C4: sendTime을 SQL 파라미터(?)로 전달 — 템플릿 리터럴 삽입 제거
+      await mysqlQuery(
+        `INSERT INTO ${table} (
+          dest_no, call_back, msg_contents, msg_type, title_str, sendreq_time, status_code, rsv1, app_etc1, app_etc2, file_name1, file_name2, file_name3
+        ) VALUES (?, ?, ?, ?, ?, ?, 100, '1', ?, ?, ?, ?, ?)`,
+        [cleanPhone, customerCallback, personalizedMessage, aiMsgTypeCode, personalizedSubject, sendTime, id, companyId, campaignMmsImages[0] || '', campaignMmsImages[1] || '', campaignMmsImages[2] || '']
+      );
+    }
+
+    if (sendChannel === 'kakao' || sendChannel === 'both') {
+      // 카카오 브랜드메시지 발송
+      await insertKakaoQueue({
+        bubbleType: kakaoBubbleType,
+        senderKey: kakaoSenderKey,
+        phone: cleanPhone,
+        targeting: kakaoTargeting,
+        message: personalizedMessage,
+        isAd: campaign.is_ad || false,
+        reservedDate: sendTime || undefined,
+        attachmentJson: kakaoAttachmentJson,
+        carouselJson: kakaoCarouselJson,
+        resendType: sendChannel === 'both' ? 'NO' : kakaoResendType,  // 동시발송이면 대체발송 끔
+        resendFrom: customerCallback,
+        resendMessage: sendChannel === 'both' ? undefined : undefined,  // 기본: 카카오 메시지 재사용
+        unsubscribePhone: opt080Number,
+        requestUid: id,
+      });
+    }
+
+    aiSentCount++;
+  } catch (insertErr) {
+    console.error(`[AI발송] MySQL INSERT 실패 (phone: ${customer.phone}):`, insertErr);
+    // 실패해도 루프 계속 → 다음 고객 발송 시도
   }
+}
 
-  if (sendChannel === 'kakao' || sendChannel === 'both') {
-    // 카카오 브랜드메시지 발송
-    await insertKakaoQueue({
-      bubbleType: kakaoBubbleType,
-      senderKey: kakaoSenderKey,
-      phone: cleanPhone,
-      targeting: kakaoTargeting,
-      message: personalizedMessage,
-      isAd: campaign.is_ad || false,
-      reservedDate: sendTime || undefined,
-      attachmentJson: kakaoAttachmentJson,
-      carouselJson: kakaoCarouselJson,
-      resendType: sendChannel === 'both' ? 'NO' : kakaoResendType,  // 동시발송이면 대체발송 끔
-      resendFrom: customerCallback,
-      resendMessage: sendChannel === 'both' ? undefined : undefined,  // 기본: 카카오 메시지 재사용
-      unsubscribePhone: opt080Number,
-      requestUid: id,
-    });
+// ★ C1: 부분 실패 시 실패분만 선별적 환불
+const aiFailCount = filteredCustomers.length - aiSentCount;
+if (aiFailCount > 0) {
+  console.warn(`[AI발송] 부분 실패 — 성공: ${aiSentCount}, 실패: ${aiFailCount} → 실패분 환불 처리`);
+  try {
+    await prepaidRefund(companyId, aiFailCount, deductType, id, `AI발송 부분실패 ${aiFailCount}건 환불`);
+  } catch (partialRefundErr) {
+    console.error('[AI발송] 부분 실패 환불 오류:', partialRefundErr);
   }
 }
 
 // campaign_runs 상태 업데이트
 // ★ #6: 예약 캠페인은 sent_at 설정하지 않음
+// ★ C1: aiSentCount 기반으로 실제 성공 건수 반영
 await query(
   `UPDATE campaign_runs SET
     sent_count = $1,
     status = $2
     ${isScheduled ? '' : ', sent_at = CURRENT_TIMESTAMP'}
    WHERE id = $3`,
-  [filteredCustomers.length, isScheduled ? 'scheduled' : 'sending', campaignRun.id]
+  [aiSentCount, aiSentCount === 0 ? 'failed' : (isScheduled ? 'scheduled' : 'sending'), campaignRun.id]
 );
 
 // 캠페인 상태 업데이트
 // ★ #6: 예약 캠페인은 sent_at 설정하지 않음 (sync-results에서 실제 발송 완료 시 설정)
-// 예약건의 "발송일시"는 scheduled_at으로 표시해야 함
+// ★ C1: aiSentCount 기반
 await query(
   `UPDATE campaigns SET
     status = $1,
@@ -1136,9 +1228,9 @@ await query(
     target_count = $3
     ${isScheduled ? '' : ', sent_at = CURRENT_TIMESTAMP'}
    WHERE id = $4`,
-   [isScheduled ? 'scheduled' : 'sending', filteredCustomers.length, filteredCustomers.length, id]
+   [aiSentCount === 0 ? 'failed' : (isScheduled ? 'scheduled' : 'sending'), aiSentCount, filteredCustomers.length, id]
   );
-  
+
       // ★ AI 학습 데이터 적재 (비동기, 실패해도 발송에 영향 없음)
       const trainingCompanyInfo = await query('SELECT name, brand_tone FROM companies WHERE id = $1', [companyId]);
       logTrainingData({
@@ -1155,20 +1247,21 @@ await query(
         finalSource: (campaign.message_template && campaign.message_template === campaign.message_content) ? 'selected_as_is' : 'edited',
         sendAt: campaign.scheduled_at ? new Date(campaign.scheduled_at) : new Date(),
       });
-  
+
       return res.json({
-      message: `${filteredCustomers.length}건 발송이 시작되었습니다.${callbackSkippedCount > 0 ? ` (회신번호 없는 ${callbackSkippedCount}명 제외)` : ''}`,
-      sentCount: filteredCustomers.length,
+      message: `${aiSentCount}건 발송이 시작되었습니다.${aiFailCount > 0 ? ` (${aiFailCount}건 실패, 자동 환불)` : ''}${callbackSkippedCount > 0 ? ` (회신번호 없는 ${callbackSkippedCount}명 제외)` : ''}`,
+      sentCount: aiSentCount,
+      failCount: aiFailCount,
       callbackSkippedCount,
       runId: campaignRun.id,
       runNumber: runNumber,
     });
 
     } catch (sendError) {
-      // ★ P0-3: MySQL INSERT 실패 시 차감 금액 자동 환불
-      console.error('[AI발송] 큐 INSERT 실패 — 차감 환불 처리:', sendError);
+      // ★ C1: 전체 실패 (루프 진입 전 오류 등) — 전액 환불
+      console.error('[AI발송] 큐 처리 전체 실패 — 차감 환불 처리:', sendError);
       try {
-        await prepaidRefund(companyId, filteredCustomers.length, deductType, id, '발송 실패 자동 환불');
+        await prepaidRefund(companyId, filteredCustomers.length, deductType, id, '발송 전체 실패 자동 환불');
         await query(`UPDATE campaigns SET status = 'failed', updated_at = NOW() WHERE id = $1`, [id]);
       } catch (refundErr) {
         console.error('[AI발송] 환불 처리 중 추가 오류:', refundErr);
@@ -1808,7 +1901,7 @@ router.post('/direct-send', async (req: Request, res: Response) => {
     if (customMessages && Array.isArray(customMessages)) {
       for (const cm of customMessages) {
         if (cm.phone && cm.message) {
-          customMessageMap.set(cm.phone.replace(/-/g, ''), cm.message);
+          customMessageMap.set(normalizePhone(cm.phone), cm.message);
         }
       }
     }
@@ -1828,7 +1921,7 @@ router.post('/direct-send', async (req: Request, res: Response) => {
           SELECT REPLACE(phone_number, '-', '') as phone FROM sender_numbers WHERE company_id = $1 AND is_active = true
           UNION SELECT REPLACE(phone, '-', '') as phone FROM callback_numbers WHERE company_id = $1
         ) t WHERE phone = $2 LIMIT 1`,
-        [companyId, callback.replace(/-/g, '')]
+        [companyId, normalizePhone(callback)]
       );
       if (senderCheck.rows.length === 0) {
         return res.status(400).json({ success: false, error: '등록되지 않은 회신번호입니다. 발신번호 관리에서 번호를 등록해주세요.', code: 'INVALID_SENDER_NUMBER' });
@@ -1843,7 +1936,7 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       }
 
       // ★ #4 수정: 개별회신번호 등록 여부 검증
-      const callbackPhones = [...new Set(recipients.map((r: any) => (r.callback || '').replace(/-/g, '')).filter(Boolean))];
+      const callbackPhones = [...new Set(recipients.map((r: any) => normalizePhone(r.callback || '')).filter(Boolean))];
       if (callbackPhones.length > 0) {
         const registeredResult = await query(
           `SELECT REPLACE(phone_number, '-', '') as phone FROM sender_numbers WHERE company_id = $1 AND is_active = true
@@ -1864,13 +1957,13 @@ router.post('/direct-send', async (req: Request, res: Response) => {
     }
 
     // 1. 수신거부 필터링
-    const phones = recipients.map((r: any) => r.phone.replace(/-/g, ''));
+    const phones = recipients.map((r: any) => normalizePhone(r.phone));
     const unsubResult = await query(
       `SELECT phone FROM unsubscribes WHERE user_id = $1 AND phone = ANY($2)`,
       [userId, phones]
     );
     const unsubPhones = new Set(unsubResult.rows.map((r: any) => r.phone));
-    const filteredRecipients = recipients.filter((r: any) => !unsubPhones.has(r.phone.replace(/-/g, '')));
+    const filteredRecipients = recipients.filter((r: any) => !unsubPhones.has(normalizePhone(r.phone)));
 
     if (filteredRecipients.length === 0) {
       return res.status(400).json({ success: false, error: '모든 수신자가 수신거부 상태입니다' });
@@ -1939,6 +2032,8 @@ router.post('/direct-send', async (req: Request, res: Response) => {
 
     // 2. MySQL 큐에 메시지 삽입 — 회사 라인그룹 테이블 라운드로빈 분배
     const isScheduledSend = scheduled && scheduledAt;
+    // ★ C1: 채널별 발송 성공 건수 추적 (블록 밖에서 선언 — 선별적 환불 계산용)
+    let directSmsSentCount = 0;
 
     // 080 수신거부 번호 조회 (카카오 광고 발송 시 필요)
     let directOpt080 = '';
@@ -1952,14 +2047,14 @@ router.post('/direct-send', async (req: Request, res: Response) => {
     const directFieldMappings = extractVarCatalog(directSchemaResult.rows[0]?.customer_schema).fieldMappings;
     const directMappingCols = Object.values(directFieldMappings).map((m: any) => m.column);
     const directSelectCols = [...new Set(['phone', ...directMappingCols])].join(', ');
-    const directPhoneList = filteredRecipients.map((r: any) => r.phone.replace(/-/g, ''));
+    const directPhoneList = filteredRecipients.map((r: any) => normalizePhone(r.phone));
     const directCustomersResult = await query(
       `SELECT ${directSelectCols} FROM customers WHERE company_id = $1 AND phone = ANY($2)`,
       [companyId, directPhoneList]
     );
     const directCustomerMap = new Map<string, Record<string, any>>();
     directCustomersResult.rows.forEach((c: any) => {
-      directCustomerMap.set(c.phone, c);
+      directCustomerMap.set(normalizePhone(c.phone), c);
     });
 
     // SMS 발송 (sms 또는 both)
@@ -1971,7 +2066,7 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       for (let i = 0; i < filteredRecipients.length; i++) {
         const recipient = filteredRecipients[i];
         // ★ S9-01: customMessages 있으면 프론트 치환값 사용, 없으면 서버 치환
-        const cleanPhone = recipient.phone.replace(/-/g, '');
+        const cleanPhone = normalizePhone(recipient.phone);
         let finalMessage: string;
         if (customMessageMap.has(cleanPhone)) {
           // 프론트 치환 완료 메시지 (직접타겟추출 경로)
@@ -1996,28 +2091,26 @@ router.post('/direct-send', async (req: Request, res: Response) => {
         // ★ D28: 제목은 고정값 그대로 사용 (머지 치환 완전 제거)
         const finalSubject = subject || '';
 
-        // 분할전송 시간 계산
+        // ★ C3: 분할전송 시간 계산 (오버플로우 방지 — calcSplitSendTime 적용)
         let sendTime: string;
         if (isScheduledSend) {
-          const baseTime = new Date(scheduledAt);
           if (splitEnabled && splitCount > 0) {
             const batchIndex = Math.floor(i / splitCount);
-            baseTime.setMinutes(baseTime.getMinutes() + batchIndex);
+            sendTime = toKoreaTimeStr(calcSplitSendTime(new Date(scheduledAt), batchIndex));
+          } else {
+            sendTime = toKoreaTimeStr(new Date(scheduledAt));
           }
-          sendTime = toKoreaTimeStr(baseTime);
         } else if (splitEnabled && splitCount > 0) {
-          const baseTime = new Date();
           const batchIndex = Math.floor(i / splitCount);
-          baseTime.setMinutes(baseTime.getMinutes() + batchIndex);
-          sendTime = toKoreaTimeStr(baseTime);
+          sendTime = toKoreaTimeStr(calcSplitSendTime(new Date(), batchIndex));
         } else {
           sendTime = '__NOW__';  // ★ #5 수정: 즉시발송은 MySQL NOW() 직접 사용
         }
 
         // 개별회신번호면 recipient.callback 사용, 아니면 공통 callback 사용
         const recipientCallback = useIndividualCallback
-          ? (recipient.callback || '').replace(/-/g, '')
-          : callback.replace(/-/g, '');
+          ? normalizePhone(recipient.callback || '')
+          : normalizePhone(callback);
 
         // 라운드로빈으로 테이블 선택
         const table = getNextSmsTable(companyTables);
@@ -2030,7 +2123,7 @@ router.post('/direct-send', async (req: Request, res: Response) => {
         const targetBatch = currentBatch[currentBatch.length - 1];
 
         targetBatch.push([
-          recipient.phone.replace(/-/g, ''),
+          normalizePhone(recipient.phone),
           recipientCallback,
           finalMessage,
           msgType === 'SMS' ? 'S' : msgType === 'LMS' ? 'L' : 'M',
@@ -2043,95 +2136,138 @@ router.post('/direct-send', async (req: Request, res: Response) => {
         ]);
       }
 
-      // Bulk INSERT 실행 (테이블별)
-      // ★ #5 수정: 즉시발송(비예약·비분할)은 sendreq_time에 MySQL NOW() 직접 사용
+      // ★ C1: Bulk INSERT에 per-batch try/catch + sentCount 추적
       const useNow = !isScheduledSend && !(splitEnabled && splitCount > 0);
       for (const [table, batches] of Object.entries(tableBatches)) {
         for (const batch of batches) {
           if (batch.length === 0) continue;
-          if (useNow) {
-            // 즉시발송: row[5](sendTime) 제외, NOW() SQL 직접 삽입
-            const placeholders = batch.map(() => '(?, ?, ?, ?, ?, NOW(), 100, \'1\', ?, ?, ?, ?)').join(', ');
-            const flatValues = batch.map(row => [row[0], row[1], row[2], row[3], row[4], row[6], row[7], row[8], row[9]]).flat();
-            await mysqlQuery(
-              `INSERT INTO ${table} (dest_no, call_back, msg_contents, msg_type, title_str, sendreq_time, status_code, rsv1, app_etc1, file_name1, file_name2, file_name3) VALUES ${placeholders}`,
-              flatValues
-            );
-          } else {
-            // 예약/분할: sendTime 파라미터 그대로 사용
-            const placeholders = batch.map(() => '(?, ?, ?, ?, ?, ?, 100, \'1\', ?, ?, ?, ?)').join(', ');
-            const flatValues = batch.flat();
-            await mysqlQuery(
-              `INSERT INTO ${table} (dest_no, call_back, msg_contents, msg_type, title_str, sendreq_time, status_code, rsv1, app_etc1, file_name1, file_name2, file_name3) VALUES ${placeholders}`,
-              flatValues
-            );
+          try {
+            if (useNow) {
+              // 즉시발송: row[5](sendTime) 제외, NOW() SQL 직접 삽입
+              const placeholders = batch.map(() => '(?, ?, ?, ?, ?, NOW(), 100, \'1\', ?, ?, ?, ?)').join(', ');
+              const flatValues = batch.map(row => [row[0], row[1], row[2], row[3], row[4], row[6], row[7], row[8], row[9]]).flat();
+              await mysqlQuery(
+                `INSERT INTO ${table} (dest_no, call_back, msg_contents, msg_type, title_str, sendreq_time, status_code, rsv1, app_etc1, file_name1, file_name2, file_name3) VALUES ${placeholders}`,
+                flatValues
+              );
+            } else {
+              // 예약/분할: sendTime 파라미터 그대로 사용
+              const placeholders = batch.map(() => '(?, ?, ?, ?, ?, ?, 100, \'1\', ?, ?, ?, ?)').join(', ');
+              const flatValues = batch.flat();
+              await mysqlQuery(
+                `INSERT INTO ${table} (dest_no, call_back, msg_contents, msg_type, title_str, sendreq_time, status_code, rsv1, app_etc1, file_name1, file_name2, file_name3) VALUES ${placeholders}`,
+                flatValues
+              );
+            }
+            directSmsSentCount += batch.length;
+          } catch (batchErr) {
+            console.error(`[직접발송] batch INSERT 실패 (${table}, ${batch.length}건):`, batchErr);
+            // 실패 batch 건수는 미집계 → 환불 대상
           }
         }
       }
     }
 
     // 카카오 발송 (kakao 또는 both)
+    // ★ C1: per-recipient try/catch로 카카오 부분 실패 추적
+    let directKakaoSentCount = 0;
     if (directChannel === 'kakao' || directChannel === 'both') {
       for (let i = 0; i < filteredRecipients.length; i++) {
-        const recipient = filteredRecipients[i];
-        const cleanPhone = recipient.phone.replace(/-/g, '');
-        let finalMessage: string;
-        if (customMessageMap.has(cleanPhone)) {
-          finalMessage = customMessageMap.get(cleanPhone)!.replace(/%[^%\s]{1,20}%/g, '');
-        } else {
-          // ★ DB 고객 데이터로 동적 치환 (하드코딩 제거)
-          const dbCustomer = directCustomerMap.get(cleanPhone);
-          if (dbCustomer) {
-            finalMessage = replaceVariables(message, dbCustomer, directFieldMappings);
+        try {
+          const recipient = filteredRecipients[i];
+          const cleanKakaoPhone = normalizePhone(recipient.phone);
+          let finalMessage: string;
+          if (customMessageMap.has(cleanKakaoPhone)) {
+            finalMessage = customMessageMap.get(cleanKakaoPhone)!.replace(/%[^%\s]{1,20}%/g, '');
           } else {
-            finalMessage = message
-              .replace(/%이름%/g, recipient.name || '')
-              .replace(/%기타1%/g, recipient.extra1 || '')
-              .replace(/%기타2%/g, recipient.extra2 || '')
-              .replace(/%기타3%/g, recipient.extra3 || '')
-              .replace(/%회신번호%/g, recipient.callback || '')
-              .replace(/%[^%\s]{1,20}%/g, '');
+            // ★ DB 고객 데이터로 동적 치환 (하드코딩 제거)
+            const dbCustomer = directCustomerMap.get(cleanKakaoPhone);
+            if (dbCustomer) {
+              finalMessage = replaceVariables(message, dbCustomer, directFieldMappings);
+            } else {
+              finalMessage = message
+                .replace(/%이름%/g, recipient.name || '')
+                .replace(/%기타1%/g, recipient.extra1 || '')
+                .replace(/%기타2%/g, recipient.extra2 || '')
+                .replace(/%기타3%/g, recipient.extra3 || '')
+                .replace(/%회신번호%/g, recipient.callback || '')
+                .replace(/%[^%\s]{1,20}%/g, '');
+            }
           }
-        }
 
-        // 분할전송 시간 계산
-        let kakaoSendTime: string | undefined;
-        if (isScheduledSend) {
-          const baseTime = new Date(scheduledAt);
-          if (splitEnabled && splitCount > 0) {
-            const batchIndex = Math.floor(i / splitCount);
-            baseTime.setMinutes(baseTime.getMinutes() + batchIndex);
+          // ★ C3: 분할전송 시간 계산 (오버플로우 방지 — calcSplitSendTime 적용)
+          let kakaoSendTime: string | undefined;
+          if (isScheduledSend) {
+            if (splitEnabled && splitCount > 0) {
+              const batchIndex = Math.floor(i / splitCount);
+              kakaoSendTime = toKoreaTimeStr(calcSplitSendTime(new Date(scheduledAt), batchIndex));
+            } else {
+              kakaoSendTime = toKoreaTimeStr(new Date(scheduledAt));
+            }
           }
-          kakaoSendTime = toKoreaTimeStr(baseTime);
+
+          const recipientCallback = useIndividualCallback
+            ? normalizePhone(recipient.callback || '')
+            : normalizePhone(callback);
+
+          await insertKakaoQueue({
+            bubbleType: kakaoBubbleType || 'TEXT',
+            senderKey: kakaoSenderKey || '',
+            phone: normalizePhone(recipient.phone),
+            targeting: kakaoTargeting || 'I',
+            message: finalMessage,
+            isAd: adEnabled || false,
+            reservedDate: kakaoSendTime,
+            attachmentJson: kakaoAttachmentJson || undefined,
+            carouselJson: kakaoCarouselJson || undefined,
+            resendType: directChannel === 'both' ? 'NO' : (kakaoResendType || 'SM'),
+            resendFrom: recipientCallback,
+            unsubscribePhone: directOpt080,
+            requestUid: campaignId,
+          });
+          directKakaoSentCount++;
+        } catch (kakaoErr) {
+          console.error(`[직접발송] 카카오 INSERT 실패 (index: ${i}):`, kakaoErr);
         }
-
-        const recipientCallback = useIndividualCallback
-          ? (recipient.callback || '').replace(/-/g, '')
-          : callback.replace(/-/g, '');
-
-        await insertKakaoQueue({
-          bubbleType: kakaoBubbleType || 'TEXT',
-          senderKey: kakaoSenderKey || '',
-          phone: recipient.phone.replace(/-/g, ''),
-          targeting: kakaoTargeting || 'I',
-          message: finalMessage,
-          isAd: adEnabled || false,
-          reservedDate: kakaoSendTime,
-          attachmentJson: kakaoAttachmentJson || undefined,
-          carouselJson: kakaoCarouselJson || undefined,
-          resendType: directChannel === 'both' ? 'NO' : (kakaoResendType || 'SM'),
-          resendFrom: recipientCallback,
-          unsubscribePhone: directOpt080,
-          requestUid: campaignId,
-        });
       }
     }
 
+    // ★ C1: 총 발송 성공 건수 계산 + 부분 실패 시 선별적 환불
+    // SMS 채널 실패분 환불
+    if (directChannel === 'sms' || directChannel === 'both') {
+      const smsFailCount = filteredRecipients.length - directSmsSentCount;
+      if (smsFailCount > 0) {
+        console.warn(`[직접발송] SMS 부분 실패 — 성공: ${directSmsSentCount}, 실패: ${smsFailCount} → 실패분 환불`);
+        try {
+          const smsDeductType = directChannel === 'kakao' ? 'KAKAO' : msgType;
+          await prepaidRefund(companyId, smsFailCount, smsDeductType, campaignId, `직접발송 SMS 부분실패 ${smsFailCount}건 환불`);
+        } catch (refundErr) {
+          console.error('[직접발송] SMS 부분 실패 환불 오류:', refundErr);
+        }
+      }
+    }
+    // 카카오 채널 실패분 환불
+    if (directChannel === 'kakao' || directChannel === 'both') {
+      const kakaoFailCount = filteredRecipients.length - directKakaoSentCount;
+      if (kakaoFailCount > 0) {
+        console.warn(`[직접발송] 카카오 부분 실패 — 성공: ${directKakaoSentCount}, 실패: ${kakaoFailCount} → 실패분 환불`);
+        try {
+          await prepaidRefund(companyId, kakaoFailCount, 'KAKAO', campaignId, `직접발송 카카오 부분실패 ${kakaoFailCount}건 환불`);
+        } catch (refundErr) {
+          console.error('[직접발송] 카카오 부분 실패 환불 오류:', refundErr);
+        }
+      }
+    }
+
+    // 실제 성공 건수 (채널별 최대값)
+    const directTotalSent = Math.max(directSmsSentCount || 0, directKakaoSentCount || 0);
+
     // 3. 즉시발송이면 상태 업데이트 (★ #5: sending으로 설정 → sync-results에서 Agent 완료 후 completed 전환)
+    // ★ C1: directTotalSent 기반으로 실제 성공 건수 반영
     if (!scheduled) {
       await query(
-        `UPDATE campaigns SET status = 'sending', sent_count = $1, sent_at = NOW() WHERE id = $2`,
-        [filteredRecipients.length, campaignId]
+        `UPDATE campaigns SET status = $1, sent_count = $2, sent_at = NOW() WHERE id = $3`,
+        [directTotalSent === 0 ? 'failed' : 'sending', directTotalSent, campaignId]
       );
     }
 
@@ -2150,17 +2286,20 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       sendAt: scheduled && scheduledAt ? new Date(scheduledAt) : new Date(),
     });
 
+    const directFailTotal = filteredRecipients.length - directTotalSent;
     res.json({
       success: true,
       campaignId,
-      message: `${filteredRecipients.length}건 발송 ${scheduled ? '예약' : '완료'}${excludedCount > 0 ? ` (수신거부 ${excludedCount}건 제외)` : ''}`
+      sentCount: directTotalSent,
+      failCount: directFailTotal,
+      message: `${directTotalSent}건 발송 ${scheduled ? '예약' : '완료'}${directFailTotal > 0 ? ` (${directFailTotal}건 실패, 자동 환불)` : ''}${excludedCount > 0 ? ` (수신거부 ${excludedCount}건 제외)` : ''}`
     });
 
     } catch (sendError) {
-      // ★ P0-3: MySQL INSERT 실패 시 차감 금액 자동 환불
-      console.error('[직접발송] 큐 INSERT 실패 — 차감 환불 처리:', sendError);
+      // ★ C1: 전체 실패 (루프 진입 전 오류 등) — 전액 환불
+      console.error('[직접발송] 큐 처리 전체 실패 — 차감 환불 처리:', sendError);
       try {
-        await prepaidRefund(companyId, filteredRecipients.length, directDeductType, campaignId, '발송 실패 자동 환불');
+        await prepaidRefund(companyId, filteredRecipients.length, directDeductType, campaignId, '발송 전체 실패 자동 환불');
         await query(`UPDATE campaigns SET status = 'failed', updated_at = NOW() WHERE id = $1`, [campaignId]);
       } catch (refundErr) {
         console.error('[직접발송] 환불 처리 중 추가 오류:', refundErr);
@@ -2277,7 +2416,7 @@ router.get('/:id/recipients', async (req: Request, res: Response) => {
     if (camp.status === 'scheduled') {
       // 검색 조건
       const searchCondition = search ? ` AND dest_no LIKE ?` : '';
-      const searchParams = search ? [campaignId, `%${String(search).replace(/-/g, '')}%`] : [campaignId];
+      const searchParams = search ? [campaignId, `%${normalizePhone(String(search))}%`] : [campaignId];
 
       const mysqlRecipients = await smsSelectAll(recipientTables,
         'seqno as idx, dest_no as phone, call_back as callback, msg_contents as message',
@@ -2372,7 +2511,7 @@ router.get('/:id/recipients', async (req: Request, res: Response) => {
 
     // 발송 완료/진행중이면 MySQL 회사 라인그룹 테이블에서 조회
     const searchCondition2 = search ? ` AND dest_no LIKE ?` : '';
-    const searchParams2 = search ? [campaignId, `%${String(search).replace(/-/g, '')}%`] : [campaignId];
+    const searchParams2 = search ? [campaignId, `%${normalizePhone(String(search))}%`] : [campaignId];
 
     const recipients = await smsSelectAll(recipientTables,
       'seqno as idx, dest_no as phone, call_back as callback, msg_contents as message, sendreq_time, status_code',
@@ -2633,7 +2772,7 @@ router.put('/:id/message', async (req: Request, res: Response) => {
             const adPrefix = msgType === 'SMS' ? '(광고)' : '(광고) ';
             finalMessage = adPrefix + finalMessage;
             if (msgType === 'SMS') {
-              finalMessage += `\n무료거부${optOut080.replace(/-/g, '')}`;
+              finalMessage += `\n무료거부${normalizePhone(optOut080)}`;
             } else {
               finalMessage += `\n무료수신거부 ${optOut080}`;
             }
