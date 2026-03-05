@@ -7,6 +7,7 @@ import { ALL_SMS_TABLES, invalidateLineGroupCache } from './campaigns';
 import { DASHBOARD_CARD_POOL, validateCardIds } from '../utils/dashboard-card-pool';
 import { SUCCESS_CODES_SQL, PENDING_CODES_SQL, getStatusLabel, getStatusType, getCarrierLabel, isSuccess, isPending } from '../utils/sms-result-map';
 import { DEFAULT_COSTS } from '../config/defaults';
+import { validateSmsTables } from '../utils/sms-table-validator';
 
 const router = Router();
 
@@ -2131,6 +2132,12 @@ router.post('/line-groups', authenticate, requireSuperAdmin, async (req: Request
     if (!groupName || !groupType || !smsTables || smsTables.length === 0) {
       return res.status(400).json({ error: '필수 필드를 입력해주세요.' });
     }
+    // ★ P0-Q1: SQL Injection 방지 — 테이블명 화이트리스트 검증
+    try {
+      validateSmsTables(smsTables);
+    } catch (err) {
+      return res.status(400).json({ error: `잘못된 테이블명: ${err instanceof Error ? err.message : String(err)}` });
+    }
     const result = await query(`
       INSERT INTO sms_line_groups (group_name, group_type, sms_tables, sort_order)
       VALUES ($1, $2, $3, $4)
@@ -2150,6 +2157,14 @@ router.put('/line-groups/:id', authenticate, requireSuperAdmin, async (req: Requ
   try {
     const { id } = req.params;
     const { groupName, groupType, smsTables, sortOrder, isActive } = req.body;
+    // ★ P0-Q1: SQL Injection 방지 — 테이블명 화이트리스트 검증
+    if (smsTables) {
+      try {
+        validateSmsTables(smsTables);
+      } catch (err) {
+        return res.status(400).json({ error: `잘못된 테이블명: ${err instanceof Error ? err.message : String(err)}` });
+      }
+    }
     const result = await query(`
       UPDATE sms_line_groups
       SET group_name = COALESCE($1, group_name),

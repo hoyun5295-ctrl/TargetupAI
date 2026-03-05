@@ -7,6 +7,7 @@ import { getSourceRef, logTrainingData, updateTrainingMetrics } from '../utils/t
 import { replaceVariables } from '../utils/messageUtils';
 import { SUCCESS_CODES, PENDING_CODES, isSuccess, isFail, SPAM_RESULT } from '../utils/sms-result-map';
 import { DEFAULT_COSTS, redis, CACHE_TTL, BATCH_SIZES } from '../config/defaults';
+import { isValidSmsTable } from '../utils/sms-table-validator';
 
 // 한국시간 문자열 변환 (MySQL datetime 형식)
 const toKoreaTimeStr = (date: Date) => {
@@ -19,6 +20,12 @@ const toKoreaTimeStr = (date: Date) => {
 // ===== 라인그룹 기반 Agent 발송 설정 =====
 // 환경변수: 서버에 연결된 전체 테이블 목록 (폴백용)
 const ALL_SMS_TABLES = (process.env.SMS_TABLES || 'SMSQ_SEND').split(',').map(t => t.trim());
+// ★ P0-Q1: 서버 기동 시 테이블명 검증 (경고 로그, 기동은 차단하지 않음)
+for (const t of ALL_SMS_TABLES) {
+  if (!isValidSmsTable(t)) {
+    console.error(`[QTmsg] ⚠️ 잘못된 SMS 테이블명 감지: "${t}" — SQL Injection 위험. SMS_TABLES 환경변수를 확인하세요.`);
+  }
+}
 // ★ 대량발송 폴백용: 테스트(10)/인증(11) 라인 제외 — 2차 안전장치
 const BULK_ONLY_TABLES = ALL_SMS_TABLES.filter(t => !['SMSQ_SEND_10', 'SMSQ_SEND_11'].includes(t));
 let rrIndex = 0;
@@ -44,9 +51,21 @@ async function getCompanySmsTables(companyId: string): Promise<string[]> {
 
   const hasDedicatedGroup = result.rows.length > 0 && result.rows[0].sms_tables?.length > 0;
   // ★ 라인그룹 미설정 시 BULK_ONLY_TABLES 폴백 (테스트/인증 라인 절대 제외)
-  const tables = hasDedicatedGroup
+  let tables = hasDedicatedGroup
     ? result.rows[0].sms_tables
     : BULK_ONLY_TABLES;
+
+  // ★ P0-Q1: DB에서 조회된 테이블명 검증 (잘못된 값 필터링, 발송 차단하지 않음)
+  if (hasDedicatedGroup) {
+    const validTables = tables.filter((t: string) => {
+      if (!isValidSmsTable(t)) {
+        console.error(`[QTmsg] ⚠️ company ${companyId} 라인그룹에 잘못된 테이블명: "${t}" — 스킵 처리`);
+        return false;
+      }
+      return true;
+    });
+    tables = validTables.length > 0 ? validTables : BULK_ONLY_TABLES;
+  }
 
   lineGroupCache.set(cacheKey, { tables, hasDedicatedGroup, expires: Date.now() + LINE_GROUP_CACHE_TTL });
   return tables;
@@ -413,6 +432,7 @@ async function prepaidRefund(
 
   return { refunded: refundAmount };
 }
+export { prepaidDeduct, prepaidRefund };
 // ===== 선불 잔액 관리 끝 =====
 
 const router = Router();

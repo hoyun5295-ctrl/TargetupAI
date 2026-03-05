@@ -6,6 +6,7 @@ import { authenticate } from '../middlewares/auth';
 import { extractVarCatalog } from '../services/ai';
 import { replaceVariables } from '../utils/messageUtils';
 import { SUCCESS_CODES, PENDING_CODES, SPAM_RESULT } from '../utils/sms-result-map';
+import { prepaidDeduct, prepaidRefund } from './campaigns';
 
 const router = Router();
 
@@ -146,7 +147,17 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
       return res.status(400).json({ error: '등록된 테스트폰이 없습니다. 관리자에게 문의하세요.' });
     }
 
-    // 5) 테스트 건 생성 (message_hash 포함)
+    // 5) 발송 건수 계산 + 메시지 타입 결정
+    const messageTypes: string[] = [];
+    if (isLmsType) {
+      if (messageContentLms) messageTypes.push('LMS');
+    } else {
+      if (messageContentSms) messageTypes.push('SMS');
+    }
+    const spamSendCount = devices.rows.length * messageTypes.length;
+    const spamDeductType = messageTypes[0] || 'SMS';
+
+    // 6) 테스트 건 생성 (message_hash 포함) — 차감 전에 생성하여 testId를 referenceId로 사용
     const testResult = await query(
       `INSERT INTO spam_filter_tests
        (company_id, user_id, callback_number, message_content_sms, message_content_lms, message_hash, spam_check_number, status)
@@ -156,12 +167,17 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
     );
     const testId = testResult.rows[0].id;
 
-    // 6) 통신사별 × 타입별 결과 행 생성 + SMS 발송
-    const messageTypes: string[] = [];
-    if (isLmsType) {
-      if (messageContentLms) messageTypes.push('LMS');
-    } else {
-      if (messageContentSms) messageTypes.push('SMS');
+    // ★ 선불 잔액 차감 (테스트폰 × 메시지타입 = 실제 발송 건수)
+    const spamDeduct = await prepaidDeduct(companyId, spamSendCount, spamDeductType, testId);
+    if (!spamDeduct.ok) {
+      // 차감 실패 시 테스트 레코드 cancelled 처리
+      await query(`UPDATE spam_filter_tests SET status = 'completed', completed_at = NOW() WHERE id = $1`, [testId]);
+      return res.status(402).json({
+        error: spamDeduct.error,
+        insufficientBalance: true,
+        balance: spamDeduct.balance,
+        requiredAmount: spamDeduct.amount
+      });
     }
 
     // ★ D32: 실제 타겟 최상단 고객 데이터로 치환 (하드코딩 완전 제거)
@@ -339,13 +355,13 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
     // 안전장치: 타임아웃 + 여유 60초 후 강제 종료
     setTimeout(() => { clearInterval(pollInterval); }, TIMEOUTS.spamFilterSafety);
 
-    const totalCount = devices.rows.length * messageTypes.length;
     res.json({
       success: true,
       testId,
-      totalCount,
-      message: `${devices.rows.length}대 테스트폰에 ${messageTypes.join('/')} 발송 완료 (${totalCount}건)`,
-      timeoutSeconds: TEST_TIMEOUT_MS / 1000
+      totalCount: spamSendCount,
+      message: `${devices.rows.length}대 테스트폰에 ${messageTypes.join('/')} 발송 완료 (${spamSendCount}건)`,
+      timeoutSeconds: TEST_TIMEOUT_MS / 1000,
+      deducted: spamDeduct.amount || 0
     });
 
   } catch (err) {
