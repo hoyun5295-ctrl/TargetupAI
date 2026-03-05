@@ -19,6 +19,19 @@ interface TestResult {
   result: 'received' | 'blocked' | 'timeout' | 'failed' | null;
 }
 
+interface TestHistoryItem {
+  id: string;
+  callback_number: string;
+  status: string;
+  created_at: string;
+  completed_at: string | null;
+  message_content_sms: string | null;
+  message_content_lms: string | null;
+  user_name: string;
+  received_count: number;
+  total_count: number;
+}
+
 export default function SpamFilterTestModal({
   onClose,
   messageContentSms,
@@ -32,10 +45,17 @@ export default function SpamFilterTestModal({
   const [status, setStatus] = useState<'ready' | 'testing' | 'completed'>('ready');
   const [testId, setTestId] = useState<string | null>(null);
   const [results, setResults] = useState<TestResult[]>([]);
-  const [countdown, setCountdown] = useState(180);
+  const [countdown, setCountdown] = useState(60);
   const [error, setError] = useState('');
   const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<'test' | 'history'>('test');
+  const [history, setHistory] = useState<TestHistoryItem[]>([]);
+  const [historyPage, setHistoryPage] = useState(1);
+  const [historyTotalPages, setHistoryTotalPages] = useState(1);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [expandedHistoryId, setExpandedHistoryId] = useState<string | null>(null);
+  const [historyDetail, setHistoryDetail] = useState<{ test: any; results: TestResult[] } | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // 서버 시작 시간 기준 타이머용
@@ -50,7 +70,7 @@ export default function SpamFilterTestModal({
   const calcRemaining = useCallback(() => {
     if (!serverCreatedAtRef.current) return 0;
     const elapsed = Date.now() - serverCreatedAtRef.current;
-    return Math.max(0, Math.ceil((180000 - elapsed) / 1000));
+    return Math.max(0, Math.ceil((60000 - elapsed) / 1000));
   }, []);
 
   // 서버 시간 기반 카운트다운 시작
@@ -114,11 +134,53 @@ export default function SpamFilterTestModal({
     setStatus('ready');
     setTestId(null);
     setResults([]);
-    setCountdown(180);
+    setCountdown(60);
     setError('');
     setTotalCount(0);
     serverCreatedAtRef.current = null;
   }, [clearTimers]);
+
+  // 본인 테스트 이력 조회
+  const fetchHistory = async (page = 1) => {
+    setHistoryLoading(true);
+    try {
+      const res = await fetch(`/api/spam-filter/tests?mine=true&page=${page}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      setHistory(data.tests || []);
+      setHistoryPage(data.page || 1);
+      setHistoryTotalPages(data.totalPages || 1);
+    } catch (err) {
+      console.error('이력 조회 실패:', err);
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  // 이력 상세 (통신사별 결과) 조회
+  const fetchHistoryDetail = async (testId: string) => {
+    if (expandedHistoryId === testId) {
+      setExpandedHistoryId(null);
+      setHistoryDetail(null);
+      return;
+    }
+    try {
+      const res = await fetch(`/api/spam-filter/tests/${testId}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      setExpandedHistoryId(testId);
+      setHistoryDetail({ test: data.test, results: data.results || [] });
+    } catch (err) {
+      console.error('상세 조회 실패:', err);
+    }
+  };
+
+  // 이력 탭 전환 시 조회
+  useEffect(() => {
+    if (activeTab === 'history') fetchHistory(1);
+  }, [activeTab]);
 
   const startTest = async () => {
     if (!callbackNumber) { setError('발신번호가 선택되지 않았습니다.'); return; }
@@ -259,6 +321,19 @@ export default function SpamFilterTestModal({
           </div>
         </div>
 
+        {/* 탭 */}
+        <div className="flex border-b bg-white">
+          <button
+            onClick={() => setActiveTab('test')}
+            className={`flex-1 py-2.5 text-sm font-medium transition-colors ${activeTab === 'test' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+          >🛡️ 스팸필터 점검</button>
+          <button
+            onClick={() => setActiveTab('history')}
+            className={`flex-1 py-2.5 text-sm font-medium transition-colors ${activeTab === 'history' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+          >📋 내 테스트 이력</button>
+        </div>
+
+        {activeTab === 'test' ? (
         <div className="p-5">
           <div className="flex gap-5">
             <div className="flex-shrink-0">
@@ -345,17 +420,115 @@ export default function SpamFilterTestModal({
           </div>
         </div>
 
+        ) : (
+        /* 이력 탭 */
+        <div className="p-5">
+          {historyLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <div className="animate-spin w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full" />
+              <span className="ml-2 text-gray-500 text-sm">이력 조회 중...</span>
+            </div>
+          ) : history.length === 0 ? (
+            <div className="text-center py-12 text-gray-400 text-sm">스팸필터 테스트 이력이 없습니다</div>
+          ) : (
+            <>
+              <div className="space-y-2 max-h-[400px] overflow-y-auto">
+                {history.map((item) => {
+                  const isExpanded = expandedHistoryId === item.id;
+                  const receivedCnt = Number(item.received_count);
+                  const totalCnt = Number(item.total_count);
+                  const blockedCnt = totalCnt - receivedCnt;
+                  const allPass = item.status === 'completed' && receivedCnt === totalCnt;
+                  const msgPreview = (item.message_content_lms || item.message_content_sms || '').slice(0, 60);
+
+                  return (
+                    <div key={item.id} className="border rounded-lg overflow-hidden">
+                      <button
+                        onClick={() => fetchHistoryDetail(item.id)}
+                        className="w-full px-4 py-3 flex items-center gap-3 hover:bg-gray-50 transition-colors text-left"
+                      >
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm shrink-0 ${allPass ? 'bg-green-100' : 'bg-red-100'}`}>
+                          {allPass ? '✅' : '🚫'}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium text-gray-800">
+                              {new Date(item.created_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${allPass ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+                              {allPass ? '전체 정상' : `차단 ${blockedCnt}건`}
+                            </span>
+                            <span className="text-[10px] text-gray-400">{receivedCnt}/{totalCnt}</span>
+                          </div>
+                          <div className="text-xs text-gray-500 mt-0.5 truncate">{msgPreview || '(메시지 없음)'}</div>
+                        </div>
+                        <svg className={`w-4 h-4 text-gray-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                      </button>
+
+                      {isExpanded && historyDetail && (
+                        <div className="border-t bg-gray-50 px-4 py-3">
+                          {/* 문안 표시 */}
+                          <div className="mb-3 p-2.5 bg-white rounded border text-xs text-gray-700 whitespace-pre-wrap break-all max-h-[120px] overflow-y-auto">
+                            {historyDetail.test.message_content_lms || historyDetail.test.message_content_sms || '(메시지 없음)'}
+                          </div>
+                          {/* 통신사별 결과 */}
+                          <table className="w-full text-xs">
+                            <thead><tr className="text-gray-500">
+                              <th className="text-left py-1 font-medium">통신사</th>
+                              <th className="text-center py-1 font-medium">유형</th>
+                              <th className="text-center py-1 font-medium">판정</th>
+                            </tr></thead>
+                            <tbody>
+                              {historyDetail.results.map((r: any, idx: number) => (
+                                <tr key={idx} className="border-t border-gray-200">
+                                  <td className="py-1.5 text-gray-700 font-medium">{r.carrier === 'LGU' ? 'LG U+' : r.carrier}</td>
+                                  <td className="py-1.5 text-center">
+                                    <span className={`px-1.5 py-0.5 rounded text-[10px] ${r.message_type === 'SMS' ? 'bg-blue-50 text-blue-600' : 'bg-violet-50 text-violet-600'}`}>{r.message_type}</span>
+                                  </td>
+                                  <td className="py-1.5 text-center">
+                                    {r.received ? <span className="text-green-600 font-medium">✅ 정상</span>
+                                      : r.result === 'blocked' ? <span className="text-red-600 font-medium">🚫 차단</span>
+                                      : r.result === 'failed' ? <span className="text-red-500">❌ 실패</span>
+                                      : r.result === 'timeout' ? <span className="text-yellow-600">⚠️ 시간초과</span>
+                                      : <span className="text-gray-400">대기</span>}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              {historyTotalPages > 1 && (
+                <div className="flex justify-center items-center gap-2 mt-3">
+                  <button onClick={() => fetchHistory(historyPage - 1)} disabled={historyPage <= 1} className="px-3 py-1 text-sm rounded border bg-white hover:bg-gray-50 disabled:opacity-40">이전</button>
+                  <span className="text-sm text-gray-500">{historyPage} / {historyTotalPages}</span>
+                  <button onClick={() => fetchHistory(historyPage + 1)} disabled={historyPage >= historyTotalPages} className="px-3 py-1 text-sm rounded border bg-white hover:bg-gray-50 disabled:opacity-40">다음</button>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+        )}
+
         <div className="p-4 border-t bg-gray-50 flex justify-end gap-3">
-          {status === 'ready' && (<>
-            <button onClick={onClose} className="px-5 py-2.5 text-gray-600 hover:bg-gray-200 rounded-lg transition-colors">취소</button>
-            <button onClick={startTest} className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors flex items-center gap-2">🛡️ 점검 시작</button>
-          </>)}
-          {status === 'testing' && <button onClick={onClose} className="px-5 py-2.5 text-gray-600 hover:bg-gray-200 rounded-lg transition-colors">백그라운드로 전환</button>}
-          {status === 'completed' && (<>
-            <button onClick={resetForRetest} className="px-5 py-2.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors font-medium flex items-center gap-1.5">
-              <span className="text-sm">🔄</span> 재테스트
-            </button>
-            <button onClick={onClose} className="px-6 py-2.5 bg-gray-700 hover:bg-gray-800 text-white rounded-lg font-medium transition-colors">확인</button>
+          {activeTab === 'history' ? (
+            <button onClick={onClose} className="px-6 py-2.5 bg-gray-700 hover:bg-gray-800 text-white rounded-lg font-medium transition-colors">닫기</button>
+          ) : (<>
+            {status === 'ready' && (<>
+              <button onClick={onClose} className="px-5 py-2.5 text-gray-600 hover:bg-gray-200 rounded-lg transition-colors">취소</button>
+              <button onClick={startTest} className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors flex items-center gap-2">🛡️ 점검 시작</button>
+            </>)}
+            {status === 'testing' && <button onClick={onClose} className="px-5 py-2.5 text-gray-600 hover:bg-gray-200 rounded-lg transition-colors">백그라운드로 전환</button>}
+            {status === 'completed' && (<>
+              <button onClick={resetForRetest} className="px-5 py-2.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors font-medium flex items-center gap-1.5">
+                <span className="text-sm">🔄</span> 재테스트
+              </button>
+              <button onClick={onClose} className="px-6 py-2.5 bg-gray-700 hover:bg-gray-800 text-white rounded-lg font-medium transition-colors">확인</button>
+            </>)}
           </>)}
         </div>
       </div>

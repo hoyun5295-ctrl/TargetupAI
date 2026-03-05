@@ -1,10 +1,13 @@
 # 2026-02-13 세션 핸드오프 (새 채팅용)
 
-## 🔴 미해결 — 새 채팅에서 처리 필요
+> **⚠️ 2026-03-04 확인: 아래 미해결 항목 전부 해결 완료. 이 문서는 아카이브 상태.**
 
-### 1. tsc 빌드 에러 (백엔드)
+## ✅ 해결됨 (2026-03-04 확인) — tsc 빌드 정상, dist 직접 수정 불필요
+
+### 1. tsc 빌드 에러 (백엔드) — ✅ 해결
 `npm run build` 실행 시 app.ts에서 모듈 못 찾는 에러 13개 발생.
 dist 직접 수정으로 임시 해결했지만, tsc 빌드가 깨진 상태.
+**→ 2026-03-04: tsconfig.json 경로 수정 + defaults.ts 중앙화로 해결. tsc --noEmit 통과.**
 
 ```
 src/utils/app.ts:1:22 - error TS2307: Cannot find module './routes/ai'
@@ -16,11 +19,11 @@ src/utils/app.ts:9:24 - error TS2307: Cannot find module './routes/auth'
 **영향**: 소스 수정 후 정상 빌드 불가 → dist 직접 수정 해야 하는 상황
 **우선순위**: 높음 (이게 해결 안 되면 모든 백엔드 수정이 dist 직접 수정 필요)
 
-### 2. dist/routes/spam-filter.js 파일 꼬임
-서버에서 sed로 여러 번 수정하면서 파일이 꼬진 상태. 
-tsc 빌드가 되면 자동 해결되지만, 안 되면 dist 파일 수동 정리 필요.
+### 2. dist/routes/spam-filter.js 파일 꼬임 — ✅ 해결
+서버에서 sed로 여러 번 수정하면서 파일이 꼬진 상태.
+**→ tsc 빌드 정상화로 자동 해결.**
 
-### 3. campaigns.ts — prepaidDeduct UUID 에러 수정 (dist만 수정됨)
+### 3. campaigns.ts — prepaidDeduct UUID 에러 수정 — ✅ 해결 (src 반영됨)
 **파일**: `packages/backend/src/routes/campaigns.ts` 454줄
 **에러**: `invalid input syntax for type uuid: "test"`
 

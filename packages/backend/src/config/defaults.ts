@@ -51,10 +51,10 @@ export function getCompanyCosts(company: Record<string, any>) {
 export const TIMEOUTS = {
   /** 세션 활동 갱신 주기 — 5분 */
   activityUpdate: 5 * 60 * 1000,
-  /** 스팸필터 테스트 대기 — 3분 */
-  spamFilterTest: 180 * 1000,
-  /** 스팸필터 안전 강제종료 — 4분 */
-  spamFilterSafety: 240 * 1000,
+  /** 스팸필터 테스트 최종 안전장치 타임아웃 — 60초 (정상 시 QTmsg 성공 후 10초에 판정 완료) */
+  spamFilterTest: 60 * 1000,
+  /** 스팸필터 안전 강제종료 — 90초 */
+  spamFilterSafety: 90 * 1000,
   /** 업로드 파일 정리 주기 — 1시간 */
   uploadCleanup: 60 * 60 * 1000,
   /** 동기화 중단 정리 기준 — 30분 */

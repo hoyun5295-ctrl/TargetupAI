@@ -11,7 +11,7 @@
 | 서비스 | Host | Port | DB/User | 비고 |
 |--------|------|------|---------|------|
 | PostgreSQL | localhost | 5432 | targetup / targetup | `docker exec -it targetup-postgres psql -U targetup targetup` |
-| MySQL (QTmsg) | localhost | 3306 | smsdb / smsuser / sms123 | `docker exec -it targetup-mysql mysql -usmsuser -psms123 smsdb` |
+| MySQL (QTmsg) | localhost | 3306 | smsdb / smsuser / **(서버 .env 참조 — 문서 기재 금지)** | `docker exec -it targetup-mysql mysql -usmsuser -p smsdb` (비밀번호 프롬프트 입력) |
 | Redis | localhost | 6379 | - | |
 | 프론트엔드 | localhost | 5173 | - | |
 | 백엔드 API | localhost | 3000 | - | |
@@ -307,3 +307,46 @@ POST /api/sync/purchases   ← 구매내역 벌크 INSERT (배치 최대 1000건
 - 나래인터넷 콜백 IP: 121.156.104.161~165, 183.98.207.13
 - 080 수신거부 번호: 080-719-6700
 - 콜백 엔드포인트 구현 완료 (토큰 인증, curl 테스트 성공)
+
+---
+
+## 10. DB 백업 체계 (2026-03-05 구축)
+
+### 10-1. 자동 백업 스케줄
+| 항목 | 값 |
+|------|-----|
+| 스케줄 | crontab — 매일 03:00 KST |
+| 스크립트 | `/home/administrator/backups/backup.sh` |
+| 환경변수 | `/home/administrator/backups/.env` (chmod 600) |
+
+### 10-2. 백업 대상
+| DB | 방식 | 옵션 |
+|----|------|------|
+| PostgreSQL (targetup) | `docker exec targetup-postgres pg_dump` | gzip 압축 |
+| MySQL (smsdb) | `docker exec targetup-mysql mysqldump` | `--single-transaction --no-tablespaces --skip-lock-tables --ignore-table=smsdb.SMSQ_SEND` (SMSQ_SEND는 VIEW) |
+
+### 10-3. 전송 및 보관
+| 항목 | 값 |
+|------|-----|
+| 원격 서버 | 58.227.193.59 (59번 서버) |
+| 포트 | 27616 |
+| 계정 | backup |
+| 원격 경로 | `/home/backup/targetup/` |
+| 인증 | SSH 키 (`/home/administrator/.ssh/id_rsa_backup`) |
+| 로컬 보관 | 7일 (`find -mtime +7 -delete`) |
+
+### 10-4. 관리 명령어
+```bash
+# 수동 백업 실행
+source /home/administrator/backups/.env && /home/administrator/backups/backup.sh
+
+# 크론 로그 확인
+tail -20 /home/administrator/backups/cron.log
+
+# 원격 백업 확인
+ssh -p 27616 -i /home/administrator/.ssh/id_rsa_backup backup@58.227.193.59 "ls -la /home/backup/targetup/"
+
+# 복원 (비상 시)
+gunzip -c /home/administrator/backups/YYYYMMDD/pg_targetup_*.sql.gz | docker exec -i targetup-postgres psql -U targetup targetup
+gunzip -c /home/administrator/backups/YYYYMMDD/mysql_smsdb_*.sql.gz | docker exec -i targetup-mysql mysql -usmsuser -p smsdb
+```

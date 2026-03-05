@@ -45,7 +45,7 @@
 | SID | orcl |
 | 포트 | 1521 (기본) |
 | 계정 | usom_user |
-| 비밀번호 | usom_user_7119 |
+| 비밀번호 | **(서버 참조 — 문서 기재 금지)** |
 | 설치 경로 | /app/oracle/product/11g |
 | 리스너 | /app/oracle/product/11g/bin/tnslsnr |
 | 데이터 용량 | 120G (/app/oracle) |
@@ -73,7 +73,7 @@
 | IP | 58.227.193.59 |
 | 포트 | 27616 |
 | 계정 | backup |
-| 비밀번호 | backup258!@# |
+| 비밀번호 | **(서버 참조 — 문서 기재 금지)** |
 | 경로 | /home/backup/ |
 
 ---
@@ -121,7 +121,7 @@
 ```bash
 # backup.sh
 _today=`date "+%Y%m%d%H"`
-exp usom_user/usom_user_7119@orcl file=invito_${_today}.dmp log=invito_backup_${_today}.log
+exp usom_user/[DB_PASSWORD]@orcl file=invito_${_today}.dmp log=invito_backup_${_today}.log
 
 # send_258.sh
 scp -P 27616 ./invito_*.* backup@58.227.193.59:/home/backup/
@@ -297,7 +297,7 @@ keytool -delete -keystore /usr/java/jdk1.7.0_45/jre/lib/security/cacerts -storep
   - 한줄로 전환(2주 내) 시까지 문제없음
 - 확인 방법 (sqlplus 접속 후):
 ```sql
-sqlplus usom_user/usom_user_7119@orcl
+sqlplus usom_user/[DB_PASSWORD]@orcl
 
 SELECT tablespace_name,
        ROUND(used_percent, 1) AS used_pct

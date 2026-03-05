@@ -61,10 +61,10 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
       });
     }
 
-    // 1) stale 테스트 자동 정리 (3분 초과 active → completed/timeout 처리)
+    // 1) stale 테스트 자동 정리 (타임아웃 초과 active → completed/timeout 처리)
     const staleTests = await query(
       `SELECT id FROM spam_filter_tests
-       WHERE status = 'active' AND created_at < NOW() - INTERVAL '3 minutes'`
+       WHERE status = 'active' AND created_at < NOW() - INTERVAL '${Math.ceil(TEST_TIMEOUT_MS / 1000)} seconds'`
     );
     if (staleTests.rows.length > 0) {
       const staleIds = staleTests.rows.map((r: any) => r.id);
@@ -193,7 +193,11 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
       }
     }
 
-    // 7) 15초 폴링 — QTmsg 성공인데 앱 미수신이면 즉시 blocked 처리
+    // 7) 15초 폴링 — QTmsg 성공 확인 후 10초 대기, 그래도 앱 미수신이면 BLOCKED
+    // qtmsgSuccessTime: 각 result row별 QTmsg 성공이 처음 확인된 시점 기록
+    const qtmsgSuccessTime = new Map<string, number>();
+    const BLOCKED_GRACE_MS = 10000; // QTmsg 성공 후 앱 리포트 대기 시간 (10초)
+
     const pollInterval = setInterval(async () => {
       try {
         // 아직 active인지 확인
@@ -257,9 +261,21 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
           let result: string | null = null;
 
           if (SUCCESS_CODES.includes(sc)) {
-            // 이통사 전달 성공이지만 앱 미수신 → 아직 대기 (앱이 감지할 시간 필요)
-            // blocked 판정은 타임아웃(3분) 시점에서만 확정
-            result = null; // 계속 대기
+            // 이통사 전달 성공 + 앱 미수신 → 10초 grace period 후 BLOCKED
+            const rowKey = row.id;
+            if (!qtmsgSuccessTime.has(rowKey)) {
+              // 첫 확인 — 시점 기록, 다음 폴링까지 대기
+              qtmsgSuccessTime.set(rowKey, Date.now());
+              console.log(`[SpamFilter] QTmsg 성공 확인 — row=${rowKey}, phone=${row.phone}, carrier=${row.message_type}, 10초 대기 시작`);
+              result = null;
+            } else if (Date.now() - qtmsgSuccessTime.get(rowKey)! >= BLOCKED_GRACE_MS) {
+              // 10초 경과 — 앱 미수신 확정 → BLOCKED
+              result = SPAM_RESULT.BLOCKED;
+              console.log(`[SpamFilter] BLOCKED 판정 — row=${rowKey}, phone=${row.phone} (QTmsg 성공 후 ${Math.round((Date.now() - qtmsgSuccessTime.get(rowKey)!) / 1000)}초 경과, 앱 미수신)`);
+            } else {
+              // 아직 10초 미경과 — 계속 대기
+              result = null;
+            }
           } else if (PENDING_CODES.includes(sc)) {
             result = null; // 아직 대기 중
           } else {
@@ -276,58 +292,34 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
         }
 
         // 전부 처리됐으면 완료
-        if (updatedCount > 0) {
-          const remaining = await query(
-            `SELECT id FROM spam_filter_test_results
-             WHERE test_id = $1 AND received = false AND result IS NULL`,
+        const remaining = await query(
+          `SELECT id FROM spam_filter_test_results
+           WHERE test_id = $1 AND received = false AND result IS NULL`,
+          [testId]
+        );
+        if (remaining.rows.length === 0) {
+          clearInterval(pollInterval);
+          await query(
+            `UPDATE spam_filter_tests SET status = 'completed', completed_at = NOW()
+             WHERE id = $1 AND status = 'active'`,
             [testId]
           );
-          if (remaining.rows.length === 0) {
-            clearInterval(pollInterval);
-            await query(
-              `UPDATE spam_filter_tests SET status = 'completed', completed_at = NOW()
-               WHERE id = $1 AND status = 'active'`,
-              [testId]
-            );
-            return;
-          }
+          return;
         }
 
-        // 최종 타임아웃 (3분 초과) — ★ #1: QTmsg 상태 기반 blocked/timeout 분류
+        // 최종 안전장치 타임아웃 (TEST_TIMEOUT_MS 초과) — 비정상 상황 대비
         const elapsed2 = Date.now() - new Date(activeCheck2.rows[0].created_at).getTime();
         if (elapsed2 > TEST_TIMEOUT_MS) {
           clearInterval(pollInterval);
-          const stillUnresolved = await query(
-            `SELECT id, phone, message_type FROM spam_filter_test_results
-             WHERE test_id = $1 AND received = false AND result IS NULL`,
-            [testId]
-          );
-
-          // QTmsg 결과 한 번 더 조회
-          const testTable2 = getTestSmsTable();
-          const now3 = new Date();
-          const yyyymm2 = `${now3.getFullYear()}${String(now3.getMonth() + 1).padStart(2, '0')}`;
-          const logTable2 = `${testTable2}_${yyyymm2}`;
-          let mqFinal: any[] = [];
-          const mqF1 = await mysqlQuery(`SELECT dest_no, msg_type, status_code FROM ${testTable2} WHERE app_etc1 = ?`, [testId]) as any[];
-          if (mqF1?.length > 0) mqFinal = mqF1;
-          try {
-            const mqF2 = await mysqlQuery(`SELECT dest_no, msg_type, status_code FROM ${logTable2} WHERE app_etc1 = ?`, [testId]) as any[];
-            if (mqF2?.length > 0) mqFinal = [...mqFinal, ...mqF2];
-          } catch (e) { /* 로그 테이블 미존재 시 무시 */ }
-
-          for (const row of stillUnresolved.rows) {
-            const mType = row.message_type === 'SMS' ? 'S' : 'L';
-            const mqMatch = mqFinal.find((m: any) => m.dest_no === row.phone && m.msg_type === mType);
-            const sc = mqMatch ? Number(mqMatch.status_code) : 0;
-
-            let finalResult: string = SPAM_RESULT.TIMEOUT;
-            if (SUCCESS_CODES.includes(sc)) {
-              finalResult = SPAM_RESULT.BLOCKED; // 이통사 전달 성공 + 앱 미수신 = 스팸 차단
-            } else if (sc && !PENDING_CODES.includes(sc)) {
-              finalResult = SPAM_RESULT.FAILED; // 이통사 실패
+          // 아직 미판정 건 일괄 처리
+          for (const row of remaining.rows) {
+            const rowKey = row.id;
+            let finalResult: string;
+            if (qtmsgSuccessTime.has(rowKey)) {
+              finalResult = SPAM_RESULT.BLOCKED; // QTmsg 성공이었으면 BLOCKED
+            } else {
+              finalResult = SPAM_RESULT.TIMEOUT; // QTmsg 결과조차 없으면 TIMEOUT
             }
-
             await query(
               `UPDATE spam_filter_test_results SET result = $1 WHERE id = $2`,
               [finalResult, row.id]
@@ -344,7 +336,7 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
       }
     }, 15000);
 
-    // 안전장치: 4분 후 강제 종료
+    // 안전장치: 타임아웃 + 여유 60초 후 강제 종료
     setTimeout(() => { clearInterval(pollInterval); }, TIMEOUTS.spamFilterSafety);
 
     const totalCount = devices.rows.length * messageTypes.length;
@@ -572,22 +564,35 @@ router.get('/tests', authenticate, async (req: Request, res: Response) => {
     const limit = 10;
     const offset = (page - 1) * limit;
 
+    // mine=true: 본인 테스트만 조회
+    const userId = (req as any).user.userId;
+    const mineOnly = req.query.mine === 'true';
+    const whereClause = mineOnly
+      ? 'WHERE t.company_id = $1 AND t.user_id = $4'
+      : 'WHERE t.company_id = $1';
+    const baseParams = mineOnly ? [companyId, limit, offset, userId] : [companyId, limit, offset];
+    const countParams = mineOnly ? [companyId, userId] : [companyId];
+    const countWhere = mineOnly
+      ? 'WHERE company_id = $1 AND user_id = $2'
+      : 'WHERE company_id = $1';
+
     const countResult = await query(
-      `SELECT COUNT(*) FROM spam_filter_tests WHERE company_id = $1`,
-      [companyId]
+      `SELECT COUNT(*) FROM spam_filter_tests ${countWhere}`,
+      countParams
     );
 
     const tests = await query(
       `SELECT t.id, t.callback_number, t.status, t.created_at, t.completed_at,
+              t.message_content_sms, t.message_content_lms,
               u.name as user_name,
               (SELECT COUNT(*) FROM spam_filter_test_results r WHERE r.test_id = t.id AND r.received = true) as received_count,
               (SELECT COUNT(*) FROM spam_filter_test_results r WHERE r.test_id = t.id) as total_count
        FROM spam_filter_tests t
        JOIN users u ON u.id = t.user_id
-       WHERE t.company_id = $1
+       ${whereClause}
        ORDER BY t.created_at DESC
        LIMIT $2 OFFSET $3`,
-      [companyId, limit, offset]
+      baseParams
     );
 
     res.json({

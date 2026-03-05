@@ -452,17 +452,20 @@
 | completed_at | timestamp |
 
 ### plans (요금제)
-| 컬럼 | 타입 |
-|------|------|
-| id | uuid PK |
-| plan_code | varchar(20) |
-| plan_name | varchar(50) |
-| max_customers | integer |
-| monthly_price | numeric(12,2) |
-| is_active | boolean |
-| trial_days | integer |
+| 컬럼 | 타입 | 비고 |
+|------|------|------|
+| id | uuid PK | |
+| plan_code | varchar(20) | FREE/STARTER/BASIC/PRO/BUSINESS/ENTERPRISE |
+| plan_name | varchar(50) | |
+| max_customers | integer | |
+| monthly_price | numeric(12,2) | |
+| is_active | boolean | |
+| trial_days | integer | |
 | ai_analysis_level | varchar(20) | none/basic/advanced (기본 none) |
-| created_at | timestamp |
+| customer_db_enabled | boolean | D53: 고객DB/타겟팅 잠금 (기본 false) |
+| spam_filter_enabled | boolean | D53: 스팸필터 잠금 (기본 false) |
+| ai_messaging_enabled | boolean | D53: AI발송 잠금 (기본 false) |
+| created_at | timestamp | |
 
 ### plan_requests (요금제 변경 요청)
 | 컬럼 | 타입 |

@@ -131,8 +131,8 @@
 
 | # | 안건 | 성격 | 난이도 | 상태 |
 |---|------|------|--------|------|
-| 1 | plans 테이블 컬럼 추가 — `spam_filter_enabled`, `ai_messaging_enabled`, `customer_db_enabled` | DB/DDL | 낮음 | ✅ 완료 (SQL 작성, DB 실행 대기) |
-| 2 | plans 테이블 데이터 업데이트 — 5개 요금제별 플래그값 설정 | DB/DML | 낮음 | ✅ 완료 (SQL 작성, DB 실행 대기) |
+| 1 | plans 테이블 컬럼 추가 — `spam_filter_enabled`, `ai_messaging_enabled`, `customer_db_enabled` | DB/DDL | 낮음 | ✅ 완료 (DB 실행 완료 2026-03-05) |
+| 2 | plans 테이블 데이터 업데이트 — 5개 요금제별 플래그값 설정 | DB/DML | 낮음 | ✅ 완료 (DB 실행 완료 2026-03-05) |
 | 3 | 백엔드: /api/companies/my-plan 응답에 새 플래그 포함 | 백엔드 | 낮음 | ✅ 완료 |
 | 4 | 백엔드: 스팸필터 API 게이팅 — spam-filter.ts에서 `spam_filter_enabled` 체크 | 백엔드 | 낮음 | ✅ 완료 |
 | 5 | 백엔드: AI 발송 API 게이팅 — ai.ts에서 `ai_messaging_enabled` 체크 (recommend-target, parse-briefing, generate-custom) | 백엔드 | 낮음 | ✅ 완료 |
@@ -140,7 +140,7 @@
 | 7 | 프론트: Dashboard.tsx — PlanInfo 인터페이스 확장 + 3개 카드 잠금 UI (🔒 + opacity) | 프론트 | 중간 | ✅ 완료 |
 | 8 | 프론트: 상단메뉴 게이팅 — 캘린더 메뉴 customer_db_enabled 체크 + 🔒 표시 | 프론트 | 낮음 | ✅ 완료 |
 | 9 | 프론트: 업그레이드 유도 모달 — PlanUpgradeModal 범용화 (featureName/requiredPlan props) + SpamFilterLockModal 텍스트 수정 | 프론트 | 중간 | ✅ 완료 |
-| 10 | 검증: 코드 검증 완료, DB 실행 + 실서버 테스트 대기 | 검증 | 중간 | 🟡 코드검증완료-DB실행대기 |
+| 10 | 검증: DB 실행 완료 + 실서버 테스트 대기 | 검증 | 중간 | ✅ DB실행완료 (2026-03-05 plans 3컬럼 ALTER+UPDATE 6건 정상) |
 
 #### 상세 구현 계획
 
@@ -587,10 +587,11 @@ QTmsg status_code, 통신사 코드, 스팸필터 판정 결과를 한 곳에서
 - [x] 직접 타겟 발송 모달 분리 — ✅ D43-3c TargetSendModal.tsx (901줄)
 - Dashboard.tsx 누적 감소: 8,039줄 → 3,910줄 (총 4,129줄 감소)
 
-### AI 맞춤한줄 Phase 2 (발송 연결)
-- [ ] 발송 확정 → 타겟 선택 방식 결정 (옵션 A/B/C 중 선택)
-- [ ] AiCampaignSendModal 연결
-- [ ] 전체 통합 테스트 (실제 발송)
+### AI 맞춤한줄 Phase 2 (발송 연결) — ✅ 구현 완료 (문서 미갱신이었음, 2026-03-05 코드 검증)
+- [x] 발송 확정 → AiCustomSendFlow.tsx Step 4 onConfirmSend 콜백으로 variant+targetFilters 전달
+- [x] AiCampaignSendModal 연결 → Dashboard.tsx handleAiCustomSend에서 campaignsApi.create+send 호출
+- [x] 전체 플로우 코드 구현 완료 (Step4 → 모달 → 캠페인생성 → targetFilter기반 고객조회 → 개인화치환 → MySQL INSERT)
+- [ ] 실서비스 통합 테스트 (실제 발송 확인) — Harold님 검증 대기
 
 ### 카카오 알림톡 템플릿 관리 (Humuson API v2.1.1)
 - [ ] 고객사 관리자(app.hanjul.ai) 템플릿 CRUD + 검수 프로세스 + 발신프로필 조회 + 관리 UI
@@ -599,14 +600,14 @@ QTmsg status_code, 통신사 코드, 스팸필터 판정 결과를 한 곳에서
 - [ ] 기술: 백엔드 프록시 /api/kakao-templates/*, DB kakao_templates 확장, 상태 전이 규칙
 - [ ] Phase 2: 이미지 업로드, 알림 수신자 관리, 발신프로필 그룹
 
-### 080 수신거부 (⏸️ 나래인터넷 콜백 미수신 — 월요일 확인)
+### 080 수신거부 (⏸️ 나래인터넷 콜백 미수신 — 02-27 이후 미확인, 확인 필요)
 - [x] 콜백 엔드포인트 구현 (토큰 인증, 고객사별 080번호 자동 매칭)
-- [x] 서버 .env OPT_OUT_080_TOKEN 설정 + PM2 재시작
+- [ ] 서버 .env OPT_OUT_080_TOKEN 설정 + PM2 재시작 — ⚠️ 실서버 미설정 확인(2026-03-05 점검)
 - [x] Nginx 080callback 경로 나래 IP 화이트리스트 적용
 - [x] D43-4 양방향 동기화: opt_out_auto_sync DDL + syncCustomerOptIn 헬퍼 + 4곳 적용
 - [x] D43-4 프론트: 080번호 동적 표시 + 연동테스트 버튼 (auto_sync=true 조건부)
 - [x] curl 로컬 테스트 정상 확인 (서버 `1` 반환)
-- [ ] **나래 담당자에게 콜백 URL 등록 완료 여부 확인** (월요일)
+- [ ] **나래 담당자에게 콜백 URL 등록 완료 여부 확인** (02-27 기록, 03-05 현재 미확인)
 - [ ] 실제 080 ARS 수신거부 테스트 (080-719-6700)
 - [ ] 기존 누적 수신거부 목록 초기 동기화 (벌크 API 또는 엑셀)
 
@@ -623,7 +624,7 @@ QTmsg status_code, 통신사 코드, 스팸필터 판정 결과를 한 곳에서
 - [x] 🔴 MySQL 랜섬웨어 대응 (2026-02-28, D49): 외부 차단+비밀번호 강화+권한분리+fail2ban+포트차단 — 상세 내용 D43 안건#6 참조
 - [ ] 프론트엔드 난독화 (vite-plugin-obfuscator, 런칭 직전 적용)
 - [ ] 슈퍼관리자 IP 화이트리스트 설정
-- [ ] 외부 자동 백업 구축 (3-2-1 법칙: 3복사본, 2매체, 1오프라인)
+- [x] 외부 자동 백업 구축 — ✅ 2026-03-05 완료: pg_dump+mysqldump → 59번 서버(58.227.193.59) SCP 전송, SSH 키 인증, crontab 매일 03:00 KST, 7일 로컬 보관. 스크립트: /home/administrator/backups/backup.sh
 - [ ] 웹 애플리케이션 SQL Injection 점검 (SSRF 포함)
 - [ ] SSH 키 인증 전용 전환 (비밀번호 로그인 비활성화) — 선택
 
@@ -685,7 +686,7 @@ QTmsg status_code, 통신사 코드, 스팸필터 판정 결과를 한 곳에서
 | R22 | MySQL 외부 노출 → 랜섬웨어/데이터 삭제 | 1 | 5 | 5 | ✅ 해결: D49 — 127.0.0.1 바인딩+smsuser DROP 제거+비밀번호 강화+fail2ban+UFW |
 | R23 | Docker 컨테이너 재생성 시 포트 바인딩 0.0.0.0 실수 | 2 | 5 | 10 | ⚠️ 운영: 컨테이너 작업 시 반드시 `docker ps --format` 포트 확인. OPS.md에 안전 명령어 기록 |
 | R24 | SQL Injection → 내부 DB 공격 (127.0.0.1 우회) | 2 | 5 | 10 | ⬜ 미조치: 웹 애플리케이션 SQLi 점검 필요 |
-| R25 | 백업 부재 → 랜섬웨어 시 복구 불가 | 3 | 5 | 15 | ⬜ 미조치: 외부 자동 백업(3-2-1 법칙) 구축 필요 |
+| R25 | 백업 부재 → 랜섬웨어 시 복구 불가 | 1 | 3 | 3 | ✅ 해결: 2026-03-05 — pg_dump+mysqldump 자동화, 59번 서버(58.227.193.59) SCP 전송, SSH 키 인증, crontab 매일 03:00, 7일 보관 |
 
 ---
 
@@ -695,6 +696,8 @@ QTmsg status_code, 통신사 코드, 스팸필터 판정 결과를 한 곳에서
 
 | 날짜 | 완료 항목 |
 |------|----------|
+| 03-05 | **D53 DB 실행 완료 + 백업 자동화 구축 + AI 맞춤한줄 Phase 2 문서 정정:** (1) plans 테이블 3컬럼 ALTER TABLE + 6개 요금제 UPDATE 실서버 실행 완료 (2) 외부 백업 자동화 — pg_dump+mysqldump → 59번 서버(58.227.193.59:27616) SCP 전송, SSH 키 인증, crontab 매일 03:00, 7일 보관. R25 리스크 해소 (3) AI 맞춤한줄 Phase 2 코드 검증 — 실제로 발송 연결 전체 구현 완료 확인(AiCustomSendFlow→Dashboard→campaignsApi.create+send), STATUS.md Phase 2 항목 [x] 갱신 |
+| 03-04 | **D53 요금제별 기능 게이팅 구현 + 배포 완료:** plans 테이블 3컬럼 추가(customer_db_enabled/spam_filter_enabled/ai_messaging_enabled)+5개 요금제+ENTERPRISE 플래그 설정. 백엔드 5파일 게이팅(companies.ts my-plan 확장, spam-filter.ts/ai.ts 3엔드포인트/upload.ts parse·save/customers.ts extract). 프론트 4파일(Dashboard.tsx PlanInfo 확장+하드코딩 가격체크 제거+3카드 잠금UI, DashboardHeader.tsx 캘린더 게이팅, PlanUpgradeModal.tsx 범용화 featureName/requiredPlan, SpamFilterLockModal.tsx 프로→스타터 텍스트 수정). tsc 에러 2건 수정(auth.ts jwt.sign 타입/campaigns.ts useIndividualCallback 선언순서). SCHEMA.md plans 테이블 반영. **기간계 무접촉.** |
 | 03-04 | **프로젝트 루트 정리 (~1.51GB 확보):** 오래된 DB 백업 8개 삭제(backup_docker/for_server/utf8/before_sync/before_billing/before_maxusers/sync_phase4/20260214_kakao_enabled.sql, 총 1.46GB) + 일회성 SQL 패치 8개 삭제(fix_admin/fix_password/add_columns/update_schema/seed_customers/migration-phase1a/migration_plan_requests/sync_ddl.sql) + qtmsg_5agents.tgz(48MB) 삭제 + 빈 폴더 2개 삭제(files/, targetup-app/). git 히스토리 정리는 추후 결정 예정 |
 | 03-04 | **10차 버그리포트 7건 전체 수정 (B10-01~07):** 직원 PDF 버그리포팅 기반. ①B10-01 🔴 customers.ts store_code 격리 누락 — GET `/`, POST `/filter`, GET `/filter-options`, GET `/enabled-fields` 4개 엔드포인트 `uploaded_by`→`store_codes` JOIN 패턴 통일 ②B10-07 🔴 campaigns.ts 회신번호 검증 UNION 누락 — `/:id/send`+`/direct-send` 2곳에 `sender_numbers UNION callback_numbers` 적용 ③B10-06 ai.ts 등급 하드코딩(`VIP,GOLD,SILVER,BRONZE`)→`SELECT DISTINCT` 실시간 조회+키워드맵 정리 ④B10-04 normalize.ts `normalizeDate()` 엑셀 시리얼넘버 변환 추가 ⑤B10-05 normalize.ts `isValidKoreanPhone()` 050x 안심번호 허용 ⑥B10-03 upload.ts AI 매핑 프롬프트 매장4필드 구분규칙 추가 ⑦B10-02 CustomerDBModal.tsx 커스텀필드 라벨 `fieldColumns` 조회 표시. **기간계 무접촉 확인.** 수정 6파일(campaigns.ts, normalize.ts, ai.ts, customers.ts, upload.ts, CustomerDBModal.tsx) |
 | 03-04 | 스팸필터 테스트 LMS 제목 누락 수정: 전 구간(프론트→백엔드→MySQL)에서 subject가 빠져있던 문제. ①Dashboard.tsx spamFilterData 타입에 subject 추가+직접발송 스팸필터 호출에 directSubject 전달 ②SpamFilterTestModal.tsx subject prop 추가+API body에 subject 전달+LMS 미리보기에 제목 표시 ③spam-filter.ts req.body에서 subject 추출+insertSmsQueue에 title_str 컬럼 추가. ⚠️ PG spam_filter_tests에 subject/message_type 컬럼 미존재 확인(SCHEMA.md와 실제 DB 불일치) — PG INSERT는 기존 유지, MySQL title_str만 추가. 수정 3파일(spam-filter.ts, SpamFilterTestModal.tsx, Dashboard.tsx) |
