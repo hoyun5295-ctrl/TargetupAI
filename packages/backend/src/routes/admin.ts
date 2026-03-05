@@ -1,4 +1,5 @@
 import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
 import { Request, Response, Router } from 'express';
 import { mysqlQuery, query } from '../config/database';
 import { authenticate, requireSuperAdmin } from '../middlewares/auth';
@@ -143,11 +144,11 @@ router.post('/users/:id/reset-password', authenticate, requireSuperAdmin, async 
     }
     const user = userResult.rows[0];
     
-    // 임시 비밀번호 생성
+    // ★ 보안: 암호학적 안전 난수로 임시 비밀번호 생성
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
     let tempPassword = '';
     for (let i = 0; i < 8; i++) {
-      tempPassword += chars.charAt(Math.floor(Math.random() * chars.length));
+      tempPassword += chars.charAt(crypto.randomInt(chars.length));
     }
     
     const passwordHash = await bcrypt.hash(tempPassword, 10);

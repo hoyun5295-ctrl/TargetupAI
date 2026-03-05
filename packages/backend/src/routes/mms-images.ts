@@ -4,27 +4,12 @@ import path from 'path';
 import fs from 'fs';
 import { v4 as uuidv4 } from 'uuid';
 import { LIMITS } from '../config/defaults';
+import { authenticate } from '../middlewares/auth';
 
 const router = express.Router();
 
 // MMS 이미지 저장 경로 (환경변수 또는 기본값)
 const MMS_IMAGE_BASE = process.env.MMS_IMAGE_PATH || path.resolve('./uploads/mms');
-
-// JWT 인증 미들웨어 (기존 auth 미들웨어와 동일한 방식)
-const jwt = require('jsonwebtoken');
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
-
-function authMiddleware(req: any, res: any, next: any) {
-  const token = req.headers.authorization?.replace('Bearer ', '');
-  if (!token) return res.status(401).json({ error: '인증 필요' });
-  try {
-    const decoded = jwt.verify(token, JWT_SECRET) as any;
-    req.user = decoded;
-    next();
-  } catch {
-    return res.status(401).json({ error: '인증 만료' });
-  }
-}
 
 // multer 설정: 메모리에 임시 저장 후 검증 → 디스크 저장
 const upload = multer({
@@ -48,7 +33,7 @@ const upload = multer({
 // ─────────────────────────────────────────
 // POST /api/mms-images/upload — MMS 이미지 업로드 (최대 3장)
 // ─────────────────────────────────────────
-router.post('/upload', authMiddleware, (req: any, res: any) => {
+router.post('/upload', authenticate, (req: any, res: any) => {
   const uploadHandler = upload.array('images', 3);
 
   uploadHandler(req, res, async (err: any) => {
@@ -143,7 +128,7 @@ router.get('/:companyId/:filename', (req: any, res: any) => {
 // ─────────────────────────────────────────
 // DELETE /api/mms-images/:companyId/:filename — 이미지 삭제
 // ─────────────────────────────────────────
-router.delete('/:companyId/:filename', authMiddleware, (req: any, res: any) => {
+router.delete('/:companyId/:filename', authenticate, (req: any, res: any) => {
   const { companyId, filename } = req.params;
 
   if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) {

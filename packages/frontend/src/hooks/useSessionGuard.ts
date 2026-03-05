@@ -32,8 +32,8 @@ export function useSessionGuard(onForceLogout: (message: string) => void) {
   }, [onForceLogout]);
 
   useEffect(() => {
-    // 로그인 상태 + 슈퍼관리자가 아닐 때만 감시
-    if (!isAuthenticated || user?.userType === 'super_admin') return;
+    // ★ 보안: 슈퍼관리자 포함 전체 사용자 세션 감시
+    if (!isAuthenticated) return;
 
     // 30초마다 체크
     intervalRef.current = setInterval(checkSession, 30 * 1000);

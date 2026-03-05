@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { companiesApi, plansApi, billingApi } from '../api/client';
 import { useAuthStore } from '../stores/authStore';
 import { formatDateTime, formatDate, formatDateTimeShort } from '../utils/formatDate';
+import SessionTimer from '../components/SessionTimer';
 
 interface Company {
   id: string;
@@ -1733,6 +1734,7 @@ const handleApproveRequest = async (id: string) => {
         <div className="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
         <h1 className="text-xl font-bold text-gray-800 cursor-pointer hover:text-blue-600 transition" onClick={() => window.location.reload()}>한줄로 시스템 관리</h1>
           <div className="flex items-center gap-4">
+            <SessionTimer />
             <span className="text-sm text-gray-600">{user?.name}님</span>
             <button
               onClick={handleLogout}

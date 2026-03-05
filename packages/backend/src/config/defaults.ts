@@ -49,6 +49,8 @@ export function getCompanyCosts(company: Record<string, any>) {
 // 타임아웃 (밀리초)
 // ============================================================
 export const TIMEOUTS = {
+  /** 슈퍼관리자 세션 타임아웃 — 30분 */
+  superAdminSessionMinutes: Number(process.env.SUPER_ADMIN_SESSION_MINUTES) || 30,
   /** 세션 활동 갱신 주기 — 5분 */
   activityUpdate: 5 * 60 * 1000,
   /** 스팸필터 테스트 최종 안전장치 타임아웃 — 60초 (정상 시 QTmsg 성공 후 10초에 판정 완료) */

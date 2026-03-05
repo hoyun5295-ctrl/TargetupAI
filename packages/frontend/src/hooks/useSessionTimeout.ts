@@ -8,6 +8,7 @@ interface UseSessionTimeoutOptions {
 interface UseSessionTimeoutReturn {
   showWarningModal: boolean;
   remainingSeconds: number;
+  totalSeconds: number;
   extendSession: () => void;
   handleLogout: () => void;
 }
@@ -101,10 +102,8 @@ export function useSessionTimeout({ onLogout }: UseSessionTimeoutOptions): UseSe
         setShowWarningModal(true);
       }
 
-      // 경고 모달이 떠있을 때만 남은 시간 업데이트
-      if (warningShownRef.current) {
-        setRemainingSeconds(remaining);
-      }
+      // ★ 항상 남은 시간 업데이트 (헤더 타이머 표시용)
+      setRemainingSeconds(remaining);
     };
 
     tickIntervalRef.current = setInterval(tick, TICK_INTERVAL);
@@ -132,6 +131,7 @@ export function useSessionTimeout({ onLogout }: UseSessionTimeoutOptions): UseSe
   return {
     showWarningModal,
     remainingSeconds,
+    totalSeconds: timeoutMinutesRef.current * 60,
     extendSession,
     handleLogout,
   };

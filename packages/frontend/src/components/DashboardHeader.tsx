@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import SessionTimer from './SessionTimer';
 
 interface DashboardHeaderProps {
   companyName: string;
@@ -83,8 +84,9 @@ export default function DashboardHeader({
           </p>
         </div>
 
-        {/* 우측: 탭 스타일 메뉴 */}
+        {/* 우측: 세션 타이머 + 탭 스타일 메뉴 */}
         <nav className="flex items-center">
+          <SessionTimer />
           {menuItems.map((item, idx) => {
             const cfg = COLOR_CONFIG[item.color];
             const isHovered = hoveredIdx === idx;

@@ -1,9 +1,12 @@
+import dotenv from 'dotenv';
+// ★ 보안: dotenv를 최우선 로딩 — 이후 모듈들이 환경변수에 의존하므로 반드시 첫 줄
+dotenv.config();
+
 import aiRoutes from './routes/ai';
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
-import dotenv from 'dotenv';
 import syncRoutes from './routes/sync';
 
 // 라우트 import
@@ -35,8 +38,6 @@ import manageStatsRoutes from './routes/manage-stats';
 // DB 연결
 import './config/database';
 import { LIMITS } from './config/defaults';
-
-dotenv.config();
 
 const app = express();
 app.set('trust proxy', true);

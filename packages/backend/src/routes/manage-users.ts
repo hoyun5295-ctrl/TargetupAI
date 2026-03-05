@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
 import { authenticate, requireCompanyAdmin } from '../middlewares/auth';
 import pool, { mysqlQuery } from '../config/database';
 
@@ -239,10 +240,11 @@ router.post('/:id/reset-password', async (req: Request, res: Response) => {
       return res.status(403).json({ error: '자사 사용자만 비밀번호를 초기화할 수 있습니다.' });
     }
 
+    // ★ 보안: 암호학적 안전 난수로 임시 비밀번호 생성
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
     let tempPassword = '';
     for (let i = 0; i < 8; i++) {
-      tempPassword += chars.charAt(Math.floor(Math.random() * chars.length));
+      tempPassword += chars.charAt(crypto.randomInt(chars.length));
     }
 
     const passwordHash = await bcrypt.hash(tempPassword, 10);

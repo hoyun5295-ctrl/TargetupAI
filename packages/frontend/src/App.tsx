@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, createContext, useContext } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { useAuthStore } from './stores/authStore';
 import { useSessionGuard } from './hooks/useSessionGuard';
@@ -14,6 +14,18 @@ import Unsubscribes from './pages/Unsubscribes';
 import PricingPage from './pages/PricingPage';
 import PrivacyPage from './pages/PrivacyPage';
 import TermsPage from './pages/TermsPage';
+
+// ★ 세션 타이머 Context — 헤더 등에서 남은 시간 표시용
+interface SessionTimerContextType {
+  remainingSeconds: number;
+  totalSeconds: number;
+  extendSession: () => void;
+}
+export const SessionTimerContext = createContext<SessionTimerContextType>({
+  remainingSeconds: 0,
+  totalSeconds: 0,
+  extendSession: () => {},
+});
 
 // 인증 필요 라우트
 function PrivateRoute({ children, allowedTypes }: { children: React.ReactNode; allowedTypes?: string[] }) {
@@ -89,8 +101,8 @@ function SessionGuard() {
   );
 }
 
-// 세션 타임아웃 (비활동 감지 → 자동 로그아웃)
-function SessionTimeoutGuard() {
+// 세션 타임아웃 (비활동 감지 → 자동 로그아웃) + Context Provider
+function SessionTimeoutGuard({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate();
   const { isAuthenticated, logout } = useAuthStore();
 
@@ -100,18 +112,21 @@ function SessionTimeoutGuard() {
     navigate('/login', { replace: true });
   }, [logout, navigate]);
 
-  const { showWarningModal, remainingSeconds, extendSession, handleLogout } =
+  const { showWarningModal, remainingSeconds, totalSeconds, extendSession, handleLogout } =
     useSessionTimeout({ onLogout: handleSessionLogout });
 
-  if (!isAuthenticated) return null;
-
   return (
-    <SessionTimeoutModal
-      isOpen={showWarningModal}
-      remainingSeconds={remainingSeconds}
-      onExtend={extendSession}
-      onLogout={handleLogout}
-    />
+    <SessionTimerContext.Provider value={{ remainingSeconds, totalSeconds, extendSession }}>
+      {children}
+      {isAuthenticated && (
+        <SessionTimeoutModal
+          isOpen={showWarningModal}
+          remainingSeconds={remainingSeconds}
+          onExtend={extendSession}
+          onLogout={handleLogout}
+        />
+      )}
+    </SessionTimerContext.Provider>
   );
 }
 
@@ -132,7 +147,7 @@ function App() {
     <BrowserRouter>
       {/* 세션 감시 (로그인 상태일 때만 활성) */}
       <SessionGuard />
-      <SessionTimeoutGuard />
+      <SessionTimeoutGuard>
 
       <Routes>
         {/* 로그인 */}
@@ -203,6 +218,7 @@ function App() {
         {/* 404 */}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+      </SessionTimeoutGuard>
     </BrowserRouter>
   );
 }

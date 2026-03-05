@@ -29,13 +29,19 @@ export const query = (text: string, params?: any[]) => {
   return pool.query(text, params);
 };
 
+// ★ 보안: MySQL 비밀번호 미설정 시 서버 기동 차단 (fail-fast)
+if (!process.env.MYSQL_PASSWORD) {
+  console.error('❌ [FATAL] MYSQL_PASSWORD 환경변수가 설정되지 않았습니다. 서버를 시작할 수 없습니다.');
+  process.exit(1);
+}
+
 // MySQL 연결 풀 (QTmsg SMS 발송용)
 export const mysqlPool = mysql.createPool({
   host: process.env.MYSQL_HOST || 'localhost',
   port: Number(process.env.MYSQL_PORT) || 3306,
   database: process.env.MYSQL_DATABASE || 'smsdb',
   user: process.env.MYSQL_USER || 'smsuser',
-  password: process.env.MYSQL_PASSWORD || (() => { console.warn('[보안경고] MYSQL_PASSWORD 환경변수 미설정 — 기본값 사용 중. 운영서버에서는 반드시 설정 필요'); return 'sms123'; })(),
+  password: process.env.MYSQL_PASSWORD,
   waitForConnections: true,
   connectionLimit: 10,
   charset: 'utf8mb4',

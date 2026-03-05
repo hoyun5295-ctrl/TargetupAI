@@ -2,7 +2,7 @@ import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import { Request, Response, Router } from 'express';
 import { query } from '../config/database';
-// 새코드
+import { TIMEOUTS } from '../config/defaults';
 import { authenticate, generateToken, JwtPayload } from '../middlewares/auth';
 
 const router = Router();
@@ -15,7 +15,7 @@ router.post('/login', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'ID and password required' });
     }
 
-    // ===== 슈퍼관리자 로그인 (세션 관리 없음) =====
+    // ===== 슈퍼관리자 로그인 (★ 보안: 세션 관리 적용) =====
     if (userType === 'super_admin') {
       const result = await query(
         'SELECT * FROM super_admins WHERE login_id = $1 AND is_active = true',
@@ -43,6 +43,32 @@ router.post('/login', async (req: Request, res: Response) => {
         return res.status(401).json({ error: 'Invalid credentials' });
       }
 
+      // 기존 세션 무효화
+      await query(
+        `UPDATE user_sessions SET is_active = false WHERE user_id = $1`,
+        [admin.id]
+      );
+
+      // 새 세션 생성
+      const sessionId = crypto.randomUUID();
+      const sessionTimeoutMinutes = TIMEOUTS.superAdminSessionMinutes;
+
+      const payload: JwtPayload = {
+        userId: admin.id,
+        userType: 'super_admin',
+        loginId: admin.login_id,
+        sessionId: sessionId,
+      };
+
+      const token = generateToken(payload);
+
+      // 세션 레코드 저장
+      await query(
+        `INSERT INTO user_sessions (id, user_id, session_token, is_active, ip_address, user_agent, device_type, created_at, last_activity_at, expires_at)
+         VALUES ($1, $2, $3, true, $4, $5, 'web', NOW(), NOW(), NOW() + INTERVAL '1 minute' * $6)`,
+        [sessionId, admin.id, token, req.ip || '', req.headers['user-agent'] || '', sessionTimeoutMinutes]
+      );
+
       await query(
         `INSERT INTO audit_logs (id, user_id, action, target_type, details, ip_address, user_agent, created_at)
          VALUES (gen_random_uuid(), $1, 'login_success', 'super_admin', $2, $3, $4, NOW())`,
@@ -54,14 +80,6 @@ router.post('/login', async (req: Request, res: Response) => {
         [admin.id]
       );
 
-      const payload: JwtPayload = {
-        userId: admin.id,
-        userType: 'super_admin',
-        loginId: admin.login_id,
-      };
-
-      const token = generateToken(payload);
-
       return res.json({
         token,
         user: {
@@ -71,7 +89,7 @@ router.post('/login', async (req: Request, res: Response) => {
           email: admin.email,
           userType: 'super_admin',
         },
-        sessionTimeoutMinutes: 60,
+        sessionTimeoutMinutes,
       });
     }
 
@@ -285,15 +303,21 @@ router.post('/change-password', async (req: Request, res: Response) => {
   }
 });
 
-// 세션 연장
+// 세션 연장 (슈퍼관리자 + 일반사용자 공용)
 router.post('/extend-session', authenticate, async (req: any, res: Response) => {
   try {
     if (req.user?.sessionId) {
-      const timeoutResult = await query(
-        'SELECT c.session_timeout_minutes FROM companies c JOIN users u ON u.company_id = c.id WHERE u.id = $1',
-        [req.user.userId]
-      );
-      const minutes = timeoutResult.rows[0]?.session_timeout_minutes || 30;
+      let minutes: number;
+
+      if (req.user.userType === 'super_admin') {
+        minutes = TIMEOUTS.superAdminSessionMinutes;
+      } else {
+        const timeoutResult = await query(
+          'SELECT c.session_timeout_minutes FROM companies c JOIN users u ON u.company_id = c.id WHERE u.id = $1',
+          [req.user.userId]
+        );
+        minutes = timeoutResult.rows[0]?.session_timeout_minutes || 30;
+      }
 
       await query(
         `UPDATE user_sessions SET last_activity_at = NOW(), expires_at = NOW() + INTERVAL '1 minute' * $2

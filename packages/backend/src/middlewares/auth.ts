@@ -19,9 +19,15 @@ declare global {
   }
 }
 
+// ★ 보안: JWT_SECRET 미설정 시 서버 기동 차단 (fail-fast)
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  console.error('❌ [FATAL] JWT_SECRET 환경변수가 설정되지 않았습니다. 서버를 시작할 수 없습니다.');
+  process.exit(1);
+}
+
 export const generateToken = (payload: JwtPayload): string => {
-  const secret = process.env.JWT_SECRET || (() => { console.warn('[보안경고] JWT_SECRET 환경변수 미설정 — 기본값 사용 중. 운영서버에서는 반드시 설정 필요'); return 'dev-only-secret'; })();
-  return jwt.sign(payload as object, secret, { expiresIn: LIMITS.jwtExpiry } as any);
+  return jwt.sign(payload as object, JWT_SECRET, { expiresIn: LIMITS.jwtExpiry } as any);
 };
 
 // last_activity_at 갱신 주기 (5분)
@@ -37,13 +43,8 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
   const token = authHeader.split(' ')[1];
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || (() => { console.warn('[보안경고] JWT_SECRET 환경변수 미설정 — 기본값 사용 중. 운영서버에서는 반드시 설정 필요'); return 'dev-only-secret'; })()) as JwtPayload;
+    const decoded = jwt.verify(token, JWT_SECRET) as JwtPayload;
     req.user = decoded;
-
-    // 슈퍼관리자는 세션 체크 건너뜀
-    if (decoded.userType === 'super_admin') {
-      return next();
-    }
 
     // sessionId 없는 기존 토큰은 통과 (배포 후 자연 만료)
     if (!decoded.sessionId) {
