@@ -51,9 +51,9 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
       return next();
     }
 
-    // 세션 유효성 체크
+    // ★ 세션 유효성 체크 — is_active + expires_at 만료 여부
     const sessionResult = await query(
-      'SELECT id, last_activity_at FROM user_sessions WHERE id = $1 AND user_id = $2 AND is_active = true',
+      'SELECT id, last_activity_at, expires_at FROM user_sessions WHERE id = $1 AND user_id = $2 AND is_active = true',
       [decoded.sessionId, decoded.userId]
     );
 
@@ -64,14 +64,31 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
       });
     }
 
-    // last_activity_at 갱신 (5분 간격 — DB 부하 최소화)
-    const lastActivity = new Date(sessionResult.rows[0].last_activity_at);
+    // ★ 보안: expires_at 지났으면 세션 만료 처리 (브라우저 닫았다 열어도 서버가 차단)
+    const expiresAt = new Date(sessionResult.rows[0].expires_at);
     const now = new Date();
-    if (now.getTime() - lastActivity.getTime() > ACTIVITY_UPDATE_INTERVAL) {
-      // 비동기로 갱신 (응답 지연 없음)
+    if (now > expiresAt) {
+      // 세션 비활성화
       query(
-        'UPDATE user_sessions SET last_activity_at = NOW() WHERE id = $1',
+        'UPDATE user_sessions SET is_active = false WHERE id = $1',
         [decoded.sessionId]
+      ).catch(() => {});
+      return res.status(401).json({
+        error: '세션이 만료되었습니다. 다시 로그인해주세요.',
+        forceLogout: true
+      });
+    }
+
+    // last_activity_at + expires_at 갱신 (5분 간격 — DB 부하 최소화)
+    const lastActivity = new Date(sessionResult.rows[0].last_activity_at);
+    if (now.getTime() - lastActivity.getTime() > ACTIVITY_UPDATE_INTERVAL) {
+      // 활동이 있으면 expires_at도 연장
+      const timeoutMinutes = decoded.userType === 'super_admin'
+        ? TIMEOUTS.superAdminSessionMinutes
+        : 30; // 기본값, extend-session에서 정확한 값으로 갱신
+      query(
+        `UPDATE user_sessions SET last_activity_at = NOW(), expires_at = NOW() + INTERVAL '1 minute' * $2 WHERE id = $1`,
+        [decoded.sessionId, timeoutMinutes]
       ).catch(err => console.error('세션 활동 갱신 실패:', err));
     }
 

@@ -43,6 +43,7 @@ router.post('/login', async (req: Request, res: Response) => {
         return res.status(401).json({ error: 'Invalid credentials' });
       }
 
+      // ★ 보안: 슈퍼관리자도 서버 측 세션 관리 (DDL-D55로 FK 제거 필요)
       // 기존 세션 무효화
       await query(
         `UPDATE user_sessions SET is_active = false WHERE user_id = $1`,
