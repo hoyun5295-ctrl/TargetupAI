@@ -1733,10 +1733,21 @@ router.post('/sync-results', async (req: Request, res: Response) => {
       const failCount = (smsAgg.fail_count || 0) + kakaoResult.fail;
       const pendingCount = (smsAgg.pending_count || 0) + kakaoResult.pending;
 
+      // 타임아웃 체크: 발송 후 60분 경과 + pending만 남아있으면 강제 완료 처리
+      const campTimeInfo = await query('SELECT sent_at, scheduled_at, created_at FROM campaigns WHERE id = $1', [run.campaign_id]);
+      const campSentAt = campTimeInfo.rows[0]?.sent_at || campTimeInfo.rows[0]?.scheduled_at || campTimeInfo.rows[0]?.created_at;
+      const minutesSinceSend = campSentAt ? (Date.now() - new Date(campSentAt).getTime()) / (1000 * 60) : 0;
+      const isTimedOut = minutesSinceSend > 60 && pendingCount > 0 && successCount === 0 && failCount === 0;
+
       // PostgreSQL 업데이트
-      if (successCount > 0 || failCount > 0) {
-        // 대기건이 남아있으면 아직 sending, 0이면 completed (발송 처리 완료 = 완료, 실패는 시스템 에러만)
-        const newStatus = pendingCount > 0 ? 'sending' : ((successCount + failCount) > 0 ? 'completed' : 'failed');
+      if (successCount > 0 || failCount > 0 || isTimedOut) {
+        // 타임아웃: pending만 남아있고 60분 경과 → 전부 fail 처리
+        const effectiveFailCount = isTimedOut ? failCount + pendingCount : failCount;
+        const effectivePendingCount = isTimedOut ? 0 : pendingCount;
+        const newStatus = effectivePendingCount > 0 ? 'sending' : ((successCount + effectiveFailCount) > 0 ? 'completed' : 'failed');
+        if (isTimedOut) {
+          console.warn(`[sync-results] campaign_run ${run.id}: 60분 타임아웃 — pending ${pendingCount}건 → fail 처리`);
+        }
 
         // campaign_runs 업데이트
         await query(
@@ -1748,7 +1759,7 @@ router.post('/sync-results', async (req: Request, res: Response) => {
               THEN COALESCE(scheduled_at, NOW())
               ELSE sent_at END
            WHERE id = $4`,
-          [successCount, failCount, newStatus, run.id]
+          [successCount, effectiveFailCount, newStatus, run.id]
         );
 
         // campaigns 테이블도 업데이트
@@ -1763,14 +1774,14 @@ router.post('/sync-results', async (req: Request, res: Response) => {
                 THEN COALESCE(scheduled_at, NOW())
                 ELSE sent_at END
              WHERE id = $4`,
-            [successCount, failCount, newStatus, runInfo.rows[0].campaign_id]
+            [successCount, effectiveFailCount, newStatus, runInfo.rows[0].campaign_id]
           );
 
           // ★ 선불 실패건 환불
-          if (failCount > 0) {
+          if (effectiveFailCount > 0) {
             const campInfo = await query('SELECT company_id, message_type FROM campaigns WHERE id = $1', [runInfo.rows[0].campaign_id]);
             if (campInfo.rows.length > 0) {
-              await prepaidRefund(campInfo.rows[0].company_id, failCount, campInfo.rows[0].message_type, runInfo.rows[0].campaign_id, '발송 실패 환불');
+              await prepaidRefund(campInfo.rows[0].company_id, effectiveFailCount, campInfo.rows[0].message_type, runInfo.rows[0].campaign_id, isTimedOut ? '타임아웃 실패 환불' : '발송 실패 환불');
             }
           }
         }
@@ -1778,7 +1789,7 @@ router.post('/sync-results', async (req: Request, res: Response) => {
         // ★ AI 학습 성과 데이터 업데이트
         updateTrainingMetrics({
           sourceRef: getSourceRef(run.id),
-          sentCount: successCount + failCount,
+          sentCount: successCount + effectiveFailCount,
           successCount,
           failCount,
         });
@@ -1810,8 +1821,18 @@ router.post('/sync-results', async (req: Request, res: Response) => {
       const failCount = (smsDirectAgg.fail_count || 0) + kakaoDirectResult.fail;
       const pendingCount = (smsDirectAgg.pending_count || 0) + kakaoDirectResult.pending;
 
-      if (successCount > 0 || failCount > 0) {
-        const newStatus = pendingCount > 0 ? 'sending' : 'completed';
+      // 직접발송 타임아웃 체크: 60분 경과 + pending만 남아있으면 강제 완료
+      const directSentAt = campaign.scheduled_at || campaign.created_at;
+      const directMinutesSince = directSentAt ? (Date.now() - new Date(directSentAt).getTime()) / (1000 * 60) : 0;
+      const directTimedOut = directMinutesSince > 60 && pendingCount > 0 && successCount === 0 && failCount === 0;
+
+      if (successCount > 0 || failCount > 0 || directTimedOut) {
+        const dEffectiveFailCount = directTimedOut ? failCount + pendingCount : failCount;
+        const dEffectivePendingCount = directTimedOut ? 0 : pendingCount;
+        const newStatus = dEffectivePendingCount > 0 ? 'sending' : 'completed';
+        if (directTimedOut) {
+          console.warn(`[sync-results] direct campaign ${campaign.id}: 60분 타임아웃 — pending ${pendingCount}건 → fail 처리`);
+        }
 
         await query(
           `UPDATE campaigns SET
@@ -1822,21 +1843,21 @@ router.post('/sync-results', async (req: Request, res: Response) => {
               THEN COALESCE(scheduled_at, NOW())
               ELSE sent_at END
            WHERE id = $4`,
-          [successCount, failCount, newStatus, campaign.id]
+          [successCount, dEffectiveFailCount, newStatus, campaign.id]
         );
 
         // ★ 선불 실패건 환불
-        if (failCount > 0) {
+        if (dEffectiveFailCount > 0) {
           const campInfo = await query('SELECT company_id, message_type FROM campaigns WHERE id = $1', [campaign.id]);
           if (campInfo.rows.length > 0) {
-            await prepaidRefund(campInfo.rows[0].company_id, failCount, campInfo.rows[0].message_type, campaign.id, '발송 실패 환불');
+            await prepaidRefund(campInfo.rows[0].company_id, dEffectiveFailCount, campInfo.rows[0].message_type, campaign.id, directTimedOut ? '타임아웃 실패 환불' : '발송 실패 환불');
           }
         }
 
         // ★ AI 학습 성과 데이터 업데이트 (직접발송)
         updateTrainingMetrics({
           sourceRef: getSourceRef(campaign.id),
-          sentCount: successCount + failCount,
+          sentCount: successCount + dEffectiveFailCount,
           successCount,
           failCount,
         });
@@ -2351,11 +2372,23 @@ router.post('/:id/cancel', async (req: Request, res: Response) => {
     const kakaoCancelCount = await kakaoCountPending(campaignId);
     const totalCancelCount = cancelCount + kakaoCancelCount;
 
-    // 3. 회사 라인그룹 테이블에서 대기 중인 메시지 삭제 (status_code = 100)
+    // 3. 회사 라인그룹 테이블에서 메시지 취소 처리
+    // - status_code = 100 (대기): 삭제 (Agent 미픽업 → 환불 대상)
+    // - status_code != 100 (Agent 픽업됨): status_code를 9999(취소)로 변경하여 발송 차단 + 레코드 유지(결과 조회용)
+    const alreadyPickedUp = await smsCountAll(cancelTables, 'app_etc1 = ? AND status_code != 100', [campaignId]);
+
     await smsExecAll(cancelTables,
       `DELETE FROM SMSQ_SEND WHERE app_etc1 = ? AND status_code = 100`,
       [campaignId]
     );
+
+    if (alreadyPickedUp > 0) {
+      await smsExecAll(cancelTables,
+        `UPDATE SMSQ_SEND SET status_code = 9999 WHERE app_etc1 = ? AND status_code NOT IN (${SUCCESS_CODES.join(',')})`,
+        [campaignId]
+      );
+      console.warn(`[취소] campaign ${campaignId}: Agent 픽업된 ${alreadyPickedUp}건 status_code→9999 처리`);
+    }
 
     // 카카오 대기건 삭제
     if (kakaoCancelCount > 0) {

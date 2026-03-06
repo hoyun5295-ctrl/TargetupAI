@@ -357,7 +357,8 @@ onClick={() => {
                     const lmsRaw = isAd ? `(광고) ${msg}\n무료수신거부 ${formatRejectNumber(optOutNumber)}` : msg;
                     const smsMsg = replaceVars(smsRaw);
                     const lmsMsg = replaceVars(lmsRaw);
-                    setSpamFilterData({sms: smsMsg, lms: lmsMsg, callback: cb, msgType: selectedChannel as 'SMS'|'LMS'|'MMS'});
+                    const subj = aiResult?.messages?.[selectedAiMsgIdx]?.subject || '';
+                    setSpamFilterData({sms: smsMsg, lms: lmsMsg, callback: cb, msgType: selectedChannel as 'SMS'|'LMS'|'MMS', subject: subj, firstRecipient: sampleCustomer || undefined});
                     setShowSpamFilter(true);
 }}
 className="flex-1 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 flex items-center justify-center gap-2"

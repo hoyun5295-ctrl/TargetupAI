@@ -315,7 +315,7 @@ export default function TargetSendModal({
     const lmsRaw = adTextEnabled ? `(광고) ${msg}\n무료수신거부 ${optOutNumber}` : msg;
     const smsMsg = replaceVars(smsRaw, firstR);
     const lmsMsg = replaceVars(lmsRaw, firstR);
-    setSpamFilterData({ sms: smsMsg, lms: lmsMsg, callback: cb, msgType: targetMsgType, firstRecipient: firstR || undefined });
+    setSpamFilterData({ sms: smsMsg, lms: lmsMsg, callback: cb, msgType: targetMsgType, subject: targetSubject || '', firstRecipient: firstR || undefined });
     setShowSpamFilter(true);
   };
 

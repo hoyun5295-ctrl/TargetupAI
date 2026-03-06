@@ -292,17 +292,24 @@ export default function CalendarModal({ onClose, token, onEdit }: CalendarModalP
                   {/* 버튼 - 예약 상태만 취소 가능 */}
                   {selectedCampaign.status === 'scheduled' && (
                     <div className="pt-4">
-                      <button 
+                      <button
                         onClick={async () => {
-                          const token = localStorage.getItem('token');
-                          const res = await fetch(`/api/campaigns/${selectedCampaign.id}/cancel`, {
-                            method: 'POST',
-                            headers: { Authorization: `Bearer ${token}` }
-                          });
-                          const data = await res.json();
-                          if (data.success) {
-                            fetchCampaigns();
-                            setSelectedCampaign(null);
+                          if (!window.confirm('이 예약을 취소하시겠습니까?')) return;
+                          try {
+                            const token = localStorage.getItem('token');
+                            const res = await fetch(`/api/campaigns/${selectedCampaign.id}/cancel`, {
+                              method: 'POST',
+                              headers: { Authorization: `Bearer ${token}` }
+                            });
+                            const data = await res.json();
+                            if (data.success) {
+                              fetchCampaigns();
+                              setSelectedCampaign(null);
+                            } else {
+                              alert(data.error || '예약 취소에 실패했습니다');
+                            }
+                          } catch (err) {
+                            alert('서버 연결 오류가 발생했습니다. 잠시 후 다시 시도해주세요.');
                           }
                         }}
                         className="w-full py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 text-sm font-medium transition-colors">

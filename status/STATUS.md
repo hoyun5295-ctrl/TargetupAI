@@ -234,7 +234,7 @@ UPDATE plans SET customer_db_enabled = true,  spam_filter_enabled = true,  ai_me
 | 1 | 대시보드 회사명 — 슈퍼관리자 수정이 반영 안 됨 | 버그 | 낮음 | ✅ 완료 |
 | 2 | AI 매핑 화면 개편 — 표준 17개 명확 나열 + 커스텀 필드 라벨 지정 | 기능개편 | 중간 | ✅ 완료 |
 | 3 | 직접 타겟 설정 — enabled-fields 기반 동적 필터 조건 | 기능개발 | 중간 | ✅ 완료 |
-| 4 | 수신거부 양방향 동기화 (독립 관리 vs DB 연동) | 설계+구현 | 높음 | ⏸️ 나래 콜백 미수신 |
+| 4 | 수신거부 양방향 동기화 (독립 관리 vs DB 연동) | 설계+구현 | 높음 | ✅ 완료 (나래 080 콜백 연동 완료 2026-03-05) |
 | 5 | AI 한줄로 입력 포맷 강제화 + 샘플 고객 미리보기 + 이모지 제거 | 기능개선 | 중간 | ✅ 완료 |
 | 6 | 🚨 긴급: 스팸필터 테스트 안됨 (원인: MySQL 랜섬웨어) | 인프라/보안 | 높음 | ✅ 완료 |
 | 7 | 결과값 매핑 중앙화 — sms-result-map.ts 컨트롤타워 | 구조개선 | 높음 | ✅ 완료 (3-Tier 전수 점검) |
@@ -316,7 +316,7 @@ UPDATE plans SET customer_db_enabled = true,  spam_filter_enabled = true,  ai_me
 
 - **직접타겟발송 발송창 하드코딩 전면 제거 + 컴포넌트 분리 — ✅ 완료 (D43-3c)**
 
-#### 안건 #4: 수신거부 양방향 동기화 — ⏸️ 나래 콜백 미수신 (D43-4, 2026-02-27)
+#### 안건 #4: 수신거부 양방향 동기화 — ✅ 완료 (D43-4 + 2026-03-05 나래 080 콜백 연동)
 
 - **설계 확정 내용:**
   - opt_outs 테이블 미사용 확인 (레거시) → **unsubscribes 테이블이 SoT**
@@ -329,12 +329,11 @@ UPDATE plans SET customer_db_enabled = true,  spam_filter_enabled = true,  ai_me
 - **코드 배포 완료 (수정 2파일):**
   - **unsubscribes.ts:** 080콜백 opt_out_auto_sync 체크 추가, 직접추가/업로드/삭제 4곳 syncCustomerOptIn 적용, GET / 응답에 opt080Number+optOutAutoSync 추가
   - **Unsubscribes.tsx:** 080번호 하드코딩 제거→API 동적 표시, 연동테스트 버튼 optOutAutoSync=true일 때만 노출, 080 안내 모달
-- **미해결 — 나래인터넷 콜백 미수신:**
-  - curl 로컬 테스트: ✅ 정상 (`1` 반환)
-  - Nginx 화이트리스트: ✅ 정상 (나래 IP 6개 등록)
-  - 나래에서 콜백 요청 자체가 서버에 안 옴 (Nginx access.log 무기록)
-  - **월요일 확인 필요:** 나래 담당자에게 콜백 URL 등록 완료 여부 + 현재 등록된 URL 확인
-  - 등록 요청 URL: `https://hanjul.ai/api/unsubscribes/080callback` + 파라미터 cid/fr/token
+- **✅ 나래 080 콜백 연동 완료 (2026-03-05):**
+  - 나래 담당자 콜백 URL 등록 확인 완료
+  - 실제 080 ARS 수신거부 테스트 — 나래 IP(183.98.207.13) 콜백 수신 + 수신거부 DB 등록 정상 확인
+  - OPT_OUT_080_TOKEN 검증 제거 — Nginx IP 화이트리스트(나래 6개 IP)로 보안 대체
+  - 기존 누적 수신거부 목록: 한줄로 이관 시 수동 처리 예정 (별도 벌크 동기화 불필요)
 - **기간계 미접촉:** campaigns.ts 발송 파이프라인 전체 미수정
 
 #### 안건 #6: 🚨 긴급 — 스팸필터 테스트 안됨 → ✅ 완료 (원인: MySQL 랜섬웨어 공격)
@@ -415,7 +414,7 @@ UPDATE plans SET customer_db_enabled = true,  spam_filter_enabled = true,  ai_me
 2. ~~**#2** AI 매핑 화면 개편 (컴포넌트 분리 + 태그 클릭 UI)~~ ✅ 완료
 3. ~~**#5** AI 한줄로 포맷 강제화 + 미리보기 + 이모지 제거~~ ✅ 완료
 4. ~~**#3** 직접 타겟 설정~~ ✅ 완료 (백엔드 버그 수정 + 발송창 하드코딩 전면 제거)
-5. ~~**#4** 수신거부 동기화~~ ⏸️ 코드 완료, 나래 콜백 미수신 → 월요일 나래 확인
+5. ~~**#4** 수신거부 동기화~~ ✅ 완료 — 나래 080 콜백 연동 완료 (2026-03-05), 토큰 검증 제거→Nginx IP 화이트리스트
 6. ~~**🚨 #6 긴급: 스팸필터 테스트 안됨**~~ ✅ 완료 — 원인: MySQL 랜섬웨어 공격 (D49 보안 대응)
 7. ~~**#7** 결과값 매핑 중앙화~~ ✅ 완료 — Phase 4: 3-Tier 전수 점검 + admin.ts/billing.ts 전환 + `>= 200` 버그 수정
 
@@ -442,7 +441,7 @@ UPDATE plans SET customer_db_enabled = true,  spam_filter_enabled = true,  ai_me
 | D43 안건#1 회사명 | ✅ 완료 |
 | D43 안건#2 매핑 UI 개편 | ✅ 완료 |
 | D43 안건#3 직접타겟 리팩토링 | ✅ 완료 (백엔드 버그 + 발송창 하드코딩 전면 제거) |
-| D43 안건#4 수신거부 동기화 | ⏸️ 코드 완료 · 나래 콜백 미수신 → 월요일 확인 |
+| D43 안건#4 수신거부 동기화 | ✅ 완료 — 나래 080 콜백 연동 + 토큰 검증 제거 (2026-03-05) |
 | D43 안건#5 AI 포맷+미리보기+이모지 | ✅ 완료 |
 | D43 안건#7 결과값 매핑 중앙화 | ✅ 완료 — Phase 4: 3-Tier 18파일 전수 점검, 백엔드 6파일+프론트 12파일 하드코딩 0건, billing.ts `>=200` 버그 수정 |
 | AI 맞춤한줄 Phase 1 (AI-CUSTOM-SEND.md) | ✅ 8단계 전체 완료 |
@@ -600,16 +599,16 @@ QTmsg status_code, 통신사 코드, 스팸필터 판정 결과를 한 곳에서
 - [ ] 기술: 백엔드 프록시 /api/kakao-templates/*, DB kakao_templates 확장, 상태 전이 규칙
 - [ ] Phase 2: 이미지 업로드, 알림 수신자 관리, 발신프로필 그룹
 
-### 080 수신거부 (⏸️ 나래인터넷 콜백 미수신 — 02-27 이후 미확인, 확인 필요)
-- [x] 콜백 엔드포인트 구현 (토큰 인증, 고객사별 080번호 자동 매칭)
-- [ ] 서버 .env OPT_OUT_080_TOKEN 설정 + PM2 재시작 — ⚠️ 실서버 미설정 확인(2026-03-05 점검)
+### 080 수신거부 (✅ 나래인터넷 콜백 연동 완료 — 2026-03-05)
+- [x] 콜백 엔드포인트 구현 (고객사별 080번호 자동 매칭)
+- [x] 토큰 검증 제거 — Nginx IP 화이트리스트(나래 6개 IP)로 보안 대체
 - [x] Nginx 080callback 경로 나래 IP 화이트리스트 적용
 - [x] D43-4 양방향 동기화: opt_out_auto_sync DDL + syncCustomerOptIn 헬퍼 + 4곳 적용
 - [x] D43-4 프론트: 080번호 동적 표시 + 연동테스트 버튼 (auto_sync=true 조건부)
 - [x] curl 로컬 테스트 정상 확인 (서버 `1` 반환)
-- [ ] **나래 담당자에게 콜백 URL 등록 완료 여부 확인** (02-27 기록, 03-05 현재 미확인)
-- [ ] 실제 080 ARS 수신거부 테스트 (080-719-6700)
-- [ ] 기존 누적 수신거부 목록 초기 동기화 (벌크 API 또는 엑셀)
+- [x] 나래 담당자 콜백 URL 등록 확인 완료 (2026-03-05)
+- [x] 실제 080 ARS 수신거부 테스트 — 나래 IP(183.98.207.13) 콜백 수신 + 수신거부 DB 등록 정상 확인
+- [x] 기존 누적 수신거부 목록 — 한줄로 이관 시 수동 처리 예정 (벌크 동기화 불필요)
 
 ### 선불 요금제 Phase 1-B~2
 - [ ] Phase 1-B: KCP PG 연동 (카드결제만, 가상계좌 제외)
@@ -708,6 +707,7 @@ QTmsg status_code, 통신사 코드, 스팸필터 판정 결과를 한 곳에서
 
 | 날짜 | 완료 항목 |
 |------|----------|
+| 03-05 | **나래 080 수신거부 콜백 연동 완료:** (1) 나래 담당자 콜백 URL 등록 확인 (2) 실제 080 ARS 테스트 — 나래 IP(183.98.207.13) 콜백 수신+수신거부 DB 등록 정상 (3) OPT_OUT_080_TOKEN 검증 제거→Nginx IP 화이트리스트(나래 6개 IP)로 보안 대체 (4) 기존 누적 수신거부: 한줄로 이관 시 수동 처리 예정. 수정 1파일(unsubscribes.ts). **기간계 무접촉.** |
 | 03-05 | **D57 P0-C1~C5 발송 파이프라인 안정화 5건:** (C1) AI발송+직접발송 per-customer/per-batch try/catch→sentCount 추적→부분실패 선별적 환불. (C2) normalize-phone.ts 신규→campaigns.ts 27곳 통일+directCustomerMap 키 불일치 핵심버그 수정. (C3) calcSplitSendTime() SEND_HOURS 경계→오버플로우 방지, defaults.ts SEND_HOURS 추가. (C4) AI발송 sendTime `?` 파라미터화. (C5) 테스트발송 bill_id→randomUUID()+실패건 DB 기록+응답 testRequestUid. 수정 2파일(campaigns.ts, defaults.ts)+신규 1파일(normalize-phone.ts). TypeScript 0에러. **기간계 발송 흐름 자체 변경 없음** |
 | 03-05 | **D56 P0-Q1 SQL Injection 방지 + 스팸필터 선불차감:** (1) sms-table-validator.ts 신규 — `/^SMSQ_SEND(_\d{1,3})?(_\d{4,8})?$/` 화이트리스트 정규식, validateSmsTable/validateSmsTables/isValidSmsTable 3함수 export. (2) admin.ts — POST/PUT `/api/admin/line-groups` 라인그룹 생성·수정 API에서 smsTables 검증, 잘못된 테이블명 400 거부. (3) campaigns.ts — 서버 기동 시 ALL_SMS_TABLES 검증(경고 로그, 기동 미차단) + getCompanySmsTables DB 조회 결과 필터링(잘못된 값 스킵→BULK_ONLY_TABLES 폴백) + prepaidDeduct/prepaidRefund export 추가. (4) spam-filter.ts — POST `/test`에 선불 잔액 차감 추가: testId 생성 후 prepaidDeduct(companyId, spamSendCount, spamDeductType, testId) 호출, 잔액 부족 시 402+테스트 cancelled, 응답에 deducted 금액 포함. 수정 3파일(admin.ts, campaigns.ts, spam-filter.ts)+신규 1파일(sms-table-validator.ts). TypeScript 타입 에러 0건. **기간계 무접촉. 배포+실서버 선불차감 로그 확인 완료.** |
 | 03-05 | **D55 보안 긴급점검 + 슈퍼관리자 세션 관리 + 세션 타이머 UI (코드+DDL+배포 완료):** (1) JWT_SECRET fail-fast — auth.ts 미들웨어에서 환경변수 미설정 시 `process.exit(1)` 서버 기동 차단, 폴백값 `'dev-only-secret'` 제거. (2) mms-images.ts 자체 JWT 인증(`'your-secret-key'`) 완전 제거 → 공용 `authenticate` 미들웨어로 교체. (3) MYSQL_PASSWORD fail-fast — database.ts에서 미설정 시 `process.exit(1)`, 폴백값 `'sms123'` 제거. (4) dotenv.config() 로딩 순서 수정 — app.ts 최상단(1행)으로 이동, 모듈 import 전에 환경변수 로딩 보장. (5) Math.random()→crypto.randomInt() — admin.ts/manage-users.ts 임시비밀번호 생성을 암호학적 안전 난수로 교체. (6) 슈퍼관리자 세션 관리 — DDL-D55로 user_sessions.user_id FK 제거(super_admins ID INSERT 허용, 보안영향 없음=서버코드만 INSERT) + 로그인 시 user_sessions 레코드 생성+sessionId JWT 포함+기존 세션 무효화, auth.ts 미들웨어 `super_admin` 세션체크 건너뛰기 제거 + expires_at 서버측 만료 강제(브라우저 닫았다 열어도 서버가 차단), extend-session 슈퍼관리자 지원, defaults.ts `superAdminSessionMinutes: 30` (환경변수 변경 가능). (7) 프론트엔드 useSessionGuard 슈퍼관리자 스킵 제거 → 30초마다 서버 세션 체크. (8) 은행 스타일 세션 타이머 UI — SessionTimer.tsx 신규 컴포넌트(초록/주황/빨강 색상전환+5분미만 깜빡임+클릭 세션연장), SessionTimerContext Provider(App.tsx), DashboardHeader+AdminDashboard 양쪽 헤더에 삽입. 수정 12파일(app.ts, auth.ts미들웨어, auth.ts라우트, mms-images.ts, database.ts, defaults.ts, admin.ts, manage-users.ts, useSessionGuard.ts, useSessionTimeout.ts, App.tsx, DashboardHeader.tsx, AdminDashboard.tsx)+신규1파일(SessionTimer.tsx)+DDL 1건 실행 완료(`docker exec -it targetup-postgres psql -U targetup targetup`). **기간계 무접촉.** |

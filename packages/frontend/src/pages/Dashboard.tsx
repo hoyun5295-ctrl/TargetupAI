@@ -3638,144 +3638,6 @@ const campaignData = {
                 </div>
               </div>
             )}
-            
-            {/* 특수문자 모달 */}
-            {showSpecialChars && (
-              <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[70]" onClick={() => setShowSpecialChars(null)}>
-                <div className="bg-white rounded-2xl shadow-2xl w-[400px] overflow-hidden animate-in fade-in zoom-in" onClick={e => e.stopPropagation()}>
-                  <div className="p-4 border-b bg-purple-50 flex justify-between items-center">
-                    <h3 className="font-bold text-lg">✨ 특수문자</h3>
-                    <button onClick={() => setShowSpecialChars(null)} className="text-gray-500 hover:text-gray-700 text-xl">✕</button>
-                  </div>
-                  <div className="p-4">
-                    <div className="grid grid-cols-8 gap-1.5">
-                      {['★','☆','♥','♡','◆','◇','■','□','▲','△','▶','◀','●','○','◎','♤','♠','♧','♣','♢','♦','♪','♬','♩','☎','✉','✈','♨','☀','☁','☂','※','☞','↑','↓','←','→','▷','◁','▽','①','②','③','④','⑤','⑥','⑦','⑧','㈜','㈔','℡','㉿','㎝','㎏','㎡','㎎'].map((char, i) => (
-                        <button
-                          key={i}
-                          onClick={() => {
-                            if (showSpecialChars === 'target') setTargetMessage(prev => prev + char);
-                            else setDirectMessage(prev => prev + char);
-                            setShowSpecialChars(null);
-                          }}
-                          className="w-10 h-10 flex items-center justify-center text-lg border rounded-lg hover:bg-purple-50 hover:border-purple-300 transition-colors"
-                        >
-                          {char}
-                        </button>
-                      ))}
-                    </div>
-                    <p className="text-xs text-gray-400 mt-3 text-center">⚠️ 일부 특수문자는 LMS 자동 전환될 수 있습니다</p>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* 보관함 모달 */}
-            {showTemplateBox && (
-              <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[70]" onClick={() => setShowTemplateBox(null)}>
-                <div className="bg-white rounded-2xl shadow-2xl w-[500px] max-h-[70vh] overflow-hidden animate-in fade-in zoom-in" onClick={e => e.stopPropagation()}>
-                  <div className="p-4 border-b bg-amber-50 flex justify-between items-center">
-                    <h3 className="font-bold text-lg">📂 보관함</h3>
-                    <button onClick={() => setShowTemplateBox(null)} className="text-gray-500 hover:text-gray-700 text-xl">✕</button>
-                  </div>
-                  <div className="p-4 overflow-y-auto max-h-[50vh]">
-                    {templateList.length === 0 ? (
-                      <div className="text-center py-12 text-gray-400">
-                        <div className="text-4xl mb-3">📭</div>
-                        <div className="text-sm">저장된 문자가 없습니다</div>
-                        <div className="text-xs mt-1">메시지 작성 후 '문자저장'을 눌러주세요</div>
-                      </div>
-                    ) : (
-                      <div className="space-y-2">
-                        {templateList.map((t: any) => (
-                          <div key={t.id} className="border rounded-xl p-4 hover:border-amber-300 hover:bg-amber-50/30 transition-colors group">
-                            <div className="flex justify-between items-start mb-2">
-                              <div className="font-medium text-sm text-gray-800">{t.template_name}</div>
-                              <div className="flex items-center gap-2">
-                                <span className="text-xs px-2 py-0.5 bg-gray-100 rounded">{t.message_type}</span>
-                                <button
-                                  onClick={(e) => { e.stopPropagation(); deleteTemplate(t.id); }}
-                                  className="text-gray-300 hover:text-red-500 text-sm opacity-0 group-hover:opacity-100 transition-opacity"
-                                >🗑️</button>
-                              </div>
-                            </div>
-                            <div className="text-xs text-gray-500 mb-3 line-clamp-2 whitespace-pre-wrap">{t.content}</div>
-                            <button
-                              onClick={() => {
-                                if (showTemplateBox === 'target') {
-                                  setTargetMessage(t.content);
-                                  if (t.subject) setTargetSubject(t.subject);
-                                  if (t.message_type) setTargetMsgType(t.message_type);
-                                } else {
-                                  setDirectMessage(t.content);
-                                  if (t.subject) setDirectSubject(t.subject);
-                                  if (t.message_type) setDirectMsgType(t.message_type);
-                                }
-                                setShowTemplateBox(null);
-                                setToast({ show: true, type: 'success', message: '문자가 적용되었습니다.' });
-                                setTimeout(() => setToast({ show: false, type: 'success', message: '' }), 3000);
-                              }}
-                              className="w-full py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-sm font-medium transition-colors"
-                            >적용하기</button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* 문자저장 모달 */}
-            {showTemplateSave && (
-              <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[70]" onClick={() => setShowTemplateSave(null)}>
-                <div className="bg-white rounded-2xl shadow-2xl w-[400px] overflow-hidden animate-in fade-in zoom-in" onClick={e => e.stopPropagation()}>
-                  <div className="p-4 border-b bg-emerald-50 flex justify-between items-center">
-                    <h3 className="font-bold text-lg">💾 문자 저장</h3>
-                    <button onClick={() => setShowTemplateSave(null)} className="text-gray-500 hover:text-gray-700 text-xl">✕</button>
-                  </div>
-                  <div className="p-6">
-                    <div className="mb-4">
-                      <label className="block text-sm font-medium text-gray-700 mb-2">저장할 이름</label>
-                      <input
-                        type="text"
-                        value={templateSaveName}
-                        onChange={(e) => setTemplateSaveName(e.target.value)}
-                        placeholder="예: VIP 할인 안내, 봄 신상품 홍보"
-                        className="w-full border-2 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
-                        autoFocus
-                      />
-                    </div>
-                    <div className="mb-4 p-3 bg-gray-50 rounded-xl">
-                      <div className="text-xs text-gray-400 mb-1">저장될 내용 미리보기</div>
-                      <div className="text-sm text-gray-700 whitespace-pre-wrap line-clamp-4">
-                        {showTemplateSave === 'target' ? targetMessage : directMessage}
-                      </div>
-                    </div>
-                    <div className="flex gap-3">
-                      <button
-                        onClick={() => setShowTemplateSave(null)}
-                        className="flex-1 py-3 border-2 rounded-xl text-sm font-medium hover:bg-gray-50"
-                      >취소</button>
-                      <button
-                        onClick={async () => {
-                          if (!templateSaveName.trim()) {
-                            setToast({ show: true, type: 'error', message: '이름을 입력해주세요.' });
-                            setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
-                            return;
-                          }
-                          const content = showTemplateSave === 'target' ? targetMessage : directMessage;
-                          const msgType = showTemplateSave === 'target' ? targetMsgType : directMsgType;
-                          const subject = showTemplateSave === 'target' ? targetSubject : directSubject;
-                          const ok = await saveTemplate(templateSaveName.trim(), content, msgType, subject);
-                          if (ok) setShowTemplateSave(null);
-                        }}
-                        className="flex-1 py-3 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl text-sm font-bold transition-colors"
-                      >💾 저장하기</button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
 
             {/* 직접입력 모달 */}
             {showDirectInput && (
@@ -3831,6 +3693,144 @@ const campaignData = {
             </div>
         </div>
       )}
+      {/* 특수문자 모달 (직접발송 + 직접타겟발송 공용) */}
+      {showSpecialChars && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[70]" onClick={() => setShowSpecialChars(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-[400px] overflow-hidden animate-in fade-in zoom-in" onClick={e => e.stopPropagation()}>
+            <div className="p-4 border-b bg-purple-50 flex justify-between items-center">
+              <h3 className="font-bold text-lg">✨ 특수문자</h3>
+              <button onClick={() => setShowSpecialChars(null)} className="text-gray-500 hover:text-gray-700 text-xl">✕</button>
+            </div>
+            <div className="p-4">
+              <div className="grid grid-cols-8 gap-1.5">
+                {['★','☆','♥','♡','◆','◇','■','□','▲','△','▶','◀','●','○','◎','♤','♠','♧','♣','♢','♦','♪','♬','♩','☎','✉','✈','♨','☀','☁','☂','※','☞','↑','↓','←','→','▷','◁','▽','①','②','③','④','⑤','⑥','⑦','⑧','㈜','㈔','℡','㉿','㎝','㎏','㎡','㎎'].map((char, i) => (
+                  <button
+                    key={i}
+                    onClick={() => {
+                      if (showSpecialChars === 'target') setTargetMessage(prev => prev + char);
+                      else setDirectMessage(prev => prev + char);
+                      setShowSpecialChars(null);
+                    }}
+                    className="w-10 h-10 flex items-center justify-center text-lg border rounded-lg hover:bg-purple-50 hover:border-purple-300 transition-colors"
+                  >
+                    {char}
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs text-gray-400 mt-3 text-center">⚠️ 일부 특수문자는 LMS 자동 전환될 수 있습니다</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 보관함 모달 (직접발송 + 직접타겟발송 공용) */}
+      {showTemplateBox && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[70]" onClick={() => setShowTemplateBox(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-[500px] max-h-[70vh] overflow-hidden animate-in fade-in zoom-in" onClick={e => e.stopPropagation()}>
+            <div className="p-4 border-b bg-amber-50 flex justify-between items-center">
+              <h3 className="font-bold text-lg">📂 보관함</h3>
+              <button onClick={() => setShowTemplateBox(null)} className="text-gray-500 hover:text-gray-700 text-xl">✕</button>
+            </div>
+            <div className="p-4 overflow-y-auto max-h-[50vh]">
+              {templateList.length === 0 ? (
+                <div className="text-center py-12 text-gray-400">
+                  <div className="text-4xl mb-3">📭</div>
+                  <div className="text-sm">저장된 문자가 없습니다</div>
+                  <div className="text-xs mt-1">메시지 작성 후 '문자저장'을 눌러주세요</div>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {templateList.map((t: any) => (
+                    <div key={t.id} className="border rounded-xl p-4 hover:border-amber-300 hover:bg-amber-50/30 transition-colors group">
+                      <div className="flex justify-between items-start mb-2">
+                        <div className="font-medium text-sm text-gray-800">{t.template_name}</div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs px-2 py-0.5 bg-gray-100 rounded">{t.message_type}</span>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); deleteTemplate(t.id); }}
+                            className="text-gray-300 hover:text-red-500 text-sm opacity-0 group-hover:opacity-100 transition-opacity"
+                          >🗑️</button>
+                        </div>
+                      </div>
+                      <div className="text-xs text-gray-500 mb-3 line-clamp-2 whitespace-pre-wrap">{t.content}</div>
+                      <button
+                        onClick={() => {
+                          if (showTemplateBox === 'target') {
+                            setTargetMessage(t.content);
+                            if (t.subject) setTargetSubject(t.subject);
+                            if (t.message_type) setTargetMsgType(t.message_type);
+                          } else {
+                            setDirectMessage(t.content);
+                            if (t.subject) setDirectSubject(t.subject);
+                            if (t.message_type) setDirectMsgType(t.message_type);
+                          }
+                          setShowTemplateBox(null);
+                          setToast({ show: true, type: 'success', message: '문자가 적용되었습니다.' });
+                          setTimeout(() => setToast({ show: false, type: 'success', message: '' }), 3000);
+                        }}
+                        className="w-full py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-sm font-medium transition-colors"
+                      >적용하기</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 문자저장 모달 (직접발송 + 직접타겟발송 공용) */}
+      {showTemplateSave && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[70]" onClick={() => setShowTemplateSave(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-[400px] overflow-hidden animate-in fade-in zoom-in" onClick={e => e.stopPropagation()}>
+            <div className="p-4 border-b bg-emerald-50 flex justify-between items-center">
+              <h3 className="font-bold text-lg">💾 문자 저장</h3>
+              <button onClick={() => setShowTemplateSave(null)} className="text-gray-500 hover:text-gray-700 text-xl">✕</button>
+            </div>
+            <div className="p-6">
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">저장할 이름</label>
+                <input
+                  type="text"
+                  value={templateSaveName}
+                  onChange={(e) => setTemplateSaveName(e.target.value)}
+                  placeholder="예: VIP 할인 안내, 봄 신상품 홍보"
+                  className="w-full border-2 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                  autoFocus
+                />
+              </div>
+              <div className="mb-4 p-3 bg-gray-50 rounded-xl">
+                <div className="text-xs text-gray-400 mb-1">저장될 내용 미리보기</div>
+                <div className="text-sm text-gray-700 whitespace-pre-wrap line-clamp-4">
+                  {showTemplateSave === 'target' ? targetMessage : directMessage}
+                </div>
+              </div>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowTemplateSave(null)}
+                  className="flex-1 py-3 border-2 rounded-xl text-sm font-medium hover:bg-gray-50"
+                >취소</button>
+                <button
+                  onClick={async () => {
+                    if (!templateSaveName.trim()) {
+                      setToast({ show: true, type: 'error', message: '이름을 입력해주세요.' });
+                      setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
+                      return;
+                    }
+                    const content = showTemplateSave === 'target' ? targetMessage : directMessage;
+                    const msgType = showTemplateSave === 'target' ? targetMsgType : directMsgType;
+                    const subject = showTemplateSave === 'target' ? targetSubject : directSubject;
+                    const ok = await saveTemplate(templateSaveName.trim(), content, msgType, subject);
+                    if (ok) setShowTemplateSave(null);
+                  }}
+                  className="flex-1 py-3 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl text-sm font-bold transition-colors"
+                >💾 저장하기</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <AddressBookModal
         show={showAddressBook}
         onClose={() => setShowAddressBook(false)}
