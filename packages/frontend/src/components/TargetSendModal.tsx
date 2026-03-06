@@ -208,8 +208,25 @@ export default function TargetSendModal({
   };
 
   // ====== 셀 값 포맷 ======
-  const formatCellValue = (value: any, dataType: string): string => {
+  // 성별 필드 자동 감지 + 한글 표시
+  const GENDER_FIELD_PATTERNS = ['gender', 'sex', '성별', '젠더'];
+  const isGenderField = (key: string) => {
+    const lower = key.toLowerCase().replace(/[\s_-]/g, '');
+    return GENDER_FIELD_PATTERNS.some(p => lower === p || lower.includes(p));
+  };
+  const GENDER_DISPLAY_MAP: Record<string, string> = {
+    'M': '남성', 'm': '남성', 'male': '남성', 'Male': '남성', 'MALE': '남성',
+    '남': '남성', '남자': '남성', '남성': '남성', '1': '남성',
+    'F': '여성', 'f': '여성', 'female': '여성', 'Female': '여성', 'FEMALE': '여성',
+    '여': '여성', '여자': '여성', '여성': '여성', '2': '여성', '0': '여성',
+  };
+
+  const formatCellValue = (value: any, dataType: string, fieldKey?: string): string => {
     if (value == null || value === '') return '-';
+    // 성별 필드 → 한글 변환
+    if (fieldKey && isGenderField(fieldKey)) {
+      return GENDER_DISPLAY_MAP[String(value)] || String(value);
+    }
     if (dataType === 'number') {
       const num = Number(value);
       if (isNaN(num)) return String(value);
@@ -860,7 +877,7 @@ export default function TargetSendModal({
                           <td className="px-4 py-2 font-mono whitespace-nowrap">{r.phone}</td>
                           {tableFields.map(fm => (
                             <td key={fm.field_key} className="px-4 py-2 whitespace-nowrap">
-                              {formatCellValue(r[fm.field_key], fm.data_type)}
+                              {formatCellValue(r[fm.field_key], fm.data_type, fm.field_key)}
                             </td>
                           ))}
                         </tr>
