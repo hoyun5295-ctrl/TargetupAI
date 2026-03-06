@@ -200,6 +200,8 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
     let smsOptIn = false;
 
     for (const [fieldKey, value] of Object.entries(filterValues)) {
+      // _min, _max, _op 보조키는 스킵 (본 필드에서 처리)
+      if (fieldKey.endsWith('_min') || fieldKey.endsWith('_max') || fieldKey.endsWith('_op')) continue;
       if (!selectedFields.has(fieldKey)) continue;
       const field = enabledFields.find((f: any) => f.field_key === fieldKey);
       if (!field) continue;
@@ -262,11 +264,17 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
 
       if (!value && value !== false) continue;
 
-      // 숫자 — 이상/이하 동적 operator
+      // 숫자 — 범위 (min ~ max)
       if (field.data_type === 'number') {
-        const opKey = `${fieldKey}_op`;
-        const op = filterValues[opKey] || 'gte';
-        filters[fieldKey] = { operator: op, value: Number(value) };
+        const minVal = filterValues[`${fieldKey}_min`];
+        const maxVal = filterValues[`${fieldKey}_max`];
+        if (minVal && maxVal) {
+          filters[fieldKey] = { operator: 'between', value: [Number(minVal), Number(maxVal)] };
+        } else if (minVal) {
+          filters[fieldKey] = { operator: 'gte', value: Number(minVal) };
+        } else if (maxVal) {
+          filters[fieldKey] = { operator: 'lte', value: Number(maxVal) };
+        }
         continue;
       }
 
@@ -469,19 +477,17 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
       );
     }
 
-    // 숫자 → 직접 입력 + 이상/이하 선택
+    // 숫자 → 범위 입력 (최소 ~ 최대)
     if (field.data_type === 'number') {
-      const opKey = `${fk}_op`;
-      const currentOp = filterValues[opKey] || 'gte';
+      const minKey = `${fk}_min`;
+      const maxKey = `${fk}_max`;
       return (
-        <div className="flex gap-1.5 mt-1.5">
-          <select value={currentOp} onChange={e => setFilterValues(prev => ({ ...prev, [opKey]: e.target.value }))}
-            className="px-2 py-1.5 border border-gray-200 rounded-md text-sm bg-white focus:ring-1 focus:ring-green-500">
-            <option value="gte">이상</option>
-            <option value="lte">이하</option>
-          </select>
-          <input type="number" value={filterValues[fk] || ''} onChange={e => setFilterValues(prev => ({ ...prev, [fk]: e.target.value }))}
-            placeholder="값 입력" className="flex-1 px-2.5 py-1.5 border border-gray-200 rounded-md text-sm focus:ring-1 focus:ring-green-500 focus:border-green-500" />
+        <div className="flex items-center gap-1.5 mt-1.5">
+          <input type="number" value={filterValues[minKey] || ''} onChange={e => setFilterValues(prev => ({ ...prev, [minKey]: e.target.value }))}
+            placeholder="최소" className="flex-1 px-2.5 py-1.5 border border-gray-200 rounded-md text-sm focus:ring-1 focus:ring-green-500 focus:border-green-500" />
+          <span className="text-gray-400 text-sm">~</span>
+          <input type="number" value={filterValues[maxKey] || ''} onChange={e => setFilterValues(prev => ({ ...prev, [maxKey]: e.target.value }))}
+            placeholder="최대" className="flex-1 px-2.5 py-1.5 border border-gray-200 rounded-md text-sm focus:ring-1 focus:ring-green-500 focus:border-green-500" />
         </div>
       );
     }
@@ -513,6 +519,11 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
 
   const hasFilterValue = (fk: string) => {
     if (!selectedFields.has(fk)) return false;
+    // 숫자 범위: _min 또는 _max 중 하나라도 있으면 활성
+    const field = enabledFields.find((f: any) => f.field_key === fk);
+    if (field?.data_type === 'number' && fk !== 'age' && fk !== 'points') {
+      return !!(filterValues[`${fk}_min`] || filterValues[`${fk}_max`]);
+    }
     const val = filterValues[fk];
     if (val === undefined || val === null || val === '') return false;
     if (Array.isArray(val)) return val.length > 0;
