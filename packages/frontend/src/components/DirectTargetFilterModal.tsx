@@ -56,11 +56,6 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
     { label: '30대', value: '30' }, { label: '40대', value: '40' },
     { label: '50대', value: '50' }, { label: '60+', value: '60' },
   ];
-  const AMOUNT_PRESETS = [
-    { label: '5만↑', value: '50000' }, { label: '10만↑', value: '100000' },
-    { label: '50만↑', value: '500000' }, { label: '100만↑', value: '1000000' },
-    { label: '500만↑', value: '5000000' },
-  ];
   const DAYS_PRESETS = [
     { label: '7일', value: '7' }, { label: '30일', value: '30' },
     { label: '90일', value: '90' }, { label: '180일', value: '180' },
@@ -93,8 +88,6 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
   };
   const getGenderLabel = (val: string) => GENDER_DISPLAY_MAP[val] || val;
 
-  // 금액 필드 판별
-  const isAmountField = (key: string) => ['total_purchase_amount', 'recent_purchase_amount', 'avg_order_value'].includes(key);
 
   // show 시 필드 로드
   useEffect(() => {
@@ -458,20 +451,6 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
               >{getDisplayLabel(opt)}</button>
             );
           })}
-        </div>
-      );
-    }
-
-    // 금액 필드 → 프리셋 태그
-    if (field.data_type === 'number' && isAmountField(fk)) {
-      const val = filterValues[fk] || '';
-      return (
-        <div className="flex flex-wrap gap-1.5 mt-1.5">
-          {AMOUNT_PRESETS.map(p => (
-            <button key={p.value} onClick={() => setFilterValues(prev => ({ ...prev, [fk]: prev[fk] === p.value ? '' : p.value }))}
-              className={`px-2.5 py-1 text-xs rounded-md font-medium transition-all ${val === p.value ? 'bg-green-600 text-white shadow-sm' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
-            >{p.label}</button>
-          ))}
         </div>
       );
     }
