@@ -481,13 +481,38 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
     if (field.data_type === 'number') {
       const minKey = `${fk}_min`;
       const maxKey = `${fk}_max`;
+      const isAmount = ['total_purchase_amount', 'recent_purchase_amount', 'avg_order_value'].some(k => fk.includes(k) || fk.includes('amount') || fk.includes('금액') || fk.includes('price') || fk.includes('가격'));
+      const unit = isAmount ? '원' : '';
+      const minPlaceholder = isAmount ? '예) 200,000' : '최소';
+      const maxPlaceholder = isAmount ? '예) 500,000' : '최대';
       return (
-        <div className="flex items-center gap-1.5 mt-1.5">
-          <input type="number" value={filterValues[minKey] || ''} onChange={e => setFilterValues(prev => ({ ...prev, [minKey]: e.target.value }))}
-            placeholder="최소" className="flex-1 px-2.5 py-1.5 border border-gray-200 rounded-md text-sm focus:ring-1 focus:ring-green-500 focus:border-green-500" />
-          <span className="text-gray-400 text-sm">~</span>
-          <input type="number" value={filterValues[maxKey] || ''} onChange={e => setFilterValues(prev => ({ ...prev, [maxKey]: e.target.value }))}
-            placeholder="최대" className="flex-1 px-2.5 py-1.5 border border-gray-200 rounded-md text-sm focus:ring-1 focus:ring-green-500 focus:border-green-500" />
+        <div className="mt-1.5">
+          <div className="flex items-center gap-1.5">
+            <div className="flex-1 relative">
+              <input type="text" inputMode="numeric" value={filterValues[minKey] ? Number(filterValues[minKey]).toLocaleString() : ''}
+                onChange={e => { const num = e.target.value.replace(/[^0-9]/g, ''); setFilterValues(prev => ({ ...prev, [minKey]: num })); }}
+                placeholder={minPlaceholder}
+                className="w-full px-2.5 py-1.5 border border-gray-200 rounded-md text-sm focus:ring-1 focus:ring-green-500 focus:border-green-500 pr-8" />
+              {unit && <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">{unit}</span>}
+            </div>
+            <span className="text-gray-400 text-sm font-medium">~</span>
+            <div className="flex-1 relative">
+              <input type="text" inputMode="numeric" value={filterValues[maxKey] ? Number(filterValues[maxKey]).toLocaleString() : ''}
+                onChange={e => { const num = e.target.value.replace(/[^0-9]/g, ''); setFilterValues(prev => ({ ...prev, [maxKey]: num })); }}
+                placeholder={maxPlaceholder}
+                className="w-full px-2.5 py-1.5 border border-gray-200 rounded-md text-sm focus:ring-1 focus:ring-green-500 focus:border-green-500 pr-8" />
+              {unit && <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">{unit}</span>}
+            </div>
+          </div>
+          {isAmount && (
+            <div className="flex gap-1 mt-1.5">
+              {[{l:'10만',v:100000},{l:'50만',v:500000},{l:'100만',v:1000000},{l:'500만',v:5000000}].map(p => (
+                <button key={p.v} type="button" onClick={() => setFilterValues(prev => ({ ...prev, [minKey]: String(p.v) }))}
+                  className={`px-2 py-0.5 text-[10px] rounded font-medium transition-all ${filterValues[minKey] === String(p.v) ? 'bg-green-100 text-green-700 border border-green-300' : 'bg-gray-50 text-gray-500 border border-gray-200 hover:bg-gray-100'}`}
+                >{p.l}↑</button>
+              ))}
+            </div>
+          )}
         </div>
       );
     }
@@ -635,9 +660,11 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
                           const isSelected = selectedFields.has(fk);
                           const hasValue = hasFilterValue(fk);
 
+                          // 범위 입력이 필요한 숫자 필드는 2열 차지
+                          const needsWide = isSelected && field.data_type === 'number' && fk !== 'age' && fk !== 'points';
                           return (
                             <div key={fk}
-                              className={`rounded-lg transition-all duration-150 ${isSelected ? 'bg-green-50/80 border border-green-200 p-2.5' : 'border border-transparent p-2.5 hover:bg-gray-50'}`}>
+                              className={`rounded-lg transition-all duration-150 ${needsWide ? 'col-span-2' : ''} ${isSelected ? 'bg-green-50/80 border border-green-200 p-2.5' : 'border border-transparent p-2.5 hover:bg-gray-50'}`}>
                               <label className="flex items-center gap-2 cursor-pointer">
                                 <input type="checkbox" checked={isSelected} onChange={() => toggleField(fk)}
                                   className="w-3.5 h-3.5 text-green-600 rounded focus:ring-green-500 border-gray-300 cursor-pointer" />
