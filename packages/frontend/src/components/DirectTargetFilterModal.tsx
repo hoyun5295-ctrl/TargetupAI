@@ -66,6 +66,12 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
     { label: '90일', value: '90' }, { label: '180일', value: '180' },
     { label: '1년', value: '365' },
   ];
+  const BIRTH_MONTH_PRESETS = [
+    { label: '1월', value: 'month:1' }, { label: '2월', value: 'month:2' }, { label: '3월', value: 'month:3' },
+    { label: '4월', value: 'month:4' }, { label: '5월', value: 'month:5' }, { label: '6월', value: 'month:6' },
+    { label: '7월', value: 'month:7' }, { label: '8월', value: 'month:8' }, { label: '9월', value: 'month:9' },
+    { label: '10월', value: 'month:10' }, { label: '11월', value: 'month:11' }, { label: '12월', value: 'month:12' },
+  ];
   const POINTS_PRESETS = [
     { label: '100↑', value: '100' }, { label: '1천↑', value: '1000' },
     { label: '5천↑', value: '5000' }, { label: '1만↑', value: '10000' },
@@ -226,7 +232,12 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
         if (!value) continue;
         const dbColMap: Record<string, string> = { 'last_purchase_date': 'recent_purchase_date' };
         const dbCol = dbColMap[fieldKey] || fieldKey;
-        filters[dbCol] = { operator: 'days_within', value: parseInt(value) };
+        // 생일 월 필터 (month:N 형식)
+        if (typeof value === 'string' && value.startsWith('month:')) {
+          filters[dbCol] = { operator: 'birth_month', value: parseInt(value.replace('month:', '')) };
+        } else {
+          filters[dbCol] = { operator: 'days_within', value: parseInt(value) };
+        }
         continue;
       }
 
@@ -243,9 +254,11 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
 
       if (!value && value !== false) continue;
 
-      // 숫자
+      // 숫자 — 이상/이하 동적 operator
       if (field.data_type === 'number') {
-        filters[fieldKey] = { operator: 'gte', value: Number(value) };
+        const opKey = `${fieldKey}_op`;
+        const op = filterValues[opKey] || 'gte';
+        filters[fieldKey] = { operator: op, value: Number(value) };
         continue;
       }
 
@@ -418,6 +431,9 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
     // 문자열 + 옵션 → 다중 태그
     if (field.data_type === 'string' && filterOptions[fk]?.length > 0) {
       const selected: string[] = Array.isArray(filterValues[fk]) ? filterValues[fk] : [];
+      // 성별 표시 변환 (DB값 → 한글)
+      const genderMap: Record<string, string> = { 'M': '남성', 'F': '여성', 'm': '남성', 'f': '여성', '남': '남성', '여': '여성' };
+      const getDisplayLabel = (opt: string) => fk === 'gender' ? (genderMap[opt] || opt) : opt;
       return (
         <div className="flex flex-wrap gap-1.5 mt-1.5">
           {filterOptions[fk].map((opt: string) => {
@@ -425,7 +441,7 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
             return (
               <button key={opt} onClick={() => toggleMultiOption(fk, opt)}
                 className={`px-2.5 py-1 text-xs rounded-md font-medium transition-all ${sel ? 'bg-green-600 text-white shadow-sm' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
-              >{opt}</button>
+              >{getDisplayLabel(opt)}</button>
             );
           })}
         </div>
@@ -460,20 +476,31 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
       );
     }
 
-    // 숫자 → 직접 입력
+    // 숫자 → 직접 입력 + 이상/이하 선택
     if (field.data_type === 'number') {
+      const opKey = `${fk}_op`;
+      const currentOp = filterValues[opKey] || 'gte';
       return (
-        <input type="number" value={filterValues[fk] || ''} onChange={e => setFilterValues(prev => ({ ...prev, [fk]: e.target.value }))}
-          placeholder="이상" className="mt-1.5 w-full px-2.5 py-1.5 border border-gray-200 rounded-md text-sm focus:ring-1 focus:ring-green-500 focus:border-green-500" />
+        <div className="flex gap-1.5 mt-1.5">
+          <select value={currentOp} onChange={e => setFilterValues(prev => ({ ...prev, [opKey]: e.target.value }))}
+            className="px-2 py-1.5 border border-gray-200 rounded-md text-sm bg-white focus:ring-1 focus:ring-green-500">
+            <option value="gte">이상</option>
+            <option value="lte">이하</option>
+          </select>
+          <input type="number" value={filterValues[fk] || ''} onChange={e => setFilterValues(prev => ({ ...prev, [fk]: e.target.value }))}
+            placeholder="값 입력" className="flex-1 px-2.5 py-1.5 border border-gray-200 rounded-md text-sm focus:ring-1 focus:ring-green-500 focus:border-green-500" />
+        </div>
       );
     }
 
-    // 날짜 → 기간 프리셋 태그
+    // 날짜 → 생일이면 월 프리셋, 그 외 기간 프리셋
     if (field.data_type === 'date') {
       const val = filterValues[fk] || '';
+      const isBirthday = fk === 'birthday' || fk === 'birth_date';
+      const presets = isBirthday ? BIRTH_MONTH_PRESETS : DAYS_PRESETS;
       return (
         <div className="flex flex-wrap gap-1.5 mt-1.5">
-          {DAYS_PRESETS.map(p => (
+          {presets.map(p => (
             <button key={p.value} onClick={() => setFilterValues(prev => ({ ...prev, [fk]: prev[fk] === p.value ? '' : p.value }))}
               className={`px-2.5 py-1 text-xs rounded-md font-medium transition-all ${val === p.value ? 'bg-green-600 text-white shadow-sm' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
             >{p.label}</button>

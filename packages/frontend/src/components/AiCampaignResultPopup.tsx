@@ -260,14 +260,7 @@ export default function AiCampaignResultPopup({
                             <div className="flex gap-2">
                               <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-xs ${selectedChannel === 'KAKAO' ? 'bg-yellow-100' : 'bg-purple-100'}`}>{selectedChannel === 'KAKAO' ? '💬' : '📱'}</div>
                               <div className={`rounded-2xl rounded-tl-sm p-3 shadow-sm border text-[12px] leading-[1.6] whitespace-pre-wrap break-all overflow-hidden text-gray-700 max-w-[95%] ${selectedChannel === 'KAKAO' ? 'bg-yellow-50 border-yellow-200' : 'bg-white border-gray-100'}`}>
-                              {(() => {
-                                  let text = msg.message_text || '';
-                                  const sc = sampleCustomer || {};
-                                  if (Object.keys(sc).length > 0) {
-                                    Object.entries(sc).forEach(([k, v]) => { text = text.replace(new RegExp(`%${k}%`, 'g'), v); });
-                                  }
-                                  return wrapAdText(text);
-                                })()}
+                              {wrapAdText(msg.message_text || '')}
                               </div>
                             </div>
                             )}

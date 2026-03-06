@@ -102,6 +102,9 @@ function buildDynamicFilter(filters: any, startIndex: number) {
         daysAgo.setDate(daysAgo.getDate() - parseInt(value));
         whereClause += ` AND ${field} >= $${paramIndex++}`;
         params.push(daysAgo.toISOString().split('T')[0]);
+      } else if (operator === 'birth_month') {
+        whereClause += ` AND EXTRACT(MONTH FROM ${field}) = $${paramIndex++}`;
+        params.push(parseInt(value));
       }
     } else if (field === 'age') {
       // age 컬럼 직접 사용 (birth_date 없는 고객도 필터 가능)

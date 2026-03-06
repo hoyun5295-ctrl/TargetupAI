@@ -103,6 +103,12 @@ interface TargetSendModalProps {
   // 발송 확인
   setSendConfirm: (s: any) => void;
 
+  // 담당자 테스트
+  handleTargetTestSend?: () => void;
+  testSending?: boolean;
+  testCooldown?: boolean;
+  testSentResult?: string | null;
+
   // 발송 중
   targetSending: boolean;
 
@@ -139,6 +145,10 @@ export default function TargetSendModal({
   smsOverrideAccepted, setSmsOverrideAccepted,
   setPendingBytes, setShowLmsConfirm, setShowSmsConvert,
   setSendConfirm,
+  handleTargetTestSend,
+  testSending: testSendingProp,
+  testCooldown: testCooldownProp,
+  testSentResult: testSentResultProp,
   targetSending,
   onResetTarget,
 }: TargetSendModalProps) {
@@ -524,9 +534,16 @@ export default function TargetSendModal({
                 </div>
               )}
 
-              {/* 미리보기 + 스팸필터 버튼 */}
+              {/* 테스트 결과 표시 */}
+              {testSentResultProp && (
+                <div className={`mx-3 mt-1.5 p-2.5 rounded-lg text-xs whitespace-pre-wrap ${testSentResultProp.startsWith('✅') ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+                  {testSentResultProp}
+                </div>
+              )}
+
+              {/* 미리보기 + 스팸필터 + 담당자테스트 버튼 */}
               <div className="px-3 py-1.5 border-t">
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-3 gap-2">
                   <button
                     onClick={handlePreview}
                     className="py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-sm font-medium transition-colors"
@@ -534,7 +551,12 @@ export default function TargetSendModal({
                   <button
                     onClick={handleSpamFilter}
                     className="py-2.5 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg text-sm font-medium transition-colors"
-                  >🛡️ 스팸필터테스트</button>
+                  >🛡️ 스팸필터</button>
+                  <button
+                    onClick={handleTargetTestSend}
+                    disabled={testSendingProp || testCooldownProp || !targetMessage.trim()}
+                    className="py-2.5 bg-orange-500 hover:bg-orange-600 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >{testSendingProp ? '📱 발송중...' : testCooldownProp ? '⏳ 10초 대기' : '📱 담당자테스트'}</button>
                 </div>
               </div>
 

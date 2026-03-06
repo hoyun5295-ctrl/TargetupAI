@@ -1563,6 +1563,51 @@ const campaignData = {
     }
   };
 
+  // 직접타겟발송 담당자 테스트
+  const handleTargetTestSend = async () => {
+    setTestSending(true);
+    setTestSentResult(null);
+    try {
+      if (!targetMessage.trim()) {
+        setToast({ show: true, type: 'error', message: '메시지를 입력해주세요' });
+        setTestSending(false);
+        return;
+      }
+      let msg = targetMessage;
+      if (adTextEnabled) {
+        const prefix = targetMsgType === 'SMS' ? '(광고)' : '(광고) ';
+        const suffix = targetMsgType === 'SMS'
+          ? `\n무료거부${optOutNumber.replace(/-/g, '')}`
+          : `\n무료수신거부 ${formatRejectNumber(optOutNumber)}`;
+        msg = prefix + msg + suffix;
+      }
+      const token = localStorage.getItem('token');
+      const res = await fetch('/api/campaigns/test-send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          messageContent: msg,
+          messageType: targetMsgType,
+          subject: targetSubject || '',
+          mmsImagePaths: mmsUploadedImages.map(img => img.serverPath),
+        }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        const contactList = data.contacts?.map((c: any) => `${c.name}(${c.phone})`).join(', ') || '';
+        setTestSentResult(`✅ ${data.message}\n${contactList}`);
+      } else {
+        setTestSentResult(`❌ ${data.error}`);
+      }
+    } catch (error) {
+      setTestSentResult('❌ 테스트 발송 실패');
+    } finally {
+      setTestSending(false);
+      setTestCooldown(true);
+      setTimeout(() => { setTestCooldown(false); setTestSentResult(null); }, 10000);
+    }
+  };
+
   const handleLogout = () => {
     logout();
     navigate('/login');
@@ -2610,6 +2655,10 @@ const campaignData = {
         setSendConfirm={setSendConfirm}
         targetSending={targetSending}
         onResetTarget={() => { setShowTargetSend(false); setShowDirectTargeting(true); }}
+        handleTargetTestSend={handleTargetTestSend}
+        testSending={testSending}
+        testCooldown={testCooldown}
+        testSentResult={testSentResult}
       />
 
       {/* 예약전송 달력 모달 (공용) */}
