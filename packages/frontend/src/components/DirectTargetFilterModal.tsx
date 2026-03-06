@@ -78,6 +78,21 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
     { label: '5만↑', value: '50000' },
   ];
 
+  // 성별 필드 자동 감지 (다양한 변수명 패턴 매칭)
+  const GENDER_FIELD_PATTERNS = ['gender', 'sex', '성별', '젠더', 'giender', 'gneder'];
+  const isGenderField = (key: string) => {
+    const lower = key.toLowerCase().replace(/[\s_-]/g, '');
+    return GENDER_FIELD_PATTERNS.some(p => lower === p || lower.includes(p));
+  };
+  // 성별 값 → 한글 표시 (다양한 DB 값 대응)
+  const GENDER_DISPLAY_MAP: Record<string, string> = {
+    'M': '남성', 'm': '남성', 'male': '남성', 'Male': '남성', 'MALE': '남성',
+    '남': '남성', '남자': '남성', '남성': '남성', '1': '남성',
+    'F': '여성', 'f': '여성', 'female': '여성', 'Female': '여성', 'FEMALE': '여성',
+    '여': '여성', '여자': '여성', '여성': '여성', '2': '여성', '0': '여성',
+  };
+  const getGenderLabel = (val: string) => GENDER_DISPLAY_MAP[val] || val;
+
   // 금액 필드 판별
   const isAmountField = (key: string) => ['total_purchase_amount', 'recent_purchase_amount', 'avg_order_value'].includes(key);
 
@@ -431,9 +446,8 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
     // 문자열 + 옵션 → 다중 태그
     if (field.data_type === 'string' && filterOptions[fk]?.length > 0) {
       const selected: string[] = Array.isArray(filterValues[fk]) ? filterValues[fk] : [];
-      // 성별 표시 변환 (DB값 → 한글)
-      const genderMap: Record<string, string> = { 'M': '남성', 'F': '여성', 'm': '남성', 'f': '여성', '남': '남성', '여': '여성' };
-      const getDisplayLabel = (opt: string) => fk === 'gender' ? (genderMap[opt] || opt) : opt;
+      // 성별 표시 변환 (DB값 → 한글) — 다양한 변수명 자동 감지
+      const getDisplayLabel = (opt: string) => isGenderField(fk) ? getGenderLabel(opt) : opt;
       return (
         <div className="flex flex-wrap gap-1.5 mt-1.5">
           {filterOptions[fk].map((opt: string) => {
