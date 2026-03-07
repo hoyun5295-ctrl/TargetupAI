@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import { COMPANY_NAME, CEO_NAME, COMPANY_PHONE } from '../constants/company';
 
 export default function PrivacyPage() {
   return (
@@ -10,7 +11,7 @@ export default function PrivacyPage() {
 
             <section>
               <h2 className="text-lg font-semibold text-gray-800 mt-6 mb-2">제1조 (목적)</h2>
-              <p>주식회사 인비토(이하 "회사")는 「개인정보 보호법」에 따라 이용자의 개인정보를 보호하고, 이와 관련한 고충을 신속하고 원활하게 처리할 수 있도록 다음과 같이 개인정보처리방침을 수립·공개합니다.</p>
+              <p>{COMPANY_NAME}(이하 "회사")는 「개인정보 보호법」에 따라 이용자의 개인정보를 보호하고, 이와 관련한 고충을 신속하고 원활하게 처리할 수 있도록 다음과 같이 개인정보처리방침을 수립·공개합니다.</p>
             </section>
 
             <section>
@@ -56,7 +57,7 @@ export default function PrivacyPage() {
 
             <section>
               <h2 className="text-lg font-semibold text-gray-800 mt-6 mb-2">제7조 (정보주체의 권리·의무)</h2>
-              <p>이용자는 언제든지 자신의 개인정보에 대해 열람, 정정, 삭제, 처리정지를 요청할 수 있습니다. 이를 위해 회사 고객센터(1800-8125)로 연락하시면 지체 없이 조치하겠습니다.</p>
+              <p>이용자는 언제든지 자신의 개인정보에 대해 열람, 정정, 삭제, 처리정지를 요청할 수 있습니다. 이를 위해 회사 고객센터({COMPANY_PHONE})로 연락하시면 지체 없이 조치하겠습니다.</p>
             </section>
 
             <section>
@@ -70,8 +71,8 @@ export default function PrivacyPage() {
             <section>
               <h2 className="text-lg font-semibold text-gray-800 mt-6 mb-2">제9조 (개인정보 보호책임자)</h2>
               <p>회사는 개인정보 처리에 관한 업무를 총괄하는 개인정보 보호책임자를 다음과 같이 지정하고 있습니다.</p>
-              <p className="mt-2">- 개인정보 보호책임자: 유호윤 (대표이사)</p>
-              <p>- 연락처: 1800-8125</p>
+              <p className="mt-2">- 개인정보 보호책임자: {CEO_NAME} (대표이사)</p>
+              <p>- 연락처: {COMPANY_PHONE}</p>
               <p>- 이메일: privacy@invito.kr</p>
             </section>
 
@@ -90,7 +91,7 @@ export default function PrivacyPage() {
 
       <footer className="bg-gray-800 text-gray-400 py-4 px-4">
         <div className="max-w-4xl mx-auto text-center text-xs">
-          <p>© 2026 INVITO. All rights reserved.</p>
+          <p>© {new Date().getFullYear()} INVITO. All rights reserved.</p>
         </div>
       </footer>
     </div>

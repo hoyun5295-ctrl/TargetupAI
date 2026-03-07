@@ -168,10 +168,6 @@ router.get('/send', async (req: Request, res: Response) => {
         const cSms = Number(costRes.rows[0]?.cost_per_sms) || DEFAULT_COSTS.sms;
         const cLms = Number(costRes.rows[0]?.cost_per_lms) || DEFAULT_COSTS.lms;
         testSummary.cost = Math.round(((testSummary.sms - testSummary.pending) * cSms + testSummary.lms * cLms) * 10) / 10;
-        // 더 정확하게: 성공 건만 과금 (sms 성공 개수 × 단가)
-        // 담당자 성공 sms/lms 분리는 MySQL에서 이미 구분됨
-        // 스팸필터는 completed 건 전체 과금 (SMS/LMS 비율로)
-        testSummary.cost = Math.round((testSummary.sms * cSms + testSummary.lms * cLms) * 10) / 10;
       } catch (mysqlErr) {
         console.error('테스트 통계 조회 실패:', mysqlErr);
       }

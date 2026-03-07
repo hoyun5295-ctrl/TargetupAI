@@ -4,6 +4,7 @@ import { authenticate } from '../middlewares/auth';
 import { checkAPIStatus, extractVarCatalog, generateCustomMessages, generateMessages, parseBriefing, recommendTarget } from '../services/ai';
 import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getGenderVariants, getRegionVariants } from '../utils/normalize';
 import { FIELD_MAP } from '../utils/standard-field-map';
+import { isValidCustomFieldKey } from '../utils/safe-field-name';
 
 
 // ============================================================
@@ -141,10 +142,11 @@ function buildFilterWhereClause(filters: any, startParamIndex: number): {
     }
   }
 
-  // custom_fields
+  // custom_fields — 화이트리스트 검증 적용
   Object.keys(filters || {}).forEach(key => {
     if (key.startsWith('custom_fields.')) {
       const fieldName = key.replace('custom_fields.', '');
+      if (!isValidCustomFieldKey(fieldName)) return; // 무효 키 무시
       const condition = filters[key];
       const value = getValue(condition);
       const operator = condition?.operator || 'eq';

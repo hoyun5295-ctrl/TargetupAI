@@ -4,6 +4,9 @@ import { FIELD_MAP, getFieldByKey } from '../utils/standard-field-map';
 import { query } from '../config/database';
 import { AI_MODELS, AI_MAX_TOKENS, TIMEOUTS } from '../config/defaults';
 
+if (!process.env.ANTHROPIC_API_KEY) console.warn('[AI] ANTHROPIC_API_KEY not configured — Claude AI 기능 비활성 상태');
+if (!process.env.OPENAI_API_KEY) console.warn('[AI] OPENAI_API_KEY not configured — OpenAI 기능 비활성 상태');
+
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY || '',
 });
@@ -924,7 +927,7 @@ ${hasKakaoProfile ? '⚠️ 이 고객사는 카카오 발신 프로필이 등�
     return {
       filters: result.filters,
       reasoning: result.reasoning,
-      estimated_count: Math.round((customerStats.total * (result.estimated_percentage || 10)) / 100),
+      estimated_count: Math.round((customerStats.total * (result.estimated_percentage ?? 10)) / 100),
       recommended_channel: result.recommended_channel || 'SMS',
       channel_reason: result.channel_reason || '기본 채널입니다.',
       is_ad: result.is_ad !== false,

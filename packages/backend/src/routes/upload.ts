@@ -343,9 +343,10 @@ router.post('/save', authenticate, async (req: Request, res: Response) => {
       });
     }
 
-    // 파일 존재 확인
+    // 파일 존재 확인 — path.basename으로 경로 탐색 방어
     const uploadDir = path.join(__dirname, '../../uploads');
-    const filePath = path.join(uploadDir, fileId);
+    const safeFileId = path.basename(fileId);
+    const filePath = path.join(uploadDir, safeFileId);
     
     if (!fs.existsSync(filePath)) {
       return res.status(404).json({ error: '파일을 찾을 수 없습니다. 다시 업로드해주세요.' });

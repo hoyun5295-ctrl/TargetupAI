@@ -4,6 +4,7 @@ import { authenticate } from '../middlewares/auth';
 import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getGenderVariants } from '../utils/normalize';
 import { FIELD_MAP, getFieldByKey, getColumnFields, CATEGORY_LABELS } from '../utils/standard-field-map';
 import { DEFAULT_COSTS, redis, CACHE_TTL } from '../config/defaults';
+import { isValidCustomFieldKey } from '../utils/safe-field-name';
 
 const router = Router();
 
@@ -132,7 +133,8 @@ function buildDynamicFilter(filters: any, startIndex: number) {
         params.push(`%${value}%`);
       }
     } else {
-      // custom_fields (JSONB) 처리
+      // custom_fields (JSONB) 처리 — 화이트리스트 검증 적용
+      if (!isValidCustomFieldKey(field)) continue; // 무효 키 무시
       if (operator === 'eq') {
         whereClause += ` AND custom_fields->>'${field}' = $${paramIndex++}`;
         params.push(String(value));

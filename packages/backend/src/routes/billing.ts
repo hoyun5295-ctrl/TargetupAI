@@ -3,6 +3,7 @@ import nodemailer from 'nodemailer';
 import { authenticate, requireSuperAdmin } from '../middlewares/auth';
 import pool, { mysqlQuery } from '../config/database';
 import { SUCCESS_CODES_SQL, PENDING_CODES_SQL } from '../utils/sms-result-map';
+import { INVITO_INFO } from '../config/defaults';
 
 // SMTP transporter (재사용)
 const getTransporter = () => nodemailer.createTransport({
@@ -657,12 +658,12 @@ router.get('/:id/pdf', async (req: Request, res: Response) => {
     setFont(false);
     doc.fontSize(9).fillColor(dark);
     y += 18;
-    doc.text('상호: 주식회사 인비토 (INVITO corp.)', 50, y); y += 14;
-    doc.text('대표: 유 호 윤', 50, y); y += 14;
-    doc.text('사업자번호: 667-86-00578', 50, y); y += 14;
-    doc.text('업태/종목: 서비스 / 소프트웨어및앱개발 공급', 50, y); y += 14;
-    doc.text('주소: 서울시 송파구 오금로 36길46, 4층', 50, y); y += 14;
-    doc.text('연락처: 1800-8125 / mobile@invitocorp.com', 50, y);
+    doc.text(`상호: ${INVITO_INFO.companyName}`, 50, y); y += 14;
+    doc.text(`대표: ${INVITO_INFO.ceoName}`, 50, y); y += 14;
+    doc.text(`사업자번호: ${INVITO_INFO.bizNumber}`, 50, y); y += 14;
+    doc.text(`업태/종목: ${INVITO_INFO.bizType}`, 50, y); y += 14;
+    doc.text(`주소: ${INVITO_INFO.address}`, 50, y); y += 14;
+    doc.text(`연락처: ${INVITO_INFO.phone} / ${INVITO_INFO.email}`, 50, y);
 
     y = 130;
     setFont(true);
@@ -1266,12 +1267,12 @@ router.get('/invoices/:id/pdf', async (req: Request, res: Response) => {
     setFont(false);
     doc.fontSize(9).fillColor(dark);
     iy += 18;
-    doc.text('상호: 주식회사 인비토 (INVITO corp.)', 50, iy); iy += 14;
-    doc.text('대표: 유 호 윤', 50, iy); iy += 14;
-    doc.text('사업자번호: 667-86-00578', 50, iy); iy += 14;
-    doc.text('업태/종목: 서비스 / 소프트웨어및앱개발 공급', 50, iy); iy += 14;
-    doc.text('주소: 서울시 송파구 오금로 36길46, 4층', 50, iy); iy += 14;
-    doc.text('연락처: 1800-8125 / mobile@invitocorp.com', 50, iy);
+    doc.text(`상호: ${INVITO_INFO.companyName}`, 50, iy); iy += 14;
+    doc.text(`대표: ${INVITO_INFO.ceoName}`, 50, iy); iy += 14;
+    doc.text(`사업자번호: ${INVITO_INFO.bizNumber}`, 50, iy); iy += 14;
+    doc.text(`업태/종목: ${INVITO_INFO.bizType}`, 50, iy); iy += 14;
+    doc.text(`주소: ${INVITO_INFO.address}`, 50, iy); iy += 14;
+    doc.text(`연락처: ${INVITO_INFO.phone} / ${INVITO_INFO.email}`, 50, iy);
 
     iy = 120;
     setFont(true);
@@ -1470,7 +1471,7 @@ router.post('/:id/send-email', async (req: Request, res: Response) => {
           </div>
           <p style="font-size: 13px; color: #9CA3AF; margin-top: 16px;">
             상세 내역은 첨부된 PDF를 확인해주세요.<br/>
-            문의사항이 있으시면 1800-8125로 연락 부탁드립니다.
+            문의사항이 있으시면 ${INVITO_INFO.phone}로 연락 부탁드립니다.
           </p>
         </div>
         <div style="padding: 16px; text-align: center; font-size: 11px; color: #9CA3AF; border: 1px solid #E5E7EB; border-top: none; border-radius: 0 0 12px 12px; background: #F9FAFB;">
@@ -1582,7 +1583,7 @@ router.post('/invoices/:id/send-email', async (req: Request, res: Response) => {
           </div>
           <p style="font-size: 13px; color: #9CA3AF; margin-top: 16px;">
             상세 내역은 첨부된 PDF를 확인해주세요.<br/>
-            문의사항이 있으시면 1800-8125로 연락 부탁드립니다.
+            문의사항이 있으시면 ${INVITO_INFO.phone}로 연락 부탁드립니다.
           </p>
         </div>
         <div style="padding: 16px; text-align: center; font-size: 11px; color: #9CA3AF; border: 1px solid #E5E7EB; border-top: none; border-radius: 0 0 12px 12px; background: #F9FAFB;">

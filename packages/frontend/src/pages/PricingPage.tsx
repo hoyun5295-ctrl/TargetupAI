@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
 import { formatDate } from '../utils/formatDate';
+import { COMPANY_PHONE, COMPANY_PHONE_TEL } from '../constants/company';
 
 interface Plan {
   id: string;
@@ -425,11 +426,11 @@ export default function PricingPage() {
             </div>
             <div className="flex items-stretch gap-3">
               <a
-                href="tel:18008125"
+                href={`tel:${COMPANY_PHONE_TEL}`}
                 className="px-6 py-3 bg-white text-gray-900 rounded-lg font-medium hover:bg-gray-100 transition-colors text-center flex flex-col justify-center"
               >
                 <div className="text-xs text-gray-500">대표번호</div>
-                <div>1800-8125</div>
+                <div>{COMPANY_PHONE}</div>
               </a>
               <button
                 onClick={openInquiryModal}

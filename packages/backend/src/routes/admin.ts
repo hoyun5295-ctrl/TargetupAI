@@ -169,7 +169,7 @@ router.post('/users/:id/reset-password', authenticate, requireSuperAdmin, async 
         
         await mysqlQuery(
           `INSERT INTO ${ALL_SMS_TABLES[0]} (dest_no, call_back, msg_contents, msg_type, sendreq_time, status_code, rsv1) VALUES (?, ?, ?, 'S', NOW(), 100, '1')`,
-          [phone, '18008125', message]
+          [phone, process.env.SYSTEM_SMS_CALLBACK || (() => { throw new Error('SYSTEM_SMS_CALLBACK 환경변수가 설정되지 않았습니다'); })(), message]
         );
         smsSent = true;
       } catch (smsError) {

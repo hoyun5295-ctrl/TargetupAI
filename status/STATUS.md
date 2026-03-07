@@ -106,6 +106,15 @@
 
 ---
 
+### ✅ D59 — 2차 코드 전수점검 (2026-03-07) — 완료
+
+> **배경:** 상용화 전 전체 코드 레벨 정밀 감사. 1차 점검(03-05 교통정리) 이후 코드 실물 기반 전수점검.
+> **범위:** 전체 백엔드(routes, services, config, utils) + 전체 프론트엔드(pages, components) + company-frontend
+> **결과:** P1~P6 총 28건 수정 완료, P7 장기 8건 백로그 기록. 기간계 무접촉. tsc 3패키지 통과.
+> **상세:** `status/교통정리-전수점검-20260305.md` 섹션 11~14 참조 + `status/CODE-REVIEW-P7-BACKLOG.md`
+
+---
+
 ### 🔧 D53 — 요금제별 기능 게이팅 구현 (2026-03-04~)
 
 > **배경:** 상용화 직전, 레거시 웹 업체를 무료요금제로 강제이관 후 유료 전환 유도 전략. 기존 plans 테이블에 5단계 요금제 존재하나, 기능별 잠금이 AI 분석(`ai_analysis_level`)과 고객DB 한도(`max_customers`)에만 적용됨. 스팸필터·AI메시징·고객DB/타겟팅 등 핵심 기능에 요금제별 게이팅이 필요.
@@ -624,7 +633,7 @@ QTmsg status_code, 통신사 코드, 스팸필터 판정 결과를 한 곳에서
 - [ ] 프론트엔드 난독화 (vite-plugin-obfuscator, 런칭 직전 적용)
 - [ ] 슈퍼관리자 IP 화이트리스트 설정
 - [x] 외부 자동 백업 구축 — ✅ 2026-03-05 완료: pg_dump+mysqldump → 59번 서버(58.227.193.59) SCP 전송, SSH 키 인증, crontab 매일 03:00 KST, 7일 로컬 보관. 스크립트: /home/administrator/backups/backup.sh
-- [x] 웹 애플리케이션 SQL Injection 점검 — ✅ D56 테이블명 화이트리스트 + D57-C4 sendTime 파라미터화 완료 (SSRF 별도)
+- [x] 웹 애플리케이션 SQL Injection 점검 — ✅ D56 테이블명 화이트리스트 + D57-C4 sendTime 파라미터화 + D59 custom_fields JSONB 키 화이트리스트(3파일) + dateFilter 파라미터화 완료 (SSRF 별도)
 - [ ] SSH 키 인증 전용 전환 (비밀번호 로그인 비활성화) — 선택
 
 ### 인비토AI (메시징 특화 모델)
@@ -661,6 +670,8 @@ QTmsg status_code, 통신사 코드, 스팸필터 판정 결과를 한 곳에서
 | D55 | 03-05 | 보안 긴급점검 + 슈퍼관리자 세션 관리 + 세션 타이머 UI | JWT_SECRET/MYSQL_PASSWORD fail-fast(폴백값 제거, 미설정 시 서버 기동 차단). mms-images.ts 자체 JWT→공용 authenticate. Math.random()→crypto.randomInt(). 슈퍼관리자 3중 구멍 수정(세션 미생성/세션체크 건너뛰기/프론트 감시 스킵→전부 해소, 30분 타임아웃). user_sessions.user_id FK 제거(DDL-D55, super_admins ID 허용). expires_at 서버측 만료 강제(브라우저 닫기→재오픈 시 서버 차단). dotenv.config() app.ts 최상단 이동. 은행 스타일 세션 타이머 UI 전체 사용자 적용. **코드+DDL+배포 완료. 기간계 무접촉** |
 | D56 | 03-05 | P0-Q1 SQL Injection 방지 + 스팸필터 선불차감 누락 수정 | sms-table-validator.ts 신규(화이트리스트 정규식). admin.ts 라인그룹 생성/수정 API 입구 검증. campaigns.ts 환경변수 경고+DB 조회 필터링+prepaidDeduct/prepaidRefund export. spam-filter.ts 선불차감 추가(테스트폰×메시지타입 건수). 수정 3파일+신규 1파일. **기간계 무접촉. 배포+실서버 검증 완료** |
 | D57 | 03-05 | P0-C1~C5 발송 파이프라인 안정화 5건 전체 구현 | **(C1)** AI발송+직접발송 per-customer/per-batch try/catch→sentCount 추적→부분실패 시 실패분만 선별적 환불(기존 all-or-nothing 제거). **(C2)** normalize-phone.ts 신규(normalizePhone 단일함수, `/\D/g` 비숫자 전체 제거)→campaigns.ts 27곳 `replace(/-/g,'')` 통일 교체+**directCustomerMap 키 불일치 핵심버그 수정**(L1962 raw phone→normalizePhone). **(C3)** calcSplitSendTime() 헬퍼 신규—SEND_HOURS.end 초과 시 다음날 start로 이월. defaults.ts SEND_HOURS 설정 추가(환경변수 SEND_START_HOUR/SEND_END_HOUR). 직접발송 SMS+카카오 2경로 적용. **(C4)** AI발송 sendTime `'${sendTime}'` 템플릿 리터럴→`?` 파라미터화(SQL Injection 차단). **(C5)** 테스트발송 bill_id `userId\|\|''`→`randomUUID()` 고유 추적ID+requestUid 통일+실패건 DB 기록+응답에 testRequestUid 반환. 수정 2파일(campaigns.ts, defaults.ts)+신규 1파일(normalize-phone.ts). TypeScript 0에러. **기간계 발송 흐름 자체는 변경 없음 — 에러 처리/환불/정규화 보강만** |
+| D58 | 03-06 | 12차 버그리포트 4건 수정 + 기능개선 3건 — 예약취소 Agent 대응, 발송결과 타임아웃, 필터 UI 전면개선, 담당자테스트 | **(B12-01)** 예약취소 DELETE+UPDATE 이중처리(Agent 픽업건 9999 코드) **(B12-02)** sync-results 60분 타임아웃+환불 **(B12-03)** 스팸필터 subject 전달 **(B12-04)** 특수문자/보관함/저장 모달 공용화 **(F12-01)** AI 머지태그 원본 표시 **(F12-02)** 필터 UI: 성별 자동감지 패턴매칭(gender/sex/성별)+DB값 자동매핑(M/F/male/남/여/1/0→한글), 생일 월별 프리셋, 금액 최소~최대 범위입력(콤마포맷+원 단위+빠른선택+col-span-2), 수신자 테이블 성별 한글 표시 **(F12-03)** 타겟발송 담당자테스트 버튼(3열 그리드+10초 쿨다운). 수정 7파일. **기간계 무접촉** |
+| D59 | 03-07 | 2차 코드 전수점검 P1~P6 총 28건 수정 — 정산정확성+SQL Injection+입력검증+하드코딩+인프라+프론트엔드 | **(P1)** ai.ts `\|\|10`→`??10`, analysis.ts 채널별 정확비용, manage-stats.ts dead code 삭제. **(P2)** safe-field-name.ts 신규+campaigns/customers/ai 3파일 custom_fields 화이트리스트+dateFilter 파라미터화. **(P3)** mms-images UUID검증, upload.ts path.basename, manage-users 비밀번호8~72자. **(P4)** SYSTEM_SMS_CALLBACK 환경변수화, INVITO_INFO 상수+billing 4곳교체, ©연도 동적화5곳, constants/company.ts 신규+15곳교체. **(P5)** Redis error handler, AI API 키 warn, process 에러핸들러(PM2 연계), PG Pool 환경변수설정. **(P6)** Dashboard setInterval cleanup, optOutNumber 안전장치, 교차중복발송방지, console.log삭제. 수정20파일+신규4파일. **기간계 무접촉. tsc 3패키지 전체 통과** |
 | D53 | 03-04 | 요금제별 기능 게이팅 — 무료/스타터/베이직/프로/비즈니스 5단계 기능 잠금 | plans 테이블 3컬럼 추가(customer_db_enabled/spam_filter_enabled/ai_messaging_enabled). 백엔드 6파일 API 게이팅 + 프론트 5파일 UI 잠금. 무료=직접발송만, 스타터=+스팸필터+고객DB+타겟팅, 베이직=+AI발송, 프로=+AI분석basic, 비즈니스=+AI분석advanced. **기간계 무접촉** | (1) campaigns.ts `'18008125'` 폴백→DB 필수화 (2) alert()→setToast 전면교체(40+곳) (3) ai.ts `'0807196700'`→DB 동적조회 (4) 단가 5파일→defaults.ts (5) AI모델명 4파일→AI_MODELS (6) Redis 4곳→공유인스턴스 (7) 타임아웃/배치/캐시TTL/RateLimit 12파일→중앙상수. **총 21건 전체 해소, 12파일 수정, 기간계 무접촉** |
 
 **아카이브:** D1-AI발송2분기(02-22) | D2-브리핑방식(02-22) | D3-개인화필드체크박스(02-22) | D4-textarea제거(02-22) | D5-별도컴포넌트분리(02-22) | D6-대시보드레이아웃(02-22) | D7-헤더탭스타일(02-23) | D8-AUTO/PRO뱃지(02-23) | D9-캘린더상태기준(02-23) | D10-6차세션분할(02-23) | D11-KCP전환(02-23) | D12-이용약관(02-23) | D13-수신거부SoT(02-23) | D14-7차3세션분할(02-24) | D15-제목머지→D28번복(02-25) | D16-스팸테스트과금(02-25) | D17-테스트통계확장(02-25) | D18-정산자체헬퍼(02-25) | D19-구독상태필드(02-25) | D20-AI분석차별화(02-25) | D21-planInfo실시간(02-25) | D22-스팸잠금직접발송만(02-25) | D23-preview보안(02-25) | D24-run세션1완전구현(02-25) | D25-pdfkit선택(02-25) | D26-분석캐싱24h(02-25) | D27-비즈니스3회최적화(02-25) | D28-제목머지제거(02-25) | D29-5경로전수점검(02-25) | D30-즉시sending전환(02-25) | D31-GPT fallback(02-25) | D32-발송파이프라인복구(02-26) | D33-messageUtils통합(02-26) | D34-스팸필터DB직접조회(02-26) | D35-선불환불보장(02-26) | D-대시보드모달분리(02-23): 8,039줄→4,964줄
@@ -688,7 +699,7 @@ QTmsg status_code, 통신사 코드, 스팸필터 판정 결과를 한 곳에서
 | R21 | standard_fields ↔ 코드 하드코딩 불일치 | 1 | 5 | 5 | ✅ 해결: D39 3세션 완료 — FIELD_MAP 단일 기준 |
 | R22 | MySQL 외부 노출 → 랜섬웨어/데이터 삭제 | 1 | 5 | 5 | ✅ 해결: D49 — 127.0.0.1 바인딩+smsuser DROP 제거+비밀번호 강화+fail2ban+UFW |
 | R23 | Docker 컨테이너 재생성 시 포트 바인딩 0.0.0.0 실수 | 2 | 5 | 10 | ⚠️ 운영: 컨테이너 작업 시 반드시 `docker ps --format` 포트 확인. OPS.md에 안전 명령어 기록 |
-| R24 | SQL Injection → 내부 DB 공격 (127.0.0.1 우회) | 1 | 5 | 5 | ✅ 해결: D56 — sms-table-validator.ts 화이트리스트(정규식 SMSQ_SEND 패턴), admin.ts 라인그룹 API 입구 검증, campaigns.ts 환경변수+DB 조회 검증. 발송 로직 무접촉 |
+| R24 | SQL Injection → 내부 DB 공격 (127.0.0.1 우회) | 1 | 5 | 5 | ✅ 해결: D56 테이블명 화이트리스트 + D57-C4 sendTime 파라미터화 + **D59 custom_fields JSONB 키 화이트리스트(safe-field-name.ts 신규, campaigns/customers/ai 3파일 적용) + dateFilter MySQL 파라미터화 + mms-images UUID 검증 + upload.ts path.basename 경로탐색 방어** |
 | R29 | 스팸필터 테스트 선불 차감 누락 → 무과금 발송 | 1 | 3 | 3 | ✅ 해결: D56 — spam-filter.ts에 prepaidDeduct 적용, 테스트폰×메시지타입 건수 차감 |
 | R26 | JWT_SECRET/MYSQL_PASSWORD 환경변수 누락 → 서버 기동 실패 | 1 | 5 | 5 | ✅ 해결: D55 — fail-fast 적용, 폴백값 완전 제거. dotenv.config() app.ts 최상단 이동으로 로딩 순서 보장 |
 | R27 | 슈퍼관리자 세션 무제한 → 토큰 탈취 시 24시간 악용 | 1 | 5 | 5 | ✅ 해결: D55 — 세션 레코드 생성+30분 타임아웃+서버측 세션 체크 적용 |
@@ -698,6 +709,11 @@ QTmsg status_code, 통신사 코드, 스팸필터 판정 결과를 한 곳에서
 | R31 | 분할발송 시간 오버플로우 → 심야/새벽 발송 | 1 | 4 | 4 | ✅ 해결: D57 C3 — calcSplitSendTime() SEND_HOURS 경계 체크, 환경변수 기반 |
 | R32 | AI발송 sendTime SQL Injection | 1 | 5 | 5 | ✅ 해결: D57 C4 — 템플릿 리터럴 삽입 제거, ? 파라미터화 |
 | R33 | 테스트발송 bill_id 빈문자열 → 결과 추적 불가 | 1 | 3 | 3 | ✅ 해결: D57 C5 — randomUUID() 고유 추적ID 생성 |
+| R34 | Redis 연결 에러 → 서버 크래시 | 1 | 5 | 5 | ✅ 해결: D59 — redis.on('error') 에러 핸들러 추가 |
+| R35 | unhandledRejection/uncaughtException → 로깅 없이 서버 크래시 | 1 | 5 | 5 | ✅ 해결: D59 — process.on 핸들러 추가, PM2 자동 재시작 연계 |
+| R36 | PostgreSQL Pool 커넥션 부족/누수 | 1 | 4 | 4 | ✅ 해결: D59 — max/idleTimeout/connectionTimeout 환경변수 기반 설정 |
+| R37 | 수신거부번호 미로딩 상태 발송 → 법적 문제 | 1 | 5 | 5 | ✅ 해결: D59 — optOutNumber 초기값 '' + 3개 발송함수 가드 |
+| R38 | 발송 상태 플래그 교차 미체크 → 동시 발송 | 1 | 3 | 3 | ✅ 해결: D59 — isSending/directSending 교차체크 3곳 |
 
 ---
 
@@ -707,6 +723,8 @@ QTmsg status_code, 통신사 코드, 스팸필터 판정 결과를 한 곳에서
 
 | 날짜 | 완료 항목 |
 |------|----------|
+| 03-07 | **D59 2차 코드 전수점검 P1~P6 총 28건 수정 완료:** **(P1 정산/데이터 3건)** ai.ts `\|\|10`→`??10` AI추정 0%치환 버그 수정. analysis.ts 하드코딩 `totalSent*15` 제거→채널별(SMS/LMS/MMS/KAKAO) getCompanyCosts() 정확 비용 계산. manage-stats.ts dead code 4줄 삭제. **(P2 SQL Injection 4건)** safe-field-name.ts 신규(custom_1~15 화이트리스트)→campaigns.ts buildFilterQuery, customers.ts buildDynamicFilter, ai.ts buildFilterWhereClause 3곳 적용. campaigns.ts dateFilter MySQL `?` 파라미터화+DATE_FORMAT 정규식 검증. **(P3 입력검증 3건)** mms-images.ts companyId UUID 정규식 검증. upload.ts `path.basename(fileId)` 디렉토리 탐색 방어. manage-users.ts 비밀번호 8~72자 bcrypt 안전 범위 검증. **(P4 하드코딩 5건)** admin.ts+manage-users.ts SMS 회신번호→`SYSTEM_SMS_CALLBACK` 환경변수(미설정 시 throw). defaults.ts `INVITO_INFO` 상수 신규+billing.ts PDF 2곳+이메일 2곳 import 교체. 프론트엔드 5곳 `©2026`→`©{new Date().getFullYear()}`. `constants/company.ts` 신규(frontend+company-frontend)+8파일 15곳 회사정보 상수 교체. **(P5 인프라 4건)** defaults.ts Redis error handler. ai.ts AI API 키 미설정 console.warn. app.ts unhandledRejection+uncaughtException PM2 연계. database.ts PG Pool max/idle/connection 환경변수 기반. **(P6 프론트 4건)** Dashboard.tsx setInterval→useRef+useEffect cleanup. optOutNumber 초기값''→미로딩 시 발송차단 가드 3곳. isSending/directSending 교차 중복 발송 방지 3곳. console.log 4줄 삭제. **(P7 장기 8건)** CODE-REVIEW-P7-BACKLOG.md 기록. 수정 20파일+신규 4파일. **기간계 무접촉. tsc backend+frontend+company-frontend 3패키지 전체 통과.** |
+| 03-06 | **D58 12차 버그리포트 4건+기능개선 3건 전체 완료:** (B12-01) 예약취소 DELETE(pending)+UPDATE(Agent 픽업건→9999) 이중처리 (B12-02) sync-results 60분 타임아웃 강제완료+환불 (B12-03) 스팸필터 subject/firstRecipient 전달 (B12-04) 특수문자/보관함/저장 모달 showDirectSend 바깥 이동→공용화 (F12-01) AI 결과팝업 머지태그 원본 표시 (F12-02) 필터 UI 전면개선: 성별 자동감지(`isGenderField` 패턴매칭)+다양한 DB값 한글 매핑, 생일 월별 프리셋+`birth_month` 오퍼레이터, 금액 최소~최대 범위 입력(콤마포맷+'원' 단위+빠른선택 버튼+`col-span-2`+백엔드 `between` 대응), 수신자 테이블 `formatCellValue` 성별 한글 표시 (F12-03) 타겟발송 담당자테스트 버튼(3열 그리드+`handleTargetTestSend`+10초 쿨다운). 수정 7파일(campaigns.ts, Dashboard.tsx, TargetSendModal.tsx, DirectTargetFilterModal.tsx, AiCampaignResultPopup.tsx, CalendarModal.tsx, customers.ts). **기간계 무접촉.** |
 | 03-05 | **나래 080 수신거부 콜백 연동 완료:** (1) 나래 담당자 콜백 URL 등록 확인 (2) 실제 080 ARS 테스트 — 나래 IP(183.98.207.13) 콜백 수신+수신거부 DB 등록 정상 (3) OPT_OUT_080_TOKEN 검증 제거→Nginx IP 화이트리스트(나래 6개 IP)로 보안 대체 (4) 기존 누적 수신거부: 한줄로 이관 시 수동 처리 예정. 수정 1파일(unsubscribes.ts). **기간계 무접촉.** |
 | 03-05 | **D57 P0-C1~C5 발송 파이프라인 안정화 5건:** (C1) AI발송+직접발송 per-customer/per-batch try/catch→sentCount 추적→부분실패 선별적 환불. (C2) normalize-phone.ts 신규→campaigns.ts 27곳 통일+directCustomerMap 키 불일치 핵심버그 수정. (C3) calcSplitSendTime() SEND_HOURS 경계→오버플로우 방지, defaults.ts SEND_HOURS 추가. (C4) AI발송 sendTime `?` 파라미터화. (C5) 테스트발송 bill_id→randomUUID()+실패건 DB 기록+응답 testRequestUid. 수정 2파일(campaigns.ts, defaults.ts)+신규 1파일(normalize-phone.ts). TypeScript 0에러. **기간계 발송 흐름 자체 변경 없음** |
 | 03-05 | **D56 P0-Q1 SQL Injection 방지 + 스팸필터 선불차감:** (1) sms-table-validator.ts 신규 — `/^SMSQ_SEND(_\d{1,3})?(_\d{4,8})?$/` 화이트리스트 정규식, validateSmsTable/validateSmsTables/isValidSmsTable 3함수 export. (2) admin.ts — POST/PUT `/api/admin/line-groups` 라인그룹 생성·수정 API에서 smsTables 검증, 잘못된 테이블명 400 거부. (3) campaigns.ts — 서버 기동 시 ALL_SMS_TABLES 검증(경고 로그, 기동 미차단) + getCompanySmsTables DB 조회 결과 필터링(잘못된 값 스킵→BULK_ONLY_TABLES 폴백) + prepaidDeduct/prepaidRefund export 추가. (4) spam-filter.ts — POST `/test`에 선불 잔액 차감 추가: testId 생성 후 prepaidDeduct(companyId, spamSendCount, spamDeductType, testId) 호출, 잔액 부족 시 402+테스트 cancelled, 응답에 deducted 금액 포함. 수정 3파일(admin.ts, campaigns.ts, spam-filter.ts)+신규 1파일(sms-table-validator.ts). TypeScript 타입 에러 0건. **기간계 무접촉. 배포+실서버 선불차감 로그 확인 완료.** |

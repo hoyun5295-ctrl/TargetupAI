@@ -10,6 +10,7 @@ import { SUCCESS_CODES, PENDING_CODES, isSuccess, isFail, SPAM_RESULT } from '..
 import { DEFAULT_COSTS, redis, CACHE_TTL, BATCH_SIZES, SEND_HOURS } from '../config/defaults';
 import { isValidSmsTable } from '../utils/sms-table-validator';
 import { normalizePhone } from '../utils/normalize-phone';
+import { isValidCustomFieldKey } from '../utils/safe-field-name';
 
 // 한국시간 문자열 변환 (MySQL datetime 형식)
 const toKoreaTimeStr = (date: Date) => {
@@ -1346,10 +1347,11 @@ function buildFilterQuery(filter: any, companyId: string) {
     }
   }
 
-  // custom_fields 처리 (AI 필터 확장)
+  // custom_fields 처리 (AI 필터 확장) — 화이트리스트 검증 적용
   Object.keys(filter).forEach(key => {
     if (key.startsWith('custom_fields.')) {
       const fieldName = key.replace('custom_fields.', '');
+      if (!isValidCustomFieldKey(fieldName)) return; // 무효 키 무시
       const condition = filter[key];
       const value = getValue(condition);
       const operator = condition?.operator || 'eq';
@@ -1455,10 +1457,13 @@ router.get('/test-stats', async (req: Request, res: Response) => {
 
     const { fromDate, toDate } = req.query;
 
-    // 날짜 범위 필터
+    // 날짜 범위 필터 — 포맷 검증 + 파라미터화 (SQL Injection 방지)
+    const DATE_FORMAT = /^\d{4}-\d{2}-\d{2}$/;
     let dateFilter = '';
-    if (fromDate && toDate) {
-      dateFilter = ` AND sendreq_time >= '${fromDate} 00:00:00' AND sendreq_time <= '${toDate} 23:59:59'`;
+    const dateParams: any[] = [];
+    if (fromDate && toDate && DATE_FORMAT.test(String(fromDate)) && DATE_FORMAT.test(String(toDate))) {
+      dateFilter = ' AND sendreq_time >= ? AND sendreq_time <= ?';
+      dateParams.push(`${fromDate} 00:00:00`, `${toDate} 23:59:59`);
     }
 
     // 일반 사용자는 본인이 보낸 테스트만
@@ -1468,6 +1473,8 @@ router.get('/test-stats', async (req: Request, res: Response) => {
       userFilter = ' AND bill_id = ?';
       queryParams.push(userId);
     }
+    // 날짜 파라미터를 쿼리 파라미터에 합산 (위치 순서 유지)
+    queryParams.push(...dateParams);
 
     // 테스트 전용 메인 테이블
     const testTables = await getTestSmsTables();

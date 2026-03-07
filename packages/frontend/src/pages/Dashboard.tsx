@@ -1,5 +1,5 @@
 ﻿import { Award, BarChart3, Bell, BellOff, Cake, Clock, CreditCard, DollarSign, HelpCircle, Mail, MapPin, Rocket, Send, ShoppingCart, Sparkles, Store, User, UserPlus, Users, UserX } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { aiApi, campaignsApi, customersApi } from '../api/client';
 import AddressBookModal from '../components/AddressBookModal';
@@ -233,6 +233,7 @@ export default function Dashboard() {
   const [planLimitInfo, setPlanLimitInfo] = useState<any>(null);
   const [uploadProgress, setUploadProgress] = useState<any>({ status: 'unknown', total: 0, processed: 0, percent: 0, insertCount: 0, duplicateCount: 0, errorCount: 0, message: '' });
   const [showUploadProgressModal, setShowUploadProgressModal] = useState(false);
+  const uploadProgressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [showDirectSend, setShowDirectSend] = useState(false);
   const [showTargetSend, setShowTargetSend] = useState(false);
   // ★ D43-3c: 타겟 필드 메타 (동적 변수/테이블용)
@@ -324,6 +325,11 @@ export default function Dashboard() {
 
   // 직접발송 실행 함수
   const executeDirectSend = async () => {
+    if (isSending || directSending) return; // 교차 중복 발송 방지
+    if (adTextEnabled && !optOutNumber) {
+      setToast({ show: true, type: 'error', message: '수신거부번호가 로딩되지 않았습니다. 잠시 후 다시 시도해주세요.' });
+      return;
+    }
     setDirectSending(true);
     try {
       const res = await fetch('/api/campaigns/direct-send', {
@@ -686,14 +692,15 @@ export default function Dashboard() {
     }
   };
   const [toast, setToast] = useState<{show: boolean, type: 'success' | 'error', message: string}>({show: false, type: 'success', message: ''});
-  const [optOutNumber, setOptOutNumber] = useState('080-000-0000');
+  const [optOutNumber, setOptOutNumber] = useState('');
 
   // 업로드 저장 시작 → 프로그레스 모달 표시 + 폴링
   const handleUploadSaveStart = (savedFileId: string, totalRows: number) => {
     setShowFileUpload(false);
     setShowUploadProgressModal(true);
     setUploadProgress({ status: 'processing', total: totalRows, processed: 0, percent: 0, insertCount: 0, duplicateCount: 0, errorCount: 0, message: '처리 시작...' });
-    const progressInterval = setInterval(async () => {
+    if (uploadProgressIntervalRef.current) clearInterval(uploadProgressIntervalRef.current);
+    uploadProgressIntervalRef.current = setInterval(async () => {
       try {
         const pRes = await fetch(`/api/upload/progress/${savedFileId}`, {
           headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
@@ -701,7 +708,8 @@ export default function Dashboard() {
         const pData = await pRes.json();
         setUploadProgress(pData);
         if (pData.status === 'completed' || pData.status === 'failed') {
-          clearInterval(progressInterval);
+          if (uploadProgressIntervalRef.current) clearInterval(uploadProgressIntervalRef.current);
+          uploadProgressIntervalRef.current = null;
         }
       } catch (e) { /* ignore */ }
     }, 2000);
@@ -748,6 +756,17 @@ export default function Dashboard() {
     loadScheduledCampaigns();
     loadCompanySettings();
   }, []);
+
+  // 업로드 프로그레스 폴링 cleanup (컴포넌트 언마운트 시 interval 정리)
+  useEffect(() => {
+    return () => {
+      if (uploadProgressIntervalRef.current) {
+        clearInterval(uploadProgressIntervalRef.current);
+        uploadProgressIntervalRef.current = null;
+      }
+    };
+  }, []);
+
 // 자동입력 변수를 수신자 중 가장 긴 값으로 치환하여 최대 바이트 메시지 생성
 const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<string, string>) => {
   let result = msg;
@@ -1238,8 +1257,12 @@ const handleAiCampaignSend = async (modalData?: {
   selectedCallback: string;
   useIndividualCallback: boolean;
 }) => {
-  if (isSending) return; // 중복 클릭 방지
-  
+  if (isSending || directSending) return; // 교차 중복 발송 방지
+  if (adTextEnabled && !optOutNumber) {
+    setToast({ show: true, type: 'error', message: '수신거부번호가 로딩되지 않았습니다. 잠시 후 다시 시도해주세요.' });
+    return;
+  }
+
   const _sendTimeOption = modalData?.sendTimeOption || sendTimeOption;
   const _customSendTime = modalData?.customSendTime || customSendTime;
   const _selectedCallback = modalData?.selectedCallback ?? selectedCallback;
@@ -1358,11 +1381,6 @@ const campaignData = {
       mmsImagePaths: mmsUploadedImages.map(img => img.serverPath),
     };
 
-    console.log('=== 발송 디버깅 ===');
-    console.log('sendTimeOption:', _sendTimeOption);
-    console.log('scheduledAt:', scheduledAt);
-    console.log('campaignData:', campaignData);
-
     const response = await campaignsApi.create(campaignData);
 
     // 캠페인 발송 API 호출 (예약/즉시 모두)
@@ -1416,7 +1434,11 @@ const campaignData = {
     selectedCallback: string;
     useIndividualCallback: boolean;
   }) => {
-    if (isSending || !customSendData) return;
+    if (isSending || directSending || !customSendData) return; // 교차 중복 발송 방지
+    if (adTextEnabled && !optOutNumber) {
+      setToast({ show: true, type: 'error', message: '수신거부번호가 로딩되지 않았습니다. 잠시 후 다시 시도해주세요.' });
+      return;
+    }
 
     const _sendTimeOption = modalData.sendTimeOption;
     const _customSendTime = modalData.customSendTime;
@@ -3983,7 +4005,7 @@ const campaignData = {
         <span>|</span>
         <a href="/terms" target="_blank" className="hover:text-gray-600 transition">이용약관</a>
         <span>|</span>
-        <span>© 2026 INVITO</span>
+        <span>© {new Date().getFullYear()} INVITO</span>
       </div>
     </div>
   );

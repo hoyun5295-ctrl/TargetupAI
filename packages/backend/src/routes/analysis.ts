@@ -4,7 +4,7 @@ import * as fs from 'fs';
 import OpenAI from 'openai';
 import * as path from 'path';
 import { query } from '../config/database';
-import { AI_MODELS, AI_MAX_TOKENS, TIMEOUTS } from '../config/defaults';
+import { AI_MODELS, AI_MAX_TOKENS, TIMEOUTS, getCompanyCosts } from '../config/defaults';
 import { authenticate } from '../middlewares/auth';
 
 const router = Router();
@@ -362,9 +362,14 @@ router.get('/preview', async (req: Request, res: Response) => {
         AND created_at >= NOW() - INTERVAL '30 days'
     `, [companyId]);
 
-    // 2) 총 발송 수
+    // 2) 총 발송 수 (채널별 분리 — ROI 정확 계산용)
     const sentCountResult = await query(`
-      SELECT COALESCE(SUM(cr.sent_count), 0) as total_sent
+      SELECT
+        COALESCE(SUM(cr.sent_count), 0) as total_sent,
+        COALESCE(SUM(CASE WHEN cr.message_type = 'SMS' THEN cr.sent_count ELSE 0 END), 0) as sms_sent,
+        COALESCE(SUM(CASE WHEN cr.message_type = 'LMS' THEN cr.sent_count ELSE 0 END), 0) as lms_sent,
+        COALESCE(SUM(CASE WHEN cr.message_type = 'MMS' THEN cr.sent_count ELSE 0 END), 0) as mms_sent,
+        COALESCE(SUM(CASE WHEN cr.message_type = 'KAKAO' THEN cr.sent_count ELSE 0 END), 0) as kakao_sent
       FROM campaign_runs cr
       JOIN campaigns c ON cr.campaign_id = c.id
       WHERE c.company_id = $1
@@ -503,7 +508,15 @@ router.get('/preview', async (req: Request, res: Response) => {
       teaser.churnRiskCount = churnCount;
       teaser.segmentCount = parseInt(segmentResult.rows[0]?.segment_count || '0');
 
-      const estimatedCost = teaser.totalSent * 15;
+      // 회사별 채널 단가로 정확한 비용 계산 (하드코딩 15 제거)
+      const companyForCost = await query('SELECT cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao FROM companies WHERE id = $1', [companyId]);
+      const costs = getCompanyCosts(companyForCost.rows[0] || {});
+      const sentRow = sentCountResult.rows[0];
+      const estimatedCost =
+        parseInt(sentRow.sms_sent) * costs.sms +
+        parseInt(sentRow.lms_sent) * costs.lms +
+        parseInt(sentRow.mms_sent) * costs.mms +
+        parseInt(sentRow.kakao_sent) * costs.kakao;
       const purchaseTotal = parseFloat(roiResult.rows[0]?.purchase_total || '0');
       teaser.estimatedROI = estimatedCost > 0
         ? `${Math.round(purchaseTotal / estimatedCost * 100)}%`

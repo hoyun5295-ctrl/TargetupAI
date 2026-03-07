@@ -4,6 +4,7 @@ import { companiesApi, plansApi, billingApi } from '../api/client';
 import { useAuthStore } from '../stores/authStore';
 import { formatDateTime, formatDate, formatDateTimeShort } from '../utils/formatDate';
 import SessionTimer from '../components/SessionTimer';
+import { COMPANY_NAME_EN, COMPANY_EMAIL } from '../constants/company';
 
 interface Company {
   id: string;
@@ -734,8 +735,8 @@ const handleSendBillingEmail = async () => {
           문의사항이 있으시면 아래 연락처로 연락 부탁드립니다.
         </p>
         <div style="margin-top:32px;padding-top:16px;border-top:1px solid #E5E7EB;color:#9CA3AF;font-size:12px;">
-          <strong style="color:#6B7280;">주식회사 인비토 (INVITO Corp.)</strong><br/>
-          이메일: mobile@invitocorp.com
+          <strong style="color:#6B7280;">${COMPANY_NAME_EN}</strong><br/>
+          이메일: ${COMPANY_EMAIL}
         </div>
       </div>
     `;
@@ -5765,7 +5766,7 @@ const handleApproveRequest = async (id: string) => {
 
                   {/* 발신 정보 */}
                   <div className="bg-gray-50 rounded-lg px-3 py-2 text-xs text-gray-400">
-                    발신: mobile@invitocorp.com (하이웍스)
+                    발신: {COMPANY_EMAIL} (하이웍스)
                   </div>
                 </div>
 

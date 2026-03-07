@@ -109,6 +109,19 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
   res.status(500).json({ error: '서버 오류가 발생했습니다.' });
 });
 
+// ============================================================
+// 프로세스 레벨 에러 핸들러 (PM2 자동 재시작 연계)
+// ============================================================
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ [unhandledRejection]', reason);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('❌ [uncaughtException]', err);
+  // PM2가 자동 재시작하므로 로깅 후 프로세스 종료
+  process.exit(1);
+});
+
 // 서버 시작
 app.listen(PORT, () => {
   console.log('');

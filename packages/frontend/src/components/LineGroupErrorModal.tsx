@@ -1,4 +1,5 @@
 import React from 'react';
+import { COMPANY_PHONE } from '../constants/company';
 
 interface LineGroupErrorModalProps {
   show: boolean;
@@ -48,7 +49,7 @@ const LineGroupErrorModal: React.FC<LineGroupErrorModalProps> = ({ show, onClose
 
           <div className="bg-gray-50 rounded-xl px-4 py-3">
             <p className="text-xs text-gray-500 text-center">
-              📞 문의: <span className="font-medium text-gray-700">1800-8125</span>
+              📞 문의: <span className="font-medium text-gray-700">{COMPANY_PHONE}</span>
             </p>
           </div>
         </div>

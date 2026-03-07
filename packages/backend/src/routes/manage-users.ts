@@ -82,6 +82,10 @@ router.post('/', async (req: Request, res: Response) => {
     return res.status(400).json({ error: '필수 항목을 입력해주세요.' });
   }
 
+  if (password.length < 8 || password.length > 72) {
+    return res.status(400).json({ error: '비밀번호는 8자 이상 72자 이하로 입력해주세요.' });
+  }
+
   // 고객사관리자는 company_admin/super_admin 타입 생성 불가
   if (callerType === 'company_admin' && userType && ['super_admin', 'company_admin'].includes(userType)) {
     return res.status(403).json({ error: '관리자 계정은 생성할 수 없습니다.' });
@@ -263,7 +267,7 @@ router.post('/:id/reset-password', async (req: Request, res: Response) => {
 
         await mysqlQuery(
           `INSERT INTO SMSQ_SEND (dest_no, call_back, msg_contents, msg_type, sendreq_time, status_code, rsv1) VALUES (?, ?, ?, 'S', NOW(), 100, '1')`,
-          [phone, '18008125', message]
+          [phone, process.env.SYSTEM_SMS_CALLBACK || (() => { throw new Error('SYSTEM_SMS_CALLBACK 환경변수가 설정되지 않았습니다'); })(), message]
         );
         smsSent = true;
       } catch (smsError) {

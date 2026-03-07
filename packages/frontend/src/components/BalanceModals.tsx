@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useAuthStore } from '../stores/authStore';
+import { COMPANY_NAME } from '../constants/company';
 
 interface BalanceInfo {
   billingType: string;
@@ -178,7 +179,7 @@ export default function BalanceModals({
                     <div className="flex items-center justify-between">
                       <div>
                         <div className="text-sm font-bold text-gray-800">기업은행 585-028893-01-011</div>
-                        <div className="text-xs text-gray-500 mt-0.5">예금주: 주식회사 인비토</div>
+                        <div className="text-xs text-gray-500 mt-0.5">예금주: {COMPANY_NAME}</div>
                       </div>
                       <button
                         onClick={() => { navigator.clipboard.writeText('585-028893-01-011'); }}

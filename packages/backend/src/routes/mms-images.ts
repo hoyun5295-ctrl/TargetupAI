@@ -106,10 +106,15 @@ router.post('/upload', authenticate, (req: any, res: any) => {
 // ─────────────────────────────────────────
 // GET /api/mms-images/:companyId/:filename — 이미지 서빙 (미리보기용)
 // ─────────────────────────────────────────
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 router.get('/:companyId/:filename', (req: any, res: any) => {
   const { companyId, filename } = req.params;
 
-  // 보안: 경로 탈출 방지
+  // 보안: companyId UUID 포맷 검증 + 경로 탈출 방지
+  if (!UUID_REGEX.test(companyId)) {
+    return res.status(400).json({ error: '잘못된 요청' });
+  }
   if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
     return res.status(400).json({ error: '잘못된 파일명' });
   }

@@ -13,6 +13,7 @@ import Redis from 'ioredis';
 // ============================================================
 export const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
 export const redis = new Redis(REDIS_URL);
+redis.on('error', (err) => console.error('[Redis] 연결 에러:', err.message));
 
 // ============================================================
 // AI 모델명 (환경변수로 모델 업그레이드 시 .env만 수정)
@@ -151,4 +152,24 @@ export const LIMITS = {
   mmsImageCount: 3,
   /** JWT 토큰 만료 */
   jwtExpiry: '24h',
+};
+
+// ============================================================
+// 공급자(인비토) 사업자 정보 — 청구서·정산서 PDF/이메일에 사용
+// ============================================================
+export const INVITO_INFO = {
+  /** 상호 */
+  companyName: process.env.INVITO_COMPANY_NAME || '주식회사 인비토 (INVITO corp.)',
+  /** 대표자명 */
+  ceoName: process.env.INVITO_CEO_NAME || '유 호 윤',
+  /** 사업자등록번호 */
+  bizNumber: process.env.INVITO_BIZ_NUMBER || '667-86-00578',
+  /** 업태/종목 */
+  bizType: process.env.INVITO_BIZ_TYPE || '서비스 / 소프트웨어및앱개발 공급',
+  /** 주소 */
+  address: process.env.INVITO_ADDRESS || '서울시 송파구 오금로 36길46, 4층',
+  /** 대표 연락처 */
+  phone: process.env.INVITO_PHONE || '1800-8125',
+  /** 대표 이메일 */
+  email: process.env.INVITO_EMAIL || 'mobile@invitocorp.com',
 };

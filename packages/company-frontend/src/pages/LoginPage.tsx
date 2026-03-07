@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { authApi } from '../api/client';
 import { useAuthStore } from '../stores/authStore';
+import { COMPANY_NAME, CEO_NAME, BIZ_NUMBER, TRADE_NUMBER, COMPANY_ADDRESS, COMPANY_PHONE } from '../constants/company';
 
 export default function LoginPage() {
   const navigate = useNavigate();
@@ -96,13 +97,13 @@ export default function LoginPage() {
       <footer className="bg-gray-800 text-gray-400 py-4 px-4">
         <div className="max-w-4xl mx-auto text-center text-xs leading-relaxed">
           <p>
-            주식회사 인비토 | 대표이사 유호윤 | 사업자등록번호 667-86-00578 | 통신판매신고 제 2017-서울송파-0160호
+            {COMPANY_NAME} | 대표이사 {CEO_NAME} | 사업자등록번호 {BIZ_NUMBER} | 통신판매신고 {TRADE_NUMBER}
           </p>
           <p className="mt-1">
-            서울시 송파구 오금로36길 46, 신승빌딩 4F | 문의전화 1800-8125
+            {COMPANY_ADDRESS} | 문의전화 {COMPANY_PHONE}
           </p>
           <p className="mt-2 text-gray-500">
-            © 2026 INVITO. All rights reserved.
+            © {new Date().getFullYear()} INVITO. All rights reserved.
           </p>
         </div>
       </footer>

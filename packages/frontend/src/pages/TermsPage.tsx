@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import { COMPANY_NAME, COMPANY_PHONE } from '../constants/company';
 
 export default function TermsPage() {
   return (
@@ -10,7 +11,7 @@ export default function TermsPage() {
 
             <section>
               <h2 className="text-lg font-semibold text-gray-800 mt-6 mb-2">제1조 (목적)</h2>
-              <p>이 약관은 주식회사 인비토(이하 "회사")가 운영하는 한줄로 서비스(이하 "서비스")의 이용 조건 및 절차, 회사와 이용자의 권리·의무 및 책임사항을 규정함을 목적으로 합니다.</p>
+              <p>이 약관은 {COMPANY_NAME}(이하 "회사")가 운영하는 한줄로 서비스(이하 "서비스")의 이용 조건 및 절차, 회사와 이용자의 권리·의무 및 책임사항을 규정함을 목적으로 합니다.</p>
             </section>
 
             <section>
@@ -106,7 +107,7 @@ export default function TermsPage() {
               <p>4. 무통장입금으로 충전한 잔액의 환불은 이용자 본인 명의 계좌로 처리되며, 입금 확인 후 영업일 기준 3~5일 이내에 처리됩니다.</p>
               <p>5. 신용카드 충전분의 환불은 카드 결제 취소 방식으로 처리되며, 카드사 사정에 따라 취소 완료까지 영업일 기준 3~7일이 소요될 수 있습니다.</p>
               <p>6. 환불 처리 시 PG 수수료 등 결제 대행 수수료가 차감될 수 있습니다.</p>
-              <p>7. 환불 요청은 고객센터(1800-8125) 또는 담당자 이메일을 통해 접수할 수 있습니다.</p>
+              <p>7. 환불 요청은 고객센터({COMPANY_PHONE}) 또는 담당자 이메일을 통해 접수할 수 있습니다.</p>
               <p>8. 회사의 귀책 사유로 서비스를 제공할 수 없는 경우, 유효기간 경과 여부와 관계없이 미사용 잔액 전액을 환불합니다.</p>
             </section>
 
@@ -132,7 +133,7 @@ export default function TermsPage() {
 
       <footer className="bg-gray-800 text-gray-400 py-4 px-4">
         <div className="max-w-4xl mx-auto text-center text-xs">
-          <p>© 2026 INVITO. All rights reserved.</p>
+          <p>© {new Date().getFullYear()} INVITO. All rights reserved.</p>
         </div>
       </footer>
     </div>

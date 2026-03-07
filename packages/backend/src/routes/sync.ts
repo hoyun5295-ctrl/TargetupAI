@@ -1,11 +1,12 @@
 // routes/sync.ts
-// Sync Agent API - Phase 1
-// 기존 코드 수정 없음. 독립 모듈.
+// Sync Agent API — FIELD_MAP 기반 동적 전환 (D39+ 반영)
+// 하드코딩 금지. standard-field-map.ts가 유일한 기준.
 
 import { Request, Response, Router } from 'express';
 import { query } from '../config/database';
 import { TIMEOUTS, RATE_LIMITS, BATCH_SIZES } from '../config/defaults';
-import { normalizePhone } from '../utils/normalize';
+import { normalizePhone, normalizeRegion, normalizeDate } from '../utils/normalize';
+import { getColumnFields, getCustomFields } from '../utils/standard-field-map';
 
 const router = Router();
 
@@ -375,17 +376,14 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
     let failedCount = 0;
     const failures: Array<{ phone: string; reason: string }> = [];
 
-    // 1단계: JS에서 phone validation + normalize 먼저 필터링
-    const validRows: Array<{
-      phone: string; name: string | null; gender: string | null;
-      birth_date: string | null; birth_year: number | null; age: number | null;
-      email: string | null; address: string | null; region: string | null;
-      grade: string | null; points: number | null;
-      store_code: string | null; store_name: string | null;
-      recent_purchase_date: string | null; recent_purchase_amount: number | null;
-      total_purchase_amount: number | null; purchase_count: number | null;
-      custom_fields: string | null;
-    }> = [];
+    // ── FIELD_MAP 기반 동적 컬럼 목록 (하드코딩 금지) ──
+    const columnFieldDefs = getColumnFields();    // 필수 17개
+    const customFieldDefs = getCustomFields();    // 커스텀 15개
+    const columnNames = columnFieldDefs.map(f => f.columnName);
+    const currentYear = new Date().getFullYear();
+
+    // 1단계: JS에서 phone validation + normalize + 파생 필드 계산
+    const validRows: Array<Record<string, any>> = [];
 
     for (const c of customers) {
       if (!c.phone) {
@@ -399,70 +397,140 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
         failures.push({ phone: c.phone, reason: 'invalid phone format' });
         continue;
       }
-      validRows.push({
-        phone, name: c.name || null, gender: c.gender || null,
-        birth_date: c.birth_date || null, birth_year: c.birth_year || null, age: c.age || null,
-        email: c.email || null, address: c.address || null, region: c.region || null,
-        grade: c.grade || null, points: c.points || null,
-        store_code: c.store_code || null, store_name: c.store_name || null,
-        recent_purchase_date: c.recent_purchase_date || null, recent_purchase_amount: c.recent_purchase_amount || null,
-        total_purchase_amount: c.total_purchase_amount || null, purchase_count: c.purchase_count || null,
-        custom_fields: c.custom_fields ? JSON.stringify(c.custom_fields) : null
-      });
+
+      // ── 파생 필드 계산 (upload.ts와 동일 로직) ──
+      let derivedBirthYear: number | null = null;
+      let derivedBirthMonthDay: string | null = null;
+      let derivedAge: number | null = null;
+      let derivedRegion: string | null = null;
+      let birthDateValue: string | null = c.birth_date || null;
+
+      // birth_date → birth_year, birth_month_day, age
+      if (birthDateValue) {
+        const bd = String(birthDateValue).trim();
+        if (/^\d{4}$/.test(bd) && parseInt(bd) >= 1900 && parseInt(bd) <= 2099) {
+          derivedBirthYear = parseInt(bd);
+          derivedAge = currentYear - derivedBirthYear;
+          birthDateValue = null; // date 타입에 연도만 넣으면 에러
+        } else {
+          const normalized = normalizeDate(bd);
+          if (normalized) {
+            birthDateValue = normalized;
+            derivedBirthYear = parseInt(normalized.substring(0, 4));
+            derivedBirthMonthDay = normalized.substring(5, 10);
+            derivedAge = currentYear - derivedBirthYear;
+          }
+        }
+      }
+
+      // birth_year 직접 전송 (birth_date가 없을 때)
+      if (c.birth_year && !derivedBirthYear) {
+        const by = parseInt(String(c.birth_year));
+        if (!isNaN(by) && by >= 1900 && by <= 2099) {
+          derivedBirthYear = by;
+          derivedAge = currentYear - by;
+        }
+      }
+
+      // age: 파생값 우선, 없으면 Agent 전송값
+      const finalAge = derivedAge ?? (c.age ? parseInt(String(c.age)) : null);
+
+      // region: 직접 전송값 우선, 없으면 address에서 파생
+      if (c.region) {
+        derivedRegion = normalizeRegion(c.region);
+      } else if (c.address && typeof c.address === 'string') {
+        const firstToken = c.address.split(/[\s,]/)[0];
+        if (firstToken) derivedRegion = normalizeRegion(firstToken);
+      }
+
+      // ── FIELD_MAP 기반 동적 row 구성 ──
+      const row: Record<string, any> = { phone };
+
+      for (const field of columnFieldDefs) {
+        if (field.fieldKey === 'phone') {
+          row.phone = phone; // 이미 정규화됨
+        } else if (field.fieldKey === 'birth_date') {
+          row.birth_date = birthDateValue;
+        } else if (field.fieldKey === 'age') {
+          row.age = finalAge;
+        } else if (field.fieldKey === 'sms_opt_in') {
+          const val = c[field.fieldKey];
+          row.sms_opt_in = val !== null && val !== undefined ? val : true;
+        } else {
+          row[field.columnName] = c[field.fieldKey] ?? c[field.columnName] ?? null;
+        }
+      }
+
+      // 파생 컬럼
+      row.birth_year = derivedBirthYear;
+      row.birth_month_day = derivedBirthMonthDay;
+      row.region = derivedRegion ?? row.region ?? null;
+
+      // custom_fields JSONB 빌드
+      const customObj: Record<string, any> = {};
+      // Agent가 이미 구성한 custom_fields 객체
+      if (c.custom_fields && typeof c.custom_fields === 'object') {
+        Object.assign(customObj, c.custom_fields);
+      }
+      // 또는 custom_1~15 개별 키로 전송한 경우
+      for (const cf of customFieldDefs) {
+        if (c[cf.fieldKey] != null && c[cf.fieldKey] !== '') {
+          customObj[cf.columnName] = String(c[cf.fieldKey]);
+        }
+      }
+      row.custom_fields = Object.keys(customObj).length > 0 ? JSON.stringify(customObj) : null;
+
+      validRows.push(row);
     }
 
-    // 2단계: 벌크 UPSERT (500건씩 청크)
+    // 2단계: 벌크 UPSERT (500건씩 청크) — FIELD_MAP 동적 INSERT
+    const insertCols = [
+      'company_id', ...columnNames,
+      'birth_year', 'birth_month_day', 'region', 'custom_fields',
+      'source', 'created_at', 'updated_at'
+    ];
+    // row당 파라미터 = company_id(1) + 필수17개 + 파생3개 + custom_fields(1) = 22
+    const PARAMS_PER_ROW = 1 + columnNames.length + 3 + 1; // 22
     const CHUNK_SIZE = 500;
+
     for (let i = 0; i < validRows.length; i += CHUNK_SIZE) {
       const chunk = validRows.slice(i, i + CHUNK_SIZE);
       try {
-        const COLS = 19; // 파라미터 개수 per row
         const values: any[] = [];
         const valueClauses: string[] = [];
 
         for (let j = 0; j < chunk.length; j++) {
-          const offset = j * COLS;
-          valueClauses.push(`($${offset+1},$${offset+2},$${offset+3},$${offset+4},$${offset+5},$${offset+6},$${offset+7},$${offset+8},$${offset+9},$${offset+10},$${offset+11},$${offset+12},$${offset+13},$${offset+14},$${offset+15},$${offset+16},$${offset+17},$${offset+18},$${offset+19},'sync',NOW(),NOW())`);
+          const offset = j * PARAMS_PER_ROW;
+          const paramList = Array.from({ length: PARAMS_PER_ROW }, (_, k) => `$${offset + k + 1}`).join(',');
+          valueClauses.push(`(${paramList},'sync',NOW(),NOW())`);
+
           const r = chunk[j];
-          values.push(
-            companyId, r.phone, r.name, r.gender, r.birth_date, r.birth_year, r.age,
-            r.email, r.address, r.region, r.grade, r.points,
-            r.store_code, r.store_name,
-            r.recent_purchase_date, r.recent_purchase_amount,
-            r.total_purchase_amount, r.purchase_count,
-            r.custom_fields
-          );
+          values.push(companyId);
+          for (const col of columnNames) {
+            values.push(r[col] ?? null);
+          }
+          values.push(r.birth_year, r.birth_month_day, r.region, r.custom_fields);
         }
 
+        // ON CONFLICT UPDATE: phone, store_code 제외 (UNIQUE 키 구성요소)
+        const updateExclusions = new Set(['phone', 'store_code']);
+        const updateClauses = [
+          ...columnNames
+            .filter(c => !updateExclusions.has(c))
+            .map(c => `${c} = COALESCE(EXCLUDED.${c}, customers.${c})`),
+          'birth_year = COALESCE(EXCLUDED.birth_year, customers.birth_year)',
+          'birth_month_day = COALESCE(EXCLUDED.birth_month_day, customers.birth_month_day)',
+          'region = COALESCE(EXCLUDED.region, customers.region)',
+          `custom_fields = CASE WHEN EXCLUDED.custom_fields IS NOT NULL THEN COALESCE(customers.custom_fields, '{}'::jsonb) || EXCLUDED.custom_fields ELSE customers.custom_fields END`,
+          `source = 'sync'`,
+          'updated_at = NOW()'
+        ].join(',\n            ');
+
         const result = await query(
-          `INSERT INTO customers (
-            company_id, phone, name, gender, birth_date, birth_year, age,
-            email, address, region, grade, points,
-            store_code, store_name,
-            recent_purchase_date, recent_purchase_amount,
-            total_purchase_amount, purchase_count,
-            custom_fields, source, created_at, updated_at
-          ) VALUES ${valueClauses.join(',')}
+          `INSERT INTO customers (${insertCols.join(', ')})
+          VALUES ${valueClauses.join(',')}
           ON CONFLICT (company_id, COALESCE(store_code, '__NONE__'), phone) DO UPDATE SET
-            name = COALESCE(EXCLUDED.name, customers.name),
-            gender = COALESCE(EXCLUDED.gender, customers.gender),
-            birth_date = COALESCE(EXCLUDED.birth_date, customers.birth_date),
-            birth_year = COALESCE(EXCLUDED.birth_year, customers.birth_year),
-            age = COALESCE(EXCLUDED.age, customers.age),
-            email = COALESCE(EXCLUDED.email, customers.email),
-            address = COALESCE(EXCLUDED.address, customers.address),
-            region = COALESCE(EXCLUDED.region, customers.region),
-            grade = COALESCE(EXCLUDED.grade, customers.grade),
-            points = COALESCE(EXCLUDED.points, customers.points),
-            store_code = COALESCE(EXCLUDED.store_code, customers.store_code),
-            store_name = COALESCE(EXCLUDED.store_name, customers.store_name),
-            recent_purchase_date = COALESCE(EXCLUDED.recent_purchase_date, customers.recent_purchase_date),
-            recent_purchase_amount = COALESCE(EXCLUDED.recent_purchase_amount, customers.recent_purchase_amount),
-            total_purchase_amount = COALESCE(EXCLUDED.total_purchase_amount, customers.total_purchase_amount),
-            purchase_count = COALESCE(EXCLUDED.purchase_count, customers.purchase_count),
-            custom_fields = COALESCE(EXCLUDED.custom_fields, customers.custom_fields),
-            source = 'sync',
-            updated_at = NOW()`,
+            ${updateClauses}`,
           values
         );
 
@@ -486,7 +554,6 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
           );
         }
       } catch (chunkError: any) {
-        // 청크 실패 시 개별 건으로 폴백하지 않고 전체 실패 처리
         failedCount += chunk.length;
         for (const r of chunk) {
           failures.push({ phone: r.phone, reason: chunkError.message || 'Bulk insert failed' });
@@ -954,6 +1021,83 @@ router.get('/version', async (req: SyncAuthRequest, res: Response) => {
     return res.status(500).json({
       success: false,
       error: 'Failed to check version'
+    });
+  }
+});
+
+
+// ============================================
+// POST /api/sync/field-definitions — 커스텀 필드 라벨 등록
+// Sync Agent가 최초 동기화 시 커스텀 필드 매핑 결과를 서버에 등록
+// ============================================
+router.post('/field-definitions', async (req: SyncAuthRequest, res: Response) => {
+  try {
+    const companyId = req.companyId!;
+    const { definitions } = req.body;
+
+    if (!definitions || !Array.isArray(definitions) || definitions.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'definitions array is required and must not be empty'
+      });
+    }
+
+    // 최대 15개 (커스텀 슬롯 제한)
+    if (definitions.length > 15) {
+      return res.status(400).json({
+        success: false,
+        error: 'Maximum 15 custom field definitions allowed'
+      });
+    }
+
+    // 유효성 검증: custom_1~custom_15만 허용
+    const validKeys = new Set(getCustomFields().map(f => f.fieldKey));
+    for (const def of definitions) {
+      if (!def.field_key || !validKeys.has(def.field_key)) {
+        return res.status(400).json({
+          success: false,
+          error: `Invalid field_key: ${def.field_key}. Only custom_1~custom_15 allowed.`
+        });
+      }
+      if (!def.field_label || typeof def.field_label !== 'string') {
+        return res.status(400).json({
+          success: false,
+          error: `field_label is required for ${def.field_key}`
+        });
+      }
+    }
+
+    // UPSERT (기존 정의 덮어쓰기)
+    let upsertedCount = 0;
+    for (const def of definitions) {
+      await query(`
+        INSERT INTO customer_field_definitions (company_id, field_key, field_label, field_type, display_order)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (company_id, field_key) DO UPDATE SET
+          field_label = EXCLUDED.field_label,
+          field_type = EXCLUDED.field_type,
+          display_order = EXCLUDED.display_order
+      `, [
+        companyId,
+        def.field_key,
+        def.field_label,
+        def.field_type || 'string',
+        def.display_order ?? 0
+      ]);
+      upsertedCount++;
+    }
+
+    console.log(`[Sync] Field definitions registered: ${upsertedCount} (company: ${req.companyName})`);
+
+    return res.json({
+      success: true,
+      data: { upsertedCount }
+    });
+  } catch (error) {
+    console.error('[Sync Field Definitions Error]', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to register field definitions'
     });
   }
 });
