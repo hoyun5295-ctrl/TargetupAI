@@ -1347,7 +1347,8 @@ const handleApproveRequest = async (id: string) => {
           department: editingUser.department,
           userType: editingUser.user_type,
           status: editingUser.status,
-          storeCodes: editingUser.storeCodes ? editingUser.storeCodes.split(',').map((s: string) => s.trim()).filter(Boolean) : null
+          storeCodes: editingUser.storeCodes ? editingUser.storeCodes.split(',').map((s: string) => s.trim()).filter(Boolean) : null,
+          lineGroupId: editingUser.line_group_id || null
         })
       });
 
@@ -3609,6 +3610,20 @@ const handleApproveRequest = async (id: string) => {
                   <option value="user">일반 사용자</option>
                   <option value="admin">회사 관리자</option>
                 </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">발송 라인그룹</label>
+                <select
+                  value={editingUser.line_group_id || ''}
+                  onChange={(e) => setEditingUser({ ...editingUser, line_group_id: e.target.value || null })}
+                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                >
+                  <option value="">회사 기본 라인그룹 사용</option>
+                  {lineGroups.filter((lg: any) => lg.group_type === 'bulk' && lg.is_active).map((lg: any) => (
+                    <option key={lg.id} value={lg.id}>{lg.group_name} ({lg.sms_tables?.length || 0}개 테이블)</option>
+                  ))}
+                </select>
+                <p className="text-xs text-gray-400 mt-1">개별 라인그룹 설정 시 이 사용자의 발송은 해당 라인으로 분리됩니다</p>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">담당 분류 코드</label>

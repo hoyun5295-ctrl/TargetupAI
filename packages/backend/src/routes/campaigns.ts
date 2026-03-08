@@ -80,8 +80,39 @@ console.log(`[QTmsg] BULK_ONLY_TABLES: ${BULK_ONLY_TABLES.join(', ')} (테스트
 const lineGroupCache = new Map<string, { tables: string[], hasDedicatedGroup: boolean, expires: number }>();
 const LINE_GROUP_CACHE_TTL = CACHE_TTL.lineGroup * 1000; // CACHE_TTL은 초 단위, Map 캐시는 ms 단위
 
-// 회사별 발송 테이블 조회 (캐시)
-async function getCompanySmsTables(companyId: string): Promise<string[]> {
+// 회사/사용자별 발송 테이블 조회 (캐시) — userId가 있으면 사용자 개별 라인그룹 우선, 없으면 회사 라인그룹 fallback
+async function getCompanySmsTables(companyId: string, userId?: string): Promise<string[]> {
+  // 1) 사용자 개별 라인그룹 확인 (userId가 전달된 경우)
+  if (userId) {
+    const userCacheKey = `user:${userId}`;
+    const userCached = lineGroupCache.get(userCacheKey);
+    if (userCached && userCached.expires > Date.now()) return userCached.tables;
+
+    const userResult = await query(`
+      SELECT lg.sms_tables
+      FROM sms_line_groups lg
+      JOIN users u ON u.line_group_id = lg.id
+      WHERE u.id = $1 AND lg.is_active = true AND lg.group_type = 'bulk'
+    `, [userId]);
+
+    if (userResult.rows.length > 0 && userResult.rows[0].sms_tables?.length > 0) {
+      let userTables = userResult.rows[0].sms_tables;
+      const validUserTables = userTables.filter((t: string) => {
+        if (!isValidSmsTable(t)) {
+          console.error(`[QTmsg] ⚠️ user ${userId} 라인그룹에 잘못된 테이블명: "${t}" — 스킵 처리`);
+          return false;
+        }
+        return true;
+      });
+      if (validUserTables.length > 0) {
+        lineGroupCache.set(userCacheKey, { tables: validUserTables, hasDedicatedGroup: true, expires: Date.now() + LINE_GROUP_CACHE_TTL });
+        return validUserTables;
+      }
+    }
+    // 사용자 개별 라인그룹 없으면 → 회사 라인그룹 fallback (아래 진행)
+  }
+
+  // 2) 회사 라인그룹 (기존 로직)
   const cacheKey = `company:${companyId}`;
   const cached = lineGroupCache.get(cacheKey);
   if (cached && cached.expires > Date.now()) return cached.tables;
@@ -158,10 +189,14 @@ async function getAuthSmsTable(): Promise<string> {
 }
 
 // 캐시 무효화 (라인그룹 설정 변경 시 호출)
-function invalidateLineGroupCache(companyId?: string) {
+function invalidateLineGroupCache(companyId?: string, userId?: string) {
+  if (userId) {
+    lineGroupCache.delete(`user:${userId}`);
+  }
   if (companyId) {
     lineGroupCache.delete(`company:${companyId}`);
-  } else {
+  }
+  if (!companyId && !userId) {
     lineGroupCache.clear();
   }
 }
@@ -248,8 +283,8 @@ async function getExistingLogTables(): Promise<Set<string>> {
   return tables;
 }
 
-async function getCompanySmsTablesWithLogs(companyId: string): Promise<string[]> {
-  const liveTables = await getCompanySmsTables(companyId);
+async function getCompanySmsTablesWithLogs(companyId: string, userId?: string): Promise<string[]> {
+  const liveTables = await getCompanySmsTables(companyId, userId);
   const existingLogs = await getExistingLogTables();
   const now = new Date();
   const curMonth = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -494,7 +529,7 @@ router.get('/', async (req: Request, res: Response) => {
       return res.status(403).json({ error: '고객사 권한이 필요합니다.' });
     }
 
-    const companyTables = await getCompanySmsTables(companyId);
+    const companyTables = await getCompanySmsTables(companyId, userId);
     const { status, page = 1, limit = 20, year, month } = req.query;
     const offset = (Number(page) - 1) * Number(limit);
 
@@ -899,7 +934,7 @@ router.post('/:id/send', async (req: Request, res: Response) => {
       return res.status(403).json({ error: '고객사 권한이 필요합니다.' });
     }
 
-    const companyTables = await getCompanySmsTables(companyId);
+    const companyTables = await getCompanySmsTables(companyId, userId);
 
     // ★ 1차 방어: 라인그룹 미설정 발송 차단
     if (!(await hasCompanyLineGroup(companyId))) {
@@ -1888,7 +1923,7 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       return res.status(401).json({ success: false, error: '인증 필요' });
     }
 
-    const companyTables = await getCompanySmsTables(companyId);
+    const companyTables = await getCompanySmsTables(companyId, userId);
 
     // ★ 1차 방어: 라인그룹 미설정 발송 차단
     if (!(await hasCompanyLineGroup(companyId))) {

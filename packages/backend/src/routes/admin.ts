@@ -17,13 +17,15 @@ const router = Router();
 router.get('/users', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
     const result = await query(`
-      SELECT 
+      SELECT
         u.id, u.login_id, u.name, u.email, u.phone, u.department,
         u.user_type, u.status, u.company_id, u.last_login_at, u.created_at,
-        u.store_codes,
-        c.company_name
+        u.store_codes, u.line_group_id,
+        c.company_name,
+        lg.group_name as line_group_name
       FROM users u
       LEFT JOIN companies c ON u.company_id = c.id
+      LEFT JOIN sms_line_groups lg ON u.line_group_id = lg.id
       ORDER BY u.created_at DESC
     `);
     
@@ -87,11 +89,11 @@ router.post('/users', authenticate, requireSuperAdmin, async (req: Request, res:
 // 사용자 수정
 router.put('/users/:id', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { name, email, phone, department, userType, status, storeCodes } = req.body;
-  
+  const { name, email, phone, department, userType, status, storeCodes, lineGroupId } = req.body;
+
   try {
     const result = await query(`
-      UPDATE users 
+      UPDATE users
       SET name = COALESCE($1, name),
           email = COALESCE($2, email),
           phone = COALESCE($3, phone),
@@ -99,10 +101,11 @@ router.put('/users/:id', authenticate, requireSuperAdmin, async (req: Request, r
           user_type = COALESCE($5, user_type),
           status = COALESCE($6, status),
           store_codes = $7,
+          line_group_id = $8,
           updated_at = NOW()
-      WHERE id = $8
-      RETURNING id, login_id, name, email, user_type, status, store_codes
-    `, [name, email, phone, department, userType, status, storeCodes || null, id]);
+      WHERE id = $9
+      RETURNING id, login_id, name, email, user_type, status, store_codes, line_group_id
+    `, [name, email, phone, department, userType, status, storeCodes || null, lineGroupId || null, id]);
     
     if (result.rows.length === 0) {
       return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
