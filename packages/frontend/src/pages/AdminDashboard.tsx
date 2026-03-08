@@ -3704,7 +3704,7 @@ const handleApproveRequest = async (id: string) => {
             </div>
 
             {/* 탭 네비게이션 */}
-            <div className="flex border-b px-2 bg-gray-50 overflow-x-auto">
+            <div className="flex flex-shrink-0 border-b px-1 bg-gray-50">
               {[
                 { key: 'basic', label: '기본정보', icon: '🏢' },
                 { key: 'send', label: '발송정책', icon: '📋' },
@@ -3714,7 +3714,7 @@ const handleApproveRequest = async (id: string) => {
                 { key: 'fields', label: '필터항목', icon: '🔍' },
                 { key: 'cards', label: '대시보드', icon: '📊' },
                 { key: 'customers', label: '고객DB', icon: '👥' },
-                { key: 'sync', label: 'SyncAgent', icon: '🔄' },
+                { key: 'sync', label: 'Sync', icon: '🔄' },
               ].map((tab) => (
                 <button
                   key={tab.key}
@@ -3725,14 +3725,14 @@ const handleApproveRequest = async (id: string) => {
                     if (tab.key === 'cost' && editCompany?.billingType === 'prepaid') { loadBalanceTx(editCompany.id); }
                     if (tab.key === 'sync') { loadSyncKeys(editCompany.id); }
                   }}
-                  className={`flex-1 px-3 py-3 text-xs font-medium border-b-2 transition-colors whitespace-nowrap ${
+                  className={`flex-1 py-2.5 text-[11px] font-medium text-center border-b-2 transition-colors ${
                     editCompanyTab === tab.key
                       ? 'border-blue-600 text-blue-600 bg-white'
                       : 'border-transparent text-gray-500 hover:text-gray-700'
                   }`}
                 >
-                  <span className="block text-base">{tab.icon}</span>
-                  {tab.label}
+                  <span className="block text-sm leading-tight">{tab.icon}</span>
+                  <span className="block mt-0.5 leading-tight">{tab.label}</span>
                 </button>
               ))}
             </div>
