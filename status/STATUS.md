@@ -106,6 +106,25 @@
 
 ---
 
+### ✅ D61 — 프론트엔드 난독화 적용 (2026-03-08) — 완료
+
+> **배경:** 상용화 전 소스 코드 보호. STATUS.md 런칭 체크리스트 항목.
+> **범위:** frontend + company-frontend 양쪽 vite.config.ts
+> **결과:** `vite-plugin-javascript-obfuscator` 적용. production 빌드 시에만 활성화. stringArray+base64 인코딩, disableConsoleOutput, identifierNamesGenerator 등. 개발 환경 무영향.
+> **배포:** 서버에서 `npm install` → `npm run build` 시 자동 적용
+
+### ✅ D60 — SyncAgent API Key 관리 + 사용자별 라인그룹 배정 (2026-03-08) — 완료
+
+> **배경:** (1) 상용화 시 고객사 온보딩마다 DB 직접 접근 불가 → 슈퍼관리자 UI 필요 (2) 동일 회사 내 사용자간 발송 라인 공유 → 대량발송 시 다른 사용자 홀딩 문제
+> **범위:** 백엔드(admin.ts, campaigns.ts) + 프론트엔드(AdminDashboard.tsx) + DB DDL(users.line_group_id)
+> **결과:**
+> - SyncAgent: 고객사 편집 모달 9번째 탭 추가 — API Key/Secret 조회·재발급·비활성화, use_db_sync 토글. 3개 엔드포인트 신규.
+> - 라인그룹: users 테이블에 line_group_id 추가(nullable). 발송 시 사용자 개별 라인그룹 우선, 없으면 회사 fallback. 슈퍼관리자 사용자 편집 모달에 라인그룹 드롭다운 추가. 고객사 관리자 접근 불가.
+> - 고객사 편집 모달 너비/탭 UI 개선 (max-w-lg → max-w-2xl, 탭 라벨 줄바꿈 방지)
+> **기간계 영향:** campaigns.ts getCompanySmsTables에 userId optional 파라미터 추가 (기존 호출 100% 호환)
+> **DDL:** `ALTER TABLE users ADD COLUMN IF NOT EXISTS line_group_id uuid REFERENCES sms_line_groups(id) ON DELETE SET NULL` — 실행 완료 (2026-03-08)
+> **tsc:** backend + frontend 모두 통과
+
 ### ✅ D59 — 2차 코드 전수점검 (2026-03-07) — 완료
 
 > **배경:** 상용화 전 전체 코드 레벨 정밀 감사. 1차 점검(03-05 교통정리) 이후 코드 실물 기반 전수점검.
@@ -630,7 +649,7 @@ QTmsg status_code, 통신사 코드, 스팸필터 판정 결과를 한 곳에서
 ### 보안
 - [x] 소스 보호: 우클릭/F12/개발자도구/드래그 차단 (3개 도메인 전체 적용)
 - [x] 🔴 MySQL 랜섬웨어 대응 (2026-02-28, D49): 외부 차단+비밀번호 강화+권한분리+fail2ban+포트차단 — 상세 내용 D43 안건#6 참조
-- [ ] 프론트엔드 난독화 (vite-plugin-obfuscator, 런칭 직전 적용)
+- [x] 프론트엔드 난독화 — ✅ D61 (2026-03-08): vite-plugin-javascript-obfuscator 적용, production 빌드 시 stringArray+base64+disableConsoleOutput. frontend+company-frontend 양쪽 적용.
 - [ ] 슈퍼관리자 IP 화이트리스트 설정
 - [x] 외부 자동 백업 구축 — ✅ 2026-03-05 완료: pg_dump+mysqldump → 59번 서버(58.227.193.59) SCP 전송, SSH 키 인증, crontab 매일 03:00 KST, 7일 로컬 보관. 스크립트: /home/administrator/backups/backup.sh
 - [x] 웹 애플리케이션 SQL Injection 점검 — ✅ D56 테이블명 화이트리스트 + D57-C4 sendTime 파라미터화 + D59 custom_fields JSONB 키 화이트리스트(3파일) + dateFilter 파라미터화 완료 (SSRF 별도)
@@ -723,6 +742,8 @@ QTmsg status_code, 통신사 코드, 스팸필터 판정 결과를 한 곳에서
 
 | 날짜 | 완료 항목 |
 |------|----------|
+| 03-08 | **D61 프론트엔드 난독화 적용:** vite-plugin-javascript-obfuscator — frontend+company-frontend 양쪽 vite.config.ts. production 빌드 시에만 활성화(mode === 'production'). stringArray+base64 인코딩, disableConsoleOutput, identifierNamesGenerator('hexadecimal'), splitStrings. 개발 환경(npm run dev) 무영향. 서버 배포 시 npm install 필요. |
+| 03-08 | **D60 SyncAgent API Key 관리 + 사용자별 라인그룹 배정:** (1) SyncAgent: 고객사 편집 모달 9번째 탭 'Sync' 추가. 백엔드 3개 엔드포인트(GET sync-keys, POST regenerate, PUT use_db_sync 토글). 프론트 마스킹+보기/숨김+복사+2단계 재발급 확인 UI. (2) 사용자별 라인그룹: DDL users.line_group_id uuid FK nullable 추가(실행 완료). campaigns.ts getCompanySmsTables(companyId, userId?) 확장—사용자 개별 라인그룹 우선→회사 fallback. admin.ts 사용자 수정 API lineGroupId 추가+사용자 목록에 line_group_name 포함. 프론트 사용자 편집 모달에 라인그룹 드롭다운(슈퍼관리자 전용). 고객사 편집 모달 너비 max-w-lg→max-w-2xl+탭 UI 개선. 수정 3파일(admin.ts, campaigns.ts, AdminDashboard.tsx)+DDL 1건+신규 1파일(DDL-user-line-group.sql). **기간계: getCompanySmsTables userId optional 추가만, 기존 호출 100% 호환.** tsc 통과. |
 | 03-07 | **D59 2차 코드 전수점검 P1~P6 총 28건 수정 완료:** **(P1 정산/데이터 3건)** ai.ts `\|\|10`→`??10` AI추정 0%치환 버그 수정. analysis.ts 하드코딩 `totalSent*15` 제거→채널별(SMS/LMS/MMS/KAKAO) getCompanyCosts() 정확 비용 계산. manage-stats.ts dead code 4줄 삭제. **(P2 SQL Injection 4건)** safe-field-name.ts 신규(custom_1~15 화이트리스트)→campaigns.ts buildFilterQuery, customers.ts buildDynamicFilter, ai.ts buildFilterWhereClause 3곳 적용. campaigns.ts dateFilter MySQL `?` 파라미터화+DATE_FORMAT 정규식 검증. **(P3 입력검증 3건)** mms-images.ts companyId UUID 정규식 검증. upload.ts `path.basename(fileId)` 디렉토리 탐색 방어. manage-users.ts 비밀번호 8~72자 bcrypt 안전 범위 검증. **(P4 하드코딩 5건)** admin.ts+manage-users.ts SMS 회신번호→`SYSTEM_SMS_CALLBACK` 환경변수(미설정 시 throw). defaults.ts `INVITO_INFO` 상수 신규+billing.ts PDF 2곳+이메일 2곳 import 교체. 프론트엔드 5곳 `©2026`→`©{new Date().getFullYear()}`. `constants/company.ts` 신규(frontend+company-frontend)+8파일 15곳 회사정보 상수 교체. **(P5 인프라 4건)** defaults.ts Redis error handler. ai.ts AI API 키 미설정 console.warn. app.ts unhandledRejection+uncaughtException PM2 연계. database.ts PG Pool max/idle/connection 환경변수 기반. **(P6 프론트 4건)** Dashboard.tsx setInterval→useRef+useEffect cleanup. optOutNumber 초기값''→미로딩 시 발송차단 가드 3곳. isSending/directSending 교차 중복 발송 방지 3곳. console.log 4줄 삭제. **(P7 장기 8건)** CODE-REVIEW-P7-BACKLOG.md 기록. 수정 20파일+신규 4파일. **기간계 무접촉. tsc backend+frontend+company-frontend 3패키지 전체 통과.** |
 | 03-06 | **D58 12차 버그리포트 4건+기능개선 3건 전체 완료:** (B12-01) 예약취소 DELETE(pending)+UPDATE(Agent 픽업건→9999) 이중처리 (B12-02) sync-results 60분 타임아웃 강제완료+환불 (B12-03) 스팸필터 subject/firstRecipient 전달 (B12-04) 특수문자/보관함/저장 모달 showDirectSend 바깥 이동→공용화 (F12-01) AI 결과팝업 머지태그 원본 표시 (F12-02) 필터 UI 전면개선: 성별 자동감지(`isGenderField` 패턴매칭)+다양한 DB값 한글 매핑, 생일 월별 프리셋+`birth_month` 오퍼레이터, 금액 최소~최대 범위 입력(콤마포맷+'원' 단위+빠른선택 버튼+`col-span-2`+백엔드 `between` 대응), 수신자 테이블 `formatCellValue` 성별 한글 표시 (F12-03) 타겟발송 담당자테스트 버튼(3열 그리드+`handleTargetTestSend`+10초 쿨다운). 수정 7파일(campaigns.ts, Dashboard.tsx, TargetSendModal.tsx, DirectTargetFilterModal.tsx, AiCampaignResultPopup.tsx, CalendarModal.tsx, customers.ts). **기간계 무접촉.** |
 | 03-05 | **나래 080 수신거부 콜백 연동 완료:** (1) 나래 담당자 콜백 URL 등록 확인 (2) 실제 080 ARS 테스트 — 나래 IP(183.98.207.13) 콜백 수신+수신거부 DB 등록 정상 (3) OPT_OUT_080_TOKEN 검증 제거→Nginx IP 화이트리스트(나래 6개 IP)로 보안 대체 (4) 기존 누적 수신거부: 한줄로 이관 시 수동 처리 예정. 수정 1파일(unsubscribes.ts). **기간계 무접촉.** |
