@@ -3697,14 +3697,14 @@ const handleApproveRequest = async (id: string) => {
       {/* 고객사 수정 모달 */}
       {showEditCompanyModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className={`bg-white rounded-lg shadow-xl w-full ${editCompanyTab === 'customers' || editCompanyTab === 'cards' ? 'max-w-3xl' : editCompanyTab === 'sync' ? 'max-w-xl' : 'max-w-lg'} max-h-[90vh] flex flex-col transition-all`}>
+          <div className={`bg-white rounded-lg shadow-xl w-full ${editCompanyTab === 'customers' || editCompanyTab === 'cards' ? 'max-w-4xl' : 'max-w-2xl'} max-h-[90vh] flex flex-col transition-all`}>
             <div className="px-6 py-4 border-b">
               <h3 className="text-lg font-semibold">고객사 상세 설정</h3>
               <p className="text-xs text-gray-500 mt-1">{editCompany.companyName}</p>
             </div>
-            
+
             {/* 탭 네비게이션 */}
-            <div className="flex border-b px-2 bg-gray-50">
+            <div className="flex border-b px-2 bg-gray-50 overflow-x-auto">
               {[
                 { key: 'basic', label: '기본정보', icon: '🏢' },
                 { key: 'send', label: '발송정책', icon: '📋' },
@@ -3725,7 +3725,7 @@ const handleApproveRequest = async (id: string) => {
                     if (tab.key === 'cost' && editCompany?.billingType === 'prepaid') { loadBalanceTx(editCompany.id); }
                     if (tab.key === 'sync') { loadSyncKeys(editCompany.id); }
                   }}
-                  className={`flex-1 px-2 py-3 text-xs font-medium border-b-2 transition-colors ${
+                  className={`flex-1 px-3 py-3 text-xs font-medium border-b-2 transition-colors whitespace-nowrap ${
                     editCompanyTab === tab.key
                       ? 'border-blue-600 text-blue-600 bg-white'
                       : 'border-transparent text-gray-500 hover:text-gray-700'
