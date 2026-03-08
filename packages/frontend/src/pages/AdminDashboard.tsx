@@ -111,10 +111,16 @@ export default function AdminDashboard() {
     kakaoEnabled: false,
     subscriptionStatus: 'trial',
   });
-  const [editCompanyTab, setEditCompanyTab] = useState<'basic' | 'send' | 'cost' | 'ai' | 'store' | 'fields' | 'cards' | 'customers'>('basic');
+  const [editCompanyTab, setEditCompanyTab] = useState<'basic' | 'send' | 'cost' | 'ai' | 'store' | 'fields' | 'cards' | 'customers' | 'sync'>('basic');
   const [standardFields, setStandardFields] = useState<any[]>([]);
   const [enabledFields, setEnabledFields] = useState<string[]>([]);
   const [fieldDataCheck, setFieldDataCheck] = useState<Record<string, { hasData: boolean; count: number }>>({});
+  // SyncAgent API Key 관리
+  const [syncKeys, setSyncKeys] = useState<{ api_key: string | null; api_secret: string | null; use_db_sync: boolean }>({ api_key: null, api_secret: null, use_db_sync: false });
+  const [syncKeyVisible, setSyncKeyVisible] = useState(false);
+  const [syncSecretVisible, setSyncSecretVisible] = useState(false);
+  const [syncLoading, setSyncLoading] = useState(false);
+  const [showSyncRegenConfirm, setShowSyncRegenConfirm] = useState(false);
   // D41 대시보드 카드 설정
   const [dashboardCardIds, setDashboardCardIds] = useState<string[]>([]);
   const [dashboardCardCount, setDashboardCardCount] = useState<4 | 8>(4);
@@ -615,6 +621,71 @@ const handleCustomerDeleteAll = async () => {
     showAlert('오류', e.message || '삭제 실패', 'error');
   } finally {
     setCustomerDeleteLoading(false);
+  }
+};
+
+// SyncAgent 키 로드
+const loadSyncKeys = async (companyId: string) => {
+  setSyncLoading(true);
+  try {
+    const res = await fetch(`/api/admin/companies/${companyId}/sync-keys`, {
+      headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+    });
+    if (res.ok) {
+      const data = await res.json();
+      setSyncKeys(data.syncKeys);
+    }
+  } catch (error) {
+    console.error('SyncAgent 키 로드 실패:', error);
+  } finally {
+    setSyncLoading(false);
+    setSyncKeyVisible(false);
+    setSyncSecretVisible(false);
+  }
+};
+
+// SyncAgent 키 재발급
+const handleSyncRegenerate = async () => {
+  if (!editCompany.id) return;
+  setSyncLoading(true);
+  try {
+    const res = await fetch(`/api/admin/companies/${editCompany.id}/sync-keys/regenerate`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+    });
+    if (res.ok) {
+      const data = await res.json();
+      setSyncKeys(data.syncKeys);
+      setSyncKeyVisible(true);
+      setSyncSecretVisible(true);
+      alert(data.message);
+    }
+  } catch (error) {
+    console.error('SyncAgent 키 재발급 실패:', error);
+  } finally {
+    setSyncLoading(false);
+    setShowSyncRegenConfirm(false);
+  }
+};
+
+// SyncAgent use_db_sync 토글
+const handleSyncToggle = async (useDbSync: boolean) => {
+  if (!editCompany.id) return;
+  setSyncLoading(true);
+  try {
+    const res = await fetch(`/api/admin/companies/${editCompany.id}/sync-keys`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token')}` },
+      body: JSON.stringify({ useDbSync })
+    });
+    if (res.ok) {
+      const data = await res.json();
+      setSyncKeys(data.syncKeys);
+    }
+  } catch (error) {
+    console.error('SyncAgent 토글 실패:', error);
+  } finally {
+    setSyncLoading(false);
   }
 };
 
@@ -3611,7 +3682,7 @@ const handleApproveRequest = async (id: string) => {
       {/* 고객사 수정 모달 */}
       {showEditCompanyModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className={`bg-white rounded-lg shadow-xl w-full ${editCompanyTab === 'customers' || editCompanyTab === 'cards' ? 'max-w-3xl' : 'max-w-lg'} max-h-[90vh] flex flex-col transition-all`}>
+          <div className={`bg-white rounded-lg shadow-xl w-full ${editCompanyTab === 'customers' || editCompanyTab === 'cards' ? 'max-w-3xl' : editCompanyTab === 'sync' ? 'max-w-xl' : 'max-w-lg'} max-h-[90vh] flex flex-col transition-all`}>
             <div className="px-6 py-4 border-b">
               <h3 className="text-lg font-semibold">고객사 상세 설정</h3>
               <p className="text-xs text-gray-500 mt-1">{editCompany.companyName}</p>
@@ -3628,6 +3699,7 @@ const handleApproveRequest = async (id: string) => {
                 { key: 'fields', label: '필터항목', icon: '🔍' },
                 { key: 'cards', label: '대시보드', icon: '📊' },
                 { key: 'customers', label: '고객DB', icon: '👥' },
+                { key: 'sync', label: 'SyncAgent', icon: '🔄' },
               ].map((tab) => (
                 <button
                   key={tab.key}
@@ -3636,6 +3708,7 @@ const handleApproveRequest = async (id: string) => {
                     setEditCompanyTab(tab.key as any);
                     if (tab.key === 'customers') { setAdminCustSearch(''); loadAdminCustomers(1); }
                     if (tab.key === 'cost' && editCompany?.billingType === 'prepaid') { loadBalanceTx(editCompany.id); }
+                    if (tab.key === 'sync') { loadSyncKeys(editCompany.id); }
                   }}
                   className={`flex-1 px-2 py-3 text-xs font-medium border-b-2 transition-colors ${
                     editCompanyTab === tab.key
@@ -4456,7 +4529,124 @@ const handleApproveRequest = async (id: string) => {
                 </div>
               )}
 
-              {editCompanyTab !== 'customers' && (
+              {/* SyncAgent 탭 */}
+              {editCompanyTab === 'sync' && (
+                <div className="space-y-5">
+                  {syncLoading ? (
+                    <div className="text-center py-8 text-gray-500">로딩 중...</div>
+                  ) : (
+                    <>
+                      {/* use_db_sync 토글 */}
+                      <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+                        <div>
+                          <div className="text-sm font-medium text-gray-800">SyncAgent 활성화</div>
+                          <p className="text-xs text-gray-500 mt-0.5">고객사 DB 자동 동기화 기능</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleSyncToggle(!syncKeys.use_db_sync)}
+                          className={`relative w-12 h-6 rounded-full transition-colors ${syncKeys.use_db_sync ? 'bg-blue-600' : 'bg-gray-300'}`}
+                        >
+                          <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${syncKeys.use_db_sync ? 'translate-x-6' : ''}`} />
+                        </button>
+                      </div>
+
+                      {/* API Key 영역 */}
+                      <div className={`space-y-4 ${!syncKeys.use_db_sync ? 'opacity-50 pointer-events-none' : ''}`}>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">API Key</label>
+                          <div className="flex gap-2">
+                            <div className="flex-1 relative">
+                              <input type="text" readOnly
+                                value={syncKeys.api_key ? (syncKeyVisible ? syncKeys.api_key : '••••••••••••••••••••') : '(미발급)'}
+                                className="w-full px-3 py-2 border rounded-lg bg-gray-50 text-sm font-mono pr-10"
+                              />
+                              {syncKeys.api_key && (
+                                <button type="button" onClick={() => setSyncKeyVisible(!syncKeyVisible)}
+                                  className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs">
+                                  {syncKeyVisible ? '숨김' : '보기'}
+                                </button>
+                              )}
+                            </div>
+                            {syncKeys.api_key && syncKeyVisible && (
+                              <button type="button"
+                                onClick={() => { navigator.clipboard.writeText(syncKeys.api_key || ''); alert('복사되었습니다.'); }}
+                                className="px-3 py-2 border rounded-lg text-xs text-gray-600 hover:bg-gray-50 whitespace-nowrap">
+                                복사
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">API Secret</label>
+                          <div className="flex gap-2">
+                            <div className="flex-1 relative">
+                              <input type="text" readOnly
+                                value={syncKeys.api_secret ? (syncSecretVisible ? syncKeys.api_secret : '••••••••••••••••••••') : '(미발급)'}
+                                className="w-full px-3 py-2 border rounded-lg bg-gray-50 text-sm font-mono pr-10"
+                              />
+                              {syncKeys.api_secret && (
+                                <button type="button" onClick={() => setSyncSecretVisible(!syncSecretVisible)}
+                                  className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs">
+                                  {syncSecretVisible ? '숨김' : '보기'}
+                                </button>
+                              )}
+                            </div>
+                            {syncKeys.api_secret && syncSecretVisible && (
+                              <button type="button"
+                                onClick={() => { navigator.clipboard.writeText(syncKeys.api_secret || ''); alert('복사되었습니다.'); }}
+                                className="px-3 py-2 border rounded-lg text-xs text-gray-600 hover:bg-gray-50 whitespace-nowrap">
+                                복사
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* 재발급 버튼 */}
+                        <div className="pt-3 border-t">
+                          {!showSyncRegenConfirm ? (
+                            <button type="button" onClick={() => setShowSyncRegenConfirm(true)}
+                              className="w-full px-4 py-2.5 bg-orange-50 text-orange-700 border border-orange-200 rounded-lg text-sm font-medium hover:bg-orange-100 transition">
+                              API Key 재발급
+                            </button>
+                          ) : (
+                            <div className="p-4 bg-red-50 border border-red-200 rounded-lg space-y-3">
+                              <div className="text-sm text-red-700 font-medium">정말 재발급하시겠습니까?</div>
+                              <p className="text-xs text-red-600">기존 API Key는 즉시 무효화됩니다. 해당 고객사의 SyncAgent가 새 키로 재설정되어야 합니다.</p>
+                              <div className="flex gap-2">
+                                <button type="button" onClick={() => setShowSyncRegenConfirm(false)}
+                                  className="flex-1 px-3 py-2 border rounded-lg text-sm text-gray-600 hover:bg-gray-50">
+                                  취소
+                                </button>
+                                <button type="button" onClick={handleSyncRegenerate}
+                                  className="flex-1 px-3 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700">
+                                  재발급 확인
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        <p className="text-xs text-gray-400">
+                          SyncAgent 설치 시 위 API Key/Secret을 고객사 에이전트 설정 파일에 입력합니다.
+                          재발급 시 기존 키는 즉시 무효화되므로, 에이전트 설정도 함께 변경해야 합니다.
+                        </p>
+                      </div>
+                    </>
+                  )}
+
+                  {/* 닫기 버튼 */}
+                  <div className="flex pt-4 mt-4 border-t">
+                    <button type="button" onClick={() => setShowEditCompanyModal(false)}
+                      className="w-full px-4 py-2 border rounded-lg text-gray-700 hover:bg-gray-50">
+                      닫기
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {editCompanyTab !== 'customers' && editCompanyTab !== 'sync' && (
               <div className="flex gap-3 pt-6 mt-4 border-t">
                 <button type="button" onClick={() => setShowEditCompanyModal(false)}
                   className="flex-1 px-4 py-2 border rounded-lg text-gray-700 hover:bg-gray-50">

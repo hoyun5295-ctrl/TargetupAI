@@ -2207,4 +2207,80 @@ router.delete('/line-groups/:id', authenticate, requireSuperAdmin, async (req: R
   }
 });
 
+// ===== SyncAgent API Key 관리 =====
+
+// SyncAgent 키 조회
+router.get('/companies/:id/sync-keys', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  try {
+    const result = await query(
+      'SELECT api_key, api_secret, use_db_sync FROM companies WHERE id = $1',
+      [id]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: '회사를 찾을 수 없습니다.' });
+    }
+    res.json({ syncKeys: result.rows[0] });
+  } catch (error) {
+    console.error('SyncAgent 키 조회 실패:', error);
+    res.status(500).json({ error: 'SyncAgent 키 조회 실패' });
+  }
+});
+
+// SyncAgent 키 재발급
+router.post('/companies/:id/sync-keys/regenerate', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  try {
+    const exists = await query('SELECT id FROM companies WHERE id = $1', [id]);
+    if (exists.rows.length === 0) {
+      return res.status(404).json({ error: '회사를 찾을 수 없습니다.' });
+    }
+
+    const newApiKey = `tk_${crypto.randomBytes(24).toString('hex')}`;
+    const newApiSecret = crypto.randomBytes(32).toString('hex');
+
+    const result = await query(
+      `UPDATE companies
+       SET api_key = $1, api_secret = $2, updated_at = NOW()
+       WHERE id = $3
+       RETURNING api_key, api_secret, use_db_sync`,
+      [newApiKey, newApiSecret, id]
+    );
+
+    res.json({ syncKeys: result.rows[0], message: 'API Key가 재발급되었습니다. 기존 키는 즉시 무효화됩니다.' });
+  } catch (error) {
+    console.error('SyncAgent 키 재발급 실패:', error);
+    res.status(500).json({ error: 'SyncAgent 키 재발급 실패' });
+  }
+});
+
+// SyncAgent use_db_sync 토글
+router.put('/companies/:id/sync-keys', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { useDbSync } = req.body;
+
+  if (typeof useDbSync !== 'boolean') {
+    return res.status(400).json({ error: 'useDbSync는 boolean 값이어야 합니다.' });
+  }
+
+  try {
+    const result = await query(
+      `UPDATE companies
+       SET use_db_sync = $1, updated_at = NOW()
+       WHERE id = $2
+       RETURNING api_key, api_secret, use_db_sync`,
+      [useDbSync, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: '회사를 찾을 수 없습니다.' });
+    }
+
+    res.json({ syncKeys: result.rows[0], message: useDbSync ? 'SyncAgent가 활성화되었습니다.' : 'SyncAgent가 비활성화되었습니다.' });
+  } catch (error) {
+    console.error('SyncAgent 설정 변경 실패:', error);
+    res.status(500).json({ error: 'SyncAgent 설정 변경 실패' });
+  }
+});
+
 export default router;
