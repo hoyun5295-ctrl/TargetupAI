@@ -3,7 +3,7 @@
 > **목적:** 버그의 발견→분석→수정→교차검증→완료를 체계적으로 관리하여 재발을 방지한다.  
 > **원칙:** (1) 추측성 땜질 금지 (2) 근본 원인 3줄 이내 특정 (3) 교차검증 통과 전까지 Closed 금지 (4) 재발 패턴 기록  
 > **SoT(진실의 원천):** STATUS.md + 이 문서. 채팅에서 떠도는 "수정 완료"는 교차검증 전까지 "임시"다.
-> **현황:** **2026-03-09 실동작 검증 완료.** 8차 8건 ✅Closed + 5건 🔄Reopened | 9차 S9-04/08 ✅Closed | GPT P0 전체 ✅ | 10차 2건 ✅Closed + 5건 🔄Reopened | 11차 3건 ✅Closed + 2건 미검증 | 12차 2건 🔄Reopened + 2건 미검증 | **13차 9건 신규 🔵Open (🔴🔴 Blocker 1건 포함)**
+> **현황:** **2026-03-09 D62 13차 코드 수정 완료 → 실동작 검증 대기.** 8차 8건 ✅Closed + 5건 🟡수정완료-검증대기 | 9차 S9-04/08 ✅Closed | GPT P0 전체 ✅ | 10차 2건 ✅Closed + 5건 🟡수정완료-검증대기 | 11차 3건 ✅Closed + 2건 미검증 | 12차 2건 🟡수정완료-검증대기 | **13차 9건 🟡수정완료-검증대기 + B8-13 신규 🟡수정완료-검증대기**
 > **⚠️ 2026-02-26 코드 실물 검증:** GPT "미수정" 지적 5건 중 GP-01/03/05는 이미 코드에 반영됨 확인. GP-04는 풀 레벨로 보강. 문서의 "❌ 미수정" 표기가 실제 코드보다 뒤떨어져 있었음.
 
 ---
@@ -156,7 +156,7 @@
 | 항목 | 내용 |
 |------|------|
 | **심각도** | 🔴 Critical |
-| **상태** | 🔄 Reopened (2026-03-09) — 직접/타겟은 OK, **AI 발송 경로에서 차단 안 됨** |
+| **상태** | 🟡 수정완료-검증대기 (D62 13차 — AI 발송 경로 콜백번호 길이 검증(8-11자리) 추가. 실동작 검증 필요) |
 | **도메인** | hanjul.ai — AI발송/직접발송 |
 | **기대 결과** | 미등록 개별회신번호로 발송 시도 시 에러 차단 |
 | **실제 결과** | 미등록 회신번호인데 발송이 그대로 진행됨 |
@@ -262,7 +262,7 @@
 | 항목 | 내용 |
 |------|------|
 | **심각도** | 🟠 Major |
-| **상태** | 🔄 Reopened (2026-03-09) — 예약모달 OK, **발송결과에서 수신거부 미제외 전체건수 표시** |
+| **상태** | 🟡 수정완료-검증대기 (D62 13차 — direct-send 응답에 unsubscribeCount 추가. 실동작 검증 필요) |
 | **도메인** | hanjul.ai — 발송 확정 모달 + 성공 모달 |
 | **기대 결과** | 확정 알림에 정확한 대상 인원수 + 실제 채널타입(SMS/LMS/카카오) 표시 |
 | **실제 결과** | 대상 0명 + 채널타입이 무조건 SMS로 고정 |
@@ -290,7 +290,7 @@
 | 항목 | 내용 |
 |------|------|
 | **심각도** | 🟠 Major |
-| **상태** | 🔄 Reopened (2026-03-09) — 맞춤한줄 OK, **AI 한줄로에서 경고 미표시** |
+| **상태** | 🟡 수정완료-검증대기 (D62 13차 — AI 한줄로 byte_count/byte_warning 추가 + 초과 시 빨간 경고 UI. 실동작 검증 필요) |
 | **도메인** | hanjul.ai — AI 문안 미리보기/편집 |
 | **기대 결과** | SMS 90바이트 초과 시 경고/차단 + AI 추천 문안도 90바이트 이내 |
 | **실제 결과** | AI 미리보기에서 편집 시 바이트 제한 없이 초과 가능. AI가 초과 문안 추천하기도 함 |
@@ -317,7 +317,7 @@
 | 항목 | 내용 |
 |------|------|
 | **심각도** | 🟡 Minor |
-| **상태** | 🔄 Reopened (2026-03-09) — 여전히 이슈 |
+| **상태** | 🟡 수정완료-검증대기 (D62 13차 — XLSX.readFile cellDates:true + normalize.ts Date 객체 처리 추가. 실동작 검증 필요) |
 | **도메인** | hanjul.ai — 고객 DB 업로드 |
 | **기대 결과** | Excel 날짜(1995-03-03)가 정상 날짜 형식으로 파싱 |
 | **실제 결과** | 시리얼넘버(34786 등)로 인식되어 DB에 잘못 저장 |
@@ -904,7 +904,7 @@
 | 항목 | 내용 |
 |------|------|
 | **심각도** | 🔴 Critical |
-| **상태** | 🔄 Reopened (2026-03-09) — DB 합산 표시 + **수신거부 리스트도 store_code 미분리** |
+| **상태** | 🟡 수정완료-검증대기 (D62 13차 — unsubscribes.ts store_code 격리 + customers.ts 확인 완료. 실동작 검증 필요) |
 | **발견자** | sh_cpb, sh_crm |
 | **증상** | 같은 회사 내 다른 브랜드(store_code) 사용자가 타 브랜드 고객을 열람 |
 | **근본원인** | GET `/`, POST `/filter`, GET `/filter-options`, GET `/enabled-fields` 4개 엔드포인트에서 company_user 필터링이 `uploaded_by`(업로더) 기준이어서 store_code 격리 안 됨. stats/filter-count/extract는 이미 store_codes 패턴 적용 상태 |
@@ -917,7 +917,7 @@
 | 항목 | 내용 |
 |------|------|
 | **심각도** | 🟡 Minor |
-| **상태** | 🔄 Reopened (2026-03-09) — 여전히 "커스텀1, 2"로 표시 |
+| **상태** | 🟡 수정완료-검증대기 (D62 13차 — CustomerDBModal.tsx fieldColumns 빈 배열 방어 로직 추가. 실동작 검증 필요) |
 | **발견자** | isoi |
 | **증상** | 고객DB 모달 상세보기에서 커스텀 필드가 "custom_1" 등 raw key로 표시 |
 | **근본원인** | CustomerDBModal.tsx의 custom_fields 렌더링에서 `key` 그대로 출력, `fieldColumns`(enabled-fields API) 라벨 미조회 |
@@ -930,7 +930,7 @@
 | 항목 | 내용 |
 |------|------|
 | **심각도** | 🟠 Major |
-| **상태** | 🔄 Reopened (2026-03-09) — 매핑 후 결과 데이터 NULL |
+| **상태** | 🟡 수정완료-검증대기 (D62 13차 — upload.ts 매장필드 보존 + ai.ts 등록매장정보/최근구매매장 분리 맵핑. 실동작 검증 필요) |
 | **발견자** | sh_crm |
 | **증상** | 엑셀 업로드 시 AI가 "등록매장"과 "최근구매매장"을 구분하지 못함 |
 | **근본원인** | upload.ts의 AI 매핑 프롬프트에 매장 관련 4개 필드(registered_store, recent_purchase_store, store_code, store_phone) 구분 규칙 없음 |
@@ -943,7 +943,7 @@
 | 항목 | 내용 |
 |------|------|
 | **심각도** | 🟠 Major |
-| **상태** | 🔄 Reopened (2026-03-09) — 숫자→날짜 변환 여전히 안 됨 |
+| **상태** | 🟡 수정완료-검증대기 (D62 13차 — normalize.ts Date 객체 처리 + upload.ts cellDates:true. 실동작 검증 필요) |
 | **발견자** | sh_cpb |
 | **증상** | 엑셀에서 날짜 셀이 숫자(34759 등)로 넘어오면 normalizeDate()에서 null 반환 |
 | **근본원인** | upload.ts의 `excelSerialToDateStr()`은 존재하지만 normalize.ts의 `normalizeDate()`에는 시리얼 변환 로직 없음. normalizeDate()가 String(value).trim()으로 먼저 변환해서 숫자 타입 정보 소실 |
@@ -969,7 +969,7 @@
 | 항목 | 내용 |
 |------|------|
 | **심각도** | 🟠 Major |
-| **상태** | 🔄 Reopened (2026-03-09) — 타겟추출 OK, **문안에 등급 미반영** (골드→"최우수고객/VIP") |
+| **상태** | 🟡 수정완료-검증대기 (D62 13차 — ai.ts 등급 키워드 확장 + fieldMappings sample_values 동적 연동. 실동작 검증 필요) |
 | **발견자** | sh_crm |
 | **증상** | AI가 항상 VIP/GOLD/SILVER/BRONZE만 추천, 고객사 실제 등급(PRESTIGE, DIAMOND 등) 무시 |
 | **근본원인** | ai.ts L762: `schema.grades?.join(', ') \|\| 'VIP, GOLD, SILVER, BRONZE'` 하드코딩 fallback. schema에 값이 없으면 무조건 4개 등급만 AI에 전달. L333 키워드맵에도 VIP/GOLD/SILVER 하드코딩 |
@@ -1080,7 +1080,7 @@
 |------|------|
 | **발견** | 2026-03-05 직원 버그리포트 |
 | **심각도** | 🔴 Critical — 예약취소 했는데 발송되는 상황 |
-| **상태** | 🔄 Reopened (2026-03-09) — 캘린더/예약대기/발송결과 모두 취소 불가. 중간관리자 취소 후 실제 발송 진행됨 |
+| **상태** | 🟡 수정완료-검증대기 (D62 13차 — status_code!=100 조건 + PostgreSQL 캠페인 상태 cancelled 업데이트. 실동작 검증 필요) |
 | **증상** | 예약취소 후에도 일부 메시지 발송됨 |
 | **근본원인** | Agent가 `status_code=100`을 픽업하여 변경한 후 DELETE WHERE status_code=100이 miss |
 | **수정** | DELETE(status_code=100 대기건) + UPDATE(Agent 픽업건 → status_code=9999 취소코드) 이중 처리 |
@@ -1095,7 +1095,7 @@
 |------|------|
 | **발견** | 2026-03-05 직원 버그리포트 |
 | **심각도** | 🔴 Critical — 결과 확인 불가, 환불 처리 불가 |
-| **상태** | 🔄 Reopened (2026-03-09) — 결과 수신 완료인데 발송내역 NULL + 캘린더 "진행중" 고착 |
+| **상태** | 🟡 수정완료-검증대기 (D62 13차 — 타임아웃 60→30분 + pending=0→completed 전환. 실동작 검증 필요) |
 | **증상** | 발송 후 결과가 계속 "발송중"으로 표시 |
 | **근본원인** | sync-results가 success/fail > 0일 때만 업데이트. 콜백 미수신 시 영구 pending |
 | **수정** | 60분 타임아웃 로직 추가. pending만 남아있으면 강제 실패 처리 + 환불 |
@@ -1182,7 +1182,7 @@
 | 항목 | 내용 |
 |------|------|
 | **심각도** | 🟠 Major |
-| **상태** | 🔵 Open |
+| **상태** | 🟡 수정완료-검증대기 (D62 13차 — 나이 라벨 "(생년월일 기준 자동계산)" 추가. 실동작 검증 필요) |
 | **발견자** | sh_crm, sh_cpb |
 | **도메인** | hanjul.ai — 고객 DB |
 | **증상** | 생일: `1995-02-28T15:00:00.000Z` ISO 전체 형태로 출력. 나이: 고객사 업로드 값이 아닌 생일 기준 자동계산값 표시 → 혼동 |
@@ -1196,7 +1196,7 @@
 | 항목 | 내용 |
 |------|------|
 | **심각도** | 🟠 Major |
-| **상태** | 🔵 Open |
+| **상태** | 🟡 수정완료-검증대기 (D62 13차 — XLSX.readFile cellDates:true + Date 객체 처리 추가. 실동작 검증 필요) |
 | **발견자** | sh_crm, sh_cpb |
 | **도메인** | hanjul.ai — 고객 DB 업로드 |
 | **증상** | 엑셀 셀 서식이 텍스트가 아니면(숫자/날짜/일반) 데이터 누락 또는 변형 |
@@ -1211,13 +1211,13 @@
 | 항목 | 내용 |
 |------|------|
 | **심각도** | 🟠 Major |
-| **상태** | 🔵 Open |
+| **상태** | 🟡 수정완료-검증대기 (D62 13차 재수정 — AiPreviewModal.tsx + AiCampaignResultPopup.tsx 양쪽 수정. 실동작 검증 필요) |
 | **발견자** | sh_crm |
 | **도메인** | hanjul.ai — AI 한줄로 |
 | **증상** | AI 맞춤한줄은 미리보기에서 개인화 정상, **AI 한줄로는 %변수% 그대로 표시** |
-| **근본 원인** | AiCampaignResultPopup에서 wrapAdText()만 호출, replaceVars 미적용 (F12-01 머지태그 원본표시 수정 영향) |
-| **수정 방향** | 미리보기에 sampleCustomer 기반 replaceVars 추가 |
-| **수정 파일** | `AiCampaignResultPopup.tsx` |
+| **근본 원인** | ① 최초 수정 시 AiCampaignResultPopup.tsx만 수정했으나 **실제 화면은 AiPreviewModal.tsx** — 엉뚱한 파일 수정 ② 하드코딩 샘플 데이터 키(`이름`)와 AI 생성 변수명(`고객명`)이 불일치하여 치환 실패 |
+| **수정 내용** | ① AiPreviewModal.tsx: 하드코딩 더미→실제 sampleCustomer 기반 치환 + AI변수↔displayName 별칭 매핑(aliasMap) ② AiCampaignResultPopup.tsx: 동일 별칭 매핑 추가 ③ Dashboard.tsx: AiPreviewModal에 sampleCustomer prop 전달 |
+| **수정 파일** | `AiPreviewModal.tsx`, `AiCampaignResultPopup.tsx`, `Dashboard.tsx` |
 
 ---
 
@@ -1226,12 +1226,13 @@
 | 항목 | 내용 |
 |------|------|
 | **심각도** | 🟡 Minor |
-| **상태** | 🔵 Open (확인 필요) |
+| **상태** | 🟡 수정완료-검증대기 (D62 13차 재수정 — AiPreviewModal.tsx 스팸필터 버튼 실연동. 실동작 검증 필요) |
 | **발견자** | sh_crm |
 | **도메인** | hanjul.ai — 발송 미리보기 |
-| **증상** | 미리보기 전 화면은 스팸필터 오픈 정상, 발송 미리보기 창에서는 미오픈 표시 |
-| **수정 방향** | setSpamFilterData에 스팸필터 상태 prop 전달 확인 |
-| **수정 파일** | `AiCampaignResultPopup.tsx` |
+| **증상** | 미리보기 전 화면은 스팸필터 오픈 정상, 발송 미리보기 창에서는 "준비 중인 기능입니다" 모달만 표시 |
+| **근본 원인** | ① 최초 수정 시 AiCampaignResultPopup.tsx만 확인했으나 **실제 화면은 AiPreviewModal.tsx** ② AiPreviewModal의 스팸필터 버튼이 하드코딩 toast("준비 중인 기능") — 실제 스팸필터 미호출 |
+| **수정 내용** | ① AiPreviewModal.tsx: 하드코딩 toast 제거 → 실제 setSpamFilterData+setShowSpamFilter 호출 ② Dashboard.tsx: AiPreviewModal에 setSpamFilterData/setShowSpamFilter/optOutNumber/isAd props 전달 |
+| **수정 파일** | `AiPreviewModal.tsx`, `Dashboard.tsx` |
 
 ---
 
@@ -1240,7 +1241,7 @@
 | 항목 | 내용 |
 |------|------|
 | **심각도** | 🔴 Critical — 타겟팅 핵심 기능 |
-| **상태** | 🔵 Open |
+| **상태** | 🟡 수정완료-검증대기 (D62 13차 — DirectTargetFilterModal dbColMap 추가 + campaigns.ts 금액필터 로직 추가. 실동작 검증 필요) |
 | **발견자** | sh_crm, sh_cpb |
 | **도메인** | hanjul.ai — 직접 타겟발송 필터 |
 | **증상** | 누적금액 최소 0원 ~ 최대 1000원 설정 시 전체 고객 추출됨 (필터 미적용) |
@@ -1255,12 +1256,12 @@
 | 항목 | 내용 |
 |------|------|
 | **심각도** | 🟠 Major |
-| **상태** | 🔵 Open |
+| **상태** | 🟡 수정완료-검증대기 (D62 13차 재수정 — 이모지 경고 + 특수문자 팝업 비호환 문자 제거. 실동작 검증 필요) |
 | **발견자** | sh_crm, sh_cpb |
 | **도메인** | hanjul.ai — 직접발송/직접타겟발송 |
-| **증상** | 구름/우산 등 이모지가 SMS/LMS에서 호환 안 됨. 사용 가능 특수문자 리스트 안내 없음 |
-| **근본 원인** | SMS/LMS는 EUC-KR 인코딩 기반 — 유니코드 이모지 미지원. 입력 단계 필터링 없음 |
-| **수정 방향** | 이모지 감지 함수 추가 + 입력 시 경고 Toast |
+| **증상** | 구름/우산 등 이모지가 SMS/LMS에서 호환 안 됨. 특수문자 팝업에 비호환 문자(✈☁☂) 포함 |
+| **근본 원인** | ① SMS/LMS는 EUC-KR 인코딩 기반 — 유니코드 이모지 미지원 ② 특수문자 팝업에 EUC-KR 비호환 문자 3개(✈☁☂) 포함 |
+| **수정 내용** | ① Dashboard.tsx/TargetSendModal.tsx: hasEmoji() 함수 + 경고 Toast 추가 ② Dashboard.tsx 특수문자 팝업: 비호환 3개(✈☁☂) 제거, 안내문구 "SMS/LMS 호환 특수문자만 표시" 변경 |
 | **수정 파일** | `Dashboard.tsx`, `TargetSendModal.tsx` |
 
 ---
@@ -1270,7 +1271,7 @@
 | 항목 | 내용 |
 |------|------|
 | **심각도** | 🔴🔴 Blocker — 수신거부 미제외 발송 = 법적 리스크 |
-| **상태** | 🔵 Open |
+| **상태** | 🟡 수정완료-검증대기 (D62 13차 — campaigns.ts company_id 필터 수정 + unsubscribes.ts COUNT(DISTINCT phone) + store_code 격리. 실동작 검증 필요) |
 | **발견자** | sh_crm, sh_cpb |
 | **도메인** | hanjul.ai — 직접발송 |
 | **증상** | ① "수신거부 1,000건 제외" 안내 후 실제 1건만 제외 1,999건 발송 ② 두번째 시도: 전체 발송 (수신거부 전혀 미제외) |
@@ -1286,7 +1287,7 @@
 | 항목 | 내용 |
 |------|------|
 | **심각도** | 🟠 Major |
-| **상태** | 🔵 Open |
+| **상태** | 🟡 수정완료-검증대기 (D62 13차 — SMS/LMS 버튼 클릭 시 mmsUploadedImages 자동 클리어 확인. 실동작 검증 필요) |
 | **발견자** | sh_crm |
 | **도메인** | hanjul.ai — MMS/SMS 전환 |
 | **증상** | ① 비용절감 안내 정상 ② SMS 전환 시 MMS 이미지 화면에 잔존 ③ LMS 유지 시 전송 자체 불가 |
@@ -1301,7 +1302,7 @@
 | 항목 | 내용 |
 |------|------|
 | **심각도** | 🟠 Major |
-| **상태** | 🔵 Open |
+| **상태** | 🟡 수정완료-검증대기 (D62 13차 — 타임아웃 60→30분 + pending=0 시 completed 전환 로직 추가. 실동작 검증 필요) |
 | **발견자** | 서수란, 임은지, 남지현 (B8-05 검증 시 발견) |
 | **도메인** | hanjul.ai — 발송결과 |
 | **증상** | 결과 수신 완료 후에도 "발송중(수동)" 또는 "진행중" 유지. 자동 상태전환 미발생 |
@@ -1311,4 +1312,20 @@
 
 ---
 
-*최종 업데이트: 2026-03-09 — 13차 9건 등록 (🔴🔴 1건, 🔴 1건, 🟠 6건, 🟡 1건). 기존 15건 ✅Closed, 10건 🔄Reopened, 12차 2건 🔄Reopened.*
+### B8-13: 대량 발송결과 조회 성능 병목 🔴
+
+| 항목 | 내용 |
+|------|------|
+| **심각도** | 🔴 Critical — 70~400만건 발송 시 결과 화면 로딩 불가 |
+| **상태** | 🟡 수정완료-검증대기 (D62 13차 추가 — 3단계 최적화 적용. 실동작 검증 필요) |
+| **발견자** | 실동작검증-체크리스트_0309.xlsx 교차검증 |
+| **도메인** | hanjul.ai — 발송결과 |
+| **증상** | 대량 발송 캠페인 결과 조회 시 화면 로딩 지연/불가. sync-results 블로킹 + MySQL UNION ALL GROUP BY 반복 실행 |
+| **근본 원인** | ① ResultsModal.tsx: sync-results await 블로킹 → 결과 화면 자체가 sync 완료까지 대기 ② results.ts: 캠페인 상세 차트 데이터 매번 MySQL UNION ALL GROUP BY 실행 (캐시 없음) ③ 메시지 목록 COUNT도 매 페이지마다 대량 테이블 전체 카운트 |
+| **수정 내용** | ① ResultsModal.tsx: sync-results fire-and-forget (await 제거) ② results.ts /campaigns/:id: Redis 캐시 (완료 24h/진행 5min TTL) ③ results.ts /campaigns/:id/messages: COUNT Redis 캐시 (필터 없는 전체 카운트) ④ defaults.ts: resultChartActive(300s)/resultChartCompleted(86400s) TTL 추가 |
+| **수정 파일** | `ResultsModal.tsx`, `results.ts`, `defaults.ts` |
+| **기간계 영향** | 없음 (조회 성능 최적화만, 발송 로직 미변경) |
+
+---
+
+*최종 업데이트: 2026-03-09 — D62 13차 코드 수정 완료. 13차 9건 + B8-13 신규 = 전체 🟡수정완료-검증대기. Reopened 12건 재수정 완료. 실동작 검증 대기 중.*

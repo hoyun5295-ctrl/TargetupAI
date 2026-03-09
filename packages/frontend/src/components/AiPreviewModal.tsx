@@ -16,6 +16,11 @@ interface AiPreviewModalProps {
   setShowAiSendModal: (v: boolean) => void;
   wrapAdText: (text: string) => string;
   formatRejectNumber?: (num: string) => string;
+  sampleCustomer?: Record<string, string>;
+  setSpamFilterData?: (data: any) => void;
+  setShowSpamFilter?: (v: boolean) => void;
+  optOutNumber?: string;
+  isAd?: boolean;
 }
 
 export default function AiPreviewModal({
@@ -33,6 +38,11 @@ export default function AiPreviewModal({
   handleTestSend,
   setShowAiSendModal,
   wrapAdText,
+  sampleCustomer,
+  setSpamFilterData,
+  setShowSpamFilter,
+  optOutNumber = '',
+  isAd = false,
 }: AiPreviewModalProps) {
   if (!show) return null;
 
@@ -75,29 +85,76 @@ export default function AiPreviewModal({
           <div>
             <div className="text-sm text-gray-600 mb-2">💬 메시지 내용</div>
             {aiResult?.usePersonalization && aiResult?.personalizationVars?.length > 0 ? (
-              <div>
-                <div className="text-xs text-purple-600 mb-2">✨ 개인화 적용 예시 (상위 3명 샘플)</div>
-                <div className="grid grid-cols-3 gap-3">
-                  {[
-                    { '이름': '김민수', '포인트': '12,500', '등급': 'VIP', '매장명': '강남점', '지역': '서울', '구매금액': '350,000', '구매횟수': '8', '평균주문금액': '43,750', 'LTV점수': '85' },
-                    { '이름': '이영희', '포인트': '8,200', '등급': 'GOLD', '매장명': '홍대점', '지역': '경기', '구매금액': '180,000', '구매횟수': '5', '평균주문금액': '36,000', 'LTV점수': '62' },
-                    { '이름': '박지현', '포인트': '25,800', '등급': 'VIP', '매장명': '부산센텀점', '지역': '부산', '구매금액': '520,000', '구매횟수': '12', '평균주문금액': '43,300', 'LTV점수': '91' },
-                  ].map((sample, idx) => {
-                    let msg = wrapAdText(aiResult?.messages?.[selectedAiMsgIdx]?.message_text || '');
-                    Object.entries(sample).forEach(([varName, value]) => {
-                      msg = msg.replace(new RegExp(`%${varName}%`, 'g'), value);
+              (() => {
+                // sampleCustomer(백엔드 실제 데이터) 기반 변수 치환 + AI 변수명↔displayName 별칭 매핑
+                const aliasMap: Record<string, string[]> = {
+                  '이름': ['고객명', '성함', '고객이름'],
+                  '고객등급': ['등급', '멤버십등급', '회원등급'],
+                  '등록매장정보': ['매장명', '매장', '지점', '등록매장'],
+                  '최근구매매장': ['구매매장', '최근매장'],
+                  '보유포인트': ['포인트', '적립금'],
+                  '최근구매금액': ['구매금액', '구매액'],
+                  '누적구매금액': ['총구매금액', '총구매액', '누적구매'],
+                };
+                const replaceAllVars = (text: string, data: Record<string, string>) => {
+                  if (!text || !data) return text;
+                  let result = text;
+                  // 1차: 직접 매칭 (sampleCustomer 키 = AI 변수명)
+                  Object.entries(data).forEach(([k, v]) => {
+                    result = result.replace(new RegExp(`%${k}%`, 'g'), v);
+                  });
+                  // 2차: 별칭 매핑 (AI가 다른 변수명 사용 시 → sampleCustomer의 실제 키로 폴백)
+                  Object.entries(aliasMap).forEach(([realKey, aliases]) => {
+                    const val = data[realKey];
+                    if (!val) return;
+                    aliases.forEach(alias => {
+                      result = result.replace(new RegExp(`%${alias}%`, 'g'), val);
                     });
-                    return (
+                  });
+                  // 역방향: AI가 displayName 사용, sampleCustomer에 별칭으로 존재하는 경우
+                  Object.entries(aliasMap).forEach(([realKey, aliases]) => {
+                    for (const alias of aliases) {
+                      const val = data[alias];
+                      if (!val) continue;
+                      result = result.replace(new RegExp(`%${realKey}%`, 'g'), val);
+                      break;
+                    }
+                  });
+                  // 남은 %변수% 제거
+                  result = result.replace(/%[^%\s]{1,20}%/g, '');
+                  return result;
+                };
+                const sc = sampleCustomer || {};
+                const hasSample = Object.keys(sc).length > 0;
+                return (
+              <div>
+                <div className="text-xs text-purple-600 mb-2">✨ 개인화 적용 예시 {hasSample ? '(실제 고객 데이터 기반)' : '(상위 3명 샘플)'}</div>
+                <div className={hasSample ? '' : 'grid grid-cols-3 gap-3'}>
+                  {hasSample ? (
+                    <div className="rounded-2xl border-2 border-purple-200 overflow-hidden bg-white">
+                      <div className="bg-purple-50 px-3 py-1.5 text-xs text-purple-500 text-center">실제 고객 샘플</div>
+                      <div className="p-3 text-xs leading-relaxed whitespace-pre-wrap bg-gray-50" style={{ minHeight: '120px', maxHeight: '200px', overflowY: 'auto' }}>
+                        {replaceAllVars(wrapAdText(aiResult?.messages?.[selectedAiMsgIdx]?.message_text || ''), sc)}
+                      </div>
+                    </div>
+                  ) : (
+                    [
+                      { '이름': '김민수', '고객명': '김민수', '포인트': '12,500', '보유포인트': '12,500', '등급': 'VIP', '고객등급': 'VIP', '등록매장정보': '강남점', '매장명': '강남점', '최근구매매장': '강남점' },
+                      { '이름': '이영희', '고객명': '이영희', '포인트': '8,200', '보유포인트': '8,200', '등급': 'GOLD', '고객등급': 'GOLD', '등록매장정보': '홍대점', '매장명': '홍대점', '최근구매매장': '홍대점' },
+                      { '이름': '박지현', '고객명': '박지현', '포인트': '25,800', '보유포인트': '25,800', '등급': 'VIP', '고객등급': 'VIP', '등록매장정보': '부산센텀점', '매장명': '부산센텀점', '최근구매매장': '부산센텀점' },
+                    ].map((sample, idx) => (
                       <div key={idx} className="rounded-2xl border-2 border-gray-200 overflow-hidden bg-white">
                         <div className="bg-gray-100 px-3 py-1.5 text-xs text-gray-500 text-center">샘플 {idx + 1}</div>
                         <div className="p-3 text-xs leading-relaxed whitespace-pre-wrap bg-gray-50" style={{ minHeight: '120px', maxHeight: '200px', overflowY: 'auto' }}>
-                          {msg}
+                          {replaceAllVars(wrapAdText(aiResult?.messages?.[selectedAiMsgIdx]?.message_text || ''), sample)}
                         </div>
                       </div>
-                    );
-                  })}
+                    ))
+                  )}
                 </div>
               </div>
+                );
+              })()
             ) : (
               <div className="bg-gray-100 rounded-lg p-4 whitespace-pre-wrap text-sm">
                 {wrapAdText(aiResult?.messages?.[selectedAiMsgIdx]?.message_text || '') || '메시지 없음'}
@@ -165,19 +222,34 @@ export default function AiPreviewModal({
             </button>
             <button
               onClick={() => {
-                const toast = document.createElement('div');
-                toast.innerHTML = `
-                  <div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:white;padding:24px 32px;border-radius:16px;box-shadow:0 10px 40px rgba(0,0,0,0.2);z-index:9999;text-align:center;">
-                    <div style="font-size:48px;margin-bottom:12px;">🚧</div>
-                    <div style="font-size:16px;font-weight:bold;color:#374151;margin-bottom:8px;">준비 중인 기능입니다</div>
-                    <div style="font-size:14px;color:#6B7280;">스팸필터테스트는 곧 업데이트됩니다</div>
-                  </div>
-                  <div style="position:fixed;inset:0;background:rgba(0,0,0,0.3);z-index:9998;" onclick="this.parentElement.remove()"></div>
-                `;
-                document.body.appendChild(toast);
-                setTimeout(() => toast.remove(), 2000);
+                if (setSpamFilterData && setShowSpamFilter) {
+                  const msg = aiResult?.messages?.[selectedAiMsgIdx]?.message_text || '';
+                  const cb = selectedCallback || '';
+                  const sc = sampleCustomer || {};
+                  const replaceVars = (text: string) => {
+                    if (!text) return text;
+                    let result = text;
+                    Object.entries(sc).forEach(([k, v]) => { result = result.replace(new RegExp(`%${k}%`, 'g'), v); });
+                    // 별칭 매핑
+                    const aliasMap: Record<string, string[]> = {
+                      '이름': ['고객명', '성함'], '고객등급': ['등급'], '등록매장정보': ['매장명', '매장'],
+                      '보유포인트': ['포인트'], '최근구매매장': ['구매매장'],
+                    };
+                    Object.entries(aliasMap).forEach(([realKey, aliases]) => {
+                      const val = sc[realKey];
+                      if (val) aliases.forEach(a => { result = result.replace(new RegExp(`%${a}%`, 'g'), val); });
+                    });
+                    result = result.replace(/%[^%\s]{1,20}%/g, '');
+                    return result;
+                  };
+                  const smsRaw = isAd ? `(광고)${msg}\n무료거부${optOutNumber.replace(/-/g, '')}` : msg;
+                  const lmsRaw = isAd ? `(광고) ${msg}\n무료수신거부 ${optOutNumber}` : msg;
+                  const subj = aiResult?.messages?.[selectedAiMsgIdx]?.subject || '';
+                  setSpamFilterData({ sms: replaceVars(smsRaw), lms: replaceVars(lmsRaw), callback: cb, msgType: selectedChannel as any, subject: subj, firstRecipient: sc });
+                  setShowSpamFilter(true);
+                }
               }}
-              className="flex-1 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300"
+              className="flex-1 py-3 bg-teal-600 text-white rounded-lg hover:bg-teal-700"
             >
               🛡️ 스팸필터
             </button>

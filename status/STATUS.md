@@ -106,18 +106,20 @@
 
 ---
 
-### 🔧 D62 — 13차 실동작 검증 버그 수정 (2026-03-09~) — 진행중
+### 🔧 D62 — 13차 실동작 검증 버그 수정 (2026-03-09~) — 코드 수정 완료, 실동작 검증 대기
 
 > **배경:** 직원 전수 실동작 검증(30개 항목) + 한줄로 PPT 버그리포트(7슬라이드) 결과, 기존 버그 재발(Reopened) + 신규 버그(13차) 총 21건 확인.
-> **범위:** 백엔드 6파일 + 프론트엔드 4파일. 기간계(발송 INSERT/차감/환불) 무접촉.
+> **범위:** 백엔드 7파일 + 프론트엔드 5파일. 기간계(발송 INSERT/차감/환불) 무접촉.
 > **원칙:** 파일 1개씩 순차 수정 (병렬 에이전트 금지 — 파일 손상 교훈 반영)
+> **결과:** FIX-GUIDE-D62.md 기반 11파일 수정 + 추가 2건(B8-13 성능최적화, B10-03 AI 매장맵핑) 수정 완료. TypeScript 0 에러. 전건 🟡수정완료-검증대기.
 
 #### 검증 결과 요약 (2026-03-09)
 - **검증 항목:** 30개 (실동작검증-체크리스트_0309.xlsx)
 - **통과(O):** 17개 → 해당 버그 ✅ Closed
-- **실패(X):** 10개 → 해당 버그 🔄 Reopened
+- **실패(X):** 10개 → 코드 재수정 완료 → 🟡 수정완료-검증대기
 - **미검증:** 3개
-- **신규(PPT):** 9건 → B13-01 ~ B13-09 등록
+- **신규(PPT):** 9건 → B13-01 ~ B13-09 코드 수정 완료 → 🟡 수정완료-검증대기
+- **추가 발견:** B8-13 대량 발송결과 성능 → 코드 수정 완료 → 🟡 수정완료-검증대기
 
 #### 수정 대상 버그 목록 (21건)
 
@@ -144,23 +146,27 @@
 | 🟠 | B13-08 | MMS→SMS 이미지 — MMS에서 SMS 전환 시 이미지 잔존 | TargetSendModal.tsx |
 | 🟡 | B10-02 | 커스텀 필드 라벨 — fieldColumns 빈 배열 시 미표시 | CustomerDBModal.tsx |
 | 🟡 | B13-04 | 스팸필터 표시 — AI 결과 팝업에서 스팸필터 결과 미노출 | AiCampaignResultPopup.tsx |
+| 🔴 | B8-13 | 대량 발송결과 성능 — 70~400만건 조회 시 로딩 불가 (**추가**) | ResultsModal.tsx, results.ts, defaults.ts |
 
-#### 수정 대상 파일 (10개)
+#### 수정 대상 파일 (13개) — 전체 수정 완료 ✅
 
-**백엔드 (6파일):**
-1. `routes/campaigns.ts` — B13-07, B13-05, B8-04, B12-01, B12-02, B13-09, B8-08
-2. `routes/customers.ts` — B10-01 (store_code 격리)
-3. `routes/unsubscribes.ts` — B10-01, B13-07
-4. `routes/upload.ts` — B8-10, B10-03, B10-04, B13-02
-5. `services/ai.ts` — B8-09, B10-06
-6. `utils/normalize.ts` — B8-10, B10-04, B13-02
+**백엔드 (8파일):**
+1. `routes/campaigns.ts` — B13-07, B13-05, B8-04, B12-01, B12-02, B13-09, B8-08 ✅
+2. `routes/customers.ts` — B10-01 (store_code 격리, 이미 적용 확인) ✅
+3. `routes/unsubscribes.ts` — B10-01, B13-07 ✅
+4. `routes/upload.ts` — B8-10, B10-03, B10-04, B13-02 ✅
+5. `services/ai.ts` — B8-09, B10-06, B10-03(매장맵핑 분리) ✅
+6. `utils/normalize.ts` — B8-10, B10-04, B13-02 ✅
+7. `routes/results.ts` — B8-13 (Redis 캐시 + COUNT 최적화) ✅ **추가**
+8. `config/defaults.ts` — B8-13 (CACHE_TTL 추가) ✅ **추가**
 
-**프론트엔드 (4파일):**
-7. `pages/Dashboard.tsx` — B8-08, B13-06
-8. `components/AiCampaignResultPopup.tsx` — B8-09, B13-03, B13-04
-9. `components/TargetSendModal.tsx` — B13-08, B13-06
-10. `components/CustomerDBModal.tsx` — B13-01, B10-02
-11. `components/DirectTargetFilterModal.tsx` — B13-05
+**프론트엔드 (5파일):**
+9. `pages/Dashboard.tsx` — B8-08, B13-06 ✅
+10. `components/AiCampaignResultPopup.tsx` — B8-09, B13-03, B13-04 ✅
+11. `components/TargetSendModal.tsx` — B13-08, B13-06 ✅
+12. `components/CustomerDBModal.tsx` — B13-01, B10-02 ✅
+13. `components/DirectTargetFilterModal.tsx` — B13-05 ✅
+14. `components/ResultsModal.tsx` — B8-13 (sync-results fire-and-forget) ✅ **추가**
 
 **기간계 무접촉:** 발송 INSERT/차감/환불/인증 로직 일절 미수정.
 

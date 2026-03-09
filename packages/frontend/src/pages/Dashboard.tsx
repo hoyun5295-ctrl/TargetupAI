@@ -2542,6 +2542,11 @@ const campaignData = {
           setShowAiSendModal={setShowAiSendModal}
           wrapAdText={wrapAdText}
           formatRejectNumber={formatRejectNumber}
+          sampleCustomer={sampleCustomer}
+          setSpamFilterData={setSpamFilterData}
+          setShowSpamFilter={setShowSpamFilter}
+          optOutNumber={optOutNumber}
+          isAd={isAd}
         />
         <CampaignSuccessModal
           show={showSuccess}
@@ -3789,7 +3794,8 @@ const campaignData = {
             </div>
             <div className="p-4">
               <div className="grid grid-cols-8 gap-1.5">
-                {['★','☆','♥','♡','◆','◇','■','□','▲','△','▶','◀','●','○','◎','♤','♠','♧','♣','♢','♦','♪','♬','♩','☎','✉','✈','♨','☀','☁','☂','※','☞','↑','↓','←','→','▷','◁','▽','①','②','③','④','⑤','⑥','⑦','⑧','㈜','㈔','℡','㉿','㎝','㎏','㎡','㎎'].map((char, i) => (
+                {/* SMS/LMS 호환 특수문자만 (EUC-KR 인코딩 지원 확인 완료) */}
+                {['★','☆','♥','♡','◆','◇','■','□','▲','△','▶','◀','●','○','◎','♤','♠','♧','♣','♢','♦','♪','♬','♩','☎','✉','♨','☀','※','☞','↑','↓','←','→','▷','◁','▽','①','②','③','④','⑤','⑥','⑦','⑧','㈜','㈔','℡','㉿','㎝','㎏','㎡','㎎'].map((char, i) => (
                   <button
                     key={i}
                     onClick={() => {
@@ -3803,7 +3809,7 @@ const campaignData = {
                   </button>
                 ))}
               </div>
-              <p className="text-xs text-gray-400 mt-3 text-center">⚠️ 일부 특수문자는 LMS 자동 전환될 수 있습니다</p>
+              <p className="text-xs text-amber-500 mt-3 text-center">✅ SMS/LMS 호환 특수문자만 표시됩니다 (EUC-KR 기준)</p>
             </div>
           </div>
         </div>
