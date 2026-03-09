@@ -106,12 +106,13 @@
 
 ---
 
-### 🔧 D62 — 13차 실동작 검증 버그 수정 (2026-03-09~) — 코드 수정 완료, 실동작 검증 대기
+### 🔧 D62 — 13차 실동작 검증 버그 수정 (2026-03-09~) — 전수점검 완료, 빌드+배포 후 2단계 실동작 검증 대기
 
 > **배경:** 직원 전수 실동작 검증(30개 항목) + 한줄로 PPT 버그리포트(7슬라이드) 결과, 기존 버그 재발(Reopened) + 신규 버그(13차) 총 21건 확인.
-> **범위:** 백엔드 7파일 + 프론트엔드 5파일. 기간계(발송 INSERT/차감/환불) 무접촉.
+> **범위:** 백엔드 8파일 + 프론트엔드 6파일. 기간계(발송 INSERT/차감/환불) 무접촉.
 > **원칙:** 파일 1개씩 순차 수정 (병렬 에이전트 금지 — 파일 손상 교훈 반영)
-> **결과:** FIX-GUIDE-D62.md 기반 11파일 수정 + 추가 2건(B8-13 성능최적화, B10-03 AI 매장맵핑) 수정 완료. TypeScript 0 에러. 전건 🟡수정완료-검증대기.
+> **결과:** FIX-GUIDE-D62.md 기반 11파일 수정 + 추가 수정(B8-13 성능최적화, B10-03 AI 매장맵핑, B13-03/04 AiPreviewModal 누락분, B13-06 특수문자 비호환 제거). TypeScript 0 에러. 전건 🟡수정완료-검증대기.
+> **⚠️ 교훈:** B13-03/B13-04는 최초 수정 시 엉뚱한 파일(AiCampaignResultPopup.tsx)만 수정 — 실제 화면은 AiPreviewModal.tsx. Harold님 현장 확인으로 발견하여 재수정. **다음 세션에서 전건 전수점검 재실시 필수.**
 
 #### 검증 결과 요약 (2026-03-09)
 - **검증 항목:** 30개 (실동작검증-체크리스트_0309.xlsx)
@@ -120,6 +121,23 @@
 - **미검증:** 3개
 - **신규(PPT):** 9건 → B13-01 ~ B13-09 코드 수정 완료 → 🟡 수정완료-검증대기
 - **추가 발견:** B8-13 대량 발송결과 성능 → 코드 수정 완료 → 🟡 수정완료-검증대기
+- **현장 확인 재수정:** B13-03(개인화 미리보기), B13-04(스팸필터 "준비중"), B13-06(특수문자 비호환) — AiPreviewModal.tsx 누락 + 특수문자 팝업 비호환 문자 제거
+
+#### ✅ 전수점검 결과 (2026-03-09)
+- **22건 🟡수정완료-검증대기 전수점검**: 코드 직접 읽기 검증 (에이전트 위임 없이 직접 수행)
+- **18건 코드 정상 확인** — 수정 코드가 관련 경로 전부에 일관 적용
+- **3건 실제 미수정 발견 + 수정 완료:**
+  - B14-01: 직접발송 수신거부 company_id→user_id 통일 (campaigns.ts L2088-2093)
+  - B14-02: generateCustomMessages byte_count/byte_warning 누락 (ai.ts L1516-1528)
+  - B14-04: sync-results 주석 60분→30분 수정 (campaigns.ts L1795)
+- **1건 신규 발견 + 수정 완료:**
+  - B14-03: 예약취소 시 campaign_runs 상태+fail_count 미변경 (campaigns.ts L2531-2552)
+- **B12-02/B13-09 보완:** AI캠페인 타임아웃 60→30분 통일 (campaigns.ts L1791)
+
+#### ⚠️ 다음 단계 TODO
+- **백엔드 빌드+배포** — campaigns.ts(3곳), ai.ts(1곳) 수정 반영 필요
+- **2단계 실동작 검증** — 26건 전체 (기존 22건 + 전수점검 신규 4건)
+- 점검 시 **실제 화면에서 동작 확인** (코드 수정 파일이 아닌 사용자가 보는 화면 기준)
 
 #### 수정 대상 버그 목록 (21건)
 
@@ -141,11 +159,11 @@
 | 🟠 | B10-06 | 등급 프롬프트 — AI 프롬프트에 등급명 하드코딩 | ai.ts |
 | 🟠 | B13-01 | 생일/나이 라벨 — 고객 상세 모달 나이 필드 라벨 미표시 | CustomerDBModal.tsx |
 | 🟠 | B13-02 | 날짜 포맷 — 엑셀 날짜 YYYY-MM-DD 미변환 | upload.ts, normalize.ts |
-| 🟠 | B13-03 | 미리보기 개인화 — AI 결과 미리보기에 {고객명} 치환 안됨 | AiCampaignResultPopup.tsx |
-| 🟠 | B13-06 | 이모지 경고 — SMS/LMS 이모지 입력 시 경고 없음 (EUC-KR) | Dashboard.tsx, TargetSendModal.tsx |
+| 🟠 | B13-03 | 미리보기 개인화 — AI 결과 미리보기에 %고객명% 치환 안됨 (**재수정**) | AiPreviewModal.tsx, AiCampaignResultPopup.tsx, Dashboard.tsx |
+| 🟠 | B13-06 | 이모지 경고 + 특수문자 비호환 (**재수정**) | Dashboard.tsx, TargetSendModal.tsx |
 | 🟠 | B13-08 | MMS→SMS 이미지 — MMS에서 SMS 전환 시 이미지 잔존 | TargetSendModal.tsx |
 | 🟡 | B10-02 | 커스텀 필드 라벨 — fieldColumns 빈 배열 시 미표시 | CustomerDBModal.tsx |
-| 🟡 | B13-04 | 스팸필터 표시 — AI 결과 팝업에서 스팸필터 결과 미노출 | AiCampaignResultPopup.tsx |
+| 🟡 | B13-04 | 스팸필터 "준비중" — 미리보기에서 스팸필터 미작동 (**재수정**) | AiPreviewModal.tsx, Dashboard.tsx |
 | 🔴 | B8-13 | 대량 발송결과 성능 — 70~400만건 조회 시 로딩 불가 (**추가**) | ResultsModal.tsx, results.ts, defaults.ts |
 
 #### 수정 대상 파일 (13개) — 전체 수정 완료 ✅
@@ -160,13 +178,14 @@
 7. `routes/results.ts` — B8-13 (Redis 캐시 + COUNT 최적화) ✅ **추가**
 8. `config/defaults.ts` — B8-13 (CACHE_TTL 추가) ✅ **추가**
 
-**프론트엔드 (5파일):**
-9. `pages/Dashboard.tsx` — B8-08, B13-06 ✅
-10. `components/AiCampaignResultPopup.tsx` — B8-09, B13-03, B13-04 ✅
-11. `components/TargetSendModal.tsx` — B13-08, B13-06 ✅
-12. `components/CustomerDBModal.tsx` — B13-01, B10-02 ✅
-13. `components/DirectTargetFilterModal.tsx` — B13-05 ✅
-14. `components/ResultsModal.tsx` — B8-13 (sync-results fire-and-forget) ✅ **추가**
+**프론트엔드 (6파일):**
+9. `pages/Dashboard.tsx` — B8-08, B13-06(이모지+특수문자팝업), B13-03/B13-04(props전달) ✅ **재수정**
+10. `components/AiCampaignResultPopup.tsx` — B8-09, B13-03(별칭매핑추가) ✅ **재수정**
+11. `components/AiPreviewModal.tsx` — B13-03(개인화치환), B13-04(스팸필터연동) ✅ **신규 추가**
+12. `components/TargetSendModal.tsx` — B13-08, B13-06 ✅
+13. `components/CustomerDBModal.tsx` — B13-01, B10-02 ✅
+14. `components/DirectTargetFilterModal.tsx` — B13-05 ✅
+15. `components/ResultsModal.tsx` — B8-13 (sync-results fire-and-forget) ✅
 
 **기간계 무접촉:** 발송 INSERT/차감/환불/인증 로직 일절 미수정.
 

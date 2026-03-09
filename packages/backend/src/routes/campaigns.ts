@@ -1784,20 +1784,20 @@ router.post('/sync-results', async (req: Request, res: Response) => {
       const failCount = (smsAgg.fail_count || 0) + kakaoResult.fail;
       const pendingCount = (smsAgg.pending_count || 0) + kakaoResult.pending;
 
-      // 타임아웃 체크: 발송 후 60분 경과 + pending만 남아있으면 강제 완료 처리
+      // 타임아웃 체크: 발송 후 30분 경과 + pending만 남아있으면 강제 완료 처리 (직접발송과 동일)
       const campTimeInfo = await query('SELECT sent_at, scheduled_at, created_at FROM campaigns WHERE id = $1', [run.campaign_id]);
       const campSentAt = campTimeInfo.rows[0]?.sent_at || campTimeInfo.rows[0]?.scheduled_at || campTimeInfo.rows[0]?.created_at;
       const minutesSinceSend = campSentAt ? (Date.now() - new Date(campSentAt).getTime()) / (1000 * 60) : 0;
-      const isTimedOut = minutesSinceSend > 60 && pendingCount > 0 && successCount === 0 && failCount === 0;
+      const isTimedOut = minutesSinceSend > 30 && pendingCount > 0 && successCount === 0 && failCount === 0;
 
       // PostgreSQL 업데이트
       if (successCount > 0 || failCount > 0 || isTimedOut) {
-        // 타임아웃: pending만 남아있고 60분 경과 → 전부 fail 처리
+        // 타임아웃: pending만 남아있고 30분 경과 → 전부 fail 처리
         const effectiveFailCount = isTimedOut ? failCount + pendingCount : failCount;
         const effectivePendingCount = isTimedOut ? 0 : pendingCount;
         const newStatus = effectivePendingCount > 0 ? 'sending' : ((successCount + effectiveFailCount) > 0 ? 'completed' : 'failed');
         if (isTimedOut) {
-          console.warn(`[sync-results] campaign_run ${run.id}: 60분 타임아웃 — pending ${pendingCount}건 → fail 처리`);
+          console.warn(`[sync-results] campaign_run ${run.id}: 30분 타임아웃 — pending ${pendingCount}건 → fail 처리`);
         }
 
         // campaign_runs 업데이트
@@ -2085,11 +2085,11 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       }
     }
 
-    // 1. 수신거부 필터링
+    // 1. 수신거부 필터링 (user_id 기준 — 브랜드별 사용자가 각자 수신거부 관리)
     const phones = targetFilteredRecipients.map((r: any) => normalizePhone(r.phone));
     const unsubResult = await query(
-      `SELECT phone FROM unsubscribes WHERE company_id = $1 AND phone = ANY($2)`,
-      [companyId, phones]
+      `SELECT DISTINCT phone FROM unsubscribes WHERE user_id = $1 AND phone = ANY($2)`,
+      [userId, phones]
     );
     const unsubPhones = new Set(unsubResult.rows.map((r: any) => r.phone));
     const filteredRecipients = targetFilteredRecipients.filter((r: any) => !unsubPhones.has(normalizePhone(r.phone)));
@@ -2528,9 +2528,26 @@ router.post('/:id/cancel', async (req: Request, res: Response) => {
       }
     }
 
-    // 5. PostgreSQL 캠페인 상태 변경
+    // 5. PostgreSQL 캠페인 상태 변경 — cancelled + 전체 건수를 fail로 처리
+    const camp_target = camp.target_count || camp.sent_count || 0;
     await query(
-      `UPDATE campaigns SET status = 'cancelled', cancelled_at = NOW(), updated_at = NOW() WHERE id = $1`,
+      `UPDATE campaigns SET
+        status = 'cancelled',
+        fail_count = COALESCE(target_count, sent_count, 0),
+        success_count = 0,
+        cancelled_at = NOW(),
+        updated_at = NOW()
+       WHERE id = $1`,
+      [campaignId]
+    );
+
+    // campaign_runs도 cancelled로 변경 (sync-results에서 재처리 방지)
+    await query(
+      `UPDATE campaign_runs SET
+        status = 'cancelled',
+        fail_count = COALESCE(target_count, sent_count, 0),
+        success_count = 0
+       WHERE campaign_id = $1 AND status IN ('scheduled', 'sending')`,
       [campaignId]
     );
 
