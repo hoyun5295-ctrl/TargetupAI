@@ -171,6 +171,12 @@ export default function TargetSendModal({
     fm.field_key !== 'phone' && fm.field_key !== 'sms_opt_in'
   );
 
+  // B13-06: 이모지 감지 함수
+  const hasEmoji = (text: string): boolean => {
+    const emojiPattern = /[\uD800-\uDBFF][\uDC00-\uDFFF]|[\u2600-\u27BF]|[\u2300-\u23FF]|[\u2B50-\u2BFF]|[\uFE00-\uFE0F]|[\u200D]|[\u20E3]|[\uE000-\uF8FF]/g;
+    return emojiPattern.test(text);
+  };
+
   // ====== ★ 커서 위치에 변수 삽입 (버그 수정) ======
   const insertVariable = (variable: string, target: 'sms' | 'kakao') => {
     const ref = target === 'sms' ? smsTextareaRef : kakaoTextareaRef;
@@ -434,7 +440,13 @@ export default function TargetSendModal({
                   <textarea
                     ref={smsTextareaRef}
                     value={targetMessage}
-                    onChange={(e) => setTargetMessage(e.target.value)}
+                    onChange={(e) => {
+                      const text = e.target.value;
+                      setTargetMessage(text);
+                      if (targetMsgType !== 'MMS' && hasEmoji(text)) {
+                        setToast({ show: true, type: 'warning', message: 'SMS/LMS는 이모지를 지원하지 않습니다. 발송 실패 원인이 됩니다.' });
+                      }
+                    }}
                     placeholder="전송하실 내용을 입력하세요."
                     style={adTextEnabled ? { textIndent: '42px' } : {}}
                     className={`w-full resize-none border-0 focus:outline-none text-sm leading-relaxed ${targetMsgType === 'SMS' ? 'h-[180px]' : 'h-[140px]'}`}

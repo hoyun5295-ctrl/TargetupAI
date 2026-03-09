@@ -143,7 +143,7 @@ export default function CustomerDBModal({ onClose, token }: CustomerDBModalProps
     { key: 'name', label: '이름' },
     { key: 'phone', label: '전화번호', format: formatPhone },
     { key: 'gender', label: '성별', format: (v) => v === 'M' || v === '남' ? '남성' : v === 'F' || v === '여' ? '여성' : v || '-' },
-    { key: 'age', label: '나이', format: (v) => v ? `${v}세` : '-' },
+    { key: 'age', label: '나이 (생년월일 기준 자동계산)', format: (v) => v ? `${v}세` : '-' },
     { key: 'birth_date', label: '생년월일', format: (v) => formatDate(v) },
     { key: 'email', label: '이메일' },
     { key: 'grade', label: '등급' },
@@ -336,7 +336,9 @@ export default function CustomerDBModal({ onClose, token }: CustomerDBModalProps
                       <div className="text-xs text-gray-400 font-medium mt-4 mb-2">추가 정보</div>
                       {Object.entries(selectedCustomer.custom_fields).map(([key, value]) => {
                         // fieldColumns에서 커스텀 필드 라벨 조회 (custom_1 → 사용자 정의 라벨)
-                        const fieldDef = fieldColumns.find((f: any) => f.field_key === key);
+                        const fieldDef = fieldColumns && fieldColumns.length > 0
+                          ? fieldColumns.find((f: any) => f.field_key === key)
+                          : null;
                         const displayLabel = fieldDef?.field_label || fieldDef?.display_name || key;
                         return (
                           <div key={key} className="flex items-center py-2.5 border-b border-gray-100">

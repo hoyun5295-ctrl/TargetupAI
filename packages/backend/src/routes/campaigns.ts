@@ -988,6 +988,15 @@ router.post('/:id/send', async (req: Request, res: Response) => {
     // ★ #4: 회신번호 등록 여부 검증 (개별회신번호가 아닌 경우)
     if (!useIndividualCallback) {
       const senderCallback = normalizePhone(campaign.callback_number || defaultCallback);
+
+      // 회신번호 최소 길이 검증 (한국 전화번호 최소 8자리)
+      if (senderCallback.length < 8 || senderCallback.length > 11) {
+        return res.status(400).json({
+          error: '유효하지 않은 회신번호입니다. 올바른 전화번호 형식으로 입력해주세요.',
+          code: 'INVALID_CALLBACK_FORMAT'
+        });
+      }
+
       const senderCheck = await query(
         `SELECT phone FROM (
           SELECT REPLACE(phone_number, '-', '') as phone FROM sender_numbers WHERE company_id = $1 AND is_active = true
@@ -1866,14 +1875,18 @@ router.post('/sync-results', async (req: Request, res: Response) => {
       // 직접발송 타임아웃 체크: 60분 경과 + pending만 남아있으면 강제 완료
       const directSentAt = campaign.scheduled_at || campaign.created_at;
       const directMinutesSince = directSentAt ? (Date.now() - new Date(directSentAt).getTime()) / (1000 * 60) : 0;
-      const directTimedOut = directMinutesSince > 60 && pendingCount > 0 && successCount === 0 && failCount === 0;
+      // 타임아웃 조건 완화: 60분 → 30분
+      const directTimedOut = directMinutesSince > 30 && pendingCount > 0 && successCount === 0 && failCount === 0;
 
       if (successCount > 0 || failCount > 0 || directTimedOut) {
         const dEffectiveFailCount = directTimedOut ? failCount + pendingCount : failCount;
         const dEffectivePendingCount = directTimedOut ? 0 : pendingCount;
-        const newStatus = dEffectivePendingCount > 0 ? 'sending' : 'completed';
+        // pending이 0이면 즉시 completed
+        const newStatus = dEffectivePendingCount === 0
+          ? ((successCount + dEffectiveFailCount) > 0 ? 'completed' : 'failed')
+          : (directTimedOut ? 'completed' : 'sending');
         if (directTimedOut) {
-          console.warn(`[sync-results] direct campaign ${campaign.id}: 60분 타임아웃 — pending ${pendingCount}건 → fail 처리`);
+          console.warn(`[sync-results] direct campaign ${campaign.id}: 30분 타임아웃 — pending ${pendingCount}건 → fail 처리`);
         }
 
         await query(
@@ -1957,6 +1970,7 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       kakaoAttachmentJson,  // 버튼/이미지 JSON
       kakaoCarouselJson,    // 캐러셀 JSON
       kakaoResendType,      // SM/LM/NO
+      targetFilter,         // 금액필터 등 타겟 조건
     } = req.body;
 
     // ★ S9-01: 프론트 치환 완료 메시지 맵 구성 (phone → message)
@@ -1979,12 +1993,23 @@ router.post('/direct-send', async (req: Request, res: Response) => {
 
     // ★ #4: 회신번호 등록 여부 검증 (개별회신번호가 아닌 경우)
     if (!useIndividualCallback && callback) {
+      const normalizedCallback = normalizePhone(callback);
+
+      // 회신번호 최소 길이 검증 (한국 전화번호 최소 8자리)
+      if (normalizedCallback.length < 8 || normalizedCallback.length > 11) {
+        return res.status(400).json({
+          success: false,
+          error: '유효하지 않은 회신번호입니다. 올바른 전화번호 형식으로 입력해주세요.',
+          code: 'INVALID_CALLBACK_FORMAT'
+        });
+      }
+
       const senderCheck = await query(
         `SELECT phone FROM (
           SELECT REPLACE(phone_number, '-', '') as phone FROM sender_numbers WHERE company_id = $1 AND is_active = true
           UNION SELECT REPLACE(phone, '-', '') as phone FROM callback_numbers WHERE company_id = $1
         ) t WHERE phone = $2 LIMIT 1`,
-        [companyId, normalizePhone(callback)]
+        [companyId, normalizedCallback]
       );
       if (senderCheck.rows.length === 0) {
         return res.status(400).json({ success: false, error: '등록되지 않은 회신번호입니다. 발신번호 관리에서 번호를 등록해주세요.', code: 'INVALID_SENDER_NUMBER' });
@@ -2019,20 +2044,61 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       }
     }
 
-    // 1. 수신거부 필터링
-    const phones = recipients.map((r: any) => normalizePhone(r.phone));
-    const unsubResult = await query(
-      `SELECT phone FROM unsubscribes WHERE user_id = $1 AND phone = ANY($2)`,
-      [userId, phones]
-    );
-    const unsubPhones = new Set(unsubResult.rows.map((r: any) => r.phone));
-    const filteredRecipients = recipients.filter((r: any) => !unsubPhones.has(normalizePhone(r.phone)));
+    // 0. 금액필터 적용 (targetFilter가 있을 경우)
+    let targetFilteredRecipients = recipients;
+    if (targetFilter && Object.keys(targetFilter).length > 0) {
+      const amountFields = Object.keys(targetFilter).filter(k =>
+        k.includes('amount') || k.includes('purchase') || k.includes('금액')
+      );
+      if (amountFields.length > 0) {
+        const recipientPhones = recipients.map((r: any) => normalizePhone(r.phone));
+        let filterWhere = 'c.company_id = $1 AND c.phone = ANY($2::text[]) AND c.is_active = true';
+        const filterParams: any[] = [companyId, recipientPhones];
+        let pIdx = 3;
 
-    if (filteredRecipients.length === 0) {
-      return res.status(400).json({ success: false, error: '모든 수신자가 수신거부 상태입니다' });
+        for (const [key, condition] of Object.entries(targetFilter)) {
+          if (typeof condition === 'object' && condition !== null) {
+            const cond = condition as any;
+            if (cond.operator === 'between' && Array.isArray(cond.value)) {
+              filterWhere += ` AND c.${key} BETWEEN $${pIdx++} AND $${pIdx++}`;
+              filterParams.push(cond.value[0], cond.value[1]);
+            } else if (cond.operator === 'gte') {
+              filterWhere += ` AND c.${key} >= $${pIdx++}`;
+              filterParams.push(cond.value);
+            } else if (cond.operator === 'lte') {
+              filterWhere += ` AND c.${key} <= $${pIdx++}`;
+              filterParams.push(cond.value);
+            }
+          }
+        }
+
+        const validResult = await query(
+          `SELECT c.phone FROM customers c WHERE ${filterWhere}`,
+          filterParams
+        );
+        const validPhones = new Set(validResult.rows.map((r: any) => normalizePhone(r.phone)));
+        const beforeCount = targetFilteredRecipients.length;
+        targetFilteredRecipients = targetFilteredRecipients.filter((r: any) => validPhones.has(normalizePhone(r.phone)));
+        if (targetFilteredRecipients.length < beforeCount) {
+          console.log(`[직접발송] 금액필터: ${beforeCount}명 → ${targetFilteredRecipients.length}명`);
+        }
+      }
     }
 
-    const excludedCount = recipients.length - filteredRecipients.length;
+    // 1. 수신거부 필터링
+    const phones = targetFilteredRecipients.map((r: any) => normalizePhone(r.phone));
+    const unsubResult = await query(
+      `SELECT phone FROM unsubscribes WHERE company_id = $1 AND phone = ANY($2)`,
+      [companyId, phones]
+    );
+    const unsubPhones = new Set(unsubResult.rows.map((r: any) => r.phone));
+    const filteredRecipients = targetFilteredRecipients.filter((r: any) => !unsubPhones.has(normalizePhone(r.phone)));
+
+    if (filteredRecipients.length === 0) {
+      return res.status(400).json({ success: false, error: '모든 수신자가 수신거부 상태이거나 필터 조건에 해당하지 않습니다' });
+    }
+
+    const excludedCount = targetFilteredRecipients.length - filteredRecipients.length;
 
     // 2. 캠페인 레코드 생성 (원본 템플릿도 저장)
     const directChannel = sendChannel || 'sms';
@@ -2324,13 +2390,18 @@ router.post('/direct-send', async (req: Request, res: Response) => {
 
     // 실제 성공 건수 (채널별 최대값)
     const directTotalSent = Math.max(directSmsSentCount || 0, directKakaoSentCount || 0);
+    const directFailTotal = filteredRecipients.length - directTotalSent;
 
     // 3. 즉시발송이면 상태 업데이트 (★ #5: sending으로 설정 → sync-results에서 Agent 완료 후 completed 전환)
     // ★ C1: directTotalSent 기반으로 실제 성공 건수 반영
     if (!scheduled) {
+      // 즉시발송: MySQL INSERT 완료 후 상태 설정
+      // QTmsg Agent가 처리할 시간을 고려하여 sending으로 설정하되,
+      // sent_count와 fail_count를 함께 기록
+      const immediateStatus = directTotalSent === 0 ? 'failed' : 'sending';
       await query(
-        `UPDATE campaigns SET status = $1, sent_count = $2, sent_at = NOW() WHERE id = $3`,
-        [directTotalSent === 0 ? 'failed' : 'sending', directTotalSent, campaignId]
+        `UPDATE campaigns SET status = $1, sent_count = $2, fail_count = $3, sent_at = NOW(), updated_at = NOW() WHERE id = $4`,
+        [immediateStatus, directTotalSent, directFailTotal, campaignId]
       );
     }
 
@@ -2349,12 +2420,12 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       sendAt: scheduled && scheduledAt ? new Date(scheduledAt) : new Date(),
     });
 
-    const directFailTotal = filteredRecipients.length - directTotalSent;
     res.json({
       success: true,
       campaignId,
       sentCount: directTotalSent,
       failCount: directFailTotal,
+      unsubscribeCount: excludedCount,
       message: `${directTotalSent}건 발송 ${scheduled ? '예약' : '완료'}${directFailTotal > 0 ? ` (${directFailTotal}건 실패, 자동 환불)` : ''}${excludedCount > 0 ? ` (수신거부 ${excludedCount}건 제외)` : ''}`
     });
 
@@ -2425,12 +2496,19 @@ router.post('/:id/cancel', async (req: Request, res: Response) => {
     );
 
     if (alreadyPickedUp > 0) {
+      // 전송완료(SUCCESS_CODES)와 대기중(100) 제외, 진행중인 것만 취소처리
       await smsExecAll(cancelTables,
-        `UPDATE SMSQ_SEND SET status_code = 9999 WHERE app_etc1 = ? AND status_code NOT IN (${SUCCESS_CODES.join(',')})`,
+        `UPDATE SMSQ_SEND SET status_code = 9999 WHERE app_etc1 = ? AND status_code NOT IN (${SUCCESS_CODES.join(',')}) AND status_code != 100`,
         [campaignId]
       );
       console.warn(`[취소] campaign ${campaignId}: Agent 픽업된 ${alreadyPickedUp}건 status_code→9999 처리`);
     }
+
+    // 캠페인 상태를 'cancelled'로 변경
+    await query(
+      `UPDATE campaigns SET status = 'cancelled', updated_at = NOW() WHERE id = $1 AND status IN ('scheduled', 'sending')`,
+      [campaignId]
+    );
 
     // 카카오 대기건 삭제
     if (kakaoCancelCount > 0) {

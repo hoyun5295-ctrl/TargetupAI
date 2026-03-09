@@ -691,7 +691,14 @@ export default function Dashboard() {
       setDirectMessage(prev => stripAd(prev));
     }
   };
-  const [toast, setToast] = useState<{show: boolean, type: 'success' | 'error', message: string}>({show: false, type: 'success', message: ''});
+  const [toast, setToast] = useState<{show: boolean, type: 'success' | 'error' | 'warning', message: string}>({show: false, type: 'success', message: ''});
+
+  // B13-06: 이모지 감지 함수
+  const hasEmoji = (text: string): boolean => {
+    const emojiPattern = /[\uD800-\uDBFF][\uDC00-\uDFFF]|[\u2600-\u27BF]|[\u2300-\u23FF]|[\u2B50-\u2BFF]|[\uFE00-\uFE0F]|[\u200D]|[\u20E3]|[\uE000-\uF8FF]/g;
+    return emojiPattern.test(text);
+  };
+
   const [optOutNumber, setOptOutNumber] = useState('');
 
   // 업로드 저장 시작 → 프로그레스 모달 표시 + 폴링
@@ -1854,11 +1861,13 @@ const campaignData = {
       {toast.show && (
         <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[100] animate-bounce">
           <div className={`px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-3 ${
-            toast.type === 'success' 
-              ? 'bg-gradient-to-r from-emerald-500 to-green-500 text-white' 
+            toast.type === 'success'
+              ? 'bg-gradient-to-r from-emerald-500 to-green-500 text-white'
+              : toast.type === 'warning'
+              ? 'bg-gradient-to-r from-amber-500 to-yellow-500 text-white'
               : 'bg-gradient-to-r from-red-500 to-rose-500 text-white'
           }`}>
-            <span className="text-2xl">{toast.type === 'success' ? '✅' : '❌'}</span>
+            <span className="text-2xl">{toast.type === 'success' ? '✅' : toast.type === 'warning' ? '⚠️' : '❌'}</span>
             <span className="font-medium text-lg">{toast.message}</span>
           </div>
         </div>
@@ -2891,7 +2900,13 @@ const campaignData = {
                       )}
                       <textarea
                         value={directMessage}
-                        onChange={(e) => setDirectMessage(e.target.value)}
+                        onChange={(e) => {
+                          const text = e.target.value;
+                          setDirectMessage(text);
+                          if (directMsgType !== 'MMS' && hasEmoji(text)) {
+                            setToast({ show: true, type: 'warning', message: 'SMS/LMS는 이모지를 지원하지 않습니다. 발송 실패 원인이 됩니다.' });
+                          }
+                        }}
                         placeholder="전송하실 내용을 입력하세요."
                         style={adTextEnabled ? { textIndent: '42px' } : {}}
                         className={`w-full resize-none border-0 focus:outline-none text-sm leading-relaxed ${directMsgType === 'SMS' ? 'h-[180px]' : 'h-[140px]'}`}

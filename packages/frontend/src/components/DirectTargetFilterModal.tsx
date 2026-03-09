@@ -266,14 +266,20 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
 
       // 숫자 — 범위 (min ~ max)
       if (field.data_type === 'number') {
+        // 필드명 → DB 컬럼명 매핑
+        const dbColMap: Record<string, string> = {
+          'last_purchase_date': 'recent_purchase_date',
+          'last_purchase_amount': 'recent_purchase_amount'
+        };
+        const dbCol = dbColMap[fieldKey] || fieldKey;
         const minVal = filterValues[`${fieldKey}_min`];
         const maxVal = filterValues[`${fieldKey}_max`];
         if (minVal && maxVal) {
-          filters[fieldKey] = { operator: 'between', value: [Number(minVal), Number(maxVal)] };
+          filters[dbCol] = { operator: 'between', value: [Number(minVal), Number(maxVal)] };
         } else if (minVal) {
-          filters[fieldKey] = { operator: 'gte', value: Number(minVal) };
+          filters[dbCol] = { operator: 'gte', value: Number(minVal) };
         } else if (maxVal) {
-          filters[fieldKey] = { operator: 'lte', value: Number(maxVal) };
+          filters[dbCol] = { operator: 'lte', value: Number(maxVal) };
         }
         continue;
       }

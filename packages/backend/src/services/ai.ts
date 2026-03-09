@@ -296,7 +296,7 @@ function buildVarCatalogPrompt(
   }
 
   text += `\n⚠️ 위 목록에 없는 변수를 절대 만들지 마세요!\n`;
-  text += `금지 예시: %매장번호%, %고객명%, %적립금%, %담당매장%, %회원번호% 등\n`;
+  text += `금지 예시: %매장번호%, %매장명%, %고객명%, %적립금%, %담당매장%, %회원번호% 등\n`;
   text += `존재하지 않는 변수는 고객에게 "%변수명%" 텍스트가 그대로 발송됩니다.\n`;
   text += `반드시 위 표의 변수명만 정확히 %변수명% 형태로 사용하세요.\n`;
   text += `변수를 사용할지 말지는 문맥에 맞게 자연스럽게 판단하세요.`;
@@ -339,8 +339,9 @@ function detectPersonalizationVars(
   const keywordMap: Record<string, string[]> = {
     '이름': ['이름', '고객명', '성함', '개인화'],
     '포인트': ['포인트', '적립금', '마일리지', '리워드'],
-    '등급': ['등급', '멤버십', '회원등급', '티어'],
-    '매장명': ['매장', '지점', '스토어', '주이용매장'],
+    '등급': ['등급', '멤버십', '회원등급', '티어', 'tier', 'rank', 'level', '레벨', '랭크'],
+    '등록매장정보': ['등록매장', '가입매장', '소속매장', '주이용매장', '매장정보', '매장', '지점', '스토어'],
+    '최근구매매장': ['최근구매매장', '최근매장', '최종구매매장', '마지막구매매장', '구매매장'],
     '브랜드': ['브랜드', '브랜드별', '브랜드명', '브랜드코드'],
     '지역': ['지역', '거주'],
     '구매금액': ['구매금액', '구매액', '총구매', '누적구매'],
@@ -355,9 +356,23 @@ function detectPersonalizationVars(
     '연령대': ['연령대'],
   };
 
+  // 스키마 기반 동적 등급 값 추가 (VIP, GOLD 등 실제 등급명을 키워드로 포함)
+  const gradeMapping = fieldMappings['등급'];
+  if (gradeMapping && (gradeMapping as any).sample_values) {
+    const gradeValues = (gradeMapping as any).sample_values;
+    if (Array.isArray(gradeValues)) {
+      keywordMap['등급'] = keywordMap['등급'].concat(gradeValues.map((v: any) => String(v)));
+    }
+  }
+
   for (const varName of availableVars) {
     if (!fieldMappings[varName]) continue;
-    const keywords = keywordMap[varName] || [varName];
+    // keywordMap 키워드 + fieldMappings의 description(displayName)도 키워드로 활용
+    const baseKeywords = keywordMap[varName] || [varName];
+    const descKeyword = fieldMappings[varName].description;
+    const keywords = descKeyword && !baseKeywords.includes(descKeyword)
+      ? [...baseKeywords, descKeyword]
+      : baseKeywords;
     for (const keyword of keywords) {
       if (objective.includes(keyword)) {
         if (!detected.includes(varName)) {
@@ -368,9 +383,9 @@ function detectPersonalizationVars(
     }
   }
 
-  // "개인화" 키워드가 있으면 기본 변수(이름, 등급, 매장명) 자동 포함
+  // "개인화" 키워드가 있으면 기본 변수(이름, 등급, 등록매장정보) 자동 포함
   if (/개인화/.test(objective)) {
-    for (const defaultVar of ['이름', '등급', '매장명']) {
+    for (const defaultVar of ['이름', '등급', '등록매장정보']) {
       if (!detected.includes(defaultVar) && availableVars.includes(defaultVar)) {
         detected.push(defaultVar);
       }
@@ -680,15 +695,17 @@ ${usePersonalization ? `- 사용할 개인화 변수: ${personalizationTags}
         }
       }
 
-      // ★ #9: SMS 바이트 초과 시 경고 로그
+      // ★ #9: SMS 바이트 초과 시 경고 로그 + 프론트 표시용 byte_count/byte_warning 추가
       if (channel === 'SMS') {
         for (const variant of result.variants) {
           const msgBytes = calculateKoreanBytes((variant as any).message_text || '');
           const totalBytes = isAd
             ? msgBytes + 6 + 1 + 8 + (rejectNumber ? rejectNumber.replace(/-/g, '').length : 10)
             : msgBytes;
+          (variant as any).byte_count = msgBytes;
+          (variant as any).byte_warning = totalBytes > 90;
           if (totalBytes > 90) {
-            console.warn(`[AI 한줄로 SMS 바이트 초과] ${variant.variant_id}: ${totalBytes}bytes (본문 ${msgBytes}bytes)`);
+            console.warn(`[AI SMS 바이트 초과] ${variant.variant_id}: 총 ${totalBytes}bytes (본문 ${msgBytes}bytes)`);
           }
         }
       }
@@ -850,7 +867,7 @@ ${varCatalogPrompt}
 
 ${hasKakaoProfile ? '⚠️ 이 고객사는 카카오 발신 프로필이 등록되어 있어 카카오 채널 추천이 가능합니다.' : '⚠️ 이 고객사는 카카오 발신 프로필이 미등록이므로 카카오 채널은 추천하지 마세요. SMS/LMS/MMS만 추천하세요.'}
 
-⚠️ 필수 규칙: 개인화 변수(%이름%, %등급%, %매장명% 등)를 사용하는 경우 반드시 LMS 이상을 추천하세요!
+⚠️ 필수 규칙: 개인화 변수(%이름%, %등급%, %등록매장정보%, %최근구매매장% 등)를 사용하는 경우 반드시 LMS 이상을 추천하세요!
 개인화 변수는 치환 시 바이트가 늘어나므로 SMS(90바이트)에서는 초과 위험이 매우 높습니다.
 개인화가 포함된 캠페인에서 SMS를 추천하는 것은 절대 금지입니다.
 

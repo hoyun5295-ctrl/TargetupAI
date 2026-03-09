@@ -20,9 +20,21 @@ function excelSerialToDateStr(serial: number): string | null {
   return `${yyyy}-${mm}-${dd}`;
 }
 
-// 범용 날짜 정규화: 시리얼넘버, YYYYMMDD, YYYY-MM-DD 모두 처리
+// 범용 날짜 정규화: Date객체, 시리얼넘버, YYYYMMDD, YYYY-MM-DD 모두 처리
 function normalizeDateValue(value: any): string | null {
   if (value === undefined || value === null || value === '') return null;
+
+  // Date 객체 직접 처리 (XLSX cellDates: true)
+  if (value instanceof Date && !isNaN(value.getTime())) {
+    const yyyy = value.getFullYear();
+    if (yyyy >= 1900 && yyyy <= 2099) {
+      const mm = String(value.getMonth() + 1).padStart(2, '0');
+      const dd = String(value.getDate()).padStart(2, '0');
+      return `${yyyy}-${mm}-${dd}`;
+    }
+    return null;
+  }
+
   const str = String(value).trim();
   if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
   if (/^\d{4}\/\d{2}\/\d{2}$/.test(str)) return str.replace(/\//g, '-');
@@ -105,6 +117,8 @@ router.post('/parse', authenticate, upload.single('file'), async (req: Request, 
       cellFormula: false,
       cellHTML: false,
       cellStyles: false,
+      cellDates: true,   // ★ 날짜 셀을 Date 객체로 변환
+      raw: false,         // ★ 셀 포매팅 적용 (숫자 정밀도 유지)
       sheetStubs: false,
     });
     const sheetName = workbook.SheetNames[0];
@@ -360,7 +374,7 @@ router.post('/save', authenticate, async (req: Request, res: Response) => {
       totalRows = meta.totalRows || 0;
     } else {
       // 메타 만료 시 파일에서 빠르게 확인
-      const workbook = XLSX.readFile(filePath, { type: 'file', cellFormula: false, cellHTML: false, cellStyles: false, sheetStubs: false });
+      const workbook = XLSX.readFile(filePath, { type: 'file', cellFormula: false, cellHTML: false, cellStyles: false, cellDates: true, raw: false, sheetStubs: false });
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
       const data = XLSX.utils.sheet_to_json(sheet, { header: 1 }) as any[][];
       totalRows = Math.max(0, data.length - 1);
@@ -446,6 +460,8 @@ async function processUploadInBackground(
       cellFormula: false,
       cellHTML: false,
       cellStyles: false,
+      cellDates: true,   // ★ 날짜 셀을 Date 객체로 변환
+      raw: false,         // ★ 셀 포매팅 적용 (숫자 정밀도 유지)
       sheetStubs: false,
     });
     const sheetName = workbook.SheetNames[0];
@@ -654,6 +670,16 @@ async function processUploadInBackground(
               WHERE c.company_id = $1 AND c.phone = ANY($3::text[])
               ON CONFLICT (customer_id, store_code) DO NOTHING
             `, [companyId, userStoreCodes, batchPhones]);
+          }
+          // B10-03: 파일에 store_code 없고 userStoreCodes도 없지만 DB에 기존 store_code가 있는 경우 보존
+          if (!hasFileStoreCode && userStoreCodes.length === 0 && batchPhones.length > 0) {
+            await query(`
+              INSERT INTO customer_stores (company_id, customer_id, store_code)
+              SELECT c.company_id, c.id, c.store_code
+              FROM customers c
+              WHERE c.company_id = $1 AND c.phone = ANY($2::text[]) AND c.store_code IS NOT NULL AND c.store_code != ''
+              ON CONFLICT (customer_id, store_code) DO NOTHING
+            `, [companyId, batchPhones]);
           }
         } catch (err) {
           console.error('[업로드 백그라운드] Batch insert error:', err);

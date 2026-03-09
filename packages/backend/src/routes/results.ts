@@ -3,7 +3,7 @@ import { mysqlQuery, query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
 import { getCompanySmsTablesWithLogs } from './campaigns';
 import { STATUS_CODE_MAP, CARRIER_MAP, SUCCESS_CODES, PENDING_CODES, getStatusLabel, getStatusType, getCarrierLabel, isSuccess } from '../utils/sms-result-map';
-import { DEFAULT_COSTS } from '../config/defaults';
+import { DEFAULT_COSTS, redis, CACHE_TTL } from '../config/defaults';
 
 const router = Router();
 
@@ -282,70 +282,90 @@ router.get('/campaigns/:id', async (req: Request, res: Response) => {
     );
 
     const sendChannel = campaign.send_channel || 'sms';
+    const isCompleted = ['completed', 'cancelled'].includes(campaign.status);
 
+    // ===== Redis 캐시 확인 (대량 발송 차트 데이터 최적화) =====
+    const chartCacheKey = `result_chart:${companyId}:${id}`;
     let errorStats: Record<string, number> = {};
     let carrierStats: Record<string, number> = {};
+    let cacheHit = false;
 
-    // ===== SMS 결과 집계 — UNION ALL + GROUP BY (단일 쿼리 2개) =====
-    if (sendChannel === 'sms' || sendChannel === 'both') {
-      // 실패사유별 집계
-      const statusAgg = await smsUnionGroupBy(
-        companyTables, 'status_code', 'WHERE app_etc1 = ?', [id]
-      );
+    try {
+      const cached = await redis.get(chartCacheKey);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        errorStats = parsed.errorStats || {};
+        carrierStats = parsed.carrierStats || {};
+        cacheHit = true;
+      }
+    } catch (e) { /* Redis 실패 시 DB 직접 조회 */ }
 
-      // statusCodeMap → sms-result-map.ts의 STATUS_CODE_MAP 사용
+    if (!cacheHit) {
+      // ===== SMS 결과 집계 — UNION ALL + GROUP BY (단일 쿼리 2개) =====
+      if (sendChannel === 'sms' || sendChannel === 'both') {
+        // 실패사유별 집계
+        const statusAgg = await smsUnionGroupBy(
+          companyTables, 'status_code', 'WHERE app_etc1 = ?', [id]
+        );
 
-      for (const [codeStr, cnt] of Object.entries(statusAgg)) {
-        const code = parseInt(codeStr);
-        if (![...SUCCESS_CODES, ...PENDING_CODES].includes(code)) {
-          const label = getStatusLabel(code);
-          errorStats[label] = (errorStats[label] || 0) + cnt;
+        for (const [codeStr, cnt] of Object.entries(statusAgg)) {
+          const code = parseInt(codeStr);
+          if (![...SUCCESS_CODES, ...PENDING_CODES].includes(code)) {
+            const label = getStatusLabel(code);
+            errorStats[label] = (errorStats[label] || 0) + cnt;
+          }
+        }
+
+        // 통신사별 집계 (성공 건만) — sms-result-map.ts 상수 사용
+        const carrierAgg = await smsUnionGroupBy(
+          companyTables, 'mob_company',
+          `WHERE app_etc1 = ? AND status_code IN (${SUCCESS_CODES.join(',')})`, [id]
+        );
+
+        for (const [carrier, cnt] of Object.entries(carrierAgg)) {
+          const label = getCarrierLabel(carrier);
+          carrierStats[label] = (carrierStats[label] || 0) + cnt;
         }
       }
 
-      // 통신사별 집계 (성공 건만) — sms-result-map.ts 상수 사용
-      const carrierAgg = await smsUnionGroupBy(
-        companyTables, 'mob_company',
-        `WHERE app_etc1 = ? AND status_code IN (${SUCCESS_CODES.join(',')})`, [id]
-      );
+      // ===== 카카오 결과 집계 =====
+      if (sendChannel === 'kakao' || sendChannel === 'both') {
+        const kakaoErrorResult = await kakaoSelectWhere(
+          'REPORT_CODE, COUNT(*) as cnt',
+          `WHERE REQUEST_UID = ?`,
+          [id],
+          'GROUP BY REPORT_CODE'
+        );
+        kakaoErrorResult.forEach((row: any) => {
+          const code = row.REPORT_CODE || '';
+          const cnt = parseInt(row.cnt);
+          if (code === '0000') {
+            carrierStats['카카오'] = (carrierStats['카카오'] || 0) + cnt;
+          } else if (code !== '' && row.REPORT_CODE !== null) {
+            const label = `카카오 오류 (${code})`;
+            errorStats[label] = (errorStats[label] || 0) + cnt;
+          }
+        });
 
-      for (const [carrier, cnt] of Object.entries(carrierAgg)) {
-        const label = getCarrierLabel(carrier);
-        carrierStats[label] = (carrierStats[label] || 0) + cnt;
+        const kakaoResendResult = await kakaoSelectWhere(
+          'RESEND_REPORT_CODE, COUNT(*) as cnt',
+          `WHERE REQUEST_UID = ? AND RESEND_MT_TYPE != 'NO' AND RESEND_REPORT_CODE IS NOT NULL AND RESEND_REPORT_CODE != ''`,
+          [id],
+          'GROUP BY RESEND_REPORT_CODE'
+        );
+        kakaoResendResult.forEach((row: any) => {
+          const cnt = parseInt(row.cnt);
+          if (row.RESEND_REPORT_CODE === '0000') {
+            carrierStats['카카오→SMS대체'] = (carrierStats['카카오→SMS대체'] || 0) + cnt;
+          }
+        });
       }
-    }
 
-    // ===== 카카오 결과 집계 =====
-    if (sendChannel === 'kakao' || sendChannel === 'both') {
-      const kakaoErrorResult = await kakaoSelectWhere(
-        'REPORT_CODE, COUNT(*) as cnt',
-        `WHERE REQUEST_UID = ?`,
-        [id],
-        'GROUP BY REPORT_CODE'
-      );
-      kakaoErrorResult.forEach((row: any) => {
-        const code = row.REPORT_CODE || '';
-        const cnt = parseInt(row.cnt);
-        if (code === '0000') {
-          carrierStats['카카오'] = (carrierStats['카카오'] || 0) + cnt;
-        } else if (code !== '' && row.REPORT_CODE !== null) {
-          const label = `카카오 오류 (${code})`;
-          errorStats[label] = (errorStats[label] || 0) + cnt;
-        }
-      });
-
-      const kakaoResendResult = await kakaoSelectWhere(
-        'RESEND_REPORT_CODE, COUNT(*) as cnt',
-        `WHERE REQUEST_UID = ? AND RESEND_MT_TYPE != 'NO' AND RESEND_REPORT_CODE IS NOT NULL AND RESEND_REPORT_CODE != ''`,
-        [id],
-        'GROUP BY RESEND_REPORT_CODE'
-      );
-      kakaoResendResult.forEach((row: any) => {
-        const cnt = parseInt(row.cnt);
-        if (row.RESEND_REPORT_CODE === '0000') {
-          carrierStats['카카오→SMS대체'] = (carrierStats['카카오→SMS대체'] || 0) + cnt;
-        }
-      });
+      // ===== Redis 캐시 저장 (완료 캠페인: 24h / 진행중: 5min) =====
+      try {
+        const ttl = isCompleted ? CACHE_TTL.resultChartCompleted : CACHE_TTL.resultChartActive;
+        await redis.setex(chartCacheKey, ttl, JSON.stringify({ errorStats, carrierStats }));
+      } catch (e) { /* Redis 실패 시 무시 — 다음 요청에서 재조회 */ }
     }
 
     return res.json({
@@ -387,9 +407,10 @@ router.get('/campaigns/:id/messages', async (req: Request, res: Response) => {
 
     const msgTables = await getCompanySmsTablesWithLogs(companyId);
 
-    // 캠페인 채널 확인
-    const campResult = await query('SELECT send_channel FROM campaigns WHERE id = $1 AND company_id = $2', [id, companyId]);
+    // 캠페인 채널+상태 확인
+    const campResult = await query('SELECT send_channel, status FROM campaigns WHERE id = $1 AND company_id = $2', [id, companyId]);
     const sendChannel = campResult.rows[0]?.send_channel || 'sms';
+    const campStatus = campResult.rows[0]?.status || '';
 
     // ===== UNION ALL 서브쿼리 빌드 =====
     const dataSubqueries: string[] = [];
@@ -463,10 +484,33 @@ router.get('/campaigns/:id/messages', async (req: Request, res: Response) => {
       return res.json({ messages: [], pagination: { total: 0, page: pageNum, limit: limitNum } });
     }
 
-    // ===== COUNT — 단일 쿼리 (기존: N+1쿼리 → 1쿼리) =====
-    const countSql = `SELECT SUM(cnt) AS total FROM (${countSubqueries.join(' UNION ALL ')}) AS _c`;
-    const countRows = await mysqlQuery(countSql, countParams) as any[];
-    const total = parseInt(countRows[0]?.total || '0');
+    // ===== COUNT — Redis 캐시 + 단일 쿼리 (필터 없는 전체 카운트는 캐시) =====
+    const hasFilter = !!(searchValue || (status && status !== 'all'));
+    const countCacheKey = hasFilter ? '' : `result_msg_count:${companyId}:${id}`;
+    let total = 0;
+    let countCacheHit = false;
+
+    if (countCacheKey) {
+      try {
+        const cachedCount = await redis.get(countCacheKey);
+        if (cachedCount) { total = parseInt(cachedCount); countCacheHit = true; }
+      } catch (e) { /* Redis 실패 시 DB 직접 조회 */ }
+    }
+
+    if (!countCacheHit) {
+      const countSql = `SELECT SUM(cnt) AS total FROM (${countSubqueries.join(' UNION ALL ')}) AS _c`;
+      const countRows = await mysqlQuery(countSql, countParams) as any[];
+      total = parseInt(countRows[0]?.total || '0');
+
+      // 필터 없는 전체 카운트 캐시 (완료 캠페인: 24h / 진행중: 5min)
+      if (countCacheKey) {
+        try {
+          const isComp = ['completed', 'cancelled'].includes(campStatus);
+          const ttl = isComp ? CACHE_TTL.resultChartCompleted : CACHE_TTL.resultChartActive;
+          await redis.setex(countCacheKey, ttl, String(total));
+        } catch (e) { /* Redis 실패 시 무시 */ }
+      }
+    }
 
     // ===== DATA — 단일 쿼리, MySQL이 정렬+페이징 (기존: 30만건 메모리 로드 → 페이지 분량만) =====
     const dataSql = `${dataSubqueries.join(' UNION ALL ')} ORDER BY _sort_time DESC LIMIT ? OFFSET ?`;

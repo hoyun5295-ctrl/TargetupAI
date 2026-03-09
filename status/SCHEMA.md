@@ -890,11 +890,11 @@
 | id | uuid PK | |
 | company_id | uuid FK | 고객사 |
 | user_id | uuid FK | 실행 사용자 |
-| campaign_id | uuid FK (nullable) | 연결 캠페인 (없으면 직접 테스트) |
-| message | text | 테스트 메시지 본문 |
-| subject | varchar(200) | LMS 제목 (nullable) |
 | callback_number | varchar(20) | 발신번호 |
-| message_type | varchar(10) | SMS/LMS |
+| message_content_sms | text (nullable) | SMS 테스트 메시지 본문 |
+| message_content_lms | text (nullable) | LMS 테스트 메시지 본문 |
+| message_hash | varchar(64) (nullable) | 메시지 해시 (앱 매칭용) |
+| spam_check_number | varchar(20) (nullable) | 스팸 체크 번호 |
 | status | varchar(20) | active/completed |
 | started_at | timestamptz | 테스트 시작 |
 | completed_at | timestamptz (nullable) | 테스트 완료 |

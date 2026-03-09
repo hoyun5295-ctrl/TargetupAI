@@ -260,14 +260,35 @@ export default function AiCampaignResultPopup({
                             <div className="flex gap-2">
                               <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-xs ${selectedChannel === 'KAKAO' ? 'bg-yellow-100' : 'bg-purple-100'}`}>{selectedChannel === 'KAKAO' ? '💬' : '📱'}</div>
                               <div className={`rounded-2xl rounded-tl-sm p-3 shadow-sm border text-[12px] leading-[1.6] whitespace-pre-wrap break-all overflow-hidden text-gray-700 max-w-[95%] ${selectedChannel === 'KAKAO' ? 'bg-yellow-50 border-yellow-200' : 'bg-white border-gray-100'}`}>
-                              {wrapAdText(msg.message_text || '')}
+                              {(() => {
+                                let text = msg.message_text || '';
+                                if (sampleCustomer) {
+                                  Object.entries(sampleCustomer).forEach(([k, v]) => {
+                                    text = text.replace(new RegExp(`%${k}%`, 'g'), String(v || ''));
+                                  });
+                                }
+                                text = text.replace(/%[^%\s]{1,20}%/g, '');
+                                return wrapAdText(text);
+                              })()}
                               </div>
                             </div>
                             )}
                           </div>
                           {/* 하단 바이트 */}
                           <div className="px-3 py-2 border-t bg-gray-50 text-center shrink-0">
-                          <span className={`text-[10px] ${editingAiMsg === idx ? 'text-purple-600 font-medium' : 'text-gray-400'}`}>{calculateBytes(wrapAdText(msg.message_text || ''))} / {selectedChannel === 'SMS' ? 90 : selectedChannel === 'KAKAO' ? '4000자' : 2000} bytes</span>
+                          {(() => {
+                            const bytes = calculateBytes(wrapAdText(msg.message_text || ''));
+                            const limit = selectedChannel === 'SMS' ? 90 : selectedChannel === 'KAKAO' ? 4000 : 2000;
+                            const isOver = selectedChannel !== 'KAKAO' && bytes > limit;
+                            return (
+                              <>
+                                <span className={`text-[10px] ${isOver ? 'text-red-600 font-bold' : editingAiMsg === idx ? 'text-purple-600 font-medium' : 'text-gray-400'}`}>
+                                  {bytes} / {limit} bytes
+                                </span>
+                                {isOver && <div className="text-[10px] text-red-600 mt-1">⚠️ {selectedChannel === 'SMS' ? 'SMS 90바이트 초과 — LMS 전환 필요' : 'LMS 2000바이트 초과'}</div>}
+                              </>
+                            );
+                          })()}
                           </div>
                         </div>
                       </div>

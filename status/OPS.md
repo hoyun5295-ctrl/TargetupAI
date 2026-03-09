@@ -61,15 +61,21 @@ ssh administrator@58.227.193.62
 cd /home/administrator/targetup-app
 git pull
 
-# 2. 프론트엔드 빌드 (변경 시)
-cd packages/frontend && npm run build
-# 또는 company-frontend 변경 시
-cd packages/company-frontend && npm run build
+# 2. 의존성 설치 (새 패키지 추가 시)
+cd packages/frontend && npm install
+cd ../company-frontend && npm install
 
-# 3. 백엔드 재시작 (변경 시)
+# 3. 프론트엔드 빌드 (변경 시) — D61 난독화 플러그인 포함
+cd /home/administrator/targetup-app/packages/frontend && npm run build
+# 또는 company-frontend 변경 시
+cd /home/administrator/targetup-app/packages/company-frontend && npm run build
+# ⚠️ 최초 빌드 시 vite-plugin-javascript-obfuscator 미설치 에러 발생하면:
+# npm install vite-plugin-javascript-obfuscator --save-dev
+
+# 4. 백엔드 재시작 (변경 시)
 pm2 restart all
 
-# 4. 확인
+# 5. 확인
 pm2 status
 ```
 
@@ -185,6 +191,7 @@ C:\Users\ceo\OneDrive\바탕 화면\projects\targetup\  (로컬)
 | 대량발송(3) | bulk | SMSQ_SEND_7,8,9 | 고객사 C 전용 |
 | 테스트발송 | test | SMSQ_SEND_10 | 테스트 전용 (격리) |
 | 슈퍼관리자인증 | auth | SMSQ_SEND_11 | 2FA 인증번호 전용 |
+- **사용자별 라인그룹 배정 (D60, 2026-03-08):** users.line_group_id (nullable uuid FK → sms_line_groups.id). 발송 시 사용자 개별 라인그룹 우선 → null이면 회사 라인그룹 fallback. 슈퍼관리자 사용자 편집 모달에서 설정.
 - 고객사별 라인그룹 할당: 고객사 수정 → 기본정보 탭 → 발송 라인 드롭다운
 - 미할당 고객사는 ALL_SMS_TABLES 전체 라운드로빈 폴백
 
@@ -211,9 +218,10 @@ grep "bind ack" /home/administrator/agent*/logs/*mtdeliver.txt
 - 환경변수: `SMS_TABLES=SMSQ_SEND_1,SMSQ_SEND_2,SMSQ_SEND_3,SMSQ_SEND_4,SMSQ_SEND_5,SMSQ_SEND_6,SMSQ_SEND_7,SMSQ_SEND_8,SMSQ_SEND_9,SMSQ_SEND_10,SMSQ_SEND_11`
 - 서버 `.env`: `packages/backend/.env`에 설정
 - 로컬은 SMS_TABLES 미설정 → 기존 `SMSQ_SEND` 1개로 동작 (변화 없음)
+- `SYSTEM_SMS_CALLBACK=18008125` — 비밀번호 초기화/정산 등 시스템 SMS 회신번호 (D59, 환경변수화. 미설정 시 서버 기동 차단)
 - campaigns.ts 헬퍼 함수: `getNextSmsTable(tables)`, `smsCountAll(tables, ...)`, `smsAggAll(tables, ...)`, `smsSelectAll(tables, ...)`, `smsMinAll(tables, ...)`, `smsExecAll(tables, ...)`
 - 모든 헬퍼에 `tables: string[]` 파라미터 → 회사별 라인그룹 테이블 기반 동작
-- `getCompanySmsTables(companyId)`: 회사별 라인그룹 조회 (1분 캐시)
+- `getCompanySmsTables(companyId, userId?)`: 회사별/사용자별 라인그룹 조회 (1분 캐시). userId 제공 시 사용자 개별 라인그룹 우선, null이면 회사 fallback
 - `getTestSmsTables()`: 테스트 전용 라인 조회
 - `getAuthSmsTable()`: 인증번호 전용 라인 조회
 - 기동 시 로그: `[QTmsg] ALL_SMS_TABLES: SMSQ_SEND_1, ... (11개 Agent)`
@@ -258,6 +266,7 @@ grep "bind ack" /home/administrator/agent*/logs/*mtdeliver.txt
 - 고객사 로컬 DB → 한줄로 서버로 고객/구매 데이터 자동 동기화
 - Sync Agent (.exe)를 고객사 PC에 설치 → API 키 인증으로 데이터 전송
 - 기존 upload와 독립적 (source: 'sync' vs 'upload' 구분)
+- **슈퍼관리자 API Key 관리 UI (D60, 2026-03-08):** 고객사 편집 모달 9번째 탭 'Sync'. API Key/Secret 조회(마스킹+보기/숨김+복사), 재발급(2단계 확인), use_db_sync 토글. 백엔드 3개 엔드포인트: GET `/api/admin/companies/:id/sync-keys`, POST `/api/admin/companies/:id/sync-keys/regenerate`, PUT `/api/admin/companies/:id/sync-keys` (use_db_sync 토글)
 
 ### 7-2. API 엔드포인트
 ```
@@ -307,6 +316,9 @@ POST /api/sync/purchases   ← 구매내역 벌크 INSERT (배치 최대 1000건
 - 나래인터넷 콜백 IP: 121.156.104.161~165, 183.98.207.13
 - 080 수신거부 번호: 080-719-6700
 - 콜백 엔드포인트 구현 완료 (토큰 인증, curl 테스트 성공)
+- **서버 환경변수:** `OPT_OUT_080_TOKEN` — 나래인터넷 콜백 인증 토큰. 서버 `.env`에 설정 필요. 미설정 시 080 수신거부 콜백 인증 불가.
+- **설정:** `ssh administrator@58.227.193.62` → `.env`에 `OPT_OUT_080_TOKEN=토큰값` 추가 → `pm2 restart all`
+- **확인사항:** 나래인터넷 담당자에게 콜백 URL 등록 완료 여부 + 토큰값 확인 + 080 ARS 수신거부 테스트
 
 ---
 
@@ -350,3 +362,11 @@ ssh -p 27616 -i /home/administrator/.ssh/id_rsa_backup backup@58.227.193.59 "ls 
 gunzip -c /home/administrator/backups/YYYYMMDD/pg_targetup_*.sql.gz | docker exec -i targetup-postgres psql -U targetup targetup
 gunzip -c /home/administrator/backups/YYYYMMDD/mysql_smsdb_*.sql.gz | docker exec -i targetup-mysql mysql -usmsuser -p smsdb
 ```
+
+### 10-5. 초기 설치 절차
+1. 서버에 `mkdir -p /home/administrator/backups`
+2. `backup-automate.sh` 복사 → `chmod +x`
+3. `/home/administrator/backups/.env` 생성 (BACKUP_DIR, PG/MySQL 정보, ENABLE_S3=false) → `chmod 600`
+4. 수동 실행 테스트 → `gzip -t *.sql.gz` 무결성 확인
+5. `crontab -e` → `0 3 * * * source .env && backup.sh >> cron.log 2>&1`
+6. 향후 S3 연동 시: `.env`에 `ENABLE_S3=true, S3_BUCKET, S3_PREFIX` + `apt install awscli && aws configure`

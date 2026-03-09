@@ -138,17 +138,32 @@ router.get('/', async (req: Request, res: Response) => {
     
     let whereClause = 'WHERE company_id = $1';
     const params: any[] = [companyId];
-    
+    let paramIndex = 2;
+
+    // company_user는 본인 매장 소속 고객의 수신거부만 조회
+    const userType = req.user?.userType;
+    const userId = req.user?.userId;
+    if (userType === 'company_user' && userId) {
+      const userResult = await query('SELECT store_codes FROM users WHERE id = $1', [userId]);
+      const storeCodes = userResult.rows[0]?.store_codes;
+      if (storeCodes && storeCodes.length > 0) {
+        whereClause += ` AND phone IN (
+          SELECT c.phone FROM customers c
+          JOIN customer_stores cs ON c.id = cs.customer_id
+          WHERE cs.company_id = $1 AND cs.store_code = ANY($${paramIndex++}::text[])
+        )`;
+        params.push(storeCodes);
+      }
+    }
+
     if (search) {
-      whereClause += ` AND phone LIKE $2`;
+      whereClause += ` AND phone LIKE $${paramIndex++}`;
       params.push(`%${search}%`);
     }
-    
-    // company_id 기준 DISTINCT ON (phone) — 같은 번호가 여러 user에 등록된 경우 최신 1건만
+
+    // COUNT(DISTINCT phone)으로 단순화
     const countResult = await query(
-      `SELECT COUNT(*) FROM (
-        SELECT DISTINCT ON (phone) id FROM unsubscribes ${whereClause} ORDER BY phone, created_at DESC
-      ) sub`,
+      `SELECT COUNT(DISTINCT phone) as count FROM unsubscribes ${whereClause}`,
       params
     );
     const total = parseInt(countResult.rows[0].count);

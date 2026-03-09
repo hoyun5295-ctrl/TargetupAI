@@ -72,7 +72,9 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
     setLoading(true);
     setCooldown(30);
     try {
-      await fetch('/api/campaigns/sync-results', { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+      // fire-and-forget: sync-results는 백그라운드에서 실행 (대량 발송 시 블로킹 방지)
+      fetch('/api/campaigns/sync-results', { method: 'POST', headers: { Authorization: `Bearer ${token}` } })
+        .catch(err => console.warn('sync-results 백그라운드 동기화 실패:', err));
       const from = startDate.replace(/-/g, '').slice(0, 6);
       const summaryRes = await fetch(`/api/v1/results/summary?from=${from}&fromDate=${startDate}&toDate=${endDate}`, { headers: { Authorization: `Bearer ${token}` } });
       setSummary(await summaryRes.json());

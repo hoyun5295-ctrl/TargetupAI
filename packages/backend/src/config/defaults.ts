@@ -98,6 +98,9 @@ export const CACHE_TTL = {
   uploadProgress: 3600,
   /** 메시지 편집 진행상태 — 10분 */
   messageEditProgress: 600,
+  /** 발송결과 차트 데이터 — 진행중 5분 / 완료 24시간 */
+  resultChartActive: 300,
+  resultChartCompleted: 86400,
 };
 
 // ============================================================
