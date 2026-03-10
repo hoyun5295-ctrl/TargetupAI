@@ -64,10 +64,13 @@ mysqlPool.getConnection()
   });
 
 // MySQL 쿼리 헬퍼 (서버 레벨 KST이므로 세션 SET 불필요)
+// ★ conn.query() 사용: conn.execute()(prepared statement)는 UNION ALL + 다수 파라미터 조합에서
+//    'Incorrect arguments to mysqld_stmt_execute' 에러 발생 (mysql2 known issue)
+//    conn.query()는 문자열 이스케이프 방식이므로 이 문제 없음. ? 파라미터 바인딩 동일 지원.
 export const mysqlQuery = async (sql: string, params?: any[]) => {
   const conn = await mysqlPool.getConnection();
   try {
-    const [rows] = await conn.execute(sql, params);
+    const [rows] = await conn.query(sql, params);
     return rows;
   } finally {
     conn.release();
