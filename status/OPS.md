@@ -107,7 +107,8 @@ C:\Users\ceo\projects\targetup\  (로컬)
 │   │           ├── customer-filter.ts     ← 고객 필터/쿼리 빌더 컨트롤타워 (D63 CT-01)
 │   │           ├── sms-queue.ts           ← MySQL 큐 조작 컨트롤타워 (D63 B16-02)
 │   │           ├── prepaid.ts             ← 선불 차감/환불 컨트롤타워 (D63 B16-02)
-│   │           └── campaign-lifecycle.ts  ← 캠페인 취소/결과동기화 (D63 B16-02)
+│   │           ├── campaign-lifecycle.ts  ← 캠페인 취소/결과동기화 (D63 B16-02)
+│   │           └── unsubscribe-helper.ts ← 수신거부 관리 + 080 자동연동 컨트롤타워 (D64 CT-03)
 │   ├── frontend/                   ← 서비스 사용자 + 슈퍼관리자 UI
 │   │   └── src/
 │   │       ├── components/         ← UI 컴포넌트

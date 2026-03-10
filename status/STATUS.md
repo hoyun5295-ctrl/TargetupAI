@@ -259,16 +259,22 @@
   ```
 - **적용 파일:** manage-stats.ts, manage-callbacks.ts, analysis.ts, campaigns.ts, results.ts, customers.ts, ai.ts, unsubscribes.ts (8개)
 
-**CT-03: `utils/unsubscribe-helper.ts` — 수신거부 관리 컨트롤타워** — ⏳ 대기
-- **문제:** 수신거부 필터 SQL 패턴(`AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.company_id = c.company_id AND u.phone = c.phone)`)이 campaigns.ts, customers.ts, ai.ts, upload.ts 4곳에 산재. `syncCustomerOptIn` 로직(단건/벌크)이 unsubscribes.ts에만 존재.
-- **효과:** 수신거부 필터 누락 방지 (B13-07 같은 버그 재발 차단), opt-in 동기화 로직 재사용 가능
-- **설계:**
+**CT-03: `utils/unsubscribe-helper.ts` — 수신거부 관리 컨트롤타워** — ✅ 완료 (D64, 2026-03-11)
+- **문제:** 수신거부 필터 SQL 패턴이 4곳에 산재 + 080 콜백이 companies 레벨에서만 매칭되어 사용자별 080번호 지원 불가
+- **해결:** 기존 SQL 빌더 + 080 자동연동 + 슈퍼관리자 수신거부 관리 기능 통합
+- **함수:**
   ```typescript
-  // utils/unsubscribe-helper.ts
-  function buildUnsubscribeFilter(companyIdRef: string, phoneRef: string): string
-  async function syncCustomerOptIn(companyId: string, phones: string[], optIn: boolean): Promise<void>
+  // 기존 (CT-03 초기)
+  buildUnsubscribeFilter(), buildUnsubscribeExistsFilter(), buildUnsubscribeCase()
+  syncCustomerOptIn(), isUnsubscribed(), getUnsubscribedPhones()
+  // 신규 (D64 080 확장)
+  findUserBy080Number()    — users 우선 → companies fallback 매칭
+  process080Callback()     — 080 콜백 처리 통합 (INSERT + sms_opt_in 동기화)
+  getUserUnsubscribes()    — 슈퍼관리자용 사용자별 수신거부 조회
+  deleteUserUnsubscribes() — 슈퍼관리자용 일괄삭제 + sms_opt_in 복구
+  exportUserUnsubscribes() — CSV 다운로드용 전체 조회
   ```
-- **적용 파일:** campaigns.ts, customers.ts, ai.ts, upload.ts, unsubscribes.ts
+- **적용 파일:** unsubscribes.ts(080콜백→컨트롤타워 위임), admin.ts(API 3개 신규), AdminDashboard.tsx(UI)
 
 **CT-04: `utils/stats-aggregation.ts` — 통계 집계 컨트롤타워** — ⏳ 대기
 - **문제:** manage-stats.ts와 results.ts에서 날짜 범위 필터링(KST 타임존 처리), 캠페인 성공/실패 집계 쿼리, 월별/일별 그루핑 로직이 거의 동일하게 중복
@@ -288,16 +294,20 @@
 
 **B16-03 ~ B16-07:** ✅ 전부 수정 완료 (위 완료 목록 참조)
 
-**개인화 미리보기 통일** — ⏳ 대기
-- **문제:** 문안 추천 카드에서 치환된 데이터(고객명 등)가 보이는데, 올바르게는:
-  - 추천 카드: `%고객명%` 변수 원본이 보여야 함
-  - 미리보기: 치환된 실제 데이터가 보여야 함
-- **범위:** 직접발송, 직접타겟발송, AI한줄로, AI맞춤한줄 4경로 전부 통일
-- **확인:** AiPreviewModal.tsx, AiCampaignResultPopup.tsx, Dashboard.tsx의 변수 치환 타이밍
+**개인화 미리보기 통일** — ✅ 완료 (D64, 2026-03-11)
+- **수정:** AiCampaignResultPopup.tsx에서 sampleCustomer 치환 로직 제거
+  - 추천 카드: `%고객명%` 변수 원본 그대로 표시
+  - 미리보기(AiPreviewModal.tsx): 기존대로 샘플 데이터 치환 표시
+- **수정 파일:** `components/AiCampaignResultPopup.tsx`
+
+**080번호 사용자별 관리 + 수신거부 관리** — ✅ 완료 (D64, 2026-03-11)
+- **수정:** 080 관리를 회사 단위 → 사용자 단위로 이전, CT-03 컨트롤타워에 통합
+  - users 테이블에 `opt_out_080_number`, `opt_out_auto_sync` 컬럼 추가
+  - 슈퍼관리자 사용자 편집 모달에 080 연동 설정/수신거부 관리 UI 추가
+  - 나래인터넷 080 콜백: users 우선 → companies fallback 매칭
+- **수정 파일:** `utils/unsubscribe-helper.ts`, `routes/unsubscribes.ts`, `routes/admin.ts`, `pages/AdminDashboard.tsx`
 
 #### 추가 사항 (Harold님 언급)
-- **080번호 사용자별 관리** — 현재 회사 단위 → 사용자별 080 번호 관리 필요
-- **수신거부 삭제 기능** — 수신거부 목록에서 개별 삭제 기능
 - **DB삭제 사용자별** — 고객 DB 삭제를 사용자별로 권한 관리
 
 #### 수정 파일 목록 (D63 전체)

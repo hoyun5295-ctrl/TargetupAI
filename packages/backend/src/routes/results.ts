@@ -168,9 +168,11 @@ router.get('/campaigns', async (req: Request, res: Response) => {
     const userType = req.user?.userType;
     
     let whereClause = 'WHERE company_id = $1';
+    // ★ draft는 발송 안 한 건이므로 발송 결과에서 제외
+    whereClause += ` AND status != 'draft'`;
     const params: any[] = [companyId];
     let paramIndex = 2;
-    
+
     if (userType === 'company_user') {
       whereClause += ` AND created_by = $${paramIndex++}`;
       params.push(userId);
@@ -257,13 +259,15 @@ router.get('/campaigns', async (req: Request, res: Response) => {
 router.get('/campaigns/:id', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
     const { id } = req.params;
 
     if (!companyId) {
       return res.status(403).json({ error: '권한이 필요합니다.' });
     }
 
-    const companyTables = await getCompanySmsTablesWithLogs(companyId);
+    // ★ userId 전달: 사용자별 라인그룹 테이블 포함 조회
+    const companyTables = await getCompanySmsTablesWithLogs(companyId, userId);
 
     const campaignResult = await query(
       `SELECT * FROM campaigns WHERE id = $1 AND company_id = $2`,
@@ -395,6 +399,7 @@ router.get('/campaigns/:id', async (req: Request, res: Response) => {
 router.get('/campaigns/:id/messages', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
     const { id } = req.params;
     const { searchType, searchValue, status, page = 1, limit = 100 } = req.query;
     const pageNum = Number(page);
@@ -405,7 +410,8 @@ router.get('/campaigns/:id/messages', async (req: Request, res: Response) => {
       return res.status(403).json({ error: '권한이 필요합니다.' });
     }
 
-    const msgTables = await getCompanySmsTablesWithLogs(companyId);
+    // ★ userId 전달: 사용자별 라인그룹 테이블 포함 조회
+    const msgTables = await getCompanySmsTablesWithLogs(companyId, userId);
 
     // 캠페인 채널+상태 확인
     const campResult = await query('SELECT send_channel, status FROM campaigns WHERE id = $1 AND company_id = $2', [id, companyId]);
@@ -512,10 +518,54 @@ router.get('/campaigns/:id/messages', async (req: Request, res: Response) => {
       }
     }
 
-    // ===== DATA — 단일 쿼리, MySQL이 정렬+페이징 (기존: 30만건 메모리 로드 → 페이지 분량만) =====
+    // ===== DATA — 단일 쿼리, MySQL이 정렬+페이징 =====
+    // ★ LOG 테이블 스키마 차이 시 전체 UNION ALL 실패 → LIVE 테이블만 재시도
     const dataSql = `${dataSubqueries.join(' UNION ALL ')} ORDER BY _sort_time DESC LIMIT ? OFFSET ?`;
     dataParams.push(limitNum, offset);
-    const messages = await mysqlQuery(dataSql, dataParams) as any[];
+    let messages: any[];
+    try {
+      messages = await mysqlQuery(dataSql, dataParams) as any[];
+    } catch (unionErr) {
+      console.warn('[messages] UNION ALL 실패 — LOG 테이블 제외 후 LIVE 테이블만 재시도:', (unionErr as Error).message);
+      // LIVE 테이블만으로 재구성 (LOG 테이블 패턴: SMSQ_SEND_XX_YYYYMM)
+      const logPattern = /_\d{6}$/;
+      const liveOnlyDataSubs: string[] = [];
+      const liveOnlyParams: any[] = [];
+      const smsBaseParams: any[] = [id];
+      if (searchType && searchValue) {
+        const sv = `%${String(searchValue).trim()}%`;
+        if (['phone', 'callback', 'content'].includes(String(searchType))) smsBaseParams.push(sv);
+      }
+
+      const smsFields = `seqno, dest_no, call_back, msg_type, msg_contents, status_code, mob_company,
+        sendreq_time, mobsend_time, repmsg_recvtm,
+        'sms' AS _channel, sendreq_time AS _sort_time,
+        NULL AS kakao_bubble_type, NULL AS kakao_report_code,
+        NULL AS resend_type, NULL AS resend_report_code`;
+      let smsWhere = 'WHERE app_etc1 = ?';
+      if (searchType && searchValue) {
+        const sv = `%${String(searchValue).trim()}%`;
+        if (searchType === 'phone') smsWhere += ' AND dest_no LIKE ?';
+        else if (searchType === 'callback') smsWhere += ' AND call_back LIKE ?';
+        else if (searchType === 'content') smsWhere += ' AND msg_contents LIKE ?';
+      }
+      if (status === 'success') smsWhere += ` AND status_code IN (${SUCCESS_CODES.join(',')})`;
+      else if (status === 'fail') smsWhere += ` AND status_code NOT IN (${[...SUCCESS_CODES, ...PENDING_CODES].join(',')})`;
+
+      for (const t of msgTables) {
+        if (logPattern.test(t)) continue; // LOG 테이블 스킵
+        liveOnlyDataSubs.push(`(SELECT ${smsFields} FROM ${t} ${smsWhere})`);
+        liveOnlyParams.push(...smsBaseParams);
+      }
+
+      if (liveOnlyDataSubs.length > 0) {
+        const fallbackSql = `${liveOnlyDataSubs.join(' UNION ALL ')} ORDER BY _sort_time DESC LIMIT ? OFFSET ?`;
+        liveOnlyParams.push(limitNum, offset);
+        messages = await mysqlQuery(fallbackSql, liveOnlyParams) as any[];
+      } else {
+        messages = [];
+      }
+    }
 
     // sms-result-map.ts 기반 해석값 추가 (프론트 하드코딩 제거용)
     const enrichedMessages = messages.map((m: any) => ({
@@ -547,6 +597,7 @@ router.get('/campaigns/:id/messages', async (req: Request, res: Response) => {
 router.get('/campaigns/:id/export', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
     const { id } = req.params;
     if (!companyId) return res.status(403).json({ error: '권한이 필요합니다.' });
 
@@ -564,7 +615,7 @@ router.get('/campaigns/:id/export', async (req: Request, res: Response) => {
     const baseParams: any[] = [];
 
     if (sendChannel === 'sms' || sendChannel === 'both') {
-      const exportTables = await getCompanySmsTablesWithLogs(companyId);
+      const exportTables = await getCompanySmsTablesWithLogs(companyId, userId);
       const smsFields = `dest_no, call_back, msg_type, msg_contents, status_code, mob_company,
         sendreq_time, mobsend_time, repmsg_recvtm, 'sms' AS _channel, NULL AS report_code_raw`;
       for (const t of exportTables) {

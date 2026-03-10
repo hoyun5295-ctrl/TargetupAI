@@ -127,16 +127,77 @@ QTmsg status_code, 통신사 코드, 스팸필터 판정 결과를 한 곳에서
 - **user_id:** 사용자 단위 (브랜드별 수신거부 등)
 - 쿼리 작성 시 반드시 company_id 조건 포함.
 
-### 5-6. 수신거부 필터링 패턴
+### 5-6. 컨트롤타워 체계 (utils/ 폴더)
 
+> **원칙:** 각 도메인의 핵심 로직은 컨트롤타워 유틸 1곳에만 존재. 라우트는 import해서 사용.
+
+#### CT-01: customer-filter.ts — 고객 필터/쿼리 빌더
+- **역할:** campaigns.ts, customers.ts, ai.ts 3곳의 중복 WHERE 절 생성을 한 곳으로 통합
+- **설계:** tableAlias 옵션으로 접두사 제어, store_code는 호출부 위임(skipStoreCode), KST 기준 나이 계산, 커스텀 필드 8개 연산자 지원
+- **주요 함수:** `buildCustomerFilter()`, `buildFilterQueryCompat()`, `buildDynamicFilterCompat()`, `buildFilterWhereClauseCompat()`
+- **적용 파일:** campaigns.ts, customers.ts, ai.ts
+
+#### CT-02: store-scope.ts — 브랜드(store_code) 격리
+- **역할:** 사용자별 매장 접근 범위를 결정하는 유일한 진입점
+- **판정 로직:**
+  - 브랜드 체계 없는 회사(단일 본사) → `no_filter` (company_id 전체)
+  - 브랜드 체계 있음 + store_codes 할당된 사용자 → `filtered` (해당 store만)
+  - 브랜드 체계 있는데 미할당 → `blocked` (차단)
+- **주요 함수:** `getStoreScope(companyId, userId)` → `StoreScopeResult`
+- **적용 파일:** campaigns.ts, customers.ts, ai.ts (company_user일 때 호출)
+
+#### CT-03: unsubscribe-helper.ts — 수신거부 관리 + 080 자동연동
+- **역할:** 수신거부 필터링, 080 콜백 처리, 수신거부 목록 관리의 유일한 진입점
+
+**필터링 패턴** — 발송 시 반드시 적용:
 ```sql
 AND NOT EXISTS (
   SELECT 1 FROM unsubscribes u
   WHERE u.company_id = c.company_id AND u.phone = c.phone
 )
 ```
-- 발송 시 반드시 수신거부 필터 적용.
-- 5개 경로 전부 동일 패턴 적용되어 있는지 확인.
+- 5개 발송 경로 전부 동일 패턴 적용되어 있는지 확인.
+
+**080 수신거부 자동연동 (나래인터넷):**
+```
+나래인터넷 콜백 → GET /api/unsubscribes/080callback?cid=수신거부번호&fr=080번호
+    → unsubscribe-helper.ts의 process080Callback() 처리
+    → 매칭 순서: ① users.opt_out_080_number (사용자 단위, auto_sync=true만)
+                  ② companies.opt_out_080_number (하위호환 fallback)
+    → unsubscribes INSERT + customers.sms_opt_in 동기화
+    → 응답: '1'(성공) / '0'(실패)
+```
+- **사용자 단위 관리:** 슈퍼관리자 → 사용자 수정 모달에서 080번호/자동연동ON·OFF 설정
+- **080 함수:** `findUserBy080Number()`, `process080Callback()`, `getUserUnsubscribes()`, `deleteUserUnsubscribes()`, `exportUserUnsubscribes()`
+- **필터 함수:** `buildUnsubscribeFilter()`, `buildUnsubscribeExistsFilter()`, `syncCustomerOptIn()`, `isUnsubscribed()`, `getUnsubscribedPhones()`
+
+#### CT-04: sms-queue.ts — MySQL 큐 조작
+- **역할:** QTmsg MySQL 큐(발송 테이블) 접근의 유일한 진입점. 라인그룹 기반 테이블 라우팅 + 캐시
+- **환경변수:** `SMS_TABLES` — 쉼표 구분 테이블 목록 (예: `SMSQ_SEND,SMSQ_SEND_02,...`)
+- **라인그룹 캐시:** 회사/사용자별 전용 테이블 매핑을 메모리 캐시 (TTL 기반)
+- **주요 함수:**
+  - 테이블 조회: `getCompanySmsTables()`, `getTestSmsTables()`, `getAuthSmsTable()`, `getCompanySmsTablesWithLogs()`
+  - 큐 조작: `getNextSmsTable()` (라운드로빈), `smsCountAll()`, `smsAggAll()`, `smsSelectAll()`, `smsMinAll()`, `smsExecAll()`
+  - 카카오: `insertKakaoQueue()`, `kakaoAgg()`, `kakaoCountPending()`, `kakaoCancelPending()`
+  - 캐시: `invalidateLineGroupCache()`
+- **적용 파일:** campaigns.ts, manage-scheduled.ts, results.ts, campaign-lifecycle.ts
+
+#### CT-05: prepaid.ts — 선불 잔액 관리
+- **역할:** 포인트 차감/환불의 유일한 진입점. DB 기반 단가 조회 (하드코딩 금지)
+- **차감 로직:** `billing_type === 'prepaid'`일 때만 작동, 후불은 자동 패스
+- **Atomic 처리:** `balance >= totalAmount` 조건부 UPDATE로 잔액 부족 시 실패 반환
+- **주요 함수:**
+  - `prepaidDeduct(companyId, count, messageType, referenceId)` — 발송 시 차감
+  - `prepaidRefund(companyId, amount, referenceId)` — 취소 시 환불
+- **적용 파일:** campaigns.ts(발송 시 차감), campaign-lifecycle.ts(취소 시 환불)
+
+#### CT-06: campaign-lifecycle.ts — 캠페인 생명주기 (취소 + 결과동기화)
+- **역할:** 캠페인 상태 변경의 유일한 진입점. sms-queue.ts + prepaid.ts를 조합
+- **주요 함수:**
+  - `cancelCampaign(campaignId, companyId, options)` — MySQL 큐 삭제 + PG 상태 변경 + 선불 환불
+  - `syncCampaignResults(companyId)` — MySQL 발송 결과 → PostgreSQL campaign_runs 업데이트
+- **취소 옵션:** reason, cancelledBy, cancelledByType, skipTimeCheck(관리자용 15분 체크 스킵)
+- **적용 파일:** campaigns.ts, manage-scheduled.ts, admin.ts
 
 ### 5-7. AI 메시지 생성 흐름
 

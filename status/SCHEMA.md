@@ -700,6 +700,8 @@
 | must_change_password | boolean |
 | password_changed_at | timestamp |
 | line_group_id | uuid FK (nullable) | 사용자별 개별 라인그룹 (null이면 회사 라인그룹 사용) → sms_line_groups.id, ON DELETE SET NULL |
+| opt_out_080_number | varchar(20) | 나래인터넷 080 수신거부번호 (080-XXX-XXXX). 콜백 매칭용 |
+| opt_out_auto_sync | boolean | 080 수신거부 자동연동 활성화 여부 (default: false). 나래 사용 업체만 ON |
 | created_at | timestamp |
 | updated_at | timestamp |
 | last_login_at | timestamp |

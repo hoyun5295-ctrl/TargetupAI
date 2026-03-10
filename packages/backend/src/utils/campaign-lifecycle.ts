@@ -162,7 +162,7 @@ export async function syncCampaignResults(companyId: string): Promise<SyncResult
 
   // === 1. AI 캠페인 (campaign_runs) ===
   const runsResult = await query(
-    `SELECT cr.id, cr.campaign_id, c.company_id
+    `SELECT cr.id, cr.campaign_id, c.company_id, c.created_by
      FROM campaign_runs cr
      JOIN campaigns c ON c.id = cr.campaign_id
      WHERE c.company_id = $1
@@ -172,7 +172,8 @@ export async function syncCampaignResults(companyId: string): Promise<SyncResult
   );
 
   for (const run of runsResult.rows) {
-    const runTables = await getCompanySmsTablesWithLogs(run.company_id);
+    // ★ userId 전달: 사용자별 라인그룹이 다를 수 있으므로 발송자 기준 테이블 조회
+    const runTables = await getCompanySmsTablesWithLogs(run.company_id, run.created_by);
     const smsAgg = await smsAggAll(runTables,
       `COUNT(CASE WHEN status_code IN (${SUCCESS_CODES.join(',')}) THEN 1 END) as success_count,
        COUNT(CASE WHEN status_code NOT IN (${[...SUCCESS_CODES, ...PENDING_CODES].join(',')}) THEN 1 END) as fail_count,
@@ -252,7 +253,7 @@ export async function syncCampaignResults(companyId: string): Promise<SyncResult
 
   // === 2. 직접발송 캠페인 ===
   const directCampaigns = await query(
-    `SELECT id, company_id, scheduled_at FROM campaigns
+    `SELECT id, company_id, scheduled_at, created_at, sent_at, created_by FROM campaigns
      WHERE company_id = $1 AND send_type = 'direct'
        AND (status IN ('sending', 'completed') OR (status = 'scheduled' AND scheduled_at <= NOW()))
        AND (success_count IS NULL OR success_count = 0)
@@ -261,7 +262,8 @@ export async function syncCampaignResults(companyId: string): Promise<SyncResult
   );
 
   for (const campaign of directCampaigns.rows) {
-    const directTables = await getCompanySmsTablesWithLogs(campaign.company_id);
+    // ★ userId 전달: 사용자별 라인그룹이 다를 수 있으므로 발송자 기준 테이블 조회
+    const directTables = await getCompanySmsTablesWithLogs(campaign.company_id, campaign.created_by);
     const smsDirectAgg = await smsAggAll(directTables,
       `COUNT(*) as total_count,
        COUNT(CASE WHEN status_code IN (${SUCCESS_CODES.join(',')}) THEN 1 END) as success_count,
@@ -278,7 +280,8 @@ export async function syncCampaignResults(companyId: string): Promise<SyncResult
     const pendingCount = (smsDirectAgg.pending_count || 0) + kakaoDirectResult.pending;
 
     // 직접발송 타임아웃: 30분 경과 + pending만 남아있으면 강제 완료
-    const directSentAt = campaign.scheduled_at || campaign.created_at;
+    // ★ sent_at → scheduled_at → created_at 우선순위 (AI캠페인과 동일 패턴)
+    const directSentAt = campaign.sent_at || campaign.scheduled_at || campaign.created_at;
     const directMinutesSince = directSentAt ? (Date.now() - new Date(directSentAt).getTime()) / (1000 * 60) : 0;
     const directTimedOut = directMinutesSince > 30 && pendingCount > 0 && successCount === 0 && failCount === 0;
 
