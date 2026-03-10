@@ -159,6 +159,7 @@ export interface SyncResultsOutput {
  */
 export async function syncCampaignResults(companyId: string): Promise<SyncResultsOutput> {
   let syncCount = 0;
+  console.log(`[sync-results] 시작 — companyId: ${companyId}`);
 
   // === 1. AI 캠페인 (campaign_runs) ===
   const runsResult = await query(
@@ -170,56 +171,53 @@ export async function syncCampaignResults(companyId: string): Promise<SyncResult
        AND cr.created_at >= NOW() - INTERVAL '7 days'`,
     [companyId]
   );
+  console.log(`[sync-results] AI캠페인 ${runsResult.rows.length}건 대상`);
 
   for (const run of runsResult.rows) {
-    // ★ userId 전달: 사용자별 라인그룹이 다를 수 있으므로 발송자 기준 테이블 조회
-    const runTables = await getCompanySmsTablesWithLogs(run.company_id, run.created_by);
-    const smsAgg = await smsAggAll(runTables,
-      `COUNT(CASE WHEN status_code IN (${SUCCESS_CODES.join(',')}) THEN 1 END) as success_count,
-       COUNT(CASE WHEN status_code NOT IN (${[...SUCCESS_CODES, ...PENDING_CODES].join(',')}) THEN 1 END) as fail_count,
-       COUNT(CASE WHEN status_code IN (${PENDING_CODES.join(',')}) THEN 1 END) as pending_count`,
-      'app_etc1 = ?',
-      [run.campaign_id]
-    );
-
-    const kakaoResult = await kakaoAgg('REQUEST_UID = ?', [run.campaign_id]);
-
-    const successCount = (smsAgg.success_count || 0) + kakaoResult.success;
-    const failCount = (smsAgg.fail_count || 0) + kakaoResult.fail;
-    const pendingCount = (smsAgg.pending_count || 0) + kakaoResult.pending;
-
-    // 타임아웃 체크: 발송 후 30분 경과 + pending만 남아있으면 강제 완료
-    const campTimeInfo = await query('SELECT sent_at, scheduled_at, created_at FROM campaigns WHERE id = $1', [run.campaign_id]);
-    const campSentAt = campTimeInfo.rows[0]?.sent_at || campTimeInfo.rows[0]?.scheduled_at || campTimeInfo.rows[0]?.created_at;
-    const minutesSinceSend = campSentAt ? (Date.now() - new Date(campSentAt).getTime()) / (1000 * 60) : 0;
-    const isTimedOut = minutesSinceSend > 30 && pendingCount > 0 && successCount === 0 && failCount === 0;
-
-    if (successCount > 0 || failCount > 0 || isTimedOut) {
-      const effectiveFailCount = isTimedOut ? failCount + pendingCount : failCount;
-      const effectivePendingCount = isTimedOut ? 0 : pendingCount;
-      const newStatus = effectivePendingCount > 0 ? 'sending' : ((successCount + effectiveFailCount) > 0 ? 'completed' : 'failed');
-      if (isTimedOut) {
-        console.warn(`[sync-results] campaign_run ${run.id}: 30분 타임아웃 — pending ${pendingCount}건 → fail 처리`);
-      }
-
-      // campaign_runs 업데이트
-      await query(
-        `UPDATE campaign_runs SET
-          success_count = $1,
-          fail_count = $2,
-          status = $3,
-          sent_at = CASE WHEN $3 = 'completed' AND sent_at IS NULL
-            THEN COALESCE(scheduled_at, NOW())
-            ELSE sent_at END
-         WHERE id = $4`,
-        [successCount, effectiveFailCount, newStatus, run.id]
+    try {
+      // ★ userId 전달: 사용자별 라인그룹이 다를 수 있으므로 발송자 기준 테이블 조회
+      const runTables = await getCompanySmsTablesWithLogs(run.company_id, run.created_by);
+      console.log(`[sync-results] AI run ${run.id} — tables: [${runTables.join(',')}], created_by: ${run.created_by}`);
+      const smsAgg = await smsAggAll(runTables,
+        `COUNT(CASE WHEN status_code IN (${SUCCESS_CODES.join(',')}) THEN 1 END) as success_count,
+         COUNT(CASE WHEN status_code NOT IN (${[...SUCCESS_CODES, ...PENDING_CODES].join(',')}) THEN 1 END) as fail_count,
+         COUNT(CASE WHEN status_code IN (${PENDING_CODES.join(',')}) THEN 1 END) as pending_count`,
+        'app_etc1 = ?',
+        [run.campaign_id]
       );
 
-      // campaigns 테이블도 업데이트
-      const runInfo = await query(`SELECT campaign_id FROM campaign_runs WHERE id = $1`, [run.id]);
-      if (runInfo.rows.length > 0) {
+      // 카카오: 테이블 미존재 시 0으로 처리 (IMC_BM_FREE_BIZ_MSG 없는 환경 대응)
+      let kakaoResult = { total: 0, success: 0, fail: 0, pending: 0 };
+      try {
+        kakaoResult = await kakaoAgg('REQUEST_UID = ?', [run.campaign_id]);
+      } catch (kakaoErr: any) {
+        if (!kakaoErr.message?.includes("doesn't exist")) {
+          console.error(`[sync-results] AI run ${run.id} 카카오 집계 에러:`, kakaoErr.message);
+        }
+      }
+
+      const successCount = (smsAgg.success_count || 0) + kakaoResult.success;
+      const failCount = (smsAgg.fail_count || 0) + kakaoResult.fail;
+      const pendingCount = (smsAgg.pending_count || 0) + kakaoResult.pending;
+      console.log(`[sync-results] AI run ${run.id} — success:${successCount}, fail:${failCount}, pending:${pendingCount}`);
+
+      // 타임아웃 체크: 발송 후 30분 경과 + pending만 남아있으면 강제 완료
+      const campTimeInfo = await query('SELECT sent_at, scheduled_at, created_at FROM campaigns WHERE id = $1', [run.campaign_id]);
+      const campSentAt = campTimeInfo.rows[0]?.sent_at || campTimeInfo.rows[0]?.scheduled_at || campTimeInfo.rows[0]?.created_at;
+      const minutesSinceSend = campSentAt ? (Date.now() - new Date(campSentAt).getTime()) / (1000 * 60) : 0;
+      const isTimedOut = minutesSinceSend > 30 && pendingCount > 0 && successCount === 0 && failCount === 0;
+
+      if (successCount > 0 || failCount > 0 || isTimedOut) {
+        const effectiveFailCount = isTimedOut ? failCount + pendingCount : failCount;
+        const effectivePendingCount = isTimedOut ? 0 : pendingCount;
+        const newStatus = effectivePendingCount > 0 ? 'sending' : ((successCount + effectiveFailCount) > 0 ? 'completed' : 'failed');
+        if (isTimedOut) {
+          console.warn(`[sync-results] campaign_run ${run.id}: 30분 타임아웃 — pending ${pendingCount}건 → fail 처리`);
+        }
+
+        // campaign_runs 업데이트
         await query(
-          `UPDATE campaigns SET
+          `UPDATE campaign_runs SET
             success_count = $1,
             fail_count = $2,
             status = $3,
@@ -227,27 +225,45 @@ export async function syncCampaignResults(companyId: string): Promise<SyncResult
               THEN COALESCE(scheduled_at, NOW())
               ELSE sent_at END
            WHERE id = $4`,
-          [successCount, effectiveFailCount, newStatus, runInfo.rows[0].campaign_id]
+          [successCount, effectiveFailCount, newStatus, run.id]
         );
 
-        // 선불 실패건 환불
-        if (effectiveFailCount > 0) {
-          const campInfo = await query('SELECT company_id, message_type FROM campaigns WHERE id = $1', [runInfo.rows[0].campaign_id]);
-          if (campInfo.rows.length > 0) {
-            await prepaidRefund(campInfo.rows[0].company_id, effectiveFailCount, campInfo.rows[0].message_type, runInfo.rows[0].campaign_id, isTimedOut ? '타임아웃 실패 환불' : '발송 실패 환불');
+        // campaigns 테이블도 업데이트
+        const runInfo = await query(`SELECT campaign_id FROM campaign_runs WHERE id = $1`, [run.id]);
+        if (runInfo.rows.length > 0) {
+          await query(
+            `UPDATE campaigns SET
+              success_count = $1,
+              fail_count = $2,
+              status = $3,
+              sent_at = CASE WHEN $3 = 'completed' AND sent_at IS NULL
+                THEN COALESCE(scheduled_at, NOW())
+                ELSE sent_at END
+             WHERE id = $4`,
+            [successCount, effectiveFailCount, newStatus, runInfo.rows[0].campaign_id]
+          );
+
+          // 선불 실패건 환불
+          if (effectiveFailCount > 0) {
+            const campInfo = await query('SELECT company_id, message_type FROM campaigns WHERE id = $1', [runInfo.rows[0].campaign_id]);
+            if (campInfo.rows.length > 0) {
+              await prepaidRefund(campInfo.rows[0].company_id, effectiveFailCount, campInfo.rows[0].message_type, runInfo.rows[0].campaign_id, isTimedOut ? '타임아웃 실패 환불' : '발송 실패 환불');
+            }
           }
         }
+
+        // AI 학습 성과 데이터 업데이트
+        updateTrainingMetrics({
+          sourceRef: getSourceRef(run.id),
+          sentCount: successCount + effectiveFailCount,
+          successCount,
+          failCount,
+        });
+
+        syncCount++;
       }
-
-      // AI 학습 성과 데이터 업데이트
-      updateTrainingMetrics({
-        sourceRef: getSourceRef(run.id),
-        sentCount: successCount + effectiveFailCount,
-        successCount,
-        failCount,
-      });
-
-      syncCount++;
+    } catch (runErr: any) {
+      console.error(`[sync-results] AI run ${run.id} 처리 에러:`, runErr.message);
     }
   }
 
@@ -262,68 +278,82 @@ export async function syncCampaignResults(companyId: string): Promise<SyncResult
   );
 
   for (const campaign of directCampaigns.rows) {
-    // ★ userId 전달: 사용자별 라인그룹이 다를 수 있으므로 발송자 기준 테이블 조회
-    const directTables = await getCompanySmsTablesWithLogs(campaign.company_id, campaign.created_by);
-    const smsDirectAgg = await smsAggAll(directTables,
-      `COUNT(*) as total_count,
-       COUNT(CASE WHEN status_code IN (${SUCCESS_CODES.join(',')}) THEN 1 END) as success_count,
-       COUNT(CASE WHEN status_code NOT IN (${[...SUCCESS_CODES, ...PENDING_CODES].join(',')}) THEN 1 END) as fail_count,
-       COUNT(CASE WHEN status_code IN (${PENDING_CODES.join(',')}) THEN 1 END) as pending_count`,
-      'app_etc1 = ?',
-      [campaign.id]
-    );
-
-    const kakaoDirectResult = await kakaoAgg('REQUEST_UID = ?', [campaign.id]);
-
-    const successCount = (smsDirectAgg.success_count || 0) + kakaoDirectResult.success;
-    const failCount = (smsDirectAgg.fail_count || 0) + kakaoDirectResult.fail;
-    const pendingCount = (smsDirectAgg.pending_count || 0) + kakaoDirectResult.pending;
-
-    // 직접발송 타임아웃: 30분 경과 + pending만 남아있으면 강제 완료
-    // ★ sent_at → scheduled_at → created_at 우선순위 (AI캠페인과 동일 패턴)
-    const directSentAt = campaign.sent_at || campaign.scheduled_at || campaign.created_at;
-    const directMinutesSince = directSentAt ? (Date.now() - new Date(directSentAt).getTime()) / (1000 * 60) : 0;
-    const directTimedOut = directMinutesSince > 30 && pendingCount > 0 && successCount === 0 && failCount === 0;
-
-    if (successCount > 0 || failCount > 0 || directTimedOut) {
-      const dEffectiveFailCount = directTimedOut ? failCount + pendingCount : failCount;
-      const dEffectivePendingCount = directTimedOut ? 0 : pendingCount;
-      const newStatus = dEffectivePendingCount === 0
-        ? ((successCount + dEffectiveFailCount) > 0 ? 'completed' : 'failed')
-        : (directTimedOut ? 'completed' : 'sending');
-      if (directTimedOut) {
-        console.warn(`[sync-results] direct campaign ${campaign.id}: 30분 타임아웃 — pending ${pendingCount}건 → fail 처리`);
-      }
-
-      await query(
-        `UPDATE campaigns SET
-          success_count = $1,
-          fail_count = $2,
-          status = $3,
-          sent_at = CASE WHEN $3 = 'completed' AND sent_at IS NULL
-            THEN COALESCE(scheduled_at, NOW())
-            ELSE sent_at END
-         WHERE id = $4`,
-        [successCount, dEffectiveFailCount, newStatus, campaign.id]
+    try {
+      // ★ userId 전달: 사용자별 라인그룹이 다를 수 있으므로 발송자 기준 테이블 조회
+      const directTables = await getCompanySmsTablesWithLogs(campaign.company_id, campaign.created_by);
+      console.log(`[sync-results] direct campaign ${campaign.id} — tables: [${directTables.join(',')}], created_by: ${campaign.created_by}`);
+      const smsDirectAgg = await smsAggAll(directTables,
+        `COUNT(*) as total_count,
+         COUNT(CASE WHEN status_code IN (${SUCCESS_CODES.join(',')}) THEN 1 END) as success_count,
+         COUNT(CASE WHEN status_code NOT IN (${[...SUCCESS_CODES, ...PENDING_CODES].join(',')}) THEN 1 END) as fail_count,
+         COUNT(CASE WHEN status_code IN (${PENDING_CODES.join(',')}) THEN 1 END) as pending_count`,
+        'app_etc1 = ?',
+        [campaign.id]
       );
 
-      // 선불 실패건 환불
-      if (dEffectiveFailCount > 0) {
-        const campInfo = await query('SELECT company_id, message_type FROM campaigns WHERE id = $1', [campaign.id]);
-        if (campInfo.rows.length > 0) {
-          await prepaidRefund(campInfo.rows[0].company_id, dEffectiveFailCount, campInfo.rows[0].message_type, campaign.id, directTimedOut ? '타임아웃 실패 환불' : '발송 실패 환불');
+      // 카카오: 테이블 미존재 시 0으로 처리 (IMC_BM_FREE_BIZ_MSG 없는 환경 대응)
+      let kakaoDirectResult = { total: 0, success: 0, fail: 0, pending: 0 };
+      try {
+        kakaoDirectResult = await kakaoAgg('REQUEST_UID = ?', [campaign.id]);
+      } catch (kakaoErr: any) {
+        if (!kakaoErr.message?.includes("doesn't exist")) {
+          console.error(`[sync-results] direct campaign ${campaign.id} 카카오 집계 에러:`, kakaoErr.message);
         }
       }
 
-      // AI 학습 성과 데이터 업데이트 (직접발송)
-      updateTrainingMetrics({
-        sourceRef: getSourceRef(campaign.id),
-        sentCount: successCount + dEffectiveFailCount,
-        successCount,
-        failCount,
-      });
+      const successCount = (smsDirectAgg.success_count || 0) + kakaoDirectResult.success;
+      const failCount = (smsDirectAgg.fail_count || 0) + kakaoDirectResult.fail;
+      const pendingCount = (smsDirectAgg.pending_count || 0) + kakaoDirectResult.pending;
+      console.log(`[sync-results] direct campaign ${campaign.id} — success:${successCount}, fail:${failCount}, pending:${pendingCount}`);
 
-      syncCount++;
+      // 직접발송 타임아웃: 30분 경과 + pending만 남아있으면 강제 완료
+      // ★ sent_at → scheduled_at → created_at 우선순위 (AI캠페인과 동일 패턴)
+      const directSentAt = campaign.sent_at || campaign.scheduled_at || campaign.created_at;
+      const directMinutesSince = directSentAt ? (Date.now() - new Date(directSentAt).getTime()) / (1000 * 60) : 0;
+      const directTimedOut = directMinutesSince > 30 && pendingCount > 0 && successCount === 0 && failCount === 0;
+
+      if (successCount > 0 || failCount > 0 || directTimedOut) {
+        const dEffectiveFailCount = directTimedOut ? failCount + pendingCount : failCount;
+        const dEffectivePendingCount = directTimedOut ? 0 : pendingCount;
+        const newStatus = dEffectivePendingCount === 0
+          ? ((successCount + dEffectiveFailCount) > 0 ? 'completed' : 'failed')
+          : (directTimedOut ? 'completed' : 'sending');
+        if (directTimedOut) {
+          console.warn(`[sync-results] direct campaign ${campaign.id}: 30분 타임아웃 — pending ${pendingCount}건 → fail 처리`);
+        }
+
+        await query(
+          `UPDATE campaigns SET
+            success_count = $1,
+            fail_count = $2,
+            status = $3,
+            sent_at = CASE WHEN $3 = 'completed' AND sent_at IS NULL
+              THEN COALESCE(scheduled_at, NOW())
+              ELSE sent_at END
+           WHERE id = $4`,
+          [successCount, dEffectiveFailCount, newStatus, campaign.id]
+        );
+
+        // 선불 실패건 환불
+        if (dEffectiveFailCount > 0) {
+          const campInfo = await query('SELECT company_id, message_type FROM campaigns WHERE id = $1', [campaign.id]);
+          if (campInfo.rows.length > 0) {
+            await prepaidRefund(campInfo.rows[0].company_id, dEffectiveFailCount, campInfo.rows[0].message_type, campaign.id, directTimedOut ? '타임아웃 실패 환불' : '발송 실패 환불');
+          }
+        }
+
+        // AI 학습 성과 데이터 업데이트 (직접발송)
+        updateTrainingMetrics({
+          sourceRef: getSourceRef(campaign.id),
+          sentCount: successCount + dEffectiveFailCount,
+          successCount,
+          failCount,
+        });
+
+        syncCount++;
+      }
+    } catch (campErr: any) {
+      console.error(`[sync-results] direct campaign ${campaign.id} 처리 에러:`, campErr.message);
     }
   }
 
