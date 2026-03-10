@@ -1392,4 +1392,64 @@
 
 ---
 
-*최종 업데이트: 2026-03-09 D62 전수점검 완료. 22건 🟡수정완료-검증대기 전수점검 결과: 18건 코드 정상 확인. 3건 실제 미수정(B14-01,02,04) + 1건 신규(B14-03) 코드 수정 완료. B12-02/B13-09 타임아웃 30분 통일 반영. 전체 빌드+배포 후 2단계 실동작 검증 필요.*
+---
+
+## 16차 버그리포트 (D63, 2026-03-10~03-11)
+
+### B16-03: AI 맞춤한줄 스팸필터/담당자테스트 누락 🟡
+
+| 항목 | 내용 |
+|------|------|
+| **심각도** | 🟠 Major — AI 맞춤한줄 경로에만 스팸필터/테스트 기능 없음 |
+| **상태** | 🟡 수정완료-검증대기 |
+| **증상** | AiCustomSendFlow Step 4에서 스팸필터/담당자테스트 버튼이 없음 |
+| **근본 원인** | AiCampaignResultPopup(AI한줄로)에는 구현되어 있으나 AiCustomSendFlow(AI맞춤한줄)에는 미구현 |
+| **수정** | AiCustomSendFlow에 9개 props 추가, Step 4에 담당자테스트+스팸필터 버튼 배치 |
+| **수정 파일** | `AiCustomSendFlow.tsx`, `Dashboard.tsx` |
+
+### B16-04: EUC-KR 비호환 특수문자 ??표시 🟡
+
+| 항목 | 내용 |
+|------|------|
+| **심각도** | 🟡 Minor — 4개 특수문자만 해당 |
+| **상태** | 🟡 수정완료-검증대기 |
+| **증상** | 특수문자 팝업에서 ♢, ♦, ✉, ☀가 SMS/LMS 발송 시 ??로 변환 |
+| **근본 원인** | SMS/LMS는 EUC-KR 기반. 해당 4개 문자는 EUC-KR 미지원 유니코드 |
+| **수정** | Python EUC-KR 인코딩 전수 테스트 후 비호환 4개 제거 (52→48개) |
+| **수정 파일** | `Dashboard.tsx` |
+
+### B16-05: MMS→SMS 전환 후 이미지 잔존 🟡
+
+| 항목 | 내용 |
+|------|------|
+| **심각도** | 🟠 Major — Harold님 "심각한 버그" |
+| **상태** | 🟡 수정완료-검증대기 |
+| **증상** | MMS로 이미지 첨부 후 SMS/LMS 전환 시 이미지가 화면에 그대로 남아있음 |
+| **근본 원인** | MMS 이미지 표시 조건이 `directMsgType === 'MMS' || mmsUploadedImages.length > 0`으로 되어 이미지가 남아있으면 SMS에서도 표시 |
+| **수정** | 표시 조건을 `directMsgType === 'MMS'`로 변경 + LmsConvert/SmsConvert 콜백에 `setMmsUploadedImages([])` 추가 |
+| **수정 파일** | `Dashboard.tsx`, `TargetSendModal.tsx` |
+
+### B16-06: AI 타겟추출 age 필터 0명 반환 🟡
+
+| 항목 | 내용 |
+|------|------|
+| **심각도** | 🔴 Critical — AI 추천 타겟에서 연령 필터 완전 미작동 |
+| **상태** | 🟡 수정완료-검증대기 |
+| **증상** | AI 추천에서 "20대 고객" → 0명. 직접타겟에서 동일 조건 → 2,176명 |
+| **근본 원인** | AI 경로(mixed 모드)는 `(currentYear - birth_year)` 계산 사용, 직접타겟(structured 모드)는 `age` 컬럼 직접 사용. 고객 DB에 birth_year NULL이지만 age는 존재 |
+| **수정** | CT-01 customer-filter.ts mixed 모드의 age 처리를 `age` 컬럼 직접 사용으로 통일 (structured 모드와 동일) |
+| **수정 파일** | `utils/customer-filter.ts` |
+
+### B16-07: 직접타겟 회신번호 선택 + 미등록 회신번호 처리 🟡
+
+| 항목 | 내용 |
+|------|------|
+| **심각도** | 🟠 Major — 기능 추가 + 보안 개선 |
+| **상태** | 🟡 수정완료-검증대기 |
+| **증상** | (1) 직접타겟 필터에 회신번호 선택 드롭다운 없음 (2) 미등록 회신번호 1건이라도 있으면 전체 발송 차단 |
+| **수정** | (1) DirectTargetFilterModal에 회신번호 드롭다운 추가 (기본/개별/특정번호). Dashboard에서 TargetSendModal로 선택값 자동 반영. (2) campaigns.ts 2개 발송 경로(/:id/send, /direct-send)에서 미등록 회신번호 고객만 제외하고 나머지 정상 발송. 응답에 callbackMissingCount/callbackUnregisteredCount 구분 건수 포함 |
+| **수정 파일** | `DirectTargetFilterModal.tsx`, `Dashboard.tsx`, `campaigns.ts` |
+
+---
+
+*최종 업데이트: 2026-03-11 D63 16차 버그리포트 수정. CT-01(customer-filter.ts) 컨트롤타워 완료 + B16-03~B16-07 5건 수정 완료. 전체 TypeScript 빌드 에러 0건. 배포 후 실동작 검증 필요.*

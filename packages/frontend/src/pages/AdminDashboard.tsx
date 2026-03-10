@@ -1348,7 +1348,9 @@ const handleApproveRequest = async (id: string) => {
           userType: editingUser.user_type,
           status: editingUser.status,
           storeCodes: editingUser.storeCodes ? editingUser.storeCodes.split(',').map((s: string) => s.trim()).filter(Boolean) : null,
-          lineGroupId: editingUser.line_group_id || null
+          lineGroupId: editingUser.line_group_id || null,
+          optOut080Number: editingUser.opt_out_080_number || null,
+          optOutAutoSync: editingUser.opt_out_auto_sync || false
         })
       });
 
@@ -3674,6 +3676,97 @@ const handleApproveRequest = async (id: string) => {
                   <option value="dormant">휴면</option>
                   </select>
               </div>
+
+              {/* 080 수신거부 자동연동 섹션 */}
+              <div className="border-t pt-4 mt-4">
+                <div className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                  📱 080 수신거부 자동연동 (나래인터넷)
+                </div>
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">080 수신거부번호</label>
+                    <input
+                      type="text"
+                      value={editingUser.opt_out_080_number || ''}
+                      onChange={(e) => setEditingUser({ ...editingUser, opt_out_080_number: e.target.value })}
+                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                      placeholder="예: 080-719-6700"
+                    />
+                    <p className="text-xs text-gray-400 mt-1">나래인터넷에서 발급받은 080번호 입력. 콜백 시 이 번호로 사용자 매칭</p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <label className="block text-sm font-medium text-gray-700">자동연동</label>
+                    <button
+                      type="button"
+                      onClick={() => setEditingUser({ ...editingUser, opt_out_auto_sync: !editingUser.opt_out_auto_sync })}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${editingUser.opt_out_auto_sync ? 'bg-green-500' : 'bg-gray-300'}`}
+                    >
+                      <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${editingUser.opt_out_auto_sync ? 'translate-x-6' : 'translate-x-1'}`} />
+                    </button>
+                    <span className={`text-sm ${editingUser.opt_out_auto_sync ? 'text-green-600 font-medium' : 'text-gray-400'}`}>
+                      {editingUser.opt_out_auto_sync ? 'ON' : 'OFF'}
+                    </span>
+                  </div>
+                  {!editingUser.opt_out_080_number && editingUser.opt_out_auto_sync && (
+                    <p className="text-xs text-orange-500">⚠️ 080번호를 입력해야 자동연동이 작동합니다</p>
+                  )}
+                </div>
+
+                {/* 수신거부 현황 */}
+                {editingUser.unsubscribe_count > 0 && (
+                  <div className="mt-3 p-3 bg-gray-50 rounded-lg">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm text-gray-600">수신거부: <strong>{Number(editingUser.unsubscribe_count).toLocaleString()}건</strong></span>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            try {
+                              const token = localStorage.getItem('token');
+                              const res = await fetch(`/api/admin/users/${editingUser.id}/unsubscribes/export`, {
+                                headers: { 'Authorization': `Bearer ${token}` }
+                              });
+                              if (!res.ok) throw new Error('다운로드 실패');
+                              const blob = await res.blob();
+                              const url = window.URL.createObjectURL(blob);
+                              const a = document.createElement('a');
+                              a.href = url;
+                              a.download = `unsubscribes_${editingUser.name}_${new Date().toISOString().slice(0,10)}.csv`;
+                              a.click();
+                              window.URL.revokeObjectURL(url);
+                            } catch { showAlert('오류', '다운로드 실패', 'error'); }
+                          }}
+                          className="px-3 py-1 text-xs bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200"
+                        >
+                          📥 다운로드
+                        </button>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (!confirm(`이 사용자의 수신거부 ${Number(editingUser.unsubscribe_count).toLocaleString()}건을 전부 삭제하시겠습니까?\n삭제 후 복구할 수 없습니다.`)) return;
+                            try {
+                              const token = localStorage.getItem('token');
+                              const res = await fetch(`/api/admin/users/${editingUser.id}/unsubscribes`, {
+                                method: 'DELETE',
+                                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }
+                              });
+                              if (res.ok) {
+                                const data = await res.json();
+                                showAlert('성공', `${data.deletedCount}건 삭제되었습니다.`, 'success');
+                                setEditingUser({ ...editingUser, unsubscribe_count: 0 });
+                              }
+                            } catch { showAlert('오류', '삭제 실패', 'error'); }
+                          }}
+                          className="px-3 py-1 text-xs bg-red-100 text-red-700 rounded-lg hover:bg-red-200"
+                        >
+                          🗑️ 전체삭제
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               <div className="flex gap-3 pt-4">
                 <button
                   type="button"

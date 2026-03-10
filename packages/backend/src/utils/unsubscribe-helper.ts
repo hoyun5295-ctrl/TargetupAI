@@ -108,3 +108,205 @@ export async function getUnsubscribedPhones(companyId: string, phones: string[])
   );
   return result.rows.map((r: any) => r.phone);
 }
+
+// ============================================================
+// 080 수신거부 자동연동 (나래인터넷 콜백)
+// ============================================================
+
+/**
+ * 080번호로 사용자 매칭 (나래인터넷 콜백에서 사용).
+ * users.opt_out_080_number 우선 매칭 → 없으면 companies.opt_out_080_number fallback.
+ *
+ * @param opt080Number - 나래인터넷에서 전달한 080번호 (숫자만)
+ * @returns 매칭된 사용자/회사 정보 배열 (여러 사용자가 같은 080번호를 쓸 수 있음)
+ */
+export async function findUserBy080Number(opt080Number: string): Promise<{
+  userId: string;
+  companyId: string;
+  companyName: string;
+  source: 'user' | 'company';
+}[]> {
+  // 1순위: users 테이블에서 직접 매칭 (사용자 레벨)
+  const userResult = await query(
+    `SELECT u.id as user_id, u.company_id, c.company_name
+     FROM users u
+     JOIN companies c ON c.id = u.company_id
+     WHERE REPLACE(REPLACE(u.opt_out_080_number, '-', ''), ' ', '') = $1
+       AND u.opt_out_auto_sync = true
+       AND u.is_active = true
+       AND c.status = 'active'`,
+    [opt080Number]
+  );
+
+  if (userResult.rows.length > 0) {
+    return userResult.rows.map((r: any) => ({
+      userId: r.user_id,
+      companyId: r.company_id,
+      companyName: r.company_name,
+      source: 'user' as const,
+    }));
+  }
+
+  // 2순위: companies 테이블 fallback (기존 호환)
+  const companyResult = await query(
+    `SELECT id, company_name, opt_out_auto_sync FROM companies
+     WHERE REPLACE(REPLACE(opt_out_080_number, '-', ''), ' ', '') = $1
+       AND status = 'active'
+     LIMIT 1`,
+    [opt080Number]
+  );
+
+  if (companyResult.rows.length === 0) return [];
+
+  const company = companyResult.rows[0];
+  if (!company.opt_out_auto_sync) return [];
+
+  // 해당 회사의 모든 활성 사용자에게 broadcast
+  const usersResult = await query(
+    `SELECT id FROM users WHERE company_id = $1 AND is_active = true`,
+    [company.id]
+  );
+
+  return usersResult.rows.map((r: any) => ({
+    userId: r.id,
+    companyId: company.id,
+    companyName: company.company_name,
+    source: 'company' as const,
+  }));
+}
+
+/**
+ * 080 콜백 처리: 수신거부 등록 + 고객 sms_opt_in 동기화.
+ *
+ * @param phone - 수신거부 전화번호 (숫자만)
+ * @param opt080Number - 나래인터넷 080번호 (숫자만)
+ * @returns 등록 결과
+ */
+export async function process080Callback(phone: string, opt080Number: string): Promise<{
+  success: boolean;
+  insertedCount: number;
+  companyName: string;
+}> {
+  const matches = await findUserBy080Number(opt080Number);
+
+  if (matches.length === 0) {
+    return { success: false, insertedCount: 0, companyName: '' };
+  }
+
+  let insertedCount = 0;
+  const companyName = matches[0].companyName;
+  const companyIds = new Set<string>();
+
+  for (const match of matches) {
+    const result = await query(
+      `INSERT INTO unsubscribes (company_id, user_id, phone, source)
+       VALUES ($1, $2, $3, '080_ars')
+       ON CONFLICT (user_id, phone) DO NOTHING
+       RETURNING id`,
+      [match.companyId, match.userId, phone]
+    );
+    if (result.rows.length > 0) insertedCount++;
+    companyIds.add(match.companyId);
+  }
+
+  // 각 회사별 customers.sms_opt_in 동기화
+  for (const companyId of companyIds) {
+    await syncCustomerOptIn(companyId, [phone], false);
+  }
+
+  return { success: true, insertedCount, companyName };
+}
+
+// ============================================================
+// 슈퍼관리자용 수신거부 관리 (사용자별)
+// ============================================================
+
+/**
+ * 사용자별 수신거부 목록 조회 (슈퍼관리자용).
+ */
+export async function getUserUnsubscribes(userId: string, options: {
+  page?: number;
+  limit?: number;
+  search?: string;
+} = {}): Promise<{ data: any[]; total: number }> {
+  const page = options.page || 1;
+  const limit = options.limit || 50;
+  const offset = (page - 1) * limit;
+
+  let whereClause = 'WHERE user_id = $1';
+  const params: any[] = [userId];
+
+  if (options.search) {
+    params.push(`%${options.search}%`);
+    whereClause += ` AND phone LIKE $${params.length}`;
+  }
+
+  const countResult = await query(
+    `SELECT COUNT(*) FROM unsubscribes ${whereClause}`,
+    params
+  );
+
+  const dataResult = await query(
+    `SELECT id, phone, source, created_at
+     FROM unsubscribes ${whereClause}
+     ORDER BY created_at DESC
+     LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+    [...params, limit, offset]
+  );
+
+  return {
+    data: dataResult.rows,
+    total: parseInt(countResult.rows[0].count, 10),
+  };
+}
+
+/**
+ * 사용자별 수신거부 일괄삭제.
+ *
+ * @param userId - 사용자 ID
+ * @param phones - 삭제할 번호 배열 (비어있으면 전체 삭제)
+ * @returns 삭제된 건수
+ */
+export async function deleteUserUnsubscribes(userId: string, phones?: string[]): Promise<number> {
+  // 먼저 company_id 조회 (sms_opt_in 동기화용)
+  const userResult = await query('SELECT company_id FROM users WHERE id = $1', [userId]);
+  if (userResult.rows.length === 0) return 0;
+  const companyId = userResult.rows[0].company_id;
+
+  let deletedPhones: string[];
+
+  if (phones && phones.length > 0) {
+    // 선택 삭제
+    const result = await query(
+      `DELETE FROM unsubscribes WHERE user_id = $1 AND phone = ANY($2) RETURNING phone`,
+      [userId, phones]
+    );
+    deletedPhones = result.rows.map((r: any) => r.phone);
+  } else {
+    // 전체 삭제
+    const result = await query(
+      `DELETE FROM unsubscribes WHERE user_id = $1 RETURNING phone`,
+      [userId]
+    );
+    deletedPhones = result.rows.map((r: any) => r.phone);
+  }
+
+  // 삭제된 번호들 sms_opt_in 복구
+  if (deletedPhones.length > 0) {
+    await syncCustomerOptIn(companyId, deletedPhones, true);
+  }
+
+  return deletedPhones.length;
+}
+
+/**
+ * 사용자별 수신거부 전체 목록 (CSV 다운로드용).
+ */
+export async function exportUserUnsubscribes(userId: string): Promise<{ phone: string; source: string; created_at: string }[]> {
+  const result = await query(
+    `SELECT phone, source, created_at FROM unsubscribes
+     WHERE user_id = $1 ORDER BY created_at DESC`,
+    [userId]
+  );
+  return result.rows;
+}

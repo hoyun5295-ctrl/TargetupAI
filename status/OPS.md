@@ -98,11 +98,16 @@ C:\Users\ceo\projects\targetup\  (로컬)
 │   │       ├── app.ts              ← 백엔드 메인
 │   │       ├── routes/             ← API 라우트
 │   │       ├── services/           ← 비즈니스 로직
-│   │       └── utils/              ← 공통 유틸리티
+│   │       └── utils/              ← 공통 유틸리티 (컨트롤타워)
 │   │           ├── standard-field-map.ts  ← 표준 필드 매핑 (유일한 필드 기준)
 │   │           ├── sms-result-map.ts      ← 발송 결과값 매핑 (유일한 결과값 기준)
 │   │           ├── normalize.ts           ← 데이터 정규화 (값 변환)
-│   │           └── messageUtils.ts        ← 공통 변수 치환 (replaceVariables)
+│   │           ├── messageUtils.ts        ← 공통 변수 치환 (replaceVariables)
+│   │           ├── store-scope.ts         ← 브랜드 격리 컨트롤타워 (D63 B16-01)
+│   │           ├── customer-filter.ts     ← 고객 필터/쿼리 빌더 컨트롤타워 (D63 CT-01)
+│   │           ├── sms-queue.ts           ← MySQL 큐 조작 컨트롤타워 (D63 B16-02)
+│   │           ├── prepaid.ts             ← 선불 차감/환불 컨트롤타워 (D63 B16-02)
+│   │           └── campaign-lifecycle.ts  ← 캠페인 취소/결과동기화 (D63 B16-02)
 │   ├── frontend/                   ← 서비스 사용자 + 슈퍼관리자 UI
 │   │   └── src/
 │   │       ├── components/         ← UI 컴포넌트

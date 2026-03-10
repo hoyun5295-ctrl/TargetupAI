@@ -1,6 +1,7 @@
 import { Request, Response, Router } from 'express';
 import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
+import { process080Callback } from '../utils/unsubscribe-helper';
 
 const router = Router();
 
@@ -40,9 +41,9 @@ async function syncCustomerOptInBulk(companyId: string, phones: string[], optIn:
 }
 
 // ================================================================
-// GET /api/unsubscribes/080callback - 나래인터넷 080 콜백 (토큰 인증)
-// D43-4: opt_out_auto_sync = true인 업체만 콜백 처리
-// D43-4: 유료 플랜 업체는 customers.sms_opt_in = false 동시 업데이트
+// GET /api/unsubscribes/080callback - 나래인터넷 080 콜백
+// 컨트롤타워(unsubscribe-helper.ts)의 process080Callback()으로 위임.
+// 매칭 우선순위: users.opt_out_080_number → companies.opt_out_080_number fallback
 // ================================================================
 router.get('/080callback', async (req: Request, res: Response) => {
   try {
@@ -55,63 +56,22 @@ router.get('/080callback', async (req: Request, res: Response) => {
     }
 
     const phone = String(cid).replace(/\D/g, '');
-    const optOut080Number = String(fr).replace(/\D/g, '');
+    const opt080Number = String(fr).replace(/\D/g, '');
 
     if (phone.length < 10) {
       console.log(`[080콜백] 잘못된 전화번호 - cid=${cid}`);
       return res.send('0');
     }
 
-    // D43-4: 080번호로 고객사 찾기 + opt_out_auto_sync 체크
-    const companyResult = await query(
-      `SELECT id, company_name, opt_out_auto_sync FROM companies
-       WHERE REPLACE(REPLACE(opt_out_080_number, '-', ''), ' ', '') = $1
-         AND status = 'active'
-       LIMIT 1`,
-      [optOut080Number]
-    );
+    // 컨트롤타워에 위임 (users 우선 → companies fallback)
+    const result = await process080Callback(phone, opt080Number);
 
-    if (companyResult.rows.length === 0) {
-      console.log(`[080콜백] 고객사 못찾음 - fr=${fr} (${optOut080Number})`);
+    if (!result.success) {
+      console.log(`[080콜백] 매칭 실패 - fr=${fr} (${opt080Number})`);
       return res.send('0');
     }
 
-    const company = companyResult.rows[0];
-
-    // D43-4: 자동동기화 미사용 업체면 콜백 무시
-    if (!company.opt_out_auto_sync) {
-      console.log(`[080콜백] 자동동기화 미사용 업체 - ${company.company_name} (${phone})`);
-      return res.send('0');
-    }
-
-    // 해당 고객사의 모든 활성 사용자 조회
-    const usersResult = await query(
-      `SELECT id FROM users WHERE company_id = $1 AND is_active = true`,
-      [company.id]
-    );
-
-    if (usersResult.rows.length === 0) {
-      console.log(`[080콜백] 활성 사용자 없음 - ${company.company_name}`);
-      return res.send('0');
-    }
-
-    // 모든 user에게 broadcast INSERT
-    let insertedCount = 0;
-    for (const user of usersResult.rows) {
-      const result = await query(
-        `INSERT INTO unsubscribes (company_id, user_id, phone, source)
-         VALUES ($1, $2, $3, '080_ars')
-         ON CONFLICT (user_id, phone) DO NOTHING
-         RETURNING id`,
-        [company.id, user.id, phone]
-      );
-      if (result.rows.length > 0) insertedCount++;
-    }
-
-    // D43-4: 유료 플랜 업체면 customers.sms_opt_in = false 동시 업데이트
-    await syncCustomerOptIn(company.id, phone, false);
-
-    console.log(`[080콜백] 수신거부 등록: ${phone} → ${company.company_name} (${insertedCount}/${usersResult.rows.length}명, 080: ${fr})`);
+    console.log(`[080콜백] 수신거부 등록: ${phone} → ${result.companyName} (${result.insertedCount}명, 080: ${fr})`);
     return res.send('1');
   } catch (error) {
     console.error('[080콜백] 처리 오류:', error);

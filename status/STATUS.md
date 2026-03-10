@@ -193,28 +193,52 @@
 - **원인:** sync-results 로직이 campaigns.ts 로컬 함수로 갇혀 있어 다른 곳에서 접근 불가
 - **수정:** campaign-lifecycle.ts의 `syncCampaignResults()` 함수로 추출, campaigns.ts sync-results 라우트에서 호출
 
+**CT-01: `utils/customer-filter.ts` — 고객 필터/쿼리 빌더 컨트롤타워** — ✅ 생성 완료, 배포 대기
+- campaigns.ts, customers.ts, ai.ts 3곳의 필터 빌딩 로직을 통합
+- `buildCustomerFilter()` 단일 함수: mixed(ai.ts 방식) + structured(customers.ts 방식) 2가지 입력 포맷 지원
+- 호환 래퍼: `buildFilterWhereClauseCompat()` (ai.ts용), `buildDynamicFilterCompat()` (customers.ts용)
+- campaigns.ts의 `buildFilterQuery()`도 래퍼로 교체
+- 내부에서 normalize.ts의 buildGenderFilter, buildGradeFilter, getRegionVariants 재사용
+- **파일:** NEW utils/customer-filter.ts, MOD ai.ts, customers.ts, campaigns.ts
+
+**B16-03: AI 맞춤한줄에 스팸필터/담당자테스트 추가** — ✅ 수정 완료, 배포 대기
+- AiCustomSendFlow.tsx Step 4에 담당자테스트 + 스팸필터 버튼 추가
+- AI한줄로(AiCampaignResultPopup)의 기존 패턴 재사용: sampleCustomer로 변수 치환 후 테스트
+- Dashboard.tsx에서 9개 props 전달 (setShowSpamFilter, handleTestSend, sampleCustomer 등)
+- **파일:** MOD AiCustomSendFlow.tsx, Dashboard.tsx
+
+**B16-04: EUC-KR 비호환 특수문자 제거** — ✅ 수정 완료, 배포 대기
+- Python EUC-KR 인코딩 테스트로 52개 특수문자 전수 확인
+- 비호환 4개(♢, ♦, ✉, ☀) 제거 → 48개로 축소
+- **파일:** MOD Dashboard.tsx
+
+**B16-05: SMS 전환 후 MMS 이미지 잔존** — ✅ 수정 완료, 배포 대기
+- MMS 이미지 미리보기 조건: `directMsgType === 'MMS' || mmsUploadedImages.length > 0` → `directMsgType === 'MMS'`
+- LmsConvert/SmsConvert 콜백에 `setMmsUploadedImages([])` 추가
+- **파일:** MOD Dashboard.tsx, TargetSendModal.tsx
+
+**B16-06: AI 타겟추출 age 필터 오류 (0명 반환)** — ✅ 수정 완료, 배포 대기
+- **근본 원인:** AI 경로(mixed 모드)는 `(currentYear - birth_year)` 계산, 직접타겟 경로(structured 모드)는 `age` 컬럼 직접 사용 → birth_year NULL이면 AI 경로 0명
+- **수정:** CT-01 customer-filter.ts mixed 모드의 age 처리를 `age` 컬럼 직접 사용으로 통일 (BETWEEN, >=, <=)
+- minAge/maxAge 기존 호환도 동일하게 변경
+- **파일:** MOD utils/customer-filter.ts
+
+**B16-07: 직접타겟 회신번호 선택 + 미등록 회신번호 제외** — ✅ 수정 완료, 배포 대기
+- **프론트엔드:** DirectTargetFilterModal에 회신번호 선택 드롭다운 추가 (기본/개별/특정번호)
+  - 선택된 회신번호를 onExtracted 콜백으로 Dashboard에 전달
+  - Dashboard에서 TargetSendModal의 selectedCallback/useIndividualCallback에 자동 반영
+- **백엔드:** 미등록 회신번호 처리 변경 — 전체 발송 차단 → 해당 고객만 제외
+  - `/:id/send` (AI 캠페인 발송): 미등록 회신번호 고객 제외 + callbackUnregisteredCount 응답 포함
+  - `/direct-send` (직접발송): 동일 로직 적용 + validRecipients 별도 변수로 처리
+  - 응답에 callbackMissingCount/callbackUnregisteredCount 구분 건수 포함
+- **파일:** MOD DirectTargetFilterModal.tsx, Dashboard.tsx, campaigns.ts
+
 #### 🔧 1순위: 추가 컨트롤타워 생성 (Harold님 컨펌 완료)
 
 > **배경:** D63에서 sms-queue.ts, prepaid.ts, campaign-lifecycle.ts 3개 컨트롤타워를 만들어 campaigns.ts 3030줄→2340줄로 리팩토링한 결과, 예약취소 버그(B16-02)가 근본 해결됨. Harold님 피드백: "유틸파일을 기준으로 잡고 통일하는게 문제점 잡기엔 좋더라고". 동적치환 때 standard-field-map.ts로 통일한 것과 같은 패턴.
 > **원칙:** 하나씩 생성 → Harold님 컨펌 → 적용. 기존 로직 변경 없이 위치만 이동(함수 추출). 기간계 무접촉.
 
-**CT-01: `utils/customer-filter.ts` — 고객 필터/쿼리 빌더 컨트롤타워** — ⏳ 대기 (최우선)
-- **문제:** campaigns.ts, customers.ts, ai.ts 3곳에서 **거의 동일한** 필터 빌딩 로직이 각각 존재
-  - campaigns.ts: `buildFilterQuery()` (L891~) — 80줄
-  - customers.ts: `buildDynamicFilter()` (L15~) — 134줄
-  - ai.ts: `buildFilterWhereClause()` (L14~) — 55줄
-- **중복 내용:** 성별 필터(`buildGenderFilter`), 등급 필터(`buildGradeFilter`), 지역 필터(`buildRegionFilter`), 연령 범위(minAge/maxAge), 숫자 필드 비교(gte/lte/between), 날짜 필드 처리, 커스텀 필드 JSONB 처리, 매장 코드/이름 필터, 구매금액/일자, 포인트 — 전부 3곳에서 각각 구현
-- **합치면:** 약 269줄 중복 제거
-- **효과:** B16-06(타겟 추출 오류) 같은 필터 버그를 한 곳만 고치면 3경로 자동 반영
-- **설계:**
-  ```typescript
-  // utils/customer-filter.ts
-  interface FilterResult { where: string; params: any[]; nextIndex: number; }
-  function buildCustomerFilterWhere(filters: any, startParamIndex: number): FilterResult
-  // 내부에서 buildGenderFilter, buildGradeFilter, buildRegionFilter 등 사용
-  // campaigns.ts, customers.ts, ai.ts에서 import하여 사용
-  ```
-- **적용 파일:** campaigns.ts(buildFilterQuery 교체), customers.ts(buildDynamicFilter 교체), ai.ts(buildFilterWhereClause 교체)
+**CT-01: `utils/customer-filter.ts` — 고객 필터/쿼리 빌더 컨트롤타워** — ✅ 완료 (위 완료 목록 참조)
 
 **CT-02: `utils/permission-helper.ts` — 권한/스코프 헬퍼 컨트롤타워** — ⏳ 대기
 - **문제:** `getCompanyScope()` 함수가 manage-scheduled.ts, manage-stats.ts, manage-callbacks.ts 등 **6개 이상 파일에 복붙**으로 존재. 슈퍼관리자/고객사관리자/일반사용자 분기 + 사용자 필터 + 매장 스코프 적용 로직이 8개 이상 라우트에서 각각 구현.
@@ -262,30 +286,7 @@
 
 #### 🔧 2순위: 16차 버그리포트 수정 (Harold님 컨펌 완료, 하나씩 진행)
 
-**B16-03: AI 맞춤한줄에 스팸필터/담당자테스트 추가** — ⏳ 대기
-- **문제:** AI 맞춤한줄 발송 모드에만 스팸필터/담당자테스트 기능이 없음
-- **방향:** 다른 발송 모드에 있는 스팸필터/테스트 기능을 AI 맞춤한줄에도 통일 적용
-- **확인:** 프론트엔드(AiCustomSendFlow.tsx 등) + 백엔드(campaigns.ts test-send) 코드 확인 필요
-
-**B16-04: 이모지 ??표시 2건 확인 후 제거** — ⏳ 대기
-- **문제:** 스크린샷 기준, 특수문자 중 2개만 ??로 표시됨 (나머지는 정상)
-- **방향:** 해당 2개 문자가 뭔지 정확히 식별 → 이모지 목록에서 제거
-- **확인:** Dashboard.tsx 또는 TargetSendModal.tsx의 이모지 팝업 코드 확인
-
-**B16-05: SMS 전환 후 MMS 이미지 화면에 잔존** — ⏳ 대기 (Harold님: 심각한 버그)
-- **문제:** MMS로 이미지 첨부 후 SMS로 전환했는데, 화면에 이미지가 그대로 남아있음
-- **방향:** 프론트엔드에서 메시지 타입 전환 시 이미지 state 초기화 누락 가능성
-- **확인:** TargetSendModal.tsx 또는 관련 모달의 타입 전환 핸들러
-
-**B16-06: 타겟 추출 오류 (9일까지 정상 → 이후 깨짐)** — ⏳ 대기 (regression 가능성)
-- **문제:** 9일까지 정상 작동하던 타겟 추출이 이후 깨짐
-- **방향:** 9일 이후 변경된 코드 확인 (15차 수정에서 customers.ts 수정이 영향?) → store-scope 적용 후 추가 확인 필요
-- **확인:** customers.ts /filter, /extract 라우트 + 15차 변경 diff
-
-**B16-07: 직접타겟 필터에 매장번호(회신번호) 선택란 추가** — ⏳ 대기 (기능 추가)
-- **문제:** 직접타겟 필터에 매장번호(회신번호) 선택할 수 있는 드롭다운이 없음
-- **방향:** DirectTargetFilterModal.tsx에 회신번호 선택 UI 추가 + 백엔드 필터 지원
-- **확인:** 회신번호 목록 조회 API 존재 여부, 발송 시 callback 필드 매핑
+**B16-03 ~ B16-07:** ✅ 전부 수정 완료 (위 완료 목록 참조)
 
 **개인화 미리보기 통일** — ⏳ 대기
 - **문제:** 문안 추천 카드에서 치환된 데이터(고객명 등)가 보이는데, 올바르게는:
@@ -299,22 +300,29 @@
 - **수신거부 삭제 기능** — 수신거부 목록에서 개별 삭제 기능
 - **DB삭제 사용자별** — 고객 DB 삭제를 사용자별로 권한 관리
 
-#### 수정 파일 목록
+#### 수정 파일 목록 (D63 전체)
 
 **신규 생성 (유틸 컨트롤타워):**
 - `utils/store-scope.ts` — 브랜드 격리 컨트롤타워 (B16-01)
 - `utils/sms-queue.ts` — MySQL 큐 조작 컨트롤타워 (B16-02)
 - `utils/prepaid.ts` — 선불 차감/환불 컨트롤타워 (B16-02)
 - `utils/campaign-lifecycle.ts` — 캠페인 취소/결과동기화 컨트롤타워 (B16-02)
+- `utils/customer-filter.ts` — 고객 필터/쿼리 빌더 컨트롤타워 (CT-01)
 
-**수정:**
-- `routes/campaigns.ts` — B16-01(store-scope), B16-02(함수→import 교체, cancel/sync-results 컨트롤타워화)
-- `routes/customers.ts` — B16-01(store-scope 7곳)
-- `routes/ai.ts` — B16-01(store-scope 3곳)
+**백엔드 수정:**
+- `routes/campaigns.ts` — B16-01(store-scope), B16-02(함수→import 교체), B16-07(미등록 회신번호 개별 제외)
+- `routes/customers.ts` — B16-01(store-scope 7곳), CT-01(buildDynamicFilter 래퍼)
+- `routes/ai.ts` — B16-01(store-scope 3곳), CT-01(buildFilterWhereClause 래퍼)
 - `routes/manage-scheduled.ts` — B16-02(cancelCampaign 컨트롤타워 적용)
 - `routes/spam-filter.ts` — B16-02(import 경로 변경)
 - `routes/results.ts` — B16-02(import 경로 변경)
 - `routes/admin.ts` — B16-02(import 경로 변경)
+
+**프론트엔드 수정:**
+- `components/AiCustomSendFlow.tsx` — B16-03(스팸필터/담당자테스트 추가)
+- `components/DirectTargetFilterModal.tsx` — B16-07(회신번호 선택 드롭다운)
+- `components/TargetSendModal.tsx` — B16-05(MMS 이미지 조건 수정)
+- `pages/Dashboard.tsx` — B16-03(props 전달), B16-04(특수문자), B16-05(MMS 초기화), B16-07(회신번호 연동)
 
 ---
 

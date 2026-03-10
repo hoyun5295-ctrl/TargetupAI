@@ -8,6 +8,7 @@ import { DASHBOARD_CARD_POOL, validateCardIds } from '../utils/dashboard-card-po
 import { SUCCESS_CODES_SQL, PENDING_CODES_SQL, getStatusLabel, getStatusType, getCarrierLabel, isSuccess, isPending } from '../utils/sms-result-map';
 import { DEFAULT_COSTS } from '../config/defaults';
 import { validateSmsTables } from '../utils/sms-table-validator';
+import { getUserUnsubscribes, deleteUserUnsubscribes, exportUserUnsubscribes } from '../utils/unsubscribe-helper';
 
 const router = Router();
 
@@ -21,8 +22,10 @@ router.get('/users', authenticate, requireSuperAdmin, async (req: Request, res: 
         u.id, u.login_id, u.name, u.email, u.phone, u.department,
         u.user_type, u.status, u.company_id, u.last_login_at, u.created_at,
         u.store_codes, u.line_group_id,
+        u.opt_out_080_number, u.opt_out_auto_sync,
         c.company_name,
-        lg.group_name as line_group_name
+        lg.group_name as line_group_name,
+        (SELECT COUNT(*) FROM unsubscribes WHERE user_id = u.id) as unsubscribe_count
       FROM users u
       LEFT JOIN companies c ON u.company_id = c.id
       LEFT JOIN sms_line_groups lg ON u.line_group_id = lg.id
@@ -89,7 +92,7 @@ router.post('/users', authenticate, requireSuperAdmin, async (req: Request, res:
 // 사용자 수정
 router.put('/users/:id', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { name, email, phone, department, userType, status, storeCodes, lineGroupId } = req.body;
+  const { name, email, phone, department, userType, status, storeCodes, lineGroupId, optOut080Number, optOutAutoSync } = req.body;
 
   try {
     const result = await query(`
@@ -102,19 +105,75 @@ router.put('/users/:id', authenticate, requireSuperAdmin, async (req: Request, r
           status = COALESCE($6, status),
           store_codes = $7,
           line_group_id = $8,
+          opt_out_080_number = $9,
+          opt_out_auto_sync = COALESCE($10, opt_out_auto_sync),
           updated_at = NOW()
-      WHERE id = $9
-      RETURNING id, login_id, name, email, user_type, status, store_codes, line_group_id
-    `, [name, email, phone, department, userType, status, storeCodes || null, lineGroupId || null, id]);
-    
+      WHERE id = $11
+      RETURNING id, login_id, name, email, user_type, status, store_codes, line_group_id, opt_out_080_number, opt_out_auto_sync
+    `, [name, email, phone, department, userType, status, storeCodes || null, lineGroupId || null, optOut080Number || null, optOutAutoSync, id]);
+
     if (result.rows.length === 0) {
       return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
     }
-    
+
     res.json({ user: result.rows[0], message: '수정되었습니다.' });
   } catch (error) {
     console.error('사용자 수정 실패:', error);
     res.status(500).json({ error: '사용자 수정 실패' });
+  }
+});
+
+// ================================================================
+// 슈퍼관리자 — 사용자별 수신거부 관리 (CT-03 컨트롤타워 활용)
+// ================================================================
+
+// 사용자별 수신거부 목록 조회
+router.get('/users/:id/unsubscribes', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 50;
+    const search = req.query.search as string || '';
+
+    const result = await getUserUnsubscribes(id, { page, limit, search });
+    res.json(result);
+  } catch (error) {
+    console.error('수신거부 목록 조회 실패:', error);
+    res.status(500).json({ error: '수신거부 목록 조회 실패' });
+  }
+});
+
+// 사용자별 수신거부 일괄삭제
+router.delete('/users/:id/unsubscribes', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { phones } = req.body || {};
+
+    const deletedCount = await deleteUserUnsubscribes(id, phones);
+    res.json({ deletedCount, message: `${deletedCount}건 삭제되었습니다.` });
+  } catch (error) {
+    console.error('수신거부 삭제 실패:', error);
+    res.status(500).json({ error: '수신거부 삭제 실패' });
+  }
+});
+
+// 사용자별 수신거부 CSV 다운로드
+router.get('/users/:id/unsubscribes/export', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const data = await exportUserUnsubscribes(id);
+
+    // CSV 생성
+    const header = '전화번호,출처,등록일시\n';
+    const sourceLabel: Record<string, string> = { '080_ars': '080 ARS', manual: '직접입력', upload: '파일업로드', sync: 'Sync연동', api: '080자동', db_upload: 'DB업로드' };
+    const rows = data.map(r => `${r.phone},${sourceLabel[r.source] || r.source},${new Date(r.created_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}`).join('\n');
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename=unsubscribes_${id}_${new Date().toISOString().slice(0,10)}.csv`);
+    res.send('\uFEFF' + header + rows); // BOM for Excel
+  } catch (error) {
+    console.error('수신거부 다운로드 실패:', error);
+    res.status(500).json({ error: '수신거부 다운로드 실패' });
   }
 });
 

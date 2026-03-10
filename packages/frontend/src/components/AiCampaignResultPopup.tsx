@@ -260,37 +260,8 @@ export default function AiCampaignResultPopup({
                             <div className="flex gap-2">
                               <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-xs ${selectedChannel === 'KAKAO' ? 'bg-yellow-100' : 'bg-purple-100'}`}>{selectedChannel === 'KAKAO' ? '💬' : '📱'}</div>
                               <div className={`rounded-2xl rounded-tl-sm p-3 shadow-sm border text-[12px] leading-[1.6] whitespace-pre-wrap break-all overflow-hidden text-gray-700 max-w-[95%] ${selectedChannel === 'KAKAO' ? 'bg-yellow-50 border-yellow-200' : 'bg-white border-gray-100'}`}>
-                              {(() => {
-                                let text = msg.message_text || '';
-                                if (sampleCustomer) {
-                                  // 1차: 직접 매칭
-                                  Object.entries(sampleCustomer).forEach(([k, v]) => {
-                                    text = text.replace(new RegExp(`%${k}%`, 'g'), String(v || ''));
-                                  });
-                                  // 2차: 별칭 매핑 (AI 변수명 ↔ displayName 불일치 대응)
-                                  const aliasMap: Record<string, string[]> = {
-                                    '이름': ['고객명', '성함', '고객이름'],
-                                    '고객등급': ['등급', '멤버십등급', '회원등급'],
-                                    '등록매장정보': ['매장명', '매장', '지점', '등록매장'],
-                                    '최근구매매장': ['구매매장', '최근매장'],
-                                    '보유포인트': ['포인트', '적립금'],
-                                    '최근구매금액': ['구매금액'], '누적구매금액': ['총구매금액'],
-                                  };
-                                  Object.entries(aliasMap).forEach(([realKey, aliases]) => {
-                                    const val = sampleCustomer[realKey];
-                                    if (val) aliases.forEach(a => { text = text.replace(new RegExp(`%${a}%`, 'g'), String(val)); });
-                                  });
-                                  // 역방향
-                                  Object.entries(aliasMap).forEach(([realKey, aliases]) => {
-                                    for (const alias of aliases) {
-                                      const val = sampleCustomer[alias];
-                                      if (val) { text = text.replace(new RegExp(`%${realKey}%`, 'g'), String(val)); break; }
-                                    }
-                                  });
-                                }
-                                text = text.replace(/%[^%\s]{1,20}%/g, '');
-                                return wrapAdText(text);
-                              })()}
+                              {/* 문안 추천 단계: 변수 원본(%고객명% 등) 그대로 표시. 미리보기에서 샘플 데이터로 치환 */}
+                              {wrapAdText(msg.message_text || '')}
                               </div>
                             </div>
                             )}
