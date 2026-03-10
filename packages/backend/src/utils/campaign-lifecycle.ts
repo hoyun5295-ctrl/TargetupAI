@@ -220,8 +220,8 @@ export async function syncCampaignResults(companyId: string): Promise<SyncResult
           `UPDATE campaign_runs SET
             success_count = $1,
             fail_count = $2,
-            status = $3,
-            sent_at = CASE WHEN $3 = 'completed' AND sent_at IS NULL
+            status = $3::text,
+            sent_at = CASE WHEN $3::text = 'completed' AND sent_at IS NULL
               THEN COALESCE(scheduled_at, NOW())
               ELSE sent_at END
            WHERE id = $4`,
@@ -235,8 +235,8 @@ export async function syncCampaignResults(companyId: string): Promise<SyncResult
             `UPDATE campaigns SET
               success_count = $1,
               fail_count = $2,
-              status = $3,
-              sent_at = CASE WHEN $3 = 'completed' AND sent_at IS NULL
+              status = $3::text,
+              sent_at = CASE WHEN $3::text = 'completed' AND sent_at IS NULL
                 THEN COALESCE(scheduled_at, NOW())
                 ELSE sent_at END
              WHERE id = $4`,
@@ -326,8 +326,8 @@ export async function syncCampaignResults(companyId: string): Promise<SyncResult
           `UPDATE campaigns SET
             success_count = $1,
             fail_count = $2,
-            status = $3,
-            sent_at = CASE WHEN $3 = 'completed' AND sent_at IS NULL
+            status = $3::text,
+            sent_at = CASE WHEN $3::text = 'completed' AND sent_at IS NULL
               THEN COALESCE(scheduled_at, NOW())
               ELSE sent_at END
            WHERE id = $4`,
