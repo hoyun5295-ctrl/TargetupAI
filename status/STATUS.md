@@ -388,6 +388,36 @@
 
 ---
 
+### ✅ D65 — sync-results 결과동기화 Blocker 수정 (2026-03-11) — 완료, 배포 완료
+
+> **배경:** 발송 완료된 캠페인이 영구적으로 "발송중" + 성공/실패 0/0으로 고착. 결과 화면이 전혀 업데이트되지 않는 Blocker 버그.
+> **진단 방법:** 서버 로그(pm2 logs) 기반 근본 원인 추적.
+
+#### 발견된 근본 원인 3가지
+
+1. **kakaoAgg() 미존재 테이블 throw** — MySQL에 `IMC_BM_FREE_BIZ_MSG` 테이블이 없는 상태에서 `kakaoAgg()`를 호출하면 에러 throw → `syncCampaignResults()` 함수 전체 중단 → SMS 결과 집계가 정상이어도 DB 업데이트까지 도달하지 못함
+2. **PostgreSQL $3 타입 추론 실패** — UPDATE 쿼리에서 `status = $3`과 `CASE WHEN $3 = 'completed'`에 동일 파라미터 사용 → PostgreSQL이 `inconsistent types deduced for parameter $3` 에러
+3. **캠페인별 에러 격리 없음** — for 루프에 try/catch가 없어 1건의 에러가 나머지 전체 캠페인 동기화를 중단
+
+#### 수정 내용 (campaign-lifecycle.ts)
+
+- `kakaoAgg()` 호출을 try/catch로 감싸 테이블 미존재 시 `{total:0, success:0, fail:0, pending:0}` 반환 (AI + 직접발송 2곳)
+- UPDATE 쿼리 `$3` → `$3::text` 명시 캐스팅 (campaign_runs AI, campaigns AI, campaigns 직접발송, campaign_runs 직접발송 — 4곳)
+- AI캠페인 / 직접발송 for 루프에 캠페인별 try/catch 추가 (2곳)
+- 디버그 로그 추가: tables, created_by, success/fail/pending 카운트
+
+#### 수정 파일
+- `utils/campaign-lifecycle.ts` — syncCampaignResults 함수
+
+#### 관련 버그 Closed
+- **B12-02** (발송결과 "발송중" 영구 고착) → ✅ Closed
+- **B13-09** (결과 수신 후에도 미변경) → ✅ Closed
+
+#### 기간계 영향: 없음
+발송 INSERT/차감/환불 무접촉. 결과 동기화(읽기→UPDATE) 로직만 수정.
+
+---
+
 ### ✅ D61 — 프론트엔드 난독화 적용 (2026-03-08) — 완료
 
 > **배경:** 상용화 전 소스 코드 보호. STATUS.md 런칭 체크리스트 항목.

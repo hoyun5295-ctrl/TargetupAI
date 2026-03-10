@@ -722,7 +722,7 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
                         <div className="flex-1 overflow-y-auto p-3 bg-gradient-to-b from-emerald-50/30 to-white">
                           <div className="flex gap-2">
                             <div className="w-7 h-7 rounded-full bg-emerald-100 flex items-center justify-center shrink-0 text-[10px] font-bold text-emerald-600">T</div>
-                            <div className="bg-white rounded-2xl rounded-tl-sm p-3 shadow-sm border border-gray-100 text-[11.5px] leading-[1.7] whitespace-pre-wrap text-gray-700 max-w-[95%]">
+                            <div className="bg-white rounded-2xl rounded-tl-sm p-3 shadow-sm border border-gray-100 text-[11.5px] leading-[1.7] whitespace-pre-wrap break-all text-gray-700 max-w-[95%] overflow-hidden">
                               {messages[0]?.msg_contents || selectedCampaign.message_content || ''}
                             </div>
                           </div>

@@ -441,8 +441,8 @@ router.get('/campaigns/:id/messages', async (req: Request, res: Response) => {
       const smsFields = `seqno, dest_no, call_back, msg_type, msg_contents, status_code, mob_company,
         sendreq_time, mobsend_time, repmsg_recvtm,
         'sms' AS _channel, sendreq_time AS _sort_time,
-        NULL AS kakao_bubble_type, NULL AS kakao_report_code,
-        NULL AS resend_type, NULL AS resend_report_code`;
+        '' AS kakao_bubble_type, '' AS kakao_report_code,
+        '' AS resend_type, '' AS resend_report_code`;
 
       for (const t of msgTables) {
         dataSubqueries.push(`(SELECT ${smsFields} FROM ${t} ${smsWhere})`);
@@ -538,8 +538,8 @@ router.get('/campaigns/:id/messages', async (req: Request, res: Response) => {
       const smsFields = `seqno, dest_no, call_back, msg_type, msg_contents, status_code, mob_company,
         sendreq_time, mobsend_time, repmsg_recvtm,
         'sms' AS _channel, sendreq_time AS _sort_time,
-        NULL AS kakao_bubble_type, NULL AS kakao_report_code,
-        NULL AS resend_type, NULL AS resend_report_code`;
+        '' AS kakao_bubble_type, '' AS kakao_report_code,
+        '' AS resend_type, '' AS resend_report_code`;
       let smsWhere = 'WHERE app_etc1 = ?';
       if (searchType && searchValue) {
         const sv = `%${String(searchValue).trim()}%`;
