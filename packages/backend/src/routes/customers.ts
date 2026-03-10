@@ -5,6 +5,7 @@ import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getGenderVarian
 import { FIELD_MAP, getFieldByKey, getColumnFields, CATEGORY_LABELS } from '../utils/standard-field-map';
 import { DEFAULT_COSTS, redis, CACHE_TTL } from '../config/defaults';
 import { isValidCustomFieldKey } from '../utils/safe-field-name';
+import { getStoreScope } from '../utils/store-scope';
 
 const router = Router();
 
@@ -60,10 +61,10 @@ function buildDynamicFilter(filters: any, startIndex: number) {
       }
     } else if (field === storeField) {
       if (operator === 'eq') {
-        whereClause += ` AND id IN (SELECT customer_id FROM customer_stores WHERE store_code = $${paramIndex++})`;
+        whereClause += ` AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = $1 AND store_code = $${paramIndex++})`;
         params.push(value);
       } else if (operator === 'in' && Array.isArray(value)) {
-        whereClause += ` AND id IN (SELECT customer_id FROM customer_stores WHERE store_code = ANY($${paramIndex++}::text[]))`;
+        whereClause += ` AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = $1 AND store_code = ANY($${paramIndex++}::text[]))`;
         params.push(value);
       }
     } else if (field === 'store_name') {
@@ -190,14 +191,19 @@ router.get('/', async (req: Request, res: Response) => {
     const params: any[] = [companyId];
     let paramIndex = 2;
 
-    // 일반 사용자(브랜드 담당자)는 본인 store_codes에 해당하는 고객만 조회
+    // ★ B16-01: 브랜드(store_code) 격리 — store-scope 컨트롤타워 사용
     if (userType === 'company_user' && userId) {
-      const userResult = await query('SELECT store_codes FROM users WHERE id = $1', [userId]);
-      const storeCodes = userResult.rows[0]?.store_codes;
-      if (storeCodes && storeCodes.length > 0) {
+      const scope = await getStoreScope(companyId, userId);
+      if (scope.type === 'filtered') {
         whereClause += ` AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = $1 AND store_code = ANY($${paramIndex++}::text[]))`;
-        params.push(storeCodes);
+        params.push(scope.storeCodes);
+      } else if (scope.type === 'blocked') {
+        return res.json({
+          customers: [],
+          pagination: { total: 0, page: Number(req.query.page || 1), limit: Number(req.query.limit || 50), totalPages: 0 },
+        });
       }
+      // scope.type === 'no_filter' → 필터 없이 company_id 전체 (기존대로)
     }
 
     // ★ 고객사관리자: 사용자(ID)별 필터 → 해당 사용자가 업로드한 고객만
@@ -319,12 +325,14 @@ router.post('/filter', async (req: Request, res: Response) => {
     let paramIndex = 2;
 
     // 일반 사용자는 본인 store_codes에 해당하는 고객만
+    // ★ B16-01: 브랜드 격리 — store-scope 컨트롤타워
     if (userType === 'company_user' && userId) {
-      const userResult = await query('SELECT store_codes FROM users WHERE id = $1', [userId]);
-      const storeCodes = userResult.rows[0]?.store_codes;
-      if (storeCodes && storeCodes.length > 0) {
+      const scope = await getStoreScope(companyId, userId);
+      if (scope.type === 'filtered') {
         whereClause += ` AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = $1 AND store_code = ANY($${paramIndex++}::text[]))`;
-        params.push(storeCodes);
+        params.push(scope.storeCodes);
+      } else if (scope.type === 'blocked') {
+        return res.json({ total: 0, customers: [] });
       }
     }
 
@@ -604,15 +612,18 @@ router.get('/stats', async (req: Request, res: Response) => {
     }
 
     // 일반 사용자는 본인 store_codes에 해당하는 고객만
+    // ★ B16-01: store_codes 없는 company_user → 빈 통계 반환
     let storeFilter = '';
     const params: any[] = [companyId];
-    
+
+    // ★ B16-01: 브랜드 격리 — store-scope 컨트롤타워
     if (userType === 'company_user' && userId) {
-      const userResult = await query('SELECT store_codes FROM users WHERE id = $1', [userId]);
-      const storeCodes = userResult.rows[0]?.store_codes;
-      if (storeCodes && storeCodes.length > 0) {
+      const scope = await getStoreScope(companyId, userId);
+      if (scope.type === 'filtered') {
         storeFilter = ' AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = $1 AND store_code = ANY($2::text[]))';
-        params.push(storeCodes);
+        params.push(scope.storeCodes);
+      } else if (scope.type === 'blocked') {
+        return res.json({ total: 0, sms_opt_in_count: 0, gender_male: 0, gender_female: 0, gender_unknown: 0, age_20s: 0, age_30s: 0, age_40s: 0, age_50s: 0, age_60plus: 0, age_unknown: 0, grades: [], store_codes: [], custom_field_keys: [] });
       }
     }
 
@@ -815,12 +826,15 @@ router.post('/filter-count', async (req: Request, res: Response) => {
     let paramIndex = 2;
 
     // 일반 사용자는 본인 store_codes에 해당하는 고객만
+    // ★ B16-01: store_codes 없는 company_user → 빈 결과
+    // ★ B16-01: 브랜드 격리 — store-scope 컨트롤타워
     if (userType === 'company_user' && userId) {
-      const userResult = await query('SELECT store_codes FROM users WHERE id = $1', [userId]);
-      const storeCodes = userResult.rows[0]?.store_codes;
-      if (storeCodes && storeCodes.length > 0) {
+      const scope = await getStoreScope(companyId, userId);
+      if (scope.type === 'filtered') {
         whereClause += ` AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = $1 AND store_code = ANY($${paramIndex++}::text[]))`;
-        params.push(storeCodes);
+        params.push(scope.storeCodes);
+      } else if (scope.type === 'blocked') {
+        return res.json({ count: 0 });
       }
     }
 
@@ -916,13 +930,14 @@ router.post('/extract', async (req: Request, res: Response) => {
     const params: any[] = [companyId];
     let paramIndex = 2;
 
-    // 일반 사용자는 본인 store_codes에 해당하는 고객만
+    // ★ B16-01: 브랜드 격리 — store-scope 컨트롤타워
     if (userType === 'company_user' && userId) {
-      const userResult = await query('SELECT store_codes FROM users WHERE id = $1', [userId]);
-      const storeCodes = userResult.rows[0]?.store_codes;
-      if (storeCodes && storeCodes.length > 0) {
+      const scope = await getStoreScope(companyId, userId);
+      if (scope.type === 'filtered') {
         whereClause += ` AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = $1 AND store_code = ANY($${paramIndex++}::text[]))`;
-        params.push(storeCodes);
+        params.push(scope.storeCodes);
+      } else if (scope.type === 'blocked') {
+        return res.json({ customers: [], count: 0 });
       }
     }
 
@@ -1016,14 +1031,16 @@ router.get('/filter-options', async (req: Request, res: Response) => {
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다' });
 
     // company_user는 본인 store_codes 데이터 기준 옵션만
+    // ★ B16-01: 브랜드 격리 — store-scope 컨트롤타워
     let scopeWhere = 'company_id = $1 AND is_active = true';
     const scopeParams: any[] = [companyId];
     if (userType === 'company_user' && userId) {
-      const userResult = await query('SELECT store_codes FROM users WHERE id = $1', [userId]);
-      const storeCodes = userResult.rows[0]?.store_codes;
-      if (storeCodes && storeCodes.length > 0) {
+      const scope = await getStoreScope(companyId, userId);
+      if (scope.type === 'filtered') {
         scopeWhere += ' AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = $1 AND store_code = ANY($2::text[]))';
-        scopeParams.push(storeCodes);
+        scopeParams.push(scope.storeCodes);
+      } else if (scope.type === 'blocked') {
+        return res.json({ grades: [], regions: [], storeNames: [], customFieldKeys: [] });
       }
     }
 
@@ -1056,14 +1073,17 @@ router.get('/enabled-fields', async (req: Request, res: Response) => {
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다' });
 
     // 데이터 범위: company_user는 본인 store_codes만, 그 외는 회사 전체
+    // ★ B16-01: store_codes 없는 company_user → 빈 필드 반환
     let scopeWhere = 'company_id = $1 AND is_active = true';
     const scopeParams: any[] = [companyId];
+    // ★ B16-01: 브랜드 격리 — store-scope 컨트롤타워
     if (userType === 'company_user' && userId) {
-      const userResult = await query('SELECT store_codes FROM users WHERE id = $1', [userId]);
-      const storeCodes = userResult.rows[0]?.store_codes;
-      if (storeCodes && storeCodes.length > 0) {
+      const scope = await getStoreScope(companyId, userId);
+      if (scope.type === 'filtered') {
         scopeWhere += ' AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = $1 AND store_code = ANY($2::text[]))';
-        scopeParams.push(storeCodes);
+        scopeParams.push(scope.storeCodes);
+      } else if (scope.type === 'blocked') {
+        return res.json({ fields: [] });
       }
     }
 

@@ -1,6 +1,184 @@
-1. 하드코딩은 절대 하지 말 것 — 경로, 값, 설정 등 모든 곳에서 환경변수나 설정파일을 통해 관리한다.
-2. 뭐든 실행하기 전에 주인님과 논의를 하고 결정된 사항을 작업하도록 할 것.
-3. 일단 서로 논의하고 브리핑을 진행한 후에 작업을 하도록 한다.
-4. 기간계 시스템은 절대 문제가 있어서는 안 된다 — 발송, DB, 인증 등 핵심 시스템은 최우선 안정성을 보장한다.
-5. 주먹구구식 땜질 코딩은 절대 안 된다 — 상용화 서비스를 곧 진행할 중요한 프로젝트이다. 체계적이고 검증된 코드만 반영한다.
-6.targetup 폴더내에 status 안에 다양한 .md 파일들이 있으니 연관있는 파일을 검색하여 최대한 빠른시간에 수정이 필요한 파일에 대한 체크를 하도록해라
+# TargetUp (한줄로) 프로젝트 — AI 에이전트 온보딩
+
+> 이 문서는 새 세션이 프로젝트를 즉시 이해하고 작업할 수 있도록 핵심 컨텍스트를 담고 있다.
+> 작업 전 반드시 이 문서를 읽고, 필요에 따라 아래 참조 문서를 추가로 읽는다.
+
+---
+
+## 1. 프로젝트 개요
+
+- **서비스명:** 한줄로 (TargetUp) — SMS/LMS/MMS 마케팅 자동화 SaaS
+- **도메인:** hanjul.ai (서비스), app.hanjul.ai (고객사 관리자), sys.hanjullo.com (슈퍼관리자)
+- **스택:** Node.js/Express + React + TypeScript, PostgreSQL(메인DB) + MySQL(QTmsg SMS 발송)
+- **상태:** 상용화 직전. 기간계 안정성 최우선.
+
+---
+
+## 2. 경로 정보
+
+| 구분 | 경로 |
+|------|------|
+| **로컬** | `C:\Users\ceo\projects\targetup` |
+| **서버** | `ssh administrator@58.227.193.62` → `/home/administrator/targetup-app/` |
+| **배포** | Harold님 로컬 PowerShell에서 `tp-push` → `tp-deploy-full` 실행 (AI가 직접 실행 불가) |
+
+---
+
+## 3. 필수 참조 문서 (status/ 폴더)
+
+| 문서 | 용도 | 언제 읽나 |
+|------|------|-----------|
+| **STATUS.md** | 전체 프로젝트 현황 + CURRENT_TASK + 아키텍처 상세 | **매 세션 시작 시 반드시** |
+| **BUGS.md** | 버그 트래커 (발견→분석→수정→검증 전 이력) | 버그 수정 작업 시 |
+| **OPS.md** | 서버/배포/인프라/파일구조/Nginx/SSL | 서버 관련 작업 시 |
+| **SCHEMA.md** | PostgreSQL/MySQL 전체 DB 스키마 | 쿼리 작성/DB 작업 시 |
+| **FIELD-INTEGRATION.md** | 필드 매핑 통합 기준 문서 | 필드/매핑 관련 작업 시 |
+
+---
+
+## 4. 절대 운영 원칙
+
+### 4-1. Harold님 컨펌 필수
+- 코드 작성 전 반드시 **현황 파악 → 설계안 제시 → Harold님 동의 → 구현** 순서.
+- 뭐든 실행하기 전에 주인님과 논의하고 결정된 사항만 작업한다.
+- Harold님께 항상 **존댓말(경어)** 사용. 호칭은 "Harold님".
+
+### 4-2. 하드코딩 절대 금지
+- 경로, 값, 설정 등 모든 곳에서 환경변수나 설정파일을 통해 관리한다.
+- 필드 매핑은 `standard-field-map.ts` 한 곳에서만 정의. 나머지는 import.
+- SCHEMA.md에 없는 컬럼명/타입을 코드에서 임의 생성 절대 금지.
+
+### 4-3. 기간계 무접촉
+- 발송 INSERT, 포인트 차감/환불, 인증 등 핵심 시스템은 최우선 안정성 보장.
+- 기간계 수정이 필요하면 반드시 Harold님과 사전 협의.
+
+### 4-4. 땜질 코딩 금지
+- 상용화 서비스를 곧 진행할 중요한 프로젝트. 체계적이고 검증된 코드만 반영.
+- 에러 발생 시 임의로 코드를 덧붙이지 않는다. 근본 원인부터 파악.
+
+### 4-5. worktree 절대 사용 금지
+- 과거 worktree 사용으로 수정이 메인코드에 미반영되는 사고 발생.
+- **반드시 `packages/` 메인코드에 직접 수정**한다.
+- `.claude/worktrees/` 폴더는 사용하지 않는다.
+
+### 4-6. 타입 에러 없는 코드만 배포
+- TypeScript 타입 에러 있는 코드 배포 = 서버 크래시 = 서비스 장애 (실제 장애 교훈).
+
+### 4-7. 버그 수정은 하나씩 세심하게
+- **에이전트 병렬 사용 금지** — 여러 버그를 동시에 병렬로 분석/수정하지 않는다.
+- **하나씩 천천히 뜯어보고 제대로 체크** — 한 건씩 코드를 직접 읽고, 근본 원인을 정확히 파악한 후 수정한다.
+- 병렬로 대충 보다가 빠뜨리는 게 반복되어 온 패턴. 느려도 정확하게.
+
+---
+
+## 5. 핵심 아키텍처 (이것만 알면 코드 수정 가능)
+
+### 5-1. SMS 발송 5개 경로 (campaigns.ts)
+
+campaigns.ts에 5개 발송 경로가 **한 파일에** 존재한다:
+
+1. `POST /` — AI 캠페인 생성
+2. `POST /:id/send` — AI 캠페인 발송
+3. `POST /direct-send` — 직접발송 (즉시)
+4. `POST /test-send` — 테스트발송
+5. `POST /:id/schedule` — 예약발송
+
+**⚠️ 과거 재발 패턴:** "5개 경로 중 1개만 패치하고 나머지 4개를 점검하지 않음" → 동일 버그 재발.
+**해결:** messageUtils.ts의 `replaceVariables()` 공통 치환 함수로 5경로 통합 (D32~D33).
+**원칙:** 발송 관련 수정 시 반드시 5개 경로 전부 확인.
+
+### 5-2. 동적 필드 매핑 체계 ("기준은 하나, 입구는 여럿")
+
+```
+standard-field-map.ts (FIELD_MAP) ← 유일한 기준
+    ↓ import
+├── upload.ts     — 엑셀 업로드 (입구)
+├── sync.ts       — SyncAgent 동기화 (입구)
+├── normalize.ts  — 값 변환 (정규화)
+├── customers.ts  — 고객 조회/관리 (출구)
+├── campaigns.ts  — 발송 시 고객 조회 (출구)
+├── ai.ts         — AI 메시지 생성 (출구)
+└── Dashboard.tsx — UI 표시 (출구)
+```
+
+- **필수 직접 컬럼 17개:** name, phone, gender, age, birth_date, email, address, recent_purchase_store, store_code, registration_type, registered_store, store_phone, recent_purchase_amount, total_purchase_amount, grade, points, sms_opt_in
+- **커스텀 슬롯 15개:** custom_1 ~ custom_15 (custom_fields JSONB)
+- **customer_field_definitions 테이블:** 고객사별 커스텀 필드 라벨 정의
+- **customer_schema (companies 테이블 JSONB):** 업로드 시 매핑/라벨 메타데이터
+
+### 5-3. 발송 결과값 매핑 (sms-result-map.ts)
+
+QTmsg status_code, 통신사 코드, 스팸필터 판정 결과를 한 곳에서 정의:
+- STATUS_CODE_MAP — 성공(6/1000/1800), 대기(100/104), 실패(7/8/16/55/2008 등)
+- CARRIER_MAP — 통신사명
+- SPAM_RESULT — 스팸필터 판정 상수
+- 헬퍼: isSuccess(), isFail(), isPending(), getStatusLabel() 등
+
+### 5-4. 변수 치환 시스템 (messageUtils.ts)
+
+`replaceVariables(message, customer, companyInfo)` — 메시지 내 `%고객명%`, `%매장명%` 등의 변수를 실제 고객 데이터로 치환.
+- 5개 발송 경로 전부 이 함수 사용.
+- 새 변수 추가 시 이 함수만 수정하면 전 경로 자동 반영.
+
+### 5-5. 멀티테넌트 격리
+
+- **company_id:** 회사 단위 데이터 격리 (모든 테이블)
+- **store_code:** 매장 단위 추가 격리 (다매장 고객사)
+- **user_id:** 사용자 단위 (브랜드별 수신거부 등)
+- 쿼리 작성 시 반드시 company_id 조건 포함.
+
+### 5-6. 수신거부 필터링 패턴
+
+```sql
+AND NOT EXISTS (
+  SELECT 1 FROM unsubscribes u
+  WHERE u.company_id = c.company_id AND u.phone = c.phone
+)
+```
+- 발송 시 반드시 수신거부 필터 적용.
+- 5개 경로 전부 동일 패턴 적용되어 있는지 확인.
+
+### 5-7. AI 메시지 생성 흐름
+
+```
+프론트엔드 → POST /api/ai/generate-messages
+    → routes/ai.ts (req.body에서 filters 추출, targetInfo 구성)
+    → services/ai.ts (generateMessages — Anthropic Claude 우선, OpenAI 폴백)
+    → 프롬프트에 타겟 필터조건(등급/성별/연령/지역) + 샘플 고객 포함
+```
+
+### 5-8. SMS 발송 흐름
+
+```
+PostgreSQL campaigns/campaign_runs 생성
+    → MySQL msg_queue_YYYYMM 테이블에 INSERT (QTmsg Agent가 실제 발송)
+    → 결과: MySQL msg_result_YYYYMM에 기록
+    → sync-results: MySQL 결과 → PostgreSQL campaign_runs 업데이트
+```
+
+---
+
+## 6. 과거 교훈 (이것 때문에 사고 났다)
+
+| 교훈 | 내용 | 대책 |
+|------|------|------|
+| **worktree 미반영** | worktree에만 수정하고 메인코드에 미반영 → 배포해도 변경 없음 | worktree 금지, packages/ 직접 수정 |
+| **5경로 중 1개만 패치** | 발송 버그 수정 시 1개 경로만 고치고 나머지 4개 방치 → 재발 | messageUtils.ts 통합 + 5경로 전수점검 |
+| **타입 에러 배포** | TS 에러 무시하고 배포 → 서버 크래시 | 빌드 통과 필수 |
+| **OneDrive 동기화** | .git이 클라우드 동기화되어 lock/충돌 | 프로젝트를 OneDrive 밖으로 이전 완료 |
+| **엉뚱한 파일 수정** | B13-03/04를 AiCampaignResultPopup.tsx에서 수정 — 실제 화면은 AiPreviewModal.tsx | 수정 전 실제 화면 확인 필수 |
+
+---
+
+## 7. 작업 시작 체크리스트
+
+새 세션에서 코드 작업을 시작할 때:
+
+1. ✅ 이 문서(CLAUDE.md) 읽기
+2. ✅ `status/STATUS.md`의 CURRENT_TASK 확인
+3. ✅ 관련 버그가 있으면 `status/BUGS.md`에서 해당 버그 상세 확인
+4. ✅ DB 관련이면 `status/SCHEMA.md` 확인
+5. ✅ 수정 대상 파일의 현재 코드를 **반드시 먼저 읽기**
+6. ✅ Harold님께 수정 방향 보고 → 컨펌 → 구현
+7. ✅ 수정 후 관련 경로(5개 발송 경로 등) 교차 확인
+8. ✅ `packages/` 메인코드에 직접 수정 (worktree 금지)

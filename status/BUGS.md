@@ -3,7 +3,7 @@
 > **목적:** 버그의 발견→분석→수정→교차검증→완료를 체계적으로 관리하여 재발을 방지한다.  
 > **원칙:** (1) 추측성 땜질 금지 (2) 근본 원인 3줄 이내 특정 (3) 교차검증 통과 전까지 Closed 금지 (4) 재발 패턴 기록  
 > **SoT(진실의 원천):** STATUS.md + 이 문서. 채팅에서 떠도는 "수정 완료"는 교차검증 전까지 "임시"다.
-> **현황:** **2026-03-09 D62 전수점검 완료 → 빌드+배포 후 실동작 검증 대기.** 8차 8건 ✅Closed + 5건 🟡검증대기 | 9차 ✅Closed | GPT P0 ✅ | 10차 2건 ✅Closed + 5건 🟡검증대기 | 11차 3건 ✅Closed + 2건 🟡검증대기 | 12차 2건 🟡검증대기 | 13차 9건 🟡검증대기 + B8-13 🟡검증대기 | **14차(전수점검) 4건 발견+수정 🟡검증대기**
+> **현황:** **2026-03-10 D62 15차(재수정) — 10건 메인코드 반영 + 빌드+배포 완료(22:17) → 서버 grep 검증 통과 → 실동작 검증 대기.** 8차 8건 ✅Closed + 5건 🟡검증대기 | 9차 ✅Closed | GPT P0 ✅ | 10차 2건 ✅Closed + 5건 🟡검증대기 | 11차 3건 ✅Closed + 2건 🟡검증대기 | 12차 2건 🟡검증대기 | 13차 9건 🟡검증대기 + B8-13 🟡검증대기 | 14차(전수점검) 4건 🟡검증대기 | **15차(재수정) 10건 메인코드 반영 🟡검증대기**
 > **⚠️ 2026-02-26 코드 실물 검증:** GPT "미수정" 지적 5건 중 GP-01/03/05는 이미 코드에 반영됨 확인. GP-04는 풀 레벨로 보강. 문서의 "❌ 미수정" 표기가 실제 코드보다 뒤떨어져 있었음.
 
 ---
@@ -156,7 +156,7 @@
 | 항목 | 내용 |
 |------|------|
 | **심각도** | 🔴 Critical |
-| **상태** | 🟡 수정완료-검증대기 (D62 13차 — AI 발송 경로 콜백번호 길이 검증(8-11자리) 추가. 실동작 검증 필요) |
+| **상태** | 🟡 수정완료-검증대기 (D62 15차 재수정 2026-03-10 — campaigns.ts POST / 에 callback/useIndividualCallback destructuring + INSERT $23/$24 추가. **메인코드 직접 반영 완료**. 실동작 검증 필요) |
 | **도메인** | hanjul.ai — AI발송/직접발송 |
 | **기대 결과** | 미등록 개별회신번호로 발송 시도 시 에러 차단 |
 | **실제 결과** | 미등록 회신번호인데 발송이 그대로 진행됨 |
@@ -262,7 +262,7 @@
 | 항목 | 내용 |
 |------|------|
 | **심각도** | 🟠 Major |
-| **상태** | 🟡 수정완료-검증대기 (D62 13차 — direct-send 응답에 unsubscribeCount 추가. 실동작 검증 필요) |
+| **상태** | 🟡 수정완료-검증대기 (D62 15차 재수정 2026-03-10 — campaigns.ts target_count에 수신거부 NOT EXISTS 추가 + send시 u.user_id→u.company_id 전환(4곳). **메인코드 직접 반영 완료**. 실동작 검증 필요) |
 | **도메인** | hanjul.ai — 발송 확정 모달 + 성공 모달 |
 | **기대 결과** | 확정 알림에 정확한 대상 인원수 + 실제 채널타입(SMS/LMS/카카오) 표시 |
 | **실제 결과** | 대상 0명 + 채널타입이 무조건 SMS로 고정 |
@@ -290,7 +290,7 @@
 | 항목 | 내용 |
 |------|------|
 | **심각도** | 🟠 Major |
-| **상태** | 🟡 수정완료-검증대기 (D62 13차 — AI 한줄로 byte_count/byte_warning 추가 + 초과 시 빨간 경고 UI. 실동작 검증 필요) |
+| **상태** | 🟡 수정완료-검증대기 (D62 15차 재수정 2026-03-10 — AiCampaignResultPopup.tsx "수정 완료" 버튼에 SMS 바이트 초과 confirm+LMS 전환 추가. **메인코드 직접 반영 완료**. 실동작 검증 필요) |
 | **도메인** | hanjul.ai — AI 문안 미리보기/편집 |
 | **기대 결과** | SMS 90바이트 초과 시 경고/차단 + AI 추천 문안도 90바이트 이내 |
 | **실제 결과** | AI 미리보기에서 편집 시 바이트 제한 없이 초과 가능. AI가 초과 문안 추천하기도 함 |
@@ -317,7 +317,7 @@
 | 항목 | 내용 |
 |------|------|
 | **심각도** | 🟡 Minor |
-| **상태** | 🟡 수정완료-검증대기 (D62 13차 — XLSX.readFile cellDates:true + normalize.ts Date 객체 처리 추가. 실동작 검증 필요) |
+| **상태** | 🟡 수정완료-검증대기 (D62 15차 재수정 2026-03-10 — upload.ts 3곳 XLSX.readFile cellDates:true + sheet_to_json raw:false,dateNF + normalizeDateValue Date객체/소수시리얼 대응. **메인코드 직접 반영 완료**. 실동작 검증 필요) |
 | **도메인** | hanjul.ai — 고객 DB 업로드 |
 | **기대 결과** | Excel 날짜(1995-03-03)가 정상 날짜 형식으로 파싱 |
 | **실제 결과** | 시리얼넘버(34786 등)로 인식되어 DB에 잘못 저장 |
@@ -904,7 +904,7 @@
 | 항목 | 내용 |
 |------|------|
 | **심각도** | 🔴 Critical |
-| **상태** | 🟡 수정완료-검증대기 (D62 13차 — unsubscribes.ts store_code 격리 + customers.ts 확인 완료. 실동작 검증 필요) |
+| **상태** | 🟡 수정완료-검증대기 (D62 15차 재수정 2026-03-10 — unsubscribes.ts GET /에 company_user store_codes JOIN 필터 추가. **메인코드 직접 반영 완료**. 실동작 검증 필요) |
 | **발견자** | sh_cpb, sh_crm |
 | **증상** | 같은 회사 내 다른 브랜드(store_code) 사용자가 타 브랜드 고객을 열람 |
 | **근본원인** | GET `/`, POST `/filter`, GET `/filter-options`, GET `/enabled-fields` 4개 엔드포인트에서 company_user 필터링이 `uploaded_by`(업로더) 기준이어서 store_code 격리 안 됨. stats/filter-count/extract는 이미 store_codes 패턴 적용 상태 |
@@ -917,7 +917,7 @@
 | 항목 | 내용 |
 |------|------|
 | **심각도** | 🟡 Minor |
-| **상태** | 🟡 수정완료-검증대기 (D62 13차 — CustomerDBModal.tsx fieldColumns 빈 배열 방어 로직 추가. 실동작 검증 필요) |
+| **상태** | 🟡 수정완료-검증대기 (D62 15차 재수정 2026-03-10 — customers.ts enabled-fields에서 customer_schema 라벨 역추적+자동보정 INSERT 추가, upload.ts에 customer_schema labels 병합 저장. **메인코드 직접 반영 완료**. 실동작 검증 필요) |
 | **발견자** | isoi |
 | **증상** | 고객DB 모달 상세보기에서 커스텀 필드가 "custom_1" 등 raw key로 표시 |
 | **근본원인** | CustomerDBModal.tsx의 custom_fields 렌더링에서 `key` 그대로 출력, `fieldColumns`(enabled-fields API) 라벨 미조회 |
@@ -930,7 +930,7 @@
 | 항목 | 내용 |
 |------|------|
 | **심각도** | 🟠 Major |
-| **상태** | 🟡 수정완료-검증대기 (D62 13차 — upload.ts 매장필드 보존 + ai.ts 등록매장정보/최근구매매장 분리 맵핑. 실동작 검증 필요) |
+| **상태** | 🟡 수정완료-검증대기 (D62 15차 재수정 2026-03-10 — customers.ts GET / SELECT에 registered_store, recent_purchase_store, store_phone 등 누락 컬럼 추가. 메인코드 직접 반영 완료. 실동작 검증 필요) |
 | **발견자** | sh_crm |
 | **증상** | 엑셀 업로드 시 AI가 "등록매장"과 "최근구매매장"을 구분하지 못함 |
 | **근본원인** | upload.ts의 AI 매핑 프롬프트에 매장 관련 4개 필드(registered_store, recent_purchase_store, store_code, store_phone) 구분 규칙 없음 |
@@ -943,7 +943,7 @@
 | 항목 | 내용 |
 |------|------|
 | **심각도** | 🟠 Major |
-| **상태** | 🟡 수정완료-검증대기 (D62 13차 — normalize.ts Date 객체 처리 + upload.ts cellDates:true. 실동작 검증 필요) |
+| **상태** | 🟡 수정완료-검증대기 (D62 15차 재수정 2026-03-10 — normalize.ts Integer 제약 제거 + Math.floor 적용, upload.ts cellDates:true. 메인코드 직접 반영 완료. 실동작 검증 필요) |
 | **발견자** | sh_cpb |
 | **증상** | 엑셀에서 날짜 셀이 숫자(34759 등)로 넘어오면 normalizeDate()에서 null 반환 |
 | **근본원인** | upload.ts의 `excelSerialToDateStr()`은 존재하지만 normalize.ts의 `normalizeDate()`에는 시리얼 변환 로직 없음. normalizeDate()가 String(value).trim()으로 먼저 변환해서 숫자 타입 정보 소실 |
@@ -969,7 +969,7 @@
 | 항목 | 내용 |
 |------|------|
 | **심각도** | 🟠 Major |
-| **상태** | 🟡 수정완료-검증대기 (D62 13차 — ai.ts 등급 키워드 확장 + fieldMappings sample_values 동적 연동. 실동작 검증 필요) |
+| **상태** | 🟡 수정완료-검증대기 (D62 15차 재수정 2026-03-10 — ai.ts generateMessages 프롬프트에 타겟 필터조건(등급/성별/연령/지역) 주입 + ai route에서 targetFilters/targetDescription 전달. 메인코드 직접 반영 완료. 실동작 검증 필요) |
 | **발견자** | sh_crm |
 | **증상** | AI가 항상 VIP/GOLD/SILVER/BRONZE만 추천, 고객사 실제 등급(PRESTIGE, DIAMOND 등) 무시 |
 | **근본원인** | ai.ts L762: `schema.grades?.join(', ') \|\| 'VIP, GOLD, SILVER, BRONZE'` 하드코딩 fallback. schema에 값이 없으면 무조건 4개 등급만 AI에 전달. L333 키워드맵에도 VIP/GOLD/SILVER 하드코딩 |
@@ -1317,7 +1317,7 @@
 | 항목 | 내용 |
 |------|------|
 | **심각도** | 🔴 Critical — 70~400만건 발송 시 결과 화면 로딩 불가 |
-| **상태** | 🟡 수정완료-검증대기 (D62 13차 추가 — 3단계 최적화 적용. 실동작 검증 필요) |
+| **상태** | 🟡 수정완료-검증대기 (D62 15차 재수정 2026-03-10 — sync-results fire-and-forget 전환(Dashboard.tsx await 제거) + campaigns.ts sync 범위 company_id + 7일 제한. 메인코드 직접 반영 완료. 실동작 검증 필요) |
 | **발견자** | 실동작검증-체크리스트_0309.xlsx 교차검증 |
 | **도메인** | hanjul.ai — 발송결과 |
 | **증상** | 대량 발송 캠페인 결과 조회 시 화면 로딩 지연/불가. sync-results 블로킹 + MySQL UNION ALL GROUP BY 반복 실행 |

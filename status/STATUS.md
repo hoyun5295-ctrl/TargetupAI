@@ -106,7 +106,7 @@
 
 ---
 
-### 🔧 D62 — 13차 실동작 검증 버그 수정 (2026-03-09~) — 전수점검 완료, 빌드+배포 후 2단계 실동작 검증 대기
+### 🔧 D62 — 13차~15차 실동작 검증 버그 수정 (2026-03-09~03-10) — ✅ 15차 빌드+배포 완료 (2026-03-10 22:17), 실동작 검증 대기
 
 > **배경:** 직원 전수 실동작 검증(30개 항목) + 한줄로 PPT 버그리포트(7슬라이드) 결과, 기존 버그 재발(Reopened) + 신규 버그(13차) 총 21건 확인.
 > **범위:** 백엔드 8파일 + 프론트엔드 6파일. 기간계(발송 INSERT/차감/환불) 무접촉.
@@ -134,10 +134,122 @@
   - B14-03: 예약취소 시 campaign_runs 상태+fail_count 미변경 (campaigns.ts L2531-2552)
 - **B12-02/B13-09 보완:** AI캠페인 타임아웃 60→30분 통일 (campaigns.ts L1791)
 
+#### 🔧 15차 재수정 (2026-03-10) — 실동작검증 체크리스트 X 10건 메인코드 직접 반영
+- **문제:** 기존 수정이 worktree에만 반영되고 메인코드에 미적용된 건들 발견
+- **조치:** 10건 전부 메인코드(`packages/`)에 직접 반영 완료
+  - B8-04: campaigns.ts — callback/useIndividualCallback INSERT 추가
+  - B8-08: campaigns.ts — target_count 수신거부 NOT EXISTS + send u.user_id→u.company_id 4곳
+  - B8-09: ai.ts — SMS 바이트 경고 (이미 메인코드 반영됨 확인)
+  - B8-10: upload.ts/normalize.ts — 셀타입 처리 (이미 메인코드 반영됨 확인)
+  - B8-13: campaigns.ts — sync-results company_id + 7일 제한, Dashboard.tsx fire-and-forget
+  - B10-01: customers.ts/unsubscribes.ts — store_code 격리 (이미 메인코드 반영됨 확인)
+  - B10-02: customers.ts — enabled-fields customer_schema 라벨 복구 + 자동보정 INSERT, upload.ts labels merge
+  - B10-03: customers.ts — GET / SELECT에 registered_store, recent_purchase_store 등 누락 컬럼 추가
+  - B10-04: normalize.ts — Integer 제약 제거 + Math.floor (이미 메인코드 반영됨 확인)
+  - B10-06: ai.ts — generateMessages 프롬프트에 타겟 필터조건 주입 + ai route targetFilters 전달
+
+#### ✅ 배포 완료 (2026-03-10 22:17)
+- **tp-deploy-full 실행:** campaigns.ts (61줄 변경) + Dashboard.tsx (12줄 변경) 서버 반영 확인
+- **서버 grep 검증:** useIndividualCallback 12곳, u.company_id 4곳, INTERVAL '7 days' 2곳, sync-results fire-and-forget — 전부 정상
+- **PM2 재시작:** targetup-backend online 확인
+- **프론트엔드 빌드:** vite 정상 빌드 (1837 modules, 15.4s)
+
 #### ⚠️ 다음 단계 TODO
-- **백엔드 빌드+배포** — campaigns.ts(3곳), ai.ts(1곳) 수정 반영 필요
-- **2단계 실동작 검증** — 26건 전체 (기존 22건 + 전수점검 신규 4건)
+- **실동작 검증** — 30개 항목 전체 재검증 (특히 X 10건 집중 확인)
 - 점검 시 **실제 화면에서 동작 확인** (코드 수정 파일이 아닌 사용자가 보는 화면 기준)
+
+---
+
+### 🔧 D63 — 16차 버그리포트 수정 + 메시징 컨트롤타워 리팩토링 (2026-03-10~) — 🟡 진행 중
+
+> **배경:** 직원 PPT 버그리포트(한줄로_20260310.pptx, 7슬라이드) + Harold님 추가 리포팅. 15차 배포(22:17) 이전 오후 5시에 수신된 리포트이므로, 15차에서 수정한 건은 재검증 필요 (실패 단정 불가).
+> **핵심 원칙:** 땜질식 수정 절대 금지. 컨트롤타워 기반으로 근본 원인 해결. 하나씩 원인 파악 → 수정안 브리핑 → Harold님 컨펌 → 작업.
+> **에이전트 병렬 금지** — 하나씩 천천히 직접 읽고 정확하게.
+
+#### ✅ 완료된 작업
+
+**B16-01: 고객 DB 통합 문제 (브랜드 격리 체계)** — ✅ 수정 완료, 배포 대기
+- **근본 원인:** store_code 기반 브랜드 격리가 산재되어 있고, 브랜드 없는 단일 본사 고객사 케이스 미고려
+- **수정:** `utils/store-scope.ts` 컨트롤타워 신규 생성
+  - 3단계 판단: no_filter(브랜드 없음) / filtered(할당됨) / blocked(미할당)
+  - customers.ts 7곳, campaigns.ts 3곳, ai.ts 3곳 총 13곳 일관 적용
+  - buildDynamicFilter store_code 서브쿼리에 company_id 조건 추가
+- **파일:** NEW utils/store-scope.ts, MOD customers.ts, campaigns.ts, ai.ts
+
+**B16-02: 예약취소 불가 + 취소해도 실제 발송됨** — ✅ 수정 완료, 배포 대기
+- **근본 원인:** manage-scheduled.ts의 cancel이 PostgreSQL만 업데이트하고 **MySQL 큐를 전혀 건드리지 않음** → QTmsg Agent가 예약시간에 그대로 발송
+- **수정:** 메시징 컨트롤타워 3개 모듈 생성 + 대규모 리팩토링
+  - `utils/sms-queue.ts` — MySQL 큐 조작의 유일한 진입점 (campaigns.ts에서 20+ 함수 이동)
+  - `utils/prepaid.ts` — 선불 차감/환불의 유일한 진입점
+  - `utils/campaign-lifecycle.ts` — 캠페인 취소 + 결과 동기화 통합
+  - campaigns.ts 3030줄 → 2340줄 (발송 인프라 유틸 분리)
+  - manage-scheduled.ts → cancelCampaign() 컨트롤타워 호출로 교체 (MySQL 삭제 + 환불 + PG 상태 변경 전부 처리)
+  - spam-filter.ts, results.ts, admin.ts → import 경로 utils/로 변경
+- **파일:** NEW utils/sms-queue.ts, utils/prepaid.ts, utils/campaign-lifecycle.ts, MOD campaigns.ts, manage-scheduled.ts, spam-filter.ts, results.ts, admin.ts
+- **기간계 영향:** 로직 변경 없음. 함수 위치만 이동 (동일 코드). manage-scheduled의 cancel만 MySQL 처리 추가 (버그 수정).
+- **TypeScript:** 0 에러 확인
+
+**추가 리포팅: 발송 완료인데 성공/실패 0/0** — ✅ 동일 수정으로 해결
+- **원인:** sync-results 로직이 campaigns.ts 로컬 함수로 갇혀 있어 다른 곳에서 접근 불가
+- **수정:** campaign-lifecycle.ts의 `syncCampaignResults()` 함수로 추출, campaigns.ts sync-results 라우트에서 호출
+
+#### 🔧 다음 세션에서 작업할 버그 (Harold님 컨펌 완료, 하나씩 진행)
+
+**B16-03: AI 맞춤한줄에 스팸필터/담당자테스트 추가** — ⏳ 대기
+- **문제:** AI 맞춤한줄 발송 모드에만 스팸필터/담당자테스트 기능이 없음
+- **방향:** 다른 발송 모드에 있는 스팸필터/테스트 기능을 AI 맞춤한줄에도 통일 적용
+- **확인:** 프론트엔드(AiCustomSendFlow.tsx 등) + 백엔드(campaigns.ts test-send) 코드 확인 필요
+
+**B16-04: 이모지 ??표시 2건 확인 후 제거** — ⏳ 대기
+- **문제:** 스크린샷 기준, 특수문자 중 2개만 ??로 표시됨 (나머지는 정상)
+- **방향:** 해당 2개 문자가 뭔지 정확히 식별 → 이모지 목록에서 제거
+- **확인:** Dashboard.tsx 또는 TargetSendModal.tsx의 이모지 팝업 코드 확인
+
+**B16-05: SMS 전환 후 MMS 이미지 화면에 잔존** — ⏳ 대기 (Harold님: 심각한 버그)
+- **문제:** MMS로 이미지 첨부 후 SMS로 전환했는데, 화면에 이미지가 그대로 남아있음
+- **방향:** 프론트엔드에서 메시지 타입 전환 시 이미지 state 초기화 누락 가능성
+- **확인:** TargetSendModal.tsx 또는 관련 모달의 타입 전환 핸들러
+
+**B16-06: 타겟 추출 오류 (9일까지 정상 → 이후 깨짐)** — ⏳ 대기 (regression 가능성)
+- **문제:** 9일까지 정상 작동하던 타겟 추출이 이후 깨짐
+- **방향:** 9일 이후 변경된 코드 확인 (15차 수정에서 customers.ts 수정이 영향?) → store-scope 적용 후 추가 확인 필요
+- **확인:** customers.ts /filter, /extract 라우트 + 15차 변경 diff
+
+**B16-07: 직접타겟 필터에 매장번호(회신번호) 선택란 추가** — ⏳ 대기 (기능 추가)
+- **문제:** 직접타겟 필터에 매장번호(회신번호) 선택할 수 있는 드롭다운이 없음
+- **방향:** DirectTargetFilterModal.tsx에 회신번호 선택 UI 추가 + 백엔드 필터 지원
+- **확인:** 회신번호 목록 조회 API 존재 여부, 발송 시 callback 필드 매핑
+
+**개인화 미리보기 통일** — ⏳ 대기
+- **문제:** 문안 추천 카드에서 치환된 데이터(고객명 등)가 보이는데, 올바르게는:
+  - 추천 카드: `%고객명%` 변수 원본이 보여야 함
+  - 미리보기: 치환된 실제 데이터가 보여야 함
+- **범위:** 직접발송, 직접타겟발송, AI한줄로, AI맞춤한줄 4경로 전부 통일
+- **확인:** AiPreviewModal.tsx, AiCampaignResultPopup.tsx, Dashboard.tsx의 변수 치환 타이밍
+
+#### 추가 사항 (Harold님 언급)
+- **080번호 사용자별 관리** — 현재 회사 단위 → 사용자별 080 번호 관리 필요
+- **수신거부 삭제 기능** — 수신거부 목록에서 개별 삭제 기능
+- **DB삭제 사용자별** — 고객 DB 삭제를 사용자별로 권한 관리
+
+#### 수정 파일 목록
+
+**신규 생성 (유틸 컨트롤타워):**
+- `utils/store-scope.ts` — 브랜드 격리 컨트롤타워 (B16-01)
+- `utils/sms-queue.ts` — MySQL 큐 조작 컨트롤타워 (B16-02)
+- `utils/prepaid.ts` — 선불 차감/환불 컨트롤타워 (B16-02)
+- `utils/campaign-lifecycle.ts` — 캠페인 취소/결과동기화 컨트롤타워 (B16-02)
+
+**수정:**
+- `routes/campaigns.ts` — B16-01(store-scope), B16-02(함수→import 교체, cancel/sync-results 컨트롤타워화)
+- `routes/customers.ts` — B16-01(store-scope 7곳)
+- `routes/ai.ts` — B16-01(store-scope 3곳)
+- `routes/manage-scheduled.ts` — B16-02(cancelCampaign 컨트롤타워 적용)
+- `routes/spam-filter.ts` — B16-02(import 경로 변경)
+- `routes/results.ts` — B16-02(import 경로 변경)
+- `routes/admin.ts` — B16-02(import 경로 변경)
+
+---
 
 #### 수정 대상 버그 목록 (21건)
 

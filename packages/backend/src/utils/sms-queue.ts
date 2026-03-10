@@ -1,0 +1,356 @@
+// utils/sms-queue.ts
+// ★ 메시징 컨트롤타워 — MySQL 큐 조작의 유일한 진입점
+// campaigns.ts, manage-scheduled.ts 등 모든 라우트는 이 모듈을 통해 MySQL 큐에 접근한다.
+// 하드코딩 금지. 환경변수/설정파일 기반.
+
+import { mysqlQuery } from '../config/database';
+import { CACHE_TTL } from '../config/defaults';
+import { isValidSmsTable } from './sms-table-validator';
+import { query } from '../config/database';
+
+// ===== 환경변수 기반 테이블 설정 =====
+export const ALL_SMS_TABLES = (process.env.SMS_TABLES || 'SMSQ_SEND').split(',').map(t => t.trim());
+for (const t of ALL_SMS_TABLES) {
+  if (!isValidSmsTable(t)) {
+    console.error(`[QTmsg] ⚠️ 잘못된 SMS 테이블명 감지: "${t}" — SQL Injection 위험. SMS_TABLES 환경변수를 확인하세요.`);
+  }
+}
+const BULK_ONLY_TABLES = ALL_SMS_TABLES.filter(t => !['SMSQ_SEND_10', 'SMSQ_SEND_11'].includes(t));
+let rrIndex = 0;
+console.log(`[QTmsg] ALL_SMS_TABLES: ${ALL_SMS_TABLES.join(', ')} (${ALL_SMS_TABLES.length}개 Agent)`);
+console.log(`[QTmsg] BULK_ONLY_TABLES: ${BULK_ONLY_TABLES.join(', ')} (테스트/인증 제외 ${BULK_ONLY_TABLES.length}개)`);
+
+// ===== 라인그룹 캐시 =====
+const lineGroupCache = new Map<string, { tables: string[], hasDedicatedGroup: boolean, expires: number }>();
+const LINE_GROUP_CACHE_TTL = CACHE_TTL.lineGroup * 1000;
+
+// ===== 한국시간 변환 헬퍼 =====
+export const toKoreaTimeStr = (date: Date) => {
+  return date.toLocaleString('sv-SE', { timeZone: 'Asia/Seoul' }).replace('T', ' ');
+};
+
+// ===== 라인그룹 테이블 조회 =====
+
+/** 회사/사용자별 발송 테이블 조회 (캐시) — userId가 있으면 사용자 개별 라인그룹 우선 */
+export async function getCompanySmsTables(companyId: string, userId?: string): Promise<string[]> {
+  // 1) 사용자 개별 라인그룹 확인 (userId가 전달된 경우)
+  if (userId) {
+    const userCacheKey = `user:${userId}`;
+    const userCached = lineGroupCache.get(userCacheKey);
+    if (userCached && userCached.expires > Date.now()) return userCached.tables;
+
+    const userResult = await query(`
+      SELECT lg.sms_tables
+      FROM sms_line_groups lg
+      JOIN users u ON u.line_group_id = lg.id
+      WHERE u.id = $1 AND lg.is_active = true AND lg.group_type = 'bulk'
+    `, [userId]);
+
+    if (userResult.rows.length > 0 && userResult.rows[0].sms_tables?.length > 0) {
+      let userTables = userResult.rows[0].sms_tables;
+      const validUserTables = userTables.filter((t: string) => {
+        if (!isValidSmsTable(t)) {
+          console.error(`[QTmsg] ⚠️ user ${userId} 라인그룹에 잘못된 테이블명: "${t}" — 스킵 처리`);
+          return false;
+        }
+        return true;
+      });
+      if (validUserTables.length > 0) {
+        lineGroupCache.set(userCacheKey, { tables: validUserTables, hasDedicatedGroup: true, expires: Date.now() + LINE_GROUP_CACHE_TTL });
+        return validUserTables;
+      }
+    }
+    // 사용자 개별 라인그룹 없으면 → 회사 라인그룹 fallback (아래 진행)
+  }
+
+  // 2) 회사 라인그룹 (기존 로직)
+  const cacheKey = `company:${companyId}`;
+  const cached = lineGroupCache.get(cacheKey);
+  if (cached && cached.expires > Date.now()) return cached.tables;
+
+  const result = await query(`
+    SELECT lg.sms_tables
+    FROM sms_line_groups lg
+    JOIN companies c ON c.line_group_id = lg.id
+    WHERE c.id = $1 AND lg.is_active = true AND lg.group_type = 'bulk'
+  `, [companyId]);
+
+  const hasDedicatedGroup = result.rows.length > 0 && result.rows[0].sms_tables?.length > 0;
+  let tables = hasDedicatedGroup
+    ? result.rows[0].sms_tables
+    : BULK_ONLY_TABLES;
+
+  if (hasDedicatedGroup) {
+    const validTables = tables.filter((t: string) => {
+      if (!isValidSmsTable(t)) {
+        console.error(`[QTmsg] ⚠️ company ${companyId} 라인그룹에 잘못된 테이블명: "${t}" — 스킵 처리`);
+        return false;
+      }
+      return true;
+    });
+    tables = validTables.length > 0 ? validTables : BULK_ONLY_TABLES;
+  }
+
+  lineGroupCache.set(cacheKey, { tables, hasDedicatedGroup, expires: Date.now() + LINE_GROUP_CACHE_TTL });
+  return tables;
+}
+
+/** 회사 전용 라인그룹 할당 여부 확인 (발송 차단용) */
+export async function hasCompanyLineGroup(companyId: string): Promise<boolean> {
+  const cacheKey = `company:${companyId}`;
+  const cached = lineGroupCache.get(cacheKey);
+  if (cached && cached.expires > Date.now()) return cached.hasDedicatedGroup;
+
+  await getCompanySmsTables(companyId);
+  const refreshed = lineGroupCache.get(cacheKey);
+  return refreshed?.hasDedicatedGroup ?? false;
+}
+
+/** 테스트 발송 테이블 조회 (캐시) */
+export async function getTestSmsTables(): Promise<string[]> {
+  const cached = lineGroupCache.get('test');
+  if (cached && cached.expires > Date.now()) return cached.tables;
+
+  const result = await query(`SELECT sms_tables FROM sms_line_groups WHERE group_type = 'test' AND is_active = true LIMIT 1`);
+  const tables = (result.rows.length > 0 && result.rows[0].sms_tables?.length > 0)
+    ? result.rows[0].sms_tables
+    : ['SMSQ_SEND_10'];
+
+  lineGroupCache.set('test', { tables, hasDedicatedGroup: true, expires: Date.now() + LINE_GROUP_CACHE_TTL });
+  return tables;
+}
+
+/** 인증번호 발송 테이블 조회 (캐시) */
+export async function getAuthSmsTable(): Promise<string> {
+  const cached = lineGroupCache.get('auth');
+  if (cached && cached.expires > Date.now()) return cached.tables[0];
+
+  const result = await query(`SELECT sms_tables FROM sms_line_groups WHERE group_type = 'auth' AND is_active = true LIMIT 1`);
+  const tables = (result.rows.length > 0 && result.rows[0].sms_tables?.length > 0)
+    ? result.rows[0].sms_tables
+    : ['SMSQ_SEND_11'];
+
+  lineGroupCache.set('auth', { tables, hasDedicatedGroup: true, expires: Date.now() + LINE_GROUP_CACHE_TTL });
+  return tables[0];
+}
+
+/** 캐시 무효화 (라인그룹 설정 변경 시 호출) */
+export function invalidateLineGroupCache(companyId?: string, userId?: string) {
+  if (userId) {
+    lineGroupCache.delete(`user:${userId}`);
+  }
+  if (companyId) {
+    lineGroupCache.delete(`company:${companyId}`);
+  }
+  if (!companyId && !userId) {
+    lineGroupCache.clear();
+  }
+}
+
+/** INSERT용: 라운드로빈으로 다음 테이블 반환 */
+export function getNextSmsTable(tables: string[]): string {
+  const table = tables[rrIndex % tables.length];
+  rrIndex++;
+  return table;
+}
+
+// ===== MySQL 큐 조작 (복수 테이블 대응) =====
+
+/** COUNT 합산 */
+export async function smsCountAll(tables: string[], whereClause: string, params: any[]): Promise<number> {
+  let total = 0;
+  for (const t of tables) {
+    const rows = await mysqlQuery(`SELECT COUNT(*) as cnt FROM ${t} WHERE ${whereClause}`, params) as any[];
+    total += Number(rows[0]?.cnt || 0);
+  }
+  return total;
+}
+
+/** 집계 합산 */
+export async function smsAggAll(tables: string[], selectFields: string, whereClause: string, params: any[]): Promise<any> {
+  const agg: any = {};
+  for (const t of tables) {
+    const rows = await mysqlQuery(`SELECT ${selectFields} FROM ${t} WHERE ${whereClause}`, params) as any[];
+    if (rows[0]) {
+      for (const k of Object.keys(rows[0])) {
+        agg[k] = (agg[k] || 0) + (Number(rows[0][k]) || 0);
+      }
+    }
+  }
+  return agg;
+}
+
+/** SELECT 합산 */
+export async function smsSelectAll(tables: string[], selectFields: string, whereClause: string, params: any[], suffix?: string): Promise<any[]> {
+  let all: any[] = [];
+  for (const t of tables) {
+    const rows = await mysqlQuery(`SELECT ${selectFields} FROM ${t} WHERE ${whereClause} ${suffix || ''}`, params) as any[];
+    all = all.concat(rows.map((r: any) => ({ ...r, _sms_table: t })));
+  }
+  return all;
+}
+
+/** MIN 합산 */
+export async function smsMinAll(tables: string[], field: string, whereClause: string, params: any[]): Promise<any> {
+  let minVal: any = null;
+  for (const t of tables) {
+    const rows = await mysqlQuery(`SELECT MIN(${field}) as min_val FROM ${t} WHERE ${whereClause}`, params) as any[];
+    const val = rows[0]?.min_val;
+    if (val && (!minVal || new Date(val) < new Date(minVal))) {
+      minVal = val;
+    }
+  }
+  return minVal;
+}
+
+/** DELETE/UPDATE: 해당 테이블 모두 실행 */
+export async function smsExecAll(tables: string[], sqlTemplate: string, params: any[]): Promise<void> {
+  for (const t of tables) {
+    await mysqlQuery(sqlTemplate.replace(/SMSQ_SEND/g, t), params);
+  }
+}
+
+// ===== 로그 테이블 포함 조회 (결과 집계용) =====
+// QTmsg Agent가 처리 완료(rsv1=5) 시 LIVE → LOG(SMSQ_SEND_X_YYYYMM) 이동
+// 결과 조회 시 LIVE + LOG 모두 조회해야 정확한 성공/실패 집계 가능
+let _logTableCache: Set<string> | null = null;
+let _logTableCacheTs = 0;
+
+async function getExistingLogTables(): Promise<Set<string>> {
+  const now = Date.now();
+  if (_logTableCache && (now - _logTableCacheTs) < 5 * 60 * 1000) {
+    return _logTableCache;
+  }
+  const rows = await mysqlQuery(
+    `SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME LIKE 'SMSQ_SEND_%'`
+  ) as any[];
+  const logPattern = /^SMSQ_SEND_\d+_\d{6}$/;
+  const tables = new Set(rows.map((r: any) => r.TABLE_NAME).filter((n: string) => logPattern.test(n)));
+  _logTableCache = tables;
+  _logTableCacheTs = now;
+  return tables;
+}
+
+/** 회사 발송 테이블 + 로그 테이블 (결과 조회용) */
+export async function getCompanySmsTablesWithLogs(companyId: string, userId?: string): Promise<string[]> {
+  const liveTables = await getCompanySmsTables(companyId, userId);
+  const existingLogs = await getExistingLogTables();
+
+  const now = new Date();
+  const ym = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const prevYm = `${prev.getFullYear()}${String(prev.getMonth() + 1).padStart(2, '0')}`;
+
+  const allTables = [...liveTables];
+  for (const live of liveTables) {
+    for (const suffix of [ym, prevYm]) {
+      const logTable = `${live}_${suffix}`;
+      if (existingLogs.has(logTable)) {
+        allTables.push(logTable);
+      }
+    }
+  }
+  return allTables;
+}
+
+// ===== 카카오 브랜드메시지 헬퍼 =====
+
+/** 카카오 브랜드메시지 큐 INSERT */
+export async function insertKakaoQueue(params: {
+  bubbleType: string;
+  senderKey: string;
+  phone: string;
+  targeting: string;
+  message: string;
+  isAd: boolean;
+  reservedDate?: string;
+  attachmentJson?: string;
+  carouselJson?: string;
+  header?: string;
+  resendType?: string;
+  resendFrom?: string;
+  resendMessage?: string;
+  resendTitle?: string;
+  unsubscribePhone?: string;
+  unsubscribeAuth?: string;
+  requestUid?: string;
+}): Promise<void> {
+  const {
+    bubbleType, senderKey, phone, targeting, message, isAd,
+    reservedDate, attachmentJson, carouselJson, header,
+    resendType = 'SM', resendFrom, resendMessage, resendTitle,
+    unsubscribePhone, unsubscribeAuth, requestUid
+  } = params;
+
+  const reservedDateStr = reservedDate || toKoreaTimeStr(new Date());
+  const messageReuse = resendMessage ? 'N' : 'Y';
+
+  await mysqlQuery(
+    `INSERT INTO IMC_BM_FREE_BIZ_MSG (
+      CHAT_BUBBLE_TYPE, STATUS, AD_FLAG, RESERVED_DATE,
+      SENDER_KEY, PHONE_NUMBER, TARGETING,
+      HEADER, MESSAGE, ATTACHMENT_JSON, CAROUSEL_JSON,
+      RESEND_MT_TYPE, RESEND_MT_FROM, RESEND_MT_TITLE,
+      RESEND_MT_MESSAGE_REUSE, RESEND_MT_MESSAGE,
+      UNSUBSCRIBE_PHONE_NUMBER, UNSUBSCRIBE_AUTH_NUMBER,
+      REQUEST_UID
+    ) VALUES (?, '1', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      bubbleType,
+      isAd ? 'Y' : 'N',
+      reservedDateStr,
+      senderKey,
+      phone,
+      targeting,
+      header || null,
+      message,
+      attachmentJson || null,
+      carouselJson || null,
+      resendType,
+      resendFrom || null,
+      resendTitle || null,
+      messageReuse,
+      resendMessage || null,
+      unsubscribePhone || null,
+      unsubscribeAuth || null,
+      requestUid || null
+    ]
+  );
+}
+
+/** 카카오 발송 결과 집계 */
+export async function kakaoAgg(whereClause: string, params: any[]): Promise<{ total: number; success: number; fail: number; pending: number }> {
+  const rows = await mysqlQuery(
+    `SELECT
+       COUNT(*) as total,
+       COUNT(CASE WHEN REPORT_CODE = '0000' THEN 1 END) as success,
+       COUNT(CASE WHEN REPORT_CODE IS NOT NULL AND REPORT_CODE != '0000' THEN 1 END) as fail,
+       COUNT(CASE WHEN REPORT_CODE IS NULL AND STATUS = '1' THEN 1 END) as pending
+     FROM IMC_BM_FREE_BIZ_MSG WHERE ${whereClause}`,
+    params
+  ) as any[];
+  return {
+    total: Number(rows[0]?.total || 0),
+    success: Number(rows[0]?.success || 0),
+    fail: Number(rows[0]?.fail || 0),
+    pending: Number(rows[0]?.pending || 0)
+  };
+}
+
+/** 카카오 예약 대기 건수 */
+export async function kakaoCountPending(requestUid: string): Promise<number> {
+  const rows = await mysqlQuery(
+    `SELECT COUNT(*) as cnt FROM IMC_BM_FREE_BIZ_MSG WHERE REQUEST_UID = ? AND STATUS = '1'`,
+    [requestUid]
+  ) as any[];
+  return Number(rows[0]?.cnt || 0);
+}
+
+/** 카카오 예약 취소 (대기 건 삭제) */
+export async function kakaoCancelPending(requestUid: string): Promise<number> {
+  const rows = await mysqlQuery(
+    `DELETE FROM IMC_BM_FREE_BIZ_MSG WHERE REQUEST_UID = ? AND STATUS = '1'`,
+    [requestUid]
+  ) as any[];
+  return (rows as any).affectedRows || 0;
+}

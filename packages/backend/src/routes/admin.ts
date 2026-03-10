@@ -3,7 +3,7 @@ import crypto from 'crypto';
 import { Request, Response, Router } from 'express';
 import { mysqlQuery, query } from '../config/database';
 import { authenticate, requireSuperAdmin } from '../middlewares/auth';
-import { ALL_SMS_TABLES, invalidateLineGroupCache } from './campaigns';
+import { ALL_SMS_TABLES, invalidateLineGroupCache } from '../utils/sms-queue';
 import { DASHBOARD_CARD_POOL, validateCardIds } from '../utils/dashboard-card-pool';
 import { SUCCESS_CODES_SQL, PENDING_CODES_SQL, getStatusLabel, getStatusType, getCarrierLabel, isSuccess, isPending } from '../utils/sms-result-map';
 import { DEFAULT_COSTS } from '../config/defaults';

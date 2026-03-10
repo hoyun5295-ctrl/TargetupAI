@@ -11,11 +11,20 @@ import { DEFAULT_COSTS, redis, CACHE_TTL, BATCH_SIZES, SEND_HOURS } from '../con
 import { isValidSmsTable } from '../utils/sms-table-validator';
 import { normalizePhone } from '../utils/normalize-phone';
 import { isValidCustomFieldKey } from '../utils/safe-field-name';
+import { getStoreScope } from '../utils/store-scope';
+// ★ 메시징 컨트롤타워 import
+import {
+  toKoreaTimeStr,
+  getCompanySmsTables, hasCompanyLineGroup, getTestSmsTables, getAuthSmsTable,
+  invalidateLineGroupCache, getNextSmsTable,
+  smsCountAll, smsAggAll, smsSelectAll, smsMinAll, smsExecAll,
+  getCompanySmsTablesWithLogs,
+  insertKakaoQueue, kakaoAgg, kakaoCountPending, kakaoCancelPending
+} from '../utils/sms-queue';
+import { prepaidDeduct, prepaidRefund } from '../utils/prepaid';
+import { cancelCampaign, syncCampaignResults } from '../utils/campaign-lifecycle';
 
-// 한국시간 문자열 변환 (MySQL datetime 형식)
-const toKoreaTimeStr = (date: Date) => {
-  return date.toLocaleString('sv-SE', { timeZone: 'Asia/Seoul' }).replace('T', ' ');
-};
+// ★ toKoreaTimeStr → utils/sms-queue.ts로 이동 (import 사용)
 
 /**
  * ★ C3: 분할발송 시간 계산 (오버플로우 방지)
@@ -61,458 +70,8 @@ function calcSplitSendTime(
 // ★ GP-04: MySQL TZ는 database.ts의 mysqlQuery 헬퍼에서 매 커넥션마다 자동 설정
 // (커넥션 풀 전체 보장 — 단일 SET으로는 1개 커넥션에만 적용되므로 제거)
 
-// ===== 라인그룹 기반 Agent 발송 설정 =====
-// 환경변수: 서버에 연결된 전체 테이블 목록 (폴백용)
-const ALL_SMS_TABLES = (process.env.SMS_TABLES || 'SMSQ_SEND').split(',').map(t => t.trim());
-// ★ P0-Q1: 서버 기동 시 테이블명 검증 (경고 로그, 기동은 차단하지 않음)
-for (const t of ALL_SMS_TABLES) {
-  if (!isValidSmsTable(t)) {
-    console.error(`[QTmsg] ⚠️ 잘못된 SMS 테이블명 감지: "${t}" — SQL Injection 위험. SMS_TABLES 환경변수를 확인하세요.`);
-  }
-}
-// ★ 대량발송 폴백용: 테스트(10)/인증(11) 라인 제외 — 2차 안전장치
-const BULK_ONLY_TABLES = ALL_SMS_TABLES.filter(t => !['SMSQ_SEND_10', 'SMSQ_SEND_11'].includes(t));
-let rrIndex = 0;
-console.log(`[QTmsg] ALL_SMS_TABLES: ${ALL_SMS_TABLES.join(', ')} (${ALL_SMS_TABLES.length}개 Agent)`);
-console.log(`[QTmsg] BULK_ONLY_TABLES: ${BULK_ONLY_TABLES.join(', ')} (테스트/인증 제외 ${BULK_ONLY_TABLES.length}개)`);
-
-// 라인그룹 캐시 (1분 TTL)
-const lineGroupCache = new Map<string, { tables: string[], hasDedicatedGroup: boolean, expires: number }>();
-const LINE_GROUP_CACHE_TTL = CACHE_TTL.lineGroup * 1000; // CACHE_TTL은 초 단위, Map 캐시는 ms 단위
-
-// 회사/사용자별 발송 테이블 조회 (캐시) — userId가 있으면 사용자 개별 라인그룹 우선, 없으면 회사 라인그룹 fallback
-async function getCompanySmsTables(companyId: string, userId?: string): Promise<string[]> {
-  // 1) 사용자 개별 라인그룹 확인 (userId가 전달된 경우)
-  if (userId) {
-    const userCacheKey = `user:${userId}`;
-    const userCached = lineGroupCache.get(userCacheKey);
-    if (userCached && userCached.expires > Date.now()) return userCached.tables;
-
-    const userResult = await query(`
-      SELECT lg.sms_tables
-      FROM sms_line_groups lg
-      JOIN users u ON u.line_group_id = lg.id
-      WHERE u.id = $1 AND lg.is_active = true AND lg.group_type = 'bulk'
-    `, [userId]);
-
-    if (userResult.rows.length > 0 && userResult.rows[0].sms_tables?.length > 0) {
-      let userTables = userResult.rows[0].sms_tables;
-      const validUserTables = userTables.filter((t: string) => {
-        if (!isValidSmsTable(t)) {
-          console.error(`[QTmsg] ⚠️ user ${userId} 라인그룹에 잘못된 테이블명: "${t}" — 스킵 처리`);
-          return false;
-        }
-        return true;
-      });
-      if (validUserTables.length > 0) {
-        lineGroupCache.set(userCacheKey, { tables: validUserTables, hasDedicatedGroup: true, expires: Date.now() + LINE_GROUP_CACHE_TTL });
-        return validUserTables;
-      }
-    }
-    // 사용자 개별 라인그룹 없으면 → 회사 라인그룹 fallback (아래 진행)
-  }
-
-  // 2) 회사 라인그룹 (기존 로직)
-  const cacheKey = `company:${companyId}`;
-  const cached = lineGroupCache.get(cacheKey);
-  if (cached && cached.expires > Date.now()) return cached.tables;
-
-  const result = await query(`
-    SELECT lg.sms_tables
-    FROM sms_line_groups lg
-    JOIN companies c ON c.line_group_id = lg.id
-    WHERE c.id = $1 AND lg.is_active = true AND lg.group_type = 'bulk'
-  `, [companyId]);
-
-  const hasDedicatedGroup = result.rows.length > 0 && result.rows[0].sms_tables?.length > 0;
-  // ★ 라인그룹 미설정 시 BULK_ONLY_TABLES 폴백 (테스트/인증 라인 절대 제외)
-  let tables = hasDedicatedGroup
-    ? result.rows[0].sms_tables
-    : BULK_ONLY_TABLES;
-
-  // ★ P0-Q1: DB에서 조회된 테이블명 검증 (잘못된 값 필터링, 발송 차단하지 않음)
-  if (hasDedicatedGroup) {
-    const validTables = tables.filter((t: string) => {
-      if (!isValidSmsTable(t)) {
-        console.error(`[QTmsg] ⚠️ company ${companyId} 라인그룹에 잘못된 테이블명: "${t}" — 스킵 처리`);
-        return false;
-      }
-      return true;
-    });
-    tables = validTables.length > 0 ? validTables : BULK_ONLY_TABLES;
-  }
-
-  lineGroupCache.set(cacheKey, { tables, hasDedicatedGroup, expires: Date.now() + LINE_GROUP_CACHE_TTL });
-  return tables;
-}
-
-// ★ 회사 전용 라인그룹 할당 여부 확인 (발송 차단용)
-async function hasCompanyLineGroup(companyId: string): Promise<boolean> {
-  const cacheKey = `company:${companyId}`;
-  const cached = lineGroupCache.get(cacheKey);
-  if (cached && cached.expires > Date.now()) return cached.hasDedicatedGroup;
-
-  // 캐시 미스 시 getCompanySmsTables 호출로 캐시 채움
-  await getCompanySmsTables(companyId);
-  const refreshed = lineGroupCache.get(cacheKey);
-  return refreshed?.hasDedicatedGroup ?? false;
-}
-
-// 테스트 발송 테이블 조회 (캐시)
-async function getTestSmsTables(): Promise<string[]> {
-  const cached = lineGroupCache.get('test');
-  if (cached && cached.expires > Date.now()) return cached.tables;
-
-  const result = await query(`SELECT sms_tables FROM sms_line_groups WHERE group_type = 'test' AND is_active = true LIMIT 1`);
-  // ★ 폴백: SMSQ_SEND_10 고정 (전체 라인 폴백 제거)
-  const tables = (result.rows.length > 0 && result.rows[0].sms_tables?.length > 0)
-    ? result.rows[0].sms_tables
-    : ['SMSQ_SEND_10'];
-
-  lineGroupCache.set('test', { tables, hasDedicatedGroup: true, expires: Date.now() + LINE_GROUP_CACHE_TTL });
-  return tables;
-}
-
-// 인증번호 발송 테이블 조회 (캐시)
-async function getAuthSmsTable(): Promise<string> {
-  const cached = lineGroupCache.get('auth');
-  if (cached && cached.expires > Date.now()) return cached.tables[0];
-
-  const result = await query(`SELECT sms_tables FROM sms_line_groups WHERE group_type = 'auth' AND is_active = true LIMIT 1`);
-  // ★ 폴백: SMSQ_SEND_11 고정 (전체 라인 폴백 제거)
-  const tables = (result.rows.length > 0 && result.rows[0].sms_tables?.length > 0)
-    ? result.rows[0].sms_tables
-    : ['SMSQ_SEND_11'];
-
-  lineGroupCache.set('auth', { tables, hasDedicatedGroup: true, expires: Date.now() + LINE_GROUP_CACHE_TTL });
-  return tables[0];
-}
-
-// 캐시 무효화 (라인그룹 설정 변경 시 호출)
-function invalidateLineGroupCache(companyId?: string, userId?: string) {
-  if (userId) {
-    lineGroupCache.delete(`user:${userId}`);
-  }
-  if (companyId) {
-    lineGroupCache.delete(`company:${companyId}`);
-  }
-  if (!companyId && !userId) {
-    lineGroupCache.clear();
-  }
-}
-
-// INSERT용: 라운드로빈으로 다음 테이블 반환
-function getNextSmsTable(tables: string[]): string {
-  const table = tables[rrIndex % tables.length];
-  rrIndex++;
-  return table;
-}
-
-// COUNT 합산
-async function smsCountAll(tables: string[], whereClause: string, params: any[]): Promise<number> {
-  let total = 0;
-  for (const t of tables) {
-    const rows = await mysqlQuery(`SELECT COUNT(*) as cnt FROM ${t} WHERE ${whereClause}`, params) as any[];
-    total += Number(rows[0]?.cnt || 0);
-  }
-  return total;
-}
-
-// 집계 합산
-async function smsAggAll(tables: string[], selectFields: string, whereClause: string, params: any[]): Promise<any> {
-  const agg: any = {};
-  for (const t of tables) {
-    const rows = await mysqlQuery(`SELECT ${selectFields} FROM ${t} WHERE ${whereClause}`, params) as any[];
-    if (rows[0]) {
-      for (const k of Object.keys(rows[0])) {
-        agg[k] = (agg[k] || 0) + (Number(rows[0][k]) || 0);
-      }
-    }
-  }
-  return agg;
-}
-
-// SELECT 합산
-async function smsSelectAll(tables: string[], selectFields: string, whereClause: string, params: any[], suffix?: string): Promise<any[]> {
-  let all: any[] = [];
-  for (const t of tables) {
-    const rows = await mysqlQuery(`SELECT ${selectFields} FROM ${t} WHERE ${whereClause} ${suffix || ''}`, params) as any[];
-    all = all.concat(rows.map((r: any) => ({ ...r, _sms_table: t })));
-  }
-  return all;
-}
-
-// MIN 합산
-async function smsMinAll(tables: string[], field: string, whereClause: string, params: any[]): Promise<any> {
-  let minVal: any = null;
-  for (const t of tables) {
-    const rows = await mysqlQuery(`SELECT MIN(${field}) as min_val FROM ${t} WHERE ${whereClause}`, params) as any[];
-    const val = rows[0]?.min_val;
-    if (val && (!minVal || new Date(val) < new Date(minVal))) {
-      minVal = val;
-    }
-  }
-  return minVal;
-}
-
-// DELETE/UPDATE: 해당 테이블 모두 실행
-async function smsExecAll(tables: string[], sqlTemplate: string, params: any[]): Promise<void> {
-  for (const t of tables) {
-    await mysqlQuery(sqlTemplate.replace(/SMSQ_SEND/g, t), params);
-  }
-}
-
-// export for other modules
-// ===== 로그 테이블 포함 조회 (결과 집계용) =====
-// QTmsg Agent가 처리 완료(rsv1=5) 시 LIVE → LOG(SMSQ_SEND_X_YYYYMM) 이동
-// 결과 조회 시 LIVE + LOG 모두 조회해야 정확한 성공/실패 집계 가능
-let _logTableCache: Set<string> | null = null;
-let _logTableCacheTs = 0;
-
-async function getExistingLogTables(): Promise<Set<string>> {
-  const now = Date.now();
-  if (_logTableCache && (now - _logTableCacheTs) < 300000) return _logTableCache;
-  const rows = await mysqlQuery("SHOW TABLES LIKE 'SMSQ_SEND_%_202___'") as any[];
-  const tables = new Set<string>();
-  for (const row of rows) {
-    tables.add(String(Object.values(row)[0]));
-  }
-  _logTableCache = tables;
-  _logTableCacheTs = now;
-  console.log(`[QTmsg] LOG 테이블 캐시 갱신: ${tables.size}개`);
-  return tables;
-}
-
-async function getCompanySmsTablesWithLogs(companyId: string, userId?: string): Promise<string[]> {
-  const liveTables = await getCompanySmsTables(companyId, userId);
-  const existingLogs = await getExistingLogTables();
-  const now = new Date();
-  const curMonth = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`;
-  const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const prevMonth = `${prev.getFullYear()}${String(prev.getMonth() + 1).padStart(2, '0')}`;
-
-  const allTables = [...liveTables];
-  for (const t of liveTables) {
-    const cur = `${t}_${curMonth}`;
-    const prv = `${t}_${prevMonth}`;
-    if (existingLogs.has(cur)) allTables.push(cur);
-    if (existingLogs.has(prv)) allTables.push(prv);
-  }
-  return allTables;
-}
-
-export { ALL_SMS_TABLES, BULK_ONLY_TABLES, getAuthSmsTable, getCompanySmsTables, getCompanySmsTablesWithLogs, getTestSmsTables, hasCompanyLineGroup, invalidateLineGroupCache, smsAggAll, smsCountAll, smsExecAll, smsSelectAll };
-// ===== 라인그룹 헬퍼 끝 =====
-
-// ===== 카카오 브랜드메시지 발송 헬퍼 =====
-// IMC_BM_FREE_BIZ_MSG 테이블에 INSERT (자유형 브랜드메시지)
-async function insertKakaoQueue(params: {
-  bubbleType: string;       // TEXT, IMAGE, WIDE 등
-  senderKey: string;        // 발신 프로필 키
-  phone: string;            // 수신번호
-  targeting: string;        // I/M/N
-  message: string;          // 메시지 내용
-  isAd: boolean;            // 광고 여부
-  reservedDate?: string;    // 예약 시간 (YYYY-MM-DD HH:mm:ss)
-  attachmentJson?: string;  // 버튼/이미지/쿠폰 JSON
-  carouselJson?: string;    // 캐러셀 JSON
-  header?: string;          // 헤더 (강조표기)
-  resendType?: string;      // 대체발송 유형 SM/LM/NO
-  resendFrom?: string;      // 대체발송 발신번호
-  resendMessage?: string;   // 대체발송 메시지 (null이면 카카오 메시지 재사용)
-  resendTitle?: string;     // 대체발송 제목 (LMS)
-  unsubscribePhone?: string;// 080 수신거부 번호
-  unsubscribeAuth?: string; // 080 인증번호
-  requestUid?: string;      // 고유 요청 ID (campaign_id 등)
-}): Promise<void> {
-  const {
-    bubbleType, senderKey, phone, targeting, message, isAd,
-    reservedDate, attachmentJson, carouselJson, header,
-    resendType = 'SM', resendFrom, resendMessage, resendTitle,
-    unsubscribePhone, unsubscribeAuth, requestUid
-  } = params;
-
-  // 예약시간: 없으면 즉시발송 (현재 시간)
-  const reservedDateStr = reservedDate || toKoreaTimeStr(new Date());
-  // 대체발송 메시지 재사용 여부: resendMessage가 없으면 카카오 메시지 그대로 사용
-  const messageReuse = resendMessage ? 'N' : 'Y';
-
-  await mysqlQuery(
-    `INSERT INTO IMC_BM_FREE_BIZ_MSG (
-      CHAT_BUBBLE_TYPE, STATUS, AD_FLAG, RESERVED_DATE,
-      SENDER_KEY, PHONE_NUMBER, TARGETING,
-      HEADER, MESSAGE, ATTACHMENT_JSON, CAROUSEL_JSON,
-      RESEND_MT_TYPE, RESEND_MT_FROM, RESEND_MT_TITLE,
-      RESEND_MT_MESSAGE_REUSE, RESEND_MT_MESSAGE,
-      UNSUBSCRIBE_PHONE_NUMBER, UNSUBSCRIBE_AUTH_NUMBER,
-      REQUEST_UID
-    ) VALUES (?, '1', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      bubbleType,
-      isAd ? 'Y' : 'N',
-      reservedDateStr,
-      senderKey,
-      phone,
-      targeting,
-      header || null,
-      message,
-      attachmentJson || null,
-      carouselJson || null,
-      resendType,
-      resendFrom || null,
-      resendTitle || null,
-      messageReuse,
-      resendMessage || null,
-      unsubscribePhone || null,
-      unsubscribeAuth || null,
-      requestUid || null
-    ]
-  );
-}
-
-// 카카오 발송 결과 집계 (IMC_BM_FREE_BIZ_MSG)
-async function kakaoAgg(whereClause: string, params: any[]): Promise<{ total: number; success: number; fail: number; pending: number }> {
-  const rows = await mysqlQuery(
-    `SELECT
-       COUNT(*) as total,
-       COUNT(CASE WHEN REPORT_CODE = '0000' THEN 1 END) as success,
-       COUNT(CASE WHEN REPORT_CODE IS NOT NULL AND REPORT_CODE != '0000' THEN 1 END) as fail,
-       COUNT(CASE WHEN REPORT_CODE IS NULL AND STATUS = '1' THEN 1 END) as pending
-     FROM IMC_BM_FREE_BIZ_MSG WHERE ${whereClause}`,
-    params
-  ) as any[];
-  return {
-    total: Number(rows[0]?.total || 0),
-    success: Number(rows[0]?.success || 0),
-    fail: Number(rows[0]?.fail || 0),
-    pending: Number(rows[0]?.pending || 0)
-  };
-}
-
-// 카카오 예약 대기 건수
-async function kakaoCountPending(requestUid: string): Promise<number> {
-  const rows = await mysqlQuery(
-    `SELECT COUNT(*) as cnt FROM IMC_BM_FREE_BIZ_MSG WHERE REQUEST_UID = ? AND STATUS = '1'`,
-    [requestUid]
-  ) as any[];
-  return Number(rows[0]?.cnt || 0);
-}
-
-// 카카오 예약 취소 (대기 건 삭제)
-async function kakaoCancelPending(requestUid: string): Promise<number> {
-  const rows = await mysqlQuery(
-    `DELETE FROM IMC_BM_FREE_BIZ_MSG WHERE REQUEST_UID = ? AND STATUS = '1'`,
-    [requestUid]
-  ) as any[];
-  return (rows as any).affectedRows || 0;
-}
-
-export { insertKakaoQueue, kakaoAgg, kakaoCancelPending, kakaoCountPending };
-// ===== 카카오 브랜드메시지 헬퍼 끝 =====
-
-// ===== 선불 잔액 관리 =====
-// 선불 잔액 체크 + 차감 (atomic UPDATE ... WHERE balance >= amount)
-async function prepaidDeduct(
-  companyId: string, count: number, messageType: string, referenceId: string
-): Promise<{ ok: boolean; error?: string; amount?: number; balance?: number; insufficientBalance?: boolean }> {
-  const co = await query(
-    'SELECT billing_type, balance, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao FROM companies WHERE id = $1',
-    [companyId]
-  );
-  if (co.rows.length === 0) return { ok: false, error: '회사 정보를 찾을 수 없습니다' };
-
-  const c = co.rows[0];
-  if (c.billing_type !== 'prepaid') return { ok: true, amount: 0 }; // 후불은 패스
-
-  const unitPrice = messageType === 'SMS' ? Number(c.cost_per_sms || 0)
-    : messageType === 'LMS' ? Number(c.cost_per_lms || 0)
-    : messageType === 'MMS' ? Number(c.cost_per_mms || 0)
-    : messageType === 'KAKAO' ? Number(c.cost_per_kakao || 0) : 0;
-
-  const totalAmount = Math.round(unitPrice * count * 100) / 100; // 부동소수점 보정
-  if (totalAmount === 0) return { ok: true, amount: 0 };
-
-  // Atomic 차감: balance >= totalAmount 일 때만 성공
-  const result = await query(
-    'UPDATE companies SET balance = balance - $1, updated_at = NOW() WHERE id = $2 AND balance >= $1 RETURNING balance',
-    [totalAmount, companyId]
-  );
-
-  if (result.rows.length === 0) {
-    return {
-      ok: false,
-      error: `잔액이 부족합니다. 필요: ${totalAmount.toLocaleString()}원 / 현재: ${Number(c.balance).toLocaleString()}원`,
-      amount: totalAmount,
-      balance: Number(c.balance),
-      insufficientBalance: true
-    };
-  }
-
-  // 거래 기록
-  await query(
-    `INSERT INTO balance_transactions (company_id, type, amount, balance_after, description, reference_type, reference_id, payment_method)
-     VALUES ($1, 'deduct', $2, $3, $4, 'campaign', $5, 'system')`,
-    [companyId, totalAmount, result.rows[0].balance, `${messageType} ${count}건 발송 차감 (건당 ${unitPrice}원)`, referenceId]
-  );
-
-  console.log(`[선불차감] company=${companyId} ${messageType}×${count} = ${totalAmount}원 차감 → 잔액 ${result.rows[0].balance}원`);
-  return { ok: true, amount: totalAmount, balance: Number(result.rows[0].balance) };
-}
-
-// 선불 환불 (실패건 또는 취소)
-async function prepaidRefund(
-  companyId: string, count: number, messageType: string, campaignId: string, reason: string
-): Promise<{ refunded: number }> {
-  const co = await query(
-    'SELECT billing_type, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao FROM companies WHERE id = $1',
-    [companyId]
-  );
-  if (co.rows.length === 0 || co.rows[0].billing_type !== 'prepaid') return { refunded: 0 };
-  if (count <= 0) return { refunded: 0 };
-
-  const c = co.rows[0];
-  const unitPrice = messageType === 'SMS' ? Number(c.cost_per_sms || 0)
-    : messageType === 'LMS' ? Number(c.cost_per_lms || 0)
-    : messageType === 'MMS' ? Number(c.cost_per_mms || 0)
-    : messageType === 'KAKAO' ? Number(c.cost_per_kakao || 0) : 0;
-
-  // 이미 환불된 금액 조회 (중복 환불 방지)
-  const existing = await query(
-    `SELECT COALESCE(SUM(amount), 0) as total FROM balance_transactions
-     WHERE company_id = $1 AND type = 'refund' AND reference_type = 'campaign' AND reference_id = $2`,
-    [companyId, campaignId]
-  );
-  const alreadyRefunded = Number(existing.rows[0].total);
-
-  // 원래 차감 금액 조회
-  const deducted = await query(
-    `SELECT COALESCE(SUM(amount), 0) as total FROM balance_transactions
-     WHERE company_id = $1 AND type = 'deduct' AND reference_type = 'campaign' AND reference_id = $2`,
-    [companyId, campaignId]
-  );
-  const totalDeducted = Number(deducted.rows[0].total);
-
-  const refundAmount = Math.round(Math.min(unitPrice * count, totalDeducted - alreadyRefunded) * 100) / 100; // 부동소수점 보정
-  if (refundAmount <= 0) return { refunded: 0 };
-
-  const result = await query(
-    'UPDATE companies SET balance = balance + $1, updated_at = NOW() WHERE id = $2 RETURNING balance',
-    [refundAmount, companyId]
-  );
-
-  if (result.rows.length > 0) {
-    await query(
-      `INSERT INTO balance_transactions (company_id, type, amount, balance_after, description, reference_type, reference_id, payment_method)
-       VALUES ($1, 'refund', $2, $3, $4, 'campaign', $5, 'system')`,
-      [companyId, refundAmount, result.rows[0].balance, `${reason} (${messageType} ${count}건 × ${unitPrice}원)`, campaignId]
-    );
-    console.log(`[선불환불] company=${companyId} ${refundAmount}원 환불 → 잔액 ${result.rows[0].balance}원`);
-  }
-
-  return { refunded: refundAmount };
-}
-export { prepaidDeduct, prepaidRefund };
-// ===== 선불 잔액 관리 끝 =====
+// ★ 라인그룹/MySQL 큐/카카오/선불 함수 → utils/sms-queue.ts, utils/prepaid.ts로 이동 (import 사용)
+// ★ 캠페인 취소/결과동기화 → utils/campaign-lifecycle.ts로 이동 (import 사용)
 
 const router = Router();
 
@@ -667,16 +226,17 @@ router.post('/test-send', async (req: Request, res: Response) => {
       return res.status(403).json({ error: '고객사 권한이 필요합니다.' });
     }
 
-    // 일반 사용자는 본인 store_codes에 해당하는 고객만
+    // ★ B16-01: 브랜드 격리 — store-scope 컨트롤타워
     let storeFilter = '';
     let storeParams: any[] = [];
 
     if (userType === 'company_user' && userId) {
-      const userResult = await query('SELECT store_codes FROM users WHERE id = $1', [userId]);
-      const storeCodes = userResult.rows[0]?.store_codes;
-      if (storeCodes && storeCodes.length > 0) {
+      const scope = await getStoreScope(companyId, userId);
+      if (scope.type === 'filtered') {
         storeFilter = ' AND c.id IN (SELECT customer_id FROM customer_stores WHERE company_id = c.company_id AND store_code = ANY($STORE_IDX::text[]))';
-        storeParams = [storeCodes];
+        storeParams = [scope.storeCodes];
+      } else if (scope.type === 'blocked') {
+        return res.status(403).json({ error: '소속 브랜드가 지정되지 않았습니다. 관리자에게 문의하세요.' });
       }
     }
 
@@ -952,15 +512,17 @@ router.post('/:id/send', async (req: Request, res: Response) => {
     }
 
     // 일반 사용자는 본인 store_codes에 해당하는 고객만
+    // ★ B16-01: 브랜드 격리 — store-scope 컨트롤타워
     let storeFilter = '';
     const storeParams: any[] = [];
 
     if (userType === 'company_user' && userId) {
-      const userResult = await query('SELECT store_codes FROM users WHERE id = $1', [userId]);
-      const storeCodes = userResult.rows[0]?.store_codes;
-      if (storeCodes && storeCodes.length > 0) {
+      const scope = await getStoreScope(companyId, userId);
+      if (scope.type === 'filtered') {
         storeFilter = ' AND c.id IN (SELECT customer_id FROM customer_stores WHERE company_id = c.company_id AND store_code = ANY($STORE_IDX::text[]))';
-        storeParams.push(storeCodes);
+        storeParams.push(scope.storeCodes);
+      } else if (scope.type === 'blocked') {
+        return res.status(403).json({ error: '소속 브랜드가 지정되지 않았습니다. 관리자에게 문의하세요.' });
       }
     }
 
@@ -1755,6 +1317,7 @@ router.get('/:id', async (req: Request, res: Response) => {
   }
 });
 // POST /api/campaigns/sync-results - MySQL 결과를 PostgreSQL로 동기화
+// ★ utils/campaign-lifecycle.ts 컨트롤타워 사용
 router.post('/sync-results', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
@@ -1762,179 +1325,8 @@ router.post('/sync-results', async (req: Request, res: Response) => {
       return res.status(403).json({ error: '권한이 필요합니다.' });
     }
 
-    // ★ B8-13: 동기화 대상을 해당 회사 + 최근 7일 이내로 제한 (대량 캠페인 전체 스캔 방지)
-    const runsResult = await query(
-      `SELECT cr.id, cr.campaign_id, c.company_id
-       FROM campaign_runs cr
-       JOIN campaigns c ON c.id = cr.campaign_id
-       WHERE c.company_id = $1
-         AND cr.status IN ('sending', 'scheduled')
-         AND cr.created_at >= NOW() - INTERVAL '7 days'`,
-      [companyId]
-    );
-
-    let syncCount = 0;
-    for (const run of runsResult.rows) {
-      // SMS: 캠페인 소속 회사의 라인그룹 테이블에서 합산 집계 (LIVE+LOG)
-      const runTables = await getCompanySmsTablesWithLogs(run.company_id);
-      const smsAgg = await smsAggAll(runTables,
-        `COUNT(CASE WHEN status_code IN (${SUCCESS_CODES.join(',')}) THEN 1 END) as success_count,
-         COUNT(CASE WHEN status_code NOT IN (${[...SUCCESS_CODES, ...PENDING_CODES].join(',')}) THEN 1 END) as fail_count,
-         COUNT(CASE WHEN status_code IN (${PENDING_CODES.join(',')}) THEN 1 END) as pending_count`,
-        'app_etc1 = ?',
-        [run.campaign_id]
-      );
-
-      // 카카오: IMC_BM_FREE_BIZ_MSG에서 결과 집계
-      const kakaoResult = await kakaoAgg('REQUEST_UID = ?', [run.campaign_id]);
-
-      const successCount = (smsAgg.success_count || 0) + kakaoResult.success;
-      const failCount = (smsAgg.fail_count || 0) + kakaoResult.fail;
-      const pendingCount = (smsAgg.pending_count || 0) + kakaoResult.pending;
-
-      // 타임아웃 체크: 발송 후 30분 경과 + pending만 남아있으면 강제 완료 처리 (직접발송과 동일)
-      const campTimeInfo = await query('SELECT sent_at, scheduled_at, created_at FROM campaigns WHERE id = $1', [run.campaign_id]);
-      const campSentAt = campTimeInfo.rows[0]?.sent_at || campTimeInfo.rows[0]?.scheduled_at || campTimeInfo.rows[0]?.created_at;
-      const minutesSinceSend = campSentAt ? (Date.now() - new Date(campSentAt).getTime()) / (1000 * 60) : 0;
-      const isTimedOut = minutesSinceSend > 30 && pendingCount > 0 && successCount === 0 && failCount === 0;
-
-      // PostgreSQL 업데이트
-      if (successCount > 0 || failCount > 0 || isTimedOut) {
-        // 타임아웃: pending만 남아있고 30분 경과 → 전부 fail 처리
-        const effectiveFailCount = isTimedOut ? failCount + pendingCount : failCount;
-        const effectivePendingCount = isTimedOut ? 0 : pendingCount;
-        const newStatus = effectivePendingCount > 0 ? 'sending' : ((successCount + effectiveFailCount) > 0 ? 'completed' : 'failed');
-        if (isTimedOut) {
-          console.warn(`[sync-results] campaign_run ${run.id}: 30분 타임아웃 — pending ${pendingCount}건 → fail 처리`);
-        }
-
-        // campaign_runs 업데이트
-        await query(
-          `UPDATE campaign_runs SET
-            success_count = $1,
-            fail_count = $2,
-            status = $3,
-            sent_at = CASE WHEN $3 = 'completed' AND sent_at IS NULL
-              THEN COALESCE(scheduled_at, NOW())
-              ELSE sent_at END
-           WHERE id = $4`,
-          [successCount, effectiveFailCount, newStatus, run.id]
-        );
-
-        // campaigns 테이블도 업데이트
-        const runInfo = await query(`SELECT campaign_id FROM campaign_runs WHERE id = $1`, [run.id]);
-        if (runInfo.rows.length > 0) {
-          await query(
-            `UPDATE campaigns SET
-              success_count = $1,
-              fail_count = $2,
-              status = $3,
-              sent_at = CASE WHEN $3 = 'completed' AND sent_at IS NULL
-                THEN COALESCE(scheduled_at, NOW())
-                ELSE sent_at END
-             WHERE id = $4`,
-            [successCount, effectiveFailCount, newStatus, runInfo.rows[0].campaign_id]
-          );
-
-          // ★ 선불 실패건 환불
-          if (effectiveFailCount > 0) {
-            const campInfo = await query('SELECT company_id, message_type FROM campaigns WHERE id = $1', [runInfo.rows[0].campaign_id]);
-            if (campInfo.rows.length > 0) {
-              await prepaidRefund(campInfo.rows[0].company_id, effectiveFailCount, campInfo.rows[0].message_type, runInfo.rows[0].campaign_id, isTimedOut ? '타임아웃 실패 환불' : '발송 실패 환불');
-            }
-          }
-        }
-
-        // ★ AI 학습 성과 데이터 업데이트
-        updateTrainingMetrics({
-          sourceRef: getSourceRef(run.id),
-          sentCount: successCount + effectiveFailCount,
-          successCount,
-          failCount,
-        });
-
-        syncCount++;
-      }
-    }
-
-    // ★ B8-13: 직접발송 동기화도 해당 회사 + 최근 7일로 제한
-    const directCampaigns = await query(
-      `SELECT id, company_id, scheduled_at FROM campaigns
-       WHERE company_id = $1 AND send_type = 'direct'
-         AND (status IN ('sending', 'completed') OR (status = 'scheduled' AND scheduled_at <= NOW()))
-         AND (success_count IS NULL OR success_count = 0)
-         AND created_at >= NOW() - INTERVAL '7 days'`,
-      [companyId]
-    );
-
-    for (const campaign of directCampaigns.rows) {
-      const directTables = await getCompanySmsTablesWithLogs(campaign.company_id);
-      const smsDirectAgg = await smsAggAll(directTables,
-        `COUNT(*) as total_count,
-         COUNT(CASE WHEN status_code IN (${SUCCESS_CODES.join(',')}) THEN 1 END) as success_count,
-         COUNT(CASE WHEN status_code NOT IN (${[...SUCCESS_CODES, ...PENDING_CODES].join(',')}) THEN 1 END) as fail_count,
-         COUNT(CASE WHEN status_code IN (${PENDING_CODES.join(',')}) THEN 1 END) as pending_count`,
-        'app_etc1 = ?',
-        [campaign.id]
-      );
-
-      // 카카오 결과도 합산
-      const kakaoDirectResult = await kakaoAgg('REQUEST_UID = ?', [campaign.id]);
-
-      const successCount = (smsDirectAgg.success_count || 0) + kakaoDirectResult.success;
-      const failCount = (smsDirectAgg.fail_count || 0) + kakaoDirectResult.fail;
-      const pendingCount = (smsDirectAgg.pending_count || 0) + kakaoDirectResult.pending;
-
-      // 직접발송 타임아웃 체크: 60분 경과 + pending만 남아있으면 강제 완료
-      const directSentAt = campaign.scheduled_at || campaign.created_at;
-      const directMinutesSince = directSentAt ? (Date.now() - new Date(directSentAt).getTime()) / (1000 * 60) : 0;
-      // 타임아웃 조건 완화: 60분 → 30분
-      const directTimedOut = directMinutesSince > 30 && pendingCount > 0 && successCount === 0 && failCount === 0;
-
-      if (successCount > 0 || failCount > 0 || directTimedOut) {
-        const dEffectiveFailCount = directTimedOut ? failCount + pendingCount : failCount;
-        const dEffectivePendingCount = directTimedOut ? 0 : pendingCount;
-        // pending이 0이면 즉시 completed
-        const newStatus = dEffectivePendingCount === 0
-          ? ((successCount + dEffectiveFailCount) > 0 ? 'completed' : 'failed')
-          : (directTimedOut ? 'completed' : 'sending');
-        if (directTimedOut) {
-          console.warn(`[sync-results] direct campaign ${campaign.id}: 30분 타임아웃 — pending ${pendingCount}건 → fail 처리`);
-        }
-
-        await query(
-          `UPDATE campaigns SET
-            success_count = $1,
-            fail_count = $2,
-            status = $3,
-            sent_at = CASE WHEN $3 = 'completed' AND sent_at IS NULL
-              THEN COALESCE(scheduled_at, NOW())
-              ELSE sent_at END
-           WHERE id = $4`,
-          [successCount, dEffectiveFailCount, newStatus, campaign.id]
-        );
-
-        // ★ 선불 실패건 환불
-        if (dEffectiveFailCount > 0) {
-          const campInfo = await query('SELECT company_id, message_type FROM campaigns WHERE id = $1', [campaign.id]);
-          if (campInfo.rows.length > 0) {
-            await prepaidRefund(campInfo.rows[0].company_id, dEffectiveFailCount, campInfo.rows[0].message_type, campaign.id, directTimedOut ? '타임아웃 실패 환불' : '발송 실패 환불');
-          }
-        }
-
-        // ★ AI 학습 성과 데이터 업데이트 (직접발송)
-        updateTrainingMetrics({
-          sourceRef: getSourceRef(campaign.id),
-          sentCount: successCount + dEffectiveFailCount,
-          successCount,
-          failCount,
-        });
-
-        syncCount++;
-      }
-    }
-
-    return res.json({ message: `${syncCount}건 동기화 완료` });
+    const result = await syncCampaignResults(companyId);
+    return res.json({ message: `${result.syncCount}건 동기화 완료` });
   } catch (error) {
     console.error('결과 동기화 에러:', error);
     return res.status(500).json({ error: '동기화 실패' });
@@ -2460,109 +1852,22 @@ router.post('/direct-send', async (req: Request, res: Response) => {
   }
 });
 
-// 예약 취소
+// 예약 취소 — ★ utils/campaign-lifecycle.ts 컨트롤타워 사용
 router.post('/:id/cancel', async (req: Request, res: Response) => {
   try {
     const companyId = (req as any).user?.companyId;
+    const userId = (req as any).user?.userId;
     const campaignId = req.params.id;
 
-    // 1. 캠페인 확인
-    const campaign = await query(
-      `SELECT * FROM campaigns WHERE id = $1 AND company_id = $2`,
-      [campaignId, companyId]
-    );
+    const result = await cancelCampaign(campaignId, companyId, {
+      cancelledBy: userId,
+      cancelledByType: (req as any).user?.userType,
+    });
 
-    if (campaign.rows.length === 0) {
-      return res.status(404).json({ success: false, error: '캠페인을 찾을 수 없습니다' });
+    if (!result.success) {
+      const status = result.tooLate ? 400 : (result.error === '캠페인을 찾을 수 없습니다' ? 404 : 400);
+      return res.status(status).json({ success: false, error: result.error, tooLate: result.tooLate });
     }
-
-    if (campaign.rows[0].status !== 'scheduled') {
-      return res.status(400).json({ success: false, error: '예약 상태가 아닙니다' });
-    }
-
-    // 15분 이내 체크 (단, 유령 예약 = 이미 과거 시간인 건은 강제 취소 허용)
-    const scheduledAt = new Date(campaign.rows[0].scheduled_at);
-    const now = new Date();
-    const diffMinutes = (scheduledAt.getTime() - now.getTime()) / (1000 * 60);
-    const isGhostSchedule = scheduledAt < now; // 이미 과거 시간인 유령 예약
-    if (diffMinutes < 15 && diffMinutes > 0) {
-      // 미래이지만 15분 이내 → 차단
-      return res.status(400).json({ success: false, error: '발송 15분 전에는 취소할 수 없습니다', tooLate: true });
-    }
-
-    // 2. 대기 중인 메시지 건수 확인 (환불 계산용)
-    const cancelTables = await getCompanySmsTables(companyId);
-    const cancelCount = await smsCountAll(cancelTables, 'app_etc1 = ? AND status_code = 100', [campaignId]);
-
-    // 카카오 대기 건수도 확인
-    const kakaoCancelCount = await kakaoCountPending(campaignId);
-    const totalCancelCount = cancelCount + kakaoCancelCount;
-
-    // 3. 회사 라인그룹 테이블에서 메시지 취소 처리
-    // - status_code = 100 (대기): 삭제 (Agent 미픽업 → 환불 대상)
-    // - status_code != 100 (Agent 픽업됨): status_code를 9999(취소)로 변경하여 발송 차단 + 레코드 유지(결과 조회용)
-    const alreadyPickedUp = await smsCountAll(cancelTables, 'app_etc1 = ? AND status_code != 100', [campaignId]);
-
-    await smsExecAll(cancelTables,
-      `DELETE FROM SMSQ_SEND WHERE app_etc1 = ? AND status_code = 100`,
-      [campaignId]
-    );
-
-    if (alreadyPickedUp > 0) {
-      // 전송완료(SUCCESS_CODES)와 대기중(100) 제외, 진행중인 것만 취소처리
-      await smsExecAll(cancelTables,
-        `UPDATE SMSQ_SEND SET status_code = 9999 WHERE app_etc1 = ? AND status_code NOT IN (${SUCCESS_CODES.join(',')}) AND status_code != 100`,
-        [campaignId]
-      );
-      console.warn(`[취소] campaign ${campaignId}: Agent 픽업된 ${alreadyPickedUp}건 status_code→9999 처리`);
-    }
-
-    // 캠페인 상태를 'cancelled'로 변경
-    await query(
-      `UPDATE campaigns SET status = 'cancelled', updated_at = NOW() WHERE id = $1 AND status IN ('scheduled', 'sending')`,
-      [campaignId]
-    );
-
-    // 카카오 대기건 삭제
-    if (kakaoCancelCount > 0) {
-      await kakaoCancelPending(campaignId);
-    }
-
-    // 4. 선불 환불 (예약 취소)
-    const camp = campaign.rows[0];
-    if (totalCancelCount > 0) {
-      // SMS 환불
-      if (cancelCount > 0) {
-        await prepaidRefund(companyId, cancelCount, camp.message_type, campaignId, '예약 취소 환불');
-      }
-      // 카카오 환불
-      if (kakaoCancelCount > 0) {
-        await prepaidRefund(companyId, kakaoCancelCount, 'KAKAO', campaignId, '카카오 예약 취소 환불');
-      }
-    }
-
-    // 5. PostgreSQL 캠페인 상태 변경 — cancelled + 전체 건수를 fail로 처리
-    const camp_target = camp.target_count || camp.sent_count || 0;
-    await query(
-      `UPDATE campaigns SET
-        status = 'cancelled',
-        fail_count = COALESCE(target_count, sent_count, 0),
-        success_count = 0,
-        cancelled_at = NOW(),
-        updated_at = NOW()
-       WHERE id = $1`,
-      [campaignId]
-    );
-
-    // campaign_runs도 cancelled로 변경 (sync-results에서 재처리 방지)
-    await query(
-      `UPDATE campaign_runs SET
-        status = 'cancelled',
-        fail_count = COALESCE(target_count, sent_count, 0),
-        success_count = 0
-       WHERE campaign_id = $1 AND status IN ('scheduled', 'sending')`,
-      [campaignId]
-    );
 
     res.json({ success: true, message: '예약이 취소되었습니다' });
   } catch (error) {
@@ -2629,15 +1934,18 @@ router.get('/:id/recipients', async (req: Request, res: Response) => {
       const excludedPhones = camp.excluded_phones || [];
 
       // store_codes 필터
+      // ★ B16-01: store_codes 없는 company_user → 빈 결과
+      // ★ B16-01: 브랜드 격리 — store-scope 컨트롤타워
       let storeFilter = '';
       let storeParams: any[] = [];
       if (userType === 'company_user' && userId) {
-        const userResult = await query('SELECT store_codes FROM users WHERE id = $1', [userId]);
-        const storeCodes = userResult.rows[0]?.store_codes;
-        if (storeCodes && storeCodes.length > 0) {
+        const scope = await getStoreScope(companyId, userId);
+        if (scope.type === 'filtered') {
           const storeIdx = 1 + filterQuery.params.length + 1;
           storeFilter = ` AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = $1 AND store_code = ANY($${storeIdx}::text[]))`;
-          storeParams = [storeCodes];
+          storeParams = [scope.storeCodes];
+        } else if (scope.type === 'blocked') {
+          return res.status(403).json({ error: '소속 브랜드가 지정되지 않았습니다. 관리자에게 문의하세요.' });
         }
       }
 

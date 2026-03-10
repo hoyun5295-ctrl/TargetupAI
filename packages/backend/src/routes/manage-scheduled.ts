@@ -1,6 +1,8 @@
 import { Router, Request, Response } from 'express';
 import { authenticate, requireCompanyAdmin } from '../middlewares/auth';
 import { query } from '../config/database';
+// ★ 메시징 컨트롤타워 — 취소 로직 통합
+import { cancelCampaign } from '../utils/campaign-lifecycle';
 
 const router = Router();
 
@@ -25,7 +27,7 @@ router.get('/', async (req: Request, res: Response) => {
     const companyScope = getCompanyScope(req);
 
     let sql = `
-      SELECT 
+      SELECT
         c.id, c.campaign_name, c.status, c.scheduled_at, c.target_count,
         c.created_at, c.cancelled_by, c.cancelled_by_type, c.cancel_reason, c.cancelled_at,
         co.company_name, co.company_code,
@@ -60,6 +62,7 @@ router.get('/', async (req: Request, res: Response) => {
 });
 
 // POST /:id/cancel - 예약 취소
+// ★ 컨트롤타워(cancelCampaign) 사용 — MySQL 큐 삭제 + 선불 환불 + PG 상태 변경 모두 처리
 router.post('/:id/cancel', async (req: Request, res: Response) => {
   const { id } = req.params;
   const { reason } = req.body;
@@ -70,7 +73,7 @@ router.post('/:id/cancel', async (req: Request, res: Response) => {
   }
 
   try {
-    // 캠페인 조회
+    // 캠페인 조회 (소유권 확인용)
     const check = await query('SELECT status, scheduled_at, company_id FROM campaigns WHERE id = $1', [id]);
 
     if (check.rows.length === 0) {
@@ -82,28 +85,25 @@ router.post('/:id/cancel', async (req: Request, res: Response) => {
       return res.status(403).json({ error: '자사 캠페인만 취소할 수 있습니다.' });
     }
 
-    if (check.rows[0].status !== 'scheduled') {
-      return res.status(400).json({ error: '예약 상태인 캠페인만 취소할 수 있습니다.' });
-    }
-
-    // cancelled_by_type: 슈퍼관리자 or 고객사관리자 구분
+    const companyId = check.rows[0].company_id;
     const cancelledByType = callerType === 'super_admin' ? 'super_admin' : 'company_admin';
 
-    const result = await query(`
-      UPDATE campaigns 
-      SET status = 'cancelled',
-          cancelled_by = $1,
-          cancelled_by_type = $2,
-          cancel_reason = $3,
-          cancelled_at = NOW(),
-          updated_at = NOW()
-      WHERE id = $4
-      RETURNING id, campaign_name
-    `, [userId, cancelledByType, reason.trim(), id]);
+    // ★ 컨트롤타워 호출 — MySQL 큐 삭제 + 선불 환불 + PG 상태 변경 전부 처리
+    const result = await cancelCampaign(id, companyId, {
+      reason: reason.trim(),
+      cancelledBy: userId,
+      cancelledByType,
+      skipTimeCheck: callerType === 'super_admin', // 슈퍼관리자는 15분 제한 없음
+    });
+
+    if (!result.success) {
+      const status = result.error === '캠페인을 찾을 수 없습니다' ? 404 : 400;
+      return res.status(status).json({ error: result.error });
+    }
 
     res.json({
       message: '예약이 취소되었습니다.',
-      campaign: result.rows[0]
+      campaign: { id }
     });
   } catch (error) {
     console.error('예약 취소 실패:', error);

@@ -37,10 +37,10 @@
 docker start targetup-postgres targetup-redis targetup-mysql
 
 # 2. 백엔드
-cd "C:\Users\ceo\OneDrive\바탕 화면\projects\targetup\packages\backend" && npm run dev
+cd "C:\Users\ceo\projects\targetup\packages\backend" && npm run dev
 
 # 3. 프론트엔드
-cd "C:\Users\ceo\OneDrive\바탕 화면\projects\targetup\packages\frontend" && npm run dev
+cd "C:\Users\ceo\projects\targetup\packages\frontend" && npm run dev
 
 # 4. 코드 수정 → 로컬 테스트 → 완료 후:
 git add -A
@@ -90,7 +90,7 @@ cd C:\projects\qtmsg\bin
 
 ## 3. 주요 파일 경로
 ```
-C:\Users\ceo\OneDrive\바탕 화면\projects\targetup\  (로컬)
+C:\Users\ceo\projects\targetup\  (로컬)
 /home/administrator/targetup-app/  (서버)
 ├── packages/
 │   ├── backend/

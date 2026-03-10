@@ -6,7 +6,7 @@ import { authenticate } from '../middlewares/auth';
 import { extractVarCatalog } from '../services/ai';
 import { replaceVariables } from '../utils/messageUtils';
 import { SUCCESS_CODES, PENDING_CODES, SPAM_RESULT } from '../utils/sms-result-map';
-import { prepaidDeduct, prepaidRefund } from './campaigns';
+import { prepaidDeduct, prepaidRefund } from '../utils/prepaid';
 
 const router = Router();
 

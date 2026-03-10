@@ -651,7 +651,7 @@ const dbCol = dbColMap[fieldKey] || fieldKey;
 1. **TypeScript 타입 체크:** `node -e "require('typescript').createProgram(...)"`
 2. **Toast 타입 확장:** Dashboard.tsx의 toast type에 `'warning'` 추가
 3. **공통 유틸:** `hasEmoji()` 함수를 `utils/emoji.ts`로 분리 검토
-4. **프로젝트 폴더 복사:** 수정 완료 후 `C:\Users\ceo\OneDrive\바탕 화면\projects\targetup` 폴더로 복사
+4. **프로젝트 폴더:** `C:\Users\ceo\projects\targetup` (OneDrive 경로에서 이전 완료 2026-03-10)
 5. **배포:** `tp-push` & `tp-full`
 
 ---

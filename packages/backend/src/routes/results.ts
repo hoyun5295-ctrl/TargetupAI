@@ -1,7 +1,7 @@
 import { Request, Response, Router } from 'express';
 import { mysqlQuery, query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
-import { getCompanySmsTablesWithLogs } from './campaigns';
+import { getCompanySmsTablesWithLogs } from '../utils/sms-queue';
 import { STATUS_CODE_MAP, CARRIER_MAP, SUCCESS_CODES, PENDING_CODES, getStatusLabel, getStatusType, getCarrierLabel, isSuccess } from '../utils/sms-result-map';
 import { DEFAULT_COSTS, redis, CACHE_TTL } from '../config/defaults';
 

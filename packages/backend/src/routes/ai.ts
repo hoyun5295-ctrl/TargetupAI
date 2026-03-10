@@ -5,6 +5,7 @@ import { checkAPIStatus, extractVarCatalog, generateCustomMessages, generateMess
 import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getGenderVariants, getRegionVariants } from '../utils/normalize';
 import { FIELD_MAP } from '../utils/standard-field-map';
 import { isValidCustomFieldKey } from '../utils/safe-field-name';
+import { getStoreScope } from '../utils/store-scope';
 
 
 // ============================================================
@@ -303,16 +304,17 @@ router.post('/recommend-target', async (req: Request, res: Response) => {
     const hasKakaoProfile = parseInt(kakaoProfileResult.rows[0].count) > 0;
     (companyInfo as any).has_kakao_profile = hasKakaoProfile;
 
-    // 일반 사용자는 본인 store_codes에 해당하는 고객만
+    // ★ B16-01: 브랜드 격리 — store-scope 컨트롤타워
     let storeFilter = '';
     const baseParams: any[] = [companyId];
 
     if (userType === 'company_user' && userId) {
-      const userResult = await query('SELECT store_codes FROM users WHERE id = $1', [userId]);
-      const storeCodes = userResult.rows[0]?.store_codes;
-      if (storeCodes && storeCodes.length > 0) {
+      const scope = await getStoreScope(companyId, userId);
+      if (scope.type === 'filtered') {
         storeFilter = ' AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = $1 AND store_code = ANY($2::text[]))';
-        baseParams.push(storeCodes);
+        baseParams.push(scope.storeCodes);
+      } else if (scope.type === 'blocked') {
+        return res.status(403).json({ error: '소속 브랜드가 지정되지 않았습니다. 관리자에게 문의하세요.' });
       }
     }
 
@@ -468,15 +470,17 @@ router.post('/recount-target', authenticate, async (req: Request, res: Response)
     }
 
     // 사용자 매장 필터 (일반 사용자는 본인 store_codes만)
+    // ★ B16-01: 브랜드 격리 — store-scope 컨트롤타워
     let storeFilter = '';
     const baseParams: any[] = [companyId];
 
     if (userType === 'company_user' && userId) {
-      const userResult = await query('SELECT store_codes FROM users WHERE id = $1', [userId]);
-      const storeCodes = userResult.rows[0]?.store_codes;
-      if (storeCodes && storeCodes.length > 0) {
+      const scope = await getStoreScope(companyId, userId);
+      if (scope.type === 'filtered') {
         storeFilter = ' AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = $1 AND store_code = ANY($2::text[]))';
-        baseParams.push(storeCodes);
+        baseParams.push(scope.storeCodes);
+      } else if (scope.type === 'blocked') {
+        return res.status(403).json({ error: '소속 브랜드가 지정되지 않았습니다. 관리자에게 문의하세요.' });
       }
     }
 
@@ -538,15 +542,18 @@ router.post('/parse-briefing', authenticate, async (req: Request, res: Response)
     const result = await parseBriefing(briefing.trim());
 
     // 사용자 매장 필터 (일반 사용자는 본인 store_codes만)
+    // ★ B16-01: store_codes 없는 company_user → 차단
     let storeFilter = '';
     const baseParams: any[] = [companyId];
 
+    // ★ B16-01: 브랜드 격리 — store-scope 컨트롤타워
     if (userType === 'company_user' && userId) {
-      const userResult = await query('SELECT store_codes FROM users WHERE id = $1', [userId]);
-      const storeCodes = userResult.rows[0]?.store_codes;
-      if (storeCodes && storeCodes.length > 0) {
+      const scope = await getStoreScope(companyId, userId);
+      if (scope.type === 'filtered') {
         storeFilter = ' AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = $1 AND store_code = ANY($2::text[]))';
-        baseParams.push(storeCodes);
+        baseParams.push(scope.storeCodes);
+      } else if (scope.type === 'blocked') {
+        return res.status(403).json({ error: '소속 브랜드가 지정되지 않았습니다. 관리자에게 문의하세요.' });
       }
     }
 
