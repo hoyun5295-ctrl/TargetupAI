@@ -544,8 +544,8 @@ export default function TargetSendModal({
                 </div>
               </div>
 
-              {/* MMS 이미지 업로드 영역 */}
-              {(targetMsgType === 'MMS' || mmsUploadedImages.length > 0) && (
+              {/* MMS 이미지 업로드 영역 — B16-05: MMS 탭에서만 표시 (SMS/LMS 전환 시 잔존 방지) */}
+              {targetMsgType === 'MMS' && (
                 <div className="px-3 py-2 border-t bg-amber-50/50 cursor-pointer hover:bg-amber-100/50 transition-colors" onClick={() => setShowMmsUploadModal(true)}>
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-semibold text-gray-600">🖼️ MMS 이미지</span>

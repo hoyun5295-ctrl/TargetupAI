@@ -193,7 +193,74 @@
 - **원인:** sync-results 로직이 campaigns.ts 로컬 함수로 갇혀 있어 다른 곳에서 접근 불가
 - **수정:** campaign-lifecycle.ts의 `syncCampaignResults()` 함수로 추출, campaigns.ts sync-results 라우트에서 호출
 
-#### 🔧 다음 세션에서 작업할 버그 (Harold님 컨펌 완료, 하나씩 진행)
+#### 🔧 1순위: 추가 컨트롤타워 생성 (Harold님 컨펌 완료)
+
+> **배경:** D63에서 sms-queue.ts, prepaid.ts, campaign-lifecycle.ts 3개 컨트롤타워를 만들어 campaigns.ts 3030줄→2340줄로 리팩토링한 결과, 예약취소 버그(B16-02)가 근본 해결됨. Harold님 피드백: "유틸파일을 기준으로 잡고 통일하는게 문제점 잡기엔 좋더라고". 동적치환 때 standard-field-map.ts로 통일한 것과 같은 패턴.
+> **원칙:** 하나씩 생성 → Harold님 컨펌 → 적용. 기존 로직 변경 없이 위치만 이동(함수 추출). 기간계 무접촉.
+
+**CT-01: `utils/customer-filter.ts` — 고객 필터/쿼리 빌더 컨트롤타워** — ⏳ 대기 (최우선)
+- **문제:** campaigns.ts, customers.ts, ai.ts 3곳에서 **거의 동일한** 필터 빌딩 로직이 각각 존재
+  - campaigns.ts: `buildFilterQuery()` (L891~) — 80줄
+  - customers.ts: `buildDynamicFilter()` (L15~) — 134줄
+  - ai.ts: `buildFilterWhereClause()` (L14~) — 55줄
+- **중복 내용:** 성별 필터(`buildGenderFilter`), 등급 필터(`buildGradeFilter`), 지역 필터(`buildRegionFilter`), 연령 범위(minAge/maxAge), 숫자 필드 비교(gte/lte/between), 날짜 필드 처리, 커스텀 필드 JSONB 처리, 매장 코드/이름 필터, 구매금액/일자, 포인트 — 전부 3곳에서 각각 구현
+- **합치면:** 약 269줄 중복 제거
+- **효과:** B16-06(타겟 추출 오류) 같은 필터 버그를 한 곳만 고치면 3경로 자동 반영
+- **설계:**
+  ```typescript
+  // utils/customer-filter.ts
+  interface FilterResult { where: string; params: any[]; nextIndex: number; }
+  function buildCustomerFilterWhere(filters: any, startParamIndex: number): FilterResult
+  // 내부에서 buildGenderFilter, buildGradeFilter, buildRegionFilter 등 사용
+  // campaigns.ts, customers.ts, ai.ts에서 import하여 사용
+  ```
+- **적용 파일:** campaigns.ts(buildFilterQuery 교체), customers.ts(buildDynamicFilter 교체), ai.ts(buildFilterWhereClause 교체)
+
+**CT-02: `utils/permission-helper.ts` — 권한/스코프 헬퍼 컨트롤타워** — ⏳ 대기
+- **문제:** `getCompanyScope()` 함수가 manage-scheduled.ts, manage-stats.ts, manage-callbacks.ts 등 **6개 이상 파일에 복붙**으로 존재. 슈퍼관리자/고객사관리자/일반사용자 분기 + 사용자 필터 + 매장 스코프 적용 로직이 8개 이상 라우트에서 각각 구현.
+- **중복 패턴 3가지:**
+  - (A) `getCompanyScope(req)` — super_admin이면 query에서, 아니면 토큰에서 companyId 추출. manage-stats.ts, manage-callbacks.ts, analysis.ts 등 6곳 동일 복붙
+  - (B) 사용자 필터 — `company_user`면 `created_by = userId` 조건 추가, `company_admin`이면 `filter_user_id` 지원. campaigns.ts, results.ts, manage-stats.ts 등 8곳 유사 구현
+  - (C) 매장 스코프 — `store-scope.ts`의 `getStoreScope()` 호출 후 WHERE 절 추가. campaigns.ts, customers.ts, ai.ts 등 5곳 유사 패턴
+- **합치면:** 약 150줄 이상 중복 제거, 보안 일관성 확보
+- **효과:** 권한 체크 누락 버그 방지 (하나 고치면 8곳 자동 반영). 특히 사용자 필터/매장 스코프 적용이 누락되는 보안 리스크 제거
+- **설계:**
+  ```typescript
+  // utils/permission-helper.ts
+  interface CompanyScope { companyId: string; isAdmin: boolean; isSuperAdmin: boolean; userId: string; }
+  interface UserFilter { where: string; params: any[]; nextIndex: number; }
+  function getCompanyScope(req: Request): CompanyScope
+  function buildUserFilter(req: Request, startParamIndex: number): UserFilter
+  function buildStoreFilter(req: Request, companyId: string, startParamIndex: number): Promise<FilterResult>
+  ```
+- **적용 파일:** manage-stats.ts, manage-callbacks.ts, analysis.ts, campaigns.ts, results.ts, customers.ts, ai.ts, unsubscribes.ts (8개)
+
+**CT-03: `utils/unsubscribe-helper.ts` — 수신거부 관리 컨트롤타워** — ⏳ 대기
+- **문제:** 수신거부 필터 SQL 패턴(`AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.company_id = c.company_id AND u.phone = c.phone)`)이 campaigns.ts, customers.ts, ai.ts, upload.ts 4곳에 산재. `syncCustomerOptIn` 로직(단건/벌크)이 unsubscribes.ts에만 존재.
+- **효과:** 수신거부 필터 누락 방지 (B13-07 같은 버그 재발 차단), opt-in 동기화 로직 재사용 가능
+- **설계:**
+  ```typescript
+  // utils/unsubscribe-helper.ts
+  function buildUnsubscribeFilter(companyIdRef: string, phoneRef: string): string
+  async function syncCustomerOptIn(companyId: string, phones: string[], optIn: boolean): Promise<void>
+  ```
+- **적용 파일:** campaigns.ts, customers.ts, ai.ts, upload.ts, unsubscribes.ts
+
+**CT-04: `utils/stats-aggregation.ts` — 통계 집계 컨트롤타워** — ⏳ 대기
+- **문제:** manage-stats.ts와 results.ts에서 날짜 범위 필터링(KST 타임존 처리), 캠페인 성공/실패 집계 쿼리, 월별/일별 그루핑 로직이 거의 동일하게 중복
+- **효과:** 통계 쿼리 변경 시 한 곳만 수정, KST 타임존 처리 일관성 확보
+- **설계:**
+  ```typescript
+  // utils/stats-aggregation.ts
+  interface DateRangeFilter { sql: string; params: any[]; nextIndex: number; }
+  function buildDateRangeFilter(startDate?: string, endDate?: string, startParamIndex?: number): DateRangeFilter
+  async function getCampaignSummary(companyId: string, options: StatsOptions): Promise<CampaignStats>
+  ```
+- **적용 파일:** manage-stats.ts, results.ts, analysis.ts
+
+---
+
+#### 🔧 2순위: 16차 버그리포트 수정 (Harold님 컨펌 완료, 하나씩 진행)
 
 **B16-03: AI 맞춤한줄에 스팸필터/담당자테스트 추가** — ⏳ 대기
 - **문제:** AI 맞춤한줄 발송 모드에만 스팸필터/담당자테스트 기능이 없음

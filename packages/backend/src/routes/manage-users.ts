@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import { authenticate, requireCompanyAdmin } from '../middlewares/auth';
 import pool, { mysqlQuery } from '../config/database';
+import { getCompanyScope } from '../utils/permission-helper';
 
 const router = Router();
 
@@ -15,11 +16,7 @@ const router = Router();
 
 router.use(authenticate, requireCompanyAdmin);
 
-function getCompanyScope(req: Request): string | null {
-  const { userType, companyId } = (req as any).user!;
-  if (userType === 'super_admin') return (req.query.companyId as string) || null;
-  return companyId!;
-}
+// ★ CT-02: getCompanyScope → permission-helper.ts 컨트롤타워로 통합
 
 // GET / - 사용자 목록 조회 (+ storeCodeList 포함)
 router.get('/', async (req: Request, res: Response) => {

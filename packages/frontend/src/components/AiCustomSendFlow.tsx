@@ -40,6 +40,15 @@ interface AiCustomSendFlowProps {
   selectedCallback: string;
   isAd: boolean;
   optOutNumber: string;
+  // B16-03: 스팸필터/담당자테스트
+  setShowSpamFilter?: (v: boolean) => void;
+  setSpamFilterData?: (data: any) => void;
+  handleTestSend?: () => void;
+  testSending?: boolean;
+  testCooldown?: boolean;
+  testSentResult?: string | null;
+  sampleCustomer?: Record<string, any>;
+  isSpamFilterLocked?: boolean;
 }
 
 interface PromotionCard {
@@ -88,6 +97,8 @@ const CATEGORY_ICONS: Record<string, any> = {
 
 export default function AiCustomSendFlow({
   onClose, onConfirmSend, brandName, callbackNumbers, selectedCallback, isAd, optOutNumber,
+  setShowSpamFilter, setSpamFilterData, handleTestSend, testSending, testCooldown, testSentResult,
+  sampleCustomer, isSpamFilterLocked,
 }: AiCustomSendFlowProps) {
   const [currentStep, setCurrentStep] = useState(1);
   const TOTAL_STEPS = 4;
@@ -728,6 +739,12 @@ export default function AiCustomSendFlow({
               ) : (
                 <div className="text-center py-8 text-gray-400">메시지를 불러오는 중...</div>
               )}
+              {/* B16-03: 담당자 테스트 결과 표시 */}
+              {testSentResult && (
+                <div className="mt-3 mx-1 p-3 bg-gray-50 rounded-lg text-sm whitespace-pre-wrap border">
+                  {testSentResult}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -752,34 +769,76 @@ export default function AiCustomSendFlow({
               </button>
             )}
             {currentStep === 4 && (
-              <button onClick={() => {
-                if (onConfirmSend && variants[selectedVariantIdx]) {
-                  // 버그 #4: SMS 바이트 초과 시 발송 차단
-                  const selectedMsg = variants[selectedVariantIdx].message_text || '';
-                  const totalBytes = calculateBytes(wrapAdText(selectedMsg));
-                  if (channel === 'SMS' && totalBytes > 90) {
-                    showAlert('SMS 바이트 초과', `선택한 문안이 SMS 90바이트를 초과합니다 (${totalBytes}바이트).\nLMS로 전환하거나 문안을 수정해주세요.`, 'warning');
-                    return;
+              <>
+                {/* B16-03: 담당자 테스트 버튼 */}
+                {handleTestSend && (
+                  <button
+                    onClick={handleTestSend}
+                    disabled={testSending || testCooldown || variants.length === 0}
+                    className="flex items-center gap-1.5 px-4 py-2.5 bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium rounded-lg disabled:opacity-50 transition-colors"
+                  >
+                    {testSending ? '📱 발송 중...' : testCooldown ? '⏳ 10초 대기' : '📱 담당자테스트'}
+                  </button>
+                )}
+                {/* B16-03: 스팸필터 테스트 버튼 */}
+                {setShowSpamFilter && setSpamFilterData && (
+                  <button
+                    onClick={() => {
+                      if (isSpamFilterLocked) return;
+                      const msg = variants[selectedVariantIdx]?.message_text || '';
+                      const cb = selectedCallback || '';
+                      const sc = sampleCustomer || {};
+                      const replaceVars = (text: string) => {
+                        if (!text) return text;
+                        let result = text;
+                        Object.entries(sc).forEach(([k, v]) => { result = result.replace(new RegExp(`%${k}%`, 'g'), String(v)); });
+                        result = result.replace(/%[^%\s]{1,20}%/g, '');
+                        return result;
+                      };
+                      const smsRaw = isAdLocal ? `(광고)${msg}\n무료거부${optOutNumber.replace(/-/g, '')}` : msg;
+                      const lmsRaw = isAdLocal ? `(광고) ${msg}\n무료수신거부 ${formatRejectNumber(optOutNumber)}` : msg;
+                      const smsMsg = replaceVars(smsRaw);
+                      const lmsMsg = replaceVars(lmsRaw);
+                      const subj = variants[selectedVariantIdx]?.subject || '';
+                      setSpamFilterData({ sms: smsMsg, lms: lmsMsg, callback: cb, msgType: channel, subject: subj, firstRecipient: sc });
+                      setShowSpamFilter(true);
+                    }}
+                    disabled={variants.length === 0}
+                    className={`flex items-center gap-1.5 px-4 py-2.5 bg-gray-200 hover:bg-gray-300 text-gray-700 text-sm font-medium rounded-lg transition-colors ${isSpamFilterLocked ? 'opacity-60 cursor-not-allowed' : ''}`}
+                  >
+                    {isSpamFilterLocked ? '🔒' : '🛡️'} 스팸필터
+                  </button>
+                )}
+                {/* 발송 확정 버튼 */}
+                <button onClick={() => {
+                  if (onConfirmSend && variants[selectedVariantIdx]) {
+                    // 버그 #4: SMS 바이트 초과 시 발송 차단
+                    const selectedMsg = variants[selectedVariantIdx].message_text || '';
+                    const totalBytes = calculateBytes(wrapAdText(selectedMsg));
+                    if (channel === 'SMS' && totalBytes > 90) {
+                      showAlert('SMS 바이트 초과', `선택한 문안이 SMS 90바이트를 초과합니다 (${totalBytes}바이트).\nLMS로 전환하거나 문안을 수정해주세요.`, 'warning');
+                      return;
+                    }
+                    onConfirmSend({
+                      variant: variants[selectedVariantIdx],
+                      targetFilters,
+                      targetCondition: editingTarget ? editedTarget : targetCondition,
+                      promotionCard: (editingCard ? editedCard : promotionCard)!,
+                      channel,
+                      tone,
+                      url: url.trim(),
+                      briefing: briefing.trim(),
+                      personalFields: selectedFields,
+                      estimatedCount,
+                      unsubscribeCount,
+                      isAd: isAdLocal,
+                    });
                   }
-                  onConfirmSend({
-                    variant: variants[selectedVariantIdx],
-                    targetFilters,
-                    targetCondition: editingTarget ? editedTarget : targetCondition,
-                    promotionCard: (editingCard ? editedCard : promotionCard)!,
-                    channel,
-                    tone,
-                    url: url.trim(),
-                    briefing: briefing.trim(),
-                    personalFields: selectedFields,
-                    estimatedCount,
-                    unsubscribeCount,
-                    isAd: isAdLocal,
-                  });
-                }
-              }} disabled={variants.length === 0}
-                className="flex items-center gap-2 px-5 py-2.5 bg-green-700 hover:bg-green-800 text-white text-sm font-medium rounded-lg disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
-                <CheckCircle2 className="w-4 h-4" /> 발송 확정 ({estimatedCount.toLocaleString()}명)
-              </button>
+                }} disabled={variants.length === 0}
+                  className="flex items-center gap-2 px-5 py-2.5 bg-green-700 hover:bg-green-800 text-white text-sm font-medium rounded-lg disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                  <CheckCircle2 className="w-4 h-4" /> 발송 확정 ({estimatedCount.toLocaleString()}명)
+                </button>
+              </>
             )}
             {currentStep === 1 && (
               <button onClick={() => setCurrentStep(2)} disabled={!canGoNext()}

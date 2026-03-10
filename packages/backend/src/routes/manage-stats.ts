@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { authenticate, requireCompanyAdmin } from '../middlewares/auth';
 import pool, { mysqlQuery } from '../config/database';
 import { DEFAULT_COSTS } from '../config/defaults';
+import { getCompanyScope } from '../utils/permission-helper';
 
 const router = Router();
 
@@ -21,11 +22,7 @@ function getTestSmsTable(): string {
 
 router.use(authenticate, requireCompanyAdmin);
 
-function getCompanyScope(req: Request): string | null {
-  const { userType, companyId } = (req as any).user!;
-  if (userType === 'super_admin') return (req.query.companyId as string) || null;
-  return companyId!;
-}
+// ★ CT-02: getCompanyScope → permission-helper.ts 컨트롤타워로 통합
 
 // GET /send - 발송 통계 (요약 + 페이징된 일별/월별) + 테스트 발송 분리
 router.get('/send', async (req: Request, res: Response) => {

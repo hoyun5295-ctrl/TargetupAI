@@ -1037,8 +1037,8 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
   };
 
   // 직접 타겟 추출 완료 콜백 (DirectTargetFilterModal → Dashboard)
-  // ★ D43-3c: fieldsMeta 파라미터 추가
-  const handleTargetExtracted = async (recipients: any[], count: number, fieldsMeta: FieldMeta[]) => {
+  // ★ D43-3c: fieldsMeta 파라미터 추가, B16-07: selectedCallbackPhone 추가
+  const handleTargetExtracted = async (recipients: any[], count: number, fieldsMeta: FieldMeta[], selectedCallbackPhone?: string) => {
     try {
       const token = localStorage.getItem('token');
       // 080 수신거부번호 로드
@@ -1058,8 +1058,18 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
       const cbData = await cbRes.json();
       if (cbData.success) {
         setCallbackNumbers(cbData.numbers || []);
-        const defaultCb = cbData.numbers?.find((n: any) => n.is_default);
-        if (defaultCb) setSelectedCallback(defaultCb.phone);
+        // ★ B16-07: 직접타겟에서 선택한 회신번호 우선 적용
+        if (selectedCallbackPhone === '__individual__') {
+          setUseIndividualCallback(true);
+          setSelectedCallback('');
+        } else if (selectedCallbackPhone) {
+          setUseIndividualCallback(false);
+          setSelectedCallback(selectedCallbackPhone);
+        } else {
+          setUseIndividualCallback(false);
+          const defaultCb = cbData.numbers?.find((n: any) => n.is_default);
+          if (defaultCb) setSelectedCallback(defaultCb.phone);
+        }
       }
     } catch (err) {
       console.error('설정 로드 실패:', err);
@@ -1771,6 +1781,14 @@ const campaignData = {
           selectedCallback={selectedCallback}
           isAd={isAd}
           optOutNumber={optOutNumber}
+          setShowSpamFilter={setShowSpamFilter}
+          setSpamFilterData={setSpamFilterData}
+          handleTestSend={handleTestSend}
+          testSending={testSending}
+          testCooldown={testCooldown}
+          testSentResult={testSentResult}
+          sampleCustomer={sampleCustomer}
+          isSpamFilterLocked={isSpamFilterLocked}
         />
       )}
 
@@ -2591,6 +2609,7 @@ const campaignData = {
           show={showDirectTargeting}
           onClose={() => setShowDirectTargeting(false)}
           onExtracted={handleTargetExtracted}
+          callbackNumbers={callbackNumbers}
         />
 
         <FileUploadMappingModal
@@ -2928,8 +2947,8 @@ const campaignData = {
                       ⚠️ 이모지(😀)·특수문자는 LMS 전환 또는 발송 실패 원인이 될 수 있습니다
                     </div>
                     
-                    {/* MMS 이미지 미리보기 */}
-                    {(directMsgType === 'MMS' || mmsUploadedImages.length > 0) && (
+                    {/* MMS 이미지 미리보기 — B16-05: MMS 탭에서만 표시 (SMS/LMS 전환 시 잔존 방지) */}
+                    {directMsgType === 'MMS' && (
                       <div className="mt-2 pt-2 border-t cursor-pointer hover:bg-amber-50/50 transition-colors rounded-lg p-2" onClick={() => setShowMmsUploadModal(true)}>
                         <div className="flex items-center gap-2">
                           <span className="text-xs font-semibold text-gray-600">🖼️ MMS 이미지</span>
@@ -3793,7 +3812,7 @@ const campaignData = {
             <div className="p-4">
               <div className="grid grid-cols-8 gap-1.5">
                 {/* SMS/LMS 호환 특수문자만 (EUC-KR 인코딩 지원 확인 완료) */}
-                {['★','☆','♥','♡','◆','◇','■','□','▲','△','▶','◀','●','○','◎','♤','♠','♧','♣','♢','♦','♪','♬','♩','☎','✉','♨','☀','※','☞','↑','↓','←','→','▷','◁','▽','①','②','③','④','⑤','⑥','⑦','⑧','㈜','㈔','℡','㉿','㎝','㎏','㎡','㎎'].map((char, i) => (
+                {['★','☆','♥','♡','◆','◇','■','□','▲','△','▶','◀','●','○','◎','♤','♠','♧','♣','♪','♬','♩','☎','♨','※','☞','↑','↓','←','→','▷','◁','▽','①','②','③','④','⑤','⑥','⑦','⑧','㈜','㈔','℡','㉿','㎝','㎏','㎡','㎎'].map((char, i) => (
                   <button
                     key={i}
                     onClick={() => {
@@ -3942,7 +3961,7 @@ const campaignData = {
         adTextEnabled={adTextEnabled}
         optOutNumber={optOutNumber}
         onSmsOverride={() => { setSmsOverrideAccepted(true); setShowLmsConfirm(false); }}
-        onLmsConvert={() => { if (showTargetSend) { setTargetMsgType('LMS'); } else { setDirectMsgType('LMS'); } setShowLmsConfirm(false); }}
+        onLmsConvert={() => { if (showTargetSend) { setTargetMsgType('LMS'); } else { setDirectMsgType('LMS'); } setMmsUploadedImages([]); setShowLmsConfirm(false); }}
         getMaxByteMessage={getMaxByteMessage}
         calculateBytes={calculateBytes}
         truncateToSmsBytes={truncateToSmsBytes}
@@ -3951,7 +3970,7 @@ const campaignData = {
         show={showSmsConvert.show}
         showSmsConvert={showSmsConvert}
         onClose={() => setShowSmsConvert({show: false, from: 'direct', currentBytes: 0, smsBytes: 0, count: 0})}
-        onSmsConvert={() => { if (showSmsConvert.from === 'target') { setTargetMsgType('SMS'); } else { setDirectMsgType('SMS'); } setShowSmsConvert({show: false, from: 'direct', currentBytes: 0, smsBytes: 0, count: 0}); }}
+        onSmsConvert={() => { if (showSmsConvert.from === 'target') { setTargetMsgType('SMS'); } else { setDirectMsgType('SMS'); } setMmsUploadedImages([]); setShowSmsConvert({show: false, from: 'direct', currentBytes: 0, smsBytes: 0, count: 0}); }}
       />
         
               <ScheduleTimeModal

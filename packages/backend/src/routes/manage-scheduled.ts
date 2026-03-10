@@ -3,6 +3,7 @@ import { authenticate, requireCompanyAdmin } from '../middlewares/auth';
 import { query } from '../config/database';
 // ★ 메시징 컨트롤타워 — 취소 로직 통합
 import { cancelCampaign } from '../utils/campaign-lifecycle';
+import { getCompanyScope } from '../utils/permission-helper';
 
 const router = Router();
 
@@ -15,11 +16,7 @@ const router = Router();
 
 router.use(authenticate, requireCompanyAdmin);
 
-function getCompanyScope(req: Request): string | null {
-  const { userType, companyId } = req.user!;
-  if (userType === 'super_admin') return (req.query.companyId as string) || null;
-  return companyId!;
-}
+// ★ CT-02: getCompanyScope → permission-helper.ts 컨트롤타워로 통합
 
 // GET / - 예약된 캠페인 목록 조회
 router.get('/', async (req: Request, res: Response) => {

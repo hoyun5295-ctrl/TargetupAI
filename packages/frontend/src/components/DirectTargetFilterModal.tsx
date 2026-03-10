@@ -10,14 +10,25 @@ export interface FieldMeta {
   category: string;
 }
 
+interface CallbackNumber {
+  id: string;
+  phone: string;
+  label: string;
+  is_default: boolean;
+  store_code?: string;
+  store_name?: string;
+}
+
 interface DirectTargetFilterModalProps {
   show: boolean;
   onClose: () => void;
   // ★ D43-3c: fieldsMeta 추가
-  onExtracted: (recipients: any[], count: number, fieldsMeta: FieldMeta[]) => void;
+  onExtracted: (recipients: any[], count: number, fieldsMeta: FieldMeta[], selectedCallbackPhone?: string) => void;
+  // ★ B16-07: 회신번호 목록
+  callbackNumbers?: CallbackNumber[];
 }
 
-export default function DirectTargetFilterModal({ show, onClose, onExtracted }: DirectTargetFilterModalProps) {
+export default function DirectTargetFilterModal({ show, onClose, onExtracted, callbackNumbers = [] }: DirectTargetFilterModalProps) {
   // 필드 데이터
   const [enabledFields, setEnabledFields] = useState<any[]>([]);
   const [filterOptions, setFilterOptions] = useState<Record<string, string[]>>({});
@@ -34,6 +45,9 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
   const [targetCount, setTargetCount] = useState(0);
   const [countLoading, setCountLoading] = useState(false);
   const [extracting, setExtracting] = useState(false);
+
+  // ★ B16-07: 회신번호 선택
+  const [selectedCallbackPhone, setSelectedCallbackPhone] = useState('');
 
   // 아코디언
   const [expandedCats, setExpandedCats] = useState<Record<string, boolean>>({ basic: true });
@@ -357,7 +371,7 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
             data_type: f.data_type || 'string',
             category: f.category || 'basic',
           }));
-        onExtracted(data.recipients, data.count, meta);
+        onExtracted(data.recipients, data.count, meta, selectedCallbackPhone || undefined);
       } else {
         showAlert('타겟 추출 실패', data.error || '데이터를 추출하지 못했습니다. 조건을 확인해주세요.', 'warning');
       }
@@ -374,6 +388,7 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
     setSelectedFields(new Set());
     setFilterValues({});
     setTargetCount(0);
+    setSelectedCallbackPhone('');
     // sms_opt_in 다시 기본 선택
     const smsField = enabledFields.find((f: any) =>
       f.field_key === 'sms_opt_in' || f.field_key === 'opt_in_sms'
@@ -604,6 +619,31 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
 
         {/* 필터 영역 */}
         <div className="p-4 space-y-3 overflow-y-auto max-h-[68vh]">
+          {/* ★ B16-07: 회신번호 선택 */}
+          {callbackNumbers.length > 0 && (
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-3">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-sm font-semibold text-blue-700">📞 발송 회신번호</span>
+              </div>
+              <select
+                value={selectedCallbackPhone}
+                onChange={e => setSelectedCallbackPhone(e.target.value)}
+                className="w-full px-3 py-2 border border-blue-200 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-400 focus:border-blue-400"
+              >
+                <option value="">기본 회신번호 사용</option>
+                <option value="__individual__">📱 개별회신번호 (고객별 매장번호)</option>
+                {callbackNumbers.map(cb => (
+                  <option key={cb.id} value={cb.phone}>
+                    {cb.phone}{cb.label ? ` (${cb.label})` : ''}{cb.store_name ? ` — ${cb.store_name}` : ''}{cb.is_default ? ' ✓기본' : ''}
+                  </option>
+                ))}
+              </select>
+              {selectedCallbackPhone === '__individual__' && (
+                <p className="text-xs text-blue-600 mt-1.5">💡 각 고객의 매장번호(회신번호)로 발송됩니다. 미등록 회신번호 고객은 자동 제외됩니다.</p>
+              )}
+            </div>
+          )}
+
           {/* 헤더 바 */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">

@@ -6,171 +6,17 @@ import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getGenderVarian
 import { FIELD_MAP } from '../utils/standard-field-map';
 import { isValidCustomFieldKey } from '../utils/safe-field-name';
 import { getStoreScope } from '../utils/store-scope';
+import { buildFilterWhereClauseCompat } from '../utils/customer-filter';
 
 
-// ============================================================
-// 공통: AI 필터 → SQL WHERE 절 변환 (recommend-target, parse-briefing 공용)
-// ============================================================
+// ★ CT-01: AI 필터 → SQL WHERE 절 변환 → customer-filter.ts 컨트롤타워로 통합
+// 기존 buildFilterWhereClause를 호환 래퍼로 교체 (동일 SQL 생성, 위치만 이동)
 function buildFilterWhereClause(filters: any, startParamIndex: number): {
   sql: string;
   params: any[];
   nextIndex: number;
 } {
-  let filterWhere = '';
-  const filterParams: any[] = [];
-  let paramIndex = startParamIndex;
-
-  const getValue = (field: any) => {
-    if (!field) return null;
-    if (typeof field === 'object' && field.value !== undefined) return field.value;
-    return field;
-  };
-
-  // gender
-  const gender = getValue(filters?.gender);
-  if (gender) {
-    const standardGender = String(gender).toLowerCase();
-    const genderKey = ['m', 'male', '남', '남자', '남성'].includes(standardGender) ? 'M'
-      : ['f', 'female', '여', '여자', '여성'].includes(standardGender) ? 'F' : gender;
-    // ★ normalize 적용: DB에 어떤 형식으로 저장돼 있든 잡아냄
-    const genderResult = buildGenderFilter(genderKey, paramIndex);
-    filterWhere += genderResult.sql;
-    filterParams.push(...genderResult.params);
-    paramIndex = genderResult.nextIndex;
-  }
-
-  // age
-  const age = getValue(filters?.age);
-  if (age && Array.isArray(age) && age.length === 2) {
-    const currentYear = new Date().getFullYear();
-    filterWhere += ` AND (${currentYear} - birth_year) >= $${paramIndex++}`;
-    filterParams.push(age[0]);
-    filterWhere += ` AND (${currentYear} - birth_year) <= $${paramIndex++}`;
-    filterParams.push(age[1]);
-  }
-
-  // grade
-  const gradeFilter = filters?.grade;
-  const grade = getValue(gradeFilter);
-  if (grade) {
-    const gradeOp = gradeFilter?.operator || 'eq';
-    if (gradeOp === 'in' && Array.isArray(grade)) {
-      const gradeResult = buildGradeFilter(grade, paramIndex);
-      filterWhere += gradeResult.sql;
-      filterParams.push(...gradeResult.params);
-      paramIndex = gradeResult.nextIndex;
-    } else {
-      const gradeResult = buildGradeFilter(String(grade), paramIndex);
-      filterWhere += gradeResult.sql;
-      filterParams.push(...gradeResult.params);
-      paramIndex = gradeResult.nextIndex;
-    }
-  }
-
-  // region
-  const regionFilter = filters?.region;
-  const region = getValue(regionFilter);
-  if (region) {
-    const regionOp = regionFilter?.operator || 'eq';
-    if (regionOp === 'in' && Array.isArray(region)) {
-      const allVariants = (region as string[]).flatMap(r => getRegionVariants(r));
-      filterWhere += ` AND region = ANY($${paramIndex++}::text[])`;
-      filterParams.push(allVariants);
-    } else {
-      const regionResult = buildRegionFilter(String(region), paramIndex);
-      filterWhere += regionResult.sql;
-      filterParams.push(...regionResult.params);
-      paramIndex = regionResult.nextIndex;
-    }
-  }
-
-  // points
-  const pointsFilter = filters?.points;
-  const points = getValue(pointsFilter);
-  if (points !== null && points !== undefined) {
-    const pointsOp = pointsFilter?.operator || 'gte';
-    if (pointsOp === 'gte') {
-      filterWhere += ` AND points >= $${paramIndex++}`;
-      filterParams.push(points);
-    } else if (pointsOp === 'lte') {
-      filterWhere += ` AND points <= $${paramIndex++}`;
-      filterParams.push(points);
-    } else if (pointsOp === 'between' && Array.isArray(points)) {
-      filterWhere += ` AND points >= $${paramIndex++} AND points <= $${paramIndex++}`;
-      filterParams.push(points[0], points[1]);
-    }
-  }
-
-  // total_purchase_amount
-  const purchaseFilter = filters?.total_purchase_amount;
-  const purchaseAmt = getValue(purchaseFilter);
-  if (purchaseAmt !== null && purchaseAmt !== undefined) {
-    const purchaseOp = purchaseFilter?.operator || 'gte';
-    if (purchaseOp === 'gte') {
-      filterWhere += ` AND total_purchase_amount >= $${paramIndex++}`;
-      filterParams.push(purchaseAmt);
-    } else if (purchaseOp === 'lte') {
-      filterWhere += ` AND total_purchase_amount <= $${paramIndex++}`;
-      filterParams.push(purchaseAmt);
-    }
-  }
-
-  // recent_purchase_date
-  const recentDateFilter = filters?.recent_purchase_date;
-  const recentDate = getValue(recentDateFilter);
-  if (recentDate) {
-    const dateOp = recentDateFilter?.operator || 'gte';
-    if (dateOp === 'lte') {
-      filterWhere += ` AND recent_purchase_date <= $${paramIndex++}`;
-      filterParams.push(recentDate);
-    } else if (dateOp === 'gte') {
-      filterWhere += ` AND recent_purchase_date >= $${paramIndex++}`;
-      filterParams.push(recentDate);
-    }
-  }
-
-  // store_name
-  const storeNameFilter = filters?.store_name;
-  const storeName = getValue(storeNameFilter);
-  if (storeName) {
-    const storeOp = storeNameFilter?.operator || 'eq';
-    if (storeOp === 'eq') {
-      filterWhere += ` AND store_name = $${paramIndex++}`;
-      filterParams.push(storeName);
-    } else if (storeOp === 'in' && Array.isArray(storeName)) {
-      filterWhere += ` AND store_name = ANY($${paramIndex++}::text[])`;
-      filterParams.push(storeName);
-    }
-  }
-
-  // custom_fields — 화이트리스트 검증 적용
-  Object.keys(filters || {}).forEach(key => {
-    if (key.startsWith('custom_fields.')) {
-      const fieldName = key.replace('custom_fields.', '');
-      if (!isValidCustomFieldKey(fieldName)) return; // 무효 키 무시
-      const condition = filters[key];
-      const value = getValue(condition);
-      const operator = condition?.operator || 'eq';
-
-      if (value !== null && value !== undefined) {
-        if (operator === 'eq') {
-          filterWhere += ` AND custom_fields->>'${fieldName}' = $${paramIndex++}`;
-          filterParams.push(value);
-        } else if (operator === 'gte') {
-          filterWhere += ` AND (custom_fields->>'${fieldName}')::numeric >= $${paramIndex++}`;
-          filterParams.push(value);
-        } else if (operator === 'lte') {
-          filterWhere += ` AND (custom_fields->>'${fieldName}')::numeric <= $${paramIndex++}`;
-          filterParams.push(value);
-        } else if (operator === 'in' && Array.isArray(value)) {
-          filterWhere += ` AND custom_fields->>'${fieldName}' = ANY($${paramIndex++})`;
-          filterParams.push(value);
-        }
-      }
-    }
-  });
-
-  return { sql: filterWhere, params: filterParams, nextIndex: paramIndex };
+  return buildFilterWhereClauseCompat(filters, startParamIndex);
 }
 
 const router = Router();

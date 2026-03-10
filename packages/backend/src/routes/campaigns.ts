@@ -23,6 +23,7 @@ import {
 } from '../utils/sms-queue';
 import { prepaidDeduct, prepaidRefund } from '../utils/prepaid';
 import { cancelCampaign, syncCampaignResults } from '../utils/campaign-lifecycle';
+import { buildFilterQueryCompat } from '../utils/customer-filter';
 
 // ★ toKoreaTimeStr → utils/sms-queue.ts로 이동 (import 사용)
 
@@ -664,17 +665,20 @@ let filteredCustomers = customers.filter(
   (c: any) => !excludedPhones.includes(normalizePhone(c.phone))
 );
 
-// ★ 개별회신번호 사용 시 callback 없는 고객 제외
+// ★ B16-07: 개별회신번호 사용 시 — callback 없는 고객 + 미등록 회신번호 고객 제외
 let callbackSkippedCount = 0;
+let callbackMissingCount = 0;    // callback 필드 자체가 없는 고객
+let callbackUnregisteredCount = 0; // 미등록 회신번호 고객
 if (useIndividualCallback) {
   const beforeCount = filteredCustomers.length;
   filteredCustomers = filteredCustomers.filter((c: any) => c.callback && c.callback.trim());
-  callbackSkippedCount = beforeCount - filteredCustomers.length;
-  if (callbackSkippedCount > 0) {
-    console.log(`[개별회신번호] callback 없는 고객 ${callbackSkippedCount}명 제외 (${filteredCustomers.length}명 발송)`);
+  callbackMissingCount = beforeCount - filteredCustomers.length;
+  if (callbackMissingCount > 0) {
+    callbackSkippedCount += callbackMissingCount;
+    console.log(`[개별회신번호] callback 없는 고객 ${callbackMissingCount}명 제외 (${filteredCustomers.length}명 발송)`);
   }
 
-  // ★ #4 수정: 개별회신번호 등록 여부 검증
+  // 미등록 회신번호 고객 제외 (전체 차단 → 개별 제외)
   const callbackPhones = [...new Set(filteredCustomers.map((c: any) => normalizePhone(c.callback || '')).filter(Boolean))];
   if (callbackPhones.length > 0) {
     const registeredResult = await query(
@@ -683,13 +687,12 @@ if (useIndividualCallback) {
       [companyId]
     );
     const registeredSet = new Set((registeredResult.rows as any[]).map((r: any) => r.phone));
-    const unregistered = callbackPhones.filter(p => !registeredSet.has(p));
-    if (unregistered.length > 0) {
-      return res.status(400).json({
-        error: `미등록 회신번호 ${unregistered.length}건이 있습니다. 발신번호 관리에서 등록 후 다시 시도해주세요.`,
-        code: 'INVALID_SENDER_NUMBER',
-        unregisteredNumbers: unregistered.slice(0, 5)
-      });
+    const beforeUnregCount = filteredCustomers.length;
+    filteredCustomers = filteredCustomers.filter((c: any) => registeredSet.has(normalizePhone(c.callback || '')));
+    callbackUnregisteredCount = beforeUnregCount - filteredCustomers.length;
+    if (callbackUnregisteredCount > 0) {
+      callbackSkippedCount += callbackUnregisteredCount;
+      console.log(`[개별회신번호] 미등록 회신번호 고객 ${callbackUnregisteredCount}명 제외 (${filteredCustomers.length}명 발송)`);
     }
   }
 }
@@ -861,10 +864,12 @@ await query(
       });
 
       return res.json({
-      message: `${aiSentCount}건 발송이 시작되었습니다.${aiFailCount > 0 ? ` (${aiFailCount}건 실패, 자동 환불)` : ''}${callbackSkippedCount > 0 ? ` (회신번호 없는 ${callbackSkippedCount}명 제외)` : ''}`,
+      message: `${aiSentCount}건 발송이 시작되었습니다.${aiFailCount > 0 ? ` (${aiFailCount}건 실패, 자동 환불)` : ''}${callbackMissingCount > 0 ? ` (회신번호 없음 ${callbackMissingCount}명 제외)` : ''}${callbackUnregisteredCount > 0 ? ` (미등록 회신번호 ${callbackUnregisteredCount}명 제외)` : ''}`,
       sentCount: aiSentCount,
       failCount: aiFailCount,
       callbackSkippedCount,
+      callbackMissingCount,
+      callbackUnregisteredCount,
       runId: campaignRun.id,
       runNumber: runNumber,
     });
@@ -887,172 +892,11 @@ await query(
   }
 });
 
-// 필터 쿼리 빌더
+// ★ CT-01: 필터 쿼리 빌더 → customer-filter.ts 컨트롤타워로 통합
+// 기존 buildFilterQuery를 호환 래퍼로 교체 (동일 SQL 생성, 위치만 이동)
 function buildFilterQuery(filter: any, companyId: string) {
-  let where = '';
-  const params: any[] = [];
-  let paramIndex = 2;
-
-  if (!filter) return { where, params };
-
-  const getValue = (field: any) => {
-    if (!field) return null;
-    if (typeof field === 'object' && field.value !== undefined) return field.value;
-    return field;
-  };
-
-  // gender (normalize.ts 변형값 매칭)
-  const gender = getValue(filter.gender);
-  if (gender) {
-    const genderResult = buildGenderFilter(gender, paramIndex);
-    where += genderResult.sql;
-    params.push(...genderResult.params);
-    paramIndex = genderResult.nextIndex;
-  }
-
-  // age (배열: [30, 39])
-  const age = getValue(filter.age);
-  if (age && Array.isArray(age) && age.length === 2) {
-    where += ` AND (EXTRACT(YEAR FROM CURRENT_DATE AT TIME ZONE 'Asia/Seoul') - birth_year) >= $${paramIndex++}`;
-    params.push(age[0]);
-    where += ` AND (EXTRACT(YEAR FROM CURRENT_DATE AT TIME ZONE 'Asia/Seoul') - birth_year) <= $${paramIndex++}`;
-    params.push(age[1]);
-  }
-
-  // minAge/maxAge (기존 호환)
-  const minAge = getValue(filter.minAge) || getValue(filter.min_age);
-  if (minAge) {
-    where += ` AND (EXTRACT(YEAR FROM CURRENT_DATE AT TIME ZONE 'Asia/Seoul') - birth_year) >= $${paramIndex++}`;
-    params.push(minAge);
-  }
-
-  const maxAge = getValue(filter.maxAge) || getValue(filter.max_age);
-  if (maxAge) {
-    where += ` AND (EXTRACT(YEAR FROM CURRENT_DATE AT TIME ZONE 'Asia/Seoul') - birth_year) <= $${paramIndex++}`;
-    params.push(maxAge);
-  }
-
-  // grade (normalize.ts 변형값 매칭)
-  const grade = getValue(filter.grade);
-  if (grade) {
-    const gradeResult = buildGradeFilter(grade, paramIndex);
-    where += gradeResult.sql;
-    params.push(...gradeResult.params);
-    paramIndex = gradeResult.nextIndex;
-  }
-
-  // region (normalize.ts 변형값 매칭)
-  const regionFilter = filter.region;
-  const region = getValue(regionFilter);
-  if (region) {
-    const regionOp = regionFilter?.operator || 'eq';
-    if (regionOp === 'in' && Array.isArray(region)) {
-      const allVariants = (region as string[]).flatMap(r => getRegionVariants(r));
-      where += ` AND region = ANY($${paramIndex++}::text[])`;
-      params.push(allVariants);
-    } else {
-      const regionResult = buildRegionFilter(String(region), paramIndex);
-      where += regionResult.sql;
-      params.push(...regionResult.params);
-      paramIndex = regionResult.nextIndex;
-    }
-  }
-
-  // custom_fields 처리 (AI 필터 확장) — 화이트리스트 검증 적용
-  Object.keys(filter).forEach(key => {
-    if (key.startsWith('custom_fields.')) {
-      const fieldName = key.replace('custom_fields.', '');
-      if (!isValidCustomFieldKey(fieldName)) return; // 무효 키 무시
-      const condition = filter[key];
-      const value = getValue(condition);
-      const operator = condition?.operator || 'eq';
-
-      if (value !== null && value !== undefined) {
-        if (operator === 'eq') {
-          where += ` AND custom_fields->>'${fieldName}' = $${paramIndex++}`;
-          params.push(value);
-        } else if (operator === 'gte') {
-          where += ` AND (custom_fields->>'${fieldName}')::numeric >= $${paramIndex++}`;
-          params.push(value);
-        } else if (operator === 'lte') {
-          where += ` AND (custom_fields->>'${fieldName}')::numeric <= $${paramIndex++}`;
-          params.push(value);
-        } else if (operator === 'in' && Array.isArray(value)) {
-          where += ` AND custom_fields->>'${fieldName}' = ANY($${paramIndex++})`;
-          params.push(value);
-        }
-      }
-    }
-  });
-
-  // store_code (브랜드)
-  const storeCode = getValue(filter.store_code);
-  if (storeCode) {
-    const storeOp = filter.store_code?.operator || 'eq';
-    if (storeOp === 'in' && Array.isArray(storeCode)) {
-      where += ` AND c.store_code = ANY($${paramIndex++}::text[])`;
-      params.push(storeCode);
-    } else {
-      where += ` AND c.store_code = $${paramIndex++}`;
-      params.push(storeCode);
-    }
-  }
-
-  // store_name (매장명)
-  const storeName = getValue(filter.store_name);
-  if (storeName) {
-    const storeNameOp = filter.store_name?.operator || 'eq';
-    if (storeNameOp === 'in' && Array.isArray(storeName)) {
-      where += ` AND c.store_name = ANY($${paramIndex++}::text[])`;
-      params.push(storeName);
-    } else {
-      where += ` AND c.store_name = $${paramIndex++}`;
-      params.push(storeName);
-    }
-  }
-
-  // total_purchase_amount (총구매금액)
-  const purchaseAmount = getValue(filter.total_purchase_amount);
-  if (purchaseAmount !== null && purchaseAmount !== undefined) {
-    const purchaseOp = filter.total_purchase_amount?.operator || 'gte';
-    if (purchaseOp === 'gte') {
-      where += ` AND c.total_purchase_amount >= $${paramIndex++}`;
-      params.push(Number(purchaseAmount));
-    } else if (purchaseOp === 'lte') {
-      where += ` AND c.total_purchase_amount <= $${paramIndex++}`;
-      params.push(Number(purchaseAmount));
-    } else if (purchaseOp === 'between' && Array.isArray(purchaseAmount)) {
-      where += ` AND c.total_purchase_amount BETWEEN $${paramIndex++} AND $${paramIndex++}`;
-      params.push(Number(purchaseAmount[0]), Number(purchaseAmount[1]));
-    }
-  }
-
-  // recent_purchase_date (최근구매일)
-  const recentDate = getValue(filter.recent_purchase_date);
-  if (recentDate) {
-    const dateOp = filter.recent_purchase_date?.operator || 'days_within';
-    if (dateOp === 'days_within') {
-      where += ` AND c.recent_purchase_date >= NOW() - INTERVAL '${parseInt(recentDate)} days'`;
-    }
-  }
-
-  // points (포인트)
-  const points = getValue(filter.points);
-  if (points !== null && points !== undefined) {
-    const pointsOp = filter.points?.operator || 'gte';
-    if (pointsOp === 'gte') {
-      where += ` AND c.points >= $${paramIndex++}`;
-      params.push(Number(points));
-    } else if (pointsOp === 'lte') {
-      where += ` AND c.points <= $${paramIndex++}`;
-      params.push(Number(points));
-    } else if (pointsOp === 'between' && Array.isArray(points)) {
-      where += ` AND c.points BETWEEN $${paramIndex++} AND $${paramIndex++}`;
-      params.push(Number(points[0]), Number(points[1]));
-    }
-  }
-
-  return { where, params };
+  const result = buildFilterQueryCompat(filter, companyId);
+  return { where: result.where, params: result.params };
 }
 
 // 담당자 테스트 발송 통계
@@ -1421,15 +1265,22 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       }
     }
 
-    // 개별회신번호 사용 시 모든 수신자에게 callback 있는지 확인
+    // ★ B16-07: 개별회신번호 사용 시 — callback 없는 고객 + 미등록 회신번호 고객 제외
+    let validRecipients: any[] = [...recipients];
+    let callbackSkippedCount = 0;
+    let callbackMissingCount = 0;      // callback 필드 자체가 없는 수신자
+    let callbackUnregisteredCount = 0; // 미등록 회신번호 수신자
     if (useIndividualCallback) {
-      const missingCallback = recipients.filter((r: any) => !r.callback);
-      if (missingCallback.length > 0) {
-        return res.status(400).json({ success: false, error: `개별회신번호가 없는 수신자가 ${missingCallback.length}명 있습니다` });
+      const beforeMissing = validRecipients.length;
+      validRecipients = validRecipients.filter((r: any) => r.callback && r.callback.trim());
+      callbackMissingCount = beforeMissing - validRecipients.length;
+      if (callbackMissingCount > 0) {
+        callbackSkippedCount += callbackMissingCount;
+        console.log(`[직접발송-개별회신번호] callback 없는 수신자 ${callbackMissingCount}명 제외`);
       }
 
-      // ★ #4 수정: 개별회신번호 등록 여부 검증
-      const callbackPhones = [...new Set(recipients.map((r: any) => normalizePhone(r.callback || '')).filter(Boolean))];
+      // 미등록 회신번호 고객 제외 (전체 차단 → 개별 제외)
+      const callbackPhones = [...new Set(validRecipients.map((r: any) => normalizePhone(r.callback || '')).filter(Boolean))];
       if (callbackPhones.length > 0) {
         const registeredResult = await query(
           `SELECT REPLACE(phone_number, '-', '') as phone FROM sender_numbers WHERE company_id = $1 AND is_active = true
@@ -1437,20 +1288,22 @@ router.post('/direct-send', async (req: Request, res: Response) => {
           [companyId]
         );
         const registeredSet = new Set((registeredResult.rows as any[]).map((r: any) => r.phone));
-        const unregistered = callbackPhones.filter(p => !registeredSet.has(p));
-        if (unregistered.length > 0) {
-          return res.status(400).json({
-            success: false,
-            error: `미등록 회신번호 ${unregistered.length}건이 있습니다. 발신번호 관리에서 등록 후 다시 시도해주세요.`,
-            code: 'INVALID_SENDER_NUMBER',
-            unregisteredNumbers: unregistered.slice(0, 5)
-          });
+        const beforeUnreg = validRecipients.length;
+        validRecipients = validRecipients.filter((r: any) => registeredSet.has(normalizePhone(r.callback || '')));
+        callbackUnregisteredCount = beforeUnreg - validRecipients.length;
+        if (callbackUnregisteredCount > 0) {
+          callbackSkippedCount += callbackUnregisteredCount;
+          console.log(`[직접발송-개별회신번호] 미등록 회신번호 수신자 ${callbackUnregisteredCount}명 제외 (${validRecipients.length}명 발송)`);
         }
+      }
+
+      if (validRecipients.length === 0) {
+        return res.status(400).json({ success: false, error: '발송 대상이 없습니다. (개별회신번호 없음 또는 미등록)' });
       }
     }
 
     // 0. 금액필터 적용 (targetFilter가 있을 경우)
-    let targetFilteredRecipients = recipients;
+    let targetFilteredRecipients = validRecipients;
     if (targetFilter && Object.keys(targetFilter).length > 0) {
       const amountFields = Object.keys(targetFilter).filter(k =>
         k.includes('amount') || k.includes('purchase') || k.includes('금액')
@@ -1831,7 +1684,10 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       sentCount: directTotalSent,
       failCount: directFailTotal,
       unsubscribeCount: excludedCount,
-      message: `${directTotalSent}건 발송 ${scheduled ? '예약' : '완료'}${directFailTotal > 0 ? ` (${directFailTotal}건 실패, 자동 환불)` : ''}${excludedCount > 0 ? ` (수신거부 ${excludedCount}건 제외)` : ''}`
+      callbackSkippedCount,
+      callbackMissingCount,
+      callbackUnregisteredCount,
+      message: `${directTotalSent}건 발송 ${scheduled ? '예약' : '완료'}${directFailTotal > 0 ? ` (${directFailTotal}건 실패, 자동 환불)` : ''}${excludedCount > 0 ? ` (수신거부 ${excludedCount}건 제외)` : ''}${callbackMissingCount > 0 ? ` (회신번호 없음 ${callbackMissingCount}명 제외)` : ''}${callbackUnregisteredCount > 0 ? ` (미등록 회신번호 ${callbackUnregisteredCount}명 제외)` : ''}`
     });
 
     } catch (sendError) {

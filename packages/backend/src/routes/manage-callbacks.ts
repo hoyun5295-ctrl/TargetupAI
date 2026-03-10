@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { authenticate, requireCompanyAdmin } from '../middlewares/auth';
 import pool from '../config/database';
+import { getCompanyScope } from '../utils/permission-helper';
 
 const router = Router();
 
@@ -13,11 +14,7 @@ const router = Router();
 
 router.use(authenticate, requireCompanyAdmin);
 
-function getCompanyScope(req: Request): string | null {
-  const { userType, companyId } = (req as any).user!;
-  if (userType === 'super_admin') return (req.query.companyId as string) || null;
-  return companyId!;
-}
+// ★ CT-02: getCompanyScope → permission-helper.ts 컨트롤타워로 통합
 
 // 고객사관리자 자체등록 허용 여부 확인
 async function checkSelfRegisterAllowed(companyId: string): Promise<boolean> {
