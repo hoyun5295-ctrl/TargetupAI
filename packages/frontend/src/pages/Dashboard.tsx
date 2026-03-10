@@ -914,13 +914,11 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
   const loadRecentCampaigns = async () => {
     try {
       const token = localStorage.getItem('token');
-      // ★ sending 상태 캠페인이 있을 수 있으므로 결과 동기화 먼저 실행
-      try {
-        await fetch('/api/campaigns/sync-results', {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        });
-      } catch {}
+      // ★ B8-13: sync-results를 fire-and-forget으로 변경 (대량 캠페인 시 대시보드 로딩 지연 방지)
+      fetch('/api/campaigns/sync-results', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      }).catch(() => {});
       const res = await fetch('/api/campaigns?limit=10', {
         headers: { Authorization: `Bearer ${token}` },
       });

@@ -871,18 +871,22 @@ router.post('/', async (req: Request, res: Response) => {
       kakaoAttachmentJson,  // 버튼/이미지 JSON
       kakaoCarouselJson,    // 캐러셀 JSON
       kakaoResendType,      // SM/LM/NO
+      // ★ B8-04: 회신번호 필드
+      callback,               // 공통 회신번호
+      useIndividualCallback,  // 개별회신번호 사용 여부
     } = req.body;
 
     if (!campaignName || !messageType || !messageContent) {
       return res.status(400).json({ error: '필수 항목을 입력하세요.' });
     }
 
-    // 타겟 인원 계산 (sms_opt_in 조건 포함)
+    // ★ B8-08: 타겟 인원 계산 (sms_opt_in + 수신거부 제외)
     let targetCount = 0;
     if (targetFilter) {
       const filterQuery = buildFilterQuery(targetFilter, companyId);
       const countResult = await query(
-        `SELECT COUNT(*) FROM customers WHERE company_id = $1 AND is_active = true AND sms_opt_in = true ${filterQuery.where}`,
+        `SELECT COUNT(*) FROM customers c WHERE c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true ${filterQuery.where}
+         AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.company_id = c.company_id AND u.phone = c.phone)`,
         [companyId, ...filterQuery.params]
       );
       targetCount = parseInt(countResult.rows[0].count);
@@ -894,8 +898,9 @@ router.post('/', async (req: Request, res: Response) => {
         message_content, subject, message_subject, message_template, scheduled_at, is_ad, target_count, created_by,
         event_start_date, event_end_date, mms_image_paths,
         send_channel, kakao_bubble_type, kakao_sender_key, kakao_targeting,
-        kakao_attachment_json, kakao_carousel_json, kakao_resend_type
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
+        kakao_attachment_json, kakao_carousel_json, kakao_resend_type,
+        callback_number, use_individual_callback
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
       RETURNING *`,
       [
         companyId, campaignName, messageType, JSON.stringify(targetFilter),
@@ -908,7 +913,8 @@ router.post('/', async (req: Request, res: Response) => {
         kakaoTargeting || 'I',
         kakaoAttachmentJson || null,
         kakaoCarouselJson || null,
-        kakaoResendType || 'SM'
+        kakaoResendType || 'SM',
+        callback || null, useIndividualCallback || false
       ]
     );
 
@@ -1037,13 +1043,12 @@ router.post('/:id/send', async (req: Request, res: Response) => {
     const storeParamIdx = 1 + filterQuery.params.length + 1;
     const storeFilterFinal = storeFilter.replace('$STORE_IDX', `$${storeParamIdx}`);
 
-    // ★ 동적 SELECT: field_mappings 기반으로 필요한 컬럼만 자동 조회
-    const unsubParamIdx = 1 + filterQuery.params.length + storeParams.length + 1;
+    // ★ B8-08 수정: 수신거부 기준을 company_id로 통일 (user_id 의존 제거 — 같은 회사 내 모든 수신거부 적용)
     const customersResult = await query(
       `SELECT ${selectColumns} FROM customers c
        WHERE c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true ${filterQuery.where}${storeFilterFinal}
-       AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${unsubParamIdx} AND u.phone = c.phone)`,
-      [companyId, ...filterQuery.params, ...storeParams, userId]
+       AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.company_id = c.company_id AND u.phone = c.phone)`,
+      [companyId, ...filterQuery.params, ...storeParams]
     );
 
     const customers = customersResult.rows;
@@ -1757,12 +1762,15 @@ router.post('/sync-results', async (req: Request, res: Response) => {
       return res.status(403).json({ error: '권한이 필요합니다.' });
     }
 
-    // 동기화 대상: sending 또는 scheduled 상태인 campaign_runs (campaign의 company_id 포함)
+    // ★ B8-13: 동기화 대상을 해당 회사 + 최근 7일 이내로 제한 (대량 캠페인 전체 스캔 방지)
     const runsResult = await query(
       `SELECT cr.id, cr.campaign_id, c.company_id
        FROM campaign_runs cr
        JOIN campaigns c ON c.id = cr.campaign_id
-       WHERE cr.status IN ('sending', 'scheduled')`
+       WHERE c.company_id = $1
+         AND cr.status IN ('sending', 'scheduled')
+         AND cr.created_at >= NOW() - INTERVAL '7 days'`,
+      [companyId]
     );
 
     let syncCount = 0;
@@ -1849,9 +1857,14 @@ router.post('/sync-results', async (req: Request, res: Response) => {
       }
     }
 
-    // 직접발송 동기화 (send_type='direct'인 campaigns)
+    // ★ B8-13: 직접발송 동기화도 해당 회사 + 최근 7일로 제한
     const directCampaigns = await query(
-      `SELECT id, company_id, scheduled_at FROM campaigns WHERE send_type = 'direct' AND (status IN ('sending', 'completed') OR (status = 'scheduled' AND scheduled_at <= NOW())) AND (success_count IS NULL OR success_count = 0)`
+      `SELECT id, company_id, scheduled_at FROM campaigns
+       WHERE company_id = $1 AND send_type = 'direct'
+         AND (status IN ('sending', 'completed') OR (status = 'scheduled' AND scheduled_at <= NOW()))
+         AND (success_count IS NULL OR success_count = 0)
+         AND created_at >= NOW() - INTERVAL '7 days'`,
+      [companyId]
     );
 
     for (const campaign of directCampaigns.rows) {
@@ -2646,29 +2659,27 @@ router.get('/:id/recipients', async (req: Request, res: Response) => {
         excludeParams = [excludedPhones];
       }
 
-      // 총 개수
-      const unsubCountIdx = 1 + filterQuery.params.length + storeParams.length + searchParams.length + excludeParams.length + 1;
+      // ★ B8-08: 수신거부 기준 company_id로 통일 (direct-send 미리보기)
       const countResult = await query(
-        `SELECT COUNT(*) FROM customers
-         WHERE company_id = $1 AND is_active = true AND sms_opt_in = true
+        `SELECT COUNT(*) FROM customers c
+         WHERE c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true
          ${filterQuery.where}${storeFilter}${searchFilter}${excludeFilter}
-         AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${unsubCountIdx} AND u.phone = customers.phone)`,
-        [companyId, ...filterQuery.params, ...storeParams, ...searchParams, ...excludeParams, userId]
+         AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.company_id = c.company_id AND u.phone = c.phone)`,
+        [companyId, ...filterQuery.params, ...storeParams, ...searchParams, ...excludeParams]
       );
       const total = parseInt(countResult.rows[0].count);
 
       // 수신자 목록 (상위 10개)
-      const unsubRecipIdx = 1 + filterQuery.params.length + storeParams.length + searchParams.length + excludeParams.length + 1;
-      const limitIdx = unsubRecipIdx + 1;
+      const limitIdx = 1 + filterQuery.params.length + storeParams.length + searchParams.length + excludeParams.length + 1;
       const recipients = await query(
         `SELECT phone, name, phone as idx
-         FROM customers
-         WHERE company_id = $1 AND is_active = true AND sms_opt_in = true
+         FROM customers c
+         WHERE c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true
          ${filterQuery.where}${storeFilter}${searchFilter}${excludeFilter}
-         AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${unsubRecipIdx} AND u.phone = customers.phone)
+         AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.company_id = c.company_id AND u.phone = c.phone)
          ORDER BY name, phone
          LIMIT $${limitIdx}`,
-        [companyId, ...filterQuery.params, ...storeParams, ...searchParams, ...excludeParams, userId, 10]
+        [companyId, ...filterQuery.params, ...storeParams, ...searchParams, ...excludeParams, 10]
       );
 
       return res.json({
