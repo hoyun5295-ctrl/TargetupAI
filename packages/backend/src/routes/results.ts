@@ -168,8 +168,6 @@ router.get('/campaigns', async (req: Request, res: Response) => {
     const userType = req.user?.userType;
     
     let whereClause = 'WHERE company_id = $1';
-    // ★ draft는 발송 안 한 건이므로 발송 결과에서 제외
-    whereClause += ` AND status != 'draft'`;
     const params: any[] = [companyId];
     let paramIndex = 2;
 
