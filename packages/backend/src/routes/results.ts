@@ -219,7 +219,7 @@ router.get('/campaigns', async (req: Request, res: Response) => {
       `SELECT 
         c.id, c.campaign_name, c.message_type, c.message_content, c.send_type, c.status,
         c.target_count, c.sent_count, c.success_count, c.fail_count,
-        c.is_ad, c.scheduled_at, c.sent_at, c.created_at, c.send_channel,
+        c.is_ad, c.scheduled_at, c.sent_at, c.created_at, c.send_channel, c.callback_number,
         (c.created_at AT TIME ZONE 'Asia/Seoul')::date as created_date_kst,
         c.cancelled_by_type, c.cancel_reason,
         u.login_id as created_by_name,
