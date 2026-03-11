@@ -747,12 +747,16 @@ const kakaoAttachmentJson = campaign.kakao_attachment_json || null;
 const kakaoCarouselJson = campaign.kakao_carousel_json || null;
 const kakaoResendType = campaign.kakao_resend_type || 'SM';
 
-// 080 수신거부 번호 조회 (카카오 광고 발송 시 필요)
+// ★ B17-11: 080 수신거부번호 — users 우선 → companies fallback (사용자별 080번호 지원)
 let opt080Number = '';
 let opt080Auth = '';
 if (sendChannel !== 'sms' && campaign.is_ad) {
-  const optResult = await query('SELECT opt_out_080_number FROM companies WHERE id = $1', [companyId]);
-  opt080Number = optResult.rows[0]?.opt_out_080_number || '';
+  const userOptResult = await query('SELECT opt_out_080_number FROM users WHERE id = $1', [userId]);
+  opt080Number = userOptResult.rows[0]?.opt_out_080_number || '';
+  if (!opt080Number) {
+    const compOptResult = await query('SELECT opt_out_080_number FROM companies WHERE id = $1', [companyId]);
+    opt080Number = compOptResult.rows[0]?.opt_out_080_number || '';
+  }
 }
 
 // ★ C1: per-customer try/catch로 부분 실패 추적 — 선별적 환불 보장
@@ -1424,11 +1428,15 @@ router.post('/direct-send', async (req: Request, res: Response) => {
     // ★ C1: 채널별 발송 성공 건수 추적 (블록 밖에서 선언 — 선별적 환불 계산용)
     let directSmsSentCount = 0;
 
-    // 080 수신거부 번호 조회 (카카오 광고 발송 시 필요)
+    // ★ B17-11: 080 수신거부번호 — users 우선 → companies fallback
     let directOpt080 = '';
     if (directChannel !== 'sms' && adEnabled) {
-      const optResult = await query('SELECT opt_out_080_number FROM companies WHERE id = $1', [companyId]);
-      directOpt080 = optResult.rows[0]?.opt_out_080_number || '';
+      const userOptResult = await query('SELECT opt_out_080_number FROM users WHERE id = $1', [userId]);
+      directOpt080 = userOptResult.rows[0]?.opt_out_080_number || '';
+      if (!directOpt080) {
+        const compOptResult = await query('SELECT opt_out_080_number FROM companies WHERE id = $1', [companyId]);
+        directOpt080 = compOptResult.rows[0]?.opt_out_080_number || '';
+      }
     }
 
     // ★ 회사 스키마 + DB 고객 데이터 조회 (replaceVariables 폴백용)
@@ -2073,13 +2081,21 @@ router.put('/:id/message', async (req: Request, res: Response) => {
       customerMap.set(c.phone, c);
     });
 
-    /// 3. 광고 문구 처리 (is_ad 필드 기준, 080번호는 company에서 조회)
+    /// 3. ★ B17-11: 광고 문구 처리 — users 우선 → companies fallback
     const adEnabled = campaign.rows[0].is_ad === true;
     const msgType = campaign.rows[0].message_type;
     let optOut080 = '';
     if (adEnabled) {
-      const compInfo = await query('SELECT opt_out_080_number FROM companies WHERE id = $1', [companyId]);
-      optOut080 = compInfo.rows[0]?.opt_out_080_number || '';
+      // 캠페인 생성자(user_id)에서 080번호 조회
+      const campUserId = campaign.rows[0].user_id;
+      if (campUserId) {
+        const userOpt = await query('SELECT opt_out_080_number FROM users WHERE id = $1', [campUserId]);
+        optOut080 = userOpt.rows[0]?.opt_out_080_number || '';
+      }
+      if (!optOut080) {
+        const compInfo = await query('SELECT opt_out_080_number FROM companies WHERE id = $1', [companyId]);
+        optOut080 = compInfo.rows[0]?.opt_out_080_number || '';
+      }
     }
 
     // 4. 테이블별로 그룹핑 후 Bulk UPDATE

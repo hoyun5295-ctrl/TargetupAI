@@ -197,6 +197,9 @@ export async function process080Callback(phone: string, opt080Number: string): P
   const companyName = matches[0].companyName;
   const companyIds = new Set<string>();
 
+  // 매칭된 user_id 수집 (admin 동기화 시 중복 방지용)
+  const matchedUserIds = new Set(matches.map(m => m.userId));
+
   for (const match of matches) {
     const result = await query(
       `INSERT INTO unsubscribes (company_id, user_id, phone, source)
@@ -207,6 +210,27 @@ export async function process080Callback(phone: string, opt080Number: string): P
     );
     if (result.rows.length > 0) insertedCount++;
     companyIds.add(match.companyId);
+  }
+
+  // ★ 상위 고객사관리자(admin)에게 자동 동기화
+  // 브랜드 담당자에게 수신거부 등록 시 → 같은 회사의 admin user에게도 INSERT
+  for (const companyId of companyIds) {
+    const adminUsers = await query(
+      `SELECT id FROM users
+       WHERE company_id = $1 AND user_type = 'admin' AND is_active = true`,
+      [companyId]
+    );
+    for (const admin of adminUsers.rows) {
+      if (matchedUserIds.has(admin.id)) continue; // 이미 매칭된 admin이면 스킵
+      const result = await query(
+        `INSERT INTO unsubscribes (company_id, user_id, phone, source)
+         VALUES ($1, $2, $3, '080_ars_sync')
+         ON CONFLICT (user_id, phone) DO NOTHING
+         RETURNING id`,
+        [companyId, admin.id, phone]
+      );
+      if (result.rows.length > 0) insertedCount++;
+    }
   }
 
   // 각 회사별 customers.sms_opt_in 동기화

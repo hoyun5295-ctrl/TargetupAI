@@ -15,8 +15,9 @@ router.use(authenticate);
 router.get('/settings', authenticate, async (req: Request, res: Response) => {
   try {
     const companyId = (req as any).user?.companyId;
+    const userId = (req as any).user?.userId;
     const result = await query(`
-      SELECT 
+      SELECT
         company_name, brand_name, business_type, reject_number, manager_phone, manager_contacts,
         monthly_budget, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao,
         send_start_hour, send_end_hour, daily_limit_per_customer,
@@ -25,8 +26,14 @@ router.get('/settings', authenticate, async (req: Request, res: Response) => {
         approval_required
       FROM companies WHERE id = $1
     `, [companyId]);
-    
+
     const row = result.rows[0] || {};
+    // ★ B17-11: 사용자별 080번호 우선 적용 (reject_number override)
+    if (userId) {
+      const userOptResult = await query('SELECT opt_out_080_number FROM users WHERE id = $1', [userId]);
+      const userOpt080 = userOptResult.rows[0]?.opt_out_080_number;
+      if (userOpt080) row.reject_number = userOpt080;
+    }
     // manager_phone: JSON 문자열이면 파싱, 단일 번호면 배열로 변환
     if (row.manager_phone) {
       try {

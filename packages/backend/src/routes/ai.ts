@@ -33,6 +33,7 @@ router.get('/status', async (req: Request, res: Response) => {
 router.post('/generate-message', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
     if (!companyId) {
       return res.status(403).json({ error: '회사 권한이 필요합니다' });
     }
@@ -49,6 +50,12 @@ router.post('/generate-message', async (req: Request, res: Response) => {
       [companyId]
     );
     const companyInfo = companyResult.rows[0] || {};
+    // ★ B17-11: 사용자별 080번호 우선 적용
+    if (userId) {
+      const userOptResult = await query('SELECT opt_out_080_number FROM users WHERE id = $1', [userId]);
+      const userOpt080 = userOptResult.rows[0]?.opt_out_080_number;
+      if (userOpt080) companyInfo.reject_number = userOpt080;
+    }
     const { fieldMappings: varCatalog, availableVars } = extractVarCatalog(companyInfo.customer_schema);
 
     // 타겟 정보 조회
@@ -141,6 +148,12 @@ router.post('/recommend-target', async (req: Request, res: Response) => {
     );
     const companyInfo = companyResult.rows[0] || {};
     companyInfo.name = companyInfo.company_name;
+    // ★ B17-11: 사용자별 080번호 우선 적용
+    if (userId) {
+      const userOptResult = await query('SELECT opt_out_080_number FROM users WHERE id = $1', [userId]);
+      const userOpt080 = userOptResult.rows[0]?.opt_out_080_number;
+      if (userOpt080) companyInfo.reject_number = userOpt080;
+    }
 
     // 카카오 프로필 존재 여부 확인
     const kakaoProfileResult = await query(
@@ -444,6 +457,7 @@ router.post('/parse-briefing', authenticate, async (req: Request, res: Response)
 router.post('/generate-custom', authenticate, async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
     if (!companyId) {
       return res.status(403).json({ error: '회사 권한이 필요합니다' });
     }
@@ -474,6 +488,12 @@ router.post('/generate-custom', authenticate, async (req: Request, res: Response
       [companyId]
     );
     const companyInfo = companyResult.rows[0] || {};
+    // ★ B17-11: 사용자별 080번호 우선 적용
+    if (userId) {
+      const userOptResult = await query('SELECT opt_out_080_number FROM users WHERE id = $1', [userId]);
+      const userOpt080 = userOptResult.rows[0]?.opt_out_080_number;
+      if (userOpt080) companyInfo.reject_number = userOpt080;
+    }
 
     const result = await generateCustomMessages({
       briefing,

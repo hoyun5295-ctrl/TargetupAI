@@ -128,13 +128,24 @@ router.get('/', async (req: Request, res: Response) => {
     );
     const paged = sorted.slice(offset, offset + Number(limit));
 
-    // D43-4: 회사의 080 설정 정보 조회
-    const companyInfo = await query(
-      `SELECT opt_out_080_number, opt_out_auto_sync FROM companies WHERE id = $1`,
-      [companyId]
+    // ★ B17-11: 사용자(users) 테이블에서 080 설정 조회 (슈퍼관리자에서 사용자 단에 설정)
+    // companies fallback: 사용자 테이블에 없으면 회사 설정 참조
+    const userInfo = await query(
+      `SELECT opt_out_080_number, opt_out_auto_sync FROM users WHERE id = $1`,
+      [userId]
     );
-    const opt080Number = companyInfo.rows[0]?.opt_out_080_number || '';
-    const optOutAutoSync = companyInfo.rows[0]?.opt_out_auto_sync || false;
+    let opt080Number = userInfo.rows[0]?.opt_out_080_number || '';
+    let optOutAutoSync = userInfo.rows[0]?.opt_out_auto_sync || false;
+
+    // 사용자에 없으면 companies fallback (하위호환)
+    if (!opt080Number) {
+      const companyInfo = await query(
+        `SELECT opt_out_080_number, opt_out_auto_sync FROM companies WHERE id = $1`,
+        [companyId]
+      );
+      opt080Number = companyInfo.rows[0]?.opt_out_080_number || '';
+      optOutAutoSync = companyInfo.rows[0]?.opt_out_auto_sync || false;
+    }
     
     return res.json({
       success: true,
