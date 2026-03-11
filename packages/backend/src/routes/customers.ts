@@ -92,10 +92,15 @@ if (grade) {
   params.push(...grf.params);
   paramIndex = grf.nextIndex;
 }
+// ★ B17-01: 수신거부 user_id 기준 통일
 if (smsOptIn === 'true') {
-  whereClause += ` AND sms_opt_in = true AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.company_id = customers_unified.company_id AND u.phone = customers_unified.phone)`;
+  whereClause += ` AND sms_opt_in = true AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${paramIndex} AND u.phone = customers_unified.phone)`;
+  params.push(userId);
+  paramIndex++;
 } else if (smsOptIn === 'false') {
-  whereClause += ` AND (sms_opt_in = false OR EXISTS (SELECT 1 FROM unsubscribes u WHERE u.company_id = customers_unified.company_id AND u.phone = customers_unified.phone))`;
+  whereClause += ` AND (sms_opt_in = false OR EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${paramIndex} AND u.phone = customers_unified.phone))`;
+  params.push(userId);
+  paramIndex++;
 }
 
     // 검색어
@@ -127,12 +132,14 @@ if (smsOptIn === 'true') {
     );
     const total = parseInt(countResult.rows[0].count);
 
-    // 목록 조회
+    // 목록 조회 — ★ B17-01: 수신거부 user_id 기준 통일
+    const unsubCaseIdx = paramIndex++;
+    params.push(userId);
     params.push(Number(limit), offset);
     const result = await query(
       `SELECT id, name, phone, gender, birth_date, age, email, grade, region, points,
               store_code, store_name,
-              CASE WHEN EXISTS (SELECT 1 FROM unsubscribes u WHERE u.company_id = customers_unified.company_id AND u.phone = customers_unified.phone)
+              CASE WHEN EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${unsubCaseIdx} AND u.phone = customers_unified.phone)
                    THEN false ELSE sms_opt_in END as sms_opt_in,
               recent_purchase_date, total_purchase_amount, custom_fields
        FROM customers_unified
@@ -192,9 +199,11 @@ router.post('/filter', async (req: Request, res: Response) => {
       params.push(...filterResult.params);
     }
 
+    // ★ B17-01: 수신거부 user_id 기준 통일
+    params.push(userId);
     const countResult = await query(
       `SELECT COUNT(*) FROM customers_unified c ${whereClause}
-       AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.company_id = c.company_id AND u.phone = c.phone)`,
+       AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${params.length} AND u.phone = c.phone)`,
       params
     );
 
@@ -477,16 +486,19 @@ router.get('/stats', async (req: Request, res: Response) => {
       }
     }
 
+    // ★ B17-01: 수신거부 user_id 기준 통일
+    const unsubStatIdx = params.length + 1;
+    params.push(userId);
     const result = await query(
       `SELECT
         COUNT(*) as total,
         COUNT(*) FILTER (WHERE c.sms_opt_in = true
-          AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.company_id = c.company_id AND u.phone = c.phone)
+          AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${unsubStatIdx} AND u.phone = c.phone)
         ) as sms_opt_in_count,
         COUNT(*) FILTER (WHERE c.gender = ANY($${params.length + 1}::text[])) as male_count,
         COUNT(*) FILTER (WHERE c.gender = ANY($${params.length + 2}::text[])) as female_count,
         COUNT(*) FILTER (WHERE c.grade = 'VIP') as vip_count,
-        COUNT(*) FILTER (WHERE c.sms_opt_in = false OR EXISTS (SELECT 1 FROM unsubscribes u WHERE u.company_id = c.company_id AND u.phone = c.phone)) as unsubscribe_count,
+        COUNT(*) FILTER (WHERE c.sms_opt_in = false OR EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${unsubStatIdx} AND u.phone = c.phone)) as unsubscribe_count,
         COUNT(*) FILTER (WHERE c.birth_year IS NOT NULL AND (2026 - c.birth_year) < 20) as age_under20,
         COUNT(*) FILTER (WHERE c.birth_year IS NOT NULL AND (2026 - c.birth_year) BETWEEN 20 AND 29) as age_20s,
         COUNT(*) FILTER (WHERE c.birth_year IS NOT NULL AND (2026 - c.birth_year) BETWEEN 30 AND 39) as age_30s,
@@ -1311,15 +1323,17 @@ router.post('/delete-all', async (req: Request, res: Response) => {
 router.get('/:id', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
     const { id } = req.params;
 
+    // ★ B17-01: 수신거부 user_id 기준 통일
     const result = await query(
       `SELECT c.*,
-              CASE WHEN EXISTS (SELECT 1 FROM unsubscribes u WHERE u.company_id = c.company_id AND u.phone = c.phone)
+              CASE WHEN EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $3 AND u.phone = c.phone)
                    THEN false ELSE c.sms_opt_in END as sms_opt_in,
-              EXISTS (SELECT 1 FROM unsubscribes u WHERE u.company_id = c.company_id AND u.phone = c.phone) as is_unsubscribed
+              EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $3 AND u.phone = c.phone) as is_unsubscribed
        FROM customers_unified c WHERE c.id = $1 AND c.company_id = $2 AND c.is_active = true`,
-      [id, companyId]
+      [id, companyId, userId]
     );
 
     if (result.rows.length === 0) {

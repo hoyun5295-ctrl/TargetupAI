@@ -406,6 +406,10 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
       let birthDateValue: string | null = c.birth_date || null;
 
       // birth_date → birth_year, birth_month_day, age
+      // ★ B17-09: Date 객체가 올 경우 String()하면 영문 형식 → normalizeDate 먼저 호출
+      if (birthDateValue && (birthDateValue as any) instanceof Date) {
+        birthDateValue = normalizeDate(birthDateValue) || null;
+      }
       if (birthDateValue) {
         const bd = String(birthDateValue).trim();
         if (/^\d{4}$/.test(bd) && parseInt(bd) >= 1900 && parseInt(bd) <= 2099) {
@@ -475,7 +479,12 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
       // 또는 custom_1~15 개별 키로 전송한 경우
       for (const cf of customFieldDefs) {
         if (c[cf.fieldKey] != null && c[cf.fieldKey] !== '') {
-          customObj[cf.columnName] = String(c[cf.fieldKey]);
+          let val = c[cf.fieldKey];
+          // ★ B17-09: Date 객체 → YYYY-MM-DD 변환
+          if (val instanceof Date) {
+            val = normalizeDate(val) || String(val);
+          }
+          customObj[cf.columnName] = String(val);
         }
       }
       row.custom_fields = Object.keys(customObj).length > 0 ? JSON.stringify(customObj) : null;
@@ -594,7 +603,7 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
           FROM customers
           WHERE company_id = $1 AND sms_opt_in = false AND is_active = true
             AND NOT EXISTS (
-              SELECT 1 FROM unsubscribes u WHERE u.company_id = $1 AND u.phone = customers.phone
+              SELECT 1 FROM unsubscribes u WHERE u.user_id = $2 AND u.phone = customers.phone
             )
           ON CONFLICT (user_id, phone) DO NOTHING
         `, [companyId, syncUserId]);

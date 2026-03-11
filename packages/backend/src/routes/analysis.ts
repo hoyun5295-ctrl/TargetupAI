@@ -346,6 +346,7 @@ async function callClaude(userMessage: string, maxRetries = 2): Promise<Analysis
 router.get('/preview', async (req: Request, res: Response) => {
   try {
     const companyId = (req as any).user?.companyId;
+    const userId = (req as any).user?.userId;
     if (!companyId) {
       return res.status(401).json({ error: '인증 필요' });
     }
@@ -457,13 +458,13 @@ router.get('/preview', async (req: Request, res: Response) => {
         LIMIT 1
       `, [companyId]);
 
-      // 8) 수신거부 30일
+      // 8) 수신거부 30일 — ★ B17-01: user_id 기준 통일
       const unsubCountResult = await query(`
         SELECT COUNT(*) as unsub_count
         FROM unsubscribes
-        WHERE company_id = $1
+        WHERE user_id = $1
           AND created_at >= NOW() - INTERVAL '30 days'
-      `, [companyId]);
+      `, [userId]);
 
       // 9) 이탈 위험 고객 (마지막 구매 90일+)
       const churnResult = await query(`
@@ -537,6 +538,7 @@ router.get('/preview', async (req: Request, res: Response) => {
 router.post('/run', async (req: Request, res: Response) => {
   try {
     const companyId = (req as any).user?.companyId;
+    const userId = (req as any).user?.userId;
     if (!companyId) {
       return res.status(401).json({ error: '인증 필요' });
     }
@@ -696,18 +698,18 @@ router.post('/run', async (req: Request, res: Response) => {
       grade: gradeDist.rows,
     };
 
-    // 6) 수신거부 월별 추이
+    // 6) 수신거부 월별 추이 — ★ B17-01: user_id 기준 통일
     const unsubTrend = await query(`
-      SELECT 
+      SELECT
         TO_CHAR(created_at, 'YYYY-MM') as month,
         COUNT(*) as count
       FROM unsubscribes
-      WHERE company_id = $1
+      WHERE user_id = $1
         AND created_at >= $2::date
         AND created_at < $3::date + INTERVAL '1 day'
       GROUP BY TO_CHAR(created_at, 'YYYY-MM')
       ORDER BY month
-    `, [companyId, dateFrom, dateTo]);
+    `, [userId, dateFrom, dateTo]);
 
     collectedData.unsubscribeTrend = unsubTrend.rows;
 
@@ -886,6 +888,7 @@ router.post('/run', async (req: Request, res: Response) => {
 router.get('/pdf', async (req: Request, res: Response) => {
   try {
     const companyId = (req as any).user?.companyId;
+    const userId = (req as any).user?.userId;
     if (!companyId) {
       return res.status(401).json({ error: '인증 필요' });
     }

@@ -441,14 +441,15 @@ router.post('/', async (req: Request, res: Response) => {
       return res.status(400).json({ error: '필수 항목을 입력하세요.' });
     }
 
-    // ★ B8-08: 타겟 인원 계산 (sms_opt_in + 수신거부 제외)
+    // ★ B17-01 수정: 타겟 인원 계산 (sms_opt_in + 수신거부 제외 — user_id 기준)
     let targetCount = 0;
     if (targetFilter) {
       const filterQuery = buildFilterQuery(targetFilter, companyId);
+      const unsubIdx = 1 + filterQuery.params.length + 1;
       const countResult = await query(
         `SELECT COUNT(*) FROM customers c WHERE c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true ${filterQuery.where}
-         AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.company_id = c.company_id AND u.phone = c.phone)`,
-        [companyId, ...filterQuery.params]
+         AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${unsubIdx} AND u.phone = c.phone)`,
+        [companyId, ...filterQuery.params, userId]
       );
       targetCount = parseInt(countResult.rows[0].count);
     }
@@ -606,12 +607,13 @@ router.post('/:id/send', async (req: Request, res: Response) => {
     const storeParamIdx = 1 + filterQuery.params.length + 1;
     const storeFilterFinal = storeFilter.replace('$STORE_IDX', `$${storeParamIdx}`);
 
-    // ★ B8-08 수정: 수신거부 기준을 company_id로 통일 (user_id 의존 제거 — 같은 회사 내 모든 수신거부 적용)
+    // ★ B17-01 수정: 수신거부 기준을 user_id로 통일 (080 자동연동과 일관성 유지 — 사용자별 수신거부 관리)
+    const unsubParamIdx = 1 + filterQuery.params.length + storeParams.length + 1;
     const customersResult = await query(
       `SELECT ${selectColumns} FROM customers c
        WHERE c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true ${filterQuery.where}${storeFilterFinal}
-       AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.company_id = c.company_id AND u.phone = c.phone)`,
-      [companyId, ...filterQuery.params, ...storeParams]
+       AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${unsubParamIdx} AND u.phone = c.phone)`,
+      [companyId, ...filterQuery.params, ...storeParams, userId]
     );
 
     const customers = customersResult.rows;
@@ -1343,7 +1345,7 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       }
     }
 
-    // 1. 수신거부 필터링 (user_id 기준 — 브랜드별 사용자가 각자 수신거부 관리)
+    // 1. 수신거부 필터링 (user_id 기준 — 각 사용자별 수신거부 관리)
     const phones = targetFilteredRecipients.map((r: any) => normalizePhone(r.phone));
     const unsubResult = await query(
       `SELECT DISTINCT phone FROM unsubscribes WHERE user_id = $1 AND phone = ANY($2)`,
@@ -1823,27 +1825,28 @@ router.get('/:id/recipients', async (req: Request, res: Response) => {
         excludeParams = [excludedPhones];
       }
 
-      // ★ B8-08: 수신거부 기준 company_id로 통일 (direct-send 미리보기)
+      // ★ B17-01 수정: 수신거부 기준 user_id로 통일 (080 자동연동과 일관성 유지)
+      const unsubIdx = 1 + filterQuery.params.length + storeParams.length + searchParams.length + excludeParams.length + 1;
       const countResult = await query(
         `SELECT COUNT(*) FROM customers c
          WHERE c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true
          ${filterQuery.where}${storeFilter}${searchFilter}${excludeFilter}
-         AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.company_id = c.company_id AND u.phone = c.phone)`,
-        [companyId, ...filterQuery.params, ...storeParams, ...searchParams, ...excludeParams]
+         AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${unsubIdx} AND u.phone = c.phone)`,
+        [companyId, ...filterQuery.params, ...storeParams, ...searchParams, ...excludeParams, userId]
       );
       const total = parseInt(countResult.rows[0].count);
 
       // 수신자 목록 (상위 10개)
-      const limitIdx = 1 + filterQuery.params.length + storeParams.length + searchParams.length + excludeParams.length + 1;
+      const limitIdx = unsubIdx + 1;
       const recipients = await query(
         `SELECT phone, name, phone as idx
          FROM customers c
          WHERE c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true
          ${filterQuery.where}${storeFilter}${searchFilter}${excludeFilter}
-         AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.company_id = c.company_id AND u.phone = c.phone)
+         AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${unsubIdx} AND u.phone = c.phone)
          ORDER BY name, phone
          LIMIT $${limitIdx}`,
-        [companyId, ...filterQuery.params, ...storeParams, ...searchParams, ...excludeParams, 10]
+        [companyId, ...filterQuery.params, ...storeParams, ...searchParams, ...excludeParams, userId, 10]
       );
 
       return res.json({

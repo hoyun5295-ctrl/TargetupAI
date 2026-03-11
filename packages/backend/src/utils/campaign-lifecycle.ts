@@ -77,7 +77,12 @@ export async function cancelCampaign(
   // 3. MySQL 대기 중인 메시지 건수 확인
   const cancelTables = await getCompanySmsTables(companyId);
   const cancelCount = await smsCountAll(cancelTables, 'app_etc1 = ? AND status_code = 100', [campaignId]);
-  const kakaoCancelCount = await kakaoCountPending(campaignId);
+  let kakaoCancelCount = 0;
+  try {
+    kakaoCancelCount = await kakaoCountPending(campaignId);
+  } catch (kakaoErr) {
+    console.warn(`[취소] 카카오 대기건 조회 실패 (무시):`, (kakaoErr as Error).message);
+  }
   const totalCancelCount = cancelCount + kakaoCancelCount;
 
   // 4. MySQL 메시지 취소 처리
@@ -100,7 +105,7 @@ export async function cancelCampaign(
 
   // 5. 카카오 대기건 삭제
   if (kakaoCancelCount > 0) {
-    await kakaoCancelPending(campaignId);
+    try { await kakaoCancelPending(campaignId); } catch (kakaoErr) { console.warn(`[취소] 카카오 대기건 삭제 실패 (무시):`, (kakaoErr as Error).message); }
   }
 
   // 6. 선불 환불

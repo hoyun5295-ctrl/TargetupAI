@@ -185,11 +185,13 @@ router.post('/recommend-target', async (req: Request, res: Response) => {
     // 실제 타겟 수 계산 — 공통 함수 사용
     const { sql: filterWhere, params: filterParams } = buildFilterWhereClause(result.filters, baseParams.length + 1);
 
+    // ★ B17-01: 수신거부 user_id 기준 통일
+    const unsubIdxA = baseParams.length + filterParams.length + 1;
     const actualCountResult = await query(
       `SELECT COUNT(*) FROM customers c
        WHERE c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true${storeFilter} ${filterWhere}
-       AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.company_id = c.company_id AND u.phone = c.phone)`,
-      [...baseParams, ...filterParams]
+       AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${unsubIdxA} AND u.phone = c.phone)`,
+      [...baseParams, ...filterParams, userId]
     );
     const actualCount = parseInt(actualCountResult.rows[0].count);
 
@@ -197,8 +199,8 @@ router.post('/recommend-target', async (req: Request, res: Response) => {
     const unsubCountResult = await query(
       `SELECT COUNT(*) FROM customers c
        WHERE c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true${storeFilter} ${filterWhere}
-       AND EXISTS (SELECT 1 FROM unsubscribes u WHERE u.company_id = c.company_id AND u.phone = c.phone)`,
-      [...baseParams, ...filterParams]
+       AND EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${unsubIdxA} AND u.phone = c.phone)`,
+      [...baseParams, ...filterParams, userId]
     );
     const unsubscribeCount = parseInt(unsubCountResult.rows[0].count);
 
@@ -216,9 +218,9 @@ router.post('/recommend-target', async (req: Request, res: Response) => {
                 birth_date, custom_fields
          FROM customers c
          WHERE c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true${storeFilter} ${filterWhere}
-         AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.company_id = c.company_id AND u.phone = c.phone)
+         AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${unsubIdxA} AND u.phone = c.phone)
          ORDER BY name ASC NULLS LAST LIMIT 1`,
-        [...baseParams, ...filterParams]
+        [...baseParams, ...filterParams, userId]
       );
 
       if (sampleResult.rows[0]) {
@@ -236,13 +238,13 @@ router.post('/recommend-target', async (req: Request, res: Response) => {
         // 커스텀 필드 → 실제 라벨명 매핑
         if (row.custom_fields && typeof row.custom_fields === 'object') {
           const defResult = await query(
-            'SELECT field_key, label FROM customer_field_definitions WHERE company_id = $1',
+            'SELECT field_key, field_label FROM customer_field_definitions WHERE company_id = $1',
             [companyId]
           );
           for (const def of defResult.rows) {
             const val = row.custom_fields[def.field_key];
             if (val !== null && val !== undefined && val !== '') {
-              sampleCustomer[def.label] = String(val);
+              sampleCustomer[def.field_label] = String(val);
             }
           }
         }
@@ -333,19 +335,21 @@ router.post('/recount-target', authenticate, async (req: Request, res: Response)
     // buildFilterWhereClause 호출 (recommend-target과 동일한 조건)
     const { sql: filterSql, params: filterParams } = buildFilterWhereClause(targetFilters, baseParams.length + 1);
 
+    // ★ B17-01: 수신거부 user_id 기준 통일
+    const unsubIdxB = baseParams.length + filterParams.length + 1;
     const countResult = await query(
       `SELECT COUNT(*) FROM customers c
        WHERE c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true${storeFilter} ${filterSql}
-       AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.company_id = c.company_id AND u.phone = c.phone)`,
-      [...baseParams, ...filterParams]
+       AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${unsubIdxB} AND u.phone = c.phone)`,
+      [...baseParams, ...filterParams, userId]
     );
     const estimatedCount = parseInt(countResult.rows[0].count);
 
     const unsubResult = await query(
       `SELECT COUNT(*) FROM customers c
        WHERE c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true${storeFilter} ${filterSql}
-       AND EXISTS (SELECT 1 FROM unsubscribes u WHERE u.company_id = c.company_id AND u.phone = c.phone)`,
-      [...baseParams, ...filterParams]
+       AND EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${unsubIdxB} AND u.phone = c.phone)`,
+      [...baseParams, ...filterParams, userId]
     );
     const unsubscribeCount = parseInt(unsubResult.rows[0].count);
 
@@ -407,19 +411,21 @@ router.post('/parse-briefing', authenticate, async (req: Request, res: Response)
     const targetFilters = result.targetFilters || {};
     const { sql: filterWhere, params: filterParams } = buildFilterWhereClause(targetFilters, baseParams.length + 1);
 
+    // ★ B17-01: 수신거부 user_id 기준 통일
+    const unsubIdxC = baseParams.length + filterParams.length + 1;
     const countResult = await query(
       `SELECT COUNT(*) FROM customers c
        WHERE c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true${storeFilter} ${filterWhere}
-       AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.company_id = c.company_id AND u.phone = c.phone)`,
-      [...baseParams, ...filterParams]
+       AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${unsubIdxC} AND u.phone = c.phone)`,
+      [...baseParams, ...filterParams, userId]
     );
     const estimatedCount = parseInt(countResult.rows[0].count);
 
     const unsubResult = await query(
       `SELECT COUNT(*) FROM customers c
        WHERE c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true${storeFilter} ${filterWhere}
-       AND EXISTS (SELECT 1 FROM unsubscribes u WHERE u.company_id = c.company_id AND u.phone = c.phone)`,
-      [...baseParams, ...filterParams]
+       AND EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${unsubIdxC} AND u.phone = c.phone)`,
+      [...baseParams, ...filterParams, userId]
     );
     const unsubscribeCount = parseInt(unsubResult.rows[0].count);
 

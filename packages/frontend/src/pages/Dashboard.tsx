@@ -167,6 +167,7 @@ export default function Dashboard() {
   const [showLmsConfirm, setShowLmsConfirm] = useState(false);
   const [pendingBytes, setPendingBytes] = useState(0);
   const [smsOverrideAccepted, setSmsOverrideAccepted] = useState(false);
+  const [lmsKeepAccepted, setLmsKeepAccepted] = useState(false);
   const [showSmsConvert, setShowSmsConvert] = useState<{show: boolean, from: 'direct' | 'target', currentBytes: number, smsBytes: number, count: number}>({show: false, from: 'direct', currentBytes: 0, smsBytes: 0, count: 0});
   const [splitEnabled, setSplitEnabled] = useState(false);
   const [splitCount, setSplitCount] = useState<number>(1000);
@@ -692,6 +693,15 @@ export default function Dashboard() {
     }
   };
   const [toast, setToast] = useState<{show: boolean, type: 'success' | 'error' | 'warning', message: string}>({show: false, type: 'success', message: ''});
+
+  // ★ B17-15: Toast 자동 해제 — show=true 될 때마다 4초 후 자동 닫힘
+  useEffect(() => {
+    if (!toast.show) return;
+    const timer = setTimeout(() => {
+      setToast(prev => ({ ...prev, show: false }));
+    }, 4000);
+    return () => clearTimeout(timer);
+  }, [toast.show, toast.message]);
 
   // B13-06: 이모지 감지 함수
   const hasEmoji = (text: string): boolean => {
@@ -1404,12 +1414,15 @@ const campaignData = {
       await campaignsApi.send(campaignId);
     }
     
-    // 모달 닫기
+    // 모달 닫기 + 상태 초기화
     setShowPreview(false);
     setShowAiResult(false);
     setShowAiSendModal(false);
     setAiStep(1);
     setAiCampaignPrompt('');
+    // ★ B17-04: 이전 AI 결과 완전 초기화 (중복 발송 방지)
+    setSelectedAiMsgIdx(0);
+    setEditingAiMsg(null);
     // 성공 모달용 발송 정보 저장 (초기화 전에!)
     const sendInfoText = _sendTimeOption === 'now' ? '즉시 발송 완료' : 
                          _sendTimeOption === 'ai' ? `예약 완료 (${aiResult?.recommendedTime || 'AI 추천'})` :
@@ -1419,6 +1432,8 @@ const campaignData = {
     setSuccessTargetCount(aiResult?.target?.count || 0);  // ★ #8 수정
     setSuccessUnsubscribeCount(aiResult?.target?.unsubscribeCount || 0);  // ★ B8-08 수정
     
+    // ★ B17-04: aiResult는 성공 모달용 값 저장 후 초기화 (중복 발송 방지)
+    setAiResult(null);
     setSendTimeOption('ai');
     setCustomSendTime('');
     
@@ -1523,6 +1538,11 @@ const campaignData = {
       setSuccessTargetCount(customSendData?.estimatedCount || 0);
       setSuccessUnsubscribeCount(customSendData?.unsubscribeCount || 0);  // ★ B8-08 수정
       setCustomSendData(null);
+      // ★ B17-04: 이전 AI 결과 완전 초기화 (중복 발송 방지)
+      setAiResult(null);
+      setSelectedAiMsgIdx(0);
+      setAiStep(1);
+      setAiCampaignPrompt('');
 
       const sendInfoText = _sendTimeOption === 'now' ? '즉시 발송 완료' :
         `예약 완료 (${_customSendTime ? new Date(_customSendTime).toLocaleString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''})`;
@@ -1885,6 +1905,7 @@ const campaignData = {
           }`}>
             <span className="text-2xl">{toast.type === 'success' ? '✅' : toast.type === 'warning' ? '⚠️' : '❌'}</span>
             <span className="font-medium text-lg">{toast.message}</span>
+            <button onClick={() => setToast(prev => ({...prev, show: false}))} className="ml-2 text-white/80 hover:text-white text-lg">✕</button>
           </div>
         </div>
       )}
@@ -2705,6 +2726,8 @@ const campaignData = {
         setPendingBytes={setPendingBytes}
         setShowLmsConfirm={setShowLmsConfirm}
         setShowSmsConvert={setShowSmsConvert}
+        lmsKeepAccepted={lmsKeepAccepted}
+        setLmsKeepAccepted={setLmsKeepAccepted}
         setSendConfirm={setSendConfirm}
         targetSending={targetSending}
         onResetTarget={() => { setShowTargetSend(false); setShowDirectTargeting(true); }}
@@ -2880,19 +2903,19 @@ const campaignData = {
                 {/* SMS/LMS/MMS 서브탭 */}
                 <div className="flex mb-2 bg-gray-50 rounded-lg p-0.5">
                   <button 
-                    onClick={() => { setDirectMsgType('SMS'); setMmsUploadedImages([]); }}
+                    onClick={() => { setDirectMsgType('SMS'); setMmsUploadedImages([]); setLmsKeepAccepted(false); }}
                     className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-colors ${directMsgType === 'SMS' ? 'bg-white shadow text-emerald-600' : 'text-gray-500 hover:text-gray-700'}`}
                   >
                     SMS
                   </button>
-                  <button 
-                    onClick={() => { setDirectMsgType('LMS'); setMmsUploadedImages([]); }}
+                  <button
+                    onClick={() => { setDirectMsgType('LMS'); setMmsUploadedImages([]); setLmsKeepAccepted(false); }}
                     className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-colors ${directMsgType === 'LMS' ? 'bg-white shadow text-emerald-600' : 'text-gray-500 hover:text-gray-700'}`}
                   >
                     LMS
                   </button>
-                  <button 
-                    onClick={() => setDirectMsgType('MMS')}
+                  <button
+                    onClick={() => { setDirectMsgType('MMS'); setLmsKeepAccepted(false); }}
                     className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-colors ${directMsgType === 'MMS' ? 'bg-white shadow text-emerald-600' : 'text-gray-500 hover:text-gray-700'}`}
                   >
                     MMS
@@ -3168,7 +3191,7 @@ const campaignData = {
                         }
 
                         // LMS/MMS인데 SMS로 보내도 되는 경우 비용 절감 안내
-                        if (directMsgType !== 'SMS') {
+                        if (directMsgType !== 'SMS' && !lmsKeepAccepted) {
                           const smsOptOut = `무료거부${optOutNumber.replace(/-/g, '')}`;
                           const smsFullMsg = adTextEnabled ? `(광고)${directMessage}\n${smsOptOut}` : directMessage;
                           const smsBytes = calculateBytes(smsFullMsg);
@@ -3961,7 +3984,7 @@ const campaignData = {
         adTextEnabled={adTextEnabled}
         optOutNumber={optOutNumber}
         onSmsOverride={() => { setSmsOverrideAccepted(true); setShowLmsConfirm(false); }}
-        onLmsConvert={() => { if (showTargetSend) { setTargetMsgType('LMS'); } else { setDirectMsgType('LMS'); } setMmsUploadedImages([]); setShowLmsConfirm(false); }}
+        onLmsConvert={() => { if (showTargetSend) { setTargetMsgType('LMS'); } else { setDirectMsgType('LMS'); } setMmsUploadedImages([]); setLmsKeepAccepted(false); setShowLmsConfirm(false); }}
         getMaxByteMessage={getMaxByteMessage}
         calculateBytes={calculateBytes}
         truncateToSmsBytes={truncateToSmsBytes}
@@ -3969,8 +3992,8 @@ const campaignData = {
       <SmsConvertModal
         show={showSmsConvert.show}
         showSmsConvert={showSmsConvert}
-        onClose={() => setShowSmsConvert({show: false, from: 'direct', currentBytes: 0, smsBytes: 0, count: 0})}
-        onSmsConvert={() => { if (showSmsConvert.from === 'target') { setTargetMsgType('SMS'); } else { setDirectMsgType('SMS'); } setMmsUploadedImages([]); setShowSmsConvert({show: false, from: 'direct', currentBytes: 0, smsBytes: 0, count: 0}); }}
+        onClose={() => { setLmsKeepAccepted(true); setShowSmsConvert({show: false, from: 'direct', currentBytes: 0, smsBytes: 0, count: 0}); }}
+        onSmsConvert={() => { if (showSmsConvert.from === 'target') { setTargetMsgType('SMS'); } else { setDirectMsgType('SMS'); } setMmsUploadedImages([]); setLmsKeepAccepted(false); setShowSmsConvert({show: false, from: 'direct', currentBytes: 0, smsBytes: 0, count: 0}); }}
       />
         
               <ScheduleTimeModal

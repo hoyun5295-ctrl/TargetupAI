@@ -371,8 +371,22 @@ className="flex-1 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 fl
 >
 🛡️ 스팸필터
 </button>
-<button 
-onClick={() => setShowAiSendModal(true)}
+<button
+onClick={() => {
+  // ★ B17-10: SMS 선택 시 바이트 초과 → LMS 전환 안내
+  if (selectedChannel === 'SMS') {
+    const msg = aiResult?.messages?.[selectedAiMsgIdx]?.message_text || '';
+    const bytes = calculateBytes(wrapAdText(msg));
+    if (bytes > 90) {
+      const ok = window.confirm(`SMS 90바이트를 초과했습니다 (${bytes}바이트).\nLMS로 자동 전환하시겠습니까?`);
+      if (ok) {
+        setSelectedChannel('LMS');
+      }
+      return; // LMS 전환 후 다시 확인하도록
+    }
+  }
+  setShowAiSendModal(true);
+}}
 className="flex-1 py-3 bg-green-700 text-white rounded-lg hover:bg-green-800 flex items-center justify-center gap-2"
 >
 ✅ 캠페인확정

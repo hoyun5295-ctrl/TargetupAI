@@ -533,6 +533,12 @@ async function processUploadInBackground(
 
         // birth_date → birth_year, birth_month_day, age 파생
         if (record.birth_date) {
+          // ★ B17-09: Date 객체(XLSX cellDates)를 String()하면 영문 형식이 되어 정규화 실패
+          // normalizeDateValue()가 Date 객체를 직접 처리하도록 먼저 호출
+          if (record.birth_date instanceof Date) {
+            const normalized = normalizeDateValue(record.birth_date);
+            record.birth_date = normalized || record.birth_date;
+          }
           const bd = String(record.birth_date).trim();
           if (/^\d{4}$/.test(bd) && parseInt(bd) >= 1900 && parseInt(bd) <= 2099) {
             // 4자리 연도만 입력 (예: 1983)
@@ -595,7 +601,13 @@ async function processUploadInBackground(
         const customObj: Record<string, any> = {};
         for (const cf of getCustomFields()) {
           if (record[cf.fieldKey] != null && record[cf.fieldKey] !== '') {
-            customObj[cf.columnName] = String(record[cf.fieldKey]);
+            let val = record[cf.fieldKey];
+            // ★ B17-09: Date 객체(XLSX cellDates)를 String()하면 영문 형식 그대로 저장됨
+            // normalizeDateValue()로 YYYY-MM-DD 변환 후 저장
+            if (val instanceof Date) {
+              val = normalizeDateValue(val) || String(val);
+            }
+            customObj[cf.columnName] = String(val);
           }
         }
         rowValues.push(Object.keys(customObj).length > 0 ? JSON.stringify(customObj) : null);
@@ -765,7 +777,7 @@ async function processUploadInBackground(
           FROM customers
           WHERE company_id = $1 AND sms_opt_in = false AND is_active = true
             AND NOT EXISTS (
-              SELECT 1 FROM unsubscribes u WHERE u.company_id = $1 AND u.phone = customers.phone
+              SELECT 1 FROM unsubscribes u WHERE u.user_id = $2 AND u.phone = customers.phone
             )
           ON CONFLICT (user_id, phone) DO NOTHING
         `, [companyId, userId]);

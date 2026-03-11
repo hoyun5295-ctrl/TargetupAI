@@ -151,6 +151,59 @@ export default function AiCustomSendFlow({
     onCancel: () => void;
   } | null>(null);
 
+  // ★ B17-12: AI맞춤한줄 자체 테스트 핸들러 — variants 데이터 사용
+  const [customTestSending, setCustomTestSending] = useState(false);
+  const [customTestCooldown, setCustomTestCooldown] = useState(false);
+  const [customTestResult, setCustomTestResult] = useState<string | null>(null);
+
+  const handleCustomTestSend = async () => {
+    setCustomTestSending(true);
+    setCustomTestResult(null);
+    try {
+      const selectedMsg = variants[selectedVariantIdx];
+      if (!selectedMsg) {
+        setAlertModal({ title: '오류', message: '메시지를 선택해주세요', type: 'error' });
+        setCustomTestSending(false);
+        return;
+      }
+      let msg = selectedMsg.message_text;
+      if (isAdLocal) {
+        const prefix = channel === 'SMS' ? '(광고)' : '(광고) ';
+        const suffix = channel === 'SMS'
+          ? `\n무료거부${optOutNumber.replace(/-/g, '')}`
+          : `\n무료수신거부 ${formatRejectNumber(optOutNumber)}`;
+        msg = prefix + msg + suffix;
+      }
+      const token = localStorage.getItem('token');
+      const res = await fetch('/api/campaigns/test-send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          messageContent: msg,
+          messageType: channel,
+          subject: selectedMsg.subject || '',
+          mmsImagePaths: [],
+        }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        const contactList = data.contacts?.map((c: any) => `${c.name}(${c.phone})`).join(', ') || '';
+        setCustomTestResult(`✅ ${data.message}\n${contactList}`);
+      } else {
+        setCustomTestResult(`❌ ${data.error}`);
+      }
+    } catch (error) {
+      setCustomTestResult('❌ 테스트 발송 실패');
+    } finally {
+      setCustomTestSending(false);
+      setCustomTestCooldown(true);
+      setTimeout(() => {
+        setCustomTestCooldown(false);
+        setCustomTestResult(null);
+      }, 10000);
+    }
+  };
+
   useEffect(() => { loadFields(); }, []);
 
   const loadFields = async () => {
@@ -739,10 +792,10 @@ export default function AiCustomSendFlow({
               ) : (
                 <div className="text-center py-8 text-gray-400">메시지를 불러오는 중...</div>
               )}
-              {/* B16-03: 담당자 테스트 결과 표시 */}
-              {testSentResult && (
+              {/* B16-03 + B17-12: 담당자 테스트 결과 표시 (자체 핸들러 결과 사용) */}
+              {customTestResult && (
                 <div className="mt-3 mx-1 p-3 bg-gray-50 rounded-lg text-sm whitespace-pre-wrap border">
-                  {testSentResult}
+                  {customTestResult}
                 </div>
               )}
             </div>
@@ -770,16 +823,14 @@ export default function AiCustomSendFlow({
             )}
             {currentStep === 4 && (
               <>
-                {/* B16-03: 담당자 테스트 버튼 */}
-                {handleTestSend && (
-                  <button
-                    onClick={handleTestSend}
-                    disabled={testSending || testCooldown || variants.length === 0}
-                    className="flex items-center gap-1.5 px-4 py-2.5 bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium rounded-lg disabled:opacity-50 transition-colors"
-                  >
-                    {testSending ? '📱 발송 중...' : testCooldown ? '⏳ 10초 대기' : '📱 담당자테스트'}
-                  </button>
-                )}
+                {/* B16-03 + B17-12: 담당자 테스트 버튼 — 자체 핸들러 사용 (variants 데이터 참조) */}
+                <button
+                  onClick={handleCustomTestSend}
+                  disabled={customTestSending || customTestCooldown || variants.length === 0}
+                  className="flex items-center gap-1.5 px-4 py-2.5 bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium rounded-lg disabled:opacity-50 transition-colors"
+                >
+                  {customTestSending ? '📱 발송 중...' : customTestCooldown ? '⏳ 10초 대기' : '📱 담당자테스트'}
+                </button>
                 {/* B16-03: 스팸필터 테스트 버튼 */}
                 {setShowSpamFilter && setSpamFilterData && (
                   <button

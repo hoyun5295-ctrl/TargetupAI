@@ -99,6 +99,8 @@ interface TargetSendModalProps {
   setPendingBytes: (n: number) => void;
   setShowLmsConfirm: (b: boolean) => void;
   setShowSmsConvert: (s: any) => void;
+  lmsKeepAccepted: boolean;
+  setLmsKeepAccepted: (b: boolean) => void;
 
   // 발송 확인
   setSendConfirm: (s: any) => void;
@@ -143,7 +145,7 @@ export default function TargetSendModal({
   setShowSpecialChars, loadTemplates, setShowTemplateBox,
   setShowTemplateSave, setTemplateSaveName,
   smsOverrideAccepted, setSmsOverrideAccepted,
-  setPendingBytes, setShowLmsConfirm, setShowSmsConvert,
+  setPendingBytes, setShowLmsConfirm, setShowSmsConvert, lmsKeepAccepted, setLmsKeepAccepted,
   setSendConfirm,
   handleTargetTestSend,
   testSending: testSendingProp,
@@ -280,7 +282,7 @@ export default function TargetSendModal({
     }
 
     // LMS/MMS인데 SMS로 보내도 되는 경우 비용 절감 안내
-    if (targetMsgType !== 'SMS') {
+    if (targetMsgType !== 'SMS' && !lmsKeepAccepted) {
       const smsOptOut = `무료거부${optOutNumber.replace(/-/g, '')}`;
       const smsFullMsg = adTextEnabled ? `(광고)${targetMessage}\n${smsOptOut}` : targetMessage;
       const smsBytes = calculateBytes(smsFullMsg);
@@ -403,15 +405,15 @@ export default function TargetSendModal({
             {/* SMS/LMS/MMS 서브탭 */}
             <div className="flex mb-2 bg-gray-50 rounded-lg p-0.5">
               <button
-                onClick={() => { setTargetMsgType('SMS'); setMmsUploadedImages([]); }}
+                onClick={() => { setTargetMsgType('SMS'); setMmsUploadedImages([]); setLmsKeepAccepted(false); }}
                 className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-colors ${targetMsgType === 'SMS' ? 'bg-white shadow text-emerald-600' : 'text-gray-500 hover:text-gray-700'}`}
               >SMS</button>
               <button
-                onClick={() => { setTargetMsgType('LMS'); setMmsUploadedImages([]); }}
+                onClick={() => { setTargetMsgType('LMS'); setMmsUploadedImages([]); setLmsKeepAccepted(false); }}
                 className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-colors ${targetMsgType === 'LMS' ? 'bg-white shadow text-emerald-600' : 'text-gray-500 hover:text-gray-700'}`}
               >LMS</button>
               <button
-                onClick={() => setTargetMsgType('MMS')}
+                onClick={() => { setTargetMsgType('MMS'); setLmsKeepAccepted(false); }}
                 className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-colors ${targetMsgType === 'MMS' ? 'bg-white shadow text-emerald-600' : 'text-gray-500 hover:text-gray-700'}`}
               >MMS</button>
             </div>

@@ -15,45 +15,43 @@ import { query } from '../config/database';
 
 /**
  * NOT EXISTS 수신거부 필터 SQL 생성.
+ * ★ B17-01: user_id 기준으로 통일 (080 자동연동과 일관성 유지 — 사용자별 수신거부)
  *
- * @param companyIdRef - company_id 참조 (예: 'c.company_id', '$1', 'customers_unified.company_id')
+ * @param userIdRef - user_id 참조 (예: '$2', '$${paramIdx}')
  * @param phoneRef - phone 참조 (예: 'c.phone', 'customers.phone', 'customers_unified.phone')
  * @returns SQL 문자열 (AND NOT EXISTS ...)
  *
  * @example
- * // campaigns.ts에서 사용
- * const unsub = buildUnsubscribeFilter('c.company_id', 'c.phone');
- * // → " AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.company_id = c.company_id AND u.phone = c.phone)"
- *
- * @example
- * // upload.ts에서 사용 (파라미터 참조)
- * const unsub = buildUnsubscribeFilter('$1', 'customers.phone');
+ * const unsub = buildUnsubscribeFilter('$2', 'c.phone');
+ * // → " AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $2 AND u.phone = c.phone)"
  */
-export function buildUnsubscribeFilter(companyIdRef: string, phoneRef: string): string {
-  return ` AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.company_id = ${companyIdRef} AND u.phone = ${phoneRef})`;
+export function buildUnsubscribeFilter(userIdRef: string, phoneRef: string): string {
+  return ` AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = ${userIdRef} AND u.phone = ${phoneRef})`;
 }
 
 /**
  * EXISTS 수신거부 체크 SQL 생성 (수신거부 된 것만 조회할 때).
+ * ★ B17-01: user_id 기준으로 통일
  *
- * @param companyIdRef - company_id 참조
+ * @param userIdRef - user_id 참조
  * @param phoneRef - phone 참조
  * @returns SQL 문자열 (AND EXISTS ...)
  */
-export function buildUnsubscribeExistsFilter(companyIdRef: string, phoneRef: string): string {
-  return ` AND EXISTS (SELECT 1 FROM unsubscribes u WHERE u.company_id = ${companyIdRef} AND u.phone = ${phoneRef})`;
+export function buildUnsubscribeExistsFilter(userIdRef: string, phoneRef: string): string {
+  return ` AND EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = ${userIdRef} AND u.phone = ${phoneRef})`;
 }
 
 /**
  * CASE WHEN 수신거부 상태 컬럼 SQL 생성 (고객 목록 등에서 사용).
+ * ★ B17-01: user_id 기준으로 통일
  *
- * @param companyIdRef - company_id 참조
+ * @param userIdRef - user_id 참조
  * @param phoneRef - phone 참조
  * @param alias - 결과 컬럼 alias (기본: 'is_unsubscribed')
  * @returns SQL 문자열 (CASE WHEN EXISTS ...)
  */
-export function buildUnsubscribeCase(companyIdRef: string, phoneRef: string, alias: string = 'is_unsubscribed'): string {
-  return `CASE WHEN EXISTS (SELECT 1 FROM unsubscribes u WHERE u.company_id = ${companyIdRef} AND u.phone = ${phoneRef}) THEN true ELSE false END as ${alias}`;
+export function buildUnsubscribeCase(userIdRef: string, phoneRef: string, alias: string = 'is_unsubscribed'): string {
+  return `CASE WHEN EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = ${userIdRef} AND u.phone = ${phoneRef}) THEN true ELSE false END as ${alias}`;
 }
 
 // ============================================================
@@ -79,32 +77,34 @@ export async function syncCustomerOptIn(companyId: string, phones: string[], opt
 
 /**
  * 특정 전화번호가 수신거부 상태인지 확인.
+ * ★ B17-01: user_id 기준으로 통일
  *
- * @param companyId - 회사 ID
+ * @param userId - 사용자 ID
  * @param phone - 전화번호
  * @returns true면 수신거부 상태
  */
-export async function isUnsubscribed(companyId: string, phone: string): Promise<boolean> {
+export async function isUnsubscribed(userId: string, phone: string): Promise<boolean> {
   const result = await query(
-    'SELECT EXISTS(SELECT 1 FROM unsubscribes WHERE company_id = $1 AND phone = $2) as exists',
-    [companyId, phone]
+    'SELECT EXISTS(SELECT 1 FROM unsubscribes WHERE user_id = $1 AND phone = $2) as exists',
+    [userId, phone]
   );
   return result.rows[0]?.exists === true;
 }
 
 /**
  * 여러 전화번호 중 수신거부 상태인 번호들만 추출.
+ * ★ B17-01: user_id 기준으로 통일
  *
- * @param companyId - 회사 ID
+ * @param userId - 사용자 ID
  * @param phones - 전화번호 배열
  * @returns 수신거부된 전화번호 배열
  */
-export async function getUnsubscribedPhones(companyId: string, phones: string[]): Promise<string[]> {
+export async function getUnsubscribedPhones(userId: string, phones: string[]): Promise<string[]> {
   if (!phones || phones.length === 0) return [];
 
   const result = await query(
-    'SELECT DISTINCT phone FROM unsubscribes WHERE company_id = $1 AND phone = ANY($2)',
-    [companyId, phones]
+    'SELECT DISTINCT phone FROM unsubscribes WHERE user_id = $1 AND phone = ANY($2)',
+    [userId, phones]
   );
   return result.rows.map((r: any) => r.phone);
 }

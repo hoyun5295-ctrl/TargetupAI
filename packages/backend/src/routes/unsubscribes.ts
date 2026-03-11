@@ -83,38 +83,24 @@ router.get('/080callback', async (req: Request, res: Response) => {
 router.use(authenticate);
 
 // ================================================================
-// GET /api/unsubscribes - 수신거부 목록 조회 (company_id 기준, 중복 제거)
+// GET /api/unsubscribes - 수신거부 목록 조회 (user_id 기준 — ★ B17-01)
 // D43-4: opt_out_080_number, opt_out_auto_sync 응답에 추가
 // ================================================================
 router.get('/', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
-    if (!companyId) {
+    const userId = req.user?.userId;
+    if (!companyId || !userId) {
       return res.status(403).json({ error: '권한이 필요합니다.' });
     }
-    
+
     const { page = 1, limit = 20, search } = req.query;
     const offset = (Number(page) - 1) * Number(limit);
-    
-    let whereClause = 'WHERE company_id = $1';
-    const params: any[] = [companyId];
-    let paramIndex = 2;
 
-    // company_user는 본인 매장 소속 고객의 수신거부만 조회
-    const userType = req.user?.userType;
-    const userId = req.user?.userId;
-    if (userType === 'company_user' && userId) {
-      const userResult = await query('SELECT store_codes FROM users WHERE id = $1', [userId]);
-      const storeCodes = userResult.rows[0]?.store_codes;
-      if (storeCodes && storeCodes.length > 0) {
-        whereClause += ` AND phone IN (
-          SELECT c.phone FROM customers c
-          JOIN customer_stores cs ON c.id = cs.customer_id
-          WHERE cs.company_id = $1 AND cs.store_code = ANY($${paramIndex++}::text[])
-        )`;
-        params.push(storeCodes);
-      }
-    }
+    // ★ B17-01: user_id 기준으로 수신거부 조회 (080 자동연동과 일관성)
+    let whereClause = 'WHERE user_id = $1';
+    const params: any[] = [userId];
+    let paramIndex = 2;
 
     if (search) {
       whereClause += ` AND phone LIKE $${paramIndex++}`;
@@ -263,34 +249,35 @@ router.post('/upload', async (req: Request, res: Response) => {
 });
 
 // ================================================================
-// DELETE /api/unsubscribes/:id - 삭제 (company_id 기준)
+// DELETE /api/unsubscribes/:id - 삭제 (user_id 기준 — ★ B17-01)
 // D43-4: 유료 플랜 업체만 customers.sms_opt_in = true 복원
 // ================================================================
 router.delete('/:id', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
-    if (!companyId) {
+    const userId = req.user?.userId;
+    if (!companyId || !userId) {
       return res.status(403).json({ error: '권한이 필요합니다.' });
     }
-    
+
     const { id } = req.params;
-    
-    // 해당 건의 phone을 먼저 조회 → 같은 회사 내 모든 user의 동일 phone 일괄 삭제
+
+    // ★ B17-01: user_id 기준으로 삭제 (본인 수신거부만 관리)
     const target = await query(
-      `SELECT phone FROM unsubscribes WHERE id = $1 AND company_id = $2`,
-      [id, companyId]
+      `SELECT phone FROM unsubscribes WHERE id = $1 AND user_id = $2`,
+      [id, userId]
     );
 
     if (target.rows.length > 0) {
       const targetPhone = target.rows[0].phone;
-      
-      // unsubscribes에서 삭제
+
+      // unsubscribes에서 해당 사용자의 해당 번호 삭제
       await query(
-        `DELETE FROM unsubscribes WHERE company_id = $1 AND phone = $2`,
-        [companyId, targetPhone]
+        `DELETE FROM unsubscribes WHERE user_id = $1 AND phone = $2`,
+        [userId, targetPhone]
       );
 
-      // D43-4: 유료 플랜 업체만 customers.sms_opt_in = true 복원
+      // D43-4: customers.sms_opt_in = true 복원
       await syncCustomerOptIn(companyId, targetPhone, true);
     }
     
@@ -302,12 +289,12 @@ router.delete('/:id', async (req: Request, res: Response) => {
 });
 
 // ================================================================
-// POST /api/unsubscribes/check - 수신거부 체크 (company_id 기준)
+// POST /api/unsubscribes/check - 수신거부 체크 (user_id 기준 — 080 자동연동과 일관성 유지)
 // ================================================================
 router.post('/check', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    if (!companyId) {
+    const userId = req.user?.userId;
+    if (!userId) {
       return res.status(403).json({ error: '권한이 필요합니다.' });
     }
 
@@ -318,8 +305,8 @@ router.post('/check', async (req: Request, res: Response) => {
 
     const cleanPhones = phones.map((p: string) => p.replace(/\D/g, ''));
     const result = await query(
-      `SELECT DISTINCT phone FROM unsubscribes WHERE company_id = $1 AND phone = ANY($2)`,
-      [companyId, cleanPhones]
+      `SELECT DISTINCT phone FROM unsubscribes WHERE user_id = $1 AND phone = ANY($2)`,
+      [userId, cleanPhones]
     );
 
     return res.json({

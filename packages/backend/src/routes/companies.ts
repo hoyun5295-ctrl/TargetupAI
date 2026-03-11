@@ -321,7 +321,7 @@ async function aggregateDashboardCards(companyId: string, cardIds: string[]): Pr
       COUNT(*) FILTER (WHERE age IS NOT NULL)::int                                           as has_age_data,
       COUNT(*) FILTER (WHERE grade IS NOT NULL)::int                                         as has_grade_data,
       COUNT(*) FILTER (WHERE region IS NOT NULL)::int                                        as has_region_data,
-      COUNT(*) FILTER (WHERE store_name IS NOT NULL)::int                                    as has_store_data
+      COUNT(*) FILTER (WHERE registered_store IS NOT NULL OR recent_purchase_store IS NOT NULL)::int as has_store_data
     FROM customers
     WHERE company_id = $1
   `, [companyId, `${month}-%`]);
@@ -462,11 +462,12 @@ async function aggregateDashboardCards(companyId: string, cardIds: string[]): Pr
           hasData = false;
           break;
         }
+        // ★ B17-16: store_name → COALESCE(registered_store, recent_purchase_store) 실제 컬럼 참조
         const storeResult = await query(`
-          SELECT store_name as label, COUNT(*)::int as count
+          SELECT COALESCE(registered_store, recent_purchase_store) as label, COUNT(*)::int as count
           FROM customers
-          WHERE company_id = $1 AND store_name IS NOT NULL
-          GROUP BY store_name
+          WHERE company_id = $1 AND (registered_store IS NOT NULL OR recent_purchase_store IS NOT NULL)
+          GROUP BY COALESCE(registered_store, recent_purchase_store)
           ORDER BY count DESC
           LIMIT 10
         `, [companyId]);
@@ -478,7 +479,7 @@ async function aggregateDashboardCards(companyId: string, cardIds: string[]): Pr
       // ── 외부 테이블 카드 ──
       case 'opt_out_count': {
         const optOutResult = await query(
-          `SELECT COUNT(DISTINCT phone)::int as count FROM opt_outs WHERE company_id = $1`,
+          `SELECT COUNT(DISTINCT phone)::int as count FROM unsubscribes WHERE company_id = $1`,
           [companyId]
         );
         value = parseInt(optOutResult.rows[0]?.count ?? 0);

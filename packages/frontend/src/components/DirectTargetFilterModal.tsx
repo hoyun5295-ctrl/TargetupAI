@@ -311,6 +311,31 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted, ca
       }
     }
 
+    // ★ B17-06: 숫자 필드는 _min/_max 보조키만 존재하므로 본키가 for문에서 누락됨 → 별도 처리
+    for (const field of enabledFields) {
+      const fk = field.field_key;
+      if (!selectedFields.has(fk)) continue;
+      if (field.data_type !== 'number') continue;
+      if (filters[fk]) continue; // 이미 처리된 경우 스킵
+
+      const dbColMap: Record<string, string> = {
+        'last_purchase_date': 'recent_purchase_date',
+        'last_purchase_amount': 'recent_purchase_amount'
+      };
+      const dbCol = dbColMap[fk] || fk;
+      if (filters[dbCol]) continue; // 매핑된 키로 이미 처리된 경우
+
+      const minVal = filterValues[`${fk}_min`];
+      const maxVal = filterValues[`${fk}_max`];
+      if (minVal && maxVal) {
+        filters[dbCol] = { operator: 'between', value: [Number(minVal), Number(maxVal)] };
+      } else if (minVal) {
+        filters[dbCol] = { operator: 'gte', value: Number(minVal) };
+      } else if (maxVal) {
+        filters[dbCol] = { operator: 'lte', value: Number(maxVal) };
+      }
+    }
+
     return { dynamicFilters: filters, smsOptIn };
   };
 
@@ -470,9 +495,44 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted, ca
       const selected: string[] = Array.isArray(filterValues[fk]) ? filterValues[fk] : [];
       // 성별 표시 변환 (DB값 → 한글) — 다양한 변수명 자동 감지
       const getDisplayLabel = (opt: string) => isGenderField(fk) ? getGenderLabel(opt) : opt;
+      const allOpts = filterOptions[fk];
+      const MAX_INLINE = 15; // ★ B17-14: 15개 초과 시 스크롤 영역 + 검색
+
+      if (allOpts.length > MAX_INLINE) {
+        // 대량 옵션: 스크롤 영역 + 검색
+        const searchKey = `__search_${fk}`;
+        const searchTerm = (filterValues[searchKey] || '').toLowerCase();
+        const filtered = searchTerm
+          ? allOpts.filter((o: string) => getDisplayLabel(o).toLowerCase().includes(searchTerm))
+          : allOpts;
+        return (
+          <div className="mt-1.5">
+            <input
+              type="text" placeholder={`검색 (${allOpts.length}개 중)...`}
+              value={filterValues[searchKey] || ''}
+              onChange={(e) => setFilterValues(prev => ({ ...prev, [searchKey]: e.target.value }))}
+              className="w-full px-2.5 py-1.5 text-xs border rounded-md mb-1.5 focus:outline-none focus:ring-1 focus:ring-green-400"
+            />
+            {selected.length > 0 && (
+              <div className="text-[10px] text-green-600 mb-1">{selected.length}개 선택됨</div>
+            )}
+            <div className="flex flex-wrap gap-1.5 max-h-[120px] overflow-y-auto pr-1">
+              {filtered.map((opt: string) => {
+                const sel = selected.includes(opt);
+                return (
+                  <button key={opt} onClick={() => toggleMultiOption(fk, opt)}
+                    className={`px-2.5 py-1 text-xs rounded-md font-medium transition-all ${sel ? 'bg-green-600 text-white shadow-sm' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+                  >{getDisplayLabel(opt)}</button>
+                );
+              })}
+            </div>
+          </div>
+        );
+      }
+
       return (
         <div className="flex flex-wrap gap-1.5 mt-1.5">
-          {filterOptions[fk].map((opt: string) => {
+          {allOpts.map((opt: string) => {
             const sel = selected.includes(opt);
             return (
               <button key={opt} onClick={() => toggleMultiOption(fk, opt)}

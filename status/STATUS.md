@@ -388,6 +388,60 @@
 
 ---
 
+### 🔧 D66 — 17차 실동작 검증 + PPT 버그리포트 수정 (2026-03-11~) — 🔴 진행 중
+
+> **배경:** 직원 전수 실동작 검증(체크리스트 30개 항목, 0311) + PPT 버그리포트(9슬라이드) 결과 종합 분석.
+> **검증 결과:** O(통과) 15건, X(실패) 8건, ▲(부분통과) 4건, 미검증 3건. PPT 신규 포함 총 16건 수정 대상.
+> **원칙:** 하나씩 코드 직접 읽고 근본 원인 파악 → Harold님 컨펌 → 수정. 병렬 에이전트 금지.
+> **기간계 무접촉:** 발송 INSERT/차감/환불 로직 직접 수정 금지.
+
+#### 체크리스트 결과 요약 (2026-03-11)
+
+| 결과 | 건수 | 항목 |
+|------|------|------|
+| O (통과) | 15건 | B8-01,02,05,06,11,13, S9-04,08, B10-01,05,06,07, B11-01,03,04 |
+| X (실패) | 8건 | B8-04,08,09,10,12, B10-02, B10-04, D39 |
+| ▲ (부분) | 4건 | B8-03,07, B10-03, B11-02 |
+| 미검증 | 3건 | B11-05, Phase2, B8-13b |
+
+#### 수정 대상 버그 목록 (16건 — 우선순위순)
+
+| # | 버그ID | 심각도 | 제목 | 상태 |
+|---|--------|--------|------|------|
+| 1 | B17-01 | 🔴🔴 | 직접발송 수신거부 제외가 발송에 미반영 (추출은 정상, 전송 시 전체 발송) | 🔵 Open |
+| 2 | B17-02 | 🔴🔴 | 예약취소 완전 불가 — 캘린더/예약대기/발송결과 3곳 취소 안 됨 + 취소해도 발송됨 | 🔵 Open |
+| 3 | B17-03 | 🔴 | AI한줄로/맞춤한줄 발송 시 "서버 오류" — AI 경로 전체 발송 불가 | 🔵 Open |
+| 4 | B17-04 | 🔴 | AI 선택 문안 ≠ 실제 발송 — 두번째 발송 시 첫번째 문안 중복 | 🔵 Open |
+| 5 | B17-05 | 🟠 | AI 맞춤한줄 스팸테스트 개인화 공백 (간헐적) | 🔵 Open |
+| 6 | B17-06 | 🟠 | 직접타겟 누적금액/포인트 필터 미작동 — 전체 고객 추출됨 | 🔵 Open |
+| 7 | B17-07 | 🟠 | MMS 비용절감 모달 후 LMS유지/SMS전환 눌러도 발송 불가 | 🔵 Open |
+| 8 | B17-08 | 🟠 | 직접타겟 회신번호 리스트 로딩 안 됨 + 자동입력 변수 "고객명"만 표시 | 🔵 Open |
+| 9 | B17-09 | 🟠 | 엑셀 날짜 ISO/영문 표시 (B8-10/B10-04 재발) | 🔵 Open |
+| 10 | B17-10 | 🟠 | AI한줄로 SMS 바이트 초과 시 LMS 전환 안내 없이 발송 가능 | 🔵 Open |
+| 11 | B17-11 | 🟠 | 080 수신거부 자동연동 미동작 (슈퍼관리자 설정 후 0건) | 🔵 Open |
+| 12 | B17-12 | 🟠 | AI맞춤한줄 담당자테스트 버튼 불안정 (실행됐다 안 됐다) | 🔵 Open |
+| 13 | B17-13 | 🟡 | 커스텀 필드 라벨 여전히 "커스텀1,2" 표시 (B10-02 재발) | 🔵 Open |
+| 14 | B17-14 | 🟡 | 필터 UI — 대량 값 시 선택창 무한 + 매장번호/지역 미노출 (D39) | 🔵 Open |
+| 15 | B17-15 | 🟡 | Toast 알림 리셋 안 됨 — 새로고침 전까지 남아있음 (B11-02) | 🔵 Open |
+| 16 | B17-16 | 🟡 | DB 현황에서 AI 매핑 필드(등록매장 등) 미표시 (B10-03) | 🔵 Open |
+
+#### 관련 이전 버그 매핑
+
+| 17차 | 관련 이전 버그 | 비고 |
+|------|--------------|------|
+| B17-01 | B13-07, B14-01 | 수신거부 필터가 추출만 반영, 발송 INSERT에 미반영 |
+| B17-02 | B12-01 | campaign-lifecycle.ts 배포 안 됐거나 manage-scheduled 미적용 |
+| B17-03 | B8-04, B8-08 | AI 경로 공통 서버 오류 — 근본 원인 별도 분석 필요 |
+| B17-04 | B8-12 | AI 캠페인 선택 문안 state 관리 문제 |
+| B17-05 | B8-03 | 간헐적 = 비동기/타이밍 문제 가능성 |
+| B17-06 | B13-05 | CT-01 customer-filter 배포 여부 확인 필요 |
+| B17-07 | B16-05, B13-08 | MMS 전환 모달 콜백 문제 |
+| B17-09 | B8-10, B10-04 | normalize.ts 날짜 처리 재발 |
+| B17-11 | 신규 | CT-03 unsubscribe-helper 080 연동 배포 여부 확인 |
+| B17-13 | B10-02 | customer_schema 라벨 복구 로직 미동작 |
+
+---
+
 ### ✅ D65 — sync-results 결과동기화 Blocker 수정 (2026-03-11) — 완료, 배포 완료
 
 > **배경:** 발송 완료된 캠페인이 영구적으로 "발송중" + 성공/실패 0/0으로 고착. 결과 화면이 전혀 업데이트되지 않는 Blocker 버그.
@@ -417,14 +471,38 @@
 - `config/database.ts` — `mysqlQuery` 함수의 `conn.execute()` → `conn.query()` 변경. `query()`는 문자열 이스케이프 방식이라 UNION ALL 문제 없음. `?` 파라미터 바인딩 동일 지원.
 - `routes/results.ts` — SMS 서브쿼리의 `NULL AS kakao_*` → `'' AS kakao_*` 변경 (메인+fallback 2곳)
 
-#### 추가 수정: 캠페인 상세 메시지 미리보기 overflow
+#### 추가 수정: 캠페인 상세 메시지 미리보기 overflow (B15-02)
 
 **수정:** `ResultsModal.tsx` — 메시지 말풍선에 `break-all overflow-hidden` 추가. 긴 특수문자가 폰 프레임 밖으로 넘치던 문제 해결.
+
+#### 추가 수정: 발송시간 UTC→KST 변환
+
+**근본 원인:** QTmsg Agent가 `mobsend_time`, `repmsg_recvtm`을 UTC로 기록. `sendreq_time`은 앱에서 MySQL NOW()(KST)로 INSERT하므로 정상이나, QTmsg가 기록하는 발송시간/결과수신시간은 9시간 느리게 표시.
+
+**수정:** `routes/results.ts` — messages/fallback/export 3곳에 `DATE_ADD(mobsend_time, INTERVAL 9 HOUR)`, `DATE_ADD(repmsg_recvtm, INTERVAL 9 HOUR)` 적용.
+
+#### 추가 수정: 캠페인 상세 엉뚱한 메시지 표시 + 회신번호 공란 (B15-03)
+
+**근본 원인:**
+1. `ResultsModal.tsx` — "상세" 클릭 시 이전 캠페인의 `messages` state가 초기화되지 않아 `messages[0]?.msg_contents`가 이전 캠페인 내용을 표시
+2. `results.ts` — 캠페인 목록 SELECT에 `callback_number` 컬럼 누락 → 프론트에서 항상 `-` 표시
+
+**수정:**
+- `ResultsModal.tsx` — 상세 클릭 시 `setMessages([])`, `setShowSendDetail(false)` 호출 추가
+- `results.ts` — 캠페인 목록 SELECT에 `c.callback_number` 추가
+
+#### 수정 파일 전체 목록 (D65)
+- `utils/campaign-lifecycle.ts` — syncCampaignResults: kakao try/catch, $3::text 캐스팅, 캠페인별 try/catch
+- `config/database.ts` — mysqlQuery: conn.execute() → conn.query()
+- `routes/results.ts` — NULL→'' 변경, callback_number 추가, mobsend_time KST 변환
+- `components/ResultsModal.tsx` — messages 초기화, 미리보기 overflow 수정
 
 #### 관련 버그 Closed
 - **B12-02** (발송결과 "발송중" 영구 고착) → ✅ Closed
 - **B13-09** (결과 수신 후에도 미변경) → ✅ Closed
 - **B15-01** (발송 내역 0건 표시) → ✅ Closed (신규)
+- **B15-02** (미리보기 overflow + 발송시간 UTC) → ✅ Closed (신규)
+- **B15-03** (상세 엉뚱한 메시지 + 회신번호 공란) → ✅ Closed (신규)
 
 #### 기간계 영향: 없음
 발송 INSERT/차감/환불 무접촉. 결과 동기화 + 조회 로직만 수정.
