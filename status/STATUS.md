@@ -406,15 +406,28 @@
 - AI캠페인 / 직접발송 for 루프에 캠페인별 try/catch 추가 (2곳)
 - 디버그 로그 추가: tables, created_by, success/fail/pending 카운트
 
-#### 수정 파일
+#### 수정 파일 (sync-results)
 - `utils/campaign-lifecycle.ts` — syncCampaignResults 함수
+
+#### 추가 수정: 발송 내역 0건 표시 (B15-01)
+
+**근본 원인:** mysql2의 `conn.execute()`(prepared statement)가 UNION ALL + 다수 `?` 파라미터 바인딩에서 `Incorrect arguments to mysqld_stmt_execute` 에러 발생 (mysql2 known issue). LIVE 테이블 fallback도 동일 실패.
+
+**수정:**
+- `config/database.ts` — `mysqlQuery` 함수의 `conn.execute()` → `conn.query()` 변경. `query()`는 문자열 이스케이프 방식이라 UNION ALL 문제 없음. `?` 파라미터 바인딩 동일 지원.
+- `routes/results.ts` — SMS 서브쿼리의 `NULL AS kakao_*` → `'' AS kakao_*` 변경 (메인+fallback 2곳)
+
+#### 추가 수정: 캠페인 상세 메시지 미리보기 overflow
+
+**수정:** `ResultsModal.tsx` — 메시지 말풍선에 `break-all overflow-hidden` 추가. 긴 특수문자가 폰 프레임 밖으로 넘치던 문제 해결.
 
 #### 관련 버그 Closed
 - **B12-02** (발송결과 "발송중" 영구 고착) → ✅ Closed
 - **B13-09** (결과 수신 후에도 미변경) → ✅ Closed
+- **B15-01** (발송 내역 0건 표시) → ✅ Closed (신규)
 
 #### 기간계 영향: 없음
-발송 INSERT/차감/환불 무접촉. 결과 동기화(읽기→UPDATE) 로직만 수정.
+발송 INSERT/차감/환불 무접촉. 결과 동기화 + 조회 로직만 수정.
 
 ---
 

@@ -1394,6 +1394,23 @@
 
 ---
 
+## 15차 추가 버그 (D65, 2026-03-11)
+
+### B15-01: 발송 내역 0건 표시 (mysql2 prepared statement UNION ALL 실패) 🔴
+
+| 항목 | 내용 |
+|------|------|
+| **발견** | 2026-03-11 Harold님 실동작 검증 |
+| **심각도** | 🔴 Critical — 발송 내역 자체가 조회 불가 |
+| **상태** | ✅ Closed (2026-03-11) — D65에서 수정. 실서버 배포 후 정상 조회 확인 |
+| **증상** | 캠페인 상세 → "발송 내역 보기" 클릭 시 "총 0건", "데이터가 없습니다" 표시. 캠페인 상세에서 성공/실패 카운트와 통신사 분포는 정상 표시 |
+| **근본 원인** | mysql2의 `conn.execute()`(prepared statement)가 UNION ALL + 다수 `?` 파라미터 바인딩(9개 테이블 × app_etc1 + LIMIT + OFFSET)에서 `Incorrect arguments to mysqld_stmt_execute`(errno 1210) 에러 발생. LIVE 테이블 fallback도 동일 실패. mysql2 known issue |
+| **수정** | ① `config/database.ts`의 `mysqlQuery` 함수: `conn.execute()` → `conn.query()` 변경 (문자열 이스케이프 방식, UNION ALL 문제 없음) ② `routes/results.ts`: SMS 서브쿼리의 `NULL AS kakao_*` → `'' AS kakao_*` 변경 (메인+fallback 2곳) |
+| **수정 파일** | `config/database.ts`, `routes/results.ts` |
+| **기간계 영향** | 없음. 조회 전용 쿼리 방식 변경만. 발송 INSERT는 단일 테이블 쿼리이므로 execute→query 변경 무영향 |
+
+---
+
 ## 16차 버그리포트 (D63, 2026-03-10~03-11)
 
 ### B16-03: AI 맞춤한줄 스팸필터/담당자테스트 누락 🟡

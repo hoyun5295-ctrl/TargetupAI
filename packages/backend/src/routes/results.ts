@@ -438,8 +438,12 @@ router.get('/campaigns/:id/messages', async (req: Request, res: Response) => {
       else if (status === 'fail') smsWhere += ` AND status_code NOT IN (${[...SUCCESS_CODES, ...PENDING_CODES].join(',')})`;
 
       // SMS 통합 필드 (카카오와 UNION ALL 호환 — 컬럼 수/순서 동일)
+      // ★ mobsend_time, repmsg_recvtm: QTmsg Agent가 UTC로 기록 → KST(+9h) 변환 필요
+      // sendreq_time: 앱에서 MySQL NOW()로 INSERT하므로 이미 KST
       const smsFields = `seqno, dest_no, call_back, msg_type, msg_contents, status_code, mob_company,
-        sendreq_time, mobsend_time, repmsg_recvtm,
+        sendreq_time,
+        DATE_ADD(mobsend_time, INTERVAL 9 HOUR) AS mobsend_time,
+        DATE_ADD(repmsg_recvtm, INTERVAL 9 HOUR) AS repmsg_recvtm,
         'sms' AS _channel, sendreq_time AS _sort_time,
         '' AS kakao_bubble_type, '' AS kakao_report_code,
         '' AS resend_type, '' AS resend_report_code`;
@@ -536,7 +540,9 @@ router.get('/campaigns/:id/messages', async (req: Request, res: Response) => {
       }
 
       const smsFields = `seqno, dest_no, call_back, msg_type, msg_contents, status_code, mob_company,
-        sendreq_time, mobsend_time, repmsg_recvtm,
+        sendreq_time,
+        DATE_ADD(mobsend_time, INTERVAL 9 HOUR) AS mobsend_time,
+        DATE_ADD(repmsg_recvtm, INTERVAL 9 HOUR) AS repmsg_recvtm,
         'sms' AS _channel, sendreq_time AS _sort_time,
         '' AS kakao_bubble_type, '' AS kakao_report_code,
         '' AS resend_type, '' AS resend_report_code`;
@@ -615,7 +621,8 @@ router.get('/campaigns/:id/export', async (req: Request, res: Response) => {
     if (sendChannel === 'sms' || sendChannel === 'both') {
       const exportTables = await getCompanySmsTablesWithLogs(companyId, userId);
       const smsFields = `dest_no, call_back, msg_type, msg_contents, status_code, mob_company,
-        sendreq_time, mobsend_time, repmsg_recvtm, 'sms' AS _channel, NULL AS report_code_raw`;
+        sendreq_time, DATE_ADD(mobsend_time, INTERVAL 9 HOUR) AS mobsend_time,
+        DATE_ADD(repmsg_recvtm, INTERVAL 9 HOUR) AS repmsg_recvtm, 'sms' AS _channel, NULL AS report_code_raw`;
       for (const t of exportTables) {
         subqueries.push(`(SELECT ${smsFields} FROM ${t} WHERE app_etc1 = ?)`);
         baseParams.push(id);
