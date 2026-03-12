@@ -85,7 +85,7 @@ interface MessageVariant {
 
 const EMPTY_TARGET_CONDITION: TargetCondition = {
   description: '', gender: '', grade: '', ageRange: '',
-  region: '', purchasePeriod: '', storeName: '', minPurchaseAmount: '', extra: '',
+  region: '', purchasePeriod: '', storeName: '', minPurchaseAmount: '', birthMonth: '', extra: '',
 };
 
 const CATEGORY_ICONS: Record<string, any> = {
