@@ -381,6 +381,7 @@ export default function Dashboard() {
         setDirectRecipients([]);
         setDirectMsgType('SMS');
         setKakaoMessage('');
+        setMmsUploadedImages([]);  // ★ MMS 이미지 초기화
         setReserveEnabled(false);
         setReserveDateTime('');
         loadRecentCampaigns();
@@ -472,6 +473,7 @@ export default function Dashboard() {
         setTargetMessage('');
         setTargetSubject('');
         setKakaoMessage('');
+        setMmsUploadedImages([]);  // ★ MMS 이미지 초기화
         loadRecentCampaigns();
         loadScheduledCampaigns();
       } else {
@@ -3191,7 +3193,8 @@ const campaignData = {
                         }
 
                         // LMS/MMS인데 SMS로 보내도 되는 경우 비용 절감 안내
-                        if (directMsgType !== 'SMS' && !lmsKeepAccepted) {
+                        // ★ MMS 이미지가 업로드되어 있으면 SMS 전환 불가 → 비용절감 안내 스킵
+                        if (directMsgType !== 'SMS' && !lmsKeepAccepted && mmsUploadedImages.length === 0) {
                           const smsOptOut = `무료거부${optOutNumber.replace(/-/g, '')}`;
                           const smsFullMsg = adTextEnabled ? `(광고)${directMessage}\n${smsOptOut}` : directMessage;
                           const smsBytes = calculateBytes(smsFullMsg);

@@ -282,7 +282,8 @@ export default function TargetSendModal({
     }
 
     // LMS/MMS인데 SMS로 보내도 되는 경우 비용 절감 안내
-    if (targetMsgType !== 'SMS' && !lmsKeepAccepted) {
+    // ★ MMS 이미지가 업로드되어 있으면 SMS 전환 불가 → 비용절감 안내 스킵
+    if (targetMsgType !== 'SMS' && !lmsKeepAccepted && mmsUploadedImages.length === 0) {
       const smsOptOut = `무료거부${optOutNumber.replace(/-/g, '')}`;
       const smsFullMsg = adTextEnabled ? `(광고)${targetMessage}\n${smsOptOut}` : targetMessage;
       const smsBytes = calculateBytes(smsFullMsg);
