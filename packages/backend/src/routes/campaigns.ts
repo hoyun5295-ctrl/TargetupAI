@@ -588,7 +588,8 @@ router.post('/:id/send', async (req: Request, res: Response) => {
     const { fieldMappings, availableVars } = extractVarCatalog(customerSchema);
 
     // ★ field_mappings에서 필요한 컬럼 자동 추출 (동적 SELECT)
-    const baseColumns = ['id', 'phone', 'callback'];
+    // ★ store_phone 포함: 개별회신번호 사용 시 callback이 없으면 store_phone을 폴백으로 사용
+    const baseColumns = ['id', 'phone', 'callback', 'store_phone'];
     const mappingColumns = Object.values(fieldMappings).map((m: VarCatalogEntry) => m.column);
     const selectColumns = [...new Set([...baseColumns, ...mappingColumns])].join(', ');
 
@@ -667,17 +668,24 @@ let filteredCustomers = customers.filter(
   (c: any) => !excludedPhones.includes(normalizePhone(c.phone))
 );
 
-// ★ B16-07: 개별회신번호 사용 시 — callback 없는 고객 + 미등록 회신번호 고객 제외
+// ★ B16-07: 개별회신번호 사용 시 — callback 없는 고객은 store_phone 폴백 → 둘 다 없으면 제외
 let callbackSkippedCount = 0;
-let callbackMissingCount = 0;    // callback 필드 자체가 없는 고객
+let callbackMissingCount = 0;    // callback + store_phone 둘 다 없는 고객
 let callbackUnregisteredCount = 0; // 미등록 회신번호 고객
 if (useIndividualCallback) {
+  // ★ store_phone → callback 폴백: callback이 없으면 store_phone을 사용
+  for (const c of filteredCustomers) {
+    if ((!c.callback || !c.callback.trim()) && c.store_phone && c.store_phone.trim()) {
+      c.callback = c.store_phone;
+    }
+  }
+
   const beforeCount = filteredCustomers.length;
   filteredCustomers = filteredCustomers.filter((c: any) => c.callback && c.callback.trim());
   callbackMissingCount = beforeCount - filteredCustomers.length;
   if (callbackMissingCount > 0) {
     callbackSkippedCount += callbackMissingCount;
-    console.log(`[개별회신번호] callback 없는 고객 ${callbackMissingCount}명 제외 (${filteredCustomers.length}명 발송)`);
+    console.log(`[개별회신번호] callback+store_phone 없는 고객 ${callbackMissingCount}명 제외 (${filteredCustomers.length}명 발송)`);
   }
 
   // 미등록 회신번호 고객 제외 (전체 차단 → 개별 제외)
@@ -1271,12 +1279,19 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       }
     }
 
-    // ★ B16-07: 개별회신번호 사용 시 — callback 없는 고객 + 미등록 회신번호 고객 제외
+    // ★ B16-07: 개별회신번호 사용 시 — callback 없는 고객은 store_phone 폴백 → 둘 다 없으면 제외
     let validRecipients: any[] = [...recipients];
     let callbackSkippedCount = 0;
-    let callbackMissingCount = 0;      // callback 필드 자체가 없는 수신자
+    let callbackMissingCount = 0;      // callback + store_phone 둘 다 없는 수신자
     let callbackUnregisteredCount = 0; // 미등록 회신번호 수신자
     if (useIndividualCallback) {
+      // ★ store_phone → callback 폴백: callback이 없으면 store_phone을 사용
+      for (const r of validRecipients) {
+        if ((!r.callback || !r.callback.trim()) && r.store_phone && r.store_phone.trim()) {
+          r.callback = r.store_phone;
+        }
+      }
+
       const beforeMissing = validRecipients.length;
       validRecipients = validRecipients.filter((r: any) => r.callback && r.callback.trim());
       callbackMissingCount = beforeMissing - validRecipients.length;
