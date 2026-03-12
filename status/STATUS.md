@@ -388,12 +388,13 @@
 
 ---
 
-### 🔧 D66 — 17차 실동작 검증 + PPT 버그리포트 수정 (2026-03-11~) — 🔴 진행 중
+### 🔧 D66 — 17차 실동작 검증 + PPT 버그리포트 수정 (2026-03-11~03-12) — ✅ 수정+배포 완료, 실동작 검증 대기
 
 > **배경:** 직원 전수 실동작 검증(체크리스트 30개 항목, 0311) + PPT 버그리포트(9슬라이드) 결과 종합 분석.
 > **검증 결과:** O(통과) 15건, X(실패) 8건, ▲(부분통과) 4건, 미검증 3건. PPT 신규 포함 총 16건 수정 대상.
 > **원칙:** 하나씩 코드 직접 읽고 근본 원인 파악 → Harold님 컨펌 → 수정. 병렬 에이전트 금지.
 > **기간계 무접촉:** 발송 INSERT/차감/환불 로직 직접 수정 금지.
+> **결과:** B17-01~B17-07(이전 세션), B17-09~B17-16(이번 세션) 수정 완료 + 080 admin 자동동기화 추가. TypeScript 0 에러. 배포 완료(2026-03-12).
 
 #### 체크리스트 결과 요약 (2026-03-11)
 
@@ -408,22 +409,22 @@
 
 | # | 버그ID | 심각도 | 제목 | 상태 |
 |---|--------|--------|------|------|
-| 1 | B17-01 | 🔴🔴 | 직접발송 수신거부 제외가 발송에 미반영 (추출은 정상, 전송 시 전체 발송) | 🔵 Open |
-| 2 | B17-02 | 🔴🔴 | 예약취소 완전 불가 — 캘린더/예약대기/발송결과 3곳 취소 안 됨 + 취소해도 발송됨 | 🔵 Open |
-| 3 | B17-03 | 🔴 | AI한줄로/맞춤한줄 발송 시 "서버 오류" — AI 경로 전체 발송 불가 | 🔵 Open |
-| 4 | B17-04 | 🔴 | AI 선택 문안 ≠ 실제 발송 — 두번째 발송 시 첫번째 문안 중복 | 🔵 Open |
-| 5 | B17-05 | 🟠 | AI 맞춤한줄 스팸테스트 개인화 공백 (간헐적) | 🔵 Open |
-| 6 | B17-06 | 🟠 | 직접타겟 누적금액/포인트 필터 미작동 — 전체 고객 추출됨 | 🔵 Open |
-| 7 | B17-07 | 🟠 | MMS 비용절감 모달 후 LMS유지/SMS전환 눌러도 발송 불가 | 🔵 Open |
-| 8 | B17-08 | 🟠 | 직접타겟 회신번호 리스트 로딩 안 됨 + 자동입력 변수 "고객명"만 표시 | 🔵 Open |
-| 9 | B17-09 | 🟠 | 엑셀 날짜 ISO/영문 표시 (B8-10/B10-04 재발) | 🔵 Open |
-| 10 | B17-10 | 🟠 | AI한줄로 SMS 바이트 초과 시 LMS 전환 안내 없이 발송 가능 | 🔵 Open |
-| 11 | B17-11 | 🟠 | 080 수신거부 자동연동 미동작 (슈퍼관리자 설정 후 0건) | 🔵 Open |
-| 12 | B17-12 | 🟠 | AI맞춤한줄 담당자테스트 버튼 불안정 (실행됐다 안 됐다) | 🔵 Open |
-| 13 | B17-13 | 🟡 | 커스텀 필드 라벨 여전히 "커스텀1,2" 표시 (B10-02 재발) | 🔵 Open |
-| 14 | B17-14 | 🟡 | 필터 UI — 대량 값 시 선택창 무한 + 매장번호/지역 미노출 (D39) | 🔵 Open |
-| 15 | B17-15 | 🟡 | Toast 알림 리셋 안 됨 — 새로고침 전까지 남아있음 (B11-02) | 🔵 Open |
-| 16 | B17-16 | 🟡 | DB 현황에서 AI 매핑 필드(등록매장 등) 미표시 (B10-03) | 🔵 Open |
+| 1 | B17-01 | 🔴🔴 | 직접발송 수신거부 제외가 발송에 미반영 (추출은 정상, 전송 시 전체 발송) | 🟡 수정완료-검증대기 |
+| 2 | B17-02 | 🔴🔴 | 예약취소 완전 불가 — 캘린더/예약대기/발송결과 3곳 취소 안 됨 + 취소해도 발송됨 | 🟡 수정완료-검증대기 |
+| 3 | B17-03 | 🔴 | AI한줄로/맞춤한줄 발송 시 "서버 오류" — AI 경로 전체 발송 불가 | 🟡 수정완료-검증대기 |
+| 4 | B17-04 | 🔴 | AI 선택 문안 ≠ 실제 발송 — 두번째 발송 시 첫번째 문안 중복 | 🟡 수정완료-검증대기 |
+| 5 | B17-05 | 🟠 | AI 맞춤한줄 스팸테스트 개인화 공백 (간헐적) | 🟡 수정완료-검증대기 |
+| 6 | B17-06 | 🟠 | 직접타겟 누적금액/포인트 필터 미작동 — 전체 고객 추출됨 | 🟡 수정완료-검증대기 |
+| 7 | B17-07 | 🟠 | MMS 비용절감 모달 후 LMS유지/SMS전환 눌러도 발송 불가 | 🟡 수정완료-검증대기 |
+| 8 | B17-08 | 🟠 | 직접타겟 회신번호 리스트 로딩 안 됨 + 자동입력 변수 "고객명"만 표시 | 🟡 배포 후 재확인 |
+| 9 | B17-09 | 🟠 | 엑셀 날짜 ISO/영문 표시 (B8-10/B10-04 재발) | 🟡 수정완료-검증대기 |
+| 10 | B17-10 | 🟠 | AI한줄로 SMS 바이트 초과 시 LMS 전환 안내 없이 발송 가능 | 🟡 수정완료-검증대기 |
+| 11 | B17-11 | 🟠 | 080 수신거부 자동연동 미동작 (슈퍼관리자 설정 후 0건) | 🟡 수정완료-검증대기 |
+| 12 | B17-12 | 🟠 | AI맞춤한줄 담당자테스트 버튼 불안정 (실행됐다 안 됐다) | 🟡 수정완료-검증대기 |
+| 13 | B17-13 | 🟡 | 커스텀 필드 라벨 여전히 "커스텀1,2" 표시 (B10-02 재발) | 🟡 코드 이상 없음-재업로드 시 해결 |
+| 14 | B17-14 | 🟡 | 필터 UI — 대량 값 시 선택창 무한 + 매장번호/지역 미노출 (D39) | 🟡 수정완료-검증대기 |
+| 15 | B17-15 | 🟡 | Toast 알림 리셋 안 됨 — 새로고침 전까지 남아있음 (B11-02) | 🟡 수정완료-검증대기 |
+| 16 | B17-16 | 🟡 | DB 현황에서 AI 매핑 필드(등록매장 등) 미표시 (B10-03) | 🟡 수정완료-검증대기 |
 
 #### 관련 이전 버그 매핑
 
@@ -439,6 +440,46 @@
 | B17-09 | B8-10, B10-04 | normalize.ts 날짜 처리 재발 |
 | B17-11 | 신규 | CT-03 unsubscribe-helper 080 연동 배포 여부 확인 |
 | B17-13 | B10-02 | customer_schema 라벨 복구 로직 미동작 |
+
+#### 수정 내역 상세 (2026-03-11~03-12, 2세션)
+
+**세션1 (D66 전반 — B17-01~B17-07):**
+- B17-01: unsubscribes 10파일 user_id 통일 (campaigns.ts, customers.ts, ai.ts 등)
+- B17-04: AI 캠페인 state 초기화 (Dashboard.tsx aiResult/selectedAiMsgIdx 리셋)
+- B17-06: customer-filter.ts 숫자 필드 연산자 처리 수정
+- B17-07: MMS 비용절감 모달 콜백 루프 수정 (SendConfirmModal.tsx)
+
+**세션2 (D66 후반 — B17-09~B17-16 + 080 admin 동기화):**
+- B17-09: upload.ts, sync.ts — XLSX Date 객체 normalizeDateValue() 처리
+- B17-10: AiCampaignResultPopup.tsx — 캠페인확정 시 SMS 바이트 체크 + LMS 전환 confirm
+- B17-11: 080 수신거부 — 7개 파일 users 우선→companies fallback 패턴 적용 (unsubscribes.ts, campaigns.ts×3, ai.ts×3, companies.ts)
+- B17-12: AiCustomSendFlow.tsx — 자체 handleCustomTestSend 함수 생성 (variants 기반)
+- B17-13: 코드 이상 없음 — customer_field_definitions 정상, 데이터 재업로드 시 해결
+- B17-14: DirectTargetFilterModal.tsx — 15개 초과 시 검색+스크롤 영역
+- B17-15: Dashboard.tsx — useEffect 4초 자동 해제 + 닫기 버튼
+- B17-16: companies.ts — store_name(미존재)→COALESCE(registered_store, recent_purchase_store), opt_outs→unsubscribes
+
+**추가 개선 (080 admin 자동동기화):**
+- unsubscribe-helper.ts process080Callback() — 080 콜백 시 같은 회사의 admin user에게도 자동 INSERT (source='080_ars_sync')
+- 매칭된 user INSERT 후 → 같은 company의 user_type='admin' 조회 → 미포함 admin에게 INSERT
+
+#### 수정 파일 전체 목록 (D66 세션2)
+- `utils/unsubscribe-helper.ts` — 080 admin 자동동기화
+- `routes/unsubscribes.ts` — B17-11 users 우선 조회
+- `routes/campaigns.ts` — B17-11 AI발송/직접발송/예약발송 3곳
+- `routes/ai.ts` — B17-11 generate-message/recommend/generate-custom 3곳
+- `routes/companies.ts` — B17-11 settings reject_number override + B17-16 store_name/opt_outs 수정
+- `routes/upload.ts` — B17-09 Date 객체 처리
+- `routes/sync.ts` — B17-09 Date 객체 처리
+- `components/AiCampaignResultPopup.tsx` — B17-10 SMS 바이트 체크
+- `components/AiCustomSendFlow.tsx` — B17-12 자체 테스트 핸들러
+- `components/DirectTargetFilterModal.tsx` — B17-14 검색+스크롤
+- `pages/Dashboard.tsx` — B17-15 Toast 자동해제
+
+#### 배포 후 재확인 필요
+- B17-08: 콜백 목록 (이전 세션 배포 분)
+- B17-11: 080 실제 콜백 동작 (나래인터넷 → sh_cpb/sh_sh 테스트)
+- B17-13: 커스텀 필드 라벨 (데이터 재업로드 후)
 
 ---
 

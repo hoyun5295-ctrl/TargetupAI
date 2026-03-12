@@ -153,10 +153,11 @@ QTmsg status_code, 통신사 코드, 스팸필터 판정 결과를 한 곳에서
 ```sql
 AND NOT EXISTS (
   SELECT 1 FROM unsubscribes u
-  WHERE u.company_id = c.company_id AND u.phone = c.phone
+  WHERE u.user_id = [발송자user_id] AND u.phone = c.phone
 )
 ```
 - 5개 발송 경로 전부 동일 패턴 적용되어 있는지 확인.
+- **⚠️ user_id 기준 (B17-01):** 수신거부는 company_id가 아닌 user_id 기준으로 격리 (브랜드별 수신거부 분리).
 
 **080 수신거부 자동연동 (나래인터넷):**
 ```
@@ -164,10 +165,14 @@ AND NOT EXISTS (
     → unsubscribe-helper.ts의 process080Callback() 처리
     → 매칭 순서: ① users.opt_out_080_number (사용자 단위, auto_sync=true만)
                   ② companies.opt_out_080_number (하위호환 fallback)
-    → unsubscribes INSERT + customers.sms_opt_in 동기화
+    → 매칭된 모든 user에게 unsubscribes INSERT
+    → ★ 같은 회사의 admin user(user_type='admin')에게도 자동 INSERT (source='080_ars_sync')
+    → customers.sms_opt_in 동기화
     → 응답: '1'(성공) / '0'(실패)
 ```
 - **사용자 단위 관리:** 슈퍼관리자 → 사용자 수정 모달에서 080번호/자동연동ON·OFF 설정
+- **admin 자동동기화:** 브랜드 담당자에게 080 수신거부 등록 시 → 같은 회사의 고객사관리자(admin)에게도 자동 INSERT (관리 가시성 + 발송 필터 적용)
+- **080 설정 조회 패턴:** users 테이블 우선 → companies fallback (unsubscribes.ts, campaigns.ts, ai.ts, companies.ts 전부 동일 패턴)
 - **080 함수:** `findUserBy080Number()`, `process080Callback()`, `getUserUnsubscribes()`, `deleteUserUnsubscribes()`, `exportUserUnsubscribes()`
 - **필터 함수:** `buildUnsubscribeFilter()`, `buildUnsubscribeExistsFilter()`, `syncCustomerOptIn()`, `isUnsubscribed()`, `getUnsubscribedPhones()`
 
