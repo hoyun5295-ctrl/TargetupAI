@@ -267,6 +267,8 @@ export default function CustomerDBModal({ onClose, token }: CustomerDBModalProps
                         let display: string;
                         if (f.field_key === 'gender') {
                           display = val === 'M' || val === '남' || val === '남성' ? '남' : val === 'F' || val === '여' || val === '여성' ? '여' : val || '-';
+                        } else if (f.field_key === 'birth_date' || f.field_key === 'recent_purchase_date' || f.field_key === 'created_at' || f.field_key === 'wedding_anniversary' || f.field_type === 'DATE') {
+                          display = val ? formatDate(String(val)) : '-';
                         } else if (f.field_key === 'total_purchase_amount' || f.field_key === 'recent_purchase_amount' || f.field_key === 'avg_order_value') {
                           display = val != null ? `${Number(val).toLocaleString()}` : '-';
                         } else if (f.field_key === 'grade') {

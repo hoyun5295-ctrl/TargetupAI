@@ -106,7 +106,7 @@
 
 ---
 
-### 🔧 D69 — 자동발송 기능 (2026-03-12) — ✅ Phase 1 (MVP) 구현 완료, 배포 완료
+### 🔧 D69 — 자동발송 기능 (2026-03-12) — Phase 1 배포 완료 + 모달 개선 진행 중
 
 > **배경:** 메트로시티 요청 — 생일자 자동발송 등 반복 스케줄 설정 기능
 > **적용:** 프로 요금제(100만원) 이상
@@ -115,7 +115,7 @@
 #### Phase 1 구현 완료 항목
 - **DB:** auto_campaigns + auto_campaign_runs 테이블 생성 완료, plans.auto_campaign_enabled + plans.max_auto_campaigns 컬럼 추가 완료
 - **백엔드:** routes/auto-campaigns.ts(CRUD 9개 엔드포인트) + utils/auto-campaign-worker.ts(매 1시간 체크 워커) + app.ts 마운트/워커 시작 연결
-- **프론트:** DashboardHeader 메뉴 추가('AI 분석'↔'직접발송' 사이) + AutoSendPage.tsx(프로 미만 블러+CTA / 프로 이상 실제 기능) + AutoSendFormModal.tsx(4단계 모달)
+- **프론트:** DashboardHeader 메뉴 추가('AI 분석'↔'직접발송' 사이) + AutoSendPage.tsx(프로 미만 블러+CTA / 프로 이상 실제 기능) + AutoSendFormModal.tsx(5단계 모달)
 - **UX:** AnalysisModal 블러 패턴 적용 — 누구나 메뉴 클릭→페이지 진입→상단 설명+하단 블러+CTA
 - **권한:** company_admin + company_user(브랜드담당자) 모두 생성/수정/삭제 가능 (store_code 범위 내)
 - **스케줄:** 매월(1~28일)/매주/매일 + 발송 시각 설정. 매월 28일 max (2월 고려)
@@ -123,11 +123,22 @@
 - **실패 정책:** 스킵 + failed 기록 → next_run_at 다음 스케줄로 갱신 (중복 발송 방지)
 - **기존 파이프라인 100% 재활용:** customer-filter, sms-queue, messageUtils, unsubscribe-helper, prepaid, campaign-lifecycle, store-scope
 
+#### AutoSendFormModal 개선 (2026-03-12, 배포 대기)
+- **버그 수정:** 발신번호 로딩 — `data.callbackNumbers` → `data.numbers` (API 응답 키 불일치 수정)
+- **5단계 재구성:** 1.기본정보 → 2.활용필드선택(신규) → 3.스케줄 → 4.메시지 → 5.확인
+- **2단계 활용필드선택:** AiCustomSendFlow 패턴 — `/api/customers/enabled-fields` 기반 카테고리별 동적 필드 체크박스. 선택한 필드가 4단계 변수 드롭다운과 AI 문구생성 personalFields에 연동
+- **4단계 메시지 보강:** SMS/LMS/MMS 수동 탭 토글, 바이트 동적표시(90/2000), 광고문구 실시간 미리보기((광고)+무료거부), 이모지 경고, MMS 이미지 업로드, LMS/MMS 제목 필수 체크
+- **AI 문구추천:** AiMessageSuggestModal 연동 + selectedFields 기반 개인화. 프로 이상 접근이므로 잠금 제거
+- **스팸필터테스트:** SpamFilterTestModal 연동. 프로 이상 접근이므로 잠금 제거
+- **자동입력 변수:** 하드코딩 5개 버튼 → enabled-fields 기반 동적 드롭다운 (TargetSendModal 패턴)
+- **⚠️ 미완료:** 타겟 필터 UI (Phase 2), 실행 이력 상세 조회 (Phase 2)
+
 #### Phase 2 (미구현, 향후)
 - D-1 사전 알림 (auto-campaign-notify.ts)
+- 타겟 필터 UI (AutoSendFormModal에 필터 단계 추가)
+- 실행 이력 상세 조회
 - 캘린더 연동 (CalendarPage에 자동발송 이벤트 표시)
 - 슈퍼관리자 모니터링 (admin 대시보드)
-- 실행 실패 시 재시도 로직
 
 #### Phase 3 (미구현, 향후)
 - AI 메시지 자동 생성 연동 (매 실행마다 시즌별 메시지 자동 생성)

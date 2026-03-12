@@ -1002,13 +1002,13 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
   };
 
   // SMS 템플릿 저장
-  const saveTemplate = async (name: string, content: string, msgType: string, subject: string) => {
+  const saveTemplate = async (name: string, content: string, msgType: string, subject: string, mmsImagePaths?: string[]) => {
     try {
       const token = localStorage.getItem('token');
       const res = await fetch('/api/sms-templates', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ templateName: name, messageType: msgType, subject: subject || null, content })
+        body: JSON.stringify({ templateName: name, messageType: msgType, subject: subject || null, content, mmsImagePaths: mmsImagePaths || null })
       });
       const data = await res.json();
       if (data.success) {
@@ -3896,6 +3896,12 @@ const campaignData = {
                             if (t.subject) setDirectSubject(t.subject);
                             if (t.message_type) setDirectMsgType(t.message_type);
                           }
+                          // ★ MMS 이미지 복원
+                          if (t.message_type === 'MMS' && t.mms_image_paths && Array.isArray(t.mms_image_paths)) {
+                            setMmsUploadedImages(t.mms_image_paths.map((p: string, i: number) => ({
+                              serverPath: p, url: p, filename: `image_${i + 1}`, size: 0
+                            })));
+                          }
                           setShowTemplateBox(null);
                           setToast({ show: true, type: 'success', message: '문자가 적용되었습니다.' });
                           setTimeout(() => setToast({ show: false, type: 'success', message: '' }), 3000);
@@ -3952,7 +3958,8 @@ const campaignData = {
                     const content = showTemplateSave === 'target' ? targetMessage : directMessage;
                     const msgType = showTemplateSave === 'target' ? targetMsgType : directMsgType;
                     const subject = showTemplateSave === 'target' ? targetSubject : directSubject;
-                    const ok = await saveTemplate(templateSaveName.trim(), content, msgType, subject);
+                    const imagePaths = msgType === 'MMS' ? mmsUploadedImages.map(img => img.serverPath) : undefined;
+                    const ok = await saveTemplate(templateSaveName.trim(), content, msgType, subject, imagePaths);
                     if (ok) setShowTemplateSave(null);
                   }}
                   className="flex-1 py-3 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl text-sm font-bold transition-colors"

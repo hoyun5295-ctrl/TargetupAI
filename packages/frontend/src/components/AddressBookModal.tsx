@@ -80,7 +80,8 @@ export default function AddressBookModal({
                     const formData = new FormData();
                     formData.append('file', file);
                     try {
-                      const res = await fetch('/api/upload/parse?includeData=true', { method: 'POST', body: formData });
+                      const token = localStorage.getItem('token');
+                      const res = await fetch('/api/upload/parse?includeData=true', { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: formData });
                       const data = await res.json();
                       if (data.success) {
                         setAddressFileHeaders(data.headers || []);

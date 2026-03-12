@@ -15,7 +15,7 @@ router.get('/', async (req: Request, res: Response) => {
     if (!companyId) return res.status(403).json({ error: '권한이 없습니다.' });
 
     const result = await query(
-      `SELECT id, template_name, message_type, subject, content, created_at
+      `SELECT id, template_name, message_type, subject, content, mms_image_paths, created_at
        FROM sms_templates
        WHERE company_id = $1 AND user_id = $2
        ORDER BY created_at DESC
@@ -37,7 +37,7 @@ router.post('/', async (req: Request, res: Response) => {
     const userId = req.user?.userId;
     if (!companyId) return res.status(403).json({ error: '권한이 없습니다.' });
 
-    const { templateName, messageType, subject, content } = req.body;
+    const { templateName, messageType, subject, content, mmsImagePaths } = req.body;
 
     if (!templateName || !content) {
       return res.status(400).json({ error: '템플릿명과 내용은 필수입니다.' });
@@ -53,10 +53,10 @@ router.post('/', async (req: Request, res: Response) => {
     }
 
     const result = await query(
-      `INSERT INTO sms_templates (id, company_id, user_id, template_name, message_type, subject, content, created_at, updated_at)
-       VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, NOW(), NOW())
-       RETURNING id, template_name, message_type, subject, content, created_at`,
-      [companyId, userId, templateName, messageType || 'SMS', subject || null, content]
+      `INSERT INTO sms_templates (id, company_id, user_id, template_name, message_type, subject, content, mms_image_paths, created_at, updated_at)
+       VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+       RETURNING id, template_name, message_type, subject, content, mms_image_paths, created_at`,
+      [companyId, userId, templateName, messageType || 'SMS', subject || null, content, mmsImagePaths ? JSON.stringify(mmsImagePaths) : null]
     );
 
     return res.json({ success: true, template: result.rows[0], message: '템플릿이 저장되었습니다.' });

@@ -458,14 +458,15 @@ router.get('/stats', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
     
-    // ★ Redis 캐싱 (60초) — 30만건 이상 집계 쿼리 최적화
-    const cacheKey = `stats:${companyId}`;
+    const userId = req.user?.userId;
+    const userType = req.user?.userType;
+
+    // ★ Redis 캐싱 (60초) — 사용자별 캐시 키 (브랜드별 store_code 격리 반영)
+    const cacheKey = `stats:${companyId}:${userId || 'anonymous'}`;
     try {
       const cached = await redis.get(cacheKey);
       if (cached) return res.json(JSON.parse(cached));
     } catch (e) { /* Redis 실패 시 DB 직접 조회 */ }
-    const userId = req.user?.userId;
-    const userType = req.user?.userType;
 
     if (!companyId) {
       return res.status(403).json({ error: '회사 권한이 필요합니다' });

@@ -226,7 +226,13 @@ AND NOT EXISTS (
 
 **프론트엔드 파일 (구현 완료):**
 - `pages/AutoSendPage.tsx` — 프로 미만: 블러 프리뷰+CTA (AnalysisModal 패턴), 프로 이상: 실제 기능
-- `components/AutoSendFormModal.tsx` — 자동발송 생성/수정 4단계 위저드 모달
+- `components/AutoSendFormModal.tsx` — 자동발송 생성/수정 **5단계** 위저드 모달:
+  - 1단계: 기본정보 (캠페인명, 설명)
+  - 2단계: 활용필드선택 (AiCustomSendFlow 패턴 — enabled-fields API 기반 카테고리별 동적 필드 체크박스)
+  - 3단계: 스케줄 (매월/매주/매일 + 발송일/요일 + 시각)
+  - 4단계: 메시지 (SMS/LMS/MMS 탭, AI문구추천(AiMessageSuggestModal+personalFields), 스팸필터(SpamFilterTestModal), 동적 변수 드롭다운, 광고문구 미리보기, MMS 이미지 업로드)
+  - 5단계: 확인 (요약 + 미리보기)
+  - ★ 프로 이상 접근이므로 AI/스팸필터 잠금 체크 없음 (불필요한 요금제 체크 제거)
 - `DashboardHeader.tsx` — "자동발송" 메뉴 (AI 분석과 직접발송 사이, 잠금 없이 누구나 클릭)
 - `App.tsx` — `/auto-send` 라우트 (company_admin + company_user 접근)
 
