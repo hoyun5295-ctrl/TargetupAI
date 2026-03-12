@@ -4,9 +4,10 @@ import { formatDate } from '../utils/formatDate';
 interface CustomerDBModalProps {
   onClose: () => void;
   token: string | null;
+  userType?: 'super_admin' | 'company_admin' | 'company_user';
 }
 
-export default function CustomerDBModal({ onClose, token }: CustomerDBModalProps) {
+export default function CustomerDBModal({ onClose, token, userType }: CustomerDBModalProps) {
   const [customers, setCustomers] = useState<any[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -21,10 +22,12 @@ export default function CustomerDBModal({ onClose, token }: CustomerDBModalProps
   const [filterGrade, setFilterGrade] = useState('all');
   const [filterRegion, setFilterRegion] = useState('all');
   const [filterSmsOptIn, setFilterSmsOptIn] = useState('all');
+  const [filterStoreCode, setFilterStoreCode] = useState('all');
 
   // 필터 옵션 (API에서 가져옴)
   const [gradeOptions, setGradeOptions] = useState<string[]>([]);
   const [regionOptions, setRegionOptions] = useState<string[]>([]);
+  const [storeCodeOptions, setStoreCodeOptions] = useState<string[]>([]);
 
   // 상세보기
   const [selectedCustomer, setSelectedCustomer] = useState<any>(null);
@@ -55,12 +58,13 @@ export default function CustomerDBModal({ onClose, token }: CustomerDBModalProps
       const data = await res.json();
       setGradeOptions(data.grades || []);
       setRegionOptions(data.regions || []);
+      setStoreCodeOptions(data.store_codes || []);
     } catch (error) {
       console.error('필터 옵션 조회 에러:', error);
     }
   };
 
-  const fetchCustomers = async (p: number, overrides?: { gender?: string; grade?: string; region?: string; smsOptIn?: string; search?: string }) => {
+  const fetchCustomers = async (p: number, overrides?: { gender?: string; grade?: string; region?: string; smsOptIn?: string; search?: string; storeCode?: string }) => {
     setLoading(true);
     setSelectedCustomer(null); // 검색/필터 변경 시 상세 패널 초기화
     try {
@@ -69,6 +73,7 @@ export default function CustomerDBModal({ onClose, token }: CustomerDBModalProps
       const currentRegion = overrides?.region ?? filterRegion;
       const currentSmsOptIn = overrides?.smsOptIn ?? filterSmsOptIn;
       const currentSearch = overrides?.search ?? searchValue;
+      const currentStoreCode = overrides?.storeCode ?? filterStoreCode;
 
       const params = new URLSearchParams({ page: String(p), limit: String(limit) });
       if (currentSearch.trim()) params.set('search', currentSearch.trim());
@@ -76,6 +81,8 @@ export default function CustomerDBModal({ onClose, token }: CustomerDBModalProps
       if (currentGrade !== 'all') params.set('grade', currentGrade);
       if (currentSmsOptIn === 'true') params.set('smsOptIn', 'true');
       if (currentSmsOptIn === 'false') params.set('smsOptIn', 'false');
+      // ★ 브랜드 필터 (고객사관리자/슈퍼관리자만)
+      if (currentStoreCode !== 'all') params.set('filterStoreCode', currentStoreCode);
       // 지역은 기존 API에서 search로 처리되므로 별도 처리 불필요시 검색으로 통합
       // 지역 필터가 필요하면 filters JSON 사용
       if (currentRegion !== 'all') {
@@ -115,6 +122,7 @@ export default function CustomerDBModal({ onClose, token }: CustomerDBModalProps
     if (key === 'grade') { setFilterGrade(value); overrides.grade = value; }
     if (key === 'region') { setFilterRegion(value); overrides.region = value; }
     if (key === 'smsOptIn') { setFilterSmsOptIn(value); overrides.smsOptIn = value; }
+    if (key === 'storeCode') { setFilterStoreCode(value); overrides.storeCode = value; }
     setPage(1);
     fetchCustomers(1, overrides);
   };
@@ -124,8 +132,9 @@ export default function CustomerDBModal({ onClose, token }: CustomerDBModalProps
     setFilterGrade('all');
     setFilterRegion('all');
     setFilterSmsOptIn('all');
+    setFilterStoreCode('all');
     setPage(1);
-    fetchCustomers(1, { gender: 'all', grade: 'all', region: 'all', smsOptIn: 'all', search: '' });
+    fetchCustomers(1, { gender: 'all', grade: 'all', region: 'all', smsOptIn: 'all', storeCode: 'all', search: '' });
   };
 
   const formatPhone = (phone: string) => {
@@ -226,6 +235,19 @@ export default function CustomerDBModal({ onClose, token }: CustomerDBModalProps
                 {opt.l}
               </button>
             ))}
+
+            {/* ★ 브랜드 필터 — 고객사관리자/슈퍼관리자만 표시 */}
+            {(userType === 'company_admin' || userType === 'super_admin') && storeCodeOptions.length > 0 && (
+              <>
+                <div className="w-px h-5 bg-gray-200" />
+                <span className="text-gray-500 font-medium">브랜드</span>
+                <select value={filterStoreCode} onChange={(e) => handleFilterChange('storeCode', e.target.value)}
+                  className="border border-gray-300 rounded-lg px-2 py-1 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-emerald-200">
+                  <option value="all">전체</option>
+                  {storeCodeOptions.map(sc => <option key={sc} value={sc}>{sc}</option>)}
+                </select>
+              </>
+            )}
           </div>
         </div>
 

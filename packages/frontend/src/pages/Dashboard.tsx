@@ -2596,7 +2596,7 @@ const campaignData = {
           overrideUnsubscribeCount={successUnsubscribeCount || undefined}
         />
         {showResults && <ResultsModal onClose={() => setShowResults(false)} token={localStorage.getItem('token')} />}
-        {showCustomerDB && <CustomerDBModal onClose={() => setShowCustomerDB(false)} token={localStorage.getItem('token')} />}
+        {showCustomerDB && <CustomerDBModal onClose={() => setShowCustomerDB(false)} token={localStorage.getItem('token')} userType={user?.userType} />}
         {showCalendar && <CalendarModal onClose={() => setShowCalendar(false)} token={localStorage.getItem('token')} onEdit={(campaign) => {
           setShowCalendar(false);
           if (campaign._clone) {

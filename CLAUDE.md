@@ -69,6 +69,20 @@
 - **하나씩 천천히 뜯어보고 제대로 체크** — 한 건씩 코드를 직접 읽고, 근본 원인을 정확히 파악한 후 수정한다.
 - 병렬로 대충 보다가 빠뜨리는 게 반복되어 온 패턴. 느려도 정확하게.
 
+### 4-8. ⚠️ 두 번 세 번 꼼꼼히 살펴보기 (D70 교훈 — 극히 중요)
+- **수정한 코드가 실제로 "그 값"을 쓰는지 끝까지 추적한다.**
+  - 예: 대시보드에 "성공건수"로 표시하는데 실제 변수가 `totalSent`(발송건수)인지 `totalSuccess`(성공건수)인지 — 변수명만 보지 말고 **값의 출처(DB 컬럼, 쿼리)까지** 추적.
+  - 예: 함수의 "안전망" 로직(regex strip 등)이 유효한 값을 의도치 않게 제거하는지 확인.
+- **"코드가 맞아 보인다"로 끝내지 말고, 실제 데이터 흐름을 따라가며 검증한다.**
+  - 입력(프론트 → API body) → 처리(백엔드 로직) → 저장(DB) → 조회(SELECT) → 표시(프론트) 전체 경로를 한 번 더 확인.
+- **서버 실데이터로 교차검증한다.**
+  - 직원/사용자 리포트를 맹신하지 않되, 무시하지도 않는다.
+  - 서버 DB 조회, PM2 로그, 실제 코드(dist/) grep으로 팩트를 확인한 후 판단.
+- **컨트롤타워 함수 수정 시 모든 호출부의 동작을 확인한다.**
+  - replaceVariables, buildCustomerFilter, getStoreScope 등 컨트롤타워 함수는 여러 곳에서 호출됨.
+  - 파라미터 추가/시그니처 변경 시 기존 호출부가 깨지지 않는지 (하위호환) 반드시 확인.
+- **이 원칙은 "시간이 걸려도 반드시 지킨다." 빠르게 대충 하면 또 사고난다.**
+
 ---
 
 ## 5. 핵심 아키텍처 (이것만 알면 코드 수정 가능)
@@ -116,9 +130,11 @@ QTmsg status_code, 통신사 코드, 스팸필터 판정 결과를 한 곳에서
 
 ### 5-4. 변수 치환 시스템 (messageUtils.ts)
 
-`replaceVariables(message, customer, companyInfo)` — 메시지 내 `%고객명%`, `%매장명%` 등의 변수를 실제 고객 데이터로 치환.
+`replaceVariables(template, customer, fieldMappings, addressBookFields?)` — 메시지 내 `%이름%`, `%등급%` 등의 변수를 실제 고객 데이터로 치환.
 - 5개 발송 경로 전부 이 함수 사용.
 - 새 변수 추가 시 이 함수만 수정하면 전 경로 자동 반영.
+- **4번째 파라미터 `addressBookFields` (D70):** 직접발송 시 주소록 %기타1/2/3%, %회신번호% 치환. fieldMappings 순회 전에 먼저 치환하여 안전망 regex에 잡히지 않도록 처리.
+- **⚠️ D70 교훈:** 주소록 변수는 fieldMappings에 없으므로, replaceVariables의 잔여 %...% 안전망이 빈값으로 제거함. 반드시 안전망 전에 치환해야 함.
 
 ### 5-5. 멀티테넌트 격리
 
@@ -276,6 +292,9 @@ PostgreSQL campaigns/campaign_runs 생성
 | **엉뚱한 파일 수정** | B13-03/04를 AiCampaignResultPopup.tsx에서 수정 — 실제 화면은 AiPreviewModal.tsx | 수정 전 실제 화면 확인 필수 |
 | **tp-deploy-full 백엔드 빌드 누락** | tp-deploy-full이 프론트엔드만 빌드 → 백엔드 dist/ 미갱신 → 서버에 코드 수정 미반영 | PowerShell 프로필에 백엔드 빌드 추가 완료 (D67) |
 | **customer-filter mixed/structured 양쪽 누락** | AI 프롬프트에 birth_date 추가했지만 customer-filter.ts mixed 형식에 핸들러 없어서 필터 무시됨 → 전체 고객 선택 | 새 필드 추가 시 mixed + structured 양쪽 확인 필수 (D68) |
+| **대시보드 sent vs success 혼동** | monthly_sent에 totalSent(큐INSERT건수)를 넣어 "성공건수"에 실패건까지 표시 | 대시보드 표시값의 출처를 반드시 DB 컬럼까지 추적하여 확인 (D70) |
+| **replaceVariables 안전망이 주소록 변수 제거** | 직접발송 시 DB에 있는 수신자 → replaceVariables 호출 → %기타1/2/3%는 fieldMappings에 없음 → 안전망 regex가 빈값으로 제거 | 컨트롤타워 함수의 "안전망"이 의도치 않게 유효한 값을 제거하는지 반드시 확인 (D70) |
+| **upload.ts customer_schema 미갱신** | 엑셀 업로드 후 companies.customer_schema가 {}로 방치 → AI/직접발송 변수 매핑 불가 | 데이터 입력 경로가 여러 개일 때 모든 경로에서 관련 메타데이터가 갱신되는지 확인 (D70) |
 
 ---
 

@@ -515,6 +515,12 @@ async function processUploadInBackground(
           continue;
         }
 
+        // ★ 브랜드 격리: 파일에 store_code 컬럼이 없으면 업로드 사용자의 store_codes[0] 자동 할당
+        // → UNIQUE(company_id, store_code, phone) 제약에 의해 브랜드별 별개 레코드로 분리됨
+        if (!hasFileStoreCode && !record.store_code && userStoreCodes.length > 0) {
+          record.store_code = userStoreCodes[0];
+        }
+
         // 배치 내 중복: store_code 포함 dedupe
         const dedupeKey = `${record.phone}__${record.store_code || '__NONE__'}`;
         if (seenInBatch.has(dedupeKey)) {
@@ -742,16 +748,16 @@ async function processUploadInBackground(
             customMappings.push({ fieldKey, label });
           }
         }
+        // ★ 최초 등록 우선 정책: 이미 라벨이 있는 필드는 덮어쓰지 않음
+        // 라벨 변경은 고객사관리자가 직접 관리 (브랜드 담당자 업로드로 덮어쓰기 방지)
         for (const cm of customMappings) {
           const existing = await query(
-            'SELECT id FROM customer_field_definitions WHERE company_id = $1 AND field_key = $2',
+            'SELECT id, field_label FROM customer_field_definitions WHERE company_id = $1 AND field_key = $2',
             [companyId, cm.fieldKey]
           );
           if (existing.rows.length > 0) {
-            await query(
-              'UPDATE customer_field_definitions SET field_label = $1 WHERE company_id = $2 AND field_key = $3',
-              [cm.label, companyId, cm.fieldKey]
-            );
+            // 기존 라벨이 이미 있으면 유지 (덮어쓰지 않음)
+            console.log(`[업로드] 커스텀 필드 ${cm.fieldKey} 기존 라벨 유지: "${existing.rows[0].field_label}" (신규 라벨 "${cm.label}" 무시)`);
           } else {
             await query(
               `INSERT INTO customer_field_definitions (id, company_id, field_key, field_label, field_type, display_order, is_hidden, created_at)

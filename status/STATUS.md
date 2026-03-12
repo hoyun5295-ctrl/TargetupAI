@@ -147,6 +147,33 @@
 
 ---
 
+### 🔧 D70 — 직원 QA 버그 일괄수정 (2026-03-12) — 🔶 진행 중 (일부 배포 완료, 나머지 배포 대기)
+
+> **배경:** 직원 2명이 실동작 검증 후 PPT(8슬라이드) + 체크리스트(30항목) 버그 리포트 제출. 서버 검증 후 순차 수정.
+> **원칙:** 직원 리포트 그대로 믿지 않고, 서버 실데이터/코드로 교차검증 후 수정.
+
+#### ✅ 수정 완료 (배포 완료)
+1. **Redis 캐시키 브랜드 격리 (Slide 1):** `stats:${companyId}` → `stats:${companyId}:${userId}` — 다른 브랜드 담당자 간 캐시 충돌 방지 (`customers.ts`)
+2. **고객DB 날짜 표시 (Slide 3):** `T15:00:00.000Z` → `formatDate()` 적용. birth_date, recent_purchase_date, created_at, wedding_anniversary, DATE 타입 필드 (`CustomerDBModal.tsx`)
+3. **커스텀 필드 정의 저장 (Slide 4 일부):** field_type `'text'` → `'VARCHAR'` — customer_field_definitions CHECK 제약조건 위반 수정 (`upload.ts`)
+4. **MMS 보관함 이미지 (Slide 7):** sms_templates.mms_image_paths 컬럼 추가 (ALTER TABLE 실행 완료) + 저장/불러오기 코드 (`sms-templates.ts`, `Dashboard.tsx`)
+5. **주소록 파일업로드 401 (Slide 8a):** Authorization 헤더 누락 → `Bearer ${token}` 추가 (`AddressBookModal.tsx`)
+6. **주소록 브랜드 격리 (Slide 8b):** address_books.user_id 컬럼 추가 (ALTER TABLE 실행 완료) + 4개 라우트에 user_id 필터 적용 (`address-books.ts`)
+
+#### ✅ 수정 완료 (배포 대기 — tp-push → tp-deploy-full 필요)
+7. **대시보드 성공건수 (신규 발견):** `monthly_sent: totalSent`(큐 INSERT 건수) → `totalSuccess`(실제 성공건수)로 변경 + 담당자테스트/스팸필터 성공건수도 합산 (`customers.ts`)
+8. **직접발송 머지변수 NULL (Slide 5):** replaceVariables 컨트롤타워에 `addressBookFields` 4번째 파라미터 추가 — %기타1/2/3%, %회신번호% 주소록 변수를 fieldMappings 순회 전에 치환하여 안전망에 잡히지 않도록 처리 (`messageUtils.ts`, `campaigns.ts` SMS+카카오 양쪽)
+9. **upload.ts customer_schema 미갱신:** 엑셀 업로드 후 companies.customer_schema 자동 갱신 로직 추가 — customers.ts 일괄추가와 동일 쿼리 (`upload.ts`)
+
+#### ❌ 미해결 (다음 세션 CURRENT_TASK)
+- **Slide 2 — 타 브랜드 고객데이터 노출:** D67 store_code 격리 코드 서버 배포 상태 검증 필요
+- **Slide 4 일부 — 매장 필드 매핑:** store_code, recent_purchase_store 빈값. registered_store는 값 존재. 업로드 매핑 로직 확인 필요
+- **Slide 6 — MMS 발송 후 이미지/수신자 미초기화:** 간헐적 프론트엔드 이슈. Dashboard.tsx 발송 후 state 초기화 로직 점검 필요
+- **B8-03 — AI맞춤한줄 개인화 불일치:** 미리보기 vs 실제 발송 시 개인화 변수 적용 차이
+- **D39 — 필터 UI 보유필드 미표시:** enabled-fields API에서 매장번호/지역 등 반환 안 됨
+
+---
+
 ### 🔧 D68 — 대시보드 UI 수정 + AI 생일 타겟팅 + 테스트 비용 합산 + 커스텀 필드 라벨 (2026-03-12) — ✅ 완료 (배포 대기)
 
 > **배경:** 메트로시티 첫 시연 준비 중 발견된 4건. 대시보드 UI 이슈 + AI 필터 누락 + 비용 집계 누락.

@@ -64,6 +64,13 @@ router.get('/', async (req: Request, res: Response) => {
       params.push(filterUserId);
     }
 
+    // ★ 브랜드(store_code) 필터 — 고객사관리자/슈퍼관리자가 특정 브랜드만 조회
+    const filterStoreCode = req.query.filterStoreCode as string;
+    if (filterStoreCode && (userType === 'company_admin' || userType === 'super_admin')) {
+      whereClause += ` AND store_code = $${paramIndex++}`;
+      params.push(filterStoreCode);
+    }
+
     // 동적 필터 적용
     if (filters) {
       const parsedFilters = typeof filters === 'string' ? JSON.parse(filters) : filters;
@@ -980,9 +987,20 @@ router.get('/filter-options', async (req: Request, res: Response) => {
       scopeParams
     );
 
+    // ★ 브랜드(store_code) 목록 — 고객사관리자/슈퍼관리자가 브랜드 필터에 사용
+    let storeCodes: string[] = [];
+    if (userType === 'company_admin' || userType === 'super_admin') {
+      const storeResult = await query(
+        `SELECT DISTINCT store_code FROM customer_stores WHERE company_id = $1 AND store_code IS NOT NULL AND store_code != '' ORDER BY store_code`,
+        [companyId]
+      );
+      storeCodes = storeResult.rows.map((r: any) => r.store_code);
+    }
+
     res.json({
       grades: gradesResult.rows.map((r: any) => r.grade),
       regions: regionsResult.rows.map((r: any) => r.region),
+      store_codes: storeCodes,
     });
   } catch (error) {
     console.error('필터 옵션 조회 에러:', error);
