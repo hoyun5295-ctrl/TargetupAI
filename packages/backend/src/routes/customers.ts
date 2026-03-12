@@ -604,18 +604,20 @@ router.get('/stats', async (req: Request, res: Response) => {
       mmsSent * costMms +
       kakaoSent * costKakao;
 
-    // ★ 테스트발송 + 스팸필터 비용 합산 (성공건수/성공률에는 미포함)
+    // ★ 테스트발송 + 스팸필터: 비용 + 성공건수 모두 합산
     try {
       const monthStart = new Date();
       monthStart.setDate(1);
       monthStart.setHours(0, 0, 0, 0);
       const monthStartStr = monthStart.toISOString().split('T')[0];
 
-      // 1) 담당자 테스트발송 (MySQL)
+      // 1) 담당자 테스트발송 (MySQL) — 성공 코드(6, 1000, 1800)만 성공건수에 포함
       const testTables = await getTestSmsTables();
       for (const tbl of testTables) {
         const testRows = await mysqlQuery(
           `SELECT
+            SUM(CASE WHEN msg_type = 'S' AND status_code IN (6, 1000, 1800) THEN 1 ELSE 0 END) as test_sms_success,
+            SUM(CASE WHEN msg_type = 'L' AND status_code IN (6, 1000, 1800) THEN 1 ELSE 0 END) as test_lms_success,
             SUM(CASE WHEN msg_type = 'S' AND status_code != 100 THEN 1 ELSE 0 END) as test_sms,
             SUM(CASE WHEN msg_type = 'L' THEN 1 ELSE 0 END) as test_lms
           FROM ${tbl}
@@ -624,11 +626,15 @@ router.get('/stats', async (req: Request, res: Response) => {
         );
         if (testRows && (testRows as any[]).length > 0) {
           const t = (testRows as any[])[0];
+          const testSmsSuccess = Number(t.test_sms_success) || 0;
+          const testLmsSuccess = Number(t.test_lms_success) || 0;
+          totalSuccess += testSmsSuccess + testLmsSuccess;
+          totalSent += (Number(t.test_sms) || 0) + (Number(t.test_lms) || 0);
           monthlyCost += (Number(t.test_sms) || 0) * costSms + (Number(t.test_lms) || 0) * costLms;
         }
       }
 
-      // 2) 스팸필터 테스트 (PostgreSQL)
+      // 2) 스팸필터 테스트 (PostgreSQL) — 발송된 건수 = 성공건수로 합산
       const sfResult = await query(
         `SELECT
           SUM(CASE WHEN r.message_type = 'SMS' THEN 1 ELSE 0 END) as sf_sms,
@@ -641,10 +647,14 @@ router.get('/stats', async (req: Request, res: Response) => {
       );
       if (sfResult.rows.length > 0) {
         const sf = sfResult.rows[0];
-        monthlyCost += (Number(sf.sf_sms) || 0) * costSms + (Number(sf.sf_lms) || 0) * costLms;
+        const sfSms = Number(sf.sf_sms) || 0;
+        const sfLms = Number(sf.sf_lms) || 0;
+        totalSuccess += sfSms + sfLms;
+        totalSent += sfSms + sfLms;
+        monthlyCost += sfSms * costSms + sfLms * costLms;
       }
     } catch (testCostErr) {
-      console.warn('[대시보드] 테스트 비용 합산 실패 (무시):', testCostErr);
+      console.warn('[대시보드] 테스트/스팸필터 통계 합산 실패 (무시):', testCostErr);
     }
 
     const successRate = totalSent > 0 ? ((totalSuccess / totalSent) * 100).toFixed(1) : '0';
