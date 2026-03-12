@@ -324,11 +324,14 @@ POST /api/sync/purchases   ← 구매내역 벌크 INSERT (배치 최대 1000건
 ## 9. 080 수신거부 운영 정보
 
 - 나래인터넷 콜백 IP: 121.156.104.161~165, 183.98.207.13
-- 080 수신거부 번호: 080-719-6700
-- 콜백 엔드포인트 구현 완료 (토큰 인증, curl 테스트 성공)
-- **서버 환경변수:** `OPT_OUT_080_TOKEN` — 나래인터넷 콜백 인증 토큰. 서버 `.env`에 설정 필요. 미설정 시 080 수신거부 콜백 인증 불가.
-- **설정:** `ssh administrator@58.227.193.62` → `.env`에 `OPT_OUT_080_TOKEN=토큰값` 추가 → `pm2 restart all`
-- **확인사항:** 나래인터넷 담당자에게 콜백 URL 등록 완료 여부 + 토큰값 확인 + 080 ARS 수신거부 테스트
+- 콜백 URL: `https://app.hanjul.ai/api/unsubscribes/080callback` (GET, 파라미터: cid=수신거부번호&fr=080번호, 응답: 1/0)
+- 인증: Nginx IP 화이트리스트 (토큰 인증 제거됨)
+- **080번호 등록 절차:** 나래인터넷에서 080번호 발급 → 나래에 콜백 URL 등록 요청 → 슈퍼관리자에서 사용자별 080번호+자동연동 ON 설정
+- **⚠️ 주의:** 새 080번호를 슈퍼관리자에 등록할 때, 나래인터넷에도 해당 번호의 콜백 URL을 등록 요청해야 함 (나래 자체 API 없음, 수동 요청)
+- **매칭 로직:** `fr` 파라미터(080번호) → users.opt_out_080_number 매칭 (opt_out_auto_sync=true인 사용자만) → 없으면 companies fallback
+- **현재 등록 080번호:** 080-719-6700 (Harold님 계정, 정상 작동)
+- **curl 테스트:** `curl "https://app.hanjul.ai/api/unsubscribes/080callback?cid=01012345678&fr=080번호(숫자만)"`
+- **DB 접속:** `psql "postgresql://targetup:targetup@127.0.0.1:5432/targetup"`
 
 ---
 

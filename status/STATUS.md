@@ -106,31 +106,41 @@
 
 ---
 
-### 🔧 D67 — 080 나래인터넷 콜백 미동작 + store_code/created_by 전수 격리 (2026-03-12~) — 🔴 진행 중
+### 🔧 D67 — 080 콜백 진단 + 수신동의 변형 인식 + 사용자별 고객DB 삭제 (2026-03-12~) — ✅ 완료 (배포 대기)
 
-> **배경:** D66 17차 수정+배포 후, 직원이 080 수신거부 테스트(실제 080번호로 전화)를 했으나 콜백이 서버에 전혀 도달하지 않음. Harold님 계정(hoyun)은 정상 작동(3,174건). 또한 고객사관리자/사용자 간 데이터 격리가 일부 API에서 누락 발견.
+> **배경:** 직원 080 수신거부 테스트 미동작 + DB 업로드 시 수신거부 자동등록 미작동 신고 + 슈퍼관리자 사용자별 고객DB 삭제 기능 요청.
 > **원칙:** 하나씩 원인 파악 → 수정. 기간계 무접촉.
 
-#### 🔴 최우선: 080 나래인터넷 콜백 미동작 (직원 계정)
+#### ✅ 080 나래인터넷 콜백 미동작 진단 완료
 
-**현상:**
-- sh_cpb 계정: 슈퍼관리자에서 080번호(080-540-5648) 설정 + 자동연동 ON → 080 버튼 정상 표시됨 (tp-deploy-full 백엔드 빌드 후 해결)
-- 직원이 080번호로 실제 전화 → 서버에 콜백 미수신
-- Nginx access.log: `080callback` 검색 결과 **0건** (Harold님 계정 콜백도 안 보임 → 로그 로테이션 가능성)
-- PM2 logs: `080callback` 관련 로그 **0건**
-- Harold님 계정(hoyun): 정상 작동 (3,174건 수신거부 존재)
+**현상:** sh_cpb 계정 080-540-5648로 전화 → 서버 콜백 미수신
+**진단:**
+- curl 직접 테스트 → 응답 `1` (서버 코드 정상, 080번호 매칭 성공)
+- pm2 로그에 10:39 나래 콜백 기록 **0건** → 나래인터넷이 080-540-5648에 대해 콜백을 보내지 않음
+- **원인:** 나래인터넷에 080-540-5648 번호의 콜백 URL 미등록. 080-719-6700(Harold님)은 등록되어 있어 정상 작동.
+- **조치:** 나래인터넷에 080-540-5648 콜백 URL 등록 요청 필요 (`https://app.hanjul.ai/api/unsubscribes/080callback`)
 
-**원인 추정 (다음 세션에서 조사):**
-1. ~~나래인터넷 콜백 미발송~~ → Harold님 계정 정상이므로 배제
-2. 나래인터넷 콜백 URL 설정: Harold님 계정과 sh_cpb 계정의 080번호가 동일 콜백 URL을 사용하는지 확인 필요
-3. `findUserBy080Number()` 매칭 로직: users 테이블에서 sh_cpb의 080번호가 정확히 매칭되는지 DB 확인
-4. 나래인터넷 관리자 페이지에서 콜백 URL 등록 현황 확인 필요
+#### ✅ 연동 테스트 버튼 stale state 버그 수정
 
-**조사 순서:**
-1. DB에서 sh_cpb/sh_sh 사용자의 `opt_out_080_number`, `opt_out_auto_sync` 값 확인
-2. 나래인터넷 관리자 페이지에서 각 080번호의 콜백 URL 설정 현황 확인 (Harold님 협조 필요)
-3. 서버에서 테스트 콜백 수동 호출: `curl "https://hanjul.ai/api/unsubscribes/080callback?cid=01012345678&fr=0805405648"` 로 서버 코드 동작 확인
-4. Nginx 로그 실시간 모니터링 (`tail -f`) 상태에서 080 전화 재시도
+**파일:** `packages/frontend/src/pages/Unsubscribes.tsx`
+**원인:** `loadUnsubscribes()` 후 React state(비동기)를 바로 참조 → 항상 이전 값으로 체크
+**수정:** `loadUnsubscribes()`가 최신 데이터를 return하도록 변경, `handleSyncTest()`에서 반환값으로 직접 체크
+
+#### ✅ SMS_OPT_IN 변형 값 인식 확대
+
+**파일:** `packages/backend/src/utils/normalize.ts`
+**원인:** "비동의", "불동의", "미동의" 등이 인식 목록에 없어 null → 기본값 true(동의)로 저장됨
+**수정:** SMS_OPT_IN_FALSE에 비동의/불동의/미동의/동의안함/거절/수신거절/해지/탈퇴/철회 추가, SMS_OPT_IN_TRUE에 수신 동의/동의함/수신동의함 추가
+
+#### ✅ 슈퍼관리자 사용자별 고객 DB 삭제 기능
+
+**파일:** `packages/backend/src/routes/admin.ts`, `packages/frontend/src/pages/AdminDashboard.tsx`
+**기존:** customers 테이블에 `uploaded_by` 컬럼이 이미 존재하고 사용자 ID 저장 중
+**추가:**
+- 백엔드: 사용자 목록 조회에 `uploaded_customer_count` 추가 + `DELETE /api/admin/users/:id/customers` API (연관 purchases/consents 삭제 + 감사로그)
+- 프론트: 사용자 수정 모달에 "업로드 고객 DB: N건 + 삭제 버튼" UI
+
+**⚠️ 배포 필요:** tp-push + tp-deploy-full
 
 #### 🟡 수정 완료-배포 대기: store_code/created_by 전수 격리
 
@@ -1193,6 +1203,7 @@ QTmsg status_code, 통신사 코드, 스팸필터 판정 결과를 한 곳에서
 | D59 | 03-07 | 2차 코드 전수점검 P1~P6 총 28건 수정 — 정산정확성+SQL Injection+입력검증+하드코딩+인프라+프론트엔드 | **(P1)** ai.ts `\|\|10`→`??10`, analysis.ts 채널별 정확비용, manage-stats.ts dead code 삭제. **(P2)** safe-field-name.ts 신규+campaigns/customers/ai 3파일 custom_fields 화이트리스트+dateFilter 파라미터화. **(P3)** mms-images UUID검증, upload.ts path.basename, manage-users 비밀번호8~72자. **(P4)** SYSTEM_SMS_CALLBACK 환경변수화, INVITO_INFO 상수+billing 4곳교체, ©연도 동적화5곳, constants/company.ts 신규+15곳교체. **(P5)** Redis error handler, AI API 키 warn, process 에러핸들러(PM2 연계), PG Pool 환경변수설정. **(P6)** Dashboard setInterval cleanup, optOutNumber 안전장치, 교차중복발송방지, console.log삭제. 수정20파일+신규4파일. **기간계 무접촉. tsc 3패키지 전체 통과** |
 | D60 | 03-08 | SyncAgent API Key 관리 UI + 사용자별 라인그룹 배정 | 상용화 온보딩 시 DB 직접 접근 불가→슈퍼관리자 UI 필요. 동일 회사 내 사용자간 발송 라인 공유→홀딩 문제. users.line_group_id 추가, getCompanySmsTables userId optional 확장. 기간계 기존 호출 100% 호환. |
 | D61 | 03-08 | 프론트엔드 난독화 적용 | 상용화 전 소스 보호. vite-plugin-javascript-obfuscator production only. stringArray+base64+disableConsoleOutput. frontend+company-frontend 양쪽. |
+| D67 | 03-12 | 080 콜백 진단 + 수신동의 변형 + 사용자별 고객DB 삭제 | 080 콜백 서버코드 정상 확인(나래측 URL 미등록 원인). 연동테스트 stale state 버그 수정. SMS_OPT_IN_FALSE 13개 변형 추가(비동의/불동의/거절/해지 등). admin.ts 사용자별 uploaded_by 기준 고객 삭제 API+UI. 기간계 무접촉 |
 
 **아카이브:** D1-AI발송2분기(02-22) | D2-브리핑방식(02-22) | D3-개인화필드체크박스(02-22) | D4-textarea제거(02-22) | D5-별도컴포넌트분리(02-22) | D6-대시보드레이아웃(02-22) | D7-헤더탭스타일(02-23) | D8-AUTO/PRO뱃지(02-23) | D9-캘린더상태기준(02-23) | D10-6차세션분할(02-23) | D11-KCP전환(02-23) | D12-이용약관(02-23) | D13-수신거부SoT(02-23) | D14-7차3세션분할(02-24) | D15-제목머지→D28번복(02-25) | D16-스팸테스트과금(02-25) | D17-테스트통계확장(02-25) | D18-정산자체헬퍼(02-25) | D19-구독상태필드(02-25) | D20-AI분석차별화(02-25) | D21-planInfo실시간(02-25) | D22-스팸잠금직접발송만(02-25) | D23-preview보안(02-25) | D24-run세션1완전구현(02-25) | D25-pdfkit선택(02-25) | D26-분석캐싱24h(02-25) | D27-비즈니스3회최적화(02-25) | D28-제목머지제거(02-25) | D29-5경로전수점검(02-25) | D30-즉시sending전환(02-25) | D31-GPT fallback(02-25) | D32-발송파이프라인복구(02-26) | D33-messageUtils통합(02-26) | D34-스팸필터DB직접조회(02-26) | D35-선불환불보장(02-26) | D-대시보드모달분리(02-23): 8,039줄→4,964줄
 

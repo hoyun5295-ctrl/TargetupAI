@@ -2127,7 +2127,7 @@ const campaignData = {
                     let displayVal = numVal.toLocaleString();
                     let suffix = '';
                     if (card.type === 'rate') { displayVal = numVal.toFixed(1); suffix = '%'; }
-                    else if (card.type === 'sum') { displayVal = numVal >= 10000 ? `${(numVal / 10000).toFixed(0)}만` : numVal.toLocaleString(); suffix = '원'; }
+                    else if (card.type === 'sum') { displayVal = numVal >= 10000 ? `${Math.round(numVal / 10000).toLocaleString()}만` : numVal.toLocaleString(); suffix = '원'; }
                     else if (card.cardId === 'active_campaigns') { suffix = '건'; }
                     else { suffix = '명'; }
 

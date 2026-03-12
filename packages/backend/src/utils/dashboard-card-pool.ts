@@ -33,7 +33,7 @@ export const DASHBOARD_CARD_POOL: DashboardCardDef[] = [
   { cardId: 'region_top',          label: '지역별 TOP',        type: 'distribution', icon: 'MapPin',       description: '지역별 고객 수 상위' },
   { cardId: 'store_distribution',  label: '매장별 고객 수',    type: 'distribution', icon: 'Store',        description: '매장별 고객 분포' },
   { cardId: 'email_rate',          label: '이메일 보유율',     type: 'rate',         icon: 'Mail',         description: '이메일 주소 보유 비율 (%)' },
-  { cardId: 'total_purchase_sum',  label: '총 구매금액',       type: 'sum',          icon: 'DollarSign',   description: '전체 고객 누적 구매금액 합계' },
+  { cardId: 'total_purchase_sum',  label: '총 구매금액',       type: 'sum',          icon: 'CreditCard',   description: '전체 고객 누적 구매금액 합계' },
   { cardId: 'recent_30d_purchase', label: '30일 내 구매',      type: 'count',        icon: 'ShoppingCart', description: '최근 30일 내 구매 이력이 있는 고객 수' },
   { cardId: 'inactive_90d',        label: '90일+ 미구매',      type: 'count',        icon: 'UserX',        description: '최근 90일간 구매 이력이 없는 고객 수' },
   { cardId: 'new_this_month',      label: '신규고객 (이번달)', type: 'count',        icon: 'UserPlus',     description: '이번 달 신규 등록된 고객 수' },

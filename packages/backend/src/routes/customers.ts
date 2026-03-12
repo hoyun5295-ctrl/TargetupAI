@@ -961,7 +961,7 @@ router.get('/enabled-fields', async (req: Request, res: Response) => {
     const fieldDefsResult = await query(
       `SELECT field_key, field_label, field_type, display_order
        FROM customer_field_definitions 
-       WHERE company_id = $1 AND is_hidden = false
+       WHERE company_id = $1 AND (is_hidden = false OR is_hidden IS NULL)
        ORDER BY display_order`,
       [companyId]
     );

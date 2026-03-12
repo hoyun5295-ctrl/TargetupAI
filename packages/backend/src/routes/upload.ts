@@ -754,8 +754,8 @@ async function processUploadInBackground(
             );
           } else {
             await query(
-              `INSERT INTO customer_field_definitions (id, company_id, field_key, field_label, field_type, display_order, created_at)
-               VALUES (gen_random_uuid(), $1, $2, $3, 'text', $4, NOW())`,
+              `INSERT INTO customer_field_definitions (id, company_id, field_key, field_label, field_type, display_order, is_hidden, created_at)
+               VALUES (gen_random_uuid(), $1, $2, $3, 'text', $4, false, NOW())`,
               [companyId, cm.fieldKey, cm.label, parseInt(cm.fieldKey.replace('custom_', ''))]
             );
           }
