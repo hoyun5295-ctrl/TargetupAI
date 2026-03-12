@@ -1469,20 +1469,15 @@ router.post('/direct-send', async (req: Request, res: Response) => {
           // 프론트 치환 완료 메시지 (직접타겟추출 경로)
           finalMessage = customMessageMap.get(cleanPhone)!.replace(/%[^%\s]{1,20}%/g, '');
         } else {
-          // ★ DB 고객 데이터로 동적 치환 (하드코딩 제거)
-          const dbCustomer = directCustomerMap.get(cleanPhone);
-          if (dbCustomer) {
-            finalMessage = replaceVariables(message, dbCustomer, directFieldMappings);
-          } else {
-            // DB에 없는 수신자 (직접입력) — 최후 안전망
-            finalMessage = message
-              .replace(/%이름%/g, recipient.name || '')
-              .replace(/%기타1%/g, recipient.extra1 || '')
-              .replace(/%기타2%/g, recipient.extra2 || '')
-              .replace(/%기타3%/g, recipient.extra3 || '')
-              .replace(/%회신번호%/g, recipient.callback || '')
-              .replace(/%[^%\s]{1,20}%/g, '');
-          }
+          // ★ 컨트롤타워(messageUtils) 통합 치환: DB 필드 + 주소록 기타 필드 한번에 처리
+          const dbCustomer = directCustomerMap.get(cleanPhone) || null;
+          finalMessage = replaceVariables(message, dbCustomer, directFieldMappings, {
+            name: recipient.name,
+            extra1: recipient.extra1,
+            extra2: recipient.extra2,
+            extra3: recipient.extra3,
+            callback: recipient.callback,
+          });
         }
 
         // ★ D28: 제목은 고정값 그대로 사용 (머지 치환 완전 제거)
@@ -1577,19 +1572,15 @@ router.post('/direct-send', async (req: Request, res: Response) => {
           if (customMessageMap.has(cleanKakaoPhone)) {
             finalMessage = customMessageMap.get(cleanKakaoPhone)!.replace(/%[^%\s]{1,20}%/g, '');
           } else {
-            // ★ DB 고객 데이터로 동적 치환 (하드코딩 제거)
-            const dbCustomer = directCustomerMap.get(cleanKakaoPhone);
-            if (dbCustomer) {
-              finalMessage = replaceVariables(message, dbCustomer, directFieldMappings);
-            } else {
-              finalMessage = message
-                .replace(/%이름%/g, recipient.name || '')
-                .replace(/%기타1%/g, recipient.extra1 || '')
-                .replace(/%기타2%/g, recipient.extra2 || '')
-                .replace(/%기타3%/g, recipient.extra3 || '')
-                .replace(/%회신번호%/g, recipient.callback || '')
-                .replace(/%[^%\s]{1,20}%/g, '');
-            }
+            // ★ 컨트롤타워(messageUtils) 통합 치환: DB 필드 + 주소록 기타 필드 한번에 처리
+            const dbCustomer = directCustomerMap.get(cleanKakaoPhone) || null;
+            finalMessage = replaceVariables(message, dbCustomer, directFieldMappings, {
+              name: recipient.name,
+              extra1: recipient.extra1,
+              extra2: recipient.extra2,
+              extra3: recipient.extra3,
+              callback: recipient.callback,
+            });
           }
 
           // ★ C3: 분할전송 시간 계산 (오버플로우 방지 — calcSplitSendTime 적용)

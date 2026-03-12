@@ -789,6 +789,27 @@ async function processUploadInBackground(
       }
     }
 
+    // ===== customer_schema 자동 갱신 (customers.ts 일괄추가와 동일 로직) =====
+    // 업로드 완료 후 회사의 customer_schema를 실제 고객 데이터 기반으로 갱신
+    // → AI 메시지 생성, 직접발송 변수 치환 등에서 활용
+    if (companyId) {
+      try {
+        await query(`
+          UPDATE companies SET customer_schema = (
+            SELECT jsonb_build_object(
+              'genders', (SELECT array_agg(DISTINCT gender) FROM customers WHERE company_id = $1 AND gender IS NOT NULL),
+              'grades', (SELECT array_agg(DISTINCT grade) FROM customers WHERE company_id = $1 AND grade IS NOT NULL),
+              'custom_field_keys', (SELECT array_agg(DISTINCT k) FROM customers, jsonb_object_keys(custom_fields) k WHERE company_id = $1),
+              'store_codes', (SELECT array_agg(DISTINCT store_code) FROM customer_stores WHERE company_id = $1)
+            )
+          ) WHERE id = $1
+        `, [companyId]);
+        console.log(`[업로드] customer_schema 갱신 완료 (company: ${companyId})`);
+      } catch (schemaErr) {
+        console.error('[업로드] customer_schema 갱신 실패:', schemaErr);
+      }
+    }
+
   } catch (error: any) {
     console.error('[업로드 백그라운드] 처리 에러:', error);
     await redis.set(`upload:${fileId}:progress`, JSON.stringify({

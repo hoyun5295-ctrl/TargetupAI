@@ -17,29 +17,67 @@ import { VarCatalogEntry } from '../services/ai';
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 /**
+ * 주소록(직접발송) 수신자의 기타 필드 타입
+ * - 직접발송 시 recipients 배열의 각 항목에서 전달됨
+ * - %기타1%, %기타2%, %기타3%, %회신번호% 치환에 사용
+ */
+export interface AddressBookFields {
+  name?: string;
+  extra1?: string;
+  extra2?: string;
+  extra3?: string;
+  callback?: string;
+}
+
+/**
  * 단건 메시지 변수 치환 (모든 발송 경로의 유일한 치환 함수)
  *
  * 실행 흐름:
+ *  0. (직접발송) 주소록 기타 필드 치환 — %기타1/2/3%, %회신번호%
  *  1. fieldMappings 순회 — %한글라벨% → customer[column] 치환
  *     - column이 최상위에 없으면 custom_fields JSONB에서 탐색
  *     - 타입별 포맷: number → toLocaleString(), date → toLocaleDateString('ko-KR')
  *  2. 잔여 %...% 패턴 → 빈문자열 strip (안전장치)
  *
- * @param template       원본 메시지 (예: "%이름%님, %등급% 전용 혜택!")
- * @param customer       고객 데이터 (DB row). phone, name, grade, custom_fields 등
- * @param fieldMappings  { 한글라벨: VarCatalogEntry } — extractVarCatalog()에서 추출
+ * @param template          원본 메시지 (예: "%이름%님, %등급% 전용 혜택!")
+ * @param customer          고객 데이터 (DB row). phone, name, grade, custom_fields 등. null이면 주소록 필드만 치환.
+ * @param fieldMappings     { 한글라벨: VarCatalogEntry } — extractVarCatalog()에서 추출
+ * @param addressBookFields (선택) 직접발송 주소록 기타 필드. 전달 시 %기타1/2/3%, %회신번호% 치환.
+ *                          customer가 null이면 %이름%도 여기서 치환.
  * @returns 치환 완료된 메시지
  */
 export function replaceVariables(
   template: string,
-  customer: Record<string, any>,
-  fieldMappings: Record<string, VarCatalogEntry>
+  customer: Record<string, any> | null,
+  fieldMappings: Record<string, VarCatalogEntry>,
+  addressBookFields?: AddressBookFields
 ): string {
   if (!template) return '';
-  if (!customer || !fieldMappings) return template;
 
   let result = template;
 
+  // 0단계: 주소록 기타 필드 치환 (직접발송 경로)
+  // — fieldMappings에 없는 주소록 전용 변수를 먼저 치환하여 안전망에 잡히지 않도록
+  if (addressBookFields) {
+    result = result
+      .replace(/%기타1%/g, addressBookFields.extra1 || '')
+      .replace(/%기타2%/g, addressBookFields.extra2 || '')
+      .replace(/%기타3%/g, addressBookFields.extra3 || '')
+      .replace(/%회신번호%/g, addressBookFields.callback || '');
+
+    // customer가 없으면 (DB에 없는 수신자) 이름도 주소록에서 치환
+    if (!customer) {
+      result = result.replace(/%이름%/g, addressBookFields.name || '');
+    }
+  }
+
+  // customer나 fieldMappings 없으면 주소록 치환만 하고 안전망 적용 후 반환
+  if (!customer || !fieldMappings) {
+    result = result.replace(/%[^%\s]{1,20}%/g, '');
+    return result;
+  }
+
+  // 1단계: fieldMappings 기반 DB 필드 치환
   for (const [varName, mapping] of Object.entries(fieldMappings)) {
     const pattern = `%${varName}%`;
     if (!result.includes(pattern)) continue;
@@ -72,7 +110,7 @@ export function replaceVariables(
     result = result.split(pattern).join(displayValue);
   }
 
-  // 안전장치: 매핑에 없는 잔여 %...% 패턴 제거
+  // 2단계 안전장치: 매핑에 없는 잔여 %...% 패턴 제거
   result = result.replace(/%[^%\s]{1,20}%/g, '');
 
   return result;
