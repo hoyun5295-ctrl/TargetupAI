@@ -652,7 +652,7 @@ router.get('/stats', async (req: Request, res: Response) => {
     const responseData = { 
       stats: {
         ...result.rows[0],
-        monthly_sent: totalSent,
+        monthly_sent: totalSuccess,
         success_rate: successRate,
         monthly_budget: parseFloat(company.monthly_budget || '0'),
         monthly_cost: Math.round(monthlyCost),
