@@ -1127,7 +1127,8 @@ const PARSE_BRIEFING_SYSTEM = `당신은 마케팅 프로모션 분석 전문가
 - 등급: 배열 형태로 ["VIP"], ["VIP","GOLD"] 등
 - 연령: [최소나이, 최대나이] 범위로 변환 — "20대"→[20,29], "30~40대"→[30,49]
 - 구매 기간: "최근 N개월"은 오늘 날짜(user 메시지에 명시) 기준 ISO 날짜(YYYY-MM-DD)로 변환
-- operator 종류: "eq"(같음), "in"(포함), "gte"(이상), "lte"(이하)
+- 생일: birth_date 필드에 birth_month 연산자 사용 — "3월 생일"→{"operator":"birth_month","value":3}
+- operator 종류: "eq"(같음), "in"(포함), "gte"(이상), "lte"(이하), "birth_month"(생일 월)
 
 ## 출력 형식
 반드시 아래 JSON 형식으로만 응답하세요 (다른 텍스트 없이):
@@ -1151,6 +1152,7 @@ const PARSE_BRIEFING_SYSTEM = `당신은 마케팅 프로모션 분석 전문가
     "purchasePeriod": "구매 기간 조건 (최근 3개월 등, 없으면 빈 문자열)",
     "storeName": "매장명/브랜드명 (없으면 빈 문자열)",
     "minPurchaseAmount": "최소 구매금액 조건 (없으면 빈 문자열)",
+    "birthMonth": "생일 월 (3월이면 '3', 없으면 빈 문자열)",
     "extra": "기타 타겟 조건 (없으면 빈 문자열)"
   },
   "targetFilters": {
@@ -1161,7 +1163,8 @@ const PARSE_BRIEFING_SYSTEM = `당신은 마케팅 프로모션 분석 전문가
     "recent_purchase_date": { "value": "2025-11-22", "operator": "gte" },
     "total_purchase_amount": { "value": 50000, "operator": "gte" },
     "points": { "value": 1000, "operator": "gte" },
-    "store_name": { "value": "강남점", "operator": "eq" }
+    "store_name": { "value": "강남점", "operator": "eq" },
+    "birth_date": { "value": 3, "operator": "birth_month" }
   }
 }`;
 
@@ -1174,6 +1177,7 @@ export interface TargetCondition {
   purchasePeriod: string;
   storeName: string;
   minPurchaseAmount: string;
+  birthMonth: string;
   extra: string;
 }
 
@@ -1186,6 +1190,7 @@ const EMPTY_TARGET_CONDITION: TargetCondition = {
   purchasePeriod: '',
   storeName: '',
   minPurchaseAmount: '',
+  birthMonth: '',
   extra: '',
 };
 

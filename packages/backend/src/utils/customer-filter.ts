@@ -410,6 +410,26 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
     }
   }
 
+  // birth_date (mixed 형식) — birth_month 연산자 지원
+  const birthDateFilter = filters.birth_date;
+  const birthDate = getValue(birthDateFilter);
+  if (birthDate !== null && birthDate !== undefined) {
+    const birthOp = birthDateFilter?.operator || 'birth_month';
+    if (birthOp === 'birth_month') {
+      sql += ` AND EXTRACT(MONTH FROM ${col(alias, 'birth_date')}) = $${paramIndex++}`;
+      params.push(parseInt(birthDate));
+    } else if (birthOp === 'gte') {
+      sql += ` AND ${col(alias, 'birth_date')} >= $${paramIndex++}`;
+      params.push(birthDate);
+    } else if (birthOp === 'lte') {
+      sql += ` AND ${col(alias, 'birth_date')} <= $${paramIndex++}`;
+      params.push(birthDate);
+    } else if (birthOp === 'between' && Array.isArray(birthDate)) {
+      sql += ` AND ${col(alias, 'birth_date')} BETWEEN $${paramIndex++} AND $${paramIndex++}`;
+      params.push(birthDate[0], birthDate[1]);
+    }
+  }
+
   // store_code (mixed 형식) — storeCodeMode에 따라 처리
   if (storeCodeMode !== 'skip') {
     const storeCode = getValue(filters.store_code);

@@ -70,6 +70,7 @@ interface TargetCondition {
   purchasePeriod: string;
   storeName: string;
   minPurchaseAmount: string;
+  birthMonth: string;
   extra: string;
 }
 

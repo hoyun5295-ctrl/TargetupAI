@@ -330,6 +330,11 @@ router.post('/recount-target', authenticate, async (req: Request, res: Response)
       targetFilters.store_name = { value: targetCondition.storeName, operator: 'eq' };
     }
 
+    // birth_date (생일 월 필터)
+    if (targetCondition.birthMonth) {
+      targetFilters.birth_date = { value: parseInt(targetCondition.birthMonth), operator: 'birth_month' };
+    }
+
     // 사용자 매장 필터 (일반 사용자는 본인 store_codes만)
     // ★ B16-01: 브랜드 격리 — store-scope 컨트롤타워
     let storeFilter = '';
