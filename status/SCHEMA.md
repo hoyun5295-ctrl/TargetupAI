@@ -55,8 +55,8 @@
 | 44 | analysis_results | AI 분석 결과 캐시 |
 | 45 | spam_filter_tests | 스팸필터 테스트 |
 | 46 | spam_filter_test_results | 스팸필터 테스트 결과 |
-| 47 | auto_campaigns | 자동발송 스케줄 (D69 설계, 미생성) |
-| 48 | auto_campaign_runs | 자동발송 실행 이력 (D69 설계, 미생성) |
+| 47 | auto_campaigns | 자동발송 스케줄 (D69 생성 완료) |
+| 48 | auto_campaign_runs | 자동발송 실행 이력 (D69 생성 완료) |
 
 ---
 
@@ -469,7 +469,8 @@
 | customer_db_enabled | boolean | D53: 고객DB/타겟팅 잠금 (기본 false) |
 | spam_filter_enabled | boolean | D53: 스팸필터 잠금 (기본 false) |
 | ai_messaging_enabled | boolean | D53: AI발송 잠금 (기본 false) |
-| auto_campaign_enabled | boolean | D69: 자동발송 잠금 (기본 false, PRO 이상 true) — 미적용, 설계만 |
+| auto_campaign_enabled | boolean | D69: 자동발송 잠금 (기본 false, PRO 이상 true) ✅ 적용 완료 |
+| max_auto_campaigns | integer | D69: 동시 활성 자동캠페인 수 제한 (PRO: 5, BUSINESS: 10, ENTERPRISE: NULL=무제한) |
 | created_at | timestamp | |
 
 ### plan_requests (요금제 변경 요청)
@@ -929,8 +930,7 @@
 - **result 허용값:** pass(정상수신), blocked(스팸차단), failed(발송실패), timeout(시간초과), NULL(판정 대기)
 - **참조:** sms-result-map.ts의 SPAM_RESULT 상수가 유일한 정의
 
-### auto_campaigns (자동발송 스케줄) — D69 설계, 미생성
-> **설계 문서:** `AUTO-SCHEDULE-DESIGN.md` 참조. Phase 1 구현 시 CREATE TABLE 실행 예정.
+### auto_campaigns (자동발송 스케줄) — D69 ✅ 생성 완료
 
 | 컬럼 | 타입 | 설명 |
 |------|------|------|
@@ -961,8 +961,7 @@
 | created_at | timestamptz | |
 | updated_at | timestamptz | |
 
-### auto_campaign_runs (자동발송 실행 이력) — D69 설계, 미생성
-> **설계 문서:** `AUTO-SCHEDULE-DESIGN.md` 참조.
+### auto_campaign_runs (자동발송 실행 이력) — D69 ✅ 생성 완료
 
 | 컬럼 | 타입 | 설명 |
 |------|------|------|

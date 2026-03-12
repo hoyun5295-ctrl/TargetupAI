@@ -106,25 +106,33 @@
 
 ---
 
-### 🔧 D69 — 자동발송 기능 설계 (2026-03-12) — ✅ 기초 설계 완료, 구현 대기
+### 🔧 D69 — 자동발송 기능 (2026-03-12) — ✅ Phase 1 (MVP) 구현 완료, 배포 완료
 
 > **배경:** 메트로시티 요청 — 생일자 자동발송 등 반복 스케줄 설정 기능
 > **적용:** 프로 요금제(100만원) 이상
 > **설계 문서:** `status/AUTO-SCHEDULE-DESIGN.md`
 
-#### 설계 완료 항목
-- **DB:** auto_campaigns + auto_campaign_runs 테이블 설계, plans.auto_campaign_enabled 컬럼 추가
-- **백엔드:** routes/auto-campaigns.ts(CRUD) + auto-campaign-worker.ts(PM2 워커) + auto-campaign-notify.ts(D-1 사전 알림)
-- **프론트:** DashboardHeader 메뉴 추가(잠금 없이 진입) + AutoSendPage.tsx(프로 미만 블러 프리뷰+CTA / 프로 이상 실제 기능) + AutoSendFormModal.tsx
+#### Phase 1 구현 완료 항목
+- **DB:** auto_campaigns + auto_campaign_runs 테이블 생성 완료, plans.auto_campaign_enabled + plans.max_auto_campaigns 컬럼 추가 완료
+- **백엔드:** routes/auto-campaigns.ts(CRUD 9개 엔드포인트) + utils/auto-campaign-worker.ts(매 1시간 체크 워커) + app.ts 마운트/워커 시작 연결
+- **프론트:** DashboardHeader 메뉴 추가('AI 분석'↔'직접발송' 사이) + AutoSendPage.tsx(프로 미만 블러+CTA / 프로 이상 실제 기능) + AutoSendFormModal.tsx(4단계 모달)
 - **UX:** AnalysisModal 블러 패턴 적용 — 누구나 메뉴 클릭→페이지 진입→상단 설명+하단 블러+CTA
 - **권한:** company_admin + company_user(브랜드담당자) 모두 생성/수정/삭제 가능 (store_code 범위 내)
 - **스케줄:** 매월(1~28일)/매주/매일 + 발송 시각 설정. 매월 28일 max (2월 고려)
-- **기존 파이프라인 100% 재활용:** customer-filter, sms-queue, messageUtils, unsubscribe-helper, prepaid, campaign-lifecycle
+- **게이팅:** 요금제별 동시 활성 수 제한 — PRO: 5개, BUSINESS: 10개, ENTERPRISE: 무제한
+- **실패 정책:** 스킵 + failed 기록 → next_run_at 다음 스케줄로 갱신 (중복 발송 방지)
+- **기존 파이프라인 100% 재활용:** customer-filter, sms-queue, messageUtils, unsubscribe-helper, prepaid, campaign-lifecycle, store-scope
 
-#### 미결정 사항
-- 동시 활성 자동캠페인 수 제한 (요금제별 차등?)
-- 실행 실패 시 재시도 정책
-- AI 메시지 자동 생성 연동 (Phase 3 우선순위)
+#### Phase 2 (미구현, 향후)
+- D-1 사전 알림 (auto-campaign-notify.ts)
+- 캘린더 연동 (CalendarPage에 자동발송 이벤트 표시)
+- 슈퍼관리자 모니터링 (admin 대시보드)
+- 실행 실패 시 재시도 로직
+
+#### Phase 3 (미구현, 향후)
+- AI 메시지 자동 생성 연동 (매 실행마다 시즌별 메시지 자동 생성)
+- 실행 결과 리포트 (월간 자동발송 성과 대시보드)
+- 카카오톡 채널 자동발송 지원
 
 ---
 

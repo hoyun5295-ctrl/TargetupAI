@@ -206,31 +206,38 @@ AND NOT EXISTS (
 - **취소 옵션:** reason, cancelledBy, cancelledByType, skipTimeCheck(관리자용 15분 체크 스킵)
 - **적용 파일:** campaigns.ts, manage-scheduled.ts, admin.ts
 
-### 5-7. 자동발송 기능 (D69 — 구현 대기)
+### 5-7. 자동발송 기능 (D69 — ✅ Phase 1 구현 완료)
 
 > **설계 문서:** `status/AUTO-SCHEDULE-DESIGN.md`
-> **상태:** 기초 설계 완료, Phase 1 구현 대기
+> **상태:** ✅ Phase 1 (MVP) 구현 완료, 배포 완료 (2026-03-12)
 
 **개요:** 한 번 설정하면 매월/매주/매일 반복 자동 발송. 프로 요금제(100만원) 이상.
 
-**신규 테이블:**
+**DB 테이블 (생성 완료):**
 - `auto_campaigns` — 스케줄 설정 + 타겟 필터 + 메시지 + 상태
 - `auto_campaign_runs` — 매 실행 이력 (회차별 발송 결과)
-- `plans.auto_campaign_enabled` — 요금제별 기능 게이팅
+- `plans.auto_campaign_enabled` — 요금제별 기능 게이팅 (BOOLEAN)
+- `plans.max_auto_campaigns` — 동시 활성 자동캠페인 수 제한 (PRO:5, BUSINESS:10, ENTERPRISE:NULL=무제한)
 
-**신규 파일:**
-- `routes/auto-campaigns.ts` — CRUD API
-- `utils/auto-campaign-worker.ts` — PM2 워커 (매시간 체크 → 도래 건 실행)
-- `utils/auto-campaign-notify.ts` — D-1 사전 알림
+**백엔드 파일 (구현 완료):**
+- `routes/auto-campaigns.ts` — CRUD API 9개 엔드포인트 (GET/, GET/:id, POST/, PUT/:id, POST/:id/pause, POST/:id/resume, DELETE/:id, POST/:id/preview, POST/:id/cancel-next)
+- `utils/auto-campaign-worker.ts` — PM2 워커 (매 1시간 체크 → 도래 건 실행). app.ts listen 콜백에서 `startAutoCampaignScheduler()` 호출
+- `utils/auto-campaign-notify.ts` — D-1 사전 알림 (Phase 2 예정)
 
-**프론트엔드:**
-- `AutoSendPage.tsx` — 프로 미만: 블러 프리뷰+CTA (AnalysisModal 패턴), 프로 이상: 실제 기능
-- `AutoSendFormModal.tsx` — 자동발송 생성/수정 모달
-- DashboardHeader에 "자동발송" 메뉴 (잠금 없이 누구나 클릭 가능)
+**프론트엔드 파일 (구현 완료):**
+- `pages/AutoSendPage.tsx` — 프로 미만: 블러 프리뷰+CTA (AnalysisModal 패턴), 프로 이상: 실제 기능
+- `components/AutoSendFormModal.tsx` — 자동발송 생성/수정 4단계 위저드 모달
+- `DashboardHeader.tsx` — "자동발송" 메뉴 (AI 분석과 직접발송 사이, 잠금 없이 누구나 클릭)
+- `App.tsx` — `/auto-send` 라우트 (company_admin + company_user 접근)
 
 **기존 파이프라인 100% 재활용:** customer-filter, sms-queue, messageUtils, unsubscribe-helper, prepaid, campaign-lifecycle, store-scope
 
+**실패 정책:** skip + failed 기록 + next_run_at 전진 (재시도 없음 → 중복 발송 방지)
+
 **권한:** company_admin + company_user(브랜드담당자) 모두 생성/수정/삭제 가능 (store_code 범위 내)
+
+**Phase 2 예정:** D-1 사전 알림, 타겟 필터 UI(AutoSendFormModal에 필터 단계 추가), 실행 이력 상세 조회
+**Phase 3 예정:** A/B 테스트, AI 메시지 자동 생성 연동, 발송 최적 시간 추천
 
 ### 5-8. AI 메시지 생성 흐름
 
