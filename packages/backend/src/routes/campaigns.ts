@@ -5,7 +5,7 @@ import { authenticate } from '../middlewares/auth';
 import { extractVarCatalog, validatePersonalizationVars, VarCatalogEntry } from '../services/ai';
 import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getRegionVariants } from '../utils/normalize';
 import { getSourceRef, logTrainingData, updateTrainingMetrics } from '../utils/training-logger';
-import { replaceVariables } from '../utils/messageUtils';
+import { replaceVariables, enrichWithCustomFields } from '../utils/messageUtils';
 import { SUCCESS_CODES, PENDING_CODES, isSuccess, isFail, SPAM_RESULT } from '../utils/sms-result-map';
 import { DEFAULT_COSTS, redis, CACHE_TTL, BATCH_SIZES, SEND_HOURS } from '../config/defaults';
 import { isValidSmsTable } from '../utils/sms-table-validator';
@@ -271,8 +271,10 @@ router.post('/test-send', async (req: Request, res: Response) => {
 
     // ★ 서버가 DB에서 직접 첫 번째 활성 고객 조회 (프론트 의존 완전 제거)
     const testFieldMappings = extractVarCatalog(companyResult.rows[0]?.customer_schema).fieldMappings;
+    // ★ B-D70-16: 커스텀 필드 매핑 보강 (미리보기 vs 실제 발송 개인화 불일치 수정)
+    await enrichWithCustomFields(testFieldMappings, companyId);
     const testMappingCols = Object.values(testFieldMappings).map((m: any) => m.column);
-    const testSelectCols = [...new Set(['phone', ...testMappingCols])].join(', ');
+    const testSelectCols = [...new Set(['phone', 'custom_fields', ...testMappingCols])].join(', ');
     const testFirstCustomerResult = await query(
       `SELECT ${testSelectCols} FROM customers WHERE company_id = $1 AND is_active = true AND sms_opt_in = true ORDER BY created_at DESC LIMIT 1`,
       [companyId]
@@ -586,10 +588,13 @@ router.post('/:id/send', async (req: Request, res: Response) => {
     );
     const customerSchema = companySchemaResult.rows[0]?.customer_schema || {};
     const { fieldMappings, availableVars } = extractVarCatalog(customerSchema);
+    // ★ B-D70-16: 커스텀 필드 매핑 보강 (미리보기 vs 실제 발송 개인화 불일치 수정)
+    await enrichWithCustomFields(fieldMappings, companyId);
 
     // ★ field_mappings에서 필요한 컬럼 자동 추출 (동적 SELECT)
     // ★ store_phone 포함: 개별회신번호 사용 시 callback이 없으면 store_phone을 폴백으로 사용
-    const baseColumns = ['id', 'phone', 'callback', 'store_phone'];
+    // ★ custom_fields 포함: 커스텀 필드 변수 치환을 위해 JSONB 컬럼 필수
+    const baseColumns = ['id', 'phone', 'callback', 'store_phone', 'custom_fields'];
     const mappingColumns = Object.values(fieldMappings).map((m: VarCatalogEntry) => m.column);
     const selectColumns = [...new Set([...baseColumns, ...mappingColumns])].join(', ');
 
@@ -1457,8 +1462,10 @@ router.post('/direct-send', async (req: Request, res: Response) => {
     // ★ 회사 스키마 + DB 고객 데이터 조회 (replaceVariables 폴백용)
     const directSchemaResult = await query('SELECT customer_schema FROM companies WHERE id = $1', [companyId]);
     const directFieldMappings = extractVarCatalog(directSchemaResult.rows[0]?.customer_schema).fieldMappings;
+    // ★ B-D70-16: 커스텀 필드 매핑 보강 (미리보기 vs 실제 발송 개인화 불일치 수정)
+    await enrichWithCustomFields(directFieldMappings, companyId);
     const directMappingCols = Object.values(directFieldMappings).map((m: any) => m.column);
-    const directSelectCols = [...new Set(['phone', ...directMappingCols])].join(', ');
+    const directSelectCols = [...new Set(['phone', 'custom_fields', ...directMappingCols])].join(', ');
     const directPhoneList = filteredRecipients.map((r: any) => normalizePhone(r.phone));
     const directCustomersResult = await query(
       `SELECT ${directSelectCols} FROM customers WHERE company_id = $1 AND phone = ANY($2)`,
@@ -2069,9 +2076,11 @@ router.put('/:id/message', async (req: Request, res: Response) => {
     const companySchemaResult = await query('SELECT customer_schema FROM companies WHERE id = $1', [companyId]);
     const customerSchema = companySchemaResult.rows[0]?.customer_schema || {};
     const { fieldMappings: editFieldMappings } = extractVarCatalog(customerSchema);
+    // ★ B-D70-16: 커스텀 필드 매핑 보강 (미리보기 vs 실제 발송 개인화 불일치 수정)
+    await enrichWithCustomFields(editFieldMappings, companyId);
 
     // ★ D32: 동적 컬럼 SELECT — fieldMappings에서 필요한 컬럼 자동 추출
-    const editBaseColumns = ['phone'];
+    const editBaseColumns = ['phone', 'custom_fields'];
     const editMappingColumns = Object.values(editFieldMappings).map((m: VarCatalogEntry) => m.column);
     const editSelectColumns = [...new Set([...editBaseColumns, ...editMappingColumns])].join(', ');
 

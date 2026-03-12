@@ -3,7 +3,7 @@
 > **목적:** 버그의 발견→분석→수정→교차검증→완료를 체계적으로 관리하여 재발을 방지한다.  
 > **원칙:** (1) 추측성 땜질 금지 (2) 근본 원인 3줄 이내 특정 (3) 교차검증 통과 전까지 Closed 금지 (4) 재발 패턴 기록  
 > **SoT(진실의 원천):** STATUS.md + 이 문서. 채팅에서 떠도는 "수정 완료"는 교차검증 전까지 "임시"다.
-> **현황:** **2026-03-12 D70 — 직원QA 버그 일괄수정: 9건 수정완료(6건 배포완료+3건 배포대기) + 5건 미해결(다음세션).** D69 자동발송 모달 🟡검증대기 | D67 — 080 콜백 🔵조사중 + store_code 격리 🟡배포대기. D66 17차 15건 🟡검증대기 | 8차~15차 기존건 유지.
+> **현황:** **2026-03-12 D70 — 직원QA 버그 일괄수정: 18건 수정완료(3차 배포대기) + 1건 미해결(B-D70-18).** D69 자동발송 모달 🟡검증대기 | D67 — 080 콜백 🔵조사중 + store_code 격리 🟡배포대기. D66 17차 15건 🟡검증대기 | 8차~15차 기존건 유지.
 > **⚠️ 2026-02-26 코드 실물 검증:** GPT "미수정" 지적 5건 중 GP-01/03/05는 이미 코드에 반영됨 확인. GP-04는 풀 레벨로 보강. 문서의 "❌ 미수정" 표기가 실제 코드보다 뒤떨어져 있었음.
 
 ---
@@ -72,19 +72,29 @@
 | B-D70-04 | 🟠 | MMS 보관함 이미지 누락 | sms_templates에 mms_image_paths 컬럼 없음 | `sms-templates.ts` + `Dashboard.tsx` + ALTER TABLE | ✅ 배포완료 |
 | B-D70-05 | 🔴 | 주소록 파일업로드 401 에러 | fetch에 Authorization 헤더 누락 | `AddressBookModal.tsx` — Bearer token 추가 | ✅ 배포완료 |
 | B-D70-06 | 🔴 | 타 브랜드 주소록 노출 | address_books에 user_id 컬럼/필터 없음 | `address-books.ts` — user_id 격리 + ALTER TABLE | ✅ 배포완료 |
-| B-D70-07 | 🟠 | 대시보드 성공건수에 실패건도 포함 | `monthly_sent: totalSent`(큐INSERT건수) 사용 | `customers.ts` — `totalSuccess`(실제성공)로 변경 + 테스트/스팸필터 합산 | 🟡 배포대기 |
-| B-D70-08 | 🔴 | 직접발송 머지변수(%기타1/2/3%) NULL | replaceVariables가 주소록 변수를 모름 → 안전망 regex가 빈값 제거 | `messageUtils.ts` — addressBookFields 4번째 파라미터 추가, `campaigns.ts` SMS+카카오 | 🟡 배포대기 |
-| B-D70-09 | 🟠 | 엑셀 업로드 후 customer_schema 빈값 | upload.ts에 customer_schema 갱신 로직 없음 (customers.ts 일괄추가에만 존재) | `upload.ts` — 업로드 완료 후 갱신 로직 추가 | 🟡 배포대기 |
+| B-D70-07 | 🟠 | 대시보드 성공건수에 실패건도 포함 | `monthly_sent: totalSent`(큐INSERT건수) 사용 | `customers.ts` — `totalSuccess`(실제성공)로 변경 + 테스트/스팸필터 합산 | ✅ 배포완료 |
+| B-D70-08 | 🔴 | 직접발송 머지변수(%기타1/2/3%) NULL | replaceVariables가 주소록 변수를 모름 → 안전망 regex가 빈값 제거 | `messageUtils.ts` — addressBookFields 4번째 파라미터 추가, `campaigns.ts` SMS+카카오 | ✅ 배포완료 |
+| B-D70-09 | 🟠 | 엑셀 업로드 후 customer_schema 빈값 | upload.ts에 customer_schema 갱신 로직 없음 (customers.ts 일괄추가에만 존재) | `upload.ts` — 업로드 완료 후 갱신 로직 추가 | ✅ 배포완료 |
+| B-D70-10 | 🔴 | 타 브랜드 고객데이터 노출 (Slide 2) | store_code 자동할당 + UNIQUE 제약으로 브랜드 격리 | `upload.ts` — 사용자 store_codes[0] 자동할당 | ✅ 배포완료 |
+| B-D70-11a | 🟠 | 필드 라벨 덮어쓰기 (Slide 2) | 후속 업로드가 기존 라벨 덮어씀 | `upload.ts` — "최초 등록 우선" 정책 (기존 라벨 유지) | ✅ 배포완료 |
+| B-D70-11b | 🟠 | 고객사관리자 브랜드 필터 없음 | admin이 전체 데이터만 보임, 브랜드별 필터 없음 | `customers.ts`, `CustomerDBModal.tsx`, `Dashboard.tsx` — filterStoreCode 드롭다운 | ✅ 배포완료 |
+| B-D70-12 | 🟠 | store_phone → callback 미연결 | 매장전화번호가 회신번호로 사용 안 됨 | `campaigns.ts` — /:id/send + /direct-send에 store_phone 폴백 추가 | ✅ 배포완료 |
+| B-D70-13 | 🟡 | MMS 발송 후 이미지/수신자 미초기화 (Slide 6) | 전송 후 setMmsUploadedImages([]) 누락 | `Dashboard.tsx` — 직접/타겟 양쪽 초기화 추가 | ✅ 배포완료 |
+| B-D70-14 | 🟡 | MMS 이미지 있을 때 비용절감 추천 | 이미지 첨부 MMS인데 SMS 전환 안내 뜸 | `Dashboard.tsx`, `TargetSendModal.tsx` — mmsUploadedImages.length === 0 조건 추가 | ✅ 배포완료 |
+
+### ✅ 수정 완료 (3차 — 배포 대기)
+
+| ID | 심각도 | 내용 | 원인 | 수정 파일 | 상태 |
+|----|--------|------|------|----------|------|
+| B-D70-15 | 🟠 | 매장 필드(registered_store 등) 고객DB에 미표시 (Slide 4) | customers.ts SELECT에 registered_store, recent_purchase_store, store_phone, registration_type 누락 + CustomerDBModal에 해당 필드 미정의 | `customers.ts` — SELECT에 4개 컬럼 추가, `CustomerDBModal.tsx` — baseDetailFields에 4개 필드 추가 | 🟡 수정완료-검증대기 |
+| B-D70-16 | 🟠 | AI맞춤한줄 개인화 불일치 (B8-03) | buildVarCatalogFromFieldMap()이 custom_fields 스킵 → 커스텀 필드 라벨(%선호스타일% 등)이 fieldMappings에 없음 → replaceVariables 안전망 regex가 빈값 제거 | `messageUtils.ts` — enrichWithCustomFields() 신규 헬퍼, `campaigns.ts` 4경로 + `auto-campaign-worker.ts` — enrichWithCustomFields 호출 + custom_fields SELECT 추가 | 🟡 수정완료-검증대기 |
+| B-D70-17 | 🟡 | 필터 UI 보유필드 미표시 (D39) | region, store_name, purchase_count가 DB/customer-filter에서 사용되지만 FIELD_MAP에 미정의 → enabled-fields API가 감지 불가 | `standard-field-map.ts` — 3개 필드 추가 (region, purchase_count, store_name) | 🟡 수정완료-검증대기 |
 
 ### 미해결 (다음 세션)
 
 | ID | 심각도 | 내용 | 현재 상태 |
 |----|--------|------|----------|
-| B-D70-10 | 🔴 | 타 브랜드 고객데이터 노출 (Slide 2) | D67 store_code 격리 코드 서버 배포 상태 검증 필요 |
-| B-D70-11 | 🟠 | 매장 필드(store_code, recent_purchase_store) 빈값 (Slide 4) | 업로드 매핑 로직 점검 필요. registered_store는 값 있음 |
-| B-D70-12 | 🟡 | MMS 발송 후 이미지/수신자 미초기화 (Slide 6) | 간헐적. Dashboard.tsx 발송 후 state 초기화 점검 |
-| B-D70-13 | 🟠 | AI맞춤한줄 개인화 불일치 (B8-03) | 미리보기 vs 실제 발송 시 변수 적용 차이 |
-| B-D70-14 | 🟡 | 필터 UI 보유필드 미표시 (D39) | enabled-fields API 반환 필드 확인 필요 |
+| B-D70-18 | 🟡 | 직원 QA 추가 버그 | Harold님 다음 세션에서 추가 스크린샷 확인 예정 |
 
 ---
 

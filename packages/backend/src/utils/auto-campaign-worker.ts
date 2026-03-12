@@ -16,7 +16,7 @@
 
 import { query, mysqlQuery } from '../config/database';
 import { buildFilterQueryCompat } from './customer-filter';
-import { replaceVariables } from './messageUtils';
+import { replaceVariables, enrichWithCustomFields } from './messageUtils';
 import {
   toKoreaTimeStr,
   getCompanySmsTables, hasCompanyLineGroup, getNextSmsTable,
@@ -130,9 +130,11 @@ async function executeAutoCampaign(ac: any): Promise<void> {
     );
     const customerSchema = companySchemaResult.rows[0]?.customer_schema || {};
     const { fieldMappings } = extractVarCatalog(customerSchema);
+    // ★ B-D70-16: 커스텀 필드 매핑 보강 (미리보기 vs 실제 발송 개인화 불일치 수정)
+    await enrichWithCustomFields(fieldMappings, ac.company_id);
 
     // 동적 SELECT 컬럼 구성
-    const baseColumns = ['id', 'phone'];
+    const baseColumns = ['id', 'phone', 'custom_fields'];
     const mappingColumns = Object.values(fieldMappings).map((m: any) => m.column);
     const selectColumns = [...new Set([...baseColumns, ...mappingColumns])].join(', ');
 

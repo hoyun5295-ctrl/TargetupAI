@@ -295,6 +295,8 @@ PostgreSQL campaigns/campaign_runs 생성
 | **대시보드 sent vs success 혼동** | monthly_sent에 totalSent(큐INSERT건수)를 넣어 "성공건수"에 실패건까지 표시 | 대시보드 표시값의 출처를 반드시 DB 컬럼까지 추적하여 확인 (D70) |
 | **replaceVariables 안전망이 주소록 변수 제거** | 직접발송 시 DB에 있는 수신자 → replaceVariables 호출 → %기타1/2/3%는 fieldMappings에 없음 → 안전망 regex가 빈값으로 제거 | 컨트롤타워 함수의 "안전망"이 의도치 않게 유효한 값을 제거하는지 반드시 확인 (D70) |
 | **upload.ts customer_schema 미갱신** | 엑셀 업로드 후 companies.customer_schema가 {}로 방치 → AI/직접발송 변수 매핑 불가 | 데이터 입력 경로가 여러 개일 때 모든 경로에서 관련 메타데이터가 갱신되는지 확인 (D70) |
+| **전송 후 state 미초기화** | MMS 전송 후 setMmsUploadedImages([]) 누락 → 이전 이미지 잔류 | 전송 성공 후 초기화 로직에 모든 관련 state가 포함되었는지 확인 (D70) |
+| **조건부 UX 분기 누락** | MMS 이미지 있는데 SMS 전환 비용절감 안내 표시 → 사용자 혼란 | UX 분기(모달/안내) 추가 시 해당 상태가 유효한 모든 조건을 고려 (D70) |
 
 ---
 

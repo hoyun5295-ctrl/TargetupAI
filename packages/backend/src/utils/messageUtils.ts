@@ -11,8 +11,54 @@
  */
 
 import { VarCatalogEntry } from '../services/ai';
+import { query } from '../config/database';
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 0) 커스텀 필드 동적 매핑 보강
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+/**
+ * fieldMappings에 회사별 커스텀 필드(customer_field_definitions)를 동적 추가
+ *
+ * - extractVarCatalog()은 FIELD_MAP 기반이라 storageType='custom_fields'를 건너뜀
+ * - AI맞춤한줄(generateCustomMessages)은 커스텀 필드 라벨(%선호스타일% 등)을 사용
+ * - 실제 발송 시 fieldMappings에 없으면 안전망 regex가 빈값으로 제거 → 미리보기와 불일치
+ * - 이 함수가 customer_field_definitions 조회 → fieldMappings에 추가하여 해결
+ *
+ * ★ B-D70-16 수정: 미리보기 vs 실제 발송 개인화 불일치 해결
+ *
+ * @param fieldMappings  extractVarCatalog()에서 받은 기본 매핑 (in-place 수정)
+ * @param companyId      회사 ID
+ * @returns 보강된 fieldMappings (원본 객체 반환)
+ */
+export async function enrichWithCustomFields(
+  fieldMappings: Record<string, VarCatalogEntry>,
+  companyId: string
+): Promise<Record<string, VarCatalogEntry>> {
+  try {
+    const defResult = await query(
+      `SELECT field_key, field_label FROM customer_field_definitions
+       WHERE company_id = $1 AND (is_hidden = false OR is_hidden IS NULL)`,
+      [companyId]
+    );
+    for (const def of defResult.rows) {
+      const label = def.field_label || def.field_key;
+      // 이미 있으면 덮어쓰지 않음 (FIELD_MAP 기본 displayName 우선)
+      if (!fieldMappings[label]) {
+        fieldMappings[label] = {
+          column: def.field_key,  // custom_1, custom_2, ... → custom_fields JSONB 내 키
+          type: 'string',
+          description: label,
+          sample: '',
+        };
+      }
+    }
+  } catch (e) {
+    // 조회 실패 시 기본 매핑으로 진행 (발송 중단하지 않음)
+    console.warn('[enrichWithCustomFields] customer_field_definitions 조회 실패:', e);
+  }
+  return fieldMappings;
+}
 // 1) 핵심 치환 함수
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 

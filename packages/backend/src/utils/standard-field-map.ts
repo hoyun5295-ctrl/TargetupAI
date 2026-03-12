@@ -56,17 +56,23 @@ export const FIELD_MAP: StandardFieldMapping[] = [
   { fieldKey: 'birth_date', category: 'basic', displayName: '생일',         dataType: 'date',   storageType: 'column', columnName: 'birth_date', normalizeFunction: 'normalizeDate',   sortOrder: 5 },
   { fieldKey: 'email',      category: 'basic', displayName: '이메일주소',   dataType: 'string', storageType: 'column', columnName: 'email',      normalizeFunction: 'normalizeEmail',  sortOrder: 6 },
   { fieldKey: 'address',    category: 'basic', displayName: '주소',         dataType: 'string', storageType: 'column', columnName: 'address',    normalizeFunction: 'trim',            sortOrder: 7 },
+  // ★ B-D70-17: region은 customer-filter/AI프롬프트에서 사용되지만 FIELD_MAP에 누락되어 enabled-fields 미감지
+  { fieldKey: 'region',     category: 'basic', displayName: '지역',         dataType: 'string', storageType: 'column', columnName: 'region',     normalizeFunction: 'trim',            sortOrder: 7.5 },
 
-  // ── purchase (구매정보) — 3개 ──
+  // ── purchase (구매정보) — 4개 ──
   { fieldKey: 'recent_purchase_store',  category: 'purchase', displayName: '최근구매매장', dataType: 'string', storageType: 'column', columnName: 'recent_purchase_store',  normalizeFunction: 'trim',            sortOrder: 8 },
   { fieldKey: 'recent_purchase_amount', category: 'purchase', displayName: '최근구매금액', dataType: 'number', storageType: 'column', columnName: 'recent_purchase_amount', normalizeFunction: 'normalizeAmount', sortOrder: 9 },
   { fieldKey: 'total_purchase_amount',  category: 'purchase', displayName: '누적구매금액', dataType: 'number', storageType: 'column', columnName: 'total_purchase_amount',  normalizeFunction: 'normalizeAmount', sortOrder: 10 },
+  // ★ B-D70-17: purchase_count는 customer-filter/CustomerDBModal에서 사용되지만 FIELD_MAP에 누락
+  { fieldKey: 'purchase_count',         category: 'purchase', displayName: '구매횟수',     dataType: 'number', storageType: 'column', columnName: 'purchase_count',         normalizeFunction: 'parseInt',        sortOrder: 10.5 },
 
-  // ── store (매장/등록정보) — 4개 ──
+  // ── store (매장/등록정보) — 5개 ──
   { fieldKey: 'store_code',        category: 'store', displayName: '브랜드',       dataType: 'string', storageType: 'column', columnName: 'store_code',        normalizeFunction: 'trim',           sortOrder: 11 },
   { fieldKey: 'registration_type', category: 'store', displayName: '등록구분',     dataType: 'string', storageType: 'column', columnName: 'registration_type', normalizeFunction: 'trim',           sortOrder: 12 },
   { fieldKey: 'registered_store',  category: 'store', displayName: '등록매장정보', dataType: 'string', storageType: 'column', columnName: 'registered_store',  normalizeFunction: 'trim',           sortOrder: 13 },
   { fieldKey: 'store_phone',       category: 'store', displayName: '매장전화번호', dataType: 'string', storageType: 'column', columnName: 'store_phone',       normalizeFunction: 'normalizePhone', sortOrder: 14 },
+  // ★ B-D70-17: store_name은 customer-filter/CustomerDBModal에서 사용되지만 FIELD_MAP에 누락
+  { fieldKey: 'store_name',        category: 'store', displayName: '매장명',       dataType: 'string', storageType: 'column', columnName: 'store_name',        normalizeFunction: 'trim',           sortOrder: 14.5 },
 
   // ── membership (등급/포인트) — 2개 ──
   { fieldKey: 'grade',  category: 'membership', displayName: '고객등급',   dataType: 'string', storageType: 'column', columnName: 'grade',  normalizeFunction: 'normalizeGrade', sortOrder: 15 },

@@ -146,7 +146,8 @@ if (smsOptIn === 'true') {
     params.push(Number(limit), offset);
     const result = await query(
       `SELECT id, name, phone, gender, birth_date, age, email, grade, region, points,
-              store_code, store_name,
+              store_code, store_name, registered_store, recent_purchase_store,
+              store_phone, registration_type,
               CASE WHEN EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${unsubCaseIdx} AND u.phone = customers_unified.phone)
                    THEN false ELSE sms_opt_in END as sms_opt_in,
               recent_purchase_date, total_purchase_amount, custom_fields

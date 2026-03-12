@@ -147,30 +147,37 @@
 
 ---
 
-### 🔧 D70 — 직원 QA 버그 일괄수정 (2026-03-12) — 🔶 진행 중 (일부 배포 완료, 나머지 배포 대기)
+### 🔧 D70 — 직원 QA 버그 일괄수정 (2026-03-12) — 🔶 진행 중 (3차 배포 대기, 잔여 1건 B-D70-18)
 
 > **배경:** 직원 2명이 실동작 검증 후 PPT(8슬라이드) + 체크리스트(30항목) 버그 리포트 제출. 서버 검증 후 순차 수정.
 > **원칙:** 직원 리포트 그대로 믿지 않고, 서버 실데이터/코드로 교차검증 후 수정.
 
-#### ✅ 수정 완료 (배포 완료)
+#### ✅ 수정 완료 (1차 배포 완료)
 1. **Redis 캐시키 브랜드 격리 (Slide 1):** `stats:${companyId}` → `stats:${companyId}:${userId}` — 다른 브랜드 담당자 간 캐시 충돌 방지 (`customers.ts`)
 2. **고객DB 날짜 표시 (Slide 3):** `T15:00:00.000Z` → `formatDate()` 적용. birth_date, recent_purchase_date, created_at, wedding_anniversary, DATE 타입 필드 (`CustomerDBModal.tsx`)
 3. **커스텀 필드 정의 저장 (Slide 4 일부):** field_type `'text'` → `'VARCHAR'` — customer_field_definitions CHECK 제약조건 위반 수정 (`upload.ts`)
 4. **MMS 보관함 이미지 (Slide 7):** sms_templates.mms_image_paths 컬럼 추가 (ALTER TABLE 실행 완료) + 저장/불러오기 코드 (`sms-templates.ts`, `Dashboard.tsx`)
 5. **주소록 파일업로드 401 (Slide 8a):** Authorization 헤더 누락 → `Bearer ${token}` 추가 (`AddressBookModal.tsx`)
 6. **주소록 브랜드 격리 (Slide 8b):** address_books.user_id 컬럼 추가 (ALTER TABLE 실행 완료) + 4개 라우트에 user_id 필터 적용 (`address-books.ts`)
-
-#### ✅ 수정 완료 (배포 대기 — tp-push → tp-deploy-full 필요)
 7. **대시보드 성공건수 (신규 발견):** `monthly_sent: totalSent`(큐 INSERT 건수) → `totalSuccess`(실제 성공건수)로 변경 + 담당자테스트/스팸필터 성공건수도 합산 (`customers.ts`)
 8. **직접발송 머지변수 NULL (Slide 5):** replaceVariables 컨트롤타워에 `addressBookFields` 4번째 파라미터 추가 — %기타1/2/3%, %회신번호% 주소록 변수를 fieldMappings 순회 전에 치환하여 안전망에 잡히지 않도록 처리 (`messageUtils.ts`, `campaigns.ts` SMS+카카오 양쪽)
 9. **upload.ts customer_schema 미갱신:** 엑셀 업로드 후 companies.customer_schema 자동 갱신 로직 추가 — customers.ts 일괄추가와 동일 쿼리 (`upload.ts`)
 
-#### ❌ 미해결 (다음 세션 CURRENT_TASK)
-- **Slide 2 — 타 브랜드 고객데이터 노출:** D67 store_code 격리 코드 서버 배포 상태 검증 필요
-- **Slide 4 일부 — 매장 필드 매핑:** store_code, recent_purchase_store 빈값. registered_store는 값 존재. 업로드 매핑 로직 확인 필요
-- **Slide 6 — MMS 발송 후 이미지/수신자 미초기화:** 간헐적 프론트엔드 이슈. Dashboard.tsx 발송 후 state 초기화 로직 점검 필요
-- **B8-03 — AI맞춤한줄 개인화 불일치:** 미리보기 vs 실제 발송 시 개인화 변수 적용 차이
-- **D39 — 필터 UI 보유필드 미표시:** enabled-fields API에서 매장번호/지역 등 반환 안 됨
+#### ✅ 수정 완료 (2차 배포 완료)
+10. **브랜드 격리 — store_code 자동할당 (Slide 2):** 엑셀에 store_code 컬럼이 없으면 업로드 사용자의 `store_codes[0]`을 자동 할당 → UNIQUE(company_id, store_code, phone) 제약에 의해 브랜드별 별개 레코드 분리 (`upload.ts`)
+11. **브랜드 격리 — 필드 라벨 덮어쓰기 방지:** customer_field_definitions에 이미 라벨이 있는 필드는 덮어쓰지 않음 — "최초 등록 우선" 정책 (`upload.ts`)
+12. **고객사관리자 브랜드 필터:** 고객DB에서 브랜드(store_code) 드롭다운 필터 추가. filter-options API에 store_codes 목록 포함 (`customers.ts`, `CustomerDBModal.tsx`, `Dashboard.tsx`)
+13. **store_phone → callback 폴백:** 개별회신번호 사용 시 callback이 없으면 store_phone을 회신번호로 사용. 둘 다 없는 수신자는 제외 (`campaigns.ts` /:id/send + /direct-send 양쪽)
+14. **MMS 이미지 있을 때 비용절감 추천 스킵:** MMS 이미지가 업로드된 상태에서 SMS 전환 안내 모달을 띄우지 않음 (`Dashboard.tsx`, `TargetSendModal.tsx`)
+15. **MMS 전송 후 이미지 리셋:** 직접발송/타겟발송 성공 후 `setMmsUploadedImages([])` 추가 — 이전 발송 이미지가 잔류하던 문제 해결 (`Dashboard.tsx`)
+
+#### ✅ 수정 완료 (3차 — 배포 대기)
+16. **매장 필드 고객DB 미표시 (Slide 4 일부):** customers.ts SELECT에 registered_store, recent_purchase_store, store_phone, registration_type 컬럼 누락 → 추가. CustomerDBModal에 4개 필드 표시 추가 (`customers.ts`, `CustomerDBModal.tsx`)
+17. **AI맞춤한줄 개인화 불일치 (B8-03):** buildVarCatalogFromFieldMap()이 custom_fields를 스킵 → 커스텀 필드 라벨이 발송 시 fieldMappings에 없음 → 안전망이 제거. enrichWithCustomFields() 헬퍼 신설 + 5경로 전부 적용 (`messageUtils.ts`, `campaigns.ts` 4경로, `auto-campaign-worker.ts`)
+18. **필터 UI 보유필드 미표시 (D39):** region, store_name, purchase_count가 FIELD_MAP에 미정의 → enabled-fields 감지 불가. FIELD_MAP에 3개 필드 추가 (`standard-field-map.ts`)
+
+#### ❌ 미해결 (다음 세션)
+- **B-D70-18 — 직원 QA 추가 버그:** Harold님이 다음 세션에서 추가 스크린샷 확인 예정
 
 ---
 
