@@ -3712,6 +3712,39 @@ const handleApproveRequest = async (id: string) => {
                   )}
                 </div>
 
+                {/* 업로드 고객 DB 현황 */}
+                {editingUser.uploaded_customer_count > 0 && (
+                  <div className="mt-3 p-3 bg-blue-50 rounded-lg">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-gray-600">업로드 고객 DB: <strong>{Number(editingUser.uploaded_customer_count).toLocaleString()}건</strong></span>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (!confirm(`이 사용자가 업로드한 고객 ${Number(editingUser.uploaded_customer_count).toLocaleString()}건을 전부 삭제하시겠습니까?\n연관 구매내역도 함께 삭제되며, 복구할 수 없습니다.`)) return;
+                          try {
+                            const token = localStorage.getItem('token');
+                            const res = await fetch(`/api/admin/users/${editingUser.id}/customers`, {
+                              method: 'DELETE',
+                              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }
+                            });
+                            if (res.ok) {
+                              const data = await res.json();
+                              showAlert('성공', `${data.deletedCount}명 삭제 (구매내역 ${data.deletedPurchases}건 포함)`, 'success');
+                              setEditingUser({ ...editingUser, uploaded_customer_count: 0 });
+                            } else {
+                              const data = await res.json();
+                              showAlert('오류', data.error || '삭제 실패', 'error');
+                            }
+                          } catch { showAlert('오류', '삭제 실패', 'error'); }
+                        }}
+                        className="px-3 py-1 text-xs bg-red-100 text-red-700 rounded-lg hover:bg-red-200"
+                      >
+                        🗑️ 고객 DB 삭제
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 {/* 수신거부 현황 */}
                 {editingUser.unsubscribe_count > 0 && (
                   <div className="mt-3 p-3 bg-gray-50 rounded-lg">

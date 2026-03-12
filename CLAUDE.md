@@ -20,7 +20,7 @@
 |------|------|
 | **로컬** | `C:\Users\ceo\projects\targetup` |
 | **서버** | `ssh administrator@58.227.193.62` → `/home/administrator/targetup-app/` |
-| **배포** | Harold님 로컬 PowerShell에서 `tp-push` → `tp-deploy-full` 실행 (AI가 직접 실행 불가) |
+| **배포** | Harold님 로컬 PowerShell에서 `tp-push` → `tp-deploy-full` 실행 (AI가 직접 실행 불가). ⚠️ tp-deploy-full = git pull → **백엔드 빌드(tsc)** → 프론트 빌드 → pm2 restart |
 
 ---
 
@@ -233,6 +233,7 @@ PostgreSQL campaigns/campaign_runs 생성
 | **타입 에러 배포** | TS 에러 무시하고 배포 → 서버 크래시 | 빌드 통과 필수 |
 | **OneDrive 동기화** | .git이 클라우드 동기화되어 lock/충돌 | 프로젝트를 OneDrive 밖으로 이전 완료 |
 | **엉뚱한 파일 수정** | B13-03/04를 AiCampaignResultPopup.tsx에서 수정 — 실제 화면은 AiPreviewModal.tsx | 수정 전 실제 화면 확인 필수 |
+| **tp-deploy-full 백엔드 빌드 누락** | tp-deploy-full이 프론트엔드만 빌드 → 백엔드 dist/ 미갱신 → 서버에 코드 수정 미반영 | PowerShell 프로필에 백엔드 빌드 추가 완료 (D67) |
 
 ---
 

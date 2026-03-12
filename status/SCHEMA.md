@@ -316,9 +316,11 @@
 | is_active | boolean |
 | custom_fields | jsonb |
 | source | varchar(20) |
+| uploaded_by | uuid FK (users.id) | 업로드한 사용자 ID |
 | created_at | timestamp |
 | updated_at | timestamp |
 - UNIQUE: (company_id, COALESCE(store_code,'__NONE__'), phone)
+- INDEX: uploaded_by
 
 ### file_uploads (파일 업로드)
 | 컬럼 | 타입 |

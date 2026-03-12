@@ -23,7 +23,7 @@ export default function Unsubscribes() {
     loadUnsubscribes();
   }, [pagination.page]);
 
-  const loadUnsubscribes = async () => {
+  const loadUnsubscribes = async (): Promise<any[]> => {
     try {
       setLoading(true);
       const token = localStorage.getItem('token');
@@ -38,17 +38,20 @@ export default function Unsubscribes() {
       });
       const data = await res.json();
       if (data.success) {
-        setUnsubscribes(data.unsubscribes || []);
+        const items = data.unsubscribes || [];
+        setUnsubscribes(items);
         setPagination(prev => ({ ...prev, ...data.pagination }));
         // D43-4: 080 설정 정보 수신
         setOpt080Number(data.opt080Number || '');
         setOptOutAutoSync(data.optOutAutoSync || false);
+        return items;
       }
     } catch (error) {
       console.error('수신거부 목록 로드 실패:', error);
     } finally {
       setLoading(false);
     }
+    return [];
   };
 
   const handleSearch = () => {
@@ -154,14 +157,15 @@ export default function Unsubscribes() {
   };
 
   // D43-4: 080 연동 테스트 — 목록 새로고침 후 최근 080_ars 건 확인
+  // ★ stale state 버그 수정: loadUnsubscribes()가 반환한 최신 데이터로 직접 체크
   const handleSyncTest = async () => {
     setSyncTesting(true);
-    await loadUnsubscribes();
+    const freshData = await loadUnsubscribes();
     setSyncTesting(false);
 
-    // 최근 5분 내 080_ars 소스 건 확인
-    const recent080 = unsubscribes.filter(
-      (item) => item.source === '080_ars' && 
+    // 최근 5분 내 080_ars 소스 건 확인 (반환된 최신 데이터 사용)
+    const recent080 = freshData.filter(
+      (item: any) => item.source === '080_ars' &&
       new Date(item.created_at).getTime() > Date.now() - 5 * 60 * 1000
     );
 

@@ -106,6 +106,61 @@
 
 ---
 
+### 🔧 D67 — 080 나래인터넷 콜백 미동작 + store_code/created_by 전수 격리 (2026-03-12~) — 🔴 진행 중
+
+> **배경:** D66 17차 수정+배포 후, 직원이 080 수신거부 테스트(실제 080번호로 전화)를 했으나 콜백이 서버에 전혀 도달하지 않음. Harold님 계정(hoyun)은 정상 작동(3,174건). 또한 고객사관리자/사용자 간 데이터 격리가 일부 API에서 누락 발견.
+> **원칙:** 하나씩 원인 파악 → 수정. 기간계 무접촉.
+
+#### 🔴 최우선: 080 나래인터넷 콜백 미동작 (직원 계정)
+
+**현상:**
+- sh_cpb 계정: 슈퍼관리자에서 080번호(080-540-5648) 설정 + 자동연동 ON → 080 버튼 정상 표시됨 (tp-deploy-full 백엔드 빌드 후 해결)
+- 직원이 080번호로 실제 전화 → 서버에 콜백 미수신
+- Nginx access.log: `080callback` 검색 결과 **0건** (Harold님 계정 콜백도 안 보임 → 로그 로테이션 가능성)
+- PM2 logs: `080callback` 관련 로그 **0건**
+- Harold님 계정(hoyun): 정상 작동 (3,174건 수신거부 존재)
+
+**원인 추정 (다음 세션에서 조사):**
+1. ~~나래인터넷 콜백 미발송~~ → Harold님 계정 정상이므로 배제
+2. 나래인터넷 콜백 URL 설정: Harold님 계정과 sh_cpb 계정의 080번호가 동일 콜백 URL을 사용하는지 확인 필요
+3. `findUserBy080Number()` 매칭 로직: users 테이블에서 sh_cpb의 080번호가 정확히 매칭되는지 DB 확인
+4. 나래인터넷 관리자 페이지에서 콜백 URL 등록 현황 확인 필요
+
+**조사 순서:**
+1. DB에서 sh_cpb/sh_sh 사용자의 `opt_out_080_number`, `opt_out_auto_sync` 값 확인
+2. 나래인터넷 관리자 페이지에서 각 080번호의 콜백 URL 설정 현황 확인 (Harold님 협조 필요)
+3. 서버에서 테스트 콜백 수동 호출: `curl "https://hanjul.ai/api/unsubscribes/080callback?cid=01012345678&fr=0805405648"` 로 서버 코드 동작 확인
+4. Nginx 로그 실시간 모니터링 (`tail -f`) 상태에서 080 전화 재시도
+
+#### 🟡 수정 완료-배포 대기: store_code/created_by 전수 격리
+
+**배경:** Harold님이 사용자 ID(hoyun123, store_code=ONLINE)로 로그인 시 고객사관리자(hoyun)의 발송현황이 그대로 보이는 문제 발견.
+
+**격리 원칙 (Harold님 확정):**
+- **고객사관리자(company_admin):** company_id 전체 데이터 조회
+- **사용자(company_user):** 고객 데이터는 store_code 기준, 발송 데이터는 created_by(본인 발송만)
+- store_code 미배정 사용자: company_id 전체 (no_filter)
+
+**수정 완료 파일 (TypeScript 0 에러):**
+1. `routes/customers.ts` — 발송현황 카드에 created_by 격리 추가 (campaignStats, directStats)
+2. `routes/companies.ts` — dashboard-cards 전체에 store_code + created_by 격리 (aggregateDashboardCards에 userId/userType 전달)
+3. `routes/results.ts` — campaigns/:id 상세에 created_by 격리 추가
+
+**⚠️ 배포 필요:** tp-push + tp-deploy-full 실행 대기 중
+
+#### tp-deploy-full 백엔드 빌드 누락 해결
+
+**문제:** tp-deploy-full이 프론트엔드만 빌드하고 백엔드 TypeScript 빌드(tsc)를 하지 않음 → 서버 dist/ 폴더에 이전 JS가 남아 코드 수정이 반영 안 됨 (080 버튼 미표시 원인)
+**수정:** Harold님 PowerShell 프로필에 백엔드 빌드 단계 추가 — `cd packages/backend && npm run build`
+**결과:** tp-deploy-full 실행 시 자동으로 백엔드도 빌드됨
+
+#### D66 17차 실동작 검증 대기 (B17-01~B17-16)
+- 16건 전건 수정+배포 완료 (2026-03-12)
+- 15건 🟡수정완료-검증대기 (B17-08 배포 후 재확인, B17-13 코드이상없음 제외)
+- 직원 재검증 결과 대기 중
+
+---
+
 ### 🔧 D62 — 13차~15차 실동작 검증 버그 수정 (2026-03-09~03-10) — ✅ 15차 빌드+배포 완료 (2026-03-10 22:17), 실동작 검증 대기
 
 > **배경:** 직원 전수 실동작 검증(30개 항목) + 한줄로 PPT 버그리포트(7슬라이드) 결과, 기존 버그 재발(Reopened) + 신규 버그(13차) 총 21건 확인.

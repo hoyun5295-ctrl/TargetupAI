@@ -3,7 +3,7 @@
 > **목적:** 버그의 발견→분석→수정→교차검증→완료를 체계적으로 관리하여 재발을 방지한다.  
 > **원칙:** (1) 추측성 땜질 금지 (2) 근본 원인 3줄 이내 특정 (3) 교차검증 통과 전까지 Closed 금지 (4) 재발 패턴 기록  
 > **SoT(진실의 원천):** STATUS.md + 이 문서. 채팅에서 떠도는 "수정 완료"는 교차검증 전까지 "임시"다.
-> **현황:** **2026-03-12 D66 17차 — B17-01~B17-16 전건 수정+배포 완료. 080 admin 자동동기화 추가.** 8차 8건 ✅Closed + 5건 🟡검증대기 | 9차 ✅Closed | GPT P0 ✅ | 10차 2건 ✅Closed + 5건 🟡검증대기 | 11차 3건 ✅Closed + 2건 🟡검증대기 | 12차 2건 🟡검증대기 | 13차 9건 🟡검증대기 + B8-13 🟡검증대기 | 14차 4건 🟡검증대기 | 15차 10건 🟡검증대기 | **17차 15건 🟡수정완료-검증대기**
+> **현황:** **2026-03-12 D67 — 080 콜백 미도달 🔵조사중 + store_code 격리 🟡배포대기 + tp-deploy-full ✅해결.** D66 17차 B17-01~B17-16 15건 🟡검증대기 | 8차 8건 ✅Closed + 5건 🟡검증대기 | 9차 ✅Closed | GPT P0 ✅ | 10차 2건 ✅Closed + 5건 🟡검증대기 | 11차 3건 ✅Closed + 2건 🟡검증대기 | 12차 2건 🟡검증대기 | 13차 9건 🟡검증대기 + B8-13 🟡검증대기 | 14차 4건 🟡검증대기 | 15차 10건 🟡검증대기
 > **⚠️ 2026-02-26 코드 실물 검증:** GPT "미수정" 지적 5건 중 GP-01/03/05는 이미 코드에 반영됨 확인. GP-04는 풀 레벨로 보강. 문서의 "❌ 미수정" 표기가 실제 코드보다 뒤떨어져 있었음.
 
 ---
@@ -1720,4 +1720,49 @@
 
 ---
 
-*최종 업데이트: 2026-03-12 D66 17차 버그 수정+배포 완료. B17-01~B17-16 전건 수정(B17-08 배포 후 재확인, B17-13 코드이상없음). 추가: 080 콜백 시 admin 자동동기화 로직. 15건 🟡수정완료-검증대기 — 실동작 검증 대기.*
+---
+
+## 18) 📋 D67 추가 발견 (2026-03-12)
+
+### B18-01: 080 나래인터넷 콜백 서버 미도달 🔴
+
+| 항목 | 내용 |
+|------|------|
+| **심각도** | 🔴 Critical |
+| **상태** | 🔵 Open (조사 중) |
+| **관련** | B17-11 (080 수신거부 자동연동 미동작) |
+| **증상** | 직원이 sh_cpb/sh_sh 계정의 080번호로 실제 전화 → 서버에 콜백 미수신. Nginx access.log 080callback 0건. PM2 logs에도 관련 로그 0건. |
+| **비교** | Harold님 계정(hoyun)은 080 수신거부 정상 작동 (3,174건 존재). 서버 코드(unsubscribe-helper.ts findUserBy080Number)는 users→companies fallback 정상 구현 |
+| **원인 추정** | ① 나래인터넷에서 해당 080번호의 콜백 URL이 미등록 또는 다른 URL로 설정 ② 080번호별 콜백 설정이 별도 필요한 구조일 수 있음 |
+| **조사 필요** | ① DB에서 사용자별 080번호 확인 ② 나래인터넷 관리자 페이지에서 콜백 URL 등록 현황 확인 (Harold님 협조) ③ 서버에서 수동 curl 테스트로 코드 동작 확인 ④ Nginx 실시간 tail -f 로 080 전화 시 요청 도달 여부 확인 |
+
+---
+
+### B18-02: store_code/created_by 격리 누락 (dashboard-cards, 발송현황, 캠페인상세) 🟠
+
+| 항목 | 내용 |
+|------|------|
+| **심각도** | 🟠 Major |
+| **상태** | 🟡 수정완료-배포대기 (2026-03-12) |
+| **증상** | 사용자(company_user, store_code=ONLINE)로 로그인 시 고객사관리자(company_admin)의 발송현황/대시보드카드/캠페인상세가 그대로 노출 |
+| **근본 원인** | customers.ts 발송현황 카드, companies.ts dashboard-cards, results.ts 캠페인 상세에서 company_user일 때 created_by/store_code 필터가 누락 |
+| **수정** | ① customers.ts — 발송현황 카드에 `created_by = userId` 필터 추가 ② companies.ts — aggregateDashboardCards에 getStoreScope() + created_by 격리 적용 ③ results.ts — campaigns/:id 상세에 `created_by = userId` 추가 |
+| **격리 원칙** | 고객사관리자 → company_id 전체, 사용자 → 고객은 store_code 기준 + 발송은 created_by(본인만), store_code 미배정 사용자 → company_id 전체 |
+| **수정 파일** | customers.ts, companies.ts, results.ts (TypeScript 0 에러 확인) |
+
+---
+
+### B18-03: tp-deploy-full 백엔드 빌드 누락 🔴
+
+| 항목 | 내용 |
+|------|------|
+| **심각도** | 🔴 Critical (배포 인프라) |
+| **상태** | ✅ Closed (2026-03-12) |
+| **증상** | tp-deploy-full 실행 후에도 백엔드 코드 변경이 서버에 미반영. 서버 dist/ 파일이 이전 버전 유지 |
+| **근본 원인** | PowerShell tp-deploy-full 함수가 프론트엔드 빌드만 수행하고 백엔드 TypeScript 컴파일(tsc)을 하지 않음 → git pull로 소스는 최신이지만 dist/는 이전 JS |
+| **수정** | Harold님 PowerShell 프로필에 `cd packages/backend && npm run build` 단계 추가 |
+| **교훈** | 백엔드는 TypeScript → JavaScript 컴파일이 필요하며, git pull만으로는 불충분. tp-deploy-full에 반드시 백엔드 빌드 포함 필수 |
+
+---
+
+*최종 업데이트: 2026-03-12 D67. B18-01 080 콜백 서버 미도달(🔵 조사 중), B18-02 store_code/created_by 격리 누락(🟡 수정완료-배포대기), B18-03 tp-deploy-full 빌드 누락(✅ Closed). D66 17차 15건 🟡수정완료-검증대기 유지.*

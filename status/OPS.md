@@ -50,7 +50,7 @@ git push
 # 5. 배포 자동화 (PowerShell 프로필 함수)
 tp-push "커밋메시지"     # 타입체크 → git add → commit → push (메시지 생략 시 자동 타임스탬프)
 tp-deploy               # 서버 git pull → pm2 restart all (백엔드만)
-tp-deploy-full          # 서버 git pull → frontend build → pm2 restart all
+tp-deploy-full          # 서버 git pull → backend build → frontend build → pm2 restart all
 ```
 
 ### 2-2. 서버 배포 (SSH 접속 후)
@@ -65,17 +65,21 @@ git pull
 cd packages/frontend && npm install
 cd ../company-frontend && npm install
 
-# 3. 프론트엔드 빌드 (변경 시) — D61 난독화 플러그인 포함
+# ⚠️ 3. 백엔드 빌드 (TypeScript → JavaScript, 변경 시 필수!)
+# git pull만으로는 dist/ 미갱신 → 코드 수정이 서버에 반영 안 됨 (D67 교훈)
+cd /home/administrator/targetup-app/packages/backend && npm run build
+
+# 4. 프론트엔드 빌드 (변경 시) — D61 난독화 플러그인 포함
 cd /home/administrator/targetup-app/packages/frontend && npm run build
 # 또는 company-frontend 변경 시
 cd /home/administrator/targetup-app/packages/company-frontend && npm run build
 # ⚠️ 최초 빌드 시 vite-plugin-javascript-obfuscator 미설치 에러 발생하면:
 # npm install vite-plugin-javascript-obfuscator --save-dev
 
-# 4. 백엔드 재시작 (변경 시)
+# 5. 백엔드 재시작 (변경 시)
 pm2 restart all
 
-# 5. 확인
+# 6. 확인
 pm2 status
 ```
 

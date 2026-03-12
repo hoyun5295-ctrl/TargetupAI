@@ -25,7 +25,8 @@ router.get('/users', authenticate, requireSuperAdmin, async (req: Request, res: 
         u.opt_out_080_number, u.opt_out_auto_sync,
         c.company_name,
         lg.group_name as line_group_name,
-        (SELECT COUNT(*) FROM unsubscribes WHERE user_id = u.id) as unsubscribe_count
+        (SELECT COUNT(*) FROM unsubscribes WHERE user_id = u.id) as unsubscribe_count,
+        (SELECT COUNT(*) FROM customers WHERE uploaded_by = u.id AND is_active = true) as uploaded_customer_count
       FROM users u
       LEFT JOIN companies c ON u.company_id = c.id
       LEFT JOIN sms_line_groups lg ON u.line_group_id = lg.id
@@ -174,6 +175,87 @@ router.get('/users/:id/unsubscribes/export', authenticate, requireSuperAdmin, as
   } catch (error) {
     console.error('수신거부 다운로드 실패:', error);
     res.status(500).json({ error: '수신거부 다운로드 실패' });
+  }
+});
+
+// ================================================================
+// 사용자별 업로드 고객 DB 삭제
+// uploaded_by = userId 인 고객만 삭제 (연관 데이터 포함)
+// ================================================================
+router.delete('/users/:id/customers', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const adminUserId = req.user?.userId;
+
+    // 사용자 확인
+    const userResult = await query(
+      'SELECT u.id, u.name, u.company_id, c.company_name FROM users u JOIN companies c ON c.id = u.company_id WHERE u.id = $1',
+      [id]
+    );
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
+    }
+    const user = userResult.rows[0];
+
+    // 삭제 대상 건수 확인
+    const countResult = await query(
+      'SELECT COUNT(*) FROM customers WHERE uploaded_by = $1 AND is_active = true',
+      [id]
+    );
+    const totalCount = parseInt(countResult.rows[0].count);
+
+    if (totalCount === 0) {
+      return res.status(400).json({ error: '이 사용자가 업로드한 고객 데이터가 없습니다.' });
+    }
+
+    // 연관 데이터 삭제
+    const purchaseResult = await query(
+      'DELETE FROM purchases WHERE customer_id IN (SELECT id FROM customers WHERE uploaded_by = $1)',
+      [id]
+    );
+    await query(
+      'DELETE FROM consents WHERE customer_id IN (SELECT id FROM customers WHERE uploaded_by = $1)',
+      [id]
+    );
+
+    // 고객 삭제
+    const deleteResult = await query(
+      'DELETE FROM customers WHERE uploaded_by = $1',
+      [id]
+    );
+
+    // 감사 로그
+    await query(
+      `INSERT INTO audit_logs (user_id, action, target_type, target_id, details, ip_address, user_agent)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [
+        adminUserId,
+        'customer_delete_by_user',
+        'user',
+        id,
+        JSON.stringify({
+          delete_type: 'by_uploaded_user',
+          target_user_name: user.name,
+          company_name: user.company_name,
+          deleted_customers: deleteResult.rowCount,
+          deleted_purchases: purchaseResult.rowCount
+        }),
+        req.ip,
+        req.headers['user-agent'] || ''
+      ]
+    );
+
+    console.log(`[관리자] 사용자별 고객 삭제: ${user.name} (${user.company_name}) → ${deleteResult.rowCount}명`);
+
+    res.json({
+      success: true,
+      message: `${deleteResult.rowCount}명의 고객 데이터가 삭제되었습니다.`,
+      deletedCount: deleteResult.rowCount,
+      deletedPurchases: purchaseResult.rowCount
+    });
+  } catch (error) {
+    console.error('사용자별 고객 삭제 실패:', error);
+    res.status(500).json({ error: '삭제 실패' });
   }
 });
 

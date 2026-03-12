@@ -147,8 +147,19 @@ export function getRegionVariants(standardValue: string): string[] {
 // 수신동의 정규화
 // 표준값: true / false
 // ============================================================
-const SMS_OPT_IN_TRUE = new Set(['true', 'Y', 'y', 'yes', 'YES', 'Yes', '동의', '수신동의', '1', 'O', 'o', 'T', 't']);
-const SMS_OPT_IN_FALSE = new Set(['false', 'N', 'n', 'no', 'NO', 'No', '거부', '수신거부', '0', 'X', 'x', 'F', 'f']);
+const SMS_OPT_IN_TRUE = new Set([
+  'true', 'Y', 'y', 'yes', 'YES', 'Yes',
+  '동의', '수신동의', '수신 동의', '동의함', '수신동의함',
+  '1', 'O', 'o', 'T', 't',
+]);
+const SMS_OPT_IN_FALSE = new Set([
+  'false', 'N', 'n', 'no', 'NO', 'No',
+  '거부', '수신거부', '수신 거부',
+  '비동의', '불동의', '미동의', '동의안함', '동의 안함', '비동의함',
+  '거절', '수신거절', '수신 거절',
+  '해지', '탈퇴', '철회',
+  '0', 'X', 'x', 'F', 'f',
+]);
 
 export function normalizeSmsOptIn(value: any): boolean | null {
   if (value == null || value === '') return null;
