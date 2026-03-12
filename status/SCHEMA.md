@@ -55,6 +55,8 @@
 | 44 | analysis_results | AI 분석 결과 캐시 |
 | 45 | spam_filter_tests | 스팸필터 테스트 |
 | 46 | spam_filter_test_results | 스팸필터 테스트 결과 |
+| 47 | auto_campaigns | 자동발송 스케줄 (D69 설계, 미생성) |
+| 48 | auto_campaign_runs | 자동발송 실행 이력 (D69 설계, 미생성) |
 
 ---
 
@@ -467,6 +469,7 @@
 | customer_db_enabled | boolean | D53: 고객DB/타겟팅 잠금 (기본 false) |
 | spam_filter_enabled | boolean | D53: 스팸필터 잠금 (기본 false) |
 | ai_messaging_enabled | boolean | D53: AI발송 잠금 (기본 false) |
+| auto_campaign_enabled | boolean | D69: 자동발송 잠금 (기본 false, PRO 이상 true) — 미적용, 설계만 |
 | created_at | timestamp | |
 
 ### plan_requests (요금제 변경 요청)
@@ -925,3 +928,58 @@
 - INDEX: idx_spam_filter_results_pending (test_id, received) WHERE received = false
 - **result 허용값:** pass(정상수신), blocked(스팸차단), failed(발송실패), timeout(시간초과), NULL(판정 대기)
 - **참조:** sms-result-map.ts의 SPAM_RESULT 상수가 유일한 정의
+
+### auto_campaigns (자동발송 스케줄) — D69 설계, 미생성
+> **설계 문서:** `AUTO-SCHEDULE-DESIGN.md` 참조. Phase 1 구현 시 CREATE TABLE 실행 예정.
+
+| 컬럼 | 타입 | 설명 |
+|------|------|------|
+| id | uuid PK | |
+| company_id | uuid FK → companies | |
+| user_id | uuid FK → users | 생성자 (발송 주체) |
+| campaign_name | varchar(200) NOT NULL | |
+| description | text | |
+| schedule_type | varchar(20) NOT NULL | monthly / weekly / daily |
+| schedule_day | integer CHECK(1~28) | monthly: 발송일, weekly: 0~6(일~토) |
+| schedule_time | time NOT NULL | 발송 시각 |
+| timezone | varchar(50) DEFAULT 'Asia/Seoul' | |
+| target_filter | jsonb NOT NULL | customer-filter.ts 호환 필터 |
+| store_code | varchar(50) | 브랜드 격리 (NULL = 전체) |
+| message_type | varchar(10) DEFAULT 'SMS' | SMS / LMS / MMS |
+| message_content | text NOT NULL | 변수 포함 (%고객명% 등) |
+| message_subject | varchar(200) | LMS/MMS 제목 |
+| callback_number | varchar(20) NOT NULL | 발신번호 |
+| sender_number_id | uuid FK → sender_numbers | |
+| is_ad | boolean DEFAULT false | |
+| pre_notify | boolean DEFAULT true | D-1 사전 알림 |
+| notify_phones | text[] | 알림 수신 전화번호 |
+| status | varchar(20) DEFAULT 'active' | active / paused / deleted |
+| last_run_at | timestamptz | |
+| next_run_at | timestamptz | |
+| total_runs | integer DEFAULT 0 | |
+| total_sent | integer DEFAULT 0 | |
+| created_at | timestamptz | |
+| updated_at | timestamptz | |
+
+### auto_campaign_runs (자동발송 실행 이력) — D69 설계, 미생성
+> **설계 문서:** `AUTO-SCHEDULE-DESIGN.md` 참조.
+
+| 컬럼 | 타입 | 설명 |
+|------|------|------|
+| id | uuid PK | |
+| auto_campaign_id | uuid FK → auto_campaigns | |
+| campaign_id | uuid FK → campaigns | 실제 생성된 캠페인 연결 |
+| run_number | integer NOT NULL | 회차 (1, 2, 3...) |
+| target_count | integer | 필터링된 타겟 수 |
+| sent_count | integer DEFAULT 0 | |
+| success_count | integer DEFAULT 0 | |
+| fail_count | integer DEFAULT 0 | |
+| status | varchar(20) DEFAULT 'pending' | pending / notified / sending / completed / cancelled / failed |
+| notified_at | timestamptz | 사전 알림 발송 시각 |
+| notify_message | text | |
+| scheduled_at | timestamptz NOT NULL | 예정 발송 시각 |
+| started_at | timestamptz | |
+| completed_at | timestamptz | |
+| cancelled_at | timestamptz | |
+| cancel_reason | text | |
+| created_at | timestamptz | |

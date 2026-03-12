@@ -28,6 +28,8 @@ import smsTemplatesRoutes from './routes/sms-templates';
 import mmsImagesRoutes from './routes/mms-images';
 import spamFilterRoutes from './routes/spam-filter';
 import analysisRoutes from './routes/analysis';
+import autoCampaignsRoutes from './routes/auto-campaigns';
+import { startAutoCampaignScheduler } from './utils/auto-campaign-worker';
 
 // 공용 관리 라우트 (슈퍼관리자 + 고객사관리자)
 import manageUsersRoutes from './routes/manage-users';
@@ -91,6 +93,7 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/test-contacts', testContactsRoutes);
 app.use('/api/sms-templates', smsTemplatesRoutes);
 app.use('/api/mms-images', mmsImagesRoutes);
+app.use('/api/auto-campaigns', autoCampaignsRoutes);
 
 // 공용 관리 라우트 (슈퍼관리자 + 고객사관리자)
 app.use('/api/manage/users', manageUsersRoutes);
@@ -131,6 +134,9 @@ app.listen(PORT, () => {
   console.log(`🚀  http://localhost:${PORT}`);
   console.log('🚀 ================================');
   console.log('');
+
+  // ★ D69: 자동발송 워커 시작 (매 1시간 체크)
+  startAutoCampaignScheduler();
 });
 
 export default app;

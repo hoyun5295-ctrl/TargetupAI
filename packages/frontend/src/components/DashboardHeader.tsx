@@ -59,6 +59,7 @@ export default function DashboardHeader({
 
   const menuItems: MenuItem[] = [
     { label: 'AI 분석', onClick: onAnalysis, color: 'gold', emphasized: true },
+    { label: '자동발송', onClick: () => navigate('/auto-send'), color: 'gold', emphasized: true },
     { label: '직접발송', onClick: onDirectSend, color: 'green', emphasized: true },
     { label: '캘린더', onClick: isCalendarLocked
         ? () => onFeatureLocked?.('캘린더', '스타터')

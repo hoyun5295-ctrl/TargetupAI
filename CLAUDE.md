@@ -135,6 +135,8 @@ QTmsg status_code, 통신사 코드, 스팸필터 판정 결과를 한 곳에서
 - **역할:** campaigns.ts, customers.ts, ai.ts 3곳의 중복 WHERE 절 생성을 한 곳으로 통합
 - **설계:** tableAlias 옵션으로 접두사 제어, store_code는 호출부 위임(skipStoreCode), KST 기준 나이 계산, 커스텀 필드 8개 연산자 지원
 - **주요 함수:** `buildCustomerFilter()`, `buildFilterQueryCompat()`, `buildDynamicFilterCompat()`, `buildFilterWhereClauseCompat()`
+- **지원 필드:** gender, age, grade, region, points, total_purchase_amount, recent_purchase_date, birth_date(birth_month 연산자), store_code, store_name, custom_fields.*
+- **⚠️ D68 교훈:** mixed 형식(AI/campaigns용)과 structured 형식(customers용) 양쪽에 새 필드 핸들러를 추가해야 함. 한쪽만 추가하면 AI 필터가 무시됨.
 - **적용 파일:** campaigns.ts, customers.ts, ai.ts
 
 #### CT-02: store-scope.ts — 브랜드(store_code) 격리
@@ -204,7 +206,33 @@ AND NOT EXISTS (
 - **취소 옵션:** reason, cancelledBy, cancelledByType, skipTimeCheck(관리자용 15분 체크 스킵)
 - **적용 파일:** campaigns.ts, manage-scheduled.ts, admin.ts
 
-### 5-7. AI 메시지 생성 흐름
+### 5-7. 자동발송 기능 (D69 — 구현 대기)
+
+> **설계 문서:** `status/AUTO-SCHEDULE-DESIGN.md`
+> **상태:** 기초 설계 완료, Phase 1 구현 대기
+
+**개요:** 한 번 설정하면 매월/매주/매일 반복 자동 발송. 프로 요금제(100만원) 이상.
+
+**신규 테이블:**
+- `auto_campaigns` — 스케줄 설정 + 타겟 필터 + 메시지 + 상태
+- `auto_campaign_runs` — 매 실행 이력 (회차별 발송 결과)
+- `plans.auto_campaign_enabled` — 요금제별 기능 게이팅
+
+**신규 파일:**
+- `routes/auto-campaigns.ts` — CRUD API
+- `utils/auto-campaign-worker.ts` — PM2 워커 (매시간 체크 → 도래 건 실행)
+- `utils/auto-campaign-notify.ts` — D-1 사전 알림
+
+**프론트엔드:**
+- `AutoSendPage.tsx` — 프로 미만: 블러 프리뷰+CTA (AnalysisModal 패턴), 프로 이상: 실제 기능
+- `AutoSendFormModal.tsx` — 자동발송 생성/수정 모달
+- DashboardHeader에 "자동발송" 메뉴 (잠금 없이 누구나 클릭 가능)
+
+**기존 파이프라인 100% 재활용:** customer-filter, sms-queue, messageUtils, unsubscribe-helper, prepaid, campaign-lifecycle, store-scope
+
+**권한:** company_admin + company_user(브랜드담당자) 모두 생성/수정/삭제 가능 (store_code 범위 내)
+
+### 5-8. AI 메시지 생성 흐름
 
 ```
 프론트엔드 → POST /api/ai/generate-messages
@@ -234,6 +262,7 @@ PostgreSQL campaigns/campaign_runs 생성
 | **OneDrive 동기화** | .git이 클라우드 동기화되어 lock/충돌 | 프로젝트를 OneDrive 밖으로 이전 완료 |
 | **엉뚱한 파일 수정** | B13-03/04를 AiCampaignResultPopup.tsx에서 수정 — 실제 화면은 AiPreviewModal.tsx | 수정 전 실제 화면 확인 필수 |
 | **tp-deploy-full 백엔드 빌드 누락** | tp-deploy-full이 프론트엔드만 빌드 → 백엔드 dist/ 미갱신 → 서버에 코드 수정 미반영 | PowerShell 프로필에 백엔드 빌드 추가 완료 (D67) |
+| **customer-filter mixed/structured 양쪽 누락** | AI 프롬프트에 birth_date 추가했지만 customer-filter.ts mixed 형식에 핸들러 없어서 필터 무시됨 → 전체 고객 선택 | 새 필드 추가 시 mixed + structured 양쪽 확인 필수 (D68) |
 
 ---
 

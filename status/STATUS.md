@@ -106,7 +106,72 @@
 
 ---
 
-### 🔧 D67 — 080 콜백 진단 + 수신동의 변형 인식 + 사용자별 고객DB 삭제 (2026-03-12~) — ✅ 완료 (배포 대기)
+### 🔧 D69 — 자동발송 기능 설계 (2026-03-12) — ✅ 기초 설계 완료, 구현 대기
+
+> **배경:** 메트로시티 요청 — 생일자 자동발송 등 반복 스케줄 설정 기능
+> **적용:** 프로 요금제(100만원) 이상
+> **설계 문서:** `status/AUTO-SCHEDULE-DESIGN.md`
+
+#### 설계 완료 항목
+- **DB:** auto_campaigns + auto_campaign_runs 테이블 설계, plans.auto_campaign_enabled 컬럼 추가
+- **백엔드:** routes/auto-campaigns.ts(CRUD) + auto-campaign-worker.ts(PM2 워커) + auto-campaign-notify.ts(D-1 사전 알림)
+- **프론트:** DashboardHeader 메뉴 추가(잠금 없이 진입) + AutoSendPage.tsx(프로 미만 블러 프리뷰+CTA / 프로 이상 실제 기능) + AutoSendFormModal.tsx
+- **UX:** AnalysisModal 블러 패턴 적용 — 누구나 메뉴 클릭→페이지 진입→상단 설명+하단 블러+CTA
+- **권한:** company_admin + company_user(브랜드담당자) 모두 생성/수정/삭제 가능 (store_code 범위 내)
+- **스케줄:** 매월(1~28일)/매주/매일 + 발송 시각 설정. 매월 28일 max (2월 고려)
+- **기존 파이프라인 100% 재활용:** customer-filter, sms-queue, messageUtils, unsubscribe-helper, prepaid, campaign-lifecycle
+
+#### 미결정 사항
+- 동시 활성 자동캠페인 수 제한 (요금제별 차등?)
+- 실행 실패 시 재시도 정책
+- AI 메시지 자동 생성 연동 (Phase 3 우선순위)
+
+---
+
+### 🔧 D68 — 대시보드 UI 수정 + AI 생일 타겟팅 + 테스트 비용 합산 + 커스텀 필드 라벨 (2026-03-12) — ✅ 완료 (배포 대기)
+
+> **배경:** 메트로시티 첫 시연 준비 중 발견된 4건. 대시보드 UI 이슈 + AI 필터 누락 + 비용 집계 누락.
+> **원칙:** 기간계 무접촉. 프론트+백엔드 수정만.
+
+#### ✅ 대시보드 총 구매금액 아이콘/포맷 수정
+
+**파일:** `dashboard-card-pool.ts`, `Dashboard.tsx`
+**원인:** 총 구매금액 카드에 DollarSign($) 아이콘 + 천 단위 콤마 없음
+**수정:** DollarSign → CreditCard 아이콘, `.toFixed(0)` → `Math.round().toLocaleString()` 천 단위 콤마 추가
+
+#### ✅ 커스텀 필드 라벨 미표시 버그 수정
+
+**파일:** `customers.ts`, `upload.ts`
+**원인:** upload.ts에서 customer_field_definitions INSERT 시 `is_hidden` 미설정 → NULL로 저장 → enabled-fields 쿼리 `is_hidden = false` 조건에 NULL 미매칭 → FIELD_MAP 기본값 "커스텀1/2/3"으로 폴백
+**수정:** 조회 조건 `(is_hidden = false OR is_hidden IS NULL)` + INSERT 시 `is_hidden = false` 명시
+
+#### ✅ AI 생일 타겟팅 전체 고객 선택 버그 수정
+
+**파일:** `customer-filter.ts`, `services/ai.ts`, `routes/ai.ts`, `AiCustomSendFlow.tsx`
+**원인:** (1) AI 프롬프트에 birth_date 필터 필드 누락 → AI가 생일 필터 생성 불가 (2) customer-filter.ts mixed 형식에 birth_date 핸들러 없음 → 필터 생성해도 무시
+**수정:**
+- customer-filter.ts: mixed 형식에 birth_date 핸들러 추가 (birth_month/gte/lte/between)
+- services/ai.ts: recommend-target + parseBriefing 프롬프트에 birth_date 필터 + birth_month 연산자 추가
+- routes/ai.ts: recount-target에 birthMonth→birth_date 변환 추가
+- AiCustomSendFlow.tsx: TargetCondition 인터페이스 + EMPTY_TARGET_CONDITION에 birthMonth 추가
+- **3개 경로 전부 적용:** AI 한줄로(recommend-target) + AI 맞춤한줄(parse-briefing) + 타겟 수정 재조회(recount-target) + 실제 발송(campaigns.ts)
+
+#### ✅ 대시보드 발송현황 총 사용금액에 테스트 비용 합산
+
+**파일:** `customers.ts`
+**원인:** 발송현황 통계가 campaign_runs + 직접발송만 집계, 담당자 테스트 + 스팸필터 테스트 비용 미포함
+**수정:** 성공건수/성공률은 실발송만 유지, 총 사용금액에 MySQL 담당자 테스트(getTestSmsTables) + PostgreSQL 스팸필터(spam_filter_test_results) 비용 합산. try-catch 안전 처리.
+
+#### 메트로시티 가상 고객 DB 2만건 생성
+
+**출력:** `메트로시티_가상고객DB_20000건.xlsx`
+**내용:** 전화번호 010-0001-0001~010-0002-0000, 메트로시티 매장 15개, 등급 6단계(VVIP~NORMAL), 수신동의 변형 포함, 스키마 필수 17필드 + 커스텀 3필드(선호스타일/최근방문일/구매횟수)
+
+**⚠️ 배포 필요:** tp-push + tp-deploy-full
+
+---
+
+### 🔧 D67 — 080 콜백 진단 + 수신동의 변형 인식 + 사용자별 고객DB 삭제 (2026-03-12~) — ✅ 완료 (배포 완료)
 
 > **배경:** 직원 080 수신거부 테스트 미동작 + DB 업로드 시 수신거부 자동등록 미작동 신고 + 슈퍼관리자 사용자별 고객DB 삭제 기능 요청.
 > **원칙:** 하나씩 원인 파악 → 수정. 기간계 무접촉.
@@ -1204,6 +1269,8 @@ QTmsg status_code, 통신사 코드, 스팸필터 판정 결과를 한 곳에서
 | D60 | 03-08 | SyncAgent API Key 관리 UI + 사용자별 라인그룹 배정 | 상용화 온보딩 시 DB 직접 접근 불가→슈퍼관리자 UI 필요. 동일 회사 내 사용자간 발송 라인 공유→홀딩 문제. users.line_group_id 추가, getCompanySmsTables userId optional 확장. 기간계 기존 호출 100% 호환. |
 | D61 | 03-08 | 프론트엔드 난독화 적용 | 상용화 전 소스 보호. vite-plugin-javascript-obfuscator production only. stringArray+base64+disableConsoleOutput. frontend+company-frontend 양쪽. |
 | D67 | 03-12 | 080 콜백 진단 + 수신동의 변형 + 사용자별 고객DB 삭제 | 080 콜백 서버코드 정상 확인(나래측 URL 미등록 원인). 연동테스트 stale state 버그 수정. SMS_OPT_IN_FALSE 13개 변형 추가(비동의/불동의/거절/해지 등). admin.ts 사용자별 uploaded_by 기준 고객 삭제 API+UI. 기간계 무접촉 |
+| D68 | 03-12 | 대시보드 UI 4건 + AI 생일 타겟팅 + 테스트 비용 합산 | (1) 총구매금액 $→CreditCard+천단위콤마 (2) 커스텀필드 라벨 is_hidden NULL 미매칭 수정 (3) AI 생일타겟팅: 프롬프트+customer-filter mixed+3경로 전부 birth_date 추가 (4) 발송현황 총사용금액에 담당자테스트+스팸필터 비용 합산. 메트로시티 가상DB 2만건 생성. 기간계 무접촉 |
+| D69 | 03-12 | 자동발송 기능 기초 설계 | 메트로시티 요청. auto_campaigns+auto_campaign_runs 테이블 설계, PM2 워커+D-1 사전알림 아키텍처, 프론트 AutoSendPage(블러 프리뷰 게이팅)+DashboardHeader 메뉴 추가. 프로 이상 전용. company_user(브랜드담당자) 생성/수정/삭제 가능. 매월 28일 max. 기존 파이프라인(customer-filter, sms-queue, messageUtils) 100% 재활용. 설계문서: AUTO-SCHEDULE-DESIGN.md |
 
 **아카이브:** D1-AI발송2분기(02-22) | D2-브리핑방식(02-22) | D3-개인화필드체크박스(02-22) | D4-textarea제거(02-22) | D5-별도컴포넌트분리(02-22) | D6-대시보드레이아웃(02-22) | D7-헤더탭스타일(02-23) | D8-AUTO/PRO뱃지(02-23) | D9-캘린더상태기준(02-23) | D10-6차세션분할(02-23) | D11-KCP전환(02-23) | D12-이용약관(02-23) | D13-수신거부SoT(02-23) | D14-7차3세션분할(02-24) | D15-제목머지→D28번복(02-25) | D16-스팸테스트과금(02-25) | D17-테스트통계확장(02-25) | D18-정산자체헬퍼(02-25) | D19-구독상태필드(02-25) | D20-AI분석차별화(02-25) | D21-planInfo실시간(02-25) | D22-스팸잠금직접발송만(02-25) | D23-preview보안(02-25) | D24-run세션1완전구현(02-25) | D25-pdfkit선택(02-25) | D26-분석캐싱24h(02-25) | D27-비즈니스3회최적화(02-25) | D28-제목머지제거(02-25) | D29-5경로전수점검(02-25) | D30-즉시sending전환(02-25) | D31-GPT fallback(02-25) | D32-발송파이프라인복구(02-26) | D33-messageUtils통합(02-26) | D34-스팸필터DB직접조회(02-26) | D35-선불환불보장(02-26) | D-대시보드모달분리(02-23): 8,039줄→4,964줄
 
