@@ -519,6 +519,10 @@ router.get('/stats', async (req: Request, res: Response) => {
     const company = companyResult.rows[0] || {};
 
     // 이번 달 채널별 발송 통계 (취소/초안/예약 제외, 성공 건수 기준)
+    // ★ 사용자(company_user)는 본인 발송만, 관리자(company_admin)는 전체
+    const sendFilterClause = userType === 'company_user' && userId ? ' AND c.created_by = $2' : '';
+    const sendFilterParams = userType === 'company_user' && userId ? [companyId, userId] : [companyId];
+
     // campaign_runs 기반 (AI추천발송)
     const campaignStats = await query(
       `SELECT
@@ -530,12 +534,13 @@ router.get('/stats', async (req: Request, res: Response) => {
        WHERE c.company_id = $1
          AND c.status NOT IN ('cancelled', 'draft', 'scheduled')
          AND cr.status NOT IN ('cancelled')
-         AND cr.created_at >= date_trunc('month', (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Seoul'))::date::timestamp AT TIME ZONE 'Asia/Seoul'
+         AND cr.created_at >= date_trunc('month', (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Seoul'))::date::timestamp AT TIME ZONE 'Asia/Seoul'${sendFilterClause}
        GROUP BY c.message_type`,
-      [companyId]
+      sendFilterParams
     );
 
     // 직접발송(send_type=direct)은 campaign_runs 없을 수 있으므로 campaigns 직접 조회
+    const directSendFilterClause = userType === 'company_user' && userId ? ' AND created_by = $2' : '';
     const directStats = await query(
       `SELECT
         message_type,
@@ -546,9 +551,9 @@ router.get('/stats', async (req: Request, res: Response) => {
          AND send_type = 'direct'
          AND status NOT IN ('cancelled', 'draft', 'scheduled')
          AND created_at >= date_trunc('month', (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Seoul'))::date::timestamp AT TIME ZONE 'Asia/Seoul'
-         AND id NOT IN (SELECT DISTINCT campaign_id FROM campaign_runs WHERE campaign_id IS NOT NULL)
+         AND id NOT IN (SELECT DISTINCT campaign_id FROM campaign_runs WHERE campaign_id IS NOT NULL)${directSendFilterClause}
        GROUP BY message_type`,
-      [companyId]
+      sendFilterParams
     );
 
     // 채널별 집계 (성공 건수 기준으로 비용 계산)

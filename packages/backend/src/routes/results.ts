@@ -267,10 +267,15 @@ router.get('/campaigns/:id', async (req: Request, res: Response) => {
     // ★ userId 전달: 사용자별 라인그룹 테이블 포함 조회
     const companyTables = await getCompanySmsTablesWithLogs(companyId, userId);
 
-    const campaignResult = await query(
-      `SELECT * FROM campaigns WHERE id = $1 AND company_id = $2`,
-      [id, companyId]
-    );
+    const userType = req.user?.userType;
+    let detailQuery = `SELECT * FROM campaigns WHERE id = $1 AND company_id = $2`;
+    const detailParams: any[] = [id, companyId];
+    // ★ 사용자는 본인 캠페인만 조회 가능
+    if (userType === 'company_user' && userId) {
+      detailQuery += ` AND created_by = $3`;
+      detailParams.push(userId);
+    }
+    const campaignResult = await query(detailQuery, detailParams);
 
     if (campaignResult.rows.length === 0) {
       return res.status(404).json({ error: '캠페인을 찾을 수 없습니다.' });

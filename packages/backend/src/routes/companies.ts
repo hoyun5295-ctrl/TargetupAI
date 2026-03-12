@@ -4,6 +4,7 @@ import nodemailer from 'nodemailer';
 import { query } from '../config/database';
 import { authenticate, requireSuperAdmin } from '../middlewares/auth';
 import { getCardDef } from '../utils/dashboard-card-pool';
+import { getStoreScope } from '../utils/store-scope';
 
 const router = Router();
 
@@ -303,8 +304,24 @@ interface CardDataResult {
  * 대시보드 카드 집계 함수
  * 설정된 카드만 효율적으로 집계 (단일 customers 쿼리 + 필요한 외부 테이블만)
  */
-async function aggregateDashboardCards(companyId: string, cardIds: string[]): Promise<CardDataResult[]> {
+async function aggregateDashboardCards(companyId: string, cardIds: string[], userId?: string, userType?: string): Promise<CardDataResult[]> {
   const results: CardDataResult[] = [];
+
+  // ★ 사용자 격리: 고객 데이터는 store_code 기준, 발송 데이터는 created_by 기준
+  let customerStoreFilter = '';
+  const isCompanyUser = userType === 'company_user' && userId;
+  if (isCompanyUser) {
+    const scope = await getStoreScope(companyId, userId);
+    if (scope.type === 'blocked') {
+      return cardIds.map(id => {
+        const def = getCardDef(id);
+        return { cardId: id, label: def?.label ?? id, type: def?.type ?? 'count', icon: def?.icon ?? 'HelpCircle', value: 0, hasData: false };
+      });
+    }
+    if (scope.type === 'filtered') {
+      customerStoreFilter = ` AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = '${companyId}' AND store_code = ANY(ARRAY[${scope.storeCodes.map(s => `'${s}'`).join(',')}]::text[]))`;
+    }
+  }
 
   // ── 1단계: customers 통합 집계 (데이터 존재 여부 포함) ──
   const month = (new Date().getMonth() + 1).toString().padStart(2, '0');
@@ -330,7 +347,7 @@ async function aggregateDashboardCards(companyId: string, cardIds: string[]): Pr
       COUNT(*) FILTER (WHERE region IS NOT NULL)::int                                        as has_region_data,
       COUNT(*) FILTER (WHERE registered_store IS NOT NULL OR recent_purchase_store IS NOT NULL)::int as has_store_data
     FROM customers
-    WHERE company_id = $1
+    WHERE company_id = $1${customerStoreFilter}
   `, [companyId, `${month}-%`]);
 
   const base = baseResult.rows[0];
@@ -417,7 +434,7 @@ async function aggregateDashboardCards(companyId: string, cardIds: string[]): Pr
             END as label,
             COUNT(*)::int as count
           FROM customers
-          WHERE company_id = $1 AND age IS NOT NULL
+          WHERE company_id = $1 AND age IS NOT NULL${customerStoreFilter}
           GROUP BY 1
           ORDER BY MIN(age)
         `, [companyId]);
@@ -435,7 +452,7 @@ async function aggregateDashboardCards(companyId: string, cardIds: string[]): Pr
         const gradeResult = await query(`
           SELECT grade as label, COUNT(*)::int as count
           FROM customers
-          WHERE company_id = $1 AND grade IS NOT NULL
+          WHERE company_id = $1 AND grade IS NOT NULL${customerStoreFilter}
           GROUP BY grade
           ORDER BY count DESC
         `, [companyId]);
@@ -453,7 +470,7 @@ async function aggregateDashboardCards(companyId: string, cardIds: string[]): Pr
         const regionResult = await query(`
           SELECT region as label, COUNT(*)::int as count
           FROM customers
-          WHERE company_id = $1 AND region IS NOT NULL
+          WHERE company_id = $1 AND region IS NOT NULL${customerStoreFilter}
           GROUP BY region
           ORDER BY count DESC
           LIMIT 5
@@ -473,7 +490,7 @@ async function aggregateDashboardCards(companyId: string, cardIds: string[]): Pr
         const storeResult = await query(`
           SELECT COALESCE(registered_store, recent_purchase_store) as label, COUNT(*)::int as count
           FROM customers
-          WHERE company_id = $1 AND (registered_store IS NOT NULL OR recent_purchase_store IS NOT NULL)
+          WHERE company_id = $1 AND (registered_store IS NOT NULL OR recent_purchase_store IS NOT NULL)${customerStoreFilter}
           GROUP BY COALESCE(registered_store, recent_purchase_store)
           ORDER BY count DESC
           LIMIT 10
@@ -495,8 +512,9 @@ async function aggregateDashboardCards(companyId: string, cardIds: string[]): Pr
       }
 
       case 'active_campaigns': {
+        const campCreatedByFilter = isCompanyUser ? ` AND created_by = '${userId}'` : '';
         const campResult = await query(
-          `SELECT COUNT(*)::int as count FROM campaigns WHERE company_id = $1 AND status IN ('sending', 'scheduled')`,
+          `SELECT COUNT(*)::int as count FROM campaigns WHERE company_id = $1 AND status IN ('sending', 'scheduled')${campCreatedByFilter}`,
           [companyId]
         );
         value = parseInt(campResult.rows[0]?.count ?? 0);
@@ -505,10 +523,11 @@ async function aggregateDashboardCards(companyId: string, cardIds: string[]): Pr
       }
 
       case 'monthly_spend': {
+        const spendCreatedByFilter = isCompanyUser ? ` AND reference_id IN (SELECT id::text FROM campaigns WHERE company_id = '${companyId}' AND created_by = '${userId}')` : '';
         const spendResult = await query(
           `SELECT COALESCE(SUM(amount), 0)::numeric as total
            FROM balance_transactions
-           WHERE company_id = $1 AND type = 'deduct' AND created_at >= date_trunc('month', NOW())`,
+           WHERE company_id = $1 AND type = 'deduct' AND created_at >= date_trunc('month', NOW())${spendCreatedByFilter}`,
           [companyId]
         );
         value = parseFloat(spendResult.rows[0]?.total ?? 0);
@@ -534,6 +553,8 @@ async function aggregateDashboardCards(companyId: string, cardIds: string[]): Pr
 router.get('/dashboard-cards', async (req: Request, res: Response) => {
   try {
     const companyId = (req as any).user?.companyId;
+    const userId = (req as any).user?.userId;
+    const userType = (req as any).user?.userType;
     if (!companyId) {
       return res.status(401).json({ error: '인증 필요' });
     }
@@ -596,8 +617,8 @@ router.get('/dashboard-cards', async (req: Request, res: Response) => {
       });
     }
 
-    // 집계 실행
-    const cards = await aggregateDashboardCards(companyId, cardIds);
+    // 집계 실행 — 사용자 격리 정보 전달
+    const cards = await aggregateDashboardCards(companyId, cardIds, userId, userType);
 
     res.json({
       configured: true,
