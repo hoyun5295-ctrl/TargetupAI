@@ -1,16 +1,17 @@
 /**
- * ★ D69: 자동발송 생성/수정 모달
+ * ★ D69: 자동발송 생성/수정 모달 (5단계)
  *
- * 설정 단계:
  * 1. 기본 정보 (캠페인명, 설명)
- * 2. 스케줄 (매월/매주/매일 + 발송일/요일 + 시각)
- * 3. 메시지 (SMS/LMS/MMS 탭 + AI문안생성 + 스팸필터 + 본문 + 발신번호)
- * 4. 확인 (요약)
+ * 2. 활용 필드 선택 (AI 맞춤한줄 패턴 — 변수/개인화에 사용할 고객 필드)
+ * 3. 스케줄 (매월/매주/매일 + 발송일/요일 + 시각)
+ * 4. 메시지 (SMS/LMS/MMS 탭 + AI문안생성 + 스팸필터 + 본문 + 발신번호)
+ * 5. 확인 (요약)
+ *
+ * ★ 자동발송은 프로 요금제 이상에서만 접근 가능 → AI/스팸필터 잠금 체크 불필요
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { aiApi } from '../api/client';
-import { useAuthStore } from '../stores/authStore';
 import AiMessageSuggestModal from './AiMessageSuggestModal';
 import SpamFilterTestModal from './SpamFilterTestModal';
 
@@ -18,6 +19,16 @@ interface AutoSendFormModalProps {
   campaign: any | null;  // null = 생성, 있으면 수정
   onClose: () => void;
   onSuccess: () => void;
+}
+
+interface FieldItem {
+  field_key: string;
+  display_name: string;
+  field_label: string;
+  data_type: string;
+  category: string;
+  sort_order: number;
+  is_custom: boolean;
 }
 
 const SCHEDULE_TYPES = [
@@ -33,6 +44,16 @@ const HOURS = Array.from({ length: 14 }, (_, i) => {
   return { value: `${String(h).padStart(2, '0')}:00`, label: `${String(h).padStart(2, '0')}:00` };
 });
 
+// 카테고리 한글 라벨 (AiCustomSendFlow 패턴)
+const DEFAULT_CATEGORY_LABELS: Record<string, string> = {
+  basic: '기본 정보',
+  purchase: '구매 정보',
+  store: '매장 정보',
+  membership: '멤버십',
+  marketing: '마케팅',
+  custom: '커스텀 필드',
+};
+
 function getToken(): string {
   return localStorage.getItem('token') || '';
 }
@@ -42,6 +63,8 @@ const hasEmoji = (text: string): boolean => {
   const emojiPattern = /[\uD800-\uDBFF][\uDC00-\uDFFF]|[\u2600-\u27BF]|[\u2300-\u23FF]|[\u2B50-\u2BFF]|[\uFE00-\uFE0F]|[\u200D]|[\u20E3]|[\uE000-\uF8FF]/g;
   return emojiPattern.test(text);
 };
+
+const TOTAL_STEPS = 5;
 
 export default function AutoSendFormModal({ campaign, onClose, onSuccess }: AutoSendFormModalProps) {
   const isEdit = !!campaign;
@@ -66,10 +89,13 @@ export default function AutoSendFormModal({ campaign, onClose, onSuccess }: Auto
   // 080 수신거부 번호
   const [optOutNumber, setOptOutNumber] = useState('');
 
-  // 요금제 정보
-  const [planInfo, setPlanInfo] = useState<any>(null);
-  const isAiMessagingLocked = !planInfo?.ai_messaging_enabled;
-  const isSpamFilterLocked = !planInfo?.spam_filter_enabled;
+  // ★ Step 2: 활용 필드 선택 (AiCustomSendFlow 패턴)
+  const [availableFields, setAvailableFields] = useState<FieldItem[]>([]);
+  const [selectedFields, setSelectedFields] = useState<string[]>(
+    campaign?.personal_fields || ['name']
+  );
+  const [fieldsLoading, setFieldsLoading] = useState(true);
+  const [categoryLabels, setCategoryLabels] = useState<Record<string, string>>(DEFAULT_CATEGORY_LABELS);
 
   // AI 문구 추천
   const [showAiHelper, setShowAiHelper] = useState(false);
@@ -86,9 +112,6 @@ export default function AutoSendFormModal({ campaign, onClose, onSuccess }: Auto
     campaign?.mms_image_url ? [{ url: campaign.mms_image_url }] : []
   );
 
-  // 변수 필드 메타 (enabled-fields API 기반 동적)
-  const [variableFields, setVariableFields] = useState<{ field_key: string; display_name: string; variable: string }[]>([]);
-
   // 토스트
   const [toast, setToast] = useState({ show: false, type: '' as 'success' | 'error' | 'warning' | '', message: '' });
 
@@ -97,6 +120,30 @@ export default function AutoSendFormModal({ campaign, onClose, onSuccess }: Auto
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
+  // 카테고리별 필드 그룹핑 (AiCustomSendFlow 패턴)
+  const groupedFields = useMemo(() => {
+    const groups: Record<string, FieldItem[]> = {};
+    for (const f of availableFields) {
+      if (f.field_key === 'phone' || f.field_key === 'sms_opt_in') continue;
+      const cat = f.category || 'basic';
+      if (!groups[cat]) groups[cat] = [];
+      groups[cat].push(f);
+    }
+    return groups;
+  }, [availableFields]);
+
+  // 선택된 필드 기반 변수 목록 (메시지 작성에서 사용)
+  const variableFields = useMemo(() => {
+    return selectedFields
+      .map(key => availableFields.find(f => f.field_key === key))
+      .filter((f): f is FieldItem => !!f)
+      .map(f => ({
+        field_key: f.field_key,
+        display_name: f.display_name,
+        variable: `%${f.display_name}%`,
+      }));
+  }, [selectedFields, availableFields]);
+
   // 토스트 자동 숨김
   useEffect(() => {
     if (!toast.show) return;
@@ -104,7 +151,7 @@ export default function AutoSendFormModal({ campaign, onClose, onSuccess }: Auto
     return () => clearTimeout(timer);
   }, [toast.show, toast.message]);
 
-  // 발신번호 + 회사설정 로드
+  // 초기 데이터 로드
   useEffect(() => {
     (async () => {
       try {
@@ -133,33 +180,27 @@ export default function AutoSendFormModal({ campaign, onClose, onSuccess }: Auto
           }
         }
 
-        // 요금제 정보
-        const planRes = await fetch('/api/companies/plan-info', {
-          headers: { Authorization: `Bearer ${getToken()}` },
-        });
-        if (planRes.ok) {
-          const planData = await planRes.json();
-          setPlanInfo(planData);
-        }
-
-        // 변수 필드 메타 로드 — TargetSendModal과 동일한 동적 변수 지원
+        // ★ 활용 가능 필드 로드 (AiCustomSendFlow와 동일한 enabled-fields API)
+        setFieldsLoading(true);
         const fieldsRes = await fetch('/api/customers/enabled-fields', {
           headers: { Authorization: `Bearer ${getToken()}` },
         });
         if (fieldsRes.ok) {
           const fieldsData = await fieldsRes.json();
-          const fields = (fieldsData.fields || fieldsData || [])
-            .filter((f: any) => f.field_key !== 'phone' && f.field_key !== 'sms_opt_in')
-            .map((f: any) => ({
-              field_key: f.field_key,
-              display_name: f.display_name || f.field_key,
-              variable: `%${f.display_name || f.field_key}%`,
-            }));
-          setVariableFields(fields);
+          setAvailableFields(fieldsData.fields || []);
+          if (fieldsData.categories) setCategoryLabels({ ...DEFAULT_CATEGORY_LABELS, ...fieldsData.categories });
         }
       } catch {}
+      finally { setFieldsLoading(false); }
     })();
   }, []);
+
+  // 필드 토글
+  const toggleField = (fieldKey: string) => {
+    setSelectedFields(prev =>
+      prev.includes(fieldKey) ? prev.filter(k => k !== fieldKey) : [...prev, fieldKey]
+    );
+  };
 
   // 메시지 바이트 계산
   const getByteLength = (str: string) => {
@@ -198,7 +239,7 @@ export default function AutoSendFormModal({ campaign, onClose, onSuccess }: Auto
       : `무료수신거부 ${formatRejectNumber(optOutNumber)}`;
   };
 
-  // AI 문구 생성
+  // AI 문구 생성 — selectedFields 기반 개인화 연동
   const generateAiMessage = async () => {
     if (!aiHelperPrompt.trim()) {
       setToast({ show: true, type: 'error', message: '어떤 메시지를 보낼지 입력해주세요.' });
@@ -211,6 +252,8 @@ export default function AutoSendFormModal({ campaign, onClose, onSuccess }: Auto
         prompt: aiHelperPrompt,
         channel: messageType,
         isAd: isAd,
+        usePersonalization: selectedFields.length > 0,
+        personalFields: selectedFields,
       });
       setAiHelperResults(res.data.variants || []);
       setAiHelperRecommendation(res.data.recommendation || '');
@@ -256,10 +299,11 @@ export default function AutoSendFormModal({ campaign, onClose, onSuccess }: Auto
     setError('');
 
     if (!campaignName.trim()) { setError('자동발송 이름을 입력해주세요.'); setStep(1); return; }
-    if (!messageContent.trim()) { setError('메시지 내용을 입력해주세요.'); setStep(3); return; }
-    if (!callbackNumber) { setError('발신번호를 선택해주세요.'); setStep(3); return; }
-    if (messageType === 'MMS' && mmsUploadedImages.length === 0) { setError('MMS 이미지를 첨부해주세요.'); setStep(3); return; }
-    if ((messageType === 'LMS' || messageType === 'MMS') && !messageSubject.trim()) { setError('LMS/MMS는 제목을 입력해주세요.'); setStep(3); return; }
+    if (selectedFields.length === 0) { setError('활용할 고객 필드를 1개 이상 선택해주세요.'); setStep(2); return; }
+    if (!messageContent.trim()) { setError('메시지 내용을 입력해주세요.'); setStep(4); return; }
+    if (!callbackNumber) { setError('발신번호를 선택해주세요.'); setStep(4); return; }
+    if (messageType === 'MMS' && mmsUploadedImages.length === 0) { setError('MMS 이미지를 첨부해주세요.'); setStep(4); return; }
+    if ((messageType === 'LMS' || messageType === 'MMS') && !messageSubject.trim()) { setError('LMS/MMS는 제목을 입력해주세요.'); setStep(4); return; }
 
     setSaving(true);
     try {
@@ -275,6 +319,7 @@ export default function AutoSendFormModal({ campaign, onClose, onSuccess }: Auto
         message_subject: messageType !== 'SMS' ? messageSubject.trim() || null : null,
         callback_number: callbackNumber,
         is_ad: isAd,
+        personal_fields: selectedFields,
       };
 
       const url = isEdit ? `/api/auto-campaigns/${campaign.id}` : '/api/auto-campaigns';
@@ -301,6 +346,19 @@ export default function AutoSendFormModal({ campaign, onClose, onSuccess }: Auto
     } finally {
       setSaving(false);
     }
+  };
+
+  // 단계 유효성 검사
+  const canProceed = () => {
+    if (step === 1 && !campaignName.trim()) {
+      setError('자동발송 이름을 입력해주세요.');
+      return false;
+    }
+    if (step === 2 && selectedFields.length === 0) {
+      setError('활용할 고객 필드를 1개 이상 선택해주세요.');
+      return false;
+    }
+    return true;
   };
 
   return (
@@ -335,7 +393,7 @@ export default function AutoSendFormModal({ campaign, onClose, onSuccess }: Auto
               <h2 className="text-lg font-bold text-gray-800">
                 {isEdit ? '자동발송 수정' : '새 자동발송'}
               </h2>
-              <p className="text-xs text-gray-400 mt-0.5">단계 {step}/4</p>
+              <p className="text-xs text-gray-400 mt-0.5">단계 {step}/{TOTAL_STEPS}</p>
             </div>
             <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition p-1 rounded-lg hover:bg-gray-100">
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
@@ -352,7 +410,7 @@ export default function AutoSendFormModal({ campaign, onClose, onSuccess }: Auto
               </div>
             )}
 
-            {/* Step 1: 기본 정보 */}
+            {/* ========== Step 1: 기본 정보 ========== */}
             {step === 1 && (
               <div className="space-y-4" style={{ animation: 'slideUp 0.3s ease-out' }}>
                 <div>
@@ -379,8 +437,94 @@ export default function AutoSendFormModal({ campaign, onClose, onSuccess }: Auto
               </div>
             )}
 
-            {/* Step 2: 스케줄 */}
+            {/* ========== Step 2: 활용 필드 선택 (AiCustomSendFlow 패턴) ========== */}
             {step === 2 && (
+              <div style={{ animation: 'slideUp 0.3s ease-out' }}>
+                <div className="mb-5">
+                  <h4 className="text-base font-bold text-gray-800 mb-1">활용할 고객 정보를 선택하세요</h4>
+                  <p className="text-sm text-gray-500">선택한 필드를 AI 문안생성과 변수 치환에 활용합니다.</p>
+                </div>
+
+                {fieldsLoading ? (
+                  <div className="flex items-center justify-center py-12">
+                    <svg className="w-6 h-6 text-violet-500 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    <span className="ml-2 text-sm text-gray-500">필드 로딩 중...</span>
+                  </div>
+                ) : Object.keys(groupedFields).length === 0 ? (
+                  <div className="text-center py-12 text-gray-400">
+                    <p>고객 데이터에 사용 가능한 필드가 없습니다.</p>
+                    <p className="text-xs mt-1">고객 데이터를 먼저 업로드해주세요.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {Object.entries(groupedFields).map(([category, fields]) => (
+                      <div key={category}>
+                        <div className="flex items-center gap-1.5 mb-2">
+                          <span className="text-xs font-semibold text-gray-500 tracking-wide">{categoryLabels[category] || category}</span>
+                        </div>
+                        <div className="grid grid-cols-3 gap-2">
+                          {fields.map((field) => {
+                            const isSelected = selectedFields.includes(field.field_key);
+                            return (
+                              <button
+                                key={field.field_key}
+                                onClick={() => toggleField(field.field_key)}
+                                className={`px-3 py-2.5 rounded-lg border text-sm text-left transition-all ${
+                                  isSelected
+                                    ? 'border-violet-400 bg-violet-50 text-violet-700 ring-1 ring-violet-200'
+                                    : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300 hover:bg-gray-50'
+                                }`}
+                              >
+                                <div className="flex items-center gap-2">
+                                  <div className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${
+                                    isSelected ? 'bg-violet-600 border-violet-600' : 'border-gray-300'
+                                  }`}>
+                                    {isSelected && (
+                                      <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" strokeWidth={3} stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                      </svg>
+                                    )}
+                                  </div>
+                                  <span className="truncate">{field.display_name}</span>
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* 선택된 필드 요약 */}
+                {selectedFields.length > 0 && (
+                  <div className="mt-4 p-3 bg-violet-50 rounded-lg border border-violet-100">
+                    <div className="text-xs text-violet-600 font-medium mb-1">선택된 필드 ({selectedFields.length}개)</div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {selectedFields.map(key => {
+                        const field = availableFields.find(f => f.field_key === key);
+                        return (
+                          <span key={key} className="inline-flex items-center gap-1 px-2 py-1 bg-white rounded-md text-xs text-violet-700 border border-violet-200">
+                            {field?.display_name || key}
+                            <button onClick={() => toggleField(key)} className="text-violet-400 hover:text-violet-600">
+                              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                              </svg>
+                            </button>
+                          </span>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ========== Step 3: 스케줄 ========== */}
+            {step === 3 && (
               <div className="space-y-4" style={{ animation: 'slideUp 0.3s ease-out' }}>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">반복 주기 *</label>
@@ -405,7 +549,6 @@ export default function AutoSendFormModal({ campaign, onClose, onSuccess }: Auto
                   </div>
                 </div>
 
-                {/* 매월: 발송일 */}
                 {scheduleType === 'monthly' && (
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">발송일 *</label>
@@ -424,7 +567,6 @@ export default function AutoSendFormModal({ campaign, onClose, onSuccess }: Auto
                   </div>
                 )}
 
-                {/* 매주: 요일 */}
                 {scheduleType === 'weekly' && (
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">요일 *</label>
@@ -446,7 +588,6 @@ export default function AutoSendFormModal({ campaign, onClose, onSuccess }: Auto
                   </div>
                 )}
 
-                {/* 발송 시각 */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">발송 시각 *</label>
                   <select
@@ -462,8 +603,8 @@ export default function AutoSendFormModal({ campaign, onClose, onSuccess }: Auto
               </div>
             )}
 
-            {/* Step 3: 메시지 */}
-            {step === 3 && (
+            {/* ========== Step 4: 메시지 ========== */}
+            {step === 4 && (
               <div className="space-y-4" style={{ animation: 'slideUp 0.3s ease-out' }}>
                 {/* 광고 여부 */}
                 <div className="flex items-center gap-2">
@@ -477,7 +618,7 @@ export default function AutoSendFormModal({ campaign, onClose, onSuccess }: Auto
                   <label htmlFor="isAd" className="text-sm text-gray-700">광고 메시지 (080 수신거부 포함)</label>
                 </div>
 
-                {/* SMS/LMS/MMS 탭 토글 — Dashboard 직접발송 패턴 */}
+                {/* SMS/LMS/MMS 탭 토글 */}
                 <div className="flex bg-gray-50 rounded-lg p-0.5">
                   <button
                     onClick={() => { setMessageType('SMS'); setMmsUploadedImages([]); }}
@@ -602,7 +743,7 @@ export default function AutoSendFormModal({ campaign, onClose, onSuccess }: Auto
                     )}
                   </div>
 
-                  {/* ★ 자동입력 드롭다운 — fieldsMeta 기반 동적 (하드코딩 제거, TargetSendModal 패턴) */}
+                  {/* ★ 자동입력 드롭다운 — 2단계에서 선택한 필드만 표시 */}
                   <div className="px-3 py-1.5 border-t bg-gray-50">
                     <div className="flex items-center gap-3">
                       <span className="text-sm font-bold text-gray-700 whitespace-nowrap">자동입력</span>
@@ -628,25 +769,17 @@ export default function AutoSendFormModal({ campaign, onClose, onSuccess }: Auto
                     <div className="grid grid-cols-2 gap-2">
                       <button
                         onClick={() => {
-                          if (isAiMessagingLocked) {
-                            setToast({ show: true, type: 'warning', message: 'AI 문구 추천은 프로 요금제 이상에서 사용 가능합니다.' });
-                            return;
-                          }
                           setShowAiHelper(true);
                           setAiHelperPrompt('');
                           setAiHelperResults([]);
                           setAiHelperRecommendation('');
                         }}
-                        className={`py-2.5 bg-gradient-to-r from-violet-500 to-blue-500 hover:from-violet-600 hover:to-blue-600 text-white rounded-lg text-sm font-medium transition-colors ${isAiMessagingLocked ? 'opacity-60' : ''}`}
+                        className="py-2.5 bg-gradient-to-r from-violet-500 to-blue-500 hover:from-violet-600 hover:to-blue-600 text-white rounded-lg text-sm font-medium transition-colors"
                       >
-                        {isAiMessagingLocked ? '🔒' : '✨'} AI 문구추천
+                        ✨ AI 문구추천
                       </button>
                       <button
                         onClick={() => {
-                          if (isSpamFilterLocked) {
-                            setToast({ show: true, type: 'warning', message: '스팸필터 테스트는 프로 요금제 이상에서 사용 가능합니다.' });
-                            return;
-                          }
                           if (!messageContent.trim()) {
                             setToast({ show: true, type: 'error', message: '메시지를 먼저 입력해주세요.' });
                             return;
@@ -657,9 +790,9 @@ export default function AutoSendFormModal({ campaign, onClose, onSuccess }: Auto
                           }
                           setShowSpamFilter(true);
                         }}
-                        className={`py-2.5 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg text-sm font-medium transition-colors ${isSpamFilterLocked ? 'opacity-60' : ''}`}
+                        className="py-2.5 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg text-sm font-medium transition-colors"
                       >
-                        {isSpamFilterLocked ? '🔒' : '🛡️'} 스팸필터테스트
+                        🛡️ 스팸필터테스트
                       </button>
                     </div>
                   </div>
@@ -667,14 +800,18 @@ export default function AutoSendFormModal({ campaign, onClose, onSuccess }: Auto
               </div>
             )}
 
-            {/* Step 4: 확인 */}
-            {step === 4 && (
+            {/* ========== Step 5: 확인 ========== */}
+            {step === 5 && (
               <div className="space-y-3" style={{ animation: 'slideUp 0.3s ease-out' }}>
                 <h3 className="text-sm font-semibold text-gray-700 mb-2">자동발송 설정 확인</h3>
                 <div className="bg-gray-50 rounded-lg p-4 space-y-2 text-sm">
                   <div className="flex justify-between">
                     <span className="text-gray-500">이름</span>
                     <span className="text-gray-800 font-medium">{campaignName}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">활용 필드</span>
+                    <span className="text-violet-700 font-medium">{selectedFields.length}개</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-500">스케줄</span>
@@ -699,6 +836,20 @@ export default function AutoSendFormModal({ campaign, onClose, onSuccess }: Auto
                     </div>
                   )}
                 </div>
+
+                {/* 선택된 필드 태그 */}
+                <div className="flex flex-wrap gap-1.5">
+                  {selectedFields.map(key => {
+                    const field = availableFields.find(f => f.field_key === key);
+                    return (
+                      <span key={key} className="px-2 py-1 bg-violet-50 border border-violet-200 rounded-md text-xs text-violet-700">
+                        {field?.display_name || key}
+                      </span>
+                    );
+                  })}
+                </div>
+
+                {/* 메시지 미리보기 */}
                 <div className="bg-blue-50 rounded-lg p-3">
                   <p className="text-xs text-blue-700 font-medium mb-1">메시지 미리보기</p>
                   {isAd && <p className="text-sm text-orange-600 font-medium">(광고)</p>}
@@ -737,14 +888,11 @@ export default function AutoSendFormModal({ campaign, onClose, onSuccess }: Auto
               >
                 취소
               </button>
-              {step < 4 ? (
+              {step < TOTAL_STEPS ? (
                 <button
                   onClick={() => {
                     setError('');
-                    if (step === 1 && !campaignName.trim()) {
-                      setError('자동발송 이름을 입력해주세요.');
-                      return;
-                    }
+                    if (!canProceed()) return;
                     setStep(step + 1);
                   }}
                   className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg text-sm font-medium transition"
