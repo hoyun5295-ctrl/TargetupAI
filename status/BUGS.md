@@ -3,7 +3,7 @@
 > **목적:** 버그의 발견→분석→수정→교차검증→완료를 체계적으로 관리하여 재발을 방지한다.  
 > **원칙:** (1) 추측성 땜질 금지 (2) 근본 원인 3줄 이내 특정 (3) 교차검증 통과 전까지 Closed 금지 (4) 재발 패턴 기록  
 > **SoT(진실의 원천):** STATUS.md + 이 문서. 채팅에서 떠도는 "수정 완료"는 교차검증 전까지 "임시"다.
-> **현황:** **2026-03-12 D70 — 직원QA 버그 일괄수정: 18건 수정완료(3차 배포대기) + 1건 미해결(B-D70-18).** D69 자동발송 모달 🟡검증대기 | D67 — 080 콜백 🔵조사중 + store_code 격리 🟡배포대기. D66 17차 15건 🟡검증대기 | 8차~15차 기존건 유지.
+> **현황:** **2026-03-13 D71 문서정합성 점검 — B17 시리즈 9건 🟡, B18-01 ✅정책해결.** 🔵Open 1건: B17-05(스팸테스트 간헐적 공백, 보류—다음 재현 시 로그 확인). D70 18건 수정완료(3차 배포완료). D69 자동발송 🟡검증대기 | D66 17차 🟡검증대기 | 8차~15차 기존건 유지.
 > **⚠️ 2026-02-26 코드 실물 검증:** GPT "미수정" 지적 5건 중 GP-01/03/05는 이미 코드에 반영됨 확인. GP-04는 풀 레벨로 보강. 문서의 "❌ 미수정" 표기가 실제 코드보다 뒤떨어져 있었음.
 
 ---
@@ -82,13 +82,13 @@
 | B-D70-13 | 🟡 | MMS 발송 후 이미지/수신자 미초기화 (Slide 6) | 전송 후 setMmsUploadedImages([]) 누락 | `Dashboard.tsx` — 직접/타겟 양쪽 초기화 추가 | ✅ 배포완료 |
 | B-D70-14 | 🟡 | MMS 이미지 있을 때 비용절감 추천 | 이미지 첨부 MMS인데 SMS 전환 안내 뜸 | `Dashboard.tsx`, `TargetSendModal.tsx` — mmsUploadedImages.length === 0 조건 추가 | ✅ 배포완료 |
 
-### ✅ 수정 완료 (3차 — 배포 대기)
+### ✅ 수정 완료 (3차 배포 완료)
 
 | ID | 심각도 | 내용 | 원인 | 수정 파일 | 상태 |
 |----|--------|------|------|----------|------|
-| B-D70-15 | 🟠 | 매장 필드(registered_store 등) 고객DB에 미표시 (Slide 4) | customers.ts SELECT에 registered_store, recent_purchase_store, store_phone, registration_type 누락 + CustomerDBModal에 해당 필드 미정의 | `customers.ts` — SELECT에 4개 컬럼 추가, `CustomerDBModal.tsx` — baseDetailFields에 4개 필드 추가 | 🟡 수정완료-검증대기 |
-| B-D70-16 | 🟠 | AI맞춤한줄 개인화 불일치 (B8-03) | buildVarCatalogFromFieldMap()이 custom_fields 스킵 → 커스텀 필드 라벨(%선호스타일% 등)이 fieldMappings에 없음 → replaceVariables 안전망 regex가 빈값 제거 | `messageUtils.ts` — enrichWithCustomFields() 신규 헬퍼, `campaigns.ts` 4경로 + `auto-campaign-worker.ts` — enrichWithCustomFields 호출 + custom_fields SELECT 추가 | 🟡 수정완료-검증대기 |
-| B-D70-17 | 🟡 | 필터 UI 보유필드 미표시 (D39) | region, store_name, purchase_count가 DB/customer-filter에서 사용되지만 FIELD_MAP에 미정의 → enabled-fields API가 감지 불가 | `standard-field-map.ts` — 3개 필드 추가 (region, purchase_count, store_name) | 🟡 수정완료-검증대기 |
+| B-D70-15 | 🟠 | 매장 필드(registered_store 등) 고객DB에 미표시 (Slide 4) | customers.ts SELECT에 registered_store, recent_purchase_store, store_phone, registration_type 누락 + CustomerDBModal에 해당 필드 미정의 | `customers.ts` — SELECT에 4개 컬럼 추가, `CustomerDBModal.tsx` — baseDetailFields에 4개 필드 추가 | ✅ 배포완료 |
+| B-D70-16 | 🟠 | AI맞춤한줄 개인화 불일치 (B8-03) | buildVarCatalogFromFieldMap()이 custom_fields 스킵 → 커스텀 필드 라벨(%선호스타일% 등)이 fieldMappings에 없음 → replaceVariables 안전망 regex가 빈값 제거 | `messageUtils.ts` — enrichWithCustomFields() 신규 헬퍼, `campaigns.ts` 4경로 + `auto-campaign-worker.ts` — enrichWithCustomFields 호출 + custom_fields SELECT 추가 | ✅ 배포완료 |
+| B-D70-17 | 🟡 | 필터 UI 보유필드 미표시 (D39) | region, store_name, purchase_count가 DB/customer-filter에서 사용되지만 FIELD_MAP에 미정의 → enabled-fields API가 감지 불가 | `standard-field-map.ts` — 3개 필드 추가 (region, purchase_count, store_name) | ✅ 배포완료 |
 
 ### 미해결 (다음 세션)
 
@@ -1584,11 +1584,12 @@
 | 항목 | 내용 |
 |------|------|
 | **심각도** | 🔴🔴 Blocker — 수신거부 미제외 발송 = 법적 리스크 |
-| **상태** | 🔵 Open |
+| **상태** | 🟡 수정완료-검증대기 (D70 — campaigns.ts 3곳에 `★ B17-01 수정` user_id 기준 NOT EXISTS 적용 + direct-send 수신거부 필터 user_id 기준 통일. 메인코드 반영 완료) |
 | **출처** | PPT 슬라이드6 |
 | **관련** | B13-07, B14-01 재발 |
 | **증상** | 수신거부 제외 추출은 정상이지만, "전송하기" 실행 시 전체 리스트가 발송됨 |
-| **근본 원인** | 분석 필요 |
+| **근본 원인** | :id/send, /direct-send, /test-send 3경로에서 수신거부 필터가 누락 또는 company_id 기준이어서 브랜드 격리 실패 |
+| **수정** | campaigns.ts L446, L616, L1849 — user_id 기준 NOT EXISTS + direct-send L1372 DISTINCT phone 필터. 5경로 전수 확인 완료 |
 
 ---
 
@@ -1597,11 +1598,11 @@
 | 항목 | 내용 |
 |------|------|
 | **심각도** | 🔴🔴 Blocker — 취소했는데 발송 = 고객 피해 |
-| **상태** | 🔵 Open |
+| **상태** | 🟡 수정완료-검증대기 (D70 — manage-scheduled.ts가 cancelCampaign CT 사용. MySQL DELETE+UPDATE(9999)+campaign_runs cancelled+선불환불 전부 구현. 메인코드 반영 완료. 당시 배포빌드 누락(B18-03)이 원인이었을 가능성 높음) |
 | **출처** | PPT 슬라이드8 |
 | **관련** | B12-01 재발 |
 | **증상** | 캘린더/예약대기/발송결과 3곳 모두 취소 안 됨. 중간관리자에서 취소 성공해도 예약시간에 실제 발송됨 |
-| **근본 원인** | 분석 필요 — B16-02에서 campaign-lifecycle.ts로 수정했으나 배포 누락 또는 manage-scheduled 미적용 가능 |
+| **근본 원인** | campaign-lifecycle.ts cancelCampaign CT에 이미 구현되어 있었으나 B18-03(tp-deploy-full 백엔드 빌드 누락)으로 서버 미반영 |
 
 ---
 
@@ -1610,11 +1611,11 @@
 | 항목 | 내용 |
 |------|------|
 | **심각도** | 🔴 Critical — AI 경로 전체 발송 불가 |
-| **상태** | 🔵 Open |
+| **상태** | 🟡 수정완료-검증대기 — :id/send L496~L912 전수 확인 완료, 코드 결함 없음. B18-03(배포빌드 누락) 해결(2026-03-12) 후 재배포 상태. 실동작 재확인 필요 |
 | **출처** | 체크리스트 B8-04(X), B8-08(X), Phase2(미검증) |
-| **관련** | B8-04, B8-08 |
+| **관련** | B8-04, B8-08, B18-03 |
 | **증상** | AI한줄로 즉시/예약 발송 → "서버 오류가 발생했습니다" 차단. AI맞춤한줄도 동일. 직접발송/직접타겟은 정상 |
-| **근본 원인** | 분석 필요 — AI 발송 경로(POST /:id/send) 공통 에러. 서버 로그 확인 필요 |
+| **근본 원인** | B18-03(tp-deploy-full 백엔드 빌드 누락)으로 서버 dist/가 이전 코드 유지 → 수정된 코드 미반영 상태에서 에러. 코드 자체 결함 없음 (2중 try/catch, 환불 보장, 에러핸들링 정상) |
 
 ---
 
@@ -1623,11 +1624,12 @@
 | 항목 | 내용 |
 |------|------|
 | **심각도** | 🔴 Critical — 고객이 의도하지 않은 문안 수신 |
-| **상태** | 🔵 Open |
+| **상태** | 🟡 수정완료-검증대기 (D70 — Dashboard.tsx `★ B17-04` 주석 3곳에 aiResult 초기화 로직 추가. 발송성공 후 + 새 AI 추천 시작 시 이전 결과 완전 클리어. 메인코드 반영 완료) |
 | **출처** | 체크리스트 B8-12(X) |
 | **관련** | B8-12 재발 |
 | **증상** | 첫 AI한줄로 발송은 선택 문안 정상 수신. 이어서 두번째(맞춤한줄) 진행 시 첫번째 문안 그대로 중복 수신. 새로 추천받은 문안 선택 적용 안 됨 |
-| **근본 원인** | 분석 필요 — AI 캠페인 생성 시 message/selected_variant state 초기화 문제 가능 |
+| **근본 원인** | Dashboard.tsx에서 AI 발송 완료 후 aiResult state를 초기화하지 않아 다음 발송 시 이전 문안이 잔류 |
+| **수정** | Dashboard.tsx L1425, L1437, L1543 — 발송 성공 후 + 새 AI 추천 시작 시 aiResult 및 관련 state 완전 초기화 |
 
 ---
 
@@ -1636,11 +1638,12 @@
 | 항목 | 내용 |
 |------|------|
 | **심각도** | 🟠 Major |
-| **상태** | 🔵 Open |
+| **상태** | 🔵 Open (보류) — 간헐적 재현으로 현시점 원인 특정 불가. 다음 재현 시 서버 로그 확인 예정 |
 | **출처** | PPT 슬라이드2, 체크리스트 B8-03(▲) |
 | **관련** | B8-03 |
 | **증상** | 스팸테스트 시 개인화 변수가 공백으로 발송됨 (간헐적). 10:42 공백 → 11:24 정상 → 15:37 다시 공백 |
-| **근본 원인** | 분석 필요 — 비결정적 = 비동기/타이밍 또는 sampleCustomer 로딩 타이밍 문제 가능 |
+| **근본 원인** | 미확정 — 비결정적 재현. 다음 발생 시 PM2 로그 + 프론트 네트워크 탭에서 요청/응답 확인하여 원인 특정 |
+| **대응 방침** | 다음 재현 시 로그 확인으로 추적 (Harold님 지시) |
 
 ---
 
@@ -1649,11 +1652,12 @@
 | 항목 | 내용 |
 |------|------|
 | **심각도** | 🟠 Major — 타겟팅 핵심 기능 |
-| **상태** | 🔵 Open |
+| **상태** | 🟡 수정완료-검증대기 (D70 — DirectTargetFilterModal.tsx L314 `★ B17-06` 숫자필드 별도 처리 로직 + dbColMap 매핑 + between/gte/lte 연산자 지원. 메인코드 반영 완료) |
 | **출처** | PPT 슬라이드3 |
 | **관련** | B13-05 재발 |
 | **증상** | 누적금액 0~2000원 설정 → 해당 6명만 나와야 하는데 전체 고객 추출. 포인트는 "이상"만 있고 "이하" 필터 없음 |
-| **근본 원인** | 분석 필요 — CT-01 customer-filter 배포 여부 또는 DirectTargetFilterModal dbColMap 매핑 확인 필요 |
+| **근본 원인** | 숫자필드(_min/_max 보조키)가 for문에서 누락 + dbColMap 미매핑 |
+| **수정** | DirectTargetFilterModal.tsx L314~337 — 숫자필드 별도 루프 + dbColMap(last_purchase_amount→recent_purchase_amount) + between/gte/lte 분기 |
 
 ---
 
@@ -1662,11 +1666,11 @@
 | 항목 | 내용 |
 |------|------|
 | **심각도** | 🟠 Major — 발송 차단 |
-| **상태** | 🔵 Open |
+| **상태** | 🟡 수정완료-검증대기 (D70 — 코드 로직 확인: LMS유지→lmsKeepAccepted=true→재클릭 시 진행, SMS전환→directMsgType='SMS'→재클릭 시 진행. 설계상 2클릭 필요. B18-03 배포빌드 누락이 원인이었을 가능성. 메인코드 반영 완료) |
 | **출처** | PPT 슬라이드7 |
 | **관련** | B16-05, B13-08 |
 | **증상** | MMS 전송 시 90byte 미만이면 비용절감 안내 모달 정상 표시. LMS유지/SMS전환 둘 다 눌러도 화면 그대로 + 발송 진행 안 됨 |
-| **근본 원인** | 분석 필요 — 비용절감 모달 콜백에서 state 업데이트 후 발송 플로우 진행 로직 확인 필요 |
+| **근본 원인** | 코드 로직상으로는 정상 — LMS유지 시 lmsKeepAccepted=true 설정 후 모달 닫힘 → 재클릭 시 조건 통과하여 진행. B18-03(배포빌드 누락)으로 수정 코드가 서버 미반영되어 발생했을 가능성 |
 
 ---
 
@@ -1675,11 +1679,11 @@
 | 항목 | 내용 |
 |------|------|
 | **심각도** | 🟠 Major |
-| **상태** | 🔵 Open |
+| **상태** | 🟡 수정완료-검증대기 (D70 — Dashboard.tsx L2635 callbackNumbers props 전달 완료, 로딩 로직 4곳(L980,L1072,L1938,L2201) 존재. B18-03 배포빌드 누락이 원인이었을 가능성. 메인코드 반영 완료) |
 | **출처** | PPT 슬라이드5 |
 | **관련** | B16-07 |
 | **증상** | 개별회신번호 선택했지만 발송창에서 회신번호 리스트 불러오기 안 됨. 자동입력 변수 드롭다운에 "고객명"만 표시 |
-| **근본 원인** | 분석 필요 — B16-07에서 구현했으나 배포 미반영 또는 props 전달 누락 가능 |
+| **근본 원인** | B16-07에서 구현 완료. B18-03(배포빌드 누락)으로 서버 미반영이 원인 |
 
 ---
 
@@ -1800,12 +1804,12 @@
 | 항목 | 내용 |
 |------|------|
 | **심각도** | 🔴 Critical |
-| **상태** | 🔵 Open (조사 중) |
+| **상태** | ✅ Closed (2026-03-13 정책 해결) |
 | **관련** | B17-11 (080 수신거부 자동연동 미동작) |
 | **증상** | 직원이 sh_cpb/sh_sh 계정의 080번호로 실제 전화 → 서버에 콜백 미수신. Nginx access.log 080callback 0건. PM2 logs에도 관련 로그 0건. |
 | **비교** | Harold님 계정(hoyun)은 080 수신거부 정상 작동 (3,174건 존재). 서버 코드(unsubscribe-helper.ts findUserBy080Number)는 users→companies fallback 정상 구현 |
-| **원인 추정** | ① 나래인터넷에서 해당 080번호의 콜백 URL이 미등록 또는 다른 URL로 설정 ② 080번호별 콜백 설정이 별도 필요한 구조일 수 있음 |
-| **조사 필요** | ① DB에서 사용자별 080번호 확인 ② 나래인터넷 관리자 페이지에서 콜백 URL 등록 현황 확인 (Harold님 협조) ③ 서버에서 수동 curl 테스트로 코드 동작 확인 ④ Nginx 실시간 tail -f 로 080 전화 시 요청 도달 여부 확인 |
+| **근본 원인** | 나래인터넷에서 080번호별로 콜백 URL을 개별 등록해야 하는 구조. 코드 문제 아님 |
+| **해결** | 정책적 해결 — 자동동기화 필요한 업체는 사전에 나래인터넷 콜백 URL 등록 요청 → 슈퍼관리자에서 설정하는 프로세스로 확정 (Harold님 결정) |
 
 ---
 

@@ -147,7 +147,7 @@
 
 ---
 
-### 🔧 D70 — 직원 QA 버그 일괄수정 (2026-03-12) — 🔶 진행 중 (3차 배포 대기, 잔여 1건 B-D70-18)
+### 🔧 D70 — 직원 QA 버그 일괄수정 (2026-03-12) — 🔶 진행 중 (3차 배포 완료, 잔여 1건 B-D70-18)
 
 > **배경:** 직원 2명이 실동작 검증 후 PPT(8슬라이드) + 체크리스트(30항목) 버그 리포트 제출. 서버 검증 후 순차 수정.
 > **원칙:** 직원 리포트 그대로 믿지 않고, 서버 실데이터/코드로 교차검증 후 수정.
@@ -171,7 +171,7 @@
 14. **MMS 이미지 있을 때 비용절감 추천 스킵:** MMS 이미지가 업로드된 상태에서 SMS 전환 안내 모달을 띄우지 않음 (`Dashboard.tsx`, `TargetSendModal.tsx`)
 15. **MMS 전송 후 이미지 리셋:** 직접발송/타겟발송 성공 후 `setMmsUploadedImages([])` 추가 — 이전 발송 이미지가 잔류하던 문제 해결 (`Dashboard.tsx`)
 
-#### ✅ 수정 완료 (3차 — 배포 대기)
+#### ✅ 수정 완료 (3차 배포 완료)
 16. **매장 필드 고객DB 미표시 (Slide 4 일부):** customers.ts SELECT에 registered_store, recent_purchase_store, store_phone, registration_type 컬럼 누락 → 추가. CustomerDBModal에 4개 필드 표시 추가 (`customers.ts`, `CustomerDBModal.tsx`)
 17. **AI맞춤한줄 개인화 불일치 (B8-03):** buildVarCatalogFromFieldMap()이 custom_fields를 스킵 → 커스텀 필드 라벨이 발송 시 fieldMappings에 없음 → 안전망이 제거. enrichWithCustomFields() 헬퍼 신설 + 5경로 전부 적용 (`messageUtils.ts`, `campaigns.ts` 4경로, `auto-campaign-worker.ts`)
 18. **필터 UI 보유필드 미표시 (D39):** region, store_name, purchase_count가 FIELD_MAP에 미정의 → enabled-fields 감지 불가. FIELD_MAP에 3개 필드 추가 (`standard-field-map.ts`)

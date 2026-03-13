@@ -593,15 +593,17 @@ async function processUploadInBackground(
             // 수신동의: 미제공 시 기본 true
             const val = record[field.fieldKey];
             rowValues.push(val !== null && val !== undefined ? val : true);
+          } else if (field.fieldKey === 'region') {
+            // region: 파생값(normalizeRegion 적용) 우선 사용
+            rowValues.push(derivedRegion ?? record[field.fieldKey] ?? null);
           } else {
             rowValues.push(record[field.fieldKey] ?? null);
           }
         }
 
-        // 파생 컬럼
+        // 파생 컬럼 (region은 FIELD_MAP 순회에서 처리됨)
         rowValues.push(derivedBirthYear);
         rowValues.push(derivedBirthMonthDay);
-        rowValues.push(derivedRegion);
 
         // custom_fields JSONB 빌드
         const customObj: Record<string, any> = {};
@@ -623,8 +625,8 @@ async function processUploadInBackground(
 
         values.push(...rowValues);
 
-        // 플레이스홀더: 파라미터 23개 + 리터럴 3개 ('upload', NOW(), NOW())
-        const paramCount = rowValues.length; // 23
+        // 플레이스홀더: 파라미터 N개(동적) + 리터럴 3개 ('upload', NOW(), NOW())
+        const paramCount = rowValues.length;
         const paramList = Array.from({ length: paramCount }, (_, j) => `$${paramIndex + j}`).join(', ');
         placeholders.push(`(${paramList}, 'upload', NOW(), NOW())`);
         paramIndex += paramCount;
@@ -637,7 +639,7 @@ async function processUploadInBackground(
           const columnNames = columnFieldDefs.map(f => f.columnName);
           const insertCols = [
             'company_id', ...columnNames,
-            'birth_year', 'birth_month_day', 'region', 'custom_fields',
+            'birth_year', 'birth_month_day', 'custom_fields',
             'uploaded_by', 'source', 'created_at', 'updated_at'
           ].join(', ');
 
@@ -649,7 +651,6 @@ async function processUploadInBackground(
               .map(c => `${c} = COALESCE(EXCLUDED.${c}, customers.${c})`),
             'birth_year = COALESCE(EXCLUDED.birth_year, customers.birth_year)',
             'birth_month_day = COALESCE(EXCLUDED.birth_month_day, customers.birth_month_day)',
-            'region = COALESCE(EXCLUDED.region, customers.region)',
             `custom_fields = CASE WHEN EXCLUDED.custom_fields IS NOT NULL THEN COALESCE(customers.custom_fields, '{}'::jsonb) || EXCLUDED.custom_fields ELSE customers.custom_fields END`,
             'uploaded_by = COALESCE(EXCLUDED.uploaded_by, customers.uploaded_by)',
             `source = CASE WHEN customers.source = 'sync' THEN 'sync' ELSE 'upload' END`,
