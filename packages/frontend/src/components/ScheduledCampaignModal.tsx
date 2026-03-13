@@ -79,6 +79,7 @@ export default function ScheduledCampaignModal({
                   <div className="font-semibold text-gray-800 text-sm truncate">{c.campaign_name}</div>
                   <div className="text-xs text-gray-500 mt-1">
                     📱 {c.message_type} · 👥 {c.target_count?.toLocaleString()}명
+                    {c.status === 'draft' && <span className="ml-1 text-amber-600 font-medium">(미확정)</span>}
                   </div>
                   <div className="text-xs text-blue-600 mt-1">
                     ⏰ {c.scheduled_at ? new Date(c.scheduled_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-'}
@@ -118,32 +119,42 @@ export default function ScheduledCampaignModal({
                     <div className="flex gap-2">
                       <button
                         onClick={() => setCancelConfirm({ show: true, campaign: selectedScheduled })}
-                        disabled={isWithin15Min(selectedScheduled?.scheduled_at)}
+                        disabled={selectedScheduled?.status !== 'draft' && isWithin15Min(selectedScheduled?.scheduled_at)}
                         className={`px-3 py-1.5 rounded text-sm ${
-                          isWithin15Min(selectedScheduled?.scheduled_at)
+                          selectedScheduled?.status !== 'draft' && isWithin15Min(selectedScheduled?.scheduled_at)
                             ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
                             : 'bg-red-500 text-white hover:bg-red-600'
                         }`}
                       >예약취소</button>
-                      <button
-                        onClick={() => {
-                          const rawMsg = selectedScheduled?.message_template || selectedScheduled?.message_content || '';
-                          const strippedMsg = rawMsg.replace(/^\(광고\)\s*/g, '').replace(/\n무료거부\d+$/g, '').replace(/\n무료수신거부\s*[\d\-]+$/g, '').trim();
-                          setEditMessage(strippedMsg);
-                          setEditSubject(selectedScheduled?.message_subject || selectedScheduled?.subject || '');
-                          setMessageEditModal(true);
-                        }}
-                        disabled={isWithin15Min(selectedScheduled?.scheduled_at)}
-                        className={`px-3 py-1.5 rounded text-sm ${
-                          isWithin15Min(selectedScheduled?.scheduled_at)
-                            ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                            : 'bg-amber-500 text-white hover:bg-amber-600'
-                        }`}
-                      >문안수정</button>
+                      {/* 문안수정: scheduled만 (draft는 MySQL 큐 없으므로 불가) */}
+                      {selectedScheduled?.status === 'scheduled' && (
+                        <button
+                          onClick={() => {
+                            const rawMsg = selectedScheduled?.message_template || selectedScheduled?.message_content || '';
+                            const strippedMsg = rawMsg.replace(/^\(광고\)\s*/g, '').replace(/\n무료거부\d+$/g, '').replace(/\n무료수신거부\s*[\d\-]+$/g, '').trim();
+                            setEditMessage(strippedMsg);
+                            setEditSubject(selectedScheduled?.message_subject || selectedScheduled?.subject || '');
+                            setMessageEditModal(true);
+                          }}
+                          disabled={isWithin15Min(selectedScheduled?.scheduled_at)}
+                          className={`px-3 py-1.5 rounded text-sm ${
+                            isWithin15Min(selectedScheduled?.scheduled_at)
+                              ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                              : 'bg-amber-500 text-white hover:bg-amber-600'
+                          }`}
+                        >문안수정</button>
+                      )}
                     </div>
                   </div>
-                  {/* 예약 시간 수정 */}
-                  <div className="flex items-center gap-2">
+                  {/* draft 상태: 발송 미확정 안내 */}
+                  {selectedScheduled?.status === 'draft' && (
+                    <div className="mx-0 mt-2 bg-amber-50 border border-amber-200 rounded p-2 text-xs text-amber-700">
+                      ⚠️ 발송 미확정 — 발송 버튼을 누르기 전까지 실제 발송되지 않습니다.
+                    </div>
+                  )}
+                  {/* 예약 시간 수정: scheduled만 */}
+                  {selectedScheduled?.status === 'scheduled' && (
+                  <div className="flex items-center gap-2 mt-3">
                     <span className="text-sm text-gray-600">예약시간:</span>
                     <input
                       type="datetime-local"
@@ -159,7 +170,6 @@ export default function ScheduledCampaignModal({
                     <button
                       onClick={async () => {
                         if (!editScheduleTime) return;
-                        // 과거 시간 체크 (현재 + 15분 이후만 허용)
                         const newTime = new Date(editScheduleTime);
                         const minTime = new Date(Date.now() + 15 * 60 * 1000);
                         if (newTime < minTime) {
@@ -177,7 +187,7 @@ export default function ScheduledCampaignModal({
                         if (data.success) {
                           setToast({ show: true, type: 'success', message: '예약 시간이 변경되었습니다' });
                           setTimeout(() => setToast({ show: false, type: 'success', message: '' }), 3000);
-                          setScheduledCampaigns(prev => prev.map(c => 
+                          setScheduledCampaigns(prev => prev.map(c =>
                             c.id === selectedScheduled.id ? { ...c, scheduled_at: editScheduleTime } : c
                           ));
                           setSelectedScheduled({ ...selectedScheduled, scheduled_at: editScheduleTime });
@@ -197,6 +207,7 @@ export default function ScheduledCampaignModal({
                       <span className="text-xs text-amber-600 ml-2">⚠️ 15분 이내 변경 불가</span>
                     )}
                   </div>
+                  )}
                 </div>
               
               {/* 수신자 검색 */}
@@ -379,13 +390,20 @@ export default function ScheduledCampaignModal({
             <button
               onClick={async () => {
                 const token = localStorage.getItem('token');
-                const res = await fetch(`/api/campaigns/${cancelConfirm.campaign.id}/cancel`, {
-                  method: 'POST',
-                  headers: { Authorization: `Bearer ${token}` }
-                });
+                const isDraft = cancelConfirm.campaign?.status === 'draft';
+                // draft: DELETE로 삭제 / scheduled: POST cancel로 취소
+                const res = isDraft
+                  ? await fetch(`/api/campaigns/${cancelConfirm.campaign.id}`, {
+                      method: 'DELETE',
+                      headers: { Authorization: `Bearer ${token}` }
+                    })
+                  : await fetch(`/api/campaigns/${cancelConfirm.campaign.id}/cancel`, {
+                      method: 'POST',
+                      headers: { Authorization: `Bearer ${token}` }
+                    });
                 const data = await res.json();
                 if (data.success) {
-                  setToast({ show: true, type: 'success', message: '예약이 취소되었습니다' });
+                  setToast({ show: true, type: 'success', message: isDraft ? '캠페인이 삭제되었습니다' : '예약이 취소되었습니다' });
                   setTimeout(() => setToast({ show: false, type: 'success', message: '' }), 3000);
                   setScheduledCampaigns(prev => prev.filter(c => c.id !== cancelConfirm.campaign.id));
                   setSelectedScheduled(null);

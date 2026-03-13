@@ -942,15 +942,20 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
     }
   };
 
-  // 예약 대기 캠페인 로드
+  // 예약 대기 캠페인 로드 — scheduled + draft(scheduled_at 있는) 캠페인 모두 포함
   const loadScheduledCampaigns = async () => {
     try {
       const token = localStorage.getItem('token');
-      const res = await fetch('/api/campaigns?status=scheduled', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await res.json();
-      setScheduledCampaigns(data.campaigns || []);
+      const [scheduledRes, draftRes] = await Promise.all([
+        fetch('/api/campaigns?status=scheduled', { headers: { Authorization: `Bearer ${token}` } }),
+        fetch('/api/campaigns?status=draft', { headers: { Authorization: `Bearer ${token}` } }),
+      ]);
+      const scheduledData = await scheduledRes.json();
+      const draftData = await draftRes.json();
+      // scheduled: 전부 포함 / draft: scheduled_at이 있는 것만 포함
+      const scheduled = scheduledData.campaigns || [];
+      const draftWithSchedule = (draftData.campaigns || []).filter((c: any) => c.scheduled_at);
+      setScheduledCampaigns([...scheduled, ...draftWithSchedule]);
     } catch (error) {
       console.error('예약 캠페인 로드 실패:', error);
     }
