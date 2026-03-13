@@ -1,7 +1,7 @@
 import { Request, Response, Router } from 'express';
 import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
-import { process080Callback, getUserUnsubscribes } from '../utils/unsubscribe-helper';
+import { process080Callback, getUserUnsubscribes, registerUnsubscribe } from '../utils/unsubscribe-helper';
 
 const router = Router();
 
@@ -156,18 +156,15 @@ router.post('/', async (req: Request, res: Response) => {
     }
     
     const { phone } = req.body;
+    const userType = req.user?.userType;
     const cleanPhone = phone.replace(/\D/g, '');
-    
+
     if (cleanPhone.length < 10) {
       return res.status(400).json({ error: '올바른 전화번호를 입력하세요.' });
     }
-    
-    await query(
-      `INSERT INTO unsubscribes (company_id, user_id, phone, source)
-       VALUES ($1, $2, $3, 'manual')
-       ON CONFLICT (user_id, phone) DO NOTHING`,
-      [companyId, userId, cleanPhone]
-    );
+
+    // CT-03: admin이면 고객 store_code 기준 브랜드 사용자에게 자동 배정
+    await registerUnsubscribe(companyId, userId, userType || 'company_user', cleanPhone, 'manual');
 
     // D43-4: 유료 플랜 업체면 customers.sms_opt_in = false 동시 업데이트
     await syncCustomerOptIn(companyId, cleanPhone, false);
@@ -197,22 +194,18 @@ router.post('/upload', async (req: Request, res: Response) => {
       return res.status(400).json({ error: '전화번호 목록이 필요합니다.' });
     }
     
+    const userType = req.user?.userType;
     let insertCount = 0;
     let skipCount = 0;
     const insertedPhones: string[] = [];
-    
+
     for (const phone of phones) {
       const cleanPhone = String(phone).replace(/\D/g, '');
       if (cleanPhone.length >= 10) {
-        const result = await query(
-          `INSERT INTO unsubscribes (company_id, user_id, phone, source)
-           VALUES ($1, $2, $3, 'upload')
-           ON CONFLICT (user_id, phone) DO NOTHING
-           RETURNING id`,
-          [companyId, userId, cleanPhone]
-        );
-        if (result.rows.length > 0) {
-          insertCount++;
+        // CT-03: admin이면 고객 store_code 기준 브랜드 사용자에게 자동 배정
+        const cnt = await registerUnsubscribe(companyId, userId, userType || 'company_user', cleanPhone, 'upload');
+        if (cnt > 0) {
+          insertCount += cnt;
           insertedPhones.push(cleanPhone);
         } else {
           skipCount++;

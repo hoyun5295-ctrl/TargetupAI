@@ -76,6 +76,58 @@ export async function syncCustomerOptIn(companyId: string, phones: string[], opt
 }
 
 /**
+ * 수신거부 등록 — 유일한 쓰기 진입점 (CT-03)
+ *
+ * - 브랜드 사용자 → 본인 user_id로 등록
+ * - 고객사관리자(admin) → 고객의 store_code 기준으로 올바른 브랜드 사용자에게 자동 배정
+ *   (한 고객이 CPB 소속이면 → 시세이도_CPB user_id로 등록)
+ *   매칭되는 브랜드 사용자가 없으면 등록 스킵 (admin user_id로 잘못 등록하지 않음)
+ *
+ * @param companyId  회사 ID
+ * @param userId     로그인한 사용자 ID
+ * @param userType   'company_admin' | 'company_user'
+ * @param phone      전화번호 (정규화된)
+ * @param source     등록 경로 ('manual', 'upload', 'db_upload' 등)
+ * @returns 실제 INSERT된 건수
+ */
+export async function registerUnsubscribe(
+  companyId: string,
+  userId: string,
+  userType: string,
+  phone: string,
+  source: string
+): Promise<number> {
+  let insertCount = 0;
+
+  if (userType === 'company_admin') {
+    // admin → 고객의 store_code 기준 브랜드 사용자 찾아서 등록
+    const result = await query(
+      `INSERT INTO unsubscribes (company_id, user_id, phone, source)
+       SELECT $1, u.id, $3, $4
+       FROM customers c
+       JOIN users u ON u.company_id = c.company_id
+         AND u.user_type = 'user'
+         AND c.store_code = ANY(u.store_codes)
+       WHERE c.company_id = $1 AND c.phone = $3
+       ON CONFLICT (user_id, phone) DO NOTHING`,
+      [companyId, userId, phone, source]
+    );
+    insertCount = result.rowCount || 0;
+  } else {
+    // 브랜드 사용자 → 본인 user_id로 등록
+    const result = await query(
+      `INSERT INTO unsubscribes (company_id, user_id, phone, source)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (user_id, phone) DO NOTHING`,
+      [companyId, userId, phone, source]
+    );
+    insertCount = result.rowCount || 0;
+  }
+
+  return insertCount;
+}
+
+/**
  * 특정 전화번호가 수신거부 상태인지 확인.
  * ★ B17-01: user_id 기준으로 통일
  *

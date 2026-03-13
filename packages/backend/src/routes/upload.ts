@@ -763,21 +763,43 @@ async function processUploadInBackground(
       }
     }
 
-    // ===== sms_opt_in=false 고객 → unsubscribes 자동 등록 =====
+    // ===== sms_opt_in=false 고객 → unsubscribes 자동 등록 (CT-03) =====
+    // admin이 업로드해도 고객의 store_code 기준 올바른 브랜드 사용자에게 배정
     if (companyId && userId) {
       try {
-        const unsubResult = await query(`
-          INSERT INTO unsubscribes (company_id, user_id, phone, source)
-          SELECT $1, $2, phone, 'db_upload'
-          FROM customers
-          WHERE company_id = $1 AND sms_opt_in = false AND is_active = true
-            AND NOT EXISTS (
-              SELECT 1 FROM unsubscribes u WHERE u.user_id = $2 AND u.phone = customers.phone
-            )
-          ON CONFLICT (user_id, phone) DO NOTHING
-        `, [companyId, userId]);
-        if (unsubResult.rowCount && unsubResult.rowCount > 0) {
-          console.log(`[업로드] 수신거부 자동등록: ${unsubResult.rowCount}건 (company: ${companyId})`);
+        const userTypeResult = await query('SELECT user_type FROM users WHERE id = $1', [userId]);
+        const uploaderType = userTypeResult.rows[0]?.user_type === 'admin' ? 'company_admin' : 'company_user';
+
+        if (uploaderType === 'company_admin') {
+          // admin → 각 고객의 store_code 기준 브랜드 사용자에게 자동 배정
+          const unsubResult = await query(`
+            INSERT INTO unsubscribes (company_id, user_id, phone, source)
+            SELECT c.company_id, u.id, c.phone, 'db_upload'
+            FROM customers c
+            JOIN users u ON u.company_id = c.company_id
+              AND u.user_type = 'user'
+              AND c.store_code = ANY(u.store_codes)
+            WHERE c.company_id = $1 AND c.sms_opt_in = false AND c.is_active = true
+            ON CONFLICT (user_id, phone) DO NOTHING
+          `, [companyId]);
+          if (unsubResult.rowCount && unsubResult.rowCount > 0) {
+            console.log(`[업로드] 수신거부 자동등록(admin→브랜드배정): ${unsubResult.rowCount}건 (company: ${companyId})`);
+          }
+        } else {
+          // 브랜드 사용자 → 본인 user_id로 등록
+          const unsubResult = await query(`
+            INSERT INTO unsubscribes (company_id, user_id, phone, source)
+            SELECT $1, $2, phone, 'db_upload'
+            FROM customers
+            WHERE company_id = $1 AND sms_opt_in = false AND is_active = true
+              AND NOT EXISTS (
+                SELECT 1 FROM unsubscribes u WHERE u.user_id = $2 AND u.phone = customers.phone
+              )
+            ON CONFLICT (user_id, phone) DO NOTHING
+          `, [companyId, userId]);
+          if (unsubResult.rowCount && unsubResult.rowCount > 0) {
+            console.log(`[업로드] 수신거부 자동등록: ${unsubResult.rowCount}건 (company: ${companyId})`);
+          }
         }
       } catch (unsubError) {
         console.error('[업로드] 수신거부 자동등록 실패:', unsubError);
