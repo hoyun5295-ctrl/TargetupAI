@@ -4,7 +4,7 @@
 // 하드코딩 금지. 환경변수/설정파일 기반.
 
 import { mysqlQuery } from '../config/database';
-import { CACHE_TTL } from '../config/defaults';
+import { CACHE_TTL, BATCH_SIZES } from '../config/defaults';
 import { isValidSmsTable } from './sms-table-validator';
 import { query } from '../config/database';
 
@@ -353,4 +353,72 @@ export async function kakaoCancelPending(requestUid: string): Promise<number> {
     [requestUid]
   ) as any[];
   return (rows as any).affectedRows || 0;
+}
+
+// ===== ★ D72: SMS/LMS/MMS bulk INSERT (성능 컨트롤타워) =====
+
+/**
+ * SMS 큐에 메시지를 bulk INSERT한다.
+ * 모든 발송 경로(AI캠페인, 직접발송, 자동발송)가 이 함수를 사용한다.
+ *
+ * @param tables       회사 발송 테이블 목록 (라운드로빈 분배)
+ * @param rows         발송 데이터 배열. 각 row:
+ *                     [dest_no, call_back, msg_contents, msg_type, title_str,
+ *                      sendTime, app_etc1, app_etc2, file_name1, file_name2, file_name3]
+ * @param useNow       true면 sendTime 무시하고 NOW() 사용 (즉시발송)
+ * @returns            성공 건수
+ */
+export async function bulkInsertSmsQueue(
+  tables: string[],
+  rows: any[][],
+  useNow: boolean = false,
+): Promise<number> {
+  if (rows.length === 0) return 0;
+
+  // 1단계: 테이블별 배치 분배 (라운드로빈)
+  const tableBatches: Record<string, any[][]> = {};
+  for (const t of tables) tableBatches[t] = [[]];
+
+  for (const row of rows) {
+    const table = getNextSmsTable(tables);
+    const currentBatch = tableBatches[table];
+    const lastBatch = currentBatch[currentBatch.length - 1];
+    if (lastBatch.length >= BATCH_SIZES.smsSend) {
+      currentBatch.push([]);
+    }
+    currentBatch[currentBatch.length - 1].push(row);
+  }
+
+  // 2단계: bulk INSERT 실행
+  let sentCount = 0;
+  for (const [table, batches] of Object.entries(tableBatches)) {
+    for (const batch of batches) {
+      if (batch.length === 0) continue;
+      try {
+        if (useNow) {
+          // 즉시발송: row[5](sendTime) 제외, NOW() SQL 직접 사용
+          const placeholders = batch.map(() => '(?, ?, ?, ?, ?, NOW(), 100, \'1\', ?, ?, ?, ?, ?)').join(', ');
+          const flatValues = batch.map(row => [row[0], row[1], row[2], row[3], row[4], row[6], row[7], row[8], row[9], row[10]]).flat();
+          await mysqlQuery(
+            `INSERT INTO ${table} (dest_no, call_back, msg_contents, msg_type, title_str, sendreq_time, status_code, rsv1, app_etc1, app_etc2, file_name1, file_name2, file_name3) VALUES ${placeholders}`,
+            flatValues
+          );
+        } else {
+          // 예약/분할: sendTime(row[5]) 파라미터 그대로 사용
+          const placeholders = batch.map(() => '(?, ?, ?, ?, ?, ?, 100, \'1\', ?, ?, ?, ?, ?)').join(', ');
+          const flatValues = batch.flat();
+          await mysqlQuery(
+            `INSERT INTO ${table} (dest_no, call_back, msg_contents, msg_type, title_str, sendreq_time, status_code, rsv1, app_etc1, app_etc2, file_name1, file_name2, file_name3) VALUES ${placeholders}`,
+            flatValues
+          );
+        }
+        sentCount += batch.length;
+      } catch (batchErr) {
+        console.error(`[sms-queue] bulk INSERT 실패 (${table}, ${batch.length}건):`, batchErr);
+        // 실패 batch는 미집계 → 호출부에서 환불 처리
+      }
+    }
+  }
+
+  return sentCount;
 }

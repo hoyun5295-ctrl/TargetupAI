@@ -14,12 +14,13 @@
  * 실패 정책: 스킵 + failed 기록 → next_run_at 다음 스케줄로 갱신 (중복 발송 방지)
  */
 
-import { query, mysqlQuery } from '../config/database';
+import { query } from '../config/database';
 import { buildFilterQueryCompat } from './customer-filter';
 import { replaceVariables, enrichWithCustomFields } from './messageUtils';
 import {
   toKoreaTimeStr,
   getCompanySmsTables, hasCompanyLineGroup, getNextSmsTable,
+  bulkInsertSmsQueue,
 } from './sms-queue';
 import { prepaidDeduct, prepaidRefund } from './prepaid';
 import { normalizePhone } from './normalize-phone';
@@ -230,31 +231,23 @@ async function executeAutoCampaign(ac: any): Promise<void> {
 
     let sentCount = 0;
 
+    // ★ D72 성능개선: sms-queue.ts 컨트롤타워 bulkInsertSmsQueue 사용
+    // 1단계: 메시지 치환 + 발송 데이터 준비 (메모리 연산)
+    const autoSmsRows: any[][] = [];
     for (const customer of customers) {
-      try {
-        const personalizedMessage = replaceVariables(ac.message_content || '', customer, fieldMappings);
-        const personalizedSubject = ac.message_subject || '';
-        const cleanPhone = normalizePhone(customer.phone);
-        const table = getNextSmsTable(companyTables);
+      const personalizedMessage = replaceVariables(ac.message_content || '', customer, fieldMappings);
+      const personalizedSubject = ac.message_subject || '';
+      const cleanPhone = normalizePhone(customer.phone);
 
-        await mysqlQuery(
-          `INSERT INTO ${table} (
-            dest_no, call_back, msg_contents, msg_type, title_str,
-            sendreq_time, status_code, rsv1, app_etc1, app_etc2,
-            file_name1, file_name2, file_name3
-          ) VALUES (?, ?, ?, ?, ?, ?, 100, '1', ?, ?, ?, ?, ?)`,
-          [
-            cleanPhone, ac.callback_number, personalizedMessage, msgTypeCode, personalizedSubject,
-            sendTime, campaignId, ac.company_id,
-            mmsImages[0] || '', mmsImages[1] || '', mmsImages[2] || '',
-          ]
-        );
-
-        sentCount++;
-      } catch (insertErr) {
-        console.error(`${logPrefix} MySQL INSERT 실패 (phone: ${customer.phone}):`, insertErr);
-      }
+      autoSmsRows.push([
+        cleanPhone, ac.callback_number, personalizedMessage, msgTypeCode,
+        personalizedSubject, sendTime, campaignId, ac.company_id,
+        mmsImages[0] || '', mmsImages[1] || '', mmsImages[2] || ''
+      ]);
     }
+
+    // 2단계: bulk INSERT — sms-queue.ts 컨트롤타워 사용 (즉시발송)
+    sentCount = await bulkInsertSmsQueue(companyTables, autoSmsRows, true);
 
     // ★ 부분 실패 시 실패분 환불
     const failCount = customers.length - sentCount;

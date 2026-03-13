@@ -19,7 +19,8 @@ import {
   invalidateLineGroupCache, getNextSmsTable,
   smsCountAll, smsAggAll, smsSelectAll, smsMinAll, smsExecAll,
   getCompanySmsTablesWithLogs,
-  insertKakaoQueue, kakaoAgg, kakaoCountPending, kakaoCancelPending
+  insertKakaoQueue, kakaoAgg, kakaoCountPending, kakaoCancelPending,
+  bulkInsertSmsQueue
 } from '../utils/sms-queue';
 import { prepaidDeduct, prepaidRefund } from '../utils/prepaid';
 import { cancelCampaign, syncCampaignResults } from '../utils/campaign-lifecycle';
@@ -774,60 +775,68 @@ if (sendChannel !== 'sms' && campaign.is_ad) {
   }
 }
 
-// ★ C1: per-customer try/catch로 부분 실패 추적 — 선별적 환불 보장
+// ★ D72 성능개선: 건건이 INSERT → sms-queue.ts 컨트롤타워 bulkInsertSmsQueue 사용
 let aiSentCount = 0;
 
+// 1단계: 메시지 치환 + 발송 데이터 준비 (메모리 연산)
+const aiSmsRows: any[][] = [];
+const aiKakaoQueue: any[] = [];
+
 for (const customer of filteredCustomers) {
+  // ★ D32: 공통 치환 함수 사용 (messageUtils.ts)
+  const personalizedMessage = replaceVariables(campaign.message_content || '', customer, fieldMappings);
+  // ★ D28: 제목은 고정값 그대로 사용 (머지 치환 완전 제거)
+  const personalizedSubject = campaign.subject || '';
+
+  // 개별회신번호: customer.callback 있으면 사용, 없으면 캠페인 설정 또는 기본값
+  const customerCallback = useIndividualCallback && customer.callback
+    ? normalizePhone(customer.callback)
+    : normalizePhone(campaign.callback_number || defaultCallback);
+
+  const cleanPhone = normalizePhone(customer.phone);
+
+  // ★ SMS/LMS/MMS — row 데이터 준비
+  if (sendChannel === 'sms' || sendChannel === 'both') {
+    aiSmsRows.push([
+      cleanPhone, customerCallback, personalizedMessage, aiMsgTypeCode,
+      personalizedSubject, sendTime, id, companyId,
+      campaignMmsImages[0] || '', campaignMmsImages[1] || '', campaignMmsImages[2] || ''
+    ]);
+  }
+
+  // ★ 카카오 — 개별 큐 축적 (insertKakaoQueue는 개별 호출 필요)
+  if (sendChannel === 'kakao' || sendChannel === 'both') {
+    aiKakaoQueue.push({
+      bubbleType: kakaoBubbleType,
+      senderKey: kakaoSenderKey,
+      phone: cleanPhone,
+      targeting: kakaoTargeting,
+      message: personalizedMessage,
+      isAd: campaign.is_ad || false,
+      reservedDate: sendTime || undefined,
+      attachmentJson: kakaoAttachmentJson,
+      carouselJson: kakaoCarouselJson,
+      resendType: sendChannel === 'both' ? 'NO' : kakaoResendType,
+      resendFrom: customerCallback,
+      resendMessage: sendChannel === 'both' ? undefined : undefined,
+      unsubscribePhone: opt080Number,
+      requestUid: id,
+    });
+  }
+}
+
+// 2단계: SMS bulk INSERT — sms-queue.ts 컨트롤타워 사용
+if (sendChannel === 'sms' || sendChannel === 'both') {
+  aiSentCount += await bulkInsertSmsQueue(companyTables, aiSmsRows, !isScheduled);
+}
+
+// 3단계: 카카오 발송 (개별 호출 — 카카오 API 특성상 bulk 미지원)
+for (const kakaoItem of aiKakaoQueue) {
   try {
-    // ★ D32: 공통 치환 함수 사용 (messageUtils.ts)
-    const personalizedMessage = replaceVariables(campaign.message_content || '', customer, fieldMappings);
-    // ★ D28: 제목은 고정값 그대로 사용 (머지 치환 완전 제거)
-    const personalizedSubject = campaign.subject || '';
-
-    // 개별회신번호: customer.callback 있으면 사용, 없으면 캠페인 설정 또는 기본값
-    const customerCallback = useIndividualCallback && customer.callback
-      ? normalizePhone(customer.callback)
-      : normalizePhone(campaign.callback_number || defaultCallback);
-
-    const cleanPhone = normalizePhone(customer.phone);
-
-    // ★ 채널별 분기: SMS / 카카오 / 동시발송
-    if (sendChannel === 'sms' || sendChannel === 'both') {
-      // SMS/LMS/MMS 발송
-      const table = getNextSmsTable(companyTables);
-      // ★ C4: sendTime을 SQL 파라미터(?)로 전달 — 템플릿 리터럴 삽입 제거
-      await mysqlQuery(
-        `INSERT INTO ${table} (
-          dest_no, call_back, msg_contents, msg_type, title_str, sendreq_time, status_code, rsv1, app_etc1, app_etc2, file_name1, file_name2, file_name3
-        ) VALUES (?, ?, ?, ?, ?, ?, 100, '1', ?, ?, ?, ?, ?)`,
-        [cleanPhone, customerCallback, personalizedMessage, aiMsgTypeCode, personalizedSubject, sendTime, id, companyId, campaignMmsImages[0] || '', campaignMmsImages[1] || '', campaignMmsImages[2] || '']
-      );
-    }
-
-    if (sendChannel === 'kakao' || sendChannel === 'both') {
-      // 카카오 브랜드메시지 발송
-      await insertKakaoQueue({
-        bubbleType: kakaoBubbleType,
-        senderKey: kakaoSenderKey,
-        phone: cleanPhone,
-        targeting: kakaoTargeting,
-        message: personalizedMessage,
-        isAd: campaign.is_ad || false,
-        reservedDate: sendTime || undefined,
-        attachmentJson: kakaoAttachmentJson,
-        carouselJson: kakaoCarouselJson,
-        resendType: sendChannel === 'both' ? 'NO' : kakaoResendType,  // 동시발송이면 대체발송 끔
-        resendFrom: customerCallback,
-        resendMessage: sendChannel === 'both' ? undefined : undefined,  // 기본: 카카오 메시지 재사용
-        unsubscribePhone: opt080Number,
-        requestUid: id,
-      });
-    }
-
-    aiSentCount++;
-  } catch (insertErr) {
-    console.error(`[AI발송] MySQL INSERT 실패 (phone: ${customer.phone}):`, insertErr);
-    // 실패해도 루프 계속 → 다음 고객 발송 시도
+    await insertKakaoQueue(kakaoItem);
+    if (sendChannel === 'kakao') aiSentCount++;
+  } catch (kakaoErr) {
+    console.error(`[AI발송] 카카오 INSERT 실패 (phone: ${kakaoItem.phone}):`, kakaoErr);
   }
 }
 

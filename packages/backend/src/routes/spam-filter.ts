@@ -107,8 +107,9 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
     if (clientFirstRecipient && typeof clientFirstRecipient === 'object' && Object.keys(clientFirstRecipient).length > 0) {
       firstCustomer = clientFirstRecipient;
     } else {
-      const spamMappingCols = Object.values(spamFieldMappings).map((m: any) => m.column);
-      const spamSelectCols = [...new Set(['phone', ...spamMappingCols])].join(', ');
+      // ★ storageType 기반 동적 필터 — 직접 컬럼만 SELECT, JSONB 내부 키는 custom_fields 컬럼에서 접근 (D72)
+      const spamMappingCols = Object.values(spamFieldMappings).filter((m: any) => m.storageType !== 'custom_fields').map((m: any) => m.column);
+      const spamSelectCols = [...new Set(['phone', 'custom_fields', ...spamMappingCols])].join(', ');
       const firstCustomerResult = await query(
         `SELECT ${spamSelectCols} FROM customers WHERE company_id = $1 AND is_active = true AND sms_opt_in = true ORDER BY created_at DESC LIMIT 1`,
         [companyId]
