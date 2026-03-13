@@ -402,10 +402,10 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
                                   취소
                                 </button>
                               )}
-                              {c.status === 'draft' && (
+                              {c.status === 'draft' && c.scheduled_at && new Date(c.scheduled_at) > new Date() && (new Date(c.scheduled_at).getTime() - Date.now()) >= 15 * 60 * 1000 && (
                                 <button
                                   onClick={async () => {
-                                    if (!window.confirm(`"${c.campaign_name}" 캠페인을 삭제하시겠습니까?\n삭제된 캠페인은 복구할 수 없습니다.`)) return;
+                                    if (!window.confirm(`"${c.campaign_name}" 예약을 취소하시겠습니까?`)) return;
                                     try {
                                       const token = localStorage.getItem('token');
                                       const res = await fetch(`/api/campaigns/${c.id}`, {
@@ -414,10 +414,9 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
                                       });
                                       const data = await res.json();
                                       if (data.success) {
-                                        // 목록에서 제거
-                                        setCampaigns((prev: any[]) => prev.filter((x: any) => x.id !== c.id));
+                                        setCampaigns((prev: any[]) => prev.map((x: any) => x.id === c.id ? { ...x, status: 'cancelled' } : x));
                                       } else {
-                                        alert(data.error || '삭제에 실패했습니다');
+                                        alert(data.error || '취소에 실패했습니다');
                                       }
                                     } catch (err) {
                                       alert('서버 연결 오류가 발생했습니다.');
@@ -425,7 +424,7 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
                                   }}
                                   className="text-red-400 hover:text-red-600 text-xs font-medium hover:underline ml-1"
                                 >
-                                  삭제
+                                  취소
                                 </button>
                               )}
                             </div>

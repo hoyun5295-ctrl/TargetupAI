@@ -322,16 +322,17 @@ export default function CalendarModal({ onClose, token, onEdit }: CalendarModalP
                     </div>
                   )}
 
-                  {/* draft 상태: 발송 미확정 경고 + 삭제 버튼 */}
-                  {selectedCampaign.status === 'draft' && (
-                    <div className="pt-4 space-y-3">
-                      <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-700">
-                        <span className="font-bold">⚠️ 발송 미확정</span>
-                        <p className="mt-1">이 캠페인은 아직 발송이 확정되지 않았습니다. 발송 버튼을 누르기 전까지 실제 발송되지 않습니다.</p>
-                      </div>
+                  {/* draft 상태: 예약 취소 버튼 (15분 이내/날짜 지남 → 비활성) */}
+                  {selectedCampaign.status === 'draft' && selectedCampaign.scheduled_at && (() => {
+                    const timeUntil = new Date(selectedCampaign.scheduled_at).getTime() - Date.now();
+                    const isPast = timeUntil <= 0;
+                    const isTooClose = timeUntil < 15 * 60 * 1000;
+                    const disabled = isPast || isTooClose;
+                    return (
+                    <div className="pt-4">
                       <button
                         onClick={async () => {
-                          if (!window.confirm(`"${selectedCampaign.campaign_name}" 캠페인을 삭제하시겠습니까?\n삭제된 캠페인은 복구할 수 없습니다.`)) return;
+                          if (!window.confirm(`"${selectedCampaign.campaign_name}" 예약을 취소하시겠습니까?`)) return;
                           try {
                             const token = localStorage.getItem('token');
                             const res = await fetch(`/api/campaigns/${selectedCampaign.id}`, {
@@ -343,17 +344,23 @@ export default function CalendarModal({ onClose, token, onEdit }: CalendarModalP
                               fetchCampaigns();
                               setSelectedCampaign(null);
                             } else {
-                              alert(data.error || '삭제에 실패했습니다');
+                              alert(data.error || '취소에 실패했습니다');
                             }
                           } catch (err) {
                             alert('서버 연결 오류가 발생했습니다. 잠시 후 다시 시도해주세요.');
                           }
                         }}
-                        className="w-full py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 text-sm font-medium transition-colors">
-                        🗑️ 캠페인 삭제
+                        disabled={disabled}
+                        className={`w-full py-2 rounded-lg text-sm font-medium transition-colors ${
+                          disabled ? 'bg-gray-300 text-gray-500 cursor-not-allowed' : 'bg-red-500 text-white hover:bg-red-600'
+                        }`}>
+                        🚫 예약 취소
                       </button>
+                      {isTooClose && !isPast && <p className="text-xs text-amber-600 text-center mt-1">⚠️ 발송 15분 전부터 취소 불가</p>}
+                      {isPast && <p className="text-xs text-gray-500 text-center mt-1">예약 시간이 지났습니다</p>}
                     </div>
-                  )}
+                    );
+                  })()}
                 </div>
               </div>
             ) : selectedDate ? (

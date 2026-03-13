@@ -119,9 +119,9 @@ export default function ScheduledCampaignModal({
                     <div className="flex gap-2">
                       <button
                         onClick={() => setCancelConfirm({ show: true, campaign: selectedScheduled })}
-                        disabled={selectedScheduled?.status !== 'draft' && isWithin15Min(selectedScheduled?.scheduled_at)}
+                        disabled={isWithin15Min(selectedScheduled?.scheduled_at)}
                         className={`px-3 py-1.5 rounded text-sm ${
-                          selectedScheduled?.status !== 'draft' && isWithin15Min(selectedScheduled?.scheduled_at)
+                          isWithin15Min(selectedScheduled?.scheduled_at)
                             ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
                             : 'bg-red-500 text-white hover:bg-red-600'
                         }`}
@@ -146,12 +146,6 @@ export default function ScheduledCampaignModal({
                       )}
                     </div>
                   </div>
-                  {/* draft 상태: 발송 미확정 안내 */}
-                  {selectedScheduled?.status === 'draft' && (
-                    <div className="mx-0 mt-2 bg-amber-50 border border-amber-200 rounded p-2 text-xs text-amber-700">
-                      ⚠️ 발송 미확정 — 발송 버튼을 누르기 전까지 실제 발송되지 않습니다.
-                    </div>
-                  )}
                   {/* 예약 시간 수정: scheduled만 */}
                   {selectedScheduled?.status === 'scheduled' && (
                   <div className="flex items-center gap-2 mt-3">

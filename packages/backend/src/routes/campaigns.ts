@@ -2227,7 +2227,7 @@ router.get('/:id/message/progress', async (req: Request, res: Response) => {
   }
 });
 
-// ★ 캠페인 삭제 (draft 상태만 허용)
+// ★ draft 캠페인 예약 취소 (상태를 cancelled로 변경, 기록 보존)
 router.delete('/:id', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
@@ -2241,7 +2241,7 @@ router.delete('/:id', async (req: Request, res: Response) => {
 
     // 캠페인 조회 — 소유권 확인
     const campResult = await query(
-      `SELECT id, status, campaign_name, created_by FROM campaigns WHERE id = $1 AND company_id = $2`,
+      `SELECT id, status, campaign_name, created_by, scheduled_at FROM campaigns WHERE id = $1 AND company_id = $2`,
       [campaignId, companyId]
     );
 
@@ -2251,32 +2251,52 @@ router.delete('/:id', async (req: Request, res: Response) => {
 
     const campaign = campResult.rows[0];
 
-    // company_user는 본인이 만든 캠페인만 삭제 가능
+    // company_user는 본인이 만든 캠페인만 취소 가능
     if (userType === 'company_user' && campaign.created_by !== userId) {
-      return res.status(403).json({ success: false, error: '본인이 생성한 캠페인만 삭제할 수 있습니다.' });
+      return res.status(403).json({ success: false, error: '본인이 생성한 캠페인만 취소할 수 있습니다.' });
     }
 
-    // draft 상태만 삭제 허용 — scheduled/sending/completed는 데이터 보존
+    // draft 상태만 이 엔드포인트로 취소 허용 (scheduled는 POST /:id/cancel 사용)
     if (campaign.status !== 'draft') {
       return res.status(400).json({
         success: false,
-        error: `'${campaign.status}' 상태의 캠페인은 삭제할 수 없습니다. 임시저장(준비) 상태만 삭제 가능합니다.`
+        error: `'${campaign.status}' 상태의 캠페인은 이 방법으로 취소할 수 없습니다.`
       });
     }
 
-    // campaign_runs 삭제 (있다면)
-    await query(`DELETE FROM campaign_runs WHERE campaign_id = $1`, [campaignId]);
+    // 예약 시간 체크 — 이미 지난 캠페인은 취소 불가
+    if (campaign.scheduled_at && new Date(campaign.scheduled_at) <= new Date()) {
+      return res.status(400).json({
+        success: false,
+        error: '예약 시간이 이미 지난 캠페인은 취소할 수 없습니다.'
+      });
+    }
 
-    // 캠페인 삭제
-    await query(`DELETE FROM campaigns WHERE id = $1 AND company_id = $2`, [campaignId, companyId]);
+    // 15분 이내 제한 — 예약 시간 15분 전부터 취소 불가
+    if (campaign.scheduled_at) {
+      const timeUntilSend = new Date(campaign.scheduled_at).getTime() - Date.now();
+      if (timeUntilSend < 15 * 60 * 1000) {
+        return res.status(400).json({
+          success: false,
+          error: '발송 15분 전부터는 취소할 수 없습니다.',
+          tooLate: true
+        });
+      }
+    }
 
-    console.log(`[캠페인삭제] campaign_id=${campaignId}, name="${campaign.campaign_name}", by user=${userId}`);
+    // 상태를 cancelled로 변경 (기록 보존)
+    await query(
+      `UPDATE campaigns SET status = 'cancelled', updated_at = NOW() WHERE id = $1 AND company_id = $2`,
+      [campaignId, companyId]
+    );
 
-    return res.json({ success: true, message: '캠페인이 삭제되었습니다.' });
+    console.log(`[캠페인취소-draft] campaign_id=${campaignId}, name="${campaign.campaign_name}", by user=${userId}`);
+
+    return res.json({ success: true, message: '예약이 취소되었습니다.' });
 
   } catch (error) {
-    console.error('[캠페인삭제] 오류:', error);
-    return res.status(500).json({ success: false, error: '캠페인 삭제 중 오류가 발생했습니다.' });
+    console.error('[캠페인취소-draft] 오류:', error);
+    return res.status(500).json({ success: false, error: '캠페인 취소 중 오류가 발생했습니다.' });
   }
 });
 
