@@ -208,7 +208,6 @@ router.post('/mapping', authenticate, async (req: Request, res: Response) => {
     }
     // 파생 필드 — DB 컬럼에 존재하지만 FIELD_MAP에는 없는 인식 대상
     mappingTargets['birth_year'] = '출생연도 (4자리 연도만 있을 때. 생년월일 전체는 birth_date에)';
-    mappingTargets['region'] = '지역 (별도의 지역 컬럼이 있을 때)';
 
     const mappingPrompt = `엑셀 파일의 컬럼명을 데이터베이스 컬럼에 매핑해줘.
 
@@ -228,12 +227,19 @@ ${Object.entries(mappingTargets).map(([k, v]) => `- ${k}: ${v}`).join('\n')}
    - recent_purchase_store: 최근구매매장, 최종구매매장, 마지막구매매장 등 가장 최근에 구매한 매장명
    - store_code: 브랜드코드, 구분코드, 분류코드 등 브랜드 식별 코드 (CPB, NARS 등)
    - store_phone: 매장전화번호, 매장번호 등 매장의 전화번호
-   ※ "매장명"만 있을 때 → 문맥상 등록/소속 매장이면 registered_store, 구매 매장이면 recent_purchase_store
+   - store_name: 매장명, 점포명 등 매장 이름 (등록매장/구매매장이 아닌 단순 매장명)
+   ※ "매장명"만 있을 때 → 문맥상 등록/소속 매장이면 registered_store, 구매 매장이면 recent_purchase_store, 단순 매장명이면 store_name
+7. ⚠️ 날짜/구매 관련 필드 구분:
+   - birth_date: 생년월일, 생일 (YYYY-MM-DD 또는 YYYYMMDD)
+   - recent_purchase_date: 최근구매일, 최종구매일, 마지막구매일 등 가장 최근 구매 날짜
+   - recent_purchase_amount: 최근구매금액, 최종구매금액
+   - total_purchase_amount: 누적구매금액, 총구매금액
+   - purchase_count: 구매횟수, 구매건수, 구매수
 
 JSON 형식으로만 응답해줘 (다른 설명 없이):
 {"엑셀컬럼명": "DB컬럼명(영문 key) 또는 null", ...}
 
-예시: {"고객번호": null, "휴대폰": "phone", "이름": "name", "성별코드": "gender", "등급": "grade", "구매횟수": "custom_1"}
+예시: {"고객번호": null, "휴대폰": "phone", "이름": "name", "성별코드": "gender", "등급": "grade", "구매횟수": "purchase_count", "최근구매일": "recent_purchase_date"}
 ⚠️ 반드시 DB컬럼의 영문 key(phone, name, gender 등)를 값으로 넣어야 합니다. 한글 설명을 넣지 마세요!`;
 
     let aiText = '{}';
@@ -293,7 +299,7 @@ JSON 형식으로만 응답해줘 (다른 설명 없이):
     const hasPhone = Object.values(mapping).includes('phone');
     const unmapped = Object.entries(mapping).filter(([_, v]) => v === null).map(([k, _]) => k);
 
-    // 표준 필드 정보 (프론트엔드 동적 렌더링용 — 필수 17개 + 파생 필드)
+    // 표준 필드 정보 (프론트엔드 동적 렌더링용 — 직접 컬럼 + 파생 필드)
     const standardFields = FIELD_MAP.filter(f => f.storageType === 'column').map(f => ({
       fieldKey: f.fieldKey,
       displayName: f.displayName,
@@ -301,11 +307,10 @@ JSON 형식으로만 응답해줘 (다른 설명 없이):
       dataType: f.dataType,
       sortOrder: f.sortOrder
     }));
-    // 파생 필드 추가 (DB 컬럼 존재, FIELD_MAP 미포함이지만 AI 매핑 대상)
+    // 파생 필드 추가 (DB 컬럼 존재, FIELD_MAP 미포함이지만 프론트엔드 표시 필요)
     standardFields.push(
       { fieldKey: 'birth_year', displayName: '출생연도', category: 'basic', dataType: 'number', sortOrder: 5.1 },
-      { fieldKey: 'birth_month_day', displayName: '생일(월-일)', category: 'basic', dataType: 'string', sortOrder: 5.2 },
-      { fieldKey: 'region', displayName: '지역', category: 'basic', dataType: 'string', sortOrder: 7.1 }
+      { fieldKey: 'birth_month_day', displayName: '생일(월-일)', category: 'basic', dataType: 'string', sortOrder: 5.2 }
     );
     standardFields.sort((a: any, b: any) => a.sortOrder - b.sortOrder);
 
@@ -585,7 +590,7 @@ async function processUploadInBackground(
         }
 
         // ── INSERT 값 빌드 (FIELD_MAP 기반 동적) ──
-        const columnFieldDefs = getColumnFields(); // 필수 17개 (sortOrder 순)
+        const columnFieldDefs = getColumnFields(); // 직접 컬럼 필드 (sortOrder 순)
         const rowValues: any[] = [companyId]; // company_id
 
         for (const field of columnFieldDefs) {

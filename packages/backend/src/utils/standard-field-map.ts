@@ -4,7 +4,7 @@
  * 유일한 필드 매핑 정의. 모든 파일은 이것만 import.
  *
  * 기준: FIELD-INTEGRATION.md (2026-02-26 Harold님 확정)
- * - 필수 직접 컬럼 17개 + 커스텀 슬롯 15개 = 최대 32개
+ * - 직접 컬럼 필드 + 커스텀 슬롯 15개
  * - 카테고리 6개: basic, purchase, store, membership, marketing, custom
  * - 하드코딩 금지. 이 파일이 유일한 기준.
  */
@@ -45,7 +45,7 @@ export const CATEGORY_LABELS: Record<FieldCategory, string> = {
   custom: '커스텀',
 };
 
-// ─── 핵심 매핑표 — 필수 직접 컬럼 17개 + 커스텀 15개 ───
+// ─── 핵심 매핑표 — 직접 컬럼 필드 + 커스텀 15개 ───
 
 export const FIELD_MAP: StandardFieldMapping[] = [
   // ── basic (기본정보) — 7개 ──
@@ -65,6 +65,8 @@ export const FIELD_MAP: StandardFieldMapping[] = [
   { fieldKey: 'total_purchase_amount',  category: 'purchase', displayName: '누적구매금액', dataType: 'number', storageType: 'column', columnName: 'total_purchase_amount',  normalizeFunction: 'normalizeAmount', sortOrder: 10 },
   // ★ B-D70-17: purchase_count는 customer-filter/CustomerDBModal에서 사용되지만 FIELD_MAP에 누락
   { fieldKey: 'purchase_count',         category: 'purchase', displayName: '구매횟수',     dataType: 'number', storageType: 'column', columnName: 'purchase_count',         normalizeFunction: 'parseInt',        sortOrder: 10.5 },
+  // ★ D71: recent_purchase_date는 DB 컬럼 존재하지만 FIELD_MAP 누락 → 엑셀 업로드 시 매핑 불가 수정
+  { fieldKey: 'recent_purchase_date',   category: 'purchase', displayName: '최근구매일',   dataType: 'date',   storageType: 'column', columnName: 'recent_purchase_date',   normalizeFunction: 'normalizeDate',   sortOrder: 10.7 },
 
   // ── store (매장/등록정보) — 5개 ──
   { fieldKey: 'store_code',        category: 'store', displayName: '브랜드',       dataType: 'string', storageType: 'column', columnName: 'store_code',        normalizeFunction: 'trim',           sortOrder: 11 },
@@ -111,7 +113,7 @@ export function getFieldsByCategory(category: FieldCategory): StandardFieldMappi
   return FIELD_MAP.filter(f => f.category === category).sort((a, b) => a.sortOrder - b.sortOrder);
 }
 
-/** customers 테이블 직접 컬럼 필드만 (필수 17개) */
+/** customers 테이블 직접 컬럼 필드만 (storageType === 'column') */
 export function getColumnFields(): StandardFieldMapping[] {
   return FIELD_MAP.filter(f => f.storageType === 'column');
 }

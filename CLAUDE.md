@@ -297,6 +297,8 @@ PostgreSQL campaigns/campaign_runs 생성
 | **upload.ts customer_schema 미갱신** | 엑셀 업로드 후 companies.customer_schema가 {}로 방치 → AI/직접발송 변수 매핑 불가 | 데이터 입력 경로가 여러 개일 때 모든 경로에서 관련 메타데이터가 갱신되는지 확인 (D70) |
 | **전송 후 state 미초기화** | MMS 전송 후 setMmsUploadedImages([]) 누락 → 이전 이미지 잔류 | 전송 성공 후 초기화 로직에 모든 관련 state가 포함되었는지 확인 (D70) |
 | **조건부 UX 분기 누락** | MMS 이미지 있는데 SMS 전환 비용절감 안내 표시 → 사용자 혼란 | UX 분기(모달/안내) 추가 시 해당 상태가 유효한 모든 조건을 고려 (D70) |
+| **customers_unified 뷰 미갱신** | customers 테이블에 store_phone 추가했지만 뷰 재생성 안 함 → 뷰 참조하는 모든 SELECT에서 500 에러 | customers 테이블 컬럼 추가 시 customers_unified 뷰도 반드시 DROP+CREATE 재생성 (D71) |
+| **FIELD_MAP 추가 vs upload.ts 파생 컬럼 중복** | region을 FIELD_MAP에 추가했으나 upload.ts에서 이미 파생 컬럼으로 별도 처리 → INSERT에 region 두 번 → 업로드 전건 오류 | FIELD_MAP에 필드 추가 시 upload.ts의 파생 컬럼(birth_year, birth_month_day)과 중복 여부 반드시 확인 (D71) |
 
 ---
 
