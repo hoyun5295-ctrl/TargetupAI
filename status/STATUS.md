@@ -147,6 +147,56 @@
 
 ---
 
+### 🔧 D71 — 시세이도 3만건 업로드 후속 수정 (2026-03-13) — 🟡 수정완료-배포대기
+
+> **배경:** 시세이도CPB 30,000건 엑셀 업로드 후 (1) 슈퍼관리자 고객 목록 500에러, (2) 업로드 전건 에러, (3) 조회 시 일부 컬럼 null 표시, (4) 업로드 속도 저하 발견.
+> **원칙:** 하나씩 근본 원인 파악 → 수정. 기간계 무접촉.
+
+#### ✅ customers_unified VIEW store_phone 누락 수정 (서버 DDL 직접 실행)
+- **현상:** 슈퍼관리자 고객 목록 500에러
+- **원인:** customers 테이블에 store_phone 컬럼 추가했지만 customers_unified VIEW 재생성 안 함 → SELECT에서 "column store_phone does not exist" 에러
+- **수정:** DROP VIEW + CREATE VIEW (store_phone 포함, 3개 SELECT 모두에 명시적 추가)
+
+#### ✅ upload.ts region 중복 INSERT 수정 (배포 완료)
+- **현상:** 30,000건 업로드 전건 에러 ("column region specified more than once")
+- **원인:** D70-17에서 region을 FIELD_MAP에 추가 → getColumnFields()에 region 포함 + insertCols/rowValues/updateClauses에 명시적 region이 남아있어 중복
+- **수정:** 명시적 region 3곳(insertCols, rowValues push, updateClauses) 제거, FIELD_MAP 루프에서 derivedRegion 우선 처리
+
+#### ✅ upload.ts AI 매핑 프롬프트 정합성 수정
+- **현상:** 엑셀에 데이터가 있는데 DB에 null로 저장
+- **원인 1:** 프롬프트 예시에 `"구매횟수": "custom_1"` — FIELD_MAP의 `purchase_count`와 모순
+- **원인 2:** `recent_purchase_date` FIELD_MAP 미등록 → AI 매핑 대상 자체에 없음
+- **원인 3:** mappingTargets, standardFields에 region 중복 (FIELD_MAP + 하드코딩)
+- **원인 4:** 프롬프트에 store_name, 날짜/구매 관련 필드 구분 안내 없음
+- **수정:**
+  - `standard-field-map.ts`: `recent_purchase_date` 필드 추가 (dataType: date, normalizeDate)
+  - `upload.ts` 프롬프트: 예시 수정 (`purchase_count`, `recent_purchase_date`), 규칙 #6 store_name 추가, 규칙 #7 날짜/구매 필드 구분 추가
+  - `upload.ts` mappingTargets: region 하드코딩 삭제 (FIELD_MAP에서 자동 생성)
+  - `upload.ts` standardFields: region 수동 push 삭제 (FIELD_MAP에서 자동 포함)
+  - 주석: "필수 17개" 숫자 하드코딩 → "직접 컬럼 필드"로 변경
+
+#### ✅ customers.ts SELECT 누락 컬럼 3개 추가
+- **현상:** 고객DB 조회 시 최근구매금액, 구매횟수, 주소가 `-` 표시
+- **원인:** 데이터는 DB에 정상 저장되어 있으나 customers.ts의 SELECT 쿼리에서 `address`, `recent_purchase_amount`, `purchase_count` 3개 컬럼을 가져오지 않음
+- **수정:** SELECT에 3개 컬럼 추가. 재업로드 불필요 — 배포만 하면 기존 데이터 즉시 표시
+
+#### ✅ 업로드 배치 사이즈 복원 (500 → 2000)
+- **현상:** 업로드 속도 체감 저하
+- **원인:** 초기 BATCH_SIZE 4000 → 어느 시점에 500으로 축소 → 30,000건 기준 8배치→60배치 (7.5배 증가)
+- **수정:** `defaults.ts` customerUpload 500 → 2000 (30,000건 = 15배치, 4배 개선)
+
+#### 수정 파일 목록
+| 파일 | 수정 내용 |
+|------|-----------|
+| `standard-field-map.ts` | recent_purchase_date 추가, 주석 숫자 하드코딩 제거 |
+| `upload.ts` | AI 프롬프트 예시/규칙 수정, region 중복 제거, 주석 정리 |
+| `customers.ts` | SELECT에 address, recent_purchase_amount, purchase_count 추가 |
+| `defaults.ts` | customerUpload 배치 사이즈 500→2000 |
+
+**⚠️ 배포 필요:** tp-push + tp-deploy-full
+
+---
+
 ### 🔧 D70 — 직원 QA 버그 일괄수정 (2026-03-12) — 🔶 진행 중 (3차 배포 완료, 잔여 1건 B-D70-18)
 
 > **배경:** 직원 2명이 실동작 검증 후 PPT(8슬라이드) + 체크리스트(30항목) 버그 리포트 제출. 서버 검증 후 순차 수정.

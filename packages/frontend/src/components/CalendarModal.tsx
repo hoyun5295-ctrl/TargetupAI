@@ -51,7 +51,7 @@ export default function CalendarModal({ onClose, token, onEdit }: CalendarModalP
   const blanks = Array.from({ length: firstDay }, (_, i) => i);
 
   const statusColors: Record<string, string> = {
-    draft: 'bg-gray-200 text-gray-600',
+    draft: 'bg-amber-100 text-amber-700',
     scheduled: 'bg-blue-200 text-blue-700',
     sending: 'bg-orange-200 text-orange-700',
     completed: 'bg-green-200 text-green-700',
@@ -92,20 +92,24 @@ export default function CalendarModal({ onClose, token, onEdit }: CalendarModalP
             <div className="flex items-center gap-4 mb-3 pb-2 border-b text-xs">
               <span className="text-gray-500">상태:</span>
               <div className="flex items-center gap-1">
-                <span className="w-3 h-3 rounded bg-green-200"></span>
-                <span className="text-gray-600">완료</span>
+                <span className="w-3 h-3 rounded bg-amber-100 border border-amber-300"></span>
+                <span className="text-gray-600">준비</span>
               </div>
               <div className="flex items-center gap-1">
                 <span className="w-3 h-3 rounded bg-blue-200"></span>
                 <span className="text-gray-600">예약</span>
               </div>
               <div className="flex items-center gap-1">
-                <span className="w-3 h-3 rounded bg-gray-200"></span>
-                <span className="text-gray-600">취소</span>
+                <span className="w-3 h-3 rounded bg-green-200"></span>
+                <span className="text-gray-600">완료</span>
               </div>
               <div className="flex items-center gap-1">
                 <span className="w-3 h-3 rounded bg-orange-200"></span>
                 <span className="text-gray-600">진행</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <span className="w-3 h-3 rounded bg-gray-200"></span>
+                <span className="text-gray-600">취소</span>
               </div>
             </div>
             {/* 요일 헤더 - 색상 적용 */}
@@ -289,7 +293,7 @@ export default function CalendarModal({ onClose, token, onEdit }: CalendarModalP
                     </div>
                   )}
                   
-                  {/* 버튼 - 예약 상태만 취소 가능 */}
+                  {/* 버튼 — 상태별 액션 */}
                   {selectedCampaign.status === 'scheduled' && (
                     <div className="pt-4">
                       <button
@@ -314,6 +318,39 @@ export default function CalendarModal({ onClose, token, onEdit }: CalendarModalP
                         }}
                         className="w-full py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 text-sm font-medium transition-colors">
                         🚫 예약 취소
+                      </button>
+                    </div>
+                  )}
+
+                  {/* draft 상태: 발송 미확정 경고 + 삭제 버튼 */}
+                  {selectedCampaign.status === 'draft' && (
+                    <div className="pt-4 space-y-3">
+                      <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-700">
+                        <span className="font-bold">⚠️ 발송 미확정</span>
+                        <p className="mt-1">이 캠페인은 아직 발송이 확정되지 않았습니다. 발송 버튼을 누르기 전까지 실제 발송되지 않습니다.</p>
+                      </div>
+                      <button
+                        onClick={async () => {
+                          if (!window.confirm(`"${selectedCampaign.campaign_name}" 캠페인을 삭제하시겠습니까?\n삭제된 캠페인은 복구할 수 없습니다.`)) return;
+                          try {
+                            const token = localStorage.getItem('token');
+                            const res = await fetch(`/api/campaigns/${selectedCampaign.id}`, {
+                              method: 'DELETE',
+                              headers: { Authorization: `Bearer ${token}` }
+                            });
+                            const data = await res.json();
+                            if (data.success) {
+                              fetchCampaigns();
+                              setSelectedCampaign(null);
+                            } else {
+                              alert(data.error || '삭제에 실패했습니다');
+                            }
+                          } catch (err) {
+                            alert('서버 연결 오류가 발생했습니다. 잠시 후 다시 시도해주세요.');
+                          }
+                        }}
+                        className="w-full py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 text-sm font-medium transition-colors">
+                        🗑️ 캠페인 삭제
                       </button>
                     </div>
                   )}

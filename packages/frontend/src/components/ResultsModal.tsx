@@ -402,6 +402,32 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
                                   취소
                                 </button>
                               )}
+                              {c.status === 'draft' && (
+                                <button
+                                  onClick={async () => {
+                                    if (!window.confirm(`"${c.campaign_name}" 캠페인을 삭제하시겠습니까?\n삭제된 캠페인은 복구할 수 없습니다.`)) return;
+                                    try {
+                                      const token = localStorage.getItem('token');
+                                      const res = await fetch(`/api/campaigns/${c.id}`, {
+                                        method: 'DELETE',
+                                        headers: { Authorization: `Bearer ${token}` }
+                                      });
+                                      const data = await res.json();
+                                      if (data.success) {
+                                        // 목록에서 제거
+                                        setCampaigns((prev: any[]) => prev.filter((x: any) => x.id !== c.id));
+                                      } else {
+                                        alert(data.error || '삭제에 실패했습니다');
+                                      }
+                                    } catch (err) {
+                                      alert('서버 연결 오류가 발생했습니다.');
+                                    }
+                                  }}
+                                  className="text-red-400 hover:text-red-600 text-xs font-medium hover:underline ml-1"
+                                >
+                                  삭제
+                                </button>
+                              )}
                             </div>
                           </td>
                         </tr>

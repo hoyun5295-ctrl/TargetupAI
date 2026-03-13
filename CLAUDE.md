@@ -115,7 +115,7 @@ standard-field-map.ts (FIELD_MAP) ← 유일한 기준
 └── Dashboard.tsx — UI 표시 (출구)
 ```
 
-- **필수 직접 컬럼 17개:** name, phone, gender, age, birth_date, email, address, recent_purchase_store, store_code, registration_type, registered_store, store_phone, recent_purchase_amount, total_purchase_amount, grade, points, sms_opt_in
+- **직접 컬럼 필드 (FIELD_MAP storageType=column):** name, phone, gender, age, birth_date, email, address, region, recent_purchase_store, recent_purchase_amount, total_purchase_amount, purchase_count, recent_purchase_date, store_code, registration_type, registered_store, store_phone, store_name, grade, points, sms_opt_in
 - **커스텀 슬롯 15개:** custom_1 ~ custom_15 (custom_fields JSONB)
 - **customer_field_definitions 테이블:** 고객사별 커스텀 필드 라벨 정의
 - **customer_schema (companies 테이블 JSONB):** 업로드 시 매핑/라벨 메타데이터
@@ -299,6 +299,9 @@ PostgreSQL campaigns/campaign_runs 생성
 | **조건부 UX 분기 누락** | MMS 이미지 있는데 SMS 전환 비용절감 안내 표시 → 사용자 혼란 | UX 분기(모달/안내) 추가 시 해당 상태가 유효한 모든 조건을 고려 (D70) |
 | **customers_unified 뷰 미갱신** | customers 테이블에 store_phone 추가했지만 뷰 재생성 안 함 → 뷰 참조하는 모든 SELECT에서 500 에러 | customers 테이블 컬럼 추가 시 customers_unified 뷰도 반드시 DROP+CREATE 재생성 (D71) |
 | **FIELD_MAP 추가 vs upload.ts 파생 컬럼 중복** | region을 FIELD_MAP에 추가했으나 upload.ts에서 이미 파생 컬럼으로 별도 처리 → INSERT에 region 두 번 → 업로드 전건 오류 | FIELD_MAP에 필드 추가 시 upload.ts의 파생 컬럼(birth_year, birth_month_day)과 중복 여부 반드시 확인 (D71) |
+| **AI 프롬프트 예시가 FIELD_MAP과 모순** | 프롬프트 예시에 "구매횟수":"custom_1"로 안내 → FIELD_MAP에는 purchase_count 존재 → AI가 예시를 따라 잘못 매핑 | FIELD_MAP 필드 추가/변경 시 upload.ts AI 프롬프트 예시/규칙도 반드시 동기화 (D71) |
+| **SELECT 쿼리에 신규 컬럼 누락** | FIELD_MAP/DB에 필드 추가하고 upload 정상 작동하지만, customers.ts SELECT에서 안 가져와서 프론트에 null 표시 | DB 컬럼 추가 시: (1) FIELD_MAP (2) upload.ts (3) customers.ts SELECT (4) customers_unified VIEW 4곳 전부 확인 (D71) |
+| **배치 사이즈 무단 축소** | BATCH_SIZE 4000→500 변경으로 업로드 속도 7.5배 저하 (30,000건: 8배치→60배치) | 성능 관련 설정값 변경 시 변경 사유와 이전 값을 주석으로 반드시 기록 (D71) |
 
 ---
 

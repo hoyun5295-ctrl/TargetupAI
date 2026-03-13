@@ -2227,4 +2227,57 @@ router.get('/:id/message/progress', async (req: Request, res: Response) => {
   }
 });
 
+// ★ 캠페인 삭제 (draft 상태만 허용)
+router.delete('/:id', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
+    const userType = req.user?.userType;
+    const campaignId = req.params.id;
+
+    if (!companyId) {
+      return res.status(403).json({ success: false, error: '고객사 권한이 필요합니다.' });
+    }
+
+    // 캠페인 조회 — 소유권 확인
+    const campResult = await query(
+      `SELECT id, status, campaign_name, created_by FROM campaigns WHERE id = $1 AND company_id = $2`,
+      [campaignId, companyId]
+    );
+
+    if (campResult.rows.length === 0) {
+      return res.status(404).json({ success: false, error: '캠페인을 찾을 수 없습니다.' });
+    }
+
+    const campaign = campResult.rows[0];
+
+    // company_user는 본인이 만든 캠페인만 삭제 가능
+    if (userType === 'company_user' && campaign.created_by !== userId) {
+      return res.status(403).json({ success: false, error: '본인이 생성한 캠페인만 삭제할 수 있습니다.' });
+    }
+
+    // draft 상태만 삭제 허용 — scheduled/sending/completed는 데이터 보존
+    if (campaign.status !== 'draft') {
+      return res.status(400).json({
+        success: false,
+        error: `'${campaign.status}' 상태의 캠페인은 삭제할 수 없습니다. 임시저장(준비) 상태만 삭제 가능합니다.`
+      });
+    }
+
+    // campaign_runs 삭제 (있다면)
+    await query(`DELETE FROM campaign_runs WHERE campaign_id = $1`, [campaignId]);
+
+    // 캠페인 삭제
+    await query(`DELETE FROM campaigns WHERE id = $1 AND company_id = $2`, [campaignId, companyId]);
+
+    console.log(`[캠페인삭제] campaign_id=${campaignId}, name="${campaign.campaign_name}", by user=${userId}`);
+
+    return res.json({ success: true, message: '캠페인이 삭제되었습니다.' });
+
+  } catch (error) {
+    console.error('[캠페인삭제] 오류:', error);
+    return res.status(500).json({ success: false, error: '캠페인 삭제 중 오류가 발생했습니다.' });
+  }
+});
+
 export default router;
