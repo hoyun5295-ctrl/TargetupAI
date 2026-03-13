@@ -1488,11 +1488,10 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       directCustomerMap.set(normalizePhone(c.phone), c);
     });
 
-    // SMS 발송 (sms 또는 both)
+    // SMS 발송 (sms 또는 both) — ★ D72: sms-queue.ts 컨트롤타워 bulkInsertSmsQueue 사용
     if (directChannel === 'sms' || directChannel === 'both') {
-      // 테이블별 데이터 분배
-      const tableBatches: Record<string, any[][]> = {};
-      for (const t of companyTables) tableBatches[t] = [[]];
+      const directSmsRows: any[][] = [];
+      const useNow = !isScheduledSend && !(splitEnabled && splitCount > 0);
 
       for (let i = 0; i < filteredRecipients.length; i++) {
         const recipient = filteredRecipients[i];
@@ -1500,10 +1499,8 @@ router.post('/direct-send', async (req: Request, res: Response) => {
         const cleanPhone = normalizePhone(recipient.phone);
         let finalMessage: string;
         if (customMessageMap.has(cleanPhone)) {
-          // 프론트 치환 완료 메시지 (직접타겟추출 경로)
           finalMessage = customMessageMap.get(cleanPhone)!.replace(/%[^%\s]{1,20}%/g, '');
         } else {
-          // ★ 컨트롤타워(messageUtils) 통합 치환: DB 필드 + 주소록 기타 필드 한번에 처리
           const dbCustomer = directCustomerMap.get(cleanPhone) || null;
           finalMessage = replaceVariables(message, dbCustomer, directFieldMappings, {
             name: recipient.name,
@@ -1514,10 +1511,9 @@ router.post('/direct-send', async (req: Request, res: Response) => {
           });
         }
 
-        // ★ D28: 제목은 고정값 그대로 사용 (머지 치환 완전 제거)
         const finalSubject = subject || '';
 
-        // ★ C3: 분할전송 시간 계산 (오버플로우 방지 — calcSplitSendTime 적용)
+        // ★ C3: 분할전송 시간 계산
         let sendTime: string;
         if (isScheduledSend) {
           if (splitEnabled && splitCount > 0) {
@@ -1530,68 +1526,22 @@ router.post('/direct-send', async (req: Request, res: Response) => {
           const batchIndex = Math.floor(i / splitCount);
           sendTime = toKoreaTimeStr(calcSplitSendTime(new Date(), batchIndex));
         } else {
-          sendTime = '__NOW__';  // ★ #5 수정: 즉시발송은 MySQL NOW() 직접 사용
+          sendTime = '';  // useNow=true이면 bulkInsertSmsQueue에서 NOW() 사용
         }
 
-        // 개별회신번호면 recipient.callback 사용, 아니면 공통 callback 사용
         const recipientCallback = useIndividualCallback
           ? normalizePhone(recipient.callback || '')
           : normalizePhone(callback);
 
-        // 라운드로빈으로 테이블 선택
-        const table = getNextSmsTable(companyTables);
-        const currentBatch = tableBatches[table];
-        const lastBatch = currentBatch[currentBatch.length - 1];
-
-        if (lastBatch.length >= 1000) {
-          currentBatch.push([]);
-        }
-        const targetBatch = currentBatch[currentBatch.length - 1];
-
-        targetBatch.push([
-          normalizePhone(recipient.phone),
-          recipientCallback,
-          finalMessage,
+        directSmsRows.push([
+          cleanPhone, recipientCallback, finalMessage,
           msgType === 'SMS' ? 'S' : msgType === 'LMS' ? 'L' : 'M',
-          finalSubject,
-          sendTime,
-          campaignId,
-          (mmsImagePaths || [])[0] || '',
-          (mmsImagePaths || [])[1] || '',
-          (mmsImagePaths || [])[2] || ''
+          finalSubject, sendTime, campaignId, companyId,
+          (mmsImagePaths || [])[0] || '', (mmsImagePaths || [])[1] || '', (mmsImagePaths || [])[2] || ''
         ]);
       }
 
-      // ★ C1: Bulk INSERT에 per-batch try/catch + sentCount 추적
-      const useNow = !isScheduledSend && !(splitEnabled && splitCount > 0);
-      for (const [table, batches] of Object.entries(tableBatches)) {
-        for (const batch of batches) {
-          if (batch.length === 0) continue;
-          try {
-            if (useNow) {
-              // 즉시발송: row[5](sendTime) 제외, NOW() SQL 직접 삽입
-              const placeholders = batch.map(() => '(?, ?, ?, ?, ?, NOW(), 100, \'1\', ?, ?, ?, ?)').join(', ');
-              const flatValues = batch.map(row => [row[0], row[1], row[2], row[3], row[4], row[6], row[7], row[8], row[9]]).flat();
-              await mysqlQuery(
-                `INSERT INTO ${table} (dest_no, call_back, msg_contents, msg_type, title_str, sendreq_time, status_code, rsv1, app_etc1, file_name1, file_name2, file_name3) VALUES ${placeholders}`,
-                flatValues
-              );
-            } else {
-              // 예약/분할: sendTime 파라미터 그대로 사용
-              const placeholders = batch.map(() => '(?, ?, ?, ?, ?, ?, 100, \'1\', ?, ?, ?, ?)').join(', ');
-              const flatValues = batch.flat();
-              await mysqlQuery(
-                `INSERT INTO ${table} (dest_no, call_back, msg_contents, msg_type, title_str, sendreq_time, status_code, rsv1, app_etc1, file_name1, file_name2, file_name3) VALUES ${placeholders}`,
-                flatValues
-              );
-            }
-            directSmsSentCount += batch.length;
-          } catch (batchErr) {
-            console.error(`[직접발송] batch INSERT 실패 (${table}, ${batch.length}건):`, batchErr);
-            // 실패 batch 건수는 미집계 → 환불 대상
-          }
-        }
-      }
+      directSmsSentCount = await bulkInsertSmsQueue(companyTables, directSmsRows, useNow);
     }
 
     // 카카오 발송 (kakao 또는 both)
