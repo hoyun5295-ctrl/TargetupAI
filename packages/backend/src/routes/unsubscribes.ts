@@ -1,7 +1,7 @@
 import { Request, Response, Router } from 'express';
 import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
-import { process080Callback } from '../utils/unsubscribe-helper';
+import { process080Callback, getUserUnsubscribes } from '../utils/unsubscribe-helper';
 
 const router = Router();
 
@@ -90,43 +90,21 @@ router.get('/', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
     const userId = req.user?.userId;
+    const userType = req.user?.userType;
     if (!companyId || !userId) {
       return res.status(403).json({ error: '권한이 필요합니다.' });
     }
 
     const { page = 1, limit = 20, search } = req.query;
-    const offset = (Number(page) - 1) * Number(limit);
 
-    // ★ B17-01: user_id 기준으로 수신거부 조회 (080 자동연동과 일관성)
-    let whereClause = 'WHERE user_id = $1';
-    const params: any[] = [userId];
-    let paramIndex = 2;
-
-    if (search) {
-      whereClause += ` AND phone LIKE $${paramIndex++}`;
-      params.push(`%${search}%`);
-    }
-
-    // COUNT(DISTINCT phone)으로 단순화
-    const countResult = await query(
-      `SELECT COUNT(DISTINCT phone) as count FROM unsubscribes ${whereClause}`,
-      params
-    );
-    const total = parseInt(countResult.rows[0].count);
-    
-    const result = await query(
-      `SELECT DISTINCT ON (phone) id, phone, source, created_at
-       FROM unsubscribes
-       ${whereClause}
-       ORDER BY phone, created_at DESC`,
-      params
-    );
-
-    // phone 기준 중복 제거 후 created_at DESC 정렬 + 페이지네이션
-    const sorted = result.rows.sort((a: any, b: any) => 
-      new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-    );
-    const paged = sorted.slice(offset, offset + Number(limit));
+    // CT-03 컨트롤타워 사용: company_admin은 회사 전체, 사용자는 본인 user_id만
+    const { data: paged, total } = await getUserUnsubscribes(userId, {
+      page: Number(page),
+      limit: Number(limit),
+      search: search as string | undefined,
+      companyId,
+      userType,
+    });
 
     // ★ B17-11: 사용자(users) 테이블에서 080 설정 조회 (슈퍼관리자에서 사용자 단에 설정)
     // companies fallback: 사용자 테이블에 없으면 회사 설정 참조

@@ -5,6 +5,36 @@
 
 ---
 
+## ⛔ 0. 최우선 원칙 — 컨트롤타워 우선 확인 (절대 위반 금지)
+
+> **코드를 수정하기 전에 반드시 컨트롤타워(utils/)에 해당 기능이 이미 존재하는지 먼저 확인한다.**
+> 인라인으로 직접 DB 쿼리를 작성하거나 로직을 구현하지 않는다.
+> 컨트롤타워에 없으면 새로 만들어서 컨트롤타워를 통해 제어한다.
+
+### 확인 순서 (매 작업 시 반드시):
+1. `packages/backend/src/utils/` 폴더의 컨트롤타워 파일 목록 확인
+2. 수정하려는 기능이 이미 컨트롤타워에 존재하는지 grep/검색
+3. **존재하면:** 해당 컨트롤타워 함수를 import해서 사용
+4. **존재하지 않으면:** 컨트롤타워에 함수를 먼저 만들고, 라우트에서 import
+
+### 현재 컨트롤타워 목록:
+| 번호 | 파일 | 역할 |
+|------|------|------|
+| CT-01 | customer-filter.ts | 고객 필터/쿼리 빌더 |
+| CT-02 | store-scope.ts | 브랜드(store_code) 격리 |
+| CT-03 | unsubscribe-helper.ts | 수신거부 관리 + 080 연동 |
+| CT-04 | sms-queue.ts | MySQL 큐 조작 |
+| CT-05 | prepaid.ts | 선불 잔액 관리 |
+| CT-06 | campaign-lifecycle.ts | 캠페인 생명주기 |
+| CT-07 | standard-field-map.ts | 필드 매핑 + customer_field_definitions UPSERT |
+| — | messageUtils.ts | 변수 치환 (5개 발송 경로 통합) |
+| — | normalize.ts | 값 정규화 |
+| — | stats-aggregation.ts | 대시보드 통계 집계 |
+
+**⚠️ 이 원칙을 어기고 인라인 코드를 작성하면 버그가 재발한다. 실제 사고 사례: upload.ts에서 customer_field_definitions를 인라인으로 INSERT하면서 "최초 등록 우선" 정책 적용 → 잘못된 라벨이 영원히 고착되는 버그 발생.**
+
+---
+
 ## 1. 프로젝트 개요
 
 - **서비스명:** 한줄로 (TargetUp) — SMS/LMS/MMS 마케팅 자동화 SaaS
@@ -222,6 +252,15 @@ AND NOT EXISTS (
   - `syncCampaignResults(companyId)` — MySQL 발송 결과 → PostgreSQL campaign_runs 업데이트
 - **취소 옵션:** reason, cancelledBy, cancelledByType, skipTimeCheck(관리자용 15분 체크 스킵)
 - **적용 파일:** campaigns.ts, manage-scheduled.ts, admin.ts
+
+#### CT-07: standard-field-map.ts — 필드 매핑 + customer_field_definitions UPSERT
+- **역할:** FIELD_MAP 정의 (유일한 기준) + 커스텀 필드 라벨 저장의 유일한 쓰기 진입점
+- **주요 함수:**
+  - `getFieldByKey()`, `getColumnFields()`, `getCustomFields()` — FIELD_MAP 조회
+  - `fieldKeyToColumn()`, `fieldKeyToCustomKey()`, `fieldKeyToSqlRef()` — SQL 생성 헬퍼
+  - `upsertCustomFieldDefinitions(companyId, definitions)` — customer_field_definitions UPSERT (ON CONFLICT DO UPDATE)
+- **⚠️ 과거 교훈:** upload.ts에서 인라인으로 "최초 등록 우선" INSERT 정책 사용 → 잘못된 라벨 영구 고착. CT-07 도입으로 항상 최신 라벨로 갱신.
+- **적용 파일:** upload.ts, sync.ts (쓰기) / messageUtils.ts, customers.ts, ai.ts (읽기)
 
 ### 5-7. 자동발송 기능 (D69 — ✅ Phase 1 구현 완료)
 

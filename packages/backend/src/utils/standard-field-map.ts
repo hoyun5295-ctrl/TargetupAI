@@ -7,7 +7,13 @@
  * - 직접 컬럼 필드 + 커스텀 슬롯 15개
  * - 카테고리 6개: basic, purchase, store, membership, marketing, custom
  * - 하드코딩 금지. 이 파일이 유일한 기준.
+ *
+ * CT-07: customer_field_definitions UPSERT 컨트롤타워
+ * - upload.ts, sync.ts 등 커스텀 필드 라벨 저장은 반드시 이 파일의 upsertCustomFieldDefinitions()를 사용
+ * - ON CONFLICT DO UPDATE 방식으로 라벨 항상 최신화 (잘못된 라벨 고착 방지)
  */
+
+import { query } from '../config/database';
 
 // ─── 타입 정의 ───
 
@@ -157,4 +163,45 @@ export function fieldKeyToSqlRef(fieldKey: string): string | null {
   if (!field) return null;
   if (field.storageType === 'column') return field.columnName;
   return `custom_fields->>'${field.columnName}'`;
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// CT-07: customer_field_definitions UPSERT 컨트롤타워
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+/**
+ * 커스텀 필드 정의(customer_field_definitions) UPSERT — 유일한 쓰기 진입점
+ *
+ * - upload.ts, sync.ts 등 모든 커스텀 필드 라벨 저장은 이 함수만 사용
+ * - ON CONFLICT DO UPDATE: 라벨이 변경되면 항상 최신으로 갱신
+ *   (기존 "최초 등록 우선" 정책은 잘못된 라벨이 영원히 고착되는 버그 유발 → 제거)
+ * - display_order는 custom_ 접미사 숫자 기반 자동 계산
+ *
+ * @param companyId    회사 ID
+ * @param definitions  { fieldKey: 'custom_1', label: '평균주문금액', fieldType?: 'VARCHAR' }[]
+ * @returns upsert된 건수
+ */
+export async function upsertCustomFieldDefinitions(
+  companyId: string,
+  definitions: Array<{ fieldKey: string; label: string; fieldType?: string }>
+): Promise<number> {
+  let upsertedCount = 0;
+  for (const def of definitions) {
+    if (!def.fieldKey.startsWith('custom_')) continue;
+    const displayOrder = parseInt(def.fieldKey.replace('custom_', '')) || 0;
+    await query(
+      `INSERT INTO customer_field_definitions (id, company_id, field_key, field_label, field_type, display_order, is_hidden, created_at)
+       VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, false, NOW())
+       ON CONFLICT (company_id, field_key) DO UPDATE SET
+         field_label = EXCLUDED.field_label,
+         field_type = EXCLUDED.field_type,
+         display_order = EXCLUDED.display_order`,
+      [companyId, def.fieldKey, def.label, def.fieldType || 'VARCHAR', displayOrder]
+    );
+    upsertedCount++;
+  }
+  if (upsertedCount > 0) {
+    console.log(`[CT-07] 커스텀 필드 정의 ${upsertedCount}개 upsert (company: ${companyId})`);
+  }
+  return upsertedCount;
 }

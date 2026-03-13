@@ -6,7 +6,7 @@ import { Request, Response, Router } from 'express';
 import { query } from '../config/database';
 import { TIMEOUTS, RATE_LIMITS, BATCH_SIZES } from '../config/defaults';
 import { normalizePhone, normalizeRegion, normalizeDate } from '../utils/normalize';
-import { getColumnFields, getCustomFields } from '../utils/standard-field-map';
+import { getColumnFields, getCustomFields, upsertCustomFieldDefinitions } from '../utils/standard-field-map';
 
 const router = Router();
 
@@ -1076,27 +1076,13 @@ router.post('/field-definitions', async (req: SyncAuthRequest, res: Response) =>
       }
     }
 
-    // UPSERT (기존 정의 덮어쓰기)
-    let upsertedCount = 0;
-    for (const def of definitions) {
-      await query(`
-        INSERT INTO customer_field_definitions (company_id, field_key, field_label, field_type, display_order)
-        VALUES ($1, $2, $3, $4, $5)
-        ON CONFLICT (company_id, field_key) DO UPDATE SET
-          field_label = EXCLUDED.field_label,
-          field_type = EXCLUDED.field_type,
-          display_order = EXCLUDED.display_order
-      `, [
-        companyId,
-        def.field_key,
-        def.field_label,
-        def.field_type || 'string',
-        def.display_order ?? 0
-      ]);
-      upsertedCount++;
-    }
-
-    console.log(`[Sync] Field definitions registered: ${upsertedCount} (company: ${req.companyName})`);
+    // CT-07 컨트롤타워 사용
+    const mapped = definitions.map((def: any) => ({
+      fieldKey: def.field_key,
+      label: def.field_label,
+      fieldType: def.field_type || 'VARCHAR',
+    }));
+    const upsertedCount = await upsertCustomFieldDefinitions(companyId, mapped);
 
     return res.json({
       success: true,

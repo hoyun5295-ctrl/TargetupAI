@@ -6,7 +6,7 @@ import * as XLSX from 'xlsx';
 import { query } from '../config/database';
 import { redis, AI_MODELS, AI_MAX_TOKENS, CACHE_TTL, TIMEOUTS, BATCH_SIZES } from '../config/defaults';
 import { normalizeByFieldKey, normalizeRegion } from '../utils/normalize';
-import { CATEGORY_LABELS, FIELD_MAP, getColumnFields, getCustomFields, getFieldByKey } from '../utils/standard-field-map';
+import { CATEGORY_LABELS, FIELD_MAP, getColumnFields, getCustomFields, getFieldByKey, upsertCustomFieldDefinitions } from '../utils/standard-field-map';
 
 // Excel 시리얼넘버 → YYYY-MM-DD 변환
 function excelSerialToDateStr(serial: number): string | null {
@@ -745,8 +745,7 @@ async function processUploadInBackground(
 
     console.log(`[업로드 완료] fileId=${fileId}, 신규=${insertCount}, 업데이트=${duplicateCount}, 오류=${errorCount}`);
 
-    // ===== 커스텀 필드 정의 저장 (customer_field_definitions) =====
-    // AI/수동 매핑에서 custom_1~15에 배정된 원본 컬럼명을 라벨로 저장
+    // ===== 커스텀 필드 정의 저장 — CT-07 컨트롤타워 사용 =====
     if (companyId) {
       try {
         const customMappings: Array<{ fieldKey: string; label: string }> = [];
@@ -756,26 +755,8 @@ async function processUploadInBackground(
             customMappings.push({ fieldKey, label });
           }
         }
-        // ★ 최초 등록 우선 정책: 이미 라벨이 있는 필드는 덮어쓰지 않음
-        // 라벨 변경은 고객사관리자가 직접 관리 (브랜드 담당자 업로드로 덮어쓰기 방지)
-        for (const cm of customMappings) {
-          const existing = await query(
-            'SELECT id, field_label FROM customer_field_definitions WHERE company_id = $1 AND field_key = $2',
-            [companyId, cm.fieldKey]
-          );
-          if (existing.rows.length > 0) {
-            // 기존 라벨이 이미 있으면 유지 (덮어쓰지 않음)
-            console.log(`[업로드] 커스텀 필드 ${cm.fieldKey} 기존 라벨 유지: "${existing.rows[0].field_label}" (신규 라벨 "${cm.label}" 무시)`);
-          } else {
-            await query(
-              `INSERT INTO customer_field_definitions (id, company_id, field_key, field_label, field_type, display_order, is_hidden, created_at)
-               VALUES (gen_random_uuid(), $1, $2, $3, 'VARCHAR', $4, false, NOW())`,
-              [companyId, cm.fieldKey, cm.label, parseInt(cm.fieldKey.replace('custom_', ''))]
-            );
-          }
-        }
         if (customMappings.length > 0) {
-          console.log(`[업로드] 커스텀 필드 정의 ${customMappings.length}개 저장 (company: ${companyId})`);
+          await upsertCustomFieldDefinitions(companyId, customMappings);
         }
       } catch (defErr) {
         console.error('[업로드] 커스텀 필드 정의 저장 실패:', defErr);

@@ -252,13 +252,23 @@ export async function getUserUnsubscribes(userId: string, options: {
   page?: number;
   limit?: number;
   search?: string;
+  companyId?: string;
+  userType?: string;
 } = {}): Promise<{ data: any[]; total: number }> {
   const page = options.page || 1;
   const limit = options.limit || 50;
   const offset = (page - 1) * limit;
 
-  let whereClause = 'WHERE user_id = $1';
-  const params: any[] = [userId];
+  // company_admin은 회사 전체 수신거부 조회, 일반 사용자는 본인 user_id만
+  let whereClause: string;
+  const params: any[] = [];
+  if (options.userType === 'company_admin' && options.companyId) {
+    whereClause = 'WHERE company_id = $1';
+    params.push(options.companyId);
+  } else {
+    whereClause = 'WHERE user_id = $1';
+    params.push(userId);
+  }
 
   if (options.search) {
     params.push(`%${options.search}%`);
@@ -266,20 +276,25 @@ export async function getUserUnsubscribes(userId: string, options: {
   }
 
   const countResult = await query(
-    `SELECT COUNT(*) FROM unsubscribes ${whereClause}`,
+    `SELECT COUNT(DISTINCT phone) FROM unsubscribes ${whereClause}`,
     params
   );
 
   const dataResult = await query(
-    `SELECT id, phone, source, created_at
+    `SELECT DISTINCT ON (phone) id, phone, source, created_at
      FROM unsubscribes ${whereClause}
-     ORDER BY created_at DESC
-     LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
-    [...params, limit, offset]
+     ORDER BY phone, created_at DESC`,
+    params
   );
 
+  // phone 기준 중복 제거 후 created_at DESC 정렬 + 페이지네이션
+  const sorted = dataResult.rows.sort((a: any, b: any) =>
+    new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  );
+  const paged = sorted.slice(offset, offset + limit);
+
   return {
-    data: dataResult.rows,
+    data: paged,
     total: parseInt(countResult.rows[0].count, 10),
   };
 }
