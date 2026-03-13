@@ -147,7 +147,44 @@
 
 ---
 
-### 🔧 D71 — 시세이도 3만건 업로드 후속 수정 (2026-03-13) — 🟡 수정완료-배포대기
+### 🔧 D72 — 예약캠페인 관리 + 발송비용 계산 수정 (2026-03-13) — ✅ 완료 (배포 완료)
+
+> **배경:** (1) 예약 대기 모달에 예약 캠페인이 표시되지 않고 취소 수단 없음, (2) 발송결과 모달의 예상 비용이 메시지 타입 무시하고 SMS 단가(9.9원)로만 계산됨.
+> **원칙:** 기록 보존 원칙 (삭제 아닌 상태 변경), 기간계 무접촉.
+
+#### ✅ 버그 1: 예약 대기 모달 — draft 캠페인 미표시 + 취소 기능 없음
+
+**현상:** AI 캠페인 생성 후 예약 시간이 설정되어 있으나 예약 대기 모달에 표시되지 않음. 취소 수단 자체가 없음.
+**원인:** AI 캠페인 생성 시 status='draft'로 INSERT, 예약 대기 모달은 status='scheduled'만 조회 → draft+scheduled_at 캠페인 누락
+**수정 파일 및 내용:**
+
+| 파일 | 수정 내용 |
+|------|-----------|
+| `campaigns.ts` | `DELETE /:id` 엔드포인트 추가 — 실제 삭제 아닌 `status='cancelled'`로 변경 (기록 보존). 과거 예약 차단 + 15분 이내 취소 제한 |
+| `Dashboard.tsx` | `loadScheduledCampaigns` — draft+scheduled_at 캠페인도 함께 조회 (Promise.all 병렬 fetch) |
+| `ScheduledCampaignModal.tsx` | draft 캠페인 "(미확정)" 라벨 표시, draft/scheduled 분기 취소 처리, 15분 제한 |
+| `CalendarModal.tsx` | draft 캠페인 amber 색상 표시, 예약 취소 버튼 + 시간 제한 (과거/15분 이내 비활성화) |
+| `ResultsModal.tsx` | 취소된 캠페인도 결과 목록에 기록 보존 (삭제하지 않음) |
+
+#### ✅ 버그 2: 발송결과 모달 — 예상 비용 SMS 단가로만 계산
+
+**현상:** LMS 27원인데 발송현황의 예상 비용이 SMS 9.9원 기준으로 계산
+**원인:** ResultsModal.tsx에서 `totalSuccess * perSms` 단일 계산 — message_type 무시
+**수정:**
+
+| 파일 | 수정 내용 |
+|------|-----------|
+| `ResultsModal.tsx` | 캠페인별 `message_type`(SMS/LMS/MMS) + `send_channel`(kakao) 체크하여 올바른 단가 적용. `filteredCampaigns.reduce()` 패턴으로 개별 합산 |
+
+**단가 기준:** SMS 9.9원 / LMS 27원 / MMS 50원 / 카카오 7.5원 (백엔드 results.ts API에서 조회)
+
+**검증:** 백엔드 `customers.ts` 대시보드 monthly_cost 계산은 이미 타입별 단가 적용 확인 (smsSent*costSms + lmsSent*costLms + mmsSent*costMms + kakaoSent*costKakao)
+
+**TypeScript:** 프론트엔드/백엔드 모두 에러 없이 통과
+
+---
+
+### 🔧 D71 — 시세이도 3만건 업로드 후속 수정 (2026-03-13) — ✅ 완료 (배포 완료)
 
 > **배경:** 시세이도CPB 30,000건 엑셀 업로드 후 (1) 슈퍼관리자 고객 목록 500에러, (2) 업로드 전건 에러, (3) 조회 시 일부 컬럼 null 표시, (4) 업로드 속도 저하 발견.
 > **원칙:** 하나씩 근본 원인 파악 → 수정. 기간계 무접촉.

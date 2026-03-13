@@ -302,6 +302,19 @@ PostgreSQL campaigns/campaign_runs 생성
 | **AI 프롬프트 예시가 FIELD_MAP과 모순** | 프롬프트 예시에 "구매횟수":"custom_1"로 안내 → FIELD_MAP에는 purchase_count 존재 → AI가 예시를 따라 잘못 매핑 | FIELD_MAP 필드 추가/변경 시 upload.ts AI 프롬프트 예시/규칙도 반드시 동기화 (D71) |
 | **SELECT 쿼리에 신규 컬럼 누락** | FIELD_MAP/DB에 필드 추가하고 upload 정상 작동하지만, customers.ts SELECT에서 안 가져와서 프론트에 null 표시 | DB 컬럼 추가 시: (1) FIELD_MAP (2) upload.ts (3) customers.ts SELECT (4) customers_unified VIEW 4곳 전부 확인 (D71) |
 | **배치 사이즈 무단 축소** | BATCH_SIZE 4000→500 변경으로 업로드 속도 7.5배 저하 (30,000건: 8배치→60배치) | 성능 관련 설정값 변경 시 변경 사유와 이전 값을 주석으로 반드시 기록 (D71) |
+| **캠페인 상태 lifecycle 조회 누락** | AI 캠페인 생성 시 status='draft'+scheduled_at 설정, 그러나 예약 대기 모달은 status='scheduled'만 조회 → draft 예약 캠페인 미표시 | 상태 기반 조회 UI 구현 시 해당 엔티티의 전체 lifecycle(draft→scheduled→sending→completed/cancelled)을 확인하고 모든 유효 상태를 포함 (D72) |
+| **프론트엔드 비용 계산 message_type 무시** | ResultsModal에서 totalSuccess * perSms 단일 계산 → LMS/MMS/카카오도 SMS 단가 적용 | 비용 계산 시 백엔드에서 타입별 단가를 이미 제공하고 있는지 확인하고, 프론트에서 캠페인별 message_type/send_channel에 따라 올바른 단가 적용 (D72) |
+| **enrichWithCustomFields column이 SQL SELECT에 직접 노출** | enrichWithCustomFields()가 column:'custom_2' (JSONB 내부 키)를 fieldMappings에 추가 → 5개 발송 경로의 동적 SELECT에 그대로 포함 → "column custom_2 does not exist" 에러 | **유틸 함수가 데이터 구조(column 값 등)를 변경/추가하면, 그 값을 소비하는 모든 곳(특히 SQL 생성부)의 동작을 반드시 끝까지 추적.** custom_fields JSONB 내부 키는 직접 컬럼이 아니므로 SQL SELECT에서 반드시 제외 (D72) |
+
+### ⚠️ 필수 체크 원칙: 유틸 함수 수정/추가 시 소비처 전수 확인
+
+> **D70~D72에서 반복된 패턴:** 유틸 함수(enrichWithCustomFields, buildCustomerFilter 등)에 데이터를 추가하거나 구조를 변경했을 때, 그 반환값을 사용하는 곳에서 어떤 일이 벌어지는지 확인하지 않아 장애 반복.
+>
+> **원칙:** 유틸 함수를 수정/추가할 때 반드시:
+> 1. 해당 함수의 반환값을 사용하는 **모든 호출부**를 grep으로 찾는다
+> 2. 각 호출부에서 반환값이 **어떻게 소비되는지** (SQL 생성, API 응답, 프론트 표시 등) 확인한다
+> 3. 추가/변경된 데이터가 소비처에서 **부작용을 일으키지 않는지** 검증한다
+> 4. 특히 **SQL 쿼리에 동적으로 삽입되는 값**은 반드시 유효한 컬럼명인지 확인한다
 
 ---
 

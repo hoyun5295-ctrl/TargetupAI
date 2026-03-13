@@ -3,7 +3,7 @@
 > **목적:** 버그의 발견→분석→수정→교차검증→완료를 체계적으로 관리하여 재발을 방지한다.  
 > **원칙:** (1) 추측성 땜질 금지 (2) 근본 원인 3줄 이내 특정 (3) 교차검증 통과 전까지 Closed 금지 (4) 재발 패턴 기록  
 > **SoT(진실의 원천):** STATUS.md + 이 문서. 채팅에서 떠도는 "수정 완료"는 교차검증 전까지 "임시"다.
-> **현황:** **2026-03-13 D71 시세이도 업로드 후속 — 5건 🟡수정완료-배포대기.** D70 18건 수정완료(3차 배포완료). 🔵Open 1건: B17-05(스팸테스트 간헐적 공백, 보류). D69 자동발송 🟡검증대기 | D66 17차 🟡검증대기 | 8차~15차 기존건 유지.
+> **현황:** **2026-03-13 D72 예약캠페인+비용계산 — 2건 ✅배포완료.** D71 시세이도 업로드 후속 — 5건 ✅배포완료. D70 18건 수정완료(3차 배포완료). 🔵Open 1건: B17-05(스팸테스트 간헐적 공백, 보류). D69 자동발송 🟡검증대기 | D66 17차 🟡검증대기 | 8차~15차 기존건 유지.
 > **⚠️ 2026-02-26 코드 실물 검증:** GPT "미수정" 지적 5건 중 GP-01/03/05는 이미 코드에 반영됨 확인. GP-04는 풀 레벨로 보강. 문서의 "❌ 미수정" 표기가 실제 코드보다 뒤떨어져 있었음.
 
 ---
@@ -57,44 +57,64 @@
 
 ---
 
-## 2) 📋 D71 — 시세이도 3만건 업로드 후속 수정 (2026-03-13)
+## 2) 📋 D72 — 예약캠페인 관리 + 발송비용 계산 수정 (2026-03-13)
+
+> **배경:** (1) AI 캠페인 예약 후 예약 대기 모달에 미표시 + 취소 수단 부재, (2) 발송결과 모달 예상 비용이 메시지 타입 무시.
+
+### B-D72-01 ✅ 예약 대기 모달 — draft 캠페인 미표시 + 취소 기능 부재
+- **심각도:** 🔴 Critical
+- **현상:** AI 캠페인 생성 후 scheduled_at 설정되어 있으나 예약 대기 모달에 표시 안 됨. 취소 수단 없음
+- **원인:** AI 캠페인 생성(POST /) → status='draft'로 INSERT, 예약 대기 모달은 status='scheduled'만 조회
+- **수정:** Dashboard.tsx draft+scheduled_at 병렬 조회, campaigns.ts DELETE→cancelled 상태 변경 엔드포인트, ScheduledCampaignModal/CalendarModal/ResultsModal 취소 UI + 15분 제한 + 기록 보존
+- **상태:** ✅ Closed (배포 완료, Harold님 확인)
+
+### B-D72-02 ✅ 발송결과 모달 — 예상 비용 SMS 단가로만 계산
+- **심각도:** 🟠 Major
+- **현상:** LMS 27원인데 발송현황의 예상 비용이 SMS 9.9원 기준으로 계산
+- **원인:** ResultsModal.tsx에서 `totalSuccess * perSms` 단일 계산 — campaign별 message_type 무시
+- **수정:** 캠페인별 message_type(SMS/LMS/MMS) + send_channel(kakao) 체크하여 올바른 단가 적용 (filteredCampaigns.reduce 패턴)
+- **상태:** ✅ Closed (배포 완료, Harold님 확인)
+
+---
+
+## 3) 📋 D71 — 시세이도 3만건 업로드 후속 수정 (2026-03-13)
 
 > **배경:** 시세이도CPB 30,000건 업로드 후 4건 연쇄 버그 발견. 모두 DB 컬럼 추가/FIELD_MAP 변경 시 연관 코드 미갱신이 원인.
 
-### B-D71-01 🟡 customers_unified VIEW store_phone 누락 → 500에러
+### B-D71-01 ✅ customers_unified VIEW store_phone 누락 → 500에러
 - **심각도:** 🔴🔴 Blocker
 - **현상:** 슈퍼관리자 고객 목록 접근 시 500에러
 - **원인:** customers 테이블에 store_phone 추가 후 customers_unified VIEW 미재생성 → "column store_phone does not exist"
 - **수정:** 서버 DDL 직접 실행 (DROP VIEW + CREATE VIEW)
-- **상태:** 🟡 수정완료-검증대기
+- **상태:** ✅ Closed (배포 완료, Harold님 확인)
 
-### B-D71-02 🟡 upload.ts INSERT region 중복 → 전건 에러
+### B-D71-02 ✅ upload.ts INSERT region 중복 → 전건 에러
 - **심각도:** 🔴🔴 Blocker
 - **현상:** 30,000건 업로드 전건 에러 ("column region specified more than once")
 - **원인:** FIELD_MAP에 region 추가(D70-17) 후 upload.ts 파생 컬럼의 명시적 region 미제거
 - **수정:** 명시적 region 3곳 제거, FIELD_MAP 루프에서 derivedRegion 우선 처리
-- **상태:** 🟡 수정완료-배포완료
+- **상태:** ✅ Closed (배포 완료, Harold님 확인)
 
-### B-D71-03 🟡 AI 매핑 프롬프트 FIELD_MAP 불일치 → 데이터 null
+### B-D71-03 ✅ AI 매핑 프롬프트 FIELD_MAP 불일치 → 데이터 null
 - **심각도:** 🔴 Critical
 - **현상:** 엑셀에 데이터 있으나 구매횟수/최근구매일 DB에 null 저장
 - **원인:** (1) 프롬프트 예시 "구매횟수":"custom_1" (2) recent_purchase_date FIELD_MAP 미등록 (3) region 중복 (4) store_name/날짜 필드 구분 안내 없음
 - **수정:** 프롬프트 예시/규칙 전면 수정, FIELD_MAP에 recent_purchase_date 추가, 중복 제거
-- **상태:** 🟡 수정완료-배포대기
+- **상태:** ✅ Closed (배포 완료, Harold님 확인)
 
-### B-D71-04 🟡 customers.ts SELECT 누락 → 조회 시 null 표시
+### B-D71-04 ✅ customers.ts SELECT 누락 → 조회 시 null 표시
 - **심각도:** 🔴 Critical
 - **현상:** 고객DB 조회 시 최근구매금액, 구매횟수, 주소 컬럼이 `-` 표시
 - **원인:** DB에 데이터 정상 저장, 그러나 customers.ts SELECT에 address, recent_purchase_amount, purchase_count 미포함
 - **수정:** SELECT 쿼리에 3개 컬럼 추가
-- **상태:** 🟡 수정완료-배포대기
+- **상태:** ✅ Closed (배포 완료, Harold님 확인)
 
-### B-D71-05 🟡 업로드 배치 사이즈 500으로 축소 → 속도 저하
+### B-D71-05 ✅ 업로드 배치 사이즈 500으로 축소 → 속도 저하
 - **심각도:** 🟠 Major
 - **현상:** 30,000건 업로드 체감 속도 저하
 - **원인:** 초기 BATCH_SIZE 4000 → 500으로 축소 (8배치→60배치)
 - **수정:** defaults.ts customerUpload 500→2000 (15배치, 4배 개선)
-- **상태:** 🟡 수정완료-배포대기
+- **상태:** ✅ Closed (배포 완료, Harold님 확인)
 
 ---
 
