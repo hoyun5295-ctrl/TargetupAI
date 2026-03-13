@@ -273,8 +273,8 @@ router.post('/test-send', async (req: Request, res: Response) => {
     const testFieldMappings = extractVarCatalog(companyResult.rows[0]?.customer_schema).fieldMappings;
     // ★ B-D70-16: 커스텀 필드 매핑 보강 (미리보기 vs 실제 발송 개인화 불일치 수정)
     await enrichWithCustomFields(testFieldMappings, companyId);
-    // ★ custom_ 접두사 컬럼은 제외 — custom_fields JSONB 내부 키이므로 직접 SELECT 불가 (D72 수정)
-    const testMappingCols = Object.values(testFieldMappings).map((m: any) => m.column).filter((col: string) => !col.startsWith('custom_'));
+    // ★ storageType 기반 동적 필터 — 직접 컬럼만 SELECT, JSONB 내부 키는 custom_fields 컬럼에서 접근 (D72)
+    const testMappingCols = Object.values(testFieldMappings).filter((m: any) => m.storageType !== 'custom_fields').map((m: any) => m.column);
     const testSelectCols = [...new Set(['phone', 'custom_fields', ...testMappingCols])].join(', ');
     const testFirstCustomerResult = await query(
       `SELECT ${testSelectCols} FROM customers WHERE company_id = $1 AND is_active = true AND sms_opt_in = true ORDER BY created_at DESC LIMIT 1`,
@@ -596,8 +596,8 @@ router.post('/:id/send', async (req: Request, res: Response) => {
     // ★ store_phone 포함: 개별회신번호 사용 시 callback이 없으면 store_phone을 폴백으로 사용
     // ★ custom_fields 포함: 커스텀 필드 변수 치환을 위해 JSONB 컬럼 필수
     const baseColumns = ['id', 'phone', 'callback', 'store_phone', 'custom_fields'];
-    // ★ custom_ 접두사 컬럼은 제외 — custom_fields JSONB 내부 키이므로 직접 SELECT 불가 (D72 수정)
-    const mappingColumns = Object.values(fieldMappings).map((m: VarCatalogEntry) => m.column).filter(col => !col.startsWith('custom_'));
+    // ★ storageType 기반 동적 필터 — 직접 컬럼만 SELECT, JSONB 내부 키는 custom_fields 컬럼에서 접근 (D72)
+    const mappingColumns = Object.values(fieldMappings).filter((m: VarCatalogEntry) => m.storageType !== 'custom_fields').map((m: VarCatalogEntry) => m.column);
     const selectColumns = [...new Set([...baseColumns, ...mappingColumns])].join(', ');
 
     // draft 또는 completed 상태에서 재발송 가능
@@ -1466,8 +1466,8 @@ router.post('/direct-send', async (req: Request, res: Response) => {
     const directFieldMappings = extractVarCatalog(directSchemaResult.rows[0]?.customer_schema).fieldMappings;
     // ★ B-D70-16: 커스텀 필드 매핑 보강 (미리보기 vs 실제 발송 개인화 불일치 수정)
     await enrichWithCustomFields(directFieldMappings, companyId);
-    // ★ custom_ 접두사 컬럼은 제외 — custom_fields JSONB 내부 키이므로 직접 SELECT 불가 (D72 수정)
-    const directMappingCols = Object.values(directFieldMappings).map((m: any) => m.column).filter((col: string) => !col.startsWith('custom_'));
+    // ★ storageType 기반 동적 필터 — 직접 컬럼만 SELECT, JSONB 내부 키는 custom_fields 컬럼에서 접근 (D72)
+    const directMappingCols = Object.values(directFieldMappings).filter((m: any) => m.storageType !== 'custom_fields').map((m: any) => m.column);
     const directSelectCols = [...new Set(['phone', 'custom_fields', ...directMappingCols])].join(', ');
     const directPhoneList = filteredRecipients.map((r: any) => normalizePhone(r.phone));
     const directCustomersResult = await query(
@@ -2084,8 +2084,8 @@ router.put('/:id/message', async (req: Request, res: Response) => {
 
     // ★ D32: 동적 컬럼 SELECT — fieldMappings에서 필요한 컬럼 자동 추출
     const editBaseColumns = ['phone', 'custom_fields'];
-    // ★ custom_ 접두사 컬럼은 제외 — custom_fields JSONB 내부 키이므로 직접 SELECT 불가 (D72 수정)
-    const editMappingColumns = Object.values(editFieldMappings).map((m: VarCatalogEntry) => m.column).filter(col => !col.startsWith('custom_'));
+    // ★ storageType 기반 동적 필터 — 직접 컬럼만 SELECT, JSONB 내부 키는 custom_fields 컬럼에서 접근 (D72)
+    const editMappingColumns = Object.values(editFieldMappings).filter((m: VarCatalogEntry) => m.storageType !== 'custom_fields').map((m: VarCatalogEntry) => m.column);
     const editSelectColumns = [...new Set([...editBaseColumns, ...editMappingColumns])].join(', ');
 
     const phones = recipients.map((r: any) => r.dest_no);

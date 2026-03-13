@@ -50,6 +50,7 @@ export async function enrichWithCustomFields(
           type: 'string',
           description: label,
           sample: '',
+          storageType: 'custom_fields',
         };
       }
     }

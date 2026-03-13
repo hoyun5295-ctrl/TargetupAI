@@ -75,6 +75,8 @@ export interface VarCatalogEntry {
   description: string;
   sample: string | number;
   values?: string[];
+  /** 저장 방식: 'column'=직접 컬럼(SQL SELECT 가능), 'custom_fields'=JSONB 내부 키(SQL SELECT 불가) */
+  storageType?: 'column' | 'custom_fields';
 }
 
 interface MessageVariant {
@@ -127,6 +129,7 @@ function buildVarCatalogFromFieldMap(): {
       type: f.dataType === 'boolean' ? 'string' : f.dataType as 'string' | 'number' | 'date',
       description: f.displayName,
       sample: f.dataType === 'number' ? 0 : f.dataType === 'date' ? '' : '',
+      storageType: 'column',
     };
     availableVars.push(varName);
   }

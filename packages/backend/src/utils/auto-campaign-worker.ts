@@ -135,8 +135,8 @@ async function executeAutoCampaign(ac: any): Promise<void> {
 
     // 동적 SELECT 컬럼 구성
     const baseColumns = ['id', 'phone', 'custom_fields'];
-    // ★ custom_ 접두사 컬럼은 제외 — custom_fields JSONB 내부 키이므로 직접 SELECT 불가 (D72 수정)
-    const mappingColumns = Object.values(fieldMappings).map((m: any) => m.column).filter((col: string) => !col.startsWith('custom_'));
+    // ★ storageType 기반 동적 필터 — 직접 컬럼만 SELECT, JSONB 내부 키는 custom_fields 컬럼에서 접근 (D72)
+    const mappingColumns = Object.values(fieldMappings).filter((m: any) => m.storageType !== 'custom_fields').map((m: any) => m.column);
     const selectColumns = [...new Set([...baseColumns, ...mappingColumns])].join(', ');
 
     // ★ customer-filter로 타겟 필터링
