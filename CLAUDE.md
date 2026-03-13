@@ -201,9 +201,10 @@ AND NOT EXISTS (
 - **주요 함수:**
   - 테이블 조회: `getCompanySmsTables()`, `getTestSmsTables()`, `getAuthSmsTable()`, `getCompanySmsTablesWithLogs()`
   - 큐 조작: `getNextSmsTable()` (라운드로빈), `smsCountAll()`, `smsAggAll()`, `smsSelectAll()`, `smsMinAll()`, `smsExecAll()`
+  - **벌크 INSERT:** `bulkInsertSmsQueue(tables, rows, useNow)` — 라운드로빈 테이블 분배 + BATCH_SIZES.smsSend(5000건) 단위 bulk INSERT. AI캠페인/직접발송/자동발송 3경로 적용 (D72)
   - 카카오: `insertKakaoQueue()`, `kakaoAgg()`, `kakaoCountPending()`, `kakaoCancelPending()`
   - 캐시: `invalidateLineGroupCache()`
-- **적용 파일:** campaigns.ts, manage-scheduled.ts, results.ts, campaign-lifecycle.ts
+- **적용 파일:** campaigns.ts, manage-scheduled.ts, results.ts, campaign-lifecycle.ts, auto-campaign-worker.ts
 
 #### CT-05: prepaid.ts — 선불 잔액 관리
 - **역할:** 포인트 차감/환불의 유일한 진입점. DB 기반 단가 조회 (하드코딩 금지)
@@ -305,6 +306,8 @@ PostgreSQL campaigns/campaign_runs 생성
 | **캠페인 상태 lifecycle 조회 누락** | AI 캠페인 생성 시 status='draft'+scheduled_at 설정, 그러나 예약 대기 모달은 status='scheduled'만 조회 → draft 예약 캠페인 미표시 | 상태 기반 조회 UI 구현 시 해당 엔티티의 전체 lifecycle(draft→scheduled→sending→completed/cancelled)을 확인하고 모든 유효 상태를 포함 (D72) |
 | **프론트엔드 비용 계산 message_type 무시** | ResultsModal에서 totalSuccess * perSms 단일 계산 → LMS/MMS/카카오도 SMS 단가 적용 | 비용 계산 시 백엔드에서 타입별 단가를 이미 제공하고 있는지 확인하고, 프론트에서 캠페인별 message_type/send_channel에 따라 올바른 단가 적용 (D72) |
 | **enrichWithCustomFields column이 SQL SELECT에 직접 노출** | enrichWithCustomFields()가 column:'custom_2' (JSONB 내부 키)를 fieldMappings에 추가 → 5개 발송 경로의 동적 SELECT에 그대로 포함 → "column custom_2 does not exist" 에러 | **유틸 함수가 데이터 구조(column 값 등)를 변경/추가하면, 그 값을 소비하는 모든 곳(특히 SQL 생성부)의 동작을 반드시 끝까지 추적.** custom_fields JSONB 내부 키는 직접 컬럼이 아니므로 SQL SELECT에서 반드시 제외 (D72) |
+| **건건이 MySQL INSERT로 발송 성능 저하** | 25,000건 발송에 ~3분 (건건이 INSERT = 25,000회 DB 왕복). 70만건이면 ~90분 | MySQL INSERT는 반드시 bulk INSERT로. sms-queue.ts 컨트롤타워(CT-04)의 `bulkInsertSmsQueue()` 사용. 인라인 INSERT 로직 절대 금지 (D72) |
+| **발송 경로 inline 로직 vs 컨트롤타워** | 직접발송에서 MySQL INSERT를 인라인으로 구현 + app_etc2(companyId) 누락 | 발송 관련 MySQL 조작은 반드시 sms-queue.ts 컨트롤타워를 통해야 함. 인라인 구현 시 다른 경로와 불일치 발생 (D72) |
 
 ### ⚠️ 필수 체크 원칙: 유틸 함수 수정/추가 시 소비처 전수 확인
 

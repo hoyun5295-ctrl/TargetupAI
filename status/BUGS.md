@@ -3,7 +3,7 @@
 > **목적:** 버그의 발견→분석→수정→교차검증→완료를 체계적으로 관리하여 재발을 방지한다.  
 > **원칙:** (1) 추측성 땜질 금지 (2) 근본 원인 3줄 이내 특정 (3) 교차검증 통과 전까지 Closed 금지 (4) 재발 패턴 기록  
 > **SoT(진실의 원천):** STATUS.md + 이 문서. 채팅에서 떠도는 "수정 완료"는 교차검증 전까지 "임시"다.
-> **현황:** **2026-03-13 D72 예약캠페인+비용계산 — 2건 ✅배포완료.** D71 시세이도 업로드 후속 — 5건 ✅배포완료. D70 18건 수정완료(3차 배포완료). 🔵Open 1건: B17-05(스팸테스트 간헐적 공백, 보류). D69 자동발송 🟡검증대기 | D66 17차 🟡검증대기 | 8차~15차 기존건 유지.
+> **현황:** **2026-03-13 D72 예약캠페인+비용계산+storageType+성능개선 — 4건 배포대기.** D71 시세이도 업로드 후속 — 5건 ✅배포완료. D70 18건 수정완료(3차 배포완료). 🔵Open 1건: B17-05(스팸테스트 간헐적 공백, 보류). D69 자동발송 🟡검증대기 | D66 17차 🟡검증대기 | 8차~15차 기존건 유지.
 > **⚠️ 2026-02-26 코드 실물 검증:** GPT "미수정" 지적 5건 중 GP-01/03/05는 이미 코드에 반영됨 확인. GP-04는 풀 레벨로 보강. 문서의 "❌ 미수정" 표기가 실제 코드보다 뒤떨어져 있었음.
 
 ---
@@ -74,6 +74,22 @@
 - **원인:** ResultsModal.tsx에서 `totalSuccess * perSms` 단일 계산 — campaign별 message_type 무시
 - **수정:** 캠페인별 message_type(SMS/LMS/MMS) + send_channel(kakao) 체크하여 올바른 단가 적용 (filteredCampaigns.reduce 패턴)
 - **상태:** ✅ Closed (배포 완료, Harold님 확인)
+
+### B-D72-03 🟡 예약발송 `column "custom_2" does not exist` — storageType 동적 필터
+- **심각도:** 🔴🔴 Blocker
+- **현상:** 예약발송 시 서버 500에러 — `column "custom_2" does not exist at character 618`
+- **원인:** `enrichWithCustomFields()`가 custom_fields JSONB 내부 키(custom_1~15)를 fieldMappings의 `column` 속성에 설정 → 동적 SELECT에 그대로 포함 → PostgreSQL에 실제 컬럼이 없어서 에러
+- **수정:** VarCatalogEntry에 `storageType` 속성 추가 ('column' vs 'custom_fields'). 6개 동적 SELECT 지점 전부에서 `storageType !== 'custom_fields'` 필터링
+- **전수점검:** campaigns.ts 4곳 + auto-campaign-worker.ts 1곳 + spam-filter.ts 1곳 = **6곳 모두 적용**
+- **상태:** 🟡 수정완료-검증대기
+
+### B-D72-04 🟡 발송 성능 — 25,000건에 3분, 건건이 MySQL INSERT
+- **심각도:** 🔴 Critical (상용화 차단)
+- **현상:** 25,000건 발송에 ~3분 소요. 70만건이면 ~90분. 상용화 불가
+- **원인:** 건건이 MySQL INSERT (25,000회 DB 왕복)
+- **수정:** sms-queue.ts (CT-04)에 `bulkInsertSmsQueue()` 함수 추가 — 라운드로빈 테이블 분배 + 5,000건 배치 bulk INSERT. AI캠페인/직접발송/자동발송 3개 경로 적용
+- **직접발송 app_etc2 누락도 동시 수정:** row에 companyId(app_etc2) 포함
+- **상태:** 🟡 수정완료-검증대기
 
 ---
 

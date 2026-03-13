@@ -137,8 +137,10 @@ export default function Dashboard() {
 
   const [stats, setStats] = useState<Stats | null>(null);
   const [planInfo, setPlanInfo] = useState<PlanInfo | null>(null);
+  // 트라이얼 만료도 subscription 잠금으로 처리 (FREE plan + 7일 경과)
   const isSubscriptionLocked = planInfo
-    ? (planInfo.subscription_status === 'expired' || planInfo.subscription_status === 'suspended')
+    ? (planInfo.subscription_status === 'expired' || planInfo.subscription_status === 'suspended'
+       || (planInfo.plan_code === 'FREE' && planInfo.is_trial_expired))
     : (subscriptionStatus === 'expired' || subscriptionStatus === 'suspended');
   // D53: DB 플래그 기반 게이팅 (하드코딩 가격 체크 제거)
   const isSpamFilterLocked = !planInfo?.spam_filter_enabled;
@@ -2212,7 +2214,7 @@ const campaignData = {
                     }
                   }}
                   disabled={aiLoading}
-                  className="p-5 bg-green-700 hover:bg-green-800 rounded-xl transition-all hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed text-right flex-1 flex flex-col justify-between relative"
+                  className={`p-5 bg-green-700 hover:bg-green-800 rounded-xl transition-all hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed text-right flex-1 flex flex-col justify-between relative ${isSubscriptionLocked || isAiMessagingLocked ? 'opacity-60' : ''}`}
                 >
                   <div className="absolute -top-2 right-3 bg-white text-green-700 text-xs font-bold px-2 py-0.5 rounded-full shadow">
                     MAIN
@@ -2228,7 +2230,7 @@ const campaignData = {
                   ) : (
                     <>
                       <div>
-                        <div className="text-xl font-bold text-white mb-1">AI 추천 발송</div>
+                        <div className="text-xl font-bold text-white mb-1">{(isSubscriptionLocked || isAiMessagingLocked) ? '🔒 ' : ''}AI 추천 발송</div>
                         <div className="text-sm text-green-200">자연어로 AI가 자동 설계</div>
                       </div>
                       <div className="text-3xl text-green-300 self-end">→</div>

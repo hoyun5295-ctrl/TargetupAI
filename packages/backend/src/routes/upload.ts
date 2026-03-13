@@ -89,8 +89,10 @@ const upload = multer({
 router.post('/parse', authenticate, upload.single('file'), async (req: Request, res: Response) => {
   try {
     // ★ D53: 요금제 게이팅 — customer_db_enabled 체크
+    // 직접발송용 파싱(includeData=true)은 게이팅 제외 — 만료 후에도 직접발송 파일등록 허용
     const companyIdForGating = req.user?.companyId;
-    if (companyIdForGating) {
+    const isDirectSendParse = req.query.includeData === 'true';
+    if (companyIdForGating && !isDirectSendParse) {
       const planCheck = await query(
         `SELECT p.customer_db_enabled FROM companies c
          LEFT JOIN plans p ON c.plan_id = p.id

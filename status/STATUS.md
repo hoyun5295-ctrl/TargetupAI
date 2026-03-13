@@ -147,10 +147,10 @@
 
 ---
 
-### 🔧 D72 — 예약캠페인 관리 + 발송비용 계산 수정 (2026-03-13) — ✅ 완료 (배포 완료)
+### 🔧 D72 — 예약캠페인 관리 + 발송비용 계산 + storageType 동적필터 + 발송 성능개선 (2026-03-13) — 배포 대기
 
-> **배경:** (1) 예약 대기 모달에 예약 캠페인이 표시되지 않고 취소 수단 없음, (2) 발송결과 모달의 예상 비용이 메시지 타입 무시하고 SMS 단가(9.9원)로만 계산됨.
-> **원칙:** 기록 보존 원칙 (삭제 아닌 상태 변경), 기간계 무접촉.
+> **배경:** (1) 예약 대기 모달에 예약 캠페인이 표시되지 않고 취소 수단 없음, (2) 발송결과 모달의 예상 비용이 메시지 타입 무시하고 SMS 단가(9.9원)로만 계산됨, (3) 예약발송 시 `column "custom_2" does not exist` 에러 — enrichWithCustomFields가 JSONB 내부 키를 SQL SELECT에 노출, (4) 25,000건 발송에 3분 소요 — 건건이 MySQL INSERT (70만건이면 90분).
+> **원칙:** 기록 보존 원칙 (삭제 아닌 상태 변경), 기간계 무접촉, 하드코딩 금지 — storageType 동적 판별, 컨트롤타워(CT-04) 활용.
 
 #### ✅ 버그 1: 예약 대기 모달 — draft 캠페인 미표시 + 취소 기능 없음
 
@@ -178,9 +178,52 @@
 
 **단가 기준:** SMS 9.9원 / LMS 27원 / MMS 50원 / 카카오 7.5원 (백엔드 results.ts API에서 조회)
 
-**검증:** 백엔드 `customers.ts` 대시보드 monthly_cost 계산은 이미 타입별 단가 적용 확인 (smsSent*costSms + lmsSent*costLms + mmsSent*costMms + kakaoSent*costKakao)
+#### ✅ 버그 3: 예약발송 `column "custom_2" does not exist` — storageType 동적 필터
 
-**TypeScript:** 프론트엔드/백엔드 모두 에러 없이 통과
+**현상:** 예약발송 시 서버 500 에러 — `column "custom_2" does not exist at character 618`
+**원인:** `enrichWithCustomFields()`가 customer_field_definitions에서 커스텀 필드를 fieldMappings에 추가할 때 `column: 'custom_2'` (custom_fields JSONB 내부 키)를 설정 → 5개 발송 경로의 동적 SELECT에 그대로 포함 → PostgreSQL에 실제 컬럼이 없으므로 에러
+**해결 방향:** `VarCatalogEntry`에 `storageType` 속성 추가 — `'column'` (SQL SELECT 가능) vs `'custom_fields'` (JSONB 내부 키, SQL SELECT 불가). 모든 동적 SELECT 생성 지점에서 `storageType !== 'custom_fields'` 필터링.
+
+| 파일 | 수정 내용 |
+|------|-----------|
+| `services/ai.ts` | `VarCatalogEntry` 인터페이스에 `storageType?: 'column' \| 'custom_fields'` 추가, `buildVarCatalogFromFieldMap()`에서 `storageType: 'column'` 설정 |
+| `utils/messageUtils.ts` | `enrichWithCustomFields()`에서 `storageType: 'custom_fields'` 설정 |
+| `routes/campaigns.ts` | **4곳** 동적 SELECT에 `.filter(m => m.storageType !== 'custom_fields')` 적용 — test-send, /:id/send, direct-send, schedule/문안수정 |
+| `utils/auto-campaign-worker.ts` | **1곳** 동적 SELECT에 storageType 필터 적용 |
+| `routes/spam-filter.ts` | **1곳** 동적 SELECT에 storageType 필터 적용 + custom_fields 컬럼 SELECT에 추가 |
+
+**⚠️ 전수점검 — 동적 SELECT 6곳 모두 적용 완료:**
+1. campaigns.ts ~277 (test-send)
+2. campaigns.ts ~600 (/:id/send AI캠페인)
+3. campaigns.ts ~1470 (direct-send)
+4. campaigns.ts ~2088 (schedule/문안수정)
+5. auto-campaign-worker.ts (자동발송)
+6. spam-filter.ts (스팸필터 테스트)
+
+#### ✅ 성능개선: 발송 MySQL INSERT 벌크화 — bulkInsertSmsQueue 컨트롤타워 (CT-04)
+
+**현상:** 25,000건 발송에 약 3분 소요 — 건건이 MySQL INSERT (25,000회 DB 왕복). 70만건이면 ~90분.
+**해결:** `sms-queue.ts` (CT-04)에 `bulkInsertSmsQueue()` 함수 추가 — 테이블 라운드로빈 분배 + 5,000건 배치 bulk INSERT.
+
+| 파일 | 수정 내용 |
+|------|-----------|
+| `utils/sms-queue.ts` | `bulkInsertSmsQueue(tables, rows, useNow)` 함수 추가 — 라운드로빈 테이블 분배, BATCH_SIZES.smsSend(5000) 단위 배치 |
+| `config/defaults.ts` | `BATCH_SIZES.smsSend: 5000` 추가 (max_allowed_packet 64MB 기준) |
+| `routes/campaigns.ts` | AI캠페인(/:id/send): 건건이 INSERT → `bulkInsertSmsQueue()` 1줄 호출. 직접발송(direct-send): inline bulk → `bulkInsertSmsQueue()` + app_etc2(companyId) 추가 |
+| `utils/auto-campaign-worker.ts` | 건건이 INSERT → `bulkInsertSmsQueue()` 1줄 호출, `mysqlQuery`/`BATCH_SIZES` import 제거 |
+
+**적용 경로 (3개):**
+- AI캠페인 `/:id/send` → `bulkInsertSmsQueue(companyTables, aiSmsRows, !isScheduled)`
+- 직접발송 `/direct-send` → `bulkInsertSmsQueue(companyTables, directSmsRows, useNow)`
+- 자동발송 `auto-campaign-worker` → `bulkInsertSmsQueue(companyTables, autoSmsRows, true)`
+
+**미적용 (2개, 사유):**
+- 테스트발송 `/test-send`: 1~3건 극소량 + bill_id 추가 컬럼 → 개별 INSERT 유지
+- 문안수정 `/:id/schedule`: UPDATE (INSERT 아님) → 해당 없음
+
+**성능 예상:** 25,000건 기준 25,000회 → 5회 INSERT (5000건 배치) = 약 5,000배 DB 왕복 감소
+
+**TypeScript:** 백엔드 `tsc --noEmit` 에러 없이 통과
 
 ---
 
