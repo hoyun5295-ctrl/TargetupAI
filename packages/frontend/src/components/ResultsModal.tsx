@@ -296,7 +296,20 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
                 const totalFail = filteredCampaigns.reduce((sum, c) => sum + (c.fail_count || 0), 0);
                 const totalSent = totalSuccess + totalFail;
                 const successRate = totalSent > 0 ? Math.round((totalSuccess / totalSent) * 100) : 0;
+                // 메시지 타입별 단가 적용 (SMS/LMS/MMS/카카오 구분)
                 const perSms = summary?.costs?.perSms || 9.9;
+                const perLms = summary?.costs?.perLms || 27;
+                const perMms = summary?.costs?.perMms || 50;
+                const perKakao = summary?.costs?.perKakao || 7.5;
+                const estimatedCost = filteredCampaigns.reduce((sum, c) => {
+                  const success = c.success_count || 0;
+                  const type = (c.message_type || 'SMS').toUpperCase();
+                  const channel = c.send_channel || 'sms';
+                  if (channel === 'kakao') return sum + success * perKakao;
+                  if (type === 'MMS') return sum + success * perMms;
+                  if (type === 'LMS') return sum + success * perLms;
+                  return sum + success * perSms;
+                }, 0);
                 return (
                   <div className="grid grid-cols-5 gap-3">
                     {[
@@ -304,7 +317,7 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
                       { label: '성공', value: totalSuccess.toLocaleString(), color: 'text-green-600', bg: 'bg-green-50 border-green-100' },
                       { label: '실패', value: totalFail.toLocaleString(), color: 'text-red-600', bg: 'bg-red-50 border-red-100' },
                       { label: '성공률', value: `${successRate}%`, color: 'text-violet-600', bg: 'bg-violet-50 border-violet-100' },
-                      { label: '예상 비용', value: `${(totalSuccess * perSms).toLocaleString()}원`, color: 'text-amber-600', bg: 'bg-amber-50 border-amber-100' },
+                      { label: '예상 비용', value: `${Math.round(estimatedCost).toLocaleString()}원`, color: 'text-amber-600', bg: 'bg-amber-50 border-amber-100' },
                     ].map(card => (
                       <div key={card.label} className={`rounded-lg p-4 text-center border ${card.bg}`}>
                         <div className={`text-2xl font-bold ${card.color}`}>{card.value}</div>
