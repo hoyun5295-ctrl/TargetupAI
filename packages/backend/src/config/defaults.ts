@@ -72,8 +72,8 @@ export const TIMEOUTS = {
 // 배치 사이즈 (건수)
 // ============================================================
 export const BATCH_SIZES = {
-  /** 고객 업로드 DB insert 배치 */
-  customerUpload: 500,
+  /** 고객 업로드 DB insert 배치 (원래 4000 → 500 으로 축소된 이력 있음, 복원) */
+  customerUpload: 2000,
   /** 발송 메시지 업데이트 배치 */
   messageUpdate: 1000,
   /** 동기화 API 고객 배치 */
