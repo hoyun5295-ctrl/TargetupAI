@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
-import { FIELD_MAP, getFieldByKey } from '../utils/standard-field-map';
+import { FIELD_MAP, getFieldByKey, getColumnFields } from '../utils/standard-field-map';
 import { query } from '../config/database';
 import { AI_MODELS, AI_MAX_TOKENS, TIMEOUTS } from '../config/defaults';
 
@@ -786,32 +786,53 @@ export async function recommendTarget(
   const brandName = companyInfo?.brand_name || companyInfo?.company_name || '브랜드';
   const hasKakaoProfile = companyInfo?.has_kakao_profile || false;
   
-  // 동적 스키마 파싱 — 하드코딩 제거, DB DISTINCT 조회로 실데이터 기반
+  // ★ D74: 고객사별 실제 필드 동적 감지 — FIELD_MAP + DB 기반
+  // 하드코딩 제거. 고객사가 등록한 데이터를 보고 필터/문안생성/치환 전부 자동 대응.
   const schema = companyInfo?.customer_schema || {};
-  const customKeys = schema.custom_field_keys || [];
 
-  // DB에서 실제 사용 중인 grade/gender/region 값을 DISTINCT 조회
-  let genders = schema.genders?.join(', ') || '';
-  let grades = schema.grades?.join(', ') || '';
-  let regions = schema.regions?.join(', ') || '';
+  // 1) 직접 컬럼 필드 — 데이터 존재 여부 한 번에 체크 (enabled-fields API와 동일 패턴)
+  const detectableFields = getColumnFields().filter(f => f.fieldKey !== 'name' && f.fieldKey !== 'phone' && f.fieldKey !== 'sms_opt_in');
+  const countFilters = detectableFields.map(f => {
+    const c = f.columnName;
+    if (f.dataType === 'number') return `COUNT(*) FILTER (WHERE ${c} IS NOT NULL AND ${c} > 0) as cnt_${f.fieldKey}`;
+    if (f.dataType === 'date') return `COUNT(*) FILTER (WHERE ${c} IS NOT NULL) as cnt_${f.fieldKey}`;
+    return `COUNT(*) FILTER (WHERE ${c} IS NOT NULL AND ${c} != '') as cnt_${f.fieldKey}`;
+  });
 
+  // 2) 커스텀 필드 라벨 조회
+  const [fieldCountRes, fieldDefsRes] = await Promise.all([
+    query(`SELECT ${countFilters.join(', ')} FROM customers WHERE company_id = $1 AND is_active = true`, [companyId]),
+    query(`SELECT field_key, field_label FROM customer_field_definitions WHERE company_id = $1 AND (is_hidden = false OR is_hidden IS NULL) ORDER BY display_order`, [companyId]),
+  ]);
+  const dc = fieldCountRes.rows[0] || {};
+  const customFieldLabels: Record<string, string> = {};
+  for (const fd of fieldDefsRes.rows) {
+    customFieldLabels[fd.field_key] = fd.field_label;
+  }
+
+  // 3) 데이터 있는 직접 컬럼 필드만 추출
+  const activeColumnFields = detectableFields.filter(f => parseInt(dc[`cnt_${f.fieldKey}`] || '0') > 0);
+
+  // 4) 문자열 필드 중 grade/gender/region은 DISTINCT 조회로 실제 값 표시
+  let genders = ''; let grades = ''; let regions = '';
   try {
-    const [gradeRes, genderRes, regionRes] = await Promise.all([
-      query('SELECT DISTINCT grade FROM customers WHERE company_id = $1 AND grade IS NOT NULL AND grade != \'\' ORDER BY grade', [companyId]),
-      query('SELECT DISTINCT gender FROM customers WHERE company_id = $1 AND gender IS NOT NULL AND gender != \'\' ORDER BY gender', [companyId]),
-      query('SELECT DISTINCT region FROM customers WHERE company_id = $1 AND region IS NOT NULL AND region != \'\' ORDER BY region', [companyId]),
-    ]);
+    const distinctQueries: Promise<any>[] = [];
+    const hasGrade = activeColumnFields.some(f => f.fieldKey === 'grade');
+    const hasGender = activeColumnFields.some(f => f.fieldKey === 'gender');
+    const hasRegion = activeColumnFields.some(f => f.fieldKey === 'region');
+    if (hasGrade) distinctQueries.push(query('SELECT DISTINCT grade FROM customers WHERE company_id = $1 AND grade IS NOT NULL AND grade != \'\' ORDER BY grade', [companyId]));
+    else distinctQueries.push(Promise.resolve({ rows: [] }));
+    if (hasGender) distinctQueries.push(query('SELECT DISTINCT gender FROM customers WHERE company_id = $1 AND gender IS NOT NULL AND gender != \'\' ORDER BY gender', [companyId]));
+    else distinctQueries.push(Promise.resolve({ rows: [] }));
+    if (hasRegion) distinctQueries.push(query('SELECT DISTINCT region FROM customers WHERE company_id = $1 AND region IS NOT NULL AND region != \'\' ORDER BY region', [companyId]));
+    else distinctQueries.push(Promise.resolve({ rows: [] }));
+    const [gradeRes, genderRes, regionRes] = await Promise.all(distinctQueries);
     if (gradeRes.rows.length > 0) grades = gradeRes.rows.map((r: any) => r.grade).join(', ');
     if (genderRes.rows.length > 0) genders = genderRes.rows.map((r: any) => r.gender).join(', ');
     if (regionRes.rows.length > 0) regions = regionRes.rows.map((r: any) => r.region).join(', ');
   } catch (err) {
-    console.warn('[AI] DISTINCT 조회 실패, schema fallback 사용:', err);
+    console.warn('[AI] DISTINCT 조회 실패:', err);
   }
-
-  // DISTINCT 결과도 schema도 없으면 빈 문자열 → 프롬프트에서 "등록된 값 없음" 표시
-  if (!genders) genders = '(등록된 성별 데이터 없음)';
-  if (!grades) grades = '(등록된 등급 데이터 없음)';
-  if (!regions) regions = '(등록된 지역 데이터 없음)';
   
   // ★ 변수 카탈로그 프롬프트 — 개인화 필수 지정 시 해당 변수만 표시
   const effectiveVars = (personalizationDirective?.requestedVars.length)
@@ -844,20 +865,23 @@ ${cleanObjective}
 - 평균 구매횟수: ${Number(customerStats.avg_purchase_count || 0).toFixed(1)}회
 - 평균 구매금액: ${Math.round(Number(customerStats.avg_total_spent || 0)).toLocaleString()}원
 
-## 사용 가능한 필터 필드 (⚠️ 반드시 아래 값만 정확히 사용!)
-- gender: 성별 → 반드시 다음 값 중 하나만 사용: ${genders}
-- age: 나이 (between 연산자로 범위 지정, 예: [20, 29])
-- grade: 등급 → 반드시 다음 값 중 하나만 사용: ${grades}
-- region: 지역 → 사용 가능한 값: ${regions} (별도 컬럼, custom_fields 아님!)
-- points: 포인트 (gte, lte, between)
-- birth_date: 생년월일 (birth_month 연산자로 월 필터, 예: {"operator": "birth_month", "value": 3} → 3월 생일)
-- total_purchase_amount: 총구매금액
-- recent_purchase_date: 최근구매일
-- store_code: 브랜드코드 (eq/in 연산자, 예: "NARS", "CPB")
-- store_name: 매장명 (eq/in 연산자, 예: "강남점", "홍대점")
-${customKeys.map((k: string) => `- custom_fields.${k}: ${k} 필터`).join('\n')}
+## 사용 가능한 필터 필드 (⚠️ 반드시 아래 값만 정확히 사용! 이 고객사에 실제 데이터가 있는 필드만 표시됨)
+${activeColumnFields.map(f => {
+    const key = f.fieldKey;
+    const label = f.displayName;
+    if (key === 'gender') return `- gender: ${label} → 반드시 다음 값 중 하나만 사용: ${genders || '(데이터 없음)'}`;
+    if (key === 'age') return `- age: ${label} (between 연산자로 범위 지정, 예: [20, 29])`;
+    if (key === 'grade') return `- grade: ${label} → 반드시 다음 값 중 하나만 사용: ${grades || '(데이터 없음)'}`;
+    if (key === 'region') return `- region: ${label} → 사용 가능한 값: ${regions || '(데이터 없음)'} (별도 컬럼, custom_fields 아님!)`;
+    if (key === 'birth_date') return `- birth_date: ${label} (birth_month 연산자로 월 필터, 예: {"operator": "birth_month", "value": 3} → 3월 생일)`;
+    if (key === 'store_code') return `- store_code: ${label} (eq/in 연산자)`;
+    if (f.dataType === 'number') return `- ${key}: ${label} (gte, lte, between 연산자)`;
+    if (f.dataType === 'date') return `- ${key}: ${label} (days_within, gte, lte 연산자)`;
+    return `- ${key}: ${label} (eq/in/contains 연산자)`;
+  }).join('\n')}
+${Object.entries(customFieldLabels).map(([key, label]) => `- custom_fields.${key}: ${label} (커스텀 필드, eq/gte/lte/between/in/contains 연산자)`).join('\n')}
 
-⚠️ 주의: region은 custom_fields.region이 아닌 그냥 "region"으로 사용!
+⚠️ 주의: region, grade 등 직접 컬럼 필드는 "custom_fields."를 붙이지 않고 그대로 사용!
 
 ${varCatalogPrompt}
 

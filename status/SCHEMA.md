@@ -263,6 +263,9 @@
 | updated_at | timestamptz |
 
 ### customer_field_definitions (고객 필드 정의)
+> **⚠️ 쓰기 진입점:** CT-07 `upsertCustomFieldDefinitions()` (standard-field-map.ts) — 인라인 INSERT/UPDATE 절대 금지.
+> ON CONFLICT (company_id, field_key) DO UPDATE로 항상 최신 라벨 유지 (D73: "최초 등록 우선" 정책 폐기).
+
 | 컬럼 | 타입 |
 |------|------|
 | id | uuid PK |
@@ -276,6 +279,7 @@
 | is_hidden | boolean |
 | display_order | integer |
 | created_at | timestamp |
+- UNIQUE: (company_id, field_key)
 
 ### customers (고객)
 | 컬럼 | 타입 |
@@ -647,16 +651,20 @@
 | created_at | timestamp |
 
 ### unsubscribes (수신거부 — user_id 기준)
+> **⚠️ 쓰기 진입점:** CT-03 `registerUnsubscribe()` (unsubscribe-helper.ts) — 인라인 INSERT 절대 금지.
+> **조회:** CT-03 `getUserUnsubscribes()` — company_admin은 company_id 기준 전체 조회, brand user는 user_id 기준 조회.
+> **등록 정책 (D73):** company_admin이 등록 시 → 해당 고객의 store_code에 매칭되는 brand user(들)에게 자동 배분. admin user_id로 직접 INSERT하지 않음.
+
 | 컬럼 | 타입 |
 |------|------|
 | id | uuid PK |
 | company_id | uuid FK |
 | user_id | uuid FK NOT NULL |
 | phone | varchar(20) |
-| source | varchar(20) |
+| source | varchar(20) — manual/upload/080_ars/080_ars_sync/db_upload |
 | created_at | timestamp |
 - UNIQUE: (user_id, phone)
-- INDEX: company_id (080 콜백용)
+- INDEX: company_id (080 콜백용, company_admin 전체 조회용)
 
 ### user_alarm_phones (사용자 알림 전화번호)
 | 컬럼 | 타입 |

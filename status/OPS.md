@@ -103,7 +103,7 @@ C:\Users\ceo\projects\targetup\  (로컬)
 │   │       ├── routes/             ← API 라우트
 │   │       ├── services/           ← 비즈니스 로직
 │   │       └── utils/              ← 공통 유틸리티 (컨트롤타워)
-│   │           ├── standard-field-map.ts  ← 표준 필드 매핑 (유일한 필드 기준)
+│   │           ├── standard-field-map.ts  ← 표준 필드 매핑 + customer_field_definitions UPSERT (CT-07, D73 확장)
 │   │           ├── sms-result-map.ts      ← 발송 결과값 매핑 (유일한 결과값 기준)
 │   │           ├── normalize.ts           ← 데이터 정규화 (값 변환)
 │   │           ├── messageUtils.ts        ← 공통 변수 치환 (replaceVariables)
@@ -112,7 +112,8 @@ C:\Users\ceo\projects\targetup\  (로컬)
 │   │           ├── sms-queue.ts           ← MySQL 큐 조작 컨트롤타워 (D63 B16-02)
 │   │           ├── prepaid.ts             ← 선불 차감/환불 컨트롤타워 (D63 B16-02)
 │   │           ├── campaign-lifecycle.ts  ← 캠페인 취소/결과동기화 (D63 B16-02)
-│   │           └── unsubscribe-helper.ts ← 수신거부 관리 + 080 자동연동 컨트롤타워 (D64 CT-03)
+│   │           ├── unsubscribe-helper.ts ← 수신거부 관리 + 080 자동연동 컨트롤타워 (D64 CT-03, D73 확장: registerUnsubscribe + getUserUnsubscribes)
+│   │           └── stats-aggregation.ts ← 대시보드 통계 집계
 │   ├── frontend/                   ← 서비스 사용자 + 슈퍼관리자 UI
 │   │   └── src/
 │   │       ├── components/         ← UI 컴포넌트

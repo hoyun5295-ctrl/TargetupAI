@@ -231,6 +231,73 @@ export function isValidKoreanPhone(phone: string): boolean {
   return false;
 }
 
+/**
+ * 한국 유선 전화번호 유효성 검증
+ * - 02: 서울 (9~10자리: 02XXXXXXX 또는 02XXXXXXXX)
+ * - 031~055: 지역번호 (10~11자리)
+ * - 070: 인터넷전화 (11자리)
+ * - 080: 수신자부담 (11자리)
+ * - 1588/1544/1577 등: 대표번호 (8자리)
+ */
+export function isValidKoreanLandline(phone: string): boolean {
+  if (!phone) return false;
+  const cleaned = phone.replace(/\D/g, '');
+  // 02 서울 → 9~10자리
+  if (cleaned.startsWith('02')) return cleaned.length >= 9 && cleaned.length <= 10;
+  // 031~055 지역번호 → 10~11자리
+  if (/^0[3-5][0-9]/.test(cleaned)) return cleaned.length >= 10 && cleaned.length <= 11;
+  // 070 인터넷전화 → 11자리
+  if (cleaned.startsWith('070')) return cleaned.length === 11;
+  // 080 수신자부담 → 11자리
+  if (cleaned.startsWith('080')) return cleaned.length === 11;
+  // 1588, 1544, 1577 등 대표번호 → 8자리
+  if (/^1[0-9]{3}/.test(cleaned) && !cleaned.startsWith('10')) return cleaned.length === 8;
+  return false;
+}
+
+/**
+ * 매장전화번호 정규화 (유선번호 + 휴대폰 모두 허용)
+ * - 유선번호: 02, 031~055, 070, 080, 1588 등
+ * - 휴대폰: 010, 011~019
+ * - 하이픈 포함 형태로 반환
+ */
+export function normalizeStorePhone(value: any): string | null {
+  if (value == null || value === '') return null;
+  let v = String(value).trim();
+  // 특수문자 제거
+  v = v.replace(/[\s\(\)\+\.]/g, '');
+  // 하이픈만 남긴 원본 보관 (포맷팅 복원용)
+  const withHyphens = v;
+  // 숫자만 추출
+  const digits = v.replace(/\D/g, '');
+  if (!digits || digits.length < 7) return null;
+
+  // 앞 0 빠짐 보정 (Excel 숫자 저장)
+  let cleaned = digits;
+  if (!cleaned.startsWith('0') && /^[2-9]/.test(cleaned)) {
+    cleaned = '0' + cleaned;
+  }
+
+  // 휴대폰이면 normalizePhone 위임
+  if (/^01[016789]/.test(cleaned)) {
+    return normalizePhone(value);
+  }
+
+  // 유선번호 유효성
+  if (isValidKoreanLandline(cleaned)) {
+    // 하이픈 포함 원본이 있으면 사용, 없으면 숫자만 반환
+    if (withHyphens.includes('-')) return withHyphens;
+    return cleaned;
+  }
+
+  // 대표번호 (1588 등)
+  if (/^1[0-9]{3}/.test(cleaned) && cleaned.length === 8) {
+    return cleaned;
+  }
+
+  return null;
+}
+
 // ============================================================
 // 나이 정규화
 // 표준값: 정수 (만 나이)
@@ -444,6 +511,8 @@ export function normalizeByFieldKey(fieldKey: string, value: any): any {
       return String(value).trim();
     case 'normalizePhone':
       return normalizePhone(value);
+    case 'normalizeStorePhone':
+      return normalizeStorePhone(value);
     case 'normalizeGender':
       return normalizeGender(value);
     case 'parseInt': {

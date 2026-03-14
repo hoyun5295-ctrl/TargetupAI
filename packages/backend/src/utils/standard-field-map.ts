@@ -78,7 +78,7 @@ export const FIELD_MAP: StandardFieldMapping[] = [
   { fieldKey: 'store_code',        category: 'store', displayName: '브랜드',       dataType: 'string', storageType: 'column', columnName: 'store_code',        normalizeFunction: 'trim',           sortOrder: 11 },
   { fieldKey: 'registration_type', category: 'store', displayName: '등록구분',     dataType: 'string', storageType: 'column', columnName: 'registration_type', normalizeFunction: 'trim',           sortOrder: 12 },
   { fieldKey: 'registered_store',  category: 'store', displayName: '등록매장정보', dataType: 'string', storageType: 'column', columnName: 'registered_store',  normalizeFunction: 'trim',           sortOrder: 13 },
-  { fieldKey: 'store_phone',       category: 'store', displayName: '매장전화번호', dataType: 'string', storageType: 'column', columnName: 'store_phone',       normalizeFunction: 'normalizePhone', sortOrder: 14 },
+  { fieldKey: 'store_phone',       category: 'store', displayName: '매장전화번호', dataType: 'string', storageType: 'column', columnName: 'store_phone',       normalizeFunction: 'normalizeStorePhone', sortOrder: 14 },
   // ★ B-D70-17: store_name은 customer-filter/CustomerDBModal에서 사용되지만 FIELD_MAP에 누락
   { fieldKey: 'store_name',        category: 'store', displayName: '매장명',       dataType: 'string', storageType: 'column', columnName: 'store_name',        normalizeFunction: 'trim',           sortOrder: 14.5 },
 

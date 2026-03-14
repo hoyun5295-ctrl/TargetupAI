@@ -16,6 +16,7 @@
 
 import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getRegionVariants } from './normalize';
 import { isValidCustomFieldKey } from './safe-field-name';
+import { getColumnFields } from './standard-field-map';
 
 // ============================================================
 // 타입 정의
@@ -357,80 +358,76 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
     }
   }
 
-  // points
-  const pointsFilter = filters.points;
-  const points = getValue(pointsFilter);
-  if (points !== null && points !== undefined) {
-    const pointsOp = pointsFilter?.operator || 'gte';
-    if (pointsOp === 'gte') {
-      sql += ` AND ${col(alias, 'points')} >= $${paramIndex++}`;
-      params.push(Number(points));
-    } else if (pointsOp === 'lte') {
-      sql += ` AND ${col(alias, 'points')} <= $${paramIndex++}`;
-      params.push(Number(points));
-    } else if (pointsOp === 'between' && Array.isArray(points)) {
-      sql += ` AND ${col(alias, 'points')} BETWEEN $${paramIndex++} AND $${paramIndex++}`;
-      params.push(Number(points[0]), Number(points[1]));
+  // ────────────────────────────────────────────────
+  // ★ D74: FIELD_MAP 기반 동적 필터 — 하드코딩 제거
+  // 특수 처리 필드(gender, grade, region, age, birth_date, store_code)는 위에서 처리 완료.
+  // 나머지 FIELD_MAP 필드는 dataType 기반으로 자동 필터 생성.
+  // ────────────────────────────────────────────────
+  const SPECIAL_FIELDS = new Set([
+    'gender', 'grade', 'region', 'age', 'name', 'phone', 'email',
+    'address', 'sms_opt_in', 'store_code',
+  ]);
+
+  for (const field of getColumnFields()) {
+    if (SPECIAL_FIELDS.has(field.fieldKey)) continue; // 위에서 이미 처리
+    const filterEntry = filters[field.fieldKey];
+    const value = getValue(filterEntry);
+    if (value === null || value === undefined) continue;
+
+    const columnRef = col(alias, field.columnName);
+    const operator = filterEntry?.operator || (field.dataType === 'number' ? 'gte' : 'eq');
+
+    if (field.dataType === 'number') {
+      // 숫자 필드: gte / lte / between
+      if (operator === 'gte') {
+        sql += ` AND ${columnRef} >= $${paramIndex++}`;
+        params.push(Number(value));
+      } else if (operator === 'lte') {
+        sql += ` AND ${columnRef} <= $${paramIndex++}`;
+        params.push(Number(value));
+      } else if (operator === 'between' && Array.isArray(value)) {
+        sql += ` AND ${columnRef} BETWEEN $${paramIndex++} AND $${paramIndex++}`;
+        params.push(Number(value[0]), Number(value[1]));
+      } else if (operator === 'eq') {
+        sql += ` AND ${columnRef} = $${paramIndex++}`;
+        params.push(Number(value));
+      }
+    } else if (field.dataType === 'date') {
+      // 날짜 필드: days_within / gte / lte / between / birth_month
+      if (operator === 'days_within') {
+        const daysAgo = new Date();
+        daysAgo.setDate(daysAgo.getDate() - parseInt(value));
+        sql += ` AND ${columnRef} >= $${paramIndex++}`;
+        params.push(daysAgo.toISOString().split('T')[0]);
+      } else if (operator === 'birth_month') {
+        sql += ` AND EXTRACT(MONTH FROM ${columnRef}) = $${paramIndex++}`;
+        params.push(parseInt(value));
+      } else if (operator === 'gte') {
+        sql += ` AND ${columnRef} >= $${paramIndex++}`;
+        params.push(value);
+      } else if (operator === 'lte') {
+        sql += ` AND ${columnRef} <= $${paramIndex++}`;
+        params.push(value);
+      } else if (operator === 'between' && Array.isArray(value)) {
+        sql += ` AND ${columnRef} BETWEEN $${paramIndex++} AND $${paramIndex++}`;
+        params.push(value[0], value[1]);
+      }
+    } else {
+      // 문자열 필드: eq / in / contains
+      if (operator === 'in' && Array.isArray(value)) {
+        sql += ` AND ${columnRef} = ANY($${paramIndex++}::text[])`;
+        params.push(value);
+      } else if (operator === 'contains') {
+        sql += ` AND ${columnRef} ILIKE $${paramIndex++}`;
+        params.push(`%${value}%`);
+      } else {
+        sql += ` AND ${columnRef} = $${paramIndex++}`;
+        params.push(value);
+      }
     }
   }
 
-  // total_purchase_amount
-  const purchaseFilter = filters.total_purchase_amount;
-  const purchaseAmt = getValue(purchaseFilter);
-  if (purchaseAmt !== null && purchaseAmt !== undefined) {
-    const purchaseOp = purchaseFilter?.operator || 'gte';
-    if (purchaseOp === 'gte') {
-      sql += ` AND ${col(alias, 'total_purchase_amount')} >= $${paramIndex++}`;
-      params.push(Number(purchaseAmt));
-    } else if (purchaseOp === 'lte') {
-      sql += ` AND ${col(alias, 'total_purchase_amount')} <= $${paramIndex++}`;
-      params.push(Number(purchaseAmt));
-    } else if (purchaseOp === 'between' && Array.isArray(purchaseAmt)) {
-      sql += ` AND ${col(alias, 'total_purchase_amount')} BETWEEN $${paramIndex++} AND $${paramIndex++}`;
-      params.push(Number(purchaseAmt[0]), Number(purchaseAmt[1]));
-    }
-  }
-
-  // recent_purchase_date — ★ days_within parameterized (SQL injection 수정)
-  const recentDateFilter = filters.recent_purchase_date;
-  const recentDate = getValue(recentDateFilter);
-  if (recentDate) {
-    const dateOp = recentDateFilter?.operator || 'days_within';
-    if (dateOp === 'days_within') {
-      const daysAgo = new Date();
-      daysAgo.setDate(daysAgo.getDate() - parseInt(recentDate));
-      sql += ` AND ${col(alias, 'recent_purchase_date')} >= $${paramIndex++}`;
-      params.push(daysAgo.toISOString().split('T')[0]);
-    } else if (dateOp === 'gte') {
-      sql += ` AND ${col(alias, 'recent_purchase_date')} >= $${paramIndex++}`;
-      params.push(recentDate);
-    } else if (dateOp === 'lte') {
-      sql += ` AND ${col(alias, 'recent_purchase_date')} <= $${paramIndex++}`;
-      params.push(recentDate);
-    }
-  }
-
-  // birth_date (mixed 형식) — birth_month 연산자 지원
-  const birthDateFilter = filters.birth_date;
-  const birthDate = getValue(birthDateFilter);
-  if (birthDate !== null && birthDate !== undefined) {
-    const birthOp = birthDateFilter?.operator || 'birth_month';
-    if (birthOp === 'birth_month') {
-      sql += ` AND EXTRACT(MONTH FROM ${col(alias, 'birth_date')}) = $${paramIndex++}`;
-      params.push(parseInt(birthDate));
-    } else if (birthOp === 'gte') {
-      sql += ` AND ${col(alias, 'birth_date')} >= $${paramIndex++}`;
-      params.push(birthDate);
-    } else if (birthOp === 'lte') {
-      sql += ` AND ${col(alias, 'birth_date')} <= $${paramIndex++}`;
-      params.push(birthDate);
-    } else if (birthOp === 'between' && Array.isArray(birthDate)) {
-      sql += ` AND ${col(alias, 'birth_date')} BETWEEN $${paramIndex++} AND $${paramIndex++}`;
-      params.push(birthDate[0], birthDate[1]);
-    }
-  }
-
-  // store_code (mixed 형식) — storeCodeMode에 따라 처리
+  // store_code (특수 처리 — storeCodeMode에 따라 direct/subquery/skip 분기)
   if (storeCodeMode !== 'skip') {
     const storeCode = getValue(filters.store_code);
     if (storeCode) {
@@ -444,7 +441,6 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
           params.push(storeCode);
         }
       }
-      // subquery 모드는 mixed 형식에서도 지원
       if (storeCodeMode === 'subquery') {
         if (storeOp === 'in' && Array.isArray(storeCode)) {
           sql += ` AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = ${companyIdParamRef} AND store_code = ANY($${paramIndex++}::text[]))`;
@@ -457,21 +453,9 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
     }
   }
 
-  // store_name (mixed 형식)
-  const storeNameFilter = filters.store_name;
-  const storeName = getValue(storeNameFilter);
-  if (storeName) {
-    const storeOp = storeNameFilter?.operator || 'eq';
-    if (storeOp === 'in' && Array.isArray(storeName)) {
-      sql += ` AND ${col(alias, 'store_name')} = ANY($${paramIndex++}::text[])`;
-      params.push(storeName);
-    } else {
-      sql += ` AND ${col(alias, 'store_name')} = $${paramIndex++}`;
-      params.push(storeName);
-    }
-  }
-
-  // custom_fields (JSONB) — 화이트리스트 검증, 8개 연산자 전부 지원
+  // ────────────────────────────────────────────────
+  // ★ D74: 커스텀 필드 (JSONB) 동적 필터 — custom_fields.custom_N 키 + 8개 연산자
+  // ────────────────────────────────────────────────
   Object.keys(filters).forEach(key => {
     if (key.startsWith('custom_fields.')) {
       const fieldName = key.replace('custom_fields.', '');

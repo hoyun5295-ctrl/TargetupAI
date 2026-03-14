@@ -106,6 +106,39 @@
 
 ---
 
+### ✅ D73 — 무료체험 게이팅 + 수신거부 아키텍처 정비 + 커스텀 필드 라벨 CT-07 (2026-03-14) — 배포 완료
+
+> **배경:** 직원 버그리포트 11건 중 관련 6건 처리 — 무료체험 기능제한, 수신거부 데이터 격리, 커스텀 필드 라벨 밀림
+> **핵심 정책 결정:** company_admin은 발송 차단(관리 전용). 수신거부는 user_id(브랜드) 기준. 전체 데이터 = 회사 = 고객사관리자 뷰, 분류코드(store_code) = 사용자 = 브랜드 뷰.
+
+#### 완료 항목
+- **무료체험 게이팅:** FREE 플랜 → PRO 레벨 기능 7일 개방, 체험 만료 후 직접발송(파일/주소록 업로드)만 유지, 스팸필터테스트만 잠금
+  - Dashboard.tsx: `isSubscriptionLocked`에 `plan_code=FREE && is_trial_expired` 추가, AI카드 opacity/lock 아이콘
+  - upload.ts: 직접발송 파일파싱(`?includeData=true`) customer_db_enabled 게이팅 면제
+- **수신거부 아키텍처 정비 (CT-03):**
+  - `getUserUnsubscribes()` 확장: company_admin → `WHERE company_id` (전체), company_user → `WHERE user_id` (본인)
+  - `registerUnsubscribe()` 신설: company_admin 등록 시 고객 store_code 기준 올바른 브랜드 사용자에게 자동 배정
+  - unsubscribes.ts: 수동추가/CSV업로드 전부 CT-03 호출로 전환 (인라인 쿼리 제거)
+  - upload.ts: sms_opt_in=false 자동등록도 admin이면 store_code 기준 브랜드 배정
+  - DB 데이터 보정: 시세이도 admin에 몰린 1486건 → 각 브랜드 사용자에게 store_code 기준 재배정
+- **커스텀 필드 라벨 CT-07:**
+  - `upsertCustomFieldDefinitions()` 신설: ON CONFLICT DO UPDATE (라벨 항상 최신화, "최초 등록 우선" 정책 제거)
+  - upload.ts, sync.ts 인라인 로직 → CT-07 호출로 전환
+  - DB 데이터 보정: 시세이도 custom_1~6 라벨 1칸 밀림 교정 + custom_7(무데이터) 삭제
+- **고객 상세 필드 누락:** CustomerDBModal.tsx에 주소, 최근구매금액 추가
+
+#### 수정 파일 (8개)
+- `packages/backend/src/utils/standard-field-map.ts` — CT-07 upsertCustomFieldDefinitions 추가
+- `packages/backend/src/utils/unsubscribe-helper.ts` — CT-03 getUserUnsubscribes 확장 + registerUnsubscribe 추가
+- `packages/backend/src/routes/unsubscribes.ts` — CT-03 호출 전환
+- `packages/backend/src/routes/upload.ts` — CT-07 전환 + 직접발송 게이팅 면제 + admin 수신거부 배정
+- `packages/backend/src/routes/sync.ts` — CT-07 전환
+- `packages/frontend/src/pages/Dashboard.tsx` — 무료체험 만료 잠금
+- `packages/frontend/src/components/CustomerDBModal.tsx` — 상세 필드 추가
+- `CLAUDE.md` — 섹션 0 컨트롤타워 우선 확인 원칙 + CT-07 문서화
+
+---
+
 ### 🔧 D69 — 자동발송 기능 (2026-03-12) — Phase 1 배포 완료 + 모달 개선 진행 중
 
 > **배경:** 메트로시티 요청 — 생일자 자동발송 등 반복 스케줄 설정 기능
@@ -1454,6 +1487,7 @@ QTmsg status_code, 통신사 코드, 스팸필터 판정 결과를 한 곳에서
 | D67 | 03-12 | 080 콜백 진단 + 수신동의 변형 + 사용자별 고객DB 삭제 | 080 콜백 서버코드 정상 확인(나래측 URL 미등록 원인). 연동테스트 stale state 버그 수정. SMS_OPT_IN_FALSE 13개 변형 추가(비동의/불동의/거절/해지 등). admin.ts 사용자별 uploaded_by 기준 고객 삭제 API+UI. 기간계 무접촉 |
 | D68 | 03-12 | 대시보드 UI 4건 + AI 생일 타겟팅 + 테스트 비용 합산 | (1) 총구매금액 $→CreditCard+천단위콤마 (2) 커스텀필드 라벨 is_hidden NULL 미매칭 수정 (3) AI 생일타겟팅: 프롬프트+customer-filter mixed+3경로 전부 birth_date 추가 (4) 발송현황 총사용금액에 담당자테스트+스팸필터 비용 합산. 메트로시티 가상DB 2만건 생성. 기간계 무접촉 |
 | D69 | 03-12 | 자동발송 기능 기초 설계 | 메트로시티 요청. auto_campaigns+auto_campaign_runs 테이블 설계, PM2 워커+D-1 사전알림 아키텍처, 프론트 AutoSendPage(블러 프리뷰 게이팅)+DashboardHeader 메뉴 추가. 프로 이상 전용. company_user(브랜드담당자) 생성/수정/삭제 가능. 매월 28일 max. 기존 파이프라인(customer-filter, sms-queue, messageUtils) 100% 재활용. 설계문서: AUTO-SCHEDULE-DESIGN.md |
+| D73 | 03-14 | 무료체험 PRO 게이팅 + 수신거부 브랜드 자동배정(CT-03) + 커스텀 필드 라벨 UPSERT(CT-07) | 무료체험 만료 후 직접발송만 유지. 수신거부 admin 등록 시 store_code 기준 브랜드 사용자 자동배정(기존 admin 몰림 방지). "최초 등록 우선" 라벨 고착 버그→ON CONFLICT DO UPDATE. 컨트롤타워 우선 확인 원칙 CLAUDE.md 섹션 0 추가 |
 | D71 | 03-13 | customers_unified 뷰 store_phone 누락 + upload.ts region 중복 수정 | (1) 슈퍼관리자 고객DB 탭 500 에러: customers_unified 뷰에 store_phone 미포함 → DROP+CREATE VIEW로 store_phone 추가 (서버 DDL). (2) 엑셀 업로드 30,000건 전건 오류: D70-17에서 region을 FIELD_MAP에 추가했으나 upload.ts에서 이미 파생 컬럼으로 별도 처리 → INSERT에 region 중복 → insertCols/rowValues/updateClauses 3곳에서 명시적 region 제거, FIELD_MAP 순회에서 derivedRegion 우선 사용하도록 통합. **교훈:** ①customers 테이블 컬럼 추가 시 customers_unified 뷰도 반드시 재생성 ②FIELD_MAP에 필드 추가 시 upload.ts 파생 컬럼과 중복 여부 확인 필수. 수정 1파일(upload.ts)+DDL 1건 |
 
 **아카이브:** D1-AI발송2분기(02-22) | D2-브리핑방식(02-22) | D3-개인화필드체크박스(02-22) | D4-textarea제거(02-22) | D5-별도컴포넌트분리(02-22) | D6-대시보드레이아웃(02-22) | D7-헤더탭스타일(02-23) | D8-AUTO/PRO뱃지(02-23) | D9-캘린더상태기준(02-23) | D10-6차세션분할(02-23) | D11-KCP전환(02-23) | D12-이용약관(02-23) | D13-수신거부SoT(02-23) | D14-7차3세션분할(02-24) | D15-제목머지→D28번복(02-25) | D16-스팸테스트과금(02-25) | D17-테스트통계확장(02-25) | D18-정산자체헬퍼(02-25) | D19-구독상태필드(02-25) | D20-AI분석차별화(02-25) | D21-planInfo실시간(02-25) | D22-스팸잠금직접발송만(02-25) | D23-preview보안(02-25) | D24-run세션1완전구현(02-25) | D25-pdfkit선택(02-25) | D26-분석캐싱24h(02-25) | D27-비즈니스3회최적화(02-25) | D28-제목머지제거(02-25) | D29-5경로전수점검(02-25) | D30-즉시sending전환(02-25) | D31-GPT fallback(02-25) | D32-발송파이프라인복구(02-26) | D33-messageUtils통합(02-26) | D34-스팸필터DB직접조회(02-26) | D35-선불환불보장(02-26) | D-대시보드모달분리(02-23): 8,039줄→4,964줄
