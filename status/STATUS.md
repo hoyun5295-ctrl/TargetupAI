@@ -106,6 +106,25 @@
 
 ---
 
+### 🔧 D74 — 컨트롤타워 동적화 + store_phone 정규화 수정 (2026-03-14) — 수정완료, 배포대기
+
+> **배경:** sh_cpb 버그리포트 — AI 한줄로 타겟추출 시 타겟 수 불일치(1,224 vs 823) + 매장전화번호 개인화 실패
+> **근본 원인:** (1) normalizePhone이 유선번호를 전부 null 처리, (2) customer-filter.ts/ai.ts에 필터 필드 하드코딩 잔존
+> **핵심 수정:** 컨트롤타워를 FIELD_MAP 기반 동적 구조로 전환. 필드 추가 시 핸들러 수동 추가 불필요.
+
+#### 수정 항목
+- **normalizeStorePhone:** normalize.ts에 유선번호(02/031~055/070/080/1588 등) 허용 함수 추가. standard-field-map.ts store_phone → normalizeStorePhone 변경
+- **customer-filter.ts 동적화:** mixed 모드 하드코딩 핸들러 전부 제거 → getColumnFields() 기반 dataType별(number/date/string) 자동 필터 생성. 새 필드 추가 시 핸들러 추가 불필요
+- **ai.ts 프롬프트 동적화:** 하드코딩 필터 필드 목록 제거 → getColumnFields() + COUNT FILTER(데이터 있는 필드만) + customer_field_definitions(커스텀 필드 라벨) 동적 생성
+
+#### 수정 파일 (4개)
+- `packages/backend/src/utils/normalize.ts` — isValidKoreanLandline + normalizeStorePhone 추가, normalizeByFieldKey switch 추가
+- `packages/backend/src/utils/standard-field-map.ts` — store_phone normalizeFunction 변경
+- `packages/backend/src/utils/customer-filter.ts` — mixed 모드 FIELD_MAP 기반 동적 필터
+- `packages/backend/src/services/ai.ts` — 프롬프트 필터 필드 동적 생성
+
+---
+
 ### ✅ D73 — 무료체험 게이팅 + 수신거부 아키텍처 정비 + 커스텀 필드 라벨 CT-07 (2026-03-14) — 배포 완료
 
 > **배경:** 직원 버그리포트 11건 중 관련 6건 처리 — 무료체험 기능제한, 수신거부 데이터 격리, 커스텀 필드 라벨 밀림

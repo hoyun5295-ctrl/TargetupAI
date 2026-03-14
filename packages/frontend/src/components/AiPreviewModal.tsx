@@ -128,8 +128,8 @@ export default function AiPreviewModal({
                 const hasSample = Object.keys(sc).length > 0;
                 return (
               <div>
-                <div className="text-xs text-purple-600 mb-2">✨ 개인화 적용 예시 {hasSample ? '(실제 고객 데이터 기반)' : '(상위 3명 샘플)'}</div>
-                <div className={hasSample ? '' : 'grid grid-cols-3 gap-3'}>
+                <div className="text-xs text-purple-600 mb-2">✨ 개인화 적용 예시 {hasSample ? '(실제 고객 데이터 기반)' : ''}</div>
+                <div>
                   {hasSample ? (
                     <div className="rounded-2xl border-2 border-purple-200 overflow-hidden bg-white">
                       <div className="bg-purple-50 px-3 py-1.5 text-xs text-purple-500 text-center">실제 고객 샘플</div>
@@ -138,18 +138,10 @@ export default function AiPreviewModal({
                       </div>
                     </div>
                   ) : (
-                    [
-                      { '이름': '김민수', '고객명': '김민수', '포인트': '12,500', '보유포인트': '12,500', '등급': 'VIP', '고객등급': 'VIP', '등록매장정보': '강남점', '매장명': '강남점', '최근구매매장': '강남점' },
-                      { '이름': '이영희', '고객명': '이영희', '포인트': '8,200', '보유포인트': '8,200', '등급': 'GOLD', '고객등급': 'GOLD', '등록매장정보': '홍대점', '매장명': '홍대점', '최근구매매장': '홍대점' },
-                      { '이름': '박지현', '고객명': '박지현', '포인트': '25,800', '보유포인트': '25,800', '등급': 'VIP', '고객등급': 'VIP', '등록매장정보': '부산센텀점', '매장명': '부산센텀점', '최근구매매장': '부산센텀점' },
-                    ].map((sample, idx) => (
-                      <div key={idx} className="rounded-2xl border-2 border-gray-200 overflow-hidden bg-white">
-                        <div className="bg-gray-100 px-3 py-1.5 text-xs text-gray-500 text-center">샘플 {idx + 1}</div>
-                        <div className="p-3 text-xs leading-relaxed whitespace-pre-wrap bg-gray-50" style={{ minHeight: '120px', maxHeight: '200px', overflowY: 'auto' }}>
-                          {replaceAllVars(wrapAdText(aiResult?.messages?.[selectedAiMsgIdx]?.message_text || ''), sample)}
-                        </div>
-                      </div>
-                    ))
+                    <div className="rounded-xl border-2 border-amber-200 bg-amber-50 p-4 text-center">
+                      <div className="text-amber-600 font-medium text-sm mb-1">등록된 고객 데이터가 없습니다</div>
+                      <div className="text-amber-500 text-xs">고객 DB에 데이터를 업로드하시면 실제 고객 정보 기반의 개인화 미리보기를 확인할 수 있습니다.</div>
+                    </div>
                   )}
                 </div>
               </div>
@@ -206,6 +198,13 @@ export default function AiPreviewModal({
               {testSentResult}
             </div>
           )}
+          {/* ★ B-D75-02: 발송 대상 0명일 때 경고 */}
+          {(aiResult?.target?.count || 0) === 0 && (
+            <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-center">
+              <div className="text-rose-600 font-medium text-sm">발송 대상이 0명입니다</div>
+              <div className="text-rose-500 text-xs mt-1">고객 DB에 데이터를 업로드하거나, 타겟 조건을 수정해주세요.</div>
+            </div>
+          )}
           <div className="flex gap-3">
             <button
               onClick={() => { onClose(); }}
@@ -215,12 +214,13 @@ export default function AiPreviewModal({
             </button>
             <button
               onClick={handleTestSend}
-              disabled={testSending || testCooldown}
+              disabled={testSending || testCooldown || (aiResult?.target?.count || 0) === 0}
               className="flex-1 py-3 bg-orange-500 text-white rounded-lg hover:bg-orange-600 disabled:opacity-50"
             >
               {testSending ? '📱 발송 중...' : testCooldown ? '⏳ 10초 대기' : '📱 담당자 사전수신'}
             </button>
             <button
+              disabled={(aiResult?.target?.count || 0) === 0}
               onClick={() => {
                 if (setSpamFilterData && setShowSpamFilter) {
                   const msg = aiResult?.messages?.[selectedAiMsgIdx]?.message_text || '';
@@ -249,13 +249,14 @@ export default function AiPreviewModal({
                   setShowSpamFilter(true);
                 }
               }}
-              className="flex-1 py-3 bg-teal-600 text-white rounded-lg hover:bg-teal-700"
+              className="flex-1 py-3 bg-teal-600 text-white rounded-lg hover:bg-teal-700 disabled:opacity-50"
             >
               🛡️ 스팸필터
             </button>
             <button
               onClick={() => { onClose(); setShowAiSendModal(true); }}
-              className="flex-1 py-3 bg-green-700 text-white rounded-lg hover:bg-green-800"
+              disabled={(aiResult?.target?.count || 0) === 0}
+              className="flex-1 py-3 bg-green-700 text-white rounded-lg hover:bg-green-800 disabled:opacity-50"
             >
               ✅ 캠페인확정
             </button>

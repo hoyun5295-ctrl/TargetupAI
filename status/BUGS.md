@@ -3,7 +3,7 @@
 > **목적:** 버그의 발견→분석→수정→교차검증→완료를 체계적으로 관리하여 재발을 방지한다.  
 > **원칙:** (1) 추측성 땜질 금지 (2) 근본 원인 3줄 이내 특정 (3) 교차검증 통과 전까지 Closed 금지 (4) 재발 패턴 기록  
 > **SoT(진실의 원천):** STATUS.md + 이 문서. 채팅에서 떠도는 "수정 완료"는 교차검증 전까지 "임시"다.
-> **현황:** **2026-03-14 D73 무료체험게이팅+수신거부아키텍처+CT-07 — 6건 ✅배포완료.** D72 예약캠페인+비용계산+storageType+성능개선 — 4건 배포대기. D71 시세이도 업로드 후속 — 5건 ✅배포완료. D70 18건 수정완료(3차 배포완료). 🔵Open 1건: B17-05(스팸테스트 간헐적 공백, 보류). D69 자동발송 🟡검증대기 | D66 17차 🟡검증대기 | 8차~15차 기존건 유지.
+> **현황:** **2026-03-14 D74 컨트롤타워 동적화+store_phone — 3건 🟡검증대기.** D73 무료체험게이팅+수신거부아키텍처+CT-07 — 6건 ✅배포완료. D72 예약캠페인+비용계산+storageType+성능개선 — 4건 배포대기. D71 시세이도 업로드 후속 — 5건 ✅배포완료. D70 18건 수정완료(3차 배포완료). 🔵Open 1건: B17-05(스팸테스트 간헐적 공백, 보류). D69 자동발송 🟡검증대기 | D66 17차 🟡검증대기 | 8차~15차 기존건 유지.
 > **⚠️ 2026-02-26 코드 실물 검증:** GPT "미수정" 지적 5건 중 GP-01/03/05는 이미 코드에 반영됨 확인. GP-04는 풀 레벨로 보강. 문서의 "❌ 미수정" 표기가 실제 코드보다 뒤떨어져 있었음.
 
 ---
@@ -89,6 +89,41 @@
 - **원인:** CustomerDBModal.tsx baseDetailFields에 해당 필드 미포함
 - **수정:** address, recent_purchase_amount 추가
 - **상태:** ✅ Closed (배포 완료)
+
+---
+
+## 2-1) 📋 D74 — 컨트롤타워 동적화 + store_phone 정규화 버그 (2026-03-14)
+
+> **배경:** sh_cpb 버그리포트 — AI 한줄로 타겟추출 시 (1) 타겟 수 불일치 (1,224 vs 823), (2) 매장전화번호 개인화 간헐적 실패 + 공백
+> **근본 원인:** 컨트롤타워(FIELD_MAP, customer-filter.ts, ai.ts)에 하드코딩이 남아있어 새 필드 추가 시 누락 반복. normalizePhone이 유선번호를 전부 null 처리.
+> **핵심 수정:** 컨트롤타워를 FIELD_MAP 기반 동적 구조로 전환. 필드 추가 시 핸들러 수동 추가 불필요.
+
+### B-D74-01 🟡 매장전화번호(store_phone) 3만건 전부 NULL — normalizePhone 유선번호 무효 처리
+- **심각도:** 🔴 Critical
+- **발견자:** sh_cpb
+- **현상:** 시세이도 3만건 업로드 시 매장전화번호(02-3479-0022 등 유선번호) 전부 store_phone에 NULL 저장. enabled-fields에서 매장전화번호 미표시. 개인화 변수(%매장전화번호%) 공백 처리
+- **근본 원인:** FIELD_MAP에서 store_phone의 normalizeFunction이 `normalizePhone`으로 지정. normalizePhone → isValidKoreanPhone은 010/011~019/050x만 허용, 유선번호(02/031~055/070/080/1588 등) 전부 `return false` → `return null`
+- **수정:** (1) normalize.ts에 `isValidKoreanLandline()` + `normalizeStorePhone()` 함수 추가 — 유선번호+휴대폰 모두 허용. (2) standard-field-map.ts store_phone normalizeFunction을 `normalizeStorePhone`으로 변경. (3) normalizeByFieldKey switch에 case 추가
+- **수정 파일:** `normalize.ts`, `standard-field-map.ts`
+- **데이터 보정:** 시세이도 재업로드 예정 (Harold님 지시)
+- **상태:** 🟡 수정완료-검증대기
+
+### B-D74-02 🟡 AI 한줄로 타겟 수 불일치 — customer-filter.ts mixed 모드 하드코딩 필터
+- **심각도:** 🔴 Critical
+- **발견자:** sh_cpb
+- **현상:** SILVER 등급 + 최근구매금액 90,000원 이상 → 추출 1,224명 (실제 823명). 리스트 계산과 불일치
+- **근본 원인:** customer-filter.ts mixed 모드(AI 경로)에 `recent_purchase_amount`, `purchase_count` 핸들러가 없어 필터 완전 무시. SILVER 필터만 적용되어 SILVER 전체 1,224명 반환
+- **수정:** mixed 모드 하드코딩 핸들러 전부 제거 → `getColumnFields()` 기반 동적 필터. FIELD_MAP에 등록된 필드는 dataType(number/date/string)별로 자동 연산자 생성. 새 필드 추가 시 핸들러 추가 불필요
+- **수정 파일:** `customer-filter.ts`
+- **상태:** 🟡 수정완료-검증대기
+
+### B-D74-03 🟡 AI 프롬프트 필터 필드 하드코딩 — 고객사별 실제 필드 미반영
+- **심각도:** 🟠 Major
+- **현상:** AI 타겟추출 프롬프트에 필터 필드 10개만 하드코딩. recent_purchase_amount, purchase_count 등 누락. 커스텀 필드는 raw key(custom_1)로만 표시
+- **근본 원인:** services/ai.ts recommendTarget 프롬프트의 "사용 가능한 필터 필드" 목록이 하드코딩. 고객사별 실제 데이터 필드 미반영
+- **수정:** (1) `getColumnFields()` + COUNT FILTER로 해당 고객사에 데이터가 있는 직접 컬럼 필드만 동적 생성. (2) `customer_field_definitions` 조회로 커스텀 필드 라벨명 표시. (3) grade/gender/region DISTINCT 조회는 데이터 있는 필드만 실행 (최적화)
+- **수정 파일:** `services/ai.ts`
+- **상태:** 🟡 수정완료-검증대기
 
 ---
 

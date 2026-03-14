@@ -347,8 +347,11 @@ PostgreSQL campaigns/campaign_runs 생성
 | **enrichWithCustomFields column이 SQL SELECT에 직접 노출** | enrichWithCustomFields()가 column:'custom_2' (JSONB 내부 키)를 fieldMappings에 추가 → 5개 발송 경로의 동적 SELECT에 그대로 포함 → "column custom_2 does not exist" 에러 | **유틸 함수가 데이터 구조(column 값 등)를 변경/추가하면, 그 값을 소비하는 모든 곳(특히 SQL 생성부)의 동작을 반드시 끝까지 추적.** custom_fields JSONB 내부 키는 직접 컬럼이 아니므로 SQL SELECT에서 반드시 제외 (D72) |
 | **건건이 MySQL INSERT로 발송 성능 저하** | 25,000건 발송에 ~3분 (건건이 INSERT = 25,000회 DB 왕복). 70만건이면 ~90분 | MySQL INSERT는 반드시 bulk INSERT로. sms-queue.ts 컨트롤타워(CT-04)의 `bulkInsertSmsQueue()` 사용. 인라인 INSERT 로직 절대 금지 (D72) |
 | **발송 경로 inline 로직 vs 컨트롤타워** | 직접발송에서 MySQL INSERT를 인라인으로 구현 + app_etc2(companyId) 누락 | 발송 관련 MySQL 조작은 반드시 sms-queue.ts 컨트롤타워를 통해야 함. 인라인 구현 시 다른 경로와 불일치 발생 (D72) |
+| **normalizePhone이 유선번호를 null 처리** | store_phone에 normalizePhone(휴대폰 전용) 지정 → 매장전화번호(02, 031 등) 3만건 전부 null 저장. enabled-fields 미표시, 개인화 공백 | **FIELD_MAP에 normalizeFunction 지정 시 해당 필드의 실제 데이터 형태를 반드시 확인.** 매장전화번호는 유선번호가 대부분이므로 normalizeStorePhone 사용 (D74) |
+| **customer-filter mixed 모드 하드코딩 핸들러** | 필드마다 핸들러를 수동 추가하는 구조 → recent_purchase_amount, purchase_count 누락 → AI 타겟추출 시 필터 무시 (1,224 vs 823) | **컨트롤타워를 만들었으면 동적으로 처리.** FIELD_MAP의 dataType 기반 자동 필터 생성으로 전환. 새 필드 추가 시 핸들러 추가 불필요 (D74) |
+| **AI 프롬프트 필터 필드 하드코딩** | 사용 가능한 필터 필드 10개만 하드코딩 → 새 필드/커스텀 필드 미반영 → AI가 해당 필드로 필터 불가 | **AI 프롬프트도 FIELD_MAP + customer_field_definitions 기반 동적 생성.** 고객사별 실제 데이터 있는 필드만 표시. 커스텀 필드는 라벨명으로 전달 (D74) |
 
-### ⚠️ 필수 체크 원칙: 유틸 함수 수정/추가 시 소비처 전수 확인
+### ⚠️ 필수 체크 원칙 1: 유틸 함수 수정/추가 시 소비처 전수 확인
 
 > **D70~D72에서 반복된 패턴:** 유틸 함수(enrichWithCustomFields, buildCustomerFilter 등)에 데이터를 추가하거나 구조를 변경했을 때, 그 반환값을 사용하는 곳에서 어떤 일이 벌어지는지 확인하지 않아 장애 반복.
 >
@@ -357,6 +360,17 @@ PostgreSQL campaigns/campaign_runs 생성
 > 2. 각 호출부에서 반환값이 **어떻게 소비되는지** (SQL 생성, API 응답, 프론트 표시 등) 확인한다
 > 3. 추가/변경된 데이터가 소비처에서 **부작용을 일으키지 않는지** 검증한다
 > 4. 특히 **SQL 쿼리에 동적으로 삽입되는 값**은 반드시 유효한 컬럼명인지 확인한다
+
+### ⚠️ 필수 체크 원칙 2: 컨트롤타워는 반드시 동적으로 — 하드코딩 금지 (D74 교훈)
+
+> **D74에서 반복된 패턴:** FIELD_MAP이라는 컨트롤타워를 만들어놓고, 이를 소비하는 곳(customer-filter.ts, ai.ts)에서 필드별 핸들러를 하드코딩 → 새 필드 추가 시 누락 반복.
+>
+> **원칙:** 컨트롤타워(FIELD_MAP, customer_field_definitions 등)에 등록된 데이터는 반드시 **동적으로 조회/참조**한다:
+> 1. **필터 생성:** `getColumnFields()` 순회 + dataType 기반 자동 연산자. 필드별 if/switch 금지
+> 2. **AI 프롬프트:** `getColumnFields()` + COUNT FILTER + customer_field_definitions 기반 동적 생성
+> 3. **변수 치환:** `extractVarCatalog()` + `enrichWithCustomFields()` — 이미 동적
+> 4. **정규화:** `normalizeByFieldKey()` → FIELD_MAP.normalizeFunction 기반 자동 호출
+> 5. **새 필드 추가 시 체크:** FIELD_MAP에 추가하면 위 4곳이 **자동으로** 따라오는지 확인. 수동 핸들러 추가가 필요하면 구조가 잘못된 것
 
 ---
 
