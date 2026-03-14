@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 
 interface AiCampaignResultPopupProps {
   show: boolean;
@@ -80,6 +80,9 @@ export default function AiCampaignResultPopup({
   targetRecipients,
   sampleCustomer,
 }: AiCampaignResultPopupProps) {
+  const [showLmsAlert, setShowLmsAlert] = useState(false);
+  const [lmsAlertBytes, setLmsAlertBytes] = useState(0);
+
   if (!show) return null;
 
   return (
@@ -373,16 +376,14 @@ className="flex-1 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 fl
 </button>
 <button
 onClick={() => {
-  // ★ B17-10: SMS 선택 시 바이트 초과 → LMS 전환 안내
+  // ★ B17-10 → B-D75-01 리팩토링: SMS 바이트 초과 → 커스텀 모달로 LMS 전환 안내
   if (selectedChannel === 'SMS') {
     const msg = aiResult?.messages?.[selectedAiMsgIdx]?.message_text || '';
     const bytes = calculateBytes(wrapAdText(msg));
     if (bytes > 90) {
-      const ok = window.confirm(`SMS 90바이트를 초과했습니다 (${bytes}바이트).\nLMS로 자동 전환하시겠습니까?`);
-      if (ok) {
-        setSelectedChannel('LMS');
-      }
-      return; // LMS 전환 후 다시 확인하도록
+      setLmsAlertBytes(bytes);
+      setShowLmsAlert(true);
+      return;
     }
   }
   setShowAiSendModal(true);
@@ -395,6 +396,45 @@ className="flex-1 py-3 bg-green-700 text-white rounded-lg hover:bg-green-800 fle
           </div>
         )}
       </div>
+
+      {/* ★ B-D75-01: SMS→LMS 전환 커스텀 모달 (window.confirm 제거) */}
+      {showLmsAlert && (
+        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[70]">
+          <div className="bg-white rounded-xl shadow-2xl w-[420px] overflow-hidden">
+            <div className="p-6 bg-gradient-to-r from-amber-50 to-orange-50 border-b">
+              <div className="text-center">
+                <div className="text-5xl mb-3">📝</div>
+                <h3 className="text-lg font-bold text-gray-800">메시지 길이 초과</h3>
+              </div>
+            </div>
+            <div className="p-6">
+              <div className="text-center mb-4">
+                <div className="text-3xl font-bold text-red-500 mb-1">{lmsAlertBytes} <span className="text-lg text-gray-400">/ 90 byte</span></div>
+                <div className="text-gray-600">SMS 제한을 초과했습니다</div>
+              </div>
+              <div className="bg-blue-50 rounded-lg p-4 mb-4">
+                <div className="text-sm text-blue-800">
+                  <div className="font-medium mb-1">LMS로 전환하시겠습니까?</div>
+                  <div className="text-blue-600">LMS는 최대 2,000byte까지 발송 가능합니다</div>
+                </div>
+              </div>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowLmsAlert(false)}
+                  className="flex-1 py-3 border-2 border-gray-300 rounded-lg text-gray-700 font-medium hover:bg-gray-50"
+                >닫기</button>
+                <button
+                  onClick={() => {
+                    setSelectedChannel('LMS');
+                    setShowLmsAlert(false);
+                  }}
+                  className="flex-1 py-3 bg-green-700 text-white rounded-lg font-medium hover:bg-green-800"
+                >LMS 전환</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -25,6 +25,7 @@ import {
 import { prepaidDeduct, prepaidRefund } from '../utils/prepaid';
 import { cancelCampaign, syncCampaignResults } from '../utils/campaign-lifecycle';
 import { buildFilterQueryCompat } from '../utils/customer-filter';
+import { filterByIndividualCallback, buildCallbackErrorResponse } from '../utils/callback-filter';
 
 // ★ toKoreaTimeStr → utils/sms-queue.ts로 이동 (import 사용)
 
@@ -676,47 +677,21 @@ let filteredCustomers = customers.filter(
   (c: any) => !excludedPhones.includes(normalizePhone(c.phone))
 );
 
-// ★ B16-07: 개별회신번호 사용 시 — callback 없는 고객은 store_phone 폴백 → 둘 다 없으면 제외
+// ★ CT-08: 개별회신번호 필터링 — callback-filter.ts 컨트롤타워 사용
 let callbackSkippedCount = 0;
-let callbackMissingCount = 0;    // callback + store_phone 둘 다 없는 고객
-let callbackUnregisteredCount = 0; // 미등록 회신번호 고객
+let callbackMissingCount = 0;
+let callbackUnregisteredCount = 0;
 if (useIndividualCallback) {
-  // ★ store_phone → callback 폴백: callback이 없으면 store_phone을 사용
-  for (const c of filteredCustomers) {
-    if ((!c.callback || !c.callback.trim()) && c.store_phone && c.store_phone.trim()) {
-      c.callback = c.store_phone;
-    }
-  }
-
-  const beforeCount = filteredCustomers.length;
-  filteredCustomers = filteredCustomers.filter((c: any) => c.callback && c.callback.trim());
-  callbackMissingCount = beforeCount - filteredCustomers.length;
-  if (callbackMissingCount > 0) {
-    callbackSkippedCount += callbackMissingCount;
-    console.log(`[개별회신번호] callback+store_phone 없는 고객 ${callbackMissingCount}명 제외 (${filteredCustomers.length}명 발송)`);
-  }
-
-  // 미등록 회신번호 고객 제외 (전체 차단 → 개별 제외)
-  const callbackPhones = [...new Set(filteredCustomers.map((c: any) => normalizePhone(c.callback || '')).filter(Boolean))];
-  if (callbackPhones.length > 0) {
-    const registeredResult = await query(
-      `SELECT REPLACE(phone_number, '-', '') as phone FROM sender_numbers WHERE company_id = $1 AND is_active = true
-       UNION SELECT REPLACE(phone, '-', '') as phone FROM callback_numbers WHERE company_id = $1`,
-      [companyId]
-    );
-    const registeredSet = new Set((registeredResult.rows as any[]).map((r: any) => r.phone));
-    const beforeUnregCount = filteredCustomers.length;
-    filteredCustomers = filteredCustomers.filter((c: any) => registeredSet.has(normalizePhone(c.callback || '')));
-    callbackUnregisteredCount = beforeUnregCount - filteredCustomers.length;
-    if (callbackUnregisteredCount > 0) {
-      callbackSkippedCount += callbackUnregisteredCount;
-      console.log(`[개별회신번호] 미등록 회신번호 고객 ${callbackUnregisteredCount}명 제외 (${filteredCustomers.length}명 발송)`);
-    }
-  }
+  const cbResult = await filterByIndividualCallback(filteredCustomers, companyId);
+  filteredCustomers = cbResult.filtered;
+  callbackMissingCount = cbResult.callbackMissingCount;
+  callbackUnregisteredCount = cbResult.callbackUnregisteredCount;
+  callbackSkippedCount = cbResult.callbackSkippedCount;
 }
 
 if (filteredCustomers.length === 0) {
-  return res.status(400).json({ error: '발송 대상이 없습니다. (모두 제외됨)' });
+  const errBody = buildCallbackErrorResponse(callbackMissingCount, callbackUnregisteredCount);
+  return res.status(400).json(errBody);
 }
 
 // ★ 선불 잔액 체크 + 차감 (MySQL INSERT 전에 atomic 차감)
@@ -1295,47 +1270,21 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       }
     }
 
-    // ★ B16-07: 개별회신번호 사용 시 — callback 없는 고객은 store_phone 폴백 → 둘 다 없으면 제외
+    // ★ CT-08: 개별회신번호 필터링 — callback-filter.ts 컨트롤타워 사용
     let validRecipients: any[] = [...recipients];
     let callbackSkippedCount = 0;
-    let callbackMissingCount = 0;      // callback + store_phone 둘 다 없는 수신자
-    let callbackUnregisteredCount = 0; // 미등록 회신번호 수신자
+    let callbackMissingCount = 0;
+    let callbackUnregisteredCount = 0;
     if (useIndividualCallback) {
-      // ★ store_phone → callback 폴백: callback이 없으면 store_phone을 사용
-      for (const r of validRecipients) {
-        if ((!r.callback || !r.callback.trim()) && r.store_phone && r.store_phone.trim()) {
-          r.callback = r.store_phone;
-        }
-      }
-
-      const beforeMissing = validRecipients.length;
-      validRecipients = validRecipients.filter((r: any) => r.callback && r.callback.trim());
-      callbackMissingCount = beforeMissing - validRecipients.length;
-      if (callbackMissingCount > 0) {
-        callbackSkippedCount += callbackMissingCount;
-        console.log(`[직접발송-개별회신번호] callback 없는 수신자 ${callbackMissingCount}명 제외`);
-      }
-
-      // 미등록 회신번호 고객 제외 (전체 차단 → 개별 제외)
-      const callbackPhones = [...new Set(validRecipients.map((r: any) => normalizePhone(r.callback || '')).filter(Boolean))];
-      if (callbackPhones.length > 0) {
-        const registeredResult = await query(
-          `SELECT REPLACE(phone_number, '-', '') as phone FROM sender_numbers WHERE company_id = $1 AND is_active = true
-           UNION SELECT REPLACE(phone, '-', '') as phone FROM callback_numbers WHERE company_id = $1`,
-          [companyId]
-        );
-        const registeredSet = new Set((registeredResult.rows as any[]).map((r: any) => r.phone));
-        const beforeUnreg = validRecipients.length;
-        validRecipients = validRecipients.filter((r: any) => registeredSet.has(normalizePhone(r.callback || '')));
-        callbackUnregisteredCount = beforeUnreg - validRecipients.length;
-        if (callbackUnregisteredCount > 0) {
-          callbackSkippedCount += callbackUnregisteredCount;
-          console.log(`[직접발송-개별회신번호] 미등록 회신번호 수신자 ${callbackUnregisteredCount}명 제외 (${validRecipients.length}명 발송)`);
-        }
-      }
+      const cbResult = await filterByIndividualCallback(validRecipients, companyId);
+      validRecipients = cbResult.filtered;
+      callbackMissingCount = cbResult.callbackMissingCount;
+      callbackUnregisteredCount = cbResult.callbackUnregisteredCount;
+      callbackSkippedCount = cbResult.callbackSkippedCount;
 
       if (validRecipients.length === 0) {
-        return res.status(400).json({ success: false, error: '발송 대상이 없습니다. (개별회신번호 없음 또는 미등록)' });
+        const errBody = buildCallbackErrorResponse(callbackMissingCount, callbackUnregisteredCount);
+        return res.status(400).json({ success: false, ...errBody });
       }
     }
 

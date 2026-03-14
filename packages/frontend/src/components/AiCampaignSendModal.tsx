@@ -8,6 +8,7 @@ interface AiCampaignSendModalProps {
     customSendTime: string;
     selectedCallback: string;
     useIndividualCallback: boolean;
+    subject?: string;
   }) => void;
   isSending: boolean;
   // AI 결과 데이터
@@ -29,6 +30,7 @@ interface AiCampaignSendModalProps {
   subject?: string;
   // 개인화
   usePersonalization?: boolean;
+  sampleCustomer?: Record<string, string>;
 }
 
 export default function AiCampaignSendModal({
@@ -49,12 +51,15 @@ export default function AiCampaignSendModal({
   mmsImages,
   subject,
   usePersonalization,
+  sampleCustomer,
 }: AiCampaignSendModalProps) {
   const [campaignName, setCampaignName] = useState(suggestedCampaignName || '');
   const [sendTimeOption, setSendTimeOption] = useState<'ai' | 'now' | 'custom'>('ai');
   const [customSendTime, setCustomSendTime] = useState('');
   const [selectedCallback, setSelectedCallback] = useState(defaultCallback);
   const [useIndividualCallback, setUseIndividualCallback] = useState(defaultUseIndividual);
+  // ★ B-D75-01: LMS/MMS 제목 수정 가능하도록 state 관리
+  const [editSubject, setEditSubject] = useState(subject || '');
 
   useEffect(() => {
     if (!recommendedTime) setSendTimeOption('now');
@@ -79,6 +84,7 @@ export default function AiCampaignSendModal({
       customSendTime,
       selectedCallback,
       useIndividualCallback,
+      subject: (selectedChannel === 'LMS' || selectedChannel === 'MMS') ? editSubject : undefined,
     });
   };
 
@@ -93,9 +99,11 @@ export default function AiCampaignSendModal({
   // 미리보기 메시지 구성
   const getPreviewMessage = () => {
     let msg = messageText || '';
-    if (usePersonalization) {
-      const sampleData: Record<string, string> = { '이름': '김민수', '포인트': '12,500', '등급': 'VIP', '매장명': '강남점', '지역': '서울' };
-      Object.entries(sampleData).forEach(([k, v]) => { msg = msg.replace(new RegExp(`%${k}%`, 'g'), v); });
+    // ★ B-D75-01: 하드코딩 샘플 제거 → sampleCustomer(백엔드 실제 데이터) 사용
+    if (usePersonalization && sampleCustomer && Object.keys(sampleCustomer).length > 0) {
+      Object.entries(sampleCustomer).forEach(([k, v]) => { msg = msg.replace(new RegExp(`%${k}%`, 'g'), v); });
+      // 남은 %변수% 제거
+      msg = msg.replace(/%[^%\s]{1,20}%/g, '');
     }
     // 광고 문구 미리보기 표시
     if (isAd && selectedChannel !== 'KAKAO') {
@@ -151,10 +159,10 @@ export default function AiCampaignSendModal({
                       {selectedChannel === 'KAKAO' ? '브랜드메시지' : useIndividualCallback ? '매장번호' : formatPhoneNumber(selectedCallback) || '회신번호'}
                     </span>
                   </div>
-                  {/* LMS 제목 */}
-                  {(selectedChannel === 'LMS' || selectedChannel === 'MMS') && subject && (
+                  {/* ★ B-D75-01: LMS/MMS 제목 표시 (editSubject 기반) */}
+                  {(selectedChannel === 'LMS' || selectedChannel === 'MMS') && editSubject && (
                     <div className="px-4 py-2 bg-orange-50 border-b border-orange-200 shrink-0">
-                      <span className="text-sm font-bold text-orange-700">{subject}</span>
+                      <span className="text-sm font-bold text-orange-700">{editSubject}</span>
                     </div>
                   )}
                   {/* 메시지 영역 */}
@@ -192,6 +200,22 @@ export default function AiCampaignSendModal({
                   className="w-full border-2 rounded-lg px-4 py-2.5 text-sm focus:border-green-400 focus:outline-none"
                 />
               </div>
+
+              {/* ★ B-D75-01: LMS/MMS 제목 입력 필드 */}
+              {(selectedChannel === 'LMS' || selectedChannel === 'MMS') && (
+                <div>
+                  <label className="text-sm font-semibold text-gray-700 mb-2 block">📄 LMS 제목</label>
+                  <input
+                    type="text"
+                    value={editSubject}
+                    onChange={(e) => setEditSubject(e.target.value)}
+                    placeholder="LMS 제목을 입력하세요"
+                    maxLength={40}
+                    className="w-full border-2 rounded-lg px-4 py-2.5 text-sm focus:border-orange-400 focus:outline-none"
+                  />
+                  <div className="text-xs text-gray-400 mt-1 text-right">{editSubject.length}/40자</div>
+                </div>
+              )}
 
               {/* 회신번호 */}
               <div>

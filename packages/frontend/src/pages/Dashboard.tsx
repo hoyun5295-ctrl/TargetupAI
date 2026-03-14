@@ -1095,11 +1095,12 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
     }
 
     // ★ D43-3c: 수신자 원본 저장 + 필드 메타 저장 (하드코딩 매핑 제거)
+    // ★ B-D75-03: custom_fields flat 처리는 백엔드 extract API에서 수행 (컨트롤타워 원칙)
     setTargetRecipients(recipients);
     setTargetFieldsMeta(fieldsMeta);
     setShowDirectTargeting(false);
     setShowTargetSend(true);
-    setToast({ show: true, type: 'success', message: `${count}명 추출 완료` });
+    setToast({ show: true, type: 'success', message: `${count.toLocaleString()}명 추출 완료` });
     setTimeout(() => setToast({ show: false, type: 'success', message: '' }), 3000);
   };
 
@@ -1290,6 +1291,7 @@ const handleAiCampaignSend = async (modalData?: {
   customSendTime: string;
   selectedCallback: string;
   useIndividualCallback: boolean;
+  subject?: string;
 }) => {
   if (isSending || directSending) return; // 교차 중복 발송 방지
   if (adTextEnabled && !optOutNumber) {
@@ -1411,7 +1413,8 @@ const campaignData = {
       eventEndDate: eventEndDate,
       callback: _useIndividualCallback ? null : _selectedCallback,
       useIndividualCallback: _useIndividualCallback,
-      subject: selectedMsg.subject || '',
+      // ★ B-D75-01: 모달에서 수정된 제목 우선 사용
+      subject: modalData?.subject ?? selectedMsg.subject ?? '',
       mmsImagePaths: mmsUploadedImages.map(img => img.serverPath),
     };
 
@@ -1472,6 +1475,7 @@ const campaignData = {
     customSendTime: string;
     selectedCallback: string;
     useIndividualCallback: boolean;
+    subject?: string;
   }) => {
     if (isSending || directSending || !customSendData) return; // 교차 중복 발송 방지
     if (adTextEnabled && !optOutNumber) {
@@ -1606,7 +1610,7 @@ const campaignData = {
             return msg;
           })(),
           messageType: selectedChannel,
-          subject: selectedMsg.subject || '',  // ★ #7 수정: LMS/MMS 제목 누락 수정
+          subject: selectedMsg.subject || '',
           mmsImagePaths: mmsUploadedImages.map(img => img.serverPath),
         }),
       });
@@ -1841,6 +1845,7 @@ const campaignData = {
           mmsImages={mmsUploadedImages}
           subject={aiResult?.messages?.[selectedAiMsgIdx]?.subject}
           usePersonalization={aiResult?.usePersonalization}
+          sampleCustomer={sampleCustomer}
           />
         )}
   
@@ -1863,6 +1868,7 @@ const campaignData = {
             optOutNumber={optOutNumber}
             subject={customSendData.variant?.subject}
             usePersonalization={true}
+            sampleCustomer={sampleCustomer}
           />
         )}
   

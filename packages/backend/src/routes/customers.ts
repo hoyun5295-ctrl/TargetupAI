@@ -860,7 +860,7 @@ router.post('/extract', async (req: Request, res: Response) => {
       });
     }
 
-    const { gender, ageRange, grade, region, minPurchase, recentDays, smsOptIn, phoneField, limit = 10000, dynamicFilters } = req.body;
+    const { gender, ageRange, grade, region, minPurchase, recentDays, smsOptIn, phoneField, dynamicFilters } = req.body;
 
     let whereClause = 'WHERE company_id = $1 AND is_active = true';
     const params: any[] = [companyId];
@@ -937,20 +937,28 @@ router.post('/extract', async (req: Request, res: Response) => {
     selectParts.push('region', 'custom_fields', 'callback');
     const selectClause = selectParts.join(', ');
     
-    params.push(parseInt(limit as string));
+    // ★ B-D75-04: LIMIT 하드코딩 제거 — 필터 조건에 맞는 전체 고객을 추출 (제한 없음)
     const result = await query(
       `SELECT ${selectClause}
-      FROM customers 
+      FROM customers
       ${whereClause}
-      ORDER BY created_at DESC
-      LIMIT $${paramIndex}`,
+      ORDER BY created_at DESC`,
       params
     );
 
-    res.json({ 
+    // ★ B-D75-03: custom_fields JSONB를 flat하게 풀어서 반환 (프론트에서 r[field_key]로 직접 접근 가능)
+    const flatRecipients = result.rows.map((r: any) => {
+      if (r.custom_fields && typeof r.custom_fields === 'object') {
+        const { custom_fields, ...rest } = r;
+        return { ...rest, ...custom_fields };
+      }
+      return r;
+    });
+
+    res.json({
       success: true,
-      count: result.rows.length,
-      recipients: result.rows 
+      count: flatRecipients.length,
+      recipients: flatRecipients
     });
   } catch (error) {
     console.error('타겟 추출 에러:', error);
