@@ -544,11 +544,14 @@ router.put('/companies/:id/dashboard-cards', authenticate, requireSuperAdmin, as
     if (!Array.isArray(cards)) {
       return res.status(400).json({ error: 'cards는 배열이어야 합니다.' });
     }
-    if (cardCount !== 4 && cardCount !== 8) {
-      return res.status(400).json({ error: 'cardCount는 4 또는 8이어야 합니다.' });
+    // cardCount는 더 이상 4/8 제한 없음 — 프론트에서 6개씩 페이징 표시
+    // 하위호환: cardCount가 전달되면 cards.length로 자동 설정
+    const effectiveCardCount = cards.length;
+    if (cards.length === 0) {
+      return res.status(400).json({ error: '최소 1개 이상의 카드를 선택해야 합니다.' });
     }
-    if (cards.length > cardCount) {
-      return res.status(400).json({ error: `카드는 최대 ${cardCount}개까지 선택 가능합니다. (현재 ${cards.length}개)` });
+    if (cards.length > DASHBOARD_CARD_POOL.length) {
+      return res.status(400).json({ error: `카드는 최대 ${DASHBOARD_CARD_POOL.length}개까지 선택 가능합니다.` });
     }
 
     // 카드 ID 유효성
@@ -570,12 +573,12 @@ router.put('/companies/:id/dashboard-cards', authenticate, requireSuperAdmin, as
 
     // UPSERT
     await upsertCompanySetting(id, 'dashboard_cards', JSON.stringify(cards), 'json', '대시보드 표시 카드 목록');
-    await upsertCompanySetting(id, 'dashboard_card_count', cardCount.toString(), 'string', '대시보드 카드 칸 수 (4 또는 8)');
+    await upsertCompanySetting(id, 'dashboard_card_count', effectiveCardCount.toString(), 'string', '대시보드 카드 수');
 
     res.json({
       message: '대시보드 카드 설정이 저장되었습니다.',
       cards,
-      cardCount,
+      cardCount: effectiveCardCount,
     });
   } catch (error) {
     console.error('대시보드 카드 설정 저장 실패:', error);

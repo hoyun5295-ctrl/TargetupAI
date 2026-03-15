@@ -123,7 +123,7 @@ export default function AdminDashboard() {
   const [showSyncRegenConfirm, setShowSyncRegenConfirm] = useState(false);
   // D41 대시보드 카드 설정
   const [dashboardCardIds, setDashboardCardIds] = useState<string[]>([]);
-  const [dashboardCardCount, setDashboardCardCount] = useState<4 | 8>(4);
+  const [dashboardCardCount, setDashboardCardCount] = useState<number>(0); // 선택된 카드 수 (제한 없음, 6개씩 페이징 표시)
   const DASHBOARD_CARD_POOL = [
     { cardId: 'total_customers',     label: '전체 고객 수',      icon: '👥', description: '전체 등록 고객 수' },
     { cardId: 'gender_male',         label: '남성 수',           icon: '👨', description: '성별이 남성인 고객 수' },
@@ -1427,10 +1427,10 @@ const handleApproveRequest = async (id: string) => {
         if (cardsRes.ok) {
           const cardsData = await cardsRes.json();
           setDashboardCardIds(cardsData.selectedCards || []);
-          setDashboardCardCount(cardsData.cardCount === 8 ? 8 : 4);
+          setDashboardCardCount(cardsData.selectedCards?.length || 0);
         } else {
           setDashboardCardIds([]);
-          setDashboardCardCount(4);
+          setDashboardCardCount(0);
         }
         setEditCompany({
           id: c.id,
@@ -1509,7 +1509,7 @@ const handleApproveRequest = async (id: string) => {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${token}`
           },
-          body: JSON.stringify({ cards: dashboardCardIds, cardCount: dashboardCardCount })
+          body: JSON.stringify({ cards: dashboardCardIds, cardCount: dashboardCardIds.length })
         })
       ]);
       
@@ -4488,21 +4488,15 @@ const handleApproveRequest = async (id: string) => {
                 <div className="space-y-4">
                   <p className="text-sm text-gray-600">이 고객사의 대시보드에 표시할 카드를 선택하세요.</p>
 
-                  {/* 모드 선택: 4칸 / 8칸 */}
+                  {/* 카드 선택 안내 — 6개씩 페이징 표시 */}
                   <div className="flex items-center gap-3 p-3 bg-blue-50 rounded-lg border border-blue-200">
-                    <span className="text-sm font-medium text-gray-700">표시 모드:</span>
-                    <button type="button"
-                      onClick={() => { setDashboardCardCount(4); if (dashboardCardIds.length > 4) setDashboardCardIds(dashboardCardIds.slice(0, 4)); }}
-                      className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${dashboardCardCount === 4 ? 'bg-blue-600 text-white shadow' : 'bg-white text-gray-600 border hover:bg-gray-50'}`}>
-                      4칸
-                    </button>
-                    <button type="button"
-                      onClick={() => setDashboardCardCount(8)}
-                      className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${dashboardCardCount === 8 ? 'bg-blue-600 text-white shadow' : 'bg-white text-gray-600 border hover:bg-gray-50'}`}>
-                      8칸
-                    </button>
-                    <span className="text-xs text-gray-400 ml-2">
-                      선택: <span className={`font-bold ${dashboardCardIds.length > dashboardCardCount ? 'text-red-500' : 'text-blue-600'}`}>{dashboardCardIds.length}</span> / {dashboardCardCount}개
+                    <span className="text-sm font-medium text-gray-700">카드 선택:</span>
+                    <span className="text-sm text-gray-600">
+                      원하는 카드를 자유롭게 선택하세요. 대시보드에서 <strong>6개씩 페이징</strong>으로 표시됩니다.
+                    </span>
+                    <span className="text-xs text-gray-400 ml-auto whitespace-nowrap">
+                      선택: <span className="font-bold text-blue-600">{dashboardCardIds.length}</span>개
+                      {dashboardCardIds.length > 6 && <span className="text-gray-400 ml-1">({Math.ceil(dashboardCardIds.length / 6)}페이지)</span>}
                     </span>
                   </div>
 
@@ -4510,22 +4504,20 @@ const handleApproveRequest = async (id: string) => {
                   <div className="grid grid-cols-1 gap-1.5">
                     {DASHBOARD_CARD_POOL.map((card) => {
                       const isChecked = dashboardCardIds.includes(card.cardId);
-                      const isFull = dashboardCardIds.length >= dashboardCardCount && !isChecked;
                       return (
                         <label
                           key={card.cardId}
                           className={`flex items-center gap-3 p-2.5 rounded-lg border cursor-pointer transition-all ${
-                            isChecked ? 'bg-blue-50 border-blue-300' : isFull ? 'opacity-40 cursor-not-allowed bg-gray-50 border-gray-200' : 'bg-white border-gray-200 hover:bg-gray-50'
+                            isChecked ? 'bg-blue-50 border-blue-300' : 'bg-white border-gray-200 hover:bg-gray-50'
                           }`}
                         >
                           <input
                             type="checkbox"
                             checked={isChecked}
-                            disabled={isFull}
                             onChange={() => {
                               if (isChecked) {
                                 setDashboardCardIds(dashboardCardIds.filter(id => id !== card.cardId));
-                              } else if (dashboardCardIds.length < dashboardCardCount) {
+                              } else {
                                 setDashboardCardIds([...dashboardCardIds, card.cardId]);
                               }
                             }}

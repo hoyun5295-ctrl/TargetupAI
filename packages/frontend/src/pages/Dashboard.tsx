@@ -200,8 +200,9 @@ export default function Dashboard() {
   const [showResults, setShowResults] = useState(false);
   const [showCustomerDB, setShowCustomerDB] = useState(false);
   const [showAnalysis, setShowAnalysis] = useState(false);
-  // D41 동적 카드
+  // D41 동적 카드 + D77 페이징 뷰 (6개씩)
   const [dashboardCards, setDashboardCards] = useState<DashboardCardsResponse | null>(null);
+  const [dbCardPage, setDbCardPage] = useState(0); // 현재 페이지 (0-indexed)
   // 5개 카드 모달 state
   const [showRecentCampaigns, setShowRecentCampaigns] = useState(false);
   const [showFileUpload, setShowFileUpload] = useState(false);
@@ -2070,8 +2071,8 @@ const campaignData = {
               {/* 고객 DB 미업로드 — 전체 블러 + CTA */}
               {dashboardCards?.configured && dashboardCards?.hasCustomerData === false && (
                 <div className="relative">
-                  <div className="grid grid-cols-4 gap-3 filter blur-sm pointer-events-none select-none">
-                    {dashboardCards.cards.map((card, i) => (
+                  <div className="grid grid-cols-3 gap-3 filter blur-sm pointer-events-none select-none">
+                    {dashboardCards.cards.slice(0, 6).map((card, i) => (
                       <div key={card.cardId} className="text-center p-3 bg-gray-50 rounded-lg">
                         <div className="text-xl font-bold text-gray-300">0</div>
                         <div className="text-xs text-gray-300 mt-1">{card.label}</div>
@@ -2093,71 +2094,97 @@ const campaignData = {
                 </div>
               )}
 
-              {/* 정상 표시: 동적 카드 렌더링 */}
-              {dashboardCards?.configured && dashboardCards?.hasCustomerData && (
-                <div className={`grid ${dashboardCards.cardCount === 8 ? 'grid-cols-4 gap-3' : 'grid-cols-4 gap-3'}`}>
-                  {dashboardCards.cards.map((card, i) => {
-                    const color = CARD_COLORS[i % CARD_COLORS.length];
-                    const IconComp = CARD_ICON_MAP[card.icon] || HelpCircle;
+              {/* 정상 표시: 6개씩 페이징 카드 렌더링 (D77) */}
+              {dashboardCards?.configured && dashboardCards?.hasCustomerData && (() => {
+                const CARDS_PER_PAGE = 6;
+                const allCards = dashboardCards.cards;
+                const totalPages = Math.ceil(allCards.length / CARDS_PER_PAGE);
+                const safePage = Math.min(dbCardPage, totalPages - 1);
+                const pageCards = allCards.slice(safePage * CARDS_PER_PAGE, (safePage + 1) * CARDS_PER_PAGE);
 
-                    // 데이터 없는 카드 — 블러 처리
-                    if (!card.hasData) {
-                      return (
-                        <div key={card.cardId} className="relative text-center p-3 bg-gray-50 rounded-lg border border-gray-200">
-                          <div className="filter blur-sm">
-                            <div className="text-xl font-bold text-gray-300">-</div>
-                          </div>
-                          <div className="text-xs text-gray-400 mt-1">{card.label}</div>
-                          <div className="absolute inset-0 flex items-center justify-center">
-                            <span className="text-[10px] text-gray-400 bg-white/80 px-1.5 py-0.5 rounded">데이터 없음</span>
-                          </div>
-                        </div>
-                      );
-                    }
+                return (
+                  <div>
+                    <div className="grid grid-cols-3 gap-3">
+                      {pageCards.map((card, i) => {
+                        const globalIdx = safePage * CARDS_PER_PAGE + i;
+                        const color = CARD_COLORS[globalIdx % CARD_COLORS.length];
+                        const IconComp = CARD_ICON_MAP[card.icon] || HelpCircle;
 
-                    // distribution 타입 — 분포 표시
-                    if (card.type === 'distribution' && Array.isArray(card.value)) {
-                      const items = card.value.slice(0, 3);
-                      return (
-                        <div key={card.cardId} className={`p-3 rounded-lg border ${color.border} ${color.bg}`}>
-                          <div className="flex items-center gap-1.5 mb-2">
-                            <IconComp className={`w-3.5 h-3.5 ${color.accent}`} />
-                            <span className="text-xs text-gray-500 font-medium">{card.label}</span>
-                          </div>
-                          <div className="space-y-1">
-                            {items.map((item, j) => (
-                              <div key={j} className="flex justify-between text-xs">
-                                <span className="text-gray-600 truncate">{item.label}</span>
-                                <span className={`font-bold ${color.text}`}>{item.count.toLocaleString()}</span>
+                        // 데이터 없는 카드 — 블러 처리
+                        if (!card.hasData) {
+                          return (
+                            <div key={card.cardId} className="relative text-center p-3 bg-gray-50 rounded-lg border border-gray-200">
+                              <div className="filter blur-sm">
+                                <div className="text-xl font-bold text-gray-300">-</div>
                               </div>
-                            ))}
-                            {items.length === 0 && <div className="text-xs text-gray-400 text-center">-</div>}
+                              <div className="text-xs text-gray-400 mt-1">{card.label}</div>
+                              <div className="absolute inset-0 flex items-center justify-center">
+                                <span className="text-[10px] text-gray-400 bg-white/80 px-1.5 py-0.5 rounded">데이터 없음</span>
+                              </div>
+                            </div>
+                          );
+                        }
+
+                        // distribution 타입 — 분포 표시
+                        if (card.type === 'distribution' && Array.isArray(card.value)) {
+                          const items = card.value.slice(0, 3);
+                          return (
+                            <div key={card.cardId} className={`p-3 rounded-lg border ${color.border} ${color.bg}`}>
+                              <div className="flex items-center gap-1.5 mb-2">
+                                <IconComp className={`w-3.5 h-3.5 ${color.accent}`} />
+                                <span className="text-xs text-gray-500 font-medium">{card.label}</span>
+                              </div>
+                              <div className="space-y-1">
+                                {items.map((item, j) => (
+                                  <div key={j} className="flex justify-between text-xs">
+                                    <span className="text-gray-600 truncate">{item.label}</span>
+                                    <span className={`font-bold ${color.text}`}>{item.count.toLocaleString()}</span>
+                                  </div>
+                                ))}
+                                {items.length === 0 && <div className="text-xs text-gray-400 text-center">-</div>}
+                              </div>
+                            </div>
+                          );
+                        }
+
+                        // count / rate / sum 타입 — 숫자 표시
+                        const numVal = typeof card.value === 'number' ? card.value : 0;
+                        let displayVal = numVal.toLocaleString();
+                        let suffix = '';
+                        if (card.type === 'rate') { displayVal = numVal.toFixed(1); suffix = '%'; }
+                        else if (card.type === 'sum') { displayVal = numVal >= 10000 ? `${Math.round(numVal / 10000).toLocaleString()}만` : numVal.toLocaleString(); suffix = '원'; }
+                        else if (card.cardId === 'active_campaigns') { suffix = '건'; }
+                        else { suffix = '명'; }
+
+                        return (
+                          <div key={card.cardId} className={`text-center p-3 rounded-lg border ${color.border} ${color.bg}`}>
+                            <IconComp className={`w-5 h-5 mx-auto mb-1.5 ${color.accent}`} />
+                            <div className={`text-xl font-bold ${color.text}`}>
+                              {displayVal}<span className="text-xs font-normal text-gray-400 ml-0.5">{suffix}</span>
+                            </div>
+                            <div className="text-xs text-gray-500 mt-1">{card.label}</div>
                           </div>
-                        </div>
-                      );
-                    }
+                        );
+                      })}
+                    </div>
 
-                    // count / rate / sum 타입 — 숫자 표시
-                    const numVal = typeof card.value === 'number' ? card.value : 0;
-                    let displayVal = numVal.toLocaleString();
-                    let suffix = '';
-                    if (card.type === 'rate') { displayVal = numVal.toFixed(1); suffix = '%'; }
-                    else if (card.type === 'sum') { displayVal = numVal >= 10000 ? `${Math.round(numVal / 10000).toLocaleString()}만` : numVal.toLocaleString(); suffix = '원'; }
-                    else if (card.cardId === 'active_campaigns') { suffix = '건'; }
-                    else { suffix = '명'; }
-
-                    return (
-                      <div key={card.cardId} className={`text-center p-3 rounded-lg border ${color.border} ${color.bg}`}>
-                        <IconComp className={`w-5 h-5 mx-auto mb-1.5 ${color.accent}`} />
-                        <div className={`text-xl font-bold ${color.text}`}>
-                          {displayVal}<span className="text-xs font-normal text-gray-400 ml-0.5">{suffix}</span>
-                        </div>
-                        <div className="text-xs text-gray-500 mt-1">{card.label}</div>
+                    {/* 페이지 인디케이터 (2페이지 이상일 때만 표시) */}
+                    {totalPages > 1 && (
+                      <div className="flex items-center justify-center gap-1.5 mt-3">
+                        {Array.from({ length: totalPages }, (_, idx) => (
+                          <button
+                            key={idx}
+                            onClick={() => setDbCardPage(idx)}
+                            className={`w-2 h-2 rounded-full transition-all ${
+                              idx === safePage ? 'bg-green-500 w-4' : 'bg-gray-300 hover:bg-gray-400'
+                            }`}
+                          />
+                        ))}
                       </div>
-                    );
-                  })}
-                </div>
-              )}
+                    )}
+                  </div>
+                );
+              })()}
             </div>
           </div>
 
