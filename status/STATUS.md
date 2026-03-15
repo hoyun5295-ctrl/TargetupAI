@@ -106,6 +106,49 @@
 
 ---
 
+### 🔧 D75 — UI/UX 버그 4건 수정 + CT-08 개별회신번호 필터링 컨트롤타워 (2026-03-14) — 수정완료, 배포대기
+
+> **배경:** 직원(isoi, sh_de) 버그리포트 4건 — LMS 제목 입력 누락, 회신번호 에러 UX, 커스텀필드 타겟추출 NULL, 타겟추출 10000건 하드코딩 제한
+> **원칙:** 컨트롤타워를 수정하고 나머지는 컨트롤타워를 바라보게 업데이트 (Harold님 명시 지시)
+
+#### 수정 항목
+
+**Bug 1 (B-D75-01): SMS→LMS 자동전환 시 제목 입력 불가 + window.confirm**
+- AiCampaignResultPopup.tsx: `window.confirm` → 커스텀 모달 (amber/orange 그라데이션, 바이트 표시, LMS 전환 버튼)
+- AiCampaignSendModal.tsx: LMS 제목 입력 필드 추가 (selectedChannel === 'LMS' || 'MMS' 일 때 표시)
+- AiCampaignSendModal.tsx: 하드코딩 샘플 데이터 `{ '이름': '김민수', ... }` 제거 → `sampleCustomer` prop으로 실제 데이터 전달
+- Dashboard.tsx: `sampleCustomer` prop 체인 연결, `subject` 전달 로직 추가
+
+**Bug 2 (B-D75-02): 개별회신번호 미등록 시 전체 차단 → 개별 제외로 변경**
+- ★ **CT-08 신설: `callback-filter.ts`** — 개별회신번호 필터링 컨트롤타워
+  - `filterByIndividualCallback(customers, companyId)` — store_phone 폴백 → callback 미보유 제외 → 미등록 회신번호 제외
+  - `buildCallbackErrorResponse(missing, unregistered)` — 제외 사유 구체적 안내 응답 생성
+- campaigns.ts AI send 경로: 인라인 ~50줄 → CT-08 호출로 교체
+- campaigns.ts direct-send 경로: 인라인 ~50줄 → CT-08 호출로 교체
+- 에러 응답에 `callbackMissingCount`, `callbackUnregisteredCount`, `isCallbackIssue` 포함
+
+**Bug 3 (B-D75-03): 직접타겟설정 커스텀필드 NULL 표시**
+- customers.ts extract API: custom_fields JSONB를 flat하게 풀어서 반환 (백엔드 컨트롤타워에서 처리)
+- Dashboard.tsx: 프론트엔드 인라인 flat 로직 제거 (백엔드로 이관)
+
+**Bug 4 (B-D75-04): 타겟추출 10,000건 하드코딩 제한**
+- customers.ts: `limit = 10000` 하드코딩 제거, LIMIT 절 완전 삭제 (무제한 추출)
+- Dashboard.tsx: toast에 `toLocaleString()` 천단위 구분 적용
+
+#### 수정 파일 (6개)
+- `packages/backend/src/utils/callback-filter.ts` — ★ CT-08 신규 생성
+- `packages/backend/src/routes/campaigns.ts` — CT-08 import + AI send/direct-send 인라인→CT-08 교체
+- `packages/backend/src/routes/customers.ts` — limit 제거 + custom_fields flat 처리
+- `packages/frontend/src/components/AiCampaignResultPopup.tsx` — window.confirm→커스텀 모달
+- `packages/frontend/src/components/AiCampaignSendModal.tsx` — LMS 제목 입력 + sampleCustomer prop
+- `packages/frontend/src/pages/Dashboard.tsx` — sampleCustomer/subject prop 연결 + toLocaleString
+
+#### TypeScript 타입 체크
+- 백엔드: ✅ 0 에러
+- 프론트엔드: ✅ 0 에러
+
+---
+
 ### 🔧 D74 — 컨트롤타워 동적화 + store_phone 정규화 수정 (2026-03-14) — 수정완료, 배포대기
 
 > **배경:** sh_cpb 버그리포트 — AI 한줄로 타겟추출 시 타겟 수 불일치(1,224 vs 823) + 매장전화번호 개인화 실패

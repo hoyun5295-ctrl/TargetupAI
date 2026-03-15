@@ -603,6 +603,9 @@ export async function generateMessages(
 ${getKoreanToday()}
 ※ "내일", "모레" 등은 위 날짜 기준으로 구체적 날짜(예: 2/5(수))로 변환하세요.
 
+${getKoreanCalendar()}
+⚠️ 날짜에 요일을 표기할 때 반드시 위 달력을 참조하세요! 직접 요일을 계산하지 마세요!
+
 ## 브랜드 정보 (⚠️ 반드시 아래 브랜드명을 정확히 사용!)
 - 브랜드명: ${brandName}
 ${brandSlogan ? `- 슬로건: ${brandSlogan}` : ''}
@@ -1253,7 +1256,7 @@ export async function parseBriefing(briefing: string): Promise<{
   try {
     const text = await callAIWithFallback({
       system: PARSE_BRIEFING_SYSTEM,
-      userMessage: `오늘 날짜: ${getKoreanToday()}\n\n다음 프로모션 브리핑을 구조화해주세요:\n\n${briefing}`,
+      userMessage: `오늘 날짜: ${getKoreanToday()}\n\n${getKoreanCalendar()}\n⚠️ 날짜→요일 변환 시 반드시 위 달력을 참조하세요!\n\n다음 프로모션 브리핑을 구조화해주세요:\n\n${briefing}`,
       maxTokens: 1024,
       temperature: 0.3,
     });
@@ -1391,6 +1394,9 @@ ${briefing}
 
 ## 오늘 날짜
 ${getKoreanToday()}
+
+${getKoreanCalendar()}
+⚠️ 날짜에 요일을 표기할 때 반드시 위 달력을 참조하세요! 직접 요일을 계산하지 마세요!
 
 ## 브랜드
 - 브랜드명: ${brandName}

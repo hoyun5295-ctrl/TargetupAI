@@ -27,6 +27,7 @@
 | CT-05 | prepaid.ts | 선불 잔액 관리 |
 | CT-06 | campaign-lifecycle.ts | 캠페인 생명주기 |
 | CT-07 | standard-field-map.ts | 필드 매핑 + customer_field_definitions UPSERT |
+| CT-08 | callback-filter.ts | 개별회신번호 필터링 (store_phone 폴백 + 미등록 제외) |
 | — | messageUtils.ts | 변수 치환 (5개 발송 경로 통합) |
 | — | normalize.ts | 값 정규화 |
 | — | stats-aggregation.ts | 대시보드 통계 집계 |
@@ -262,6 +263,18 @@ AND NOT EXISTS (
 - **⚠️ 과거 교훈:** upload.ts에서 인라인으로 "최초 등록 우선" INSERT 정책 사용 → 잘못된 라벨 영구 고착. CT-07 도입으로 항상 최신 라벨로 갱신.
 - **적용 파일:** upload.ts, sync.ts (쓰기) / messageUtils.ts, customers.ts, ai.ts (읽기)
 
+#### CT-08: callback-filter.ts — 개별회신번호 필터링
+- **역할:** 개별회신번호 사용 시 store_phone 폴백 + callback 미보유 제외 + 미등록 회신번호 제외의 유일한 진입점
+- **처리 흐름:**
+  1. store_phone → callback 폴백: callback이 없으면 store_phone 사용
+  2. callback 미보유 고객 제외: callback + store_phone 둘 다 없는 수신자 제외
+  3. 미등록 회신번호 제외: sender_numbers + callback_numbers에 등록되지 않은 회신번호의 수신자 제외
+- **주요 함수:**
+  - `filterByIndividualCallback(customers, companyId)` → `CallbackFilterResult` (filtered, callbackMissingCount, callbackUnregisteredCount, callbackSkippedCount)
+  - `buildCallbackErrorResponse(missing, unregistered)` → 제외 사유 구체적 안내 에러 응답 객체
+- **⚠️ D75 교훈:** AI send와 direct-send에 동일 로직이 인라인으로 중복 → 동작 불일치 발생. CT-08로 통합하여 단일 진입점 보장.
+- **적용 파일:** campaigns.ts (AI send + direct-send 2곳)
+
 ### 5-7. 자동발송 기능 (D69 — ✅ Phase 1 구현 완료)
 
 > **설계 문서:** `status/AUTO-SCHEDULE-DESIGN.md`
@@ -350,6 +363,10 @@ PostgreSQL campaigns/campaign_runs 생성
 | **normalizePhone이 유선번호를 null 처리** | store_phone에 normalizePhone(휴대폰 전용) 지정 → 매장전화번호(02, 031 등) 3만건 전부 null 저장. enabled-fields 미표시, 개인화 공백 | **FIELD_MAP에 normalizeFunction 지정 시 해당 필드의 실제 데이터 형태를 반드시 확인.** 매장전화번호는 유선번호가 대부분이므로 normalizeStorePhone 사용 (D74) |
 | **customer-filter mixed 모드 하드코딩 핸들러** | 필드마다 핸들러를 수동 추가하는 구조 → recent_purchase_amount, purchase_count 누락 → AI 타겟추출 시 필터 무시 (1,224 vs 823) | **컨트롤타워를 만들었으면 동적으로 처리.** FIELD_MAP의 dataType 기반 자동 필터 생성으로 전환. 새 필드 추가 시 핸들러 추가 불필요 (D74) |
 | **AI 프롬프트 필터 필드 하드코딩** | 사용 가능한 필터 필드 10개만 하드코딩 → 새 필드/커스텀 필드 미반영 → AI가 해당 필드로 필터 불가 | **AI 프롬프트도 FIELD_MAP + customer_field_definitions 기반 동적 생성.** 고객사별 실제 데이터 있는 필드만 표시. 커스텀 필드는 라벨명으로 전달 (D74) |
+| **개별회신번호 필터링 인라인 중복** | AI send와 direct-send에 동일한 콜백 필터링 로직 ~50줄씩 인라인으로 중복 → 동작 불일치(한쪽은 전체 차단, 한쪽은 개별 제외) | **동일 로직이 2곳 이상 인라인이면 즉시 컨트롤타워로 추출.** CT-08 callback-filter.ts 생성으로 단일 진입점 보장 (D75) |
+| **타겟추출 건수 하드코딩 제한** | customers.ts extract API에 `limit = 10000` 하드코딩 → 16,993명 매칭인데 10,000명만 추출 | **추출/발송 건수에 인위적 limit 하드코딩 금지.** 필요 시 환경변수나 설정으로 관리 (D75) |
+| **custom_fields JSONB flat 미처리** | extract API가 custom_fields JSONB 그대로 반환 → 프론트에서 `r[field_key]` 접근 시 커스텀 필드 NULL 표시 | **JSONB 내부 키를 프론트에서 접근해야 할 때 백엔드 API에서 flat 처리하여 반환** (D75) |
+| **window.confirm 사용** | SMS→LMS 전환 확인을 window.confirm으로 표시 → 다크모드/테마 미적용, UX 이질적 | **window.confirm/alert 사용 금지.** 모든 확인 대화상자는 커스텀 모달 컴포넌트 사용 (D75) |
 
 ### ⚠️ 필수 체크 원칙 1: 유틸 함수 수정/추가 시 소비처 전수 확인
 
@@ -371,6 +388,15 @@ PostgreSQL campaigns/campaign_runs 생성
 > 3. **변수 치환:** `extractVarCatalog()` + `enrichWithCustomFields()` — 이미 동적
 > 4. **정규화:** `normalizeByFieldKey()` → FIELD_MAP.normalizeFunction 기반 자동 호출
 > 5. **새 필드 추가 시 체크:** FIELD_MAP에 추가하면 위 4곳이 **자동으로** 따라오는지 확인. 수동 핸들러 추가가 필요하면 구조가 잘못된 것
+
+### ⚠️ 필수 체크 원칙 3: 동일 로직 2곳 이상 = 즉시 컨트롤타워 추출 (D75 교훈)
+
+> **D75에서 반복된 패턴:** campaigns.ts AI send와 direct-send에 개별회신번호 필터링 로직이 ~50줄씩 인라인으로 중복 → 한쪽만 수정 시 동작 불일치 발생.
+>
+> **원칙:** 동일한 비즈니스 로직이 2곳 이상에 인라인으로 존재하면:
+> 1. **즉시 컨트롤타워(utils/)에 함수로 추출**한다
+> 2. 모든 인라인 코드를 컨트롤타워 호출로 교체한다
+> 3. 신규 기능 구현 시에도 "이 로직이 다른 경로에서도 필요한가?" 먼저 확인하고, 필요하면 처음부터 컨트롤타워로 만든다
 
 ---
 

@@ -190,10 +190,10 @@ export default function PricingPage() {
   const getPlanFeatures = (planCode: string) => {
     const features: Record<string, string[]> = {
       STARTER: ['기본 SMS/LMS/MMS 발송', '엑셀 업로드', '캘린더 관리', '발송 결과 조회', '스팸필터 테스트'],
-      BASIC: ['STARTER 기능 포함', 'AI 타겟 추천', 'AI 문구 생성', 'AI 추천발송', '분할 발송'],
-      PRO: ['BASIC 기능 포함', 'AI 마케팅분석(기본)', 'API 연동', '카카오톡 연동'],
-      BUSINESS: ['PRO 기능 포함', 'AI 마케팅분석(고급)', 'DB 실시간 동기화', '맞춤 리포트', '전담 매니저', 'SLA 보장'],
-      ENTERPRISE: ['BUSINESS 기능 포함', '온프레미스 설치', '커스텀 개발', '24/7 지원'],
+      BASIC: ['STARTER 기능 포함', 'AI 타겟 추천', 'AI 문구 생성', 'AI 추천발송', 'AI 자동매핑'],
+      PRO: ['BASIC 기능 포함', 'AI 마케팅분석(기본)', 'Sync-Agent 연동', '자동발송 5건'],
+      BUSINESS: ['PRO 기능 포함', 'AI 마케팅분석(고급)', 'DB 실시간 동기화', '맞춤 리포트', '전담 매니저', 'SLA 보장', '자동발송 10건'],
+      ENTERPRISE: ['BUSINESS 기능 포함', '온프레미스 설치', '커스텀 개발', '24/7 지원', '자동발송 무제한'],
     };
     return features[planCode] || [];
   };

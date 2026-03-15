@@ -1987,4 +1987,67 @@
 
 ---
 
-*최종 업데이트: 2026-03-12 D67. B18-01 080 콜백 서버 미도달(🔵 조사 중), B18-02 store_code/created_by 격리 누락(🟡 수정완료-배포대기), B18-03 tp-deploy-full 빌드 누락(✅ Closed). D66 17차 15건 🟡수정완료-검증대기 유지.*
+---
+
+## 19차 버그리포트 — D75 (2026-03-14) 직원 리포트 4건
+
+### B19-01: SMS→LMS 자동전환 시 제목 입력 불가 + window.confirm 🟡
+
+| 항목 | 내용 |
+|------|------|
+| **심각도** | 🟡 Major (UX/기능) |
+| **상태** | 🟡 수정완료-배포대기 (2026-03-14) |
+| **리포터** | isoi |
+| **증상** | AI 한줄로/맞춤한줄에서 메시지가 90바이트 초과해 SMS→LMS 자동전환될 때, (1) LMS 제목 입력 필드가 없어서 제목 없이 발송됨, (2) 전환 확인이 `window.confirm`으로 표시되어 UI 이질적 |
+| **근본 원인** | AiCampaignSendModal에 LMS 제목 입력 UI 미구현, AiCampaignResultPopup에서 `window.confirm` 사용 |
+| **수정** | (1) AiCampaignSendModal: LMS/MMS일 때 제목 입력 필드 추가 + `subject` onSend 전달 (2) AiCampaignResultPopup: window.confirm → 커스텀 모달 (amber/orange 그라데이션) (3) 하드코딩 샘플 데이터 → sampleCustomer prop |
+| **수정 파일** | AiCampaignResultPopup.tsx, AiCampaignSendModal.tsx, Dashboard.tsx |
+
+---
+
+### B19-02: 개별회신번호 미등록 시 전체 차단 에러 🟡
+
+| 항목 | 내용 |
+|------|------|
+| **심각도** | 🟡 Major (발송 차단) |
+| **상태** | 🟡 수정완료-배포대기 (2026-03-14) |
+| **리포터** | isoi |
+| **증상** | AI한줄로/맞춤한줄에서 개별회신번호 사용 시, 미등록 회신번호가 일부만 있어도 "발송대상이 없습니다.(모두 제외됨)" 에러로 전체 차단. 직접발송은 정상적으로 해당 N명만 제외하고 나머지 발송 |
+| **근본 원인** | campaigns.ts AI send/direct-send 경로에 개별회신번호 필터링 로직이 인라인으로 중복 구현 → 동작 불일치 |
+| **수정** | ★ CT-08 `callback-filter.ts` 컨트롤타워 신설 → AI send + direct-send 양쪽 모두 CT-08 호출로 통합. 에러 응답에 제외 사유(회신번호 미보유 N명, 미등록 회신번호 N명) 구체적 안내 |
+| **수정 파일** | callback-filter.ts(신규), campaigns.ts |
+| **교훈** | 동일 로직이 2곳 이상 인라인으로 존재하면 반드시 컨트롤타워로 추출. 인라인 중복 = 동작 불일치 근원 |
+
+---
+
+### B19-03: 직접타겟설정 커스텀필드 데이터 NULL 표시 🟡
+
+| 항목 | 내용 |
+|------|------|
+| **심각도** | 🟡 Major (데이터 표시) |
+| **상태** | 🟡 수정완료-배포대기 (2026-03-14) |
+| **리포터** | sh_de |
+| **증상** | 직접타겟설정에서 타겟 추출 시 커스텀 필드(회원타입 등) 데이터가 "-"(NULL)로 표시. 표준 컬럼 필드(누적구매금액 등)는 정상 표시 |
+| **근본 원인** | customers.ts extract API가 custom_fields JSONB를 그대로 반환 → 프론트엔드에서 `r[field_key]` 접근 시 JSONB 내부 키(custom_1 등)에 접근 불가 |
+| **수정** | 백엔드 customers.ts extract API에서 custom_fields JSONB를 flat하게 풀어서 반환 (`{ custom_fields: {custom_1: 'VIP'}, ...rest }` → `{ custom_1: 'VIP', ...rest }`). 프론트엔드 인라인 처리 제거 |
+| **수정 파일** | customers.ts |
+| **교훈** | JSONB 내부 키는 SQL row의 최상위 키가 아님. API 응답에서 flat 처리해야 프론트에서 동일한 접근 패턴 사용 가능 |
+
+---
+
+### B19-04: 타겟추출 10,000건 하드코딩 제한 🟡
+
+| 항목 | 내용 |
+|------|------|
+| **심각도** | 🟡 Major (기능 제한) |
+| **상태** | 🟡 수정완료-배포대기 (2026-03-14) |
+| **리포터** | Harold님 |
+| **증상** | 16,993명 매칭되는데 타겟 추출 시 10,000명만 추출됨. toast 메시지 "10000명 추출 완료"에 천단위 구분 없음 |
+| **근본 원인** | customers.ts extract API에 `limit = 10000` 하드코딩 + SQL LIMIT 절 존재 |
+| **수정** | (1) `limit = 10000` 하드코딩 완전 제거, LIMIT 절 삭제 → 무제한 추출 (2) Dashboard.tsx toast에 `toLocaleString()` 적용 |
+| **수정 파일** | customers.ts, Dashboard.tsx |
+| **교훈** | limit 하드코딩 = 하드코딩 금지 원칙 위반. 추출/발송 건수에 인위적 제한을 두지 않는다 |
+
+---
+
+*최종 업데이트: 2026-03-14 D75. B19-01~04 4건 🟡수정완료-배포대기. B18-01 080 콜백 서버 미도달(🔵 조사 중), B18-02 store_code/created_by 격리 누락(🟡 수정완료-배포대기), B18-03 tp-deploy-full 빌드 누락(✅ Closed).*
