@@ -287,6 +287,13 @@ AND NOT EXISTS (
 - `auto_campaign_runs` — 매 실행 이력 (회차별 발송 결과)
 - `plans.auto_campaign_enabled` — 요금제별 기능 게이팅 (BOOLEAN)
 - `plans.max_auto_campaigns` — 동시 활성 자동캠페인 수 제한 (PRO:5, BUSINESS:10, ENTERPRISE:NULL=무제한)
+- `companies.auto_campaign_override` — 회사별 오버라이드 (NULL=플랜따름, 0=비활성, 1+=허용건수). 특정 업체에 서비스로 자동발송 제공 시 사용
+
+**회사별 자동발송 오버라이드 (D76):**
+- 플랜 자체를 변경하지 않고 특정 회사에만 자동발송을 열어줄 때 사용
+- `checkPlanGating()` 함수에서 `auto_campaign_override`가 NULL이 아니면 플랜 설정보다 우선 적용
+- 서비스 제공: `UPDATE companies SET auto_campaign_override = N WHERE id = '업체ID';`
+- 서비스 회수: `UPDATE companies SET auto_campaign_override = NULL WHERE id = '업체ID';`
 
 **백엔드 파일 (구현 완료):**
 - `routes/auto-campaigns.ts` — CRUD API 9개 엔드포인트 (GET/, GET/:id, POST/, PUT/:id, POST/:id/pause, POST/:id/resume, DELETE/:id, POST/:id/preview, POST/:id/cancel-next)
@@ -367,6 +374,7 @@ PostgreSQL campaigns/campaign_runs 생성
 | **타겟추출 건수 하드코딩 제한** | customers.ts extract API에 `limit = 10000` 하드코딩 → 16,993명 매칭인데 10,000명만 추출 | **추출/발송 건수에 인위적 limit 하드코딩 금지.** 필요 시 환경변수나 설정으로 관리 (D75) |
 | **custom_fields JSONB flat 미처리** | extract API가 custom_fields JSONB 그대로 반환 → 프론트에서 `r[field_key]` 접근 시 커스텀 필드 NULL 표시 | **JSONB 내부 키를 프론트에서 접근해야 할 때 백엔드 API에서 flat 처리하여 반환** (D75) |
 | **window.confirm 사용** | SMS→LMS 전환 확인을 window.confirm으로 표시 → 다크모드/테마 미적용, UX 이질적 | **window.confirm/alert 사용 금지.** 모든 확인 대화상자는 커스텀 모달 컴포넌트 사용 (D75) |
+| **AI 문안 요일 오류** | generateMessages 프롬프트에 달력 미제공 → AI가 요일 자체 계산 → 3/20(목)이 실제로는 금요일 | **AI 프롬프트에 날짜/요일이 관여하는 모든 함수에 getKoreanCalendar() 달력 제공 필수.** getKoreanToday() 쓰는 곳이면 getKoreanCalendar()도 함께 (D76) |
 
 ### ⚠️ 필수 체크 원칙 1: 유틸 함수 수정/추가 시 소비처 전수 확인
 

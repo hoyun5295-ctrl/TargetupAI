@@ -226,6 +226,7 @@
 | use_product_category_small | boolean | |
 | api_key | varchar(100) | |
 | api_secret | varchar(100) | |
+| auto_campaign_override | integer | 자동발송 회사별 오버라이드 (NULL=플랜따름, 0=비활성, 1+=허용건수) |
 | max_users | integer | 최대 사용자 수 (기본 5) |
 | session_timeout_minutes | integer | 세션 타임아웃 분 (기본 30) |
 | created_by | uuid | |

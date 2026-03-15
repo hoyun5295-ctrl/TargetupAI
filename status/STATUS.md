@@ -106,6 +106,45 @@
 
 ---
 
+### 🔧 D76 — AI 문안 요일 오류 수정 + 요금제 피처 업데이트 + 자동발송 회사별 오버라이드 (2026-03-15) — 수정완료, 배포대기
+
+> **배경:** (1) AI 메시지 생성 시 요일이 틀림(3/20목→실제 금) — AI가 요일을 자체 계산해서 오류. (2) 요금제 비교 페이지 피처 업데이트 필요. (3) 베이직 업체에 서비스로 자동발송 1건 제공 필요.
+
+#### 수정 항목
+
+**1. AI 문안 요일 오류 — getKoreanCalendar() 누락 (ai.ts)**
+- generateMessages() 프롬프트에 달력 미제공 → AI가 요일 자체 계산 → 오류
+- getKoreanCalendar() + 경고 문구를 generateMessages, parseBriefing, optimizePrompt 3곳 추가
+- getKoreanToday() 사용처 4곳 = getKoreanCalendar() 사용처 4곳 전수 일치 확인
+
+**2. 요금제 피처 업데이트 (PricingPage.tsx)**
+- 베이직: 분할 발송 제거, AI 자동매핑 추가
+- 프로: API 연동→Sync-Agent 연동, 카카오톡 연동 제거, DB 실시간 동기화 추가, 자동발송 5건 추가
+- 비즈니스: DB 실시간 동기화 제거(PRO에 이관), 자동발송 10건 추가
+- 엔터프라이즈: 자동발송 무제한 추가
+
+**3. 자동발송 회사별 오버라이드 (auto-campaigns.ts + DB)**
+- companies 테이블에 auto_campaign_override 컬럼 추가 (INTEGER, DEFAULT NULL)
+- NULL=플랜설정따름, 0=강제비활성, 1+=해당건수허용
+- checkPlanGating() 수정: 오버라이드 값이 있으면 플랜보다 우선 적용
+- GET / 목록 조회: 프론트에 전달하는 plan 정보도 오버라이드 반영
+- 사용법: `UPDATE companies SET auto_campaign_override = 1 WHERE id = '업체ID';`
+
+#### 수정 파일 (3개) + DB 마이그레이션 (1개)
+- `packages/backend/src/services/ai.ts` — 3곳에 getKoreanCalendar() 추가
+- `packages/frontend/src/pages/PricingPage.tsx` — getPlanFeatures() 피처 목록 업데이트
+- `packages/backend/src/routes/auto-campaigns.ts` — checkPlanGating + GET / 오버라이드 반영
+- `status/migrations/D76-auto-campaign-override.sql` — DB 마이그레이션
+
+#### TypeScript 타입 체크
+- 백엔드: ✅ 0 에러
+
+#### ⚠️ 배포 시 필수 작업
+1. 서버 DB에서 마이그레이션 SQL 실행: `status/migrations/D76-auto-campaign-override.sql`
+2. 이후 tp-push → tp-deploy-full
+
+---
+
 ### 🔧 D75 — UI/UX 버그 4건 수정 + CT-08 개별회신번호 필터링 컨트롤타워 (2026-03-14) — 수정완료, 배포대기
 
 > **배경:** 직원(isoi, sh_de) 버그리포트 4건 — LMS 제목 입력 누락, 회신번호 에러 UX, 커스텀필드 타겟추출 NULL, 타겟추출 10000건 하드코딩 제한

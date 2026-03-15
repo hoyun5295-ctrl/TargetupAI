@@ -27,28 +27,43 @@ router.use(authenticate);
 // 공통 헬퍼
 // ============================================================
 
-/** 요금제 게이팅 + 최대 활성 수 조회 */
+/** 요금제 게이팅 + 최대 활성 수 조회
+ * - plans.auto_campaign_enabled / max_auto_campaigns 기본 참조
+ * - companies.auto_campaign_override가 NULL이 아니면 회사별 오버라이드 우선 적용
+ *   (특정 업체에 서비스로 자동발송 N건 제공 시 사용)
+ */
 async function checkPlanGating(companyId: string): Promise<{
   allowed: boolean;
   maxAutoCampaigns: number | null;
   errorMsg?: string;
 }> {
   const result = await query(
-    `SELECT p.auto_campaign_enabled, p.max_auto_campaigns
+    `SELECT p.auto_campaign_enabled, p.max_auto_campaigns, c.auto_campaign_override
      FROM companies c
      LEFT JOIN plans p ON c.plan_id = p.id
      WHERE c.id = $1`,
     [companyId]
   );
-  const plan = result.rows[0];
-  if (!plan?.auto_campaign_enabled) {
+  const row = result.rows[0];
+
+  // 회사별 오버라이드가 있으면 플랜 설정보다 우선
+  if (row?.auto_campaign_override != null) {
+    const override = Number(row.auto_campaign_override);
+    if (override <= 0) {
+      return { allowed: false, maxAutoCampaigns: null, errorMsg: '자동발송이 비활성화되어 있습니다.' };
+    }
+    return { allowed: true, maxAutoCampaigns: override };
+  }
+
+  // 오버라이드 없으면 플랜 설정 따름
+  if (!row?.auto_campaign_enabled) {
     return {
       allowed: false,
       maxAutoCampaigns: null,
       errorMsg: '자동발송은 프로 요금제 이상에서 이용 가능합니다.',
     };
   }
-  return { allowed: true, maxAutoCampaigns: plan.max_auto_campaigns };
+  return { allowed: true, maxAutoCampaigns: row.max_auto_campaigns };
 }
 
 /** 활성 자동캠페인 수 제한 체크 */
@@ -189,9 +204,9 @@ router.get('/', async (req: Request, res: Response) => {
       }
     }
 
-    // 요금제 정보도 함께 조회 (프론트에서 게이팅 판단용)
+    // 요금제 정보도 함께 조회 (프론트에서 게이팅 판단용) + 회사별 오버라이드 반영
     const planResult = await query(
-      `SELECT p.auto_campaign_enabled, p.max_auto_campaigns
+      `SELECT p.auto_campaign_enabled, p.max_auto_campaigns, c.auto_campaign_override
        FROM companies c LEFT JOIN plans p ON c.plan_id = p.id WHERE c.id = $1`,
       [companyId]
     );
@@ -209,9 +224,19 @@ router.get('/', async (req: Request, res: Response) => {
 
     const activeCount = result.rows.filter(r => r.status === 'active').length;
 
+    // 회사별 오버라이드 반영하여 프론트에 전달
+    const planRow = planResult.rows[0];
+    let planForFront = { auto_campaign_enabled: false, max_auto_campaigns: null as number | null };
+    if (planRow?.auto_campaign_override != null) {
+      const override = Number(planRow.auto_campaign_override);
+      planForFront = { auto_campaign_enabled: override > 0, max_auto_campaigns: override > 0 ? override : null };
+    } else if (planRow) {
+      planForFront = { auto_campaign_enabled: planRow.auto_campaign_enabled, max_auto_campaigns: planRow.max_auto_campaigns };
+    }
+
     res.json({
       autoCampaigns: result.rows,
-      plan: planResult.rows[0] || { auto_campaign_enabled: false, max_auto_campaigns: null },
+      plan: planForFront,
       activeCount,
     });
   } catch (err: any) {
