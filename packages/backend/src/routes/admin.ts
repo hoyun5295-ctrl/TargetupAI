@@ -4,7 +4,7 @@ import { Request, Response, Router } from 'express';
 import { mysqlQuery, query } from '../config/database';
 import { authenticate, requireSuperAdmin } from '../middlewares/auth';
 import { ALL_SMS_TABLES, invalidateLineGroupCache } from '../utils/sms-queue';
-import { DASHBOARD_CARD_POOL, validateCardIds, getRequiredFields, filterPoolByAvailableFields } from '../utils/dashboard-card-pool';
+import { DASHBOARD_CARD_POOL, validateCardIds } from '../utils/dashboard-card-pool';
 import { SUCCESS_CODES_SQL, PENDING_CODES_SQL, getStatusLabel, getStatusType, getCarrierLabel, isSuccess, isPending } from '../utils/sms-result-map';
 import { DEFAULT_COSTS } from '../config/defaults';
 import { validateSmsTables } from '../utils/sms-table-validator';
@@ -522,41 +522,13 @@ router.get('/companies/:id/dashboard-cards', authenticate, requireSuperAdmin, as
       selectedCards = [];
     }
 
-    // ★ 고객사 데이터 유무 체크 → 데이터 있는 카드만 풀에 포함
-    const requiredFields = getRequiredFields(); // ['gender', 'birth_date', 'grade', 'region', ...]
-    const availableFields = new Set<string>();
-
-    if (requiredFields.length > 0) {
-      // EXISTS 서브쿼리로 각 필드별 데이터 유무를 한 쿼리로 체크 (효율적)
-      const existsClauses = requiredFields.map((field, i) => {
-        if (['total_purchase_amount'].includes(field)) {
-          // 숫자 필드: NULL이 아니고 0보다 큰 경우만
-          return `EXISTS(SELECT 1 FROM customers WHERE company_id = $1 AND ${field} IS NOT NULL AND ${field} > 0) as has_${i}`;
-        }
-        // 문자열/날짜 필드: NULL이 아니고 빈값이 아닌 경우
-        return `EXISTS(SELECT 1 FROM customers WHERE company_id = $1 AND ${field} IS NOT NULL AND ${field}::text != '') as has_${i}`;
-      });
-
-      const checkResult = await query(`SELECT ${existsClauses.join(', ')}`, [id]);
-      if (checkResult.rows.length > 0) {
-        const row = checkResult.rows[0] as any;
-        requiredFields.forEach((field, i) => {
-          if (row[`has_${i}`]) availableFields.add(field);
-        });
-      }
-    }
-
-    const filteredPool = filterPoolByAvailableFields(availableFields);
-
-    // 기존 selectedCards 중 필터링된 풀에 없는 카드 제거 (데이터 삭제로 카드가 무효화된 경우)
-    const filteredPoolIds = new Set(filteredPool.map(c => c.cardId));
-    const validSelectedCards = selectedCards.filter(id => filteredPoolIds.has(id));
-
+    // 17개 카드 풀 전체 반환 — 슈퍼관리자가 직접 선택
+    // (커스텀 필드 매핑이 고객사마다 달라 동적 필터링 불가)
     res.json({
       companyName: companyCheck.rows[0].company_name,
-      pool: filteredPool,
-      selectedCards: validSelectedCards,
-      cardCount: validSelectedCards.length,
+      pool: DASHBOARD_CARD_POOL,
+      selectedCards,
+      cardCount: parseInt(settings.dashboard_card_count || '0'),
     });
   } catch (error) {
     console.error('대시보드 카드 설정 조회 실패:', error);
