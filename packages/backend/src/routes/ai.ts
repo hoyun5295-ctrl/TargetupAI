@@ -197,25 +197,35 @@ router.post('/recommend-target', async (req: Request, res: Response) => {
 
     // 실제 타겟 수 계산 — 공통 함수 사용
     const { sql: filterWhere, params: filterParams } = buildFilterWhereClause(result.filters, baseParams.length + 1);
-
     // ★ B17-01: 수신거부 user_id 기준 통일
     const unsubIdxA = baseParams.length + filterParams.length + 1;
-    const actualCountResult = await query(
-      `SELECT COUNT(*) FROM customers c
-       WHERE c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true${storeFilter} ${filterWhere}
-       AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${unsubIdxA} AND u.phone = c.phone)`,
-      [...baseParams, ...filterParams, userId]
-    );
-    const actualCount = parseInt(actualCountResult.rows[0].count);
 
-    // 수신거부 건수 계산
-    const unsubCountResult = await query(
-      `SELECT COUNT(*) FROM customers c
-       WHERE c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true${storeFilter} ${filterWhere}
-       AND EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${unsubIdxA} AND u.phone = c.phone)`,
-      [...baseParams, ...filterParams, userId]
-    );
-    const unsubscribeCount = parseInt(unsubCountResult.rows[0].count);
+    // ★ D77: 필터 쿼리 에러 시 0명 반환 (전체고객 폴백 절대 방지)
+    let actualCount = 0;
+    let unsubscribeCount = 0;
+    try {
+      const actualCountResult = await query(
+        `SELECT COUNT(*) FROM customers c
+         WHERE c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true${storeFilter} ${filterWhere}
+         AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${unsubIdxA} AND u.phone = c.phone)`,
+        [...baseParams, ...filterParams, userId]
+      );
+      actualCount = parseInt(actualCountResult.rows[0].count);
+
+      // 수신거부 건수 계산
+      const unsubCountResult = await query(
+        `SELECT COUNT(*) FROM customers c
+         WHERE c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true${storeFilter} ${filterWhere}
+         AND EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${unsubIdxA} AND u.phone = c.phone)`,
+        [...baseParams, ...filterParams, userId]
+      );
+      unsubscribeCount = parseInt(unsubCountResult.rows[0].count);
+    } catch (filterError) {
+      console.error('[AI] 필터 쿼리 실행 실패 (0명 반환):', filterError);
+      // 필터 쿼리 에러 시 0명으로 처리 — 전체고객 폴백 절대 방지
+      actualCount = 0;
+      unsubscribeCount = 0;
+    }
 
     result.estimated_count = actualCount;
     (result as any).unsubscribe_count = unsubscribeCount;

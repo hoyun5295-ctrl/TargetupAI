@@ -166,10 +166,18 @@ export default function AiCampaignResultPopup({
               </div>
             </div>
 
-            {/* 다음 버튼 */}
+            {/* ★ D77: 추출 고객 0명일 때 경고 + 문안생성 차단 */}
+            {(aiResult?.target?.count || 0) === 0 && (
+              <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-center">
+                <div className="text-rose-600 font-medium text-sm">추출된 고객이 0명입니다</div>
+                <div className="text-rose-500 text-xs mt-1">타겟 조건을 수정하거나, 고객 DB에 데이터를 업로드해주세요.</div>
+              </div>
+            )}
+
+            {/* 다음 버튼 — 0명이면 비활성화 */}
             <button
               onClick={handleAiGenerateChannelMessage}
-              disabled={aiLoading}
+              disabled={aiLoading || (aiResult?.target?.count || 0) === 0}
               className="w-full py-4 bg-green-700 text-white rounded-lg font-medium hover:bg-green-800 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {aiLoading ? (
@@ -177,6 +185,8 @@ export default function AiCampaignResultPopup({
                   <span className="animate-spin">⏳</span>
                   메시지 생성 중...
                 </>
+              ) : (aiResult?.target?.count || 0) === 0 ? (
+                <>추출된 고객이 0명입니다. 다시 추출바랍니다</>
               ) : (
                 <>다음: 문구 생성 →</>
               )}

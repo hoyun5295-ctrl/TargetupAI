@@ -61,6 +61,13 @@ function getValue(field: any): any {
   return field;
 }
 
+/** 값이 날짜 패턴인지 감지 (YYYY-MM-DD 또는 YYYYMMDD) — 커스텀필드 캐스팅 자동 전환용 */
+function isDateLikeValue(value: any): boolean {
+  if (typeof value !== 'string' && typeof value !== 'number') return false;
+  const s = String(value);
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) || /^\d{8}$/.test(s);
+}
+
 /** 컬럼명에 테이블 alias 접두사 적용 */
 function col(alias: string, column: string): string {
   return alias ? `${alias}.${column}` : column;
@@ -260,14 +267,32 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
           sql += ` AND ${cfCol} = $${paramIndex++}`;
           params.push(String(value));
         } else if (operator === 'gte') {
-          sql += ` AND (${cfCol})::numeric >= $${paramIndex++}`;
-          params.push(Number(value));
+          // ★ D77: 날짜형 값 자동 감지 — ::numeric 대신 ::date 캐스팅
+          if (isDateLikeValue(value)) {
+            sql += ` AND (${cfCol})::date >= $${paramIndex++}`;
+            params.push(value);
+          } else {
+            sql += ` AND (${cfCol})::numeric >= $${paramIndex++}`;
+            params.push(Number(value));
+          }
         } else if (operator === 'lte') {
-          sql += ` AND (${cfCol})::numeric <= $${paramIndex++}`;
-          params.push(Number(value));
+          // ★ D77: 날짜형 값 자동 감지
+          if (isDateLikeValue(value)) {
+            sql += ` AND (${cfCol})::date <= $${paramIndex++}`;
+            params.push(value);
+          } else {
+            sql += ` AND (${cfCol})::numeric <= $${paramIndex++}`;
+            params.push(Number(value));
+          }
         } else if (operator === 'between' && Array.isArray(value)) {
-          sql += ` AND (${cfCol})::numeric BETWEEN $${paramIndex++} AND $${paramIndex++}`;
-          params.push(Number(value[0]), Number(value[1]));
+          // ★ D77: 날짜형 값 자동 감지
+          if (isDateLikeValue(value[0]) || isDateLikeValue(value[1])) {
+            sql += ` AND (${cfCol})::date BETWEEN $${paramIndex++} AND $${paramIndex++}`;
+            params.push(value[0], value[1]);
+          } else {
+            sql += ` AND (${cfCol})::numeric BETWEEN $${paramIndex++} AND $${paramIndex++}`;
+            params.push(Number(value[0]), Number(value[1]));
+          }
         } else if (operator === 'in' && Array.isArray(value)) {
           const placeholders = value.map(() => `$${paramIndex++}`).join(', ');
           sql += ` AND ${cfCol} IN (${placeholders})`;
@@ -471,14 +496,32 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
           sql += ` AND ${cfCol} = $${paramIndex++}`;
           params.push(value);
         } else if (operator === 'gte') {
-          sql += ` AND (${cfCol})::numeric >= $${paramIndex++}`;
-          params.push(value);
+          // ★ D77: 날짜형 값 자동 감지 — ::numeric 대신 ::date 캐스팅
+          if (isDateLikeValue(value)) {
+            sql += ` AND (${cfCol})::date >= $${paramIndex++}`;
+            params.push(value);
+          } else {
+            sql += ` AND (${cfCol})::numeric >= $${paramIndex++}`;
+            params.push(value);
+          }
         } else if (operator === 'lte') {
-          sql += ` AND (${cfCol})::numeric <= $${paramIndex++}`;
-          params.push(value);
+          // ★ D77: 날짜형 값 자동 감지
+          if (isDateLikeValue(value)) {
+            sql += ` AND (${cfCol})::date <= $${paramIndex++}`;
+            params.push(value);
+          } else {
+            sql += ` AND (${cfCol})::numeric <= $${paramIndex++}`;
+            params.push(value);
+          }
         } else if (operator === 'between' && Array.isArray(value)) {
-          sql += ` AND (${cfCol})::numeric BETWEEN $${paramIndex++} AND $${paramIndex++}`;
-          params.push(Number(value[0]), Number(value[1]));
+          // ★ D77: 날짜형 값 자동 감지
+          if (isDateLikeValue(value[0]) || isDateLikeValue(value[1])) {
+            sql += ` AND (${cfCol})::date BETWEEN $${paramIndex++} AND $${paramIndex++}`;
+            params.push(value[0], value[1]);
+          } else {
+            sql += ` AND (${cfCol})::numeric BETWEEN $${paramIndex++} AND $${paramIndex++}`;
+            params.push(Number(value[0]), Number(value[1]));
+          }
         } else if (operator === 'in' && Array.isArray(value)) {
           sql += ` AND ${cfCol} = ANY($${paramIndex++})`;
           params.push(value);

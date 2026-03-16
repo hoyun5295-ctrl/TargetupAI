@@ -106,7 +106,42 @@
 
 ---
 
-### 🔧 D76 — AI 문안 요일 오류 수정 + 요금제 피처 업데이트 + 자동발송 회사별 오버라이드 (2026-03-15) — 수정완료, 배포대기
+### ✅ D77 — 대시보드 DB현황 6분할 페이징 뷰 (2026-03-16) — 배포 완료
+
+> **배경:** 대시보드 DB현황 카드가 4개/8개 고정 선택이었음. 카드를 자유롭게 선택하고 6개씩(3×2) 페이징으로 보여주도록 개선.
+
+#### 수정 항목
+
+**1. 슈퍼관리자 — 카드 선택 제한 해제 (AdminDashboard.tsx + admin.ts)**
+- 4칸/8칸 토글 버튼 제거 → "자유롭게 선택, 6개씩 페이징" 안내 UI로 교체
+- 체크박스 비활성화(isFull) 로직 제거 → 17종 풀에서 제한 없이 선택 가능
+- 백엔드 PUT 검증: `cardCount !== 4 && !== 8` 제거 → 선택한 카드 수 자동 반영
+
+**2. 고객사 대시보드 — 6분할 페이징 뷰 (Dashboard.tsx)**
+- `grid-cols-4` → `grid-cols-3` (3열×2행 = 6개씩 표시)
+- 페이지 state(dbCardPage) 추가, 도트 인디케이터로 페이지 전환 (2페이지 이상일 때만 표시)
+- 블러 처리(미업로드)도 3×2 그리드로 통일
+- 카드 색상은 전체 인덱스(globalIdx) 기준으로 페이지 간 일관성 유지
+
+**3. 컨트롤타워 주석 업데이트 (dashboard-card-pool.ts)**
+- "4개 또는 8개" → "원하는 만큼 선택, 6개씩 페이징 표시"
+
+#### 수정 파일 (4개)
+- `packages/backend/src/utils/dashboard-card-pool.ts` — 주석 업데이트
+- `packages/backend/src/routes/admin.ts` — PUT 검증 로직 변경 (4/8 제한 제거)
+- `packages/frontend/src/pages/AdminDashboard.tsx` — 4/8 토글 제거, 자유 선택 UI
+- `packages/frontend/src/pages/Dashboard.tsx` — 6분할 페이징 뷰 + 도트 인디케이터
+
+#### TypeScript 타입 체크
+- 백엔드/프론트엔드: ✅ 0 에러
+
+#### 하위호환
+- 기존 4개/8개 설정 고객사 → 그대로 동작 (4개=1페이지, 8개=2페이지)
+- DB/마이그레이션 불필요
+
+---
+
+### ✅ D76 — AI 문안 요일 오류 수정 + 요금제 피처 업데이트 + 자동발송 회사별 오버라이드 (2026-03-15) — 배포 완료
 
 > **배경:** (1) AI 메시지 생성 시 요일이 틀림(3/20목→실제 금) — AI가 요일을 자체 계산해서 오류. (2) 요금제 비교 페이지 피처 업데이트 필요. (3) 베이직 업체에 서비스로 자동발송 1건 제공 필요.
 
@@ -145,7 +180,7 @@
 
 ---
 
-### 🔧 D75 — UI/UX 버그 4건 수정 + CT-08 개별회신번호 필터링 컨트롤타워 (2026-03-14) — 수정완료, 배포대기
+### ✅ D75 — UI/UX 버그 4건 수정 + CT-08 개별회신번호 필터링 컨트롤타워 (2026-03-14) — 배포 완료
 
 > **배경:** 직원(isoi, sh_de) 버그리포트 4건 — LMS 제목 입력 누락, 회신번호 에러 UX, 커스텀필드 타겟추출 NULL, 타겟추출 10000건 하드코딩 제한
 > **원칙:** 컨트롤타워를 수정하고 나머지는 컨트롤타워를 바라보게 업데이트 (Harold님 명시 지시)
@@ -188,7 +223,7 @@
 
 ---
 
-### 🔧 D74 — 컨트롤타워 동적화 + store_phone 정규화 수정 (2026-03-14) — 수정완료, 배포대기
+### ✅ D74 — 컨트롤타워 동적화 + store_phone 정규화 수정 (2026-03-14) — 배포 완료
 
 > **배경:** sh_cpb 버그리포트 — AI 한줄로 타겟추출 시 타겟 수 불일치(1,224 vs 823) + 매장전화번호 개인화 실패
 > **근본 원인:** (1) normalizePhone이 유선번호를 전부 null 처리, (2) customer-filter.ts/ai.ts에 필터 필드 하드코딩 잔존
@@ -257,7 +292,7 @@
 - **실패 정책:** 스킵 + failed 기록 → next_run_at 다음 스케줄로 갱신 (중복 발송 방지)
 - **기존 파이프라인 100% 재활용:** customer-filter, sms-queue, messageUtils, unsubscribe-helper, prepaid, campaign-lifecycle, store-scope
 
-#### AutoSendFormModal 개선 (2026-03-12, 배포 대기)
+#### AutoSendFormModal 개선 (2026-03-12, 배포 완료)
 - **버그 수정:** 발신번호 로딩 — `data.callbackNumbers` → `data.numbers` (API 응답 키 불일치 수정)
 - **5단계 재구성:** 1.기본정보 → 2.활용필드선택(신규) → 3.스케줄 → 4.메시지 → 5.확인
 - **2단계 활용필드선택:** AiCustomSendFlow 패턴 — `/api/customers/enabled-fields` 기반 카테고리별 동적 필드 체크박스. 선택한 필드가 4단계 변수 드롭다운과 AI 문구생성 personalFields에 연동
@@ -281,7 +316,7 @@
 
 ---
 
-### 🔧 D72 — 예약캠페인 관리 + 발송비용 계산 + storageType 동적필터 + 발송 성능개선 (2026-03-13) — 배포 대기
+### ✅ D72 — 예약캠페인 관리 + 발송비용 계산 + storageType 동적필터 + 발송 성능개선 (2026-03-13) — 배포 완료
 
 > **배경:** (1) 예약 대기 모달에 예약 캠페인이 표시되지 않고 취소 수단 없음, (2) 발송결과 모달의 예상 비용이 메시지 타입 무시하고 SMS 단가(9.9원)로만 계산됨, (3) 예약발송 시 `column "custom_2" does not exist` 에러 — enrichWithCustomFields가 JSONB 내부 키를 SQL SELECT에 노출, (4) 25,000건 발송에 3분 소요 — 건건이 MySQL INSERT (70만건이면 90분).
 > **원칙:** 기록 보존 원칙 (삭제 아닌 상태 변경), 기간계 무접촉, 하드코딩 금지 — storageType 동적 판별, 컨트롤타워(CT-04) 활용.
@@ -445,7 +480,7 @@
 
 ---
 
-### 🔧 D68 — 대시보드 UI 수정 + AI 생일 타겟팅 + 테스트 비용 합산 + 커스텀 필드 라벨 (2026-03-12) — ✅ 완료 (배포 대기)
+### ✅ D68 — 대시보드 UI 수정 + AI 생일 타겟팅 + 테스트 비용 합산 + 커스텀 필드 라벨 (2026-03-12) — 배포 완료
 
 > **배경:** 메트로시티 첫 시연 준비 중 발견된 4건. 대시보드 UI 이슈 + AI 필터 누락 + 비용 집계 누락.
 > **원칙:** 기간계 무접촉. 프론트+백엔드 수정만.
@@ -522,9 +557,9 @@
 - 백엔드: 사용자 목록 조회에 `uploaded_customer_count` 추가 + `DELETE /api/admin/users/:id/customers` API (연관 purchases/consents 삭제 + 감사로그)
 - 프론트: 사용자 수정 모달에 "업로드 고객 DB: N건 + 삭제 버튼" UI
 
-**⚠️ 배포 필요:** tp-push + tp-deploy-full
+**✅ 배포 완료**
 
-#### 🟡 수정 완료-배포 대기: store_code/created_by 전수 격리
+#### ✅ 수정 완료-배포 완료: store_code/created_by 전수 격리
 
 **배경:** Harold님이 사용자 ID(hoyun123, store_code=ONLINE)로 로그인 시 고객사관리자(hoyun)의 발송현황이 그대로 보이는 문제 발견.
 
@@ -615,7 +650,7 @@
 
 #### ✅ 완료된 작업
 
-**B16-01: 고객 DB 통합 문제 (브랜드 격리 체계)** — ✅ 수정 완료, 배포 대기
+**B16-01: 고객 DB 통합 문제 (브랜드 격리 체계)** — ✅ 배포 완료
 - **근본 원인:** store_code 기반 브랜드 격리가 산재되어 있고, 브랜드 없는 단일 본사 고객사 케이스 미고려
 - **수정:** `utils/store-scope.ts` 컨트롤타워 신규 생성
   - 3단계 판단: no_filter(브랜드 없음) / filtered(할당됨) / blocked(미할당)
@@ -623,7 +658,7 @@
   - buildDynamicFilter store_code 서브쿼리에 company_id 조건 추가
 - **파일:** NEW utils/store-scope.ts, MOD customers.ts, campaigns.ts, ai.ts
 
-**B16-02: 예약취소 불가 + 취소해도 실제 발송됨** — ✅ 수정 완료, 배포 대기
+**B16-02: 예약취소 불가 + 취소해도 실제 발송됨** — ✅ 배포 완료
 - **근본 원인:** manage-scheduled.ts의 cancel이 PostgreSQL만 업데이트하고 **MySQL 큐를 전혀 건드리지 않음** → QTmsg Agent가 예약시간에 그대로 발송
 - **수정:** 메시징 컨트롤타워 3개 모듈 생성 + 대규모 리팩토링
   - `utils/sms-queue.ts` — MySQL 큐 조작의 유일한 진입점 (campaigns.ts에서 20+ 함수 이동)
@@ -640,7 +675,7 @@
 - **원인:** sync-results 로직이 campaigns.ts 로컬 함수로 갇혀 있어 다른 곳에서 접근 불가
 - **수정:** campaign-lifecycle.ts의 `syncCampaignResults()` 함수로 추출, campaigns.ts sync-results 라우트에서 호출
 
-**CT-01: `utils/customer-filter.ts` — 고객 필터/쿼리 빌더 컨트롤타워** — ✅ 생성 완료, 배포 대기
+**CT-01: `utils/customer-filter.ts` — 고객 필터/쿼리 빌더 컨트롤타워** — ✅ 배포 완료
 - campaigns.ts, customers.ts, ai.ts 3곳의 필터 빌딩 로직을 통합
 - `buildCustomerFilter()` 단일 함수: mixed(ai.ts 방식) + structured(customers.ts 방식) 2가지 입력 포맷 지원
 - 호환 래퍼: `buildFilterWhereClauseCompat()` (ai.ts용), `buildDynamicFilterCompat()` (customers.ts용)
@@ -648,29 +683,29 @@
 - 내부에서 normalize.ts의 buildGenderFilter, buildGradeFilter, getRegionVariants 재사용
 - **파일:** NEW utils/customer-filter.ts, MOD ai.ts, customers.ts, campaigns.ts
 
-**B16-03: AI 맞춤한줄에 스팸필터/담당자테스트 추가** — ✅ 수정 완료, 배포 대기
+**B16-03: AI 맞춤한줄에 스팸필터/담당자테스트 추가** — ✅ 배포 완료
 - AiCustomSendFlow.tsx Step 4에 담당자테스트 + 스팸필터 버튼 추가
 - AI한줄로(AiCampaignResultPopup)의 기존 패턴 재사용: sampleCustomer로 변수 치환 후 테스트
 - Dashboard.tsx에서 9개 props 전달 (setShowSpamFilter, handleTestSend, sampleCustomer 등)
 - **파일:** MOD AiCustomSendFlow.tsx, Dashboard.tsx
 
-**B16-04: EUC-KR 비호환 특수문자 제거** — ✅ 수정 완료, 배포 대기
+**B16-04: EUC-KR 비호환 특수문자 제거** — ✅ 배포 완료
 - Python EUC-KR 인코딩 테스트로 52개 특수문자 전수 확인
 - 비호환 4개(♢, ♦, ✉, ☀) 제거 → 48개로 축소
 - **파일:** MOD Dashboard.tsx
 
-**B16-05: SMS 전환 후 MMS 이미지 잔존** — ✅ 수정 완료, 배포 대기
+**B16-05: SMS 전환 후 MMS 이미지 잔존** — ✅ 배포 완료
 - MMS 이미지 미리보기 조건: `directMsgType === 'MMS' || mmsUploadedImages.length > 0` → `directMsgType === 'MMS'`
 - LmsConvert/SmsConvert 콜백에 `setMmsUploadedImages([])` 추가
 - **파일:** MOD Dashboard.tsx, TargetSendModal.tsx
 
-**B16-06: AI 타겟추출 age 필터 오류 (0명 반환)** — ✅ 수정 완료, 배포 대기
+**B16-06: AI 타겟추출 age 필터 오류 (0명 반환)** — ✅ 배포 완료
 - **근본 원인:** AI 경로(mixed 모드)는 `(currentYear - birth_year)` 계산, 직접타겟 경로(structured 모드)는 `age` 컬럼 직접 사용 → birth_year NULL이면 AI 경로 0명
 - **수정:** CT-01 customer-filter.ts mixed 모드의 age 처리를 `age` 컬럼 직접 사용으로 통일 (BETWEEN, >=, <=)
 - minAge/maxAge 기존 호환도 동일하게 변경
 - **파일:** MOD utils/customer-filter.ts
 
-**B16-07: 직접타겟 회신번호 선택 + 미등록 회신번호 제외** — ✅ 수정 완료, 배포 대기
+**B16-07: 직접타겟 회신번호 선택 + 미등록 회신번호 제외** — ✅ 배포 완료
 - **프론트엔드:** DirectTargetFilterModal에 회신번호 선택 드롭다운 추가 (기본/개별/특정번호)
   - 선택된 회신번호를 onExtracted 콜백으로 Dashboard에 전달
   - Dashboard에서 TargetSendModal의 selectedCallback/useIndividualCallback에 자동 반영
