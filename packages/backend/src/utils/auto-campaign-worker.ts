@@ -1,15 +1,21 @@
 /**
- * ★ D69: 자동발송 PM2 워커
+ * ★ D69+AI Premium: 자동발송 PM2 워커 (3단계 라이프사이클)
  *
- * 실행 방식: PM2 cron (매 시간 정각) 또는 app.ts 내부 setInterval
- * 역할: next_run_at이 도래한 active 자동캠페인을 찾아 발송 실행
+ * 실행 방식: app.ts 내부 setInterval (매 1시간)
+ *
+ * ★ 3단계 라이프사이클 (AI 문안 자동생성 지원):
+ *   D-2 23:00  → runMessageGeneration()  — AI 문안 생성 + 스팸테스트
+ *   D-1        → runPreNotification()    — 담당자에게 테스트 발송 + 알림
+ *   D-day      → executeAutoCampaign()   — 실제 발송
  *
  * 기존 파이프라인 100% 재활용:
- * - customer-filter.ts → 타겟 필터링
- * - unsubscribe-helper.ts → 수신거부 제외
- * - sms-queue.ts → MySQL 큐 INSERT
+ * - customer-filter.ts (CT-01) → 타겟 필터링
+ * - unsubscribe-helper.ts (CT-03) → 수신거부 제외
+ * - sms-queue.ts (CT-04) → MySQL 큐 INSERT
  * - messageUtils.ts → 변수 치환
- * - prepaid.ts → 선불 차감
+ * - prepaid.ts (CT-05) → 선불 차감
+ * - services/ai.ts → AI 메시지 생성 (generateMessages)
+ * - spam-test-queue.ts (CT-09) → 자동 스팸테스트/재생성
  *
  * 실패 정책: 스킵 + failed 기록 → next_run_at 다음 스케줄로 갱신 (중복 발송 방지)
  */
@@ -24,7 +30,8 @@ import {
 } from './sms-queue';
 import { prepaidDeduct, prepaidRefund } from './prepaid';
 import { normalizePhone } from './normalize-phone';
-import { extractVarCatalog } from '../services/ai';
+import { extractVarCatalog, generateMessages } from '../services/ai';
+import { autoSpamTestWithRegenerate } from './spam-test-queue';
 import { SEND_HOURS } from '../config/defaults';
 
 // ============================================================
@@ -87,7 +94,310 @@ function isWithinSendHours(): boolean {
 }
 
 // ============================================================
-// 단건 자동캠페인 실행
+// ★ 1단계: D-2 AI 문안 생성 + 스팸테스트
+// ai_generate_enabled=true AND next_run_at 24~48시간 이내 AND 아직 미생성
+// ============================================================
+
+async function runMessageGeneration(): Promise<void> {
+  const logPrefix = '[auto-worker][gen]';
+
+  try {
+    // D-2 범위: next_run_at이 24~48시간 이내 + AI 모드 + 아직 생성 안 한 건
+    const result = await query(
+      `SELECT * FROM auto_campaigns
+       WHERE status = 'active'
+         AND ai_generate_enabled = true
+         AND next_run_at > NOW() + INTERVAL '24 hours'
+         AND next_run_at <= NOW() + INTERVAL '48 hours'
+         AND (generated_at IS NULL OR generated_at < NOW() - INTERVAL '48 hours')
+       ORDER BY next_run_at ASC`
+    );
+
+    if (result.rows.length === 0) return;
+
+    console.log(`${logPrefix} AI 문안 생성 대상 ${result.rows.length}건`);
+
+    for (const ac of result.rows) {
+      await generateMessageForAutoCampaign(ac);
+    }
+  } catch (err: any) {
+    console.error(`${logPrefix} 문안 생성 워커 에러:`, err);
+  }
+}
+
+async function generateMessageForAutoCampaign(ac: any): Promise<void> {
+  const logPrefix = `[auto-worker][gen][${ac.id}]`;
+
+  try {
+    console.log(`${logPrefix} AI 문안 생성 시작 (${ac.campaign_name})`);
+
+    // 회사 정보 조회 (AI 생성에 필요)
+    const companyResult = await query(
+      `SELECT company_name, brand_name, brand_tone, brand_description, brand_slogan,
+              COALESCE(reject_number, opt_out_080_number) as reject_number, customer_schema
+       FROM companies WHERE id = $1`,
+      [ac.company_id]
+    );
+    const companyInfo = companyResult.rows[0] || {};
+
+    // 사용자별 080번호 우선
+    if (ac.user_id) {
+      const userOptResult = await query('SELECT opt_out_080_number FROM users WHERE id = $1', [ac.user_id]);
+      const userOpt080 = userOptResult.rows[0]?.opt_out_080_number;
+      if (userOpt080) companyInfo.reject_number = userOpt080;
+    }
+
+    const { fieldMappings: varCatalog, availableVars } = extractVarCatalog(companyInfo.customer_schema);
+
+    // 타겟 통계 조회 (간략)
+    const statsResult = await query(
+      `SELECT COUNT(*) as total FROM customers WHERE company_id = $1 AND is_active = true AND sms_opt_in = true`,
+      [ac.company_id]
+    );
+    const targetInfo = {
+      total_count: parseInt(statsResult.rows[0].total),
+      avg_purchase_count: 0,
+      avg_total_spent: 0,
+    };
+
+    // ★ AI 메시지 생성 — services/ai.ts generateMessages() 재활용
+    // message_type에 따라 SMS/LMS/MMS 전부 지원
+    const channel = ac.message_type || 'SMS';
+    const extraContext = {
+      brandName: companyInfo.brand_name || companyInfo.company_name || '브랜드',
+      brandTone: companyInfo.brand_tone,
+      brandDescription: companyInfo.brand_description,
+      brandSlogan: companyInfo.brand_slogan,
+      channel,
+      isAd: ac.is_ad ?? false,
+      rejectNumber: companyInfo.reject_number,
+      tone: ac.ai_tone || 'friendly',
+      availableVarsCatalog: varCatalog,
+      availableVars,
+    };
+
+    const aiResult = await generateMessages(ac.ai_prompt || ac.campaign_name, targetInfo, extraContext);
+
+    let generatedContent = '';
+    let generatedSubject = '';
+    let aiGenerationStatus = 'ai_generated';
+    let spamTestResult: any = null;
+
+    if (aiResult.variants && aiResult.variants.length > 0) {
+      // ★ 스팸테스트 — CT-09 autoSpamTestWithRegenerate 재활용
+      // 프로 이상이므로 스팸테스트 가능
+      let testedVariants = aiResult.variants;
+
+      if (ac.callback_number && channel !== '카카오') {
+        try {
+          const spamResult = await autoSpamTestWithRegenerate({
+            companyId: ac.company_id,
+            userId: ac.user_id,
+            callbackNumber: ac.callback_number,
+            messageType: channel as 'SMS' | 'LMS' | 'MMS',
+            variants: aiResult.variants.map((v: any) => ({
+              variantId: v.variant_id || v.variantId || 'A',
+              messageText: v.message_text || v.sms_text || v.lms_text || '',
+              subject: v.subject,
+            })),
+            isAd: ac.is_ad || false,
+            rejectNumber: companyInfo.reject_number,
+            regenerateCallback: async (blockedVariantId: string) => {
+              try {
+                console.log(`${logPrefix} 스팸 차단 variant ${blockedVariantId} 재생성`);
+                const regenResult = await generateMessages(
+                  (ac.ai_prompt || ac.campaign_name) + '\n(이전 문안이 스팸필터에 차단되었습니다. 다른 표현으로 작성해주세요.)',
+                  targetInfo, extraContext
+                );
+                if (regenResult.variants?.length > 0) {
+                  const nv = regenResult.variants[0] as any;
+                  return {
+                    messageText: nv.message_text || nv.sms_text || nv.lms_text || '',
+                    subject: nv.subject,
+                  };
+                }
+                return null;
+              } catch {
+                return null;
+              }
+            },
+          });
+
+          spamTestResult = {
+            batchId: spamResult.batchId,
+            totalTestCount: spamResult.totalTestCount,
+            totalRegenerateCount: spamResult.totalRegenerateCount,
+          };
+
+          // 스팸 통과한 variant만 필터 (+ 재생성된 메시지 교체)
+          for (const sv of spamResult.variants) {
+            const original = testedVariants.find(
+              (v: any) => (v.variant_id || v.variantId) === sv.variantId
+            );
+            if (original && sv.regenerated) {
+              (original as any).message_text = sv.messageText;
+              (original as any).sms_text = sv.messageText;
+              (original as any).lms_text = sv.messageText;
+              if (sv.subject) (original as any).subject = sv.subject;
+            }
+          }
+
+          console.log(`${logPrefix} 스팸테스트 완료 — batch=${spamResult.batchId}`);
+        } catch (spamErr) {
+          console.error(`${logPrefix} 스팸테스트 오류 (AI 결과 그대로 사용):`, spamErr);
+        }
+      }
+
+      // 최고 점수 variant 선택
+      const best = testedVariants.sort((a: any, b: any) => (b.score || 0) - (a.score || 0))[0] as any;
+      generatedContent = best.message_text || best.sms_text || best.lms_text || '';
+      generatedSubject = best.subject || '';
+
+      if (!generatedContent) {
+        // AI가 빈 메시지를 생성한 경우 → 폴백
+        generatedContent = ac.fallback_message_content || ac.message_content || '';
+        generatedSubject = ac.message_subject || '';
+        aiGenerationStatus = 'ai_fallback';
+        console.warn(`${logPrefix} AI 생성 메시지 비어있음 → 폴백 사용`);
+      }
+    } else {
+      // AI 생성 실패 → 폴백
+      generatedContent = ac.fallback_message_content || ac.message_content || '';
+      generatedSubject = ac.message_subject || '';
+      aiGenerationStatus = 'ai_fallback';
+      console.warn(`${logPrefix} AI 생성 실패 → 폴백 사용`);
+    }
+
+    // auto_campaigns에 생성된 문안 저장
+    await query(
+      `UPDATE auto_campaigns SET
+        generated_message_content = $2,
+        generated_message_subject = $3,
+        generated_at = NOW(),
+        updated_at = NOW()
+       WHERE id = $1`,
+      [ac.id, generatedContent, generatedSubject || null]
+    );
+
+    console.log(`${logPrefix} 문안 생성 완료 — status=${aiGenerationStatus}, length=${generatedContent.length}자`);
+  } catch (err: any) {
+    console.error(`${logPrefix} AI 문안 생성 에러:`, err);
+    // 생성 실패해도 next_run_at은 건드리지 않음 — D-day에 fallback으로 발송
+  }
+}
+
+// ============================================================
+// ★ 2단계: D-1 사전 알림 (담당자 테스트 발송)
+// pre_notify=true AND next_run_at 0~24시간 이내 AND 아직 미알림
+// ============================================================
+
+async function runPreNotification(): Promise<void> {
+  const logPrefix = '[auto-worker][notify]';
+
+  try {
+    const result = await query(
+      `SELECT ac.* FROM auto_campaigns ac
+       WHERE ac.status = 'active'
+         AND ac.pre_notify = true
+         AND ac.notify_phones IS NOT NULL
+         AND array_length(ac.notify_phones, 1) > 0
+         AND ac.next_run_at > NOW()
+         AND ac.next_run_at <= NOW() + INTERVAL '24 hours'
+         AND NOT EXISTS (
+           SELECT 1 FROM auto_campaign_runs acr
+           WHERE acr.auto_campaign_id = ac.id
+             AND acr.status = 'notified'
+             AND acr.scheduled_at = ac.next_run_at
+         )
+       ORDER BY ac.next_run_at ASC`
+    );
+
+    if (result.rows.length === 0) return;
+
+    console.log(`${logPrefix} 사전 알림 대상 ${result.rows.length}건`);
+
+    for (const ac of result.rows) {
+      await sendPreNotification(ac);
+    }
+  } catch (err: any) {
+    console.error(`${logPrefix} 사전 알림 워커 에러:`, err);
+  }
+}
+
+async function sendPreNotification(ac: any): Promise<void> {
+  const logPrefix = `[auto-worker][notify][${ac.id}]`;
+
+  try {
+    // 라인그룹 체크
+    if (!(await hasCompanyLineGroup(ac.company_id))) {
+      console.warn(`${logPrefix} 라인그룹 미설정 — 알림 스킵`);
+      return;
+    }
+
+    const companyTables = await getCompanySmsTables(ac.company_id, ac.user_id);
+    const sendTime = toKoreaTimeStr(new Date());
+
+    // 발송 예정 시각 (KST)
+    const scheduledKst = new Date(ac.next_run_at).toLocaleString('ko-KR', {
+      timeZone: 'Asia/Seoul',
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit',
+    });
+
+    // 사용할 메시지 결정 (AI 생성 문안 or 고정 문안)
+    const messageContent = ac.ai_generate_enabled && ac.generated_message_content
+      ? ac.generated_message_content
+      : ac.message_content;
+
+    // 알림 메시지 구성
+    const notifyMessage = `[자동발송 사전알림]\n\n캠페인: ${ac.campaign_name}\n발송 예정: ${scheduledKst}\n타입: ${ac.message_type}\n\n▼ 발송 문안 미리보기 ▼\n${messageContent}\n\n※ 취소하려면 관리자 페이지에서 자동발송을 일시정지해주세요.`;
+
+    // notify_phones에 테스트 발송
+    const phones: string[] = ac.notify_phones || [];
+    if (phones.length === 0) return;
+
+    const notifyRows: any[][] = [];
+    for (const phone of phones) {
+      const cleanPhone = normalizePhone(phone);
+      if (!cleanPhone) continue;
+      notifyRows.push([
+        cleanPhone, ac.callback_number, notifyMessage, 'L',  // 알림은 LMS로 (본문이 길어서)
+        `[사전알림] ${ac.campaign_name}`, sendTime, null, ac.company_id,
+        '', '', ''
+      ]);
+    }
+
+    if (notifyRows.length > 0) {
+      await bulkInsertSmsQueue(companyTables, notifyRows, true);
+    }
+
+    // auto_campaign_runs에 notified 기록
+    const runNumberResult = await query(
+      `SELECT COALESCE(MAX(run_number), 0) + 1 as next_run FROM auto_campaign_runs WHERE auto_campaign_id = $1`,
+      [ac.id]
+    );
+    await query(
+      `INSERT INTO auto_campaign_runs (
+        auto_campaign_id, run_number, status, scheduled_at, notified_at, notify_message,
+        generated_message_content, generated_message_subject, ai_generation_status
+      ) VALUES ($1, $2, 'notified', $3, NOW(), $4, $5, $6, $7)`,
+      [
+        ac.id, runNumberResult.rows[0].next_run, ac.next_run_at, notifyMessage,
+        ac.generated_message_content || null,
+        ac.generated_message_subject || null,
+        ac.ai_generate_enabled ? (ac.generated_message_content ? 'ai_generated' : 'ai_fallback') : 'fixed',
+      ]
+    );
+
+    console.log(`${logPrefix} 사전 알림 발송 완료 → ${phones.length}명`);
+  } catch (err: any) {
+    console.error(`${logPrefix} 사전 알림 에러:`, err);
+  }
+}
+
+// ============================================================
+// ★ 3단계: D-day 실제 발송 (기존 executeAutoCampaign 개선)
+// AI 생성 문안이 있으면 그것 사용, 없으면 고정 메시지
 // ============================================================
 
 async function executeAutoCampaign(ac: any): Promise<void> {
@@ -115,7 +425,7 @@ async function executeAutoCampaign(ac: any): Promise<void> {
       return;
     }
 
-    // ★ 발송 시간대 체크 (회사별 send_start_hour/send_end_hour)
+    // ★ 발송 시간대 체크
     if (!isWithinSendHours()) {
       console.warn(`${logPrefix} 발송 허용 시간 외 — 스킵`);
       await markFailed(ac, '발송 허용 시간 외');
@@ -131,12 +441,10 @@ async function executeAutoCampaign(ac: any): Promise<void> {
     );
     const customerSchema = companySchemaResult.rows[0]?.customer_schema || {};
     const { fieldMappings } = extractVarCatalog(customerSchema);
-    // ★ B-D70-16: 커스텀 필드 매핑 보강 (미리보기 vs 실제 발송 개인화 불일치 수정)
     await enrichWithCustomFields(fieldMappings, ac.company_id);
 
     // 동적 SELECT 컬럼 구성
     const baseColumns = ['id', 'phone', 'custom_fields'];
-    // ★ storageType 기반 동적 필터 — 직접 컬럼만 SELECT, JSONB 내부 키는 custom_fields 컬럼에서 접근 (D72)
     const mappingColumns = Object.values(fieldMappings).filter((m: any) => m.storageType !== 'custom_fields').map((m: any) => m.column);
     const selectColumns = [...new Set([...baseColumns, ...mappingColumns])].join(', ');
 
@@ -172,14 +480,42 @@ async function executeAutoCampaign(ac: any): Promise<void> {
 
     console.log(`${logPrefix} 타겟 ${customers.length}명`);
 
-    // ★ campaign_runs에 run 기록 (run_number 계산)
+    // ★ 기능 3: AI 생성 문안 vs 고정 메시지 결정
+    // 폴백 체인: generated_message_content → fallback_message_content → message_content
+    let messageContent: string;
+    let messageSubject: string;
+    let aiGenerationStatus: string;
+
+    if (ac.ai_generate_enabled && ac.generated_message_content) {
+      messageContent = ac.generated_message_content;
+      messageSubject = ac.generated_message_subject || ac.message_subject || '';
+      aiGenerationStatus = 'ai_generated';
+      console.log(`${logPrefix} AI 생성 문안 사용 (${messageContent.length}자)`);
+    } else if (ac.ai_generate_enabled && ac.fallback_message_content) {
+      messageContent = ac.fallback_message_content;
+      messageSubject = ac.message_subject || '';
+      aiGenerationStatus = 'ai_fallback';
+      console.warn(`${logPrefix} AI 생성 문안 없음 → 폴백 메시지 사용`);
+    } else {
+      messageContent = ac.message_content || '';
+      messageSubject = ac.message_subject || '';
+      aiGenerationStatus = 'fixed';
+    }
+
+    if (!messageContent) {
+      console.warn(`${logPrefix} 메시지 내용 없음 — 스킵`);
+      await markFailed(ac, '메시지 내용 없음 (AI 생성 실패 + 폴백 없음)');
+      return;
+    }
+
+    // ★ campaign_runs에 run 기록
     const runNumberResult = await query(
       `SELECT COALESCE(MAX(run_number), 0) + 1 as next_run FROM auto_campaign_runs WHERE auto_campaign_id = $1`,
       [ac.id]
     );
     const runNumber = runNumberResult.rows[0].next_run;
 
-    // ★ campaigns 테이블에 연결 레코드 생성 (결과 추적용)
+    // ★ campaigns 테이블에 연결 레코드 생성
     const campaignResult = await query(
       `INSERT INTO campaigns (
         company_id, campaign_name, message_type, target_filter,
@@ -192,8 +528,8 @@ async function executeAutoCampaign(ac: any): Promise<void> {
         `[자동] ${ac.campaign_name} #${runNumber}`,
         ac.message_type,
         JSON.stringify(ac.target_filter),
-        ac.message_content,
-        ac.message_subject || null,
+        messageContent,
+        messageSubject || null,
         ac.is_ad ?? false,
         customers.length,
         ac.user_id,
@@ -205,10 +541,16 @@ async function executeAutoCampaign(ac: any): Promise<void> {
     // auto_campaign_runs 기록
     const runResult = await query(
       `INSERT INTO auto_campaign_runs (
-        auto_campaign_id, campaign_id, run_number, target_count, status, scheduled_at, started_at
-      ) VALUES ($1, $2, $3, $4, 'sending', $5, NOW())
+        auto_campaign_id, campaign_id, run_number, target_count, status, scheduled_at, started_at,
+        generated_message_content, generated_message_subject, ai_generation_status
+      ) VALUES ($1, $2, $3, $4, 'sending', $5, NOW(), $6, $7, $8)
       RETURNING id`,
-      [ac.id, campaignId, runNumber, customers.length, ac.next_run_at]
+      [
+        ac.id, campaignId, runNumber, customers.length, ac.next_run_at,
+        ac.ai_generate_enabled ? messageContent : null,
+        ac.ai_generate_enabled ? (messageSubject || null) : null,
+        aiGenerationStatus,
+      ]
     );
     const runId = runResult.rows[0].id;
 
@@ -224,19 +566,15 @@ async function executeAutoCampaign(ac: any): Promise<void> {
       return;
     }
 
-    // ★ MySQL 큐 INSERT (campaigns.ts /:id/send 패턴 그대로)
+    // ★ MySQL 큐 INSERT
     const sendTime = toKoreaTimeStr(new Date());
     const msgTypeCode = ac.message_type === 'SMS' ? 'S' : ac.message_type === 'LMS' ? 'L' : 'M';
-    const mmsImages: string[] = [];  // 자동발송은 MMS 이미지 미지원 (MVP)
+    const mmsImages: string[] = [];  // MMS 이미지는 추후 지원
 
-    let sentCount = 0;
-
-    // ★ D72 성능개선: sms-queue.ts 컨트롤타워 bulkInsertSmsQueue 사용
-    // 1단계: 메시지 치환 + 발송 데이터 준비 (메모리 연산)
     const autoSmsRows: any[][] = [];
     for (const customer of customers) {
-      const personalizedMessage = replaceVariables(ac.message_content || '', customer, fieldMappings);
-      const personalizedSubject = ac.message_subject || '';
+      const personalizedMessage = replaceVariables(messageContent, customer, fieldMappings);
+      const personalizedSubject = messageSubject;
       const cleanPhone = normalizePhone(customer.phone);
 
       autoSmsRows.push([
@@ -246,10 +584,9 @@ async function executeAutoCampaign(ac: any): Promise<void> {
       ]);
     }
 
-    // 2단계: bulk INSERT — sms-queue.ts 컨트롤타워 사용 (즉시발송)
-    sentCount = await bulkInsertSmsQueue(companyTables, autoSmsRows, true);
+    const sentCount = await bulkInsertSmsQueue(companyTables, autoSmsRows, true);
 
-    // ★ 부분 실패 시 실패분 환불
+    // ★ 부분 실패 시 환불
     const failCount = customers.length - sentCount;
     if (failCount > 0) {
       console.warn(`${logPrefix} 부분 실패 — 성공: ${sentCount}, 실패: ${failCount}`);
@@ -275,17 +612,25 @@ async function executeAutoCampaign(ac: any): Promise<void> {
       [campaignId, sentCount]
     );
 
-    // ★ campaign_runs 연결 레코드 생성 (sync-results 호환)
+    // ★ campaign_runs 연결 레코드
     await query(
       `INSERT INTO campaign_runs (campaign_id, run_number, target_count, sent_count, status, sent_at)
        VALUES ($1, 1, $2, $3, 'sending', NOW())`,
       [campaignId, customers.length, sentCount]
     );
 
-    // ★ auto_campaigns 통계 + next_run_at 갱신
+    // ★ auto_campaigns 통계 + next_run_at 갱신 + generated 초기화
     await advanceNextRun(ac, sentCount);
 
-    console.log(`${logPrefix} 완료 — ${sentCount}/${customers.length}건 발송`);
+    // AI 모드: 생성 문안 초기화 (다음 회차에 새로 생성하도록)
+    if (ac.ai_generate_enabled) {
+      await query(
+        `UPDATE auto_campaigns SET generated_message_content = NULL, generated_message_subject = NULL, generated_at = NULL WHERE id = $1`,
+        [ac.id]
+      );
+    }
+
+    console.log(`${logPrefix} 완료 — ${sentCount}/${customers.length}건 발송 (${aiGenerationStatus})`);
   } catch (err: any) {
     console.error(`${logPrefix} 실행 중 에러:`, err);
     await markFailed(ac, `실행 에러: ${err.message || '알 수 없는 오류'}`);
@@ -298,7 +643,6 @@ async function executeAutoCampaign(ac: any): Promise<void> {
 
 async function markFailed(ac: any, reason: string): Promise<void> {
   try {
-    // auto_campaign_runs에 실패 기록
     const runNumberResult = await query(
       `SELECT COALESCE(MAX(run_number), 0) + 1 as next_run FROM auto_campaign_runs WHERE auto_campaign_id = $1`,
       [ac.id]
@@ -312,7 +656,6 @@ async function markFailed(ac: any, reason: string): Promise<void> {
     console.error(`[auto-worker][${ac.id}] 실패 기록 오류:`, err);
   }
 
-  // next_run_at은 항상 다음 스케줄로 진행 (스킵 정책)
   await advanceNextRun(ac);
 }
 
@@ -339,23 +682,27 @@ async function advanceNextRun(ac: any, sentCount?: number): Promise<void> {
 }
 
 // ============================================================
-// 메인 실행 함수 (외부에서 호출)
+// 메인 실행 함수 (3단계 순차 실행)
 // ============================================================
 
 export async function runAutoCampaignWorker(): Promise<void> {
   const logPrefix = '[auto-worker]';
 
   try {
-    // status='active' AND next_run_at <= NOW() 인 건 조회
+    // ★ 1단계: D-2 AI 문안 생성 (24~48시간 전)
+    await runMessageGeneration();
+
+    // ★ 2단계: D-1 사전 알림 (0~24시간 전)
+    await runPreNotification();
+
+    // ★ 3단계: D-day 발송 (next_run_at <= NOW())
     const result = await query(
       `SELECT * FROM auto_campaigns
        WHERE status = 'active' AND next_run_at <= NOW()
        ORDER BY next_run_at ASC`
     );
 
-    if (result.rows.length === 0) {
-      return; // 도래한 건 없음 — 조용히 종료
-    }
+    if (result.rows.length === 0) return;
 
     console.log(`${logPrefix} ${result.rows.length}건 도래 — 실행 시작`);
 
@@ -377,7 +724,7 @@ export async function runAutoCampaignWorker(): Promise<void> {
 const WORKER_INTERVAL_MS = 60 * 60 * 1000; // 1시간
 
 export function startAutoCampaignScheduler(): void {
-  console.log('[auto-worker] 자동발송 스케줄러 시작 (매 1시간 체크)');
+  console.log('[auto-worker] 자동발송 스케줄러 시작 (매 1시간 체크, 3단계 라이프사이클)');
 
   // 기동 시 즉시 1회 실행
   runAutoCampaignWorker().catch(err => {

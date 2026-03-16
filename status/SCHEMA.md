@@ -477,6 +477,7 @@
 | auto_campaign_enabled | boolean | D69: 자동발송 잠금 (기본 false, PRO 이상 true) ✅ 적용 완료 |
 | max_auto_campaigns | integer | D69: 동시 활성 자동캠페인 수 제한 (PRO: 5, BUSINESS: 10, ENTERPRISE: NULL=무제한) |
 | auto_spam_test_enabled | boolean DEFAULT false | 자동 스팸필터 테스트 기능 잠금 |
+| ai_premium_enabled | boolean DEFAULT false | D80: AI 프리미엄 기능 게이팅 (PRO 이상 true) — 자동조건완화, 성과기반추천, 자동문안생성 |
 | created_at | timestamp | |
 
 ### plan_requests (요금제 변경 요청)
@@ -967,6 +968,13 @@
 | is_ad | boolean DEFAULT false | |
 | pre_notify | boolean DEFAULT true | D-1 사전 알림 |
 | notify_phones | text[] | 알림 수신 전화번호 |
+| ai_generate_enabled | boolean DEFAULT false | D80: 매 발송 시 AI가 문안을 새로 생성할지 여부 |
+| ai_prompt | text | D80: AI에 전달할 마케팅 컨셉/지시 |
+| ai_tone | varchar(20) DEFAULT 'friendly' | D80: 톤 (friendly/formal/cute/professional) |
+| fallback_message_content | text | D80: AI 실패 시 폴백 메시지 |
+| generated_message_content | text | D80: D-2에 생성된 문안 (발송 때 사용) |
+| generated_message_subject | varchar(200) | D80: D-2에 생성된 LMS/MMS 제목 |
+| generated_at | timestamptz | D80: 문안 생성 시각 |
 | status | varchar(20) DEFAULT 'active' | active / paused / deleted |
 | last_run_at | timestamptz | |
 | next_run_at | timestamptz | |
@@ -995,4 +1003,8 @@
 | completed_at | timestamptz | |
 | cancelled_at | timestamptz | |
 | cancel_reason | text | |
+| generated_message_content | text | D80: 해당 회차에 사용된 AI 생성 문안 |
+| generated_message_subject | varchar(200) | D80: 해당 회차에 사용된 AI 생성 제목 |
+| spam_test_result | jsonb | D80: 스팸테스트 결과 JSON |
+| ai_generation_status | varchar(20) | D80: ai_generated / ai_fallback / fixed |
 | created_at | timestamptz | |

@@ -17,6 +17,7 @@ import SpamFilterTestModal from './SpamFilterTestModal';
 
 interface AutoSendFormModalProps {
   campaign: any | null;  // null = 생성, 있으면 수정
+  aiPremiumEnabled?: boolean; // ★ AI 프리미엄 게이팅 (프로 이상)
   onClose: () => void;
   onSuccess: () => void;
 }
@@ -66,7 +67,14 @@ const hasEmoji = (text: string): boolean => {
 
 const TOTAL_STEPS = 5;
 
-export default function AutoSendFormModal({ campaign, onClose, onSuccess }: AutoSendFormModalProps) {
+const AI_TONES = [
+  { value: 'friendly', label: '친근한' },
+  { value: 'formal', label: '격식있는' },
+  { value: 'cute', label: '귀여운' },
+  { value: 'professional', label: '전문적인' },
+];
+
+export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose, onSuccess }: AutoSendFormModalProps) {
   const isEdit = !!campaign;
 
   // 폼 상태
@@ -82,6 +90,12 @@ export default function AutoSendFormModal({ campaign, onClose, onSuccess }: Auto
   const [messageSubject, setMessageSubject] = useState(campaign?.message_subject || '');
   const [callbackNumber, setCallbackNumber] = useState(campaign?.callback_number || '');
   const [isAd, setIsAd] = useState(campaign?.is_ad ?? false);
+
+  // ★ AI 문안 자동생성 모드 (기능 3)
+  const [aiGenerateEnabled, setAiGenerateEnabled] = useState(campaign?.ai_generate_enabled ?? false);
+  const [aiPrompt, setAiPrompt] = useState(campaign?.ai_prompt || '');
+  const [aiTone, setAiTone] = useState(campaign?.ai_tone || 'friendly');
+  const [fallbackMessageContent, setFallbackMessageContent] = useState(campaign?.fallback_message_content || '');
 
   // 발신번호 목록
   const [callbackNumbers, setCallbackNumbers] = useState<{ id: string; phone: string; label: string; is_default: boolean }[]>([]);
@@ -300,14 +314,20 @@ export default function AutoSendFormModal({ campaign, onClose, onSuccess }: Auto
 
     if (!campaignName.trim()) { setError('자동발송 이름을 입력해주세요.'); setStep(1); return; }
     if (selectedFields.length === 0) { setError('활용할 고객 필드를 1개 이상 선택해주세요.'); setStep(2); return; }
-    if (!messageContent.trim()) { setError('메시지 내용을 입력해주세요.'); setStep(4); return; }
+    // ★ AI 모드: prompt + fallback 필수 / 일반 모드: messageContent 필수
+    if (aiGenerateEnabled) {
+      if (!aiPrompt.trim()) { setError('AI 마케팅 컨셉을 입력해주세요.'); setStep(4); return; }
+      if (!fallbackMessageContent.trim()) { setError('AI 생성 실패 시 사용할 폴백 메시지를 입력해주세요.'); setStep(4); return; }
+    } else {
+      if (!messageContent.trim()) { setError('메시지 내용을 입력해주세요.'); setStep(4); return; }
+    }
     if (!callbackNumber) { setError('발신번호를 선택해주세요.'); setStep(4); return; }
-    if (messageType === 'MMS' && mmsUploadedImages.length === 0) { setError('MMS 이미지를 첨부해주세요.'); setStep(4); return; }
-    if ((messageType === 'LMS' || messageType === 'MMS') && !messageSubject.trim()) { setError('LMS/MMS는 제목을 입력해주세요.'); setStep(4); return; }
+    if (messageType === 'MMS' && mmsUploadedImages.length === 0 && !aiGenerateEnabled) { setError('MMS 이미지를 첨부해주세요.'); setStep(4); return; }
+    if ((messageType === 'LMS' || messageType === 'MMS') && !messageSubject.trim() && !aiGenerateEnabled) { setError('LMS/MMS는 제목을 입력해주세요.'); setStep(4); return; }
 
     setSaving(true);
     try {
-      const body = {
+      const body: any = {
         campaign_name: campaignName.trim(),
         description: description.trim() || null,
         schedule_type: scheduleType,
@@ -315,11 +335,16 @@ export default function AutoSendFormModal({ campaign, onClose, onSuccess }: Auto
         schedule_time: scheduleTime,
         target_filter: campaign?.target_filter || {},
         message_type: messageType,
-        message_content: messageContent.trim(),
+        message_content: aiGenerateEnabled ? (fallbackMessageContent.trim() || null) : messageContent.trim(),
         message_subject: messageType !== 'SMS' ? messageSubject.trim() || null : null,
         callback_number: callbackNumber,
         is_ad: isAd,
         personal_fields: selectedFields,
+        // ★ AI 문안 자동생성 필드
+        ai_generate_enabled: aiGenerateEnabled,
+        ai_prompt: aiGenerateEnabled ? aiPrompt.trim() : null,
+        ai_tone: aiGenerateEnabled ? aiTone : null,
+        fallback_message_content: aiGenerateEnabled ? fallbackMessageContent.trim() : null,
       };
 
       const url = isEdit ? `/api/auto-campaigns/${campaign.id}` : '/api/auto-campaigns';
@@ -640,7 +665,72 @@ export default function AutoSendFormModal({ campaign, onClose, onSuccess }: Auto
                   </button>
                 </div>
 
-                {/* 메시지 작성 영역 */}
+                {/* ★ AI 문안 자동생성 토글 (프로 이상만 표시) */}
+                {aiPremiumEnabled && (
+                  <div className={`p-3 rounded-xl border-2 transition-all ${aiGenerateEnabled ? 'border-violet-300 bg-violet-50/50' : 'border-gray-200 bg-gray-50'}`}>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-bold text-gray-700">AI 문안 자동생성</span>
+                        <span className="px-1.5 py-0.5 text-[10px] font-bold bg-violet-100 text-violet-600 rounded">PRO</span>
+                      </div>
+                      <button
+                        onClick={() => setAiGenerateEnabled(!aiGenerateEnabled)}
+                        className={`relative w-10 h-5 rounded-full transition-colors ${aiGenerateEnabled ? 'bg-violet-500' : 'bg-gray-300'}`}
+                      >
+                        <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${aiGenerateEnabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                      </button>
+                    </div>
+                    {aiGenerateEnabled && (
+                      <p className="text-xs text-violet-600 mt-1.5">발송 D-2에 AI가 문안을 자동 생성하고 스팸테스트까지 진행합니다.</p>
+                    )}
+                  </div>
+                )}
+
+                {/* ★ AI 모드 ON: 프롬프트 + 톤 + 폴백 메시지 입력 */}
+                {aiGenerateEnabled && (
+                  <div className="space-y-3 p-4 border-2 border-violet-200 rounded-2xl bg-gradient-to-b from-violet-50/80 to-white">
+                    <div>
+                      <label className="block text-sm font-medium text-violet-700 mb-1">마케팅 컨셉 / AI 지시사항 *</label>
+                      <textarea
+                        value={aiPrompt}
+                        onChange={e => setAiPrompt(e.target.value)}
+                        placeholder="예: 봄 시즌 세일 안내. 20% 할인 쿠폰 강조. 고객 이름 넣어서 친근하게."
+                        className="w-full border border-violet-300 rounded-lg px-3 py-2.5 text-sm resize-none h-[80px] focus:ring-2 focus:ring-violet-500 focus:border-violet-500 outline-none bg-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-violet-700 mb-1">문안 톤</label>
+                      <div className="flex gap-2">
+                        {AI_TONES.map(t => (
+                          <button
+                            key={t.value}
+                            onClick={() => setAiTone(t.value)}
+                            className={`flex-1 py-2 rounded-lg text-xs font-medium transition ${
+                              aiTone === t.value
+                                ? 'bg-violet-600 text-white'
+                                : 'bg-white border border-violet-200 text-violet-600 hover:bg-violet-50'
+                            }`}
+                          >
+                            {t.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-violet-700 mb-1">폴백 메시지 (AI 실패 시 사용) *</label>
+                      <textarea
+                        value={fallbackMessageContent}
+                        onChange={e => setFallbackMessageContent(e.target.value)}
+                        placeholder="AI 생성이 실패할 경우 이 메시지가 대신 발송됩니다."
+                        className="w-full border border-violet-300 rounded-lg px-3 py-2.5 text-sm resize-none h-[60px] focus:ring-2 focus:ring-violet-500 focus:border-violet-500 outline-none bg-white"
+                      />
+                      <p className="text-xs text-gray-400 mt-1">%이름% 등 변수 사용 가능</p>
+                    </div>
+                  </div>
+                )}
+
+                {/* 메시지 작성 영역 (AI 모드 OFF일 때만 표시) */}
+                {!aiGenerateEnabled && (
                 <div className="border-2 border-gray-200 rounded-2xl overflow-hidden bg-white shadow-sm">
                   {/* LMS/MMS 제목 */}
                   {(messageType === 'LMS' || messageType === 'MMS') && (
@@ -797,6 +887,31 @@ export default function AutoSendFormModal({ campaign, onClose, onSuccess }: Auto
                     </div>
                   </div>
                 </div>
+                )}
+                {/* ★ AI 모드 ON: 발신번호 + 광고 설정은 여전히 필요 */}
+                {aiGenerateEnabled && (
+                  <div className="border-2 border-gray-200 rounded-2xl overflow-hidden bg-white shadow-sm">
+                    {/* 발신번호 */}
+                    <div className="px-3 py-1.5">
+                      {callbackNumbers.length > 0 ? (
+                        <select
+                          value={callbackNumber}
+                          onChange={e => setCallbackNumber(e.target.value)}
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                        >
+                          <option value="">회신번호 선택</option>
+                          {callbackNumbers.map(cb => (
+                            <option key={cb.id} value={cb.phone}>
+                              {cb.phone}{cb.label ? ` (${cb.label})` : ''}{cb.is_default ? ' ⭐' : ''}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <p className="text-sm text-red-500 py-2">등록된 발신번호가 없습니다. 설정에서 발신번호를 등록해주세요.</p>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -835,7 +950,25 @@ export default function AutoSendFormModal({ campaign, onClose, onSuccess }: Auto
                       <span className="text-gray-800">{messageSubject}</span>
                     </div>
                   )}
+                  {aiGenerateEnabled && (
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">AI 문안생성</span>
+                      <span className="text-violet-600 font-medium">ON ({AI_TONES.find(t => t.value === aiTone)?.label || aiTone})</span>
+                    </div>
+                  )}
                 </div>
+
+                {/* AI 모드 요약 */}
+                {aiGenerateEnabled && (
+                  <div className="bg-violet-50 rounded-lg p-3 border border-violet-200">
+                    <p className="text-xs text-violet-600 font-medium mb-1">AI 자동생성 설정</p>
+                    <p className="text-sm text-gray-700 mb-2">{aiPrompt}</p>
+                    <p className="text-xs text-gray-500">발송 D-2에 AI가 문안을 생성하고 스팸테스트를 자동 진행합니다. 실패 시 아래 폴백 메시지가 발송됩니다.</p>
+                    <div className="mt-2 p-2 bg-white rounded border border-violet-100 text-xs text-gray-600">
+                      <span className="font-medium text-violet-600">폴백: </span>{fallbackMessageContent}
+                    </div>
+                  </div>
+                )}
 
                 {/* 선택된 필드 태그 */}
                 <div className="flex flex-wrap gap-1.5">
@@ -849,7 +982,8 @@ export default function AutoSendFormModal({ campaign, onClose, onSuccess }: Auto
                   })}
                 </div>
 
-                {/* 메시지 미리보기 */}
+                {/* 메시지 미리보기 (AI 모드 OFF일 때만) */}
+                {!aiGenerateEnabled && (
                 <div className="bg-blue-50 rounded-lg p-3">
                   <p className="text-xs text-blue-700 font-medium mb-1">메시지 미리보기</p>
                   {isAd && <p className="text-sm text-orange-600 font-medium">(광고)</p>}
@@ -858,6 +992,7 @@ export default function AutoSendFormModal({ campaign, onClose, onSuccess }: Auto
                     <p className="text-sm text-orange-600 mt-1">{getAdSuffix()}</p>
                   )}
                 </div>
+                )}
                 {messageType === 'MMS' && mmsUploadedImages.length > 0 && (
                   <div className="flex gap-2">
                     {mmsUploadedImages.map((img, idx) => (

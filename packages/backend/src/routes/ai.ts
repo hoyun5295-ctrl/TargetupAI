@@ -1,13 +1,14 @@
 import { Request, Response, Router } from 'express';
 import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
-import { checkAPIStatus, extractVarCatalog, generateCustomMessages, generateMessages, parseBriefing, recommendTarget } from '../services/ai';
+import { checkAPIStatus, extractVarCatalog, generateCustomMessages, generateMessages, parseBriefing, recommendTarget, countFilteredCustomers, relaxFilters, recommendNextCampaign } from '../services/ai';
 import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getGenderVariants, getRegionVariants } from '../utils/normalize';
 import { FIELD_MAP } from '../utils/standard-field-map';
 import { isValidCustomFieldKey } from '../utils/safe-field-name';
 import { getStoreScope } from '../utils/store-scope';
 import { buildFilterWhereClauseCompat } from '../utils/customer-filter';
 import { autoSpamTestWithRegenerate } from '../utils/spam-test-queue';
+import { aggregateCampaignPerformance } from '../utils/stats-aggregation';
 
 
 // ★ D79: 인라인 래퍼 제거 → CT-01 buildFilterWhereClauseCompat 직접 사용
@@ -284,43 +285,77 @@ router.post('/recommend-target', async (req: Request, res: Response) => {
 
     console.log('AI 필터 결과:', JSON.stringify(result.filters, null, 2));
 
-    // 실제 타겟 수 계산 — 공통 함수 사용
-    const { sql: filterWhere, params: filterParams } = buildFilterWhereClauseCompat(result.filters, baseParams.length + 1);
-    // ★ B17-01: 수신거부 user_id 기준 통일
-    const unsubIdxA = baseParams.length + filterParams.length + 1;
+    // ★ 실제 타겟 수 계산 — countFilteredCustomers 공통 함수 사용 (중복 제거)
+    let filterResult = await countFilteredCustomers(companyId, result.filters, userId!, storeFilter, baseParams);
+    let actualCount = filterResult.count;
+    let unsubscribeCount = filterResult.unsubscribeCount;
 
-    // ★ D77: 필터 쿼리 에러 시 0명 반환 (전체고객 폴백 절대 방지)
-    let actualCount = 0;
-    let unsubscribeCount = 0;
-    try {
-      const actualCountResult = await query(
-        `SELECT COUNT(*) FROM customers c
-         WHERE c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true${storeFilter} ${filterWhere}
-         AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${unsubIdxA} AND u.phone = c.phone)`,
-        [...baseParams, ...filterParams, userId]
-      );
-      actualCount = parseInt(actualCountResult.rows[0].count);
+    // ★ 기능 4: 0명일 때 AI 자동 조건완화 (프로 이상 ai_premium_enabled 전용)
+    let autoRelaxed = false;
+    let originalFilters: Record<string, any> | null = null;
+    let relaxedFields: string[] = [];
 
-      // 수신거부 건수 계산
-      const unsubCountResult = await query(
-        `SELECT COUNT(*) FROM customers c
-         WHERE c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true${storeFilter} ${filterWhere}
-         AND EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${unsubIdxA} AND u.phone = c.phone)`,
-        [...baseParams, ...filterParams, userId]
+    if (actualCount === 0 && Object.keys(result.filters).length > 0) {
+      // 프로 이상 게이팅 체크
+      const premiumCheck = await query(
+        `SELECT p.ai_premium_enabled FROM companies c LEFT JOIN plans p ON c.plan_id = p.id WHERE c.id = $1`,
+        [companyId]
       );
-      unsubscribeCount = parseInt(unsubCountResult.rows[0].count);
-    } catch (filterError) {
-      console.error('[AI] 필터 쿼리 실행 실패 (0명 반환):', filterError);
-      // 필터 쿼리 에러 시 0명으로 처리 — 전체고객 폴백 절대 방지
-      actualCount = 0;
-      unsubscribeCount = 0;
+      const isPremium = premiumCheck.rows[0]?.ai_premium_enabled === true;
+
+      if (isPremium) {
+        console.log('[AI] 0명 매칭 → 자동 조건완화 시도 (프로 이상)');
+        originalFilters = { ...result.filters };
+
+        // 최대 2회 시도
+        for (let attempt = 1; attempt <= 2; attempt++) {
+          const relaxResult = await relaxFilters(
+            result.filters,
+            result.reasoning,
+            statsResult.rows[0],
+            '' // activeFieldsPrompt는 recommendTarget 내부에서 이미 사용됨
+          );
+
+          if (Object.keys(relaxResult.filters).length === 0) {
+            console.warn(`[AI] 조건완화 ${attempt}회차 — 빈 필터 반환, 중단`);
+            break;
+          }
+
+          const relaxCount = await countFilteredCustomers(companyId, relaxResult.filters, userId!, storeFilter, baseParams);
+
+          if (relaxCount.count > 0) {
+            console.log(`[AI] 조건완화 ${attempt}회차 성공 — ${relaxCount.count}명 매칭`);
+            result.filters = relaxResult.filters;
+            result.reasoning = relaxResult.reasoning;
+            actualCount = relaxCount.count;
+            unsubscribeCount = relaxCount.unsubscribeCount;
+            autoRelaxed = true;
+            relaxedFields = relaxResult.relaxed_fields;
+            break;
+          }
+
+          console.log(`[AI] 조건완화 ${attempt}회차 — 여전히 0명`);
+          // 다음 시도를 위해 현재 완화된 필터를 기준으로 재시도
+          result.filters = relaxResult.filters;
+          result.reasoning = relaxResult.reasoning;
+        }
+      }
     }
 
     result.estimated_count = actualCount;
     (result as any).unsubscribe_count = unsubscribeCount;
     (result as any).has_kakao_profile = hasKakaoProfile;
+    (result as any).auto_relaxed = autoRelaxed;
+    if (autoRelaxed && originalFilters) {
+      (result as any).original_filters = originalFilters;
+      (result as any).relaxed_fields = relaxedFields;
+    }
 
     // ★ 샘플 고객 1명 조회 (미리보기 치환용 — displayName 키 기반)
+    // 최신 필터 기준으로 WHERE 재생성 (자동완화 시 result.filters가 변경됨)
+    const { sql: sampleFilterWhere, params: sampleFilterParams } = buildFilterWhereClauseCompat(result.filters, baseParams.length + 1);
+    const sampleUnsubIdx = baseParams.length + sampleFilterParams.length + 1;
+
     let sampleCustomer: Record<string, string> = {};
     try {
       const sampleResult = await query(
@@ -329,10 +364,10 @@ router.post('/recommend-target', async (req: Request, res: Response) => {
                 store_phone, recent_purchase_amount, total_purchase_amount,
                 birth_date, custom_fields
          FROM customers c
-         WHERE c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true${storeFilter} ${filterWhere}
-         AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${unsubIdxA} AND u.phone = c.phone)
+         WHERE c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true${storeFilter} ${sampleFilterWhere}
+         AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${sampleUnsubIdx} AND u.phone = c.phone)
          ORDER BY name ASC NULLS LAST LIMIT 1`,
-        [...baseParams, ...filterParams, userId]
+        [...baseParams, ...sampleFilterParams, userId]
       );
 
       if (sampleResult.rows[0]) {
@@ -372,6 +407,81 @@ router.post('/recommend-target', async (req: Request, res: Response) => {
     return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
   }
 });
+
+// ============================================================
+// ★ 기능 2: AI 다음 캠페인 추천 (발송 결과 기반)
+// 프로 이상 ai_premium_enabled 전용
+// ============================================================
+router.post('/recommend-next-campaign', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
+
+    if (!companyId) {
+      return res.status(403).json({ error: '회사 권한이 필요합니다' });
+    }
+
+    // ★ 프로 이상 게이팅
+    const premiumCheck = await query(
+      `SELECT p.ai_premium_enabled FROM companies c LEFT JOIN plans p ON c.plan_id = p.id WHERE c.id = $1`,
+      [companyId]
+    );
+    if (!premiumCheck.rows[0]?.ai_premium_enabled) {
+      return res.status(403).json({
+        error: 'AI 캠페인 추천은 프로 이상 요금제에서 이용 가능합니다.',
+        code: 'PLAN_FEATURE_LOCKED'
+      });
+    }
+
+    const { months } = req.body;
+    const analysisMonths = Math.min(Math.max(months || 3, 1), 12);
+
+    // 1) 캠페인 성과 집계 — stats-aggregation.ts 컨트롤타워
+    const performanceData = await aggregateCampaignPerformance(companyId, analysisMonths);
+
+    if (performanceData.totalCampaigns === 0) {
+      return res.json({
+        recommended_target: { filters: {}, reasoning: '분석할 캠페인 데이터가 없습니다.' },
+        recommended_time: '',
+        recommended_channel: 'SMS',
+        insights: ['최근 발송한 캠페인이 없어 추천을 생성할 수 없습니다. 캠페인을 발송한 후 다시 시도해주세요.'],
+        suggested_objective: '',
+        performance_data: performanceData,
+      });
+    }
+
+    // 2) 고객 통계 조회
+    const statsResult = await query(
+      `SELECT
+        COUNT(*) as total,
+        COUNT(*) FILTER (WHERE sms_opt_in = true) as sms_opt_in_count,
+        COUNT(*) FILTER (WHERE gender IN ('M', '남', '남성', 'male')) as male_count,
+        COUNT(*) FILTER (WHERE gender IN ('F', '여', '여성', 'female')) as female_count
+       FROM customers WHERE company_id = $1 AND is_active = true`,
+      [companyId]
+    );
+
+    // 3) 회사 정보
+    const companyResult = await query(
+      'SELECT company_name, business_type, brand_name FROM companies WHERE id = $1',
+      [companyId]
+    );
+
+    // 4) AI 추천 — services/ai.ts 컨트롤타워
+    const recommendation = await recommendNextCampaign(
+      companyId, performanceData, statsResult.rows[0], companyResult.rows[0]
+    );
+
+    return res.json({
+      ...recommendation,
+      performance_data: performanceData,
+    });
+  } catch (error) {
+    console.error('AI 캠페인 추천 오류:', error);
+    return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+});
+
 // ============================================================
 // 타겟 조건 수정 후 재조회 (AI 맞춤한줄 Step 3 수정하기)
 // ============================================================

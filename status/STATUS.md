@@ -171,6 +171,111 @@ ALTER TABLE spam_filter_tests ALTER COLUMN spam_check_number DROP DEFAULT;
 
 ---
 
+### 🔧 D79 — 인라인 함수 전수조사/제거 + 날짜 정규화 수정 + 필터 UI 동적화 + plan_code 수정 (2026-03-16) — 배포 대기
+
+> **배경:** (1) YYMMDD 6자리 엑셀 업로드 에러 재발 (2) 프로 요금제 대시보드에 스팸필터 테스트 비용 합산 (3) 고객DB 필터 UI 하드코딩 (4) 인라인 중복 함수 전수조사 — Harold님 강력 지시로 routes/ 전체 파일에서 컨트롤타워 중복 함수 제거
+> **핵심:** CLAUDE.md 인라인 금지 원칙에도 불구하고 8건의 인라인 중복 함수가 잔존 → 물리적으로 전수 제거하여 구조적 재발 방지
+
+#### 수정 항목
+
+**1. YYMMDD 6자리 날짜 정규화 — 컨트롤타워(normalize.ts) 수정 (D79 핵심 교훈)**
+- **문제:** upload.ts에 인라인 `normalizeDateValue()` 함수가 존재 → 이전 세션에서 인라인 함수만 수정 → FIELD_MAP 경로(`normalizeByFieldKey` → `normalizeDate`)에 미반영 → 업로드 에러 재발
+- **수정:** normalize.ts `normalizeDate()`에 YYMMDD 6자리 핸들러 추가 (250103 → 2025-01-03). upload.ts 인라인 `normalizeDateValue()` + `excelSerialToDateStr()` 완전 삭제, `normalizeDate` import로 교체
+
+**2. 프로 요금제 대시보드 — plan_code 대소문자 불일치**
+- **문제:** customers.ts에서 `planCode === 'pro'`로 비교 → DB에 'PRO'(대문자) 저장 → 항상 false → 프로 계정도 스팸테스트 비용 합산
+- **수정:** `.toUpperCase()` 적용 + 대문자 비교 (`'PRO', 'BUSINESS', 'ENTERPRISE'`)
+
+**3. 고객DB 모달 필터 UI 동적화 (CustomerDBModal.tsx)**
+- **문제:** 성별/등급/지역 필터가 하드코딩 버튼 → 새 필드 추가 불가
+- **수정:** enabled-fields API 기반 동적 필드 드롭다운 + 연산자 선택 + 값 입력 UI. activeFilters 배열 → `buildDynamicFilterCompat` structured 형식 변환
+
+**4. customers_unified VIEW — uploaded_by 컬럼 추가**
+- **문제:** customers 테이블에 uploaded_by 추가 후 VIEW 미재생성 → 조회 에러
+- **수정:** Harold님이 서버에서 직접 DROP VIEW + CREATE VIEW DDL 실행 완료
+
+**5. ⚠️ 인라인 중복 함수 전수조사 — 8건 제거**
+
+| # | 파일 | 인라인 함수 | 컨트롤타워 교체 |
+|---|------|-----------|--------------|
+| 1 | upload.ts | `normalizeDateValue()` + `excelSerialToDateStr()` | normalize.ts `normalizeDate()` |
+| 2 | customers.ts | `buildDynamicFilter()` 래퍼 | customer-filter.ts `buildDynamicFilterCompat()` 직접 호출 |
+| 3 | ai.ts | `buildFilterWhereClause()` 래퍼 | customer-filter.ts `buildFilterWhereClauseCompat()` 직접 호출 |
+| 4 | campaigns.ts | `buildFilterQuery()` 래퍼 | customer-filter.ts `buildFilterQueryCompat()` 직접 호출 |
+| 5 | manage-stats.ts | `getTestSmsTable()` | sms-queue.ts `getTestSmsTables()` |
+| 6 | spam-filter.ts | `normalizeContent()` + `computeMessageHash()` + `getTestSmsTable()` | spam-test-queue.ts + sms-queue.ts |
+| 7 | auto-campaigns.ts | `kstToUtc()` | auto-campaign-worker.ts `kstToUtc()` |
+| 8 | spam-test-queue.ts / auto-campaign-worker.ts | (export 누락) | `export` 키워드 추가 |
+
+#### 수정 파일 (12개)
+- `packages/backend/src/utils/normalize.ts` — YYMMDD 6자리 핸들러 추가
+- `packages/backend/src/utils/spam-test-queue.ts` — normalizeContent/computeMessageHash export 추가
+- `packages/backend/src/utils/auto-campaign-worker.ts` — kstToUtc export 추가
+- `packages/backend/src/routes/upload.ts` — 인라인 제거 + normalizeDate import
+- `packages/backend/src/routes/customers.ts` — plan_code 대소문자 수정 + buildDynamicFilter 래퍼 제거
+- `packages/backend/src/routes/ai.ts` — buildFilterWhereClause 래퍼 제거
+- `packages/backend/src/routes/campaigns.ts` — buildFilterQuery 래퍼 제거
+- `packages/backend/src/routes/manage-stats.ts` — getTestSmsTable 제거 + getTestSmsTables import
+- `packages/backend/src/routes/spam-filter.ts` — 3개 인라인 제거 + import 교체
+- `packages/backend/src/routes/auto-campaigns.ts` — kstToUtc 제거 + import
+- `packages/frontend/src/components/CustomerDBModal.tsx` — 동적 필터 UI 전면 개편
+- `CLAUDE.md` — 인라인 금지 원칙 + D79 사례 추가
+- 서버 DDL: customers_unified VIEW 재생성 (Harold님 직접 실행 완료)
+
+#### TypeScript 타입 체크
+- 백엔드/프론트엔드: ✅ 0 에러
+
+---
+
+### 🔧 D80 — AI 프리미엄 기능 3종 (자동조건완화 + 성과추천 + 문안자동생성) (2026-03-16) — 배포 대기
+
+> **배경:** 프로(100만원) 요금제 전용 AI 프리미엄 기능 3종. plans.ai_premium_enabled 게이팅.
+> **DB 마이그레이션:** `migrations/ai-premium-features.sql` — Harold님 직접 실행 필요
+
+#### 기능 2: 캠페인 성과 → AI 다음 캠페인 추천
+- `stats-aggregation.ts` — `aggregateCampaignPerformance()` 추가: 세그먼트별/시간대별/메시지타입별/TOP5 다각도 집계
+- `services/ai.ts` — `recommendNextCampaign()` 추가: AI가 성과 데이터 분석 → 다음 캠페인 추천
+- `routes/ai.ts` — `POST /api/ai/recommend-next-campaign` 엔드포인트 추가
+
+#### 기능 3: 자동발송 + AI 문안 자동생성 (D-2/D-1/D-day 3단계 생명주기)
+- `auto-campaign-worker.ts` — 전면 리팩토링:
+  - Stage 1 `runMessageGeneration()`: D-2에 AI 문안생성 + `autoSpamTestWithRegenerate()` 자동 스팸테스트
+  - Stage 2 `runPreNotification()`: D-1에 담당자 테스트발송 알림
+  - Stage 3 `executeAutoCampaign()`: D-day 실제 발송 (AI 폴백 체인: generated → fallback → message_content)
+- `auto-campaigns.ts` — CRUD API에 AI 필드 지원 (ai_generate_enabled, ai_prompt, ai_tone, fallback_message_content)
+  - `checkAiPremiumGating()` — AI 프리미엄 게이팅 체크 함수 추가
+  - CREATE/UPDATE에 AI 필수값 검증 + generated 필드 초기화 로직
+  - GET 목록에 `ai_premium_enabled` 프론트 전달
+- `AutoSendFormModal.tsx` — Step 4에 AI 자동생성 모드 토글:
+  - 프로 이상만 표시되는 ON/OFF 토글
+  - ON: 마케팅 컨셉 프롬프트 + 톤 선택 + 폴백 메시지 입력
+  - OFF: 기존 수동 메시지 작성 (변경 없음)
+  - Step 5 확인에 AI 설정 요약 표시
+- `AutoSendPage.tsx` — PlanInfo에 ai_premium_enabled 추가, 모달에 prop 전달
+- SMS + LMS 모두 AI 문안생성 지원 (message_type 동적 전달)
+
+#### 기능 4: AI 타겟 자동조건완화
+- `services/ai.ts` — `relaxFilters()` 추가: AI가 조건을 완화하면서 마케팅 의도 유지
+- `services/ai.ts` — `countFilteredCustomers()` 추가: 중복 COUNT 쿼리 공통화
+- `routes/ai.ts` — recommend-target에 auto-relax 로직 (최대 2회, ai_premium_enabled 게이팅)
+
+#### 수정 파일 목록
+- `migrations/ai-premium-features.sql` (신규)
+- `packages/backend/src/utils/stats-aggregation.ts`
+- `packages/backend/src/utils/auto-campaign-worker.ts`
+- `packages/backend/src/services/ai.ts`
+- `packages/backend/src/routes/ai.ts`
+- `packages/backend/src/routes/auto-campaigns.ts`
+- `packages/frontend/src/components/AutoSendFormModal.tsx`
+- `packages/frontend/src/pages/AutoSendPage.tsx`
+- `status/SCHEMA.md`, `status/STATUS.md`
+
+#### TypeScript 타입 체크
+- 백엔드: ✅ 0 에러
+- 프론트엔드: ✅ transpile 성공
+
+---
+
 ### ✅ D77 — 대시보드 DB현황 6분할 페이징 뷰 (2026-03-16) — 배포 완료
 
 > **배경:** 대시보드 DB현황 카드가 4개/8개 고정 선택이었음. 카드를 자유롭게 선택하고 6개씩(3×2) 페이징으로 보여주도록 개선.

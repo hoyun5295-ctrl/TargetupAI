@@ -31,7 +31,7 @@
 | CT-09 | spam-test-queue.ts | 스팸테스트 큐 관리 + 자동 스팸검사/재생성 |
 | — | messageUtils.ts | 변수 치환 (5개 발송 경로 통합) |
 | — | normalize.ts | 값 정규화 |
-| — | stats-aggregation.ts | 대시보드 통계 집계 |
+| — | stats-aggregation.ts | 대시보드 통계 집계 + AI 캠페인 성과 집계 |
 
 **⚠️ 이 원칙을 어기고 인라인 코드를 작성하면 버그가 재발한다. 실제 사고 사례:**
 - **사례 1:** upload.ts에서 customer_field_definitions를 인라인으로 INSERT하면서 "최초 등록 우선" 정책 적용 → 잘못된 라벨이 영원히 고착되는 버그 발생.
@@ -341,8 +341,15 @@ AND NOT EXISTS (
 
 **권한:** company_admin + company_user(브랜드담당자) 모두 생성/수정/삭제 가능 (store_code 범위 내)
 
-**Phase 2 예정:** D-1 사전 알림, 타겟 필터 UI(AutoSendFormModal에 필터 단계 추가), 실행 이력 상세 조회
-**Phase 3 예정:** A/B 테스트, AI 메시지 자동 생성 연동, 발송 최적 시간 추천
+**Phase 2 (D80 구현 완료):**
+- AI 문안 자동생성 연동 (D-2 생성 + 스팸테스트 → D-1 담당자 알림 → D-day 발송)
+- DB: ai_generate_enabled, ai_prompt, ai_tone, fallback_message_content, generated_message_content 등 컬럼 추가
+- 프론트: AutoSendFormModal Step 4에 AI 모드 토글 (plans.ai_premium_enabled 게이팅)
+- auto-campaign-worker.ts: runMessageGeneration() + runPreNotification() + executeAutoCampaign() 3단계 분리
+- AI 폴백 체인: generated_message_content → fallback_message_content → message_content
+
+**Phase 2 남은 작업:** 타겟 필터 UI(AutoSendFormModal에 필터 단계 추가), 실행 이력 상세 조회
+**Phase 3 예정:** A/B 테스트, 발송 최적 시간 추천
 
 ### 5-8. AI 메시지 생성 흐름
 

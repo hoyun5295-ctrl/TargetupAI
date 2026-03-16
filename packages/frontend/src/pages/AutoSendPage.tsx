@@ -40,6 +40,7 @@ interface AutoCampaign {
 interface PlanInfo {
   auto_campaign_enabled: boolean;
   max_auto_campaigns: number | null;
+  ai_premium_enabled: boolean;
 }
 
 // ============================================================
@@ -88,7 +89,7 @@ function getToken(): string {
 export default function AutoSendPage() {
   const navigate = useNavigate();
   const [campaigns, setCampaigns] = useState<AutoCampaign[]>([]);
-  const [plan, setPlan] = useState<PlanInfo>({ auto_campaign_enabled: false, max_auto_campaigns: null });
+  const [plan, setPlan] = useState<PlanInfo>({ auto_campaign_enabled: false, max_auto_campaigns: null, ai_premium_enabled: false });
   const [activeCount, setActiveCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -118,7 +119,7 @@ export default function AutoSendPage() {
       if (!res.ok) throw new Error('조회 실패');
       const data = await res.json();
       setCampaigns(data.autoCampaigns || []);
-      setPlan(data.plan || { auto_campaign_enabled: false, max_auto_campaigns: null });
+      setPlan(data.plan || { auto_campaign_enabled: false, max_auto_campaigns: null, ai_premium_enabled: false });
       setActiveCount(data.activeCount || 0);
     } catch (err: any) {
       setError(err.message);
@@ -467,6 +468,7 @@ export default function AutoSendPage() {
       {showFormModal && (
         <AutoSendFormModal
           campaign={editingCampaign}
+          aiPremiumEnabled={plan.ai_premium_enabled}
           onClose={() => { setShowFormModal(false); setEditingCampaign(null); }}
           onSuccess={handleFormSuccess}
         />

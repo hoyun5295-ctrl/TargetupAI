@@ -67,6 +67,18 @@ async function checkPlanGating(companyId: string): Promise<{
   return { allowed: true, maxAutoCampaigns: row.max_auto_campaigns };
 }
 
+/** AI 프리미엄 게이팅 체크 (ai_generate_enabled 사용 시) */
+async function checkAiPremiumGating(companyId: string): Promise<boolean> {
+  const result = await query(
+    `SELECT p.ai_premium_enabled
+     FROM companies c
+     LEFT JOIN plans p ON c.plan_id = p.id
+     WHERE c.id = $1`,
+    [companyId]
+  );
+  return result.rows[0]?.ai_premium_enabled === true;
+}
+
 /** 활성 자동캠페인 수 제한 체크 */
 async function checkActiveLimit(companyId: string, maxAutoCampaigns: number | null): Promise<{
   ok: boolean;
@@ -204,7 +216,7 @@ router.get('/', async (req: Request, res: Response) => {
 
     // 요금제 정보도 함께 조회 (프론트에서 게이팅 판단용) + 회사별 오버라이드 반영
     const planResult = await query(
-      `SELECT p.auto_campaign_enabled, p.max_auto_campaigns, c.auto_campaign_override
+      `SELECT p.auto_campaign_enabled, p.max_auto_campaigns, p.ai_premium_enabled, c.auto_campaign_override
        FROM companies c LEFT JOIN plans p ON c.plan_id = p.id WHERE c.id = $1`,
       [companyId]
     );
@@ -224,12 +236,12 @@ router.get('/', async (req: Request, res: Response) => {
 
     // 회사별 오버라이드 반영하여 프론트에 전달
     const planRow = planResult.rows[0];
-    let planForFront = { auto_campaign_enabled: false, max_auto_campaigns: null as number | null };
+    let planForFront = { auto_campaign_enabled: false, max_auto_campaigns: null as number | null, ai_premium_enabled: false };
     if (planRow?.auto_campaign_override != null) {
       const override = Number(planRow.auto_campaign_override);
-      planForFront = { auto_campaign_enabled: override > 0, max_auto_campaigns: override > 0 ? override : null };
+      planForFront = { auto_campaign_enabled: override > 0, max_auto_campaigns: override > 0 ? override : null, ai_premium_enabled: planRow.ai_premium_enabled ?? false };
     } else if (planRow) {
-      planForFront = { auto_campaign_enabled: planRow.auto_campaign_enabled, max_auto_campaigns: planRow.max_auto_campaigns };
+      planForFront = { auto_campaign_enabled: planRow.auto_campaign_enabled, max_auto_campaigns: planRow.max_auto_campaigns, ai_premium_enabled: planRow.ai_premium_enabled ?? false };
     }
 
     res.json({
@@ -331,6 +343,8 @@ router.post('/', async (req: Request, res: Response) => {
       campaign_name, description, schedule_type, schedule_day, schedule_time,
       target_filter, store_code, message_type, message_content, message_subject,
       callback_number, sender_number_id, is_ad, pre_notify, notify_phones,
+      // ★ AI 프리미엄 필드 (기능 3)
+      ai_generate_enabled, ai_prompt, ai_tone, fallback_message_content,
     } = req.body;
 
     // 필수값 검증
@@ -355,7 +369,24 @@ router.post('/', async (req: Request, res: Response) => {
     if (!target_filter || typeof target_filter !== 'object') {
       return res.status(400).json({ error: '타겟 필터를 설정해주세요.' });
     }
-    if (!message_content?.trim()) {
+    // ★ AI 문안생성 모드: 프리미엄 게이팅 + 필수값 검증
+    if (ai_generate_enabled) {
+      const aiPremium = await checkAiPremiumGating(companyId);
+      if (!aiPremium) {
+        return res.status(403).json({
+          error: 'AI 문안 자동생성은 프로 요금제 이상에서 이용 가능합니다.',
+          code: 'AI_PREMIUM_LOCKED',
+        });
+      }
+      if (!ai_prompt?.trim()) {
+        return res.status(400).json({ error: 'AI 문안생성 모드에서는 마케팅 컨셉(프롬프트)을 입력해주세요.' });
+      }
+      if (!fallback_message_content?.trim()) {
+        return res.status(400).json({ error: 'AI 생성 실패 시 사용할 폴백 메시지를 입력해주세요.' });
+      }
+    }
+
+    if (!message_content?.trim() && !ai_generate_enabled) {
       return res.status(400).json({ error: '메시지 내용을 입력해주세요.' });
     }
     if (!callback_number?.trim()) {
@@ -381,19 +412,22 @@ router.post('/', async (req: Request, res: Response) => {
         schedule_type, schedule_day, schedule_time, target_filter, store_code,
         message_type, message_content, message_subject, callback_number,
         sender_number_id, is_ad, pre_notify, notify_phones,
+        ai_generate_enabled, ai_prompt, ai_tone, fallback_message_content,
         status, next_run_at
       ) VALUES (
         $1, $2, $3, $4,
         $5, $6, $7, $8, $9,
         $10, $11, $12, $13,
         $14, $15, $16, $17,
-        'active', $18
+        $18, $19, $20, $21,
+        'active', $22
       ) RETURNING *`,
       [
         companyId, userId, campaign_name.trim(), description || null,
         schedule_type, schedule_day ?? null, schedule_time, JSON.stringify(target_filter), finalStoreCode,
-        message_type || 'SMS', message_content.trim(), message_subject || null, callback_number.trim(),
+        message_type || 'SMS', message_content?.trim() || null, message_subject || null, callback_number.trim(),
         sender_number_id || null, is_ad ?? false, pre_notify ?? true, notify_phones || null,
+        ai_generate_enabled ?? false, ai_prompt?.trim() || null, ai_tone || 'friendly', fallback_message_content?.trim() || null,
         nextRunAt,
       ]
     );
@@ -436,6 +470,8 @@ router.put('/:id', async (req: Request, res: Response) => {
       campaign_name, description, schedule_type, schedule_day, schedule_time,
       target_filter, message_type, message_content, message_subject,
       callback_number, sender_number_id, is_ad, pre_notify, notify_phones,
+      // ★ AI 프리미엄 필드 (기능 3)
+      ai_generate_enabled, ai_prompt, ai_tone, fallback_message_content,
     } = req.body;
 
     // 스케줄 변경 시 유효성 검증
@@ -445,6 +481,29 @@ router.put('/:id', async (req: Request, res: Response) => {
 
     if (schedule_type && !['monthly', 'weekly', 'daily'].includes(schedule_type)) {
       return res.status(400).json({ error: '스케줄 유형은 monthly, weekly, daily 중 하나여야 합니다.' });
+    }
+
+    // ★ AI 문안생성 모드 활성화/수정 시: 프리미엄 게이팅 + 필수값 검증
+    const finalAiEnabled = ai_generate_enabled !== undefined ? ai_generate_enabled : ownership.campaign.ai_generate_enabled;
+    if (finalAiEnabled) {
+      const aiPremium = await checkAiPremiumGating(companyId);
+      if (!aiPremium) {
+        return res.status(403).json({
+          error: 'AI 문안 자동생성은 프로 요금제 이상에서 이용 가능합니다.',
+          code: 'AI_PREMIUM_LOCKED',
+        });
+      }
+      // AI 모드를 새로 켤 때만 prompt/fallback 필수 체크
+      if (ai_generate_enabled === true) {
+        const finalPrompt = ai_prompt?.trim() || ownership.campaign.ai_prompt;
+        const finalFallback = fallback_message_content?.trim() || ownership.campaign.fallback_message_content;
+        if (!finalPrompt) {
+          return res.status(400).json({ error: 'AI 문안생성 모드에서는 마케팅 컨셉(프롬프트)을 입력해주세요.' });
+        }
+        if (!finalFallback) {
+          return res.status(400).json({ error: 'AI 생성 실패 시 사용할 폴백 메시지를 입력해주세요.' });
+        }
+      }
     }
 
     // 발신번호 변경 시 등록 여부 확인
@@ -464,6 +523,9 @@ router.put('/:id', async (req: Request, res: Response) => {
       nextRunAt = calcNextRunAt(finalScheduleType, finalScheduleDay, finalScheduleTime);
     }
 
+    // ★ AI 모드 OFF 전환 시 generated 필드 초기화
+    const clearGenerated = ai_generate_enabled === false;
+
     const updateResult = await query(
       `UPDATE auto_campaigns SET
         campaign_name = COALESCE($2, campaign_name),
@@ -481,6 +543,13 @@ router.put('/:id', async (req: Request, res: Response) => {
         pre_notify = COALESCE($14, pre_notify),
         notify_phones = COALESCE($15, notify_phones),
         next_run_at = $16,
+        ai_generate_enabled = COALESCE($18, ai_generate_enabled),
+        ai_prompt = COALESCE($19, ai_prompt),
+        ai_tone = COALESCE($20, ai_tone),
+        fallback_message_content = COALESCE($21, fallback_message_content),
+        generated_message_content = CASE WHEN $22::boolean THEN NULL ELSE generated_message_content END,
+        generated_message_subject = CASE WHEN $22::boolean THEN NULL ELSE generated_message_subject END,
+        generated_at = CASE WHEN $22::boolean THEN NULL ELSE generated_at END,
         updated_at = NOW()
       WHERE id = $1 AND company_id = $17
       RETURNING *`,
@@ -502,6 +571,11 @@ router.put('/:id', async (req: Request, res: Response) => {
         notify_phones !== undefined ? notify_phones : null,
         nextRunAt,
         companyId,
+        ai_generate_enabled !== undefined ? ai_generate_enabled : null,
+        ai_prompt?.trim() || null,
+        ai_tone || null,
+        fallback_message_content?.trim() || null,
+        clearGenerated,
       ]
     );
 
