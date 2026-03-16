@@ -4,7 +4,7 @@ import { Request, Response, Router } from 'express';
 import { mysqlQuery, query } from '../config/database';
 import { authenticate, requireSuperAdmin } from '../middlewares/auth';
 import { ALL_SMS_TABLES, invalidateLineGroupCache } from '../utils/sms-queue';
-import { DASHBOARD_CARD_POOL, validateCardIds } from '../utils/dashboard-card-pool';
+import { DASHBOARD_CARD_POOL, validateCardIds, getRequiredFields, filterPoolByAvailableData } from '../utils/dashboard-card-pool';
 import { SUCCESS_CODES_SQL, PENDING_CODES_SQL, getStatusLabel, getStatusType, getCarrierLabel, isSuccess, isPending } from '../utils/sms-result-map';
 import { DEFAULT_COSTS } from '../config/defaults';
 import { validateSmsTables } from '../utils/sms-table-validator';
@@ -522,13 +522,59 @@ router.get('/companies/:id/dashboard-cards', authenticate, requireSuperAdmin, as
       selectedCards = [];
     }
 
-    // 17개 카드 풀 전체 반환 — 슈퍼관리자가 직접 선택
-    // (커스텀 필드 매핑이 고객사마다 달라 동적 필터링 불가)
+    // ★ 고객사 데이터 유무 동적 체크 (직접 컬럼 + 커스텀 필드 JSONB 양쪽)
+    // enabled-fields API와 동일한 방식으로 체크
+    const availableColumns = new Set<string>();
+
+    // 1. 직접 컬럼 데이터 유무 — EXISTS 서브쿼리
+    const requiredFields = getRequiredFields();
+    if (requiredFields.length > 0) {
+      const existsClauses = requiredFields.map((field, i) => {
+        if (['total_purchase_amount'].includes(field)) {
+          return `EXISTS(SELECT 1 FROM customers WHERE company_id = $1 AND ${field} IS NOT NULL AND ${field} > 0) as has_${i}`;
+        }
+        return `EXISTS(SELECT 1 FROM customers WHERE company_id = $1 AND ${field} IS NOT NULL AND ${field}::text != '') as has_${i}`;
+      });
+      const checkResult = await query(`SELECT ${existsClauses.join(', ')}`, [id]);
+      if (checkResult.rows.length > 0) {
+        const row = checkResult.rows[0] as any;
+        requiredFields.forEach((field, i) => {
+          if (row[`has_${i}`]) availableColumns.add(field);
+        });
+      }
+    }
+
+    // 2. 커스텀 필드 — custom_fields JSONB에 데이터 있는 키의 라벨 조회
+    let customFieldLabels: string[] = [];
+    try {
+      const customResult = await query(`
+        SELECT DISTINCT cfd.field_label
+        FROM customer_field_definitions cfd
+        WHERE cfd.company_id = $1
+          AND cfd.field_key LIKE 'custom_%'
+          AND EXISTS (
+            SELECT 1 FROM customers c
+            WHERE c.company_id = $1
+              AND c.custom_fields->>cfd.field_key IS NOT NULL
+              AND c.custom_fields->>cfd.field_key != ''
+            LIMIT 1
+          )
+      `, [id]);
+      customFieldLabels = customResult.rows.map((r: any) => (r.field_label || '').toLowerCase());
+    } catch { /* custom_fields 없으면 무시 */ }
+
+    // 3. 직접 컬럼 OR 커스텀 필드 라벨 매칭으로 카드 풀 필터링
+    const filteredPool = filterPoolByAvailableData(availableColumns, customFieldLabels);
+
+    // 기존 selectedCards 중 필터링된 풀에 없는 카드 제거
+    const filteredPoolIds = new Set(filteredPool.map(c => c.cardId));
+    const validSelectedCards = selectedCards.filter(cid => filteredPoolIds.has(cid));
+
     res.json({
       companyName: companyCheck.rows[0].company_name,
-      pool: DASHBOARD_CARD_POOL,
-      selectedCards,
-      cardCount: parseInt(settings.dashboard_card_count || '0'),
+      pool: filteredPool,
+      selectedCards: validSelectedCards,
+      cardCount: validSelectedCards.length,
     });
   } catch (error) {
     console.error('대시보드 카드 설정 조회 실패:', error);

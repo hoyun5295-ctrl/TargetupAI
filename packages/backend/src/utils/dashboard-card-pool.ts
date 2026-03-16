@@ -5,7 +5,11 @@
  *
  * FIELD_MAP 필수 17개 기반 카드 17종.
  * 슈퍼관리자가 고객사별로 원하는 만큼 선택 (프론트에서 6개씩 페이징 표시).
- * ★ requiresField: 해당 카드가 의존하는 DB 컬럼 — 데이터가 없으면 카드 풀에서 제외
+ *
+ * ★ 동적 필터링: 직접 컬럼 + 커스텀 필드(JSONB) 양쪽 데이터 유무를 체크하여
+ *   해당 고객사에 실제 데이터가 있는 카드만 풀에 표시.
+ *   - requiresField: 직접 컬럼명
+ *   - customLabelPatterns: 커스텀 필드 라벨 매칭 패턴 (부분일치)
  *
  * 이 파일은 companies.ts + admin.ts에서 import.
  */
@@ -18,26 +22,27 @@ export interface DashboardCardDef {
   cardId: string;
   label: string;
   type: CardType;
-  icon: string;        // lucide-react 아이콘명
-  description: string; // 슈퍼관리자 설정 UI 설명
-  requiresField?: string; // 의존 DB 컬럼 — null이면 항상 표시
+  icon: string;              // lucide-react 아이콘명
+  description: string;       // 슈퍼관리자 설정 UI 설명
+  requiresField?: string;    // 의존 직접 컬럼명 — null이면 항상 표시
+  customLabelPatterns?: string[]; // 커스텀 필드 라벨 매칭 (부분일치, 소문자 비교)
 }
 
 // ─── 카드 풀 — 17종 ───
 
 export const DASHBOARD_CARD_POOL: DashboardCardDef[] = [
   { cardId: 'total_customers',     label: '전체 고객 수',      type: 'count',        icon: 'Users',        description: '전체 등록 고객 수' },
-  { cardId: 'gender_male',         label: '남성 수',           type: 'count',        icon: 'User',         description: '성별이 남성인 고객 수',          requiresField: 'gender' },
-  { cardId: 'gender_female',       label: '여성 수',           type: 'count',        icon: 'User',         description: '성별이 여성인 고객 수',          requiresField: 'gender' },
-  { cardId: 'birthday_this_month', label: '이번달 생일 고객',  type: 'count',        icon: 'Cake',         description: '이번 달 생일인 고객 수',         requiresField: 'birth_date' },
-  { cardId: 'age_distribution',    label: '연령대별 분포',     type: 'distribution', icon: 'BarChart3',    description: '연령대별 고객 분포',              requiresField: 'birth_date' },
-  { cardId: 'grade_distribution',  label: '등급별 고객 수',    type: 'distribution', icon: 'Award',        description: '고객 등급별 분포',                requiresField: 'grade' },
-  { cardId: 'region_top',          label: '지역별 TOP',        type: 'distribution', icon: 'MapPin',       description: '지역별 고객 수 상위',            requiresField: 'region' },
-  { cardId: 'store_distribution',  label: '매장별 고객 수',    type: 'distribution', icon: 'Store',        description: '매장별 고객 분포',                requiresField: 'store_code' },
-  { cardId: 'email_rate',          label: '이메일 보유율',     type: 'rate',         icon: 'Mail',         description: '이메일 주소 보유 비율 (%)',       requiresField: 'email' },
-  { cardId: 'total_purchase_sum',  label: '총 구매금액',       type: 'sum',          icon: 'CreditCard',   description: '전체 고객 누적 구매금액 합계',    requiresField: 'total_purchase_amount' },
-  { cardId: 'recent_30d_purchase', label: '30일 내 구매',      type: 'count',        icon: 'ShoppingCart', description: '최근 30일 내 구매 이력이 있는 고객 수', requiresField: 'recent_purchase_date' },
-  { cardId: 'inactive_90d',        label: '90일+ 미구매',      type: 'count',        icon: 'UserX',        description: '최근 90일간 구매 이력이 없는 고객 수',  requiresField: 'recent_purchase_date' },
+  { cardId: 'gender_male',         label: '남성 수',           type: 'count',        icon: 'User',         description: '성별이 남성인 고객 수',          requiresField: 'gender',                customLabelPatterns: ['성별', 'gender', 'sex'] },
+  { cardId: 'gender_female',       label: '여성 수',           type: 'count',        icon: 'User',         description: '성별이 여성인 고객 수',          requiresField: 'gender',                customLabelPatterns: ['성별', 'gender', 'sex'] },
+  { cardId: 'birthday_this_month', label: '이번달 생일 고객',  type: 'count',        icon: 'Cake',         description: '이번 달 생일인 고객 수',         requiresField: 'birth_date',            customLabelPatterns: ['생년월일', '생일', '출생', 'birthday', 'birth'] },
+  { cardId: 'age_distribution',    label: '연령대별 분포',     type: 'distribution', icon: 'BarChart3',    description: '연령대별 고객 분포',              requiresField: 'birth_date',            customLabelPatterns: ['생년월일', '생일', '출생', 'birthday', 'birth', '나이', '연령'] },
+  { cardId: 'grade_distribution',  label: '등급별 고객 수',    type: 'distribution', icon: 'Award',        description: '고객 등급별 분포',                requiresField: 'grade',                 customLabelPatterns: ['등급', 'grade', 'vip', '회원등급', '멤버십'] },
+  { cardId: 'region_top',          label: '지역별 TOP',        type: 'distribution', icon: 'MapPin',       description: '지역별 고객 수 상위',            requiresField: 'region',                customLabelPatterns: ['지역', 'region', '시도', '도시'] },
+  { cardId: 'store_distribution',  label: '매장별 고객 수',    type: 'distribution', icon: 'Store',        description: '매장별 고객 분포',                requiresField: 'store_code',            customLabelPatterns: ['매장', 'store', '지점', '점포', '브랜드'] },
+  { cardId: 'email_rate',          label: '이메일 보유율',     type: 'rate',         icon: 'Mail',         description: '이메일 주소 보유 비율 (%)',       requiresField: 'email',                 customLabelPatterns: ['이메일', 'email', 'e-mail'] },
+  { cardId: 'total_purchase_sum',  label: '총 구매금액',       type: 'sum',          icon: 'CreditCard',   description: '전체 고객 누적 구매금액 합계',    requiresField: 'total_purchase_amount',  customLabelPatterns: ['구매금액', '총구매', '누적구매', '총금액', 'purchase_amount'] },
+  { cardId: 'recent_30d_purchase', label: '30일 내 구매',      type: 'count',        icon: 'ShoppingCart', description: '최근 30일 내 구매 이력이 있는 고객 수', requiresField: 'recent_purchase_date', customLabelPatterns: ['최근구매', '구매일', '마지막구매', 'purchase_date', '최종구매'] },
+  { cardId: 'inactive_90d',        label: '90일+ 미구매',      type: 'count',        icon: 'UserX',        description: '최근 90일간 구매 이력이 없는 고객 수',  requiresField: 'recent_purchase_date', customLabelPatterns: ['최근구매', '구매일', '마지막구매', 'purchase_date', '최종구매'] },
   { cardId: 'new_this_month',      label: '신규고객 (이번달)', type: 'count',        icon: 'UserPlus',     description: '이번 달 신규 등록된 고객 수' },
   { cardId: 'opt_out_count',       label: '수신거부 수',       type: 'count',        icon: 'BellOff',      description: '수신거부 등록 건수' },
   { cardId: 'opt_in_count',        label: '수신동의 수',       type: 'count',        icon: 'Bell',         description: 'SMS 수신동의 고객 수' },
@@ -61,7 +66,7 @@ export function validateCardIds(cardIds: string[]): { valid: boolean; invalid: s
   return { valid: invalid.length === 0, invalid };
 }
 
-/** 의존 필드가 있는 카드들의 필드 목록 (중복 제거) */
+/** 의존 필드가 있는 카드들의 직접 컬럼 목록 (중복 제거) */
 export function getRequiredFields(): string[] {
   const fields = new Set<string>();
   for (const card of DASHBOARD_CARD_POOL) {
@@ -70,12 +75,26 @@ export function getRequiredFields(): string[] {
   return Array.from(fields);
 }
 
-/** 데이터 존재 필드 기반으로 카드 풀 필터링 */
-export function filterPoolByAvailableFields(availableFields: Set<string>): DashboardCardDef[] {
+/**
+ * 데이터 존재 필드 기반으로 카드 풀 필터링
+ * @param availableColumns - 직접 컬럼 중 데이터가 있는 필드 Set
+ * @param customFieldLabels - 커스텀 필드 중 데이터가 있는 라벨 목록 (소문자)
+ */
+export function filterPoolByAvailableData(
+  availableColumns: Set<string>,
+  customFieldLabels: string[]
+): DashboardCardDef[] {
   return DASHBOARD_CARD_POOL.filter(card => {
     // requiresField 없으면 항상 표시
     if (!card.requiresField) return true;
-    // 해당 필드에 데이터가 있으면 표시
-    return availableFields.has(card.requiresField);
+    // 1. 직접 컬럼에 데이터가 있으면 OK
+    if (availableColumns.has(card.requiresField)) return true;
+    // 2. 커스텀 필드 라벨 매칭 — 부분일치
+    if (card.customLabelPatterns && customFieldLabels.length > 0) {
+      return card.customLabelPatterns.some(pattern =>
+        customFieldLabels.some(label => label.includes(pattern.toLowerCase()))
+      );
+    }
+    return false;
   });
 }
