@@ -351,7 +351,23 @@ AND NOT EXISTS (
 **Phase 2 남은 작업:** 타겟 필터 UI(AutoSendFormModal에 필터 단계 추가), 실행 이력 상세 조회
 **Phase 3 예정:** A/B 테스트, 발송 최적 시간 추천
 
-### 5-8. AI 메시지 생성 흐름
+### 5-8. AI 프리미엄 기능 (D80 — plans.ai_premium_enabled 게이팅)
+
+**1. 자동조건완화 (auto-relax):**
+- `services/ai.ts` — `relaxFilters()`: AI가 매칭 0건 시 조건 완화 (최대 2회 시도)
+- `routes/ai.ts` — recommend-target에 `auto_relax` 파라미터 (기본 true, 프론트에서 ON/OFF 제어)
+- `AiSendTypeModal.tsx` — "AI 한줄로" 프롬프트 영역에 토글 UI (프로 이상만 표시)
+- `Dashboard.tsx` — `handleAiCampaignGenerate(prompt, autoRelax)` → `recommendTarget({ objective, auto_relax })` 전달
+
+**2. 캠페인 성과 → AI 다음 캠페인 추천:**
+- `stats-aggregation.ts` — `aggregateCampaignPerformance()`: 최근 N개월 성과 다각도 집계
+- `services/ai.ts` — `recommendNextCampaign()`: AI 분석 → 추천
+- `routes/ai.ts` — `POST /api/ai/recommend-next-campaign`
+- `AiCustomSendFlow.tsx` — Step 2 헤더에 "AI 추천" 버튼 + 호버 툴팁
+
+**3. 자동발송 AI 문안생성:** → 5-7 자동발송 기능 Phase 2 참조
+
+### 5-9. AI 메시지 생성 흐름
 
 ```
 프론트엔드 → POST /api/ai/generate-messages
@@ -360,7 +376,7 @@ AND NOT EXISTS (
     → 프롬프트에 타겟 필터조건(등급/성별/연령/지역) + 샘플 고객 포함
 ```
 
-### 5-8. SMS 발송 흐름
+### 5-10. SMS 발송 흐름
 
 ```
 PostgreSQL campaigns/campaign_runs 생성

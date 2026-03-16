@@ -227,15 +227,27 @@ ALTER TABLE spam_filter_tests ALTER COLUMN spam_check_number DROP DEFAULT;
 
 ---
 
-### 🔧 D80 — AI 프리미엄 기능 3종 (자동조건완화 + 성과추천 + 문안자동생성) (2026-03-16) — 배포 대기
+### ✅ D80 — AI 프리미엄 기능 3종 (자동조건완화 + 성과추천 + 문안자동생성) (2026-03-16) — 배포 완료
 
 > **배경:** 프로(100만원) 요금제 전용 AI 프리미엄 기능 3종. plans.ai_premium_enabled 게이팅.
-> **DB 마이그레이션:** `migrations/ai-premium-features.sql` — Harold님 직접 실행 필요
+> **DB 마이그레이션:** ✅ 완료 (`migrations/ai-premium-features.sql`)
+
+#### 기능 1: AI 타겟 자동조건완화 + ON/OFF 토글
+- `services/ai.ts` — `relaxFilters()` 추가: AI가 조건을 완화하면서 마케팅 의도 유지
+- `services/ai.ts` — `countFilteredCustomers()` 추가: 중복 COUNT 쿼리 공통화
+- `routes/ai.ts` — recommend-target에 auto-relax 로직 (최대 2회, ai_premium_enabled 게이팅)
+  - `auto_relax` 파라미터: 프론트에서 ON/OFF 제어 (기본 true)
+- `AiSendTypeModal.tsx` — "AI 한줄로" 프롬프트 영역에 자동조건완화 ON/OFF 토글 추가
+  - 프로 이상(aiPremiumEnabled)일 때만 표시
+  - ON: "매칭 0건 시 AI가 조건을 완화하여 재추천"
+  - OFF: "정확한 조건만 적용 (완화 없음)"
+- `Dashboard.tsx` — `handleAiCampaignGenerate`에서 autoRelax 값을 recommendTarget API에 전달
 
 #### 기능 2: 캠페인 성과 → AI 다음 캠페인 추천
 - `stats-aggregation.ts` — `aggregateCampaignPerformance()` 추가: 세그먼트별/시간대별/메시지타입별/TOP5 다각도 집계
 - `services/ai.ts` — `recommendNextCampaign()` 추가: AI가 성과 데이터 분석 → 다음 캠페인 추천
 - `routes/ai.ts` — `POST /api/ai/recommend-next-campaign` 엔드포인트 추가
+- `AiCustomSendFlow.tsx` — Step 2 헤더에 "AI 추천" 버튼 (앰버 그라데이션) + 호버 시 기능 설명 툴팁
 
 #### 기능 3: 자동발송 + AI 문안 자동생성 (D-2/D-1/D-day 3단계 생명주기)
 - `auto-campaign-worker.ts` — 전면 리팩토링:
@@ -247,17 +259,17 @@ ALTER TABLE spam_filter_tests ALTER COLUMN spam_check_number DROP DEFAULT;
   - CREATE/UPDATE에 AI 필수값 검증 + generated 필드 초기화 로직
   - GET 목록에 `ai_premium_enabled` 프론트 전달
 - `AutoSendFormModal.tsx` — Step 4에 AI 자동생성 모드 토글:
-  - 프로 이상만 표시되는 ON/OFF 토글
-  - ON: 마케팅 컨셉 프롬프트 + 톤 선택 + 폴백 메시지 입력
+  - 프로 이상만 표시되는 ON/OFF 토글 (문안 톤 선택 제거 — 불필요)
+  - ON: 마케팅 컨셉 프롬프트 + 폴백 메시지 입력
   - OFF: 기존 수동 메시지 작성 (변경 없음)
   - Step 5 확인에 AI 설정 요약 표시
+  - 발신번호 라벨 개선: "발신번호 (수신자에게 표시되는 번호)" + 매장전화번호 개별회신번호 안내
 - `AutoSendPage.tsx` — PlanInfo에 ai_premium_enabled 추가, 모달에 prop 전달
 - SMS + LMS 모두 AI 문안생성 지원 (message_type 동적 전달)
 
-#### 기능 4: AI 타겟 자동조건완화
-- `services/ai.ts` — `relaxFilters()` 추가: AI가 조건을 완화하면서 마케팅 의도 유지
-- `services/ai.ts` — `countFilteredCustomers()` 추가: 중복 COUNT 쿼리 공통화
-- `routes/ai.ts` — recommend-target에 auto-relax 로직 (최대 2회, ai_premium_enabled 게이팅)
+#### plan-info API 개선
+- `companies.ts` — plan-info 조회에 `p.ai_premium_enabled` 추가
+- `Dashboard.tsx` — PlanInfo 인터페이스에 `ai_premium_enabled` 타입 추가
 
 #### 수정 파일 목록
 - `migrations/ai-premium-features.sql` (신규)
@@ -266,13 +278,17 @@ ALTER TABLE spam_filter_tests ALTER COLUMN spam_check_number DROP DEFAULT;
 - `packages/backend/src/services/ai.ts`
 - `packages/backend/src/routes/ai.ts`
 - `packages/backend/src/routes/auto-campaigns.ts`
+- `packages/backend/src/routes/companies.ts`
 - `packages/frontend/src/components/AutoSendFormModal.tsx`
+- `packages/frontend/src/components/AiSendTypeModal.tsx`
+- `packages/frontend/src/components/AiCustomSendFlow.tsx`
 - `packages/frontend/src/pages/AutoSendPage.tsx`
-- `status/SCHEMA.md`, `status/STATUS.md`
+- `packages/frontend/src/pages/Dashboard.tsx`
+- `status/SCHEMA.md`, `status/STATUS.md`, `CLAUDE.md`
 
 #### TypeScript 타입 체크
 - 백엔드: ✅ 0 에러
-- 프론트엔드: ✅ transpile 성공
+- 프론트엔드: ✅ 0 에러
 
 ---
 

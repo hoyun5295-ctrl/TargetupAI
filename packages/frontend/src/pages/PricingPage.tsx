@@ -191,9 +191,27 @@ export default function PricingPage() {
     const features: Record<string, string[]> = {
       STARTER: ['기본 SMS/LMS/MMS 발송', '엑셀 업로드', '캘린더 관리', '발송 결과 조회', '스팸필터 테스트'],
       BASIC: ['STARTER 기능 포함', 'AI 타겟 추천', 'AI 문구 생성', 'AI 추천발송', 'AI 자동매핑'],
-      PRO: ['BASIC 기능 포함', 'AI 마케팅분석(기본)', 'Sync-Agent 연동', 'DB 실시간 동기화', '자동발송 5건'],
-      BUSINESS: ['PRO 기능 포함', 'AI 마케팅분석(고급)', '맞춤 리포트', '전담 매니저', 'SLA 보장', '자동발송 10건'],
-      ENTERPRISE: ['BUSINESS 기능 포함', '온프레미스 설치', '커스텀 개발', '24/7 지원', '자동발송 무제한'],
+      PRO: [
+        'BASIC 기능 포함',
+        'AI 자동 조건완화 (0건 시 자동 재추천)',
+        'AI 캠페인 성과분석 + 다음 캠페인 추천',
+        '자동발송 5건 (AI 문안 자동생성)',
+        '자동 스팸필터 테스트 (무료)',
+        'Sync-Agent 연동 / DB 실시간 동기화',
+      ],
+      BUSINESS: [
+        'PRO 기능 포함',
+        'AI 마케팅분석(고급)',
+        '자동발송 10건',
+        '맞춤 리포트',
+        '전담 매니저 / SLA 보장',
+      ],
+      ENTERPRISE: [
+        'BUSINESS 기능 포함',
+        '자동발송 무제한',
+        '온프레미스 설치',
+        '커스텀 개발 / 24/7 지원',
+      ],
     };
     return features[planCode] || [];
   };
