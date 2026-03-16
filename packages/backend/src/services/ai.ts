@@ -816,26 +816,46 @@ export async function recommendTarget(
   // 3) 데이터 있는 직접 컬럼 필드만 추출
   const activeColumnFields = detectableFields.filter(f => parseInt(dc[`cnt_${f.fieldKey}`] || '0') > 0);
 
-  // 4) 문자열 필드 중 grade/gender/region은 DISTINCT 조회로 실제 값 표시
-  let genders = ''; let grades = ''; let regions = '';
+  // 4) ★ D77: 모든 문자열 필드 DISTINCT 조회 — AI가 정확한 DB값만 사용하도록
+  //    기존 grade/gender/region 3개만 하던 것을 전체 문자열 필드로 동적 확장
+  const distinctValues: Record<string, string[]> = {};
   try {
-    const distinctQueries: Promise<any>[] = [];
-    const hasGrade = activeColumnFields.some(f => f.fieldKey === 'grade');
-    const hasGender = activeColumnFields.some(f => f.fieldKey === 'gender');
-    const hasRegion = activeColumnFields.some(f => f.fieldKey === 'region');
-    if (hasGrade) distinctQueries.push(query('SELECT DISTINCT grade FROM customers WHERE company_id = $1 AND grade IS NOT NULL AND grade != \'\' ORDER BY grade', [companyId]));
-    else distinctQueries.push(Promise.resolve({ rows: [] }));
-    if (hasGender) distinctQueries.push(query('SELECT DISTINCT gender FROM customers WHERE company_id = $1 AND gender IS NOT NULL AND gender != \'\' ORDER BY gender', [companyId]));
-    else distinctQueries.push(Promise.resolve({ rows: [] }));
-    if (hasRegion) distinctQueries.push(query('SELECT DISTINCT region FROM customers WHERE company_id = $1 AND region IS NOT NULL AND region != \'\' ORDER BY region', [companyId]));
-    else distinctQueries.push(Promise.resolve({ rows: [] }));
-    const [gradeRes, genderRes, regionRes] = await Promise.all(distinctQueries);
-    if (gradeRes.rows.length > 0) grades = gradeRes.rows.map((r: any) => r.grade).join(', ');
-    if (genderRes.rows.length > 0) genders = genderRes.rows.map((r: any) => r.gender).join(', ');
-    if (regionRes.rows.length > 0) regions = regionRes.rows.map((r: any) => r.region).join(', ');
+    const stringFields = activeColumnFields.filter(f => f.dataType === 'string');
+    if (stringFields.length > 0) {
+      const distinctQueries = stringFields.map(f =>
+        query(
+          `SELECT DISTINCT ${f.columnName} FROM customers WHERE company_id = $1 AND ${f.columnName} IS NOT NULL AND ${f.columnName} != '' ORDER BY ${f.columnName} LIMIT 200`,
+          [companyId]
+        )
+      );
+      const results = await Promise.all(distinctQueries);
+      stringFields.forEach((f, i) => {
+        const vals = results[i].rows.map((r: any) => r[f.columnName]).filter(Boolean);
+        if (vals.length > 0) distinctValues[f.fieldKey] = vals;
+      });
+    }
+
+    // 커스텀 필드도 DISTINCT 조회 (라벨 있는 필드만)
+    for (const [key, label] of Object.entries(customFieldLabels)) {
+      try {
+        const cfRes = await query(
+          `SELECT DISTINCT custom_fields->>'${key}' as val FROM customers WHERE company_id = $1 AND custom_fields->>'${key}' IS NOT NULL AND custom_fields->>'${key}' != '' ORDER BY val LIMIT 200`,
+          [companyId]
+        );
+        const vals = cfRes.rows.map((r: any) => r.val).filter(Boolean);
+        if (vals.length > 0) distinctValues[`custom_fields.${key}`] = vals;
+      } catch (cfErr) {
+        // 개별 커스텀 필드 조회 실패 시 무시
+      }
+    }
   } catch (err) {
     console.warn('[AI] DISTINCT 조회 실패:', err);
   }
+
+  // 하위호환: 기존 변수명 유지
+  const genders = (distinctValues['gender'] || []).join(', ');
+  const grades = (distinctValues['grade'] || []).join(', ');
+  const regions = (distinctValues['region'] || []).join(', ');
   
   // ★ 변수 카탈로그 프롬프트 — 개인화 필수 지정 시 해당 변수만 표시
   const effectiveVars = (personalizationDirective?.requestedVars.length)
@@ -872,19 +892,31 @@ ${cleanObjective}
 ${activeColumnFields.map(f => {
     const key = f.fieldKey;
     const label = f.displayName;
-    if (key === 'gender') return `- gender: ${label} → 반드시 다음 값 중 하나만 사용: ${genders || '(데이터 없음)'}`;
+    const vals = distinctValues[key];
     if (key === 'age') return `- age: ${label} (between 연산자로 범위 지정, 예: [20, 29])`;
-    if (key === 'grade') return `- grade: ${label} → 반드시 다음 값 중 하나만 사용: ${grades || '(데이터 없음)'}`;
-    if (key === 'region') return `- region: ${label} → 사용 가능한 값: ${regions || '(데이터 없음)'} (별도 컬럼, custom_fields 아님!)`;
     if (key === 'birth_date') return `- birth_date: ${label} (birth_month 연산자로 월 필터, 예: {"operator": "birth_month", "value": 3} → 3월 생일)`;
-    if (key === 'store_code') return `- store_code: ${label} (eq/in 연산자)`;
+    if (key === 'store_code') return `- store_code: ${label} (eq/in 연산자)${vals ? ' → 반드시 다음 값 중 하나만 정확히 사용: ' + vals.join(', ') : ''}`;
     if (f.dataType === 'number') return `- ${key}: ${label} (gte, lte, between 연산자)`;
     if (f.dataType === 'date') return `- ${key}: ${label} (days_within, gte, lte 연산자)`;
-    return `- ${key}: ${label} (eq/in/contains 연산자)`;
+    // ★ D77: 모든 문자열 필드에 실제 DB값 목록 제공 — 정확한 값만 사용 강제
+    if (vals && vals.length > 0) {
+      const valList = vals.length > 50 ? vals.slice(0, 50).join(', ') + ` ... 외 ${vals.length - 50}개` : vals.join(', ');
+      return `- ${key}: ${label} → ⚠️ 반드시 다음 값 중 하나만 정확히 사용 (띄어쓰기/대소문자 그대로): ${valList}`;
+    }
+    return `- ${key}: ${label} (eq/in 연산자)`;
   }).join('\n')}
-${Object.entries(customFieldLabels).map(([key, label]) => `- custom_fields.${key}: ${label} (커스텀 필드, eq/gte/lte/between/in/contains/date_gte/date_lte 연산자. ⚠️ 날짜 데이터는 반드시 date_gte/date_lte 사용!)`).join('\n')}
+${Object.entries(customFieldLabels).map(([key, label]) => {
+    const vals = distinctValues[`custom_fields.${key}`];
+    const baseOps = 'eq/gte/lte/between/in/contains/date_gte/date_lte';
+    if (vals && vals.length > 0) {
+      const valList = vals.length > 50 ? vals.slice(0, 50).join(', ') + ` ... 외 ${vals.length - 50}개` : vals.join(', ');
+      return `- custom_fields.${key}: ${label} (${baseOps}) → ⚠️ 반드시 다음 값 중 하나만 정확히 사용: ${valList}`;
+    }
+    return `- custom_fields.${key}: ${label} (커스텀 필드, ${baseOps}. ⚠️ 날짜 데이터는 반드시 date_gte/date_lte 사용!)`;
+  }).join('\n')}
 
 ⚠️ 주의: region, grade 등 직접 컬럼 필드는 "custom_fields."를 붙이지 않고 그대로 사용!
+⚠️ 극히 중요: 필터 값에는 반드시 위 목록에 표시된 정확한 DB값만 사용하세요! 사용자 입력의 띄어쓰기/오타를 그대로 쓰지 말고, 위 목록에서 가장 일치하는 정확한 값을 골라 사용하세요. 목록에 없는 값은 절대 사용하지 마세요.
 
 ${varCatalogPrompt}
 
