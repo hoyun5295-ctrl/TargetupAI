@@ -7,6 +7,7 @@ import { FIELD_MAP } from '../utils/standard-field-map';
 import { isValidCustomFieldKey } from '../utils/safe-field-name';
 import { getStoreScope } from '../utils/store-scope';
 import { buildFilterWhereClauseCompat } from '../utils/customer-filter';
+import { autoSpamTestWithRegenerate } from '../utils/spam-test-queue';
 
 
 // ★ CT-01: AI 필터 → SQL WHERE 절 변환 → customer-filter.ts 컨트롤타워로 통합
@@ -86,7 +87,7 @@ router.post('/generate-message', async (req: Request, res: Response) => {
       kakaoSenderKey = kakaoResult.rows[0]?.profile_key;
     }
 
-    const result = await generateMessages(prompt, targetInfo, {
+    const extraContext = {
       productName,
       discountRate,
       eventName,
@@ -101,7 +102,103 @@ router.post('/generate-message', async (req: Request, res: Response) => {
       personalizationVars,
       availableVarsCatalog: varCatalog,
       availableVars: availableVars,
-    });
+    };
+
+    const result = await generateMessages(prompt, targetInfo, extraContext);
+
+    // ★ D78: 프로 이상 자동 스팸검사 + 재생성
+    const planCheck = await query(
+      `SELECT p.auto_spam_test_enabled FROM companies c
+       LEFT JOIN plans p ON c.plan_id = p.id
+       WHERE c.id = $1`,
+      [companyId]
+    );
+    const autoSpamEnabled = planCheck.rows[0]?.auto_spam_test_enabled === true;
+
+    if (autoSpamEnabled && result.variants && result.variants.length > 0 && channel !== '카카오') {
+      // 발신번호 조회 (사용자별 우선)
+      let callbackNumber = companyInfo.reject_number || '';
+      if (!callbackNumber) {
+        const senderResult = await query(
+          `SELECT number FROM sender_numbers WHERE company_id = $1 AND is_active = true LIMIT 1`,
+          [companyId]
+        );
+        callbackNumber = senderResult.rows[0]?.number || '';
+      }
+
+      if (callbackNumber) {
+        try {
+          const spamResult = await autoSpamTestWithRegenerate({
+            companyId: companyId!,
+            userId: userId!,
+            callbackNumber,
+            messageType: (channel === 'LMS' || channel === 'MMS') ? channel : 'SMS',
+            variants: result.variants.map((v: any) => ({
+              variantId: v.variant_id || v.variantId || 'A',
+              messageText: v.message_text || v.sms_text || v.lms_text || '',
+              subject: v.subject,
+            })),
+            isAd: isAd || false,
+            rejectNumber: companyInfo.reject_number,
+            // 재생성 콜백: 스팸 차단된 variant를 새로 생성
+            regenerateCallback: async (blockedVariantId: string) => {
+              try {
+                console.log(`[AI] 스팸 차단 variant ${blockedVariantId} 재생성 시도`);
+                const regenResult = await generateMessages(
+                  prompt + '\n(이전 문안이 스팸필터에 차단되었습니다. 다른 표현으로 작성해주세요.)',
+                  targetInfo,
+                  extraContext
+                );
+                if (regenResult.variants && regenResult.variants.length > 0) {
+                  const nv = regenResult.variants[0] as any;
+                  return {
+                    messageText: nv.message_text || nv.sms_text || nv.lms_text || '',
+                    subject: nv.subject,
+                  };
+                }
+                return null;
+              } catch (err) {
+                console.error(`[AI] variant ${blockedVariantId} 재생성 실패:`, err);
+                return null;
+              }
+            },
+          });
+
+          // 스팸 테스트 결과를 variants에 병합 (동적 속성 → as any 캐스팅)
+          const resultAny = result as any;
+          for (const spamVariant of spamResult.variants) {
+            const originalVariant = resultAny.variants.find(
+              (v: any) => (v.variant_id || v.variantId) === spamVariant.variantId
+            );
+            if (originalVariant) {
+              // 재생성되었으면 메시지 교체
+              if (spamVariant.regenerated) {
+                originalVariant.message_text = spamVariant.messageText;
+                if (spamVariant.subject) originalVariant.subject = spamVariant.subject;
+                if (channel === 'SMS') originalVariant.sms_text = spamVariant.messageText;
+                else originalVariant.lms_text = spamVariant.messageText;
+              }
+              // 스팸 결과 추가
+              originalVariant.spam_result = spamVariant.spamResult;
+              originalVariant.spam_carrier_results = spamVariant.carrierResults;
+              originalVariant.spam_regenerated = spamVariant.regenerated;
+              originalVariant.spam_regenerate_count = spamVariant.regenerateCount;
+            }
+          }
+
+          // 배치 ID 추가
+          resultAny.spamTestBatchId = spamResult.batchId;
+          resultAny.spamTestCompleted = true;
+          resultAny.spamTestTotalCount = spamResult.totalTestCount;
+          resultAny.spamTestRegenerateCount = spamResult.totalRegenerateCount;
+
+          console.log(`[AI] D78 자동 스팸검사 완료 — batch=${spamResult.batchId}, tests=${spamResult.totalTestCount}, regenerated=${spamResult.totalRegenerateCount}`);
+        } catch (spamErr) {
+          console.error('[AI] D78 자동 스팸검사 오류 (무시, 결과는 그대로 반환):', spamErr);
+          // 스팸 테스트 실패해도 AI 결과는 그대로 반환
+        }
+      }
+    }
 
     return res.json(result);
   } catch (error) {

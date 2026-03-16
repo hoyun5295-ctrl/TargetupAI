@@ -49,8 +49,9 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
     }
 
     // ★ D53: 요금제 게이팅 — spam_filter_enabled 체크
+    // ★ D78: auto_spam_test_enabled 조회 추가 (프로 이상 무료)
     const planCheck = await query(
-      `SELECT p.spam_filter_enabled FROM companies c
+      `SELECT p.spam_filter_enabled, p.auto_spam_test_enabled FROM companies c
        LEFT JOIN plans p ON c.plan_id = p.id
        WHERE c.id = $1`,
       [companyId]
@@ -61,6 +62,7 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
         code: 'PLAN_FEATURE_LOCKED'
       });
     }
+    const isAutoSpamFree = planCheck.rows[0]?.auto_spam_test_enabled === true;
 
     // 1) stale 테스트 자동 정리 (타임아웃 초과 active → completed/timeout 처리)
     const staleTests = await query(
@@ -171,16 +173,21 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
     const testId = testResult.rows[0].id;
 
     // ★ 선불 잔액 차감 (테스트폰 × 메시지타입 = 실제 발송 건수)
-    const spamDeduct = await prepaidDeduct(companyId, spamSendCount, spamDeductType, testId);
-    if (!spamDeduct.ok) {
-      // 차감 실패 시 테스트 레코드 cancelled 처리
-      await query(`UPDATE spam_filter_tests SET status = 'completed', completed_at = NOW() WHERE id = $1`, [testId]);
-      return res.status(402).json({
-        error: spamDeduct.error,
-        insufficientBalance: true,
-        balance: spamDeduct.balance,
-        requiredAmount: spamDeduct.amount
-      });
+    // ★ D78: 프로 이상 (auto_spam_test_enabled) → 스팸필터 테스트 무료
+    let spamDeductAmount = 0;
+    if (!isAutoSpamFree) {
+      const spamDeduct = await prepaidDeduct(companyId, spamSendCount, spamDeductType, testId);
+      if (!spamDeduct.ok) {
+        // 차감 실패 시 테스트 레코드 cancelled 처리
+        await query(`UPDATE spam_filter_tests SET status = 'completed', completed_at = NOW() WHERE id = $1`, [testId]);
+        return res.status(402).json({
+          error: spamDeduct.error,
+          insufficientBalance: true,
+          balance: spamDeduct.balance,
+          requiredAmount: spamDeduct.amount
+        });
+      }
+      spamDeductAmount = spamDeduct.amount || 0;
     }
 
     // ★ D32: 실제 타겟 최상단 고객 데이터로 치환 (하드코딩 완전 제거)
@@ -364,7 +371,7 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
       totalCount: spamSendCount,
       message: `${devices.rows.length}대 테스트폰에 ${messageTypes.join('/')} 발송 완료 (${spamSendCount}건)`,
       timeoutSeconds: TEST_TIMEOUT_MS / 1000,
-      deducted: spamDeduct.amount || 0
+      deducted: spamDeductAmount
     });
 
   } catch (err) {

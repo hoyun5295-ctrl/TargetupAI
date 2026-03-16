@@ -30,6 +30,7 @@ import spamFilterRoutes from './routes/spam-filter';
 import analysisRoutes from './routes/analysis';
 import autoCampaignsRoutes from './routes/auto-campaigns';
 import { startAutoCampaignScheduler } from './utils/auto-campaign-worker';
+import { startSpamTestQueueWorker } from './utils/spam-test-queue';
 
 // 공용 관리 라우트 (슈퍼관리자 + 고객사관리자)
 import manageUsersRoutes from './routes/manage-users';
@@ -137,6 +138,9 @@ app.listen(PORT, () => {
 
   // ★ D69: 자동발송 워커 시작 (매 1시간 체크)
   startAutoCampaignScheduler();
+
+  // ★ D78: 스팸테스트 큐 워커 시작 (3초 간격)
+  startSpamTestQueueWorker();
 });
 
 export default app;

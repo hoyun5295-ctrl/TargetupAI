@@ -28,6 +28,7 @@
 | CT-06 | campaign-lifecycle.ts | 캠페인 생명주기 |
 | CT-07 | standard-field-map.ts | 필드 매핑 + customer_field_definitions UPSERT |
 | CT-08 | callback-filter.ts | 개별회신번호 필터링 (store_phone 폴백 + 미등록 제외) |
+| CT-09 | spam-test-queue.ts | 스팸테스트 큐 관리 + 자동 스팸검사/재생성 |
 | — | messageUtils.ts | 변수 치환 (5개 발송 경로 통합) |
 | — | normalize.ts | 값 정규화 |
 | — | stats-aggregation.ts | 대시보드 통계 집계 |
@@ -274,6 +275,18 @@ AND NOT EXISTS (
   - `buildCallbackErrorResponse(missing, unregistered)` → 제외 사유 구체적 안내 에러 응답 객체
 - **⚠️ D75 교훈:** AI send와 direct-send에 동일 로직이 인라인으로 중복 → 동작 불일치 발생. CT-08로 통합하여 단일 진입점 보장.
 - **적용 파일:** campaigns.ts (AI send + direct-send 2곳)
+
+#### CT-09: spam-test-queue.ts — 스팸테스트 큐 관리 + 자동 스팸검사/재생성
+- **역할:** 스팸테스트 큐 기반 순차 처리 + 프로 요금제 자동 스팸검사/재생성의 유일한 진입점
+- **설계:** 글로벌 큐(1개만 active) → 테스트폰 충돌 방지. batch_id로 3개 variant 그룹핑. 차단 시 자동 재생성(최대 2회)
+- **Grace Period:** 수동=10초, 자동=20초 (자동은 false positive 최소화)
+- **주요 함수:**
+  - `enqueueSpamTest(params)` — 큐 등록 (status='queued')
+  - `processSpamTestQueue()` — 큐 워커: 다음 queued 건 실행 (3초 간격)
+  - `getSpamTestBatchResults(batchId)` — 배치 결과 조회
+  - `autoSpamTestWithRegenerate(params)` — 전체 흐름: 3 variant 큐잉 → 테스트 → 차단 시 재생성
+  - `startSpamTestQueueWorker()` — 3초 간격 워커 시작 (app.ts listen 콜백)
+- **적용 파일:** ai.ts (자동 스팸검사 연동), spam-filter.ts (프로 무료 적용), app.ts (워커 시작)
 
 ### 5-7. 자동발송 기능 (D69 — ✅ Phase 1 구현 완료)
 

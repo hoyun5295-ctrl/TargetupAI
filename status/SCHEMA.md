@@ -476,6 +476,7 @@
 | ai_messaging_enabled | boolean | D53: AI발송 잠금 (기본 false) |
 | auto_campaign_enabled | boolean | D69: 자동발송 잠금 (기본 false, PRO 이상 true) ✅ 적용 완료 |
 | max_auto_campaigns | integer | D69: 동시 활성 자동캠페인 수 제한 (PRO: 5, BUSINESS: 10, ENTERPRISE: NULL=무제한) |
+| auto_spam_test_enabled | boolean DEFAULT false | 자동 스팸필터 테스트 기능 잠금 |
 | created_at | timestamp | |
 
 ### plan_requests (요금제 변경 요청)
@@ -912,12 +913,16 @@
 | message_content_lms | text (nullable) | LMS 테스트 메시지 본문 |
 | message_hash | varchar(64) (nullable) | 메시지 해시 (앱 매칭용) |
 | spam_check_number | varchar(20) (nullable) | 스팸 체크 번호 |
+| source | varchar(20) DEFAULT 'manual' | 발원지: manual / auto_campaign |
+| variant_id | varchar(2) (nullable) | A/B 테스트 변형 ID (A/B) |
+| batch_id | uuid (nullable) | 배치 그룹화 ID (자동 테스트용) |
 | status | varchar(20) | active/completed |
 | started_at | timestamptz | 테스트 시작 |
 | completed_at | timestamptz (nullable) | 테스트 완료 |
 | created_at | timestamptz | |
 - INDEX: idx_spam_filter_tests_company (company_id, created_at DESC)
 - INDEX: idx_spam_filter_tests_status (status) WHERE status = 'active'
+- INDEX: idx_spam_filter_tests_queued (company_id, status, batch_id, variant_id) WHERE status = 'active' — 자동 대기열 조회 최적화
 
 ### spam_filter_test_results (스팸필터 테스트 결과)
 | 컬럼 | 타입 | 설명 |

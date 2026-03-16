@@ -137,6 +137,7 @@ router.get('/my-plan', async (req: Request, res: Response) => {
         p.customer_db_enabled,
         p.spam_filter_enabled,
         p.ai_messaging_enabled,
+        p.auto_spam_test_enabled,
         c.subscription_status,
         c.created_at,
         c.created_at + INTERVAL '7 days' as trial_expires_at,
