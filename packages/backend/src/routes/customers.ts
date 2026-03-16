@@ -613,58 +613,64 @@ router.get('/stats', async (req: Request, res: Response) => {
       mmsSent * costMms +
       kakaoSent * costKakao;
 
-    // ★ 테스트발송 + 스팸필터: 비용 + 성공건수 모두 합산
+    // ★ D79: 테스트발송 + 스팸필터 — 발송건수/성공률에서 제외, 사용금액만 요금제별 차등 포함
+    // - 발송건수/성공률: 테스트/스팸필터 절대 미포함 (실제 발송 실적만)
+    // - 사용금액: 무료/스타터/베이직 → 포함 (유료), 프로 이상 → 미포함 (무료 제공)
+    let testCost = 0;
     try {
-      const monthStart = new Date();
-      monthStart.setDate(1);
-      monthStart.setHours(0, 0, 0, 0);
-      const monthStartStr = monthStart.toISOString().split('T')[0];
-
-      // 1) 담당자 테스트발송 (MySQL) — 성공 코드(6, 1000, 1800)만 성공건수에 포함
-      const testTables = await getTestSmsTables();
-      for (const tbl of testTables) {
-        const testRows = await mysqlQuery(
-          `SELECT
-            SUM(CASE WHEN msg_type = 'S' AND status_code IN (6, 1000, 1800) THEN 1 ELSE 0 END) as test_sms_success,
-            SUM(CASE WHEN msg_type = 'L' AND status_code IN (6, 1000, 1800) THEN 1 ELSE 0 END) as test_lms_success,
-            SUM(CASE WHEN msg_type = 'S' AND status_code != 100 THEN 1 ELSE 0 END) as test_sms,
-            SUM(CASE WHEN msg_type = 'L' THEN 1 ELSE 0 END) as test_lms
-          FROM ${tbl}
-          WHERE app_etc1 = 'test' AND app_etc2 = ? AND msg_instm >= ?`,
-          [companyId, monthStartStr]
-        );
-        if (testRows && (testRows as any[]).length > 0) {
-          const t = (testRows as any[])[0];
-          const testSmsSuccess = Number(t.test_sms_success) || 0;
-          const testLmsSuccess = Number(t.test_lms_success) || 0;
-          totalSuccess += testSmsSuccess + testLmsSuccess;
-          totalSent += (Number(t.test_sms) || 0) + (Number(t.test_lms) || 0);
-          monthlyCost += (Number(t.test_sms) || 0) * costSms + (Number(t.test_lms) || 0) * costLms;
-        }
-      }
-
-      // 2) 스팸필터 테스트 (PostgreSQL) — 발송된 건수 = 성공건수로 합산
-      const sfResult = await query(
-        `SELECT
-          SUM(CASE WHEN r.message_type = 'SMS' THEN 1 ELSE 0 END) as sf_sms,
-          SUM(CASE WHEN r.message_type = 'LMS' THEN 1 ELSE 0 END) as sf_lms
-        FROM spam_filter_test_results r
-        JOIN spam_filter_tests t ON r.test_id = t.id
-        WHERE t.company_id = $1
-          AND t.created_at >= date_trunc('month', (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Seoul'))::date::timestamp AT TIME ZONE 'Asia/Seoul'`,
+      // 요금제 확인 — 프로 이상이면 테스트 비용 무료
+      const planResult = await query(
+        `SELECT p.plan_code FROM companies c JOIN plans p ON c.plan_id = p.id WHERE c.id = $1`,
         [companyId]
       );
-      if (sfResult.rows.length > 0) {
-        const sf = sfResult.rows[0];
-        const sfSms = Number(sf.sf_sms) || 0;
-        const sfLms = Number(sf.sf_lms) || 0;
-        totalSuccess += sfSms + sfLms;
-        totalSent += sfSms + sfLms;
-        monthlyCost += sfSms * costSms + sfLms * costLms;
+      const planCode = planResult.rows[0]?.plan_code || 'free';
+      const isProOrAbove = ['pro', 'business', 'enterprise'].includes(planCode);
+
+      if (!isProOrAbove) {
+        // 무료/스타터/베이직: 테스트 비용을 사용금액에 포함
+        const monthStart = new Date();
+        monthStart.setDate(1);
+        monthStart.setHours(0, 0, 0, 0);
+        const monthStartStr = monthStart.toISOString().split('T')[0];
+
+        // 1) 담당자 테스트발송 (MySQL) — 비용만 합산 (발송건수/성공률 미포함)
+        const testTables = await getTestSmsTables();
+        for (const tbl of testTables) {
+          const testRows = await mysqlQuery(
+            `SELECT
+              SUM(CASE WHEN msg_type = 'S' AND status_code != 100 THEN 1 ELSE 0 END) as test_sms,
+              SUM(CASE WHEN msg_type = 'L' THEN 1 ELSE 0 END) as test_lms
+            FROM ${tbl}
+            WHERE app_etc1 = 'test' AND app_etc2 = ? AND msg_instm >= ?`,
+            [companyId, monthStartStr]
+          );
+          if (testRows && (testRows as any[]).length > 0) {
+            const t = (testRows as any[])[0];
+            testCost += (Number(t.test_sms) || 0) * costSms + (Number(t.test_lms) || 0) * costLms;
+          }
+        }
+
+        // 2) 스팸필터 테스트 (PostgreSQL) — 비용만 합산 (발송건수/성공률 미포함)
+        const sfResult = await query(
+          `SELECT
+            SUM(CASE WHEN r.message_type = 'SMS' THEN 1 ELSE 0 END) as sf_sms,
+            SUM(CASE WHEN r.message_type = 'LMS' THEN 1 ELSE 0 END) as sf_lms
+          FROM spam_filter_test_results r
+          JOIN spam_filter_tests t ON r.test_id = t.id
+          WHERE t.company_id = $1
+            AND t.created_at >= date_trunc('month', (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Seoul'))::date::timestamp AT TIME ZONE 'Asia/Seoul'`,
+          [companyId]
+        );
+        if (sfResult.rows.length > 0) {
+          const sf = sfResult.rows[0];
+          testCost += (Number(sf.sf_sms) || 0) * costSms + (Number(sf.sf_lms) || 0) * costLms;
+        }
       }
+      // 프로 이상: testCost = 0 (무료 제공, 사용금액 미포함)
     } catch (testCostErr) {
-      console.warn('[대시보드] 테스트/스팸필터 통계 합산 실패 (무시):', testCostErr);
+      console.warn('[대시보드] 테스트/스팸필터 비용 조회 실패 (무시):', testCostErr);
     }
+    monthlyCost += testCost;
 
     const successRate = totalSent > 0 ? ((totalSuccess / totalSent) * 100).toFixed(1) : '0';
 

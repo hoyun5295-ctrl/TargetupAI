@@ -17,17 +17,18 @@ export default function CustomerDBModal({ onClose, token, userType }: CustomerDB
   // 검색
   const [searchValue, setSearchValue] = useState('');
 
-  // 필터
-  const [filterGender, setFilterGender] = useState('all');
-  const [filterGrade, setFilterGrade] = useState('all');
-  const [filterRegion, setFilterRegion] = useState('all');
+  // ★ D79: 동적 필터 (필드 드롭다운 + 값/범위)
+  const [dynFilterField, setDynFilterField] = useState('');
+  const [dynFilterOp, setDynFilterOp] = useState('eq');
+  const [dynFilterValue, setDynFilterValue] = useState('');
+  const [dynFilterValueMax, setDynFilterValueMax] = useState('');
+  const [activeFilters, setActiveFilters] = useState<{ field: string; label: string; op: string; value: string; valueMax?: string }[]>([]);
   const [filterSmsOptIn, setFilterSmsOptIn] = useState('all');
   const [filterStoreCode, setFilterStoreCode] = useState('all');
 
   // 필터 옵션 (API에서 가져옴)
-  const [gradeOptions, setGradeOptions] = useState<string[]>([]);
-  const [regionOptions, setRegionOptions] = useState<string[]>([]);
   const [storeCodeOptions, setStoreCodeOptions] = useState<string[]>([]);
+  const [filterOptions, setFilterOptions] = useState<Record<string, string[]>>({});
 
   // 상세보기
   const [selectedCustomer, setSelectedCustomer] = useState<any>(null);
@@ -56,38 +57,44 @@ export default function CustomerDBModal({ onClose, token, userType }: CustomerDB
     try {
       const res = await fetch('/api/customers/filter-options', { headers: { Authorization: `Bearer ${token}` } });
       const data = await res.json();
-      setGradeOptions(data.grades || []);
-      setRegionOptions(data.regions || []);
+      // ★ D79: 등급/지역 등 distinct 값을 filterOptions 딕셔너리에 저장
+      const opts: Record<string, string[]> = {};
+      if (data.grades?.length) opts['grade'] = data.grades;
+      if (data.regions?.length) opts['region'] = data.regions;
+      setFilterOptions(opts);
       setStoreCodeOptions(data.store_codes || []);
     } catch (error) {
       console.error('필터 옵션 조회 에러:', error);
     }
   };
 
-  const fetchCustomers = async (p: number, overrides?: { gender?: string; grade?: string; region?: string; smsOptIn?: string; search?: string; storeCode?: string }) => {
+  const fetchCustomers = async (p: number, overrides?: { smsOptIn?: string; search?: string; storeCode?: string; filtersOverride?: typeof activeFilters }) => {
     setLoading(true);
     setSelectedCustomer(null); // 검색/필터 변경 시 상세 패널 초기화
     try {
-      const currentGender = overrides?.gender ?? filterGender;
-      const currentGrade = overrides?.grade ?? filterGrade;
-      const currentRegion = overrides?.region ?? filterRegion;
       const currentSmsOptIn = overrides?.smsOptIn ?? filterSmsOptIn;
       const currentSearch = overrides?.search ?? searchValue;
       const currentStoreCode = overrides?.storeCode ?? filterStoreCode;
+      const currentFilters = overrides?.filtersOverride ?? activeFilters;
 
       const params = new URLSearchParams({ page: String(p), limit: String(limit) });
       if (currentSearch.trim()) params.set('search', currentSearch.trim());
-      if (currentGender !== 'all') params.set('gender', currentGender);
-      if (currentGrade !== 'all') params.set('grade', currentGrade);
       if (currentSmsOptIn === 'true') params.set('smsOptIn', 'true');
       if (currentSmsOptIn === 'false') params.set('smsOptIn', 'false');
       // ★ 브랜드 필터 (고객사관리자/슈퍼관리자만)
       if (currentStoreCode !== 'all') params.set('filterStoreCode', currentStoreCode);
-      // 지역은 기존 API에서 search로 처리되므로 별도 처리 불필요시 검색으로 통합
-      // 지역 필터가 필요하면 filters JSON 사용
-      if (currentRegion !== 'all') {
-        const filters = JSON.stringify({ region: { operator: 'contains', value: currentRegion } });
-        params.set('filters', filters);
+
+      // ★ D79: activeFilters → filters JSON 변환 (buildDynamicFilterCompat structured 형식)
+      if (currentFilters.length > 0) {
+        const filtersObj: Record<string, any> = {};
+        for (const af of currentFilters) {
+          if (af.op === 'between' && af.valueMax) {
+            filtersObj[af.field] = { operator: 'between', value: [af.value, af.valueMax] };
+          } else {
+            filtersObj[af.field] = { operator: af.op, value: af.value };
+          }
+        }
+        params.set('filters', JSON.stringify(filtersObj));
       }
 
       const res = await fetch(`/api/customers?${params}`, { headers: { Authorization: `Bearer ${token}` } });
@@ -116,25 +123,77 @@ export default function CustomerDBModal({ onClose, token, userType }: CustomerDB
   };
 
   const handleSearch = () => { setPage(1); fetchCustomers(1); };
-  const handleFilterChange = (key: string, value: string) => {
+
+  // ★ D79: 동적 필터 추가
+  const handleAddFilter = () => {
+    if (!dynFilterField || !dynFilterValue) return;
+    const fieldDef = fieldColumns.find((f: any) => f.field_key === dynFilterField);
+    const label = fieldDef?.field_label || fieldDef?.display_name || dynFilterField;
+    const newFilter = { field: dynFilterField, label, op: dynFilterOp, value: dynFilterValue, valueMax: dynFilterOp === 'between' ? dynFilterValueMax : undefined };
+    const updated = [...activeFilters.filter(f => f.field !== dynFilterField), newFilter];
+    setActiveFilters(updated);
+    // 입력 초기화
+    setDynFilterField('');
+    setDynFilterOp('eq');
+    setDynFilterValue('');
+    setDynFilterValueMax('');
+    setPage(1);
+    fetchCustomers(1, { filtersOverride: updated });
+  };
+
+  // ★ D79: 활성 필터 제거
+  const handleRemoveFilter = (field: string) => {
+    const updated = activeFilters.filter(f => f.field !== field);
+    setActiveFilters(updated);
+    setPage(1);
+    fetchCustomers(1, { filtersOverride: updated });
+  };
+
+  // ★ D79: 수신동의 / 브랜드 필터 변경
+  const handleSpecialFilterChange = (key: string, value: string) => {
     const overrides: any = {};
-    if (key === 'gender') { setFilterGender(value); overrides.gender = value; }
-    if (key === 'grade') { setFilterGrade(value); overrides.grade = value; }
-    if (key === 'region') { setFilterRegion(value); overrides.region = value; }
     if (key === 'smsOptIn') { setFilterSmsOptIn(value); overrides.smsOptIn = value; }
     if (key === 'storeCode') { setFilterStoreCode(value); overrides.storeCode = value; }
     setPage(1);
     fetchCustomers(1, overrides);
   };
+
   const handleReset = () => {
     setSearchValue('');
-    setFilterGender('all');
-    setFilterGrade('all');
-    setFilterRegion('all');
+    setActiveFilters([]);
     setFilterSmsOptIn('all');
     setFilterStoreCode('all');
+    setDynFilterField('');
+    setDynFilterOp('eq');
+    setDynFilterValue('');
+    setDynFilterValueMax('');
     setPage(1);
-    fetchCustomers(1, { gender: 'all', grade: 'all', region: 'all', smsOptIn: 'all', storeCode: 'all', search: '' });
+    fetchCustomers(1, { smsOptIn: 'all', storeCode: 'all', search: '', filtersOverride: [] });
+  };
+
+  // ★ D79: 선택된 필드의 데이터 타입에 따라 연산자 목록 결정
+  const getOperatorsForField = (fieldKey: string) => {
+    const fieldDef = fieldColumns.find((f: any) => f.field_key === fieldKey);
+    const dataType = fieldDef?.data_type || fieldDef?.field_type || 'text';
+    if (['number', 'integer', 'float', 'numeric'].includes(dataType.toLowerCase())) {
+      return [
+        { v: 'eq', l: '=' }, { v: 'gte', l: '>=' }, { v: 'lte', l: '<=' }, { v: 'between', l: '범위' },
+      ];
+    }
+    if (['date', 'datetime', 'timestamp'].includes(dataType.toLowerCase())) {
+      return [
+        { v: 'eq', l: '=' }, { v: 'gte', l: '이후' }, { v: 'lte', l: '이전' }, { v: 'between', l: '범위' },
+      ];
+    }
+    // text/string 기본
+    return [
+      { v: 'eq', l: '일치' }, { v: 'contains', l: '포함' },
+    ];
+  };
+
+  // ★ D79: 필드에 대한 드롭다운 옵션 존재 여부 (등급, 지역 등 distinct values)
+  const hasDropdownOptions = (fieldKey: string) => {
+    return filterOptions[fieldKey] && filterOptions[fieldKey].length > 0;
   };
 
   const formatPhone = (phone: string) => {
@@ -207,36 +266,68 @@ export default function CustomerDBModal({ onClose, token, userType }: CustomerDB
             <div className="w-px h-6 bg-gray-200" />
             <button onClick={handleReset} className="px-3 py-1.5 bg-white border border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-gray-50 transition-colors">초기화</button>
           </div>
-          {/* 필터 */}
-          <div className="flex items-center gap-3 text-sm flex-wrap">
-            <span className="text-gray-500 font-medium">성별</span>
-            {[{ v: 'all', l: '전체' }, { v: 'F', l: '여성' }, { v: 'M', l: '남성' }].map(opt => (
-              <button key={opt.v} onClick={() => handleFilterChange('gender', opt.v)}
-                className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${filterGender === opt.v ? 'bg-emerald-100 text-emerald-700 border border-emerald-300' : 'bg-white border border-gray-200 text-gray-500 hover:bg-gray-50'}`}>
-                {opt.l}
+          {/* ★ D79: 동적 필터 — 필드 드롭다운 + 연산자 + 값 입력 */}
+          <div className="flex items-center gap-2 text-sm flex-wrap">
+            {/* 필드 선택 */}
+            <select value={dynFilterField} onChange={(e) => { setDynFilterField(e.target.value); setDynFilterOp('eq'); setDynFilterValue(''); setDynFilterValueMax(''); }}
+              className="border border-gray-300 rounded-lg px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-emerald-200 min-w-[120px]">
+              <option value="">필터 필드 선택</option>
+              {fieldColumns.map((f: any) => (
+                <option key={f.field_key} value={f.field_key}>{f.field_label || f.display_name || f.field_key}</option>
+              ))}
+            </select>
+
+            {/* 연산자 선택 (필드 선택 시에만 표시) */}
+            {dynFilterField && (
+              <select value={dynFilterOp} onChange={(e) => setDynFilterOp(e.target.value)}
+                className="border border-gray-300 rounded-lg px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-emerald-200">
+                {getOperatorsForField(dynFilterField).map(op => (
+                  <option key={op.v} value={op.v}>{op.l}</option>
+                ))}
+              </select>
+            )}
+
+            {/* 값 입력 (필드 선택 시에만 표시) */}
+            {dynFilterField && (
+              hasDropdownOptions(dynFilterField) ? (
+                <select value={dynFilterValue} onChange={(e) => setDynFilterValue(e.target.value)}
+                  className="border border-gray-300 rounded-lg px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-emerald-200 min-w-[100px]">
+                  <option value="">선택</option>
+                  {filterOptions[dynFilterField].map(v => <option key={v} value={v}>{v}</option>)}
+                </select>
+              ) : (
+                <input type="text" value={dynFilterValue} onChange={(e) => setDynFilterValue(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleAddFilter(); }}
+                  placeholder="값 입력"
+                  className="border border-gray-300 rounded-lg px-2 py-1.5 text-xs w-28 focus:outline-none focus:ring-2 focus:ring-emerald-200" />
+              )
+            )}
+
+            {/* 범위(between) 최대값 입력 */}
+            {dynFilterField && dynFilterOp === 'between' && (
+              <>
+                <span className="text-gray-400 text-xs">~</span>
+                <input type="text" value={dynFilterValueMax} onChange={(e) => setDynFilterValueMax(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleAddFilter(); }}
+                  placeholder="최대값"
+                  className="border border-gray-300 rounded-lg px-2 py-1.5 text-xs w-28 focus:outline-none focus:ring-2 focus:ring-emerald-200" />
+              </>
+            )}
+
+            {/* 필터 추가 버튼 */}
+            {dynFilterField && dynFilterValue && (
+              <button onClick={handleAddFilter}
+                className="px-3 py-1.5 bg-emerald-500 text-white rounded-lg text-xs font-medium hover:bg-emerald-600 transition-colors">
+                추가
               </button>
-            ))}
+            )}
+
             <div className="w-px h-5 bg-gray-200" />
 
-            <span className="text-gray-500 font-medium">등급</span>
-            <select value={filterGrade} onChange={(e) => handleFilterChange('grade', e.target.value)}
-              className="border border-gray-300 rounded-lg px-2 py-1 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-emerald-200">
-              <option value="all">전체</option>
-              {gradeOptions.map(g => <option key={g} value={g}>{g}</option>)}
-            </select>
-            <div className="w-px h-5 bg-gray-200" />
-
-            <span className="text-gray-500 font-medium">지역</span>
-            <select value={filterRegion} onChange={(e) => handleFilterChange('region', e.target.value)}
-              className="border border-gray-300 rounded-lg px-2 py-1 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-emerald-200">
-              <option value="all">전체</option>
-              {regionOptions.map(r => <option key={r} value={r}>{r}</option>)}
-            </select>
-            <div className="w-px h-5 bg-gray-200" />
-
-            <span className="text-gray-500 font-medium">수신동의</span>
+            {/* 수신동의 필터 (고정) */}
+            <span className="text-gray-500 font-medium text-xs">수신</span>
             {[{ v: 'all', l: '전체' }, { v: 'true', l: '동의' }, { v: 'false', l: '거부' }].map(opt => (
-              <button key={opt.v} onClick={() => handleFilterChange('smsOptIn', opt.v)}
+              <button key={opt.v} onClick={() => handleSpecialFilterChange('smsOptIn', opt.v)}
                 className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${filterSmsOptIn === opt.v ? 'bg-emerald-100 text-emerald-700 border border-emerald-300' : 'bg-white border border-gray-200 text-gray-500 hover:bg-gray-50'}`}>
                 {opt.l}
               </button>
@@ -246,8 +337,8 @@ export default function CustomerDBModal({ onClose, token, userType }: CustomerDB
             {(userType === 'company_admin' || userType === 'super_admin') && storeCodeOptions.length > 0 && (
               <>
                 <div className="w-px h-5 bg-gray-200" />
-                <span className="text-gray-500 font-medium">브랜드</span>
-                <select value={filterStoreCode} onChange={(e) => handleFilterChange('storeCode', e.target.value)}
+                <span className="text-gray-500 font-medium text-xs">브랜드</span>
+                <select value={filterStoreCode} onChange={(e) => handleSpecialFilterChange('storeCode', e.target.value)}
                   className="border border-gray-300 rounded-lg px-2 py-1 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-emerald-200">
                   <option value="all">전체</option>
                   {storeCodeOptions.map(sc => <option key={sc} value={sc}>{sc}</option>)}
@@ -255,6 +346,23 @@ export default function CustomerDBModal({ onClose, token, userType }: CustomerDB
               </>
             )}
           </div>
+
+          {/* ★ D79: 활성 필터 태그 표시 */}
+          {activeFilters.length > 0 && (
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-xs text-gray-400">적용 필터:</span>
+              {activeFilters.map(af => {
+                const opLabel = af.op === 'eq' ? '=' : af.op === 'contains' ? '포함' : af.op === 'gte' ? '>=' : af.op === 'lte' ? '<=' : af.op === 'between' ? '~' : af.op;
+                const valueDisplay = af.op === 'between' && af.valueMax ? `${af.value} ~ ${af.valueMax}` : af.value;
+                return (
+                  <span key={af.field} className="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded-full text-xs border border-emerald-200">
+                    {af.label} {opLabel} {valueDisplay}
+                    <button onClick={() => handleRemoveFilter(af.field)} className="ml-0.5 text-emerald-400 hover:text-emerald-600">&times;</button>
+                  </span>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {/* 테이블 + 상세 패널 */}

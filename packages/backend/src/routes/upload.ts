@@ -41,6 +41,16 @@ function normalizeDateValue(value: any): string | null {
   if (/^\d{8}$/.test(str)) {
     return `${str.substring(0, 4)}-${str.substring(4, 6)}-${str.substring(6, 8)}`;
   }
+  // ★ D79: YYMMDD 6자리 형식 (250103 → 2025-01-03)
+  if (/^\d{6}$/.test(str)) {
+    const yy = parseInt(str.substring(0, 2));
+    const mm = str.substring(2, 4);
+    const dd = str.substring(4, 6);
+    const yyyy = yy >= 0 && yy <= 50 ? 2000 + yy : 1900 + yy;
+    if (parseInt(mm) >= 1 && parseInt(mm) <= 12 && parseInt(dd) >= 1 && parseInt(dd) <= 31) {
+      return `${yyyy}-${mm}-${dd}`;
+    }
+  }
   const num = Number(str);
   if (!isNaN(num) && num >= 1 && num <= 73050 && Number.isInteger(num)) {
     return excelSerialToDateStr(num);
