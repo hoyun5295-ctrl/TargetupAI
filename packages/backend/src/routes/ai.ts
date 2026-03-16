@@ -295,7 +295,10 @@ router.post('/recommend-target', async (req: Request, res: Response) => {
     let originalFilters: Record<string, any> | null = null;
     let relaxedFields: string[] = [];
 
-    if (actualCount === 0 && Object.keys(result.filters).length > 0) {
+    // ★ auto_relax 파라미터: 프론트에서 ON/OFF 제어 (기본 true — 프로 이상이면 자동 시도)
+    const autoRelaxRequested = req.body.auto_relax !== false;
+
+    if (actualCount === 0 && Object.keys(result.filters).length > 0 && autoRelaxRequested) {
       // 프로 이상 게이팅 체크
       const premiumCheck = await query(
         `SELECT p.ai_premium_enabled FROM companies c LEFT JOIN plans p ON c.plan_id = p.id WHERE c.id = $1`,

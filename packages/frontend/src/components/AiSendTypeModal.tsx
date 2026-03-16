@@ -3,14 +3,16 @@ import { useState } from 'react';
 
 interface AiSendTypeModalProps {
   onClose: () => void;
-  onSelectHanjullo: (prompt: string) => void;
+  onSelectHanjullo: (prompt: string, autoRelax?: boolean) => void;
   onSelectCustom: () => void;
   initialPrompt?: string;
+  aiPremiumEnabled?: boolean;
 }
 
-export default function AiSendTypeModal({ onClose, onSelectHanjullo, onSelectCustom, initialPrompt }: AiSendTypeModalProps) {
+export default function AiSendTypeModal({ onClose, onSelectHanjullo, onSelectCustom, initialPrompt, aiPremiumEnabled }: AiSendTypeModalProps) {
   const [selected, setSelected] = useState<'hanjullo' | 'custom' | null>(initialPrompt ? 'hanjullo' : null);
   const [prompt, setPrompt] = useState(initialPrompt || '');
+  const [autoRelax, setAutoRelax] = useState(true); // ★ D80: 자동조건완화 기본 ON
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
@@ -93,18 +95,33 @@ export default function AiSendTypeModal({ onClose, onSelectHanjullo, onSelectCus
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();
-                    if (prompt.trim()) onSelectHanjullo(prompt.trim());
+                    if (prompt.trim()) onSelectHanjullo(prompt.trim(), autoRelax);
                   }
                 }}
                 autoFocus
               />
+              {/* ★ D80: 자동조건완화 ON/OFF 토글 (프로 이상만 표시) */}
+              {aiPremiumEnabled && (
+                <div
+                  className="flex items-center gap-2.5 mt-3 cursor-pointer select-none group"
+                  onClick={() => setAutoRelax(!autoRelax)}
+                >
+                  <div className={`relative w-10 h-5 rounded-full shrink-0 transition-colors duration-200 ${autoRelax ? 'bg-green-500' : 'bg-gray-300'}`}>
+                    <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform duration-200 ${autoRelax ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                  </div>
+                  <span className="text-xs text-gray-600 group-hover:text-gray-800 transition-colors">
+                    자동 조건완화
+                    <span className="text-gray-400 ml-1">— {autoRelax ? '매칭 0건 시 AI가 조건을 완화하여 재추천' : '정확한 조건만 적용 (완화 없음)'}</span>
+                  </span>
+                </div>
+              )}
               <div className="flex items-center justify-between mt-3">
                 <div className="flex flex-col gap-0.5">
                   <span className="text-xs text-gray-400">Enter로 바로 실행</span>
                   <span className="text-[11px] text-gray-400">💡 <span className="text-gray-500 font-medium">개인화 필수:</span> 뒤에 업로드된 필드명을 쓰면 맞춤 변수로 활용됩니다</span>
                 </div>
                 <button
-                  onClick={() => { if (prompt.trim()) onSelectHanjullo(prompt.trim()); }}
+                  onClick={() => { if (prompt.trim()) onSelectHanjullo(prompt.trim(), autoRelax); }}
                   disabled={!prompt.trim()}
                   className="px-5 py-2 bg-green-700 hover:bg-green-800 text-white text-sm font-medium rounded-lg disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
                 >

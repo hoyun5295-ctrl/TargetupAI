@@ -84,6 +84,7 @@ interface PlanInfo {
   customer_db_enabled?: boolean;
   spam_filter_enabled?: boolean;
   ai_messaging_enabled?: boolean;
+  ai_premium_enabled?: boolean;
 }
 
 // D41 대시보드 동적 카드 아이콘 맵
@@ -1147,7 +1148,7 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
     }
   };
 // AI 캠페인 생성 (프롬프트 한 방)
-const handleAiCampaignGenerate = async (promptOverride?: string) => {
+const handleAiCampaignGenerate = async (promptOverride?: string, autoRelax?: boolean) => {
   const prompt = promptOverride || aiCampaignPrompt;
   if (!prompt.trim()) {
     setShowPromptAlert(true);
@@ -1155,8 +1156,8 @@ const handleAiCampaignGenerate = async (promptOverride?: string) => {
   }
   setAiLoading(true);
   try {
-    // 1. 타겟 + 채널 추천 받기
-    const response = await aiApi.recommendTarget({ objective: prompt });
+    // 1. 타겟 + 채널 추천 받기 (★ D80: auto_relax 파라미터 전달)
+    const response = await aiApi.recommendTarget({ objective: prompt, auto_relax: autoRelax !== false });
     const result = response.data;
     
     // AI 결과 저장
@@ -1790,10 +1791,11 @@ const campaignData = {
         <AiSendTypeModal
           onClose={() => { setShowAiSendType(false); setAiCampaignPrompt(''); }}
           initialPrompt={aiCampaignPrompt}
-          onSelectHanjullo={(prompt) => {
+          aiPremiumEnabled={!!planInfo?.ai_premium_enabled}
+          onSelectHanjullo={(prompt, autoRelax) => {
             setShowAiSendType(false);
             setAiCampaignPrompt(prompt);
-            handleAiCampaignGenerate(prompt);
+            handleAiCampaignGenerate(prompt, autoRelax);
           }}
           onSelectCustom={() => {
             setShowAiSendType(false);

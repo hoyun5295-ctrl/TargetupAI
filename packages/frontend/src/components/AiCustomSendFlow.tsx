@@ -152,6 +152,37 @@ export default function AiCustomSendFlow({
     onCancel: () => void;
   } | null>(null);
 
+  // ★ D80: AI 성과 기반 다음 캠페인 추천
+  const [showRecommend, setShowRecommend] = useState(false);
+  const [recommendLoading, setRecommendLoading] = useState(false);
+  const [recommendData, setRecommendData] = useState<any>(null);
+  const [recommendHover, setRecommendHover] = useState(false);
+
+  const fetchRecommendation = async () => {
+    setRecommendLoading(true);
+    setRecommendData(null);
+    try {
+      const token = localStorage.getItem('token') || '';
+      const res = await fetch('/api/ai/recommend-next-campaign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ months: 3 }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setRecommendData(data);
+        setShowRecommend(true);
+      } else {
+        const err = await res.json();
+        setAlertModal({ title: 'AI 추천 실패', message: err.error || '추천 데이터를 가져올 수 없습니다.', type: 'error' });
+      }
+    } catch {
+      setAlertModal({ title: 'AI 추천 실패', message: '네트워크 오류가 발생했습니다.', type: 'error' });
+    } finally {
+      setRecommendLoading(false);
+    }
+  };
+
   // ★ B17-12: AI맞춤한줄 자체 테스트 핸들러 — variants 데이터 사용
   const [customTestSending, setCustomTestSending] = useState(false);
   const [customTestCooldown, setCustomTestCooldown] = useState(false);
@@ -481,9 +512,75 @@ export default function AiCustomSendFlow({
           {currentStep === 2 && (
             <div>
               <div className="mb-5">
-                <h4 className="text-base font-bold text-gray-800 mb-1">프로모션을 브리핑해주세요</h4>
+                <div className="flex items-center justify-between mb-1">
+                  <h4 className="text-base font-bold text-gray-800">프로모션을 브리핑해주세요</h4>
+                  <div className="relative"
+                    onMouseEnter={() => setRecommendHover(true)}
+                    onMouseLeave={() => setRecommendHover(false)}
+                  >
+                    <button
+                      onClick={fetchRecommendation}
+                      disabled={recommendLoading}
+                      className="flex items-center gap-1 px-2.5 py-1.5 bg-gradient-to-r from-amber-400 to-orange-400 hover:from-amber-500 hover:to-orange-500 text-white rounded-lg text-xs font-medium transition-all shadow-sm disabled:opacity-50"
+                    >
+                      {recommendLoading ? (
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                      ) : (
+                        <Sparkles className="w-3 h-3" />
+                      )}
+                      AI 추천
+                    </button>
+                    {recommendHover && !recommendLoading && (
+                      <div className="absolute right-0 top-full mt-1 w-56 p-2.5 bg-gray-800 text-white text-xs rounded-lg shadow-lg z-20 leading-relaxed">
+                        최근 3개월 캠페인 성과를 AI가 분석하여 최적의 타겟/시간/채널을 추천합니다.
+                        <div className="absolute -top-1 right-4 w-2 h-2 bg-gray-800 rotate-45" />
+                      </div>
+                    )}
+                  </div>
+                </div>
                 <p className="text-sm text-gray-500">회의에서 팀원에게 설명하듯 자연스럽게 적으시면 됩니다. <b className="text-violet-600">발송 대상도 함께 적으면</b> AI가 타겟까지 자동 분석합니다.</p>
               </div>
+
+              {/* ★ D80: AI 성과 기반 추천 결과 패널 */}
+              {showRecommend && recommendData?.recommendations && (
+                <div className="mb-5 p-4 bg-gradient-to-b from-amber-50 to-white border-2 border-amber-200 rounded-xl">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <Sparkles className="w-4 h-4 text-amber-500" />
+                      <span className="text-sm font-bold text-gray-800">AI 캠페인 추천</span>
+                    </div>
+                    <button onClick={() => setShowRecommend(false)} className="text-gray-400 hover:text-gray-600">
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                  <div className="space-y-2 text-sm text-gray-700">
+                    {recommendData.recommendations.target && (
+                      <div className="flex gap-2">
+                        <span className="shrink-0 text-xs font-semibold text-amber-600 bg-amber-100 px-2 py-0.5 rounded">타겟</span>
+                        <span>{recommendData.recommendations.target}</span>
+                      </div>
+                    )}
+                    {recommendData.recommendations.timing && (
+                      <div className="flex gap-2">
+                        <span className="shrink-0 text-xs font-semibold text-amber-600 bg-amber-100 px-2 py-0.5 rounded">시간</span>
+                        <span>{recommendData.recommendations.timing}</span>
+                      </div>
+                    )}
+                    {recommendData.recommendations.channel && (
+                      <div className="flex gap-2">
+                        <span className="shrink-0 text-xs font-semibold text-amber-600 bg-amber-100 px-2 py-0.5 rounded">채널</span>
+                        <span>{recommendData.recommendations.channel}</span>
+                      </div>
+                    )}
+                    {recommendData.recommendations.insights && (
+                      <div className="mt-2 pt-2 border-t border-amber-100">
+                        <p className="text-xs text-gray-500 leading-relaxed">{recommendData.recommendations.insights}</p>
+                      </div>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-gray-400 mt-2">최근 {recommendData.performance?.periodMonths || 3}개월 캠페인 {recommendData.performance?.totalCampaigns || 0}건 기반 분석</p>
+                </div>
+              )}
               <div className="mb-5">
                 <label className="block text-sm font-medium text-gray-700 mb-1.5"><FileText className="w-4 h-4 inline mr-1 text-violet-500" />프로모션 브리핑</label>
                 <textarea value={briefing} onChange={(e) => setBriefing(e.target.value)}
