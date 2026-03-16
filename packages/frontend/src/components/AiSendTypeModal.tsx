@@ -12,7 +12,7 @@ interface AiSendTypeModalProps {
 export default function AiSendTypeModal({ onClose, onSelectHanjullo, onSelectCustom, initialPrompt, aiPremiumEnabled }: AiSendTypeModalProps) {
   const [selected, setSelected] = useState<'hanjullo' | 'custom' | null>(initialPrompt ? 'hanjullo' : null);
   const [prompt, setPrompt] = useState(initialPrompt || '');
-  const [autoRelax, setAutoRelax] = useState(true); // ★ D80: 자동조건완화 기본 ON
+  const [autoRelax, setAutoRelax] = useState(false); // ★ D80: 자동조건완화 기본 OFF (사용자가 명시적으로 켜야 함)
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">

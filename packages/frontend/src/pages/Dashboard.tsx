@@ -2674,7 +2674,6 @@ const campaignData = {
           show={showDirectTargeting}
           onClose={() => setShowDirectTargeting(false)}
           onExtracted={handleTargetExtracted}
-          callbackNumbers={callbackNumbers}
         />
 
         <FileUploadMappingModal
