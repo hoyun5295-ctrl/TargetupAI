@@ -7,6 +7,8 @@ import { extractVarCatalog } from '../services/ai';
 import { replaceVariables, enrichWithCustomFields } from '../utils/messageUtils';
 import { SUCCESS_CODES, PENDING_CODES, SPAM_RESULT } from '../utils/sms-result-map';
 import { prepaidDeduct, prepaidRefund } from '../utils/prepaid';
+import { getTestSmsTables } from '../utils/sms-queue';
+import { normalizeContent, computeMessageHash } from '../utils/spam-test-queue';
 
 const router = Router();
 
@@ -16,21 +18,7 @@ const TEST_TIMEOUT_MS = TIMEOUTS.spamFilterTest;
 // 앱 인증 토큰 (환경변수)
 const SPAM_APP_TOKEN = process.env.SPAM_APP_TOKEN || 'spam-hanjul-secret-2026';
 
-// ============================================================
-// 헬퍼: 메시지 내용 정규화 (공백/줄바꿈 제거)
-// ============================================================
-function normalizeContent(s: string): string {
-  return (s || '').replace(/[\s\r\n]+/g, '');
-}
-
-// ============================================================
-// 헬퍼: 메시지 내용 해시 (SHA-256 앞 16자)
-// ============================================================
-function computeMessageHash(content: string): string {
-  const normalized = normalizeContent(content);
-  if (!normalized) return '';
-  return createHash('sha256').update(normalized, 'utf8').digest('hex').substring(0, 16);
-}
+// ★ D79: 인라인 normalizeContent/computeMessageHash 제거 → CT-09 spam-test-queue.ts에서 import
 
 // ============================================================
 // [POST] /api/spam-filter/test — 스팸필터 테스트 요청
@@ -263,7 +251,7 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
         }
 
         // QTmsg 결과 조회 (현재 큐 + 월별 로그 테이블)
-        const testTable = getTestSmsTable();
+        const testTable = (await getTestSmsTables())[0];
         const now2 = new Date();
         const yyyymm = `${now2.getFullYear()}${String(now2.getMonth() + 1).padStart(2, '0')}`;
         const logTable = `${testTable}_${yyyymm}`;
@@ -776,7 +764,7 @@ async function insertSmsQueue(
   testId: string,
   subject: string
 ): Promise<void> {
-  const testTable = getTestSmsTable();
+  const testTable = (await getTestSmsTables())[0];
   const mType = msgType === 'SMS' ? 'S' : 'L';
 
   await mysqlQuery(
@@ -788,9 +776,6 @@ async function insertSmsQueue(
 }
 
 // 테스트 전용 SMS 테이블 (환경변수 기반)
-function getTestSmsTable(): string {
-  const allTables = (process.env.SMS_TABLES || 'SMSQ_SEND').split(',').map(t => t.trim());
-  return allTables.find(t => t === 'SMSQ_SEND_10') || allTables[allTables.length - 1];
-}
+// ★ D79: 인라인 getTestSmsTable 제거 → CT-04 sms-queue.ts의 getTestSmsTables() 사용
 
 export default router;

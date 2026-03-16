@@ -70,7 +70,7 @@ function calcNextRunAt(scheduleType: string, scheduleDay: number | null, schedul
   throw new Error(`Invalid schedule_type: ${scheduleType}`);
 }
 
-function kstToUtc(kstDate: Date): Date {
+export function kstToUtc(kstDate: Date): Date {
   return new Date(kstDate.getTime() - 9 * 60 * 60 * 1000);
 }
 

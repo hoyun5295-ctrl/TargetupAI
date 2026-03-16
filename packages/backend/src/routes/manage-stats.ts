@@ -3,6 +3,7 @@ import { authenticate, requireCompanyAdmin } from '../middlewares/auth';
 import pool, { mysqlQuery } from '../config/database';
 import { DEFAULT_COSTS } from '../config/defaults';
 import { getCompanyScope } from '../utils/permission-helper';
+import { getTestSmsTables } from '../utils/sms-queue';
 
 const router = Router();
 
@@ -14,11 +15,7 @@ const router = Router();
 // ============================================================
 // ★ 2026-02-25 수정: 테스트 통계에 스팸필터 합산 + 비용 계산 추가
 
-// SMS 테이블 설정 (런타임에 읽어야 dotenv 로드 후 적용됨)
-function getTestSmsTable(): string {
-  const tables = process.env.SMS_TABLES ? process.env.SMS_TABLES.split(',') : ['SMSQ_SEND'];
-  return tables.find(t => t.includes('_10')) || tables[0];
-}
+// ★ D79: 인라인 getTestSmsTable 제거 → CT-04 sms-queue.ts의 getTestSmsTables() 사용
 
 router.use(authenticate, requireCompanyAdmin);
 
@@ -105,26 +102,30 @@ router.get('/send', async (req: Request, res: Response) => {
           mysqlParams.push(endDate);
         }
 
-        const testRows = await mysqlQuery(
-          `SELECT 
-            COUNT(*) as total,
-            SUM(CASE WHEN status_code IN (6, 1000, 1800) THEN 1 ELSE 0 END) as success,
-            SUM(CASE WHEN status_code NOT IN (6, 1000, 1800, 100) THEN 1 ELSE 0 END) as fail,
-            SUM(CASE WHEN status_code = 100 THEN 1 ELSE 0 END) as pending,
-            SUM(CASE WHEN msg_type = 'S' THEN 1 ELSE 0 END) as sms,
-            SUM(CASE WHEN msg_type = 'L' THEN 1 ELSE 0 END) as lms
-          FROM ${getTestSmsTable()}
-          WHERE app_etc1 = 'test' AND app_etc2 = ? ${mysqlDateWhere}`,
-          mysqlParams
-        );
-        if (testRows && (testRows as any[]).length > 0) {
-          const t = (testRows as any[])[0];
-          testSummary.total += Number(t.total) || 0;
-          testSummary.success += Number(t.success) || 0;
-          testSummary.fail += Number(t.fail) || 0;
-          testSummary.pending += Number(t.pending) || 0;
-          testSummary.sms += Number(t.sms) || 0;
-          testSummary.lms += Number(t.lms) || 0;
+        // ★ D79: CT-04 getTestSmsTables() — 테스트 테이블 전체 순회
+        const testTables = await getTestSmsTables();
+        for (const tbl of testTables) {
+          const testRows = await mysqlQuery(
+            `SELECT
+              COUNT(*) as total,
+              SUM(CASE WHEN status_code IN (6, 1000, 1800) THEN 1 ELSE 0 END) as success,
+              SUM(CASE WHEN status_code NOT IN (6, 1000, 1800, 100) THEN 1 ELSE 0 END) as fail,
+              SUM(CASE WHEN status_code = 100 THEN 1 ELSE 0 END) as pending,
+              SUM(CASE WHEN msg_type = 'S' THEN 1 ELSE 0 END) as sms,
+              SUM(CASE WHEN msg_type = 'L' THEN 1 ELSE 0 END) as lms
+            FROM ${tbl}
+            WHERE app_etc1 = 'test' AND app_etc2 = ? ${mysqlDateWhere}`,
+            mysqlParams
+          );
+          if (testRows && (testRows as any[]).length > 0) {
+            const t = (testRows as any[])[0];
+            testSummary.total += Number(t.total) || 0;
+            testSummary.success += Number(t.success) || 0;
+            testSummary.fail += Number(t.fail) || 0;
+            testSummary.pending += Number(t.pending) || 0;
+            testSummary.sms += Number(t.sms) || 0;
+            testSummary.lms += Number(t.lms) || 0;
+          }
         }
 
         // 2-2) 스팸필터 테스트 (PostgreSQL)
@@ -326,7 +327,7 @@ router.get('/send/detail', async (req: Request, res: Response) => {
           status_code,
           msg_instm as sent_at,
           bill_id as sender_id
-        FROM ${getTestSmsTable()}
+        FROM ${(await getTestSmsTables())[0]}
         WHERE app_etc1 = 'test' AND app_etc2 = ? ${mysqlDateWhere}
         ORDER BY msg_instm DESC
         LIMIT 50`,

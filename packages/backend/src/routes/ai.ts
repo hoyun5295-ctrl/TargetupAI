@@ -10,15 +10,7 @@ import { buildFilterWhereClauseCompat } from '../utils/customer-filter';
 import { autoSpamTestWithRegenerate } from '../utils/spam-test-queue';
 
 
-// ★ CT-01: AI 필터 → SQL WHERE 절 변환 → customer-filter.ts 컨트롤타워로 통합
-// 기존 buildFilterWhereClause를 호환 래퍼로 교체 (동일 SQL 생성, 위치만 이동)
-function buildFilterWhereClause(filters: any, startParamIndex: number): {
-  sql: string;
-  params: any[];
-  nextIndex: number;
-} {
-  return buildFilterWhereClauseCompat(filters, startParamIndex);
-}
+// ★ D79: 인라인 래퍼 제거 → CT-01 buildFilterWhereClauseCompat 직접 사용
 
 const router = Router();
 
@@ -293,7 +285,7 @@ router.post('/recommend-target', async (req: Request, res: Response) => {
     console.log('AI 필터 결과:', JSON.stringify(result.filters, null, 2));
 
     // 실제 타겟 수 계산 — 공통 함수 사용
-    const { sql: filterWhere, params: filterParams } = buildFilterWhereClause(result.filters, baseParams.length + 1);
+    const { sql: filterWhere, params: filterParams } = buildFilterWhereClauseCompat(result.filters, baseParams.length + 1);
     // ★ B17-01: 수신거부 user_id 기준 통일
     const unsubIdxA = baseParams.length + filterParams.length + 1;
 
@@ -458,7 +450,7 @@ router.post('/recount-target', authenticate, async (req: Request, res: Response)
     }
 
     // buildFilterWhereClause 호출 (recommend-target과 동일한 조건)
-    const { sql: filterSql, params: filterParams } = buildFilterWhereClause(targetFilters, baseParams.length + 1);
+    const { sql: filterSql, params: filterParams } = buildFilterWhereClauseCompat(targetFilters, baseParams.length + 1);
 
     // ★ B17-01: 수신거부 user_id 기준 통일
     const unsubIdxB = baseParams.length + filterParams.length + 1;
@@ -534,7 +526,7 @@ router.post('/parse-briefing', authenticate, async (req: Request, res: Response)
 
     // targetFilters 기반 고객 수 산출
     const targetFilters = result.targetFilters || {};
-    const { sql: filterWhere, params: filterParams } = buildFilterWhereClause(targetFilters, baseParams.length + 1);
+    const { sql: filterWhere, params: filterParams } = buildFilterWhereClauseCompat(targetFilters, baseParams.length + 1);
 
     // ★ B17-01: 수신거부 user_id 기준 통일
     const unsubIdxC = baseParams.length + filterParams.length + 1;

@@ -13,11 +13,7 @@ const router = Router();
 
 router.use(authenticate);
 
-// ★ CT-01: 동적 필터 쿼리 빌더 → customer-filter.ts 컨트롤타워로 통합
-// 기존 buildDynamicFilter를 호환 래퍼로 교체 (동일 SQL 생성, 위치만 이동)
-function buildDynamicFilter(filters: any, startIndex: number) {
-  return buildDynamicFilterCompat(filters, startIndex);
-}
+// ★ D79: 인라인 래퍼 제거 → CT-01 buildDynamicFilterCompat 직접 사용
 
 // GET /api/customers - 고객 목록 (동적 필터)
 router.get('/', async (req: Request, res: Response) => {
@@ -74,7 +70,7 @@ router.get('/', async (req: Request, res: Response) => {
     // 동적 필터 적용
     if (filters) {
       const parsedFilters = typeof filters === 'string' ? JSON.parse(filters) : filters;
-      const filterResult = buildDynamicFilter(parsedFilters, paramIndex);
+      const filterResult = buildDynamicFilterCompat(parsedFilters, paramIndex);
       whereClause += filterResult.where;
       params.push(...filterResult.params);
       paramIndex = filterResult.nextIndex;
@@ -204,7 +200,7 @@ router.post('/filter', async (req: Request, res: Response) => {
     }
 
     if (filters) {
-      const filterResult = buildDynamicFilter(filters, paramIndex);
+      const filterResult = buildDynamicFilterCompat(filters, paramIndex);
       whereClause += filterResult.where;
       params.push(...filterResult.params);
     }
@@ -784,7 +780,7 @@ router.post('/filter-count', async (req: Request, res: Response) => {
     if (dynamicFilters && typeof dynamicFilters === 'object' && Object.keys(dynamicFilters).length > 0) {
       // === 동적 필터 (새 UI) ===
       if (smsOptIn) whereClause += ' AND sms_opt_in = true';
-      const df = buildDynamicFilter(dynamicFilters, paramIndex);
+      const df = buildDynamicFilterCompat(dynamicFilters, paramIndex);
       whereClause += df.where;
       params.push(...df.params);
       paramIndex = df.nextIndex;
@@ -887,7 +883,7 @@ router.post('/extract', async (req: Request, res: Response) => {
 
     if (dynamicFilters && typeof dynamicFilters === 'object' && Object.keys(dynamicFilters).length > 0) {
       if (smsOptIn) whereClause += ' AND sms_opt_in = true';
-      const df = buildDynamicFilter(dynamicFilters, paramIndex);
+      const df = buildDynamicFilterCompat(dynamicFilters, paramIndex);
       whereClause += df.where;
       params.push(...df.params);
       paramIndex = df.nextIndex;

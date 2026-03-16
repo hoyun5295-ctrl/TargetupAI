@@ -18,6 +18,7 @@ import { authenticate } from '../middlewares/auth';
 import { getStoreScope } from '../utils/store-scope';
 import { buildFilterQueryCompat } from '../utils/customer-filter';
 import { buildUnsubscribeFilter } from '../utils/unsubscribe-helper';
+import { kstToUtc } from '../utils/auto-campaign-worker';
 
 const router = Router();
 
@@ -171,10 +172,7 @@ function calcNextRunAt(scheduleType: string, scheduleDay: number | null, schedul
   throw new Error(`Invalid schedule_type: ${scheduleType}`);
 }
 
-/** KST Date → UTC Date 변환 (+9h 보정) */
-function kstToUtc(kstDate: Date): Date {
-  return new Date(kstDate.getTime() - 9 * 60 * 60 * 1000);
-}
+// ★ D79: 인라인 kstToUtc 제거 → auto-campaign-worker.ts에서 import
 
 // ============================================================
 // 1. GET / — 자동캠페인 목록 조회 (게이팅 없이, store-scope만 적용)

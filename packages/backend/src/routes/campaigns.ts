@@ -449,7 +449,7 @@ router.post('/', async (req: Request, res: Response) => {
     // ★ B17-01 수정: 타겟 인원 계산 (sms_opt_in + 수신거부 제외 — user_id 기준)
     let targetCount = 0;
     if (targetFilter) {
-      const filterQuery = buildFilterQuery(targetFilter, companyId);
+      const filterQuery = buildFilterQueryCompat(targetFilter, companyId);
       const unsubIdx = 1 + filterQuery.params.length + 1;
       const countResult = await query(
         `SELECT COUNT(*) FROM customers c WHERE c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true ${filterQuery.where}
@@ -610,7 +610,7 @@ router.post('/:id/send', async (req: Request, res: Response) => {
     // 타겟 고객 조회
     const targetFilter = campaign.target_filter;
     console.log('targetFilter:', JSON.stringify(targetFilter, null, 2));
-    const filterQuery = buildFilterQuery(targetFilter, companyId);
+    const filterQuery = buildFilterQueryCompat(targetFilter, companyId);
     console.log('filterQuery:', filterQuery);
 
     // store_code 필터 인덱스 계산
@@ -897,12 +897,7 @@ await query(
   }
 });
 
-// ★ CT-01: 필터 쿼리 빌더 → customer-filter.ts 컨트롤타워로 통합
-// 기존 buildFilterQuery를 호환 래퍼로 교체 (동일 SQL 생성, 위치만 이동)
-function buildFilterQuery(filter: any, companyId: string) {
-  const result = buildFilterQueryCompat(filter, companyId);
-  return { where: result.where, params: result.params };
-}
+// ★ D79: 인라인 래퍼 제거 → CT-01 buildFilterQueryCompat 직접 사용
 
 // 담당자 테스트 발송 통계
 router.get('/test-stats', async (req: Request, res: Response) => {
@@ -1720,7 +1715,7 @@ router.get('/:id/recipients', async (req: Request, res: Response) => {
     // draft 상태이거나 MySQL에 데이터 없으면 PostgreSQL customers에서 조회
     if (camp.status === 'scheduled' || camp.status === 'draft') {
       const targetFilter = camp.target_filter || {};
-      const filterQuery = buildFilterQuery(targetFilter, companyId);
+      const filterQuery = buildFilterQueryCompat(targetFilter, companyId);
       const excludedPhones = camp.excluded_phones || [];
 
       // store_codes 필터

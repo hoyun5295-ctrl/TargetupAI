@@ -101,11 +101,11 @@ export interface AutoSpamTestResult {
 // ============================================================
 // 헬퍼: 메시지 해시
 // ============================================================
-function normalizeContent(s: string): string {
+export function normalizeContent(s: string): string {
   return (s || '').replace(/[\s\r\n]+/g, '');
 }
 
-function computeMessageHash(content: string): string {
+export function computeMessageHash(content: string): string {
   const normalized = normalizeContent(content);
   if (!normalized) return '';
   return createHash('sha256').update(normalized, 'utf8').digest('hex').substring(0, 16);
