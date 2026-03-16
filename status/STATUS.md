@@ -106,6 +106,71 @@
 
 ---
 
+### 🔧 D78 — 프로 요금제 자동 스팸필터 테스트 + CT-09 (2026-03-16) — 배포 완료, 실서비스 검증 필요
+
+> **배경:** 프로(100만원) 요금제 차별화 핵심 기능. AI 문안생성 시 자동으로 스팸필터 테스트 수행 → 차단 문안은 자동 재생성하여 안전한 문안만 제공.
+> **⚠️ 상태: 코드 배포 완료, 실서비스 환경에서 E2E 검증 필요 (테스트폰 ACK 연동, 큐 순차 처리, 재생성 흐름 등)**
+
+#### 구현 내역
+
+**1. CT-09: spam-test-queue.ts (신규 컨트롤타워)**
+- 글로벌 큐 기반 순차 처리 — 동시에 1건만 active (테스트폰 충돌 방지)
+- batch_id로 3개 variant 그룹핑
+- 차단 시 자동 재생성 (최대 2회, AI 프롬프트에 "스팸 차단됨, 다른 표현" 지시)
+- Grace Period: 수동=10초, 자동=20초 (자동은 false positive 최소화)
+- 3초 간격 큐 워커 (app.ts listen 콜백에서 시작)
+
+**2. ai.ts — 자동 스팸테스트 연동**
+- POST /generate-message: AI 문안 생성 후 plans.auto_spam_test_enabled=true이면 자동 스팸테스트 실행
+- 3개 variant 전부 큐잉 → 순차 테스트 → 차단 시 재생성 → 결과를 응답에 포함
+- 응답에 spam_result, spam_regenerated, spamTestBatchId 등 추가
+
+**3. spam-filter.ts — 프로 이상 무료**
+- auto_spam_test_enabled=true인 요금제: 스팸필터 테스트 선불 차감 skip (무료)
+- 기존 베이직 요금제: 기존대로 수동 테스트 + 유료
+
+**4. AiCampaignResultPopup.tsx — 스팸 배지 UI**
+- Step 2 상단: 자동 스팸검사 진행/완료 배너 (검사 중.../전체 안전/N건 재생성됨)
+- variant별 배지: ✅ 수신 안전 / 🔄 재생성 완료 / 🚫 스팸 차단
+- 차단 variant 선택 불가 + 캠페인확정 버튼 disabled
+
+**5. spam_check_number 하드코딩 제거**
+- DB DEFAULT '0807196700' 제거 → 고객사 실제 080번호 동적 조회 (users 우선 → companies fallback)
+
+#### DB 변경 (적용 완료)
+```sql
+ALTER TABLE plans ADD COLUMN auto_spam_test_enabled BOOLEAN DEFAULT false;
+UPDATE plans SET auto_spam_test_enabled = true WHERE plan_code IN ('PRO', 'BUSINESS', 'ENTERPRISE');
+ALTER TABLE spam_filter_tests ADD COLUMN source VARCHAR(20) DEFAULT 'manual';
+ALTER TABLE spam_filter_tests ADD COLUMN variant_id VARCHAR(2);
+ALTER TABLE spam_filter_tests ADD COLUMN batch_id UUID;
+CREATE INDEX idx_spam_filter_tests_queued ON spam_filter_tests (status, created_at) WHERE status = 'queued';
+ALTER TABLE spam_filter_tests ALTER COLUMN spam_check_number DROP DEFAULT;
+```
+
+#### 수정 파일 (7개)
+- `packages/backend/src/utils/spam-test-queue.ts` — **신규** CT-09 컨트롤타워 (~450줄)
+- `packages/backend/src/routes/ai.ts` — 자동 스팸테스트 연동
+- `packages/backend/src/routes/spam-filter.ts` — 프로 무료 + 080번호 동적 조회
+- `packages/backend/src/routes/companies.ts` — my-plan 쿼리에 auto_spam_test_enabled 추가
+- `packages/backend/src/app.ts` — 큐 워커 시작 추가
+- `packages/frontend/src/components/AiCampaignResultPopup.tsx` — 스팸 배지 UI
+- 문서: CLAUDE.md (CT-09 추가), SCHEMA.md (컬럼 추가), STATUS.md
+
+#### ⚠️ 실서비스 검증 TODO
+- [ ] 프로 요금제 업체에서 AI 문안생성 → 자동 스팸테스트 실행 확인
+- [ ] 큐 워커 정상 동작 (3초 간격 폴링, 순차 처리)
+- [ ] 테스트폰 ACK → pass/blocked 판정 정상 여부
+- [ ] 차단 시 자동 재생성 → 새 문안으로 교체 확인
+- [ ] 여러 업체 동시 테스트 시 큐 충돌 없음 확인
+- [ ] 베이직 요금제 → 기존대로 수동 테스트 유지 확인
+- [ ] 프론트엔드 스팸 배지 표시 + 차단 variant 선택 불가 확인
+
+#### TypeScript 타입 체크
+- 백엔드/프론트엔드: ✅ 0 에러
+
+---
+
 ### ✅ D77 — 대시보드 DB현황 6분할 페이징 뷰 (2026-03-16) — 배포 완료
 
 > **배경:** 대시보드 DB현황 카드가 4개/8개 고정 선택이었음. 카드를 자유롭게 선택하고 6개씩(3×2) 페이징으로 보여주도록 개선.
@@ -1624,6 +1689,7 @@ QTmsg status_code, 통신사 코드, 스팸필터 판정 결과를 한 곳에서
 | D68 | 03-12 | 대시보드 UI 4건 + AI 생일 타겟팅 + 테스트 비용 합산 | (1) 총구매금액 $→CreditCard+천단위콤마 (2) 커스텀필드 라벨 is_hidden NULL 미매칭 수정 (3) AI 생일타겟팅: 프롬프트+customer-filter mixed+3경로 전부 birth_date 추가 (4) 발송현황 총사용금액에 담당자테스트+스팸필터 비용 합산. 메트로시티 가상DB 2만건 생성. 기간계 무접촉 |
 | D69 | 03-12 | 자동발송 기능 기초 설계 | 메트로시티 요청. auto_campaigns+auto_campaign_runs 테이블 설계, PM2 워커+D-1 사전알림 아키텍처, 프론트 AutoSendPage(블러 프리뷰 게이팅)+DashboardHeader 메뉴 추가. 프로 이상 전용. company_user(브랜드담당자) 생성/수정/삭제 가능. 매월 28일 max. 기존 파이프라인(customer-filter, sms-queue, messageUtils) 100% 재활용. 설계문서: AUTO-SCHEDULE-DESIGN.md |
 | D73 | 03-14 | 무료체험 PRO 게이팅 + 수신거부 브랜드 자동배정(CT-03) + 커스텀 필드 라벨 UPSERT(CT-07) | 무료체험 만료 후 직접발송만 유지. 수신거부 admin 등록 시 store_code 기준 브랜드 사용자 자동배정(기존 admin 몰림 방지). "최초 등록 우선" 라벨 고착 버그→ON CONFLICT DO UPDATE. 컨트롤타워 우선 확인 원칙 CLAUDE.md 섹션 0 추가 |
+| D78 | 03-16 | 프로 자동 스팸필터 테스트 + CT-09 spam-test-queue.ts | 프로 요금제 차별화 핵심. AI 문안생성→자동 스팸테스트(큐 기반 순차처리)→차단 시 자동 재생성(최대2회). 프로 이상 무료. DB: plans.auto_spam_test_enabled + spam_filter_tests(source/variant_id/batch_id). spam_check_number 하드코딩 제거→080번호 동적조회. **배포 완료, 실서비스 E2E 검증 필요** |
 | D71 | 03-13 | customers_unified 뷰 store_phone 누락 + upload.ts region 중복 수정 | (1) 슈퍼관리자 고객DB 탭 500 에러: customers_unified 뷰에 store_phone 미포함 → DROP+CREATE VIEW로 store_phone 추가 (서버 DDL). (2) 엑셀 업로드 30,000건 전건 오류: D70-17에서 region을 FIELD_MAP에 추가했으나 upload.ts에서 이미 파생 컬럼으로 별도 처리 → INSERT에 region 중복 → insertCols/rowValues/updateClauses 3곳에서 명시적 region 제거, FIELD_MAP 순회에서 derivedRegion 우선 사용하도록 통합. **교훈:** ①customers 테이블 컬럼 추가 시 customers_unified 뷰도 반드시 재생성 ②FIELD_MAP에 필드 추가 시 upload.ts 파생 컬럼과 중복 여부 확인 필수. 수정 1파일(upload.ts)+DDL 1건 |
 
 **아카이브:** D1-AI발송2분기(02-22) | D2-브리핑방식(02-22) | D3-개인화필드체크박스(02-22) | D4-textarea제거(02-22) | D5-별도컴포넌트분리(02-22) | D6-대시보드레이아웃(02-22) | D7-헤더탭스타일(02-23) | D8-AUTO/PRO뱃지(02-23) | D9-캘린더상태기준(02-23) | D10-6차세션분할(02-23) | D11-KCP전환(02-23) | D12-이용약관(02-23) | D13-수신거부SoT(02-23) | D14-7차3세션분할(02-24) | D15-제목머지→D28번복(02-25) | D16-스팸테스트과금(02-25) | D17-테스트통계확장(02-25) | D18-정산자체헬퍼(02-25) | D19-구독상태필드(02-25) | D20-AI분석차별화(02-25) | D21-planInfo실시간(02-25) | D22-스팸잠금직접발송만(02-25) | D23-preview보안(02-25) | D24-run세션1완전구현(02-25) | D25-pdfkit선택(02-25) | D26-분석캐싱24h(02-25) | D27-비즈니스3회최적화(02-25) | D28-제목머지제거(02-25) | D29-5경로전수점검(02-25) | D30-즉시sending전환(02-25) | D31-GPT fallback(02-25) | D32-발송파이프라인복구(02-26) | D33-messageUtils통합(02-26) | D34-스팸필터DB직접조회(02-26) | D35-선불환불보장(02-26) | D-대시보드모달분리(02-23): 8,039줄→4,964줄

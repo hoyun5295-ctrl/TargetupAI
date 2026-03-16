@@ -231,16 +231,18 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
           params.push(parseInt(value));
         }
 
-      // ── age (직접 컬럼) ──
+      // ── age (직접 컬럼 + birth_date 폴백) ──
+      // ★ D79: age 컬럼이 NULL이어도 birth_date에서 나이 동적 계산
       } else if (field === 'age') {
+        const ageExpr = `COALESCE(${col(alias, 'age')}, DATE_PART('year', AGE(${col(alias, 'birth_date')}))::int)`;
         if (operator === 'gte') {
-          sql += ` AND ${col(alias, 'age')} >= $${paramIndex++}`;
+          sql += ` AND ${ageExpr} >= $${paramIndex++}`;
           params.push(Number(value));
         } else if (operator === 'lte') {
-          sql += ` AND ${col(alias, 'age')} <= $${paramIndex++}`;
+          sql += ` AND ${ageExpr} <= $${paramIndex++}`;
           params.push(Number(value));
         } else if (operator === 'between' && Array.isArray(value)) {
-          sql += ` AND ${col(alias, 'age')} BETWEEN $${paramIndex++} AND $${paramIndex++}`;
+          sql += ` AND ${ageExpr} BETWEEN $${paramIndex++} AND $${paramIndex++}`;
           params.push(Number(value[0]), Number(value[1]));
         }
 
@@ -328,23 +330,23 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
     paramIndex = genderResult.nextIndex;
   }
 
-  // age (배열: [30, 39]) — ★ structured 모드와 동일하게 age 컬럼 직접 사용
-  // ★ birth_year는 NULL인 경우가 많아 age 컬럼 기반으로 통일 (B16-06 수정)
+  // age (배열: [30, 39]) — ★ D79: age 컬럼 NULL이어도 birth_date에서 나이 동적 계산
+  const ageExprMixed = `COALESCE(${col(alias, 'age')}, DATE_PART('year', AGE(${col(alias, 'birth_date')}))::int)`;
   const age = getValue(filters.age);
   if (age && Array.isArray(age) && age.length === 2) {
-    sql += ` AND ${col(alias, 'age')} BETWEEN $${paramIndex++} AND $${paramIndex++}`;
+    sql += ` AND ${ageExprMixed} BETWEEN $${paramIndex++} AND $${paramIndex++}`;
     params.push(Number(age[0]), Number(age[1]));
   }
 
-  // minAge/maxAge (기존 호환) — age 컬럼 직접 사용으로 통일
+  // minAge/maxAge (기존 호환) — ★ D79: birth_date 폴백 동일 적용
   const minAge = getValue(filters.minAge) || getValue(filters.min_age);
   if (minAge) {
-    sql += ` AND ${col(alias, 'age')} >= $${paramIndex++}`;
+    sql += ` AND ${ageExprMixed} >= $${paramIndex++}`;
     params.push(Number(minAge));
   }
   const maxAge = getValue(filters.maxAge) || getValue(filters.max_age);
   if (maxAge) {
-    sql += ` AND ${col(alias, 'age')} <= $${paramIndex++}`;
+    sql += ` AND ${ageExprMixed} <= $${paramIndex++}`;
     params.push(Number(maxAge));
   }
 

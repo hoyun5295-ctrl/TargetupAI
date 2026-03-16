@@ -797,6 +797,8 @@ export async function recommendTarget(
   const detectableFields = getColumnFields().filter(f => f.fieldKey !== 'name' && f.fieldKey !== 'phone' && f.fieldKey !== 'sms_opt_in');
   const countFilters = detectableFields.map(f => {
     const c = f.columnName;
+    // ★ D79: age는 birth_date에서도 계산 가능하므로 birth_date 존재 여부도 함께 체크
+    if (f.fieldKey === 'age') return `COUNT(*) FILTER (WHERE ${c} IS NOT NULL AND ${c} > 0 OR birth_date IS NOT NULL) as cnt_${f.fieldKey}`;
     if (f.dataType === 'number') return `COUNT(*) FILTER (WHERE ${c} IS NOT NULL AND ${c} > 0) as cnt_${f.fieldKey}`;
     if (f.dataType === 'date') return `COUNT(*) FILTER (WHERE ${c} IS NOT NULL) as cnt_${f.fieldKey}`;
     return `COUNT(*) FILTER (WHERE ${c} IS NOT NULL AND ${c} != '') as cnt_${f.fieldKey}`;

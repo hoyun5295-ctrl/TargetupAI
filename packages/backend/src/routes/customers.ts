@@ -794,11 +794,13 @@ router.post('/filter-count', async (req: Request, res: Response) => {
         paramIndex = gf.nextIndex;
       }
       if (ageRange) {
+        // ★ D79: age 컬럼 NULL이어도 birth_date에서 나이 동적 계산
+        const ageExpr = `COALESCE(age, DATE_PART('year', AGE(birth_date))::int)`;
         const ageVal = parseInt(ageRange);
         if (ageVal === 60) {
-          whereClause += ` AND age >= 60`;
+          whereClause += ` AND ${ageExpr} >= 60`;
         } else {
-          whereClause += ` AND age >= $${paramIndex++} AND age < $${paramIndex++}`;
+          whereClause += ` AND ${ageExpr} >= $${paramIndex++} AND ${ageExpr} < $${paramIndex++}`;
           params.push(ageVal, ageVal + 10);
         }
       }
@@ -894,11 +896,13 @@ router.post('/extract', async (req: Request, res: Response) => {
         paramIndex = gf.nextIndex;
       }
       if (ageRange) {
+        // ★ D79: age 컬럼 NULL이어도 birth_date에서 나이 동적 계산
+        const ageExpr = `COALESCE(age, DATE_PART('year', AGE(birth_date))::int)`;
         const ageVal = parseInt(ageRange);
         if (ageVal === 60) {
-          whereClause += ` AND age >= 60`;
+          whereClause += ` AND ${ageExpr} >= 60`;
         } else {
-          whereClause += ` AND age >= $${paramIndex++} AND age < $${paramIndex++}`;
+          whereClause += ` AND ${ageExpr} >= $${paramIndex++} AND ${ageExpr} < $${paramIndex++}`;
           params.push(ageVal, ageVal + 10);
         }
       }

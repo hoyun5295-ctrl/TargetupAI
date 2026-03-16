@@ -388,6 +388,7 @@ PostgreSQL campaigns/campaign_runs 생성
 | **custom_fields JSONB flat 미처리** | extract API가 custom_fields JSONB 그대로 반환 → 프론트에서 `r[field_key]` 접근 시 커스텀 필드 NULL 표시 | **JSONB 내부 키를 프론트에서 접근해야 할 때 백엔드 API에서 flat 처리하여 반환** (D75) |
 | **window.confirm 사용** | SMS→LMS 전환 확인을 window.confirm으로 표시 → 다크모드/테마 미적용, UX 이질적 | **window.confirm/alert 사용 금지.** 모든 확인 대화상자는 커스텀 모달 컴포넌트 사용 (D75) |
 | **AI 문안 요일 오류** | generateMessages 프롬프트에 달력 미제공 → AI가 요일 자체 계산 → 3/20(목)이 실제로는 금요일 | **AI 프롬프트에 날짜/요일이 관여하는 모든 함수에 getKoreanCalendar() 달력 제공 필수.** getKoreanToday() 쓰는 곳이면 getKoreanCalendar()도 함께 (D76) |
+| **DB DEFAULT 하드코딩** | spam_filter_tests.spam_check_number에 DEFAULT '0807196700' 하드코딩 → 모든 고객사 테스트에 동일 080번호 기록 | **DB DEFAULT로 특정 값 하드코딩 금지.** 고객사별로 달라지는 값(080번호, 발신번호 등)은 반드시 코드에서 동적 조회하여 INSERT (D78) |
 
 ### ⚠️ 필수 체크 원칙 1: 유틸 함수 수정/추가 시 소비처 전수 확인
 
