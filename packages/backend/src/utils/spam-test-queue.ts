@@ -193,6 +193,15 @@ export async function enqueueSpamTest(params: SpamTestEnqueueParams): Promise<Sp
     const sendCount = devices.rows.length * messageTypes.length;
     const deductType = messageTypes[0] || 'SMS';
 
+    // 2-1) 고객사 080 수신거부번호 조회 (users 우선 → companies fallback)
+    const opt080Result = await query(
+      `SELECT u.opt_out_080_number AS user_080, c.opt_out_080_number AS company_080
+       FROM users u JOIN companies c ON u.company_id = c.id
+       WHERE u.id = $1`,
+      [userId]
+    );
+    const spamCheckNumber = opt080Result.rows[0]?.user_080 || opt080Result.rows[0]?.company_080 || null;
+
     // 3) 테스트 레코드 생성 (status = 'queued')
     const testResult = await query(
       `INSERT INTO spam_filter_tests
@@ -202,7 +211,7 @@ export async function enqueueSpamTest(params: SpamTestEnqueueParams): Promise<Sp
        RETURNING id, created_at`,
       [companyId, userId, callbackNumber,
        messageContentSms || null, messageContentLms || null,
-       messageHash || null, null,
+       messageHash || null, spamCheckNumber,
        source, variantId || null, batchId || null]
     );
     const testId = testResult.rows[0].id;

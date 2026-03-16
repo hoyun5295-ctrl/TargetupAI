@@ -162,13 +162,22 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
     const spamSendCount = devices.rows.length * messageTypes.length;
     const spamDeductType = messageTypes[0] || 'SMS';
 
-    // 6) 테스트 건 생성 (message_hash 포함) — 차감 전에 생성하여 testId를 referenceId로 사용
+    // 6) 고객사 080 수신거부번호 조회 (users 우선 → companies fallback)
+    const opt080Result = await query(
+      `SELECT u.opt_out_080_number AS user_080, c.opt_out_080_number AS company_080
+       FROM users u JOIN companies c ON u.company_id = c.id
+       WHERE u.id = $1`,
+      [userId]
+    );
+    const spamCheckNumber = opt080Result.rows[0]?.user_080 || opt080Result.rows[0]?.company_080 || null;
+
+    // 7) 테스트 건 생성 (message_hash 포함) — 차감 전에 생성하여 testId를 referenceId로 사용
     const testResult = await query(
       `INSERT INTO spam_filter_tests
        (company_id, user_id, callback_number, message_content_sms, message_content_lms, message_hash, spam_check_number, status)
        VALUES ($1, $2, $3, $4, $5, $6, $7, 'active')
        RETURNING id, created_at`,
-      [companyId, userId, callbackNumber, messageContentSms || null, messageContentLms || null, messageHash || null, null]
+      [companyId, userId, callbackNumber, messageContentSms || null, messageContentLms || null, messageHash || null, spamCheckNumber]
     );
     const testId = testResult.rows[0].id;
 
