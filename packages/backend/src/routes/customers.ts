@@ -623,8 +623,8 @@ router.get('/stats', async (req: Request, res: Response) => {
         `SELECT p.plan_code FROM companies c JOIN plans p ON c.plan_id = p.id WHERE c.id = $1`,
         [companyId]
       );
-      const planCode = planResult.rows[0]?.plan_code || 'free';
-      const isProOrAbove = ['pro', 'business', 'enterprise'].includes(planCode);
+      const planCode = (planResult.rows[0]?.plan_code || 'FREE').toUpperCase();
+      const isProOrAbove = ['PRO', 'BUSINESS', 'ENTERPRISE'].includes(planCode);
 
       if (!isProOrAbove) {
         // 무료/스타터/베이직: 테스트 비용을 사용금액에 포함

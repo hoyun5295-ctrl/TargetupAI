@@ -385,6 +385,16 @@ export function normalizeDate(value: any): string | null {
   if (/^\d{4}\/\d{2}\/\d{2}$/.test(v)) return v.replace(/\//g, '-');
   // YYYY.MM.DD
   if (/^\d{4}\.\d{2}\.\d{2}$/.test(v)) return v.replace(/\./g, '-');
+  // ★ D79: YYMMDD 6자리 형식 (250103 → 2025-01-03)
+  if (/^\d{6}$/.test(v)) {
+    const yy = parseInt(v.substring(0, 2));
+    const mm = v.substring(2, 4);
+    const dd = v.substring(4, 6);
+    const yyyy = yy >= 0 && yy <= 50 ? 2000 + yy : 1900 + yy;
+    if (parseInt(mm) >= 1 && parseInt(mm) <= 12 && parseInt(dd) >= 1 && parseInt(dd) <= 31) {
+      return `${yyyy}-${mm}-${dd}`;
+    }
+  }
   // MM/DD/YYYY (미국식)
   const usMatch = v.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
   if (usMatch) return `${usMatch[3]}-${usMatch[1]}-${usMatch[2]}`;

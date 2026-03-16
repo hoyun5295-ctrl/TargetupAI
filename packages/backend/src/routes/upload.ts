@@ -5,58 +5,11 @@ import path from 'path';
 import * as XLSX from 'xlsx';
 import { query } from '../config/database';
 import { redis, AI_MODELS, AI_MAX_TOKENS, CACHE_TTL, TIMEOUTS, BATCH_SIZES } from '../config/defaults';
-import { normalizeByFieldKey, normalizeRegion } from '../utils/normalize';
+import { normalizeByFieldKey, normalizeRegion, normalizeDate } from '../utils/normalize';
 import { CATEGORY_LABELS, FIELD_MAP, getColumnFields, getCustomFields, getFieldByKey, upsertCustomFieldDefinitions } from '../utils/standard-field-map';
 
-// Excel 시리얼넘버 → YYYY-MM-DD 변환
-function excelSerialToDateStr(serial: number): string | null {
-  if (serial < 1 || serial > 73050) return null;
-  const excelEpoch = new Date(1899, 11, 30);
-  const converted = new Date(excelEpoch.getTime() + serial * 86400000);
-  const yyyy = converted.getFullYear();
-  if (yyyy < 1900 || yyyy > 2099) return null;
-  const mm = String(converted.getMonth() + 1).padStart(2, '0');
-  const dd = String(converted.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
-}
-
-// 범용 날짜 정규화: Date객체, 시리얼넘버, YYYYMMDD, YYYY-MM-DD 모두 처리
-function normalizeDateValue(value: any): string | null {
-  if (value === undefined || value === null || value === '') return null;
-
-  // Date 객체 직접 처리 (XLSX cellDates: true)
-  if (value instanceof Date && !isNaN(value.getTime())) {
-    const yyyy = value.getFullYear();
-    if (yyyy >= 1900 && yyyy <= 2099) {
-      const mm = String(value.getMonth() + 1).padStart(2, '0');
-      const dd = String(value.getDate()).padStart(2, '0');
-      return `${yyyy}-${mm}-${dd}`;
-    }
-    return null;
-  }
-
-  const str = String(value).trim();
-  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
-  if (/^\d{4}\/\d{2}\/\d{2}$/.test(str)) return str.replace(/\//g, '-');
-  if (/^\d{8}$/.test(str)) {
-    return `${str.substring(0, 4)}-${str.substring(4, 6)}-${str.substring(6, 8)}`;
-  }
-  // ★ D79: YYMMDD 6자리 형식 (250103 → 2025-01-03)
-  if (/^\d{6}$/.test(str)) {
-    const yy = parseInt(str.substring(0, 2));
-    const mm = str.substring(2, 4);
-    const dd = str.substring(4, 6);
-    const yyyy = yy >= 0 && yy <= 50 ? 2000 + yy : 1900 + yy;
-    if (parseInt(mm) >= 1 && parseInt(mm) <= 12 && parseInt(dd) >= 1 && parseInt(dd) <= 31) {
-      return `${yyyy}-${mm}-${dd}`;
-    }
-  }
-  const num = Number(str);
-  if (!isNaN(num) && num >= 1 && num <= 73050 && Number.isInteger(num)) {
-    return excelSerialToDateStr(num);
-  }
-  return null;
-}
+// ★ D79: 날짜 정규화는 컨트롤타워(normalize.ts)의 normalizeDate() 사용
+// 인라인 normalizeDate 제거 — 컨트롤타워 원칙 위반이었음
 
 import { authenticate } from '../middlewares/auth';
 
@@ -557,9 +510,9 @@ async function processUploadInBackground(
         // birth_date → birth_year, birth_month_day, age 파생
         if (record.birth_date) {
           // ★ B17-09: Date 객체(XLSX cellDates)를 String()하면 영문 형식이 되어 정규화 실패
-          // normalizeDateValue()가 Date 객체를 직접 처리하도록 먼저 호출
+          // normalizeDate()가 Date 객체를 직접 처리하도록 먼저 호출
           if (record.birth_date instanceof Date) {
-            const normalized = normalizeDateValue(record.birth_date);
+            const normalized = normalizeDate(record.birth_date);
             record.birth_date = normalized || record.birth_date;
           }
           const bd = String(record.birth_date).trim();
@@ -569,7 +522,7 @@ async function processUploadInBackground(
             derivedAge = currentYear - derivedBirthYear;
             record.birth_date = null; // date 타입에 연도만 넣으면 에러
           } else {
-            const normalized = normalizeDateValue(bd);
+            const normalized = normalizeDate(bd);
             if (normalized) {
               record.birth_date = normalized;
               derivedBirthYear = parseInt(normalized.substring(0, 4));
@@ -628,9 +581,9 @@ async function processUploadInBackground(
           if (record[cf.fieldKey] != null && record[cf.fieldKey] !== '') {
             let val = record[cf.fieldKey];
             // ★ B17-09: Date 객체(XLSX cellDates)를 String()하면 영문 형식 그대로 저장됨
-            // normalizeDateValue()로 YYYY-MM-DD 변환 후 저장
+            // normalizeDate()로 YYYY-MM-DD 변환 후 저장
             if (val instanceof Date) {
-              val = normalizeDateValue(val) || String(val);
+              val = normalizeDate(val) || String(val);
             }
             customObj[cf.columnName] = String(val);
           }
