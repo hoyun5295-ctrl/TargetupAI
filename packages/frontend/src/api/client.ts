@@ -74,7 +74,7 @@ export const customersApi = {
 export const campaignsApi = {
   list: (params?: any) => api.get('/campaigns', { params }),
   create: (data: any) => api.post('/campaigns', data),
-  send: (id: string) => api.post(`/campaigns/${id}/send`),
+  send: (id: string, data?: any) => api.post(`/campaigns/${id}/send`, data || {}),
 };
 
 // AI API

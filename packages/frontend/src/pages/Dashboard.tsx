@@ -31,6 +31,7 @@ import RecommendTemplateModal from '../components/RecommendTemplateModal';
 import ResultsModal from '../components/ResultsModal';
 import ScheduledCampaignModal from '../components/ScheduledCampaignModal';
 import ScheduleTimeModal from '../components/ScheduleTimeModal';
+import CallbackConfirmModal, { type CallbackConfirmData } from '../components/CallbackConfirmModal';
 import SendConfirmModal from '../components/SendConfirmModal';
 import SpamFilterLockModal from '../components/SpamFilterLockModal';
 import SpamFilterTestModal from '../components/SpamFilterTestModal';
@@ -329,7 +330,7 @@ export default function Dashboard() {
   };
 
   // 직접발송 실행 함수
-  const executeDirectSend = async () => {
+  const executeDirectSend = async (confirmCallbackExclusion?: boolean) => {
     if (isSending || directSending) return; // 교차 중복 발송 방지
     if (adTextEnabled && !optOutNumber) {
       setToast({ show: true, type: 'error', message: '수신거부번호가 로딩되지 않았습니다. 잠시 후 다시 시도해주세요.' });
@@ -337,27 +338,29 @@ export default function Dashboard() {
     }
     setDirectSending(true);
     try {
+      const sendBody = {
+        msgType: directSendChannel === 'kakao_brand' ? 'LMS' : directMsgType,
+        sendChannel: directSendChannel === 'sms' ? 'sms' : 'kakao',
+        subject: directSubject,
+        message: getFullMessage(directSendChannel === 'kakao_brand' ? kakaoMessage : directMessage),
+        callback: useIndividualCallback ? null : selectedCallback,
+        useIndividualCallback: useIndividualCallback,
+        recipients: directRecipients.map((r: any) => ({ ...r, callback: r.callback || null })),
+        adEnabled: adTextEnabled,
+        scheduled: reserveEnabled,
+        scheduledAt: reserveEnabled && reserveDateTime ? new Date(reserveDateTime).toISOString() : null,
+        splitEnabled: splitEnabled,
+        splitCount: splitEnabled ? splitCount : null,
+        mmsImagePaths: mmsUploadedImages.map(img => img.serverPath),
+        ...(confirmCallbackExclusion ? { confirmCallbackExclusion: true } : {}),
+      };
       const res = await fetch('/api/campaigns/direct-send', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         },
-        body: JSON.stringify({
-          msgType: directSendChannel === 'kakao_brand' ? 'LMS' : directMsgType,
-          sendChannel: directSendChannel === 'sms' ? 'sms' : 'kakao',
-          subject: directSubject,
-          message: getFullMessage(directSendChannel === 'kakao_brand' ? kakaoMessage : directMessage),
-          callback: useIndividualCallback ? null : selectedCallback,
-          useIndividualCallback: useIndividualCallback,
-          recipients: directRecipients.map((r: any) => ({ ...r, callback: r.callback || null })),
-          adEnabled: adTextEnabled,
-          scheduled: reserveEnabled,
-          scheduledAt: reserveEnabled && reserveDateTime ? new Date(reserveDateTime).toISOString() : null,
-          splitEnabled: splitEnabled,
-          splitCount: splitEnabled ? splitCount : null,
-          mmsImagePaths: mmsUploadedImages.map(img => img.serverPath)
-        })
+        body: JSON.stringify(sendBody)
       });
       const data = await res.json();
       if (res.status === 402 && data.insufficientBalance) {
@@ -369,6 +372,21 @@ export default function Dashboard() {
       if (data.code === 'LINE_GROUP_NOT_SET') {
         setSendConfirm({show: false, type: 'immediate', count: 0, unsubscribeCount: 0});
         setShowLineGroupError(true);
+        setDirectSending(false);
+        return;
+      }
+      // ★ 미등록 회신번호 확인 모달 — callbackConfirmRequired 응답 처리
+      if (data.callbackConfirmRequired) {
+        setSendConfirm({show: false, type: 'immediate', count: 0, unsubscribeCount: 0});
+        setCallbackConfirm({
+          show: true,
+          callbackMissingCount: data.callbackMissingCount,
+          callbackUnregisteredCount: data.callbackUnregisteredCount,
+          unregisteredDetails: data.unregisteredDetails || [],
+          remainingCount: data.remainingCount,
+          message: data.message,
+          sendType: 'direct',
+        });
         setDirectSending(false);
         return;
       }
@@ -404,7 +422,7 @@ export default function Dashboard() {
   };
   
   // 직접타겟추출 발송 함수
-  const executeTargetSend = async () => {
+  const executeTargetSend = async (confirmCallbackExclusion?: boolean) => {
     setTargetSending(true);
     try {
       const token = localStorage.getItem('token');
@@ -449,7 +467,8 @@ export default function Dashboard() {
           splitEnabled: splitEnabled,
           splitCount: splitEnabled ? splitCount : null,
           customMessages: recipientsWithMessage.map(r => ({ ...r, callback: r.callback || null })),
-          mmsImagePaths: mmsUploadedImages.map(img => img.serverPath)
+          mmsImagePaths: mmsUploadedImages.map(img => img.serverPath),
+          ...(confirmCallbackExclusion ? { confirmCallbackExclusion: true } : {}),
         })
       });
       const data = await res.json();
@@ -462,6 +481,21 @@ export default function Dashboard() {
       if (data.code === 'LINE_GROUP_NOT_SET') {
         setSendConfirm({show: false, type: 'immediate', count: 0, unsubscribeCount: 0});
         setShowLineGroupError(true);
+        setTargetSending(false);
+        return;
+      }
+      // ★ 미등록 회신번호 확인 모달 — callbackConfirmRequired 응답 처리
+      if (data.callbackConfirmRequired) {
+        setSendConfirm({show: false, type: 'immediate', count: 0, unsubscribeCount: 0});
+        setCallbackConfirm({
+          show: true,
+          callbackMissingCount: data.callbackMissingCount,
+          callbackUnregisteredCount: data.callbackUnregisteredCount,
+          unregisteredDetails: data.unregisteredDetails || [],
+          remainingCount: data.remainingCount,
+          message: data.message,
+          sendType: 'target',
+        });
         setTargetSending(false);
         return;
       }
@@ -493,6 +527,49 @@ export default function Dashboard() {
     setSendConfirm({show: false, type: 'immediate', count: 0, unsubscribeCount: 0});
   };
   
+  // ★ 미등록 회신번호 확인 모달 — "제외하고 발송" 핸들러
+  const handleCallbackConfirmSend = async () => {
+    const sendType = callbackConfirm.sendType;
+    setCallbackConfirm(defaultCallbackConfirm);
+
+    if (sendType === 'direct') {
+      // 직접발송 재호출 (confirmCallbackExclusion=true)
+      await executeDirectSend(true);
+    } else if (sendType === 'target') {
+      // 타겟추출 발송 재호출
+      await executeTargetSend(true);
+    } else if ((sendType === 'ai' || sendType === 'aiCustom') && pendingAiCampaignId) {
+      // AI 캠페인 재발송 (confirmCallbackExclusion=true)
+      try {
+        setIsSending(true);
+        await campaignsApi.send(pendingAiCampaignId, { confirmCallbackExclusion: true });
+        setPendingAiCampaignId(null);
+
+        // 성공 후 UI 초기화
+        setShowPreview(false);
+        setShowAiResult(false);
+        setShowAiSendModal(false);
+        setShowCustomSendModal(false);
+        setShowAiCustomFlow(false);
+        setAiStep(1);
+        setAiCampaignPrompt('');
+        setAiResult(null);
+        setSelectedAiMsgIdx(0);
+        setCustomSendData(null);
+
+        setToast({ show: true, type: 'success', message: '발송이 시작되었습니다.' });
+        setTimeout(() => setToast({ show: false, type: 'success', message: '' }), 3000);
+        loadRecentCampaigns();
+        loadScheduledCampaigns();
+      } catch (error: any) {
+        console.error('미등록 회신번호 확인 후 발송 실패:', error);
+        setToast({ show: true, type: 'error', message: error.response?.data?.error || '발송에 실패했습니다.' });
+      } finally {
+        setIsSending(false);
+      }
+    }
+  };
+
   // MMS 이미지 (서버 업로드 방식)
   const [mmsUploadedImages, setMmsUploadedImages] = useState<{serverPath: string; url: string; filename: string; size: number}[]>([]);
   const [mmsUploading, setMmsUploading] = useState(false);
@@ -648,6 +725,14 @@ export default function Dashboard() {
   const [selectedCallback, setSelectedCallback] = useState('');
   const [useIndividualCallback, setUseIndividualCallback] = useState(false);
   const [sendConfirm, setSendConfirm] = useState<{show: boolean, type: 'immediate' | 'scheduled', count: number, unsubscribeCount: number, dateTime?: string, from?: 'direct' | 'target', msgType?: string}>({show: false, type: 'immediate', count: 0, unsubscribeCount: 0});
+
+  // ★ 미등록 회신번호 확인 모달 state
+  const defaultCallbackConfirm: CallbackConfirmData = { show: false, callbackMissingCount: 0, callbackUnregisteredCount: 0, unregisteredDetails: [], remainingCount: 0, message: '', sendType: 'direct' };
+  const [callbackConfirm, setCallbackConfirm] = useState<CallbackConfirmData>(defaultCallbackConfirm);
+  // 확인 모달에서 "제외하고 발송" 클릭 시 사용할 보관 데이터 (AI 캠페인용)
+  const [pendingAiCampaignId, setPendingAiCampaignId] = useState<string | null>(null);
+  // 직접발송 확인 모달용 원본 요청 body 보관
+  const [pendingDirectSendBody, setPendingDirectSendBody] = useState<any>(null);
 
   // 전화번호 포맷팅 함수
   const formatPhoneNumber = (phone: string) => {
@@ -1425,9 +1510,24 @@ const campaignData = {
     // 캠페인 발송 API 호출 (예약/즉시 모두)
     const campaignId = response.data.campaign?.id;
     if (campaignId) {
-      await campaignsApi.send(campaignId);
+      const sendResult = await campaignsApi.send(campaignId);
+      // ★ 미등록 회신번호 확인 모달 — callbackConfirmRequired 응답 처리
+      if (sendResult.data?.callbackConfirmRequired) {
+        setPendingAiCampaignId(campaignId);
+        setCallbackConfirm({
+          show: true,
+          callbackMissingCount: sendResult.data.callbackMissingCount,
+          callbackUnregisteredCount: sendResult.data.callbackUnregisteredCount,
+          unregisteredDetails: sendResult.data.unregisteredDetails || [],
+          remainingCount: sendResult.data.remainingCount,
+          message: sendResult.data.message,
+          sendType: 'ai',
+        });
+        setIsSending(false);
+        return;
+      }
     }
-    
+
     // 모달 닫기 + 상태 초기화
     setShowPreview(false);
     setShowAiResult(false);
@@ -1542,7 +1642,22 @@ const campaignData = {
 
       const campaignId = response.data.campaign?.id;
       if (campaignId) {
-        await campaignsApi.send(campaignId);
+        const sendResult = await campaignsApi.send(campaignId);
+        // ★ 미등록 회신번호 확인 모달 — callbackConfirmRequired 응답 처리
+        if (sendResult.data?.callbackConfirmRequired) {
+          setPendingAiCampaignId(campaignId);
+          setCallbackConfirm({
+            show: true,
+            callbackMissingCount: sendResult.data.callbackMissingCount,
+            callbackUnregisteredCount: sendResult.data.callbackUnregisteredCount,
+            unregisteredDetails: sendResult.data.unregisteredDetails || [],
+            remainingCount: sendResult.data.remainingCount,
+            message: sendResult.data.message,
+            sendType: 'aiCustom',
+          });
+          setIsSending(false);
+          return;
+        }
       }
 
       // 모달 닫기 + 초기화
@@ -4076,6 +4191,13 @@ const campaignData = {
         directSending={directSending}
         executeDirectSend={executeDirectSend}
         executeTargetSend={executeTargetSend}
+      />
+      {/* ★ 미등록 회신번호 제외 확인 모달 */}
+      <CallbackConfirmModal
+        data={callbackConfirm}
+        onClose={() => { setCallbackConfirm(defaultCallbackConfirm); setPendingAiCampaignId(null); }}
+        onConfirm={handleCallbackConfirmSend}
+        isSending={directSending || isSending}
       />
       <BalanceModals
         showBalanceModal={showBalanceModal}

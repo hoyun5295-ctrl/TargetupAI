@@ -25,7 +25,7 @@ import {
 import { prepaidDeduct, prepaidRefund } from '../utils/prepaid';
 import { cancelCampaign, syncCampaignResults } from '../utils/campaign-lifecycle';
 import { buildFilterQueryCompat } from '../utils/customer-filter';
-import { filterByIndividualCallback, buildCallbackErrorResponse } from '../utils/callback-filter';
+import { filterByIndividualCallback, buildCallbackErrorResponse, buildCallbackConfirmResponse } from '../utils/callback-filter';
 
 // ★ toKoreaTimeStr → utils/sms-queue.ts로 이동 (import 사용)
 
@@ -502,6 +502,7 @@ router.post('/:id/send', async (req: Request, res: Response) => {
     const userId = req.user?.userId;
     const userType = req.user?.userType;
     const { id } = req.params;
+    const { confirmCallbackExclusion } = req.body || {};
 
     if (!companyId) {
       return res.status(403).json({ error: '고객사 권한이 필요합니다.' });
@@ -687,6 +688,16 @@ if (useIndividualCallback) {
   callbackMissingCount = cbResult.callbackMissingCount;
   callbackUnregisteredCount = cbResult.callbackUnregisteredCount;
   callbackSkippedCount = cbResult.callbackSkippedCount;
+
+  // ★ 미등록 회신번호 확인 모달 — 제외 건이 있고 confirmCallbackExclusion 없으면 확인 요청 반환
+  if (cbResult.callbackSkippedCount > 0 && !confirmCallbackExclusion) {
+    if (filteredCustomers.length === 0) {
+      const errBody = buildCallbackErrorResponse(callbackMissingCount, callbackUnregisteredCount);
+      return res.status(400).json(errBody);
+    }
+    const confirmBody = buildCallbackConfirmResponse(cbResult, filteredCustomers.length);
+    return res.status(200).json(confirmBody);
+  }
 }
 
 if (filteredCustomers.length === 0) {
@@ -1210,6 +1221,7 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       splitEnabled,   // 분할전송 여부
       splitCount,     // 분당 발송 건수
       useIndividualCallback,  // 개별회신번호 사용 여부
+      confirmCallbackExclusion, // ★ 미등록 회신번호 제외 확인 플래그
       mmsImagePaths,  // MMS 이미지 서버 경로 배열
       // 카카오 브랜드메시지 필드
       sendChannel,          // sms / kakao / both
@@ -1276,6 +1288,16 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       callbackMissingCount = cbResult.callbackMissingCount;
       callbackUnregisteredCount = cbResult.callbackUnregisteredCount;
       callbackSkippedCount = cbResult.callbackSkippedCount;
+
+      // ★ 미등록 회신번호 확인 모달 — 제외 건이 있고 confirmCallbackExclusion 없으면 확인 요청 반환
+      if (cbResult.callbackSkippedCount > 0 && !confirmCallbackExclusion) {
+        if (validRecipients.length === 0) {
+          const errBody = buildCallbackErrorResponse(callbackMissingCount, callbackUnregisteredCount);
+          return res.status(400).json({ success: false, ...errBody });
+        }
+        const confirmBody = buildCallbackConfirmResponse(cbResult, validRecipients.length);
+        return res.status(200).json({ success: false, ...confirmBody });
+      }
 
       if (validRecipients.length === 0) {
         const errBody = buildCallbackErrorResponse(callbackMissingCount, callbackUnregisteredCount);

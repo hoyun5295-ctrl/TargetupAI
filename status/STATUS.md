@@ -227,6 +227,56 @@ ALTER TABLE spam_filter_tests ALTER COLUMN spam_check_number DROP DEFAULT;
 
 ---
 
+### 🔧 D81 — 대시보드 카드 동적 필터링 + UI 개선 4건 (2026-03-17) — 배포 대기 (git lock 해결 후)
+
+> **배경:** (1) 자동조건완화 토글 기본값 OFF (2) 직접타겟발송 회신번호 제거 (3) 빈 배열 저장 허용 (4) 대시보드 카드 동적 필터링 (고객사 DB 데이터 유무 기반)
+
+#### 수정 항목
+
+**1. 자동 조건완화 토글 기본값 OFF**
+- `AiSendTypeModal.tsx` — `useState(true)` → `useState(false)` (사용자가 명시적으로 켜야 함)
+
+**2. 직접 타겟 설정 모달 회신번호 제거**
+- `DirectTargetFilterModal.tsx` — CallbackNumber interface, callbackNumbers prop, selectedCallbackPhone state, 회신번호 select UI 블록 완전 삭제
+- `Dashboard.tsx` — DirectTargetFilterModal 호출에서 `callbackNumbers={callbackNumbers}` prop 제거
+
+**3. 대시보드 카드 빈 배열 저장 허용**
+- `admin.ts` PUT — `cards.length === 0` 차단 조건 제거 → 카드 전부 해제 후 저장 가능
+
+**4. ⚠️ 대시보드 카드 동적 필터링 (프론트+백엔드)**
+- **핵심 버그:** 프론트엔드 AdminDashboard.tsx에 17개 카드 풀이 **하드코딩**되어 있어 백엔드 API의 동적 필터링을 완전히 무시 → 몇 번 배포해도 변경 없음
+- **백엔드 (admin.ts GET /dashboard-cards):**
+  - 직접 컬럼 EXISTS 서브쿼리로 데이터 유무 체크
+  - customer_field_definitions + custom_fields JSONB 조합으로 커스텀 필드 체크
+  - `filterPoolByAvailableData()` (dashboard-card-pool.ts) — 필터링된 pool만 API 응답에 포함
+- **백엔드 (dashboard-card-pool.ts):**
+  - DashboardCardDef에 `requiresField`, `customLabelPatterns`, `emoji` 속성 추가
+  - 17개 카드 각각에 의존 직접 컬럼 + 커스텀 필드 라벨 패턴 매핑
+- **프론트엔드 (AdminDashboard.tsx):**
+  - ❌ 하드코딩 `DASHBOARD_CARD_POOL` 17개 **완전 삭제**
+  - ✅ API 응답 `pool`을 `dashboardCardPool` state로 저장하여 동적 렌더링
+  - 2열 그리드 레이아웃 (`grid-cols-1` → `grid-cols-2`)
+  - 이모지 표시 (`card.icon` → `card.emoji`)
+
+#### ⚠️ 배포 상태
+- **git index.lock 이슈:** Harold님 로컬에서 `.git/index.lock` 파일 존재 → git add/commit 실패 → push 시 "Everything up-to-date" → 서버에 변경 미반영
+- **해결:** `del C:\Users\ceo\projects\targetup\.git\index.lock` 후 재push 필요
+- **테스트계정 예상 결과:** total_purchase_amount(0건), recent_purchase_date(0건) 관련 카드 3개(총 구매금액, 30일 내 구매, 90일+ 미구매) 필터링되어 14개 표시
+
+#### 수정 파일 (6개)
+- `packages/backend/src/utils/dashboard-card-pool.ts` — emoji 필드 추가, filterPoolByAvailableData() 함수
+- `packages/backend/src/routes/admin.ts` — GET 동적 필터링 + PUT 빈 배열 허용
+- `packages/frontend/src/pages/AdminDashboard.tsx` — 하드코딩 제거 → API pool 사용, 2열 그리드
+- `packages/frontend/src/components/AiSendTypeModal.tsx` — 자동조건완화 기본 OFF
+- `packages/frontend/src/components/DirectTargetFilterModal.tsx` — 회신번호 완전 제거
+- `packages/frontend/src/pages/Dashboard.tsx` — callbackNumbers prop 제거
+
+#### TypeScript 타입 체크
+- 백엔드: ✅ 서버 tsc 0 에러 확인 완료
+- 프론트엔드: ✅ Vite 빌드 성공 확인 완료 (git push 미반영 상태)
+
+---
+
 ### ✅ D80 — AI 프리미엄 기능 3종 (자동조건완화 + 성과추천 + 문안자동생성) (2026-03-16) — 배포 완료
 
 > **배경:** 프로(100만원) 요금제 전용 AI 프리미엄 기능 3종. plans.ai_premium_enabled 게이팅.

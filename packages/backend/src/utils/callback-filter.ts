@@ -15,6 +15,14 @@
 import { query } from '../config/database';
 import { normalizePhone } from './normalize-phone';
 
+/** 미등록 회신번호별 제외 상세 */
+export interface UnregisteredCallbackDetail {
+  /** 미등록 회신번호 (정규화된 번호) */
+  phone: string;
+  /** 해당 회신번호로 인해 제외된 고객 수 */
+  excludedCount: number;
+}
+
 /** 개별회신번호 필터링 결과 */
 export interface CallbackFilterResult {
   /** 필터링 후 남은 고객/수신자 배열 */
@@ -25,6 +33,8 @@ export interface CallbackFilterResult {
   callbackUnregisteredCount: number;
   /** 총 제외 건수 */
   callbackSkippedCount: number;
+  /** 미등록 회신번호별 제외 상세 (확인 모달용) */
+  unregisteredDetails: UnregisteredCallbackDetail[];
 }
 
 /**
@@ -61,7 +71,8 @@ export async function filterByIndividualCallback(
     console.log(`[개별회신번호] callback+store_phone 없는 고객 ${callbackMissingCount}명 제외 (${filtered.length}명 남음)`);
   }
 
-  // 3단계: 미등록 회신번호 고객 제외
+  // 3단계: 미등록 회신번호 고객 제외 + 번호별 상세 수집
+  const unregisteredDetails: UnregisteredCallbackDetail[] = [];
   const callbackPhones = [...new Set(filtered.map((c: any) => normalizePhone(c.callback || '')).filter(Boolean))];
   if (callbackPhones.length > 0) {
     const registeredResult = await query(
@@ -70,11 +81,28 @@ export async function filterByIndividualCallback(
       [companyId]
     );
     const registeredSet = new Set((registeredResult.rows as any[]).map((r: any) => r.phone));
+
+    // 미등록 회신번호별 제외 인원수 집계
+    const unregCountMap = new Map<string, number>();
     const beforeUnreg = filtered.length;
-    filtered = filtered.filter((c: any) => registeredSet.has(normalizePhone(c.callback || '')));
+    filtered = filtered.filter((c: any) => {
+      const normalized = normalizePhone(c.callback || '');
+      if (registeredSet.has(normalized)) return true;
+      // 미등록 — 번호별 카운트 집계
+      unregCountMap.set(normalized, (unregCountMap.get(normalized) || 0) + 1);
+      return false;
+    });
     callbackUnregisteredCount = beforeUnreg - filtered.length;
+
+    // 상세 배열 생성 (제외 인원 많은 순 정렬)
+    for (const [phone, count] of unregCountMap.entries()) {
+      unregisteredDetails.push({ phone, excludedCount: count });
+    }
+    unregisteredDetails.sort((a, b) => b.excludedCount - a.excludedCount);
+
     if (callbackUnregisteredCount > 0) {
-      console.log(`[개별회신번호] 미등록 회신번호 고객 ${callbackUnregisteredCount}명 제외 (${filtered.length}명 남음)`);
+      console.log(`[개별회신번호] 미등록 회신번호 고객 ${callbackUnregisteredCount}명 제외 (${filtered.length}명 남음)`,
+        unregisteredDetails.map(d => `${d.phone}(${d.excludedCount}명)`).join(', '));
     }
   }
 
@@ -83,6 +111,7 @@ export async function filterByIndividualCallback(
     callbackMissingCount,
     callbackUnregisteredCount,
     callbackSkippedCount: callbackMissingCount + callbackUnregisteredCount,
+    unregisteredDetails,
   };
 }
 
@@ -112,5 +141,41 @@ export function buildCallbackErrorResponse(
     callbackMissingCount,
     callbackUnregisteredCount,
     isCallbackIssue: callbackMissingCount > 0 || callbackUnregisteredCount > 0,
+  };
+}
+
+/**
+ * 미등록 회신번호 확인 요청 응답 생성 — 발송 전 사용자 확인용
+ *
+ * 제외 대상이 있지만 발송 가능한 수신자가 남아있을 때,
+ * confirmCallbackExclusion 없이 호출하면 이 응답을 반환하여
+ * 프론트에서 확인 모달을 띄운 후 재호출하도록 유도한다.
+ *
+ * @param cbResult - filterByIndividualCallback 결과
+ * @param remainingCount - 필터링 후 남은 발송 대상 수
+ * @returns 확인 요청 응답 객체
+ */
+export function buildCallbackConfirmResponse(
+  cbResult: CallbackFilterResult,
+  remainingCount: number
+): {
+  callbackConfirmRequired: boolean;
+  callbackMissingCount: number;
+  callbackUnregisteredCount: number;
+  unregisteredDetails: UnregisteredCallbackDetail[];
+  remainingCount: number;
+  message: string;
+} {
+  const reasons: string[] = [];
+  if (cbResult.callbackMissingCount > 0) reasons.push(`회신번호 미보유 ${cbResult.callbackMissingCount}명`);
+  if (cbResult.callbackUnregisteredCount > 0) reasons.push(`미등록 회신번호 ${cbResult.callbackUnregisteredCount}명`);
+
+  return {
+    callbackConfirmRequired: true,
+    callbackMissingCount: cbResult.callbackMissingCount,
+    callbackUnregisteredCount: cbResult.callbackUnregisteredCount,
+    unregisteredDetails: cbResult.unregisteredDetails,
+    remainingCount,
+    message: `${reasons.join(', ')} 제외 후 ${remainingCount}명에게 발송됩니다.`,
   };
 }

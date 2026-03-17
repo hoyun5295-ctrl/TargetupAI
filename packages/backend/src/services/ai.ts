@@ -921,6 +921,12 @@ ${Object.entries(customFieldLabels).map(([key, label]) => {
 ⚠️ 주의: region, grade 등 직접 컬럼 필드는 "custom_fields."를 붙이지 않고 그대로 사용!
 ⚠️ 극히 중요: 필터 값에는 반드시 위 목록에 표시된 정확한 DB값만 사용하세요! 사용자 입력의 띄어쓰기/오타를 그대로 쓰지 말고, 위 목록에서 가장 일치하는 정확한 값을 골라 사용하세요. 목록에 없는 값은 절대 사용하지 마세요.
 
+⛔ 핵심 안전 규칙:
+- 사용자가 요청한 조건(예: "80대 이상", "미국 거주")에 해당하는 데이터가 위 DB값 목록에 없으면, 억지로 필터를 만들지 마세요.
+- 이 경우 filters를 빈 객체 {}로 반환하고, reasoning에 "요청하신 조건(XX)에 해당하는 고객 데이터가 없습니다"라고 명확히 안내하세요.
+- 절대로 조건에 맞지 않는 전체 고객을 대상으로 추천하지 마세요. 해당 데이터가 없으면 없다고 솔직하게 알려주는 것이 맞습니다.
+- 예: "80대 이상 고객" 요청인데 age 데이터에 80 이상이 없으면 → filters: {}, reasoning: "현재 고객 데이터에 80대 이상 고객이 없습니다."
+
 ${varCatalogPrompt}
 
 ## 채널 선택 기준
@@ -1730,6 +1736,12 @@ ${activeFieldsPrompt}
 3. 조건을 완전히 제거하기보다 범위를 넓히는 방향 선호
 4. 너무 넓히면 안 됨 — 타겟팅 의미가 없어짐
 
+## ⛔ 절대 금지 규칙
+- filters를 빈 객체 {}로 반환하지 마세요! 빈 필터 = 전체 고객 선택 = 타겟팅 무의미
+- 모든 필터 조건을 제거하지 마세요. 최소 1개 이상의 의미 있는 필터를 반드시 유지하세요
+- 해당 데이터가 DB에 존재하지 않을 수 있습니다. 그 경우에도 완전히 제거하지 말고 범위만 넓히세요
+- 0명 매칭이 반복되면 차라리 "매칭 불가"라고 reasoning에 명시하고, 원래 필터를 그대로 반환하세요
+
 ## 출력 형식 (JSON만 응답)
 {
   "filters": { ... 완화된 필터 조건 ... },
@@ -1757,16 +1769,41 @@ ${activeFieldsPrompt}
     }
 
     const result = JSON.parse(jsonStr);
+    const relaxedFilters = result.filters || {};
+
+    // ★ 안전장치: AI가 빈 필터를 반환하면 원래 필터 유지 (전체 고객 풀백 방지)
+    if (Object.keys(relaxedFilters).length === 0) {
+      console.warn('[AI] relaxFilters 안전장치 — AI가 빈 필터 반환, 원래 필터 유지');
+      return {
+        filters: originalFilters,
+        reasoning: '조건 완화 시 모든 필터가 제거되어 원래 조건을 유지합니다.',
+        relaxed_fields: [],
+      };
+    }
+
+    // ★ 안전장치: 원래 필터 키가 전부 제거되었으면 차단
+    const originalKeys = Object.keys(originalFilters);
+    const remainingOriginalKeys = originalKeys.filter(k => k in relaxedFilters);
+    if (originalKeys.length > 0 && remainingOriginalKeys.length === 0) {
+      console.warn(`[AI] relaxFilters 안전장치 — 원래 필터 키(${originalKeys.join(',')}) 전부 제거됨, 원래 필터 유지`);
+      return {
+        filters: originalFilters,
+        reasoning: '조건 완화 시 핵심 필터가 모두 제거되어 원래 조건을 유지합니다.',
+        relaxed_fields: [],
+      };
+    }
+
     return {
-      filters: result.filters || {},
+      filters: relaxedFilters,
       reasoning: result.reasoning || '조건을 완화했습니다.',
       relaxed_fields: result.relaxed_fields || [],
     };
   } catch (err) {
     console.error('[AI] relaxFilters 실패:', err);
+    // ★ 실패 시에도 원래 필터 유지 (빈 필터 반환 = 전체 고객 풀백 위험)
     return {
-      filters: {},
-      reasoning: '조건 완화에 실패했습니다.',
+      filters: originalFilters,
+      reasoning: '조건 완화에 실패하여 원래 조건을 유지합니다.',
       relaxed_fields: [],
     };
   }
