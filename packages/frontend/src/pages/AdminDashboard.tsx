@@ -124,25 +124,8 @@ export default function AdminDashboard() {
   // D41 대시보드 카드 설정
   const [dashboardCardIds, setDashboardCardIds] = useState<string[]>([]);
   const [dashboardCardCount, setDashboardCardCount] = useState<number>(0); // 선택된 카드 수 (제한 없음, 6개씩 페이징 표시)
-  const DASHBOARD_CARD_POOL = [
-    { cardId: 'total_customers',     label: '전체 고객 수',      icon: '👥', description: '전체 등록 고객 수' },
-    { cardId: 'gender_male',         label: '남성 수',           icon: '👨', description: '성별이 남성인 고객 수' },
-    { cardId: 'gender_female',       label: '여성 수',           icon: '👩', description: '성별이 여성인 고객 수' },
-    { cardId: 'birthday_this_month', label: '이번달 생일 고객',  icon: '🎂', description: '이번 달 생일인 고객 수' },
-    { cardId: 'age_distribution',    label: '연령대별 분포',     icon: '📊', description: '연령대별 고객 분포' },
-    { cardId: 'grade_distribution',  label: '등급별 고객 수',    icon: '🏆', description: '고객 등급별 분포' },
-    { cardId: 'region_top',          label: '지역별 TOP',        icon: '📍', description: '지역별 고객 수 상위' },
-    { cardId: 'store_distribution',  label: '매장별 고객 수',    icon: '🏪', description: '매장별 고객 분포' },
-    { cardId: 'email_rate',          label: '이메일 보유율',     icon: '📧', description: '이메일 주소 보유 비율 (%)' },
-    { cardId: 'total_purchase_sum',  label: '총 구매금액',       icon: '💰', description: '전체 고객 누적 구매금액 합계' },
-    { cardId: 'recent_30d_purchase', label: '30일 내 구매',      icon: '🛒', description: '최근 30일 내 구매 이력이 있는 고객 수' },
-    { cardId: 'inactive_90d',        label: '90일+ 미구매',      icon: '⚠️', description: '최근 90일간 구매 이력이 없는 고객 수' },
-    { cardId: 'new_this_month',      label: '신규고객 (이번달)', icon: '🆕', description: '이번 달 신규 등록된 고객 수' },
-    { cardId: 'opt_out_count',       label: '수신거부 수',       icon: '🔕', description: '수신거부 등록 건수' },
-    { cardId: 'opt_in_count',        label: '수신동의 수',       icon: '🔔', description: 'SMS 수신동의 고객 수' },
-    { cardId: 'active_campaigns',    label: '진행 캠페인 수',    icon: '📤', description: '현재 진행 중인 캠페인 수' },
-    { cardId: 'monthly_spend',       label: '이번달 사용금액',   icon: '💳', description: '이번 달 발송 사용 금액' },
-  ];
+  // ★ D80: 하드코딩 풀 제거 → API 응답의 동적 필터링된 풀 사용 (고객사 DB 데이터 유무 기반)
+  const [dashboardCardPool, setDashboardCardPool] = useState<{ cardId: string; label: string; emoji: string; description: string }[]>([]);
   // 전체 캠페인
 const [allCampaigns, setAllCampaigns] = useState<any[]>([]);
 const [allCampaignsTotal, setAllCampaignsTotal] = useState(0);
@@ -1428,9 +1411,19 @@ const handleApproveRequest = async (id: string) => {
           const cardsData = await cardsRes.json();
           setDashboardCardIds(cardsData.selectedCards || []);
           setDashboardCardCount(cardsData.selectedCards?.length || 0);
+          // ★ D80: API 응답의 동적 필터링된 풀 사용 (고객사 DB 데이터 유무 기반)
+          if (cardsData.pool && Array.isArray(cardsData.pool)) {
+            setDashboardCardPool(cardsData.pool.map((c: any) => ({
+              cardId: c.cardId,
+              label: c.label,
+              emoji: c.emoji || '📋',
+              description: c.description,
+            })));
+          }
         } else {
           setDashboardCardIds([]);
           setDashboardCardCount(0);
+          setDashboardCardPool([]);
         }
         setEditCompany({
           id: c.id,
@@ -4500,14 +4493,14 @@ const handleApproveRequest = async (id: string) => {
                     </span>
                   </div>
 
-                  {/* 카드 풀 체크박스 */}
-                  <div className="grid grid-cols-1 gap-1.5">
-                    {DASHBOARD_CARD_POOL.map((card) => {
+                  {/* 카드 풀 체크박스 — 2열 그리드 (D80: 공간 활용 개선) */}
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {dashboardCardPool.map((card) => {
                       const isChecked = dashboardCardIds.includes(card.cardId);
                       return (
                         <label
                           key={card.cardId}
-                          className={`flex items-center gap-3 p-2.5 rounded-lg border cursor-pointer transition-all ${
+                          className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition-all ${
                             isChecked ? 'bg-blue-50 border-blue-300' : 'bg-white border-gray-200 hover:bg-gray-50'
                           }`}
                         >
@@ -4521,12 +4514,12 @@ const handleApproveRequest = async (id: string) => {
                                 setDashboardCardIds([...dashboardCardIds, card.cardId]);
                               }
                             }}
-                            className="w-4 h-4 text-blue-600 rounded"
+                            className="w-4 h-4 text-blue-600 rounded flex-shrink-0"
                           />
-                          <span className="text-lg">{card.icon}</span>
+                          <span className="text-base flex-shrink-0">{card.emoji}</span>
                           <div className="flex-1 min-w-0">
                             <span className="text-sm font-medium text-gray-800">{card.label}</span>
-                            <span className="text-xs text-gray-400 ml-2">{card.description}</span>
+                            <span className="text-xs text-gray-400 ml-1 hidden xl:inline">{card.description}</span>
                           </div>
                         </label>
                       );
