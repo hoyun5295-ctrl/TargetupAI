@@ -37,6 +37,7 @@ import manageUsersRoutes from './routes/manage-users';
 import manageCallbacksRoutes from './routes/manage-callbacks';
 import manageScheduledRoutes from './routes/manage-scheduled';
 import manageStatsRoutes from './routes/manage-stats';
+import senderRegistrationRoutes from './routes/sender-registration';
 
 // DB 연결
 import './config/database';
@@ -101,6 +102,7 @@ app.use('/api/manage/users', manageUsersRoutes);
 app.use('/api/manage/callbacks', manageCallbacksRoutes);
 app.use('/api/manage/scheduled', manageScheduledRoutes);
 app.use('/api/manage/stats', manageStatsRoutes);
+app.use('/api/sender-registration', senderRegistrationRoutes);
 
 // 404 처리
 app.use((req, res) => {

@@ -57,6 +57,8 @@
 | 46 | spam_filter_test_results | 스팸필터 테스트 결과 |
 | 47 | auto_campaigns | 자동발송 스케줄 (D69 생성 완료) |
 | 48 | auto_campaign_runs | 자동발송 실행 이력 (D69 생성 완료) |
+| 49 | sender_managers | 발신번호 관리 담당자 |
+| 50 | sender_registrations | 발신번호 등록 신청 |
 
 ---
 
@@ -1008,3 +1010,38 @@
 | spam_test_result | jsonb | D80: 스팸테스트 결과 JSON |
 | ai_generation_status | varchar(20) | D80: ai_generated / ai_fallback / fixed |
 | created_at | timestamptz | |
+
+### sender_managers (발신번호 관리 담당자)
+| 컬럼 | 타입 | 설명 |
+|------|------|------|
+| id | uuid PK | |
+| company_id | uuid FK → companies | |
+| manager_name | varchar(100) NOT NULL | 담당자 이름 |
+| manager_phone | varchar(20) NOT NULL | 담당자 전화번호 |
+| manager_email | varchar(100) | 담당자 이메일 |
+| status | varchar(20) DEFAULT 'active' | active / inactive |
+| created_at | timestamptz | |
+| updated_at | timestamptz | |
+
+### sender_registrations (발신번호 등록 신청)
+| 컬럼 | 타입 | 설명 |
+|------|------|------|
+| id | uuid PK | |
+| company_id | uuid FK → companies | |
+| requested_by | uuid FK → users | 신청자 |
+| phone | varchar(20) NOT NULL | 신청 발신번호 |
+| label | varchar(100) | 라벨 |
+| store_code | varchar(50) | 매장코드 |
+| store_name | varchar(100) | 매장명 |
+| documents | jsonb DEFAULT '[]' | 첨부 서류 [{type, originalName, storedName, filePath, fileSize, uploadedAt}] |
+| request_note | text | 신청 메모 |
+| status | varchar(20) DEFAULT 'pending' | pending / approved / rejected |
+| reviewed_by | uuid FK → super_admins | 심사자 |
+| reviewed_at | timestamptz | 심사 시각 |
+| reject_reason | text | 반려 사유 |
+| approved_callback_id | uuid FK → callback_numbers | 승인 시 생성된 발신번호 ID |
+| created_at | timestamptz | |
+| updated_at | timestamptz | |
+- INDEX: company_id
+- INDEX: status WHERE status = 'pending'
+- INDEX: requested_by
