@@ -192,7 +192,7 @@ const [statsDetailInfo, setStatsDetailInfo] = useState<{ date: string; companyNa
   });
 
   // 발신번호 등록 신청 관리
-  const [callbackSubTab, setCallbackSubTab] = useState<'manage' | 'registrations'>('manage');
+  const [callbackSubTab, setCallbackSubTab] = useState<'manage' | 'registrations' | 'managers'>('manage');
   const [senderRegistrations, setSenderRegistrations] = useState<any[]>([]);
   const [senderRegFilter, setSenderRegFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('pending');
   const [senderRegLoading, setSenderRegLoading] = useState(false);
@@ -206,6 +206,9 @@ const [statsDetailInfo, setStatsDetailInfo] = useState<{ date: string; companyNa
   const [pendingManagerCount, setPendingManagerCount] = useState(0);
   const [mgrRejectId, setMgrRejectId] = useState<string | null>(null);
   const [mgrRejectReason, setMgrRejectReason] = useState('');
+  const [mgrFilter, setMgrFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
+  const [mgrSearch, setMgrSearch] = useState('');
+  const [allManagers, setAllManagers] = useState<any[]>([]);
 
   // 회사 목록 검색/필터
   const [companySearch, setCompanySearch] = useState('');
@@ -376,7 +379,8 @@ useEffect(() => { if (activeTab === 'deposits') loadChargeManagement(1); }, [act
 useEffect(() => { if (activeTab === 'syncAgents') loadSyncAgents(); }, [activeTab]);
 useEffect(() => { if (activeTab === 'auditLogs') loadAuditLogs(1); }, [activeTab]);
 useEffect(() => { if (activeTab === 'callbacks') { loadSenderRegPendingCount(); } }, [activeTab]);
-useEffect(() => { if (activeTab === 'callbacks' && callbackSubTab === 'registrations') { loadSenderRegistrations(senderRegFilter); loadPendingManagers(); } }, [activeTab, callbackSubTab, senderRegFilter]);
+useEffect(() => { if (activeTab === 'callbacks' && callbackSubTab === 'registrations') { loadSenderRegistrations(senderRegFilter); } }, [activeTab, callbackSubTab, senderRegFilter]);
+useEffect(() => { if (activeTab === 'callbacks' && callbackSubTab === 'managers') { loadAllManagers(); } }, [activeTab, callbackSubTab, mgrFilter]);
 useEffect(() => { loadLineGroups(); }, []);
 
 // 감사 로그 조회
@@ -1042,18 +1046,18 @@ const handleSendBillingEmail = async () => {
   };
 
   // === 담당자 위임장 승인 관리 ===
-  const loadPendingManagers = async () => {
+  const loadAllManagers = async () => {
     try {
       const token = localStorage.getItem('token');
-      const url = senderRegFilter === 'pending'
-        ? '/api/sender-registration/admin/pending-managers'
-        : `/api/sender-registration/admin/all-managers${senderRegFilter !== 'all' ? `?status=${senderRegFilter}` : ''}`;
+      const url = mgrFilter !== 'all'
+        ? `/api/sender-registration/admin/all-managers?status=${mgrFilter}`
+        : '/api/sender-registration/admin/all-managers';
       const res = await fetch(url, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.ok) {
         const data = await res.json();
-        setPendingManagers(data.managers || []);
+        setAllManagers(data.managers || []);
       }
     } catch (error) {
       console.error('담당자 목록 로드 실패:', error);
@@ -1070,7 +1074,7 @@ const handleSendBillingEmail = async () => {
       const data = await res.json();
       if (res.ok) {
         setModal({ type: 'alert', title: '승인 완료', message: '담당자 위임장이 승인되었습니다.', variant: 'success' });
-        loadPendingManagers();
+        loadAllManagers();
         loadSenderRegPendingCount();
       } else {
         setModal({ type: 'alert', title: '승인 실패', message: data.error || '승인 처리에 실패했습니다.', variant: 'error' });
@@ -1096,7 +1100,7 @@ const handleSendBillingEmail = async () => {
       const data = await res.json();
       if (res.ok) {
         setModal({ type: 'alert', title: '반려 완료', message: '담당자 위임장이 반려되었습니다.', variant: 'success' });
-        loadPendingManagers();
+        loadAllManagers();
         loadSenderRegPendingCount();
       } else {
         setModal({ type: 'alert', title: '반려 실패', message: data.error || '반려 처리에 실패했습니다.', variant: 'error' });
@@ -2647,6 +2651,16 @@ const handleApproveRequest = async (id: string) => {
                   </span>
                 )}
               </button>
+              <button
+                onClick={() => setCallbackSubTab('managers')}
+                className={`px-6 py-3 text-sm font-medium border-b-2 ${
+                  callbackSubTab === 'managers'
+                    ? 'border-blue-500 text-blue-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                등록현황 관리
+              </button>
             </div>
 
             {/* 서브탭: 발신번호 관리 */}
@@ -2791,77 +2805,13 @@ const handleApproveRequest = async (id: string) => {
                   </div>
                 </div>
 
-                {/* === 담당자 위임장 승인 영역 === */}
-                {pendingManagers.length > 0 && (
-                  <div className="px-6 py-4 border-b">
-                    <h3 className="text-sm font-semibold text-indigo-700 mb-3">담당자 위임장 승인</h3>
-                    <div className="space-y-2">
-                      {pendingManagers.map((mgr: any) => (
-                        <div key={mgr.id} className={`flex items-center gap-3 rounded-lg px-4 py-3 border ${
-                          mgr.status === 'pending' ? 'bg-yellow-50 border-yellow-200'
-                          : mgr.status === 'approved' ? 'bg-green-50 border-green-200'
-                          : 'bg-red-50 border-red-200'
-                        }`}>
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2">
-                              <span className="font-medium text-sm text-gray-900">{mgr.manager_name}</span>
-                              <span className="text-xs text-gray-500">{mgr.manager_phone}</span>
-                              {mgr.manager_email && <span className="text-xs text-gray-400">{mgr.manager_email}</span>}
-                            </div>
-                            <div className="text-xs text-gray-500 mt-0.5">
-                              <span className="font-medium">{mgr.company_name || '-'}</span>
-                              {mgr.authorization_doc && (
-                                <button onClick={() => downloadSenderDoc(mgr.authorization_doc.storedName, mgr.authorization_doc.originalName)}
-                                  className="ml-2 text-blue-600 hover:text-blue-800 underline">
-                                  위임장 다운로드
-                                </button>
-                              )}
-                            </div>
-                            {mgr.status === 'rejected' && mgr.reject_reason && (
-                              <div className="text-xs text-red-500 mt-1">반려사유: {mgr.reject_reason}</div>
-                            )}
-                          </div>
-                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                            mgr.status === 'pending' ? 'bg-yellow-100 text-yellow-800'
-                            : mgr.status === 'approved' ? 'bg-green-100 text-green-800'
-                            : 'bg-red-100 text-red-800'
-                          }`}>
-                            {mgr.status === 'pending' ? '위임장 대기' : mgr.status === 'approved' ? '승인' : '반려'}
-                          </span>
-                          {mgr.status === 'pending' && mgrRejectId !== mgr.id && (
-                            <div className="flex gap-1">
-                              <button onClick={() => handleApproveManager(mgr.id)}
-                                className="px-3 py-1.5 bg-green-600 text-white rounded-lg text-xs font-medium hover:bg-green-700">승인</button>
-                              <button onClick={() => { setMgrRejectId(mgr.id); setMgrRejectReason(''); }}
-                                className="px-3 py-1.5 bg-red-600 text-white rounded-lg text-xs font-medium hover:bg-red-700">반려</button>
-                            </div>
-                          )}
-                          {mgr.status === 'pending' && mgrRejectId === mgr.id && (
-                            <div className="flex items-center gap-2">
-                              <input type="text" value={mgrRejectReason} onChange={(e) => setMgrRejectReason(e.target.value)}
-                                placeholder="반려 사유 입력" className="px-2 py-1 border rounded text-xs w-48" />
-                              <button onClick={() => { handleRejectManager(mgr.id, mgrRejectReason); setMgrRejectId(null); }}
-                                disabled={!mgrRejectReason.trim()}
-                                className="px-2.5 py-1 bg-red-600 text-white rounded text-xs font-medium hover:bg-red-700 disabled:opacity-40">확인</button>
-                              <button onClick={() => setMgrRejectId(null)}
-                                className="px-2.5 py-1 bg-gray-200 text-gray-700 rounded text-xs hover:bg-gray-300">취소</button>
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
                 {/* === 발신번호 등록 신청 목록 === */}
                 {senderRegLoading ? (
                   <div className="px-6 py-12 text-center text-gray-500">로딩 중...</div>
-                ) : senderRegistrations.length === 0 && pendingManagers.length === 0 ? (
+                ) : senderRegistrations.length === 0 ? (
                   <div className="px-6 py-12 text-center text-gray-500">
                     {senderRegFilter === 'pending' ? '승인 대기 중인 신청이 없습니다.' : '해당 조건의 신청 내역이 없습니다.'}
                   </div>
-                ) : senderRegistrations.length === 0 ? (
-                  <div className="px-6 py-6 text-center text-gray-400 text-sm">발신번호 등록 신청 내역이 없습니다.</div>
                 ) : (
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm">
@@ -2911,6 +2861,124 @@ const handleApproveRequest = async (id: string) => {
                     </table>
                   </div>
                 )}
+              </>
+            )}
+
+            {/* 서브탭: 등록현황 관리 (담당자 위임장) */}
+            {callbackSubTab === 'managers' && (
+              <>
+                <div className="px-6 py-4 border-b">
+                  <div className="flex justify-between items-center mb-3">
+                    <h2 className="text-lg font-semibold">등록현황 관리</h2>
+                    <div className="flex gap-2">
+                      {(['all', 'pending', 'approved', 'rejected'] as const).map(f => (
+                        <button
+                          key={f}
+                          onClick={() => setMgrFilter(f)}
+                          className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                            mgrFilter === f
+                              ? f === 'pending' ? 'bg-yellow-100 text-yellow-800'
+                              : f === 'approved' ? 'bg-green-100 text-green-800'
+                              : f === 'rejected' ? 'bg-red-100 text-red-800'
+                              : 'bg-blue-100 text-blue-800'
+                              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                          }`}
+                        >
+                          {f === 'all' ? '전체' : f === 'pending' ? '승인대기' : f === 'approved' ? '승인완료' : '반려'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <input
+                    type="text"
+                    value={mgrSearch}
+                    onChange={(e) => setMgrSearch(e.target.value)}
+                    placeholder="업체명 또는 담당자 이름으로 검색..."
+                    className="w-full max-w-sm px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                  />
+                </div>
+
+                {(() => {
+                  const filteredMgrs = allManagers.filter(mgr => {
+                    if (!mgrSearch.trim()) return true;
+                    const q = mgrSearch.trim().toLowerCase();
+                    return (mgr.company_name || '').toLowerCase().includes(q)
+                      || (mgr.manager_name || '').toLowerCase().includes(q)
+                      || (mgr.manager_phone || '').includes(q);
+                  });
+                  return filteredMgrs.length === 0 ? (
+                    <div className="px-6 py-12 text-center text-gray-500">
+                      {mgrSearch.trim() ? '검색 결과가 없습니다.' : '등록된 담당자가 없습니다.'}
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead className="bg-gray-50">
+                          <tr>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">고객사</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">담당자</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">연락처</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">이메일</th>
+                            <th className="px-4 py-3 text-center text-xs font-medium text-gray-500">위임장</th>
+                            <th className="px-4 py-3 text-center text-xs font-medium text-gray-500">상태</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">반려사유</th>
+                            <th className="px-4 py-3 text-center text-xs font-medium text-gray-500">관리</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200">
+                          {filteredMgrs.map((mgr: any) => (
+                            <tr key={mgr.id} className="hover:bg-gray-50">
+                              <td className="px-4 py-3 text-gray-900 font-medium">{mgr.company_name || '-'}</td>
+                              <td className="px-4 py-3 text-gray-900">{mgr.manager_name}</td>
+                              <td className="px-4 py-3 text-gray-600 font-mono text-xs">{mgr.manager_phone}</td>
+                              <td className="px-4 py-3 text-gray-500 text-xs">{mgr.manager_email || '-'}</td>
+                              <td className="px-4 py-3 text-center">
+                                {mgr.authorization_doc ? (
+                                  <button onClick={() => downloadSenderDoc(mgr.authorization_doc.storedName, mgr.authorization_doc.originalName)}
+                                    className="text-blue-600 hover:text-blue-800 text-xs underline">다운로드</button>
+                                ) : (
+                                  <span className="text-gray-300 text-xs">없음</span>
+                                )}
+                              </td>
+                              <td className="px-4 py-3 text-center">
+                                <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                                  mgr.status === 'pending' ? 'bg-yellow-100 text-yellow-800'
+                                  : mgr.status === 'approved' ? 'bg-green-100 text-green-800'
+                                  : 'bg-red-100 text-red-800'
+                                }`}>
+                                  {mgr.status === 'pending' ? '대기' : mgr.status === 'approved' ? '승인' : '반려'}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 text-gray-500 text-xs">{mgr.reject_reason || '-'}</td>
+                              <td className="px-4 py-3 text-center">
+                                {mgr.status === 'pending' && mgrRejectId !== mgr.id && (
+                                  <div className="flex gap-1 justify-center">
+                                    <button onClick={() => handleApproveManager(mgr.id)}
+                                      className="px-2.5 py-1 bg-green-600 text-white rounded text-xs font-medium hover:bg-green-700">승인</button>
+                                    <button onClick={() => { setMgrRejectId(mgr.id); setMgrRejectReason(''); }}
+                                      className="px-2.5 py-1 bg-red-600 text-white rounded text-xs font-medium hover:bg-red-700">반려</button>
+                                  </div>
+                                )}
+                                {mgr.status === 'pending' && mgrRejectId === mgr.id && (
+                                  <div className="flex items-center gap-1">
+                                    <input type="text" value={mgrRejectReason} onChange={(e) => setMgrRejectReason(e.target.value)}
+                                      placeholder="반려 사유" className="px-2 py-1 border rounded text-xs w-32" />
+                                    <button onClick={() => { handleRejectManager(mgr.id, mgrRejectReason); setMgrRejectId(null); }}
+                                      disabled={!mgrRejectReason.trim()}
+                                      className="px-2 py-1 bg-red-600 text-white rounded text-xs hover:bg-red-700 disabled:opacity-40">확인</button>
+                                    <button onClick={() => setMgrRejectId(null)}
+                                      className="px-2 py-1 bg-gray-200 text-gray-700 rounded text-xs hover:bg-gray-300">취소</button>
+                                  </div>
+                                )}
+                                {mgr.status !== 'pending' && <span className="text-xs text-gray-300">-</span>}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  );
+                })()}
               </>
             )}
             </div>
