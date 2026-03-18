@@ -285,16 +285,12 @@ router.post('/recommend-target', async (req: Request, res: Response) => {
 
     console.log('AI 필터 결과:', JSON.stringify(result.filters, null, 2));
 
-    // ★ AI가 빈 필터를 반환했으면 (데이터 없음 안내) — 전체 고객 카운트하지 않고 0으로 처리
-    let actualCount = 0;
-    let unsubscribeCount = 0;
-    if (Object.keys(result.filters).length > 0) {
-      const filterResult = await countFilteredCustomers(companyId, result.filters, userId!, storeFilter, baseParams);
-      actualCount = filterResult.count;
-      unsubscribeCount = filterResult.unsubscribeCount;
-    } else {
-      console.log('[AI] 빈 필터 반환 — 전체 고객 카운트 건너뜀 (0명 반환)');
-    }
+    // ★ 실제 타겟 수 계산 — countFilteredCustomers 공통 함수 사용
+    // 빈 필터({})도 정상 카운트 (AI가 전체 대상을 의도한 경우 포함)
+    const filterResult = await countFilteredCustomers(companyId, result.filters, userId!, storeFilter, baseParams);
+    let actualCount = filterResult.count;
+    let unsubscribeCount = filterResult.unsubscribeCount;
+    console.log(`[AI] 필터 카운트 결과: ${actualCount}명 (수신거부: ${unsubscribeCount}명)`);
 
     // ★ 기능 4: 0명일 때 AI 자동 조건완화 (프로 이상 ai_premium_enabled 전용)
     let autoRelaxed = false;
@@ -330,7 +326,13 @@ router.post('/recommend-target', async (req: Request, res: Response) => {
             break;
           }
 
-          const relaxCount = await countFilteredCustomers(companyId, relaxResult.filters, userId!, storeFilter, baseParams);
+          let relaxCount: { count: number; unsubscribeCount: number };
+          try {
+            relaxCount = await countFilteredCustomers(companyId, relaxResult.filters, userId!, storeFilter, baseParams);
+          } catch (relaxErr) {
+            console.warn(`[AI] 조건완화 ${attempt}회차 — 카운트 쿼리 실패, 중단:`, relaxErr);
+            break;
+          }
 
           if (relaxCount.count > 0) {
             console.log(`[AI] 조건완화 ${attempt}회차 성공 — ${relaxCount.count}명 매칭`);
@@ -351,37 +353,10 @@ router.post('/recommend-target', async (req: Request, res: Response) => {
       }
     }
 
-    // ★ 전체 고객 풀백 방지 — AI가 의미 있는 필터를 생성했는데 결과적으로
-    // 빈 필터가 되어 전체 고객이 선택되는 사고 방지
+    // ★ 풀백 감지 — 로그만 남김 (DB 추출 결과는 정확하므로 임의로 0으로 덮어쓰지 않음)
     const totalCustomers = parseInt(statsResult.rows[0].sms_opt_in_count || statsResult.rows[0].total);
-    const hasEffectiveFilter = Object.keys(result.filters).length > 0;
-    const { sql: checkFilterSql } = buildFilterWhereClauseCompat(result.filters, 99);
-    const filterActuallyEmpty = !checkFilterSql || checkFilterSql.trim() === '';
-
-    if (filterActuallyEmpty && actualCount > 0 && actualCount >= totalCustomers * 0.95) {
-      // 필터가 실질적으로 비어서 전체 고객이 선택된 경우
-      // (AI가 DB에 없는 값으로 필터를 만들어 WHERE절이 무효화된 경우 포함)
-      console.warn(`[AI] ⚠️ 전체 고객 풀백 감지! 필터: ${JSON.stringify(result.filters)}, actualCount: ${actualCount}, total: ${totalCustomers}`);
-      if (!hasEffectiveFilter) {
-        // 필터 자체가 비어있음 → 그대로 사용 (전체 대상 의도일 수 있음)
-      } else {
-        // 필터가 있지만 SQL 변환 시 빈 WHERE절 → 필터가 무효화됨
-        console.warn(`[AI] 필터가 SQL 변환 시 무효화됨 — 전체 고객 풀백 차단`);
-        actualCount = 0;
-        unsubscribeCount = 0;
-      }
-    }
-
-    // ★ auto-relax 후에도 전체 고객 풀백이면 차단
-    if (autoRelaxed && actualCount >= totalCustomers * 0.95) {
-      console.warn(`[AI] ⚠️ auto-relax 후 전체 고객 풀백 감지 — 원래 필터로 롤백 (actualCount: ${actualCount}, total: ${totalCustomers})`);
-      if (originalFilters) {
-        result.filters = originalFilters;
-      }
-      actualCount = 0;
-      unsubscribeCount = 0;
-      autoRelaxed = false;
-      relaxedFields = [];
+    if (Object.keys(result.filters).length > 0 && actualCount >= totalCustomers * 0.95) {
+      console.warn(`[AI] ⚠️ 풀백 감지 (로그만): 필터 ${JSON.stringify(result.filters)}, actualCount=${actualCount}, total=${totalCustomers}`);
     }
 
     result.estimated_count = actualCount;

@@ -921,12 +921,6 @@ ${Object.entries(customFieldLabels).map(([key, label]) => {
 ⚠️ 주의: region, grade 등 직접 컬럼 필드는 "custom_fields."를 붙이지 않고 그대로 사용!
 ⚠️ 극히 중요: 필터 값에는 반드시 위 목록에 표시된 정확한 DB값만 사용하세요! 사용자 입력의 띄어쓰기/오타를 그대로 쓰지 말고, 위 목록에서 가장 일치하는 정확한 값을 골라 사용하세요. 목록에 없는 값은 절대 사용하지 마세요.
 
-⛔ 핵심 안전 규칙:
-- 사용자가 요청한 조건(예: "80대 이상", "미국 거주")에 해당하는 데이터가 위 DB값 목록에 없으면, 억지로 필터를 만들지 마세요.
-- 이 경우 filters를 빈 객체 {}로 반환하고, reasoning에 "요청하신 조건(XX)에 해당하는 고객 데이터가 없습니다"라고 명확히 안내하세요.
-- 절대로 조건에 맞지 않는 전체 고객을 대상으로 추천하지 마세요. 해당 데이터가 없으면 없다고 솔직하게 알려주는 것이 맞습니다.
-- 예: "80대 이상 고객" 요청인데 age 데이터에 80 이상이 없으면 → filters: {}, reasoning: "현재 고객 데이터에 80대 이상 고객이 없습니다."
-
 ${varCatalogPrompt}
 
 ## 채널 선택 기준
@@ -1683,8 +1677,11 @@ export async function countFilteredCustomers(
 
     return { count, unsubscribeCount };
   } catch (err) {
-    console.error('[AI] countFilteredCustomers 쿼리 실패 (0명 반환):', err);
-    return { count: 0, unsubscribeCount: 0 };
+    // ★ 에러를 삼키지 않고 상위로 전파 — 조용히 0 반환하면 디버깅 불가
+    console.error('[AI] countFilteredCustomers 쿼리 실패:', err);
+    console.error('[AI] 필터:', JSON.stringify(filters));
+    console.error('[AI] storeFilter:', storeFilter);
+    throw err;
   }
 }
 
