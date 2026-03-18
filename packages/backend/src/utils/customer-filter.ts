@@ -246,22 +246,46 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
           params.push(Number(value[0]), Number(value[1]));
         }
 
-      // ── 문자열 필드 ──
-      } else if (STRING_FIELDS.includes(field)) {
-        if (operator === 'eq') {
-          sql += ` AND ${col(alias, field)} = $${paramIndex++}`;
-          params.push(String(value));
-        } else if (operator === 'in' && Array.isArray(value)) {
-          const placeholders = value.map(() => `$${paramIndex++}`).join(', ');
-          sql += ` AND ${col(alias, field)} IN (${placeholders})`;
-          params.push(...value.map(String));
-        } else if (operator === 'contains') {
-          sql += ` AND ${col(alias, field)} ILIKE $${paramIndex++}`;
-          params.push(`%${value}%`);
+      // ── FIELD_MAP 동적 처리 — 위 핸들러에 없는 직접 컬럼 필드를 dataType 기반으로 자동 처리 ──
+      // ★ phone, name, email, address 등 STRING_FIELDS 하드코딩 없이 FIELD_MAP으로 통일
+      } else {
+        const fieldDef = getColumnFields().find(f => f.fieldKey === field);
+        if (fieldDef) {
+          const columnRef = col(alias, fieldDef.columnName);
+          if (fieldDef.dataType === 'number') {
+            if (operator === 'eq') { sql += ` AND ${columnRef} = $${paramIndex++}`; params.push(Number(value)); }
+            else if (operator === 'gte') { sql += ` AND ${columnRef} >= $${paramIndex++}`; params.push(Number(value)); }
+            else if (operator === 'lte') { sql += ` AND ${columnRef} <= $${paramIndex++}`; params.push(Number(value)); }
+            else if (operator === 'between' && Array.isArray(value)) {
+              sql += ` AND ${columnRef} BETWEEN $${paramIndex++} AND $${paramIndex++}`;
+              params.push(Number(value[0]), Number(value[1]));
+            }
+          } else if (fieldDef.dataType === 'date') {
+            if (operator === 'gte') { sql += ` AND ${columnRef} >= $${paramIndex++}`; params.push(value); }
+            else if (operator === 'lte') { sql += ` AND ${columnRef} <= $${paramIndex++}`; params.push(value); }
+            else if (operator === 'between' && Array.isArray(value)) {
+              sql += ` AND ${columnRef} BETWEEN $${paramIndex++} AND $${paramIndex++}`;
+              params.push(value[0], value[1]);
+            } else if (operator === 'days_within') {
+              const daysAgo = new Date(); daysAgo.setDate(daysAgo.getDate() - parseInt(value));
+              sql += ` AND ${columnRef} >= $${paramIndex++}`; params.push(daysAgo.toISOString().split('T')[0]);
+            } else if (operator === 'birth_month') {
+              sql += ` AND EXTRACT(MONTH FROM ${columnRef}) = $${paramIndex++}`; params.push(parseInt(value));
+            }
+          } else {
+            // 문자열 필드: contains 기본, eq/in도 지원
+            if (operator === 'contains') { sql += ` AND ${columnRef} ILIKE $${paramIndex++}`; params.push(`%${value}%`); }
+            else if (operator === 'in' && Array.isArray(value)) {
+              sql += ` AND ${columnRef} = ANY($${paramIndex++}::text[])`; params.push(value);
+            } else {
+              // eq 포함 기타 → 정확 일치
+              sql += ` AND ${columnRef} = $${paramIndex++}`; params.push(String(value));
+            }
+          }
+          continue; // FIELD_MAP에서 처리됨 → 커스텀 필드로 넘기지 않음
         }
 
-      // ── 커스텀 필드 (JSONB) — 화이트리스트 검증 ──
-      } else {
+        // ── 커스텀 필드 (JSONB) — FIELD_MAP에 없는 필드만 ──
         if (!isValidCustomFieldKey(field)) continue;
         const cfCol = `custom_fields->>'${field}'`;
 

@@ -14,12 +14,9 @@ export default function CustomerDBModal({ onClose, token, userType }: CustomerDB
   const [loading, setLoading] = useState(false);
   const limit = 20;
 
-  // 검색
-  const [searchValue, setSearchValue] = useState('');
-
-  // ★ D79: 동적 필터 (필드 드롭다운 + 값/범위)
+  // ★ 동적 필터 (필드 드롭다운 + 값/범위)
   const [dynFilterField, setDynFilterField] = useState('');
-  const [dynFilterOp, setDynFilterOp] = useState('eq');
+  const [dynFilterOp, setDynFilterOp] = useState('contains');
   const [dynFilterValue, setDynFilterValue] = useState('');
   const [dynFilterValueMax, setDynFilterValueMax] = useState('');
   const [activeFilters, setActiveFilters] = useState<{ field: string; label: string; op: string; value: string; valueMax?: string }[]>([]);
@@ -68,17 +65,15 @@ export default function CustomerDBModal({ onClose, token, userType }: CustomerDB
     }
   };
 
-  const fetchCustomers = async (p: number, overrides?: { smsOptIn?: string; search?: string; storeCode?: string; filtersOverride?: typeof activeFilters }) => {
+  const fetchCustomers = async (p: number, overrides?: { smsOptIn?: string; storeCode?: string; filtersOverride?: typeof activeFilters }) => {
     setLoading(true);
-    setSelectedCustomer(null); // 검색/필터 변경 시 상세 패널 초기화
+    setSelectedCustomer(null);
     try {
       const currentSmsOptIn = overrides?.smsOptIn ?? filterSmsOptIn;
-      const currentSearch = overrides?.search ?? searchValue;
       const currentStoreCode = overrides?.storeCode ?? filterStoreCode;
       const currentFilters = overrides?.filtersOverride ?? activeFilters;
 
       const params = new URLSearchParams({ page: String(p), limit: String(limit) });
-      if (currentSearch.trim()) params.set('search', currentSearch.trim());
       if (currentSmsOptIn === 'true') params.set('smsOptIn', 'true');
       if (currentSmsOptIn === 'false') params.set('smsOptIn', 'false');
       // ★ 브랜드 필터 (고객사관리자/슈퍼관리자만)
@@ -122,19 +117,18 @@ export default function CustomerDBModal({ onClose, token, userType }: CustomerDB
     }
   };
 
-  const handleSearch = () => { setPage(1); fetchCustomers(1); };
-
-  // ★ D79: 동적 필터 추가
+  // ★ 동적 필터 추가 — 문자열은 자동 contains, 드롭다운 선택은 eq
   const handleAddFilter = () => {
     if (!dynFilterField || !dynFilterValue) return;
     const fieldDef = fieldColumns.find((f: any) => f.field_key === dynFilterField);
     const label = fieldDef?.field_label || fieldDef?.display_name || dynFilterField;
-    const newFilter = { field: dynFilterField, label, op: dynFilterOp, value: dynFilterValue, valueMax: dynFilterOp === 'between' ? dynFilterValueMax : undefined };
+    // 드롭다운 옵션에서 선택한 경우(등급, 지역 등)는 eq, 그 외 문자열은 contains
+    const effectiveOp = hasDropdownOptions(dynFilterField) ? 'eq' : dynFilterOp;
+    const newFilter = { field: dynFilterField, label, op: effectiveOp, value: dynFilterValue, valueMax: effectiveOp === 'between' ? dynFilterValueMax : undefined };
     const updated = [...activeFilters.filter(f => f.field !== dynFilterField), newFilter];
     setActiveFilters(updated);
-    // 입력 초기화
     setDynFilterField('');
-    setDynFilterOp('eq');
+    setDynFilterOp('contains');
     setDynFilterValue('');
     setDynFilterValueMax('');
     setPage(1);
@@ -159,36 +153,43 @@ export default function CustomerDBModal({ onClose, token, userType }: CustomerDB
   };
 
   const handleReset = () => {
-    setSearchValue('');
     setActiveFilters([]);
     setFilterSmsOptIn('all');
     setFilterStoreCode('all');
     setDynFilterField('');
-    setDynFilterOp('eq');
+    setDynFilterOp('contains');
     setDynFilterValue('');
     setDynFilterValueMax('');
     setPage(1);
-    fetchCustomers(1, { smsOptIn: 'all', storeCode: 'all', search: '', filtersOverride: [] });
+    fetchCustomers(1, { smsOptIn: 'all', storeCode: 'all', filtersOverride: [] });
   };
 
-  // ★ D79: 선택된 필드의 데이터 타입에 따라 연산자 목록 결정
-  const getOperatorsForField = (fieldKey: string) => {
+  // ★ 필드 데이터 타입 판별
+  const getFieldDataType = (fieldKey: string): string => {
     const fieldDef = fieldColumns.find((f: any) => f.field_key === fieldKey);
-    const dataType = fieldDef?.data_type || fieldDef?.field_type || 'text';
-    if (['number', 'integer', 'float', 'numeric'].includes(dataType.toLowerCase())) {
+    return (fieldDef?.data_type || fieldDef?.field_type || 'text').toLowerCase();
+  };
+
+  // 숫자/날짜 필드에만 연산자 드롭다운 표시 (문자열은 자동 포함검색)
+  const getOperatorsForField = (fieldKey: string) => {
+    const dataType = getFieldDataType(fieldKey);
+    if (['number', 'integer', 'float', 'numeric'].includes(dataType)) {
       return [
-        { v: 'eq', l: '=' }, { v: 'gte', l: '>=' }, { v: 'lte', l: '<=' }, { v: 'between', l: '범위' },
+        { v: 'gte', l: '이상' }, { v: 'lte', l: '이하' }, { v: 'eq', l: '일치' }, { v: 'between', l: '범위' },
       ];
     }
-    if (['date', 'datetime', 'timestamp'].includes(dataType.toLowerCase())) {
+    if (['date', 'datetime', 'timestamp'].includes(dataType)) {
       return [
-        { v: 'eq', l: '=' }, { v: 'gte', l: '이후' }, { v: 'lte', l: '이전' }, { v: 'between', l: '범위' },
+        { v: 'gte', l: '이후' }, { v: 'lte', l: '이전' }, { v: 'between', l: '범위' },
       ];
     }
-    // text/string 기본
-    return [
-      { v: 'eq', l: '일치' }, { v: 'contains', l: '포함' },
-    ];
+    return []; // 문자열 → 연산자 드롭다운 없음 (자동 contains)
+  };
+
+  // 숫자/날짜 필드인지 확인
+  const isNumericOrDateField = (fieldKey: string): boolean => {
+    const dataType = getFieldDataType(fieldKey);
+    return ['number', 'integer', 'float', 'numeric', 'date', 'datetime', 'timestamp'].includes(dataType);
   };
 
   // ★ D79: 필드에 대한 드롭다운 옵션 존재 여부 (등급, 지역 등 distinct values)
@@ -251,25 +252,23 @@ export default function CustomerDBModal({ onClose, token, userType }: CustomerDB
           <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-200 text-gray-400 hover:text-gray-600 transition-colors text-lg">&times;</button>
         </div>
 
-        {/* 검색 + 필터 */}
+        {/* 필터 (한 줄 통합) */}
         <div className="px-6 py-3 border-b space-y-2">
-          {/* 검색바 */}
-          <div className="flex items-center gap-2">
-            <input
-              type="text" value={searchValue}
-              onChange={(e) => setSearchValue(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') handleSearch(); }}
-              placeholder="이름 또는 전화번호 검색"
-              className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm w-64 focus:outline-none focus:ring-2 focus:ring-emerald-200"
-            />
-            <button onClick={handleSearch} className="px-4 py-1.5 bg-emerald-500 text-white rounded-lg text-sm font-medium hover:bg-emerald-600 transition-colors">검색</button>
-            <div className="w-px h-6 bg-gray-200" />
-            <button onClick={handleReset} className="px-3 py-1.5 bg-white border border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-gray-50 transition-colors">초기화</button>
-          </div>
-          {/* ★ D79: 동적 필터 — 필드 드롭다운 + 연산자 + 값 입력 */}
           <div className="flex items-center gap-2 text-sm flex-wrap">
             {/* 필드 선택 */}
-            <select value={dynFilterField} onChange={(e) => { setDynFilterField(e.target.value); setDynFilterOp('eq'); setDynFilterValue(''); setDynFilterValueMax(''); }}
+            <select value={dynFilterField} onChange={(e) => {
+              const newField = e.target.value;
+              setDynFilterField(newField);
+              setDynFilterValue('');
+              setDynFilterValueMax('');
+              // 숫자/날짜 필드면 첫 번째 연산자, 문자열이면 contains
+              if (newField) {
+                const ops = getOperatorsForField(newField);
+                setDynFilterOp(ops.length > 0 ? ops[0].v : 'contains');
+              } else {
+                setDynFilterOp('contains');
+              }
+            }}
               className="border border-gray-300 rounded-lg px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-emerald-200 min-w-[120px]">
               <option value="">필터 필드 선택</option>
               {fieldColumns.map((f: any) => (
@@ -277,8 +276,8 @@ export default function CustomerDBModal({ onClose, token, userType }: CustomerDB
               ))}
             </select>
 
-            {/* 연산자 선택 (필드 선택 시에만 표시) */}
-            {dynFilterField && (
+            {/* 연산자 드롭다운 — 숫자/날짜 필드만 표시 (문자열은 자동 포함검색) */}
+            {dynFilterField && isNumericOrDateField(dynFilterField) && (
               <select value={dynFilterOp} onChange={(e) => setDynFilterOp(e.target.value)}
                 className="border border-gray-300 rounded-lg px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-emerald-200">
                 {getOperatorsForField(dynFilterField).map(op => (
@@ -287,7 +286,7 @@ export default function CustomerDBModal({ onClose, token, userType }: CustomerDB
               </select>
             )}
 
-            {/* 값 입력 (필드 선택 시에만 표시) */}
+            {/* 값 입력 */}
             {dynFilterField && (
               hasDropdownOptions(dynFilterField) ? (
                 <select value={dynFilterValue} onChange={(e) => setDynFilterValue(e.target.value)}
@@ -298,12 +297,12 @@ export default function CustomerDBModal({ onClose, token, userType }: CustomerDB
               ) : (
                 <input type="text" value={dynFilterValue} onChange={(e) => setDynFilterValue(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter') handleAddFilter(); }}
-                  placeholder="값 입력"
-                  className="border border-gray-300 rounded-lg px-2 py-1.5 text-xs w-28 focus:outline-none focus:ring-2 focus:ring-emerald-200" />
+                  placeholder={isNumericOrDateField(dynFilterField) ? '값 입력' : '검색어 입력'}
+                  className="border border-gray-300 rounded-lg px-2 py-1.5 text-xs w-36 focus:outline-none focus:ring-2 focus:ring-emerald-200" />
               )
             )}
 
-            {/* 범위(between) 최대값 입력 */}
+            {/* 범위(between) 최대값 */}
             {dynFilterField && dynFilterOp === 'between' && (
               <>
                 <span className="text-gray-400 text-xs">~</span>
@@ -314,17 +313,17 @@ export default function CustomerDBModal({ onClose, token, userType }: CustomerDB
               </>
             )}
 
-            {/* 필터 추가 버튼 */}
+            {/* 검색 버튼 */}
             {dynFilterField && dynFilterValue && (
               <button onClick={handleAddFilter}
-                className="px-3 py-1.5 bg-emerald-500 text-white rounded-lg text-xs font-medium hover:bg-emerald-600 transition-colors">
-                추가
+                className="px-4 py-1.5 bg-emerald-500 text-white rounded-lg text-xs font-medium hover:bg-emerald-600 transition-colors">
+                검색
               </button>
             )}
 
             <div className="w-px h-5 bg-gray-200" />
 
-            {/* 수신동의 필터 (고정) */}
+            {/* 수신동의 */}
             <span className="text-gray-500 font-medium text-xs">수신</span>
             {[{ v: 'all', l: '전체' }, { v: 'true', l: '동의' }, { v: 'false', l: '거부' }].map(opt => (
               <button key={opt.v} onClick={() => handleSpecialFilterChange('smsOptIn', opt.v)}
@@ -333,7 +332,7 @@ export default function CustomerDBModal({ onClose, token, userType }: CustomerDB
               </button>
             ))}
 
-            {/* ★ 브랜드 필터 — 고객사관리자/슈퍼관리자만 표시 */}
+            {/* 브랜드 */}
             {(userType === 'company_admin' || userType === 'super_admin') && storeCodeOptions.length > 0 && (
               <>
                 <div className="w-px h-5 bg-gray-200" />
@@ -345,6 +344,14 @@ export default function CustomerDBModal({ onClose, token, userType }: CustomerDB
                 </select>
               </>
             )}
+
+            {/* 초기화 */}
+            {(activeFilters.length > 0 || filterSmsOptIn !== 'all' || filterStoreCode !== 'all') && (
+              <>
+                <div className="w-px h-5 bg-gray-200" />
+                <button onClick={handleReset} className="px-3 py-1 bg-white border border-gray-300 rounded-lg text-xs text-gray-500 hover:bg-gray-50 transition-colors">초기화</button>
+              </>
+            )}
           </div>
 
           {/* ★ D79: 활성 필터 태그 표시 */}
@@ -352,7 +359,7 @@ export default function CustomerDBModal({ onClose, token, userType }: CustomerDB
             <div className="flex items-center gap-1.5 flex-wrap">
               <span className="text-xs text-gray-400">적용 필터:</span>
               {activeFilters.map(af => {
-                const opLabel = af.op === 'eq' ? '=' : af.op === 'contains' ? '포함' : af.op === 'gte' ? '>=' : af.op === 'lte' ? '<=' : af.op === 'between' ? '~' : af.op;
+                const opLabel = af.op === 'contains' ? '포함' : af.op === 'eq' ? '=' : af.op === 'gte' ? '이상' : af.op === 'lte' ? '이하' : af.op === 'between' ? '~' : af.op;
                 const valueDisplay = af.op === 'between' && af.valueMax ? `${af.value} ~ ${af.valueMax}` : af.value;
                 return (
                   <span key={af.field} className="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded-full text-xs border border-emerald-200">
@@ -388,7 +395,7 @@ export default function CustomerDBModal({ onClose, token, userType }: CustomerDB
                   <tr><td colSpan={3 + fieldColumns.filter(f => !['name', 'phone'].includes(f.field_key)).length + 1} className="py-16 text-center text-gray-400">조회 중...</td></tr>
                 ) : customers.length === 0 ? (
                   <tr><td colSpan={3 + fieldColumns.filter(f => !['name', 'phone'].includes(f.field_key)).length + 1} className="py-16 text-center text-gray-400">
-                    {searchValue ? '검색 결과가 없습니다.' : '고객 데이터가 없습니다.'}
+                    {activeFilters.length > 0 ? '검색 결과가 없습니다.' : '고객 데이터가 없습니다.'}
                   </td></tr>
                 ) : (
                   customers.map((c: any, idx: number) => (
