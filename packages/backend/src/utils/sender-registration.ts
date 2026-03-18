@@ -39,7 +39,7 @@ export interface SenderManager {
 }
 
 export interface DocumentInfo {
-  type: 'telecom_cert' | 'authorization' | 'consent_form' | 'employment_cert';
+  type: 'telecom_cert' | 'authorization' | 'consent_form' | 'employment_cert' | 'business_relation';
   originalName: string;
   storedName: string;
   filePath: string;
@@ -55,7 +55,7 @@ export interface SenderRegistration {
   label: string | null;
   store_code: string | null;
   store_name: string | null;
-  number_type: 'landline' | 'mobile'; // 일반번호 / 임직원 개인 휴대폰
+  number_type: 'company' | 'other'; // 회사명의 / 기타명의
   documents: DocumentInfo[];
   request_note: string | null;
   status: string;
@@ -244,7 +244,7 @@ export async function createRegistration(data: {
   label?: string;
   storeCode?: string;
   storeName?: string;
-  numberType?: 'landline' | 'mobile';
+  numberType?: 'company' | 'other';
   documents: DocumentInfo[];
   requestNote?: string;
 }): Promise<SenderRegistration> {
@@ -285,7 +285,7 @@ export async function createRegistration(data: {
       data.label || null,
       data.storeCode || null,
       data.storeName || null,
-      data.numberType || 'landline',
+      data.numberType || 'company',
       JSON.stringify(data.documents),
       data.requestNote || null,
     ]

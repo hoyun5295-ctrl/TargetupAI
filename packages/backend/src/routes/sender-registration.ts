@@ -161,7 +161,7 @@ router.post(
 
       const files = req.files as Express.Multer.File[];
       if (!files || files.length === 0) {
-        const docLabel = numberType === 'mobile' ? '발신번호 사용 동의서 및 재직증명서' : '통신가입증명원';
+        const docLabel = numberType === 'other' ? '필요 서류(발신번호 사용 동의서 등)' : '통신가입증명원';
         return res.status(400).json({ error: `${docLabel} 파일을 첨부해주세요.` });
       }
 
@@ -189,7 +189,7 @@ router.post(
         label,
         storeCode,
         storeName,
-        numberType: numberType === 'mobile' ? 'mobile' : 'landline',
+        numberType: numberType === 'other' ? 'other' : 'company',
         documents,
         requestNote,
       });

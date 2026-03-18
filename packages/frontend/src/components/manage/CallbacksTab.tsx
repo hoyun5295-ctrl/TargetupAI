@@ -78,7 +78,7 @@ export default function CallbacksTab() {
   const [regStoreCode, setRegStoreCode] = useState('');
   const [regStoreName, setRegStoreName] = useState('');
   const [regNote, setRegNote] = useState('');
-  const [regNumberType, setRegNumberType] = useState<'landline' | 'mobile'>('landline');
+  const [regNumberType, setRegNumberType] = useState<'company' | 'other'>('company');
   const [regFiles, setRegFiles] = useState<File[]>([]);
   const [regDocTypes, setRegDocTypes] = useState<string[]>([]);
   const [regSubmitting, setRegSubmitting] = useState(false);
@@ -241,7 +241,7 @@ export default function CallbacksTab() {
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
-    const defaultType = regNumberType === 'mobile' ? 'consent_form' : 'telecom_cert';
+    const defaultType = regNumberType === 'other' ? 'consent_form' : 'telecom_cert';
     setRegFiles(prev => [...prev, ...files]);
     setRegDocTypes(prev => [...prev, ...files.map(() => defaultType)]);
     if (fileInputRef.current) fileInputRef.current.value = '';
@@ -255,7 +255,7 @@ export default function CallbacksTab() {
   const handleSubmitRegistration = async () => {
     if (!regPhone.trim()) { setToast({ msg: '발신번호를 입력해주세요.', type: 'error' }); return; }
     if (regFiles.length === 0) {
-      const msg = regNumberType === 'mobile' ? '발신번호 사용 동의서 및 재직증명서를 첨부해주세요.' : '통신가입증명원을 첨부해주세요.';
+      const msg = regNumberType === 'other' ? '필요 서류를 첨부해주세요. (발신번호 사용 동의서 + 재직증명서 또는 거래관계증명파일)' : '통신가입증명원을 첨부해주세요.';
       setToast({ msg, type: 'error' }); return;
     }
     setRegSubmitting(true);
@@ -279,7 +279,7 @@ export default function CallbacksTab() {
       if (data.success) {
         setToast({ msg: '발신번호 등록 신청이 접수되었습니다.', type: 'success' });
         setRegPhone(''); setRegLabel(''); setRegStoreCode(''); setRegStoreName(''); setRegNote('');
-        setRegFiles([]); setRegDocTypes([]); setRegNumberType('landline');
+        setRegFiles([]); setRegDocTypes([]); setRegNumberType('company');
         setMyRegistrations([data.registration, ...myRegistrations]);
       } else {
         setToast({ msg: data.error || '신청 실패', type: 'error' });
@@ -532,38 +532,45 @@ export default function CallbacksTab() {
                   <label className="block text-sm font-medium text-gray-700 mb-2">번호 유형 *</label>
                   <div className="flex gap-3">
                     <label className={`flex-1 cursor-pointer border-2 rounded-lg p-3 transition ${
-                      regNumberType === 'landline' ? 'border-indigo-500 bg-indigo-50' : 'border-gray-200 hover:border-gray-300'
+                      regNumberType === 'company' ? 'border-indigo-500 bg-indigo-50' : 'border-gray-200 hover:border-gray-300'
                     }`}>
-                      <input type="radio" name="numberType" value="landline" checked={regNumberType === 'landline'}
-                        onChange={() => { setRegNumberType('landline'); setRegFiles([]); setRegDocTypes([]); }}
+                      <input type="radio" name="numberType" value="company" checked={regNumberType === 'company'}
+                        onChange={() => { setRegNumberType('company'); setRegFiles([]); setRegDocTypes([]); }}
                         className="sr-only" />
-                      <span className="text-sm font-medium text-gray-900">일반번호 (유선전화)</span>
-                      <p className="text-xs text-gray-500 mt-0.5">02, 031 등 일반 전화번호</p>
+                      <span className="text-sm font-medium text-gray-900">회사명의 발신번호</span>
+                      <p className="text-xs text-gray-500 mt-0.5">회사(법인) 명의로 개통된 번호</p>
                     </label>
                     <label className={`flex-1 cursor-pointer border-2 rounded-lg p-3 transition ${
-                      regNumberType === 'mobile' ? 'border-indigo-500 bg-indigo-50' : 'border-gray-200 hover:border-gray-300'
+                      regNumberType === 'other' ? 'border-indigo-500 bg-indigo-50' : 'border-gray-200 hover:border-gray-300'
                     }`}>
-                      <input type="radio" name="numberType" value="mobile" checked={regNumberType === 'mobile'}
-                        onChange={() => { setRegNumberType('mobile'); setRegFiles([]); setRegDocTypes([]); }}
+                      <input type="radio" name="numberType" value="other" checked={regNumberType === 'other'}
+                        onChange={() => { setRegNumberType('other'); setRegFiles([]); setRegDocTypes([]); }}
                         className="sr-only" />
-                      <span className="text-sm font-medium text-gray-900">임직원 개인 휴대폰번호</span>
-                      <p className="text-xs text-gray-500 mt-0.5">010 등 개인 명의 휴대폰</p>
+                      <span className="text-sm font-medium text-gray-900">기타명의 발신번호</span>
+                      <p className="text-xs text-gray-500 mt-0.5">직원 개인, 대리점, 지사 등 타 명의 번호</p>
                     </label>
                   </div>
                 </div>
 
                 {/* 번호 유형별 안내 + 양식 다운로드 */}
-                <div className={`rounded-lg p-3 mb-4 border ${regNumberType === 'landline' ? 'bg-gray-50 border-gray-200' : 'bg-orange-50 border-orange-200'}`}>
-                  {regNumberType === 'landline' ? (
+                <div className={`rounded-lg p-3 mb-4 border ${regNumberType === 'company' ? 'bg-gray-50 border-gray-200' : 'bg-orange-50 border-orange-200'}`}>
+                  {regNumberType === 'company' ? (
                     <div>
                       <p className="text-sm font-medium text-gray-800">필요 서류: 통신가입증명원</p>
-                      <p className="text-xs text-gray-500 mt-1">해당 번호의 통신사에서 발급받은 통신가입증명원을 첨부해주세요.</p>
+                      <p className="text-xs text-gray-500 mt-1">회사(법인) 명의로 개통된 번호의 통신가입증명원을 첨부해주세요.</p>
                     </div>
                   ) : (
                     <div>
-                      <p className="text-sm font-medium text-orange-800">필요 서류: 발신번호 사용 동의서 + 재직증명서</p>
-                      <p className="text-xs text-orange-600 mt-1">개인 휴대폰번호 등록 시 발신번호 사용 동의서와 재직증명서를 함께 첨부해주세요. 재직증명서는 자체 양식으로 준비해주세요.</p>
-                      <div className="mt-2">
+                      <p className="text-sm font-medium text-orange-800">필요 서류 (해당하는 서류를 모두 첨부)</p>
+                      <div className="mt-2 space-y-1.5">
+                        <div className="text-xs text-orange-700">
+                          <span className="font-medium">직원 개인번호:</span> 재직증명서 + 발신번호 사용 동의서
+                        </div>
+                        <div className="text-xs text-orange-700">
+                          <span className="font-medium">대리점·지사·기타 명의:</span> 거래관계증명파일(계약서, 거래내역서) + 발신번호 사용 동의서
+                        </div>
+                      </div>
+                      <div className="mt-3">
                         <a href="/templates/발신번호_사용_동의서.docx" download
                           className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-orange-300 text-orange-700 rounded-lg text-sm hover:bg-orange-100 transition">
                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
@@ -578,7 +585,7 @@ export default function CallbacksTab() {
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">발신번호 *</label>
                     <input type="text" value={regPhone} onChange={(e) => setRegPhone(e.target.value.replace(/[^\d-]/g, ''))}
-                      className="w-full px-3 py-2 border rounded-lg" placeholder={regNumberType === 'mobile' ? '010-1234-5678' : '02-1234-5678'} />
+                      className="w-full px-3 py-2 border rounded-lg" placeholder="02-1234-5678" />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">라벨 (별칭)</label>
@@ -606,9 +613,9 @@ export default function CallbacksTab() {
                 {/* 파일 첨부 */}
                 <div className="mb-4">
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    서류 첨부 * {regNumberType === 'landline'
+                    서류 첨부 * {regNumberType === 'company'
                       ? '(통신가입증명원)'
-                      : '(발신번호 사용 동의서 + 재직증명서)'}
+                      : '(발신번호 사용 동의서 + 재직증명서 또는 거래관계증명파일)'}
                   </label>
                   <div className="flex items-center gap-3">
                     <button onClick={() => fileInputRef.current?.click()}
@@ -623,12 +630,13 @@ export default function CallbacksTab() {
                           <span className="flex-1 text-sm text-gray-700 truncate">{file.name}</span>
                           <select value={regDocTypes[idx] || 'telecom_cert'} onChange={(e) => { const t = [...regDocTypes]; t[idx] = e.target.value; setRegDocTypes(t); }}
                             className="text-xs border rounded px-2 py-1">
-                            {regNumberType === 'landline' ? (
+                            {regNumberType === 'company' ? (
                               <option value="telecom_cert">통신가입증명원</option>
                             ) : (
                               <>
                                 <option value="consent_form">발신번호 사용 동의서</option>
                                 <option value="employment_cert">재직증명서</option>
+                                <option value="business_relation">거래관계증명파일</option>
                               </>
                             )}
                           </select>
@@ -672,7 +680,7 @@ export default function CallbacksTab() {
                         <tr key={reg.id} className="hover:bg-gray-50">
                           <td className="px-4 py-2.5 font-mono">{reg.phone}</td>
                           <td className="px-4 py-2.5 text-gray-600 text-xs">
-                            {reg.number_type === 'mobile' ? '휴대폰' : '일반번호'}
+                            {reg.number_type === 'other' ? '기타명의' : '회사명의'}
                           </td>
                           <td className="px-4 py-2.5 text-gray-700">{reg.label || '-'}</td>
                           <td className="px-4 py-2.5 text-gray-600">{reg.store_name || '-'}</td>
