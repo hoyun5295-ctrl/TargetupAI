@@ -390,9 +390,13 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
   // 특수 처리 필드(gender, grade, region, age, birth_date, store_code)는 위에서 처리 완료.
   // 나머지 FIELD_MAP 필드는 dataType 기반으로 자동 필터 생성.
   // ────────────────────────────────────────────────
+  // ★ 위에서 이미 특수 처리한 필드만 등록 (normalize 헬퍼 사용 또는 별도 분기 필요한 것)
+  // name, email, address는 일반 문자열 필드이므로 FIELD_MAP 동적 루프에서 자동 처리
+  // phone, sms_opt_in은 기본 WHERE절에 이미 포함 (필터 불필요)
   const SPECIAL_FIELDS = new Set([
-    'gender', 'grade', 'region', 'age', 'name', 'phone', 'email',
-    'address', 'sms_opt_in', 'store_code',
+    'gender', 'grade', 'region', 'age',  // normalize 헬퍼 사용
+    'phone', 'sms_opt_in',               // 기본 WHERE절에 포함
+    'store_code',                          // 아래 별도 분기
   ]);
 
   for (const field of getColumnFields()) {
