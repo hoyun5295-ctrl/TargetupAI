@@ -271,18 +271,24 @@ router.post('/test-send', async (req: Request, res: Response) => {
       return res.status(404).json({ error: '회사 정보를 찾을 수 없습니다.' });
     }
 
-    // ★ 서버가 DB에서 직접 첫 번째 활성 고객 조회 (프론트 의존 완전 제거)
+    // ★ 미리보기와 동일한 고객으로 개인화 — 프론트에서 sampleCustomer 전달 시 그대로 사용
     const testFieldMappings = extractVarCatalog(companyResult.rows[0]?.customer_schema).fieldMappings;
-    // ★ B-D70-16: 커스텀 필드 매핑 보강 (미리보기 vs 실제 발송 개인화 불일치 수정)
     await enrichWithCustomFields(testFieldMappings, companyId);
-    // ★ storageType 기반 동적 필터 — 직접 컬럼만 SELECT, JSONB 내부 키는 custom_fields 컬럼에서 접근 (D72)
-    const testMappingCols = Object.values(testFieldMappings).filter((m: any) => m.storageType !== 'custom_fields').map((m: any) => m.column);
-    const testSelectCols = [...new Set(['phone', 'custom_fields', ...testMappingCols])].join(', ');
-    const testFirstCustomerResult = await query(
-      `SELECT ${testSelectCols} FROM customers WHERE company_id = $1 AND is_active = true AND sms_opt_in = true ORDER BY created_at DESC LIMIT 1`,
-      [companyId]
-    );
-    const testFirstCustomer: Record<string, any> = testFirstCustomerResult.rows[0] || {};
+
+    let testFirstCustomer: Record<string, any>;
+    if (req.body.sampleCustomer && typeof req.body.sampleCustomer === 'object' && Object.keys(req.body.sampleCustomer).length > 0) {
+      // 프론트에서 미리보기에 사용한 샘플 고객 그대로 사용 (미리보기 = 테스트발송 = 스팸테스트 동일 보장)
+      testFirstCustomer = req.body.sampleCustomer;
+    } else {
+      // 폴백: DB에서 조회 (sampleCustomer 미전달 시)
+      const testMappingCols = Object.values(testFieldMappings).filter((m: any) => m.storageType !== 'custom_fields').map((m: any) => m.column);
+      const testSelectCols = [...new Set(['phone', 'custom_fields', ...testMappingCols])].join(', ');
+      const testFirstCustomerResult = await query(
+        `SELECT ${testSelectCols} FROM customers WHERE company_id = $1 AND is_active = true AND sms_opt_in = true ORDER BY name ASC NULLS LAST LIMIT 1`,
+        [companyId]
+      );
+      testFirstCustomer = testFirstCustomerResult.rows[0] || {};
+    }
 
     // 회신번호 가져오기 (callback_numbers 테이블에서)
     const callbackResult = await query(

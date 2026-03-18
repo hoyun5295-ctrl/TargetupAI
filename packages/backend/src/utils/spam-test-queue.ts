@@ -166,8 +166,9 @@ export async function enqueueSpamTest(params: SpamTestEnqueueParams): Promise<Sp
     } else {
       const mappingCols = Object.values(fieldMappings).filter((m: any) => m.storageType !== 'custom_fields').map((m: any) => m.column);
       const selectCols = [...new Set(['phone', 'custom_fields', ...mappingCols])].join(', ');
+      // ★ 미리보기와 동일한 정렬 (name ASC) — recommend-target의 샘플 고객과 일치 보장
       const firstResult = await query(
-        `SELECT ${selectCols} FROM customers WHERE company_id = $1 AND is_active = true AND sms_opt_in = true ORDER BY created_at DESC LIMIT 1`,
+        `SELECT ${selectCols} FROM customers WHERE company_id = $1 AND is_active = true AND sms_opt_in = true ORDER BY name ASC NULLS LAST LIMIT 1`,
         [companyId]
       );
       firstCustomer = firstResult.rows[0] || {};

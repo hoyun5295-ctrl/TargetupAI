@@ -1729,6 +1729,7 @@ const campaignData = {
           messageType: selectedChannel,
           subject: selectedMsg.subject || '',
           mmsImagePaths: mmsUploadedImages.map(img => img.serverPath),
+          sampleCustomer: sampleCustomer && Object.keys(sampleCustomer).length > 0 ? sampleCustomer : undefined,
         }),
       });
       const data = await res.json();
@@ -1777,6 +1778,7 @@ const campaignData = {
           messageType: targetMsgType,
           subject: targetSubject || '',
           mmsImagePaths: mmsUploadedImages.map(img => img.serverPath),
+          sampleCustomer: sampleCustomer && Object.keys(sampleCustomer).length > 0 ? sampleCustomer : undefined,
         }),
       });
       const data = await res.json();
