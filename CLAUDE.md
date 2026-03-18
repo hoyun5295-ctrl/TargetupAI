@@ -423,6 +423,9 @@ PostgreSQL campaigns/campaign_runs 생성
 | **window.confirm 사용** | SMS→LMS 전환 확인을 window.confirm으로 표시 → 다크모드/테마 미적용, UX 이질적 | **window.confirm/alert 사용 금지.** 모든 확인 대화상자는 커스텀 모달 컴포넌트 사용 (D75) |
 | **AI 문안 요일 오류** | generateMessages 프롬프트에 달력 미제공 → AI가 요일 자체 계산 → 3/20(목)이 실제로는 금요일 | **AI 프롬프트에 날짜/요일이 관여하는 모든 함수에 getKoreanCalendar() 달력 제공 필수.** getKoreanToday() 쓰는 곳이면 getKoreanCalendar()도 함께 (D76) |
 | **DB DEFAULT 하드코딩** | spam_filter_tests.spam_check_number에 DEFAULT '0807196700' 하드코딩 → 모든 고객사 테스트에 동일 080번호 기록 | **DB DEFAULT로 특정 값 하드코딩 금지.** 고객사별로 달라지는 값(080번호, 발신번호 등)은 반드시 코드에서 동적 조회하여 INSERT (D78) |
+| **SPECIAL_FIELDS 과잉 등록** | customer-filter.ts SPECIAL_FIELDS에 name/email/address 포함 → FIELD_MAP 동적 루프에서 건너뜀 + 전용 핸들러 없음 → AI가 address 필터 반환해도 WHERE절 비어서 전체 고객 반환 | **SPECIAL_FIELDS에는 normalize 헬퍼 필요 필드만. 나머지는 FIELD_MAP 동적 루프가 자동 처리.** 필드별 핸들러 수동 추가 구조 = 누락 재발 (D82) |
+| **안전장치가 정상 결과 차단** | 풀백 방지 로직이 DB 추출 결과(actualCount)를 임의로 0으로 덮어씀 → AI 타겟추출이 항상 0명 | **안전장치는 로그만 남기고 정상 결과를 훼손하지 않는다.** DB에서 정확히 추출한 결과가 최종 (D82) |
+| **테스트발송 샘플 고객 불일치** | 미리보기 ORDER BY name ASC vs 테스트발송 ORDER BY created_at DESC → 다른 고객 데이터로 치환 | **미리보기 샘플 고객을 테스트발송에 그대로 전달.** 프론트 → 백엔드 sampleCustomer body 전달 (D82) |
 
 ### ⚠️ 필수 체크 원칙 1: 유틸 함수 수정/추가 시 소비처 전수 확인
 
@@ -453,6 +456,16 @@ PostgreSQL campaigns/campaign_runs 생성
 > 1. **즉시 컨트롤타워(utils/)에 함수로 추출**한다
 > 2. 모든 인라인 코드를 컨트롤타워 호출로 교체한다
 > 3. 신규 기능 구현 시에도 "이 로직이 다른 경로에서도 필요한가?" 먼저 확인하고, 필요하면 처음부터 컨트롤타워로 만든다
+
+### ⚠️ 필수 체크 원칙 4: SPECIAL_FIELDS / 하드코딩 리스트에 필드 등록 금지 (D82 교훈)
+
+> **D82에서 반복된 패턴:** customer-filter.ts mixed 모드의 SPECIAL_FIELDS에 name/email/address가 포함 → FIELD_MAP 동적 루프에서 건너뜀 → 전용 핸들러도 없어서 필터 무시 → 전체 고객 반환. structured 모드의 STRING_FIELDS에 phone 누락 → 고객DB 전화번호 필터 무시.
+>
+> **원칙:**
+> 1. **SPECIAL_FIELDS에는 normalize 헬퍼가 필요한 필드(gender, grade, region, age)와 기본 WHERE절 포함 필드(phone, sms_opt_in), 별도 분기 필드(store_code)만 등록**한다
+> 2. **나머지 모든 직접 컬럼 필드는 FIELD_MAP 동적 루프가 dataType 기반으로 자동 처리**한다
+> 3. **structured 모드도 FIELD_MAP 동적 처리 fallback 추가 완료** — 새 필드는 FIELD_MAP에만 등록하면 양쪽 모드 자동 반영
+> 4. **"안전장치"가 정상 결과를 차단하면 안 됨** — 풀백 방지 로직 등 안전장치는 로그만 남기고 DB 추출 결과를 임의로 0으로 덮어쓰지 않는다
 
 ---
 

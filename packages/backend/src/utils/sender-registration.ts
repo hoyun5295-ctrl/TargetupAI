@@ -12,19 +12,34 @@ import pool from '../config/database';
 //  타입 정의
 // ============================================================
 
+export interface ManagerDocInfo {
+  originalName: string;
+  storedName: string;
+  filePath: string;
+  fileSize: number;
+  uploadedAt: string;
+}
+
 export interface SenderManager {
   id: string;
   company_id: string;
   manager_name: string;
   manager_phone: string;
   manager_email: string | null;
-  status: string;
+  authorization_doc: ManagerDocInfo | null;
+  status: string; // pending | approved | rejected | inactive
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  reject_reason: string | null;
   created_at: string;
   updated_at: string;
+  // JOIN 필드 (조회 시)
+  company_name?: string;
+  reviewed_by_name?: string;
 }
 
 export interface DocumentInfo {
-  type: 'telecom_cert' | 'authorization';
+  type: 'telecom_cert' | 'authorization' | 'consent_form' | 'employment_cert';
   originalName: string;
   storedName: string;
   filePath: string;
@@ -40,6 +55,7 @@ export interface SenderRegistration {
   label: string | null;
   store_code: string | null;
   store_name: string | null;
+  number_type: 'landline' | 'mobile'; // 일반번호 / 임직원 개인 휴대폰
   documents: DocumentInfo[];
   request_note: string | null;
   status: string;
@@ -59,25 +75,31 @@ export interface SenderRegistration {
 //  발신번호 관리 담당자 (sender_managers)
 // ============================================================
 
-/** 담당자 목록 조회 */
+/** 담당자 목록 조회 (inactive 제외) */
 export async function getManagers(companyId: string): Promise<SenderManager[]> {
   const result = await pool.query(
-    `SELECT * FROM sender_managers WHERE company_id = $1 AND status = 'active' ORDER BY created_at DESC`,
+    `SELECT * FROM sender_managers WHERE company_id = $1 AND status != 'inactive' ORDER BY created_at DESC`,
     [companyId]
   );
   return result.rows;
 }
 
-/** 담당자 등록 */
+/** 담당자 등록 (위임장 첨부 시 status='pending' → 슈퍼관리자 승인 필요) */
 export async function createManager(
   companyId: string,
-  data: { managerName: string; managerPhone: string; managerEmail?: string }
+  data: { managerName: string; managerPhone: string; managerEmail?: string; authorizationDoc?: ManagerDocInfo }
 ): Promise<SenderManager> {
   const result = await pool.query(
-    `INSERT INTO sender_managers (company_id, manager_name, manager_phone, manager_email)
-     VALUES ($1, $2, $3, $4)
+    `INSERT INTO sender_managers (company_id, manager_name, manager_phone, manager_email, authorization_doc, status)
+     VALUES ($1, $2, $3, $4, $5, 'pending')
      RETURNING *`,
-    [companyId, data.managerName, data.managerPhone, data.managerEmail || null]
+    [
+      companyId,
+      data.managerName,
+      data.managerPhone,
+      data.managerEmail || null,
+      data.authorizationDoc ? JSON.stringify(data.authorizationDoc) : null,
+    ]
   );
   return result.rows[0];
 }
@@ -105,10 +127,109 @@ export async function updateManager(
 export async function deleteManager(managerId: string, companyId: string): Promise<boolean> {
   const result = await pool.query(
     `UPDATE sender_managers SET status = 'inactive', updated_at = now()
-     WHERE id = $1 AND company_id = $2 AND status = 'active'`,
+     WHERE id = $1 AND company_id = $2 AND status != 'inactive'`,
     [managerId, companyId]
   );
   return (result.rowCount ?? 0) > 0;
+}
+
+// ============================================================
+//  담당자 위임장 승인/반려 (슈퍼관리자)
+// ============================================================
+
+/** 담당자 승인 대기 목록 (슈퍼관리자용) */
+export async function getPendingManagers(): Promise<SenderManager[]> {
+  const result = await pool.query(
+    `SELECT sm.*, c.company_name
+     FROM sender_managers sm
+     LEFT JOIN companies c ON sm.company_id = c.id
+     WHERE sm.status = 'pending'
+     ORDER BY sm.created_at ASC`
+  );
+  return result.rows;
+}
+
+/** 전체 담당자 목록 (슈퍼관리자용, 필터 가능) */
+export async function getAllManagers(status?: string): Promise<SenderManager[]> {
+  let sql = `
+    SELECT sm.*, c.company_name,
+           sa.name as reviewed_by_name
+    FROM sender_managers sm
+    LEFT JOIN companies c ON sm.company_id = c.id
+    LEFT JOIN super_admins sa ON sm.reviewed_by = sa.id
+    WHERE sm.status != 'inactive'
+  `;
+  const params: any[] = [];
+
+  if (status) {
+    sql += ' AND sm.status = $1';
+    params.push(status);
+  }
+
+  sql += ' ORDER BY sm.created_at DESC';
+  const result = await pool.query(sql, params);
+  return result.rows;
+}
+
+/** 담당자 위임장 승인 */
+export async function approveManager(
+  managerId: string,
+  reviewedBy: string
+): Promise<SenderManager> {
+  const result = await pool.query(
+    `UPDATE sender_managers
+     SET status = 'approved',
+         reviewed_by = $1,
+         reviewed_at = now(),
+         updated_at = now()
+     WHERE id = $2 AND status = 'pending'
+     RETURNING *`,
+    [reviewedBy, managerId]
+  );
+  if (result.rows.length === 0) {
+    throw new Error('승인 대기 상태의 담당자를 찾을 수 없습니다.');
+  }
+  return result.rows[0];
+}
+
+/** 담당자 위임장 반려 */
+export async function rejectManager(
+  managerId: string,
+  reviewedBy: string,
+  rejectReason: string
+): Promise<SenderManager> {
+  const result = await pool.query(
+    `UPDATE sender_managers
+     SET status = 'rejected',
+         reviewed_by = $1,
+         reviewed_at = now(),
+         reject_reason = $2,
+         updated_at = now()
+     WHERE id = $3 AND status = 'pending'
+     RETURNING *`,
+    [reviewedBy, rejectReason, managerId]
+  );
+  if (result.rows.length === 0) {
+    throw new Error('승인 대기 상태의 담당자를 찾을 수 없습니다.');
+  }
+  return result.rows[0];
+}
+
+/** 담당자 승인 대기 건수 (배지용) */
+export async function getPendingManagerCount(): Promise<number> {
+  const result = await pool.query(
+    `SELECT COUNT(*) as cnt FROM sender_managers WHERE status = 'pending'`
+  );
+  return parseInt(result.rows[0].cnt, 10);
+}
+
+/** 승인된 담당자가 있는지 확인 (발신번호 등록 전제조건) */
+export async function hasApprovedManager(companyId: string): Promise<boolean> {
+  const result = await pool.query(
+    `SELECT 1 FROM sender_managers WHERE company_id = $1 AND status = 'approved' LIMIT 1`,
+    [companyId]
+  );
+  return result.rows.length > 0;
 }
 
 // ============================================================
@@ -123,9 +244,16 @@ export async function createRegistration(data: {
   label?: string;
   storeCode?: string;
   storeName?: string;
+  numberType?: 'landline' | 'mobile';
   documents: DocumentInfo[];
   requestNote?: string;
 }): Promise<SenderRegistration> {
+  // 승인된 담당자 존재 여부 체크 (1차 위임장 승인 완료 필수)
+  const approved = await hasApprovedManager(data.companyId);
+  if (!approved) {
+    throw new Error('먼저 담당자 등록 및 위임장 승인을 완료해주세요.');
+  }
+
   // 중복 신청 체크: 같은 회사에서 같은 번호로 pending 상태인 건이 있으면 차단
   const dupCheck = await pool.query(
     `SELECT id FROM sender_registrations
@@ -147,8 +275,8 @@ export async function createRegistration(data: {
 
   const result = await pool.query(
     `INSERT INTO sender_registrations
-       (company_id, requested_by, phone, label, store_code, store_name, documents, request_note)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       (company_id, requested_by, phone, label, store_code, store_name, number_type, documents, request_note)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
      RETURNING *`,
     [
       data.companyId,
@@ -157,6 +285,7 @@ export async function createRegistration(data: {
       data.label || null,
       data.storeCode || null,
       data.storeName || null,
+      data.numberType || 'landline',
       JSON.stringify(data.documents),
       data.requestNote || null,
     ]
@@ -321,10 +450,15 @@ export async function rejectRegistration(
   return result.rows[0];
 }
 
-/** 승인 대기 건수 조회 (슈퍼관리자 대시보드 배지용) */
-export async function getPendingCount(): Promise<number> {
-  const result = await pool.query(
+/** 승인 대기 건수 조회 (슈퍼관리자 대시보드 배지용) — 담당자 + 발신번호 합산 */
+export async function getPendingCount(): Promise<{ managers: number; registrations: number; total: number }> {
+  const mgrResult = await pool.query(
+    `SELECT COUNT(*) as cnt FROM sender_managers WHERE status = 'pending'`
+  );
+  const regResult = await pool.query(
     `SELECT COUNT(*) as cnt FROM sender_registrations WHERE status = 'pending'`
   );
-  return parseInt(result.rows[0].cnt, 10);
+  const managers = parseInt(mgrResult.rows[0].cnt, 10);
+  const registrations = parseInt(regResult.rows[0].cnt, 10);
+  return { managers, registrations, total: managers + registrations };
 }

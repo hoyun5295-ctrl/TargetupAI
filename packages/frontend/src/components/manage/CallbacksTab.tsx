@@ -28,6 +28,7 @@ interface SenderRegistration {
   label: string | null;
   store_code: string | null;
   store_name: string | null;
+  number_type: string;
   documents: DocumentInfo[];
   request_note: string | null;
   status: string;
@@ -40,6 +41,9 @@ interface SenderManager {
   manager_name: string;
   manager_phone: string;
   manager_email: string | null;
+  authorization_doc: { originalName: string; storedName: string; filePath: string; fileSize: number } | null;
+  status: string; // pending | approved | rejected
+  reject_reason: string | null;
 }
 
 export default function CallbacksTab() {
@@ -58,12 +62,23 @@ export default function CallbacksTab() {
   const [page, setPage] = useState(1);
   const perPage = 10;
 
-  // --- 등록 신청 ---
+  // --- 1차: 담당자 + 위임장 ---
+  const [senderManagers, setSenderManagers] = useState<SenderManager[]>([]);
+  const [newMgrName, setNewMgrName] = useState('');
+  const [newMgrPhone, setNewMgrPhone] = useState('');
+  const [newMgrEmail, setNewMgrEmail] = useState('');
+  const [mgrAuthFile, setMgrAuthFile] = useState<File | null>(null);
+  const mgrFileInputRef = useRef<HTMLInputElement>(null);
+  const [mgrSubmitting, setMgrSubmitting] = useState(false);
+
+  // --- 2차: 발신번호 등록 ---
+  const [hasApproved, setHasApproved] = useState(false);
   const [regPhone, setRegPhone] = useState('');
   const [regLabel, setRegLabel] = useState('');
   const [regStoreCode, setRegStoreCode] = useState('');
   const [regStoreName, setRegStoreName] = useState('');
   const [regNote, setRegNote] = useState('');
+  const [regNumberType, setRegNumberType] = useState<'landline' | 'mobile'>('landline');
   const [regFiles, setRegFiles] = useState<File[]>([]);
   const [regDocTypes, setRegDocTypes] = useState<string[]>([]);
   const [regSubmitting, setRegSubmitting] = useState(false);
@@ -72,18 +87,13 @@ export default function CallbacksTab() {
   // 신청 이력
   const [myRegistrations, setMyRegistrations] = useState<SenderRegistration[]>([]);
 
-  // 담당자
-  const [senderManagers, setSenderManagers] = useState<SenderManager[]>([]);
-  const [newMgrName, setNewMgrName] = useState('');
-  const [newMgrPhone, setNewMgrPhone] = useState('');
-  const [newMgrEmail, setNewMgrEmail] = useState('');
-
   useEffect(() => { loadNumbers(); }, []);
 
   useEffect(() => {
     if (subTab === 'register') {
       loadRegistrations();
       loadManagers();
+      checkApprovedManager();
     }
   }, [subTab]);
 
@@ -160,15 +170,7 @@ export default function CallbacksTab() {
     }
   };
 
-  // === 등록 신청 로직 ===
-  const loadRegistrations = async () => {
-    try {
-      const res = await fetch('/api/sender-registration/my', { headers: { Authorization: `Bearer ${getToken()}` } });
-      const data = await res.json();
-      if (data.success) setMyRegistrations(data.registrations || []);
-    } catch {}
-  };
-
+  // === 1차: 담당자 + 위임장 로직 ===
   const loadManagers = async () => {
     try {
       const res = await fetch('/api/sender-registration/managers', { headers: { Authorization: `Bearer ${getToken()}` } });
@@ -177,11 +179,71 @@ export default function CallbacksTab() {
     } catch {}
   };
 
+  const checkApprovedManager = async () => {
+    try {
+      const res = await fetch('/api/sender-registration/has-approved-manager', { headers: { Authorization: `Bearer ${getToken()}` } });
+      const data = await res.json();
+      if (data.success) setHasApproved(data.hasApprovedManager);
+    } catch {}
+  };
+
+  const handleAddManager = async () => {
+    if (!newMgrName.trim() || !newMgrPhone.trim()) { setToast({ msg: '담당자 이름과 전화번호는 필수입니다.', type: 'error' }); return; }
+    if (!mgrAuthFile) { setToast({ msg: '위임장 파일을 첨부해주세요.', type: 'error' }); return; }
+    setMgrSubmitting(true);
+    try {
+      const formData = new FormData();
+      formData.append('managerName', newMgrName.trim());
+      formData.append('managerPhone', newMgrPhone.replace(/\D/g, ''));
+      if (newMgrEmail.trim()) formData.append('managerEmail', newMgrEmail.trim());
+      formData.append('authorizationDoc', mgrAuthFile);
+
+      const res = await fetch('/api/sender-registration/managers', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${getToken()}` },
+        body: formData,
+      });
+      const data = await res.json();
+      if (data.success) {
+        setSenderManagers([data.manager, ...senderManagers]);
+        setNewMgrName(''); setNewMgrPhone(''); setNewMgrEmail('');
+        setMgrAuthFile(null);
+        if (mgrFileInputRef.current) mgrFileInputRef.current.value = '';
+        setToast({ msg: '담당자 등록 및 위임장이 접수되었습니다. 관리자 승인을 기다려주세요.', type: 'success' });
+      } else { setToast({ msg: data.error || '등록 실패', type: 'error' }); }
+    } catch { setToast({ msg: '등록 중 오류', type: 'error' }); }
+    finally { setMgrSubmitting(false); }
+  };
+
+  const handleDeleteManager = async (id: string) => {
+    try {
+      const res = await fetch(`/api/sender-registration/managers/${id}`, {
+        method: 'DELETE', headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      const data = await res.json();
+      if (data.success) {
+        setSenderManagers(senderManagers.filter(m => m.id !== id));
+        setToast({ msg: '삭제되었습니다.', type: 'success' });
+        checkApprovedManager();
+      }
+    } catch { setToast({ msg: '삭제 중 오류', type: 'error' }); }
+  };
+
+  // === 2차: 발신번호 등록 로직 ===
+  const loadRegistrations = async () => {
+    try {
+      const res = await fetch('/api/sender-registration/my', { headers: { Authorization: `Bearer ${getToken()}` } });
+      const data = await res.json();
+      if (data.success) setMyRegistrations(data.registrations || []);
+    } catch {}
+  };
+
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
+    const defaultType = regNumberType === 'mobile' ? 'consent_form' : 'telecom_cert';
     setRegFiles(prev => [...prev, ...files]);
-    setRegDocTypes(prev => [...prev, ...files.map(() => 'telecom_cert')]);
+    setRegDocTypes(prev => [...prev, ...files.map(() => defaultType)]);
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
@@ -192,11 +254,15 @@ export default function CallbacksTab() {
 
   const handleSubmitRegistration = async () => {
     if (!regPhone.trim()) { setToast({ msg: '발신번호를 입력해주세요.', type: 'error' }); return; }
-    if (regFiles.length === 0) { setToast({ msg: '통신가입증명원 파일을 첨부해주세요.', type: 'error' }); return; }
+    if (regFiles.length === 0) {
+      const msg = regNumberType === 'mobile' ? '발신번호 사용 동의서 및 재직증명서를 첨부해주세요.' : '통신가입증명원을 첨부해주세요.';
+      setToast({ msg, type: 'error' }); return;
+    }
     setRegSubmitting(true);
     try {
       const formData = new FormData();
       formData.append('phone', regPhone.trim());
+      formData.append('numberType', regNumberType);
       if (regLabel.trim()) formData.append('label', regLabel.trim());
       if (regStoreCode.trim()) formData.append('storeCode', regStoreCode.trim());
       if (regStoreName.trim()) formData.append('storeName', regStoreName.trim());
@@ -213,7 +279,7 @@ export default function CallbacksTab() {
       if (data.success) {
         setToast({ msg: '발신번호 등록 신청이 접수되었습니다.', type: 'success' });
         setRegPhone(''); setRegLabel(''); setRegStoreCode(''); setRegStoreName(''); setRegNote('');
-        setRegFiles([]); setRegDocTypes([]);
+        setRegFiles([]); setRegDocTypes([]); setRegNumberType('landline');
         setMyRegistrations([data.registration, ...myRegistrations]);
       } else {
         setToast({ msg: data.error || '신청 실패', type: 'error' });
@@ -221,36 +287,6 @@ export default function CallbacksTab() {
     } catch {
       setToast({ msg: '신청 중 오류가 발생했습니다.', type: 'error' });
     } finally { setRegSubmitting(false); }
-  };
-
-  const handleAddManager = async () => {
-    if (!newMgrName.trim() || !newMgrPhone.trim()) { setToast({ msg: '담당자 이름과 전화번호는 필수입니다.', type: 'error' }); return; }
-    try {
-      const res = await fetch('/api/sender-registration/managers', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
-        body: JSON.stringify({ managerName: newMgrName.trim(), managerPhone: newMgrPhone.replace(/\D/g, ''), managerEmail: newMgrEmail.trim() || undefined }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        setSenderManagers([data.manager, ...senderManagers]);
-        setNewMgrName(''); setNewMgrPhone(''); setNewMgrEmail('');
-        setToast({ msg: '담당자가 등록되었습니다.', type: 'success' });
-      } else { setToast({ msg: data.error || '등록 실패', type: 'error' }); }
-    } catch { setToast({ msg: '등록 중 오류', type: 'error' }); }
-  };
-
-  const handleDeleteManager = async (id: string) => {
-    try {
-      const res = await fetch(`/api/sender-registration/managers/${id}`, {
-        method: 'DELETE', headers: { Authorization: `Bearer ${getToken()}` },
-      });
-      const data = await res.json();
-      if (data.success) {
-        setSenderManagers(senderManagers.filter(m => m.id !== id));
-        setToast({ msg: '삭제되었습니다.', type: 'success' });
-      }
-    } catch { setToast({ msg: '삭제 중 오류', type: 'error' }); }
   };
 
   const formatPhone = (phone: string) => {
@@ -379,113 +415,237 @@ export default function CallbacksTab() {
       {/* === 발신번호 등록 신청 탭 === */}
       {subTab === 'register' && (
         <div className="space-y-4">
-          {/* 담당자 관리 */}
-          <div className="bg-white rounded-lg shadow p-6">
-            <h3 className="text-base font-semibold mb-3">발신번호 관리 담당자</h3>
-            <p className="text-sm text-gray-500 mb-3">발신번호 등록 신청 시 연락 가능한 담당자 정보입니다.</p>
 
+          {/* ========== 1차: 담당자 등록 + 위임장 ========== */}
+          <div className="bg-white rounded-lg shadow p-6">
+            <div className="flex items-center gap-3 mb-3">
+              <span className="flex items-center justify-center w-7 h-7 rounded-full bg-indigo-600 text-white text-sm font-bold">1</span>
+              <h3 className="text-base font-semibold">담당자 등록 및 위임장 제출</h3>
+            </div>
+            <p className="text-sm text-gray-500 mb-4">
+              발신번호 등록을 위해 먼저 담당자 정보와 위임장을 제출해주세요. 관리자 승인 후 발신번호 등록이 가능합니다.
+            </p>
+
+            {/* 양식 다운로드 */}
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
+              <p className="text-sm font-medium text-blue-800 mb-2">양식 다운로드</p>
+              <a href="/templates/발신번호_등록_위임장.docx" download
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-blue-300 text-blue-700 rounded-lg text-sm hover:bg-blue-100 transition">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                위임장 양식 다운로드
+              </a>
+            </div>
+
+            {/* 기존 담당자 목록 + 상태 */}
             {senderManagers.length > 0 && (
-              <div className="space-y-2 mb-3">
-                {senderManagers.map((mgr) => (
-                  <div key={mgr.id} className="flex items-center gap-3 bg-indigo-50 border border-indigo-200 rounded-lg px-4 py-2.5">
-                    <span className="flex-1 text-sm text-gray-800">
-                      <span className="font-medium">{mgr.manager_name}</span>
-                      <span className="ml-2 text-gray-500">{formatPhone(mgr.manager_phone)}</span>
-                      {mgr.manager_email && <span className="ml-2 text-xs text-gray-400">{mgr.manager_email}</span>}
-                    </span>
-                    <button onClick={() => handleDeleteManager(mgr.id)}
-                      className="px-2.5 py-1 text-xs bg-white border border-red-300 text-red-600 rounded-lg hover:bg-red-50">삭제</button>
-                  </div>
-                ))}
+              <div className="space-y-2 mb-4">
+                {senderManagers.map((mgr) => {
+                  const st = statusLabel(mgr.status);
+                  return (
+                    <div key={mgr.id} className={`flex items-center gap-3 rounded-lg px-4 py-2.5 border ${
+                      mgr.status === 'approved' ? 'bg-green-50 border-green-200' :
+                      mgr.status === 'rejected' ? 'bg-red-50 border-red-200' :
+                      'bg-yellow-50 border-yellow-200'
+                    }`}>
+                      <span className="flex-1 text-sm text-gray-800">
+                        <span className="font-medium">{mgr.manager_name}</span>
+                        <span className="ml-2 text-gray-500">{formatPhone(mgr.manager_phone)}</span>
+                        {mgr.manager_email && <span className="ml-2 text-xs text-gray-400">{mgr.manager_email}</span>}
+                      </span>
+                      <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${st.color}`}>{st.text}</span>
+                      {mgr.status === 'rejected' && mgr.reject_reason && (
+                        <span className="text-xs text-red-500" title={mgr.reject_reason}>반려: {mgr.reject_reason}</span>
+                      )}
+                      <button onClick={() => handleDeleteManager(mgr.id)}
+                        className="px-2.5 py-1 text-xs bg-white border border-red-300 text-red-600 rounded-lg hover:bg-red-50">삭제</button>
+                    </div>
+                  );
+                })}
               </div>
             )}
 
-            <div className="flex items-end gap-2">
-              <div className="w-24">
-                <label className="block text-xs font-medium text-gray-700 mb-1">이름 *</label>
-                <input type="text" value={newMgrName} onChange={(e) => setNewMgrName(e.target.value)}
-                  className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="홍길동" />
+            {/* 담당자 등록 폼 */}
+            <div className="space-y-3">
+              <div className="flex items-end gap-2">
+                <div className="w-24">
+                  <label className="block text-xs font-medium text-gray-700 mb-1">이름 *</label>
+                  <input type="text" value={newMgrName} onChange={(e) => setNewMgrName(e.target.value)}
+                    className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="홍길동" />
+                </div>
+                <div className="flex-1">
+                  <label className="block text-xs font-medium text-gray-700 mb-1">전화번호 *</label>
+                  <input type="text" value={newMgrPhone} onChange={(e) => setNewMgrPhone(e.target.value.replace(/[^\d-]/g, ''))}
+                    className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="01012345678" />
+                </div>
+                <div className="flex-1">
+                  <label className="block text-xs font-medium text-gray-700 mb-1">이메일</label>
+                  <input type="email" value={newMgrEmail} onChange={(e) => setNewMgrEmail(e.target.value)}
+                    className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="email@example.com" />
+                </div>
               </div>
-              <div className="flex-1">
-                <label className="block text-xs font-medium text-gray-700 mb-1">전화번호 *</label>
-                <input type="text" value={newMgrPhone} onChange={(e) => setNewMgrPhone(e.target.value.replace(/[^\d-]/g, ''))}
-                  className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="01012345678" />
+
+              {/* 위임장 첨부 */}
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">위임장 첨부 *</label>
+                <div className="flex items-center gap-3">
+                  <button onClick={() => mgrFileInputRef.current?.click()}
+                    className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 text-sm font-medium border border-gray-300">파일 선택</button>
+                  <span className="text-sm text-gray-500">
+                    {mgrAuthFile ? mgrAuthFile.name : 'PDF, JPG, PNG (최대 10MB)'}
+                  </span>
+                  {mgrAuthFile && (
+                    <button onClick={() => { setMgrAuthFile(null); if (mgrFileInputRef.current) mgrFileInputRef.current.value = ''; }}
+                      className="text-red-500 hover:text-red-700 text-sm">X</button>
+                  )}
+                  <input ref={mgrFileInputRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.gif,.bmp,.webp"
+                    onChange={(e) => { if (e.target.files?.[0]) setMgrAuthFile(e.target.files[0]); }} className="hidden" />
+                </div>
               </div>
-              <div className="flex-1">
-                <label className="block text-xs font-medium text-gray-700 mb-1">이메일</label>
-                <input type="email" value={newMgrEmail} onChange={(e) => setNewMgrEmail(e.target.value)}
-                  className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="email@example.com" />
-              </div>
-              <button onClick={handleAddManager} disabled={!newMgrName.trim() || !newMgrPhone.replace(/\D/g, '')}
-                className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap">+ 등록</button>
+
+              <button onClick={handleAddManager}
+                disabled={mgrSubmitting || !newMgrName.trim() || !newMgrPhone.replace(/\D/g, '') || !mgrAuthFile}
+                className="px-5 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed transition">
+                {mgrSubmitting ? '등록 중...' : '담당자 등록 + 위임장 제출'}
+              </button>
             </div>
           </div>
 
-          {/* 등록 신청 폼 */}
-          <div className="bg-white rounded-lg shadow p-6">
-            <h3 className="text-base font-semibold mb-3">발신번호 등록 신청</h3>
-            <p className="text-sm text-gray-500 mb-4">통신가입증명원을 첨부하여 발신번호 등록을 신청합니다. 관리자 확인 후 승인 시 자동 등록됩니다.</p>
-
-            <div className="grid grid-cols-2 gap-4 mb-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">발신번호 *</label>
-                <input type="text" value={regPhone} onChange={(e) => setRegPhone(e.target.value.replace(/[^\d-]/g, ''))}
-                  className="w-full px-3 py-2 border rounded-lg" placeholder="02-1234-5678" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">라벨 (별칭)</label>
-                <input type="text" value={regLabel} onChange={(e) => setRegLabel(e.target.value)}
-                  className="w-full px-3 py-2 border rounded-lg" placeholder="예: 강남점 대표번호" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">매장코드</label>
-                <input type="text" value={regStoreCode} onChange={(e) => setRegStoreCode(e.target.value)}
-                  className="w-full px-3 py-2 border rounded-lg" placeholder="매장코드 (선택)" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">매장명</label>
-                <input type="text" value={regStoreName} onChange={(e) => setRegStoreName(e.target.value)}
-                  className="w-full px-3 py-2 border rounded-lg" placeholder="매장명 (선택)" />
-              </div>
+          {/* ========== 2차: 발신번호 등록 신청 ========== */}
+          <div className={`bg-white rounded-lg shadow p-6 ${!hasApproved ? 'opacity-60' : ''}`}>
+            <div className="flex items-center gap-3 mb-3">
+              <span className={`flex items-center justify-center w-7 h-7 rounded-full text-white text-sm font-bold ${hasApproved ? 'bg-indigo-600' : 'bg-gray-400'}`}>2</span>
+              <h3 className="text-base font-semibold">발신번호 등록 신청</h3>
+              {hasApproved && <span className="px-2 py-0.5 text-xs bg-green-100 text-green-700 rounded-full font-medium">위임장 승인 완료</span>}
             </div>
 
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-1">신청 메모</label>
-              <textarea value={regNote} onChange={(e) => setRegNote(e.target.value)}
-                className="w-full px-3 py-2 border rounded-lg text-sm" rows={2} placeholder="특이사항이 있으면 기입해주세요" />
-            </div>
-
-            {/* 파일 첨부 */}
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-2">서류 첨부 * (통신가입증명원, 위임장 등)</label>
-              <div className="flex items-center gap-3">
-                <button onClick={() => fileInputRef.current?.click()}
-                  className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 text-sm font-medium border border-gray-300">파일 선택</button>
-                <span className="text-sm text-gray-500">{regFiles.length > 0 ? `${regFiles.length}개 파일 선택됨` : 'PDF, JPG, PNG (최대 10MB)'}</span>
-                <input ref={fileInputRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.gif,.bmp,.webp" multiple onChange={handleFileSelect} className="hidden" />
+            {!hasApproved ? (
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 text-center">
+                <p className="text-sm text-yellow-800 font-medium">먼저 1단계 담당자 등록 및 위임장 승인을 완료해주세요.</p>
+                <p className="text-xs text-yellow-600 mt-1">위임장이 관리자에 의해 승인되면 발신번호 등록이 가능합니다.</p>
               </div>
-              {regFiles.length > 0 && (
-                <div className="mt-2 space-y-1">
-                  {regFiles.map((file, idx) => (
-                    <div key={idx} className="flex items-center gap-3 bg-gray-50 border rounded-lg px-3 py-2">
-                      <span className="flex-1 text-sm text-gray-700 truncate">{file.name}</span>
-                      <select value={regDocTypes[idx] || 'telecom_cert'} onChange={(e) => { const t = [...regDocTypes]; t[idx] = e.target.value; setRegDocTypes(t); }}
-                        className="text-xs border rounded px-2 py-1">
-                        <option value="telecom_cert">통신가입증명원</option>
-                        <option value="authorization">위임장</option>
-                      </select>
-                      <span className="text-xs text-gray-400">{(file.size / 1024).toFixed(0)}KB</span>
-                      <button onClick={() => handleRemoveFile(idx)} className="text-red-500 hover:text-red-700 text-sm">X</button>
-                    </div>
-                  ))}
+            ) : (
+              <>
+                <p className="text-sm text-gray-500 mb-4">번호 유형에 맞는 서류를 첨부하여 발신번호 등록을 신청합니다. 관리자 확인 후 승인 시 자동 등록됩니다.</p>
+
+                {/* 번호 유형 선택 */}
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">번호 유형 *</label>
+                  <div className="flex gap-3">
+                    <label className={`flex-1 cursor-pointer border-2 rounded-lg p-3 transition ${
+                      regNumberType === 'landline' ? 'border-indigo-500 bg-indigo-50' : 'border-gray-200 hover:border-gray-300'
+                    }`}>
+                      <input type="radio" name="numberType" value="landline" checked={regNumberType === 'landline'}
+                        onChange={() => { setRegNumberType('landline'); setRegFiles([]); setRegDocTypes([]); }}
+                        className="sr-only" />
+                      <span className="text-sm font-medium text-gray-900">일반번호 (유선전화)</span>
+                      <p className="text-xs text-gray-500 mt-0.5">02, 031 등 일반 전화번호</p>
+                    </label>
+                    <label className={`flex-1 cursor-pointer border-2 rounded-lg p-3 transition ${
+                      regNumberType === 'mobile' ? 'border-indigo-500 bg-indigo-50' : 'border-gray-200 hover:border-gray-300'
+                    }`}>
+                      <input type="radio" name="numberType" value="mobile" checked={regNumberType === 'mobile'}
+                        onChange={() => { setRegNumberType('mobile'); setRegFiles([]); setRegDocTypes([]); }}
+                        className="sr-only" />
+                      <span className="text-sm font-medium text-gray-900">임직원 개인 휴대폰번호</span>
+                      <p className="text-xs text-gray-500 mt-0.5">010 등 개인 명의 휴대폰</p>
+                    </label>
+                  </div>
                 </div>
-              )}
-            </div>
 
-            <button onClick={handleSubmitRegistration} disabled={regSubmitting || !regPhone.trim() || regFiles.length === 0}
-              className="px-6 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium disabled:opacity-40 disabled:cursor-not-allowed">
-              {regSubmitting ? '신청 중...' : '등록 신청'}
-            </button>
+                {/* 번호 유형별 안내 + 양식 다운로드 */}
+                <div className={`rounded-lg p-3 mb-4 border ${regNumberType === 'landline' ? 'bg-gray-50 border-gray-200' : 'bg-orange-50 border-orange-200'}`}>
+                  {regNumberType === 'landline' ? (
+                    <div>
+                      <p className="text-sm font-medium text-gray-800">필요 서류: 통신가입증명원</p>
+                      <p className="text-xs text-gray-500 mt-1">해당 번호의 통신사에서 발급받은 통신가입증명원을 첨부해주세요.</p>
+                    </div>
+                  ) : (
+                    <div>
+                      <p className="text-sm font-medium text-orange-800">필요 서류: 발신번호 사용 동의서 + 재직증명서</p>
+                      <p className="text-xs text-orange-600 mt-1">개인 휴대폰번호 등록 시 발신번호 사용 동의서와 재직증명서를 함께 첨부해주세요. 재직증명서는 자체 양식으로 준비해주세요.</p>
+                      <div className="mt-2">
+                        <a href="/templates/발신번호_사용_동의서.docx" download
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-orange-300 text-orange-700 rounded-lg text-sm hover:bg-orange-100 transition">
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                          발신번호 사용 동의서 양식 다운로드
+                        </a>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-2 gap-4 mb-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">발신번호 *</label>
+                    <input type="text" value={regPhone} onChange={(e) => setRegPhone(e.target.value.replace(/[^\d-]/g, ''))}
+                      className="w-full px-3 py-2 border rounded-lg" placeholder={regNumberType === 'mobile' ? '010-1234-5678' : '02-1234-5678'} />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">라벨 (별칭)</label>
+                    <input type="text" value={regLabel} onChange={(e) => setRegLabel(e.target.value)}
+                      className="w-full px-3 py-2 border rounded-lg" placeholder="예: 강남점 대표번호" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">매장코드</label>
+                    <input type="text" value={regStoreCode} onChange={(e) => setRegStoreCode(e.target.value)}
+                      className="w-full px-3 py-2 border rounded-lg" placeholder="매장코드 (선택)" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">매장명</label>
+                    <input type="text" value={regStoreName} onChange={(e) => setRegStoreName(e.target.value)}
+                      className="w-full px-3 py-2 border rounded-lg" placeholder="매장명 (선택)" />
+                  </div>
+                </div>
+
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">신청 메모</label>
+                  <textarea value={regNote} onChange={(e) => setRegNote(e.target.value)}
+                    className="w-full px-3 py-2 border rounded-lg text-sm" rows={2} placeholder="특이사항이 있으면 기입해주세요" />
+                </div>
+
+                {/* 파일 첨부 */}
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    서류 첨부 * {regNumberType === 'landline'
+                      ? '(통신가입증명원)'
+                      : '(발신번호 사용 동의서 + 재직증명서)'}
+                  </label>
+                  <div className="flex items-center gap-3">
+                    <button onClick={() => fileInputRef.current?.click()}
+                      className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 text-sm font-medium border border-gray-300">파일 선택</button>
+                    <span className="text-sm text-gray-500">{regFiles.length > 0 ? `${regFiles.length}개 파일 선택됨` : 'PDF, JPG, PNG (최대 10MB)'}</span>
+                    <input ref={fileInputRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.gif,.bmp,.webp,.docx" multiple onChange={handleFileSelect} className="hidden" />
+                  </div>
+                  {regFiles.length > 0 && (
+                    <div className="mt-2 space-y-1">
+                      {regFiles.map((file, idx) => (
+                        <div key={idx} className="flex items-center gap-3 bg-gray-50 border rounded-lg px-3 py-2">
+                          <span className="flex-1 text-sm text-gray-700 truncate">{file.name}</span>
+                          <select value={regDocTypes[idx] || 'telecom_cert'} onChange={(e) => { const t = [...regDocTypes]; t[idx] = e.target.value; setRegDocTypes(t); }}
+                            className="text-xs border rounded px-2 py-1">
+                            {regNumberType === 'landline' ? (
+                              <option value="telecom_cert">통신가입증명원</option>
+                            ) : (
+                              <>
+                                <option value="consent_form">발신번호 사용 동의서</option>
+                                <option value="employment_cert">재직증명서</option>
+                              </>
+                            )}
+                          </select>
+                          <span className="text-xs text-gray-400">{(file.size / 1024).toFixed(0)}KB</span>
+                          <button onClick={() => handleRemoveFile(idx)} className="text-red-500 hover:text-red-700 text-sm">X</button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <button onClick={handleSubmitRegistration} disabled={regSubmitting || !regPhone.trim() || regFiles.length === 0}
+                  className="px-6 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium disabled:opacity-40 disabled:cursor-not-allowed">
+                  {regSubmitting ? '신청 중...' : '등록 신청'}
+                </button>
+              </>
+            )}
           </div>
 
           {/* 신청 이력 */}
@@ -497,6 +657,7 @@ export default function CallbacksTab() {
                   <thead className="bg-gray-50 border-b">
                     <tr>
                       <th className="px-4 py-2.5 text-left font-medium text-gray-600">발신번호</th>
+                      <th className="px-4 py-2.5 text-left font-medium text-gray-600">유형</th>
                       <th className="px-4 py-2.5 text-left font-medium text-gray-600">라벨</th>
                       <th className="px-4 py-2.5 text-left font-medium text-gray-600">매장</th>
                       <th className="px-4 py-2.5 text-center font-medium text-gray-600">상태</th>
@@ -510,6 +671,9 @@ export default function CallbacksTab() {
                       return (
                         <tr key={reg.id} className="hover:bg-gray-50">
                           <td className="px-4 py-2.5 font-mono">{reg.phone}</td>
+                          <td className="px-4 py-2.5 text-gray-600 text-xs">
+                            {reg.number_type === 'mobile' ? '휴대폰' : '일반번호'}
+                          </td>
                           <td className="px-4 py-2.5 text-gray-700">{reg.label || '-'}</td>
                           <td className="px-4 py-2.5 text-gray-600">{reg.store_name || '-'}</td>
                           <td className="px-4 py-2.5 text-center">

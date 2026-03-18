@@ -9,6 +9,13 @@ import {
   createManager,
   updateManager,
   deleteManager,
+  // 담당자 승인/반려
+  getPendingManagers,
+  getAllManagers,
+  approveManager,
+  rejectManager,
+  getPendingManagerCount,
+  hasApprovedManager,
   // 등록 신청
   createRegistration,
   getRegistrationsByCompany,
@@ -19,7 +26,7 @@ import {
   rejectRegistration,
   getPendingCount,
 } from '../utils/sender-registration';
-import type { DocumentInfo } from '../utils/sender-registration';
+import type { DocumentInfo, ManagerDocInfo } from '../utils/sender-registration';
 
 const router = Router();
 
@@ -74,8 +81,8 @@ router.get('/managers', authenticate, requireCompanyAdmin, async (req: Request, 
   }
 });
 
-// POST /managers — 담당자 등록
-router.post('/managers', authenticate, requireCompanyAdmin, async (req: Request, res: Response) => {
+// POST /managers — 담당자 등록 (위임장 파일 첨부 필수)
+router.post('/managers', authenticate, requireCompanyAdmin, docUpload.single('authorizationDoc'), async (req: Request, res: Response) => {
   try {
     const companyId = (req as any).user!.companyId;
     const { managerName, managerPhone, managerEmail } = req.body;
@@ -84,11 +91,24 @@ router.post('/managers', authenticate, requireCompanyAdmin, async (req: Request,
       return res.status(400).json({ error: '담당자 이름과 전화번호는 필수입니다.' });
     }
 
-    const manager = await createManager(companyId, { managerName, managerPhone, managerEmail });
+    const file = req.file;
+    if (!file) {
+      return res.status(400).json({ error: '위임장 파일을 첨부해주세요.' });
+    }
+
+    const authorizationDoc: ManagerDocInfo = {
+      originalName: file.originalname,
+      storedName: file.filename,
+      filePath: `/uploads/sender-docs/${file.filename}`,
+      fileSize: file.size,
+      uploadedAt: new Date().toISOString(),
+    };
+
+    const manager = await createManager(companyId, { managerName, managerPhone, managerEmail, authorizationDoc });
     res.json({ success: true, manager });
   } catch (error: any) {
     console.error('담당자 등록 실패:', error);
-    res.status(500).json({ error: '담당자 등록 실패' });
+    res.status(400).json({ error: error.message || '담당자 등록 실패' });
   }
 });
 
@@ -133,7 +153,7 @@ router.post(
   async (req: Request, res: Response) => {
     try {
       const { companyId, userId } = (req as any).user!;
-      const { phone, label, storeCode, storeName, requestNote, documentTypes } = req.body;
+      const { phone, label, storeCode, storeName, requestNote, documentTypes, numberType } = req.body;
 
       if (!phone) {
         return res.status(400).json({ error: '발신번호는 필수입니다.' });
@@ -141,10 +161,11 @@ router.post(
 
       const files = req.files as Express.Multer.File[];
       if (!files || files.length === 0) {
-        return res.status(400).json({ error: '통신가입증명원 파일을 첨부해주세요.' });
+        const docLabel = numberType === 'mobile' ? '발신번호 사용 동의서 및 재직증명서' : '통신가입증명원';
+        return res.status(400).json({ error: `${docLabel} 파일을 첨부해주세요.` });
       }
 
-      // documentTypes: JSON 파싱 (프론트에서 '["telecom_cert","authorization"]' 형태로 전달)
+      // documentTypes: JSON 파싱 (프론트에서 '["telecom_cert","consent_form"]' 형태로 전달)
       let docTypes: string[] = [];
       try {
         docTypes = typeof documentTypes === 'string' ? JSON.parse(documentTypes) : (documentTypes || []);
@@ -153,7 +174,7 @@ router.post(
       }
 
       const documents: DocumentInfo[] = files.map((file, idx) => ({
-        type: (docTypes[idx] || 'telecom_cert') as 'telecom_cert' | 'authorization',
+        type: (docTypes[idx] || 'telecom_cert') as DocumentInfo['type'],
         originalName: file.originalname,
         storedName: file.filename,
         filePath: `/uploads/sender-docs/${file.filename}`,
@@ -168,6 +189,7 @@ router.post(
         label,
         storeCode,
         storeName,
+        numberType: numberType === 'mobile' ? 'mobile' : 'landline',
         documents,
         requestNote,
       });
@@ -192,9 +214,75 @@ router.get('/my', authenticate, requireCompanyAdmin, async (req: Request, res: R
   }
 });
 
+// GET /has-approved-manager — 승인된 담당자 존재 여부 (프론트에서 2차 진행 가능 여부 판단)
+router.get('/has-approved-manager', authenticate, requireCompanyAdmin, async (req: Request, res: Response) => {
+  try {
+    const companyId = (req as any).user!.companyId;
+    const approved = await hasApprovedManager(companyId);
+    res.json({ success: true, hasApprovedManager: approved });
+  } catch (error: any) {
+    res.status(500).json({ error: '확인 실패' });
+  }
+});
+
 // ============================================================
 //  슈퍼관리자용 API
 // ============================================================
+
+// --- 담당자 위임장 승인/반려 ---
+
+// GET /admin/pending-managers — 담당자 승인 대기 목록
+router.get('/admin/pending-managers', authenticate, requireSuperAdmin, async (_req: Request, res: Response) => {
+  try {
+    const managers = await getPendingManagers();
+    res.json({ success: true, managers });
+  } catch (error: any) {
+    console.error('담당자 승인 대기 목록 조회 실패:', error);
+    res.status(500).json({ error: '조회 실패' });
+  }
+});
+
+// GET /admin/all-managers — 전체 담당자 목록 (필터: ?status=pending|approved|rejected)
+router.get('/admin/all-managers', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const status = req.query.status as string | undefined;
+    const managers = await getAllManagers(status);
+    res.json({ success: true, managers });
+  } catch (error: any) {
+    console.error('전체 담당자 목록 조회 실패:', error);
+    res.status(500).json({ error: '조회 실패' });
+  }
+});
+
+// POST /admin/managers/:id/approve — 담당자 위임장 승인
+router.post('/admin/managers/:id/approve', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const adminId = (req as any).user!.adminId || (req as any).user!.userId;
+    const manager = await approveManager(req.params.id, adminId);
+    res.json({ success: true, message: '담당자 위임장이 승인되었습니다.', manager });
+  } catch (error: any) {
+    console.error('담당자 승인 실패:', error);
+    res.status(400).json({ error: error.message || '승인 처리 실패' });
+  }
+});
+
+// POST /admin/managers/:id/reject — 담당자 위임장 반려
+router.post('/admin/managers/:id/reject', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const adminId = (req as any).user!.adminId || (req as any).user!.userId;
+    const { rejectReason } = req.body;
+    if (!rejectReason) {
+      return res.status(400).json({ error: '반려 사유를 입력해주세요.' });
+    }
+    const manager = await rejectManager(req.params.id, adminId, rejectReason);
+    res.json({ success: true, message: '담당자 위임장이 반려되었습니다.', manager });
+  } catch (error: any) {
+    console.error('담당자 반려 실패:', error);
+    res.status(400).json({ error: error.message || '반려 처리 실패' });
+  }
+});
+
+// --- 발신번호 등록 승인/반려 ---
 
 // GET /admin/pending — 승인 대기 목록
 router.get('/admin/pending', authenticate, requireSuperAdmin, async (_req: Request, res: Response) => {
@@ -219,11 +307,12 @@ router.get('/admin/all', authenticate, requireSuperAdmin, async (req: Request, r
   }
 });
 
-// GET /admin/pending-count — 승인 대기 건수 (배지용)
+// GET /admin/pending-count — 승인 대기 건수 (배지용) — 담당자 + 발신번호 합산
 router.get('/admin/pending-count', authenticate, requireSuperAdmin, async (_req: Request, res: Response) => {
   try {
-    const count = await getPendingCount();
-    res.json({ success: true, count });
+    const counts = await getPendingCount();
+    // 하위호환: count(total)도 포함
+    res.json({ success: true, ...counts, count: counts.total });
   } catch (error: any) {
     res.status(500).json({ error: '조회 실패' });
   }

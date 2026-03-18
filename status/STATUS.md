@@ -106,6 +106,52 @@
 
 ---
 
+### 🔧 D82 — AI 타겟추출 정상화 + 전체필드 동적필터 통일 + 개인화 통일 + 자동발송 시간 KST (2026-03-18) — ✅ 배포 완료
+
+> **배경:** (1) AI 타겟추출 0명 버그 (2) 전체고객 풀백 방지 과잉 로직 (3) address/name/phone 등 필터 누락 (4) 미리보기 vs 테스트발송 개인화 불일치 (5) 자동발송 시간 표시 오류 (6) 고객DB 필터 UI 중복/과잉
+
+#### 수정 항목
+
+**1. AI 타겟추출 0명 → 정상 추출 복구 (routes/ai.ts + services/ai.ts)**
+- **문제:** 어제 커밋(73cd231)의 "전체 고객 풀백 방지" 로직이 정상 결과까지 0으로 덮어씀
+- **수정:** (1) 풀백 방지 과잉 로직 삭제 — 로그만 남기고 actualCount를 임의로 0으로 만들지 않음 (2) AI 프롬프트 "핵심 안전 규칙" 삭제 — AI가 `filters: {}` 과잉 반환 유발 (3) countFilteredCustomers 에러 핸들링 — catch에서 조용히 0 반환 → throw로 전환
+
+**2. 전체 필드 동적 필터 통일 (customer-filter.ts — CT-01)**
+- **문제:** mixed 모드 SPECIAL_FIELDS에 name/email/address 포함 → FIELD_MAP 동적 루프에서 건너뜀 → AI가 address 필터 반환해도 SQL 미생성 → 전체 고객 반환
+- **문제:** structured 모드 STRING_FIELDS에 phone 미포함 → 고객DB에서 전화번호 필터 무시
+- **수정 (mixed 모드):** SPECIAL_FIELDS에서 name/email/address 제거 → FIELD_MAP 동적 루프가 자동 처리. SPECIAL_FIELDS에는 진짜 특수 처리 필요한 7개만 (gender, grade, region, age, phone, sms_opt_in, store_code)
+- **수정 (structured 모드):** STRING_FIELDS/NUMERIC_FIELDS/DATE_FIELDS 하드코딩 분기 뒤에 FIELD_MAP 동적 처리 추가 → phone 포함 모든 직접 컬럼 필드 자동 처리. 새 필드 추가 시 FIELD_MAP에만 등록하면 양쪽 모드 모두 자동 반영.
+
+**3. 고객DB 필터 UI 통합 (CustomerDBModal.tsx)**
+- **수정:** (1) 상단 "이름 또는 전화번호 검색" 중복 영역 삭제 (2) 필터 한 줄로 통합 (3) 문자열 필드 → 연산자 드롭다운 없이 자동 contains(포함) 검색 (4) 숫자/날짜 필드만 이상/이하/범위 연산자 표시 (5) 초기화 버튼 필터 라인 끝으로 이동
+
+**4. 미리보기 = 테스트발송 = 스팸테스트 개인화 통일 (Dashboard.tsx + campaigns.ts + spam-test-queue.ts)**
+- **문제:** 미리보기 `ORDER BY name ASC` vs 테스트발송 `ORDER BY created_at DESC` → 서로 다른 고객 데이터로 치환
+- **수정:** (1) Dashboard.tsx handleTestSend/handleTargetTestSend에 sampleCustomer body 전달 (2) campaigns.ts test-send에서 sampleCustomer 수신 시 DB 재조회 없이 그대로 사용 (3) spam-test-queue.ts 폴백 정렬 name ASC로 통일
+
+**5. 자동발송 다음 발송일 시간 표시 KST 변환 (AutoSendPage.tsx)**
+- **문제:** DB에 UTC로 저장된 next_run_at을 프론트에서 getHours()로 표시 → 10:00이 01:00으로 표시
+- **수정:** formatDate()에서 UTC → KST (+9시간) 변환 후 getUTCHours()로 표시
+
+#### 수정 파일 (8개)
+- `packages/backend/src/utils/customer-filter.ts` — mixed SPECIAL_FIELDS 최소화 + structured FIELD_MAP 동적 처리
+- `packages/backend/src/utils/spam-test-queue.ts` — 폴백 정렬 name ASC 통일
+- `packages/backend/src/routes/ai.ts` — 풀백 방지 과잉 로직 삭제 + countFilteredCustomers 에러 핸들링
+- `packages/backend/src/services/ai.ts` — AI 프롬프트 과잉 규칙 삭제 + countFilteredCustomers throw 전환
+- `packages/backend/src/routes/campaigns.ts` — test-send sampleCustomer 수용
+- `packages/frontend/src/pages/Dashboard.tsx` — sampleCustomer 전달
+- `packages/frontend/src/components/CustomerDBModal.tsx` — 필터 UI 통합 + 자동 contains
+- `packages/frontend/src/pages/AutoSendPage.tsx` — formatDate KST 변환
+
+#### ⚠️ 검증 TODO
+- [ ] AI 한줄로 타겟추출 → 정상 인원수 표시 확인
+- [ ] 고객DB 필터 → 전화번호/주소/이름 포함 검색 정상 작동
+- [ ] 담당자테스트 → 미리보기와 동일 고객명으로 개인화 확인
+- [ ] 자동발송 다음 발송일 → 설정한 시간(KST) 그대로 표시 확인
+- [ ] 자동발송 D-1 담당자 사전 알림 발송 여부 (내일 확인)
+
+---
+
 ### 🔧 D78 — 프로 요금제 자동 스팸필터 테스트 + CT-09 (2026-03-16) — 배포 완료, 실서비스 검증 필요
 
 > **배경:** 프로(100만원) 요금제 차별화 핵심 기능. AI 문안생성 시 자동으로 스팸필터 테스트 수행 → 차단 문안은 자동 재생성하여 안전한 문안만 제공.
