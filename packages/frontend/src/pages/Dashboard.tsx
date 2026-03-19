@@ -190,6 +190,8 @@ export default function Dashboard() {
   const [showSpamFilter, setShowSpamFilter] = useState(false);
   const [spamFilterData, setSpamFilterData] = useState<{sms?: string; lms?: string; callback: string; msgType: 'SMS'|'LMS'|'MMS'; subject?: string; firstRecipient?: Record<string, any>}>({callback:'',msgType:'SMS'});
   const [sampleCustomer, setSampleCustomer] = useState<Record<string, string>>({});
+  // ★ D85: column 키 raw 데이터 — 백엔드 replaceVariables용 (담당자테스트/스팸테스트)
+  const [sampleCustomerRaw, setSampleCustomerRaw] = useState<Record<string, any>>({});
   const [sendTimeOption, setSendTimeOption] = useState<'ai' | 'now' | 'custom'>('now');
   const [successSendInfo, setSuccessSendInfo] = useState<string>('');  // 성공 모달용 발송 정보
   const [successChannel, setSuccessChannel] = useState<string>('');  // ★ #8 수정: 성공모달 전용 채널
@@ -1263,6 +1265,8 @@ const handleAiCampaignGenerate = async (promptOverride?: string, autoRelax?: boo
       personalizationVars: result.personalization_vars || [],
     });
     setSampleCustomer(result.sample_customer || {});
+    // ★ D85: column 키 raw 데이터 (백엔드 replaceVariables용)
+    setSampleCustomerRaw(result.sample_customer_raw || {});
     
     // 추천 채널로 기본 설정
     const kakaoEnabled = !!(user as any)?.company?.kakaoEnabled;
@@ -1729,7 +1733,8 @@ const campaignData = {
           messageType: selectedChannel,
           subject: selectedMsg.subject || '',
           mmsImagePaths: mmsUploadedImages.map(img => img.serverPath),
-          sampleCustomer: sampleCustomer && Object.keys(sampleCustomer).length > 0 ? sampleCustomer : undefined,
+          // ★ D85: column 키 raw 데이터 전달 — replaceVariables가 customer[column]으로 접근
+          sampleCustomer: sampleCustomerRaw && Object.keys(sampleCustomerRaw).length > 0 ? sampleCustomerRaw : undefined,
         }),
       });
       const data = await res.json();
@@ -1778,7 +1783,8 @@ const campaignData = {
           messageType: targetMsgType,
           subject: targetSubject || '',
           mmsImagePaths: mmsUploadedImages.map(img => img.serverPath),
-          sampleCustomer: sampleCustomer && Object.keys(sampleCustomer).length > 0 ? sampleCustomer : undefined,
+          // ★ D85: column 키 raw 데이터 전달
+          sampleCustomer: sampleCustomerRaw && Object.keys(sampleCustomerRaw).length > 0 ? sampleCustomerRaw : undefined,
         }),
       });
       const data = await res.json();

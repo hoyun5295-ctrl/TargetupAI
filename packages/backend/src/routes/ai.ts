@@ -368,18 +368,22 @@ router.post('/recommend-target', async (req: Request, res: Response) => {
       (result as any).relaxed_fields = relaxedFields;
     }
 
-    // ★ 샘플 고객 1명 조회 (미리보기 치환용 — displayName 키 기반)
+    // ★ D85: 샘플 고객 1명 조회
+    // - sample_customer: displayName 키 (프론트 미리보기용 — %이름%, %등급% 등)
+    // - sample_customer_raw: column 키 + custom_fields (백엔드 replaceVariables용)
     // 최신 필터 기준으로 WHERE 재생성 (자동완화 시 result.filters가 변경됨)
     const { sql: sampleFilterWhere, params: sampleFilterParams } = buildFilterWhereClauseCompat(result.filters, baseParams.length + 1);
     const sampleUnsubIdx = baseParams.length + sampleFilterParams.length + 1;
 
     let sampleCustomer: Record<string, string> = {};
+    let sampleCustomerRaw: Record<string, any> = {};
     try {
       const sampleResult = await query(
         `SELECT name, gender, age, grade, points, email, address,
                 recent_purchase_store, registered_store, registration_type,
-                store_phone, recent_purchase_amount, total_purchase_amount,
-                birth_date, custom_fields
+                store_phone, store_name, store_code, region,
+                recent_purchase_amount, total_purchase_amount, purchase_count,
+                birth_date, recent_purchase_date, custom_fields
          FROM customers c
          WHERE c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true${storeFilter} ${sampleFilterWhere}
          AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${sampleUnsubIdx} AND u.phone = c.phone)
@@ -389,14 +393,23 @@ router.post('/recommend-target', async (req: Request, res: Response) => {
 
       if (sampleResult.rows[0]) {
         const row = sampleResult.rows[0];
-        // 표준 필드 → displayName 매핑
+        // ★ D85: column 키 raw 데이터 보존 (백엔드 replaceVariables용)
+        sampleCustomerRaw = { ...row };
+        // 표준 필드 → displayName 매핑 (프론트 미리보기용)
         for (const f of FIELD_MAP) {
           if (f.storageType === 'custom_fields' || f.fieldKey === 'phone' || f.fieldKey === 'sms_opt_in') continue;
           const val = row[f.columnName];
           if (val !== null && val !== undefined && val !== '') {
-            sampleCustomer[f.displayName] = f.dataType === 'number' && !isNaN(Number(val))
-              ? Number(val).toLocaleString()
-              : String(val);
+            if (f.dataType === 'number' && !isNaN(Number(val))) {
+              sampleCustomer[f.displayName] = Number(val).toLocaleString();
+            } else if (f.dataType === 'date' && val) {
+              // ★ D85: 날짜 KST 포맷 통일 — ISO raw 문자열 노출 방지
+              try {
+                sampleCustomer[f.displayName] = new Date(val).toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul' });
+              } catch { sampleCustomer[f.displayName] = String(val); }
+            } else {
+              sampleCustomer[f.displayName] = String(val);
+            }
           }
         }
         // 커스텀 필드 → 실제 라벨명 매핑
@@ -417,6 +430,7 @@ router.post('/recommend-target', async (req: Request, res: Response) => {
       console.warn('[AI] 샘플 고객 조회 실패 (무시)', e);
     }
     (result as any).sample_customer = sampleCustomer;
+    (result as any).sample_customer_raw = sampleCustomerRaw;
 
     return res.json(result);
   } catch (error) {
@@ -751,6 +765,85 @@ router.post('/generate-custom', authenticate, async (req: Request, res: Response
       isAd,
       rejectNumber: companyInfo.reject_number,
     });
+
+    // ★ D85: 프로 이상 자동 스팸테스트 — 한줄로와 동일 로직
+    const spamPlanCheck = await query(
+      `SELECT p.auto_spam_test_enabled FROM companies c
+       LEFT JOIN plans p ON c.plan_id = p.id
+       WHERE c.id = $1`,
+      [companyId]
+    );
+    const autoSpamEnabled = spamPlanCheck.rows[0]?.auto_spam_test_enabled === true;
+    const effectiveChannel = channel || 'LMS';
+
+    if (autoSpamEnabled && result.variants && result.variants.length > 0 && effectiveChannel !== '카카오') {
+      // 발신번호 조회
+      let callbackNumber = companyInfo.reject_number || '';
+      if (!callbackNumber) {
+        const senderResult = await query(
+          `SELECT number FROM sender_numbers WHERE company_id = $1 AND is_active = true LIMIT 1`,
+          [companyId]
+        );
+        callbackNumber = senderResult.rows[0]?.number || '';
+      }
+
+      if (callbackNumber) {
+        try {
+          const spamResult = await autoSpamTestWithRegenerate({
+            companyId: companyId!,
+            userId: userId!,
+            callbackNumber,
+            messageType: (effectiveChannel === 'LMS' || effectiveChannel === 'MMS') ? effectiveChannel : 'SMS',
+            variants: result.variants.map((v: any) => ({
+              variantId: v.variant_id || 'A',
+              messageText: v.message_text || '',
+              subject: v.subject,
+            })),
+            isAd: isAd || false,
+            rejectNumber: companyInfo.reject_number,
+            regenerateCallback: async (blockedVariantId: string) => {
+              try {
+                console.log(`[맞춤한줄] 스팸 차단 variant ${blockedVariantId} 재생성 시도`);
+                const regenResult = await generateCustomMessages({
+                  briefing, promotionCard, personalFields, fieldLabels, url, tone,
+                  brandName: companyInfo.brand_name || brandName || '브랜드',
+                  brandTone: companyInfo.brand_tone,
+                  channel: effectiveChannel,
+                  isAd, rejectNumber: companyInfo.reject_number,
+                });
+                if (regenResult.variants?.length > 0) {
+                  const v = regenResult.variants[0];
+                  return { messageText: v.message_text || '', subject: v.subject };
+                }
+              } catch (err) {
+                console.error(`[맞춤한줄] 스팸 재생성 실패:`, err);
+              }
+              return null;
+            },
+          });
+
+          // 스팸테스트 결과를 응답에 포함
+          (result as any).spamTestBatchId = spamResult.batchId;
+          (result as any).spamTestCompleted = true; // autoSpamTestWithRegenerate는 동기 완료 후 반환
+          (result as any).spamTestRegenerateCount = spamResult.totalRegenerateCount || 0;
+          (result as any).spamTestTotalCount = spamResult.variants?.length || 0;
+
+          // 재생성된 variant 반영
+          for (const sv of spamResult.variants) {
+            if (sv.regenerated) {
+              const target = result.variants.find((v: any) => (v.variant_id || 'A') === sv.variantId);
+              if (target) {
+                target.message_text = sv.messageText;
+                if (sv.subject) target.subject = sv.subject;
+                (target as any).spam_result = sv.spamResult === 'pass' ? 'regenerated_pass' : sv.spamResult;
+              }
+            }
+          }
+        } catch (spamErr) {
+          console.error('[맞춤한줄] 자동 스팸테스트 오류:', spamErr);
+        }
+      }
+    }
 
     return res.json(result);
   } catch (error) {

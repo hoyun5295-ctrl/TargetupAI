@@ -144,13 +144,24 @@ export function replaceVariables(
     } else if (mapping.type === 'number' && typeof rawValue === 'number') {
       displayValue = rawValue.toLocaleString();
     } else if (mapping.type === 'date' && rawValue) {
+      // ★ D85: 날짜 KST 고정 — UTC ISO raw 문자열(2003-04-10T15:00:00.000Z) 노출 방지
       try {
-        displayValue = new Date(rawValue).toLocaleDateString('ko-KR');
+        displayValue = new Date(rawValue).toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul' });
       } catch {
         displayValue = String(rawValue);
       }
     } else {
-      displayValue = String(rawValue);
+      // ★ D85: ISO 날짜 패턴 자동 감지 — mapping.type이 'date'가 아니어도 ISO 문자열이면 KST 포맷
+      const strVal = String(rawValue);
+      if (/^\d{4}-\d{2}-\d{2}(T|\s)/.test(strVal)) {
+        try {
+          displayValue = new Date(strVal).toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul' });
+        } catch {
+          displayValue = strVal;
+        }
+      } else {
+        displayValue = strVal;
+      }
     }
 
     // 전역 치환 (동일 변수가 여러 번 나올 수 있음)
