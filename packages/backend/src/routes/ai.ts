@@ -512,13 +512,13 @@ router.post('/recount-target', authenticate, async (req: Request, res: Response)
       return res.status(403).json({ error: '회사 권한이 필요합니다' });
     }
 
-    const { targetCondition } = req.body;
+    const { targetCondition, originalTargetFilters } = req.body;
 
     if (!targetCondition) {
       return res.status(400).json({ error: 'targetCondition이 필요합니다' });
     }
 
-    // targetCondition → targetFilters 변환
+    // targetCondition → targetFilters 변환 (기본 필드)
     const targetFilters: Record<string, any> = {};
 
     if (targetCondition.gender) {
@@ -559,6 +559,17 @@ router.post('/recount-target', authenticate, async (req: Request, res: Response)
     // birth_date (생일 월 필터)
     if (targetCondition.birthMonth) {
       targetFilters.birth_date = { value: parseInt(targetCondition.birthMonth), operator: 'birth_month' };
+    }
+
+    // ★ D84: 커스텀 필드 + 기타 필드 보존 — parseBriefing이 생성한 custom_fields.*, registered_store 등
+    // originalTargetFilters에서 기본 필드(위에서 이미 변환한 것)를 제외한 나머지를 merge
+    if (originalTargetFilters && typeof originalTargetFilters === 'object') {
+      const basicFieldKeys = new Set(['gender', 'grade', 'age', 'region', 'store_name', 'birth_date']);
+      for (const [key, value] of Object.entries(originalTargetFilters)) {
+        if (!basicFieldKeys.has(key) && value != null) {
+          targetFilters[key] = value;
+        }
+      }
     }
 
     // 사용자 매장 필터 (일반 사용자는 본인 store_codes만)
@@ -633,7 +644,8 @@ router.post('/parse-briefing', authenticate, async (req: Request, res: Response)
       return res.status(400).json({ error: '브리핑 내용을 10자 이상 입력해주세요' });
     }
 
-    const result = await parseBriefing(briefing.trim());
+    // ★ D84: companyId 전달 → 동적 필드 프롬프트 생성 (커스텀 필드 + 전체 FIELD_MAP 지원)
+    const result = await parseBriefing(briefing.trim(), companyId);
 
     // 사용자 매장 필터 (일반 사용자는 본인 store_codes만)
     // ★ B16-01: store_codes 없는 company_user → 차단

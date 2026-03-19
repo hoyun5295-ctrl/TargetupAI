@@ -365,7 +365,8 @@ export default function AiCustomSendFlow({
       const res = await fetch('/api/ai/recount-target', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ targetCondition: updatedTarget })
+        // ★ D84: 기존 targetFilters도 전달 — 커스텀 필드(custom_fields.*) 보존
+        body: JSON.stringify({ targetCondition: updatedTarget, originalTargetFilters: targetFilters })
       });
       if (res.ok) {
         const data = await res.json();

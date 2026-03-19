@@ -2090,4 +2090,51 @@
 
 ---
 
-*최종 업데이트: 2026-03-14 D75. B19-01~04 4건 🟡수정완료-배포대기. B18-01 080 콜백 서버 미도달(🔵 조사 중), B18-02 store_code/created_by 격리 누락(🟡 수정완료-배포대기), B18-03 tp-deploy-full 빌드 누락(✅ Closed).*
+---
+
+## 20차 버그리포트 — D83 (2026-03-19) 직원 리포트 5건
+
+### B20-01: 고객DB 필터 검색 다수 컬럼 미작동 🔴
+
+| 항목 | 내용 |
+|------|------|
+| **심각도** | 🔴 Critical (데이터 조회) |
+| **상태** | 🟡 수정완료-배포대기 (2026-03-19) |
+| **리포터** | sh_sh |
+| **증상** | 성별→전체 리스트, 나이(일치)→전체 리스트, 생일/최근구매일→0명, VIP행사참석→전체 리스트. 다중 필터 시 한쪽 필터 무시 |
+| **근본 원인** | (1) structured 모드에 NUMERIC_FIELDS/DATE_FIELDS 하드코딩 → 새 필드 누락 + store_name contains 미지원 (2) gender가 filter-options에 없어 텍스트 입력(contains) → 핸들러에서 eq/in만 처리 → 무시 (3) age에 eq 연산자 없음 → 일치 검색 무시 (4) 날짜 필드에 텍스트 자유 입력 → 한국식 형식("2025. 10. 19.") → DateTimeParseError |
+| **수정** | (1) NUMERIC_FIELDS/DATE_FIELDS/store_name 하드코딩 전부 삭제 → FIELD_MAP 동적 루프 통일 (2) filter-options API에 genders 추가 + CustomerDBModal gender dropdown (3) age eq 추가 (4) safeDateValue 방어 + date picker + normalizeDate 한국식 패턴 |
+| **수정 파일** | customer-filter.ts, normalize.ts, customers.ts, CustomerDBModal.tsx |
+
+---
+
+### B20-02: 맞춤한줄 담당자테스트 개인화 불일치 🟡
+
+| 항목 | 내용 |
+|------|------|
+| **심각도** | 🟡 Major (개인화) |
+| **상태** | 🟡 수정완료-배포대기 (2026-03-19) |
+| **리포터** | 직원 |
+| **증상** | 맞춤한줄에서 미리보기/스팸테스트/담당자테스트 모두 다른 개인화 정보로 수신 |
+| **근본 원인** | AiCustomSendFlow.tsx의 handleCustomTestSend에서 test-send API 호출 시 sampleCustomer 미전달 → 백엔드에서 다른 고객 조회 |
+| **수정** | sampleData를 sampleCustomer로 API body에 전달 |
+| **수정 파일** | AiCustomSendFlow.tsx |
+
+---
+
+### B20-03: 자동발송 3건 중복 + 시간 오차 + 타겟 오류 🔴
+
+| 항목 | 내용 |
+|------|------|
+| **심각도** | 🔴 Critical (기간계 — 실제 고객 중복 발송) |
+| **상태** | 🟡 수정완료-배포대기 (2026-03-19, target_filter UI는 미구현) |
+| **리포터** | sh_cpb |
+| **증상** | (1) 매월 18일 10:00 설정인데 8:39/9:39/10:07 3번 발송 (2) 다음 발송일이 01:00으로 표시 (3) 3월 생일 타겟인데 7월/9월/2월 생일 고객에게도 발송 (4) D-1 담당자 알림 미수신 |
+| **근본 원인** | (1) executing 잠금 미비 — `active→active` UPDATE는 잠금 역할 못 함 → 워커 1시간 간격 3회 실행 (2) calcNextRunAt kstToUtc 이중변환 — KST 서버에서 -9h 두 번 적용 (3) target_filter `{}` — AutoSendFormModal에 필터 UI 미구현(Phase 2 미완성) → 전체 고객 발송 (4) D-1 알림 — pre_notify/notify_phones 설정 확인 필요 |
+| **수정** | (1) `active→executing` 원자적 잠금 + 완료 후 active 복원 (2) 서버 타임존 무관 Date.UTC 기반 calcNextRunAt 교체 (3) target_filter UI는 다음 세션 구현 예정 |
+| **수정 파일** | auto-campaign-worker.ts, auto-campaigns.ts |
+| **교훈** | (1) 잠금은 반드시 상태 전환(active→executing)으로 구현 — 동일 상태 UPDATE는 잠금 아님 (2) 시간 변환은 서버 TZ에 의존하지 않고 UTC 오프셋 기반으로 (3) 기간계(실제 발송) 기능은 필수 필터 UI 없이 배포 금지 |
+
+---
+
+*최종 업데이트: 2026-03-19 D83. B20-01~03 3건 🟡수정완료-배포대기. 다음 세션 TODO: 자동발송 target_filter UI 구현, 커스텀 필드 dropdown 확인, D-1 알림 설정 점검.*

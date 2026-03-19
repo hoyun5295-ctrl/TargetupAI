@@ -726,6 +726,128 @@ ${usePersonalization ? `- 사용할 개인화 변수: ${personalizationTags}
 }
 
 // ============================================================
+// ★ D84: 동적 필드 탐지 공통 함수 — recommendTarget + parseBriefing 공용
+// AI 프롬프트에 고객사별 실제 데이터 기반 필터 필드를 제공하기 위한 컨트롤타워
+// ============================================================
+
+interface ActiveFieldsResult {
+  activeColumnFields: ReturnType<typeof getColumnFields>;
+  customFieldLabels: Record<string, string>;
+  distinctValues: Record<string, string[]>;
+}
+
+/**
+ * 고객사별 데이터 있는 필드 + 커스텀 필드 라벨 + DISTINCT 값 일괄 조회.
+ * recommendTarget, parseBriefing 등 AI 프롬프트 생성 시 공통 사용.
+ */
+export async function detectActiveFields(companyId: string): Promise<ActiveFieldsResult> {
+  // 1) 직접 컬럼 필드 — 데이터 존재 여부 한 번에 체크
+  const detectableFields = getColumnFields().filter(f => f.fieldKey !== 'name' && f.fieldKey !== 'phone' && f.fieldKey !== 'sms_opt_in');
+  const countFilters = detectableFields.map(f => {
+    const c = f.columnName;
+    if (f.fieldKey === 'age') return `COUNT(*) FILTER (WHERE ${c} IS NOT NULL AND ${c} > 0 OR birth_date IS NOT NULL) as cnt_${f.fieldKey}`;
+    if (f.dataType === 'number') return `COUNT(*) FILTER (WHERE ${c} IS NOT NULL AND ${c} > 0) as cnt_${f.fieldKey}`;
+    if (f.dataType === 'date') return `COUNT(*) FILTER (WHERE ${c} IS NOT NULL) as cnt_${f.fieldKey}`;
+    return `COUNT(*) FILTER (WHERE ${c} IS NOT NULL AND ${c} != '') as cnt_${f.fieldKey}`;
+  });
+
+  // 2) 커스텀 필드 라벨 조회
+  const [fieldCountRes, fieldDefsRes] = await Promise.all([
+    query(`SELECT ${countFilters.join(', ')} FROM customers WHERE company_id = $1 AND is_active = true`, [companyId]),
+    query(`SELECT field_key, field_label FROM customer_field_definitions WHERE company_id = $1 AND (is_hidden = false OR is_hidden IS NULL) ORDER BY display_order`, [companyId]),
+  ]);
+  const dc = fieldCountRes.rows[0] || {};
+  const customFieldLabels: Record<string, string> = {};
+  for (const fd of fieldDefsRes.rows) {
+    customFieldLabels[fd.field_key] = fd.field_label;
+  }
+
+  // 3) 데이터 있는 직접 컬럼 필드만 추출
+  const activeColumnFields = detectableFields.filter(f => parseInt(dc[`cnt_${f.fieldKey}`] || '0') > 0);
+
+  // 4) 모든 문자열 필드 DISTINCT 조회 — AI가 정확한 DB값만 사용하도록
+  const distinctValues: Record<string, string[]> = {};
+  try {
+    const stringFields = activeColumnFields.filter(f => f.dataType === 'string');
+    if (stringFields.length > 0) {
+      const distinctQueries = stringFields.map(f =>
+        query(
+          `SELECT DISTINCT ${f.columnName} FROM customers WHERE company_id = $1 AND ${f.columnName} IS NOT NULL AND ${f.columnName} != '' ORDER BY ${f.columnName} LIMIT 200`,
+          [companyId]
+        )
+      );
+      const results = await Promise.all(distinctQueries);
+      stringFields.forEach((f, i) => {
+        const vals = results[i].rows.map((r: any) => r[f.columnName]).filter(Boolean);
+        if (vals.length > 0) distinctValues[f.fieldKey] = vals;
+      });
+    }
+
+    // 커스텀 필드도 DISTINCT 조회 (라벨 있는 필드만)
+    for (const [key, label] of Object.entries(customFieldLabels)) {
+      try {
+        const cfRes = await query(
+          `SELECT DISTINCT custom_fields->>'${key}' as val FROM customers WHERE company_id = $1 AND custom_fields->>'${key}' IS NOT NULL AND custom_fields->>'${key}' != '' ORDER BY val LIMIT 200`,
+          [companyId]
+        );
+        const vals = cfRes.rows.map((r: any) => r.val).filter(Boolean);
+        if (vals.length > 0) distinctValues[`custom_fields.${key}`] = vals;
+      } catch (cfErr) {
+        // 개별 커스텀 필드 조회 실패 시 무시
+      }
+    }
+  } catch (err) {
+    console.warn('[AI] DISTINCT 조회 실패:', err);
+  }
+
+  return { activeColumnFields, customFieldLabels, distinctValues };
+}
+
+/**
+ * AI 프롬프트용 "사용 가능한 필터 필드" 섹션 생성.
+ * detectActiveFields() 결과를 받아 프롬프트 텍스트로 변환.
+ */
+export function buildFilterFieldsPrompt(fields: ActiveFieldsResult): string {
+  const { activeColumnFields, customFieldLabels, distinctValues } = fields;
+
+  const columnLines = activeColumnFields.map(f => {
+    const key = f.fieldKey;
+    const label = f.displayName;
+    const vals = distinctValues[key];
+    if (key === 'age') return `- age: ${label} (between 연산자로 범위 지정, 예: [20, 29])`;
+    if (key === 'birth_date') return `- birth_date: ${label} (birth_month 연산자로 월 필터, 예: {"operator": "birth_month", "value": 3} → 3월 생일)`;
+    if (key === 'store_code') return `- store_code: ${label} (eq/in 연산자)${vals ? ' → 반드시 다음 값 중 하나만 정확히 사용: ' + vals.join(', ') : ''}`;
+    if (f.dataType === 'number') return `- ${key}: ${label} (gte, lte, between 연산자)`;
+    if (f.dataType === 'date') return `- ${key}: ${label} (days_within, gte, lte 연산자)`;
+    if (['address', 'name', 'email'].includes(key)) {
+      return `- ${key}: ${label} (contains 연산자 권장 — 부분일치 검색. 예: {"operator":"contains","value":"용산구"})`;
+    }
+    if (vals && vals.length > 0) {
+      const valList = vals.length > 50 ? vals.slice(0, 50).join(', ') + ` ... 외 ${vals.length - 50}개` : vals.join(', ');
+      return `- ${key}: ${label} → ⚠️ 반드시 다음 값 중 하나만 정확히 사용 (띄어쓰기/대소문자 그대로): ${valList}`;
+    }
+    return `- ${key}: ${label} (eq/in 연산자)`;
+  }).join('\n');
+
+  const customLines = Object.entries(customFieldLabels).map(([key, label]) => {
+    const vals = distinctValues[`custom_fields.${key}`];
+    const baseOps = 'eq/gte/lte/between/in/contains/date_gte/date_lte';
+    if (vals && vals.length > 0) {
+      const valList = vals.length > 50 ? vals.slice(0, 50).join(', ') + ` ... 외 ${vals.length - 50}개` : vals.join(', ');
+      return `- custom_fields.${key}: ${label} (${baseOps}) → ⚠️ 반드시 다음 값 중 하나만 정확히 사용: ${valList}`;
+    }
+    return `- custom_fields.${key}: ${label} (커스텀 필드, ${baseOps}. ⚠️ 날짜 데이터는 반드시 date_gte/date_lte 사용!)`;
+  }).join('\n');
+
+  return `## 사용 가능한 필터 필드 (⚠️ 반드시 아래 값만 정확히 사용! 이 고객사에 실제 데이터가 있는 필드만 표시됨)
+${columnLines}
+${customLines}
+
+⚠️ 주의: region, grade 등 직접 컬럼 필드는 "custom_fields."를 붙이지 않고 그대로 사용!
+⚠️ 극히 중요: 필터 값에는 반드시 위 목록에 표시된 정확한 DB값만 사용하세요! 사용자 입력의 띄어쓰기/오타를 그대로 쓰지 말고, 위 목록에서 가장 일치하는 정확한 값을 골라 사용하세요. 목록에 없는 값은 절대 사용하지 마세요.`;
+}
+
+// ============================================================
 // 타겟 추천 (recommendTarget)
 // ============================================================
 
@@ -789,71 +911,9 @@ export async function recommendTarget(
   const businessType = companyInfo?.business_type || '기타';
   const brandName = companyInfo?.brand_name || companyInfo?.company_name || '브랜드';
   const hasKakaoProfile = companyInfo?.has_kakao_profile || false;
-  
-  // ★ D74: 고객사별 실제 필드 동적 감지 — FIELD_MAP + DB 기반
-  // 하드코딩 제거. 고객사가 등록한 데이터를 보고 필터/문안생성/치환 전부 자동 대응.
-  const schema = companyInfo?.customer_schema || {};
 
-  // 1) 직접 컬럼 필드 — 데이터 존재 여부 한 번에 체크 (enabled-fields API와 동일 패턴)
-  const detectableFields = getColumnFields().filter(f => f.fieldKey !== 'name' && f.fieldKey !== 'phone' && f.fieldKey !== 'sms_opt_in');
-  const countFilters = detectableFields.map(f => {
-    const c = f.columnName;
-    // ★ D79: age는 birth_date에서도 계산 가능하므로 birth_date 존재 여부도 함께 체크
-    if (f.fieldKey === 'age') return `COUNT(*) FILTER (WHERE ${c} IS NOT NULL AND ${c} > 0 OR birth_date IS NOT NULL) as cnt_${f.fieldKey}`;
-    if (f.dataType === 'number') return `COUNT(*) FILTER (WHERE ${c} IS NOT NULL AND ${c} > 0) as cnt_${f.fieldKey}`;
-    if (f.dataType === 'date') return `COUNT(*) FILTER (WHERE ${c} IS NOT NULL) as cnt_${f.fieldKey}`;
-    return `COUNT(*) FILTER (WHERE ${c} IS NOT NULL AND ${c} != '') as cnt_${f.fieldKey}`;
-  });
-
-  // 2) 커스텀 필드 라벨 조회
-  const [fieldCountRes, fieldDefsRes] = await Promise.all([
-    query(`SELECT ${countFilters.join(', ')} FROM customers WHERE company_id = $1 AND is_active = true`, [companyId]),
-    query(`SELECT field_key, field_label FROM customer_field_definitions WHERE company_id = $1 AND (is_hidden = false OR is_hidden IS NULL) ORDER BY display_order`, [companyId]),
-  ]);
-  const dc = fieldCountRes.rows[0] || {};
-  const customFieldLabels: Record<string, string> = {};
-  for (const fd of fieldDefsRes.rows) {
-    customFieldLabels[fd.field_key] = fd.field_label;
-  }
-
-  // 3) 데이터 있는 직접 컬럼 필드만 추출
-  const activeColumnFields = detectableFields.filter(f => parseInt(dc[`cnt_${f.fieldKey}`] || '0') > 0);
-
-  // 4) ★ D77: 모든 문자열 필드 DISTINCT 조회 — AI가 정확한 DB값만 사용하도록
-  //    기존 grade/gender/region 3개만 하던 것을 전체 문자열 필드로 동적 확장
-  const distinctValues: Record<string, string[]> = {};
-  try {
-    const stringFields = activeColumnFields.filter(f => f.dataType === 'string');
-    if (stringFields.length > 0) {
-      const distinctQueries = stringFields.map(f =>
-        query(
-          `SELECT DISTINCT ${f.columnName} FROM customers WHERE company_id = $1 AND ${f.columnName} IS NOT NULL AND ${f.columnName} != '' ORDER BY ${f.columnName} LIMIT 200`,
-          [companyId]
-        )
-      );
-      const results = await Promise.all(distinctQueries);
-      stringFields.forEach((f, i) => {
-        const vals = results[i].rows.map((r: any) => r[f.columnName]).filter(Boolean);
-        if (vals.length > 0) distinctValues[f.fieldKey] = vals;
-      });
-    }
-
-    // 커스텀 필드도 DISTINCT 조회 (라벨 있는 필드만)
-    for (const [key, label] of Object.entries(customFieldLabels)) {
-      try {
-        const cfRes = await query(
-          `SELECT DISTINCT custom_fields->>'${key}' as val FROM customers WHERE company_id = $1 AND custom_fields->>'${key}' IS NOT NULL AND custom_fields->>'${key}' != '' ORDER BY val LIMIT 200`,
-          [companyId]
-        );
-        const vals = cfRes.rows.map((r: any) => r.val).filter(Boolean);
-        if (vals.length > 0) distinctValues[`custom_fields.${key}`] = vals;
-      } catch (cfErr) {
-        // 개별 커스텀 필드 조회 실패 시 무시
-      }
-    }
-  } catch (err) {
-    console.warn('[AI] DISTINCT 조회 실패:', err);
-  }
+  // ★ D84: 공통 함수 detectActiveFields 호출 (기존 인라인 로직 제거)
+  const { activeColumnFields, customFieldLabels, distinctValues } = await detectActiveFields(companyId);
 
   // 하위호환: 기존 변수명 유지
   const genders = (distinctValues['gender'] || []).join(', ');
@@ -891,39 +951,7 @@ ${cleanObjective}
 - 평균 구매횟수: ${Number(customerStats.avg_purchase_count || 0).toFixed(1)}회
 - 평균 구매금액: ${Math.round(Number(customerStats.avg_total_spent || 0)).toLocaleString()}원
 
-## 사용 가능한 필터 필드 (⚠️ 반드시 아래 값만 정확히 사용! 이 고객사에 실제 데이터가 있는 필드만 표시됨)
-${activeColumnFields.map(f => {
-    const key = f.fieldKey;
-    const label = f.displayName;
-    const vals = distinctValues[key];
-    if (key === 'age') return `- age: ${label} (between 연산자로 범위 지정, 예: [20, 29])`;
-    if (key === 'birth_date') return `- birth_date: ${label} (birth_month 연산자로 월 필터, 예: {"operator": "birth_month", "value": 3} → 3월 생일)`;
-    if (key === 'store_code') return `- store_code: ${label} (eq/in 연산자)${vals ? ' → 반드시 다음 값 중 하나만 정확히 사용: ' + vals.join(', ') : ''}`;
-    if (f.dataType === 'number') return `- ${key}: ${label} (gte, lte, between 연산자)`;
-    if (f.dataType === 'date') return `- ${key}: ${label} (days_within, gte, lte 연산자)`;
-    // ★ 주소/이름 등 자유 텍스트 필드는 contains(부분일치) 기본 안내
-    if (['address', 'name', 'email'].includes(key)) {
-      return `- ${key}: ${label} (contains 연산자 권장 — 부분일치 검색. 예: {"operator":"contains","value":"용산구"})`;
-    }
-    // ★ D77: 모든 문자열 필드에 실제 DB값 목록 제공 — 정확한 값만 사용 강제
-    if (vals && vals.length > 0) {
-      const valList = vals.length > 50 ? vals.slice(0, 50).join(', ') + ` ... 외 ${vals.length - 50}개` : vals.join(', ');
-      return `- ${key}: ${label} → ⚠️ 반드시 다음 값 중 하나만 정확히 사용 (띄어쓰기/대소문자 그대로): ${valList}`;
-    }
-    return `- ${key}: ${label} (eq/in 연산자)`;
-  }).join('\n')}
-${Object.entries(customFieldLabels).map(([key, label]) => {
-    const vals = distinctValues[`custom_fields.${key}`];
-    const baseOps = 'eq/gte/lte/between/in/contains/date_gte/date_lte';
-    if (vals && vals.length > 0) {
-      const valList = vals.length > 50 ? vals.slice(0, 50).join(', ') + ` ... 외 ${vals.length - 50}개` : vals.join(', ');
-      return `- custom_fields.${key}: ${label} (${baseOps}) → ⚠️ 반드시 다음 값 중 하나만 정확히 사용: ${valList}`;
-    }
-    return `- custom_fields.${key}: ${label} (커스텀 필드, ${baseOps}. ⚠️ 날짜 데이터는 반드시 date_gte/date_lte 사용!)`;
-  }).join('\n')}
-
-⚠️ 주의: region, grade 등 직접 컬럼 필드는 "custom_fields."를 붙이지 않고 그대로 사용!
-⚠️ 극히 중요: 필터 값에는 반드시 위 목록에 표시된 정확한 DB값만 사용하세요! 사용자 입력의 띄어쓰기/오타를 그대로 쓰지 말고, 위 목록에서 가장 일치하는 정확한 값을 골라 사용하세요. 목록에 없는 값은 절대 사용하지 마세요.
+${buildFilterFieldsPrompt({ activeColumnFields, customFieldLabels, distinctValues })}
 
 ${varCatalogPrompt}
 
@@ -1172,7 +1200,13 @@ function stripEmojis(text: string): string {
 // 프로모션 브리핑 파싱 (parseBriefing)
 // ============================================================
 
-const PARSE_BRIEFING_SYSTEM = `당신은 마케팅 프로모션 분석 전문가입니다.
+/**
+ * ★ D84: parseBriefing 시스템 프롬프트를 동적으로 생성.
+ * 기존 하드코딩 프롬프트에서 targetFilters 필드가 9개만 고정이었던 문제 해결.
+ * recommendTarget과 동일한 detectActiveFields + buildFilterFieldsPrompt 사용.
+ */
+function buildParseBriefingSystem(filterFieldsPrompt: string): string {
+  return `당신은 마케팅 프로모션 분석 전문가입니다.
 마케터가 자연어로 브리핑한 프로모션 내용을 구조화된 JSON으로 파싱합니다.
 
 ## 파싱 규칙
@@ -1200,7 +1234,11 @@ const PARSE_BRIEFING_SYSTEM = `당신은 마케팅 프로모션 분석 전문가
 - 연령: [최소나이, 최대나이] 범위로 변환 — "20대"→[20,29], "30~40대"→[30,49]
 - 구매 기간: "최근 N개월"은 오늘 날짜(user 메시지에 명시) 기준 ISO 날짜(YYYY-MM-DD)로 변환
 - 생일: birth_date 필드에 birth_month 연산자 사용 — "3월 생일"→{"operator":"birth_month","value":3}
-- operator 종류: "eq"(같음), "in"(포함), "gte"(이상), "lte"(이하), "birth_month"(생일 월)
+- 커스텀 필드: "custom_fields." 접두사 + field_key 형식 사용 — 예: {"custom_fields.custom_1": {"operator":"eq","value":"참석"}}
+- operator 종류: "eq"(같음), "in"(포함), "gte"(이상), "lte"(이하), "between"(범위), "contains"(포함검색), "birth_month"(생일 월), "days_within"(최근 N일), "date_gte"(날짜 이후), "date_lte"(날짜 이전)
+- ⚠️ 반드시 아래 "사용 가능한 필터 필드"에 나열된 필드와 값만 사용!
+
+${filterFieldsPrompt}
 
 ## 출력 형식
 반드시 아래 JSON 형식으로만 응답하세요 (다른 텍스트 없이):
@@ -1228,17 +1266,15 @@ const PARSE_BRIEFING_SYSTEM = `당신은 마케팅 프로모션 분석 전문가
     "extra": "기타 타겟 조건 (없으면 빈 문자열)"
   },
   "targetFilters": {
-    "gender": "F",
-    "grade": { "value": ["VIP"], "operator": "in" },
-    "age": [30, 49],
-    "region": { "value": ["서울"], "operator": "in" },
-    "recent_purchase_date": { "value": "2025-11-22", "operator": "gte" },
-    "total_purchase_amount": { "value": 50000, "operator": "gte" },
-    "points": { "value": 1000, "operator": "gte" },
-    "store_name": { "value": "강남점", "operator": "eq" },
-    "birth_date": { "value": 3, "operator": "birth_month" }
+    // ⚠️ 위 "사용 가능한 필터 필드"의 키만 사용! 커스텀 필드는 "custom_fields.custom_N" 형식으로!
+    // 예시 (필요한 것만 포함, 나머지는 제외):
+    // "gender": "F",
+    // "grade": { "value": ["VIP"], "operator": "in" },
+    // "age": [30, 49],
+    // "custom_fields.custom_1": { "value": "참석", "operator": "eq" }
   }
 }`;
+}
 
 export interface TargetCondition {
   description: string;
@@ -1266,7 +1302,7 @@ const EMPTY_TARGET_CONDITION: TargetCondition = {
   extra: '',
 };
 
-export async function parseBriefing(briefing: string): Promise<{
+export async function parseBriefing(briefing: string, companyId?: string): Promise<{
   promotionCard: {
     name: string;
     benefit: string;
@@ -1296,8 +1332,20 @@ export async function parseBriefing(briefing: string): Promise<{
   }
 
   try {
+    // ★ D84: 동적 프롬프트 생성 — recommendTarget과 동일한 컨트롤타워 사용
+    let filterFieldsPrompt = '';
+    if (companyId) {
+      try {
+        const activeFields = await detectActiveFields(companyId);
+        filterFieldsPrompt = buildFilterFieldsPrompt(activeFields);
+      } catch (err) {
+        console.warn('[parseBriefing] 동적 필드 탐지 실패, 기본 프롬프트 사용:', err);
+      }
+    }
+    const systemPrompt = buildParseBriefingSystem(filterFieldsPrompt);
+
     const text = await callAIWithFallback({
-      system: PARSE_BRIEFING_SYSTEM,
+      system: systemPrompt,
       userMessage: `오늘 날짜: ${getKoreanToday()}\n\n${getKoreanCalendar()}\n⚠️ 날짜→요일 변환 시 반드시 위 달력을 참조하세요!\n\n다음 프로모션 브리핑을 구조화해주세요:\n\n${briefing}`,
       maxTokens: 1024,
       temperature: 0.3,

@@ -106,6 +106,57 @@
 
 ---
 
+### 🔧 D83 — 고객DB 필터 전면 수정 + 자동발송 3건 중복/시간오차/개인화 (2026-03-19) — 🟡 수정완료-배포대기
+
+> **배경:** 직원 리포트 5건. (1) 고객DB 필터 검색 다수 컬럼 미작동 (2) 한줄로 정상 (3) 맞춤한줄 타겟추출 0명/전체 (4) 미리보기/담당자테스트 개인화 불일치 (5) 자동발송 3건 중복+시간오차+D-1 알림 미발송
+
+#### 수정 항목 (8개 파일)
+
+**1. structured 모드 FIELD_MAP 동적 루프 통일 (customer-filter.ts — CT-01)**
+- **문제:** NUMERIC_FIELDS/DATE_FIELDS 하드코딩 리스트 + store_name 전용 핸들러 → contains 미지원, 새 필드 누락
+- **수정:** 하드코딩 리스트 전부 삭제 → 한줄로(mixed 모드)와 동일한 FIELD_MAP 동적 루프로 통일. 특수 처리 필드(gender/grade/region/sms_opt_in/store_code/age)만 전용 핸들러 유지
+- **추가:** age에 eq 연산자 추가 (일치 검색 시 전체 리스트 반환 버그), safeDateValue 방어 (한국식 날짜 입력 시 쿼리 에러 방지), 디버그 로그
+
+**2. normalizeDate 한국식 날짜 패턴 (normalize.ts)**
+- **문제:** "2025. 12. 17." 같은 한국식 형식 미지원 → 날짜 필터 시 PostgreSQL DateTimeParseError
+- **수정:** 한국식 날짜 패턴 regex 추가 ("YYYY. M. D." → "YYYY-MM-DD")
+
+**3. 날짜 필드 date picker (CustomerDBModal.tsx)**
+- **문제:** 날짜 필드에 텍스트 자유 입력 → 비정상 형식 직접 입력 가능
+- **수정:** `<input type="date">` 적용 (비정상 입력 원천 차단)
+
+**4. 성별 dropdown (customers.ts + CustomerDBModal.tsx)**
+- **문제:** filter-options API에 genders 미포함 → 성별이 텍스트 입력(contains) → 핸들러에서 무시 → 전체 리스트
+- **수정:** filter-options에 genders 추가 + CustomerDBModal에서 성별 dropdown 활성화
+
+**5. 맞춤한줄 담당자테스트 sampleCustomer (AiCustomSendFlow.tsx)**
+- **문제:** test-send API 호출 시 sampleCustomer 미전달 → 미리보기와 다른 고객으로 개인화
+- **수정:** sampleData를 sampleCustomer로 전달
+
+**6. 자동발송 3건 중복 방지 (auto-campaign-worker.ts)**
+- **문제:** `status='active'→'active'` UPDATE는 잠금 역할 못 함 → 워커 1시간 간격 재실행 시 동일 캠페인 반복 처리
+- **수정:** `status='active'→'executing'` 원자적 잠금 + 완료 후 'active' 복원. executing 상태에서 다음 워커가 스킵
+
+**7. 자동발송 KST 이중변환 (auto-campaigns.ts + auto-campaign-worker.ts)**
+- **문제:** `toLocaleString('Asia/Seoul') + kstToUtc(-9h)` → KST 서버에서 이중 변환 → 9시간 오차 (10:00 KST 설정 → 01:00 KST 실행)
+- **수정:** 서버 타임존 무관한 UTC+9 오프셋 기반 계산으로 교체 (`Date.UTC() - KST_OFFSET_MS`)
+
+#### 미해결 (다음 세션)
+- 자동발송 target_filter UI 미구현 (Phase 2 미완성) → 필터 `{}` → 전체 고객 발송
+- 커스텀 필드(VIP행사참석 등) dropdown 연동 확인 (배포 후 디버그 로그로 확인)
+- 자동발송 D-1 알림: pre_notify/notify_phones 설정 여부 확인 필요
+
+#### 수정 파일 (8개)
+- `packages/backend/src/utils/customer-filter.ts` — structured 하드코딩 삭제 + FIELD_MAP 통일 + age eq + safeDateValue + 디버그 로그
+- `packages/backend/src/utils/normalize.ts` — 한국식 날짜 패턴
+- `packages/backend/src/routes/customers.ts` — filter-options genders 추가
+- `packages/frontend/src/components/CustomerDBModal.tsx` — date picker + gender dropdown
+- `packages/frontend/src/components/AiCustomSendFlow.tsx` — sampleCustomer 전달
+- `packages/backend/src/utils/auto-campaign-worker.ts` — executing 잠금 + calcNextRunAt KST 수정
+- `packages/backend/src/routes/auto-campaigns.ts` — calcNextRunAt KST 수정
+
+---
+
 ### 🔧 D82 — AI 타겟추출 정상화 + 전체필드 동적필터 통일 + 개인화 통일 + 자동발송 시간 KST (2026-03-18) — ✅ 배포 완료
 
 > **배경:** (1) AI 타겟추출 0명 버그 (2) 전체고객 풀백 방지 과잉 로직 (3) address/name/phone 등 필터 누락 (4) 미리보기 vs 테스트발송 개인화 불일치 (5) 자동발송 시간 표시 오류 (6) 고객DB 필터 UI 중복/과잉

@@ -426,6 +426,11 @@ PostgreSQL campaigns/campaign_runs 생성
 | **SPECIAL_FIELDS 과잉 등록** | customer-filter.ts SPECIAL_FIELDS에 name/email/address 포함 → FIELD_MAP 동적 루프에서 건너뜀 + 전용 핸들러 없음 → AI가 address 필터 반환해도 WHERE절 비어서 전체 고객 반환 | **SPECIAL_FIELDS에는 normalize 헬퍼 필요 필드만. 나머지는 FIELD_MAP 동적 루프가 자동 처리.** 필드별 핸들러 수동 추가 구조 = 누락 재발 (D82) |
 | **안전장치가 정상 결과 차단** | 풀백 방지 로직이 DB 추출 결과(actualCount)를 임의로 0으로 덮어씀 → AI 타겟추출이 항상 0명 | **안전장치는 로그만 남기고 정상 결과를 훼손하지 않는다.** DB에서 정확히 추출한 결과가 최종 (D82) |
 | **테스트발송 샘플 고객 불일치** | 미리보기 ORDER BY name ASC vs 테스트발송 ORDER BY created_at DESC → 다른 고객 데이터로 치환 | **미리보기 샘플 고객을 테스트발송에 그대로 전달.** 프론트 → 백엔드 sampleCustomer body 전달 (D82) |
+| **structured 모드 하드코딩 리스트** | NUMERIC_FIELDS/DATE_FIELDS/store_name 전용 핸들러가 FIELD_MAP 동적 루프 진입을 차단 → contains 미지원, 새 필드 누락 | **structured 모드도 mixed 모드와 동일한 FIELD_MAP 동적 루프로 통일.** 특수 처리 필드(gender/grade/region/age/store_code/sms_opt_in)만 전용 핸들러 유지 (D83) |
+| **filter-options에 성별 미포함** | gender가 텍스트 입력(contains) → 핸들러에서 eq/in만 처리 → 필터 무시 → 전체 리스트 | **dropdown으로 제공할 필드는 반드시 filter-options API에 포함.** 텍스트 자유 입력 시 핸들러 불일치 위험 (D83) |
+| **자동발송 잠금 미비** | `status='active'→'active'` UPDATE는 잠금 역할 못 함 → 워커 1시간 간격 3회 중복 실행 → 12,051건 3배 발송 | **잠금은 반드시 상태 전환(active→executing)으로 구현.** 동일 상태 UPDATE는 잠금이 아님 (D83) |
+| **KST 이중변환** | `toLocaleString('Asia/Seoul') + kstToUtc(-9h)` → KST 서버에서 9시간 이중 빼기 → 10:00 설정이 01:00에 실행 | **시간 변환은 서버 TZ에 의존하지 않고 `Date.UTC() - KST_OFFSET_MS` 패턴 사용** (D83) |
+| **기간계 기능 필수 UI 없이 배포** | 자동발송 target_filter UI 미구현 상태에서 배포 → `{}` 필터 → 전체 고객 발송 사고 | **기간계(실제 발송) 기능은 필수 필터/설정 UI 완성 전 배포 금지** (D83) |
 
 ### ⚠️ 필수 체크 원칙 1: 유틸 함수 수정/추가 시 소비처 전수 확인
 
