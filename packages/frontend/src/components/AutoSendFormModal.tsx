@@ -3,7 +3,7 @@
  *
  * 1. 기본 정보 (캠페인명, 설명)
  * 2. 활용 필드 선택 (AI 맞춤한줄 패턴 — 변수/개인화에 사용할 고객 필드)
- * 3. ★ D86: 타겟 필터 (DirectTargetFilterModal 재활용 — 발송 대상 조건)
+ * 3. ★ D86: 발송 대상 설정 (AI 기반 자동 target_filter 생성 — parseBriefing 컨트롤타워 재활용)
  * 4. 스케줄 (매월/매주/매일 + 발송일/요일 + 시각)
  * 5. 메시지 (SMS/LMS/MMS 탭 + AI문안생성 + 스팸필터 + 본문 + 발신번호)
  * 6. 확인 (요약)
@@ -15,7 +15,6 @@
 import { useEffect, useState, useMemo } from 'react';
 import { aiApi } from '../api/client';
 import AiMessageSuggestModal from './AiMessageSuggestModal';
-import DirectTargetFilterModal from './DirectTargetFilterModal';
 import SpamFilterTestModal from './SpamFilterTestModal';
 
 interface AutoSendFormModalProps {
@@ -114,10 +113,12 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
   const [fieldsLoading, setFieldsLoading] = useState(true);
   const [categoryLabels, setCategoryLabels] = useState<Record<string, string>>(DEFAULT_CATEGORY_LABELS);
 
-  // ★ D86: 타겟 필터 (Step 3)
+  // ★ D86: 타겟 설정 (Step 3) — AI 기반 자동 target_filter 생성
   const [targetFilter, setTargetFilter] = useState<Record<string, any>>(campaign?.target_filter || {});
   const [targetCount, setTargetCount] = useState(0);
-  const [showFilterModal, setShowFilterModal] = useState(false);
+  const [targetDescription, setTargetDescription] = useState(campaign?.description || '');
+  const [targetParsing, setTargetParsing] = useState(false);
+  const [targetConditionSummary, setTargetConditionSummary] = useState('');
 
   // ★ D86: D-1 사전 알림 (Step 4 하단)
   const [preNotify, setPreNotify] = useState(campaign?.pre_notify ?? true);
@@ -264,6 +265,41 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
     return messageType === 'SMS'
       ? `무료거부${optOutNumber.replace(/-/g, '')}`
       : `무료수신거부 ${formatRejectNumber(optOutNumber)}`;
+  };
+
+  // ★ D86: AI 기반 타겟 자동 파싱 — parseBriefing 컨트롤타워 재활용
+  const parseTargetCondition = async () => {
+    if (!targetDescription.trim()) {
+      setToast({ show: true, type: 'error', message: '발송 대상을 입력해주세요.' });
+      return;
+    }
+    setTargetParsing(true);
+    try {
+      const res = await fetch('/api/ai/parse-briefing', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
+        body: JSON.stringify({ briefing: `다음 조건의 고객 대상으로 자동발송합니다: ${targetDescription.trim()}` }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const filters = data.targetFilters || {};
+        setTargetFilter(filters);
+        setTargetConditionSummary(data.targetCondition?.description || '');
+        setTargetCount(data.estimatedCount || 0);
+        if (Object.keys(filters).length === 0) {
+          setToast({ show: true, type: 'warning', message: 'AI가 타겟 조건을 인식하지 못했습니다. 좀 더 구체적으로 입력해주세요.' });
+        } else {
+          setToast({ show: true, type: 'success', message: `타겟 조건이 설정되었습니다. 현재 기준 약 ${(data.estimatedCount || 0).toLocaleString()}명` });
+        }
+      } else {
+        const err = await res.json();
+        setToast({ show: true, type: 'error', message: err.error || '타겟 분석에 실패했습니다.' });
+      }
+    } catch {
+      setToast({ show: true, type: 'error', message: '서버 연결에 실패했습니다.' });
+    } finally {
+      setTargetParsing(false);
+    }
   };
 
   // AI 문구 생성 — selectedFields 기반 개인화 연동
@@ -593,62 +629,77 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
               </div>
             )}
 
-            {/* ========== Step 3: 타겟 필터 (D86 신규) ========== */}
+            {/* ========== Step 3: 발송 대상 설정 (D86 — AI 기반 자동 타겟 생성) ========== */}
             {step === 3 && (
               <div className="space-y-4" style={{ animation: 'slideUp 0.3s ease-out' }}>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">발송 대상 필터 *</label>
-                  <p className="text-xs text-gray-500 mb-3">매 실행 시점에 아래 조건에 맞는 고객을 자동으로 조회하여 발송합니다.</p>
+                  <label className="block text-sm font-bold text-gray-800 mb-1">발송 대상을 설명해주세요 *</label>
+                  <p className="text-xs text-gray-500 mb-3">AI가 조건을 분석하여 매 발송 시점에 해당 조건의 고객을 자동 조회합니다.</p>
                 </div>
 
-                {/* 현재 필터 상태 표시 */}
-                {targetFilter && Object.keys(targetFilter).length > 0 ? (
-                  <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-sm font-medium text-green-700">✅ 필터 설정 완료</span>
-                      {targetCount > 0 && (
-                        <span className="text-xs text-green-600 bg-green-100 px-2 py-0.5 rounded-full">
-                          현재 기준 약 {targetCount.toLocaleString()}명
-                        </span>
-                      )}
+                {/* 대상 설명 입력 */}
+                <textarea
+                  value={targetDescription}
+                  onChange={e => setTargetDescription(e.target.value)}
+                  placeholder={"예시:\n• 이번 달 생일인 고객\n• VIP 등급 여성 고객\n• 최근 3개월 미구매 고객\n• 피부타입이 건성인 고객\n• 30대 남성 중 구매금액 10만원 이상"}
+                  className="w-full h-28 px-4 py-3 border border-gray-300 rounded-xl text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder-gray-400 leading-relaxed"
+                />
+
+                {/* AI 분석 버튼 */}
+                <button
+                  onClick={parseTargetCondition}
+                  disabled={targetParsing || !targetDescription.trim()}
+                  className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white rounded-lg text-sm font-medium transition flex items-center justify-center gap-2"
+                >
+                  {targetParsing ? (
+                    <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> AI 타겟 분석 중...</>
+                  ) : (
+                    <>🎯 AI 타겟 분석</>
+                  )}
+                </button>
+
+                {/* 분석 결과 */}
+                {targetFilter && Object.keys(targetFilter).length > 0 && (
+                  <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium text-blue-700">✅ 타겟 조건 설정 완료</span>
+                      <span className="text-lg font-bold text-blue-700">
+                        약 {targetCount.toLocaleString()}명
+                      </span>
                     </div>
-                    <div className="flex flex-wrap gap-1.5 mb-3">
+
+                    {targetConditionSummary && (
+                      <p className="text-sm text-gray-700">{targetConditionSummary}</p>
+                    )}
+
+                    <div className="flex flex-wrap gap-1.5">
                       {Object.entries(targetFilter).map(([key, val]) => {
                         const field = availableFields.find(f => f.field_key === key);
                         const label = field?.display_name || field?.field_label || key;
                         let display = '';
                         if (val && typeof val === 'object' && val.operator) {
+                          const opLabels: Record<string, string> = { eq: '=', in: '포함', gte: '이상', lte: '이하', between: '범위', contains: '포함', days_within: '최근', birth_month: '월' };
+                          const op = opLabels[val.operator] || val.operator;
                           const v = Array.isArray(val.value) ? val.value.join('~') : val.value;
-                          display = `${v}`;
+                          display = `${op} ${v}`;
                         } else if (Array.isArray(val)) {
                           display = val.join('~');
                         } else {
                           display = String(val);
                         }
                         return (
-                          <span key={key} className="px-2 py-1 bg-white rounded-md text-xs text-green-700 border border-green-200">
-                            {label}: {display}
+                          <span key={key} className="px-2.5 py-1 bg-white rounded-lg text-xs text-blue-700 border border-blue-200 font-medium">
+                            {label} {display}
                           </span>
                         );
                       })}
                     </div>
-                    <p className="text-xs text-amber-600">
-                      📌 인원수는 현재 시점 기준이며, 실제 발송 시 조건에 맞는 고객이 자동 조회됩니다.
+
+                    <p className="text-xs text-gray-500">
+                      📌 위 인원수는 현재 시점 기준이며, 실제 발송 시 해당 조건에 맞는 고객이 자동으로 조회됩니다.
                     </p>
                   </div>
-                ) : (
-                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-center">
-                    <p className="text-sm text-amber-700 font-medium mb-1">⚠️ 필터가 설정되지 않았습니다</p>
-                    <p className="text-xs text-amber-600">아래 버튼을 눌러 발송 대상 조건을 설정해주세요.</p>
-                  </div>
                 )}
-
-                <button
-                  onClick={() => setShowFilterModal(true)}
-                  className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition flex items-center justify-center gap-2"
-                >
-                  🎯 {targetFilter && Object.keys(targetFilter).length > 0 ? '필터 조건 변경' : '필터 조건 설정'}
-                </button>
               </div>
             )}
 
@@ -1091,11 +1142,11 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
                     <span className="text-gray-500">활용 필드</span>
                     <span className="text-violet-700 font-medium">{selectedFields.length}개</span>
                   </div>
-                  {/* ★ D86: 타겟 필터 요약 */}
+                  {/* ★ D86: 타겟 요약 */}
                   <div className="flex justify-between">
                     <span className="text-gray-500">발송 대상</span>
                     <span className="text-blue-700 font-medium">
-                      {targetCount > 0 ? `현재 기준 약 ${targetCount.toLocaleString()}명` : '조건 설정됨'}
+                      {targetConditionSummary || (targetCount > 0 ? `현재 기준 약 ${targetCount.toLocaleString()}명` : getFilterSummary())}
                     </span>
                   </div>
                   <div className="flex justify-between">
@@ -1251,19 +1302,6 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
         />
       )}
 
-      {/* ★ D86: 타겟 필터 모달 (filterOnlyMode — 조건만 저장, 추출 없음) */}
-      <DirectTargetFilterModal
-        show={showFilterModal}
-        onClose={() => setShowFilterModal(false)}
-        filterOnlyMode={true}
-        onExtracted={(_recipients, count, _fieldsMeta, _callbackPhone, dynamicFilters) => {
-          if (dynamicFilters && Object.keys(dynamicFilters).length > 0) {
-            setTargetFilter(dynamicFilters);
-            setTargetCount(count);
-          }
-          setShowFilterModal(false);
-        }}
-      />
     </>
   );
 }
