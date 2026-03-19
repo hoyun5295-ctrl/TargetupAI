@@ -128,6 +128,11 @@ export const manageCallbacksApi = {
   update: (id: string, data: any) => api.put(`/manage/callbacks/${id}`, data),
   delete: (id: string) => api.delete(`/manage/callbacks/${id}`),
   setDefault: (id: string) => api.put(`/manage/callbacks/${id}/default`),
+  // D87: 배정 관리
+  updateScope: (id: string, scope: 'all' | 'assigned') => api.put(`/manage/callbacks/${id}/scope`, { scope }),
+  getAssignments: (id: string) => api.get(`/manage/callbacks/${id}/assignments`),
+  saveAssignments: (id: string, userIds: string[]) => api.put(`/manage/callbacks/${id}/assignments`, { userIds }),
+  removeAssignment: (id: string, userId: string) => api.delete(`/manage/callbacks/${id}/assignments/${userId}`),
 };
 
 // 예약 캠페인 관리

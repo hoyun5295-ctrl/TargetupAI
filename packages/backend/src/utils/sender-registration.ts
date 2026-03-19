@@ -450,6 +450,200 @@ export async function rejectRegistration(
   return result.rows[0];
 }
 
+// ============================================================
+//  발신번호 배정 관리 (callback_number_assignments)
+//  D87: 발신번호를 전체 사용 / 사용자 지정으로 선택적 관리
+// ============================================================
+
+export interface CallbackNumberAssignment {
+  id: string;
+  callback_number_id: string;
+  user_id: string;
+  assigned_by: string;
+  created_at: string;
+  // JOIN 필드
+  user_name?: string;
+  user_email?: string;
+  store_codes?: string[];
+}
+
+/** 배정 범위 변경 (all / assigned) */
+export async function updateAssignmentScope(
+  callbackNumberId: string,
+  companyId: string,
+  scope: 'all' | 'assigned'
+): Promise<boolean> {
+  const result = await pool.query(
+    `UPDATE callback_numbers
+     SET assignment_scope = $1
+     WHERE id = $2 AND company_id = $3
+     RETURNING id`,
+    [scope, callbackNumberId, companyId]
+  );
+  return (result.rowCount ?? 0) > 0;
+}
+
+/** 사용자 배정 추가 (여러 명 한 번에) */
+export async function assignUsersToCallback(
+  callbackNumberId: string,
+  companyId: string,
+  userIds: string[],
+  assignedBy: string
+): Promise<CallbackNumberAssignment[]> {
+  // 해당 번호가 이 회사 소유인지 확인
+  const ownerCheck = await pool.query(
+    `SELECT id FROM callback_numbers WHERE id = $1 AND company_id = $2`,
+    [callbackNumberId, companyId]
+  );
+  if (ownerCheck.rows.length === 0) {
+    throw new Error('해당 발신번호를 찾을 수 없습니다.');
+  }
+
+  // 배정할 사용자들이 같은 회사인지 확인
+  const userCheck = await pool.query(
+    `SELECT id FROM users WHERE id = ANY($1) AND company_id = $2`,
+    [userIds, companyId]
+  );
+  if (userCheck.rows.length !== userIds.length) {
+    throw new Error('같은 회사에 속하지 않는 사용자가 포함되어 있습니다.');
+  }
+
+  // ON CONFLICT DO NOTHING으로 중복 배정 방지
+  const values = userIds.map((uid, i) =>
+    `($1, $${i + 3}, $2)`
+  ).join(', ');
+  const params = [callbackNumberId, assignedBy, ...userIds];
+
+  const result = await pool.query(
+    `INSERT INTO callback_number_assignments (callback_number_id, user_id, assigned_by)
+     VALUES ${values}
+     ON CONFLICT (callback_number_id, user_id) DO NOTHING
+     RETURNING *`,
+    params
+  );
+
+  return result.rows;
+}
+
+/** 사용자 배정 해제 */
+export async function unassignUserFromCallback(
+  callbackNumberId: string,
+  userId: string,
+  companyId: string
+): Promise<boolean> {
+  // 해당 번호가 이 회사 소유인지 확인
+  const ownerCheck = await pool.query(
+    `SELECT id FROM callback_numbers WHERE id = $1 AND company_id = $2`,
+    [callbackNumberId, companyId]
+  );
+  if (ownerCheck.rows.length === 0) {
+    throw new Error('해당 발신번호를 찾을 수 없습니다.');
+  }
+
+  const result = await pool.query(
+    `DELETE FROM callback_number_assignments
+     WHERE callback_number_id = $1 AND user_id = $2`,
+    [callbackNumberId, userId]
+  );
+  return (result.rowCount ?? 0) > 0;
+}
+
+/** 특정 발신번호에 배정된 사용자 목록 조회 */
+export async function getAssignmentsByCallback(
+  callbackNumberId: string,
+  companyId: string
+): Promise<CallbackNumberAssignment[]> {
+  const result = await pool.query(
+    `SELECT cna.*, u.name as user_name, u.email as user_email, u.store_codes
+     FROM callback_number_assignments cna
+     LEFT JOIN users u ON cna.user_id = u.id
+     LEFT JOIN callback_numbers cn ON cna.callback_number_id = cn.id
+     WHERE cna.callback_number_id = $1 AND cn.company_id = $2
+     ORDER BY u.name ASC`,
+    [callbackNumberId, companyId]
+  );
+  return result.rows;
+}
+
+/** 특정 사용자에게 배정된 발신번호 ID 목록 조회 (발송 시 필터링용) */
+export async function getAssignedCallbackIds(
+  userId: string,
+  companyId: string
+): Promise<string[]> {
+  const result = await pool.query(
+    `SELECT cna.callback_number_id
+     FROM callback_number_assignments cna
+     JOIN callback_numbers cn ON cna.callback_number_id = cn.id
+     WHERE cna.user_id = $1 AND cn.company_id = $2`,
+    [userId, companyId]
+  );
+  return result.rows.map((r: any) => r.callback_number_id);
+}
+
+/** 배정 전체 교체 (기존 삭제 → 새로 INSERT) */
+export async function replaceAssignments(
+  callbackNumberId: string,
+  companyId: string,
+  userIds: string[],
+  assignedBy: string
+): Promise<CallbackNumberAssignment[]> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // 해당 번호가 이 회사 소유인지 확인
+    const ownerCheck = await client.query(
+      `SELECT id FROM callback_numbers WHERE id = $1 AND company_id = $2`,
+      [callbackNumberId, companyId]
+    );
+    if (ownerCheck.rows.length === 0) {
+      throw new Error('해당 발신번호를 찾을 수 없습니다.');
+    }
+
+    // 기존 배정 전체 삭제
+    await client.query(
+      `DELETE FROM callback_number_assignments WHERE callback_number_id = $1`,
+      [callbackNumberId]
+    );
+
+    // 새 배정이 비어있으면 (전체 해제) 그대로 커밋
+    if (userIds.length === 0) {
+      await client.query('COMMIT');
+      return [];
+    }
+
+    // 배정할 사용자들이 같은 회사인지 확인
+    const userCheck = await client.query(
+      `SELECT id FROM users WHERE id = ANY($1) AND company_id = $2`,
+      [userIds, companyId]
+    );
+    if (userCheck.rows.length !== userIds.length) {
+      throw new Error('같은 회사에 속하지 않는 사용자가 포함되어 있습니다.');
+    }
+
+    // 새로 INSERT
+    const values = userIds.map((_, i) =>
+      `($1, $${i + 3}, $2)`
+    ).join(', ');
+    const params = [callbackNumberId, assignedBy, ...userIds];
+
+    const result = await client.query(
+      `INSERT INTO callback_number_assignments (callback_number_id, user_id, assigned_by)
+       VALUES ${values}
+       RETURNING *`,
+      params
+    );
+
+    await client.query('COMMIT');
+    return result.rows;
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 /** 승인 대기 건수 조회 (슈퍼관리자 대시보드 배지용) — 담당자 + 발신번호 합산 */
 export async function getPendingCount(): Promise<{ managers: number; registrations: number; total: number }> {
   const mgrResult = await pool.query(

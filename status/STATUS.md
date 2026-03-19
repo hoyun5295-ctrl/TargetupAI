@@ -106,7 +106,42 @@
 
 ---
 
-### 🔧 D83 — 고객DB 필터 전면 수정 + 자동발송 3건 중복/시간오차/개인화 (2026-03-19) — 🟡 수정완료-배포대기
+### 🔧 D86 — 자동발송 완전화 + 맞춤한줄/개인화/스팸 수정 (2026-03-19) — ✅ 배포 완료
+
+> **배경:** (1) 맞춤한줄 발송대상 추출 0명/전체 (2) 개인화 NULL (3) 맞춤한줄 스팸 자동화 미구현 (4) 날짜 UTC raw 표시 (5) 자동발송 Phase 2 미완성 (타겟필터/D-1알림/실행이력)
+
+#### D84 — 맞춤한줄 발송대상 추출 0명/전체 (✅ 배포완료)
+- **근본 원인:** parseBriefing 프롬프트 하드코딩 (직접 컬럼 9개만) → 커스텀 필드/registered_store 등 AI가 필터 생성 불가
+- **수정:** `detectActiveFields()` + `buildFilterFieldsPrompt()` 공통 함수 추출 → recommendTarget과 parseBriefing 공용. 하드코딩 프롬프트 → 동적 프롬프트 전환
+- **수정 파일:** services/ai.ts, routes/ai.ts, AiCustomSendFlow.tsx
+
+#### D85 — 개인화 NULL + 맞춤한줄 스팸 자동화 + 날짜 KST (✅ 배포완료)
+- **개인화 NULL 원인:** recommend-target이 `sample_customer`를 displayName 키("이름")로 반환 → test-send의 `replaceVariables`는 column 키("name")로 접근 → undefined
+- **수정:** `sample_customer_raw` (column 키 DB row 원본) 추가 반환. Dashboard.tsx에서 test-send 호출 시 raw 데이터 전달
+- **맞춤한줄 스팸 자동화:** generate-custom 라우트에 프로 이상 `autoSpamTestWithRegenerate` 추가 (한줄로와 동일 로직)
+- **날짜 KST:** `replaceVariables`에 `timeZone: 'Asia/Seoul'` 고정 + ISO 문자열 자동 감지 포맷팅
+- **수정 파일:** routes/ai.ts, pages/Dashboard.tsx, AiCustomSendFlow.tsx, utils/messageUtils.ts
+
+#### D86 — 자동발송 완전화 3건 (✅ 배포완료)
+- **D86-1 타겟 설정:** AutoSendFormModal 5→6단계. Step 3에 AI 기반 타겟 자동 생성 (`recommend-target` 컨트롤타워 재활용, `auto_relax: false`). 사용자가 자연어로 대상 설명 → AI가 target_filter 생성 → 예상 인원 표시. 매 실행 시 동적 조회. 빈 필터 {} 차단 (D83 사고 방지)
+- **D86-2 D-1 사전 알림 UI:** Step 4(스케줄) 하단에 ON/OFF 토글 + 전화번호 입력. `pre_notify` + `notify_phones` handleSave에 전달. 백엔드 `sendPreNotification()` 기존 구현 활용
+- **D86-3 실행 이력 조회:** AutoSendPage 캠페인 카드에 "이력" 버튼. GET /:id API → 모달에 회차별 결과 (대상/발송/성공/실패/상태/AI여부)
+- **수정 파일:** AutoSendFormModal.tsx, AutoSendPage.tsx, DirectTargetFilterModal.tsx (원복)
+
+#### D79 — ✅ 배포 완료 (Harold님 확인)
+#### D83 — ✅ 배포 완료 (Harold님 확인)
+
+#### 자동발송 Phase 2 완성 상태
+- ✅ AI 문안 자동생성 (D80)
+- ✅ 타겟 필터 설정 (D86-1) — recommend-target 재활용, 매 실행 시 동적 조회
+- ✅ D-1 사전 알림 (D86-2)
+- ✅ 실행 이력 상세 조회 (D86-3)
+- ✅ 3건 중복 방지 + KST 이중변환 (D83)
+- 🔜 Phase 3 (A/B 테스트, 발송 최적 시간 추천) — 향후 과제
+
+---
+
+### 🔧 D83 — 고객DB 필터 전면 수정 + 자동발송 3건 중복/시간오차/개인화 (2026-03-19) — ✅ 배포 완료
 
 > **배경:** 직원 리포트 5건. (1) 고객DB 필터 검색 다수 컬럼 미작동 (2) 한줄로 정상 (3) 맞춤한줄 타겟추출 0명/전체 (4) 미리보기/담당자테스트 개인화 불일치 (5) 자동발송 3건 중복+시간오차+D-1 알림 미발송
 

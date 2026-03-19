@@ -258,7 +258,31 @@ router.put('/plan-request/:id/confirm', async (req: Request, res: Response) => {
   }
 });
 
+// D87: 자사 사용자 목록 조회 (발신번호 배정용)
+router.get('/company-users', async (req: Request, res: Response) => {
+  try {
+    const companyId = (req as any).user?.companyId;
+    if (!companyId) {
+      return res.status(401).json({ success: false, error: '인증 필요' });
+    }
+
+    const result = await query(
+      `SELECT id, name, email, user_type, store_codes
+       FROM users
+       WHERE company_id = $1 AND is_active = true
+       ORDER BY user_type ASC, name ASC`,
+      [companyId]
+    );
+
+    res.json({ success: true, users: result.rows });
+  } catch (error) {
+    console.error('사용자 목록 조회 실패:', error);
+    res.status(500).json({ success: false, error: '조회 실패' });
+  }
+});
+
 // 회신번호 목록 조회
+// D87: assignment_scope 기반 사용자별 배정 필터링 추가
 router.get('/callback-numbers', async (req: Request, res: Response) => {
   try {
     const companyId = (req as any).user?.companyId;
@@ -268,20 +292,34 @@ router.get('/callback-numbers', async (req: Request, res: Response) => {
       return res.status(401).json({ success: false, error: '인증 필요' });
     }
 
-    let sql = 'SELECT id, phone, label, is_default, store_code, store_name, created_at FROM callback_numbers WHERE company_id = $1';
-    const params: any[] = [companyId];
+    // assignment_scope 필터링:
+    // - 'all': 누구나 사용 가능
+    // - 'assigned': callback_number_assignments에 배정된 사용자만
+    let sql = `
+      SELECT cn.id, cn.phone, cn.label, cn.is_default, cn.store_code, cn.store_name, cn.created_at, cn.assignment_scope
+      FROM callback_numbers cn
+      WHERE cn.company_id = $1
+        AND (
+          cn.assignment_scope = 'all'
+          OR EXISTS (
+            SELECT 1 FROM callback_number_assignments cna
+            WHERE cna.callback_number_id = cn.id AND cna.user_id = $2
+          )
+        )
+    `;
+    const params: any[] = [companyId, userId];
 
-    // 일반 사용자는 본인 store_codes에 해당하는 회신번호만
+    // 일반 사용자(브랜드담당자)는 본인 store_codes에 해당하는 회신번호만
     if (userType !== 'admin') {
       const userResult = await query('SELECT store_codes FROM users WHERE id = $1', [userId]);
       const storeCodes = userResult.rows[0]?.store_codes;
       if (storeCodes && storeCodes.length > 0) {
-        sql += ' AND (store_code = ANY($2) OR store_code IS NULL OR is_default = true)';
+        sql += ' AND (cn.store_code = ANY($3) OR cn.store_code IS NULL OR cn.is_default = true)';
         params.push(storeCodes);
       }
     }
 
-    sql += ' ORDER BY is_default DESC, store_code ASC, created_at ASC';
+    sql += ' ORDER BY cn.is_default DESC, cn.store_code ASC, cn.created_at ASC';
     const result = await query(sql, params);
 
     res.json({ success: true, numbers: result.rows });

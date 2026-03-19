@@ -12,6 +12,23 @@ interface CallbackNumber {
   store_code: string;
   store_name: string;
   created_at: string;
+  assignment_scope?: 'all' | 'assigned';
+}
+
+interface AssignedUser {
+  id: string;
+  user_id: string;
+  user_name: string;
+  user_email: string;
+  store_codes: string[];
+}
+
+interface CompanyUser {
+  id: string;
+  name: string;
+  email: string;
+  store_codes: string[];
+  user_type: string;
 }
 
 interface DocumentInfo {
@@ -61,6 +78,13 @@ export default function CallbacksTab() {
   const [modal, setModal] = useState<{ show: boolean; title: string; message: string; variant: 'success' | 'error' | 'warning' | 'info'; onConfirm?: () => void; }>({ show: false, title: '', message: '', variant: 'info' });
   const [page, setPage] = useState(1);
   const perPage = 10;
+
+  // --- D87: 배정 관리 ---
+  const [assignModal, setAssignModal] = useState<{ show: boolean; callbackId: string; phone: string; label: string }>({ show: false, callbackId: '', phone: '', label: '' });
+  const [companyUsers, setCompanyUsers] = useState<CompanyUser[]>([]);
+  const [assignedUserIds, setAssignedUserIds] = useState<string[]>([]);
+  const [assignLoading, setAssignLoading] = useState(false);
+  const [assignSaving, setAssignSaving] = useState(false);
 
   // --- 1차: 담당자 + 위임장 ---
   const [senderManagers, setSenderManagers] = useState<SenderManager[]>([]);
@@ -167,6 +191,66 @@ export default function CallbacksTab() {
       loadNumbers();
     } catch (err: any) {
       setToast({ msg: err.response?.data?.error || '설정 실패', type: 'error' });
+    }
+  };
+
+  // === D87: 배정 관리 로직 ===
+  const handleScopeToggle = async (n: CallbackNumber) => {
+    const newScope = n.assignment_scope === 'assigned' ? 'all' : 'assigned';
+    try {
+      await manageCallbacksApi.updateScope(n.id, newScope);
+      setNumbers(prev => prev.map(item => item.id === n.id ? { ...item, assignment_scope: newScope } : item));
+      if (newScope === 'assigned') {
+        // scope를 지정으로 변경했으면 바로 배정 모달 열기
+        openAssignModal(n.id, n.phone, n.label);
+      } else {
+        setToast({ msg: '전체 사용으로 변경되었습니다.', type: 'success' });
+      }
+    } catch (err: any) {
+      setToast({ msg: err.response?.data?.error || '변경 실패', type: 'error' });
+    }
+  };
+
+  const openAssignModal = async (callbackId: string, phone: string, label: string) => {
+    setAssignModal({ show: true, callbackId, phone, label });
+    setAssignLoading(true);
+    try {
+      // 회사 사용자 목록 로드
+      const usersRes = await fetch('/api/companies/company-users', {
+        headers: { Authorization: `Bearer ${getToken()}` }
+      });
+      const usersData = await usersRes.json();
+      if (usersData.success) {
+        setCompanyUsers(usersData.users || []);
+      }
+
+      // 현재 배정된 사용자 로드
+      const assignRes = await manageCallbacksApi.getAssignments(callbackId);
+      const assigned = assignRes.data.assignments || [];
+      setAssignedUserIds(assigned.map((a: AssignedUser) => a.user_id));
+    } catch {
+      setToast({ msg: '사용자 목록 로드 실패', type: 'error' });
+    } finally {
+      setAssignLoading(false);
+    }
+  };
+
+  const handleAssignToggle = (userId: string) => {
+    setAssignedUserIds(prev =>
+      prev.includes(userId) ? prev.filter(id => id !== userId) : [...prev, userId]
+    );
+  };
+
+  const handleSaveAssignments = async () => {
+    setAssignSaving(true);
+    try {
+      await manageCallbacksApi.saveAssignments(assignModal.callbackId, assignedUserIds);
+      setToast({ msg: '사용자 배정이 저장되었습니다.', type: 'success' });
+      setAssignModal({ show: false, callbackId: '', phone: '', label: '' });
+    } catch (err: any) {
+      setToast({ msg: err.response?.data?.error || '저장 실패', type: 'error' });
+    } finally {
+      setAssignSaving(false);
     }
   };
 
@@ -357,13 +441,14 @@ export default function CallbacksTab() {
                   <th className="px-4 py-3 text-left font-medium text-gray-600">라벨</th>
                   <th className="px-4 py-3 text-left font-medium text-gray-600">매장</th>
                   <th className="px-4 py-3 text-center font-medium text-gray-600">대표</th>
+                  <th className="px-4 py-3 text-center font-medium text-gray-600">사용 범위</th>
                   <th className="px-4 py-3 text-left font-medium text-gray-600">등록일</th>
                   <th className="px-4 py-3 text-center font-medium text-gray-600">관리</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
                 {paged.length === 0 ? (
-                  <tr><td colSpan={6} className="px-4 py-12 text-center text-gray-500">
+                  <tr><td colSpan={7} className="px-4 py-12 text-center text-gray-500">
                     {numbers.length === 0 ? '등록된 발신번호가 없습니다.' : '검색 결과가 없습니다.'}
                   </td></tr>
                 ) : paged.map(n => (
@@ -377,6 +462,30 @@ export default function CallbacksTab() {
                       ) : (
                         <button onClick={() => handleSetDefault(n)} className="text-xs text-gray-400 hover:text-blue-600 transition">설정</button>
                       )}
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      <div className="flex items-center justify-center gap-2">
+                        <button
+                          onClick={() => handleScopeToggle(n)}
+                          className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                            n.assignment_scope === 'assigned' ? 'bg-indigo-600' : 'bg-gray-300'
+                          }`}
+                          title={n.assignment_scope === 'assigned' ? '사용자 지정' : '전체 사용'}
+                        >
+                          <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                            n.assignment_scope === 'assigned' ? 'translate-x-4.5' : 'translate-x-0.5'
+                          }`} />
+                        </button>
+                        <span className="text-xs text-gray-500 whitespace-nowrap">
+                          {n.assignment_scope === 'assigned' ? '지정' : '전체'}
+                        </span>
+                        {n.assignment_scope === 'assigned' && (
+                          <button onClick={() => openAssignModal(n.id, n.phone, n.label)}
+                            className="px-1.5 py-0.5 text-xs bg-indigo-50 text-indigo-600 hover:bg-indigo-100 rounded transition">
+                            설정
+                          </button>
+                        )}
+                      </div>
                     </td>
                     <td className="px-4 py-3 text-gray-500 text-xs">{formatDate(n.created_at)}</td>
                     <td className="px-4 py-3 text-center">
@@ -697,6 +806,69 @@ export default function CallbacksTab() {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* D87: 사용자 배정 모달 */}
+      {assignModal.show && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 animate-[fadeIn_0.15s_ease-out]">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 animate-[zoomIn_0.2s_ease-out] max-h-[80vh] flex flex-col">
+            <div className="px-6 pt-6 pb-4 bg-gradient-to-r from-indigo-50 to-blue-50 rounded-t-2xl">
+              <h3 className="text-lg font-bold text-gray-900">사용자 배정</h3>
+              <p className="text-sm text-gray-600 mt-1">
+                {assignModal.phone} {assignModal.label ? `(${assignModal.label})` : ''}
+              </p>
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-6 py-4">
+              {assignLoading ? (
+                <div className="py-8 text-center text-gray-500">로딩 중...</div>
+              ) : companyUsers.length === 0 ? (
+                <div className="py-8 text-center text-gray-500">등록된 사용자가 없습니다.</div>
+              ) : (
+                <div className="space-y-2">
+                  <p className="text-xs text-gray-500 mb-3">이 발신번호를 사용할 수 있는 사용자를 선택하세요.</p>
+                  {companyUsers.map(user => (
+                    <label key={user.id}
+                      className={`flex items-center gap-3 px-3 py-2.5 rounded-lg border cursor-pointer transition ${
+                        assignedUserIds.includes(user.id) ? 'border-indigo-300 bg-indigo-50' : 'border-gray-200 hover:bg-gray-50'
+                      }`}>
+                      <input type="checkbox"
+                        checked={assignedUserIds.includes(user.id)}
+                        onChange={() => handleAssignToggle(user.id)}
+                        className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" />
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium text-gray-900">{user.name}</div>
+                        <div className="text-xs text-gray-500 truncate">{user.email}</div>
+                      </div>
+                      {user.store_codes && user.store_codes.length > 0 && (
+                        <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">
+                          {user.store_codes.length}개 매장
+                        </span>
+                      )}
+                      <span className="text-xs text-gray-400">
+                        {user.user_type === 'admin' ? '관리자' : '담당자'}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="px-6 pb-6 pt-4 border-t flex items-center justify-between">
+              <span className="text-xs text-gray-500">
+                {assignedUserIds.length}명 선택됨
+              </span>
+              <div className="flex gap-3">
+                <button onClick={() => setAssignModal({ show: false, callbackId: '', phone: '', label: '' })}
+                  className="px-4 py-2.5 rounded-lg text-sm font-medium border border-gray-300 text-gray-700 hover:bg-gray-50 transition">취소</button>
+                <button onClick={handleSaveAssignments} disabled={assignSaving}
+                  className="px-5 py-2.5 rounded-lg text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 transition">
+                  {assignSaving ? '저장 중...' : '저장'}
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 

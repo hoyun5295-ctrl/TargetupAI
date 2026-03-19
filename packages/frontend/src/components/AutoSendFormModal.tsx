@@ -278,7 +278,8 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
       const res = await fetch('/api/ai/recommend-target', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
-        body: JSON.stringify({ objective: targetDescription.trim() }),
+        // ★ auto_relax: false — 자동발송은 사용자 지정 조건 그대로 적용. 멋대로 완화 금지.
+        body: JSON.stringify({ objective: targetDescription.trim(), auto_relax: false }),
       });
       if (res.ok) {
         const data = await res.json();

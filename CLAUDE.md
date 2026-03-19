@@ -431,6 +431,10 @@ PostgreSQL campaigns/campaign_runs 생성
 | **자동발송 잠금 미비** | `status='active'→'active'` UPDATE는 잠금 역할 못 함 → 워커 1시간 간격 3회 중복 실행 → 12,051건 3배 발송 | **잠금은 반드시 상태 전환(active→executing)으로 구현.** 동일 상태 UPDATE는 잠금이 아님 (D83) |
 | **KST 이중변환** | `toLocaleString('Asia/Seoul') + kstToUtc(-9h)` → KST 서버에서 9시간 이중 빼기 → 10:00 설정이 01:00에 실행 | **시간 변환은 서버 TZ에 의존하지 않고 `Date.UTC() - KST_OFFSET_MS` 패턴 사용** (D83) |
 | **기간계 기능 필수 UI 없이 배포** | 자동발송 target_filter UI 미구현 상태에서 배포 → `{}` 필터 → 전체 고객 발송 사고 | **기간계(실제 발송) 기능은 필수 필터/설정 UI 완성 전 배포 금지** (D83) |
+| **AI 프롬프트 하드코딩 미점검** | recommendTarget은 동적 프롬프트 전환했지만 같은 파일의 parseBriefing은 하드코딩 방치 → 맞춤한줄 커스텀필드/숫자필드 필터 전면 미작동 | **동일 기능(필터 필드 목록 제공)을 수행하는 프롬프트가 2곳 이상이면 즉시 공통 함수로 추출.** 한 곳 전환 시 동일 파일 내 다른 함수도 반드시 점검 (D84) |
+| **sampleCustomer displayName/column 키 불일치** | recommend-target이 displayName 키("이름")로 반환 → test-send의 replaceVariables는 column 키("name")로 접근 → 개인화 전부 NULL | **프론트↔백엔드 간 데이터 키 형식이 다르면 반드시 변환 레이어 또는 양쪽 키 제공.** 미리보기(프론트)와 실제 발송(백엔드)의 데이터 참조 방식이 다를 수 있음 (D85) |
+| **자동발송에 직접발송 UI 재활용 시도** | DirectTargetFilterModal(직접발송용)을 자동발송에 끼워넣음 → 3뎁스 모달, UX 이질적 | **기간계 기능별 UX 흐름이 다르면 컨트롤타워(API)만 재활용하고 UI는 전용으로 구현.** 자동발송 타겟은 AI 자동 추출(recommend-target), 직접발송 타겟은 수동 필터(DirectTargetFilterModal) (D86) |
+| **auto_relax 기본 true로 타겟 왜곡** | 자동발송에서 recommend-target 호출 시 auto_relax 미설정 → AI가 멋대로 조건 완화 → 의도와 다른 타겟 | **자동발송처럼 사용자 지정 조건이 중요한 경우 auto_relax: false 명시.** 기본값에 의존하지 않고 용도에 맞게 파라미터 명시 (D86) |
 
 ### ⚠️ 필수 체크 원칙 1: 유틸 함수 수정/추가 시 소비처 전수 확인
 

@@ -2,6 +2,13 @@ import { Router, Request, Response } from 'express';
 import { authenticate, requireCompanyAdmin } from '../middlewares/auth';
 import pool from '../config/database';
 import { getCompanyScope } from '../utils/permission-helper';
+import {
+  updateAssignmentScope,
+  assignUsersToCallback,
+  unassignUserFromCallback,
+  getAssignmentsByCallback,
+  replaceAssignments,
+} from '../utils/sender-registration';
 
 const router = Router();
 
@@ -31,9 +38,9 @@ router.get('/', async (req: Request, res: Response) => {
     const companyScope = getCompanyScope(req);
 
     let sql = `
-      SELECT 
+      SELECT
         cn.id, cn.phone, cn.label, cn.is_default, cn.created_at,
-        cn.store_code, cn.store_name,
+        cn.store_code, cn.store_name, cn.assignment_scope,
         c.company_name, c.company_code, c.id as company_id
       FROM callback_numbers cn
       LEFT JOIN companies c ON cn.company_id = c.id
@@ -198,6 +205,119 @@ router.put('/:id/default', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('대표번호 설정 실패:', error);
     res.status(500).json({ error: '대표번호 설정 실패' });
+  }
+});
+
+// ============================================================
+//  발신번호 배정 관리 (D87)
+//  assignment_scope: 'all' | 'assigned'
+//  callback_number_assignments 매핑 테이블 CRUD
+// ============================================================
+
+// PUT /:id/scope — 배정 범위 변경 (전체 / 사용자 지정)
+router.put('/:id/scope', async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { userType: callerType, companyId: callerCompanyId } = (req as any).user!;
+  const { scope } = req.body;
+
+  if (!scope || !['all', 'assigned'].includes(scope)) {
+    return res.status(400).json({ error: '유효한 범위를 지정해주세요. (all 또는 assigned)' });
+  }
+
+  try {
+    // 해당 번호 소유 회사 확인
+    const check = await pool.query('SELECT company_id FROM callback_numbers WHERE id = $1', [id]);
+    if (check.rows.length === 0) return res.status(404).json({ error: '발신번호를 찾을 수 없습니다.' });
+
+    const targetCompanyId = check.rows[0].company_id;
+    if (callerType === 'company_admin' && targetCompanyId !== callerCompanyId) {
+      return res.status(403).json({ error: '자사 발신번호만 수정할 수 있습니다.' });
+    }
+
+    const updated = await updateAssignmentScope(id, targetCompanyId, scope);
+    if (!updated) {
+      return res.status(404).json({ error: '발신번호를 찾을 수 없습니다.' });
+    }
+
+    res.json({ success: true, message: scope === 'all' ? '전체 사용으로 변경되었습니다.' : '사용자 지정으로 변경되었습니다.' });
+  } catch (error: any) {
+    console.error('배정 범위 변경 실패:', error);
+    res.status(500).json({ error: error.message || '배정 범위 변경 실패' });
+  }
+});
+
+// GET /:id/assignments — 배정된 사용자 목록 조회
+router.get('/:id/assignments', async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { userType: callerType, companyId: callerCompanyId } = (req as any).user!;
+
+  try {
+    const check = await pool.query('SELECT company_id FROM callback_numbers WHERE id = $1', [id]);
+    if (check.rows.length === 0) return res.status(404).json({ error: '발신번호를 찾을 수 없습니다.' });
+
+    const targetCompanyId = check.rows[0].company_id;
+    if (callerType === 'company_admin' && targetCompanyId !== callerCompanyId) {
+      return res.status(403).json({ error: '자사 발신번호만 조회할 수 있습니다.' });
+    }
+
+    const assignments = await getAssignmentsByCallback(id, targetCompanyId);
+    res.json({ success: true, assignments });
+  } catch (error: any) {
+    console.error('배정 사용자 조회 실패:', error);
+    res.status(500).json({ error: '조회 실패' });
+  }
+});
+
+// PUT /:id/assignments — 배정 사용자 전체 교체 (프론트에서 체크박스 선택 후 저장)
+router.put('/:id/assignments', async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { userType: callerType, companyId: callerCompanyId, userId: callerId } = (req as any).user!;
+  const { userIds } = req.body; // string[]
+
+  if (!Array.isArray(userIds)) {
+    return res.status(400).json({ error: '사용자 ID 목록이 필요합니다.' });
+  }
+
+  try {
+    const check = await pool.query('SELECT company_id FROM callback_numbers WHERE id = $1', [id]);
+    if (check.rows.length === 0) return res.status(404).json({ error: '발신번호를 찾을 수 없습니다.' });
+
+    const targetCompanyId = check.rows[0].company_id;
+    if (callerType === 'company_admin' && targetCompanyId !== callerCompanyId) {
+      return res.status(403).json({ error: '자사 발신번호만 수정할 수 있습니다.' });
+    }
+
+    const assignments = await replaceAssignments(id, targetCompanyId, userIds, callerId);
+    res.json({ success: true, assignments, message: '사용자 배정이 저장되었습니다.' });
+  } catch (error: any) {
+    console.error('배정 저장 실패:', error);
+    res.status(400).json({ error: error.message || '배정 저장 실패' });
+  }
+});
+
+// DELETE /:id/assignments/:userId — 개별 배정 해제
+router.delete('/:id/assignments/:userId', async (req: Request, res: Response) => {
+  const { id, userId: targetUserId } = req.params;
+  const { userType: callerType, companyId: callerCompanyId } = (req as any).user!;
+
+  try {
+    const check = await pool.query('SELECT company_id FROM callback_numbers WHERE id = $1', [id]);
+    if (check.rows.length === 0) return res.status(404).json({ error: '발신번호를 찾을 수 없습니다.' });
+
+    const targetCompanyId = check.rows[0].company_id;
+    if (callerType === 'company_admin' && targetCompanyId !== callerCompanyId) {
+      return res.status(403).json({ error: '자사 발신번호만 수정할 수 있습니다.' });
+    }
+
+    const removed = await unassignUserFromCallback(id, targetUserId, targetCompanyId);
+    if (!removed) {
+      return res.status(404).json({ error: '해당 배정을 찾을 수 없습니다.' });
+    }
+
+    res.json({ success: true, message: '배정이 해제되었습니다.' });
+  } catch (error: any) {
+    console.error('배정 해제 실패:', error);
+    res.status(500).json({ error: '배정 해제 실패' });
   }
 });
 
