@@ -267,7 +267,7 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
       : `무료수신거부 ${formatRejectNumber(optOutNumber)}`;
   };
 
-  // ★ D86: AI 기반 타겟 자동 파싱 — parseBriefing 컨트롤타워 재활용
+  // ★ D86: AI 기반 타겟 자동 추출 — recommend-target 컨트롤타워 재활용 (한줄로와 동일 로직)
   const parseTargetCondition = async () => {
     if (!targetDescription.trim()) {
       setToast({ show: true, type: 'error', message: '발송 대상을 입력해주세요.' });
@@ -275,21 +275,21 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
     }
     setTargetParsing(true);
     try {
-      const res = await fetch('/api/ai/parse-briefing', {
+      const res = await fetch('/api/ai/recommend-target', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
-        body: JSON.stringify({ briefing: `다음 조건의 고객 대상으로 자동발송합니다: ${targetDescription.trim()}` }),
+        body: JSON.stringify({ objective: targetDescription.trim() }),
       });
       if (res.ok) {
         const data = await res.json();
-        const filters = data.targetFilters || {};
+        const filters = data.filters || {};
         setTargetFilter(filters);
-        setTargetConditionSummary(data.targetCondition?.description || '');
-        setTargetCount(data.estimatedCount || 0);
+        setTargetConditionSummary(data.reasoning || '');
+        setTargetCount(data.estimated_count || 0);
         if (Object.keys(filters).length === 0) {
           setToast({ show: true, type: 'warning', message: 'AI가 타겟 조건을 인식하지 못했습니다. 좀 더 구체적으로 입력해주세요.' });
         } else {
-          setToast({ show: true, type: 'success', message: `타겟 조건이 설정되었습니다. 현재 기준 약 ${(data.estimatedCount || 0).toLocaleString()}명` });
+          setToast({ show: true, type: 'success', message: `타겟 조건이 설정되었습니다. 현재 기준 약 ${(data.estimated_count || 0).toLocaleString()}명` });
         }
       } else {
         const err = await res.json();
