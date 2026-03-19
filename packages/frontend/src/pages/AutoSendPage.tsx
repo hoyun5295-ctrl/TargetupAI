@@ -108,6 +108,10 @@ export default function AutoSendPage() {
     onConfirm: () => void;
   }>({ show: false, title: '', message: '', onConfirm: () => {} });
 
+  // ★ D86: 실행 이력 모달
+  const [historyModal, setHistoryModal] = useState<{ show: boolean; campaignName: string; runs: any[] }>({ show: false, campaignName: '', runs: [] });
+  const [historyLoading, setHistoryLoading] = useState(false);
+
   // ============================================================
   // 데이터 로드
   // ============================================================
@@ -133,6 +137,27 @@ export default function AutoSendPage() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  // ============================================================
+  // ★ D86: 실행 이력 조회 — GET /api/auto-campaigns/:id (runs 포함)
+  // ============================================================
+  const fetchRunHistory = async (ac: AutoCampaign) => {
+    setHistoryLoading(true);
+    setHistoryModal({ show: true, campaignName: ac.campaign_name, runs: [] });
+    try {
+      const res = await fetch(`/api/auto-campaigns/${ac.id}`, {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setHistoryModal({ show: true, campaignName: ac.campaign_name, runs: data.runs || [] });
+      }
+    } catch (err) {
+      console.error('이력 조회 실패:', err);
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
 
   // ============================================================
   // 액션 핸들러
@@ -431,6 +456,13 @@ export default function AutoSendPage() {
 
                   {/* 액션 버튼 */}
                   <div className="flex items-center gap-2 ml-4">
+                    {/* ★ D86: 실행 이력 보기 */}
+                    <button
+                      onClick={() => fetchRunHistory(ac)}
+                      className="text-xs text-gray-500 hover:text-violet-600 px-3 py-1.5 rounded-lg hover:bg-violet-50 transition"
+                    >
+                      이력
+                    </button>
                     <button
                       onClick={() => handleEdit(ac)}
                       className="text-xs text-gray-500 hover:text-blue-600 px-3 py-1.5 rounded-lg hover:bg-blue-50 transition"
@@ -511,6 +543,83 @@ export default function AutoSendPage() {
             </div>
           </div>
         </>
+      )}
+
+      {/* ★ D86: 실행 이력 모달 */}
+      {historyModal.show && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-4 border-b bg-gray-50">
+              <div>
+                <h3 className="text-lg font-bold text-gray-800">실행 이력</h3>
+                <p className="text-xs text-gray-500">{historyModal.campaignName}</p>
+              </div>
+              <button onClick={() => setHistoryModal({ show: false, campaignName: '', runs: [] })} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-200 text-gray-400 hover:text-gray-600 transition text-lg">&times;</button>
+            </div>
+
+            <div className="flex-1 overflow-auto px-6 py-4">
+              {historyLoading ? (
+                <div className="text-center py-10 text-gray-400">조회 중...</div>
+              ) : historyModal.runs.length === 0 ? (
+                <div className="text-center py-10 text-gray-400">아직 실행 이력이 없습니다.</div>
+              ) : (
+                <div className="space-y-3">
+                  {historyModal.runs.map((run: any) => {
+                    const statusMap: Record<string, { label: string; color: string }> = {
+                      completed: { label: '완료', color: 'bg-green-100 text-green-700' },
+                      sending: { label: '발송중', color: 'bg-blue-100 text-blue-700' },
+                      notified: { label: '알림발송', color: 'bg-violet-100 text-violet-700' },
+                      pending: { label: '대기', color: 'bg-gray-100 text-gray-600' },
+                      failed: { label: '실패', color: 'bg-red-100 text-red-700' },
+                      cancelled: { label: '취소', color: 'bg-amber-100 text-amber-700' },
+                    };
+                    const st = statusMap[run.status] || { label: run.status, color: 'bg-gray-100 text-gray-600' };
+                    return (
+                      <div key={run.id} className="border border-gray-200 rounded-lg p-4">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-bold text-gray-800">#{run.run_number}회차</span>
+                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${st.color}`}>{st.label}</span>
+                            {run.ai_generation_status && (
+                              <span className="text-xs px-2 py-0.5 rounded-full bg-violet-50 text-violet-600">
+                                {run.ai_generation_status === 'ai_generated' ? 'AI생성' : run.ai_generation_status === 'ai_fallback' ? '폴백' : '고정문안'}
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-xs text-gray-400">{formatDate(run.scheduled_at)}</span>
+                        </div>
+                        <div className="grid grid-cols-4 gap-2 text-center">
+                          <div className="bg-gray-50 rounded-lg p-2">
+                            <div className="text-xs text-gray-500">대상</div>
+                            <div className="text-sm font-bold text-gray-800">{(run.target_count || 0).toLocaleString()}</div>
+                          </div>
+                          <div className="bg-blue-50 rounded-lg p-2">
+                            <div className="text-xs text-blue-600">발송</div>
+                            <div className="text-sm font-bold text-blue-700">{(run.sent_count || 0).toLocaleString()}</div>
+                          </div>
+                          <div className="bg-green-50 rounded-lg p-2">
+                            <div className="text-xs text-green-600">성공</div>
+                            <div className="text-sm font-bold text-green-700">{(run.success_count || 0).toLocaleString()}</div>
+                          </div>
+                          <div className="bg-red-50 rounded-lg p-2">
+                            <div className="text-xs text-red-600">실패</div>
+                            <div className="text-sm font-bold text-red-700">{(run.fail_count || 0).toLocaleString()}</div>
+                          </div>
+                        </div>
+                        {run.cancel_reason && (
+                          <p className="text-xs text-amber-600 mt-2">취소 사유: {run.cancel_reason}</p>
+                        )}
+                        {run.notified_at && (
+                          <p className="text-xs text-violet-500 mt-1">사전알림: {formatDate(run.notified_at)}</p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       )}
 
       <style>{`

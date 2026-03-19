@@ -1,18 +1,21 @@
 /**
- * ★ D69: 자동발송 생성/수정 모달 (5단계)
+ * ★ D69/D86: 자동발송 생성/수정 모달 (6단계)
  *
  * 1. 기본 정보 (캠페인명, 설명)
  * 2. 활용 필드 선택 (AI 맞춤한줄 패턴 — 변수/개인화에 사용할 고객 필드)
- * 3. 스케줄 (매월/매주/매일 + 발송일/요일 + 시각)
- * 4. 메시지 (SMS/LMS/MMS 탭 + AI문안생성 + 스팸필터 + 본문 + 발신번호)
- * 5. 확인 (요약)
+ * 3. ★ D86: 타겟 필터 (DirectTargetFilterModal 재활용 — 발송 대상 조건)
+ * 4. 스케줄 (매월/매주/매일 + 발송일/요일 + 시각)
+ * 5. 메시지 (SMS/LMS/MMS 탭 + AI문안생성 + 스팸필터 + 본문 + 발신번호)
+ * 6. 확인 (요약)
  *
  * ★ 자동발송은 프로 요금제 이상에서만 접근 가능 → AI/스팸필터 잠금 체크 불필요
+ * ★ D83 교훈: 타겟 필터 없이({}) 발송 = 전체 고객 발송 사고 → 필터 필수 검증
  */
 
 import { useEffect, useState, useMemo } from 'react';
 import { aiApi } from '../api/client';
 import AiMessageSuggestModal from './AiMessageSuggestModal';
+import DirectTargetFilterModal from './DirectTargetFilterModal';
 import SpamFilterTestModal from './SpamFilterTestModal';
 
 interface AutoSendFormModalProps {
@@ -65,7 +68,7 @@ const hasEmoji = (text: string): boolean => {
   return emojiPattern.test(text);
 };
 
-const TOTAL_STEPS = 5;
+const TOTAL_STEPS = 6;
 
 const AI_TONES = [
   { value: 'friendly', label: '친근한' },
@@ -110,6 +113,16 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
   );
   const [fieldsLoading, setFieldsLoading] = useState(true);
   const [categoryLabels, setCategoryLabels] = useState<Record<string, string>>(DEFAULT_CATEGORY_LABELS);
+
+  // ★ D86: 타겟 필터 (Step 3)
+  const [targetFilter, setTargetFilter] = useState<Record<string, any>>(campaign?.target_filter || {});
+  const [targetCount, setTargetCount] = useState(0);
+  const [showFilterModal, setShowFilterModal] = useState(false);
+
+  // ★ D86: D-1 사전 알림 (Step 4 하단)
+  const [preNotify, setPreNotify] = useState(campaign?.pre_notify ?? true);
+  const [notifyPhones, setNotifyPhones] = useState<string[]>(campaign?.notify_phones || []);
+  const [notifyPhoneInput, setNotifyPhoneInput] = useState('');
 
   // AI 문구 추천
   const [showAiHelper, setShowAiHelper] = useState(false);
@@ -314,16 +327,18 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
 
     if (!campaignName.trim()) { setError('자동발송 이름을 입력해주세요.'); setStep(1); return; }
     if (selectedFields.length === 0) { setError('활용할 고객 필드를 1개 이상 선택해주세요.'); setStep(2); return; }
+    // ★ D86: 타겟 필터 필수 — D83 교훈 (빈 필터 = 전체 고객 발송 사고 방지)
+    if (!targetFilter || Object.keys(targetFilter).length === 0) { setError('발송 대상 필터를 설정해주세요. 필터 없이는 전체 고객에게 발송됩니다.'); setStep(3); return; }
     // ★ AI 모드: prompt + fallback 필수 / 일반 모드: messageContent 필수
     if (aiGenerateEnabled) {
-      if (!aiPrompt.trim()) { setError('AI 마케팅 컨셉을 입력해주세요.'); setStep(4); return; }
-      if (!fallbackMessageContent.trim()) { setError('AI 생성 실패 시 사용할 폴백 메시지를 입력해주세요.'); setStep(4); return; }
+      if (!aiPrompt.trim()) { setError('AI 마케팅 컨셉을 입력해주세요.'); setStep(5); return; }
+      if (!fallbackMessageContent.trim()) { setError('AI 생성 실패 시 사용할 폴백 메시지를 입력해주세요.'); setStep(5); return; }
     } else {
-      if (!messageContent.trim()) { setError('메시지 내용을 입력해주세요.'); setStep(4); return; }
+      if (!messageContent.trim()) { setError('메시지 내용을 입력해주세요.'); setStep(5); return; }
     }
-    if (!callbackNumber) { setError('발신번호를 선택해주세요.'); setStep(4); return; }
-    if (messageType === 'MMS' && mmsUploadedImages.length === 0 && !aiGenerateEnabled) { setError('MMS 이미지를 첨부해주세요.'); setStep(4); return; }
-    if ((messageType === 'LMS' || messageType === 'MMS') && !messageSubject.trim() && !aiGenerateEnabled) { setError('LMS/MMS는 제목을 입력해주세요.'); setStep(4); return; }
+    if (!callbackNumber) { setError('발신번호를 선택해주세요.'); setStep(5); return; }
+    if (messageType === 'MMS' && mmsUploadedImages.length === 0 && !aiGenerateEnabled) { setError('MMS 이미지를 첨부해주세요.'); setStep(5); return; }
+    if ((messageType === 'LMS' || messageType === 'MMS') && !messageSubject.trim() && !aiGenerateEnabled) { setError('LMS/MMS는 제목을 입력해주세요.'); setStep(5); return; }
 
     setSaving(true);
     try {
@@ -333,7 +348,8 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
         schedule_type: scheduleType,
         schedule_day: scheduleType === 'daily' ? null : scheduleDay,
         schedule_time: scheduleTime,
-        target_filter: campaign?.target_filter || {},
+        // ★ D86: 사용자가 설정한 타겟 필터 — 빈 객체면 백엔드에서 거부됨
+        target_filter: targetFilter,
         message_type: messageType,
         message_content: aiGenerateEnabled ? (fallbackMessageContent.trim() || null) : messageContent.trim(),
         message_subject: messageType !== 'SMS' ? messageSubject.trim() || null : null,
@@ -345,6 +361,9 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
         ai_prompt: aiGenerateEnabled ? aiPrompt.trim() : null,
         ai_tone: aiGenerateEnabled ? aiTone : null,
         fallback_message_content: aiGenerateEnabled ? fallbackMessageContent.trim() : null,
+        // ★ D86: D-1 사전 알림
+        pre_notify: preNotify,
+        notify_phones: preNotify && notifyPhones.length > 0 ? notifyPhones : null,
       };
 
       const url = isEdit ? `/api/auto-campaigns/${campaign.id}` : '/api/auto-campaigns';
@@ -383,7 +402,33 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
       setError('활용할 고객 필드를 1개 이상 선택해주세요.');
       return false;
     }
+    // ★ D86: 타겟 필터 필수 — D83 교훈 (빈 필터 = 전체 고객 발송 사고)
+    if (step === 3 && (!targetFilter || Object.keys(targetFilter).length === 0)) {
+      setError('발송 대상 필터를 설정해주세요. 필터 없이는 전체 고객에게 발송됩니다.');
+      return false;
+    }
     return true;
+  };
+
+  // ★ D86: 타겟 필터 요약 텍스트
+  const getFilterSummary = () => {
+    if (!targetFilter || Object.keys(targetFilter).length === 0) return '미설정';
+    const parts: string[] = [];
+    for (const [key, val] of Object.entries(targetFilter)) {
+      const field = availableFields.find(f => f.field_key === key);
+      const label = field?.display_name || field?.field_label || key;
+      if (val && typeof val === 'object' && val.operator) {
+        const opLabels: Record<string, string> = { eq: '=', in: '포함', gte: '이상', lte: '이하', between: '범위', contains: '포함', days_within: '최근', birth_month: '월' };
+        const op = opLabels[val.operator] || val.operator;
+        const v = Array.isArray(val.value) ? val.value.join('~') : val.value;
+        parts.push(`${label} ${op} ${v}`);
+      } else if (Array.isArray(val)) {
+        parts.push(`${label}: ${val.join('~')}`);
+      } else {
+        parts.push(`${label}: ${val}`);
+      }
+    }
+    return parts.join(', ');
   };
 
   return (
@@ -548,8 +593,67 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
               </div>
             )}
 
-            {/* ========== Step 3: 스케줄 ========== */}
+            {/* ========== Step 3: 타겟 필터 (D86 신규) ========== */}
             {step === 3 && (
+              <div className="space-y-4" style={{ animation: 'slideUp 0.3s ease-out' }}>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">발송 대상 필터 *</label>
+                  <p className="text-xs text-gray-500 mb-3">매 실행 시점에 아래 조건에 맞는 고객을 자동으로 조회하여 발송합니다.</p>
+                </div>
+
+                {/* 현재 필터 상태 표시 */}
+                {targetFilter && Object.keys(targetFilter).length > 0 ? (
+                  <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-medium text-green-700">✅ 필터 설정 완료</span>
+                      {targetCount > 0 && (
+                        <span className="text-xs text-green-600 bg-green-100 px-2 py-0.5 rounded-full">
+                          현재 기준 약 {targetCount.toLocaleString()}명
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap gap-1.5 mb-3">
+                      {Object.entries(targetFilter).map(([key, val]) => {
+                        const field = availableFields.find(f => f.field_key === key);
+                        const label = field?.display_name || field?.field_label || key;
+                        let display = '';
+                        if (val && typeof val === 'object' && val.operator) {
+                          const v = Array.isArray(val.value) ? val.value.join('~') : val.value;
+                          display = `${v}`;
+                        } else if (Array.isArray(val)) {
+                          display = val.join('~');
+                        } else {
+                          display = String(val);
+                        }
+                        return (
+                          <span key={key} className="px-2 py-1 bg-white rounded-md text-xs text-green-700 border border-green-200">
+                            {label}: {display}
+                          </span>
+                        );
+                      })}
+                    </div>
+                    <p className="text-xs text-amber-600">
+                      📌 인원수는 현재 시점 기준이며, 실제 발송 시 조건에 맞는 고객이 자동 조회됩니다.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-center">
+                    <p className="text-sm text-amber-700 font-medium mb-1">⚠️ 필터가 설정되지 않았습니다</p>
+                    <p className="text-xs text-amber-600">아래 버튼을 눌러 발송 대상 조건을 설정해주세요.</p>
+                  </div>
+                )}
+
+                <button
+                  onClick={() => setShowFilterModal(true)}
+                  className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition flex items-center justify-center gap-2"
+                >
+                  🎯 {targetFilter && Object.keys(targetFilter).length > 0 ? '필터 조건 변경' : '필터 조건 설정'}
+                </button>
+              </div>
+            )}
+
+            {/* ========== Step 4: 스케줄 (기존 Step 3) ========== */}
+            {step === 4 && (
               <div className="space-y-4" style={{ animation: 'slideUp 0.3s ease-out' }}>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">반복 주기 *</label>
@@ -625,11 +729,83 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
                     ))}
                   </select>
                 </div>
+
+                {/* ★ D86: D-1 사전 알림 설정 */}
+                <div className="border-t border-gray-200 pt-4 mt-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <div>
+                      <label className="text-sm font-medium text-gray-700">D-1 사전 알림</label>
+                      <p className="text-xs text-gray-500 mt-0.5">발송 전날 담당자에게 알림 메시지를 보냅니다</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setPreNotify(!preNotify)}
+                      className={`relative w-11 h-6 rounded-full transition-colors ${preNotify ? 'bg-blue-600' : 'bg-gray-300'}`}
+                    >
+                      <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${preNotify ? 'translate-x-5' : ''}`} />
+                    </button>
+                  </div>
+
+                  {preNotify && (
+                    <div className="space-y-2">
+                      <label className="block text-xs font-medium text-gray-600">알림 받을 전화번호</label>
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={notifyPhoneInput}
+                          onChange={e => setNotifyPhoneInput(e.target.value.replace(/[^0-9-]/g, ''))}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              const clean = notifyPhoneInput.replace(/-/g, '');
+                              if (clean.length >= 10 && !notifyPhones.includes(clean)) {
+                                setNotifyPhones(prev => [...prev, clean]);
+                                setNotifyPhoneInput('');
+                              }
+                            }
+                          }}
+                          placeholder="01012345678"
+                          className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const clean = notifyPhoneInput.replace(/-/g, '');
+                            if (clean.length >= 10 && !notifyPhones.includes(clean)) {
+                              setNotifyPhones(prev => [...prev, clean]);
+                              setNotifyPhoneInput('');
+                            }
+                          }}
+                          className="px-3 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 transition shrink-0"
+                        >
+                          추가
+                        </button>
+                      </div>
+                      {notifyPhones.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5">
+                          {notifyPhones.map((phone, idx) => (
+                            <span key={idx} className="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-50 border border-blue-200 rounded-full text-xs text-blue-700">
+                              {phone.replace(/(\d{3})(\d{4})(\d{4})/, '$1-$2-$3')}
+                              <button onClick={() => setNotifyPhones(prev => prev.filter((_, i) => i !== idx))} className="text-blue-400 hover:text-blue-600">
+                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                              </button>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      {preNotify && notifyPhones.length === 0 && (
+                        <p className="text-xs text-amber-600">📌 전화번호를 추가하지 않으면 사전 알림이 발송되지 않습니다.</p>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 
-            {/* ========== Step 4: 메시지 ========== */}
-            {step === 4 && (
+            {/* ========== Step 5: 메시지 (기존 Step 4) ========== */}
+            {step === 5 && (
               <div className="space-y-4" style={{ animation: 'slideUp 0.3s ease-out' }}>
                 {/* 광고 여부 */}
                 <div className="flex items-center gap-2">
@@ -902,8 +1078,8 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
               </div>
             )}
 
-            {/* ========== Step 5: 확인 ========== */}
-            {step === 5 && (
+            {/* ========== Step 6: 확인 (기존 Step 5) ========== */}
+            {step === 6 && (
               <div className="space-y-3" style={{ animation: 'slideUp 0.3s ease-out' }}>
                 <h3 className="text-sm font-semibold text-gray-700 mb-2">자동발송 설정 확인</h3>
                 <div className="bg-gray-50 rounded-lg p-4 space-y-2 text-sm">
@@ -915,12 +1091,26 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
                     <span className="text-gray-500">활용 필드</span>
                     <span className="text-violet-700 font-medium">{selectedFields.length}개</span>
                   </div>
+                  {/* ★ D86: 타겟 필터 요약 */}
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">발송 대상</span>
+                    <span className="text-blue-700 font-medium">
+                      {targetCount > 0 ? `현재 기준 약 ${targetCount.toLocaleString()}명` : '조건 설정됨'}
+                    </span>
+                  </div>
                   <div className="flex justify-between">
                     <span className="text-gray-500">스케줄</span>
                     <span className="text-gray-800 font-medium">
                       {scheduleType === 'daily' && `매일 ${scheduleTime}`}
                       {scheduleType === 'weekly' && `매주 ${WEEKDAYS[scheduleDay]} ${scheduleTime}`}
                       {scheduleType === 'monthly' && `매월 ${scheduleDay}일 ${scheduleTime}`}
+                    </span>
+                  </div>
+                  {/* ★ D86: D-1 사전 알림 */}
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">D-1 알림</span>
+                    <span className={preNotify && notifyPhones.length > 0 ? 'text-blue-700 font-medium' : 'text-gray-400'}>
+                      {preNotify && notifyPhones.length > 0 ? `ON (${notifyPhones.length}명)` : 'OFF'}
                     </span>
                   </div>
                   <div className="flex justify-between">
@@ -1060,6 +1250,20 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
           subject={messageSubject}
         />
       )}
+
+      {/* ★ D86: 타겟 필터 모달 (filterOnlyMode — 조건만 저장, 추출 없음) */}
+      <DirectTargetFilterModal
+        show={showFilterModal}
+        onClose={() => setShowFilterModal(false)}
+        filterOnlyMode={true}
+        onExtracted={(_recipients, count, _fieldsMeta, _callbackPhone, dynamicFilters) => {
+          if (dynamicFilters && Object.keys(dynamicFilters).length > 0) {
+            setTargetFilter(dynamicFilters);
+            setTargetCount(count);
+          }
+          setShowFilterModal(false);
+        }}
+      />
     </>
   );
 }

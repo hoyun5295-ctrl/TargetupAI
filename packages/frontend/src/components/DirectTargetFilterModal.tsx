@@ -13,11 +13,14 @@ export interface FieldMeta {
 interface DirectTargetFilterModalProps {
   show: boolean;
   onClose: () => void;
-  // ★ D43-3c: fieldsMeta 추가
-  onExtracted: (recipients: any[], count: number, fieldsMeta: FieldMeta[], selectedCallbackPhone?: string) => void;
+  // ★ D43-3c: fieldsMeta 추가, D86: dynamicFilters 추가 (자동발송 target_filter용)
+  onExtracted: (recipients: any[], count: number, fieldsMeta: FieldMeta[], selectedCallbackPhone?: string, dynamicFilters?: Record<string, any>) => void;
+  // ★ D86: 추출 없이 필터만 선택하고 닫기 (자동발송용 — 실제 추출은 발송 시점에)
+  filterOnlyMode?: boolean;
+  initialFilters?: Record<string, any>;
 }
 
-export default function DirectTargetFilterModal({ show, onClose, onExtracted }: DirectTargetFilterModalProps) {
+export default function DirectTargetFilterModal({ show, onClose, onExtracted, filterOnlyMode, initialFilters }: DirectTargetFilterModalProps) {
   // 필드 데이터
   const [enabledFields, setEnabledFields] = useState<any[]>([]);
   const [filterOptions, setFilterOptions] = useState<Record<string, string[]>>({});
@@ -382,7 +385,9 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
             data_type: f.data_type || 'string',
             category: f.category || 'basic',
           }));
-        onExtracted(data.recipients, data.count, meta);
+        // ★ D86: dynamicFilters도 전달 (자동발송 target_filter용)
+        const { dynamicFilters: builtFilters } = buildDynamicFiltersForAPI();
+        onExtracted(data.recipients, data.count, meta, undefined, builtFilters);
       } else {
         showAlert('타겟 추출 실패', data.error || '데이터를 추출하지 못했습니다. 조건을 확인해주세요.', 'warning');
       }
@@ -790,20 +795,36 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
                 className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-100 transition-colors font-medium text-sm">
                 취소
               </button>
-              <button onClick={handleExtract} disabled={targetCount === 0 || extracting}
-                className="px-5 py-2 bg-green-700 text-white rounded-lg hover:bg-green-800 transition-colors font-medium flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed text-sm">
-                {extracting ? (
-                  <>
-                    <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    추출 중...
-                  </>
-                ) : (
-                  <>
-                    <Users className="w-3.5 h-3.5" />
-                    타겟 추출
-                  </>
-                )}
-              </button>
+              {filterOnlyMode ? (
+                // ★ D86: 자동발송용 — 추출 없이 필터만 적용
+                <button onClick={() => {
+                  const { dynamicFilters: builtFilters } = buildDynamicFiltersForAPI();
+                  if (!builtFilters || Object.keys(builtFilters).length === 0) {
+                    showAlert('필터 미설정', '최소 1개 이상의 필터 조건을 설정해주세요.', 'warning');
+                    return;
+                  }
+                  onExtracted([], targetCount, [], undefined, builtFilters);
+                }} disabled={targetCount === 0}
+                  className="px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed text-sm">
+                  <Filter className="w-3.5 h-3.5" />
+                  필터 적용 ({targetCount.toLocaleString()}명)
+                </button>
+              ) : (
+                <button onClick={handleExtract} disabled={targetCount === 0 || extracting}
+                  className="px-5 py-2 bg-green-700 text-white rounded-lg hover:bg-green-800 transition-colors font-medium flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed text-sm">
+                  {extracting ? (
+                    <>
+                      <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      추출 중...
+                    </>
+                  ) : (
+                    <>
+                      <Users className="w-3.5 h-3.5" />
+                      타겟 추출
+                    </>
+                  )}
+                </button>
+              )}
             </div>
           </div>
         </div>
