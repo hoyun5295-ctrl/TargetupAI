@@ -672,29 +672,6 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
                       <p className="text-sm text-gray-700">{targetConditionSummary}</p>
                     )}
 
-                    <div className="flex flex-wrap gap-1.5">
-                      {Object.entries(targetFilter).map(([key, val]) => {
-                        const field = availableFields.find(f => f.field_key === key);
-                        const label = field?.display_name || field?.field_label || key;
-                        let display = '';
-                        if (val && typeof val === 'object' && val.operator) {
-                          const opLabels: Record<string, string> = { eq: '=', in: '포함', gte: '이상', lte: '이하', between: '범위', contains: '포함', days_within: '최근', birth_month: '월' };
-                          const op = opLabels[val.operator] || val.operator;
-                          const v = Array.isArray(val.value) ? val.value.join('~') : val.value;
-                          display = `${op} ${v}`;
-                        } else if (Array.isArray(val)) {
-                          display = val.join('~');
-                        } else {
-                          display = String(val);
-                        }
-                        return (
-                          <span key={key} className="px-2.5 py-1 bg-white rounded-lg text-xs text-blue-700 border border-blue-200 font-medium">
-                            {label} {display}
-                          </span>
-                        );
-                      })}
-                    </div>
-
                     <p className="text-xs text-gray-500">
                       📌 위 인원수는 현재 시점 기준이며, 실제 발송 시 해당 조건에 맞는 고객이 자동으로 조회됩니다.
                     </p>
