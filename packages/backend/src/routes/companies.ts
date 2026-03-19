@@ -292,34 +292,51 @@ router.get('/callback-numbers', async (req: Request, res: Response) => {
       return res.status(401).json({ success: false, error: '인증 필요' });
     }
 
-    // assignment_scope 필터링:
-    // - 'all': 누구나 사용 가능
-    // - 'assigned': callback_number_assignments에 배정된 사용자만
-    let sql = `
-      SELECT cn.id, cn.phone, cn.label, cn.is_default, cn.store_code, cn.store_name, cn.created_at, cn.assignment_scope
-      FROM callback_numbers cn
-      WHERE cn.company_id = $1
-        AND (
-          cn.assignment_scope = 'all'
-          OR EXISTS (
-            SELECT 1 FROM callback_number_assignments cna
-            WHERE cna.callback_number_id = cn.id AND cna.user_id = $2
+    // D87: assignment_scope 기반 필터링 (하위호환: 컬럼 미존재 시 기존 동작 유지)
+    let hasAssignmentScope = true;
+    try {
+      await query(`SELECT assignment_scope FROM callback_numbers LIMIT 0`);
+    } catch {
+      hasAssignmentScope = false;
+    }
+
+    let sql: string;
+    const params: any[] = [companyId];
+
+    if (hasAssignmentScope) {
+      // D87: assignment_scope 필터링
+      // - 'all': 누구나 사용 가능
+      // - 'assigned': callback_number_assignments에 배정된 사용자만
+      sql = `
+        SELECT cn.id, cn.phone, cn.label, cn.is_default, cn.store_code, cn.store_name, cn.created_at, cn.assignment_scope
+        FROM callback_numbers cn
+        WHERE cn.company_id = $1
+          AND (
+            cn.assignment_scope = 'all'
+            OR EXISTS (
+              SELECT 1 FROM callback_number_assignments cna
+              WHERE cna.callback_number_id = cn.id AND cna.user_id = $2
+            )
           )
-        )
-    `;
-    const params: any[] = [companyId, userId];
+      `;
+      params.push(userId);
+    } else {
+      // 하위호환: assignment_scope 컬럼 없으면 기존 쿼리
+      sql = `SELECT id, phone, label, is_default, store_code, store_name, created_at FROM callback_numbers WHERE company_id = $1`;
+    }
 
     // 일반 사용자(브랜드담당자)는 본인 store_codes에 해당하는 회신번호만
     if (userType !== 'admin') {
       const userResult = await query('SELECT store_codes FROM users WHERE id = $1', [userId]);
       const storeCodes = userResult.rows[0]?.store_codes;
       if (storeCodes && storeCodes.length > 0) {
-        sql += ' AND (cn.store_code = ANY($3) OR cn.store_code IS NULL OR cn.is_default = true)';
+        const paramIdx = params.length + 1;
+        sql += ` AND (${hasAssignmentScope ? 'cn.' : ''}store_code = ANY($${paramIdx}) OR ${hasAssignmentScope ? 'cn.' : ''}store_code IS NULL OR ${hasAssignmentScope ? 'cn.' : ''}is_default = true)`;
         params.push(storeCodes);
       }
     }
 
-    sql += ' ORDER BY cn.is_default DESC, cn.store_code ASC, cn.created_at ASC';
+    sql += ` ORDER BY ${hasAssignmentScope ? 'cn.' : ''}is_default DESC, ${hasAssignmentScope ? 'cn.' : ''}store_code ASC, ${hasAssignmentScope ? 'cn.' : ''}created_at ASC`;
     const result = await query(sql, params);
 
     res.json({ success: true, numbers: result.rows });

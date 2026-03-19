@@ -37,10 +37,19 @@ router.get('/', async (req: Request, res: Response) => {
   try {
     const companyScope = getCompanyScope(req);
 
+    // D87 하위호환: assignment_scope 컬럼 존재 여부 확인
+    let hasAssignmentScope = true;
+    try {
+      await pool.query(`SELECT assignment_scope FROM callback_numbers LIMIT 0`);
+    } catch {
+      hasAssignmentScope = false;
+    }
+
     let sql = `
       SELECT
         cn.id, cn.phone, cn.label, cn.is_default, cn.created_at,
-        cn.store_code, cn.store_name, cn.assignment_scope,
+        cn.store_code, cn.store_name,
+        ${hasAssignmentScope ? "cn.assignment_scope," : "'all' as assignment_scope,"}
         c.company_name, c.company_code, c.id as company_id
       FROM callback_numbers cn
       LEFT JOIN companies c ON cn.company_id = c.id
@@ -225,6 +234,13 @@ router.put('/:id/scope', async (req: Request, res: Response) => {
   }
 
   try {
+    // D87 하위호환: assignment_scope 컬럼 없으면 안내
+    try {
+      await pool.query(`SELECT assignment_scope FROM callback_numbers LIMIT 0`);
+    } catch {
+      return res.status(400).json({ error: 'DB 마이그레이션이 필요합니다. 관리자에게 문의하세요.' });
+    }
+
     // 해당 번호 소유 회사 확인
     const check = await pool.query('SELECT company_id FROM callback_numbers WHERE id = $1', [id]);
     if (check.rows.length === 0) return res.status(404).json({ error: '발신번호를 찾을 수 없습니다.' });
