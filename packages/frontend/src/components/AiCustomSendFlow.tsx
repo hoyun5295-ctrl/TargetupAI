@@ -215,6 +215,8 @@ export default function AiCustomSendFlow({
           messageType: channel,
           subject: selectedMsg.subject || '',
           mmsImagePaths: [],
+          // ★ D83: 미리보기와 동일한 샘플 고객으로 개인화 치환 (불일치 버그 수정)
+          sampleCustomer: sampleData && Object.keys(sampleData).length > 0 ? sampleData : undefined,
         }),
       });
       const data = await res.json();

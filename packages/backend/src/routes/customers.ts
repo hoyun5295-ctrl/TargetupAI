@@ -994,6 +994,11 @@ router.get('/filter-options', async (req: Request, res: Response) => {
       }
     }
 
+    // ★ D83: genders 추가 — 성별도 dropdown으로 제공 (contains 검색 시 필터 무시 버그 방지)
+    const gendersResult = await query(
+      `SELECT DISTINCT gender FROM customers WHERE ${scopeWhere} AND gender IS NOT NULL AND gender != '' ORDER BY gender`,
+      scopeParams
+    );
     const gradesResult = await query(
       `SELECT DISTINCT grade FROM customers WHERE ${scopeWhere} AND grade IS NOT NULL AND grade != '' ORDER BY grade`,
       scopeParams
@@ -1014,6 +1019,7 @@ router.get('/filter-options', async (req: Request, res: Response) => {
     }
 
     res.json({
+      genders: gendersResult.rows.map((r: any) => r.gender),
       grades: gradesResult.rows.map((r: any) => r.grade),
       regions: regionsResult.rows.map((r: any) => r.region),
       store_codes: storeCodes,

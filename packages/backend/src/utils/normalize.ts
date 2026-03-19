@@ -385,6 +385,16 @@ export function normalizeDate(value: any): string | null {
   if (/^\d{4}\/\d{2}\/\d{2}$/.test(v)) return v.replace(/\//g, '-');
   // YYYY.MM.DD
   if (/^\d{4}\.\d{2}\.\d{2}$/.test(v)) return v.replace(/\./g, '-');
+  // ★ D83: 한국식 날짜 형식 — "2025. 12. 17." "2025. 1. 3." "2025.12.17." (공백+점 조합)
+  const koMatch = v.replace(/\.$/, '').match(/^(\d{4})\s*\.\s*(\d{1,2})\s*\.\s*(\d{1,2})$/);
+  if (koMatch) {
+    const yyyy = koMatch[1];
+    const mm = String(parseInt(koMatch[2])).padStart(2, '0');
+    const dd = String(parseInt(koMatch[3])).padStart(2, '0');
+    if (parseInt(mm) >= 1 && parseInt(mm) <= 12 && parseInt(dd) >= 1 && parseInt(dd) <= 31) {
+      return `${yyyy}-${mm}-${dd}`;
+    }
+  }
   // ★ D79: YYMMDD 6자리 형식 (250103 → 2025-01-03)
   if (/^\d{6}$/.test(v)) {
     const yy = parseInt(v.substring(0, 2));

@@ -39,42 +39,41 @@ import { SEND_HOURS } from '../config/defaults';
 // ============================================================
 
 function calcNextRunAt(scheduleType: string, scheduleDay: number | null, scheduleTime: string): Date {
-  const now = new Date();
-  const kstNow = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Seoul' }));
+  // ★ D83: 서버 타임존에 관계없이 정확한 KST→UTC 변환
+  // 이전: toLocaleString + kstToUtc 조합 → KST 서버에서 이중 변환 → 9시간 오차
+  const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
   const [hours, minutes] = scheduleTime.split(':').map(Number);
 
+  const now = new Date();
+  const kstMs = now.getTime() + KST_OFFSET_MS;
+  const kstDate = new Date(kstMs);
+  const kstYear = kstDate.getUTCFullYear();
+  const kstMonth = kstDate.getUTCMonth();
+  const kstDay = kstDate.getUTCDate();
+  const kstDow = kstDate.getUTCDay();
+  const kstNowMinutes = kstDate.getUTCHours() * 60 + kstDate.getUTCMinutes();
+  const targetMinutes = hours * 60 + minutes;
+
+  let tYear = kstYear, tMonth = kstMonth, tDay: number;
+
   if (scheduleType === 'daily') {
-    const today = new Date(kstNow);
-    today.setHours(hours, minutes, 0, 0);
-    if (today <= kstNow) {
-      today.setDate(today.getDate() + 1);
+    tDay = kstDay;
+    if (targetMinutes <= kstNowMinutes) tDay++;
+  } else if (scheduleType === 'weekly') {
+    const daysUntil = (scheduleDay! - kstDow + 7) % 7;
+    tDay = kstDay + daysUntil;
+    if (daysUntil === 0 && targetMinutes <= kstNowMinutes) tDay += 7;
+  } else if (scheduleType === 'monthly') {
+    tDay = scheduleDay!;
+    if (tDay < kstDay || (tDay === kstDay && targetMinutes <= kstNowMinutes)) {
+      tMonth++;
+      if (tMonth > 11) { tMonth = 0; tYear++; }
     }
-    return kstToUtc(today);
+  } else {
+    throw new Error(`Invalid schedule_type: ${scheduleType}`);
   }
 
-  if (scheduleType === 'weekly') {
-    const currentDay = kstNow.getDay();
-    let daysUntil = (scheduleDay! - currentDay + 7) % 7;
-    const target = new Date(kstNow);
-    target.setDate(target.getDate() + daysUntil);
-    target.setHours(hours, minutes, 0, 0);
-    if (target <= kstNow) {
-      target.setDate(target.getDate() + 7);
-    }
-    return kstToUtc(target);
-  }
-
-  if (scheduleType === 'monthly') {
-    const target = new Date(kstNow);
-    target.setDate(scheduleDay!);
-    target.setHours(hours, minutes, 0, 0);
-    if (target <= kstNow) {
-      target.setMonth(target.getMonth() + 1);
-    }
-    return kstToUtc(target);
-  }
-
-  throw new Error(`Invalid schedule_type: ${scheduleType}`);
+  return new Date(Date.UTC(tYear, tMonth, tDay, hours, minutes, 0) - KST_OFFSET_MS);
 }
 
 export function kstToUtc(kstDate: Date): Date {
@@ -406,15 +405,16 @@ async function executeAutoCampaign(ac: any): Promise<void> {
   try {
     console.log(`${logPrefix} 실행 시작`);
 
-    // ★ 이중 실행 방지: status='active' AND next_run_at이 현재인 건만 원자적 잠금
+    // ★ D83: 이중 실행 방지 — status를 'executing'으로 원자적 전환 (진짜 잠금)
+    // 이전: active→active 업데이트는 잠금 역할 못 함 → 워커 재시작 시 중복 실행 → 3건 중복 발송
     const lockResult = await query(
-      `UPDATE auto_campaigns SET status = 'active', updated_at = NOW()
+      `UPDATE auto_campaigns SET status = 'executing', updated_at = NOW()
        WHERE id = $1 AND status = 'active' AND next_run_at <= NOW()
        RETURNING id`,
       [ac.id]
     );
     if (lockResult.rows.length === 0) {
-      console.log(`${logPrefix} 이미 처리됨 (스킵)`);
+      console.log(`${logPrefix} 이미 처리 중이거나 완료됨 (스킵)`);
       return;
     }
 
@@ -667,9 +667,10 @@ async function advanceNextRun(ac: any, sentCount?: number): Promise<void> {
 
     const nextRunAt = calcNextRunAt(ac.schedule_type, ac.schedule_day, scheduleTime);
 
+    // ★ D83: executing → active 복원 (잠금 해제) + next_run_at 전진
     const updateFields = sentCount !== undefined
-      ? `next_run_at = $2, last_run_at = NOW(), total_runs = total_runs + 1, total_sent = total_sent + $3, updated_at = NOW()`
-      : `next_run_at = $2, updated_at = NOW()`;
+      ? `status = 'active', next_run_at = $2, last_run_at = NOW(), total_runs = total_runs + 1, total_sent = total_sent + $3, updated_at = NOW()`
+      : `status = 'active', next_run_at = $2, updated_at = NOW()`;
 
     const params = sentCount !== undefined
       ? [ac.id, nextRunAt, sentCount]

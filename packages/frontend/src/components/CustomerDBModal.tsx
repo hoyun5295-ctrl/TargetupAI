@@ -56,6 +56,8 @@ export default function CustomerDBModal({ onClose, token, userType }: CustomerDB
       const data = await res.json();
       // ★ D79: 등급/지역 등 distinct 값을 filterOptions 딕셔너리에 저장
       const opts: Record<string, string[]> = {};
+      // ★ D83: genders도 dropdown으로 (contains 검색 시 필터 무시 버그 방지)
+      if (data.genders?.length) opts['gender'] = data.genders;
       if (data.grades?.length) opts['grade'] = data.grades;
       if (data.regions?.length) opts['region'] = data.regions;
       setFilterOptions(opts);
@@ -192,6 +194,12 @@ export default function CustomerDBModal({ onClose, token, userType }: CustomerDB
     return ['number', 'integer', 'float', 'numeric', 'date', 'datetime', 'timestamp'].includes(dataType);
   };
 
+  // ★ D83: 날짜 필드인지 확인 (date picker 적용용)
+  const isDateField = (fieldKey: string): boolean => {
+    const dataType = getFieldDataType(fieldKey);
+    return ['date', 'datetime', 'timestamp'].includes(dataType);
+  };
+
   // ★ D79: 필드에 대한 드롭다운 옵션 존재 여부 (등급, 지역 등 distinct values)
   const hasDropdownOptions = (fieldKey: string) => {
     return filterOptions[fieldKey] && filterOptions[fieldKey].length > 0;
@@ -295,9 +303,10 @@ export default function CustomerDBModal({ onClose, token, userType }: CustomerDB
                   {filterOptions[dynFilterField].map(v => <option key={v} value={v}>{v}</option>)}
                 </select>
               ) : (
-                <input type="text" value={dynFilterValue} onChange={(e) => setDynFilterValue(e.target.value)}
+                <input type={isDateField(dynFilterField) ? 'date' : 'text'}
+                  value={dynFilterValue} onChange={(e) => setDynFilterValue(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter') handleAddFilter(); }}
-                  placeholder={isNumericOrDateField(dynFilterField) ? '값 입력' : '검색어 입력'}
+                  placeholder={isDateField(dynFilterField) ? '' : isNumericOrDateField(dynFilterField) ? '값 입력' : '검색어 입력'}
                   className="border border-gray-300 rounded-lg px-2 py-1.5 text-xs w-36 focus:outline-none focus:ring-2 focus:ring-emerald-200" />
               )
             )}
@@ -306,9 +315,10 @@ export default function CustomerDBModal({ onClose, token, userType }: CustomerDB
             {dynFilterField && dynFilterOp === 'between' && (
               <>
                 <span className="text-gray-400 text-xs">~</span>
-                <input type="text" value={dynFilterValueMax} onChange={(e) => setDynFilterValueMax(e.target.value)}
+                <input type={isDateField(dynFilterField) ? 'date' : 'text'}
+                  value={dynFilterValueMax} onChange={(e) => setDynFilterValueMax(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter') handleAddFilter(); }}
-                  placeholder="최대값"
+                  placeholder={isDateField(dynFilterField) ? '' : '최대값'}
                   className="border border-gray-300 rounded-lg px-2 py-1.5 text-xs w-28 focus:outline-none focus:ring-2 focus:ring-emerald-200" />
               </>
             )}

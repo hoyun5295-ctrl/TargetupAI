@@ -14,7 +14,7 @@
  * - 커스텀 필드: 8개 연산자 전부 지원 (customers.ts 기준)
  */
 
-import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getRegionVariants } from './normalize';
+import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getRegionVariants, normalizeDate } from './normalize';
 import { isValidCustomFieldKey } from './safe-field-name';
 import { getColumnFields } from './standard-field-map';
 
@@ -73,27 +73,28 @@ function col(alias: string, column: string): string {
   return alias ? `${alias}.${column}` : column;
 }
 
-// ============================================================
-// 숫자 필드 목록 (customers.ts 기준 — 가장 완전)
-// ============================================================
-const NUMERIC_FIELDS = [
-  'points', 'total_purchase_amount', 'recent_purchase_amount',
-  'purchase_count', 'avg_order_value', 'ltv_score',
-  'visit_count', 'coupon_usage_count', 'return_count',
-];
+/**
+ * ★ D83: 날짜 필터값 안전 정규화 — normalize.ts 컨트롤타워 활용
+ * 사용자가 "2025. 10. 19.", "3월" 등 비정상 형식을 입력해도 쿼리가 터지지 않도록 방어.
+ * 정규화 성공 → YYYY-MM-DD 반환, 실패 → null 반환 (호출부에서 해당 필터 스킵)
+ */
+function safeDateValue(value: any): string | null {
+  if (value == null || value === '') return null;
+  const s = String(value).trim();
+  // 이미 ISO 형식이면 바로 반환
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  // normalize.ts 컨트롤타워의 normalizeDate로 정규화 시도
+  const normalized = normalizeDate(s);
+  if (normalized) return normalized;
+  // 정규화 실패 — 쿼리 에러 방지를 위해 null 반환
+  console.warn(`[CT-01] 날짜 필터값 정규화 실패 (무시됨): "${s}"`);
+  return null;
+}
 
-// ============================================================
-// 날짜 필드 목록
-// ============================================================
-const DATE_FIELDS = ['birth_date', 'recent_purchase_date', 'created_at'];
-
-// ============================================================
-// 문자열 직접 컬럼 필드 목록
-// ============================================================
-const STRING_FIELDS = [
-  'name', 'email', 'address', 'registration_type',
-  'registered_store', 'recent_purchase_store', 'store_phone',
-];
+// ★ D83: NUMERIC_FIELDS, DATE_FIELDS, STRING_FIELDS 하드코딩 리스트 제거
+// structured 모드에서 이 리스트에 의존하던 전용 핸들러를 삭제하고
+// FIELD_MAP 동적 루프(getColumnFields() + dataType 기반)로 통일.
+// 한줄로(mixed 모드)와 동일한 방식 — 새 필드 추가 시 FIELD_MAP만 수정하면 자동 반영.
 
 // ============================================================
 // 메인 함수: buildCustomerFilter
@@ -183,59 +184,20 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
           }
         }
 
-      // ── store_name ──
-      } else if (field === 'store_name') {
-        if (operator === 'eq') {
-          sql += ` AND ${col(alias, 'store_name')} = $${paramIndex++}`;
-          params.push(value);
-        } else if (operator === 'in' && Array.isArray(value)) {
-          sql += ` AND ${col(alias, 'store_name')} = ANY($${paramIndex++}::text[])`;
-          params.push(value);
-        }
-
-      // ── 숫자 필드 ──
-      } else if (NUMERIC_FIELDS.includes(field)) {
-        if (operator === 'eq') {
-          sql += ` AND ${col(alias, field)} = $${paramIndex++}`;
-          params.push(Number(value));
-        } else if (operator === 'gte') {
-          sql += ` AND ${col(alias, field)} >= $${paramIndex++}`;
-          params.push(Number(value));
-        } else if (operator === 'lte') {
-          sql += ` AND ${col(alias, field)} <= $${paramIndex++}`;
-          params.push(Number(value));
-        } else if (operator === 'between' && Array.isArray(value)) {
-          sql += ` AND ${col(alias, field)} BETWEEN $${paramIndex++} AND $${paramIndex++}`;
-          params.push(Number(value[0]), Number(value[1]));
-        }
-
-      // ── 날짜 필드 ──
-      } else if (DATE_FIELDS.includes(field)) {
-        if (operator === 'gte') {
-          sql += ` AND ${col(alias, field)} >= $${paramIndex++}`;
-          params.push(value);
-        } else if (operator === 'lte') {
-          sql += ` AND ${col(alias, field)} <= $${paramIndex++}`;
-          params.push(value);
-        } else if (operator === 'between' && Array.isArray(value)) {
-          sql += ` AND ${col(alias, field)} BETWEEN $${paramIndex++} AND $${paramIndex++}`;
-          params.push(value[0], value[1]);
-        } else if (operator === 'days_within') {
-          // ★ SQL injection 방지: parameterized (campaigns.ts 기존 string interpolation 수정)
-          const daysAgo = new Date();
-          daysAgo.setDate(daysAgo.getDate() - parseInt(value));
-          sql += ` AND ${col(alias, field)} >= $${paramIndex++}`;
-          params.push(daysAgo.toISOString().split('T')[0]);
-        } else if (operator === 'birth_month') {
-          sql += ` AND EXTRACT(MONTH FROM ${col(alias, field)}) = $${paramIndex++}`;
-          params.push(parseInt(value));
-        }
+      // ── store_name, 숫자 필드, 날짜 필드 ──
+      // ★ D83: 전용 핸들러 전부 삭제 → FIELD_MAP 동적 루프(else 블록)에서 dataType 기반 자동 처리
+      // 한줄로(mixed 모드)와 동일한 FIELD_MAP 동적 루프 방식으로 통일
+      // 이전: NUMERIC_FIELDS/DATE_FIELDS 하드코딩 리스트 → 새 필드 추가 시 누락 위험
 
       // ── age (직접 컬럼 + birth_date 폴백) ──
       // ★ D79: age 컬럼이 NULL이어도 birth_date에서 나이 동적 계산
       } else if (field === 'age') {
         const ageExpr = `COALESCE(${col(alias, 'age')}, DATE_PART('year', AGE(${col(alias, 'birth_date')}))::int)`;
-        if (operator === 'gte') {
+        if (operator === 'eq') {
+          // ★ D83: 나이 일치 연산자 추가 (직원 리포트 — eq 시 전체 리스트 반환 버그)
+          sql += ` AND ${ageExpr} = $${paramIndex++}`;
+          params.push(Number(value));
+        } else if (operator === 'gte') {
           sql += ` AND ${ageExpr} >= $${paramIndex++}`;
           params.push(Number(value));
         } else if (operator === 'lte') {
@@ -261,16 +223,30 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
               params.push(Number(value[0]), Number(value[1]));
             }
           } else if (fieldDef.dataType === 'date') {
-            if (operator === 'gte') { sql += ` AND ${columnRef} >= $${paramIndex++}`; params.push(value); }
-            else if (operator === 'lte') { sql += ` AND ${columnRef} <= $${paramIndex++}`; params.push(value); }
-            else if (operator === 'between' && Array.isArray(value)) {
-              sql += ` AND ${columnRef} BETWEEN $${paramIndex++} AND $${paramIndex++}`;
-              params.push(value[0], value[1]);
-            } else if (operator === 'days_within') {
-              const daysAgo = new Date(); daysAgo.setDate(daysAgo.getDate() - parseInt(value));
-              sql += ` AND ${columnRef} >= $${paramIndex++}`; params.push(daysAgo.toISOString().split('T')[0]);
+            // ★ D83: safeDateValue 방어 — 비정상 날짜 입력 시 쿼리 에러 방지
+            if (operator === 'days_within') {
+              const days = parseInt(value);
+              if (!isNaN(days)) {
+                const daysAgo = new Date(); daysAgo.setDate(daysAgo.getDate() - days);
+                sql += ` AND ${columnRef} >= $${paramIndex++}`; params.push(daysAgo.toISOString().split('T')[0]);
+              }
             } else if (operator === 'birth_month') {
-              sql += ` AND EXTRACT(MONTH FROM ${columnRef}) = $${paramIndex++}`; params.push(parseInt(value));
+              const month = parseInt(value);
+              if (!isNaN(month) && month >= 1 && month <= 12) {
+                sql += ` AND EXTRACT(MONTH FROM ${columnRef}) = $${paramIndex++}`; params.push(month);
+              }
+            } else if (operator === 'gte') {
+              const safe = safeDateValue(value);
+              if (safe) { sql += ` AND ${columnRef} >= $${paramIndex++}`; params.push(safe); }
+            } else if (operator === 'lte') {
+              const safe = safeDateValue(value);
+              if (safe) { sql += ` AND ${columnRef} <= $${paramIndex++}`; params.push(safe); }
+            } else if (operator === 'between' && Array.isArray(value)) {
+              const safe0 = safeDateValue(value[0]); const safe1 = safeDateValue(value[1]);
+              if (safe0 && safe1) {
+                sql += ` AND ${columnRef} BETWEEN $${paramIndex++} AND $${paramIndex++}`;
+                params.push(safe0, safe1);
+              }
             }
           } else {
             // 문자열 필드: contains 기본, eq/in도 지원
@@ -448,24 +424,34 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
         params.push(Number(value));
       }
     } else if (field.dataType === 'date') {
-      // 날짜 필드: days_within / gte / lte / between / birth_month
+      // ★ D83: 날짜 필드 — safeDateValue로 비정상 입력 방어
       if (operator === 'days_within') {
-        const daysAgo = new Date();
-        daysAgo.setDate(daysAgo.getDate() - parseInt(value));
-        sql += ` AND ${columnRef} >= $${paramIndex++}`;
-        params.push(daysAgo.toISOString().split('T')[0]);
+        const days = parseInt(value);
+        if (!isNaN(days)) {
+          const daysAgo = new Date();
+          daysAgo.setDate(daysAgo.getDate() - days);
+          sql += ` AND ${columnRef} >= $${paramIndex++}`;
+          params.push(daysAgo.toISOString().split('T')[0]);
+        }
       } else if (operator === 'birth_month') {
-        sql += ` AND EXTRACT(MONTH FROM ${columnRef}) = $${paramIndex++}`;
-        params.push(parseInt(value));
+        const month = parseInt(value);
+        if (!isNaN(month) && month >= 1 && month <= 12) {
+          sql += ` AND EXTRACT(MONTH FROM ${columnRef}) = $${paramIndex++}`;
+          params.push(month);
+        }
       } else if (operator === 'gte') {
-        sql += ` AND ${columnRef} >= $${paramIndex++}`;
-        params.push(value);
+        const safe = safeDateValue(value);
+        if (safe) { sql += ` AND ${columnRef} >= $${paramIndex++}`; params.push(safe); }
       } else if (operator === 'lte') {
-        sql += ` AND ${columnRef} <= $${paramIndex++}`;
-        params.push(value);
+        const safe = safeDateValue(value);
+        if (safe) { sql += ` AND ${columnRef} <= $${paramIndex++}`; params.push(safe); }
       } else if (operator === 'between' && Array.isArray(value)) {
-        sql += ` AND ${columnRef} BETWEEN $${paramIndex++} AND $${paramIndex++}`;
-        params.push(value[0], value[1]);
+        const safe0 = safeDateValue(value[0]);
+        const safe1 = safeDateValue(value[1]);
+        if (safe0 && safe1) {
+          sql += ` AND ${columnRef} BETWEEN $${paramIndex++} AND $${paramIndex++}`;
+          params.push(safe0, safe1);
+        }
       }
     } else {
       // 문자열 필드: eq / in / contains
@@ -585,12 +571,15 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
  * ★ store_code는 'direct' 모드 + alias 'c' 사용.
  */
 export function buildFilterQueryCompat(filter: any, _companyId: string): { where: string; params: any[]; nextIndex: number } {
+  // ★ D83: 디버그 로그
+  console.log('[CT-01 DEBUG] buildFilterQueryCompat input:', JSON.stringify(filter));
   const result = buildCustomerFilter(filter, {
     tableAlias: 'c',
     startParamIndex: 2,  // campaigns.ts는 항상 $1 = companyId
     storeCodeMode: 'direct',
     inputFormat: 'mixed',
   });
+  console.log('[CT-01 DEBUG] buildFilterQueryCompat output SQL:', result.sql, '| params:', JSON.stringify(result.params));
   return { where: result.sql, params: result.params, nextIndex: result.nextIndex };
 }
 
@@ -600,6 +589,8 @@ export function buildFilterQueryCompat(filter: any, _companyId: string): { where
  * ★ store_code는 'subquery' 모드.
  */
 export function buildDynamicFilterCompat(filters: any, startIndex: number): { where: string; params: any[]; nextIndex: number } {
+  // ★ D83: 디버그 로그 — 필터 입력 → 생성된 SQL 추적 (문제 필드 특정용)
+  console.log('[CT-01 DEBUG] buildDynamicFilterCompat input:', JSON.stringify(filters));
   const result = buildCustomerFilter(filters, {
     tableAlias: '',
     startParamIndex: startIndex,
@@ -607,6 +598,7 @@ export function buildDynamicFilterCompat(filters: any, startIndex: number): { wh
     companyIdParamRef: '$1',
     inputFormat: 'structured',
   });
+  console.log('[CT-01 DEBUG] buildDynamicFilterCompat output SQL:', result.sql, '| params:', JSON.stringify(result.params));
   return { where: result.sql, params: result.params, nextIndex: result.nextIndex };
 }
 

@@ -143,45 +143,43 @@ async function checkOwnership(
  * - daily: 오늘 schedule_time이 안 지났으면 오늘, 지났으면 내일
  */
 function calcNextRunAt(scheduleType: string, scheduleDay: number | null, scheduleTime: string): Date {
-  // KST 기준으로 계산
-  const now = new Date();
-  const kstNow = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Seoul' }));
+  // ★ D83: 서버 타임존에 관계없이 정확한 KST→UTC 변환
+  // 이전: toLocaleString + kstToUtc 조합 → KST 서버에서 이중 변환 → 9시간 오차
+  const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
   const [hours, minutes] = scheduleTime.split(':').map(Number);
 
+  // 현재 KST 시간 구하기 (서버 타임존 무관)
+  const now = new Date();
+  const kstMs = now.getTime() + KST_OFFSET_MS;
+  const kstDate = new Date(kstMs); // getUTC* 메서드가 KST 값을 반환
+  const kstYear = kstDate.getUTCFullYear();
+  const kstMonth = kstDate.getUTCMonth();
+  const kstDay = kstDate.getUTCDate();
+  const kstDow = kstDate.getUTCDay();
+  const kstNowMinutes = kstDate.getUTCHours() * 60 + kstDate.getUTCMinutes();
+  const targetMinutes = hours * 60 + minutes;
+
+  let tYear = kstYear, tMonth = kstMonth, tDay: number;
+
   if (scheduleType === 'daily') {
-    const today = new Date(kstNow);
-    today.setHours(hours, minutes, 0, 0);
-    if (today <= kstNow) {
-      today.setDate(today.getDate() + 1);
+    tDay = kstDay;
+    if (targetMinutes <= kstNowMinutes) tDay++;
+  } else if (scheduleType === 'weekly') {
+    const daysUntil = (scheduleDay! - kstDow + 7) % 7;
+    tDay = kstDay + daysUntil;
+    if (daysUntil === 0 && targetMinutes <= kstNowMinutes) tDay += 7;
+  } else if (scheduleType === 'monthly') {
+    tDay = scheduleDay!;
+    if (tDay < kstDay || (tDay === kstDay && targetMinutes <= kstNowMinutes)) {
+      tMonth++;
+      if (tMonth > 11) { tMonth = 0; tYear++; }
     }
-    return kstToUtc(today);
+  } else {
+    throw new Error(`Invalid schedule_type: ${scheduleType}`);
   }
 
-  if (scheduleType === 'weekly') {
-    // schedule_day: 0=일, 1=월, ..., 6=토
-    const currentDay = kstNow.getDay();
-    let daysUntil = (scheduleDay! - currentDay + 7) % 7;
-    const target = new Date(kstNow);
-    target.setDate(target.getDate() + daysUntil);
-    target.setHours(hours, minutes, 0, 0);
-    if (target <= kstNow) {
-      target.setDate(target.getDate() + 7);
-    }
-    return kstToUtc(target);
-  }
-
-  if (scheduleType === 'monthly') {
-    const target = new Date(kstNow);
-    target.setDate(scheduleDay!);
-    target.setHours(hours, minutes, 0, 0);
-    if (target <= kstNow) {
-      // 다음 달로
-      target.setMonth(target.getMonth() + 1);
-    }
-    return kstToUtc(target);
-  }
-
-  throw new Error(`Invalid schedule_type: ${scheduleType}`);
+  // KST 목표 시각 → UTC 변환 (KST = UTC + 9)
+  return new Date(Date.UTC(tYear, tMonth, tDay, hours, minutes, 0) - KST_OFFSET_MS);
 }
 
 // ★ D79: 인라인 kstToUtc 제거 → auto-campaign-worker.ts에서 import
