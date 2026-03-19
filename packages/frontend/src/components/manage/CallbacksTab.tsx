@@ -243,6 +243,19 @@ export default function CallbacksTab() {
   };
 
   const handleSaveAssignments = async () => {
+    // D87 안전장치: 배정 사용자 0명이면 자동으로 '전체 사용'으로 복귀
+    if (assignedUserIds.length === 0) {
+      try {
+        await manageCallbacksApi.updateScope(assignModal.callbackId, 'all');
+        setNumbers(prev => prev.map(item => item.id === assignModal.callbackId ? { ...item, assignment_scope: 'all' } : item));
+        setToast({ msg: '배정된 사용자가 없어 전체 사용으로 변경되었습니다.', type: 'success' });
+      } catch (err: any) {
+        setToast({ msg: err.response?.data?.error || '변경 실패', type: 'error' });
+      }
+      setAssignModal({ show: false, callbackId: '', phone: '', label: '' });
+      setAssignSearch('');
+      return;
+    }
     setAssignSaving(true);
     try {
       await manageCallbacksApi.saveAssignments(assignModal.callbackId, assignedUserIds);
@@ -871,7 +884,17 @@ export default function CallbacksTab() {
                 {assignedUserIds.length}명 선택됨
               </span>
               <div className="flex gap-3">
-                <button onClick={() => { setAssignModal({ show: false, callbackId: '', phone: '', label: '' }); setAssignSearch(''); }}
+                <button onClick={async () => {
+                  // D87 안전장치: 취소 시 배정 0명이면 자동으로 '전체 사용'으로 복귀
+                  if (assignedUserIds.length === 0) {
+                    try {
+                      await manageCallbacksApi.updateScope(assignModal.callbackId, 'all');
+                      setNumbers(prev => prev.map(item => item.id === assignModal.callbackId ? { ...item, assignment_scope: 'all' } : item));
+                    } catch {}
+                  }
+                  setAssignModal({ show: false, callbackId: '', phone: '', label: '' });
+                  setAssignSearch('');
+                }}
                   className="px-4 py-2.5 rounded-lg text-sm font-medium border border-gray-300 text-gray-700 hover:bg-gray-50 transition">취소</button>
                 <button onClick={handleSaveAssignments} disabled={assignSaving}
                   className="px-5 py-2.5 rounded-lg text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 transition">

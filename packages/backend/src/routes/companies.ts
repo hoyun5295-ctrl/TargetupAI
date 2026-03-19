@@ -305,21 +305,29 @@ router.get('/callback-numbers', async (req: Request, res: Response) => {
 
     if (hasAssignmentScope) {
       // D87: assignment_scope 필터링
-      // - 'all': 누구나 사용 가능
-      // - 'assigned': callback_number_assignments에 배정된 사용자만
-      sql = `
-        SELECT cn.id, cn.phone, cn.label, cn.is_default, cn.store_code, cn.store_name, cn.created_at, cn.assignment_scope
-        FROM callback_numbers cn
-        WHERE cn.company_id = $1
-          AND (
-            cn.assignment_scope = 'all'
-            OR EXISTS (
-              SELECT 1 FROM callback_number_assignments cna
-              WHERE cna.callback_number_id = cn.id AND cna.user_id = $2
+      // - admin: 전체 번호 조회 (assignment_scope 무관) — 관리 가시성 보장
+      // - 일반 사용자: 'all' + 본인 배정된 'assigned' 번호만
+      if (userType === 'admin') {
+        sql = `
+          SELECT cn.id, cn.phone, cn.label, cn.is_default, cn.store_code, cn.store_name, cn.created_at, cn.assignment_scope
+          FROM callback_numbers cn
+          WHERE cn.company_id = $1
+        `;
+      } else {
+        sql = `
+          SELECT cn.id, cn.phone, cn.label, cn.is_default, cn.store_code, cn.store_name, cn.created_at, cn.assignment_scope
+          FROM callback_numbers cn
+          WHERE cn.company_id = $1
+            AND (
+              cn.assignment_scope = 'all'
+              OR EXISTS (
+                SELECT 1 FROM callback_number_assignments cna
+                WHERE cna.callback_number_id = cn.id AND cna.user_id = $2
+              )
             )
-          )
-      `;
-      params.push(userId);
+        `;
+        params.push(userId);
+      }
     } else {
       // 하위호환: assignment_scope 컬럼 없으면 기존 쿼리
       sql = `SELECT id, phone, label, is_default, store_code, store_name, created_at FROM callback_numbers WHERE company_id = $1`;
@@ -896,25 +904,7 @@ router.put('/:id', requireSuperAdmin, async (req: Request, res: Response) => {
   }
 });
 
-// 회신번호 목록 조회
-router.get('/callback-numbers', async (req: Request, res: Response) => {
-  try {
-    const companyId = (req as any).user?.companyId;
-    if (!companyId) {
-      return res.status(401).json({ success: false, error: '인증 필요' });
-    }
-
-    const result = await query(
-      'SELECT id, phone, label, is_default, created_at FROM callback_numbers WHERE company_id = $1 ORDER BY is_default DESC, created_at ASC',
-      [companyId]
-    );
-  
-    res.json({ success: true, numbers: result.rows });
-  } catch (error) {
-    console.error('회신번호 조회 실패:', error);
-    res.status(500).json({ success: false, error: '조회 실패' });
-  }
-});
+// D87: 중복 callback-numbers 라우트 제거 (286번 줄의 D87 버전으로 통합)
 
 // POST /api/companies/refresh-schema - 고객 스키마 갱신
 router.post('/refresh-schema', async (req: Request, res: Response) => {
