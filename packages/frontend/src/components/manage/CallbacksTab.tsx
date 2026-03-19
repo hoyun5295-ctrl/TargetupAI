@@ -85,6 +85,7 @@ export default function CallbacksTab() {
   const [assignedUserIds, setAssignedUserIds] = useState<string[]>([]);
   const [assignLoading, setAssignLoading] = useState(false);
   const [assignSaving, setAssignSaving] = useState(false);
+  const [assignSearch, setAssignSearch] = useState('');
 
   // --- 1차: 담당자 + 위임장 ---
   const [senderManagers, setSenderManagers] = useState<SenderManager[]>([]);
@@ -247,6 +248,7 @@ export default function CallbacksTab() {
       await manageCallbacksApi.saveAssignments(assignModal.callbackId, assignedUserIds);
       setToast({ msg: '사용자 배정이 저장되었습니다.', type: 'success' });
       setAssignModal({ show: false, callbackId: '', phone: '', label: '' });
+      setAssignSearch('');
     } catch (err: any) {
       setToast({ msg: err.response?.data?.error || '저장 실패', type: 'error' });
     } finally {
@@ -416,13 +418,9 @@ export default function CallbacksTab() {
         <div className="bg-white rounded-lg shadow">
           <div className="px-6 py-4 border-b flex justify-between items-center">
             <h2 className="text-lg font-semibold">등록 발신번호</h2>
-            {allowSelfRegister ? (
+            {allowSelfRegister && (
               <button onClick={() => setShowAdd(true)}
                 className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition">+ 발신번호 등록</button>
-            ) : (
-              <span className="text-xs text-gray-400 bg-gray-50 px-3 py-2 rounded-lg border border-dashed border-gray-300">
-                발신번호 등록/삭제는 슈퍼관리자만 가능합니다
-              </span>
             )}
           </div>
 
@@ -827,8 +825,21 @@ export default function CallbacksTab() {
                 <div className="py-8 text-center text-gray-500">등록된 사용자가 없습니다.</div>
               ) : (
                 <div className="space-y-2">
-                  <p className="text-xs text-gray-500 mb-3">이 발신번호를 사용할 수 있는 사용자를 선택하세요.</p>
-                  {companyUsers.map(user => (
+                  <p className="text-xs text-gray-500 mb-2">이 발신번호를 사용할 수 있는 사용자를 선택하세요.</p>
+                  <input
+                    type="text"
+                    value={assignSearch}
+                    onChange={(e) => setAssignSearch(e.target.value)}
+                    placeholder="이름, 이메일로 검색..."
+                    className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none mb-2"
+                  />
+                  {companyUsers
+                    .filter(user => {
+                      if (!assignSearch) return true;
+                      const q = assignSearch.toLowerCase();
+                      return (user.name || '').toLowerCase().includes(q) || (user.email || '').toLowerCase().includes(q);
+                    })
+                    .map(user => (
                     <label key={user.id}
                       className={`flex items-center gap-3 px-3 py-2.5 rounded-lg border cursor-pointer transition ${
                         assignedUserIds.includes(user.id) ? 'border-indigo-300 bg-indigo-50' : 'border-gray-200 hover:bg-gray-50'
@@ -860,7 +871,7 @@ export default function CallbacksTab() {
                 {assignedUserIds.length}명 선택됨
               </span>
               <div className="flex gap-3">
-                <button onClick={() => setAssignModal({ show: false, callbackId: '', phone: '', label: '' })}
+                <button onClick={() => { setAssignModal({ show: false, callbackId: '', phone: '', label: '' }); setAssignSearch(''); }}
                   className="px-4 py-2.5 rounded-lg text-sm font-medium border border-gray-300 text-gray-700 hover:bg-gray-50 transition">취소</button>
                 <button onClick={handleSaveAssignments} disabled={assignSaving}
                   className="px-5 py-2.5 rounded-lg text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 transition">

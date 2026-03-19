@@ -29,7 +29,7 @@
 | CT-07 | standard-field-map.ts | 필드 매핑 + customer_field_definitions UPSERT |
 | CT-08 | callback-filter.ts | 개별회신번호 필터링 (store_phone 폴백 + 미등록 제외) |
 | CT-09 | spam-test-queue.ts | 스팸테스트 큐 관리 + 자동 스팸검사/재생성 |
-| CT-10 | sender-registration.ts | 발신번호 등록 신청/승인/반려 워크플로우 |
+| CT-10 | sender-registration.ts | 발신번호 등록 신청/승인/반려 + 사용자별 배정 관리 (D87) |
 | — | messageUtils.ts | 변수 치환 (5개 발송 경로 통합) |
 | — | normalize.ts | 값 정규화 |
 | — | stats-aggregation.ts | 대시보드 통계 집계 + AI 캠페인 성과 집계 |

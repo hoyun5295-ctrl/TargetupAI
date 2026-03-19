@@ -59,6 +59,7 @@
 | 48 | auto_campaign_runs | 자동발송 실행 이력 (D69 생성 완료) |
 | 49 | sender_managers | 발신번호 관리 담당자 |
 | 50 | sender_registrations | 발신번호 등록 신청 |
+| 51 | callback_number_assignments | 발신번호 사용자별 배정 (D87) |
 
 ---
 
@@ -98,7 +99,18 @@
 | is_default | boolean |
 | store_code | varchar(50) |
 | store_name | varchar(100) |
+| assignment_scope | varchar(10) DEFAULT 'all' NOT NULL | — 'all'=전체사용, 'assigned'=지정사용자만 (D87)
 | created_at | timestamp |
+
+### callback_number_assignments (발신번호 사용자별 배정 — D87)
+| 컬럼 | 타입 |
+|------|------|
+| id | uuid PK |
+| callback_number_id | uuid FK → callback_numbers(id) ON DELETE CASCADE |
+| user_id | uuid FK → users(id) ON DELETE CASCADE |
+| assigned_by | uuid |
+| created_at | timestamptz |
+| UNIQUE(callback_number_id, user_id) | |
 
 ### campaign_runs (캠페인 실행)
 | 컬럼 | 타입 |
