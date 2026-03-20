@@ -443,10 +443,15 @@ export default function CustomerDBModal({ onClose, token, userType }: CustomerDB
                         let display: string;
                         if (f.field_key === 'gender') {
                           display = val === 'M' || val === '남' || val === '남성' ? '남' : val === 'F' || val === '여' || val === '여성' ? '여' : val || '-';
-                        } else if (f.field_key === 'birth_date' || f.field_key === 'recent_purchase_date' || f.field_key === 'created_at' || f.field_key === 'wedding_anniversary' || f.field_type === 'DATE') {
+                        } else if (f.field_key === 'birth_date' || f.field_key === 'recent_purchase_date' || f.field_key === 'created_at' || f.field_key === 'wedding_anniversary' || (f.field_type && f.field_type.toUpperCase() === 'DATE')) {
+                          // ★ D89: field_type 대소문자 무관 + formatDate 개선으로 하루 밀림 방지
                           display = val ? formatDate(String(val)) : '-';
-                        } else if (f.field_key === 'total_purchase_amount' || f.field_key === 'recent_purchase_amount' || f.field_key === 'avg_order_value') {
+                        } else if (f.field_key === 'total_purchase_amount' || f.field_key === 'recent_purchase_amount' || f.field_key === 'avg_order_value' || f.field_key === 'points' || f.field_key === 'purchase_count') {
+                          // ★ D89: points/purchase_count 등 숫자 직접 컬럼 쉼표 포맷팅
                           display = val != null ? `${Number(val).toLocaleString()}` : '-';
+                        } else if (f.field_type === 'NUMBER' && val != null) {
+                          // ★ D89: 커스텀 숫자 필드도 자동 쉼표 포맷팅
+                          display = `${Number(val).toLocaleString()}`;
                         } else if (f.field_key === 'grade') {
                           return (
                             <td key={f.field_key} className="px-3 py-2.5 text-center whitespace-nowrap">
@@ -518,10 +523,15 @@ export default function CustomerDBModal({ onClose, token, userType }: CustomerDB
                           ? fieldColumns.find((f: any) => f.field_key === key)
                           : null;
                         const displayLabel = fieldDef?.field_label || fieldDef?.display_name || key;
+                        // ★ D89: 커스텀 숫자 필드 쉼표 포맷팅
+                        const isNumericField = fieldDef?.field_type === 'NUMBER';
+                        const displayValue = value != null
+                          ? (isNumericField && !isNaN(Number(value)) ? Number(value).toLocaleString() : String(value))
+                          : '-';
                         return (
                           <div key={key} className="flex items-center py-2.5 border-b border-gray-100">
                             <span className="w-24 flex-shrink-0 text-xs text-gray-400">{displayLabel}</span>
-                            <span className="text-sm text-gray-800 font-medium">{String(value) || '-'}</span>
+                            <span className="text-sm text-gray-800 font-medium">{displayValue}</span>
                           </div>
                         );
                       })}

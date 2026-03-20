@@ -106,6 +106,64 @@
 
 ---
 
+### 🔧 D88 — QA 버그리포트 11건 전면 수정 (2026-03-20) — ✅ 배포 완료
+
+> **배경:** 테스터 직원들의 PPT 버그리포트 (한줄로_20260320.pptx) — 11개 슬라이드, 7개 그룹(A~G). 컨트롤타워 패턴 + 동적 처리 원칙으로 전체 수정.
+
+#### A. 구독/게이팅 (슬라이드 1)
+- 무료체험 만료 후 자동발송/캘린더/스팸필터 사용 가능했던 문제
+- **수정:** DashboardHeader.tsx `isSubscriptionLocked` prop + `lockGuard()` → AI 분석/자동발송/직접발송/캘린더 전부 잠금. Dashboard.tsx `isSpamFilterLocked` 등에 OR 조건 추가. auto-campaigns.ts `checkPlanGating`에 subscription_status + is_trial_expired 체크 추가
+
+#### B. 고객DB 필터 (슬라이드 3-4)
+- 수신동의여부: 텍스트 입력 → 동의/거부 드롭다운 필요
+- 평균주문금액: 금액인데 상세조건(이상/이하/범위) 없음
+- VIP행사참석: "참석" 검색 시 "미참석" 포함 전체 추출
+- **수정:** CustomerDBModal.tsx boolean 필드 자동 드롭다운('동의'/'거부'). enabled-fields API D88 자동 타입 감지(샘플 20건→number/date/string). customer-filter.ts dropdown 필드 contains→eq 자동 전환
+
+#### C. 개인화/소수점 (슬라이드 7-8-9)
+- 맞춤한줄 미리보기에 타겟 아닌 고객 표시 + 스팸테스트 개인화 NULL + 금액 소수점 2자리
+- **수정:** ai.ts parse-briefing에서 타겟 필터 적용 sampleCustomer 반환 → AiCustomSendFlow.tsx setSampleData. 스팸테스트 replaceVars에 field_key→field_label 매핑 추가. messageUtils.ts string→Number 파싱 후 toLocaleString(). AiCustomSendFlow.tsx replaceSampleVars도 동일 처리
+
+#### D. 발신번호 배정 격리 (슬라이드 10) + 미등록 회신번호 확인 (슬라이드 2)
+- 시세이도 나스만 배정한 번호가 다른 사용자에게도 공유
+- **수정:** companies.ts callback-numbers: `company_admin`도 admin과 동일하게 전체 조회 (기존에는 company_user와 같은 필터 적용)
+- 미등록 회신번호 확인 모달: 기존 CT-08 buildCallbackConfirmResponse 기반 4경로(direct/target/ai/aiCustom) 전부 적용 확인
+
+#### E. 수신거부 자동 등록 (슬라이드 5)
+- admin이 DB 업로드 시 수신거부 자동 반영 안 됨
+- **수정:** upload.ts admin 경로에 ① admin 본인 user_id INSERT 추가 + ② 고객 store_code 기준 브랜드 사용자 배정 유지
+
+#### F. 중간관리자 사용자별 DB 조회 (슬라이드 11)
+- 시세이도 중간관리자가 사용자별 DB 조회 시 데이터 없음
+- **수정:** customers.ts filterUserId를 `uploaded_by` → 해당 사용자의 `store_codes` 기준 `store_code = ANY(store_codes)` 필터로 변경
+
+#### G. 스팸테스트 광고표기 (슬라이드 6)
+- 스팸테스트 시 (광고)/무료수신거부 표기 없이 테스트됨
+- **수정:** spam-test-queue.ts autoSpamTestWithRegenerate에서 isAd=true일 때 (광고) 접두사 + 무료수신거부 접미사 래핑 후 테스트
+
+#### 수정 파일 (11개)
+- `packages/backend/src/routes/customers.ts` — enabled-fields 자동 타입 감지 + filterUserId store_codes 기반
+- `packages/backend/src/routes/companies.ts` — callback-numbers company_admin 전체 조회
+- `packages/backend/src/routes/upload.ts` — admin 수신거부 자동 등록
+- `packages/backend/src/routes/auto-campaigns.ts` — checkPlanGating 구독 체크
+- `packages/backend/src/routes/ai.ts` — parse-briefing sampleCustomer 반환
+- `packages/backend/src/utils/messageUtils.ts` — numeric string 포맷팅
+- `packages/backend/src/utils/customer-filter.ts` — contains→eq 자동 전환
+- `packages/backend/src/utils/spam-test-queue.ts` — 광고문구 래핑
+- `packages/frontend/src/pages/Dashboard.tsx` — isSubscriptionLocked 전파
+- `packages/frontend/src/components/DashboardHeader.tsx` — lockGuard + 잠금 prop
+- `packages/frontend/src/components/AiCustomSendFlow.tsx` — sampleData/replaceVars/replaceSampleVars 수정
+- `packages/frontend/src/components/CustomerDBModal.tsx` — boolean 드롭다운
+
+#### D88 교훈
+- **DB 값의 실제 타입을 맹신하지 않는다:** PostgreSQL numeric 필드가 JS에서 string으로 올 수 있음 → 항상 타입 체크 후 변환
+- **미리보기 샘플은 타겟 필터를 적용한 고객이어야 한다:** enabled-fields의 범용 샘플 ≠ 타겟 매칭 샘플
+- **dropdown 필드에 contains 연산자가 오면 eq로 전환:** "참석" contains → "미참석"도 매칭되는 패턴 방지
+- **admin 업로드 시 수신거부는 admin 본인에게도 등록:** 단일 브랜드 회사에서 브랜드 사용자 없으면 수신거부 0건
+- **구독 만료 게이팅은 프론트+백엔드 양쪽 필수:** 프론트만 차단하면 API 직접 호출로 우회 가능
+
+---
+
 ### 🔧 D87 — 발신번호 사용자별 배정 기능 (2026-03-19~20) — ✅ 배포 완료
 
 > **배경:** 발신번호를 "전체 사용" 또는 "특정 사용자에게만 배정" 선택적으로 관리하는 기능 요청 (Harold님 실무 피드백)
@@ -2085,6 +2143,7 @@ QTmsg status_code, 통신사 코드, 스팸필터 판정 결과를 한 곳에서
 
 | 날짜 | 완료 항목 |
 |------|----------|
+| 03-20 | **D88 QA 버그리포트 11건(7그룹) 전면 수정:** 테스터 PPT 버그리포트 기반. (A) DashboardHeader isSubscriptionLocked+lockGuard+auto-campaigns checkPlanGating 구독/트라이얼 체크. (B) CustomerDBModal boolean 자동 드롭다운+enabled-fields 자동 타입 감지(샘플20건)+customer-filter contains→eq 전환. (C) ai.ts parse-briefing 타겟 필터 sampleCustomer+AiCustomSendFlow replaceVars field_key→field_label 매핑+messageUtils string→Number 파싱+toLocaleString. (D) companies.ts company_admin 전체 조회+CT-08 확인 모달 4경로 적용. (E) upload.ts admin 본인 user_id 수신거부 INSERT. (F) customers.ts filterUserId store_codes 기준. (G) spam-test-queue.ts 광고문구 래핑. 수정 11파일. tsc 프론트+백엔드 통과. **기간계 무접촉.** |
 | 03-08 | **D61 프론트엔드 난독화 적용:** vite-plugin-javascript-obfuscator — frontend+company-frontend 양쪽 vite.config.ts. production 빌드 시에만 활성화(mode === 'production'). stringArray+base64 인코딩, disableConsoleOutput, identifierNamesGenerator('hexadecimal'), splitStrings. 개발 환경(npm run dev) 무영향. 서버 배포 시 npm install 필요. |
 | 03-08 | **D60 SyncAgent API Key 관리 + 사용자별 라인그룹 배정:** (1) SyncAgent: 고객사 편집 모달 9번째 탭 'Sync' 추가. 백엔드 3개 엔드포인트(GET sync-keys, POST regenerate, PUT use_db_sync 토글). 프론트 마스킹+보기/숨김+복사+2단계 재발급 확인 UI. (2) 사용자별 라인그룹: DDL users.line_group_id uuid FK nullable 추가(실행 완료). campaigns.ts getCompanySmsTables(companyId, userId?) 확장—사용자 개별 라인그룹 우선→회사 fallback. admin.ts 사용자 수정 API lineGroupId 추가+사용자 목록에 line_group_name 포함. 프론트 사용자 편집 모달에 라인그룹 드롭다운(슈퍼관리자 전용). 고객사 편집 모달 너비 max-w-lg→max-w-2xl+탭 UI 개선. 수정 3파일(admin.ts, campaigns.ts, AdminDashboard.tsx)+DDL 1건+신규 1파일(DDL-user-line-group.sql). **기간계: getCompanySmsTables userId optional 추가만, 기존 호출 100% 호환.** tsc 통과. |
 | 03-07 | **D59 2차 코드 전수점검 P1~P6 총 28건 수정 완료:** **(P1 정산/데이터 3건)** ai.ts `\|\|10`→`??10` AI추정 0%치환 버그 수정. analysis.ts 하드코딩 `totalSent*15` 제거→채널별(SMS/LMS/MMS/KAKAO) getCompanyCosts() 정확 비용 계산. manage-stats.ts dead code 4줄 삭제. **(P2 SQL Injection 4건)** safe-field-name.ts 신규(custom_1~15 화이트리스트)→campaigns.ts buildFilterQuery, customers.ts buildDynamicFilter, ai.ts buildFilterWhereClause 3곳 적용. campaigns.ts dateFilter MySQL `?` 파라미터화+DATE_FORMAT 정규식 검증. **(P3 입력검증 3건)** mms-images.ts companyId UUID 정규식 검증. upload.ts `path.basename(fileId)` 디렉토리 탐색 방어. manage-users.ts 비밀번호 8~72자 bcrypt 안전 범위 검증. **(P4 하드코딩 5건)** admin.ts+manage-users.ts SMS 회신번호→`SYSTEM_SMS_CALLBACK` 환경변수(미설정 시 throw). defaults.ts `INVITO_INFO` 상수 신규+billing.ts PDF 2곳+이메일 2곳 import 교체. 프론트엔드 5곳 `©2026`→`©{new Date().getFullYear()}`. `constants/company.ts` 신규(frontend+company-frontend)+8파일 15곳 회사정보 상수 교체. **(P5 인프라 4건)** defaults.ts Redis error handler. ai.ts AI API 키 미설정 console.warn. app.ts unhandledRejection+uncaughtException PM2 연계. database.ts PG Pool max/idle/connection 환경변수 기반. **(P6 프론트 4건)** Dashboard.tsx setInterval→useRef+useEffect cleanup. optOutNumber 초기값''→미로딩 시 발송차단 가드 3곳. isSending/directSending 교차 중복 발송 방지 3곳. console.log 4줄 삭제. **(P7 장기 8건)** CODE-REVIEW-P7-BACKLOG.md 기록. 수정 20파일+신규 4파일. **기간계 무접촉. tsc backend+frontend+company-frontend 3패키지 전체 통과.** |

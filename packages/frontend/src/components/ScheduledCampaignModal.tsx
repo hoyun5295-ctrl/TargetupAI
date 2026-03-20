@@ -471,7 +471,8 @@ export default function ScheduledCampaignModal({
                 placeholder="메시지 내용 입력"
               />
               <div className="text-right text-sm text-gray-500 mt-1">
-                {new TextEncoder().encode(editMessage).length} bytes
+                {/* ★ D89: SMS 표준 바이트 계산 (한글 2byte) — 다른 발송 경로와 통일 */}
+                {(() => { let b = 0; for (let i = 0; i < editMessage.length; i++) b += editMessage.charCodeAt(i) > 127 ? 2 : 1; return b; })()} bytes
               </div>
             </div>
             {messageEditing && (

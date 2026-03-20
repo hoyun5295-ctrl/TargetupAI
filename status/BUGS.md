@@ -3,7 +3,7 @@
 > **목적:** 버그의 발견→분석→수정→교차검증→완료를 체계적으로 관리하여 재발을 방지한다.  
 > **원칙:** (1) 추측성 땜질 금지 (2) 근본 원인 3줄 이내 특정 (3) 교차검증 통과 전까지 Closed 금지 (4) 재발 패턴 기록  
 > **SoT(진실의 원천):** STATUS.md + 이 문서. 채팅에서 떠도는 "수정 완료"는 교차검증 전까지 "임시"다.
-> **현황:** **2026-03-16 D79 인라인전수제거+날짜정규화+필터UI+plan_code — 4건 🟡배포대기.** D74 컨트롤타워 동적화+store_phone — 3건 🟡검증대기. D73 무료체험게이팅+수신거부아키텍처+CT-07 — 6건 ✅배포완료. D72 예약캠페인+비용계산+storageType+성능개선 — 4건 배포대기. D71 시세이도 업로드 후속 — 5건 ✅배포완료. D70 18건 수정완료(3차 배포완료). 🔵Open 1건: B17-05(스팸테스트 간헐적 공백, 보류). D69 자동발송 🟡검증대기 | D66 17차 🟡검증대기 | 8차~15차 기존건 유지.
+> **현황:** **2026-03-20 D88 QA 버그리포트 11건(7그룹) — ✅배포완료.** D87 발신번호배정 ✅배포완료. D79 인라인전수제거 4건 🟡배포대기. D74 컨트롤타워 동적화 3건 🟡검증대기. D73~D72 ✅배포완료. D71 ✅배포완료. D70 18건 ✅배포완료. 🔵Open 1건: B17-05(스팸테스트 간헐적 공백, 보류).
 > **⚠️ 2026-02-26 코드 실물 검증:** GPT "미수정" 지적 5건 중 GP-01/03/05는 이미 코드에 반영됨 확인. GP-04는 풀 레벨로 보강. 문서의 "❌ 미수정" 표기가 실제 코드보다 뒤떨어져 있었음.
 
 ---
@@ -57,7 +57,69 @@
 
 ---
 
-## 2) 📋 D79 — 인라인 전수제거 + 날짜 정규화 + 필터 UI + plan_code (2026-03-16)
+## 2) 📋 D88 — QA 버그리포트 11건 전면 수정 (2026-03-20) — ✅ 배포 완료
+
+> **배경:** 테스터 직원 PPT 버그리포트 11개 슬라이드, 7그룹(A~G). 컨트롤타워 패턴 + 동적 처리로 전체 수정.
+
+### B-D88-01 ✅ 무료체험 만료 후 자동발송/캘린더/스팸필터 미차단
+- **심각도:** 🔴 Critical
+- **현상:** 무료체험 만료 사용자가 자동발송, 캘린더 관리, 스팸필터 테스트 이용 가능
+- **근본 원인:** DashboardHeader에 구독 상태 전달 안 됨 + isSpamFilterLocked에 구독 체크 없음 + auto-campaigns checkPlanGating에 구독/트라이얼 만료 체크 없음
+- **수정:** DashboardHeader isSubscriptionLocked prop + lockGuard. Dashboard isSpamFilterLocked OR 조건. auto-campaigns subscription_status + is_trial_expired 체크
+- **상태:** ✅ 배포완료
+
+### B-D88-02 ✅ 수신동의여부/평균주문금액/VIP행사참석 필터 오동작
+- **심각도:** 🔴 Critical
+- **현상:** 수신동의여부 텍스트 입력만 가능, 평균주문금액 상세조건 없음, VIP행사참석 "참석" 검색 시 전체 추출
+- **근본 원인:** boolean 필드 드롭다운 미생성. 커스텀 숫자 필드 string 감지. dropdown 필드에 contains 연산자 적용
+- **수정:** CustomerDBModal boolean 자동 드롭다운. enabled-fields 자동 타입 감지(샘플 20건). customer-filter contains→eq 자동 전환
+- **상태:** ✅ 배포완료
+
+### B-D88-03 ✅ 맞춤한줄 개인화: 타겟 아닌 고객 표시 + 스팸테스트 NULL
+- **심각도:** 🔴 Critical
+- **현상:** 타겟(건성) 지정했는데 미리보기에 중성피부 고객 표시. 스팸테스트/실발송 개인화 NULL
+- **근본 원인:** enabled-fields의 범용 샘플(타겟 무관) 사용. 스팸테스트 replaceVars에 field_key→field_label 매핑 없음
+- **수정:** ai.ts parse-briefing 타겟 필터 적용 sampleCustomer 반환. AiCustomSendFlow replaceVars field_key→field_label 매핑
+- **상태:** ✅ 배포완료
+
+### B-D88-04 ✅ 금액 소수점 2자리 표시
+- **심각도:** 🟠 Major
+- **현상:** 누적금액 등 금액 개인화 시 소수점 아래 2자리로 단말 수신 (담당자사전수신, 맞춤한줄 미리보기 등)
+- **근본 원인:** PostgreSQL numeric 필드가 JS에서 string 도착 → `typeof rawValue === 'number'` 분기 미진입 → toLocaleString 미적용
+- **수정:** messageUtils.ts string→Number 파싱 후 toLocaleString. AiCustomSendFlow replaceSampleVars도 동일 처리
+- **상태:** ✅ 배포완료
+
+### B-D88-05 ✅ DB 업로드 시 수신거부 자동 등록 안 됨
+- **심각도:** 🔴 Critical
+- **현상:** 시세이도 외 계정으로 DB 업로드 후 수신거부 관리에 자동 반영 안 됨
+- **근본 원인:** upload.ts admin 경로에서 브랜드 사용자에게만 배정 → admin 본인 user_id INSERT 누락 → 단일 브랜드 회사 수신거부 0건
+- **수정:** admin 본인 user_id INSERT 추가 (브랜드 사용자 배정 전에 실행)
+- **상태:** ✅ 배포완료
+
+### B-D88-06 ✅ 스팸테스트 시 광고표기 누락
+- **심각도:** 🟠 Major
+- **현상:** 스팸테스트가 (광고)/무료수신거부 없이 실행 → 실제 발송 형태와 다른 결과
+- **근본 원인:** autoSpamTestWithRegenerate에서 isAd/rejectNumber를 받지만 메시지 래핑 안 함
+- **수정:** spam-test-queue.ts에 (광고) 접두사 + 무료수신거부 접미사 래핑 추가
+- **상태:** ✅ 배포완료
+
+### B-D88-07 ✅ 발신번호 사용자 배정 격리 안 됨
+- **심각도:** 🔴 Critical
+- **현상:** 시세이도 나스만 배정한 번호가 다른 사용자에게도 공유되어 발송 가능
+- **근본 원인:** companies.ts callback-numbers에서 company_admin도 company_user와 동일 필터 적용 → assignment_scope 필터에 걸림
+- **수정:** company_admin은 admin과 동일하게 전체 조회 (관리 가시성)
+- **상태:** ✅ 배포완료
+
+### B-D88-08 ✅ 중간관리자 사용자별 DB 조회 안 됨
+- **심각도:** 🔴 Critical
+- **현상:** 시세이도 중간관리자가 사용자별 고객 DB 조회 시 "데이터 없음"
+- **근본 원인:** filterUserId가 uploaded_by 기준 → admin이 업로드한 고객은 사용자별 조회에서 미표시
+- **수정:** 해당 사용자의 store_codes 조회 → store_code = ANY(store_codes) 필터로 변경. 폴백: store_codes 없으면 uploaded_by
+- **상태:** ✅ 배포완료
+
+---
+
+## 3) 📋 D79 — 인라인 전수제거 + 날짜 정규화 + 필터 UI + plan_code (2026-03-16)
 
 > **배경:** (1) YYMMDD 6자리 업로드 에러 재발 — 인라인 함수만 수정하고 컨트롤타워(normalize.ts) 미수정. (2) 프로 요금제 plan_code 대소문자 불일치. (3) 고객DB 필터 하드코딩. (4) Harold님 지시: routes/ 전체 인라인 중복 함수 전수조사 및 제거.
 

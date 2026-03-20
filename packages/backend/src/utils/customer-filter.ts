@@ -96,6 +96,27 @@ function safeDateValue(value: any): string | null {
 // FIELD_MAP 동적 루프(getColumnFields() + dataType 기반)로 통일.
 // 한줄로(mixed 모드)와 동일한 방식 — 새 필드 추가 시 FIELD_MAP만 수정하면 자동 반영.
 
+/**
+ * ★ D89: 문자열 contains 검색 시 구분자 정규화 헬퍼
+ * - phone/store_phone: 하이픈(-) 제거 후 비교 (DB에 하이픈 없이 저장)
+ * - address/recent_purchase_store/registered_store/store_name: 언더스코어(_)/공백 제거 후 비교
+ * - 기타 문자열 필드: 그대로 ILIKE
+ *
+ * @returns { colExpr: SQL 컬럼 표현식, cleanValue: 정규화된 검색값 }
+ */
+const PHONE_FIELDS = new Set(['phone', 'store_phone']);
+const SEPARATOR_FIELDS = new Set(['address', 'recent_purchase_store', 'registered_store', 'store_name']);
+
+function normalizeContainsSearch(fieldKey: string, columnRef: string, value: string): { colExpr: string; cleanValue: string } {
+  if (PHONE_FIELDS.has(fieldKey)) {
+    return { colExpr: `REPLACE(${columnRef}, '-', '')`, cleanValue: String(value).replace(/-/g, '') };
+  }
+  if (SEPARATOR_FIELDS.has(fieldKey)) {
+    return { colExpr: `REPLACE(REPLACE(${columnRef}, '_', ''), ' ', '')`, cleanValue: String(value).replace(/[_ ]/g, '') };
+  }
+  return { colExpr: columnRef, cleanValue: String(value) };
+}
+
 // ============================================================
 // 메인 함수: buildCustomerFilter
 // ============================================================
@@ -256,8 +277,11 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
             }
           } else {
             // 문자열 필드: contains 기본, eq/in도 지원
-            if (operator === 'contains') { sql += ` AND ${columnRef} ILIKE $${paramIndex++}`; params.push(`%${value}%`); }
-            else if (operator === 'in' && Array.isArray(value)) {
+            if (operator === 'contains') {
+              // ★ D89: 전화번호 하이픈, 주소/매장명 구분자 정규화
+              const norm = normalizeContainsSearch(field, columnRef, value);
+              sql += ` AND ${norm.colExpr} ILIKE $${paramIndex++}`; params.push(`%${norm.cleanValue}%`);
+            } else if (operator === 'in' && Array.isArray(value)) {
               sql += ` AND ${columnRef} = ANY($${paramIndex++}::text[])`; params.push(value);
             } else {
               // eq 포함 기타 → 정확 일치
@@ -465,8 +489,10 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
         sql += ` AND ${columnRef} = ANY($${paramIndex++}::text[])`;
         params.push(value);
       } else if (operator === 'contains') {
-        sql += ` AND ${columnRef} ILIKE $${paramIndex++}`;
-        params.push(`%${value}%`);
+        // ★ D89: 전화번호 하이픈, 주소/매장명 구분자 정규화
+        const norm = normalizeContainsSearch(field.fieldKey, columnRef, value);
+        sql += ` AND ${norm.colExpr} ILIKE $${paramIndex++}`;
+        params.push(`%${norm.cleanValue}%`);
       } else {
         sql += ` AND ${columnRef} = $${paramIndex++}`;
         params.push(value);

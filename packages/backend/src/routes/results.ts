@@ -433,9 +433,13 @@ router.get('/campaigns/:id/messages', async (req: Request, res: Response) => {
       const smsBaseParams: any[] = [id];
 
       if (searchType && searchValue) {
-        const sv = `%${String(searchValue).trim()}%`;
-        if (searchType === 'phone') { smsWhere += ' AND dest_no LIKE ?'; smsBaseParams.push(sv); }
-        else if (searchType === 'callback') { smsWhere += ' AND call_back LIKE ?'; smsBaseParams.push(sv); }
+        // ★ D89: 전화번호/회신번호 검색 시 하이픈 제거 (DB에 하이픈 없이 저장)
+        const cleanValue = (searchType === 'phone' || searchType === 'callback')
+          ? String(searchValue).trim().replace(/-/g, '')
+          : String(searchValue).trim();
+        const sv = `%${cleanValue}%`;
+        if (searchType === 'phone') { smsWhere += ' AND REPLACE(dest_no, \'-\', \'\') LIKE ?'; smsBaseParams.push(sv); }
+        else if (searchType === 'callback') { smsWhere += ' AND REPLACE(call_back, \'-\', \'\') LIKE ?'; smsBaseParams.push(sv); }
         else if (searchType === 'content') { smsWhere += ' AND msg_contents LIKE ?'; smsBaseParams.push(sv); }
       }
 
@@ -467,8 +471,12 @@ router.get('/campaigns/:id/messages', async (req: Request, res: Response) => {
       const kakaoBaseParams: any[] = [id];
 
       if (searchType && searchValue) {
-        const sv = `%${String(searchValue).trim()}%`;
-        if (searchType === 'phone') { kakaoWhere += ' AND PHONE_NUMBER LIKE ?'; kakaoBaseParams.push(sv); }
+        // ★ D89: 전화번호 검색 시 하이픈 제거
+        const cleanValue = searchType === 'phone'
+          ? String(searchValue).trim().replace(/-/g, '')
+          : String(searchValue).trim();
+        const sv = `%${cleanValue}%`;
+        if (searchType === 'phone') { kakaoWhere += ' AND REPLACE(PHONE_NUMBER, \'-\', \'\') LIKE ?'; kakaoBaseParams.push(sv); }
         else if (searchType === 'content') { kakaoWhere += ' AND MESSAGE LIKE ?'; kakaoBaseParams.push(sv); }
         // callback 검색은 카카오에 미적용 (원래 동작과 동일)
       }
@@ -540,7 +548,11 @@ router.get('/campaigns/:id/messages', async (req: Request, res: Response) => {
       const liveOnlyParams: any[] = [];
       const smsBaseParams: any[] = [id];
       if (searchType && searchValue) {
-        const sv = `%${String(searchValue).trim()}%`;
+        // ★ D89: 전화번호/회신번호 검색 시 하이픈 제거
+        const cleanValue = (searchType === 'phone' || searchType === 'callback')
+          ? String(searchValue).trim().replace(/-/g, '')
+          : String(searchValue).trim();
+        const sv = `%${cleanValue}%`;
         if (['phone', 'callback', 'content'].includes(String(searchType))) smsBaseParams.push(sv);
       }
 
@@ -553,9 +565,13 @@ router.get('/campaigns/:id/messages', async (req: Request, res: Response) => {
         '' AS resend_type, '' AS resend_report_code`;
       let smsWhere = 'WHERE app_etc1 = ?';
       if (searchType && searchValue) {
-        const sv = `%${String(searchValue).trim()}%`;
-        if (searchType === 'phone') smsWhere += ' AND dest_no LIKE ?';
-        else if (searchType === 'callback') smsWhere += ' AND call_back LIKE ?';
+        // ★ D89: 전화번호/회신번호 검색 시 하이픈 제거 + REPLACE
+        const cleanValue = (searchType === 'phone' || searchType === 'callback')
+          ? String(searchValue).trim().replace(/-/g, '')
+          : String(searchValue).trim();
+        const sv = `%${cleanValue}%`;
+        if (searchType === 'phone') smsWhere += ' AND REPLACE(dest_no, \'-\', \'\') LIKE ?';
+        else if (searchType === 'callback') smsWhere += ' AND REPLACE(call_back, \'-\', \'\') LIKE ?';
         else if (searchType === 'content') smsWhere += ' AND msg_contents LIKE ?';
       }
       if (status === 'success') smsWhere += ` AND status_code IN (${SUCCESS_CODES.join(',')})`;

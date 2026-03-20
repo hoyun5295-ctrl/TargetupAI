@@ -437,6 +437,12 @@ PostgreSQL campaigns/campaign_runs 생성
 | **auto_relax 기본 true로 타겟 왜곡** | 자동발송에서 recommend-target 호출 시 auto_relax 미설정 → AI가 멋대로 조건 완화 → 의도와 다른 타겟 | **자동발송처럼 사용자 지정 조건이 중요한 경우 auto_relax: false 명시.** 기본값에 의존하지 않고 용도에 맞게 파라미터 명시 (D86) |
 | **assigned 상태에서 배정 0명 → 번호 미표시** | callback_numbers.assignment_scope='assigned'로 전환 후 사용자 배정 0명 → D87 필터(EXISTS)에서 제외 → "등록된 발신번호가 없습니다" | **상태 전환 시 "빈 상태" 안전장치 필수.** assigned에 배정 0명이면 자동 'all' 복귀. admin은 assignment_scope 무관하게 전체 조회 (D87) |
 | **동일 경로 라우트 중복 등록** | companies.ts에 callback-numbers GET 라우트 2개 존재 → Express는 첫 번째만 실행하지만 혼란 유발 + 유지보수 위험 | **라우트 추가/수정 시 동일 경로가 이미 존재하는지 grep으로 반드시 확인.** 중복 발견 시 즉시 제거 (D87) |
+| **PostgreSQL numeric이 JS string으로 도착** | messageUtils replaceVariables에서 `typeof rawValue === 'number'` 분기 미진입 → toLocaleString 미적용 → 소수점 2자리 그대로 표시 | **DB numeric 필드는 JS에서 string으로 올 수 있음.** 항상 `Number(String(val).replace(/,/g, ''))` 파싱 후 포맷 (D88) |
+| **미리보기 샘플이 타겟 무관 고객** | enabled-fields API의 sample은 ORDER BY updated_at DESC 1건(타겟 무관) → 건성 타겟인데 중성피부 고객 표시 | **미리보기 샘플은 반드시 타겟 필터를 적용한 고객에서 추출.** parse-briefing/recommend-target에서 필터 적용 후 샘플 반환 (D88) |
+| **dropdown 필드에 contains 연산자** | "참석" contains → "미참석"도 ILIKE '%참석%' 매칭 → 전체 리스트 반환 | **dropdown으로 제공하는 필드는 contains가 와도 eq로 자동 전환.** customer-filter.ts에서 방어 처리 (D88) |
+| **admin 업로드 시 수신거부 admin 본인 누락** | upload.ts admin 경로에서 브랜드 사용자에게만 INSERT → 단일 브랜드 회사(브랜드 사용자 0명) 수신거부 0건 | **admin도 발송 주체이므로 admin 본인 user_id로 반드시 INSERT.** 브랜드 사용자 배정과 별도로 admin 본인 등록 필수 (D88) |
+| **company_admin을 company_user와 동일 필터** | callback-numbers에서 company_admin도 assignment_scope 필터 적용 → 배정된 번호만 보임 | **company_admin은 admin과 동급으로 전체 조회.** 관리 가시성 보장. company_user만 assignment_scope 필터 적용 (D88) |
+| **filterUserId가 uploaded_by 기준** | 중간관리자가 사용자별 DB 조회 시 uploaded_by 기준 → admin이 업로드한 고객 미표시 | **사용자별 고객 조회는 store_codes(소속 브랜드) 기준.** uploaded_by는 store_codes 없을 때 폴백만 (D88) |
 
 ### ⚠️ 필수 체크 원칙 1: 유틸 함수 수정/추가 시 소비처 전수 확인
 
