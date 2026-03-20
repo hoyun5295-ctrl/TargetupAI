@@ -35,35 +35,49 @@ export default function CustomerDBModal({ onClose, token, userType }: CustomerDB
   const [fieldColumns, setFieldColumns] = useState<any[]>([]);
 
   useEffect(() => {
-    fetchFilterOptions();
-    fetchFieldDefinitions();
+    fetchEnabledFieldsAndOptions();
     fetchCustomers(1);
   }, []);
 
-  const fetchFieldDefinitions = async () => {
+  // ★ D88: enabled-fields 하나로 통합 — 필드 정의 + 필터 옵션 + 브랜드 코드를 한 번에 가져옴
+  // 기존 fetchFieldDefinitions + fetchFilterOptions 2개 API 호출 → 1개로 통합
+  const fetchEnabledFieldsAndOptions = async () => {
     try {
+      // 1. enabled-fields API — 필드 + 옵션 + 카테고리 전부 반환
       const res = await fetch('/api/customers/enabled-fields', { headers: { Authorization: `Bearer ${token}` } });
       const data = await res.json();
       setFieldColumns(data.fields || []);
-    } catch (error) {
-      console.error('필드 정의 조회 에러:', error);
-    }
-  };
 
-  const fetchFilterOptions = async () => {
-    try {
-      const res = await fetch('/api/customers/filter-options', { headers: { Authorization: `Bearer ${token}` } });
-      const data = await res.json();
-      // ★ D79: 등급/지역 등 distinct 값을 filterOptions 딕셔너리에 저장
+      // ★ D88: enabled-fields가 반환하는 options를 filterOptions에 직접 병합
+      // 커스텀 필드(VIP행사참석 등)의 DISTINCT 값도 여기서 자동으로 가져옴
       const opts: Record<string, string[]> = {};
-      // ★ D83: genders도 dropdown으로 (contains 검색 시 필터 무시 버그 방지)
-      if (data.genders?.length) opts['gender'] = data.genders;
-      if (data.grades?.length) opts['grade'] = data.grades;
-      if (data.regions?.length) opts['region'] = data.regions;
+      if (data.options) {
+        for (const [key, values] of Object.entries(data.options)) {
+          if (Array.isArray(values) && values.length > 0) {
+            opts[key] = values as string[];
+          }
+        }
+      }
+
+      // ★ D88: boolean 필드(sms_opt_in 등)는 자동으로 동의/거부 옵션 생성
+      for (const f of (data.fields || [])) {
+        if (f.data_type === 'boolean' && !opts[f.field_key]) {
+          opts[f.field_key] = ['동의', '거부'];
+        }
+      }
+
       setFilterOptions(opts);
-      setStoreCodeOptions(data.store_codes || []);
+
+      // 2. 브랜드 코드는 filter-options에서 가져옴 (enabled-fields에는 미포함)
+      try {
+        const foRes = await fetch('/api/customers/filter-options', { headers: { Authorization: `Bearer ${token}` } });
+        const foData = await foRes.json();
+        setStoreCodeOptions(foData.store_codes || []);
+      } catch (e) {
+        console.error('브랜드 코드 조회 에러:', e);
+      }
     } catch (error) {
-      console.error('필터 옵션 조회 에러:', error);
+      console.error('필드/옵션 조회 에러:', error);
     }
   };
 
@@ -119,14 +133,22 @@ export default function CustomerDBModal({ onClose, token, userType }: CustomerDB
     }
   };
 
-  // ★ 동적 필터 추가 — 문자열은 자동 contains, 드롭다운 선택은 eq
+  // ★ 동적 필터 추가 — 드롭다운 선택은 eq, 문자열은 contains, 숫자/날짜는 연산자 선택
   const handleAddFilter = () => {
     if (!dynFilterField || !dynFilterValue) return;
     const fieldDef = fieldColumns.find((f: any) => f.field_key === dynFilterField);
     const label = fieldDef?.field_label || fieldDef?.display_name || dynFilterField;
-    // 드롭다운 옵션에서 선택한 경우(등급, 지역 등)는 eq, 그 외 문자열은 contains
+    const dataType = getFieldDataType(dynFilterField);
+
+    // ★ D88: boolean 필드(sms_opt_in) — "동의"/"거부"를 실제 DB 값으로 변환
+    let effectiveValue = dynFilterValue;
+    if (dataType === 'boolean') {
+      effectiveValue = dynFilterValue === '동의' ? 'true' : dynFilterValue === '거부' ? 'false' : dynFilterValue;
+    }
+
+    // 드롭다운 옵션에서 선택한 경우(등급, 지역, 커스텀 필드 등)는 eq, 그 외 문자열은 contains
     const effectiveOp = hasDropdownOptions(dynFilterField) ? 'eq' : dynFilterOp;
-    const newFilter = { field: dynFilterField, label, op: effectiveOp, value: dynFilterValue, valueMax: effectiveOp === 'between' ? dynFilterValueMax : undefined };
+    const newFilter = { field: dynFilterField, label, op: effectiveOp, value: effectiveValue, valueMax: effectiveOp === 'between' ? dynFilterValueMax : undefined };
     const updated = [...activeFilters.filter(f => f.field !== dynFilterField), newFilter];
     setActiveFilters(updated);
     setDynFilterField('');
@@ -279,7 +301,8 @@ export default function CustomerDBModal({ onClose, token, userType }: CustomerDB
             }}
               className="border border-gray-300 rounded-lg px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-emerald-200 min-w-[120px]">
               <option value="">필터 필드 선택</option>
-              {fieldColumns.map((f: any) => (
+              {/* ★ D88: sms_opt_in은 전용 필터 버튼이 있으므로 중복 제외 */}
+              {fieldColumns.filter((f: any) => f.field_key !== 'sms_opt_in').map((f: any) => (
                 <option key={f.field_key} value={f.field_key}>{f.field_label || f.display_name || f.field_key}</option>
               ))}
             </select>

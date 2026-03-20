@@ -145,9 +145,10 @@ export default function Dashboard() {
        || (planInfo.plan_code === 'FREE' && planInfo.is_trial_expired))
     : (subscriptionStatus === 'expired' || subscriptionStatus === 'suspended');
   // D53: DB 플래그 기반 게이팅 (하드코딩 가격 체크 제거)
-  const isSpamFilterLocked = !planInfo?.spam_filter_enabled;
-  const isCustomerDbLocked = !planInfo?.customer_db_enabled;
-  const isAiMessagingLocked = !planInfo?.ai_messaging_enabled;
+  // ★ D88: 구독 만료 시에도 모든 기능 잠금
+  const isSpamFilterLocked = !planInfo?.spam_filter_enabled || isSubscriptionLocked;
+  const isCustomerDbLocked = !planInfo?.customer_db_enabled || isSubscriptionLocked;
+  const isAiMessagingLocked = !planInfo?.ai_messaging_enabled || isSubscriptionLocked;
   const [balanceInfo, setBalanceInfo] = useState<{billingType: string, balance: number, costPerSms: number, costPerLms: number, costPerMms: number, costPerKakao: number} | null>(null);
   const [showBalanceModal, setShowBalanceModal] = useState(false);
   const [showChargeModal, setShowChargeModal] = useState(false);
@@ -2087,6 +2088,8 @@ const campaignData = {
         onAnalysis={() => setShowAnalysis(true)}
         onLogout={handleLogout}
         customerDbEnabled={planInfo?.customer_db_enabled}
+        isSubscriptionLocked={isSubscriptionLocked}
+        onSubscriptionLocked={() => setShowSubscriptionLock(true)}
         onFeatureLocked={(feature, required) => {
           setPlanUpgradeFeature(feature);
           setPlanUpgradeRequired(required);

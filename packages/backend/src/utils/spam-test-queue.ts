@@ -648,9 +648,19 @@ export async function autoSpamTestWithRegenerate(params: {
 
     // 최대 재시도 횟수까지 반복
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      // ★ D88: 광고문구 포함하여 실제 발송될 형태로 테스트
+      let testMessage = currentMessage;
+      if (isAd) {
+        const adPrefix = isLmsType ? '(광고) ' : '(광고)';
+        const rejectFooter = rejectNumber
+          ? (isLmsType ? `\n무료수신거부 ${rejectNumber}` : `\n무료거부${rejectNumber.replace(/-/g, '')}`)
+          : '';
+        testMessage = `${adPrefix}${currentMessage}${rejectFooter}`;
+      }
+
       // 메시지 내용 구성
-      const smsContent = !isLmsType ? currentMessage : undefined;
-      const lmsContent = isLmsType ? currentMessage : undefined;
+      const smsContent = !isLmsType ? testMessage : undefined;
+      const lmsContent = isLmsType ? testMessage : undefined;
 
       // 큐에 등록
       const enqueueResult = await enqueueSpamTest({

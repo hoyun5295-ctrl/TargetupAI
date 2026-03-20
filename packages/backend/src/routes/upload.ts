@@ -734,7 +734,22 @@ async function processUploadInBackground(
         const uploaderType = userTypeResult.rows[0]?.user_type === 'admin' ? 'company_admin' : 'company_user';
 
         if (uploaderType === 'company_admin') {
-          // admin → 각 고객의 store_code 기준 브랜드 사용자에게 자동 배정
+          // ★ D88: admin 본인에게도 수신거부 등록 (admin도 발송 주체이므로 필수)
+          const adminUnsubResult = await query(`
+            INSERT INTO unsubscribes (company_id, user_id, phone, source)
+            SELECT $1, $2, phone, 'db_upload'
+            FROM customers
+            WHERE company_id = $1 AND sms_opt_in = false AND is_active = true
+              AND NOT EXISTS (
+                SELECT 1 FROM unsubscribes u WHERE u.user_id = $2 AND u.phone = customers.phone
+              )
+            ON CONFLICT (user_id, phone) DO NOTHING
+          `, [companyId, userId]);
+          if (adminUnsubResult.rowCount && adminUnsubResult.rowCount > 0) {
+            console.log(`[업로드] 수신거부 자동등록(admin 본인): ${adminUnsubResult.rowCount}건 (company: ${companyId})`);
+          }
+
+          // admin → 각 고객의 store_code 기준 브랜드 사용자에게도 자동 배정
           const unsubResult = await query(`
             INSERT INTO unsubscribes (company_id, user_id, phone, source)
             SELECT c.company_id, u.id, c.phone, 'db_upload'

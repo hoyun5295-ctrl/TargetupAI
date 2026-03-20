@@ -53,11 +53,19 @@ router.get('/', async (req: Request, res: Response) => {
       // scope.type === 'no_filter' → 필터 없이 company_id 전체 (기존대로)
     }
 
-    // ★ 고객사관리자: 사용자(ID)별 필터 → 해당 사용자가 업로드한 고객만
+    // ★ D88: 사용자(ID)별 필터 → 해당 사용자의 store_codes 기준 조회 (uploaded_by 아닌 소속 브랜드 기준)
     const filterUserId = req.query.filterUserId as string;
     if (filterUserId && (userType === 'company_admin' || userType === 'super_admin')) {
-      whereClause += ` AND uploaded_by = $${paramIndex++}`;
-      params.push(filterUserId);
+      const fuResult = await query('SELECT store_codes FROM users WHERE id = $1 AND company_id = $2', [filterUserId, companyId]);
+      const fuStoreCodes = fuResult.rows[0]?.store_codes;
+      if (fuStoreCodes && fuStoreCodes.length > 0) {
+        whereClause += ` AND store_code = ANY($${paramIndex++}::text[])`;
+        params.push(fuStoreCodes);
+      } else {
+        // store_codes 미지정 사용자 → 해당 사용자가 업로드한 고객으로 폴백
+        whereClause += ` AND uploaded_by = $${paramIndex++}`;
+        params.push(filterUserId);
+      }
     }
 
     // ★ 브랜드(store_code) 필터 — 고객사관리자/슈퍼관리자가 특정 브랜드만 조회
@@ -1066,8 +1074,10 @@ router.get('/enabled-fields', async (req: Request, res: Response) => {
       [companyId]
     );
     const fieldDefLabels: Record<string, string> = {};
+    const fieldDefTypes: Record<string, string> = {};
     for (const fd of fieldDefsResult.rows) {
       fieldDefLabels[fd.field_key] = fd.field_label;
+      if (fd.field_type) fieldDefTypes[fd.field_key] = fd.field_type;
     }
 
     // 1. 직접 컬럼 필드 — 항상 FIELD_MAP + 실제 데이터 감지 (단일 경로)
@@ -1118,7 +1128,9 @@ router.get('/enabled-fields', async (req: Request, res: Response) => {
       }
     }
 
-    // 2. 커스텀 필드 — custom_fields JSONB에 실제 데이터 있는 것만 + field_definitions 라벨 적용
+    // 2. 커스텀 필드 — custom_fields JSONB에 실제 데이터 있는 것만
+    // ★ D88: 실제 데이터 기반 타입 자동 감지 — 고객사가 뭘 올리든 동적 대응
+    // field_definitions.field_type 우선 → 없으면 실제 DISTINCT 값 샘플링으로 자동 감지
     try {
       const customKeysResult = await query(
         `SELECT DISTINCT jsonb_object_keys(custom_fields) as field_key
@@ -1130,11 +1142,53 @@ router.get('/enabled-fields', async (req: Request, res: Response) => {
         if (!existingKeys.has(row.field_key)) {
           const mapped = getFieldByKey(row.field_key);
           const label = fieldDefLabels[row.field_key] || mapped?.displayName || row.field_key;
+
+          // ★ D88: 커스텀 필드 data_type 자동 감지
+          // 우선순위: (1) field_definitions.field_type → (2) 실제 데이터 샘플링
+          let detectedType = 'string';
+          const defType = fieldDefTypes[row.field_key];
+          if (defType) {
+            const upper = defType.toUpperCase();
+            if (['NUMBER', 'INTEGER', 'INT', 'FLOAT', 'NUMERIC', 'DECIMAL'].includes(upper)) {
+              detectedType = 'number';
+            } else if (['DATE', 'DATETIME', 'TIMESTAMP'].includes(upper)) {
+              detectedType = 'date';
+            }
+          }
+
+          // field_definitions에 타입 정보 없으면 실제 데이터로 감지
+          if (detectedType === 'string' && !defType) {
+            try {
+              const sampleResult = await query(
+                `SELECT DISTINCT custom_fields->>'${row.field_key}' as val
+                 FROM customers
+                 WHERE ${scopeWhere} AND custom_fields->>'${row.field_key}' IS NOT NULL
+                   AND custom_fields->>'${row.field_key}' != ''
+                 LIMIT 20`,
+                scopeParams
+              );
+              const sampleValues = sampleResult.rows.map((r: any) => r.val).filter(Boolean);
+              if (sampleValues.length > 0) {
+                // 숫자 감지: 전체 샘플이 숫자(정수/소수/콤마 포함)이면 number
+                const numPattern = /^-?[\d,]+(\.\d+)?$/;
+                const allNumeric = sampleValues.every((v: string) => numPattern.test(v.trim()));
+                if (allNumeric) {
+                  detectedType = 'number';
+                } else {
+                  // 날짜 감지: 전체 샘플이 날짜 형식이면 date
+                  const datePattern = /^\d{4}[-/.]\d{1,2}[-/.]\d{1,2}$|^\d{8}$/;
+                  const allDate = sampleValues.every((v: string) => datePattern.test(v.trim()));
+                  if (allDate) detectedType = 'date';
+                }
+              }
+            } catch (e) { /* 샘플링 실패 시 string 유지 */ }
+          }
+
           fields.push({
             field_key: row.field_key,
             display_name: label,
             field_label: label,
-            data_type: mapped?.dataType || 'string',
+            data_type: detectedType,
             category: mapped?.category || 'custom',
             sort_order: mapped?.sortOrder || 900,
             is_custom: true,

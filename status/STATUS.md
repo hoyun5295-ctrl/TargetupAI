@@ -106,12 +106,12 @@
 
 ---
 
-### 🔧 D87 — 발신번호 사용자별 배정 기능 (2026-03-19) — 코드 완료, 배포 전
+### 🔧 D87 — 발신번호 사용자별 배정 기능 (2026-03-19~20) — ✅ 배포 완료
 
 > **배경:** 발신번호를 "전체 사용" 또는 "특정 사용자에게만 배정" 선택적으로 관리하는 기능 요청 (Harold님 실무 피드백)
 
 #### 수정 내용
-- **DB 변경 (배포 전 서버 수동 실행 필요):**
+- **DB 변경 (✅ 마이그레이션 완료):**
   - `callback_numbers.assignment_scope` 컬럼 추가 (VARCHAR(10), DEFAULT 'all')
   - `callback_number_assignments` 테이블 생성 (callback_number_id + user_id 매핑)
 - **컨트롤타워 (CT-10 sender-registration.ts):**
@@ -123,36 +123,27 @@
   - DELETE /:id/assignments/:userId — 개별 배정 해제
   - GET / 목록에 assignment_scope 포함
 - **발송 시 필터링 (companies.ts):**
-  - callback-numbers 조회에 assignment_scope 기반 필터 적용 (scope='all' OR EXISTS 배정)
+  - callback-numbers 조회에 assignment_scope 기반 필터 적용
+  - **admin 사용자:** assignment_scope 무관하게 전체 번호 조회 (관리 가시성 보장)
+  - **일반 사용자:** scope='all' + 본인 배정된 'assigned' 번호만 조회
   - company-users API 추가 (배정 모달용)
+  - 중복 callback-numbers 라우트 제거 (D87 버전으로 통합)
 - **프론트엔드 (CallbacksTab.tsx):**
   - 등록 발신번호 테이블에 "사용 범위" 컬럼 + 전체/지정 토글
   - 사용자 배정 모달 (체크박스 선택 → 저장 + 이름/이메일 검색 기능)
+  - **배정 0명 안전장치:** 저장/취소 시 배정 사용자 0명이면 자동으로 'all'(전체 사용)로 복귀
   - "발신번호 등록/삭제는 슈퍼관리자만 가능합니다" 안내 문구 제거
 - **API 클라이언트 (api/client.ts):** manageCallbacksApi에 배정 메서드 4개 추가
 
 #### 수정 파일 (5개)
 - `packages/backend/src/utils/sender-registration.ts` — 배정 관리 컨트롤타워 함수
 - `packages/backend/src/routes/manage-callbacks.ts` — 배정 API 4개
-- `packages/backend/src/routes/companies.ts` — callback-numbers 필터링 + company-users API
+- `packages/backend/src/routes/companies.ts` — callback-numbers 필터링 (admin 전체조회 + 중복라우트 제거) + company-users API
 - `packages/frontend/src/api/client.ts` — 배정 API 메서드
-- `packages/frontend/src/components/manage/CallbacksTab.tsx` — 배정 UI
+- `packages/frontend/src/components/manage/CallbacksTab.tsx` — 배정 UI + 0명 안전장치
 
-#### 배포 전 필수 작업
-```sql
--- 서버 PostgreSQL에서 실행
-ALTER TABLE callback_numbers ADD COLUMN IF NOT EXISTS assignment_scope VARCHAR(10) DEFAULT 'all' NOT NULL;
-CREATE TABLE IF NOT EXISTS callback_number_assignments (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  callback_number_id UUID NOT NULL REFERENCES callback_numbers(id) ON DELETE CASCADE,
-  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  assigned_by UUID NOT NULL,
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  UNIQUE(callback_number_id, user_id)
-);
-CREATE INDEX IF NOT EXISTS idx_cna_callback_number_id ON callback_number_assignments(callback_number_id);
-CREATE INDEX IF NOT EXISTS idx_cna_user_id ON callback_number_assignments(user_id);
-```
+#### D87 교훈
+- **assigned 상태에서 배정 사용자 0명 → 아무도 해당 번호를 볼 수 없음** → AutoSendFormModal "등록된 발신번호가 없습니다" 사고 발생. admin은 항상 전체 조회 + 0명이면 자동 'all' 복귀 안전장치로 해결
 
 ---
 

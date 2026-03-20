@@ -141,8 +141,10 @@ export function replaceVariables(
     let displayValue = '';
     if (rawValue === null || rawValue === undefined) {
       displayValue = '';
-    } else if (mapping.type === 'number' && typeof rawValue === 'number') {
-      displayValue = rawValue.toLocaleString();
+    } else if (mapping.type === 'number') {
+      // ★ D88: PostgreSQL numeric 필드는 string으로 올 수 있음 — 숫자 파싱 후 포맷
+      const numVal = typeof rawValue === 'number' ? rawValue : Number(String(rawValue).replace(/,/g, ''));
+      displayValue = !isNaN(numVal) ? numVal.toLocaleString() : String(rawValue);
     } else if (mapping.type === 'date' && rawValue) {
       // ★ D85: 날짜 KST 고정 — UTC ISO raw 문자열(2003-04-10T15:00:00.000Z) 노출 방지
       try {

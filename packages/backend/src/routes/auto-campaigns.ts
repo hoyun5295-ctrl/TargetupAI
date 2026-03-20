@@ -39,13 +39,23 @@ async function checkPlanGating(companyId: string): Promise<{
   errorMsg?: string;
 }> {
   const result = await query(
-    `SELECT p.auto_campaign_enabled, p.max_auto_campaigns, c.auto_campaign_override
+    `SELECT p.auto_campaign_enabled, p.max_auto_campaigns, p.plan_code, c.auto_campaign_override,
+            c.subscription_status,
+            NOW() > c.created_at + INTERVAL '7 days' as is_trial_expired
      FROM companies c
      LEFT JOIN plans p ON c.plan_id = p.id
      WHERE c.id = $1`,
     [companyId]
   );
   const row = result.rows[0];
+
+  // ★ D88: 구독 만료/트라이얼 만료 시 차단
+  if (row?.subscription_status === 'expired' || row?.subscription_status === 'suspended') {
+    return { allowed: false, maxAutoCampaigns: null, errorMsg: '구독이 만료되었습니다. 요금제를 갱신해주세요.' };
+  }
+  if (row?.plan_code === 'FREE' && row?.is_trial_expired) {
+    return { allowed: false, maxAutoCampaigns: null, errorMsg: '무료체험이 만료되었습니다. 요금제를 업그레이드해주세요.' };
+  }
 
   // 회사별 오버라이드가 있으면 플랜 설정보다 우선
   if (row?.auto_campaign_override != null) {
@@ -212,9 +222,11 @@ router.get('/', async (req: Request, res: Response) => {
       }
     }
 
-    // 요금제 정보도 함께 조회 (프론트에서 게이팅 판단용) + 회사별 오버라이드 반영
+    // 요금제 정보도 함께 조회 (프론트에서 게이팅 판단용) + 회사별 오버라이드 반영 + 구독 상태
     const planResult = await query(
-      `SELECT p.auto_campaign_enabled, p.max_auto_campaigns, p.ai_premium_enabled, c.auto_campaign_override
+      `SELECT p.auto_campaign_enabled, p.max_auto_campaigns, p.ai_premium_enabled, p.plan_code,
+              c.auto_campaign_override, c.subscription_status,
+              NOW() > c.created_at + INTERVAL '7 days' as is_trial_expired
        FROM companies c LEFT JOIN plans p ON c.plan_id = p.id WHERE c.id = $1`,
       [companyId]
     );
@@ -235,7 +247,14 @@ router.get('/', async (req: Request, res: Response) => {
     // 회사별 오버라이드 반영하여 프론트에 전달
     const planRow = planResult.rows[0];
     let planForFront = { auto_campaign_enabled: false, max_auto_campaigns: null as number | null, ai_premium_enabled: false };
-    if (planRow?.auto_campaign_override != null) {
+
+    // ★ D88: 구독/트라이얼 만료 시 auto_campaign_enabled = false 강제
+    const isSubscriptionBlocked = planRow?.subscription_status === 'expired' || planRow?.subscription_status === 'suspended'
+      || (planRow?.plan_code === 'FREE' && planRow?.is_trial_expired);
+
+    if (isSubscriptionBlocked) {
+      planForFront = { auto_campaign_enabled: false, max_auto_campaigns: null, ai_premium_enabled: false };
+    } else if (planRow?.auto_campaign_override != null) {
       const override = Number(planRow.auto_campaign_override);
       planForFront = { auto_campaign_enabled: override > 0, max_auto_campaigns: override > 0 ? override : null, ai_premium_enabled: planRow.ai_premium_enabled ?? false };
     } else if (planRow) {

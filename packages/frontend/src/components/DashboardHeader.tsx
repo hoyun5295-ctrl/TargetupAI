@@ -15,6 +15,9 @@ interface DashboardHeaderProps {
   // D53: 게이팅 콜백 — 잠긴 기능 클릭 시 업그레이드 모달
   onFeatureLocked?: (featureName: string, requiredPlan: string) => void;
   customerDbEnabled?: boolean;
+  // ★ D88: 구독 만료 시 전체 잠금
+  isSubscriptionLocked?: boolean;
+  onSubscriptionLocked?: () => void;
 }
 
 type MenuColor = 'green' | 'gold' | 'gray';
@@ -50,6 +53,8 @@ export default function DashboardHeader({
   onLogout,
   onFeatureLocked,
   customerDbEnabled,
+  isSubscriptionLocked,
+  onSubscriptionLocked,
 }: DashboardHeaderProps) {
   const navigate = useNavigate();
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
@@ -57,13 +62,19 @@ export default function DashboardHeader({
   // D53: 캘린더 게이팅 — customer_db_enabled 필요
   const isCalendarLocked = customerDbEnabled === false;
 
+  // ★ D88: 구독 만료 시 잠금 핸들러
+  const lockGuard = (handler: () => void) => {
+    if (isSubscriptionLocked) { onSubscriptionLocked?.(); return; }
+    handler();
+  };
+
   const menuItems: MenuItem[] = [
-    { label: 'AI 분석', onClick: onAnalysis, color: 'gold', emphasized: true },
-    { label: '자동발송', onClick: () => navigate('/auto-send'), color: 'gold', emphasized: true },
-    { label: '직접발송', onClick: onDirectSend, color: 'green', emphasized: true },
-    { label: '캘린더', onClick: isCalendarLocked
-        ? () => onFeatureLocked?.('캘린더', '스타터')
-        : onCalendar, color: 'gold', locked: isCalendarLocked },
+    { label: 'AI 분석', onClick: () => lockGuard(onAnalysis), color: 'gold', emphasized: true, locked: isSubscriptionLocked },
+    { label: '자동발송', onClick: () => lockGuard(() => navigate('/auto-send')), color: 'gold', emphasized: true, locked: isSubscriptionLocked },
+    { label: '직접발송', onClick: () => lockGuard(onDirectSend), color: 'green', emphasized: true, locked: isSubscriptionLocked },
+    { label: '캘린더', onClick: (isSubscriptionLocked || isCalendarLocked)
+        ? () => isSubscriptionLocked ? onSubscriptionLocked?.() : onFeatureLocked?.('캘린더', '스타터')
+        : onCalendar, color: 'gold', locked: isSubscriptionLocked || isCalendarLocked },
     { label: '발송결과', onClick: onResults, color: 'green' },
     { label: '수신거부', onClick: () => navigate('/unsubscribes'), color: 'gold' },
     { label: '설정', onClick: () => navigate('/settings'), color: 'green' },

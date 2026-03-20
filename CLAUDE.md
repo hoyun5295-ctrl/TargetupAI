@@ -435,6 +435,8 @@ PostgreSQL campaigns/campaign_runs 생성
 | **sampleCustomer displayName/column 키 불일치** | recommend-target이 displayName 키("이름")로 반환 → test-send의 replaceVariables는 column 키("name")로 접근 → 개인화 전부 NULL | **프론트↔백엔드 간 데이터 키 형식이 다르면 반드시 변환 레이어 또는 양쪽 키 제공.** 미리보기(프론트)와 실제 발송(백엔드)의 데이터 참조 방식이 다를 수 있음 (D85) |
 | **자동발송에 직접발송 UI 재활용 시도** | DirectTargetFilterModal(직접발송용)을 자동발송에 끼워넣음 → 3뎁스 모달, UX 이질적 | **기간계 기능별 UX 흐름이 다르면 컨트롤타워(API)만 재활용하고 UI는 전용으로 구현.** 자동발송 타겟은 AI 자동 추출(recommend-target), 직접발송 타겟은 수동 필터(DirectTargetFilterModal) (D86) |
 | **auto_relax 기본 true로 타겟 왜곡** | 자동발송에서 recommend-target 호출 시 auto_relax 미설정 → AI가 멋대로 조건 완화 → 의도와 다른 타겟 | **자동발송처럼 사용자 지정 조건이 중요한 경우 auto_relax: false 명시.** 기본값에 의존하지 않고 용도에 맞게 파라미터 명시 (D86) |
+| **assigned 상태에서 배정 0명 → 번호 미표시** | callback_numbers.assignment_scope='assigned'로 전환 후 사용자 배정 0명 → D87 필터(EXISTS)에서 제외 → "등록된 발신번호가 없습니다" | **상태 전환 시 "빈 상태" 안전장치 필수.** assigned에 배정 0명이면 자동 'all' 복귀. admin은 assignment_scope 무관하게 전체 조회 (D87) |
+| **동일 경로 라우트 중복 등록** | companies.ts에 callback-numbers GET 라우트 2개 존재 → Express는 첫 번째만 실행하지만 혼란 유발 + 유지보수 위험 | **라우트 추가/수정 시 동일 경로가 이미 존재하는지 grep으로 반드시 확인.** 중복 발견 시 즉시 제거 (D87) |
 
 ### ⚠️ 필수 체크 원칙 1: 유틸 함수 수정/추가 시 소비처 전수 확인
 

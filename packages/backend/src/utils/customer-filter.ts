@@ -137,7 +137,9 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
 
       // ── 기본 필드 (gender, grade, sms_opt_in, region) ──
       if (['gender', 'grade', 'sms_opt_in', 'region'].includes(field)) {
-        if (operator === 'eq') {
+        // ★ D88: dropdown 선택 필드는 contains가 와도 eq로 자동 전환 (방어)
+        const effectiveOp = (operator === 'contains') ? 'eq' : operator;
+        if (effectiveOp === 'eq') {
           if (field === 'gender') {
             const gf = buildGenderFilter(String(value), paramIndex);
             sql += gf.sql;
@@ -153,12 +155,16 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
             sql += rf.sql;
             params.push(...rf.params);
             paramIndex = rf.nextIndex;
+          } else if (field === 'sms_opt_in') {
+            // ★ D88: boolean 필드 — 문자열 'true'/'false' → 실제 boolean 변환
+            const boolVal = String(value).toLowerCase() === 'true' || value === true;
+            sql += ` AND ${col(alias, field)} = $${paramIndex++}`;
+            params.push(boolVal);
           } else {
-            // sms_opt_in 등
             sql += ` AND ${col(alias, field)} = $${paramIndex++}`;
             params.push(value);
           }
-        } else if (operator === 'in' && Array.isArray(value)) {
+        } else if (effectiveOp === 'in' && Array.isArray(value)) {
           const placeholders = value.map(() => `$${paramIndex++}`).join(', ');
           sql += ` AND ${col(alias, field)} IN (${placeholders})`;
           params.push(...value);

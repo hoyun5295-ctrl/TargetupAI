@@ -298,7 +298,15 @@ export default function AiCustomSendFlow({
       const label = fieldLabelMap[f.field_key];
       const sampleVal = sampleData[f.field_key];
       if (label && sampleVal != null) {
-        const displayVal = typeof sampleVal === 'number' ? sampleVal.toLocaleString() : String(sampleVal);
+        // ★ D88: string-typed numeric도 toLocaleString 포맷 (DB에서 string으로 오는 경우)
+        let displayVal: string;
+        if (typeof sampleVal === 'number') {
+          displayVal = sampleVal.toLocaleString();
+        } else {
+          const strVal = String(sampleVal);
+          const numParsed = Number(strVal.replace(/,/g, ''));
+          displayVal = (f.data_type === 'number' && !isNaN(numParsed)) ? numParsed.toLocaleString() : strVal;
+        }
         result = result.replace(new RegExp(`%${label}%`, 'g'), displayVal);
       }
     }
@@ -330,6 +338,10 @@ export default function AiCustomSendFlow({
         setTargetFilters(data.targetFilters || {});
         setEstimatedCount(data.estimatedCount || 0);
         setUnsubscribeCount(data.unsubscribeCount || 0);
+        // ★ D88: 타겟 필터에 맞는 샘플 고객으로 교체 — 미리보기 정확도 향상
+        if (data.sampleCustomer && Object.keys(data.sampleCustomer).length > 0) {
+          setSampleData(data.sampleCustomer);
+        }
         setCurrentStep(3);
       } else { const err = await res.json(); showAlert('AI 분석 실패', err.error || '브리핑 파싱에 실패했습니다. 내용을 확인 후 다시 시도해주세요.', 'error'); }
     } catch (error) { console.error('브리핑 파싱 실패:', error); showAlert('서버 오류', '서버와의 통신 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.', 'error'); }
@@ -980,11 +992,21 @@ export default function AiCustomSendFlow({
                       if (isSpamFilterLocked) return;
                       const msg = variants[selectedVariantIdx]?.message_text || '';
                       const cb = selectedCallback || '';
-                      const sc = sampleCustomer || {};
+                      // ★ D88: sampleData(타겟 필터 매칭 샘플) 우선 사용, 없으면 sampleCustomer(prop) 폴백
+                      const sc = (Object.keys(sampleData).length > 0 ? sampleData : sampleCustomer) || {};
                       const replaceVars = (text: string) => {
                         if (!text) return text;
                         let result = text;
-                        Object.entries(sc).forEach(([k, v]) => { result = result.replace(new RegExp(`%${k}%`, 'g'), String(v)); });
+                        // field_key → field_label 매핑으로 %한글라벨% 치환 (replaceSampleVars와 동일 패턴)
+                        for (const f of availableFields) {
+                          const label = f.field_label || f.display_name || f.field_key;
+                          const val = sc[f.field_key];
+                          if (label && val != null) {
+                            result = result.replace(new RegExp(`%${label}%`, 'g'), String(val));
+                          }
+                        }
+                        // column 키로도 치환 (sampleCustomer가 column 키일 때 호환)
+                        Object.entries(sc).forEach(([k, v]) => { if (v != null) result = result.replace(new RegExp(`%${k}%`, 'g'), String(v)); });
                         result = result.replace(/%[^%\s]{1,20}%/g, '');
                         return result;
                       };

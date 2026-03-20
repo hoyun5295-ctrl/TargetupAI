@@ -305,9 +305,9 @@ router.get('/callback-numbers', async (req: Request, res: Response) => {
 
     if (hasAssignmentScope) {
       // D87: assignment_scope 필터링
-      // - admin: 전체 번호 조회 (assignment_scope 무관) — 관리 가시성 보장
-      // - 일반 사용자: 'all' + 본인 배정된 'assigned' 번호만
-      if (userType === 'admin') {
+      // - admin/company_admin: 전체 번호 조회 (assignment_scope 무관) — 관리 가시성 보장
+      // - company_user: 'all' + 본인 배정된 'assigned' 번호만
+      if (userType === 'admin' || userType === 'company_admin') {
         sql = `
           SELECT cn.id, cn.phone, cn.label, cn.is_default, cn.store_code, cn.store_name, cn.created_at, cn.assignment_scope
           FROM callback_numbers cn

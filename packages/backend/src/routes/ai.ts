@@ -699,10 +699,34 @@ router.post('/parse-briefing', authenticate, async (req: Request, res: Response)
     );
     const unsubscribeCount = parseInt(unsubResult.rows[0].count);
 
+    // ★ D88: 타겟 필터에 맞는 샘플 고객 1명 반환 — 미리보기용
+    // enabled-fields의 sample(타겟 무관)과 달리, 실제 타겟 고객에서 샘플링
+    let sampleCustomer: Record<string, any> = {};
+    try {
+      const sampleResult = await query(
+        `SELECT * FROM customers c
+         WHERE c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true${storeFilter} ${filterWhere}
+         AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${unsubIdxC} AND u.phone = c.phone)
+         ORDER BY c.name ASC LIMIT 1`,
+        [...baseParams, ...filterParams, userId]
+      );
+      if (sampleResult.rows.length > 0) {
+        const row = sampleResult.rows[0];
+        sampleCustomer = { ...row };
+        // custom_fields JSONB flat 처리 — 프론트에서 field_key로 직접 접근 가능하게
+        if (row.custom_fields && typeof row.custom_fields === 'object') {
+          for (const [k, v] of Object.entries(row.custom_fields)) {
+            if (sampleCustomer[k] === undefined) sampleCustomer[k] = v;
+          }
+        }
+      }
+    } catch (e) { console.warn('[parse-briefing] 샘플 고객 조회 실패:', e); }
+
     return res.json({
       ...result,
       estimatedCount,
       unsubscribeCount,
+      sampleCustomer,
     });
   } catch (error) {
     console.error('브리핑 파싱 오류:', error);
