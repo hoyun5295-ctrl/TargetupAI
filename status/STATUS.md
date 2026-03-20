@@ -106,13 +106,55 @@
 
 ---
 
+### 🔧 D89 — 마이너 수정 5건 + D88 직접발송 잠금 회귀 수정 (2026-03-20) — ✅ 배포 완료
+
+> **배경:** 테스터 PPT 마이너 수정 요청 5건 (한줄로(마이너한 수정 요청)_20260320.pptx) + D88에서 직접발송까지 과잉 잠금한 회귀 버그 수정.
+
+#### 1. 고객DB 검색 정규화 (CT-01 customer-filter.ts)
+- 전화번호 검색: 하이픈 자동 제거 (`REPLACE(col, '-', '')`)
+- 주소/매장명 검색: 공백+언더스코어 자동 제거
+- structured + mixed 양쪽 모드 적용
+
+#### 2. 고객DB 숫자 포맷 (CustomerDBModal.tsx)
+- 포인트/구매횟수/커스텀 NUMBER 필드에 toLocaleString() 적용
+
+#### 3. 발송결과 전화번호 검색 (results.ts)
+- SMS/카카오/폴백 3곳 하이픈 제거 정규화 적용
+
+#### 4. 날짜 표시 하루 밀림 수정 (formatDate.ts)
+- YYYY-MM-DD 순수 날짜를 UTC 변환 없이 직접 파싱하여 하루 밀림 방지
+
+#### 5. 예약발송 바이트 계산 (ScheduledCampaignModal.tsx)
+- UTF-8 TextEncoder → EUC-KR 기준 (한글 2바이트) 계산으로 변경
+
+#### 6. D88 회귀 수정: 직접발송 잠금 해제 (DashboardHeader.tsx)
+- D88에서 lockGuard()가 직접발송까지 잠금 → 무료체험 만료 시 직접발송 불가 회귀
+- **수정:** 직접발송 메뉴에서 lockGuard + locked:isSubscriptionLocked 제거
+- **정책:** 직접발송은 구독 상태 무관하게 항상 사용 가능. 스팸필터테스트만 잠금 유지
+
+#### 수정 파일 (6개)
+- `packages/backend/src/utils/customer-filter.ts` — normalizeContainsSearch 헬퍼 추가
+- `packages/backend/src/routes/results.ts` — 하이픈 제거 검색 3곳
+- `packages/frontend/src/components/CustomerDBModal.tsx` — 숫자 포맷팅
+- `packages/frontend/src/utils/formatDate.ts` — 날짜 파싱 재작성
+- `packages/frontend/src/components/ScheduledCampaignModal.tsx` — EUC-KR 바이트 계산
+- `packages/frontend/src/components/DashboardHeader.tsx` — 직접발송 lockGuard 해제
+
+#### D89 교훈
+- **lockGuard 등 잠금 적용 시 "이 기능이 정말 잠겨야 하는가?" 기능별로 판단 필수.** 무료체험 만료여도 직접발송(기본 기능)은 사용 가능해야 함
+- **검색 정규화는 컨트롤타워(CT-01)에서 일괄 처리.** 인라인 REPLACE 금지
+- **SMS 바이트 계산은 EUC-KR 기준(한글 2바이트).** TextEncoder(UTF-8, 한글 3바이트)와 혼동 금지
+
+---
+
 ### 🔧 D88 — QA 버그리포트 11건 전면 수정 (2026-03-20) — ✅ 배포 완료
 
 > **배경:** 테스터 직원들의 PPT 버그리포트 (한줄로_20260320.pptx) — 11개 슬라이드, 7개 그룹(A~G). 컨트롤타워 패턴 + 동적 처리 원칙으로 전체 수정.
 
 #### A. 구독/게이팅 (슬라이드 1)
 - 무료체험 만료 후 자동발송/캘린더/스팸필터 사용 가능했던 문제
-- **수정:** DashboardHeader.tsx `isSubscriptionLocked` prop + `lockGuard()` → AI 분석/자동발송/직접발송/캘린더 전부 잠금. Dashboard.tsx `isSpamFilterLocked` 등에 OR 조건 추가. auto-campaigns.ts `checkPlanGating`에 subscription_status + is_trial_expired 체크 추가
+- **수정:** DashboardHeader.tsx `isSubscriptionLocked` prop + `lockGuard()` → AI 분석/자동발송/캘린더 잠금. Dashboard.tsx `isSpamFilterLocked` 등에 OR 조건 추가. auto-campaigns.ts `checkPlanGating`에 subscription_status + is_trial_expired 체크 추가
+- **⚠️ D89 회귀 수정:** 직접발송까지 lockGuard 적용하여 과잉 잠금 → D89에서 직접발송 lockGuard 해제. 직접발송은 구독 상태 무관 항상 사용 가능
 
 #### B. 고객DB 필터 (슬라이드 3-4)
 - 수신동의여부: 텍스트 입력 → 동의/거부 드롭다운 필요

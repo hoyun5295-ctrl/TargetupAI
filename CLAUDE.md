@@ -443,6 +443,8 @@ PostgreSQL campaigns/campaign_runs 생성
 | **admin 업로드 시 수신거부 admin 본인 누락** | upload.ts admin 경로에서 브랜드 사용자에게만 INSERT → 단일 브랜드 회사(브랜드 사용자 0명) 수신거부 0건 | **admin도 발송 주체이므로 admin 본인 user_id로 반드시 INSERT.** 브랜드 사용자 배정과 별도로 admin 본인 등록 필수 (D88) |
 | **company_admin을 company_user와 동일 필터** | callback-numbers에서 company_admin도 assignment_scope 필터 적용 → 배정된 번호만 보임 | **company_admin은 admin과 동급으로 전체 조회.** 관리 가시성 보장. company_user만 assignment_scope 필터 적용 (D88) |
 | **filterUserId가 uploaded_by 기준** | 중간관리자가 사용자별 DB 조회 시 uploaded_by 기준 → admin이 업로드한 고객 미표시 | **사용자별 고객 조회는 store_codes(소속 브랜드) 기준.** uploaded_by는 store_codes 없을 때 폴백만 (D88) |
+| **lockGuard 과잉 적용** | D88에서 lockGuard()를 직접발송에도 적용 → 무료체험 만료 시 직접발송 불가 | **잠금 적용 시 기능별로 "이 기능이 정말 잠겨야 하는가?" 판단 필수.** 직접발송은 기본 기능으로 구독 상태 무관 항상 사용 가능 (D89) |
+| **SMS 바이트 계산 UTF-8 vs EUC-KR** | TextEncoder(UTF-8)로 바이트 계산 → 한글 3바이트 = 실제 SMS 기준(EUC-KR 2바이트)과 불일치 | **SMS 바이트 계산은 EUC-KR 기준.** charCode > 127 ? 2 : 1 패턴 사용 (D89) |
 
 ### ⚠️ 필수 체크 원칙 1: 유틸 함수 수정/추가 시 소비처 전수 확인
 
