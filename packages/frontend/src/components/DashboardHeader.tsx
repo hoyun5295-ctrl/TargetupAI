@@ -71,7 +71,7 @@ export default function DashboardHeader({
   const menuItems: MenuItem[] = [
     { label: 'AI 분석', onClick: () => lockGuard(onAnalysis), color: 'gold', emphasized: true, locked: isSubscriptionLocked },
     { label: '자동발송', onClick: () => lockGuard(() => navigate('/auto-send')), color: 'gold', emphasized: true, locked: isSubscriptionLocked },
-    { label: '직접발송', onClick: () => lockGuard(onDirectSend), color: 'green', emphasized: true, locked: isSubscriptionLocked },
+    { label: '직접발송', onClick: onDirectSend, color: 'green', emphasized: true },
     { label: '캘린더', onClick: (isSubscriptionLocked || isCalendarLocked)
         ? () => isSubscriptionLocked ? onSubscriptionLocked?.() : onFeatureLocked?.('캘린더', '스타터')
         : onCalendar, color: 'gold', locked: isSubscriptionLocked || isCalendarLocked },
