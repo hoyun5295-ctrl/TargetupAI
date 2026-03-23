@@ -708,7 +708,9 @@ let callbackSkippedCount = 0;
 let callbackMissingCount = 0;
 let callbackUnregisteredCount = 0;
 if (useIndividualCallback) {
-  const cbResult = await filterByIndividualCallback(filteredCustomers, companyId, userId);
+  // D91: admin/company_admin은 배정 필터 미적용 (전체 번호 사용 가능)
+  const cbUserId = (userType === 'super_admin' || userType === 'company_admin') ? undefined : userId;
+  const cbResult = await filterByIndividualCallback(filteredCustomers, companyId, cbUserId);
   filteredCustomers = cbResult.filtered;
   callbackMissingCount = cbResult.callbackMissingCount;
   callbackUnregisteredCount = cbResult.callbackUnregisteredCount;
@@ -1217,6 +1219,7 @@ router.post('/direct-send', async (req: Request, res: Response) => {
   try {
     const companyId = (req as any).user?.companyId;
     const userId = (req as any).user?.userId;
+    const userType = (req as any).user?.userType;
     if (!companyId) {
       return res.status(401).json({ success: false, error: '인증 필요' });
     }
@@ -1313,7 +1316,9 @@ router.post('/direct-send', async (req: Request, res: Response) => {
     let callbackMissingCount = 0;
     let callbackUnregisteredCount = 0;
     if (useIndividualCallback) {
-      const cbResult = await filterByIndividualCallback(validRecipients, companyId, userId);
+      // D91: admin/company_admin은 배정 필터 미적용 (전체 번호 사용 가능)
+      const cbUserId = (userType === 'super_admin' || userType === 'company_admin') ? undefined : userId;
+      const cbResult = await filterByIndividualCallback(validRecipients, companyId, cbUserId);
       validRecipients = cbResult.filtered;
       callbackMissingCount = cbResult.callbackMissingCount;
       callbackUnregisteredCount = cbResult.callbackUnregisteredCount;

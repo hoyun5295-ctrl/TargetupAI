@@ -106,6 +106,54 @@
 
 ---
 
+### 🔧 D91 — QA 버그리포트 10건 전면 수정 (2026-03-23) — ✅ 수정 완료
+
+> **배경:** 테스터 PPT 버그리포트 (한줄로_20260323.pptx) — 10개 슬라이드, 5개 그룹. 컨트롤타워 우선 수정 원칙 준수.
+> **상세:** `status/D91-BUGFIX-REPORT.md` 참조
+
+#### 수정 그룹 (5개)
+
+**그룹1: 콜백번호 (A+B)**
+- A: 미등록 회신번호 발송 시 "수신거부번호 미로딩" 에러 → 에러 메시지 명확화 (080 미설정 안내)
+- B: 발신번호 배정(assigned) 미작동 → CT-08에 userId + assignment_scope 필터 추가
+
+**그룹2: 담당자 격리 (C)**
+- 담당자 등록 시 회사 전체 브랜드 공유 → users.manager_contacts 컬럼 추가 (DB 마이그레이션) + 사용자별 저장/조회
+
+**그룹3: 소수점+스팸테스트 (E+H+I)**
+- E+H: 맞춤한줄 자동 스팸테스트에서 타겟 아닌 고객 데이터 사용 → ai.ts에서 타겟 필터 적용 샘플을 firstRecipient로 전달
+- I: 맞춤한줄/직접타겟발송 미리보기 소수점 잔존 → 프론트 replaceVars 숫자 포맷팅 추가
+
+**그룹4: LMS (F+G)**
+- F: LMS 제목 미입력 발송 가능 → campaigns.ts에 subject 필수 검증 추가
+- G: 맞춤한줄 SMS 초과 시 LMS 전환 불가 → LMS 전환 확인 모달 추가
+
+**그룹5: 필터/표시 (D+J)**
+- D: 평균주문금액 드롭다운만 제공 → sampleValues 필터링 강화 (trim + null/빈값 정확 제거)
+- J: 발송결과 LMS/MMS 제목 미표시 → results.ts SELECT + ResultsModal 제목 표시
+
+#### 수정 파일 (12개)
+- `packages/backend/src/utils/callback-filter.ts` — CT-08 userId + assignment_scope 필터
+- `packages/backend/src/routes/campaigns.ts` — CT-08 userId 전달 + LMS subject 필수 + user 담당자 조회
+- `packages/backend/src/routes/companies.ts` — GET/PUT settings 사용자별 manager_contacts
+- `packages/backend/src/routes/ai.ts` — 스팸테스트 firstRecipient 전달 (2곳)
+- `packages/backend/src/routes/customers.ts` — 자동 타입 감지 sampleValues 필터링 강화
+- `packages/backend/src/routes/results.ts` — SELECT에 subject/message_subject 추가
+- `packages/frontend/src/pages/Dashboard.tsx` — 080 미설정 에러 메시지 개선
+- `packages/frontend/src/components/AiCustomSendFlow.tsx` — LMS 전환 모달 + 숫자 포맷팅
+- `packages/frontend/src/components/TargetSendModal.tsx` — replaceVars 숫자 포맷팅
+- `packages/frontend/src/components/ResultsModal.tsx` — LMS/MMS 제목 표시
+
+#### DB 마이그레이션 (실행 완료)
+- `users.manager_contacts` JSONB 컬럼 추가 + 기존 companies 데이터 admin에 복사
+
+#### D91 교훈
+- **컨트롤타워에 필터 추가 시 모든 발송 경로 확인:** callback-numbers 조회에만 배정 필터 적용하고 발송 시 CT-08에 미적용하면 배정이 무의미
+- **스팸테스트·미리보기·발송의 고객 데이터는 반드시 타겟 필터 적용 동일 데이터:** 임의 고객으로 테스트하면 개인화 불일치
+- **프론트 인라인 치환에도 백엔드와 동일한 숫자 포맷팅 필수:** 한쪽만 수정하면 나머지 경로에서 소수점 잔존
+
+---
+
 ### 🔧 D90 — AI 한줄로/맞춤한줄 개별회신번호 옵션 누락 수정 (2026-03-20) — ✅ 수정 완료
 
 > **배경:** AI 맞춤한줄 발송 모달에서 "📱 개별회신번호 (고객별 매장번호)" 옵션이 표시되지 않는 문제. 직접발송에서는 항상 표시되지만 AI 발송 모달에서만 `callbackNumbers.length >= 2` 조건이 걸려 있어 불일치 발생.

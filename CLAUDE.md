@@ -446,6 +446,10 @@ PostgreSQL campaigns/campaign_runs 생성
 | **lockGuard 과잉 적용** | D88에서 lockGuard()를 직접발송에도 적용 → 무료체험 만료 시 직접발송 불가 | **잠금 적용 시 기능별로 "이 기능이 정말 잠겨야 하는가?" 판단 필수.** 직접발송은 기본 기능으로 구독 상태 무관 항상 사용 가능 (D89) |
 | **SMS 바이트 계산 UTF-8 vs EUC-KR** | TextEncoder(UTF-8)로 바이트 계산 → 한글 3바이트 = 실제 SMS 기준(EUC-KR 2바이트)과 불일치 | **SMS 바이트 계산은 EUC-KR 기준.** charCode > 127 ? 2 : 1 패턴 사용 (D89) |
 | **발송 경로별 UI 옵션 조건 불일치** | AiCampaignSendModal에만 `callbackNumbers.length >= 2` 조건 → 직접발송에서는 개별회신번호 보이는데 AI 발송에서는 안 보임 | **동일 UI 요소(드롭다운 옵션 등)는 모든 발송 경로에서 동일 조건.** 한 경로에만 추가 조건 금지 (D90) |
+| **CT-08 배정 필터 발송 경로 누락** | D87에서 callback-numbers 조회에만 assignment_scope 필터 적용 → 발송 시 CT-08에는 미적용 → 배정이 무의미 | **컨트롤타워에 필터링 추가 시, 해당 컨트롤타워를 호출하는 모든 발송 경로에서 동일 필터 적용 확인** (D91) |
+| **스팸테스트 샘플이 타겟 무관 고객** | autoSpamTestWithRegenerate에 firstRecipient 미전달 → 임의 고객 데이터로 개인화 스팸테스트 → 타겟 불일치 | **스팸테스트·미리보기·발송에 사용하는 고객 데이터는 반드시 타겟 필터가 적용된 동일한 데이터여야 함** (D91) |
+| **프론트 인라인 치환에 숫자 포맷팅 누락** | 백엔드 messageUtils.ts에만 toLocaleString 추가 → 프론트 미리보기/스팸필터에서 소수점 잔존 | **프론트 인라인 replaceVars에도 동일 숫자 포맷팅 필수.** 백엔드-프론트 치환 결과가 동일해야 함 (D91) |
+| **회사 단위 데이터를 사용자 단위로 분리 미비** | companies.manager_contacts가 company_id 단위 → 동일 회사 내 모든 브랜드가 담당자 공유 | **브랜드별로 달라야 하는 데이터는 users 테이블에 저장.** companies는 fallback (D91) |
 
 ### ⚠️ 필수 체크 원칙 1: 유틸 함수 수정/추가 시 소비처 전수 확인
 
