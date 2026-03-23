@@ -119,6 +119,35 @@ router.post('/generate-message', async (req: Request, res: Response) => {
         callbackNumber = senderResult.rows[0]?.number || '';
       }
 
+      // ★ D91: 스팸테스트용 샘플 고객 조회 — 타겟 필터 적용 (E+H 버그 수정)
+      let spamFirstRecipient: Record<string, any> | undefined;
+      try {
+        let sampleSql = `SELECT * FROM customers WHERE company_id = $1 AND is_active = true AND sms_opt_in = true`;
+        const sampleParams: any[] = [companyId];
+        // filters가 있으면 타겟 필터 적용하여 샘플 추출
+        if (filters && typeof filters === 'object' && Object.keys(filters).length > 0) {
+          const filterResult = buildFilterWhereClauseCompat(filters, sampleParams.length);
+          if (filterResult.sql) {
+            sampleSql += ` AND ${filterResult.sql}`;
+            sampleParams.push(...filterResult.params);
+          }
+        }
+        sampleSql += ` ORDER BY name ASC NULLS LAST LIMIT 1`;
+        const sampleResult = await query(sampleSql, sampleParams);
+        if (sampleResult.rows.length > 0) {
+          const row = sampleResult.rows[0];
+          spamFirstRecipient = { ...row };
+          // custom_fields flat 처리
+          if (row.custom_fields && typeof row.custom_fields === 'object') {
+            for (const [k, v] of Object.entries(row.custom_fields as Record<string, any>)) {
+              if (!(k in spamFirstRecipient!)) spamFirstRecipient![k] = v;
+            }
+          }
+        }
+      } catch (e) {
+        console.error('[D91] 스팸테스트 샘플 고객 조회 실패:', e);
+      }
+
       if (callbackNumber) {
         try {
           const spamResult = await autoSpamTestWithRegenerate({
@@ -133,6 +162,7 @@ router.post('/generate-message', async (req: Request, res: Response) => {
             })),
             isAd: isAd || false,
             rejectNumber: companyInfo.reject_number,
+            firstRecipient: spamFirstRecipient,
             // 재생성 콜백: 스팸 차단된 variant를 새로 생성
             regenerateCallback: async (blockedVariantId: string) => {
               try {
@@ -811,6 +841,30 @@ router.post('/generate-custom', authenticate, async (req: Request, res: Response
         callbackNumber = senderResult.rows[0]?.number || '';
       }
 
+      // ★ D91: 스팸테스트용 샘플 고객 조회 — sampleCustomer 우선, 없으면 DB 조회
+      let spamFirstRecipient: Record<string, any> | undefined;
+      try {
+        if (req.body.sampleCustomer && typeof req.body.sampleCustomer === 'object' && Object.keys(req.body.sampleCustomer).length > 0) {
+          spamFirstRecipient = req.body.sampleCustomer;
+        } else {
+          const sampleResult = await query(
+            `SELECT * FROM customers WHERE company_id = $1 AND is_active = true AND sms_opt_in = true ORDER BY name ASC NULLS LAST LIMIT 1`,
+            [companyId]
+          );
+          if (sampleResult.rows.length > 0) {
+            const row = sampleResult.rows[0];
+            spamFirstRecipient = { ...row };
+            if (row.custom_fields && typeof row.custom_fields === 'object') {
+              for (const [k, v] of Object.entries(row.custom_fields as Record<string, any>)) {
+                if (!(k in spamFirstRecipient!)) spamFirstRecipient![k] = v;
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.error('[D91] 맞춤한줄 스팸테스트 샘플 고객 조회 실패:', e);
+      }
+
       if (callbackNumber) {
         try {
           const spamResult = await autoSpamTestWithRegenerate({
@@ -825,6 +879,7 @@ router.post('/generate-custom', authenticate, async (req: Request, res: Response
             })),
             isAd: isAd || false,
             rejectNumber: companyInfo.reject_number,
+            firstRecipient: spamFirstRecipient,
             regenerateCallback: async (blockedVariantId: string) => {
               try {
                 console.log(`[맞춤한줄] 스팸 차단 variant ${blockedVariantId} 재생성 시도`);

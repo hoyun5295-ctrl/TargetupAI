@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip install:*)",
+      "Bash(python -m markitdown \"C:\\\\Users\\\\ceo\\\\OneDrive\\\\문서\\\\카카오톡 받은 파일\\\\한줄로_20260323.pptx\")",
+      "Bash(python -c \":*)",
+      "Read(//c/tmp/**)",
+      "Bash(python -u -c \":*)",
+      "Read(//c/Users/ceo/AppData/Local/Temp/pptx_images/**)",
+      "Read(//c/Users/ceo/**)",
+      "Bash(grep -rn GET.*enabled-fields C:Usersceoprojectstargetuppackagesbackendsrcroutes*)",
+      "Bash(npx tsc:*)"
+    ]
+  }
+}

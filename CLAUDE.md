@@ -445,6 +445,7 @@ PostgreSQL campaigns/campaign_runs 생성
 | **filterUserId가 uploaded_by 기준** | 중간관리자가 사용자별 DB 조회 시 uploaded_by 기준 → admin이 업로드한 고객 미표시 | **사용자별 고객 조회는 store_codes(소속 브랜드) 기준.** uploaded_by는 store_codes 없을 때 폴백만 (D88) |
 | **lockGuard 과잉 적용** | D88에서 lockGuard()를 직접발송에도 적용 → 무료체험 만료 시 직접발송 불가 | **잠금 적용 시 기능별로 "이 기능이 정말 잠겨야 하는가?" 판단 필수.** 직접발송은 기본 기능으로 구독 상태 무관 항상 사용 가능 (D89) |
 | **SMS 바이트 계산 UTF-8 vs EUC-KR** | TextEncoder(UTF-8)로 바이트 계산 → 한글 3바이트 = 실제 SMS 기준(EUC-KR 2바이트)과 불일치 | **SMS 바이트 계산은 EUC-KR 기준.** charCode > 127 ? 2 : 1 패턴 사용 (D89) |
+| **발송 경로별 UI 옵션 조건 불일치** | AiCampaignSendModal에만 `callbackNumbers.length >= 2` 조건 → 직접발송에서는 개별회신번호 보이는데 AI 발송에서는 안 보임 | **동일 UI 요소(드롭다운 옵션 등)는 모든 발송 경로에서 동일 조건.** 한 경로에만 추가 조건 금지 (D90) |
 
 ### ⚠️ 필수 체크 원칙 1: 유틸 함수 수정/추가 시 소비처 전수 확인
 

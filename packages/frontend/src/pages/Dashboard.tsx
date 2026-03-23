@@ -336,7 +336,7 @@ export default function Dashboard() {
   const executeDirectSend = async (confirmCallbackExclusion?: boolean) => {
     if (isSending || directSending) return; // 교차 중복 발송 방지
     if (adTextEnabled && !optOutNumber) {
-      setToast({ show: true, type: 'error', message: '수신거부번호가 로딩되지 않았습니다. 잠시 후 다시 시도해주세요.' });
+      setToast({ show: true, type: 'error', message: '광고 발송을 위해 수신거부번호(080) 설정이 필요합니다. 설정 > 발신번호 관리에서 등록해주세요.' });
       return;
     }
     setDirectSending(true);
@@ -1387,7 +1387,7 @@ const handleAiCampaignSend = async (modalData?: {
 }) => {
   if (isSending || directSending) return; // 교차 중복 발송 방지
   if (adTextEnabled && !optOutNumber) {
-    setToast({ show: true, type: 'error', message: '수신거부번호가 로딩되지 않았습니다. 잠시 후 다시 시도해주세요.' });
+    setToast({ show: true, type: 'error', message: '광고 발송을 위해 수신거부번호(080) 설정이 필요합니다. 설정 > 발신번호 관리에서 등록해주세요.' });
     return;
   }
 
@@ -1586,7 +1586,7 @@ const campaignData = {
   }) => {
     if (isSending || directSending || !customSendData) return; // 교차 중복 발송 방지
     if (adTextEnabled && !optOutNumber) {
-      setToast({ show: true, type: 'error', message: '수신거부번호가 로딩되지 않았습니다. 잠시 후 다시 시도해주세요.' });
+      setToast({ show: true, type: 'error', message: '광고 발송을 위해 수신거부번호(080) 설정이 필요합니다. 설정 > 발신번호 관리에서 등록해주세요.' });
       return;
     }
 

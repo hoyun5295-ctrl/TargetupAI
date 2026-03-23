@@ -205,12 +205,27 @@ export default function TargetSendModal({
   };
 
   // ====== ★ 동적 변수 치환 (스팸필터용) ======
+  // D91: 숫자 필드 toLocaleString 적용 (소수점 제거 + 천단위 쉼표)
   const replaceVars = (text: string, recipient: any) => {
     if (!text || !recipient) return text;
     let result = text;
     variableFields.forEach(fm => {
       const pattern = new RegExp(escapeRegExp(fm.variable), 'g');
-      result = result.replace(pattern, String(recipient[fm.field_key] ?? ''));
+      let rawValue = recipient[fm.field_key] ?? '';
+      // custom_fields 내부 키 fallback
+      if ((rawValue === '' || rawValue == null) && recipient.custom_fields && typeof recipient.custom_fields === 'object') {
+        rawValue = recipient.custom_fields[fm.field_key] ?? '';
+      }
+      // 숫자 포맷팅: "35000.00" → "35,000"
+      const strVal = String(rawValue).replace(/,/g, '');
+      if (strVal && /^-?\d+(\.\d+)?$/.test(strVal)) {
+        const num = Number(strVal);
+        if (!isNaN(num) && Number.isFinite(num)) {
+          result = result.replace(pattern, num.toLocaleString('ko-KR'));
+          return;
+        }
+      }
+      result = result.replace(pattern, String(rawValue));
     });
     return result;
   };

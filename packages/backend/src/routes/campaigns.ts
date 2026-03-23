@@ -262,6 +262,7 @@ router.post('/test-send', async (req: Request, res: Response) => {
     }
 
     // 회사 설정에서 담당자 정보 + 스키마 가져오기
+    // ★ D91: 사용자별 manager_contacts 우선 (브랜드별 담당자 격리)
     const companyResult = await query(
       'SELECT manager_phone, manager_contacts, customer_schema FROM companies WHERE id = $1',
       [companyId]
@@ -269,6 +270,19 @@ router.post('/test-send', async (req: Request, res: Response) => {
 
     if (companyResult.rows.length === 0) {
       return res.status(404).json({ error: '회사 정보를 찾을 수 없습니다.' });
+    }
+
+    // D91: user별 manager_contacts 우선 적용
+    if (userId) {
+      try {
+        const userMcResult = await query('SELECT manager_contacts FROM users WHERE id = $1', [userId]);
+        const userMc = userMcResult.rows[0]?.manager_contacts;
+        if (userMc && Array.isArray(userMc) && userMc.length > 0) {
+          companyResult.rows[0].manager_contacts = userMc;
+        }
+      } catch {
+        // manager_contacts 컬럼 미존재 시 companies fallback
+      }
     }
 
     // ★ 미리보기와 동일한 고객으로 개인화 — 프론트에서 sampleCustomer 전달 시 그대로 사용
@@ -552,6 +566,11 @@ router.post('/:id/send', async (req: Request, res: Response) => {
 
     const campaign = campaignResult.rows[0];
 
+    // ★ D91: LMS/MMS 제목 필수 검증
+    if ((campaign.message_type === 'LMS' || campaign.message_type === 'MMS') && !campaign.message_subject?.trim() && !campaign.subject?.trim()) {
+      return res.status(400).json({ error: 'LMS/MMS 발송 시 제목을 입력해주세요.' });
+    }
+
     // 기본 회신번호 조회 (callback_numbers 테이블에서)
     const callbackResult = await query(
       'SELECT phone FROM callback_numbers WHERE company_id = $1 AND is_default = true LIMIT 1',
@@ -689,7 +708,7 @@ let callbackSkippedCount = 0;
 let callbackMissingCount = 0;
 let callbackUnregisteredCount = 0;
 if (useIndividualCallback) {
-  const cbResult = await filterByIndividualCallback(filteredCustomers, companyId);
+  const cbResult = await filterByIndividualCallback(filteredCustomers, companyId, userId);
   filteredCustomers = cbResult.filtered;
   callbackMissingCount = cbResult.callbackMissingCount;
   callbackUnregisteredCount = cbResult.callbackUnregisteredCount;
@@ -1254,6 +1273,11 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: '수신자가 없습니다' });
     }
 
+    // ★ D91: LMS/MMS 제목 필수 검증
+    if ((msgType === 'LMS' || msgType === 'MMS') && !subject?.trim()) {
+      return res.status(400).json({ success: false, error: 'LMS/MMS 발송 시 제목을 입력해주세요.' });
+    }
+
     if (!callback && !useIndividualCallback) {
       return res.status(400).json({ success: false, error: '회신번호를 선택해주세요' });
     }
@@ -1289,7 +1313,7 @@ router.post('/direct-send', async (req: Request, res: Response) => {
     let callbackMissingCount = 0;
     let callbackUnregisteredCount = 0;
     if (useIndividualCallback) {
-      const cbResult = await filterByIndividualCallback(validRecipients, companyId);
+      const cbResult = await filterByIndividualCallback(validRecipients, companyId, userId);
       validRecipients = cbResult.filtered;
       callbackMissingCount = cbResult.callbackMissingCount;
       callbackUnregisteredCount = cbResult.callbackUnregisteredCount;

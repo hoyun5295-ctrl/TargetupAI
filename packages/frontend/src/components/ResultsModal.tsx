@@ -761,6 +761,10 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
                           <div className="flex gap-2">
                             <div className="w-7 h-7 rounded-full bg-emerald-100 flex items-center justify-center shrink-0 text-[10px] font-bold text-emerald-600">T</div>
                             <div className="bg-white rounded-2xl rounded-tl-sm p-3 shadow-sm border border-gray-100 text-[11.5px] leading-[1.7] whitespace-pre-wrap break-all text-gray-700 max-w-[95%] overflow-hidden">
+                              {/* ★ D91: LMS/MMS 제목 표시 */}
+                              {(selectedCampaign.message_type === 'LMS' || selectedCampaign.message_type === 'MMS' || selectedCampaign.message_type === 'L' || selectedCampaign.message_type === 'M') && (selectedCampaign.subject || selectedCampaign.message_subject) && (
+                                <div className="font-bold text-gray-900 mb-1 pb-1 border-b border-gray-200">{selectedCampaign.subject || selectedCampaign.message_subject}</div>
+                              )}
                               {messages[0]?.msg_contents || selectedCampaign.message_content || ''}
                             </div>
                           </div>
@@ -781,6 +785,10 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
                     <div className="border border-gray-200 rounded-lg divide-y">
                       {[
                         { label: '캠페인명', value: selectedCampaign.campaign_name },
+                        // ★ D91: LMS/MMS 제목 표시
+                        ...((selectedCampaign.message_type === 'LMS' || selectedCampaign.message_type === 'MMS' || selectedCampaign.message_type === 'L' || selectedCampaign.message_type === 'M') && (selectedCampaign.subject || selectedCampaign.message_subject)
+                          ? [{ label: '제목', value: selectedCampaign.subject || selectedCampaign.message_subject }]
+                          : []),
                         { label: '유형', value: `${selectedCampaign.send_type === 'direct' ? '수동' : 'AI'} / ${msgTypeLabel[selectedCampaign.message_type] || selectedCampaign.message_type}` },
                         { label: '발송자', value: selectedCampaign.created_by_name || '-' },
                         { label: '회신번호', value: selectedCampaign.callback_number || '-' },

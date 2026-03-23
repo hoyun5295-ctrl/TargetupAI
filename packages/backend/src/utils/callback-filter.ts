@@ -43,14 +43,17 @@ export interface CallbackFilterResult {
  * 1단계: callback이 없으면 store_phone으로 폴백
  * 2단계: callback이 여전히 없는 고객 제외
  * 3단계: callback이 미등록 발신번호인 고객 제외
+ * 3단계 추가(D91): assignment_scope='assigned'인 번호는 배정된 사용자만 사용 가능
  *
  * @param customers - 필터링 대상 고객/수신자 배열 (callback, store_phone 필드 필요)
  * @param companyId - 회사 ID (등록 발신번호 조회용)
+ * @param userId - 발송자 user_id (assignment_scope 필터링용, 선택)
  * @returns CallbackFilterResult
  */
 export async function filterByIndividualCallback(
   customers: any[],
-  companyId: string
+  companyId: string,
+  userId?: string
 ): Promise<CallbackFilterResult> {
   let filtered = [...customers];
   let callbackMissingCount = 0;
@@ -72,14 +75,42 @@ export async function filterByIndividualCallback(
   }
 
   // 3단계: 미등록 회신번호 고객 제외 + 번호별 상세 수집
+  // D91: assignment_scope='assigned'인 번호는 해당 사용자에게 배정된 경우만 허용
   const unregisteredDetails: UnregisteredCallbackDetail[] = [];
   const callbackPhones = [...new Set(filtered.map((c: any) => normalizePhone(c.callback || '')).filter(Boolean))];
   if (callbackPhones.length > 0) {
-    const registeredResult = await query(
-      `SELECT REPLACE(phone_number, '-', '') as phone FROM sender_numbers WHERE company_id = $1 AND is_active = true
-       UNION SELECT REPLACE(phone, '-', '') as phone FROM callback_numbers WHERE company_id = $1`,
-      [companyId]
-    );
+    // 등록된 발신번호 조회 (sender_numbers + callback_numbers)
+    // D91: userId가 있으면 assignment_scope 필터 적용 — 'all' 또는 본인 배정된 'assigned'만 허용
+    let registeredSql = `
+      SELECT REPLACE(phone_number, '-', '') as phone FROM sender_numbers WHERE company_id = $1 AND is_active = true
+      UNION SELECT REPLACE(cn.phone, '-', '') as phone FROM callback_numbers cn WHERE cn.company_id = $1
+    `;
+    const registeredParams: any[] = [companyId];
+
+    if (userId) {
+      // assignment_scope 컬럼 존재 시에만 필터 적용 (하위호환)
+      try {
+        await query(`SELECT assignment_scope FROM callback_numbers LIMIT 0`);
+        registeredSql = `
+          SELECT REPLACE(phone_number, '-', '') as phone FROM sender_numbers WHERE company_id = $1 AND is_active = true
+          UNION SELECT REPLACE(cn.phone, '-', '') as phone FROM callback_numbers cn
+          WHERE cn.company_id = $1
+            AND (
+              cn.assignment_scope = 'all'
+              OR cn.assignment_scope IS NULL
+              OR EXISTS (
+                SELECT 1 FROM callback_number_assignments cna
+                WHERE cna.callback_number_id = cn.id AND cna.user_id = $2
+              )
+            )
+        `;
+        registeredParams.push(userId);
+      } catch {
+        // assignment_scope 컬럼 미존재 — 기존 쿼리 유지
+      }
+    }
+
+    const registeredResult = await query(registeredSql, registeredParams);
     const registeredSet = new Set((registeredResult.rows as any[]).map((r: any) => r.phone));
 
     // 미등록 회신번호별 제외 인원수 집계
@@ -88,7 +119,7 @@ export async function filterByIndividualCallback(
     filtered = filtered.filter((c: any) => {
       const normalized = normalizePhone(c.callback || '');
       if (registeredSet.has(normalized)) return true;
-      // 미등록 — 번호별 카운트 집계
+      // 미등록 또는 미배정 — 번호별 카운트 집계
       unregCountMap.set(normalized, (unregCountMap.get(normalized) || 0) + 1);
       return false;
     });

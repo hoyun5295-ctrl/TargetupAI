@@ -30,10 +30,16 @@ router.get('/settings', authenticate, async (req: Request, res: Response) => {
 
     const row = result.rows[0] || {};
     // ★ B17-11: 사용자별 080번호 우선 적용 (reject_number override)
+    // ★ D91: 사용자별 manager_contacts 우선 적용 (브랜드별 담당자 격리)
     if (userId) {
-      const userOptResult = await query('SELECT opt_out_080_number FROM users WHERE id = $1', [userId]);
-      const userOpt080 = userOptResult.rows[0]?.opt_out_080_number;
+      const userResult = await query('SELECT opt_out_080_number, manager_contacts FROM users WHERE id = $1', [userId]);
+      const userOpt080 = userResult.rows[0]?.opt_out_080_number;
       if (userOpt080) row.reject_number = userOpt080;
+      // 사용자별 담당자가 있으면 회사 담당자보다 우선
+      const userManagerContacts = userResult.rows[0]?.manager_contacts;
+      if (userManagerContacts && Array.isArray(userManagerContacts) && userManagerContacts.length > 0) {
+        row.manager_contacts = userManagerContacts;
+      }
     }
     // manager_phone: JSON 문자열이면 파싱, 단일 번호면 배열로 변환
     if (row.manager_phone) {
@@ -65,6 +71,7 @@ router.get('/settings', authenticate, async (req: Request, res: Response) => {
 router.put('/settings', authenticate, async (req: Request, res: Response) => {
   try {
     const companyId = (req as any).user?.companyId;
+    const userId = (req as any).user?.userId;
     const {
       brand_name, business_type, reject_number, manager_phones, manager_contacts,
       monthly_budget, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao,
@@ -78,6 +85,24 @@ router.put('/settings', authenticate, async (req: Request, res: Response) => {
     const managerPhoneJson = manager_phones ? JSON.stringify(manager_phones) : null;
     // manager_contacts는 JSON 문자열로 변환해서 저장
     const managerContactsJson = manager_contacts ? JSON.stringify(manager_contacts) : null;
+
+    // ★ D91: manager_contacts는 사용자(user)별로 저장하여 브랜드별 담당자 격리
+    // users.manager_contacts 컬럼이 있으면 user에 저장, 없으면 기존 companies에 저장 (하위호환)
+    if (managerContactsJson && userId) {
+      try {
+        await query(
+          `UPDATE users SET manager_contacts = $1, updated_at = NOW() WHERE id = $2`,
+          [managerContactsJson, userId]
+        );
+      } catch (e: any) {
+        // manager_contacts 컬럼 미존재 시 companies에 저장 (하위호환)
+        if (e.code === '42703') {
+          console.log('[D91] users.manager_contacts 컬럼 없음 — companies fallback 저장');
+        } else {
+          throw e;
+        }
+      }
+    }
 
     await query(`
       UPDATE companies SET

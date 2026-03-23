@@ -1167,11 +1167,12 @@ router.get('/enabled-fields', async (req: Request, res: Response) => {
                  LIMIT 20`,
                 scopeParams
               );
-              const sampleValues = sampleResult.rows.map((r: any) => r.val).filter(Boolean);
+              const sampleValues = sampleResult.rows.map((r: any) => r.val).filter((v: any) => v != null && String(v).trim() !== '');
               if (sampleValues.length > 0) {
-                // 숫자 감지: 전체 샘플이 숫자(정수/소수/콤마 포함)이면 number
+                // ★ D91: 숫자 감지 — 유효 값(NULL/빈값 제외) 전체가 숫자이면 number
+                // 공백 trim 후 검증하여 " 100000 " 같은 값도 정확히 감지
                 const numPattern = /^-?[\d,]+(\.\d+)?$/;
-                const allNumeric = sampleValues.every((v: string) => numPattern.test(v.trim()));
+                const allNumeric = sampleValues.every((v: string) => numPattern.test(String(v).trim()));
                 if (allNumeric) {
                   detectedType = 'number';
                 } else {

@@ -147,6 +147,8 @@ export default function AiCustomSendFlow({
     message: string;
     type: 'error' | 'warning' | 'info';
   } | null>(null);
+  // ★ D91: SMS→LMS 전환 확인 모달
+  const [lmsConvertModal, setLmsConvertModal] = useState<{ show: boolean; bytes: number }>({ show: false, bytes: 0 });
   const [confirmModal, setConfirmModal] = useState<{
     title: string;
     message: string;
@@ -298,14 +300,14 @@ export default function AiCustomSendFlow({
       const label = fieldLabelMap[f.field_key];
       const sampleVal = sampleData[f.field_key];
       if (label && sampleVal != null) {
-        // ★ D88: string-typed numeric도 toLocaleString 포맷 (DB에서 string으로 오는 경우)
+        // ★ D88+D91: string-typed numeric도 toLocaleString 포맷 (소수점 제거 + 천단위 쉼표)
         let displayVal: string;
-        if (typeof sampleVal === 'number') {
-          displayVal = sampleVal.toLocaleString();
+        const strVal = String(sampleVal).replace(/,/g, '');
+        if (/^-?\d+(\.\d+)?$/.test(strVal)) {
+          const num = Number(strVal);
+          displayVal = (!isNaN(num) && Number.isFinite(num)) ? num.toLocaleString('ko-KR') : strVal;
         } else {
-          const strVal = String(sampleVal);
-          const numParsed = Number(strVal.replace(/,/g, ''));
-          displayVal = (f.data_type === 'number' && !isNaN(numParsed)) ? numParsed.toLocaleString() : strVal;
+          displayVal = String(sampleVal);
         }
         result = result.replace(new RegExp(`%${label}%`, 'g'), displayVal);
       }
@@ -998,15 +1000,36 @@ export default function AiCustomSendFlow({
                         if (!text) return text;
                         let result = text;
                         // field_key → field_label 매핑으로 %한글라벨% 치환 (replaceSampleVars와 동일 패턴)
+                        // ★ D91: 숫자 포맷팅 적용 (소수점 제거 + 천단위 쉼표)
                         for (const f of availableFields) {
                           const label = f.field_label || f.display_name || f.field_key;
                           const val = sc[f.field_key];
                           if (label && val != null) {
-                            result = result.replace(new RegExp(`%${label}%`, 'g'), String(val));
+                            const strVal = String(val).replace(/,/g, '');
+                            let displayVal: string;
+                            if (/^-?\d+(\.\d+)?$/.test(strVal)) {
+                              const num = Number(strVal);
+                              displayVal = (!isNaN(num) && Number.isFinite(num)) ? num.toLocaleString('ko-KR') : strVal;
+                            } else {
+                              displayVal = String(val);
+                            }
+                            result = result.replace(new RegExp(`%${label}%`, 'g'), displayVal);
                           }
                         }
                         // column 키로도 치환 (sampleCustomer가 column 키일 때 호환)
-                        Object.entries(sc).forEach(([k, v]) => { if (v != null) result = result.replace(new RegExp(`%${k}%`, 'g'), String(v)); });
+                        Object.entries(sc).forEach(([k, v]) => {
+                          if (v != null) {
+                            const strVal = String(v).replace(/,/g, '');
+                            let displayVal: string;
+                            if (/^-?\d+(\.\d+)?$/.test(strVal)) {
+                              const num = Number(strVal);
+                              displayVal = (!isNaN(num) && Number.isFinite(num)) ? num.toLocaleString('ko-KR') : strVal;
+                            } else {
+                              displayVal = String(v);
+                            }
+                            result = result.replace(new RegExp(`%${k}%`, 'g'), displayVal);
+                          }
+                        });
                         result = result.replace(/%[^%\s]{1,20}%/g, '');
                         return result;
                       };
@@ -1027,11 +1050,11 @@ export default function AiCustomSendFlow({
                 {/* 발송 확정 버튼 */}
                 <button onClick={() => {
                   if (onConfirmSend && variants[selectedVariantIdx]) {
-                    // 버그 #4: SMS 바이트 초과 시 발송 차단
+                    // ★ D91: SMS 바이트 초과 시 LMS 전환 확인 모달 (경고 대신 전환 옵션 제공)
                     const selectedMsg = variants[selectedVariantIdx].message_text || '';
                     const totalBytes = calculateBytes(wrapAdText(selectedMsg));
                     if (channel === 'SMS' && totalBytes > 90) {
-                      showAlert('SMS 바이트 초과', `선택한 문안이 SMS 90바이트를 초과합니다 (${totalBytes}바이트).\nLMS로 전환하거나 문안을 수정해주세요.`, 'warning');
+                      setLmsConvertModal({ show: true, bytes: totalBytes });
                       return;
                     }
                     onConfirmSend({
@@ -1066,6 +1089,40 @@ export default function AiCustomSendFlow({
       </div>
 
       {/* 커스텀 Alert 모달 */}
+      {/* ★ D91: SMS→LMS 전환 확인 모달 */}
+      {lmsConvertModal.show && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[60] animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full mx-4 overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="p-6 text-center">
+              <div className="w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-3 bg-amber-100">
+                <AlertTriangle className="w-6 h-6 text-amber-600" />
+              </div>
+              <h4 className="text-base font-bold text-gray-800 mb-2">메시지 길이 초과</h4>
+              <p className="text-sm text-gray-600 leading-relaxed">
+                SMS 제한을 초과합니다 ({lmsConvertModal.bytes}바이트).<br />
+                LMS로 전환하여 발송하시겠습니까?
+              </p>
+            </div>
+            <div className="px-6 pb-5 flex gap-3">
+              <button
+                onClick={() => setLmsConvertModal({ show: false, bytes: 0 })}
+                className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-gray-600 bg-gray-100 hover:bg-gray-200 transition-colors"
+              >
+                취소
+              </button>
+              <button
+                onClick={() => {
+                  setChannel('LMS');
+                  setLmsConvertModal({ show: false, bytes: 0 });
+                }}
+                className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white bg-green-600 hover:bg-green-700 transition-colors"
+              >
+                LMS 전환
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {alertModal && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[60] animate-in fade-in duration-150">
           <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full mx-4 overflow-hidden animate-in zoom-in-95 duration-200">
