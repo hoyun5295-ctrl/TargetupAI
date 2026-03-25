@@ -2139,10 +2139,10 @@ const handleApproveRequest = async (id: string) => {
         {/* 탭 메뉴 */}
         <div className="bg-white rounded-lg shadow mb-6">
           <div className="border-b">
-            <nav className="flex">
+            <nav className="flex overflow-x-auto">
               <button
                 onClick={() => setActiveTab('companies')}
-                className={`px-4 py-3 text-sm font-medium border-b-2 ${
+                className={`px-4 py-3 text-sm font-medium border-b-2 whitespace-nowrap ${
                   activeTab === 'companies'
                     ? 'border-blue-500 text-blue-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700'
@@ -2152,7 +2152,7 @@ const handleApproveRequest = async (id: string) => {
               </button>
               <button
                 onClick={() => setActiveTab('users')}
-                className={`px-4 py-3 text-sm font-medium border-b-2 ${
+                className={`px-4 py-3 text-sm font-medium border-b-2 whitespace-nowrap ${
                   activeTab === 'users'
                     ? 'border-blue-500 text-blue-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700'
@@ -2177,7 +2177,7 @@ const handleApproveRequest = async (id: string) => {
               </button>
               <button
                 onClick={() => { setActiveTab('stats'); loadSendStats(); }}
-                className={`px-4 py-3 text-sm font-medium border-b-2 ${
+                className={`px-4 py-3 text-sm font-medium border-b-2 whitespace-nowrap ${
                   activeTab === 'stats'
                     ? 'border-blue-500 text-blue-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700'
@@ -2187,7 +2187,7 @@ const handleApproveRequest = async (id: string) => {
               </button>
               <button
                 onClick={() => setActiveTab('scheduled')}
-                className={`px-4 py-3 text-sm font-medium border-b-2 ${
+                className={`px-4 py-3 text-sm font-medium border-b-2 whitespace-nowrap ${
                   activeTab === 'scheduled'
                     ? 'border-blue-500 text-blue-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700'
@@ -2197,7 +2197,7 @@ const handleApproveRequest = async (id: string) => {
               </button>
               <button
                 onClick={() => { setActiveTab('allCampaigns'); loadAllCampaigns(); }}
-                className={`px-4 py-3 text-sm font-medium border-b-2 ${
+                className={`px-4 py-3 text-sm font-medium border-b-2 whitespace-nowrap ${
                   activeTab === 'allCampaigns'
                     ? 'border-blue-500 text-blue-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700'
@@ -2207,7 +2207,7 @@ const handleApproveRequest = async (id: string) => {
               </button>
               <button
                 onClick={() => setActiveTab('plans')}
-                className={`px-4 py-3 text-sm font-medium border-b-2 ${
+                className={`px-4 py-3 text-sm font-medium border-b-2 whitespace-nowrap ${
                   activeTab === 'plans'
                     ? 'border-blue-500 text-blue-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700'
@@ -2247,7 +2247,7 @@ const handleApproveRequest = async (id: string) => {
               </button>
               <button
                 onClick={() => setActiveTab('billing')}
-                className={`px-4 py-3 text-sm font-medium border-b-2 ${
+                className={`px-4 py-3 text-sm font-medium border-b-2 whitespace-nowrap ${
                   activeTab === 'billing'
                     ? 'border-blue-500 text-blue-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700'
@@ -2257,7 +2257,7 @@ const handleApproveRequest = async (id: string) => {
               </button>
               <button
                 onClick={() => setActiveTab('syncAgents')}
-                className={`px-4 py-3 text-sm font-medium border-b-2 ${
+                className={`px-4 py-3 text-sm font-medium border-b-2 whitespace-nowrap ${
                   activeTab === 'syncAgents'
                     ? 'border-blue-500 text-blue-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700'
@@ -2267,7 +2267,7 @@ const handleApproveRequest = async (id: string) => {
               </button>
               <button
                 onClick={() => setActiveTab('auditLogs')}
-                className={`px-4 py-3 text-sm font-medium border-b-2 ${
+                className={`px-4 py-3 text-sm font-medium border-b-2 whitespace-nowrap ${
                   activeTab === 'auditLogs'
                     ? 'border-blue-500 text-blue-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700'
@@ -2277,7 +2277,7 @@ const handleApproveRequest = async (id: string) => {
                 </button>
               <button
                 onClick={() => setActiveTab('templates')}
-                className={`px-4 py-3 text-sm font-medium border-b-2 ${
+                className={`px-4 py-3 text-sm font-medium border-b-2 whitespace-nowrap ${
                   activeTab === 'templates'
                     ? 'border-amber-500 text-amber-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700'

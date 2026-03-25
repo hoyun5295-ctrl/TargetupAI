@@ -3404,7 +3404,7 @@ const campaignData = {
                       <textarea
                         value={kakaoMessage}
                         onChange={(e) => setKakaoMessage(e.target.value)}
-                        placeholder={"RCS 메시지 내용을 입력하세요.\n\n리치 미디어 지원 (Phase 2)\nRCS 미지원 단말은 SMS로 자동 폴백됩니다"}
+                        placeholder={"RCS 메시지 내용을 입력하세요.\n\nRCS 미지원 단말은 SMS로 자동 폴백됩니다"}
                         className="w-full h-[200px] resize-none border border-purple-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-400 text-sm leading-relaxed p-3 bg-purple-50/30"
                       />
                       <div className="text-xs text-gray-400 mt-1">
@@ -3421,12 +3421,12 @@ const campaignData = {
                     </div>
                     <div className="px-3 py-2 border-t">
                       <button
-                        onClick={() => setToast({ show: true, type: 'error', message: 'RCS 발송 기능은 준비 중입니다 (Phase 2)' })}
+                        onClick={() => setToast({ show: true, type: 'error', message: 'RCS 발송 기능은 곧 오픈 예정입니다' })}
                         className="w-full py-3 rounded-xl font-bold text-base transition-colors bg-purple-500 hover:bg-purple-600 text-white"
                       >
                         📱 RCS 전송하기
                       </button>
-                      <p className="text-xs text-center text-purple-400 mt-1.5">젬텍 RCS API 연동 후 사용 가능합니다</p>
+                      <p className="text-xs text-center text-purple-400 mt-1.5">RCS 발송 기능은 곧 오픈 예정입니다</p>
                     </div>
                   </div>
                 )}
@@ -3443,7 +3443,7 @@ const campaignData = {
                         <div className="text-center py-12">
                           <div className="text-4xl mb-3">📋</div>
                           <p className="text-sm text-gray-500 font-medium">등록된 알림톡 템플릿이 없습니다</p>
-                          <p className="text-xs text-gray-400 mt-1">설정 → 카카오 프로필 관리에서 템플릿을 등록해주세요</p>
+                          <p className="text-xs text-gray-400 mt-1">카카오&RCS → 알림톡 템플릿에서 등록해주세요</p>
                         </div>
                       ) : (
                         <div className="space-y-2 max-h-[300px] overflow-y-auto">
@@ -3486,7 +3486,7 @@ const campaignData = {
                       <button disabled={true} className="w-full py-3 bg-gray-300 text-gray-500 rounded-xl font-bold text-base cursor-not-allowed">
                         🔒 알림톡 발송 준비중
                       </button>
-                      <p className="text-xs text-center text-gray-400 mt-1.5">알림톡 발송 기능은 준비 중입니다</p>
+                      <p className="text-xs text-center text-gray-400 mt-1.5">알림톡 발송 기능은 곧 오픈 예정입니다</p>
                     </div>
                   </div>
                 )}
