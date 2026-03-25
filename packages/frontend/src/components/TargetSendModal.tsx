@@ -515,7 +515,7 @@ export default function TargetSendModal({
                   className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 >
                   <option value="">회신번호 선택</option>
-                  <option value="__individual__">📱 개별회신번호 (고객별 매장번호)</option>
+                  <option value="__individual__">수신자별 회신번호 칼럼 사용</option>
                   {callbackNumbers.map((cb) => (
                     <option key={cb.id} value={cb.phone}>
                       {formatPhoneNumber(cb.phone)} {cb.label ? `(${cb.label})` : ''} {cb.is_default ? '⭐' : ''}
@@ -523,7 +523,7 @@ export default function TargetSendModal({
                   ))}
                 </select>
                 {useIndividualCallback && (
-                  <p className="text-xs text-blue-600 mt-1">💡 각 고객의 주이용매장 회신번호로 발송됩니다</p>
+                  <p className="text-xs text-blue-600 mt-1">각 수신자의 회신번호 칼럼 값으로 발송됩니다</p>
                 )}
               </div>
 

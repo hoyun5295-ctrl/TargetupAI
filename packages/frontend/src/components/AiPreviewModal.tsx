@@ -78,7 +78,7 @@ export default function AiPreviewModal({
           <div className="flex items-center gap-2">
             <span className="text-sm text-gray-600">📞 회신번호:</span>
             <span className="font-medium">
-              {useIndividualCallback ? '개별회신번호 (고객별 매장)' : (selectedCallback || '미선택')}
+              {useIndividualCallback ? '수신자별 회신번호 칼럼 사용' : (selectedCallback || '미선택')}
             </span>
           </div>
 
@@ -164,7 +164,7 @@ export default function AiPreviewModal({
                   <div className="bg-white rounded-[1.6rem] overflow-hidden flex flex-col w-[280px]" style={{ height: '420px' }}>
                     <div className="px-4 py-2.5 bg-gradient-to-r from-gray-50 to-gray-100 flex justify-between items-center shrink-0 border-b">
                       <span className="text-[11px] text-gray-400 font-medium">문자메시지</span>
-                      <span className="text-[11px] font-bold text-purple-600">{useIndividualCallback ? '매장번호' : (selectedCallback || '회신번호')}</span>
+                      <span className="text-[11px] font-bold text-purple-600">{useIndividualCallback ? '수신자별 회신번호' : (selectedCallback || '회신번호')}</span>
                     </div>
                     {selectedChannel === 'LMS' || selectedChannel === 'MMS' ? (
                       <div className="px-4 py-2 bg-orange-50 border-b border-orange-200 shrink-0">

@@ -1014,7 +1014,7 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
                     ) : (
                       <p className="text-sm text-red-500 py-2">등록된 발신번호가 없습니다. 설정에서 발신번호를 등록해주세요.</p>
                     )}
-                    <p className="text-xs text-gray-400 mt-1.5">고객 DB에 매장전화번호가 등록된 경우, 수신자별 개별회신번호로 자동 발송됩니다.</p>
+                    <p className="text-xs text-gray-400 mt-1.5">수신자별 회신번호 칼럼에 값이 있는 경우, 해당 번호로 자동 발송됩니다.</p>
                   </div>
 
                   {/* ★ 자동입력 드롭다운 — 2단계에서 선택한 필드만 표시 */}
@@ -1093,7 +1093,7 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
                       ) : (
                         <p className="text-sm text-red-500 py-2">등록된 발신번호가 없습니다. 설정에서 발신번호를 등록해주세요.</p>
                       )}
-                      <p className="text-xs text-gray-400 mt-1.5">고객 DB에 매장전화번호가 등록된 경우, 수신자별 개별회신번호로 자동 발송됩니다.</p>
+                      <p className="text-xs text-gray-400 mt-1.5">수신자별 회신번호 칼럼에 값이 있는 경우, 해당 번호로 자동 발송됩니다.</p>
                     </div>
                   </div>
                 )}

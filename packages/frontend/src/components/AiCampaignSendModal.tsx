@@ -156,7 +156,7 @@ export default function AiCampaignSendModal({
                   <div className="px-4 py-2.5 bg-gradient-to-r from-gray-50 to-gray-100 flex justify-between items-center shrink-0 border-b">
                     <span className="text-[11px] text-gray-400 font-medium">{selectedChannel === 'KAKAO' ? '카카오톡' : '문자메시지'}</span>
                     <span className="text-[11px] font-bold text-emerald-600">
-                      {selectedChannel === 'KAKAO' ? '브랜드메시지' : useIndividualCallback ? '매장번호' : formatPhoneNumber(selectedCallback) || '회신번호'}
+                      {selectedChannel === 'KAKAO' ? '브랜드메시지' : useIndividualCallback ? '수신자별 회신번호' : formatPhoneNumber(selectedCallback) || '회신번호'}
                     </span>
                   </div>
                   {/* ★ B-D75-01: LMS/MMS 제목 표시 (editSubject 기반) */}
@@ -234,7 +234,7 @@ export default function AiCampaignSendModal({
                   className="w-full border-2 rounded-lg px-4 py-2.5 text-sm focus:border-green-400 focus:outline-none"
                 >
                   <option value="">회신번호 선택</option>
-                  <option value="__individual__">📱 개별회신번호 (고객별 매장번호)</option>
+                  <option value="__individual__">수신자별 회신번호 칼럼 사용</option>
                   {callbackNumbers.map((cb) => (
                     <option key={cb.id} value={cb.phone}>
                       {cb.phone ? `${cb.phone}${cb.label ? ` (${cb.label})` : ''}` : cb.label}{cb.is_default ? ' ✓기본' : ''}
@@ -242,7 +242,7 @@ export default function AiCampaignSendModal({
                   ))}
                 </select>
                 {useIndividualCallback && (
-                  <p className="text-xs text-blue-600 mt-1">💡 각 고객의 주이용매장 회신번호로 발송</p>
+                  <p className="text-xs text-blue-600 mt-1">각 수신자의 회신번호 칼럼 값으로 발송됩니다</p>
                 )}
               </div>
 
