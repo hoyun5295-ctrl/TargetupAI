@@ -2139,7 +2139,7 @@ const handleApproveRequest = async (id: string) => {
         {/* 탭 메뉴 */}
         <div className="bg-white rounded-lg shadow mb-6">
           <div className="border-b">
-            <nav className="flex overflow-x-auto">
+            <nav className="flex flex-wrap">
               <button
                 onClick={() => setActiveTab('companies')}
                 className={`px-4 py-3 text-sm font-medium border-b-2 whitespace-nowrap ${

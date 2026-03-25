@@ -2551,7 +2551,6 @@ const campaignData = {
                       <option value="SMS">SMS (단문)</option>
                       <option value="LMS">LMS (장문)</option>
                       <option value="MMS">MMS (사진)</option>
-                      <option value="KAKAO">카카오 알림톡</option>
                     </select>
                   </div>
                   <div>
@@ -3483,10 +3482,30 @@ const campaignData = {
                       )}
                     </div>
                     <div className="px-3 py-2 border-t">
-                      <button disabled={true} className="w-full py-3 bg-gray-300 text-gray-500 rounded-xl font-bold text-base cursor-not-allowed">
-                        🔒 알림톡 발송 준비중
+                      <button
+                        onClick={async () => {
+                          if (directRecipients.length === 0) { setToast({ show: true, type: 'error', message: '수신자를 추가해주세요' }); return; }
+                          if (!kakaoSelectedTemplate) { setToast({ show: true, type: 'error', message: '템플릿을 선택해주세요' }); return; }
+                          if (kakaoSelectedTemplate.status !== 'approved') { setToast({ show: true, type: 'error', message: '승인된 템플릿만 발송 가능합니다' }); return; }
+                          // 변수 치환
+                          let finalContent = kakaoSelectedTemplate.content;
+                          Object.entries(kakaoTemplateVars).forEach(([k, v]) => { finalContent = finalContent.replace(new RegExp(k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), v); });
+                          const token = localStorage.getItem('token');
+                          const phones = directRecipients.map((r: any) => r.phone);
+                          const checkRes = await fetch('/api/unsubscribes/check', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ phones }) });
+                          const checkData = await checkRes.json();
+                          const unsubCount = checkData.unsubscribeCount || 0;
+                          setSendConfirm({ show: true, type: 'immediate', count: directRecipients.length - unsubCount, unsubscribeCount: unsubCount, from: 'direct', msgType: '알림톡' });
+                        }}
+                        disabled={!kakaoSelectedTemplate || kakaoSelectedTemplate?.status !== 'approved'}
+                        className={`w-full py-3 rounded-xl font-bold text-base transition-colors ${
+                          kakaoSelectedTemplate?.status === 'approved'
+                            ? 'bg-blue-500 hover:bg-blue-600 text-white'
+                            : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                        }`}
+                      >
+                        {!kakaoSelectedTemplate ? '템플릿을 선택해주세요' : '🔔 알림톡 발송하기'}
                       </button>
-                      <p className="text-xs text-center text-gray-400 mt-1.5">알림톡 발송 기능은 곧 오픈 예정입니다</p>
                     </div>
                   </div>
                 )}

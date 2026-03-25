@@ -20,7 +20,7 @@ import {
   smsCountAll, smsAggAll, smsSelectAll, smsMinAll, smsExecAll,
   getCompanySmsTablesWithLogs,
   insertKakaoQueue, kakaoAgg, kakaoCountPending, kakaoCancelPending,
-  bulkInsertSmsQueue
+  bulkInsertSmsQueue, insertAlimtalkQueue
 } from '../utils/sms-queue';
 import { prepaidDeduct, prepaidRefund } from '../utils/prepaid';
 import { cancelCampaign, syncCampaignResults } from '../utils/campaign-lifecycle';
@@ -1248,7 +1248,7 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       confirmCallbackExclusion, // ★ 미등록 회신번호 제외 확인 플래그
       mmsImagePaths,  // MMS 이미지 서버 경로 배열
       // 카카오 브랜드메시지 필드
-      sendChannel,          // sms / kakao / both
+      sendChannel,          // sms / kakao / both / alimtalk
       kakaoBubbleType,      // TEXT, IMAGE, WIDE 등
       kakaoSenderKey,       // 발신 프로필 키
       kakaoTargeting,       // I/M/N
@@ -1256,6 +1256,10 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       kakaoCarouselJson,    // 캐러셀 JSON
       kakaoResendType,      // SM/LM/NO
       targetFilter,         // 금액필터 등 타겟 조건
+      // 알림톡 필드
+      alimtalkTemplateCode, // 알림톡 템플릿 코드
+      alimtalkButtonJson,   // 알림톡 버튼 JSON (k_button_json 형식)
+      alimtalkNextType,     // 실패 시 폴백 (N/S/L)
     } = req.body;
 
     // ★ S9-01: 프론트 치환 완료 메시지 맵 구성 (phone → message)
@@ -1627,8 +1631,36 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       }
     }
 
+    // ★ 알림톡 발송 (CT-04 insertAlimtalkQueue 사용)
+    let directAlimtalkSentCount = 0;
+    if (directChannel === 'alimtalk') {
+      if (!alimtalkTemplateCode) {
+        return res.status(400).json({ success: false, error: '알림톡 템플릿 코드가 필요합니다' });
+      }
+
+      const alimtalkRows = filteredRecipients.map((recipient: any, i: number) => {
+        const finalMessage = customMessageMap.get(normalizePhone(recipient.phone)) || message;
+        return {
+          phone: normalizePhone(recipient.phone),
+          callback: normalizePhone(callback),
+          message: finalMessage,
+          templateCode: alimtalkTemplateCode,
+          nextType: alimtalkNextType || 'L',
+          buttonJson: alimtalkButtonJson || null,
+          companyId,
+        };
+      });
+
+      try {
+        directAlimtalkSentCount = await insertAlimtalkQueue(companyTables, alimtalkRows);
+        console.log(`[직접발송] 알림톡 INSERT 완료: ${directAlimtalkSentCount}건`);
+      } catch (alimtalkErr) {
+        console.error('[직접발송] 알림톡 INSERT 실패:', alimtalkErr);
+      }
+    }
+
     // 실제 성공 건수 (채널별 최대값)
-    const directTotalSent = Math.max(directSmsSentCount || 0, directKakaoSentCount || 0);
+    const directTotalSent = Math.max(directSmsSentCount || 0, directKakaoSentCount || 0, directAlimtalkSentCount || 0);
     const directFailTotal = filteredRecipients.length - directTotalSent;
 
     // 3. 즉시발송이면 상태 업데이트 (★ #5: sending으로 설정 → sync-results에서 Agent 완료 후 completed 전환)

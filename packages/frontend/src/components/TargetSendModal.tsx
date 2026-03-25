@@ -338,6 +338,17 @@ export default function TargetSendModal({
     setSendConfirm({ show: true, type: reserveEnabled ? 'scheduled' : 'immediate', count: targetRecipients.length - unsubCount, unsubscribeCount: unsubCount, dateTime: reserveEnabled && reserveDateTime ? reserveDateTime : undefined, from: 'target', msgType: '카카오' });
   };
 
+  const handleAlimtalkSend = async () => {
+    if (targetRecipients.length === 0) { setToast({ show: true, type: 'error', message: '수신자가 없습니다' }); return; }
+    if (!kakaoSelectedTemplate) { setToast({ show: true, type: 'error', message: '템플릿을 선택해주세요' }); return; }
+    const token = localStorage.getItem('token');
+    const phones = targetRecipients.map((r: any) => r.phone);
+    const checkRes = await fetch('/api/unsubscribes/check', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ phones }) });
+    const checkData = await checkRes.json();
+    const unsubCount = checkData.unsubscribeCount || 0;
+    setSendConfirm({ show: true, type: reserveEnabled ? 'scheduled' : 'immediate', count: targetRecipients.length - unsubCount, unsubscribeCount: unsubCount, dateTime: reserveEnabled && reserveDateTime ? reserveDateTime : undefined, from: 'target', msgType: '알림톡' });
+  };
+
   // ====== 미리보기 핸들러 ======
   const handlePreview = () => {
     if (!targetMessage.trim()) {
@@ -786,10 +797,20 @@ export default function TargetSendModal({
                 {/* 전송하기 버튼 */}
                 <div className="px-3 py-2 border-t">
                   <button
-                    disabled={true}
-                    className="w-full py-2.5 bg-gray-300 text-gray-500 rounded-xl font-bold text-base cursor-not-allowed"
-                  >🔒 알림톡 발송 준비중</button>
-                  <p className="text-xs text-center text-gray-400 mt-1.5">알림톡 발송 기능은 곧 오픈 예정입니다</p>
+                    onClick={() => {
+                      if (!kakaoSelectedTemplate) { setToast({ show: true, type: 'error', message: '템플릿을 선택해주세요' }); return; }
+                      if (kakaoSelectedTemplate.status !== 'approved') { setToast({ show: true, type: 'error', message: '승인된 템플릿만 발송 가능합니다' }); return; }
+                      handleAlimtalkSend();
+                    }}
+                    disabled={!kakaoSelectedTemplate || kakaoSelectedTemplate?.status !== 'approved' || targetSending}
+                    className={`w-full py-2.5 rounded-xl font-bold text-base transition-colors disabled:opacity-50 ${
+                      kakaoSelectedTemplate?.status === 'approved'
+                        ? 'bg-blue-500 hover:bg-blue-600 text-white'
+                        : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                    }`}
+                  >
+                    {targetSending ? '발송 중...' : !kakaoSelectedTemplate ? '템플릿을 선택해주세요' : '🔔 알림톡 발송하기'}
+                  </button>
                 </div>
               </div>
             )}

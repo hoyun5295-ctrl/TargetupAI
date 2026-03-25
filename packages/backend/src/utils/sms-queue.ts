@@ -318,6 +318,69 @@ export async function insertKakaoQueue(params: {
   );
 }
 
+/**
+ * CT-04: 알림톡 발송 큐 INSERT (SMSQ_SEND에 msg_type='K')
+ * QTmsg Agent가 SMSQ_SEND에서 가져가서 발송
+ */
+export async function insertAlimtalkQueue(
+  tables: string[],
+  rows: {
+    phone: string;
+    callback: string;
+    message: string;
+    templateCode: string;
+    nextType?: string;    // 실패 시 폴백: N/S/L/A/B (기본 L)
+    nextContents?: string; // A/B일 때 대체 문구
+    buttonJson?: string;  // k_button_json
+    etcJson?: string;     // k_etc_json (강조표기 title, senderkey 등)
+    titleStr?: string;
+    reservedDate?: string;
+    companyId?: string;
+  }[]
+): Promise<number> {
+  if (rows.length === 0) return 0;
+
+  const table = tables[0]; // 알림톡은 첫 번째 테이블 사용
+  let inserted = 0;
+
+  // 배치 단위 INSERT (5000건씩)
+  const BATCH = 5000;
+  for (let i = 0; i < rows.length; i += BATCH) {
+    const batch = rows.slice(i, i + BATCH);
+    const values: string[] = [];
+    const params: any[] = [];
+
+    for (const r of batch) {
+      const idx = params.length;
+      values.push(`(?, ?, ?, 'K', ?, ?, ?, ?, ?, NOW(), NOW(), '1', ?, ?)`);
+      params.push(
+        r.phone,                       // dest_no
+        r.callback,                    // call_back
+        r.message,                     // msg_contents
+        r.titleStr || null,            // title_str
+        r.templateCode,                // k_template_code
+        r.nextType || 'L',             // k_next_type
+        r.nextContents || null,        // k_next_contents
+        r.buttonJson || null,          // k_button_json
+        r.etcJson || null,             // k_etc_json
+        r.companyId || null,           // app_etc2 (companyId 추적용)
+      );
+    }
+
+    await mysqlQuery(
+      `INSERT INTO ${table} (
+        dest_no, call_back, msg_contents, msg_type, title_str,
+        k_template_code, k_next_type, k_next_contents, k_button_json,
+        sendreq_time, msg_instm, rsv1, k_etc_json, app_etc2
+      ) VALUES ${values.join(',')}`,
+      params
+    );
+    inserted += batch.length;
+  }
+
+  return inserted;
+}
+
 /** 카카오 발송 결과 집계 */
 export async function kakaoAgg(whereClause: string, params: any[]): Promise<{ total: number; success: number; fail: number; pending: number }> {
   const rows = await mysqlQuery(

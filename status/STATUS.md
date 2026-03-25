@@ -106,6 +106,57 @@
 
 ---
 
+### 🔧 D94 — 채널 확장 Phase 1: 카카오&RCS 메뉴 + 알림톡 발송 (2026-03-25) — ✅ 배포 완료
+
+> **배경:** 발송창 탭 재구성(브랜드MSG→RCS) + 카카오&RCS 신규 메뉴(알림톡 템플릿/RCS 템플릿 관리) + 알림톡 실제 발송 연결 + 슈퍼관리자 템플릿 관리
+> **설계:** `status/CHANNEL-EXPANSION.md` / `status/BRAND-MESSAGE-DESIGN.md`
+
+#### 구현 내용
+
+**DB 마이그레이션 (서버 반영 완료):**
+- kakao_templates 12개 컬럼 확장 (category, message_type, emphasize_type, buttons JSON 등)
+- rcs_templates 3개 컬럼 추가 (requested_at, reviewed_at, reviewed_by)
+
+**백엔드 API:**
+- 알림톡/RCS 템플릿 CRUD — `companies.ts` (GET/POST/PUT/DELETE 8개 엔드포인트)
+- 슈퍼관리자 템플릿 승인/반려/수동등록 — `admin.ts` (7개 엔드포인트)
+- 알림톡 발송 컨트롤타워 — `sms-queue.ts`의 `insertAlimtalkQueue()` (SMSQ_SEND msg_type='K')
+- 직접발송 알림톡 분기 — `campaigns.ts` direct-send에 sendChannel='alimtalk' 처리
+
+**프론트엔드:**
+- 카카오&RCS 페이지 신규 — `KakaoRcsPage.tsx` (3탭: 알림톡 템플릿/브랜드메시지/RCS 템플릿)
+- 알림톡 템플릿 등록 모달 — `AlimtalkTemplateFormModal.tsx` (카테고리, 유형, 강조, 버튼, 변수감지)
+- RCS 템플릿 등록 모달 — `RcsTemplateFormModal.tsx`
+- 메뉴 "카카오&RCS" 추가 (녹색) — `DashboardHeader.tsx`
+- 라우트 `/kakao-rcs` 추가 — `App.tsx`
+- 발송창 탭 변경: 문자/RCS/알림톡 (브랜드MSG 제거) — `Dashboard.tsx`, `TargetSendModal.tsx`
+- 알림톡 탭 실제 발송 연결 (준비중 → 발송 버튼)
+- AI 한줄로 유형선택에서 카카오 제거
+- 슈퍼관리자 템플릿 관리 탭 + 2줄 메뉴 — `AdminDashboard.tsx`
+
+#### 수정 파일 (14개)
+- `packages/backend/src/utils/sms-queue.ts` — CT-04 `insertAlimtalkQueue()` 추가
+- `packages/backend/src/routes/companies.ts` — 알림톡/RCS 템플릿 CRUD 8개 엔드포인트
+- `packages/backend/src/routes/admin.ts` — 슈퍼관리자 템플릿 관리 7개 엔드포인트
+- `packages/backend/src/routes/campaigns.ts` — 직접발송 알림톡 분기 + import
+- `packages/frontend/src/pages/KakaoRcsPage.tsx` — 신규
+- `packages/frontend/src/components/AlimtalkTemplateFormModal.tsx` — 신규
+- `packages/frontend/src/components/RcsTemplateFormModal.tsx` — 신규
+- `packages/frontend/src/components/DashboardHeader.tsx` — 카카오&RCS 메뉴 추가
+- `packages/frontend/src/App.tsx` — `/kakao-rcs` 라우트
+- `packages/frontend/src/pages/Dashboard.tsx` — 발송창 탭 변경 + 알림톡 발송 연결 + 카카오 옵션 제거
+- `packages/frontend/src/components/TargetSendModal.tsx` — 탭 변경 + 알림톡 발송 연결
+- `packages/frontend/src/components/AiCampaignSendModal.tsx` — 타입 변경 (kakao_brand→rcs)
+- `packages/frontend/src/pages/AdminDashboard.tsx` — 템플릿 관리 탭 + 2줄 메뉴
+- `status/CHANNEL-EXPANSION.md` — 문서 업데이트
+
+#### Phase 2 예정
+- 휴머스온 알림톡 API 연동 (템플릿 등록 자동화)
+- 젬텍 RCS API 연동 (발송)
+- 브랜드메시지 8종 메시지 유형 확장 (`status/BRAND-MESSAGE-DESIGN.md` 참조)
+
+---
+
 ### 🔧 D91 — QA 버그리포트 10건 전면 수정 (2026-03-23) — ✅ 수정 완료
 
 > **배경:** 테스터 PPT 버그리포트 (한줄로_20260323.pptx) — 10개 슬라이드, 5개 그룹. 컨트롤타워 우선 수정 원칙 준수.
