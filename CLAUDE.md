@@ -5,6 +5,17 @@
 
 ---
 
+## 🚨🚨🚨 절대 금지 사항 (최우선 — 이 규칙을 어기면 즉시 중단)
+
+> **1. git push 절대 금지** — git add, git commit, git push 등 모든 git 명령어를 AI가 실행하지 않는다. Harold님이 직접 실행한다.
+> **2. 서버 SSH 접속 절대 금지** — `ssh administrator@58.227.193.62` 등 서버 접속을 AI가 시도하지 않는다. 비밀번호 틀려서 계정 잠기는 사고가 실제 발생했다.
+> **3. 서버 비밀번호 확인 금지** — .env 파일에서 서버 비밀번호를 읽거나 확인하지 않는다.
+>
+> **AI는 코드 수정만 한다.** 배포, git 조작, 서버 접속은 전부 Harold님이 직접 한다.
+> 서버에서 확인이 필요하면 Harold님이 실행할 **명령어만 안내**한다.
+
+---
+
 ## ⛔ 0. 최우선 원칙 — 컨트롤타워 우선 확인 (절대 위반 금지)
 
 > **코드를 수정하기 전에 반드시 컨트롤타워(utils/)에 해당 기능이 이미 존재하는지 먼저 확인한다.**
@@ -450,6 +461,10 @@ PostgreSQL campaigns/campaign_runs 생성
 | **스팸테스트 샘플이 타겟 무관 고객** | autoSpamTestWithRegenerate에 firstRecipient 미전달 → 임의 고객 데이터로 개인화 스팸테스트 → 타겟 불일치 | **스팸테스트·미리보기·발송에 사용하는 고객 데이터는 반드시 타겟 필터가 적용된 동일한 데이터여야 함** (D91) |
 | **프론트 인라인 치환에 숫자 포맷팅 누락** | 백엔드 messageUtils.ts에만 toLocaleString 추가 → 프론트 미리보기/스팸필터에서 소수점 잔존 | **프론트 인라인 replaceVars에도 동일 숫자 포맷팅 필수.** 백엔드-프론트 치환 결과가 동일해야 함 (D91) |
 | **회사 단위 데이터를 사용자 단위로 분리 미비** | companies.manager_contacts가 company_id 단위 → 동일 회사 내 모든 브랜드가 담당자 공유 | **브랜드별로 달라야 하는 데이터는 users 테이블에 저장.** companies는 fallback (D91) |
+| **onClick에 함수 직접 전달 → MouseEvent가 인자로** | SendConfirmModal onClick={executeDirectSend} → React가 MouseEvent 전달 → confirmCallbackExclusion=truthy → 확인 모달 항상 스킵 | **onClick에 함수 참조 직접 전달 금지.** 반드시 `() => fn()` 래핑하여 의도치 않은 인자 전달 방지 (D93) |
+| **campaign_runs INSERT가 확인 모달 전에 실행** | CT-08 미등록 회신번호 확인 모달 반환 전에 campaign_runs INSERT → 회신번호 변경 후 재발송 시 2건 중복 | **확인 모달/검증 로직은 DB INSERT 전에 실행.** 중간에 return될 수 있는 코드 앞에 INSERT하지 않는다 (D93) |
+| **엑셀 Date 부동소수점 오차로 하루 밀림** | xlsx가 1995-03-01을 1995-02-28T14:59:08.000Z로 변환 → getUTCDate()=28 | **엑셀 Date 처리 시 Math.round(ms/dayMs)*dayMs로 가장 가까운 자정 반올림** (D93) |
+| **서버 SSH 접속 시도 → 계정 잠금 사고** | AI가 서버 SSH 접속 시도 → 비밀번호 3회 실패 → fail2ban IP 차단 → Harold님 접속 불가 | **AI는 서버 접속/git push 절대 금지.** 코드 수정만 하고 배포/서버는 Harold님이 직접 (D93) |
 
 ### ⚠️ 필수 체크 원칙 1: 유틸 함수 수정/추가 시 소비처 전수 확인
 

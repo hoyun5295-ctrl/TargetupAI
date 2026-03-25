@@ -60,7 +60,7 @@ export default function AdminDashboard() {
   const navigate = useNavigate();
   const { user, logout } = useAuthStore();
 
-  const [activeTab, setActiveTab] = useState<'companies' | 'users' | 'scheduled' | 'callbacks' | 'plans' | 'requests' | 'deposits' | 'allCampaigns' | 'stats' | 'billing' | 'syncAgents' | 'auditLogs' | 'lineGroups'>('companies');
+  const [activeTab, setActiveTab] = useState<'companies' | 'users' | 'scheduled' | 'callbacks' | 'plans' | 'requests' | 'deposits' | 'allCampaigns' | 'stats' | 'billing' | 'syncAgents' | 'auditLogs' | 'lineGroups' | 'templates'>('companies');
   const [companies, setCompanies] = useState<Company[]>([]);
   const [plans, setPlans] = useState<Plan[]>([]);
   const [users, setUsers] = useState<User[]>([]);
@@ -342,6 +342,15 @@ const [emailSending, setEmailSending] = useState(false);
   const [lineGroups, setLineGroups] = useState<any[]>([]);
   const [lineGroupsLoading, setLineGroupsLoading] = useState(false);
 
+  // ===== 템플릿 관리 =====
+  const [adminTemplates, setAdminTemplates] = useState<any[]>([]);
+  const [adminRcsTemplates, setAdminRcsTemplates] = useState<any[]>([]);
+  const [templatesLoading, setTemplatesLoading] = useState(false);
+  const [templateFilter, setTemplateFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
+  const [templateSubTab, setTemplateSubTab] = useState<'alimtalk' | 'rcs'>('alimtalk');
+  const [showManualTemplateForm, setShowManualTemplateForm] = useState(false);
+  const [manualForm, setManualForm] = useState({ companyId: '', templateCode: '', templateName: '', category: '', messageType: 'BA', content: '' });
+
   // 커스텀 모달 상태
   const [modal, setModal] = useState<ModalState>({ type: null, title: '', message: '' });
   const [copied, setCopied] = useState(false);
@@ -378,10 +387,82 @@ useEffect(() => { if (activeTab === 'billing') loadBillings(); }, [filterYear]);
 useEffect(() => { if (activeTab === 'deposits') loadChargeManagement(1); }, [activeTab, chargeTxCompanyFilter, chargeTxTypeFilter, chargeTxMethodFilter, chargeTxStartDate, chargeTxEndDate]);
 useEffect(() => { if (activeTab === 'syncAgents') loadSyncAgents(); }, [activeTab]);
 useEffect(() => { if (activeTab === 'auditLogs') loadAuditLogs(1); }, [activeTab]);
+useEffect(() => { if (activeTab === 'templates') { loadAdminTemplates(); loadAdminRcsTemplates(); } }, [activeTab, templateFilter]);
 useEffect(() => { if (activeTab === 'callbacks') { loadSenderRegPendingCount(); } }, [activeTab]);
 useEffect(() => { if (activeTab === 'callbacks' && callbackSubTab === 'registrations') { loadSenderRegistrations(senderRegFilter); } }, [activeTab, callbackSubTab, senderRegFilter]);
 useEffect(() => { if (activeTab === 'callbacks' && callbackSubTab === 'managers') { loadAllManagers(); } }, [activeTab, callbackSubTab, mgrFilter]);
 useEffect(() => { loadLineGroups(); }, []);
+
+// ===== 템플릿 관리 함수 =====
+const loadAdminTemplates = async () => {
+  setTemplatesLoading(true);
+  try {
+    const tk = localStorage.getItem('token');
+    const params = new URLSearchParams();
+    if (templateFilter !== 'all') params.set('status', templateFilter);
+    const res = await fetch(`/api/admin/kakao-templates?${params}`, { headers: { Authorization: `Bearer ${tk}` } });
+    const data = await res.json();
+    if (data.success) setAdminTemplates(data.templates);
+  } catch { /* ignore */ }
+  setTemplatesLoading(false);
+};
+
+const loadAdminRcsTemplates = async () => {
+  try {
+    const tk = localStorage.getItem('token');
+    const params = new URLSearchParams();
+    if (templateFilter !== 'all') params.set('status', templateFilter);
+    const res = await fetch(`/api/admin/rcs-templates?${params}`, { headers: { Authorization: `Bearer ${tk}` } });
+    const data = await res.json();
+    if (data.success) setAdminRcsTemplates(data.templates);
+  } catch { /* ignore */ }
+};
+
+const handleTemplateApprove = async (type: 'kakao' | 'rcs', id: string) => {
+  try {
+    const tk = localStorage.getItem('token');
+    const endpoint = type === 'kakao' ? `/api/admin/kakao-templates/${id}/approve` : `/api/admin/rcs-templates/${id}/approve`;
+    const res = await fetch(endpoint, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tk}` }, body: JSON.stringify({}) });
+    const data = await res.json();
+    if (data.success) { loadAdminTemplates(); loadAdminRcsTemplates(); setModal({ type: 'alert', title: '승인 완료', message: '템플릿이 승인되었습니다', variant: 'success' }); }
+    else setModal({ type: 'alert', title: '승인 실패', message: data.error, variant: 'error' });
+  } catch { setModal({ type: 'alert', title: '오류', message: '서버 오류', variant: 'error' }); }
+};
+
+const handleTemplateReject = async (type: 'kakao' | 'rcs', id: string) => {
+  const reason = prompt('반려 사유를 입력하세요:');
+  if (!reason) return;
+  try {
+    const tk = localStorage.getItem('token');
+    const endpoint = type === 'kakao' ? `/api/admin/kakao-templates/${id}/reject` : `/api/admin/rcs-templates/${id}/reject`;
+    const res = await fetch(endpoint, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tk}` }, body: JSON.stringify({ rejectReason: reason }) });
+    const data = await res.json();
+    if (data.success) { loadAdminTemplates(); loadAdminRcsTemplates(); setModal({ type: 'alert', title: '반려 완료', message: '템플릿이 반려되었습니다', variant: 'success' }); }
+    else setModal({ type: 'alert', title: '반려 실패', message: data.error, variant: 'error' });
+  } catch { setModal({ type: 'alert', title: '오류', message: '서버 오류', variant: 'error' }); }
+};
+
+const handleManualTemplateSubmit = async () => {
+  if (!manualForm.companyId || !manualForm.templateName || !manualForm.content) {
+    setModal({ type: 'alert', title: '입력 오류', message: '고객사, 템플릿명, 본문은 필수입니다', variant: 'error' });
+    return;
+  }
+  try {
+    const tk = localStorage.getItem('token');
+    const res = await fetch('/api/admin/kakao-templates/manual', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tk}` },
+      body: JSON.stringify(manualForm),
+    });
+    const data = await res.json();
+    if (data.success) {
+      setShowManualTemplateForm(false);
+      setManualForm({ companyId: '', templateCode: '', templateName: '', category: '', messageType: 'BA', content: '' });
+      loadAdminTemplates();
+      setModal({ type: 'alert', title: '등록 완료', message: '템플릿이 승인 상태로 등록되었습니다', variant: 'success' });
+    } else setModal({ type: 'alert', title: '등록 실패', message: data.error, variant: 'error' });
+  } catch { setModal({ type: 'alert', title: '오류', message: '서버 오류', variant: 'error' }); }
+};
 
 // 감사 로그 조회
 const loadAuditLogs = async (page: number) => {
@@ -2194,6 +2275,16 @@ const handleApproveRequest = async (id: string) => {
               >
                 📋 감사 로그
                 </button>
+              <button
+                onClick={() => setActiveTab('templates')}
+                className={`px-4 py-3 text-sm font-medium border-b-2 ${
+                  activeTab === 'templates'
+                    ? 'border-amber-500 text-amber-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                💬 템플릿 관리
+              </button>
             </nav>
           </div>
         </div>
@@ -3693,6 +3784,205 @@ const handleApproveRequest = async (id: string) => {
             )}
           </div>
         )}
+
+      {/* ═══ 템플릿 관리 탭 ═══ */}
+      {activeTab === 'templates' && (
+        <div className="bg-white rounded-lg shadow">
+          <div className="px-6 py-4 border-b flex justify-between items-center">
+            <div>
+              <h2 className="text-lg font-semibold">💬 템플릿 관리</h2>
+              <p className="text-xs text-gray-500 mt-1">고객사 알림톡/RCS 템플릿 승인·반려 및 수동 등록</p>
+            </div>
+            <button onClick={() => setShowManualTemplateForm(true)}
+              className="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-lg text-sm font-medium">
+              + 수동 등록 (기존 템플릿)
+            </button>
+          </div>
+
+          {/* 서브탭 + 필터 */}
+          <div className="px-6 py-3 border-b flex items-center justify-between">
+            <div className="flex gap-2">
+              <button onClick={() => setTemplateSubTab('alimtalk')}
+                className={`px-3 py-1.5 rounded-full text-xs font-medium transition ${templateSubTab === 'alimtalk' ? 'bg-amber-600 text-white' : 'bg-gray-100 text-gray-600'}`}>
+                알림톡
+              </button>
+              <button onClick={() => setTemplateSubTab('rcs')}
+                className={`px-3 py-1.5 rounded-full text-xs font-medium transition ${templateSubTab === 'rcs' ? 'bg-purple-600 text-white' : 'bg-gray-100 text-gray-600'}`}>
+                RCS
+              </button>
+            </div>
+            <div className="flex gap-1">
+              {(['all', 'pending', 'approved', 'rejected'] as const).map(f => (
+                <button key={f} onClick={() => setTemplateFilter(f)}
+                  className={`px-2.5 py-1 rounded text-xs transition ${templateFilter === f ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
+                  {f === 'all' ? '전체' : f === 'pending' ? '승인대기' : f === 'approved' ? '승인' : '반려'}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* 알림톡 목록 */}
+          {templateSubTab === 'alimtalk' && (
+            <div className="overflow-x-auto">
+              {templatesLoading ? (
+                <div className="text-center py-12 text-gray-400">로딩 중...</div>
+              ) : adminTemplates.length === 0 ? (
+                <div className="text-center py-12 text-gray-400">템플릿이 없습니다</div>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 border-b">
+                    <tr>
+                      <th className="px-4 py-3 text-left font-medium text-gray-600">고객사</th>
+                      <th className="px-4 py-3 text-left font-medium text-gray-600">템플릿명</th>
+                      <th className="px-4 py-3 text-left font-medium text-gray-600">카테고리</th>
+                      <th className="px-4 py-3 text-center font-medium text-gray-600">상태</th>
+                      <th className="px-4 py-3 text-left font-medium text-gray-600">요청일</th>
+                      <th className="px-4 py-3 text-center font-medium text-gray-600">관리</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {adminTemplates.map((t: any) => (
+                      <tr key={t.id} className="hover:bg-gray-50">
+                        <td className="px-4 py-3 text-gray-900 font-medium">{t.company_name || '-'}</td>
+                        <td className="px-4 py-3">
+                          <div className="text-gray-900">{t.template_name}</div>
+                          {t.template_code && <div className="text-xs text-gray-400">{t.template_code}</div>}
+                        </td>
+                        <td className="px-4 py-3 text-gray-600">{t.category || '-'}</td>
+                        <td className="px-4 py-3 text-center">
+                          <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${
+                            t.status === 'approved' ? 'bg-green-100 text-green-700' :
+                            t.status === 'rejected' ? 'bg-red-100 text-red-700' :
+                            'bg-amber-100 text-amber-700'
+                          }`}>
+                            {t.status === 'approved' ? '승인' : t.status === 'rejected' ? '반려' : '승인대기'}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-gray-500 text-xs">{t.requested_at ? new Date(t.requested_at).toLocaleDateString('ko-KR') : '-'}</td>
+                        <td className="px-4 py-3 text-center">
+                          {t.status === 'pending' && (
+                            <div className="flex gap-1 justify-center">
+                              <button onClick={() => handleTemplateApprove('kakao', t.id)}
+                                className="text-xs px-2 py-1 bg-green-50 text-green-700 rounded hover:bg-green-100">승인</button>
+                              <button onClick={() => handleTemplateReject('kakao', t.id)}
+                                className="text-xs px-2 py-1 bg-red-50 text-red-700 rounded hover:bg-red-100">반려</button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          )}
+
+          {/* RCS 목록 */}
+          {templateSubTab === 'rcs' && (
+            <div className="overflow-x-auto">
+              {adminRcsTemplates.length === 0 ? (
+                <div className="text-center py-12 text-gray-400">RCS 템플릿이 없습니다</div>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 border-b">
+                    <tr>
+                      <th className="px-4 py-3 text-left font-medium text-gray-600">고객사</th>
+                      <th className="px-4 py-3 text-left font-medium text-gray-600">템플릿명</th>
+                      <th className="px-4 py-3 text-left font-medium text-gray-600">유형</th>
+                      <th className="px-4 py-3 text-center font-medium text-gray-600">상태</th>
+                      <th className="px-4 py-3 text-center font-medium text-gray-600">관리</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {adminRcsTemplates.map((t: any) => (
+                      <tr key={t.id} className="hover:bg-gray-50">
+                        <td className="px-4 py-3 text-gray-900 font-medium">{t.company_name || '-'}</td>
+                        <td className="px-4 py-3 text-gray-900">{t.template_name}</td>
+                        <td className="px-4 py-3 text-gray-600">{t.message_type}</td>
+                        <td className="px-4 py-3 text-center">
+                          <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${
+                            t.status === 'approved' ? 'bg-green-100 text-green-700' :
+                            t.status === 'rejected' ? 'bg-red-100 text-red-700' :
+                            'bg-amber-100 text-amber-700'
+                          }`}>
+                            {t.status === 'approved' ? '승인' : t.status === 'rejected' ? '반려' : '승인대기'}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          {t.status === 'pending' && (
+                            <div className="flex gap-1 justify-center">
+                              <button onClick={() => handleTemplateApprove('rcs', t.id)}
+                                className="text-xs px-2 py-1 bg-green-50 text-green-700 rounded hover:bg-green-100">승인</button>
+                              <button onClick={() => handleTemplateReject('rcs', t.id)}
+                                className="text-xs px-2 py-1 bg-red-50 text-red-700 rounded hover:bg-red-100">반려</button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 수동 등록 모달 */}
+      {showManualTemplateForm && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
+            <div className="px-6 py-4 border-b bg-gradient-to-r from-amber-50 to-white flex justify-between items-center">
+              <div>
+                <h3 className="text-lg font-bold">기존 템플릿 수동 등록</h3>
+                <p className="text-xs text-gray-500">이미 카카오에 등록된 템플릿을 승인 상태로 직접 등록합니다</p>
+              </div>
+              <button onClick={() => setShowManualTemplateForm(false)} className="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
+            </div>
+            <div className="px-6 py-4 space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">고객사 <span className="text-red-500">*</span></label>
+                <select value={manualForm.companyId} onChange={e => setManualForm({ ...manualForm, companyId: e.target.value })}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm">
+                  <option value="">선택</option>
+                  {companies.map((c: any) => <option key={c.id} value={c.id}>{c.companyName || c.company_name}</option>)}
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">템플릿 코드</label>
+                  <input value={manualForm.templateCode} onChange={e => setManualForm({ ...manualForm, templateCode: e.target.value })}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">카테고리</label>
+                  <select value={manualForm.category} onChange={e => setManualForm({ ...manualForm, category: e.target.value })}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm">
+                    <option value="">선택</option>
+                    {['결제/입금','배송/물류','예약/일정','회원가입/인증','공지/안내','주문/구매','이벤트/프로모션','고객관리','기타'].map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">템플릿명 <span className="text-red-500">*</span></label>
+                <input value={manualForm.templateName} onChange={e => setManualForm({ ...manualForm, templateName: e.target.value })}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">본문 <span className="text-red-500">*</span></label>
+                <textarea value={manualForm.content} onChange={e => setManualForm({ ...manualForm, content: e.target.value })}
+                  rows={5} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm resize-none" />
+              </div>
+            </div>
+            <div className="px-6 py-3 border-t bg-gray-50 flex justify-end gap-3">
+              <button onClick={() => setShowManualTemplateForm(false)}
+                className="px-5 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-sm">취소</button>
+              <button onClick={handleManualTemplateSubmit}
+                className="px-5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-medium">승인 상태로 등록</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 고객사 추가 모달 */}
       {showCompanyModal && (

@@ -248,7 +248,7 @@ export default function Dashboard() {
   // ★ D43-3c: 타겟 필드 메타 (동적 변수/테이블용)
   const [targetFieldsMeta, setTargetFieldsMeta] = useState<FieldMeta[]>([]);
   // 직접타겟발송 관련 state
-  const [targetSendChannel, setTargetSendChannel] = useState<'sms' | 'kakao_brand' | 'kakao_alimtalk'>('sms');
+  const [targetSendChannel, setTargetSendChannel] = useState<'sms' | 'rcs' | 'kakao_alimtalk'>('sms');
   const [targetMsgType, setTargetMsgType] = useState<'SMS' | 'LMS' | 'MMS'>('SMS');
   const [targetSubject, setTargetSubject] = useState('');
   const [targetMessage, setTargetMessage] = useState('');
@@ -258,7 +258,7 @@ export default function Dashboard() {
   const [targetListSearch, setTargetListSearch] = useState('');
   const [showTargetPreview, setShowTargetPreview] = useState(false);
   // 직접발송 관련 state
-  const [directSendChannel, setDirectSendChannel] = useState<'sms' | 'kakao_brand' | 'kakao_alimtalk'>('sms');
+  const [directSendChannel, setDirectSendChannel] = useState<'sms' | 'rcs' | 'kakao_alimtalk'>('sms');
   const [directMsgType, setDirectMsgType] = useState<'SMS' | 'LMS' | 'MMS'>('SMS');
   const [directSubject, setDirectSubject] = useState('');
   const [directMessage, setDirectMessage] = useState('');
@@ -342,10 +342,10 @@ export default function Dashboard() {
     setDirectSending(true);
     try {
       const sendBody = {
-        msgType: directSendChannel === 'kakao_brand' ? 'LMS' : directMsgType,
-        sendChannel: directSendChannel === 'sms' ? 'sms' : 'kakao',
+        msgType: directSendChannel === 'rcs' ? 'LMS' : directMsgType,
+        sendChannel: directSendChannel === 'sms' ? 'sms' : directSendChannel === 'rcs' ? 'rcs' : 'kakao',
         subject: directSubject,
-        message: getFullMessage(directSendChannel === 'kakao_brand' ? kakaoMessage : directMessage),
+        message: getFullMessage(directSendChannel === 'rcs' ? kakaoMessage : directMessage),
         callback: useIndividualCallback ? null : selectedCallback,
         useIndividualCallback: useIndividualCallback,
         recipients: directRecipients.map((r: any) => ({ ...r, callback: r.callback || null })),
@@ -430,8 +430,8 @@ export default function Dashboard() {
     try {
       const token = localStorage.getItem('token');
       // 변수 치환 처리
-      const isKakaoBrand = targetSendChannel === 'kakao_brand';
-      const baseMsg = isKakaoBrand ? kakaoMessage : targetMessage;
+      const isRcs = targetSendChannel === 'rcs';
+      const baseMsg = isRcs ? kakaoMessage : targetMessage;
       // ★ D43-3c: 동적 변수 치환 (하드코딩 제거)
       const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const recipientsWithMessage = targetRecipients.map((r: any) => {
@@ -444,9 +444,9 @@ export default function Dashboard() {
         return {
           phone: r.phone,
           callback: r.callback || null,
-          message: ((!isKakaoBrand && adTextEnabled) ? (targetMsgType === 'SMS' ? '(광고)' : '(광고) ') : '') +
+          message: ((!isRcs && adTextEnabled) ? (targetMsgType === 'SMS' ? '(광고)' : '(광고) ') : '') +
             substituted +
-            ((!isKakaoBrand && adTextEnabled) ? (targetMsgType === 'SMS' ? `\n무료거부${optOutNumber.replace(/-/g, '')}` : `\n무료수신거부 ${formatRejectNumber(optOutNumber)}`) : '')
+            ((!isRcs && adTextEnabled) ? (targetMsgType === 'SMS' ? `\n무료거부${optOutNumber.replace(/-/g, '')}` : `\n무료수신거부 ${formatRejectNumber(optOutNumber)}`) : '')
         };
       });
 
@@ -457,10 +457,10 @@ export default function Dashboard() {
           'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify({
-          msgType: targetSendChannel === 'kakao_brand' ? 'LMS' : targetMsgType,
-          sendChannel: targetSendChannel === 'sms' ? 'sms' : 'kakao',
+          msgType: targetSendChannel === 'rcs' ? 'LMS' : targetMsgType,
+          sendChannel: targetSendChannel === 'sms' ? 'sms' : targetSendChannel === 'rcs' ? 'rcs' : 'kakao',
           subject: targetSubject,
-          message: targetSendChannel === 'kakao_brand' ? kakaoMessage : targetMessage,
+          message: targetSendChannel === 'rcs' ? kakaoMessage : targetMessage,
           callback: useIndividualCallback ? null : selectedCallback,
           useIndividualCallback: useIndividualCallback,
           recipients: recipientsWithMessage.map(r => ({ phone: r.phone, name: '', var1: '', var2: '', var3: '', callback: r.callback || null })),
@@ -3050,17 +3050,15 @@ const campaignData = {
                 {/* 채널 선택 탭 */}
                 <div className="flex mb-2 bg-gray-100 rounded-lg p-1 gap-0.5">
                   {([
-                    { key: 'sms' as const, label: '📱 문자' },
-                    { key: 'kakao_brand' as const, label: '💬 브랜드MSG' },
-                    { key: 'kakao_alimtalk' as const, label: '🔔 알림톡' },
+                    { key: 'sms' as const, label: '📱 문자', activeColor: 'text-emerald-600' },
+                    { key: 'rcs' as const, label: '📱 RCS', activeColor: 'text-purple-600' },
+                    { key: 'kakao_alimtalk' as const, label: '🔔 알림톡', activeColor: 'text-blue-600' },
                   ] as const).map(ch => (
                     <button key={ch.key}
                       onClick={() => { setDirectSendChannel(ch.key); if (ch.key === 'sms') setMmsUploadedImages([]); }}
                       className={`flex-1 py-2 text-xs font-medium rounded-md transition-all ${
-                        directSendChannel === ch.key 
-                          ? ch.key === 'sms' ? 'bg-white shadow text-emerald-600' 
-                            : ch.key === 'kakao_brand' ? 'bg-white shadow text-yellow-700' 
-                            : 'bg-white shadow text-blue-600'
+                        directSendChannel === ch.key
+                          ? `bg-white shadow ${ch.activeColor}`
                           : 'text-gray-400 hover:text-gray-600'
                       }`}
                     >{ch.label}</button>
@@ -3395,91 +3393,40 @@ const campaignData = {
                 </div>
                 </>)}
 
-                {/* === 카카오 브랜드메시지 채널 === */}
-                {directSendChannel === 'kakao_brand' && (
-                  <div className="border-2 border-yellow-200 rounded-2xl overflow-hidden bg-white shadow-sm">
-                    {/* 카카오 메시지 입력 */}
+                {/* === RCS 채널 === */}
+                {directSendChannel === 'rcs' && (
+                  <div className="border-2 border-purple-200 rounded-2xl overflow-hidden bg-white shadow-sm">
                     <div className="p-4">
                       <div className="flex items-center gap-2 mb-2">
-                        <span className="text-lg">💬</span>
-                        <span className="text-sm font-semibold text-yellow-800">브랜드메시지 (자유형)</span>
+                        <span className="text-lg">📱</span>
+                        <span className="text-sm font-semibold text-purple-800">RCS 메시지</span>
                       </div>
                       <textarea
                         value={kakaoMessage}
                         onChange={(e) => setKakaoMessage(e.target.value)}
-                        placeholder={"카카오 브랜드메시지 내용을 입력하세요.\n\n이모지 사용 가능 😊\n최대 4,000자"}
-                        className="w-full h-[200px] resize-none border border-yellow-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-yellow-400 text-sm leading-relaxed p-3 bg-yellow-50/30"
+                        placeholder={"RCS 메시지 내용을 입력하세요.\n\n리치 미디어 지원 (Phase 2)\nRCS 미지원 단말은 SMS로 자동 폴백됩니다"}
+                        className="w-full h-[200px] resize-none border border-purple-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-400 text-sm leading-relaxed p-3 bg-purple-50/30"
                       />
                       <div className="text-xs text-gray-400 mt-1">
-                        💡 이모지·특수문자 사용 가능 | 광고표기는 백엔드에서 자동 처리됩니다
+                        RCS 미지원 단말은 SMS/LMS로 자동 폴백됩니다
                       </div>
                     </div>
-                    {/* 글자수 표시 */}
-                    <div className="px-3 py-1.5 bg-yellow-50 border-t flex items-center justify-between">
+                    <div className="px-3 py-1.5 bg-purple-50 border-t flex items-center justify-between">
                       <div className="flex items-center gap-0.5">
                         <button onClick={() => setShowSpecialChars('direct')} className="px-2 py-1 text-xs bg-white border rounded hover:bg-gray-100">특수문자</button>
-                        <button onClick={() => { loadTemplates(); setShowTemplateBox('direct'); }} className="px-2 py-1 text-xs bg-white border rounded hover:bg-gray-100">보관함</button>
                       </div>
                       <span className="text-xs text-gray-500">
-                        <span className={`font-bold ${kakaoMessage.length > 4000 ? 'text-red-500' : 'text-yellow-600'}`}>{kakaoMessage.length}</span>/4,000자
+                        <span className="font-bold text-purple-600">{kakaoMessage.length}</span>자
                       </span>
                     </div>
-                    {/* 발신프로필 안내 */}
-                    <div className="px-3 py-1.5 border-t">
-                      <div className="flex items-center gap-2 text-xs text-gray-500">
-                        <span>💬</span>
-                        <span>카카오 발신프로필로 발송됩니다 (설정에서 관리)</span>
-                      </div>
-                    </div>
-                    {/* 예약/분할 옵션 */}
-                    <div className="px-3 py-2 border-t">
-                      <div className="grid grid-cols-2 gap-2 text-xs">
-                        <div className={`rounded-lg p-3 text-center ${reserveEnabled ? 'bg-blue-50' : 'bg-gray-50'}`}>
-                          <label className="flex items-center justify-center gap-1.5 cursor-pointer">
-                            <input type="checkbox" checked={reserveEnabled} onChange={(e) => { setReserveEnabled(e.target.checked); if (e.target.checked) setShowReservePicker(true); }} className="rounded w-4 h-4" />
-                            <span className={`font-medium ${reserveEnabled ? 'text-blue-700' : ''}`}>예약전송</span>
-                          </label>
-                          <div className={`mt-1.5 text-xs cursor-pointer ${reserveEnabled ? 'text-blue-600 font-medium' : 'text-gray-400'}`} onClick={() => reserveEnabled && setShowReservePicker(true)}>
-                            {reserveDateTime ? new Date(reserveDateTime).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '예약시간 선택'}
-                          </div>
-                        </div>
-                        <div className={`rounded-lg p-3 text-center ${splitEnabled ? 'bg-purple-50' : 'bg-gray-50'}`}>
-                          <label className="flex items-center justify-center gap-1.5 cursor-pointer">
-                            <input type="checkbox" className="rounded w-4 h-4" checked={splitEnabled} onChange={(e) => setSplitEnabled(e.target.checked)} />
-                            <span className={`font-medium ${splitEnabled ? 'text-purple-700' : ''}`}>분할전송</span>
-                          </label>
-                          <div className="mt-1.5 flex items-center justify-center gap-1">
-                            <input type="number" className="w-14 border rounded px-1.5 py-1 text-xs text-center" placeholder="1000" value={splitCount} onChange={(e) => setSplitCount(Number(e.target.value) || 1000)} disabled={!splitEnabled} />
-                            <span className="text-xs text-gray-500">건/분</span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                    {/* 전송하기 버튼 */}
                     <div className="px-3 py-2 border-t">
                       <button
-                        onClick={async () => {
-                          if (directRecipients.length === 0) { setToast({ show: true, type: 'error', message: '수신자를 추가해주세요' }); return; }
-                          if (!kakaoMessage.trim()) { setToast({ show: true, type: 'error', message: '메시지를 입력해주세요' }); return; }
-                          if (kakaoMessage.length > 4000) { setToast({ show: true, type: 'error', message: '카카오 메시지는 4,000자 이내로 입력해주세요' }); return; }
-                          if (!kakaoEnabled) { setToast({ show: true, type: 'error', message: '카카오 발송이 활성화되지 않았습니다. 관리자에게 문의해주세요.' }); return; }
-                          const token = localStorage.getItem('token');
-                          const phones = directRecipients.map((r: any) => r.phone);
-                          const checkRes = await fetch('/api/unsubscribes/check', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ phones }) });
-                          const checkData = await checkRes.json();
-                          const unsubCount = checkData.unsubscribeCount || 0;
-                          setSendConfirm({ show: true, type: reserveEnabled ? 'scheduled' : 'immediate', count: directRecipients.length - unsubCount, unsubscribeCount: unsubCount, dateTime: reserveEnabled && reserveDateTime ? reserveDateTime : undefined, from: 'direct', msgType: '카카오' });
-                        }}
-                        disabled={!kakaoEnabled}
-                        className={`w-full py-3 rounded-xl font-bold text-base transition-colors ${
-                          kakaoEnabled ? 'bg-yellow-500 hover:bg-yellow-600 text-white' : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                        }`}
+                        onClick={() => setToast({ show: true, type: 'error', message: 'RCS 발송 기능은 준비 중입니다 (Phase 2)' })}
+                        className="w-full py-3 rounded-xl font-bold text-base transition-colors bg-purple-500 hover:bg-purple-600 text-white"
                       >
-                        {!kakaoEnabled ? '🔒 카카오 발송 준비중' : '💬 전송하기'}
+                        📱 RCS 전송하기
                       </button>
-                      {!kakaoEnabled && (
-                        <p className="text-xs text-center text-gray-400 mt-1.5">카카오 발송 활성화는 관리자에게 문의해주세요</p>
-                      )}
+                      <p className="text-xs text-center text-purple-400 mt-1.5">젬텍 RCS API 연동 후 사용 가능합니다</p>
                     </div>
                   </div>
                 )}

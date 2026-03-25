@@ -15,6 +15,7 @@ import PricingPage from './pages/PricingPage';
 import PrivacyPage from './pages/PrivacyPage';
 import TermsPage from './pages/TermsPage';
 import AutoSendPage from './pages/AutoSendPage';
+import KakaoRcsPage from './pages/KakaoRcsPage';
 
 // ★ 세션 타이머 Context — 헤더 등에서 남은 시간 표시용
 interface SessionTimerContextType {
@@ -216,6 +217,16 @@ function App() {
           element={
             <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
               <AutoSendPage />
+            </PrivateRoute>
+          }
+        />
+
+        {/* 채널 확장: 카카오&RCS */}
+        <Route
+          path="/kakao-rcs"
+          element={
+            <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
+              <KakaoRcsPage />
             </PrivateRoute>
           }
         />

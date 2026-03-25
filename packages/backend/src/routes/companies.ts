@@ -1162,4 +1162,288 @@ router.delete('/kakao-profiles/:id', async (req: Request, res: Response) => {
   }
 });
 
+// ═══════════════════════════════════════════════════════════
+// 알림톡 템플릿 CRUD
+// ═══════════════════════════════════════════════════════════
+
+// GET /api/companies/kakao-templates — 알림톡 템플릿 목록
+router.get('/kakao-templates', async (req: Request, res: Response) => {
+  try {
+    const companyId = (req as any).user?.companyId;
+    if (!companyId) return res.status(401).json({ success: false, error: '인증 필요' });
+
+    const status = req.query.status as string | undefined;
+    const category = req.query.category as string | undefined;
+
+    let sql = `SELECT kt.*, ksp.profile_name
+       FROM kakao_templates kt
+       LEFT JOIN kakao_sender_profiles ksp ON kt.profile_id = ksp.id
+       WHERE kt.company_id = $1`;
+    const params: any[] = [companyId];
+
+    if (status) {
+      params.push(status);
+      sql += ` AND kt.status = $${params.length}`;
+    }
+    if (category) {
+      params.push(category);
+      sql += ` AND kt.category = $${params.length}`;
+    }
+
+    sql += ' ORDER BY kt.created_at DESC';
+
+    const result = await query(sql, params);
+    res.json({ success: true, templates: result.rows });
+  } catch (error) {
+    console.error('알림톡 템플릿 조회 실패:', error);
+    res.status(500).json({ success: false, error: '조회 실패' });
+  }
+});
+
+// POST /api/companies/kakao-templates — 알림톡 템플릿 등록 요청
+router.post('/kakao-templates', async (req: Request, res: Response) => {
+  try {
+    const companyId = (req as any).user?.companyId;
+    if (!companyId) return res.status(401).json({ success: false, error: '인증 필요' });
+
+    const {
+      profileId, templateName, category, messageType, emphasizeType,
+      content, emphasizeTitle, imageUrl, extraContent, adContent,
+      securityFlag, buttons, quickReplies, templateCode,
+    } = req.body;
+
+    if (!templateName || !content) {
+      return res.status(400).json({ success: false, error: '템플릿명과 본문은 필수입니다' });
+    }
+
+    // 같은 회사 내 이름 중복 체크
+    const dup = await query(
+      'SELECT id FROM kakao_templates WHERE company_id = $1 AND template_name = $2',
+      [companyId, templateName]
+    );
+    if (dup.rows.length > 0) {
+      return res.status(400).json({ success: false, error: '동일한 템플릿 이름이 이미 존재합니다' });
+    }
+
+    const result = await query(
+      `INSERT INTO kakao_templates (
+        company_id, profile_id, template_code, template_name, category,
+        message_type, emphasize_type, emphasize_title, content, image_url,
+        extra_content, ad_content, security_flag, buttons, quick_replies,
+        status, requested_at
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'pending',NOW())
+      RETURNING *`,
+      [
+        companyId, profileId || null, templateCode || null, templateName, category || null,
+        messageType || 'BA', emphasizeType || 'NONE', emphasizeTitle || null, content, imageUrl || null,
+        extraContent || null, adContent || null, securityFlag || false, JSON.stringify(buttons || []),
+        JSON.stringify(quickReplies || []),
+      ]
+    );
+
+    res.json({ success: true, template: result.rows[0] });
+  } catch (error) {
+    console.error('알림톡 템플릿 등록 실패:', error);
+    res.status(500).json({ success: false, error: '등록 실패' });
+  }
+});
+
+// PUT /api/companies/kakao-templates/:id — 알림톡 템플릿 수정 (pending/rejected만)
+router.put('/kakao-templates/:id', async (req: Request, res: Response) => {
+  try {
+    const companyId = (req as any).user?.companyId;
+    const { id } = req.params;
+    if (!companyId) return res.status(401).json({ success: false, error: '인증 필요' });
+
+    // 수정 가능 상태 확인
+    const existing = await query(
+      'SELECT status FROM kakao_templates WHERE id = $1 AND company_id = $2',
+      [id, companyId]
+    );
+    if (existing.rows.length === 0) {
+      return res.status(404).json({ success: false, error: '템플릿을 찾을 수 없습니다' });
+    }
+    if (!['pending', 'rejected'].includes(existing.rows[0].status)) {
+      return res.status(400).json({ success: false, error: '승인대기 또는 반려 상태에서만 수정 가능합니다' });
+    }
+
+    const {
+      profileId, templateName, category, messageType, emphasizeType,
+      content, emphasizeTitle, imageUrl, extraContent, adContent,
+      securityFlag, buttons, quickReplies, templateCode,
+    } = req.body;
+
+    const result = await query(
+      `UPDATE kakao_templates SET
+        profile_id = COALESCE($3, profile_id),
+        template_code = COALESCE($4, template_code),
+        template_name = COALESCE($5, template_name),
+        category = COALESCE($6, category),
+        message_type = COALESCE($7, message_type),
+        emphasize_type = COALESCE($8, emphasize_type),
+        emphasize_title = $9,
+        content = COALESCE($10, content),
+        image_url = $11,
+        extra_content = $12,
+        ad_content = $13,
+        security_flag = COALESCE($14, security_flag),
+        buttons = COALESCE($15, buttons),
+        quick_replies = COALESCE($16, quick_replies),
+        status = 'pending',
+        updated_at = NOW()
+      WHERE id = $1 AND company_id = $2
+      RETURNING *`,
+      [
+        id, companyId, profileId, templateCode, templateName, category,
+        messageType, emphasizeType, emphasizeTitle ?? null, content,
+        imageUrl ?? null, extraContent ?? null, adContent ?? null,
+        securityFlag, buttons ? JSON.stringify(buttons) : null,
+        quickReplies ? JSON.stringify(quickReplies) : null,
+      ]
+    );
+
+    res.json({ success: true, template: result.rows[0] });
+  } catch (error) {
+    console.error('알림톡 템플릿 수정 실패:', error);
+    res.status(500).json({ success: false, error: '수정 실패' });
+  }
+});
+
+// DELETE /api/companies/kakao-templates/:id — 알림톡 템플릿 삭제 (pending만)
+router.delete('/kakao-templates/:id', async (req: Request, res: Response) => {
+  try {
+    const companyId = (req as any).user?.companyId;
+    const { id } = req.params;
+    if (!companyId) return res.status(401).json({ success: false, error: '인증 필요' });
+
+    const result = await query(
+      `DELETE FROM kakao_templates WHERE id = $1 AND company_id = $2 AND status = 'pending' RETURNING id`,
+      [id, companyId]
+    );
+    if (result.rows.length === 0) {
+      return res.status(400).json({ success: false, error: '승인대기 상태의 템플릿만 삭제 가능합니다' });
+    }
+
+    res.json({ success: true, message: '삭제되었습니다.' });
+  } catch (error) {
+    console.error('알림톡 템플릿 삭제 실패:', error);
+    res.status(500).json({ success: false, error: '삭제 실패' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// RCS 템플릿 CRUD
+// ═══════════════════════════════════════════════════════════
+
+// GET /api/companies/rcs-templates — RCS 템플릿 목록
+router.get('/rcs-templates', async (req: Request, res: Response) => {
+  try {
+    const companyId = (req as any).user?.companyId;
+    if (!companyId) return res.status(401).json({ success: false, error: '인증 필요' });
+
+    const status = req.query.status as string | undefined;
+    let sql = 'SELECT * FROM rcs_templates WHERE company_id = $1';
+    const params: any[] = [companyId];
+
+    if (status) {
+      params.push(status);
+      sql += ` AND status = $${params.length}`;
+    }
+    sql += ' ORDER BY created_at DESC';
+
+    const result = await query(sql, params);
+    res.json({ success: true, templates: result.rows });
+  } catch (error) {
+    console.error('RCS 템플릿 조회 실패:', error);
+    res.status(500).json({ success: false, error: '조회 실패' });
+  }
+});
+
+// POST /api/companies/rcs-templates — RCS 템플릿 등록 요청
+router.post('/rcs-templates', async (req: Request, res: Response) => {
+  try {
+    const companyId = (req as any).user?.companyId;
+    if (!companyId) return res.status(401).json({ success: false, error: '인증 필요' });
+
+    const { templateName, messageType, content, buttons, mediaUrl } = req.body;
+    if (!templateName || !content || !messageType) {
+      return res.status(400).json({ success: false, error: '템플릿명, 메시지유형, 본문은 필수입니다' });
+    }
+
+    const result = await query(
+      `INSERT INTO rcs_templates (company_id, template_name, message_type, content, buttons, media_url, status, requested_at)
+       VALUES ($1,$2,$3,$4,$5,$6,'pending',NOW()) RETURNING *`,
+      [companyId, templateName, messageType, content, JSON.stringify(buttons || []), mediaUrl || null]
+    );
+
+    res.json({ success: true, template: result.rows[0] });
+  } catch (error) {
+    console.error('RCS 템플릿 등록 실패:', error);
+    res.status(500).json({ success: false, error: '등록 실패' });
+  }
+});
+
+// PUT /api/companies/rcs-templates/:id — RCS 템플릿 수정 (pending/rejected만)
+router.put('/rcs-templates/:id', async (req: Request, res: Response) => {
+  try {
+    const companyId = (req as any).user?.companyId;
+    const { id } = req.params;
+    if (!companyId) return res.status(401).json({ success: false, error: '인증 필요' });
+
+    const existing = await query(
+      'SELECT status FROM rcs_templates WHERE id = $1 AND company_id = $2',
+      [id, companyId]
+    );
+    if (existing.rows.length === 0) {
+      return res.status(404).json({ success: false, error: '템플릿을 찾을 수 없습니다' });
+    }
+    if (!['pending', 'rejected'].includes(existing.rows[0].status)) {
+      return res.status(400).json({ success: false, error: '승인대기 또는 반려 상태에서만 수정 가능합니다' });
+    }
+
+    const { templateName, messageType, content, buttons, mediaUrl } = req.body;
+
+    const result = await query(
+      `UPDATE rcs_templates SET
+        template_name = COALESCE($3, template_name),
+        message_type = COALESCE($4, message_type),
+        content = COALESCE($5, content),
+        buttons = COALESCE($6, buttons),
+        media_url = $7,
+        status = 'pending',
+        updated_at = NOW()
+      WHERE id = $1 AND company_id = $2
+      RETURNING *`,
+      [id, companyId, templateName, messageType, content, buttons ? JSON.stringify(buttons) : null, mediaUrl ?? null]
+    );
+
+    res.json({ success: true, template: result.rows[0] });
+  } catch (error) {
+    console.error('RCS 템플릿 수정 실패:', error);
+    res.status(500).json({ success: false, error: '수정 실패' });
+  }
+});
+
+// DELETE /api/companies/rcs-templates/:id — RCS 템플릿 삭제 (pending만)
+router.delete('/rcs-templates/:id', async (req: Request, res: Response) => {
+  try {
+    const companyId = (req as any).user?.companyId;
+    const { id } = req.params;
+    if (!companyId) return res.status(401).json({ success: false, error: '인증 필요' });
+
+    const result = await query(
+      `DELETE FROM rcs_templates WHERE id = $1 AND company_id = $2 AND status = 'pending' RETURNING id`,
+      [id, companyId]
+    );
+    if (result.rows.length === 0) {
+      return res.status(400).json({ success: false, error: '승인대기 상태의 템플릿만 삭제 가능합니다' });
+    }
+
+    res.json({ success: true, message: '삭제되었습니다.' });
+  } catch (error) {
+    console.error('RCS 템플릿 삭제 실패:', error);
+    res.status(500).json({ success: false, error: '삭제 실패' });
+  }
+});
+
 export default router;

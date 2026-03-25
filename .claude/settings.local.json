@@ -14,7 +14,25 @@
       "Bash(python3 -c \":*)",
       "WebFetch(domain:bizmessage.zendesk.com)",
       "WebSearch",
-      "WebFetch(domain:github.com)"
+      "WebFetch(domain:github.com)",
+      "Bash(find /c/Users/ceo/projects/targetup -type d -iname *sync*)",
+      "Bash(xargs grep:*)",
+      "Bash(grep -r \"testConnection\\\\|test-connection\\\\|test.*connection\\\\|접속.*테스트\" /c/Users/ceo/projects/targetup/packages --include=*.tsx --include=*.ts)",
+      "Bash(pg_isready -h localhost -p 5432)",
+      "Bash(powershell.exe -Command \"Get-NetTCPConnection -LocalPort 5432 -ErrorAction SilentlyContinue | Select-Object State\")",
+      "Bash(powershell.exe -Command \"Get-NetTCPConnection -LocalPort 3306 -ErrorAction SilentlyContinue | Select-Object State\")",
+      "Bash(powershell.exe -Command \"Get-Service -Name ''*mysql*'' 2>/dev/null | Select-Object Name, Status, StartType\")",
+      "Bash(npx esbuild:*)",
+      "Bash(pandoc \"C:/Users/ceo/OneDrive/바탕 화면/한줄로_피치덱_추가슬라이드_기획안.docx\" -o /tmp/pitch_plan.md)",
+      "Read(//tmp/**)",
+      "Bash(python scripts/office/unpack.py \"C:/Users/ceo/OneDrive/바탕 화면/한줄로_피치덱_추가슬라이드_기획안.docx\" /tmp/pitch_unpacked/)",
+      "Bash(npm list:*)",
+      "Bash(npm install:*)",
+      "Bash(npm init:*)",
+      "Bash(node C:/Users/ceo/projects/targetup/tmp_pitch_doc.js)",
+      "Bash(cp C:/Users/ceo/projects/targetup/tmp_pitch_doc.js /tmp/tmp_pitch_doc.js)",
+      "Bash(node tmp_pitch_doc.js)",
+      "Bash(npm run:*)"
     ]
   }
 }

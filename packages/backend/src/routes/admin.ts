@@ -2476,4 +2476,230 @@ router.put('/companies/:id/sync-keys', authenticate, requireSuperAdmin, async (r
   }
 });
 
+// ═══════════════════════════════════════════════════════════
+// 슈퍼관리자 — 알림톡/RCS 템플릿 관리
+// ═══════════════════════════════════════════════════════════
+
+// GET /api/admin/kakao-templates — 전체 고객사 알림톡 템플릿 목록
+router.get('/kakao-templates', async (req: Request, res: Response) => {
+  try {
+    const status = req.query.status as string | undefined;
+    const companyId = req.query.company_id as string | undefined;
+
+    let sql = `SELECT kt.*, c.company_name, ksp.profile_name
+       FROM kakao_templates kt
+       LEFT JOIN companies c ON kt.company_id = c.id
+       LEFT JOIN kakao_sender_profiles ksp ON kt.profile_id = ksp.id
+       WHERE 1=1`;
+    const params: any[] = [];
+
+    if (status) {
+      params.push(status);
+      sql += ` AND kt.status = $${params.length}`;
+    }
+    if (companyId) {
+      params.push(companyId);
+      sql += ` AND kt.company_id = $${params.length}`;
+    }
+
+    sql += ' ORDER BY kt.created_at DESC';
+
+    const result = await query(sql, params);
+    res.json({ success: true, templates: result.rows });
+  } catch (error) {
+    console.error('[Admin] 알림톡 템플릿 조회 실패:', error);
+    res.status(500).json({ success: false, error: '조회 실패' });
+  }
+});
+
+// PUT /api/admin/kakao-templates/:id/approve — 알림톡 템플릿 승인
+router.put('/kakao-templates/:id/approve', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const adminId = (req as any).user?.id;
+    const { templateCode } = req.body;
+
+    const result = await query(
+      `UPDATE kakao_templates SET
+        status = 'approved',
+        template_code = COALESCE($2, template_code),
+        approved_at = NOW(),
+        reviewed_at = NOW(),
+        reviewed_by = $3,
+        updated_at = NOW()
+      WHERE id = $1 AND status = 'pending'
+      RETURNING *`,
+      [id, templateCode || null, adminId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(400).json({ success: false, error: '승인대기 상태의 템플릿만 승인 가능합니다' });
+    }
+
+    res.json({ success: true, template: result.rows[0] });
+  } catch (error) {
+    console.error('[Admin] 알림톡 템플릿 승인 실패:', error);
+    res.status(500).json({ success: false, error: '승인 실패' });
+  }
+});
+
+// PUT /api/admin/kakao-templates/:id/reject — 알림톡 템플릿 반려
+router.put('/kakao-templates/:id/reject', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const adminId = (req as any).user?.id;
+    const { rejectReason } = req.body;
+
+    if (!rejectReason) {
+      return res.status(400).json({ success: false, error: '반려 사유는 필수입니다' });
+    }
+
+    const result = await query(
+      `UPDATE kakao_templates SET
+        status = 'rejected',
+        reject_reason = $2,
+        reviewed_at = NOW(),
+        reviewed_by = $3,
+        updated_at = NOW()
+      WHERE id = $1 AND status = 'pending'
+      RETURNING *`,
+      [id, rejectReason, adminId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(400).json({ success: false, error: '승인대기 상태의 템플릿만 반려 가능합니다' });
+    }
+
+    res.json({ success: true, template: result.rows[0] });
+  } catch (error) {
+    console.error('[Admin] 알림톡 템플릿 반려 실패:', error);
+    res.status(500).json({ success: false, error: '반려 실패' });
+  }
+});
+
+// POST /api/admin/kakao-templates/manual — 기존 템플릿 수동 등록 (승인 상태로 직접 저장)
+router.post('/kakao-templates/manual', async (req: Request, res: Response) => {
+  try {
+    const adminId = (req as any).user?.id;
+    const {
+      companyId, profileId, templateCode, templateName, category,
+      messageType, emphasizeType, emphasizeTitle, content, imageUrl,
+      extraContent, adContent, securityFlag, buttons, quickReplies,
+    } = req.body;
+
+    if (!companyId || !templateName || !content) {
+      return res.status(400).json({ success: false, error: '고객사, 템플릿명, 본문은 필수입니다' });
+    }
+
+    const result = await query(
+      `INSERT INTO kakao_templates (
+        company_id, profile_id, template_code, template_name, category,
+        message_type, emphasize_type, emphasize_title, content, image_url,
+        extra_content, ad_content, security_flag, buttons, quick_replies,
+        status, approved_at, reviewed_at, reviewed_by, requested_at
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'approved',NOW(),NOW(),$16,NOW())
+      RETURNING *`,
+      [
+        companyId, profileId || null, templateCode || null, templateName, category || null,
+        messageType || 'BA', emphasizeType || 'NONE', emphasizeTitle || null, content, imageUrl || null,
+        extraContent || null, adContent || null, securityFlag || false,
+        JSON.stringify(buttons || []), JSON.stringify(quickReplies || []), adminId,
+      ]
+    );
+
+    res.json({ success: true, template: result.rows[0] });
+  } catch (error) {
+    console.error('[Admin] 알림톡 템플릿 수동 등록 실패:', error);
+    res.status(500).json({ success: false, error: '등록 실패' });
+  }
+});
+
+// GET /api/admin/rcs-templates — 전체 고객사 RCS 템플릿 목록
+router.get('/rcs-templates', async (req: Request, res: Response) => {
+  try {
+    const status = req.query.status as string | undefined;
+    const companyId = req.query.company_id as string | undefined;
+
+    let sql = `SELECT rt.*, c.company_name
+       FROM rcs_templates rt
+       LEFT JOIN companies c ON rt.company_id = c.id
+       WHERE 1=1`;
+    const params: any[] = [];
+
+    if (status) {
+      params.push(status);
+      sql += ` AND rt.status = $${params.length}`;
+    }
+    if (companyId) {
+      params.push(companyId);
+      sql += ` AND rt.company_id = $${params.length}`;
+    }
+
+    sql += ' ORDER BY rt.created_at DESC';
+
+    const result = await query(sql, params);
+    res.json({ success: true, templates: result.rows });
+  } catch (error) {
+    console.error('[Admin] RCS 템플릿 조회 실패:', error);
+    res.status(500).json({ success: false, error: '조회 실패' });
+  }
+});
+
+// PUT /api/admin/rcs-templates/:id/approve — RCS 템플릿 승인
+router.put('/rcs-templates/:id/approve', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const adminId = (req as any).user?.id;
+
+    const result = await query(
+      `UPDATE rcs_templates SET
+        status = 'approved', approved_at = NOW(), reviewed_at = NOW(),
+        reviewed_by = $2, updated_at = NOW()
+      WHERE id = $1 AND status = 'pending'
+      RETURNING *`,
+      [id, adminId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(400).json({ success: false, error: '승인대기 상태의 템플릿만 승인 가능합니다' });
+    }
+
+    res.json({ success: true, template: result.rows[0] });
+  } catch (error) {
+    console.error('[Admin] RCS 템플릿 승인 실패:', error);
+    res.status(500).json({ success: false, error: '승인 실패' });
+  }
+});
+
+// PUT /api/admin/rcs-templates/:id/reject — RCS 템플릿 반려
+router.put('/rcs-templates/:id/reject', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const adminId = (req as any).user?.id;
+    const { rejectReason } = req.body;
+
+    if (!rejectReason) {
+      return res.status(400).json({ success: false, error: '반려 사유는 필수입니다' });
+    }
+
+    const result = await query(
+      `UPDATE rcs_templates SET
+        status = 'rejected', reject_reason = $2, reviewed_at = NOW(),
+        reviewed_by = $3, updated_at = NOW()
+      WHERE id = $1 AND status = 'pending'
+      RETURNING *`,
+      [id, rejectReason, adminId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(400).json({ success: false, error: '승인대기 상태의 템플릿만 반려 가능합니다' });
+    }
+
+    res.json({ success: true, template: result.rows[0] });
+  } catch (error) {
+    console.error('[Admin] RCS 템플릿 반려 실패:', error);
+    res.status(500).json({ success: false, error: '반려 실패' });
+  }
+});
+
 export default router;
