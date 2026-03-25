@@ -1314,15 +1314,18 @@ router.post('/direct-send', async (req: Request, res: Response) => {
     if (useIndividualCallback) {
       // D91: admin/company_admin은 배정 필터 미적용 (전체 번호 사용 가능)
       const cbUserId = (userType === 'super_admin' || userType === 'company_admin') ? undefined : userId;
+      console.log(`[direct-send] 개별회신번호 필터 시작 — recipients: ${validRecipients.length}, confirmCallbackExclusion: ${confirmCallbackExclusion}`);
       const cbResult = await filterByIndividualCallback(validRecipients, companyId, cbUserId);
       validRecipients = cbResult.filtered;
       callbackMissingCount = cbResult.callbackMissingCount;
       callbackUnregisteredCount = cbResult.callbackUnregisteredCount;
       callbackSkippedCount = cbResult.callbackSkippedCount;
+      console.log(`[direct-send] 필터 결과 — skipped: ${callbackSkippedCount}, missing: ${callbackMissingCount}, unregistered: ${callbackUnregisteredCount}, remaining: ${validRecipients.length}`);
 
       // ★ 미등록 회신번호 확인 모달 — 제외 건이 있고 confirmCallbackExclusion 없으면 항상 확인 모달 반환
       if (cbResult.callbackSkippedCount > 0 && !confirmCallbackExclusion) {
         const confirmBody = buildCallbackConfirmResponse(cbResult, validRecipients.length);
+        console.log(`[direct-send] ★ 확인 모달 반환 — callbackConfirmRequired: true, remaining: ${validRecipients.length}`);
         return res.status(200).json({ success: false, ...confirmBody });
       }
 

@@ -83,7 +83,7 @@ export default function SendConfirmModal({
             취소
           </button>
           <button
-            onClick={sendConfirm.from === 'target' ? executeTargetSend : executeDirectSend}
+            onClick={() => sendConfirm.from === 'target' ? executeTargetSend() : executeDirectSend()}
             disabled={directSending}
             className={`flex-1 py-3 text-white font-medium ${sendConfirm.type === 'immediate' ? 'bg-emerald-500 hover:bg-emerald-600' : 'bg-blue-500 hover:bg-blue-600'} disabled:opacity-50`}
           >
