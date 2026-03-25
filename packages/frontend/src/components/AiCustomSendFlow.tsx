@@ -137,11 +137,6 @@ export default function AiCustomSendFlow({
   const [isGenerating, setIsGenerating] = useState(false);
   const [selectedVariantIdx, setSelectedVariantIdx] = useState(0);
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
-  // ★ D85: 자동 스팸테스트 결과 (프로 이상)
-  const [spamTestBatchId, setSpamTestBatchId] = useState<string | null>(null);
-  const [spamTestCompleted, setSpamTestCompleted] = useState(false);
-  const [spamTestRegenerateCount, setSpamTestRegenerateCount] = useState(0);
-
   // ★ D92: 미리보기 모달 state
   const [showPreviewModal, setShowPreviewModal] = useState(false);
 
@@ -366,12 +361,6 @@ export default function AiCustomSendFlow({
         const data = await res.json();
         setVariants(data.variants || []);
         setSelectedVariantIdx(0);
-        // ★ D85: 자동 스팸테스트 결과 반영 (프로 이상)
-        if (data.spamTestBatchId) {
-          setSpamTestBatchId(data.spamTestBatchId);
-          setSpamTestCompleted(data.spamTestCompleted || false);
-          setSpamTestRegenerateCount(data.spamTestRegenerateCount || 0);
-        }
       } else { const err = await res.json(); showAlert('문안 생성 실패', err.error || '맞춤 문안 생성에 실패했습니다. 프로모션 카드를 확인 후 다시 시도해주세요.', 'error'); setCurrentStep(3); }
     } catch (error) { console.error('문안 생성 실패:', error); showAlert('서버 오류', '서버와의 통신 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.', 'error'); setCurrentStep(3); }
     finally { setIsGenerating(false); }
@@ -821,37 +810,6 @@ export default function AiCustomSendFlow({
           {/* Step 4 — 핸드폰 모양 3개 가로 배치 (기존 AI 한줄로와 동일) */}
           {currentStep === 4 && (
             <div>
-              {/* ★ D85: 자동 스팸테스트 결과 배너 (프로 요금제) */}
-              {spamTestBatchId && (
-                <div className={`rounded-lg p-3 border mb-3 ${
-                  spamTestCompleted
-                    ? spamTestRegenerateCount > 0
-                      ? 'bg-amber-50 border-amber-200'
-                      : 'bg-green-50 border-green-200'
-                    : 'bg-blue-50 border-blue-200'
-                }`}>
-                  <div className="flex items-center gap-2">
-                    {!spamTestCompleted ? (
-                      <>
-                        <span className="animate-spin text-blue-500">🔄</span>
-                        <span className="text-sm font-medium text-blue-700">스팸필터 자동 검사 중...</span>
-                      </>
-                    ) : spamTestRegenerateCount > 0 ? (
-                      <>
-                        <span>🛡️</span>
-                        <span className="text-sm font-medium text-amber-700">
-                          스팸필터 검사 완료 — {spamTestRegenerateCount}건 스팸 차단되어 자동 재생성됨
-                        </span>
-                      </>
-                    ) : (
-                      <>
-                        <span>✅</span>
-                        <span className="text-sm font-medium text-green-700">스팸필터 검사 완료 — 전체 문안 수신 안전</span>
-                      </>
-                    )}
-                  </div>
-                </div>
-              )}
               <div className="text-sm text-gray-600 mb-3">💬 {channel} 메시지 추천 (택1)</div>
               {isGenerating ? (
                 <div className="flex flex-col items-center justify-center py-16">

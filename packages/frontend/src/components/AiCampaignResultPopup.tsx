@@ -204,64 +204,23 @@ export default function AiCampaignResultPopup({
               <span className="px-2 py-1 bg-purple-100 text-purple-700 rounded font-medium">{selectedChannel === 'KAKAO' ? '카카오' : selectedChannel}</span>
             </div>
 
-            {/* ★ D78: 자동 스팸테스트 진행/결과 배너 (프로 요금제) */}
-            {aiResult?.spamTestBatchId && (
-              <div className={`rounded-lg p-3 border ${
-                aiResult.spamTestCompleted
-                  ? aiResult.spamTestRegenerateCount > 0
-                    ? 'bg-amber-50 border-amber-200'
-                    : 'bg-green-50 border-green-200'
-                  : 'bg-blue-50 border-blue-200'
-              }`}>
-                <div className="flex items-center gap-2">
-                  {!aiResult.spamTestCompleted ? (
-                    <>
-                      <span className="animate-spin text-blue-500">🔄</span>
-                      <span className="text-sm font-medium text-blue-700">스팸필터 자동 검사 중... ({aiResult.spamTestTotalCount || 0}/3 완료)</span>
-                    </>
-                  ) : aiResult.spamTestRegenerateCount > 0 ? (
-                    <>
-                      <span>🛡️</span>
-                      <span className="text-sm font-medium text-amber-700">
-                        스팸필터 검사 완료 — {aiResult.spamTestRegenerateCount}건 스팸 차단되어 자동 재생성됨
-                      </span>
-                    </>
-                  ) : (
-                    <>
-                      <span>✅</span>
-                      <span className="text-sm font-medium text-green-700">스팸필터 검사 완료 — 전체 문안 수신 안전</span>
-                    </>
-                  )}
-                </div>
-              </div>
-            )}
-
             {/* 메시지 3안 - 모던 폰 UI */}
             <div>
               <div className="text-sm text-gray-600 mb-3">💬 {selectedChannel === 'KAKAO' ? '카카오' : selectedChannel} 메시지 추천 (택1)</div>
               <div className="grid grid-cols-3 gap-5">
                 {aiResult?.messages?.length > 0 ? (
                   aiResult.messages.map((msg: any, idx: number) => {
-                    // ★ D78: 스팸 차단된 variant는 선택 불가
-                    const isSpamBlocked = msg.spam_result === 'blocked';
-                    const isSpamPass = msg.spam_result === 'pass';
-                    const wasRegenerated = msg.spam_regenerated === true;
-                    const hasSpamResult = !!msg.spam_result;
                     return (
-                    <label key={msg.variant_id || idx} className={`group ${isSpamBlocked ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}>
-                      <input type="radio" name="message" className="hidden" checked={selectedAiMsgIdx === idx} onChange={() => { if (isSpamBlocked) return; setSelectedAiMsgIdx(idx); setEditingAiMsg(null); }} disabled={isSpamBlocked} />
+                    <label key={msg.variant_id || idx} className="group cursor-pointer">
+                      <input type="radio" name="message" className="hidden" checked={selectedAiMsgIdx === idx} onChange={() => { setSelectedAiMsgIdx(idx); setEditingAiMsg(null); }} />
                       {/* 모던 폰 프레임 */}
-                      <div className={`rounded-[1.8rem] p-[3px] transition-all ${
-                        isSpamBlocked
-                          ? 'bg-red-300'
-                          : 'bg-gray-300 group-has-[:checked]:bg-gradient-to-b group-has-[:checked]:from-purple-400 group-has-[:checked]:to-purple-600 group-has-[:checked]:shadow-lg group-has-[:checked]:shadow-purple-200 hover:bg-gray-400'
-                      }`}>
+                      <div className="rounded-[1.8rem] p-[3px] transition-all bg-gray-300 group-has-[:checked]:bg-gradient-to-b group-has-[:checked]:from-purple-400 group-has-[:checked]:to-purple-600 group-has-[:checked]:shadow-lg group-has-[:checked]:shadow-purple-200 hover:bg-gray-400">
                         <div className="bg-white rounded-[1.6rem] overflow-hidden flex flex-col" style={{ height: '420px' }}>
                           {/* 상단 - 타입명 + 수정 버튼 */}
                           <div className="px-4 py-2.5 bg-gradient-to-r from-gray-50 to-gray-100 flex justify-between items-center shrink-0 border-b">
                             <span className="text-[11px] text-gray-400 font-medium">{selectedChannel === 'KAKAO' ? '카카오톡' : '문자메시지'}</span>
                             <div className="flex items-center gap-1.5">
-                              {selectedAiMsgIdx === idx && editingAiMsg !== idx && !isSpamBlocked && (
+                              {selectedAiMsgIdx === idx && editingAiMsg !== idx && (
                                 <button
                                   onClick={(e) => { e.preventDefault(); e.stopPropagation(); setEditingAiMsg(idx); }}
                                   className="text-[10px] px-1.5 py-0.5 bg-purple-100 text-purple-600 rounded hover:bg-purple-200 transition-colors"
@@ -272,24 +231,6 @@ export default function AiCampaignResultPopup({
                               <span className="text-[11px] font-bold text-purple-600">{msg.variant_id}. {msg.variant_name}</span>
                             </div>
                           </div>
-                          {/* ★ D78: 스팸필터 결과 배지 */}
-                          {hasSpamResult && (
-                            <div className={`px-4 py-1.5 text-center shrink-0 border-b ${
-                              isSpamBlocked ? 'bg-red-50 border-red-200' :
-                              wasRegenerated ? 'bg-amber-50 border-amber-200' :
-                              'bg-green-50 border-green-200'
-                            }`}>
-                              <span className={`text-[11px] font-bold ${
-                                isSpamBlocked ? 'text-red-600' :
-                                wasRegenerated ? 'text-amber-600' :
-                                'text-green-600'
-                              }`}>
-                                {isSpamBlocked ? '🚫 스팸 차단 — 선택 불가' :
-                                 wasRegenerated ? `🔄 재생성 완료 (${msg.spam_regenerate_count || 1}회)` :
-                                 '✅ 수신 안전'}
-                              </span>
-                            </div>
-                          )}
                           {/* LMS/MMS 제목 */}
                           {(selectedChannel === 'LMS' || selectedChannel === 'MMS') && msg.subject && (
                             <div className="px-4 py-1.5 bg-orange-50 border-b border-orange-200 shrink-0">
@@ -444,13 +385,11 @@ onClick={() => {
 }}
 className="flex-1 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 flex items-center justify-center gap-2"
 >
-{aiResult?.spamTestCompleted ? '🛡️ 스팸검사 완료' : '🛡️ 스팸필터'}
+스팸필터 테스트
 </button>
 <button
 onClick={() => {
-  // ★ D78: 스팸 차단된 variant 선택 차단
   const selectedMsg = aiResult?.messages?.[selectedAiMsgIdx];
-  if (selectedMsg?.spam_result === 'blocked') return;
   // ★ B17-10 → B-D75-01 리팩토링: SMS 바이트 초과 → 커스텀 모달로 LMS 전환 안내
   if (selectedChannel === 'SMS') {
     const msg = selectedMsg?.message_text || '';
@@ -463,8 +402,7 @@ onClick={() => {
   }
   setShowAiSendModal(true);
 }}
-disabled={aiResult?.messages?.[selectedAiMsgIdx]?.spam_result === 'blocked'}
-className="flex-1 py-3 bg-green-700 text-white rounded-lg hover:bg-green-800 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+className="flex-1 py-3 bg-green-700 text-white rounded-lg hover:bg-green-800 flex items-center justify-center gap-2"
 >
 ✅ 캠페인확정
 </button>
