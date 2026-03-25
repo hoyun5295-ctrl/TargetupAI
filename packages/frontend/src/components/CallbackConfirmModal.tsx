@@ -109,6 +109,18 @@ export default function CallbackConfirmModal({
           <p className="text-xs text-gray-400 mt-3">
             * 미등록 회신번호를 사용하려면 먼저 발신번호 관리에서 등록해주세요.
           </p>
+
+          {/* 전원 제외 시 발송 불가 안내 */}
+          {data.remainingCount === 0 && (
+            <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+              <p className="text-sm font-semibold text-red-700">
+                발송 대상이 없습니다. 전체 수신자가 미등록 회신번호로 인해 제외되었습니다.
+              </p>
+              <p className="text-xs text-red-500 mt-1">
+                발신번호 관리에서 해당 회신번호를 등록한 후 다시 시도해주세요.
+              </p>
+            </div>
+          )}
         </div>
 
         {/* 하단 버튼 */}
@@ -118,21 +130,23 @@ export default function CallbackConfirmModal({
             disabled={isSending}
             className="flex-1 py-3 text-gray-600 hover:bg-gray-50 font-medium disabled:opacity-50"
           >
-            취소
+            {data.remainingCount === 0 ? '확인' : '취소'}
           </button>
-          <button
-            onClick={onConfirm}
-            disabled={isSending}
-            className="flex-1 py-3 text-white font-medium bg-amber-500 hover:bg-amber-600 disabled:opacity-50"
-          >
-            {isSending ? (
-              <span className="flex items-center justify-center gap-2">
-                <span className="animate-spin">⏳</span> 처리중...
-              </span>
-            ) : (
-              `제외하고 발송 (${data.remainingCount.toLocaleString()}명)`
-            )}
-          </button>
+          {data.remainingCount > 0 && (
+            <button
+              onClick={onConfirm}
+              disabled={isSending}
+              className="flex-1 py-3 text-white font-medium bg-amber-500 hover:bg-amber-600 disabled:opacity-50"
+            >
+              {isSending ? (
+                <span className="flex items-center justify-center gap-2">
+                  <span className="animate-spin">⏳</span> 처리중...
+                </span>
+              ) : (
+                `제외하고 발송 (${data.remainingCount.toLocaleString()}명)`
+              )}
+            </button>
+          )}
         </div>
       </div>
     </div>

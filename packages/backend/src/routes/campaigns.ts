@@ -716,12 +716,8 @@ if (useIndividualCallback) {
   callbackUnregisteredCount = cbResult.callbackUnregisteredCount;
   callbackSkippedCount = cbResult.callbackSkippedCount;
 
-  // ★ 미등록 회신번호 확인 모달 — 제외 건이 있고 confirmCallbackExclusion 없으면 확인 요청 반환
+  // ★ 미등록 회신번호 확인 모달 — 제외 건이 있고 confirmCallbackExclusion 없으면 항상 확인 모달 반환
   if (cbResult.callbackSkippedCount > 0 && !confirmCallbackExclusion) {
-    if (filteredCustomers.length === 0) {
-      const errBody = buildCallbackErrorResponse(callbackMissingCount, callbackUnregisteredCount);
-      return res.status(400).json(errBody);
-    }
     const confirmBody = buildCallbackConfirmResponse(cbResult, filteredCustomers.length);
     return res.status(200).json(confirmBody);
   }
@@ -1324,12 +1320,8 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       callbackUnregisteredCount = cbResult.callbackUnregisteredCount;
       callbackSkippedCount = cbResult.callbackSkippedCount;
 
-      // ★ 미등록 회신번호 확인 모달 — 제외 건이 있고 confirmCallbackExclusion 없으면 확인 요청 반환
+      // ★ 미등록 회신번호 확인 모달 — 제외 건이 있고 confirmCallbackExclusion 없으면 항상 확인 모달 반환
       if (cbResult.callbackSkippedCount > 0 && !confirmCallbackExclusion) {
-        if (validRecipients.length === 0) {
-          const errBody = buildCallbackErrorResponse(callbackMissingCount, callbackUnregisteredCount);
-          return res.status(400).json({ success: false, ...errBody });
-        }
         const confirmBody = buildCallbackConfirmResponse(cbResult, validRecipients.length);
         return res.status(200).json({ success: false, ...confirmBody });
       }
