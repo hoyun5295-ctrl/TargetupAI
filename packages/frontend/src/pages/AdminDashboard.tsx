@@ -61,6 +61,7 @@ export default function AdminDashboard() {
   const { user, logout } = useAuthStore();
 
   const [activeTab, setActiveTab] = useState<'companies' | 'users' | 'scheduled' | 'callbacks' | 'plans' | 'requests' | 'deposits' | 'allCampaigns' | 'stats' | 'billing' | 'syncAgents' | 'auditLogs' | 'lineGroups' | 'templates'>('companies');
+  const [openMenu, setOpenMenu] = useState<string | null>(null);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [plans, setPlans] = useState<Plan[]>([]);
   const [users, setUsers] = useState<User[]>([]);
@@ -2136,158 +2137,104 @@ const handleApproveRequest = async (id: string) => {
           </div>
         </div>
 
-        {/* 탭 메뉴 */}
+        {/* 드롭다운 그룹 메뉴 */}
         <div className="bg-white rounded-lg shadow mb-6">
-          <div className="border-b">
-            <nav className="flex flex-wrap">
-              <button
-                onClick={() => setActiveTab('companies')}
-                className={`px-4 py-3 text-sm font-medium border-b-2 whitespace-nowrap ${
-                  activeTab === 'companies'
-                    ? 'border-blue-500 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                고객사 관리
-              </button>
-              <button
-                onClick={() => setActiveTab('users')}
-                className={`px-4 py-3 text-sm font-medium border-b-2 whitespace-nowrap ${
-                  activeTab === 'users'
-                    ? 'border-blue-500 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                사용자 관리
-              </button>
-              <button
-                onClick={() => setActiveTab('callbacks')}
-                className={`px-4 py-3 text-sm font-medium border-b-2 relative ${
-                  activeTab === 'callbacks'
-                    ? 'border-blue-500 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                발신번호 관리
-                {senderRegPendingCount > 0 && (
-                  <span className="ml-1.5 inline-flex items-center justify-center w-5 h-5 text-xs font-bold text-white bg-red-500 rounded-full">
-                    {senderRegPendingCount}
-                  </span>
-                )}
-              </button>
-              <button
-                onClick={() => { setActiveTab('stats'); loadSendStats(); }}
-                className={`px-4 py-3 text-sm font-medium border-b-2 whitespace-nowrap ${
-                  activeTab === 'stats'
-                    ? 'border-blue-500 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                발송 통계
-              </button>
-              <button
-                onClick={() => setActiveTab('scheduled')}
-                className={`px-4 py-3 text-sm font-medium border-b-2 whitespace-nowrap ${
-                  activeTab === 'scheduled'
-                    ? 'border-blue-500 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                예약 관리
-              </button>
-              <button
-                onClick={() => { setActiveTab('allCampaigns'); loadAllCampaigns(); }}
-                className={`px-4 py-3 text-sm font-medium border-b-2 whitespace-nowrap ${
-                  activeTab === 'allCampaigns'
-                    ? 'border-blue-500 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                캠페인 관리
-              </button>
-              <button
-                onClick={() => setActiveTab('plans')}
-                className={`px-4 py-3 text-sm font-medium border-b-2 whitespace-nowrap ${
-                  activeTab === 'plans'
-                    ? 'border-blue-500 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700'
-                }`}
-                >
-                요금제 관리
-              </button>
-              <button
-                onClick={() => setActiveTab('requests')}
-                className={`px-4 py-3 text-sm font-medium border-b-2 relative ${
-                  activeTab === 'requests'
-                    ? 'border-blue-500 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                플랜 신청
-                {planRequests.filter(r => r.status === 'pending').length > 0 && (
-                  <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
-                    {planRequests.filter(r => r.status === 'pending').length}
-                  </span>
-                )}
-              </button>
-              <button
-                onClick={() => setActiveTab('deposits')}
-                className={`px-4 py-3 text-sm font-medium border-b-2 relative ${
-                  activeTab === 'deposits'
-                    ? 'border-blue-500 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                충전 관리
-                {pendingDeposits.length > 0 && (
-                  <span className="absolute -top-1 -right-1 bg-emerald-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
-                    {pendingDeposits.length}
-                  </span>
-                )}
-              </button>
-              <button
-                onClick={() => setActiveTab('billing')}
-                className={`px-4 py-3 text-sm font-medium border-b-2 whitespace-nowrap ${
-                  activeTab === 'billing'
-                    ? 'border-blue-500 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                정산 관리
-              </button>
-              <button
-                onClick={() => setActiveTab('syncAgents')}
-                className={`px-4 py-3 text-sm font-medium border-b-2 whitespace-nowrap ${
-                  activeTab === 'syncAgents'
-                    ? 'border-blue-500 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                Sync 모니터링
-              </button>
-              <button
-                onClick={() => setActiveTab('auditLogs')}
-                className={`px-4 py-3 text-sm font-medium border-b-2 whitespace-nowrap ${
-                  activeTab === 'auditLogs'
-                    ? 'border-blue-500 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                📋 감사 로그
-                </button>
-              <button
-                onClick={() => setActiveTab('templates')}
-                className={`px-4 py-3 text-sm font-medium border-b-2 whitespace-nowrap ${
-                  activeTab === 'templates'
-                    ? 'border-amber-500 text-amber-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                💬 템플릿 관리
-              </button>
-            </nav>
+          <div className="border-b px-4 py-2 flex items-center gap-1">
+            {[
+              {
+                label: '고객 관리', color: 'blue',
+                tabs: ['companies', 'users'] as const,
+                items: [
+                  { key: 'companies', label: '고객사 관리' },
+                  { key: 'users', label: '사용자 관리' },
+                ],
+              },
+              {
+                label: '발송 관리', color: 'emerald',
+                tabs: ['callbacks', 'stats', 'scheduled', 'allCampaigns', 'templates'] as const,
+                items: [
+                  { key: 'callbacks', label: '발신번호 관리', badge: senderRegPendingCount > 0 ? senderRegPendingCount : 0 },
+                  { key: 'stats', label: '발송 통계', onClick: () => loadSendStats() },
+                  { key: 'scheduled', label: '예약 관리' },
+                  { key: 'allCampaigns', label: '캠페인 관리', onClick: () => loadAllCampaigns() },
+                  { key: 'templates', label: '템플릿 관리' },
+                ],
+              },
+              {
+                label: '요금/정산', color: 'amber',
+                tabs: ['plans', 'requests', 'deposits', 'billing'] as const,
+                items: [
+                  { key: 'plans', label: '요금제 관리' },
+                  { key: 'requests', label: '플랜 신청', badge: planRequests.filter(r => r.status === 'pending').length },
+                  { key: 'deposits', label: '충전 관리', badge: pendingDeposits.length },
+                  { key: 'billing', label: '정산 관리' },
+                ],
+              },
+              {
+                label: '시스템', color: 'gray',
+                tabs: ['syncAgents', 'auditLogs'] as const,
+                items: [
+                  { key: 'syncAgents', label: 'Sync 모니터링' },
+                  { key: 'auditLogs', label: '감사 로그' },
+                ],
+              },
+            ].map(group => {
+              const isGroupActive = (group.tabs as readonly string[]).includes(activeTab);
+              const isOpen = openMenu === group.label;
+              const colorMap: Record<string, { active: string; hover: string; bg: string; border: string }> = {
+                blue: { active: 'text-blue-600', hover: 'hover:text-blue-600', bg: 'bg-blue-50', border: 'border-blue-500' },
+                emerald: { active: 'text-emerald-600', hover: 'hover:text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-500' },
+                amber: { active: 'text-amber-600', hover: 'hover:text-amber-600', bg: 'bg-amber-50', border: 'border-amber-500' },
+                gray: { active: 'text-gray-700', hover: 'hover:text-gray-600', bg: 'bg-gray-50', border: 'border-gray-500' },
+              };
+              const c = colorMap[group.color] || colorMap.blue;
+
+              return (
+                <div key={group.label} className="relative">
+                  <button
+                    onClick={() => setOpenMenu(isOpen ? null : group.label)}
+                    onBlur={() => setTimeout(() => setOpenMenu(null), 150)}
+                    className={`px-4 py-2.5 text-sm font-medium rounded-lg transition-all flex items-center gap-1.5 ${
+                      isGroupActive ? `${c.active} ${c.bg}` : `text-gray-500 ${c.hover} hover:bg-gray-50`
+                    }`}
+                  >
+                    {group.label}
+                    {group.items.some((it: any) => it.badge > 0) && (
+                      <span className="w-2 h-2 rounded-full bg-red-500"></span>
+                    )}
+                    <svg className={`w-3.5 h-3.5 transition-transform ${isOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                  </button>
+                  {isOpen && (
+                    <div className="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-lg py-1 min-w-[180px] z-50"
+                         style={{ animation: 'fadeIn 0.15s ease-out' }}>
+                      {group.items.map((item: any) => (
+                        <button key={item.key}
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            setActiveTab(item.key);
+                            item.onClick?.();
+                            setOpenMenu(null);
+                          }}
+                          className={`w-full text-left px-4 py-2.5 text-sm transition-colors flex items-center justify-between ${
+                            activeTab === item.key ? `${c.active} ${c.bg} font-medium` : 'text-gray-600 hover:bg-gray-50'
+                          }`}
+                        >
+                          {item.label}
+                          {item.badge > 0 && (
+                            <span className="ml-2 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-bold">
+                              {item.badge}
+                            </span>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
+        <style>{`@keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }`}</style>
         {/* 고객사 관리 탭 */}
         {activeTab === 'companies' && (
           <div className="bg-white rounded-lg shadow">
