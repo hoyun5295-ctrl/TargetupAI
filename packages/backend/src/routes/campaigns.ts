@@ -665,36 +665,6 @@ router.post('/:id/send', async (req: Request, res: Response) => {
       // 잘못된 변수는 빈 문자열로 치환하여 발송 (차단하지 않고 안전하게 처리)
     }
 
-    // campaign_runs에 발송 이력 생성
-    const runNumberResult = await query(
-      `SELECT COALESCE(MAX(run_number), 0) + 1 as next_run
-       FROM campaign_runs WHERE campaign_id = $1`,
-      [id]
-    );
-    const runNumber = runNumberResult.rows[0].next_run;
-
-    // 예약 발송인지 확인
-    console.log('scheduled_at:', campaign.scheduled_at);
-    const isScheduled = campaign.scheduled_at && new Date(campaign.scheduled_at) > new Date();
-    console.log('isScheduled:', isScheduled);
-
-    const runResult = await query(
-      `INSERT INTO campaign_runs (
-        campaign_id, run_number, target_filter, target_count,
-        status, scheduled_at
-      ) VALUES ($1, $2, $3, $4, $5, $6)
-      RETURNING *`,
-      [
-        id,
-        runNumber,
-        JSON.stringify(targetFilter),
-        customers.length,
-        isScheduled ? 'scheduled' : 'sending',
-        campaign.scheduled_at
-      ]
-    );
-    const campaignRun = runResult.rows[0];
-
 // excluded_phones 목록 조회
 const excludedPhones = campaign.excluded_phones || [];
 
@@ -703,7 +673,7 @@ let filteredCustomers = customers.filter(
   (c: any) => !excludedPhones.includes(normalizePhone(c.phone))
 );
 
-// ★ CT-08: 개별회신번호 필터링 — callback-filter.ts 컨트롤타워 사용
+// ★ D93: CT-08 필터링을 campaign_runs INSERT 전에 실행 — 확인 모달 반환 시 불필요한 run 생성 방지
 let callbackSkippedCount = 0;
 let callbackMissingCount = 0;
 let callbackUnregisteredCount = 0;
@@ -727,6 +697,36 @@ if (filteredCustomers.length === 0) {
   const errBody = buildCallbackErrorResponse(callbackMissingCount, callbackUnregisteredCount);
   return res.status(400).json(errBody);
 }
+
+    // campaign_runs에 발송 이력 생성 (CT-08 확인 모달 통과 후에만 INSERT)
+    const runNumberResult = await query(
+      `SELECT COALESCE(MAX(run_number), 0) + 1 as next_run
+       FROM campaign_runs WHERE campaign_id = $1`,
+      [id]
+    );
+    const runNumber = runNumberResult.rows[0].next_run;
+
+    // 예약 발송인지 확인
+    console.log('scheduled_at:', campaign.scheduled_at);
+    const isScheduled = campaign.scheduled_at && new Date(campaign.scheduled_at) > new Date();
+    console.log('isScheduled:', isScheduled);
+
+    const runResult = await query(
+      `INSERT INTO campaign_runs (
+        campaign_id, run_number, target_filter, target_count,
+        status, scheduled_at
+      ) VALUES ($1, $2, $3, $4, $5, $6)
+      RETURNING *`,
+      [
+        id,
+        runNumber,
+        JSON.stringify(targetFilter),
+        filteredCustomers.length,
+        isScheduled ? 'scheduled' : 'sending',
+        campaign.scheduled_at
+      ]
+    );
+    const campaignRun = runResult.rows[0];
 
 // ★ 선불 잔액 체크 + 차감 (MySQL INSERT 전에 atomic 차감)
 // 카카오 채널이면 KAKAO 타입으로 차감

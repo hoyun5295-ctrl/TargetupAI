@@ -228,6 +228,10 @@ export default function CustomerDBModal({ onClose, token, userType }: CustomerDB
     if (!filterOptions[fieldKey] || filterOptions[fieldKey].length === 0) return false;
     const dataType = getFieldDataType(fieldKey);
     if (['number', 'integer', 'float', 'numeric', 'date', 'datetime', 'timestamp'].includes(dataType)) return false;
+    // ★ 값이 모두 숫자이면 숫자 필드로 취급 (금액, 포인트 등 커스텀 필드)
+    const vals = filterOptions[fieldKey];
+    const allNumeric = vals.length > 0 && vals.every((v: string) => v !== '' && !isNaN(Number(String(v).replace(/,/g, ''))));
+    if (allNumeric) return false;
     return true;
   };
 
@@ -447,8 +451,8 @@ export default function CustomerDBModal({ onClose, token, userType }: CustomerDB
                         let display: string;
                         if (f.field_key === 'gender') {
                           display = val === 'M' || val === '남' || val === '남성' ? '남' : val === 'F' || val === '여' || val === '여성' ? '여' : val || '-';
-                        } else if (f.field_key === 'birth_date' || f.field_key === 'recent_purchase_date' || f.field_key === 'created_at' || f.field_key === 'wedding_anniversary' || (f.field_type && f.field_type.toUpperCase() === 'DATE')) {
-                          // ★ D89: field_type 대소문자 무관 + formatDate 개선으로 하루 밀림 방지
+                        } else if (f.field_key === 'birth_date' || f.field_key === 'recent_purchase_date' || f.field_key === 'created_at' || f.field_key === 'wedding_anniversary' || f.field_key === 'registration_date' || f.field_key === 'first_purchase_date' || (f.field_type && ['DATE', 'DATETIME', 'TIMESTAMP'].includes(f.field_type.toUpperCase()))) {
+                          // ★ D93: DATE/DATETIME/TIMESTAMP 타입 + 날짜 직접 컬럼 전부 formatDate 적용
                           display = val ? formatDate(String(val)) : '-';
                         } else if (f.field_key === 'total_purchase_amount' || f.field_key === 'recent_purchase_amount' || f.field_key === 'avg_order_value' || f.field_key === 'points' || f.field_key === 'purchase_count') {
                           // ★ D89: points/purchase_count 등 숫자 직접 컬럼 쉼표 포맷팅

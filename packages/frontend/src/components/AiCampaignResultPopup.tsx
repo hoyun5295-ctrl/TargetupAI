@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { formatPreviewValue } from '../utils/formatDate';
+import { highlightVars } from '../utils/highlightVars';
 
 interface AiCampaignResultPopupProps {
   show: boolean;
@@ -275,8 +276,8 @@ export default function AiCampaignResultPopup({
                             <div className="flex gap-2">
                               <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-xs ${selectedChannel === 'KAKAO' ? 'bg-yellow-100' : 'bg-purple-100'}`}>{selectedChannel === 'KAKAO' ? '💬' : '📱'}</div>
                               <div className={`rounded-2xl rounded-tl-sm p-3 shadow-sm border text-[12px] leading-[1.6] whitespace-pre-wrap break-all overflow-hidden text-gray-700 max-w-[95%] ${selectedChannel === 'KAKAO' ? 'bg-yellow-50 border-yellow-200' : 'bg-white border-gray-100'}`}>
-                              {/* 문안 추천 단계: 변수 원본(%고객명% 등) 그대로 표시. 미리보기에서 샘플 데이터로 치환 */}
-                              {wrapAdText(msg.message_text || '')}
+                              {/* ★ D93: 문안 추천 단계 — %변수% 하이라이트 표시로 개인화 부분 직관적 확인 */}
+                              {highlightVars(wrapAdText(msg.message_text || ''))}
                               </div>
                             </div>
                             )}

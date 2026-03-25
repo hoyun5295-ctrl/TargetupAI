@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { highlightVars } from '../utils/highlightVars';
 
 interface AiCampaignSendModalProps {
   onClose: () => void;
@@ -96,15 +97,9 @@ export default function AiCampaignSendModal({
     return clean.replace(/(\d{3,4})(\d{3,4})(\d{4})/, '$1-$2-$3');
   };
 
-  // 미리보기 메시지 구성
+  // ★ D93: 발송 확인창에서는 %변수% 원본 + 하이라이트로 표시 (개인화 위치 직관적 확인)
   const getPreviewMessage = () => {
     let msg = messageText || '';
-    // ★ B-D75-01: 하드코딩 샘플 제거 → sampleCustomer(백엔드 실제 데이터) 사용
-    if (usePersonalization && sampleCustomer && Object.keys(sampleCustomer).length > 0) {
-      Object.entries(sampleCustomer).forEach(([k, v]) => { msg = msg.replace(new RegExp(`%${k}%`, 'g'), v); });
-      // 남은 %변수% 제거
-      msg = msg.replace(/%[^%\s]{1,20}%/g, '');
-    }
     // 광고 문구 미리보기 표시
     if (isAd && selectedChannel !== 'KAKAO') {
       const adPrefix = selectedChannel === 'SMS' ? '(광고)' : '(광고) ';
@@ -174,7 +169,7 @@ export default function AiCampaignSendModal({
                     <div className="flex gap-2 mt-1">
                       <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-xs ${selectedChannel === 'KAKAO' ? 'bg-yellow-100' : 'bg-emerald-100'}`}>{selectedChannel === 'KAKAO' ? '💬' : '📱'}</div>
                       <div className={`rounded-2xl rounded-tl-sm p-3 shadow-sm border text-[12px] leading-[1.7] whitespace-pre-wrap break-all text-gray-700 max-w-[95%] ${selectedChannel === 'KAKAO' ? 'bg-yellow-50 border-yellow-200' : 'bg-white border-gray-100'}`}>
-                        {getPreviewMessage() || '메시지 없음'}
+                        {highlightVars(getPreviewMessage()) || '메시지 없음'}
                       </div>
                     </div>
                   </div>

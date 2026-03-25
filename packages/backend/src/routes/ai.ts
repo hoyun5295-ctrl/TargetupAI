@@ -292,7 +292,7 @@ router.post('/recommend-target', async (req: Request, res: Response) => {
          FROM customers c
          WHERE c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true${storeFilter} ${sampleFilterWhere}
          AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${sampleUnsubIdx} AND u.phone = c.phone)
-         ORDER BY name ASC NULLS LAST LIMIT 1`,
+         ORDER BY c.updated_at DESC NULLS LAST LIMIT 1`,
         [...baseParams, ...sampleFilterParams, userId]
       );
 
@@ -612,7 +612,7 @@ router.post('/parse-briefing', authenticate, async (req: Request, res: Response)
         `SELECT * FROM customers c
          WHERE c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true${storeFilter} ${filterWhere}
          AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${unsubIdxC} AND u.phone = c.phone)
-         ORDER BY c.name ASC LIMIT 1`,
+         ORDER BY c.updated_at DESC NULLS LAST LIMIT 1`,
         [...baseParams, ...filterParams, userId]
       );
       if (sampleResult.rows.length > 0) {

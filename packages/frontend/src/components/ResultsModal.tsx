@@ -42,6 +42,7 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
   const itemsPerPage = 10;
   const [cancelTarget, setCancelTarget] = useState<any>(null);
   const [toast, setToast] = useState<{show: boolean, type: 'success' | 'error', message: string}>({show: false, type: 'success', message: ''});
+  const [msgDetailContent, setMsgDetailContent] = useState<string | null>(null);
 
   // 필터 상태
   const [filterType, setFilterType] = useState('all');
@@ -368,8 +369,14 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
                             </span>
                           </td>
                           <td className="px-3 py-2.5 text-center text-xs text-gray-600">{c.created_by_name || '-'}</td>
-                          <td className="px-3 py-2.5 max-w-[200px] text-gray-700" title={c.message_content}>
-                            <span className="truncate block">{c.message_content}</span>
+                          <td className="px-3 py-2.5 max-w-[200px] text-gray-700">
+                            <button
+                              onClick={() => setMsgDetailContent(c.message_content || '')}
+                              className="truncate block text-left hover:text-emerald-600 hover:underline cursor-pointer max-w-full"
+                              title="클릭하여 전체 내용 보기"
+                            >
+                              {c.message_content}
+                            </button>
                           </td>
                           <td className="px-3 py-2.5 text-center text-xs text-gray-500">
                           {new Date(c.created_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
@@ -1059,6 +1066,25 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
             toast.type === 'success' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'
           }`}>
             {toast.message}
+          </div>
+        )}
+        {/* ★ D93: 메시지 상세보기 모달 — 클릭으로 열리는 스크롤 가능 모달 */}
+        {msgDetailContent !== null && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[80]" onClick={() => setMsgDetailContent(null)}>
+            <div className="bg-white rounded-xl shadow-2xl w-[400px] max-h-[70vh] flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
+              <div className="px-5 py-3 border-b bg-gray-50 flex justify-between items-center">
+                <h4 className="text-sm font-bold text-gray-700">💬 메시지 내용</h4>
+                <button onClick={() => setMsgDetailContent(null)} className="text-gray-400 hover:text-gray-600 text-lg">✕</button>
+              </div>
+              <div className="p-5 overflow-y-auto flex-1">
+                <div className="whitespace-pre-wrap text-sm text-gray-700 leading-relaxed break-all">
+                  {msgDetailContent}
+                </div>
+              </div>
+              <div className="px-5 py-3 border-t">
+                <button onClick={() => setMsgDetailContent(null)} className="w-full py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm font-medium text-gray-600">확인</button>
+              </div>
+            </div>
           </div>
         )}
       </div>

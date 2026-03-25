@@ -91,6 +91,7 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
   const [messageContent, setMessageContent] = useState(campaign?.message_content || '');
   const [messageSubject, setMessageSubject] = useState(campaign?.message_subject || '');
   const [callbackNumber, setCallbackNumber] = useState(campaign?.callback_number || '');
+  const [useIndividualCallback, setUseIndividualCallback] = useState(campaign?.use_individual_callback ?? false);
   const [isAd, setIsAd] = useState(campaign?.is_ad ?? false);
 
   // ★ AI 문안 자동생성 모드 (기능 3)
@@ -390,7 +391,8 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
         message_type: messageType,
         message_content: aiGenerateEnabled ? (fallbackMessageContent.trim() || null) : messageContent.trim(),
         message_subject: messageType !== 'SMS' ? messageSubject.trim() || null : null,
-        callback_number: callbackNumber,
+        callback_number: useIndividualCallback ? null : callbackNumber,
+        use_individual_callback: useIndividualCallback,
         is_ad: isAd,
         personal_fields: selectedFields,
         // ★ AI 문안 자동생성 필드
@@ -1000,8 +1002,16 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
                     <label className="block text-xs font-semibold text-gray-600 mb-1.5">발신번호 (수신자에게 표시되는 번호)</label>
                     {callbackNumbers.length > 0 ? (
                       <select
-                        value={callbackNumber}
-                        onChange={e => setCallbackNumber(e.target.value)}
+                        value={useIndividualCallback ? '__individual__' : callbackNumber}
+                        onChange={e => {
+                          if (e.target.value === '__individual__') {
+                            setUseIndividualCallback(true);
+                            setCallbackNumber('');
+                          } else {
+                            setUseIndividualCallback(false);
+                            setCallbackNumber(e.target.value);
+                          }
+                        }}
                         className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                       >
                         <option value="">발신번호 선택</option>
@@ -1010,11 +1020,14 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
                             {cb.phone}{cb.label ? ` (${cb.label})` : ''}{cb.is_default ? ' ⭐ 기본' : ''}
                           </option>
                         ))}
+                        <option value="__individual__">수신자별 회신번호 칼럼 사용</option>
                       </select>
                     ) : (
                       <p className="text-sm text-red-500 py-2">등록된 발신번호가 없습니다. 설정에서 발신번호를 등록해주세요.</p>
                     )}
-                    <p className="text-xs text-gray-400 mt-1.5">수신자별 회신번호 칼럼에 값이 있는 경우, 해당 번호로 자동 발송됩니다.</p>
+                    {useIndividualCallback && (
+                      <p className="text-xs text-emerald-600 mt-1.5">각 수신자의 회신번호 칼럼 값으로 발송됩니다</p>
+                    )}
                   </div>
 
                   {/* ★ 자동입력 드롭다운 — 2단계에서 선택한 필드만 표시 */}

@@ -571,14 +571,29 @@ async function executeAutoCampaign(ac: any): Promise<void> {
     const msgTypeCode = ac.message_type === 'SMS' ? 'S' : ac.message_type === 'LMS' ? 'L' : 'M';
     const mmsImages: string[] = [];  // MMS 이미지는 추후 지원
 
+    // ★ D93: 개별회신번호 사용 시 CT-08 필터링 적용
+    let filteredCustomers = customers;
+    if (ac.use_individual_callback) {
+      const { filterByIndividualCallback } = await import('./callback-filter');
+      const cbResult = await filterByIndividualCallback(customers, ac.company_id);
+      filteredCustomers = cbResult.filtered;
+      if (cbResult.callbackSkippedCount > 0) {
+        console.log(`${logPrefix} 개별회신번호 — ${cbResult.callbackSkippedCount}명 제외 (미보유 ${cbResult.callbackMissingCount}, 미등록 ${cbResult.callbackUnregisteredCount})`);
+      }
+    }
+
     const autoSmsRows: any[][] = [];
-    for (const customer of customers) {
+    for (const customer of filteredCustomers) {
       const personalizedMessage = replaceVariables(messageContent, customer, fieldMappings);
       const personalizedSubject = messageSubject;
       const cleanPhone = normalizePhone(customer.phone);
+      // ★ D93: 개별회신번호 사용 시 고객별 store_phone → callback
+      const callback = ac.use_individual_callback
+        ? (customer.store_phone || customer.callback || ac.callback_number)
+        : ac.callback_number;
 
       autoSmsRows.push([
-        cleanPhone, ac.callback_number, personalizedMessage, msgTypeCode,
+        cleanPhone, callback, personalizedMessage, msgTypeCode,
         personalizedSubject, sendTime, campaignId, ac.company_id,
         mmsImages[0] || '', mmsImages[1] || '', mmsImages[2] || ''
       ]);
@@ -587,7 +602,7 @@ async function executeAutoCampaign(ac: any): Promise<void> {
     const sentCount = await bulkInsertSmsQueue(companyTables, autoSmsRows, true);
 
     // ★ 부분 실패 시 환불
-    const failCount = customers.length - sentCount;
+    const failCount = filteredCustomers.length - sentCount;
     if (failCount > 0) {
       console.warn(`${logPrefix} 부분 실패 — 성공: ${sentCount}, 실패: ${failCount}`);
       try {

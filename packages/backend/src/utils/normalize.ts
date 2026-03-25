@@ -352,12 +352,16 @@ export function normalizeDate(value: any): string | null {
   if (value == null || value === '') return null;
 
   // Date 객체 직접 처리 (XLSX cellDates: true)
-  // ★ D92: UTC 기반으로 추출하여 타임존에 의한 하루 밀림 방지
+  // ★ D93: 엑셀 Date의 부동소수점/TZ 오차 보정 — 가장 가까운 자정으로 반올림
+  // 예: 엑셀 1995-03-01 → xlsx가 1995-02-28T14:59:08.000Z로 변환 → 반올림하면 1995-03-01T00:00:00.000Z
   if (value instanceof Date && !isNaN(value.getTime())) {
-    const yyyy = value.getUTCFullYear();
+    const dayMs = 86400000;
+    const roundedMs = Math.round(value.getTime() / dayMs) * dayMs;
+    const rounded = new Date(roundedMs);
+    const yyyy = rounded.getUTCFullYear();
     if (yyyy >= 1900 && yyyy <= 2099) {
-      const mm = String(value.getUTCMonth() + 1).padStart(2, '0');
-      const dd = String(value.getUTCDate()).padStart(2, '0');
+      const mm = String(rounded.getUTCMonth() + 1).padStart(2, '0');
+      const dd = String(rounded.getUTCDate()).padStart(2, '0');
       return `${yyyy}-${mm}-${dd}`;
     }
     return null;

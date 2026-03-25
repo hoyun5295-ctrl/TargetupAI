@@ -3236,6 +3236,7 @@ const campaignData = {
                               .replace(/%지역%/g, firstR.region || '')
                               .replace(/%매장명%/g, firstR.store_name || '')
                               .replace(/%포인트%/g, firstR.point != null ? formatPreviewValue(firstR.point) : '')
+                              .replace(/%회신번호%/g, firstR.callback || '')
                               .replace(/%기타1%/g, firstR.extra1 || '')
                               .replace(/%기타2%/g, firstR.extra2 || '')
                               .replace(/%기타3%/g, firstR.extra3 || '');

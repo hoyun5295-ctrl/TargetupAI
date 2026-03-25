@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { formatPreviewValue } from '../utils/formatDate';
+import { highlightVars } from '../utils/highlightVars';
 
 interface AiCustomSendFlowProps {
   onClose: () => void;
@@ -876,7 +877,7 @@ export default function AiCustomSendFlow({
                               <div className="flex gap-2">
                                 <div className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-xs bg-purple-100">📱</div>
                                 <div className="rounded-2xl rounded-tl-sm p-3 shadow-sm border text-[12px] leading-[1.6] whitespace-pre-wrap break-all overflow-hidden text-gray-700 max-w-[95%] bg-white border-gray-100">
-                                  {replaceSampleVars(wrapAdText(msg.message_text || ''))}
+                                  {highlightVars(wrapAdText(msg.message_text || ''))}
                                 </div>
                               </div>
                             )}
@@ -1058,7 +1059,7 @@ export default function AiCustomSendFlow({
                       <div className="flex gap-2 mt-1">
                         <div className="w-7 h-7 rounded-full bg-purple-100 flex items-center justify-center shrink-0 text-xs">📱</div>
                         <div className="bg-white rounded-2xl rounded-tl-sm p-3 shadow-sm border border-gray-100 text-[12px] leading-[1.6] whitespace-pre-wrap break-all text-gray-700 max-w-[95%]">
-                          {replaceSampleVars(wrapAdText(variants[selectedVariantIdx]?.message_text || ''))}
+                          {highlightVars(wrapAdText(variants[selectedVariantIdx]?.message_text || ''))}
                         </div>
                       </div>
                     </div>

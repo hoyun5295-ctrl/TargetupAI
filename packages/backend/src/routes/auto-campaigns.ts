@@ -360,6 +360,7 @@ router.post('/', async (req: Request, res: Response) => {
       campaign_name, description, schedule_type, schedule_day, schedule_time,
       target_filter, store_code, message_type, message_content, message_subject,
       callback_number, sender_number_id, is_ad, pre_notify, notify_phones,
+      use_individual_callback, // ★ D93: 수신자별 회신번호 칼럼 사용
       // ★ AI 프리미엄 필드 (기능 3)
       ai_generate_enabled, ai_prompt, ai_tone, fallback_message_content,
     } = req.body;
@@ -406,17 +407,20 @@ router.post('/', async (req: Request, res: Response) => {
     if (!message_content?.trim() && !ai_generate_enabled) {
       return res.status(400).json({ error: '메시지 내용을 입력해주세요.' });
     }
-    if (!callback_number?.trim()) {
+    // ★ D93: 개별회신번호 사용 시 발신번호 미필수
+    if (!use_individual_callback && !callback_number?.trim()) {
       return res.status(400).json({ error: '발신번호를 선택해주세요.' });
     }
 
-    // 발신번호 등록 여부 확인
-    const cbCheck = await query(
-      `SELECT id FROM callback_numbers WHERE company_id = $1 AND phone = $2`,
-      [companyId, callback_number]
-    );
-    if (cbCheck.rows.length === 0) {
-      return res.status(400).json({ error: '등록되지 않은 발신번호입니다.' });
+    // 발신번호 등록 여부 확인 (개별회신번호 사용 시 스킵)
+    if (!use_individual_callback && callback_number) {
+      const cbCheck = await query(
+        `SELECT id FROM callback_numbers WHERE company_id = $1 AND phone = $2`,
+        [companyId, callback_number]
+      );
+      if (cbCheck.rows.length === 0) {
+        return res.status(400).json({ error: '등록되지 않은 발신번호입니다.' });
+      }
     }
 
     // next_run_at 계산
@@ -429,6 +433,7 @@ router.post('/', async (req: Request, res: Response) => {
         schedule_type, schedule_day, schedule_time, target_filter, store_code,
         message_type, message_content, message_subject, callback_number,
         sender_number_id, is_ad, pre_notify, notify_phones,
+        use_individual_callback,
         ai_generate_enabled, ai_prompt, ai_tone, fallback_message_content,
         status, next_run_at
       ) VALUES (
@@ -436,14 +441,16 @@ router.post('/', async (req: Request, res: Response) => {
         $5, $6, $7, $8, $9,
         $10, $11, $12, $13,
         $14, $15, $16, $17,
-        $18, $19, $20, $21,
-        'active', $22
+        $18,
+        $19, $20, $21, $22,
+        'active', $23
       ) RETURNING *`,
       [
         companyId, userId, campaign_name.trim(), description || null,
         schedule_type, schedule_day ?? null, schedule_time, JSON.stringify(target_filter), finalStoreCode,
-        message_type || 'SMS', message_content?.trim() || null, message_subject || null, callback_number.trim(),
+        message_type || 'SMS', message_content?.trim() || null, message_subject || null, (callback_number || '').trim() || null,
         sender_number_id || null, is_ad ?? false, pre_notify ?? true, notify_phones || null,
+        use_individual_callback ?? false,
         ai_generate_enabled ?? false, ai_prompt?.trim() || null, ai_tone || 'friendly', fallback_message_content?.trim() || null,
         nextRunAt,
       ]
@@ -487,6 +494,7 @@ router.put('/:id', async (req: Request, res: Response) => {
       campaign_name, description, schedule_type, schedule_day, schedule_time,
       target_filter, message_type, message_content, message_subject,
       callback_number, sender_number_id, is_ad, pre_notify, notify_phones,
+      use_individual_callback, // ★ D93: 수신자별 회신번호 칼럼 사용
       // ★ AI 프리미엄 필드 (기능 3)
       ai_generate_enabled, ai_prompt, ai_tone, fallback_message_content,
     } = req.body;
@@ -559,16 +567,17 @@ router.put('/:id', async (req: Request, res: Response) => {
         is_ad = COALESCE($13, is_ad),
         pre_notify = COALESCE($14, pre_notify),
         notify_phones = COALESCE($15, notify_phones),
-        next_run_at = $16,
-        ai_generate_enabled = COALESCE($18, ai_generate_enabled),
-        ai_prompt = COALESCE($19, ai_prompt),
-        ai_tone = COALESCE($20, ai_tone),
-        fallback_message_content = COALESCE($21, fallback_message_content),
-        generated_message_content = CASE WHEN $22::boolean THEN NULL ELSE generated_message_content END,
-        generated_message_subject = CASE WHEN $22::boolean THEN NULL ELSE generated_message_subject END,
-        generated_at = CASE WHEN $22::boolean THEN NULL ELSE generated_at END,
+        use_individual_callback = COALESCE($16, use_individual_callback),
+        next_run_at = $17,
+        ai_generate_enabled = COALESCE($19, ai_generate_enabled),
+        ai_prompt = COALESCE($20, ai_prompt),
+        ai_tone = COALESCE($21, ai_tone),
+        fallback_message_content = COALESCE($22, fallback_message_content),
+        generated_message_content = CASE WHEN $23::boolean THEN NULL ELSE generated_message_content END,
+        generated_message_subject = CASE WHEN $23::boolean THEN NULL ELSE generated_message_subject END,
+        generated_at = CASE WHEN $23::boolean THEN NULL ELSE generated_at END,
         updated_at = NOW()
-      WHERE id = $1 AND company_id = $17
+      WHERE id = $1 AND company_id = $18
       RETURNING *`,
       [
         req.params.id,
@@ -586,6 +595,7 @@ router.put('/:id', async (req: Request, res: Response) => {
         is_ad !== undefined ? is_ad : null,
         pre_notify !== undefined ? pre_notify : null,
         notify_phones !== undefined ? notify_phones : null,
+        use_individual_callback !== undefined ? use_individual_callback : null,
         nextRunAt,
         companyId,
         ai_generate_enabled !== undefined ? ai_generate_enabled : null,

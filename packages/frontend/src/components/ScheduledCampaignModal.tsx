@@ -126,82 +126,8 @@ export default function ScheduledCampaignModal({
                             : 'bg-red-500 text-white hover:bg-red-600'
                         }`}
                       >예약취소</button>
-                      {/* 문안수정: scheduled만 (draft는 MySQL 큐 없으므로 불가) */}
-                      {selectedScheduled?.status === 'scheduled' && (
-                        <button
-                          onClick={() => {
-                            const rawMsg = selectedScheduled?.message_template || selectedScheduled?.message_content || '';
-                            const strippedMsg = rawMsg.replace(/^\(광고\)\s*/g, '').replace(/\n무료거부\d+$/g, '').replace(/\n무료수신거부\s*[\d\-]+$/g, '').trim();
-                            setEditMessage(strippedMsg);
-                            setEditSubject(selectedScheduled?.message_subject || selectedScheduled?.subject || '');
-                            setMessageEditModal(true);
-                          }}
-                          disabled={isWithin15Min(selectedScheduled?.scheduled_at)}
-                          className={`px-3 py-1.5 rounded text-sm ${
-                            isWithin15Min(selectedScheduled?.scheduled_at)
-                              ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                              : 'bg-amber-500 text-white hover:bg-amber-600'
-                          }`}
-                        >문안수정</button>
-                      )}
                     </div>
                   </div>
-                  {/* 예약 시간 수정: scheduled만 */}
-                  {selectedScheduled?.status === 'scheduled' && (
-                  <div className="flex items-center gap-2 mt-3">
-                    <span className="text-sm text-gray-600">예약시간:</span>
-                    <input
-                      type="datetime-local"
-                      value={editScheduleTime}
-                      onChange={(e) => setEditScheduleTime(e.target.value)}
-                      min={(() => {
-                        const d = new Date(Date.now() + 15 * 60 * 1000);
-                        const pad = (n: number) => n.toString().padStart(2, '0');
-                        return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-                      })()}
-                      className="border rounded px-2 py-1 text-sm"
-                    />
-                    <button
-                      onClick={async () => {
-                        if (!editScheduleTime) return;
-                        const newTime = new Date(editScheduleTime);
-                        const minTime = new Date(Date.now() + 15 * 60 * 1000);
-                        if (newTime < minTime) {
-                          setToast({ show: true, type: 'error', message: '현재 시간 + 15분 이후로만 변경 가능합니다' });
-                          setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
-                          return;
-                        }
-                        const token = localStorage.getItem('token');
-                        const res = await fetch(`/api/campaigns/${selectedScheduled.id}/reschedule`, {
-                          method: 'PUT',
-                          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                          body: JSON.stringify({ scheduledAt: new Date(editScheduleTime).toISOString() })
-                        });
-                        const data = await res.json();
-                        if (data.success) {
-                          setToast({ show: true, type: 'success', message: '예약 시간이 변경되었습니다' });
-                          setTimeout(() => setToast({ show: false, type: 'success', message: '' }), 3000);
-                          setScheduledCampaigns(prev => prev.map(c =>
-                            c.id === selectedScheduled.id ? { ...c, scheduled_at: editScheduleTime } : c
-                          ));
-                          setSelectedScheduled({ ...selectedScheduled, scheduled_at: editScheduleTime });
-                        } else {
-                          setToast({ show: true, type: 'error', message: data.error || '변경 실패' });
-                          setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
-                        }
-                      }}
-                      disabled={isWithin15Min(selectedScheduled?.scheduled_at)}
-                      className={`px-3 py-1 rounded text-sm ${
-                        isWithin15Min(selectedScheduled?.scheduled_at)
-                          ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                          : 'bg-blue-500 text-white hover:bg-blue-600'
-                      }`}
-                    >시간변경</button>
-                    {isWithin15Min(selectedScheduled?.scheduled_at) && (
-                      <span className="text-xs text-amber-600 ml-2">⚠️ 15분 이내 변경 불가</span>
-                    )}
-                  </div>
-                  )}
                 </div>
               
               {/* 수신자 검색 */}
