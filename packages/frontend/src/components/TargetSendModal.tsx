@@ -680,55 +680,26 @@ export default function TargetSendModal({
             </div>
             </>)}
 
-            {/* === RCS 채널 === */}
+            {/* === RCS 채널 (템플릿 기반) === */}
             {targetSendChannel === 'rcs' && (
               <div className="border-2 border-purple-200 rounded-2xl overflow-hidden bg-white shadow-sm">
                 <div className="p-4">
-                  <div className="flex items-center gap-2 mb-2">
+                  <div className="flex items-center gap-2 mb-3">
                     <span className="text-lg">📱</span>
-                    <span className="text-sm font-semibold text-purple-800">RCS 메시지</span>
+                    <span className="text-sm font-semibold text-purple-800">RCS (템플릿 기반)</span>
                   </div>
-                  <textarea
-                    ref={kakaoTextareaRef}
-                    value={kakaoMessage}
-                    onChange={(e) => setKakaoMessage(e.target.value)}
-                    placeholder={"RCS 메시지 내용을 입력하세요.\n\nRCS 미지원 단말은 SMS로 자동 폴백됩니다"}
-                    className="w-full h-[200px] resize-none border border-purple-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-400 text-sm leading-relaxed p-3 bg-purple-50/30"
-                  />
-                  <div className="text-xs text-gray-400 mt-1">
+                  <div className="text-center py-12">
+                    <div className="text-4xl mb-3">📱</div>
+                    <p className="text-sm text-gray-500 font-medium">등록된 RCS 템플릿이 없습니다</p>
+                    <p className="text-xs text-gray-400 mt-1">카카오&RCS → RCS 템플릿에서 등록해주세요</p>
+                  </div>
+                  <div className="text-xs text-gray-400 mt-2">
                     RCS 미지원 단말은 SMS/LMS로 자동 폴백됩니다
                   </div>
                 </div>
-                <div className="px-3 py-1.5 bg-purple-50 border-t flex items-center justify-between">
-                  <div className="flex items-center gap-0.5">
-                    <button onClick={() => setShowSpecialChars('target')} className="px-2 py-1 text-xs bg-white border rounded hover:bg-gray-100">특수문자</button>
-                  </div>
-                  <span className="text-xs text-gray-500">
-                    <span className="font-bold text-purple-600">{kakaoMessage.length}</span>자
-                  </span>
-                </div>
-                {/* 자동입력 변수 */}
-                <div className="px-3 py-1.5 border-t bg-purple-50/50">
-                  <div className="flex items-center gap-3">
-                    <span className="text-sm font-bold text-gray-700 whitespace-nowrap">자동입력</span>
-                    <select
-                      value=""
-                      onChange={(e) => { if (e.target.value) insertVariable(e.target.value, 'kakao'); }}
-                      className="flex-1 border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400"
-                    >
-                      <option value="">변수 선택</option>
-                      {variableFields.map(fm => (
-                        <option key={fm.field_key} value={fm.variable}>{fm.display_name}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
                 <div className="px-3 py-2 border-t">
-                  <button
-                    onClick={() => setToast({ show: true, type: 'error', message: 'RCS 발송 기능은 곧 오픈 예정입니다' })}
-                    className="w-full py-2.5 rounded-xl font-bold text-base transition-colors bg-purple-500 hover:bg-purple-600 text-white"
-                  >
-                    📱 RCS 전송하기
+                  <button disabled className="w-full py-2.5 rounded-xl font-bold text-base bg-gray-300 text-gray-500 cursor-not-allowed">
+                    템플릿을 선택해주세요
                   </button>
                   <p className="text-xs text-center text-purple-400 mt-1.5">RCS 발송 기능은 곧 오픈 예정입니다</p>
                 </div>

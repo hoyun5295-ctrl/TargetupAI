@@ -106,13 +106,18 @@ router.put('/settings', authenticate, async (req: Request, res: Response) => {
       }
     }
 
+    // ★ D94: savedToUser이면 companies.manager_contacts는 건드리지 않음 (덮어쓰기 방지)
+    const managerContactsClause = savedToUser
+      ? 'manager_contacts = manager_contacts'
+      : 'manager_contacts = COALESCE($5, manager_contacts)';
+
     await query(`
       UPDATE companies SET
         brand_name = COALESCE($1, brand_name),
         business_type = COALESCE($2, business_type),
         reject_number = COALESCE($3, reject_number),
         manager_phone = COALESCE($4, manager_phone),
-        manager_contacts = COALESCE($5, manager_contacts),
+        ${managerContactsClause},
         monthly_budget = COALESCE($6, monthly_budget),
         cost_per_sms = COALESCE($7, cost_per_sms),
         cost_per_lms = COALESCE($8, cost_per_lms),

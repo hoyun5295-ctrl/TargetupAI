@@ -1076,7 +1076,7 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
                 <h4 className="text-sm font-bold text-gray-700">💬 메시지 내용</h4>
                 <button onClick={() => setMsgDetailContent(null)} className="text-gray-400 hover:text-gray-600 text-lg">✕</button>
               </div>
-              <div className="p-5 overflow-y-auto flex-1">
+              <div className="p-5 overflow-y-auto flex-1" style={{ overscrollBehavior: 'contain' }}>
                 <div className="whitespace-pre-wrap text-sm text-gray-700 leading-relaxed break-all">
                   {msgDetailContent}
                 </div>

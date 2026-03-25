@@ -371,7 +371,7 @@
 | is_active | boolean |
 | created_at | timestamp |
 
-### kakao_templates (카카오 템플릿)
+### kakao_templates (카카오 알림톡 템플릿)
 | 컬럼 | 타입 |
 |------|------|
 | id | uuid PK |
@@ -381,11 +381,24 @@
 | template_name | varchar(100) |
 | content | text |
 | buttons | jsonb |
+| variables | text[] |
 | status | varchar(20) |
 | reject_reason | text |
 | created_at | timestamp |
 | updated_at | timestamp |
 | approved_at | timestamp |
+| category | varchar(50) |
+| message_type | varchar(10) DEFAULT 'BA' |
+| emphasize_type | varchar(20) DEFAULT 'NONE' |
+| emphasize_title | varchar(50) |
+| image_url | text |
+| extra_content | text |
+| ad_content | varchar(100) |
+| security_flag | boolean DEFAULT false |
+| quick_replies | jsonb DEFAULT '[]' |
+| requested_at | timestamptz |
+| reviewed_at | timestamptz |
+| reviewed_by | uuid |
 
 ### kakao_friendtalk_images (카카오 친구톡 이미지)
 | 컬럼 | 타입 |
@@ -575,6 +588,9 @@
 | created_at | timestamp |
 | updated_at | timestamp |
 | approved_at | timestamp |
+| requested_at | timestamptz |
+| reviewed_at | timestamptz |
+| reviewed_by | uuid |
 
 ### sender_numbers (발신번호 관리)
 | 컬럼 | 타입 |

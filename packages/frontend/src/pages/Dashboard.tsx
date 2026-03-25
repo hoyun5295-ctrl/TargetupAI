@@ -277,10 +277,24 @@ export default function Dashboard() {
   const loadKakaoTemplates = async () => {
     try {
       const token = localStorage.getItem('token');
-      const res = await fetch('/api/companies/kakao-templates', { headers: { Authorization: `Bearer ${token}` } });
+      // ★ D94: 승인된 알림톡 템플릿만 로드
+      const res = await fetch('/api/companies/kakao-templates?status=approved', { headers: { Authorization: `Bearer ${token}` } });
       if (res.ok) {
         const data = await res.json();
         setKakaoTemplates(data.templates || []);
+      }
+    } catch {}
+  };
+  // RCS 승인 템플릿 로드
+  const [rcsTemplates, setRcsTemplates] = useState<any[]>([]);
+  const [rcsSelectedTemplate, setRcsSelectedTemplate] = useState<any>(null);
+  const loadRcsTemplates = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch('/api/companies/rcs-templates?status=approved', { headers: { Authorization: `Bearer ${token}` } });
+      if (res.ok) {
+        const data = await res.json();
+        setRcsTemplates(data.templates || []);
       }
     } catch {}
   };
@@ -1078,6 +1092,9 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
         const defaultCb = cbData.numbers?.find((n: any) => n.is_default);
         if (defaultCb) setSelectedCallback(defaultCb.phone);
       }
+      // ★ D94: 알림톡/RCS 승인 템플릿 로드
+      loadKakaoTemplates();
+      loadRcsTemplates();
     } catch (err) {
       console.error('회사 설정 로드 실패:', err);
     }
@@ -3233,7 +3250,7 @@ const campaignData = {
                               .replace(/%지역%/g, firstR.region || '')
                               .replace(/%매장명%/g, firstR.store_name || '')
                               .replace(/%포인트%/g, firstR.point != null ? formatPreviewValue(firstR.point) : '')
-                              .replace(/%회신번호%/g, firstR.callback || '')
+                              .replace(/%회신번호%/g, firstR.callback || selectedCallback || '')
                               .replace(/%기타1%/g, firstR.extra1 || '')
                               .replace(/%기타2%/g, firstR.extra2 || '')
                               .replace(/%기타3%/g, firstR.extra3 || '');
@@ -3392,38 +3409,51 @@ const campaignData = {
                 </div>
                 </>)}
 
-                {/* === RCS 채널 === */}
+                {/* === RCS 채널 (템플릿 기반) === */}
                 {directSendChannel === 'rcs' && (
                   <div className="border-2 border-purple-200 rounded-2xl overflow-hidden bg-white shadow-sm">
                     <div className="p-4">
-                      <div className="flex items-center gap-2 mb-2">
+                      <div className="flex items-center gap-2 mb-3">
                         <span className="text-lg">📱</span>
-                        <span className="text-sm font-semibold text-purple-800">RCS 메시지</span>
+                        <span className="text-sm font-semibold text-purple-800">RCS (템플릿 기반)</span>
                       </div>
-                      <textarea
-                        value={kakaoMessage}
-                        onChange={(e) => setKakaoMessage(e.target.value)}
-                        placeholder={"RCS 메시지 내용을 입력하세요.\n\nRCS 미지원 단말은 SMS로 자동 폴백됩니다"}
-                        className="w-full h-[200px] resize-none border border-purple-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-400 text-sm leading-relaxed p-3 bg-purple-50/30"
-                      />
-                      <div className="text-xs text-gray-400 mt-1">
+                      {rcsTemplates.length === 0 ? (
+                        <div className="text-center py-12">
+                          <div className="text-4xl mb-3">📱</div>
+                          <p className="text-sm text-gray-500 font-medium">등록된 RCS 템플릿이 없습니다</p>
+                          <p className="text-xs text-gray-400 mt-1">카카오&RCS → RCS 템플릿에서 등록해주세요</p>
+                        </div>
+                      ) : (
+                        <div className="space-y-2 max-h-[300px] overflow-y-auto">
+                          {rcsTemplates.map((t: any) => (
+                            <div key={t.id}
+                              onClick={() => setRcsSelectedTemplate(t)}
+                              className={`p-3 border rounded-lg cursor-pointer transition-colors ${
+                                rcsSelectedTemplate?.id === t.id ? 'border-purple-500 bg-purple-50' : 'border-gray-200 hover:border-purple-300'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between">
+                                <span className="text-sm font-medium">{t.template_name}</span>
+                                <span className="text-xs px-2 py-0.5 rounded-full bg-purple-100 text-purple-700">{t.message_type}</span>
+                              </div>
+                              <p className="text-xs text-gray-500 mt-1 line-clamp-2">{t.content}</p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      <div className="text-xs text-gray-400 mt-2">
                         RCS 미지원 단말은 SMS/LMS로 자동 폴백됩니다
                       </div>
-                    </div>
-                    <div className="px-3 py-1.5 bg-purple-50 border-t flex items-center justify-between">
-                      <div className="flex items-center gap-0.5">
-                        <button onClick={() => setShowSpecialChars('direct')} className="px-2 py-1 text-xs bg-white border rounded hover:bg-gray-100">특수문자</button>
-                      </div>
-                      <span className="text-xs text-gray-500">
-                        <span className="font-bold text-purple-600">{kakaoMessage.length}</span>자
-                      </span>
                     </div>
                     <div className="px-3 py-2 border-t">
                       <button
                         onClick={() => setToast({ show: true, type: 'error', message: 'RCS 발송 기능은 곧 오픈 예정입니다' })}
-                        className="w-full py-3 rounded-xl font-bold text-base transition-colors bg-purple-500 hover:bg-purple-600 text-white"
+                        disabled={!rcsSelectedTemplate}
+                        className={`w-full py-3 rounded-xl font-bold text-base transition-colors ${
+                          rcsSelectedTemplate ? 'bg-purple-500 hover:bg-purple-600 text-white' : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                        }`}
                       >
-                        📱 RCS 전송하기
+                        {!rcsSelectedTemplate ? '템플릿을 선택해주세요' : '📱 RCS 전송하기'}
                       </button>
                       <p className="text-xs text-center text-purple-400 mt-1.5">RCS 발송 기능은 곧 오픈 예정입니다</p>
                     </div>
