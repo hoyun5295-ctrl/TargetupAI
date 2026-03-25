@@ -18,6 +18,7 @@ import {
   XCircle
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { formatPreviewValue } from '../utils/formatDate';
 
 interface AiCustomSendFlowProps {
   onClose: () => void;
@@ -140,6 +141,9 @@ export default function AiCustomSendFlow({
   const [spamTestBatchId, setSpamTestBatchId] = useState<string | null>(null);
   const [spamTestCompleted, setSpamTestCompleted] = useState(false);
   const [spamTestRegenerateCount, setSpamTestRegenerateCount] = useState(0);
+
+  // ★ D92: 미리보기 모달 state
+  const [showPreviewModal, setShowPreviewModal] = useState(false);
 
   // 커스텀 모달 state
   const [alertModal, setAlertModal] = useState<{
@@ -300,16 +304,8 @@ export default function AiCustomSendFlow({
       const label = fieldLabelMap[f.field_key];
       const sampleVal = sampleData[f.field_key];
       if (label && sampleVal != null) {
-        // ★ D88+D91: string-typed numeric도 toLocaleString 포맷 (소수점 제거 + 천단위 쉼표)
-        let displayVal: string;
-        const strVal = String(sampleVal).replace(/,/g, '');
-        if (/^-?\d+(\.\d+)?$/.test(strVal)) {
-          const num = Number(strVal);
-          displayVal = (!isNaN(num) && Number.isFinite(num)) ? num.toLocaleString('ko-KR') : strVal;
-        } else {
-          displayVal = String(sampleVal);
-        }
-        result = result.replace(new RegExp(`%${label}%`, 'g'), displayVal);
+        // ★ D92: formatPreviewValue 컨트롤타워 사용 (숫자+날짜 포맷팅)
+        result = result.replace(new RegExp(`%${label}%`, 'g'), formatPreviewValue(sampleVal));
       }
     }
     return result;
@@ -979,6 +975,14 @@ export default function AiCustomSendFlow({
             )}
             {currentStep === 4 && (
               <>
+                {/* ★ D92: 미리보기 버튼 — 한줄로와 동일하게 개인화 미리보기 제공 */}
+                <button
+                  onClick={() => setShowPreviewModal(true)}
+                  disabled={variants.length === 0}
+                  className="flex items-center gap-1.5 px-4 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-medium rounded-lg disabled:opacity-50 transition-colors"
+                >
+                  📄 미리보기
+                </button>
                 {/* B16-03 + B17-12: 담당자 테스트 버튼 — 자체 핸들러 사용 (variants 데이터 참조) */}
                 <button
                   onClick={handleCustomTestSend}
@@ -999,35 +1003,17 @@ export default function AiCustomSendFlow({
                       const replaceVars = (text: string) => {
                         if (!text) return text;
                         let result = text;
-                        // field_key → field_label 매핑으로 %한글라벨% 치환 (replaceSampleVars와 동일 패턴)
-                        // ★ D91: 숫자 포맷팅 적용 (소수점 제거 + 천단위 쉼표)
                         for (const f of availableFields) {
                           const label = f.field_label || f.display_name || f.field_key;
                           const val = sc[f.field_key];
                           if (label && val != null) {
-                            const strVal = String(val).replace(/,/g, '');
-                            let displayVal: string;
-                            if (/^-?\d+(\.\d+)?$/.test(strVal)) {
-                              const num = Number(strVal);
-                              displayVal = (!isNaN(num) && Number.isFinite(num)) ? num.toLocaleString('ko-KR') : strVal;
-                            } else {
-                              displayVal = String(val);
-                            }
-                            result = result.replace(new RegExp(`%${label}%`, 'g'), displayVal);
+                            result = result.replace(new RegExp(`%${label}%`, 'g'), formatPreviewValue(val));
                           }
                         }
                         // column 키로도 치환 (sampleCustomer가 column 키일 때 호환)
                         Object.entries(sc).forEach(([k, v]) => {
                           if (v != null) {
-                            const strVal = String(v).replace(/,/g, '');
-                            let displayVal: string;
-                            if (/^-?\d+(\.\d+)?$/.test(strVal)) {
-                              const num = Number(strVal);
-                              displayVal = (!isNaN(num) && Number.isFinite(num)) ? num.toLocaleString('ko-KR') : strVal;
-                            } else {
-                              displayVal = String(v);
-                            }
-                            result = result.replace(new RegExp(`%${k}%`, 'g'), displayVal);
+                            result = result.replace(new RegExp(`%${k}%`, 'g'), formatPreviewValue(v));
                           }
                         });
                         result = result.replace(/%[^%\s]{1,20}%/g, '');
@@ -1087,6 +1073,58 @@ export default function AiCustomSendFlow({
           </div>
         </div>
       </div>
+
+      {/* ★ D92: 맞춤한줄 미리보기 모달 — 한줄로와 동일한 개인화 미리보기 */}
+      {showPreviewModal && variants[selectedVariantIdx] && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl shadow-2xl w-[400px] overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="p-4 border-b bg-emerald-50 flex justify-between items-center">
+              <h3 className="font-bold text-lg">📄 메시지 미리보기</h3>
+              <button onClick={() => setShowPreviewModal(false)} className="text-gray-500 hover:text-gray-700 text-xl">✕</button>
+            </div>
+            <div className="p-4">
+              {/* 폰 프레임 */}
+              <div className="mx-auto w-[280px]">
+                <div className="rounded-[1.8rem] p-[3px] bg-gradient-to-b from-purple-400 to-purple-600 shadow-lg">
+                  <div className="bg-white rounded-[1.6rem] overflow-hidden flex flex-col" style={{ height: '420px' }}>
+                    <div className="px-4 py-2.5 bg-gradient-to-r from-gray-50 to-gray-100 flex justify-between items-center shrink-0 border-b">
+                      <span className="text-[11px] text-gray-400 font-medium">문자메시지</span>
+                      <span className="text-[11px] font-bold text-purple-600">{channel}</span>
+                    </div>
+                    {(channel === 'LMS' || channel === 'MMS') && variants[selectedVariantIdx]?.subject && (
+                      <div className="px-4 py-2 bg-orange-50 border-b border-orange-200">
+                        <span className="text-sm font-bold text-orange-700">{variants[selectedVariantIdx].subject}</span>
+                      </div>
+                    )}
+                    <div className="flex-1 overflow-y-auto p-3 bg-gradient-to-b from-purple-50/30 to-white">
+                      <div className="flex gap-2 mt-1">
+                        <div className="w-7 h-7 rounded-full bg-purple-100 flex items-center justify-center shrink-0 text-xs">📱</div>
+                        <div className="bg-white rounded-2xl rounded-tl-sm p-3 shadow-sm border border-gray-100 text-[12px] leading-[1.6] whitespace-pre-wrap break-all text-gray-700 max-w-[95%]">
+                          {replaceSampleVars(wrapAdText(variants[selectedVariantIdx]?.message_text || ''))}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="px-3 py-2 border-t bg-gray-50 text-center shrink-0">
+                      <span className="text-[10px] text-gray-400">
+                        {calculateBytes(wrapAdText(variants[selectedVariantIdx]?.message_text || ''))} / {channel === 'SMS' ? 90 : 2000} bytes
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              {/* 샘플 고객 정보 */}
+              {Object.keys(sampleData).length > 0 && (
+                <div className="mt-3 p-2 bg-purple-50 rounded-lg">
+                  <div className="text-[10px] text-purple-600 font-medium mb-1">✨ 실제 타겟 고객 데이터 기반 미리보기</div>
+                  <div className="text-[10px] text-purple-500">
+                    {availableFields.filter(f => sampleData[f.field_key] != null).slice(0, 5).map(f => `${f.field_label || f.field_key}: ${formatPreviewValue(sampleData[f.field_key])}`).join(' | ')}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 커스텀 Alert 모달 */}
       {/* ★ D91: SMS→LMS 전환 확인 모달 */}

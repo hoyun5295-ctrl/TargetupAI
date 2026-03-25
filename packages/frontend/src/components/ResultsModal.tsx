@@ -368,7 +368,9 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
                             </span>
                           </td>
                           <td className="px-3 py-2.5 text-center text-xs text-gray-600">{c.created_by_name || '-'}</td>
-                          <td className="px-3 py-2.5 max-w-[200px] truncate text-gray-700">{c.message_content}</td>
+                          <td className="px-3 py-2.5 max-w-[200px] text-gray-700" title={c.message_content}>
+                            <span className="truncate block">{c.message_content}</span>
+                          </td>
                           <td className="px-3 py-2.5 text-center text-xs text-gray-500">
                           {new Date(c.created_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
                           </td>
@@ -760,7 +762,7 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
                         <div className="flex-1 overflow-y-auto p-3 bg-gradient-to-b from-emerald-50/30 to-white">
                           <div className="flex gap-2">
                             <div className="w-7 h-7 rounded-full bg-emerald-100 flex items-center justify-center shrink-0 text-[10px] font-bold text-emerald-600">T</div>
-                            <div className="bg-white rounded-2xl rounded-tl-sm p-3 shadow-sm border border-gray-100 text-[11.5px] leading-[1.7] whitespace-pre-wrap break-all text-gray-700 max-w-[95%] overflow-hidden">
+                            <div className="bg-white rounded-2xl rounded-tl-sm p-3 shadow-sm border border-gray-100 text-[11.5px] leading-[1.7] whitespace-pre-wrap break-all text-gray-700 max-w-[95%]">
                               {/* ★ D91: LMS/MMS 제목 표시 */}
                               {(selectedCampaign.message_type === 'LMS' || selectedCampaign.message_type === 'MMS' || selectedCampaign.message_type === 'L' || selectedCampaign.message_type === 'M') && (selectedCampaign.subject || selectedCampaign.message_subject) && (
                                 <div className="font-bold text-gray-900 mb-1 pb-1 border-b border-gray-200">{selectedCampaign.subject || selectedCampaign.message_subject}</div>
@@ -924,11 +926,11 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
                             <td className="px-3 py-2.5 font-mono text-xs text-gray-600">{formatPhone(m.call_back)}</td>
                             <td className="px-3 py-2.5 text-xs text-gray-600 max-w-[120px]">
                               <div className="relative group/msg">
-                                <span className="truncate block cursor-default">{(m.msg_contents || '').slice(0, 10)}{(m.msg_contents || '').length > 10 ? '...' : ''}</span>
+                                <span className="truncate block cursor-pointer hover:text-emerald-600" title="클릭하여 전체 내용 보기">{(m.msg_contents || '').slice(0, 10)}{(m.msg_contents || '').length > 10 ? '...' : ''}</span>
                                 {(m.msg_contents || '').length > 10 && (
-                                  <div className="invisible group-hover/msg:visible absolute left-full top-0 ml-2 z-[100] pointer-events-none">
-                                    <div className="w-[220px] rounded-[1.4rem] p-[3px] bg-gradient-to-b from-emerald-400 to-emerald-600 shadow-2xl">
-                                      <div className="bg-white rounded-[1.2rem] overflow-hidden flex flex-col" style={{ maxHeight: '300px' }}>
+                                  <div className="invisible group-hover/msg:visible absolute left-full top-0 ml-2 z-[100]">
+                                    <div className="w-[250px] rounded-[1.4rem] p-[3px] bg-gradient-to-b from-emerald-400 to-emerald-600 shadow-2xl">
+                                      <div className="bg-white rounded-[1.2rem] overflow-hidden flex flex-col" style={{ maxHeight: '400px' }}>
                                         <div className="px-3 py-1.5 bg-gradient-to-r from-gray-50 to-gray-100 flex justify-between items-center shrink-0 border-b">
                                           <span className="text-[10px] text-gray-400 font-medium">문자메시지</span>
                                           <span className="text-[10px] font-bold text-emerald-600">{m.msg_type === 'S' ? 'SMS' : m.msg_type === 'L' ? 'LMS' : m.msg_type}</span>

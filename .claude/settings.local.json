@@ -9,7 +9,9 @@
       "Read(//c/Users/ceo/AppData/Local/Temp/pptx_images/**)",
       "Read(//c/Users/ceo/**)",
       "Bash(grep -rn GET.*enabled-fields C:Usersceoprojectstargetuppackagesbackendsrcroutes*)",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Bash(python -m markitdown \"C:\\\\Users\\\\ceo\\\\OneDrive\\\\문서\\\\카카오톡 받은 파일\\\\한줄로_20260324.pptx\")",
+      "Bash(python3 -c \":*)"
     ]
   }
 }

@@ -86,18 +86,20 @@ router.put('/settings', authenticate, async (req: Request, res: Response) => {
     // manager_contacts는 JSON 문자열로 변환해서 저장
     const managerContactsJson = manager_contacts ? JSON.stringify(manager_contacts) : null;
 
-    // ★ D91: manager_contacts는 사용자(user)별로 저장하여 브랜드별 담당자 격리
-    // users.manager_contacts 컬럼이 있으면 user에 저장, 없으면 기존 companies에 저장 (하위호환)
+    // ★ D91+D92: manager_contacts는 사용자(user)별로 저장하여 브랜드별 담당자 격리
+    // users.manager_contacts에 저장 성공하면 companies 테이블에는 쓰지 않음 (덮어쓰기 방지)
+    let savedToUser = false;
     if (managerContactsJson && userId) {
       try {
         await query(
           `UPDATE users SET manager_contacts = $1, updated_at = NOW() WHERE id = $2`,
           [managerContactsJson, userId]
         );
+        savedToUser = true;
       } catch (e: any) {
-        // manager_contacts 컬럼 미존재 시 companies에 저장 (하위호환)
+        // manager_contacts 컬럼 미존재 시 companies fallback 저장
         if (e.code === '42703') {
-          console.log('[D91] users.manager_contacts 컬럼 없음 — companies fallback 저장');
+          console.log('[D92] users.manager_contacts 컬럼 없음 — companies fallback 저장');
         } else {
           throw e;
         }
@@ -128,7 +130,7 @@ router.put('/settings', authenticate, async (req: Request, res: Response) => {
         updated_at = NOW()
       WHERE id = $20
     `, [
-      brand_name, business_type, reject_number, managerPhoneJson, managerContactsJson,
+      brand_name, business_type, reject_number, managerPhoneJson, savedToUser ? null : managerContactsJson,
       monthly_budget, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao,
       send_start_hour, send_end_hour, daily_limit_per_customer,
       holiday_send_allowed, duplicate_prevention_days,

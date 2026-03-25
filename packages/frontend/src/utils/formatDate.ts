@@ -54,6 +54,36 @@ export function formatDate(dateStr: string | null | undefined): string {
   return d.toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul' });
 }
 
+/**
+ * ★ D92: 변수 치환 미리보기용 포맷팅 — 프론트 전 경로의 유일한 포맷팅 함수
+ *
+ * - 날짜(ISO): "2025-03-01T00:00:00.000Z" → "2025. 3. 1."
+ * - 숫자: "35000.00" → "35,000"
+ * - 기타: 그대로 반환
+ *
+ * 사용처: Dashboard.tsx, TargetSendModal.tsx, AiCustomSendFlow.tsx,
+ *          AiPreviewModal.tsx, DirectPreviewModal.tsx, AiCampaignResultPopup.tsx
+ */
+export function formatPreviewValue(val: any): string {
+  if (val == null || val === '') return '';
+  const str = String(val);
+  // 날짜: ISO 형식이면 formatDate와 동일한 KST 포맷
+  if (/^\d{4}-\d{2}-\d{2}(T|\s)/.test(str)) {
+    return formatDate(str.slice(0, 10));
+  }
+  // 순수 날짜(YYYY-MM-DD)
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+    return formatDate(str);
+  }
+  // 숫자: 소수점 제거 + 천단위 쉼표
+  const numStr = str.replace(/,/g, '');
+  if (/^-?\d+(\.\d+)?$/.test(numStr)) {
+    const num = Number(numStr);
+    if (!isNaN(num) && Number.isFinite(num)) return num.toLocaleString('ko-KR');
+  }
+  return str;
+}
+
 export function formatDateTimeShort(dateStr: string | null | undefined): string {
   if (!dateStr) return '-';
   const d = safeParse(String(dateStr));

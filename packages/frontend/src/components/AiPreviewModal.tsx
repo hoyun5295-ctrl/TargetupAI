@@ -1,4 +1,5 @@
 import React from 'react';
+import { formatPreviewValue } from '../utils/formatDate';
 
 interface AiPreviewModalProps {
   show: boolean;
@@ -101,14 +102,14 @@ export default function AiPreviewModal({
                   let result = text;
                   // 1차: 직접 매칭 (sampleCustomer 키 = AI 변수명)
                   Object.entries(data).forEach(([k, v]) => {
-                    result = result.replace(new RegExp(`%${k}%`, 'g'), v);
+                    result = result.replace(new RegExp(`%${k}%`, 'g'), formatPreviewValue(v));
                   });
                   // 2차: 별칭 매핑 (AI가 다른 변수명 사용 시 → sampleCustomer의 실제 키로 폴백)
                   Object.entries(aliasMap).forEach(([realKey, aliases]) => {
                     const val = data[realKey];
                     if (!val) return;
                     aliases.forEach(alias => {
-                      result = result.replace(new RegExp(`%${alias}%`, 'g'), val);
+                      result = result.replace(new RegExp(`%${alias}%`, 'g'), formatPreviewValue(val));
                     });
                   });
                   // 역방향: AI가 displayName 사용, sampleCustomer에 별칭으로 존재하는 경우
@@ -116,7 +117,7 @@ export default function AiPreviewModal({
                     for (const alias of aliases) {
                       const val = data[alias];
                       if (!val) continue;
-                      result = result.replace(new RegExp(`%${realKey}%`, 'g'), val);
+                      result = result.replace(new RegExp(`%${realKey}%`, 'g'), formatPreviewValue(val));
                       break;
                     }
                   });
@@ -229,7 +230,7 @@ export default function AiPreviewModal({
                   const replaceVars = (text: string) => {
                     if (!text) return text;
                     let result = text;
-                    Object.entries(sc).forEach(([k, v]) => { result = result.replace(new RegExp(`%${k}%`, 'g'), v); });
+                    Object.entries(sc).forEach(([k, v]) => { result = result.replace(new RegExp(`%${k}%`, 'g'), formatPreviewValue(v)); });
                     // 별칭 매핑
                     const aliasMap: Record<string, string[]> = {
                       '이름': ['고객명', '성함'], '고객등급': ['등급'], '등록매장정보': ['매장명', '매장'],
@@ -237,7 +238,7 @@ export default function AiPreviewModal({
                     };
                     Object.entries(aliasMap).forEach(([realKey, aliases]) => {
                       const val = sc[realKey];
-                      if (val) aliases.forEach(a => { result = result.replace(new RegExp(`%${a}%`, 'g'), val); });
+                      if (val) aliases.forEach(a => { result = result.replace(new RegExp(`%${a}%`, 'g'), formatPreviewValue(val)); });
                     });
                     result = result.replace(/%[^%\s]{1,20}%/g, '');
                     return result;

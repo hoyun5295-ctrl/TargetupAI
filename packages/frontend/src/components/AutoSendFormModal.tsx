@@ -946,9 +946,6 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
                         onChange={e => {
                           const text = e.target.value;
                           setMessageContent(text);
-                          if (messageType !== 'MMS' && hasEmoji(text)) {
-                            setToast({ show: true, type: 'warning', message: 'SMS/LMS는 이모지를 지원하지 않습니다. 발송 실패 원인이 됩니다.' });
-                          }
                         }}
                         placeholder="전송하실 내용을 입력하세요."
                         style={isAd ? { textIndent: '42px' } : {}}
@@ -961,10 +958,6 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
                         {getAdSuffix()}
                       </div>
                     )}
-                    {/* 이모지 안내 */}
-                    <div className="text-xs text-gray-400 mt-2">
-                      ⚠️ 이모지·특수문자는 LMS 전환 또는 발송 실패 원인이 될 수 있습니다
-                    </div>
 
                     {/* MMS 이미지 */}
                     {messageType === 'MMS' && (

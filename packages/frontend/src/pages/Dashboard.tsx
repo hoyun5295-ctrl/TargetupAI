@@ -40,7 +40,7 @@ import TodayStatsModal from '../components/TodayStatsModal';
 import UploadProgressModal from '../components/UploadProgressModal';
 import UploadResultModal from '../components/UploadResultModal';
 import { useAuthStore } from '../stores/authStore';
-import { formatDate } from '../utils/formatDate';
+import { formatDate, formatPreviewValue } from '../utils/formatDate';
 
 interface Stats {
   total: string;
@@ -3117,9 +3117,6 @@ const campaignData = {
                         onChange={(e) => {
                           const text = e.target.value;
                           setDirectMessage(text);
-                          if (directMsgType !== 'MMS' && hasEmoji(text)) {
-                            setToast({ show: true, type: 'warning', message: 'SMS/LMS는 이모지를 지원하지 않습니다. 발송 실패 원인이 됩니다.' });
-                          }
                         }}
                         placeholder="전송하실 내용을 입력하세요."
                         style={adTextEnabled ? { textIndent: '42px' } : {}}
@@ -3134,10 +3131,6 @@ const campaignData = {
                           : `무료수신거부 ${formatRejectNumber(optOutNumber)}`}
                       </div>
                     )}
-                    {/* 특수문자/이모지 안내 */}
-                    <div className="text-xs text-gray-400 mt-2">
-                      ⚠️ 이모지(😀)·특수문자는 LMS 전환 또는 발송 실패 원인이 될 수 있습니다
-                    </div>
                     
                     {/* MMS 이미지 미리보기 — B16-05: MMS 탭에서만 표시 (SMS/LMS 전환 시 잔존 방지) */}
                     {directMsgType === 'MMS' && (
@@ -3242,7 +3235,7 @@ const campaignData = {
                               .replace(/%등급%/g, firstR.grade || '')
                               .replace(/%지역%/g, firstR.region || '')
                               .replace(/%매장명%/g, firstR.store_name || '')
-                              .replace(/%포인트%/g, firstR.point != null ? String(firstR.point) : '')
+                              .replace(/%포인트%/g, firstR.point != null ? formatPreviewValue(firstR.point) : '')
                               .replace(/%기타1%/g, firstR.extra1 || '')
                               .replace(/%기타2%/g, firstR.extra2 || '')
                               .replace(/%기타3%/g, firstR.extra3 || '');

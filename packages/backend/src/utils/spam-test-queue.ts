@@ -174,7 +174,9 @@ export async function enqueueSpamTest(params: SpamTestEnqueueParams): Promise<Sp
       firstCustomer = firstResult.rows[0] || {};
     }
 
-    const personalizedForHash = replaceVariables(rawContent, firstCustomer, fieldMappings);
+    // ★ D92: %회신번호% 치환 — callbackNumber를 addressBookFields로 전달하여 스팸테스트에서도 맵핑
+    const spamAddressBookFields = callbackNumber ? { callback: callbackNumber, extra1: '', extra2: '', extra3: '', name: '' } : undefined;
+    const personalizedForHash = replaceVariables(rawContent, firstCustomer, fieldMappings, spamAddressBookFields);
     const messageHash = computeMessageHash(personalizedForHash);
 
     // 2) 디바이스 조회 + 발송 건수 계산
@@ -358,7 +360,9 @@ async function executeSpamTest(testId: string, isAuto: boolean): Promise<void> {
     // QTmsg INSERT
     for (const row of resultRows.rows) {
       const rawContent = row.message_type === 'SMS' ? test.message_content_sms : test.message_content_lms;
-      const content = replaceVariables(rawContent || '', firstCustomer, fieldMappings);
+      // ★ D92: %회신번호% 치환 — 실제 스팸테스트 발송 시에도 callbackNumber 전달
+      const testAddressBookFields = test.callback_number ? { callback: test.callback_number, extra1: '', extra2: '', extra3: '', name: '' } : undefined;
+      const content = replaceVariables(rawContent || '', firstCustomer, fieldMappings, testAddressBookFields);
       const titleStr = (row.message_type === 'LMS' || row.message_type === 'MMS') ? (test.subject || '') : '';
       await insertSmsQueue(row.phone, test.callback_number, content, row.message_type, testId, titleStr);
     }

@@ -1,6 +1,7 @@
 import { Sparkles } from 'lucide-react';
 import { useRef, useState } from 'react';
 import type { FieldMeta } from './DirectTargetFilterModal';
+import { formatPreviewValue } from '../utils/formatDate';
 
 // ★ D43-3c: 정규식 특수문자 이스케이프
 const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -205,7 +206,7 @@ export default function TargetSendModal({
   };
 
   // ====== ★ 동적 변수 치환 (스팸필터용) ======
-  // D91: 숫자 필드 toLocaleString 적용 (소수점 제거 + 천단위 쉼표)
+  // D91+D92: 숫자 필드 toLocaleString + 날짜 포맷팅 (전 경로 통일)
   const replaceVars = (text: string, recipient: any) => {
     if (!text || !recipient) return text;
     let result = text;
@@ -216,16 +217,8 @@ export default function TargetSendModal({
       if ((rawValue === '' || rawValue == null) && recipient.custom_fields && typeof recipient.custom_fields === 'object') {
         rawValue = recipient.custom_fields[fm.field_key] ?? '';
       }
-      // 숫자 포맷팅: "35000.00" → "35,000"
-      const strVal = String(rawValue).replace(/,/g, '');
-      if (strVal && /^-?\d+(\.\d+)?$/.test(strVal)) {
-        const num = Number(strVal);
-        if (!isNaN(num) && Number.isFinite(num)) {
-          result = result.replace(pattern, num.toLocaleString('ko-KR'));
-          return;
-        }
-      }
-      result = result.replace(pattern, String(rawValue));
+      // ★ D92: formatPreviewValue 컨트롤타워 사용
+      result = result.replace(pattern, formatPreviewValue(rawValue));
     });
     return result;
   };
@@ -461,9 +454,6 @@ export default function TargetSendModal({
                     onChange={(e) => {
                       const text = e.target.value;
                       setTargetMessage(text);
-                      if (targetMsgType !== 'MMS' && hasEmoji(text)) {
-                        setToast({ show: true, type: 'warning', message: 'SMS/LMS는 이모지를 지원하지 않습니다. 발송 실패 원인이 됩니다.' });
-                      }
                     }}
                     placeholder="전송하실 내용을 입력하세요."
                     style={adTextEnabled ? { textIndent: '42px' } : {}}
@@ -478,10 +468,6 @@ export default function TargetSendModal({
                       : `무료수신거부 ${formatRejectNumber(optOutNumber)}`}
                   </div>
                 )}
-                {/* 특수문자/이모지 안내 */}
-                <div className="text-xs text-gray-400 mt-2">
-                  ⚠️ 이모지(😀)·특수문자는 LMS 전환 또는 발송 실패 원인이 될 수 있습니다
-                </div>
               </div>
 
               {/* 버튼들 + 바이트 표시 */}

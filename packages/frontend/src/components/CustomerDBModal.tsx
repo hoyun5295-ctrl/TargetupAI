@@ -222,9 +222,13 @@ export default function CustomerDBModal({ onClose, token, userType }: CustomerDB
     return ['date', 'datetime', 'timestamp'].includes(dataType);
   };
 
-  // ★ D79: 필드에 대한 드롭다운 옵션 존재 여부 (등급, 지역 등 distinct values)
+  // ★ D79+D92: 필드에 대한 드롭다운 옵션 존재 여부 (등급, 지역 등 distinct values)
+  // ★ D92: 숫자/날짜 타입 필드는 이상/이하/범위 연산자 우선 → 드롭다운 표시하지 않음
   const hasDropdownOptions = (fieldKey: string) => {
-    return filterOptions[fieldKey] && filterOptions[fieldKey].length > 0;
+    if (!filterOptions[fieldKey] || filterOptions[fieldKey].length === 0) return false;
+    const dataType = getFieldDataType(fieldKey);
+    if (['number', 'integer', 'float', 'numeric', 'date', 'datetime', 'timestamp'].includes(dataType)) return false;
+    return true;
   };
 
   const formatPhone = (phone: string) => {

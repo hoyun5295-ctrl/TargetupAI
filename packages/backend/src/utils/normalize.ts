@@ -352,25 +352,27 @@ export function normalizeDate(value: any): string | null {
   if (value == null || value === '') return null;
 
   // Date 객체 직접 처리 (XLSX cellDates: true)
+  // ★ D92: UTC 기반으로 추출하여 타임존에 의한 하루 밀림 방지
   if (value instanceof Date && !isNaN(value.getTime())) {
-    const yyyy = value.getFullYear();
+    const yyyy = value.getUTCFullYear();
     if (yyyy >= 1900 && yyyy <= 2099) {
-      const mm = String(value.getMonth() + 1).padStart(2, '0');
-      const dd = String(value.getDate()).padStart(2, '0');
+      const mm = String(value.getUTCMonth() + 1).padStart(2, '0');
+      const dd = String(value.getUTCDate()).padStart(2, '0');
       return `${yyyy}-${mm}-${dd}`;
     }
     return null;
   }
 
   // 엑셀 시리얼넘버 (숫자형 또는 정수형 문자열 — 1~73050 범위)
+  // ★ D92: UTC 기반 연산으로 타임존 무관하게 정확한 날짜 변환
   const numVal = typeof value === 'number' ? value : Number(value);
   if (!isNaN(numVal) && Number.isInteger(numVal) && numVal >= 1 && numVal <= 73050) {
-    const excelEpoch = new Date(1899, 11, 30);
-    const converted = new Date(excelEpoch.getTime() + numVal * 86400000);
-    const yyyy = converted.getFullYear();
+    const excelEpochMs = Date.UTC(1899, 11, 30);
+    const converted = new Date(excelEpochMs + numVal * 86400000);
+    const yyyy = converted.getUTCFullYear();
     if (yyyy >= 1900 && yyyy <= 2099) {
-      const mm = String(converted.getMonth() + 1).padStart(2, '0');
-      const dd = String(converted.getDate()).padStart(2, '0');
+      const mm = String(converted.getUTCMonth() + 1).padStart(2, '0');
+      const dd = String(converted.getUTCDate()).padStart(2, '0');
       return `${yyyy}-${mm}-${dd}`;
     }
   }

@@ -1,4 +1,5 @@
 import type { FieldMeta } from './DirectTargetFilterModal';
+import { formatPreviewValue } from '../utils/formatDate';
 
 // ★ 정규식 특수문자 이스케이프
 const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -21,7 +22,7 @@ interface DirectPreviewModalProps {
   targetFieldsMeta: FieldMeta[];
 }
 
-// ★ D43-3c: 동적 변수 치환 함수
+// ★ D43-3c+D92: 동적 변수 치환 함수 — formatPreviewValue 컨트롤타워 사용
 const replaceVarsWithMeta = (text: string, recipient: any, fieldsMeta: FieldMeta[], fallback: boolean = false) => {
   if (!text || !recipient) return text;
   let result = text;
@@ -29,7 +30,7 @@ const replaceVarsWithMeta = (text: string, recipient: any, fieldsMeta: FieldMeta
     if (fm.field_key === 'phone' || fm.field_key === 'sms_opt_in') return;
     const pattern = new RegExp(escapeRegExp(fm.variable), 'g');
     const val = recipient[fm.field_key];
-    const display = val != null && val !== '' ? String(val) : (fallback ? fm.display_name : '');
+    const display = val != null && val !== '' ? formatPreviewValue(val) : (fallback ? fm.display_name : '');
     result = result.replace(pattern, display);
   });
   return result;

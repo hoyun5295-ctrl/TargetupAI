@@ -110,7 +110,9 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
     }
 
     // 해시는 치환 후 내용으로 계산 (앱이 리포트하는 내용과 일치시킴)
-    const personalizedForHash = replaceVariables(rawActualContent, firstCustomer, spamFieldMappings);
+    // ★ D92: %회신번호% 치환 — 수동 스팸테스트에서도 callbackNumber 전달
+    const spamAddressBookFields = callbackNumber ? { callback: callbackNumber, extra1: '', extra2: '', extra3: '', name: '' } : undefined;
+    const personalizedForHash = replaceVariables(rawActualContent, firstCustomer, spamFieldMappings, spamAddressBookFields);
     const messageHash = computeMessageHash(personalizedForHash);
 
     // 3) 동일 발신번호 + 동일 메시지 해시로 진행 중인 테스트 차단 (세션 격리)
@@ -199,9 +201,10 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
           [testId, device.carrier, msgType, device.phone]
         );
 
-        // ★ #3: 개인화 변수를 샘플 데이터로 치환하여 발송 (원본은 DB에 보관)
+        // ★ #3+D92: 개인화 변수를 샘플 데이터로 치환하여 발송 (원본은 DB에 보관)
+        // %회신번호%도 callbackNumber로 치환
         const rawContent = msgType === 'SMS' ? messageContentSms : messageContentLms;
-        const content = replaceVariables(rawContent || '', firstCustomer, spamFieldMappings);
+        const content = replaceVariables(rawContent || '', firstCustomer, spamFieldMappings, spamAddressBookFields);
 
         // QTmsg 테스트 라인으로 발송
         const titleStr = (msgType === 'LMS' || msgType === 'MMS') ? (subject || '') : '';

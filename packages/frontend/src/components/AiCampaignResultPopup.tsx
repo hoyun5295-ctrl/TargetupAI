@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { formatPreviewValue } from '../utils/formatDate';
 
 interface AiCampaignResultPopupProps {
   show: boolean;
@@ -428,7 +429,7 @@ onClick={() => {
                     const replaceVars = (text: string) => {
                       if (!text) return text;
                       let result = text;
-                      Object.entries(sc).forEach(([k, v]) => { result = result.replace(new RegExp(`%${k}%`, 'g'), v); });
+                      Object.entries(sc).forEach(([k, v]) => { result = result.replace(new RegExp(`%${k}%`, 'g'), formatPreviewValue(v)); });
                       // 치환 안 된 %변수% 제거 (sampleCustomer에 없는 경우)
                       result = result.replace(/%[^%\s]{1,20}%/g, '');
                       return result;
