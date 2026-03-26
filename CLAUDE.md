@@ -44,7 +44,7 @@
 | — | messageUtils.ts | 변수 치환 (5개 발송 경로 통합) |
 | — | normalize.ts | 값 정규화 + normalizeCustomFieldValue (커스텀 필드 Date/문자열 정규화) |
 | — | stats-aggregation.ts | 대시보드 통계 집계 + AI 캠페인 성과 집계 |
-| — | formatDate.ts (프론트) | calculateSmsBytes (바이트 계산) + truncateToSmsBytes (바이트 자르기) + replaceMessageVars (변수 치환) + formatPreviewValue (미리보기 포맷팅) |
+| — | formatDate.ts (프론트) | calculateSmsBytes (바이트 계산) + truncateToSmsBytes (바이트 자르기) + replaceMessageVars (변수 치환) + formatPreviewValue (미리보기 포맷팅) + DIRECT_VAR_MAP/replaceDirectVars (직접발송 변수맵 D96) |
 
 **⚠️ 이 원칙을 어기고 인라인 코드를 작성하면 버그가 재발한다. 실제 사고 사례:**
 - **사례 1:** upload.ts에서 customer_field_definitions를 인라인으로 INSERT하면서 "최초 등록 우선" 정책 적용 → 잘못된 라벨이 영원히 고착되는 버그 발생.

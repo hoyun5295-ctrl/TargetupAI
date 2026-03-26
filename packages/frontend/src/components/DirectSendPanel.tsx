@@ -880,7 +880,7 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
         {/* 파일 매핑 모달 */}
         {directShowMapping && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60]">
-            <div className="bg-white rounded-2xl shadow-2xl w-[500px] max-h-[80vh] overflow-y-auto">
+            <div className="bg-white rounded-2xl shadow-2xl w-[650px] max-h-[80vh] overflow-y-auto">
               <div className="px-5 py-3 border-b bg-blue-50 flex justify-between items-center">
                 <div>
                   <h3 className="font-bold text-sm">📁 컬럼 매핑</h3>
