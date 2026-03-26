@@ -153,9 +153,9 @@ export function replaceVariables(
         displayValue = String(rawValue);
       }
     } else {
-      // ★ D85: ISO 날짜 패턴 자동 감지 — mapping.type이 'date'가 아니어도 ISO 문자열이면 KST 포맷
+      // ★ D85+D95: 날짜 패턴 자동 감지 — ISO 타임스탬프 + 순수 YYYY-MM-DD 모두 KST 포맷
       const strVal = String(rawValue);
-      if (/^\d{4}-\d{2}-\d{2}(T|\s)/.test(strVal)) {
+      if (/^\d{4}-\d{2}-\d{2}($|T|\s)/.test(strVal)) {
         try {
           displayValue = new Date(strVal).toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul' });
         } catch {

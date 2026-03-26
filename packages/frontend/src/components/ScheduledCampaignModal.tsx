@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { calculateSmsBytes } from '../utils/formatDate';
 
 interface ScheduledCampaignModalProps {
   show: boolean;
@@ -397,8 +398,8 @@ export default function ScheduledCampaignModal({
                 placeholder="메시지 내용 입력"
               />
               <div className="text-right text-sm text-gray-500 mt-1">
-                {/* ★ D89: SMS 표준 바이트 계산 (한글 2byte) — 다른 발송 경로와 통일 */}
-                {(() => { let b = 0; for (let i = 0; i < editMessage.length; i++) b += editMessage.charCodeAt(i) > 127 ? 2 : 1; return b; })()} bytes
+                {/* ★ D95: 바이트 계산 — formatDate.ts 컨트롤타워 사용 */}
+                {calculateSmsBytes(editMessage)} bytes
               </div>
             </div>
             {messageEditing && (

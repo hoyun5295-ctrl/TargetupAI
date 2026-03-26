@@ -18,7 +18,7 @@ import {
   XCircle
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { formatPreviewValue } from '../utils/formatDate';
+import { formatPreviewValue, calculateSmsBytes, replaceMessageVars } from '../utils/formatDate';
 import { highlightVars } from '../utils/highlightVars';
 
 interface AiCustomSendFlowProps {
@@ -267,11 +267,8 @@ export default function AiCustomSendFlow({
     setSelectedFields(prev => prev.includes(fieldKey) ? prev.filter(k => k !== fieldKey) : [...prev, fieldKey]);
   };
 
-  const calculateBytes = (text: string) => {
-    let bytes = 0;
-    for (let i = 0; i < text.length; i++) { bytes += text.charCodeAt(i) > 127 ? 2 : 1; }
-    return bytes;
-  };
+  // ★ D95: 바이트 계산 — formatDate.ts 컨트롤타워 사용
+  const calculateBytes = calculateSmsBytes;
 
   const formatRejectNumber = (num: string) => {
     const clean = num.replace(/-/g, '');
@@ -288,24 +285,8 @@ export default function AiCustomSendFlow({
     return adPrefix + msg + adSuffix;
   };
 
-  const replaceSampleVars = (text: string) => {
-    let result = text;
-    // field_key → field_label 매핑 (API에서 받은 필드 정의 기반)
-    const fieldLabelMap: Record<string, string> = {};
-    for (const f of availableFields) {
-      fieldLabelMap[f.field_key] = f.field_label || f.display_name || f.field_key;
-    }
-    // %한글변수% → 실제 샘플값으로 치환
-    for (const f of availableFields) {
-      const label = fieldLabelMap[f.field_key];
-      const sampleVal = sampleData[f.field_key];
-      if (label && sampleVal != null) {
-        // ★ D92: formatPreviewValue 컨트롤타워 사용 (숫자+날짜 포맷팅)
-        result = result.replace(new RegExp(`%${label}%`, 'g'), formatPreviewValue(sampleVal));
-      }
-    }
-    return result;
-  };
+  // ★ D95: replaceMessageVars 컨트롤타워 사용
+  const replaceSampleVars = (text: string) => replaceMessageVars(text, availableFields, sampleData);
 
   // 커스텀 alert 표시
   const showAlert = (title: string, message: string, type: 'error' | 'warning' | 'info' = 'error') => {
@@ -959,25 +940,8 @@ export default function AiCustomSendFlow({
                       const cb = selectedCallback || '';
                       // ★ D88: sampleData(타겟 필터 매칭 샘플) 우선 사용, 없으면 sampleCustomer(prop) 폴백
                       const sc = (Object.keys(sampleData).length > 0 ? sampleData : sampleCustomer) || {};
-                      const replaceVars = (text: string) => {
-                        if (!text) return text;
-                        let result = text;
-                        for (const f of availableFields) {
-                          const label = f.field_label || f.display_name || f.field_key;
-                          const val = sc[f.field_key];
-                          if (label && val != null) {
-                            result = result.replace(new RegExp(`%${label}%`, 'g'), formatPreviewValue(val));
-                          }
-                        }
-                        // column 키로도 치환 (sampleCustomer가 column 키일 때 호환)
-                        Object.entries(sc).forEach(([k, v]) => {
-                          if (v != null) {
-                            result = result.replace(new RegExp(`%${k}%`, 'g'), formatPreviewValue(v));
-                          }
-                        });
-                        result = result.replace(/%[^%\s]{1,20}%/g, '');
-                        return result;
-                      };
+                      // ★ D95: replaceMessageVars 컨트롤타워 사용
+                      const replaceVars = (text: string) => replaceMessageVars(text, availableFields, sc, { removeUnmatched: true });
                       const smsRaw = isAdLocal ? `(광고)${msg}\n무료거부${optOutNumber.replace(/-/g, '')}` : msg;
                       const lmsRaw = isAdLocal ? `(광고) ${msg}\n무료수신거부 ${formatRejectNumber(optOutNumber)}` : msg;
                       const smsMsg = replaceVars(smsRaw);
@@ -1059,13 +1023,15 @@ export default function AiCustomSendFlow({
                       <div className="flex gap-2 mt-1">
                         <div className="w-7 h-7 rounded-full bg-purple-100 flex items-center justify-center shrink-0 text-xs">📱</div>
                         <div className="bg-white rounded-2xl rounded-tl-sm p-3 shadow-sm border border-gray-100 text-[12px] leading-[1.6] whitespace-pre-wrap break-all text-gray-700 max-w-[95%]">
-                          {highlightVars(wrapAdText(variants[selectedVariantIdx]?.message_text || ''))}
+                          {Object.keys(sampleData).length > 0
+                            ? replaceSampleVars(wrapAdText(variants[selectedVariantIdx]?.message_text || ''))
+                            : highlightVars(wrapAdText(variants[selectedVariantIdx]?.message_text || ''))}
                         </div>
                       </div>
                     </div>
                     <div className="px-3 py-2 border-t bg-gray-50 text-center shrink-0">
                       <span className="text-[10px] text-gray-400">
-                        {calculateBytes(wrapAdText(variants[selectedVariantIdx]?.message_text || ''))} / {channel === 'SMS' ? 90 : 2000} bytes
+                        {calculateBytes(Object.keys(sampleData).length > 0 ? replaceSampleVars(wrapAdText(variants[selectedVariantIdx]?.message_text || '')) : wrapAdText(variants[selectedVariantIdx]?.message_text || ''))} / {channel === 'SMS' ? 90 : 2000} bytes
                       </span>
                     </div>
                   </div>

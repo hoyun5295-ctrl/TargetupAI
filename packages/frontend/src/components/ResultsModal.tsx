@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { calculateSmsBytes } from '../utils/formatDate';
 
 interface ResultsModalProps {
   onClose: () => void;
@@ -781,7 +782,7 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
                         {/* 하단 바이트 */}
                         <div className="px-3 py-2 border-t bg-gray-50 text-center shrink-0">
                           <span className="text-[10px] text-gray-400">
-                            {(() => { let b=0; const t=selectedCampaign.message_content||''; for(let i=0;i<t.length;i++) b+=t.charCodeAt(i)>127?2:1; return b; })()} / {selectedCampaign.message_type === 'SMS' || selectedCampaign.message_type === 'S' ? 90 : 2000} bytes
+                            {calculateSmsBytes(selectedCampaign.message_content || '')} / {selectedCampaign.message_type === 'SMS' || selectedCampaign.message_type === 'S' ? 90 : 2000} bytes
                           </span>
                         </div>
                       </div>
@@ -933,7 +934,7 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
                             <td className="px-3 py-2.5 font-mono text-xs text-gray-600">{formatPhone(m.call_back)}</td>
                             <td className="px-3 py-2.5 text-xs text-gray-600 max-w-[120px]">
                               <div className="relative group/msg">
-                                <span className="truncate block cursor-pointer hover:text-emerald-600" title="클릭하여 전체 내용 보기">{(m.msg_contents || '').slice(0, 10)}{(m.msg_contents || '').length > 10 ? '...' : ''}</span>
+                                <span className="truncate block cursor-pointer hover:text-emerald-600" title="클릭하여 전체 내용 보기" onClick={() => setMsgDetailContent(m.msg_contents || '')}>{(m.msg_contents || '').slice(0, 10)}{(m.msg_contents || '').length > 10 ? '...' : ''}</span>
                                 {(m.msg_contents || '').length > 10 && (
                                   <div className="invisible group-hover/msg:visible absolute left-full top-0 ml-2 z-[100]">
                                     <div className="w-[250px] rounded-[1.4rem] p-[3px] bg-gradient-to-b from-emerald-400 to-emerald-600 shadow-2xl">

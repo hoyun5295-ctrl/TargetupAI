@@ -5,7 +5,7 @@ import path from 'path';
 import * as XLSX from 'xlsx';
 import { query } from '../config/database';
 import { redis, AI_MODELS, AI_MAX_TOKENS, CACHE_TTL, TIMEOUTS, BATCH_SIZES } from '../config/defaults';
-import { normalizeByFieldKey, normalizeRegion, normalizeDate } from '../utils/normalize';
+import { normalizeByFieldKey, normalizeRegion, normalizeDate, normalizeCustomFieldValue } from '../utils/normalize';
 import { CATEGORY_LABELS, FIELD_MAP, getColumnFields, getCustomFields, getFieldByKey, upsertCustomFieldDefinitions } from '../utils/standard-field-map';
 
 // ★ D79: 날짜 정규화는 컨트롤타워(normalize.ts)의 normalizeDate() 사용
@@ -575,17 +575,11 @@ async function processUploadInBackground(
         rowValues.push(derivedBirthYear);
         rowValues.push(derivedBirthMonthDay);
 
-        // custom_fields JSONB 빌드
+        // custom_fields JSONB 빌드 — normalizeCustomFieldValue 컨트롤타워 사용
         const customObj: Record<string, any> = {};
         for (const cf of getCustomFields()) {
           if (record[cf.fieldKey] != null && record[cf.fieldKey] !== '') {
-            let val = record[cf.fieldKey];
-            // ★ B17-09: Date 객체(XLSX cellDates)를 String()하면 영문 형식 그대로 저장됨
-            // normalizeDate()로 YYYY-MM-DD 변환 후 저장
-            if (val instanceof Date) {
-              val = normalizeDate(val) || String(val);
-            }
-            customObj[cf.columnName] = String(val);
+            customObj[cf.columnName] = normalizeCustomFieldValue(record[cf.fieldKey]);
           }
         }
         rowValues.push(Object.keys(customObj).length > 0 ? JSON.stringify(customObj) : null);

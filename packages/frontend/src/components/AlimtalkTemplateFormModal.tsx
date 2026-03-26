@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 
 interface AlimtalkButton {
-  linkType: 'WL' | 'AL' | 'DS' | 'BK' | 'MD';
+  linkType: 'WL' | 'AL' | 'DS' | 'BK' | 'MD' | 'AC';
   name: string;
   linkM?: string;
   linkP?: string;
@@ -58,6 +58,7 @@ const BUTTON_TYPES = [
   { value: 'WL', label: '웹링크' },
   { value: 'AL', label: '앱링크' },
   { value: 'DS', label: '배송조회' },
+  { value: 'AC', label: '채널추가' },
   { value: 'BK', label: '봇키워드' },
   { value: 'MD', label: '메시지전달' },
 ];
@@ -79,6 +80,7 @@ export default function AlimtalkTemplateFormModal({ template, profiles, onClose,
   const [messageType, setMessageType] = useState(template?.message_type || 'BA');
   const [emphasizeType, setEmphasizeType] = useState(template?.emphasize_type || 'NONE');
   const [emphasizeTitle, setEmphasizeTitle] = useState(template?.emphasize_title || '');
+  const [emphasizeSubTitle, setEmphasizeSubTitle] = useState('');
   const [content, setContent] = useState(template?.content || '');
   const [imageUrl, setImageUrl] = useState(template?.image_url || '');
   const [extraContent, setExtraContent] = useState(template?.extra_content || '');
@@ -94,6 +96,16 @@ export default function AlimtalkTemplateFormModal({ template, profiles, onClose,
     const t = setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
     return () => clearTimeout(t);
   }, [toast.show]);
+
+  // ★ 채널추가형 선택 시 "채널추가" 버튼 자동 삽입
+  useEffect(() => {
+    if (messageType === 'AD') {
+      const hasChannelBtn = buttons.some(b => b.linkType === 'AC');
+      if (!hasChannelBtn) {
+        setButtons(prev => [...prev, { linkType: 'AC', name: '채널 추가' }]);
+      }
+    }
+  }, [messageType]);
 
   const addButton = () => {
     if (buttons.length >= 5) return;
@@ -145,6 +157,7 @@ export default function AlimtalkTemplateFormModal({ template, profiles, onClose,
           messageType,
           emphasizeType,
           emphasizeTitle: emphasizeType === 'TEXT' ? emphasizeTitle : null,
+          emphasizeSubTitle: emphasizeType === 'TEXT' ? emphasizeSubTitle : null,
           content,
           imageUrl: emphasizeType === 'IMAGE' ? imageUrl : null,
           extraContent: ['EX', 'MI'].includes(messageType) ? extraContent : null,
@@ -240,13 +253,21 @@ export default function AlimtalkTemplateFormModal({ template, profiles, onClose,
             </div>
           </div>
 
-          {/* 강조 제목 (TEXT) */}
+          {/* 강조 제목 + 보조문구 (TEXT) */}
           {emphasizeType === 'TEXT' && (
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">강조 제목 <span className="text-red-500">*</span></label>
-              <input value={emphasizeTitle} onChange={e => setEmphasizeTitle(e.target.value)}
-                placeholder="말풍선 상단에 표시될 강조 텍스트" maxLength={50}
-                className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-200" />
+            <div className="space-y-2">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">강조표기 타이틀 <span className="text-red-500">*</span></label>
+                <input value={emphasizeTitle} onChange={e => setEmphasizeTitle(e.target.value)}
+                  placeholder="말풍선 상단에 표시될 강조 텍스트" maxLength={50}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-200" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">강조표기 보조문구</label>
+                <input value={emphasizeSubTitle} onChange={e => setEmphasizeSubTitle(e.target.value)}
+                  placeholder="강조 텍스트 하단 보조 설명 (선택)" maxLength={50}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-200" />
+              </div>
             </div>
           )}
 
@@ -317,7 +338,7 @@ export default function AlimtalkTemplateFormModal({ template, profiles, onClose,
               </button>
             </div>
             {buttons.map((btn, idx) => (
-              <div key={idx} className="flex gap-2 mb-2 items-start bg-gray-50 p-2 rounded-lg">
+              <div key={idx} className="flex flex-wrap gap-2 mb-2 items-start bg-gray-50 p-2 rounded-lg">
                 <select value={btn.linkType} onChange={e => updateButton(idx, 'linkType', e.target.value)}
                   className="border border-gray-300 rounded px-2 py-1 text-xs w-24">
                   {BUTTON_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
@@ -326,9 +347,24 @@ export default function AlimtalkTemplateFormModal({ template, profiles, onClose,
                   placeholder="버튼명 (최대 14자)" maxLength={14}
                   className="border border-gray-300 rounded px-2 py-1 text-xs flex-1" />
                 {btn.linkType === 'WL' && (
-                  <input value={btn.linkM || ''} onChange={e => updateButton(idx, 'linkM', e.target.value)}
-                    placeholder="모바일 URL"
-                    className="border border-gray-300 rounded px-2 py-1 text-xs flex-1" />
+                  <>
+                    <input value={btn.linkM || ''} onChange={e => updateButton(idx, 'linkM', e.target.value)}
+                      placeholder="모바일 URL"
+                      className="border border-gray-300 rounded px-2 py-1 text-xs flex-1" />
+                    <input value={btn.linkP || ''} onChange={e => updateButton(idx, 'linkP', e.target.value)}
+                      placeholder="PC URL"
+                      className="border border-gray-300 rounded px-2 py-1 text-xs flex-1" />
+                  </>
+                )}
+                {btn.linkType === 'AL' && (
+                  <>
+                    <input value={btn.schemeAndroid || ''} onChange={e => updateButton(idx, 'schemeAndroid', e.target.value)}
+                      placeholder="Android scheme"
+                      className="border border-gray-300 rounded px-2 py-1 text-xs flex-1" />
+                    <input value={btn.schemeIos || ''} onChange={e => updateButton(idx, 'schemeIos', e.target.value)}
+                      placeholder="iOS scheme"
+                      className="border border-gray-300 rounded px-2 py-1 text-xs flex-1" />
+                  </>
                 )}
                 <button onClick={() => removeButton(idx)} className="text-red-400 hover:text-red-600 text-sm px-1">&times;</button>
               </div>

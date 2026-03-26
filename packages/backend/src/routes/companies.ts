@@ -1213,7 +1213,7 @@ router.post('/kakao-templates', async (req: Request, res: Response) => {
 
     const {
       profileId, templateName, category, messageType, emphasizeType,
-      content, emphasizeTitle, imageUrl, extraContent, adContent,
+      content, emphasizeTitle, emphasizeSubTitle, imageUrl, extraContent, adContent,
       securityFlag, buttons, quickReplies, templateCode,
     } = req.body;
 
@@ -1233,14 +1233,15 @@ router.post('/kakao-templates', async (req: Request, res: Response) => {
     const result = await query(
       `INSERT INTO kakao_templates (
         company_id, profile_id, template_code, template_name, category,
-        message_type, emphasize_type, emphasize_title, content, image_url,
+        message_type, emphasize_type, emphasize_title, emphasize_sub_title, content, image_url,
         extra_content, ad_content, security_flag, buttons, quick_replies,
         status, requested_at
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'pending',NOW())
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'pending',NOW())
       RETURNING *`,
       [
         companyId, profileId || null, templateCode || null, templateName, category || null,
-        messageType || 'BA', emphasizeType || 'NONE', emphasizeTitle || null, content, imageUrl || null,
+        messageType || 'BA', emphasizeType || 'NONE', emphasizeTitle || null, emphasizeSubTitle || null,
+        content, imageUrl || null,
         extraContent || null, adContent || null, securityFlag || false, JSON.stringify(buttons || []),
         JSON.stringify(quickReplies || []),
       ]
@@ -1274,7 +1275,7 @@ router.put('/kakao-templates/:id', async (req: Request, res: Response) => {
 
     const {
       profileId, templateName, category, messageType, emphasizeType,
-      content, emphasizeTitle, imageUrl, extraContent, adContent,
+      content, emphasizeTitle, emphasizeSubTitle, imageUrl, extraContent, adContent,
       securityFlag, buttons, quickReplies, templateCode,
     } = req.body;
 
@@ -1287,20 +1288,21 @@ router.put('/kakao-templates/:id', async (req: Request, res: Response) => {
         message_type = COALESCE($7, message_type),
         emphasize_type = COALESCE($8, emphasize_type),
         emphasize_title = $9,
-        content = COALESCE($10, content),
-        image_url = $11,
-        extra_content = $12,
-        ad_content = $13,
-        security_flag = COALESCE($14, security_flag),
-        buttons = COALESCE($15, buttons),
-        quick_replies = COALESCE($16, quick_replies),
+        emphasize_sub_title = $10,
+        content = COALESCE($11, content),
+        image_url = $12,
+        extra_content = $13,
+        ad_content = $14,
+        security_flag = COALESCE($15, security_flag),
+        buttons = COALESCE($16, buttons),
+        quick_replies = COALESCE($17, quick_replies),
         status = 'pending',
         updated_at = NOW()
       WHERE id = $1 AND company_id = $2
       RETURNING *`,
       [
         id, companyId, profileId, templateCode, templateName, category,
-        messageType, emphasizeType, emphasizeTitle ?? null, content,
+        messageType, emphasizeType, emphasizeTitle ?? null, emphasizeSubTitle ?? null, content,
         imageUrl ?? null, extraContent ?? null, adContent ?? null,
         securityFlag, buttons ? JSON.stringify(buttons) : null,
         quickReplies ? JSON.stringify(quickReplies) : null,

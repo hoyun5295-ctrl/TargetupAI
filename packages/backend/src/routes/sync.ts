@@ -5,7 +5,7 @@
 import { Request, Response, Router } from 'express';
 import { query } from '../config/database';
 import { TIMEOUTS, RATE_LIMITS, BATCH_SIZES } from '../config/defaults';
-import { normalizePhone, normalizeRegion, normalizeDate } from '../utils/normalize';
+import { normalizePhone, normalizeRegion, normalizeDate, normalizeCustomFieldValue } from '../utils/normalize';
 import { getColumnFields, getCustomFields, upsertCustomFieldDefinitions } from '../utils/standard-field-map';
 
 const router = Router();
@@ -479,12 +479,7 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
       // 또는 custom_1~15 개별 키로 전송한 경우
       for (const cf of customFieldDefs) {
         if (c[cf.fieldKey] != null && c[cf.fieldKey] !== '') {
-          let val = c[cf.fieldKey];
-          // ★ B17-09: Date 객체 → YYYY-MM-DD 변환
-          if (val instanceof Date) {
-            val = normalizeDate(val) || String(val);
-          }
-          customObj[cf.columnName] = String(val);
+          customObj[cf.columnName] = normalizeCustomFieldValue(c[cf.fieldKey]);
         }
       }
       row.custom_fields = Object.keys(customObj).length > 0 ? JSON.stringify(customObj) : null;

@@ -424,6 +424,28 @@ export function normalizeDate(value: any): string | null {
   return null;
 }
 
+/**
+ * ★ D95: 커스텀 필드 값 정규화 — upload.ts / sync.ts에서 호출
+ * Date 객체 또는 JS Date.toString() 문자열이면 normalizeDate로 YYYY-MM-DD 변환.
+ * 일반 문자열(건성, 매트 등)은 그대로 반환. YYMMDD 6자리 같은 모호한 값은 건드리지 않음.
+ */
+export function normalizeCustomFieldValue(val: any): string {
+  if (val == null || val === '') return '';
+  // Date 객체 → normalizeDate
+  if (val instanceof Date) {
+    return normalizeDate(val) || String(val);
+  }
+  // JS Date.toString() 형식: "Wed Jan 01 2025 23:59:08 GMT+0900 (...)"
+  if (typeof val === 'string' && /^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s\w{3}\s\d{2}\s\d{4}/.test(val)) {
+    return normalizeDate(val) || val;
+  }
+  // ISO 타임스탬프 문자열: "2025-01-01T14:59:08.000Z"
+  if (typeof val === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(val)) {
+    return normalizeDate(val) || val;
+  }
+  return String(val);
+}
+
 // ============================================================
 // 일괄 정규화 (동기화/업로드 시 레코드 한 건 통째로 변환)
 // ============================================================

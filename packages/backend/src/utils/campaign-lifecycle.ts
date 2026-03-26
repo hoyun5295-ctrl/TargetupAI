@@ -59,8 +59,9 @@ export async function cancelCampaign(
 
   const camp = campaign.rows[0];
 
-  if (camp.status !== 'scheduled') {
-    return { success: false, error: '예약 상태가 아닙니다', cancelledCount: 0, refundedAmount: 0 };
+  // ★ D95: draft 상태도 취소 허용 (회신번호 확인 모달 취소 시 orphan draft 정리)
+  if (camp.status !== 'scheduled' && camp.status !== 'draft') {
+    return { success: false, error: '취소 가능한 상태가 아닙니다', cancelledCount: 0, refundedAmount: 0 };
   }
 
   // 2. 15분 이내 체크 (skipTimeCheck가 false이고, 미래 예약인 경우만)

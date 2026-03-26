@@ -40,7 +40,7 @@ import TodayStatsModal from '../components/TodayStatsModal';
 import UploadProgressModal from '../components/UploadProgressModal';
 import UploadResultModal from '../components/UploadResultModal';
 import { useAuthStore } from '../stores/authStore';
-import { formatDate, formatPreviewValue } from '../utils/formatDate';
+import { formatDate, formatPreviewValue, calculateSmsBytes, truncateToSmsBytes } from '../utils/formatDate';
 
 interface Stats {
   total: string;
@@ -932,6 +932,7 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
     if (!maxValue) {
       const defaults: Record<string, string> = {
         '%이름%': '홍길동어머니', '%등급%': 'VVIP', '%지역%': '경기도 성남시',
+        '%매장명%': '서울특별시 강남본점', '%포인트%': '9,999,999',
         '%구매금액%': '99,999,999원', '%기타1%': '가나다라마바사', '%기타2%': '가나다라마바사', '%기타3%': '가나다라마바사',
         '%회신번호%': '07012345678',
       };
@@ -945,9 +946,12 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
   useEffect(() => {
     // 메시지 변경 시 오버라이드 리셋
     setSmsOverrideAccepted(false);
-    // 자동입력 변수를 최대 길이 값으로 치환
+    // ★ D95: 자동입력 변수 최대 길이 치환 — directVarMapForBytes와 동일 맵
     const directVarMap: Record<string, string> = {
-      '%이름%': 'name', '%기타1%': 'extra1', '%기타2%': 'extra2', '%기타3%': 'extra3', '%회신번호%': 'callback',
+      '%이름%': 'name', '%등급%': 'grade', '%지역%': 'region',
+      '%매장명%': 'store_name', '%포인트%': 'point',
+      '%회신번호%': 'callback',
+      '%기타1%': 'extra1', '%기타2%': 'extra2', '%기타3%': 'extra3',
     };
     let fullMsg = getMaxByteMessage(directMessage, directRecipients, directVarMap);
     if (adTextEnabled) {
@@ -957,12 +961,8 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
         : `무료수신거부 ${optOutNumber}`;
       fullMsg = `${adPrefix}${fullMsg}\n${optOutText}`;
     }
-    // 한글 2byte, 영문/숫자 1byte 계산
-    let bytes = 0;
-    for (let i = 0; i < fullMsg.length; i++) {
-      const char = fullMsg.charCodeAt(i);
-      bytes += char > 127 ? 2 : 1;
-    }
+    // ★ D95: 컨트롤타워 사용
+    const bytes = calculateSmsBytes(fullMsg);
     // SMS에서 90바이트 초과 시 LMS 전환 확인 모달
     if (directMsgType === 'SMS' && bytes > 90 && !showLmsConfirm) {
       setPendingBytes(bytes);
@@ -989,11 +989,8 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
         : `무료수신거부 ${optOutNumber}`;
       fullMsg = `${adPrefix}${fullMsg}\n${optOutText}`;
     }
-    let bytes = 0;
-    for (let i = 0; i < fullMsg.length; i++) {
-      const char = fullMsg.charCodeAt(i);
-      bytes += char > 127 ? 2 : 1;
-    }
+    // ★ D95: 컨트롤타워 사용
+    const bytes = calculateSmsBytes(fullMsg);
     if (targetMsgType === 'SMS' && bytes > 90 && !showLmsConfirm) {
       setPendingBytes(bytes);
       setShowLmsConfirm(true);
@@ -1856,26 +1853,10 @@ const campaignData = {
     );
   }
 
-  // 바이트 계산 함수 (한글 2byte, 영문/숫자 1byte)
-  const calculateBytes = (text: string) => {
-    let bytes = 0;
-    for (let i = 0; i < text.length; i++) {
-      const char = text.charCodeAt(i);
-      bytes += char > 127 ? 2 : 1;
-    }
-    return bytes;
-  };
+  // ★ D95: 바이트 계산 — formatDate.ts 컨트롤타워 사용
+  const calculateBytes = calculateSmsBytes;
 
-  // SMS 90바이트로 잘린 메시지 반환
-  const truncateToSmsBytes = (text: string, maxBytes: number = 90) => {
-    let bytes = 0;
-    for (let i = 0; i < text.length; i++) {
-      const char = text.charCodeAt(i);
-      bytes += char > 127 ? 2 : 1;
-      if (bytes > maxBytes) return text.substring(0, i);
-    }
-    return text;
-  };
+  // ★ D95: SMS 바이트 자르기 — formatDate.ts 컨트롤타워 사용 (alias)
 
   // 광고문구 포함된 최종 메시지
   // 080번호 하이픈 포맷팅 (0801111111 → 080-111-1111)
@@ -1908,8 +1889,15 @@ const campaignData = {
     return `${prefix}${msg}\n${optOutText}`;
   };
 
-  const messageBytes = calculateBytes(getFullMessage(directMessage));
-  
+  // ★ D95: 변수 치환 후 최대 바이트 계산 — 스팸필터 replaceVars와 동일 맵 사용
+  const directVarMapForBytes: Record<string, string> = {
+    '%이름%': 'name', '%등급%': 'grade', '%지역%': 'region',
+    '%매장명%': 'store_name', '%포인트%': 'point',
+    '%회신번호%': 'callback',
+    '%기타1%': 'extra1', '%기타2%': 'extra2', '%기타3%': 'extra3',
+  };
+  const messageBytes = calculateBytes(getFullMessage(getMaxByteMessage(directMessage, directRecipients, directVarMapForBytes)));
+
   const maxBytes = directMsgType === 'SMS' ? 90 : 2000;
 
   return (
@@ -3264,18 +3252,22 @@ const campaignData = {
                           const cb = selectedCallback || '';
                           // ★ 리스트 최상단 고객 데이터로 미리보기 치환
                           const firstR = directRecipients[0];
+                          // ★ D95: 동적 변수 치환 — 하드코딩 변수 목록 제거
+                          const directVarMap: Record<string, string> = {
+                            '%이름%': 'name', '%등급%': 'grade', '%지역%': 'region',
+                            '%매장명%': 'store_name', '%포인트%': 'point',
+                            '%회신번호%': 'callback',
+                            '%기타1%': 'extra1', '%기타2%': 'extra2', '%기타3%': 'extra3',
+                          };
                           const replaceVars = (text: string) => {
                             if (!text || !firstR) return text;
-                            return text
-                              .replace(/%이름%/g, firstR.name || '')
-                              .replace(/%등급%/g, firstR.grade || '')
-                              .replace(/%지역%/g, firstR.region || '')
-                              .replace(/%매장명%/g, firstR.store_name || '')
-                              .replace(/%포인트%/g, firstR.point != null ? formatPreviewValue(firstR.point) : '')
-                              .replace(/%회신번호%/g, firstR.callback || selectedCallback || '')
-                              .replace(/%기타1%/g, firstR.extra1 || '')
-                              .replace(/%기타2%/g, firstR.extra2 || '')
-                              .replace(/%기타3%/g, firstR.extra3 || '');
+                            let result = text;
+                            for (const [variable, field] of Object.entries(directVarMap)) {
+                              const val = (firstR as any)[field];
+                              result = result.replace(new RegExp(variable.replace(/%/g, '%'), 'g'),
+                                val != null ? formatPreviewValue(val) : (field === 'callback' ? selectedCallback || '' : ''));
+                            }
+                            return result;
                           };
                           const smsRaw = adTextEnabled ? `(광고)${msg}\n무료거부${optOutNumber.replace(/-/g, '')}` : msg;
                           const lmsRaw = adTextEnabled ? `(광고) ${msg}\n무료수신거부 ${optOutNumber}` : msg;
@@ -3393,7 +3385,8 @@ const campaignData = {
                         // ★ MMS 이미지가 업로드되어 있으면 SMS 전환 불가 → 비용절감 안내 스킵
                         if (directMsgType !== 'SMS' && !lmsKeepAccepted && mmsUploadedImages.length === 0) {
                           const smsOptOut = `무료거부${optOutNumber.replace(/-/g, '')}`;
-                          const smsFullMsg = adTextEnabled ? `(광고)${directMessage}\n${smsOptOut}` : directMessage;
+                          const smsMaxMsg = getMaxByteMessage(directMessage, directRecipients, directVarMapForBytes);
+                          const smsFullMsg = adTextEnabled ? `(광고)${smsMaxMsg}\n${smsOptOut}` : smsMaxMsg;
                           const smsBytes = calculateBytes(smsFullMsg);
                           if (smsBytes <= 90) {
                             setShowSmsConvert({show: true, from: 'direct', currentBytes: messageBytes, smsBytes, count: directRecipients.length});
@@ -3846,7 +3839,7 @@ const campaignData = {
             {/* 파일 매핑 모달 — 2열 콤팩트, 매핑한 컬럼만 테이블에 표시 */}
             {directShowMapping && (
               <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60]">
-                <div className="bg-white rounded-2xl shadow-2xl w-[500px] overflow-hidden">
+                <div className="bg-white rounded-2xl shadow-2xl w-[500px] max-h-[80vh] overflow-y-auto">
                   <div className="px-5 py-3 border-b bg-blue-50 flex justify-between items-center">
                     <div>
                       <h3 className="font-bold text-sm">📁 컬럼 매핑</h3>
@@ -3861,7 +3854,7 @@ const campaignData = {
                       <span className="text-xs font-bold text-red-700 w-20 shrink-0">📱 수신번호 *</span>
                       <span className="text-gray-400 text-xs">→</span>
                       <select
-                        className="flex-1 border border-red-300 rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-red-400"
+                        className="flex-1 border border-red-300 rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-red-400 min-w-0"
                         value={directColumnMapping.phone || ''}
                         onChange={(e) => setDirectColumnMapping({...directColumnMapping, phone: e.target.value})}
                       >
@@ -3884,10 +3877,10 @@ const campaignData = {
                           { key: 'extra2', label: '기타2' },
                           { key: 'extra3', label: '기타3' },
                         ] as const).map(field => (
-                          <div key={field.key} className="flex items-center gap-2 p-2 bg-gray-50 rounded-lg">
+                          <div key={field.key} className="flex items-center gap-2 p-2 bg-gray-50 rounded-lg min-w-0">
                             <span className="text-xs font-medium text-gray-600 w-14 shrink-0">{field.label}</span>
                             <select
-                              className="flex-1 border rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-emerald-400"
+                              className="flex-1 border rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-emerald-400 min-w-0"
                               value={(directColumnMapping as any)[field.key] || ''}
                               onChange={(e) => setDirectColumnMapping({...directColumnMapping, [field.key]: e.target.value})}
                             >
@@ -3910,10 +3903,10 @@ const campaignData = {
                           {(kakaoSelectedTemplate.content?.match(/#\{[^}]+\}/g) || []).map((varName: string, i: number) => {
                             const varKey = `tplvar_${i}`;
                             return (
-                              <div key={varKey} className="flex items-center gap-2 p-2 bg-blue-50 rounded-lg">
+                              <div key={varKey} className="flex items-center gap-2 p-2 bg-blue-50 rounded-lg min-w-0">
                                 <span className="text-xs font-medium text-blue-700 w-20 shrink-0 truncate">{varName}</span>
                                 <select
-                                  className="flex-1 border border-blue-200 rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
+                                  className="flex-1 border border-blue-200 rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400 min-w-0"
                                   value={(directColumnMapping as any)[varKey] || ''}
                                   onChange={(e) => setDirectColumnMapping({...directColumnMapping, [varKey]: e.target.value})}
                                 >
@@ -4369,7 +4362,14 @@ const campaignData = {
       {/* ★ 미등록 회신번호 제외 확인 모달 */}
       <CallbackConfirmModal
         data={callbackConfirm}
-        onClose={() => { setCallbackConfirm(defaultCallbackConfirm); setPendingAiCampaignId(null); }}
+        onClose={async () => {
+          // ★ D95: 확인 모달 취소 시 pending draft 캠페인 정리 (중복 예약 방지)
+          if (pendingAiCampaignId) {
+            try { await campaignsApi.cancel(pendingAiCampaignId); } catch { /* 이미 없으면 무시 */ }
+          }
+          setCallbackConfirm(defaultCallbackConfirm);
+          setPendingAiCampaignId(null);
+        }}
         onConfirm={handleCallbackConfirmSend}
         isSending={directSending || isSending}
       />

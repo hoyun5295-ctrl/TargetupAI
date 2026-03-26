@@ -14,6 +14,7 @@
 
 import { useEffect, useState, useMemo } from 'react';
 import { aiApi } from '../api/client';
+import { calculateSmsBytes } from '../utils/formatDate';
 import AiMessageSuggestModal from './AiMessageSuggestModal';
 import SpamFilterTestModal from './SpamFilterTestModal';
 
@@ -231,14 +232,8 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
     );
   };
 
-  // 메시지 바이트 계산
-  const getByteLength = (str: string) => {
-    let bytes = 0;
-    for (let i = 0; i < str.length; i++) {
-      bytes += str.charCodeAt(i) > 127 ? 2 : 1;
-    }
-    return bytes;
-  };
+  // ★ D95: 바이트 계산 — formatDate.ts 컨트롤타워 사용
+  const getByteLength = calculateSmsBytes;
 
   const msgBytes = getByteLength(messageContent);
   const maxBytes = messageType === 'SMS' ? 90 : 2000;
@@ -490,7 +485,6 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
 
       <div
         className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-[fadeIn_0.2s_ease-out]"
-        onClick={onClose}
       >
         <div
           className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] overflow-y-auto animate-[slideUp_0.3s_ease-out]"

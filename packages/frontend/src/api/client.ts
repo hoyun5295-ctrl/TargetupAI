@@ -75,6 +75,7 @@ export const campaignsApi = {
   list: (params?: any) => api.get('/campaigns', { params }),
   create: (data: any) => api.post('/campaigns', data),
   send: (id: string, data?: any) => api.post(`/campaigns/${id}/send`, data || {}),
+  cancel: (id: string) => api.post(`/campaigns/${id}/cancel`),
 };
 
 // AI API
