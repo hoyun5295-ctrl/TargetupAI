@@ -472,6 +472,8 @@ PostgreSQL campaigns/campaign_runs 생성
 | **cancelCampaign이 draft 상태 미지원** | 회신번호 확인 모달 취소 시 draft 캠페인이 정리 안 됨 → orphan draft + 예약 중복 | **cancelCampaign에서 draft 상태도 취소 허용.** 확인 모달 취소 시 draft 캠페인 cancel (D95) |
 | **formatPreviewValue가 전화번호를 숫자로 변환** | 01012345678 → Number → toLocaleString → 1,011,110,001 | **0으로 시작하는 순수 숫자 문자열은 숫자 포맷팅 제외.** `/^0\d+$/` 체크 (D95) |
 | **프론트/백엔드 순수 YYYY-MM-DD 날짜 처리 불일치** | 프론트 formatPreviewValue는 한국어 포맷, 백엔드 messageUtils는 문자열 그대로 | **messageUtils.ts ISO 감지 regex에 `$` 추가: `/^\d{4}-\d{2}-\d{2}($\|T\|\s)/`** (D95) |
+| **직접발송 변수맵 3곳 하드코딩** | 자동입력 버튼, 스팸필터, 직접입력 모달에 각각 다른 변수맵 하드코딩 → 한 곳 수정 시 나머지 불일치 | **formatDate.ts `DIRECT_VAR_MAP` 컨트롤타워 1곳에서 정의.** 자동입력/스팸필터/직접입력/파일매핑/바이트계산 전부 import (D96) |
+| **Dashboard.tsx 4,400줄 거대 파일** | 직접발송/AI발송/타겟발송/통계 전부 한 파일에 → 수정 시 side effect 추적 불가 | **기능별 컴포넌트 분리.** DirectSendPanel.tsx로 직접발송 1,033줄 분리. 발송 실행 로직(executeDirectSend)은 기간계이므로 Dashboard에 유지 (D96) |
 
 ### ⚠️ 필수 체크 원칙 1: 유틸 함수 수정/추가 시 소비처 전수 확인
 

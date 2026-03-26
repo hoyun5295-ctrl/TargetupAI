@@ -106,6 +106,69 @@
 
 ---
 
+### 🔧 D96 — 자동발송 테스터 피드백 5건 + 직접발송 분리 + 슈퍼관리자 (2026-03-26) — 🟡 배포대기
+
+> **배경:** 자동발송 테스터 PPT 5건 처리 + Dashboard.tsx 직접발송 컴포넌트 분리 + 직접발송 변수맵 컨트롤타워 통합
+
+#### 자동발송 테스터 피드백 (슬라이드 5건)
+
+**슬1 개별회신번호:** 답변용 — 스팸테스트는 단일 발신번호만 가능(테스트폰 1대), 실제 발송은 개별회신번호 지원됨
+**슬2 스팸테스트:** 답변용 — AI 3 variant 생성 → 각각 스팸테스트 → best 1건 선택. 정상 동작
+**슬3 3번씩 발송:** 답변용 — D-2 자동 스팸테스트 3 variant. 정상 동작
+**슬4 AI 생성 문안 확인/수정 불가:**
+- `auto-campaigns.ts` — PUT /:id/generated-message 엔드포인트 추가
+- `AutoSendPage.tsx` — AI 생성 문안 확인/수정 모달 + 캠페인 카드 AI상태 배지 + 실행이력 문안 표시
+**슬5 모달 드래그 시 초기화:**
+- `AutoSendFormModal.tsx` — overscrollBehavior: contain + onMouseDown stopPropagation
+
+#### 직접발송 Dashboard 분리 (D96 핵심)
+
+**컴포넌트 분리:**
+- `DirectSendPanel.tsx` — **신규** (1,072줄). 직접발송 모달 전체를 Dashboard에서 분리
+- `Dashboard.tsx` — 4,400줄 → 3,367줄 (-1,033줄). DirectSendPanel props 전달로 교체
+- 직접발송 전용 내부 state 12개를 DirectSendPanel로 이동 (파일매핑, 직접입력, 검색, 선택 등)
+- 발송 실행 로직(executeDirectSend)은 Dashboard에 그대로 유지 — 기간계 무접촉
+
+**변수맵 컨트롤타워 통합:**
+- `formatDate.ts` — DIRECT_VAR_MAP, DIRECT_VAR_TO_FIELD, DIRECT_FIELD_LABELS, DIRECT_MAPPING_FIELDS, replaceDirectVars 추가
+- `Dashboard.tsx` — 하드코딩 변수맵 5곳 → 컨트롤타워 import로 교체 (자동입력 버튼, 스팸필터, 직접입력, 파일매핑, 바이트 계산)
+
+#### 기타
+
+**슈퍼관리자 반려 모달:**
+- `AdminDashboard.tsx` — prompt('반려 사유') → 커스텀 모달 (rejectModal + handleTemplateRejectConfirm)
+
+**담당자 폴백 제거:**
+- `companies.ts` — settings GET에서 companies.manager_contacts 폴백 제거 → 사용자별 완전 격리
+
+#### 수정 파일 (9개)
+
+**프론트엔드 (7개):**
+- `packages/frontend/src/components/DirectSendPanel.tsx` (신규)
+- `packages/frontend/src/components/AutoSendFormModal.tsx`
+- `packages/frontend/src/pages/AutoSendPage.tsx`
+- `packages/frontend/src/pages/AdminDashboard.tsx`
+- `packages/frontend/src/pages/Dashboard.tsx`
+- `packages/frontend/src/utils/formatDate.ts`
+
+**백엔드 (2개):**
+- `packages/backend/src/routes/auto-campaigns.ts`
+- `packages/backend/src/routes/companies.ts`
+
+#### 미완료 (다음 세션)
+
+**Dashboard 2차 리팩토링:**
+- useSendExecution() 훅: executeDirectSend/executeTargetSend + 관련 state 캡슐화
+- 공용 모달 분리 (SendOptionModals.tsx)
+- AI 발송 흐름 분리
+- 같은 패턴으로 AI발송, 타겟발송도 순차 분리 → Dashboard를 레이아웃+라우팅 역할만으로 경량화
+
+**직접발송 추가 개선:**
+- RCS 템플릿 폼 보강 (버튼, 브랜드정보)
+- 직접발송 UI를 커스텀 훅 패턴으로 전환 (props 최소화)
+
+---
+
 ### 🔧 D95 — QA 버그리포트 11건 + 컨트롤타워 정비 + 헤더 UI (2026-03-26) — ✅ 배포 완료
 
 > **배경:** 0326 테스터 PPT 11건 버그 수정 + 프론트 바이트계산/변수치환 컨트롤타워 추출 + 헤더 메뉴 필(pill) 스타일 통일
