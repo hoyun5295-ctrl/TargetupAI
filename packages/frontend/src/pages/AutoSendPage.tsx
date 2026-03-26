@@ -35,6 +35,13 @@ interface AutoCampaign {
   created_at: string;
   creator_login_id: string;
   run_count: number;
+  // ★ D96: AI 생성 문안 관련
+  ai_generate_enabled: boolean;
+  generated_message_content: string | null;
+  generated_message_subject: string | null;
+  generated_at: string | null;
+  ai_generation_status: string | null;
+  fallback_message_content: string | null;
 }
 
 interface PlanInfo {
@@ -111,6 +118,22 @@ export default function AutoSendPage() {
   // ★ D86: 실행 이력 모달
   const [historyModal, setHistoryModal] = useState<{ show: boolean; campaignName: string; runs: any[] }>({ show: false, campaignName: '', runs: [] });
   const [historyLoading, setHistoryLoading] = useState(false);
+
+  // ★ D96: AI 생성 문안 확인/수정 모달
+  const [messageModal, setMessageModal] = useState<{
+    show: boolean;
+    campaignId: string;
+    campaignName: string;
+    content: string;
+    subject: string;
+    generatedAt: string | null;
+    aiStatus: string | null;
+    fallback: string | null;
+    isAd: boolean;
+    messageType: string;
+  }>({ show: false, campaignId: '', campaignName: '', content: '', subject: '', generatedAt: null, aiStatus: null, fallback: null, isAd: false, messageType: 'SMS' });
+  const [messageEditing, setMessageEditing] = useState(false);
+  const [messageSaving, setMessageSaving] = useState(false);
 
   // ============================================================
   // 데이터 로드
@@ -214,6 +237,47 @@ export default function AutoSendPage() {
         } catch { alert('삭제에 실패했습니다.'); }
       },
     });
+  };
+
+  // ★ D96: AI 생성 문안 보기
+  const handleViewMessage = (ac: AutoCampaign) => {
+    setMessageModal({
+      show: true,
+      campaignId: ac.id,
+      campaignName: ac.campaign_name,
+      content: ac.generated_message_content || '',
+      subject: ac.generated_message_subject || '',
+      generatedAt: ac.generated_at,
+      aiStatus: ac.ai_generation_status,
+      fallback: ac.fallback_message_content,
+      isAd: ac.is_ad,
+      messageType: ac.message_type,
+    });
+    setMessageEditing(false);
+  };
+
+  // ★ D96: AI 생성 문안 저장
+  const handleSaveMessage = async () => {
+    if (!messageModal.content.trim()) return;
+    setMessageSaving(true);
+    try {
+      const res = await fetch(`/api/auto-campaigns/${messageModal.campaignId}/generated-message`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
+        body: JSON.stringify({
+          generated_message_content: messageModal.content,
+          generated_message_subject: messageModal.subject || null,
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        alert(data.error || '저장 실패');
+        return;
+      }
+      setMessageEditing(false);
+      fetchData();
+    } catch { alert('저장에 실패했습니다.'); }
+    finally { setMessageSaving(false); }
   };
 
   const handleEdit = (ac: AutoCampaign) => {
@@ -437,6 +501,15 @@ export default function AutoSendPage() {
                       <span className="text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full">
                         {ac.message_type}
                       </span>
+                      {ac.ai_generate_enabled && (
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                          ac.generated_message_content
+                            ? 'bg-violet-100 text-violet-700'
+                            : 'bg-gray-100 text-gray-500'
+                        }`}>
+                          {ac.generated_message_content ? 'AI문안 생성됨' : 'AI 대기'}
+                        </span>
+                      )}
                     </div>
                     <div className="text-sm text-gray-500 space-y-0.5">
                       <div>{getScheduleText(ac)}</div>
@@ -456,6 +529,21 @@ export default function AutoSendPage() {
 
                   {/* 액션 버튼 */}
                   <div className="flex items-center gap-2 ml-4">
+                    {/* ★ D96: AI 생성 문안 보기 */}
+                    {ac.ai_generate_enabled && (
+                      <button
+                        onClick={() => handleViewMessage(ac)}
+                        className={`text-xs px-3 py-1.5 rounded-lg transition ${
+                          ac.generated_message_content
+                            ? 'text-violet-600 hover:text-violet-700 hover:bg-violet-50 font-medium'
+                            : 'text-gray-400 cursor-default'
+                        }`}
+                        disabled={!ac.generated_message_content}
+                        title={ac.generated_message_content ? 'AI 생성 문안 확인/수정' : 'AI 문안이 아직 생성되지 않았습니다'}
+                      >
+                        문안
+                      </button>
+                    )}
                     {/* ★ D86: 실행 이력 보기 */}
                     <button
                       onClick={() => fetchRunHistory(ac)}
@@ -545,6 +633,136 @@ export default function AutoSendPage() {
         </>
       )}
 
+      {/* ★ D96: AI 생성 문안 확인/수정 모달 */}
+      {messageModal.show && (
+        <>
+          <style>{`
+            @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+            @keyframes zoomIn { from { opacity: 0; transform: scale(0.92); } to { opacity: 1; transform: scale(1); } }
+          `}</style>
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-[fadeIn_0.2s_ease-out]">
+            <div
+              className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col overflow-hidden animate-[zoomIn_0.25s_ease-out]"
+              onClick={e => e.stopPropagation()}
+            >
+              {/* 헤더 */}
+              <div className="flex items-center justify-between px-6 py-4 border-b bg-gradient-to-r from-violet-50 to-white">
+                <div>
+                  <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+                    AI 생성 문안
+                    {messageModal.aiStatus && (
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                        messageModal.aiStatus === 'ai_generated' ? 'bg-violet-100 text-violet-700' :
+                        messageModal.aiStatus === 'ai_fallback' ? 'bg-amber-100 text-amber-700' :
+                        'bg-gray-100 text-gray-600'
+                      }`}>
+                        {messageModal.aiStatus === 'ai_generated' ? 'AI 생성' : messageModal.aiStatus === 'ai_fallback' ? '폴백' : '고정문안'}
+                      </span>
+                    )}
+                  </h3>
+                  <p className="text-xs text-gray-500 mt-0.5">{messageModal.campaignName}</p>
+                  {messageModal.generatedAt && (
+                    <p className="text-xs text-gray-400 mt-0.5">생성일: {formatDate(messageModal.generatedAt)}</p>
+                  )}
+                </div>
+                <button
+                  onClick={() => setMessageModal(prev => ({ ...prev, show: false }))}
+                  className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-200 text-gray-400 hover:text-gray-600 transition text-lg"
+                >
+                  &times;
+                </button>
+              </div>
+
+              {/* 본문 */}
+              <div className="flex-1 overflow-auto px-6 py-4 space-y-4">
+                {/* 제목 (LMS/MMS) */}
+                {(messageModal.messageType === 'LMS' || messageModal.messageType === 'MMS') && (
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">제목</label>
+                    {messageEditing ? (
+                      <input
+                        value={messageModal.subject}
+                        onChange={e => setMessageModal(prev => ({ ...prev, subject: e.target.value }))}
+                        className="w-full border border-violet-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
+                      />
+                    ) : (
+                      <p className="text-sm text-gray-800 bg-gray-50 rounded-lg px-3 py-2">{messageModal.subject || '-'}</p>
+                    )}
+                  </div>
+                )}
+
+                {/* 메시지 본문 */}
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    본문 {messageModal.isAd && <span className="text-orange-500">(광고)</span>}
+                  </label>
+                  {messageEditing ? (
+                    <textarea
+                      value={messageModal.content}
+                      onChange={e => setMessageModal(prev => ({ ...prev, content: e.target.value }))}
+                      rows={8}
+                      className="w-full border border-violet-300 rounded-lg px-3 py-2.5 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-violet-500 leading-relaxed"
+                    />
+                  ) : (
+                    <div className="bg-gray-50 rounded-lg px-3 py-2.5 text-sm text-gray-800 whitespace-pre-line leading-relaxed min-h-[120px]">
+                      {messageModal.content || '(아직 생성되지 않음)'}
+                    </div>
+                  )}
+                </div>
+
+                {/* 폴백 메시지 참고 */}
+                {messageModal.fallback && (
+                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                    <p className="text-xs font-medium text-amber-700 mb-1">폴백 메시지 (AI 실패 시 사용)</p>
+                    <p className="text-xs text-gray-600 whitespace-pre-line">{messageModal.fallback}</p>
+                  </div>
+                )}
+
+                <p className="text-xs text-gray-400">
+                  다음 발송에 위 문안이 사용됩니다. 수정하면 변경된 내용으로 발송됩니다.
+                </p>
+              </div>
+
+              {/* 하단 버튼 */}
+              <div className="px-6 py-4 border-t bg-gray-50 flex justify-end gap-3">
+                {messageEditing ? (
+                  <>
+                    <button
+                      onClick={() => setMessageEditing(false)}
+                      className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-sm transition"
+                    >
+                      취소
+                    </button>
+                    <button
+                      onClick={handleSaveMessage}
+                      disabled={messageSaving}
+                      className="px-4 py-2 bg-violet-600 hover:bg-violet-700 disabled:bg-violet-400 text-white rounded-lg text-sm font-medium transition"
+                    >
+                      {messageSaving ? '저장 중...' : '저장'}
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      onClick={() => setMessageModal(prev => ({ ...prev, show: false }))}
+                      className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-sm transition"
+                    >
+                      닫기
+                    </button>
+                    <button
+                      onClick={() => setMessageEditing(true)}
+                      className="px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white rounded-lg text-sm font-medium transition"
+                    >
+                      수정
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
       {/* ★ D86: 실행 이력 모달 */}
       {historyModal.show && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
@@ -606,6 +824,13 @@ export default function AutoSendPage() {
                             <div className="text-sm font-bold text-red-700">{(run.fail_count || 0).toLocaleString()}</div>
                           </div>
                         </div>
+                        {/* ★ D96: 회차별 AI 생성 문안 표시 */}
+                        {run.generated_message_content && (
+                          <div className="mt-2 bg-violet-50 border border-violet-200 rounded-lg p-2.5">
+                            <p className="text-xs font-medium text-violet-600 mb-1">사용된 문안</p>
+                            <p className="text-xs text-gray-700 whitespace-pre-line leading-relaxed line-clamp-3">{run.generated_message_content}</p>
+                          </div>
+                        )}
                         {run.cancel_reason && (
                           <p className="text-xs text-amber-600 mt-2">취소 사유: {run.cancel_reason}</p>
                         )}

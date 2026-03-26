@@ -30,16 +30,17 @@ router.get('/settings', authenticate, async (req: Request, res: Response) => {
 
     const row = result.rows[0] || {};
     // ★ B17-11: 사용자별 080번호 우선 적용 (reject_number override)
-    // ★ D91: 사용자별 manager_contacts 우선 적용 (브랜드별 담당자 격리)
+    // ★ D91+D95: 사용자별 manager_contacts 완전 격리 (companies 폴백 제거)
+    // 각 사용자는 자기 담당자만 봄. 미설정 시 빈 배열 → 직접 등록 유도
     if (userId) {
       const userResult = await query('SELECT opt_out_080_number, manager_contacts FROM users WHERE id = $1', [userId]);
       const userOpt080 = userResult.rows[0]?.opt_out_080_number;
       if (userOpt080) row.reject_number = userOpt080;
-      // 사용자별 담당자가 있으면 회사 담당자보다 우선
+      // ★ D95: companies 폴백 제거 — 사용자 담당자가 없으면 빈 배열 (다른 사용자 담당자 공유 방지)
       const userManagerContacts = userResult.rows[0]?.manager_contacts;
-      if (userManagerContacts && Array.isArray(userManagerContacts) && userManagerContacts.length > 0) {
-        row.manager_contacts = userManagerContacts;
-      }
+      row.manager_contacts = (userManagerContacts && Array.isArray(userManagerContacts) && userManagerContacts.length > 0)
+        ? userManagerContacts
+        : [];
     }
     // manager_phone: JSON 문자열이면 파싱, 단일 번호면 배열로 변환
     if (row.manager_phone) {

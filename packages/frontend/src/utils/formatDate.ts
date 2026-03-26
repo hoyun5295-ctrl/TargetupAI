@@ -139,6 +139,56 @@ export function truncateToSmsBytes(text: string, maxBytes: number = 90): string 
  * @param options.removeUnmatched - true이면 남은 %변수% 빈값으로 제거 (기본 false)
  * @param options.extraReplacements - 추가 치환 맵 ({%회신번호%: '07012345678'} 등)
  */
+// ============================================================
+// ★ D96: 직접발송 변수맵 컨트롤타워 (하드코딩 3곳 통합)
+// ============================================================
+
+/** 직접발송에서 사용 가능한 변수 목록 — %변수% → recipient 필드키 */
+export const DIRECT_VAR_MAP: { variable: string; fieldKey: string; label: string }[] = [
+  { variable: '%이름%', fieldKey: 'name', label: '이름' },
+  { variable: '%회신번호%', fieldKey: 'callback', label: '회신번호' },
+  { variable: '%기타1%', fieldKey: 'extra1', label: '기타1' },
+  { variable: '%기타2%', fieldKey: 'extra2', label: '기타2' },
+  { variable: '%기타3%', fieldKey: 'extra3', label: '기타3' },
+];
+
+/** %변수% → fieldKey 매핑 (간편 조회용) */
+export const DIRECT_VAR_TO_FIELD: Record<string, string> = Object.fromEntries(
+  DIRECT_VAR_MAP.map(v => [v.variable, v.fieldKey])
+);
+
+/** fieldKey → label 매핑 */
+export const DIRECT_FIELD_LABELS: Record<string, string> = Object.fromEntries(
+  DIRECT_VAR_MAP.map(v => [v.fieldKey, v.label])
+);
+
+/** 직접발송 메시지 내 변수를 수신자 데이터로 치환 */
+export function replaceDirectVars(
+  text: string,
+  recipient: Record<string, any>,
+  fallbackCallback?: string
+): string {
+  if (!text) return text;
+  let result = text;
+  for (const { variable, fieldKey } of DIRECT_VAR_MAP) {
+    const val = recipient[fieldKey];
+    result = result.replace(
+      new RegExp(variable.replace(/%/g, '%'), 'g'),
+      val != null && String(val).trim() ? formatPreviewValue(val) : (fieldKey === 'callback' ? fallbackCallback || '' : '')
+    );
+  }
+  return result;
+}
+
+/** 직접발송 파일매핑 필드 목록 (phone 제외) */
+export const DIRECT_MAPPING_FIELDS: { key: string; label: string }[] = [
+  { key: 'name', label: '이름' },
+  { key: 'callback', label: '회신번호' },
+  { key: 'extra1', label: '기타1' },
+  { key: 'extra2', label: '기타2' },
+  { key: 'extra3', label: '기타3' },
+];
+
 export function replaceMessageVars(
   text: string,
   fields: { field_key: string; field_label?: string; display_name?: string }[],

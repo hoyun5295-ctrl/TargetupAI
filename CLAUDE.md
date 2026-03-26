@@ -42,8 +42,9 @@
 | CT-09 | spam-test-queue.ts | 스팸테스트 큐 관리 + 자동 스팸검사/재생성 |
 | CT-10 | sender-registration.ts | 발신번호 등록 신청/승인/반려 + 사용자별 배정 관리 (D87) |
 | — | messageUtils.ts | 변수 치환 (5개 발송 경로 통합) |
-| — | normalize.ts | 값 정규화 |
+| — | normalize.ts | 값 정규화 + normalizeCustomFieldValue (커스텀 필드 Date/문자열 정규화) |
 | — | stats-aggregation.ts | 대시보드 통계 집계 + AI 캠페인 성과 집계 |
+| — | formatDate.ts (프론트) | calculateSmsBytes (바이트 계산) + truncateToSmsBytes (바이트 자르기) + replaceMessageVars (변수 치환) + formatPreviewValue (미리보기 포맷팅) |
 
 **⚠️ 이 원칙을 어기고 인라인 코드를 작성하면 버그가 재발한다. 실제 사고 사례:**
 - **사례 1:** upload.ts에서 customer_field_definitions를 인라인으로 INSERT하면서 "최초 등록 우선" 정책 적용 → 잘못된 라벨이 영원히 고착되는 버그 발생.
@@ -465,6 +466,12 @@ PostgreSQL campaigns/campaign_runs 생성
 | **campaign_runs INSERT가 확인 모달 전에 실행** | CT-08 미등록 회신번호 확인 모달 반환 전에 campaign_runs INSERT → 회신번호 변경 후 재발송 시 2건 중복 | **확인 모달/검증 로직은 DB INSERT 전에 실행.** 중간에 return될 수 있는 코드 앞에 INSERT하지 않는다 (D93) |
 | **엑셀 Date 부동소수점 오차로 하루 밀림** | xlsx가 1995-03-01을 1995-02-28T14:59:08.000Z로 변환 → getUTCDate()=28 | **엑셀 Date 처리 시 Math.round(ms/dayMs)*dayMs로 가장 가까운 자정 반올림** (D93) |
 | **서버 SSH 접속 시도 → 계정 잠금 사고** | AI가 서버 SSH 접속 시도 → 비밀번호 3회 실패 → fail2ban IP 차단 → Harold님 접속 불가 | **AI는 서버 접속/git push 절대 금지.** 코드 수정만 하고 배포/서버는 Harold님이 직접 (D93) |
+| **프론트 바이트 계산 인라인 5곳 중복** | Dashboard, AiCustomSendFlow, AutoSendFormModal, ResultsModal, ScheduledCampaignModal에 동일 charCodeAt 로직 | **바이트 계산은 formatDate.ts `calculateSmsBytes` 컨트롤타워 사용.** 인라인 charCodeAt 금지 (D95) |
+| **프론트 변수 치환 인라인 중복** | 6곳에서 availableFields 순회+formatPreviewValue 인라인 → 한곳 수정 시 나머지 불일치 | **변수 치환은 formatDate.ts `replaceMessageVars` 컨트롤타워 사용.** aliasMap 필요 시만 인라인 유지 (D95) |
+| **커스텀 필드 JS Date.toString() 저장** | xlsx raw:false가 Date를 "Wed Jan 01 2025..." 문자열로 반환 → instanceof Date 미통과 → 영문 날짜 그대로 DB 저장 | **커스텀 필드 값은 normalize.ts `normalizeCustomFieldValue` 컨트롤타워 사용.** Date 객체+Date 문자열+ISO 모두 YYYY-MM-DD 변환 (D95) |
+| **cancelCampaign이 draft 상태 미지원** | 회신번호 확인 모달 취소 시 draft 캠페인이 정리 안 됨 → orphan draft + 예약 중복 | **cancelCampaign에서 draft 상태도 취소 허용.** 확인 모달 취소 시 draft 캠페인 cancel (D95) |
+| **formatPreviewValue가 전화번호를 숫자로 변환** | 01012345678 → Number → toLocaleString → 1,011,110,001 | **0으로 시작하는 순수 숫자 문자열은 숫자 포맷팅 제외.** `/^0\d+$/` 체크 (D95) |
+| **프론트/백엔드 순수 YYYY-MM-DD 날짜 처리 불일치** | 프론트 formatPreviewValue는 한국어 포맷, 백엔드 messageUtils는 문자열 그대로 | **messageUtils.ts ISO 감지 regex에 `$` 추가: `/^\d{4}-\d{2}-\d{2}($\|T\|\s)/`** (D95) |
 
 ### ⚠️ 필수 체크 원칙 1: 유틸 함수 수정/추가 시 소비처 전수 확인
 

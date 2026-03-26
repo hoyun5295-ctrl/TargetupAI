@@ -616,6 +616,46 @@ router.put('/:id', async (req: Request, res: Response) => {
 });
 
 // ============================================================
+// 4-1. PUT /:id/generated-message — AI 생성 문안 수정 (D96: 슬4)
+// ============================================================
+router.put('/:id/generated-message', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
+    const userType = req.user?.userType;
+
+    if (!companyId || !userId) {
+      return res.status(400).json({ error: '회사 정보가 없습니다.' });
+    }
+
+    const ownership = await checkOwnership(req.params.id, companyId, userType!, userId);
+    if (!ownership.ok) {
+      return res.status(ownership.statusCode || 403).json({ error: ownership.errorMsg });
+    }
+
+    const { generated_message_content, generated_message_subject } = req.body;
+    if (!generated_message_content?.trim()) {
+      return res.status(400).json({ error: '문안 내용을 입력해주세요.' });
+    }
+
+    await query(
+      `UPDATE auto_campaigns SET
+        generated_message_content = $2,
+        generated_message_subject = $3,
+        updated_at = NOW()
+      WHERE id = $1 AND company_id = $4`,
+      [req.params.id, generated_message_content.trim(), generated_message_subject?.trim() || null, companyId]
+    );
+
+    console.log(`[auto-campaigns] AI 생성 문안 수정: ${req.params.id} by user=${userId}`);
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error('[auto-campaigns] AI 생성 문안 수정 실패:', err);
+    res.status(500).json({ error: 'AI 생성 문안 수정에 실패했습니다.' });
+  }
+});
+
+// ============================================================
 // 5. POST /:id/pause — 일시정지
 // ============================================================
 router.post('/:id/pause', async (req: Request, res: Response) => {

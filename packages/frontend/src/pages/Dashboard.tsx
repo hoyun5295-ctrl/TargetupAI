@@ -40,7 +40,7 @@ import TodayStatsModal from '../components/TodayStatsModal';
 import UploadProgressModal from '../components/UploadProgressModal';
 import UploadResultModal from '../components/UploadResultModal';
 import { useAuthStore } from '../stores/authStore';
-import { formatDate, formatPreviewValue, calculateSmsBytes, truncateToSmsBytes } from '../utils/formatDate';
+import { formatDate, formatPreviewValue, calculateSmsBytes, truncateToSmsBytes, DIRECT_VAR_MAP, DIRECT_VAR_TO_FIELD, DIRECT_FIELD_LABELS, DIRECT_MAPPING_FIELDS, replaceDirectVars } from '../utils/formatDate';
 
 interface Stats {
   total: string;
@@ -946,14 +946,8 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
   useEffect(() => {
     // 메시지 변경 시 오버라이드 리셋
     setSmsOverrideAccepted(false);
-    // ★ D95: 자동입력 변수 최대 길이 치환 — directVarMapForBytes와 동일 맵
-    const directVarMap: Record<string, string> = {
-      '%이름%': 'name', '%등급%': 'grade', '%지역%': 'region',
-      '%매장명%': 'store_name', '%포인트%': 'point',
-      '%회신번호%': 'callback',
-      '%기타1%': 'extra1', '%기타2%': 'extra2', '%기타3%': 'extra3',
-    };
-    let fullMsg = getMaxByteMessage(directMessage, directRecipients, directVarMap);
+    // ★ D96: 컨트롤타워(DIRECT_VAR_TO_FIELD) 사용
+    let fullMsg = getMaxByteMessage(directMessage, directRecipients, DIRECT_VAR_TO_FIELD);
     if (adTextEnabled) {
       const adPrefix = directMsgType === 'SMS' ? '(광고)' : '(광고) ';
       const optOutText = directMsgType === 'SMS'
@@ -1889,14 +1883,8 @@ const campaignData = {
     return `${prefix}${msg}\n${optOutText}`;
   };
 
-  // ★ D95: 변수 치환 후 최대 바이트 계산 — 스팸필터 replaceVars와 동일 맵 사용
-  const directVarMapForBytes: Record<string, string> = {
-    '%이름%': 'name', '%등급%': 'grade', '%지역%': 'region',
-    '%매장명%': 'store_name', '%포인트%': 'point',
-    '%회신번호%': 'callback',
-    '%기타1%': 'extra1', '%기타2%': 'extra2', '%기타3%': 'extra3',
-  };
-  const messageBytes = calculateBytes(getFullMessage(getMaxByteMessage(directMessage, directRecipients, directVarMapForBytes)));
+  // ★ D96: 컨트롤타워(DIRECT_VAR_TO_FIELD) 사용 — 하드코딩 변수맵 제거
+  const messageBytes = calculateBytes(getFullMessage(getMaxByteMessage(directMessage, directRecipients, DIRECT_VAR_TO_FIELD)));
 
   const maxBytes = directMsgType === 'SMS' ? 90 : 2000;
 
@@ -3216,16 +3204,18 @@ const campaignData = {
                     )}
                   </div>
 
-                  {/* 자동입력 버튼 */}
+                  {/* 자동입력 버튼 — ★ D96: 컨트롤타워(DIRECT_VAR_MAP) 기반 동적 생성 */}
                   <div className="px-3 py-1.5 border-t bg-gray-50">
                     <div className="flex items-center gap-3">
                       <span className="text-sm font-bold text-gray-700 whitespace-nowrap">자동입력</span>
                       <div className="flex gap-2 flex-1">
-                        <button onClick={() => setDirectMessage(prev => prev + '%이름%')} className="flex-1 py-2 text-sm bg-white border rounded-lg hover:bg-gray-100 font-medium">이름</button>
-                        <button onClick={() => setDirectMessage(prev => prev + '%회신번호%')} className="flex-1 py-2 text-sm bg-white border rounded-lg hover:bg-blue-50 font-medium text-blue-700">회신번호</button>
-                        <button onClick={() => setDirectMessage(prev => prev + '%기타1%')} className="flex-1 py-2 text-sm bg-white border rounded-lg hover:bg-gray-100 font-medium">기타1</button>
-                        <button onClick={() => setDirectMessage(prev => prev + '%기타2%')} className="flex-1 py-2 text-sm bg-white border rounded-lg hover:bg-gray-100 font-medium">기타2</button>
-                        <button onClick={() => setDirectMessage(prev => prev + '%기타3%')} className="flex-1 py-2 text-sm bg-white border rounded-lg hover:bg-gray-100 font-medium">기타3</button>
+                        {DIRECT_VAR_MAP.map(v => (
+                          <button
+                            key={v.fieldKey}
+                            onClick={() => setDirectMessage(prev => prev + v.variable)}
+                            className={`flex-1 py-2 text-sm bg-white border rounded-lg font-medium ${v.fieldKey === 'callback' ? 'hover:bg-blue-50 text-blue-700' : 'hover:bg-gray-100'}`}
+                          >{v.label}</button>
+                        ))}
                       </div>
                     </div>
                   </div>
@@ -3250,24 +3240,11 @@ const campaignData = {
                           if (isSpamFilterLocked) { setShowSpamFilterLock(true); return; }
                           const msg = directMessage || '';
                           const cb = selectedCallback || '';
-                          // ★ 리스트 최상단 고객 데이터로 미리보기 치환
+                          // ★ D96: 컨트롤타워(replaceDirectVars) 사용
                           const firstR = directRecipients[0];
-                          // ★ D95: 동적 변수 치환 — 하드코딩 변수 목록 제거
-                          const directVarMap: Record<string, string> = {
-                            '%이름%': 'name', '%등급%': 'grade', '%지역%': 'region',
-                            '%매장명%': 'store_name', '%포인트%': 'point',
-                            '%회신번호%': 'callback',
-                            '%기타1%': 'extra1', '%기타2%': 'extra2', '%기타3%': 'extra3',
-                          };
                           const replaceVars = (text: string) => {
                             if (!text || !firstR) return text;
-                            let result = text;
-                            for (const [variable, field] of Object.entries(directVarMap)) {
-                              const val = (firstR as any)[field];
-                              result = result.replace(new RegExp(variable.replace(/%/g, '%'), 'g'),
-                                val != null ? formatPreviewValue(val) : (field === 'callback' ? selectedCallback || '' : ''));
-                            }
-                            return result;
+                            return replaceDirectVars(text, firstR, selectedCallback);
                           };
                           const smsRaw = adTextEnabled ? `(광고)${msg}\n무료거부${optOutNumber.replace(/-/g, '')}` : msg;
                           const lmsRaw = adTextEnabled ? `(광고) ${msg}\n무료수신거부 ${optOutNumber}` : msg;
@@ -3385,7 +3362,7 @@ const campaignData = {
                         // ★ MMS 이미지가 업로드되어 있으면 SMS 전환 불가 → 비용절감 안내 스킵
                         if (directMsgType !== 'SMS' && !lmsKeepAccepted && mmsUploadedImages.length === 0) {
                           const smsOptOut = `무료거부${optOutNumber.replace(/-/g, '')}`;
-                          const smsMaxMsg = getMaxByteMessage(directMessage, directRecipients, directVarMapForBytes);
+                          const smsMaxMsg = getMaxByteMessage(directMessage, directRecipients, DIRECT_VAR_TO_FIELD);
                           const smsFullMsg = adTextEnabled ? `(광고)${smsMaxMsg}\n${smsOptOut}` : smsMaxMsg;
                           const smsBytes = calculateBytes(smsFullMsg);
                           if (smsBytes <= 90) {
@@ -3719,8 +3696,7 @@ const campaignData = {
                   <div className="flex-1 overflow-y-auto">
                     <table className="w-full">
                     {(() => {
-                      // 동적 컬럼: 매핑된/입력된 필드만 표시
-                      const FIELD_LABELS: Record<string, string> = { name: '이름', callback: '회신번호', extra1: '기타1', extra2: '기타2', extra3: '기타3' };
+                      // ★ D96: 컨트롤타워(DIRECT_FIELD_LABELS) 사용
                       const activeFields = directRecipients.length > 0
                         ? (['name', 'callback', 'extra1', 'extra2', 'extra3'] as const).filter(f =>
                             directRecipients.some(r => r[f] && String(r[f]).trim())
@@ -3749,7 +3725,7 @@ const campaignData = {
                           </th>
                           <th className="px-4 py-3 text-left text-xs font-bold text-gray-600">수신번호</th>
                           {activeFields.map(f => (
-                            <th key={f} className="px-4 py-3 text-left text-xs font-bold text-gray-600">{FIELD_LABELS[f]}</th>
+                            <th key={f} className="px-4 py-3 text-left text-xs font-bold text-gray-600">{DIRECT_FIELD_LABELS[f] || f}</th>
                           ))}
                         </tr>
                       </thead>
@@ -3868,15 +3844,10 @@ const campaignData = {
                     </div>
 
                     {/* 나머지 항목 — 채널별 분기 */}
+                    {/* ★ D96: 컨트롤타워(DIRECT_MAPPING_FIELDS) 기반 동적 생성 */}
                     {directSendChannel === 'sms' && (
                       <div className="grid grid-cols-2 gap-2">
-                        {([
-                          { key: 'name', label: '이름' },
-                          { key: 'callback', label: '회신번호' },
-                          { key: 'extra1', label: '기타1' },
-                          { key: 'extra2', label: '기타2' },
-                          { key: 'extra3', label: '기타3' },
-                        ] as const).map(field => (
+                        {DIRECT_MAPPING_FIELDS.map(field => (
                           <div key={field.key} className="flex items-center gap-2 p-2 bg-gray-50 rounded-lg min-w-0">
                             <span className="text-xs font-medium text-gray-600 w-14 shrink-0">{field.label}</span>
                             <select
@@ -3941,7 +3912,7 @@ const campaignData = {
                     {Object.values(directColumnMapping).some(v => v) && (
                       <div className="mt-3 flex flex-wrap gap-1">
                         {Object.entries(directColumnMapping).filter(([, v]) => v).map(([k, v]) => {
-                          const labels: Record<string, string> = { phone: '수신번호', name: '이름', callback: '회신번호', extra1: '기타1', extra2: '기타2', extra3: '기타3' };
+                          const labels: Record<string, string> = { phone: '수신번호', ...DIRECT_FIELD_LABELS };
                           // 알림톡 템플릿 변수
                           let label = labels[k] || k;
                           if (k.startsWith('tplvar_') && kakaoSelectedTemplate) {
@@ -4029,11 +4000,9 @@ const campaignData = {
 
             {/* 직접입력 모달 — 메시지 변수 기반 동적 입력폼 */}
             {showDirectInput && (() => {
-              // 메시지에서 사용된 변수 감지 (%이름%, %기타1% 등)
-              const VAR_FIELD_MAP: Record<string, string> = { '%이름%': 'name', '%기타1%': 'extra1', '%기타2%': 'extra2', '%기타3%': 'extra3', '%회신번호%': 'callback' };
-              const VAR_LABEL_MAP: Record<string, string> = { name: '이름', extra1: '기타1', extra2: '기타2', extra3: '기타3', callback: '회신번호' };
+              // ★ D96: 컨트롤타워(DIRECT_VAR_MAP) 기반 — 메시지에서 사용된 변수 감지
               const usedVars = directSendChannel === 'sms'
-                ? Object.entries(VAR_FIELD_MAP).filter(([varName]) => directMessage.includes(varName)).map(([, fieldKey]) => fieldKey)
+                ? DIRECT_VAR_MAP.filter(v => directMessage.includes(v.variable)).map(v => v.fieldKey)
                 : []; // 알림톡/RCS는 템플릿 변수 사용 → 수신번호만
 
               return (
@@ -4044,7 +4013,7 @@ const campaignData = {
                       <h3 className="font-bold text-sm">✏️ 직접입력</h3>
                       <p className="text-xs text-gray-500 mt-0.5">
                         {usedVars.length > 0
-                          ? `메시지에 사용된 변수: ${usedVars.map(f => VAR_LABEL_MAP[f]).join(', ')}`
+                          ? `메시지에 사용된 변수: ${usedVars.map(f => DIRECT_FIELD_LABELS[f] || f).join(', ')}`
                           : '수신번호를 입력해주세요 (한 줄에 하나씩 또는 한 건씩 추가)'}
                       </p>
                     </div>
@@ -4078,11 +4047,11 @@ const campaignData = {
                           </div>
                           {usedVars.map(f => (
                             <div key={f} className="flex-1">
-                              <label className="block text-xs font-medium text-gray-600 mb-1">{VAR_LABEL_MAP[f]}</label>
+                              <label className="block text-xs font-medium text-gray-600 mb-1">{DIRECT_FIELD_LABELS[f]}</label>
                               <input
                                 id={`directInput_${f}`}
                                 type="text"
-                                placeholder={VAR_LABEL_MAP[f]}
+                                placeholder={DIRECT_FIELD_LABELS[f]}
                                 className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                               />
                             </div>

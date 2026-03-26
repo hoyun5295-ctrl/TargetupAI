@@ -488,7 +488,9 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
       >
         <div
           className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] overflow-y-auto animate-[slideUp_0.3s_ease-out]"
+          style={{ overscrollBehavior: 'contain' }}
           onClick={e => e.stopPropagation()}
+          onMouseDown={e => e.stopPropagation()}
         >
           {/* 헤더 */}
           <div className="sticky top-0 bg-white border-b border-gray-100 px-6 py-4 flex items-center justify-between z-10">

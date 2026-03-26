@@ -106,37 +106,89 @@
 
 ---
 
-### 🔧 D95 — AI 카카오 제거 + 직접발송 UI 개선 + 슈퍼관리자 수정 (2026-03-26) — 🔄 진행중
+### 🔧 D95 — QA 버그리포트 11건 + 컨트롤타워 정비 + 헤더 UI (2026-03-26) — ✅ 배포 완료
 
-> **배경:** AI 발송에서 카카오 채널 제거, 하이라이트 효과 수정, 직접발송 파일매핑 UI 개선, 슈퍼관리자 통계/템플릿 관리 수정
+> **배경:** 0326 테스터 PPT 11건 버그 수정 + 프론트 바이트계산/변수치환 컨트롤타워 추출 + 헤더 메뉴 필(pill) 스타일 통일
 
-#### 완료된 작업
+#### 세션1 완료 (이전 세션)
 
-**AI 발송 카카오 제거:**
-- `AiCampaignResultPopup.tsx` — 카카오 채널 선택 제거
-- `AiCampaignSendModal.tsx` — 카카오 채널 선택 제거
-- `AiPreviewModal.tsx` — 카카오 채널 선택 제거
-- `Dashboard.tsx` — AI 한줄로 카카오 관련 로직 제거
+**AI 발송 카카오 제거:** AiCampaignResultPopup, AiCampaignSendModal, AiPreviewModal, Dashboard
+**하이라이트 효과:** highlightVars.tsx %변수% regex 수정
+**직접발송 파일매핑:** 2열 콤팩트 + 동적 표시 + 알림톡 템플릿 변수 + 샘플 표시
+**슈퍼관리자:** 통계 자동로드, 프로필 등록 커스텀 모달
+**스팸필터:** Grace Period 10초→20초
 
-**하이라이트 효과 수정:**
-- `highlightVars.tsx` — %변수% regex 수정 (병합 텍스트에 잘못 하이라이트 적용되던 버그 수정)
+#### 세션2 완료 (이번 세션) — 0326 QA 버그리포트 11건
 
-**직접발송 파일매핑 UI 개선:**
-- `Dashboard.tsx` — 파일매핑 모달 2열 콤팩트 레이아웃 + 수신번호만 필수
-- `Dashboard.tsx` — 매핑한 컬럼만 수신자 테이블에 동적 표시
-- `Dashboard.tsx` — 알림톡 채널: 수신번호 + 템플릿 변수만 매핑 항목으로 표시
-- `Dashboard.tsx` — 드롭다운에 첫 행 데이터 샘플 표시 (예: 컬럼1 (예: 01012345678))
-- `Dashboard.tsx` — 알림톡/RCS 채널에서 회신번호/기타1/2/3 숨김
-- `Dashboard.tsx` — 알림톡 대체발송 설정 UI (LMS 대체/SMS 대체/대체 안함)
-- `Dashboard.tsx` — 알림톡 발송 파라미터 sendChannel: 'alimtalk' 수정
+**슬4 파일매핑 선택창 겹침/짤림:**
+- `Dashboard.tsx` — grid 셀/select에 min-w-0, 모달 max-h-[80vh] overflow-y-auto
 
-**슈퍼관리자 수정:**
-- `AdminDashboard.tsx` — 발송 통계 탭 전환 시 자동 로드 useEffect 추가 (데이터 안 뜨던 버그)
-- `AdminDashboard.tsx` — 프로필 등록: prompt() → 커스텀 모달 + 고객사 드롭다운 선택
-- `KakaoRcsPage.tsx` — 프로필 등록: prompt() → 커스텀 모달
+**슬5 머지 바이트 계산 오류:**
+- `Dashboard.tsx` — messageBytes를 getMaxByteMessage(변수 치환 후) 기반 계산으로 변경. 비용절감도 동일
 
-**스팸필터 Grace Period 조정:**
-- `spam-test-queue.ts` — 수동 Grace Period 10초 → 20초 (KT 통신사 지연 대응)
+**슬6 맞춤한줄 미리보기 %개인화% 미치환:**
+- `AiCustomSendFlow.tsx` — 미리보기 모달에서 sampleData 있으면 replaceSampleVars 적용
+
+**슬7 미리보기 전화번호/날짜 이상:**
+- `formatDate.ts` — formatPreviewValue: 0시작 숫자(전화번호) 보호 + ISO 타임스탬프 KST 변환
+
+**슬8 회신번호 미등록 시 예약 중복:**
+- `Dashboard.tsx` — CallbackConfirmModal 취소 시 draft 캠페인 cancel
+- `client.ts` — campaignsApi.cancel 추가
+- `campaign-lifecycle.ts` — cancelCampaign에 draft 상태 허용
+
+**슬9 발송결과 메시지 스크롤 전체확인 불가:**
+- `ResultsModal.tsx` — msg_contents 클릭 시 상세 모달 onClick 추가
+
+**슬10 자동발송 모달 배경클릭 초기화:**
+- `AutoSendFormModal.tsx` — 배경 onClick={onClose} 제거
+
+**슬11 알림톡 템플릿 등록 UI 보강:**
+- `AlimtalkTemplateFormModal.tsx` — 채널추가(AC) 자동 삽입, PC URL(linkP), 앱링크(scheme), 강조보조문구(emphasizeSubTitle)
+- `companies.ts` — POST/PUT에 emphasize_sub_title 저장
+
+**슬3 엑셀 날짜형식 업로드:**
+- `normalize.ts` — normalizeCustomFieldValue 컨트롤타워 추가 (Date 객체 + JS Date.toString() + ISO 처리)
+- `upload.ts`, `sync.ts` — 커스텀 필드 normalizeCustomFieldValue 사용
+
+**슬7 백엔드 날짜 불일치:**
+- `messageUtils.ts` — 순수 YYYY-MM-DD 감지 regex 수정 (`($|T|\s)`)
+
+**컨트롤타워 정비 (D95 신규):**
+- `formatDate.ts` — `calculateSmsBytes`, `truncateToSmsBytes`, `replaceMessageVars` 3개 컨트롤타워 추가
+- `Dashboard.tsx` — 인라인 바이트 계산 5곳 제거 → calculateSmsBytes 사용
+- `AiCustomSendFlow.tsx` — 인라인 replaceVars 2곳 → replaceMessageVars 사용
+- `ResultsModal.tsx`, `AutoSendFormModal.tsx`, `ScheduledCampaignModal.tsx` — 인라인 바이트 계산 → calculateSmsBytes
+- `Dashboard.tsx` — replaceVars 하드코딩 변수 9개 → 동적 Object.entries 순회
+- `Dashboard.tsx` — directVarMap 3곳 통일 (%매장명%, %포인트% 추가)
+
+**헤더 메뉴 UI 개선:**
+- `DashboardHeader.tsx` — 밑줄 제거 → 필(pill) 스타일. useLocation 현재 페이지 활성 표시. tracking-wide 글자 간격. gap-1 메뉴 간격
+
+**DB 마이그레이션 (서버 반영 완료):**
+- `ALTER TABLE kakao_templates ADD COLUMN IF NOT EXISTS emphasize_sub_title VARCHAR(50);`
+- `UPDATE customer_field_definitions SET field_type = 'INT' WHERE field_key = 'custom_1' AND company_id = (시세이도ID);`
+
+#### 수정 파일 (15개)
+
+**프론트엔드 (9개):**
+- `packages/frontend/src/utils/formatDate.ts`
+- `packages/frontend/src/pages/Dashboard.tsx`
+- `packages/frontend/src/components/AiCustomSendFlow.tsx`
+- `packages/frontend/src/components/ResultsModal.tsx`
+- `packages/frontend/src/components/AutoSendFormModal.tsx`
+- `packages/frontend/src/components/ScheduledCampaignModal.tsx`
+- `packages/frontend/src/components/AlimtalkTemplateFormModal.tsx`
+- `packages/frontend/src/components/DashboardHeader.tsx`
+- `packages/frontend/src/api/client.ts`
+
+**백엔드 (6개):**
+- `packages/backend/src/utils/normalize.ts`
+- `packages/backend/src/utils/messageUtils.ts`
+- `packages/backend/src/utils/campaign-lifecycle.ts`
+- `packages/backend/src/routes/companies.ts`
+- `packages/backend/src/routes/upload.ts`
+- `packages/backend/src/routes/sync.ts`
 
 #### 미완료 (다음 세션)
 
@@ -148,6 +200,9 @@
 
 **슈퍼관리자:**
 - 템플릿 수동등록 모달: prompt() → 커스텀 모달 + 고객사/사용자 드롭다운
+
+**슬1 담당자 일괄변경:** ✅ settings GET에서 companies.manager_contacts 폴백 제거 → 각 사용자가 자기 담당자만 봄 (미설정 시 빈 배열)
+**슬10 자동발송 질문사항:** AI 문안 확인/수정 기능, 개별회신번호 지원 등 기능 미비 — Phase 3 검토
 
 ---
 
