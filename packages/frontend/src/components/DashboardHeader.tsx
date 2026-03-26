@@ -101,23 +101,19 @@ export default function DashboardHeader({
             const isHovered = hoveredIdx === idx;
             const isEmphasized = !!item.emphasized;
 
-            // 텍스트 색상
+            // 텍스트 색상: 전체 동일 기본색, 호버 시만 색상 변경
             const textColor = item.locked
               ? '#d1d5db'
-              : isEmphasized
-                ? cfg.activeText
-                : isHovered
-                  ? cfg.hoverText
-                  : cfg.text;
+              : isHovered
+                ? cfg.hoverText
+                : cfg.text;
 
-            // 배경색: 강조→활성배경, 호버→호버배경
+            // 배경색: 호버 시에만 표시 (emphasized 구분은 font-weight로만)
             const bgColor = item.locked
               ? 'transparent'
-              : isEmphasized
-                ? cfg.activeBg
-                : isHovered
-                  ? cfg.hoverBg
-                  : 'transparent';
+              : isHovered
+                ? cfg.hoverBg
+                : 'transparent';
 
             return (
               <button
