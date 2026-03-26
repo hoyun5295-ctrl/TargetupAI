@@ -351,6 +351,9 @@ const [emailSending, setEmailSending] = useState(false);
   const [templateSubTab, setTemplateSubTab] = useState<'alimtalk' | 'rcs'>('alimtalk');
   const [showManualTemplateForm, setShowManualTemplateForm] = useState(false);
   const [adminProfiles, setAdminProfiles] = useState<any[]>([]);
+  const [showProfileForm, setShowProfileForm] = useState(false);
+  const [profileForm, setProfileForm] = useState({ companyId: '', profileName: '', profileKey: '' });
+  const [profileSaving, setProfileSaving] = useState(false);
   const [manualForm, setManualForm] = useState({ companyId: '', templateCode: '', templateName: '', category: '', messageType: 'BA', content: '' });
 
   // 커스텀 모달 상태
@@ -3752,32 +3755,7 @@ const handleApproveRequest = async (id: string) => {
               <h2 className="text-lg font-semibold">👤 발신 프로필 관리</h2>
               <p className="text-xs text-gray-500 mt-1">고객사별 카카오톡 발신 프로필(Sender Key) 관리</p>
             </div>
-            <button onClick={async () => {
-              const companyId = prompt('고객사 ID를 입력하세요');
-              if (!companyId) return;
-              const profileName = prompt('프로필 이름을 입력하세요');
-              if (!profileName) return;
-              const profileKey = prompt('발신 프로필 키(Sender Key)를 입력하세요');
-              if (!profileKey) return;
-              try {
-                const token = localStorage.getItem('token');
-                const res = await fetch('/api/admin/kakao-profiles', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                  body: JSON.stringify({ companyId, profileName, profileKey }),
-                });
-                const data = await res.json();
-                if (data.success) {
-                  alert('발신 프로필이 등록되었습니다');
-                  // 프로필 목록 리로드
-                  const listRes = await fetch('/api/admin/kakao-profiles', { headers: { Authorization: `Bearer ${token}` } });
-                  const listData = await listRes.json();
-                  if (listData.success) setAdminProfiles(listData.profiles || []);
-                } else {
-                  alert(data.error || '등록 실패');
-                }
-              } catch { alert('서버 오류'); }
-            }}
+            <button onClick={() => { setProfileForm({ companyId: '', profileName: '', profileKey: '' }); setShowProfileForm(true); }}
               className="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-lg text-sm font-medium">
               + 프로필 등록
             </button>
@@ -3804,16 +3782,21 @@ const handleApproveRequest = async (id: string) => {
                       <td className="px-3 py-2 font-mono text-xs text-gray-500">{p.profile_key?.slice(0, 12)}...</td>
                       <td className="px-3 py-2 text-gray-500">{p.created_at ? new Date(p.created_at).toLocaleDateString('ko-KR') : '-'}</td>
                       <td className="px-3 py-2 text-center">
-                        <button onClick={async () => {
-                          if (!window.confirm(`"${p.profile_name}" 프로필을 삭제하시겠습니까?`)) return;
-                          try {
-                            const token = localStorage.getItem('token');
-                            const res = await fetch(`/api/admin/kakao-profiles/${p.id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
-                            const data = await res.json();
-                            if (data.success) {
-                              setAdminProfiles((prev: any[]) => prev.filter((x: any) => x.id !== p.id));
-                            } else { alert(data.error || '삭제 실패'); }
-                          } catch { alert('서버 오류'); }
+                        <button onClick={() => {
+                          setModal({
+                            type: 'confirm', title: '프로필 삭제', message: `"${p.profile_name}" 프로필을 삭제하시겠습니까?`, variant: 'warning',
+                            onConfirm: async () => {
+                              try {
+                                const token = localStorage.getItem('token');
+                                const res = await fetch(`/api/admin/kakao-profiles/${p.id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+                                const data = await res.json();
+                                if (data.success) {
+                                  setAdminProfiles((prev: any[]) => prev.filter((x: any) => x.id !== p.id));
+                                  setModal({ type: 'alert', title: '삭제 완료', message: '프로필이 삭제되었습니다', variant: 'success' });
+                                } else { setModal({ type: 'alert', title: '삭제 실패', message: data.error || '삭제 실패', variant: 'error' }); }
+                              } catch { setModal({ type: 'alert', title: '오류', message: '서버 오류', variant: 'error' }); }
+                            }
+                          });
                         }} className="text-red-500 hover:text-red-700 text-xs">삭제</button>
                       </td>
                     </tr>
@@ -3964,6 +3947,81 @@ const handleApproveRequest = async (id: string) => {
             </div>
           )}
         </div>
+        </div>
+      )}
+
+      {/* 발신 프로필 등록 모달 */}
+      {showProfileForm && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden"
+               style={{ animation: 'zoomIn 0.2s ease-out' }}>
+            <div className="px-6 py-4 border-b bg-gradient-to-r from-amber-50 to-white flex justify-between items-center">
+              <div>
+                <h3 className="text-lg font-bold text-gray-900">발신 프로필 등록</h3>
+                <p className="text-xs text-gray-500 mt-0.5">카카오톡 채널의 Sender Key를 등록합니다</p>
+              </div>
+              <button onClick={() => setShowProfileForm(false)} className="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
+            </div>
+            <div className="px-6 py-4 space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">고객사 <span className="text-red-500">*</span></label>
+                <select value={profileForm.companyId} onChange={e => setProfileForm({ ...profileForm, companyId: e.target.value })}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-200">
+                  <option value="">고객사 선택</option>
+                  {companies.map((c: any) => <option key={c.id} value={c.id}>{c.companyName || c.company_name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">프로필 이름 <span className="text-red-500">*</span></label>
+                <input value={profileForm.profileName} onChange={e => setProfileForm({ ...profileForm, profileName: e.target.value })}
+                  placeholder="예: 브랜드명, 매장명"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-200" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Sender Key <span className="text-red-500">*</span></label>
+                <input value={profileForm.profileKey} onChange={e => setProfileForm({ ...profileForm, profileKey: e.target.value })}
+                  placeholder="카카오톡 채널에서 발급받은 키"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-amber-200" />
+                <p className="text-xs text-gray-400 mt-1">카카오 비즈니스 채널 관리자에서 확인할 수 있습니다</p>
+              </div>
+            </div>
+            <div className="px-6 py-3 border-t bg-gray-50 flex justify-end gap-3">
+              <button onClick={() => setShowProfileForm(false)}
+                className="px-5 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-sm transition">취소</button>
+              <button
+                onClick={async () => {
+                  if (!profileForm.companyId || !profileForm.profileName || !profileForm.profileKey) {
+                    setModal({ type: 'alert', title: '입력 오류', message: '모든 필수 항목을 입력해주세요', variant: 'error' });
+                    return;
+                  }
+                  setProfileSaving(true);
+                  try {
+                    const token = localStorage.getItem('token');
+                    const res = await fetch('/api/admin/kakao-profiles', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                      body: JSON.stringify(profileForm),
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                      setShowProfileForm(false);
+                      loadAdminProfiles();
+                      setModal({ type: 'alert', title: '등록 완료', message: '발신 프로필이 등록되었습니다', variant: 'success' });
+                    } else {
+                      setModal({ type: 'alert', title: '등록 실패', message: data.error || '등록 실패', variant: 'error' });
+                    }
+                  } catch {
+                    setModal({ type: 'alert', title: '오류', message: '서버 오류', variant: 'error' });
+                  } finally {
+                    setProfileSaving(false);
+                  }
+                }}
+                disabled={profileSaving}
+                className="px-5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-medium transition disabled:opacity-50">
+                {profileSaving ? '등록 중...' : '등록'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

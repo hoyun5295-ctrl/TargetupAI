@@ -3725,6 +3725,19 @@ const campaignData = {
                   </div>
                   <div className="flex-1 overflow-y-auto">
                     <table className="w-full">
+                    {(() => {
+                      // 동적 컬럼: 매핑된/입력된 필드만 표시
+                      const FIELD_LABELS: Record<string, string> = { name: '이름', callback: '회신번호', extra1: '기타1', extra2: '기타2', extra3: '기타3' };
+                      const activeFields = directRecipients.length > 0
+                        ? (['name', 'callback', 'extra1', 'extra2', 'extra3'] as const).filter(f =>
+                            directRecipients.some(r => r[f] && String(r[f]).trim())
+                          )
+                        : (directSendChannel === 'sms'
+                            ? (['name', 'callback', 'extra1', 'extra2', 'extra3'] as const).filter(f => directColumnMapping[f])
+                            : []);
+                      const colCount = 2 + activeFields.length; // 체크박스 + 수신번호 + 동적 필드
+
+                      return (<>
                     <thead className="bg-gray-50 border-b sticky top-0">
                         <tr>
                           <th className="px-4 py-3 text-left text-xs font-bold text-gray-600 w-10">
@@ -3742,27 +3755,15 @@ const campaignData = {
                             />
                           </th>
                           <th className="px-4 py-3 text-left text-xs font-bold text-gray-600">수신번호</th>
-                          {directSendChannel === 'sms' && (
-                            <>
-                              <th className="px-4 py-3 text-left text-xs font-bold text-gray-600">이름</th>
-                              <th className="px-4 py-3 text-left text-xs font-bold text-gray-600">회신번호</th>
-                              <th className="px-4 py-3 text-left text-xs font-bold text-gray-600">기타1</th>
-                              <th className="px-4 py-3 text-left text-xs font-bold text-gray-600">기타2</th>
-                              <th className="px-4 py-3 text-left text-xs font-bold text-gray-600">기타3</th>
-                            </>
-                          )}
-                          {directSendChannel === 'kakao_alimtalk' && (
-                            <th className="px-4 py-3 text-left text-xs font-bold text-gray-600">이름</th>
-                          )}
-                          {directSendChannel === 'rcs' && (
-                            <th className="px-4 py-3 text-left text-xs font-bold text-gray-600">이름</th>
-                          )}
+                          {activeFields.map(f => (
+                            <th key={f} className="px-4 py-3 text-left text-xs font-bold text-gray-600">{FIELD_LABELS[f]}</th>
+                          ))}
                         </tr>
                       </thead>
                       <tbody className="divide-y">
                         {directRecipients.length === 0 ? (
                           <tr>
-                            <td colSpan={directSendChannel === 'sms' ? 7 : 3} className="px-4 py-24 text-center text-gray-400">
+                            <td colSpan={colCount} className="px-4 py-24 text-center text-gray-400">
                               <div className="text-4xl mb-2">📋</div>
                               <div className="text-sm">파일을 업로드하거나 직접 입력해주세요</div>
                             </td>
@@ -3788,22 +3789,17 @@ const campaignData = {
                                 />
                               </td>
                               <td className="px-4 py-3 text-sm">{r.phone}</td>
-                              {directSendChannel === 'sms' && (
-                                <>
-                                  <td className="px-4 py-3 text-sm">{r.name || '-'}</td>
-                                  <td className="px-4 py-3 text-sm font-mono text-xs text-gray-600">{r.callback || '-'}</td>
-                                  <td className="px-4 py-3 text-sm">{r.extra1 || '-'}</td>
-                                  <td className="px-4 py-3 text-sm">{r.extra2 || '-'}</td>
-                                  <td className="px-4 py-3 text-sm">{r.extra3 || '-'}</td>
-                                </>
-                              )}
-                              {(directSendChannel === 'kakao_alimtalk' || directSendChannel === 'rcs') && (
-                                <td className="px-4 py-3 text-sm">{r.name || '-'}</td>
-                              )}
+                              {activeFields.map(f => (
+                                <td key={f} className={`px-4 py-3 text-sm ${f === 'callback' ? 'font-mono text-xs text-gray-600' : ''}`}>
+                                  {r[f] || '-'}
+                                </td>
+                              ))}
                             </tr>
                           ))
                         )}
                       </tbody>
+                      </>);
+                    })()}
                     </table>
                   </div>
                 </div>
@@ -3847,180 +3843,116 @@ const campaignData = {
                 </div>
               </div>
             </div>
-            {/* 파일 매핑 모달 */}
+            {/* 파일 매핑 모달 — 2열 콤팩트, 매핑한 컬럼만 테이블에 표시 */}
             {directShowMapping && (
               <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60]">
-                <div className="bg-white rounded-2xl shadow-2xl w-[550px] overflow-hidden">
-                  <div className="p-4 border-b bg-blue-50 flex justify-between items-center">
-                    <h3 className="font-bold text-lg">📁 컬럼 매핑</h3>
-                    <button onClick={() => setDirectShowMapping(false)} className="text-gray-500 hover:text-gray-700 text-xl">✕</button>
+                <div className="bg-white rounded-2xl shadow-2xl w-[500px] overflow-hidden">
+                  <div className="px-5 py-3 border-b bg-blue-50 flex justify-between items-center">
+                    <div>
+                      <h3 className="font-bold text-sm">📁 컬럼 매핑</h3>
+                      <p className="text-xs text-gray-500 mt-0.5">수신번호 필수, 나머지는 사용할 항목만 선택</p>
+                    </div>
+                    <button onClick={() => setDirectShowMapping(false)} className="text-gray-500 hover:text-gray-700">✕</button>
                   </div>
-                  
-                  <div className="p-6">
-                    {/* 매핑 안내 */}
-                    <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-xl text-sm text-yellow-800">
-                      💡 아래 필수 항목에 <strong>엑셀의 어떤 컬럼</strong>을 매핑할지 선택해주세요.
+
+                  <div className="px-5 py-4">
+                    {/* 수신번호 필수 */}
+                    <div className="flex items-center gap-3 p-3 bg-red-50 rounded-lg border border-red-200 mb-3">
+                      <span className="text-xs font-bold text-red-700 w-20 shrink-0">📱 수신번호 *</span>
+                      <span className="text-gray-400 text-xs">→</span>
+                      <select
+                        className="flex-1 border border-red-300 rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-red-400"
+                        value={directColumnMapping.phone || ''}
+                        onChange={(e) => setDirectColumnMapping({...directColumnMapping, phone: e.target.value})}
+                      >
+                        <option value="">-- 선택 --</option>
+                        {directFileHeaders.map((h, i) => <option key={i} value={h}>{h}</option>)}
+                      </select>
                     </div>
-                    
-                    {/* 헤더 */}
-                    <div className="flex items-center gap-4 mb-3 px-4">
-                      <span className="w-28 text-xs font-bold text-gray-500">필수 항목</span>
-                      <span className="w-8 text-center text-xs text-gray-400">→</span>
-                      <span className="flex-1 text-xs font-bold text-gray-500">엑셀 컬럼 선택</span>
+
+                    {/* 나머지 항목 — 2열 그리드 */}
+                    <div className="grid grid-cols-2 gap-2">
+                      {([
+                        { key: 'name', label: '이름' },
+                        { key: 'callback', label: '회신번호' },
+                        { key: 'extra1', label: '기타1' },
+                        { key: 'extra2', label: '기타2' },
+                        { key: 'extra3', label: '기타3' },
+                      ] as const).map(field => (
+                        <div key={field.key} className="flex items-center gap-2 p-2 bg-gray-50 rounded-lg">
+                          <span className="text-xs font-medium text-gray-600 w-14 shrink-0">{field.label}</span>
+                          <select
+                            className="flex-1 border rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-emerald-400"
+                            value={(directColumnMapping as any)[field.key] || ''}
+                            onChange={(e) => setDirectColumnMapping({...directColumnMapping, [field.key]: e.target.value})}
+                          >
+                            <option value="">-- 선택 --</option>
+                            {directFileHeaders.map((h, i) => <option key={i} value={h}>{h}</option>)}
+                          </select>
+                        </div>
+                      ))}
                     </div>
-                    
-                    {/* 매핑 선택 - 5개만 */}
-                    <div className="space-y-3">
-                      {/* 수신번호 (필수) */}
-                      <div className="flex items-center gap-4 p-4 bg-red-50 rounded-xl border-2 border-red-200">
-                        <span className="w-28 text-sm font-bold text-red-700">📱 수신번호 *</span>
-                        <span className="w-8 text-center text-gray-400">→</span>
-                        <select
-                          className="flex-1 border-2 border-red-300 rounded-lg px-4 py-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-red-500"
-                          value={directColumnMapping.phone || ''}
-                          onChange={(e) => setDirectColumnMapping({...directColumnMapping, phone: e.target.value})}
-                        >
-                          <option value="">-- 컬럼 선택 --</option>
-                          {directFileHeaders.map((h, i) => (
-                            <option key={i} value={h}>{h}</option>
-                          ))}
-                        </select>
+
+                    {/* 매핑된 항목 요약 */}
+                    {Object.values(directColumnMapping).some(v => v) && (
+                      <div className="mt-3 flex flex-wrap gap-1">
+                        {Object.entries(directColumnMapping).filter(([, v]) => v).map(([k, v]) => (
+                          <span key={k} className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">
+                            {k === 'phone' ? '수신번호' : k === 'name' ? '이름' : k === 'callback' ? '회신번호' : k} → {v}
+                          </span>
+                        ))}
                       </div>
-                      
-                      {/* 이름 */}
-                      <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-xl">
-                        <span className="w-28 text-sm font-bold text-gray-700">👤 이름</span>
-                        <span className="w-8 text-center text-gray-400">→</span>
-                        <select
-                          className="flex-1 border rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                          value={directColumnMapping.name || ''}
-                          onChange={(e) => setDirectColumnMapping({...directColumnMapping, name: e.target.value})}
-                        >
-                          <option value="">-- 컬럼 선택 --</option>
-                          {directFileHeaders.map((h, i) => (
-                            <option key={i} value={h}>{h}</option>
-                          ))}
-                        </select>
-                      </div>
-                      
-                      {/* 기타1 */}
-                      <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-xl">
-                        <span className="w-28 text-sm font-bold text-gray-700">1️⃣ 기타1</span>
-                        <span className="w-8 text-center text-gray-400">→</span>
-                        <select
-                          className="flex-1 border rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                          value={directColumnMapping.extra1 || ''}
-                          onChange={(e) => setDirectColumnMapping({...directColumnMapping, extra1: e.target.value})}
-                        >
-                          <option value="">-- 컬럼 선택 --</option>
-                          {directFileHeaders.map((h, i) => (
-                            <option key={i} value={h}>{h}</option>
-                          ))}
-                        </select>
-                      </div>
-                      
-                      {/* 기타2 */}
-                      <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-xl">
-                        <span className="w-28 text-sm font-bold text-gray-700">2️⃣ 기타2</span>
-                        <span className="w-8 text-center text-gray-400">→</span>
-                        <select
-                          className="flex-1 border rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                          value={directColumnMapping.extra2 || ''}
-                          onChange={(e) => setDirectColumnMapping({...directColumnMapping, extra2: e.target.value})}
-                        >
-                          <option value="">-- 컬럼 선택 --</option>
-                          {directFileHeaders.map((h, i) => (
-                            <option key={i} value={h}>{h}</option>
-                          ))}
-                        </select>
-                      </div>
-                      
-                      {/* 기타3 */}
-                      <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-xl">
-                        <span className="w-28 text-sm font-bold text-gray-700">3️⃣ 기타3</span>
-                        <span className="w-8 text-center text-gray-400">→</span>
-                        <select
-                          className="flex-1 border rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                          value={directColumnMapping.extra3 || ''}
-                          onChange={(e) => setDirectColumnMapping({...directColumnMapping, extra3: e.target.value})}
-                        >
-                          <option value="">-- 컬럼 선택 --</option>
-                          {directFileHeaders.map((h, i) => (
-                            <option key={i} value={h}>{h}</option>
-                          ))}
-                        </select>
-                      </div>
-                      
-                      {/* 회신번호 */}
-                      <div className="flex items-center gap-4 p-4 bg-blue-50 rounded-xl border border-blue-200">
-                        <span className="w-28 text-sm font-bold text-blue-700">📞 회신번호</span>
-                        <span className="w-8 text-center text-gray-400">→</span>
-                        <select
-                          className="flex-1 border border-blue-300 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          value={directColumnMapping.callback || ''}
-                          onChange={(e) => setDirectColumnMapping({...directColumnMapping, callback: e.target.value})}
-                        >
-                          <option value="">-- 컬럼 선택 --</option>
-                          {directFileHeaders.map((h, i) => (
-                            <option key={i} value={h}>{h}</option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
+                    )}
                   </div>
-                  
-                  <div className="p-4 border-t bg-gray-50 flex justify-between items-center">
-                    <span className="text-sm text-gray-600">📊 총 <strong>{directFileData.length.toLocaleString()}</strong>건</span>
-                    <div className="flex gap-3">
-                      <button 
+
+                  <div className="px-5 py-3 border-t bg-gray-50 flex justify-between items-center">
+                    <span className="text-xs text-gray-600">총 <strong>{directFileData.length.toLocaleString()}</strong>건</span>
+                    <div className="flex gap-2">
+                      <button
                         onClick={() => setDirectShowMapping(false)}
-                        className="px-6 py-2.5 border rounded-lg text-sm font-medium hover:bg-gray-100"
+                        className="px-4 py-2 border rounded-lg text-xs font-medium hover:bg-gray-100"
                       >취소</button>
-                      <button 
+                      <button
                         onClick={async () => {
                           if (!directColumnMapping.phone) {
                             setToast({ show: true, type: 'error', message: '수신번호는 필수입니다.' });
                             return;
                           }
-                          
+
                           setDirectMappingLoading(true);
                           setDirectLoadingProgress(0);
-                          
-                          // 비동기로 처리하여 UI 업데이트 허용
                           await new Promise(resolve => setTimeout(resolve, 10));
-                          
+
                           const total = directFileData.length;
                           const chunkSize = 5000;
                           const mapped: any[] = [];
-                          
+
                           for (let i = 0; i < total; i += chunkSize) {
                             const chunk = directFileData.slice(i, i + chunkSize);
                             const processed = chunk.map(row => {
                               let phone = String(row[directColumnMapping.phone] || '').replace(/-/g, '').trim();
-                              if (phone.length === 10 && phone.startsWith('1')) {
-                                phone = '0' + phone;
-                              }
+                              if (phone.length === 10 && phone.startsWith('1')) phone = '0' + phone;
                               return {
                                 phone,
-                                name: row[directColumnMapping.name] || '',
-                                extra1: row[directColumnMapping.extra1] || '',
-                                extra2: row[directColumnMapping.extra2] || '',
-                                extra3: row[directColumnMapping.extra3] || '',
+                                name: directColumnMapping.name ? (row[directColumnMapping.name] || '') : '',
+                                extra1: directColumnMapping.extra1 ? (row[directColumnMapping.extra1] || '') : '',
+                                extra2: directColumnMapping.extra2 ? (row[directColumnMapping.extra2] || '') : '',
+                                extra3: directColumnMapping.extra3 ? (row[directColumnMapping.extra3] || '') : '',
                                 callback: directColumnMapping.callback ? String(row[directColumnMapping.callback] || '').replace(/-/g, '').trim() : ''
                               };
                             }).filter(r => r.phone && r.phone.length >= 10);
-                            
+
                             mapped.push(...processed);
                             setDirectLoadingProgress(Math.min(100, Math.round((i + chunkSize) / total * 100)));
                             await new Promise(resolve => setTimeout(resolve, 10));
                           }
-                          
+
                           setDirectRecipients(mapped);
                           setDirectMappingLoading(false);
                           setDirectShowMapping(false);
                         }}
                         disabled={!directColumnMapping.phone || directMappingLoading}
-                        className="px-8 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-sm font-bold disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="px-6 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-xs font-bold disabled:opacity-50"
                       >
                         {directMappingLoading ? `처리중... ${directLoadingProgress}%` : '등록하기'}
                       </button>
@@ -4030,56 +3962,125 @@ const campaignData = {
               </div>
             )}
 
-            {/* 직접입력 모달 */}
-            {showDirectInput && (
+            {/* 직접입력 모달 — 메시지 변수 기반 동적 입력폼 */}
+            {showDirectInput && (() => {
+              // 메시지에서 사용된 변수 감지 (%이름%, %기타1% 등)
+              const VAR_FIELD_MAP: Record<string, string> = { '%이름%': 'name', '%기타1%': 'extra1', '%기타2%': 'extra2', '%기타3%': 'extra3', '%회신번호%': 'callback' };
+              const VAR_LABEL_MAP: Record<string, string> = { name: '이름', extra1: '기타1', extra2: '기타2', extra3: '기타3', callback: '회신번호' };
+              const usedVars = directSendChannel === 'sms'
+                ? Object.entries(VAR_FIELD_MAP).filter(([varName]) => directMessage.includes(varName)).map(([, fieldKey]) => fieldKey)
+                : []; // 알림톡/RCS는 템플릿 변수 사용 → 수신번호만
+
+              return (
               <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60]">
-                <div className="bg-white rounded-2xl shadow-2xl w-[500px] overflow-hidden">
-                  <div className="p-4 border-b bg-blue-50 flex justify-between items-center">
-                    <h3 className="font-bold text-lg">✏️ 직접입력</h3>
-                    <button onClick={() => setShowDirectInput(false)} className="text-gray-500 hover:text-gray-700 text-xl">✕</button>
-                  </div>
-                  
-                  <div className="p-6">
-                    <div className="mb-3 text-sm text-gray-600">
-                      전화번호를 한 줄에 하나씩 입력해주세요.
+                <div className="bg-white rounded-2xl shadow-2xl w-[550px] overflow-hidden">
+                  <div className="px-5 py-3 border-b bg-blue-50 flex justify-between items-center">
+                    <div>
+                      <h3 className="font-bold text-sm">✏️ 직접입력</h3>
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        {usedVars.length > 0
+                          ? `메시지에 사용된 변수: ${usedVars.map(f => VAR_LABEL_MAP[f]).join(', ')}`
+                          : '수신번호를 입력해주세요 (한 줄에 하나씩 또는 한 건씩 추가)'}
+                      </p>
                     </div>
-                    <textarea
-                      value={directInputText}
-                      onChange={(e) => setDirectInputText(e.target.value)}
-                      placeholder="01012345678&#10;01087654321&#10;01011112222"
-                      className="w-full h-[250px] border rounded-lg p-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                    />
+                    <button onClick={() => setShowDirectInput(false)} className="text-gray-500 hover:text-gray-700">✕</button>
                   </div>
-                  
-                  <div className="p-4 border-t bg-gray-50 flex justify-end gap-3">
-                    <button 
+
+                  <div className="p-5">
+                    {usedVars.length === 0 ? (
+                      /* 변수 없을 때: 기존 방식 — 수신번호만 일괄 입력 */
+                      <>
+                        <div className="mb-2 text-xs text-gray-500">전화번호를 한 줄에 하나씩 입력</div>
+                        <textarea
+                          value={directInputText}
+                          onChange={(e) => setDirectInputText(e.target.value)}
+                          placeholder="01012345678&#10;01087654321&#10;01011112222"
+                          className="w-full h-[200px] border rounded-lg p-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                        />
+                      </>
+                    ) : (
+                      /* 변수 있을 때: 한 건씩 입력 폼 */
+                      <>
+                        <div className="flex gap-2 items-end mb-3">
+                          <div className="flex-1">
+                            <label className="block text-xs font-medium text-gray-600 mb-1">수신번호 *</label>
+                            <input
+                              id="directInputPhone"
+                              type="text"
+                              placeholder="01012345678"
+                              className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                            />
+                          </div>
+                          {usedVars.map(f => (
+                            <div key={f} className="flex-1">
+                              <label className="block text-xs font-medium text-gray-600 mb-1">{VAR_LABEL_MAP[f]}</label>
+                              <input
+                                id={`directInput_${f}`}
+                                type="text"
+                                placeholder={VAR_LABEL_MAP[f]}
+                                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                              />
+                            </div>
+                          ))}
+                          <button
+                            onClick={() => {
+                              const phoneEl = document.getElementById('directInputPhone') as HTMLInputElement;
+                              const phone = phoneEl?.value?.replace(/-/g, '').trim();
+                              if (!phone || phone.length < 10) {
+                                setToast({ show: true, type: 'error', message: '유효한 수신번호를 입력해주세요' });
+                                return;
+                              }
+                              const entry: any = { phone, name: '', extra1: '', extra2: '', extra3: '', callback: '' };
+                              usedVars.forEach(f => {
+                                const el = document.getElementById(`directInput_${f}`) as HTMLInputElement;
+                                entry[f] = el?.value || '';
+                              });
+                              setDirectRecipients(prev => [...prev, entry]);
+                              // 입력칸 초기화
+                              phoneEl.value = '';
+                              usedVars.forEach(f => {
+                                const el = document.getElementById(`directInput_${f}`) as HTMLInputElement;
+                                if (el) el.value = '';
+                              });
+                              phoneEl.focus();
+                              setDirectInputMode('direct');
+                            }}
+                            className="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-sm font-medium shrink-0"
+                          >추가</button>
+                        </div>
+                        {directRecipients.length > 0 && (
+                          <div className="text-xs text-emerald-600 font-medium">✅ {directRecipients.length}건 추가됨</div>
+                        )}
+                      </>
+                    )}
+                  </div>
+
+                  <div className="px-5 py-3 border-t bg-gray-50 flex justify-end gap-2">
+                    <button
                       onClick={() => setShowDirectInput(false)}
-                      className="px-6 py-2.5 border rounded-lg text-sm font-medium hover:bg-gray-100"
-                    >취소</button>
-                    <button 
-                      onClick={() => {
-                        const lines = directInputText.split('\n').map(l => l.trim()).filter(l => l);
-                        const newRecipients = lines.map(phone => ({
-                          phone: phone.replace(/-/g, ''),
-                          name: '',
-                          extra1: '',
-                          extra2: '',
-                          extra3: '',
-                          callback: ''
-                        }));
-                        setDirectRecipients([...directRecipients, ...newRecipients]);
-                        setDirectInputText('');
-                        setShowDirectInput(false);
-                        setDirectInputMode('direct');
-                      }}
-                      className="px-6 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-sm font-medium"
-                    >
-                      등록
-                    </button>
+                      className="px-4 py-2 border rounded-lg text-xs font-medium hover:bg-gray-100"
+                    >닫기</button>
+                    {usedVars.length === 0 && (
+                      <button
+                        onClick={() => {
+                          const lines = directInputText.split('\n').map(l => l.trim()).filter(l => l);
+                          const newRecipients = lines.map(phone => ({
+                            phone: phone.replace(/-/g, ''),
+                            name: '', extra1: '', extra2: '', extra3: '', callback: ''
+                          }));
+                          setDirectRecipients([...directRecipients, ...newRecipients]);
+                          setDirectInputText('');
+                          setShowDirectInput(false);
+                          setDirectInputMode('direct');
+                        }}
+                        className="px-6 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-xs font-medium"
+                      >등록</button>
+                    )}
                   </div>
                 </div>
               </div>
-            )}
+              );
+            })()}
             
             </div>
         </div>
