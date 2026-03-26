@@ -3866,41 +3866,102 @@ const campaignData = {
                         onChange={(e) => setDirectColumnMapping({...directColumnMapping, phone: e.target.value})}
                       >
                         <option value="">-- 선택 --</option>
-                        {directFileHeaders.map((h, i) => <option key={i} value={h}>{h}</option>)}
+                        {directFileHeaders.map((h, i) => {
+                          const sample = directFileData[0]?.[h];
+                          const sampleStr = sample ? ` (예: ${String(sample).slice(0, 15)})` : '';
+                          return <option key={i} value={h}>{h}{sampleStr}</option>;
+                        })}
                       </select>
                     </div>
 
-                    {/* 나머지 항목 — 2열 그리드 */}
-                    <div className="grid grid-cols-2 gap-2">
-                      {([
-                        { key: 'name', label: '이름' },
-                        { key: 'callback', label: '회신번호' },
-                        { key: 'extra1', label: '기타1' },
-                        { key: 'extra2', label: '기타2' },
-                        { key: 'extra3', label: '기타3' },
-                      ] as const).map(field => (
-                        <div key={field.key} className="flex items-center gap-2 p-2 bg-gray-50 rounded-lg">
-                          <span className="text-xs font-medium text-gray-600 w-14 shrink-0">{field.label}</span>
-                          <select
-                            className="flex-1 border rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-emerald-400"
-                            value={(directColumnMapping as any)[field.key] || ''}
-                            onChange={(e) => setDirectColumnMapping({...directColumnMapping, [field.key]: e.target.value})}
-                          >
-                            <option value="">-- 선택 --</option>
-                            {directFileHeaders.map((h, i) => <option key={i} value={h}>{h}</option>)}
-                          </select>
+                    {/* 나머지 항목 — 채널별 분기 */}
+                    {directSendChannel === 'sms' && (
+                      <div className="grid grid-cols-2 gap-2">
+                        {([
+                          { key: 'name', label: '이름' },
+                          { key: 'callback', label: '회신번호' },
+                          { key: 'extra1', label: '기타1' },
+                          { key: 'extra2', label: '기타2' },
+                          { key: 'extra3', label: '기타3' },
+                        ] as const).map(field => (
+                          <div key={field.key} className="flex items-center gap-2 p-2 bg-gray-50 rounded-lg">
+                            <span className="text-xs font-medium text-gray-600 w-14 shrink-0">{field.label}</span>
+                            <select
+                              className="flex-1 border rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-emerald-400"
+                              value={(directColumnMapping as any)[field.key] || ''}
+                              onChange={(e) => setDirectColumnMapping({...directColumnMapping, [field.key]: e.target.value})}
+                            >
+                              <option value="">-- 선택 --</option>
+                              {directFileHeaders.map((h, i) => {
+                                const sample = directFileData[0]?.[h];
+                                const sampleStr = sample ? ` (예: ${String(sample).slice(0, 15)})` : '';
+                                return <option key={i} value={h}>{h}{sampleStr}</option>;
+                              })}
+                            </select>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {directSendChannel === 'kakao_alimtalk' && kakaoSelectedTemplate && (
+                      <div>
+                        <p className="text-xs font-medium text-blue-700 mb-2">🔔 템플릿 변수 매핑</p>
+                        <div className="grid grid-cols-2 gap-2">
+                          {(kakaoSelectedTemplate.content?.match(/#\{[^}]+\}/g) || []).map((varName: string, i: number) => {
+                            const varKey = `tplvar_${i}`;
+                            return (
+                              <div key={varKey} className="flex items-center gap-2 p-2 bg-blue-50 rounded-lg">
+                                <span className="text-xs font-medium text-blue-700 w-20 shrink-0 truncate">{varName}</span>
+                                <select
+                                  className="flex-1 border border-blue-200 rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
+                                  value={(directColumnMapping as any)[varKey] || ''}
+                                  onChange={(e) => setDirectColumnMapping({...directColumnMapping, [varKey]: e.target.value})}
+                                >
+                                  <option value="">-- 선택 --</option>
+                                  {directFileHeaders.map((h, hi) => {
+                                    const sample = directFileData[0]?.[h];
+                                    const sampleStr = sample ? ` (예: ${String(sample).slice(0, 15)})` : '';
+                                    return <option key={hi} value={h}>{h}{sampleStr}</option>;
+                                  })}
+                                </select>
+                              </div>
+                            );
+                          })}
                         </div>
-                      ))}
-                    </div>
+                        {!kakaoSelectedTemplate.content?.match(/#\{[^}]+\}/g) && (
+                          <p className="text-xs text-gray-400 py-2">템플릿에 변수가 없습니다 (수신번호만 매핑)</p>
+                        )}
+                      </div>
+                    )}
+
+                    {directSendChannel === 'kakao_alimtalk' && !kakaoSelectedTemplate && (
+                      <div className="p-3 bg-yellow-50 rounded-lg border border-yellow-200">
+                        <p className="text-xs text-yellow-700">⚠️ 먼저 알림톡 템플릿을 선택해주세요. 템플릿의 변수에 맞춰 매핑됩니다.</p>
+                      </div>
+                    )}
+
+                    {directSendChannel === 'rcs' && (
+                      <p className="text-xs text-gray-400 py-2">RCS는 수신번호만 매핑하면 됩니다.</p>
+                    )}
 
                     {/* 매핑된 항목 요약 */}
                     {Object.values(directColumnMapping).some(v => v) && (
                       <div className="mt-3 flex flex-wrap gap-1">
-                        {Object.entries(directColumnMapping).filter(([, v]) => v).map(([k, v]) => (
-                          <span key={k} className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">
-                            {k === 'phone' ? '수신번호' : k === 'name' ? '이름' : k === 'callback' ? '회신번호' : k} → {v}
-                          </span>
-                        ))}
+                        {Object.entries(directColumnMapping).filter(([, v]) => v).map(([k, v]) => {
+                          const labels: Record<string, string> = { phone: '수신번호', name: '이름', callback: '회신번호', extra1: '기타1', extra2: '기타2', extra3: '기타3' };
+                          // 알림톡 템플릿 변수
+                          let label = labels[k] || k;
+                          if (k.startsWith('tplvar_') && kakaoSelectedTemplate) {
+                            const vars = kakaoSelectedTemplate.content?.match(/#\{[^}]+\}/g) || [];
+                            const idx = parseInt(k.replace('tplvar_', ''));
+                            label = vars[idx] || k;
+                          }
+                          return (
+                            <span key={k} className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">
+                              {label} → {v}
+                            </span>
+                          );
+                        })}
                       </div>
                     )}
                   </div>
@@ -3932,7 +3993,7 @@ const campaignData = {
                             const processed = chunk.map(row => {
                               let phone = String(row[directColumnMapping.phone] || '').replace(/-/g, '').trim();
                               if (phone.length === 10 && phone.startsWith('1')) phone = '0' + phone;
-                              return {
+                              const entry: any = {
                                 phone,
                                 name: directColumnMapping.name ? (row[directColumnMapping.name] || '') : '',
                                 extra1: directColumnMapping.extra1 ? (row[directColumnMapping.extra1] || '') : '',
@@ -3940,6 +4001,17 @@ const campaignData = {
                                 extra3: directColumnMapping.extra3 ? (row[directColumnMapping.extra3] || '') : '',
                                 callback: directColumnMapping.callback ? String(row[directColumnMapping.callback] || '').replace(/-/g, '').trim() : ''
                               };
+                              // 알림톡 템플릿 변수 매핑
+                              if (directSendChannel === 'kakao_alimtalk' && kakaoSelectedTemplate) {
+                                const vars = kakaoSelectedTemplate.content?.match(/#\{[^}]+\}/g) || [];
+                                const varValues: Record<string, string> = {};
+                                vars.forEach((varName: string, vi: number) => {
+                                  const mappedCol = (directColumnMapping as any)[`tplvar_${vi}`];
+                                  if (mappedCol) varValues[varName] = String(row[mappedCol] || '');
+                                });
+                                entry._templateVars = varValues;
+                              }
+                              return entry;
                             }).filter(r => r.phone && r.phone.length >= 10);
 
                             mapped.push(...processed);
