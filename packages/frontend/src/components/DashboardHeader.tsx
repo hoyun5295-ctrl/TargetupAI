@@ -30,15 +30,11 @@ interface MenuItem {
   locked?: boolean;
 }
 
-const COLOR_CONFIG: Record<MenuColor, { normal: string; hover: string; bar: string }> = {
-  green: { normal: '#4b5563', hover: '#15803d', bar: '#16a34a' },
-  gold:  { normal: '#4b5563', hover: '#b45309', bar: '#d97706' },
-  gray:  { normal: '#9ca3af', hover: '#6b7280', bar: '#9ca3af' },
-};
-
-const EMPHASIZED_COLOR: Record<string, string> = {
-  green: '#15803d',
-  gold: '#b45309',
+// ★ D95: 필(pill) 스타일 메뉴 — 밑줄 제거, 호버/강조 시 배경색
+const COLOR_CONFIG: Record<MenuColor, { text: string; hoverText: string; hoverBg: string; activeBg: string; activeText: string }> = {
+  green: { text: '#4b5563', hoverText: '#15803d', hoverBg: '#f0fdf4', activeBg: '#ecfdf5', activeText: '#15803d' },
+  gold:  { text: '#4b5563', hoverText: '#b45309', hoverBg: '#fffbeb', activeBg: '#fef3c7', activeText: '#b45309' },
+  gray:  { text: '#9ca3af', hoverText: '#6b7280', hoverBg: '#f3f4f6', activeBg: '#f3f4f6', activeText: '#6b7280' },
 };
 
 export default function DashboardHeader({
@@ -105,17 +101,23 @@ export default function DashboardHeader({
             const isHovered = hoveredIdx === idx;
             const isEmphasized = !!item.emphasized;
 
-            // 텍스트 색상: 강조→항상 색상, 호버→hover색, 기본→normal색
+            // 텍스트 색상
             const textColor = item.locked
               ? '#d1d5db'
-              : isHovered
-                ? cfg.hover
-                : isEmphasized
-                  ? EMPHASIZED_COLOR[item.color] || cfg.normal
-                  : cfg.normal;
+              : isEmphasized
+                ? cfg.activeText
+                : isHovered
+                  ? cfg.hoverText
+                  : cfg.text;
 
-            // 밑줄 너비: 강조→항상 표시, 호버→표시
-            const barWidth = isEmphasized || isHovered ? '60%' : '0%';
+            // 배경색: 강조→활성배경, 호버→호버배경
+            const bgColor = item.locked
+              ? 'transparent'
+              : isEmphasized
+                ? cfg.activeBg
+                : isHovered
+                  ? cfg.hoverBg
+                  : 'transparent';
 
             return (
               <button
@@ -123,24 +125,15 @@ export default function DashboardHeader({
                 onClick={item.onClick}
                 onMouseEnter={() => setHoveredIdx(idx)}
                 onMouseLeave={() => setHoveredIdx(null)}
-                className="relative px-4 py-2 text-sm transition-colors duration-200 flex items-center gap-1"
+                className="px-3 py-1.5 text-sm rounded-lg transition-all duration-200 flex items-center gap-1"
                 style={{
                   color: textColor,
+                  backgroundColor: bgColor,
                   fontWeight: isEmphasized ? 600 : 400,
                 }}
               >
                 {item.locked && <span className="text-xs">🔒</span>}
                 {item.label}
-                {/* 밑줄 애니메이션 */}
-                <span
-                  className="absolute bottom-0 left-1/2 h-[2px] rounded-full"
-                  style={{
-                    transform: 'translateX(-50%)',
-                    width: barWidth,
-                    backgroundColor: cfg.bar,
-                    transition: 'width 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-                  }}
-                />
               </button>
             );
           })}
