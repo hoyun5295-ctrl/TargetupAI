@@ -350,6 +350,7 @@ const [emailSending, setEmailSending] = useState(false);
   const [templateFilter, setTemplateFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
   const [templateSubTab, setTemplateSubTab] = useState<'alimtalk' | 'rcs'>('alimtalk');
   const [showManualTemplateForm, setShowManualTemplateForm] = useState(false);
+  const [adminProfiles, setAdminProfiles] = useState<any[]>([]);
   const [manualForm, setManualForm] = useState({ companyId: '', templateCode: '', templateName: '', category: '', messageType: 'BA', content: '' });
 
   // 커스텀 모달 상태
@@ -388,7 +389,7 @@ useEffect(() => { if (activeTab === 'billing') loadBillings(); }, [filterYear]);
 useEffect(() => { if (activeTab === 'deposits') loadChargeManagement(1); }, [activeTab, chargeTxCompanyFilter, chargeTxTypeFilter, chargeTxMethodFilter, chargeTxStartDate, chargeTxEndDate]);
 useEffect(() => { if (activeTab === 'syncAgents') loadSyncAgents(); }, [activeTab]);
 useEffect(() => { if (activeTab === 'auditLogs') loadAuditLogs(1); }, [activeTab]);
-useEffect(() => { if (activeTab === 'templates') { loadAdminTemplates(); loadAdminRcsTemplates(); } }, [activeTab, templateFilter]);
+useEffect(() => { if (activeTab === 'templates') { loadAdminTemplates(); loadAdminRcsTemplates(); loadAdminProfiles(); } }, [activeTab, templateFilter]);
 useEffect(() => { if (activeTab === 'callbacks') { loadSenderRegPendingCount(); } }, [activeTab]);
 useEffect(() => { if (activeTab === 'callbacks' && callbackSubTab === 'registrations') { loadSenderRegistrations(senderRegFilter); } }, [activeTab, callbackSubTab, senderRegFilter]);
 useEffect(() => { if (activeTab === 'callbacks' && callbackSubTab === 'managers') { loadAllManagers(); } }, [activeTab, callbackSubTab, mgrFilter]);
@@ -406,6 +407,15 @@ const loadAdminTemplates = async () => {
     if (data.success) setAdminTemplates(data.templates);
   } catch { /* ignore */ }
   setTemplatesLoading(false);
+};
+
+const loadAdminProfiles = async () => {
+  try {
+    const tk = localStorage.getItem('token');
+    const res = await fetch('/api/admin/kakao-profiles', { headers: { Authorization: `Bearer ${tk}` } });
+    const data = await res.json();
+    if (data.success) setAdminProfiles(data.profiles || []);
+  } catch { /* ignore */ }
 };
 
 const loadAdminRcsTemplates = async () => {
@@ -3734,6 +3744,87 @@ const handleApproveRequest = async (id: string) => {
 
       {/* ═══ 템플릿 관리 탭 ═══ */}
       {activeTab === 'templates' && (
+        <div className="space-y-4">
+        {/* 발신 프로필 관리 */}
+        <div className="bg-white rounded-lg shadow">
+          <div className="px-6 py-4 border-b flex justify-between items-center">
+            <div>
+              <h2 className="text-lg font-semibold">👤 발신 프로필 관리</h2>
+              <p className="text-xs text-gray-500 mt-1">고객사별 카카오톡 발신 프로필(Sender Key) 관리</p>
+            </div>
+            <button onClick={async () => {
+              const companyId = prompt('고객사 ID를 입력하세요');
+              if (!companyId) return;
+              const profileName = prompt('프로필 이름을 입력하세요');
+              if (!profileName) return;
+              const profileKey = prompt('발신 프로필 키(Sender Key)를 입력하세요');
+              if (!profileKey) return;
+              try {
+                const token = localStorage.getItem('token');
+                const res = await fetch('/api/admin/kakao-profiles', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                  body: JSON.stringify({ companyId, profileName, profileKey }),
+                });
+                const data = await res.json();
+                if (data.success) {
+                  alert('발신 프로필이 등록되었습니다');
+                  // 프로필 목록 리로드
+                  const listRes = await fetch('/api/admin/kakao-profiles', { headers: { Authorization: `Bearer ${token}` } });
+                  const listData = await listRes.json();
+                  if (listData.success) setAdminProfiles(listData.profiles || []);
+                } else {
+                  alert(data.error || '등록 실패');
+                }
+              } catch { alert('서버 오류'); }
+            }}
+              className="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-lg text-sm font-medium">
+              + 프로필 등록
+            </button>
+          </div>
+          <div className="px-6 py-4">
+            {adminProfiles.length === 0 ? (
+              <p className="text-sm text-gray-400 text-center py-4">등록된 발신 프로필이 없습니다</p>
+            ) : (
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 border-b">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-medium text-gray-600">고객사</th>
+                    <th className="px-3 py-2 text-left font-medium text-gray-600">프로필명</th>
+                    <th className="px-3 py-2 text-left font-medium text-gray-600">Sender Key</th>
+                    <th className="px-3 py-2 text-left font-medium text-gray-600">등록일</th>
+                    <th className="px-3 py-2 text-center font-medium text-gray-600">관리</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {adminProfiles.map((p: any) => (
+                    <tr key={p.id} className="hover:bg-gray-50">
+                      <td className="px-3 py-2">{p.company_name || '-'}</td>
+                      <td className="px-3 py-2 font-medium">{p.profile_name}</td>
+                      <td className="px-3 py-2 font-mono text-xs text-gray-500">{p.profile_key?.slice(0, 12)}...</td>
+                      <td className="px-3 py-2 text-gray-500">{p.created_at ? new Date(p.created_at).toLocaleDateString('ko-KR') : '-'}</td>
+                      <td className="px-3 py-2 text-center">
+                        <button onClick={async () => {
+                          if (!window.confirm(`"${p.profile_name}" 프로필을 삭제하시겠습니까?`)) return;
+                          try {
+                            const token = localStorage.getItem('token');
+                            const res = await fetch(`/api/admin/kakao-profiles/${p.id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+                            const data = await res.json();
+                            if (data.success) {
+                              setAdminProfiles((prev: any[]) => prev.filter((x: any) => x.id !== p.id));
+                            } else { alert(data.error || '삭제 실패'); }
+                          } catch { alert('서버 오류'); }
+                        }} className="text-red-500 hover:text-red-700 text-xs">삭제</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+
+        {/* 템플릿 관리 */}
         <div className="bg-white rounded-lg shadow">
           <div className="px-6 py-4 border-b flex justify-between items-center">
             <div>
@@ -3872,6 +3963,7 @@ const handleApproveRequest = async (id: string) => {
               )}
             </div>
           )}
+        </div>
         </div>
       )}
 

@@ -168,6 +168,79 @@ export default function KakaoRcsPage() {
         {/* ═══ 알림톡 템플릿 탭 ═══ */}
         {activeTab === 'alimtalk' && (
           <div>
+            {/* 발신 프로필 관리 */}
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 mb-5">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-lg">👤</span>
+                  <h3 className="text-sm font-bold text-gray-800">발신 프로필</h3>
+                  <span className="text-xs text-gray-400">카카오톡 채널에서 발급받은 발신 프로필 키를 등록합니다</span>
+                </div>
+                <button
+                  onClick={async () => {
+                    const profileName = prompt('프로필 이름을 입력하세요 (예: 브랜드명)');
+                    if (!profileName) return;
+                    const profileKey = prompt('발신 프로필 키(Sender Key)를 입력하세요');
+                    if (!profileKey) return;
+                    try {
+                      const res = await fetch('/api/companies/kakao-profiles', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
+                        body: JSON.stringify({ profileName, profileKey }),
+                      });
+                      const data = await res.json();
+                      if (data.success) {
+                        setToast({ show: true, type: 'success', message: '발신 프로필이 등록되었습니다' });
+                        fetchProfiles();
+                      } else {
+                        setToast({ show: true, type: 'error', message: data.error || '등록 실패' });
+                      }
+                    } catch {
+                      setToast({ show: true, type: 'error', message: '서버 오류' });
+                    }
+                  }}
+                  className="px-3 py-1.5 bg-amber-100 hover:bg-amber-200 text-amber-700 rounded-lg text-xs font-medium transition"
+                >
+                  + 프로필 등록
+                </button>
+              </div>
+              {profiles.length === 0 ? (
+                <div className="text-center py-4 text-gray-400 text-sm">
+                  등록된 발신 프로필이 없습니다. 카카오톡 채널의 Sender Key를 등록해주세요.
+                </div>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {profiles.map((p: any) => (
+                    <div key={p.id} className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                      <span className="text-sm font-medium text-amber-800">{p.profile_name}</span>
+                      <span className="text-xs text-amber-500 font-mono">{p.profile_key?.slice(0, 8)}...</span>
+                      <button
+                        onClick={async () => {
+                          if (!window.confirm(`"${p.profile_name}" 프로필을 삭제하시겠습니까?`)) return;
+                          try {
+                            const res = await fetch(`/api/companies/kakao-profiles/${p.id}`, {
+                              method: 'DELETE',
+                              headers: { Authorization: `Bearer ${getToken()}` },
+                            });
+                            const data = await res.json();
+                            if (data.success) {
+                              setToast({ show: true, type: 'success', message: '삭제되었습니다' });
+                              fetchProfiles();
+                            } else {
+                              setToast({ show: true, type: 'error', message: data.error || '삭제 실패' });
+                            }
+                          } catch {
+                            setToast({ show: true, type: 'error', message: '서버 오류' });
+                          }
+                        }}
+                        className="text-amber-400 hover:text-red-500 text-xs ml-1"
+                      >✕</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
             {/* 필터 + 등록 버튼 */}
             <div className="flex items-center justify-between mb-4">
               <div className="flex gap-2">

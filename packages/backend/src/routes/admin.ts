@@ -2480,6 +2480,56 @@ router.put('/companies/:id/sync-keys', authenticate, requireSuperAdmin, async (r
 // 슈퍼관리자 — 알림톡/RCS 템플릿 관리
 // ═══════════════════════════════════════════════════════════
 
+// GET /api/admin/kakao-profiles — 전체 고객사 발신 프로필 목록
+router.get('/kakao-profiles', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.query.company_id as string | undefined;
+    let sql = `SELECT ksp.*, c.company_name
+       FROM kakao_sender_profiles ksp
+       LEFT JOIN companies c ON ksp.company_id = c.id
+       WHERE 1=1`;
+    const params: any[] = [];
+    if (companyId) { params.push(companyId); sql += ` AND ksp.company_id = $${params.length}`; }
+    sql += ' ORDER BY ksp.created_at DESC';
+    const result = await query(sql, params);
+    res.json({ success: true, profiles: result.rows });
+  } catch (error) {
+    console.error('[Admin] 발신 프로필 목록 조회 실패:', error);
+    res.status(500).json({ success: false, error: '조회 실패' });
+  }
+});
+
+// POST /api/admin/kakao-profiles — 슈퍼관리자가 고객사 발신 프로필 등록
+router.post('/kakao-profiles', async (req: Request, res: Response) => {
+  try {
+    const { companyId, profileName, profileKey } = req.body;
+    if (!companyId || !profileName || !profileKey) {
+      return res.status(400).json({ success: false, error: '고객사, 프로필명, 프로필키는 필수입니다' });
+    }
+    const result = await query(
+      `INSERT INTO kakao_sender_profiles (company_id, profile_name, profile_key)
+       VALUES ($1, $2, $3) RETURNING *`,
+      [companyId, profileName, profileKey]
+    );
+    res.json({ success: true, profile: result.rows[0] });
+  } catch (error) {
+    console.error('[Admin] 발신 프로필 등록 실패:', error);
+    res.status(500).json({ success: false, error: '등록 실패' });
+  }
+});
+
+// DELETE /api/admin/kakao-profiles/:id — 슈퍼관리자가 발신 프로필 삭제
+router.delete('/kakao-profiles/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    await query('DELETE FROM kakao_sender_profiles WHERE id = $1', [id]);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('[Admin] 발신 프로필 삭제 실패:', error);
+    res.status(500).json({ success: false, error: '삭제 실패' });
+  }
+});
+
 // GET /api/admin/kakao-templates — 전체 고객사 알림톡 템플릿 목록
 router.get('/kakao-templates', async (req: Request, res: Response) => {
   try {

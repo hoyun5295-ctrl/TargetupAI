@@ -272,6 +272,7 @@ export default function Dashboard() {
   const [kakaoTemplates, setKakaoTemplates] = useState<any[]>([]);
   const [kakaoSelectedTemplate, setKakaoSelectedTemplate] = useState<any>(null);
   const [kakaoTemplateVars, setKakaoTemplateVars] = useState<Record<string, string>>({});
+  const [alimtalkFallback, setAlimtalkFallback] = useState<'N' | 'S' | 'L'>('L'); // 알림톡 실패 시 폴백: N=없음, S=SMS, L=LMS
   const kakaoEnabled = !!(user as any)?.company?.kakaoEnabled;
   // 카카오 템플릿 로드
   const loadKakaoTemplates = async () => {
@@ -355,21 +356,44 @@ export default function Dashboard() {
     }
     setDirectSending(true);
     try {
+      // 알림톡 버튼을 QTmsg k_button_json 형식으로 변환
+      const convertButtonsToQTmsg = (buttons: any[]) => {
+        if (!buttons || buttons.length === 0) return null;
+        const obj: Record<string, string> = {};
+        buttons.forEach((btn: any, i: number) => {
+          const n = i + 1;
+          obj[`name${n}`] = btn.name || '';
+          // linkType → QTmsg type 코드: WL=2(웹링크), AL=3(앱링크), DS=1(배송조회), BK=4(봇키워드), MD=5(메시지전달), CA=6(채널추가)
+          const typeMap: Record<string, string> = { WL: '2', AL: '3', DS: '1', BK: '4', MD: '5', CA: '6' };
+          obj[`type${n}`] = typeMap[btn.linkType] || '2';
+          obj[`url${n}_1`] = btn.linkM || btn.linkP || '';
+          obj[`url${n}_2`] = btn.linkP || '';
+        });
+        return JSON.stringify(obj);
+      };
+
+      const isAlimtalk = directSendChannel === 'kakao_alimtalk';
       const sendBody = {
-        msgType: directSendChannel === 'rcs' ? 'LMS' : directMsgType,
-        sendChannel: directSendChannel === 'sms' ? 'sms' : directSendChannel === 'rcs' ? 'rcs' : 'kakao',
+        msgType: directSendChannel === 'rcs' ? 'LMS' : isAlimtalk ? 'LMS' : directMsgType,
+        sendChannel: directSendChannel === 'sms' ? 'sms' : directSendChannel === 'rcs' ? 'rcs' : 'alimtalk',
         subject: directSubject,
-        message: getFullMessage(directSendChannel === 'rcs' ? kakaoMessage : directMessage),
-        callback: useIndividualCallback ? null : selectedCallback,
-        useIndividualCallback: useIndividualCallback,
+        message: isAlimtalk ? kakaoMessage : getFullMessage(directSendChannel === 'rcs' ? kakaoMessage : directMessage),
+        callback: isAlimtalk ? (callbackNumbers[0]?.phone || '') : (useIndividualCallback ? null : selectedCallback),
+        useIndividualCallback: isAlimtalk ? false : useIndividualCallback,
         recipients: directRecipients.map((r: any) => ({ ...r, callback: r.callback || null })),
-        adEnabled: adTextEnabled,
+        adEnabled: isAlimtalk ? false : adTextEnabled,
         scheduled: reserveEnabled,
         scheduledAt: reserveEnabled && reserveDateTime ? new Date(reserveDateTime).toISOString() : null,
-        splitEnabled: splitEnabled,
-        splitCount: splitEnabled ? splitCount : null,
-        mmsImagePaths: mmsUploadedImages.map(img => img.serverPath),
+        splitEnabled: isAlimtalk ? false : splitEnabled,
+        splitCount: isAlimtalk ? null : (splitEnabled ? splitCount : null),
+        mmsImagePaths: isAlimtalk ? [] : mmsUploadedImages.map(img => img.serverPath),
         ...(confirmCallbackExclusion ? { confirmCallbackExclusion: true } : {}),
+        // 알림톡 전용 파라미터
+        ...(isAlimtalk && kakaoSelectedTemplate ? {
+          alimtalkTemplateCode: kakaoSelectedTemplate.template_code || '',
+          alimtalkButtonJson: convertButtonsToQTmsg(kakaoSelectedTemplate.buttons) || null,
+          alimtalkNextType: alimtalkFallback,
+        } : {}),
       };
       const res = await fetch('/api/campaigns/direct-send', {
         method: 'POST',
@@ -3508,6 +3532,65 @@ const campaignData = {
                           ))}
                         </div>
                       )}
+
+                      {/* 대체발송(폴백) 설정 */}
+                      <div className="mt-3 pt-3 border-t">
+                        <p className="text-xs font-semibold text-gray-600 mb-2">대체발송 설정</p>
+                        <p className="text-xs text-gray-400 mb-2">알림톡 발송 실패 시 문자로 대체 발송합니다</p>
+                        <div className="flex gap-1.5">
+                          {([
+                            { value: 'L' as const, label: 'LMS 대체', desc: '실패 시 LMS로 발송' },
+                            { value: 'S' as const, label: 'SMS 대체', desc: '실패 시 SMS로 발송' },
+                            { value: 'N' as const, label: '대체 안함', desc: '실패 시 발송하지 않음' },
+                          ]).map(opt => (
+                            <button
+                              key={opt.value}
+                              onClick={() => setAlimtalkFallback(opt.value)}
+                              className={`flex-1 py-2 text-xs font-medium rounded-lg border transition-colors ${
+                                alimtalkFallback === opt.value
+                                  ? 'bg-blue-50 border-blue-400 text-blue-700'
+                                  : 'bg-white border-gray-200 text-gray-500 hover:border-blue-300'
+                              }`}
+                            >
+                              {opt.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* 미리보기 */}
+                      {kakaoSelectedTemplate && (
+                        <div className="mt-3 pt-3 border-t">
+                          <p className="text-xs font-semibold text-gray-600 mb-2">미리보기</p>
+                          <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-3 text-xs">
+                            {kakaoSelectedTemplate.emphasize_type === 'TEXT' && kakaoSelectedTemplate.emphasize_title && (
+                              <div className="font-bold text-sm text-gray-900 mb-2 pb-2 border-b border-yellow-200">
+                                {(() => {
+                                  let title = kakaoSelectedTemplate.emphasize_title;
+                                  Object.entries(kakaoTemplateVars).forEach(([k, v]) => { title = title.replace(new RegExp(k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), v || k); });
+                                  return title;
+                                })()}
+                              </div>
+                            )}
+                            <div className="whitespace-pre-wrap text-gray-700 leading-relaxed">
+                              {(() => {
+                                let content = kakaoSelectedTemplate.content;
+                                Object.entries(kakaoTemplateVars).forEach(([k, v]) => { content = content.replace(new RegExp(k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), v || k); });
+                                return content;
+                              })()}
+                            </div>
+                            {kakaoSelectedTemplate.buttons && kakaoSelectedTemplate.buttons.length > 0 && (
+                              <div className="mt-3 pt-2 border-t border-yellow-200 space-y-1.5">
+                                {kakaoSelectedTemplate.buttons.map((btn: any, i: number) => (
+                                  <div key={i} className="text-center py-1.5 bg-yellow-100 rounded-lg text-xs font-medium text-yellow-800">
+                                    {btn.name || btn.linkType}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
                     </div>
                     <div className="px-3 py-2 border-t">
                       <button
@@ -3518,6 +3601,8 @@ const campaignData = {
                           // 변수 치환
                           let finalContent = kakaoSelectedTemplate.content;
                           Object.entries(kakaoTemplateVars).forEach(([k, v]) => { finalContent = finalContent.replace(new RegExp(k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), v); });
+                          // 알림톡 메시지를 kakaoMessage에 저장 (executeDirectSend에서 사용)
+                          setKakaoMessage(finalContent);
                           const token = localStorage.getItem('token');
                           const phones = directRecipients.map((r: any) => r.phone);
                           const checkRes = await fetch('/api/unsubscribes/check', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ phones }) });
@@ -3643,8 +3728,8 @@ const campaignData = {
                     <thead className="bg-gray-50 border-b sticky top-0">
                         <tr>
                           <th className="px-4 py-3 text-left text-xs font-bold text-gray-600 w-10">
-                            <input 
-                              type="checkbox" 
+                            <input
+                              type="checkbox"
                               className="rounded w-4 h-4"
                               checked={directRecipients.length > 0 && selectedRecipients.size === directRecipients.length}
                               onChange={(e) => {
@@ -3657,17 +3742,27 @@ const campaignData = {
                             />
                           </th>
                           <th className="px-4 py-3 text-left text-xs font-bold text-gray-600">수신번호</th>
-                          <th className="px-4 py-3 text-left text-xs font-bold text-gray-600">이름</th>
-                          <th className="px-4 py-3 text-left text-xs font-bold text-gray-600">회신번호</th>
-                          <th className="px-4 py-3 text-left text-xs font-bold text-gray-600">기타1</th>
-                          <th className="px-4 py-3 text-left text-xs font-bold text-gray-600">기타2</th>
-                          <th className="px-4 py-3 text-left text-xs font-bold text-gray-600">기타3</th>
+                          {directSendChannel === 'sms' && (
+                            <>
+                              <th className="px-4 py-3 text-left text-xs font-bold text-gray-600">이름</th>
+                              <th className="px-4 py-3 text-left text-xs font-bold text-gray-600">회신번호</th>
+                              <th className="px-4 py-3 text-left text-xs font-bold text-gray-600">기타1</th>
+                              <th className="px-4 py-3 text-left text-xs font-bold text-gray-600">기타2</th>
+                              <th className="px-4 py-3 text-left text-xs font-bold text-gray-600">기타3</th>
+                            </>
+                          )}
+                          {directSendChannel === 'kakao_alimtalk' && (
+                            <th className="px-4 py-3 text-left text-xs font-bold text-gray-600">이름</th>
+                          )}
+                          {directSendChannel === 'rcs' && (
+                            <th className="px-4 py-3 text-left text-xs font-bold text-gray-600">이름</th>
+                          )}
                         </tr>
                       </thead>
                       <tbody className="divide-y">
                         {directRecipients.length === 0 ? (
                           <tr>
-                            <td colSpan={7} className="px-4 py-24 text-center text-gray-400">
+                            <td colSpan={directSendChannel === 'sms' ? 7 : 3} className="px-4 py-24 text-center text-gray-400">
                               <div className="text-4xl mb-2">📋</div>
                               <div className="text-sm">파일을 업로드하거나 직접 입력해주세요</div>
                             </td>
@@ -3680,8 +3775,8 @@ const campaignData = {
                             .map((r) => (
                             <tr key={r.originalIdx} className="hover:bg-gray-50">
                               <td className="px-4 py-3">
-                                <input 
-                                  type="checkbox" 
+                                <input
+                                  type="checkbox"
                                   className="rounded w-4 h-4"
                                   checked={selectedRecipients.has(r.originalIdx)}
                                   onChange={(e) => {
@@ -3693,11 +3788,18 @@ const campaignData = {
                                 />
                               </td>
                               <td className="px-4 py-3 text-sm">{r.phone}</td>
-                              <td className="px-4 py-3 text-sm">{r.name || '-'}</td>
-                              <td className="px-4 py-3 text-sm font-mono text-xs text-gray-600">{r.callback || '-'}</td>
-                              <td className="px-4 py-3 text-sm">{r.extra1 || '-'}</td>
-                              <td className="px-4 py-3 text-sm">{r.extra2 || '-'}</td>
-                              <td className="px-4 py-3 text-sm">{r.extra3 || '-'}</td>
+                              {directSendChannel === 'sms' && (
+                                <>
+                                  <td className="px-4 py-3 text-sm">{r.name || '-'}</td>
+                                  <td className="px-4 py-3 text-sm font-mono text-xs text-gray-600">{r.callback || '-'}</td>
+                                  <td className="px-4 py-3 text-sm">{r.extra1 || '-'}</td>
+                                  <td className="px-4 py-3 text-sm">{r.extra2 || '-'}</td>
+                                  <td className="px-4 py-3 text-sm">{r.extra3 || '-'}</td>
+                                </>
+                              )}
+                              {(directSendChannel === 'kakao_alimtalk' || directSendChannel === 'rcs') && (
+                                <td className="px-4 py-3 text-sm">{r.name || '-'}</td>
+                              )}
                             </tr>
                           ))
                         )}
