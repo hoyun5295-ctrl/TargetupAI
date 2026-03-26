@@ -12,7 +12,8 @@ export function highlightVars(text: string): React.ReactNode[] {
   if (!text) return [text];
 
   const parts: React.ReactNode[] = [];
-  const regex = /%([^%]+)%/g;
+  // ★ D93 fix: [^%\s]{1,20}으로 공백/줄바꿈 제외 — "30% 할인...%변수%" 같은 텍스트에서 30%~%변수% 사이 전체가 매칭되는 버그 방지
+  const regex = /%([^%\s]{1,20})%/g;
   let lastIndex = 0;
   let match;
   let key = 0;

@@ -134,6 +134,14 @@
 - AI 한줄로 유형선택에서 카카오 제거
 - 슈퍼관리자 템플릿 관리 탭 + 2줄 메뉴 — `AdminDashboard.tsx`
 
+#### 추가 수정 (전수점검 + UI 개선)
+- `companies.ts` — 담당자 `manager_contacts` companies 덮어쓰기 방지 (슬라이드1 버그)
+- `Dashboard.tsx` — 스팸테스트 `%회신번호%` selectedCallback 폴백 (슬라이드6 버그)
+- `Dashboard.tsx` — RCS 탭 텍스트입력 → 템플릿 선택 기반으로 교체
+- `Dashboard.tsx` — 알림톡/RCS 승인 템플릿 자동 로드 추가
+- `ResultsModal.tsx` — 메시지 상세보기 모달 overscrollBehavior: contain (슬라이드11)
+- `AdminDashboard.tsx` — 14개 탭 → 드롭다운 그룹 메뉴 (고객관리/발송관리/요금정산/시스템)
+
 #### 수정 파일 (14개)
 - `packages/backend/src/utils/sms-queue.ts` — CT-04 `insertAlimtalkQueue()` 추가
 - `packages/backend/src/routes/companies.ts` — 알림톡/RCS 템플릿 CRUD 8개 엔드포인트
@@ -151,9 +159,10 @@
 - `status/CHANNEL-EXPANSION.md` — 문서 업데이트
 
 #### Phase 2 예정
-- 휴머스온 알림톡 API 연동 (템플릿 등록 자동화)
+- 휴머스온 알림톡 API 연동 (템플릿 등록 자동화 + 발송)
 - 젬텍 RCS API 연동 (발송)
 - 브랜드메시지 8종 메시지 유형 확장 (`status/BRAND-MESSAGE-DESIGN.md` 참조)
+- QTmsg SMSQ_SEND 알림톡 발송 완전 연결 (`status/BRAND-MESSAGE-DESIGN.md` §10~11 참조)
 
 ---
 

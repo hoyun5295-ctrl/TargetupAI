@@ -32,7 +32,8 @@
       "Bash(node C:/Users/ceo/projects/targetup/tmp_pitch_doc.js)",
       "Bash(cp C:/Users/ceo/projects/targetup/tmp_pitch_doc.js /tmp/tmp_pitch_doc.js)",
       "Bash(node tmp_pitch_doc.js)",
-      "Bash(npm run:*)"
+      "Bash(npm run:*)",
+      "Bash(PYTHONIOENCODING=utf-8 python3 -c \":*)"
     ]
   }
 }

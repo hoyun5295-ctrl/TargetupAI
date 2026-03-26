@@ -117,9 +117,6 @@ export default function AiCampaignResultPopup({
               <div className="bg-purple-50 border border-purple-200 rounded-lg p-4 mb-4">
               <div className="font-semibold text-purple-800">{aiResult?.recommendedChannel || 'SMS'} 추천</div>
               <div className="text-sm text-purple-600 mt-1">"{aiResult?.channelReason || '추천 채널입니다'}"</div>
-              {(aiResult?.recommendedChannel === '카카오' || aiResult?.recommendedChannel === 'KAKAO') && !(user as any)?.company?.kakaoEnabled && (
-                <div className="text-xs text-amber-600 mt-2 bg-amber-50 rounded p-2">💡 카카오 채널은 아직 준비 중입니다. 현재는 SMS/LMS를 이용해주세요.</div>
-              )}
               </div>
 {/* 광고성 여부 */}
 <div className="flex items-center justify-between bg-yellow-50 rounded-lg p-4 mb-4">
@@ -140,31 +137,20 @@ export default function AiCampaignResultPopup({
               </label>
             </div>
               <div className="text-sm text-gray-600 mb-2">채널 선택</div>
-              <div className="grid grid-cols-4 gap-2">
-                {[{key: 'SMS', label: 'SMS', icon: '📱'}, {key: 'LMS', label: 'LMS', icon: '📝'}, {key: 'MMS', label: 'MMS', icon: '🖼️'}, {key: 'KAKAO', label: '카카오', icon: '💬'}].map(({key: ch, label, icon}) => {
-                  const isKakao = ch === 'KAKAO';
-                  const kakaoEnabled = !!(user as any)?.company?.kakaoEnabled;
-                  const isKakaoDisabled = isKakao && !kakaoEnabled;
-                  return (
+              <div className="grid grid-cols-3 gap-2">
+                {[{key: 'SMS', label: 'SMS', icon: '📱'}, {key: 'LMS', label: 'LMS', icon: '📝'}, {key: 'MMS', label: 'MMS', icon: '🖼️'}].map(({key: ch, label, icon}) => (
                   <button
                     key={ch}
-                    onClick={() => { if (isKakaoDisabled) return; setSelectedChannel(ch); if (ch !== 'MMS') setMmsUploadedImages([]); }}
-                    disabled={isKakaoDisabled}
-                    className={`p-3 rounded-lg border-2 text-center font-medium transition-all relative ${
-                      isKakaoDisabled
-                        ? 'border-gray-200 bg-gray-50 text-gray-400 cursor-not-allowed opacity-60'
-                        : selectedChannel === ch
+                    onClick={() => { setSelectedChannel(ch); if (ch !== 'MMS') setMmsUploadedImages([]); }}
+                    className={`p-3 rounded-lg border-2 text-center font-medium transition-all ${
+                      selectedChannel === ch
                         ? 'border-purple-500 bg-purple-50 text-purple-700'
                         : 'border-gray-200 hover:border-gray-300 text-gray-600'
                     }`}
                   >
                     {icon} {label}
-                    {isKakaoDisabled && (
-                      <span className="absolute -top-2 -right-2 text-[10px] bg-gray-400 text-white px-1.5 py-0.5 rounded-full font-medium">준비중</span>
-                    )}
                   </button>
-                  );
-                })}
+                ))}
               </div>
             </div>
 
@@ -202,12 +188,12 @@ export default function AiCampaignResultPopup({
             {/* 선택된 채널 표시 */}
             <div className="flex items-center gap-2 text-sm text-gray-600">
               <span>선택된 채널:</span>
-              <span className="px-2 py-1 bg-purple-100 text-purple-700 rounded font-medium">{selectedChannel === 'KAKAO' ? '카카오' : selectedChannel}</span>
+              <span className="px-2 py-1 bg-purple-100 text-purple-700 rounded font-medium">{selectedChannel}</span>
             </div>
 
             {/* 메시지 3안 - 모던 폰 UI */}
             <div>
-              <div className="text-sm text-gray-600 mb-3">💬 {selectedChannel === 'KAKAO' ? '카카오' : selectedChannel} 메시지 추천 (택1)</div>
+              <div className="text-sm text-gray-600 mb-3">💬 {selectedChannel} 메시지 추천 (택1)</div>
               <div className="grid grid-cols-3 gap-5">
                 {aiResult?.messages?.length > 0 ? (
                   aiResult.messages.map((msg: any, idx: number) => {
@@ -219,7 +205,7 @@ export default function AiCampaignResultPopup({
                         <div className="bg-white rounded-[1.6rem] overflow-hidden flex flex-col" style={{ height: '420px' }}>
                           {/* 상단 - 타입명 + 수정 버튼 */}
                           <div className="px-4 py-2.5 bg-gradient-to-r from-gray-50 to-gray-100 flex justify-between items-center shrink-0 border-b">
-                            <span className="text-[11px] text-gray-400 font-medium">{selectedChannel === 'KAKAO' ? '카카오톡' : '문자메시지'}</span>
+                            <span className="text-[11px] text-gray-400 font-medium">문자메시지</span>
                             <div className="flex items-center gap-1.5">
                               {selectedAiMsgIdx === idx && editingAiMsg !== idx && (
                                 <button
@@ -274,8 +260,8 @@ export default function AiCampaignResultPopup({
                               </div>
                             ) : (
                             <div className="flex gap-2">
-                              <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-xs ${selectedChannel === 'KAKAO' ? 'bg-yellow-100' : 'bg-purple-100'}`}>{selectedChannel === 'KAKAO' ? '💬' : '📱'}</div>
-                              <div className={`rounded-2xl rounded-tl-sm p-3 shadow-sm border text-[12px] leading-[1.6] whitespace-pre-wrap break-all overflow-hidden text-gray-700 max-w-[95%] ${selectedChannel === 'KAKAO' ? 'bg-yellow-50 border-yellow-200' : 'bg-white border-gray-100'}`}>
+                              <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-xs $bg-purple-100`}>📱</div>
+                              <div className={`rounded-2xl rounded-tl-sm p-3 shadow-sm border text-[12px] leading-[1.6] whitespace-pre-wrap break-all overflow-hidden text-gray-700 max-w-[95%] bg-white border-gray-100`}>
                               {/* ★ D93: 문안 추천 단계 — %변수% 하이라이트 표시로 개인화 부분 직관적 확인 */}
                               {highlightVars(wrapAdText(msg.message_text || ''))}
                               </div>
@@ -286,8 +272,8 @@ export default function AiCampaignResultPopup({
                           <div className="px-3 py-2 border-t bg-gray-50 text-center shrink-0">
                           {(() => {
                             const bytes = calculateBytes(wrapAdText(msg.message_text || ''));
-                            const limit = selectedChannel === 'SMS' ? 90 : selectedChannel === 'KAKAO' ? 4000 : 2000;
-                            const isOver = selectedChannel !== 'KAKAO' && bytes > limit;
+                            const limit = selectedChannel === 'SMS' ? 90 : 2000;
+                            const isOver = bytes > limit;
                             return (
                               <>
                                 <span className={`text-[10px] ${isOver ? 'text-red-600 font-bold' : editingAiMsg === idx ? 'text-purple-600 font-medium' : 'text-gray-400'}`}>

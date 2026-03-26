@@ -101,7 +101,7 @@ export default function AiCampaignSendModal({
   const getPreviewMessage = () => {
     let msg = messageText || '';
     // 광고 문구 미리보기 표시
-    if (isAd && selectedChannel !== 'KAKAO') {
+    if (isAd) {
       const adPrefix = selectedChannel === 'SMS' ? '(광고)' : '(광고) ';
       const fmtNum = (n: string) => { const c = n.replace(/\D/g, ''); return c.length === 11 ? `${c.slice(0,3)}-${c.slice(3,7)}-${c.slice(7)}` : c.length === 10 ? `${c.slice(0,3)}-${c.slice(3,6)}-${c.slice(6)}` : c; };
       const adSuffix = selectedChannel === 'SMS'
@@ -149,9 +149,9 @@ export default function AiCampaignSendModal({
                 <div className="bg-white rounded-[1.6rem] overflow-hidden flex flex-col w-[260px]" style={{ height: '440px' }}>
                   {/* 상단 */}
                   <div className="px-4 py-2.5 bg-gradient-to-r from-gray-50 to-gray-100 flex justify-between items-center shrink-0 border-b">
-                    <span className="text-[11px] text-gray-400 font-medium">{selectedChannel === 'KAKAO' ? '카카오톡' : '문자메시지'}</span>
+                    <span className="text-[11px] text-gray-400 font-medium">문자메시지</span>
                     <span className="text-[11px] font-bold text-emerald-600">
-                      {selectedChannel === 'KAKAO' ? '브랜드메시지' : useIndividualCallback ? '수신자별 회신번호' : formatPhoneNumber(selectedCallback) || '회신번호'}
+                      {useIndividualCallback ? '수신자별 회신번호' : formatPhoneNumber(selectedCallback) || '회신번호'}
                     </span>
                   </div>
                   {/* ★ B-D75-01: LMS/MMS 제목 표시 (editSubject 기반) */}
@@ -167,8 +167,8 @@ export default function AiCampaignSendModal({
                       <img key={idx} src={img.url} alt="" className="w-full h-auto rounded mb-1.5" />
                     ))}
                     <div className="flex gap-2 mt-1">
-                      <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-xs ${selectedChannel === 'KAKAO' ? 'bg-yellow-100' : 'bg-emerald-100'}`}>{selectedChannel === 'KAKAO' ? '💬' : '📱'}</div>
-                      <div className={`rounded-2xl rounded-tl-sm p-3 shadow-sm border text-[12px] leading-[1.7] whitespace-pre-wrap break-all text-gray-700 max-w-[95%] ${selectedChannel === 'KAKAO' ? 'bg-yellow-50 border-yellow-200' : 'bg-white border-gray-100'}`}>
+                      <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-xs bg-emerald-100`}>📱</div>
+                      <div className={`rounded-2xl rounded-tl-sm p-3 shadow-sm border text-[12px] leading-[1.7] whitespace-pre-wrap break-all text-gray-700 max-w-[95%] bg-white border-gray-100`}>
                         {highlightVars(getPreviewMessage()) || '메시지 없음'}
                       </div>
                     </div>

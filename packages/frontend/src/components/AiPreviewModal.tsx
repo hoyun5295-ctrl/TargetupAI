@@ -71,7 +71,7 @@ export default function AiPreviewModal({
           {/* 채널 */}
           <div className="flex items-center gap-2">
             <span className="text-sm text-gray-600">채널:</span>
-            <span className="px-2 py-1 bg-purple-100 text-purple-700 rounded font-medium">{selectedChannel === 'KAKAO' ? '카카오' : selectedChannel}</span>
+            <span className="px-2 py-1 bg-purple-100 text-purple-700 rounded font-medium">{selectedChannel}</span>
           </div>
 
           {/* 회신번호 */}

@@ -1287,10 +1287,9 @@ const handleAiCampaignGenerate = async (promptOverride?: string, autoRelax?: boo
     setSampleCustomerRaw(result.sample_customer_raw || {});
     
     // 추천 채널로 기본 설정
-    const kakaoEnabled = !!(user as any)?.company?.kakaoEnabled;
     let recommendedCh = result.recommended_channel || 'SMS';
-    // 카카오 추천인데 활성화 안 되어있으면 SMS/LMS로 폴백
-    if ((recommendedCh === '카카오' || recommendedCh === 'KAKAO') && !kakaoEnabled) {
+    // AI가 카카오 추천해도 SMS/LMS/MMS만 허용
+    if (recommendedCh === '카카오' || recommendedCh === 'KAKAO') {
       recommendedCh = 'LMS';
     }
     setSelectedChannel(recommendedCh);
@@ -1501,12 +1500,11 @@ const autoName = _campaignName || aiResult?.suggestedCampaignName || extractedNa
 
 const campaignData = {
   campaignName: autoName,
-      messageType: selectedChannel === 'KAKAO' ? 'LMS' : selectedChannel,
-      sendChannel: selectedChannel === 'KAKAO' ? 'kakao' : 'sms',
+      messageType: selectedChannel,
+      sendChannel: 'sms',
       messageContent: (() => {
         let msg = selectedMsg.message_text;
-        // 카카오는 광고문구를 백엔드(insertKakaoQueue)에서 별도 처리 → 프론트에서 붙이지 않음
-        if (isAd && selectedChannel !== 'KAKAO') {
+        if (isAd) {
           const prefix = selectedChannel === 'SMS' ? '(광고)' : '(광고) ';
           const suffix = selectedChannel === 'SMS'
             ? `\n무료거부${optOutNumber.replace(/-/g, '')}`
@@ -1869,7 +1867,7 @@ const campaignData = {
   const wrapAdText = (msg: string, channel?: string) => {
     if (!msg) return msg;
     const ch = channel || selectedChannel;
-    if (!isAd || ch === 'KAKAO') return msg;
+    if (!isAd) return msg;
     const adPrefix = ch === 'SMS' ? '(광고)' : '(광고) ';
     const adSuffix = ch === 'SMS'
       ? `\n무료거부${optOutNumber.replace(/-/g, '')}`
