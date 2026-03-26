@@ -39,7 +39,9 @@
       "Bash(python \"C:\\\\Users\\\\ceo\\\\AppData\\\\Roaming\\\\Claude\\\\local-agent-mode-sessions\\\\skills-plugin\\\\6d06a82e-67d3-4e3b-ac21-6ce048d5e114\\\\3b15f59b-4539-4fe7-bac8-0ecb8a62c30c\\\\skills\\\\pptx\\\\scripts\\\\office\\\\soffice.py\" --headless --convert-to pdf \"C:\\\\Users\\\\ceo\\\\OneDrive\\\\문서\\\\카카오톡 받은 파일\\\\한줄로_20260325.pptx\")",
       "Bash(where soffice:*)",
       "Read(//c/Program Files/LibreOffice/program/**)",
-      "Read(//c/Program Files \\(x86\\)/LibreOffice/program/**)"
+      "Read(//c/Program Files \\(x86\\)/LibreOffice/program/**)",
+      "Bash(/tmp/direct_send_analysis.md:*)",
+      "Bash(ls C:/Users/ceo/projects/targetup/packages/frontend/src/components/Direct*)"
     ]
   }
 }

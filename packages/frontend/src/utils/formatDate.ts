@@ -177,6 +177,8 @@ export function replaceDirectVars(
       val != null && String(val).trim() ? formatPreviewValue(val) : (fieldKey === 'callback' ? fallbackCallback || '' : '')
     );
   }
+  // 잔여 %변수% 제거 (기존 동작 호환 — 매핑 안 된 변수는 빈값으로)
+  result = result.replace(/%[^%\s]{1,20}%/g, '');
   return result;
 }
 
