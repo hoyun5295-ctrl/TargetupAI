@@ -24,8 +24,8 @@ import { prepaidDeduct } from '../utils/prepaid';
 // 상수
 // ============================================================
 const QUEUE_POLL_INTERVAL_MS = 3000; // 큐 워커 체크 주기 (3초)
-const MANUAL_GRACE_MS = 10000;       // 수동 테스트: QTmsg 성공 후 앱 리포트 대기 (10초)
-const AUTO_GRACE_MS = 20000;         // 자동 테스트: QTmsg 성공 후 앱 리포트 대기 (20초, 오탐 방지)
+const MANUAL_GRACE_MS = 20000;       // 수동 테스트: QTmsg 성공 후 앱 리포트 대기 (20초, KT 12~15초 소요 대응)
+const AUTO_GRACE_MS = 25000;         // 자동 테스트: QTmsg 성공 후 앱 리포트 대기 (25초, 오탐 방지)
 const RESULT_POLL_INTERVAL_MS = 5000; // 결과 폴링 주기 (5초)
 const MAX_REGENERATE_RETRIES = 2;    // 스팸 차단 시 최대 재생성 횟수
 
