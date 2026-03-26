@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import SessionTimer from './SessionTimer';
 
 interface DashboardHeaderProps {
@@ -28,6 +28,7 @@ interface MenuItem {
   color: MenuColor;
   emphasized?: boolean;
   locked?: boolean;
+  path?: string; // 현재 페이지 활성 감지용
 }
 
 // ★ D95: 필(pill) 스타일 메뉴 — 밑줄 제거, 호버/강조 시 배경색
@@ -53,6 +54,7 @@ export default function DashboardHeader({
   onSubscriptionLocked,
 }: DashboardHeaderProps) {
   const navigate = useNavigate();
+  const location = useLocation();
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
 
   // D53: 캘린더 게이팅 — customer_db_enabled 필요
@@ -65,18 +67,18 @@ export default function DashboardHeader({
   };
 
   const menuItems: MenuItem[] = [
-    { label: 'AI 분석', onClick: () => lockGuard(onAnalysis), color: 'gold', emphasized: true, locked: isSubscriptionLocked },
-    { label: '자동발송', onClick: () => lockGuard(() => navigate('/auto-send')), color: 'gold', emphasized: true, locked: isSubscriptionLocked },
-    { label: '카카오&RCS', onClick: () => navigate('/kakao-rcs'), color: 'green', emphasized: true },
-    { label: '직접발송', onClick: onDirectSend, color: 'green', emphasized: true },
+    { label: 'AI 분석', onClick: () => lockGuard(onAnalysis), color: 'gold', locked: isSubscriptionLocked, path: '/' },
+    { label: '자동발송', onClick: () => lockGuard(() => navigate('/auto-send')), color: 'gold', locked: isSubscriptionLocked, path: '/auto-send' },
+    { label: '카카오&RCS', onClick: () => navigate('/kakao-rcs'), color: 'green', path: '/kakao-rcs' },
+    { label: '직접발송', onClick: onDirectSend, color: 'green', path: '/' },
     { label: '캘린더', onClick: (isSubscriptionLocked || isCalendarLocked)
         ? () => isSubscriptionLocked ? onSubscriptionLocked?.() : onFeatureLocked?.('캘린더', '스타터')
-        : onCalendar, color: 'gold', locked: isSubscriptionLocked || isCalendarLocked },
-    { label: '발송결과', onClick: onResults, color: 'green' },
-    { label: '수신거부', onClick: () => navigate('/unsubscribes'), color: 'gold' },
-    { label: '설정', onClick: () => navigate('/settings'), color: 'green' },
+        : onCalendar, color: 'gold', locked: isSubscriptionLocked || isCalendarLocked, path: '/calendar' },
+    { label: '발송결과', onClick: onResults, color: 'green', path: '/' },
+    { label: '수신거부', onClick: () => navigate('/unsubscribes'), color: 'gold', path: '/unsubscribes' },
+    { label: '설정', onClick: () => navigate('/settings'), color: 'green', path: '/settings' },
     ...(isCompanyAdmin
-      ? [{ label: '관리', onClick: () => navigate('/manage'), color: 'gold' as MenuColor, emphasized: true }]
+      ? [{ label: '관리', onClick: () => navigate('/manage'), color: 'gold' as MenuColor, path: '/manage' }]
       : []),
     { label: '로그아웃', onClick: onLogout, color: 'gray' as MenuColor },
   ];
@@ -94,26 +96,33 @@ export default function DashboardHeader({
         </div>
 
         {/* 우측: 세션 타이머 + 탭 스타일 메뉴 */}
-        <nav className="flex items-center">
+        <nav className="flex items-center gap-1">
           <SessionTimer />
           {menuItems.map((item, idx) => {
             const cfg = COLOR_CONFIG[item.color];
             const isHovered = hoveredIdx === idx;
-            const isEmphasized = !!item.emphasized;
+            // 현재 페이지 활성 감지 (path가 '/'인 메뉴는 대시보드에서만 활성)
+            const isActive = item.path && item.path !== '/'
+              ? location.pathname === item.path
+              : false;
 
-            // 텍스트 색상: 전체 동일 기본색, 호버 시만 색상 변경
+            // 텍스트 색상: 활성→강조색, 호버→호버색, 기본→회색
             const textColor = item.locked
               ? '#d1d5db'
-              : isHovered
-                ? cfg.hoverText
-                : cfg.text;
+              : isActive
+                ? cfg.activeText
+                : isHovered
+                  ? cfg.hoverText
+                  : cfg.text;
 
-            // 배경색: 호버 시에만 표시 (emphasized 구분은 font-weight로만)
+            // 배경색: 활성→활성배경, 호버→호버배경
             const bgColor = item.locked
               ? 'transparent'
-              : isHovered
-                ? cfg.hoverBg
-                : 'transparent';
+              : isActive
+                ? cfg.activeBg
+                : isHovered
+                  ? cfg.hoverBg
+                  : 'transparent';
 
             return (
               <button
@@ -121,11 +130,11 @@ export default function DashboardHeader({
                 onClick={item.onClick}
                 onMouseEnter={() => setHoveredIdx(idx)}
                 onMouseLeave={() => setHoveredIdx(null)}
-                className="px-3 py-1.5 text-sm rounded-lg transition-all duration-200 flex items-center gap-1"
+                className="px-3.5 py-1.5 text-[13px] rounded-lg transition-all duration-200 flex items-center gap-1 tracking-wide"
                 style={{
                   color: textColor,
                   backgroundColor: bgColor,
-                  fontWeight: isEmphasized ? 600 : 400,
+                  fontWeight: isActive ? 600 : 500,
                 }}
               >
                 {item.locked && <span className="text-xs">🔒</span>}
