@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useAuthStore } from '../stores/authStore';
+import { formatPhoneNumber } from '../utils/formatDate';
 
 interface SpamFilterTestModalProps {
   onClose: () => void;
@@ -279,13 +280,6 @@ export default function SpamFilterTestModal({
   const rawPreview = messageContentSms || messageContentLms || '';
   const previewMessage = replacePreviewVars(rawPreview);
 
-  const formatPhoneNumber = (num: string) => {
-    if (!num) return '';
-    const clean = num.replace(/\D/g, '');
-    if (clean.startsWith('02')) return clean.replace(/(\d{2})(\d{3,4})(\d{4})/, '$1-$2-$3');
-    if (clean.length === 8) return clean.replace(/(\d{4})(\d{4})/, '$1-$2');
-    return clean.replace(/(\d{3,4})(\d{3,4})(\d{4})/, '$1-$2-$3');
-  };
 
   // 로딩 중 표시
   if (loading) {

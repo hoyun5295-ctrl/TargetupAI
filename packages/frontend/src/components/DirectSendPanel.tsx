@@ -330,15 +330,14 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
     for (let i = 0; i < total; i += chunkSize) {
       const chunk = directFileData.slice(i, i + chunkSize);
       const processed = chunk.map(row => {
-        let phone = String(row[directColumnMapping.phone] || '').replace(/-/g, '').trim();
-        if (phone.length === 10 && phone.startsWith('1')) phone = '0' + phone;
+        let phone = String(row[directColumnMapping.phone] || '').trim();
         const entry: any = {
           phone,
           name: directColumnMapping.name ? (row[directColumnMapping.name] || '') : '',
           extra1: directColumnMapping.extra1 ? (row[directColumnMapping.extra1] || '') : '',
           extra2: directColumnMapping.extra2 ? (row[directColumnMapping.extra2] || '') : '',
           extra3: directColumnMapping.extra3 ? (row[directColumnMapping.extra3] || '') : '',
-          callback: directColumnMapping.callback ? String(row[directColumnMapping.callback] || '').replace(/-/g, '').trim() : '',
+          callback: directColumnMapping.callback ? String(row[directColumnMapping.callback] || '').trim() : '',
         };
         // 알림톡 템플릿 변수 매핑
         if (directSendChannel === 'kakao_alimtalk' && kakaoSelectedTemplate) {
@@ -838,9 +837,9 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                                     onChange={(e) => { const s = new Set(selectedRecipients); if (e.target.checked) s.add(r.originalIdx); else s.delete(r.originalIdx); setSelectedRecipients(s); }}
                                   />
                                 </td>
-                                <td className="px-4 py-3 text-sm">{r.phone}</td>
+                                <td className="px-4 py-3 text-sm">{formatPhoneNumber(r.phone)}</td>
                                 {activeFields.map(f => (
-                                  <td key={f} className={`px-4 py-3 text-sm ${f === 'callback' ? 'font-mono text-xs text-gray-600' : ''}`}>{r[f] || '-'}</td>
+                                  <td key={f} className={`px-4 py-3 text-sm ${f === 'callback' ? 'font-mono text-xs text-gray-600' : ''}`}>{f === 'callback' && r[f] ? formatPhoneNumber(r[f]) : (r[f] || '-')}</td>
                                 ))}
                               </tr>
                             ))

@@ -238,3 +238,44 @@ export function replaceMessageVars(
 
   return result;
 }
+
+/**
+ * ★ D97: 전화번호 포맷팅 컨트롤타워
+ * 하이픈 없는 번호 → 하이픈 포함 포맷. 이미 하이픈이 있으면 정규화 후 재포맷.
+ * 사용처: Dashboard, DirectSendPanel, AiCampaignSendModal,
+ *          CallbackConfirmModal, SpamFilterTestModal, DirectPreviewModal, TargetSendModal
+ */
+export function formatPhoneNumber(phone: string): string {
+  if (!phone) return '';
+  const cleaned = phone.replace(/\D/g, '');
+
+  // 휴대폰 11자리: 010-XXXX-XXXX
+  if (cleaned.length === 11 && cleaned.startsWith('01')) {
+    return `${cleaned.slice(0, 3)}-${cleaned.slice(3, 7)}-${cleaned.slice(7)}`;
+  }
+  // 휴대폰 10자리 (구형): 01X-XXX-XXXX
+  if (cleaned.length === 10 && cleaned.startsWith('01')) {
+    return `${cleaned.slice(0, 3)}-${cleaned.slice(3, 6)}-${cleaned.slice(6)}`;
+  }
+  // 서울 02 (9자리): 02-XXX-XXXX
+  if (cleaned.length === 9 && cleaned.startsWith('02')) {
+    return `${cleaned.slice(0, 2)}-${cleaned.slice(2, 5)}-${cleaned.slice(5)}`;
+  }
+  // 서울 02 (10자리): 02-XXXX-XXXX
+  if (cleaned.length === 10 && cleaned.startsWith('02')) {
+    return `${cleaned.slice(0, 2)}-${cleaned.slice(2, 6)}-${cleaned.slice(6)}`;
+  }
+  // 대표번호 8자리 (15XX, 16XX, 18XX): 1XXX-XXXX
+  if (cleaned.length === 8 && cleaned.startsWith('1')) {
+    return `${cleaned.slice(0, 4)}-${cleaned.slice(4)}`;
+  }
+  // 기타 지역번호 10자리: 0XX-XXX-XXXX
+  if (cleaned.length === 10 && cleaned.startsWith('0')) {
+    return `${cleaned.slice(0, 3)}-${cleaned.slice(3, 6)}-${cleaned.slice(6)}`;
+  }
+  // 기타 지역번호 11자리: 0XX-XXXX-XXXX
+  if (cleaned.length === 11 && cleaned.startsWith('0')) {
+    return `${cleaned.slice(0, 3)}-${cleaned.slice(3, 7)}-${cleaned.slice(7)}`;
+  }
+  return phone;
+}

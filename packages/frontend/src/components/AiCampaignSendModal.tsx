@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { highlightVars } from '../utils/highlightVars';
+import { formatPhoneNumber } from '../utils/formatDate';
 
 interface AiCampaignSendModalProps {
   onClose: () => void;
@@ -89,13 +90,6 @@ export default function AiCampaignSendModal({
     });
   };
 
-  const formatPhoneNumber = (num: string) => {
-    if (!num) return '';
-    const clean = num.replace(/\D/g, '');
-    if (clean.startsWith('02')) return clean.replace(/(\d{2})(\d{3,4})(\d{4})/, '$1-$2-$3');
-    if (clean.length === 8) return clean.replace(/(\d{4})(\d{4})/, '$1-$2');
-    return clean.replace(/(\d{3,4})(\d{3,4})(\d{4})/, '$1-$2-$3');
-  };
 
   // ★ D93: 발송 확인창에서는 %변수% 원본 + 하이라이트로 표시 (개인화 위치 직관적 확인)
   const getPreviewMessage = () => {

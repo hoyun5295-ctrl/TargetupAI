@@ -40,7 +40,7 @@ import TodayStatsModal from '../components/TodayStatsModal';
 import UploadProgressModal from '../components/UploadProgressModal';
 import UploadResultModal from '../components/UploadResultModal';
 import { useAuthStore } from '../stores/authStore';
-import { formatDate, formatPreviewValue, calculateSmsBytes, truncateToSmsBytes, DIRECT_VAR_MAP, DIRECT_VAR_TO_FIELD, DIRECT_FIELD_LABELS, DIRECT_MAPPING_FIELDS, replaceDirectVars } from '../utils/formatDate';
+import { formatDate, formatPreviewValue, calculateSmsBytes, truncateToSmsBytes, DIRECT_VAR_MAP, DIRECT_VAR_TO_FIELD, DIRECT_FIELD_LABELS, DIRECT_MAPPING_FIELDS, replaceDirectVars, formatPhoneNumber } from '../utils/formatDate';
 import DirectSendPanel from '../components/DirectSendPanel';
 
 interface Stats {
@@ -771,41 +771,7 @@ export default function Dashboard() {
   const [pendingDirectSendBody, setPendingDirectSendBody] = useState<any>(null);
 
   // 전화번호 포맷팅 함수
-  const formatPhoneNumber = (phone: string) => {
-    if (!phone) return '';
-    const cleaned = phone.replace(/\D/g, '');
-    
-    // 휴대폰 11자리: 010-XXXX-XXXX
-    if (cleaned.length === 11 && cleaned.startsWith('01')) {
-      return `${cleaned.slice(0, 3)}-${cleaned.slice(3, 7)}-${cleaned.slice(7)}`;
-    }
-    // 휴대폰 10자리 (구형): 01X-XXX-XXXX
-    if (cleaned.length === 10 && cleaned.startsWith('01')) {
-      return `${cleaned.slice(0, 3)}-${cleaned.slice(3, 6)}-${cleaned.slice(6)}`;
-    }
-    // 서울 02 지역번호 (9자리): 02-XXX-XXXX
-    if (cleaned.length === 9 && cleaned.startsWith('02')) {
-      return `${cleaned.slice(0, 2)}-${cleaned.slice(2, 5)}-${cleaned.slice(5)}`;
-    }
-    // 서울 02 지역번호 (10자리): 02-XXXX-XXXX
-    if (cleaned.length === 10 && cleaned.startsWith('02')) {
-      return `${cleaned.slice(0, 2)}-${cleaned.slice(2, 6)}-${cleaned.slice(6)}`;
-    }
-    // 대표번호 8자리 (15XX, 16XX, 18XX): 1XXX-XXXX
-    if (cleaned.length === 8 && cleaned.startsWith('1')) {
-      return `${cleaned.slice(0, 4)}-${cleaned.slice(4)}`;
-    }
-    // 기타 지역번호 10자리: 0XX-XXX-XXXX
-    if (cleaned.length === 10 && cleaned.startsWith('0')) {
-      return `${cleaned.slice(0, 3)}-${cleaned.slice(3, 6)}-${cleaned.slice(6)}`;
-    }
-    // 기타 지역번호 11자리: 0XX-XXXX-XXXX
-    if (cleaned.length === 11 && cleaned.startsWith('0')) {
-      return `${cleaned.slice(0, 3)}-${cleaned.slice(3, 7)}-${cleaned.slice(7)}`;
-    }
-    // 그 외는 원본 반환
-    return phone;
-  };
+  // ★ D97: formatPhoneNumber → formatDate.ts 컨트롤타워로 이관 (인라인 삭제)
   // ★ D96: selectedRecipients → DirectSendPanel로 이동
   const [showDirectPreview, setShowDirectPreview] = useState(false);
   const [adTextEnabled, setAdTextEnabled] = useState(true);

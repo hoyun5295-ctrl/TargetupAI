@@ -7,6 +7,8 @@
  * CT-08(callback-filter.ts) → campaigns.ts → 프론트엔드 확인 흐름의 마지막 단계
  */
 
+import { formatPhoneNumber } from '../utils/formatDate';
+
 interface UnregisteredDetail {
   phone: string;
   excludedCount: number;
@@ -30,19 +32,6 @@ interface CallbackConfirmModalProps {
   isSending: boolean;
 }
 
-/** 전화번호 포맷팅 (01012345678 → 010-1234-5678, 0312345678 → 031-234-5678) */
-function formatPhoneNumber(phone: string): string {
-  if (!phone) return phone;
-  const cleaned = phone.replace(/\D/g, '');
-  if (cleaned.startsWith('02')) {
-    // 서울 (02)
-    if (cleaned.length === 9) return `${cleaned.slice(0, 2)}-${cleaned.slice(2, 5)}-${cleaned.slice(5)}`;
-    if (cleaned.length === 10) return `${cleaned.slice(0, 2)}-${cleaned.slice(2, 6)}-${cleaned.slice(6)}`;
-  }
-  if (cleaned.length === 10) return `${cleaned.slice(0, 3)}-${cleaned.slice(3, 6)}-${cleaned.slice(6)}`;
-  if (cleaned.length === 11) return `${cleaned.slice(0, 3)}-${cleaned.slice(3, 7)}-${cleaned.slice(7)}`;
-  return phone;
-}
 
 export type { CallbackConfirmData };
 
