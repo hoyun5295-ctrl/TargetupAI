@@ -88,13 +88,71 @@
 - **수정 방향:** 수신자 목록 표시 시 formatPhoneNumber 적용. 회신번호 컬럼도 동일
 - **상태:** 🔵 Open
 
-### B97-04 🔄 생일 날짜 밀림 (D93 재발)
+### B97-04 🟡 생일 날짜 밀림 (D93 재발) — 수정완료-검증대기
 - **심각도:** 🟠 Major
-- **이전 수정:** D93에서 Math.round 패치 → **미해결 (추가 케이스 존재)**
+- **이전 수정:** D93에서 Math.round 패치 → 미해결 (UTC 기준 반올림으로 TZ에 따라 밀림)
 - **현상:** 엑셀 업로드 시 생일이 하루 밀려서 저장됨
-- **근본 원인:** D93 Math.round 패치가 모든 경로에 적용되었는지 미확인. normalize.ts 날짜 처리 코드 끝까지 추적 필요
-- **수정 방향:** normalize.ts + upload.ts 날짜 처리 전 경로 추적. 컨트롤타워 단일 진입점 확인
-- **상태:** 🔄 Reopened
+- **근본 원인:** Math.round(ms/dayMs)*dayMs UTC 기준 반올림 → KST 서버에서는 정상이지만 다른 환경에서 밀림
+- **수정 (D98):** normalize.ts normalizeDate에서 Date 객체 처리 시 `getFullYear()/getMonth()/getDate()` 로컬TZ 기준 사용. Math.round/UTC 방식 완전 제거. 전 경로(upload.ts, sync.ts, normalizeByFieldKey, normalizeCustomFieldValue) 추적 완료
+- **상태:** 🟡 수정완료-검증대기
+
+---
+
+## 2-1) 📋 D98 — PPT 버그리포트 11건 전면 수정 + 재검증 (2026-03-27) — 🟡 배포대기
+
+> **배경:** 테스터 직원 PPT 11건. 컨트롤타워 원칙 + 데이터 흐름 끝까지 추적하여 수정.
+
+### B98-01 🟡 사용금액 사용자 격리 (S1) — 수정완료-검증대기
+- **심각도:** 🔴 Critical
+- **현상:** invito02가 invito01 사용금액 89원 표시. company_id 단위로만 집계하여 사용자 간 격리 안 됨
+- **근본 원인:** balance_transactions에 created_by 없어 사용자별 필터 불가
+- **수정:** prepaid.ts에 createdBy 파라미터 추가 + balance_transactions.created_by 기록 + **전 호출부 9곳**(campaigns 3, spam-filter, spam-test-queue, brand-message 2, auto-campaign-worker) userId 전달 + companies.ts 대시보드 monthly_spend에 company_user일 때 `created_by=$2` 필터
+- **컨트롤타워:** CT-05 prepaid.ts 단일 진입점
+- **DB 마이그레이션:** `ALTER TABLE balance_transactions ADD COLUMN created_by uuid REFERENCES users(id)` (완료)
+
+### B98-02 🟡 업로드 미리보기 날짜 포맷 (S2) — 수정완료-검증대기
+- **심각도:** 🟡 Minor
+- **현상:** 매핑 화면에서 날짜가 이상한 형식으로 출력
+- **수정:** FileUploadMappingModal 미리보기 셀에 `formatPreviewValue` 컨트롤타워 적용
+
+### B98-03 🟡 평균주문금액 쉼표 미적용 (S4) — 수정완료-검증대기
+- **심각도:** 🟡 Minor
+- **현상:** DB조회에서 평균주문금액만 쉼표 처리 안 됨
+- **근본 원인:** (1) avg_order_value는 직접 컬럼이 아닌 커스텀 필드(custom_N) (2) enabled-fields API가 `data_type:'number'`로 반환하는데 프론트가 `field_type==='NUMBER'`로만 체크 → 키 불일치로 커스텀 숫자 필드 포맷팅 전부 미작동
+- **수정:** CustomerDBModal 목록+상세에서 `f.field_type === 'NUMBER' || f.data_type === 'number'` 양쪽 체크
+
+### B98-04 🟡 MMS 이미지 저장 깨짐 (S5) — 수정완료-검증대기
+- **심각도:** 🟠 Major
+- **현상:** MMS 문자저장 후 불러오면 이미지 깨짐
+- **근본 원인:** DB에 저장된 serverPath(절대경로)를 `url: p`로 그대로 img src에 사용 → 브라우저에서 서버 절대경로 접근 불가
+- **수정:** `mmsServerPathToUrl` 컨트롤타워(formatDate.ts) 신규 생성. serverPath → `/api/mms-images/{companyDir}/{filename}` API URL 변환. Dashboard.tsx + ResultsModal.tsx 2곳 인라인 제거, CT 호출로 교체
+- **검증:** 서버 curl 200 확인, 이미지 파일 존재 확인
+
+### B98-05 🟡 직접발송 중복제거 안 됨 (S6) — 수정완료-검증대기
+- **심각도:** 🔴 Critical
+- **현상:** 중복번호로 발송해도 전체 발송됨
+- **수정:** CT-14 deduplicate.ts 신규 생성. `deduplicateByPhone()` — normalizePhone 기반 Set 중복 판정. campaigns.ts direct-send에서 수신자 검증 직후 호출. 응답에 duplicateCount 포함, 토스트 메시지에 "(중복 N건 제거)" 표시
+
+### B98-06 🟡 발송결과 MMS 이미지 미표시 (S8) — 수정완료-검증대기
+- **심각도:** 🟠 Major
+- **현상:** MMS 발송 결과에서 이미지 확인 불가
+- **근본 원인:** results.ts 캠페인 목록 SELECT에 `mms_image_paths` 컬럼 누락
+- **수정:** SELECT에 `c.mms_image_paths` 추가 + ResultsModal에서 `mmsServerPathToUrl` CT로 이미지 표시
+
+### B98-07 🟡 AI(draft) 대기→실패 카운트 (S9) — 수정완료-검증대기
+- **심각도:** 🟠 Major
+- **현상:** draft 유형이 "대기"로 카운트됨. 직원 요청: "실패로 카운트"
+- **수정:** results.ts summary에서 draft 제외 제거(캠페인 건수에 포함) + 캠페인 목록에 draft 포함 + ResultsModal에서 draft → "실패" 텍스트 + 빨간 배지 표시
+
+### B98-08 🟡 엑셀 다운로드 시간 형식 (S10) — 수정완료-검증대기
+- **심각도:** 🟡 Minor
+- **현상:** 발송내역 엑셀 다운로드 시 시간이 이상하게 출력
+- **수정:** `formatCsvDateTime` 함수 추가 (YYYY-MM-DD HH:mm:ss) + smsFields 3곳 인라인 → `SMS_DETAIL_FIELDS`/`SMS_EXPORT_FIELDS` 컨트롤타워 상수로 통합
+- **⚠️ MySQL TZ 확인:** MySQL 서버=KST(+09:00), sendreq_time=KST(우리앱 NOW()), mobsend_time/repmsg_recvtm=UTC(QTmsg Agent가 통신사 리포트 그대로 저장) → DATE_ADD(+9h) 필요. OPS.md에 문서화
+
+### B98-09 🟡 알림톡 템플릿 UI 4건 (S11) — 수정완료-검증대기
+- **심각도:** 🟡 Minor
+- **수정:** (1) 발신프로필 "(선택)" + "카카오 등록 시 자동 생성" (2) 채널추가형 AC 버튼 삭제 방지 + disabled (3) 웹링크/앱링크 grid-cols-2 균등 배치 (4) ITEM_LIST 제거
 
 ---
 

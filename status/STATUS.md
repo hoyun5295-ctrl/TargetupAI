@@ -106,9 +106,45 @@
 
 ---
 
-### 🔧 D97 — 브랜드메시지 전체 구현 + 디버깅 이슈 발견 (2026-03-27) — 🟡 배포대기
+### 🔧 D98 — PPT 버그리포트 11건 전면 수정 + 재검증 (2026-03-27) — 🟡 배포대기
 
-> **배경:** 브랜드메시지 8종 자유형 + 기본형(템플릿) 전체 구현. CT-12 컨트롤타워 신설. 디버깅 이슈 4건 발견 (다음 세션 처리)
+> **배경:** 테스터 직원 PPT 11건 전면 수정. 컨트롤타워 원칙 + 데이터 흐름 끝까지 추적 검증.
+
+#### 신규 컨트롤타워
+- **CT-14 deduplicate.ts** — 수신자 중복제거 단일 진입점 (phone 기준 normalizePhone)
+- **mmsServerPathToUrl** (formatDate.ts) — MMS 이미지 serverPath→API URL 변환 (Dashboard+ResultsModal 2곳)
+- **SMS_DETAIL_FIELDS / SMS_EXPORT_FIELDS** (results.ts) — SMS 필드 정의 상수 (3곳 인라인→상수 2개)
+
+#### 수정 파일 (이번 세션 추가분 — D97 커밋 이후)
+- `results.ts` — S8 mms_image_paths SELECT + S9 draft 실패카운트 + S10 smsFields CT화
+- `CustomerDBModal.tsx` — S4 data_type/field_type 양쪽 체크
+- `ResultsModal.tsx` — S9 draft "실패" 표시 + MMS URL CT 교체
+- `Dashboard.tsx` — MMS URL CT 교체
+- `formatDate.ts` — mmsServerPathToUrl CT 추가
+- `OPS.md` — MySQL TZ 문서화 (sendreq_time=KST, mobsend_time/repmsg_recvtm=UTC)
+
+#### D97 커밋에 포함된 수정 (이전 세션)
+- S1 사용금액 격리: prepaid.ts created_by + 전 호출부 9곳 + companies.ts 대시보드 필터
+- S2 업로드 미리보기: FileUploadMappingModal formatPreviewValue 적용
+- S3 날짜 밀림: normalize.ts 로컬TZ 기준 getFullYear/getMonth/getDate
+- S5 MMS 이미지: Dashboard.tsx serverPath→API URL 변환
+- S6 중복제거: deduplicate.ts CT-14 + campaigns.ts direct-send 적용
+- S10 엑셀 시간: formatCsvDateTime 함수 추가
+- S11 알림톡 UI: AlimtalkTemplateFormModal 4건
+- B97-01 스팸필터: SpamFilterTestModal+DirectPreviewModal 인라인→replaceDirectVars CT
+- B97-02 담당자: CT-11 test-contact-helper.ts + test_contacts 테이블 완전 이관
+
+#### 교훈
+- **검증은 데이터 흐름 끝까지 추적** — 코드 존재가 아니라 입력→처리→저장→조회→표시 전체 경로를 실제 값으로 따라감
+- **API 반환 키(data_type)와 프론트 접근 키(field_type)가 일치하는지 확인** — S4에서 키 불일치 발견
+- **직원 요청 원문과 구현 결과의 의미가 동일한지 대조** — S9 "실패로 카운트" ≠ "목록에서 제외"
+- **MySQL TZ ≠ QTmsg Agent TZ** — MySQL 서버는 KST이지만 통신사 리포트 시간은 UTC로 저장됨
+
+---
+
+### 🔧 D97 — 브랜드메시지 전체 구현 + 디버깅 이슈 발견 (2026-03-27) — ✅ 배포완료
+
+> **배경:** 브랜드메시지 8종 자유형 + 기본형(템플릿) 전체 구현. CT-12 컨트롤타워 신설.
 
 #### 브랜드메시지 전체 구현
 

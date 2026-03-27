@@ -42,10 +42,11 @@
 | CT-09 | spam-test-queue.ts | 스팸테스트 큐 관리 + 자동 스팸검사/재생성 |
 | CT-10 | sender-registration.ts | 발신번호 등록 신청/승인/반려 + 사용자별 배정 관리 (D87) |
 | CT-12 | brand-message.ts | 브랜드메시지 발송/검증 (자유형 8종 + 기본형 템플릿, D97) |
+| CT-14 | deduplicate.ts | 수신자 중복제거 — phone 기준 normalizePhone (D98) |
 | — | messageUtils.ts | 변수 치환 (5개 발송 경로 통합) |
 | — | normalize.ts | 값 정규화 + normalizeCustomFieldValue (커스텀 필드 Date/문자열 정규화) |
 | — | stats-aggregation.ts | 대시보드 통계 집계 + AI 캠페인 성과 집계 |
-| — | formatDate.ts (프론트) | calculateSmsBytes (바이트 계산) + truncateToSmsBytes (바이트 자르기) + replaceMessageVars (변수 치환) + formatPreviewValue (미리보기 포맷팅) + DIRECT_VAR_MAP/replaceDirectVars (직접발송 변수맵 D96) |
+| — | formatDate.ts (프론트) | calculateSmsBytes (바이트 계산) + truncateToSmsBytes (바이트 자르기) + replaceMessageVars (변수 치환) + formatPreviewValue (미리보기 포맷팅) + DIRECT_VAR_MAP/replaceDirectVars (직접발송 변수맵 D96) + mmsServerPathToUrl (MMS 이미지 URL 변환 D98) |
 
 **⚠️ 이 원칙을 어기고 인라인 코드를 작성하면 버그가 재발한다. 실제 사고 사례:**
 - **사례 1:** upload.ts에서 customer_field_definitions를 인라인으로 INSERT하면서 "최초 등록 우선" 정책 적용 → 잘못된 라벨이 영원히 고착되는 버그 발생.
@@ -475,6 +476,11 @@ PostgreSQL campaigns/campaign_runs 생성
 | **프론트/백엔드 순수 YYYY-MM-DD 날짜 처리 불일치** | 프론트 formatPreviewValue는 한국어 포맷, 백엔드 messageUtils는 문자열 그대로 | **messageUtils.ts ISO 감지 regex에 `$` 추가: `/^\d{4}-\d{2}-\d{2}($\|T\|\s)/`** (D95) |
 | **직접발송 변수맵 3곳 하드코딩** | 자동입력 버튼, 스팸필터, 직접입력 모달에 각각 다른 변수맵 하드코딩 → 한 곳 수정 시 나머지 불일치 | **formatDate.ts `DIRECT_VAR_MAP` 컨트롤타워 1곳에서 정의.** 자동입력/스팸필터/직접입력/파일매핑/바이트계산 전부 import (D96) |
 | **Dashboard.tsx 4,400줄 거대 파일** | 직접발송/AI발송/타겟발송/통계 전부 한 파일에 → 수정 시 side effect 추적 불가 | **기능별 컴포넌트 분리.** DirectSendPanel.tsx로 직접발송 1,033줄 분리. 발송 실행 로직(executeDirectSend)은 기간계이므로 Dashboard에 유지 (D96) |
+| **API 반환 키와 프론트 접근 키 불일치** | enabled-fields API가 `data_type:'number'` 반환 → 프론트 CustomerDBModal이 `field_type==='NUMBER'`로 체크 → 키 불일치로 커스텀 숫자 필드 포맷팅 전부 미작동 | **API 반환 키와 프론트 접근 키를 양쪽 체크.** `f.field_type === 'NUMBER' \|\| f.data_type === 'number'` (D98) |
+| **MMS serverPath를 img src에 그대로 사용** | DB에 저장된 서버 절대경로(`/home/admin/...`)를 `url: p`로 그대로 img src → 브라우저 접근 불가 → 이미지 깨짐 | **mmsServerPathToUrl 컨트롤타워로 API URL 변환.** Dashboard+ResultsModal 2곳 통합 (D98) |
+| **MySQL TZ ≠ QTmsg Agent TZ** | MySQL 서버=KST(+09:00)이지만 QTmsg Agent가 통신사 리포트 시간(UTC)을 그대로 DATETIME에 저장 | **sendreq_time=KST(DATE_ADD 불필요), mobsend_time/repmsg_recvtm=UTC(DATE_ADD+9h 필요).** SMS_DETAIL_FIELDS/SMS_EXPORT_FIELDS 상수로 통합 관리 (D98) |
+| **직원 요청 원문과 구현 결과 의미 불일치** | "draft를 실패로 카운트" 요청 → "목록에서 제외"로 구현 → 다른 의미 | **직원 요청 원문을 그대로 구현.** "실패로 카운트" = 목록에 포함 + "실패" 표시 (D98) |
+| **검증 시 코드 존재만 확인** | "코드가 있다"만 보고 "검증 완료" 보고 → 실제로는 API 키 불일치, SELECT 누락 등 6건 추가 발견 | **검증은 데이터 흐름 끝까지 추적.** 입력→처리→저장→조회→표시 전체 경로를 실제 값으로 따라감 (D98) |
 
 ### ⚠️ 필수 체크 원칙 1: 유틸 함수 수정/추가 시 소비처 전수 확인
 
