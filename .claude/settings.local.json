@@ -43,7 +43,9 @@
       "Bash(/tmp/direct_send_analysis.md:*)",
       "Bash(ls C:/Users/ceo/projects/targetup/packages/frontend/src/components/Direct*)",
       "Bash(python3:*)",
-      "Bash(node -e \":*)"
+      "Bash(node -e \":*)",
+      "Bash(pip show:*)",
+      "Bash(pdftotext 'C:/Users/ceo/OneDrive/바탕 화면/bito-gateway/[휴머스온]브랜드메시지 Agent 사용 메뉴얼_20260209.pdf' -)"
     ]
   }
 }

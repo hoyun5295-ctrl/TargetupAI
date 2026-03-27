@@ -319,6 +319,96 @@ export async function insertKakaoQueue(params: {
 }
 
 /**
+ * CT-04: 기본형 브랜드메시지 발송 큐 INSERT (IMC_BM_BASIC_BIZ_MSG)
+ * 템플릿 코드 + 변수 JSON 기반 발송
+ */
+export async function insertKakaoBasicQueue(params: {
+  bubbleType: string;
+  senderKey: string;
+  phone: string;
+  targeting: string;
+  templateCode: string;
+  isAd: boolean;
+  reservedDate?: string;
+  header?: string;
+  message?: string;
+  additionalContent?: string;
+  attachmentJson?: string;
+  carouselJson?: string;
+  messageVariableJson?: string;
+  buttonVariableJson?: string;
+  couponVariableJson?: string;
+  imageVariableJson?: string;
+  videoVariableJson?: string;
+  commerceVariableJson?: string;
+  carouselVariableJson?: string;
+  resendType?: string;
+  resendFrom?: string;
+  resendMessage?: string;
+  resendTitle?: string;
+  unsubscribePhone?: string;
+  unsubscribeAuth?: string;
+  requestUid?: string;
+}): Promise<void> {
+  const {
+    bubbleType, senderKey, phone, targeting, templateCode, isAd,
+    reservedDate, header, message, additionalContent,
+    attachmentJson, carouselJson,
+    messageVariableJson, buttonVariableJson, couponVariableJson,
+    imageVariableJson, videoVariableJson, commerceVariableJson, carouselVariableJson,
+    resendType = 'NO', resendFrom, resendMessage, resendTitle,
+    unsubscribePhone, unsubscribeAuth, requestUid
+  } = params;
+
+  const reservedDateStr = reservedDate || toKoreaTimeStr(new Date());
+  const messageReuse = resendMessage ? 'N' : 'Y';
+
+  await mysqlQuery(
+    `INSERT INTO IMC_BM_BASIC_BIZ_MSG (
+      CHAT_BUBBLE_TYPE, STATUS, PRIORITY, AD_FLAG, RESERVED_DATE,
+      SENDER_KEY, PHONE_NUMBER, TARGETING, TEMPLATE_CODE, PUSH_ALARM,
+      HEADER, MESSAGE, ADDITIONAL_CONTENT,
+      ATTACHMENT_JSON, CAROUSEL_JSON,
+      MESSAGE_VARIABLE_JSON, BUTTON_VARIABLE_JSON, COUPON_VARIABLE_JSON,
+      IMAGE_VARIABLE_JSON, VIDEO_VARIABLE_JSON, COMMERCE_VARIABLE_JSON, CAROUSEL_VARIABLE_JSON,
+      RESEND_MT_TYPE, RESEND_MT_FROM, RESEND_MT_TITLE,
+      RESEND_MT_MESSAGE_REUSE, RESEND_MT_MESSAGE,
+      UNSUBSCRIBE_PHONE_NUMBER, UNSUBSCRIBE_AUTH_NUMBER,
+      REQUEST_UID
+    ) VALUES (?, '1', 'N', ?, ?, ?, ?, ?, ?, 'Y', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      bubbleType,
+      isAd ? 'Y' : 'N',
+      reservedDateStr,
+      senderKey,
+      phone,
+      targeting,
+      templateCode,
+      header || null,
+      message || null,
+      additionalContent || null,
+      attachmentJson || null,
+      carouselJson || null,
+      messageVariableJson || null,
+      buttonVariableJson || null,
+      couponVariableJson || null,
+      imageVariableJson || null,
+      videoVariableJson || null,
+      commerceVariableJson || null,
+      carouselVariableJson || null,
+      resendType,
+      resendFrom || null,
+      resendTitle || null,
+      messageReuse,
+      resendMessage || null,
+      unsubscribePhone || null,
+      unsubscribeAuth || null,
+      requestUid || null
+    ]
+  );
+}
+
+/**
  * CT-04: 알림톡 발송 큐 INSERT (SMSQ_SEND에 msg_type='K')
  * QTmsg Agent가 SMSQ_SEND에서 가져가서 발송
  */

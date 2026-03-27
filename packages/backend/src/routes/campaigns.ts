@@ -2266,4 +2266,145 @@ router.delete('/:id', async (req: Request, res: Response) => {
   }
 });
 
+// ============================================================
+// POST /brand-send — 브랜드메시지 발송 (CT-12 컨트롤타워)
+// ============================================================
+router.post('/brand-send', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
+    if (!companyId || !userId) {
+      return res.status(401).json({ error: '인증 필요' });
+    }
+
+    const {
+      mode,           // 'free' (자유형) | 'template' (기본형)
+      bubbleType,     // TEXT, IMAGE, WIDE, ...
+      senderKey,
+      targeting,
+      isAd,
+      phones,         // string[]
+      message,
+      header,
+      additionalContent,
+      buttons,
+      image,
+      coupon,
+      commerce,
+      video,
+      itemList,
+      carouselHead,
+      carouselItems,
+      carouselTail,
+      resendType,
+      resendFrom,
+      resendMessage,
+      resendTitle,
+      unsubscribePhone,
+      unsubscribeAuth,
+      reservedDate,
+      // 기본형(템플릿) 전용
+      templateCode,
+      messageVariableJson,
+      buttonVariableJson,
+      couponVariableJson,
+      imageVariableJson,
+      videoVariableJson,
+      commerceVariableJson,
+      carouselVariableJson,
+    } = req.body;
+
+    if (!phones || !Array.isArray(phones) || phones.length === 0) {
+      return res.status(400).json({ error: '수신자 목록이 필요합니다' });
+    }
+
+    // 캠페인 레코드 생성
+    const campaignResult = await query(
+      `INSERT INTO campaigns (company_id, user_id, name, message_content, message_type, send_channel, status, created_at)
+       VALUES ($1, $2, $3, $4, 'LMS', 'kakao_brand', 'sending', NOW())
+       RETURNING id`,
+      [companyId, userId, `브랜드메시지 ${bubbleType || 'TEXT'}`, message || `[${bubbleType}] 브랜드메시지`]
+    );
+    const campaignId = campaignResult.rows[0].id;
+
+    const baseParams = {
+      bubbleType: bubbleType || 'TEXT',
+      senderKey,
+      phones,
+      targeting: targeting || 'I',
+      isAd: isAd ?? true,
+      companyId,
+      userId,
+      message,
+      header,
+      additionalContent,
+      buttons,
+      image,
+      coupon,
+      commerce,
+      video,
+      itemList,
+      carouselHead,
+      carouselItems,
+      carouselTail,
+      resendType,
+      resendFrom,
+      resendMessage,
+      resendTitle,
+      unsubscribePhone,
+      unsubscribeAuth,
+      reservedDate,
+      campaignId,
+    };
+
+    let result;
+    if (mode === 'template') {
+      const { sendBrandMessageTemplate } = await import('../utils/brand-message');
+      result = await sendBrandMessageTemplate({
+        ...baseParams,
+        templateCode,
+        messageVariableJson,
+        buttonVariableJson,
+        couponVariableJson,
+        imageVariableJson,
+        videoVariableJson,
+        commerceVariableJson,
+        carouselVariableJson,
+      });
+    } else {
+      const { sendBrandMessage } = await import('../utils/brand-message');
+      result = await sendBrandMessage(baseParams);
+    }
+
+    if (!result.success) {
+      // 실패 시 캠페인 상태 변경
+      await query(`UPDATE campaigns SET status = 'failed' WHERE id = $1`, [campaignId]);
+      return res.status(400).json({ error: result.error });
+    }
+
+    // 성공 시 캠페인 업데이트
+    await query(
+      `UPDATE campaigns SET status = 'completed', target_count = $1 WHERE id = $2`,
+      [result.sentCount, campaignId]
+    );
+
+    // campaign_runs INSERT
+    await query(
+      `INSERT INTO campaign_runs (campaign_id, company_id, total_sent, total_success, sent_at)
+       VALUES ($1, $2, $3, $3, NOW())`,
+      [campaignId, companyId, result.sentCount]
+    );
+
+    return res.json({
+      success: true,
+      campaignId,
+      sentCount: result.sentCount,
+      failCount: result.failCount,
+    });
+  } catch (error) {
+    console.error('[brand-send] 에러:', error);
+    return res.status(500).json({ error: '브랜드메시지 발송 중 오류가 발생했습니다.' });
+  }
+});
+
 export default router;

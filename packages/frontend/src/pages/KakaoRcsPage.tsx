@@ -2,6 +2,9 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import AlimtalkTemplateFormModal from '../components/AlimtalkTemplateFormModal';
 import RcsTemplateFormModal from '../components/RcsTemplateFormModal';
+import BrandMessageEditor from '../components/BrandMessageEditor';
+import BrandMessagePreview from '../components/BrandMessagePreview';
+import { formatPhoneNumber } from '../utils/formatDate';
 
 function getToken(): string {
   return localStorage.getItem('token') || '';
@@ -311,19 +314,7 @@ export default function KakaoRcsPage() {
 
         {/* ═══ 브랜드메시지 탭 ═══ */}
         {activeTab === 'brand' && (
-          <div className="text-center py-16">
-            <div className="text-4xl mb-3">📢</div>
-            <h3 className="text-lg font-bold text-gray-900 mb-2">브랜드메시지 발송</h3>
-            <p className="text-sm text-gray-500 mb-6">
-              카카오 브랜드메시지를 작성하고 발송합니다
-            </p>
-            <div className="bg-blue-50 border border-blue-200 rounded-xl p-6 max-w-md mx-auto">
-              <p className="text-sm text-blue-700">
-                브랜드메시지 발송 기능은 현재 메인 발송창에서 이용 가능합니다.<br />
-                이 탭으로 이동 예정입니다.
-              </p>
-            </div>
-          </div>
+          <BrandMessageTab profiles={profiles} setToast={setToast} />
         )}
 
         {/* ═══ RCS 템플릿 탭 ═══ */}
@@ -524,6 +515,84 @@ export default function KakaoRcsPage() {
           {toast.message}
         </div>
       )}
+    </div>
+  );
+}
+
+// ============================================================
+// BrandMessageTab — 브랜드메시지 발송 탭 (수신자 + 에디터 + 미리보기)
+// ============================================================
+function BrandMessageTab({ profiles, setToast }: {
+  profiles: { id: string; profile_key: string; profile_name: string }[];
+  setToast: (t: { show: boolean; type: 'success' | 'error'; message: string }) => void;
+}) {
+  const [sending, setSending] = useState(false);
+  const [phones, setPhones] = useState('');
+  const [previewState, setPreviewState] = useState<any>({});
+
+  const handleSend = async (data: any) => {
+    const phoneList = phones.split(/[\n,]/).map(p => p.trim().replace(/\D/g, '')).filter(p => p.length >= 10);
+    if (phoneList.length === 0) {
+      setToast({ show: true, type: 'error', message: '수신자 번호를 입력해주세요' });
+      return;
+    }
+    if (!data.senderKey) {
+      setToast({ show: true, type: 'error', message: '발신 프로필을 선택해주세요' });
+      return;
+    }
+
+    setSending(true);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch('/api/campaigns/brand-send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ ...data, phones: phoneList }),
+      });
+      const result = await res.json();
+      if (result.success) {
+        setToast({ show: true, type: 'success', message: `브랜드메시지 ${result.sentCount}건 발송 완료` });
+        setPhones('');
+      } else {
+        setToast({ show: true, type: 'error', message: result.error || '발송 실패' });
+      }
+    } catch (err) {
+      setToast({ show: true, type: 'error', message: '발송 중 오류가 발생했습니다' });
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div className="flex gap-6">
+      {/* 좌측: 에디터 + 수신자 */}
+      <div className="flex-1 space-y-6">
+        {/* 수신자 입력 */}
+        <div className="bg-gray-50 rounded-xl p-4">
+          <label className="block text-sm font-bold text-gray-700 mb-2">수신자 번호</label>
+          <textarea
+            value={phones}
+            onChange={(e) => setPhones(e.target.value)}
+            rows={3}
+            className="w-full border rounded-lg px-3 py-2 text-sm resize-none"
+            placeholder="전화번호 입력 (줄바꿈 또는 쉼표로 구분)&#10;예: 01012345678&#10;01098765432"
+          />
+          <div className="text-xs text-gray-400 mt-1">
+            총 {phones.split(/[\n,]/).map(p => p.trim().replace(/\D/g, '')).filter(p => p.length >= 10).length}건
+          </div>
+        </div>
+
+        {/* 메시지 에디터 */}
+        <BrandMessageEditor profiles={profiles} onSend={handleSend} sending={sending} />
+      </div>
+
+      {/* 우측: 미리보기 */}
+      <div className="w-[320px] shrink-0">
+        <div className="sticky top-4">
+          <h3 className="text-sm font-bold text-gray-700 mb-3">미리보기</h3>
+          <BrandMessagePreview {...previewState} />
+        </div>
+      </div>
     </div>
   );
 }
