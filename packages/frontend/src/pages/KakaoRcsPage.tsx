@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import AlimtalkTemplateFormModal from '../components/AlimtalkTemplateFormModal';
 import RcsTemplateFormModal from '../components/RcsTemplateFormModal';
 import BrandMessageEditor from '../components/BrandMessageEditor';
-import BrandMessagePreview from '../components/BrandMessagePreview';
 import DirectTargetFilterModal from '../components/DirectTargetFilterModal';
 import { formatPhoneNumber } from '../utils/formatDate';
 
@@ -576,7 +575,6 @@ function BrandMessageTab({ profiles, setToast }: {
   setToast: (t: { show: boolean; type: 'success' | 'error'; message: string }) => void;
 }) {
   const [sending, setSending] = useState(false);
-  const [previewState, setPreviewState] = useState<any>({});
 
   // ★ 수신자 입력 3탭 (직접입력 / 파일등록 / DB추출)
   type RecipientMode = 'direct' | 'file' | 'db';
@@ -719,114 +717,149 @@ function BrandMessageTab({ profiles, setToast }: {
 
   return (
     <>
-    <div className="flex gap-8">
-      {/* 좌측: 수신자 + 에디터 */}
-      <div className="flex-1 min-w-0 space-y-6">
-        {/* 수신자 입력 */}
-        <div className="bg-white rounded-xl border-2 border-gray-200 overflow-hidden">
-          <div className="flex items-center border-b bg-gray-50">
-            <button
-              onClick={() => setRecipientMode('direct')}
-              className={`flex-1 px-4 py-3 text-sm font-medium transition-colors ${recipientMode === 'direct' ? 'bg-white text-emerald-700 border-b-2 border-emerald-500' : 'text-gray-500 hover:text-gray-700'}`}
-            >✏️ 직접입력</button>
-            <label
-              className={`flex-1 px-4 py-3 text-sm font-medium text-center cursor-pointer transition-colors ${recipientMode === 'file' && recipientList.length > 0 ? 'bg-white text-amber-700 border-b-2 border-amber-500' : 'text-gray-500 hover:text-gray-700'} ${fileLoading ? 'opacity-50 cursor-wait' : ''}`}
-            >
-              {fileLoading ? '⏳ 파일 분석중...' : '📁 파일등록'}
-              <input type="file" accept=".xlsx,.xls,.csv" className="hidden"
-                onChange={(e) => { const file = e.target.files?.[0]; if (file) handleFileUpload(file); e.target.value = ''; }}
-              />
-            </label>
-            <button
-              onClick={() => setShowDbExtract(true)}
-              className={`flex-1 px-4 py-3 text-sm font-medium transition-colors ${recipientMode === 'db' && recipientList.length > 0 ? 'bg-white text-blue-700 border-b-2 border-blue-500' : 'text-gray-500 hover:text-gray-700'}`}
-            >🔍 DB추출</button>
-          </div>
+    <div className="space-y-6">
+      {/* 수신자 입력 — 3버튼 + 결과 영역 */}
+      <div className="bg-white rounded-xl border-2 border-gray-200 overflow-hidden">
+        {/* 3버튼 탭 */}
+        <div className="flex gap-3 p-4 pb-0">
+          <button
+            onClick={() => setRecipientMode('direct')}
+            className={`flex-1 py-3 rounded-xl text-sm font-bold transition-all ${
+              recipientMode === 'direct'
+                ? 'bg-emerald-500 text-white shadow-md shadow-emerald-200'
+                : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+            }`}
+          >✏️ 직접입력</button>
+          <button
+            onClick={() => {
+              setRecipientMode('file');
+              if (recipientList.length === 0 || recipientMode !== 'file') {
+                // 파일 대화상자 열기
+                const inp = document.createElement('input');
+                inp.type = 'file'; inp.accept = '.xlsx,.xls,.csv';
+                inp.onchange = (ev) => { const f = (ev.target as HTMLInputElement).files?.[0]; if (f) handleFileUpload(f); };
+                inp.click();
+              }
+            }}
+            className={`flex-1 py-3 rounded-xl text-sm font-bold transition-all ${
+              recipientMode === 'file'
+                ? 'bg-amber-500 text-white shadow-md shadow-amber-200'
+                : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+            } ${fileLoading ? 'opacity-60 cursor-wait' : ''}`}
+          >{fileLoading ? '⏳ 분석중...' : '📁 파일등록'}</button>
+          <button
+            onClick={() => { setRecipientMode('db'); setShowDbExtract(true); }}
+            className={`flex-1 py-3 rounded-xl text-sm font-bold transition-all ${
+              recipientMode === 'db'
+                ? 'bg-blue-500 text-white shadow-md shadow-blue-200'
+                : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+            }`}
+          >🔍 DB추출</button>
+        </div>
 
-          <div className="p-4">
-            {recipientMode === 'direct' ? (
-              <>
-                <textarea
-                  value={phones}
-                  onChange={(e) => setPhones(e.target.value)}
-                  rows={4}
-                  className="w-full border rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-emerald-300 focus:border-emerald-400"
-                  placeholder="전화번호 입력 (줄바꿈 또는 쉼표로 구분)&#10;예: 01012345678&#10;01098765432"
-                />
-                <div className="flex items-center justify-between mt-2">
-                  <span className="text-xs text-gray-400">
-                    총 <span className="font-bold text-emerald-600">{getPhoneList().length.toLocaleString()}</span>건
-                  </span>
-                  {phones && (
-                    <button onClick={() => setPhones('')} className="text-xs text-gray-400 hover:text-red-500">초기화</button>
-                  )}
-                </div>
-              </>
-            ) : (
-              <div className="text-center py-3">
-                {recipientList.length > 0 ? (
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <span className={`text-lg ${recipientMode === 'file' ? '📁' : '🔍'}`}>{recipientMode === 'file' ? '📁' : '🔍'}</span>
-                      <div className="text-left">
-                        <div className="text-sm font-medium text-gray-700">
-                          {recipientMode === 'file' ? fileName : 'DB 추출 결과'}
-                        </div>
-                        <div className="text-xs text-gray-400">
-                          총 <span className="font-bold text-emerald-600">{recipientList.length.toLocaleString()}</span>건
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex gap-2">
-                      {recipientMode === 'file' && (
-                        <label className="text-xs text-blue-500 hover:text-blue-700 cursor-pointer font-medium">
-                          다시 업로드
-                          <input type="file" accept=".xlsx,.xls,.csv" className="hidden"
-                            onChange={(e) => { const file = e.target.files?.[0]; if (file) handleFileUpload(file); e.target.value = ''; }}
-                          />
-                        </label>
-                      )}
-                      {recipientMode === 'db' && (
-                        <button onClick={() => setShowDbExtract(true)} className="text-xs text-blue-500 hover:text-blue-700 font-medium">다시 추출</button>
-                      )}
-                      <button onClick={() => { setRecipientList([]); setRecipientMode('direct'); }} className="text-xs text-gray-400 hover:text-red-500">초기화</button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="text-gray-400 text-sm py-4">
-                    {recipientMode === 'file' ? (
-                      <label className="cursor-pointer hover:text-gray-600">
-                        <div className="text-3xl mb-2">📁</div>
-                        <div>클릭하여 파일을 업로드하세요</div>
-                        <div className="text-xs mt-1">(.xlsx, .xls, .csv)</div>
-                        <input type="file" accept=".xlsx,.xls,.csv" className="hidden"
-                          onChange={(e) => { const file = e.target.files?.[0]; if (file) handleFileUpload(file); e.target.value = ''; }}
-                        />
-                      </label>
-                    ) : (
-                      <div>
-                        <div className="text-3xl mb-2">🔍</div>
-                        <div>DB추출 버튼을 눌러 고객을 추출하세요</div>
-                      </div>
-                    )}
-                  </div>
+        {/* 컨텐츠 영역 */}
+        <div className="p-4">
+          {/* 직접입력 모드 */}
+          {recipientMode === 'direct' && (
+            <>
+              <textarea
+                value={phones}
+                onChange={(e) => setPhones(e.target.value)}
+                rows={3}
+                className="w-full border-2 border-gray-200 rounded-lg px-3 py-2.5 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-emerald-300 focus:border-emerald-400"
+                placeholder="전화번호 입력 (줄바꿈 또는 쉼표로 구분)&#10;예: 01012345678, 01098765432"
+              />
+              <div className="flex items-center justify-between mt-2">
+                <span className="text-xs text-gray-400">
+                  총 <span className="font-bold text-emerald-600 text-sm">{getPhoneList().length.toLocaleString()}</span>건
+                </span>
+                {phones && (
+                  <button onClick={() => setPhones('')} className="text-xs text-gray-400 hover:text-red-500">초기화</button>
                 )}
               </div>
-            )}
-          </div>
-        </div>
+            </>
+          )}
 
-        {/* 메시지 에디터 */}
-        <BrandMessageEditor profiles={profiles} onSend={handleSend} sending={sending} />
+          {/* 파일등록 모드 */}
+          {recipientMode === 'file' && (
+            <>
+              {recipientList.length > 0 ? (
+                <div className="flex items-center justify-between bg-amber-50 rounded-lg p-3 border border-amber-200">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-amber-100 rounded-lg flex items-center justify-center text-lg">📁</div>
+                    <div>
+                      <div className="text-sm font-medium text-gray-800">{fileName}</div>
+                      <div className="text-xs text-gray-500">
+                        총 <span className="font-bold text-amber-600">{recipientList.length.toLocaleString()}</span>건
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <button onClick={() => {
+                      const inp = document.createElement('input');
+                      inp.type = 'file'; inp.accept = '.xlsx,.xls,.csv';
+                      inp.onchange = (ev) => { const f = (ev.target as HTMLInputElement).files?.[0]; if (f) handleFileUpload(f); };
+                      inp.click();
+                    }} className="px-3 py-1.5 text-xs font-medium text-amber-700 bg-amber-100 hover:bg-amber-200 rounded-lg transition-colors">
+                      다시 업로드
+                    </button>
+                    <button onClick={() => { setRecipientList([]); setFileName(''); }} className="px-3 py-1.5 text-xs font-medium text-gray-500 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors">
+                      초기화
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button onClick={() => {
+                  const inp = document.createElement('input');
+                  inp.type = 'file'; inp.accept = '.xlsx,.xls,.csv';
+                  inp.onchange = (ev) => { const f = (ev.target as HTMLInputElement).files?.[0]; if (f) handleFileUpload(f); };
+                  inp.click();
+                }} className="w-full py-8 border-2 border-dashed border-amber-300 rounded-xl text-center hover:bg-amber-50 transition-colors cursor-pointer">
+                  <div className="text-3xl mb-2">📁</div>
+                  <div className="text-sm text-gray-600 font-medium">클릭하여 파일을 업로드하세요</div>
+                  <div className="text-xs text-gray-400 mt-1">.xlsx, .xls, .csv</div>
+                </button>
+              )}
+            </>
+          )}
+
+          {/* DB추출 모드 */}
+          {recipientMode === 'db' && (
+            <>
+              {recipientList.length > 0 ? (
+                <div className="flex items-center justify-between bg-blue-50 rounded-lg p-3 border border-blue-200">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center text-lg">🔍</div>
+                    <div>
+                      <div className="text-sm font-medium text-gray-800">DB 추출 결과</div>
+                      <div className="text-xs text-gray-500">
+                        총 <span className="font-bold text-blue-600">{recipientList.length.toLocaleString()}</span>건
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <button onClick={() => setShowDbExtract(true)} className="px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-100 hover:bg-blue-200 rounded-lg transition-colors">
+                      다시 추출
+                    </button>
+                    <button onClick={() => setRecipientList([])} className="px-3 py-1.5 text-xs font-medium text-gray-500 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors">
+                      초기화
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button onClick={() => setShowDbExtract(true)} className="w-full py-8 border-2 border-dashed border-blue-300 rounded-xl text-center hover:bg-blue-50 transition-colors cursor-pointer">
+                  <div className="text-3xl mb-2">🔍</div>
+                  <div className="text-sm text-gray-600 font-medium">클릭하여 고객 DB에서 추출하세요</div>
+                  <div className="text-xs text-gray-400 mt-1">필터 조건으로 대상자를 선택합니다</div>
+                </button>
+              )}
+            </>
+          )}
+        </div>
       </div>
 
-      {/* 우측: 미리보기 — 크기 확대 */}
-      <div className="w-[380px] shrink-0">
-        <div className="sticky top-4">
-          <h3 className="text-sm font-bold text-gray-700 mb-3">미리보기</h3>
-          <BrandMessagePreview {...previewState} />
-        </div>
-      </div>
+      {/* 메시지 에디터 (미리보기 통합) */}
+      <BrandMessageEditor profiles={profiles} onSend={handleSend} sending={sending} />
     </div>
 
     {/* 파일 매핑 모달 */}
@@ -841,7 +874,6 @@ function BrandMessageTab({ profiles, setToast }: {
             <button onClick={() => setShowMapping(false)} className="text-gray-500 hover:text-gray-700">✕</button>
           </div>
           <div className="px-5 py-4">
-            {/* 수신번호 필수 */}
             <div className="flex items-center gap-3 p-3 bg-red-50 rounded-lg border border-red-200 mb-3">
               <span className="text-xs font-bold text-red-700 w-20 shrink-0">📱 수신번호 *</span>
               <span className="text-gray-400 text-xs">→</span>
@@ -854,7 +886,6 @@ function BrandMessageTab({ profiles, setToast }: {
                 })}
               </select>
             </div>
-            {/* 미리보기 */}
             {filePreview.length > 0 && (
               <div className="mt-3 border rounded-lg overflow-hidden">
                 <div className="bg-gray-50 px-3 py-2 text-xs font-medium text-gray-600">미리보기 (상위 {Math.min(filePreview.length, 3)}건)</div>
@@ -894,7 +925,7 @@ function BrandMessageTab({ profiles, setToast }: {
       </div>
     )}
 
-    {/* DB추출 모달 — DirectTargetFilterModal 재활용 */}
+    {/* DB추출 모달 */}
     {showDbExtract && (
       <DirectTargetFilterModal
         show={showDbExtract}

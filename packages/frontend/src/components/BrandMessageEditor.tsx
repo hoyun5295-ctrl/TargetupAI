@@ -5,6 +5,7 @@
  * 자유형(8종) + 기본형(템플릿) 발송 UI.
  */
 import { useState } from 'react';
+import BrandMessagePreview from './BrandMessagePreview';
 
 // ============================================================
 // 상수 (프론트 컨트롤타워 — 백엔드 CT-12와 동기)
@@ -218,8 +219,32 @@ export default function BrandMessageEditor({ profiles, onSend, sending }: BrandM
     onSend(data);
   };
 
+  // 미리보기 데이터
+  const previewData = {
+    bubbleType,
+    message: message || undefined,
+    header: header || undefined,
+    additionalContent: additionalContent || undefined,
+    imageUrl: imageUrl || undefined,
+    buttons: buttons.length > 0 ? buttons : undefined,
+    videoUrl: videoUrl || undefined,
+    commerce: commerceTitle ? {
+      title: commerceTitle,
+      regular_price: Number(regularPrice) || 0,
+      discount_price: discountPrice ? Number(discountPrice) : undefined,
+      discount_rate: discountRate ? Number(discountRate) : undefined,
+    } : undefined,
+    carouselItems: (bubbleType === 'CAROUSEL_FEED' || bubbleType === 'CAROUSEL_COMMERCE') ? carouselItems : undefined,
+    listItems: bubbleType === 'WIDE_ITEM_LIST' ? listItems.filter(i => i.title).map(i => ({ title: i.title, desc: i.desc, imgUrl: i.imgUrl })) : undefined,
+    couponTitle: couponTitle || undefined,
+    isAd,
+    unsubPhone: unsubPhone || undefined,
+  };
+
   return (
-    <div className="space-y-6">
+    <div className="flex gap-8">
+      {/* 좌측: 에디터 */}
+      <div className="flex-1 min-w-0 space-y-6">
       {/* 모드 선택 */}
       <div className="flex gap-2">
         <button onClick={() => setMode('free')} className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${mode === 'free' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
@@ -460,6 +485,15 @@ export default function BrandMessageEditor({ profiles, onSend, sending }: BrandM
         className="w-full py-3 bg-blue-600 text-white rounded-xl font-bold text-sm hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
         {sending ? '발송 중...' : '브랜드메시지 발송'}
       </button>
+      </div>
+
+      {/* 우측: 미리보기 */}
+      <div className="w-[380px] shrink-0">
+        <div className="sticky top-4">
+          <h3 className="text-sm font-bold text-gray-700 mb-3">미리보기</h3>
+          <BrandMessagePreview {...previewData} />
+        </div>
+      </div>
     </div>
   );
 }
