@@ -352,16 +352,16 @@ export function normalizeDate(value: any): string | null {
   if (value == null || value === '') return null;
 
   // Date 객체 직접 처리 (XLSX cellDates: true)
-  // ★ D93: 엑셀 Date의 부동소수점/TZ 오차 보정 — 가장 가까운 자정으로 반올림
-  // 예: 엑셀 1995-03-01 → xlsx가 1995-02-28T14:59:08.000Z로 변환 → 반올림하면 1995-03-01T00:00:00.000Z
+  // ★ D98: 서버 TZ 무관하게 안전한 날짜 추출 — 로컬 시간 기준 연/월/일 사용
+  // XLSX cellDates:true → 엑셀 시리얼을 서버 로컬 TZ 기준 Date 객체로 변환
+  // → getFullYear/getMonth/getDate (로컬 TZ 기준)로 원래 엑셀 날짜 복원
+  // D93 Math.round 패치의 문제: UTC 기준 반올림 시 KST(+9h) 서버에서는 정상이지만
+  // UTC 서버에서는 15:00 UTC → 반올림 → 다음날로 밀림. 로컬 TZ 기준이 서버 환경 무관 안전
   if (value instanceof Date && !isNaN(value.getTime())) {
-    const dayMs = 86400000;
-    const roundedMs = Math.round(value.getTime() / dayMs) * dayMs;
-    const rounded = new Date(roundedMs);
-    const yyyy = rounded.getUTCFullYear();
+    const yyyy = value.getFullYear();
     if (yyyy >= 1900 && yyyy <= 2099) {
-      const mm = String(rounded.getUTCMonth() + 1).padStart(2, '0');
-      const dd = String(rounded.getUTCDate()).padStart(2, '0');
+      const mm = String(value.getMonth() + 1).padStart(2, '0');
+      const dd = String(value.getDate()).padStart(2, '0');
       return `${yyyy}-${mm}-${dd}`;
     }
     return null;

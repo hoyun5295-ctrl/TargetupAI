@@ -1,5 +1,5 @@
 import type { FieldMeta } from './DirectTargetFilterModal';
-import { formatPreviewValue } from '../utils/formatDate';
+import { formatPreviewValue, replaceDirectVars } from '../utils/formatDate';
 
 // ★ 정규식 특수문자 이스케이프
 const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -36,15 +36,11 @@ const replaceVarsWithMeta = (text: string, recipient: any, fieldsMeta: FieldMeta
   return result;
 };
 
-// 직접발송용 하드코딩 치환 (직접발송은 기존 유지)
-const replaceVarsDirect = (text: string, recipient: any, selectedCallback: string, fallback: boolean = false) => {
+// ★ D97: 인라인 제거 → formatDate.ts replaceDirectVars 컨트롤타워 사용
+// fallback=true → useFallbackLabels=true (미리보기용 라벨 표시)
+const replaceVarsDirectWrap = (text: string, recipient: any, selectedCallback: string, fallback: boolean = false) => {
   if (!text || !recipient) return text;
-  return text
-    .replace(/%이름%/g, recipient.name || (fallback ? '홍길동' : ''))
-    .replace(/%기타1%/g, recipient.extra1 || (fallback ? '기타1' : ''))
-    .replace(/%기타2%/g, recipient.extra2 || (fallback ? '기타2' : ''))
-    .replace(/%기타3%/g, recipient.extra3 || (fallback ? '기타3' : ''))
-    .replace(/%회신번호%/g, recipient.callback || selectedCallback || '');
+  return replaceDirectVars(text, recipient, selectedCallback, fallback);
 };
 
 export default function DirectPreviewModal({
@@ -96,7 +92,7 @@ export default function DirectPreviewModal({
                         if (showTargetSend && targetFieldsMeta.length > 0) {
                           return replaceVarsWithMeta(fullMsg, firstR, targetFieldsMeta, true);
                         }
-                        return replaceVarsDirect(fullMsg, firstR, selectedCallback, true);
+                        return replaceVarsDirectWrap(fullMsg, firstR, selectedCallback, true);
                       })()}
                     </div>
                   </div>
@@ -109,7 +105,7 @@ export default function DirectPreviewModal({
                     const fullMsg = getFullMessage(directMessage);
                     const mergedMsg = (showTargetSend && targetFieldsMeta.length > 0)
                       ? replaceVarsWithMeta(fullMsg, firstR, targetFieldsMeta, true)
-                      : replaceVarsDirect(fullMsg, firstR, selectedCallback, true);
+                      : replaceVarsDirectWrap(fullMsg, firstR, selectedCallback, true);
                     const mergedBytes = calculateBytes(mergedMsg);
                     const limit = directMsgType === 'SMS' ? 90 : 2000;
                     const isOver = mergedBytes > limit;
@@ -151,7 +147,7 @@ export default function DirectPreviewModal({
                       if (showTargetSend && targetFieldsMeta.length > 0) {
                         msg = replaceVarsWithMeta(msg, r, targetFieldsMeta, false);
                       } else {
-                        msg = replaceVarsDirect(msg, r, selectedCallback, false);
+                        msg = replaceVarsDirectWrap(msg, r, selectedCallback, false);
                       }
                       return (
                         <tr key={idx} className="hover:bg-gray-50">

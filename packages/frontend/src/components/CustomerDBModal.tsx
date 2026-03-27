@@ -266,6 +266,7 @@ export default function CustomerDBModal({ onClose, token, userType }: CustomerDB
     { key: 'recent_purchase_amount', label: '최근구매금액', format: (v) => v != null ? `${Number(v).toLocaleString()}원` : '-' },
     { key: 'total_purchase_amount', label: '총구매금액', format: (v) => v != null ? `${Number(v).toLocaleString()}원` : '-' },
     { key: 'purchase_count', label: '구매횟수', format: (v) => v != null ? `${Number(v).toLocaleString()}회` : '-' },
+    { key: 'avg_order_value', label: '평균주문금액', format: (v) => v != null ? `${Number(v).toLocaleString()}원` : '-' },
     { key: 'recent_purchase_date', label: '최근구매일', format: (v) => formatDate(v) },
     { key: 'sms_opt_in', label: '수신동의', format: (v) => v === true || v === 'Y' ? '동의' : '거부' },
     { key: 'created_at', label: '등록일', format: (v) => formatDate(v) },

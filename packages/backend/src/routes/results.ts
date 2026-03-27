@@ -7,6 +7,23 @@ import { DEFAULT_COSTS, redis, CACHE_TTL } from '../config/defaults';
 
 const router = Router();
 
+/**
+ * ★ D98: CSV/엑셀 출력용 날짜 포맷팅 — YYYY-MM-DD HH:mm:ss 형식
+ * MySQL DATETIME → JS Date → .toString() 시 "Mon Mar 23 2026 14:27:08 GMT+0900" 방지
+ */
+function formatCsvDateTime(val: any): string {
+  if (!val) return '';
+  const d = val instanceof Date ? val : new Date(val);
+  if (isNaN(d.getTime())) return String(val);
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mi = String(d.getMinutes()).padStart(2, '0');
+  const ss = String(d.getSeconds()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}`;
+}
+
 // ===== UNION ALL 기반 MySQL 헬퍼 (서버측 정렬/페이지네이션) =====
 // [S9-08] 기존: N개 테이블 순차 쿼리 → 메모리 concat → JS 정렬 → slice (30만건 OOM 위험)
 // 개선: UNION ALL 단일 쿼리 → MySQL이 정렬+페이징 처리 (페이지 분량만 메모리 로드)
@@ -170,6 +187,9 @@ router.get('/campaigns', async (req: Request, res: Response) => {
     let whereClause = 'WHERE company_id = $1';
     const params: any[] = [companyId];
     let paramIndex = 2;
+
+    // ★ D98: draft 상태 캠페인은 발송결과 목록에서 제외 (발송 전 상태이므로 결과 없음)
+    whereClause += ` AND status NOT IN ('draft')`;
 
     if (userType === 'company_user') {
       whereClause += ` AND created_by = $${paramIndex++}`;
@@ -710,7 +730,7 @@ router.get('/campaigns/:id/export', async (req: Request, res: Response) => {
           `"${(m.msg_contents || '').replace(/"/g, '""')}"`,
           statusDisplay, m.status_code,
           carrierDisplay,
-          m.sendreq_time || '', m.mobsend_time || '', m.repmsg_recvtm || ''
+          formatCsvDateTime(m.sendreq_time), formatCsvDateTime(m.mobsend_time), formatCsvDateTime(m.repmsg_recvtm)
         ].join(',') + '\n');
       }
 

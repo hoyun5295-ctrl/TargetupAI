@@ -400,7 +400,7 @@ export async function sendBrandMessage(params: BrandMessageParams): Promise<Bran
   }
 
   // 3. 선불 차감 (카카오 단가 기준)
-  const deduct = await prepaidDeduct(params.companyId, filteredPhones.length, 'kakao', params.campaignId || '');
+  const deduct = await prepaidDeduct(params.companyId, filteredPhones.length, 'kakao', params.campaignId || '', params.userId);
   if (!deduct.ok) {
     return { success: false, sentCount: 0, failCount: 0, error: deduct.error || '잔액 부족' };
   }
@@ -490,7 +490,7 @@ export async function sendBrandMessageTemplate(params: BrandTemplateParams): Pro
   }
 
   // 선불 차감
-  const deduct = await prepaidDeduct(params.companyId, filteredPhones.length, 'kakao', params.campaignId || '');
+  const deduct = await prepaidDeduct(params.companyId, filteredPhones.length, 'kakao', params.campaignId || '', params.userId);
   if (!deduct.ok) {
     return { success: false, sentCount: 0, failCount: 0, error: deduct.error || '잔액 부족' };
   }

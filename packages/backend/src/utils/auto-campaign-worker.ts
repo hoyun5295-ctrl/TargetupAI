@@ -555,7 +555,7 @@ async function executeAutoCampaign(ac: any): Promise<void> {
     const runId = runResult.rows[0].id;
 
     // ★ 선불 차감 (prepaid.ts 재활용)
-    const deduct = await prepaidDeduct(ac.company_id, customers.length, ac.message_type, campaignId);
+    const deduct = await prepaidDeduct(ac.company_id, customers.length, ac.message_type, campaignId, ac.user_id);
     if (!deduct.ok) {
       console.warn(`${logPrefix} 잔액 부족 — ${deduct.error}`);
       await query(

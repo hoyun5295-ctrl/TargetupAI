@@ -5,9 +5,12 @@
 
 import { query } from '../config/database';
 
-/** 선불 차감 */
+/**
+ * 선불 차감
+ * @param createdBy - ★ D98: 차감 실행 사용자 ID (user_id 기반 사용금액 격리용)
+ */
 export async function prepaidDeduct(
-  companyId: string, count: number, messageType: string, referenceId: string
+  companyId: string, count: number, messageType: string, referenceId: string, createdBy?: string
 ): Promise<{ ok: boolean; error?: string; amount?: number; balance?: number; insufficientBalance?: boolean }> {
   const co = await query(
     'SELECT billing_type, balance, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao FROM companies WHERE id = $1',
@@ -42,11 +45,11 @@ export async function prepaidDeduct(
     };
   }
 
-  // 거래 기록
+  // 거래 기록 — ★ D98: created_by 추가 (사용자별 사용금액 격리)
   await query(
-    `INSERT INTO balance_transactions (company_id, type, amount, balance_after, description, reference_type, reference_id, payment_method)
-     VALUES ($1, 'deduct', $2, $3, $4, 'campaign', $5, 'system')`,
-    [companyId, totalAmount, result.rows[0].balance, `${messageType} ${count}건 발송 차감 (건당 ${unitPrice}원)`, referenceId]
+    `INSERT INTO balance_transactions (company_id, type, amount, balance_after, description, reference_type, reference_id, payment_method, created_by)
+     VALUES ($1, 'deduct', $2, $3, $4, 'campaign', $5, 'system', $6)`,
+    [companyId, totalAmount, result.rows[0].balance, `${messageType} ${count}건 발송 차감 (건당 ${unitPrice}원)`, referenceId, createdBy || null]
   );
 
   console.log(`[선불차감] company=${companyId} ${messageType}×${count} = ${totalAmount}원 차감 → 잔액 ${result.rows[0].balance}원`);

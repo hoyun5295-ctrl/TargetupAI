@@ -221,7 +221,7 @@ export async function enqueueSpamTest(params: SpamTestEnqueueParams): Promise<Sp
 
     // 4) 선불 차감 (skipPrepaid가 아닐 때만)
     if (!skipPrepaid) {
-      const deduct = await prepaidDeduct(companyId, sendCount, deductType, testId);
+      const deduct = await prepaidDeduct(companyId, sendCount, deductType, testId, userId);
       if (!deduct.ok) {
         await query(`UPDATE spam_filter_tests SET status = 'completed', completed_at = NOW() WHERE id = $1`, [testId]);
         return {

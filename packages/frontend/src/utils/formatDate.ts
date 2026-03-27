@@ -79,10 +79,12 @@ export function formatPreviewValue(val: any): string {
   if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
     return formatDate(str);
   }
-  // ★ 전화번호 보호: 0으로 시작하는 순수 숫자 문자열은 숫자 포맷팅 하지 않음
-  // (예: 01012345678 → 1,012,345,678 방지)
+  // ★ 전화번호 보호: 숫자 포맷팅 제외 대상
+  // - 0으로 시작하는 순수 숫자 (01012345678 → 1,012,345,678 방지)
+  // - 하이픈 포함 숫자열 (1800-8125, 02-1234-5678 등 전화번호 형태)
   const numStr = str.replace(/,/g, '');
   if (/^0\d+$/.test(numStr)) return str;
+  if (/^\d[\d-]+\d$/.test(str) && str.includes('-')) return str;
   // 숫자: 소수점 제거 + 천단위 쉼표
   if (/^-?\d+(\.\d+)?$/.test(numStr)) {
     const num = Number(numStr);
@@ -162,21 +164,31 @@ export const DIRECT_FIELD_LABELS: Record<string, string> = Object.fromEntries(
   DIRECT_VAR_MAP.map(v => [v.fieldKey, v.label])
 );
 
-/** 직접발송 메시지 내 변수를 수신자 데이터로 치환 */
+/**
+ * 직접발송 메시지 내 변수를 수신자 데이터로 치환
+ * @param fallbackCallback - 수신자에 callback 없을 때 사용할 기본 회신번호
+ * @param useFallbackLabels - true이면 값 없는 변수에 라벨명 표시 (미리보기용)
+ */
 export function replaceDirectVars(
   text: string,
   recipient: Record<string, any>,
-  fallbackCallback?: string
+  fallbackCallback?: string,
+  useFallbackLabels?: boolean
 ): string {
   if (!text) return text;
   let result = text;
-  for (const { variable, fieldKey } of DIRECT_VAR_MAP) {
+  for (const { variable, fieldKey, label } of DIRECT_VAR_MAP) {
     const val = recipient[fieldKey];
     const hasVal = val != null && String(val).trim();
     // ★ callback(회신번호)은 전화번호이므로 숫자 포맷팅(formatPreviewValue) 적용 금지
-    const displayVal = hasVal
-      ? (fieldKey === 'callback' ? String(val).trim() : formatPreviewValue(val))
-      : (fieldKey === 'callback' ? fallbackCallback || '' : '');
+    let displayVal: string;
+    if (hasVal) {
+      displayVal = fieldKey === 'callback' ? String(val).trim() : formatPreviewValue(val);
+    } else if (fieldKey === 'callback') {
+      displayVal = fallbackCallback || '';
+    } else {
+      displayVal = useFallbackLabels ? label : '';
+    }
     result = result.replace(
       new RegExp(variable.replace(/%/g, '%'), 'g'),
       displayVal

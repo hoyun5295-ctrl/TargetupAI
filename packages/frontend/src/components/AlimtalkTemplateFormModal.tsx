@@ -51,7 +51,7 @@ const EMPHASIZE_TYPES = [
   { value: 'NONE', label: '없음' },
   { value: 'TEXT', label: '강조표기' },
   { value: 'IMAGE', label: '이미지' },
-  { value: 'ITEM_LIST', label: '아이템리스트' },
+  // ★ D98: ITEM_LIST 제거 — 입력 항목이 너무 많아 현재 미지원 (추후 필요 시 재추가)
 ];
 
 const BUTTON_TYPES = [
@@ -113,6 +113,8 @@ export default function AlimtalkTemplateFormModal({ template, profiles, onClose,
   };
 
   const removeButton = (idx: number) => {
+    // ★ D98: 채널추가형(AD)에서 "채널추가" 버튼 삭제 방지
+    if (messageType === 'AD' && buttons[idx]?.linkType === 'AC') return;
     setButtons(buttons.filter((_, i) => i !== idx));
   };
 
@@ -204,10 +206,10 @@ export default function AlimtalkTemplateFormModal({ template, profiles, onClose,
           {/* 발신 프로필 + 템플릿 코드 */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">발신 프로필</label>
+              <label className="block text-xs font-medium text-gray-600 mb-1">발신 프로필 <span className="text-gray-400">(선택)</span></label>
               <select value={profileId} onChange={e => setProfileId(e.target.value)}
                 className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-200">
-                <option value="">선택 안 함</option>
+                <option value="">선택 안 함 (카카오 등록 시 자동 생성)</option>
                 {profiles.map(p => <option key={p.id} value={p.id}>{p.profile_name}</option>)}
               </select>
             </div>
@@ -338,35 +340,43 @@ export default function AlimtalkTemplateFormModal({ template, profiles, onClose,
               </button>
             </div>
             {buttons.map((btn, idx) => (
-              <div key={idx} className="flex flex-wrap gap-2 mb-2 items-start bg-gray-50 p-2 rounded-lg">
-                <select value={btn.linkType} onChange={e => updateButton(idx, 'linkType', e.target.value)}
-                  className="border border-gray-300 rounded px-2 py-1 text-xs w-24">
-                  {BUTTON_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-                </select>
-                <input value={btn.name} onChange={e => updateButton(idx, 'name', e.target.value)}
-                  placeholder="버튼명 (최대 14자)" maxLength={14}
-                  className="border border-gray-300 rounded px-2 py-1 text-xs flex-1" />
+              <div key={idx} className="mb-2 bg-gray-50 p-2 rounded-lg space-y-1.5">
+                {/* 1줄: 유형 + 버튼명 + 삭제 */}
+                <div className="flex gap-2 items-center">
+                  <select value={btn.linkType} onChange={e => updateButton(idx, 'linkType', e.target.value)}
+                    disabled={messageType === 'AD' && btn.linkType === 'AC'}
+                    className="border border-gray-300 rounded px-2 py-1 text-xs w-24 disabled:bg-gray-200">
+                    {BUTTON_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                  </select>
+                  <input value={btn.name} onChange={e => updateButton(idx, 'name', e.target.value)}
+                    placeholder="버튼명 (최대 14자)" maxLength={14}
+                    disabled={messageType === 'AD' && btn.linkType === 'AC'}
+                    className="border border-gray-300 rounded px-2 py-1 text-xs flex-1 disabled:bg-gray-200" />
+                  <button onClick={() => removeButton(idx)}
+                    className={`text-sm px-1 ${messageType === 'AD' && btn.linkType === 'AC' ? 'text-gray-300 cursor-not-allowed' : 'text-red-400 hover:text-red-600'}`}
+                  >&times;</button>
+                </div>
+                {/* ★ D98: 2줄: 링크 입력 — 동일 너비(grid 50:50)로 일정한 비율 */}
                 {btn.linkType === 'WL' && (
-                  <>
+                  <div className="grid grid-cols-2 gap-2">
                     <input value={btn.linkM || ''} onChange={e => updateButton(idx, 'linkM', e.target.value)}
                       placeholder="모바일 URL"
-                      className="border border-gray-300 rounded px-2 py-1 text-xs flex-1" />
+                      className="border border-gray-300 rounded px-2 py-1 text-xs" />
                     <input value={btn.linkP || ''} onChange={e => updateButton(idx, 'linkP', e.target.value)}
                       placeholder="PC URL"
-                      className="border border-gray-300 rounded px-2 py-1 text-xs flex-1" />
-                  </>
+                      className="border border-gray-300 rounded px-2 py-1 text-xs" />
+                  </div>
                 )}
                 {btn.linkType === 'AL' && (
-                  <>
+                  <div className="grid grid-cols-2 gap-2">
                     <input value={btn.schemeAndroid || ''} onChange={e => updateButton(idx, 'schemeAndroid', e.target.value)}
                       placeholder="Android scheme"
-                      className="border border-gray-300 rounded px-2 py-1 text-xs flex-1" />
+                      className="border border-gray-300 rounded px-2 py-1 text-xs" />
                     <input value={btn.schemeIos || ''} onChange={e => updateButton(idx, 'schemeIos', e.target.value)}
                       placeholder="iOS scheme"
-                      className="border border-gray-300 rounded px-2 py-1 text-xs flex-1" />
-                  </>
+                      className="border border-gray-300 rounded px-2 py-1 text-xs" />
+                  </div>
                 )}
-                <button onClick={() => removeButton(idx)} className="text-red-400 hover:text-red-600 text-sm px-1">&times;</button>
               </div>
             ))}
           </div>

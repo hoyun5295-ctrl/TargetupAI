@@ -776,6 +776,18 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
                                 <div className="font-bold text-gray-900 mb-1 pb-1 border-b border-gray-200">{selectedCampaign.subject || selectedCampaign.message_subject}</div>
                               )}
                               {messages[0]?.msg_contents || selectedCampaign.message_content || ''}
+                              {/* ★ D98: MMS 이미지 표시 */}
+                              {selectedCampaign.mms_image_paths && Array.isArray(selectedCampaign.mms_image_paths) && selectedCampaign.mms_image_paths.length > 0 && (
+                                <div className="mt-2 pt-2 border-t border-gray-100 flex gap-1.5">
+                                  {selectedCampaign.mms_image_paths.map((imgPath: string, idx: number) => {
+                                    const parts = imgPath.replace(/\\/g, '/').split('/');
+                                    const filename = parts[parts.length - 1];
+                                    const companyDir = parts[parts.length - 2];
+                                    const apiUrl = filename && companyDir ? `/api/mms-images/${companyDir}/${filename}` : imgPath;
+                                    return <img key={idx} src={apiUrl} alt={`MMS ${idx+1}`} className="w-16 h-16 object-cover rounded border" />;
+                                  })}
+                                </div>
+                              )}
                             </div>
                           </div>
                         </div>

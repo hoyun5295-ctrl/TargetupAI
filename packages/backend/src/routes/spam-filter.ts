@@ -175,7 +175,7 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
     // ★ D78: 프로 이상 (auto_spam_test_enabled) → 스팸필터 테스트 무료
     let spamDeductAmount = 0;
     if (!isAutoSpamFree) {
-      const spamDeduct = await prepaidDeduct(companyId, spamSendCount, spamDeductType, testId);
+      const spamDeduct = await prepaidDeduct(companyId, spamSendCount, spamDeductType, testId, userId);
       if (!spamDeduct.ok) {
         // 차감 실패 시 테스트 레코드 cancelled 처리
         await query(`UPDATE spam_filter_tests SET status = 'completed', completed_at = NOW() WHERE id = $1`, [testId]);

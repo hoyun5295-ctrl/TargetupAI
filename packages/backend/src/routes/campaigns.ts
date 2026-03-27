@@ -26,6 +26,7 @@ import { prepaidDeduct, prepaidRefund } from '../utils/prepaid';
 import { cancelCampaign, syncCampaignResults } from '../utils/campaign-lifecycle';
 import { buildFilterQueryCompat } from '../utils/customer-filter';
 import { filterByIndividualCallback, buildCallbackErrorResponse, buildCallbackConfirmResponse } from '../utils/callback-filter';
+import { deduplicateByPhone } from '../utils/deduplicate';
 import { getUserTestContacts } from '../utils/test-contact-helper';
 
 // ★ toKoreaTimeStr → utils/sms-queue.ts로 이동 (import 사용)
@@ -310,7 +311,7 @@ router.post('/test-send', async (req: Request, res: Response) => {
 
     // ★ 선불 잔액 체크
     const testMsgType = (messageType || 'SMS') as string;
-    const testDeduct = await prepaidDeduct(companyId, managerContacts.length, testMsgType, '00000000-0000-0000-0000-000000000000');
+    const testDeduct = await prepaidDeduct(companyId, managerContacts.length, testMsgType, '00000000-0000-0000-0000-000000000000', userId);
     if (!testDeduct.ok) {
       return res.status(402).json({ error: testDeduct.error, insufficientBalance: true, balance: testDeduct.balance, requiredAmount: testDeduct.amount });
     }
@@ -716,7 +717,7 @@ if (sendChannel === 'kakao' || sendChannel === 'both') {
 }
 
 const deductType = sendChannel === 'kakao' ? 'KAKAO' : campaign.message_type;
-const sendDeduct = await prepaidDeduct(companyId, filteredCustomers.length, deductType, id);
+const sendDeduct = await prepaidDeduct(companyId, filteredCustomers.length, deductType, id, userId);
 if (!sendDeduct.ok) {
   return res.status(402).json({
     error: sendDeduct.error,
@@ -1251,6 +1252,13 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: '수신자가 없습니다' });
     }
 
+    // ★ D98 CT-14: 중복제거 — 항상 적용 (phone 기준, 첫 번째 유지)
+    const { unique: dedupedRecipients, duplicateCount } = deduplicateByPhone(recipients);
+    const finalRecipients = dedupedRecipients;
+    if (duplicateCount > 0) {
+      console.log(`[직접발송] 중복제거: ${recipients.length}건 → ${finalRecipients.length}건 (${duplicateCount}건 제거)`);
+    }
+
     // ★ D91: LMS/MMS 제목 필수 검증
     if ((msgType === 'LMS' || msgType === 'MMS') && !subject?.trim()) {
       return res.status(400).json({ success: false, error: 'LMS/MMS 발송 시 제목을 입력해주세요.' });
@@ -1286,7 +1294,7 @@ router.post('/direct-send', async (req: Request, res: Response) => {
     }
 
     // ★ CT-08: 개별회신번호 필터링 — callback-filter.ts 컨트롤타워 사용
-    let validRecipients: any[] = [...recipients];
+    let validRecipients: any[] = [...finalRecipients];
     let callbackSkippedCount = 0;
     let callbackMissingCount = 0;
     let callbackUnregisteredCount = 0;
@@ -1321,7 +1329,7 @@ router.post('/direct-send', async (req: Request, res: Response) => {
         k.includes('amount') || k.includes('purchase') || k.includes('금액')
       );
       if (amountFields.length > 0) {
-        const recipientPhones = recipients.map((r: any) => normalizePhone(r.phone));
+        const recipientPhones = finalRecipients.map((r: any) => normalizePhone(r.phone));
         let filterWhere = 'c.company_id = $1 AND c.phone = ANY($2::text[]) AND c.is_active = true';
         const filterParams: any[] = [companyId, recipientPhones];
         let pIdx = 3;
@@ -1413,7 +1421,7 @@ router.post('/direct-send', async (req: Request, res: Response) => {
 
     // ★ 선불 잔액 체크 + 차감
     const directDeductType = directChannel === 'kakao' ? 'KAKAO' : msgType;
-    const directDeduct = await prepaidDeduct(companyId, filteredRecipients.length, directDeductType, campaignId);
+    const directDeduct = await prepaidDeduct(companyId, filteredRecipients.length, directDeductType, campaignId, userId);
     if (!directDeduct.ok) {
       // 캠페인 레코드 롤백
       await query('DELETE FROM campaigns WHERE id = $1', [campaignId]);
@@ -1672,10 +1680,11 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       sentCount: directTotalSent,
       failCount: directFailTotal,
       unsubscribeCount: excludedCount,
+      duplicateCount,
       callbackSkippedCount,
       callbackMissingCount,
       callbackUnregisteredCount,
-      message: `${directTotalSent}건 발송 ${scheduled ? '예약' : '완료'}${directFailTotal > 0 ? ` (${directFailTotal}건 실패, 자동 환불)` : ''}${excludedCount > 0 ? ` (수신거부 ${excludedCount}건 제외)` : ''}${callbackMissingCount > 0 ? ` (회신번호 없음 ${callbackMissingCount}명 제외)` : ''}${callbackUnregisteredCount > 0 ? ` (미등록 회신번호 ${callbackUnregisteredCount}명 제외)` : ''}`
+      message: `${directTotalSent}건 발송 ${scheduled ? '예약' : '완료'}${duplicateCount > 0 ? ` (중복 ${duplicateCount}건 제거)` : ''}${directFailTotal > 0 ? ` (${directFailTotal}건 실패, 자동 환불)` : ''}${excludedCount > 0 ? ` (수신거부 ${excludedCount}건 제외)` : ''}${callbackMissingCount > 0 ? ` (회신번호 없음 ${callbackMissingCount}명 제외)` : ''}${callbackUnregisteredCount > 0 ? ` (미등록 회신번호 ${callbackUnregisteredCount}명 제외)` : ''}`
     });
 
     } catch (sendError) {

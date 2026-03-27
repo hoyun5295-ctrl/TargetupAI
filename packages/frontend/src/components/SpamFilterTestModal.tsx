@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useAuthStore } from '../stores/authStore';
-import { formatPhoneNumber } from '../utils/formatDate';
+import { formatPhoneNumber, replaceDirectVars } from '../utils/formatDate';
 
 interface SpamFilterTestModalProps {
   onClose: () => void;
@@ -257,28 +257,11 @@ export default function SpamFilterTestModal({
   const timeoutCount = status === 'completed' ? results.filter(r => r.result === 'timeout').length : 0;
   const failedCount = status === 'completed' ? results.filter(r => r.result === 'failed').length : 0;
 
-  // 미리보기: firstRecipient 데이터로 %변수% 치환
-  const replacePreviewVars = (msg: string): string => {
-    if (!msg || !firstRecipient) return msg;
-    let result = msg;
-    const varMap: Record<string, string> = {
-      '%이름%': firstRecipient.name || firstRecipient['이름'] || '',
-      '%등급%': firstRecipient.grade || firstRecipient['등급'] || '',
-      '%지역%': firstRecipient.region || firstRecipient['지역'] || '',
-      '%포인트%': firstRecipient.point != null ? String(firstRecipient.point) : (firstRecipient['포인트'] || ''),
-      '%매장명%': firstRecipient.store_name || firstRecipient['매장명'] || '',
-      '%기타1%': firstRecipient.extra1 || firstRecipient['기타1'] || '',
-      '%기타2%': firstRecipient.extra2 || firstRecipient['기타2'] || '',
-      '%기타3%': firstRecipient.extra3 || firstRecipient['기타3'] || '',
-    };
-    for (const [varName, value] of Object.entries(varMap)) {
-      if (value) result = result.split(varName).join(value);
-    }
-    return result;
-  };
-
+  // ★ D97: 미리보기 변수 치환 — replaceDirectVars 컨트롤타워 사용 (인라인 금지)
   const rawPreview = messageContentSms || messageContentLms || '';
-  const previewMessage = replacePreviewVars(rawPreview);
+  const previewMessage = firstRecipient
+    ? replaceDirectVars(rawPreview, firstRecipient, callbackNumber)
+    : rawPreview;
 
 
   // 로딩 중 표시

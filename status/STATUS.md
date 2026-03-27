@@ -106,7 +106,57 @@
 
 ---
 
-### 🔧 D96 — 자동발송 테스터 피드백 5건 + 직접발송 분리 + 슈퍼관리자 (2026-03-26) — 🟡 배포대기
+### 🔧 D97 — 브랜드메시지 전체 구현 + 디버깅 이슈 발견 (2026-03-27) — 🟡 배포대기
+
+> **배경:** 브랜드메시지 8종 자유형 + 기본형(템플릿) 전체 구현. CT-12 컨트롤타워 신설. 디버깅 이슈 4건 발견 (다음 세션 처리)
+
+#### 브랜드메시지 전체 구현
+
+**CT-12 brand-message.ts (신규 컨트롤타워):**
+- `validateBrandMessage()` — 유형별 필수값/길이/버튼개수 검증
+- `buildAttachmentJson()` — ATTACHMENT_JSON 구성 (버튼/이미지/쿠폰/리스트/커머스/동영상)
+- `buildCarouselJson()` — CAROUSEL_JSON 구성 (head/items/tail)
+- `sendBrandMessage()` — 자유형 발송 (validation → 수신거부 → 선불차감 → MySQL INSERT)
+- `sendBrandMessageTemplate()` — 기본형 발송 (템플릿 코드 + 변수 JSON)
+- 상수: BUBBLE_TYPES, BUTTON_TYPES, TARGETING_OPTIONS, RESEND_TYPES
+
+**sms-queue.ts (CT-04 확장):**
+- `insertKakaoBasicQueue()` 신규 — IMC_BM_BASIC_BIZ_MSG INSERT (TEMPLATE_CODE + 7개 VARIABLE_JSON)
+
+**campaigns.ts:**
+- `POST /brand-send` 엔드포인트 신규 — HTTP 핸들링만, 핵심 로직은 CT-12 호출
+
+**프론트엔드:**
+- `BrandMessageEditor.tsx` (신규) — 8종 유형 카드 선택 + 유형별 입력 폼 + 버튼/쿠폰/캐러셀 에디터
+- `BrandMessagePreview.tsx` (신규) — 카카오 말풍선 스타일 미리보기
+- `KakaoRcsPage.tsx` — 브랜드MSG 탭 플레이스홀더 → 실제 구현 교체
+
+**브랜드메시지 엔터프라이즈 게이팅:**
+- KakaoRcsPage 브랜드MSG 탭에 plan_code 기반 잠금 (ENTERPRISE 이상만 접근)
+- 잠금 모달: "엔터프라이즈 요금제부터 이용 가능" 안내
+
+#### 디버깅 이슈 발견 (다음 세션 처리 예정)
+
+1. **스팸필터 미리보기 %회신번호% 숫자 포맷팅:** `1800-8125` → 하이픈 제거 → `18008125` → toLocaleString → `18,008,125`. 전화번호 형태 값은 숫자 포맷팅 제외 필요
+2. **담당자 설정 회사 전체 공유:** 사용자별 담당자 격리 미완성. settings 저장/조회 시 users vs companies 테이블 흐름 추적 필요 → 컨트롤타워 필요
+3. **직접발송 파일업로드 전화번호 하이픈 제거:** 엑셀에 `010-5295-8517`로 있는데 하이픈 없이 저장/표시됨 + 하이픈 없는 번호도 포맷팅해서 표시 필요
+4. **생일 날짜 밀림:** 엑셀 Date 부동소수점 오차 관련 추가 확인 필요
+
+#### 수정 파일 (6개)
+
+**프론트엔드 (3개):**
+- `packages/frontend/src/components/BrandMessageEditor.tsx` (신규)
+- `packages/frontend/src/components/BrandMessagePreview.tsx` (신규)
+- `packages/frontend/src/pages/KakaoRcsPage.tsx`
+
+**백엔드 (3개):**
+- `packages/backend/src/utils/brand-message.ts` (신규 — CT-12)
+- `packages/backend/src/utils/sms-queue.ts`
+- `packages/backend/src/routes/campaigns.ts`
+
+---
+
+### 🔧 D96 — 자동발송 테스터 피드백 5건 + 직접발송 분리 + 슈퍼관리자 (2026-03-26) — ✅ 배포완료
 
 > **배경:** 자동발송 테스터 PPT 5건 처리 + Dashboard.tsx 직접발송 컴포넌트 분리 + 직접발송 변수맵 컨트롤타워 통합
 

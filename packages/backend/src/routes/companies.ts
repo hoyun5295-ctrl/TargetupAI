@@ -592,12 +592,14 @@ async function aggregateDashboardCards(companyId: string, cardIds: string[], use
       }
 
       case 'monthly_spend': {
-        const spendCreatedByFilter = isCompanyUser ? ` AND reference_id IN (SELECT id::text FROM campaigns WHERE company_id = '${companyId}' AND created_by = '${userId}')` : '';
+        // ★ D98: created_by 직접 필터링 (서브쿼리 대신 — 테스트발송 더미 UUID 문제 해결)
+        const spendCreatedByFilter = isCompanyUser ? ` AND created_by = $2` : '';
+        const spendParams: any[] = isCompanyUser ? [companyId, userId] : [companyId];
         const spendResult = await query(
           `SELECT COALESCE(SUM(amount), 0)::numeric as total
            FROM balance_transactions
            WHERE company_id = $1 AND type = 'deduct' AND created_at >= date_trunc('month', NOW())${spendCreatedByFilter}`,
-          [companyId]
+          spendParams
         );
         value = parseFloat(spendResult.rows[0]?.total ?? 0);
         hasData = true;

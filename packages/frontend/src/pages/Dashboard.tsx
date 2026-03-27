@@ -3136,11 +3136,16 @@ const campaignData = {
                             if (t.subject) setDirectSubject(t.subject);
                             if (t.message_type) setDirectMsgType(t.message_type);
                           }
-                          // ★ MMS 이미지 복원
+                          // ★ D98: MMS 이미지 복원 — serverPath에서 API URL 추출
                           if (t.message_type === 'MMS' && t.mms_image_paths && Array.isArray(t.mms_image_paths)) {
-                            setMmsUploadedImages(t.mms_image_paths.map((p: string, i: number) => ({
-                              serverPath: p, url: p, filename: `image_${i + 1}`, size: 0
-                            })));
+                            setMmsUploadedImages(t.mms_image_paths.map((p: string, i: number) => {
+                              // serverPath가 절대경로면 → /api/mms-images/{companyId}/{filename} URL 생성
+                              const parts = p.replace(/\\/g, '/').split('/');
+                              const filename = parts[parts.length - 1];
+                              const companyDir = parts[parts.length - 2];
+                              const apiUrl = filename && companyDir ? `/api/mms-images/${companyDir}/${filename}` : p;
+                              return { serverPath: p, url: apiUrl, filename: filename || `image_${i + 1}`, size: 0 };
+                            }));
                           }
                           setShowTemplateBox(null);
                           setToast({ show: true, type: 'success', message: '문자가 적용되었습니다.' });

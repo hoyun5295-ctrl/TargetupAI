@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { formatPreviewValue } from '../utils/formatDate';
 
 // ─── 타입 ───
 
@@ -454,7 +455,7 @@ export default function FileUploadMappingModal({ show, onClose, onSaveStart, onP
                           {filePreview.map((row: any, rowIdx: number) => (
                             <tr key={rowIdx} className="hover:bg-gray-50">
                               {fileHeaders.map((h, colIdx) => (
-                                <td key={colIdx} className="px-3 py-2 border-b text-gray-700 whitespace-nowrap">{row[h] ?? '-'}</td>
+                                <td key={colIdx} className="px-3 py-2 border-b text-gray-700 whitespace-nowrap">{row[h] != null ? formatPreviewValue(row[h]) : '-'}</td>
                               ))}
                             </tr>
                           ))}
