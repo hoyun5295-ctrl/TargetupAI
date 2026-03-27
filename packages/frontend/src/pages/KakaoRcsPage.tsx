@@ -24,6 +24,11 @@ export default function KakaoRcsPage() {
   const [activeTab, setActiveTab] = useState<Tab>('alimtalk');
   const [loading, setLoading] = useState(false);
 
+  // ★ 브랜드메시지 엔터프라이즈 게이팅
+  const [planCode, setPlanCode] = useState<string>('');
+  const [brandLockedModal, setBrandLockedModal] = useState(false);
+  const isBrandLocked = !['ENTERPRISE'].includes(planCode);
+
   // 알림톡
   const [alimtalkTemplates, setAlimtalkTemplates] = useState<any[]>([]);
   const [alimtalkFilter, setAlimtalkFilter] = useState('');
@@ -91,6 +96,12 @@ export default function KakaoRcsPage() {
     setLoading(true);
     Promise.all([fetchAlimtalkTemplates(), fetchRcsTemplates(), fetchProfiles()])
       .finally(() => setLoading(false));
+
+    // 플랜 정보 조회 (브랜드메시지 게이팅용)
+    fetch('/api/companies/my-plan', { headers: { Authorization: `Bearer ${getToken()}` } })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.plan_code) setPlanCode(d.plan_code); })
+      .catch(() => {});
   }, [fetchAlimtalkTemplates, fetchRcsTemplates, fetchProfiles]);
 
   const deleteTemplate = async (type: 'kakao' | 'rcs', id: string, name: string) => {
@@ -152,19 +163,28 @@ export default function KakaoRcsPage() {
       {/* 탭 */}
       <div className="bg-white border-b border-gray-200">
         <div className="max-w-6xl mx-auto px-6 flex">
-          {tabs.map(tab => (
-            <button
-              key={tab.key}
-              onClick={() => setActiveTab(tab.key)}
-              className={`px-5 py-3 text-sm font-medium transition-colors border-b-2 ${
-                activeTab === tab.key
-                  ? `border-${tab.color}-500 text-${tab.color}-600`
-                  : 'border-transparent text-gray-500 hover:text-gray-700'
-              }`}
-            >
-              {tab.icon} {tab.label}
-            </button>
-          ))}
+          {tabs.map(tab => {
+            const locked = tab.key === 'brand' && isBrandLocked;
+            return (
+              <button
+                key={tab.key}
+                onClick={() => {
+                  if (locked) { setBrandLockedModal(true); return; }
+                  setActiveTab(tab.key);
+                }}
+                className={`px-5 py-3 text-sm font-medium transition-colors border-b-2 relative ${
+                  activeTab === tab.key
+                    ? `border-${tab.color}-500 text-${tab.color}-600`
+                    : locked
+                      ? 'border-transparent text-gray-300 cursor-not-allowed'
+                      : 'border-transparent text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                {tab.icon} {tab.label}
+                {locked && <span className="ml-1 text-[10px]">🔒</span>}
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -503,6 +523,34 @@ export default function KakaoRcsPage() {
                 className="px-5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-medium transition disabled:opacity-50">
                 {profileSaving ? '등록 중...' : '등록'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 브랜드메시지 잠금 모달 */}
+      {brandLockedModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-2xl shadow-xl max-w-sm w-full mx-4 p-6">
+            <div className="text-center">
+              <div className="text-4xl mb-3">🔒</div>
+              <h3 className="text-lg font-bold text-gray-900 mb-2">브랜드메시지</h3>
+              <p className="text-sm text-gray-600 mb-4">
+                브랜드메시지는 <span className="font-bold text-purple-600">엔터프라이즈</span> 요금제부터 이용 가능합니다.
+              </p>
+              <p className="text-xs text-gray-400 mb-6">
+                카카오 브랜드메시지 8종 유형 발송 + 템플릿 기반 개인화 발송 기능이 포함됩니다.
+              </p>
+              <div className="flex gap-2">
+                <button onClick={() => setBrandLockedModal(false)}
+                  className="flex-1 px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-lg text-sm transition">
+                  닫기
+                </button>
+                <button onClick={() => { setBrandLockedModal(false); navigate('/settings'); }}
+                  className="flex-1 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm font-medium transition">
+                  요금제 확인
+                </button>
+              </div>
             </div>
           </div>
         </div>
