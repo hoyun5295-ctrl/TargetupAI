@@ -172,9 +172,14 @@ export function replaceDirectVars(
   let result = text;
   for (const { variable, fieldKey } of DIRECT_VAR_MAP) {
     const val = recipient[fieldKey];
+    const hasVal = val != null && String(val).trim();
+    // ★ callback(회신번호)은 전화번호이므로 숫자 포맷팅(formatPreviewValue) 적용 금지
+    const displayVal = hasVal
+      ? (fieldKey === 'callback' ? String(val).trim() : formatPreviewValue(val))
+      : (fieldKey === 'callback' ? fallbackCallback || '' : '');
     result = result.replace(
       new RegExp(variable.replace(/%/g, '%'), 'g'),
-      val != null && String(val).trim() ? formatPreviewValue(val) : (fieldKey === 'callback' ? fallbackCallback || '' : '')
+      displayVal
     );
   }
   // 잔여 %변수% 제거 (기존 동작 호환 — 매핑 안 된 변수는 빈값으로)

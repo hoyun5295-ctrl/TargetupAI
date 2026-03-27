@@ -197,7 +197,7 @@ export default function CustomerDBModal({ onClose, token, userType }: CustomerDB
   // 숫자/날짜 필드에만 연산자 드롭다운 표시 (문자열은 자동 포함검색)
   const getOperatorsForField = (fieldKey: string) => {
     const dataType = getFieldDataType(fieldKey);
-    if (['number', 'integer', 'float', 'numeric'].includes(dataType)) {
+    if (['number', 'integer', 'int', 'float', 'numeric'].includes(dataType)) {
       return [
         { v: 'gte', l: '이상' }, { v: 'lte', l: '이하' }, { v: 'eq', l: '일치' }, { v: 'between', l: '범위' },
       ];
@@ -213,7 +213,7 @@ export default function CustomerDBModal({ onClose, token, userType }: CustomerDB
   // 숫자/날짜 필드인지 확인
   const isNumericOrDateField = (fieldKey: string): boolean => {
     const dataType = getFieldDataType(fieldKey);
-    return ['number', 'integer', 'float', 'numeric', 'date', 'datetime', 'timestamp'].includes(dataType);
+    return ['number', 'integer', 'int', 'float', 'numeric', 'date', 'datetime', 'timestamp'].includes(dataType);
   };
 
   // ★ D83: 날짜 필드인지 확인 (date picker 적용용)
@@ -227,7 +227,7 @@ export default function CustomerDBModal({ onClose, token, userType }: CustomerDB
   const hasDropdownOptions = (fieldKey: string) => {
     if (!filterOptions[fieldKey] || filterOptions[fieldKey].length === 0) return false;
     const dataType = getFieldDataType(fieldKey);
-    if (['number', 'integer', 'float', 'numeric', 'date', 'datetime', 'timestamp'].includes(dataType)) return false;
+    if (['number', 'integer', 'int', 'float', 'numeric', 'date', 'datetime', 'timestamp'].includes(dataType)) return false;
     // ★ 값이 모두 숫자이면 숫자 필드로 취급 (금액, 포인트 등 커스텀 필드)
     const vals = filterOptions[fieldKey];
     const allNumeric = vals.length > 0 && vals.every((v: string) => v !== '' && !isNaN(Number(String(v).replace(/,/g, ''))));

@@ -19,7 +19,7 @@ router.get('/settings', authenticate, async (req: Request, res: Response) => {
     const userId = (req as any).user?.userId;
     const result = await query(`
       SELECT
-        company_name, brand_name, business_type, reject_number, manager_phone, manager_contacts,
+        company_name, brand_name, business_type, reject_number, manager_phone,
         monthly_budget, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao,
         send_start_hour, send_end_hour, daily_limit_per_customer,
         holiday_send_allowed, duplicate_prevention_days,
@@ -30,18 +30,14 @@ router.get('/settings', authenticate, async (req: Request, res: Response) => {
 
     const row = result.rows[0] || {};
     // ★ B17-11: 사용자별 080번호 우선 적용 (reject_number override)
-    // ★ D91+D95: 사용자별 manager_contacts 완전 격리 (companies 폴백 제거)
-    // 각 사용자는 자기 담당자만 봄. 미설정 시 빈 배열 → 직접 등록 유도
     if (userId) {
-      const userResult = await query('SELECT opt_out_080_number, manager_contacts FROM users WHERE id = $1', [userId]);
+      const userResult = await query('SELECT opt_out_080_number FROM users WHERE id = $1', [userId]);
       const userOpt080 = userResult.rows[0]?.opt_out_080_number;
       if (userOpt080) row.reject_number = userOpt080;
-      // ★ D95: companies 폴백 제거 — 사용자 담당자가 없으면 빈 배열 (다른 사용자 담당자 공유 방지)
-      const userManagerContacts = userResult.rows[0]?.manager_contacts;
-      row.manager_contacts = (userManagerContacts && Array.isArray(userManagerContacts) && userManagerContacts.length > 0)
-        ? userManagerContacts
-        : [];
     }
+    // ★ D97: manager_contacts는 test_contacts 테이블로 완전 이관
+    // settings 응답에서 제거 — 프론트는 /api/test-contacts API로만 담당자 관리
+    delete row.manager_contacts;
     // manager_phone: JSON 문자열이면 파싱, 단일 번호면 배열로 변환
     if (row.manager_phone) {
       try {
@@ -74,43 +70,19 @@ router.put('/settings', authenticate, async (req: Request, res: Response) => {
     const companyId = (req as any).user?.companyId;
     const userId = (req as any).user?.userId;
     const {
-      brand_name, business_type, reject_number, manager_phones, manager_contacts,
+      brand_name, business_type, reject_number, manager_phones,
       monthly_budget, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao,
       send_start_hour, send_end_hour, daily_limit_per_customer,
       holiday_send_allowed, duplicate_prevention_days,
       target_strategy, cross_category_allowed, excluded_segments,
       approval_required
     } = req.body;
+    // ★ D97: manager_contacts는 test_contacts 테이블로 완전 이관
+    // PUT /settings에서 manager_contacts 저장 로직 완전 제거
+    // 담당자 추가/삭제는 /api/test-contacts API에서만 처리
 
     // manager_phones 배열 → JSON 문자열로 저장 (하위 호환)
     const managerPhoneJson = manager_phones ? JSON.stringify(manager_phones) : null;
-    // manager_contacts는 JSON 문자열로 변환해서 저장
-    const managerContactsJson = manager_contacts ? JSON.stringify(manager_contacts) : null;
-
-    // ★ D91+D92: manager_contacts는 사용자(user)별로 저장하여 브랜드별 담당자 격리
-    // users.manager_contacts에 저장 성공하면 companies 테이블에는 쓰지 않음 (덮어쓰기 방지)
-    let savedToUser = false;
-    if (managerContactsJson && userId) {
-      try {
-        await query(
-          `UPDATE users SET manager_contacts = $1, updated_at = NOW() WHERE id = $2`,
-          [managerContactsJson, userId]
-        );
-        savedToUser = true;
-      } catch (e: any) {
-        // manager_contacts 컬럼 미존재 시 companies fallback 저장
-        if (e.code === '42703') {
-          console.log('[D92] users.manager_contacts 컬럼 없음 — companies fallback 저장');
-        } else {
-          throw e;
-        }
-      }
-    }
-
-    // ★ D94: savedToUser이면 companies.manager_contacts는 건드리지 않음 (덮어쓰기 방지)
-    const managerContactsClause = savedToUser
-      ? 'manager_contacts = manager_contacts'
-      : 'manager_contacts = COALESCE($5, manager_contacts)';
 
     await query(`
       UPDATE companies SET
@@ -118,25 +90,24 @@ router.put('/settings', authenticate, async (req: Request, res: Response) => {
         business_type = COALESCE($2, business_type),
         reject_number = COALESCE($3, reject_number),
         manager_phone = COALESCE($4, manager_phone),
-        ${managerContactsClause},
-        monthly_budget = COALESCE($6, monthly_budget),
-        cost_per_sms = COALESCE($7, cost_per_sms),
-        cost_per_lms = COALESCE($8, cost_per_lms),
-        cost_per_mms = COALESCE($9, cost_per_mms),
-        cost_per_kakao = COALESCE($10, cost_per_kakao),
-        send_start_hour = COALESCE($11, send_start_hour),
-        send_end_hour = COALESCE($12, send_end_hour),
-        daily_limit_per_customer = COALESCE($13, daily_limit_per_customer),
-        holiday_send_allowed = COALESCE($14, holiday_send_allowed),
-        duplicate_prevention_days = COALESCE($15, duplicate_prevention_days),
-        target_strategy = COALESCE($16, target_strategy),
-        cross_category_allowed = COALESCE($17, cross_category_allowed),
-        excluded_segments = COALESCE($18, excluded_segments),
-        approval_required = COALESCE($19, approval_required),
+        monthly_budget = COALESCE($5, monthly_budget),
+        cost_per_sms = COALESCE($6, cost_per_sms),
+        cost_per_lms = COALESCE($7, cost_per_lms),
+        cost_per_mms = COALESCE($8, cost_per_mms),
+        cost_per_kakao = COALESCE($9, cost_per_kakao),
+        send_start_hour = COALESCE($10, send_start_hour),
+        send_end_hour = COALESCE($11, send_end_hour),
+        daily_limit_per_customer = COALESCE($12, daily_limit_per_customer),
+        holiday_send_allowed = COALESCE($13, holiday_send_allowed),
+        duplicate_prevention_days = COALESCE($14, duplicate_prevention_days),
+        target_strategy = COALESCE($15, target_strategy),
+        cross_category_allowed = COALESCE($16, cross_category_allowed),
+        excluded_segments = COALESCE($17, excluded_segments),
+        approval_required = COALESCE($18, approval_required),
         updated_at = NOW()
-      WHERE id = $20
+      WHERE id = $19
     `, [
-      brand_name, business_type, reject_number, managerPhoneJson, savedToUser ? null : managerContactsJson,
+      brand_name, business_type, reject_number, managerPhoneJson,
       monthly_budget, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao,
       send_start_hour, send_end_hour, daily_limit_per_customer,
       holiday_send_allowed, duplicate_prevention_days,

@@ -11,9 +11,7 @@ export default function Settings() {
   const [saving, setSaving] = useState(false);
   const [newPhone, setNewPhone] = useState('');
   const [newName, setNewName] = useState('');
-  const [managerContacts, setManagerContacts] = useState<{id?: string, phone: string, name: string, type?: string}[]>([]);
-  const [testContactMode, setTestContactMode] = useState<'shared' | 'personal' | 'both'>('shared');
-  const [activeTab, setActiveTab] = useState<'shared' | 'personal'>('shared');
+  const [managerContacts, setManagerContacts] = useState<{id?: string, phone: string, name: string}[]>([]);
   const [callbackNumbers, setCallbackNumbers] = useState<{id: string, phone: string, label: string, is_default: boolean, store_code?: string, store_name?: string}[]>([]);
   const [callbackPage, setCallbackPage] = useState(0);
   const callbackPageSize = 5;
@@ -58,7 +56,7 @@ export default function Settings() {
       });
       const data = await res.json();
       if (data) {
-        const { manager_phones, manager_contacts, manager_phone, callback_auth_phone, callback_auth_verified, ...rest } = data;
+        const { manager_phones, manager_phone, callback_auth_phone, callback_auth_verified, ...rest } = data;
         setSettings((prev) => ({ ...prev, ...rest }));
         // 담당자 사전수신 목록
         const tcRes = await fetch('/api/test-contacts', {
@@ -67,7 +65,6 @@ export default function Settings() {
         const tcData = await tcRes.json();
         if (tcData.success) {
           setManagerContacts(tcData.contacts || []);
-          setTestContactMode(tcData.mode || 'shared');
         }
       }
 
@@ -97,7 +94,7 @@ export default function Settings() {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ ...settings, manager_contacts: managerContacts }),
+        body: JSON.stringify(settings),
       });
       const data = await res.json();
       showToast('success', data.message || '저장 완료');
@@ -131,7 +128,7 @@ export default function Settings() {
     const res = await fetch('/api/test-contacts', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ name: newName.trim(), phone: cleaned, isShared: testContactMode === 'both' ? activeTab === 'shared' : undefined }),
+      body: JSON.stringify({ name: newName.trim(), phone: cleaned }),
     });
     const data = await res.json();
     if (data.success) {
@@ -225,41 +222,12 @@ export default function Settings() {
             캠페인 발송 전 등록된 담당자 전원에게 테스트 문자를 보내 확인할 수 있습니다.
           </p>
 
-          {testContactMode === 'both' && (
-            <div className="flex gap-2 mb-4">
-              <button
-                onClick={() => setActiveTab('shared')}
-                className={`px-4 py-2 rounded-lg text-sm font-medium ${
-                  activeTab === 'shared' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                }`}
-              >
-                회사 공용
-              </button>
-              <button
-                onClick={() => setActiveTab('personal')}
-                className={`px-4 py-2 rounded-lg text-sm font-medium ${
-                  activeTab === 'personal' ? 'bg-purple-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                }`}
-              >
-                내 번호
-              </button>
-            </div>
-          )}
-
-          {managerContacts.filter(c =>
-            testContactMode === 'both'
-              ? (activeTab === 'shared' ? c.type === 'shared' : c.type === 'personal')
-              : true
-          ).length > 0 ? (
+          {managerContacts.length > 0 ? (
             <div className="space-y-2 mb-4">
-              {managerContacts
-                .filter(c => testContactMode === 'both' ? (activeTab === 'shared' ? c.type === 'shared' : c.type === 'personal') : true)
-                .map((contact, idx) => (
+              {managerContacts.map((contact, idx) => (
                 <div
                   key={contact.id || contact.phone}
-                  className={`flex items-center gap-3 rounded-lg px-4 py-2.5 ${
-                    contact.type === 'shared' ? 'bg-blue-50 border border-blue-200' : 'bg-purple-50 border border-purple-200'
-                  }`}
+                  className="flex items-center gap-3 rounded-lg px-4 py-2.5 bg-emerald-50 border border-emerald-200"
                 >
                   <span className="flex-1 font-medium text-gray-800">
                     {contact.name || `담당자 ${idx + 1}`}: {formatPhone(contact.phone)}

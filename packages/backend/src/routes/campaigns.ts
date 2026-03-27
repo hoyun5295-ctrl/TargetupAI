@@ -26,6 +26,7 @@ import { prepaidDeduct, prepaidRefund } from '../utils/prepaid';
 import { cancelCampaign, syncCampaignResults } from '../utils/campaign-lifecycle';
 import { buildFilterQueryCompat } from '../utils/customer-filter';
 import { filterByIndividualCallback, buildCallbackErrorResponse, buildCallbackConfirmResponse } from '../utils/callback-filter';
+import { getUserTestContacts } from '../utils/test-contact-helper';
 
 // ★ toKoreaTimeStr → utils/sms-queue.ts로 이동 (import 사용)
 
@@ -261,28 +262,14 @@ router.post('/test-send', async (req: Request, res: Response) => {
       }
     }
 
-    // 회사 설정에서 담당자 정보 + 스키마 가져오기
-    // ★ D91: 사용자별 manager_contacts 우선 (브랜드별 담당자 격리)
+    // 회사 설정에서 스키마 가져오기
     const companyResult = await query(
-      'SELECT manager_phone, manager_contacts, customer_schema FROM companies WHERE id = $1',
+      'SELECT customer_schema FROM companies WHERE id = $1',
       [companyId]
     );
 
     if (companyResult.rows.length === 0) {
       return res.status(404).json({ error: '회사 정보를 찾을 수 없습니다.' });
-    }
-
-    // D91: user별 manager_contacts 우선 적용
-    if (userId) {
-      try {
-        const userMcResult = await query('SELECT manager_contacts FROM users WHERE id = $1', [userId]);
-        const userMc = userMcResult.rows[0]?.manager_contacts;
-        if (userMc && Array.isArray(userMc) && userMc.length > 0) {
-          companyResult.rows[0].manager_contacts = userMc;
-        }
-      } catch {
-        // manager_contacts 컬럼 미존재 시 companies fallback
-      }
     }
 
     // ★ 미리보기와 동일한 고객으로 개인화 — 프론트에서 sampleCustomer 전달 시 그대로 사용
@@ -314,20 +301,8 @@ router.post('/test-send', async (req: Request, res: Response) => {
       return res.status(400).json({ error: '기본 회신번호가 설정되지 않았습니다. 회사 설정에서 기본 회신번호를 등록해주세요.', code: 'NO_DEFAULT_CALLBACK' });
     }
 
-    // 새 형식 (manager_contacts) 우선, 없으면 기존 형식 (manager_phone)
-    let managerContacts: {phone: string, name?: string}[] = [];
-
-    if (companyResult.rows[0].manager_contacts && companyResult.rows[0].manager_contacts.length > 0) {
-      managerContacts = companyResult.rows[0].manager_contacts;
-    } else if (companyResult.rows[0].manager_phone) {
-      const managerPhoneRaw = companyResult.rows[0].manager_phone;
-      try {
-        const phones = JSON.parse(managerPhoneRaw);
-        managerContacts = phones.map((p: string) => ({ phone: p }));
-      } catch {
-        managerContacts = [{ phone: managerPhoneRaw }];
-      }
-    }
+    // ★ D97: CT-11 컨트롤타워로 담당자 조회 (사용자별 격리)
+    const managerContacts = await getUserTestContacts(companyId, userId!);
 
     if (managerContacts.length === 0) {
       return res.status(400).json({ error: '등록된 담당자 번호가 없습니다. 설정에서 번호를 추가해주세요.' });

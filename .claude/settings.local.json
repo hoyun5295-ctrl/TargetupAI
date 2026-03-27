@@ -41,7 +41,8 @@
       "Read(//c/Program Files/LibreOffice/program/**)",
       "Read(//c/Program Files \\(x86\\)/LibreOffice/program/**)",
       "Bash(/tmp/direct_send_analysis.md:*)",
-      "Bash(ls C:/Users/ceo/projects/targetup/packages/frontend/src/components/Direct*)"
+      "Bash(ls C:/Users/ceo/projects/targetup/packages/frontend/src/components/Direct*)",
+      "Bash(python3:*)"
     ]
   }
 }

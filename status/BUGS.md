@@ -3,7 +3,7 @@
 > **목적:** 버그의 발견→분석→수정→교차검증→완료를 체계적으로 관리하여 재발을 방지한다.  
 > **원칙:** (1) 추측성 땜질 금지 (2) 근본 원인 3줄 이내 특정 (3) 교차검증 통과 전까지 Closed 금지 (4) 재발 패턴 기록  
 > **SoT(진실의 원천):** STATUS.md + 이 문서. 채팅에서 떠도는 "수정 완료"는 교차검증 전까지 "임시"다.
-> **현황:** **2026-03-20 D89 마이너수정5건+D88회귀수정 — ✅배포완료.** D88 QA 11건(7그룹) ✅배포완료. D87 발신번호배정 ✅배포완료. D79 인라인전수제거 4건 🟡배포대기. D74 컨트롤타워 동적화 3건 🟡검증대기. D73~D72 ✅배포완료. D71 ✅배포완료. D70 18건 ✅배포완료. 🔵Open 1건: B17-05(스팸테스트 간헐적 공백, 보류).
+> **현황:** **2026-03-27 D96 배포완료.** D95 ✅배포완료. D94 ✅배포완료. D91 ✅배포완료. D89 ✅배포완료. D88 ✅배포완료. D87 ✅배포완료. D79 ✅배포완료. D74 ✅배포완료. D73 ✅배포완료. D72 ✅배포완료. D71 ✅배포완료. D70 ✅배포완료. 🔵Open 1건: B17-05(스팸테스트 간헐적 공백, 보류).
 > **⚠️ 2026-02-26 코드 실물 검증:** GPT "미수정" 지적 5건 중 GP-01/03/05는 이미 코드에 반영됨 확인. GP-04는 풀 레벨로 보강. 문서의 "❌ 미수정" 표기가 실제 코드보다 뒤떨어져 있었음.
 
 ---
@@ -173,39 +173,39 @@
 
 > **배경:** (1) YYMMDD 6자리 업로드 에러 재발 — 인라인 함수만 수정하고 컨트롤타워(normalize.ts) 미수정. (2) 프로 요금제 plan_code 대소문자 불일치. (3) 고객DB 필터 하드코딩. (4) Harold님 지시: routes/ 전체 인라인 중복 함수 전수조사 및 제거.
 
-### B-D79-01 🟡 YYMMDD 6자리 업로드 에러 — normalize.ts 컨트롤타워 미수정
+### B-D79-01 ✅ YYMMDD 6자리 업로드 에러 — normalize.ts 컨트롤타워 미수정
 - **심각도:** 🔴 Critical
 - **현상:** 최근구매일이 YYMMDD(250103) 형식인 엑셀 업로드 시 에러 발생
 - **근본 원인:** 이전 세션에서 upload.ts 인라인 `normalizeDateValue()` 함수에만 YYMMDD 핸들러 추가. 실제 FIELD_MAP 경로는 `normalizeByFieldKey()` → `normalizeDate()`(normalize.ts)를 호출하므로 인라인 수정 미적용. **컨트롤타워 원칙 위반의 대표적 사례.**
 - **수정:** (1) normalize.ts `normalizeDate()`에 YYMMDD 6자리 핸들러 추가. (2) upload.ts 인라인 `normalizeDateValue()` + `excelSerialToDateStr()` 완전 삭제, `normalizeDate` import로 교체
 - **수정 파일:** `normalize.ts`, `upload.ts`
 - **교훈:** CLAUDE.md D79 사례로 등록. 컨트롤타워 함수의 실제 호출 경로를 반드시 추적해야 함
-- **상태:** 🟡 수정완료-배포대기
+- **상태:** ✅ Closed (배포 완료)
 
-### B-D79-02 🟡 프로 요금제 대시보드 — 스팸테스트 비용 합산 표시
+### B-D79-02 ✅ 프로 요금제 대시보드 — 스팸테스트 비용 합산 표시
 - **심각도:** 🟠 Major
 - **현상:** 프로 요금제 대시보드에 이번달 사용현황 1,342원 표시 — 스팸필터 테스트 비용까지 합산
 - **근본 원인:** customers.ts에서 `planCode === 'pro'`(소문자)로 비교 → DB에 'PRO'(대문자) 저장 → 항상 false → `isProOrAbove`가 false → 스팸테스트 비용 필터링 안 됨
 - **수정:** `.toUpperCase()` 적용 + 대문자 비교
 - **수정 파일:** `customers.ts`
 - **교훈:** DB 저장값의 실제 케이스를 반드시 확인 후 비교
-- **상태:** 🟡 수정완료-배포대기
+- **상태:** ✅ Closed (배포 완료)
 
-### B-D79-03 🟡 customers_unified VIEW — uploaded_by 컬럼 누락
+### B-D79-03 ✅ customers_unified VIEW — uploaded_by 컬럼 누락
 - **심각도:** 🔴 Critical
 - **현상:** customers 테이블에 uploaded_by 컬럼 추가 후 VIEW 미재생성 → 조회 시 에러
 - **근본 원인:** D71 교훈(customers_unified VIEW 재생성 필수) 재발 — 컬럼 추가 시 VIEW 재생성 누락
 - **수정:** Harold님이 서버에서 직접 DROP VIEW + CREATE VIEW DDL 실행 완료
-- **상태:** 🟡 수정완료-배포대기 (VIEW는 적용 완료, 코드 배포 대기)
+- **상태:** ✅ Closed (배포 완료)
 
-### B-D79-04 🟡 인라인 중복 함수 8건 — routes/ 전체 전수조사 및 제거
+### B-D79-04 ✅ 인라인 중복 함수 8건 — routes/ 전체 전수조사 및 제거
 - **심각도:** 🔴 Critical (구조적 버그 재발 원인)
 - **현상:** CLAUDE.md에 인라인 금지 원칙이 있으나 routes/ 파일 8곳에 컨트롤타워 중복 함수 잔존
 - **근본 원인:** 과거 세션에서 컨트롤타워 함수를 만들면서 기존 인라인 함수를 제거하지 않고 방치
 - **수정:** 8건 전부 물리적 삭제 + 컨트롤타워 import로 교체. 컨트롤타워 함수에 export 누락된 것도 보완
 - **수정 파일:** upload.ts, customers.ts, ai.ts, campaigns.ts, manage-stats.ts, spam-filter.ts, auto-campaigns.ts, spam-test-queue.ts, auto-campaign-worker.ts
 - **교훈:** 컨트롤타워 함수 신설 시 기존 인라인 함수를 반드시 동시에 삭제해야 함. 문서화만으로는 재발 방지 불가 → 물리적 제거가 유일한 해결책
-- **상태:** 🟡 수정완료-배포대기
+- **상태:** ✅ Closed (배포 완료)
 
 ---
 
@@ -250,7 +250,7 @@
 > **근본 원인:** 컨트롤타워(FIELD_MAP, customer-filter.ts, ai.ts)에 하드코딩이 남아있어 새 필드 추가 시 누락 반복. normalizePhone이 유선번호를 전부 null 처리.
 > **핵심 수정:** 컨트롤타워를 FIELD_MAP 기반 동적 구조로 전환. 필드 추가 시 핸들러 수동 추가 불필요.
 
-### B-D74-01 🟡 매장전화번호(store_phone) 3만건 전부 NULL — normalizePhone 유선번호 무효 처리
+### B-D74-01 ✅ 매장전화번호(store_phone) 3만건 전부 NULL — normalizePhone 유선번호 무효 처리
 - **심각도:** 🔴 Critical
 - **발견자:** sh_cpb
 - **현상:** 시세이도 3만건 업로드 시 매장전화번호(02-3479-0022 등 유선번호) 전부 store_phone에 NULL 저장. enabled-fields에서 매장전화번호 미표시. 개인화 변수(%매장전화번호%) 공백 처리
@@ -258,24 +258,24 @@
 - **수정:** (1) normalize.ts에 `isValidKoreanLandline()` + `normalizeStorePhone()` 함수 추가 — 유선번호+휴대폰 모두 허용. (2) standard-field-map.ts store_phone normalizeFunction을 `normalizeStorePhone`으로 변경. (3) normalizeByFieldKey switch에 case 추가
 - **수정 파일:** `normalize.ts`, `standard-field-map.ts`
 - **데이터 보정:** 시세이도 재업로드 예정 (Harold님 지시)
-- **상태:** 🟡 수정완료-검증대기
+- **상태:** ✅ Closed (배포 완료)
 
-### B-D74-02 🟡 AI 한줄로 타겟 수 불일치 — customer-filter.ts mixed 모드 하드코딩 필터
+### B-D74-02 ✅ AI 한줄로 타겟 수 불일치 — customer-filter.ts mixed 모드 하드코딩 필터
 - **심각도:** 🔴 Critical
 - **발견자:** sh_cpb
 - **현상:** SILVER 등급 + 최근구매금액 90,000원 이상 → 추출 1,224명 (실제 823명). 리스트 계산과 불일치
 - **근본 원인:** customer-filter.ts mixed 모드(AI 경로)에 `recent_purchase_amount`, `purchase_count` 핸들러가 없어 필터 완전 무시. SILVER 필터만 적용되어 SILVER 전체 1,224명 반환
 - **수정:** mixed 모드 하드코딩 핸들러 전부 제거 → `getColumnFields()` 기반 동적 필터. FIELD_MAP에 등록된 필드는 dataType(number/date/string)별로 자동 연산자 생성. 새 필드 추가 시 핸들러 추가 불필요
 - **수정 파일:** `customer-filter.ts`
-- **상태:** 🟡 수정완료-검증대기
+- **상태:** ✅ Closed (배포 완료)
 
-### B-D74-03 🟡 AI 프롬프트 필터 필드 하드코딩 — 고객사별 실제 필드 미반영
+### B-D74-03 ✅ AI 프롬프트 필터 필드 하드코딩 — 고객사별 실제 필드 미반영
 - **심각도:** 🟠 Major
 - **현상:** AI 타겟추출 프롬프트에 필터 필드 10개만 하드코딩. recent_purchase_amount, purchase_count 등 누락. 커스텀 필드는 raw key(custom_1)로만 표시
 - **근본 원인:** services/ai.ts recommendTarget 프롬프트의 "사용 가능한 필터 필드" 목록이 하드코딩. 고객사별 실제 데이터 필드 미반영
 - **수정:** (1) `getColumnFields()` + COUNT FILTER로 해당 고객사에 데이터가 있는 직접 컬럼 필드만 동적 생성. (2) `customer_field_definitions` 조회로 커스텀 필드 라벨명 표시. (3) grade/gender/region DISTINCT 조회는 데이터 있는 필드만 실행 (최적화)
 - **수정 파일:** `services/ai.ts`
-- **상태:** 🟡 수정완료-검증대기
+- **상태:** ✅ Closed (배포 완료)
 
 ---
 
@@ -297,21 +297,21 @@
 - **수정:** 캠페인별 message_type(SMS/LMS/MMS) + send_channel(kakao) 체크하여 올바른 단가 적용 (filteredCampaigns.reduce 패턴)
 - **상태:** ✅ Closed (배포 완료, Harold님 확인)
 
-### B-D72-03 🟡 예약발송 `column "custom_2" does not exist` — storageType 동적 필터
+### B-D72-03 ✅ 예약발송 `column "custom_2" does not exist` — storageType 동적 필터
 - **심각도:** 🔴🔴 Blocker
 - **현상:** 예약발송 시 서버 500에러 — `column "custom_2" does not exist at character 618`
 - **원인:** `enrichWithCustomFields()`가 custom_fields JSONB 내부 키(custom_1~15)를 fieldMappings의 `column` 속성에 설정 → 동적 SELECT에 그대로 포함 → PostgreSQL에 실제 컬럼이 없어서 에러
 - **수정:** VarCatalogEntry에 `storageType` 속성 추가 ('column' vs 'custom_fields'). 6개 동적 SELECT 지점 전부에서 `storageType !== 'custom_fields'` 필터링
 - **전수점검:** campaigns.ts 4곳 + auto-campaign-worker.ts 1곳 + spam-filter.ts 1곳 = **6곳 모두 적용**
-- **상태:** 🟡 수정완료-검증대기
+- **상태:** ✅ Closed (배포 완료)
 
-### B-D72-04 🟡 발송 성능 — 25,000건에 3분, 건건이 MySQL INSERT
+### B-D72-04 ✅ 발송 성능 — 25,000건에 3분, 건건이 MySQL INSERT
 - **심각도:** 🔴 Critical (상용화 차단)
 - **현상:** 25,000건 발송에 ~3분 소요. 70만건이면 ~90분. 상용화 불가
 - **원인:** 건건이 MySQL INSERT (25,000회 DB 왕복)
 - **수정:** sms-queue.ts (CT-04)에 `bulkInsertSmsQueue()` 함수 추가 — 라운드로빈 테이블 분배 + 5,000건 배치 bulk INSERT. AI캠페인/직접발송/자동발송 3개 경로 적용
 - **직접발송 app_etc2 누락도 동시 수정:** row에 companyId(app_etc2) 포함
-- **상태:** 🟡 수정완료-검증대기
+- **상태:** ✅ Closed (배포 완료)
 
 ---
 
