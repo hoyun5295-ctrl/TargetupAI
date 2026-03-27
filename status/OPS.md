@@ -22,7 +22,15 @@
 |--------|------|------|------|
 | SSH | 58.227.193.62 | 22 | administrator |
 | PostgreSQL | localhost | 5432 | Docker 컨테이너 (튜닝 완료) |
-| MySQL (QTmsg) | localhost | 3306 | Docker 컨테이너 |
+| MySQL (QTmsg) | localhost | 3306 | Docker 컨테이너, **TZ=KST(+09:00)** |
+
+> **⚠️ MySQL 시간 컬럼 TZ 주의 (D98 확인):**
+> - MySQL 서버 자체: `@@global.time_zone = +09:00` (KST)
+> - `sendreq_time`: 우리 앱 `NOW()` → **KST** (DATE_ADD 불필요)
+> - `mobsend_time`: QTmsg Agent가 **통신사 리포트 시간을 그대로 저장** → **UTC** (DATE_ADD +9h 필요)
+> - `repmsg_recvtm`: QTmsg Agent가 **통신사 리포트 시간을 그대로 저장** → **UTC** (DATE_ADD +9h 필요)
+> - QTmsg 설정(`qtmsg.xml update_report`)에서 통신사 문자열을 그대로 DATETIME에 INSERT하므로 변경 불가
+> - **코드에서 조회 시 반드시 `SMS_DETAIL_FIELDS` / `SMS_EXPORT_FIELDS` 컨트롤타워 상수 사용** (results.ts 상단 정의)
 | Redis | localhost | 6379 | Docker 컨테이너 |
 | Nginx | 0.0.0.0 | 80/443 | 리버스 프록시 + SSL, client_max_body_size 50M |
 | 백엔드 API | localhost | 3000 | PM2 관리 |

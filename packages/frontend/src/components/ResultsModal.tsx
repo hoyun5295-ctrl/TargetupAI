@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { calculateSmsBytes } from '../utils/formatDate';
+import { calculateSmsBytes, mmsServerPathToUrl } from '../utils/formatDate';
 
 interface ResultsModalProps {
   onClose: () => void;
@@ -199,7 +199,7 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
     else if (status === 'sending') status = '발송중';
     else if (status === 'cancelled') status = c.cancelled_by_type === 'super_admin' ? '관리자취소' : '취소';
     else if (status === 'failed') status = '실패';
-    else if (status === 'draft') status = 'draft';
+    else if (status === 'draft') status = '실패';
     return `${type}(${status})`;
   };
 
@@ -208,7 +208,7 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
     if (c.status === 'scheduled') return 'bg-blue-50 text-blue-700 border border-blue-200';
     if (c.status === 'sending') return 'bg-yellow-50 text-yellow-700 border border-yellow-200';
     if (c.status === 'cancelled') return 'bg-gray-100 text-gray-600 border border-gray-200';
-    if (c.status === 'failed') return 'bg-red-50 text-red-700 border border-red-200';
+    if (c.status === 'failed' || c.status === 'draft') return 'bg-red-50 text-red-700 border border-red-200';
     return 'bg-gray-50 text-gray-600 border border-gray-200';
   };
 
@@ -776,16 +776,12 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
                                 <div className="font-bold text-gray-900 mb-1 pb-1 border-b border-gray-200">{selectedCampaign.subject || selectedCampaign.message_subject}</div>
                               )}
                               {messages[0]?.msg_contents || selectedCampaign.message_content || ''}
-                              {/* ★ D98: MMS 이미지 표시 */}
+                              {/* ★ D98: MMS 이미지 표시 — mmsServerPathToUrl 컨트롤타워 사용 */}
                               {selectedCampaign.mms_image_paths && Array.isArray(selectedCampaign.mms_image_paths) && selectedCampaign.mms_image_paths.length > 0 && (
                                 <div className="mt-2 pt-2 border-t border-gray-100 flex gap-1.5">
-                                  {selectedCampaign.mms_image_paths.map((imgPath: string, idx: number) => {
-                                    const parts = imgPath.replace(/\\/g, '/').split('/');
-                                    const filename = parts[parts.length - 1];
-                                    const companyDir = parts[parts.length - 2];
-                                    const apiUrl = filename && companyDir ? `/api/mms-images/${companyDir}/${filename}` : imgPath;
-                                    return <img key={idx} src={apiUrl} alt={`MMS ${idx+1}`} className="w-16 h-16 object-cover rounded border" />;
-                                  })}
+                                  {selectedCampaign.mms_image_paths.map((imgPath: string, idx: number) => (
+                                    <img key={idx} src={mmsServerPathToUrl(imgPath)} alt={`MMS ${idx+1}`} className="w-16 h-16 object-cover rounded border" />
+                                  ))}
                                 </div>
                               )}
                             </div>

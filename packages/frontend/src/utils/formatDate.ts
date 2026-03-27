@@ -199,6 +199,18 @@ export function replaceDirectVars(
   return result;
 }
 
+/**
+ * ★ D98 CT: MMS 이미지 serverPath → API URL 변환 (컨트롤타워)
+ * DB에 저장된 절대경로를 브라우저에서 접근 가능한 API URL로 변환
+ * 사용처: Dashboard.tsx(템플릿 불러오기), ResultsModal.tsx(발송결과 미리보기)
+ */
+export function mmsServerPathToUrl(serverPath: string): string {
+  const parts = serverPath.replace(/\\/g, '/').split('/');
+  const filename = parts[parts.length - 1];
+  const companyDir = parts[parts.length - 2];
+  return filename && companyDir ? `/api/mms-images/${companyDir}/${filename}` : serverPath;
+}
+
 /** 직접발송 파일매핑 필드 목록 (phone 제외) */
 export const DIRECT_MAPPING_FIELDS: { key: string; label: string }[] = [
   { key: 'name', label: '이름' },

@@ -24,6 +24,27 @@ function formatCsvDateTime(val: any): string {
   return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}`;
 }
 
+// ===== SMS 필드 정의 컨트롤타워 (3곳에서 사용 — 인라인 중복 방지) =====
+// ★ D98: MySQL 서버 TZ=KST(+09:00)이지만, QTmsg Agent가 mobsend_time/repmsg_recvtm을 UTC로 기록
+//   - sendreq_time: 우리 앱 NOW() → KST → DATE_ADD 불필요
+//   - mobsend_time: QTmsg Agent → UTC → DATE_ADD(+9h) 필요
+//   - repmsg_recvtm: QTmsg Agent → UTC → DATE_ADD(+9h) 필요
+/** 상세조회용 SMS 필드 (seqno 포함) */
+const SMS_DETAIL_FIELDS = `seqno, dest_no, call_back, msg_type, msg_contents, status_code, mob_company,
+  sendreq_time,
+  DATE_ADD(mobsend_time, INTERVAL 9 HOUR) AS mobsend_time,
+  DATE_ADD(repmsg_recvtm, INTERVAL 9 HOUR) AS repmsg_recvtm,
+  'sms' AS _channel, sendreq_time AS _sort_time,
+  '' AS kakao_bubble_type, '' AS kakao_report_code,
+  '' AS resend_type, '' AS resend_report_code`;
+
+/** 엑셀 export용 SMS 필드 (seqno 제외) */
+const SMS_EXPORT_FIELDS = `dest_no, call_back, msg_type, msg_contents, status_code, mob_company,
+  sendreq_time,
+  DATE_ADD(mobsend_time, INTERVAL 9 HOUR) AS mobsend_time,
+  DATE_ADD(repmsg_recvtm, INTERVAL 9 HOUR) AS repmsg_recvtm,
+  'sms' AS _channel, NULL AS report_code_raw`;
+
 // ===== UNION ALL 기반 MySQL 헬퍼 (서버측 정렬/페이지네이션) =====
 // [S9-08] 기존: N개 테이블 순차 쿼리 → 메모리 concat → JS 정렬 → slice (30만건 OOM 위험)
 // 개선: UNION ALL 단일 쿼리 → MySQL이 정렬+페이징 처리 (페이지 분량만 메모리 로드)
@@ -113,7 +134,8 @@ router.get('/summary', async (req: Request, res: Response) => {
     
     const summaryParams: any[] = [companyId];
 
-    summaryQuery += ` AND status NOT IN ('cancelled', 'draft')`;
+    // ★ D98: draft/cancelled도 실패로 카운트 (목록에서 제외하지 않음)
+    summaryQuery += ` AND status NOT IN ('cancelled')`;
 
     if (fromDate && toDate) {
       summaryQuery += ` AND created_at >= $2::date::timestamp AT TIME ZONE 'Asia/Seoul' AND created_at < ($3::date + interval '1 day')::timestamp AT TIME ZONE 'Asia/Seoul'`;
@@ -188,8 +210,7 @@ router.get('/campaigns', async (req: Request, res: Response) => {
     const params: any[] = [companyId];
     let paramIndex = 2;
 
-    // ★ D98: draft 상태 캠페인은 발송결과 목록에서 제외 (발송 전 상태이므로 결과 없음)
-    whereClause += ` AND status NOT IN ('draft')`;
+    // ★ D98: draft도 목록에 포함 (실패로 표시 — 직원 요청)
 
     if (userType === 'company_user') {
       whereClause += ` AND created_by = $${paramIndex++}`;
@@ -240,7 +261,7 @@ router.get('/campaigns', async (req: Request, res: Response) => {
         c.id, c.campaign_name, c.message_type, c.message_content, c.send_type, c.status,
         c.target_count, c.sent_count, c.success_count, c.fail_count,
         c.is_ad, c.scheduled_at, c.sent_at, c.created_at, c.send_channel, c.callback_number,
-        c.subject, c.message_subject,
+        c.subject, c.message_subject, c.mms_image_paths,
         (c.created_at AT TIME ZONE 'Asia/Seoul')::date as created_date_kst,
         c.cancelled_by_type, c.cancel_reason,
         u.login_id as created_by_name,
@@ -467,16 +488,7 @@ router.get('/campaigns/:id/messages', async (req: Request, res: Response) => {
       if (status === 'success') smsWhere += ` AND status_code IN (${SUCCESS_CODES.join(',')})`;
       else if (status === 'fail') smsWhere += ` AND status_code NOT IN (${[...SUCCESS_CODES, ...PENDING_CODES].join(',')})`;
 
-      // SMS 통합 필드 (카카오와 UNION ALL 호환 — 컬럼 수/순서 동일)
-      // ★ mobsend_time, repmsg_recvtm: QTmsg Agent가 UTC로 기록 → KST(+9h) 변환 필요
-      // sendreq_time: 앱에서 MySQL NOW()로 INSERT하므로 이미 KST
-      const smsFields = `seqno, dest_no, call_back, msg_type, msg_contents, status_code, mob_company,
-        sendreq_time,
-        DATE_ADD(mobsend_time, INTERVAL 9 HOUR) AS mobsend_time,
-        DATE_ADD(repmsg_recvtm, INTERVAL 9 HOUR) AS repmsg_recvtm,
-        'sms' AS _channel, sendreq_time AS _sort_time,
-        '' AS kakao_bubble_type, '' AS kakao_report_code,
-        '' AS resend_type, '' AS resend_report_code`;
+      const smsFields = SMS_DETAIL_FIELDS;
 
       for (const t of msgTables) {
         dataSubqueries.push(`(SELECT ${smsFields} FROM ${t} ${smsWhere})`);
@@ -577,13 +589,7 @@ router.get('/campaigns/:id/messages', async (req: Request, res: Response) => {
         if (['phone', 'callback', 'content'].includes(String(searchType))) smsBaseParams.push(sv);
       }
 
-      const smsFields = `seqno, dest_no, call_back, msg_type, msg_contents, status_code, mob_company,
-        sendreq_time,
-        DATE_ADD(mobsend_time, INTERVAL 9 HOUR) AS mobsend_time,
-        DATE_ADD(repmsg_recvtm, INTERVAL 9 HOUR) AS repmsg_recvtm,
-        'sms' AS _channel, sendreq_time AS _sort_time,
-        '' AS kakao_bubble_type, '' AS kakao_report_code,
-        '' AS resend_type, '' AS resend_report_code`;
+      const smsFields = SMS_DETAIL_FIELDS;
       let smsWhere = 'WHERE app_etc1 = ?';
       if (searchType && searchValue) {
         // ★ D89: 전화번호/회신번호 검색 시 하이픈 제거 + REPLACE
@@ -662,9 +668,7 @@ router.get('/campaigns/:id/export', async (req: Request, res: Response) => {
 
     if (sendChannel === 'sms' || sendChannel === 'both') {
       const exportTables = await getCompanySmsTablesWithLogs(companyId, userId);
-      const smsFields = `dest_no, call_back, msg_type, msg_contents, status_code, mob_company,
-        sendreq_time, DATE_ADD(mobsend_time, INTERVAL 9 HOUR) AS mobsend_time,
-        DATE_ADD(repmsg_recvtm, INTERVAL 9 HOUR) AS repmsg_recvtm, 'sms' AS _channel, NULL AS report_code_raw`;
+      const smsFields = SMS_EXPORT_FIELDS;
       for (const t of exportTables) {
         subqueries.push(`(SELECT ${smsFields} FROM ${t} WHERE app_etc1 = ?)`);
         baseParams.push(id);

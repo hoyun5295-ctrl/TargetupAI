@@ -266,7 +266,7 @@ export default function CustomerDBModal({ onClose, token, userType }: CustomerDB
     { key: 'recent_purchase_amount', label: '최근구매금액', format: (v) => v != null ? `${Number(v).toLocaleString()}원` : '-' },
     { key: 'total_purchase_amount', label: '총구매금액', format: (v) => v != null ? `${Number(v).toLocaleString()}원` : '-' },
     { key: 'purchase_count', label: '구매횟수', format: (v) => v != null ? `${Number(v).toLocaleString()}회` : '-' },
-    { key: 'avg_order_value', label: '평균주문금액', format: (v) => v != null ? `${Number(v).toLocaleString()}원` : '-' },
+    // ★ 평균주문금액은 커스텀 필드(custom_N) — 직접 컬럼 아님. field_type/data_type 'number' 자동 감지로 처리
     { key: 'recent_purchase_date', label: '최근구매일', format: (v) => formatDate(v) },
     { key: 'sms_opt_in', label: '수신동의', format: (v) => v === true || v === 'Y' ? '동의' : '거부' },
     { key: 'created_at', label: '등록일', format: (v) => formatDate(v) },
@@ -455,11 +455,11 @@ export default function CustomerDBModal({ onClose, token, userType }: CustomerDB
                         } else if (f.field_key === 'birth_date' || f.field_key === 'recent_purchase_date' || f.field_key === 'created_at' || f.field_key === 'wedding_anniversary' || f.field_key === 'registration_date' || f.field_key === 'first_purchase_date' || (f.field_type && ['DATE', 'DATETIME', 'TIMESTAMP'].includes(f.field_type.toUpperCase()))) {
                           // ★ D93: DATE/DATETIME/TIMESTAMP 타입 + 날짜 직접 컬럼 전부 formatDate 적용
                           display = val ? formatDate(String(val)) : '-';
-                        } else if (f.field_key === 'total_purchase_amount' || f.field_key === 'recent_purchase_amount' || f.field_key === 'avg_order_value' || f.field_key === 'points' || f.field_key === 'purchase_count') {
+                        } else if (f.field_key === 'total_purchase_amount' || f.field_key === 'recent_purchase_amount' || f.field_key === 'points' || f.field_key === 'purchase_count') {
                           // ★ D89: points/purchase_count 등 숫자 직접 컬럼 쉼표 포맷팅
                           display = val != null ? `${Number(val).toLocaleString()}` : '-';
-                        } else if (f.field_type === 'NUMBER' && val != null) {
-                          // ★ D89: 커스텀 숫자 필드도 자동 쉼표 포맷팅
+                        } else if ((f.field_type === 'NUMBER' || f.data_type === 'number') && val != null) {
+                          // ★ D98: 커스텀 숫자 필드 — field_type(정의) 또는 data_type(자동감지) 양쪽 체크
                           display = `${Number(val).toLocaleString()}`;
                         } else if (f.field_key === 'grade') {
                           return (
@@ -533,7 +533,7 @@ export default function CustomerDBModal({ onClose, token, userType }: CustomerDB
                           : null;
                         const displayLabel = fieldDef?.field_label || fieldDef?.display_name || key;
                         // ★ D89: 커스텀 숫자 필드 쉼표 포맷팅
-                        const isNumericField = fieldDef?.field_type === 'NUMBER';
+                        const isNumericField = fieldDef?.field_type === 'NUMBER' || fieldDef?.data_type === 'number';
                         const displayValue = value != null
                           ? (isNumericField && !isNaN(Number(value)) ? Number(value).toLocaleString() : String(value))
                           : '-';

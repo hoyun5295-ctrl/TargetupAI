@@ -40,7 +40,7 @@ import TodayStatsModal from '../components/TodayStatsModal';
 import UploadProgressModal from '../components/UploadProgressModal';
 import UploadResultModal from '../components/UploadResultModal';
 import { useAuthStore } from '../stores/authStore';
-import { formatDate, formatPreviewValue, calculateSmsBytes, truncateToSmsBytes, DIRECT_VAR_MAP, DIRECT_VAR_TO_FIELD, DIRECT_FIELD_LABELS, DIRECT_MAPPING_FIELDS, replaceDirectVars, formatPhoneNumber } from '../utils/formatDate';
+import { formatDate, formatPreviewValue, calculateSmsBytes, truncateToSmsBytes, DIRECT_VAR_MAP, DIRECT_VAR_TO_FIELD, DIRECT_FIELD_LABELS, DIRECT_MAPPING_FIELDS, replaceDirectVars, formatPhoneNumber, mmsServerPathToUrl } from '../utils/formatDate';
 import DirectSendPanel from '../components/DirectSendPanel';
 
 interface Stats {
@@ -3136,15 +3136,12 @@ const campaignData = {
                             if (t.subject) setDirectSubject(t.subject);
                             if (t.message_type) setDirectMsgType(t.message_type);
                           }
-                          // ★ D98: MMS 이미지 복원 — serverPath에서 API URL 추출
+                          // ★ D98: MMS 이미지 복원 — mmsServerPathToUrl 컨트롤타워 사용
                           if (t.message_type === 'MMS' && t.mms_image_paths && Array.isArray(t.mms_image_paths)) {
                             setMmsUploadedImages(t.mms_image_paths.map((p: string, i: number) => {
-                              // serverPath가 절대경로면 → /api/mms-images/{companyId}/{filename} URL 생성
+                              const apiUrl = mmsServerPathToUrl(p);
                               const parts = p.replace(/\\/g, '/').split('/');
-                              const filename = parts[parts.length - 1];
-                              const companyDir = parts[parts.length - 2];
-                              const apiUrl = filename && companyDir ? `/api/mms-images/${companyDir}/${filename}` : p;
-                              return { serverPath: p, url: apiUrl, filename: filename || `image_${i + 1}`, size: 0 };
+                              return { serverPath: p, url: apiUrl, filename: parts[parts.length - 1] || `image_${i + 1}`, size: 0 };
                             }));
                           }
                           setShowTemplateBox(null);
