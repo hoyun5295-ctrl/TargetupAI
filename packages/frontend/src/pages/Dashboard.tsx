@@ -504,13 +504,28 @@ export default function Dashboard() {
           callback: useIndividualCallback ? null : selectedCallback,
           useIndividualCallback: useIndividualCallback,
           individualCallbackColumn: useIndividualCallback ? individualCallbackColumn : undefined,
-          recipients: recipientsWithMessage.map(r => ({ phone: r.phone, name: '', var1: '', var2: '', var3: '', callback: r.callback || null })),
+          recipients: recipientsWithMessage.map(r => {
+            // ★ D99: individualCallbackColumn이 지정되면 해당 컬럼값을 callback으로 전달
+            let cb = r.callback || null;
+            if (useIndividualCallback && individualCallbackColumn) {
+              const raw = r as any;
+              cb = raw[individualCallbackColumn] || (raw.custom_fields && individualCallbackColumn.startsWith('custom_') ? raw.custom_fields[individualCallbackColumn] : null) || null;
+            }
+            return { phone: r.phone, name: '', var1: '', var2: '', var3: '', callback: cb };
+          }),
           adEnabled: adTextEnabled,
           scheduled: reserveEnabled,
           scheduledAt: reserveEnabled && reserveDateTime ? new Date(reserveDateTime).toISOString() : null,
           splitEnabled: splitEnabled,
           splitCount: splitEnabled ? splitCount : null,
-          customMessages: recipientsWithMessage.map(r => ({ ...r, callback: r.callback || null })),
+          customMessages: recipientsWithMessage.map(r => {
+            let cb = r.callback || null;
+            if (useIndividualCallback && individualCallbackColumn) {
+              const raw = r as any;
+              cb = raw[individualCallbackColumn] || (raw.custom_fields && individualCallbackColumn.startsWith('custom_') ? raw.custom_fields[individualCallbackColumn] : null) || null;
+            }
+            return { ...r, callback: cb };
+          }),
           mmsImagePaths: mmsUploadedImages.map(img => img.serverPath),
           ...(confirmCallbackExclusion ? { confirmCallbackExclusion: true } : {}),
         })

@@ -1309,8 +1309,10 @@ router.post('/direct-send', async (req: Request, res: Response) => {
     if (useIndividualCallback) {
       // D91: admin/company_admin은 배정 필터 미적용 (전체 번호 사용 가능)
       const cbUserId = (userType === 'super_admin' || userType === 'company_admin') ? undefined : userId;
-      console.log(`[direct-send] 개별회신번호 필터 시작 — recipients: ${validRecipients.length}, column: ${individualCallbackColumn || '(default)'}, confirmCallbackExclusion: ${confirmCallbackExclusion}`);
-      const cbResult = await filterByIndividualCallback(validRecipients, companyId, cbUserId, individualCallbackColumn);
+      // ★ D99: direct-send에서는 프론트가 이미 선택된 컬럼값을 callback에 매핑해서 전달하므로
+      // callbackColumn을 CT-08에 전달하지 않음 (recipients에 원본 컬럼 필드가 없으므로 전달하면 덮어씌워짐)
+      console.log(`[direct-send] 개별회신번호 필터 시작 — recipients: ${validRecipients.length}, confirmCallbackExclusion: ${confirmCallbackExclusion}`);
+      const cbResult = await filterByIndividualCallback(validRecipients, companyId, cbUserId);
       validRecipients = cbResult.filtered;
       callbackMissingCount = cbResult.callbackMissingCount;
       callbackUnregisteredCount = cbResult.callbackUnregisteredCount;
