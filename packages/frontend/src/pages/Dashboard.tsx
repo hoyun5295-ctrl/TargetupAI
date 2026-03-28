@@ -483,7 +483,7 @@ export default function Dashboard() {
         });
         return {
           phone: r.phone,
-          callback: r.callback || null,
+          callback: resolveRecipientCallback(r, useIndividualCallback, individualCallbackColumn),
           message: ((!isRcs && adTextEnabled) ? (targetMsgType === 'SMS' ? '(광고)' : '(광고) ') : '') +
             substituted +
             ((!isRcs && adTextEnabled) ? (targetMsgType === 'SMS' ? `\n무료거부${optOutNumber.replace(/-/g, '')}` : `\n무료수신거부 ${formatRejectNumber(optOutNumber)}`) : '')
@@ -506,7 +506,7 @@ export default function Dashboard() {
           individualCallbackColumn: useIndividualCallback ? individualCallbackColumn : undefined,
           recipients: recipientsWithMessage.map(r => ({
             phone: r.phone, name: '', var1: '', var2: '', var3: '',
-            callback: resolveRecipientCallback(r, useIndividualCallback, individualCallbackColumn),
+            callback: r.callback,
           })),
           adEnabled: adTextEnabled,
           scheduled: reserveEnabled,
@@ -515,7 +515,6 @@ export default function Dashboard() {
           splitCount: splitEnabled ? splitCount : null,
           customMessages: recipientsWithMessage.map(r => ({
             ...r,
-            callback: resolveRecipientCallback(r, useIndividualCallback, individualCallbackColumn),
           })),
           mmsImagePaths: mmsUploadedImages.map(img => img.serverPath),
           ...(confirmCallbackExclusion ? { confirmCallbackExclusion: true } : {}),
