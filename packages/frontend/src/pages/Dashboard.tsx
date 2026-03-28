@@ -381,6 +381,7 @@ export default function Dashboard() {
         message: isAlimtalk ? kakaoMessage : getFullMessage(directSendChannel === 'rcs' ? kakaoMessage : directMessage),
         callback: isAlimtalk ? (callbackNumbers[0]?.phone || '') : (useIndividualCallback ? null : selectedCallback),
         useIndividualCallback: isAlimtalk ? false : useIndividualCallback,
+        individualCallbackColumn: (!isAlimtalk && useIndividualCallback) ? individualCallbackColumn : undefined,
         recipients: directRecipients.map((r: any) => ({ ...r, callback: r.callback || null })),
         adEnabled: isAlimtalk ? false : adTextEnabled,
         scheduled: reserveEnabled,
@@ -502,6 +503,7 @@ export default function Dashboard() {
           message: targetSendChannel === 'rcs' ? kakaoMessage : targetMessage,
           callback: useIndividualCallback ? null : selectedCallback,
           useIndividualCallback: useIndividualCallback,
+          individualCallbackColumn: useIndividualCallback ? individualCallbackColumn : undefined,
           recipients: recipientsWithMessage.map(r => ({ phone: r.phone, name: '', var1: '', var2: '', var3: '', callback: r.callback || null })),
           adEnabled: adTextEnabled,
           scheduled: reserveEnabled,
@@ -760,6 +762,7 @@ export default function Dashboard() {
   const [callbackNumbers, setCallbackNumbers] = useState<{id: string, phone: string, label: string, is_default: boolean}[]>([]);
   const [selectedCallback, setSelectedCallback] = useState('');
   const [useIndividualCallback, setUseIndividualCallback] = useState(false);
+  const [individualCallbackColumn, setIndividualCallbackColumn] = useState('');
   const [sendConfirm, setSendConfirm] = useState<{show: boolean, type: 'immediate' | 'scheduled', count: number, unsubscribeCount: number, dateTime?: string, from?: 'direct' | 'target', msgType?: string}>({show: false, type: 'immediate', count: 0, unsubscribeCount: 0});
 
   // ★ 미등록 회신번호 확인 모달 state
@@ -1375,6 +1378,7 @@ const handleAiCampaignSend = async (modalData?: {
   customSendTime: string;
   selectedCallback: string;
   useIndividualCallback: boolean;
+  individualCallbackColumn?: string;
   subject?: string;
 }) => {
   if (isSending || directSending) return; // 교차 중복 발송 방지
@@ -1496,6 +1500,7 @@ const campaignData = {
       eventEndDate: eventEndDate,
       callback: _useIndividualCallback ? null : _selectedCallback,
       useIndividualCallback: _useIndividualCallback,
+      individualCallbackColumn: _useIndividualCallback ? (modalData?.individualCallbackColumn ?? individualCallbackColumn) : undefined,
       // ★ B-D75-01: 모달에서 수정된 제목 우선 사용
       subject: modalData?.subject ?? selectedMsg.subject ?? '',
       mmsImagePaths: mmsUploadedImages.map(img => img.serverPath),
@@ -1626,6 +1631,7 @@ const campaignData = {
         eventEndDate: null,
         callback: _useIndividualCallback ? null : _selectedCallback,
         useIndividualCallback: _useIndividualCallback,
+        individualCallbackColumn: _useIndividualCallback ? individualCallbackColumn : undefined,
         subject: variant.subject || '',
         mmsImagePaths: [],
       };
@@ -2834,6 +2840,8 @@ const campaignData = {
         setSelectedCallback={setSelectedCallback}
         useIndividualCallback={useIndividualCallback}
         setUseIndividualCallback={setUseIndividualCallback}
+        individualCallbackColumn={individualCallbackColumn}
+        setIndividualCallbackColumn={setIndividualCallbackColumn}
         callbackNumbers={callbackNumbers}
         adTextEnabled={adTextEnabled}
         handleAdToggle={handleAdToggle}

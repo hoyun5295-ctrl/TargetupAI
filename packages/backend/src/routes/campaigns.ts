@@ -436,6 +436,7 @@ router.post('/', async (req: Request, res: Response) => {
       // ★ B8-04: 회신번호 필드
       callback,               // 공통 회신번호
       useIndividualCallback,  // 개별회신번호 사용 여부
+      individualCallbackColumn,  // ★ D99: 회신번호로 사용할 컬럼명
     } = req.body;
 
     if (!campaignName || !messageType || !messageContent) {
@@ -462,8 +463,8 @@ router.post('/', async (req: Request, res: Response) => {
         event_start_date, event_end_date, mms_image_paths,
         send_channel, kakao_bubble_type, kakao_sender_key, kakao_targeting,
         kakao_attachment_json, kakao_carousel_json, kakao_resend_type,
-        callback_number, use_individual_callback
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
+        callback_number, use_individual_callback, individual_callback_column
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
       RETURNING *`,
       [
         companyId, campaignName, messageType, JSON.stringify(targetFilter),
@@ -477,7 +478,8 @@ router.post('/', async (req: Request, res: Response) => {
         kakaoAttachmentJson || null,
         kakaoCarouselJson || null,
         kakaoResendType || 'SM',
-        callback || null, useIndividualCallback || false
+        callback || null, useIndividualCallback || false,
+        individualCallbackColumn || null
       ]
     );
 
@@ -557,6 +559,7 @@ router.post('/:id/send', async (req: Request, res: Response) => {
 
     // 개별회신번호 사용 여부
     const useIndividualCallback = campaign.use_individual_callback || false;
+    const individualCallbackColumn = campaign.individual_callback_column || undefined;
 
     if (!defaultCallback && !campaign.callback_number && !useIndividualCallback) {
       return res.status(400).json({ error: '기본 회신번호가 설정되지 않았습니다. 회사 설정에서 기본 회신번호를 등록해주세요.', code: 'NO_DEFAULT_CALLBACK' });
@@ -600,6 +603,10 @@ router.post('/:id/send', async (req: Request, res: Response) => {
     // ★ store_phone 포함: 개별회신번호 사용 시 callback이 없으면 store_phone을 폴백으로 사용
     // ★ custom_fields 포함: 커스텀 필드 변수 치환을 위해 JSONB 컬럼 필수
     const baseColumns = ['id', 'phone', 'callback', 'store_phone', 'custom_fields'];
+    // ★ D99: individualCallbackColumn이 직접 컬럼이면 SELECT에 추가
+    if (individualCallbackColumn && !individualCallbackColumn.startsWith('custom_') && !baseColumns.includes(individualCallbackColumn)) {
+      baseColumns.push(individualCallbackColumn);
+    }
     // ★ storageType 기반 동적 필터 — 직접 컬럼만 SELECT, JSONB 내부 키는 custom_fields 컬럼에서 접근 (D72)
     const mappingColumns = Object.values(fieldMappings).filter((m: VarCatalogEntry) => m.storageType !== 'custom_fields').map((m: VarCatalogEntry) => m.column);
     const selectColumns = [...new Set([...baseColumns, ...mappingColumns])].join(', ');
@@ -656,7 +663,7 @@ let callbackUnregisteredCount = 0;
 if (useIndividualCallback) {
   // D91: admin/company_admin은 배정 필터 미적용 (전체 번호 사용 가능)
   const cbUserId = (userType === 'super_admin' || userType === 'company_admin') ? undefined : userId;
-  const cbResult = await filterByIndividualCallback(filteredCustomers, companyId, cbUserId);
+  const cbResult = await filterByIndividualCallback(filteredCustomers, companyId, cbUserId, individualCallbackColumn);
   filteredCustomers = cbResult.filtered;
   callbackMissingCount = cbResult.callbackMissingCount;
   callbackUnregisteredCount = cbResult.callbackUnregisteredCount;
@@ -1221,6 +1228,7 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       splitEnabled,   // 분할전송 여부
       splitCount,     // 분당 발송 건수
       useIndividualCallback,  // 개별회신번호 사용 여부
+      individualCallbackColumn,  // ★ D99: 회신번호로 사용할 컬럼명 (store_phone, callback, custom_N 등)
       confirmCallbackExclusion, // ★ 미등록 회신번호 제외 확인 플래그
       mmsImagePaths,  // MMS 이미지 서버 경로 배열
       // 카카오 브랜드메시지 필드
@@ -1301,8 +1309,8 @@ router.post('/direct-send', async (req: Request, res: Response) => {
     if (useIndividualCallback) {
       // D91: admin/company_admin은 배정 필터 미적용 (전체 번호 사용 가능)
       const cbUserId = (userType === 'super_admin' || userType === 'company_admin') ? undefined : userId;
-      console.log(`[direct-send] 개별회신번호 필터 시작 — recipients: ${validRecipients.length}, confirmCallbackExclusion: ${confirmCallbackExclusion}`);
-      const cbResult = await filterByIndividualCallback(validRecipients, companyId, cbUserId);
+      console.log(`[direct-send] 개별회신번호 필터 시작 — recipients: ${validRecipients.length}, column: ${individualCallbackColumn || '(default)'}, confirmCallbackExclusion: ${confirmCallbackExclusion}`);
+      const cbResult = await filterByIndividualCallback(validRecipients, companyId, cbUserId, individualCallbackColumn);
       validRecipients = cbResult.filtered;
       callbackMissingCount = cbResult.callbackMissingCount;
       callbackUnregisteredCount = cbResult.callbackUnregisteredCount;

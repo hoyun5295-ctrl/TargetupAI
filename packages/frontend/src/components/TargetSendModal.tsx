@@ -42,6 +42,8 @@ interface TargetSendModalProps {
   setSelectedCallback: (cb: string) => void;
   useIndividualCallback: boolean;
   setUseIndividualCallback: (b: boolean) => void;
+  individualCallbackColumn: string;
+  setIndividualCallbackColumn: (col: string) => void;
   callbackNumbers: any[];
 
   // 광고
@@ -131,6 +133,7 @@ export default function TargetSendModal({
   kakaoTemplateVars, setKakaoTemplateVars,
   selectedCallback, setSelectedCallback,
   useIndividualCallback, setUseIndividualCallback,
+  individualCallbackColumn, setIndividualCallbackColumn,
   callbackNumbers,
   adTextEnabled, handleAdToggle, optOutNumber,
   reserveEnabled, setReserveEnabled,
@@ -511,28 +514,55 @@ export default function TargetSendModal({
               {/* 회신번호 선택 */}
               <div className="px-3 py-1.5 border-t">
                 <select
-                  value={useIndividualCallback ? '__individual__' : selectedCallback}
+                  value={useIndividualCallback ? `__col__${individualCallbackColumn}` : selectedCallback}
                   onChange={(e) => {
-                    if (e.target.value === '__individual__') {
+                    const val = e.target.value;
+                    if (val.startsWith('__col__')) {
                       setUseIndividualCallback(true);
                       setSelectedCallback('');
+                      setIndividualCallbackColumn(val.replace('__col__', ''));
                     } else {
                       setUseIndividualCallback(false);
-                      setSelectedCallback(e.target.value);
+                      setSelectedCallback(val);
+                      setIndividualCallbackColumn('');
                     }
                   }}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 >
                   <option value="">회신번호 선택</option>
-                  <option value="__individual__">수신자별 회신번호 칼럼 사용</option>
-                  {callbackNumbers.map((cb) => (
-                    <option key={cb.id} value={cb.phone}>
-                      {formatPhoneNumber(cb.phone)} {cb.label ? `(${cb.label})` : ''} {cb.is_default ? '⭐' : ''}
-                    </option>
-                  ))}
+                  <optgroup label="수신자별 회신번호 컬럼">
+                    {fieldsMeta
+                      .filter(f => f.field_key === 'store_phone' || f.field_key === 'callback' || f.field_key === 'phone' ||
+                        f.display_name.includes('전화') || f.display_name.includes('번호') || f.display_name.includes('연락처'))
+                      .map(f => (
+                        <option key={f.field_key} value={`__col__${f.field_key}`}>
+                          {f.display_name} (수신자별)
+                        </option>
+                      ))
+                    }
+                    {/* 전화번호성이 아닌 컬럼도 선택 가능하도록 전체 필드 제공 */}
+                    {fieldsMeta
+                      .filter(f => f.field_key !== 'store_phone' && f.field_key !== 'callback' && f.field_key !== 'phone' &&
+                        !f.display_name.includes('전화') && !f.display_name.includes('번호') && !f.display_name.includes('연락처'))
+                      .map(f => (
+                        <option key={f.field_key} value={`__col__${f.field_key}`}>
+                          {f.display_name} (수신자별)
+                        </option>
+                      ))
+                    }
+                  </optgroup>
+                  <optgroup label="등록된 회신번호">
+                    {callbackNumbers.map((cb) => (
+                      <option key={cb.id} value={cb.phone}>
+                        {formatPhoneNumber(cb.phone)} {cb.label ? `(${cb.label})` : ''} {cb.is_default ? '⭐' : ''}
+                      </option>
+                    ))}
+                  </optgroup>
                 </select>
                 {useIndividualCallback && (
-                  <p className="text-xs text-blue-600 mt-1">각 수신자의 회신번호 칼럼 값으로 발송됩니다</p>
+                  <p className="text-xs text-blue-600 mt-1">
+                    각 수신자의 <strong>{fieldsMeta.find(f => f.field_key === individualCallbackColumn)?.display_name || individualCallbackColumn}</strong> 값으로 발송됩니다
+                  </p>
                 )}
               </div>
 

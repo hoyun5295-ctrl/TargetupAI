@@ -40,29 +40,46 @@ export interface CallbackFilterResult {
 /**
  * 개별회신번호 필터링 — 모든 발송 경로의 유일한 진입점
  *
- * 1단계: callback이 없으면 store_phone으로 폴백
+ * 1단계: 지정된 컬럼(callbackColumn)에서 회신번호 추출 → callback에 복사
+ *        callbackColumn 미지정 시 기존 동작: callback → store_phone 폴백
  * 2단계: callback이 여전히 없는 고객 제외
  * 3단계: callback이 미등록 발신번호인 고객 제외
  * 3단계 추가(D91): assignment_scope='assigned'인 번호는 배정된 사용자만 사용 가능
  *
- * @param customers - 필터링 대상 고객/수신자 배열 (callback, store_phone 필드 필요)
+ * @param customers - 필터링 대상 고객/수신자 배열
  * @param companyId - 회사 ID (등록 발신번호 조회용)
  * @param userId - 발송자 user_id (assignment_scope 필터링용, 선택)
+ * @param callbackColumn - 회신번호로 사용할 컬럼명 (선택, 미지정 시 callback→store_phone 폴백)
  * @returns CallbackFilterResult
  */
 export async function filterByIndividualCallback(
   customers: any[],
   companyId: string,
-  userId?: string
+  userId?: string,
+  callbackColumn?: string
 ): Promise<CallbackFilterResult> {
   let filtered = [...customers];
   let callbackMissingCount = 0;
   let callbackUnregisteredCount = 0;
 
-  // 1단계: store_phone → callback 폴백
-  for (const c of filtered) {
-    if ((!c.callback || !c.callback.trim()) && c.store_phone && c.store_phone.trim()) {
-      c.callback = c.store_phone;
+  // 1단계: 회신번호 컬럼 결정
+  if (callbackColumn) {
+    // ★ D99: 지정된 컬럼의 값을 callback으로 복사
+    // custom_fields JSONB 내부 키(custom_1~15)도 지원
+    for (const c of filtered) {
+      let val = c[callbackColumn];
+      // custom_fields JSONB 내부 키 처리
+      if (!val && c.custom_fields && callbackColumn.startsWith('custom_')) {
+        val = c.custom_fields[callbackColumn];
+      }
+      c.callback = val ? String(val).trim() : '';
+    }
+  } else {
+    // 기존 동작: store_phone → callback 폴백
+    for (const c of filtered) {
+      if ((!c.callback || !c.callback.trim()) && c.store_phone && c.store_phone.trim()) {
+        c.callback = c.store_phone;
+      }
     }
   }
 
