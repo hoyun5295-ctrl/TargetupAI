@@ -40,7 +40,7 @@ import TodayStatsModal from '../components/TodayStatsModal';
 import UploadProgressModal from '../components/UploadProgressModal';
 import UploadResultModal from '../components/UploadResultModal';
 import { useAuthStore } from '../stores/authStore';
-import { formatDate, formatPreviewValue, calculateSmsBytes, truncateToSmsBytes, DIRECT_VAR_MAP, DIRECT_VAR_TO_FIELD, DIRECT_FIELD_LABELS, DIRECT_MAPPING_FIELDS, replaceDirectVars, formatPhoneNumber, mmsServerPathToUrl } from '../utils/formatDate';
+import { formatDate, formatPreviewValue, calculateSmsBytes, truncateToSmsBytes, DIRECT_VAR_MAP, DIRECT_VAR_TO_FIELD, DIRECT_FIELD_LABELS, DIRECT_MAPPING_FIELDS, replaceDirectVars, formatPhoneNumber, mmsServerPathToUrl, resolveRecipientCallback } from '../utils/formatDate';
 import DirectSendPanel from '../components/DirectSendPanel';
 
 interface Stats {
@@ -504,28 +504,19 @@ export default function Dashboard() {
           callback: useIndividualCallback ? null : selectedCallback,
           useIndividualCallback: useIndividualCallback,
           individualCallbackColumn: useIndividualCallback ? individualCallbackColumn : undefined,
-          recipients: recipientsWithMessage.map(r => {
-            // ★ D99: individualCallbackColumn이 지정되면 해당 컬럼값을 callback으로 전달
-            let cb = r.callback || null;
-            if (useIndividualCallback && individualCallbackColumn) {
-              const raw = r as any;
-              cb = raw[individualCallbackColumn] || (raw.custom_fields && individualCallbackColumn.startsWith('custom_') ? raw.custom_fields[individualCallbackColumn] : null) || null;
-            }
-            return { phone: r.phone, name: '', var1: '', var2: '', var3: '', callback: cb };
-          }),
+          recipients: recipientsWithMessage.map(r => ({
+            phone: r.phone, name: '', var1: '', var2: '', var3: '',
+            callback: resolveRecipientCallback(r, useIndividualCallback, individualCallbackColumn),
+          })),
           adEnabled: adTextEnabled,
           scheduled: reserveEnabled,
           scheduledAt: reserveEnabled && reserveDateTime ? new Date(reserveDateTime).toISOString() : null,
           splitEnabled: splitEnabled,
           splitCount: splitEnabled ? splitCount : null,
-          customMessages: recipientsWithMessage.map(r => {
-            let cb = r.callback || null;
-            if (useIndividualCallback && individualCallbackColumn) {
-              const raw = r as any;
-              cb = raw[individualCallbackColumn] || (raw.custom_fields && individualCallbackColumn.startsWith('custom_') ? raw.custom_fields[individualCallbackColumn] : null) || null;
-            }
-            return { ...r, callback: cb };
-          }),
+          customMessages: recipientsWithMessage.map(r => ({
+            ...r,
+            callback: resolveRecipientCallback(r, useIndividualCallback, individualCallbackColumn),
+          })),
           mmsImagePaths: mmsUploadedImages.map(img => img.serverPath),
           ...(confirmCallbackExclusion ? { confirmCallbackExclusion: true } : {}),
         })

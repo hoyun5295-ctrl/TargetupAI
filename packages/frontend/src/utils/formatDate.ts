@@ -303,3 +303,25 @@ export function formatPhoneNumber(phone: string): string {
   }
   return phone;
 }
+
+/**
+ * ★ D99: 수신자의 개별회신번호 값 추출 — 컨트롤타워
+ * individualCallbackColumn이 지정되면 해당 컬럼에서 회신번호 추출.
+ * custom_fields JSONB 내부 키(custom_1~15)도 지원.
+ *
+ * 적용: Dashboard.tsx executeTargetSend (recipients + customMessages 2곳)
+ */
+export function resolveRecipientCallback(
+  recipient: any,
+  useIndividualCallback: boolean,
+  individualCallbackColumn: string
+): string | null {
+  if (!useIndividualCallback || !individualCallbackColumn) {
+    return recipient.callback || null;
+  }
+  return recipient[individualCallbackColumn]
+    || (recipient.custom_fields && individualCallbackColumn.startsWith('custom_')
+        ? recipient.custom_fields[individualCallbackColumn]
+        : null)
+    || null;
+}
