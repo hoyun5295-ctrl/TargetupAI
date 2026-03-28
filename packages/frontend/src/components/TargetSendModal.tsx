@@ -269,9 +269,18 @@ export default function TargetSendModal({
       setToast({ show: true, type: 'error', message: '회신번호를 선택해주세요' });
       return;
     }
-    if (useIndividualCallback && targetRecipients.some((r: any) => !r.callback)) {
-      setToast({ show: true, type: 'error', message: '개별회신번호가 없는 고객이 있습니다. 일반 회신번호를 선택하거나 고객 데이터를 확인해주세요.' });
-      return;
+    if (useIndividualCallback) {
+      // ★ D99: 선택된 컬럼(individualCallbackColumn)에서 값 체크
+      const col = individualCallbackColumn || 'callback';
+      const missingCount = targetRecipients.filter((r: any) => {
+        const val = r[col] || (r.custom_fields && col.startsWith('custom_') ? r.custom_fields[col] : null);
+        return !val || !String(val).trim();
+      }).length;
+      if (missingCount > 0) {
+        const colName = fieldsMeta.find(f => f.field_key === col)?.display_name || col;
+        setToast({ show: true, type: 'error', message: `${colName} 값이 없는 고객이 ${missingCount}명 있습니다. 일반 회신번호를 선택하거나 고객 데이터를 확인해주세요.` });
+        return;
+      }
     }
     if ((targetMsgType === 'LMS' || targetMsgType === 'MMS') && !targetSubject.trim()) {
       setToast({ show: true, type: 'error', message: '제목을 입력해주세요' });
