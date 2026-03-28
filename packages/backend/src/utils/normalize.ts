@@ -352,16 +352,18 @@ export function normalizeDate(value: any): string | null {
   if (value == null || value === '') return null;
 
   // Date 객체 직접 처리 (XLSX cellDates: true)
-  // ★ D98: 서버 TZ 무관하게 안전한 날짜 추출 — 로컬 시간 기준 연/월/일 사용
-  // XLSX cellDates:true → 엑셀 시리얼을 서버 로컬 TZ 기준 Date 객체로 변환
-  // → getFullYear/getMonth/getDate (로컬 TZ 기준)로 원래 엑셀 날짜 복원
-  // D93 Math.round 패치의 문제: UTC 기준 반올림 시 KST(+9h) 서버에서는 정상이지만
-  // UTC 서버에서는 15:00 UTC → 반올림 → 다음날로 밀림. 로컬 TZ 기준이 서버 환경 무관 안전
+  // ★ D99: UTC 기준 Math.ceil(올림)으로 가장 가까운 자정으로 올림
+  // XLSX cellDates:true → 엑셀 시리얼을 Date 변환 시 부동소수점 오차로 14:59:08 UTC 같은 값 생성
+  // 예: 엑셀 3/1/95 → Date("1995-02-28T14:59:08.000Z") → 어떤 TZ든 getDate()=28 → 하루 전
+  // 해결: UTC ms를 dayMs로 올림(ceil) → 정확한 자정 UTC → getUTCFullYear/Month/Date
+  // D98 로컬TZ 방식 실패 원인: 14:59 UTC + KST 9h = 23:59 → 여전히 28일 (다음날로 안 넘어감)
   if (value instanceof Date && !isNaN(value.getTime())) {
-    const yyyy = value.getFullYear();
+    const dayMs = 86400000;
+    const ceiled = new Date(Math.ceil(value.getTime() / dayMs) * dayMs);
+    const yyyy = ceiled.getUTCFullYear();
     if (yyyy >= 1900 && yyyy <= 2099) {
-      const mm = String(value.getMonth() + 1).padStart(2, '0');
-      const dd = String(value.getDate()).padStart(2, '0');
+      const mm = String(ceiled.getUTCMonth() + 1).padStart(2, '0');
+      const dd = String(ceiled.getUTCDate()).padStart(2, '0');
       return `${yyyy}-${mm}-${dd}`;
     }
     return null;
