@@ -553,6 +553,9 @@ export function normalizeByFieldKey(fieldKey: string, value: any): any {
 
   const field = getFieldByKey(fieldKey);
   if (!field || !field.normalizeFunction) {
+    // ★ D99: Date 객체는 String()하면 영문 날짜 문자열이 되어 후속 normalizeCustomFieldValue에서
+    // Math.ceil Date 분기를 못 타고 문자열 파싱 → 하루 밀림. Date 객체는 그대로 반환
+    if (value instanceof Date) return value;
     return String(value).trim();
   }
 
