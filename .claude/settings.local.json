@@ -58,7 +58,8 @@
       "Bash(grep -n \"INSERT INTO balance_transactions\\\\|UPDATE balance_transactions\" /c/Users/ceo/projects/targetup/packages/backend/src/routes/*.ts /c/Users/ceo/projects/targetup/packages/backend/src/utils/*.ts)",
       "Bash(find /c/Users/ceo/projects/targetup -name *migration* -type f)",
       "Bash(node -e \"const XLSX = require\\(''xlsx''\\); const path = require\\(''path''\\); const fp = path.join\\(''C:'',''Users'',''ceo'',''Downloads'',''은지 테스트리스트.xlsx''\\); console.log\\(''path:'', fp\\); const wb = XLSX.readFile\\(fp, { cellDates: true, raw: false }\\); const ws = wb.Sheets[wb.SheetNames[0]]; const data = XLSX.utils.sheet_to_json\\(ws, { header: 1 }\\); data.slice\\(0, 6\\).forEach\\(\\(row, i\\) => console.log\\(''Row'', i, JSON.stringify\\(row\\)\\)\\);\")",
-      "Bash(grep -E \"\\\\.\\(sql|ts|js\\)$\")"
+      "Bash(grep -E \"\\\\.\\(sql|ts|js\\)$\")",
+      "Bash(npm create:*)"
     ]
   }
 }
