@@ -153,8 +153,8 @@ export default function FlyerPage({ token }: { token: string }) {
 
             <SectionCard title="기본 정보" className="mb-4">
               <div className="grid grid-cols-2 gap-4">
-                <div className="col-span-2"><Input label="행사명 *" value={title} onChange={e => setTitle(e.target.value)} placeholder="예: 26년 3월 데레사 행사" /></div>
-                <Input label="매장명" value={storeName} onChange={e => setStoreName(e.target.value)} placeholder="예: 데레사 마트" />
+                <div className="col-span-2"><Input label="행사명 *" value={title} onChange={e => setTitle(e.target.value)} placeholder="예: X월 XX일~XX일 행사" /></div>
+                <Input label="매장명" value={storeName} onChange={e => setStoreName(e.target.value)} placeholder="예: OO마트" />
                 <div className="grid grid-cols-2 gap-2">
                   <Input label="시작일" type="date" value={periodStart} onChange={e => setPeriodStart(e.target.value)} />
                   <Input label="종료일" type="date" value={periodEnd} onChange={e => setPeriodEnd(e.target.value)} />
@@ -215,31 +215,49 @@ export default function FlyerPage({ token }: { token: string }) {
             </div>
           </div>
 
-          {/* 우측: 폰 프레임 미리보기 */}
+          {/* 우측: 모던 폰 프레임 미리보기 */}
           <div className="w-[280px] flex-shrink-0 sticky top-20 self-start">
             <p className="text-xs font-semibold text-text-secondary mb-3 text-center">미리보기</p>
-            <div className="bg-gray-900 rounded-[2rem] p-2.5 shadow-elevated">
-              {/* 노치 */}
-              <div className="flex justify-center mb-1">
-                <div className="w-20 h-5 bg-gray-900 rounded-b-xl relative -top-0.5" />
-              </div>
-              <div className="bg-surface rounded-[1.5rem] overflow-hidden" style={{ width: 255, height: 520 }}>
-                {/* 미니 주소바 */}
-                <div className="bg-bg px-3 py-1.5 border-b border-border flex items-center gap-1">
-                  <div className="w-1.5 h-1.5 rounded-full bg-success-500" />
-                  <span className="text-[8px] text-text-muted font-mono truncate">hanjul-flyer.kr/preview</span>
-                </div>
-                {/* 프론트 자체 렌더링 미리보기 */}
-                <div className="overflow-y-auto" style={{ height: 490 }}>
-                  {editingFlyer?.short_code ? (
-                    <iframe src={`${API_BASE}/api/flyer/p/${editingFlyer.short_code}`} className="w-full border-0" style={{ height: 490, transform: 'scale(0.68)', transformOrigin: 'top left', width: '147%' }} title="미리보기" />
-                  ) : (
-                    <FlyerPreviewRenderer title={title} storeName={storeName} periodStart={periodStart} periodEnd={periodEnd} categories={categories} template={template} />
-                  )}
+            <div className="relative mx-auto" style={{ width: 260 }}>
+              {/* 폰 외곽 — 모던 플랫 스타일 */}
+              <div className="bg-[#1a1a1a] rounded-[2.8rem] p-[6px] shadow-[0_8px_30px_rgba(0,0,0,0.25)]">
+                {/* 다이나믹 아일랜드 */}
+                <div className="absolute top-[10px] left-1/2 -translate-x-1/2 w-[72px] h-[22px] bg-[#1a1a1a] rounded-full z-20" />
+                {/* 스크린 */}
+                <div className="bg-surface rounded-[2.4rem] overflow-hidden relative">
+                  {/* 상태바 */}
+                  <div className="h-[42px] bg-white/80 backdrop-blur-sm flex items-end justify-between px-6 pb-1">
+                    <span className="text-[9px] font-semibold text-gray-800">9:41</span>
+                    <div className="flex items-center gap-[3px]">
+                      <svg className="w-[14px] h-[10px] text-gray-800" viewBox="0 0 17 12" fill="currentColor"><path d="M15.5 1h-1a.5.5 0 00-.5.5v9a.5.5 0 00.5.5h1a.5.5 0 00.5-.5v-9a.5.5 0 00-.5-.5zM11.5 3h-1a.5.5 0 00-.5.5v7a.5.5 0 00.5.5h1a.5.5 0 00.5-.5v-7a.5.5 0 00-.5-.5zM7.5 5h-1a.5.5 0 00-.5.5v5a.5.5 0 00.5.5h1a.5.5 0 00.5-.5v-5a.5.5 0 00-.5-.5zM3.5 7.5h-1a.5.5 0 00-.5.5v2.5a.5.5 0 00.5.5h1a.5.5 0 00.5-.5V8a.5.5 0 00-.5-.5z"/></svg>
+                      <svg className="w-[15px] h-[10px] text-gray-800" viewBox="0 0 16 12" fill="currentColor"><path d="M8 3.5a6.47 6.47 0 014.56 1.86.5.5 0 01-.7.7A5.47 5.47 0 008 4.5a5.47 5.47 0 00-3.86 1.56.5.5 0 01-.7-.7A6.47 6.47 0 018 3.5z"/><path d="M8 6.5a3.98 3.98 0 012.83 1.17.5.5 0 01-.71.71A2.98 2.98 0 008 7.5a2.98 2.98 0 00-2.12.88.5.5 0 01-.71-.71A3.98 3.98 0 018 6.5z"/><circle cx="8" cy="10" r="1"/></svg>
+                      <div className="w-[22px] h-[10px] border border-gray-800 rounded-[3px] relative ml-0.5">
+                        <div className="absolute inset-[1.5px] bg-gray-800 rounded-[1px]" style={{ width: '70%' }} />
+                        <div className="absolute right-[-3px] top-[2.5px] w-[1.5px] h-[4px] bg-gray-800 rounded-r-sm" />
+                      </div>
+                    </div>
+                  </div>
+                  {/* 미니 주소바 */}
+                  <div className="bg-gray-100 mx-3 mt-0.5 mb-1 rounded-lg px-2.5 py-1 flex items-center gap-1.5">
+                    <svg className="w-2.5 h-2.5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 15v.01M12 12a2.5 2.5 0 001.286-4.642A2.5 2.5 0 0011 5.5 2.5 2.5 0 008.714 7.358 2.5 2.5 0 0010 12" /></svg>
+                    <span className="text-[8px] text-gray-500 font-medium">hanjul-flyer.kr</span>
+                  </div>
+                  {/* 콘텐츠 */}
+                  <div className="overflow-y-auto" style={{ height: 460 }}>
+                    {editingFlyer?.short_code ? (
+                      <iframe src={`${API_BASE}/api/flyer/p/${editingFlyer.short_code}`} className="w-full border-0" style={{ height: 460, transform: 'scale(0.66)', transformOrigin: 'top left', width: '152%' }} title="미리보기" />
+                    ) : (
+                      <FlyerPreviewRenderer title={title} storeName={storeName} periodStart={periodStart} periodEnd={periodEnd} categories={categories} template={template} />
+                    )}
+                  </div>
+                  {/* 홈 인디케이터 */}
+                  <div className="flex justify-center py-2 bg-white">
+                    <div className="w-[100px] h-[4px] bg-gray-900 rounded-full" />
+                  </div>
                 </div>
               </div>
             </div>
-            <p className="text-[10px] text-text-muted text-center mt-2">
+            <p className="text-[10px] text-text-muted text-center mt-3">
               {editingFlyer?.short_code ? '발행된 전단지 미리보기' : '입력 내용이 실시간 반영됩니다'}
             </p>
           </div>

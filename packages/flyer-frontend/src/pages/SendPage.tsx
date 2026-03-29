@@ -600,10 +600,28 @@ export default function SendPage({ token }: { token: string }) {
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 backdrop-blur-sm" onClick={() => setShowFlyerPreview(false)}>
           <div className="relative" onClick={e => e.stopPropagation()}>
             <button onClick={() => setShowFlyerPreview(false)} className="absolute -top-4 -right-4 w-9 h-9 bg-surface rounded-full shadow-elevated flex items-center justify-center text-text-secondary hover:text-text z-10">✕</button>
-            <div className="bg-gray-900 rounded-[2.5rem] p-3 shadow-modal">
-              <div className="bg-surface rounded-[2rem] overflow-hidden" style={{ width: 375, height: 720 }}>
-                <div className="bg-bg px-5 py-2 flex items-center text-[10px] text-text-muted border-b border-border">hanjul-flyer.kr/{selectedFlyerData.short_code}</div>
-                <iframe src={`${API_BASE}/api/flyer/p/${selectedFlyerData.short_code}`} className="w-full border-0" style={{ height: 692 }} title="전단지 미리보기" />
+            <div className="bg-[#1a1a1a] rounded-[3rem] p-[7px] shadow-[0_20px_60px_rgba(0,0,0,0.4)] relative">
+              {/* 다이나믹 아일랜드 */}
+              <div className="absolute top-[12px] left-1/2 -translate-x-1/2 w-[90px] h-[26px] bg-[#1a1a1a] rounded-full z-20" />
+              <div className="bg-surface rounded-[2.6rem] overflow-hidden" style={{ width: 375, height: 740 }}>
+                {/* 상태바 */}
+                <div className="h-[48px] bg-white flex items-end justify-between px-8 pb-1">
+                  <span className="text-[11px] font-semibold text-gray-800">9:41</span>
+                  <div className="flex items-center gap-1">
+                    <div className="w-[24px] h-[11px] border border-gray-800 rounded-[3px] relative">
+                      <div className="absolute inset-[1.5px] bg-gray-800 rounded-[1px]" style={{ width: '70%' }} />
+                    </div>
+                  </div>
+                </div>
+                {/* 주소바 */}
+                <div className="bg-gray-100 mx-4 rounded-xl px-3 py-1.5 flex items-center gap-2 mb-1">
+                  <span className="text-[10px] text-gray-500 font-medium">hanjul-flyer.kr/{selectedFlyerData.short_code}</span>
+                </div>
+                <iframe src={`${API_BASE}/api/flyer/p/${selectedFlyerData.short_code}`} className="w-full border-0" style={{ height: 660 }} title="전단지 미리보기" />
+                {/* 홈 인디케이터 */}
+                <div className="flex justify-center py-2 bg-white">
+                  <div className="w-[120px] h-[4px] bg-gray-900 rounded-full" />
+                </div>
               </div>
             </div>
           </div>
