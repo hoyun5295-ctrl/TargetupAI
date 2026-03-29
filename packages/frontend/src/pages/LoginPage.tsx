@@ -196,78 +196,116 @@ export default function LoginPage() {
   );
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 flex flex-col">
-      {/* CSS 애니메이션 정의 */}
-      <style>{`
-        @keyframes fadeIn {
-          from { opacity: 0; }
-          to { opacity: 1; }
-        }
-        @keyframes zoomIn {
-          from { opacity: 0; transform: scale(0.92); }
-          to { opacity: 1; transform: scale(1); }
-        }
-      `}</style>
-
-      <div className="flex-1 flex items-center justify-center px-4">
-        <div className="w-full max-w-sm">
-          <div className="text-center mb-8">
-          {isSuperAdminOnly ? (
-              <>
-                <img src="/logo.png" alt="한줄로" className="h-10 mx-auto" />
-                <p className="mt-3 text-sm text-gray-500">시스템 관리</p>
-              </>
+    <div className="min-h-screen flex">
+      {/* 좌측: 브랜드 패널 (슈퍼관리자는 다크, 고객사는 그린 그라데이션) */}
+      <div className={`hidden lg:flex w-[480px] flex-col justify-between p-12 relative overflow-hidden ${
+        isSuperAdminOnly
+          ? 'bg-gradient-to-br from-slate-800 via-slate-900 to-gray-900'
+          : 'bg-gradient-to-br from-emerald-600 via-teal-700 to-blue-800'
+      }`}>
+        <div className="relative z-10">
+          <img src="/logo.png" alt="한줄로" className="h-9 brightness-0 invert mb-10" />
+          <h1 className="text-3xl font-bold text-white leading-snug">
+            {isSuperAdminOnly ? (
+              <>시스템 관리<br/>콘솔</>
             ) : (
-              <>
-                <img src="/logo.png" alt="한줄로" className="h-10 mx-auto" />
-                <p className="mt-3 text-sm text-gray-500">AI 마케팅 자동화</p>
-              </>
+              <>한줄로 AI<br/>마케팅 자동화</>
             )}
-          </div>
-
-          <form onSubmit={handleSubmit} className="bg-white rounded-2xl shadow-lg p-8 space-y-5">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">아이디</label>
-              <input type="text" value={loginId} onChange={(e) => setLoginId(e.target.value)}
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
-                placeholder="아이디 입력" autoFocus required />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">비밀번호</label>
-              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
-                placeholder="비밀번호 입력" required />
-            </div>
-
-            {error && <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-2.5 text-sm text-red-600">{error}</div>}
-
-            <button type="submit" disabled={loading}
-              className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white font-medium py-2.5 rounded-lg text-sm transition">
-              {loading ? '로그인 중...' : '로그인'}
-            </button>
-          </form>
+          </h1>
+          <p className="text-white/60 mt-4 text-sm leading-relaxed">
+            {isSuperAdminOnly ? (
+              <>고객사 관리, 발송 현황 모니터링,<br/>요금제 설정을 한 곳에서 관리합니다</>
+            ) : (
+              <>고객 DB 업로드부터 AI 타겟 분석,<br/>SMS/LMS/MMS 발송까지 한번에</>
+            )}
+          </p>
         </div>
+
+        <div className="relative z-10 space-y-3">
+          <div className="flex gap-2">
+            <Link to="/privacy" className="text-white/40 hover:text-white/70 text-xs transition">개인정보처리방침</Link>
+            <span className="text-white/20">|</span>
+            <Link to="/terms" className="text-white/40 hover:text-white/70 text-xs transition">이용약관</Link>
+          </div>
+          <div className="text-white/30 text-xs leading-relaxed">
+            <p>{COMPANY_NAME} | 대표이사 {CEO_NAME}</p>
+            <p>사업자등록번호 {BIZ_NUMBER} | 통신판매신고 {TRADE_NUMBER}</p>
+            <p>{COMPANY_ADDRESS}</p>
+            <p className="mt-1">© {new Date().getFullYear()} INVITO. All rights reserved.</p>
+          </div>
+        </div>
+
+        {/* 배경 장식 */}
+        <div className="absolute top-[-80px] right-[-80px] w-[250px] h-[250px] bg-white/5 rounded-full" />
+        <div className="absolute bottom-[-60px] left-[-60px] w-[200px] h-[200px] bg-white/5 rounded-full" />
+        <div className="absolute top-1/3 right-[-30px] w-[120px] h-[120px] bg-white/5 rounded-full" />
       </div>
 
-      {/* 푸터 */}
-      <footer className="bg-gray-800 text-gray-400 py-4 px-4">
-        <div className="max-w-4xl mx-auto text-center text-xs leading-relaxed">
-          <p>
-            {COMPANY_NAME} | 대표이사 {CEO_NAME} | 사업자등록번호 {BIZ_NUMBER} | 통신판매신고 {TRADE_NUMBER}
-          </p>
-          <p className="mt-1">
-            {COMPANY_ADDRESS} | 문의전화 {COMPANY_PHONE}
-          </p>
-          <p className="mt-2">
-            <Link to="/privacy" className="hover:text-white transition">개인정보처리방침</Link>
-            <span className="mx-2">|</span>
-            <Link to="/terms" className="hover:text-white transition">이용약관</Link>
-          </p>
-          <p className="mt-2 text-gray-500">
-            © {new Date().getFullYear()} INVITO. All rights reserved.
-          </p>
+      {/* 우측: 로그인 폼 */}
+      <div className="flex-1 bg-gray-50 flex flex-col">
+        <div className="flex-1 flex items-center justify-center px-6">
+          <div className="w-full max-w-sm">
+            {/* 모바일 로고 */}
+            <div className="lg:hidden text-center mb-8">
+              <img src="/logo.png" alt="한줄로" className="h-9 mx-auto" />
+              <p className="mt-2 text-sm text-gray-500">
+                {isSuperAdminOnly ? '시스템 관리' : 'AI 마케팅 자동화'}
+              </p>
+            </div>
+
+            <h2 className="text-xl font-bold text-gray-900 mb-1">로그인</h2>
+            <p className="text-sm text-gray-500 mb-8">
+              {isSuperAdminOnly ? '관리자 계정으로 로그인하세요' : '한줄로 계정으로 로그인하세요'}
+            </p>
+
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1.5">아이디</label>
+                <input type="text" value={loginId} onChange={(e) => setLoginId(e.target.value)}
+                  className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition bg-white"
+                  placeholder="아이디를 입력하세요" autoFocus required />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1.5">비밀번호</label>
+                <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+                  className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition bg-white"
+                  placeholder="비밀번호를 입력하세요" required />
+              </div>
+
+              {error && (
+                <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-2.5">
+                  <p className="text-sm text-red-600">{error}</p>
+                </div>
+              )}
+
+              <button type="submit" disabled={loading}
+                className={`w-full font-semibold py-3 rounded-xl text-sm transition-colors disabled:opacity-50 ${
+                  isSuperAdminOnly
+                    ? 'bg-slate-800 hover:bg-slate-900 text-white'
+                    : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                }`}>
+                {loading ? '로그인 중...' : '로그인'}
+              </button>
+            </form>
+
+            <p className="text-center text-xs text-gray-400 mt-6">
+              문의전화 {COMPANY_PHONE}
+            </p>
+          </div>
         </div>
-      </footer>
+
+        {/* 모바일 푸터 */}
+        <footer className="lg:hidden bg-gray-100 text-gray-400 py-4 px-4">
+          <div className="max-w-4xl mx-auto text-center text-xs leading-relaxed">
+            <p>{COMPANY_NAME} | {BIZ_NUMBER}</p>
+            <p className="mt-1">
+              <Link to="/privacy" className="hover:text-gray-600 transition">개인정보처리방침</Link>
+              <span className="mx-2">|</span>
+              <Link to="/terms" className="hover:text-gray-600 transition">이용약관</Link>
+            </p>
+          </div>
+        </footer>
+      </div>
 
       {/* 모달들 */}
       {forceLogoutModal}

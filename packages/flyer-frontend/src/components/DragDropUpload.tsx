@@ -55,8 +55,8 @@ export default function DragDropUpload({ accept = '.xlsx,.xls,.csv', loading, on
                 )}
               </svg>
             </div>
-            <p className="text-sm font-medium text-text mb-1">{label || '\uc5d1\uc140/CSV \ud30c\uc77c\uc744 \ub4dc\ub798\uadf8\ud558\uac70\ub098 \ud074\ub9ad\ud558\uc138\uc694'}</p>
-            <p className="text-xs text-text-muted">{hint || accept.split(',').join(', ') + ' \uc9c0\uc6d0'}</p>
+            <p className="text-sm font-medium text-text mb-1">{label || 'Excel/CSV 파일을 드래그하거나 클릭하세요'}</p>
+            <p className="text-xs text-text-muted">{hint || accept.split(',').join(', ') + ' 지원'}</p>
           </>
         )}
       </div>
