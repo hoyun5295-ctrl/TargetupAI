@@ -54,10 +54,10 @@ export default function SendPage({ token }: { token: string }) {
     (async () => {
       const [fRes, sRes] = await Promise.all([
         fetch(`${API_BASE}/api/flyer/flyers`, { headers }).catch(() => null),
-        fetch(`${API_BASE}/api/companies/sender-numbers`, { headers }).catch(() => null),
+        fetch(`${API_BASE}/api/companies/callback-numbers`, { headers }).catch(() => null),
       ]);
       if (fRes?.ok) { const d = await fRes.json(); setFlyers(d.filter((f: Flyer) => f.status === 'published' && f.short_code)); }
-      if (sRes?.ok) { const d = await sRes.json(); const n = (d.senderNumbers || d || []).map((s: any) => s.phone_number || s); setSenderNumbers(n); if (n.length > 0) setCallback(n[0]); }
+      if (sRes?.ok) { const d = await sRes.json(); const nums = (d.numbers || d || []).map((cb: any) => cb.phone || cb.phone_number || cb); setSenderNumbers(nums); if (nums.length > 0) setCallback(nums[0]); }
     })();
   }, [token]);
 
