@@ -46,7 +46,7 @@
 | — | messageUtils.ts | 변수 치환 (5개 발송 경로 통합) |
 | — | normalize.ts | 값 정규화 + normalizeCustomFieldValue (커스텀 필드 Date/문자열 정규화) |
 | — | stats-aggregation.ts | 대시보드 통계 집계 + AI 캠페인 성과 집계 |
-| — | formatDate.ts (프론트) | calculateSmsBytes (바이트 계산) + truncateToSmsBytes (바이트 자르기) + replaceMessageVars (변수 치환) + formatPreviewValue (미리보기 포맷팅) + DIRECT_VAR_MAP/replaceDirectVars (직접발송 변수맵 D96) + mmsServerPathToUrl (MMS 이미지 URL 변환 D98) |
+| — | formatDate.ts (프론트) | calculateSmsBytes (바이트 계산) + truncateToSmsBytes (바이트 자르기) + replaceMessageVars (변수 치환) + formatPreviewValue (미리보기 포맷팅) + DIRECT_VAR_MAP/replaceDirectVars (직접발송 변수맵 D96) + mmsServerPathToUrl (MMS 이미지 URL 변환 D98) + resolveRecipientCallback (개별회신번호 컬럼 값 추출 D99) |
 
 **⚠️ 이 원칙을 어기고 인라인 코드를 작성하면 버그가 재발한다. 실제 사고 사례:**
 - **사례 1:** upload.ts에서 customer_field_definitions를 인라인으로 INSERT하면서 "최초 등록 우선" 정책 적용 → 잘못된 라벨이 영원히 고착되는 버그 발생.
@@ -481,6 +481,9 @@ PostgreSQL campaigns/campaign_runs 생성
 | **MySQL TZ ≠ QTmsg Agent TZ** | MySQL 서버=KST(+09:00)이지만 QTmsg Agent가 통신사 리포트 시간(UTC)을 그대로 DATETIME에 저장 | **sendreq_time=KST(DATE_ADD 불필요), mobsend_time/repmsg_recvtm=UTC(DATE_ADD+9h 필요).** SMS_DETAIL_FIELDS/SMS_EXPORT_FIELDS 상수로 통합 관리 (D98) |
 | **직원 요청 원문과 구현 결과 의미 불일치** | "draft를 실패로 카운트" 요청 → "목록에서 제외"로 구현 → 다른 의미 | **직원 요청 원문을 그대로 구현.** "실패로 카운트" = 목록에 포함 + "실패" 표시 (D98) |
 | **검증 시 코드 존재만 확인** | "코드가 있다"만 보고 "검증 완료" 보고 → 실제로는 API 키 불일치, SELECT 누락 등 6건 추가 발견 | **검증은 데이터 흐름 끝까지 추적.** 입력→처리→저장→조회→표시 전체 경로를 실제 값으로 따라감 (D98) |
+| **xlsx cellDates 부동소수점 오차** | 엑셀 시리얼→Date 변환 시 자정에서 ~9시간 부족한 값 생성 → getDate()로 하루 전 | **Math.ceil(올림)으로 다음 자정 복원** + getUTCFullYear/Month/Date. Math.round/로컬TZ 모두 실패 (D99) |
+| **normalizeByFieldKey가 Date를 String()** | 커스텀 필드(normalizeFunction 없음)에 Date 객체 → `String(Date)` = 영문 날짜 → normalizeDate 문자열 파싱 → 밀림 | **Date 객체는 String() 변환하지 않고 그대로 반환.** 후속 normalizeCustomFieldValue에서 Date 분기 진입 (D99) |
+| **recipientsWithMessage 원본 필드 탈락** | {phone, callback, message}만 추출 → store_phone 등 다른 컬럼 소실 → resolveRecipientCallback이 값 못 읽음 | **컬럼 매핑(resolveRecipientCallback)은 원본 데이터(targetRecipients)에서 호출.** 축소된 객체에서 호출 금지 (D99) |
 
 ### ⚠️ 필수 체크 원칙 1: 유틸 함수 수정/추가 시 소비처 전수 확인
 

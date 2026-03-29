@@ -39,6 +39,10 @@ import manageScheduledRoutes from './routes/manage-scheduled';
 import manageStatsRoutes from './routes/manage-stats';
 import senderRegistrationRoutes from './routes/sender-registration';
 
+// 전단AI 라우트
+import flyerRoutes from './routes/flyer/flyers';
+import flyerPublicRoutes from './routes/flyer/short-urls';
+
 // DB 연결
 import './config/database';
 import { LIMITS } from './config/defaults';
@@ -103,6 +107,10 @@ app.use('/api/manage/callbacks', manageCallbacksRoutes);
 app.use('/api/manage/scheduled', manageScheduledRoutes);
 app.use('/api/manage/stats', manageStatsRoutes);
 app.use('/api/sender-registration', senderRegistrationRoutes);
+
+// 전단AI 라우트 (기존 코드 수정 없이 격리)
+app.use('/api/flyer/flyers', flyerRoutes);
+app.use('/api/flyer/p', flyerPublicRoutes);  // 공개 페이지 (인증 불필요)
 
 // 404 처리
 app.use((req, res) => {

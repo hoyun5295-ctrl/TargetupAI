@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>26년 3월 데레사 행사</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;900&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Noto Sans KR', -apple-system, sans-serif;
+    background: #f5f5f5;
+    color: #222;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ── 히어로 배너 ── */
+  .hero {
+    background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+    color: #fff;
+    text-align: center;
+    padding: 28px 16px 22px;
+    position: relative;
+    overflow: hidden;
+  }
+  .hero::before {
+    content: '';
+    position: absolute;
+    top: -40px; right: -40px;
+    width: 120px; height: 120px;
+    background: rgba(255,255,255,0.08);
+    border-radius: 50%;
+  }
+  .hero::after {
+    content: '';
+    position: absolute;
+    bottom: -30px; left: -20px;
+    width: 80px; height: 80px;
+    background: rgba(255,255,255,0.06);
+    border-radius: 50%;
+  }
+  .hero .store-name {
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: 2px;
+    opacity: 0.9;
+    margin-bottom: 6px;
+  }
+  .hero h1 {
+    font-size: 26px;
+    font-weight: 900;
+    line-height: 1.3;
+    text-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  }
+  .hero .period {
+    margin-top: 10px;
+    font-size: 13px;
+    font-weight: 500;
+    background: rgba(255,255,255,0.18);
+    display: inline-block;
+    padding: 4px 14px;
+    border-radius: 20px;
+  }
+
+  /* ── 카테고리 섹션 ── */
+  .category {
+    margin: 16px 12px;
+  }
+  .category-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+    padding: 0 4px;
+  }
+  .category-icon {
+    width: 32px; height: 32px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    flex-shrink: 0;
+  }
+  .category-icon.fruit { background: #fef3c7; }
+  .category-icon.grocery { background: #dbeafe; }
+  .category-icon.meat { background: #fce7f3; }
+  .category-icon.seafood { background: #cffafe; }
+
+  .category-header h2 {
+    font-size: 17px;
+    font-weight: 800;
+    color: #1a1a1a;
+  }
+  .category-header .count {
+    font-size: 12px;
+    color: #888;
+    font-weight: 400;
+  }
+
+  /* ── 상품 그리드 ── */
+  .product-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+  }
+
+  .product-card {
+    background: #fff;
+    border-radius: 14px;
+    overflow: hidden;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+    position: relative;
+    transition: transform 0.15s;
+  }
+  .product-card:active { transform: scale(0.97); }
+
+  .product-img {
+    width: 100%;
+    aspect-ratio: 4/3;
+    object-fit: cover;
+    background: #f8f8f8;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 40px;
+    color: #ddd;
+  }
+
+  .product-info {
+    padding: 10px 12px 14px;
+  }
+  .product-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: #333;
+    line-height: 1.4;
+    margin-bottom: 2px;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .product-unit {
+    font-size: 11px;
+    color: #999;
+    margin-bottom: 6px;
+  }
+  .price-row {
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+    flex-wrap: wrap;
+  }
+  .price-sale {
+    font-size: 20px;
+    font-weight: 900;
+    color: #e74c3c;
+    letter-spacing: -0.5px;
+  }
+  .price-sale .won {
+    font-size: 13px;
+    font-weight: 700;
+  }
+  .price-original {
+    font-size: 12px;
+    color: #bbb;
+    text-decoration: line-through;
+  }
+  .discount-rate {
+    font-size: 11px;
+    font-weight: 700;
+    color: #fff;
+    background: #e74c3c;
+    padding: 1px 6px;
+    border-radius: 4px;
+  }
+
+  /* ── 뱃지 ── */
+  .badge {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    background: #ff6b35;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 6px;
+    box-shadow: 0 2px 6px rgba(255,107,53,0.3);
+    z-index: 1;
+  }
+  .badge.hot { background: #e74c3c; }
+  .badge.limited { background: #8b5cf6; }
+  .badge.event { background: #f59e0b; color: #7c2d12; }
+
+  /* ── 풋터 ── */
+  .footer {
+    text-align: center;
+    padding: 24px 16px 40px;
+    color: #aaa;
+    font-size: 12px;
+    line-height: 1.6;
+  }
+  .footer .brand {
+    font-weight: 700;
+    color: #e74c3c;
+    font-size: 13px;
+  }
+
+  /* ── 구분선 ── */
+  .divider {
+    height: 8px;
+    background: #f0f0f0;
+    margin: 8px 0;
+  }
+</style>
+</head>
+<body>
+
+<!-- 히어로 배너 -->
+<div class="hero">
+  <div class="store-name">DERESA MART</div>
+  <h1>3월 대감사 행사</h1>
+  <div class="period">3/28(금) ~ 4/3(목)</div>
+</div>
+
+<!-- 청과/야채 -->
+<div class="category">
+  <div class="category-header">
+    <div class="category-icon fruit">🍓</div>
+    <h2>청과 / 야채</h2>
+    <span class="count">10개 상품</span>
+  </div>
+  <div class="product-grid">
+    <div class="product-card">
+      <div class="badge hot">초특가</div>
+      <div class="product-img">🍓</div>
+      <div class="product-info">
+        <div class="product-name">딸기</div>
+        <div class="product-unit">3kg</div>
+        <div class="price-row">
+          <span class="price-sale">6,980<span class="won">원</span></span>
+        </div>
+      </div>
+    </div>
+    <div class="product-card">
+      <div class="badge limited">한정특가</div>
+      <div class="product-img">🍎</div>
+      <div class="product-info">
+        <div class="product-name">청송사과</div>
+        <div class="product-unit">1박스 20KG</div>
+        <div class="price-row">
+          <span class="price-sale">79,800<span class="won">원</span></span>
+        </div>
+        <div class="price-original">99,000원</div>
+        <span class="discount-rate">20%</span>
+      </div>
+    </div>
+    <div class="product-card">
+      <div class="product-img">🍅</div>
+      <div class="product-info">
+        <div class="product-name">짭짤이토마토</div>
+        <div class="product-unit">1박스</div>
+        <div class="price-row">
+          <span class="price-sale">9,900<span class="won">원</span></span>
+        </div>
+        <div class="price-original">12,800원</div>
+        <span class="discount-rate">23%</span>
+      </div>
+    </div>
+    <div class="product-card">
+      <div class="product-img">🍊</div>
+      <div class="product-info">
+        <div class="product-name">왕오렌지</div>
+        <div class="product-unit">1봉</div>
+        <div class="price-row">
+          <span class="price-sale">6,980<span class="won">원</span></span>
+        </div>
+        <div class="price-original">7,980원</div>
+        <span class="discount-rate">13%</span>
+      </div>
+    </div>
+    <div class="product-card">
+      <div class="product-img">🍊</div>
+      <div class="product-info">
+        <div class="product-name">만다린</div>
+        <div class="product-unit">1팩</div>
+        <div class="price-row">
+          <span class="price-sale">7,980<span class="won">원</span></span>
+        </div>
+      </div>
+    </div>
+    <div class="product-card">
+      <div class="product-img">🍇</div>
+      <div class="product-info">
+        <div class="product-name">크림슨포도</div>
+        <div class="product-unit">1팩</div>
+        <div class="price-row">
+          <span class="price-sale">9,900<span class="won">원</span></span>
+        </div>
+      </div>
+    </div>
+    <div class="product-card">
+      <div class="product-img">🥬</div>
+      <div class="product-info">
+        <div class="product-name">양배추</div>
+        <div class="product-unit">1통</div>
+        <div class="price-row">
+          <span class="price-sale">990<span class="won">원</span></span>
+        </div>
+        <div class="price-original">1,980원</div>
+        <span class="discount-rate">50%</span>
+      </div>
+    </div>
+    <div class="product-card">
+      <div class="product-img">🧅</div>
+      <div class="product-info">
+        <div class="product-name">양파</div>
+        <div class="product-unit">1망 3KG</div>
+        <div class="price-row">
+          <span class="price-sale">3,980<span class="won">원</span></span>
+        </div>
+        <div class="price-original">5,980원</div>
+        <span class="discount-rate">33%</span>
+      </div>
+    </div>
+    <div class="product-card">
+      <div class="product-img">🌿</div>
+      <div class="product-info">
+        <div class="product-name">흙쪽파</div>
+        <div class="product-unit">1단</div>
+        <div class="price-row">
+          <span class="price-sale">2,980<span class="won">원</span></span>
+        </div>
+        <div class="price-original">3,980원</div>
+        <span class="discount-rate">25%</span>
+      </div>
+    </div>
+    <div class="product-card">
+      <div class="product-img">🌿</div>
+      <div class="product-info">
+        <div class="product-name">바라부추</div>
+        <div class="product-unit">1봉</div>
+        <div class="price-row">
+          <span class="price-sale">990<span class="won">원</span></span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="divider"></div>
+
+<!-- 공산 -->
+<div class="category">
+  <div class="category-header">
+    <div class="category-icon grocery">🛒</div>
+    <h2>공산</h2>
+    <span class="count">13개 상품</span>
+  </div>
+  <div class="product-grid">
+    <div class="product-card">
+      <div class="badge event">시식행사</div>
+      <div class="product-img">🍜</div>
+      <div class="product-info">
+        <div class="product-name">오뚜기 유니짜장</div>
+        <div class="product-unit">2인분</div>
+        <div class="price-row">
+          <span class="price-sale">4,980<span class="won">원</span></span>
+        </div>
+      </div>
+    </div>
+    <div class="product-card">
+      <div class="product-img">🧈</div>
+      <div class="product-info">
+        <div class="product-name">CJ 큰두부</div>
+        <div class="product-unit">800G</div>
+        <div class="price-row">
+          <span class="price-sale">1,980<span class="won">원</span></span>
+        </div>
+      </div>
+    </div>
+    <div class="product-card">
+      <div class="product-img">🍢</div>
+      <div class="product-info">
+        <div class="product-name">CJ삼호 바른사각어묵</div>
+        <div class="product-unit">200G</div>
+        <div class="price-row">
+          <span class="price-sale">990<span class="won">원</span></span>
+        </div>
+      </div>
+    </div>
+    <div class="product-card">
+      <div class="product-img">🥟</div>
+      <div class="product-info">
+        <div class="product-name">CJ비비고 왕교자</div>
+        <div class="product-unit">840G</div>
+        <div class="price-row">
+          <span class="price-sale">6,980<span class="won">원</span></span>
+        </div>
+      </div>
+    </div>
+    <div class="product-card">
+      <div class="product-img">🍪</div>
+      <div class="product-info">
+        <div class="product-name">에이스</div>
+        <div class="product-unit">1박스</div>
+        <div class="price-row">
+          <span class="price-sale">2,980<span class="won">원</span></span>
+        </div>
+      </div>
+    </div>
+    <div class="product-card">
+      <div class="product-img">🍘</div>
+      <div class="product-info">
+        <div class="product-name">크라운 스낵봉지</div>
+        <div class="product-unit">각각</div>
+        <div class="price-row">
+          <span class="price-sale">1,600<span class="won">원</span></span>
+        </div>
+      </div>
+    </div>
+    <div class="product-card">
+      <div class="product-img">🍫</div>
+      <div class="product-info">
+        <div class="product-name">오리온 초코파이</div>
+        <div class="product-unit">30입</div>
+        <div class="price-row">
+          <span class="price-sale">6,980<span class="won">원</span></span>
+        </div>
+      </div>
+    </div>
+    <div class="product-card">
+      <div class="product-img">🍡</div>
+      <div class="product-info">
+        <div class="product-name">청우 찰떡초코파이</div>
+        <div class="product-unit">1+1</div>
+        <div class="price-row">
+          <span class="price-sale">3,980<span class="won">원</span></span>
+        </div>
+      </div>
+    </div>
+    <div class="product-card">
+      <div class="product-img">🍺</div>
+      <div class="product-info">
+        <div class="product-name">필굿 오리지널</div>
+        <div class="product-unit">355ml x 6</div>
+        <div class="price-row">
+          <span class="price-sale">3,980<span class="won">원</span></span>
+        </div>
+      </div>
+    </div>
+    <div class="product-card">
+      <div class="product-img">🍺</div>
+      <div class="product-info">
+        <div class="product-name">카스</div>
+        <div class="product-unit">355ml x 6</div>
+        <div class="price-row">
+          <span class="price-sale">8,900<span class="won">원</span></span>
+        </div>
+      </div>
+    </div>
+    <div class="product-card">
+      <div class="product-img">🍶</div>
+      <div class="product-info">
+        <div class="product-name">참이슬</div>
+        <div class="product-unit">360ml x 6</div>
+        <div class="price-row">
+          <span class="price-sale">6,980<span class="won">원</span></span>
+        </div>
+      </div>
+    </div>
+    <div class="product-card">
+      <div class="product-img">🍶</div>
+      <div class="product-info">
+        <div class="product-name">새로 소주</div>
+        <div class="product-unit">360ml x 6</div>
+        <div class="price-row">
+          <span class="price-sale">6,980<span class="won">원</span></span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 풋터 -->
+<div class="footer">
+  <div class="brand">한줄로전단</div>
+  <div style="margin-top:4px;">데레사 마트 | 3/28 ~ 4/3</div>
+  <div style="margin-top:2px; color:#ccc; font-size:11px;">본 전단은 한줄로AI로 제작되었습니다</div>
+</div>
+
+</body>
+</html>

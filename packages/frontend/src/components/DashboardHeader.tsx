@@ -70,6 +70,7 @@ export default function DashboardHeader({
     { label: 'AI 분석', onClick: () => lockGuard(onAnalysis), color: 'gold', locked: isSubscriptionLocked, path: '/' },
     { label: '자동발송', onClick: () => lockGuard(() => navigate('/auto-send')), color: 'gold', locked: isSubscriptionLocked, path: '/auto-send' },
     { label: '카카오&RCS', onClick: () => navigate('/kakao-rcs'), color: 'green', path: '/kakao-rcs' },
+    { label: '전단AI', onClick: () => navigate('/flyer'), color: 'green', path: '/flyer' },
     { label: '직접발송', onClick: onDirectSend, color: 'green', path: '/' },
     { label: '캘린더', onClick: (isSubscriptionLocked || isCalendarLocked)
         ? () => isSubscriptionLocked ? onSubscriptionLocked?.() : onFeatureLocked?.('캘린더', '스타터')

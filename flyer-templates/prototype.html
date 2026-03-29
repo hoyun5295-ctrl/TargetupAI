@@ -1,0 +1,1102 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>전단AI — 전단지 만들기</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700;800;900&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --primary: #2563eb;
+    --primary-light: #eff6ff;
+    --primary-dark: #1d4ed8;
+    --gray-50: #f9fafb;
+    --gray-100: #f3f4f6;
+    --gray-200: #e5e7eb;
+    --gray-300: #d1d5db;
+    --gray-400: #9ca3af;
+    --gray-500: #6b7280;
+    --gray-600: #4b5563;
+    --gray-700: #374151;
+    --gray-800: #1f2937;
+    --gray-900: #111827;
+    --red: #ef4444;
+    --green: #22c55e;
+    --amber: #f59e0b;
+  }
+
+  body {
+    font-family: 'Noto Sans KR', -apple-system, sans-serif;
+    background: var(--gray-100);
+    color: var(--gray-800);
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
+  }
+
+  /* ── 상단 헤더 ── */
+  .app-header {
+    background: #fff;
+    border-bottom: 1px solid var(--gray-200);
+    padding: 16px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+  .app-header .logo {
+    font-size: 20px;
+    font-weight: 800;
+    color: var(--primary);
+  }
+  .app-header .logo span { color: var(--gray-400); font-weight: 400; font-size: 14px; margin-left: 8px; }
+
+  /* ── 메인 레이아웃 ── */
+  .main-layout {
+    display: flex;
+    height: calc(100vh - 57px);
+  }
+
+  /* ── 좌측: 입력 폼 ── */
+  .form-panel {
+    flex: 1;
+    overflow-y: auto;
+    padding: 24px;
+    max-width: 720px;
+  }
+
+  .form-section {
+    background: #fff;
+    border-radius: 12px;
+    border: 1px solid var(--gray-200);
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+  .form-section-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--gray-800);
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .form-section-title .num {
+    width: 24px; height: 24px;
+    background: var(--primary);
+    color: #fff;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+
+  .form-row {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+  .form-group {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .form-group label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--gray-500);
+  }
+  .form-group input,
+  .form-group select {
+    padding: 8px 12px;
+    border: 1px solid var(--gray-200);
+    border-radius: 8px;
+    font-size: 14px;
+    font-family: inherit;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  .form-group input:focus,
+  .form-group select:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(37,99,235,0.1);
+  }
+
+  /* ── 카테고리 관리 ── */
+  .category-tabs {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+  }
+  .category-tab {
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 600;
+    border: 1.5px solid var(--gray-200);
+    background: #fff;
+    cursor: pointer;
+    transition: all 0.15s;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .category-tab:hover { border-color: var(--primary); }
+  .category-tab.active {
+    background: var(--primary);
+    color: #fff;
+    border-color: var(--primary);
+  }
+  .category-tab .remove-cat {
+    width: 16px; height: 16px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    margin-left: 2px;
+    opacity: 0.6;
+    cursor: pointer;
+  }
+  .category-tab .remove-cat:hover { opacity: 1; }
+  .add-category-btn {
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 600;
+    border: 1.5px dashed var(--gray-300);
+    background: transparent;
+    color: var(--gray-400);
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .add-category-btn:hover {
+    border-color: var(--primary);
+    color: var(--primary);
+  }
+
+  /* ── 상품 테이블 ── */
+  .product-table-wrapper {
+    overflow-x: auto;
+  }
+  .product-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: 13px;
+  }
+  .product-table thead th {
+    background: var(--gray-50);
+    padding: 8px 10px;
+    text-align: left;
+    font-weight: 600;
+    color: var(--gray-500);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-bottom: 1px solid var(--gray-200);
+    position: sticky;
+    top: 0;
+    white-space: nowrap;
+  }
+  .product-table tbody td {
+    padding: 4px 4px;
+    border-bottom: 1px solid var(--gray-100);
+    vertical-align: middle;
+  }
+  .product-table tbody tr:hover {
+    background: var(--gray-50);
+  }
+  .product-table input {
+    width: 100%;
+    padding: 6px 8px;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    font-size: 13px;
+    font-family: inherit;
+    outline: none;
+    background: transparent;
+    transition: all 0.15s;
+  }
+  .product-table input:focus {
+    border-color: var(--primary);
+    background: #fff;
+    box-shadow: 0 0 0 2px rgba(37,99,235,0.1);
+  }
+  .product-table input::placeholder {
+    color: var(--gray-300);
+  }
+  .product-table .col-num { width: 30px; text-align: center; color: var(--gray-400); font-size: 12px; }
+  .product-table .col-emoji { width: 36px; text-align: center; font-size: 18px; }
+  .product-table .col-name { min-width: 120px; }
+  .product-table .col-unit { width: 80px; }
+  .product-table .col-original { width: 90px; }
+  .product-table .col-sale { width: 90px; }
+  .product-table .col-badge { width: 80px; }
+  .product-table .col-rate { width: 50px; text-align: center; color: var(--red); font-weight: 700; font-size: 12px; }
+  .product-table .col-action { width: 32px; }
+
+  .product-table .col-sale input { font-weight: 700; color: var(--red); }
+
+  .row-delete-btn {
+    width: 24px; height: 24px;
+    border: none;
+    background: transparent;
+    color: var(--gray-300);
+    cursor: pointer;
+    border-radius: 4px;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .row-delete-btn:hover { background: #fef2f2; color: var(--red); }
+
+  .add-row-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    border: 1.5px dashed var(--gray-300);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--gray-400);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    margin-top: 8px;
+    width: 100%;
+    justify-content: center;
+    font-family: inherit;
+    transition: all 0.15s;
+  }
+  .add-row-btn:hover {
+    border-color: var(--primary);
+    color: var(--primary);
+    background: var(--primary-light);
+  }
+
+  .product-count {
+    font-size: 12px;
+    color: var(--gray-400);
+    margin-top: 8px;
+    text-align: right;
+  }
+
+  /* ── 템플릿 선택 ── */
+  .template-options {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+  }
+  .template-option {
+    border: 2px solid var(--gray-200);
+    border-radius: 12px;
+    padding: 12px;
+    cursor: pointer;
+    transition: all 0.15s;
+    text-align: center;
+  }
+  .template-option:hover { border-color: var(--gray-400); }
+  .template-option.active {
+    border-color: var(--primary);
+    background: var(--primary-light);
+  }
+  .template-option .tmpl-preview {
+    height: 80px;
+    border-radius: 8px;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 28px;
+  }
+  .template-option .tmpl-name {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--gray-700);
+  }
+  .template-option .tmpl-desc {
+    font-size: 11px;
+    color: var(--gray-400);
+    margin-top: 2px;
+  }
+  .tmpl1-preview { background: linear-gradient(135deg, #fef2f2, #fee2e2); }
+  .tmpl2-preview { background: linear-gradient(135deg, #f8fafc, #e2e8f0); }
+  .tmpl3-preview { background: linear-gradient(135deg, #1e293b, #334155); color: #fbbf24; }
+
+  /* ── 우측: 미리보기 ── */
+  .preview-panel {
+    width: 420px;
+    background: var(--gray-50);
+    border-left: 1px solid var(--gray-200);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 24px 16px;
+    overflow-y: auto;
+    flex-shrink: 0;
+  }
+  .preview-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--gray-500);
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .phone-frame {
+    width: 375px;
+    min-height: 600px;
+    background: #000;
+    border-radius: 40px;
+    padding: 12px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.15);
+    position: sticky;
+    top: 24px;
+  }
+  .phone-screen {
+    width: 100%;
+    height: 700px;
+    background: #fff;
+    border-radius: 30px;
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+  .phone-screen::-webkit-scrollbar { width: 0; }
+
+  /* ── 카테고리 프리셋 팝업 ── */
+  .preset-popup {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    background: #fff;
+    border: 1px solid var(--gray-200);
+    border-radius: 12px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+    padding: 8px;
+    z-index: 50;
+    min-width: 200px;
+  }
+  .preset-popup.show { display: block; }
+  .preset-item {
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-size: 13px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: background 0.1s;
+  }
+  .preset-item:hover { background: var(--gray-50); }
+
+  .category-section-wrapper { position: relative; }
+
+  /* ── 뱃지 select ── */
+  .badge-select {
+    padding: 4px 6px !important;
+    font-size: 12px !important;
+    border: 1px solid transparent !important;
+    background: transparent;
+    border-radius: 6px;
+    cursor: pointer;
+    color: var(--gray-500);
+  }
+  .badge-select:focus {
+    border-color: var(--primary) !important;
+  }
+
+  /* ── empty state ── */
+  .empty-state {
+    text-align: center;
+    padding: 40px 20px;
+    color: var(--gray-400);
+  }
+  .empty-state .icon { font-size: 40px; margin-bottom: 12px; }
+  .empty-state .text { font-size: 14px; }
+
+  /* ── 반응형 ── */
+  @media (max-width: 900px) {
+    .main-layout { flex-direction: column; height: auto; }
+    .form-panel { max-width: 100%; }
+    .preview-panel {
+      width: 100%;
+      border-left: none;
+      border-top: 1px solid var(--gray-200);
+    }
+    .phone-frame { position: static; }
+  }
+
+
+  /* ============================================
+     전단지 템플릿 스타일 (미리보기용)
+     ============================================ */
+
+  /* ── Template 1: Grid ── */
+  .flyer-t1 .f-hero {
+    background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+    color: #fff; text-align: center; padding: 22px 14px 18px;
+  }
+  .flyer-t1 .f-hero .store { font-size: 10px; font-weight: 500; letter-spacing: 2px; opacity: 0.9; }
+  .flyer-t1 .f-hero h1 { font-size: 20px; font-weight: 900; margin-top: 4px; }
+  .flyer-t1 .f-hero .period { font-size: 11px; margin-top: 8px; background: rgba(255,255,255,0.18); display: inline-block; padding: 3px 12px; border-radius: 20px; }
+
+  .flyer-t1 .f-cat { padding: 14px 10px 6px; }
+  .flyer-t1 .f-cat-header { display: flex; align-items: center; gap: 6px; margin-bottom: 10px; }
+  .flyer-t1 .f-cat-icon { width: 26px; height: 26px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 14px; background: #fef3c7; }
+  .flyer-t1 .f-cat-header h2 { font-size: 14px; font-weight: 800; }
+  .flyer-t1 .f-cat-header .cnt { font-size: 10px; color: #999; }
+
+  .flyer-t1 .f-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .flyer-t1 .f-card { background: #fff; border-radius: 10px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.06); position: relative; }
+  .flyer-t1 .f-card-img { width: 100%; aspect-ratio: 4/3; background: #f8f8f8; display: flex; align-items: center; justify-content: center; font-size: 32px; }
+  .flyer-t1 .f-card-info { padding: 8px 10px 10px; }
+  .flyer-t1 .f-card-name { font-size: 11px; font-weight: 600; color: #333; }
+  .flyer-t1 .f-card-unit { font-size: 9px; color: #999; margin-top: 1px; }
+  .flyer-t1 .f-card-price { font-size: 16px; font-weight: 900; color: #e74c3c; margin-top: 4px; }
+  .flyer-t1 .f-card-price .won { font-size: 10px; font-weight: 700; }
+  .flyer-t1 .f-card-orig { font-size: 10px; color: #bbb; text-decoration: line-through; }
+  .flyer-t1 .f-card-rate { font-size: 9px; font-weight: 700; color: #fff; background: #e74c3c; padding: 1px 5px; border-radius: 3px; display: inline-block; margin-top: 2px; }
+  .flyer-t1 .f-badge { position: absolute; top: 6px; left: 6px; font-size: 9px; font-weight: 700; color: #fff; padding: 2px 6px; border-radius: 4px; z-index: 1; }
+  .flyer-t1 .f-badge.hot { background: #e74c3c; }
+  .flyer-t1 .f-badge.limited { background: #8b5cf6; }
+  .flyer-t1 .f-badge.event { background: #f59e0b; color: #7c2d12; }
+  .flyer-t1 .f-badge.sale { background: #22c55e; }
+  .flyer-t1 .f-divider { height: 6px; background: #f0f0f0; }
+
+  .flyer-t1 .f-footer { text-align: center; padding: 16px 12px 24px; color: #aaa; font-size: 10px; }
+  .flyer-t1 .f-footer .brand { font-weight: 700; color: #e74c3c; font-size: 11px; }
+
+  /* ── Template 2: List ── */
+  .flyer-t2 { background: #fff; }
+  .flyer-t2 .f-header { background: #1a1a1a; color: #fff; padding: 20px 16px 16px; }
+  .flyer-t2 .f-header .store { font-size: 9px; font-weight: 600; letter-spacing: 3px; color: #fbbf24; }
+  .flyer-t2 .f-header h1 { font-size: 20px; font-weight: 900; margin-top: 6px; }
+  .flyer-t2 .f-header .sub { font-size: 11px; color: rgba(255,255,255,0.6); margin-top: 8px; }
+  .flyer-t2 .f-accent { height: 3px; background: linear-gradient(90deg, #fbbf24, #d97706); }
+
+  .flyer-t2 .f-nav { display: flex; background: #fafafa; border-bottom: 1px solid #eee; overflow-x: auto; position: sticky; top: 0; z-index: 5; }
+  .flyer-t2 .f-nav a { flex: 1; text-align: center; padding: 10px 12px; font-size: 11px; font-weight: 600; color: #888; text-decoration: none; border-bottom: 2px solid transparent; white-space: nowrap; cursor: pointer; }
+  .flyer-t2 .f-nav a.active { color: #1a1a1a; border-bottom-color: #fbbf24; }
+
+  .flyer-t2 .f-section { padding: 16px 14px 6px; }
+  .flyer-t2 .f-section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 2px solid #1a1a1a; }
+  .flyer-t2 .f-section-title { font-size: 15px; font-weight: 800; display: flex; align-items: center; gap: 6px; }
+  .flyer-t2 .f-section-cnt { font-size: 10px; color: #999; }
+
+  .flyer-t2 .f-item { display: flex; align-items: center; padding: 10px 0; border-bottom: 1px solid #f3f3f3; gap: 10px; }
+  .flyer-t2 .f-item-icon { width: 38px; height: 38px; border-radius: 10px; background: #f8f8f8; display: flex; align-items: center; justify-content: center; font-size: 20px; flex-shrink: 0; }
+  .flyer-t2 .f-item-detail { flex: 1; min-width: 0; }
+  .flyer-t2 .f-item-name { font-size: 13px; font-weight: 600; }
+  .flyer-t2 .f-item-unit { font-size: 10px; color: #999; }
+  .flyer-t2 .f-item-badge { display: inline-block; font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 3px; margin-top: 2px; }
+  .flyer-t2 .f-item-badge.sale { background: #fef3c7; color: #92400e; }
+  .flyer-t2 .f-item-badge.limited { background: #ede9fe; color: #6d28d9; }
+  .flyer-t2 .f-item-badge.event { background: #dcfce7; color: #166534; }
+  .flyer-t2 .f-item-badge.hot { background: #fef2f2; color: #dc2626; }
+  .flyer-t2 .f-item-price { text-align: right; flex-shrink: 0; }
+  .flyer-t2 .f-item-sale { font-size: 15px; font-weight: 900; }
+  .flyer-t2 .f-item-sale .won { font-size: 10px; font-weight: 600; }
+  .flyer-t2 .f-item-orig { font-size: 10px; color: #ccc; text-decoration: line-through; }
+  .flyer-t2 .f-item-rate { font-size: 10px; font-weight: 800; color: #dc2626; }
+
+  .flyer-t2 .f-footer { background: #fafafa; text-align: center; padding: 16px 12px 24px; border-top: 1px solid #eee; }
+  .flyer-t2 .f-footer .brand { font-size: 12px; font-weight: 800; }
+  .flyer-t2 .f-footer .info { font-size: 10px; color: #aaa; margin-top: 4px; }
+
+  /* ── Template 3: Highlight ── */
+  .flyer-t3 { background: #0f172a; color: #f1f5f9; }
+  .flyer-t3 .f-hero { text-align: center; padding: 26px 16px 20px; position: relative; overflow: hidden; }
+  .flyer-t3 .f-hero .store { font-size: 9px; font-weight: 700; letter-spacing: 4px; color: #fbbf24; }
+  .flyer-t3 .f-hero h1 { font-size: 22px; font-weight: 900; margin-top: 8px; background: linear-gradient(135deg, #fff 30%, #fbbf24 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+  .flyer-t3 .f-hero .period { font-size: 12px; color: rgba(255,255,255,0.5); margin-top: 8px; }
+
+  .flyer-t3 .f-picks-title { padding: 16px 14px 8px; display: flex; align-items: center; gap: 8px; }
+  .flyer-t3 .f-picks-title h2 { font-size: 13px; font-weight: 800; color: #fbbf24; }
+  .flyer-t3 .f-picks-title .line { flex: 1; height: 1px; background: linear-gradient(90deg, rgba(251,191,36,0.3), transparent); }
+
+  .flyer-t3 .f-pick { background: linear-gradient(135deg, #1e293b, #334155); border: 1px solid rgba(251,191,36,0.15); border-radius: 12px; padding: 14px; margin: 0 14px 10px; position: relative; overflow: hidden; display: flex; align-items: center; gap: 12px; }
+  .flyer-t3 .f-pick-badge { position: absolute; top: 10px; left: 14px; background: #fbbf24; color: #1e293b; font-size: 9px; font-weight: 800; padding: 2px 8px; border-radius: 4px; }
+  .flyer-t3 .f-pick-rate { position: absolute; top: 10px; right: 14px; font-size: 18px; font-weight: 900; color: #ef4444; }
+  .flyer-t3 .f-pick-emoji { font-size: 36px; flex-shrink: 0; margin-top: 12px; }
+  .flyer-t3 .f-pick-info { flex: 1; margin-top: 12px; }
+  .flyer-t3 .f-pick-name { font-size: 15px; font-weight: 800; color: #fff; }
+  .flyer-t3 .f-pick-unit { font-size: 11px; color: rgba(255,255,255,0.45); }
+  .flyer-t3 .f-pick-price { margin-top: 4px; }
+  .flyer-t3 .f-pick-sale { font-size: 22px; font-weight: 900; color: #fbbf24; }
+  .flyer-t3 .f-pick-sale .won { font-size: 13px; font-weight: 700; }
+  .flyer-t3 .f-pick-orig { font-size: 11px; color: rgba(255,255,255,0.3); text-decoration: line-through; margin-left: 6px; }
+
+  .flyer-t3 .f-rest { padding: 6px 14px 14px; }
+  .flyer-t3 .f-rest-header { display: flex; align-items: center; gap: 6px; padding: 10px 0 8px; border-top: 1px solid rgba(255,255,255,0.06); }
+  .flyer-t3 .f-rest-header .icon { width: 22px; height: 22px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 12px; background: rgba(251,191,36,0.12); }
+  .flyer-t3 .f-rest-header h3 { font-size: 12px; font-weight: 700; color: #cbd5e1; }
+
+  .flyer-t3 .f-compact-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
+  .flyer-t3 .f-compact { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.06); border-radius: 8px; padding: 10px; }
+  .flyer-t3 .f-compact-top { display: flex; align-items: center; gap: 4px; }
+  .flyer-t3 .f-compact-emoji { font-size: 14px; }
+  .flyer-t3 .f-compact-name { font-size: 11px; font-weight: 600; color: #e2e8f0; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .flyer-t3 .f-compact-unit { font-size: 9px; color: #64748b; margin-top: 1px; }
+  .flyer-t3 .f-compact-sale { font-size: 14px; font-weight: 900; color: #fbbf24; margin-top: 2px; }
+  .flyer-t3 .f-compact-sale .won { font-size: 9px; font-weight: 600; }
+  .flyer-t3 .f-compact-orig { font-size: 9px; color: #475569; text-decoration: line-through; }
+  .flyer-t3 .f-compact-badge { display: inline-block; font-size: 8px; font-weight: 700; padding: 1px 5px; border-radius: 3px; background: rgba(251,191,36,0.15); color: #fbbf24; margin-top: 2px; }
+
+  .flyer-t3 .f-footer { text-align: center; padding: 18px 14px 26px; border-top: 1px solid rgba(255,255,255,0.05); }
+  .flyer-t3 .f-footer .brand { font-size: 12px; font-weight: 800; color: #fbbf24; letter-spacing: 2px; }
+  .flyer-t3 .f-footer .info { font-size: 10px; color: #475569; margin-top: 4px; }
+</style>
+</head>
+<body>
+
+<!-- 상단 헤더 -->
+<header class="app-header">
+  <div class="logo">전단AI <span>by 한줄로</span></div>
+</header>
+
+<div class="main-layout">
+  <!-- 좌측: 입력 폼 -->
+  <div class="form-panel">
+
+    <!-- 1. 매장 기본정보 -->
+    <div class="form-section">
+      <div class="form-section-title"><span class="num">1</span> 매장 기본정보</div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>매장명</label>
+          <input type="text" id="storeName" placeholder="예: 데레사 마트" oninput="renderPreview()">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>행사명</label>
+          <input type="text" id="eventTitle" placeholder="예: 3월 대감사 행사" oninput="renderPreview()">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>시작일</label>
+          <input type="date" id="periodStart" onchange="renderPreview()">
+        </div>
+        <div class="form-group">
+          <label>종료일</label>
+          <input type="date" id="periodEnd" onchange="renderPreview()">
+        </div>
+      </div>
+    </div>
+
+    <!-- 2. 카테고리 & 상품 -->
+    <div class="form-section">
+      <div class="form-section-title"><span class="num">2</span> 카테고리 & 상품</div>
+
+      <div class="category-section-wrapper">
+        <div class="category-tabs" id="categoryTabs"></div>
+        <button class="add-category-btn" onclick="togglePresetPopup()">+ 카테고리 추가</button>
+        <div class="preset-popup" id="presetPopup">
+          <div class="preset-item" onclick="addCategory('청과/야채', '🍓')">🍓 청과/야채</div>
+          <div class="preset-item" onclick="addCategory('공산', '🛒')">🛒 공산</div>
+          <div class="preset-item" onclick="addCategory('축산', '🥩')">🥩 축산</div>
+          <div class="preset-item" onclick="addCategory('수산', '🐟')">🐟 수산</div>
+          <div class="preset-item" onclick="addCategory('생활용품', '🧴')">🧴 생활용품</div>
+          <div class="preset-item" onclick="addCategory('유제품/냉장', '🥛')">🥛 유제품/냉장</div>
+          <div class="preset-item" onclick="addCategory('음료/주류', '🍺')">🍺 음료/주류</div>
+          <div class="preset-item" onclick="addCategory('베이커리', '🍞')">🍞 베이커리</div>
+          <div class="preset-item" onclick="addCustomCategory()">✏️ 직접 입력</div>
+        </div>
+      </div>
+
+      <!-- 상품 테이블 -->
+      <div id="productTableArea" style="margin-top:16px;"></div>
+    </div>
+
+    <!-- 3. 템플릿 선택 -->
+    <div class="form-section">
+      <div class="form-section-title"><span class="num">3</span> 템플릿 선택</div>
+      <div class="template-options">
+        <div class="template-option active" onclick="selectTemplate('grid')">
+          <div class="tmpl-preview tmpl1-preview">🏪</div>
+          <div class="tmpl-name">가격 강조형</div>
+          <div class="tmpl-desc">그리드 카드 레이아웃</div>
+        </div>
+        <div class="template-option" onclick="selectTemplate('list')">
+          <div class="tmpl-preview tmpl2-preview">📋</div>
+          <div class="tmpl-name">리스트형</div>
+          <div class="tmpl-desc">깔끔한 리스트</div>
+        </div>
+        <div class="template-option" onclick="selectTemplate('highlight')">
+          <div class="tmpl-preview tmpl3-preview">✨</div>
+          <div class="tmpl-name">특가 하이라이트</div>
+          <div class="tmpl-desc">대표 특가 강조</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- 우측: 미리보기 -->
+  <div class="preview-panel">
+    <div class="preview-label">📱 실시간 미리보기</div>
+    <div class="phone-frame">
+      <div class="phone-screen" id="previewScreen">
+        <div class="empty-state">
+          <div class="icon">📝</div>
+          <div class="text">매장 정보와 상품을 입력하면<br>여기에 미리보기가 표시됩니다</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── 상태 ──
+let categories = [];
+let activeCategoryIdx = 0;
+let selectedTemplate = 'grid';
+
+// ── 상품 이모지 자동 매핑 ──
+const EMOJI_MAP = {
+  // 과일
+  '딸기': '🍓', '사과': '🍎', '토마토': '🍅', '오렌지': '🍊', '귤': '🍊', '만다린': '🍊',
+  '포도': '🍇', '바나나': '🍌', '복숭아': '🍑', '수박': '🍉', '멜론': '🍈', '키위': '🥝',
+  '레몬': '🍋', '체리': '🍒', '배': '🍐', '파인애플': '🍍', '망고': '🥭', '블루베리': '🫐',
+  '자두': '🫐', '감': '🍊', '참외': '🍈',
+  // 채소
+  '양배추': '🥬', '배추': '🥬', '상추': '🥬', '시금치': '🥬', '부추': '🌿',
+  '양파': '🧅', '마늘': '🧄', '파': '🌿', '쪽파': '🌿', '대파': '🌿',
+  '감자': '🥔', '고구마': '🍠', '당근': '🥕', '무': '🥕', '브로콜리': '🥦',
+  '옥수수': '🌽', '고추': '🌶️', '피망': '🫑', '버섯': '🍄', '팽이': '🍄',
+  // 축산
+  '삼겹살': '🥩', '갈비': '🥩', '소고기': '🥩', '돼지': '🥩', '목살': '🥩',
+  '닭': '🍗', '치킨': '🍗', '오리': '🦆', '소시지': '🌭', '햄': '🥓',
+  '계란': '🥚', '달걀': '🥚',
+  // 수산
+  '연어': '🐟', '고등어': '🐟', '갈치': '🐟', '참치': '🐟', '생선': '🐟',
+  '새우': '🦐', '꽃게': '🦀', '오징어': '🦑', '문어': '🐙', '조개': '🐚',
+  '김': '🌊', '미역': '🌊',
+  // 가공식품
+  '라면': '🍜', '짜장': '🍜', '국수': '🍝', '우동': '🍜', '만두': '🥟', '교자': '🥟',
+  '두부': '🧈', '어묵': '🍢', '떡': '🍡', '떡볶이': '🍢',
+  // 과자/간식
+  '과자': '🍪', '쿠키': '🍪', '에이스': '🍪', '스낵': '🍘', '초코파이': '🍫',
+  '초콜릿': '🍫', '사탕': '🍬', '젤리': '🍬', '아이스크림': '🍦',
+  // 음료/주류
+  '맥주': '🍺', '카스': '🍺', '필굿': '🍺', '하이트': '🍺', '테라': '🍺',
+  '소주': '🍶', '참이슬': '🍶', '새로': '🍶', '처음처럼': '🍶',
+  '우유': '🥛', '커피': '☕', '주스': '🧃', '콜라': '🥤', '사이다': '🥤', '물': '💧',
+  '와인': '🍷', '막걸리': '🍶',
+  // 유제품
+  '요거트': '🥛', '치즈': '🧀', '버터': '🧈',
+  // 빵
+  '빵': '🍞', '식빵': '🍞', '케이크': '🎂', '도넛': '🍩', '크로와상': '🥐',
+  // 생활
+  '세제': '🧴', '샴푸': '🧴', '휴지': '🧻', '비누': '🧼',
+  // 밥/반찬
+  '밥': '🍚', '김치': '🥬', '반찬': '🍱',
+};
+
+function getEmoji(productName, categoryIcon) {
+  for (const [keyword, emoji] of Object.entries(EMOJI_MAP)) {
+    if (productName.includes(keyword)) return emoji;
+  }
+  return categoryIcon || '🏷️';
+}
+
+// ── 카테고리 관리 ──
+function togglePresetPopup() {
+  const popup = document.getElementById('presetPopup');
+  popup.classList.toggle('show');
+}
+
+function addCategory(name, icon) {
+  categories.push({ name, icon, products: [{ name: '', unit: '', originalPrice: '', salePrice: '', badge: '' }] });
+  activeCategoryIdx = categories.length - 1;
+  document.getElementById('presetPopup').classList.remove('show');
+  renderCategoryTabs();
+  renderProductTable();
+  renderPreview();
+}
+
+function addCustomCategory() {
+  const name = prompt('카테고리명을 입력하세요:');
+  if (!name) return;
+  const icon = prompt('아이콘 이모지를 입력하세요 (예: 🍓):', '🏷️') || '🏷️';
+  addCategory(name, icon);
+}
+
+function removeCategory(idx, e) {
+  e.stopPropagation();
+  if (!confirm(`"${categories[idx].name}" 카테고리를 삭제하시겠습니까?`)) return;
+  categories.splice(idx, 1);
+  if (activeCategoryIdx >= categories.length) activeCategoryIdx = Math.max(0, categories.length - 1);
+  renderCategoryTabs();
+  renderProductTable();
+  renderPreview();
+}
+
+function selectCategory(idx) {
+  activeCategoryIdx = idx;
+  renderCategoryTabs();
+  renderProductTable();
+}
+
+function renderCategoryTabs() {
+  const container = document.getElementById('categoryTabs');
+  container.innerHTML = categories.map((cat, i) => `
+    <div class="category-tab ${i === activeCategoryIdx ? 'active' : ''}" onclick="selectCategory(${i})">
+      ${cat.icon} ${cat.name}
+      <span class="remove-cat" onclick="removeCategory(${i}, event)">&times;</span>
+    </div>
+  `).join('');
+}
+
+// ── 상품 테이블 ──
+function renderProductTable() {
+  const area = document.getElementById('productTableArea');
+  if (categories.length === 0) {
+    area.innerHTML = '<div class="empty-state"><div class="icon">📦</div><div class="text">카테고리를 추가해주세요</div></div>';
+    return;
+  }
+  const cat = categories[activeCategoryIdx];
+  if (!cat) return;
+
+  const totalProducts = categories.reduce((sum, c) => sum + c.products.filter(p => p.name).length, 0);
+
+  area.innerHTML = `
+    <div class="product-table-wrapper">
+      <table class="product-table">
+        <thead>
+          <tr>
+            <th class="col-num">#</th>
+            <th class="col-emoji"></th>
+            <th class="col-name">상품명</th>
+            <th class="col-unit">용량/단위</th>
+            <th class="col-original">원가</th>
+            <th class="col-sale">할인가</th>
+            <th class="col-rate">할인</th>
+            <th class="col-badge">뱃지</th>
+            <th class="col-action"></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${cat.products.map((p, i) => {
+            const emoji = p.name ? getEmoji(p.name, cat.icon) : '';
+            const rate = (p.originalPrice && p.salePrice && Number(p.originalPrice) > Number(p.salePrice))
+              ? Math.round((1 - Number(p.salePrice) / Number(p.originalPrice)) * 100) + '%'
+              : '';
+            return `
+            <tr>
+              <td class="col-num">${i + 1}</td>
+              <td class="col-emoji">${emoji}</td>
+              <td class="col-name"><input value="${p.name}" placeholder="상품명" oninput="updateProduct(${i},'name',this.value)"></td>
+              <td class="col-unit"><input value="${p.unit}" placeholder="1kg" oninput="updateProduct(${i},'unit',this.value)"></td>
+              <td class="col-original"><input type="number" value="${p.originalPrice}" placeholder="선택" oninput="updateProduct(${i},'originalPrice',this.value)"></td>
+              <td class="col-sale"><input type="number" value="${p.salePrice}" placeholder="필수" oninput="updateProduct(${i},'salePrice',this.value)"></td>
+              <td class="col-rate">${rate}</td>
+              <td class="col-badge">
+                <select class="badge-select" onchange="updateProduct(${i},'badge',this.value)">
+                  <option value="" ${!p.badge ? 'selected' : ''}>없음</option>
+                  <option value="hot" ${p.badge==='hot' ? 'selected' : ''}>초특가</option>
+                  <option value="limited" ${p.badge==='limited' ? 'selected' : ''}>한정</option>
+                  <option value="event" ${p.badge==='event' ? 'selected' : ''}>행사</option>
+                  <option value="sale" ${p.badge==='sale' ? 'selected' : ''}>세일</option>
+                </select>
+              </td>
+              <td class="col-action"><button class="row-delete-btn" onclick="removeProduct(${i})">&times;</button></td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+    <button class="add-row-btn" onclick="addProduct()">+ 상품 추가</button>
+    <div class="product-count">전체 ${totalProducts}개 상품 (이 카테고리 ${cat.products.filter(p => p.name).length}개)</div>
+  `;
+}
+
+function addProduct() {
+  if (categories.length === 0) return;
+  categories[activeCategoryIdx].products.push({ name: '', unit: '', originalPrice: '', salePrice: '', badge: '' });
+  renderProductTable();
+}
+
+function removeProduct(idx) {
+  const cat = categories[activeCategoryIdx];
+  if (cat.products.length <= 1) return;
+  cat.products.splice(idx, 1);
+  renderProductTable();
+  renderPreview();
+}
+
+function updateProduct(idx, field, value) {
+  categories[activeCategoryIdx].products[idx][field] = value;
+  // 할인율 업데이트를 위한 테이블 재렌더링 (이모지도)
+  clearTimeout(window._renderTimer);
+  window._renderTimer = setTimeout(() => {
+    renderProductTable();
+    renderPreview();
+  }, 300);
+}
+
+// ── 템플릿 선택 ──
+function selectTemplate(type) {
+  selectedTemplate = type;
+  document.querySelectorAll('.template-option').forEach(el => el.classList.remove('active'));
+  event.currentTarget.classList.add('active');
+  renderPreview();
+}
+
+// ── 유틸 ──
+function formatPrice(val) {
+  return Number(val).toLocaleString();
+}
+
+function formatPeriod(start, end) {
+  if (!start || !end) return '';
+  const days = ['일','월','화','수','목','금','토'];
+  const s = new Date(start);
+  const e = new Date(end);
+  return `${s.getMonth()+1}/${s.getDate()}(${days[s.getDay()]}) ~ ${e.getMonth()+1}/${e.getDate()}(${days[e.getDay()]})`;
+}
+
+const BADGE_LABELS = { hot: '초특가', limited: '한정특가', event: '행사', sale: '세일' };
+
+// ── 미리보기 렌더링 ──
+function renderPreview() {
+  const storeName = document.getElementById('storeName').value || '매장명';
+  const eventTitle = document.getElementById('eventTitle').value || '행사명';
+  const periodStart = document.getElementById('periodStart').value;
+  const periodEnd = document.getElementById('periodEnd').value;
+  const period = formatPeriod(periodStart, periodEnd) || '기간 미설정';
+
+  // 상품 데이터 정리
+  const validCategories = categories.map(cat => ({
+    ...cat,
+    products: cat.products.filter(p => p.name && p.salePrice)
+  })).filter(cat => cat.products.length > 0);
+
+  if (validCategories.length === 0) {
+    document.getElementById('previewScreen').innerHTML = `
+      <div class="empty-state">
+        <div class="icon">📝</div>
+        <div class="text">매장 정보와 상품을 입력하면<br>여기에 미리보기가 표시됩니다</div>
+      </div>`;
+    return;
+  }
+
+  const totalProducts = validCategories.reduce((s, c) => s + c.products.length, 0);
+
+  let html = '';
+  if (selectedTemplate === 'grid') {
+    html = renderGrid(storeName, eventTitle, period, validCategories);
+  } else if (selectedTemplate === 'list') {
+    html = renderList(storeName, eventTitle, period, validCategories, totalProducts);
+  } else {
+    html = renderHighlight(storeName, eventTitle, period, validCategories);
+  }
+
+  document.getElementById('previewScreen').innerHTML = html;
+}
+
+// ── Template 1: Grid ──
+function renderGrid(store, title, period, cats) {
+  let html = `<div class="flyer-t1" style="background:#f5f5f5;min-height:100%;">`;
+  html += `<div class="f-hero"><div class="store">${store.toUpperCase()}</div><h1>${title}</h1><div class="period">${period}</div></div>`;
+
+  cats.forEach((cat, ci) => {
+    if (ci > 0) html += '<div class="f-divider"></div>';
+    html += `<div class="f-cat"><div class="f-cat-header"><div class="f-cat-icon">${cat.icon}</div><h2>${cat.name}</h2><span class="cnt">${cat.products.length}개 상품</span></div>`;
+    html += '<div class="f-grid">';
+    cat.products.forEach(p => {
+      const emoji = getEmoji(p.name, cat.icon);
+      const rate = (p.originalPrice && Number(p.originalPrice) > Number(p.salePrice))
+        ? Math.round((1 - Number(p.salePrice) / Number(p.originalPrice)) * 100) : 0;
+      html += '<div class="f-card">';
+      if (p.badge) html += `<div class="f-badge ${p.badge}">${BADGE_LABELS[p.badge] || p.badge}</div>`;
+      html += `<div class="f-card-img">${emoji}</div><div class="f-card-info">`;
+      html += `<div class="f-card-name">${p.name}</div>`;
+      if (p.unit) html += `<div class="f-card-unit">${p.unit}</div>`;
+      html += `<div class="f-card-price">${formatPrice(p.salePrice)}<span class="won">원</span></div>`;
+      if (p.originalPrice && rate > 0) {
+        html += `<div class="f-card-orig">${formatPrice(p.originalPrice)}원</div>`;
+        html += `<span class="f-card-rate">${rate}%</span>`;
+      }
+      html += '</div></div>';
+    });
+    html += '</div></div>';
+  });
+
+  html += `<div class="f-footer"><div class="brand">한줄로전단</div><div style="margin-top:3px;color:#ccc;font-size:9px;">${store} | ${period}</div></div>`;
+  html += '</div>';
+  return html;
+}
+
+// ── Template 2: List ──
+function renderList(store, title, period, cats, total) {
+  let html = `<div class="flyer-t2">`;
+  html += `<div class="f-header"><div class="store">${store.toUpperCase()}</div><h1>${title}</h1><div class="sub">${period} | 총 ${total}개 상품</div></div>`;
+  html += '<div class="f-accent"></div>';
+
+  // 네비
+  html += '<nav class="f-nav">';
+  cats.forEach((cat, i) => {
+    html += `<a class="${i === 0 ? 'active' : ''}">${cat.icon} ${cat.name}</a>`;
+  });
+  html += '</nav>';
+
+  cats.forEach(cat => {
+    html += `<div class="f-section"><div class="f-section-header"><div class="f-section-title"><span style="font-size:16px;">${cat.icon}</span>${cat.name}</div><div class="f-section-cnt">${cat.products.length}개</div></div>`;
+    cat.products.forEach(p => {
+      const emoji = getEmoji(p.name, cat.icon);
+      const rate = (p.originalPrice && Number(p.originalPrice) > Number(p.salePrice))
+        ? Math.round((1 - Number(p.salePrice) / Number(p.originalPrice)) * 100) : 0;
+      html += `<div class="f-item"><div class="f-item-icon">${emoji}</div><div class="f-item-detail"><div class="f-item-name">${p.name}</div>`;
+      if (p.unit) html += `<div class="f-item-unit">${p.unit}</div>`;
+      if (p.badge) html += `<div class="f-item-badge ${p.badge}">${BADGE_LABELS[p.badge] || p.badge}</div>`;
+      html += '</div><div class="f-item-price">';
+      if (rate > 0) html += `<div class="f-item-rate">${rate}%</div>`;
+      html += `<div class="f-item-sale">${formatPrice(p.salePrice)}<span class="won">원</span></div>`;
+      if (p.originalPrice && rate > 0) html += `<div class="f-item-orig">${formatPrice(p.originalPrice)}원</div>`;
+      html += '</div></div>';
+    });
+    html += '</div>';
+  });
+
+  html += `<div class="f-footer"><div class="brand">${store.toUpperCase()}</div><div class="info">${period} | 조기 품절될 수 있습니다</div><div style="font-size:9px;color:#ddd;margin-top:6px;">Powered by 한줄로전단</div></div>`;
+  html += '</div>';
+  return html;
+}
+
+// ── Template 3: Highlight ──
+function renderHighlight(store, title, period, cats) {
+  // 할인율 높은 순으로 상위 4개 자동 선정
+  const allProducts = [];
+  cats.forEach(cat => {
+    cat.products.forEach(p => {
+      const rate = (p.originalPrice && Number(p.originalPrice) > Number(p.salePrice))
+        ? Math.round((1 - Number(p.salePrice) / Number(p.originalPrice)) * 100) : 0;
+      allProducts.push({ ...p, rate, catIcon: cat.icon, catName: cat.name });
+    });
+  });
+  const picks = allProducts.filter(p => p.rate > 0).sort((a, b) => b.rate - a.rate).slice(0, 4);
+  const pickNames = new Set(picks.map(p => p.name));
+
+  let html = `<div class="flyer-t3">`;
+  html += `<div class="f-hero"><div class="store">${store.toUpperCase()}</div><h1>${title}</h1><div class="period">${period}</div></div>`;
+
+  // TODAY'S PICK
+  if (picks.length > 0) {
+    html += '<div class="f-picks-title"><h2>TODAY\'S PICK</h2><div class="line"></div></div>';
+    const pickBadges = ['반값 특가', '초특가', '한정 수량', '추천'];
+    picks.forEach((p, i) => {
+      const emoji = getEmoji(p.name, p.catIcon);
+      html += `<div class="f-pick">`;
+      html += `<div class="f-pick-badge">${pickBadges[i] || '추천'}</div>`;
+      html += `<div class="f-pick-rate">${p.rate}%</div>`;
+      html += `<div class="f-pick-emoji">${emoji}</div>`;
+      html += `<div class="f-pick-info"><div class="f-pick-name">${p.name}</div>`;
+      if (p.unit) html += `<div class="f-pick-unit">${p.unit}</div>`;
+      html += `<div class="f-pick-price"><span class="f-pick-sale">${formatPrice(p.salePrice)}<span class="won">원</span></span>`;
+      if (p.originalPrice) html += `<span class="f-pick-orig">${formatPrice(p.originalPrice)}원</span>`;
+      html += '</div></div></div>';
+    });
+  }
+
+  // 나머지 컴팩트 리스트
+  cats.forEach(cat => {
+    const rest = cat.products.filter(p => !pickNames.has(p.name));
+    if (rest.length === 0) return;
+    html += `<div class="f-rest"><div class="f-rest-header"><div class="icon">${cat.icon}</div><h3>${cat.name}</h3></div>`;
+    html += '<div class="f-compact-grid">';
+    rest.forEach(p => {
+      const emoji = getEmoji(p.name, cat.icon);
+      const rate = (p.originalPrice && Number(p.originalPrice) > Number(p.salePrice))
+        ? Math.round((1 - Number(p.salePrice) / Number(p.originalPrice)) * 100) : 0;
+      html += `<div class="f-compact"><div class="f-compact-top"><span class="f-compact-emoji">${emoji}</span><span class="f-compact-name">${p.name}</span></div>`;
+      if (p.unit) html += `<div class="f-compact-unit">${p.unit}</div>`;
+      html += `<div class="f-compact-sale">${formatPrice(p.salePrice)}<span class="won">원</span></div>`;
+      if (p.originalPrice && rate > 0) html += `<div class="f-compact-orig">${formatPrice(p.originalPrice)}원</div>`;
+      if (p.badge) html += `<div class="f-compact-badge">${BADGE_LABELS[p.badge] || p.badge}</div>`;
+      html += '</div>';
+    });
+    html += '</div></div>';
+  });
+
+  html += `<div class="f-footer"><div class="brand">${store.toUpperCase()}</div><div class="info">${period}<br>조기 품절될 수 있습니다</div><div style="font-size:9px;color:#334155;margin-top:8px;">Powered by 한줄로전단</div></div>`;
+  html += '</div>';
+  return html;
+}
+
+// ── 초기화: 데모 데이터 ──
+function loadDemoData() {
+  document.getElementById('storeName').value = '데레사 마트';
+  document.getElementById('eventTitle').value = '3월 대감사 행사';
+  document.getElementById('periodStart').value = '2026-03-28';
+  document.getElementById('periodEnd').value = '2026-04-03';
+
+  categories = [
+    {
+      name: '청과/야채', icon: '🍓',
+      products: [
+        { name: '딸기', unit: '3kg', originalPrice: '', salePrice: '6980', badge: 'hot' },
+        { name: '청송사과', unit: '1박스 20KG', originalPrice: '99000', salePrice: '79800', badge: 'limited' },
+        { name: '짭짤이토마토', unit: '1박스', originalPrice: '12800', salePrice: '9900', badge: '' },
+        { name: '왕오렌지', unit: '1봉', originalPrice: '7980', salePrice: '6980', badge: '' },
+        { name: '만다린', unit: '1팩', originalPrice: '', salePrice: '7980', badge: '' },
+        { name: '크림슨포도', unit: '1팩', originalPrice: '', salePrice: '9900', badge: '' },
+        { name: '양배추', unit: '1통', originalPrice: '1980', salePrice: '990', badge: '' },
+        { name: '흙쪽파', unit: '1단', originalPrice: '3980', salePrice: '2980', badge: '' },
+        { name: '양파', unit: '1망 3KG', originalPrice: '5980', salePrice: '3980', badge: '' },
+        { name: '바라부추', unit: '1봉', originalPrice: '', salePrice: '990', badge: '' },
+      ]
+    },
+    {
+      name: '공산', icon: '🛒',
+      products: [
+        { name: '오뚜기 유니짜장', unit: '2인분', originalPrice: '', salePrice: '4980', badge: 'event' },
+        { name: 'CJ 큰두부', unit: '800G', originalPrice: '', salePrice: '1980', badge: '' },
+        { name: 'CJ삼호 바른사각어묵', unit: '200G', originalPrice: '', salePrice: '990', badge: '' },
+        { name: 'CJ비비고 왕교자', unit: '840G', originalPrice: '', salePrice: '6980', badge: '' },
+        { name: '에이스', unit: '1박스', originalPrice: '', salePrice: '2980', badge: '' },
+        { name: '크라운 스낵봉지', unit: '각각', originalPrice: '', salePrice: '1600', badge: '' },
+        { name: '오리온 초코파이', unit: '30입', originalPrice: '', salePrice: '6980', badge: '' },
+        { name: '청우 찰떡초코파이', unit: '1+1', originalPrice: '', salePrice: '3980', badge: '' },
+        { name: '필굿 오리지널', unit: '355ml x 6', originalPrice: '', salePrice: '3980', badge: '' },
+        { name: '카스', unit: '355ml x 6', originalPrice: '', salePrice: '8900', badge: '' },
+        { name: '참이슬', unit: '360ml x 6', originalPrice: '', salePrice: '6980', badge: '' },
+        { name: '새로 소주', unit: '360ml x 6', originalPrice: '', salePrice: '6980', badge: '' },
+      ]
+    }
+  ];
+
+  activeCategoryIdx = 0;
+  renderCategoryTabs();
+  renderProductTable();
+  renderPreview();
+}
+
+// 페이지 로드 시 데모 데이터
+document.addEventListener('DOMContentLoaded', loadDemoData);
+
+// 프리셋 팝업 외부 클릭 닫기
+document.addEventListener('click', (e) => {
+  const popup = document.getElementById('presetPopup');
+  if (!e.target.closest('.category-section-wrapper')) {
+    popup.classList.remove('show');
+  }
+});
+</script>
+
+</body>
+</html>

@@ -60,6 +60,9 @@
 | 49 | sender_managers | 발신번호 관리 담당자 |
 | 50 | sender_registrations | 발신번호 등록 신청 |
 | 51 | callback_number_assignments | 발신번호 사용자별 배정 (D87) |
+| 52 | flyers | 전단AI 전단지 (Phase 1) |
+| 53 | short_urls | 전단AI 단축URL (Phase 1) |
+| 54 | url_clicks | 전단AI 클릭 로그 (Phase 1) |
 
 ---
 
@@ -803,6 +806,46 @@
 | sort_order | integer | 정렬 순서 |
 | created_at | timestamptz | |
 | updated_at | timestamptz | |
+
+### flyers (전단AI — 전단지)
+
+| 컬럼 | 타입 | 설명 |
+|------|------|------|
+| id | uuid PK | |
+| company_id | uuid FK→companies | |
+| user_id | uuid FK→users | 생성자 |
+| store_code | varchar(50) | 브랜드 격리 |
+| title | varchar(200) | 행사명 |
+| store_name | varchar(100) | 매장명 |
+| period_start | date | 행사 시작일 |
+| period_end | date | 행사 종료일 |
+| categories | jsonb | 카테고리+상품 배열 |
+| template | varchar(50) | grid/list/highlight |
+| logo_url | text | 매장 로고 |
+| status | varchar(20) | draft/published |
+| created_at | timestamptz | |
+| updated_at | timestamptz | |
+
+### short_urls (전단AI — 단축URL)
+
+| 컬럼 | 타입 | 설명 |
+|------|------|------|
+| id | uuid PK | |
+| code | varchar(10) UNIQUE | 단축 코드 (hanjul-flyer.kr/{code}) |
+| flyer_id | uuid FK→flyers | |
+| company_id | uuid FK→companies | |
+| created_at | timestamptz | |
+| expires_at | timestamptz | 만료일 (기본 90일) |
+
+### url_clicks (전단AI — 클릭 로그)
+
+| 컬럼 | 타입 | 설명 |
+|------|------|------|
+| id | bigserial PK | |
+| short_url_id | uuid FK→short_urls | |
+| clicked_at | timestamptz | |
+| ip | inet | 접속 IP |
+| user_agent | text | 브라우저 UA |
 
 ---
 

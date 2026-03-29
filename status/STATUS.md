@@ -106,7 +106,37 @@
 
 ---
 
-### 🔧 D98 — PPT 버그리포트 11건 전면 수정 + 재검증 (2026-03-27) — 🟡 배포대기
+### 🔧 D99 — 브랜드메시지 수신자 확장 + 날짜 밀림 최종 수정 + 개별회신번호 컬럼 선택 (2026-03-28) — ✅ 배포완료
+
+> **배경:** 브랜드메시지 수신자 입력 3탭(직접입력/파일등록/DB추출) + 미리보기 통합 + 날짜 밀림 근본 수정 + 개별회신번호 컬럼 선택 기능.
+
+#### 신규 컨트롤타워
+- **resolveRecipientCallback** (formatDate.ts) — 수신자별 개별회신번호 값 추출 (individualCallbackColumn 기반)
+
+#### 수정 파일
+- `KakaoRcsPage.tsx` — 브랜드메시지 수신자 3탭(직접입력/파일등록/DB추출), DirectTargetFilterModal 재활용
+- `BrandMessageEditor.tsx` — 미리보기(BrandMessagePreview) 에디터 내부 통합 (우측 분리 제거)
+- `BrandMessagePreview.tsx` — 미리보기 크기 확대 (w-[360px], min-h-[400px], 말풍선 max-w-[290px])
+- `normalize.ts` — normalizeDate: Math.ceil(올림) UTC 기준 자정 보정 (D98 로컬TZ 방식 실패 → 근본 수정)
+- `normalize.ts` — normalizeByFieldKey: Date 객체 String() 변환 방지 (커스텀 필드 날짜 밀림 수정)
+- `callback-filter.ts` (CT-08) — callbackColumn 파라미터 추가 (지정 컬럼에서 회신번호 추출)
+- `campaigns.ts` — individualCallbackColumn 파라미터 처리 (AI send + direct-send)
+- `TargetSendModal.tsx` — 회신번호 드롭다운 컬럼 선택 UI (optgroup: 수신자별 컬럼 + 등록 회신번호)
+- `Dashboard.tsx` — individualCallbackColumn state + resolveRecipientCallback CT 호출 + API 전달
+- `formatDate.ts` — resolveRecipientCallback CT 추가
+
+#### DB 마이그레이션
+- `ALTER TABLE campaigns ADD COLUMN individual_callback_column VARCHAR(50)` (완료)
+
+#### 교훈
+- **xlsx cellDates 부동소수점 오차** — 엑셀 시리얼→Date 변환 시 자정에서 ~9시간 부족한 값 생성 → Math.ceil(올림)으로 다음 자정 복원
+- **normalizeByFieldKey가 Date를 String()으로 변환** — 커스텀 필드 경로에서 Date 객체가 영문 문자열로 변환 → normalizeDate의 문자열 파싱 경로를 타서 밀림 → Date 객체 보존 필수
+- **recipientsWithMessage 구성 시 원본 필드 탈락** — phone/callback/message만 추출하면 store_phone 등 다른 컬럼이 사라짐 → resolveRecipientCallback을 원본 데이터에서 호출해야 함
+- **프론트에서 callback 매핑 후 백엔드 CT-08에 callbackColumn 전달하면 덮어씌워짐** — direct-send는 프론트 매핑 완료이므로 callbackColumn 미전달
+
+---
+
+### 🔧 D98 — PPT 버그리포트 11건 전면 수정 + 재검증 (2026-03-27) — ✅ 배포완료
 
 > **배경:** 테스터 직원 PPT 11건 전면 수정. 컨트롤타워 원칙 + 데이터 흐름 끝까지 추적 검증.
 

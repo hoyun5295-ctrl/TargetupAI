@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>26년 3월 데레사 행사</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700;900&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Noto Sans KR', -apple-system, sans-serif;
+    background: #0f172a;
+    color: #f1f5f9;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ── 히어로 ── */
+  .hero {
+    background: linear-gradient(160deg, #1e293b 0%, #0f172a 50%, #1e1b4b 100%);
+    text-align: center;
+    padding: 32px 20px 24px;
+    position: relative;
+    overflow: hidden;
+  }
+  .hero::before {
+    content: '';
+    position: absolute;
+    top: -60px; right: -60px;
+    width: 200px; height: 200px;
+    background: radial-gradient(circle, rgba(251,191,36,0.12) 0%, transparent 70%);
+    border-radius: 50%;
+  }
+  .hero .label {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 4px;
+    color: #fbbf24;
+    margin-bottom: 10px;
+  }
+  .hero h1 {
+    font-size: 28px;
+    font-weight: 900;
+    background: linear-gradient(135deg, #fff 30%, #fbbf24 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    line-height: 1.3;
+  }
+  .hero .period {
+    margin-top: 12px;
+    font-size: 14px;
+    color: rgba(255,255,255,0.5);
+    font-weight: 500;
+  }
+
+  /* ── TODAY'S PICK 섹션 ── */
+  .picks-section {
+    padding: 24px 16px 16px;
+  }
+  .picks-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+  .picks-title h2 {
+    font-size: 16px;
+    font-weight: 800;
+    color: #fbbf24;
+    letter-spacing: 1px;
+  }
+  .picks-title .line {
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(90deg, rgba(251,191,36,0.3), transparent);
+  }
+
+  /* ── 대형 특가 카드 ── */
+  .pick-card {
+    background: linear-gradient(135deg, #1e293b, #334155);
+    border: 1px solid rgba(251,191,36,0.15);
+    border-radius: 16px;
+    padding: 20px;
+    margin-bottom: 12px;
+    position: relative;
+    overflow: hidden;
+  }
+  .pick-card::after {
+    content: '';
+    position: absolute;
+    top: 0; right: 0;
+    width: 80px; height: 80px;
+    background: radial-gradient(circle at top right, rgba(251,191,36,0.08), transparent);
+  }
+  .pick-card .pick-badge {
+    display: inline-block;
+    background: #fbbf24;
+    color: #1e293b;
+    font-size: 11px;
+    font-weight: 800;
+    padding: 3px 10px;
+    border-radius: 6px;
+    margin-bottom: 10px;
+  }
+  .pick-card .pick-row {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  .pick-card .pick-emoji {
+    font-size: 48px;
+    flex-shrink: 0;
+  }
+  .pick-card .pick-info {
+    flex: 1;
+  }
+  .pick-card .pick-name {
+    font-size: 18px;
+    font-weight: 800;
+    color: #fff;
+    line-height: 1.3;
+  }
+  .pick-card .pick-unit {
+    font-size: 13px;
+    color: rgba(255,255,255,0.45);
+    margin-top: 2px;
+  }
+  .pick-card .pick-price-row {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin-top: 8px;
+  }
+  .pick-card .pick-sale {
+    font-size: 28px;
+    font-weight: 900;
+    color: #fbbf24;
+    letter-spacing: -1px;
+  }
+  .pick-card .pick-sale .won {
+    font-size: 16px;
+    font-weight: 700;
+  }
+  .pick-card .pick-original {
+    font-size: 14px;
+    color: rgba(255,255,255,0.3);
+    text-decoration: line-through;
+  }
+  .pick-card .pick-rate {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    font-size: 24px;
+    font-weight: 900;
+    color: #ef4444;
+    z-index: 1;
+  }
+
+  /* ── 나머지 상품 컴팩트 리스트 ── */
+  .rest-section {
+    padding: 8px 16px 16px;
+  }
+  .rest-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+    padding: 12px 0 8px;
+    border-top: 1px solid rgba(255,255,255,0.06);
+  }
+  .rest-header .cat-icon {
+    width: 28px; height: 28px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 15px;
+    flex-shrink: 0;
+  }
+  .rest-header .cat-icon.fruit { background: rgba(251,191,36,0.12); }
+  .rest-header .cat-icon.grocery { background: rgba(96,165,250,0.12); }
+  .rest-header h3 {
+    font-size: 14px;
+    font-weight: 700;
+    color: #cbd5e1;
+  }
+
+  .compact-list {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  .compact-item {
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 10px;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .compact-item .ci-top {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .compact-item .ci-emoji {
+    font-size: 18px;
+  }
+  .compact-item .ci-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: #e2e8f0;
+    line-height: 1.3;
+    flex: 1;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .compact-item .ci-unit {
+    font-size: 11px;
+    color: #64748b;
+  }
+  .compact-item .ci-price-row {
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+    margin-top: 2px;
+  }
+  .compact-item .ci-sale {
+    font-size: 16px;
+    font-weight: 900;
+    color: #fbbf24;
+    letter-spacing: -0.5px;
+  }
+  .compact-item .ci-sale .won {
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .compact-item .ci-original {
+    font-size: 11px;
+    color: #475569;
+    text-decoration: line-through;
+  }
+  .compact-item .ci-rate {
+    font-size: 11px;
+    font-weight: 800;
+    color: #ef4444;
+  }
+  .compact-item .ci-badge {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: rgba(251,191,36,0.15);
+    color: #fbbf24;
+    align-self: flex-start;
+    margin-top: 2px;
+  }
+
+  /* ── 풋터 ── */
+  .footer {
+    text-align: center;
+    padding: 28px 16px 44px;
+    border-top: 1px solid rgba(255,255,255,0.05);
+  }
+  .footer .brand {
+    font-size: 15px;
+    font-weight: 800;
+    color: #fbbf24;
+    letter-spacing: 2px;
+  }
+  .footer .info {
+    font-size: 12px;
+    color: #475569;
+    margin-top: 6px;
+    line-height: 1.5;
+  }
+  .footer .powered {
+    font-size: 10px;
+    color: #334155;
+    margin-top: 10px;
+  }
+</style>
+</head>
+<body>
+
+<!-- 히어로 -->
+<div class="hero">
+  <div class="label">DERESA MART</div>
+  <h1>3월 대감사<br>초특가 행사</h1>
+  <div class="period">3/28(금) ~ 4/3(목)</div>
+</div>
+
+<!-- TODAY'S PICK -->
+<div class="picks-section">
+  <div class="picks-title">
+    <h2>TODAY'S PICK</h2>
+    <div class="line"></div>
+  </div>
+
+  <!-- 특가 1: 양배추 50% -->
+  <div class="pick-card">
+    <div class="pick-badge">반값 특가</div>
+    <div class="pick-rate">50%</div>
+    <div class="pick-row">
+      <div class="pick-emoji">🥬</div>
+      <div class="pick-info">
+        <div class="pick-name">양배추</div>
+        <div class="pick-unit">1통</div>
+        <div class="pick-price-row">
+          <span class="pick-sale">990<span class="won">원</span></span>
+          <span class="pick-original">1,980원</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 특가 2: 양파 33% -->
+  <div class="pick-card">
+    <div class="pick-badge">초특가</div>
+    <div class="pick-rate">33%</div>
+    <div class="pick-row">
+      <div class="pick-emoji">🧅</div>
+      <div class="pick-info">
+        <div class="pick-name">양파</div>
+        <div class="pick-unit">1망 3KG</div>
+        <div class="pick-price-row">
+          <span class="pick-sale">3,980<span class="won">원</span></span>
+          <span class="pick-original">5,980원</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 특가 3: 청송사과 20% -->
+  <div class="pick-card">
+    <div class="pick-badge">한정 수량</div>
+    <div class="pick-rate">20%</div>
+    <div class="pick-row">
+      <div class="pick-emoji">🍎</div>
+      <div class="pick-info">
+        <div class="pick-name">청송사과</div>
+        <div class="pick-unit">1박스 20KG</div>
+        <div class="pick-price-row">
+          <span class="pick-sale">79,800<span class="won">원</span></span>
+          <span class="pick-original">99,000원</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 특가 4: 짭짤이토마토 23% -->
+  <div class="pick-card">
+    <div class="pick-badge">추천</div>
+    <div class="pick-rate">23%</div>
+    <div class="pick-row">
+      <div class="pick-emoji">🍅</div>
+      <div class="pick-info">
+        <div class="pick-name">짭짤이토마토</div>
+        <div class="pick-unit">1박스</div>
+        <div class="pick-price-row">
+          <span class="pick-sale">9,900<span class="won">원</span></span>
+          <span class="pick-original">12,800원</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 나머지 청과/야채 -->
+<div class="rest-section">
+  <div class="rest-header">
+    <div class="cat-icon fruit">🍓</div>
+    <h3>청과 / 야채</h3>
+  </div>
+  <div class="compact-list">
+    <div class="compact-item">
+      <div class="ci-top">
+        <span class="ci-emoji">🍓</span>
+        <span class="ci-name">딸기</span>
+      </div>
+      <div class="ci-unit">3kg</div>
+      <div class="ci-price-row">
+        <span class="ci-sale">6,980<span class="won">원</span></span>
+      </div>
+    </div>
+    <div class="compact-item">
+      <div class="ci-top">
+        <span class="ci-emoji">🍊</span>
+        <span class="ci-name">왕오렌지</span>
+      </div>
+      <div class="ci-unit">1봉</div>
+      <div class="ci-price-row">
+        <span class="ci-sale">6,980<span class="won">원</span></span>
+        <span class="ci-original">7,980원</span>
+      </div>
+    </div>
+    <div class="compact-item">
+      <div class="ci-top">
+        <span class="ci-emoji">🍊</span>
+        <span class="ci-name">만다린</span>
+      </div>
+      <div class="ci-unit">1팩</div>
+      <div class="ci-price-row">
+        <span class="ci-sale">7,980<span class="won">원</span></span>
+      </div>
+    </div>
+    <div class="compact-item">
+      <div class="ci-top">
+        <span class="ci-emoji">🍇</span>
+        <span class="ci-name">크림슨포도</span>
+      </div>
+      <div class="ci-unit">1팩</div>
+      <div class="ci-price-row">
+        <span class="ci-sale">9,900<span class="won">원</span></span>
+      </div>
+    </div>
+    <div class="compact-item">
+      <div class="ci-top">
+        <span class="ci-emoji">🌿</span>
+        <span class="ci-name">흙쪽파</span>
+      </div>
+      <div class="ci-unit">1단</div>
+      <div class="ci-price-row">
+        <span class="ci-sale">2,980<span class="won">원</span></span>
+        <span class="ci-rate">25%</span>
+      </div>
+    </div>
+    <div class="compact-item">
+      <div class="ci-top">
+        <span class="ci-emoji">🌿</span>
+        <span class="ci-name">바라부추</span>
+      </div>
+      <div class="ci-unit">1봉</div>
+      <div class="ci-price-row">
+        <span class="ci-sale">990<span class="won">원</span></span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 공산 -->
+<div class="rest-section">
+  <div class="rest-header">
+    <div class="cat-icon grocery">🛒</div>
+    <h3>공산</h3>
+  </div>
+  <div class="compact-list">
+    <div class="compact-item">
+      <div class="ci-top">
+        <span class="ci-emoji">🍜</span>
+        <span class="ci-name">오뚜기 유니짜장</span>
+      </div>
+      <div class="ci-unit">2인분</div>
+      <div class="ci-price-row">
+        <span class="ci-sale">4,980<span class="won">원</span></span>
+      </div>
+      <div class="ci-badge">시식 행사중!</div>
+    </div>
+    <div class="compact-item">
+      <div class="ci-top">
+        <span class="ci-emoji">🧈</span>
+        <span class="ci-name">CJ 큰두부</span>
+      </div>
+      <div class="ci-unit">800G</div>
+      <div class="ci-price-row">
+        <span class="ci-sale">1,980<span class="won">원</span></span>
+      </div>
+    </div>
+    <div class="compact-item">
+      <div class="ci-top">
+        <span class="ci-emoji">🍢</span>
+        <span class="ci-name">CJ삼호 바른사각어묵</span>
+      </div>
+      <div class="ci-unit">200G</div>
+      <div class="ci-price-row">
+        <span class="ci-sale">990<span class="won">원</span></span>
+      </div>
+    </div>
+    <div class="compact-item">
+      <div class="ci-top">
+        <span class="ci-emoji">🥟</span>
+        <span class="ci-name">CJ비비고 왕교자</span>
+      </div>
+      <div class="ci-unit">840G</div>
+      <div class="ci-price-row">
+        <span class="ci-sale">6,980<span class="won">원</span></span>
+      </div>
+    </div>
+    <div class="compact-item">
+      <div class="ci-top">
+        <span class="ci-emoji">🍪</span>
+        <span class="ci-name">에이스</span>
+      </div>
+      <div class="ci-unit">1박스</div>
+      <div class="ci-price-row">
+        <span class="ci-sale">2,980<span class="won">원</span></span>
+      </div>
+    </div>
+    <div class="compact-item">
+      <div class="ci-top">
+        <span class="ci-emoji">🍘</span>
+        <span class="ci-name">크라운 스낵봉지</span>
+      </div>
+      <div class="ci-unit">각각</div>
+      <div class="ci-price-row">
+        <span class="ci-sale">1,600<span class="won">원</span></span>
+      </div>
+    </div>
+    <div class="compact-item">
+      <div class="ci-top">
+        <span class="ci-emoji">🍫</span>
+        <span class="ci-name">오리온 초코파이</span>
+      </div>
+      <div class="ci-unit">30입</div>
+      <div class="ci-price-row">
+        <span class="ci-sale">6,980<span class="won">원</span></span>
+      </div>
+    </div>
+    <div class="compact-item">
+      <div class="ci-top">
+        <span class="ci-emoji">🍡</span>
+        <span class="ci-name">청우 찰떡초코파이</span>
+      </div>
+      <div class="ci-unit">1+1</div>
+      <div class="ci-price-row">
+        <span class="ci-sale">3,980<span class="won">원</span></span>
+      </div>
+    </div>
+    <div class="compact-item">
+      <div class="ci-top">
+        <span class="ci-emoji">🍺</span>
+        <span class="ci-name">필굿 오리지널</span>
+      </div>
+      <div class="ci-unit">355ml x 6</div>
+      <div class="ci-price-row">
+        <span class="ci-sale">3,980<span class="won">원</span></span>
+      </div>
+    </div>
+    <div class="compact-item">
+      <div class="ci-top">
+        <span class="ci-emoji">🍺</span>
+        <span class="ci-name">카스</span>
+      </div>
+      <div class="ci-unit">355ml x 6</div>
+      <div class="ci-price-row">
+        <span class="ci-sale">8,900<span class="won">원</span></span>
+      </div>
+    </div>
+    <div class="compact-item">
+      <div class="ci-top">
+        <span class="ci-emoji">🍶</span>
+        <span class="ci-name">참이슬</span>
+      </div>
+      <div class="ci-unit">360ml x 6</div>
+      <div class="ci-price-row">
+        <span class="ci-sale">6,980<span class="won">원</span></span>
+      </div>
+    </div>
+    <div class="compact-item">
+      <div class="ci-top">
+        <span class="ci-emoji">🍶</span>
+        <span class="ci-name">새로 소주</span>
+      </div>
+      <div class="ci-unit">360ml x 6</div>
+      <div class="ci-price-row">
+        <span class="ci-sale">6,980<span class="won">원</span></span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 풋터 -->
+<div class="footer">
+  <div class="brand">DERESA MART</div>
+  <div class="info">3/28(금) ~ 4/3(목)<br>행사 기간 중 조기 품절될 수 있습니다</div>
+  <div class="powered">Powered by 한줄로전단</div>
+</div>
+
+</body>
+</html>
