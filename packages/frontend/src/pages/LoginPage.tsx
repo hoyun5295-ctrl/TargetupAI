@@ -209,14 +209,14 @@ export default function LoginPage() {
             {isSuperAdminOnly ? (
               <>시스템 관리<br/>콘솔</>
             ) : (
-              <>한줄로 AI<br/>마케팅 자동화</>
+              <><span className="font-black">한줄로 AI</span><br/>비즈메세징 플랫폼</>
             )}
           </h1>
           <p className="text-white/60 mt-4 text-sm leading-relaxed">
             {isSuperAdminOnly ? (
               <>고객사 관리, 발송 현황 모니터링,<br/>요금제 설정을 한 곳에서 관리합니다</>
             ) : (
-              <>고객 DB 업로드부터 AI 타겟 분석,<br/>SMS/LMS/MMS 발송까지 한번에</>
+              <>AI 타겟 분석부터 캠페인 발송까지<br/>기업형 비즈메세징을 한번에</>
             )}
           </p>
         </div>
@@ -255,7 +255,7 @@ export default function LoginPage() {
 
             <h2 className="text-xl font-bold text-gray-900 mb-1">로그인</h2>
             <p className="text-sm text-gray-500 mb-8">
-              {isSuperAdminOnly ? '관리자 계정으로 로그인하세요' : '한줄로 계정으로 로그인하세요'}
+              {isSuperAdminOnly ? '관리자 계정으로 로그인하세요' : <><span className="font-semibold">한줄로 AI</span> 계정으로 로그인하세요</>}
             </p>
 
             <form onSubmit={handleSubmit} className="space-y-4">
