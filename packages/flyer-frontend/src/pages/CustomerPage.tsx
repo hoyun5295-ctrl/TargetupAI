@@ -156,7 +156,7 @@ export default function CustomerPage({ token }: { token: string }) {
       {/* 업로드 영역 */}
       {showUpload && (
         <SectionCard title="고객 데이터 업로드" className="mb-6">
-          <DragDropUpload loading={fileLoading} onFile={handleFileSelect} label="엑셀/CSV 파일을 드래그하거나 클릭하세요" hint=".xlsx, .xls, .csv 파일 지원" />
+          <DragDropUpload loading={fileLoading} onFile={handleFileSelect} label="Excel/CSV file drag & drop" hint=".xlsx, .xls, .csv" />
         </SectionCard>
       )}
 

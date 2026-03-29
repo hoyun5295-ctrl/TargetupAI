@@ -425,7 +425,7 @@ export default function SendPage({ token }: { token: string }) {
                   <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={e => { if (e.target.files?.[0]) handleFileSelect(e.target.files[0]); }} />
 
                   {recipients.length === 0 ? (
-                    <DragDropUpload loading={fileLoading} onFile={handleFileSelect} label="엑���/CSV 파일을 드래그하거나 클릭하세요" hint=".xlsx, .xls, .csv 지원" />
+                    <DragDropUpload loading={fileLoading} onFile={handleFileSelect} label="Excel/CSV file drag & drop" hint=".xlsx, .xls, .csv" />
                   ) : (
                     <div>
                       <div className="flex items-center justify-between mb-3">
