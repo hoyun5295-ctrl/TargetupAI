@@ -46,11 +46,17 @@ export default function DragDropUpload({ accept = '.xlsx,.xls,.csv', loading, on
           <p className="text-sm text-text-secondary">파일 처리 중...</p>
         ) : (
           <>
-            <div className="w-12 h-12 bg-bg rounded-xl flex items-center justify-center mx-auto mb-3 text-2xl">
-              {dragging ? '📥' : '📁'}
+            <div className="w-12 h-12 bg-bg rounded-xl flex items-center justify-center mx-auto mb-3">
+              <svg className="w-6 h-6 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                {dragging ? (
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+                ) : (
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m6.75 12H9.75m3 3H9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zM9.75 9.75h4.5" />
+                )}
+              </svg>
             </div>
-            <p className="text-sm font-medium text-text mb-1">{label || '파일을 드래그하거나 클릭하여 선택하세요'}</p>
-            <p className="text-xs text-text-muted">{hint || accept.split(',').join(', ') + ' 지원'}</p>
+            <p className="text-sm font-medium text-text mb-1">{label || '\uc5d1\uc140/CSV \ud30c\uc77c\uc744 \ub4dc\ub798\uadf8\ud558\uac70\ub098 \ud074\ub9ad\ud558\uc138\uc694'}</p>
+            <p className="text-xs text-text-muted">{hint || accept.split(',').join(', ') + ' \uc9c0\uc6d0'}</p>
           </>
         )}
       </div>

@@ -52,6 +52,9 @@ export default function SendPage({ token }: { token: string }) {
   const [newGroupName, setNewGroupName] = useState('');
   const [newGroupPhones, setNewGroupPhones] = useState('');
   const [savingAddress, setSavingAddress] = useState(false);
+  const [addrInputMode, setAddrInputMode] = useState<'text' | 'file'>('text');
+  const [addrFileLoading, setAddrFileLoading] = useState(false);
+  const [addrFilePhones, setAddrFilePhones] = useState<string[]>([]);
 
   // apiFetch가 자동으로 Authorization 헤더 추가
   const maxBytes = msgType === 'SMS' ? 90 : 2000;
@@ -171,10 +174,37 @@ export default function SendPage({ token }: { token: string }) {
     }
   };
 
+  // 주소록 파일 업로드
+  const handleAddrFileUpload = async (file: File) => {
+    setAddrFileLoading(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await apiFetch(`${API_BASE}/api/upload/parse?includeData=true`, { method: 'POST', body: formData });
+      const data = await res.json();
+      if (data.success) {
+        const allData = data.allData || data.preview || [];
+        const headers = data.headers || [];
+        // 첫 번째 컬럼에서 전화번호 추출 (phone/전화번호 등 자동 감지)
+        const phoneCol = headers.find((h: string) => /phone|전화|핸드폰|휴대폰|번호|수신/i.test(h)) || headers[0];
+        if (!phoneCol) { setAlert({ show: true, title: '오류', message: '전화번호 컬럼을 찾을 수 없습니다.', type: 'error' }); return; }
+        const phones = allData.map((row: any) => String(row[phoneCol] || '').trim().replace(/-/g, '')).filter((p: string) => p.length >= 10);
+        setAddrFilePhones(phones);
+        setNewGroupPhones(phones.join('\n'));
+        setAlert({ show: true, title: '파일 불러오기 완료', message: `${phones.length}건의 전화번호를 불러왔습니다.`, type: 'success' });
+      } else {
+        setAlert({ show: true, title: '파일 오류', message: data.error || '파일 처리에 실패했습니다.', type: 'error' });
+      }
+    } catch { setAlert({ show: true, title: '오류', message: '파일 업로드 중 오류가 발생했습니다.', type: 'error' }); }
+    finally { setAddrFileLoading(false); }
+  };
+
   // 주소록 새로 저장
   const handleSaveAddressGroup = async () => {
     if (!newGroupName.trim()) { setAlert({ show: true, title: '입력 오류', message: '그룹명을 입력해주세요.', type: 'error' }); return; }
-    const lines = newGroupPhones.split(/[\n,;]+/).map(p => p.trim().replace(/-/g, '')).filter(p => p.length >= 10);
+    // 파일 모드에서는 addrFilePhones 사용, 텍스트 모드에서는 newGroupPhones 사용
+    const phoneSource = addrInputMode === 'file' && addrFilePhones.length > 0 ? addrFilePhones.join('\n') : newGroupPhones;
+    const lines = phoneSource.split(/[\n,;]+/).map(p => p.trim().replace(/-/g, '')).filter(p => p.length >= 10);
     if (lines.length === 0) { setAlert({ show: true, title: '입력 오류', message: '유효한 전화번호를 1개 이상 입력해주세요.', type: 'error' }); return; }
     setSavingAddress(true);
     try {
@@ -186,7 +216,7 @@ export default function SendPage({ token }: { token: string }) {
       if (res.ok) {
         const d = await res.json();
         setAlert({ show: true, title: '저장 완료', message: `"${newGroupName.trim()}" 주소록에 ${d.insertCount || lines.length}건 저장되었습니다.`, type: 'success' });
-        setShowNewAddress(false); setNewGroupName(''); setNewGroupPhones('');
+        setShowNewAddress(false); setNewGroupName(''); setNewGroupPhones(''); setAddrFilePhones([]); setAddrInputMode('text');
         // 주소록 리로드
         const gRes = await apiFetch(`${API_BASE}/api/address-books/groups`);
         if (gRes.ok) { const g = await gRes.json(); setAddressGroups(g.groups || g || []); }
@@ -439,11 +469,27 @@ export default function SendPage({ token }: { token: string }) {
                   {showNewAddress ? (
                     <div className="space-y-3">
                       <Input label="그룹명 *" value={newGroupName} onChange={e => setNewGroupName(e.target.value)} placeholder="예: 3월 행사 고객" />
-                      <Textarea label="전화번호 (줄바꿈/쉼표로 구분)" value={newGroupPhones} onChange={e => setNewGroupPhones(e.target.value)}
-                        placeholder={"01012345678\n01098765432"} rows={6} className="font-mono text-xs" />
+
+                      {/* 직접입력 / 파일등록 탭 */}
+                      <div className="flex bg-bg rounded-lg p-0.5 gap-0.5">
+                        <button onClick={() => setAddrInputMode('text')} className={`flex-1 py-1.5 text-xs font-semibold rounded-md transition-all ${addrInputMode === 'text' ? 'bg-surface shadow-sm text-primary-600' : 'text-text-muted hover:text-text-secondary'}`}>직접 입력</button>
+                        <button onClick={() => setAddrInputMode('file')} className={`flex-1 py-1.5 text-xs font-semibold rounded-md transition-all ${addrInputMode === 'file' ? 'bg-surface shadow-sm text-primary-600' : 'text-text-muted hover:text-text-secondary'}`}>파일 등록</button>
+                      </div>
+
+                      {addrInputMode === 'text' ? (
+                        <Textarea label="전화번호 (줄바꿈/쉼표로 구분)" value={newGroupPhones} onChange={e => setNewGroupPhones(e.target.value)}
+                          placeholder={"01012345678\n01098765432"} rows={6} className="font-mono text-xs" />
+                      ) : (
+                        <DragDropUpload accept=".xlsx,.xls,.csv" loading={addrFileLoading} onFile={handleAddrFileUpload} />
+                      )}
+
+                      {addrFilePhones.length > 0 && addrInputMode === 'file' && (
+                        <p className="text-xs text-success-600 font-semibold">{addrFilePhones.length}건 파일에서 불러옴</p>
+                      )}
+
                       <div className="flex gap-2">
                         <Button size="sm" disabled={savingAddress} onClick={handleSaveAddressGroup}>{savingAddress ? '저장 중...' : '주소록 저장'}</Button>
-                        <Button size="sm" variant="ghost" onClick={() => { setShowNewAddress(false); setNewGroupName(''); setNewGroupPhones(''); }}>취소</Button>
+                        <Button size="sm" variant="ghost" onClick={() => { setShowNewAddress(false); setNewGroupName(''); setNewGroupPhones(''); setAddrFilePhones([]); setAddrInputMode('text'); }}>취소</Button>
                       </div>
                     </div>
                   ) : (
