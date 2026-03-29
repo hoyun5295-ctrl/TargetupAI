@@ -1,6 +1,8 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { API_BASE } from '../App';
 import AlertModal from '../components/AlertModal';
+import ScheduleModal from '../components/ScheduleModal';
+import DragDropUpload from '../components/DragDropUpload';
 import { SectionCard, Button, Select, TabBar, Textarea, Badge } from '../components/ui';
 
 interface Flyer { id: string; title: string; short_code: string | null; status: string; store_name: string; }
@@ -27,6 +29,7 @@ export default function SendPage({ token }: { token: string }) {
   const [callback, setCallback] = useState('');
   const [optOutNumber] = useState('080');
   const [sending, setSending] = useState(false);
+  const [showSchedule, setShowSchedule] = useState(false);
   const [alert, setAlert] = useState<{ show: boolean; title: string; message: string; type: 'success' | 'error' | 'info' }>({ show: false, title: '', message: '', type: 'info' });
 
   // 수신자
@@ -164,33 +167,52 @@ export default function SendPage({ token }: { token: string }) {
     }
   };
 
-  // 발송
-  const handleSend = async () => {
+  // 발송 유효성 검증
+  const validateSend = (): { phone: string }[] | null => {
     let phoneList: { phone: string }[];
     if (recipientMode === 'direct') {
       phoneList = directPhones.split(/[\n,;]+/).map(p => ({ phone: p.trim().replace(/-/g, '') })).filter(r => r.phone.length >= 10);
     } else {
       phoneList = recipients.map(r => ({ phone: r.phone }));
     }
+    if (phoneList.length === 0) { setAlert({ show: true, title: '수신자 필요', message: '수신자를 추가해주세요.', type: 'error' }); return null; }
+    if (!message.trim()) { setAlert({ show: true, title: '메시지 필요', message: '메시지를 입력해주세요.', type: 'error' }); return null; }
+    if (!callback) { setAlert({ show: true, title: '발신번호 필요', message: '발신번호를 선택해주세요.', type: 'error' }); return null; }
+    if ((msgType === 'LMS' || msgType === 'MMS') && !subject.trim()) { setAlert({ show: true, title: '제목 필요', message: '제목을 입력해주세요.', type: 'error' }); return null; }
+    if (msgType === 'SMS' && byteCount > 90) { setAlert({ show: true, title: '바이트 초과', message: `SMS는 90byte까지입니다. (현재 ${byteCount}byte)\nLMS로 전환해주세요.`, type: 'error' }); return null; }
+    return phoneList;
+  };
 
-    if (phoneList.length === 0) { setAlert({ show: true, title: '수신자 필요', message: '수신자를 추가해주세요.', type: 'error' }); return; }
-    if (!message.trim()) { setAlert({ show: true, title: '메시지 필요', message: '메시지를 입력해주세요.', type: 'error' }); return; }
-    if (!callback) { setAlert({ show: true, title: '발신번호 필요', message: '발신번호를 선택해주세요.', type: 'error' }); return; }
-    if ((msgType === 'LMS' || msgType === 'MMS') && !subject.trim()) { setAlert({ show: true, title: '제목 필요', message: '제목을 입력해주세요.', type: 'error' }); return; }
-    if (msgType === 'SMS' && byteCount > 90) { setAlert({ show: true, title: '바이트 초과', message: `SMS는 90byte까지입니다. (현재 ${byteCount}byte)\nLMS로 전환해주세요.`, type: 'error' }); return; }
+  // 발송 (즉시 or 예약)
+  const handleSend = async (scheduledAt?: string) => {
+    const phoneList = validateSend();
+    if (!phoneList) return;
 
     setSending(true);
     try {
       let sendMsg = message;
       if (isAd) { sendMsg = `(광고) ${message}\n${msgType === 'SMS' ? `무료거부${optOutNumber.replace(/-/g, '')}` : `무료수신거부 ${optOutNumber}`}`; }
+      const body: any = { recipients: phoneList, message: sendMsg, subject: (msgType === 'LMS' || msgType === 'MMS') ? subject : undefined, callback, messageType: msgType };
+      if (scheduledAt) { body.scheduled = true; body.scheduledAt = scheduledAt; }
       const res = await fetch(`${API_BASE}/api/campaigns/direct-send`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ recipients: phoneList, message: sendMsg, subject: (msgType === 'LMS' || msgType === 'MMS') ? subject : undefined, callback, messageType: msgType }),
+        body: JSON.stringify(body),
       });
-      if (res.ok) { const d = await res.json(); setAlert({ show: true, title: '발송 완료', message: `${d.totalSent || phoneList.length}건 발송 요청되었습니다.`, type: 'success' }); setDirectPhones(''); setRecipients([]); }
+      if (res.ok) {
+        const d = await res.json();
+        const msg = scheduledAt ? `${d.totalSent || phoneList.length}건 예약 발송이 설정되었습니다.` : `${d.totalSent || phoneList.length}건 발송 요청되었습니다.`;
+        setAlert({ show: true, title: scheduledAt ? '예약 완료' : '발송 완료', message: msg, type: 'success' });
+        setDirectPhones(''); setRecipients([]);
+      }
       else { const e = await res.json(); setAlert({ show: true, title: '발송 실패', message: e.error || '발송 실패', type: 'error' }); }
     } catch { setAlert({ show: true, title: '오류', message: '네트워크 오류', type: 'error' }); }
     finally { setSending(false); }
+  };
+
+  // 예약발송 핸들러
+  const handleScheduleConfirm = (scheduledAt: string) => {
+    setShowSchedule(false);
+    handleSend(scheduledAt);
   };
 
   const MAPPING_FIELDS = [
@@ -252,9 +274,12 @@ export default function SendPage({ token }: { token: string }) {
               </label>
             </div>
 
-            <div className="px-4 py-3 border-t border-border">
-              <Button className="w-full" size="lg" disabled={sending || totalRecipientCount === 0 || !message.trim()} onClick={handleSend}>
+            <div className="px-4 py-3 border-t border-border flex gap-2">
+              <Button className="flex-1" size="lg" disabled={sending || totalRecipientCount === 0 || !message.trim()} onClick={() => handleSend()}>
                 {sending ? '발송 중...' : `발송하기${totalRecipientCount > 0 ? ` (${totalRecipientCount}건)` : ''}`}
+              </Button>
+              <Button variant="secondary" size="lg" disabled={sending || totalRecipientCount === 0 || !message.trim()} onClick={() => setShowSchedule(true)} className="flex-shrink-0">
+                예약
               </Button>
             </div>
           </div>
@@ -326,20 +351,7 @@ export default function SendPage({ token }: { token: string }) {
                   <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={e => { if (e.target.files?.[0]) handleFileSelect(e.target.files[0]); }} />
 
                   {recipients.length === 0 ? (
-                    <div
-                      onClick={() => fileInputRef.current?.click()}
-                      className="border-2 border-dashed border-border hover:border-primary-500/50 rounded-xl p-8 text-center cursor-pointer transition-colors bg-bg/50 hover:bg-primary-50/30"
-                    >
-                      {fileLoading ? (
-                        <p className="text-sm text-text-secondary">파일 처리 중...</p>
-                      ) : (
-                        <>
-                          <div className="w-12 h-12 bg-bg rounded-xl flex items-center justify-center mx-auto mb-3 text-2xl">📁</div>
-                          <p className="text-sm font-medium text-text mb-1">엑셀/CSV 파일을 클릭하여 선택하세요</p>
-                          <p className="text-xs text-text-muted">.xlsx, .xls, .csv 지원</p>
-                        </>
-                      )}
-                    </div>
+                    <DragDropUpload loading={fileLoading} onFile={handleFileSelect} label="엑���/CSV 파일을 드래그하거나 클릭하세요" hint=".xlsx, .xls, .csv 지원" />
                   ) : (
                     <div>
                       <div className="flex items-center justify-between mb-3">
@@ -485,6 +497,7 @@ export default function SendPage({ token }: { token: string }) {
         </div>
       )}
 
+      <ScheduleModal show={showSchedule} onConfirm={handleScheduleConfirm} onCancel={() => setShowSchedule(false)} />
       <AlertModal alert={alert} onClose={() => setAlert({ ...alert, show: false })} />
     </>
   );

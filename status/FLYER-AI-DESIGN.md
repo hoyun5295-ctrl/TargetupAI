@@ -150,26 +150,41 @@
 
 ## 7. 구현 우선순위 (제안)
 
-### Phase 1 — MVP (단축 URL + 기본 전단지) — 2026-03-29 구현
+### Phase 1 — MVP 인프라 (2026-03-29 완료)
 - [x] DB 마이그레이션 (flyers, short_urls, url_clicks)
 - [x] 백엔드 API — `routes/flyer/flyers.ts` (전단지 CRUD + 발행 + 클릭통계)
 - [x] 백엔드 공개페이지 — `routes/flyer/short-urls.ts` (3종 템플릿 SSR + 클릭 로그)
-- [x] 프론트엔드 — `pages/FlyerPage.tsx` (전단지 생성/수정/삭제/발행/목록)
-- [x] 라우트 등록 (`app.ts` + `App.tsx` + `DashboardHeader.tsx`)
-- [x] TypeScript 빌드 통과 (백엔드 + 프론트엔드)
-- [ ] SMS 문구에 단축 URL 자동 삽입 (Phase 1.5)
-- [ ] 도메인 연결 (hanjul-flyer.com → 관리화면, hanjul-flyer.kr → 공개페이지)
+- [x] 도메인 연결 (DNS + SSL + Nginx): hanjul-flyer.com → 관리화면, hanjul-flyer.kr → 공개페이지
+- [x] 별도 React 앱 (`packages/flyer-frontend/`) — Vite + Tailwind CSS v4
+- [x] 디자인 시스템 토큰 정의 (index.css) + 공통 컴포넌트 (ui.tsx)
+- [x] 메뉴 구조: 전단제작 / 발송 / 결과 / 충전관리 + 수신거부 / 설정
+
+### Phase 1.5 — 프론트엔드 완성 (2026-03-29 완료)
+- [x] 로그인 (한줄로 auth API 재활용, 별도 토큰 저장)
+- [x] 전단제작 (FlyerPage — CRUD + 발행 + 3종 템플릿)
+- [x] 발송 (SendPage — SMS/LMS/MMS + 직접입력/파일업로드/주소록 3탭 + 전단지 URL 자동삽입)
+- [x] 설정 (SettingsPage — 회사정보/회신번호/080/요금 단가, 한줄로 API 연동)
+- [x] 결과/충전관리/수신거부 기본 화면
+- [x] 고객 DB 관리 (CustomerPage — 업로드/조회/검색/삭제 + 페이지네이션)
+- [x] 발송 결과 상세 (캠페인 클릭→수신자 목록 모달, 전단지 일별 클릭 추이, 예약 탭)
+- [x] 전단지 제작 시 실시간 미리보기 (폰 프레임 + 프론트 자체 렌더링, 발행 전단지는 iframe)
+- [x] 발송 예약 기능 (ScheduleModal — 빠른선택 프리셋 + 날짜/시간 수동선택)
+- [x] 파일 업로드 드래그&드롭 (DragDropUpload 공통 컴포넌트 — SendPage + CustomerPage 적용)
+- [x] 발신번호 등록 신청 (SettingsPage 내 — 번호/라벨/서류 업로드 + 신청 내역 표시)
+- [x] 요금 충전/결제 연동 (BalancePage — 입금요청 폼 + 거래내역 필터/페이지네이션 + 월별 요약)
+- [ ] 슈퍼관리자에서 전단AI 고객사 관리 (한줄로 메인 프론트엔드 영역 — 별도 진행)
 
 ### Phase 2 — 디자인 확장
-- [ ] 업종별 템플릿 (마트, 카페, 미용실, 정육점)
+- [ ] 업종별 템플릿 (카페, 미용실, 정육점, 꽃집)
 - [ ] 상품 이미지 업로드 + 전단지에 표시
 - [ ] 매장 로고/브랜딩 커스터마이징
+- [ ] 전단지 제작 시 미리보기 개선 (템플릿별 프리뷰 썸네일)
 
 ### Phase 3 — 분석 + 확장
 - [ ] 상품별 클릭 영역 추적 (어떤 상품에 관심이 높은지)
-- [ ] AI 발송 시간 추천
 - [ ] 전단지 히스토리 (지난 행사 복사해서 재사용)
 - [ ] 카카오 친구톡/알림톡 연동 (전단지 URL 포함)
+- [ ] 전단AI 전용 요금제 체계 (15만원 플랜)
 
 ---
 
@@ -182,6 +197,9 @@
 | 3 | 디자인 방향 | **3종 템플릿 확정** (프로토타입 완성) | 2026-03-28 |
 | 4 | 도메인 | **관리화면:** `hanjul-flyer.com` / **단축URL+공개페이지:** `hanjul-flyer.kr` / **예비(리다이렉트):** `hanjul-flyer.co.kr` — 3개 도메인 3년치 구매 완료. **hanjul.ai는 전단AI에 사용하지 않음** | 2026-03-29 |
 | 5 | 요금제 | **15만원 요금제.** 마트 고객 10만 이하 규모. AI 문안생성 없이 전단 생성만 제공 | 2026-03-29 |
+| 6 | 프론트 분리 | **한줄로 앱 밖 완전 독립** — `packages/flyer-frontend/` 별도 React 앱. 한줄로 DashboardHeader에 전단AI 메뉴 없음 | 2026-03-29 |
+| 7 | 메뉴 구조 | **메인 4개:** 전단제작/발송/결과/충전관리. **부가:** 수신거부/설정 | 2026-03-29 |
+| 8 | 백엔드 API | 한줄로 기존 API 100% 재활용 (auth, companies/settings, companies/callback-numbers, campaigns/direct-send, upload/parse, address-books, unsubscribes, balance, results). 전단AI 전용 API는 `/api/flyer/` 경로만 | 2026-03-29 |
 
 ## 9. 아키텍처 상세 (2026-03-29 확정)
 
@@ -203,6 +221,25 @@ routes/
 - DB: 신규 테이블만 (flyers, short_urls, url_clicks)
 - 발송 시 기존 컨트롤타워(sms-queue, prepaid 등) import 호출
 
+### 프론트엔드 파일 구조 (packages/flyer-frontend/)
+```
+src/
+  ├── App.tsx              ← 메인 레이아웃 + 네비게이션 + 페이지 라우팅
+  ├── index.css            ← 디자인 시스템 토큰 (컬러/타이포/간격/보더/그림자)
+  ├── main.tsx
+  ├── components/
+  │   ├── ui.tsx           ← 공통 컴포넌트 (Button, Input, Select, Textarea, TabBar, Badge, SectionCard, EmptyState, ConfirmModal, Toast, StatCard, DataTable)
+  │   └── AlertModal.tsx
+  └── pages/
+      ├── LoginPage.tsx    ← 로그인 (좌측 브랜드패널 + 우측 폼)
+      ├── FlyerPage.tsx    ← 전단제작 (목록 + 생성/수정 폼)
+      ├── SendPage.tsx     ← 발송 (좌: SMS/LMS/MMS 편집, 우: 전단지선택 + 수신자 3탭)
+      ├── ResultsPage.tsx  ← 결과 (발송결과 + 전단지 클릭 탭)
+      ├── BalancePage.tsx   ← 충전관리 (잔액 + 거래내역)
+      ├── UnsubscribesPage.tsx ← 수신거부 (등록 + 목록)
+      └── SettingsPage.tsx ← 설정 (회사정보/회신번호/080/요금단가)
+```
+
 ### 도메인 구조
 - `hanjul-flyer.com` — 관리화면 (마트 사장님이 전단지 만드는 곳)
 - `hanjul-flyer.kr` — 단축URL + 전단지 공개페이지 (SMS에 들어가는 링크)
@@ -210,7 +247,10 @@ routes/
 
 ## 10. 미결정 사항
 
-(현재 없음)
+1. **고객 DB 관리 방식:** 전단AI 자체 고객DB 메뉴를 만들지, 발송 시 파일/주소록으로만 할지
+2. **요금 충전/결제:** 전단AI 자체 결제 페이지 필요 vs 한줄로 관리자가 충전
+3. **슈퍼관리자 관리:** 전단AI 고객사 생성/관리를 한줄로 슈퍼관리자에서 할지, 별도 관리자 만들지
+4. **발신번호 등록:** 전단AI에서 직접 신청 가능하게 할지, 한줄로 관리 메뉴 안내만 할지
 
 ## 10. 프로토타입 산출물 (2026-03-28)
 

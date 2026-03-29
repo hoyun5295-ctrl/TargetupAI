@@ -7,14 +7,16 @@ import ResultsPage from './pages/ResultsPage';
 import BalancePage from './pages/BalancePage';
 import UnsubscribesPage from './pages/UnsubscribesPage';
 import SettingsPage from './pages/SettingsPage';
+import CustomerPage from './pages/CustomerPage';
 
 export const API_BASE = import.meta.env.VITE_API_URL || '';
 export function getToken(): string { return localStorage.getItem('flyer_token') || ''; }
-export type Page = 'flyer' | 'send' | 'results' | 'balance' | 'unsubscribes' | 'settings';
+export type Page = 'flyer' | 'send' | 'customers' | 'results' | 'balance' | 'unsubscribes' | 'settings';
 
 const MAIN_MENUS: { key: Page; label: string; icon: string }[] = [
   { key: 'flyer', label: '전단제작', icon: '📄' },
   { key: 'send', label: '발송', icon: '📨' },
+  { key: 'customers', label: '고객DB', icon: '👥' },
   { key: 'results', label: '결과', icon: '📊' },
   { key: 'balance', label: '충전관리', icon: '💳' },
 ];
@@ -101,6 +103,7 @@ function App() {
       <main className="max-w-6xl mx-auto px-6 py-6">
         {currentPage === 'flyer' && <FlyerPage token={token} />}
         {currentPage === 'send' && <SendPage token={token} />}
+        {currentPage === 'customers' && <CustomerPage token={token} />}
         {currentPage === 'results' && <ResultsPage token={token} />}
         {currentPage === 'balance' && <BalancePage token={token} />}
         {currentPage === 'unsubscribes' && <UnsubscribesPage token={token} />}

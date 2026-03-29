@@ -142,75 +142,107 @@ export default function FlyerPage({ token }: { token: string }) {
         </>
       )}
 
-      {/* ── 생성/수정 폼 ── */}
+      {/* ── 생성/수정 폼 + 미리보기 ── */}
       {showForm && (
-        <div className="max-w-3xl mx-auto">
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-lg font-bold text-text">{editingFlyer ? '전단지 수정' : '새 전단지 만들기'}</h2>
-            <Button variant="ghost" size="sm" onClick={() => { setShowForm(false); resetForm(); }}>취소</Button>
+        <div className="flex gap-6">
+          {/* 좌측: 입력 폼 */}
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-lg font-bold text-text">{editingFlyer ? '전단지 수정' : '새 전단지 만들기'}</h2>
+              <Button variant="ghost" size="sm" onClick={() => { setShowForm(false); resetForm(); }}>취소</Button>
+            </div>
+
+            <SectionCard title="기본 정보" className="mb-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="col-span-2"><Input label="행사명 *" value={title} onChange={e => setTitle(e.target.value)} placeholder="예: 26년 3월 데레사 행사" /></div>
+                <Input label="매장명" value={storeName} onChange={e => setStoreName(e.target.value)} placeholder="예: 데레사 마트" />
+                <div className="grid grid-cols-2 gap-2">
+                  <Input label="시작일" type="date" value={periodStart} onChange={e => setPeriodStart(e.target.value)} />
+                  <Input label="종료일" type="date" value={periodEnd} onChange={e => setPeriodEnd(e.target.value)} />
+                </div>
+              </div>
+            </SectionCard>
+
+            <SectionCard title="디자인 템플릿" className="mb-4">
+              <div className="grid grid-cols-3 gap-3">
+                {TEMPLATES.map(t => (
+                  <button key={t.value} onClick={() => setTemplate(t.value)}
+                    className={`rounded-xl border-2 text-left transition-all overflow-hidden ${template === t.value ? 'border-primary-500 shadow-elevated' : 'border-border hover:border-border-strong'}`}>
+                    <div className={`h-3 bg-gradient-to-r ${t.color}`} />
+                    <div className="p-3">
+                      <div className="text-sm font-bold text-text">{t.label}</div>
+                      <div className="text-xs text-text-muted mt-0.5">{t.desc}</div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </SectionCard>
+
+            <SectionCard title="상품 등록" className="mb-4">
+              <div className="flex flex-wrap gap-1 mb-4">
+                {CATEGORY_PRESETS.filter(p => !categories.some(c => c.name === p)).map(p => (
+                  <button key={p} onClick={() => addCategory(p)} className="px-2.5 py-1 text-xs bg-bg hover:bg-border/50 rounded-md text-text-secondary font-medium transition-colors">+{p}</button>
+                ))}
+              </div>
+              {categories.map((cat, ci) => (
+                <div key={ci} className="mb-4 border border-border rounded-xl p-4 bg-bg/30">
+                  <div className="flex justify-between items-center mb-3">
+                    <input type="text" value={cat.name} onChange={e => updateCategoryName(ci, e.target.value)} className="font-bold text-sm text-text border-b border-transparent hover:border-border-strong focus:border-primary-500 focus:outline-none pb-1 bg-transparent" />
+                    <button onClick={() => removeCategory(ci)} className="text-xs text-error-500 hover:text-error-600 font-medium">삭제</button>
+                  </div>
+                  <div className="space-y-2">
+                    <div className="grid grid-cols-12 gap-2 text-[11px] font-semibold text-text-muted uppercase tracking-wider px-1">
+                      <div className="col-span-4">상품명</div><div className="col-span-2">원가</div><div className="col-span-2">할인가</div><div className="col-span-3">뱃지</div><div className="col-span-1"></div>
+                    </div>
+                    {cat.items.map((item, ii) => (
+                      <div key={ii} className="grid grid-cols-12 gap-2 items-center">
+                        <input type="text" value={item.name} onChange={e => updateItem(ci, ii, 'name', e.target.value)} placeholder="상품명" className="col-span-4 px-2.5 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 bg-surface" />
+                        <input type="number" value={item.originalPrice || ''} onChange={e => updateItem(ci, ii, 'originalPrice', Number(e.target.value))} placeholder="원가" className="col-span-2 px-2.5 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 bg-surface" />
+                        <input type="number" value={item.salePrice || ''} onChange={e => updateItem(ci, ii, 'salePrice', Number(e.target.value))} placeholder="할인가" className="col-span-2 px-2.5 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 bg-surface" />
+                        <input type="text" value={item.badge || ''} onChange={e => updateItem(ci, ii, 'badge', e.target.value)} placeholder="뱃지" className="col-span-3 px-2.5 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 bg-surface" />
+                        <button onClick={() => removeItem(ci, ii)} className="col-span-1 text-error-500/60 hover:text-error-500 text-center transition-colors">✕</button>
+                      </div>
+                    ))}
+                    <button onClick={() => addItem(ci)} className="w-full py-2 text-xs text-primary-600 hover:bg-primary-50 rounded-lg border border-dashed border-primary-500/30 transition-colors font-medium">+ 상품 추가</button>
+                  </div>
+                </div>
+              ))}
+              <button onClick={() => addCategory()} className="w-full py-2.5 text-sm text-text-secondary hover:bg-bg rounded-xl border border-dashed border-border transition-colors font-medium">+ 카테고리 추가</button>
+            </SectionCard>
+
+            <div className="flex justify-end gap-3">
+              <Button variant="secondary" onClick={() => { setShowForm(false); resetForm(); }}>취소</Button>
+              <Button onClick={handleSave}>{editingFlyer ? '수정 저장' : '전단지 저장'}</Button>
+            </div>
           </div>
 
-          <SectionCard title="기본 정보" className="mb-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="col-span-2"><Input label="행사명 *" value={title} onChange={e => setTitle(e.target.value)} placeholder="예: 26년 3월 데레사 행사" /></div>
-              <Input label="매장명" value={storeName} onChange={e => setStoreName(e.target.value)} placeholder="예: 데레사 마트" />
-              <div className="grid grid-cols-2 gap-2">
-                <Input label="시작일" type="date" value={periodStart} onChange={e => setPeriodStart(e.target.value)} />
-                <Input label="종료일" type="date" value={periodEnd} onChange={e => setPeriodEnd(e.target.value)} />
+          {/* 우측: 폰 프레임 미리보기 */}
+          <div className="w-[280px] flex-shrink-0 sticky top-20 self-start">
+            <p className="text-xs font-semibold text-text-secondary mb-3 text-center">미리보기</p>
+            <div className="bg-gray-900 rounded-[2rem] p-2.5 shadow-elevated">
+              {/* 노치 */}
+              <div className="flex justify-center mb-1">
+                <div className="w-20 h-5 bg-gray-900 rounded-b-xl relative -top-0.5" />
               </div>
-            </div>
-          </SectionCard>
-
-          <SectionCard title="디자인 템플릿" className="mb-4">
-            <div className="grid grid-cols-3 gap-3">
-              {TEMPLATES.map(t => (
-                <button key={t.value} onClick={() => setTemplate(t.value)}
-                  className={`rounded-xl border-2 text-left transition-all overflow-hidden ${template === t.value ? 'border-primary-500 shadow-elevated' : 'border-border hover:border-border-strong'}`}>
-                  <div className={`h-3 bg-gradient-to-r ${t.color}`} />
-                  <div className="p-3">
-                    <div className="text-sm font-bold text-text">{t.label}</div>
-                    <div className="text-xs text-text-muted mt-0.5">{t.desc}</div>
-                  </div>
-                </button>
-              ))}
-            </div>
-          </SectionCard>
-
-          <SectionCard title="상품 등록" className="mb-4">
-            <div className="flex flex-wrap gap-1 mb-4">
-              {CATEGORY_PRESETS.filter(p => !categories.some(c => c.name === p)).map(p => (
-                <button key={p} onClick={() => addCategory(p)} className="px-2.5 py-1 text-xs bg-bg hover:bg-border/50 rounded-md text-text-secondary font-medium transition-colors">+{p}</button>
-              ))}
-            </div>
-            {categories.map((cat, ci) => (
-              <div key={ci} className="mb-4 border border-border rounded-xl p-4 bg-bg/30">
-                <div className="flex justify-between items-center mb-3">
-                  <input type="text" value={cat.name} onChange={e => updateCategoryName(ci, e.target.value)} className="font-bold text-sm text-text border-b border-transparent hover:border-border-strong focus:border-primary-500 focus:outline-none pb-1 bg-transparent" />
-                  <button onClick={() => removeCategory(ci)} className="text-xs text-error-500 hover:text-error-600 font-medium">삭제</button>
+              <div className="bg-surface rounded-[1.5rem] overflow-hidden" style={{ width: 255, height: 520 }}>
+                {/* 미니 주소바 */}
+                <div className="bg-bg px-3 py-1.5 border-b border-border flex items-center gap-1">
+                  <div className="w-1.5 h-1.5 rounded-full bg-success-500" />
+                  <span className="text-[8px] text-text-muted font-mono truncate">hanjul-flyer.kr/preview</span>
                 </div>
-                <div className="space-y-2">
-                  <div className="grid grid-cols-12 gap-2 text-[11px] font-semibold text-text-muted uppercase tracking-wider px-1">
-                    <div className="col-span-4">상품명</div><div className="col-span-2">원가</div><div className="col-span-2">할인가</div><div className="col-span-3">뱃지</div><div className="col-span-1"></div>
-                  </div>
-                  {cat.items.map((item, ii) => (
-                    <div key={ii} className="grid grid-cols-12 gap-2 items-center">
-                      <input type="text" value={item.name} onChange={e => updateItem(ci, ii, 'name', e.target.value)} placeholder="상품명" className="col-span-4 px-2.5 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 bg-surface" />
-                      <input type="number" value={item.originalPrice || ''} onChange={e => updateItem(ci, ii, 'originalPrice', Number(e.target.value))} placeholder="원가" className="col-span-2 px-2.5 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 bg-surface" />
-                      <input type="number" value={item.salePrice || ''} onChange={e => updateItem(ci, ii, 'salePrice', Number(e.target.value))} placeholder="할인가" className="col-span-2 px-2.5 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 bg-surface" />
-                      <input type="text" value={item.badge || ''} onChange={e => updateItem(ci, ii, 'badge', e.target.value)} placeholder="뱃지" className="col-span-3 px-2.5 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 bg-surface" />
-                      <button onClick={() => removeItem(ci, ii)} className="col-span-1 text-error-500/60 hover:text-error-500 text-center transition-colors">✕</button>
-                    </div>
-                  ))}
-                  <button onClick={() => addItem(ci)} className="w-full py-2 text-xs text-primary-600 hover:bg-primary-50 rounded-lg border border-dashed border-primary-500/30 transition-colors font-medium">+ 상품 추가</button>
+                {/* 프론트 자체 렌더링 미리보기 */}
+                <div className="overflow-y-auto" style={{ height: 490 }}>
+                  {editingFlyer?.short_code ? (
+                    <iframe src={`${API_BASE}/api/flyer/p/${editingFlyer.short_code}`} className="w-full border-0" style={{ height: 490, transform: 'scale(0.68)', transformOrigin: 'top left', width: '147%' }} title="미리보기" />
+                  ) : (
+                    <FlyerPreviewRenderer title={title} storeName={storeName} periodStart={periodStart} periodEnd={periodEnd} categories={categories} template={template} />
+                  )}
                 </div>
               </div>
-            ))}
-            <button onClick={() => addCategory()} className="w-full py-2.5 text-sm text-text-secondary hover:bg-bg rounded-xl border border-dashed border-border transition-colors font-medium">+ 카테고리 추가</button>
-          </SectionCard>
-
-          <div className="flex justify-end gap-3">
-            <Button variant="secondary" onClick={() => { setShowForm(false); resetForm(); }}>취소</Button>
-            <Button onClick={handleSave}>{editingFlyer ? '수정 저장' : '전단지 저장'}</Button>
+            </div>
+            <p className="text-[10px] text-text-muted text-center mt-2">
+              {editingFlyer?.short_code ? '발행된 전단지 미리보기' : '입력 내용이 실시간 반영됩니다'}
+            </p>
           </div>
         </div>
       )}
@@ -219,5 +251,85 @@ export default function FlyerPage({ token }: { token: string }) {
       <Toast show={copyToast} message="URL이 복사되었습니다" />
       <ConfirmModal show={deleteModal.show} icon="🗑️" title="전단지 삭제" message={`"${deleteModal.title}"을(를) 삭제하시겠습니까?`} danger confirmLabel="삭제" onConfirm={() => handleDelete(deleteModal.id)} onCancel={() => setDeleteModal({ show: false, id: '', title: '' })} />
     </>
+  );
+}
+
+// 프론트 자체 렌더링 미리보기 (미발행 전단지용)
+function FlyerPreviewRenderer({ title, storeName, periodStart, periodEnd, categories, template }: {
+  title: string; storeName: string; periodStart: string; periodEnd: string;
+  categories: FlyerCategory[]; template: string;
+}) {
+  const fmtDate = (d: string) => { if (!d) return ''; const dt = new Date(d); return `${dt.getMonth() + 1}/${dt.getDate()}`; };
+  const fmtPrice = (n: number) => n ? n.toLocaleString() : '';
+  const cleanCats = categories.map(c => ({ ...c, items: c.items.filter(i => i.name.trim()) })).filter(c => c.items.length > 0);
+  const hasContent = title.trim() || cleanCats.length > 0;
+
+  const colors = template === 'grid'
+    ? { bg: '#FFF5F5', header: 'linear-gradient(135deg, #DC2626, #F97316)', card: '#fff', price: '#DC2626', badge: '#DC2626' }
+    : template === 'list'
+    ? { bg: '#1A1A1A', header: 'linear-gradient(135deg, #1A1A1A, #92400E)', card: '#262626', price: '#F59E0B', badge: '#F59E0B' }
+    : { bg: '#111', header: 'linear-gradient(135deg, #EA580C, #DC2626)', card: '#1E1E1E', price: '#FB923C', badge: '#EA580C' };
+  const isLight = template === 'grid';
+
+  if (!hasContent) {
+    return (
+      <div className="flex items-center justify-center h-full" style={{ background: colors.bg }}>
+        <div className="text-center p-4">
+          <p style={{ fontSize: 28 }}>📄</p>
+          <p style={{ fontSize: 10, color: isLight ? '#999' : '#666', marginTop: 8 }}>상품을 입력하면<br />미리보기가 표시됩니다</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ background: colors.bg, minHeight: '100%', fontFamily: 'system-ui, sans-serif' }}>
+      {/* 헤더 */}
+      <div style={{ background: colors.header, padding: '16px 12px', textAlign: 'center' }}>
+        <p style={{ fontSize: 8, color: 'rgba(255,255,255,0.7)', margin: 0, letterSpacing: 1 }}>{storeName || '매장명'}</p>
+        <p style={{ fontSize: 14, color: '#fff', fontWeight: 800, margin: '4px 0' }}>{title || '행사명'}</p>
+        {(periodStart || periodEnd) && (
+          <p style={{ fontSize: 8, color: 'rgba(255,255,255,0.8)', margin: 0 }}>{fmtDate(periodStart)} ~ {fmtDate(periodEnd)}</p>
+        )}
+      </div>
+
+      {/* 상품 */}
+      <div style={{ padding: '8px' }}>
+        {cleanCats.map((cat, ci) => (
+          <div key={ci} style={{ marginBottom: 8 }}>
+            <p style={{ fontSize: 9, fontWeight: 700, color: isLight ? '#333' : '#ddd', margin: '4px 0 4px 4px', textTransform: 'uppercase', letterSpacing: 0.5 }}>{cat.name}</p>
+            {template === 'grid' ? (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
+                {cat.items.map((item, ii) => (
+                  <div key={ii} style={{ background: colors.card, borderRadius: 6, padding: '6px 8px', border: '1px solid rgba(0,0,0,0.06)' }}>
+                    <p style={{ fontSize: 9, fontWeight: 600, color: '#333', margin: 0, lineHeight: 1.3 }}>{item.name}</p>
+                    <div style={{ marginTop: 3, display: 'flex', alignItems: 'baseline', gap: 3 }}>
+                      {item.originalPrice > 0 && <span style={{ fontSize: 7, color: '#999', textDecoration: 'line-through' }}>{fmtPrice(item.originalPrice)}</span>}
+                      <span style={{ fontSize: 11, fontWeight: 800, color: colors.price }}>{fmtPrice(item.salePrice)}</span>
+                    </div>
+                    {item.badge && <span style={{ fontSize: 7, color: '#fff', background: colors.badge, borderRadius: 3, padding: '1px 4px', display: 'inline-block', marginTop: 2 }}>{item.badge}</span>}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                {cat.items.map((item, ii) => (
+                  <div key={ii} style={{ background: colors.card, borderRadius: 6, padding: '6px 8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', border: isLight ? '1px solid rgba(0,0,0,0.06)' : '1px solid rgba(255,255,255,0.08)' }}>
+                    <div>
+                      <p style={{ fontSize: 9, fontWeight: 600, color: isLight ? '#333' : '#eee', margin: 0 }}>{item.name}</p>
+                      {item.badge && <span style={{ fontSize: 7, color: colors.badge, fontWeight: 600 }}>{item.badge}</span>}
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      {item.originalPrice > 0 && <p style={{ fontSize: 7, color: '#999', textDecoration: 'line-through', margin: 0 }}>{fmtPrice(item.originalPrice)}</p>}
+                      <p style={{ fontSize: 11, fontWeight: 800, color: colors.price, margin: 0 }}>{fmtPrice(item.salePrice)}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
