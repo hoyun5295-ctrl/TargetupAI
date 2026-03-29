@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { API_BASE } from '../App';
+import { API_BASE, apiFetch } from '../App';
 import AlertModal from '../components/AlertModal';
 import { SectionCard, Button, Input, Badge } from '../components/ui';
 
@@ -21,15 +21,15 @@ export default function SettingsPage({ token }: { token: string }) {
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [alert, setAlert] = useState<{ show: boolean; title: string; message: string; type: 'success' | 'error' | 'info' }>({ show: false, title: '', message: '', type: 'info' });
-  const headers = { Authorization: `Bearer ${token}` };
+  // apiFetch가 자동으로 Authorization 헤더 추가
 
   useEffect(() => {
     (async () => {
       try {
         const [settRes, cbRes, reqRes] = await Promise.all([
-          fetch(`${API_BASE}/api/companies/settings`, { headers }),
-          fetch(`${API_BASE}/api/companies/callback-numbers`, { headers }),
-          fetch(`${API_BASE}/api/sender-registration/my`, { headers }).catch(() => null),
+          apiFetch(`${API_BASE}/api/companies/settings`),
+          apiFetch(`${API_BASE}/api/companies/callback-numbers`),
+          apiFetch(`${API_BASE}/api/sender-registration/my`).catch(() => null),
         ]);
         if (settRes.ok) setSettings(await settRes.json());
         if (cbRes.ok) { const d = await cbRes.json(); setCallbackNumbers(d.numbers || d || []); }
@@ -61,8 +61,8 @@ export default function SettingsPage({ token }: { token: string }) {
       formData.append('documentTypes', JSON.stringify(regFiles.map(() => 'telecom_cert')));
       regFiles.forEach(f => formData.append('documents', f));
 
-      const res = await fetch(`${API_BASE}/api/sender-registration`, {
-        method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: formData,
+      const res = await apiFetch(`${API_BASE}/api/sender-registration`, {
+        method: 'POST', body: formData,
       });
       if (res.ok) {
         setAlert({ show: true, title: '등록 신청 완료', message: '발신번호 등록 신청이 접수되었습니다.\n관리자 승인 후 사용 가능합니다.', type: 'success' });

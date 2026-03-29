@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { API_BASE } from '../App';
+import { API_BASE, apiFetch } from '../App';
 import AlertModal from '../components/AlertModal';
 import { SectionCard, StatCard, DataTable, Badge, Button, Input, Select } from '../components/ui';
 
@@ -25,7 +25,7 @@ export default function BalancePage({ token }: { token: string }) {
   const [depositing, setDepositing] = useState(false);
 
   const [alert, setAlert] = useState<{ show: boolean; title: string; message: string; type: 'success' | 'error' | 'info' }>({ show: false, title: '', message: '', type: 'info' });
-  const headers = { Authorization: `Bearer ${token}` };
+  // apiFetch가 자동으로 Authorization 헤더 추가
   const PER_PAGE = 20;
 
   const loadData = async () => {
@@ -37,9 +37,9 @@ export default function BalancePage({ token }: { token: string }) {
       if (endDate) params.set('endDate', endDate);
 
       const [bRes, tRes, sRes] = await Promise.all([
-        fetch(`${API_BASE}/api/balance`, { headers }),
-        fetch(`${API_BASE}/api/balance/transactions?${params}`, { headers }),
-        fetch(`${API_BASE}/api/balance/summary?months=6`, { headers }),
+        apiFetch(`${API_BASE}/api/balance`),
+        apiFetch(`${API_BASE}/api/balance/transactions?${params}`),
+        apiFetch(`${API_BASE}/api/balance/summary?months=6`),
       ]);
       if (bRes.ok) setBalance(await bRes.json());
       if (tRes.ok) { const d = await tRes.json(); setTransactions(d.transactions || d || []); setTotal(d.total || 0); }
@@ -61,9 +61,9 @@ export default function BalancePage({ token }: { token: string }) {
 
     setDepositing(true);
     try {
-      const res = await fetch(`${API_BASE}/api/balance/deposit-request`, {
+      const res = await apiFetch(`${API_BASE}/api/balance/deposit-request`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ amount, depositorName: depositorName.trim() }),
       });
       if (res.ok) {

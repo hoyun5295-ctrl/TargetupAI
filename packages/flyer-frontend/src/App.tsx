@@ -13,6 +13,21 @@ export const API_BASE = import.meta.env.VITE_API_URL || '';
 export function getToken(): string { return localStorage.getItem('flyer_token') || ''; }
 export type Page = 'flyer' | 'send' | 'customers' | 'results' | 'balance' | 'unsubscribes' | 'settings';
 
+/** 공통 fetch — 401 시 자동 로그아웃 */
+export async function apiFetch(url: string, options?: RequestInit): Promise<Response> {
+  const token = getToken();
+  const headers: Record<string, string> = { ...(options?.headers as Record<string, string> || {}) };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  const res = await fetch(url, { ...options, headers });
+  if (res.status === 401) {
+    localStorage.removeItem('flyer_token');
+    localStorage.removeItem('flyer_user');
+    window.dispatchEvent(new Event('flyer-auth-expired'));
+    throw new Error('세션이 만료되었습니다. 다시 로그인해주세요.');
+  }
+  return res;
+}
+
 const MAIN_MENUS: { key: Page; label: string; icon: string }[] = [
   { key: 'flyer', label: '전단제작', icon: '📄' },
   { key: 'send', label: '발송', icon: '📨' },
@@ -56,10 +71,7 @@ function App() {
         <div className="max-w-6xl mx-auto px-6 flex items-center justify-between h-14">
           {/* 좌측: 로고 + 메인 메뉴 */}
           <div className="flex items-center gap-1">
-            <button onClick={() => setCurrentPage('flyer')} className="flex items-center gap-2 mr-6 group">
-              <div className="w-7 h-7 bg-gradient-to-br from-brand-500 to-brand-700 rounded-lg flex items-center justify-center">
-                <span className="text-white text-xs font-black">F</span>
-              </div>
+            <button onClick={() => setCurrentPage('flyer')} className="flex items-center mr-6 group">
               <span className="text-sm font-bold text-text group-hover:text-brand-600 transition-colors">전단AI</span>
             </button>
 

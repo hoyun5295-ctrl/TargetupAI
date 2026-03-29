@@ -1,9 +1,9 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { API_BASE } from '../App';
+import { API_BASE, apiFetch } from '../App';
 import AlertModal from '../components/AlertModal';
 import ScheduleModal from '../components/ScheduleModal';
 import DragDropUpload from '../components/DragDropUpload';
-import { SectionCard, Button, Select, TabBar, Textarea, Badge } from '../components/ui';
+import { SectionCard, Button, Select, TabBar, Textarea, Badge, Input, ConfirmModal } from '../components/ui';
 
 interface Flyer { id: string; title: string; short_code: string | null; status: string; store_name: string; }
 interface Recipient { phone: string; name?: string; extra1?: string; extra2?: string; extra3?: string; }
@@ -48,16 +48,20 @@ export default function SendPage({ token }: { token: string }) {
   // 주소록
   const [addressGroups, setAddressGroups] = useState<AddressGroup[]>([]);
   const [addressLoading, setAddressLoading] = useState(false);
+  const [showNewAddress, setShowNewAddress] = useState(false);
+  const [newGroupName, setNewGroupName] = useState('');
+  const [newGroupPhones, setNewGroupPhones] = useState('');
+  const [savingAddress, setSavingAddress] = useState(false);
 
-  const headers = { Authorization: `Bearer ${token}` };
+  // apiFetch가 자동으로 Authorization 헤더 추가
   const maxBytes = msgType === 'SMS' ? 90 : 2000;
 
   // 데이터 로드
   useEffect(() => {
     (async () => {
       const [fRes, sRes] = await Promise.all([
-        fetch(`${API_BASE}/api/flyer/flyers`, { headers }).catch(() => null),
-        fetch(`${API_BASE}/api/companies/callback-numbers`, { headers }).catch(() => null),
+        apiFetch(`${API_BASE}/api/flyer/flyers`).catch(() => null),
+        apiFetch(`${API_BASE}/api/companies/callback-numbers`).catch(() => null),
       ]);
       if (fRes?.ok) { const d = await fRes.json(); setFlyers(d.filter((f: Flyer) => f.status === 'published' && f.short_code)); }
       if (sRes?.ok) { const d = await sRes.json(); const nums = (d.numbers || d || []).map((cb: any) => cb.phone || cb.phone_number || cb); setSenderNumbers(nums); if (nums.length > 0) setCallback(nums[0]); }
@@ -68,7 +72,7 @@ export default function SendPage({ token }: { token: string }) {
   useEffect(() => {
     if (recipientMode === 'address' && addressGroups.length === 0) {
       setAddressLoading(true);
-      fetch(`${API_BASE}/api/address-books/groups`, { headers })
+      apiFetch(`${API_BASE}/api/address-books/groups`)
         .then(r => r.ok ? r.json() : [])
         .then(d => setAddressGroups(d.groups || d || []))
         .catch(() => {})
@@ -109,8 +113,8 @@ export default function SendPage({ token }: { token: string }) {
     const formData = new FormData();
     formData.append('file', file);
     try {
-      const res = await fetch(`${API_BASE}/api/upload/parse?includeData=true`, {
-        method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: formData,
+      const res = await apiFetch(`${API_BASE}/api/upload/parse?includeData=true`, {
+        method: 'POST', body: formData,
       });
       const data = await res.json();
       if (data.success) {
@@ -148,7 +152,7 @@ export default function SendPage({ token }: { token: string }) {
   // 주소록 선택
   const handleAddressSelect = async (groupName: string) => {
     try {
-      const res = await fetch(`${API_BASE}/api/address-books/${encodeURIComponent(groupName)}`, { headers });
+      const res = await apiFetch(`${API_BASE}/api/address-books/${encodeURIComponent(groupName)}`);
       if (res.ok) {
         const data = await res.json();
         const contacts = (data.contacts || data || []).map((c: any) => ({
@@ -165,6 +169,46 @@ export default function SendPage({ token }: { token: string }) {
     } catch {
       setAlert({ show: true, title: '오류', message: '주소록 불러오기에 실패했습니다.', type: 'error' });
     }
+  };
+
+  // 주소록 새로 저장
+  const handleSaveAddressGroup = async () => {
+    if (!newGroupName.trim()) { setAlert({ show: true, title: '입력 오류', message: '그룹명을 입력해주세요.', type: 'error' }); return; }
+    const lines = newGroupPhones.split(/[\n,;]+/).map(p => p.trim().replace(/-/g, '')).filter(p => p.length >= 10);
+    if (lines.length === 0) { setAlert({ show: true, title: '입력 오류', message: '유효한 전화번호를 1개 이상 입력해주세요.', type: 'error' }); return; }
+    setSavingAddress(true);
+    try {
+      const contacts = lines.map(p => ({ phone: p, name: '', extra1: '', extra2: '', extra3: '' }));
+      const res = await apiFetch(`${API_BASE}/api/address-books`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ groupName: newGroupName.trim(), contacts }),
+      });
+      if (res.ok) {
+        const d = await res.json();
+        setAlert({ show: true, title: '저장 완료', message: `"${newGroupName.trim()}" 주소록에 ${d.insertCount || lines.length}건 저장되었습니다.`, type: 'success' });
+        setShowNewAddress(false); setNewGroupName(''); setNewGroupPhones('');
+        // 주소록 리로드
+        const gRes = await apiFetch(`${API_BASE}/api/address-books/groups`);
+        if (gRes.ok) { const g = await gRes.json(); setAddressGroups(g.groups || g || []); }
+      } else {
+        const e = await res.json();
+        setAlert({ show: true, title: '저장 실패', message: e.error || '주소록 저장에 실패했습니다.', type: 'error' });
+      }
+    } catch { setAlert({ show: true, title: '오류', message: '네트워크 오류', type: 'error' }); }
+    finally { setSavingAddress(false); }
+  };
+
+  // 주소록 삭제
+  const [deleteGroup, setDeleteGroup] = useState<string>('');
+  const handleDeleteGroup = async (groupName: string) => {
+    try {
+      const res = await apiFetch(`${API_BASE}/api/address-books/${encodeURIComponent(groupName)}`, { method: 'DELETE' });
+      if (res.ok) {
+        setAlert({ show: true, title: '삭제 완료', message: `"${groupName}" 주소록이 삭제되었습니다.`, type: 'success' });
+        setDeleteGroup('');
+        setAddressGroups(prev => prev.filter(g => g.group_name !== groupName));
+      }
+    } catch { setAlert({ show: true, title: '오류', message: '삭제 실패', type: 'error' }); }
   };
 
   // 발송 유효성 검증
@@ -194,8 +238,8 @@ export default function SendPage({ token }: { token: string }) {
       if (isAd) { sendMsg = `(광고) ${message}\n${msgType === 'SMS' ? `무료거부${optOutNumber.replace(/-/g, '')}` : `무료수신거부 ${optOutNumber}`}`; }
       const body: any = { recipients: phoneList, message: sendMsg, subject: (msgType === 'LMS' || msgType === 'MMS') ? subject : undefined, callback, messageType: msgType };
       if (scheduledAt) { body.scheduled = true; body.scheduledAt = scheduledAt; }
-      const res = await fetch(`${API_BASE}/api/campaigns/direct-send`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      const res = await apiFetch(`${API_BASE}/api/campaigns/direct-send`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
       if (res.ok) {
@@ -391,36 +435,59 @@ export default function SendPage({ token }: { token: string }) {
               {/* 주소록 */}
               {recipientMode === 'address' && (
                 <>
-                  {addressLoading ? (
-                    <p className="text-sm text-text-muted text-center py-6">주소록 불러오는 중...</p>
-                  ) : addressGroups.length === 0 ? (
-                    <div className="text-center py-6">
-                      <div className="w-12 h-12 bg-bg rounded-xl flex items-center justify-center mx-auto mb-3 text-2xl">📒</div>
-                      <p className="text-sm text-text-muted">저장된 주소록이 없습니다</p>
+                  {/* 새 주소록 만들기 */}
+                  {showNewAddress ? (
+                    <div className="space-y-3">
+                      <Input label="그룹명 *" value={newGroupName} onChange={e => setNewGroupName(e.target.value)} placeholder="예: 3월 행사 고객" />
+                      <Textarea label="전화번호 (줄바꿈/쉼표로 구분)" value={newGroupPhones} onChange={e => setNewGroupPhones(e.target.value)}
+                        placeholder={"01012345678\n01098765432"} rows={6} className="font-mono text-xs" />
+                      <div className="flex gap-2">
+                        <Button size="sm" disabled={savingAddress} onClick={handleSaveAddressGroup}>{savingAddress ? '저장 중...' : '주소록 저장'}</Button>
+                        <Button size="sm" variant="ghost" onClick={() => { setShowNewAddress(false); setNewGroupName(''); setNewGroupPhones(''); }}>취소</Button>
+                      </div>
                     </div>
                   ) : (
-                    <div className="space-y-2">
-                      {addressGroups.map(g => (
-                        <button key={g.group_name} onClick={() => handleAddressSelect(g.group_name)}
-                          className="w-full flex items-center justify-between px-4 py-3 bg-bg hover:bg-primary-50/50 rounded-lg transition-colors text-left group">
-                          <div>
-                            <p className="text-sm font-medium text-text group-hover:text-primary-600">{g.group_name}</p>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <Badge variant="neutral">{g.count}건</Badge>
-                            <span className="text-xs text-text-muted group-hover:text-primary-600">선택</span>
-                          </div>
-                        </button>
-                      ))}
-                      {recipients.length > 0 && (
-                        <div className="mt-3 pt-3 border-t border-border">
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm font-semibold text-success-600">{recipients.length}건 선택됨</span>
-                            <Button size="sm" variant="ghost" onClick={() => setRecipients([])}>초기화</Button>
-                          </div>
+                    <>
+                      <div className="flex justify-end mb-3">
+                        <Button size="sm" variant="secondary" onClick={() => setShowNewAddress(true)}>+ 주소록 만들기</Button>
+                      </div>
+
+                      {addressLoading ? (
+                        <p className="text-sm text-text-muted text-center py-6">주소록 불러오는 중...</p>
+                      ) : addressGroups.length === 0 ? (
+                        <div className="text-center py-6">
+                          <div className="w-12 h-12 bg-bg rounded-xl flex items-center justify-center mx-auto mb-3 text-2xl">📒</div>
+                          <p className="text-sm text-text-muted">저장된 주소록이 없습니다</p>
+                          <p className="text-xs text-text-muted mt-1">위 "주소록 만들기" 버튼으로 등록하세요</p>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          {addressGroups.map(g => (
+                            <div key={g.group_name} className="flex items-center gap-2">
+                              <button onClick={() => handleAddressSelect(g.group_name)}
+                                className="flex-1 flex items-center justify-between px-4 py-3 bg-bg hover:bg-primary-50/50 rounded-lg transition-colors text-left group">
+                                <div>
+                                  <p className="text-sm font-medium text-text group-hover:text-primary-600">{g.group_name}</p>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <Badge variant="neutral">{g.count}건</Badge>
+                                  <span className="text-xs text-text-muted group-hover:text-primary-600">선택</span>
+                                </div>
+                              </button>
+                              <button onClick={() => setDeleteGroup(g.group_name)} className="text-xs text-error-500/50 hover:text-error-500 px-1 flex-shrink-0">삭제</button>
+                            </div>
+                          ))}
+                          {recipients.length > 0 && (
+                            <div className="mt-3 pt-3 border-t border-border">
+                              <div className="flex items-center justify-between">
+                                <span className="text-sm font-semibold text-success-600">{recipients.length}건 선택됨</span>
+                                <Button size="sm" variant="ghost" onClick={() => setRecipients([])}>초기화</Button>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       )}
-                    </div>
+                    </>
                   )}
                 </>
               )}
@@ -498,6 +565,7 @@ export default function SendPage({ token }: { token: string }) {
       )}
 
       <ScheduleModal show={showSchedule} onConfirm={handleScheduleConfirm} onCancel={() => setShowSchedule(false)} />
+      <ConfirmModal show={!!deleteGroup} icon="🗑️" title="주소록 삭제" message={`"${deleteGroup}" 주소록을 삭제하시겠습니까?`} danger confirmLabel="삭제" onConfirm={() => handleDeleteGroup(deleteGroup)} onCancel={() => setDeleteGroup('')} />
       <AlertModal alert={alert} onClose={() => setAlert({ ...alert, show: false })} />
     </>
   );

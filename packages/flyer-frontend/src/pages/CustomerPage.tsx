@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { API_BASE } from '../App';
+import { API_BASE, apiFetch } from '../App';
 import AlertModal from '../components/AlertModal';
 import DragDropUpload from '../components/DragDropUpload';
 import { SectionCard, Button, Input, DataTable, Badge, EmptyState, ConfirmModal, StatCard } from '../components/ui';
@@ -29,8 +29,7 @@ export default function CustomerPage({ token }: { token: string }) {
   const [deleteModal, setDeleteModal] = useState<{ show: boolean; id: string; phone: string }>({ show: false, id: '', phone: '' });
   const [alert, setAlert] = useState<{ show: boolean; title: string; message: string; type: 'success' | 'error' | 'info' }>({ show: false, title: '', message: '', type: 'info' });
 
-  const headers = { Authorization: `Bearer ${token}` };
-  const jsonHeaders = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
+  const jsonHeaders = { 'Content-Type': 'application/json' };
   const PER_PAGE = 20;
 
   const loadCustomers = useCallback(async () => {
@@ -38,7 +37,7 @@ export default function CustomerPage({ token }: { token: string }) {
     try {
       const params = new URLSearchParams({ page: String(page), limit: String(PER_PAGE) });
       if (search.trim()) params.set('search', search.trim());
-      const res = await fetch(`${API_BASE}/api/customers?${params}`, { headers });
+      const res = await apiFetch(`${API_BASE}/api/customers?${params}`);
       if (res.ok) {
         const d = await res.json();
         setCustomers(d.customers || d.data || []);
@@ -63,8 +62,8 @@ export default function CustomerPage({ token }: { token: string }) {
     const formData = new FormData();
     formData.append('file', file);
     try {
-      const res = await fetch(`${API_BASE}/api/upload/parse?includeData=true`, {
-        method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: formData,
+      const res = await apiFetch(`${API_BASE}/api/upload/parse?includeData=true`, {
+        method: 'POST', body: formData,
       });
       const data = await res.json();
       if (data.success) {
@@ -89,7 +88,7 @@ export default function CustomerPage({ token }: { token: string }) {
     }
     setSaving(true);
     try {
-      const res = await fetch(`${API_BASE}/api/upload/save`, {
+      const res = await apiFetch(`${API_BASE}/api/upload/save`, {
         method: 'POST', headers: jsonHeaders,
         body: JSON.stringify({ fileId, mapping: columnMapping }),
       });
@@ -109,7 +108,7 @@ export default function CustomerPage({ token }: { token: string }) {
   // 고객 삭제
   const handleDelete = async (id: string) => {
     try {
-      const res = await fetch(`${API_BASE}/api/customers/${id}`, { method: 'DELETE', headers });
+      const res = await apiFetch(`${API_BASE}/api/customers/${id}`, { method: 'DELETE' });
       if (res.ok) {
         setAlert({ show: true, title: '삭제 완료', message: '고객이 삭제되었습니다.', type: 'success' });
         setDeleteModal({ show: false, id: '', phone: '' });

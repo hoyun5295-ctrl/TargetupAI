@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { API_BASE } from '../App';
+import { API_BASE, apiFetch } from '../App';
 import { TabBar, DataTable, Badge, EmptyState, StatCard, Button } from '../components/ui';
 
 interface Campaign { id: string; campaign_name: string; message_type: string; total_sent: number; total_success: number; total_failed: number; status: string; created_at: string; scheduled_at?: string; }
@@ -22,15 +22,15 @@ export default function ResultsPage({ token }: { token: string }) {
   const [clickDetail, setClickDetail] = useState<{ flyer: FlyerStat; daily: DailyClick[] } | null>(null);
   const [clickLoading, setClickLoading] = useState(false);
 
-  const headers = { Authorization: `Bearer ${token}` };
+  // apiFetch가 자동으로 Authorization 헤더 추가
 
   useEffect(() => {
     (async () => {
       setLoading(true);
       try {
         const [cRes, fRes] = await Promise.all([
-          fetch(`${API_BASE}/api/v1/results?limit=50`, { headers }),
-          fetch(`${API_BASE}/api/flyer/flyers`, { headers }),
+          apiFetch(`${API_BASE}/api/v1/results?limit=50`),
+          apiFetch(`${API_BASE}/api/flyer/flyers`),
         ]);
         if (cRes.ok) { const d = await cRes.json(); setCampaigns(d.campaigns || d.results || []); }
         if (fRes.ok) { const d = await fRes.json(); setFlyerStats(d.filter((f: FlyerStat) => f.status === 'published')); }
@@ -52,7 +52,7 @@ export default function ResultsPage({ token }: { token: string }) {
     setDetailLoading(true);
     setDetailRecipients([]);
     try {
-      const res = await fetch(`${API_BASE}/api/v1/results/${c.id}/recipients?limit=100`, { headers });
+      const res = await apiFetch(`${API_BASE}/api/v1/results/${c.id}/recipients?limit=100`);
       if (res.ok) {
         const d = await res.json();
         setDetailRecipients(d.recipients || d.data || []);
@@ -66,7 +66,7 @@ export default function ResultsPage({ token }: { token: string }) {
     setClickLoading(true);
     setClickDetail(null);
     try {
-      const res = await fetch(`${API_BASE}/api/flyer/flyers/${f.id}/stats`, { headers });
+      const res = await apiFetch(`${API_BASE}/api/flyer/flyers/${f.id}/stats`);
       if (res.ok) {
         const d = await res.json();
         setClickDetail({ flyer: f, daily: d.daily_clicks || [] });

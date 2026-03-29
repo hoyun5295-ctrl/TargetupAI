@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { API_BASE } from '../App';
+import { API_BASE, apiFetch } from '../App';
 import AlertModal from '../components/AlertModal';
 import { SectionCard, Button, Input, Badge, EmptyState, ConfirmModal, Toast } from '../components/ui';
 
@@ -31,11 +31,10 @@ export default function FlyerPage({ token }: { token: string }) {
   const [copyToast, setCopyToast] = useState(false);
   const [deleteModal, setDeleteModal] = useState<{ show: boolean; id: string; title: string }>({ show: false, id: '', title: '' });
 
-  const headers = { Authorization: `Bearer ${token}` };
-  const jsonHeaders = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
+  const jsonHeaders = { 'Content-Type': 'application/json' };
 
   const loadFlyers = useCallback(async () => {
-    try { const res = await fetch(`${API_BASE}/api/flyer/flyers`, { headers }); if (res.ok) setFlyers(await res.json()); }
+    try { const res = await apiFetch(`${API_BASE}/api/flyer/flyers`); if (res.ok) setFlyers(await res.json()); }
     catch (err) { console.error(err); } finally { setLoading(false); }
   }, [token]);
 
@@ -50,19 +49,19 @@ export default function FlyerPage({ token }: { token: string }) {
     try {
       const body = { title: title.trim(), store_name: storeName.trim(), period_start: periodStart || null, period_end: periodEnd || null, categories: clean, template };
       const url = editingFlyer ? `${API_BASE}/api/flyer/flyers/${editingFlyer.id}` : `${API_BASE}/api/flyer/flyers`;
-      const res = await fetch(url, { method: editingFlyer ? 'PUT' : 'POST', headers: jsonHeaders, body: JSON.stringify(body) });
+      const res = await apiFetch(url, { method: editingFlyer ? 'PUT' : 'POST', headers: jsonHeaders, body: JSON.stringify(body) });
       if (res.ok) { setAlert({ show: true, title: editingFlyer ? '수정 완료' : '생성 완료', message: editingFlyer ? '전단지가 수정되었습니다.' : '전단지가 생성되었습니다.', type: 'success' }); setShowForm(false); resetForm(); loadFlyers(); }
       else { const e = await res.json(); setAlert({ show: true, title: '오류', message: e.error || '저장 실패', type: 'error' }); }
     } catch { setAlert({ show: true, title: '오류', message: '네트워크 오류', type: 'error' }); }
   };
 
   const handlePublish = async (id: string) => {
-    try { const res = await fetch(`${API_BASE}/api/flyer/flyers/${id}/publish`, { method: 'POST', headers }); if (res.ok) { const d = await res.json(); setAlert({ show: true, title: '발행 완료', message: `단축URL: ${d.short_url}`, type: 'success' }); loadFlyers(); } }
+    try { const res = await apiFetch(`${API_BASE}/api/flyer/flyers/${id}/publish`, { method: 'POST' }); if (res.ok) { const d = await res.json(); setAlert({ show: true, title: '발행 완료', message: `단축URL: ${d.short_url}`, type: 'success' }); loadFlyers(); } }
     catch { setAlert({ show: true, title: '오류', message: '발행 실패', type: 'error' }); }
   };
 
   const handleDelete = async (id: string) => {
-    try { const res = await fetch(`${API_BASE}/api/flyer/flyers/${id}`, { method: 'DELETE', headers }); if (res.ok) { setAlert({ show: true, title: '삭제 완료', message: '삭제되었습니다.', type: 'success' }); setDeleteModal({ show: false, id: '', title: '' }); loadFlyers(); } }
+    try { const res = await apiFetch(`${API_BASE}/api/flyer/flyers/${id}`, { method: 'DELETE' }); if (res.ok) { setAlert({ show: true, title: '삭제 완료', message: '삭제되었습니다.', type: 'success' }); setDeleteModal({ show: false, id: '', title: '' }); loadFlyers(); } }
     catch { setAlert({ show: true, title: '오류', message: '삭제 실패', type: 'error' }); }
   };
 
