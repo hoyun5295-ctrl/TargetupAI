@@ -8,9 +8,14 @@
 
 import { Request, Response, Router } from 'express';
 import crypto from 'crypto';
+import path from 'path';
+import fs from 'fs';
 import { query } from '../../config/database';
 import { authenticate } from '../../middlewares/auth';
 import { getStoreScope } from '../../utils/store-scope';
+import { generateProductImage, generateFlyerImages, getGeneratedImageUrl } from '../../utils/product-images';
+
+const PRODUCT_IMAGE_DIR = process.env.PRODUCT_IMAGE_PATH || path.resolve('./uploads/product-images');
 
 const router = Router();
 
@@ -106,6 +111,105 @@ router.get('/', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[전단AI] 전단지 목록 조회 실패:', err.message);
     res.status(500).json({ error: '전단지 목록 조회에 실패했습니다.' });
+  }
+});
+
+// ============================================================
+// POST /generate-images — 전단지 상품 이미지 일괄 생성 (DALL-E 3)
+// ⚠️ /:id 라우트보다 앞에 위치해야 Express가 올바르게 매칭
+// ============================================================
+router.post('/generate-images', async (req: Request, res: Response) => {
+  try {
+    const companyId = requireCompanyId(req, res);
+    if (!companyId) return;
+
+    const { categories } = req.body;
+    if (!categories || !Array.isArray(categories)) {
+      return res.status(400).json({ error: '카테고리 정보가 필요합니다.' });
+    }
+
+    // 즉시 응답 (백그라운드 생성)
+    res.json({ status: 'generating', message: '이미지 생성이 시작되었습니다. 잠시 후 자동으로 반영됩니다.' });
+
+    // 백그라운드에서 이미지 생성
+    generateFlyerImages(categories).then(results => {
+      const count = Object.keys(results).length;
+      console.log(`[전단AI] 이미지 일괄 생성 완료: ${count}개 상품`);
+    }).catch(err => {
+      console.error('[전단AI] 이미지 일괄 생성 실패:', err.message);
+    });
+  } catch (err: any) {
+    console.error('[전단AI] 이미지 생성 요청 실패:', err.message);
+    res.status(500).json({ error: '이미지 생성에 실패했습니다.' });
+  }
+});
+
+// ============================================================
+// POST /generate-image — 단일 상품 이미지 생성 (DALL-E 3)
+// ============================================================
+router.post('/generate-image', async (req: Request, res: Response) => {
+  try {
+    const companyId = requireCompanyId(req, res);
+    if (!companyId) return;
+
+    const { productName } = req.body;
+    if (!productName) {
+      return res.status(400).json({ error: '상품명이 필요합니다.' });
+    }
+
+    // 이미 생성된 이미지가 있으면 즉시 반환
+    const existing = getGeneratedImageUrl(productName);
+    if (existing) {
+      return res.json({ imageUrl: existing, cached: true });
+    }
+
+    // DALL-E 생성
+    const filePath = await generateProductImage(productName);
+    if (filePath) {
+      const imageUrl = `/api/flyer/flyers/product-images/${encodeURIComponent(productName)}.png`;
+      return res.json({ imageUrl, cached: false });
+    }
+
+    res.json({ imageUrl: null, error: '이미지 생성에 실패했습니다.' });
+  } catch (err: any) {
+    console.error('[전단AI] 단일 이미지 생성 실패:', err.message);
+    res.status(500).json({ error: '이미지 생성에 실패했습니다.' });
+  }
+});
+
+// ============================================================
+// GET /product-images/:filename — 생성된 이미지 서빙 (인증 불필요)
+// ============================================================
+router.get('/product-images/:filename', (req: Request, res: Response) => {
+  try {
+    const { filename } = req.params;
+    const filePath = path.join(PRODUCT_IMAGE_DIR, filename);
+
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: '이미지를 찾을 수 없습니다.' });
+    }
+
+    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    fs.createReadStream(filePath).pipe(res);
+  } catch (err: any) {
+    res.status(500).json({ error: '이미지 로드 실패' });
+  }
+});
+
+// ============================================================
+// GET /product-image-status — 상품별 이미지 생성 상태 조회
+// ============================================================
+router.get('/product-image-status', async (req: Request, res: Response) => {
+  try {
+    const names = (req.query.names as string || '').split(',').filter(Boolean);
+    const status: Record<string, string | null> = {};
+    for (const name of names) {
+      status[name] = getGeneratedImageUrl(name);
+    }
+    res.json(status);
+  } catch (err: any) {
+    res.status(500).json({ error: '상태 조회 실패' });
   }
 });
 

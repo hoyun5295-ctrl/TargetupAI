@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { API_BASE, apiFetch } from '../App';
 import AlertModal from '../components/AlertModal';
 import { SectionCard, Button, Input, Badge, EmptyState, ConfirmModal, Toast } from '../components/ui';
@@ -51,7 +51,14 @@ export default function FlyerPage({ token }: { token: string }) {
       const body = { title: title.trim(), store_name: storeName.trim(), period_start: periodStart || null, period_end: periodEnd || null, categories: clean, template };
       const url = editingFlyer ? `${API_BASE}/api/flyer/flyers/${editingFlyer.id}` : `${API_BASE}/api/flyer/flyers`;
       const res = await apiFetch(url, { method: editingFlyer ? 'PUT' : 'POST', headers: jsonHeaders, body: JSON.stringify(body) });
-      if (res.ok) { setAlert({ show: true, title: editingFlyer ? '수정 완료' : '생성 완료', message: editingFlyer ? '전단지가 수정되었습니다.' : '전단지가 생성되었습니다.', type: 'success' }); setShowForm(false); resetForm(); loadFlyers(); }
+      if (res.ok) {
+        setAlert({ show: true, title: editingFlyer ? '수정 완료' : '생성 완료', message: editingFlyer ? '전단지가 수정되었습니다.' : '전단지가 생성되었습니다. AI 상품 이미지를 생성 중입니다...', type: 'success' });
+        setShowForm(false); resetForm(); loadFlyers();
+        // 백그라운드 이미지 생성 트리거
+        apiFetch(`${API_BASE}/api/flyer/flyers/generate-images`, {
+          method: 'POST', headers: jsonHeaders, body: JSON.stringify({ categories: clean })
+        }).catch(() => {});
+      }
       else { const e = await res.json(); setAlert({ show: true, title: '오류', message: e.error || '저장 실패', type: 'error' }); }
     } catch { setAlert({ show: true, title: '오류', message: '네트워크 오류', type: 'error' }); }
   };
@@ -178,37 +185,17 @@ export default function FlyerPage({ token }: { token: string }) {
               </div>
             </SectionCard>
 
-            <SectionCard title="상품 등록" className="mb-4">
-              <div className="flex flex-wrap gap-1 mb-4">
-                {CATEGORY_PRESETS.filter(p => !categories.some(c => c.name === p)).map(p => (
-                  <button key={p} onClick={() => addCategory(p)} className="px-2.5 py-1 text-xs bg-bg hover:bg-border/50 rounded-md text-text-secondary font-medium transition-colors">+{p}</button>
-                ))}
-              </div>
-              {categories.map((cat, ci) => (
-                <div key={ci} className="mb-4 border border-border rounded-xl p-4 bg-bg/30">
-                  <div className="flex justify-between items-center mb-3">
-                    <input type="text" value={cat.name} onChange={e => updateCategoryName(ci, e.target.value)} className="font-bold text-sm text-text border-b border-transparent hover:border-border-strong focus:border-primary-500 focus:outline-none pb-1 bg-transparent" />
-                    <button onClick={() => removeCategory(ci)} className="text-xs text-error-500 hover:text-error-600 font-medium">삭제</button>
-                  </div>
-                  <div className="space-y-2">
-                    <div className="grid grid-cols-12 gap-2 text-[11px] font-semibold text-text-muted uppercase tracking-wider px-1">
-                      <div className="col-span-4">상품명</div><div className="col-span-2">원가</div><div className="col-span-2">할인가</div><div className="col-span-3">뱃지</div><div className="col-span-1"></div>
-                    </div>
-                    {cat.items.map((item, ii) => (
-                      <div key={ii} className="grid grid-cols-12 gap-2 items-center">
-                        <input type="text" value={item.name} onChange={e => updateItem(ci, ii, 'name', e.target.value)} placeholder="상품명" className="col-span-4 px-2.5 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 bg-surface" />
-                        <input type="number" value={item.originalPrice || ''} onChange={e => updateItem(ci, ii, 'originalPrice', Number(e.target.value))} placeholder="원가" className="col-span-2 px-2.5 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 bg-surface" />
-                        <input type="number" value={item.salePrice || ''} onChange={e => updateItem(ci, ii, 'salePrice', Number(e.target.value))} placeholder="할인가" className="col-span-2 px-2.5 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 bg-surface" />
-                        <input type="text" value={item.badge || ''} onChange={e => updateItem(ci, ii, 'badge', e.target.value)} placeholder="뱃지" className="col-span-3 px-2.5 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 bg-surface" />
-                        <button onClick={() => removeItem(ci, ii)} className="col-span-1 text-error-500/60 hover:text-error-500 text-center transition-colors">✕</button>
-                      </div>
-                    ))}
-                    <button onClick={() => addItem(ci)} className="w-full py-2 text-xs text-primary-600 hover:bg-primary-50 rounded-lg border border-dashed border-primary-500/30 transition-colors font-medium">+ 상품 추가</button>
-                  </div>
-                </div>
-              ))}
-              <button onClick={() => addCategory()} className="w-full py-2.5 text-sm text-text-secondary hover:bg-bg rounded-xl border border-dashed border-border transition-colors font-medium">+ 카테고리 추가</button>
-            </SectionCard>
+            <ProductRegistrationSection
+              categories={categories}
+              setCategories={setCategories}
+              addCategory={addCategory}
+              removeCategory={removeCategory}
+              updateCategoryName={updateCategoryName}
+              addItem={addItem}
+              removeItem={removeItem}
+              updateItem={updateItem}
+              setAlert={setAlert}
+            />
 
             <div className="flex justify-end gap-3">
               <Button variant="secondary" onClick={() => { setShowForm(false); resetForm(); }}>취소</Button>
@@ -269,6 +256,207 @@ export default function FlyerPage({ token }: { token: string }) {
       <Toast show={copyToast} message="URL이 복사되었습니다" />
       <ConfirmModal show={deleteModal.show} icon="🗑️" title="전단지 삭제" message={`"${deleteModal.title}"을(를) 삭제하시겠습니까?`} danger confirmLabel="삭제" onConfirm={() => handleDelete(deleteModal.id)} onCancel={() => setDeleteModal({ show: false, id: '', title: '' })} />
     </>
+  );
+}
+
+// ============================================================
+// 상품 등록 섹션 — 엑셀 업로드 + 카테고리 탭 방식
+// ============================================================
+function ProductRegistrationSection({ categories, setCategories, addCategory, removeCategory, updateCategoryName, addItem, removeItem, updateItem, setAlert }: {
+  categories: FlyerCategory[];
+  setCategories: (c: FlyerCategory[]) => void;
+  addCategory: (name?: string) => void;
+  removeCategory: (idx: number) => void;
+  updateCategoryName: (idx: number, name: string) => void;
+  addItem: (ci: number) => void;
+  removeItem: (ci: number, ii: number) => void;
+  updateItem: (ci: number, ii: number, f: keyof FlyerItem, v: string | number) => void;
+  setAlert: (a: { show: boolean; title: string; message: string; type: 'success' | 'error' | 'info' }) => void;
+}) {
+  const [activeTab, setActiveTab] = useState(0);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // 활성 탭이 범위 밖이면 보정
+  const safeTab = Math.min(activeTab, Math.max(categories.length - 1, 0));
+
+  // 예시 엑셀 다운로드 (CSV — 엑셀에서 바로 열림)
+  const downloadTemplate = () => {
+    const BOM = '\uFEFF';
+    const header = '카테고리,상품명,원가,할인가,뱃지';
+    const examples = [
+      '청과/야채,대저토마토,8980,6980,오늘만',
+      '청과/야채,짭짤이 토마토,9900,7900,인기',
+      '청과/야채,청송사과 20kg,79800,59800,',
+      '축산,한돈 삼겹살 1kg,18900,12900,초특가',
+      '축산,한우 등심 1++ 500g,49800,39800,프리미엄',
+      '수산,노르웨이 연어 500g,19900,14900,',
+      '수산,흰다리 새우 1kg,15900,11900,대용량',
+      '유제품,서울우유 1L,2980,2480,',
+      '냉동,비비고 만두 1kg,8900,6900,1+1',
+      '음료/주류,카스 500ml 12캔,18900,14900,주말특가',
+    ];
+    const csv = BOM + header + '\n' + examples.join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = '전단지_상품_예시.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // 엑셀/CSV 파일 업로드 파싱
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const text = ev.target?.result as string;
+        const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+
+        // 헤더 스킵 (첫 줄이 '카테고리'로 시작하면)
+        const startIdx = lines[0]?.includes('카테고리') ? 1 : 0;
+
+        const parsed: Record<string, FlyerItem[]> = {};
+        for (let i = startIdx; i < lines.length; i++) {
+          const cols = lines[i].split(',').map(c => c.trim());
+          if (cols.length < 3) continue;
+
+          const catName = cols[0] || '기타';
+          const itemName = cols[1] || '';
+          const originalPrice = Number(cols[2]) || 0;
+          const salePrice = Number(cols[3]) || 0;
+          const badge = cols[4] || '';
+
+          if (!itemName) continue;
+
+          if (!parsed[catName]) parsed[catName] = [];
+          parsed[catName].push({ name: itemName, originalPrice, salePrice, badge });
+        }
+
+        const newCategories: FlyerCategory[] = Object.entries(parsed).map(([name, items]) => ({ name, items }));
+
+        if (newCategories.length === 0) {
+          setAlert({ show: true, title: '업로드 오류', message: '유효한 상품 데이터가 없습니다. 예시 파일 형식을 확인해주세요.', type: 'error' });
+          return;
+        }
+
+        // 기존 카테고리에 머지 (같은 이름이면 추가, 새 이름이면 새 탭)
+        const merged = [...categories];
+        for (const newCat of newCategories) {
+          const existIdx = merged.findIndex(c => c.name === newCat.name);
+          if (existIdx >= 0) {
+            merged[existIdx].items = [...merged[existIdx].items, ...newCat.items];
+          } else {
+            merged.push(newCat);
+          }
+        }
+
+        setCategories(merged);
+        const totalItems = newCategories.reduce((sum, c) => sum + c.items.length, 0);
+        setAlert({ show: true, title: '업로드 완료', message: `${newCategories.length}개 카테고리, ${totalItems}개 상품이 등록되었습니다.`, type: 'success' });
+      } catch {
+        setAlert({ show: true, title: '업로드 오류', message: '파일 형식이 올바르지 않습니다.', type: 'error' });
+      }
+    };
+    reader.readAsText(file, 'UTF-8');
+    // 같은 파일 재업로드 가능하도록 초기화
+    e.target.value = '';
+  };
+
+  const totalItems = categories.reduce((sum, c) => sum + c.items.filter(i => i.name.trim()).length, 0);
+
+  return (
+    <SectionCard title={`상품 등록 (${totalItems}개)`} className="mb-4">
+      {/* 엑셀 업로드 / 예시 다운로드 */}
+      <div className="flex items-center gap-2 mb-4">
+        <button onClick={downloadTemplate} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-primary-600 bg-primary-50 hover:bg-primary-100 rounded-lg transition-colors">
+          <span>📋</span> 예시파일 다운로드
+        </button>
+        <button onClick={() => fileInputRef.current?.click()} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-success-600 bg-success-50 hover:bg-success-100 rounded-lg transition-colors">
+          <span>📥</span> 엑셀/CSV 업로드
+        </button>
+        <input ref={fileInputRef} type="file" accept=".csv,.txt" onChange={handleFileUpload} className="hidden" />
+        <span className="text-[10px] text-text-muted ml-1">CSV 형식 (엑셀에서 다른이름으로 저장 → CSV)</span>
+      </div>
+
+      {/* 카테고리 추가 버튼들 */}
+      <div className="flex flex-wrap gap-1 mb-4">
+        {CATEGORY_PRESETS.filter(p => !categories.some(c => c.name === p)).map(p => (
+          <button key={p} onClick={() => { addCategory(p); setActiveTab(categories.length); }} className="px-2.5 py-1 text-xs bg-bg hover:bg-border/50 rounded-md text-text-secondary font-medium transition-colors">+{p}</button>
+        ))}
+      </div>
+
+      {/* 카테고리 탭 */}
+      {categories.length > 0 && (
+        <>
+          <div className="flex border-b border-border mb-3 overflow-x-auto">
+            {categories.map((cat, ci) => {
+              const itemCount = cat.items.filter(i => i.name.trim()).length;
+              return (
+                <button key={ci} onClick={() => setActiveTab(ci)}
+                  className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${
+                    safeTab === ci
+                      ? 'border-primary-500 text-primary-600'
+                      : 'border-transparent text-text-muted hover:text-text hover:border-border-strong'
+                  }`}>
+                  {cat.name}
+                  {itemCount > 0 && (
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${
+                      safeTab === ci ? 'bg-primary-100 text-primary-700' : 'bg-bg text-text-muted'
+                    }`}>{itemCount}</span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* 활성 카테고리 상품 목록 */}
+          {categories[safeTab] && (
+            <div className="border border-border rounded-xl p-4 bg-bg/30">
+              <div className="flex justify-between items-center mb-3">
+                <input type="text" value={categories[safeTab].name} onChange={e => updateCategoryName(safeTab, e.target.value)}
+                  className="font-bold text-sm text-text border-b border-transparent hover:border-border-strong focus:border-primary-500 focus:outline-none pb-1 bg-transparent" />
+                <button onClick={() => { removeCategory(safeTab); setActiveTab(Math.max(0, safeTab - 1)); }}
+                  className="text-xs text-error-500 hover:text-error-600 font-medium">카테고리 삭제</button>
+              </div>
+
+              <div className="space-y-2">
+                <div className="grid grid-cols-12 gap-2 text-[11px] font-semibold text-text-muted uppercase tracking-wider px-1">
+                  <div className="col-span-4">상품명</div><div className="col-span-2">원가</div><div className="col-span-2">할인가</div><div className="col-span-3">뱃지</div><div className="col-span-1"></div>
+                </div>
+                {categories[safeTab].items.map((item, ii) => (
+                  <div key={ii} className="grid grid-cols-12 gap-2 items-center">
+                    <input type="text" value={item.name} onChange={e => updateItem(safeTab, ii, 'name', e.target.value)} placeholder="상품명"
+                      className="col-span-4 px-2.5 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 bg-surface" />
+                    <input type="number" value={item.originalPrice || ''} onChange={e => updateItem(safeTab, ii, 'originalPrice', Number(e.target.value))} placeholder="원가"
+                      className="col-span-2 px-2.5 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 bg-surface" />
+                    <input type="number" value={item.salePrice || ''} onChange={e => updateItem(safeTab, ii, 'salePrice', Number(e.target.value))} placeholder="할인가"
+                      className="col-span-2 px-2.5 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 bg-surface" />
+                    <input type="text" value={item.badge || ''} onChange={e => updateItem(safeTab, ii, 'badge', e.target.value)} placeholder="뱃지"
+                      className="col-span-3 px-2.5 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 bg-surface" />
+                    <button onClick={() => removeItem(safeTab, ii)} className="col-span-1 text-error-500/60 hover:text-error-500 text-center transition-colors">✕</button>
+                  </div>
+                ))}
+                <button onClick={() => addItem(safeTab)} className="w-full py-2 text-xs text-primary-600 hover:bg-primary-50 rounded-lg border border-dashed border-primary-500/30 transition-colors font-medium">+ 상품 추가</button>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* 카테고리 0개일 때 */}
+      {categories.length === 0 && (
+        <div className="text-center py-8 text-text-muted">
+          <p className="text-2xl mb-2">📦</p>
+          <p className="text-sm">위 카테고리 버튼을 클릭하거나<br/>예시파일을 업로드하여 상품을 등록하세요</p>
+        </div>
+      )}
+
+      <button onClick={() => addCategory()} className="w-full mt-3 py-2.5 text-sm text-text-secondary hover:bg-bg rounded-xl border border-dashed border-border transition-colors font-medium">+ 카테고리 추가</button>
+    </SectionCard>
   );
 }
 
