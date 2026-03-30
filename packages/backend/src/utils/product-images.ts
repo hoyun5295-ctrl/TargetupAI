@@ -308,7 +308,7 @@ export async function generateFlyerImages(categories: any[]): Promise<Record<str
 export function getGeneratedImageUrl(productName: string): string | null {
   const cached = generatedImageCache.get(productName);
   if (cached && fs.existsSync(cached)) {
-    return `/api/flyer/product-images/${encodeURIComponent(productName)}.png`;
+    return `/api/flyer/flyers/product-images/${encodeURIComponent(productName)}.png`;
   }
   return null;
 }

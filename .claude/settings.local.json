@@ -69,7 +69,8 @@
       "WebFetch(domain:unsplash.com)",
       "WebFetch(domain:images.unsplash.com)",
       "WebFetch(domain:api.unsplash.com)",
-      "WebFetch(domain:raw.githubusercontent.com)"
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(wc -l /c/Users/ceo/projects/targetup/packages/backend/src/routes/flyer/*.ts)"
     ]
   }
 }

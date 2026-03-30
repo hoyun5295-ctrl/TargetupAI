@@ -13,6 +13,21 @@ import { renderProductImage, resolveProductImageUrl } from '../../utils/product-
 
 const router = Router();
 
+/**
+ * 공개 페이지용 — 상대경로 이미지 URL을 절대 URL로 변환
+ * hanjul-flyer.kr에서 렌더링되는 HTML이므로, /api/flyer/... 상대경로는
+ * 해당 도메인에서 해석 불가 → 절대 URL 변환 필요
+ *
+ * 해결 방법 (택 1):
+ *   1. 환경변수 FLYER_API_BASE_URL 설정 (예: https://hanjul-flyer.com)
+ *   2. Nginx에서 hanjul-flyer.kr의 /api/flyer/ → 백엔드 프록시 추가
+ */
+function toAbsoluteImageUrl(url: string | null): string | null {
+  if (!url || url.startsWith('http')) return url;
+  const base = process.env.FLYER_API_BASE_URL || '';
+  return base ? base + url : url;
+}
+
 // ============================================================
 // GET /:code — 전단지 공개 페이지 렌더링 + 클릭 로그
 // ============================================================
@@ -127,7 +142,7 @@ function renderGridTemplate(storeName: string, title: string, period: string, ca
   for (const cat of categories) {
     itemsHtml += `<div class="cat-title">${escapeHtml(cat.name || '')}</div><div class="grid">`;
     for (const item of (cat.items || [])) {
-      const generatedUrl = resolveProductImageUrl(item.name || '');
+      const generatedUrl = toAbsoluteImageUrl(resolveProductImageUrl(item.name || ''));
       const productImg = renderProductImage(item.name || '', 48, generatedUrl || undefined);
       const discount = item.originalPrice && item.originalPrice > 0
         ? Math.round((1 - item.salePrice / item.originalPrice) * 100) : 0;
@@ -191,7 +206,7 @@ function renderListTemplate(storeName: string, title: string, period: string, ca
   for (const cat of categories) {
     itemsHtml += `<div class="cat-section"><div class="cat-title">${escapeHtml(cat.name || '')}</div>`;
     for (const item of (cat.items || [])) {
-      const listGenUrl = resolveProductImageUrl(item.name || '');
+      const listGenUrl = toAbsoluteImageUrl(resolveProductImageUrl(item.name || ''));
       const productImg = renderProductImage(item.name || '', 40, listGenUrl || undefined);
       itemsHtml += `<div class="item">
         <div class="item-visual">${productImg}</div>
@@ -266,7 +281,7 @@ function renderHighlightTemplate(storeName: string, title: string, period: strin
   if (picks.length > 0) {
     picksHtml = `<div class="picks-title">TODAY'S PICK</div><div class="picks-grid">`;
     for (const p of picks) {
-      const pickGenUrl = resolveProductImageUrl(p.name || '');
+      const pickGenUrl = toAbsoluteImageUrl(resolveProductImageUrl(p.name || ''));
       const pickImg = renderProductImage(p.name || '', 56, pickGenUrl || undefined);
       picksHtml += `<div class="pick-card">
         <div class="discount-badge">${p.discount}% OFF</div>
@@ -283,7 +298,7 @@ function renderHighlightTemplate(storeName: string, title: string, period: strin
   for (const cat of categories) {
     itemsHtml += `<div class="cat-title">${escapeHtml(cat.name || '')}</div>`;
     for (const item of (cat.items || [])) {
-      const rowGenUrl = resolveProductImageUrl(item.name || '');
+      const rowGenUrl = toAbsoluteImageUrl(resolveProductImageUrl(item.name || ''));
       const rowImg = renderProductImage(item.name || '', 32, rowGenUrl || undefined);
       itemsHtml += `<div class="item-row">
         <div class="row-visual">${rowImg}</div>
