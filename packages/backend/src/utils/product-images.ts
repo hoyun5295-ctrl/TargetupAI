@@ -155,8 +155,8 @@ export function getEmoji(productName: string): string {
  * @param generatedImageUrl - DALL-E 생성 이미지 URL (있으면 최우선)
  */
 export function renderProductImage(productName: string, size: number = 48, generatedImageUrl?: string): string {
-  const { emoji, imageUrl } = getProductDisplay(productName);
-  const finalUrl = generatedImageUrl || imageUrl;
+  const { emoji } = getProductDisplay(productName);
+  const finalUrl = generatedImageUrl || null;
   if (finalUrl) {
     return `<img src="${finalUrl}" alt="" style="width:${size}px;height:${size}px;object-fit:cover;border-radius:8px;" onerror="this.onerror=null;this.style.display='none';var fb=this.nextElementSibling;if(fb)fb.style.display='inline'"><span class="emoji-fb" style="display:none;font-size:${size * 0.6}px">${emoji}</span>`;
   }
