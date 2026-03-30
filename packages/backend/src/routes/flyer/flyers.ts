@@ -19,6 +19,27 @@ const PRODUCT_IMAGE_DIR = process.env.PRODUCT_IMAGE_PATH || path.resolve('./uplo
 
 const router = Router();
 
+// ── 인증 불필요 (공개 엔드포인트 — authenticate 위에 배치) ──
+
+// GET /product-images/:filename — 생성된 이미지 서빙 (공개 페이지에서 접근)
+router.get('/product-images/:filename', (req: Request, res: Response) => {
+  try {
+    const { filename } = req.params;
+    const filePath = path.join(PRODUCT_IMAGE_DIR, filename);
+
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: '이미지를 찾을 수 없습니다.' });
+    }
+
+    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    fs.createReadStream(filePath).pipe(res);
+  } catch (err: any) {
+    res.status(500).json({ error: '이미지 로드 실패' });
+  }
+});
+
+// ── 이하 모든 라우트는 인증 필요 ──
 router.use(authenticate);
 
 // ── 단축URL 코드 생성 (nanoid 대신 crypto) ──
@@ -177,25 +198,7 @@ router.post('/generate-image', async (req: Request, res: Response) => {
   }
 });
 
-// ============================================================
-// GET /product-images/:filename — 생성된 이미지 서빙 (인증 불필요)
-// ============================================================
-router.get('/product-images/:filename', (req: Request, res: Response) => {
-  try {
-    const { filename } = req.params;
-    const filePath = path.join(PRODUCT_IMAGE_DIR, filename);
-
-    if (!fs.existsSync(filePath)) {
-      return res.status(404).json({ error: '이미지를 찾을 수 없습니다.' });
-    }
-
-    res.setHeader('Content-Type', 'image/png');
-    res.setHeader('Cache-Control', 'public, max-age=86400');
-    fs.createReadStream(filePath).pipe(res);
-  } catch (err: any) {
-    res.status(500).json({ error: '이미지 로드 실패' });
-  }
-});
+// (product-images 서빙은 authenticate 위로 이동됨 — 공개 접근 필요)
 
 // ============================================================
 // GET /product-image-status — 상품별 이미지 생성 상태 조회

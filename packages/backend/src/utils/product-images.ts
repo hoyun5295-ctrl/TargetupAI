@@ -158,7 +158,7 @@ export function renderProductImage(productName: string, size: number = 48, gener
   const { emoji, imageUrl } = getProductDisplay(productName);
   const finalUrl = generatedImageUrl || imageUrl;
   if (finalUrl) {
-    return `<img src="${finalUrl}" alt="" style="width:${size}px;height:${size}px;object-fit:cover;border-radius:8px;" loading="lazy" onerror="this.onerror=null;this.style.display='none';this.parentElement.querySelector('.emoji-fb').style.display='inline'"><span class="emoji-fb" style="display:none;font-size:${size * 0.6}px">${emoji}</span>`;
+    return `<img src="${finalUrl}" alt="" style="width:${size}px;height:${size}px;object-fit:cover;border-radius:8px;" onerror="this.onerror=null;this.style.display='none';var fb=this.nextElementSibling;if(fb)fb.style.display='inline'"><span class="emoji-fb" style="display:none;font-size:${size * 0.6}px">${emoji}</span>`;
   }
   return `<span style="font-size:${size * 0.6}px">${emoji}</span>`;
 }
