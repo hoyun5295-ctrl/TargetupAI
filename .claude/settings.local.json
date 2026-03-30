@@ -61,7 +61,15 @@
       "Bash(grep -E \"\\\\.\\(sql|ts|js\\)$\")",
       "Bash(npm create:*)",
       "Bash(npx vite:*)",
-      "Bash(grep -l \"from ''../App''\" *.tsx)"
+      "Bash(grep -l \"from ''../App''\" *.tsx)",
+      "Bash(pandoc \"C:\\\\Users\\\\ceo\\\\OneDrive\\\\바탕 화면\\\\특허출원\\\\스팸필터테스트\\\\특허출원명세서유호윤.docx\" -t markdown --wrap=none)",
+      "Bash(find /c/Users/ceo/projects/targetup -name *.sql -path */migrations/* -o -name *flyer*.sql)",
+      "Bash(grep -r \"flyer\\\\|전단\" /c/Users/ceo/projects/targetup/status/*.md --include=\"*.md\" -l)",
+      "Bash(grep -l \"flyer\\\\|short_url\" /c/Users/ceo/projects/targetup/migrations/*.sql)",
+      "WebFetch(domain:unsplash.com)",
+      "WebFetch(domain:images.unsplash.com)",
+      "WebFetch(domain:api.unsplash.com)",
+      "WebFetch(domain:raw.githubusercontent.com)"
     ]
   }
 }

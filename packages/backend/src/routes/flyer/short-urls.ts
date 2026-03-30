@@ -9,6 +9,7 @@
 
 import { Request, Response, Router } from 'express';
 import { query } from '../../config/database';
+import { getProductDisplay, renderProductImage } from '../../utils/product-images';
 
 const router = Router();
 
@@ -115,27 +116,8 @@ function formatPrice(price: number): string {
   return price.toLocaleString();
 }
 
-// 상품명 → 이모지 매핑
-const EMOJI_MAP: Record<string, string> = {
-  '딸기': '🍓', '사과': '🍎', '배': '🍐', '감': '🍊', '귤': '🍊', '오렌지': '🍊',
-  '바나나': '🍌', '포도': '🍇', '수박': '🍉', '참외': '🍈', '복숭아': '🍑', '체리': '🍒',
-  '토마토': '🍅', '양배추': '🥬', '브로콜리': '🥦', '당근': '🥕', '감자': '🥔', '고구마': '🍠',
-  '양파': '🧅', '마늘': '🧄', '옥수수': '🌽', '고추': '🌶️', '버섯': '🍄', '파프리카': '🫑',
-  '쌀': '🍚', '계란': '🥚', '우유': '🥛', '치즈': '🧀', '빵': '🍞', '두부': '🫘',
-  '소고기': '🥩', '돼지': '🥩', '삼겹살': '🥓', '닭': '🍗', '오리': '🦆',
-  '생선': '🐟', '연어': '🐟', '참치': '🐟', '새우': '🦐', '오징어': '🦑', '게': '🦀', '굴': '🦪', '조개': '🐚',
-  '김치': '🥬', '라면': '🍜', '국수': '🍜', '만두': '🥟', '피자': '🍕',
-  '커피': '☕', '맥주': '🍺', '와인': '🍷', '주스': '🧃', '물': '💧',
-  '케이크': '🎂', '초콜릿': '🍫', '과자': '🍪', '아이스크림': '🍦',
-  '꽃': '💐', '장미': '🌹',
-};
-
-function getEmoji(name: string): string {
-  for (const [keyword, emoji] of Object.entries(EMOJI_MAP)) {
-    if (name.includes(keyword)) return emoji;
-  }
-  return '🏷️';
-}
+// 상품 이미지/이모지 매핑: utils/product-images.ts 컨트롤타워 사용
+// (기존 EMOJI_MAP 인라인 삭제 → 컨트롤타워로 통합)
 
 // ============================================================
 // 템플릿 1: 그리드형 (빨간 테마)
@@ -145,11 +127,11 @@ function renderGridTemplate(storeName: string, title: string, period: string, ca
   for (const cat of categories) {
     itemsHtml += `<div class="cat-title">${escapeHtml(cat.name || '')}</div><div class="grid">`;
     for (const item of (cat.items || [])) {
-      const emoji = getEmoji(item.name || '');
+      const productImg = renderProductImage(item.name || '', 48);
       const discount = item.originalPrice && item.originalPrice > 0
         ? Math.round((1 - item.salePrice / item.originalPrice) * 100) : 0;
       itemsHtml += `<div class="card">
-        <div class="emoji">${emoji}</div>
+        <div class="product-visual">${productImg}</div>
         <div class="name">${escapeHtml(item.name || '')}</div>
         ${item.originalPrice ? `<div class="orig">₩${formatPrice(item.originalPrice)}</div>` : ''}
         <div class="price">₩${formatPrice(item.salePrice || 0)}</div>
@@ -178,7 +160,8 @@ function renderGridTemplate(storeName: string, title: string, period: string, ca
   .cat-title { font-size: 16px; font-weight: 800; color: #c0392b; margin: 20px 0 10px; padding-left: 4px; border-left: 4px solid #e74c3c; padding-left: 10px; }
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .card { background: #fff; border-radius: 12px; padding: 14px; text-align: center; box-shadow: 0 1px 4px rgba(0,0,0,0.06); position: relative; }
-  .card .emoji { font-size: 32px; margin-bottom: 6px; }
+  .card .product-visual { margin-bottom: 6px; display: flex; justify-content: center; align-items: center; min-height: 48px; }
+  .card .product-visual img { width: 48px; height: 48px; object-fit: cover; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
   .card .name { font-size: 13px; font-weight: 600; margin-bottom: 4px; line-height: 1.3; }
   .card .orig { font-size: 11px; color: #999; text-decoration: line-through; }
   .card .price { font-size: 18px; font-weight: 900; color: #e74c3c; }
@@ -207,9 +190,9 @@ function renderListTemplate(storeName: string, title: string, period: string, ca
   for (const cat of categories) {
     itemsHtml += `<div class="cat-section"><div class="cat-title">${escapeHtml(cat.name || '')}</div>`;
     for (const item of (cat.items || [])) {
-      const emoji = getEmoji(item.name || '');
+      const productImg = renderProductImage(item.name || '', 40);
       itemsHtml += `<div class="item">
-        <span class="emoji">${emoji}</span>
+        <div class="item-visual">${productImg}</div>
         <div class="info">
           <div class="name">${escapeHtml(item.name || '')} ${item.badge ? `<span class="tag">${escapeHtml(item.badge)}</span>` : ''}</div>
           ${item.originalPrice ? `<span class="orig">₩${formatPrice(item.originalPrice)}</span>` : ''}
@@ -238,7 +221,8 @@ function renderListTemplate(storeName: string, title: string, period: string, ca
   .cat-section { margin-top: 16px; }
   .cat-title { font-size: 14px; font-weight: 700; color: #d4a844; padding: 10px 0; border-bottom: 1px solid #333; }
   .item { display: flex; align-items: center; padding: 12px 0; border-bottom: 1px solid #222; }
-  .item .emoji { font-size: 24px; margin-right: 12px; flex-shrink: 0; }
+  .item .item-visual { margin-right: 12px; flex-shrink: 0; display: flex; align-items: center; }
+  .item .item-visual img { width: 40px; height: 40px; object-fit: cover; border-radius: 8px; }
   .item .info { flex: 1; }
   .item .name { font-size: 14px; font-weight: 600; }
   .item .orig { font-size: 11px; color: #666; text-decoration: line-through; }
@@ -280,10 +264,10 @@ function renderHighlightTemplate(storeName: string, title: string, period: strin
   if (picks.length > 0) {
     picksHtml = `<div class="picks-title">TODAY'S PICK</div><div class="picks-grid">`;
     for (const p of picks) {
-      const emoji = getEmoji(p.name || '');
+      const pickImg = renderProductImage(p.name || '', 56);
       picksHtml += `<div class="pick-card">
         <div class="discount-badge">${p.discount}% OFF</div>
-        <div class="emoji">${emoji}</div>
+        <div class="pick-visual">${pickImg}</div>
         <div class="name">${escapeHtml(p.name || '')}</div>
         <div class="orig">₩${formatPrice(p.originalPrice)}</div>
         <div class="price">₩${formatPrice(p.salePrice || 0)}</div>
@@ -296,9 +280,9 @@ function renderHighlightTemplate(storeName: string, title: string, period: strin
   for (const cat of categories) {
     itemsHtml += `<div class="cat-title">${escapeHtml(cat.name || '')}</div>`;
     for (const item of (cat.items || [])) {
-      const emoji = getEmoji(item.name || '');
+      const rowImg = renderProductImage(item.name || '', 32);
       itemsHtml += `<div class="item-row">
-        <span class="emoji">${emoji}</span>
+        <div class="row-visual">${rowImg}</div>
         <span class="name">${escapeHtml(item.name || '')}</span>
         <span class="price">₩${formatPrice(item.salePrice || 0)}</span>
       </div>`;
@@ -324,13 +308,15 @@ function renderHighlightTemplate(storeName: string, title: string, period: strin
   .picks-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px; }
   .pick-card { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 14px; text-align: center; position: relative; }
   .pick-card .discount-badge { position: absolute; top: 8px; left: 8px; background: #ff6b35; color: #fff; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 8px; }
-  .pick-card .emoji { font-size: 32px; margin: 8px 0 6px; }
+  .pick-card .pick-visual { margin: 8px 0 6px; display: flex; justify-content: center; }
+  .pick-card .pick-visual img { width: 56px; height: 56px; object-fit: cover; border-radius: 10px; box-shadow: 0 2px 6px rgba(0,0,0,0.3); }
   .pick-card .name { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
   .pick-card .orig { font-size: 11px; color: #666; text-decoration: line-through; }
   .pick-card .price { font-size: 18px; font-weight: 900; color: #ff6b35; }
   .cat-title { font-size: 14px; font-weight: 700; color: #ff6b35; padding: 12px 0 8px; border-bottom: 1px solid #21262d; margin-top: 8px; }
   .item-row { display: flex; align-items: center; padding: 10px 0; border-bottom: 1px solid #161b22; }
-  .item-row .emoji { font-size: 20px; margin-right: 10px; }
+  .item-row .row-visual { margin-right: 10px; flex-shrink: 0; display: flex; align-items: center; }
+  .item-row .row-visual img { width: 32px; height: 32px; object-fit: cover; border-radius: 6px; }
   .item-row .name { flex: 1; font-size: 14px; }
   .item-row .price { font-size: 15px; font-weight: 700; color: #ff6b35; }
   .footer { text-align: center; padding: 20px 16px 30px; color: #484f58; font-size: 11px; }

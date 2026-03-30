@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { API_BASE, apiFetch } from '../App';
 import AlertModal from '../components/AlertModal';
 import { SectionCard, Button, Input, Badge, EmptyState, ConfirmModal, Toast } from '../components/ui';
+import { getProductDisplay } from '../utils/product-images';
 
 interface FlyerItem { name: string; originalPrice: number; salePrice: number; badge?: string; }
 interface FlyerCategory { name: string; items: FlyerItem[]; }
@@ -317,31 +318,47 @@ function FlyerPreviewRenderer({ title, storeName, periodStart, periodEnd, catego
             <p style={{ fontSize: 9, fontWeight: 700, color: isLight ? '#333' : '#ddd', margin: '4px 0 4px 4px', textTransform: 'uppercase', letterSpacing: 0.5 }}>{cat.name}</p>
             {template === 'grid' ? (
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
-                {cat.items.map((item, ii) => (
-                  <div key={ii} style={{ background: colors.card, borderRadius: 6, padding: '6px 8px', border: '1px solid rgba(0,0,0,0.06)' }}>
-                    <p style={{ fontSize: 9, fontWeight: 600, color: '#333', margin: 0, lineHeight: 1.3 }}>{item.name}</p>
-                    <div style={{ marginTop: 3, display: 'flex', alignItems: 'baseline', gap: 3 }}>
-                      {item.originalPrice > 0 && <span style={{ fontSize: 7, color: '#999', textDecoration: 'line-through' }}>{fmtPrice(item.originalPrice)}</span>}
-                      <span style={{ fontSize: 11, fontWeight: 800, color: colors.price }}>{fmtPrice(item.salePrice)}</span>
+                {cat.items.map((item, ii) => {
+                  const pd = getProductDisplay(item.name);
+                  return (
+                    <div key={ii} style={{ background: colors.card, borderRadius: 6, padding: '6px 8px', border: '1px solid rgba(0,0,0,0.06)', textAlign: 'center' }}>
+                      {pd.imageUrl ? (
+                        <img src={pd.imageUrl} alt={item.name} style={{ width: 36, height: 36, objectFit: 'cover', borderRadius: 6, margin: '0 auto 4px' }} />
+                      ) : (
+                        <p style={{ fontSize: 22, margin: '0 0 4px', textAlign: 'center' }}>{pd.emoji}</p>
+                      )}
+                      <p style={{ fontSize: 9, fontWeight: 600, color: '#333', margin: 0, lineHeight: 1.3 }}>{item.name}</p>
+                      <div style={{ marginTop: 3, display: 'flex', justifyContent: 'center', alignItems: 'baseline', gap: 3 }}>
+                        {item.originalPrice > 0 && <span style={{ fontSize: 7, color: '#999', textDecoration: 'line-through' }}>{fmtPrice(item.originalPrice)}</span>}
+                        <span style={{ fontSize: 11, fontWeight: 800, color: colors.price }}>{fmtPrice(item.salePrice)}</span>
+                      </div>
+                      {item.badge && <span style={{ fontSize: 7, color: '#fff', background: colors.badge, borderRadius: 3, padding: '1px 4px', display: 'inline-block', marginTop: 2 }}>{item.badge}</span>}
                     </div>
-                    {item.badge && <span style={{ fontSize: 7, color: '#fff', background: colors.badge, borderRadius: 3, padding: '1px 4px', display: 'inline-block', marginTop: 2 }}>{item.badge}</span>}
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                {cat.items.map((item, ii) => (
-                  <div key={ii} style={{ background: colors.card, borderRadius: 6, padding: '6px 8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', border: isLight ? '1px solid rgba(0,0,0,0.06)' : '1px solid rgba(255,255,255,0.08)' }}>
-                    <div>
-                      <p style={{ fontSize: 9, fontWeight: 600, color: isLight ? '#333' : '#eee', margin: 0 }}>{item.name}</p>
-                      {item.badge && <span style={{ fontSize: 7, color: colors.badge, fontWeight: 600 }}>{item.badge}</span>}
+                {cat.items.map((item, ii) => {
+                  const pd = getProductDisplay(item.name);
+                  return (
+                    <div key={ii} style={{ background: colors.card, borderRadius: 6, padding: '6px 8px', display: 'flex', alignItems: 'center', gap: 8, border: isLight ? '1px solid rgba(0,0,0,0.06)' : '1px solid rgba(255,255,255,0.08)' }}>
+                      {pd.imageUrl ? (
+                        <img src={pd.imageUrl} alt={item.name} style={{ width: 30, height: 30, objectFit: 'cover', borderRadius: 6, flexShrink: 0 }} />
+                      ) : (
+                        <span style={{ fontSize: 18, flexShrink: 0 }}>{pd.emoji}</span>
+                      )}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <p style={{ fontSize: 9, fontWeight: 600, color: isLight ? '#333' : '#eee', margin: 0 }}>{item.name}</p>
+                        {item.badge && <span style={{ fontSize: 7, color: colors.badge, fontWeight: 600 }}>{item.badge}</span>}
+                      </div>
+                      <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                        {item.originalPrice > 0 && <p style={{ fontSize: 7, color: '#999', textDecoration: 'line-through', margin: 0 }}>{fmtPrice(item.originalPrice)}</p>}
+                        <p style={{ fontSize: 11, fontWeight: 800, color: colors.price, margin: 0 }}>{fmtPrice(item.salePrice)}</p>
+                      </div>
                     </div>
-                    <div style={{ textAlign: 'right' }}>
-                      {item.originalPrice > 0 && <p style={{ fontSize: 7, color: '#999', textDecoration: 'line-through', margin: 0 }}>{fmtPrice(item.originalPrice)}</p>}
-                      <p style={{ fontSize: 11, fontWeight: 800, color: colors.price, margin: 0 }}>{fmtPrice(item.salePrice)}</p>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
