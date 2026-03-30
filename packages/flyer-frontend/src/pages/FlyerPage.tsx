@@ -275,6 +275,7 @@ function ProductRegistrationSection({ categories, setCategories, addCategory, re
 }) {
   const [activeTab, setActiveTab] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const jsonHeaders = { 'Content-Type': 'application/json' };
 
   // 활성 탭이 범위 밖이면 보정
   const safeTab = Math.min(activeTab, Math.max(categories.length - 1, 0));
@@ -458,7 +459,7 @@ function ProductRegistrationSection({ categories, setCategories, addCategory, re
                         </label>
                         {item.imageUrl && (
                           <button onClick={async () => {
-                            try { await apiFetch(`${API_BASE}/api/flyer/flyers/product-image`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: item.imageUrl }) }); } catch {}
+                            try { await apiFetch(`${API_BASE}/api/flyer/flyers/product-image`, { method: 'DELETE', headers: jsonHeaders, body: JSON.stringify({ url: item.imageUrl }) }); } catch {}
                             updateItem(safeTab, ii, 'imageUrl', '');
                           }} className="absolute -top-1 -right-1 w-4 h-4 bg-error-500 text-white rounded-full text-[10px] leading-none flex items-center justify-center hover:bg-error-600">✕</button>
                         )}
