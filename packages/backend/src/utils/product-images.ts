@@ -314,15 +314,10 @@ export function getGeneratedImageUrl(productName: string): string | null {
 }
 
 /**
- * 최종 이미지 URL 결정 (3단계 폴백)
- * 1. DALL-E 생성 이미지 → 2. Unsplash 큐레이션 → 3. null (이모지)
+ * 최종 이미지 URL 결정
+ * ⚠️ DALL-E = AI 느낌 강함, Unsplash = 외국 식재료 느낌 → 둘 다 부적합
+ * 이모지가 가장 깔끔하고 안정적 (로드 실패 없음, 한국 마트 느낌)
  */
 export function resolveProductImageUrl(productName: string): string | null {
-  // 1. DALL-E 생성 이미지
-  const generated = getGeneratedImageUrl(productName);
-  if (generated) return generated;
-
-  // 2. Unsplash 큐레이션
-  const { imageUrl } = getProductDisplay(productName);
-  return imageUrl;
+  return null;
 }
