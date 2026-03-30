@@ -135,24 +135,28 @@ function formatPrice(price: number): string {
 // (기존 EMOJI_MAP 인라인 삭제 → 컨트롤타워로 통합)
 
 // ============================================================
-// 템플릿 1: 그리드형 (빨간 테마)
+// 템플릿 1: 그리드형 (마트 전단지 — 빨간 테마, 대형 이미지 카드)
 // ============================================================
 function renderGridTemplate(storeName: string, title: string, period: string, categories: any[]): string {
   let itemsHtml = '';
   for (const cat of categories) {
-    itemsHtml += `<div class="cat-title">${escapeHtml(cat.name || '')}</div><div class="grid">`;
+    itemsHtml += `<div class="cat-title"><span class="cat-bar"></span>${escapeHtml(cat.name || '')}</div><div class="grid">`;
     for (const item of (cat.items || [])) {
-      const generatedUrl = toAbsoluteImageUrl(item.imageUrl || resolveProductImageUrl(item.name || ''));
-      const productImg = renderProductImage(item.name || '', 48, generatedUrl || undefined);
+      const imgUrl = toAbsoluteImageUrl(item.imageUrl || resolveProductImageUrl(item.name || ''));
+      const productImg = renderProductImage(item.name || '', 120, imgUrl || undefined);
       const discount = item.originalPrice && item.originalPrice > 0
         ? Math.round((1 - item.salePrice / item.originalPrice) * 100) : 0;
       itemsHtml += `<div class="card">
-        <div class="product-visual">${productImg}</div>
-        <div class="name">${escapeHtml(item.name || '')}</div>
-        ${item.originalPrice ? `<div class="orig">₩${formatPrice(item.originalPrice)}</div>` : ''}
-        <div class="price">₩${formatPrice(item.salePrice || 0)}</div>
         ${discount > 0 ? `<div class="badge">${discount}%</div>` : ''}
-        ${item.badge ? `<div class="tag">${escapeHtml(item.badge)}</div>` : ''}
+        <div class="card-img">${productImg}</div>
+        <div class="card-body">
+          <div class="name">${escapeHtml(item.name || '')}</div>
+          <div class="price-row">
+            ${item.originalPrice ? `<span class="orig">${formatPrice(item.originalPrice)}</span>` : ''}
+            <span class="price">₩${formatPrice(item.salePrice || 0)}</span>
+          </div>
+          ${item.badge ? `<div class="tag">${escapeHtml(item.badge)}</div>` : ''}
+        </div>
       </div>`;
     }
     itemsHtml += '</div>';
@@ -166,29 +170,34 @@ function renderGridTemplate(storeName: string, title: string, period: string, ca
 <title>${escapeHtml(title)}</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;900&display=swap');
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: 'Noto Sans KR', sans-serif; background: #f5f5f5; color: #222; -webkit-font-smoothing: antialiased; }
-  .hero { background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%); color: #fff; text-align: center; padding: 28px 16px 22px; }
-  .hero .store-name { font-size: 13px; font-weight: 500; letter-spacing: 2px; opacity: 0.9; margin-bottom: 6px; }
-  .hero h1 { font-size: 24px; font-weight: 900; line-height: 1.3; }
-  .hero .period { margin-top: 10px; font-size: 13px; font-weight: 500; background: rgba(255,255,255,0.2); display: inline-block; padding: 4px 14px; border-radius: 20px; }
-  .content { padding: 16px; max-width: 480px; margin: 0 auto; }
-  .cat-title { font-size: 16px; font-weight: 800; color: #c0392b; margin: 20px 0 10px; padding-left: 4px; border-left: 4px solid #e74c3c; padding-left: 10px; }
-  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-  .card { background: #fff; border-radius: 12px; padding: 14px; text-align: center; box-shadow: 0 1px 4px rgba(0,0,0,0.06); position: relative; }
-  .card .product-visual { margin-bottom: 6px; display: flex; justify-content: center; align-items: center; min-height: 48px; }
-  .card .product-visual img { width: 48px; height: 48px; object-fit: cover; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-  .card .name { font-size: 13px; font-weight: 600; margin-bottom: 4px; line-height: 1.3; }
-  .card .orig { font-size: 11px; color: #999; text-decoration: line-through; }
-  .card .price { font-size: 18px; font-weight: 900; color: #e74c3c; }
-  .card .badge { position: absolute; top: 8px; right: 8px; background: #e74c3c; color: #fff; font-size: 11px; font-weight: 700; padding: 2px 6px; border-radius: 8px; }
-  .card .tag { margin-top: 4px; font-size: 10px; color: #e74c3c; font-weight: 600; background: #fff5f5; padding: 2px 6px; border-radius: 4px; display: inline-block; }
-  .footer { text-align: center; padding: 20px 16px 30px; color: #999; font-size: 11px; }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:'Noto Sans KR',sans-serif;background:#f2f2f2;color:#222;-webkit-font-smoothing:antialiased}
+  .hero{background:linear-gradient(135deg,#dc2626 0%,#b91c1c 100%);color:#fff;text-align:center;padding:32px 16px 26px;position:relative;overflow:hidden}
+  .hero::after{content:'';position:absolute;bottom:-20px;left:50%;transform:translateX(-50%);width:140%;height:40px;background:#f2f2f2;border-radius:50% 50% 0 0}
+  .hero .store{font-size:12px;font-weight:500;letter-spacing:3px;text-transform:uppercase;opacity:.85;margin-bottom:8px}
+  .hero h1{font-size:22px;font-weight:900;line-height:1.35;text-shadow:0 2px 8px rgba(0,0,0,.15)}
+  .hero .period{margin-top:12px;font-size:12px;font-weight:600;background:rgba(255,255,255,.2);backdrop-filter:blur(4px);display:inline-block;padding:5px 16px;border-radius:20px}
+  .content{padding:12px 14px 20px;max-width:480px;margin:0 auto}
+  .cat-title{display:flex;align-items:center;gap:8px;font-size:15px;font-weight:800;color:#b91c1c;margin:18px 0 10px}
+  .cat-bar{width:4px;height:18px;background:linear-gradient(180deg,#dc2626,#f97316);border-radius:2px;flex-shrink:0}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .card{background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.06);position:relative;transition:transform .15s}
+  .card-img{width:100%;height:120px;overflow:hidden;background:#f8f8f8;display:flex;align-items:center;justify-content:center}
+  .card-img .product-img{width:100%;height:120px;object-fit:cover}
+  .card-img .emoji-area{width:100%;height:120px;display:flex;align-items:center;justify-content:center;font-size:48px;background:linear-gradient(135deg,#fff5f5,#fef2f2)}
+  .card-body{padding:10px 12px 12px}
+  .card .name{font-size:13px;font-weight:700;line-height:1.35;margin-bottom:6px;color:#222}
+  .card .price-row{display:flex;align-items:baseline;gap:6px;flex-wrap:wrap}
+  .card .orig{font-size:11px;color:#aaa;text-decoration:line-through}
+  .card .price{font-size:19px;font-weight:900;color:#dc2626}
+  .card .badge{position:absolute;top:8px;left:8px;background:linear-gradient(135deg,#dc2626,#ea580c);color:#fff;font-size:11px;font-weight:800;padding:3px 8px;border-radius:8px;z-index:1;box-shadow:0 2px 4px rgba(220,38,38,.3)}
+  .card .tag{margin-top:6px;font-size:10px;color:#dc2626;font-weight:700;background:#fef2f2;padding:3px 8px;border-radius:6px;display:inline-block;border:1px solid #fecaca}
+  .footer{text-align:center;padding:24px 16px 32px;color:#bbb;font-size:11px}
 </style>
 </head>
 <body>
 <div class="hero">
-  <div class="store-name">${escapeHtml(storeName)}</div>
+  <div class="store">${escapeHtml(storeName)}</div>
   <h1>${escapeHtml(title)}</h1>
   ${period ? `<div class="period">${escapeHtml(period)}</div>` : ''}
 </div>
@@ -199,22 +208,28 @@ function renderGridTemplate(storeName: string, title: string, period: string, ca
 }
 
 // ============================================================
-// 템플릿 2: 리스트형 (블랙+골드 프리미엄)
+// 템플릿 2: 리스트형 (깔끔 모던 — 밝은 톤, 딥블루 강조)
 // ============================================================
 function renderListTemplate(storeName: string, title: string, period: string, categories: any[]): string {
   let itemsHtml = '';
   for (const cat of categories) {
-    itemsHtml += `<div class="cat-section"><div class="cat-title">${escapeHtml(cat.name || '')}</div>`;
+    itemsHtml += `<div class="cat-section"><div class="cat-tag">${escapeHtml(cat.name || '')}</div>`;
     for (const item of (cat.items || [])) {
-      const listGenUrl = toAbsoluteImageUrl(item.imageUrl || resolveProductImageUrl(item.name || ''));
-      const productImg = renderProductImage(item.name || '', 40, listGenUrl || undefined);
+      const imgUrl = toAbsoluteImageUrl(item.imageUrl || resolveProductImageUrl(item.name || ''));
+      const productImg = renderProductImage(item.name || '', 72, imgUrl || undefined);
+      const discount = item.originalPrice && item.originalPrice > 0
+        ? Math.round((1 - item.salePrice / item.originalPrice) * 100) : 0;
       itemsHtml += `<div class="item">
-        <div class="item-visual">${productImg}</div>
-        <div class="info">
-          <div class="name">${escapeHtml(item.name || '')} ${item.badge ? `<span class="tag">${escapeHtml(item.badge)}</span>` : ''}</div>
-          ${item.originalPrice ? `<span class="orig">₩${formatPrice(item.originalPrice)}</span>` : ''}
+        <div class="item-img">${productImg}</div>
+        <div class="item-info">
+          <div class="name">${escapeHtml(item.name || '')}</div>
+          ${item.badge ? `<span class="tag">${escapeHtml(item.badge)}</span>` : ''}
+          <div class="price-row">
+            ${item.originalPrice ? `<span class="orig">₩${formatPrice(item.originalPrice)}</span>` : ''}
+            <span class="price">₩${formatPrice(item.salePrice || 0)}</span>
+          </div>
         </div>
-        <div class="price">₩${formatPrice(item.salePrice || 0)}</div>
+        ${discount > 0 ? `<div class="discount">${discount}%</div>` : ''}
       </div>`;
     }
     itemsHtml += '</div>';
@@ -228,29 +243,33 @@ function renderListTemplate(storeName: string, title: string, period: string, ca
 <title>${escapeHtml(title)}</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;900&display=swap');
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: 'Noto Sans KR', sans-serif; background: #111; color: #fff; -webkit-font-smoothing: antialiased; }
-  .hero { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); text-align: center; padding: 28px 16px 22px; border-bottom: 2px solid #d4a844; }
-  .hero .store-name { font-size: 13px; font-weight: 500; letter-spacing: 3px; color: #d4a844; margin-bottom: 6px; }
-  .hero h1 { font-size: 24px; font-weight: 900; color: #fff; }
-  .hero .period { margin-top: 10px; font-size: 12px; color: #aaa; }
-  .content { padding: 0 16px 20px; max-width: 480px; margin: 0 auto; }
-  .cat-section { margin-top: 16px; }
-  .cat-title { font-size: 14px; font-weight: 700; color: #d4a844; padding: 10px 0; border-bottom: 1px solid #333; }
-  .item { display: flex; align-items: center; padding: 12px 0; border-bottom: 1px solid #222; }
-  .item .item-visual { margin-right: 12px; flex-shrink: 0; display: flex; align-items: center; }
-  .item .item-visual img { width: 40px; height: 40px; object-fit: cover; border-radius: 8px; }
-  .item .info { flex: 1; }
-  .item .name { font-size: 14px; font-weight: 600; }
-  .item .orig { font-size: 11px; color: #666; text-decoration: line-through; }
-  .item .price { font-size: 17px; font-weight: 900; color: #d4a844; flex-shrink: 0; }
-  .item .tag { font-size: 10px; color: #e74c3c; background: rgba(231,76,60,0.15); padding: 1px 6px; border-radius: 4px; margin-left: 6px; }
-  .footer { text-align: center; padding: 20px 16px 30px; color: #555; font-size: 11px; }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:'Noto Sans KR',sans-serif;background:#f8f9fa;color:#1a1a1a;-webkit-font-smoothing:antialiased}
+  .hero{background:linear-gradient(135deg,#1e40af 0%,#1d4ed8 50%,#2563eb 100%);color:#fff;text-align:center;padding:32px 16px 26px;position:relative}
+  .hero::after{content:'';position:absolute;bottom:0;left:0;right:0;height:4px;background:linear-gradient(90deg,#60a5fa,#3b82f6,#2563eb)}
+  .hero .store{font-size:12px;font-weight:500;letter-spacing:3px;opacity:.8;margin-bottom:8px}
+  .hero h1{font-size:22px;font-weight:900;line-height:1.35}
+  .hero .period{margin-top:10px;font-size:12px;opacity:.75}
+  .content{padding:8px 14px 20px;max-width:480px;margin:0 auto}
+  .cat-section{margin-top:14px}
+  .cat-tag{display:inline-block;font-size:13px;font-weight:700;color:#fff;background:linear-gradient(135deg,#2563eb,#1d4ed8);padding:6px 14px;border-radius:20px;margin-bottom:10px}
+  .item{display:flex;align-items:center;gap:12px;background:#fff;border-radius:14px;padding:10px;margin-bottom:8px;box-shadow:0 1px 4px rgba(0,0,0,.04);position:relative}
+  .item-img{width:72px;height:72px;flex-shrink:0;border-radius:12px;overflow:hidden;background:#f1f5f9}
+  .item-img .product-img{width:72px;height:72px;object-fit:cover}
+  .item-img .emoji-area{width:72px;height:72px;display:flex;align-items:center;justify-content:center;font-size:32px;background:linear-gradient(135deg,#eff6ff,#dbeafe)}
+  .item-info{flex:1;min-width:0}
+  .item .name{font-size:14px;font-weight:700;line-height:1.3;margin-bottom:2px}
+  .item .tag{display:inline-block;font-size:10px;font-weight:600;color:#2563eb;background:#eff6ff;padding:2px 8px;border-radius:6px;margin-bottom:4px}
+  .item .price-row{display:flex;align-items:baseline;gap:6px}
+  .item .orig{font-size:11px;color:#aaa;text-decoration:line-through}
+  .item .price{font-size:18px;font-weight:900;color:#1e40af}
+  .item .discount{position:absolute;top:8px;right:8px;background:#ef4444;color:#fff;font-size:11px;font-weight:800;padding:3px 7px;border-radius:8px}
+  .footer{text-align:center;padding:24px 16px 32px;color:#bbb;font-size:11px}
 </style>
 </head>
 <body>
 <div class="hero">
-  <div class="store-name">${escapeHtml(storeName)}</div>
+  <div class="store">${escapeHtml(storeName)}</div>
   <h1>${escapeHtml(title)}</h1>
   ${period ? `<div class="period">${escapeHtml(period)}</div>` : ''}
 </div>
@@ -261,10 +280,10 @@ function renderListTemplate(storeName: string, title: string, period: string, ca
 }
 
 // ============================================================
-// 템플릿 3: 특가 하이라이트형 (다크 모드, TODAY'S PICK)
+// 템플릿 3: 하이라이트형 (프리미엄 다크 — 골드 강조, TOP PICK 대형)
 // ============================================================
 function renderHighlightTemplate(storeName: string, title: string, period: string, categories: any[]): string {
-  // 할인율 높은 4개 자동 선정 (TODAY'S PICK)
+  // 할인율 높은 4개 자동 선정 (TOP PICK)
   const allItems: any[] = [];
   for (const cat of categories) {
     for (const item of (cat.items || [])) {
@@ -279,16 +298,20 @@ function renderHighlightTemplate(storeName: string, title: string, period: strin
 
   let picksHtml = '';
   if (picks.length > 0) {
-    picksHtml = `<div class="picks-title">TODAY'S PICK</div><div class="picks-grid">`;
+    picksHtml = `<div class="section-label">TOP PICK</div><div class="picks">`;
     for (const p of picks) {
-      const pickGenUrl = toAbsoluteImageUrl(p.imageUrl || resolveProductImageUrl(p.name || ''));
-      const pickImg = renderProductImage(p.name || '', 56, pickGenUrl || undefined);
-      picksHtml += `<div class="pick-card">
-        <div class="discount-badge">${p.discount}% OFF</div>
-        <div class="pick-visual">${pickImg}</div>
-        <div class="name">${escapeHtml(p.name || '')}</div>
-        <div class="orig">₩${formatPrice(p.originalPrice)}</div>
-        <div class="price">₩${formatPrice(p.salePrice || 0)}</div>
+      const pickUrl = toAbsoluteImageUrl(p.imageUrl || resolveProductImageUrl(p.name || ''));
+      const pickImg = renderProductImage(p.name || '', 160, pickUrl || undefined);
+      picksHtml += `<div class="pick">
+        <div class="pick-img">${pickImg}</div>
+        <div class="pick-badge">${p.discount}% OFF</div>
+        <div class="pick-body">
+          <div class="name">${escapeHtml(p.name || '')}</div>
+          <div class="pick-prices">
+            <span class="orig">₩${formatPrice(p.originalPrice)}</span>
+            <span class="price">₩${formatPrice(p.salePrice || 0)}</span>
+          </div>
+        </div>
       </div>`;
     }
     picksHtml += '</div>';
@@ -296,16 +319,20 @@ function renderHighlightTemplate(storeName: string, title: string, period: strin
 
   let itemsHtml = '';
   for (const cat of categories) {
-    itemsHtml += `<div class="cat-title">${escapeHtml(cat.name || '')}</div>`;
+    itemsHtml += `<div class="cat-title">${escapeHtml(cat.name || '')}</div><div class="compact-grid">`;
     for (const item of (cat.items || [])) {
-      const rowGenUrl = toAbsoluteImageUrl(item.imageUrl || resolveProductImageUrl(item.name || ''));
-      const rowImg = renderProductImage(item.name || '', 32, rowGenUrl || undefined);
-      itemsHtml += `<div class="item-row">
-        <div class="row-visual">${rowImg}</div>
-        <span class="name">${escapeHtml(item.name || '')}</span>
-        <span class="price">₩${formatPrice(item.salePrice || 0)}</span>
+      const rowUrl = toAbsoluteImageUrl(item.imageUrl || resolveProductImageUrl(item.name || ''));
+      const rowImg = renderProductImage(item.name || '', 80, rowUrl || undefined);
+      itemsHtml += `<div class="compact-card">
+        <div class="compact-img">${rowImg}</div>
+        <div class="compact-body">
+          <div class="name">${escapeHtml(item.name || '')}</div>
+          <div class="price">₩${formatPrice(item.salePrice || 0)}</div>
+          ${item.badge ? `<span class="tag">${escapeHtml(item.badge)}</span>` : ''}
+        </div>
       </div>`;
     }
+    itemsHtml += '</div>';
   }
 
   return `<!DOCTYPE html>
@@ -316,34 +343,43 @@ function renderHighlightTemplate(storeName: string, title: string, period: strin
 <title>${escapeHtml(title)}</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;900&display=swap');
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: 'Noto Sans KR', sans-serif; background: #0d1117; color: #e6edf3; -webkit-font-smoothing: antialiased; }
-  .hero { background: linear-gradient(135deg, #ff6b35 0%, #e74c3c 100%); text-align: center; padding: 28px 16px 22px; }
-  .hero .store-name { font-size: 13px; letter-spacing: 2px; opacity: 0.9; margin-bottom: 6px; }
-  .hero h1 { font-size: 24px; font-weight: 900; }
-  .hero .period { margin-top: 10px; font-size: 12px; opacity: 0.85; }
-  .content { padding: 16px; max-width: 480px; margin: 0 auto; }
-  .picks-title { font-size: 18px; font-weight: 900; color: #ff6b35; text-align: center; margin: 16px 0 12px; letter-spacing: 2px; }
-  .picks-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px; }
-  .pick-card { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 14px; text-align: center; position: relative; }
-  .pick-card .discount-badge { position: absolute; top: 8px; left: 8px; background: #ff6b35; color: #fff; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 8px; }
-  .pick-card .pick-visual { margin: 8px 0 6px; display: flex; justify-content: center; }
-  .pick-card .pick-visual img { width: 56px; height: 56px; object-fit: cover; border-radius: 10px; box-shadow: 0 2px 6px rgba(0,0,0,0.3); }
-  .pick-card .name { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
-  .pick-card .orig { font-size: 11px; color: #666; text-decoration: line-through; }
-  .pick-card .price { font-size: 18px; font-weight: 900; color: #ff6b35; }
-  .cat-title { font-size: 14px; font-weight: 700; color: #ff6b35; padding: 12px 0 8px; border-bottom: 1px solid #21262d; margin-top: 8px; }
-  .item-row { display: flex; align-items: center; padding: 10px 0; border-bottom: 1px solid #161b22; }
-  .item-row .row-visual { margin-right: 10px; flex-shrink: 0; display: flex; align-items: center; }
-  .item-row .row-visual img { width: 32px; height: 32px; object-fit: cover; border-radius: 6px; }
-  .item-row .name { flex: 1; font-size: 14px; }
-  .item-row .price { font-size: 15px; font-weight: 700; color: #ff6b35; }
-  .footer { text-align: center; padding: 20px 16px 30px; color: #484f58; font-size: 11px; }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:'Noto Sans KR',sans-serif;background:#0f0f0f;color:#e5e5e5;-webkit-font-smoothing:antialiased}
+  .hero{background:linear-gradient(180deg,#1a1a2e 0%,#0f0f0f 100%);text-align:center;padding:36px 16px 28px;border-bottom:2px solid #d4a844}
+  .hero .store{font-size:11px;font-weight:600;letter-spacing:4px;color:#d4a844;text-transform:uppercase;margin-bottom:10px}
+  .hero h1{font-size:24px;font-weight:900;color:#fff;line-height:1.3}
+  .hero .period{margin-top:12px;font-size:12px;color:#888}
+  .content{padding:12px 14px 20px;max-width:480px;margin:0 auto}
+  .section-label{text-align:center;font-size:12px;font-weight:800;letter-spacing:4px;color:#d4a844;margin:20px 0 12px;position:relative}
+  .section-label::before,.section-label::after{content:'';position:absolute;top:50%;width:60px;height:1px;background:#333}
+  .section-label::before{left:0}.section-label::after{right:0}
+  .picks{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:20px}
+  .pick{background:#1a1a1a;border:1px solid #2a2a2a;border-radius:14px;overflow:hidden;position:relative}
+  .pick-img{width:100%;height:140px;overflow:hidden;background:#1a1a1a}
+  .pick-img .product-img{width:100%;height:140px;object-fit:cover}
+  .pick-img .emoji-area{width:100%;height:140px;display:flex;align-items:center;justify-content:center;font-size:48px;background:linear-gradient(135deg,#1a1a2e,#2a2a3e)}
+  .pick-badge{position:absolute;top:10px;left:10px;background:linear-gradient(135deg,#d4a844,#b8860b);color:#000;font-size:11px;font-weight:800;padding:4px 10px;border-radius:8px}
+  .pick-body{padding:10px 12px 14px}
+  .pick .name{font-size:13px;font-weight:700;color:#fff;margin-bottom:4px}
+  .pick-prices{display:flex;align-items:baseline;gap:6px}
+  .pick .orig{font-size:11px;color:#666;text-decoration:line-through}
+  .pick .price{font-size:20px;font-weight:900;color:#d4a844}
+  .cat-title{font-size:13px;font-weight:700;color:#d4a844;padding:14px 0 8px;border-bottom:1px solid #222;margin-top:8px;letter-spacing:1px}
+  .compact-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+  .compact-card{background:#1a1a1a;border-radius:12px;overflow:hidden;border:1px solid #222}
+  .compact-img{width:100%;height:80px;overflow:hidden}
+  .compact-img .product-img{width:100%;height:80px;object-fit:cover}
+  .compact-img .emoji-area{width:100%;height:80px;display:flex;align-items:center;justify-content:center;font-size:32px;background:linear-gradient(135deg,#1a1a2e,#2a2a3e)}
+  .compact-body{padding:8px 10px 10px}
+  .compact-card .name{font-size:12px;font-weight:600;color:#ddd;margin-bottom:2px}
+  .compact-card .price{font-size:16px;font-weight:900;color:#d4a844}
+  .compact-card .tag{display:inline-block;font-size:9px;font-weight:600;color:#d4a844;background:rgba(212,168,68,.1);padding:2px 6px;border-radius:4px;margin-top:2px}
+  .footer{text-align:center;padding:24px 16px 32px;color:#444;font-size:11px}
 </style>
 </head>
 <body>
 <div class="hero">
-  <div class="store-name">${escapeHtml(storeName)}</div>
+  <div class="store">${escapeHtml(storeName)}</div>
   <h1>${escapeHtml(title)}</h1>
   ${period ? `<div class="period">${escapeHtml(period)}</div>` : ''}
 </div>
