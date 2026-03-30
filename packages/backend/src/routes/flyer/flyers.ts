@@ -10,19 +10,65 @@ import { Request, Response, Router } from 'express';
 import crypto from 'crypto';
 import path from 'path';
 import fs from 'fs';
+import multer from 'multer';
+import { v4 as uuidv4 } from 'uuid';
 import { query } from '../../config/database';
 import { authenticate } from '../../middlewares/auth';
 import { getStoreScope } from '../../utils/store-scope';
 import { generateProductImage, generateFlyerImages, getGeneratedImageUrl } from '../../utils/product-images';
 
 const PRODUCT_IMAGE_DIR = process.env.PRODUCT_IMAGE_PATH || path.resolve('./uploads/product-images');
+const FLYER_PRODUCT_DIR = process.env.FLYER_PRODUCT_PATH || path.resolve('./uploads/flyer-products');
+
+// 상품 이미지 업로드용 multer 설정 (MMS 패턴 따라감)
+const productImageUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 1 * 1024 * 1024 }, // 1MB
+  fileFilter: (_req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    const mime = file.mimetype.toLowerCase();
+    if (['.jpg', '.jpeg', '.png', '.webp'].includes(ext) &&
+        ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'].includes(mime)) {
+      cb(null, true);
+    } else {
+      cb(new Error('JPG, PNG, WebP 이미지만 업로드 가능합니다.'));
+    }
+  },
+});
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const router = Router();
 
-// ── 인증 불필요 (공개 엔드포인트 — authenticate 위에 배치) ──
+// ══════════════════════════════════════════
+// 인증 불필요 (공개 엔드포인트 — authenticate 위에 배치)
+// ══════════════════════════════════════════
 
-// GET /product-images/:filename — 생성된 이미지 서빙 (공개 페이지에서 접근)
-// ⚠️ Express가 URL 파라미터를 자동 디코딩하지만, 디스크 파일명은 인코딩 상태이므로 re-encode 필요
+// GET /flyer-products/:companyId/:filename — 직접 업로드 상품 이미지 서빙 (공개)
+router.get('/flyer-products/:companyId/:filename', (req: Request, res: Response) => {
+  try {
+    const { companyId, filename } = req.params;
+    if (!UUID_REGEX.test(companyId)) return res.status(400).json({ error: '잘못된 요청' });
+    if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
+      return res.status(400).json({ error: '잘못된 파일명' });
+    }
+
+    const filePath = path.join(FLYER_PRODUCT_DIR, companyId, filename);
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: '이미지를 찾을 수 없습니다.' });
+    }
+
+    const ext = path.extname(filename).toLowerCase();
+    const mimeMap: Record<string, string> = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp' };
+    res.setHeader('Content-Type', mimeMap[ext] || 'image/jpeg');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    fs.createReadStream(filePath).pipe(res);
+  } catch (err: any) {
+    res.status(500).json({ error: '이미지 로드 실패' });
+  }
+});
+
+// GET /product-images/:filename — DALL-E/PRODUCT_MAP 기본 이미지 서빙 (공개)
 router.get('/product-images/:filename', (req: Request, res: Response) => {
   try {
     const { filename } = req.params;
@@ -41,8 +87,95 @@ router.get('/product-images/:filename', (req: Request, res: Response) => {
   }
 });
 
-// ── 이하 모든 라우트는 인증 필요 ──
+// ══════════════════════════════════════════
+// 이하 모든 라우트는 인증 필요
+// ══════════════════════════════════════════
 router.use(authenticate);
+
+// ============================================================
+// POST /product-image — 상품 이미지 업로드 (1장)
+// ⚠️ /:id 라우트보다 앞에 배치
+// ============================================================
+router.post('/product-image', (req: Request, res: Response) => {
+  const uploadHandler = productImageUpload.single('image');
+
+  uploadHandler(req, res, (err: any) => {
+    if (err) {
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(400).json({ error: '이미지 크기는 1MB 이하여야 합니다.' });
+      }
+      return res.status(400).json({ error: err.message || '이미지 업로드 실패' });
+    }
+
+    const file = req.file;
+    if (!file) {
+      return res.status(400).json({ error: '이미지 파일을 선택해주세요.' });
+    }
+
+    const companyId = (req as any).user?.companyId;
+    if (!companyId) {
+      return res.status(403).json({ error: '회사 정보가 없습니다.' });
+    }
+
+    try {
+      const companyDir = path.join(FLYER_PRODUCT_DIR, companyId);
+      if (!fs.existsSync(companyDir)) {
+        fs.mkdirSync(companyDir, { recursive: true });
+      }
+
+      const ext = path.extname(file.originalname).toLowerCase() || '.jpg';
+      const filename = `${uuidv4()}${ext}`;
+      const filePath = path.join(companyDir, filename);
+
+      fs.writeFileSync(filePath, file.buffer);
+
+      const url = `/api/flyer/flyers/flyer-products/${companyId}/${filename}`;
+      console.log(`[전단AI] 상품 이미지 업로드: ${file.originalname} → ${filename}`);
+
+      return res.json({ url, filename, size: file.size });
+    } catch (error: any) {
+      console.error('[전단AI] 상품 이미지 업로드 실패:', error.message);
+      return res.status(500).json({ error: '이미지 업로드 중 오류가 발생했습니다.' });
+    }
+  });
+});
+
+// ============================================================
+// DELETE /product-image — 상품 이미지 삭제
+// ============================================================
+router.delete('/product-image', async (req: Request, res: Response) => {
+  try {
+    const companyId = (req as any).user?.companyId;
+    if (!companyId) return res.status(403).json({ error: '회사 정보가 없습니다.' });
+
+    const { url } = req.body;
+    if (!url || typeof url !== 'string') {
+      return res.status(400).json({ error: '삭제할 이미지 URL이 필요합니다.' });
+    }
+
+    // URL에서 파일 경로 추출: /api/flyer/flyers/flyer-products/{companyId}/{filename}
+    const match = url.match(/\/flyer-products\/([^/]+)\/([^/]+)$/);
+    if (!match || match[1] !== companyId) {
+      return res.status(403).json({ error: '권한이 없습니다.' });
+    }
+
+    const filename = match[2];
+    if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
+      return res.status(400).json({ error: '잘못된 파일명' });
+    }
+
+    const filePath = path.join(FLYER_PRODUCT_DIR, companyId, filename);
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+      console.log(`[전단AI] 상품 이미지 삭제: ${filename}`);
+    }
+
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error('[전단AI] 상품 이미지 삭제 실패:', err.message);
+    res.status(500).json({ error: '이미지 삭제에 실패했습니다.' });
+  }
+});
 
 // ── 단축URL 코드 생성 (nanoid 대신 crypto) ──
 function generateShortCode(length = 7): string {

@@ -142,7 +142,7 @@ function renderGridTemplate(storeName: string, title: string, period: string, ca
   for (const cat of categories) {
     itemsHtml += `<div class="cat-title">${escapeHtml(cat.name || '')}</div><div class="grid">`;
     for (const item of (cat.items || [])) {
-      const generatedUrl = toAbsoluteImageUrl(resolveProductImageUrl(item.name || ''));
+      const generatedUrl = toAbsoluteImageUrl(item.imageUrl || resolveProductImageUrl(item.name || ''));
       const productImg = renderProductImage(item.name || '', 48, generatedUrl || undefined);
       const discount = item.originalPrice && item.originalPrice > 0
         ? Math.round((1 - item.salePrice / item.originalPrice) * 100) : 0;
@@ -206,7 +206,7 @@ function renderListTemplate(storeName: string, title: string, period: string, ca
   for (const cat of categories) {
     itemsHtml += `<div class="cat-section"><div class="cat-title">${escapeHtml(cat.name || '')}</div>`;
     for (const item of (cat.items || [])) {
-      const listGenUrl = toAbsoluteImageUrl(resolveProductImageUrl(item.name || ''));
+      const listGenUrl = toAbsoluteImageUrl(item.imageUrl || resolveProductImageUrl(item.name || ''));
       const productImg = renderProductImage(item.name || '', 40, listGenUrl || undefined);
       itemsHtml += `<div class="item">
         <div class="item-visual">${productImg}</div>
@@ -281,7 +281,7 @@ function renderHighlightTemplate(storeName: string, title: string, period: strin
   if (picks.length > 0) {
     picksHtml = `<div class="picks-title">TODAY'S PICK</div><div class="picks-grid">`;
     for (const p of picks) {
-      const pickGenUrl = toAbsoluteImageUrl(resolveProductImageUrl(p.name || ''));
+      const pickGenUrl = toAbsoluteImageUrl(p.imageUrl || resolveProductImageUrl(p.name || ''));
       const pickImg = renderProductImage(p.name || '', 56, pickGenUrl || undefined);
       picksHtml += `<div class="pick-card">
         <div class="discount-badge">${p.discount}% OFF</div>
@@ -298,7 +298,7 @@ function renderHighlightTemplate(storeName: string, title: string, period: strin
   for (const cat of categories) {
     itemsHtml += `<div class="cat-title">${escapeHtml(cat.name || '')}</div>`;
     for (const item of (cat.items || [])) {
-      const rowGenUrl = toAbsoluteImageUrl(resolveProductImageUrl(item.name || ''));
+      const rowGenUrl = toAbsoluteImageUrl(item.imageUrl || resolveProductImageUrl(item.name || ''));
       const rowImg = renderProductImage(item.name || '', 32, rowGenUrl || undefined);
       itemsHtml += `<div class="item-row">
         <div class="row-visual">${rowImg}</div>

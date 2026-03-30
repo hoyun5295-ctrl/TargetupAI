@@ -4,7 +4,7 @@ import AlertModal from '../components/AlertModal';
 import { SectionCard, Button, Input, Badge, EmptyState, ConfirmModal, Toast } from '../components/ui';
 import { getProductDisplay } from '../utils/product-images';
 
-interface FlyerItem { name: string; originalPrice: number; salePrice: number; badge?: string; }
+interface FlyerItem { name: string; originalPrice: number; salePrice: number; badge?: string; imageUrl?: string; }
 interface FlyerCategory { name: string; items: FlyerItem[]; }
 interface Flyer { id: string; title: string; store_name: string; period_start: string | null; period_end: string | null; categories: FlyerCategory[]; template: string; status: string; short_code: string | null; click_count: number; created_at: string; }
 
@@ -425,18 +425,53 @@ function ProductRegistrationSection({ categories, setCategories, addCategory, re
 
               <div className="space-y-2">
                 <div className="grid grid-cols-12 gap-2 text-[11px] font-semibold text-text-muted uppercase tracking-wider px-1">
-                  <div className="col-span-4">상품명</div><div className="col-span-2">원가</div><div className="col-span-2">할인가</div><div className="col-span-3">뱃지</div><div className="col-span-1"></div>
+                  <div className="col-span-5">상품명</div><div className="col-span-2">원가</div><div className="col-span-2">할인가</div><div className="col-span-2">뱃지</div><div className="col-span-1"></div>
                 </div>
                 {categories[safeTab].items.map((item, ii) => (
                   <div key={ii} className="grid grid-cols-12 gap-2 items-center">
-                    <input type="text" value={item.name} onChange={e => updateItem(safeTab, ii, 'name', e.target.value)} placeholder="상품명"
-                      className="col-span-4 px-2.5 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 bg-surface" />
+                    <div className="col-span-5 flex items-center gap-2">
+                      <div className="relative flex-shrink-0">
+                        <label className="cursor-pointer block w-9 h-9 rounded-lg border border-dashed border-border hover:border-primary-500 overflow-hidden flex items-center justify-center bg-bg/50 transition-colors">
+                          {item.imageUrl ? (
+                            <img src={`${API_BASE}${item.imageUrl}`} alt="" className="w-full h-full object-cover" />
+                          ) : (
+                            <span className="text-text-muted text-sm">📷</span>
+                          )}
+                          <input type="file" accept="image/*" className="hidden" onChange={async (e) => {
+                            const file = e.target.files?.[0];
+                            if (!file) return;
+                            if (file.size > 1 * 1024 * 1024) { setAlert({ show: true, title: '업로드 오류', message: '이미지 크기는 1MB 이하여야 합니다.', type: 'error' }); return; }
+                            const formData = new FormData();
+                            formData.append('image', file);
+                            try {
+                              const res = await apiFetch(`${API_BASE}/api/flyer/flyers/product-image`, { method: 'POST', body: formData });
+                              if (res.ok) {
+                                const data = await res.json();
+                                updateItem(safeTab, ii, 'imageUrl', data.url);
+                              } else {
+                                const err = await res.json();
+                                setAlert({ show: true, title: '업로드 실패', message: err.error || '이미지 업로드에 실패했습니다.', type: 'error' });
+                              }
+                            } catch { setAlert({ show: true, title: '업로드 실패', message: '네트워크 오류', type: 'error' }); }
+                            e.target.value = '';
+                          }} />
+                        </label>
+                        {item.imageUrl && (
+                          <button onClick={async () => {
+                            try { await apiFetch(`${API_BASE}/api/flyer/flyers/product-image`, { method: 'DELETE', headers: jsonHeaders, body: JSON.stringify({ url: item.imageUrl }) }); } catch {}
+                            updateItem(safeTab, ii, 'imageUrl', '');
+                          }} className="absolute -top-1 -right-1 w-4 h-4 bg-error-500 text-white rounded-full text-[10px] leading-none flex items-center justify-center hover:bg-error-600">✕</button>
+                        )}
+                      </div>
+                      <input type="text" value={item.name} onChange={e => updateItem(safeTab, ii, 'name', e.target.value)} placeholder="상품명"
+                        className="flex-1 min-w-0 px-2.5 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 bg-surface" />
+                    </div>
                     <input type="number" value={item.originalPrice || ''} onChange={e => updateItem(safeTab, ii, 'originalPrice', Number(e.target.value))} placeholder="원가"
                       className="col-span-2 px-2.5 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 bg-surface" />
                     <input type="number" value={item.salePrice || ''} onChange={e => updateItem(safeTab, ii, 'salePrice', Number(e.target.value))} placeholder="할인가"
                       className="col-span-2 px-2.5 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 bg-surface" />
                     <input type="text" value={item.badge || ''} onChange={e => updateItem(safeTab, ii, 'badge', e.target.value)} placeholder="뱃지"
-                      className="col-span-3 px-2.5 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 bg-surface" />
+                      className="col-span-2 px-2.5 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 bg-surface" />
                     <button onClick={() => removeItem(safeTab, ii)} className="col-span-1 text-error-500/60 hover:text-error-500 text-center transition-colors">✕</button>
                   </div>
                 ))}
@@ -508,10 +543,11 @@ function FlyerPreviewRenderer({ title, storeName, periodStart, periodEnd, catego
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
                 {cat.items.map((item, ii) => {
                   const pd = getProductDisplay(item.name);
+                  const imgSrc = item.imageUrl ? `${API_BASE}${item.imageUrl}` : null;
                   return (
                     <div key={ii} style={{ background: colors.card, borderRadius: 6, padding: '6px 8px', border: '1px solid rgba(0,0,0,0.06)', textAlign: 'center' }}>
-                      {pd.imageUrl ? (
-                        <img src={pd.imageUrl} alt={item.name} style={{ width: 36, height: 36, objectFit: 'cover', borderRadius: 6, margin: '0 auto 4px' }} />
+                      {imgSrc ? (
+                        <img src={imgSrc} alt={item.name} style={{ width: 36, height: 36, objectFit: 'cover', borderRadius: 6, margin: '0 auto 4px' }} />
                       ) : (
                         <p style={{ fontSize: 22, margin: '0 0 4px', textAlign: 'center' }}>{pd.emoji}</p>
                       )}
@@ -529,10 +565,11 @@ function FlyerPreviewRenderer({ title, storeName, periodStart, periodEnd, catego
               <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                 {cat.items.map((item, ii) => {
                   const pd = getProductDisplay(item.name);
+                  const imgSrc2 = item.imageUrl ? `${API_BASE}${item.imageUrl}` : null;
                   return (
                     <div key={ii} style={{ background: colors.card, borderRadius: 6, padding: '6px 8px', display: 'flex', alignItems: 'center', gap: 8, border: isLight ? '1px solid rgba(0,0,0,0.06)' : '1px solid rgba(255,255,255,0.08)' }}>
-                      {pd.imageUrl ? (
-                        <img src={pd.imageUrl} alt={item.name} style={{ width: 30, height: 30, objectFit: 'cover', borderRadius: 6, flexShrink: 0 }} />
+                      {imgSrc2 ? (
+                        <img src={imgSrc2} alt={item.name} style={{ width: 30, height: 30, objectFit: 'cover', borderRadius: 6, flexShrink: 0 }} />
                       ) : (
                         <span style={{ fontSize: 18, flexShrink: 0 }}>{pd.emoji}</span>
                       )}
