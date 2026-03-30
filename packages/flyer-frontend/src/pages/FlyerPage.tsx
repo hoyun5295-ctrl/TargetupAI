@@ -506,7 +506,6 @@ function FlyerPreviewRenderer({ title, storeName, periodStart, periodEnd, catego
   const cleanCats = categories.map(c => ({ ...c, items: c.items.filter(i => i.name.trim()) })).filter(c => c.items.length > 0);
   const hasContent = title.trim() || cleanCats.length > 0;
   const period = (periodStart || periodEnd) ? `${fmtDate(periodStart)} ~ ${fmtDate(periodEnd)}` : '';
-  const isLight = template === 'grid' || template === 'list';
 
   if (!hasContent) {
     return (
