@@ -101,6 +101,12 @@ router.get('/', async (req: Request, res: Response) => {
     const params: any[] = [companyId];
     let paramIndex = 2;
 
+    // ★ D100: cancelled/draft 캠페인은 기본 제외 (캘린더/목록에 불필요한 건 표시 방지)
+    //   status 파라미터로 명시 요청 시에만 표시
+    if (!status) {
+      whereClause += ` AND status NOT IN ('cancelled', 'draft')`;
+    }
+
     // 일반 사용자는 본인이 만든 캠페인만
     if (userType === 'company_user' && userId) {
       whereClause += ` AND created_by = $${paramIndex++}`;
@@ -320,8 +326,9 @@ router.post('/test-send', async (req: Request, res: Response) => {
     const testTables = await getTestSmsTables();
     const msgType = (messageType || 'SMS') === 'SMS' ? 'S' : (messageType || 'SMS') === 'LMS' ? 'L' : 'M';
     const mmsImagePaths: string[] = req.body.mmsImagePaths || [];
-    // ★ C5: 테스트 발송 고유 추적 ID — bill_id에 저장하여 결과 조회 시 정확한 매칭 보장
-    const testRequestUid = randomUUID();
+    // ★ D100: bill_id에 userId 저장 (사용자별 테스트 결과 필터 + 사용금액 격리)
+    //   기존 testBillId 사용 → 결과 조회 시 bill_id=userId 필터와 불일치 → company_user 결과 미표시
+    const testBillId = userId || '';
     let sentCount = 0;
     const failedContacts: { phone: string; error: string }[] = [];
 
@@ -340,7 +347,7 @@ router.post('/test-send', async (req: Request, res: Response) => {
             `INSERT INTO ${table} (
               dest_no, call_back, msg_contents, msg_type, title_str, sendreq_time, status_code, rsv1, app_etc1, app_etc2, bill_id, file_name1, file_name2, file_name3
             ) VALUES (?, ?, ?, ?, ?, NOW(), 100, '1', ?, ?, ?, ?, ?, ?)`,
-            [cleanPhone, callbackNumber, testMsg, msgType, testSubject, 'test', companyId, testRequestUid, mmsImagePaths[0] || '', mmsImagePaths[1] || '', mmsImagePaths[2] || '']
+            [cleanPhone, callbackNumber, testMsg, msgType, testSubject, 'test', companyId, testBillId, mmsImagePaths[0] || '', mmsImagePaths[1] || '', mmsImagePaths[2] || '']
           );
         }
 
@@ -354,7 +361,7 @@ router.post('/test-send', async (req: Request, res: Response) => {
             message: testMsg,
             isAd: false,
             resendType: 'NO',  // 테스트는 대체발송 안함
-            requestUid: testRequestUid,
+            requestUid: testBillId,
           });
         }
 
@@ -381,7 +388,7 @@ router.post('/test-send', async (req: Request, res: Response) => {
         await query(
           `INSERT INTO campaign_runs (campaign_id, run_number, target_count, sent_count, status, created_at)
            VALUES ($1, 0, $2, $3, 'failed', NOW())`,
-          [testRequestUid, managerContacts.length, sentCount]
+          [testBillId, managerContacts.length, sentCount]
         );
       } catch (logErr) {
         console.error('[테스트발송] 실패 기록 저장 오류 (발송에는 영향 없음):', logErr);
@@ -392,7 +399,7 @@ router.post('/test-send', async (req: Request, res: Response) => {
       message: `담당자 ${sentCount}명에게 테스트 문자를 발송했습니다.`,
       sentCount,
       // ★ C5: 추적 ID — 프론트에서 결과 조회 시 사용
-      testRequestUid,
+      testBillId,
       contacts: managerContacts.map(c => ({
         name: c.name || '이름없음',
         phone: `${normalizePhone(c.phone).slice(0, 3)}-****-${normalizePhone(c.phone).slice(-4)}`
@@ -558,8 +565,11 @@ router.post('/:id/send', async (req: Request, res: Response) => {
     const defaultCallback = callbackResult.rows[0]?.phone;
 
     // 개별회신번호 사용 여부
-    const useIndividualCallback = campaign.use_individual_callback || false;
+    // ★ D100: use_individual_callback=true인데 individual_callback_column이 없으면 개별회신번호 비활성
+    //   AI가 use_individual_callback=true를 반환했지만 사용자가 컬럼을 지정 안 한 경우
+    //   → callback 컬럼이 비어있는 고객이 callbackMissing으로 잡히는 문제 방지
     const individualCallbackColumn = campaign.individual_callback_column || undefined;
+    const useIndividualCallback = (campaign.use_individual_callback || false) && !!individualCallbackColumn;
 
     if (!defaultCallback && !campaign.callback_number && !useIndividualCallback) {
       return res.status(400).json({ error: '기본 회신번호가 설정되지 않았습니다. 회사 설정에서 기본 회신번호를 등록해주세요.', code: 'NO_DEFAULT_CALLBACK' });
@@ -680,6 +690,15 @@ if (filteredCustomers.length === 0) {
   const errBody = buildCallbackErrorResponse(callbackMissingCount, callbackUnregisteredCount);
   return res.status(400).json(errBody);
 }
+
+    // ★ D100: 동일 캠페인 중복 발송 방지 — 이미 sending/scheduled run이 있으면 차단
+    const existingRun = await query(
+      `SELECT id FROM campaign_runs WHERE campaign_id = $1 AND status IN ('sending', 'scheduled') LIMIT 1`,
+      [id]
+    );
+    if (existingRun.rows.length > 0) {
+      return res.status(400).json({ error: '이미 발송이 진행 중이거나 예약되어 있습니다.' });
+    }
 
     // campaign_runs에 발송 이력 생성 (CT-08 확인 모달 통과 후에만 INSERT)
     const runNumberResult = await query(

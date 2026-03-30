@@ -66,6 +66,7 @@ export async function filterByIndividualCallback(
   if (callbackColumn) {
     // ★ D99: 지정된 컬럼의 값을 callback으로 복사
     // custom_fields JSONB 내부 키(custom_1~15)도 지원
+    // ★ D100: 지정 컬럼 값이 비어있으면 store_phone → callback 폴백 추가
     for (const c of filtered) {
       let val = c[callbackColumn];
       // custom_fields JSONB 내부 키 처리
@@ -73,6 +74,10 @@ export async function filterByIndividualCallback(
         val = c.custom_fields[callbackColumn];
       }
       c.callback = val ? String(val).trim() : '';
+      // 지정 컬럼 비어있으면 store_phone 폴백
+      if (!c.callback && c.store_phone && c.store_phone.trim()) {
+        c.callback = c.store_phone;
+      }
     }
   } else {
     // 기존 동작: store_phone → callback 폴백

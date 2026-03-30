@@ -119,6 +119,11 @@ function renderFlyerPage(flyer: any): string {
 }
 
 function formatDate(d: string | Date): string {
+  // ★ D100: 순수 YYYY-MM-DD는 직접 파싱 (new Date() UTC 변환 → 하루 밀림 방지)
+  if (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d.trim())) {
+    const [, m, day] = d.trim().split('-').map(Number);
+    return `${m}/${day}`;
+  }
   const date = new Date(d);
   return `${date.getMonth() + 1}/${date.getDate()}`;
 }

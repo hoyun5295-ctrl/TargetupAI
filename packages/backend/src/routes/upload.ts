@@ -114,10 +114,15 @@ router.post('/parse', authenticate, upload.single('file'), async (req: Request, 
     }
 
     // 미리보기 (최대 5행)
+    // ★ D100: Date 객체를 YYYY-MM-DD로 변환 — normalizeDate 컨트롤타워 사용 (인라인 금지)
     const preview = dataRows.slice(0, 5).map(row => {
       const obj: any = {};
       headers.forEach((h, idx) => {
-        obj[h] = row[idx];
+        let val = row[idx];
+        if (val instanceof Date) {
+          val = normalizeDate(val) || val;
+        }
+        obj[h] = val;
       });
       return obj;
     });
@@ -140,11 +145,17 @@ router.post('/parse', authenticate, upload.single('file'), async (req: Request, 
     };
 
     // 직접발송/주소록용: includeData=true일 때만 allData 포함
+    // ★ D100: Date 객체를 YYYY-MM-DD 문자열로 변환 — normalizeDate 컨트롤타워 사용
+    //   근본 원인: JSON.stringify(Date) → UTC ISO 문자열("1995-02-28T15:00:00.000Z") → 프론트에서 하루 밀림
     if (includeData) {
       response.allData = dataRows.map(row => {
         const obj: any = {};
         headers.forEach((h, idx) => {
-          obj[h] = row[idx];
+          let val = row[idx];
+          if (val instanceof Date) {
+            val = normalizeDate(val) || val;
+          }
+          obj[h] = val;
         });
         return obj;
       });

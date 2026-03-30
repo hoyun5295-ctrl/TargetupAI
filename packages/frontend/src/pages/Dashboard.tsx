@@ -578,6 +578,8 @@ export default function Dashboard() {
   
   // ★ 미등록 회신번호 확인 모달 — "제외하고 발송" 핸들러
   const handleCallbackConfirmSend = async () => {
+    // ★ D100: 이중 호출 방지 — isSending 체크로 더블클릭 차단
+    if (isSending || directSending || targetSending) return;
     const sendType = callbackConfirm.sendType;
     setCallbackConfirm(defaultCallbackConfirm);
 
@@ -1189,6 +1191,11 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
     // ★ B-D75-03: custom_fields flat 처리는 백엔드 extract API에서 수행 (컨트롤타워 원칙)
     setTargetRecipients(recipients);
     setTargetFieldsMeta(fieldsMeta);
+    // ★ D100: 직접타겟 추출 시 첫 번째 수신자를 샘플로 설정 (담당자테스트용)
+    //   이전: AI 추천에서만 setSampleCustomerRaw → 직접타겟 담당자테스트에 이전 AI 샘플 잔류
+    if (recipients.length > 0) {
+      setSampleCustomerRaw(recipients[0]);
+    }
     setShowDirectTargeting(false);
     setShowTargetSend(true);
     setToast({ show: true, type: 'success', message: `${count.toLocaleString()}명 추출 완료` });
@@ -3149,9 +3156,14 @@ const campaignData = {
                             if (t.subject) setDirectSubject(t.subject);
                             if (t.message_type) setDirectMsgType(t.message_type);
                           }
-                          // ★ D98: MMS 이미지 복원 — mmsServerPathToUrl 컨트롤타워 사용
-                          if (t.message_type === 'MMS' && t.mms_image_paths && Array.isArray(t.mms_image_paths)) {
-                            setMmsUploadedImages(t.mms_image_paths.map((p: string, i: number) => {
+                          // ★ D100: MMS 이미지 복원 — JSON 문자열/배열 양쪽 대응
+                          //   DB에 JSON.stringify()로 저장 → 조회 시 string으로 반환 → Array.isArray 실패 → 이미지 미복원
+                          let mmsPaths = t.mms_image_paths;
+                          if (typeof mmsPaths === 'string') {
+                            try { mmsPaths = JSON.parse(mmsPaths); } catch { mmsPaths = null; }
+                          }
+                          if (t.message_type === 'MMS' && mmsPaths && Array.isArray(mmsPaths)) {
+                            setMmsUploadedImages(mmsPaths.map((p: string, i: number) => {
                               const apiUrl = mmsServerPathToUrl(p);
                               const parts = p.replace(/\\/g, '/').split('/');
                               return { serverPath: p, url: apiUrl, filename: parts[parts.length - 1] || `image_${i + 1}`, size: 0 };

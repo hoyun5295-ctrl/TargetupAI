@@ -632,43 +632,40 @@ router.get('/stats', async (req: Request, res: Response) => {
 
       if (!isProOrAbove) {
         // 무료/스타터/베이직: 테스트 비용을 사용금액에 포함
-        const monthStart = new Date();
-        monthStart.setDate(1);
-        monthStart.setHours(0, 0, 0, 0);
-        const monthStartStr = monthStart.toISOString().split('T')[0];
-
-        // 1) 담당자 테스트발송 (MySQL) — 비용만 합산 (발송건수/성공률 미포함)
-        const testTables = await getTestSmsTables();
-        for (const tbl of testTables) {
-          const testRows = await mysqlQuery(
-            `SELECT
-              SUM(CASE WHEN msg_type = 'S' AND status_code != 100 THEN 1 ELSE 0 END) as test_sms,
-              SUM(CASE WHEN msg_type = 'L' THEN 1 ELSE 0 END) as test_lms
-            FROM ${tbl}
-            WHERE app_etc1 = 'test' AND app_etc2 = ? AND msg_instm >= ?`,
-            [companyId, monthStartStr]
-          );
-          if (testRows && (testRows as any[]).length > 0) {
-            const t = (testRows as any[])[0];
-            testCost += (Number(t.test_sms) || 0) * costSms + (Number(t.test_lms) || 0) * costLms;
-          }
-        }
-
-        // 2) 스팸필터 테스트 (PostgreSQL) — 비용만 합산 (발송건수/성공률 미포함)
-        const sfResult = await query(
-          `SELECT
-            SUM(CASE WHEN r.message_type = 'SMS' THEN 1 ELSE 0 END) as sf_sms,
-            SUM(CASE WHEN r.message_type = 'LMS' THEN 1 ELSE 0 END) as sf_lms
-          FROM spam_filter_test_results r
-          JOIN spam_filter_tests t ON r.test_id = t.id
-          WHERE t.company_id = $1
-            AND t.created_at >= date_trunc('month', (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Seoul'))::date::timestamp AT TIME ZONE 'Asia/Seoul'`,
-          [companyId]
+        // ★ D100: balance_transactions 기반으로 테스트 비용 조회 (근본 해결)
+        //   prepaidDeduct()가 모든 차감(테스트/스팸/발송)에서 created_by=userId를 저장하므로
+        //   balance_transactions 한 곳에서 정확한 사용자별 비용 조회 가능.
+        //   기존 방식(MySQL 테스트 테이블 직접 조회)은 userId 저장 불일치 문제가 있었음.
+        //   → 테스트발송 차감 참조ID = '00000000-0000-0000-0000-000000000000' (더미 UUID)
+        const testCostFilter = userType === 'company_user' && userId ? ' AND created_by = $2' : '';
+        const testCostParams: any[] = userType === 'company_user' && userId ? [companyId, userId] : [companyId];
+        const testCostResult = await query(
+          `SELECT COALESCE(SUM(amount), 0)::numeric as total
+           FROM balance_transactions
+           WHERE company_id = $1
+             AND type = 'deduct'
+             AND reference_id = '00000000-0000-0000-0000-000000000000'
+             AND created_at >= date_trunc('month', (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Seoul'))::date::timestamp AT TIME ZONE 'Asia/Seoul'${testCostFilter}`,
+          testCostParams
         );
-        if (sfResult.rows.length > 0) {
-          const sf = sfResult.rows[0];
-          testCost += (Number(sf.sf_sms) || 0) * costSms + (Number(sf.sf_lms) || 0) * costLms;
-        }
+        testCost += parseFloat(testCostResult.rows[0]?.total ?? 0);
+
+        // 스팸필터 비용도 balance_transactions에서 조회
+        //   스팸필터 차감의 reference_id = spam_filter_tests.id (UUID)
+        //   reference_type = 'campaign' (prepaidDeduct 기본값)
+        //   description에 '스팸' 포함되지 않으므로 spam_filter_tests JOIN으로 식별
+        const sfCostFilter = userType === 'company_user' && userId ? ' AND bt.created_by = $2' : '';
+        const sfCostParams: any[] = userType === 'company_user' && userId ? [companyId, userId] : [companyId];
+        const sfCostResult = await query(
+          `SELECT COALESCE(SUM(bt.amount), 0)::numeric as total
+           FROM balance_transactions bt
+           WHERE bt.company_id = $1
+             AND bt.type = 'deduct'
+             AND bt.reference_id IN (SELECT id::text FROM spam_filter_tests WHERE company_id = $1)
+             AND bt.created_at >= date_trunc('month', (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Seoul'))::date::timestamp AT TIME ZONE 'Asia/Seoul'${sfCostFilter}`,
+          sfCostParams
+        );
+        testCost += parseFloat(sfCostResult.rows[0]?.total ?? 0);
       }
       // 프로 이상: testCost = 0 (무료 제공, 사용금액 미포함)
     } catch (testCostErr) {
@@ -1156,8 +1153,9 @@ router.get('/enabled-fields', async (req: Request, res: Response) => {
             }
           }
 
-          // field_definitions에 타입 정보 없으면 실제 데이터로 감지
-          if (detectedType === 'string' && !defType) {
+          // ★ D100: field_definitions에 타입 정보 없거나 VARCHAR(기본값)이면 실제 데이터로 감지
+          //   업로드 시 fieldType 미전달 → 'VARCHAR' 기본 저장 → 숫자 필드도 string 판정 → 쉼표 미적용
+          if (detectedType === 'string' && (!defType || defType.toUpperCase() === 'VARCHAR')) {
             try {
               const sampleResult = await query(
                 `SELECT DISTINCT custom_fields->>'${row.field_key}' as val

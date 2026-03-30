@@ -8,6 +8,7 @@ import { isValidCustomFieldKey } from '../utils/safe-field-name';
 import { getStoreScope } from '../utils/store-scope';
 import { buildFilterWhereClauseCompat } from '../utils/customer-filter';
 import { aggregateCampaignPerformance } from '../utils/stats-aggregation';
+import { formatDateValue } from '../utils/messageUtils';
 
 
 // ★ D79: 인라인 래퍼 제거 → CT-01 buildFilterWhereClauseCompat 직접 사용
@@ -308,10 +309,8 @@ router.post('/recommend-target', async (req: Request, res: Response) => {
             if (f.dataType === 'number' && !isNaN(Number(val))) {
               sampleCustomer[f.displayName] = Number(val).toLocaleString();
             } else if (f.dataType === 'date' && val) {
-              // ★ D85: 날짜 KST 포맷 통일 — ISO raw 문자열 노출 방지
-              try {
-                sampleCustomer[f.displayName] = new Date(val).toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul' });
-              } catch { sampleCustomer[f.displayName] = String(val); }
+              // ★ D100: 날짜 포맷팅 컨트롤타워 사용 — 순수 YYYY-MM-DD 하루 밀림 방지
+              sampleCustomer[f.displayName] = formatDateValue(val);
             } else {
               sampleCustomer[f.displayName] = String(val);
             }

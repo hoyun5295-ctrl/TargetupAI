@@ -14,7 +14,49 @@ import { VarCatalogEntry } from '../services/ai';
 import { query } from '../config/database';
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// 0) 커스텀 필드 동적 매핑 보강
+// 0-A) 날짜 포맷팅 헬퍼 — 순수 YYYY-MM-DD는 new Date() 없이 직접 파싱
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+/**
+ * ★ D100: 날짜 값을 한국어 포맷으로 변환
+ *
+ * 순수 YYYY-MM-DD → 직접 파싱 (new Date() 사용 시 UTC 자정 해석 → KST 변환에서 하루 밀림)
+ * ISO 타임스탬프(YYYY-MM-DDT...) → new Date() + KST 변환
+ *
+ * 프론트 formatDate.ts의 formatDate()와 동일한 방식.
+ * D99까지 new Date("1995-03-01")로 파싱 → UTC 자정 → KST -9h → "1995. 2. 28." 버그 발생.
+ */
+export function formatDateValue(value: any): string {
+  if (value == null || value === '') return '';
+
+  // Date 객체 직접 처리 — String(Date)은 영문 형식이므로 직접 변환
+  if (value instanceof Date && !isNaN(value.getTime())) {
+    return value.toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul' });
+  }
+
+  const str = String(value).trim();
+
+  // 순수 YYYY-MM-DD — UTC 변환 없이 직접 파싱 (하루 밀림 방지)
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+    const [y, m, d] = str.split('-').map(Number);
+    if (y > 0 && m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+      return `${y}. ${m}. ${d}.`;
+    }
+  }
+
+  // ISO 타임스탬프(T 또는 공백 포함) — KST 변환
+  try {
+    const d = new Date(str);
+    if (!isNaN(d.getTime())) {
+      return d.toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul' });
+    }
+  } catch { /* ignore */ }
+
+  return str;
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 0-B) 커스텀 필드 동적 매핑 보강
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 /**
@@ -146,21 +188,13 @@ export function replaceVariables(
       const numVal = typeof rawValue === 'number' ? rawValue : Number(String(rawValue).replace(/,/g, ''));
       displayValue = !isNaN(numVal) ? numVal.toLocaleString() : String(rawValue);
     } else if (mapping.type === 'date' && rawValue) {
-      // ★ D85: 날짜 KST 고정 — UTC ISO raw 문자열(2003-04-10T15:00:00.000Z) 노출 방지
-      try {
-        displayValue = new Date(rawValue).toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul' });
-      } catch {
-        displayValue = String(rawValue);
-      }
+      // ★ D100: 날짜 KST 고정 — 순수 YYYY-MM-DD는 new Date() 없이 직접 파싱 (하루 밀림 방지)
+      displayValue = formatDateValue(rawValue);
     } else {
-      // ★ D85+D95: 날짜 패턴 자동 감지 — ISO 타임스탬프 + 순수 YYYY-MM-DD 모두 KST 포맷
+      // ★ D100: 날짜 패턴 자동 감지 — 순수 YYYY-MM-DD는 직접 파싱, ISO는 KST 변환
       const strVal = String(rawValue);
       if (/^\d{4}-\d{2}-\d{2}($|T|\s)/.test(strVal)) {
-        try {
-          displayValue = new Date(strVal).toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul' });
-        } catch {
-          displayValue = strVal;
-        }
+        displayValue = formatDateValue(strVal);
       } else {
         displayValue = strVal;
       }

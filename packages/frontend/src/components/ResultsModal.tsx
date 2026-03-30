@@ -843,7 +843,7 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
         {/* ==================== 발송 내역 팝업 ==================== */}
         {showSendDetail && selectedCampaign && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[70]">
-            <div className="bg-white rounded-xl shadow-2xl w-[960px] max-h-[85vh] min-h-[70vh] overflow-hidden flex flex-col">
+            <div className="bg-white rounded-xl shadow-2xl w-[960px] max-h-[85vh] overflow-hidden flex flex-col">
               {/* 헤더 */}
               <div className="flex justify-between items-center px-6 py-4 border-b">
                 <div>
