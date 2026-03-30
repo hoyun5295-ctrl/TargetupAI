@@ -22,10 +22,12 @@ const router = Router();
 // ── 인증 불필요 (공개 엔드포인트 — authenticate 위에 배치) ──
 
 // GET /product-images/:filename — 생성된 이미지 서빙 (공개 페이지에서 접근)
+// ⚠️ Express가 URL 파라미터를 자동 디코딩하지만, 디스크 파일명은 인코딩 상태이므로 re-encode 필요
 router.get('/product-images/:filename', (req: Request, res: Response) => {
   try {
     const { filename } = req.params;
-    const filePath = path.join(PRODUCT_IMAGE_DIR, filename);
+    const encodedFilename = encodeURIComponent(filename.replace(/\.png$/, '')) + '.png';
+    const filePath = path.join(PRODUCT_IMAGE_DIR, encodedFilename);
 
     if (!fs.existsSync(filePath)) {
       return res.status(404).json({ error: '이미지를 찾을 수 없습니다.' });
