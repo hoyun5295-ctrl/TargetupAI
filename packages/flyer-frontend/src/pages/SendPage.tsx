@@ -27,7 +27,7 @@ export default function SendPage({ token }: { token: string }) {
   const [showFlyerPreview, setShowFlyerPreview] = useState(false);
   const [senderNumbers, setSenderNumbers] = useState<string[]>([]);
   const [callback, setCallback] = useState('');
-  const [optOutNumber] = useState('080');
+  const [optOutNumber, setOptOutNumber] = useState('');
   const [sending, setSending] = useState(false);
   const [showSchedule, setShowSchedule] = useState(false);
   const [alert, setAlert] = useState<{ show: boolean; title: string; message: string; type: 'success' | 'error' | 'info' }>({ show: false, title: '', message: '', type: 'info' });
@@ -56,18 +56,29 @@ export default function SendPage({ token }: { token: string }) {
   const [addrFileLoading, setAddrFileLoading] = useState(false);
   const [addrFilePhones, setAddrFilePhones] = useState<string[]>([]);
 
+  // ★ MMS 이미지 (전단AI 전용 — uploads/flyer-mms/ 별도 저장)
+  const mmsInputRef = useRef<HTMLInputElement>(null);
+  const [mmsImages, setMmsImages] = useState<{ serverPath: string; url: string; filename: string; size: number }[]>([]);
+  const [mmsUploading, setMmsUploading] = useState(false);
+
+  // ★ 중복제거 + 수신거부 옵션
+  const [removeDuplicates, setRemoveDuplicates] = useState(true);
+  const [filterUnsubscribes, setFilterUnsubscribes] = useState(true);
+
   // apiFetch가 자동으로 Authorization 헤더 추가
   const maxBytes = msgType === 'SMS' ? 90 : 2000;
 
   // 데이터 로드
   useEffect(() => {
     (async () => {
-      const [fRes, sRes] = await Promise.all([
+      const [fRes, sRes, settRes] = await Promise.all([
         apiFetch(`${API_BASE}/api/flyer/flyers`).catch(() => null),
         apiFetch(`${API_BASE}/api/companies/callback-numbers`).catch(() => null),
+        apiFetch(`${API_BASE}/api/companies/settings`).catch(() => null),
       ]);
       if (fRes?.ok) { const d = await fRes.json(); setFlyers(d.filter((f: Flyer) => f.status === 'published' && f.short_code)); }
       if (sRes?.ok) { const d = await sRes.json(); const nums = (d.numbers || d || []).map((cb: any) => cb.phone || cb.phone_number || cb); setSenderNumbers(nums); if (nums.length > 0) setCallback(nums[0]); }
+      if (settRes?.ok) { const d = await settRes.json(); if (d.reject_number) setOptOutNumber(d.reject_number); }
     })();
   }, [token]);
 
@@ -241,6 +252,37 @@ export default function SendPage({ token }: { token: string }) {
     } catch { setAlert({ show: true, title: '오류', message: '삭제 실패', type: 'error' }); }
   };
 
+  // ★ MMS 이미지 업로드 (전단AI 전용 엔드포인트)
+  const handleMmsUpload = async (files: FileList) => {
+    if (mmsImages.length + files.length > 3) {
+      setAlert({ show: true, title: '첨부 제한', message: 'MMS 이미지는 최대 3장까지 첨부 가능합니다.', type: 'error' });
+      return;
+    }
+    setMmsUploading(true);
+    try {
+      const formData = new FormData();
+      Array.from(files).forEach(f => formData.append('images', f));
+      const res = await apiFetch(`${API_BASE}/api/flyer/flyers/mms-upload`, { method: 'POST', body: formData });
+      const data = await res.json();
+      if (data.success) {
+        setMmsImages(prev => [...prev, ...data.images].slice(0, 3));
+      } else {
+        setAlert({ show: true, title: '업로드 실패', message: data.error || '이미지 업로드에 실패했습니다.', type: 'error' });
+      }
+    } catch { setAlert({ show: true, title: '오류', message: '이미지 업로드 중 오류가 발생했습니다.', type: 'error' }); }
+    finally { setMmsUploading(false); }
+  };
+
+  const handleMmsRemove = async (index: number) => {
+    const img = mmsImages[index];
+    // 서버에서 삭제
+    apiFetch(`${API_BASE}/api/flyer/flyers/mms-image`, {
+      method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ serverPath: img.serverPath }),
+    }).catch(() => {});
+    setMmsImages(prev => prev.filter((_, i) => i !== index));
+  };
+
   // 발송 유효성 검증
   const validateSend = (): { phone: string }[] | null => {
     let phoneList: { phone: string }[];
@@ -252,6 +294,7 @@ export default function SendPage({ token }: { token: string }) {
     if (phoneList.length === 0) { setAlert({ show: true, title: '수신자 필요', message: '수신자를 추가해주세요.', type: 'error' }); return null; }
     if (!message.trim()) { setAlert({ show: true, title: '메시지 필요', message: '메시지를 입력해주세요.', type: 'error' }); return null; }
     if (!callback) { setAlert({ show: true, title: '발신번호 필요', message: '발신번호를 선택해주세요.', type: 'error' }); return null; }
+    if (isAd && !optOutNumber) { setAlert({ show: true, title: '080 번호 필요', message: '광고 문자 발송 시 080 수신거부번호가 필요합니다.\n설정 페이지에서 080 번호를 등록해주세요.', type: 'error' }); return null; }
     if ((msgType === 'LMS' || msgType === 'MMS') && !subject.trim()) { setAlert({ show: true, title: '제목 필요', message: '제목을 입력해주세요.', type: 'error' }); return null; }
     if (msgType === 'SMS' && byteCount > 90) { setAlert({ show: true, title: '바이트 초과', message: `SMS는 90byte까지입니다. (현재 ${byteCount}byte)\nLMS로 전환해주세요.`, type: 'error' }); return null; }
     return phoneList;
@@ -262,11 +305,45 @@ export default function SendPage({ token }: { token: string }) {
     const phoneList = validateSend();
     if (!phoneList) return;
 
+    // ★ 프론트 중복제거 (removeDuplicates 체크 시)
+    let finalRecipients = phoneList;
+    let duplicateCount = 0;
+    if (removeDuplicates) {
+      const seen = new Set<string>();
+      const unique: typeof phoneList = [];
+      for (const r of phoneList) {
+        const normalized = r.phone.replace(/-/g, '');
+        if (!seen.has(normalized)) { seen.add(normalized); unique.push(r); }
+      }
+      duplicateCount = phoneList.length - unique.length;
+      finalRecipients = unique;
+    }
+
+    if (finalRecipients.length === 0) {
+      setAlert({ show: true, title: '수신자 없음', message: '중복 제거 후 유효한 수신자가 없습니다.', type: 'error' });
+      return;
+    }
+
+    // MMS 선택인데 이미지 없으면 확인
+    if (msgType === 'MMS' && mmsImages.length === 0) {
+      setAlert({ show: true, title: '이미지 필요', message: 'MMS 발송 시 이미지를 1장 이상 첨부해주세요.', type: 'error' });
+      return;
+    }
+
     setSending(true);
     try {
       let sendMsg = message;
       if (isAd) { sendMsg = `(광고) ${message}\n${msgType === 'SMS' ? `무료거부${optOutNumber.replace(/-/g, '')}` : `무료수신거부 ${optOutNumber}`}`; }
-      const body: any = { recipients: phoneList, message: sendMsg, subject: (msgType === 'LMS' || msgType === 'MMS') ? subject : undefined, callback, messageType: msgType };
+      const body: any = {
+        recipients: finalRecipients,
+        message: sendMsg,
+        subject: (msgType === 'LMS' || msgType === 'MMS') ? subject : undefined,
+        callback,
+        messageType: msgType,
+        // ★ MMS 이미지 경로 (전단AI 전용 flyer-mms 경로)
+        mmsImagePaths: msgType === 'MMS' ? mmsImages.map(img => img.serverPath) : undefined,
+        // ★ 수신거부 필터링은 백엔드 direct-send가 자동 적용 (filterUnsubscribes는 UI 표시용)
+      };
       if (scheduledAt) { body.scheduled = true; body.scheduledAt = scheduledAt; }
       const res = await apiFetch(`${API_BASE}/api/campaigns/direct-send`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -274,9 +351,12 @@ export default function SendPage({ token }: { token: string }) {
       });
       if (res.ok) {
         const d = await res.json();
-        const msg = scheduledAt ? `${d.totalSent || phoneList.length}건 예약 발송이 설정되었습니다.` : `${d.totalSent || phoneList.length}건 발송 요청되었습니다.`;
+        let msg = scheduledAt
+          ? `${d.totalSent || finalRecipients.length}건 예약 발송이 설정되었습니다.`
+          : `${d.totalSent || finalRecipients.length}건 발송 요청되었습니다.`;
+        if (duplicateCount > 0) msg += `\n(중복 ${duplicateCount}건 제거됨)`;
         setAlert({ show: true, title: scheduledAt ? '예약 완료' : '발송 완료', message: msg, type: 'success' });
-        setDirectPhones(''); setRecipients([]);
+        setDirectPhones(''); setRecipients([]); setMmsImages([]);
       }
       else { const e = await res.json(); setAlert({ show: true, title: '발송 실패', message: e.error || '발송 실패', type: 'error' }); }
     } catch { setAlert({ show: true, title: '오류', message: '네트워크 오류', type: 'error' }); }
@@ -321,8 +401,36 @@ export default function SendPage({ token }: { token: string }) {
               </div>
               {isAd && <p className="text-sm text-brand-600 mt-1">{msgType === 'SMS' ? `무료거부${optOutNumber.replace(/-/g, '')}` : `무료수신거부 ${optOutNumber}`}</p>}
               {msgType === 'MMS' && (
-                <div className="mt-3 pt-3 border-t border-border rounded-lg p-3 bg-warn-50">
-                  <span className="text-xs text-warn-500 font-medium">MMS 이미지 첨부 (준비 중)</span>
+                <div className="mt-3 pt-3 border-t border-border">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-semibold text-text-secondary">MMS 이미지 첨부</span>
+                    <span className="text-[10px] text-text-muted">JPG만 / 300KB 이하 / 최대 3장</span>
+                  </div>
+                  {/* 업로드된 이미지 미리보기 */}
+                  {mmsImages.length > 0 && (
+                    <div className="flex gap-2 mb-2">
+                      {mmsImages.map((img, i) => (
+                        <div key={i} className="relative w-16 h-16 rounded-lg overflow-hidden border border-border bg-bg">
+                          <img src={`${API_BASE}${img.url}`} alt={`MMS ${i + 1}`} className="w-full h-full object-cover" />
+                          <button onClick={() => handleMmsRemove(i)}
+                            className="absolute -top-1 -right-1 w-5 h-5 bg-error-500 text-white rounded-full text-[10px] font-bold flex items-center justify-center hover:bg-error-600">
+                            X
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {/* 업로드 버튼 */}
+                  {mmsImages.length < 3 && (
+                    <>
+                      <input ref={mmsInputRef} type="file" accept=".jpg,.jpeg" multiple className="hidden"
+                        onChange={e => { if (e.target.files && e.target.files.length > 0) { handleMmsUpload(e.target.files); e.target.value = ''; } }} />
+                      <button onClick={() => mmsInputRef.current?.click()} disabled={mmsUploading}
+                        className="w-full py-2 border border-dashed border-border-strong rounded-lg text-xs text-text-secondary hover:border-primary-500 hover:text-primary-600 transition-colors disabled:opacity-50">
+                        {mmsUploading ? '업로드 중...' : `+ 이미지 추가 (${mmsImages.length}/3)`}
+                      </button>
+                    </>
+                  )}
                 </div>
               )}
             </div>
@@ -340,11 +448,20 @@ export default function SendPage({ token }: { token: string }) {
               </Select>
             </div>
 
-            <div className="px-4 py-3 border-t border-border">
+            <div className="px-4 py-3 border-t border-border space-y-2">
               <label className="flex items-center gap-2.5 cursor-pointer">
                 <input type="checkbox" checked={isAd} onChange={e => setIsAd(e.target.checked)} className="w-4 h-4 rounded border-border-strong text-primary-600 focus:ring-primary-500" />
                 <span className="text-sm text-text">광고문구 자동 삽입</span>
                 <span className="text-xs text-text-muted">(광고) + 무료수신거부</span>
+              </label>
+              <label className="flex items-center gap-2.5 cursor-pointer">
+                <input type="checkbox" checked={removeDuplicates} onChange={e => setRemoveDuplicates(e.target.checked)} className="w-4 h-4 rounded border-border-strong text-primary-600 focus:ring-primary-500" />
+                <span className="text-sm text-text">중복번호 자동 제거</span>
+              </label>
+              <label className="flex items-center gap-2.5 cursor-pointer">
+                <input type="checkbox" checked={filterUnsubscribes} onChange={e => setFilterUnsubscribes(e.target.checked)} className="w-4 h-4 rounded border-border-strong text-primary-600 focus:ring-primary-500" />
+                <span className="text-sm text-text">수신거부번호 자동 제거</span>
+                <span className="text-xs text-text-muted">080 수신거부 등록 번호 제외</span>
               </label>
             </div>
 

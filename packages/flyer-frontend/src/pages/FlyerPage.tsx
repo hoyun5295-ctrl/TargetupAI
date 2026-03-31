@@ -91,6 +91,16 @@ export default function FlyerPage({ token }: { token: string }) {
 
   const fmtDate = (d: string | null) => { if (!d) return ''; const dt = new Date(d); return `${dt.getFullYear()}.${dt.getMonth()+1}.${dt.getDate()}`; };
 
+  // ★ 행사 기간 만료 판정
+  const isExpired = (f: Flyer) => {
+    if (!f.period_end) return false;
+    const endStr = typeof f.period_end === 'string' ? f.period_end.slice(0, 10) : '';
+    if (!endStr) return false;
+    const today = new Date();
+    const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    return endStr < todayStr;
+  };
+
   return (
     <>
       {/* ── 목록 뷰 ── */}
@@ -117,7 +127,11 @@ export default function FlyerPage({ token }: { token: string }) {
                         <h3 className="font-bold text-sm text-text truncate">{f.title}</h3>
                         {f.store_name && <p className="text-xs text-text-muted mt-0.5">{f.store_name}</p>}
                       </div>
-                      <Badge variant={f.status === 'published' ? 'success' : 'neutral'}>{f.status === 'published' ? '발행됨' : '임시저장'}</Badge>
+                      {isExpired(f) ? (
+                        <Badge variant="warn">만료</Badge>
+                      ) : (
+                        <Badge variant={f.status === 'published' ? 'success' : 'neutral'}>{f.status === 'published' ? '발행됨' : '임시저장'}</Badge>
+                      )}
                     </div>
                   </div>
                   <div className="px-4 py-3">

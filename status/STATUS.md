@@ -106,6 +106,43 @@
 
 ---
 
+### 🔧 D101 — 0331 PPT 버그리포트 15건 디버깅 (2026-03-31) — ✅ 배포완료
+
+> **배경:** 직원 PPT 0331 버그리포트 15건. 커스텀 필드 타입 동적화, AI 개인화 커스텀필드 지원, 회신번호 자동설정, 수신자 선택삭제 등.
+
+#### 핵심 변경
+- **enrichWithCustomFields** — field_type 기반 동적 type 설정 (기존 'string' 하드코딩 → NUMBER/DATE/VARCHAR 분기)
+- **formatDateValue** — YYMMDD 6자리, YYYYMMDD 8자리 날짜 포맷팅 추가
+- **formatByType** (프론트 신규) — data_type 기반 날짜/숫자/문자열 포맷팅 분기 (formatPreviewValue 대체)
+- **parsePersonalizationDirective** — "개인화 :" 패턴도 감지 (기존 "개인화 필수:" 한정 → 완화)
+- **parseBriefing + generateMessages** — 커스텀 필드 라벨을 availableVars에 동적 추가
+
+#### 수정 파일 (12개)
+- `messageUtils.ts` — enrichWithCustomFields field_type 동적 + formatDateValue YYMMDD + else 분기 소수점 감지
+- `formatDate.ts` (프론트) — formatDatePreview/formatNumberPreview/formatByType 신규 + replaceMessageVars 타입 기반 분기
+- `ai.ts` (services) — parsePersonalizationDirective regex 완화 + parseBriefing 커스텀필드 availableVars 추가
+- `ai.ts` (routes) — generateMessages용 availableVars 커스텀필드 추가 + sampleCustomer 커스텀필드 타입 포맷팅
+- `TargetSendModal.tsx` — 체크박스+선택삭제+중복제거 구현 + 회신번호 드롭다운 비전화번호 필드 제거 + formatByType 교체
+- `AiCampaignSendModal.tsx` — individualCallbackColumn 'store_phone' 기본 전달 + 타입 확장
+- `Dashboard.tsx` — AI 개별회신번호 추천 시 individualCallbackColumn 자동설정
+- `auto-campaign-worker.ts` — 스팸테스트 firstRecipient(타겟 첫 고객) 전달
+- `campaigns.ts` — 직접발송 campaign_runs INSERT 추가
+- `upload.ts` — 커스텀 필드 field_type 자동감지 (날짜→DATE, 숫자→NUMBER)
+- `ResultsModal.tsx` — overscrollBehavior: contain
+- `AutoSendFormModal.tsx` — D-1 알림 "ON (알림번호 미입력)" 표시
+
+#### 교훈
+- **땜질식 수정 절대 금지** — 코드 한 줄 쓰기 전에 PPT 시나리오대로 전체 데이터 경로 추적 + 실서버 데이터 확인. D101에서 5번 이상 고쳐가며 땜질 반복한 원인: 실데이터 미확인 상태에서 추측 기반 코드 작성
+- **enrichWithCustomFields VARCHAR 샘플링 부작용** — 시리얼/고객번호(정수)에 쉼표 찍히는 부작용. field_type에만 의존하는 것이 안전. 자동 감지는 upload.ts에서 1회만
+- **formatPreviewValue 직접 호출 경로 전수 확인** — replaceMessageVars뿐 아니라 TargetSendModal, AiPreviewModal 등 인라인 호출부도 확인 필수
+- **AiCampaignSendModal individualCallbackColumn 미전달** — 한줄로/맞춤한줄 양쪽에서 개별회신번호 선택해도 컬럼 미전달 → 발송 시 대표번호 폴백
+
+#### 서버 확인 필요
+- **버그2:** 엑셀 업로드 시 매장전화번호 미매핑 (데이터 문제 — SH 일부 레코드 store_phone 빈값)
+- **버그14-15:** campaigns 182건/campaign_runs 146건 데이터 존재 — 배포 후 슈퍼관리자 화면 재확인
+
+---
+
 ### 🔧 D100 — PPT 버그리포트 전면 디버깅 + 전단AI 이미지 + 세션 동시접속 (2026-03-31) — ✅ 배포완료
 
 > **배경:** 0327+0330 직원 PPT 버그리포트 전면 수정. 날짜 밀림 근본 해결, 사용금액 격리, 중복예약 방지, 전단AI 이미지 서빙, 세션 동시접속 허용.

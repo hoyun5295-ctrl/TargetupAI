@@ -109,10 +109,33 @@ export default function SettingsPage({ token }: { token: string }) {
           </div>
         </SectionCard>
 
-        {/* 080 수신거부번호 */}
+        {/* 080 수신거부번호 — 직접 설정 가능 */}
         <SectionCard title="080 수신거부번호">
-          <p className="text-sm font-mono text-text">{settings?.opt_out_080_number ? formatPhone(settings.opt_out_080_number) : '미설정'}</p>
-          <p className="text-xs text-text-muted mt-2">080 수신거부번호 변경은 관리자에게 문의해주세요.</p>
+          <div className="space-y-3">
+            <Input
+              value={settings?.reject_number || ''}
+              onChange={e => setSettings({ ...settings, reject_number: e.target.value })}
+              placeholder="예: 080-123-4567"
+            />
+            <div className="flex items-center gap-2">
+              <Button size="sm" onClick={async () => {
+                const phone = (settings?.reject_number || '').trim();
+                if (!phone) { setAlert({ show: true, title: '입력 오류', message: '080 번호를 입력해주세요.', type: 'error' }); return; }
+                try {
+                  const res = await apiFetch(`${API_BASE}/api/companies/settings`, {
+                    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ reject_number: phone }),
+                  });
+                  if (res.ok) {
+                    setAlert({ show: true, title: '저장 완료', message: '080 수신거부번호가 저장되었습니다.', type: 'success' });
+                  } else {
+                    setAlert({ show: true, title: '저장 실패', message: '저장에 실패했습니다.', type: 'error' });
+                  }
+                } catch { setAlert({ show: true, title: '오류', message: '네트워크 오류', type: 'error' }); }
+              }}>저장</Button>
+              <span className="text-xs text-text-muted">광고 문자 발송 시 자동 삽입됩니다</span>
+            </div>
+          </div>
         </SectionCard>
 
         {/* 등록 회신번호 */}

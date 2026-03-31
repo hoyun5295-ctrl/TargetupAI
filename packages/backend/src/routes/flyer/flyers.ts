@@ -16,9 +16,13 @@ import { query } from '../../config/database';
 import { authenticate } from '../../middlewares/auth';
 import { getStoreScope } from '../../utils/store-scope';
 import { generateProductImage, generateFlyerImages, getGeneratedImageUrl } from '../../utils/product-images';
+import { LIMITS } from '../../config/defaults';
 
 const PRODUCT_IMAGE_DIR = process.env.PRODUCT_IMAGE_PATH || path.resolve('./uploads/product-images');
 const FLYER_PRODUCT_DIR = process.env.FLYER_PRODUCT_PATH || path.resolve('./uploads/flyer-products');
+
+// ★ 전단AI 전용 MMS 이미지 저장 경로 (한줄로 uploads/mms/와 완전 분리)
+const FLYER_MMS_DIR = process.env.FLYER_MMS_PATH || path.resolve('./uploads/flyer-mms');
 
 // 상품 이미지 업로드용 multer 설정 (MMS 패턴 따라감)
 const productImageUpload = multer({
@@ -84,13 +88,15 @@ router.get('/product-images/:filename', (req: Request, res: Response) => {
         return res.status(404).json({ error: '이미지를 찾을 수 없습니다.' });
       }
       const ext2 = path.extname(encodedFilename).toLowerCase();
-      res.setHeader('Content-Type', ext2 === '.png' ? 'image/png' : 'image/jpeg');
+      const mimeMap2: Record<string, string> = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp' };
+      res.setHeader('Content-Type', mimeMap2[ext2] || 'image/jpeg');
       res.setHeader('Cache-Control', 'public, max-age=86400');
       return fs.createReadStream(filePath2).pipe(res);
     }
 
     const ext = path.extname(decodedFilename).toLowerCase();
-    res.setHeader('Content-Type', ext === '.png' ? 'image/png' : 'image/jpeg');
+    const mimeMap3: Record<string, string> = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp' };
+    res.setHeader('Content-Type', mimeMap3[ext] || 'image/jpeg');
     res.setHeader('Cache-Control', 'public, max-age=86400');
     fs.createReadStream(filePath).pipe(res);
   } catch (err: any) {
@@ -98,10 +104,105 @@ router.get('/product-images/:filename', (req: Request, res: Response) => {
   }
 });
 
+// ============================================================
+// GET /flyer-mms/:companyId/:filename — 전단AI MMS 이미지 서빙 (공개 — 미리보기용)
+// ★ 한줄로 uploads/mms/와 완전 분리된 경로 (uploads/flyer-mms/)
+// ============================================================
+router.get('/flyer-mms/:companyId/:filename', (req: Request, res: Response) => {
+  const { companyId, filename } = req.params;
+  if (!UUID_REGEX.test(companyId)) return res.status(400).json({ error: '잘못된 요청' });
+  if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
+    return res.status(400).json({ error: '잘못된 파일명' });
+  }
+  const filePath = path.join(FLYER_MMS_DIR, companyId, filename);
+  if (!fs.existsSync(filePath)) return res.status(404).json({ error: '이미지를 찾을 수 없습니다' });
+  res.setHeader('Content-Type', 'image/jpeg');
+  res.setHeader('Cache-Control', 'private, max-age=3600');
+  res.sendFile(path.resolve(filePath));
+});
+
 // ══════════════════════════════════════════
 // 이하 모든 라우트는 인증 필요
 // ══════════════════════════════════════════
 router.use(authenticate);
+
+// ============================================================
+// ★ 전단AI 전용 MMS 이미지 업로드 (한줄로 MMS 보관함과 완전 분리)
+// POST /mms-upload — 최대 3장, JPG만, 300KB 이하
+// 저장 경로: uploads/flyer-mms/{companyId}/
+// ============================================================
+const flyerMmsUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: LIMITS.mmsImageSize, files: LIMITS.mmsImageCount },
+  fileFilter: (_req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    const mime = file.mimetype.toLowerCase();
+    if ((ext === '.jpg' || ext === '.jpeg') && (mime === 'image/jpeg' || mime === 'image/jpg')) {
+      cb(null, true);
+    } else {
+      cb(new Error('JPG 파일만 업로드 가능합니다.'));
+    }
+  },
+});
+
+router.post('/mms-upload', (req: any, res: any) => {
+  const uploadHandler = flyerMmsUpload.array('images', 3);
+  uploadHandler(req, res, async (err: any) => {
+    if (err) {
+      if (err.code === 'LIMIT_FILE_SIZE') return res.status(400).json({ error: '이미지 크기는 300KB 이하여야 합니다' });
+      if (err.code === 'LIMIT_FILE_COUNT') return res.status(400).json({ error: '이미지는 최대 3개까지 첨부 가능합니다' });
+      return res.status(400).json({ error: err.message || '이미지 업로드 실패' });
+    }
+    const files = req.files as Express.Multer.File[];
+    if (!files || files.length === 0) return res.status(400).json({ error: '이미지 파일을 선택해주세요' });
+
+    const companyId = req.user.companyId;
+    if (!companyId) return res.status(400).json({ error: '회사 정보를 찾을 수 없습니다' });
+
+    try {
+      const companyDir = path.join(FLYER_MMS_DIR, companyId);
+      if (!fs.existsSync(companyDir)) fs.mkdirSync(companyDir, { recursive: true });
+
+      const results: { serverPath: string; url: string; filename: string; size: number }[] = [];
+      for (const file of files) {
+        if (file.size > LIMITS.mmsImageSize) {
+          return res.status(400).json({ error: `${file.originalname}: 300KB 초과 (${(file.size / 1024).toFixed(0)}KB)` });
+        }
+        const filename = `${uuidv4()}.jpg`;
+        const filePath = path.join(companyDir, filename);
+        fs.writeFileSync(filePath, file.buffer);
+        results.push({
+          serverPath: path.resolve(filePath),
+          url: `/api/flyer/flyers/flyer-mms/${companyId}/${filename}`,
+          filename,
+          size: file.size,
+        });
+      }
+      console.log(`[전단AI MMS] 이미지 ${results.length}개 업로드 완료 (company: ${companyId})`);
+      return res.json({ success: true, images: results });
+    } catch (error) {
+      console.error('[전단AI MMS] 이미지 업로드 실패:', error);
+      return res.status(500).json({ error: '이미지 업로드 중 오류가 발생했습니다' });
+    }
+  });
+});
+
+// DELETE /mms-image — 전단AI MMS 이미지 삭제
+router.delete('/mms-image', (req: any, res: any) => {
+  const { serverPath } = req.body;
+  if (!serverPath || typeof serverPath !== 'string') return res.status(400).json({ error: '삭제할 이미지 경로가 필요합니다' });
+
+  // 보안: flyer-mms 디렉토리 내의 파일만 삭제 허용
+  const resolved = path.resolve(serverPath);
+  const mmsBase = path.resolve(FLYER_MMS_DIR);
+  if (!resolved.startsWith(mmsBase)) return res.status(403).json({ error: '접근 권한 없음' });
+
+  if (fs.existsSync(resolved)) {
+    fs.unlinkSync(resolved);
+    console.log(`[전단AI MMS] 이미지 삭제: ${resolved}`);
+  }
+  return res.json({ success: true });
+});
 
 // ============================================================
 // POST /product-image — 상품 이미지 업로드 (1장)

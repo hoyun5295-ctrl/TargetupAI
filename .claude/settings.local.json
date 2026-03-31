@@ -77,7 +77,9 @@
       "Bash(find /c/Users/ceo/projects/targetup -type f -name *.log)",
       "Bash(python -m markitdown \"C:\\\\Users\\\\ceo\\\\OneDrive\\\\문서\\\\카카오톡 받은 파일\\\\한줄로_20260331.pptx\")",
       "Bash(python scripts/office/soffice.py --headless --convert-to pdf \"C:\\\\Users\\\\ceo\\\\OneDrive\\\\문서\\\\카카오톡 받은 파일\\\\한줄로_20260331.pptx\")",
-      "Bash(ls \"C:/Program Files \\(x86\\)/LibreOffice/program/soffice.exe\")"
+      "Bash(ls \"C:/Program Files \\(x86\\)/LibreOffice/program/soffice.exe\")",
+      "Bash(grep -E \"\\\\.\\(ts|js\\)$\")",
+      "Bash(find /c/Users/ceo/projects/targetup -name useSessionTimeout* -o -name useSession*)"
     ]
   }
 }

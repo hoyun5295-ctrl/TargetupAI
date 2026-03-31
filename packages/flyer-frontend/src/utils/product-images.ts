@@ -77,6 +77,9 @@ const PRODUCT_MAP: ProductEntry[] = [
   // ── 가공식품 ──
   { keyword: '김치', emoji: '🥬', image: '김치.jpg' },
   { keyword: '라면', emoji: '🍜', image: '라면.jpg' },
+  { keyword: '비비고왕교자', emoji: '🥟', image: '비비고왕교자.webp' },
+  { keyword: '비비고 왕교자', emoji: '🥟', image: '비비고왕교자.webp' },
+  { keyword: '카스맥주', emoji: '🍺', image: '카스맥주.jpeg' },
 ];
 
 export interface ProductDisplay {

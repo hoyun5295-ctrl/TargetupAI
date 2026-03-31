@@ -8,6 +8,9 @@ import BalancePage from './pages/BalancePage';
 import UnsubscribesPage from './pages/UnsubscribesPage';
 import SettingsPage from './pages/SettingsPage';
 import CustomerPage from './pages/CustomerPage';
+import { useSessionTimeout } from './hooks/useSessionTimeout';
+import SessionTimer from './components/SessionTimer';
+import SessionTimeoutModal from './components/SessionTimeoutModal';
 
 export const API_BASE = import.meta.env.VITE_API_URL || '';
 export function getToken(): string { return localStorage.getItem('flyer_token') || ''; }
@@ -62,6 +65,9 @@ function App() {
     return () => window.removeEventListener('flyer-auth-expired', handler);
   }, []);
 
+  // ★ 세션 30분 자동 로그아웃 (전단AI 전용 — 한줄로와 완전 분리)
+  const session = useSessionTimeout({ onLogout: handleLogout });
+
   if (!token || !user) return <LoginPage onLogin={handleLogin} />;
 
   return (
@@ -72,7 +78,7 @@ function App() {
           {/* 좌측: 로고 + 메인 메뉴 */}
           <div className="flex items-center gap-1">
             <button onClick={() => setCurrentPage('flyer')} className="flex items-center mr-6 group">
-              <span className="text-sm font-bold text-text group-hover:text-brand-600 transition-colors">전단AI</span>
+              <span className="text-sm font-bold text-text group-hover:text-brand-600 transition-colors">{user?.company?.name || '한줄전단'}</span>
             </button>
 
             <nav className="flex">
@@ -91,8 +97,10 @@ function App() {
             </nav>
           </div>
 
-          {/* 우측: 부가 메뉴 + 사용자 */}
+          {/* 우측: 세션 타이머 + 부가 메뉴 + 사용자 */}
           <div className="flex items-center gap-1">
+            <SessionTimer remainingSeconds={session.remainingSeconds} totalSeconds={session.totalSeconds} onExtend={session.extendSession} />
+            <div className="w-px h-5 bg-border mx-2" />
             {SUB_MENUS.map(m => (
               <button key={m.key} onClick={() => setCurrentPage(m.key)}
                 className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
@@ -121,6 +129,14 @@ function App() {
         {currentPage === 'unsubscribes' && <UnsubscribesPage token={token} />}
         {currentPage === 'settings' && <SettingsPage token={token} />}
       </main>
+
+      {/* ★ 세션 만료 경고 모달 */}
+      <SessionTimeoutModal
+        isOpen={session.showWarningModal}
+        remainingSeconds={session.remainingSeconds}
+        onExtend={session.extendSession}
+        onLogout={session.handleLogout}
+      />
     </div>
   );
 }

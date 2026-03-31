@@ -50,9 +50,21 @@ router.get('/:code', async (req: Request, res: Response) => {
 
     const flyer = result.rows[0];
 
-    // 만료 체크
+    // 만료 체크 — 단축URL 90일 만료
     if (flyer.expires_at && new Date(flyer.expires_at) < new Date()) {
       return res.status(410).send(renderErrorPage('이 전단지는 기간이 만료되었습니다.'));
+    }
+
+    // ★ 행사 기간 종료 체크 — period_end가 지나면 "행사 종료" 안내
+    if (flyer.period_end) {
+      const periodEndStr = typeof flyer.period_end === 'string' ? flyer.period_end : flyer.period_end.toISOString();
+      // YYYY-MM-DD 형식에서 날짜만 비교 (시간 무시)
+      const endDate = periodEndStr.slice(0, 10);
+      const today = new Date();
+      const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+      if (endDate < todayStr) {
+        return res.status(410).send(renderExpiredPage(flyer.store_name || '', flyer.title || '', endDate));
+      }
     }
 
     // 클릭 로그 기록 (비동기 — 페이지 렌더링 차단하지 않음)
@@ -93,6 +105,44 @@ function renderErrorPage(message: string): string {
 </style>
 </head>
 <body><div class="msg"><h1>${message}</h1><p>hanjul-flyer.kr</p></div></body>
+</html>`;
+}
+
+// ============================================================
+// 행사 종료 안내 페이지
+// ============================================================
+function renderExpiredPage(storeName: string, title: string, endDate: string): string {
+  const [, m, d] = endDate.split('-').map(Number);
+  return `<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>행사 종료 — ${escapeHtml(title)}</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700&display=swap');
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:'Noto Sans KR',sans-serif;background:#f5f5f5;display:flex;align-items:center;justify-content:center;min-height:100vh}
+  .card{text-align:center;padding:48px 32px;background:#fff;border-radius:20px;box-shadow:0 4px 20px rgba(0,0,0,0.08);max-width:360px;width:90%}
+  .icon{font-size:48px;margin-bottom:16px}
+  .store{font-size:12px;color:#999;letter-spacing:2px;margin-bottom:8px}
+  .title{font-size:18px;font-weight:700;color:#333;margin-bottom:8px}
+  .msg{font-size:14px;color:#888;line-height:1.6;margin-bottom:4px}
+  .date{font-size:13px;color:#aaa;margin-top:12px}
+  .footer{margin-top:24px;font-size:11px;color:#ccc}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="icon">📋</div>
+  ${storeName ? `<div class="store">${escapeHtml(storeName)}</div>` : ''}
+  <div class="title">${escapeHtml(title)}</div>
+  <p class="msg">이 행사는 종료되었습니다.</p>
+  <p class="msg">다음 행사를 기대해주세요!</p>
+  <p class="date">행사 기간: ~ ${m}/${d}</p>
+  <div class="footer">hanjul-flyer.kr</div>
+</div>
+</body>
 </html>`;
 }
 
