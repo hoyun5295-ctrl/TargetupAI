@@ -1,97 +1,82 @@
 /**
  * 프론트엔드 상품 이미지 매핑 컨트롤타워
+ * ★ D100: Pixabay 로컬 이미지로 전환 (Unsplash 외국 식재료 → Pixabay 한국 마트 실사)
  * 백엔드 product-images.ts와 동일한 매핑 데이터.
  * FlyerPage.tsx FlyerPreviewRenderer에서 사용.
  */
 
+import { API_BASE } from '../App';
+
 interface ProductEntry {
   keyword: string;
   emoji: string;
-  image: string;
+  image: string;  // 로컬 파일명 (API URL로 변환)
 }
 
 const PRODUCT_MAP: ProductEntry[] = [
   // ── 과일 ──
-  { keyword: '딸기', emoji: '🍓', image: 'https://images.unsplash.com/photo-1464965911861-746a04b4bca6?w=200&h=200&fit=crop' },
-  { keyword: '사과', emoji: '🍎', image: 'https://images.unsplash.com/photo-1560806887-1e4cd0b6cbd6?w=200&h=200&fit=crop' },
-  { keyword: '배', emoji: '🍐', image: 'https://images.unsplash.com/photo-1514756331096-242fdeb70d4a?w=200&h=200&fit=crop' },
-  { keyword: '감', emoji: '🍊', image: 'https://images.unsplash.com/photo-1603532648955-039310d9ed75?w=200&h=200&fit=crop' },
-  { keyword: '귤', emoji: '🍊', image: 'https://images.unsplash.com/photo-1557800636-894a64c1696f?w=200&h=200&fit=crop' },
-  { keyword: '오렌지', emoji: '🍊', image: 'https://images.unsplash.com/photo-1557800636-894a64c1696f?w=200&h=200&fit=crop' },
-  { keyword: '바나나', emoji: '🍌', image: 'https://images.unsplash.com/photo-1571771894821-ce9b6c11b08e?w=200&h=200&fit=crop' },
-  { keyword: '포도', emoji: '🍇', image: 'https://images.unsplash.com/photo-1537640538966-79f369143f8f?w=200&h=200&fit=crop' },
-  { keyword: '수박', emoji: '🍉', image: 'https://images.unsplash.com/photo-1563114773-84221bd62daa?w=200&h=200&fit=crop' },
-  { keyword: '참외', emoji: '🍈', image: 'https://images.unsplash.com/photo-1571575173700-afb9492e6a50?w=200&h=200&fit=crop' },
-  { keyword: '복숭아', emoji: '🍑', image: 'https://images.unsplash.com/photo-1629903439461-1e57e0e804c0?w=200&h=200&fit=crop' },
-  { keyword: '체리', emoji: '🍒', image: 'https://images.unsplash.com/photo-1559181567-c3190ca9959b?w=200&h=200&fit=crop' },
-  { keyword: '토마토', emoji: '🍅', image: 'https://images.unsplash.com/photo-1558818498-28c1e002b655?w=200&h=200&fit=crop' },
-  { keyword: '블루베리', emoji: '🫐', image: 'https://images.unsplash.com/photo-1498557850523-fd3d118b962e?w=200&h=200&fit=crop' },
-  { keyword: '키위', emoji: '🥝', image: 'https://images.unsplash.com/photo-1585059895524-72f83a8c8809?w=200&h=200&fit=crop' },
-  { keyword: '레몬', emoji: '🍋', image: 'https://images.unsplash.com/photo-1590502593747-42a996133562?w=200&h=200&fit=crop' },
-  { keyword: '망고', emoji: '🥭', image: 'https://images.unsplash.com/photo-1553279768-865429fa0078?w=200&h=200&fit=crop' },
-  { keyword: '파인애플', emoji: '🍍', image: 'https://images.unsplash.com/photo-1550258987-190a2d41a8ba?w=200&h=200&fit=crop' },
+  { keyword: '딸기', emoji: '🍓', image: '딸기.jpg' },
+  { keyword: '사과', emoji: '🍎', image: '사과.jpg' },
+  { keyword: '배', emoji: '🍐', image: '배.jpg' },
+  { keyword: '귤', emoji: '🍊', image: '귤.jpg' },
+  { keyword: '오렌지', emoji: '🍊', image: '귤.jpg' },
+  { keyword: '바나나', emoji: '🍌', image: '바나나.jpg' },
+  { keyword: '포도', emoji: '🍇', image: '포도.jpg' },
+  { keyword: '수박', emoji: '🍉', image: '수박.jpg' },
+  { keyword: '참외', emoji: '🍈', image: '참외.jpg' },
+  { keyword: '복숭아', emoji: '🍑', image: '복숭아.jpg' },
+  { keyword: '체리', emoji: '🍒', image: '체리.jpg' },
+  { keyword: '토마토', emoji: '🍅', image: '토마토.jpg' },
+  { keyword: '블루베리', emoji: '🫐', image: '블루베리.jpg' },
+  { keyword: '키위', emoji: '🥝', image: '키위.jpg' },
+  { keyword: '망고', emoji: '🥭', image: '망고.jpg' },
 
   // ── 채소 ──
-  { keyword: '양배추', emoji: '🥬', image: 'https://images.unsplash.com/photo-1594282486552-05b4d80fbb9f?w=200&h=200&fit=crop' },
-  { keyword: '브로콜리', emoji: '🥦', image: 'https://images.unsplash.com/photo-1615485290382-441e4d049cb5?w=200&h=200&fit=crop' },
-  { keyword: '당근', emoji: '🥕', image: 'https://images.unsplash.com/photo-1598170845058-32b9d6a5da37?w=200&h=200&fit=crop' },
-  { keyword: '감자', emoji: '🥔', image: 'https://images.unsplash.com/photo-1518977676601-b53f82aba655?w=200&h=200&fit=crop' },
-  { keyword: '고구마', emoji: '🍠', image: 'https://images.unsplash.com/photo-1590165482129-1b8b27698780?w=200&h=200&fit=crop' },
-  { keyword: '양파', emoji: '🧅', image: 'https://images.unsplash.com/photo-1518977956812-cd3dbadaaf31?w=200&h=200&fit=crop' },
-  { keyword: '마늘', emoji: '🧄', image: 'https://images.unsplash.com/photo-1540148426945-6cf22a6b2383?w=200&h=200&fit=crop' },
-  { keyword: '옥수수', emoji: '🌽', image: 'https://images.unsplash.com/photo-1551754655-cd27e38d2076?w=200&h=200&fit=crop' },
-  { keyword: '고추', emoji: '🌶️', image: 'https://images.unsplash.com/photo-1588252303782-cb80119abd6d?w=200&h=200&fit=crop' },
-  { keyword: '버섯', emoji: '🍄', image: 'https://images.unsplash.com/photo-1504545102780-26774c1bb073?w=200&h=200&fit=crop' },
-  { keyword: '파프리카', emoji: '🫑', image: 'https://images.unsplash.com/photo-1563565375-f3fdfdbefa83?w=200&h=200&fit=crop' },
-  { keyword: '시금치', emoji: '🥬', image: 'https://images.unsplash.com/photo-1576045057995-568f588f82fb?w=200&h=200&fit=crop' },
-  { keyword: '호박', emoji: '🎃', image: 'https://images.unsplash.com/photo-1570586437263-ab629fccc818?w=200&h=200&fit=crop' },
-  { keyword: '오이', emoji: '🥒', image: 'https://images.unsplash.com/photo-1449300079323-02e209d9d3a6?w=200&h=200&fit=crop' },
-  { keyword: '배추', emoji: '🥬', image: 'https://images.unsplash.com/photo-1594282486552-05b4d80fbb9f?w=200&h=200&fit=crop' },
+  { keyword: '양배추', emoji: '🥬', image: '양배추.jpg' },
+  { keyword: '브로콜리', emoji: '🥦', image: '브로콜리.jpg' },
+  { keyword: '당근', emoji: '🥕', image: '당근.jpg' },
+  { keyword: '감자', emoji: '🥔', image: '감자.jpg' },
+  { keyword: '고구마', emoji: '🍠', image: '고구마.jpg' },
+  { keyword: '양파', emoji: '🧅', image: '양파.jpg' },
+  { keyword: '마늘', emoji: '🧄', image: '마늘.jpg' },
+  { keyword: '옥수수', emoji: '🌽', image: '옥수수.jpg' },
+  { keyword: '고추', emoji: '🌶️', image: '고추.jpg' },
+  { keyword: '버섯', emoji: '🍄', image: '버섯.jpg' },
+  { keyword: '파프리카', emoji: '🫑', image: '파프리카.jpg' },
+  { keyword: '시금치', emoji: '🥬', image: '시금치.jpg' },
+  { keyword: '호박', emoji: '🎃', image: '호박.jpg' },
+  { keyword: '오이', emoji: '🥒', image: '오이.jpg' },
+  { keyword: '배추', emoji: '🥬', image: '양배추.jpg' },
 
   // ── 축산 ──
-  { keyword: '소고기', emoji: '🥩', image: 'https://images.unsplash.com/photo-1529692236671-f1f6cf9683ba?w=200&h=200&fit=crop' },
-  { keyword: '한우', emoji: '🥩', image: 'https://images.unsplash.com/photo-1529692236671-f1f6cf9683ba?w=200&h=200&fit=crop' },
-  { keyword: '돼지', emoji: '🥩', image: 'https://images.unsplash.com/photo-1544025162-d76694265947?w=200&h=200&fit=crop' },
-  { keyword: '삼겹살', emoji: '🥓', image: 'https://images.unsplash.com/photo-1544025162-d76694265947?w=200&h=200&fit=crop' },
-  { keyword: '목살', emoji: '🥩', image: 'https://images.unsplash.com/photo-1544025162-d76694265947?w=200&h=200&fit=crop' },
-  { keyword: '닭', emoji: '🍗', image: 'https://images.unsplash.com/photo-1587593810167-a84920ea0781?w=200&h=200&fit=crop' },
-  { keyword: '오리', emoji: '🦆', image: 'https://images.unsplash.com/photo-1504674900247-0877df9cc836?w=200&h=200&fit=crop' },
+  { keyword: '소고기', emoji: '🥩', image: '소고기.jpg' },
+  { keyword: '한우', emoji: '🥩', image: '한우.jpg' },
+  { keyword: '삼겹살', emoji: '🥓', image: '삼겹살.jpg' },
+  { keyword: '목살', emoji: '🥩', image: '목살.jpg' },
+  { keyword: '닭', emoji: '🍗', image: '닭고기.jpg' },
+  { keyword: '닭고기', emoji: '🍗', image: '닭고기.jpg' },
+  { keyword: '오리', emoji: '🦆', image: '오리고기.jpg' },
+  { keyword: '오리고기', emoji: '🦆', image: '오리고기.jpg' },
 
   // ── 수산 ──
-  { keyword: '생선', emoji: '🐟', image: 'https://images.unsplash.com/photo-1510130113356-d26b1e38e34c?w=200&h=200&fit=crop' },
-  { keyword: '연어', emoji: '🐟', image: 'https://images.unsplash.com/photo-1574781330855-d0db8cc6a79c?w=200&h=200&fit=crop' },
-  { keyword: '참치', emoji: '🐟', image: 'https://images.unsplash.com/photo-1544551763-46a013bb70d5?w=200&h=200&fit=crop' },
-  { keyword: '새우', emoji: '🦐', image: 'https://images.unsplash.com/photo-1565680018093-ebb6b9e3a057?w=200&h=200&fit=crop' },
-  { keyword: '오징어', emoji: '🦑', image: 'https://images.unsplash.com/photo-1504544750208-dc0358e63f7f?w=200&h=200&fit=crop' },
-  { keyword: '게', emoji: '🦀', image: 'https://images.unsplash.com/photo-1510130113356-d26b1e38e34c?w=200&h=200&fit=crop' },
-  { keyword: '굴', emoji: '🦪', image: 'https://images.unsplash.com/photo-1606685614236-05afdb945058?w=200&h=200&fit=crop' },
-  { keyword: '고등어', emoji: '🐟', image: 'https://images.unsplash.com/photo-1544551763-46a013bb70d5?w=200&h=200&fit=crop' },
+  { keyword: '연어', emoji: '🐟', image: '연어.jpg' },
+  { keyword: '고등어', emoji: '🐟', image: '고등어.jpg' },
+  { keyword: '새우', emoji: '🦐', image: '새우.jpg' },
+  { keyword: '오징어', emoji: '🦑', image: '오징어.jpg' },
+  { keyword: '게', emoji: '🦀', image: '게.jpg' },
+  { keyword: '조개', emoji: '🐚', image: '조개.jpg' },
 
   // ── 유제품/가공 ──
-  { keyword: '계란', emoji: '🥚', image: 'https://images.unsplash.com/photo-1582722872445-44dc5f7e3c8f?w=200&h=200&fit=crop' },
-  { keyword: '달걀', emoji: '🥚', image: 'https://images.unsplash.com/photo-1582722872445-44dc5f7e3c8f?w=200&h=200&fit=crop' },
-  { keyword: '우유', emoji: '🥛', image: 'https://images.unsplash.com/photo-1563636619-e9143da7973b?w=200&h=200&fit=crop' },
-  { keyword: '치즈', emoji: '🧀', image: 'https://images.unsplash.com/photo-1486297678162-eb2a19b0a32d?w=200&h=200&fit=crop' },
-  { keyword: '빵', emoji: '🍞', image: 'https://images.unsplash.com/photo-1509440159596-0249088772ff?w=200&h=200&fit=crop' },
-  { keyword: '두부', emoji: '🫘', image: 'https://images.unsplash.com/photo-1585032226651-759b368d7246?w=200&h=200&fit=crop' },
-  { keyword: '쌀', emoji: '🍚', image: 'https://images.unsplash.com/photo-1586201375761-83865001e31c?w=200&h=200&fit=crop' },
-
-  // ── 음료 ──
-  { keyword: '커피', emoji: '☕', image: 'https://images.unsplash.com/photo-1495474472287-4d71bcdd2085?w=200&h=200&fit=crop' },
-  { keyword: '맥주', emoji: '🍺', image: 'https://images.unsplash.com/photo-1535958636474-b021ee887b13?w=200&h=200&fit=crop' },
-  { keyword: '와인', emoji: '🍷', image: 'https://images.unsplash.com/photo-1510812431401-41d2bd2722f3?w=200&h=200&fit=crop' },
-  { keyword: '주스', emoji: '🧃', image: 'https://images.unsplash.com/photo-1621506289937-a8e4df240d0b?w=200&h=200&fit=crop' },
-
-  // ── 간식 ──
-  { keyword: '케이크', emoji: '🎂', image: 'https://images.unsplash.com/photo-1578985545062-69928b1d9587?w=200&h=200&fit=crop' },
-  { keyword: '초콜릿', emoji: '🍫', image: 'https://images.unsplash.com/photo-1606312619070-d48b4c652a52?w=200&h=200&fit=crop' },
-  { keyword: '과자', emoji: '🍪', image: 'https://images.unsplash.com/photo-1499636136210-6f4ee915583e?w=200&h=200&fit=crop' },
-  { keyword: '아이스크림', emoji: '🍦', image: 'https://images.unsplash.com/photo-1497034825429-c343d7c6a68f?w=200&h=200&fit=crop' },
+  { keyword: '계란', emoji: '🥚', image: '계란.jpg' },
+  { keyword: '달걀', emoji: '🥚', image: '계란.jpg' },
+  { keyword: '우유', emoji: '🥛', image: '우유.jpg' },
+  { keyword: '치즈', emoji: '🧀', image: '치즈.jpg' },
+  { keyword: '두부', emoji: '🫘', image: '두부.jpg' },
+  { keyword: '소시지', emoji: '🌭', image: '소시지.jpg' },
 
   // ── 가공식품 ──
-  { keyword: '김치', emoji: '🥬', image: 'https://images.unsplash.com/photo-1583224964978-2257b960c3d3?w=200&h=200&fit=crop' },
-  { keyword: '라면', emoji: '🍜', image: 'https://images.unsplash.com/photo-1569058242567-93de6f36f8e6?w=200&h=200&fit=crop' },
-  { keyword: '만두', emoji: '🥟', image: 'https://images.unsplash.com/photo-1534422298391-e4f8c172dddb?w=200&h=200&fit=crop' },
+  { keyword: '김치', emoji: '🥬', image: '김치.jpg' },
+  { keyword: '라면', emoji: '🍜', image: '라면.jpg' },
 ];
 
 export interface ProductDisplay {
@@ -104,7 +89,8 @@ export function getProductDisplay(productName: string): ProductDisplay {
   const name = productName.toLowerCase();
   for (const entry of PRODUCT_MAP) {
     if (name.includes(entry.keyword)) {
-      return { emoji: entry.emoji, imageUrl: entry.image };
+      const imageUrl = `${API_BASE}/api/flyer/flyers/product-images/${encodeURIComponent(entry.image)}`;
+      return { emoji: entry.emoji, imageUrl };
     }
   }
   return { emoji: '📦', imageUrl: null };

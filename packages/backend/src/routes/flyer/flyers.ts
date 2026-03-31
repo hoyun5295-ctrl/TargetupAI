@@ -72,14 +72,25 @@ router.get('/flyer-products/:companyId/:filename', (req: Request, res: Response)
 router.get('/product-images/:filename', (req: Request, res: Response) => {
   try {
     const { filename } = req.params;
-    const encodedFilename = encodeURIComponent(filename.replace(/\.png$/, '')) + '.png';
-    const filePath = path.join(PRODUCT_IMAGE_DIR, encodedFilename);
+    // ★ D100: jpg/png 양쪽 지원 (Pixabay 이미지는 jpg)
+    const decodedFilename = decodeURIComponent(filename);
+    const filePath = path.join(PRODUCT_IMAGE_DIR, decodedFilename);
 
     if (!fs.existsSync(filePath)) {
-      return res.status(404).json({ error: '이미지를 찾을 수 없습니다.' });
+      // 인코딩된 파일명으로 재시도
+      const encodedFilename = encodeURIComponent(decodedFilename);
+      const filePath2 = path.join(PRODUCT_IMAGE_DIR, encodedFilename);
+      if (!fs.existsSync(filePath2)) {
+        return res.status(404).json({ error: '이미지를 찾을 수 없습니다.' });
+      }
+      const ext2 = path.extname(encodedFilename).toLowerCase();
+      res.setHeader('Content-Type', ext2 === '.png' ? 'image/png' : 'image/jpeg');
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+      return fs.createReadStream(filePath2).pipe(res);
     }
 
-    res.setHeader('Content-Type', 'image/png');
+    const ext = path.extname(decodedFilename).toLowerCase();
+    res.setHeader('Content-Type', ext === '.png' ? 'image/png' : 'image/jpeg');
     res.setHeader('Cache-Control', 'public, max-age=86400');
     fs.createReadStream(filePath).pipe(res);
   } catch (err: any) {
