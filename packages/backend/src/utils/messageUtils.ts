@@ -104,61 +104,16 @@ export async function enrichWithCustomFields(
        WHERE company_id = $1 AND (is_hidden = false OR is_hidden IS NULL)`,
       [companyId]
     );
-    // ★ D101: VARCHAR인 기존 데이터도 실제 값 기반 타입 감지 (enabled-fields API와 동일 방식)
-    // 발송 시 1회만 실행, DISTINCT 샘플 5개로 부하 최소화
-    const varcharKeys = defResult.rows
-      .filter((d: any) => !d.field_type || d.field_type.toUpperCase() === 'VARCHAR')
-      .map((d: any) => d.field_key);
-    const detectedTypes: Record<string, 'number' | 'date'> = {};
-    if (varcharKeys.length > 0) {
-      try {
-        // 한 번의 쿼리로 모든 VARCHAR 커스텀 필드 샘플 조회 (성능 최적화)
-        const safeKeys = varcharKeys.filter((k: string) => /^custom_\d{1,2}$/.test(k));
-        if (safeKeys.length > 0) {
-          const sampleRes = await query(
-            `SELECT custom_fields FROM customers
-             WHERE company_id = $1 AND custom_fields IS NOT NULL AND custom_fields != '{}'::jsonb
-             ORDER BY updated_at DESC NULLS LAST LIMIT 5`,
-            [companyId]
-          );
-          for (const fk of safeKeys) {
-            const vals = sampleRes.rows
-              .map((r: any) => r.custom_fields?.[fk])
-              .filter((v: any) => v != null && String(v).trim() !== '')
-              .map((v: any) => String(v).trim());
-            if (vals.length > 0) {
-              // 날짜 감지: YYYY-MM-DD, YYYYMMDD, YYMMDD(월1~12,일1~31) 포함
-              const allDate = vals.every((v: string) => {
-                if (/^\d{4}-\d{2}-\d{2}/.test(v)) return true;
-                if (/^\d{8}$/.test(v)) return true;
-                if (/^\d{6}$/.test(v)) {
-                  const mm = parseInt(v.substring(2, 4));
-                  const dd = parseInt(v.substring(4, 6));
-                  return mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31;
-                }
-                return false;
-              });
-              const allNum = vals.every((v: string) => /^-?\d+(\.\d+)?$/.test(v));
-              // 날짜를 먼저 체크 (YYMMDD 6자리가 숫자로 잘못 분류되는 것 방지)
-              if (allDate) detectedTypes[fk] = 'date';
-              else if (allNum) detectedTypes[fk] = 'number';
-            }
-          }
-        }
-      } catch { /* 감지 실패 시 string 유지 */ }
-    }
-
     for (const def of defResult.rows) {
       const label = def.field_label || def.field_key;
-      // ★ D101: field_type 기반 동적 type 설정 + VARCHAR일 때 샘플링 감지 fallback
+      // ★ D101: field_type 기반 동적 type 설정 (기존 'string' 하드코딩 → 동적)
+      // field_type: VARCHAR→string, NUMBER/INTEGER→number, DATE/DATETIME→date
+      // ⚠️ VARCHAR 자동 샘플링은 하지 않음 — 시리얼/고객번호(정수)에 쉼표 찍히는 부작용 방지
+      // VARCHAR인 경우 replaceVariables else 분기에서 소수점(".") 있는 값만 숫자 포맷팅
       const ft = (def.field_type || 'VARCHAR').toUpperCase();
-      let mappedType: 'string' | 'number' | 'date' =
+      const mappedType: 'string' | 'number' | 'date' =
         ft === 'NUMBER' || ft === 'INTEGER' || ft === 'NUMERIC' ? 'number' :
         ft === 'DATE' || ft === 'DATETIME' ? 'date' : 'string';
-      // VARCHAR인데 실제 데이터가 숫자/날짜이면 감지 결과 사용
-      if (mappedType === 'string' && detectedTypes[def.field_key]) {
-        mappedType = detectedTypes[def.field_key];
-      }
       // 이미 있으면 덮어쓰지 않음 (FIELD_MAP 기본 displayName 우선)
       if (!fieldMappings[label]) {
         fieldMappings[label] = {
