@@ -43,12 +43,18 @@ router.post('/login', async (req: Request, res: Response) => {
         return res.status(401).json({ error: 'Invalid credentials' });
       }
 
-      // ★ 보안: 슈퍼관리자도 서버 측 세션 관리 (DDL-D55로 FK 제거 필요)
-      // 기존 세션 무효화
-      await query(
-        `UPDATE user_sessions SET is_active = false WHERE user_id = $1`,
+      // ★ D100: 슈퍼관리자도 동시 세션 허용 (최대 5개)
+      const adminSessions = await query(
+        `SELECT id FROM user_sessions WHERE user_id = $1 AND is_active = true ORDER BY last_activity_at DESC`,
         [admin.id]
       );
+      if (adminSessions.rows.length >= 5) {
+        const keepIds = adminSessions.rows.slice(0, 4).map((s: any) => s.id);
+        await query(
+          `UPDATE user_sessions SET is_active = false WHERE user_id = $1 AND id != ALL($2::uuid[])`,
+          [admin.id, keepIds]
+        );
+      }
 
       // 새 세션 생성
       const sessionId = crypto.randomUUID();
@@ -159,11 +165,14 @@ router.post('/login', async (req: Request, res: Response) => {
       [user.id]
     );
 
-    if (activeSessions.rows.length > 0) {
-      // 기존 세션 전부 무효화 (발송 중이어도 로그인 허용 — 발송은 백그라운드 처리)
+    // ★ D100: 동시 세션 허용 (최대 5개) — 전단AI+한줄로 메인 동시 사용 지원
+    //   기존: 전부 무효화 → 다른 앱 세션까지 사망 → 전단AI 저장 401 에러
+    //   변경: 5개 초과 시 가장 오래된 것만 정리
+    if (activeSessions.rows.length >= 5) {
+      const keepIds = activeSessions.rows.slice(0, 4).map((s: any) => s.id);
       await query(
-        `UPDATE user_sessions SET is_active = false WHERE user_id = $1`,
-        [user.id]
+        `UPDATE user_sessions SET is_active = false WHERE user_id = $1 AND id != ALL($2::uuid[])`,
+        [user.id, keepIds]
       );
     }
 

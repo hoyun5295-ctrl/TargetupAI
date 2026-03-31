@@ -72,7 +72,9 @@
       "WebFetch(domain:raw.githubusercontent.com)",
       "Bash(wc -l /c/Users/ceo/projects/targetup/packages/backend/src/routes/flyer/*.ts)",
       "Bash(grep -l \"sender_numbers\\\\|callback_numbers\" /c/Users/ceo/projects/targetup/database/*.sql)",
-      "Bash(grep -n \"extract-target\\\\|extractTarget\" /c/Users/ceo/projects/targetup/packages/backend/src/routes/*.ts)"
+      "Bash(grep -n \"extract-target\\\\|extractTarget\" /c/Users/ceo/projects/targetup/packages/backend/src/routes/*.ts)",
+      "Bash(grep -r 'CREATE TABLE.*flyers' --include=*.sql --include=*.ts)",
+      "Bash(find /c/Users/ceo/projects/targetup -type f -name *.log)"
     ]
   }
 }
