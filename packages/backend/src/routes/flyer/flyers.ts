@@ -211,7 +211,8 @@ function requireCompanyId(req: Request, res: Response): string | null {
 
 // ── 브랜드 격리 헬퍼 ──
 async function applyStoreScope(companyId: string, userId: string, userType: string) {
-  if (userType === 'super_admin' || userType === 'admin') return { blocked: false, storeFilter: '', storeParams: [] as string[] };
+  // ★ D100: company_admin도 전체 접근 허용 (기존 'admin'만 체크 → company_admin 403 에러)
+  if (userType === 'super_admin' || userType === 'admin' || userType === 'company_admin') return { blocked: false, storeFilter: '', storeParams: [] as string[] };
 
   const scope = await getStoreScope(companyId, userId);
   if (scope.type === 'blocked') return { blocked: true, storeFilter: '', storeParams: [] };

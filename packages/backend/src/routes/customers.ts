@@ -661,7 +661,7 @@ router.get('/stats', async (req: Request, res: Response) => {
            FROM balance_transactions bt
            WHERE bt.company_id = $1
              AND bt.type = 'deduct'
-             AND bt.reference_id IN (SELECT id::text FROM spam_filter_tests WHERE company_id = $1)
+             AND bt.reference_id IN (SELECT id FROM spam_filter_tests WHERE company_id = $1)
              AND bt.created_at >= date_trunc('month', (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Seoul'))::date::timestamp AT TIME ZONE 'Asia/Seoul'${sfCostFilter}`,
           sfCostParams
         );
