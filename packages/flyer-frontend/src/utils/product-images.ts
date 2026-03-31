@@ -77,9 +77,10 @@ const PRODUCT_MAP: ProductEntry[] = [
   // ── 가공식품 ──
   { keyword: '김치', emoji: '🥬', image: '김치.jpg' },
   { keyword: '라면', emoji: '🍜', image: '라면.jpg' },
-  { keyword: '비비고왕교자', emoji: '🥟', image: '비비고왕교자.webp' },
-  { keyword: '비비고 왕교자', emoji: '🥟', image: '비비고왕교자.webp' },
-  { keyword: '카스맥주', emoji: '🍺', image: '카스맥주.jpeg' },
+  { keyword: '비비고왕교자', emoji: '🥟', image: '비비고 왕교자.webp' },
+  { keyword: '비비고 왕교자', emoji: '🥟', image: '비비고 왕교자.webp' },
+  { keyword: '카스 500ml', emoji: '🍺', image: '카스 500ML.jpeg' },
+  { keyword: '카스 500ML', emoji: '🍺', image: '카스 500ML.jpeg' },
 ];
 
 export interface ProductDisplay {
@@ -91,7 +92,7 @@ export interface ProductDisplay {
 export function getProductDisplay(productName: string): ProductDisplay {
   const name = productName.toLowerCase();
   for (const entry of PRODUCT_MAP) {
-    if (name.includes(entry.keyword)) {
+    if (name.includes(entry.keyword.toLowerCase())) {
       const imageUrl = `${API_BASE}/api/flyer/flyers/product-images/${encodeURIComponent(entry.image)}`;
       return { emoji: entry.emoji, imageUrl };
     }

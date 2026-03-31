@@ -56,12 +56,22 @@ router.get('/:code', async (req: Request, res: Response) => {
     }
 
     // ★ 행사 기간 종료 체크 — period_end가 지나면 "행사 종료" 안내
+    // KST 기준 비교 (UTC → KST 변환 시 하루 밀림 방지)
     if (flyer.period_end) {
-      const periodEndStr = typeof flyer.period_end === 'string' ? flyer.period_end : flyer.period_end.toISOString();
-      // YYYY-MM-DD 형식에서 날짜만 비교 (시간 무시)
-      const endDate = periodEndStr.slice(0, 10);
-      const today = new Date();
-      const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+      let endDate: string;
+      const raw = flyer.period_end;
+      if (typeof raw === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(raw.trim())) {
+        // 순수 YYYY-MM-DD 문자열이면 그대로 사용
+        endDate = raw.trim();
+      } else {
+        // Date 객체 또는 TIMESTAMP → KST 기준 날짜 추출
+        const KST_OFFSET = 9 * 60 * 60 * 1000;
+        const kst = new Date(new Date(raw).getTime() + KST_OFFSET);
+        endDate = kst.toISOString().slice(0, 10);
+      }
+      // 오늘 날짜도 KST 기준
+      const nowKst = new Date(Date.now() + 9 * 60 * 60 * 1000);
+      const todayStr = nowKst.toISOString().slice(0, 10);
       if (endDate < todayStr) {
         return res.status(410).send(renderExpiredPage(flyer.store_name || '', flyer.title || '', endDate));
       }
