@@ -1686,6 +1686,16 @@ router.post('/direct-send', async (req: Request, res: Response) => {
         `UPDATE campaigns SET status = $1, sent_count = $2, fail_count = $3, sent_at = NOW(), updated_at = NOW() WHERE id = $4`,
         [immediateStatus, directTotalSent, directFailTotal, campaignId]
       );
+      // ★ D101: 직접발송도 campaign_runs INSERT (슈퍼관리자 캠페인 상세조회에서 데이터 필요)
+      try {
+        await query(
+          `INSERT INTO campaign_runs (campaign_id, run_number, target_count, sent_count, status, sent_at, created_at)
+           VALUES ($1, 1, $2, $3, $4, NOW(), NOW())`,
+          [campaignId, filteredRecipients.length, directTotalSent, immediateStatus]
+        );
+      } catch (runErr) {
+        console.warn('[direct-send] campaign_runs INSERT 실패 (발송에 영향 없음):', runErr);
+      }
     }
 
     // ★ AI 학습 데이터 적재 — 직접발송 (비동기, 실패해도 발송에 영향 없음)

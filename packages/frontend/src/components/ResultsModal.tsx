@@ -242,7 +242,7 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
         </div>
 
         {/* 콘텐츠 */}
-        <div className="flex-1 overflow-y-auto p-5">
+        <div className="flex-1 overflow-y-auto p-5" style={{ overscrollBehavior: 'contain' }}>
           {activeTab === 'summary' && (
             <div className="space-y-4">
               {/* 기간 선택 + 필터 */}

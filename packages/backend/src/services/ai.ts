@@ -149,7 +149,8 @@ function parsePersonalizationDirective(
   input: string,
   availableVars: string[]
 ): { cleanPrompt: string; requestedVars: string[] } | null {
-  const match = input.match(/개인화\s*필수\s*[:：]\s*(.+)$/);
+  // ★ D101: "개인화 필수:" 뿐 아니라 "개인화 :", "개인화:" 도 감지 (사용자 입력 유연성)
+  const match = input.match(/개인화\s*(?:필수)?\s*[:：]\s*(.+)$/);
   if (!match || match.index === undefined) return null;
 
   const cleanPrompt = input.substring(0, match.index).trim();
@@ -888,10 +889,27 @@ export async function recommendTarget(
   // ★ 변수 카탈로그 추출 (customer_schema 기반, 없으면 FIELD_MAP 동적 생성)
   const { fieldMappings, availableVars } = extractVarCatalog(companyInfo?.customer_schema);
 
+  // ★ D101: 커스텀 필드 라벨을 availableVars + fieldMappings에 먼저 추가
+  // parsePersonalizationDirective보다 먼저 실행해야 "개인화 : 시리얼" 파싱 가능
+  const earlyFieldDefs = await detectActiveFields(companyId);
+  for (const [fieldKey, label] of Object.entries(earlyFieldDefs.customFieldLabels)) {
+    if (!availableVars.includes(label)) {
+      availableVars.push(label);
+      fieldMappings[label] = {
+        column: fieldKey,
+        type: 'string',
+        description: label,
+        sample: '',
+        storageType: 'custom_fields' as any,
+      };
+    }
+  }
+
   // 키워드 감지: 개별회신번호
   const useIndividualCallback = /매장번호|각 매장|주이용매장|개별번호|각자 번호/.test(objective);
-  
+
   // ★ "개인화 필수:" 명시적 파싱 우선, 없으면 기존 자동 감지 (하위호환)
+  // ★ D101: availableVars에 커스텀 필드 라벨이 이미 포함되어 있으므로 "개인화 : 시리얼" 매칭 가능
   const personalizationDirective = parsePersonalizationDirective(objective, availableVars);
   const cleanObjective = personalizationDirective?.cleanPrompt || objective;
 
@@ -912,14 +930,14 @@ export async function recommendTarget(
   const brandName = companyInfo?.brand_name || companyInfo?.company_name || '브랜드';
   const hasKakaoProfile = companyInfo?.has_kakao_profile || false;
 
-  // ★ D84: 공통 함수 detectActiveFields 호출 (기존 인라인 로직 제거)
-  const { activeColumnFields, customFieldLabels, distinctValues } = await detectActiveFields(companyId);
+  // ★ D101: detectActiveFields는 위에서 이미 호출됨 (earlyFieldDefs)
+  const { activeColumnFields, customFieldLabels, distinctValues } = earlyFieldDefs;
 
   // 하위호환: 기존 변수명 유지
   const genders = (distinctValues['gender'] || []).join(', ');
   const grades = (distinctValues['grade'] || []).join(', ');
   const regions = (distinctValues['region'] || []).join(', ');
-  
+
   // ★ 변수 카탈로그 프롬프트 — 개인화 필수 지정 시 해당 변수만 표시
   const effectiveVars = (personalizationDirective?.requestedVars.length)
     ? personalizationDirective.requestedVars

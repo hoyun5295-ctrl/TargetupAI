@@ -1288,8 +1288,13 @@ const handleAiCampaignGenerate = async (promptOverride?: string, autoRelax?: boo
     setIsAd(result.is_ad !== false);
     
     // 개별회신번호 자동 설정
+    // ★ D101: AI가 개별회신번호 추천 시 컬럼도 자동 설정 (store_phone 기본)
+    // individualCallbackColumn이 빈 문자열이면 발송 시 useIndividualCallback=false로 폴백되는 버그 방지
     if (result.use_individual_callback) {
       setUseIndividualCallback(true);
+      if (!individualCallbackColumn) {
+        setIndividualCallbackColumn('store_phone');
+      }
     }
   
     // 팝업 열기

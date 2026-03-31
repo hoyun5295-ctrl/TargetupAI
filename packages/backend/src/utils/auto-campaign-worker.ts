@@ -188,6 +188,22 @@ async function generateMessageForAutoCampaign(ac: any): Promise<void> {
       let testedVariants = aiResult.variants;
 
       if (ac.callback_number && channel !== '카카오') {
+        // ★ D101: 타겟 첫 번째 고객 조회 (스팸테스트 개인화 치환용)
+        let firstRecipient: Record<string, any> | undefined;
+        try {
+          const filterResult = buildFilterQueryCompat(ac.target_filter, ac.company_id);
+          const firstCustResult = await query(
+            `SELECT * FROM customers WHERE company_id = $1 AND is_active = true AND sms_opt_in = true ${filterResult.where ? 'AND ' + filterResult.where : ''} ORDER BY updated_at DESC LIMIT 1`,
+            [ac.company_id, ...filterResult.params]
+          );
+          if (firstCustResult.rows.length > 0) {
+            const c = firstCustResult.rows[0];
+            firstRecipient = { ...c, ...(c.custom_fields || {}) };
+          }
+        } catch (e) {
+          console.warn(`${logPrefix} 스팸테스트용 첫 고객 조회 실패 (무시):`, e);
+        }
+
         try {
           const spamResult = await autoSpamTestWithRegenerate({
             companyId: ac.company_id,
@@ -201,6 +217,7 @@ async function generateMessageForAutoCampaign(ac: any): Promise<void> {
             })),
             isAd: ac.is_ad || false,
             rejectNumber: companyInfo.reject_number,
+            firstRecipient,
             regenerateCallback: async (blockedVariantId: string) => {
               try {
                 console.log(`${logPrefix} 스팸 차단 variant ${blockedVariantId} 재생성`);

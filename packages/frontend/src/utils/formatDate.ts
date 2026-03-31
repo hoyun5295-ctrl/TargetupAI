@@ -220,9 +220,69 @@ export const DIRECT_MAPPING_FIELDS: { key: string; label: string }[] = [
   { key: 'extra3', label: '기타3' },
 ];
 
+/**
+ * ★ D101: 날짜 값을 한국어 포맷으로 변환 (프론트 전용)
+ * YYYY-MM-DD, YYYYMMDD, YYMMDD, ISO 타임스탬프 모두 처리
+ * 백엔드 messageUtils.ts formatDateValue와 동일 로직 (프론트/백엔드 일치 보장)
+ */
+function formatDatePreview(val: any): string {
+  if (val == null || val === '') return '';
+  const str = String(val).trim();
+  // 순수 YYYY-MM-DD
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return formatDate(str);
+  // ISO 타임스탬프
+  if (/^\d{4}-\d{2}-\d{2}(T|\s)/.test(str)) {
+    const d = safeParse(str);
+    if (!isNaN(d.getTime())) return d.toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul' });
+    return formatDate(str.slice(0, 10));
+  }
+  // YYYYMMDD 8자리
+  if (/^\d{8}$/.test(str)) {
+    const y = parseInt(str.substring(0, 4));
+    const m = parseInt(str.substring(4, 6));
+    const d = parseInt(str.substring(6, 8));
+    if (y > 0 && m >= 1 && m <= 12 && d >= 1 && d <= 31) return `${y}. ${m}. ${d}.`;
+  }
+  // YYMMDD 6자리
+  if (/^\d{6}$/.test(str)) {
+    const yy = parseInt(str.substring(0, 2));
+    const m = parseInt(str.substring(2, 4));
+    const d = parseInt(str.substring(4, 6));
+    if (m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+      const y = yy >= 0 && yy <= 50 ? 2000 + yy : 1900 + yy;
+      return `${y}. ${m}. ${d}.`;
+    }
+  }
+  return str;
+}
+
+/**
+ * ★ D101: 숫자 값을 천단위 쉼표 포맷 (소수점 제거)
+ */
+function formatNumberPreview(val: any): string {
+  if (val == null || val === '') return '';
+  const str = String(val).trim();
+  // 0으로 시작하는 순수 숫자 (전화번호) — 포맷팅 제외
+  if (/^0\d+$/.test(str.replace(/,/g, ''))) return str;
+  const num = Number(str.replace(/,/g, ''));
+  if (!isNaN(num) && Number.isFinite(num)) return num.toLocaleString('ko-KR');
+  return str;
+}
+
+/**
+ * ★ D101: 필드 data_type 기반 포맷팅 (type-aware)
+ * date → formatDatePreview, number → formatNumberPreview, 기타 → formatPreviewValue
+ */
+export function formatByType(val: any, dataType?: string): string {
+  if (val == null || val === '') return '';
+  if (dataType === 'date') return formatDatePreview(val);
+  if (dataType === 'number') return formatNumberPreview(val);
+  return formatPreviewValue(val);
+}
+
 export function replaceMessageVars(
   text: string,
-  fields: { field_key: string; field_label?: string; display_name?: string }[],
+  fields: { field_key: string; field_label?: string; display_name?: string; data_type?: string; field_type?: string }[],
   customerData: Record<string, any>,
   options?: { removeUnmatched?: boolean; extraReplacements?: Record<string, string> }
 ): string {
@@ -232,19 +292,27 @@ export function replaceMessageVars(
   // regex 특수문자 이스케이프 (라벨에 괄호 등 포함 시 에러 방지)
   const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+  // ★ D101: field_key → data_type 매핑 생성 (column 키 치환 시에도 타입 인식)
+  const typeMap: Record<string, string> = {};
+  for (const f of fields) {
+    const dt = f.data_type || (f.field_type ? f.field_type.toLowerCase() : undefined);
+    if (dt) typeMap[f.field_key] = dt;
+  }
+
   // 필드 정의 기반 치환 (field_label → field_key 매핑)
   for (const f of fields) {
     const label = f.field_label || f.display_name || f.field_key;
     const val = customerData[f.field_key];
+    const dt = f.data_type || (f.field_type ? f.field_type.toLowerCase() : undefined);
     if (label && val != null) {
-      result = result.replace(new RegExp(`%${escapeRegex(label)}%`, 'g'), formatPreviewValue(val));
+      result = result.replace(new RegExp(`%${escapeRegex(label)}%`, 'g'), formatByType(val, dt));
     }
   }
 
   // column 키로도 치환 (sampleCustomer가 column 키일 때 호환)
   for (const [k, v] of Object.entries(customerData)) {
     if (v != null) {
-      result = result.replace(new RegExp(`%${escapeRegex(k)}%`, 'g'), formatPreviewValue(v));
+      result = result.replace(new RegExp(`%${escapeRegex(k)}%`, 'g'), formatByType(v, typeMap[k]));
     }
   }
 

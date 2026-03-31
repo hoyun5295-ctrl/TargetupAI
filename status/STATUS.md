@@ -106,6 +106,37 @@
 
 ---
 
+### 🔧 D100 — PPT 버그리포트 전면 디버깅 + 전단AI 이미지 + 세션 동시접속 (2026-03-31) — ✅ 배포완료
+
+> **배경:** 0327+0330 직원 PPT 버그리포트 전면 수정. 날짜 밀림 근본 해결, 사용금액 격리, 중복예약 방지, 전단AI 이미지 서빙, 세션 동시접속 허용.
+
+#### 신규 컨트롤타워
+- **formatDateValue** (messageUtils.ts) — 날짜 표시용 포맷팅 컨트롤타워 (순수 YYYY-MM-DD 직접 파싱, ISO→KST 변환). 백엔드 전 경로 통합.
+
+#### 수정 파일 (12개)
+- `messageUtils.ts` — formatDateValue 컨트롤타워 신설 (export). replaceVariables에서 사용. Date 객체 방어 처리
+- `ai.ts` — sampleCustomer 날짜 포맷팅 → formatDateValue import로 통합 (인라인 new Date() 제거)
+- `upload.ts` — parse API preview+allData에서 Date 객체 → normalizeDate() 컨트롤타워 (JSON.stringify UTC 밀림 방지)
+- `customers.ts` — (1) 테스트/스팸 비용 balance_transactions 기반 전환 (created_by 격리) (2) enabled-fields VARCHAR일 때도 데이터 샘플링
+- `campaigns.ts` — (1) testBillId=userId 저장 (2) cancelled/draft 캘린더 기본 제외 (3) campaign_runs 중복 INSERT 차단 (4) useIndividualCallback 컬럼 존재 조건
+- `callback-filter.ts` — callbackColumn 지정 시에도 값 비면 store_phone 폴백
+- `Dashboard.tsx` — (1) sampleCustomerRaw 타겟추출 시 업데이트 (2) MMS 템플릿 JSON.parse 추가 (3) 모달 이중호출 방지
+- `ResultsModal.tsx` — 발송내역 min-h-[70vh] 제거
+- `auth.ts` — 동시 세션 최대 5개 허용 (전단AI+메인 동시 사용 지원)
+- `flyer/flyers.ts` — (1) company_admin 권한 추가 (403 수정) (2) product-images jpg 서빙 지원
+- `flyer/short-urls.ts` — 인라인 formatDate 순수 YYYY-MM-DD 직접 파싱
+- `product-images.ts` (백엔드+프론트) — Unsplash→Pixabay 로컬 이미지 47개 매핑 + resolveProductImageUrl 활성화
+
+#### 교훈
+- **new Date("YYYY-MM-DD") UTC 자정 해석** — 순수 날짜 문자열을 new Date()로 파싱하면 UTC 자정 → KST 변환 시 하루 전. 직접 파싱 필수
+- **JSON.stringify(Date) UTC ISO 변환** — 엑셀 Date 객체가 API 응답에 포함되면 "1995-02-28T15:00:00.000Z"로 전달 → 프론트에서 하루 밀림. API 반환 전 normalizeDate 필수
+- **로그인 시 기존 세션 전부 무효화** — 전단AI+메인이 같은 JWT/세션 사용 → 한쪽 로그인 시 다른쪽 세션 사망. 동시 세션 허용으로 해결
+- **company_admin vs admin 타입 체크 누락** — JWT userType='company_admin'인데 코드에서 'admin'만 체크 → 403
+- **balance_transactions가 유일한 비용 SoT** — MySQL 테스트 테이블에는 userId 미저장이었으므로 balance_transactions(created_by 정확) 기반으로 전환
+- **커스텀 필드 field_type='VARCHAR' 기본값** — 업로드 시 fieldType 미전달 → 'VARCHAR' 저장 → enabled-fields에서 숫자 감지 건너뜀 → 쉼표 미적용. VARCHAR일 때도 샘플링 필요
+
+---
+
 ### 🔧 D99 — 브랜드메시지 수신자 확장 + 날짜 밀림 최종 수정 + 개별회신번호 컬럼 선택 (2026-03-28) — ✅ 배포완료
 
 > **배경:** 브랜드메시지 수신자 입력 3탭(직접입력/파일등록/DB추출) + 미리보기 통합 + 날짜 밀림 근본 수정 + 개별회신번호 컬럼 선택 기능.

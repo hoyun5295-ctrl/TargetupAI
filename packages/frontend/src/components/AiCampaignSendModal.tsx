@@ -10,6 +10,7 @@ interface AiCampaignSendModalProps {
     customSendTime: string;
     selectedCallback: string;
     useIndividualCallback: boolean;
+    individualCallbackColumn?: string;
     subject?: string;
   }) => void;
   isSending: boolean;
@@ -86,6 +87,8 @@ export default function AiCampaignSendModal({
       customSendTime,
       selectedCallback,
       useIndividualCallback,
+      // ★ D101: 개별회신번호 선택 시 기본 컬럼 전달 (빈 문자열 방지 → 발송 시 useIndividualCallback=false 폴백 방지)
+      individualCallbackColumn: useIndividualCallback ? 'store_phone' : undefined,
       subject: (selectedChannel === 'LMS' || selectedChannel === 'MMS') ? editSubject : undefined,
     });
   };

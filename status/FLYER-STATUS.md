@@ -52,8 +52,8 @@
 | 3종 템플릿 디자인 전면 개선 | ✅ 배포 완료 |
 | Nginx 프록시 /api/flyer/ 추가 (hanjul-flyer.kr) | ✅ 적용 완료 |
 | FL-B01~B04 버그 전부 수정 | ✅ 배포 완료 |
-| Pixabay 무료 기본 이미지 50개 수집 | 🟡 직원 작업중 |
-| PRODUCT_MAP 로컬 이미지 매핑 | ⏳ 이미지 도착 후 |
+| Pixabay 무료 기본 이미지 47개 수집 | ✅ 완료 |
+| PRODUCT_MAP 로컬 이미지 매핑 + 서빙 | ✅ 배포 완료 (D100) |
 | 업종별 템플릿 (카페/미용실/정육점/꽃집) | 미착수 |
 | 매장 로고 + 테마 컬러 커스터마이징 | 미착수 |
 
@@ -163,6 +163,8 @@ location /api/flyer/ → proxy_pass http://127.0.0.1:3000/api/flyer/
 | FL-B04 | 🟠 | ✅ 수정+배포 | onerror 폴백 미작동 → nextElementSibling 방식으로 개선 |
 | FL-B05 | 🔴 | ✅ 수정+배포 | authenticate 미들웨어가 이미지 서빙도 차단 (401) → 공개 엔드포인트를 authenticate 위로 이동 |
 | FL-B06 | 🟠 | ✅ 수정+배포 | Express URL 자동 디코딩 vs 디스크 인코딩 파일명 불일치 → re-encode 처리 |
+| FL-B07 | 🔴 | ✅ 수정+배포 | 전단지 저장 후 목록 403 — applyStoreScope에서 company_admin 미체크 (D100) |
+| FL-B08 | 🟠 | ✅ 수정+배포 | 로그인 시 기존 세션 전부 무효화 → 전단AI+메인 동시 사용 불가 → 동시 세션 5개 허용 (D100) |
 
 ---
 
@@ -179,3 +181,6 @@ location /api/flyer/ → proxy_pass http://127.0.0.1:3000/api/flyer/
 | **유료 스톡 비용** | 클립아트코리아 50개=41만원 — SaaS 초기에 부담 | Pixabay 무료 이미지로 대체 (상업적 사용 가능) |
 | **프론트 미리보기 동기화** | short-urls.ts(공개 페이지)만 수정하고 FlyerPreviewRenderer(프론트)는 수정 안 함 → 미리보기 변화 없음 | **공개 페이지와 프론트 미리보기 양쪽 동시 수정** |
 | **TS 미사용 변수** | isLight 선언 후 미사용 → 프론트 빌드 실패 | 수정 후 반드시 프론트+백엔드 양쪽 tsc 확인 |
+| **company_admin 권한 체크 누락** | applyStoreScope에서 'admin'만 체크 → company_admin이 403 → 전단지 목록 미표시 | **userType 체크 시 company_admin도 포함** |
+| **세션 전부 무효화** | 로그인 시 같은 userId 세션 전부 is_active=false → 다른 앱 세션 사망 | **동시 세션 허용 (최대 5개, 초과 시 오래된 것만 정리)** |
+| **이미지 경로 불일치** | PM2가 packages/backend/에서 실행 → ./uploads/ = packages/backend/uploads/ ≠ 루트 uploads/ | **심볼릭 링크 또는 절대경로 사용** |

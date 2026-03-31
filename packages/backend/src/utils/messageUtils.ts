@@ -44,6 +44,27 @@ export function formatDateValue(value: any): string {
     }
   }
 
+  // YYYYMMDD 8자리 — 날짜로 직접 파싱
+  if (/^\d{8}$/.test(str)) {
+    const y = parseInt(str.substring(0, 4));
+    const m = parseInt(str.substring(4, 6));
+    const d = parseInt(str.substring(6, 8));
+    if (y > 0 && m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+      return `${y}. ${m}. ${d}.`;
+    }
+  }
+
+  // ★ D101: YYMMDD 6자리 — 날짜로 직접 파싱 (260331 → 2026. 3. 31.)
+  if (/^\d{6}$/.test(str)) {
+    const yy = parseInt(str.substring(0, 2));
+    const m = parseInt(str.substring(2, 4));
+    const d = parseInt(str.substring(4, 6));
+    if (m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+      const y = yy >= 0 && yy <= 50 ? 2000 + yy : 1900 + yy;
+      return `${y}. ${m}. ${d}.`;
+    }
+  }
+
   // ISO 타임스탬프(T 또는 공백 포함) — KST 변환
   try {
     const d = new Date(str);
@@ -79,17 +100,70 @@ export async function enrichWithCustomFields(
 ): Promise<Record<string, VarCatalogEntry>> {
   try {
     const defResult = await query(
-      `SELECT field_key, field_label FROM customer_field_definitions
+      `SELECT field_key, field_label, field_type FROM customer_field_definitions
        WHERE company_id = $1 AND (is_hidden = false OR is_hidden IS NULL)`,
       [companyId]
     );
+    // ★ D101: VARCHAR인 기존 데이터도 실제 값 기반 타입 감지 (enabled-fields API와 동일 방식)
+    // 발송 시 1회만 실행, DISTINCT 샘플 5개로 부하 최소화
+    const varcharKeys = defResult.rows
+      .filter((d: any) => !d.field_type || d.field_type.toUpperCase() === 'VARCHAR')
+      .map((d: any) => d.field_key);
+    const detectedTypes: Record<string, 'number' | 'date'> = {};
+    if (varcharKeys.length > 0) {
+      try {
+        // 한 번의 쿼리로 모든 VARCHAR 커스텀 필드 샘플 조회 (성능 최적화)
+        const safeKeys = varcharKeys.filter((k: string) => /^custom_\d{1,2}$/.test(k));
+        if (safeKeys.length > 0) {
+          const sampleRes = await query(
+            `SELECT custom_fields FROM customers
+             WHERE company_id = $1 AND custom_fields IS NOT NULL AND custom_fields != '{}'::jsonb
+             ORDER BY updated_at DESC NULLS LAST LIMIT 5`,
+            [companyId]
+          );
+          for (const fk of safeKeys) {
+            const vals = sampleRes.rows
+              .map((r: any) => r.custom_fields?.[fk])
+              .filter((v: any) => v != null && String(v).trim() !== '')
+              .map((v: any) => String(v).trim());
+            if (vals.length > 0) {
+              // 날짜 감지: YYYY-MM-DD, YYYYMMDD, YYMMDD(월1~12,일1~31) 포함
+              const allDate = vals.every((v: string) => {
+                if (/^\d{4}-\d{2}-\d{2}/.test(v)) return true;
+                if (/^\d{8}$/.test(v)) return true;
+                if (/^\d{6}$/.test(v)) {
+                  const mm = parseInt(v.substring(2, 4));
+                  const dd = parseInt(v.substring(4, 6));
+                  return mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31;
+                }
+                return false;
+              });
+              const allNum = vals.every((v: string) => /^-?\d+(\.\d+)?$/.test(v));
+              // 날짜를 먼저 체크 (YYMMDD 6자리가 숫자로 잘못 분류되는 것 방지)
+              if (allDate) detectedTypes[fk] = 'date';
+              else if (allNum) detectedTypes[fk] = 'number';
+            }
+          }
+        }
+      } catch { /* 감지 실패 시 string 유지 */ }
+    }
+
     for (const def of defResult.rows) {
       const label = def.field_label || def.field_key;
+      // ★ D101: field_type 기반 동적 type 설정 + VARCHAR일 때 샘플링 감지 fallback
+      const ft = (def.field_type || 'VARCHAR').toUpperCase();
+      let mappedType: 'string' | 'number' | 'date' =
+        ft === 'NUMBER' || ft === 'INTEGER' || ft === 'NUMERIC' ? 'number' :
+        ft === 'DATE' || ft === 'DATETIME' ? 'date' : 'string';
+      // VARCHAR인데 실제 데이터가 숫자/날짜이면 감지 결과 사용
+      if (mappedType === 'string' && detectedTypes[def.field_key]) {
+        mappedType = detectedTypes[def.field_key];
+      }
       // 이미 있으면 덮어쓰지 않음 (FIELD_MAP 기본 displayName 우선)
       if (!fieldMappings[label]) {
         fieldMappings[label] = {
-          column: def.field_key,  // custom_1, custom_2, ... → custom_fields JSONB 내 키
-          type: 'string',
+          column: def.field_key,
+          type: mappedType,
           description: label,
           sample: '',
           storageType: 'custom_fields',
@@ -191,10 +265,15 @@ export function replaceVariables(
       // ★ D100: 날짜 KST 고정 — 순수 YYYY-MM-DD는 new Date() 없이 직접 파싱 (하루 밀림 방지)
       displayValue = formatDateValue(rawValue);
     } else {
-      // ★ D100: 날짜 패턴 자동 감지 — 순수 YYYY-MM-DD는 직접 파싱, ISO는 KST 변환
       const strVal = String(rawValue);
+      // ★ D100: 날짜 패턴 자동 감지 — 순수 YYYY-MM-DD는 직접 파싱, ISO는 KST 변환
       if (/^\d{4}-\d{2}-\d{2}($|T|\s)/.test(strVal)) {
         displayValue = formatDateValue(strVal);
+      // ★ D101: 소수점 숫자 자동 감지 — "50000.00" → "50,000" (field_type=VARCHAR인 기존 데이터 대응)
+      // 전화번호(0으로 시작)와 하이픈 포함 번호는 제외
+      } else if (/^-?\d+\.\d+$/.test(strVal.replace(/,/g, '')) && !/^0\d/.test(strVal)) {
+        const numVal = Number(strVal.replace(/,/g, ''));
+        displayValue = !isNaN(numVal) ? numVal.toLocaleString() : strVal;
       } else {
         displayValue = strVal;
       }

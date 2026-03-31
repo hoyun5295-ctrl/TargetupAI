@@ -716,11 +716,35 @@ async function processUploadInBackground(
     // ===== 커스텀 필드 정의 저장 — CT-07 컨트롤타워 사용 =====
     if (companyId) {
       try {
-        const customMappings: Array<{ fieldKey: string; label: string }> = [];
+        const customMappings: Array<{ fieldKey: string; label: string; fieldType?: string }> = [];
         for (const [header, fieldKey] of Object.entries(mapping)) {
           if (typeof fieldKey === 'string' && fieldKey.startsWith('custom_')) {
             const label = customLabels?.[fieldKey] || header;
-            customMappings.push({ fieldKey, label });
+            // ★ D101: 업로드 데이터 샘플링으로 field_type 자동 감지
+            let fieldType: string | undefined;
+            const sampleVals = rows.slice(0, Math.min(20, rows.length))
+              .map((r: any) => r[header])
+              .filter((v: any) => v != null && v !== '');
+            if (sampleVals.length > 0) {
+              // ★ D101: 날짜 감지를 숫자보다 먼저 — YYMMDD 6자리, YYYYMMDD 8자리 포함
+              const allDate = sampleVals.every((v: any) => {
+                const s = String(v).trim();
+                return /^\d{4}-\d{2}-\d{2}/.test(s) || /^\d{8}$/.test(s) || /^\d{6}$/.test(s) || (v instanceof Date);
+              });
+              // 6자리 숫자가 날짜일 수 있으므로 YYMMDD 유효성 추가 검증
+              const looksLikeDate6 = sampleVals.every((v: any) => {
+                const s = String(v).trim();
+                if (!/^\d{6}$/.test(s)) return true; // 6자리 아닌 값은 패스
+                const mm = parseInt(s.substring(2, 4));
+                const dd = parseInt(s.substring(4, 6));
+                return mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31;
+              });
+              const allNumeric = sampleVals.every((v: any) => !isNaN(Number(v)) && String(v).trim() !== '');
+              // 날짜 패턴을 먼저 체크 (6자리 날짜가 숫자로 잘못 분류되는 것 방지)
+              if (allDate && looksLikeDate6) fieldType = 'DATE';
+              else if (allNumeric) fieldType = 'NUMBER';
+            }
+            customMappings.push({ fieldKey, label, fieldType });
           }
         }
         if (customMappings.length > 0) {

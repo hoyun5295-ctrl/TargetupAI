@@ -52,6 +52,25 @@ router.post('/generate-message', async (req: Request, res: Response) => {
     }
     const { fieldMappings: varCatalog, availableVars } = extractVarCatalog(companyInfo.customer_schema);
 
+    // ★ D101: 커스텀 필드 라벨을 availableVars에 추가 (generateMessages에서 개인화 변수 매칭용)
+    const fieldDefsForVars = await query(
+      `SELECT field_key, field_label FROM customer_field_definitions WHERE company_id = $1 AND (is_hidden = false OR is_hidden IS NULL)`,
+      [companyId]
+    );
+    for (const fd of fieldDefsForVars.rows) {
+      const label = fd.field_label || fd.field_key;
+      if (!availableVars.includes(label)) {
+        availableVars.push(label);
+        varCatalog[label] = {
+          column: fd.field_key,
+          type: 'string',
+          description: label,
+          sample: '',
+          storageType: 'custom_fields' as any,
+        };
+      }
+    }
+
     // 타겟 정보 조회
     let targetQuery = 'SELECT COUNT(*) as total FROM customers WHERE company_id = $1 AND is_active = true AND sms_opt_in = true';
     const targetResult = await query(targetQuery, [companyId]);
@@ -317,15 +336,23 @@ router.post('/recommend-target', async (req: Request, res: Response) => {
           }
         }
         // 커스텀 필드 → 실제 라벨명 매핑
+        // ★ D101: field_type 기반 숫자/날짜 포맷팅 (기존 String(val) 하드코딩 → 타입 인식)
         if (row.custom_fields && typeof row.custom_fields === 'object') {
           const defResult = await query(
-            'SELECT field_key, field_label FROM customer_field_definitions WHERE company_id = $1',
+            'SELECT field_key, field_label, field_type FROM customer_field_definitions WHERE company_id = $1',
             [companyId]
           );
           for (const def of defResult.rows) {
             const val = row.custom_fields[def.field_key];
             if (val !== null && val !== undefined && val !== '') {
-              sampleCustomer[def.field_label] = String(val);
+              const ft = (def.field_type || '').toUpperCase();
+              if ((ft === 'NUMBER' || ft === 'INTEGER' || ft === 'NUMERIC') && !isNaN(Number(val))) {
+                sampleCustomer[def.field_label] = Number(val).toLocaleString();
+              } else if ((ft === 'DATE' || ft === 'DATETIME') && val) {
+                sampleCustomer[def.field_label] = formatDateValue(val);
+              } else {
+                sampleCustomer[def.field_label] = String(val);
+              }
             }
           }
         }

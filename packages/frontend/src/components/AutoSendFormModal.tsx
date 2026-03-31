@@ -1140,8 +1140,8 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
                   {/* ★ D86: D-1 사전 알림 */}
                   <div className="flex justify-between">
                     <span className="text-gray-500">D-1 알림</span>
-                    <span className={preNotify && notifyPhones.length > 0 ? 'text-blue-700 font-medium' : 'text-gray-400'}>
-                      {preNotify && notifyPhones.length > 0 ? `ON (${notifyPhones.length}명)` : 'OFF'}
+                    <span className={preNotify ? 'text-blue-700 font-medium' : 'text-gray-400'}>
+                      {preNotify ? (notifyPhones.length > 0 ? `ON (${notifyPhones.length}명)` : 'ON (알림번호 미입력)') : 'OFF'}
                     </span>
                   </div>
                   <div className="flex justify-between">

@@ -74,7 +74,10 @@
       "Bash(grep -l \"sender_numbers\\\\|callback_numbers\" /c/Users/ceo/projects/targetup/database/*.sql)",
       "Bash(grep -n \"extract-target\\\\|extractTarget\" /c/Users/ceo/projects/targetup/packages/backend/src/routes/*.ts)",
       "Bash(grep -r 'CREATE TABLE.*flyers' --include=*.sql --include=*.ts)",
-      "Bash(find /c/Users/ceo/projects/targetup -type f -name *.log)"
+      "Bash(find /c/Users/ceo/projects/targetup -type f -name *.log)",
+      "Bash(python -m markitdown \"C:\\\\Users\\\\ceo\\\\OneDrive\\\\문서\\\\카카오톡 받은 파일\\\\한줄로_20260331.pptx\")",
+      "Bash(python scripts/office/soffice.py --headless --convert-to pdf \"C:\\\\Users\\\\ceo\\\\OneDrive\\\\문서\\\\카카오톡 받은 파일\\\\한줄로_20260331.pptx\")",
+      "Bash(ls \"C:/Program Files \\(x86\\)/LibreOffice/program/soffice.exe\")"
     ]
   }
 }

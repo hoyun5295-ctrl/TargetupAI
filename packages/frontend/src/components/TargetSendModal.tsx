@@ -1,7 +1,7 @@
 import { Sparkles } from 'lucide-react';
 import { useRef, useState } from 'react';
 import type { FieldMeta } from './DirectTargetFilterModal';
-import { formatPreviewValue } from '../utils/formatDate';
+import { formatPreviewValue, formatByType } from '../utils/formatDate';
 
 // ★ D43-3c: 정규식 특수문자 이스케이프
 const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -162,6 +162,8 @@ export default function TargetSendModal({
   // ====== 내부 state ======
   const [targetListPage, setTargetListPage] = useState(0);
   const [targetListSearch, setTargetListSearch] = useState('');
+  // ★ D101: 수신자 선택삭제 기능
+  const [selectedPhones, setSelectedPhones] = useState<Set<string>>(new Set());
   const smsTextareaRef = useRef<HTMLTextAreaElement>(null);
   const kakaoTextareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -220,8 +222,8 @@ export default function TargetSendModal({
       if ((rawValue === '' || rawValue == null) && recipient.custom_fields && typeof recipient.custom_fields === 'object') {
         rawValue = recipient.custom_fields[fm.field_key] ?? '';
       }
-      // ★ D92: formatPreviewValue 컨트롤타워 사용
-      result = result.replace(pattern, formatPreviewValue(rawValue));
+      // ★ D101: formatByType으로 타입 인식 포맷팅 (날짜→날짜포맷, 숫자→쉼표포맷)
+      result = result.replace(pattern, formatByType(rawValue, fm.data_type));
     });
     return result;
   };
@@ -549,16 +551,9 @@ export default function TargetSendModal({
                         </option>
                       ))
                     }
-                    {/* 전화번호성이 아닌 컬럼도 선택 가능하도록 전체 필드 제공 */}
-                    {fieldsMeta
-                      .filter(f => f.field_key !== 'store_phone' && f.field_key !== 'callback' && f.field_key !== 'phone' &&
-                        !f.display_name.includes('전화') && !f.display_name.includes('번호') && !f.display_name.includes('연락처'))
-                      .map(f => (
-                        <option key={f.field_key} value={`__col__${f.field_key}`}>
-                          {f.display_name} (수신자별)
-                        </option>
-                      ))
-                    }
+                    {/* ★ D101: 전화번호성이 아닌 컬럼은 회신번호 드롭다운에서 제외
+                        기존에 전체 필드를 표시 → 이름/등급 등 관계없는 필드가 노출되는 버그
+                        전화번호/번호/연락처 포함 필드만 표시 */}
                   </optgroup>
                   <optgroup label="등록된 회신번호">
                     {callbackNumbers.map((cb) => (
@@ -862,6 +857,20 @@ export default function TargetSendModal({
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50">
                     <tr>
+                      <th className="px-2 py-2.5 text-center w-10">
+                        <input
+                          type="checkbox"
+                          className="rounded"
+                          checked={targetRecipients.length > 0 && selectedPhones.size === targetRecipients.length}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedPhones(new Set(targetRecipients.map((r, i) => `${r.phone}_${i}`)));
+                            } else {
+                              setSelectedPhones(new Set());
+                            }
+                          }}
+                        />
+                      </th>
                       <th className="px-4 py-2.5 text-left font-medium text-gray-600 whitespace-nowrap">수신번호</th>
                       {tableFields.map(fm => (
                         <th key={fm.field_key} className="px-4 py-2.5 text-left font-medium text-gray-600 whitespace-nowrap">
@@ -878,7 +887,20 @@ export default function TargetSendModal({
                       const pageSize = 15;
                       const start = targetListPage * pageSize;
                       return filtered.slice(start, start + pageSize).map((r, idx) => (
-                        <tr key={idx} className="border-t hover:bg-gray-50">
+                        <tr key={idx} className={`border-t hover:bg-gray-50 ${selectedPhones.has(`${r.phone}_${start + idx}`) ? 'bg-blue-50' : ''}`}>
+                          <td className="px-2 py-2 text-center">
+                            <input
+                              type="checkbox"
+                              className="rounded"
+                              checked={selectedPhones.has(`${r.phone}_${start + idx}`)}
+                              onChange={(e) => {
+                                const key = `${r.phone}_${start + idx}`;
+                                const next = new Set(selectedPhones);
+                                if (e.target.checked) next.add(key); else next.delete(key);
+                                setSelectedPhones(next);
+                              }}
+                            />
+                          </td>
                           <td className="px-4 py-2 font-mono whitespace-nowrap">{r.phone}</td>
                           {tableFields.map(fm => (
                             <td key={fm.field_key} className="px-4 py-2 whitespace-nowrap">
@@ -925,8 +947,34 @@ export default function TargetSendModal({
             {/* 하단 버튼 */}
             <div className="mt-3 flex justify-between items-center">
               <div className="flex gap-2">
-                <button className="px-3 py-1.5 text-sm border rounded-lg hover:bg-gray-50">중복제거</button>
-                <button className="px-3 py-1.5 text-sm border rounded-lg hover:bg-gray-50">선택삭제</button>
+                <button
+                  onClick={() => {
+                    const seen = new Set<string>();
+                    const deduped = targetRecipients.filter(r => {
+                      if (seen.has(r.phone)) return false;
+                      seen.add(r.phone);
+                      return true;
+                    });
+                    setTargetRecipients(deduped);
+                    setSelectedPhones(new Set());
+                  }}
+                  className="px-3 py-1.5 text-sm border rounded-lg hover:bg-gray-50"
+                >중복제거</button>
+                <button
+                  onClick={() => {
+                    if (selectedPhones.size === 0) return;
+                    const selectedIndices = new Set<number>();
+                    for (const key of selectedPhones) {
+                      const idx = parseInt(key.split('_').pop() || '-1');
+                      if (idx >= 0) selectedIndices.add(idx);
+                    }
+                    const remaining = targetRecipients.filter((_, i) => !selectedIndices.has(i));
+                    setTargetRecipients(remaining);
+                    setSelectedPhones(new Set());
+                  }}
+                  disabled={selectedPhones.size === 0}
+                  className={`px-3 py-1.5 text-sm border rounded-lg ${selectedPhones.size > 0 ? 'hover:bg-red-50 text-red-600 border-red-300' : 'text-gray-400'}`}
+                >선택삭제 {selectedPhones.size > 0 && `(${selectedPhones.size})`}</button>
                 <button
                   onClick={() => setTargetRecipients([])}
                   className="px-3 py-1.5 text-sm border rounded-lg hover:bg-gray-50"
