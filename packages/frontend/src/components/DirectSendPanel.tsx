@@ -17,6 +17,7 @@ import {
   DIRECT_FIELD_LABELS,
   DIRECT_MAPPING_FIELDS,
   replaceDirectVars,
+  buildAdMessageFront,
 } from '../utils/formatDate';
 
 // ============================================================
@@ -177,6 +178,7 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
   // ============================================================
   const calculateBytes = calculateSmsBytes;
 
+  // ★ D102: getAdSuffix UI 표시용으로만 유지 (메시지 조합은 buildAdMessageFront 사용)
   const getAdSuffix = () => {
     return directMsgType === 'SMS'
       ? `무료거부${optOutNumber.replace(/-/g, '')}`
@@ -217,9 +219,8 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
 
     // LMS/MMS인데 SMS로 보내도 되는 경우 비용 절감 안내
     if (directMsgType !== 'SMS' && !lmsKeepAccepted && mmsUploadedImages.length === 0) {
-      const smsOptOut = `무료거부${optOutNumber.replace(/-/g, '')}`;
       const smsMaxMsg = getMaxByteMessage(directMessage, directRecipients, DIRECT_VAR_TO_FIELD);
-      const smsFullMsg = adTextEnabled ? `(광고)${smsMaxMsg}\n${smsOptOut}` : smsMaxMsg;
+      const smsFullMsg = buildAdMessageFront(smsMaxMsg, 'SMS', adTextEnabled, optOutNumber);
       const smsBytes = calculateBytes(smsFullMsg);
       if (smsBytes <= 90) {
         setShowSmsConvert({ show: true, from: 'direct', currentBytes: messageBytes, smsBytes, count: directRecipients.length });
@@ -275,8 +276,8 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
       if (!text || !firstR) return text;
       return replaceDirectVars(text, firstR, selectedCallback);
     };
-    const smsRaw = adTextEnabled ? `(광고)${msg}\n무료거부${optOutNumber.replace(/-/g, '')}` : msg;
-    const lmsRaw = adTextEnabled ? `(광고) ${msg}\n무료수신거부 ${optOutNumber}` : msg;
+    const smsRaw = buildAdMessageFront(msg, 'SMS', adTextEnabled, optOutNumber);
+    const lmsRaw = buildAdMessageFront(msg, 'LMS', adTextEnabled, optOutNumber);
     const smsMsg = replaceVars(smsRaw);
     const lmsMsg = replaceVars(lmsRaw);
     setSpamFilterData({ sms: smsMsg, lms: lmsMsg, callback: cb, msgType: directMsgType, subject: directSubject || '', firstRecipient: firstR || undefined });

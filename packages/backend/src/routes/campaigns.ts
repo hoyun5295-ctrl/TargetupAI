@@ -5,7 +5,7 @@ import { authenticate } from '../middlewares/auth';
 import { extractVarCatalog, validatePersonalizationVars, VarCatalogEntry } from '../services/ai';
 import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getRegionVariants } from '../utils/normalize';
 import { getSourceRef, logTrainingData, updateTrainingMetrics } from '../utils/training-logger';
-import { replaceVariables, enrichWithCustomFields } from '../utils/messageUtils';
+import { replaceVariables, enrichWithCustomFields, getOpt080Number, buildAdMessage, prepareFieldMappings } from '../utils/messageUtils';
 import { SUCCESS_CODES, PENDING_CODES, isSuccess, isFail, SPAM_RESULT } from '../utils/sms-result-map';
 import { DEFAULT_COSTS, redis, CACHE_TTL, BATCH_SIZES, SEND_HOURS } from '../config/defaults';
 import { isValidSmsTable } from '../utils/sms-table-validator';
@@ -280,8 +280,8 @@ router.post('/test-send', async (req: Request, res: Response) => {
     }
 
     // ★ 미리보기와 동일한 고객으로 개인화 — 프론트에서 sampleCustomer 전달 시 그대로 사용
-    const testFieldMappings = extractVarCatalog(companyResult.rows[0]?.customer_schema).fieldMappings;
-    await enrichWithCustomFields(testFieldMappings, companyId);
+    // ★ D102: prepareFieldMappings 컨트롤타워로 통합 (customer_schema 조회 + extractVarCatalog + enrichWithCustomFields)
+    const testFieldMappings = await prepareFieldMappings(companyId);
 
     let testFirstCustomer: Record<string, any>;
     if (req.body.sampleCustomer && typeof req.body.sampleCustomer === 'object' && Object.keys(req.body.sampleCustomer).length > 0) {
@@ -599,15 +599,11 @@ router.post('/:id/send', async (req: Request, res: Response) => {
       }
     }
 
-    // ★ 회사 스키마 조회 → 동적 변수 치환을 위한 field_mappings
-    const companySchemaResult = await query(
-      'SELECT customer_schema FROM companies WHERE id = $1',
-      [companyId]
-    );
-    const customerSchema = companySchemaResult.rows[0]?.customer_schema || {};
-    const { fieldMappings, availableVars } = extractVarCatalog(customerSchema);
-    // ★ B-D70-16: 커스텀 필드 매핑 보강 (미리보기 vs 실제 발송 개인화 불일치 수정)
-    await enrichWithCustomFields(fieldMappings, companyId);
+    // ★ D102: prepareFieldMappings 컨트롤타워로 통합 (customer_schema 조회 + extractVarCatalog + enrichWithCustomFields)
+    const fieldMappings = await prepareFieldMappings(companyId);
+    // availableVars는 변수 검증용으로 별도 추출 (extractVarCatalog는 순수 함수)
+    const companySchemaResult = await query('SELECT customer_schema FROM companies WHERE id = $1', [companyId]);
+    const { availableVars } = extractVarCatalog(companySchemaResult.rows[0]?.customer_schema);
 
     // ★ field_mappings에서 필요한 컬럼 자동 추출 (동적 SELECT)
     // ★ store_phone 포함: 개별회신번호 사용 시 callback이 없으면 store_phone을 폴백으로 사용
@@ -774,17 +770,9 @@ const kakaoAttachmentJson = campaign.kakao_attachment_json || null;
 const kakaoCarouselJson = campaign.kakao_carousel_json || null;
 const kakaoResendType = campaign.kakao_resend_type || 'SM';
 
-// ★ B17-11: 080 수신거부번호 — users 우선 → companies fallback (사용자별 080번호 지원)
-let opt080Number = '';
+// ★ D102: 080 수신거부번호 — CT-AD 컨트롤타워 사용
+const opt080Number = campaign.is_ad ? await getOpt080Number(userId || null, companyId) : '';
 let opt080Auth = '';
-if (sendChannel !== 'sms' && campaign.is_ad) {
-  const userOptResult = await query('SELECT opt_out_080_number FROM users WHERE id = $1', [userId]);
-  opt080Number = userOptResult.rows[0]?.opt_out_080_number || '';
-  if (!opt080Number) {
-    const compOptResult = await query('SELECT opt_out_080_number FROM companies WHERE id = $1', [companyId]);
-    opt080Number = compOptResult.rows[0]?.opt_out_080_number || '';
-  }
-}
 
 // ★ D72 성능개선: 건건이 INSERT → sms-queue.ts 컨트롤타워 bulkInsertSmsQueue 사용
 let aiSentCount = 0;
@@ -795,7 +783,9 @@ const aiKakaoQueue: any[] = [];
 
 for (const customer of filteredCustomers) {
   // ★ D32: 공통 치환 함수 사용 (messageUtils.ts)
-  const personalizedMessage = replaceVariables(campaign.message_content || '', customer, fieldMappings);
+  let personalizedMessage = replaceVariables(campaign.message_content || '', customer, fieldMappings);
+  // ★ D102: (광고)+080 — CT-AD 컨트롤타워 사용 (전 경로 통일)
+  personalizedMessage = buildAdMessage(personalizedMessage, campaign.message_type, campaign.is_ad || false, opt080Number);
   // ★ D28: 제목은 고정값 그대로 사용 (머지 치환 완전 제거)
   const personalizedSubject = campaign.subject || '';
 
@@ -1265,15 +1255,7 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       alimtalkNextType,     // 실패 시 폴백 (N/S/L)
     } = req.body;
 
-    // ★ S9-01: 프론트 치환 완료 메시지 맵 구성 (phone → message)
-    const customMessageMap = new Map<string, string>();
-    if (customMessages && Array.isArray(customMessages)) {
-      for (const cm of customMessages) {
-        if (cm.phone && cm.message) {
-          customMessageMap.set(normalizePhone(cm.phone), cm.message);
-        }
-      }
-    }
+    // ★ D102: customMessageMap 제거 — 프론트 치환 폐기, 백엔드 replaceVariables 컨트롤타워 통일
 
     if (!recipients || recipients.length === 0) {
       return res.status(400).json({ success: false, error: '수신자가 없습니다' });
@@ -1471,22 +1453,11 @@ router.post('/direct-send', async (req: Request, res: Response) => {
     // ★ C1: 채널별 발송 성공 건수 추적 (블록 밖에서 선언 — 선별적 환불 계산용)
     let directSmsSentCount = 0;
 
-    // ★ B17-11: 080 수신거부번호 — users 우선 → companies fallback
-    let directOpt080 = '';
-    if (directChannel !== 'sms' && adEnabled) {
-      const userOptResult = await query('SELECT opt_out_080_number FROM users WHERE id = $1', [userId]);
-      directOpt080 = userOptResult.rows[0]?.opt_out_080_number || '';
-      if (!directOpt080) {
-        const compOptResult = await query('SELECT opt_out_080_number FROM companies WHERE id = $1', [companyId]);
-        directOpt080 = compOptResult.rows[0]?.opt_out_080_number || '';
-      }
-    }
+    // ★ D102: 080 수신거부번호 — CT-AD 컨트롤타워 사용
+    const directOpt080 = adEnabled ? await getOpt080Number(userId, companyId) : '';
 
-    // ★ 회사 스키마 + DB 고객 데이터 조회 (replaceVariables 폴백용)
-    const directSchemaResult = await query('SELECT customer_schema FROM companies WHERE id = $1', [companyId]);
-    const directFieldMappings = extractVarCatalog(directSchemaResult.rows[0]?.customer_schema).fieldMappings;
-    // ★ B-D70-16: 커스텀 필드 매핑 보강 (미리보기 vs 실제 발송 개인화 불일치 수정)
-    await enrichWithCustomFields(directFieldMappings, companyId);
+    // ★ D102: prepareFieldMappings 컨트롤타워로 통합 (customer_schema 조회 + extractVarCatalog + enrichWithCustomFields)
+    const directFieldMappings = await prepareFieldMappings(companyId);
     // ★ storageType 기반 동적 필터 — 직접 컬럼만 SELECT, JSONB 내부 키는 custom_fields 컬럼에서 접근 (D72)
     const directMappingCols = Object.values(directFieldMappings).filter((m: any) => m.storageType !== 'custom_fields').map((m: any) => m.column);
     const directSelectCols = [...new Set(['phone', 'custom_fields', ...directMappingCols])].join(', ');
@@ -1507,21 +1478,19 @@ router.post('/direct-send', async (req: Request, res: Response) => {
 
       for (let i = 0; i < filteredRecipients.length; i++) {
         const recipient = filteredRecipients[i];
-        // ★ S9-01: customMessages 있으면 프론트 치환값 사용, 없으면 서버 치환
+        // ★ D102: customMessages 분기 제거 — 항상 백엔드 replaceVariables 컨트롤타워 사용
+        // 숫자(.00)/날짜 포맷팅이 replaceVariables 한 곳에서 처리되므로 프론트/백엔드 불일치 원천 차단
         const cleanPhone = normalizePhone(recipient.phone);
-        let finalMessage: string;
-        if (customMessageMap.has(cleanPhone)) {
-          finalMessage = customMessageMap.get(cleanPhone)!.replace(/%[^%\s]{1,20}%/g, '');
-        } else {
-          const dbCustomer = directCustomerMap.get(cleanPhone) || null;
-          finalMessage = replaceVariables(message, dbCustomer, directFieldMappings, {
-            name: recipient.name,
-            extra1: recipient.extra1,
-            extra2: recipient.extra2,
-            extra3: recipient.extra3,
-            callback: recipient.callback,
-          });
-        }
+        const dbCustomer = directCustomerMap.get(cleanPhone) || null;
+        let finalMessage = replaceVariables(message, dbCustomer, directFieldMappings, {
+          name: recipient.name,
+          extra1: recipient.extra1,
+          extra2: recipient.extra2,
+          extra3: recipient.extra3,
+          callback: recipient.callback,
+        });
+        // ★ D102: (광고)+080 — CT-AD 컨트롤타워 사용 (전 경로 통일)
+        finalMessage = buildAdMessage(finalMessage, msgType, adEnabled, directOpt080);
 
         const finalSubject = subject || '';
 
@@ -1563,21 +1532,16 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       for (let i = 0; i < filteredRecipients.length; i++) {
         try {
           const recipient = filteredRecipients[i];
+          // ★ D102: 항상 백엔드 replaceVariables 컨트롤타워 사용 (customMessages 분기 제거)
           const cleanKakaoPhone = normalizePhone(recipient.phone);
-          let finalMessage: string;
-          if (customMessageMap.has(cleanKakaoPhone)) {
-            finalMessage = customMessageMap.get(cleanKakaoPhone)!.replace(/%[^%\s]{1,20}%/g, '');
-          } else {
-            // ★ 컨트롤타워(messageUtils) 통합 치환: DB 필드 + 주소록 기타 필드 한번에 처리
-            const dbCustomer = directCustomerMap.get(cleanKakaoPhone) || null;
-            finalMessage = replaceVariables(message, dbCustomer, directFieldMappings, {
-              name: recipient.name,
-              extra1: recipient.extra1,
-              extra2: recipient.extra2,
-              extra3: recipient.extra3,
-              callback: recipient.callback,
-            });
-          }
+          const dbKakaoCustomer = directCustomerMap.get(cleanKakaoPhone) || null;
+          const finalMessage = replaceVariables(message, dbKakaoCustomer, directFieldMappings, {
+            name: recipient.name,
+            extra1: recipient.extra1,
+            extra2: recipient.extra2,
+            extra3: recipient.extra3,
+            callback: recipient.callback,
+          });
 
           // ★ C3: 분할전송 시간 계산 (오버플로우 방지 — calcSplitSendTime 적용)
           let kakaoSendTime: string | undefined;
@@ -1651,7 +1615,12 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       }
 
       const alimtalkRows = filteredRecipients.map((recipient: any, i: number) => {
-        const finalMessage = customMessageMap.get(normalizePhone(recipient.phone)) || message;
+        // ★ D102: 항상 백엔드 replaceVariables 컨트롤타워 사용
+        const dbAlimCustomer = directCustomerMap.get(normalizePhone(recipient.phone)) || null;
+        const finalMessage = replaceVariables(message, dbAlimCustomer, directFieldMappings, {
+          name: recipient.name, extra1: recipient.extra1, extra2: recipient.extra2,
+          extra3: recipient.extra3, callback: recipient.callback,
+        });
         return {
           phone: normalizePhone(recipient.phone),
           callback: normalizePhone(callback),
@@ -2085,12 +2054,8 @@ router.put('/:id/message', async (req: Request, res: Response) => {
       return res.json({ success: true, message: '문안이 수정되었습니다 (발송 시 적용)' });
     }
 
-    // 2. 회사 스키마 조회 + 전화번호로 고객 정보 조회 (PostgreSQL)
-    const companySchemaResult = await query('SELECT customer_schema FROM companies WHERE id = $1', [companyId]);
-    const customerSchema = companySchemaResult.rows[0]?.customer_schema || {};
-    const { fieldMappings: editFieldMappings } = extractVarCatalog(customerSchema);
-    // ★ B-D70-16: 커스텀 필드 매핑 보강 (미리보기 vs 실제 발송 개인화 불일치 수정)
-    await enrichWithCustomFields(editFieldMappings, companyId);
+    // ★ D102: prepareFieldMappings 컨트롤타워로 통합 (customer_schema 조회 + extractVarCatalog + enrichWithCustomFields)
+    const editFieldMappings = await prepareFieldMappings(companyId);
 
     // ★ D32: 동적 컬럼 SELECT — fieldMappings에서 필요한 컬럼 자동 추출
     const editBaseColumns = ['phone', 'custom_fields'];
@@ -2113,19 +2078,9 @@ router.put('/:id/message', async (req: Request, res: Response) => {
     /// 3. ★ B17-11: 광고 문구 처리 — users 우선 → companies fallback
     const adEnabled = campaign.rows[0].is_ad === true;
     const msgType = campaign.rows[0].message_type;
-    let optOut080 = '';
-    if (adEnabled) {
-      // 캠페인 생성자(user_id)에서 080번호 조회
-      const campUserId = campaign.rows[0].user_id;
-      if (campUserId) {
-        const userOpt = await query('SELECT opt_out_080_number FROM users WHERE id = $1', [campUserId]);
-        optOut080 = userOpt.rows[0]?.opt_out_080_number || '';
-      }
-      if (!optOut080) {
-        const compInfo = await query('SELECT opt_out_080_number FROM companies WHERE id = $1', [companyId]);
-        optOut080 = compInfo.rows[0]?.opt_out_080_number || '';
-      }
-    }
+    // ★ D102: 080 수신거부번호 — CT-AD 컨트롤타워 사용
+    const campUserId = campaign.rows[0].user_id;
+    const optOut080 = adEnabled ? await getOpt080Number(campUserId, companyId) : '';
 
     // 4. 테이블별로 그룹핑 후 Bulk UPDATE
     const tableGroups: Record<string, any[]> = {};
@@ -2161,15 +2116,8 @@ router.put('/:id/message', async (req: Request, res: Response) => {
           let finalMessage = replaceVariables(message, customer, editFieldMappings);
 
           // 광고 문구 추가
-          if (adEnabled && optOut080) {
-            const adPrefix = msgType === 'SMS' ? '(광고)' : '(광고) ';
-            finalMessage = adPrefix + finalMessage;
-            if (msgType === 'SMS') {
-              finalMessage += `\n무료거부${normalizePhone(optOut080)}`;
-            } else {
-              finalMessage += `\n무료수신거부 ${optOut080}`;
-            }
-          }
+          // ★ D102: (광고)+080 — CT-AD 컨트롤타워 사용
+          finalMessage = buildAdMessage(finalMessage, msgType, adEnabled, optOut080);
 
           // SQL escape
           const escapedMessage = finalMessage.replace(/'/g, "''");

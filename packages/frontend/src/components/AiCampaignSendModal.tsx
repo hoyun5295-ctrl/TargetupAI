@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { highlightVars } from '../utils/highlightVars';
-import { formatPhoneNumber } from '../utils/formatDate';
+import { formatPhoneNumber, buildAdMessageFront } from '../utils/formatDate';
 
 interface AiCampaignSendModalProps {
   onClose: () => void;
@@ -96,17 +96,8 @@ export default function AiCampaignSendModal({
 
   // ★ D93: 발송 확인창에서는 %변수% 원본 + 하이라이트로 표시 (개인화 위치 직관적 확인)
   const getPreviewMessage = () => {
-    let msg = messageText || '';
-    // 광고 문구 미리보기 표시
-    if (isAd) {
-      const adPrefix = selectedChannel === 'SMS' ? '(광고)' : '(광고) ';
-      const fmtNum = (n: string) => { const c = n.replace(/\D/g, ''); return c.length === 11 ? `${c.slice(0,3)}-${c.slice(3,7)}-${c.slice(7)}` : c.length === 10 ? `${c.slice(0,3)}-${c.slice(3,6)}-${c.slice(6)}` : c; };
-      const adSuffix = selectedChannel === 'SMS'
-        ? `\n무료거부${optOutNumber.replace(/-/g, '')}`
-        : `\n무료수신거부 ${fmtNum(optOutNumber)}`;
-      msg = adPrefix + msg + adSuffix;
-    }
-    return msg;
+    // ★ D102: buildAdMessageFront 컨트롤타워 사용
+    return buildAdMessageFront(messageText || '', selectedChannel, isAd, optOutNumber);
   };
 
   // AI 추천시간 과거 여부

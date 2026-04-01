@@ -3,8 +3,7 @@ import { Request, Response, Router } from 'express';
 import { mysqlQuery, query } from '../config/database';
 import { TIMEOUTS } from '../config/defaults';
 import { authenticate } from '../middlewares/auth';
-import { extractVarCatalog } from '../services/ai';
-import { replaceVariables, enrichWithCustomFields } from '../utils/messageUtils';
+import { replaceVariables, prepareFieldMappings } from '../utils/messageUtils';
 import { SUCCESS_CODES, PENDING_CODES, SPAM_RESULT } from '../utils/sms-result-map';
 import { prepaidDeduct, prepaidRefund } from '../utils/prepaid';
 import { getTestSmsTables } from '../utils/sms-queue';
@@ -89,11 +88,8 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
     const isLmsType = messageType === 'LMS' || messageType === 'MMS';
     const rawActualContent = isLmsType ? (messageContentLms || '') : (messageContentSms || '');
 
-    // ★ 프론트에서 리스트 최상단 고객 전달 시 우선 사용, 없으면 DB fallback
-    const companySchemaResult = await query('SELECT customer_schema FROM companies WHERE id = $1', [companyId]);
-    const spamFieldMappings = extractVarCatalog(companySchemaResult.rows[0]?.customer_schema).fieldMappings;
-    // ★ B-D75-01: enrichWithCustomFields 누락 수정 — 커스텀 필드 변수 치환을 위해 필수
-    await enrichWithCustomFields(spamFieldMappings, companyId);
+    // ★ D102: prepareFieldMappings 컨트롤타워로 통합 (customer_schema 조회 + extractVarCatalog + enrichWithCustomFields)
+    const spamFieldMappings = await prepareFieldMappings(companyId);
 
     let firstCustomer: Record<string, any>;
     if (clientFirstRecipient && typeof clientFirstRecipient === 'object' && Object.keys(clientFirstRecipient).length > 0) {

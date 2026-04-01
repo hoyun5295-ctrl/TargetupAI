@@ -16,7 +16,7 @@ import { createHash } from 'crypto';
 import { mysqlQuery, query } from '../config/database';
 import { TIMEOUTS } from '../config/defaults';
 import { extractVarCatalog } from '../services/ai';
-import { replaceVariables, enrichWithCustomFields } from '../utils/messageUtils';
+import { replaceVariables, enrichWithCustomFields, buildAdMessage, prepareFieldMappings } from '../utils/messageUtils';
 import { SUCCESS_CODES, PENDING_CODES, SPAM_RESULT } from '../utils/sms-result-map';
 import { prepaidDeduct } from '../utils/prepaid';
 
@@ -156,9 +156,8 @@ export async function enqueueSpamTest(params: SpamTestEnqueueParams): Promise<Sp
     const isLmsType = messageType === 'LMS' || messageType === 'MMS';
     const rawContent = isLmsType ? (messageContentLms || '') : (messageContentSms || '');
 
-    const companySchemaResult = await query('SELECT customer_schema FROM companies WHERE id = $1', [companyId]);
-    const fieldMappings = extractVarCatalog(companySchemaResult.rows[0]?.customer_schema).fieldMappings;
-    await enrichWithCustomFields(fieldMappings, companyId);
+    // ★ D102: prepareFieldMappings 컨트롤타워로 통합
+    const fieldMappings = await prepareFieldMappings(companyId);
 
     let firstCustomer: Record<string, any>;
     if (clientFirstRecipient && typeof clientFirstRecipient === 'object' && Object.keys(clientFirstRecipient).length > 0) {
@@ -652,15 +651,9 @@ export async function autoSpamTestWithRegenerate(params: {
 
     // 최대 재시도 횟수까지 반복
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      // ★ D88: 광고문구 포함하여 실제 발송될 형태로 테스트
-      let testMessage = currentMessage;
-      if (isAd) {
-        const adPrefix = isLmsType ? '(광고) ' : '(광고)';
-        const rejectFooter = rejectNumber
-          ? (isLmsType ? `\n무료수신거부 ${rejectNumber}` : `\n무료거부${rejectNumber.replace(/-/g, '')}`)
-          : '';
-        testMessage = `${adPrefix}${currentMessage}${rejectFooter}`;
-      }
+      // ★ D102: (광고)+080 — CT-AD 컨트롤타워 사용
+      const msgTypeForAd = isLmsType ? 'LMS' : 'SMS';
+      const testMessage = buildAdMessage(currentMessage, msgTypeForAd, isAd, rejectNumber || '');
 
       // 메시지 내용 구성
       const smsContent = !isLmsType ? testMessage : undefined;

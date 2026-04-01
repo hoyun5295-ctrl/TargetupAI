@@ -14,7 +14,7 @@
 
 import { useEffect, useState, useMemo } from 'react';
 import { aiApi } from '../api/client';
-import { calculateSmsBytes } from '../utils/formatDate';
+import { calculateSmsBytes, buildAdMessageFront } from '../utils/formatDate';
 import AiMessageSuggestModal from './AiMessageSuggestModal';
 import SpamFilterTestModal from './SpamFilterTestModal';
 
@@ -1274,8 +1274,8 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
       {showSpamFilter && (
         <SpamFilterTestModal
           onClose={() => setShowSpamFilter(false)}
-          messageContentSms={isAd ? `(광고)${messageContent}\n${getAdSuffix()}` : messageContent}
-          messageContentLms={isAd ? `(광고) ${messageContent}\n${getAdSuffix()}` : messageContent}
+          messageContentSms={buildAdMessageFront(messageContent, 'SMS', isAd, optOutNumber)}
+          messageContentLms={buildAdMessageFront(messageContent, 'LMS', isAd, optOutNumber)}
           callbackNumber={callbackNumber}
           messageType={messageType}
           subject={messageSubject}

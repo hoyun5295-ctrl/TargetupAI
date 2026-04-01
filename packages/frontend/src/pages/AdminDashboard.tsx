@@ -145,6 +145,8 @@ const [statsTotal, setStatsTotal] = useState(0);
 const [statsDetail, setStatsDetail] = useState<any>(null);
 const [statsDetailLoading, setStatsDetailLoading] = useState(false);
 const [statsDetailInfo, setStatsDetailInfo] = useState<{ date: string; companyName: string } | null>(null);
+// ★ D102: 메시지 내용 상세 모달
+const [messageDetailContent, setMessageDetailContent] = useState<{ name: string; content: string } | null>(null);
   // 예약 캠페인 관리
   const [scheduledCampaigns, setScheduledCampaigns] = useState<any[]>([]);
   const [scheduledTotal, setScheduledTotal] = useState(0);
@@ -6527,7 +6529,8 @@ const handleApproveRequest = async (id: string) => {
                             <th className="px-4 py-2.5 text-center text-gray-600 font-medium">전송</th>
                             <th className="px-4 py-2.5 text-center text-gray-600 font-medium">성공</th>
                             <th className="px-4 py-2.5 text-center text-gray-600 font-medium">실패</th>
-                            <th className="px-4 py-2.5 text-center text-gray-600 font-medium">메시지</th>
+                            <th className="px-4 py-2.5 text-center text-gray-600 font-medium">타입</th>
+                            <th className="px-4 py-2.5 text-left text-gray-600 font-medium">메시지내용</th>
                             <th className="px-4 py-2.5 text-center text-gray-600 font-medium">발송시간</th>
                           </tr>
                         </thead>
@@ -6559,6 +6562,17 @@ const handleApproveRequest = async (id: string) => {
                                   {c.message_type || 'SMS'}
                                 </span>
                               </td>
+                              <td className="px-4 py-2.5 text-left text-xs text-gray-600 max-w-[250px]">
+                                {c.message_content ? (
+                                  <div
+                                    className="truncate cursor-pointer hover:text-blue-600"
+                                    title="클릭하여 전체 메시지 보기"
+                                    onClick={() => setMessageDetailContent({ name: c.campaign_name, content: c.message_content })}
+                                  >
+                                    {c.message_content.substring(0, 50)}{c.message_content.length > 50 ? '...' : ''}
+                                  </div>
+                                ) : '-'}
+                              </td>
                               <td className="px-4 py-2.5 text-center text-gray-500 font-mono text-xs">
                                 {c.sent_at ? new Date(c.sent_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit' }) : '-'}
                               </td>
@@ -6571,6 +6585,21 @@ const handleApproveRequest = async (id: string) => {
                 </>
               ) : null}
             </div>
+          </div>
+        </div>
+      )}
+      {/* ★ D102: 메시지 내용 상세 모달 */}
+      {messageDetailContent && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setMessageDetailContent(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 max-h-[80vh] overflow-auto" onClick={e => e.stopPropagation()}>
+            <div className="px-6 pt-5 pb-3 border-b bg-gray-50 rounded-t-2xl flex justify-between items-center">
+              <div>
+                <h3 className="text-base font-bold text-gray-900">메시지 내용</h3>
+                <p className="text-xs text-gray-500 mt-0.5">{messageDetailContent.name}</p>
+              </div>
+              <button onClick={() => setMessageDetailContent(null)} className="text-gray-400 hover:text-gray-600 text-lg leading-none">&times;</button>
+            </div>
+            <div className="p-6 whitespace-pre-wrap break-words text-sm text-gray-700">{messageDetailContent.content}</div>
           </div>
         </div>
       )}

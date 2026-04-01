@@ -79,7 +79,11 @@
       "Bash(python scripts/office/soffice.py --headless --convert-to pdf \"C:\\\\Users\\\\ceo\\\\OneDrive\\\\문서\\\\카카오톡 받은 파일\\\\한줄로_20260331.pptx\")",
       "Bash(ls \"C:/Program Files \\(x86\\)/LibreOffice/program/soffice.exe\")",
       "Bash(grep -E \"\\\\.\\(ts|js\\)$\")",
-      "Bash(find /c/Users/ceo/projects/targetup -name useSessionTimeout* -o -name useSession*)"
+      "Bash(find /c/Users/ceo/projects/targetup -name useSessionTimeout* -o -name useSession*)",
+      "Bash(python -m markitdown \"C:\\\\Users\\\\ceo\\\\OneDrive\\\\문서\\\\카카오톡 받은 파일\\\\한줄로_20260401.pptx\")",
+      "Bash(find /c/Users/ceo/projects/targetup/packages/frontend/src -type f \\\\\\(-name *.tsx -o -name *.ts \\\\\\))",
+      "Bash(grep -E \"\\\\.\\(tsx|ts\\)$\")",
+      "Bash(grep -n \"const companyId = req.user\" /c/Users/ceo/projects/targetup/packages/backend/src/routes/*.ts)"
     ]
   }
 }

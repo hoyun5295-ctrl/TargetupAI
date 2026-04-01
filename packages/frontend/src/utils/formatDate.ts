@@ -393,3 +393,36 @@ export function resolveRecipientCallback(
         : null)
     || null;
 }
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ★ D102: (광고)+080 프론트 컨트롤타워
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+/**
+ * 메시지에 (광고) 접두사 + 무료거부/무료수신거부 접미사 추가 (프론트 미리보기/바이트계산용)
+ *
+ * 백엔드 messageUtils.ts의 buildAdMessage()와 동일한 로직.
+ * 8곳 이상에서 인라인으로 반복되던 코드를 이 함수 하나로 통합.
+ *
+ * @param message      순수 본문 (광고 미포함)
+ * @param msgType      'SMS' | 'LMS' | 'MMS'
+ * @param isAd         광고 여부
+ * @param optOutNumber 080 수신거부번호
+ * @returns (광고)+본문+무료거부 조합 메시지. 광고 아니면 원본 반환.
+ */
+export function buildAdMessageFront(
+  message: string,
+  msgType: string,
+  isAd: boolean,
+  optOutNumber: string
+): string {
+  if (!isAd || !optOutNumber) return message;
+
+  const isSms = msgType === 'SMS';
+  const adPrefix = isSms ? '(광고)' : '(광고) ';
+  const rejectFooter = isSms
+    ? `\n무료거부${optOutNumber.replace(/-/g, '')}`
+    : `\n무료수신거부 ${optOutNumber}`;
+
+  return `${adPrefix}${message}${rejectFooter}`;
+}

@@ -1,7 +1,7 @@
 /**
  * ★ D69+AI Premium: 자동발송 PM2 워커 (3단계 라이프사이클)
  *
- * 실행 방식: app.ts 내부 setInterval (매 1시간)
+ * 실행 방식: app.ts 내부 setInterval (매 10분)
  *
  * ★ 3단계 라이프사이클 (AI 문안 자동생성 지원):
  *   D-2 23:00  → runMessageGeneration()  — AI 문안 생성 + 스팸테스트
@@ -22,7 +22,7 @@
 
 import { query } from '../config/database';
 import { buildFilterQueryCompat } from './customer-filter';
-import { replaceVariables, enrichWithCustomFields } from './messageUtils';
+import { replaceVariables, getOpt080Number, buildAdMessage, prepareFieldMappings } from './messageUtils';
 import {
   toKoreaTimeStr,
   getCompanySmsTables, hasCompanyLineGroup, getNextSmsTable,
@@ -452,13 +452,8 @@ async function executeAutoCampaign(ac: any): Promise<void> {
     const companyTables = await getCompanySmsTables(ac.company_id, ac.user_id);
 
     // 회사 스키마 조회 (변수 치환용)
-    const companySchemaResult = await query(
-      'SELECT customer_schema FROM companies WHERE id = $1',
-      [ac.company_id]
-    );
-    const customerSchema = companySchemaResult.rows[0]?.customer_schema || {};
-    const { fieldMappings } = extractVarCatalog(customerSchema);
-    await enrichWithCustomFields(fieldMappings, ac.company_id);
+    // ★ D102: prepareFieldMappings 컨트롤타워로 통합 (customer_schema 조회 + extractVarCatalog + enrichWithCustomFields)
+    const fieldMappings = await prepareFieldMappings(ac.company_id);
 
     // 동적 SELECT 컬럼 구성
     const baseColumns = ['id', 'phone', 'custom_fields'];
@@ -599,9 +594,14 @@ async function executeAutoCampaign(ac: any): Promise<void> {
       }
     }
 
+    // ★ D102: (광고)+080 — CT-AD 컨트롤타워 사용 (기존 누락 수정)
+    const autoOpt080 = (ac.is_ad) ? await getOpt080Number(ac.user_id, ac.company_id) : '';
+
     const autoSmsRows: any[][] = [];
     for (const customer of filteredCustomers) {
-      const personalizedMessage = replaceVariables(messageContent, customer, fieldMappings);
+      let personalizedMessage = replaceVariables(messageContent, customer, fieldMappings);
+      // ★ D102: (광고) 접두사 + 080 수신거부 접미사 — 컨트롤타워 한 줄
+      personalizedMessage = buildAdMessage(personalizedMessage, ac.message_type, ac.is_ad ?? false, autoOpt080);
       const personalizedSubject = messageSubject;
       const cleanPhone = normalizePhone(customer.phone);
       // ★ D93: 개별회신번호 사용 시 고객별 store_phone → callback
@@ -754,17 +754,18 @@ export async function runAutoCampaignWorker(): Promise<void> {
 // setInterval 기반 실행 (app.ts에서 호출)
 // ============================================================
 
-const WORKER_INTERVAL_MS = 60 * 60 * 1000; // 1시간
+// ★ D102: 1시간→10분 (최대 지연 9분으로 축소, 11시 설정→11:49 발송 문제 해결)
+const WORKER_INTERVAL_MS = 10 * 60 * 1000; // 10분
 
 export function startAutoCampaignScheduler(): void {
-  console.log('[auto-worker] 자동발송 스케줄러 시작 (매 1시간 체크, 3단계 라이프사이클)');
+  console.log('[auto-worker] 자동발송 스케줄러 시작 (매 10분 체크, 3단계 라이프사이클)');
 
   // 기동 시 즉시 1회 실행
   runAutoCampaignWorker().catch(err => {
     console.error('[auto-worker] 초기 실행 에러:', err);
   });
 
-  // 이후 매 1시간마다
+  // 이후 매 10분마다
   setInterval(() => {
     runAutoCampaignWorker().catch(err => {
       console.error('[auto-worker] 정기 실행 에러:', err);

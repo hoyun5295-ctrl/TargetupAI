@@ -242,16 +242,10 @@ export function isValidKoreanPhone(phone: string): boolean {
 export function isValidKoreanLandline(phone: string): boolean {
   if (!phone) return false;
   const cleaned = phone.replace(/\D/g, '');
-  // 02 서울 → 9~10자리
-  if (cleaned.startsWith('02')) return cleaned.length >= 9 && cleaned.length <= 10;
-  // 031~055 지역번호 → 10~11자리
-  if (/^0[3-5][0-9]/.test(cleaned)) return cleaned.length >= 10 && cleaned.length <= 11;
-  // 070 인터넷전화 → 11자리
-  if (cleaned.startsWith('070')) return cleaned.length === 11;
-  // 080 수신자부담 → 11자리
-  if (cleaned.startsWith('080')) return cleaned.length === 11;
+  // ★ D102: 범위 제한 없이 — 0으로 시작 + 휴대폰(01X) 아닌 7자리 이상이면 유선번호로 인정
+  if (cleaned.startsWith('0') && !/^01[016789]/.test(cleaned) && cleaned.length >= 7) return true;
   // 1588, 1544, 1577 등 대표번호 → 8자리
-  if (/^1[0-9]{3}/.test(cleaned) && !cleaned.startsWith('10')) return cleaned.length === 8;
+  if (/^1[0-9]{3}/.test(cleaned) && cleaned.length === 8) return true;
   return false;
 }
 

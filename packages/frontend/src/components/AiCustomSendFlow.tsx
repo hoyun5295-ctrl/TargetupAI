@@ -18,7 +18,7 @@ import {
   XCircle
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { formatPreviewValue, calculateSmsBytes, replaceMessageVars } from '../utils/formatDate';
+import { formatPreviewValue, calculateSmsBytes, replaceMessageVars, buildAdMessageFront } from '../utils/formatDate';
 import { highlightVars } from '../utils/highlightVars';
 
 interface AiCustomSendFlowProps {
@@ -204,14 +204,7 @@ export default function AiCustomSendFlow({
         setCustomTestSending(false);
         return;
       }
-      let msg = selectedMsg.message_text;
-      if (isAdLocal) {
-        const prefix = channel === 'SMS' ? '(광고)' : '(광고) ';
-        const suffix = channel === 'SMS'
-          ? `\n무료거부${optOutNumber.replace(/-/g, '')}`
-          : `\n무료수신거부 ${formatRejectNumber(optOutNumber)}`;
-        msg = prefix + msg + suffix;
-      }
+      const msg = buildAdMessageFront(selectedMsg.message_text, channel, isAdLocal, optOutNumber);
       const token = localStorage.getItem('token');
       const res = await fetch('/api/campaigns/test-send', {
         method: 'POST',
@@ -276,13 +269,10 @@ export default function AiCustomSendFlow({
     return num;
   };
 
+  // ★ D102: buildAdMessageFront 컨트롤타워 사용
   const wrapAdText = (msg: string) => {
-    if (!msg || !isAdLocal) return msg;
-    const adPrefix = channel === 'SMS' ? '(광고)' : '(광고) ';
-    const adSuffix = channel === 'SMS'
-      ? `\n무료거부${optOutNumber.replace(/-/g, '')}`
-      : `\n무료수신거부 ${formatRejectNumber(optOutNumber)}`;
-    return adPrefix + msg + adSuffix;
+    if (!msg) return msg;
+    return buildAdMessageFront(msg, channel, isAdLocal, optOutNumber);
   };
 
   // ★ D95: replaceMessageVars 컨트롤타워 사용
@@ -942,8 +932,8 @@ export default function AiCustomSendFlow({
                       const sc = (Object.keys(sampleData).length > 0 ? sampleData : sampleCustomer) || {};
                       // ★ D95: replaceMessageVars 컨트롤타워 사용
                       const replaceVars = (text: string) => replaceMessageVars(text, availableFields, sc, { removeUnmatched: true });
-                      const smsRaw = isAdLocal ? `(광고)${msg}\n무료거부${optOutNumber.replace(/-/g, '')}` : msg;
-                      const lmsRaw = isAdLocal ? `(광고) ${msg}\n무료수신거부 ${formatRejectNumber(optOutNumber)}` : msg;
+                      const smsRaw = buildAdMessageFront(msg, 'SMS', isAdLocal, optOutNumber);
+                      const lmsRaw = buildAdMessageFront(msg, 'LMS', isAdLocal, optOutNumber);
                       const smsMsg = replaceVars(smsRaw);
                       const lmsMsg = replaceVars(lmsRaw);
                       const subj = variants[selectedVariantIdx]?.subject || '';

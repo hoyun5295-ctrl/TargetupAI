@@ -10,7 +10,7 @@
  * 의존: services/ai.ts의 VarCatalogEntry, extractVarCatalog 재사용
  */
 
-import { VarCatalogEntry } from '../services/ai';
+import { VarCatalogEntry, extractVarCatalog } from '../services/ai';
 import { query } from '../config/database';
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -213,9 +213,9 @@ export function replaceVariables(
     if (rawValue === null || rawValue === undefined) {
       displayValue = '';
     } else if (mapping.type === 'number') {
-      // ★ D88: PostgreSQL numeric 필드는 string으로 올 수 있음 — 숫자 파싱 후 포맷
+      // ★ D88+D102: PostgreSQL numeric→string 파싱 + 정수 반올림 + ko-KR 로케일 명시
       const numVal = typeof rawValue === 'number' ? rawValue : Number(String(rawValue).replace(/,/g, ''));
-      displayValue = !isNaN(numVal) ? numVal.toLocaleString() : String(rawValue);
+      displayValue = !isNaN(numVal) ? Math.round(numVal).toLocaleString('ko-KR') : String(rawValue);
     } else if (mapping.type === 'date' && rawValue) {
       // ★ D100: 날짜 KST 고정 — 순수 YYYY-MM-DD는 new Date() 없이 직접 파싱 (하루 밀림 방지)
       displayValue = formatDateValue(rawValue);
@@ -227,8 +227,9 @@ export function replaceVariables(
       // ★ D101: 소수점 숫자 자동 감지 — "50000.00" → "50,000" (field_type=VARCHAR인 기존 데이터 대응)
       // 전화번호(0으로 시작)와 하이픈 포함 번호는 제외
       } else if (/^-?\d+\.\d+$/.test(strVal.replace(/,/g, '')) && !/^0\d/.test(strVal)) {
+        // ★ D102: 정수 반올림 + ko-KR 로케일 명시 (소수점 2자리 제거)
         const numVal = Number(strVal.replace(/,/g, ''));
-        displayValue = !isNaN(numVal) ? numVal.toLocaleString() : strVal;
+        displayValue = !isNaN(numVal) ? Math.round(numVal).toLocaleString('ko-KR') : strVal;
       } else {
         displayValue = strVal;
       }
@@ -277,4 +278,74 @@ export function replaceWithFirstCustomer(
 ): string {
   if (!customers || customers.length === 0) return template;
   return replaceVariables(template, customers[0], fieldMappings);
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// CT-AD: (광고)+080 수신거부 컨트롤타워
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+/**
+ * 080 수신거부번호 조회 — users 우선 → companies fallback
+ *
+ * ★ D102 컨트롤타워화: campaigns.ts 3곳 + auto-campaign-worker.ts + spam-test-queue.ts에
+ *   동일한 080번호 조회 로직이 인라인으로 흩어져 있어서 auto-campaign-worker에서 누락됨.
+ *   이 함수 하나로 통합.
+ *
+ * @param userId    사용자 ID (users.opt_out_080_number 우선)
+ * @param companyId 회사 ID (companies.opt_out_080_number fallback)
+ * @returns 080번호 문자열 (없으면 '')
+ */
+export async function getOpt080Number(userId: string | null, companyId: string): Promise<string> {
+  if (userId) {
+    const userResult = await query('SELECT opt_out_080_number FROM users WHERE id = $1', [userId]);
+    const userOpt = userResult.rows[0]?.opt_out_080_number;
+    if (userOpt) return userOpt;
+  }
+  const compResult = await query('SELECT opt_out_080_number FROM companies WHERE id = $1', [companyId]);
+  return compResult.rows[0]?.opt_out_080_number || '';
+}
+
+/**
+ * 메시지에 (광고) 접두사 + 무료거부/무료수신거부 접미사 추가
+ *
+ * ★ D102 컨트롤타워화: 모든 발송 경로(AI발송, 직접발송, 직접타겟발송, 자동발송, 스팸테스트)에서
+ *   이 함수 하나로 (광고)+080 조합. 인라인 코드 전면 제거.
+ *
+ * SMS: (광고)본문\n무료거부08012345678
+ * LMS/MMS: (광고) 본문\n무료수신거부 080-1234-5678
+ *
+ * @param message     원본 메시지 (순수 본문, (광고) 미포함)
+ * @param msgType     메시지 타입 ('SMS' | 'LMS' | 'MMS')
+ * @param isAd        광고 여부
+ * @param opt080Number 080 수신거부번호 (getOpt080Number로 조회한 값)
+ * @returns (광고)+본문+무료거부 조합된 메시지. 광고 아니거나 080번호 없으면 원본 반환.
+ */
+export function buildAdMessage(
+  message: string,
+  msgType: string,
+  isAd: boolean,
+  opt080Number: string
+): string {
+  if (!isAd || !opt080Number) return message;
+
+  const isLms = msgType === 'LMS' || msgType === 'MMS';
+  const adPrefix = isLms ? '(광고) ' : '(광고)';
+  const rejectFooter = isLms
+    ? `\n무료수신거부 ${opt080Number}`
+    : `\n무료거부${opt080Number.replace(/-/g, '')}`;
+
+  return `${adPrefix}${message}${rejectFooter}`;
+}
+
+/**
+ * ★ D102: 필드 매핑 준비 컨트롤타워
+ * customer_schema 조회 + extractVarCatalog + enrichWithCustomFields 3종 세트를 한 함수로 통합.
+ * campaigns.ts 4곳 + spam-filter.ts 1곳 + auto-campaign-worker.ts 1곳 + spam-test-queue.ts 2곳에서
+ * 인라인으로 반복되던 코드.
+ */
+export async function prepareFieldMappings(companyId: string): Promise<Record<string, VarCatalogEntry>> {
+  const schemaResult = await query('SELECT customer_schema FROM companies WHERE id = $1', [companyId]);
+  const { fieldMappings } = extractVarCatalog(schemaResult.rows[0]?.customer_schema);
+  await enrichWithCustomFields(fieldMappings, companyId);
+  return fieldMappings;
 }

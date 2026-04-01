@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { formatPreviewValue } from '../utils/formatDate';
+import { formatPreviewValue, buildAdMessageFront } from '../utils/formatDate';
 import { highlightVars } from '../utils/highlightVars';
 
 interface AiCampaignResultPopupProps {
@@ -362,8 +362,8 @@ onClick={() => {
                       result = result.replace(/%[^%\s]{1,20}%/g, '');
                       return result;
                     };
-                    const smsRaw = isAd ? `(광고)${msg}\n무료거부${optOutNumber.replace(/-/g, '')}` : msg;
-                    const lmsRaw = isAd ? `(광고) ${msg}\n무료수신거부 ${formatRejectNumber(optOutNumber)}` : msg;
+                    const smsRaw = buildAdMessageFront(msg, 'SMS', isAd, optOutNumber);
+                    const lmsRaw = buildAdMessageFront(msg, 'LMS', isAd, optOutNumber);
                     const smsMsg = replaceVars(smsRaw);
                     const lmsMsg = replaceVars(lmsRaw);
                     const subj = aiResult?.messages?.[selectedAiMsgIdx]?.subject || '';

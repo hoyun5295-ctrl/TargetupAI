@@ -158,8 +158,11 @@ function parsePersonalizationDirective(
 
   const matchedVars: string[] = [];
   for (const name of fieldNames) {
-    if (availableVars.includes(name) && !matchedVars.includes(name)) {
-      matchedVars.push(name);
+    // ★ D102: 정확 매칭 우선, 실패 시 부분 매칭 (등록매장명→등록매장정보, 등록매장번호→매장전화번호)
+    let found = availableVars.find(v => v === name);
+    if (!found) found = availableVars.find(v => v.includes(name) || name.includes(v));
+    if (found && !matchedVars.includes(found)) {
+      matchedVars.push(found);
     }
   }
 

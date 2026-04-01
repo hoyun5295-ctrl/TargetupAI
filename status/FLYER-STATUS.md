@@ -2,22 +2,22 @@
 
 > **설계 문서:** FLYER-AI-DESIGN.md (컨셉, 결정사항, 로드맵)
 > **이 문서:** 현재 작업 상태, 구현 현황, 버그, 아키텍처 변경 추적
-> **최종 업데이트:** 2026-03-30
+> **최종 업데이트:** 2026-04-01
 
 ---
 
 ## 1) CURRENT_TASK (현재 집중 작업)
 
-### 🟡 FL-02 — 상품 이미지 기본 매핑 (Pixabay 무료 이미지) — 대기중
+### ✅ D101 — 전단AI 6건 기능 개선 + 버그 수정 (2026-04-01 완료)
 
-> **배경:** DALL-E=AI느낌, Unsplash=외국느낌, 유료 스톡=비쌈 → Pixabay 무료 실사 이미지 50개 수집 결정
-> **상태:** 직원들이 Pixabay에서 50개 이미지 다운로드 진행 중. 이미지 도착 후 서버 업로드 + PRODUCT_MAP 매핑 예정.
-
-#### 이미지 도착 후 작업
-1. 서버에 `uploads/product-images/` 폴더에 50개 이미지 업로드
-2. `product-images.ts` PRODUCT_MAP에 로컬 이미지 경로 매핑
-3. `resolveProductImageUrl()` 활성화 (현재 null 반환 → 로컬 이미지 반환)
-4. 배포 후 공개 페이지에서 기본 이미지 표시 검증
+> 1. 좌측상단 회사명 표시 (로그인한 company_name)
+> 2. 세션 30분 자동 로그아웃 (전단AI 전용 파일 3개, 한줄로와 완전 분리)
+> 3. MMS 이미지 첨부 (전단AI 전용 업로드 엔드포인트 + uploads/flyer-mms/ 별도 저장)
+> 4. 중복제거 + 수신거부제거 체크마크 + 실제 동작
+> 5. 080 수신거부번호 직접 설정 (SettingsPage 읽기전용→편집 가능)
+> 6. 전단지 기간 만료 시 자동 만료 처리 (공개 페이지 "행사 종료" 안내)
+> 7. 브랜드 상품 이미지 매핑 추가 (비비고 왕교자, 카스 500ML)
+> 8. DATE 타입 UTC 밀림 버그 수정 (TO_CHAR로 YYYY-MM-DD 문자열 반환)
 
 ---
 
@@ -43,7 +43,7 @@
 | SettingsPage (회사정보/회신번호/080/요금단가) | ✅ |
 | CustomerPage (엑셀 업로드/조회/검색/삭제) | ✅ |
 
-### Phase 2 — 상품 이미지 + 템플릿 개선 🟡 (2026-03-30 진행중)
+### Phase 2 — 상품 이미지 + 템플릿 개선 ✅ (2026-03-30 ~ 2026-04-01)
 | 항목 | 상태 |
 |------|------|
 | 상품 이미지 직접 업로드 (상품별 📷 버튼) | ✅ 배포 완료 |
@@ -54,8 +54,20 @@
 | FL-B01~B04 버그 전부 수정 | ✅ 배포 완료 |
 | Pixabay 무료 기본 이미지 47개 수집 | ✅ 완료 |
 | PRODUCT_MAP 로컬 이미지 매핑 + 서빙 | ✅ 배포 완료 (D100) |
+| 브랜드 상품 이미지 추가 (비비고 왕교자, 카스 500ML) | ✅ 배포 완료 (D101) |
 | 업종별 템플릿 (카페/미용실/정육점/꽃집) | 미착수 |
 | 매장 로고 + 테마 컬러 커스터마이징 | 미착수 |
+
+### Phase 2.5 — 발송 강화 + UX 개선 ✅ (2026-04-01)
+| 항목 | 상태 |
+|------|------|
+| 좌측상단 로그인 회사명 표시 | ✅ 배포 완료 (D101) |
+| 세션 30분 자동 로그아웃 + 타이머 (전단AI 전용) | ✅ 배포 완료 (D101) |
+| MMS 이미지 첨부 (전단AI 전용 저장 경로 분리) | ✅ 배포 완료 (D101) |
+| 중복제거 + 수신거부제거 체크마크 | ✅ 배포 완료 (D101) |
+| 080 수신거부번호 직접 설정 | ✅ 배포 완료 (D101) |
+| 전단지 기간 만료 시 자동 만료 처리 | ✅ 배포 완료 (D101) |
+| DATE UTC 밀림 수정 (TO_CHAR) | ✅ 배포 완료 (D101) |
 
 ### Phase 3 — AI + 분석 (미착수)
 | 항목 | 상태 |
@@ -79,10 +91,15 @@
    └─ 상품 입력 행의 📷 버튼으로 업로드
    └─ categories JSONB → item.imageUrl에 저장
 
-2순위: PRODUCT_MAP 기본 이미지 (Pixabay 무료 수집)
-   └─ uploads/product-images/딸기.jpg 등 50개
-   └─ product-images.ts에서 상품명 키워드 매칭
-   └─ ⏳ 이미지 수집 후 활성화 예정
+2순위: PRODUCT_MAP 기본 이미지 (Pixabay 무료 수집 + 브랜드 공식 이미지)
+   └─ uploads/product-images/딸기.jpg 등 49개
+   └─ product-images.ts에서 상품명 키워드 매칭 (toLowerCase 비교)
+   └─ ✅ 활성화 완료
+
+MMS 이미지 (전단AI 전용 — 한줄로 uploads/mms/와 완전 분리):
+   └─ uploads/flyer-mms/{companyId}/{uuid}.jpg
+   └─ API: /api/flyer/flyers/mms-upload (업로드), /api/flyer/flyers/mms-image (삭제)
+   └─ 서빙: /api/flyer/flyers/flyer-mms/:companyId/:filename (공개)
 
 3순위: 이모지 (최종 폴백)
    └─ 상품명 키워드 → 이모지 자동 매핑
@@ -116,6 +133,9 @@
 | DELETE | /api/flyer/flyers/product-image | ✅ | 상품 이미지 삭제 |
 | GET | /api/flyer/flyers/flyer-products/:companyId/:filename | ❌ | 업로드 이미지 서빙 (공개) |
 | GET | /api/flyer/flyers/product-images/:filename | ❌ | 기본 이미지 서빙 (공개) |
+| POST | /api/flyer/flyers/mms-upload | ✅ | 전단AI 전용 MMS 이미지 업로드 (uploads/flyer-mms/) |
+| DELETE | /api/flyer/flyers/mms-image | ✅ | 전단AI 전용 MMS 이미지 삭제 |
+| GET | /api/flyer/flyers/flyer-mms/:companyId/:filename | ❌ | 전단AI MMS 이미지 서빙 (공개) |
 | GET | /api/flyer/p/:code | ❌ | 공개 페이지 렌더링 |
 
 ### 3-4. DB 테이블
@@ -165,6 +185,9 @@ location /api/flyer/ → proxy_pass http://127.0.0.1:3000/api/flyer/
 | FL-B06 | 🟠 | ✅ 수정+배포 | Express URL 자동 디코딩 vs 디스크 인코딩 파일명 불일치 → re-encode 처리 |
 | FL-B07 | 🔴 | ✅ 수정+배포 | 전단지 저장 후 목록 403 — applyStoreScope에서 company_admin 미체크 (D100) |
 | FL-B08 | 🟠 | ✅ 수정+배포 | 로그인 시 기존 세션 전부 무효화 → 전단AI+메인 동시 사용 불가 → 동시 세션 5개 허용 (D100) |
+| FL-B09 | 🔴 | ✅ 수정+배포 | DATE 타입 UTC 밀림 — node-postgres가 DATE→Date 객체→JSON 직렬화 시 UTC 변환으로 하루 밀림 → TO_CHAR로 YYYY-MM-DD 문자열 반환 (D101) |
+| FL-B10 | 🟠 | ✅ 수정+배포 | SettingsPage 080 키 불일치 — `opt_out_080_number`로 접근했으나 API는 `reject_number` 반환 → 키 수정 + 직접 편집 가능으로 변경 (D101) |
+| FL-B11 | 🟠 | ✅ 수정+배포 | product-images 서빙 webp/jpeg Content-Type 미지원 + PRODUCT_MAP 키워드 대소문자 비교 누락 (D101) |
 
 ---
 
@@ -184,3 +207,7 @@ location /api/flyer/ → proxy_pass http://127.0.0.1:3000/api/flyer/
 | **company_admin 권한 체크 누락** | applyStoreScope에서 'admin'만 체크 → company_admin이 403 → 전단지 목록 미표시 | **userType 체크 시 company_admin도 포함** |
 | **세션 전부 무효화** | 로그인 시 같은 userId 세션 전부 is_active=false → 다른 앱 세션 사망 | **동시 세션 허용 (최대 5개, 초과 시 오래된 것만 정리)** |
 | **이미지 경로 불일치** | PM2가 packages/backend/에서 실행 → ./uploads/ = packages/backend/uploads/ ≠ 루트 uploads/ | **심볼릭 링크 또는 절대경로 사용** |
+| **DATE UTC 밀림** | PostgreSQL DATE → node-postgres Date 객체 → JSON.stringify UTC 변환 → 하루 전 날짜 | **SELECT에서 TO_CHAR(column, 'YYYY-MM-DD')로 문자열 반환. Date 객체 직렬화 금지** |
+| **한줄로 데이터 격리** | MMS 이미지를 같은 /api/mms-images/ 사용하면 한줄로 MMS 보관함에 전단AI 이미지 섞임 | **전단AI 전용 엔드포인트 + 별도 저장경로(uploads/flyer-mms/) 완전 분리** |
+| **브랜드 상품 키워드** | "맥주"로 매핑하면 모든 맥주가 카스 이미지, "비비고"면 모든 비비고 제품이 왕교자 이미지 | **브랜드 상품은 정확한 상품명으로 매핑. 범용 키워드 금지** |
+| **API 응답 키 불일치** | SettingsPage가 opt_out_080_number로 접근하지만 API는 reject_number 반환 → 항상 미설정 | **API 반환 키와 프론트 접근 키를 양쪽 확인** |

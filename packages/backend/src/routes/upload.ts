@@ -538,7 +538,10 @@ async function processUploadInBackground(
               record.birth_date = normalized;
               derivedBirthYear = parseInt(normalized.substring(0, 4));
               derivedBirthMonthDay = normalized.substring(5, 10);
-              derivedAge = currentYear - derivedBirthYear;
+              // ★ D102: 생일 지남 여부 반영 (단순 연도 뺄셈 → 올해 생일 안 지났으면 -1)
+              const now = new Date();
+              const todayMD = `${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+              derivedAge = currentYear - derivedBirthYear - (derivedBirthMonthDay > todayMD ? 1 : 0);
             }
           }
         }

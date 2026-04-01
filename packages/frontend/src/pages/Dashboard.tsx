@@ -40,7 +40,7 @@ import TodayStatsModal from '../components/TodayStatsModal';
 import UploadProgressModal from '../components/UploadProgressModal';
 import UploadResultModal from '../components/UploadResultModal';
 import { useAuthStore } from '../stores/authStore';
-import { formatDate, formatPreviewValue, calculateSmsBytes, truncateToSmsBytes, DIRECT_VAR_MAP, DIRECT_VAR_TO_FIELD, DIRECT_FIELD_LABELS, DIRECT_MAPPING_FIELDS, replaceDirectVars, formatPhoneNumber, mmsServerPathToUrl, resolveRecipientCallback } from '../utils/formatDate';
+import { formatDate, formatPreviewValue, formatByType, calculateSmsBytes, truncateToSmsBytes, DIRECT_VAR_MAP, DIRECT_VAR_TO_FIELD, DIRECT_FIELD_LABELS, DIRECT_MAPPING_FIELDS, replaceDirectVars, formatPhoneNumber, mmsServerPathToUrl, resolveRecipientCallback, buildAdMessageFront } from '../utils/formatDate';
 import DirectSendPanel from '../components/DirectSendPanel';
 
 interface Stats {
@@ -472,23 +472,16 @@ export default function Dashboard() {
       // 변수 치환 처리
       const isRcs = targetSendChannel === 'rcs';
       const baseMsg = isRcs ? kakaoMessage : targetMessage;
-      // ★ D43-3c: 동적 변수 치환 (하드코딩 제거)
-      const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const recipientsWithMessage = targetRecipients.map((r: any) => {
-        let substituted = baseMsg;
-        targetFieldsMeta.forEach(fm => {
-          if (fm.field_key === 'phone' || fm.field_key === 'sms_opt_in') return;
-          const pattern = new RegExp(escapeRe(fm.variable), 'g');
-          substituted = substituted.replace(pattern, String(r[fm.field_key] ?? ''));
-        });
-        return {
-          phone: r.phone,
-          callback: resolveRecipientCallback(r, useIndividualCallback, individualCallbackColumn),
-          message: ((!isRcs && adTextEnabled) ? (targetMsgType === 'SMS' ? '(광고)' : '(광고) ') : '') +
-            substituted +
-            ((!isRcs && adTextEnabled) ? (targetMsgType === 'SMS' ? `\n무료거부${optOutNumber.replace(/-/g, '')}` : `\n무료수신거부 ${formatRejectNumber(optOutNumber)}`) : '')
-        };
-      });
+      // ★ D102: 프론트 변수 치환 제거 — 백엔드 replaceVariables 컨트롤타워 하나로 통일
+      // customMessages를 보내지 않으므로 백엔드에서 DB 고객 데이터 기반으로 치환 + 포맷팅
+      const recipientsForSend = targetRecipients.map((r: any) => ({
+        phone: r.phone,
+        name: r.name || '',
+        extra1: r.extra1 || '',
+        extra2: r.extra2 || '',
+        extra3: r.extra3 || '',
+        callback: resolveRecipientCallback(r, useIndividualCallback, individualCallbackColumn),
+      }));
 
       const res = await fetch('/api/campaigns/direct-send', {
         method: 'POST',
@@ -504,18 +497,12 @@ export default function Dashboard() {
           callback: useIndividualCallback ? null : selectedCallback,
           useIndividualCallback: useIndividualCallback,
           individualCallbackColumn: useIndividualCallback ? individualCallbackColumn : undefined,
-          recipients: recipientsWithMessage.map(r => ({
-            phone: r.phone, name: '', var1: '', var2: '', var3: '',
-            callback: r.callback,
-          })),
+          recipients: recipientsForSend,
           adEnabled: adTextEnabled,
           scheduled: reserveEnabled,
           scheduledAt: reserveEnabled && reserveDateTime ? new Date(reserveDateTime).toISOString() : null,
           splitEnabled: splitEnabled,
           splitCount: splitEnabled ? splitCount : null,
-          customMessages: recipientsWithMessage.map(r => ({
-            ...r,
-          })),
           mmsImagePaths: mmsUploadedImages.map(img => img.serverPath),
           ...(confirmCallbackExclusion ? { confirmCallbackExclusion: true } : {}),
         })
@@ -919,13 +906,7 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
     setSmsOverrideAccepted(false);
     // ★ D96: 컨트롤타워(DIRECT_VAR_TO_FIELD) 사용
     let fullMsg = getMaxByteMessage(directMessage, directRecipients, DIRECT_VAR_TO_FIELD);
-    if (adTextEnabled) {
-      const adPrefix = directMsgType === 'SMS' ? '(광고)' : '(광고) ';
-      const optOutText = directMsgType === 'SMS'
-        ? `무료거부${optOutNumber.replace(/-/g, '')}`
-        : `무료수신거부 ${optOutNumber}`;
-      fullMsg = `${adPrefix}${fullMsg}\n${optOutText}`;
-    }
+    fullMsg = buildAdMessageFront(fullMsg, directMsgType, adTextEnabled, optOutNumber);
     // ★ D95: 컨트롤타워 사용
     const bytes = calculateSmsBytes(fullMsg);
     // SMS에서 90바이트 초과 시 LMS 전환 확인 모달
@@ -947,13 +928,7 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
       }
     });
     let fullMsg = getMaxByteMessage(targetMessage, targetRecipients, targetVarMap);
-    if (adTextEnabled) {
-      const adPrefix = targetMsgType === 'SMS' ? '(광고)' : '(광고) ';
-      const optOutText = targetMsgType === 'SMS'
-        ? `무료거부${optOutNumber.replace(/-/g, '')}`
-        : `무료수신거부 ${optOutNumber}`;
-      fullMsg = `${adPrefix}${fullMsg}\n${optOutText}`;
-    }
+    fullMsg = buildAdMessageFront(fullMsg, targetMsgType, adTextEnabled, optOutNumber);
     // ★ D95: 컨트롤타워 사용
     const bytes = calculateSmsBytes(fullMsg);
     if (targetMsgType === 'SMS' && bytes > 90 && !showLmsConfirm) {
@@ -1499,17 +1474,7 @@ const campaignData = {
   campaignName: autoName,
       messageType: selectedChannel,
       sendChannel: 'sms',
-      messageContent: (() => {
-        let msg = selectedMsg.message_text;
-        if (isAd) {
-          const prefix = selectedChannel === 'SMS' ? '(광고)' : '(광고) ';
-          const suffix = selectedChannel === 'SMS'
-            ? `\n무료거부${optOutNumber.replace(/-/g, '')}`
-            : `\n무료수신거부 ${formatRejectNumber(optOutNumber)}`;
-          msg = prefix + msg + suffix;
-        }
-        return msg;
-      })(),
+      messageContent: buildAdMessageFront(selectedMsg.message_text, selectedChannel, isAd, optOutNumber),
       targetFilter: aiResult?.target?.filters || {},
       isAd: isAd,
       scheduledAt: scheduledAt,
@@ -1626,15 +1591,8 @@ const campaignData = {
       }
       // AI 맞춤한줄은 AI 추천시간 없으므로 'ai' 옵션 없음, 'now'면 null
 
-      // 메시지 내용 (광고문구 래핑)
-      let messageContent = variant.message_text || '';
-      if (isAd) {
-        const prefix = channelType === 'SMS' ? '(광고)' : '(광고) ';
-        const suffix = channelType === 'SMS'
-          ? `\n무료거부${optOutNumber.replace(/-/g, '')}`
-          : `\n무료수신거부 ${formatRejectNumber(optOutNumber)}`;
-        messageContent = prefix + messageContent + suffix;
-      }
+      // 메시지 내용 (광고문구 래핑) — ★ D102: buildAdMessageFront 컨트롤타워 사용
+      const messageContent = buildAdMessageFront(variant.message_text || '', channelType, isAd, optOutNumber);
 
       const campaignData = {
         campaignName: _campaignName,
@@ -1734,17 +1692,7 @@ const campaignData = {
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          messageContent: (() => {
-            let msg = selectedMsg.message_text;
-            if (isAd) {
-              const prefix = selectedChannel === 'SMS' ? '(광고)' : '(광고) ';
-              const suffix = selectedChannel === 'SMS'
-                ? `\n무료거부${optOutNumber.replace(/-/g, '')}`
-                : `\n무료수신거부 ${formatRejectNumber(optOutNumber)}`;
-              msg = prefix + msg + suffix;
-            }
-            return msg;
-          })(),
+          messageContent: buildAdMessageFront(selectedMsg.message_text, selectedChannel, isAd, optOutNumber),
           messageType: selectedChannel,
           subject: selectedMsg.subject || '',
           mmsImagePaths: mmsUploadedImages.map(img => img.serverPath),
@@ -1781,14 +1729,7 @@ const campaignData = {
         setTestSending(false);
         return;
       }
-      let msg = targetMessage;
-      if (adTextEnabled) {
-        const prefix = targetMsgType === 'SMS' ? '(광고)' : '(광고) ';
-        const suffix = targetMsgType === 'SMS'
-          ? `\n무료거부${optOutNumber.replace(/-/g, '')}`
-          : `\n무료수신거부 ${formatRejectNumber(optOutNumber)}`;
-        msg = prefix + msg + suffix;
-      }
+      const msg = buildAdMessageFront(targetMessage, targetMsgType, adTextEnabled, optOutNumber);
       const token = localStorage.getItem('token');
       const res = await fetch('/api/campaigns/test-send', {
         method: 'POST',
@@ -1846,25 +1787,14 @@ const campaignData = {
     return num;
   };
 
-  // ★ AI추천 미리보기용 광고 문구 래핑
+  // ★ AI추천 미리보기용 광고 문구 래핑 — D102: buildAdMessageFront 컨트롤타워 사용
   const wrapAdText = (msg: string, channel?: string) => {
     if (!msg) return msg;
-    const ch = channel || selectedChannel;
-    if (!isAd) return msg;
-    const adPrefix = ch === 'SMS' ? '(광고)' : '(광고) ';
-    const adSuffix = ch === 'SMS'
-      ? `\n무료거부${optOutNumber.replace(/-/g, '')}`
-      : `\n무료수신거부 ${formatRejectNumber(optOutNumber)}`;
-    return adPrefix + msg + adSuffix;
+    return buildAdMessageFront(msg, channel || selectedChannel, isAd, optOutNumber);
   };
 
   const getFullMessage = (msg: string) => {
-    if (!adTextEnabled) return msg;
-    const prefix = directMsgType === 'SMS' ? '(광고)' : '(광고) ';
-    const optOutText = directMsgType === 'SMS' 
-      ? `무료거부${optOutNumber.replace(/-/g, '')}` 
-      : `무료수신거부 ${formatRejectNumber(optOutNumber)}`;
-    return `${prefix}${msg}\n${optOutText}`;
+    return buildAdMessageFront(msg, directMsgType, adTextEnabled, optOutNumber);
   };
 
   // ★ D96: 컨트롤타워(DIRECT_VAR_TO_FIELD) 사용 — 하드코딩 변수맵 제거

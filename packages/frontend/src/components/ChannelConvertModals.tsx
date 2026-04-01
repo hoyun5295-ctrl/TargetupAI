@@ -1,3 +1,5 @@
+import { buildAdMessageFront } from '../utils/formatDate';
+
 interface LmsConvertModalProps {
   show: boolean;
   onClose: () => void;
@@ -35,15 +37,13 @@ export function LmsConvertModal({
   const activeVarMap: Record<string, string> = showTargetSend
     ? { '%이름%': 'name', '%등급%': 'grade', '%지역%': 'region', '%구매금액%': 'total_purchase_amount', '%회신번호%': 'callback' }
     : { '%이름%': 'name', '%기타1%': 'extra1', '%기타2%': 'extra2', '%기타3%': 'extra3', '%회신번호%': 'callback' };
-  let fullMsg = getMaxByteMessage(activeMsg, activeRecipients, activeVarMap);
-  
+  const rawMsg = getMaxByteMessage(activeMsg, activeRecipients, activeVarMap);
+  // ★ D102: buildAdMessageFront 컨트롤타워 사용
+  const fullMsg = buildAdMessageFront(rawMsg, activeMsgType, adTextEnabled, optOutNumber);
+  // optOutText는 truncation 후 잘림 여부 검사용
   const optOutText = activeMsgType === 'SMS'
     ? `무료거부${optOutNumber.replace(/-/g, '')}`
     : `무료수신거부 ${optOutNumber}`;
-  if (adTextEnabled) {
-    const adPrefix = activeMsgType === 'SMS' ? '(광고)' : '(광고) ';
-    fullMsg = `${adPrefix}${fullMsg}\n${optOutText}`;
-  }
 
   const truncated = truncateToSmsBytes(fullMsg, 90);
   const truncatedBytes = calculateBytes(truncated);

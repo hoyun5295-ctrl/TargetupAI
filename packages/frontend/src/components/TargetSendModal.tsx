@@ -1,7 +1,7 @@
 import { Sparkles } from 'lucide-react';
 import { useRef, useState } from 'react';
 import type { FieldMeta } from './DirectTargetFilterModal';
-import { formatPreviewValue, formatByType } from '../utils/formatDate';
+import { formatPreviewValue, formatByType, buildAdMessageFront } from '../utils/formatDate';
 
 // ★ D43-3c: 정규식 특수문자 이스케이프
 const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -289,11 +289,8 @@ export default function TargetSendModal({
       return;
     }
 
-    // 바이트 계산
-    const optOutText = targetMsgType === 'SMS'
-      ? `무료거부${optOutNumber.replace(/-/g, '')}`
-      : `무료수신거부 ${formatRejectNumber(optOutNumber)}`;
-    const fullMsg = adTextEnabled ? `${targetMsgType === 'SMS' ? '(광고)' : '(광고) '}${targetMessage}\n${optOutText}` : targetMessage;
+    // 바이트 계산 — ★ D102: buildAdMessageFront 컨트롤타워 사용
+    const fullMsg = buildAdMessageFront(targetMessage, targetMsgType, adTextEnabled, optOutNumber);
     const msgBytes = calculateBytes(fullMsg);
 
     // SMS인데 90바이트 초과 시 전환 안내
@@ -306,8 +303,7 @@ export default function TargetSendModal({
     // LMS/MMS인데 SMS로 보내도 되는 경우 비용 절감 안내
     // ★ MMS 이미지가 업로드되어 있으면 SMS 전환 불가 → 비용절감 안내 스킵
     if (targetMsgType !== 'SMS' && !lmsKeepAccepted && mmsUploadedImages.length === 0) {
-      const smsOptOut = `무료거부${optOutNumber.replace(/-/g, '')}`;
-      const smsFullMsg = adTextEnabled ? `(광고)${targetMessage}\n${smsOptOut}` : targetMessage;
+      const smsFullMsg = buildAdMessageFront(targetMessage, 'SMS', adTextEnabled, optOutNumber);
       const smsBytes = calculateBytes(smsFullMsg);
       if (smsBytes <= 90) {
         setShowSmsConvert({ show: true, from: 'target', currentBytes: msgBytes, smsBytes, count: targetRecipients.length });
@@ -380,8 +376,8 @@ export default function TargetSendModal({
     const msg = targetMessage || '';
     const cb = selectedCallback || '';
     const firstR = targetRecipients[0];
-    const smsRaw = adTextEnabled ? `(광고)${msg}\n무료거부${optOutNumber.replace(/-/g, '')}` : msg;
-    const lmsRaw = adTextEnabled ? `(광고) ${msg}\n무료수신거부 ${optOutNumber}` : msg;
+    const smsRaw = buildAdMessageFront(msg, 'SMS', adTextEnabled, optOutNumber);
+    const lmsRaw = buildAdMessageFront(msg, 'LMS', adTextEnabled, optOutNumber);
     const smsMsg = replaceVars(smsRaw, firstR);
     const lmsMsg = replaceVars(lmsRaw, firstR);
     setSpamFilterData({ sms: smsMsg, lms: lmsMsg, callback: cb, msgType: targetMsgType, subject: targetSubject || '', firstRecipient: firstR || undefined });
@@ -503,19 +499,13 @@ export default function TargetSendModal({
                 </div>
                 <span className="text-xs text-gray-500 whitespace-nowrap">
                   <span className={`font-bold ${(() => {
-                    const optOutText = targetMsgType === 'SMS'
-                      ? `무료거부${optOutNumber.replace(/-/g, '')}`
-                      : `무료수신거부 ${formatRejectNumber(optOutNumber)}`;
-                    const fullMsg = adTextEnabled ? `${targetMsgType === 'SMS' ? '(광고)' : '(광고) '}${targetMessage}\n${optOutText}` : targetMessage;
+                    const fullMsg = buildAdMessageFront(targetMessage, targetMsgType, adTextEnabled, optOutNumber);
                     const bytes = calculateBytes(fullMsg);
                     const max = targetMsgType === 'SMS' ? 90 : 2000;
                     return bytes > max ? 'text-red-500' : 'text-emerald-600';
                   })()}`}>
                     {(() => {
-                      const optOutText = targetMsgType === 'SMS'
-                        ? `무료거부${optOutNumber.replace(/-/g, '')}`
-                        : `무료수신거부 ${formatRejectNumber(optOutNumber)}`;
-                      const fullMsg = adTextEnabled ? `${targetMsgType === 'SMS' ? '(광고)' : '(광고) '}${targetMessage}\n${optOutText}` : targetMessage;
+                      const fullMsg = buildAdMessageFront(targetMessage, targetMsgType, adTextEnabled, optOutNumber);
                       return calculateBytes(fullMsg);
                     })()}
                   </span>/{targetMsgType === 'SMS' ? 90 : 2000}byte
@@ -543,8 +533,12 @@ export default function TargetSendModal({
                   <option value="">회신번호 선택</option>
                   <optgroup label="수신자별 회신번호 컬럼">
                     {fieldsMeta
-                      .filter(f => f.field_key === 'store_phone' || f.field_key === 'callback' || f.field_key === 'phone' ||
-                        f.display_name.includes('전화') || f.display_name.includes('번호') || f.display_name.includes('연락처'))
+                      .filter(f => {
+                        // ★ D102: phone(고객전화번호)은 수신자 번호이므로 회신번호 드롭다운에서 제외
+                        if (f.field_key === 'phone' || f.field_key === 'sms_opt_in') return false;
+                        return f.field_key === 'store_phone' || f.field_key === 'callback' ||
+                          f.display_name.includes('전화') || f.display_name.includes('회신') || f.display_name.includes('연락처');
+                      })
                       .map(f => (
                         <option key={f.field_key} value={`__col__${f.field_key}`}>
                           {f.display_name} (수신자별)

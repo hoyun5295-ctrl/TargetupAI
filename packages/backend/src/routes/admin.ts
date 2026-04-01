@@ -1303,10 +1303,11 @@ router.get('/stats/send/detail', authenticate, requireSuperAdmin, async (req: Re
 
     // 캠페인 상세 목록 (campaigns 직접 조회)
     const campaignsResult = await query(`
-      SELECT 
+      SELECT
         c.id as campaign_id,
         c.campaign_name,
         c.send_type,
+        c.message_content,
         u.name as user_name,
         u.login_id,
         c.id as run_id,
