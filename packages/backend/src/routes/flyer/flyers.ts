@@ -367,7 +367,10 @@ router.get('/', async (req: Request, res: Response) => {
 
     const params: any[] = [companyId, ...scope.storeParams];
     const result = await query(
-      `SELECT f.*, s.code as short_code,
+      `SELECT f.*,
+              TO_CHAR(f.period_start, 'YYYY-MM-DD') as period_start,
+              TO_CHAR(f.period_end, 'YYYY-MM-DD') as period_end,
+              s.code as short_code,
               (SELECT COUNT(*) FROM url_clicks uc JOIN short_urls su ON su.id = uc.short_url_id WHERE su.flyer_id = f.id) as click_count
        FROM flyers f
        LEFT JOIN short_urls s ON s.flyer_id = f.id
@@ -474,7 +477,10 @@ router.get('/:id', async (req: Request, res: Response) => {
     const { id } = req.params;
 
     const result = await query(
-      `SELECT f.*, s.code as short_code,
+      `SELECT f.*,
+              TO_CHAR(f.period_start, 'YYYY-MM-DD') as period_start,
+              TO_CHAR(f.period_end, 'YYYY-MM-DD') as period_end,
+              s.code as short_code,
               (SELECT COUNT(*) FROM url_clicks uc JOIN short_urls su ON su.id = uc.short_url_id WHERE su.flyer_id = f.id) as click_count
        FROM flyers f
        LEFT JOIN short_urls s ON s.flyer_id = f.id
