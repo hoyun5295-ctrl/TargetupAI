@@ -83,7 +83,8 @@
       "Bash(python -m markitdown \"C:\\\\Users\\\\ceo\\\\OneDrive\\\\문서\\\\카카오톡 받은 파일\\\\한줄로_20260401.pptx\")",
       "Bash(find /c/Users/ceo/projects/targetup/packages/frontend/src -type f \\\\\\(-name *.tsx -o -name *.ts \\\\\\))",
       "Bash(grep -E \"\\\\.\\(tsx|ts\\)$\")",
-      "Bash(grep -n \"const companyId = req.user\" /c/Users/ceo/projects/targetup/packages/backend/src/routes/*.ts)"
+      "Bash(grep -n \"const companyId = req.user\" /c/Users/ceo/projects/targetup/packages/backend/src/routes/*.ts)",
+      "Bash(grep -n \"field_key === ''phone''\" /c/Users/ceo/projects/targetup/packages/frontend/src/components/TargetSendModal.tsx)"
     ]
   }
 }

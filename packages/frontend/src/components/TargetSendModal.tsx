@@ -162,6 +162,9 @@ export default function TargetSendModal({
   // ====== 내부 state ======
   const [targetListPage, setTargetListPage] = useState(0);
   const [targetListSearch, setTargetListSearch] = useState('');
+  // ★ D102: 중복제거/수신거부제거 체크박스 state (기본 true)
+  const [dedupEnabled, setDedupEnabled] = useState(true);
+  const [unsubFilterEnabled, setUnsubFilterEnabled] = useState(true);
   // ★ D101: 수신자 선택삭제 기능
   const [selectedPhones, setSelectedPhones] = useState<Set<string>>(new Set());
   const smsTextareaRef = useRef<HTMLTextAreaElement>(null);
@@ -326,11 +329,14 @@ export default function TargetSendModal({
     setSendConfirm({
       show: true,
       type: reserveEnabled ? 'scheduled' : 'immediate',
-      count: targetRecipients.length - unsubCount,
-      unsubscribeCount: unsubCount,
+      count: targetRecipients.length - (unsubFilterEnabled ? unsubCount : 0),
+      unsubscribeCount: unsubFilterEnabled ? unsubCount : 0,
       dateTime: reserveEnabled && reserveDateTime ? reserveDateTime : undefined,
       from: 'target',
-      msgType: targetMsgType
+      msgType: targetMsgType,
+      // ★ D102: 중복제거/수신거부제거 플래그 전달
+      dedupEnabled,
+      unsubFilterEnabled,
     });
   };
 
@@ -835,11 +841,11 @@ export default function TargetSendModal({
                   className="border rounded-lg px-3 py-1.5 text-sm w-48"
                 />
                 <label className="flex items-center gap-1 text-sm text-gray-600">
-                  <input type="checkbox" defaultChecked className="rounded" />
+                  <input type="checkbox" checked={dedupEnabled} onChange={e => setDedupEnabled(e.target.checked)} className="rounded accent-emerald-600" />
                   중복제거
                 </label>
                 <label className="flex items-center gap-1 text-sm text-gray-600">
-                  <input type="checkbox" defaultChecked className="rounded" />
+                  <input type="checkbox" checked={unsubFilterEnabled} onChange={e => setUnsubFilterEnabled(e.target.checked)} className="rounded accent-emerald-600" />
                   수신거부제거
                 </label>
               </div>

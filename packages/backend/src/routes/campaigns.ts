@@ -1253,6 +1253,9 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       alimtalkTemplateCode, // 알림톡 템플릿 코드
       alimtalkButtonJson,   // 알림톡 버튼 JSON (k_button_json 형식)
       alimtalkNextType,     // 실패 시 폴백 (N/S/L)
+      // ★ D102: 중복제거/수신거부제거 사용자 선택 (기본 true)
+      dedupEnabled = true,
+      unsubFilterEnabled = true,
     } = req.body;
 
     // ★ D102: customMessageMap 제거 — 프론트 치환 폐기, 백엔드 replaceVariables 컨트롤타워 통일
@@ -1261,11 +1264,16 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: '수신자가 없습니다' });
     }
 
-    // ★ D98 CT-14: 중복제거 — 항상 적용 (phone 기준, 첫 번째 유지)
-    const { unique: dedupedRecipients, duplicateCount } = deduplicateByPhone(recipients);
-    const finalRecipients = dedupedRecipients;
-    if (duplicateCount > 0) {
-      console.log(`[직접발송] 중복제거: ${recipients.length}건 → ${finalRecipients.length}건 (${duplicateCount}건 제거)`);
+    // ★ D102: 중복제거 — 사용자 선택에 따라 적용 (기본 true)
+    let finalRecipients = recipients;
+    let duplicateCount = 0;
+    if (dedupEnabled !== false) {
+      const dedupResult = deduplicateByPhone(recipients);
+      finalRecipients = dedupResult.unique;
+      duplicateCount = dedupResult.duplicateCount;
+      if (duplicateCount > 0) {
+        console.log(`[직접발송] 중복제거: ${recipients.length}건 → ${finalRecipients.length}건 (${duplicateCount}건 제거)`);
+      }
     }
 
     // ★ D91: LMS/MMS 제목 필수 검증
@@ -1374,20 +1382,23 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       }
     }
 
-    // 1. 수신거부 필터링 (user_id 기준 — 각 사용자별 수신거부 관리)
-    const phones = targetFilteredRecipients.map((r: any) => normalizePhone(r.phone));
-    const unsubResult = await query(
-      `SELECT DISTINCT phone FROM unsubscribes WHERE user_id = $1 AND phone = ANY($2)`,
-      [userId, phones]
-    );
-    const unsubPhones = new Set(unsubResult.rows.map((r: any) => r.phone));
-    const filteredRecipients = targetFilteredRecipients.filter((r: any) => !unsubPhones.has(normalizePhone(r.phone)));
+    // ★ D102: 수신거부 필터링 — 사용자 선택에 따라 적용 (기본 true)
+    let filteredRecipients = targetFilteredRecipients;
+    let excludedCount = 0;
+    if (unsubFilterEnabled !== false) {
+      const phones = targetFilteredRecipients.map((r: any) => normalizePhone(r.phone));
+      const unsubResult = await query(
+        `SELECT DISTINCT phone FROM unsubscribes WHERE user_id = $1 AND phone = ANY($2)`,
+        [userId, phones]
+      );
+      const unsubPhones = new Set(unsubResult.rows.map((r: any) => r.phone));
+      filteredRecipients = targetFilteredRecipients.filter((r: any) => !unsubPhones.has(normalizePhone(r.phone)));
+      excludedCount = targetFilteredRecipients.length - filteredRecipients.length;
+    }
 
     if (filteredRecipients.length === 0) {
       return res.status(400).json({ success: false, error: '모든 수신자가 수신거부 상태이거나 필터 조건에 해당하지 않습니다' });
     }
-
-    const excludedCount = targetFilteredRecipients.length - filteredRecipients.length;
 
     // 2. 캠페인 레코드 생성 (원본 템플릿도 저장)
     const directChannel = sendChannel || 'sms';

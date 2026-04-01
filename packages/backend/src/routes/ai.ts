@@ -8,7 +8,7 @@ import { isValidCustomFieldKey } from '../utils/safe-field-name';
 import { getStoreScope } from '../utils/store-scope';
 import { buildFilterWhereClauseCompat } from '../utils/customer-filter';
 import { aggregateCampaignPerformance } from '../utils/stats-aggregation';
-import { formatDateValue } from '../utils/messageUtils';
+import { formatDateValue, getOpt080Number } from '../utils/messageUtils';
 
 
 // ★ D79: 인라인 래퍼 제거 → CT-01 buildFilterWhereClauseCompat 직접 사용
@@ -44,12 +44,9 @@ router.post('/generate-message', async (req: Request, res: Response) => {
       [companyId]
     );
     const companyInfo = companyResult.rows[0] || {};
-    // ★ B17-11: 사용자별 080번호 우선 적용
-    if (userId) {
-      const userOptResult = await query('SELECT opt_out_080_number FROM users WHERE id = $1', [userId]);
-      const userOpt080 = userOptResult.rows[0]?.opt_out_080_number;
-      if (userOpt080) companyInfo.reject_number = userOpt080;
-    }
+    // ★ D102: getOpt080Number 컨트롤타워 사용 (인라인 조회 제거)
+    const userOpt080 = await getOpt080Number(userId || null, companyId);
+    if (userOpt080) companyInfo.reject_number = userOpt080;
     const { fieldMappings: varCatalog, availableVars } = extractVarCatalog(companyInfo.customer_schema);
 
     // ★ D101: 커스텀 필드 라벨을 availableVars에 추가 (generateMessages에서 개인화 변수 매칭용)
@@ -163,12 +160,9 @@ router.post('/recommend-target', async (req: Request, res: Response) => {
     );
     const companyInfo = companyResult.rows[0] || {};
     companyInfo.name = companyInfo.company_name;
-    // ★ B17-11: 사용자별 080번호 우선 적용
-    if (userId) {
-      const userOptResult = await query('SELECT opt_out_080_number FROM users WHERE id = $1', [userId]);
-      const userOpt080 = userOptResult.rows[0]?.opt_out_080_number;
-      if (userOpt080) companyInfo.reject_number = userOpt080;
-    }
+    // ★ D102: getOpt080Number 컨트롤타워 사용 (인라인 조회 제거)
+    const userOpt080 = await getOpt080Number(userId || null, companyId);
+    if (userOpt080) companyInfo.reject_number = userOpt080;
 
     // 카카오 프로필 존재 여부 확인
     const kakaoProfileResult = await query(
@@ -700,12 +694,9 @@ router.post('/generate-custom', authenticate, async (req: Request, res: Response
       [companyId]
     );
     const companyInfo = companyResult.rows[0] || {};
-    // ★ B17-11: 사용자별 080번호 우선 적용
-    if (userId) {
-      const userOptResult = await query('SELECT opt_out_080_number FROM users WHERE id = $1', [userId]);
-      const userOpt080 = userOptResult.rows[0]?.opt_out_080_number;
-      if (userOpt080) companyInfo.reject_number = userOpt080;
-    }
+    // ★ D102: getOpt080Number 컨트롤타워 사용 (인라인 조회 제거)
+    const userOpt080 = await getOpt080Number(userId || null, companyId);
+    if (userOpt080) companyInfo.reject_number = userOpt080;
 
     const result = await generateCustomMessages({
       briefing,

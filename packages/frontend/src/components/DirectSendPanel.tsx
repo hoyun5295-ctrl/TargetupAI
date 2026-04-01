@@ -169,6 +169,9 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
   const [directLoadingProgress, setDirectLoadingProgress] = useState(0);
   const [directShowMapping, setDirectShowMapping] = useState(false);
   const [showDirectInput, setShowDirectInput] = useState(false);
+  // ★ D102: 중복제거/수신거부제거 체크박스 state (기본 true)
+  const [dedupEnabled, setDedupEnabled] = useState(true);
+  const [unsubFilterEnabled, setUnsubFilterEnabled] = useState(true);
   const [directInputText, setDirectInputText] = useState('');
   const [directSearchQuery, setDirectSearchQuery] = useState('');
   const [selectedRecipients, setSelectedRecipients] = useState<Set<number>>(new Set());
@@ -242,11 +245,14 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
     onSendConfirm({
       show: true,
       type: reserveEnabled ? 'scheduled' : 'immediate',
-      count: directRecipients.length - unsubCount,
-      unsubscribeCount: unsubCount,
+      count: directRecipients.length - (unsubFilterEnabled ? unsubCount : 0),
+      unsubscribeCount: unsubFilterEnabled ? unsubCount : 0,
       dateTime: reserveEnabled && reserveDateTime ? reserveDateTime : undefined,
       from: 'direct',
       msgType: directMsgType,
+      // ★ D102: 중복제거/수신거부제거 플래그 전달
+      dedupEnabled,
+      unsubFilterEnabled,
     });
   };
 
@@ -769,11 +775,11 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                 className={`px-5 py-2.5 border-2 rounded-lg text-sm font-medium hover:bg-gray-50 ${directInputMode === 'address' ? 'bg-emerald-50 border-emerald-400 text-emerald-700' : ''}`}
               >📒 주소록</button>
               <label className="flex items-center gap-2 text-sm cursor-pointer ml-2">
-                <input type="checkbox" defaultChecked className="rounded w-4 h-4" />
+                <input type="checkbox" checked={dedupEnabled} onChange={e => setDedupEnabled(e.target.checked)} className="rounded w-4 h-4 accent-emerald-600" />
                 <span className="font-medium">중복제거</span>
               </label>
               <label className="flex items-center gap-2 text-sm cursor-pointer">
-                <input type="checkbox" defaultChecked className="rounded w-4 h-4" />
+                <input type="checkbox" checked={unsubFilterEnabled} onChange={e => setUnsubFilterEnabled(e.target.checked)} className="rounded w-4 h-4 accent-emerald-600" />
                 <span className="font-medium">수신거부제거</span>
               </label>
               <div className="flex-1"></div>

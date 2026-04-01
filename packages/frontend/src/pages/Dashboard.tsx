@@ -390,6 +390,9 @@ export default function Dashboard() {
         splitCount: isAlimtalk ? null : (splitEnabled ? splitCount : null),
         mmsImagePaths: isAlimtalk ? [] : mmsUploadedImages.map(img => img.serverPath),
         ...(confirmCallbackExclusion ? { confirmCallbackExclusion: true } : {}),
+        // ★ D102: 중복제거/수신거부제거 사용자 선택 전달
+        dedupEnabled: sendConfirm.dedupEnabled ?? true,
+        unsubFilterEnabled: sendConfirm.unsubFilterEnabled ?? true,
         // 알림톡 전용 파라미터
         ...(isAlimtalk && kakaoSelectedTemplate ? {
           alimtalkTemplateCode: kakaoSelectedTemplate.template_code || '',
@@ -505,6 +508,9 @@ export default function Dashboard() {
           splitCount: splitEnabled ? splitCount : null,
           mmsImagePaths: mmsUploadedImages.map(img => img.serverPath),
           ...(confirmCallbackExclusion ? { confirmCallbackExclusion: true } : {}),
+          // ★ D102: 중복제거/수신거부제거 사용자 선택 전달
+          dedupEnabled: sendConfirm.dedupEnabled ?? true,
+          unsubFilterEnabled: sendConfirm.unsubFilterEnabled ?? true,
         })
       });
       const data = await res.json();
@@ -757,7 +763,7 @@ export default function Dashboard() {
   const [selectedCallback, setSelectedCallback] = useState('');
   const [useIndividualCallback, setUseIndividualCallback] = useState(false);
   const [individualCallbackColumn, setIndividualCallbackColumn] = useState('');
-  const [sendConfirm, setSendConfirm] = useState<{show: boolean, type: 'immediate' | 'scheduled', count: number, unsubscribeCount: number, dateTime?: string, from?: 'direct' | 'target', msgType?: string}>({show: false, type: 'immediate', count: 0, unsubscribeCount: 0});
+  const [sendConfirm, setSendConfirm] = useState<{show: boolean, type: 'immediate' | 'scheduled', count: number, unsubscribeCount: number, dateTime?: string, from?: 'direct' | 'target', msgType?: string, dedupEnabled?: boolean, unsubFilterEnabled?: boolean}>({show: false, type: 'immediate', count: 0, unsubscribeCount: 0});
 
   // ★ 미등록 회신번호 확인 모달 state
   const defaultCallbackConfirm: CallbackConfirmData = { show: false, callbackMissingCount: 0, callbackUnregisteredCount: 0, unregisteredDetails: [], remainingCount: 0, message: '', sendType: 'direct' };
@@ -1560,6 +1566,7 @@ const campaignData = {
     customSendTime: string;
     selectedCallback: string;
     useIndividualCallback: boolean;
+    individualCallbackColumn?: string;
     subject?: string;
   }) => {
     if (isSending || directSending || !customSendData) return; // 교차 중복 발송 방지
@@ -1606,7 +1613,8 @@ const campaignData = {
         eventEndDate: null,
         callback: _useIndividualCallback ? null : _selectedCallback,
         useIndividualCallback: _useIndividualCallback,
-        individualCallbackColumn: _useIndividualCallback ? individualCallbackColumn : undefined,
+        // ★ D102: modalData.individualCallbackColumn 우선 (맞춤한줄 개별회신번호 누락 수정)
+        individualCallbackColumn: _useIndividualCallback ? (modalData.individualCallbackColumn || individualCallbackColumn || 'store_phone') : undefined,
         subject: variant.subject || '',
         mmsImagePaths: [],
       };

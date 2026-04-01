@@ -5,6 +5,7 @@ import { query } from '../config/database';
 import { authenticate, requireSuperAdmin } from '../middlewares/auth';
 import { getCardDef } from '../utils/dashboard-card-pool';
 import { getStoreScope } from '../utils/store-scope';
+import { getOpt080Number } from '../utils/messageUtils';
 
 const router = Router();
 
@@ -29,12 +30,9 @@ router.get('/settings', authenticate, async (req: Request, res: Response) => {
     `, [companyId]);
 
     const row = result.rows[0] || {};
-    // ★ B17-11: 사용자별 080번호 우선 적용 (reject_number override)
-    if (userId) {
-      const userResult = await query('SELECT opt_out_080_number FROM users WHERE id = $1', [userId]);
-      const userOpt080 = userResult.rows[0]?.opt_out_080_number;
-      if (userOpt080) row.reject_number = userOpt080;
-    }
+    // ★ D102: getOpt080Number 컨트롤타워 사용 (인라인 조회 제거)
+    const userOpt080 = await getOpt080Number(userId || null, companyId);
+    if (userOpt080) row.reject_number = userOpt080;
     // ★ D97: manager_contacts는 test_contacts 테이블로 완전 이관
     // settings 응답에서 제거 — 프론트는 /api/test-contacts API로만 담당자 관리
     delete row.manager_contacts;
