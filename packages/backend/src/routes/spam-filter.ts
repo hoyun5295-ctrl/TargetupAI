@@ -3,10 +3,10 @@ import { Request, Response, Router } from 'express';
 import { mysqlQuery, query } from '../config/database';
 import { TIMEOUTS } from '../config/defaults';
 import { authenticate } from '../middlewares/auth';
-import { replaceVariables, prepareFieldMappings } from '../utils/messageUtils';
+import { replaceVariables, prepareFieldMappings, getOpt080Number } from '../utils/messageUtils';
 import { SUCCESS_CODES, PENDING_CODES, SPAM_RESULT } from '../utils/sms-result-map';
 import { prepaidDeduct, prepaidRefund } from '../utils/prepaid';
-import { getTestSmsTables } from '../utils/sms-queue';
+import { getTestSmsTables, toQtmsgType, insertTestSmsQueue } from '../utils/sms-queue';
 import { normalizeContent, computeMessageHash } from '../utils/spam-test-queue';
 
 const router = Router();
@@ -148,14 +148,8 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
     const spamSendCount = devices.rows.length * messageTypes.length;
     const spamDeductType = messageTypes[0] || 'SMS';
 
-    // 6) 고객사 080 수신거부번호 조회 (users 우선 → companies fallback)
-    const opt080Result = await query(
-      `SELECT u.opt_out_080_number AS user_080, c.opt_out_080_number AS company_080
-       FROM users u JOIN companies c ON u.company_id = c.id
-       WHERE u.id = $1`,
-      [userId]
-    );
-    const spamCheckNumber = opt080Result.rows[0]?.user_080 || opt080Result.rows[0]?.company_080 || null;
+    // ★ D103: getOpt080Number 컨트롤타워 사용 (인라인 조회 제거)
+    const spamCheckNumber = await getOpt080Number(userId || null, companyId) || null;
 
     // 7) 테스트 건 생성 (message_hash 포함) — 차감 전에 생성하여 testId를 referenceId로 사용
     const testResult = await query(
@@ -204,7 +198,7 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
 
         // QTmsg 테스트 라인으로 발송
         const titleStr = (msgType === 'LMS' || msgType === 'MMS') ? (subject || '') : '';
-        await insertSmsQueue(
+        await insertTestSmsQueue(
           device.phone,
           callbackNumber,
           content,
@@ -272,7 +266,7 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
 
         let updatedCount = 0;
         for (const row of unreceived.rows) {
-          const mType = row.message_type === 'SMS' ? 'S' : 'L';
+          const mType = toQtmsgType(row.message_type);
           const mqMatch = mqRows.find(
             (m: any) => m.dest_no === row.phone && m.msg_type === mType
           );
@@ -752,29 +746,6 @@ router.get('/admin/devices', authenticate, async (req: Request, res: Response) =
   }
 });
 
-// ============================================================
-// 헬퍼: QTmsg 테스트 라인에 SMS/LMS INSERT
-// ============================================================
-async function insertSmsQueue(
-  destNo: string,
-  callBack: string,
-  content: string,
-  msgType: string,
-  testId: string,
-  subject: string
-): Promise<void> {
-  const testTable = (await getTestSmsTables())[0];
-  const mType = msgType === 'SMS' ? 'S' : 'L';
-
-  await mysqlQuery(
-    `INSERT INTO ${testTable} (
-      dest_no, call_back, msg_contents, msg_type, title_str, sendreq_time, status_code, rsv1, app_etc1
-    ) VALUES (?, ?, ?, ?, ?, NOW(), 100, '1', ?)`,
-    [destNo, callBack, content, mType, subject || '', testId]
-  );
-}
-
-// 테스트 전용 SMS 테이블 (환경변수 기반)
-// ★ D79: 인라인 getTestSmsTable 제거 → CT-04 sms-queue.ts의 getTestSmsTables() 사용
+// ★ D103: 인라인 insertSmsQueue 삭제 → sms-queue.ts CT-04 컨트롤타워(insertTestSmsQueue) 사용
 
 export default router;

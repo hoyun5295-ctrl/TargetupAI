@@ -1069,7 +1069,7 @@
 | sent_count | integer DEFAULT 0 | |
 | success_count | integer DEFAULT 0 | |
 | fail_count | integer DEFAULT 0 | |
-| status | varchar(20) DEFAULT 'pending' | pending / notified / sending / completed / cancelled / failed |
+| status | varchar(20) DEFAULT 'pending' | pending / notified / spam_tested / sending / completed / cancelled / failed |
 | notified_at | timestamptz | 사전 알림 발송 시각 |
 | notify_message | text | |
 | scheduled_at | timestamptz NOT NULL | 예정 발송 시각 |

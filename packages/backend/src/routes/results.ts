@@ -4,6 +4,7 @@ import { authenticate } from '../middlewares/auth';
 import { getCompanySmsTablesWithLogs } from '../utils/sms-queue';
 import { STATUS_CODE_MAP, CARRIER_MAP, SUCCESS_CODES, PENDING_CODES, getStatusLabel, getStatusType, getCarrierLabel, isSuccess } from '../utils/sms-result-map';
 import { DEFAULT_COSTS, redis, CACHE_TTL } from '../config/defaults';
+import { buildDateRangeFilter, buildPeriodFilter } from '../utils/stats-aggregation';
 
 const router = Router();
 
@@ -137,13 +138,14 @@ router.get('/summary', async (req: Request, res: Response) => {
     // ★ D98: draft/cancelled도 실패로 카운트 (목록에서 제외하지 않음)
     summaryQuery += ` AND status NOT IN ('cancelled')`;
 
-    if (fromDate && toDate) {
-      summaryQuery += ` AND created_at >= $2::date::timestamp AT TIME ZONE 'Asia/Seoul' AND created_at < ($3::date + interval '1 day')::timestamp AT TIME ZONE 'Asia/Seoul'`;
-      summaryParams.push(String(fromDate), String(toDate));
-    } else {
-      summaryQuery += ` AND created_at >= $2::date::timestamp AT TIME ZONE 'Asia/Seoul' AND created_at < ($2::date + interval '1 month')::timestamp AT TIME ZONE 'Asia/Seoul'`;
-      summaryParams.push(`${yearMonth.slice(0,4)}-${yearMonth.slice(4,6)}-01`);
-    }
+    // ★ D104: 날짜 필터 컨트롤타워 사용
+    const summaryDr = buildPeriodFilter('created_at', {
+      fromDate: fromDate ? String(fromDate) : undefined,
+      toDate: toDate ? String(toDate) : undefined,
+      yearMonth: (!fromDate || !toDate) ? yearMonth : undefined,
+    }, summaryParams.length + 1);
+    summaryQuery += summaryDr.sql;
+    summaryParams.push(...summaryDr.params);
     
     if (userType === 'company_user') {
       summaryQuery += ` AND created_by = $${summaryParams.length + 1}`;
@@ -224,21 +226,15 @@ router.get('/campaigns', async (req: Request, res: Response) => {
       params.push(req.query.filter_user_id);
     }
 
-    if (fromDate && toDate) {
-      whereClause += ` AND created_at >= $${paramIndex++}::date::timestamp AT TIME ZONE 'Asia/Seoul'`;
-      params.push(String(fromDate));
-      whereClause += ` AND created_at < ($${paramIndex++}::date + interval '1 day')::timestamp AT TIME ZONE 'Asia/Seoul'`;
-      params.push(String(toDate));
-    } else {
-      if (from) {
-        whereClause += ` AND created_at >= $${paramIndex++}::date::timestamp AT TIME ZONE 'Asia/Seoul'`;
-        params.push(`${String(from).slice(0,4)}-${String(from).slice(4,6)}-01`);
-      }
-      if (to) {
-        whereClause += ` AND created_at < ($${paramIndex++}::date + interval '1 month')::timestamp AT TIME ZONE 'Asia/Seoul'`;
-        params.push(`${String(to).slice(0,4)}-${String(to).slice(4,6)}-01`);
-      }
-    }
+    // ★ D104: 날짜 필터 컨트롤타워 사용
+    const campDr = buildPeriodFilter('created_at', {
+      fromDate: fromDate ? String(fromDate) : undefined,
+      toDate: toDate ? String(toDate) : undefined,
+      yearMonth: (!fromDate || !toDate) ? (from ? String(from) : undefined) : undefined,
+    }, paramIndex);
+    whereClause += campDr.sql;
+    params.push(...campDr.params);
+    paramIndex = campDr.nextIndex;
 
     if (channel && channel !== 'all') {
       whereClause += ` AND message_type = $${paramIndex++}`;

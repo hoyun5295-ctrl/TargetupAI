@@ -265,8 +265,8 @@ router.post('/generate', async (req: Request, res: Response) => {
         FROM spam_filter_test_results r
         JOIN spam_filter_tests t ON r.test_id = t.id
         WHERE t.company_id = $1
-          AND t.created_at >= ($2::date) AT TIME ZONE 'Asia/Seoul'
-          AND t.created_at < (($3::date) + INTERVAL '1 day') AT TIME ZONE 'Asia/Seoul'
+          AND t.created_at >= ($2 || ' 00:00:00+09')::timestamptz
+          AND t.created_at < (($3::date + INTERVAL '1 day')::date::text || ' 00:00:00+09')::timestamptz
         GROUP BY r.message_type, DATE(t.created_at AT TIME ZONE 'Asia/Seoul')
       `, [company_id, billing_start, billing_end]);
 
@@ -940,8 +940,8 @@ router.get('/preview', async (req: Request, res: Response) => {
       FROM spam_filter_test_results r
       JOIN spam_filter_tests t ON r.test_id = t.id
       WHERE t.company_id = $1
-        AND t.created_at >= ($2::date) AT TIME ZONE 'Asia/Seoul'
-        AND t.created_at < (($3::date) + INTERVAL '1 day') AT TIME ZONE 'Asia/Seoul'
+        AND t.created_at >= ($2 || ' 00:00:00+09')::timestamptz
+        AND t.created_at < (($3::date + INTERVAL '1 day')::date::text || ' 00:00:00+09')::timestamptz
       GROUP BY r.message_type
     `, [company_id, start, end]);
 

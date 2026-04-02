@@ -60,7 +60,8 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
   const [messageLoading, setMessageLoading] = useState(false);
   const messagePerPage = 10;
 
-  useEffect(() => { fetchData(); }, [startDate, endDate]);
+  // ★ D104: 날짜 변경 시 cooldown 무시하고 즉시 조회
+  useEffect(() => { fetchData(true); }, [startDate, endDate]);
   useEffect(() => {
     if (cooldown > 0) { const t = setTimeout(() => setCooldown(cooldown - 1), 1000); return () => clearTimeout(t); }
   }, [cooldown]);
@@ -69,10 +70,10 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
   }, [testCooldown]);
   useEffect(() => { setCurrentPage(1); }, [filterType, filterSender]);
 
-  const fetchData = async () => {
-    if (cooldown > 0) return;
+  const fetchData = async (force = false) => {
+    if (!force && cooldown > 0) return;
     setLoading(true);
-    setCooldown(30);
+    setCooldown(5);
     try {
       // fire-and-forget: sync-results는 백그라운드에서 실행 (대량 발송 시 블로킹 방지)
       fetch('/api/campaigns/sync-results', { method: 'POST', headers: { Authorization: `Bearer ${token}` } })
@@ -101,7 +102,7 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
 
   const fetchTestStats = async () => {
     if (testCooldown > 0) return;
-    setTestCooldown(30);
+    setTestCooldown(5);
     try {
       const testFrom = startDate.replace(/-/g, '').slice(0, 6);
       const res = await fetch(`/api/campaigns/test-stats?yearMonth=${testFrom}&fromDate=${startDate}&toDate=${endDate}`, { headers: { Authorization: `Bearer ${token}` } });
@@ -282,7 +283,7 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
                   {uniqueSenders.map(s => <option key={s} value={s}>{s}</option>)}
                 </select>
                 <button
-                  onClick={fetchData}
+                  onClick={() => fetchData()}
                   disabled={cooldown > 0 || loading}
                   className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
                     cooldown > 0 ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-emerald-500 text-white hover:bg-emerald-600'
@@ -1052,7 +1053,7 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
                       if (data.success) {
                         setCancelTarget(null);
                         showToast('success', '예약이 취소되었습니다.');
-                        fetchData();
+                        fetchData(true);
                       } else {
                         showToast('error', data.error || '취소 실패');
                       }

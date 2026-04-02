@@ -14,12 +14,13 @@ interface DirectTargetFilterModalProps {
   show: boolean;
   onClose: () => void;
   // ★ D43-3c: fieldsMeta 추가
-  onExtracted: (recipients: any[], count: number, fieldsMeta: FieldMeta[], selectedCallbackPhone?: string) => void;
+  onExtracted: (recipients: any[], count: number, fieldsMeta: FieldMeta[], selectedCallbackPhone?: string, phoneFields?: string[]) => void;
 }
 
 export default function DirectTargetFilterModal({ show, onClose, onExtracted }: DirectTargetFilterModalProps) {
   // 필드 데이터
   const [enabledFields, setEnabledFields] = useState<any[]>([]);
+  const [extractedPhoneFields, setExtractedPhoneFields] = useState<string[]>([]);
   const [filterOptions, setFilterOptions] = useState<Record<string, string[]>>({});
   const [categoryLabels, setCategoryLabels] = useState<Record<string, string>>({});
   const [fieldsLoaded, setFieldsLoaded] = useState(false);
@@ -106,6 +107,7 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
         setEnabledFields(data.fields || []);
         setFilterOptions(data.options || {});
         if (data.categories) setCategoryLabels(data.categories);
+        if (data.phoneFields) setExtractedPhoneFields(data.phoneFields);
         setFieldsLoaded(true);
 
         // sms_opt_in 기본 선택 (수신동의 고객만)
@@ -195,16 +197,20 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
   };
 
   // 동적 필터 → API 포맷
+  // ★ D104: selectedFields 순회로 변경 — filterValues에 본 키가 없어도 _min/_max 참조 가능
   const buildDynamicFiltersForAPI = () => {
     const filters: Record<string, any> = {};
     let smsOptIn = false;
 
-    for (const [fieldKey, value] of Object.entries(filterValues)) {
-      // _min, _max, _op 보조키는 스킵 (본 필드에서 처리)
-      if (fieldKey.endsWith('_min') || fieldKey.endsWith('_max') || fieldKey.endsWith('_op')) continue;
-      if (!selectedFields.has(fieldKey)) continue;
+    const dbColMap: Record<string, string> = {
+      'last_purchase_date': 'recent_purchase_date',
+      'last_purchase_amount': 'recent_purchase_amount'
+    };
+
+    for (const fieldKey of selectedFields) {
       const field = enabledFields.find((f: any) => f.field_key === fieldKey);
       if (!field) continue;
+      const value = filterValues[fieldKey];
 
       // sms_opt_in 별도 처리
       if (fieldKey === 'sms_opt_in' || fieldKey === 'opt_in_sms') {
@@ -214,7 +220,7 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
 
       // 연령 특수 처리
       if (fieldKey === 'age') {
-        if (value.mode === 'preset' && value.presets?.length > 0) {
+        if (value?.mode === 'preset' && value.presets?.length > 0) {
           const decades = value.presets.map(Number).sort((a: number, b: number) => a - b);
           const min = decades[0];
           const maxD = decades[decades.length - 1];
@@ -225,7 +231,7 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
           } else {
             filters['age'] = { operator: 'between', value: [min, maxD + 9] };
           }
-        } else if (value.mode === 'range') {
+        } else if (value?.mode === 'range') {
           if (value.min && value.max) {
             filters['age'] = { operator: 'between', value: [Number(value.min), Number(value.max)] };
           } else if (value.min) {
@@ -237,12 +243,25 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
         continue;
       }
 
+      // 숫자 — 범위 (min ~ max) ★ filterValues에 본 키 없어도 _min/_max로 처리
+      if (field.data_type === 'number' && fieldKey !== 'age') {
+        const dbCol = dbColMap[fieldKey] || fieldKey;
+        const minVal = filterValues[`${fieldKey}_min`];
+        const maxVal = filterValues[`${fieldKey}_max`];
+        if (minVal && maxVal) {
+          filters[dbCol] = { operator: 'between', value: [Number(minVal), Number(maxVal)] };
+        } else if (minVal) {
+          filters[dbCol] = { operator: 'gte', value: Number(minVal) };
+        } else if (maxVal) {
+          filters[dbCol] = { operator: 'lte', value: Number(maxVal) };
+        }
+        continue;
+      }
+
       // 날짜 필드
       if (field.data_type === 'date') {
         if (!value) continue;
-        const dbColMap: Record<string, string> = { 'last_purchase_date': 'recent_purchase_date' };
         const dbCol = dbColMap[fieldKey] || fieldKey;
-        // 생일 월 필터 (month:N 형식)
         if (typeof value === 'string' && value.startsWith('month:')) {
           filters[dbCol] = { operator: 'birth_month', value: parseInt(value.replace('month:', '')) };
         } else {
@@ -264,26 +283,6 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
 
       if (!value && value !== false) continue;
 
-      // 숫자 — 범위 (min ~ max)
-      if (field.data_type === 'number') {
-        // 필드명 → DB 컬럼명 매핑
-        const dbColMap: Record<string, string> = {
-          'last_purchase_date': 'recent_purchase_date',
-          'last_purchase_amount': 'recent_purchase_amount'
-        };
-        const dbCol = dbColMap[fieldKey] || fieldKey;
-        const minVal = filterValues[`${fieldKey}_min`];
-        const maxVal = filterValues[`${fieldKey}_max`];
-        if (minVal && maxVal) {
-          filters[dbCol] = { operator: 'between', value: [Number(minVal), Number(maxVal)] };
-        } else if (minVal) {
-          filters[dbCol] = { operator: 'gte', value: Number(minVal) };
-        } else if (maxVal) {
-          filters[dbCol] = { operator: 'lte', value: Number(maxVal) };
-        }
-        continue;
-      }
-
       // 불린
       if (field.data_type === 'boolean') {
         filters[fieldKey] = { operator: 'eq', value: value === 'true' };
@@ -294,31 +293,6 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
       if (field.data_type === 'string' && typeof value === 'string' && value.trim()) {
         filters[fieldKey] = { operator: 'contains', value: value.trim() };
         continue;
-      }
-    }
-
-    // ★ B17-06: 숫자 필드는 _min/_max 보조키만 존재하므로 본키가 for문에서 누락됨 → 별도 처리
-    for (const field of enabledFields) {
-      const fk = field.field_key;
-      if (!selectedFields.has(fk)) continue;
-      if (field.data_type !== 'number') continue;
-      if (filters[fk]) continue; // 이미 처리된 경우 스킵
-
-      const dbColMap: Record<string, string> = {
-        'last_purchase_date': 'recent_purchase_date',
-        'last_purchase_amount': 'recent_purchase_amount'
-      };
-      const dbCol = dbColMap[fk] || fk;
-      if (filters[dbCol]) continue; // 매핑된 키로 이미 처리된 경우
-
-      const minVal = filterValues[`${fk}_min`];
-      const maxVal = filterValues[`${fk}_max`];
-      if (minVal && maxVal) {
-        filters[dbCol] = { operator: 'between', value: [Number(minVal), Number(maxVal)] };
-      } else if (minVal) {
-        filters[dbCol] = { operator: 'gte', value: Number(minVal) };
-      } else if (maxVal) {
-        filters[dbCol] = { operator: 'lte', value: Number(maxVal) };
       }
     }
 
@@ -382,7 +356,7 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
             data_type: f.data_type || 'string',
             category: f.category || 'basic',
           }));
-        onExtracted(data.recipients, data.count, meta);
+        onExtracted(data.recipients, data.count, meta, undefined, extractedPhoneFields);
       } else {
         showAlert('타겟 추출 실패', data.error || '데이터를 추출하지 못했습니다. 조건을 확인해주세요.', 'warning');
       }
@@ -529,16 +503,28 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
       );
     }
 
-    // 포인트 → 프리셋 태그
+    // 포인트 → 프리셋 태그 + 범위 입력 (누적구매금액과 동일 UX)
     if (field.data_type === 'number' && fk === 'points') {
-      const val = filterValues[fk] || '';
+      const minKey = `${fk}_min`;
+      const maxKey = `${fk}_max`;
       return (
-        <div className="flex flex-wrap gap-1.5 mt-1.5">
-          {POINTS_PRESETS.map(p => (
-            <button key={p.value} onClick={() => setFilterValues(prev => ({ ...prev, [fk]: prev[fk] === p.value ? '' : p.value }))}
-              className={`px-2.5 py-1 text-xs rounded-md font-medium transition-all ${val === p.value ? 'bg-green-600 text-white shadow-sm' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
-            >{p.label}</button>
-          ))}
+        <div className="mt-1.5 space-y-2">
+          <div className="flex flex-wrap gap-1.5">
+            {POINTS_PRESETS.map(p => (
+              <button key={p.value} onClick={() => setFilterValues(prev => ({ ...prev, [minKey]: prev[minKey] === p.value ? '' : p.value, [maxKey]: '' }))}
+                className={`px-2.5 py-1 text-xs rounded-md font-medium transition-all ${filterValues[minKey] === p.value && !filterValues[maxKey] ? 'bg-green-600 text-white shadow-sm' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+              >{p.label}</button>
+            ))}
+          </div>
+          <div className="flex items-center gap-1.5">
+            <input type="text" inputMode="numeric" value={filterValues[minKey] ? Number(filterValues[minKey]).toLocaleString() : ''}
+              onChange={e => { const num = e.target.value.replace(/[^0-9]/g, ''); setFilterValues(prev => ({ ...prev, [minKey]: num })); }}
+              placeholder="최소" className="flex-1 px-2.5 py-1.5 border border-gray-200 rounded-md text-sm focus:ring-1 focus:ring-green-500 focus:border-green-500" />
+            <span className="text-gray-400 text-sm font-medium">~</span>
+            <input type="text" inputMode="numeric" value={filterValues[maxKey] ? Number(filterValues[maxKey]).toLocaleString() : ''}
+              onChange={e => { const num = e.target.value.replace(/[^0-9]/g, ''); setFilterValues(prev => ({ ...prev, [maxKey]: num })); }}
+              placeholder="최대" className="flex-1 px-2.5 py-1.5 border border-gray-200 rounded-md text-sm focus:ring-1 focus:ring-green-500 focus:border-green-500" />
+          </div>
         </div>
       );
     }
@@ -612,7 +598,7 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
     if (!selectedFields.has(fk)) return false;
     // 숫자 범위: _min 또는 _max 중 하나라도 있으면 활성
     const field = enabledFields.find((f: any) => f.field_key === fk);
-    if (field?.data_type === 'number' && fk !== 'age' && fk !== 'points') {
+    if (field?.data_type === 'number' && fk !== 'age') {
       return !!(filterValues[`${fk}_min`] || filterValues[`${fk}_max`]);
     }
     const val = filterValues[fk];
@@ -727,7 +713,7 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
                           const hasValue = hasFilterValue(fk);
 
                           // 범위 입력이 필요한 숫자 필드는 2열 차지
-                          const needsWide = isSelected && field.data_type === 'number' && fk !== 'age' && fk !== 'points';
+                          const needsWide = isSelected && field.data_type === 'number' && fk !== 'age';
                           return (
                             <div key={fk}
                               className={`rounded-lg transition-all duration-150 ${needsWide ? 'col-span-2' : ''} ${isSelected ? 'bg-green-50/80 border border-green-200 p-2.5' : 'border border-transparent p-2.5 hover:bg-gray-50'}`}>

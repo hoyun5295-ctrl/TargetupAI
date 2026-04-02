@@ -79,6 +79,18 @@ export function formatPreviewValue(val: any): string {
   if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
     return formatDate(str);
   }
+  // ★ YYMMDD 날짜 보호: 6자리 숫자가 유효한 날짜 범위면 포맷팅 제외 (260331 → 260,331 방지)
+  if (/^\d{6}$/.test(str)) {
+    const mm = parseInt(str.slice(2, 4));
+    const dd = parseInt(str.slice(4, 6));
+    if (mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) return str;
+  }
+  // ★ YYYYMMDD 날짜 보호: 8자리도 동일 (20260331 → 20,260,331 방지)
+  if (/^\d{8}$/.test(str)) {
+    const mm = parseInt(str.slice(4, 6));
+    const dd = parseInt(str.slice(6, 8));
+    if (mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) return str;
+  }
   // ★ 전화번호 보호: 숫자 포맷팅 제외 대상
   // - 0으로 시작하는 순수 숫자 (01012345678 → 1,012,345,678 방지)
   // - 하이픈 포함 숫자열 (1800-8125, 02-1234-5678 등 전화번호 형태)
@@ -264,6 +276,17 @@ function formatNumberPreview(val: any): string {
   const str = String(val).trim();
   // 0으로 시작하는 순수 숫자 (전화번호) — 포맷팅 제외
   if (/^0\d+$/.test(str.replace(/,/g, ''))) return str;
+  // ★ D104: YYMMDD/YYYYMMDD 날짜 보호 (data_type 오감지 대응)
+  if (/^\d{6}$/.test(str)) {
+    const mm = parseInt(str.slice(2, 4)), dd = parseInt(str.slice(4, 6));
+    if (mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) return str;
+  }
+  if (/^\d{8}$/.test(str)) {
+    const mm = parseInt(str.slice(4, 6)), dd = parseInt(str.slice(6, 8));
+    if (mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) return str;
+  }
+  // 하이픈 포함 숫자열 (전화번호 형태) — 포맷팅 제외
+  if (/^\d[\d-]+\d$/.test(str) && str.includes('-')) return str;
   const num = Number(str.replace(/,/g, ''));
   if (!isNaN(num) && Number.isFinite(num)) return num.toLocaleString('ko-KR');
   return str;
@@ -405,7 +428,35 @@ export function resolveRecipientCallback(
  * 8곳 이상에서 인라인으로 반복되던 코드를 이 함수 하나로 통합.
  *
  * @param message      순수 본문 (광고 미포함)
- * @param msgType      'SMS' | 'LMS' | 'MMS'
+/**
+ * ★ D103: 전화번호 형태 값 판별 (프론트용)
+ * 파일 업로드 시 전화번호 컬럼만 회신번호 드롭다운에 표시하기 위한 컨트롤타워.
+ * 백엔드 callback-filter.ts의 isPhoneLikeValue와 동일 로직.
+ */
+export function isPhoneLikeValue(value: any): boolean {
+  if (value == null || value === '') return false;
+  const str = String(value).trim();
+  const cleaned = str.replace(/[\s\-\(\)\.]/g, '');
+  if (!/^\d+$/.test(cleaned)) return false;
+  if (cleaned.length < 7 || cleaned.length > 15) return false;
+  return /^(01[016789]|02|0[3-6]\d|050\d|070|080|1[0-9]{3})/.test(cleaned);
+}
+
+/**
+ * ★ D103: 파일 업로드 시 전화번호 형태 헤더 감지
+ * 첫 번째 데이터 행의 값이 전화번호 형태인 헤더만 반환.
+ */
+export function detectPhoneHeaders(headers: string[], data: Record<string, any>[]): string[] {
+  if (!headers.length || !data.length) return [];
+  return headers.filter(h => {
+    const values = data.slice(0, 10).map(row => row[h]).filter(v => v != null && String(v).trim() !== '');
+    if (values.length === 0) return false;
+    const phoneCount = values.filter(v => isPhoneLikeValue(v)).length;
+    return phoneCount / values.length >= 0.5;
+  });
+}
+
+/** @param msgType      'SMS' | 'LMS' | 'MMS'
  * @param isAd         광고 여부
  * @param optOutNumber 080 수신거부번호
  * @returns (광고)+본문+무료거부 조합 메시지. 광고 아니면 원본 반환.

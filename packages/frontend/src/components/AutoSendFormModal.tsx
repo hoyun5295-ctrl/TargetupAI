@@ -137,6 +137,9 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
   // 스팸필터 테스트
   const [showSpamFilter, setShowSpamFilter] = useState(false);
 
+  // ★ D105: 스팸테스트 개인화용 샘플 고객 (P8 — recommend-target에서 받은 타겟 매칭 고객)
+  const [spamSampleCustomer, setSpamSampleCustomer] = useState<Record<string, any> | undefined>(undefined);
+
   // MMS 이미지
   const [mmsUploadedImages, setMmsUploadedImages] = useState<{ url: string; file?: File }[]>(
     campaign?.mms_image_url ? [{ url: campaign.mms_image_url }] : []
@@ -283,6 +286,12 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
         setTargetFilter(filters);
         setTargetConditionSummary(data.reasoning || '');
         setTargetCount(data.estimated_count || 0);
+        // ★ D105 P8: 타겟 매칭 샘플 고객 저장 (스팸테스트 개인화용 — column 키 raw)
+        if (data.sample_customer_raw && Object.keys(data.sample_customer_raw).length > 0) {
+          const raw = data.sample_customer_raw;
+          // custom_fields JSONB flat 처리 (백엔드 replaceVariables가 접근 가능하도록)
+          setSpamSampleCustomer({ ...raw, ...(raw.custom_fields || {}) });
+        }
         if (Object.keys(filters).length === 0) {
           setToast({ show: true, type: 'warning', message: 'AI가 타겟 조건을 인식하지 못했습니다. 좀 더 구체적으로 입력해주세요.' });
         } else {
@@ -1279,6 +1288,7 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
           callbackNumber={callbackNumber}
           messageType={messageType}
           subject={messageSubject}
+          firstRecipient={spamSampleCustomer}
         />
       )}
 

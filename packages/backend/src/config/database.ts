@@ -1,7 +1,7 @@
 import { Pool, types } from 'pg';
 import mysql from 'mysql2/promise';
 
-// timestamp without timezone를 UTC로 강제 처리
+// timestamp without timezone를 UTC로 처리 (PostgreSQL timezone=Etc/UTC)
 types.setTypeParser(1114, (str) => str + 'Z');
 
 import dotenv from 'dotenv';

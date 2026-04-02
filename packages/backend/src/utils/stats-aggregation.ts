@@ -30,7 +30,7 @@ export interface DateRangeResult {
  *
  * @example
  * const dr = buildDateRangeFilter('c.sent_at', '2026-01-01', '2026-01-31', 1);
- * // sql: " AND c.sent_at >= $1::date AT TIME ZONE 'Asia/Seoul' AND c.sent_at < ($2::date + INTERVAL '1 day') AT TIME ZONE 'Asia/Seoul'"
+ * // sql: " AND c.sent_at >= ($1 || ' 00:00:00+09')::timestamptz AND c.sent_at < (($2::date + INTERVAL '1 day')::date::text || ' 00:00:00+09')::timestamptz"
  * // params: ['2026-01-01', '2026-01-31']
  */
 export function buildDateRangeFilter(
@@ -43,14 +43,16 @@ export function buildDateRangeFilter(
   const params: any[] = [];
   let paramIndex = startParamIndex;
 
+  // ★ D104: 명시적 KST timestamptz 구성 — PG session timezone(UTC)에 무관하게 정확
+  // '2026-04-02 00:00:00+09' = KST 자정 = UTC 전일 15:00
   if (startDate) {
-    sql += ` AND ${column} >= $${paramIndex}::date AT TIME ZONE 'Asia/Seoul'`;
+    sql += ` AND ${column} >= ($${paramIndex} || ' 00:00:00+09')::timestamptz`;
     params.push(startDate);
     paramIndex++;
   }
 
   if (endDate) {
-    sql += ` AND ${column} < ($${paramIndex}::date + INTERVAL '1 day') AT TIME ZONE 'Asia/Seoul'`;
+    sql += ` AND ${column} < (($${paramIndex}::date + INTERVAL '1 day')::date::text || ' 00:00:00+09')::timestamptz`;
     params.push(endDate);
     paramIndex++;
   }
@@ -68,7 +70,7 @@ export function buildDateRangeFilter(
  *
  * @example
  * const dr = buildMonthRangeFilter('created_at', '202603', 2);
- * // sql: " AND created_at >= $2::date::timestamp AT TIME ZONE 'Asia/Seoul' AND created_at < ($2::date + interval '1 month')::timestamp AT TIME ZONE 'Asia/Seoul'"
+ * // sql: " AND created_at >= ($2 || ' 00:00:00+09')::timestamptz AND created_at < (($2::date + interval '1 month')::date::text || ' 00:00:00+09')::timestamptz"
  * // params: ['2026-03-01']
  */
 export function buildMonthRangeFilter(
@@ -85,8 +87,9 @@ export function buildMonthRangeFilter(
     ? `${yearMonth}-01`
     : `${yearMonth.slice(0, 4)}-${yearMonth.slice(4, 6)}-01`;
 
-  sql += ` AND ${column} >= $${paramIndex}::date::timestamp AT TIME ZONE 'Asia/Seoul'`;
-  sql += ` AND ${column} < ($${paramIndex}::date + interval '1 month')::timestamp AT TIME ZONE 'Asia/Seoul'`;
+  // ★ D104: 명시적 KST timestamptz 구성
+  sql += ` AND ${column} >= ($${paramIndex} || ' 00:00:00+09')::timestamptz`;
+  sql += ` AND ${column} < (($${paramIndex}::date + interval '1 month')::date::text || ' 00:00:00+09')::timestamptz`;
   params.push(normalized);
   paramIndex++;
 
@@ -113,11 +116,12 @@ export function buildPeriodFilter(
     const params: any[] = [];
     let paramIndex = startParamIndex;
 
-    sql += ` AND ${column} >= $${paramIndex}::date::timestamp AT TIME ZONE 'Asia/Seoul'`;
+    // ★ D104: 명시적 KST timestamptz 구성
+    sql += ` AND ${column} >= ($${paramIndex} || ' 00:00:00+09')::timestamptz`;
     params.push(String(fromDate));
     paramIndex++;
 
-    sql += ` AND ${column} < ($${paramIndex}::date + interval '1 day')::timestamp AT TIME ZONE 'Asia/Seoul'`;
+    sql += ` AND ${column} < (($${paramIndex}::date + interval '1 day')::date::text || ' 00:00:00+09')::timestamptz`;
     params.push(String(toDate));
     paramIndex++;
 

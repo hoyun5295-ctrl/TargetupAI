@@ -248,6 +248,7 @@ export default function Dashboard() {
   const [showTargetSend, setShowTargetSend] = useState(false);
   // ★ D43-3c: 타겟 필드 메타 (동적 변수/테이블용)
   const [targetFieldsMeta, setTargetFieldsMeta] = useState<FieldMeta[]>([]);
+  const [phoneFields, setPhoneFields] = useState<string[]>([]);  // ★ D103: 전화번호 형태 필드
   // 직접타겟발송 관련 state
   const [targetSendChannel, setTargetSendChannel] = useState<'sms' | 'rcs' | 'kakao_alimtalk'>('sms');
   const [targetMsgType, setTargetMsgType] = useState<'SMS' | 'LMS' | 'MMS'>('SMS');
@@ -378,7 +379,7 @@ export default function Dashboard() {
         msgType: directSendChannel === 'rcs' ? 'LMS' : isAlimtalk ? 'LMS' : directMsgType,
         sendChannel: directSendChannel === 'sms' ? 'sms' : directSendChannel === 'rcs' ? 'rcs' : 'alimtalk',
         subject: directSubject,
-        message: isAlimtalk ? kakaoMessage : getFullMessage(directSendChannel === 'rcs' ? kakaoMessage : directMessage),
+        message: isAlimtalk ? kakaoMessage : (directSendChannel === 'rcs' ? kakaoMessage : directMessage),  // ★ D103: 순수 본문만. (광고)+080은 백엔드 prepareSendMessage에서 추가
         callback: isAlimtalk ? (callbackNumbers[0]?.phone || '') : (useIndividualCallback ? null : selectedCallback),
         useIndividualCallback: isAlimtalk ? false : useIndividualCallback,
         individualCallbackColumn: (!isAlimtalk && useIndividualCallback) ? individualCallbackColumn : undefined,
@@ -1059,6 +1060,14 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
         const defaultCb = cbData.numbers?.find((n: any) => n.is_default);
         if (defaultCb) setSelectedCallback(defaultCb.phone);
       }
+      // ★ D103: 전화번호 형태 필드 로드 (개별회신번호 드롭다운용)
+      try {
+        const fieldsRes = await fetch('/api/customers/enabled-fields', { headers: { Authorization: `Bearer ${token}` } });
+        if (fieldsRes.ok) {
+          const fieldsData = await fieldsRes.json();
+          if (fieldsData.phoneFields) setPhoneFields(fieldsData.phoneFields);
+        }
+      } catch (e) { /* 실패 시 빈 배열 유지 */ }
       // ★ D94: 알림톡/RCS 승인 템플릿 로드
       loadKakaoTemplates();
       loadRcsTemplates();
@@ -1131,7 +1140,7 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
 
   // 직접 타겟 추출 완료 콜백 (DirectTargetFilterModal → Dashboard)
   // ★ D43-3c: fieldsMeta 파라미터 추가, B16-07: selectedCallbackPhone 추가
-  const handleTargetExtracted = async (recipients: any[], count: number, fieldsMeta: FieldMeta[], selectedCallbackPhone?: string) => {
+  const handleTargetExtracted = async (recipients: any[], count: number, fieldsMeta: FieldMeta[], selectedCallbackPhone?: string, extractedPhoneFields?: string[]) => {
     try {
       const token = localStorage.getItem('token');
       // 080 수신거부번호 로드
@@ -1172,6 +1181,7 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
     // ★ B-D75-03: custom_fields flat 처리는 백엔드 extract API에서 수행 (컨트롤타워 원칙)
     setTargetRecipients(recipients);
     setTargetFieldsMeta(fieldsMeta);
+    if (extractedPhoneFields) setPhoneFields(extractedPhoneFields);
     // ★ D100: 직접타겟 추출 시 첫 번째 수신자를 샘플로 설정 (담당자테스트용)
     //   이전: AI 추천에서만 setSampleCustomerRaw → 직접타겟 담당자테스트에 이전 AI 샘플 잔류
     if (recipients.length > 0) {
@@ -1268,13 +1278,12 @@ const handleAiCampaignGenerate = async (promptOverride?: string, autoRelax?: boo
     if ((recommendedCh) !== 'MMS') setMmsUploadedImages([]);
     setIsAd(result.is_ad !== false);
     
-    // 개별회신번호 자동 설정
-    // ★ D101: AI가 개별회신번호 추천 시 컬럼도 자동 설정 (store_phone 기본)
-    // individualCallbackColumn이 빈 문자열이면 발송 시 useIndividualCallback=false로 폴백되는 버그 방지
+    // ★ D103: AI가 개별회신번호 추천 시 phoneFields 기반 동적 설정 (하드코딩 'store_phone' 제거)
     if (result.use_individual_callback) {
       setUseIndividualCallback(true);
       if (!individualCallbackColumn) {
-        setIndividualCallbackColumn('store_phone');
+        // phoneFields에서 첫 번째 전화번호 필드 사용, 없으면 store_phone 폴백
+        setIndividualCallbackColumn(phoneFields[0] || 'store_phone');
       }
     }
   
@@ -1480,7 +1489,7 @@ const campaignData = {
   campaignName: autoName,
       messageType: selectedChannel,
       sendChannel: 'sms',
-      messageContent: buildAdMessageFront(selectedMsg.message_text, selectedChannel, isAd, optOutNumber),
+      messageContent: selectedMsg.message_text,  // ★ D103: 순수 본문만 전달. (광고)+080은 백엔드 prepareSendMessage에서 추가
       targetFilter: aiResult?.target?.filters || {},
       isAd: isAd,
       scheduledAt: scheduledAt,
@@ -1598,8 +1607,8 @@ const campaignData = {
       }
       // AI 맞춤한줄은 AI 추천시간 없으므로 'ai' 옵션 없음, 'now'면 null
 
-      // 메시지 내용 (광고문구 래핑) — ★ D102: buildAdMessageFront 컨트롤타워 사용
-      const messageContent = buildAdMessageFront(variant.message_text || '', channelType, isAd, optOutNumber);
+      // ★ D103: 순수 본문만 전달. (광고)+080은 백엔드 prepareSendMessage에서 추가
+      const messageContent = variant.message_text || '';
 
       const campaignData = {
         campaignName: _campaignName,
@@ -1700,8 +1709,9 @@ const campaignData = {
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          messageContent: buildAdMessageFront(selectedMsg.message_text, selectedChannel, isAd, optOutNumber),
+          messageContent: selectedMsg.message_text,  // ★ D103: 순수 본문만. (광고)+080은 백엔드에서 추가
           messageType: selectedChannel,
+          isAd: isAd,
           subject: selectedMsg.subject || '',
           mmsImagePaths: mmsUploadedImages.map(img => img.serverPath),
           // ★ D85: column 키 raw 데이터 전달 — replaceVariables가 customer[column]으로 접근
@@ -1737,14 +1747,15 @@ const campaignData = {
         setTestSending(false);
         return;
       }
-      const msg = buildAdMessageFront(targetMessage, targetMsgType, adTextEnabled, optOutNumber);
+      // ★ D103: 순수 본문만. (광고)+080은 백엔드 test-send에서 추가
       const token = localStorage.getItem('token');
       const res = await fetch('/api/campaigns/test-send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
-          messageContent: msg,
+          messageContent: targetMessage,
           messageType: targetMsgType,
+          isAd: adTextEnabled,
           subject: targetSubject || '',
           mmsImagePaths: mmsUploadedImages.map(img => img.serverPath),
           // ★ D85: column 키 raw 데이터 전달
@@ -1906,13 +1917,14 @@ const campaignData = {
           defaultUseIndividual={useIndividualCallback}
           isAd={isAd}
           optOutNumber={optOutNumber}
+          phoneFields={phoneFields}
           mmsImages={mmsUploadedImages}
           subject={aiResult?.messages?.[selectedAiMsgIdx]?.subject}
           usePersonalization={aiResult?.usePersonalization}
           sampleCustomer={sampleCustomer}
           />
         )}
-  
+
         {/* AI 맞춤한줄 발송 확정 모달 */}
         {showCustomSendModal && customSendData && (
           <AiCampaignSendModal
@@ -1930,6 +1942,7 @@ const campaignData = {
             defaultUseIndividual={useIndividualCallback}
             isAd={isAd}
             optOutNumber={optOutNumber}
+            phoneFields={phoneFields}
             subject={customSendData.variant?.subject}
             usePersonalization={true}
             sampleCustomer={sampleCustomer}
@@ -2798,6 +2811,7 @@ const campaignData = {
         individualCallbackColumn={individualCallbackColumn}
         setIndividualCallbackColumn={setIndividualCallbackColumn}
         callbackNumbers={callbackNumbers}
+        phoneFields={phoneFields}
         adTextEnabled={adTextEnabled}
         handleAdToggle={handleAdToggle}
         optOutNumber={optOutNumber}
@@ -2990,6 +3004,7 @@ const campaignData = {
           callbackNumbers={callbackNumbers}
           selectedCallback={selectedCallback} setSelectedCallback={setSelectedCallback}
           useIndividualCallback={useIndividualCallback} setUseIndividualCallback={setUseIndividualCallback}
+          individualCallbackColumn={individualCallbackColumn} setIndividualCallbackColumn={setIndividualCallbackColumn}
           adTextEnabled={adTextEnabled} handleAdToggle={handleAdToggle}
           reserveEnabled={reserveEnabled} setReserveEnabled={setReserveEnabled}
           reserveDateTime={reserveDateTime} setShowReservePicker={setShowReservePicker}

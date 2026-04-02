@@ -17,6 +17,7 @@ import { mysqlQuery, query } from '../config/database';
 import { TIMEOUTS } from '../config/defaults';
 import { extractVarCatalog } from '../services/ai';
 import { replaceVariables, enrichWithCustomFields, buildAdMessage, prepareFieldMappings } from '../utils/messageUtils';
+import { getTestSmsTables, toQtmsgType, insertTestSmsQueue } from './sms-queue';
 import { SUCCESS_CODES, PENDING_CODES, SPAM_RESULT } from '../utils/sms-result-map';
 import { prepaidDeduct } from '../utils/prepaid';
 
@@ -111,34 +112,7 @@ export function computeMessageHash(content: string): string {
   return createHash('sha256').update(normalized, 'utf8').digest('hex').substring(0, 16);
 }
 
-// ============================================================
-// 헬퍼: QTmsg 테스트 테이블명
-// ============================================================
-function getTestSmsTable(): string {
-  const allTables = (process.env.SMS_TABLES || 'SMSQ_SEND').split(',').map(t => t.trim());
-  return allTables.find(t => t === 'SMSQ_SEND_10') || allTables[allTables.length - 1];
-}
-
-// ============================================================
-// 헬퍼: QTmsg INSERT
-// ============================================================
-async function insertSmsQueue(
-  destNo: string,
-  callBack: string,
-  content: string,
-  msgType: string,
-  testId: string,
-  subject: string
-): Promise<void> {
-  const testTable = getTestSmsTable();
-  const mType = msgType === 'SMS' ? 'S' : 'L';
-  await mysqlQuery(
-    `INSERT INTO ${testTable} (
-      dest_no, call_back, msg_contents, msg_type, title_str, sendreq_time, status_code, rsv1, app_etc1
-    ) VALUES (?, ?, ?, ?, ?, NOW(), 100, '1', ?)`,
-    [destNo, callBack, content, mType, subject || '', testId]
-  );
-}
+// ★ D103: 인라인 getTestSmsTable/insertSmsQueue 삭제 → sms-queue.ts CT-04 컨트롤타워(getTestSmsTables, insertTestSmsQueue) 사용
 
 // ============================================================
 // [1] 큐에 스팸 테스트 등록
@@ -363,7 +337,7 @@ async function executeSpamTest(testId: string, isAuto: boolean): Promise<void> {
       const testAddressBookFields = test.callback_number ? { callback: test.callback_number, extra1: '', extra2: '', extra3: '', name: '' } : undefined;
       const content = replaceVariables(rawContent || '', firstCustomer, fieldMappings, testAddressBookFields);
       const titleStr = (row.message_type === 'LMS' || row.message_type === 'MMS') ? (test.subject || '') : '';
-      await insertSmsQueue(row.phone, test.callback_number, content, row.message_type, testId, titleStr);
+      await insertTestSmsQueue(row.phone, test.callback_number, content, row.message_type, testId, titleStr);
     }
 
     // grace period 결정
@@ -401,7 +375,7 @@ async function executeSpamTest(testId: string, isAuto: boolean): Promise<void> {
         }
 
         // QTmsg 결과 조회
-        const testTable = getTestSmsTable();
+        const testTable = (await getTestSmsTables())[0];
         const now2 = new Date();
         const yyyymm = `${now2.getFullYear()}${String(now2.getMonth() + 1).padStart(2, '0')}`;
         const logTable = `${testTable}_${yyyymm}`;
@@ -422,7 +396,7 @@ async function executeSpamTest(testId: string, isAuto: boolean): Promise<void> {
         } catch (e) { /* 로그 테이블 미존재 시 무시 */ }
 
         for (const row of unreceived.rows) {
-          const mType = row.message_type === 'SMS' ? 'S' : 'L';
+          const mType = toQtmsgType(row.message_type);
           const mqMatch = mqRows.find(
             (m: any) => m.dest_no === row.phone && m.msg_type === mType
           );

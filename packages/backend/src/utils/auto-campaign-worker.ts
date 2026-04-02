@@ -22,16 +22,18 @@
 
 import { query } from '../config/database';
 import { buildFilterQueryCompat } from './customer-filter';
-import { replaceVariables, getOpt080Number, buildAdMessage, prepareFieldMappings } from './messageUtils';
+import { getOpt080Number, prepareFieldMappings, prepareSendMessage } from './messageUtils';
 import {
-  toKoreaTimeStr,
+  toKoreaTimeStr, toQtmsgType,
   getCompanySmsTables, hasCompanyLineGroup, getNextSmsTable,
   bulkInsertSmsQueue,
 } from './sms-queue';
 import { prepaidDeduct, prepaidRefund } from './prepaid';
 import { normalizePhone } from './normalize-phone';
+import { resolveCustomerCallback } from './callback-filter';
 import { extractVarCatalog, generateMessages } from '../services/ai';
 import { autoSpamTestWithRegenerate } from './spam-test-queue';
+import { buildUnsubscribeFilter } from './unsubscribe-helper';
 import { SEND_HOURS } from '../config/defaults';
 
 // ============================================================
@@ -296,6 +298,45 @@ async function generateMessageForAutoCampaign(ac: any): Promise<void> {
     );
 
     console.log(`${logPrefix} 문안 생성 완료 — status=${aiGenerationStatus}, length=${generatedContent.length}자`);
+
+    // ★ D105 P7: AI 문안 생성 완료 후 담당자에게 알림 SMS 발송
+    const phones: string[] = ac.notify_phones || [];
+    if (phones.length > 0 && (await hasCompanyLineGroup(ac.company_id))) {
+      try {
+        const companyTables = await getCompanySmsTables(ac.company_id, ac.user_id);
+        const sendTime = toKoreaTimeStr(new Date());
+
+        const scheduledDate = new Date(ac.next_run_at);
+        const scheduledDateStr = scheduledDate.toLocaleString('ko-KR', {
+          timeZone: 'Asia/Seoul',
+          month: 'long', day: 'numeric',
+        });
+        const scheduledTimeStr = scheduledDate.toLocaleString('ko-KR', {
+          timeZone: 'Asia/Seoul',
+          hour: '2-digit', minute: '2-digit', hour12: false,
+        });
+
+        const genNotifyMsg = `[AI 문안 생성 완료]\n\n캠페인: ${ac.campaign_name}\n발송 예정: ${scheduledDateStr} ${scheduledTimeStr}\n\n▼ AI 생성 문안 ▼\n${generatedContent}\n\n※ 문안 수정이 필요하면 관리자 페이지에서 수정해주세요.`;
+
+        const genNotifyRows: any[][] = [];
+        for (const phone of phones) {
+          const cleanPhone = normalizePhone(phone);
+          if (!cleanPhone) continue;
+          genNotifyRows.push([
+            cleanPhone, ac.callback_number, genNotifyMsg, 'L',
+            `[AI문안생성] ${ac.campaign_name}`, sendTime, null, ac.company_id,
+            '', '', ''
+          ]);
+        }
+
+        if (genNotifyRows.length > 0) {
+          await bulkInsertSmsQueue(companyTables, genNotifyRows, true);
+          console.log(`${logPrefix} AI 문안 생성 알림 → ${genNotifyRows.length}명`);
+        }
+      } catch (notifyErr) {
+        console.error(`${logPrefix} AI 문안 생성 알림 발송 실패 (무시):`, notifyErr);
+      }
+    }
   } catch (err: any) {
     console.error(`${logPrefix} AI 문안 생성 에러:`, err);
     // 생성 실패해도 next_run_at은 건드리지 않음 — D-day에 fallback으로 발송
@@ -353,22 +394,49 @@ async function sendPreNotification(ac: any): Promise<void> {
     const companyTables = await getCompanySmsTables(ac.company_id, ac.user_id);
     const sendTime = toKoreaTimeStr(new Date());
 
-    // 발송 예정 시각 (KST)
-    const scheduledKst = new Date(ac.next_run_at).toLocaleString('ko-KR', {
+    // ★ D105: 발송 예정 시각 — "내일 XX시 XX분" 형식
+    const scheduledDate = new Date(ac.next_run_at);
+    const scheduledTimeStr = scheduledDate.toLocaleString('ko-KR', {
       timeZone: 'Asia/Seoul',
-      year: 'numeric', month: '2-digit', day: '2-digit',
-      hour: '2-digit', minute: '2-digit',
+      hour: '2-digit', minute: '2-digit', hour12: false,
     });
+    const scheduledDateStr = scheduledDate.toLocaleString('ko-KR', {
+      timeZone: 'Asia/Seoul',
+      month: 'long', day: 'numeric',
+    });
+
+    // ★ D105: 타겟 고객 수 실시간 조회 (CT-01 + CT-03 재활용)
+    let targetCount = 0;
+    try {
+      const filterResult = buildFilterQueryCompat(ac.target_filter, ac.company_id);
+      let storeFilter = '';
+      const storeParams: any[] = [];
+      if (ac.store_code) {
+        storeFilter = ` AND c.store_code = $${filterResult.nextIndex}`;
+        storeParams.push(ac.store_code);
+      }
+      const unsubParamIdx = filterResult.nextIndex + storeParams.length;
+      const unsubFilter = buildUnsubscribeFilter(`$${unsubParamIdx}`, 'c.phone');
+      const countResult = await query(
+        `SELECT COUNT(*) as cnt FROM customers c
+         WHERE c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true
+         ${filterResult.where}${storeFilter}${unsubFilter}`,
+        [ac.company_id, ...filterResult.params, ...storeParams, ac.user_id]
+      );
+      targetCount = parseInt(countResult.rows[0].cnt);
+    } catch (countErr) {
+      console.warn(`${logPrefix} 타겟 수 조회 실패 (무시):`, countErr);
+    }
 
     // 사용할 메시지 결정 (AI 생성 문안 or 고정 문안)
     const messageContent = ac.ai_generate_enabled && ac.generated_message_content
       ? ac.generated_message_content
       : ac.message_content;
 
-    // 알림 메시지 구성
-    const notifyMessage = `[자동발송 사전알림]\n\n캠페인: ${ac.campaign_name}\n발송 예정: ${scheduledKst}\n타입: ${ac.message_type}\n\n▼ 발송 문안 미리보기 ▼\n${messageContent}\n\n※ 취소하려면 관리자 페이지에서 자동발송을 일시정지해주세요.`;
+    // ★ D105: 알림 메시지 개선 — 타겟 수 + "내일 XX시 XX분" 포함
+    const notifyMessage = `[자동발송 사전알림]\n\n캠페인: ${ac.campaign_name}\n발송 예정: ${scheduledDateStr} ${scheduledTimeStr}\n발송 대상: ${targetCount.toLocaleString()}명\n메시지 타입: ${ac.message_type}\n\n▼ 발송 문안 ▼\n${messageContent}\n\n※ 취소하려면 관리자 페이지에서 자동발송을 일시정지해주세요.`;
 
-    // notify_phones에 테스트 발송
+    // notify_phones에 알림 발송
     const phones: string[] = ac.notify_phones || [];
     if (phones.length === 0) return;
 
@@ -405,7 +473,7 @@ async function sendPreNotification(ac: any): Promise<void> {
       ]
     );
 
-    console.log(`${logPrefix} 사전 알림 발송 완료 → ${phones.length}명`);
+    console.log(`${logPrefix} 사전 알림 발송 완료 → ${phones.length}명 (타겟 ${targetCount}명)`);
   } catch (err: any) {
     console.error(`${logPrefix} 사전 알림 에러:`, err);
   }
@@ -580,7 +648,7 @@ async function executeAutoCampaign(ac: any): Promise<void> {
 
     // ★ MySQL 큐 INSERT
     const sendTime = toKoreaTimeStr(new Date());
-    const msgTypeCode = ac.message_type === 'SMS' ? 'S' : ac.message_type === 'LMS' ? 'L' : 'M';
+    const msgTypeCode = toQtmsgType(ac.message_type);
     const mmsImages: string[] = [];  // MMS 이미지는 추후 지원
 
     // ★ D93: 개별회신번호 사용 시 CT-08 필터링 적용
@@ -599,15 +667,14 @@ async function executeAutoCampaign(ac: any): Promise<void> {
 
     const autoSmsRows: any[][] = [];
     for (const customer of filteredCustomers) {
-      let personalizedMessage = replaceVariables(messageContent, customer, fieldMappings);
-      // ★ D102: (광고) 접두사 + 080 수신거부 접미사 — 컨트롤타워 한 줄
-      personalizedMessage = buildAdMessage(personalizedMessage, ac.message_type, ac.is_ad ?? false, autoOpt080);
+      // ★ D103: prepareSendMessage 컨트롤타워 — 변수 치환 + (광고)+080 한 함수로 통합
+      const personalizedMessage = prepareSendMessage(messageContent, customer, fieldMappings, {
+        msgType: ac.message_type, isAd: ac.is_ad ?? false, opt080Number: autoOpt080,
+      });
       const personalizedSubject = messageSubject;
       const cleanPhone = normalizePhone(customer.phone);
-      // ★ D93: 개별회신번호 사용 시 고객별 store_phone → callback
-      const callback = ac.use_individual_callback
-        ? (customer.store_phone || customer.callback || ac.callback_number)
-        : ac.callback_number;
+      // ★ D103: resolveCustomerCallback 컨트롤타워 — 개별회신번호 resolve 통합
+      const callback = resolveCustomerCallback(customer, ac.use_individual_callback || false, ac.callback_number);
 
       autoSmsRows.push([
         cleanPhone, callback, personalizedMessage, msgTypeCode,
@@ -715,7 +782,153 @@ async function advanceNextRun(ac: any, sentCount?: number): Promise<void> {
 }
 
 // ============================================================
-// 메인 실행 함수 (3단계 순차 실행)
+// ★ 3단계: D-day 2시간 전 자동 스팸테스트 + 담당자 알림 (D105 신설)
+// next_run_at 0~2시간 이내 AND 아직 스팸테스트 안 한 건
+// ============================================================
+
+async function runPreSendSpamTest(): Promise<void> {
+  const logPrefix = '[auto-worker][spam]';
+
+  try {
+    const result = await query(
+      `SELECT ac.* FROM auto_campaigns ac
+       WHERE ac.status = 'active'
+         AND ac.callback_number IS NOT NULL
+         AND ac.next_run_at > NOW()
+         AND ac.next_run_at <= NOW() + INTERVAL '2 hours'
+         AND NOT EXISTS (
+           SELECT 1 FROM auto_campaign_runs acr
+           WHERE acr.auto_campaign_id = ac.id
+             AND acr.status = 'spam_tested'
+             AND acr.scheduled_at = ac.next_run_at
+         )
+       ORDER BY ac.next_run_at ASC`
+    );
+
+    if (result.rows.length === 0) return;
+
+    console.log(`${logPrefix} D-day 스팸테스트 대상 ${result.rows.length}건`);
+
+    for (const ac of result.rows) {
+      await executePreSendSpamTest(ac);
+    }
+  } catch (err: any) {
+    console.error(`${logPrefix} 스팸테스트 워커 에러:`, err);
+  }
+}
+
+async function executePreSendSpamTest(ac: any): Promise<void> {
+  const logPrefix = `[auto-worker][spam][${ac.id}]`;
+
+  try {
+    // 사용할 메시지 결정 (AI 생성 문안 or 고정 문안)
+    const messageContent = ac.ai_generate_enabled && ac.generated_message_content
+      ? ac.generated_message_content
+      : ac.message_content;
+
+    if (!messageContent) {
+      console.warn(`${logPrefix} 메시지 내용 없음 — 스팸테스트 스킵`);
+      return;
+    }
+
+    const channel = ac.message_type || 'SMS';
+
+    // ★ CT-01: 타겟 필터 매칭 첫 고객 조회 (스팸테스트 개인화용)
+    let firstRecipient: Record<string, any> | undefined;
+    try {
+      const filterResult = buildFilterQueryCompat(ac.target_filter, ac.company_id);
+      const firstCustResult = await query(
+        `SELECT * FROM customers WHERE company_id = $1 AND is_active = true AND sms_opt_in = true ${filterResult.where ? 'AND ' + filterResult.where : ''} ORDER BY updated_at DESC LIMIT 1`,
+        [ac.company_id, ...filterResult.params]
+      );
+      if (firstCustResult.rows.length > 0) {
+        const c = firstCustResult.rows[0];
+        firstRecipient = { ...c, ...(c.custom_fields || {}) };
+      }
+    } catch (e) {
+      console.warn(`${logPrefix} 스팸테스트용 첫 고객 조회 실패 (무시):`, e);
+    }
+
+    // ★ CT-09: autoSpamTestWithRegenerate 재활용
+    // D-day 2시간 전 스팸테스트에서는 재생성하지 않음 (이미 문안이 확정된 상태)
+    const spamResult = await autoSpamTestWithRegenerate({
+      companyId: ac.company_id,
+      userId: ac.user_id,
+      callbackNumber: ac.callback_number,
+      messageType: channel as 'SMS' | 'LMS' | 'MMS',
+      variants: [{
+        variantId: 'final',
+        messageText: messageContent,
+        subject: ac.message_subject || ac.generated_message_subject,
+      }],
+      isAd: ac.is_ad || false,
+      rejectNumber: await getOpt080Number(ac.user_id, ac.company_id),
+      firstRecipient,
+      maxRetries: 0, // 재생성 없이 1회 테스트만
+    });
+
+    // 결과 판정
+    const finalVariant = spamResult.variants[0];
+    const isBlocked = finalVariant?.spamResult === 'blocked';
+    const resultLabel = isBlocked ? '차단 ✗' : '통과 ✓';
+
+    console.log(`${logPrefix} 스팸테스트 완료 — ${resultLabel}`);
+
+    // ★ auto_campaign_runs에 spam_tested 기록
+    const runNumberResult = await query(
+      `SELECT COALESCE(MAX(run_number), 0) + 1 as next_run FROM auto_campaign_runs WHERE auto_campaign_id = $1`,
+      [ac.id]
+    );
+    await query(
+      `INSERT INTO auto_campaign_runs (
+        auto_campaign_id, run_number, status, scheduled_at, spam_test_result, ai_generation_status
+      ) VALUES ($1, $2, 'spam_tested', $3, $4, $5)`,
+      [
+        ac.id, runNumberResult.rows[0].next_run, ac.next_run_at,
+        JSON.stringify({ batchId: spamResult.batchId, isBlocked, result: resultLabel, variants: spamResult.variants }),
+        ac.ai_generate_enabled ? (ac.generated_message_content ? 'ai_generated' : 'ai_fallback') : 'fixed',
+      ]
+    );
+
+    // ★ 담당자에게 스팸테스트 결과 SMS 발송 (CT-04 재활용)
+    const phones: string[] = ac.notify_phones || [];
+    if (phones.length > 0 && (await hasCompanyLineGroup(ac.company_id))) {
+      const companyTables = await getCompanySmsTables(ac.company_id, ac.user_id);
+      const sendTime = toKoreaTimeStr(new Date());
+
+      const scheduledTimeStr = new Date(ac.next_run_at).toLocaleString('ko-KR', {
+        timeZone: 'Asia/Seoul',
+        hour: '2-digit', minute: '2-digit', hour12: false,
+      });
+
+      let notifyMsg = `[자동발송 스팸테스트 결과]\n\n캠페인: ${ac.campaign_name}\n발송 예정: 오늘 ${scheduledTimeStr}\n\n스팸테스트 결과: ${resultLabel}`;
+      if (isBlocked) {
+        notifyMsg += `\n\n⚠️ 문안이 스팸필터에 차단되었습니다.\n관리자 페이지에서 문안을 수정하거나 일시정지해주세요.`;
+      }
+
+      const notifyRows: any[][] = [];
+      for (const phone of phones) {
+        const cleanPhone = normalizePhone(phone);
+        if (!cleanPhone) continue;
+        notifyRows.push([
+          cleanPhone, ac.callback_number, notifyMsg, 'L',
+          `[스팸테스트] ${ac.campaign_name}`, sendTime, null, ac.company_id,
+          '', '', ''
+        ]);
+      }
+
+      if (notifyRows.length > 0) {
+        await bulkInsertSmsQueue(companyTables, notifyRows, true);
+        console.log(`${logPrefix} 스팸테스트 결과 알림 → ${notifyRows.length}명`);
+      }
+    }
+  } catch (err: any) {
+    console.error(`${logPrefix} 스팸테스트 에러:`, err);
+  }
+}
+
+// ============================================================
+// 메인 실행 함수 (4단계 순차 실행)
 // ============================================================
 
 export async function runAutoCampaignWorker(): Promise<void> {
@@ -728,7 +941,10 @@ export async function runAutoCampaignWorker(): Promise<void> {
     // ★ 2단계: D-1 사전 알림 (0~24시간 전)
     await runPreNotification();
 
-    // ★ 3단계: D-day 발송 (next_run_at <= NOW())
+    // ★ 3단계: D-day 2시간 전 스팸테스트 (D105 신설)
+    await runPreSendSpamTest();
+
+    // ★ 4단계: D-day 발송 (next_run_at <= NOW())
     const result = await query(
       `SELECT * FROM auto_campaigns
        WHERE status = 'active' AND next_run_at <= NOW()
@@ -754,11 +970,11 @@ export async function runAutoCampaignWorker(): Promise<void> {
 // setInterval 기반 실행 (app.ts에서 호출)
 // ============================================================
 
-// ★ D102: 1시간→10분 (최대 지연 9분으로 축소, 11시 설정→11:49 발송 문제 해결)
-const WORKER_INTERVAL_MS = 10 * 60 * 1000; // 10분
+// ★ D105: 10분→5분 (최대 지연 5분으로 축소, 정각 발송 정확도 개선)
+const WORKER_INTERVAL_MS = 5 * 60 * 1000; // 5분
 
 export function startAutoCampaignScheduler(): void {
-  console.log('[auto-worker] 자동발송 스케줄러 시작 (매 10분 체크, 3단계 라이프사이클)');
+  console.log('[auto-worker] 자동발송 스케줄러 시작 (매 5분 체크, 4단계 라이프사이클)');
 
   // 기동 시 즉시 1회 실행
   runAutoCampaignWorker().catch(err => {

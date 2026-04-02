@@ -4,6 +4,7 @@ import pool, { mysqlQuery } from '../config/database';
 import { DEFAULT_COSTS } from '../config/defaults';
 import { getCompanyScope } from '../utils/permission-helper';
 import { getTestSmsTables } from '../utils/sms-queue';
+import { buildDateRangeFilter } from '../utils/stats-aggregation';
 
 const router = Router();
 
@@ -43,21 +44,11 @@ router.get('/send', async (req: Request, res: Response) => {
     const limit = parseInt(req.query.limit as string) || 10;
     const offset = (page - 1) * limit;
 
-    let dateWhere = '';
-    const baseParams: any[] = [];
-    let paramIdx = 1;
-
-    // ★ KST 기준 날짜 필터
-    if (startDate) {
-      dateWhere += ` AND c.sent_at >= $${paramIdx}::date AT TIME ZONE 'Asia/Seoul'`;
-      baseParams.push(startDate);
-      paramIdx++;
-    }
-    if (endDate) {
-      dateWhere += ` AND c.sent_at < ($${paramIdx}::date + INTERVAL '1 day') AT TIME ZONE 'Asia/Seoul'`;
-      baseParams.push(endDate);
-      paramIdx++;
-    }
+    // ★ D104: 날짜 필터 컨트롤타워 사용
+    const dr = buildDateRangeFilter('c.sent_at', startDate, endDate, 1);
+    let dateWhere = dr.sql;
+    const baseParams: any[] = [...dr.params];
+    let paramIdx = dr.nextIndex;
     let companyWhere = '';
     if (companyScope) {
       companyWhere = ` AND c.company_id = $${paramIdx}`;
@@ -129,19 +120,9 @@ router.get('/send', async (req: Request, res: Response) => {
         }
 
         // 2-2) 스팸필터 테스트 (PostgreSQL)
-        let sfDateWhere = '';
-        const sfParams: any[] = [companyScope];
-        let sfIdx = 2;
-        if (startDate) {
-          sfDateWhere += ` AND t.created_at >= $${sfIdx}::date AT TIME ZONE 'Asia/Seoul'`;
-          sfParams.push(startDate);
-          sfIdx++;
-        }
-        if (endDate) {
-          sfDateWhere += ` AND t.created_at < ($${sfIdx}::date + INTERVAL '1 day') AT TIME ZONE 'Asia/Seoul'`;
-          sfParams.push(endDate);
-          sfIdx++;
-        }
+        const sfDr = buildDateRangeFilter('t.created_at', startDate, endDate, 2);
+        const sfDateWhere = sfDr.sql;
+        const sfParams: any[] = [companyScope, ...sfDr.params];
 
         const sfAgg = await pool.query(`
           SELECT

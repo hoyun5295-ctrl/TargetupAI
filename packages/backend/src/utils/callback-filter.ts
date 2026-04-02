@@ -198,6 +198,87 @@ export function buildCallbackErrorResponse(
 }
 
 /**
+ * ★ D103: 개별회신번호 resolve 컨트롤타워
+ * 발송 루프에서 "이 고객/수신자의 회신번호"를 결정하는 유일한 진입점.
+ * campaigns.ts AI발송(793), 직접발송(1524,1568), auto-campaign-worker(609)에서
+ * 인라인으로 각각 다르게 처리하던 로직을 통합.
+ *
+ * CT-08 filterByIndividualCallback이 사전 필터링 + customer.callback 세팅 완료한 상태에서,
+ * 발송 루프에서 최종 회신번호를 결정.
+ *
+ * @param customer - 고객/수신자 객체 (callback이 CT-08에서 세팅됨)
+ * @param useIndividualCallback - 개별회신번호 사용 여부
+ * @param defaultCallback - 기본 회신번호 (캠페인 설정 또는 대표번호)
+ * @returns normalizePhone 적용된 최종 회신번호
+ */
+export function resolveCustomerCallback(
+  customer: Record<string, any>,
+  useIndividualCallback: boolean,
+  defaultCallback: string
+): string {
+  if (useIndividualCallback && customer.callback) {
+    return normalizePhone(customer.callback);
+  }
+  return normalizePhone(defaultCallback);
+}
+
+/**
+ * ★ D103: 전화번호 형태 값 판별
+ * 숫자+하이픈만으로 구성된 7자리 이상 문자열이 한국 전화번호 패턴에 맞는지 판별.
+ * 개별회신번호 드롭다운에서 전화번호 필드만 동적으로 표시하기 위한 컨트롤타워.
+ */
+export function isPhoneLikeValue(value: any): boolean {
+  if (value == null || value === '') return false;
+  const str = String(value).trim();
+  // 숫자+하이픈+공백+괄호+점만 허용
+  const cleaned = str.replace(/[\s\-\(\)\.]/g, '');
+  if (!/^\d+$/.test(cleaned)) return false;
+  if (cleaned.length < 7 || cleaned.length > 15) return false;
+  // 한국 전화번호 패턴: 01X(휴대폰), 02(서울), 03X-06X(지역), 050X(안심), 070(인터넷), 080(수신거부), 1XXX(대표)
+  return /^(01[016789]|02|0[3-6]\d|050\d|070|080|1[0-9]{3})/.test(cleaned);
+}
+
+/**
+ * ★ D103: 전화번호 형태 필드 자동 감지
+ * 샘플 데이터에서 각 필드의 값을 검사하여 전화번호 형태인 필드만 반환.
+ * enabled-fields API, 직접발송 파일 업로드 등에서 회신번호 드롭다운 필터링에 사용.
+ *
+ * @param samples - 샘플 데이터 배열 (최대 10건)
+ * @param fields - 검사 대상 필드 목록 [{field_key, display_name}]
+ * @param excludeKeys - 제외할 필드 키 (기본: ['phone'] — 수신자 번호이므로 회신번호 불가)
+ * @returns 전화번호 형태 데이터가 있는 필드 목록
+ */
+export function detectPhoneFields(
+  samples: Record<string, any>[],
+  fields: { field_key: string; display_name: string }[],
+  excludeKeys: string[] = ['phone', 'sms_opt_in']
+): { field_key: string; display_name: string }[] {
+  if (!samples.length || !fields.length) return [];
+
+  return fields.filter(f => {
+    if (excludeKeys.includes(f.field_key)) return false;
+
+    // 값이 있는 샘플만 검사
+    const values = samples
+      .map(s => {
+        // custom_fields JSONB 내부 키 지원
+        let val = s[f.field_key];
+        if (val == null && s.custom_fields && f.field_key.startsWith('custom_')) {
+          val = s.custom_fields[f.field_key];
+        }
+        return val;
+      })
+      .filter(v => v != null && String(v).trim() !== '');
+
+    if (values.length === 0) return false;
+
+    // 50% 이상이 전화번호 형태면 전화번호 필드로 판정
+    const phoneCount = values.filter(v => isPhoneLikeValue(v)).length;
+    return phoneCount / values.length >= 0.5;
+  });
+}
+
+/**
  * 미등록 회신번호 확인 요청 응답 생성 — 발송 전 사용자 확인용
  *
  * 제외 대상이 있지만 발송 가능한 수신자가 남아있을 때,

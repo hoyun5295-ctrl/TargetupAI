@@ -18,6 +18,7 @@ import {
   DIRECT_MAPPING_FIELDS,
   replaceDirectVars,
   buildAdMessageFront,
+  detectPhoneHeaders,
 } from '../utils/formatDate';
 
 // ============================================================
@@ -47,6 +48,8 @@ export interface DirectSendPanelProps {
   setSelectedCallback: (s: string) => void;
   useIndividualCallback: boolean;
   setUseIndividualCallback: (b: boolean) => void;
+  individualCallbackColumn: string;
+  setIndividualCallbackColumn: (col: string) => void;
 
   // 옵션
   adTextEnabled: boolean;
@@ -135,6 +138,7 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
     messageBytes, maxBytes,
     callbackNumbers, selectedCallback, setSelectedCallback,
     useIndividualCallback, setUseIndividualCallback,
+    individualCallbackColumn, setIndividualCallbackColumn,
     adTextEnabled, handleAdToggle,
     reserveEnabled, setReserveEnabled, reserveDateTime, setShowReservePicker,
     splitEnabled, setSplitEnabled, splitCount, setSplitCount,
@@ -487,28 +491,48 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
               {/* 회신번호 선택 */}
               <div className="px-3 py-1.5 border-t">
                 <select
-                  value={useIndividualCallback ? '__individual__' : selectedCallback}
+                  value={useIndividualCallback ? `__col__${individualCallbackColumn}` : selectedCallback}
                   onChange={(e) => {
-                    if (e.target.value === '__individual__') {
+                    const val = e.target.value;
+                    if (val.startsWith('__col__')) {
                       setUseIndividualCallback(true);
                       setSelectedCallback('');
+                      setIndividualCallbackColumn(val.replace('__col__', ''));
                     } else {
                       setUseIndividualCallback(false);
-                      setSelectedCallback(e.target.value);
+                      setSelectedCallback(val);
+                      setIndividualCallbackColumn('');
                     }
                   }}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 >
                   <option value="">회신번호 선택</option>
-                  <option value="__individual__">수신자별 회신번호 칼럼 사용</option>
-                  {callbackNumbers.map((cb) => (
-                    <option key={cb.id} value={cb.phone}>
-                      {formatPhoneNumber(cb.phone)} {cb.label ? `(${cb.label})` : ''} {cb.is_default ? '⭐' : ''}
-                    </option>
-                  ))}
+                  {/* ★ D103: 파일 업로드 시 전화번호 형태 컬럼만 동적 표시 */}
+                  {directFileHeaders.length > 0 && (() => {
+                    const phoneHeaders = detectPhoneHeaders(directFileHeaders, directFileData);
+                    return phoneHeaders.length > 0 ? (
+                      <optgroup label="수신자별 회신번호 컬럼">
+                        {phoneHeaders.map(h => {
+                          const sample = directFileData[0]?.[h];
+                          return (
+                            <option key={h} value={`__col__${h}`}>
+                              {h}{sample ? ` (예: ${String(sample).slice(0, 15)})` : ''} (수신자별)
+                            </option>
+                          );
+                        })}
+                      </optgroup>
+                    ) : null;
+                  })()}
+                  <optgroup label="등록된 회신번호">
+                    {callbackNumbers.map((cb) => (
+                      <option key={cb.id} value={cb.phone}>
+                        {formatPhoneNumber(cb.phone)} {cb.label ? `(${cb.label})` : ''} {cb.is_default ? '⭐' : ''}
+                      </option>
+                    ))}
+                  </optgroup>
                 </select>
-                {useIndividualCallback && (
-                  <p className="text-xs text-blue-600 mt-1">각 수신자의 회신번호 칼럼 값으로 발송됩니다</p>
+                {useIndividualCallback && individualCallbackColumn && (
+                  <p className="text-xs text-blue-600 mt-1">각 수신자의 <strong>{individualCallbackColumn}</strong> 값으로 발송됩니다</p>
                 )}
               </div>
 

@@ -9,6 +9,7 @@ import { SUCCESS_CODES_SQL, PENDING_CODES_SQL, getStatusLabel, getStatusType, ge
 import { DEFAULT_COSTS } from '../config/defaults';
 import { validateSmsTables } from '../utils/sms-table-validator';
 import { getUserUnsubscribes, deleteUserUnsubscribes, exportUserUnsubscribes } from '../utils/unsubscribe-helper';
+import { buildDateRangeFilter } from '../utils/stats-aggregation';
 
 const router = Router();
 
@@ -1113,20 +1114,12 @@ router.get('/stats/send', authenticate, requireSuperAdmin, async (req: Request, 
     const limit = parseInt(req.query.limit as string) || 10;
     const offset = (page - 1) * limit;
 
-    let dateWhere = '';
-    const baseParams: any[] = [];
-    let paramIdx = 1;
+    // ★ D104: 날짜 필터 컨트롤타워 사용
+    const dr = buildDateRangeFilter('c.sent_at', startDate, endDate, 1);
+    let dateWhere = dr.sql;
+    const baseParams: any[] = [...dr.params];
+    let paramIdx = dr.nextIndex;
 
-    if (startDate) {
-      dateWhere += ` AND c.sent_at >= $${paramIdx}::date AT TIME ZONE 'Asia/Seoul'`;
-      baseParams.push(startDate);
-      paramIdx++;
-    }
-    if (endDate) {
-      dateWhere += ` AND c.sent_at < ($${paramIdx}::date + INTERVAL '1 day') AT TIME ZONE 'Asia/Seoul'`;
-      baseParams.push(endDate);
-      paramIdx++;
-    }
     let companyWhere = '';
     if (companyId) {
       companyWhere = ` AND c.company_id = $${paramIdx}`;
@@ -1217,11 +1210,10 @@ router.get('/stats/send', authenticate, requireSuperAdmin, async (req: Request, 
         }
 
         // 2) 스팸필터 테스트 (PostgreSQL)
-        let sfDateWhere = '';
-        const sfParams: any[] = [targetCompanyId];
-        let sfIdx = 2;
-        if (startDate) { sfDateWhere += ` AND t.created_at >= $${sfIdx}::date AT TIME ZONE 'Asia/Seoul'`; sfParams.push(startDate); sfIdx++; }
-        if (endDate) { sfDateWhere += ` AND t.created_at < ($${sfIdx}::date + INTERVAL '1 day') AT TIME ZONE 'Asia/Seoul'`; sfParams.push(endDate); sfIdx++; }
+        const sfDr = buildDateRangeFilter('t.created_at', startDate, endDate, 2);
+        const sfDateWhere = sfDr.sql;
+        const sfParams: any[] = [targetCompanyId, ...sfDr.params];
+        const sfIdx = sfDr.nextIndex;
 
         const sfAgg = await query(`
           SELECT COUNT(*) as total,

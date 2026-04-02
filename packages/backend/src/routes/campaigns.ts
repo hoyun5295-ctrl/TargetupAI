@@ -5,7 +5,7 @@ import { authenticate } from '../middlewares/auth';
 import { extractVarCatalog, validatePersonalizationVars, VarCatalogEntry } from '../services/ai';
 import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getRegionVariants } from '../utils/normalize';
 import { getSourceRef, logTrainingData, updateTrainingMetrics } from '../utils/training-logger';
-import { replaceVariables, enrichWithCustomFields, getOpt080Number, buildAdMessage, prepareFieldMappings } from '../utils/messageUtils';
+import { replaceVariables, enrichWithCustomFields, getOpt080Number, buildAdMessage, prepareFieldMappings, prepareSendMessage } from '../utils/messageUtils';
 import { SUCCESS_CODES, PENDING_CODES, isSuccess, isFail, SPAM_RESULT } from '../utils/sms-result-map';
 import { DEFAULT_COSTS, redis, CACHE_TTL, BATCH_SIZES, SEND_HOURS } from '../config/defaults';
 import { isValidSmsTable } from '../utils/sms-table-validator';
@@ -20,12 +20,13 @@ import {
   smsCountAll, smsAggAll, smsSelectAll, smsMinAll, smsExecAll,
   getCompanySmsTablesWithLogs,
   insertKakaoQueue, kakaoAgg, kakaoCountPending, kakaoCancelPending,
-  bulkInsertSmsQueue, insertAlimtalkQueue
+  bulkInsertSmsQueue, insertAlimtalkQueue, toQtmsgType, insertTestSmsQueue
 } from '../utils/sms-queue';
 import { prepaidDeduct, prepaidRefund } from '../utils/prepaid';
+import { buildDateRangeFilter } from '../utils/stats-aggregation';
 import { cancelCampaign, syncCampaignResults } from '../utils/campaign-lifecycle';
 import { buildFilterQueryCompat } from '../utils/customer-filter';
-import { filterByIndividualCallback, buildCallbackErrorResponse, buildCallbackConfirmResponse } from '../utils/callback-filter';
+import { filterByIndividualCallback, buildCallbackErrorResponse, buildCallbackConfirmResponse, resolveCustomerCallback } from '../utils/callback-filter';
 import { deduplicateByPhone } from '../utils/deduplicate';
 import { getUserTestContacts } from '../utils/test-contact-helper';
 
@@ -251,7 +252,7 @@ router.post('/test-send', async (req: Request, res: Response) => {
       }
     }
 
-    const { messageContent, messageType } = req.body;
+    const { messageContent, messageType, isAd } = req.body;
     if (!messageContent) {
       return res.status(400).json({ error: '메시지 내용이 필요합니다.' });
     }
@@ -324,7 +325,7 @@ router.post('/test-send', async (req: Request, res: Response) => {
 
     // 담당자별로 테스트 전용 라인으로 INSERT
     const testTables = await getTestSmsTables();
-    const msgType = (messageType || 'SMS') === 'SMS' ? 'S' : (messageType || 'SMS') === 'LMS' ? 'L' : 'M';
+    const msgType = toQtmsgType(messageType || 'SMS');
     const mmsImagePaths: string[] = req.body.mmsImagePaths || [];
     // ★ D100: bill_id에 userId 저장 (사용자별 테스트 결과 필터 + 사용금액 격리)
     //   기존 testBillId 사용 → 결과 조회 시 bill_id=userId 필터와 불일치 → company_user 결과 미표시
@@ -332,23 +333,23 @@ router.post('/test-send', async (req: Request, res: Response) => {
     let sentCount = 0;
     const failedContacts: { phone: string; error: string }[] = [];
 
+    // ★ D103: 테스트발송도 백엔드에서 (광고)+080 추가 (전 경로 동일 원칙)
+    const testOpt080 = isAd ? await getOpt080Number(userId || null, companyId) : '';
+
     for (const contact of managerContacts) {
       try {
         const cleanPhone = normalizePhone(contact.phone);
-        // ★ D32: 공통 치환 함수로 실제 타겟 첫 번째 고객 데이터 치환
-        const testMsg = replaceVariables(messageContent, testFirstCustomer, testFieldMappings);
+        // ★ D103: prepareSendMessage 컨트롤타워 — 변수 치환 + (광고)+080 한 함수로 통합
+        const testMsg = prepareSendMessage(messageContent, testFirstCustomer, testFieldMappings, {
+          msgType: messageType || 'SMS', isAd: isAd || false, opt080Number: testOpt080,
+        });
 
         if (testChannel === 'sms' || testChannel === 'both') {
-          // SMS 테스트 발송
-          const table = getNextSmsTable(testTables);
-          // ★ #7: title_str 추가 (LMS/MMS 제목 누락 수정)
+          // ★ D103: insertTestSmsQueue 컨트롤타워 사용 (인라인 INSERT 제거)
           const testSubject = req.body.subject || '';
-          await mysqlQuery(
-            `INSERT INTO ${table} (
-              dest_no, call_back, msg_contents, msg_type, title_str, sendreq_time, status_code, rsv1, app_etc1, app_etc2, bill_id, file_name1, file_name2, file_name3
-            ) VALUES (?, ?, ?, ?, ?, NOW(), 100, '1', ?, ?, ?, ?, ?, ?)`,
-            [cleanPhone, callbackNumber, testMsg, msgType, testSubject, 'test', companyId, testBillId, mmsImagePaths[0] || '', mmsImagePaths[1] || '', mmsImagePaths[2] || '']
-          );
+          await insertTestSmsQueue(cleanPhone, callbackNumber, testMsg, messageType || 'SMS', 'test', testSubject, {
+            companyId, billId: testBillId, mmsImages: mmsImagePaths,
+          });
         }
 
         if (testChannel === 'kakao' || testChannel === 'both') {
@@ -760,7 +761,7 @@ const sendTime = isScheduled
 
 // MMS 이미지 경로 (campaigns 테이블에서 가져옴)
 const campaignMmsImages: string[] = campaign.mms_image_paths || [];
-const aiMsgTypeCode = campaign.message_type === 'SMS' ? 'S' : campaign.message_type === 'LMS' ? 'L' : 'M';
+const aiMsgTypeCode = toQtmsgType(campaign.message_type);
 
 // 카카오 설정 (campaigns 테이블에서)
 const kakaoBubbleType = campaign.kakao_bubble_type || 'TEXT';
@@ -782,17 +783,15 @@ const aiSmsRows: any[][] = [];
 const aiKakaoQueue: any[] = [];
 
 for (const customer of filteredCustomers) {
-  // ★ D32: 공통 치환 함수 사용 (messageUtils.ts)
-  let personalizedMessage = replaceVariables(campaign.message_content || '', customer, fieldMappings);
-  // ★ D102: (광고)+080 — CT-AD 컨트롤타워 사용 (전 경로 통일)
-  personalizedMessage = buildAdMessage(personalizedMessage, campaign.message_type, campaign.is_ad || false, opt080Number);
+  // ★ D103: prepareSendMessage 컨트롤타워 — 변수 치환 + (광고)+080 한 함수로 통합
+  const personalizedMessage = prepareSendMessage(campaign.message_content || '', customer, fieldMappings, {
+    msgType: campaign.message_type, isAd: campaign.is_ad || false, opt080Number,
+  });
   // ★ D28: 제목은 고정값 그대로 사용 (머지 치환 완전 제거)
   const personalizedSubject = campaign.subject || '';
 
-  // 개별회신번호: customer.callback 있으면 사용, 없으면 캠페인 설정 또는 기본값
-  const customerCallback = useIndividualCallback && customer.callback
-    ? normalizePhone(customer.callback)
-    : normalizePhone(campaign.callback_number || defaultCallback);
+  // ★ D103: resolveCustomerCallback 컨트롤타워 — 개별회신번호 resolve 통합
+  const customerCallback = resolveCustomerCallback(customer, useIndividualCallback, campaign.callback_number || defaultCallback);
 
   const cleanPhone = normalizePhone(customer.phone);
 
@@ -1047,19 +1046,11 @@ router.get('/test-stats', async (req: Request, res: Response) => {
     }));
 
     // ========== 스팸필터 테스트 통합 ==========
-    let spamDateWhere = '';
-    const spamParams: any[] = [companyId];
-    let spamIdx = 2;
-    if (fromDate) {
-      spamDateWhere += ` AND t.created_at >= $${spamIdx}::date AT TIME ZONE 'Asia/Seoul'`;
-      spamParams.push(fromDate);
-      spamIdx++;
-    }
-    if (toDate) {
-      spamDateWhere += ` AND t.created_at < ($${spamIdx}::date + INTERVAL '1 day') AT TIME ZONE 'Asia/Seoul'`;
-      spamParams.push(toDate);
-      spamIdx++;
-    }
+    // ★ D104: 날짜 필터 컨트롤타워 사용
+    const spamDr = buildDateRangeFilter('t.created_at', fromDate as string | undefined, toDate as string | undefined, 2);
+    const spamDateWhere = spamDr.sql;
+    const spamParams: any[] = [companyId, ...spamDr.params];
+    let spamIdx = spamDr.nextIndex;
     let spamUserWhere = '';
     if (userType === 'company_user' && userId) {
       spamUserWhere = ` AND t.user_id = $${spamIdx}`;
@@ -1489,19 +1480,19 @@ router.post('/direct-send', async (req: Request, res: Response) => {
 
       for (let i = 0; i < filteredRecipients.length; i++) {
         const recipient = filteredRecipients[i];
-        // ★ D102: customMessages 분기 제거 — 항상 백엔드 replaceVariables 컨트롤타워 사용
-        // 숫자(.00)/날짜 포맷팅이 replaceVariables 한 곳에서 처리되므로 프론트/백엔드 불일치 원천 차단
+        // ★ D103: prepareSendMessage 컨트롤타워 — 변수 치환 + (광고)+080 한 함수로 통합
         const cleanPhone = normalizePhone(recipient.phone);
         const dbCustomer = directCustomerMap.get(cleanPhone) || null;
-        let finalMessage = replaceVariables(message, dbCustomer, directFieldMappings, {
-          name: recipient.name,
-          extra1: recipient.extra1,
-          extra2: recipient.extra2,
-          extra3: recipient.extra3,
-          callback: recipient.callback,
+        const finalMessage = prepareSendMessage(message, dbCustomer, directFieldMappings, {
+          msgType, isAd: adEnabled, opt080Number: directOpt080,
+          addressBookFields: {
+            name: recipient.name,
+            extra1: recipient.extra1,
+            extra2: recipient.extra2,
+            extra3: recipient.extra3,
+            callback: recipient.callback,
+          },
         });
-        // ★ D102: (광고)+080 — CT-AD 컨트롤타워 사용 (전 경로 통일)
-        finalMessage = buildAdMessage(finalMessage, msgType, adEnabled, directOpt080);
 
         const finalSubject = subject || '';
 
@@ -1521,13 +1512,12 @@ router.post('/direct-send', async (req: Request, res: Response) => {
           sendTime = '';  // useNow=true이면 bulkInsertSmsQueue에서 NOW() 사용
         }
 
-        const recipientCallback = useIndividualCallback
-          ? normalizePhone(recipient.callback || '')
-          : normalizePhone(callback);
+        // ★ D103: resolveCustomerCallback 컨트롤타워
+        const recipientCallback = resolveCustomerCallback(recipient, useIndividualCallback, callback);
 
         directSmsRows.push([
           cleanPhone, recipientCallback, finalMessage,
-          msgType === 'SMS' ? 'S' : msgType === 'LMS' ? 'L' : 'M',
+          toQtmsgType(msgType),
           finalSubject, sendTime, campaignId, companyId,
           (mmsImagePaths || [])[0] || '', (mmsImagePaths || [])[1] || '', (mmsImagePaths || [])[2] || ''
         ]);
@@ -1565,9 +1555,8 @@ router.post('/direct-send', async (req: Request, res: Response) => {
             }
           }
 
-          const recipientCallback = useIndividualCallback
-            ? normalizePhone(recipient.callback || '')
-            : normalizePhone(callback);
+          // ★ D103: resolveCustomerCallback 컨트롤타워
+          const recipientCallback = resolveCustomerCallback(recipient, useIndividualCallback, callback);
 
           await insertKakaoQueue({
             bubbleType: kakaoBubbleType || 'TEXT',
@@ -2123,12 +2112,10 @@ router.put('/:id/message', async (req: Request, res: Response) => {
         for (const recipient of batch) {
           const customer = customerMap.get(recipient.dest_no) || {};
 
-          // ★ D32: 공통 치환 함수 사용
-          let finalMessage = replaceVariables(message, customer, editFieldMappings);
-
-          // 광고 문구 추가
-          // ★ D102: (광고)+080 — CT-AD 컨트롤타워 사용
-          finalMessage = buildAdMessage(finalMessage, msgType, adEnabled, optOut080);
+          // ★ D103: prepareSendMessage 컨트롤타워 — 변수 치환 + (광고)+080 한 함수로 통합
+          const finalMessage = prepareSendMessage(message, customer, editFieldMappings, {
+            msgType, isAd: adEnabled, opt080Number: optOut080,
+          });
 
           // SQL escape
           const escapedMessage = finalMessage.replace(/'/g, "''");

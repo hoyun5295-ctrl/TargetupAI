@@ -29,6 +29,18 @@ export const toKoreaTimeStr = (date: Date) => {
   return date.toLocaleString('sv-SE', { timeZone: 'Asia/Seoul' }).replace('T', ' ');
 };
 
+/**
+ * ★ D103: QTmsg 메시지 타입 코드 변환 컨트롤타워
+ * 'SMS' → 'S', 'LMS' → 'L', 'MMS' → 'M'
+ * campaigns.ts 3곳, auto-campaign-worker 1곳, spam-test-queue 2곳, spam-filter 2곳에서
+ * 인라인으로 반복되던 변환 로직을 한 곳으로 통합.
+ */
+export function toQtmsgType(msgType: string): string {
+  if (msgType === 'SMS') return 'S';
+  if (msgType === 'LMS') return 'L';
+  return 'M';
+}
+
 // ===== 라인그룹 테이블 조회 =====
 
 /** 회사/사용자별 발송 테이블 조회 (캐시) — userId가 있으면 사용자 개별 라인그룹 우선 */
@@ -118,6 +130,43 @@ export async function getTestSmsTables(): Promise<string[]> {
 
   lineGroupCache.set('test', { tables, hasDedicatedGroup: true, expires: Date.now() + LINE_GROUP_CACHE_TTL });
   return tables;
+}
+
+/**
+ * ★ D103: 테스트/스팸필터 전용 단건 SMS INSERT 컨트롤타워
+ * spam-test-queue.ts, spam-filter.ts, campaigns.ts test-send에서
+ * 인라인으로 반복되던 테스트 INSERT 로직을 한 곳으로 통합.
+ */
+export async function insertTestSmsQueue(
+  destNo: string,
+  callBack: string,
+  content: string,
+  msgType: string,
+  testId: string,
+  subject: string,
+  extra?: { companyId?: string; billId?: string; mmsImages?: string[] }
+): Promise<void> {
+  const testTables = await getTestSmsTables();
+  const table = testTables[0];
+  const mType = toQtmsgType(msgType);
+  if (extra?.companyId || extra?.billId || extra?.mmsImages) {
+    // campaigns.ts test-send 호환 (app_etc2=companyId, bill_id=userId, file_name)
+    await mysqlQuery(
+      `INSERT INTO ${table} (
+        dest_no, call_back, msg_contents, msg_type, title_str, sendreq_time, status_code, rsv1, app_etc1, app_etc2, bill_id, file_name1, file_name2, file_name3
+      ) VALUES (?, ?, ?, ?, ?, NOW(), 100, '1', ?, ?, ?, ?, ?, ?)`,
+      [destNo, callBack, content, mType, subject || '', testId,
+       extra.companyId || '', extra.billId || '',
+       extra.mmsImages?.[0] || '', extra.mmsImages?.[1] || '', extra.mmsImages?.[2] || '']
+    );
+  } else {
+    await mysqlQuery(
+      `INSERT INTO ${table} (
+        dest_no, call_back, msg_contents, msg_type, title_str, sendreq_time, status_code, rsv1, app_etc1
+      ) VALUES (?, ?, ?, ?, ?, NOW(), 100, '1', ?)`,
+      [destNo, callBack, content, mType, subject || '', testId]
+    );
+  }
 }
 
 /** 인증번호 발송 테이블 조회 (캐시) */

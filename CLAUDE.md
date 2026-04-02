@@ -34,19 +34,19 @@
 | CT-01 | customer-filter.ts | 고객 필터/쿼리 빌더 |
 | CT-02 | store-scope.ts | 브랜드(store_code) 격리 |
 | CT-03 | unsubscribe-helper.ts | 수신거부 관리 + 080 연동 |
-| CT-04 | sms-queue.ts | MySQL 큐 조작 |
+| CT-04 | sms-queue.ts | MySQL 큐 조작 + **toQtmsgType (MSG타입코드변환 D103) + insertTestSmsQueue (테스트SMS INSERT D103)** |
 | CT-05 | prepaid.ts | 선불 잔액 관리 |
 | CT-06 | campaign-lifecycle.ts | 캠페인 생명주기 |
 | CT-07 | standard-field-map.ts | 필드 매핑 + customer_field_definitions UPSERT |
-| CT-08 | callback-filter.ts | 개별회신번호 필터링 (store_phone 폴백 + 미등록 제외) |
+| CT-08 | callback-filter.ts | 개별회신번호 필터링 + resolveCustomerCallback (발송 루프 회신번호 결정 D103) + isPhoneLikeValue/detectPhoneFields (전화번호 필드 동적 감지 D103) |
 | CT-09 | spam-test-queue.ts | 스팸테스트 큐 관리 + 자동 스팸검사/재생성 |
 | CT-10 | sender-registration.ts | 발신번호 등록 신청/승인/반려 + 사용자별 배정 관리 (D87) |
 | CT-12 | brand-message.ts | 브랜드메시지 발송/검증 (자유형 8종 + 기본형 템플릿, D97) |
 | CT-14 | deduplicate.ts | 수신자 중복제거 — phone 기준 normalizePhone (D98) |
-| — | messageUtils.ts | 변수 치환 (5개 발송 경로 통합) |
+| — | messageUtils.ts | 변수 치환 (5개 발송 경로 통합) + buildAdMessage (광고+080 전경로 D102) + getOpt080Number (080번호 조회 D102) + prepareFieldMappings (schema+varCatalog+enrich D102) + **prepareSendMessage (변수치환+광고080 통합 D103)** |
 | — | normalize.ts | 값 정규화 + normalizeCustomFieldValue (커스텀 필드 Date/문자열 정규화) |
 | — | stats-aggregation.ts | 대시보드 통계 집계 + AI 캠페인 성과 집계 |
-| — | formatDate.ts (프론트) | calculateSmsBytes (바이트 계산) + truncateToSmsBytes (바이트 자르기) + replaceMessageVars (변수 치환) + formatPreviewValue (미리보기 포맷팅) + DIRECT_VAR_MAP/replaceDirectVars (직접발송 변수맵 D96) + mmsServerPathToUrl (MMS 이미지 URL 변환 D98) + resolveRecipientCallback (개별회신번호 컬럼 값 추출 D99) |
+| — | formatDate.ts (프론트) | calculateSmsBytes (바이트 계산) + truncateToSmsBytes (바이트 자르기) + replaceMessageVars (변수 치환) + formatPreviewValue (미리보기 포맷팅) + DIRECT_VAR_MAP/replaceDirectVars (직접발송 변수맵 D96) + mmsServerPathToUrl (MMS 이미지 URL 변환 D98) + resolveRecipientCallback (개별회신번호 컬럼 값 추출 D99) + buildAdMessageFront (프론트 광고+080 미리보기전용 D102) + **isPhoneLikeValue/detectPhoneHeaders (전화번호 컬럼 동적 감지 D103)** |
 
 **⚠️ 이 원칙을 어기고 인라인 코드를 작성하면 버그가 재발한다. 실제 사고 사례:**
 - **사례 1:** upload.ts에서 customer_field_definitions를 인라인으로 INSERT하면서 "최초 등록 우선" 정책 적용 → 잘못된 라벨이 영원히 고착되는 버그 발생.
@@ -112,6 +112,7 @@
 ### 4-4. 땜질 코딩 금지
 - 상용화 서비스를 곧 진행할 중요한 프로젝트. 체계적이고 검증된 코드만 반영.
 - 에러 발생 시 임의로 코드를 덧붙이지 않는다. 근본 원인부터 파악.
+- **땜질(Inline Patch)은 기술 부채다.** 모든 반복 로직은 컨트롤타워(Utility/Service)로 추상화하여 한 곳에서 통제한다. **파일 1개만 수정하고 보고하는 행위는 '미완료'로 간주한다.**
 
 ### 4-5. worktree 절대 사용 금지
 - 과거 worktree 사용으로 수정이 메인코드에 미반영되는 사고 발생.
@@ -335,8 +336,7 @@ AND NOT EXISTS (
 
 **백엔드 파일 (구현 완료):**
 - `routes/auto-campaigns.ts` — CRUD API 9개 엔드포인트 (GET/, GET/:id, POST/, PUT/:id, POST/:id/pause, POST/:id/resume, DELETE/:id, POST/:id/preview, POST/:id/cancel-next)
-- `utils/auto-campaign-worker.ts` — PM2 워커 (매 1시간 체크 → 도래 건 실행). app.ts listen 콜백에서 `startAutoCampaignScheduler()` 호출
-- `utils/auto-campaign-notify.ts` — D-1 사전 알림 (Phase 2 예정)
+- `utils/auto-campaign-worker.ts` — PM2 워커 (매 5분 체크, D105에서 10분→5분 축소). 4단계 라이프사이클: D-2 AI문안생성+알림 → D-1 사전알림(타겟수+발송시각) → D-day 2시간전 스팸테스트+결과알림 → D-day 실제발송. app.ts listen 콜백에서 `startAutoCampaignScheduler()` 호출
 
 **프론트엔드 파일 (구현 완료):**
 - `pages/AutoSendPage.tsx` — 프로 미만: 블러 프리뷰+CTA (AnalysisModal 패턴), 프로 이상: 실제 기능
@@ -484,6 +484,18 @@ PostgreSQL campaigns/campaign_runs 생성
 | **xlsx cellDates 부동소수점 오차** | 엑셀 시리얼→Date 변환 시 자정에서 ~9시간 부족한 값 생성 → getDate()로 하루 전 | **Math.ceil(올림)으로 다음 자정 복원** + getUTCFullYear/Month/Date. Math.round/로컬TZ 모두 실패 (D99) |
 | **normalizeByFieldKey가 Date를 String()** | 커스텀 필드(normalizeFunction 없음)에 Date 객체 → `String(Date)` = 영문 날짜 → normalizeDate 문자열 파싱 → 밀림 | **Date 객체는 String() 변환하지 않고 그대로 반환.** 후속 normalizeCustomFieldValue에서 Date 분기 진입 (D99) |
 | **recipientsWithMessage 원본 필드 탈락** | {phone, callback, message}만 추출 → store_phone 등 다른 컬럼 소실 → resolveRecipientCallback이 값 못 읽음 | **컬럼 매핑(resolveRecipientCallback)은 원본 데이터(targetRecipients)에서 호출.** 축소된 객체에서 호출 금지 (D99) |
+| **프론트 customMessages가 백엔드 replaceVariables 우회** | 프론트에서 String()으로 치환 → 숫자 .00, 날짜 원본 형식 그대로 발송. 백엔드 replaceVariables의 포맷팅 적용 안 됨 | **프론트 변수 치환 경로 폐기. 모든 발송 경로에서 백엔드 replaceVariables 컨트롤타워 하나로 통일.** customMessages 분기 완전 제거 (D102) |
+| **(광고)+080 인라인 다경로 분산** | campaigns.ts 3곳 + auto-campaign-worker 0곳(누락) + spam-test-queue 1곳에 인라인 조합 → 자동발송에서 (광고)+080 완전 누락 | **buildAdMessage() 컨트롤타워 한 함수로 통일.** 모든 발송 경로에서 import. 인라인 (광고) 조합 전면 제거 (D102) |
+| **isValidKoreanLandline 지역번호 범위 한정** | `0[3-5]` regex로 062(광주), 064(제주) 등 유선번호 null 반환 → store_phone DB 미저장 | **유선번호 범위 제한 금지.** 0시작 + 휴대폰 아닌 7자리 이상이면 전부 유선번호 인정 (D102) |
+| **handleAiCustomSend 타입 정의 파라미터 누락** | individualCallbackColumn 미포함 → 빈 문자열 DB 저장 → 백엔드에서 useIndividualCallback=false 판정 → 대표번호 폴백 | **발송 관련 핸들러 타입 정의에 모든 발송 옵션 파라미터 포함 확인.** 한줄로/맞춤한줄 양쪽 점검 (D102) |
+| **체크박스 UI만 있고 state 미연결** | 중복제거/수신거부제거 체크박스가 defaultChecked만 → onChange 없음 → 백엔드 전달 안 됨 | **UI 체크박스는 반드시 state 연결 + API body에 플래그 전달.** 껍데기 UI 금지 (D102) |
+| **프론트에서 (광고) 붙여서 DB 저장 → 백엔드에서 또 추가** | buildAdMessageFront()로 API body에 (광고)+080 포함하여 전송 → DB에 (광고) 포함 상태 저장 → 발송 시 buildAdMessage()가 중복 추가 | **DB에는 순수 본문만 저장. (광고)+080은 발송 직전 백엔드 prepareSendMessage() 한 곳에서만 추가.** 프론트 buildAdMessageFront는 미리보기/바이트계산 전용 (D103) |
+| **발송 경로별 인라인 반복 패턴 방치** | replaceVariables+buildAdMessage 2줄 조합이 6경로에 인라인, msgType→'S' 변환 8곳 인라인, insertSmsQueue 2곳 중복 정의, 개별회신번호 resolve 4곳 각각 다른 로직 | **발송 경로에서 2곳 이상 반복되는 패턴은 즉시 컨트롤타워화.** prepareSendMessage/toQtmsgType/insertTestSmsQueue/resolveCustomerCallback 4개 신설 (D103) |
+| **개별회신번호 displayName 하드코딩 필터** | '전화','회신','연락처' 포함 여부로 필터 → 커스텀 전화번호 필드 누락 | **실제 데이터 샘플링 기반 동적 감지.** isPhoneLikeValue+detectPhoneFields 컨트롤타워로 전화번호 형태 필드 자동 판별 (D103) |
+| **AT TIME ZONE이 PG TZ=UTC에서 0건 반환** | `$N::date AT TIME ZONE 'Asia/Seoul'`로 timestamptz 비교 시 PG TZ=UTC 환경에서 당일 데이터 0건 | **`($N \|\| ' 00:00:00+09')::timestamptz` 명시적 KST 구성.** stats-aggregation.ts 컨트롤타워 + import. PG TZ에 무관 (D104) |
+| **buildDynamicFiltersForAPI filterValues 순회** | 숫자 필드 UI는 `_min/_max`만 설정 → 본 키가 filterValues에 없음 → number handler 미도달 → 포인트+누적구매금액 등 전체 숫자 필터 무시 | **selectedFields 순회로 변경.** 필드 선택 여부 기준으로 순회하면 값 존재 여부와 무관하게 handler 도달 (D104) |
+| **formatPreviewValue만 수정하고 formatNumberPreview 누락** | YYMMDD 보호를 formatPreviewValue에만 추가 → formatByType(data_type='number') 경로의 formatNumberPreview에 미적용 | **동일 역할의 형제 함수 전수 확인.** 숫자 포맷팅 경로: formatPreviewValue + formatNumberPreview 양쪽 동일 보호 필수 (D104) |
+| **컨트롤타워 함수 만들어놓고 import 안 함** | stats-aggregation.ts에 buildDateRangeFilter 수정했지만 라우트 0곳에서 import → 인라인 7곳 각각 수정 = 컨트롤타워화 아님 | **컨트롤타워 수정 시 소비처가 import하는지 반드시 확인.** import 0곳이면 인라인 제거 + import 교체까지 해야 완료 (D104) |
 
 ### ⚠️ 필수 체크 원칙 1: 유틸 함수 수정/추가 시 소비처 전수 확인
 

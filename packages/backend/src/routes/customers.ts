@@ -8,6 +8,7 @@ import { isValidCustomFieldKey } from '../utils/safe-field-name';
 import { getStoreScope } from '../utils/store-scope';
 import { buildDynamicFilterCompat } from '../utils/customer-filter';
 import { getTestSmsTables } from '../utils/sms-queue';
+import { detectPhoneFields } from '../utils/callback-filter';
 
 const router = Router();
 
@@ -1258,7 +1259,31 @@ router.get('/enabled-fields', async (req: Request, res: Response) => {
       }
     } catch (e) { /* 샘플 조회 실패 시 빈 객체 */ }
 
-    res.json({ fields, options, sample, categories: CATEGORY_LABELS });
+    // ★ D103: 전화번호 형태 필드 동적 감지 — 개별회신번호 드롭다운용
+    let phoneFields: string[] = [];
+    try {
+      // FIELD_MAP에서 normalizeFunction이 전화번호 관련인 필드는 무조건 포함 (데이터 없어도)
+      const knownPhoneKeys = FIELD_MAP.filter(f =>
+        f.normalizeFunction === 'normalizePhone' || f.normalizeFunction === 'normalizeStorePhone'
+      ).map(f => f.fieldKey).filter(k => k !== 'phone'); // phone(수신자번호) 제외
+
+      // 이미 enabled된 필드 중 기본 전화번호 필드
+      const enabledKnown = knownPhoneKeys.filter(k => fields.some((f: any) => f.field_key === k));
+
+      // 커스텀 필드는 실제 데이터 샘플링으로 판별 (최대 10건)
+      const phoneSampleResult = await query(
+        `SELECT custom_fields, store_phone FROM customers WHERE ${scopeWhere} AND custom_fields IS NOT NULL AND custom_fields != '{}' LIMIT 10`,
+        scopeParams
+      );
+      const customPhoneFields = detectPhoneFields(
+        phoneSampleResult.rows,
+        fields.filter((f: any) => f.is_custom),
+      );
+
+      phoneFields = [...new Set([...enabledKnown, ...customPhoneFields.map(f => f.field_key)])];
+    } catch (e) { /* phone_fields 감지 실패 시 빈 배열 */ }
+
+    res.json({ fields, options, sample, categories: CATEGORY_LABELS, phoneFields });
   } catch (error) {
     console.error('활성 필드 조회 실패:', error);
     res.status(500).json({ error: '조회 실패' });

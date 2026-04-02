@@ -106,6 +106,151 @@
 
 ---
 
+### 🔧 D103 — (광고) 중복 수정 + 발송 경로 컨트롤타워 전면 통합 + 개별회신번호 동적 필터링 (2026-04-02) — 🟡 코드수정완료-배포대기
+
+> **배경:** (광고) 중복 발송 버그 + 발송 경로 인라인 반복 패턴 전면 컨트롤타워화 + 개별회신번호 드롭다운에 전화번호 필드만 동적 표시.
+
+#### 신규 컨트롤타워 6개 (핵심 성과)
+| 컨트롤타워 | 파일 | 효과 |
+|-----------|------|------|
+| `prepareSendMessage()` | messageUtils.ts | 변수 치환 + (광고)+080 통합. 6경로 인라인 2줄 조합 제거 |
+| `toQtmsgType()` | sms-queue.ts | SMS→S 코드 변환. 8곳 인라인 제거 |
+| `insertTestSmsQueue()` | sms-queue.ts | 테스트 SMS INSERT. 인라인 함수 2개 + 호출 3곳 제거 |
+| `resolveCustomerCallback()` | callback-filter.ts | 개별회신번호 최종 결정. 4곳 인라인 제거 |
+| `isPhoneLikeValue()` + `detectPhoneFields()` | callback-filter.ts | DB 고객에서 전화번호 형태 필드 동적 감지 |
+| `isPhoneLikeValue()` + `detectPhoneHeaders()` | formatDate.ts (프론트) | 파일 업로드 시 전화번호 컬럼 동적 감지 |
+
+#### 구조 변경
+- **(광고) 중복 원천 차단** — DB에는 순수 본문만 저장, (광고)+080은 백엔드 `prepareSendMessage()` 한 곳에서만 추가. 프론트 API body에서 `buildAdMessageFront()` 전면 제거.
+- **`buildAdMessage()` 중복방지 안전장치** — 이미 (광고)가 있으면 접두사 안 붙임, 이미 수신거부가 있으면 푸터 안 붙임.
+- **개별회신번호 드롭다운 5곳 통일** — `__col__` 패턴 + `phoneFields` 기반 동적 필터. 생일/주소 등 비전화번호 필드 제외. 하드코딩 'store_phone' 제거.
+- **enabled-fields API** — `phoneFields` 응답 추가 (FIELD_MAP + 커스텀 필드 샘플링 기반 자동 감지)
+
+#### 수정 파일 (13개)
+| 파일 | 변경 |
+|------|------|
+| `messageUtils.ts` | prepareSendMessage + buildAdMessage 중복방지 |
+| `sms-queue.ts` | toQtmsgType + insertTestSmsQueue |
+| `callback-filter.ts` | resolveCustomerCallback + isPhoneLikeValue + detectPhoneFields |
+| `campaigns.ts` | 4경로 prepareSendMessage + toQtmsgType + insertTestSmsQueue + resolveCustomerCallback |
+| `auto-campaign-worker.ts` | prepareSendMessage + toQtmsgType + resolveCustomerCallback |
+| `spam-test-queue.ts` | 인라인 함수 2개 삭제 → CT import |
+| `spam-filter.ts` | 인라인 함수 1개 삭제 + getOpt080Number CT + toQtmsgType |
+| `customers.ts` | enabled-fields API에 phoneFields 추가 |
+| `Dashboard.tsx` | API body 순수 본문 + phoneFields 로드/전달 + 하드코딩 제거 |
+| `AiCustomSendFlow.tsx` | API body 순수 본문 |
+| `DirectSendPanel.tsx` | __col__ 패턴 + detectPhoneHeaders 동적 필터 |
+| `TargetSendModal.tsx` | phoneFields 기반 동적 필터 |
+| `AiCampaignSendModal.tsx` | __col__ 패턴 + phoneFields 동적 |
+| `DirectTargetFilterModal.tsx` | phoneFields 콜백 전달 |
+| `formatDate.ts` | isPhoneLikeValue + detectPhoneHeaders |
+| `CLAUDE.md` | 절대 개발원칙 4-4 강화 |
+
+---
+
+### 🔧 D104 — 0402 PPT 버그리포트 10건 (타임존 컨트롤타워화 + 숫자필터 + YYMMDD + cooldown) (2026-04-02) — 🟡 자동발송 제외 코드수정완료-배포대기
+
+> **배경:** 직원 PPT(한줄로_20260402.pdf) 10건. 타임존 날짜 비교를 컨트롤타워화, 숫자 필터 근본 수정, YYMMDD 보호, cooldown 축소. 자동발송 4건은 별도 세션.
+
+#### 핵심 수정
+1. **타임존 날짜 비교 컨트롤타워화** — `AT TIME ZONE 'Asia/Seoul'` → `($N || ' 00:00:00+09')::timestamptz` (PG TZ=UTC에서 정확). stats-aggregation.ts 컨트롤타워 + 4개 라우트 import 교체. 서버 검증 7건 확인
+2. **숫자 필터 근본 수정** — buildDynamicFiltersForAPI를 `filterValues` 순회 → `selectedFields` 순회로 변경. 포인트+누적구매금액+평균주문금액 등 전체 숫자 필드 필터 정상화
+3. **YYMMDD 보호** — formatPreviewValue + formatNumberPreview 양쪽에 6/8자리 날짜 패턴 보호
+4. **타겟발송 날짜 표시** — formatCellValue 인라인 toLocaleString → formatByType 컨트롤타워
+5. **발송결과 cooldown** — 30초→5초 + 날짜 변경 시 force=true + onClick 래핑(D93 재발 방지)
+
+#### 수정 파일 (11개)
+| 파일 | 변경 |
+|------|------|
+| stats-aggregation.ts | buildDateRangeFilter/buildMonthRangeFilter/buildPeriodFilter KST timestamptz 패턴 |
+| admin.ts | 발송통계+스팸필터 → 컨트롤타워 import |
+| manage-stats.ts | 발송통계+스팸필터 → 컨트롤타워 import |
+| results.ts | summary+campaigns → buildPeriodFilter import |
+| campaigns.ts | 스팸필터 → buildDateRangeFilter import |
+| billing.ts | 정산 스팸필터 2곳 인라인 패턴 수정 |
+| database.ts | 타입파서 'Z'(UTC) 유지 확인 |
+| DirectTargetFilterModal.tsx | selectedFields 순회 + 포인트 min/max UI + B17-06 중복 제거 |
+| formatDate.ts | formatPreviewValue+formatNumberPreview YYMMDD 보호 |
+| TargetSendModal.tsx | formatCellValue → formatByType CT |
+| ResultsModal.tsx | cooldown 5초 + force 파라미터 + onClick 래핑 |
+
+#### 자동발송 4건 — ✅ D105에서 수정 완료
+
+---
+
+### 🔧 D105 — 자동발송 4단계 라이프사이클 개선 (P7~P10) (2026-04-02) — 🟡 코드수정완료-배포대기
+
+> **배경:** 직원 테스트에서 발견된 자동발송 버그 4건 + D-day 스팸테스트 신설. 직원 요청 프로세스에 맞게 워커 3단계→4단계로 확장.
+
+#### 워커 4단계 라이프사이클
+| 단계 | 시점 | 동작 | 담당자 알림 |
+|------|------|------|------------|
+| 1 | D-2 | AI 문안 생성 | **[P7 신설]** 생성된 문안 SMS 발송 |
+| 2 | D-1 | 사전 알림 | **[P9 개선]** 타겟 N명 + 발송시각 포함 |
+| 3 | D-day 2시간 전 | **[신설]** 자동 스팸테스트 | 결과(통과/차단) SMS 발송 |
+| 4 | D-day 정각 | 실제 발송 | - |
+
+#### 수정 내역
+| # | 버그 | 수정 |
+|---|------|------|
+| P7 | AI문안 생성 후 담당자에게 알림 안 됨 | 문안 생성 완료 후 notify_phones에 SMS 발송 추가 |
+| P8 | 스팸필터 미리보기 개인화 미적용 | AutoSendFormModal → SpamFilterTestModal에 firstRecipient 전달 (recommend-target의 sample_customer_raw 사용) |
+| P9 | D-1 알림 메시지에 타겟 수/발송시각 없음 | CT-01 + CT-03으로 타겟 수 실시간 조회, "X월 X일 XX:XX" 형식으로 개선 |
+| P10 | 워커 10분 간격 → 최대 10분 지연 | 워커 간격 5분으로 축소 (최대 5분 지연) |
+| 신규 | D-day 스팸테스트 없음 | runPreSendSpamTest() 신설 — CT-09 재활용, 결과를 담당자에게 SMS 발송 |
+
+#### 수정 파일 (2개)
+| 파일 | 변경 |
+|------|------|
+| auto-campaign-worker.ts | P7(AI알림) + P9(D-1개선) + P10(5분) + runPreSendSpamTest 신설 + buildUnsubscribeFilter import |
+| AutoSendFormModal.tsx | P8: spamSampleCustomer state + recommend-target에서 sample_customer_raw 저장 + SpamFilterTestModal에 firstRecipient 전달 |
+
+#### SCHEMA 변경
+- auto_campaign_runs.status에 `spam_tested` 값 추가 (varchar — DB 마이그레이션 불필요)
+
+#### 컨트롤타워 원칙 준수
+- CT-01 buildFilterQueryCompat — 타겟 수 조회 (P9), 샘플 고객 조회 (스팸테스트)
+- CT-03 buildUnsubscribeFilter — 수신거부 제외 (P9)
+- CT-04 bulkInsertSmsQueue — 알림 SMS 발송 (전 단계)
+- CT-09 autoSpamTestWithRegenerate — D-day 스팸테스트
+- 인라인 로직 0개, 전부 기존 컨트롤타워 import
+
+---
+
+### 🔧 D102 — 0401 PPT 버그리포트 15건 + 맞춤한줄 회신번호 + 중복제거/수신거부 (2026-04-01) — ✅ 배포완료
+
+> **배경:** 직원 PPT(한줄로_20260401.pptx) 15건 + 맞춤한줄 개별회신번호 대표번호 폴백 + 중복제거/수신거부 체크박스 미동작.
+
+#### 신규 컨트롤타워 4개 (핵심 성과)
+| 컨트롤타워 | 파일 | 효과 |
+|-----------|------|------|
+| `buildAdMessage()` | messageUtils.ts | 백엔드 (광고)+080 전 발송 경로 통일. 기존 4곳 인라인 제거 |
+| `getOpt080Number()` | messageUtils.ts | 080번호 조회 users→companies 폴백 통일. 기존 7곳 인라인 제거 |
+| `prepareFieldMappings()` | messageUtils.ts | schema+extractVarCatalog+enrich 3종세트 통일. 기존 7곳 인라인 제거 |
+| `buildAdMessageFront()` | formatDate.ts | 프론트 (광고)+080 미리보기/바이트계산 통일. 기존 21곳 인라인 제거 |
+
+#### 구조 변경
+- **customMessages 프론트→백엔드 분기 완전 제거** — 모든 발송 경로에서 백엔드 replaceVariables 컨트롤타워 하나로 통일. 프론트 치환 경로 폐기.
+- **숫자 포맷팅** — Math.round() + toLocaleString('ko-KR') 명시. 소수점 2자리(.00) 원천 차단.
+- **중복제거/수신거부제거** — 프론트 체크박스를 state 연결 + 백엔드 플래그 전달. 기본 true, 해제 가능.
+
+#### 슬라이드별 수정
+| # | 내용 | 근본 원인 | 수정 |
+|---|------|---------|------|
+| 1,6,8 | 날짜/숫자 포맷팅 실발송 깨짐 | 프론트 customMessages가 replaceVariables 우회 | customMessages 폐기, 백엔드 통일 |
+| 2 | 062 지역번호 NULL | isValidKoreanLandline 범위 0[3-5] 한정 | 범위 제한 제거 |
+| 3 | AI 개인화 고객명만 매칭 | displayName 정확 매칭만 | fuzzy 매칭(includes) 추가 |
+| 4 | AI(취소) 중복 2건 | 미발송 cancelled 목록 표시 | sent_count=0 취소 캠페인 제외 |
+| 5 | 나이 51→52 불일치 | 생일 지남 여부 미반영 | derivedBirthMonthDay > todayMD 비교 |
+| 7,12 | (광고)+080 누락 | auto-campaign-worker 로직 없음 + AI발송/직접발송 미적용 | buildAdMessage 컨트롤타워 전 경로 |
+| 9 | 회신번호 드롭다운에 phone | 필터에 phone 포함 | phone 제외 |
+| 13 | 자동발송 11시→11:49 | 워커 1시간 간격 | 10분 축소 |
+| 15 | 메시지 확인 불가 | API에 message_content 누락 | SELECT 추가 + 클릭 모달 |
+| 추가 | 맞춤한줄 회신번호 폴백 | handleAiCustomSend에 individualCallbackColumn 파라미터 누락 | 타입 추가 + 폴백 'store_phone' |
+| 추가 | 중복제거/수신거부 체크박스 | UI만 있고 state 미연결 | state 연결 + API 전달 + 백엔드 플래그 |
+
+---
+
 ### 🔧 D101 — 0331 PPT 버그리포트 15건 디버깅 (2026-03-31) — ✅ 배포완료
 
 > **배경:** 직원 PPT 0331 버그리포트 15건. 커스텀 필드 타입 동적화, AI 개인화 커스텀필드 지원, 회신번호 자동설정, 수신자 선택삭제 등.

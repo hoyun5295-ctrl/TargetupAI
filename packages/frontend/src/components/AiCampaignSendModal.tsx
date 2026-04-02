@@ -28,6 +28,7 @@ interface AiCampaignSendModalProps {
   // 광고 여부
   isAd: boolean;
   optOutNumber: string;
+  phoneFields?: string[];  // ★ D103: 전화번호 형태 필드 목록
   // MMS
   mmsImages?: { url: string }[];
   subject?: string;
@@ -55,12 +56,14 @@ export default function AiCampaignSendModal({
   subject,
   usePersonalization,
   sampleCustomer,
+  phoneFields,
 }: AiCampaignSendModalProps) {
   const [campaignName, setCampaignName] = useState(suggestedCampaignName || '');
   const [sendTimeOption, setSendTimeOption] = useState<'ai' | 'now' | 'custom'>('ai');
   const [customSendTime, setCustomSendTime] = useState('');
   const [selectedCallback, setSelectedCallback] = useState(defaultCallback);
   const [useIndividualCallback, setUseIndividualCallback] = useState(defaultUseIndividual);
+  const [individualCallbackColumn, setIndividualCallbackColumn] = useState(defaultUseIndividual ? (phoneFields?.[0] || 'store_phone') : '');
   // ★ B-D75-01: LMS/MMS 제목 수정 가능하도록 state 관리
   const [editSubject, setEditSubject] = useState(subject || '');
 
@@ -87,8 +90,8 @@ export default function AiCampaignSendModal({
       customSendTime,
       selectedCallback,
       useIndividualCallback,
-      // ★ D101: 개별회신번호 선택 시 기본 컬럼 전달 (빈 문자열 방지 → 발송 시 useIndividualCallback=false 폴백 방지)
-      individualCallbackColumn: useIndividualCallback ? 'store_phone' : undefined,
+      // ★ D103: 개별회신번호 선택 시 동적 컬럼 전달 (하드코딩 'store_phone' 제거)
+      individualCallbackColumn: useIndividualCallback ? individualCallbackColumn : undefined,
       subject: (selectedChannel === 'LMS' || selectedChannel === 'MMS') ? editSubject : undefined,
     });
   };
@@ -204,28 +207,40 @@ export default function AiCampaignSendModal({
               <div>
                 <label className="text-sm font-semibold text-gray-700 mb-2 block">📞 회신번호</label>
                 <select
-                  value={useIndividualCallback ? '__individual__' : selectedCallback}
+                  value={useIndividualCallback ? `__col__${individualCallbackColumn}` : selectedCallback}
                   onChange={(e) => {
-                    if (e.target.value === '__individual__') {
+                    const val = e.target.value;
+                    if (val.startsWith('__col__')) {
                       setUseIndividualCallback(true);
                       setSelectedCallback('');
+                      setIndividualCallbackColumn(val.replace('__col__', ''));
                     } else {
                       setUseIndividualCallback(false);
-                      setSelectedCallback(e.target.value);
+                      setSelectedCallback(val);
+                      setIndividualCallbackColumn('');
                     }
                   }}
                   className="w-full border-2 rounded-lg px-4 py-2.5 text-sm focus:border-green-400 focus:outline-none"
                 >
                   <option value="">회신번호 선택</option>
-                  <option value="__individual__">수신자별 회신번호 칼럼 사용</option>
-                  {callbackNumbers.map((cb) => (
-                    <option key={cb.id} value={cb.phone}>
-                      {cb.phone ? `${cb.phone}${cb.label ? ` (${cb.label})` : ''}` : cb.label}{cb.is_default ? ' ✓기본' : ''}
-                    </option>
-                  ))}
+                  {/* ★ D103: phoneFields 기반 동적 표시 */}
+                  {phoneFields && phoneFields.length > 0 && (
+                    <optgroup label="수신자별 회신번호 컬럼">
+                      {phoneFields.map(k => (
+                        <option key={k} value={`__col__${k}`}>{k === 'store_phone' ? '매장전화번호' : k} (수신자별)</option>
+                      ))}
+                    </optgroup>
+                  )}
+                  <optgroup label="등록된 회신번호">
+                    {callbackNumbers.map((cb) => (
+                      <option key={cb.id} value={cb.phone}>
+                        {cb.phone ? `${cb.phone}${cb.label ? ` (${cb.label})` : ''}` : cb.label}{cb.is_default ? ' ✓기본' : ''}
+                      </option>
+                    ))}
+                  </optgroup>
                 </select>
-                {useIndividualCallback && (
-                  <p className="text-xs text-blue-600 mt-1">각 수신자의 회신번호 칼럼 값으로 발송됩니다</p>
+                {useIndividualCallback && individualCallbackColumn && (
+                  <p className="text-xs text-blue-600 mt-1">각 수신자의 <strong>{individualCallbackColumn === 'store_phone' ? '매장전화번호' : individualCallbackColumn}</strong> 값으로 발송됩니다</p>
                 )}
               </div>
 

@@ -334,7 +334,38 @@ export function buildAdMessage(
     ? `\n무료수신거부 ${opt080Number}`
     : `\n무료거부${opt080Number.replace(/-/g, '')}`;
 
-  return `${adPrefix}${message}${rejectFooter}`;
+  // ★ D103: 중복 방지 안전장치 — 이미 (광고)가 있으면 접두사 안 붙임, 이미 수신거부가 있으면 푸터 안 붙임
+  const hasAdPrefix = message.startsWith('(광고)');
+  const hasRejectFooter = /무료수신거부|무료거부/.test(message);
+
+  const finalPrefix = hasAdPrefix ? '' : adPrefix;
+  const finalFooter = hasRejectFooter ? '' : rejectFooter;
+
+  return `${finalPrefix}${message}${finalFooter}`;
+}
+
+/**
+ * ★ D103: 발송 메시지 최종 준비 컨트롤타워
+ * 모든 발송 경로(AI즉시/AI예약/직접/타겟/자동발송)의 유일한 진입점.
+ * 변수 치환 → (광고)+080 조합을 한 함수로 통합.
+ * 각 발송 경로에서 replaceVariables + buildAdMessage를 인라인으로 호출하던 패턴을 제거.
+ */
+export function prepareSendMessage(
+  template: string,
+  customer: Record<string, any> | null,
+  fieldMappings: Record<string, VarCatalogEntry>,
+  options: {
+    msgType: string;
+    isAd: boolean;
+    opt080Number: string;
+    addressBookFields?: AddressBookFields;
+  }
+): string {
+  // 1. 변수 치환
+  let msg = replaceVariables(template, customer, fieldMappings, options.addressBookFields);
+  // 2. (광고)+080 (중복 방지 안전장치 내장)
+  msg = buildAdMessage(msg, options.msgType, options.isAd, options.opt080Number);
+  return msg;
 }
 
 /**

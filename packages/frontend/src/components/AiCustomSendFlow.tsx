@@ -204,14 +204,15 @@ export default function AiCustomSendFlow({
         setCustomTestSending(false);
         return;
       }
-      const msg = buildAdMessageFront(selectedMsg.message_text, channel, isAdLocal, optOutNumber);
+      // ★ D103: 순수 본문만. (광고)+080은 백엔드 test-send에서 추가
       const token = localStorage.getItem('token');
       const res = await fetch('/api/campaigns/test-send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
-          messageContent: msg,
+          messageContent: selectedMsg.message_text,
           messageType: channel,
+          isAd: isAdLocal,
           subject: selectedMsg.subject || '',
           mmsImagePaths: [],
           // ★ D83: 미리보기와 동일한 샘플 고객으로 개인화 치환 (불일치 버그 수정)

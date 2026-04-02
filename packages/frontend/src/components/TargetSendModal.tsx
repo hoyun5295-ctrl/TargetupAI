@@ -45,6 +45,7 @@ interface TargetSendModalProps {
   individualCallbackColumn: string;
   setIndividualCallbackColumn: (col: string) => void;
   callbackNumbers: any[];
+  phoneFields?: string[];  // ★ D103: 전화번호 형태 필드 키 목록 (개별회신번호 드롭다운 동적 필터)
 
   // 광고
   adTextEnabled: boolean;
@@ -135,6 +136,7 @@ export default function TargetSendModal({
   useIndividualCallback, setUseIndividualCallback,
   individualCallbackColumn, setIndividualCallbackColumn,
   callbackNumbers,
+  phoneFields,
   adTextEnabled, handleAdToggle, optOutNumber,
   reserveEnabled, setReserveEnabled,
   reserveDateTime, setShowReservePicker,
@@ -245,19 +247,15 @@ export default function TargetSendModal({
     '여': '여성', '여자': '여성', '여성': '여성', '2': '여성', '0': '여성',
   };
 
+  // ★ D104: formatByType 컨트롤타워 사용 — 인라인 toLocaleString 제거
   const formatCellValue = (value: any, dataType: string, fieldKey?: string): string => {
     if (value == null || value === '') return '-';
     // 성별 필드 → 한글 변환
     if (fieldKey && isGenderField(fieldKey)) {
       return GENDER_DISPLAY_MAP[String(value)] || String(value);
     }
-    if (dataType === 'number') {
-      const num = Number(value);
-      if (isNaN(num)) return String(value);
-      return num.toLocaleString();
-    }
     if (dataType === 'boolean') return value === true || value === 'true' ? '예' : '아니오';
-    return String(value);
+    return formatByType(value, dataType);
   };
 
   // ====== SMS 전송하기 핸들러 ======
@@ -538,22 +536,15 @@ export default function TargetSendModal({
                 >
                   <option value="">회신번호 선택</option>
                   <optgroup label="수신자별 회신번호 컬럼">
+                    {/* ★ D103: phoneFields 기반 동적 필터 (displayName 하드코딩 제거) */}
                     {fieldsMeta
-                      .filter(f => {
-                        // ★ D102: phone(고객전화번호)은 수신자 번호이므로 회신번호 드롭다운에서 제외
-                        if (f.field_key === 'phone' || f.field_key === 'sms_opt_in') return false;
-                        return f.field_key === 'store_phone' || f.field_key === 'callback' ||
-                          f.display_name.includes('전화') || f.display_name.includes('회신') || f.display_name.includes('연락처');
-                      })
+                      .filter(f => phoneFields?.includes(f.field_key))
                       .map(f => (
                         <option key={f.field_key} value={`__col__${f.field_key}`}>
                           {f.display_name} (수신자별)
                         </option>
                       ))
                     }
-                    {/* ★ D101: 전화번호성이 아닌 컬럼은 회신번호 드롭다운에서 제외
-                        기존에 전체 필드를 표시 → 이름/등급 등 관계없는 필드가 노출되는 버그
-                        전화번호/번호/연락처 포함 필드만 표시 */}
                   </optgroup>
                   <optgroup label="등록된 회신번호">
                     {callbackNumbers.map((cb) => (
