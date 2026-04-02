@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1a0533;stop-opacity:1" />
+      <stop offset="40%" style="stop-color:#2d1055;stop-opacity:1" />
+      <stop offset="70%" style="stop-color:#4a1a7a;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#7c3aed;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#a855f7;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#7c3aed;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1200" height="630" fill="url(#bg)"/>
+
+  <!-- Subtle grid pattern -->
+  <g opacity="0.03">
+    <line x1="0" y1="0" x2="1200" y2="630" stroke="white" stroke-width="1"/>
+    <line x1="400" y1="0" x2="1200" y2="530" stroke="white" stroke-width="1"/>
+    <line x1="800" y1="0" x2="1200" y2="260" stroke="white" stroke-width="1"/>
+    <line x1="0" y1="200" x2="1000" y2="630" stroke="white" stroke-width="1"/>
+    <line x1="0" y1="400" x2="600" y2="630" stroke="white" stroke-width="1"/>
+  </g>
+
+  <!-- Glow circle behind icon -->
+  <circle cx="600" cy="200" r="120" fill="#863bff" opacity="0.15"/>
+  <circle cx="600" cy="200" r="80" fill="#863bff" opacity="0.1"/>
+
+  <!-- Lightning bolt icon (scaled version of favicon) -->
+  <g transform="translate(564, 130) scale(1.5)">
+    <path fill="#863bff" d="M25.946 44.938c-.664.845-2.021.375-2.021-.698V33.937a2.26 2.26 0 0 0-2.262-2.262H10.287c-.92 0-1.456-1.04-.92-1.788l7.48-10.471c1.07-1.497 0-3.578-1.842-3.578H1.237c-.92 0-1.456-1.04-.92-1.788L10.013.474c.214-.297.556-.474.92-.474h28.894c.92 0 1.456 1.04.92 1.788l-7.48 10.471c-1.07 1.498 0 3.579 1.842 3.579h11.377c.943 0 1.473 1.088.89 1.83L25.947 44.94z"/>
+  </g>
+
+  <!-- Title text -->
+  <text x="600" y="320" text-anchor="middle" font-family="'Noto Sans KR', sans-serif" font-weight="800" font-size="64" fill="white">
+    <tspan>&#xD55C;&#xC904;&#xC804;&#xB2E8; AI</tspan>
+  </text>
+
+  <!-- Subtitle -->
+  <text x="600" y="390" text-anchor="middle" font-family="'Noto Sans KR', sans-serif" font-weight="400" font-size="32" fill="rgba(255,255,255,0.8)">
+    <tspan>&#xC2A4;&#xB9C8;&#xD2B8; &#xC804;&#xB2E8;&#xC9C0; &#xC194;&#xB8E8;&#xC158;</tspan>
+  </text>
+
+  <!-- Description -->
+  <text x="600" y="450" text-anchor="middle" font-family="'Noto Sans KR', sans-serif" font-weight="300" font-size="24" fill="rgba(255,255,255,0.6)">
+    <tspan>&#xC0C1;&#xD488;&#xB9CC; &#xC785;&#xB825;&#xD558;&#xBA74; &#xC804;&#xB2E8;&#xC9C0; &#xC790;&#xB3D9; &#xC0DD;&#xC131; &#xB2E8;&#xCD95;URL &#xBC1C;&#xAE09;&#xBD80;&#xD130; &#xBC1C;&#xC1A1;&#xAE4C;&#xC9C0;</tspan>
+  </text>
+
+  <!-- Divider line -->
+  <rect x="500" y="480" width="200" height="2" rx="1" fill="url(#accent)" opacity="0.5"/>
+
+  <!-- Domain -->
+  <text x="600" y="520" text-anchor="middle" font-family="'Noto Sans KR', sans-serif" font-weight="500" font-size="22" fill="rgba(255,255,255,0.5)">
+    hanjul-flyer.com
+  </text>
+
+  <!-- Bottom accent bar -->
+  <rect x="0" y="620" width="1200" height="10" fill="url(#accent)"/>
+</svg>

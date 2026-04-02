@@ -360,7 +360,7 @@ AND NOT EXISTS (
 - AI 문안 자동생성 연동 (D-2 생성 + 스팸테스트 → D-1 담당자 알림 → D-day 발송)
 - DB: ai_generate_enabled, ai_prompt, ai_tone, fallback_message_content, generated_message_content 등 컬럼 추가
 - 프론트: AutoSendFormModal Step 4에 AI 모드 토글 (plans.ai_premium_enabled 게이팅)
-- auto-campaign-worker.ts: runMessageGeneration() + runPreNotification() + executeAutoCampaign() 3단계 분리
+- auto-campaign-worker.ts: runMessageGeneration() + runPreNotification() + runPreSendSpamTest() + executeAutoCampaign() 4단계 분리 (D105에서 3→4단계 확장)
 - AI 폴백 체인: generated_message_content → fallback_message_content → message_content
 
 **Phase 2 남은 작업:** 타겟 필터 UI(AutoSendFormModal에 필터 단계 추가), 실행 이력 상세 조회

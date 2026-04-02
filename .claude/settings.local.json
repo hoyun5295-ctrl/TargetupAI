@@ -84,7 +84,11 @@
       "Bash(find /c/Users/ceo/projects/targetup/packages/frontend/src -type f \\\\\\(-name *.tsx -o -name *.ts \\\\\\))",
       "Bash(grep -E \"\\\\.\\(tsx|ts\\)$\")",
       "Bash(grep -n \"const companyId = req.user\" /c/Users/ceo/projects/targetup/packages/backend/src/routes/*.ts)",
-      "Bash(grep -n \"field_key === ''phone''\" /c/Users/ceo/projects/targetup/packages/frontend/src/components/TargetSendModal.tsx)"
+      "Bash(grep -n \"field_key === ''phone''\" /c/Users/ceo/projects/targetup/packages/frontend/src/components/TargetSendModal.tsx)",
+      "Bash(node -e \"try { require\\(''sharp''\\); console.log\\(''sharp available''\\); } catch\\(e\\) { console.log\\(''sharp not available''\\); }\")",
+      "Bash(node -e \"try { require\\(''canvas''\\); console.log\\(''canvas available''\\); } catch\\(e\\) { console.log\\(''canvas not available''\\); }\")",
+      "Bash(npx sharp-cli:*)",
+      "Bash(ls -la favicon*.png apple-touch-icon.png)"
     ]
   }
 }
