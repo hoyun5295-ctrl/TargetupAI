@@ -14,7 +14,7 @@
 
 import { useEffect, useState, useMemo } from 'react';
 import { aiApi } from '../api/client';
-import { calculateSmsBytes, buildAdMessageFront } from '../utils/formatDate';
+import { calculateSmsBytes, buildAdMessageFront, replaceMessageVars } from '../utils/formatDate';
 import AiMessageSuggestModal from './AiMessageSuggestModal';
 import SpamFilterTestModal from './SpamFilterTestModal';
 
@@ -1280,17 +1280,23 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
       />
 
       {/* 스팸필터 테스트 모달 */}
-      {showSpamFilter && (
-        <SpamFilterTestModal
-          onClose={() => setShowSpamFilter(false)}
-          messageContentSms={buildAdMessageFront(messageContent, 'SMS', isAd, optOutNumber)}
-          messageContentLms={buildAdMessageFront(messageContent, 'LMS', isAd, optOutNumber)}
-          callbackNumber={callbackNumber}
-          messageType={messageType}
-          subject={messageSubject}
-          firstRecipient={spamSampleCustomer}
-        />
-      )}
+      {/* ★ D106: 미리보기용 변수 치환 — replaceMessageVars로 필드매핑 변수(%고객명% 등) 치환 후 전달 */}
+      {showSpamFilter && (() => {
+        const preReplacedMsg = spamSampleCustomer
+          ? replaceMessageVars(messageContent, availableFields, spamSampleCustomer, { removeUnmatched: true })
+          : messageContent;
+        return (
+          <SpamFilterTestModal
+            onClose={() => setShowSpamFilter(false)}
+            messageContentSms={buildAdMessageFront(preReplacedMsg, 'SMS', isAd, optOutNumber)}
+            messageContentLms={buildAdMessageFront(preReplacedMsg, 'LMS', isAd, optOutNumber)}
+            callbackNumber={callbackNumber}
+            messageType={messageType}
+            subject={messageSubject}
+            firstRecipient={spamSampleCustomer}
+          />
+        );
+      })()}
 
     </>
   );

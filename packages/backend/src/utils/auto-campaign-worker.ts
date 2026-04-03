@@ -25,7 +25,7 @@ import { buildFilterQueryCompat } from './customer-filter';
 import { getOpt080Number, prepareFieldMappings, prepareSendMessage } from './messageUtils';
 import {
   toKoreaTimeStr, toQtmsgType,
-  getCompanySmsTables, hasCompanyLineGroup, getNextSmsTable,
+  getCompanySmsTables, getAuthSmsTable, hasCompanyLineGroup, getNextSmsTable,
   bulkInsertSmsQueue,
 } from './sms-queue';
 import { prepaidDeduct, prepaidRefund } from './prepaid';
@@ -300,10 +300,11 @@ async function generateMessageForAutoCampaign(ac: any): Promise<void> {
     console.log(`${logPrefix} 문안 생성 완료 — status=${aiGenerationStatus}, length=${generatedContent.length}자`);
 
     // ★ D105 P7: AI 문안 생성 완료 후 담당자에게 알림 SMS 발송
+    // ★ D106: 담당자 알림은 테스트 라인으로 발송 (대량발송 Agent 차단 시에도 발송 가능)
     const phones: string[] = ac.notify_phones || [];
-    if (phones.length > 0 && (await hasCompanyLineGroup(ac.company_id))) {
+    if (phones.length > 0) {
       try {
-        const companyTables = await getCompanySmsTables(ac.company_id, ac.user_id);
+        const companyTables = [await getAuthSmsTable()];
         const sendTime = toKoreaTimeStr(new Date());
 
         const scheduledDate = new Date(ac.next_run_at);
@@ -385,13 +386,8 @@ async function sendPreNotification(ac: any): Promise<void> {
   const logPrefix = `[auto-worker][notify][${ac.id}]`;
 
   try {
-    // 라인그룹 체크
-    if (!(await hasCompanyLineGroup(ac.company_id))) {
-      console.warn(`${logPrefix} 라인그룹 미설정 — 알림 스킵`);
-      return;
-    }
-
-    const companyTables = await getCompanySmsTables(ac.company_id, ac.user_id);
+    // ★ D106: 담당자 알림은 테스트 라인으로 발송 (대량발송 Agent 차단 시에도 발송 가능)
+    const companyTables = [await getAuthSmsTable()];
     const sendTime = toKoreaTimeStr(new Date());
 
     // ★ D105: 발송 예정 시각 — "내일 XX시 XX분" 형식
@@ -891,9 +887,10 @@ async function executePreSendSpamTest(ac: any): Promise<void> {
     );
 
     // ★ 담당자에게 스팸테스트 결과 SMS 발송 (CT-04 재활용)
+    // ★ D106: 담당자 알림은 테스트 라인으로 발송
     const phones: string[] = ac.notify_phones || [];
-    if (phones.length > 0 && (await hasCompanyLineGroup(ac.company_id))) {
-      const companyTables = await getCompanySmsTables(ac.company_id, ac.user_id);
+    if (phones.length > 0) {
+      const companyTables = [await getAuthSmsTable()];
       const sendTime = toKoreaTimeStr(new Date());
 
       const scheduledTimeStr = new Date(ac.next_run_at).toLocaleString('ko-KR', {
@@ -970,11 +967,11 @@ export async function runAutoCampaignWorker(): Promise<void> {
 // setInterval 기반 실행 (app.ts에서 호출)
 // ============================================================
 
-// ★ D105: 10분→5분 (최대 지연 5분으로 축소, 정각 발송 정확도 개선)
-const WORKER_INTERVAL_MS = 5 * 60 * 1000; // 5분
+// ★ D106: 5분→3분 (최대 지연 3분으로 축소. 가벼운 SELECT 4회/사이클 — 서버 부하 무시 가능)
+const WORKER_INTERVAL_MS = 3 * 60 * 1000; // 3분
 
 export function startAutoCampaignScheduler(): void {
-  console.log('[auto-worker] 자동발송 스케줄러 시작 (매 5분 체크, 4단계 라이프사이클)');
+  console.log('[auto-worker] 자동발송 스케줄러 시작 (매 3분 체크, 4단계 라이프사이클)');
 
   // 기동 시 즉시 1회 실행
   runAutoCampaignWorker().catch(err => {
