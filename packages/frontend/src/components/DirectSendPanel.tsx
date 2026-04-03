@@ -508,8 +508,10 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                 >
                   <option value="">회신번호 선택</option>
                   {/* ★ D103: 파일 업로드 시 전화번호 형태 컬럼만 동적 표시 */}
+                  {/* ★ D106: 수신번호 컬럼은 회신번호로 사용 불가 → 제외 */}
                   {directFileHeaders.length > 0 && (() => {
-                    const phoneHeaders = detectPhoneHeaders(directFileHeaders, directFileData);
+                    const phoneHeaders = detectPhoneHeaders(directFileHeaders, directFileData)
+                      .filter(h => h !== directColumnMapping.phone);
                     return phoneHeaders.length > 0 ? (
                       <optgroup label="수신자별 회신번호 컬럼">
                         {phoneHeaders.map(h => {

@@ -30,6 +30,7 @@ import spamFilterRoutes from './routes/spam-filter';
 import analysisRoutes from './routes/analysis';
 import autoCampaignsRoutes from './routes/auto-campaigns';
 import { startAutoCampaignScheduler } from './utils/auto-campaign-worker';
+import { ensureMonthlyLogTables } from './utils/sms-queue';
 import { startSpamTestQueueWorker } from './utils/spam-test-queue';
 
 // 공용 관리 라우트 (슈퍼관리자 + 고객사관리자)
@@ -145,6 +146,9 @@ app.listen(PORT, () => {
   console.log(`🚀  http://localhost:${PORT}`);
   console.log('🚀 ================================');
   console.log('');
+
+  // ★ D106: 로그 테이블 자동 생성 (당월+다음달 — 202604 미생성 사고 재발 방지)
+  ensureMonthlyLogTables().catch(err => console.error('[QTmsg] 로그 테이블 자동 생성 실패:', err));
 
   // ★ D69: 자동발송 워커 시작 (매 1시간 체크)
   startAutoCampaignScheduler();

@@ -551,3 +551,32 @@ PostgreSQL campaigns/campaign_runs 생성
 6. ✅ Harold님께 수정 방향 보고 → 컨펌 → 구현
 7. ✅ 수정 후 관련 경로(5개 발송 경로 등) 교차 확인
 8. ✅ `packages/` 메인코드에 직접 수정 (worktree 금지)
+
+### 7-1. ⚠️ 컨트롤타워 수정/생성 시 필수 프로세스 (D106 — 절대 위반 금지)
+
+> **2개월간 동일 패턴 반복:** 컨트롤타워 함수를 만들고 소비처 절반만 교체 → 나머지가 다음 세션에서 버그로 재발.
+> buildAdMessage(D102→B3), detectPhoneFields(D103→B2), stats-aggregation(D104→B8) 전부 같은 실수.
+
+**컨트롤타워 함수를 만들거나 수정하면 반드시 아래 3단계를 실행한다. 건너뛰기 절대 금지.**
+
+#### 1단계: 수정 전 — 소비처 전수 리스트업
+```bash
+# 예: buildAdMessageFront 컨트롤타워 수정 시
+grep -rn "message_content" packages/frontend/src --include="*.tsx" --include="*.ts"
+grep -rn "buildAdMessageFront\|buildAdMessage" packages/ --include="*.ts" --include="*.tsx"
+```
+- grep 결과를 Harold님께 보여드리고 **"이 N곳 전부 수정합니다"** 리스트 확인 후 작업 시작.
+- **리스트업 없이 수정 시작하는 것 = 미완료 확정.**
+
+#### 2단계: 수정 후 — 인라인 잔존 0건 확인
+```bash
+# 컨트롤타워로 교체해야 할 인라인 패턴이 남아있는지 확인
+grep -rn "인라인패턴" packages/ --include="*.ts" --include="*.tsx"
+```
+- 인라인 잔존 0건이어야 완료.
+- **grep 결과를 Harold님께 보여드려야 완료.**
+
+#### 3단계: 표시 경로까지 확인
+- 발송 경로(5개)만 보지 말고 **표시 경로(캘린더, 발송결과, 관리자 대시보드, 미리보기)도 전수 확인.**
+- DB에 순수 본문만 저장하는 패턴이면 → 표시하는 모든 곳에서 컨트롤타워(buildAdMessageFront 등) 호출 여부 확인.
+- **"발송은 됐는데 표시가 안 된다" 패턴이 D102~B3까지 3번 반복됨. 4번째는 없어야 한다.**

@@ -302,6 +302,54 @@ export async function getCompanySmsTablesWithLogs(companyId: string, userId?: st
   return allTables;
 }
 
+// ===== ★ D106: 로그 테이블 자동 생성 (당월+다음달) =====
+// 앱 기동 시 호출 — 202604 미생성 사고 재발 방지
+// MySQL root 권한 필요 (smsuser는 CREATE 불가 → mysqlRootQuery 사용)
+
+let _ensureLogTablesRan = false;
+
+export async function ensureMonthlyLogTables(): Promise<void> {
+  if (_ensureLogTablesRan) return;
+  _ensureLogTablesRan = true;
+
+  try {
+    const now = new Date();
+    // 당월 + 다음달 2개월분 확인/생성
+    const months: string[] = [];
+    for (let offset = 0; offset <= 1; offset++) {
+      const d = new Date(now.getFullYear(), now.getMonth() + offset, 1);
+      months.push(`${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}`);
+    }
+
+    const existingLogs = await getExistingLogTables();
+
+    for (const ym of months) {
+      for (const baseTable of ALL_SMS_TABLES) {
+        const logTable = `${baseTable}_${ym}`;
+        if (existingLogs.has(logTable)) continue;
+
+        try {
+          await mysqlQuery(`CREATE TABLE IF NOT EXISTS ${logTable} LIKE ${baseTable}`);
+          console.log(`[QTmsg] 로그 테이블 자동 생성: ${logTable}`);
+        } catch (createErr: any) {
+          // CREATE 권한 없으면 (smsuser) 경고만 출력
+          if (createErr.code === 'ER_TABLEACCESS_DENIED_ERROR') {
+            console.warn(`[QTmsg] ⚠️ 로그 테이블 생성 권한 없음: ${logTable} — root로 수동 생성 필요`);
+          } else {
+            console.error(`[QTmsg] 로그 테이블 생성 실패: ${logTable}`, createErr);
+          }
+        }
+      }
+    }
+
+    // 캐시 무효화
+    _logTableCache = null;
+    _logTableCacheTs = 0;
+  } catch (err) {
+    console.error('[QTmsg] 로그 테이블 자동 생성 에러:', err);
+  }
+}
+
 // ===== 카카오 브랜드메시지 헬퍼 =====
 
 /** 카카오 브랜드메시지 큐 INSERT */
