@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { companiesApi, plansApi, billingApi } from '../api/client';
 import { useAuthStore } from '../stores/authStore';
-import { formatDateTime, formatDate, formatDateTimeShort } from '../utils/formatDate';
+import { formatDateTime, formatDate, formatDateTimeShort, buildAdMessageFront } from '../utils/formatDate';
 import SessionTimer from '../components/SessionTimer';
 import { COMPANY_NAME_EN, COMPANY_EMAIL } from '../constants/company';
 
@@ -6567,9 +6567,9 @@ const handleApproveRequest = async (id: string) => {
                                   <div
                                     className="truncate cursor-pointer hover:text-blue-600"
                                     title="클릭하여 전체 메시지 보기"
-                                    onClick={() => setMessageDetailContent({ name: c.campaign_name, content: c.message_content })}
+                                    onClick={() => setMessageDetailContent({ name: c.campaign_name, content: buildAdMessageFront(c.message_content, c.message_type || 'SMS', c.is_ad || false, c.callback_number || '') })}
                                   >
-                                    {c.message_content.substring(0, 50)}{c.message_content.length > 50 ? '...' : ''}
+                                    {buildAdMessageFront(c.message_content, c.message_type || 'SMS', c.is_ad || false, c.callback_number || '').substring(0, 50)}{c.message_content.length > 50 ? '...' : ''}
                                   </div>
                                 ) : '-'}
                               </td>

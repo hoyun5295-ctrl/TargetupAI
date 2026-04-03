@@ -439,6 +439,8 @@ export function isPhoneLikeValue(value: any): boolean {
   const cleaned = str.replace(/[\s\-\(\)\.]/g, '');
   if (!/^\d+$/.test(cleaned)) return false;
   if (cleaned.length < 7 || cleaned.length > 15) return false;
+  // ★ D106: 날짜 패턴 제외 (19950301, 20260403 등이 1xxx 대표번호 패턴에 오매칭 방지)
+  if (/^(19|20)\d{6}$/.test(cleaned)) return false;
   return /^(01[016789]|02|0[3-6]\d|050\d|070|080|1[0-9]{3})/.test(cleaned);
 }
 

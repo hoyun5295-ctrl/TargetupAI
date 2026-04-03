@@ -234,6 +234,8 @@ export function isPhoneLikeValue(value: any): boolean {
   const cleaned = str.replace(/[\s\-\(\)\.]/g, '');
   if (!/^\d+$/.test(cleaned)) return false;
   if (cleaned.length < 7 || cleaned.length > 15) return false;
+  // ★ D106: 날짜 패턴 제외 (19950301, 20260403 등이 1xxx 대표번호 패턴에 오매칭 방지)
+  if (/^(19|20)\d{6}$/.test(cleaned)) return false;
   // 한국 전화번호 패턴: 01X(휴대폰), 02(서울), 03X-06X(지역), 050X(안심), 070(인터넷), 080(수신거부), 1XXX(대표)
   return /^(01[016789]|02|0[3-6]\d|050\d|070|080|1[0-9]{3})/.test(cleaned);
 }
@@ -250,13 +252,18 @@ export function isPhoneLikeValue(value: any): boolean {
  */
 export function detectPhoneFields(
   samples: Record<string, any>[],
-  fields: { field_key: string; display_name: string }[],
+  fields: { field_key: string; display_name: string; data_type?: string }[],
   excludeKeys: string[] = ['phone', 'sms_opt_in']
 ): { field_key: string; display_name: string }[] {
   if (!samples.length || !fields.length) return [];
 
   return fields.filter(f => {
     if (excludeKeys.includes(f.field_key)) return false;
+
+    // ★ D106: data_type 기반 비-문자열 필드 즉시 제외 (date/number/boolean은 회신번호 불가)
+    if ((f as any).data_type && ['date', 'number', 'boolean'].includes(String((f as any).data_type).toLowerCase())) {
+      return false;
+    }
 
     // 값이 있는 샘플만 검사
     const values = samples

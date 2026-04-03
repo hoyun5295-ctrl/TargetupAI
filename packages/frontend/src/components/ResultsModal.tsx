@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { calculateSmsBytes, mmsServerPathToUrl } from '../utils/formatDate';
+import { calculateSmsBytes, mmsServerPathToUrl, buildAdMessageFront } from '../utils/formatDate';
 
 interface ResultsModalProps {
   onClose: () => void;
@@ -373,11 +373,11 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
                           <td className="px-3 py-2.5 text-center text-xs text-gray-600">{c.created_by_name || '-'}</td>
                           <td className="px-3 py-2.5 max-w-[200px] text-gray-700">
                             <button
-                              onClick={() => setMsgDetailContent(c.message_content || '')}
+                              onClick={() => setMsgDetailContent(buildAdMessageFront(c.message_content || '', c.message_type || 'SMS', c.is_ad || false, c.callback_number || ''))}
                               className="truncate block text-left hover:text-emerald-600 hover:underline cursor-pointer max-w-full"
                               title="클릭하여 전체 내용 보기"
                             >
-                              {c.message_content}
+                              {buildAdMessageFront(c.message_content || '', c.message_type || 'SMS', c.is_ad || false, c.callback_number || '')}
                             </button>
                           </td>
                           <td className="px-3 py-2.5 text-center text-xs text-gray-500">

@@ -251,9 +251,11 @@ router.get('/campaigns', async (req: Request, res: Response) => {
     const aliasedWhere = whereClause
       .replace(/company_id/g, 'c.company_id')
       .replace(/created_by/g, 'c.created_by')
-      .replace(/sent_at/g, 'c.sent_at')
-      .replace(/created_at/g, 'c.created_at')
-      .replace(/message_type/g, 'c.message_type');
+      .replace(/\bstatus\b/g, 'c.status')
+      .replace(/\bsent_count\b/g, 'c.sent_count')
+      .replace(/\bsent_at\b/g, 'c.sent_at')
+      .replace(/\bcreated_at\b/g, 'c.created_at')
+      .replace(/\bmessage_type\b/g, 'c.message_type');
 
     const result = await query(
       `SELECT 
