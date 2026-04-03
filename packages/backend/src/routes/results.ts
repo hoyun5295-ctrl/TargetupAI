@@ -138,8 +138,8 @@ router.get('/summary', async (req: Request, res: Response) => {
     // ★ D98: draft/cancelled도 실패로 카운트 (목록에서 제외하지 않음)
     summaryQuery += ` AND status NOT IN ('cancelled')`;
 
-    // ★ D104: 날짜 필터 컨트롤타워 사용
-    const summaryDr = buildPeriodFilter('created_at', {
+    // ★ D106: 발송결과는 sent_at(발송일) 기준 필터링. 미발송(draft)은 created_at 폴백
+    const summaryDr = buildPeriodFilter('COALESCE(sent_at, created_at)', {
       fromDate: fromDate ? String(fromDate) : undefined,
       toDate: toDate ? String(toDate) : undefined,
       yearMonth: (!fromDate || !toDate) ? yearMonth : undefined,
@@ -226,8 +226,8 @@ router.get('/campaigns', async (req: Request, res: Response) => {
       params.push(req.query.filter_user_id);
     }
 
-    // ★ D104: 날짜 필터 컨트롤타워 사용
-    const campDr = buildPeriodFilter('created_at', {
+    // ★ D106: 발송결과는 sent_at(발송일) 기준 필터링. 미발송(draft)은 created_at 폴백
+    const campDr = buildPeriodFilter('COALESCE(sent_at, created_at)', {
       fromDate: fromDate ? String(fromDate) : undefined,
       toDate: toDate ? String(toDate) : undefined,
       yearMonth: (!fromDate || !toDate) ? (from ? String(from) : undefined) : undefined,
@@ -251,6 +251,7 @@ router.get('/campaigns', async (req: Request, res: Response) => {
     const aliasedWhere = whereClause
       .replace(/company_id/g, 'c.company_id')
       .replace(/created_by/g, 'c.created_by')
+      .replace(/sent_at/g, 'c.sent_at')
       .replace(/created_at/g, 'c.created_at')
       .replace(/message_type/g, 'c.message_type');
 

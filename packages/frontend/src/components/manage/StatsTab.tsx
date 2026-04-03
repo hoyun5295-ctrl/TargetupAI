@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { manageStatsApi, manageUsersApi } from '../../api/client';
 import Toast from '../Toast';
 import { formatDateTime } from '../../utils/formatDate';
@@ -24,6 +24,9 @@ export default function StatsTab() {
 
   const perPage = 10;
 
+  // ★ B8 수정: race condition 방지 — 탭 전환 시 이전 응답 무시
+  const requestIdRef = useRef(0);
+
   // 사용자 목록 로드
   useEffect(() => {
     manageUsersApi.list()
@@ -32,15 +35,20 @@ export default function StatsTab() {
   }, []);
 
   const loadStats = useCallback(async (p = 1) => {
+    const currentRequestId = ++requestIdRef.current;
     setLoading(true);
     try {
       const res = await manageStatsApi.send({
         view, startDate, endDate, page: p, limit: perPage,
         filterUserId: filterUserId || undefined,
       });
+      // ★ stale 응답이면 무시 (탭 전환 race condition 방지)
+      if (currentRequestId !== requestIdRef.current) return;
       setStats(res.data);
       setPage(p);
-    } catch { /* */ } finally { setLoading(false); }
+    } catch { /* */ } finally {
+      if (currentRequestId === requestIdRef.current) setLoading(false);
+    }
   }, [view, startDate, endDate, filterUserId]);
 
   useEffect(() => { loadStats(1); }, [loadStats]);
@@ -177,7 +185,7 @@ export default function StatsTab() {
                 {rows.length === 0 ? (
                   <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-500">데이터가 없습니다.</td></tr>
                 ) : rows.map((r: any, i: number) => {
-                  const dateKey = r.date || r.month;
+                  const dateKey = r.period || r.date || r.month;
                   return (
                     <tr key={i} className="hover:bg-gray-50">
                       <td className="px-4 py-3 font-medium">{dateKey}</td>

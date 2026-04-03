@@ -169,6 +169,210 @@ export function kstDate(column: string): string {
 }
 
 // ============================================================
+// ★ 발송통계 컨트롤타워 — manage-stats.ts, results.ts 등 공용
+// 슈퍼관리자/고객사관리자/고객사사용자 모두 이 함수를 import해서 사용
+// ============================================================
+
+export interface SendStatsOptions {
+  view: 'daily' | 'monthly';
+  startDate?: string;
+  endDate?: string;
+  companyId?: string;       // null이면 전체 회사 (슈퍼관리자)
+  filterUserId?: string;    // 특정 사용자 필터
+  page: number;
+  limit: number;
+}
+
+export interface SendStatsRow {
+  period: string;  // 항상 'period' 키로 통일 (YYYY-MM-DD 또는 YYYY-MM)
+  companyName?: string;
+  runs: number;
+  sent: number;
+  success: number;
+  fail: number;
+}
+
+export interface SendStatsResult {
+  summary: { total_sent: string; total_success: string; total_fail: string };
+  rows: SendStatsRow[];
+  total: number;
+  page: number;
+  totalPages: number;
+}
+
+/**
+ * 발송통계 조회 (일별/월별) — 단일 진입점
+ * manage-stats.ts, results.ts 등에서 import하여 사용.
+ * 슈퍼관리자(companyId=null): 전체 회사 통계
+ * 고객사관리자/사용자(companyId 지정): 자사 통계
+ */
+export async function querySendStats(options: SendStatsOptions): Promise<SendStatsResult> {
+  const { view, page, limit } = options;
+  let { startDate, endDate } = options;
+  const offset = (page - 1) * limit;
+
+  // 월별 조회 시 날짜를 월 단위로 자동 확장
+  if (view === 'monthly') {
+    if (startDate) startDate = startDate.substring(0, 7) + '-01';
+    if (endDate) {
+      const d = new Date(endDate);
+      d.setMonth(d.getMonth() + 1, 0);
+      endDate = d.toISOString().split('T')[0];
+    }
+  }
+
+  // WHERE 절 동적 구성
+  const dr = buildDateRangeFilter('c.sent_at', startDate, endDate, 1);
+  let dateWhere = dr.sql;
+  const baseParams: any[] = [...dr.params];
+  let paramIdx = dr.nextIndex;
+
+  let companyWhere = '';
+  if (options.companyId) {
+    companyWhere = ` AND c.company_id = $${paramIdx}`;
+    baseParams.push(options.companyId);
+    paramIdx++;
+  }
+
+  let userWhere = '';
+  if (options.filterUserId) {
+    userWhere = ` AND c.created_by = $${paramIdx}`;
+    baseParams.push(options.filterUserId);
+    paramIdx++;
+  }
+
+  const baseWhereSql = `c.sent_at IS NOT NULL AND c.status NOT IN ('cancelled', 'draft') ${dateWhere} ${companyWhere} ${userWhere}`;
+
+  // 1) 요약
+  const summaryResult = await query(`
+    SELECT
+      COALESCE(SUM(c.sent_count), 0) as total_sent,
+      COALESCE(SUM(c.success_count), 0) as total_success,
+      COALESCE(SUM(c.fail_count), 0) as total_fail
+    FROM campaigns c
+    WHERE ${baseWhereSql}
+  `, baseParams);
+
+  // 2) 그룹핑 (일별/월별)
+  const groupCol = kstGroupBy('c.sent_at', view);
+
+  const countResult = await query(`
+    SELECT COUNT(*) FROM (
+      SELECT ${groupCol} as grp
+      FROM campaigns c
+      WHERE ${baseWhereSql}
+      GROUP BY grp
+    ) sub
+  `, baseParams);
+  const total = parseInt(countResult.rows[0].count);
+
+  const rowsResult = await query(`
+    SELECT
+      ${groupCol} as period,
+      COUNT(DISTINCT c.id) as runs,
+      COALESCE(SUM(c.sent_count), 0) as sent,
+      COALESCE(SUM(c.success_count), 0) as success,
+      COALESCE(SUM(c.fail_count), 0) as fail
+    FROM campaigns c
+    WHERE ${baseWhereSql}
+    GROUP BY ${groupCol}
+    ORDER BY period DESC
+    LIMIT $${paramIdx} OFFSET $${paramIdx + 1}
+  `, [...baseParams, limit, offset]);
+
+  return {
+    summary: summaryResult.rows[0],
+    rows: rowsResult.rows,
+    total,
+    page,
+    totalPages: Math.ceil(total / limit),
+  };
+}
+
+export interface SendStatsDetailOptions {
+  view: 'daily' | 'monthly';
+  date: string;            // 조회 대상 날짜/월
+  companyId: string;
+  filterUserId?: string;
+}
+
+export interface SendStatsDetailResult {
+  userStats: any[];
+  campaigns: any[];
+  unitCost: { sms: number; lms: number };
+}
+
+/**
+ * 발송통계 상세 (사용자별 분해) — 단일 진입점
+ */
+export async function querySendStatsDetail(
+  options: SendStatsDetailOptions,
+  DEFAULT_COSTS_PARAM: { sms: number; lms: number }
+): Promise<SendStatsDetailResult> {
+  const { view, date, companyId, filterUserId } = options;
+
+  const groupCol = kstGroupBy('c.sent_at', view);
+
+  const userFilter = filterUserId ? ` AND c.created_by = $3` : '';
+  const detailParams = filterUserId ? [date, companyId, filterUserId] : [date, companyId];
+
+  // 비용 단가
+  const costRes = await query('SELECT cost_per_sms, cost_per_lms FROM companies WHERE id = $1', [companyId]);
+  const cSms = Number(costRes.rows[0]?.cost_per_sms) || DEFAULT_COSTS_PARAM.sms;
+  const cLms = Number(costRes.rows[0]?.cost_per_lms) || DEFAULT_COSTS_PARAM.lms;
+
+  // 사용자별 통계
+  const result = await query(`
+    SELECT
+      u.id as user_id, u.name as user_name, u.login_id, u.department, u.store_codes,
+      COUNT(DISTINCT c.id) as runs,
+      COALESCE(SUM(c.sent_count), 0) as sent,
+      COALESCE(SUM(c.success_count), 0) as success,
+      COALESCE(SUM(c.fail_count), 0) as fail,
+      COALESCE(SUM(CASE WHEN c.message_type IN ('SMS','S') THEN c.success_count ELSE 0 END), 0) as sms_success,
+      COALESCE(SUM(CASE WHEN c.message_type IN ('LMS','L','MMS','M') THEN c.success_count ELSE 0 END), 0) as lms_success
+    FROM campaigns c
+    LEFT JOIN users u ON c.created_by = u.id
+    WHERE c.sent_at IS NOT NULL
+      AND ${groupCol} = $1
+      AND c.company_id = $2
+      AND c.status NOT IN ('cancelled', 'draft')
+      ${userFilter}
+    GROUP BY u.id, u.name, u.login_id, u.department, u.store_codes
+    ORDER BY sent DESC
+  `, detailParams);
+
+  const userStats = result.rows.map((u: any) => ({
+    ...u,
+    cost: Math.round((Number(u.sms_success) * cSms + Number(u.lms_success) * cLms) * 10) / 10,
+  }));
+
+  // 캠페인 상세 목록
+  const campaignsResult = await query(`
+    SELECT
+      c.id as campaign_id, c.campaign_name, c.send_type, c.message_content,
+      u.name as user_name, u.login_id,
+      c.id as run_id, 1 as run_number,
+      c.sent_count, c.success_count, c.fail_count, c.target_count,
+      c.message_type, c.sent_at
+    FROM campaigns c
+    LEFT JOIN users u ON c.created_by = u.id
+    WHERE c.sent_at IS NOT NULL
+      AND ${groupCol} = $1
+      AND c.company_id = $2
+      AND c.status NOT IN ('cancelled', 'draft')
+      ${userFilter}
+    ORDER BY c.sent_at DESC
+  `, detailParams);
+
+  return {
+    userStats,
+    campaigns: campaignsResult.rows,
+    unitCost: { sms: cSms, lms: cLms },
+  };
+}
+
+// ============================================================
 // ★ 기능 2: 캠페인 성과 집계 (AI 다음 캠페인 추천용)
 // campaigns + campaign_runs JOIN → 세그먼트별/시간대별/채널별 성과 분석
 // ============================================================
