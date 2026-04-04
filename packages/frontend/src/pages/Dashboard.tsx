@@ -3359,6 +3359,11 @@ const campaignData = {
         show={showAnalysis}
         onClose={() => setShowAnalysis(false)}
         analysisLevel={planInfo?.ai_analysis_level || 'none'}
+        onActionPrompt={(prompt) => {
+          setShowAnalysis(false);
+          setAiCampaignPrompt(prompt);
+          handleAiCampaignGenerate(prompt);
+        }}
       />
 
       {/* 하단 링크 */}

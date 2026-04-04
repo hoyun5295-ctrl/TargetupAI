@@ -233,13 +233,15 @@ ${turn2Insights.map(i => `[${i.title}] ${i.summary}`).join('\n')}
 분석 기간: ${collectedData.period.from} ~ ${collectedData.period.to}
 
 === 응답 JSON 형식 ===
-{ "insights": [ { "id": "...", "category": "...", "title": "...", "summary": "...", "details": "...", "level": "advanced", "keyMetrics": [...], "recommendations": [...] } ] }
+{ "insights": [ { "id": "...", "category": "...", "title": "...", "summary": "...", "details": "...", "level": "advanced", "keyMetrics": [...], "recommendations": [...], "actionItems": [...] } ] }
 
 === 반드시 생성할 인사이트 (3개) ===
 1. id: "action-plan", category: "strategy", title: "맞춤 액션 플랜"
    - 향후 1개월 실행할 구체적 캠페인 3~5개 제안
    - 각 캠페인: 타겟군 + 메시지 방향 + 추천 발송 시간 + 예상 효과
    - recommendations 5개 이상
+   - ★ actionItems 필수 (3~5개): 자동화 연계용 구조화 데이터
+     [{ "title": "캠페인 제목", "target": "타겟 설명 (예: VIP 여성 30대 서울)", "timing": "추천 시간 (예: 화요일 오전 10시)", "prompt": "AI 한줄로에 입력할 프롬프트 (예: VIP 여성 30대 서울 고객에게 봄 신상 20% 할인 안내 보내줘)" }]
 
 2. id: "roi-analysis", category: "conversion", title: "ROI 종합 분석"
    - 현재 캠페인 투자 대비 성과 종합
@@ -592,6 +594,7 @@ router.post('/run', async (req: Request, res: Response) => {
           generatedAt: row.created_at,
           insights: row.insights,
           cached: true,
+          collectedData: row.collected_data,
         });
       }
     }
@@ -675,6 +678,22 @@ router.post('/run', async (req: Request, res: Response) => {
     `, [companyId, dateFrom, dateTo]);
 
     collectedData.hourStats = hourStats.rows;
+
+    // 4-1) D108: 요일x시간 히트맵 데이터 (차트용)
+    const heatmapData = await query(`
+      SELECT
+        EXTRACT(DOW FROM cr.sent_at)::int as day,
+        EXTRACT(HOUR FROM cr.sent_at)::int as hour,
+        ROUND(SUM(cr.success_count)::numeric / NULLIF(SUM(cr.sent_count), 0) * 100, 1) as rate
+      FROM campaign_runs cr
+      JOIN campaigns c ON cr.campaign_id = c.id
+      WHERE c.company_id = $1
+        AND cr.sent_at >= $2::date
+        AND cr.sent_at < $3::date + INTERVAL '1 day'
+        AND cr.sent_count > 0
+      GROUP BY EXTRACT(DOW FROM cr.sent_at), EXTRACT(HOUR FROM cr.sent_at)
+    `, [companyId, dateFrom, dateTo]);
+    collectedData.heatmapData = heatmapData.rows;
 
     // 5) 고객 분포 (성별/등급)
     const genderDist = await query(`
@@ -873,6 +892,7 @@ router.post('/run', async (req: Request, res: Response) => {
       generatedAt: savedRow.created_at,
       insights: allInsights,
       cached: false,
+      collectedData,
     });
 
   } catch (error: any) {

@@ -4,6 +4,10 @@ import {
   FileText, Lock, Rocket, Sparkles, TrendingUp, Users, X,
   Activity, Target, ShieldAlert, PieChart, Zap, ArrowUpRight
 } from 'lucide-react';
+import {
+  HorizontalBarChart, HeatmapGrid, DonutChart, StackBar, MiniLineChart,
+  ScoreCard, RfmMatrix, FunnelChart, ActionTimeline
+} from './AnalysisCharts';
 
 /* ─────────────────── Types ─────────────────── */
 
@@ -11,6 +15,7 @@ interface Props {
   show: boolean;
   onClose: () => void;
   analysisLevel: string; // 'none' | 'basic' | 'advanced'
+  onActionPrompt?: (prompt: string) => void;
 }
 
 interface TeaserData {
@@ -42,6 +47,7 @@ interface AnalysisResult {
   level: string;
   generatedAt: string;
   insights: InsightCard[];
+  collectedData?: any;
 }
 
 /* ─────────────────── Constants ─────────────────── */
@@ -83,7 +89,7 @@ const DEFAULT_COLOR = { bg: 'bg-gray-50', border: 'border-gray-200', icon: 'text
 
 /* ─────────────────── Component ─────────────────── */
 
-export default function AnalysisModal({ show, onClose, analysisLevel }: Props) {
+export default function AnalysisModal({ show, onClose, analysisLevel, onActionPrompt }: Props) {
   const [loading, setLoading] = useState(true);
   const [teaser, setTeaser] = useState<TeaserData | null>(null);
   const [period, setPeriod] = useState<'30d' | '90d' | 'custom'>('30d');
@@ -278,6 +284,7 @@ export default function AnalysisModal({ show, onClose, analysisLevel }: Props) {
               pdfLoading={pdfLoading}
               onRun={runAnalysis}
               onDownloadPdf={downloadPdf}
+              onActionPrompt={onActionPrompt}
             />
           )}
         </div>
@@ -422,12 +429,13 @@ interface RunnerProps {
   pdfLoading: boolean;
   onRun: () => void;
   onDownloadPdf: () => void;
+  onActionPrompt?: (prompt: string) => void;
 }
 
 function RunnerSection({
   analysisLevel, teaser, period, setPeriod, customStart, setCustomStart,
   customEnd, setCustomEnd, running, loadingStep, result, error,
-  expandedCard, setExpandedCard, pdfLoading, onRun, onDownloadPdf
+  expandedCard, setExpandedCard, pdfLoading, onRun, onDownloadPdf, onActionPrompt
 }: RunnerProps) {
   const isAdvanced = analysisLevel === 'advanced';
 
@@ -631,21 +639,63 @@ function RunnerSection({
                   </button>
                   {isExpanded && (
                     <div className="px-5 pb-4 border-t border-white/50">
+                      {/* D108: 시각화 차트 */}
+                      {result.collectedData && (
+                        <InsightChart insight={insight} collectedData={result.collectedData} isAdvanced={isAdvanced} onActionPrompt={onActionPrompt} />
+                      )}
                       <p className="text-sm text-gray-700 leading-relaxed mt-3 whitespace-pre-line">
                         {insight.details}
                       </p>
-                      {insight.data && typeof insight.data === 'object' && Object.keys(insight.data).length > 0 && (
+                      {/* keyMetrics 표시 */}
+                      {Array.isArray((insight as any).keyMetrics) && (insight as any).keyMetrics.length > 0 && (
                         <div className="mt-3 p-3 bg-white/60 rounded-lg">
-                          <p className="text-xs font-medium text-gray-500 mb-2">상세 데이터</p>
+                          <p className="text-xs font-medium text-gray-500 mb-2">핵심 지표</p>
                           <div className="grid grid-cols-2 gap-2">
-                            {Object.entries(insight.data).map(([key, val]) => (
-                              <div key={key} className="flex justify-between text-xs">
-                                <span className="text-gray-500">{key}</span>
-                                <span className="font-medium text-gray-700">{String(val)}</span>
+                            {(insight as any).keyMetrics.map((m: any, mi: number) => (
+                              <div key={mi} className="flex justify-between text-xs">
+                                <span className="text-gray-500">{m.label}</span>
+                                <span className="font-medium text-gray-700">{m.value}</span>
                               </div>
                             ))}
                           </div>
                         </div>
+                      )}
+                      {/* recommendations 표시 */}
+                      {Array.isArray((insight as any).recommendations) && (insight as any).recommendations.length > 0 && (
+                        <div className="mt-3 p-3 bg-white/60 rounded-lg">
+                          <p className="text-xs font-medium text-gray-500 mb-2">추천 사항</p>
+                          <ul className="space-y-1">
+                            {(insight as any).recommendations.map((r: string, ri: number) => (
+                              <li key={ri} className="text-xs text-gray-600 flex items-start gap-1.5">
+                                <span className="text-amber-500 mt-0.5 shrink-0">&#9679;</span>
+                                {r}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                      {/* BUSINESS: 액션 버튼 (PRO는 블러) */}
+                      {insight.category === 'strategy' && Array.isArray((insight as any).actionItems) && (
+                        isAdvanced ? (
+                          <div className="mt-3">
+                            <ActionTimeline
+                              actions={(insight as any).actionItems}
+                              onAction={onActionPrompt}
+                            />
+                          </div>
+                        ) : (
+                          <div className="mt-3 relative rounded-lg border border-purple-200 bg-purple-50/30 p-3 overflow-hidden">
+                            <div className="absolute inset-0 bg-white/50 backdrop-blur-sm z-10 flex items-center justify-center">
+                              <div className="flex items-center gap-2 bg-white/90 rounded-lg px-3 py-1.5 shadow border border-purple-200">
+                                <Crown size={12} className="text-purple-600" />
+                                <span className="text-[10px] font-medium text-gray-600">비즈니스 요금제에서 바로 실행 가능</span>
+                              </div>
+                            </div>
+                            <div className="select-none" style={{ filter: 'blur(4px)' }}>
+                              <div className="text-xs text-gray-500">추천 캠페인 3건 자동 생성 가능</div>
+                            </div>
+                          </div>
+                        )
                       )}
                     </div>
                   )}
@@ -678,6 +728,111 @@ function RunnerSection({
 /* ═══════════════════════════════════════════════════
    서브 컴포넌트
    ═══════════════════════════════════════════════════ */
+
+/* ═══════════════════════════════════════════════════
+   D108: 인사이트별 차트 렌더링
+   ═══════════════════════════════════════════════════ */
+
+const CHANNEL_COLORS: Record<string, string> = {
+  SMS: '#3b82f6', LMS: '#8b5cf6', MMS: '#f59e0b', KAKAO: '#facc15',
+};
+
+function InsightChart({ insight, collectedData, isAdvanced, onActionPrompt }: {
+  insight: InsightCard; collectedData: any; isAdvanced: boolean; onActionPrompt?: (prompt: string) => void;
+}) {
+  const category = insight.category;
+
+  // 캠페인 성과 → 가로 바 (채널별 성공률)
+  if (category === 'campaign' && collectedData.channelStats) {
+    const barData = (collectedData.channelStats as any[]).map(s => ({
+      label: s.message_type || 'Unknown',
+      value: parseFloat(s.success_rate) || 0,
+      color: CHANNEL_COLORS[s.message_type] || '#6b7280',
+    }));
+    if (barData.length > 0) return <div className="mt-3 mb-2"><HorizontalBarChart data={barData} /></div>;
+  }
+
+  // 최적 시간 → 히트맵
+  if ((category === 'timing' || category === 'time') && collectedData.heatmapData) {
+    const hData = (collectedData.heatmapData as any[]).map(d => ({
+      day: parseInt(d.day), hour: parseInt(d.hour), rate: parseFloat(d.rate) || 0,
+    }));
+    if (hData.length > 0) return <div className="mt-3 mb-2"><HeatmapGrid data={hData} /></div>;
+  }
+
+  // 채널 비교 → 도넛
+  if (category === 'channel' && collectedData.channelStats) {
+    const donutData = (collectedData.channelStats as any[]).map(s => ({
+      label: s.message_type || 'Unknown',
+      value: parseInt(s.sent) || 0,
+      color: CHANNEL_COLORS[s.message_type] || '#6b7280',
+    }));
+    if (donutData.length > 0) return <div className="mt-3 mb-2"><DonutChart data={donutData} centerLabel="총 발송" /></div>;
+  }
+
+  // 고객 분포 → 스택 바
+  if (category === 'customer' && collectedData.customerDistribution) {
+    const dist = collectedData.customerDistribution;
+    const genderData = (dist.gender as any[] || []).map((g: any) => ({
+      label: g.gender === 'M' ? '남성' : g.gender === 'F' ? '여성' : g.gender || '미지정',
+      value: parseInt(g.count) || 0,
+      color: g.gender === 'M' ? '#3b82f6' : g.gender === 'F' ? '#ec4899' : '#9ca3af',
+    }));
+    return (
+      <div className="mt-3 mb-2 space-y-3">
+        {genderData.length > 0 && <StackBar data={genderData} label="성별 분포" />}
+      </div>
+    );
+  }
+
+  // 수신거부 → 미니 라인
+  if (category === 'unsubscribe' && collectedData.unsubscribeTrend) {
+    const lineData = (collectedData.unsubscribeTrend as any[]).map(t => ({
+      month: t.month?.slice(5) || '', // "2026-03" → "03"
+      value: parseInt(t.count) || 0,
+    }));
+    if (lineData.length >= 2) return <div className="mt-3 mb-2"><MiniLineChart data={lineData} /></div>;
+  }
+
+  // 종합 요약 → 스코어카드
+  if (category === 'summary') {
+    const summary = collectedData.campaignSummary;
+    const rate = parseFloat(summary?.success_rate) || 0;
+    const score = Math.min(Math.round(rate * 1.1), 100); // 성공률 기반 점수
+    const grade = score >= 90 ? 'S' : score >= 80 ? 'A+' : score >= 70 ? 'A' : score >= 60 ? 'B+' : score >= 50 ? 'B' : 'C';
+    const highlights = Array.isArray((insight as any).recommendations) ? (insight as any).recommendations.slice(0, 3) : [];
+    return <div className="mt-3 mb-2"><ScoreCard score={score} grade={grade} highlights={highlights} /></div>;
+  }
+
+  // RFM 세그먼트 (BUSINESS)
+  if (category === 'segment' && collectedData.rfmSegments) {
+    const segments = (collectedData.rfmSegments as any[]).slice(0, 4).map((s: any, i: number) => ({
+      name: s.segment_name || `세그먼트 ${i + 1}`,
+      count: parseInt(s.customer_count) || 0,
+      description: s.description || '',
+      color: ['#10b981', '#3b82f6', '#f59e0b', '#ef4444'][i] || '#6b7280',
+    }));
+    if (segments.length > 0) return <div className="mt-3 mb-2"><RfmMatrix segments={segments} /></div>;
+  }
+
+  // 전환 분석 (BUSINESS) → 퍼널
+  if (category === 'conversion' && collectedData.conversionAnalysis) {
+    const conv = collectedData.conversionAnalysis as any[];
+    if (conv.length > 0) {
+      const totalSent = conv.reduce((s: number, c: any) => s + (parseInt(c.sent_count) || 0), 0);
+      const totalSuccess = Math.round(totalSent * (parseFloat(collectedData.campaignSummary?.success_rate) || 80) / 100);
+      const totalConverted = conv.reduce((s: number, c: any) => s + (parseInt(c.converted_customers) || 0), 0);
+      const steps = [
+        { label: '발송', value: totalSent, color: '#3b82f6' },
+        { label: '성공', value: totalSuccess, color: '#10b981' },
+        { label: '구매전환', value: totalConverted, color: '#f59e0b' },
+      ];
+      return <div className="mt-3 mb-2"><FunnelChart steps={steps} /></div>;
+    }
+  }
+
+  return null;
+}
 
 function StatCard({ icon, label, value, suffix, color, isPercent }: {
   icon: React.ReactNode; label: string; value: number; suffix: string; color: string; isPercent?: boolean;
