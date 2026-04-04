@@ -2500,12 +2500,15 @@ const campaignData = {
                     <div className="text-xl font-bold text-green-700">관리</div>
                   </div>
 
-                  {/* 고객 인사이트 */}
-                  <div onClick={() => { if (isSubscriptionLocked) { setShowSubscriptionLock(true); return; } setShowInsights(true); }} className={`bg-white/50 shadow-sm rounded-xl p-6 min-h-[140px] cursor-pointer hover:shadow-lg transition-all text-center border border-green-200 ${isSubscriptionLocked ? 'opacity-60' : ''}`}>
-                    <Users className="w-8 h-8 mx-auto mb-3 text-green-600" />
-                    <div className="font-semibold text-gray-800 mb-1">{isSubscriptionLocked ? '🔒 ' : ''}고객 인사이트</div>
-                    <div className="text-xs text-gray-500 mb-3">고객 현황 분석</div>
-                    <div className="text-xl font-bold text-green-700">{parseInt(stats?.total || '0').toLocaleString()}명</div>
+                  {/* AI 분석 (발송 성과 + 예시 리포트) */}
+                  <div onClick={() => { setShowAnalysis(true); }} className={`bg-white/50 shadow-sm rounded-xl p-6 min-h-[140px] cursor-pointer hover:shadow-lg transition-all text-center border border-green-200 relative overflow-hidden`}>
+                    <Sparkles className="w-8 h-8 mx-auto mb-3 text-amber-500" />
+                    <div className="font-semibold text-gray-800 mb-1">AI 분석</div>
+                    <div className="text-xs text-gray-500 mb-2">성과 분석 리포트</div>
+                    <div className="text-xs text-gray-400 leading-relaxed" style={{ WebkitMaskImage: 'linear-gradient(to bottom, black 40%, transparent)', maskImage: 'linear-gradient(to bottom, black 40%, transparent)' }}>
+                      화요일 오전 10시 발송이 가장 효과적...
+                    </div>
+                    <div className="absolute bottom-2 left-0 right-0 text-[10px] text-amber-600 font-medium">예시 리포트 보기 →</div>
                   </div>
 
                   {/* 예약 대기 */}
