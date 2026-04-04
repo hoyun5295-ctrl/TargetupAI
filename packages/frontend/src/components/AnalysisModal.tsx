@@ -539,6 +539,42 @@ function RunnerSection({
             <Sparkles size={16} />
             AI 분석 시작
           </button>
+
+          {/* 예시 리포트 다운로드 */}
+          <div className="mt-5 pt-5 border-t border-gray-100">
+            <p className="text-xs text-gray-400 mb-3 flex items-center gap-1.5">
+              <Download size={12} />
+              AI 분석 예시 리포트
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              <a
+                href="/sample_analysis_pro.pdf"
+                download="한줄로_AI기본분석_예시_PRO.pdf"
+                className="flex items-center gap-2.5 p-3 rounded-xl border border-green-200 bg-green-50/50 hover:bg-green-50 hover:shadow-sm transition-all group"
+              >
+                <div className="w-8 h-8 rounded-lg bg-green-100 flex items-center justify-center shrink-0">
+                  <FileText size={14} className="text-green-600" />
+                </div>
+                <div>
+                  <div className="text-xs font-semibold text-gray-700 group-hover:text-green-700">PRO 기본분석 예시</div>
+                  <div className="text-[9px] text-gray-400">6개 인사이트 · PDF</div>
+                </div>
+              </a>
+              <a
+                href="/sample_analysis_business.pdf"
+                download="한줄로_AI상세분석_예시_BUSINESS.pdf"
+                className="flex items-center gap-2.5 p-3 rounded-xl border border-purple-200 bg-purple-50/50 hover:bg-purple-50 hover:shadow-sm transition-all group"
+              >
+                <div className="w-8 h-8 rounded-lg bg-purple-100 flex items-center justify-center shrink-0">
+                  <FileText size={14} className="text-purple-600" />
+                </div>
+                <div>
+                  <div className="text-xs font-semibold text-gray-700 group-hover:text-purple-700">BUSINESS 상세분석 예시</div>
+                  <div className="text-[9px] text-gray-400">11개 인사이트 + 액션플랜 · PDF</div>
+                </div>
+              </a>
+            </div>
+          </div>
         </div>
       )}
 
