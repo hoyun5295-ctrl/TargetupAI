@@ -1,3 +1,6 @@
+import { Bookmark, Check, X } from 'lucide-react';
+import { useState } from 'react';
+
 interface CampaignSuccessModalProps {
   show: boolean;
   onClose: () => void;
@@ -7,13 +10,37 @@ interface CampaignSuccessModalProps {
   successSendInfo: string;
   overrideTargetCount?: number;
   overrideUnsubscribeCount?: number;
+  onSaveSegment?: (name: string, emoji: string) => void;
+  canSaveSegment?: boolean;
 }
 
-export default function CampaignSuccessModal({ show, onClose, onShowCalendar, selectedChannel, aiResult, successSendInfo, overrideTargetCount, overrideUnsubscribeCount }: CampaignSuccessModalProps) {
+const EMOJI_OPTIONS = ['📋', '🎯', '🎂', '🛍️', '📢', '💎', '🏷️', '🔥', '💌', '🎁'];
+
+export default function CampaignSuccessModal({ show, onClose, onShowCalendar, selectedChannel, aiResult, successSendInfo, overrideTargetCount, overrideUnsubscribeCount, onSaveSegment, canSaveSegment }: CampaignSuccessModalProps) {
+  const [showSaveForm, setShowSaveForm] = useState(false);
+  const [segmentName, setSegmentName] = useState('');
+  const [segmentEmoji, setSegmentEmoji] = useState('📋');
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
   if (!show) return null;
 
   const displayCount = overrideTargetCount ?? aiResult?.target?.count ?? 0;
   const displayUnsub = overrideUnsubscribeCount ?? aiResult?.target?.unsubscribeCount ?? 0;
+
+  const handleSave = async () => {
+    if (!segmentName.trim() || !onSaveSegment) return;
+    setSaving(true);
+    try {
+      await onSaveSegment(segmentName.trim(), segmentEmoji);
+      setSaved(true);
+      setTimeout(() => setShowSaveForm(false), 1500);
+    } catch {
+      // 에러는 Dashboard에서 토스트로 처리
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 animate-fadeIn">
@@ -25,7 +52,7 @@ export default function CampaignSuccessModal({ show, onClose, onShowCalendar, se
           <h3 className="text-xl font-bold text-gray-800 mb-1">캠페인이 확정되었습니다!</h3>
           <p className="text-sm text-gray-500 mb-5">발송이 정상적으로 등록되었습니다</p>
         </div>
-        <div className="mx-6 mb-6 bg-green-50 rounded-xl p-4 text-left">
+        <div className="mx-6 mb-4 bg-green-50 rounded-xl p-4 text-left">
           <div className="text-sm text-gray-600 space-y-2">
             <div className="flex items-center gap-2">
               <span>{selectedChannel === 'KAKAO' ? '💬' : '📱'}</span>
@@ -51,6 +78,73 @@ export default function CampaignSuccessModal({ show, onClose, onShowCalendar, se
             </div>
           </div>
         </div>
+
+        {/* 저장 세그먼트 영역 */}
+        {canSaveSegment && onSaveSegment && !saved && (
+          <div className="mx-6 mb-4">
+            {!showSaveForm ? (
+              <button
+                onClick={() => setShowSaveForm(true)}
+                className="w-full py-2.5 px-4 border border-dashed border-gray-300 rounded-xl text-sm text-gray-500 hover:border-green-400 hover:text-green-700 hover:bg-green-50/50 transition-all flex items-center justify-center gap-2"
+              >
+                <Bookmark className="w-4 h-4" />
+                이 설정을 저장하기
+              </button>
+            ) : (
+              <div className="border border-green-200 rounded-xl p-3 bg-green-50/30 space-y-2.5 animate-in fade-in duration-150">
+                <div className="flex gap-2">
+                  <div className="flex gap-1 flex-wrap">
+                    {EMOJI_OPTIONS.map(e => (
+                      <button
+                        key={e}
+                        onClick={() => setSegmentEmoji(e)}
+                        className={`w-8 h-8 rounded-lg text-base flex items-center justify-center transition-all ${
+                          segmentEmoji === e ? 'bg-green-200 ring-2 ring-green-400' : 'hover:bg-gray-100'
+                        }`}
+                      >
+                        {e}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={segmentName}
+                    onChange={(e) => setSegmentName(e.target.value)}
+                    placeholder="세그먼트 이름 (예: VIP 재구매)"
+                    className="flex-1 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-400 focus:border-transparent"
+                    maxLength={50}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleSave(); }}
+                    autoFocus
+                  />
+                  <button
+                    onClick={handleSave}
+                    disabled={!segmentName.trim() || saving}
+                    className="px-4 py-2 bg-green-700 text-white text-sm rounded-lg hover:bg-green-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {saving ? '...' : '저장'}
+                  </button>
+                  <button
+                    onClick={() => setShowSaveForm(false)}
+                    className="p-2 text-gray-400 hover:text-gray-600 transition-colors"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* 저장 완료 표시 */}
+        {saved && (
+          <div className="mx-6 mb-4 flex items-center justify-center gap-2 text-sm text-green-600 bg-green-50 rounded-xl py-2.5">
+            <Check className="w-4 h-4" />
+            세그먼트가 저장되었습니다
+          </div>
+        )}
+
         <div className="flex border-t">
           <button
             onClick={onShowCalendar}

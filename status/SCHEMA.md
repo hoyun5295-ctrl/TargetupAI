@@ -510,6 +510,26 @@
 | ai_premium_enabled | boolean DEFAULT false | D80: AI 프리미엄 기능 게이팅 (PRO 이상 true) — 자동조건완화, 성과기반추천, 자동문안생성 |
 | created_at | timestamp | |
 
+### saved_segments (저장 세그먼트 — D107)
+| 컬럼 | 타입 | 비고 |
+|------|------|------|
+| id | uuid PK | |
+| company_id | uuid FK | |
+| user_id | uuid FK | |
+| name | varchar(100) NOT NULL | 세그먼트명 |
+| emoji | varchar(10) DEFAULT '📋' | 카드 아이콘 |
+| segment_type | varchar(20) NOT NULL | 'hanjullo' \| 'custom' |
+| prompt | text | AI 한줄로용 프롬프트 |
+| auto_relax | boolean DEFAULT false | AI 조건완화 |
+| selected_fields | text[] | 맞춤한줄 활용필드 |
+| briefing | text | 맞춤한줄 프로모션 설명 |
+| url | varchar(500) | 바코드/이벤트 링크 |
+| channel | varchar(10) | SMS/LMS/MMS |
+| is_ad | boolean DEFAULT false | 광고 여부 |
+| last_used_at | timestamp | 최근 사용 시각 |
+| created_at | timestamp | |
+| updated_at | timestamp | |
+
 ### plan_requests (요금제 변경 요청)
 | 컬럼 | 타입 |
 |------|------|

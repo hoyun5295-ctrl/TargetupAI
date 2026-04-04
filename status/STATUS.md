@@ -106,7 +106,61 @@
 
 ---
 
-### 🔧 D103 — (광고) 중복 수정 + 발송 경로 컨트롤타워 전면 통합 + 개별회신번호 동적 필터링 (2026-04-02) — 🟡 코드수정완료-배포대기
+### 🔧 D107 — 저장 세그먼트 기능 (빠른 발송 고도화) (2026-04-04) — 🟡 배포대기
+
+> **배경:** 기존 "빠른 발송 예시" 하드코딩 4개 카드를 저장 세그먼트 시스템으로 고도화. 발송 성공 후 설정 저장 → 클릭 한번으로 재실행.
+
+#### 신규 컨트롤타워
+| 컨트롤타워 | 파일 | 효과 |
+|-----------|------|------|
+| `saveSegment()` | saved-segments.ts | 세그먼트 저장 (20개 제한) |
+| `getSegments()` | saved-segments.ts | 목록 조회 (최근 사용순) |
+| `deleteSegment()` | saved-segments.ts | 삭제 (소유자 확인) |
+| `touchSegment()` | saved-segments.ts | 사용 시각 갱신 |
+
+#### 핵심 변경
+- **RecommendTemplateModal 전면 리뉴얼** — 기본 예시 4개(2x2 그리드) + 내 저장 세그먼트 섹션. 타입별 배지(AI 한줄로/맞춤한줄), 삭제 버튼
+- **AiSendTypeModal 스킵** — 저장 세그먼트 클릭 시 타입이 이미 정해져 있으므로 중간 모달 없이 바로 실행
+- **맞춤한줄 Step 1 스킵** — preloadData prop으로 필드/브리핑/채널 사전 세팅, Step 2부터 시작
+- **발송 성공 후 저장** — CampaignSuccessModal에 "이 설정 저장하기" 인라인 폼 (이모지 선택 + 이름 입력)
+
+#### 수정 파일 (7개)
+| 파일 | 변경 |
+|------|------|
+| **(신규)** `utils/saved-segments.ts` | 컨트롤타워 4함수 |
+| **(신규)** `routes/saved-segments.ts` | CRUD 라우트 4개 |
+| `app.ts` | 라우트 등록 |
+| `RecommendTemplateModal.tsx` | 전면 리뉴얼 (Props 변경, 세그먼트 로드/삭제) |
+| `Dashboard.tsx` | customFlowPreload/lastSendConfig state + 배선 변경 + 저장 콜백 |
+| `AiCustomSendFlow.tsx` | preloadData prop + Step 스킵 useEffect |
+| `CampaignSuccessModal.tsx` | 저장 세그먼트 UI (이모지 + 이름 + 저장) |
+
+#### DB 마이그레이션 (Harold님 서버 실행)
+```sql
+CREATE TABLE saved_segments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id UUID NOT NULL REFERENCES companies(id),
+  user_id UUID NOT NULL REFERENCES users(id),
+  name VARCHAR(100) NOT NULL,
+  emoji VARCHAR(10) DEFAULT '📋',
+  segment_type VARCHAR(20) NOT NULL,
+  prompt TEXT,
+  auto_relax BOOLEAN DEFAULT false,
+  selected_fields TEXT[],
+  briefing TEXT,
+  url VARCHAR(500),
+  channel VARCHAR(10),
+  is_ad BOOLEAN DEFAULT false,
+  last_used_at TIMESTAMP,
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW()
+);
+CREATE INDEX idx_saved_segments_company_user ON saved_segments(company_id, user_id);
+```
+
+---
+
+### 🔧 D103 — (광고) 중복 수정 + 발송 경로 컨트롤타워 전면 통합 + 개별회신번호 동적 필터링 (2026-04-02) — ✅ 배포완료
 
 > **배경:** (광고) 중복 발송 버그 + 발송 경로 인라인 반복 패턴 전면 컨트롤타워화 + 개별회신번호 드롭다운에 전화번호 필드만 동적 표시.
 
@@ -148,7 +202,7 @@
 
 ---
 
-### 🔧 D104 — 0402 PPT 버그리포트 10건 (타임존 컨트롤타워화 + 숫자필터 + YYMMDD + cooldown) (2026-04-02) — 🟡 자동발송 제외 코드수정완료-배포대기
+### 🔧 D104 — 0402 PPT 버그리포트 10건 (타임존 컨트롤타워화 + 숫자필터 + YYMMDD + cooldown) (2026-04-02) — ✅ 배포완료
 
 > **배경:** 직원 PPT(한줄로_20260402.pdf) 10건. 타임존 날짜 비교를 컨트롤타워화, 숫자 필터 근본 수정, YYMMDD 보호, cooldown 축소. 자동발송 4건은 별도 세션.
 
@@ -178,7 +232,55 @@
 
 ---
 
-### 🔧 D105 — 자동발송 4단계 라이프사이클 개선 (P7~P10) (2026-04-02) — 🟡 코드수정완료-배포대기
+### 🔧 D106 — 0403 버그리포트 8건 + 컨트롤타워 전수점검 강제 프로세스 (2026-04-04) — ✅ 배포완료
+
+> **배경:** 직원 PDF(한줄로_20260403.pdf) 8건. 발송통계 컨트롤타워화, 발송결과 SQL ambiguous 수정, 회신번호 동적 감지 보강, 캘린더 (광고)+080 표시 경로 전수 적용, 자동발송 담당자 알림 라인 분리.
+
+#### 핵심 수정 (8건)
+| # | 버그 | 원인 | 수정 |
+|---|------|------|------|
+| B1 | 발송결과 조회 0건 | `LEFT JOIN users`에서 `status` ambiguous + `created_at` 필터 | aliasedWhere에 `\bstatus\b`,`\bsent_count\b`,`\bsent_at\b` 추가 + `COALESCE(sent_at, created_at)` 필터 |
+| B2 | 회신번호 드롭다운 무관 컬럼 | `detectPhoneFields` data_type 미체크 + 날짜 패턴 오매칭 | data_type 필터 추가 + isPhoneLikeValue에 `(19\|20)\d{6}` 제외 + 수신번호 컬럼 제외 |
+| B3 | 캘린더 (광고)+080 누락 | CalendarModal/ResultsModal/AdminDashboard에서 buildAdMessageFront 미호출 | 3곳 컨트롤타워 호출 추가 |
+| B4 | 자동발송 의견 미반영 | 담당자 알림이 대량발송 라인(차단됨)으로 발송 | B6과 동일 원인 — 11번 라인으로 수정 |
+| B5 | 스팸필터 미리보기 개인화 미치환 | replaceDirectVars(직접발송 변수 5개만)를 사용 → 필드매핑 변수 미인식 | AutoSendFormModal에서 replaceMessageVars로 사전 치환 후 전달 |
+| B6 | D-1 알림 미발송 | 담당자 알림이 getCompanySmsTables(대량발송 라인)으로 INSERT → Agent 차단 | 알림 3곳 getAuthSmsTable(11번 라인)으로 변경 |
+| B7 | 설정시간 3분 지연 | 5분 폴링 구조 한계 | 워커 간격 5분→3분 축소 |
+| B8 | 일별/월별 뒤바뀜 | 인라인 통계 쿼리 + 프론트 race condition | querySendStats 컨트롤타워 + requestIdRef stale 응답 무시 |
+
+#### 컨트롤타워 신설/강화
+| 컨트롤타워 | 파일 | 효과 |
+|-----------|------|------|
+| `querySendStats()` | stats-aggregation.ts | 발송통계 일별/월별 조회 단일 진입점. manage-stats.ts 인라인 쿼리 제거 |
+| `querySendStatsDetail()` | stats-aggregation.ts | 발송통계 상세(사용자별) 단일 진입점 |
+| `ensureMonthlyLogTables()` | sms-queue.ts | 앱 기동 시 당월+다음달 MySQL 로그 테이블 자동 확인/생성 (202604 미생성 사고 재발 방지) |
+
+#### 수정 파일 (14개)
+| 파일 | 변경 |
+|------|------|
+| stats-aggregation.ts | querySendStats + querySendStatsDetail 컨트롤타워 신설 |
+| manage-stats.ts | 인라인 통계 쿼리 → 컨트롤타워 import 교체 |
+| results.ts | aliasedWhere 컬럼 누락 수정 + COALESCE(sent_at, created_at) |
+| callback-filter.ts | isPhoneLikeValue 날짜패턴 제외 + detectPhoneFields data_type 필터 |
+| auto-campaign-worker.ts | 담당자 알림 3곳 → 11번 라인 + 워커 3분 간격 |
+| sms-queue.ts | ensureMonthlyLogTables 자동 생성 |
+| app.ts | ensureMonthlyLogTables 기동 시 호출 |
+| CalendarModal.tsx | buildAdMessageFront 적용 |
+| ResultsModal.tsx | buildAdMessageFront 적용 |
+| AdminDashboard.tsx | buildAdMessageFront 적용 |
+| AutoSendFormModal.tsx | replaceMessageVars 사전 치환 |
+| DirectSendPanel.tsx | 수신번호 컬럼 회신번호 드롭다운 제외 |
+| manage/StatsTab.tsx | requestIdRef race condition 방지 + period 키 |
+| StatsTab-company.tsx | requestIdRef race condition 방지 + period 키 |
+| formatDate.ts | isPhoneLikeValue 날짜패턴 제외 |
+
+#### CLAUDE.md 교훈 추가
+- **섹션 7-1 신설:** 컨트롤타워 수정/생성 시 필수 3단계 프로세스 (1단계: 소비처 전수 리스트업 → 2단계: 인라인 잔존 0건 확인 → 3단계: 표시 경로까지 확인)
+- **과거 교훈 테이블:** B1(status ambiguous), B2(isPhoneLikeValue 날짜오매칭), B3(buildAdMessageFront 표시경로 누락), B5(replaceDirectVars vs replaceMessageVars), B6(담당자 알림 라인 분리) 추가
+
+---
+
+### 🔧 D105 — 자동발송 4단계 라이프사이클 개선 (P7~P10) (2026-04-02) — ✅ 배포완료
 
 > **배경:** 직원 테스트에서 발견된 자동발송 버그 4건 + D-day 스팸테스트 신설. 직원 요청 프로세스에 맞게 워커 3단계→4단계로 확장.
 

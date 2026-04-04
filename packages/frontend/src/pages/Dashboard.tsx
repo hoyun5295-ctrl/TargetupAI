@@ -189,6 +189,9 @@ export default function Dashboard() {
   const [showAiCustomFlow, setShowAiCustomFlow] = useState(false);
   const [customSendData, setCustomSendData] = useState<any>(null);
   const [showCustomSendModal, setShowCustomSendModal] = useState(false);
+  // 저장 세그먼트용
+  const [customFlowPreload, setCustomFlowPreload] = useState<{selectedFields: string[]; briefing: string; url: string; channel: string; isAd: boolean} | null>(null);
+  const [lastSendConfig, setLastSendConfig] = useState<{type: 'hanjullo' | 'custom'; prompt?: string; autoRelax?: boolean; selectedFields?: string[]; briefing?: string; url?: string; channel?: string; isAd?: boolean} | null>(null);
   const [showSpamFilter, setShowSpamFilter] = useState(false);
   const [spamFilterData, setSpamFilterData] = useState<{sms?: string; lms?: string; callback: string; msgType: 'SMS'|'LMS'|'MMS'; subject?: string; firstRecipient?: Record<string, any>}>({callback:'',msgType:'SMS'});
   const [sampleCustomer, setSampleCustomer] = useState<Record<string, string>>({});
@@ -1543,12 +1546,14 @@ const campaignData = {
     setSuccessChannel(selectedChannel);  // ★ #8 수정
     setSuccessTargetCount(aiResult?.target?.count || 0);  // ★ #8 수정
     setSuccessUnsubscribeCount(aiResult?.target?.unsubscribeCount || 0);  // ★ B8-08 수정
-    
+    // ★ D107: 저장 세그먼트용 — 한줄로 설정 캐시
+    setLastSendConfig({ type: 'hanjullo', prompt: aiCampaignPrompt });
+
     // ★ B17-04: aiResult는 성공 모달용 값 저장 후 초기화 (중복 발송 방지)
     setAiResult(null);
     setSendTimeOption('ai');
     setCustomSendTime('');
-    
+
     setSuccessCampaignId(response.data.campaign?.id || '');
     setShowSuccess(true);
     loadRecentCampaigns();
@@ -1661,6 +1666,17 @@ const campaignData = {
       setSuccessChannel(customSendData?.channel || 'LMS');
       setSuccessTargetCount(customSendData?.estimatedCount || 0);
       setSuccessUnsubscribeCount(customSendData?.unsubscribeCount || 0);  // ★ B8-08 수정
+      // ★ D107: 저장 세그먼트용 — 맞춤한줄 설정 캐시
+      if (customSendData) {
+        setLastSendConfig({
+          type: 'custom',
+          selectedFields: customSendData.personalFields,
+          briefing: customSendData.briefing,
+          url: customSendData.url,
+          channel: customSendData.channel,
+          isAd: customSendData.isAd,
+        });
+      }
       setCustomSendData(null);
       // ★ B17-04: 이전 AI 결과 완전 초기화 (중복 발송 방지)
       setAiResult(null);
@@ -1879,7 +1895,8 @@ const campaignData = {
       {/* AI 맞춤한줄 플로우 */}
       {showAiCustomFlow && (
         <AiCustomSendFlow
-          onClose={() => { setShowAiCustomFlow(false); setCustomSendData(null); }}
+          onClose={() => { setShowAiCustomFlow(false); setCustomSendData(null); setCustomFlowPreload(null); }}
+          preloadData={customFlowPreload || undefined}
           onConfirmSend={(data) => {
             setCustomSendData(data);
             setShowCustomSendModal(true);
@@ -2706,13 +2723,38 @@ const campaignData = {
         />
         <CampaignSuccessModal
           show={showSuccess}
-          onClose={() => setShowSuccess(false)}
+          onClose={() => { setShowSuccess(false); setLastSendConfig(null); }}
           onShowCalendar={() => { setShowSuccess(false); setShowCalendar(true); }}
           selectedChannel={successChannel || selectedChannel}
           aiResult={aiResult}
           successSendInfo={successSendInfo}
           overrideTargetCount={successTargetCount || undefined}
           overrideUnsubscribeCount={successUnsubscribeCount || undefined}
+          canSaveSegment={!!lastSendConfig}
+          onSaveSegment={async (name: string, emoji: string) => {
+            if (!lastSendConfig) return;
+            const res = await fetch('/api/saved-segments', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token')}` },
+              body: JSON.stringify({
+                name,
+                emoji,
+                segmentType: lastSendConfig.type,
+                prompt: lastSendConfig.prompt,
+                autoRelax: lastSendConfig.autoRelax,
+                selectedFields: lastSendConfig.selectedFields,
+                briefing: lastSendConfig.briefing,
+                url: lastSendConfig.url,
+                channel: lastSendConfig.channel,
+                isAd: lastSendConfig.isAd,
+              }),
+            });
+            const data = await res.json();
+            if (!data.success) {
+              setToast({ show: true, type: 'error', message: data.error || '세그먼트 저장에 실패했습니다.' });
+              throw new Error(data.error);
+            }
+          }}
         />
         {showResults && <ResultsModal onClose={() => setShowResults(false)} token={localStorage.getItem('token')} />}
         {showCustomerDB && <CustomerDBModal onClose={() => setShowCustomerDB(false)} token={localStorage.getItem('token')} userType={user?.userType} />}
@@ -2742,7 +2784,20 @@ const campaignData = {
         
         <RecentCampaignModal show={showRecentCampaigns} onClose={() => setShowRecentCampaigns(false)} recentCampaigns={recentCampaigns} />
 
-        <RecommendTemplateModal show={showTemplates} onClose={() => setShowTemplates(false)} onSelectTemplate={(prompt) => { setAiCampaignPrompt(prompt); setShowTemplates(false); setShowAiSendType(true); }} />
+        <RecommendTemplateModal
+          show={showTemplates}
+          onClose={() => setShowTemplates(false)}
+          onSelectHanjullo={(prompt, autoRelax) => {
+            setShowTemplates(false);
+            setAiCampaignPrompt(prompt);
+            handleAiCampaignGenerate(prompt, autoRelax);
+          }}
+          onSelectCustom={(preloadData) => {
+            setShowTemplates(false);
+            setCustomFlowPreload(preloadData);
+            setShowAiCustomFlow(true);
+          }}
+        />
                             {/* 파일 업로드 캠페인 모달 */}
         {/* 직접 타겟 설정 모달 (D43-3: 컴포넌트 분리) */}
         <DirectTargetFilterModal

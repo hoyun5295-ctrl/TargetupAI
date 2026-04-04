@@ -29,6 +29,7 @@ import mmsImagesRoutes from './routes/mms-images';
 import spamFilterRoutes from './routes/spam-filter';
 import analysisRoutes from './routes/analysis';
 import autoCampaignsRoutes from './routes/auto-campaigns';
+import savedSegmentsRoutes from './routes/saved-segments';
 import { startAutoCampaignScheduler } from './utils/auto-campaign-worker';
 import { ensureMonthlyLogTables } from './utils/sms-queue';
 import { startSpamTestQueueWorker } from './utils/spam-test-queue';
@@ -101,6 +102,7 @@ app.use('/api/test-contacts', testContactsRoutes);
 app.use('/api/sms-templates', smsTemplatesRoutes);
 app.use('/api/mms-images', mmsImagesRoutes);
 app.use('/api/auto-campaigns', autoCampaignsRoutes);
+app.use('/api/saved-segments', savedSegmentsRoutes);
 
 // 공용 관리 라우트 (슈퍼관리자 + 고객사관리자)
 app.use('/api/manage/users', manageUsersRoutes);

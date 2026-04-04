@@ -51,6 +51,14 @@ interface AiCustomSendFlowProps {
   testSentResult?: string | null;
   sampleCustomer?: Record<string, any>;
   isSpamFilterLocked?: boolean;
+  // D107: 저장 세그먼트에서 프리로드
+  preloadData?: {
+    selectedFields: string[];
+    briefing: string;
+    url: string;
+    channel: string;
+    isAd: boolean;
+  };
 }
 
 interface PromotionCard {
@@ -101,7 +109,7 @@ const CATEGORY_ICONS: Record<string, any> = {
 export default function AiCustomSendFlow({
   onClose, onConfirmSend, brandName, callbackNumbers, selectedCallback, isAd, optOutNumber,
   setShowSpamFilter, setSpamFilterData, handleTestSend, testSending, testCooldown, testSentResult,
-  sampleCustomer, isSpamFilterLocked,
+  sampleCustomer, isSpamFilterLocked, preloadData,
 }: AiCustomSendFlowProps) {
   const [currentStep, setCurrentStep] = useState(1);
   const TOTAL_STEPS = 4;
@@ -239,6 +247,20 @@ export default function AiCustomSendFlow({
   };
 
   useEffect(() => { loadFields(); }, []);
+
+  // D107: 저장 세그먼트 프리로드 — 필드 로드 완료 후 적용
+  useEffect(() => {
+    if (preloadData && !fieldsLoading) {
+      setSelectedFields(preloadData.selectedFields);
+      setBriefing(preloadData.briefing);
+      setUrl(preloadData.url);
+      if (preloadData.channel === 'SMS' || preloadData.channel === 'LMS' || preloadData.channel === 'MMS') {
+        setChannel(preloadData.channel);
+      }
+      setIsAdLocal(preloadData.isAd);
+      setCurrentStep(2); // Step 1 스킵 → Step 2 (프로모션 브리���)부터
+    }
+  }, [preloadData, fieldsLoading]);
 
   const loadFields = async () => {
     try {

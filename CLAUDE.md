@@ -496,6 +496,11 @@ PostgreSQL campaigns/campaign_runs 생성
 | **buildDynamicFiltersForAPI filterValues 순회** | 숫자 필드 UI는 `_min/_max`만 설정 → 본 키가 filterValues에 없음 → number handler 미도달 → 포인트+누적구매금액 등 전체 숫자 필터 무시 | **selectedFields 순회로 변경.** 필드 선택 여부 기준으로 순회하면 값 존재 여부와 무관하게 handler 도달 (D104) |
 | **formatPreviewValue만 수정하고 formatNumberPreview 누락** | YYMMDD 보호를 formatPreviewValue에만 추가 → formatByType(data_type='number') 경로의 formatNumberPreview에 미적용 | **동일 역할의 형제 함수 전수 확인.** 숫자 포맷팅 경로: formatPreviewValue + formatNumberPreview 양쪽 동일 보호 필수 (D104) |
 | **컨트롤타워 함수 만들어놓고 import 안 함** | stats-aggregation.ts에 buildDateRangeFilter 수정했지만 라우트 0곳에서 import → 인라인 7곳 각각 수정 = 컨트롤타워화 아님 | **컨트롤타워 수정 시 소비처가 import하는지 반드시 확인.** import 0곳이면 인라인 제거 + import 교체까지 해야 완료 (D104) |
+| **LEFT JOIN 시 컬럼 ambiguous 미확인** | results.ts에서 `LEFT JOIN users` 추가 후 `status` 컬럼이 양쪽 테이블에 존재 → aliasedWhere에 `status` 변환 누락 → "column reference 'status' is ambiguous" 500 에러 | **LEFT JOIN 추가 시 WHERE절의 모든 컬럼이 테이블 접두사(c., u.)를 갖는지 확인.** aliasedWhere 변환 체인에 새 컬럼 추가 필수 (D106) |
+| **isPhoneLikeValue 날짜 패턴 오매칭** | `19950301`(생년월일)이 `1[0-9]{3}` 패턴(1588류 대표번호)에 매칭 → 생일 컬럼이 회신번호 드롭다운에 표시 | **isPhoneLikeValue에 `(19\|20)\d{6}` 날짜 패턴 제외.** detectPhoneFields에 data_type 필터 추가 (D106) |
+| **buildAdMessageFront 표시 경로 누락** | D102에서 발송 경로 통일했지만 CalendarModal/ResultsModal/AdminDashboard 표시 경로에 미적용 → 3번째 재발 | **발송 경로뿐 아니라 표시 경로(캘린더/발송결과/관리자) 전수 확인 필수.** CLAUDE.md 7-1 프로세스 참조 (D106) |
+| **replaceDirectVars vs replaceMessageVars 혼용** | 자동발송 스팸필터 미리보기가 replaceDirectVars(직접발송 변수 5개만) 사용 → 필드매핑 변수(%고객명%,%생일%) 미치환 | **자동발송/AI발송은 replaceMessageVars(필드매핑 기반), 직접발송은 replaceDirectVars.** 경로별 치환 함수 구분 (D106) |
+| **담당자 알림이 대량발송 라인으로 발송** | D-1 알림/AI문안알림/스팸결과알림이 getCompanySmsTables(대량발송 Agent)로 INSERT → 테스트기간 Agent 차단 시 미발송 | **담당자 알림은 getAuthSmsTable(11번 인증 라인)으로 분리.** 실제 발송만 업체 설정 라인 사용 (D106) |
 
 ### ⚠️ 필수 체크 원칙 1: 유틸 함수 수정/추가 시 소비처 전수 확인
 
