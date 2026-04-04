@@ -94,16 +94,16 @@ const CARD_ICON_MAP: Record<string, any> = {
   Users, User, Cake, BarChart3, Award, MapPin, Store, Mail, DollarSign, ShoppingCart, UserX, UserPlus, BellOff, Bell, Send, CreditCard, HelpCircle,
 };
 
-// D41 카드 색상 로테이션
+// D41 카드 아이콘 액센트 색상 (카드 자체는 white 통일)
 const CARD_COLORS = [
-  { bg: 'bg-emerald-50', border: 'border-emerald-200', text: 'text-emerald-700', accent: 'text-emerald-500' },
-  { bg: 'bg-blue-50', border: 'border-blue-200', text: 'text-blue-700', accent: 'text-blue-500' },
-  { bg: 'bg-amber-50', border: 'border-amber-200', text: 'text-amber-700', accent: 'text-amber-500' },
-  { bg: 'bg-violet-50', border: 'border-violet-200', text: 'text-violet-700', accent: 'text-violet-500' },
-  { bg: 'bg-rose-50', border: 'border-rose-200', text: 'text-rose-700', accent: 'text-rose-500' },
-  { bg: 'bg-cyan-50', border: 'border-cyan-200', text: 'text-cyan-700', accent: 'text-cyan-500' },
-  { bg: 'bg-orange-50', border: 'border-orange-200', text: 'text-orange-700', accent: 'text-orange-500' },
-  { bg: 'bg-teal-50', border: 'border-teal-200', text: 'text-teal-700', accent: 'text-teal-500' },
+  { bg: 'bg-white', border: 'border-gray-100', text: 'text-gray-900', accent: 'text-emerald-600', iconBg: 'bg-emerald-50', barColor: 'bg-emerald-500' },
+  { bg: 'bg-white', border: 'border-gray-100', text: 'text-gray-900', accent: 'text-blue-600', iconBg: 'bg-blue-50', barColor: 'bg-blue-500' },
+  { bg: 'bg-white', border: 'border-gray-100', text: 'text-gray-900', accent: 'text-amber-600', iconBg: 'bg-amber-50', barColor: 'bg-amber-500' },
+  { bg: 'bg-white', border: 'border-gray-100', text: 'text-gray-900', accent: 'text-violet-600', iconBg: 'bg-violet-50', barColor: 'bg-violet-500' },
+  { bg: 'bg-white', border: 'border-gray-100', text: 'text-gray-900', accent: 'text-rose-600', iconBg: 'bg-rose-50', barColor: 'bg-rose-500' },
+  { bg: 'bg-white', border: 'border-gray-100', text: 'text-gray-900', accent: 'text-cyan-600', iconBg: 'bg-cyan-50', barColor: 'bg-cyan-500' },
+  { bg: 'bg-white', border: 'border-gray-100', text: 'text-gray-900', accent: 'text-orange-600', iconBg: 'bg-orange-50', barColor: 'bg-orange-500' },
+  { bg: 'bg-white', border: 'border-gray-100', text: 'text-gray-900', accent: 'text-teal-600', iconBg: 'bg-teal-50', barColor: 'bg-teal-500' },
 ];
 
 interface DashboardCardData {
@@ -2146,19 +2146,26 @@ const campaignData = {
               </div>
             </div>
 
-            {/* 2행: DB현황 — 동적 카드 (D41) */}
-            <div className="bg-white/50 rounded-xl p-5 border border-green-200 flex-1">
-              <div className="flex items-center justify-between mb-4">
-                <span className="text-sm text-gray-500 font-medium">DB 현황</span>
-                <button onClick={() => isSubscriptionLocked ? setShowSubscriptionLock(true) : setShowCustomerDB(true)} className="text-green-700 text-xs font-medium hover:text-green-800 transition-colors">DB 정보조회 →</button>
+            {/* 2행: DB현황 — 동적 카드 (D41, D107 리뉴얼) */}
+            <div className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm flex-1">
+              <div className="flex items-center justify-between mb-5">
+                <div className="flex items-center gap-2">
+                  <div className="w-1 h-4 bg-green-600 rounded-full" />
+                  <span className="text-sm font-semibold text-gray-800">DB 현황</span>
+                </div>
+                <button onClick={() => isSubscriptionLocked ? setShowSubscriptionLock(true) : setShowCustomerDB(true)} className="text-xs font-medium text-gray-400 hover:text-green-700 transition-colors flex items-center gap-1">
+                  상세보기 <span className="text-[10px]">→</span>
+                </button>
               </div>
 
               {/* 카드 미설정 */}
               {(!dashboardCards || !dashboardCards.configured) && (
-                <div className="flex items-center justify-center py-8 text-gray-400">
+                <div className="flex items-center justify-center py-10 text-gray-400">
                   <div className="text-center">
-                    <div className="text-3xl mb-2">📊</div>
-                    <div className="text-sm">관리자가 대시보드 카드를 설정하면 표시됩니다</div>
+                    <div className="w-12 h-12 rounded-2xl bg-gray-50 flex items-center justify-center mx-auto mb-3">
+                      <BarChart3 className="w-6 h-6 text-gray-300" />
+                    </div>
+                    <div className="text-sm text-gray-400">관리자가 대시보드 카드를 설정하면 표시됩니다</div>
                   </div>
                 </div>
               )}
@@ -2167,20 +2174,22 @@ const campaignData = {
               {dashboardCards?.configured && dashboardCards?.hasCustomerData === false && (
                 <div className="relative">
                   <div className="grid grid-cols-3 gap-3 filter blur-sm pointer-events-none select-none">
-                    {dashboardCards.cards.slice(0, 6).map((card, i) => (
-                      <div key={card.cardId} className="text-center p-3 bg-gray-50 rounded-lg">
-                        <div className="text-xl font-bold text-gray-300">0</div>
-                        <div className="text-xs text-gray-300 mt-1">{card.label}</div>
+                    {dashboardCards.cards.slice(0, 6).map((card) => (
+                      <div key={card.cardId} className="p-4 bg-gray-50/50 rounded-xl">
+                        <div className="text-lg font-bold text-gray-200">0</div>
+                        <div className="text-[10px] text-gray-300 mt-1">{card.label}</div>
                       </div>
                     ))}
                   </div>
-                  <div className="absolute inset-0 flex items-center justify-center bg-white/60 rounded-lg">
+                  <div className="absolute inset-0 flex items-center justify-center bg-white/70 backdrop-blur-[2px] rounded-xl">
                     <div className="text-center">
-                      <div className="text-3xl mb-2">📂</div>
-                      <div className="text-sm text-gray-600 font-medium mb-2">고객 DB를 업로드하면 현황을 확인할 수 있습니다</div>
+                      <div className="w-12 h-12 rounded-2xl bg-green-50 flex items-center justify-center mx-auto mb-3">
+                        <Users className="w-6 h-6 text-green-500" />
+                      </div>
+                      <div className="text-sm text-gray-600 font-medium mb-3">고객 DB를 업로드하면 현황을 확인할 수 있습니다</div>
                       <button
                         onClick={() => { if (isSubscriptionLocked) { setShowSubscriptionLock(true); return; } setShowFileUpload(true); }}
-                        className="px-4 py-1.5 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700 transition-colors"
+                        className="px-5 py-2 bg-gray-900 text-white text-xs font-medium rounded-xl hover:bg-gray-800 transition-colors shadow-sm"
                       >
                         고객 DB 업로드
                       </button>
@@ -2189,7 +2198,7 @@ const campaignData = {
                 </div>
               )}
 
-              {/* 정상 표시: 6개씩 페이징 카드 렌더링 (D77) */}
+              {/* 정상 표시: 6개씩 페이징 카드 렌더링 (D77, D107 리뉴얼) */}
               {dashboardCards?.configured && dashboardCards?.hasCustomerData && (() => {
                 const CARDS_PER_PAGE = 6;
                 const allCards = dashboardCards.cards;
@@ -2205,44 +2214,48 @@ const campaignData = {
                         const color = CARD_COLORS[globalIdx % CARD_COLORS.length];
                         const IconComp = CARD_ICON_MAP[card.icon] || HelpCircle;
 
-                        // 데이터 없는 카드 — 블러 처리
+                        // 데이터 없는 카드
                         if (!card.hasData) {
                           return (
-                            <div key={card.cardId} className="relative text-center p-3 bg-gray-50 rounded-lg border border-gray-200">
-                              <div className="filter blur-sm">
-                                <div className="text-xl font-bold text-gray-300">-</div>
-                              </div>
-                              <div className="text-xs text-gray-400 mt-1">{card.label}</div>
-                              <div className="absolute inset-0 flex items-center justify-center">
-                                <span className="text-[10px] text-gray-400 bg-white/80 px-1.5 py-0.5 rounded">데이터 없음</span>
-                              </div>
+                            <div key={card.cardId} className="relative p-4 rounded-xl border border-gray-100 bg-gray-50/30">
+                              <div className="text-xs text-gray-400 mb-2">{card.label}</div>
+                              <div className="text-lg font-bold text-gray-200">-</div>
+                              <span className="absolute top-2 right-2 text-[9px] text-gray-300 bg-gray-100 px-1.5 py-0.5 rounded-md">N/A</span>
                             </div>
                           );
                         }
 
-                        // distribution 타입 — 분포 표시
+                        // distribution 타입 — 프로그레스 바 시각화
                         if (card.type === 'distribution' && Array.isArray(card.value)) {
                           const items = card.value.slice(0, 3);
+                          const maxCount = Math.max(...items.map(it => it.count), 1);
                           return (
-                            <div key={card.cardId} className={`p-3 rounded-lg border ${color.border} ${color.bg}`}>
-                              <div className="flex items-center gap-1.5 mb-2">
-                                <IconComp className={`w-3.5 h-3.5 ${color.accent}`} />
-                                <span className="text-xs text-gray-500 font-medium">{card.label}</span>
+                            <div key={card.cardId} className="p-4 rounded-xl border border-gray-100 hover:shadow-md hover:-translate-y-0.5 transition-all">
+                              <div className="flex items-center gap-2 mb-3">
+                                <div className={`w-7 h-7 rounded-lg ${color.iconBg} flex items-center justify-center`}>
+                                  <IconComp className={`w-3.5 h-3.5 ${color.accent}`} />
+                                </div>
+                                <span className="text-[11px] text-gray-500 font-medium">{card.label}</span>
                               </div>
-                              <div className="space-y-1">
+                              <div className="space-y-2">
                                 {items.map((item, j) => (
-                                  <div key={j} className="flex justify-between text-xs">
-                                    <span className="text-gray-600 truncate">{item.label}</span>
-                                    <span className={`font-bold ${color.text}`}>{item.count.toLocaleString()}</span>
+                                  <div key={j}>
+                                    <div className="flex justify-between text-[11px] mb-0.5">
+                                      <span className="text-gray-500 truncate max-w-[60%]">{item.label}</span>
+                                      <span className="font-semibold text-gray-800">{item.count.toLocaleString()}</span>
+                                    </div>
+                                    <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                                      <div className={`h-full ${color.barColor} rounded-full transition-all duration-500`} style={{ width: `${(item.count / maxCount) * 100}%` }} />
+                                    </div>
                                   </div>
                                 ))}
-                                {items.length === 0 && <div className="text-xs text-gray-400 text-center">-</div>}
+                                {items.length === 0 && <div className="text-[11px] text-gray-300 text-center py-2">-</div>}
                               </div>
                             </div>
                           );
                         }
 
-                        // count / rate / sum 타입 — 숫자 표시
+                        // count / rate / sum 타입 — 숫자 카드
                         const numVal = typeof card.value === 'number' ? card.value : 0;
                         let displayVal = numVal.toLocaleString();
                         let suffix = '';
@@ -2252,26 +2265,30 @@ const campaignData = {
                         else { suffix = '명'; }
 
                         return (
-                          <div key={card.cardId} className={`text-center p-3 rounded-lg border ${color.border} ${color.bg}`}>
-                            <IconComp className={`w-5 h-5 mx-auto mb-1.5 ${color.accent}`} />
-                            <div className={`text-xl font-bold ${color.text}`}>
-                              {displayVal}<span className="text-xs font-normal text-gray-400 ml-0.5">{suffix}</span>
+                          <div key={card.cardId} className="p-4 rounded-xl border border-gray-100 hover:shadow-md hover:-translate-y-0.5 transition-all">
+                            <div className="flex items-center gap-2 mb-3">
+                              <div className={`w-8 h-8 rounded-xl ${color.iconBg} flex items-center justify-center`}>
+                                <IconComp className={`w-4 h-4 ${color.accent}`} />
+                              </div>
+                              <span className="text-[11px] text-gray-400">{card.label}</span>
                             </div>
-                            <div className="text-xs text-gray-500 mt-1">{card.label}</div>
+                            <div className="text-2xl font-bold text-gray-900 tracking-tight">
+                              {displayVal}<span className="text-sm font-normal text-gray-400 ml-0.5">{suffix}</span>
+                            </div>
                           </div>
                         );
                       })}
                     </div>
 
-                    {/* 페이지 인디케이터 (2페이지 이상일 때만 표시) */}
+                    {/* 페이지 인디케이터 */}
                     {totalPages > 1 && (
-                      <div className="flex items-center justify-center gap-1.5 mt-3">
+                      <div className="flex items-center justify-center gap-1.5 mt-4">
                         {Array.from({ length: totalPages }, (_, idx) => (
                           <button
                             key={idx}
                             onClick={() => setDbCardPage(idx)}
-                            className={`w-2 h-2 rounded-full transition-all ${
-                              idx === safePage ? 'bg-green-500 w-4' : 'bg-gray-300 hover:bg-gray-400'
+                            className={`h-1.5 rounded-full transition-all duration-300 ${
+                              idx === safePage ? 'bg-gray-800 w-5' : 'bg-gray-200 w-1.5 hover:bg-gray-400'
                             }`}
                           />
                         ))}

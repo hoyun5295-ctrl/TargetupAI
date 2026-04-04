@@ -11,6 +11,22 @@ interface ResultsModalProps {
 
 // CARRIER_MAP 삭제 — 백엔드 API가 carrier_label 직접 전달
 
+// D107: 메시지 내용 셀 컨트롤타워 (3곳 통일)
+function MessageCell({ content, maxWidth, onShowDetail }: { content: string; maxWidth?: string; onShowDetail: (text: string) => void }) {
+  const display = content.length > 40 ? content.slice(0, 40) + '...' : content;
+  return (
+    <td className={`px-3 py-2.5 text-xs text-gray-600 ${maxWidth || 'max-w-[250px]'}`}>
+      <button
+        onClick={() => onShowDetail(content)}
+        className="text-left truncate block max-w-full hover:text-emerald-600 hover:underline cursor-pointer"
+        title="클릭하여 전체 내용 보기"
+      >
+        {display}
+      </button>
+    </td>
+  );
+}
+
 export default function ResultsModal({ onClose, token }: ResultsModalProps) {
   const [activeTab, setActiveTab] = useState<'summary' | 'test'>('summary');
   const [testStats, setTestStats] = useState<any>(null);
@@ -371,15 +387,10 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
                             </span>
                           </td>
                           <td className="px-3 py-2.5 text-center text-xs text-gray-600">{c.created_by_name || '-'}</td>
-                          <td className="px-3 py-2.5 max-w-[200px] text-gray-700">
-                            <button
-                              onClick={() => setMsgDetailContent(buildAdMessageFront(c.message_content || '', c.message_type || 'SMS', c.is_ad || false, c.callback_number || ''))}
-                              className="truncate block text-left hover:text-emerald-600 hover:underline cursor-pointer max-w-full"
-                              title="클릭하여 전체 내용 보기"
-                            >
-                              {buildAdMessageFront(c.message_content || '', c.message_type || 'SMS', c.is_ad || false, c.callback_number || '')}
-                            </button>
-                          </td>
+                          <MessageCell
+                            content={buildAdMessageFront(c.message_content || '', c.message_type || 'SMS', c.is_ad || false, c.callback_number || '')}
+                            onShowDetail={setMsgDetailContent}
+                          />
                           <td className="px-3 py-2.5 text-center text-xs text-gray-500">
                           {new Date(c.created_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
                           </td>
@@ -605,7 +616,11 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
                               </span>
                             </td>
                             <td className="px-3 py-2 font-mono text-xs">{t.phone}</td>
-                            <td className="px-3 py-2 max-w-[300px] truncate">{t.content}</td>
+                            <MessageCell
+                              content={t.content || ''}
+                              maxWidth="max-w-[300px]"
+                              onShowDetail={setMsgDetailContent}
+                            />
                             <td className="px-3 py-2 text-center">
                               <span className={`px-2 py-0.5 rounded text-xs font-medium ${
                                 t.status === 'success' ? 'bg-green-50 text-green-700' : t.status === 'pending' ? 'bg-yellow-50 text-yellow-700' : 'bg-red-50 text-red-700'
@@ -941,31 +956,10 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
                             <td className="px-3 py-2.5 text-center text-xs text-gray-400">{(messagePage - 1) * messagePerPage + idx + 1}</td>
                             <td className="px-3 py-2.5 font-mono text-xs">{formatPhone(m.dest_no)}</td>
                             <td className="px-3 py-2.5 font-mono text-xs text-gray-600">{formatPhone(m.call_back)}</td>
-                            <td className="px-3 py-2.5 text-xs text-gray-600 max-w-[120px]">
-                              <div className="relative group/msg">
-                                <span className="truncate block cursor-pointer hover:text-emerald-600" title="클릭하여 전체 내용 보기" onClick={() => setMsgDetailContent(m.msg_contents || '')}>{(m.msg_contents || '').slice(0, 10)}{(m.msg_contents || '').length > 10 ? '...' : ''}</span>
-                                {(m.msg_contents || '').length > 10 && (
-                                  <div className="invisible group-hover/msg:visible absolute left-full top-0 ml-2 z-[100]">
-                                    <div className="w-[250px] rounded-[1.4rem] p-[3px] bg-gradient-to-b from-emerald-400 to-emerald-600 shadow-2xl">
-                                      <div className="bg-white rounded-[1.2rem] overflow-hidden flex flex-col" style={{ maxHeight: '400px' }}>
-                                        <div className="px-3 py-1.5 bg-gradient-to-r from-gray-50 to-gray-100 flex justify-between items-center shrink-0 border-b">
-                                          <span className="text-[10px] text-gray-400 font-medium">문자메시지</span>
-                                          <span className="text-[10px] font-bold text-emerald-600">{m.msg_type === 'S' ? 'SMS' : m.msg_type === 'L' ? 'LMS' : m.msg_type}</span>
-                                        </div>
-                                        <div className="flex-1 overflow-y-auto p-2 bg-gradient-to-b from-emerald-50/30 to-white">
-                                          <div className="flex gap-1.5">
-                                            <div className="w-5 h-5 rounded-full bg-emerald-100 flex items-center justify-center shrink-0 text-[8px] font-bold text-emerald-600">T</div>
-                                            <div className="bg-white rounded-xl rounded-tl-sm p-2 shadow-sm border border-gray-100 text-[10px] leading-[1.6] whitespace-pre-wrap text-gray-700 max-w-[95%]">
-                                              {m.msg_contents || ''}
-                                            </div>
-                                          </div>
-                                        </div>
-                                      </div>
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                            </td>
+                            <MessageCell
+                              content={m.msg_contents || ''}
+                              onShowDetail={setMsgDetailContent}
+                            />
                             <td className="px-3 py-2.5 text-center text-xs text-gray-500">{formatDateTime(m.sendreq_time)}</td>
                             <td className="px-3 py-2.5 text-center text-xs text-gray-500">{formatDateTime(m.mobsend_time)}</td>
                             <td className="px-3 py-2.5 text-center">

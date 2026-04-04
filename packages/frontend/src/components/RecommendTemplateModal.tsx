@@ -309,13 +309,38 @@ function EditSegmentModal({ mode, segment, onClose, onSave }: {
   const [emoji, setEmoji] = useState(segment?.emoji || '📋');
   const [segmentType, setSegmentType] = useState<'hanjullo' | 'custom'>(segment?.segment_type || 'hanjullo');
   const [prompt, setPrompt] = useState(segment?.prompt || '');
-  const [selectedFields, setSelectedFields] = useState<string>(segment?.selected_fields?.join(', ') || 'name');
+  const [selectedFieldKeys, setSelectedFieldKeys] = useState<string[]>(segment?.selected_fields || ['name']);
+  const [availableFields, setAvailableFields] = useState<any[]>([]);
+  const [fieldsLoading, setFieldsLoading] = useState(false);
   const [briefing, setBriefing] = useState(segment?.briefing || '');
   const [url, setUrl] = useState(segment?.url || '');
   const [channel, setChannel] = useState(segment?.channel || 'LMS');
   const [isAd, setIsAd] = useState(segment?.is_ad || false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+
+  // 맞춤한줄 선택 시 enabled-fields 로드
+  useEffect(() => {
+    if (segmentType === 'custom' && availableFields.length === 0) loadFields();
+  }, [segmentType]);
+
+  const loadFields = async () => {
+    setFieldsLoading(true);
+    try {
+      const res = await fetch('/api/customers/enabled-fields', {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setAvailableFields(data.fields || []);
+      }
+    } catch (e) { console.error('필드 로드 실패:', e); }
+    finally { setFieldsLoading(false); }
+  };
+
+  const toggleField = (key: string) => {
+    setSelectedFieldKeys(prev => prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]);
+  };
 
   const handleSubmit = async () => {
     if (!name.trim()) { setError('템플릿 이름을 입력해주세요.'); return; }
@@ -325,7 +350,7 @@ function EditSegmentModal({ mode, segment, onClose, onSave }: {
     const data: any = {
       name: name.trim(), emoji, segmentType,
       prompt: segmentType === 'hanjullo' ? prompt.trim() : null,
-      selectedFields: segmentType === 'custom' ? selectedFields.split(',').map((s: string) => s.trim()).filter(Boolean) : null,
+      selectedFields: segmentType === 'custom' ? selectedFieldKeys : null,
       briefing: segmentType === 'custom' ? briefing.trim() || null : null,
       url: url.trim() || null,
       channel: segmentType === 'custom' ? channel : null,
@@ -429,15 +454,38 @@ function EditSegmentModal({ mode, segment, onClose, onSave }: {
           {segmentType === 'custom' && (
             <>
               <div>
-                <label className="text-xs font-medium text-gray-600 mb-1.5 block">활용 필드 (쉼표 구분)</label>
-                <input
-                  type="text"
-                  value={selectedFields}
-                  onChange={e => setSelectedFields(e.target.value)}
-                  placeholder="name, grade, points"
-                  className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-400"
-                />
-                <p className="text-[10px] text-gray-400 mt-1">예: name, grade, points, birth_date</p>
+                <label className="text-xs font-medium text-gray-600 mb-1.5 block">활용 필드 선택</label>
+                {fieldsLoading ? (
+                  <div className="flex items-center justify-center py-4">
+                    <div className="animate-spin w-4 h-4 border-2 border-gray-300 border-t-purple-500 rounded-full" />
+                    <span className="ml-2 text-xs text-gray-400">필드 불러오는 중...</span>
+                  </div>
+                ) : availableFields.length === 0 ? (
+                  <p className="text-xs text-gray-400 py-2">사용 가능한 필드가 없습니다. 고객 데이터를 먼저 업로드해주세요.</p>
+                ) : (
+                  <div className="border border-gray-200 rounded-xl p-3 max-h-[160px] overflow-y-auto space-y-1">
+                    {availableFields.map((f: any) => (
+                      <label
+                        key={f.field_key}
+                        className={`flex items-center gap-2.5 px-2 py-1.5 rounded-lg cursor-pointer transition-colors ${
+                          selectedFieldKeys.includes(f.field_key) ? 'bg-purple-50' : 'hover:bg-gray-50'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedFieldKeys.includes(f.field_key)}
+                          onChange={() => toggleField(f.field_key)}
+                          className="w-3.5 h-3.5 rounded border-gray-300 text-purple-600 focus:ring-purple-400"
+                        />
+                        <span className="text-sm text-gray-700">{f.display_name || f.field_key}</span>
+                        {f.category && <span className="text-[9px] text-gray-400 ml-auto">{f.category}</span>}
+                      </label>
+                    ))}
+                  </div>
+                )}
+                {selectedFieldKeys.length > 0 && (
+                  <p className="text-[10px] text-gray-400 mt-1.5">{selectedFieldKeys.length}개 선택됨</p>
+                )}
               </div>
               <div>
                 <label className="text-xs font-medium text-gray-600 mb-1.5 block">프로모션 브리핑</label>
