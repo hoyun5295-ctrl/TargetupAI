@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { authenticate } from '../middlewares/auth';
-import { saveSegment, getSegments, deleteSegment, touchSegment } from '../utils/saved-segments';
+import { saveSegment, getSegments, deleteSegment, updateSegment, touchSegment } from '../utils/saved-segments';
 
 const router = Router();
 
@@ -50,6 +50,28 @@ router.post('/', async (req: Request, res: Response) => {
     }
     console.error('세그먼트 저장 에러:', error);
     return res.status(500).json({ error: '저장 중 오류가 발생했습니다.' });
+  }
+});
+
+// 수정
+router.put('/:id', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
+    if (!companyId || !userId) return res.status(403).json({ error: '권한이 없습니다.' });
+
+    const { name, emoji, segmentType, prompt, autoRelax, selectedFields, briefing, url, channel, isAd } = req.body;
+
+    const segment = await updateSegment(req.params.id, companyId, userId, {
+      name, emoji, segmentType, prompt, autoRelax, selectedFields, briefing, url, channel, isAd,
+    });
+    if (!segment) {
+      return res.status(404).json({ error: '세그먼트를 찾을 수 없습니다.' });
+    }
+    return res.json({ success: true, segment, message: '수정되었습니다.' });
+  } catch (error: any) {
+    console.error('세그먼트 수정 에러:', error);
+    return res.status(500).json({ error: '수정 중 오류가 발생했습니다.' });
   }
 });
 

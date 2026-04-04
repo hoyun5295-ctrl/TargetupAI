@@ -2453,12 +2453,12 @@ const campaignData = {
                     <div className="text-xl font-bold text-green-700">{recentCampaigns.length}건</div>
                   </div>
 
-                  {/* 빠른 발송 예시 */}
+                  {/* AI 발송 템플릿 */}
                   <div onClick={() => { if (isSubscriptionLocked) { setShowSubscriptionLock(true); return; } setShowTemplates(true); }} className={`bg-white/50 shadow-sm rounded-xl p-6 min-h-[140px] cursor-pointer hover:shadow-lg transition-all text-center border border-green-200 ${isSubscriptionLocked ? 'opacity-60' : ''}`}>
-                    <Rocket className="w-8 h-8 mx-auto mb-3 text-green-600" />
-                    <div className="font-semibold text-gray-800 mb-1">{isSubscriptionLocked ? '🔒 ' : ''}발송 예시</div>
-                    <div className="text-xs text-gray-500 mb-3">클릭하면 바로 실행</div>
-                    <div className="text-xl font-bold text-green-700">4개</div>
+                    <Sparkles className="w-8 h-8 mx-auto mb-3 text-green-600" />
+                    <div className="font-semibold text-gray-800 mb-1">{isSubscriptionLocked ? '🔒 ' : ''}AI 발송 템플릿</div>
+                    <div className="text-xs text-gray-500 mb-3">저장 & 바로 실행</div>
+                    <div className="text-xl font-bold text-green-700">관리</div>
                   </div>
 
                   {/* 고객 인사이트 */}
