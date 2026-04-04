@@ -1,4 +1,4 @@
-﻿import { Award, BarChart3, Bell, BellOff, Cake, Clock, CreditCard, DollarSign, HelpCircle, Mail, MapPin, Rocket, Send, ShoppingCart, Sparkles, Store, User, UserPlus, Users, UserX } from 'lucide-react';
+﻿import { Award, BarChart3, Bell, BellOff, Cake, ChevronLeft, ChevronRight, Clock, CreditCard, DollarSign, HelpCircle, Mail, MapPin, Rocket, Send, ShoppingCart, Sparkles, Store, User, UserPlus, Users, UserX } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { aiApi, campaignsApi, customersApi } from '../api/client';
@@ -2073,13 +2073,16 @@ const campaignData = {
             {/* 1행: 요금제 + 발송현황 */}
             <div className="flex gap-4">
               {/* 요금제 현황 */}
-              <div 
+              <div
                 onClick={() => navigate('/pricing')}
-                className="w-[40%] bg-white/50 rounded-xl p-5 cursor-pointer hover:bg-white/80 transition-all border border-green-200"
+                className="w-[40%] bg-white rounded-2xl p-5 cursor-pointer hover:shadow-md transition-all border border-gray-100 shadow-sm"
               >
                 <div className="flex items-center justify-between mb-3">
-                  <span className="text-xs text-gray-400 font-medium">요금제 현황</span>
-                  <span className="text-green-700 text-xs font-medium">요금제 안내 →</span>
+                  <div className="flex items-center gap-2">
+                    <div className="w-1 h-4 bg-green-600 rounded-full" />
+                    <span className="text-sm font-semibold text-gray-800">요금제 현황</span>
+                  </div>
+                  <span className="text-xs font-medium text-gray-400 hover:text-green-700 transition-colors">요금제 안내 <span className="text-[10px]">→</span></span>
                 </div>
                 <div className="text-lg font-bold text-gray-800 mb-1">
                   {planInfo?.plan_name || '로딩...'}
@@ -2122,11 +2125,14 @@ const campaignData = {
               </div>
 
               {/* 발송 현황 */}
-              <div className="w-[60%] bg-white/50 rounded-xl p-5 border border-amber-200">
+              <div className="w-[60%] bg-white rounded-2xl p-5 border border-gray-100 shadow-sm">
                 <div className="flex items-center justify-between mb-3">
-                  <span className="text-xs text-gray-400 font-medium">발송 현황</span>
+                  <div className="flex items-center gap-2">
+                    <div className="w-1 h-4 bg-green-600 rounded-full" />
+                    <span className="text-sm font-semibold text-gray-800">발송 현황</span>
+                  </div>
                   {balanceInfo?.billingType === 'prepaid' && (
-                    <button onClick={() => setShowBalanceModal(true)} className="text-green-700 text-xs font-medium hover:text-green-800 transition-colors">잔액 현황 →</button>
+                    <button onClick={() => setShowBalanceModal(true)} className="text-xs font-medium text-gray-400 hover:text-green-700 transition-colors">잔액 현황 <span className="text-[10px]">→</span></button>
                   )}
                 </div>
                 <div className="grid grid-cols-3 gap-2">
@@ -2280,18 +2286,34 @@ const campaignData = {
                       })}
                     </div>
 
-                    {/* 페이지 인디케이터 */}
+                    {/* 페이지 인디케이터 + 좌우 화살표 */}
                     {totalPages > 1 && (
-                      <div className="flex items-center justify-center gap-1.5 mt-4">
-                        {Array.from({ length: totalPages }, (_, idx) => (
-                          <button
-                            key={idx}
-                            onClick={() => setDbCardPage(idx)}
-                            className={`h-1.5 rounded-full transition-all duration-300 ${
-                              idx === safePage ? 'bg-gray-800 w-5' : 'bg-gray-200 w-1.5 hover:bg-gray-400'
-                            }`}
-                          />
-                        ))}
+                      <div className="flex items-center justify-between mt-4">
+                        <button
+                          onClick={() => setDbCardPage(p => Math.max(0, p - 1))}
+                          disabled={safePage === 0}
+                          className="w-7 h-7 rounded-full flex items-center justify-center text-green-600 hover:bg-green-50 disabled:opacity-20 disabled:hover:bg-transparent transition-colors"
+                        >
+                          <ChevronLeft className="w-4 h-4" />
+                        </button>
+                        <div className="flex items-center gap-1.5">
+                          {Array.from({ length: totalPages }, (_, idx) => (
+                            <button
+                              key={idx}
+                              onClick={() => setDbCardPage(idx)}
+                              className={`h-1.5 rounded-full transition-all duration-300 ${
+                                idx === safePage ? 'bg-gray-800 w-5' : 'bg-gray-200 w-1.5 hover:bg-gray-400'
+                              }`}
+                            />
+                          ))}
+                        </div>
+                        <button
+                          onClick={() => setDbCardPage(p => Math.min(totalPages - 1, p + 1))}
+                          disabled={safePage >= totalPages - 1}
+                          className="w-7 h-7 rounded-full flex items-center justify-center text-green-600 hover:bg-green-50 disabled:opacity-20 disabled:hover:bg-transparent transition-colors"
+                        >
+                          <ChevronRight className="w-4 h-4" />
+                        </button>
                       </div>
                     )}
                   </div>
