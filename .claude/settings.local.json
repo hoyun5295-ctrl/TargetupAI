@@ -93,7 +93,9 @@
       "Bash(grep -E \"\\\\.\\(ts|tsx\\)$\")",
       "Bash(grep -n \"phoneFields\" /c/Users/ceo/projects/targetup/packages/backend/src/routes/*.ts)",
       "Bash(grep -l \"message_content\" /c/Users/ceo/projects/targetup/packages/frontend/src/components/*.tsx)",
-      "Bash(xargs basename:*)"
+      "Bash(xargs basename:*)",
+      "Bash(ls /c/Users/ceo/projects/targetup/*.pdf)",
+      "Bash(python generate_sample_pdfs.py)"
     ]
   }
 }

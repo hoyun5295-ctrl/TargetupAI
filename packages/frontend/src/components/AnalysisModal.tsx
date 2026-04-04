@@ -382,6 +382,42 @@ function PreviewSection({ teaser }: { teaser: TeaserData | null }) {
         </div>
       </div>
 
+      {/* D108: 예시 리포트 다운로드 */}
+      <div className="mb-8" style={{ animation: 'analysisFadeUp 0.75s ease-out' }}>
+        <h3 className="text-sm font-semibold text-gray-500 mb-3 flex items-center gap-2">
+          <Download size={14} />
+          AI 분석 예시 리포트
+        </h3>
+        <div className="grid grid-cols-2 gap-3">
+          <a
+            href="/sample_analysis_pro.pdf"
+            download="한줄로_AI기본분석_예시_PRO.pdf"
+            className="flex items-center gap-3 p-4 rounded-xl border border-green-200 bg-green-50/50 hover:bg-green-50 hover:shadow-md transition-all group"
+          >
+            <div className="w-10 h-10 rounded-xl bg-green-100 flex items-center justify-center shrink-0">
+              <FileText size={18} className="text-green-600" />
+            </div>
+            <div>
+              <div className="text-sm font-semibold text-gray-800 group-hover:text-green-700">PRO 기본분석 예시</div>
+              <div className="text-[10px] text-gray-400">6개 인사이트 · PDF 다운로드</div>
+            </div>
+          </a>
+          <a
+            href="/sample_analysis_business.pdf"
+            download="한줄로_AI상세분석_예시_BUSINESS.pdf"
+            className="flex items-center gap-3 p-4 rounded-xl border border-purple-200 bg-purple-50/50 hover:bg-purple-50 hover:shadow-md transition-all group"
+          >
+            <div className="w-10 h-10 rounded-xl bg-purple-100 flex items-center justify-center shrink-0">
+              <FileText size={18} className="text-purple-600" />
+            </div>
+            <div>
+              <div className="text-sm font-semibold text-gray-800 group-hover:text-purple-700">BUSINESS 상세분석 예시</div>
+              <div className="text-[10px] text-gray-400">11개 인사이트 + 액션플랜 · PDF</div>
+            </div>
+          </a>
+        </div>
+      </div>
+
       {/* CTA */}
       <div
         className="rounded-2xl bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 p-6 text-center"
