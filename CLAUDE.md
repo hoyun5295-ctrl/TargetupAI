@@ -43,6 +43,7 @@
 | CT-10 | sender-registration.ts | 발신번호 등록 신청/승인/반려 + 사용자별 배정 관리 (D87) |
 | CT-12 | brand-message.ts | 브랜드메시지 발송/검증 (자유형 8종 + 기본형 템플릿, D97) |
 | CT-14 | deduplicate.ts | 수신자 중복제거 — phone 기준 normalizePhone (D98) |
+| CT-15 | saved-segments.ts | AI 발송 템플릿 저장/조회/수정/삭제/touch (D107) |
 | — | messageUtils.ts | 변수 치환 (5개 발송 경로 통합) + buildAdMessage (광고+080 전경로 D102) + getOpt080Number (080번호 조회 D102) + prepareFieldMappings (schema+varCatalog+enrich D102) + **prepareSendMessage (변수치환+광고080 통합 D103)** |
 | — | normalize.ts | 값 정규화 + normalizeCustomFieldValue (커스텀 필드 Date/문자열 정규화) |
 | — | stats-aggregation.ts | 대시보드 통계 집계 + AI 캠페인 성과 집계 |

@@ -95,7 +95,8 @@
       "Bash(grep -l \"message_content\" /c/Users/ceo/projects/targetup/packages/frontend/src/components/*.tsx)",
       "Bash(xargs basename:*)",
       "Bash(ls /c/Users/ceo/projects/targetup/*.pdf)",
-      "Bash(python generate_sample_pdfs.py)"
+      "Bash(python generate_sample_pdfs.py)",
+      "Bash(node generate-fake-customers.js)"
     ]
   }
 }

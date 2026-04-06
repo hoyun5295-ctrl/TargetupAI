@@ -106,9 +106,9 @@
 
 ---
 
-### 🔧 D108 — AI 분석 시각화 고도화 + BUSINESS 자동화 연계 (2026-04-04) — 🟡 배포대기
+### 🔧 D108 — AI 분석 시각화 고도화 + BUSINESS 자동화 연계 + 예시 PDF (2026-04-04) — ✅ 배포완료
 
-> **배경:** PRO(기본분석)와 BUSINESS(상세분석)의 체감 차이가 텍스트 인사이트 개수 차이뿐이었음. 시각적 차트 + BUSINESS 전용 자동화 연계 버튼으로 고도화.
+> **배경:** PRO(기본분석)와 BUSINESS(상세분석)의 체감 차이가 텍스트 인사이트 개수 차이뿐이었음. 시각적 차트 + BUSINESS 전용 자동화 연계 버튼 + 시연용 예시 PDF로 고도화.
 
 #### 핵심 변경
 - **PRO 차트 6종 추가:** 가로바(채널 성공률), 히트맵(요일x시간), 도넛(채널비율), 스택바(성별/등급), 미니라인(수신거부), 스코어카드(종합점수)
@@ -117,34 +117,78 @@
 - **PRO 블러 배지:** 액션 버튼 자리에 "비즈니스 요금제에서 바로 실행 가능" 블러
 - **collectedData 응답 포함:** 프론트에서 차트용 원본 데이터 직접 접근
 - **히트맵 쿼리 추가:** 요일x시간 교차 성공률 데이터
+- **예시 PDF 2종:** PRO(122KB, 5p, 차트6종) + BUSINESS(145KB, 8p, 차트12종+RFM+퍼널+액션플랜)
+- **"고객 인사이트" → "AI 분석" 카드 교체:** 대시보드 하단 카드에서 AI 분석 맛보기 + 예시 리포트 다운로드 연결
+- **예시 리포트 다운로드:** AnalysisModal 분석 실행 전 화면 + 프리뷰 섹션(무료) 양쪽에 PRO/BUSINESS 예시 PDF 다운로드 버튼
 
-#### 수정 파일 (4개)
+#### 수정 파일 (6개)
 | 파일 | 변경 |
 |------|------|
 | **(신규)** `AnalysisCharts.tsx` | 순수 SVG/CSS 차트 컴포넌트 9종 |
+| **(신규)** `public/sample_analysis_pro.pdf` | PRO 예시 리포트 (차트 포함) |
+| **(신규)** `public/sample_analysis_business.pdf` | BUSINESS 예시 리포트 (차트+RFM+퍼널+액션플랜) |
 | `analysis.ts` (백엔드) | collectedData 응답 포함 + 히트맵 쿼리 + actionItems 프롬프트 |
-| `AnalysisModal.tsx` | 차트 렌더링 + 액션 버튼 + keyMetrics/recommendations 표시 개선 |
-| `Dashboard.tsx` | onActionPrompt 콜백 (분석→AI 한줄로 자동 실행) |
+| `AnalysisModal.tsx` | 차트 렌더링 + 액션 버튼 + 예시 PDF 다운로드 + keyMetrics/recommendations |
+| `Dashboard.tsx` | "고객 인사이트"→"AI 분석" 카드 교체 + onActionPrompt 콜백 |
 
 ---
 
-### 🔧 D107 — 저장 세그먼트 기능 (빠른 발송 고도화) (2026-04-04) — 🟡 배포대기
+### 🔧 D107 — AI 발송 템플릿 + DB 현황 디자인 리뉴얼 + 메시지 셀 컨트롤타워 (2026-04-04) — ✅ 배포완료
 
-> **배경:** 기존 "빠른 발송 예시" 하드코딩 4개 카드를 저장 세그먼트 시스템으로 고도화. 발송 성공 후 설정 저장 → 클릭 한번으로 재실행.
+> **배경:** 기존 "빠른 발송 예시" 하드코딩 4개 카드를 "AI 발송 템플릿" 시스템으로 고도화. DB 현황 카드 디자인 모던화. 발송 내역 메시지 셀 컨트롤타워화.
 
 #### 신규 컨트롤타워
 | 컨트롤타워 | 파일 | 효과 |
 |-----------|------|------|
 | `saveSegment()` | saved-segments.ts | 세그먼트 저장 (20개 제한) |
 | `getSegments()` | saved-segments.ts | 목록 조회 (최근 사용순) |
+| `updateSegment()` | saved-segments.ts | 세그먼트 수정 (소유자 확인) |
 | `deleteSegment()` | saved-segments.ts | 삭제 (소유자 확인) |
 | `touchSegment()` | saved-segments.ts | 사용 시각 갱신 |
+| `MessageCell` | ResultsModal.tsx | 메시지 내용 셀 렌더링 3곳 통일 |
 
 #### 핵심 변경
-- **RecommendTemplateModal 전면 리뉴얼** — 기본 예시 4개(2x2 그리드) + 내 저장 세그먼트 섹션. 타입별 배지(AI 한줄로/맞춤한줄), 삭제 버튼
-- **AiSendTypeModal 스킵** — 저장 세그먼트 클릭 시 타입이 이미 정해져 있으므로 중간 모달 없이 바로 실행
+- **"AI 발송 템플릿" 전면 구축** — 하드코딩 4개 예시 제거 → 전부 DB 저장. 업체/사용자별 완전 격리. 검색/8개씩 페이징/수정모달/+새로 만들기. 맞춤한줄 필드 선택은 한글 체크박스 목록(enabled-fields API 연동)
+- **AiSendTypeModal 스킵** — 템플릿 클릭 시 타입이 이미 정해져 있으므로 중간 모달 없이 바로 실행
 - **맞춤한줄 Step 1 스킵** — preloadData prop으로 필드/브리핑/채널 사전 세팅, Step 2부터 시작
-- **발송 성공 후 저장** — CampaignSuccessModal에 "이 설정 저장하기" 인라인 폼 (이모지 선택 + 이름 입력)
+- **발송 성공 후 저장** — CampaignSuccessModal에 "이 설정 저장하기" 인라인 폼 (이모지 16종 + 이름 입력)
+- **DB 현황 디자인 리뉴얼** — 파스텔 bg 제거 → 화이트 카드 + 아이콘 컬러 배경 + distribution 프로그레스 바 + 호버 shadow. 요금제/발송 현황 헤더 통일 (녹색 바 + 볼드). 페이징 좌우 < > 화살표 추가
+- **메시지 셀 컨트롤타워** — ResultsModal 3곳 인라인 메시지 표시를 MessageCell 서브 컴포넌트로 통일 (40글자 표시 + 클릭→모달 전체 보기)
+
+#### DB 마이그레이션
+```sql
+CREATE TABLE saved_segments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id UUID NOT NULL REFERENCES companies(id),
+  user_id UUID NOT NULL REFERENCES users(id),
+  name VARCHAR(100) NOT NULL,
+  emoji VARCHAR(10) DEFAULT '📋',
+  segment_type VARCHAR(20) NOT NULL,
+  prompt TEXT,
+  auto_relax BOOLEAN DEFAULT false,
+  selected_fields TEXT[],
+  briefing TEXT,
+  url VARCHAR(500),
+  channel VARCHAR(10),
+  is_ad BOOLEAN DEFAULT false,
+  last_used_at TIMESTAMP,
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW()
+);
+CREATE INDEX idx_saved_segments_company_user ON saved_segments(company_id, user_id);
+```
+
+#### 수정 파일 (11개)
+| 파일 | 변경 |
+|------|------|
+| **(신규)** `utils/saved-segments.ts` | 컨트롤타워 5함수 (save/get/update/delete/touch) |
+| **(신규)** `routes/saved-segments.ts` | CRUD 라우트 5개 (GET/POST/PUT/DELETE/POST touch) |
+| `app.ts` | 라우트 등록 |
+| `RecommendTemplateModal.tsx` | 전면 재작성 — 검색/페이징/수정모달(EditSegmentModal)/+새로만들기/한글 체크박스 필드선택 |
+| `CampaignSuccessModal.tsx` | 저장 세그먼트 UI (이모지 + 이름 + 저장) |
+| `AiCustomSendFlow.tsx` | preloadData prop + Step 2 자동 점프 |
+| `Dashboard.tsx` | "AI 발송 템플릿" 카드 + DB 현황 리뉴얼 + 헤더 통일 + 페이징 화살표 + customFlowPreload/lastSendConfig state |
+| `ResultsModal.tsx` | MessageCell 서브 컴포넌트 + 3곳 교체 (메시지 40글자+클릭→모달) |
 
 #### 수정 파일 (7개)
 | 파일 | 변경 |
