@@ -1,5 +1,5 @@
 import type { FieldMeta } from './DirectTargetFilterModal';
-import { formatPreviewValue, replaceDirectVars } from '../utils/formatDate';
+import { formatPreviewValue, replaceDirectVars, FRONT_FIELD_DISPLAY_MAP, reverseDisplayValueFront } from '../utils/formatDate';
 
 // ★ 정규식 특수문자 이스케이프
 const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -23,6 +23,7 @@ interface DirectPreviewModalProps {
 }
 
 // ★ D43-3c+D92: 동적 변수 치환 함수 — formatPreviewValue 컨트롤타워 사용
+// ★ B+0407-1: enum 필드(gender 등) 역변환 — FIELD_DISPLAY_MAP 우선 적용
 const replaceVarsWithMeta = (text: string, recipient: any, fieldsMeta: FieldMeta[], fallback: boolean = false) => {
   if (!text || !recipient) return text;
   let result = text;
@@ -30,7 +31,17 @@ const replaceVarsWithMeta = (text: string, recipient: any, fieldsMeta: FieldMeta
     if (fm.field_key === 'phone' || fm.field_key === 'sms_opt_in') return;
     const pattern = new RegExp(escapeRegExp(fm.variable), 'g');
     const val = recipient[fm.field_key];
-    const display = val != null && val !== '' ? formatPreviewValue(val) : (fallback ? fm.display_name : '');
+    let display: string;
+    if (val != null && val !== '') {
+      // ★ B+0407-1: enum 필드(gender F/M → 여성/남성)는 역변환 우선 적용
+      if (FRONT_FIELD_DISPLAY_MAP[fm.field_key]) {
+        display = reverseDisplayValueFront(fm.field_key, val);
+      } else {
+        display = formatPreviewValue(val);
+      }
+    } else {
+      display = fallback ? fm.display_name : '';
+    }
     result = result.replace(pattern, display);
   });
   return result;
