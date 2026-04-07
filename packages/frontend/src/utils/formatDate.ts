@@ -509,7 +509,17 @@ export function buildAdMessageFront(
     ? `\n무료거부${optOutNumber.replace(/-/g, '')}`
     : `\n무료수신거부 ${optOutNumber}`;
 
-  return `${adPrefix}${message}${rejectFooter}`;
+  // ★ D103+B 후속: 중복 방지 안전장치 — 백엔드 buildAdMessage와 동일 처리
+  //   D103 이전에 발송된 캠페인이나, message_content에 이미 (광고)/무료거부가 포함된 경우
+  //   formatCampaignMessageForDisplay → buildAdMessageFront 호출 시 또 부착되어 "(광고)(광고)" 중복 발생.
+  //   이미 부착된 메시지는 건드리지 않는다.
+  const hasAdPrefix = message.startsWith('(광고)');
+  const hasRejectFooter = /무료수신거부|무료거부/.test(message);
+
+  const finalPrefix = hasAdPrefix ? '' : adPrefix;
+  const finalFooter = hasRejectFooter ? '' : rejectFooter;
+
+  return `${finalPrefix}${message}${finalFooter}`;
 }
 
 /**
