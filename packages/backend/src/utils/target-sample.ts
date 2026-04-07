@@ -24,6 +24,7 @@
 import { query } from '../config/database';
 import { buildFilterQueryCompat } from './customer-filter';
 import { buildUnsubscribeFilter } from './unsubscribe-helper';
+import { FIELD_DISPLAY_MAP, reverseDisplayValue } from './standard-field-map';
 
 export interface TargetSampleOptions {
   /** 회사 ID — 필수 */
@@ -98,6 +99,13 @@ export async function fetchTargetSampleCustomer(
     const row = result.rows[0];
     // custom_fields JSONB를 평탄화하여 합침 (replaceVariables/replaceMessageVars 호환)
     const flat = { ...row, ...(row.custom_fields || {}) };
+    // ★ B+0407-1: enum 필드(gender F→여성) 미리 변환
+    //   frontend의 모든 표시 컨트롤타워가 이미 변환된 값을 받음 → 일관 표시 보장
+    for (const fk of Object.keys(FIELD_DISPLAY_MAP)) {
+      if (flat[fk] != null) {
+        flat[fk] = reverseDisplayValue(fk, flat[fk]);
+      }
+    }
     return { raw: flat, matched: true };
   } catch (err: any) {
     console.error('[target-sample] 타겟 첫 고객 조회 실패:', err.message);

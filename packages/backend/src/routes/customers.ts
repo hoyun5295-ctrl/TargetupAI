@@ -2,7 +2,7 @@ import { Request, Response, Router } from 'express';
 import { query, mysqlQuery } from '../config/database';
 import { authenticate } from '../middlewares/auth';
 import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getGenderVariants } from '../utils/normalize';
-import { FIELD_MAP, getFieldByKey, getColumnFields, CATEGORY_LABELS } from '../utils/standard-field-map';
+import { FIELD_MAP, getFieldByKey, getColumnFields, CATEGORY_LABELS, FIELD_DISPLAY_MAP, reverseDisplayValue } from '../utils/standard-field-map';
 import { DEFAULT_COSTS, redis, CACHE_TTL } from '../config/defaults';
 import { isValidCustomFieldKey } from '../utils/safe-field-name';
 import { getStoreScope } from '../utils/store-scope';
@@ -959,12 +959,21 @@ router.post('/extract', async (req: Request, res: Response) => {
     );
 
     // ★ B-D75-03: custom_fields JSONB를 flat하게 풀어서 반환 (프론트에서 r[field_key]로 직접 접근 가능)
+    // ★ B+0407-1: enum 필드(gender F→여성) 미리 변환 — 모든 frontend 표시 경로 자동 정상화
     const flatRecipients = result.rows.map((r: any) => {
+      let flat: any;
       if (r.custom_fields && typeof r.custom_fields === 'object') {
         const { custom_fields, ...rest } = r;
-        return { ...rest, ...custom_fields };
+        flat = { ...rest, ...custom_fields };
+      } else {
+        flat = { ...r };
       }
-      return r;
+      for (const fk of Object.keys(FIELD_DISPLAY_MAP)) {
+        if (flat[fk] != null) {
+          flat[fk] = reverseDisplayValue(fk, flat[fk]);
+        }
+      }
+      return flat;
     });
 
     res.json({
@@ -1234,6 +1243,7 @@ router.get('/enabled-fields', async (req: Request, res: Response) => {
     }
 
     // 4. 실제 고객 1건 샘플 데이터 (AI 맞춤한줄 미리보기용)
+    // ★ B+0407-1: enum 필드(gender F→여성) 미리 변환 — 모든 frontend 표시 경로 자동 정상화
     let sample: Record<string, any> = {};
     try {
       const sampleResult = await query(
@@ -1247,13 +1257,22 @@ router.get('/enabled-fields', async (req: Request, res: Response) => {
         for (const f of fields) {
           const key = f.field_key;
           const mapped = getFieldByKey(key);
+          let val: any;
           if (mapped?.storageType === 'custom_fields' && row.custom_fields && row.custom_fields[key] != null) {
-            sample[key] = row.custom_fields[key];
+            val = row.custom_fields[key];
           } else if (!mapped && row.custom_fields && row.custom_fields[key] != null) {
             // FIELD_MAP에 없는 커스텀 필드 (레거시 등)
-            sample[key] = row.custom_fields[key];
+            val = row.custom_fields[key];
           } else if (row[key] != null) {
-            sample[key] = row[key];
+            val = row[key];
+          } else {
+            continue;
+          }
+          // ★ B+0407-1: enum 필드 한글 역변환 (gender 'F' → '여성')
+          if (FIELD_DISPLAY_MAP[key]) {
+            sample[key] = reverseDisplayValue(key, val);
+          } else {
+            sample[key] = val;
           }
         }
       }

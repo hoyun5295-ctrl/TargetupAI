@@ -3,7 +3,7 @@ import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
 import { checkAPIStatus, extractVarCatalog, generateCustomMessages, generateMessages, parseBriefing, recommendTarget, countFilteredCustomers, relaxFilters, recommendNextCampaign } from '../services/ai';
 import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getGenderVariants, getRegionVariants } from '../utils/normalize';
-import { FIELD_MAP } from '../utils/standard-field-map';
+import { FIELD_MAP, FIELD_DISPLAY_MAP, reverseDisplayValue } from '../utils/standard-field-map';
 import { isValidCustomFieldKey } from '../utils/safe-field-name';
 import { getStoreScope } from '../utils/store-scope';
 import { buildFilterWhereClauseCompat } from '../utils/customer-filter';
@@ -314,12 +314,24 @@ router.post('/recommend-target', async (req: Request, res: Response) => {
         const row = sampleResult.rows[0];
         // ★ D85: column 키 raw 데이터 보존 (백엔드 replaceVariables용)
         sampleCustomerRaw = { ...row };
+        // ★ B+0407-1: raw에도 enum 필드(gender F→여성) 미리 변환 저장
+        //   frontend의 모든 표시 컨트롤타워가 column 키로 접근할 때 이미 정상 표시
+        for (const fk of Object.keys(FIELD_DISPLAY_MAP)) {
+          if (sampleCustomerRaw[fk] != null) {
+            sampleCustomerRaw[fk] = reverseDisplayValue(fk, sampleCustomerRaw[fk]);
+          }
+        }
         // 표준 필드 → displayName 매핑 (프론트 미리보기용)
         for (const f of FIELD_MAP) {
           if (f.storageType === 'custom_fields' || f.fieldKey === 'phone' || f.fieldKey === 'sms_opt_in') continue;
           const val = row[f.columnName];
           if (val !== null && val !== undefined && val !== '') {
-            if (f.dataType === 'number' && !isNaN(Number(val))) {
+            // ★ B+0407-1: enum 필드는 한글 역변환 우선 (gender 'F' → '여성')
+            //   sampleCustomer는 displayName 키(한국어 라벨) 형태이므로
+            //   FIELD_DISPLAY_MAP[fieldKey]가 매칭되는 enum은 표시 시점에 이미 변환되어 저장
+            if (FIELD_DISPLAY_MAP[f.fieldKey]) {
+              sampleCustomer[f.displayName] = reverseDisplayValue(f.fieldKey, val);
+            } else if (f.dataType === 'number' && !isNaN(Number(val))) {
               sampleCustomer[f.displayName] = Number(val).toLocaleString();
             } else if (f.dataType === 'date' && val) {
               // ★ D100: 날짜 포맷팅 컨트롤타워 사용 — 순수 YYYY-MM-DD 하루 밀림 방지
