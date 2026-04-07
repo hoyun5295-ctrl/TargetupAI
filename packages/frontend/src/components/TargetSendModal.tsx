@@ -1,7 +1,7 @@
 import { Sparkles } from 'lucide-react';
 import { useRef, useState } from 'react';
 import type { FieldMeta } from './DirectTargetFilterModal';
-import { formatPreviewValue, formatByType, buildAdMessageFront } from '../utils/formatDate';
+import { formatPreviewValue, formatByType, buildAdMessageFront, replaceVarsByFieldMeta } from '../utils/formatDate';
 
 // ★ D43-3c: 정규식 특수문자 이스케이프
 const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -215,23 +215,10 @@ export default function TargetSendModal({
     });
   };
 
-  // ====== ★ 동적 변수 치환 (스팸필터용) ======
-  // D91+D92: 숫자 필드 toLocaleString + 날짜 포맷팅 (전 경로 통일)
-  const replaceVars = (text: string, recipient: any) => {
-    if (!text || !recipient) return text;
-    let result = text;
-    variableFields.forEach(fm => {
-      const pattern = new RegExp(escapeRegExp(fm.variable), 'g');
-      let rawValue = recipient[fm.field_key] ?? '';
-      // custom_fields 내부 키 fallback
-      if ((rawValue === '' || rawValue == null) && recipient.custom_fields && typeof recipient.custom_fields === 'object') {
-        rawValue = recipient.custom_fields[fm.field_key] ?? '';
-      }
-      // ★ D101: formatByType으로 타입 인식 포맷팅 (날짜→날짜포맷, 숫자→쉼표포맷)
-      result = result.replace(pattern, formatByType(rawValue, fm.data_type));
-    });
-    return result;
-  };
+  // ====== ★ B+0407-1: 인라인 replaceVars 제거 — replaceVarsByFieldMeta 컨트롤타워 사용 ======
+  //   기존 인라인 함수는 enum 역변환 누락으로 성별 F/M이 그대로 노출되는 버그 발생
+  const replaceVars = (text: string, recipient: any) =>
+    replaceVarsByFieldMeta(text, recipient, variableFields as any);
 
   // ====== 셀 값 포맷 ======
   // 성별 필드 자동 감지 + 한글 표시

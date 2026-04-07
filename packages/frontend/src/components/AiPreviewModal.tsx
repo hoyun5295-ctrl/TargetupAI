@@ -1,5 +1,5 @@
 import React from 'react';
-import { formatPreviewValue, buildAdMessageFront } from '../utils/formatDate';
+import { formatPreviewValue, buildAdMessageFront, replaceVarsBySampleCustomer } from '../utils/formatDate';
 
 interface AiPreviewModalProps {
   show: boolean;
@@ -227,22 +227,17 @@ export default function AiPreviewModal({
                   const msg = aiResult?.messages?.[selectedAiMsgIdx]?.message_text || '';
                   const cb = selectedCallback || '';
                   const sc = sampleCustomer || {};
-                  const replaceVars = (text: string) => {
-                    if (!text) return text;
-                    let result = text;
-                    Object.entries(sc).forEach(([k, v]) => { result = result.replace(new RegExp(`%${k}%`, 'g'), formatPreviewValue(v)); });
-                    // 별칭 매핑
-                    const aliasMap: Record<string, string[]> = {
-                      '이름': ['고객명', '성함'], '고객등급': ['등급'], '등록매장정보': ['매장명', '매장'],
-                      '보유포인트': ['포인트'], '최근구매매장': ['구매매장'],
-                    };
-                    Object.entries(aliasMap).forEach(([realKey, aliases]) => {
-                      const val = sc[realKey];
-                      if (val) aliases.forEach(a => { result = result.replace(new RegExp(`%${a}%`, 'g'), formatPreviewValue(val)); });
-                    });
-                    result = result.replace(/%[^%\s]{1,20}%/g, '');
-                    return result;
-                  };
+                  // ★ B+0407-1: 인라인 제거 — replaceVarsBySampleCustomer 컨트롤타워 + aliasMap 옵션
+                  const replaceVars = (text: string) => replaceVarsBySampleCustomer(text, sc, {
+                    removeUnmatched: true,
+                    aliasMap: {
+                      '이름': ['고객명', '성함'],
+                      '고객등급': ['등급'],
+                      '등록매장정보': ['매장명', '매장'],
+                      '보유포인트': ['포인트'],
+                      '최근구매매장': ['구매매장'],
+                    },
+                  });
                   const smsRaw = buildAdMessageFront(msg, 'SMS', isAd, optOutNumber);
                   const lmsRaw = buildAdMessageFront(msg, 'LMS', isAd, optOutNumber);
                   const subj = aiResult?.messages?.[selectedAiMsgIdx]?.subject || '';

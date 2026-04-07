@@ -113,7 +113,10 @@
       "Bash(ls *.xlsx)",
       "Bash(ls generate-*.js)",
       "Bash(node read-0407.js)",
-      "Bash(ls *.js)"
+      "Bash(ls *.js)",
+      "Bash(grep -n \"from ''../utils/formatDate''\" packages/frontend/src/components/TargetSendModal.tsx)",
+      "Bash(grep -n \"from ''../utils/formatDate''\" packages/frontend/src/components/AiCampaignResultPopup.tsx)",
+      "Bash(grep -n \"from ''../utils/formatDate''\" packages/frontend/src/components/AiPreviewModal.tsx)"
     ]
   }
 }

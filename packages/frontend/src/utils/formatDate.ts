@@ -386,6 +386,136 @@ export function replaceMessageVars(
   return result;
 }
 
+// ============================================================
+// ★ B+0407-1: 변수 치환 통합 컨트롤타워 (인라인 replaceVars 7곳 통합)
+// ============================================================
+//
+// 기존: 직접발송/직접타겟발송/AI 미리보기 등 7개 컴포넌트에 동일 패턴의
+//       인라인 `replaceVars` 함수가 산재 → enum 역변환(gender F→여성) 누락,
+//       숫자 포맷팅 누락, 컴포넌트별 동작 불일치.
+//
+// 통합: 아래 두 컨트롤타워 + 기존 replaceMessageVars / replaceDirectVars 4개로 통일.
+//
+// ⚠️ 절대 금지:
+//   - 컴포넌트에 새 인라인 replaceVars 작성 금지
+//   - 반드시 아래 4개 함수 중 하나를 import 해서 사용
+
+/**
+ * 패턴 A — FieldMeta 기반 치환 (직접타겟발송/일부 직접발송 미리보기·스팸필터·바이트계산용)
+ *
+ * 입력 fieldsMeta: [{ field_key, variable, data_type?, display_name? }, ...]
+ * recipient: 고객 1명 (DB row + custom_fields flat)
+ *
+ * 처리 순서:
+ *   1) recipient[field_key] 우선 (custom_fields fallback)
+ *   2) FRONT_FIELD_DISPLAY_MAP[field_key] 매칭 → enum 역변환 (gender F→여성)
+ *   3) formatByType(val, data_type) → 숫자/날짜 포맷팅
+ *   4) fallback=true이면 빈 값일 때 display_name으로 대체 (미리보기용 라벨 표시)
+ *
+ * 사용처: DirectPreviewModal.replaceVarsWithMeta, TargetSendModal.replaceVars
+ */
+export interface ReplaceVarsFieldMeta {
+  field_key: string;
+  variable: string;
+  data_type?: string;
+  display_name?: string;
+}
+
+export function replaceVarsByFieldMeta(
+  text: string,
+  recipient: any,
+  fieldsMeta: ReplaceVarsFieldMeta[],
+  options?: { fallback?: boolean }
+): string {
+  if (!text || !recipient) return text;
+  const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const fallback = options?.fallback ?? false;
+  let result = text;
+
+  fieldsMeta.forEach(fm => {
+    if (fm.field_key === 'phone' || fm.field_key === 'sms_opt_in') return;
+    const pattern = new RegExp(escapeRegex(fm.variable), 'g');
+    let rawValue = recipient[fm.field_key];
+    if ((rawValue == null || rawValue === '') && recipient.custom_fields && typeof recipient.custom_fields === 'object') {
+      rawValue = recipient.custom_fields[fm.field_key];
+    }
+
+    let display: string;
+    if (rawValue != null && rawValue !== '') {
+      // ★ enum 필드(gender F→여성) 역변환 우선
+      if (FRONT_FIELD_DISPLAY_MAP[fm.field_key]) {
+        display = reverseDisplayValueFront(fm.field_key, rawValue);
+      } else {
+        display = formatByType(rawValue, fm.data_type);
+      }
+    } else {
+      display = fallback ? (fm.display_name || fm.field_key) : '';
+    }
+    result = result.replace(pattern, display);
+  });
+
+  return result;
+}
+
+/**
+ * 패턴 C — sampleCustomer(displayName 한국어 키) 기반 치환 (한줄로 AI 결과/미리보기용)
+ *
+ * 입력 sampleCustomer: { "이름": "김철수", "고객등급": "VIP", "성별": "F", ... }
+ * 키가 한국어 라벨이거나 column 키 둘 다 가능.
+ *
+ * 처리:
+ *   1) sampleCustomer 모든 키를 %키%로 치환 — formatPreviewValue로 포맷팅
+ *   2) FRONT_FIELD_DISPLAY_MAP — sampleCustomer에 column 키('gender')가 있으면 역변환
+ *   3) aliasMap 적용 (예: 이름 → 고객명, 성함)
+ *   4) removeUnmatched=true이면 잔여 %변수% 제거
+ *
+ * 사용처: AiCampaignResultPopup.replaceVars, AiPreviewModal.replaceVars
+ */
+export function replaceVarsBySampleCustomer(
+  text: string,
+  sampleCustomer: Record<string, any> | null | undefined,
+  options?: {
+    removeUnmatched?: boolean;
+    aliasMap?: Record<string, string[]>; // 한국어 라벨 → 별칭 배열 (예: { "이름": ["고객명","성함"] })
+  }
+): string {
+  if (!text) return text;
+  const sc = sampleCustomer || {};
+  let result = text;
+  const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+  // 1) sampleCustomer 직접 치환
+  Object.entries(sc).forEach(([k, v]) => {
+    if (v == null) return;
+    // enum 필드(column 키) 역변환 우선
+    const display = FRONT_FIELD_DISPLAY_MAP[k]
+      ? reverseDisplayValueFront(k, v)
+      : formatPreviewValue(v);
+    result = result.replace(new RegExp(`%${escapeRegex(k)}%`, 'g'), display);
+  });
+
+  // 2) aliasMap 적용 (예: sc["이름"] = "김철수"이면 %고객명%, %성함%도 치환)
+  if (options?.aliasMap) {
+    Object.entries(options.aliasMap).forEach(([realKey, aliases]) => {
+      const val = sc[realKey];
+      if (val == null) return;
+      const display = FRONT_FIELD_DISPLAY_MAP[realKey]
+        ? reverseDisplayValueFront(realKey, val)
+        : formatPreviewValue(val);
+      aliases.forEach(a => {
+        result = result.replace(new RegExp(`%${escapeRegex(a)}%`, 'g'), display);
+      });
+    });
+  }
+
+  // 3) 잔여 %변수% 제거
+  if (options?.removeUnmatched !== false) {
+    result = result.replace(/%[^%\s]{1,20}%/g, '');
+  }
+
+  return result;
+}
+
 /**
  * ★ D97: 전화번호 포맷팅 컨트롤타워
  * 하이픈 없는 번호 → 하이픈 포함 포맷. 이미 하이픈이 있으면 정규화 후 재포맷.

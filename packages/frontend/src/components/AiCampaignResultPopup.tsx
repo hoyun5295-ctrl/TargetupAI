@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { formatPreviewValue, buildAdMessageFront } from '../utils/formatDate';
+import { formatPreviewValue, buildAdMessageFront, replaceVarsBySampleCustomer } from '../utils/formatDate';
 import { highlightVars } from '../utils/highlightVars';
 
 interface AiCampaignResultPopupProps {
@@ -354,14 +354,8 @@ onClick={() => {
   const msg = aiResult?.messages?.[selectedAiMsgIdx]?.message_text || campaign.messageContent || '';
                     const cb = selectedCallback || '';
                     const sc = sampleCustomer || {};
-                    const replaceVars = (text: string) => {
-                      if (!text) return text;
-                      let result = text;
-                      Object.entries(sc).forEach(([k, v]) => { result = result.replace(new RegExp(`%${k}%`, 'g'), formatPreviewValue(v)); });
-                      // 치환 안 된 %변수% 제거 (sampleCustomer에 없는 경우)
-                      result = result.replace(/%[^%\s]{1,20}%/g, '');
-                      return result;
-                    };
+                    // ★ B+0407-1: 인라인 제거 — replaceVarsBySampleCustomer 컨트롤타워 사용
+                    const replaceVars = (text: string) => replaceVarsBySampleCustomer(text, sc, { removeUnmatched: true });
                     const smsRaw = buildAdMessageFront(msg, 'SMS', isAd, optOutNumber);
                     const lmsRaw = buildAdMessageFront(msg, 'LMS', isAd, optOutNumber);
                     const smsMsg = replaceVars(smsRaw);
