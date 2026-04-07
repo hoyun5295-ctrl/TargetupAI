@@ -1630,7 +1630,8 @@ const campaignData = {
         // ★ D102: modalData.individualCallbackColumn 우선 (맞춤한줄 개별회신번호 누락 수정)
         individualCallbackColumn: _useIndividualCallback ? (modalData.individualCallbackColumn || individualCallbackColumn || 'store_phone') : undefined,
         subject: variant.subject || '',
-        mmsImagePaths: [],
+        // ★ B1: MMS 채널일 때 첨부 이미지 경로 전달 (이전: 빈 배열 하드코딩으로 첨부 누락)
+        mmsImagePaths: channelType === 'MMS' ? mmsUploadedImages.map(img => img.serverPath) : [],
       };
 
       console.log('=== AI 맞춤한줄 발송 디버깅 ===');
@@ -1914,6 +1915,11 @@ const campaignData = {
           testSentResult={testSentResult}
           sampleCustomer={sampleCustomer}
           isSpamFilterLocked={isSpamFilterLocked}
+          /* ★ B1: MMS 이미지 첨부 (한줄로 AI와 동일 패턴 — Dashboard 부모 state 공유) */
+          mmsUploadedImages={mmsUploadedImages}
+          onMmsImageUpload={(files) => handleMmsMultiUpload(files!)}
+          onMmsImageRemove={handleMmsImageRemove}
+          mmsUploading={mmsUploading}
         />
       )}
 

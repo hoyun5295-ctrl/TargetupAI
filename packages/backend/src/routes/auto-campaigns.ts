@@ -18,6 +18,7 @@ import { authenticate } from '../middlewares/auth';
 import { getStoreScope } from '../utils/store-scope';
 import { buildFilterQueryCompat } from '../utils/customer-filter';
 import { buildUnsubscribeFilter, CAMPAIGN_OPT080_SELECT_EXPR, buildCampaignOpt080LeftJoin } from '../utils/unsubscribe-helper';
+import { fetchTargetSampleCustomer } from '../utils/target-sample';
 import { kstToUtc } from '../utils/auto-campaign-worker';
 
 const router = Router();
@@ -197,6 +198,42 @@ function calcNextRunAt(scheduleType: string, scheduleDay: number | null, schedul
 }
 
 // ★ D79: 인라인 kstToUtc 제거 → auto-campaign-worker.ts에서 import
+
+// ============================================================
+// ★ B5: POST /preview-sample — 타겟 첫 고객 1명 조회 (스팸필터/미리보기 개인화용)
+//
+//   자동발송 모달에서 사용자가 스팸필터 테스트 또는 미리보기를 열 때,
+//   recommend-target 호출 없이도 즉시 타겟 매칭 첫 고객 데이터를 받기 위함.
+//
+//   body: { target_filter: any, store_code?: string }
+//   응답: { customer: Record<string, any> | null, matched: boolean }
+// ============================================================
+router.post('/preview-sample', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
+    if (!companyId || !userId) {
+      return res.status(400).json({ error: '회사 정보가 없습니다.' });
+    }
+
+    const { target_filter, store_code } = req.body;
+
+    const result = await fetchTargetSampleCustomer({
+      companyId,
+      targetFilter: target_filter || {},
+      userId,
+      storeCode: store_code || null,
+    });
+
+    return res.json({
+      customer: result.raw,
+      matched: result.matched,
+    });
+  } catch (err: any) {
+    console.error('[auto-campaigns] preview-sample 실패:', err);
+    return res.status(500).json({ error: '타겟 샘플 조회에 실패했습니다.' });
+  }
+});
 
 // ============================================================
 // 1. GET / — 자동캠페인 목록 조회 (게이팅 없이, store-scope만 적용)

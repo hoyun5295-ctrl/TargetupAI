@@ -59,6 +59,11 @@ interface AiCustomSendFlowProps {
     channel: string;
     isAd: boolean;
   };
+  // ★ B1: MMS 이미지 첨부 (Dashboard에서 props 전달 — 한줄로 AI와 동일 패턴)
+  mmsUploadedImages?: { serverPath: string; url: string; filename: string; size: number }[];
+  onMmsImageUpload?: (files: FileList | null) => void;
+  onMmsImageRemove?: (index: number) => void;
+  mmsUploading?: boolean;
 }
 
 interface PromotionCard {
@@ -110,6 +115,7 @@ export default function AiCustomSendFlow({
   onClose, onConfirmSend, brandName, callbackNumbers, selectedCallback, isAd, optOutNumber,
   setShowSpamFilter, setSpamFilterData, handleTestSend, testSending, testCooldown, testSentResult,
   sampleCustomer, isSpamFilterLocked, preloadData,
+  mmsUploadedImages = [], onMmsImageUpload, onMmsImageRemove, mmsUploading,
 }: AiCustomSendFlowProps) {
   const [currentStep, setCurrentStep] = useState(1);
   const TOTAL_STEPS = 4;
@@ -145,6 +151,8 @@ export default function AiCustomSendFlow({
   const [variants, setVariants] = useState<MessageVariant[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [selectedVariantIdx, setSelectedVariantIdx] = useState(0);
+  // ★ 검수리스트 UX: 머지 미리보기 토글 (기본=머지 결과 / 토글 시 변수 강조)
+  const [showVarsHighlightOnly, setShowVarsHighlightOnly] = useState(false);
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
   // ★ D92: 미리보기 모달 state
   const [showPreviewModal, setShowPreviewModal] = useState(false);
@@ -634,6 +642,44 @@ export default function AiCustomSendFlow({
                       </button>
                     ))}
                   </div>
+                  {/* ★ B1: MMS 채널 선택 시 이미지 첨부 UI (한줄로 AI/직접발송과 동일 패턴) */}
+                  {channel === 'MMS' && (
+                    <div className="mt-4 p-3 bg-violet-50 border border-violet-200 rounded-lg">
+                      <div className="flex items-center justify-between mb-2">
+                        <label className="text-xs font-semibold text-violet-700">📎 MMS 이미지 첨부 (최대 3장)</label>
+                        <span className="text-[10px] text-violet-500">JPG / 300KB 이하</span>
+                      </div>
+                      {mmsUploadedImages && mmsUploadedImages.length > 0 ? (
+                        <div className="flex flex-wrap gap-2">
+                          {mmsUploadedImages.map((img, idx) => (
+                            <div key={idx} className="relative w-16 h-16 rounded border border-violet-300 overflow-hidden">
+                              <img src={img.url} alt={img.filename} className="w-full h-full object-cover" />
+                              {onMmsImageRemove && (
+                                <button
+                                  onClick={() => onMmsImageRemove(idx)}
+                                  className="absolute top-0 right-0 w-4 h-4 bg-red-500 text-white text-[10px] rounded-bl flex items-center justify-center hover:bg-red-600"
+                                  title="삭제"
+                                >×</button>
+                              )}
+                            </div>
+                          ))}
+                          {mmsUploadedImages.length < 3 && onMmsImageUpload && (
+                            <label className="w-16 h-16 border-2 border-dashed border-violet-300 rounded flex items-center justify-center cursor-pointer hover:bg-violet-100 text-violet-500 text-xs">
+                              + 추가
+                              <input type="file" accept="image/jpeg,image/jpg" multiple className="hidden" onChange={(e) => onMmsImageUpload(e.target.files)} />
+                            </label>
+                          )}
+                        </div>
+                      ) : onMmsImageUpload ? (
+                        <label className="block w-full py-3 border-2 border-dashed border-violet-300 rounded text-center text-xs text-violet-600 cursor-pointer hover:bg-violet-100">
+                          {mmsUploading ? '업로드 중...' : '클릭하여 이미지 선택 (JPG, 300KB 이하)'}
+                          <input type="file" accept="image/jpeg,image/jpg" multiple className="hidden" onChange={(e) => onMmsImageUpload(e.target.files)} />
+                        </label>
+                      ) : (
+                        <p className="text-xs text-violet-500">이미지 첨부 핸들러가 연결되지 않았습니다.</p>
+                      )}
+                    </div>
+                  )}
                   {/* 광고 여부 토글 */}
                   <div className="mt-4">
                     <label className="flex items-center gap-2 cursor-pointer group">
@@ -1033,10 +1079,25 @@ export default function AiCustomSendFlow({
                       </div>
                     )}
                     <div className="flex-1 overflow-y-auto p-3 bg-gradient-to-b from-purple-50/30 to-white">
+                      {/* ★ 검수리스트 UX: 머지 토글 — 변수 강조 vs 첫 고객 데이터 머지 */}
+                      {Object.keys(sampleData).length > 0 && (
+                        <div className="flex items-center gap-1 mb-2 px-1">
+                          <button
+                            onClick={() => setShowVarsHighlightOnly(true)}
+                            className={`flex-1 text-[10px] py-1 rounded transition-colors ${showVarsHighlightOnly ? 'bg-amber-100 text-amber-800 font-bold' : 'bg-gray-50 text-gray-400'}`}
+                            title="개인화 변수 위치 강조 (실제 값 미치환)"
+                          >변수 강조</button>
+                          <button
+                            onClick={() => setShowVarsHighlightOnly(false)}
+                            className={`flex-1 text-[10px] py-1 rounded transition-colors ${!showVarsHighlightOnly ? 'bg-purple-100 text-purple-800 font-bold' : 'bg-gray-50 text-gray-400'}`}
+                            title="첫 고객 데이터로 실제 머지된 결과 미리보기"
+                          >머지 결과</button>
+                        </div>
+                      )}
                       <div className="flex gap-2 mt-1">
                         <div className="w-7 h-7 rounded-full bg-purple-100 flex items-center justify-center shrink-0 text-xs">📱</div>
                         <div className="bg-white rounded-2xl rounded-tl-sm p-3 shadow-sm border border-gray-100 text-[12px] leading-[1.6] whitespace-pre-wrap break-all text-gray-700 max-w-[95%]">
-                          {Object.keys(sampleData).length > 0
+                          {Object.keys(sampleData).length > 0 && !showVarsHighlightOnly
                             ? replaceSampleVars(wrapAdText(variants[selectedVariantIdx]?.message_text || ''))
                             : highlightVars(wrapAdText(variants[selectedVariantIdx]?.message_text || ''))}
                         </div>

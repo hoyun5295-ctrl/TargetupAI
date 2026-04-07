@@ -1,11 +1,15 @@
 /**
- * ★ D69+AI Premium: 자동발송 PM2 워커 (3단계 라이프사이클)
+ * ★ D69+AI Premium: 자동발송 PM2 워커 (4단계 라이프사이클)
  *
- * 실행 방식: app.ts 내부 setInterval (매 10분)
+ * 실행 방식: app.ts 내부 setInterval (매 1분, 정각 align)
+ *   - 워커 시작 시 다음 분의 0초까지 대기 후 첫 실행
+ *   - 이후 60초 간격으로 반복
+ *   - 정각 발송 설정(예: 11:00)이 최대 60초 이내에 잡히도록 보장 (B7 fix)
  *
- * ★ 3단계 라이프사이클 (AI 문안 자동생성 지원):
- *   D-2 23:00  → runMessageGeneration()  — AI 문안 생성 + 스팸테스트
- *   D-1        → runPreNotification()    — 담당자에게 테스트 발송 + 알림
+ * ★ 4단계 라이프사이클 (AI 문안 자동생성 지원):
+ *   D-2 23:00  → runMessageGeneration()  — AI 문안 생성 + 담당자 알림
+ *   D-1        → runPreNotification()    — 담당자에게 사전알림
+ *   D-day 2h전 → runPreSendSpamTest()    — 스팸테스트 + 결과 알림
  *   D-day      → executeAutoCampaign()   — 실제 발송
  *
  * 기존 파이프라인 100% 재활용:
@@ -16,6 +20,8 @@
  * - prepaid.ts (CT-05) → 선불 차감
  * - services/ai.ts → AI 메시지 생성 (generateMessages)
  * - spam-test-queue.ts (CT-09) → 자동 스팸테스트/재생성
+ * - target-sample.ts (CT-A, B5) → 타겟 첫 고객 조회 (스팸테스트 개인화)
+ * - auto-notify-message.ts (CT-B, B6) → 담당자 알림 메시지 빌더
  *
  * 실패 정책: 스킵 + failed 기록 → next_run_at 다음 스케줄로 갱신 (중복 발송 방지)
  */
@@ -35,6 +41,13 @@ import { extractVarCatalog, generateMessages } from '../services/ai';
 import { autoSpamTestWithRegenerate } from './spam-test-queue';
 import { buildUnsubscribeFilter } from './unsubscribe-helper';
 import { SEND_HOURS } from '../config/defaults';
+// ★ B5/B6: 신규 컨트롤타워
+import { fetchTargetSampleCustomer } from './target-sample';
+import {
+  buildAiGeneratedNotifyMessage,
+  buildPreNotifyMessage,
+  buildSpamTestResultNotifyMessage,
+} from './auto-notify-message';
 
 // ============================================================
 // next_run_at 계산 (auto-campaigns.ts와 동일 로직)
@@ -190,21 +203,15 @@ async function generateMessageForAutoCampaign(ac: any): Promise<void> {
       let testedVariants = aiResult.variants;
 
       if (ac.callback_number && channel !== '카카오') {
-        // ★ D101: 타겟 첫 번째 고객 조회 (스팸테스트 개인화 치환용)
-        let firstRecipient: Record<string, any> | undefined;
-        try {
-          const filterResult = buildFilterQueryCompat(ac.target_filter, ac.company_id);
-          const firstCustResult = await query(
-            `SELECT * FROM customers WHERE company_id = $1 AND is_active = true AND sms_opt_in = true ${filterResult.where ? 'AND ' + filterResult.where : ''} ORDER BY updated_at DESC LIMIT 1`,
-            [ac.company_id, ...filterResult.params]
-          );
-          if (firstCustResult.rows.length > 0) {
-            const c = firstCustResult.rows[0];
-            firstRecipient = { ...c, ...(c.custom_fields || {}) };
-          }
-        } catch (e) {
-          console.warn(`${logPrefix} 스팸테스트용 첫 고객 조회 실패 (무시):`, e);
-        }
+        // ★ B5: 타겟 첫 고객 조회 — CT-A target-sample.ts (인라인 SELECT 제거)
+        //   store_code 격리 + 수신거부 제외 자동 적용
+        const sampleResult = await fetchTargetSampleCustomer({
+          companyId: ac.company_id,
+          targetFilter: ac.target_filter,
+          userId: ac.user_id,
+          storeCode: ac.store_code,
+        });
+        const firstRecipient = sampleResult.raw || undefined;
 
         try {
           const spamResult = await autoSpamTestWithRegenerate({
@@ -317,7 +324,13 @@ async function generateMessageForAutoCampaign(ac: any): Promise<void> {
           hour: '2-digit', minute: '2-digit', hour12: false,
         });
 
-        const genNotifyMsg = `[AI 문안 생성 완료]\n\n캠페인: ${ac.campaign_name}\n발송 예정: ${scheduledDateStr} ${scheduledTimeStr}\n\n▼ AI 생성 문안 ▼\n${generatedContent}\n\n※ 문안 수정이 필요하면 관리자 페이지에서 수정해주세요.`;
+        // ★ B6: CT-B auto-notify-message — dingbats/이모지 자동 sanitize + 옵션 A(=== 가로선)
+        const genNotifyMsg = buildAiGeneratedNotifyMessage({
+          campaignName: ac.campaign_name,
+          scheduledDateStr,
+          scheduledTimeStr,
+          messageContent: generatedContent,
+        });
 
         const genNotifyRows: any[][] = [];
         for (const phone of phones) {
@@ -429,8 +442,15 @@ async function sendPreNotification(ac: any): Promise<void> {
       ? ac.generated_message_content
       : ac.message_content;
 
-    // ★ D105: 알림 메시지 개선 — 타겟 수 + "내일 XX시 XX분" 포함
-    const notifyMessage = `[자동발송 사전알림]\n\n캠페인: ${ac.campaign_name}\n발송 예정: ${scheduledDateStr} ${scheduledTimeStr}\n발송 대상: ${targetCount.toLocaleString()}명\n메시지 타입: ${ac.message_type}\n\n▼ 발송 문안 ▼\n${messageContent}\n\n※ 취소하려면 관리자 페이지에서 자동발송을 일시정지해주세요.`;
+    // ★ B6: CT-B auto-notify-message — 옵션 A(=== 가로선) + dingbats/이모지 자동 sanitize
+    const notifyMessage = buildPreNotifyMessage({
+      campaignName: ac.campaign_name,
+      scheduledDateStr,
+      scheduledTimeStr,
+      targetCount,
+      messageType: ac.message_type,
+      messageContent,
+    });
 
     // notify_phones에 알림 발송
     const phones: string[] = ac.notify_phones || [];
@@ -829,20 +849,18 @@ async function executePreSendSpamTest(ac: any): Promise<void> {
 
     const channel = ac.message_type || 'SMS';
 
-    // ★ CT-01: 타겟 필터 매칭 첫 고객 조회 (스팸테스트 개인화용)
-    let firstRecipient: Record<string, any> | undefined;
-    try {
-      const filterResult = buildFilterQueryCompat(ac.target_filter, ac.company_id);
-      const firstCustResult = await query(
-        `SELECT * FROM customers WHERE company_id = $1 AND is_active = true AND sms_opt_in = true ${filterResult.where ? 'AND ' + filterResult.where : ''} ORDER BY updated_at DESC LIMIT 1`,
-        [ac.company_id, ...filterResult.params]
-      );
-      if (firstCustResult.rows.length > 0) {
-        const c = firstCustResult.rows[0];
-        firstRecipient = { ...c, ...(c.custom_fields || {}) };
-      }
-    } catch (e) {
-      console.warn(`${logPrefix} 스팸테스트용 첫 고객 조회 실패 (무시):`, e);
+    // ★ B5: 타겟 첫 고객 조회 — CT-A target-sample.ts
+    //   기존 인라인 SELECT는 store_code/수신거부 필터 누락으로 다른 브랜드 고객을 가져오는 버그 발생
+    //   CT-A가 store_code 격리 + 수신거부 제외를 자동 적용
+    const sampleRes = await fetchTargetSampleCustomer({
+      companyId: ac.company_id,
+      targetFilter: ac.target_filter,
+      userId: ac.user_id,
+      storeCode: ac.store_code,
+    });
+    const firstRecipient = sampleRes.raw || undefined;
+    if (!sampleRes.matched) {
+      console.warn(`${logPrefix} 스팸테스트용 첫 고객 조회 결과 0건 (필터 매칭 없음)`);
     }
 
     // ★ CT-09: autoSpamTestWithRegenerate 재활용
@@ -898,10 +916,14 @@ async function executePreSendSpamTest(ac: any): Promise<void> {
         hour: '2-digit', minute: '2-digit', hour12: false,
       });
 
-      let notifyMsg = `[자동발송 스팸테스트 결과]\n\n캠페인: ${ac.campaign_name}\n발송 예정: 오늘 ${scheduledTimeStr}\n\n스팸테스트 결과: ${resultLabel}`;
-      if (isBlocked) {
-        notifyMsg += `\n\n⚠️ 문안이 스팸필터에 차단되었습니다.\n관리자 페이지에서 문안을 수정하거나 일시정지해주세요.`;
-      }
+      // ★ B6: CT-B auto-notify-message — ⚠️ 이모지/dingbats 제거 + 옵션 A 디자인
+      const notifyMsg = buildSpamTestResultNotifyMessage({
+        campaignName: ac.campaign_name,
+        scheduledTimeStr,
+        spamResultLabel: resultLabel,
+        spamBlocked: isBlocked,
+        messageContent,
+      });
 
       const notifyRows: any[][] = [];
       for (const phone of phones) {
@@ -967,21 +989,33 @@ export async function runAutoCampaignWorker(): Promise<void> {
 // setInterval 기반 실행 (app.ts에서 호출)
 // ============================================================
 
-// ★ D106: 5분→3분 (최대 지연 3분으로 축소. 가벼운 SELECT 4회/사이클 — 서버 부하 무시 가능)
-const WORKER_INTERVAL_MS = 3 * 60 * 1000; // 3분
+// ★ B7: 3분→1분 + 정각 align (정각 발송 최대 지연 60초 보장)
+//   D106 3분 → 11:00 발송 설정인데 11:02에 잡히는 케이스(2분 지연) 발생
+//   1분 + 다음 분의 0초에 align하면 11:00:00~11:00:59 사이 무조건 잡힘
+const WORKER_INTERVAL_MS = 60 * 1000; // 1분
 
 export function startAutoCampaignScheduler(): void {
-  console.log('[auto-worker] 자동발송 스케줄러 시작 (매 3분 체크, 4단계 라이프사이클)');
+  console.log('[auto-worker] 자동발송 스케줄러 시작 (매 1분 체크, 다음 분 0초 align, 4단계 라이프사이클)');
 
-  // 기동 시 즉시 1회 실행
+  // 기동 시 즉시 1회 실행 (현재 도래한 건 처리)
   runAutoCampaignWorker().catch(err => {
     console.error('[auto-worker] 초기 실행 에러:', err);
   });
 
-  // 이후 매 10분마다
-  setInterval(() => {
+  // ★ B7: 다음 분의 0초까지 대기 후 정각 align
+  //   예: 현재 14:23:47 → 13초 후(14:24:00)에 첫 align 실행 → 이후 60초 간격
+  const now = Date.now();
+  const msToNextMinute = 60_000 - (now % 60_000);
+  setTimeout(() => {
+    // 정각 첫 실행
     runAutoCampaignWorker().catch(err => {
-      console.error('[auto-worker] 정기 실행 에러:', err);
+      console.error('[auto-worker] align 첫 실행 에러:', err);
     });
-  }, WORKER_INTERVAL_MS);
+    // 이후 매 1분마다 (정각 ± 약간의 jitter)
+    setInterval(() => {
+      runAutoCampaignWorker().catch(err => {
+        console.error('[auto-worker] 정기 실행 에러:', err);
+      });
+    }, WORKER_INTERVAL_MS);
+  }, msToNextMinute);
 }

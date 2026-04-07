@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { highlightVars } from '../utils/highlightVars';
+import { highlightVars, mergeAndHighlightVars } from '../utils/highlightVars';
 import { formatPhoneNumber, buildAdMessageFront } from '../utils/formatDate';
 
 interface AiCampaignSendModalProps {
@@ -66,6 +66,8 @@ export default function AiCampaignSendModal({
   const [individualCallbackColumn, setIndividualCallbackColumn] = useState(defaultUseIndividual ? (phoneFields?.[0] || 'store_phone') : '');
   // ★ B-D75-01: LMS/MMS 제목 수정 가능하도록 state 관리
   const [editSubject, setEditSubject] = useState(subject || '');
+  // ★ 검수리스트 UX: 머지 미리보기 토글 (변수 그대로 vs 샘플 고객 데이터 치환)
+  const [showMergedPreview, setShowMergedPreview] = useState(false);
 
   useEffect(() => {
     if (!recommendedTime) setSendTimeOption('now');
@@ -153,6 +155,21 @@ export default function AiCampaignSendModal({
                   )}
                   {/* 메시지 영역 */}
                   <div className="flex-1 overflow-y-auto p-3 bg-gradient-to-b from-emerald-50/30 to-white">
+                    {/* ★ 검수리스트 UX: 머지 미리보기 토글 (개인화 변수 강조 vs 첫 고객 머지 결과) */}
+                    {usePersonalization && sampleCustomer && Object.keys(sampleCustomer).length > 0 && (
+                      <div className="flex items-center gap-1 mb-2 px-1">
+                        <button
+                          onClick={() => setShowMergedPreview(false)}
+                          className={`flex-1 text-[10px] py-1 rounded transition-colors ${!showMergedPreview ? 'bg-amber-100 text-amber-800 font-bold' : 'bg-gray-50 text-gray-400'}`}
+                          title="개인화 변수가 어디에 들어갈지 강조 표시"
+                        >변수 강조</button>
+                        <button
+                          onClick={() => setShowMergedPreview(true)}
+                          className={`flex-1 text-[10px] py-1 rounded transition-colors ${showMergedPreview ? 'bg-emerald-100 text-emerald-800 font-bold' : 'bg-gray-50 text-gray-400'}`}
+                          title="첫 고객 데이터로 실제 치환된 결과 미리보기"
+                        >머지 결과</button>
+                      </div>
+                    )}
                     {/* MMS 이미지 */}
                     {mmsImages && mmsImages.length > 0 && mmsImages.map((img, idx) => (
                       <img key={idx} src={img.url} alt="" className="w-full h-auto rounded mb-1.5" />
@@ -160,7 +177,9 @@ export default function AiCampaignSendModal({
                     <div className="flex gap-2 mt-1">
                       <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-xs bg-emerald-100`}>📱</div>
                       <div className={`rounded-2xl rounded-tl-sm p-3 shadow-sm border text-[12px] leading-[1.7] whitespace-pre-wrap break-all text-gray-700 max-w-[95%] bg-white border-gray-100`}>
-                        {highlightVars(getPreviewMessage()) || '메시지 없음'}
+                        {showMergedPreview && sampleCustomer
+                          ? mergeAndHighlightVars(getPreviewMessage(), sampleCustomer)
+                          : highlightVars(getPreviewMessage()) || '메시지 없음'}
                       </div>
                     </div>
                   </div>

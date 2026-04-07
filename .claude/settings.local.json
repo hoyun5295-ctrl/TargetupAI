@@ -106,7 +106,9 @@
       "Bash(grep -v \"//\")",
       "Bash(grep -n \"from ''../utils/formatDate''\" packages/frontend/src/pages/AutoSendPage.tsx)",
       "Bash(echo \"EXIT=$?\")",
-      "Bash(echo \"===EXIT=$?==\")"
+      "Bash(echo \"===EXIT=$?==\")",
+      "Bash(echo \"BACKEND_EXIT=$?\")",
+      "Bash(echo \"FRONTEND_EXIT=$?\")"
     ]
   }
 }

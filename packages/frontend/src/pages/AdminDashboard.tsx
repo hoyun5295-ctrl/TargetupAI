@@ -1384,11 +1384,17 @@ const handleSendBillingEmail = async () => {
     loadSmsDetail(campaignId, 1);
   };
 
-const loadSendStats = async (page = 1) => {
+// ★ B8: viewOverride 파라미터 추가 — setStatsView 후 stale 값 회피
+//   기존: setStatsView(key); setTimeout(() => loadSendStats(1), 0);
+//        → React state 업데이트가 batched라 setTimeout 안에서도 statsView 가 stale → 일/월 1회 어긋남
+//   변경: setStatsView(key); loadSendStats(1, key);
+//        → 명시적 view 인자 전달로 stale 회피
+const loadSendStats = async (page = 1, viewOverride?: 'daily' | 'monthly') => {
   try {
+    const view = viewOverride || statsView;
     const token = localStorage.getItem('token');
     const params = new URLSearchParams({
-      view: statsView,
+      view,
       page: String(page),
       limit: '10',
     });
@@ -3644,7 +3650,7 @@ const handleApproveRequest = async (id: string) => {
                 {([['daily', '일별'], ['monthly', '월별']] as const).map(([key, label]) => (
                   <button
                     key={key}
-                    onClick={() => { setStatsView(key); setTimeout(() => loadSendStats(1), 0); }}
+                    onClick={() => { setStatsView(key); loadSendStats(1, key); }}
                     className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
                       statsView === key ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'
                     }`}

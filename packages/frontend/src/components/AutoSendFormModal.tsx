@@ -1071,7 +1071,7 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
                         ✨ AI 문구추천
                       </button>
                       <button
-                        onClick={() => {
+                        onClick={async () => {
                           if (!messageContent.trim()) {
                             setToast({ show: true, type: 'error', message: '메시지를 먼저 입력해주세요.' });
                             return;
@@ -1079,6 +1079,28 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
                           if (!callbackNumber) {
                             setToast({ show: true, type: 'error', message: '발신번호를 먼저 선택해주세요.' });
                             return;
+                          }
+                          // ★ B5: 스팸필터 모달 열기 직전 타겟 첫 고객 강제 채움
+                          //   recommend-target 미호출 케이스에도 미리보기 개인화가 보이도록 보장
+                          if (!spamSampleCustomer && Object.keys(targetFilter || {}).length > 0) {
+                            try {
+                              const res = await fetch('/api/auto-campaigns/preview-sample', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
+                                body: JSON.stringify({
+                                  target_filter: targetFilter,
+                                  store_code: campaign?.store_code || null,
+                                }),
+                              });
+                              if (res.ok) {
+                                const data = await res.json();
+                                if (data.matched && data.customer) {
+                                  setSpamSampleCustomer(data.customer);
+                                }
+                              }
+                            } catch {
+                              // 실패해도 스팸필터 모달은 열림 (미치환 상태로 폴백)
+                            }
                           }
                           setShowSpamFilter(true);
                         }}
