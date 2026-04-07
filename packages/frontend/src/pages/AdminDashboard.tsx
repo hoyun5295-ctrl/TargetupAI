@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { companiesApi, plansApi, billingApi } from '../api/client';
 import { useAuthStore } from '../stores/authStore';
-import { formatDateTime, formatDate, formatDateTimeShort, buildAdMessageFront } from '../utils/formatDate';
+import { formatDateTime, formatDate, formatDateTimeShort, formatCampaignMessageForDisplay } from '../utils/formatDate';
 import SessionTimer from '../components/SessionTimer';
 import { COMPANY_NAME_EN, COMPANY_EMAIL } from '../constants/company';
 
@@ -6564,13 +6564,19 @@ const handleApproveRequest = async (id: string) => {
                               </td>
                               <td className="px-4 py-2.5 text-left text-xs text-gray-600 max-w-[250px]">
                                 {c.message_content ? (
-                                  <div
-                                    className="truncate cursor-pointer hover:text-blue-600"
-                                    title="클릭하여 전체 메시지 보기"
-                                    onClick={() => setMessageDetailContent({ name: c.campaign_name, content: buildAdMessageFront(c.message_content, c.message_type || 'SMS', c.is_ad || false, c.callback_number || '') })}
-                                  >
-                                    {buildAdMessageFront(c.message_content, c.message_type || 'SMS', c.is_ad || false, c.callback_number || '').substring(0, 50)}{c.message_content.length > 50 ? '...' : ''}
-                                  </div>
+                                  (() => {
+                                    // ★ B2: 컨트롤타워 — opt_out_080_number 기반 (광고)+080 부착
+                                    const fullMsg = formatCampaignMessageForDisplay(c);
+                                    return (
+                                      <div
+                                        className="truncate cursor-pointer hover:text-blue-600"
+                                        title="클릭하여 전체 메시지 보기"
+                                        onClick={() => setMessageDetailContent({ name: c.campaign_name, content: fullMsg })}
+                                      >
+                                        {fullMsg.substring(0, 50)}{fullMsg.length > 50 ? '...' : ''}
+                                      </div>
+                                    );
+                                  })()
                                 ) : '-'}
                               </td>
                               <td className="px-4 py-2.5 text-center text-gray-500 font-mono text-xs">

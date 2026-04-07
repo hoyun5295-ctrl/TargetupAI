@@ -401,3 +401,63 @@ export async function exportUserUnsubscribes(userId: string): Promise<{ phone: s
   );
   return result.rows;
 }
+
+// ============================================================
+// ★ 캠페인 SELECT용 080 번호 SQL fragment (B2-광고+080표시 통합)
+// ============================================================
+//
+// 캠페인 표시 화면(발송결과/캘린더/슈퍼관리자/대시보드)에서
+// "(광고)+080번호"를 정확히 부착하려면 캠페인 응답에 사용자/회사의
+// opt_out_080_number가 함께 내려가야 한다.
+//
+// 매칭 우선순위 (CT-03 080 콜백 매칭과 동일):
+//   1) users.opt_out_auto_sync = true 인 경우 → users.opt_out_080_number
+//   2) 그 외 → companies.opt_out_080_number (fallback)
+//
+// 사용 위치 (전부 동일 패턴):
+//   - results.ts (캠페인 목록/상세)
+//   - campaigns.ts (캘린더/캠페인 상세)
+//   - admin.ts (슈퍼관리자 통계 캠페인 목록)
+//   - stats-aggregation.ts (고객사 대시보드 캠페인 목록)
+//   - auto-campaigns.ts (자동발송 목록/실행이력)
+//
+// ⚠️ 사용 규칙:
+//   - 메인 캠페인 테이블 alias 는 반드시 'c' 여야 한다.
+//   - 다른 LEFT JOIN 의 alias 와 충돌하지 않게 'opt_user', 'opt_co' 사용.
+//   - SELECT 절에는 CAMPAIGN_OPT080_SELECT_EXPR 추가, FROM 뒤에 CAMPAIGN_OPT080_LEFT_JOIN 추가.
+
+/**
+ * 캠페인 SELECT 절에 추가할 opt_out_080_number 표현식.
+ * 주의: 끝 콤마/공백 없음 — 호출부에서 콤마와 함께 삽입.
+ */
+export const CAMPAIGN_OPT080_SELECT_EXPR = `COALESCE(
+  CASE WHEN opt_user.opt_out_auto_sync = true THEN opt_user.opt_out_080_number END,
+  opt_co.opt_out_080_number
+) AS opt_out_080_number`;
+
+/**
+ * 캠페인 FROM 절 뒤에 추가할 LEFT JOIN — alias/컬럼 가변 빌더.
+ *
+ * @param campaignAlias - 메인 캠페인 테이블 alias (기본 'c')
+ * @param userIdColumn - 발송 주체 사용자 ID 컬럼 (기본 'created_by', 자동발송은 'user_id')
+ *
+ * @example 일반 캠페인:
+ *   buildCampaignOpt080LeftJoin() → "LEFT JOIN users opt_user ON opt_user.id = c.created_by ..."
+ * @example 자동발송:
+ *   buildCampaignOpt080LeftJoin('ac', 'user_id') → "LEFT JOIN users opt_user ON opt_user.id = ac.user_id ..."
+ */
+export function buildCampaignOpt080LeftJoin(
+  campaignAlias: string = 'c',
+  userIdColumn: string = 'created_by'
+): string {
+  return `
+  LEFT JOIN users opt_user ON opt_user.id = ${campaignAlias}.${userIdColumn}
+  LEFT JOIN companies opt_co ON opt_co.id = ${campaignAlias}.company_id
+`;
+}
+
+/**
+ * 일반 캠페인용 기본 LEFT JOIN 상수 (alias 'c' + created_by).
+ * 6곳의 발송 결과/캘린더/슈퍼관리자/대시보드 SELECT에서 사용.
+ */
+export const CAMPAIGN_OPT080_LEFT_JOIN = buildCampaignOpt080LeftJoin();

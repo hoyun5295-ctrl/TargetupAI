@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { calculateSmsBytes, mmsServerPathToUrl, buildAdMessageFront } from '../utils/formatDate';
+import { calculateSmsBytes, mmsServerPathToUrl, formatCampaignMessageForDisplay } from '../utils/formatDate';
 
 interface ResultsModalProps {
   onClose: () => void;
@@ -388,7 +388,7 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
                           </td>
                           <td className="px-3 py-2.5 text-center text-xs text-gray-600">{c.created_by_name || '-'}</td>
                           <MessageCell
-                            content={buildAdMessageFront(c.message_content || '', c.message_type || 'SMS', c.is_ad || false, c.callback_number || '')}
+                            content={formatCampaignMessageForDisplay(c)}
                             onShowDetail={setMsgDetailContent}
                           />
                           <td className="px-3 py-2.5 text-center text-xs text-gray-500">
@@ -791,7 +791,8 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
                               {(selectedCampaign.message_type === 'LMS' || selectedCampaign.message_type === 'MMS' || selectedCampaign.message_type === 'L' || selectedCampaign.message_type === 'M') && (selectedCampaign.subject || selectedCampaign.message_subject) && (
                                 <div className="font-bold text-gray-900 mb-1 pb-1 border-b border-gray-200">{selectedCampaign.subject || selectedCampaign.message_subject}</div>
                               )}
-                              {messages[0]?.msg_contents || selectedCampaign.message_content || ''}
+                              {/* ★ B2: 컨트롤타워 — 실발송 텍스트(MySQL) 우선, 없으면 순수본문에 (광고)+080 부착 */}
+                              {formatCampaignMessageForDisplay(selectedCampaign, messages[0]?.msg_contents)}
                               {/* ★ D98: MMS 이미지 표시 — mmsServerPathToUrl 컨트롤타워 사용 */}
                               {selectedCampaign.mms_image_paths && Array.isArray(selectedCampaign.mms_image_paths) && selectedCampaign.mms_image_paths.length > 0 && (
                                 <div className="mt-2 pt-2 border-t border-gray-100 flex gap-1.5">
@@ -806,7 +807,8 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
                         {/* 하단 바이트 */}
                         <div className="px-3 py-2 border-t bg-gray-50 text-center shrink-0">
                           <span className="text-[10px] text-gray-400">
-                            {calculateSmsBytes(selectedCampaign.message_content || '')} / {selectedCampaign.message_type === 'SMS' || selectedCampaign.message_type === 'S' ? 90 : 2000} bytes
+                            {/* ★ B2: 바이트 계산도 (광고)+080 부착된 최종 텍스트 기준 */}
+                            {calculateSmsBytes(formatCampaignMessageForDisplay(selectedCampaign, messages[0]?.msg_contents))} / {selectedCampaign.message_type === 'SMS' || selectedCampaign.message_type === 'S' ? 90 : 2000} bytes
                           </span>
                         </div>
                       </div>

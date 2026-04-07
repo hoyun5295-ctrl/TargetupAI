@@ -17,7 +17,7 @@ import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
 import { getStoreScope } from '../utils/store-scope';
 import { buildFilterQueryCompat } from '../utils/customer-filter';
-import { buildUnsubscribeFilter } from '../utils/unsubscribe-helper';
+import { buildUnsubscribeFilter, CAMPAIGN_OPT080_SELECT_EXPR, buildCampaignOpt080LeftJoin } from '../utils/unsubscribe-helper';
 import { kstToUtc } from '../utils/auto-campaign-worker';
 
 const router = Router();
@@ -121,8 +121,12 @@ async function checkOwnership(
   userType: string,
   userId: string
 ): Promise<{ ok: boolean; campaign?: any; errorMsg?: string; statusCode?: number }> {
+  // ★ B2: opt_out_080_number 포함을 위해 LEFT JOIN (자동발송은 ac.user_id 기반)
   const result = await query(
-    `SELECT * FROM auto_campaigns WHERE id = $1 AND company_id = $2 AND status != 'deleted'`,
+    `SELECT ac.*, ${CAMPAIGN_OPT080_SELECT_EXPR}
+     FROM auto_campaigns ac
+     ${buildCampaignOpt080LeftJoin('ac', 'user_id')}
+     WHERE ac.id = $1 AND ac.company_id = $2 AND ac.status != 'deleted'`,
     [autoCampaignId, companyId]
   );
   if (result.rows.length === 0) {
@@ -231,12 +235,15 @@ router.get('/', async (req: Request, res: Response) => {
       [companyId]
     );
 
+    // ★ B2: opt_out_080_number 포함을 위해 LEFT JOIN (자동발송은 ac.user_id 기반)
     const result = await query(
       `SELECT ac.*,
               u.login_id as creator_login_id,
+              ${CAMPAIGN_OPT080_SELECT_EXPR},
               (SELECT COUNT(*)::int FROM auto_campaign_runs acr WHERE acr.auto_campaign_id = ac.id) as run_count
        FROM auto_campaigns ac
        LEFT JOIN users u ON ac.user_id = u.id
+       ${buildCampaignOpt080LeftJoin('ac', 'user_id')}
        WHERE ac.company_id = $1 AND ac.status != 'deleted'${storeFilter}
        ORDER BY ac.created_at DESC`,
       params

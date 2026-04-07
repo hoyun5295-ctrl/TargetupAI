@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useAuthStore } from '../stores/authStore';
-import { formatDateTime, buildAdMessageFront } from '../utils/formatDate';
+import { formatDateTime, formatCampaignMessageForDisplay } from '../utils/formatDate';
 
 interface CalendarModalProps {
   onClose: () => void;
@@ -267,12 +267,8 @@ export default function CalendarModal({ onClose, token, onEdit }: CalendarModalP
                     <div className="pt-3 border-t">
                       <div className="text-gray-500 mb-2">💬 메시지</div>
                       <div className="bg-white rounded-lg p-3 text-xs text-gray-700 whitespace-pre-wrap border max-h-24 overflow-y-auto">
-                        {buildAdMessageFront(
-                          selectedCampaign.message_content,
-                          selectedCampaign.message_type || 'SMS',
-                          selectedCampaign.is_ad || false,
-                          selectedCampaign.callback_number || ''
-                        )}
+                        {/* ★ B2: 컨트롤타워 — opt_out_080_number 기반 (광고)+080 부착 */}
+                        {formatCampaignMessageForDisplay(selectedCampaign)}
                       </div>
                     </div>
                   )}

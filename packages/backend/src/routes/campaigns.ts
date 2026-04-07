@@ -12,6 +12,7 @@ import { isValidSmsTable } from '../utils/sms-table-validator';
 import { normalizePhone } from '../utils/normalize-phone';
 import { isValidCustomFieldKey } from '../utils/safe-field-name';
 import { getStoreScope } from '../utils/store-scope';
+import { CAMPAIGN_OPT080_SELECT_EXPR, CAMPAIGN_OPT080_LEFT_JOIN } from '../utils/unsubscribe-helper';
 // ★ 메시징 컨트롤타워 import
 import {
   toKoreaTimeStr,
@@ -197,17 +198,28 @@ router.get('/', async (req: Request, res: Response) => {
     const total = parseInt(countResult.rows[0].count);
 
     params.push(Number(limit), offset);
+    // ★ B2: opt_out_080_number 포함을 위해 alias 'c' + LEFT JOIN
+    const aliasedWhereClause = whereClause
+      .replace(/\bcompany_id\b/g, 'c.company_id')
+      .replace(/\bstatus\b/g, 'c.status')
+      .replace(/\bcreated_by\b/g, 'c.created_by')
+      .replace(/\bscheduled_at\b/g, 'c.scheduled_at')
+      .replace(/\bcreated_at\b/g, 'c.created_at')
+      .replace(/\bevent_start_date\b/g, 'c.event_start_date')
+      .replace(/\bevent_end_date\b/g, 'c.event_end_date');
     const result = await query(
       `SELECT
-        id, campaign_name, status, message_type, send_type,
-        target_count, sent_count, success_count, fail_count,
-        scheduled_at, sent_at, created_at,
-        TO_CHAR(event_start_date, 'YYYY-MM-DD') as event_start_date,
-        TO_CHAR(event_end_date, 'YYYY-MM-DD') as event_end_date,
-        message_content, message_template, subject, message_subject, is_ad, callback_number
-       FROM campaigns
-       ${whereClause}
-       ORDER BY created_at DESC
+        c.id, c.campaign_name, c.status, c.message_type, c.send_type,
+        c.target_count, c.sent_count, c.success_count, c.fail_count,
+        c.scheduled_at, c.sent_at, c.created_at,
+        TO_CHAR(c.event_start_date, 'YYYY-MM-DD') as event_start_date,
+        TO_CHAR(c.event_end_date, 'YYYY-MM-DD') as event_end_date,
+        c.message_content, c.message_template, c.subject, c.message_subject, c.is_ad, c.callback_number,
+        ${CAMPAIGN_OPT080_SELECT_EXPR}
+       FROM campaigns c
+       ${CAMPAIGN_OPT080_LEFT_JOIN}
+       ${aliasedWhereClause}
+       ORDER BY c.created_at DESC
        LIMIT $${paramIndex++} OFFSET $${paramIndex}`,
       params
     );
@@ -1153,8 +1165,12 @@ router.get('/:id', async (req: Request, res: Response) => {
     const { id } = req.params;
     const companyId = req.user?.companyId;
 
+    // ★ B2: opt_out_080_number 포함을 위해 LEFT JOIN
     const result = await query(
-      `SELECT * FROM campaigns WHERE id = $1 AND company_id = $2`,
+      `SELECT c.*, ${CAMPAIGN_OPT080_SELECT_EXPR}
+       FROM campaigns c
+       ${CAMPAIGN_OPT080_LEFT_JOIN}
+       WHERE c.id = $1 AND c.company_id = $2`,
       [id, companyId]
     );
 

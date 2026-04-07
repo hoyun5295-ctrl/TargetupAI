@@ -96,7 +96,17 @@
       "Bash(xargs basename:*)",
       "Bash(ls /c/Users/ceo/projects/targetup/*.pdf)",
       "Bash(python generate_sample_pdfs.py)",
-      "Bash(node generate-fake-customers.js)"
+      "Bash(node generate-fake-customers.js)",
+      "Bash(node -e \"const XLSX = require\\(''./packages/backend/node_modules/xlsx''\\); const wb = XLSX.readFile\\(String.raw\\\\`C:\\\\Users\\\\ceo\\\\OneDrive\\\\문서\\\\카카오톡 받은 파일\\\\한줄로 검수리스트_0406.xlsx\\\\`\\); for \\(const name of wb.SheetNames\\) { console.log\\(''=== Sheet:'', name, ''===''\\); const ws = wb.Sheets[name]; const data = XLSX.utils.sheet_to_csv\\(ws\\); console.log\\(data\\); }\")",
+      "Bash(node read-files.js)",
+      "Bash(node check-pdf.js)",
+      "Bash(npm ls:*)",
+      "Bash(node read-pdf.js)",
+      "Bash(node -e \"const m = require\\(''./node_modules/pdf-parse''\\); console.log\\(Object.keys\\(m\\)\\)\")",
+      "Bash(grep -v \"//\")",
+      "Bash(grep -n \"from ''../utils/formatDate''\" packages/frontend/src/pages/AutoSendPage.tsx)",
+      "Bash(echo \"EXIT=$?\")",
+      "Bash(echo \"===EXIT=$?==\")"
     ]
   }
 }

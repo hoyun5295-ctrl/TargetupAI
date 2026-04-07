@@ -8,6 +8,7 @@
  */
 
 import { query } from '../config/database';
+import { CAMPAIGN_OPT080_SELECT_EXPR, CAMPAIGN_OPT080_LEFT_JOIN } from './unsubscribe-helper';
 
 // ============================================================
 // KST 날짜 범위 필터 빌더
@@ -348,15 +349,19 @@ export async function querySendStatsDetail(
   }));
 
   // 캠페인 상세 목록
+  // ★ B2: opt_out_080_number 포함을 위해 LEFT JOIN
   const campaignsResult = await query(`
     SELECT
       c.id as campaign_id, c.campaign_name, c.send_type, c.message_content,
+      c.message_type, c.is_ad, c.callback_number,
+      ${CAMPAIGN_OPT080_SELECT_EXPR},
       u.name as user_name, u.login_id,
       c.id as run_id, 1 as run_number,
       c.sent_count, c.success_count, c.fail_count, c.target_count,
-      c.message_type, c.sent_at
+      c.sent_at
     FROM campaigns c
     LEFT JOIN users u ON c.created_by = u.id
+    ${CAMPAIGN_OPT080_LEFT_JOIN}
     WHERE c.sent_at IS NOT NULL
       AND ${groupCol} = $1
       AND c.company_id = $2

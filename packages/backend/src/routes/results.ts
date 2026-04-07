@@ -5,6 +5,7 @@ import { getCompanySmsTablesWithLogs } from '../utils/sms-queue';
 import { STATUS_CODE_MAP, CARRIER_MAP, SUCCESS_CODES, PENDING_CODES, getStatusLabel, getStatusType, getCarrierLabel, isSuccess } from '../utils/sms-result-map';
 import { DEFAULT_COSTS, redis, CACHE_TTL } from '../config/defaults';
 import { buildDateRangeFilter, buildPeriodFilter } from '../utils/stats-aggregation';
+import { CAMPAIGN_OPT080_SELECT_EXPR, CAMPAIGN_OPT080_LEFT_JOIN } from '../utils/unsubscribe-helper';
 
 const router = Router();
 
@@ -258,7 +259,7 @@ router.get('/campaigns', async (req: Request, res: Response) => {
       .replace(/\bmessage_type\b/g, 'c.message_type');
 
     const result = await query(
-      `SELECT 
+      `SELECT
         c.id, c.campaign_name, c.message_type, c.message_content, c.send_type, c.status,
         c.target_count, c.sent_count, c.success_count, c.fail_count,
         c.is_ad, c.scheduled_at, c.sent_at, c.created_at, c.send_channel, c.callback_number,
@@ -266,12 +267,14 @@ router.get('/campaigns', async (req: Request, res: Response) => {
         (c.created_at AT TIME ZONE 'Asia/Seoul')::date as created_date_kst,
         c.cancelled_by_type, c.cancel_reason,
         u.login_id as created_by_name,
-        CASE WHEN c.sent_count > 0 
+        ${CAMPAIGN_OPT080_SELECT_EXPR},
+        CASE WHEN c.sent_count > 0
           THEN ROUND((c.success_count::numeric / c.sent_count) * 100, 1)
-          ELSE 0 
+          ELSE 0
         END as success_rate
        FROM campaigns c
        LEFT JOIN users u ON c.created_by = u.id
+       ${CAMPAIGN_OPT080_LEFT_JOIN}
        ${aliasedWhere}
        ORDER BY c.created_at DESC
        LIMIT $${paramIndex++} OFFSET $${paramIndex}`,
@@ -311,11 +314,15 @@ router.get('/campaigns/:id', async (req: Request, res: Response) => {
     const companyTables = await getCompanySmsTablesWithLogs(companyId, userId);
 
     const userType = req.user?.userType;
-    let detailQuery = `SELECT * FROM campaigns WHERE id = $1 AND company_id = $2`;
+    // ★ B2: opt_out_080_number 포함을 위해 LEFT JOIN
+    let detailQuery = `SELECT c.*, ${CAMPAIGN_OPT080_SELECT_EXPR}
+                       FROM campaigns c
+                       ${CAMPAIGN_OPT080_LEFT_JOIN}
+                       WHERE c.id = $1 AND c.company_id = $2`;
     const detailParams: any[] = [id, companyId];
     // ★ 사용자는 본인 캠페인만 조회 가능
     if (userType === 'company_user' && userId) {
-      detailQuery += ` AND created_by = $3`;
+      detailQuery += ` AND c.created_by = $3`;
       detailParams.push(userId);
     }
     const campaignResult = await query(detailQuery, detailParams);

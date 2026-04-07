@@ -9,6 +9,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import AutoSendFormModal from '../components/AutoSendFormModal';
+import { formatCampaignMessageForDisplay } from '../utils/formatDate';
 
 // ============================================================
 // 타입
@@ -42,6 +43,8 @@ interface AutoCampaign {
   generated_at: string | null;
   ai_generation_status: string | null;
   fallback_message_content: string | null;
+  // ★ B2: 백엔드 LEFT JOIN으로 내려오는 사용자/회사 080 번호
+  opt_out_080_number: string | null;
 }
 
 interface PlanInfo {
@@ -116,7 +119,8 @@ export default function AutoSendPage() {
   }>({ show: false, title: '', message: '', onConfirm: () => {} });
 
   // ★ D86: 실행 이력 모달
-  const [historyModal, setHistoryModal] = useState<{ show: boolean; campaignName: string; runs: any[] }>({ show: false, campaignName: '', runs: [] });
+  // ★ B2: ac 객체도 저장 — 표시 시 (광고)+080 부착에 message_type/is_ad/opt_out_080_number 필요
+  const [historyModal, setHistoryModal] = useState<{ show: boolean; campaignName: string; ac: AutoCampaign | null; runs: any[] }>({ show: false, campaignName: '', ac: null, runs: [] });
   const [historyLoading, setHistoryLoading] = useState(false);
 
   // ★ D96: AI 생성 문안 확인/수정 모달
@@ -166,14 +170,15 @@ export default function AutoSendPage() {
   // ============================================================
   const fetchRunHistory = async (ac: AutoCampaign) => {
     setHistoryLoading(true);
-    setHistoryModal({ show: true, campaignName: ac.campaign_name, runs: [] });
+    setHistoryModal({ show: true, campaignName: ac.campaign_name, ac, runs: [] });
     try {
       const res = await fetch(`/api/auto-campaigns/${ac.id}`, {
         headers: { Authorization: `Bearer ${getToken()}` },
       });
       if (res.ok) {
         const data = await res.json();
-        setHistoryModal({ show: true, campaignName: ac.campaign_name, runs: data.runs || [] });
+        // ★ B2: 백엔드 응답의 autoCampaign(opt_out_080_number 포함)을 우선 저장 — 폴백으로 목록의 ac 사용
+        setHistoryModal({ show: true, campaignName: ac.campaign_name, ac: data.autoCampaign || ac, runs: data.runs || [] });
       }
     } catch (err) {
       console.error('이력 조회 실패:', err);
@@ -772,7 +777,7 @@ export default function AutoSendPage() {
                 <h3 className="text-lg font-bold text-gray-800">실행 이력</h3>
                 <p className="text-xs text-gray-500">{historyModal.campaignName}</p>
               </div>
-              <button onClick={() => setHistoryModal({ show: false, campaignName: '', runs: [] })} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-200 text-gray-400 hover:text-gray-600 transition text-lg">&times;</button>
+              <button onClick={() => setHistoryModal({ show: false, campaignName: '', ac: null, runs: [] })} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-200 text-gray-400 hover:text-gray-600 transition text-lg">&times;</button>
             </div>
 
             <div className="flex-1 overflow-auto px-6 py-4">
@@ -824,11 +829,21 @@ export default function AutoSendPage() {
                             <div className="text-sm font-bold text-red-700">{(run.fail_count || 0).toLocaleString()}</div>
                           </div>
                         </div>
-                        {/* ★ D96: 회차별 AI 생성 문안 표시 */}
+                        {/* ★ D96: 회차별 AI 생성 문안 표시
+                            ★ B2: 컨트롤타워 — 실제 발송된 본문에 (광고)+080 부착하여 표시 */}
                         {run.generated_message_content && (
                           <div className="mt-2 bg-violet-50 border border-violet-200 rounded-lg p-2.5">
                             <p className="text-xs font-medium text-violet-600 mb-1">사용된 문안</p>
-                            <p className="text-xs text-gray-700 whitespace-pre-line leading-relaxed line-clamp-3">{run.generated_message_content}</p>
+                            <p className="text-xs text-gray-700 whitespace-pre-line leading-relaxed line-clamp-3">
+                              {historyModal.ac
+                                ? formatCampaignMessageForDisplay({
+                                    message_content: run.generated_message_content,
+                                    message_type: historyModal.ac.message_type,
+                                    is_ad: historyModal.ac.is_ad,
+                                    opt_out_080_number: historyModal.ac.opt_out_080_number,
+                                  })
+                                : run.generated_message_content}
+                            </p>
                           </div>
                         )}
                         {run.cancel_reason && (

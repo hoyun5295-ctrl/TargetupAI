@@ -479,3 +479,40 @@ export function buildAdMessageFront(
 
   return `${adPrefix}${message}${rejectFooter}`;
 }
+
+/**
+ * ★ B2: 캠페인 표시용 메시지 컨트롤타워
+ *
+ * 발송 결과/캘린더/슈퍼관리자/대시보드/자동발송 등 모든 표시 경로에서
+ * "(광고)+080번호" 부착된 최종 메시지를 일관되게 생성한다.
+ *
+ * 데이터 출처 우선순위:
+ *  1) realSentMessage (MySQL msg_contents 등 이미 발송된 텍스트) → 그대로 사용
+ *     (prepareSendMessage 거쳐 큐에 INSERT됐으므로 이미 (광고)+080 포함 상태)
+ *  2) campaign.message_content (DB 순수본문) → buildAdMessageFront 로 (광고)+080 부착
+ *
+ * ⚠️ 절대 금지:
+ *  - 4번째 인자 자리에 callback_number(회신번호) 전달 금지 (D106 재발 패턴)
+ *  - 표시 경로에서 buildAdMessageFront 직접 호출 금지 — 반드시 이 함수를 통할 것
+ *
+ * @param campaign - opt_out_080_number 포함된 캠페인 객체 (백엔드에서 LEFT JOIN으로 내려옴)
+ * @param realSentMessage - MySQL에 INSERT된 실제 발송 텍스트 (있으면 우선)
+ */
+export function formatCampaignMessageForDisplay(
+  campaign: {
+    message_content?: string | null;
+    message_type?: string | null;
+    is_ad?: boolean | null;
+    opt_out_080_number?: string | null;
+  } | null | undefined,
+  realSentMessage?: string | null
+): string {
+  if (realSentMessage) return realSentMessage;
+  if (!campaign) return '';
+  return buildAdMessageFront(
+    campaign.message_content || '',
+    campaign.message_type || 'SMS',
+    campaign.is_ad || false,
+    campaign.opt_out_080_number || ''
+  );
+}
