@@ -713,21 +713,20 @@ export default function AiCustomSendFlow({
             <div>
               <div className="mb-5">
                 <h4 className="text-base font-bold text-gray-800 mb-1">AI가 파싱한 프로모션 정보를 확인하세요</h4>
-                <p className="text-sm text-gray-500">내용이 정확한지 확인하고, 필요하면 직접 수정할 수 있습니다.</p>
+                <p className="text-sm text-gray-500">
+                  내용을 변경하려면 <b className="text-violet-600">이전 단계(프로모션 브리핑)</b>로 돌아가서 새로 입력해주세요.
+                </p>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
-                {/* 프로모션 카드 (왼쪽) */}
+                {/* 프로모션 카드 (왼쪽) — ★ B+0407-2: 수정 불가 (read-only) */}
                 <div className="bg-gradient-to-br from-violet-50 to-purple-50 rounded-xl border border-violet-200 p-5">
                   <div className="flex items-center justify-between mb-4">
                     <div className="flex items-center gap-2"><Sparkles className="w-4 h-4 text-violet-600" /><span className="text-sm font-bold text-violet-700">프로모션 카드</span></div>
-                    <button onClick={() => { setEditingCard(!editingCard); if (!editingCard) setEditedCard({ ...promotionCard }); }}
-                      className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${editingCard ? 'bg-violet-600 text-white' : 'bg-white text-violet-600 border border-violet-300 hover:bg-violet-50'}`}>
-                      {editingCard ? <><Check className="w-3 h-3" /> 수정완료</> : <><Pencil className="w-3 h-3" /> 수정하기</>}
-                    </button>
+                    <span className="text-[11px] text-violet-500 italic">변경하려면 이전 단계에서 새 브리핑</span>
                   </div>
                   {(() => {
-                    const card = editingCard ? editedCard! : promotionCard;
+                    const card = promotionCard;
                     const cardFields = [
                       { key: 'name', label: '프로모션명', icon: '🎯' }, { key: 'benefit', label: '혜택/할인', icon: '🎁' },
                       { key: 'condition', label: '조건', icon: '📋' }, { key: 'period', label: '기간', icon: '📅' },
@@ -738,17 +737,13 @@ export default function AiCustomSendFlow({
                       <div className="space-y-3">
                         {cardFields.map(({ key, label, icon }) => {
                           const value = (card as any)[key];
-                          if (!value && !editingCard) return null;
+                          if (!value) return null;
                           return (
                             <div key={key} className="flex items-start gap-3">
                               <span className="text-base mt-0.5 shrink-0">{icon}</span>
                               <div className="flex-1 min-w-0">
                                 <div className="text-xs font-medium text-gray-500 mb-0.5">{label}</div>
-                                {editingCard ? (
-                                  <input type="text" value={(editedCard as any)?.[key] || ''}
-                                    onChange={(e) => setEditedCard(prev => prev ? { ...prev, [key]: e.target.value } : null)}
-                                    className="w-full px-3 py-1.5 border border-violet-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-violet-400 bg-white" placeholder={`${label}을 입력하세요`} />
-                                ) : (<div className="text-sm text-gray-800 font-medium">{value}</div>)}
+                                <div className="text-sm text-gray-800 font-medium">{value}</div>
                               </div>
                             </div>
                           );
@@ -758,33 +753,19 @@ export default function AiCustomSendFlow({
                   })()}
                 </div>
 
-                {/* 타겟 조건 카드 (오른쪽) */}
-                {/* ★ B+0407-2: B옵션 — 5개 안전 필드만 수정 가능 (성별/등급/연령대/지역/최소구매금액)
-                    자연어 필드(구매기간/매장/기타)는 readOnly + "이전 단계에서 새 브리핑" 안내 */}
+                {/* 타겟 조건 카드 (오른쪽) — ★ B+0407-2: 수정 불가 (read-only) */}
                 <div className="bg-gradient-to-br from-blue-50 to-cyan-50 rounded-xl border border-blue-200 p-5">
                   <div className="flex items-center justify-between mb-4">
                     <div className="flex items-center gap-2"><Users className="w-4 h-4 text-blue-600" /><span className="text-sm font-bold text-blue-700">발송 대상</span></div>
-                    <button onClick={() => {
-                      if (editingTarget) {
-                        setEditingTarget(false);
-                        setTargetCondition({ ...editedTarget });
-                        handleRetargetCount(editedTarget);
-                      } else {
-                        setEditingTarget(true);
-                        setEditedTarget({ ...targetCondition });
-                      }
-                    }}
-                      className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${editingTarget ? 'bg-blue-600 text-white' : 'bg-white text-blue-600 border border-blue-300 hover:bg-blue-50'}`}>
-                      {editingTarget ? <><Check className="w-3 h-3" /> 수정완료</> : <><Pencil className="w-3 h-3" /> 수정하기</>}
-                    </button>
+                    <span className="text-[11px] text-blue-500 italic">변경하려면 이전 단계에서 새 브리핑</span>
                   </div>
 
-                  {/* 타겟 요약 (description) */}
+                  {/* 타겟 요약 (description) — ★ B+0407-2: read-only 모드 */}
                   {(() => {
-                    const tc = editingTarget ? editedTarget : targetCondition;
+                    const tc = targetCondition;
                     const hasCondition = hasTargetCondition(tc);
 
-                    if (!hasCondition && !editingTarget) {
+                    if (!hasCondition) {
                       return (
                         <div className="text-center py-6">
                           <Users className="w-8 h-8 text-blue-300 mx-auto mb-2" />
@@ -796,8 +777,6 @@ export default function AiCustomSendFlow({
                             <div className="text-lg font-bold text-blue-700">{estimatedCount.toLocaleString()}명</div>
                           )}
                           {!targetRecounting && unsubscribeCount > 0 && <div className="text-xs text-red-400 mt-0.5">수신거부 {unsubscribeCount.toLocaleString()}명 제외</div>}
-                          <button onClick={() => { setEditingTarget(true); setEditedTarget({ ...targetCondition }); }}
-                            className="mt-3 text-xs text-blue-500 hover:text-blue-700 underline">타겟 조건 직접 추가</button>
                         </div>
                       );
                     }
@@ -805,7 +784,7 @@ export default function AiCustomSendFlow({
                     return (
                       <div className="space-y-3">
                         {/* 요약 */}
-                        {tc.description && !editingTarget && (
+                        {tc.description && (
                           <div className="px-3 py-2 bg-blue-100/60 rounded-lg border border-blue-200">
                             <div className="text-xs font-semibold text-blue-700">{tc.description}</div>
                             <div className="flex items-center gap-2 mt-1.5">
@@ -818,33 +797,16 @@ export default function AiCustomSendFlow({
                             </div>
                           </div>
                         )}
-                        {/* 각 필드 */}
+                        {/* 각 필드 — read-only 표시만 */}
                         {targetFields.map(({ key, label, icon }) => {
                           const value = (tc as any)[key];
-                          if (!value && !editingTarget) return null;
-                          // ★ B+0407-2: B옵션 — 자연어 필드(구매기간/매장/기타)는 readOnly + 안내
-                          //   백엔드 recount-target이 자연어 파싱을 다시 못 하므로 변경 시 적용 안 됨 → 이전 단계에서 새 분석 필요
-                          const READONLY_FIELDS = new Set(['purchasePeriod', 'storeName', 'extra']);
-                          const isReadOnly = READONLY_FIELDS.has(key);
+                          if (!value) return null;
                           return (
                             <div key={key} className="flex items-start gap-3">
                               <span className="text-base mt-0.5 shrink-0">{icon}</span>
                               <div className="flex-1 min-w-0">
                                 <div className="text-xs font-medium text-gray-500 mb-0.5">{label}</div>
-                                {editingTarget && !isReadOnly ? (
-                                  <input type="text" value={(editedTarget as any)?.[key] || ''}
-                                    onChange={(e) => setEditedTarget(prev => ({ ...prev, [key]: e.target.value }))}
-                                    className="w-full px-3 py-1.5 border border-blue-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white" placeholder={`${label} (비워두면 제한 없음)`} />
-                                ) : (
-                                  <>
-                                    <div className="text-sm text-gray-800 font-medium">{value || '-'}</div>
-                                    {editingTarget && isReadOnly && (
-                                      <div className="text-[11px] text-amber-600 mt-1">
-                                        💡 변경하려면 <b>이전 단계(프로모션 브리핑)</b>로 돌아가서 새 브리핑을 입력해주세요
-                                      </div>
-                                    )}
-                                  </>
-                                )}
+                                <div className="text-sm text-gray-800 font-medium">{value}</div>
                               </div>
                             </div>
                           );
