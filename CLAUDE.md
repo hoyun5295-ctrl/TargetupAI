@@ -44,10 +44,14 @@
 | CT-12 | brand-message.ts | 브랜드메시지 발송/검증 (자유형 8종 + 기본형 템플릿, D97) |
 | CT-14 | deduplicate.ts | 수신자 중복제거 — phone 기준 normalizePhone (D98) |
 | CT-15 | saved-segments.ts | AI 발송 템플릿 저장/조회/수정/삭제/touch (D107) |
-| — | messageUtils.ts | 변수 치환 (5개 발송 경로 통합) + buildAdMessage (광고+080 전경로 D102) + getOpt080Number (080번호 조회 D102) + prepareFieldMappings (schema+varCatalog+enrich D102) + **prepareSendMessage (변수치환+광고080 통합 D103)** |
+| CT-A | target-sample.ts | **(D109 신설)** 자동발송/캠페인 미리보기/스팸테스트 첫 고객 조회 단일 진입점 — store_code 격리 + 수신거부 제외 + enum 역변환 자동 |
+| CT-B | auto-notify-message.ts | **(D109 신설)** 자동발송 담당자 알림 메시지 빌더 — buildAiGeneratedNotifyMessage/buildPreNotifyMessage/buildSpamTestResultNotifyMessage + sanitizeSmsText (dingbats/이모지 자동 제거 + 옵션 A `===` 가로선 디자인) |
+| — | messageUtils.ts | 변수 치환 (5개 발송 경로 통합) + buildAdMessage (광고+080 전경로 D102) + getOpt080Number (080번호 조회 D102) + prepareFieldMappings (schema+varCatalog+enrich D102) + **prepareSendMessage (변수치환+광고080 통합 D103)** + **replaceVariables enum 역변환 (D109)** |
 | — | normalize.ts | 값 정규화 + normalizeCustomFieldValue (커스텀 필드 Date/문자열 정규화) |
 | — | stats-aggregation.ts | 대시보드 통계 집계 + AI 캠페인 성과 집계 |
-| — | formatDate.ts (프론트) | calculateSmsBytes (바이트 계산) + truncateToSmsBytes (바이트 자르기) + replaceMessageVars (변수 치환) + formatPreviewValue (미리보기 포맷팅) + DIRECT_VAR_MAP/replaceDirectVars (직접발송 변수맵 D96) + mmsServerPathToUrl (MMS 이미지 URL 변환 D98) + resolveRecipientCallback (개별회신번호 컬럼 값 추출 D99) + buildAdMessageFront (프론트 광고+080 미리보기전용 D102) + **isPhoneLikeValue/detectPhoneHeaders (전화번호 컬럼 동적 감지 D103)** |
+| — | unsubscribe-helper.ts (CT-03 확장) | **(D109 추가)** `CAMPAIGN_OPT080_SELECT_EXPR` + `buildCampaignOpt080LeftJoin(alias='c', userIdCol='created_by')` — 캠페인 SELECT에 user/company 080번호 LEFT JOIN. 자동발송용 alias 'ac' + user_id 지원 |
+| — | standard-field-map.ts (CT-07 확장) | **(D109 추가)** `FIELD_DISPLAY_MAP` + `reverseDisplayValue(fieldKey, dbValue)` — DB enum 값(gender F/M) → 표시 한글(여성/남성) 역변환. 향후 enum 필드 추가 시 한 곳만 수정 |
+| — | formatDate.ts (프론트) | calculateSmsBytes + truncateToSmsBytes + replaceMessageVars + formatPreviewValue + DIRECT_VAR_MAP/replaceDirectVars (D96) + mmsServerPathToUrl (D98) + resolveRecipientCallback (D99) + buildAdMessageFront (D102) + **isPhoneLikeValue/detectPhoneHeaders (D103)** + **(D109 추가)** `formatCampaignMessageForDisplay()` + `stripAdParts()` (D103 위반 데이터 정규화 + is_ad 기반 재부착) + `FRONT_FIELD_DISPLAY_MAP`/`reverseDisplayValueFront` (백엔드와 동기화) + `replaceVarsByFieldMeta()` + `replaceVarsBySampleCustomer()` (인라인 7곳 통합) + `mergeAndHighlightVars()` (변수 강조 ↔ 머지 결과 토글) |
 
 **⚠️ 이 원칙을 어기고 인라인 코드를 작성하면 버그가 재발한다. 실제 사고 사례:**
 - **사례 1:** upload.ts에서 customer_field_definitions를 인라인으로 INSERT하면서 "최초 등록 우선" 정책 적용 → 잘못된 라벨이 영원히 고착되는 버그 발생.
@@ -502,6 +506,13 @@ PostgreSQL campaigns/campaign_runs 생성
 | **buildAdMessageFront 표시 경로 누락** | D102에서 발송 경로 통일했지만 CalendarModal/ResultsModal/AdminDashboard 표시 경로에 미적용 → 3번째 재발 | **발송 경로뿐 아니라 표시 경로(캘린더/발송결과/관리자) 전수 확인 필수.** CLAUDE.md 7-1 프로세스 참조 (D106) |
 | **replaceDirectVars vs replaceMessageVars 혼용** | 자동발송 스팸필터 미리보기가 replaceDirectVars(직접발송 변수 5개만) 사용 → 필드매핑 변수(%고객명%,%생일%) 미치환 | **자동발송/AI발송은 replaceMessageVars(필드매핑 기반), 직접발송은 replaceDirectVars.** 경로별 치환 함수 구분 (D106) |
 | **담당자 알림이 대량발송 라인으로 발송** | D-1 알림/AI문안알림/스팸결과알림이 getCompanySmsTables(대량발송 Agent)로 INSERT → 테스트기간 Agent 차단 시 미발송 | **담당자 알림은 getAuthSmsTable(11번 인증 라인)으로 분리.** 실제 발송만 업체 설정 라인 사용 (D106) |
+| **direct-send INSERT에 is_ad 컬럼 자체 누락** | campaigns.ts:1421 INSERT 컬럼 목록에 is_ad가 없어 광고 ON/OFF 무관 항상 false 저장 → 발송결과/캘린더 표시 잘못 + 컨트롤타워 적용해도 무력화 | **INSERT 컬럼 목록을 항상 grep으로 verify.** 새 컬럼이 frontend body에서 전달되어도 INSERT에 포함되지 않으면 무시됨 (D109) |
+| **D103 위반 데이터 표시 시 (광고) 중복** | 과거 발송 캠페인의 message_content에 (광고)+무료거부 텍스트가 박힌 채 저장 → 컨트롤타워 buildAdMessageFront가 또 부착 → "(광고)(광고)" 중복 | **컨트롤타워에 idempotent + stripAdParts 정규화.** 표시 직전에 본문에서 (광고)/무료거부 부분을 제거하여 순수 본문으로 만든 후 is_ad에 따라 다시 부착 (D109) |
+| **인라인 replaceVars 7곳 산재** | DirectPreviewModal/TargetSendModal/AiCampaignResultPopup/AiPreviewModal/AiPreviewModal2/AiCustomSendFlow/DirectSendPanel에 동일 패턴 인라인 함수 → enum 역변환 누락으로 gender F가 그대로 노출. 7곳마다 따로 패치하면 또 빠짐 | **인라인 7곳을 컨트롤타워 4개로 통합:** `replaceVarsByFieldMeta` (FieldMeta 기반) + `replaceVarsBySampleCustomer` (sampleCustomer 기반 + aliasMap) + `replaceMessageVars` (기존) + `replaceDirectVars` (기존). 모든 인라인은 1줄 wrapper로만 (D109) |
+| **데이터 출처가 아닌 표시 시점에서 변환 시도** | gender 'F'/'M' 역변환을 frontend 표시 함수마다 추가하려다 매번 새로운 인라인 함수가 튀어나옴 (스팸필터 모달, AiPreviewModal의 또 다른 replaceAllVars 등) | **백엔드 데이터 출처 시점(API 응답 직전)에서 enum 변환 → frontend 모든 표시 경로 자동 정상화.** ai.ts/recommend-target + customers.ts/extract + customers.ts/enabled-fields + target-sample.ts 4곳에서 reverseDisplayValue 적용. 데이터가 이미 '여성' 상태로 내려옴 (D109) |
+| **5경로 매트릭스 점검 미수행** | 경로 하나(직접타겟발송)만 보고 fix → 한줄로AI/맞춤한줄/자동발송에서 또 발견 → 산발 추적 반복 | **5개 발송 경로 × 데이터 출처 × 표시 시점 매트릭스 한 번에 점검.** (한줄로AI/맞춤한줄/직접발송/직접타겟발송/자동발송) × (미리보기/스팸필터/담당자테스트/실제발송) × (sample 출처 API). 매트릭스 표 작성 후 fix (D109) |
+| **자연어 자유 입력 필드 수정 가능 UX의 함정** | 맞춤한줄 발송대상 카드에서 자연어 필드(매장/구매기간/기타)를 input으로 수정 가능하게 해놨는데, 백엔드 recount-target은 자연어 파싱을 다시 못 함 → 사용자가 수정해도 originalTargetFilters 그대로 → "수정해도 안 바뀜" | **자연어 필드는 read-only.** 변경하려면 이전 단계(브리핑)로 돌아가서 새로 입력. 발송대상 카드 + 프로모션 카드 양쪽 수정 기능 제거 (D109) |
+| **`setStatsView(key); setTimeout(() => loadFn(), 0)` 패턴** | React state는 batched라 setTimeout 0 안에서도 statsView가 stale → 일/월 토글이 한 번씩 어긋남 | **함수 시그니처에 viewOverride 추가 + `loadFn(1, key)` 명시 전달.** setTimeout/setState 우회 트릭 금지 (D109) |
 
 ### ⚠️ 필수 체크 원칙 1: 유틸 함수 수정/추가 시 소비처 전수 확인
 

@@ -106,6 +106,87 @@
 
 ---
 
+### 🔧 D109 — 0406+0407 PDF 버그 + 검수리스트 일괄 처리 (2026-04-07) — ✅ 배포완료
+
+> **배경:** 직원 검수리스트 + PDF 버그리포트 2일치(0406, 0407) 13건을 한 번에 잡음. 핵심은 컨트롤타워화 — 인라인 중복 함수 7개를 컨트롤타워 4개로 통합 + 백엔드 데이터 출처 시점 enum 변환으로 표시 경로 자동 정상화.
+
+#### 신규 컨트롤타워 (8개)
+| 컨트롤타워 | 위치 | 효과 |
+|-----------|------|------|
+| `CAMPAIGN_OPT080_SELECT_EXPR` + `buildCampaignOpt080LeftJoin()` | unsubscribe-helper.ts (CT-03 확장) | 캠페인 SELECT 8곳에 user/company 080번호 LEFT JOIN — alias 가변 (자동발송 'ac' 지원) |
+| `formatCampaignMessageForDisplay()` + `stripAdParts()` | formatDate.ts (frontend) | 표시용 메시지 컨트롤타워 — D103 위반 데이터(message_content에 (광고)/무료거부 박힌 케이스) 정규화 후 is_ad에 따라 재부착 |
+| `FIELD_DISPLAY_MAP` + `reverseDisplayValue()` | standard-field-map.ts (backend) | DB enum 값(gender F/M) → 표시 한글(여성/남성) 역변환 — 향후 enum 필드 추가 시 한 곳만 수정 |
+| `FRONT_FIELD_DISPLAY_MAP` + `reverseDisplayValueFront()` | formatDate.ts (frontend) | 백엔드 FIELD_DISPLAY_MAP과 동기화 |
+| `replaceVarsByFieldMeta()` | formatDate.ts | FieldMeta[] 기반 변수 치환 (DirectPreviewModal/TargetSendModal 인라인 통합) |
+| `replaceVarsBySampleCustomer()` | formatDate.ts | sampleCustomer(displayName 키) 기반 + aliasMap 옵션 (AiCampaignResultPopup/AiPreviewModal 인라인 통합) |
+| `fetchTargetSampleCustomer()` (CT-A) | utils/target-sample.ts | 자동발송 미리보기/스팸테스트 첫 고객 조회 단일 진입점 — store_code 격리 + 수신거부 제외 자동 |
+| `buildAiGeneratedNotifyMessage()` / `buildPreNotifyMessage()` / `buildSpamTestResultNotifyMessage()` + `sanitizeSmsText()` (CT-B) | utils/auto-notify-message.ts | 자동발송 담당자 알림 빌더 — dingbats/이모지 자동 제거 + 옵션 A(=== 가로선) 디자인 |
+
+#### 해결 항목 (PDF 13건 + 검수리스트)
+| # | 영역 | 근본원인 | 해결 |
+|---|------|---------|------|
+| **B1** | 맞춤한줄 MMS 이미지 첨부 누락 | AiCustomSendFlow에 MMS UI 자체 미구현 + Dashboard handleAiCustomSend의 mmsImagePaths 하드코딩 [] | UI 인라인 추가 (Step 2 + variant 카드 + 미리보기 모달 + 발송확정 모달 4곳) + Dashboard에서 props 전달 + mmsImagePaths 조건부 전달 |
+| **B2** | 발송결과 상세보기 (광고)+080 누락 | (1) 백엔드 results.ts SELECT에 opt_out_080_number 누락 (2) 호출부 7곳이 callback_number를 4번째 인자로 잘못 전달 (3) ResultsModal 794줄 buildAdMessageFront 미적용 (4) frontend buildAdMessageFront에 idempotent 처리 누락 → 중복 부착 발생 | 백엔드 SELECT 8곳에 LEFT JOIN 추가 + formatCampaignMessageForDisplay 컨트롤타워 + stripAdParts 정규화 + buildAdMessageFront idempotent 추가 |
+| **B3** | 캘린더 광고 미표기인데 (광고)+080 자동기입 | direct-send INSERT 컬럼에 `is_ad` 자체가 누락 → 항상 false로 저장 + D103 위반 데이터(message_content에 (광고) 박힌 캠페인) | direct-send INSERT에 is_ad 컬럼 추가 + stripAdParts로 표시 시점 정규화 |
+| **B8** | 슈퍼관리자 발송통계 일/월 뒤바뀜 | `setStatsView(key); setTimeout(() => loadSendStats(1), 0)` — React state batched 라 setTimeout 안에서도 statsView가 stale | `loadSendStats(page, viewOverride)` 시그니처 + `loadSendStats(1, key)` 명시 전달 |
+| **검수 UX** | 캠페인 확정 후 변수 직관성 부족 | 변수 위치 vs 머지 결과를 동시에 못 봄 | `mergeAndHighlightVars()` 신설 + AiCampaignSendModal/AiCustomSendFlow 변수 강조 ↔ 머지 결과 토글 |
+| **0407-1** | 직접타겟발송 성별(여성) `F` 출력 | 5개 발송 경로 × 데이터 출처 4곳에서 enum 'F'/'M'을 한글로 역변환하지 않음. frontend 인라인 replaceVars 7곳이 산재 | (1) backend ai.ts:recommend-target + customers.ts:/extract + customers.ts:/enabled-fields + target-sample.ts 4곳에서 데이터 응답 시점에 reverseDisplayValue 적용 → 한 곳만 수정해도 모든 frontend 표시 경로 자동 정상화 (2) frontend 인라인 replaceVars 7곳을 컨트롤타워 4개(`replaceVarsByFieldMeta` / `replaceVarsBySampleCustomer` / `replaceMessageVars` / `replaceDirectVars`)로 통합 |
+| **0407-2** | 맞춤한줄 매장/브랜드 수정 시 0명 | (1) ai.ts:recount-target에 minPurchaseAmount 처리 자체 누락 (2) 매장/구매기간/기타조건 등 자연어 필드는 백엔드 재파싱 불가 | 발송대상 카드 + 프로모션 카드 양쪽 수정 기능 제거 (read-only) → "변경하려면 이전 단계에서 새 브리핑" 안내. 변수 케이스 폭발 방지 |
+| **0407-3** | 맞춤한줄 LMS 제목 수정 미반영 | Dashboard.tsx:1632 `subject: variant.subject || ''` ← modalData.subject(사용자 수정값) 무시 | `subject: modalData.subject ?? variant.subject ?? ''` 우선순위 변경 |
+| **자동발송 5건** (B4~B7, 0407-4) | 자동발송 영역 | 직원 검증 예정 — Harold님 검증 범위 외 | (코드 수정 완료, 직원 검증 후 처리) |
+
+#### 자동발송 5건 코드 변경 요약 (직원 검증 대기)
+- **B4 자동발송 스팸필터 미리보기 개인화** — AutoSendFormModal에서 스팸필터 모달 직전 `POST /api/auto-campaigns/preview-sample` 호출 (CT-A 신설)
+- **B5 자동발송 스팸테스트 타겟 불일치** — auto-campaign-worker 인라인 SELECT 2곳 → CT-A로 통합 (store_code 격리 자동)
+- **B6 자동발송 알림 ?/이모지** — 알림 메시지 빌더 3곳 → CT-B 통합 (sanitizeSmsText로 dingbats 자동 제거)
+- **B7 자동발송 시간 지연** — 워커 주기 3분 → 1분 + 다음 분 0초 align
+- **0407-4 자동발송 AI 개인화 미적용** — auto_campaigns 테이블에 personal_fields TEXT[] 컬럼 추가 + INSERT/UPDATE/worker extraContext (`personalizationVars`) 전달
+
+#### DB 마이그레이션
+```sql
+ALTER TABLE auto_campaigns ADD COLUMN IF NOT EXISTS personal_fields TEXT[] DEFAULT NULL;
+```
+
+#### 수정 파일 (24개)
+**백엔드 (12)**
+- (신규) `utils/target-sample.ts` (CT-A), `utils/auto-notify-message.ts` (CT-B)
+- `utils/standard-field-map.ts` (FIELD_DISPLAY_MAP)
+- `utils/unsubscribe-helper.ts` (CAMPAIGN_OPT080_*)
+- `utils/messageUtils.ts` (replaceVariables enum 역변환)
+- `utils/auto-campaign-worker.ts` (인라인 SELECT 2곳→CT-A, 알림 3곳→CT-B, 워커 1분+정각, personalizationVars)
+- `utils/stats-aggregation.ts` (캠페인 SELECT opt_out_080)
+- `routes/results.ts` (캠페인 목록/상세 SELECT)
+- `routes/campaigns.ts` (캘린더/캠페인 상세 SELECT + direct-send is_ad INSERT)
+- `routes/admin.ts` (슈퍼관리자 통계 SELECT)
+- `routes/ai.ts` (recommend-target sampleCustomer enum 변환 + recount-target storeName contains/minPurchaseAmount)
+- `routes/auto-campaigns.ts` (preview-sample 라우트 + INSERT/UPDATE personal_fields)
+- `routes/customers.ts` (/extract + /enabled-fields enum 변환)
+
+**프론트엔드 (12)**
+- `utils/formatDate.ts` (formatCampaignMessageForDisplay/stripAdParts/replaceVarsByFieldMeta/replaceVarsBySampleCustomer/FRONT_FIELD_DISPLAY_MAP)
+- `utils/highlightVars.tsx` (mergeAndHighlightVars)
+- `components/ResultsModal.tsx` (3곳 컨트롤타워 호출)
+- `components/CalendarModal.tsx` (컨트롤타워 호출)
+- `components/AiCustomSendFlow.tsx` (MMS UI 4곳 + 머지 토글 + 발송대상 카드 read-only)
+- `components/AutoSendFormModal.tsx` (preview-sample 호출)
+- `components/AiCampaignSendModal.tsx` (머지 토글 + 인라인 통합)
+- `components/AiCampaignResultPopup.tsx` (인라인 통합)
+- `components/AiPreviewModal.tsx` (인라인 통합)
+- `components/DirectPreviewModal.tsx` (인라인 통합)
+- `components/TargetSendModal.tsx` (인라인 통합)
+- `pages/Dashboard.tsx` (handleAiCustomSend modalData.subject 우선 + mmsImagePaths 조건부)
+- `pages/AdminDashboard.tsx` (loadSendStats viewOverride + 컨트롤타워 호출)
+- `pages/AutoSendPage.tsx` (history 컨트롤타워)
+
+#### 핵심 교훈 (B+0407 — 매트릭스 전수파악)
+> **데이터 출처에서 변환하면 표시 경로 모두 자동 정상화.** frontend 표시 함수마다 enum 매핑을 추가하는 것보다, 백엔드 응답 시점에 한 번 변환하는 게 안전 + 컨트롤타워 효율 압도적.
+>
+> **인라인 함수 7곳 산재 = D106 재발 패턴.** 동일 로직이 2곳 이상이면 즉시 컨트롤타워 추출. 시간 없어서 인라인으로 빠르게 패치 = 다음 세션에 또 잡힘.
+>
+> **5개 발송 경로 × 데이터 출처 매트릭스로 한 번에 점검.** 한 경로씩 보면 또 빠짐. 매트릭스 = (한줄로AI / 맞춤한줄 / 직접발송 / 직접타겟발송 / 자동발송) × (미리보기 / 스팸필터 / 담당자테스트 / 실제발송) × (데이터 출처 API).
+
+---
+
 ### 🔧 D108 — AI 분석 시각화 고도화 + BUSINESS 자동화 연계 + 예시 PDF (2026-04-04) — ✅ 배포완료
 
 > **배경:** PRO(기본분석)와 BUSINESS(상세분석)의 체감 차이가 텍스트 인사이트 개수 차이뿐이었음. 시각적 차트 + BUSINESS 전용 자동화 연계 버튼 + 시연용 예시 PDF로 고도화.
