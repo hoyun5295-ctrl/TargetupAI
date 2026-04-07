@@ -3,7 +3,7 @@ import crypto from 'crypto';
 import { Request, Response, Router } from 'express';
 import { mysqlQuery, query } from '../config/database';
 import { authenticate, requireSuperAdmin } from '../middlewares/auth';
-import { ALL_SMS_TABLES, invalidateLineGroupCache } from '../utils/sms-queue';
+import { ALL_SMS_TABLES, invalidateLineGroupCache, getAllSmsTablesWithLogs, smsCountAll, smsSelectAll, smsAggAll, getTestSmsTables } from '../utils/sms-queue';
 import { DASHBOARD_CARD_POOL, validateCardIds, getRequiredFields, filterPoolByAvailableData } from '../utils/dashboard-card-pool';
 import { SUCCESS_CODES_SQL, PENDING_CODES_SQL, getStatusLabel, getStatusType, getCarrierLabel, isSuccess, isPending } from '../utils/sms-result-map';
 import { DEFAULT_COSTS } from '../config/defaults';
@@ -1182,32 +1182,30 @@ router.get('/stats/send', authenticate, requireSuperAdmin, async (req: Request, 
     const targetCompanyId = companyId || null;
     if (targetCompanyId) {
       try {
-        // 1) 담당자 테스트 (MySQL)
-        const testTable = (process.env.SMS_TABLES || 'SMSQ_SEND').split(',').map((t: string) => t.trim()).find((t: string) => t.includes('_10')) || 'SMSQ_SEND';
+        // 1) 담당자 테스트 (MySQL) — CT-04 컨트롤타워: 테스트 라인 테이블 동적 조회
+        const testTables = await getTestSmsTables();
         let mysqlDateWhere = '';
         const mysqlParams: any[] = [targetCompanyId];
         if (startDate) { mysqlDateWhere += ` AND msg_instm >= ?`; mysqlParams.push(startDate); }
         if (endDate) { mysqlDateWhere += ` AND msg_instm < DATE_ADD(?, INTERVAL 1 DAY)`; mysqlParams.push(endDate); }
 
-        const testRows = await mysqlQuery(
-          `SELECT COUNT(*) as total,
-            SUM(CASE WHEN status_code IN (${SUCCESS_CODES_SQL}) THEN 1 ELSE 0 END) as success,
-            SUM(CASE WHEN status_code NOT IN (${SUCCESS_CODES_SQL},${PENDING_CODES_SQL}) THEN 1 ELSE 0 END) as fail,
-            SUM(CASE WHEN status_code IN (${PENDING_CODES_SQL}) THEN 1 ELSE 0 END) as pending,
-            SUM(CASE WHEN msg_type = 'S' THEN 1 ELSE 0 END) as sms,
-            SUM(CASE WHEN msg_type = 'L' THEN 1 ELSE 0 END) as lms
-          FROM ${testTable} WHERE app_etc1 = 'test' AND app_etc2 = ? ${mysqlDateWhere}`,
+        const testAgg = await smsAggAll(
+          testTables,
+          `COUNT(*) as total,
+           SUM(CASE WHEN status_code IN (${SUCCESS_CODES_SQL}) THEN 1 ELSE 0 END) as success,
+           SUM(CASE WHEN status_code NOT IN (${SUCCESS_CODES_SQL},${PENDING_CODES_SQL}) THEN 1 ELSE 0 END) as fail,
+           SUM(CASE WHEN status_code IN (${PENDING_CODES_SQL}) THEN 1 ELSE 0 END) as pending,
+           SUM(CASE WHEN msg_type = 'S' THEN 1 ELSE 0 END) as sms,
+           SUM(CASE WHEN msg_type = 'L' THEN 1 ELSE 0 END) as lms`,
+          `app_etc1 = 'test' AND app_etc2 = ? ${mysqlDateWhere}`,
           mysqlParams
         );
-        if (testRows && (testRows as any[]).length > 0) {
-          const t = (testRows as any[])[0];
-          testSummary.total += Number(t.total) || 0;
-          testSummary.success += Number(t.success) || 0;
-          testSummary.fail += Number(t.fail) || 0;
-          testSummary.pending += Number(t.pending) || 0;
-          testSummary.sms += Number(t.sms) || 0;
-          testSummary.lms += Number(t.lms) || 0;
-        }
+        testSummary.total += Number(testAgg.total) || 0;
+        testSummary.success += Number(testAgg.success) || 0;
+        testSummary.fail += Number(testAgg.fail) || 0;
+        testSummary.pending += Number(testAgg.pending) || 0;
+        testSummary.sms += Number(testAgg.sms) || 0;
+        testSummary.lms += Number(testAgg.lms) || 0;
 
         // 2) 스팸필터 테스트 (PostgreSQL)
         const sfDr = buildDateRangeFilter('t.created_at', startDate, endDate, 2);
@@ -1327,8 +1325,8 @@ router.get('/stats/send/detail', authenticate, requireSuperAdmin, async (req: Re
     // ===== 테스트 발송 상세 (담당자 + 스팸필터) =====
     let testDetail: any[] = [];
     try {
-      // 1) 담당자 테스트 (MySQL)
-      const testTable = (process.env.SMS_TABLES || 'SMSQ_SEND').split(',').map((t: string) => t.trim()).find((t: string) => t.includes('_10')) || 'SMSQ_SEND';
+      // 1) 담당자 테스트 (MySQL) — CT-04 컨트롤타워
+      const testTables2 = await getTestSmsTables();
       let mysqlDateWhere2 = '';
       const mysqlParams2: any[] = [companyId];
       if (view === 'monthly') {
@@ -1338,13 +1336,15 @@ router.get('/stats/send/detail', authenticate, requireSuperAdmin, async (req: Re
       }
       mysqlParams2.push(dateVal);
 
-      const testRows2 = await mysqlQuery(
-        `SELECT dest_no as phone, msg_type, status_code, msg_instm as sent_at, bill_id as sender_id
-        FROM ${testTable}
-        WHERE app_etc1 = 'test' AND app_etc2 = ? ${mysqlDateWhere2}
-        ORDER BY msg_instm DESC LIMIT 50`,
-        mysqlParams2
+      const testRows2All = await smsSelectAll(
+        testTables2,
+        `dest_no as phone, msg_type, status_code, msg_instm as sent_at, bill_id as sender_id`,
+        `app_etc1 = 'test' AND app_etc2 = ? ${mysqlDateWhere2}`,
+        mysqlParams2,
+        `ORDER BY msg_instm DESC LIMIT 50`
       );
+      testRows2All.sort((a: any, b: any) => new Date(b.sent_at).getTime() - new Date(a.sent_at).getTime());
+      const testRows2 = testRows2All.slice(0, 50);
       testDetail = (testRows2 as any[]).map(r => ({
         phone: r.phone,
         msgType: r.msg_type === 'S' ? 'SMS' : 'LMS',
@@ -1512,7 +1512,11 @@ router.get('/campaigns/:id/sms-detail', authenticate, requireSuperAdmin, async (
 
     // ===== SMS 내역 조회 =====
     if (showSms) {
-      let mysqlWhere = `WHERE app_etc1 = ?`;
+      // CT-04: 어드민은 전역 조회 — 전체 LIVE + 전체 LOG 테이블 스캔
+      // (완료된 캠페인은 SMSQ_SEND_X_YYYYMM 로그 테이블로 이동되므로 LIVE만 보면 0건)
+      const smsTables = await getAllSmsTablesWithLogs();
+
+      let mysqlWhere = `app_etc1 = ?`;
       const mysqlParams: any[] = [id];
 
       if (statusFilter === 'success') {
@@ -1531,17 +1535,18 @@ router.get('/campaigns/:id/sms-detail', authenticate, requireSuperAdmin, async (
         mysqlParams.push(`%${searchValue.replace(/-/g, '')}%`);
       }
 
-      const countRows = await mysqlQuery(`SELECT COUNT(*) as cnt FROM SMSQ_SEND ${mysqlWhere}`, mysqlParams);
-      totalSms = (countRows as any[])[0]?.cnt || 0;
+      totalSms = await smsCountAll(smsTables, mysqlWhere, mysqlParams);
 
-      const rows = await mysqlQuery(
-        `SELECT seqno, dest_no, call_back, msg_contents, msg_type, status_code, mob_company,
-                sendreq_time, mobsend_time, repmsg_recvtm
-         FROM SMSQ_SEND ${mysqlWhere}
-         ORDER BY seqno DESC
-         LIMIT ? OFFSET ?`,
-         [...mysqlParams, Number(limit), Number(offset)]
+      // 전체 테이블에서 수집 후 seqno DESC 정렬 + 인메모리 페이지네이션
+      const allRows = await smsSelectAll(
+        smsTables,
+        `seqno, dest_no, call_back, msg_contents, msg_type, status_code, mob_company,
+         sendreq_time, mobsend_time, repmsg_recvtm`,
+        mysqlWhere,
+        mysqlParams
       );
+      allRows.sort((a: any, b: any) => Number(b.seqno) - Number(a.seqno));
+      const rows = allRows.slice(Number(offset), Number(offset) + Number(limit));
 
       (rows as any[]).forEach(r => {
         allDetail.push({

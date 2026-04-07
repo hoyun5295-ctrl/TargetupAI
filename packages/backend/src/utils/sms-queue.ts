@@ -280,6 +280,16 @@ async function getExistingLogTables(): Promise<Set<string>> {
   return tables;
 }
 
+/**
+ * ★ 슈퍼관리자 전역 조회용 — 전체 LIVE 테이블 + 전체 LOG 테이블
+ * 회사/유저 구분 없이 모든 SMSQ_SEND* 테이블(LIVE+LOG)을 반환한다.
+ * admin.ts의 sms-detail 등 어드민 범위 조회에서 사용.
+ */
+export async function getAllSmsTablesWithLogs(): Promise<string[]> {
+  const existingLogs = await getExistingLogTables();
+  return [...ALL_SMS_TABLES, ...Array.from(existingLogs)];
+}
+
 /** 회사 발송 테이블 + 로그 테이블 (결과 조회용) */
 export async function getCompanySmsTablesWithLogs(companyId: string, userId?: string): Promise<string[]> {
   const liveTables = await getCompanySmsTables(companyId, userId);

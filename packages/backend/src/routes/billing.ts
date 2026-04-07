@@ -4,6 +4,7 @@ import { authenticate, requireSuperAdmin } from '../middlewares/auth';
 import pool, { mysqlQuery } from '../config/database';
 import { SUCCESS_CODES_SQL, PENDING_CODES_SQL } from '../utils/sms-result-map';
 import { INVITO_INFO } from '../config/defaults';
+import { getCompanySmsTables, getTestSmsTables } from '../utils/sms-queue';
 
 // SMTP transporter (재사용)
 const getTransporter = () => nodemailer.createTransport({
@@ -14,36 +15,21 @@ const getTransporter = () => nodemailer.createTransport({
 });
 
 // ============================================================
-//  정산 전용 헬퍼 (campaigns.ts 순환참조 방지)
+//  정산 전용 헬퍼 — CT-04(sms-queue.ts) 컨트롤타워 재사용
 // ============================================================
 
-async function getBillingCompanyTables(companyId: string): Promise<string[]> {
-  const result = await pool.query(`
-    SELECT lg.sms_tables
-    FROM sms_line_groups lg
-    JOIN companies c ON c.line_group_id = lg.id
-    WHERE c.id = $1 AND lg.is_active = true AND lg.group_type = 'bulk'
-  `, [companyId]);
-  if (result.rows.length > 0 && result.rows[0].sms_tables?.length > 0) {
-    return result.rows[0].sms_tables;
-  }
-  const all = (process.env.SMS_TABLES || 'SMSQ_SEND').split(',').map(t => t.trim());
-  return all.filter(t => !['SMSQ_SEND_10', 'SMSQ_SEND_11'].includes(t));
-}
-
-async function getBillingTestTables(): Promise<string[]> {
-  const result = await pool.query(`SELECT sms_tables FROM sms_line_groups WHERE group_type = 'test' AND is_active = true LIMIT 1`);
-  if (result.rows.length > 0 && result.rows[0].sms_tables?.length > 0) {
-    return result.rows[0].sms_tables;
-  }
-  return ['SMSQ_SEND_10'];
-}
+// 하위호환 래퍼 (호출부 변경 최소화). 내부적으로 CT-04 함수 사용.
+const getBillingCompanyTables = (companyId: string) => getCompanySmsTables(companyId);
+const getBillingTestTables = () => getTestSmsTables();
 
 async function getBillingLogTables(): Promise<Set<string>> {
-  const rows = await mysqlQuery("SHOW TABLES LIKE 'SMSQ_SEND_%_202___'") as any[];
+  const rows = await mysqlQuery(
+    `SELECT TABLE_NAME FROM information_schema.TABLES
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME REGEXP '^SMSQ_SEND(_[0-9]+)?_[0-9]{6}$'`
+  ) as any[];
   const tables = new Set<string>();
   for (const row of rows) {
-    tables.add(String(Object.values(row)[0]));
+    tables.add(String(row.TABLE_NAME));
   }
   return tables;
 }

@@ -4,6 +4,7 @@ import crypto from 'crypto';
 import { authenticate, requireCompanyAdmin } from '../middlewares/auth';
 import pool, { mysqlQuery } from '../config/database';
 import { getCompanyScope } from '../utils/permission-helper';
+import { getAuthSmsTable } from '../utils/sms-queue';
 
 const router = Router();
 
@@ -262,9 +263,13 @@ router.post('/:id/reset-password', async (req: Request, res: Response) => {
         const phone = user.phone.replace(/-/g, '');
         const message = `[Target-UP] 임시 비밀번호: ${tempPassword}\n최초 로그인 시 비밀번호 변경이 필요합니다.`;
 
+        // CT-04: 인증/시스템 SMS는 auth 라인그룹 테이블 사용 (하드코딩 금지)
+        const authTable = await getAuthSmsTable();
+        const callback = process.env.SYSTEM_SMS_CALLBACK;
+        if (!callback) throw new Error('SYSTEM_SMS_CALLBACK 환경변수가 설정되지 않았습니다');
         await mysqlQuery(
-          `INSERT INTO SMSQ_SEND (dest_no, call_back, msg_contents, msg_type, sendreq_time, status_code, rsv1) VALUES (?, ?, ?, 'S', NOW(), 100, '1')`,
-          [phone, process.env.SYSTEM_SMS_CALLBACK || (() => { throw new Error('SYSTEM_SMS_CALLBACK 환경변수가 설정되지 않았습니다'); })(), message]
+          `INSERT INTO ${authTable} (dest_no, call_back, msg_contents, msg_type, sendreq_time, status_code, rsv1) VALUES (?, ?, ?, 'S', NOW(), 100, '1')`,
+          [phone, callback, message]
         );
         smsSent = true;
       } catch (smsError) {
