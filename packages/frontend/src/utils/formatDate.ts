@@ -523,6 +523,30 @@ export function buildAdMessageFront(
 }
 
 /**
+ * ★ B2 후속: D103 위반 데이터(message_content에 (광고)/무료거부가 이미 포함된 캠페인) 정규화
+ *
+ * 컨트롤타워가 표시 직전에 본문에서 (광고) 접두사 + 무료거부 푸터를 제거하여
+ * 항상 "순수 본문" 상태로 만든 뒤, is_ad 플래그에 따라 다시 정확히 부착한다.
+ *
+ * 이로써:
+ *  - is_ad=false 인데 본문에 (광고)가 박혀있는 D103 위반 데이터 → 표시 시 자동 제거
+ *  - is_ad=true 인 정상 데이터 → strip 후 다시 정확히 부착
+ *
+ * 정규식은 backend buildAdMessage 가 만드는 정확한 패턴만 매칭 — 본문 내부 텍스트 훼손 방지.
+ */
+function stripAdParts(text: string): string {
+  if (!text) return '';
+  let result = text;
+  // 끝의 무료수신거부 (LMS) 제거: "\n무료수신거부 080-xxx-xxxx"
+  result = result.replace(/\s*\n?\s*무료수신거부\s*[\d-]+\s*$/g, '');
+  // 끝의 무료거부 (SMS) 제거: "\n무료거부080xxxxxxxx"
+  result = result.replace(/\s*\n?\s*무료거부\d+\s*$/g, '');
+  // 시작의 (광고) prefix 제거 (양식: "(광고)" or "(광고) ")
+  result = result.replace(/^\s*\(광고\)\s*/g, '');
+  return result;
+}
+
+/**
  * ★ B2: 캠페인 표시용 메시지 컨트롤타워
  *
  * 발송 결과/캘린더/슈퍼관리자/대시보드/자동발송 등 모든 표시 경로에서
@@ -531,7 +555,8 @@ export function buildAdMessageFront(
  * 데이터 출처 우선순위:
  *  1) realSentMessage (MySQL msg_contents 등 이미 발송된 텍스트) → 그대로 사용
  *     (prepareSendMessage 거쳐 큐에 INSERT됐으므로 이미 (광고)+080 포함 상태)
- *  2) campaign.message_content (DB 순수본문) → buildAdMessageFront 로 (광고)+080 부착
+ *  2) campaign.message_content (DB 순수본문) → stripAdParts 로 D103 위반 데이터 정규화 후
+ *     buildAdMessageFront 로 is_ad 에 따라 다시 부착
  *
  * ⚠️ 절대 금지:
  *  - 4번째 인자 자리에 callback_number(회신번호) 전달 금지 (D106 재발 패턴)
@@ -551,8 +576,10 @@ export function formatCampaignMessageForDisplay(
 ): string {
   if (realSentMessage) return realSentMessage;
   if (!campaign) return '';
+  // ★ D103 위반 데이터 정규화: 본문에 박힌 (광고)/무료거부 제거 후 is_ad 에 따라 다시 부착
+  const pureBody = stripAdParts(campaign.message_content || '');
   return buildAdMessageFront(
-    campaign.message_content || '',
+    pureBody,
     campaign.message_type || 'SMS',
     campaign.is_ad || false,
     campaign.opt_out_080_number || ''

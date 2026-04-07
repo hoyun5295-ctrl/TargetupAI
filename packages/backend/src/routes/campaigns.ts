@@ -1418,10 +1418,12 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       }
     }
 
+    // ★ B+0407 후속: is_ad 컬럼 INSERT 추가
+    //   기존: 컬럼 자체가 누락되어 항상 DEFAULT(false)로 저장 → 광고 ON 발송이 발송결과에서 (광고) 미표시 + 캘린더 잘못 표시 등 연쇄 버그 발생
     const campaignResult = await query(
       `INSERT INTO campaigns (company_id, campaign_name, message_type, message_content, subject, callback_number, target_count, send_type, status, scheduled_at, message_template, message_subject, created_by, mms_image_paths,
-        send_channel, kakao_bubble_type, kakao_sender_key, kakao_targeting, kakao_attachment_json, kakao_carousel_json, kakao_resend_type, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'direct', $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, NOW())
+        send_channel, kakao_bubble_type, kakao_sender_key, kakao_targeting, kakao_attachment_json, kakao_carousel_json, kakao_resend_type, is_ad, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'direct', $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, NOW())
        RETURNING id`,
       [
         companyId,
@@ -1443,7 +1445,8 @@ router.post('/direct-send', async (req: Request, res: Response) => {
         kakaoTargeting || 'I',
         kakaoAttachmentJson || null,
         kakaoCarouselJson || null,
-        kakaoResendType || 'SM'
+        kakaoResendType || 'SM',
+        adEnabled ?? false,  // ★ is_ad 명시 저장
       ]
     );
     const campaignId = campaignResult.rows[0].id;
