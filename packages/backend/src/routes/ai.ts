@@ -510,15 +510,29 @@ router.post('/recount-target', authenticate, async (req: Request, res: Response)
       targetFilters.store_name = { value: targetCondition.storeName, operator: 'contains' };
     }
 
+    // ★ B+0407-2: 최소 구매금액 처리 (B옵션 — 안전 필드)
+    //   기존에는 처리 안 되어 originalTargetFilters의 원래 값이 그대로 사용됨 → 사용자 수정 무시 버그
+    if (targetCondition.minPurchaseAmount) {
+      const numStr = String(targetCondition.minPurchaseAmount).replace(/[^0-9]/g, '');
+      const amount = parseInt(numStr);
+      if (!isNaN(amount) && amount > 0) {
+        targetFilters.total_purchase_amount = { value: amount, operator: 'gte' };
+      }
+    }
+
     // birth_date (생일 월 필터)
     if (targetCondition.birthMonth) {
       targetFilters.birth_date = { value: parseInt(targetCondition.birthMonth), operator: 'birth_month' };
     }
 
-    // ★ D84: 커스텀 필드 + 기타 필드 보존 — parseBriefing이 생성한 custom_fields.*, registered_store 등
+    // ★ D84+B+0407-2: 커스텀 필드 + 기타 필드 보존 — parseBriefing이 생성한 custom_fields.*, registered_store 등
     // originalTargetFilters에서 기본 필드(위에서 이미 변환한 것)를 제외한 나머지를 merge
+    // ★ B+0407-2: total_purchase_amount 추가 — minPurchaseAmount 새로 처리하므로 originalTargetFilters의 원래 값 무시
     if (originalTargetFilters && typeof originalTargetFilters === 'object') {
-      const basicFieldKeys = new Set(['gender', 'grade', 'age', 'region', 'store_name', 'birth_date']);
+      const basicFieldKeys = new Set([
+        'gender', 'grade', 'age', 'region', 'store_name', 'birth_date',
+        'total_purchase_amount',
+      ]);
       for (const [key, value] of Object.entries(originalTargetFilters)) {
         if (!basicFieldKeys.has(key) && value != null) {
           targetFilters[key] = value;

@@ -759,12 +759,13 @@ export default function AiCustomSendFlow({
                 </div>
 
                 {/* 타겟 조건 카드 (오른쪽) */}
+                {/* ★ B+0407-2: B옵션 — 5개 안전 필드만 수정 가능 (성별/등급/연령대/지역/최소구매금액)
+                    자연어 필드(구매기간/매장/기타)는 readOnly + "이전 단계에서 새 브리핑" 안내 */}
                 <div className="bg-gradient-to-br from-blue-50 to-cyan-50 rounded-xl border border-blue-200 p-5">
                   <div className="flex items-center justify-between mb-4">
                     <div className="flex items-center gap-2"><Users className="w-4 h-4 text-blue-600" /><span className="text-sm font-bold text-blue-700">발송 대상</span></div>
                     <button onClick={() => {
                       if (editingTarget) {
-                        // 수정완료 → 재조회 trigger
                         setEditingTarget(false);
                         setTargetCondition({ ...editedTarget });
                         handleRetargetCount(editedTarget);
@@ -821,16 +822,29 @@ export default function AiCustomSendFlow({
                         {targetFields.map(({ key, label, icon }) => {
                           const value = (tc as any)[key];
                           if (!value && !editingTarget) return null;
+                          // ★ B+0407-2: B옵션 — 자연어 필드(구매기간/매장/기타)는 readOnly + 안내
+                          //   백엔드 recount-target이 자연어 파싱을 다시 못 하므로 변경 시 적용 안 됨 → 이전 단계에서 새 분석 필요
+                          const READONLY_FIELDS = new Set(['purchasePeriod', 'storeName', 'extra']);
+                          const isReadOnly = READONLY_FIELDS.has(key);
                           return (
                             <div key={key} className="flex items-start gap-3">
                               <span className="text-base mt-0.5 shrink-0">{icon}</span>
                               <div className="flex-1 min-w-0">
                                 <div className="text-xs font-medium text-gray-500 mb-0.5">{label}</div>
-                                {editingTarget ? (
+                                {editingTarget && !isReadOnly ? (
                                   <input type="text" value={(editedTarget as any)?.[key] || ''}
                                     onChange={(e) => setEditedTarget(prev => ({ ...prev, [key]: e.target.value }))}
                                     className="w-full px-3 py-1.5 border border-blue-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white" placeholder={`${label} (비워두면 제한 없음)`} />
-                                ) : (<div className="text-sm text-gray-800 font-medium">{value}</div>)}
+                                ) : (
+                                  <>
+                                    <div className="text-sm text-gray-800 font-medium">{value || '-'}</div>
+                                    {editingTarget && isReadOnly && (
+                                      <div className="text-[11px] text-amber-600 mt-1">
+                                        💡 변경하려면 <b>이전 단계(프로모션 브리핑)</b>로 돌아가서 새 브리핑을 입력해주세요
+                                      </div>
+                                    )}
+                                  </>
+                                )}
                               </div>
                             </div>
                           );
