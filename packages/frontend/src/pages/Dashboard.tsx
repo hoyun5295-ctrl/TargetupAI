@@ -1629,7 +1629,9 @@ const campaignData = {
         useIndividualCallback: _useIndividualCallback,
         // ★ D102: modalData.individualCallbackColumn 우선 (맞춤한줄 개별회신번호 누락 수정)
         individualCallbackColumn: _useIndividualCallback ? (modalData.individualCallbackColumn || individualCallbackColumn || 'store_phone') : undefined,
-        subject: variant.subject || '',
+        // ★ B+0407-3: 사용자가 발송확정 모달에서 수정한 제목(modalData.subject)을 우선 사용
+        //   기존: variant.subject 만 사용 → 사용자 제목 수정이 무시되어 원본 제목으로 발송됨
+        subject: modalData.subject ?? variant.subject ?? '',
         // ★ B1: MMS 채널일 때 첨부 이미지 경로 전달 (이전: 빈 배열 하드코딩으로 첨부 누락)
         mmsImagePaths: channelType === 'MMS' ? mmsUploadedImages.map(img => img.serverPath) : [],
       };

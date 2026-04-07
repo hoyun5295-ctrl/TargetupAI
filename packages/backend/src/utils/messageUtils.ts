@@ -11,6 +11,7 @@
  */
 
 import { VarCatalogEntry, extractVarCatalog } from '../services/ai';
+import { reverseDisplayValue, FIELD_DISPLAY_MAP } from './standard-field-map';
 import { query } from '../config/database';
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -212,6 +213,9 @@ export function replaceVariables(
     let displayValue = '';
     if (rawValue === null || rawValue === undefined) {
       displayValue = '';
+    } else if (FIELD_DISPLAY_MAP[mapping.column]) {
+      // ★ B+0407-1: enum 필드(gender 등) → 한글 역변환 (FIELD_DISPLAY_MAP 컨트롤타워)
+      displayValue = reverseDisplayValue(mapping.column, rawValue);
     } else if (mapping.type === 'number') {
       // ★ D88+D102: PostgreSQL numeric→string 파싱 + 정수 반올림 + ko-KR 로케일 명시
       const numVal = typeof rawValue === 'number' ? rawValue : Number(String(rawValue).replace(/,/g, ''));

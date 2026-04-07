@@ -177,6 +177,12 @@ async function generateMessageForAutoCampaign(ac: any): Promise<void> {
     // ★ AI 메시지 생성 — services/ai.ts generateMessages() 재활용
     // message_type에 따라 SMS/LMS/MMS 전부 지원
     const channel = ac.message_type || 'SMS';
+    // ★ B+0407-4: 개인화 변수 — ac.personal_fields에서 가져와 generateMessages에 전달
+    //   누락 시 AI가 개인화 변수를 만들지 않는 버그 발생 (0407 PDF #6)
+    //   ⚠️ services/ai.ts 시그니처는 personalizationVars (이름 일치 필수)
+    const personalizationVars: string[] = Array.isArray(ac.personal_fields) ? ac.personal_fields : [];
+    const usePersonalization = personalizationVars.length > 0;
+
     const extraContext = {
       brandName: companyInfo.brand_name || companyInfo.company_name || '브랜드',
       brandTone: companyInfo.brand_tone,
@@ -188,6 +194,9 @@ async function generateMessageForAutoCampaign(ac: any): Promise<void> {
       tone: ac.ai_tone || 'friendly',
       availableVarsCatalog: varCatalog,
       availableVars,
+      // ★ B+0407-4: 개인화 활성화 + 변수 목록 전달 (services/ai.ts 시그니처와 일치)
+      usePersonalization,
+      personalizationVars,
     };
 
     const aiResult = await generateMessages(ac.ai_prompt || ac.campaign_name, targetInfo, extraContext);

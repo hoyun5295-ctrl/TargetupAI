@@ -205,3 +205,58 @@ export async function upsertCustomFieldDefinitions(
   }
   return upsertedCount;
 }
+
+// ============================================================
+// ★ B+0407-1: FIELD_DISPLAY_MAP — DB enum 값 → 표시용 한글 역변환 컨트롤타워
+// ============================================================
+//
+// DB에는 정규화된 enum 값(예: gender 'M'/'F')이 저장되지만,
+// 메시지/미리보기에 표시할 때는 한글('남성'/'여성')로 보여야 한다.
+//
+// 기존 누락 사례:
+//   - 직접타겟발송 미리보기/스팸필터/담당자테스트에서 %성별% → "F" 출력 (0407 PDF #4)
+//
+// 사용처 (백엔드/프론트 양쪽):
+//   - backend/utils/messageUtils.ts replaceVariables — 발송 변수 치환
+//   - frontend/utils/formatDate.ts replaceMessageVars/formatPreviewValue — 미리보기
+//
+// ⚠️ 절대 금지:
+//   - 라우트/컴포넌트에서 인라인으로 'F'→'여성' 매핑 작성 금지
+//   - 새 enum 필드 추가 시 반드시 이 MAP에 등록 (한 곳만 수정하면 백/프론트 자동 반영)
+
+/**
+ * 필드별 DB값 → 표시값 매핑.
+ * key: FIELD_MAP fieldKey
+ * value: { dbValue(소문자): displayValue }
+ *
+ * 대소문자 무관 매칭을 위해 lowercase 키 사용.
+ */
+export const FIELD_DISPLAY_MAP: Record<string, Record<string, string>> = {
+  gender: {
+    m: '남성',
+    f: '여성',
+    male: '남성',
+    female: '여성',
+    남: '남성',
+    여: '여성',
+  },
+  // 향후 확장 예시:
+  // is_married: { true: '기혼', false: '미혼' },
+};
+
+/**
+ * DB값을 표시용 한글로 역변환한다.
+ * 매칭되는 매핑이 없으면 원본 String(dbValue)을 그대로 반환.
+ *
+ * @example
+ *   reverseDisplayValue('gender', 'F') → '여성'
+ *   reverseDisplayValue('gender', 'M') → '남성'
+ *   reverseDisplayValue('grade', 'VIP') → 'VIP' (매핑 없음)
+ */
+export function reverseDisplayValue(fieldKey: string, dbValue: any): string {
+  if (dbValue === null || dbValue === undefined) return '';
+  const map = FIELD_DISPLAY_MAP[fieldKey];
+  if (!map) return String(dbValue);
+  const key = String(dbValue).trim().toLowerCase();
+  return map[key] || String(dbValue);
+}

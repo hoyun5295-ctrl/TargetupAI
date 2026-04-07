@@ -471,6 +471,10 @@ router.post('/', async (req: Request, res: Response) => {
     const nextRunAt = calcNextRunAt(schedule_type, schedule_day, schedule_time);
     const finalStoreCode = store_code || userStoreCode || null;
 
+    // ★ B+0407-4: personal_fields 추가 — AI 문안 생성 시 개인화 변수 전달
+    //   프론트(AutoSendFormModal)는 personal_fields를 보내지만 기존 INSERT는 컬럼 누락으로 무시했음
+    const personal_fields = req.body.personal_fields;
+
     const insertResult = await query(
       `INSERT INTO auto_campaigns (
         company_id, user_id, campaign_name, description,
@@ -479,6 +483,7 @@ router.post('/', async (req: Request, res: Response) => {
         sender_number_id, is_ad, pre_notify, notify_phones,
         use_individual_callback,
         ai_generate_enabled, ai_prompt, ai_tone, fallback_message_content,
+        personal_fields,
         status, next_run_at
       ) VALUES (
         $1, $2, $3, $4,
@@ -487,7 +492,8 @@ router.post('/', async (req: Request, res: Response) => {
         $14, $15, $16, $17,
         $18,
         $19, $20, $21, $22,
-        'active', $23
+        $23,
+        'active', $24
       ) RETURNING *`,
       [
         companyId, userId, campaign_name.trim(), description || null,
@@ -496,6 +502,7 @@ router.post('/', async (req: Request, res: Response) => {
         sender_number_id || null, is_ad ?? false, pre_notify ?? true, notify_phones || null,
         use_individual_callback ?? false,
         ai_generate_enabled ?? false, ai_prompt?.trim() || null, ai_tone || 'friendly', fallback_message_content?.trim() || null,
+        Array.isArray(personal_fields) && personal_fields.length > 0 ? personal_fields : null,
         nextRunAt,
       ]
     );
@@ -541,6 +548,8 @@ router.put('/:id', async (req: Request, res: Response) => {
       use_individual_callback, // ★ D93: 수신자별 회신번호 칼럼 사용
       // ★ AI 프리미엄 필드 (기능 3)
       ai_generate_enabled, ai_prompt, ai_tone, fallback_message_content,
+      // ★ B+0407-4: 개인화 필드 (AI 문안 생성 시 변수 전달용)
+      personal_fields,
     } = req.body;
 
     // 스케줄 변경 시 유효성 검증
@@ -620,6 +629,7 @@ router.put('/:id', async (req: Request, res: Response) => {
         generated_message_content = CASE WHEN $23::boolean THEN NULL ELSE generated_message_content END,
         generated_message_subject = CASE WHEN $23::boolean THEN NULL ELSE generated_message_subject END,
         generated_at = CASE WHEN $23::boolean THEN NULL ELSE generated_at END,
+        personal_fields = COALESCE($24, personal_fields),
         updated_at = NOW()
       WHERE id = $1 AND company_id = $18
       RETURNING *`,
@@ -647,6 +657,8 @@ router.put('/:id', async (req: Request, res: Response) => {
         ai_tone || null,
         fallback_message_content?.trim() || null,
         clearGenerated,
+        // ★ B+0407-4: personal_fields (개인화 변수)
+        Array.isArray(personal_fields) ? personal_fields : null,
       ]
     );
 

@@ -108,7 +108,12 @@
       "Bash(echo \"EXIT=$?\")",
       "Bash(echo \"===EXIT=$?==\")",
       "Bash(echo \"BACKEND_EXIT=$?\")",
-      "Bash(echo \"FRONTEND_EXIT=$?\")"
+      "Bash(echo \"FRONTEND_EXIT=$?\")",
+      "Bash(node generate-polachoice-customers.js)",
+      "Bash(ls *.xlsx)",
+      "Bash(ls generate-*.js)",
+      "Bash(node read-0407.js)",
+      "Bash(ls *.js)"
     ]
   }
 }

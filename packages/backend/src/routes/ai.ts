@@ -492,7 +492,10 @@ router.post('/recount-target', authenticate, async (req: Request, res: Response)
     }
 
     if (targetCondition.storeName) {
-      targetFilters.store_name = { value: targetCondition.storeName, operator: 'eq' };
+      // ★ B+0407-2: 'eq'는 정확 일치만 → 사용자가 "강남점"이라 입력했는데
+      //   DB는 "강남직영점"이면 0건. 'contains'로 부분 매칭하여 사용자 친화적으로.
+      //   (CT-01 customer-filter는 contains 시 ILIKE '%X%'로 처리됨, D89)
+      targetFilters.store_name = { value: targetCondition.storeName, operator: 'contains' };
     }
 
     // birth_date (생일 월 필터)

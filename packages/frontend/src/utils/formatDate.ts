@@ -303,6 +303,30 @@ export function formatByType(val: any, dataType?: string): string {
   return formatPreviewValue(val);
 }
 
+/**
+ * ★ B+0407-1: enum 필드 DB값 → 표시용 한글 역변환 (백엔드 standard-field-map.ts와 동기화)
+ *
+ * DB는 정규화된 enum 값을 저장하지만 미리보기/메시지에는 한글로 표시.
+ * 사용처: replaceMessageVars (메시지 변수 치환 시)
+ *
+ * ⚠️ 백엔드 standard-field-map.ts FIELD_DISPLAY_MAP과 반드시 동기화 유지.
+ */
+export const FRONT_FIELD_DISPLAY_MAP: Record<string, Record<string, string>> = {
+  gender: {
+    m: '남성', f: '여성',
+    male: '남성', female: '여성',
+    남: '남성', 여: '여성',
+  },
+};
+
+export function reverseDisplayValueFront(fieldKey: string, dbValue: any): string {
+  if (dbValue === null || dbValue === undefined) return '';
+  const map = FRONT_FIELD_DISPLAY_MAP[fieldKey];
+  if (!map) return String(dbValue);
+  const key = String(dbValue).trim().toLowerCase();
+  return map[key] || String(dbValue);
+}
+
 export function replaceMessageVars(
   text: string,
   fields: { field_key: string; field_label?: string; display_name?: string; data_type?: string; field_type?: string }[],
@@ -322,20 +346,28 @@ export function replaceMessageVars(
     if (dt) typeMap[f.field_key] = dt;
   }
 
+  // ★ B+0407-1: enum 필드 우선 역변환 (gender 'F' → '여성'). formatByType보다 먼저 적용.
+  const renderValue = (fieldKey: string | undefined, val: any, dt: string | undefined): string => {
+    if (fieldKey && FRONT_FIELD_DISPLAY_MAP[fieldKey]) {
+      return reverseDisplayValueFront(fieldKey, val);
+    }
+    return formatByType(val, dt);
+  };
+
   // 필드 정의 기반 치환 (field_label → field_key 매핑)
   for (const f of fields) {
     const label = f.field_label || f.display_name || f.field_key;
     const val = customerData[f.field_key];
     const dt = f.data_type || (f.field_type ? f.field_type.toLowerCase() : undefined);
     if (label && val != null) {
-      result = result.replace(new RegExp(`%${escapeRegex(label)}%`, 'g'), formatByType(val, dt));
+      result = result.replace(new RegExp(`%${escapeRegex(label)}%`, 'g'), renderValue(f.field_key, val, dt));
     }
   }
 
   // column 키로도 치환 (sampleCustomer가 column 키일 때 호환)
   for (const [k, v] of Object.entries(customerData)) {
     if (v != null) {
-      result = result.replace(new RegExp(`%${escapeRegex(k)}%`, 'g'), formatByType(v, typeMap[k]));
+      result = result.replace(new RegExp(`%${escapeRegex(k)}%`, 'g'), renderValue(k, v, typeMap[k]));
     }
   }
 
