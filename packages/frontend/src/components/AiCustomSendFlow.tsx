@@ -917,6 +917,14 @@ export default function AiCustomSendFlow({
                               <div className="flex gap-2">
                                 <div className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-xs bg-purple-100">📱</div>
                                 <div className="rounded-2xl rounded-tl-sm p-3 shadow-sm border text-[12px] leading-[1.6] whitespace-pre-wrap break-all overflow-hidden text-gray-700 max-w-[95%] bg-white border-gray-100">
+                                  {/* ★ B1 후속: MMS 첨부 이미지 미리보기 */}
+                                  {channel === 'MMS' && mmsUploadedImages && mmsUploadedImages.length > 0 && (
+                                    <div className="flex flex-wrap gap-1 mb-1.5">
+                                      {mmsUploadedImages.map((img, i) => (
+                                        <img key={i} src={img.url} alt="" className="w-full h-auto rounded border border-purple-200" style={{ maxHeight: '120px', objectFit: 'cover' }} />
+                                      ))}
+                                    </div>
+                                  )}
                                   {highlightVars(wrapAdText(msg.message_text || ''))}
                                 </div>
                               </div>
@@ -1097,6 +1105,14 @@ export default function AiCustomSendFlow({
                       <div className="flex gap-2 mt-1">
                         <div className="w-7 h-7 rounded-full bg-purple-100 flex items-center justify-center shrink-0 text-xs">📱</div>
                         <div className="bg-white rounded-2xl rounded-tl-sm p-3 shadow-sm border border-gray-100 text-[12px] leading-[1.6] whitespace-pre-wrap break-all text-gray-700 max-w-[95%]">
+                          {/* ★ B1 후속: 미리보기 모달에도 MMS 이미지 표시 */}
+                          {channel === 'MMS' && mmsUploadedImages && mmsUploadedImages.length > 0 && (
+                            <div className="flex flex-wrap gap-1 mb-2">
+                              {mmsUploadedImages.map((img, i) => (
+                                <img key={i} src={img.url} alt="" className="w-full h-auto rounded border border-purple-200" style={{ maxHeight: '160px', objectFit: 'cover' }} />
+                              ))}
+                            </div>
+                          )}
                           {Object.keys(sampleData).length > 0 && !showVarsHighlightOnly
                             ? replaceSampleVars(wrapAdText(variants[selectedVariantIdx]?.message_text || ''))
                             : highlightVars(wrapAdText(variants[selectedVariantIdx]?.message_text || ''))}

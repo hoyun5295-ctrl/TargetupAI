@@ -1971,6 +1971,8 @@ const campaignData = {
             subject={customSendData.variant?.subject}
             usePersonalization={true}
             sampleCustomer={sampleCustomer}
+            /* ★ B1 후속: 발송 확정 모달 폰 미리보기에도 MMS 이미지 표시 */
+            mmsImages={customSendData.channel === 'MMS' ? mmsUploadedImages : undefined}
           />
         )}
   
