@@ -30,6 +30,7 @@ import { buildFilterQueryCompat } from '../utils/customer-filter';
 import { filterByIndividualCallback, buildCallbackErrorResponse, buildCallbackConfirmResponse, resolveCustomerCallback } from '../utils/callback-filter';
 import { deduplicateByPhone } from '../utils/deduplicate';
 import { getUserTestContacts } from '../utils/test-contact-helper';
+import { validateScheduledAt } from '../utils/campaign-validation';
 
 // ★ toKoreaTimeStr → utils/sms-queue.ts로 이동 (import 사용)
 
@@ -463,6 +464,13 @@ router.post('/', async (req: Request, res: Response) => {
 
     if (!campaignName || !messageType || !messageContent) {
       return res.status(400).json({ error: '필수 항목을 입력하세요.' });
+    }
+
+    // ★ D111 P4: 예약 시각 검증 — 컨트롤타워 validateScheduledAt (인라인 검증 금지)
+    //   즉시발송(scheduledAt=null) 허용, 과거 차단, 최대 365일 미래 차단
+    const schedCheck = validateScheduledAt(scheduledAt, { allowNull: true });
+    if (!schedCheck.valid) {
+      return res.status(400).json({ error: schedCheck.error });
     }
 
     // ★ B17-01 수정: 타겟 인원 계산 (sms_opt_in + 수신거부 제외 — user_id 기준)
@@ -1273,6 +1281,15 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: '수신자가 없습니다' });
     }
 
+    // ★ D111 P4: 예약 시각 검증 — 컨트롤타워 validateScheduledAt
+    //   scheduled=false면 scheduledAt 무시, scheduled=true면 과거/미래 검증
+    if (scheduled) {
+      const dsCheck = validateScheduledAt(scheduledAt, { allowNull: false });
+      if (!dsCheck.valid) {
+        return res.status(400).json({ success: false, error: dsCheck.error });
+      }
+    }
+
     // ★ D102: 중복제거 — 사용자 선택에 따라 적용 (기본 true)
     let finalRecipients = recipients;
     let duplicateCount = 0;
@@ -1985,12 +2002,12 @@ router.put('/:id/reschedule', async (req: Request, res: Response) => {
       return res.status(404).json({ success: false, error: '예약 캠페인을 찾을 수 없습니다' });
     }
 
-    // 새 예약 시간 검증: 현재 + 15분 이후만 허용
-    const newScheduledAt = new Date(scheduledAt);
-    const nowCheck = new Date();
-    if ((newScheduledAt.getTime() - nowCheck.getTime()) / (1000 * 60) < 15) {
-      return res.status(400).json({ success: false, error: '현재 시간 + 15분 이후로만 변경 가능합니다' });
+    // ★ D111 P4: 새 예약 시각 검증 — 컨트롤타워 validateScheduledAt (이전 인라인 15분 체크 교체)
+    const rsCheck = validateScheduledAt(scheduledAt, { allowNull: false, minMinutesFromNow: 15 });
+    if (!rsCheck.valid) {
+      return res.status(400).json({ success: false, error: rsCheck.error });
     }
+    const newScheduledAt = rsCheck.normalizedDate!;
 
     // 15분 이내 체크
     const currentScheduledAt = new Date(campaign.rows[0].scheduled_at);
