@@ -1658,7 +1658,10 @@ const campaignData = {
         sendChannel: 'sms',
         messageContent,
         targetFilter: customSendData.targetFilters || {},
-        isAd: isAd,
+        // ★ D111 P3: Dashboard 전역 isAd 대신 맞춤한줄 Step3 토글값(customSendData.isAd) 사용
+        //   이전: isAd: isAd → 사용자가 광고 OFF 해도 Dashboard 전역값 true면 실발송에 (광고) 붙음
+        //   같은 버그를 미리보기 prop과 실발송 body 양쪽에 가지고 있었음 → 양쪽 동일 수정
+        isAd: customSendData.isAd ?? false,
         scheduledAt,
         eventStartDate: null,
         eventEndDate: null,
