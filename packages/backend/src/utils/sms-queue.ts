@@ -205,21 +205,21 @@ export function getNextSmsTable(tables: string[]): string {
 
 // ===== MySQL 큐 조작 (복수 테이블 대응) =====
 
-/** COUNT 합산 */
+/** COUNT 합산 — 병렬 실행 */
 export async function smsCountAll(tables: string[], whereClause: string, params: any[]): Promise<number> {
-  let total = 0;
-  for (const t of tables) {
-    const rows = await mysqlQuery(`SELECT COUNT(*) as cnt FROM ${t} WHERE ${whereClause}`, params) as any[];
-    total += Number(rows[0]?.cnt || 0);
-  }
-  return total;
+  const results = await Promise.all(
+    tables.map(t => mysqlQuery(`SELECT COUNT(*) as cnt FROM ${t} WHERE ${whereClause}`, params) as Promise<any[]>)
+  );
+  return results.reduce((sum, rows) => sum + Number(rows[0]?.cnt || 0), 0);
 }
 
-/** 집계 합산 */
+/** 집계 합산 — 병렬 실행 */
 export async function smsAggAll(tables: string[], selectFields: string, whereClause: string, params: any[]): Promise<any> {
+  const results = await Promise.all(
+    tables.map(t => mysqlQuery(`SELECT ${selectFields} FROM ${t} WHERE ${whereClause}`, params) as Promise<any[]>)
+  );
   const agg: any = {};
-  for (const t of tables) {
-    const rows = await mysqlQuery(`SELECT ${selectFields} FROM ${t} WHERE ${whereClause}`, params) as any[];
+  for (const rows of results) {
     if (rows[0]) {
       for (const k of Object.keys(rows[0])) {
         agg[k] = (agg[k] || 0) + (Number(rows[0][k]) || 0);
@@ -229,14 +229,15 @@ export async function smsAggAll(tables: string[], selectFields: string, whereCla
   return agg;
 }
 
-/** SELECT 합산 */
+/** SELECT 합산 — 병렬 실행 */
 export async function smsSelectAll(tables: string[], selectFields: string, whereClause: string, params: any[], suffix?: string): Promise<any[]> {
-  let all: any[] = [];
-  for (const t of tables) {
-    const rows = await mysqlQuery(`SELECT ${selectFields} FROM ${t} WHERE ${whereClause} ${suffix || ''}`, params) as any[];
-    all = all.concat(rows.map((r: any) => ({ ...r, _sms_table: t })));
-  }
-  return all;
+  const results = await Promise.all(
+    tables.map(t =>
+      (mysqlQuery(`SELECT ${selectFields} FROM ${t} WHERE ${whereClause} ${suffix || ''}`, params) as Promise<any[]>)
+        .then(rows => rows.map((r: any) => ({ ...r, _sms_table: t })))
+    )
+  );
+  return results.flat();
 }
 
 /** MIN 합산 */
@@ -288,6 +289,39 @@ async function getExistingLogTables(): Promise<Set<string>> {
 export async function getAllSmsTablesWithLogs(): Promise<string[]> {
   const existingLogs = await getExistingLogTables();
   return [...ALL_SMS_TABLES, ...Array.from(existingLogs)];
+}
+
+/**
+ * ★ 캠페인 단일 조회용 — 해당 회사의 LIVE 테이블 + 발송월 LOG 테이블만 반환
+ * admin.ts sms-detail, 결과 상세 조회 등에서 사용. 확장성 O(1~3개).
+ *
+ * @param companyId - 캠페인 소유 회사 ID
+ * @param refDate   - 캠페인 발송 기준 시각 (sent_at || scheduled_at || created_at)
+ * @param userId    - (선택) 사용자 라인그룹이 있을 경우
+ */
+export async function getCampaignSmsTables(
+  companyId: string,
+  refDate: Date,
+  userId?: string
+): Promise<string[]> {
+  const liveTables = await getCompanySmsTables(companyId, userId);
+  const existingLogs = await getExistingLogTables();
+
+  // 발송 기준월 + 전후 1개월(경계/재발송 대비)
+  const months: string[] = [];
+  for (let offset = -1; offset <= 1; offset++) {
+    const d = new Date(refDate.getFullYear(), refDate.getMonth() + offset, 1);
+    months.push(`${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}`);
+  }
+
+  const result = [...liveTables];
+  for (const live of liveTables) {
+    for (const ym of months) {
+      const log = `${live}_${ym}`;
+      if (existingLogs.has(log)) result.push(log);
+    }
+  }
+  return result;
 }
 
 /** 회사 발송 테이블 + 로그 테이블 (결과 조회용) */

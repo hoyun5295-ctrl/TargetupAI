@@ -3,7 +3,7 @@ import crypto from 'crypto';
 import { Request, Response, Router } from 'express';
 import { mysqlQuery, query } from '../config/database';
 import { authenticate, requireSuperAdmin } from '../middlewares/auth';
-import { ALL_SMS_TABLES, invalidateLineGroupCache, getAllSmsTablesWithLogs, smsCountAll, smsSelectAll, smsAggAll, getTestSmsTables } from '../utils/sms-queue';
+import { ALL_SMS_TABLES, invalidateLineGroupCache, getCampaignSmsTables, smsCountAll, smsSelectAll, smsAggAll, getTestSmsTables } from '../utils/sms-queue';
 import { DASHBOARD_CARD_POOL, validateCardIds, getRequiredFields, filterPoolByAvailableData } from '../utils/dashboard-card-pool';
 import { SUCCESS_CODES_SQL, PENDING_CODES_SQL, getStatusLabel, getStatusType, getCarrierLabel, isSuccess, isPending } from '../utils/sms-result-map';
 import { DEFAULT_COSTS } from '../config/defaults';
@@ -1489,7 +1489,8 @@ router.get('/campaigns/:id/sms-detail', authenticate, requireSuperAdmin, async (
 
     // 캠페인 기본 정보 (PostgreSQL)
     const campResult = await query(`
-      SELECT c.id, c.campaign_name, c.message_type, c.send_type, c.status, c.scheduled_at, c.sent_at, c.target_count,
+      SELECT c.id, c.company_id, c.created_by, c.created_at,
+             c.campaign_name, c.message_type, c.send_type, c.status, c.scheduled_at, c.sent_at, c.target_count,
              c.success_count, c.fail_count, c.send_channel,
              co.company_name, co.company_code,
              u.name as created_by_name, u.login_id as created_by_login
@@ -1512,9 +1513,11 @@ router.get('/campaigns/:id/sms-detail', authenticate, requireSuperAdmin, async (
 
     // ===== SMS 내역 조회 =====
     if (showSms) {
-      // CT-04: 어드민은 전역 조회 — 전체 LIVE + 전체 LOG 테이블 스캔
-      // (완료된 캠페인은 SMSQ_SEND_X_YYYYMM 로그 테이블로 이동되므로 LIVE만 보면 0건)
-      const smsTables = await getAllSmsTablesWithLogs();
+      // CT-04: 캠페인 단일 조회 최적화 —
+      // 해당 회사 라인그룹 LIVE 테이블(1~2개) + 발송월 LOG 테이블(1개)만 조회
+      // 고객사/테이블 수 증가와 무관하게 O(2~3) 유지
+      const refDate = new Date(campaign.sent_at || campaign.scheduled_at || campaign.created_at);
+      const smsTables = await getCampaignSmsTables(campaign.company_id, refDate, campaign.created_by);
 
       let mysqlWhere = `app_etc1 = ?`;
       const mysqlParams: any[] = [id];
