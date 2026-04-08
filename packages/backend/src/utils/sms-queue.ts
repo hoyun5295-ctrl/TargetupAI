@@ -221,6 +221,72 @@ function normalizeWhere(whereClause: string): string {
   return whereClause.replace(/^\s*WHERE\s+/i, '');
 }
 
+/**
+ * ★ D111 P4: selectFields의 `X as Y` alias 매핑 추출
+ *
+ * 배경: smsSelectAll은 UNION ALL을 outer `SELECT * FROM (...) AS _u ${suffix}`로 감싼다.
+ *   inner에서 `seqno AS idx`로 alias하면 outer `_u`에는 `idx` 컬럼만 존재하고 `seqno`는 없음.
+ *   호출부가 suffix에 `ORDER BY seqno`를 쓰면 "column not found" 에러 → 0건 반환.
+ *
+ * 해결: 컨트롤타워가 selectFields를 파싱해서 alias 맵을 만들고,
+ *   suffix의 컬럼 참조를 자동으로 alias로 재작성 → 호출부가 raw/alias 어느 쪽을 써도 동작.
+ *
+ * 반환: { rawCol: aliasCol } 맵 (대소문자 정규화)
+ */
+function extractAliasMap(selectFields: string): Record<string, string> {
+  const map: Record<string, string> = {};
+  // SELECT 절 내 각 항목 분리. 괄호 안 쉼표는 고려하지 않음(현재 CT-04 호출부 전부 단순 컬럼 기반).
+  for (const rawItem of selectFields.split(',')) {
+    const item = rawItem.trim();
+    if (!item) continue;
+    // "table.col AS alias" / "col AS alias" / "col alias" 매칭. 함수 호출(SUM/COUNT 등)은 제외.
+    const m = item.match(/^([a-zA-Z_][\w.]*)\s+(?:as\s+)?([a-zA-Z_]\w*)\s*$/i);
+    if (!m) continue;
+    const raw = m[1];
+    const alias = m[2];
+    // raw가 함수/키워드가 아니고, alias와 다를 때만 매핑
+    if (raw.toLowerCase() !== alias.toLowerCase()) {
+      // 테이블 prefix가 있으면 컬럼명만도 같이 매핑 (예: c.seqno → idx, seqno → idx)
+      const bareRaw = raw.includes('.') ? raw.split('.').pop()! : raw;
+      map[raw.toLowerCase()] = alias;
+      map[bareRaw.toLowerCase()] = alias;
+    }
+  }
+  return map;
+}
+
+/**
+ * suffix(ORDER BY / GROUP BY / HAVING)의 식별자 토큰을 alias로 재작성.
+ * - 문자열 리터럴('...'), 숫자, SQL 키워드는 건드리지 않음
+ * - 매핑에 없는 컬럼은 그대로 둠
+ */
+function rewriteSuffixWithAliases(suffix: string, aliasMap: Record<string, string>): string {
+  if (!suffix || Object.keys(aliasMap).length === 0) return suffix;
+  // 문자열 리터럴 보호
+  const literals: string[] = [];
+  let masked = suffix.replace(/'(?:[^'\\]|\\.)*'/g, (m) => {
+    literals.push(m);
+    return `\u0000L${literals.length - 1}\u0000`;
+  });
+  // SQL 키워드 (대소문자 무관)
+  const KEYWORDS = new Set([
+    'order', 'by', 'group', 'having', 'limit', 'offset', 'asc', 'desc',
+    'and', 'or', 'not', 'null', 'is', 'true', 'false',
+  ]);
+  // 식별자 토큰(backtick 가능)만 재작성
+  masked = masked.replace(/`?([a-zA-Z_][\w.]*)`?/g, (match, tok) => {
+    if (!tok) return match;
+    const lower = tok.toLowerCase();
+    if (KEYWORDS.has(lower)) return match;
+    if (/^\d/.test(tok)) return match;
+    const alias = aliasMap[lower];
+    return alias ? alias : match;
+  });
+  // 리터럴 복원
+  masked = masked.replace(/\u0000L(\d+)\u0000/g, (_, i) => literals[Number(i)]);
+  return masked;
+}
+
 /** ★ COUNT 합산 — UNION ALL 단일 쿼리 */
 export async function smsCountAll(tables: string[], whereClause: string, params: any[]): Promise<number> {
   if (tables.length === 0) return 0;
@@ -263,7 +329,11 @@ export async function smsSelectAll(
   const unions = tables
     .map(t => `SELECT '${t}' AS _sms_table, ${selectFields} FROM ${t} WHERE ${w}`)
     .join(' UNION ALL ');
-  const sql = suffix ? `SELECT * FROM (${unions}) AS _u ${suffix}` : unions;
+  // ★ D111 P4: outer suffix(ORDER BY/GROUP BY)가 inner alias가 아닌 raw 컬럼명을 참조해도 자동 재작성.
+  //   호출부가 'seqno as idx' + 'ORDER BY seqno' 써도 'ORDER BY idx'로 자동 치환 → "column not found" 재발 차단
+  const aliasMap = extractAliasMap(selectFields);
+  const safeSuffix = suffix ? rewriteSuffixWithAliases(suffix, aliasMap) : '';
+  const sql = safeSuffix ? `SELECT * FROM (${unions}) AS _u ${safeSuffix}` : unions;
   return await mysqlQuery(sql, repeatParams(params, tables.length)) as any[];
 }
 
