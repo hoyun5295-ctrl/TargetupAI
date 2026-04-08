@@ -7,8 +7,8 @@
 import { query } from '../config/database';
 import {
   getCompanySmsTables, getCompanySmsTablesWithLogs,
-  smsCountAll, smsExecAll, smsAggAll,
-  kakaoCountPending, kakaoCancelPending, kakaoAgg
+  smsCountAll, smsExecAll, smsBatchAggByGroup,
+  kakaoCountPending, kakaoCancelPending, kakaoBatchAggByGroup
 } from './sms-queue';
 import { prepaidRefund } from './prepaid';
 import { SUCCESS_CODES, PENDING_CODES } from './sms-result-map';
@@ -179,28 +179,36 @@ export async function syncCampaignResults(companyId: string): Promise<SyncResult
   );
   console.log(`[sync-results] AI캠페인 ${runsResult.rows.length}건 대상`);
 
+  // ★ 최적화 — 전체 runs를 1개 UNION ALL GROUP BY로 일괄 집계 (N쿼리 → 1쿼리)
+  // 회사/유저 조합별로 테이블 해석 후 배치 집계
+  const runsByUser = new Map<string, any[]>();
+  for (const run of runsResult.rows) {
+    const key = `${run.company_id}::${run.created_by || ''}`;
+    if (!runsByUser.has(key)) runsByUser.set(key, []);
+    runsByUser.get(key)!.push(run);
+  }
+
+  const aggFields = `COUNT(CASE WHEN status_code IN (${SUCCESS_CODES.join(',')}) THEN 1 END) as success_count,
+     COUNT(CASE WHEN status_code NOT IN (${[...SUCCESS_CODES, ...PENDING_CODES].join(',')}) THEN 1 END) as fail_count,
+     COUNT(CASE WHEN status_code IN (${PENDING_CODES.join(',')}) THEN 1 END) as pending_count`;
+
+  const smsAggMap = new Map<string, Record<string, number>>();
+  for (const [key, runs] of runsByUser) {
+    const [cid, uid] = key.split('::');
+    const runTables = await getCompanySmsTablesWithLogs(cid, uid || undefined);
+    const ids = runs.map(r => r.campaign_id);
+    const partial = await smsBatchAggByGroup(runTables, 'app_etc1', aggFields, ids);
+    for (const [g, v] of partial) smsAggMap.set(g, v);
+  }
+
+  // 카카오는 단일 테이블이므로 한 번에 배치 집계
+  const allRunIds: string[] = runsResult.rows.map((r: any) => r.campaign_id);
+  const kakaoAggMap = await kakaoBatchAggByGroup(allRunIds);
+
   for (const run of runsResult.rows) {
     try {
-      // ★ userId 전달: 사용자별 라인그룹이 다를 수 있으므로 발송자 기준 테이블 조회
-      const runTables = await getCompanySmsTablesWithLogs(run.company_id, run.created_by);
-      console.log(`[sync-results] AI run ${run.id} — tables: [${runTables.join(',')}], created_by: ${run.created_by}`);
-      const smsAgg = await smsAggAll(runTables,
-        `COUNT(CASE WHEN status_code IN (${SUCCESS_CODES.join(',')}) THEN 1 END) as success_count,
-         COUNT(CASE WHEN status_code NOT IN (${[...SUCCESS_CODES, ...PENDING_CODES].join(',')}) THEN 1 END) as fail_count,
-         COUNT(CASE WHEN status_code IN (${PENDING_CODES.join(',')}) THEN 1 END) as pending_count`,
-        'app_etc1 = ?',
-        [run.campaign_id]
-      );
-
-      // 카카오: 테이블 미존재 시 0으로 처리 (IMC_BM_FREE_BIZ_MSG 없는 환경 대응)
-      let kakaoResult = { total: 0, success: 0, fail: 0, pending: 0 };
-      try {
-        kakaoResult = await kakaoAgg('REQUEST_UID = ?', [run.campaign_id]);
-      } catch (kakaoErr: any) {
-        if (!kakaoErr.message?.includes("doesn't exist")) {
-          console.error(`[sync-results] AI run ${run.id} 카카오 집계 에러:`, kakaoErr.message);
-        }
-      }
+      const smsAgg = smsAggMap.get(run.campaign_id) || {};
+      const kakaoResult = kakaoAggMap.get(run.campaign_id) || { total: 0, success: 0, fail: 0, pending: 0 };
 
       const successCount = (smsAgg.success_count || 0) + kakaoResult.success;
       const failCount = (smsAgg.fail_count || 0) + kakaoResult.fail;
@@ -283,29 +291,33 @@ export async function syncCampaignResults(companyId: string): Promise<SyncResult
     [companyId]
   );
 
+  // ★ 최적화 — 직접발송도 배치 집계 (회사/유저 조합별 테이블 → UNION ALL GROUP BY)
+  const directByUser = new Map<string, any[]>();
+  for (const c of directCampaigns.rows) {
+    const key = `${c.company_id}::${c.created_by || ''}`;
+    if (!directByUser.has(key)) directByUser.set(key, []);
+    directByUser.get(key)!.push(c);
+  }
+  const directAggFields = `COUNT(*) as total_count,
+     COUNT(CASE WHEN status_code IN (${SUCCESS_CODES.join(',')}) THEN 1 END) as success_count,
+     COUNT(CASE WHEN status_code NOT IN (${[...SUCCESS_CODES, ...PENDING_CODES].join(',')}) THEN 1 END) as fail_count,
+     COUNT(CASE WHEN status_code IN (${PENDING_CODES.join(',')}) THEN 1 END) as pending_count`;
+
+  const directSmsAggMap = new Map<string, Record<string, number>>();
+  for (const [key, camps] of directByUser) {
+    const [cid, uid] = key.split('::');
+    const directTables = await getCompanySmsTablesWithLogs(cid, uid || undefined);
+    const ids = camps.map(c => c.id);
+    const partial = await smsBatchAggByGroup(directTables, 'app_etc1', directAggFields, ids);
+    for (const [g, v] of partial) directSmsAggMap.set(g, v);
+  }
+  const allDirectIds: string[] = directCampaigns.rows.map((c: any) => c.id);
+  const directKakaoAggMap = await kakaoBatchAggByGroup(allDirectIds);
+
   for (const campaign of directCampaigns.rows) {
     try {
-      // ★ userId 전달: 사용자별 라인그룹이 다를 수 있으므로 발송자 기준 테이블 조회
-      const directTables = await getCompanySmsTablesWithLogs(campaign.company_id, campaign.created_by);
-      console.log(`[sync-results] direct campaign ${campaign.id} — tables: [${directTables.join(',')}], created_by: ${campaign.created_by}`);
-      const smsDirectAgg = await smsAggAll(directTables,
-        `COUNT(*) as total_count,
-         COUNT(CASE WHEN status_code IN (${SUCCESS_CODES.join(',')}) THEN 1 END) as success_count,
-         COUNT(CASE WHEN status_code NOT IN (${[...SUCCESS_CODES, ...PENDING_CODES].join(',')}) THEN 1 END) as fail_count,
-         COUNT(CASE WHEN status_code IN (${PENDING_CODES.join(',')}) THEN 1 END) as pending_count`,
-        'app_etc1 = ?',
-        [campaign.id]
-      );
-
-      // 카카오: 테이블 미존재 시 0으로 처리 (IMC_BM_FREE_BIZ_MSG 없는 환경 대응)
-      let kakaoDirectResult = { total: 0, success: 0, fail: 0, pending: 0 };
-      try {
-        kakaoDirectResult = await kakaoAgg('REQUEST_UID = ?', [campaign.id]);
-      } catch (kakaoErr: any) {
-        if (!kakaoErr.message?.includes("doesn't exist")) {
-          console.error(`[sync-results] direct campaign ${campaign.id} 카카오 집계 에러:`, kakaoErr.message);
-        }
-      }
+      const smsDirectAgg = directSmsAggMap.get(campaign.id) || {};
+      const kakaoDirectResult = directKakaoAggMap.get(campaign.id) || { total: 0, success: 0, fail: 0, pending: 0 };
 
       const successCount = (smsDirectAgg.success_count || 0) + kakaoDirectResult.success;
       const failCount = (smsDirectAgg.fail_count || 0) + kakaoDirectResult.fail;

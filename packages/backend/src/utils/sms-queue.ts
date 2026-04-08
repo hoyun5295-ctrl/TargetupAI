@@ -204,53 +204,140 @@ export function getNextSmsTable(tables: string[]): string {
 }
 
 // ===== MySQL 큐 조작 (복수 테이블 대응) =====
+// ★ 최적화 원칙 (확장성):
+// 모든 조회 헬퍼는 UNION ALL 단일 쿼리로 실행한다. 테이블 수(고객사/라인그룹)
+// 와 무관하게 DB 왕복 1회만 발생. 이전 Promise.all 병렬 N쿼리보다 더 빠름.
+// SQL escape 안전성: 테이블명은 sms-table-validator로 사전 검증된 식별자만 주입.
 
-/** COUNT 합산 — 병렬 실행 */
-export async function smsCountAll(tables: string[], whereClause: string, params: any[]): Promise<number> {
-  const results = await Promise.all(
-    tables.map(t => mysqlQuery(`SELECT COUNT(*) as cnt FROM ${t} WHERE ${whereClause}`, params) as Promise<any[]>)
-  );
-  return results.reduce((sum, rows) => sum + Number(rows[0]?.cnt || 0), 0);
+/** 파라미터를 테이블 수만큼 반복 (UNION ALL 각 서브쿼리에 동일 WHERE 필요) */
+function repeatParams(params: any[], count: number): any[] {
+  const out: any[] = [];
+  for (let i = 0; i < count; i++) out.push(...params);
+  return out;
 }
 
-/** 집계 합산 — 병렬 실행 */
+/** whereClause 정규화: "WHERE ..." 접두사가 있으면 제거 (호출부 규약 유연화) */
+function normalizeWhere(whereClause: string): string {
+  return whereClause.replace(/^\s*WHERE\s+/i, '');
+}
+
+/** ★ COUNT 합산 — UNION ALL 단일 쿼리 */
+export async function smsCountAll(tables: string[], whereClause: string, params: any[]): Promise<number> {
+  if (tables.length === 0) return 0;
+  const w = normalizeWhere(whereClause);
+  const sql = `SELECT SUM(cnt) AS total FROM (${
+    tables.map(t => `SELECT COUNT(*) AS cnt FROM ${t} WHERE ${w}`).join(' UNION ALL ')
+  }) AS _u`;
+  const rows = await mysqlQuery(sql, repeatParams(params, tables.length)) as any[];
+  return Number(rows[0]?.total || 0);
+}
+
+/** ★ 집계 합산 — UNION ALL 단일 쿼리 + JS 합산 */
 export async function smsAggAll(tables: string[], selectFields: string, whereClause: string, params: any[]): Promise<any> {
-  const results = await Promise.all(
-    tables.map(t => mysqlQuery(`SELECT ${selectFields} FROM ${t} WHERE ${whereClause}`, params) as Promise<any[]>)
-  );
+  if (tables.length === 0) return {};
+  const w = normalizeWhere(whereClause);
+  const innerList = tables.map(t => `SELECT ${selectFields} FROM ${t} WHERE ${w}`).join(' UNION ALL ');
+  const rows = await mysqlQuery(innerList, repeatParams(params, tables.length)) as any[];
   const agg: any = {};
-  for (const rows of results) {
-    if (rows[0]) {
-      for (const k of Object.keys(rows[0])) {
-        agg[k] = (agg[k] || 0) + (Number(rows[0][k]) || 0);
-      }
+  for (const r of rows) {
+    for (const k of Object.keys(r)) {
+      agg[k] = (agg[k] || 0) + (Number(r[k]) || 0);
     }
   }
   return agg;
 }
 
-/** SELECT 합산 — 병렬 실행 */
-export async function smsSelectAll(tables: string[], selectFields: string, whereClause: string, params: any[], suffix?: string): Promise<any[]> {
-  const results = await Promise.all(
-    tables.map(t =>
-      (mysqlQuery(`SELECT ${selectFields} FROM ${t} WHERE ${whereClause} ${suffix || ''}`, params) as Promise<any[]>)
-        .then(rows => rows.map((r: any) => ({ ...r, _sms_table: t })))
-    )
-  );
-  return results.flat();
+/**
+ * ★ SELECT 합산 — UNION ALL 단일 쿼리
+ * _sms_table 메타는 리터럴 컬럼으로 보존. ORDER BY/LIMIT은 outer에서 적용.
+ */
+export async function smsSelectAll(
+  tables: string[],
+  selectFields: string,
+  whereClause: string,
+  params: any[],
+  suffix?: string
+): Promise<any[]> {
+  if (tables.length === 0) return [];
+  const w = normalizeWhere(whereClause);
+  const unions = tables
+    .map(t => `SELECT '${t}' AS _sms_table, ${selectFields} FROM ${t} WHERE ${w}`)
+    .join(' UNION ALL ');
+  const sql = suffix ? `SELECT * FROM (${unions}) AS _u ${suffix}` : unions;
+  return await mysqlQuery(sql, repeatParams(params, tables.length)) as any[];
 }
 
-/** MIN 합산 */
+/** ★ MIN 합산 — UNION ALL 단일 쿼리 */
 export async function smsMinAll(tables: string[], field: string, whereClause: string, params: any[]): Promise<any> {
-  let minVal: any = null;
-  for (const t of tables) {
-    const rows = await mysqlQuery(`SELECT MIN(${field}) as min_val FROM ${t} WHERE ${whereClause}`, params) as any[];
-    const val = rows[0]?.min_val;
-    if (val && (!minVal || new Date(val) < new Date(minVal))) {
-      minVal = val;
+  if (tables.length === 0) return null;
+  const w = normalizeWhere(whereClause);
+  const sql = `SELECT MIN(min_val) AS min_val FROM (${
+    tables.map(t => `SELECT MIN(${field}) AS min_val FROM ${t} WHERE ${w}`).join(' UNION ALL ')
+  }) AS _u`;
+  const rows = await mysqlQuery(sql, repeatParams(params, tables.length)) as any[];
+  return rows[0]?.min_val || null;
+}
+
+/**
+ * ★ 다중 campaign_id 배치 집계 — UNION ALL + GROUP BY 단일 쿼리
+ * sync-results처럼 여러 캠페인을 한 번에 집계할 때 사용. N개 쿼리 → 1개.
+ *
+ * @param tables      대상 테이블 목록
+ * @param groupField  그룹 컬럼(e.g., 'app_etc1')
+ * @param aggFields   `success_count: SUM(CASE ...)` 형식 — 여러 개 지원
+ * @param ids         IN 절에 들어갈 값들
+ * @returns Map<groupValue, { [aggField]: number }>
+ */
+export async function smsBatchAggByGroup(
+  tables: string[],
+  groupField: string,
+  aggFields: string,
+  ids: (string | number)[]
+): Promise<Map<string, Record<string, number>>> {
+  const result = new Map<string, Record<string, number>>();
+  if (tables.length === 0 || ids.length === 0) return result;
+
+  const placeholders = ids.map(() => '?').join(',');
+  const where = `${groupField} IN (${placeholders})`;
+
+  // 각 테이블에서 group + 집계 값을 UNION ALL 한 뒤, outer에서 다시 GROUP BY로 합산
+  const unions = tables
+    .map(t => `SELECT ${groupField} AS _grp, ${aggFields} FROM ${t} WHERE ${where} GROUP BY ${groupField}`)
+    .join(' UNION ALL ');
+
+  // outer sum: 각 agg field를 이름으로 재합산 (aggFields 파싱 없이 JS에서 합산)
+  const rows = await mysqlQuery(unions, repeatParams(ids, tables.length)) as any[];
+  for (const r of rows) {
+    const grp = String(r._grp);
+    const existing = result.get(grp) || {};
+    for (const k of Object.keys(r)) {
+      if (k === '_grp') continue;
+      existing[k] = (existing[k] || 0) + Number(r[k] || 0);
     }
+    result.set(grp, existing);
   }
-  return minVal;
+  return result;
+}
+
+/**
+ * ★ GROUP BY 집계 — UNION ALL + 단일 GROUP BY
+ * results.ts의 smsUnionGroupBy를 CT-04로 승격. 오류사유/통신사별 집계 등에 사용.
+ */
+export async function smsGroupByAll(
+  tables: string[],
+  rawField: string,
+  whereClause: string,
+  params: any[]
+): Promise<Record<string, number>> {
+  if (tables.length === 0) return {};
+  const w = normalizeWhere(whereClause);
+  const sql = `SELECT _grp, COUNT(*) AS cnt FROM (${
+    tables.map(t => `SELECT ${rawField} AS _grp FROM ${t} WHERE ${w}`).join(' UNION ALL ')
+  }) AS _u GROUP BY _grp`;
+  const rows = await mysqlQuery(sql, repeatParams(params, tables.length)) as any[];
+  const result: Record<string, number> = {};
+  for (const r of rows) result[String(r._grp ?? '')] = Number(r.cnt || 0);
+  return result;
 }
 
 /** DELETE/UPDATE: 해당 테이블 모두 실행 */
@@ -647,6 +734,88 @@ export async function kakaoCancelPending(requestUid: string): Promise<number> {
     [requestUid]
   ) as any[];
   return (rows as any).affectedRows || 0;
+}
+
+// ===== ★ 카카오 범용 조회 헬퍼 (단일 테이블 IMC_BM_FREE_BIZ_MSG) =====
+// admin.ts, results.ts, billing.ts 등에서 인라인으로 중복 쿼리하던 패턴 통합.
+
+/** 카카오 COUNT — whereClause는 "WHERE" 접두사 선택적 */
+export async function kakaoCountWhere(whereClause: string, params: any[]): Promise<number> {
+  const w = whereClause.replace(/^\s*WHERE\s+/i, '');
+  const rows = await mysqlQuery(
+    `SELECT COUNT(*) AS cnt FROM IMC_BM_FREE_BIZ_MSG WHERE ${w}`,
+    params
+  ) as any[];
+  return Number(rows[0]?.cnt || 0);
+}
+
+/** 카카오 SELECT — suffix에 ORDER BY/LIMIT/GROUP BY 지정 가능 */
+export async function kakaoSelectWhere(
+  fields: string,
+  whereClause: string,
+  params: any[],
+  suffix?: string
+): Promise<any[]> {
+  const w = whereClause.replace(/^\s*WHERE\s+/i, '');
+  return await mysqlQuery(
+    `SELECT ${fields} FROM IMC_BM_FREE_BIZ_MSG WHERE ${w} ${suffix || ''}`,
+    params
+  ) as any[];
+}
+
+/**
+ * ★ 카카오 다중 REQUEST_UID 배치 집계 — GROUP BY 단일 쿼리
+ * sync-results 등에서 여러 캠페인 한 번에 집계.
+ */
+export async function kakaoBatchAggByGroup(
+  ids: string[]
+): Promise<Map<string, { total: number; success: number; fail: number; pending: number }>> {
+  const result = new Map();
+  if (ids.length === 0) return result;
+  try {
+    const placeholders = ids.map(() => '?').join(',');
+    const rows = await mysqlQuery(
+      `SELECT REQUEST_UID as _grp,
+         COUNT(*) as total,
+         COUNT(CASE WHEN REPORT_CODE = '0000' THEN 1 END) as success,
+         COUNT(CASE WHEN REPORT_CODE IS NOT NULL AND REPORT_CODE != '0000' THEN 1 END) as fail,
+         COUNT(CASE WHEN REPORT_CODE IS NULL AND STATUS = '1' THEN 1 END) as pending
+       FROM IMC_BM_FREE_BIZ_MSG
+       WHERE REQUEST_UID IN (${placeholders})
+       GROUP BY REQUEST_UID`,
+      ids
+    ) as any[];
+    for (const r of rows) {
+      result.set(String(r._grp), {
+        total: Number(r.total || 0),
+        success: Number(r.success || 0),
+        fail: Number(r.fail || 0),
+        pending: Number(r.pending || 0),
+      });
+    }
+  } catch (err: any) {
+    // IMC_BM_FREE_BIZ_MSG 테이블 미존재 환경 대응
+    if (!err.message?.includes("doesn't exist")) throw err;
+  }
+  return result;
+}
+
+/** 카카오 GROUP BY — 오류사유별/상태별 집계 */
+export async function kakaoGroupBy(
+  rawField: string,
+  whereClause: string,
+  params: any[]
+): Promise<Record<string, number>> {
+  const w = whereClause.replace(/^\s*WHERE\s+/i, '');
+  const rows = await mysqlQuery(
+    `SELECT ${rawField} AS _grp, COUNT(*) AS cnt
+     FROM IMC_BM_FREE_BIZ_MSG WHERE ${w}
+     GROUP BY _grp`,
+    params
+  ) as any[];
+  const result: Record<string, number> = {};
+  for (const r of rows) result[String(r._grp ?? '')] = Number(r.cnt || 0);
+  return result;
 }
 
 // ===== ★ D72: SMS/LMS/MMS bulk INSERT (성능 컨트롤타워) =====

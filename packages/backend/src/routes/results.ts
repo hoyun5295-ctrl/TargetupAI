@@ -1,7 +1,15 @@
 import { Request, Response, Router } from 'express';
 import { mysqlQuery, query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
-import { getCompanySmsTablesWithLogs } from '../utils/sms-queue';
+import {
+  getCompanySmsTablesWithLogs,
+  smsCountAll as smsUnionCount,
+  smsSelectAll,
+  smsGroupByAll as smsUnionGroupBy,
+  kakaoCountWhere,
+  kakaoSelectWhere,
+  kakaoGroupBy,
+} from '../utils/sms-queue';
 import { STATUS_CODE_MAP, CARRIER_MAP, SUCCESS_CODES, PENDING_CODES, getStatusLabel, getStatusType, getCarrierLabel, isSuccess } from '../utils/sms-result-map';
 import { DEFAULT_COSTS, redis, CACHE_TTL } from '../config/defaults';
 import { buildDateRangeFilter, buildPeriodFilter } from '../utils/stats-aggregation';
@@ -47,64 +55,22 @@ const SMS_EXPORT_FIELDS = `dest_no, call_back, msg_type, msg_contents, status_co
   DATE_ADD(repmsg_recvtm, INTERVAL 9 HOUR) AS repmsg_recvtm,
   'sms' AS _channel, NULL AS report_code_raw`;
 
-// ===== UNION ALL 기반 MySQL 헬퍼 (서버측 정렬/페이지네이션) =====
-// [S9-08] 기존: N개 테이블 순차 쿼리 → 메모리 concat → JS 정렬 → slice (30만건 OOM 위험)
-// 개선: UNION ALL 단일 쿼리 → MySQL이 정렬+페이징 처리 (페이지 분량만 메모리 로드)
+// ===== UNION ALL 기반 MySQL 헬퍼 — CT-04(sms-queue.ts)로 승격됨 =====
+// smsUnionCount → smsCountAll, smsUnionGroupBy → smsGroupByAll, kakao 헬퍼 → CT-04
+// smsUnionSelect는 ORDER BY/LIMIT 후미구문 호환을 위해 smsSelectAll 래퍼로 유지.
 
-/** 파라미터를 테이블 수만큼 반복 (UNION ALL 각 서브쿼리에 동일 WHERE 파라미터 필요) */
-function repeatParams(params: any[], count: number): any[] {
-  const result: any[] = [];
-  for (let i = 0; i < count; i++) result.push(...params);
-  return result;
-}
-
-/** UNION ALL COUNT: 여러 테이블의 COUNT를 SUM으로 합산 — 단일 쿼리 */
-async function smsUnionCount(tables: string[], whereClause: string, params: any[]): Promise<number> {
-  if (tables.length === 0) return 0;
-  const sql = `SELECT SUM(cnt) AS total FROM (${
-    tables.map(t => `SELECT COUNT(*) AS cnt FROM ${t} ${whereClause}`).join(' UNION ALL ')
-  }) AS _u`;
-  const rows = await mysqlQuery(sql, repeatParams(params, tables.length)) as any[];
-  return parseInt(rows[0]?.total || '0');
-}
-
-/** UNION ALL SELECT: ORDER BY + LIMIT/OFFSET을 MySQL에서 처리 */
+/** smsSelectAll 래퍼: orderBy/limit/offset을 suffix로 조립 */
 async function smsUnionSelect(
   tables: string[], fields: string, whereClause: string, params: any[],
   orderBy?: string, limit?: number, offset?: number
 ): Promise<any[]> {
-  if (tables.length === 0) return [];
-  let sql = tables.map(t => `(SELECT ${fields} FROM ${t} ${whereClause})`).join(' UNION ALL ');
-  const allParams = repeatParams(params, tables.length);
-  if (orderBy) sql += ` ORDER BY ${orderBy}`;
-  if (limit !== undefined) { sql += ` LIMIT ?`; allParams.push(limit); }
-  if (offset !== undefined) { sql += ` OFFSET ?`; allParams.push(offset); }
-  return await mysqlQuery(sql, allParams) as any[];
-}
-
-/** UNION ALL GROUP BY: 여러 테이블 통합 후 단일 GROUP BY 집계 — 기존 N회→1회 */
-async function smsUnionGroupBy(
-  tables: string[], rawField: string, whereClause: string, params: any[]
-): Promise<Record<string, number>> {
-  if (tables.length === 0) return {};
-  const sql = `SELECT _grp, COUNT(*) AS cnt FROM (${
-    tables.map(t => `(SELECT ${rawField} AS _grp FROM ${t} ${whereClause})`).join(' UNION ALL ')
-  }) AS _u GROUP BY _grp`;
-  const rows = await mysqlQuery(sql, repeatParams(params, tables.length)) as any[];
-  const result: Record<string, number> = {};
-  for (const r of rows) result[String(r._grp ?? '')] = parseInt(r.cnt);
-  return result;
-}
-
-// ===== 카카오 브랜드메시지 헬퍼 (단일 테이블 — 변경 불필요) =====
-
-async function kakaoCountWhere(whereClause: string, params: any[]): Promise<number> {
-  const rows = await mysqlQuery(`SELECT COUNT(*) AS cnt FROM IMC_BM_FREE_BIZ_MSG ${whereClause}`, params) as any[];
-  return parseInt(rows[0]?.cnt || '0');
-}
-
-async function kakaoSelectWhere(fields: string, whereClause: string, params: any[], suffix?: string): Promise<any[]> {
-  return await mysqlQuery(`SELECT ${fields} FROM IMC_BM_FREE_BIZ_MSG ${whereClause} ${suffix || ''}`, params) as any[];
+  // whereClause는 "WHERE ..." 형식으로 전달받음 — "WHERE " 접두사 제거하여 CT-04 규약으로 변환
+  const where = whereClause.replace(/^\s*WHERE\s+/i, '');
+  let suffix = '';
+  if (orderBy) suffix += `ORDER BY ${orderBy} `;
+  if (limit !== undefined) suffix += `LIMIT ${Number(limit)} `;
+  if (offset !== undefined) suffix += `OFFSET ${Number(offset)}`;
+  return await smsSelectAll(tables, fields, where, params, suffix.trim() || undefined);
 }
 
 router.use(authenticate);

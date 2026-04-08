@@ -3,7 +3,7 @@ import crypto from 'crypto';
 import { Request, Response, Router } from 'express';
 import { mysqlQuery, query } from '../config/database';
 import { authenticate, requireSuperAdmin } from '../middlewares/auth';
-import { ALL_SMS_TABLES, invalidateLineGroupCache, getCampaignSmsTables, smsCountAll, smsSelectAll, smsAggAll, getTestSmsTables } from '../utils/sms-queue';
+import { ALL_SMS_TABLES, invalidateLineGroupCache, getCampaignSmsTables, smsCountAll, smsSelectAll, smsAggAll, getTestSmsTables, kakaoCountWhere, kakaoSelectWhere } from '../utils/sms-queue';
 import { DASHBOARD_CARD_POOL, validateCardIds, getRequiredFields, filterPoolByAvailableData } from '../utils/dashboard-card-pool';
 import { SUCCESS_CODES_SQL, PENDING_CODES_SQL, getStatusLabel, getStatusType, getCarrierLabel, isSuccess, isPending } from '../utils/sms-result-map';
 import { DEFAULT_COSTS } from '../config/defaults';
@@ -1572,7 +1572,8 @@ router.get('/campaigns/:id/sms-detail', authenticate, requireSuperAdmin, async (
 
     // ===== 카카오 내역 조회 =====
     if (showKakao) {
-      let kakaoWhere = `WHERE REQUEST_UID = ?`;
+      // CT-04: 카카오 조회도 컨트롤타워 사용 (IMC_BM_FREE_BIZ_MSG 단일 테이블)
+      let kakaoWhere = `REQUEST_UID = ?`;
       const kakaoParams: any[] = [id];
 
       if (statusFilter === 'success') {
@@ -1588,16 +1589,14 @@ router.get('/campaigns/:id/sms-detail', authenticate, requireSuperAdmin, async (
         kakaoParams.push(`%${searchValue.replace(/-/g, '')}%`);
       }
 
-      const kakaoCountRows = await mysqlQuery(`SELECT COUNT(*) as cnt FROM IMC_BM_FREE_BIZ_MSG ${kakaoWhere}`, kakaoParams);
-      totalKakao = (kakaoCountRows as any[])[0]?.cnt || 0;
+      totalKakao = await kakaoCountWhere(kakaoWhere, kakaoParams);
 
-      const kakaoRows = await mysqlQuery(
-        `SELECT ID, PHONE_NUMBER, MESSAGE, CHAT_BUBBLE_TYPE, STATUS, REPORT_CODE, REPORT_DATE,
-                REQUEST_DATE, RESPONSE_DATE, RESEND_MT_TYPE, RESEND_REPORT_CODE
-         FROM IMC_BM_FREE_BIZ_MSG ${kakaoWhere}
-         ORDER BY ID DESC
-         LIMIT ? OFFSET ?`,
-         [...kakaoParams, Number(limit), Number(offset)]
+      const kakaoRows = await kakaoSelectWhere(
+        `ID, PHONE_NUMBER, MESSAGE, CHAT_BUBBLE_TYPE, STATUS, REPORT_CODE, REPORT_DATE,
+         REQUEST_DATE, RESPONSE_DATE, RESEND_MT_TYPE, RESEND_REPORT_CODE`,
+        kakaoWhere,
+        kakaoParams,
+        `ORDER BY ID DESC LIMIT ${Number(limit)} OFFSET ${Number(offset)}`
       );
 
       const kakaoStatusMap: Record<string, string> = {
