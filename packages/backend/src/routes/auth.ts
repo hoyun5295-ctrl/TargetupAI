@@ -1,15 +1,20 @@
 import bcrypt from 'bcryptjs';
-import crypto from 'crypto';
 import { Request, Response, Router } from 'express';
 import { query } from '../config/database';
 import { TIMEOUTS } from '../config/defaults';
 import { authenticate, generateToken, JwtPayload } from '../middlewares/auth';
+import { rotateUserSession, normalizeAppSource, newSessionId } from '../utils/session-manager';
 
 const router = Router();
 
 router.post('/login', async (req: Request, res: Response) => {
   try {
     const { loginId, password, userType } = req.body;
+    // ★ D111 P0: app_source 기반 단일 세션 — 'hanjul' | 'flyer' | 'super'
+    //   - 한줄로 메인(hanjul.ai) + 고객사관리자(app.hanjul.ai) 전부 'hanjul'로 묶음
+    //   - 전단AI(flyer-frontend)는 'flyer' → 한줄로와 별개 공존
+    //   - 슈퍼관리자 경로는 자동으로 'super'로 덮어씀 (아래)
+    const appSource = normalizeAppSource(req.body.appSource);
 
     if (!loginId || !password) {
       return res.status(400).json({ error: 'ID and password required' });
@@ -43,38 +48,30 @@ router.post('/login', async (req: Request, res: Response) => {
         return res.status(401).json({ error: 'Invalid credentials' });
       }
 
-      // ★ D100: 슈퍼관리자도 동시 세션 허용 (최대 5개)
-      const adminSessions = await query(
-        `SELECT id FROM user_sessions WHERE user_id = $1 AND is_active = true ORDER BY last_activity_at DESC`,
-        [admin.id]
-      );
-      if (adminSessions.rows.length >= 5) {
-        const keepIds = adminSessions.rows.slice(0, 4).map((s: any) => s.id);
-        await query(
-          `UPDATE user_sessions SET is_active = false WHERE user_id = $1 AND id != ALL($2::uuid[])`,
-          [admin.id, keepIds]
-        );
-      }
-
-      // 새 세션 생성
-      const sessionId = crypto.randomUUID();
+      // ★ D111 P0: 슈퍼관리자는 app_source='super' 단일 세션 (D100의 5개 허용 폐기)
+      //   같은 super 세션이 있으면 이전 것은 무효화 → 다음 API 호출 때 401 → 재로그인
+      //   단, 다른 app_source(hanjul/flyer)는 그대로 유지
       const sessionTimeoutMinutes = TIMEOUTS.superAdminSessionMinutes;
 
+      const sessionId = newSessionId();
       const payload: JwtPayload = {
         userId: admin.id,
         userType: 'super_admin',
         loginId: admin.login_id,
-        sessionId: sessionId,
+        sessionId,
       };
 
       const token = generateToken(payload);
 
-      // 세션 레코드 저장
-      await query(
-        `INSERT INTO user_sessions (id, user_id, session_token, is_active, ip_address, user_agent, device_type, created_at, last_activity_at, expires_at)
-         VALUES ($1, $2, $3, true, $4, $5, 'web', NOW(), NOW(), NOW() + INTERVAL '1 minute' * $6)`,
-        [sessionId, admin.id, token, req.ip || '', req.headers['user-agent'] || '', sessionTimeoutMinutes]
-      );
+      // ★ 컨트롤타워 rotateUserSession — invalidate + create 통합. 인라인 세션 SQL 금지.
+      await rotateUserSession({
+        sessionId,
+        userId: admin.id,
+        token,
+        appSource: 'super',
+        req,
+        expiresInMinutes: sessionTimeoutMinutes,
+      });
 
       await query(
         `INSERT INTO audit_logs (id, user_id, action, target_type, details, ip_address, user_agent, created_at)
@@ -157,44 +154,30 @@ router.post('/login', async (req: Request, res: Response) => {
       return res.status(403).json({ error: '고객사 관리자 권한이 없습니다.' });
     }
 
-    // ===== 단일 세션 체크 =====
-    const activeSessions = await query(
-      `SELECT id, last_activity_at FROM user_sessions
-       WHERE user_id = $1 AND is_active = true
-       ORDER BY last_activity_at DESC`,
-      [user.id]
-    );
-
-    // ★ D100: 동시 세션 허용 (최대 5개) — 전단AI+한줄로 메인 동시 사용 지원
-    //   기존: 전부 무효화 → 다른 앱 세션까지 사망 → 전단AI 저장 401 에러
-    //   변경: 5개 초과 시 가장 오래된 것만 정리
-    if (activeSessions.rows.length >= 5) {
-      const keepIds = activeSessions.rows.slice(0, 4).map((s: any) => s.id);
-      await query(
-        `UPDATE user_sessions SET is_active = false WHERE user_id = $1 AND id != ALL($2::uuid[])`,
-        [user.id, keepIds]
-      );
-    }
-
-    // ===== 새 세션 생성 =====
-    const sessionId = crypto.randomUUID();
-
+    // ===== ★ D111 P0: app_source 단위 단일 세션 =====
+    //   D100에서 "5개 허용"으로 풀었던 로직 완전 제거.
+    //   같은 app_source(hanjul/flyer) 내에서는 1세션만 — 2번째 로그인 시 이전 세션 무효화.
+    //   app_source가 다르면 공존 → 한줄로(hanjul) + 전단AI(flyer) 동시 사용 가능.
+    //   컨트롤타워: utils/session-manager.ts (rotateUserSession)
+    const sessionId = newSessionId();
     const payload: JwtPayload = {
       userId: user.id,
       companyId: user.company_id,
       userType: user.user_type === 'admin' ? 'company_admin' : 'company_user',
       loginId: user.login_id,
-      sessionId: sessionId,
+      sessionId,
     };
 
     const token = generateToken(payload);
 
-    // 세션 레코드 저장
-    await query(
-      `INSERT INTO user_sessions (id, user_id, session_token, is_active, ip_address, user_agent, device_type, created_at, last_activity_at, expires_at)
-       VALUES ($1, $2, $3, true, $4, $5, 'web', NOW(), NOW(), NOW() + INTERVAL '24 hours')`,
-      [sessionId, user.id, token, req.ip || '', req.headers['user-agent'] || '']
-    );
+    await rotateUserSession({
+      sessionId,
+      userId: user.id,
+      token,
+      appSource,
+      req,
+      expiresInMinutes: 24 * 60, // 24시간
+    });
 
     // 로그인 기록
     await query(

@@ -17,17 +17,45 @@
  * ⚠️ 절대 금지:
  *   - 워커에서 알림 메시지를 인라인 템플릿 리터럴로 직접 작성 금지
  *   - 반드시 buildAutoCampaignNotifyMessage() 또는 sanitizeSmsText() 통과
+ *
+ * D111 (0408 검수 P5/P6):
+ *   - (P5) 3개 빌더 전부 messageContent를 buildAdMessage로 감싸서 (광고)+무료거부 부착
+ *     → isAd / opt080Number 파라미터 추가. D103 안전장치(중복방지) 내장이므로 이중 부착 걱정 없음.
+ *   - (P6) buildSpamTestResultNotifyMessage의 .replace(/✓/g, '통과') 제거.
+ *     호출부(auto-campaign-worker.ts)가 라벨을 '통과 ✓'로 넘기는데 ✓→'통과' 치환 → '통과 통과' 중복.
+ *     호출부 라벨을 순수 '통과'/'차단'으로 단순화 + 빌더 내부 replace 제거.
  */
+
+import { buildAdMessage } from './messageUtils';
 
 export interface AutoCampaignNotifyContext {
   campaignName: string;
   scheduledDateStr?: string;
   scheduledTimeStr?: string;
   targetCount?: number;
-  messageType?: string;
+  messageType?: string;       // 본문 발송 타입 ('SMS'|'LMS'|'MMS') — buildAdMessage에 전달. 알림 SMS 자체는 항상 LMS로 발송됨.
   messageContent?: string;
   spamResultLabel?: string;
   spamBlocked?: boolean;
+  // ★ D111 P5: (광고)+무료거부 부착용
+  isAd?: boolean;
+  opt080Number?: string;
+}
+
+/**
+ * ★ D111 P5: messageContent에 (광고)+무료거부 부착.
+ * D103 buildAdMessage 안전장치(중복 방지) 내장 — 이미 붙어있으면 건드리지 않음.
+ * isAd=false거나 opt080Number 없으면 sanitize만 적용하고 원본 반환.
+ */
+function applyAdAndSanitize(ctx: AutoCampaignNotifyContext): string {
+  const raw = sanitizeSmsText(ctx.messageContent || '');
+  if (!raw) return '';
+  return buildAdMessage(
+    raw,
+    ctx.messageType || 'LMS',
+    !!ctx.isAd,
+    ctx.opt080Number || ''
+  );
 }
 
 /**
@@ -84,7 +112,7 @@ export function buildAiGeneratedNotifyMessage(ctx: AutoCampaignNotifyContext): s
   }
   lines.push('');
   lines.push('=== AI 생성 문안 ===');
-  lines.push(sanitizeSmsText(ctx.messageContent || ''));
+  lines.push(applyAdAndSanitize(ctx));
   lines.push('');
   lines.push('[안내] 문안 수정이 필요하면 관리자 페이지에서 수정해주세요.');
   return lines.join('\n');
@@ -122,7 +150,7 @@ export function buildPreNotifyMessage(ctx: AutoCampaignNotifyContext): string {
   }
   lines.push('');
   lines.push('=== 발송 문안 ===');
-  lines.push(sanitizeSmsText(ctx.messageContent || ''));
+  lines.push(applyAdAndSanitize(ctx));
   lines.push('');
   lines.push('[안내] 취소하려면 관리자 페이지에서 자동발송을 일시정지해주세요.');
   return lines.join('\n');
@@ -155,16 +183,14 @@ export function buildSpamTestResultNotifyMessage(ctx: AutoCampaignNotifyContext)
     lines.push(`발송 예정: 오늘 ${ctx.scheduledTimeStr}`);
   }
   lines.push('');
-  // 결과 라벨에서 dingbats 제거 (✓ ✗ 등도 안전 문자로 대체)
-  const safeResult = (ctx.spamResultLabel || '')
-    .replace(/✓/g, '통과')
-    .replace(/✗/g, '차단')
-    .replace(/[✔✘]/g, '');
-  lines.push(`스팸테스트 결과: ${sanitizeSmsText(safeResult)}`);
+  // ★ D111 P6: replace(✓→통과) 제거. 호출부가 순수 '통과'/'차단' 문자열을 넘긴다.
+  // sanitizeSmsText가 dingbats/이모지를 자동 제거하므로 혹시 호출부 실수로 ✓가 들어와도 안전.
+  const safeResult = sanitizeSmsText(ctx.spamResultLabel || '').replace(/[✓✗✔✘]/g, '').trim();
+  lines.push(`스팸테스트 결과: ${safeResult}`);
   if (ctx.messageContent) {
     lines.push('');
     lines.push('=== 발송 문안 ===');
-    lines.push(sanitizeSmsText(ctx.messageContent));
+    lines.push(applyAdAndSanitize(ctx));
   }
   if (ctx.spamBlocked) {
     lines.push('');

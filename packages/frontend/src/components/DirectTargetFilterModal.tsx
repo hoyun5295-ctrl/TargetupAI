@@ -1,5 +1,6 @@
 import { Filter, RotateCcw, Search, Users } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { FRONT_FIELD_DISPLAY_MAP, reverseDisplayValueFront } from '../utils/formatDate';
 
 // ★ D43-3c: 필드 메타 인터페이스 (TargetSendModal에서도 사용)
 export interface FieldMeta {
@@ -74,20 +75,10 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
     { label: '5만↑', value: '50000' },
   ];
 
-  // 성별 필드 자동 감지 (다양한 변수명 패턴 매칭)
-  const GENDER_FIELD_PATTERNS = ['gender', 'sex', '성별', '젠더', 'giender', 'gneder'];
-  const isGenderField = (key: string) => {
-    const lower = key.toLowerCase().replace(/[\s_-]/g, '');
-    return GENDER_FIELD_PATTERNS.some(p => lower === p || lower.includes(p));
-  };
-  // 성별 값 → 한글 표시 (다양한 DB 값 대응)
-  const GENDER_DISPLAY_MAP: Record<string, string> = {
-    'M': '남성', 'm': '남성', 'male': '남성', 'Male': '남성', 'MALE': '남성',
-    '남': '남성', '남자': '남성', '남성': '남성', '1': '남성',
-    'F': '여성', 'f': '여성', 'female': '여성', 'Female': '여성', 'FEMALE': '여성',
-    '여': '여성', '여자': '여성', '여성': '여성', '2': '여성', '0': '여성',
-  };
-  const getGenderLabel = (val: string) => GENDER_DISPLAY_MAP[val] || val;
+  // ★ D111 E1: 인라인 GENDER_DISPLAY_MAP 제거 → FRONT_FIELD_DISPLAY_MAP 컨트롤타워 사용
+  //   '0':'여성' 같은 모호한 매핑 제거. 오타 패턴('giender','gneder')도 제거 — FIELD_MAP 표준 field_key 기준.
+  const isGenderField = (key: string) => !!FRONT_FIELD_DISPLAY_MAP[key];
+  const getGenderLabel = (val: string) => reverseDisplayValueFront('gender', val);
 
 
   // show 시 필드 로드

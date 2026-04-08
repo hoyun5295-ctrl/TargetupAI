@@ -34,7 +34,7 @@
 | CT-01 | customer-filter.ts | 고객 필터/쿼리 빌더 |
 | CT-02 | store-scope.ts | 브랜드(store_code) 격리 |
 | CT-03 | unsubscribe-helper.ts | 수신거부 관리 + 080 연동 |
-| CT-04 | sms-queue.ts | MySQL 큐 조작 + **toQtmsgType (MSG타입코드변환 D103) + insertTestSmsQueue (테스트SMS INSERT D103)** |
+| CT-04 | sms-queue.ts | MySQL 큐 조작 + **toQtmsgType (MSG타입코드변환 D103) + insertTestSmsQueue (테스트SMS INSERT D103) + getCampaignSmsTables (회사+발송월 단일 캠페인 스코프 D110) + smsBatchAggByGroup/kakaoBatchAggByGroup (다중 campaign_id 배치 집계 D110) + 전 helper UNION ALL 단일쿼리 승격 D110** |
 | CT-05 | prepaid.ts | 선불 잔액 관리 |
 | CT-06 | campaign-lifecycle.ts | 캠페인 생명주기 |
 | CT-07 | standard-field-map.ts | 필드 매핑 + customer_field_definitions UPSERT |
@@ -261,13 +261,35 @@ AND NOT EXISTS (
 - **역할:** QTmsg MySQL 큐(발송 테이블) 접근의 유일한 진입점. 라인그룹 기반 테이블 라우팅 + 캐시
 - **환경변수:** `SMS_TABLES` — 쉼표 구분 테이블 목록 (예: `SMSQ_SEND,SMSQ_SEND_02,...`)
 - **라인그룹 캐시:** 회사/사용자별 전용 테이블 매핑을 메모리 캐시 (TTL 기반)
-- **주요 함수:**
-  - 테이블 조회: `getCompanySmsTables()`, `getTestSmsTables()`, `getAuthSmsTable()`, `getCompanySmsTablesWithLogs()`
-  - 큐 조작: `getNextSmsTable()` (라운드로빈), `smsCountAll()`, `smsAggAll()`, `smsSelectAll()`, `smsMinAll()`, `smsExecAll()`
-  - **벌크 INSERT:** `bulkInsertSmsQueue(tables, rows, useNow)` — 라운드로빈 테이블 분배 + BATCH_SIZES.smsSend(5000건) 단위 bulk INSERT. AI캠페인/직접발송/자동발송 3경로 적용 (D72)
-  - 카카오: `insertKakaoQueue()`, `kakaoAgg()`, `kakaoCountPending()`, `kakaoCancelPending()`
-  - 캐시: `invalidateLineGroupCache()`
-- **적용 파일:** campaigns.ts, manage-scheduled.ts, results.ts, campaign-lifecycle.ts, auto-campaign-worker.ts
+- **테이블 조회 함수:**
+  - `getCompanySmsTables(companyId, userId)` — 회사/유저 LIVE 테이블
+  - `getCompanySmsTablesWithLogs(companyId, userId)` — LIVE + 현재월/전월 LOG
+  - **`getCampaignSmsTables(companyId, refDate, userId)` (D110)** — 해당 회사 LIVE + 발송월 LOG만 반환. O(2~3) 테이블. admin.ts sms-detail 등 캠페인 단일 조회용
+  - `getAllSmsTablesWithLogs()` — 전역 스캔 (비권장, 확장성 없음)
+  - `getTestSmsTables()`, `getAuthSmsTable()`
+- **큐 조작 함수 (D110 — 전부 UNION ALL 단일쿼리로 승격):**
+  - `smsCountAll(tables, where, params)` — SUM(COUNT) 외곽
+  - `smsAggAll(tables, selectFields, where, params)` — UNION ALL + JS 합산
+  - `smsSelectAll(tables, fields, where, params, suffix?)` — `_sms_table` 리터럴 컬럼 보존 + outer ORDER BY/LIMIT
+  - `smsMinAll(tables, field, where, params)` — MIN(MIN) 외곽
+  - `smsGroupByAll(tables, rawField, where, params)` — 상태코드/통신사별 집계 (D110, results.ts에서 승격)
+  - **`smsBatchAggByGroup(tables, groupField, aggFields, ids[])` (D110)** — 다중 campaign_id IN + GROUP BY 배치 집계. sync-results 루프 O(N²)→O(1) 최적화
+  - `smsExecAll(tables, sqlTemplate, params)` — sqlTemplate 내 `SMSQ_SEND` 플레이스홀더를 각 테이블명으로 치환 실행 (DELETE/UPDATE용)
+  - **whereClause 규약:** 모든 helper에 `normalizeWhere()` — "WHERE" 접두사 유무 자동 수용
+- **벌크 INSERT:** `bulkInsertSmsQueue(tables, rows, useNow)` — 라운드로빈 테이블 분배 + BATCH_SIZES.smsSend(5000건) 단위 bulk INSERT. AI캠페인/직접발송/자동발송 3경로 적용 (D72)
+- **카카오 (D110 — 범용 helper 4종 추가):**
+  - `insertKakaoQueue()`, `kakaoAgg(where, params)`, `kakaoCountPending()`, `kakaoCancelPending()`
+  - **`kakaoCountWhere(where, params)` (D110)** — 범용 COUNT
+  - **`kakaoSelectWhere(fields, where, params, suffix?)` (D110)** — 범용 SELECT
+  - **`kakaoGroupBy(rawField, where, params)` (D110)** — 범용 GROUP BY
+  - **`kakaoBatchAggByGroup(ids[])` (D110)** — 다중 REQUEST_UID 배치 집계 (테이블 미존재 환경 자동 대응)
+- **캐시:** `invalidateLineGroupCache()`
+- **적용 파일:** campaigns.ts, manage-scheduled.ts, results.ts, campaign-lifecycle.ts, auto-campaign-worker.ts, **admin.ts (D110), manage-users.ts (D110), billing.ts (D110)**
+- **⚠️ D110 핵심 교훈:**
+  1. **admin.ts sms-detail이 `FROM SMSQ_SEND` 단일 테이블 하드코딩** → 완료 캠페인 LOG 테이블 못 찾아 상세 조회 0건. **테이블명 하드코딩은 반드시 `getCampaignSmsTables()` 등 CT-04 함수로 교체.**
+  2. **`results.ts`에 이미 로컬로 존재하던 UNION ALL 헬퍼를 CT-04 미승격** → admin.ts/campaign-lifecycle.ts가 옛 for 루프 패턴 유지 → 확장성 격차. **검증된 로컬 패턴은 즉시 CT 승격 원칙.**
+  3. **Promise.all 병렬화 ≠ UNION ALL.** Promise.all은 여전히 N회 DB 왕복 + 커넥션 풀 점유. UNION ALL은 1회 왕복. 확장성은 UNION ALL이 압도.
+  4. **전역 스캔 함수(`getAllSmsTablesWithLogs()`)는 성능 킬러.** 캠페인 단일 조회는 항상 `getCampaignSmsTables(회사, 발송월)`로 스코프 좁힘.
 
 #### CT-05: prepaid.ts — 선불 잔액 관리
 - **역할:** 포인트 차감/환불의 유일한 진입점. DB 기반 단가 조회 (하드코딩 금지)
@@ -506,6 +528,10 @@ PostgreSQL campaigns/campaign_runs 생성
 | **buildAdMessageFront 표시 경로 누락** | D102에서 발송 경로 통일했지만 CalendarModal/ResultsModal/AdminDashboard 표시 경로에 미적용 → 3번째 재발 | **발송 경로뿐 아니라 표시 경로(캘린더/발송결과/관리자) 전수 확인 필수.** CLAUDE.md 7-1 프로세스 참조 (D106) |
 | **replaceDirectVars vs replaceMessageVars 혼용** | 자동발송 스팸필터 미리보기가 replaceDirectVars(직접발송 변수 5개만) 사용 → 필드매핑 변수(%고객명%,%생일%) 미치환 | **자동발송/AI발송은 replaceMessageVars(필드매핑 기반), 직접발송은 replaceDirectVars.** 경로별 치환 함수 구분 (D106) |
 | **담당자 알림이 대량발송 라인으로 발송** | D-1 알림/AI문안알림/스팸결과알림이 getCompanySmsTables(대량발송 Agent)로 INSERT → 테스트기간 Agent 차단 시 미발송 | **담당자 알림은 getAuthSmsTable(11번 인증 라인)으로 분리.** 실제 발송만 업체 설정 라인 사용 (D106) |
+| **admin.ts sms-detail SMSQ_SEND 하드코딩** | 슈퍼관리자 캠페인내역 [조회] 모달이 `FROM SMSQ_SEND` 단일 테이블 하드코딩 → QTmsg Agent 완료 처리 후 LOG 테이블로 이동한 데이터 못 찾음 → 완료 캠페인 상세 0건 표시 | **하드코딩 테이블명 절대 금지(CLAUDE.md 4-2).** 캠페인 단일 조회는 `getCampaignSmsTables(companyId, refDate, userId)` 사용. 주기적 `grep -rn "SMSQ_SEND"` 스캔 (D110) |
+| **results.ts 로컬 UNION ALL 헬퍼 CT 미승격** | results.ts에 `smsUnionCount`/`smsUnionGroupBy`/`kakaoCountWhere`가 로컬로 검증되어 있었으나 CT-04 미승격 → admin.ts/campaign-lifecycle.ts가 옛 for 루프 패턴 그대로 사용 → N²쿼리 성능 격차 + 하드코딩 버그까지 동반 | **검증된 로컬 패턴은 즉시 컨트롤타워로 승격.** 2곳 이상 쓰일 가능성이 있으면 로컬로 두지 말고 CT로 올림. D110에서 CT-04 helper 4개 UNION ALL 단일쿼리 재작성 + 신규 7개 함수(`getCampaignSmsTables`, `smsBatchAggByGroup`, `smsGroupByAll`, `kakaoCountWhere/SelectWhere/GroupBy/BatchAggByGroup`) (D110) |
+| **Promise.all 병렬화 ≠ UNION ALL** | CT-04 helper를 Promise.all N회 쿼리로 수정했다가 여전히 느림 → 고객사 수 늘어도 확장성 없음. Promise.all은 병렬이지만 여전히 N회 DB 왕복 + 커넥션 풀 N개 점유 | **확장성 요구 시 UNION ALL 단일쿼리가 정답.** Promise.all은 독립적 쿼리 N개일 때만 의미, 같은 패턴 N회는 UNION ALL로 합침. `normalizeWhere()`로 호출부 규약 차이 흡수 (D110) |
+| **전역 스캔 함수 확장성 킬러** | 초기 수정 시 `getAllSmsTablesWithLogs()`(회사 무관 전역) 사용 → 테이블 수십 개 스캔 → 체감 속도 저하. Harold님 지적 | **단일 조회는 반드시 스코프 좁힘.** 캠페인 조회는 `getCampaignSmsTables(회사, 발송월)` — 회사 라인그룹 + 발송월 LOG만. O(2~3) 테이블 유지. 고객사 수와 쿼리 수 무관 (D110) |
 | **direct-send INSERT에 is_ad 컬럼 자체 누락** | campaigns.ts:1421 INSERT 컬럼 목록에 is_ad가 없어 광고 ON/OFF 무관 항상 false 저장 → 발송결과/캘린더 표시 잘못 + 컨트롤타워 적용해도 무력화 | **INSERT 컬럼 목록을 항상 grep으로 verify.** 새 컬럼이 frontend body에서 전달되어도 INSERT에 포함되지 않으면 무시됨 (D109) |
 | **D103 위반 데이터 표시 시 (광고) 중복** | 과거 발송 캠페인의 message_content에 (광고)+무료거부 텍스트가 박힌 채 저장 → 컨트롤타워 buildAdMessageFront가 또 부착 → "(광고)(광고)" 중복 | **컨트롤타워에 idempotent + stripAdParts 정규화.** 표시 직전에 본문에서 (광고)/무료거부 부분을 제거하여 순수 본문으로 만든 후 is_ad에 따라 다시 부착 (D109) |
 | **인라인 replaceVars 7곳 산재** | DirectPreviewModal/TargetSendModal/AiCampaignResultPopup/AiPreviewModal/AiPreviewModal2/AiCustomSendFlow/DirectSendPanel에 동일 패턴 인라인 함수 → enum 역변환 누락으로 gender F가 그대로 노출. 7곳마다 따로 패치하면 또 빠짐 | **인라인 7곳을 컨트롤타워 4개로 통합:** `replaceVarsByFieldMeta` (FieldMeta 기반) + `replaceVarsBySampleCustomer` (sampleCustomer 기반 + aliasMap) + `replaceMessageVars` (기존) + `replaceDirectVars` (기존). 모든 인라인은 1줄 wrapper로만 (D109) |

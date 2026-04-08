@@ -32,7 +32,14 @@ export type DataType = 'string' | 'number' | 'date' | 'boolean';
 export interface StandardFieldMapping {
   fieldKey: string;            // 유일한 기준 키
   category: FieldCategory;     // 카테고리
-  displayName: string;         // 한글 라벨
+  displayName: string;         // 한글 라벨 (기본)
+  /**
+   * ★ D111 P2: 추가 한글 별칭 (동의어) — 사용자가 %이름%, %성함% 등 다른 한글로 변수를 써도 치환되도록.
+   * extractVarCatalog가 fieldMappings에 displayName + aliases 모두 등록.
+   * 배경: isoi 사례 — customer_schema.field_mappings가 없는 회사에서 FIELD_MAP fallback 시
+   *       displayName('고객명')만 등록되어 %이름%이 치환 안 되는 문제.
+   */
+  aliases?: string[];
   dataType: DataType;          // 데이터 타입
   storageType: StorageType;    // 'column' = customers 직접 컬럼, 'custom_fields' = JSONB
   columnName: string;          // storageType=column → DB 컬럼명, storageType=custom_fields → JSONB 내 키
@@ -55,8 +62,9 @@ export const CATEGORY_LABELS: Record<FieldCategory, string> = {
 
 export const FIELD_MAP: StandardFieldMapping[] = [
   // ── basic (기본정보) — 7개 ──
-  { fieldKey: 'name',       category: 'basic', displayName: '고객명',       dataType: 'string', storageType: 'column', columnName: 'name',       normalizeFunction: 'trim',            sortOrder: 1 },
-  { fieldKey: 'phone',      category: 'basic', displayName: '고객전화번호', dataType: 'string', storageType: 'column', columnName: 'phone',      normalizeFunction: 'normalizePhone',  sortOrder: 2 },
+  // ★ D111 P2: aliases — isoi 사례(customer_schema.field_mappings 비어있음)에서 %이름% 변수가 '고객명'만 등록되어 치환 실패한 문제 해결
+  { fieldKey: 'name',       category: 'basic', displayName: '고객명',       aliases: ['이름', '성함'],            dataType: 'string', storageType: 'column', columnName: 'name',       normalizeFunction: 'trim',            sortOrder: 1 },
+  { fieldKey: 'phone',      category: 'basic', displayName: '고객전화번호', aliases: ['전화번호', '연락처', '휴대폰'], dataType: 'string', storageType: 'column', columnName: 'phone',      normalizeFunction: 'normalizePhone',  sortOrder: 2 },
   { fieldKey: 'gender',     category: 'basic', displayName: '성별',         dataType: 'string', storageType: 'column', columnName: 'gender',     normalizeFunction: 'normalizeGender', sortOrder: 3 },
   { fieldKey: 'age',        category: 'basic', displayName: '나이',         dataType: 'number', storageType: 'column', columnName: 'age',        normalizeFunction: 'parseInt',        sortOrder: 4 },
   { fieldKey: 'birth_date', category: 'basic', displayName: '생일',         dataType: 'date',   storageType: 'column', columnName: 'birth_date', normalizeFunction: 'normalizeDate',   sortOrder: 5 },
@@ -120,6 +128,48 @@ export function getFieldsByCategory(category: FieldCategory): StandardFieldMappi
 }
 
 /** customers 테이블 직접 컬럼 필드만 (storageType === 'column') */
+/**
+ * ★ D111 P2: FIELD_MAP.aliases 자동 주입 컨트롤타워
+ *
+ * 배경: isoi 사례 — customer_schema.field_mappings가 비어있는 회사에서
+ *       `%이름%` 변수가 FIELD_MAP displayName('고객명')만 등록되어 치환 실패.
+ *
+ * 역할: 임의의 fieldMappings 맵에 FIELD_MAP.aliases(한글 동의어)를 자동 주입한다.
+ *       이미 등록된 키는 덮어쓰지 않으므로 customer_schema 우선순위를 유지한다.
+ *
+ * 호출부:
+ *   - services/ai.ts extractVarCatalog (변수 카탈로그 최종 반환 전)
+ *   - 향후 추가되는 fieldMappings 구성 경로
+ *
+ * ⚠️ 이 함수를 호출하는 대신 인라인으로 alias 주입 로직을 작성하지 말 것 (재발 방지).
+ *
+ * @param fieldMappings  { varName: entry } 맵 (in-place 수정)
+ * @param availableVars  가용 변수명 배열 (in-place 수정)
+ * @param findEntryByColumn  displayName에 entry가 없을 때 column으로 찾는 콜백
+ */
+export function applyFieldAliases<T>(
+  fieldMappings: Record<string, T>,
+  availableVars: string[],
+  findEntryByColumn: (columnName: string) => T | undefined
+): void {
+  for (const f of FIELD_MAP) {
+    if (f.storageType === 'custom_fields') continue;
+    if (!f.aliases || f.aliases.length === 0) continue;
+
+    const baseEntry = fieldMappings[f.displayName] || findEntryByColumn(f.columnName);
+    if (!baseEntry) continue;
+
+    for (const alias of f.aliases) {
+      if (!fieldMappings[alias]) {
+        fieldMappings[alias] = baseEntry;
+      }
+      if (!availableVars.includes(alias)) {
+        availableVars.push(alias);
+      }
+    }
+  }
+}
+
 export function getColumnFields(): StandardFieldMapping[] {
   return FIELD_MAP.filter(f => f.storageType === 'column');
 }

@@ -106,6 +106,100 @@
 
 ---
 
+### 🔧 D110 — 캠페인 결과조회 버그 + CT-04 전면 UNION ALL 최적화 (2026-04-08) — ✅ 코드수정완료, 배포대기
+
+> **배경:** 슈퍼관리자 "캠페인내역 조회" 모달에서 완료된 캠페인 상세 조회 시 0건으로 나오는 버그 발견. 근본 원인은 `admin.ts sms-detail` 라우트가 `FROM SMSQ_SEND` 단일 테이블에 하드코딩되어 있어 QTmsg Agent가 완료 처리 후 LOG 테이블(`SMSQ_SEND_X_YYYYMM`)로 이동시킨 데이터를 못 찾는 것. 단순 버그 수정 후 Harold님 지시로 **발송·결과 양쪽 경로 전체 성능 재검토 + CT-04 전면 UNION ALL 승격**까지 확장.
+
+#### 📌 버그 (B-D110-01) — 캠페인 상세 조회 0건
+- **현상:** 슈퍼관리자 발송통계 화면의 [조회] 클릭 시 "발송 내역이 없습니다" 표시 (완료된 캠페인)
+- **원인:** `packages/backend/src/routes/admin.ts:1534,1540` — `FROM SMSQ_SEND` 단일 테이블 하드코딩 (CLAUDE.md 4-2 하드코딩 금지 위반)
+- **확인 절차:** QTmsg Agent가 rsv1=5 완료 처리 시 LIVE 테이블(SMSQ_SEND_X) → LOG 테이블(SMSQ_SEND_X_YYYYMM)로 이동. 완료 캠페인은 LOG에만 존재
+- **해결:** `getCampaignSmsTables(companyId, refDate, userId)` CT-04 신설 — 해당 회사 라인그룹 LIVE(1~2개) + 발송월 LOG(1개) = **O(2~3) 테이블만** 조회. `smsCountAll` + `smsSelectAll` 컨트롤타워로 교체. 카카오 인라인 쿼리도 `kakaoCountWhere` + `kakaoSelectWhere`로 교체
+
+#### 🚀 성능 최적화 — CT-04 전면 UNION ALL 승격
+
+Harold님 지시: **"고객사가 늘어나도 가장 최적의 속도를 보장할 수 있도록 발송 및 결과 둘 다 체크해보도록하자"**
+
+**기존 CT-04 helper의 문제:**
+- `smsCountAll` / `smsAggAll` / `smsSelectAll` / `smsMinAll` 모두 **for 루프 N회 쿼리** (N = 회사 라인그룹 테이블 수)
+- `results.ts`에는 이미 UNION ALL 기반 `smsUnionCount`/`smsUnionSelect`/`smsUnionGroupBy` 로컬 함수가 있었음 — 검증된 패턴
+- 그러나 CT-04는 미승격 → 같은 패턴 중복
+
+**승격/신설 컨트롤타워 (sms-queue.ts):**
+
+| 함수 | 이전 | 이후 |
+|------|------|------|
+| `smsCountAll` | for 루프 N쿼리 | **UNION ALL 단일 쿼리** (SUM 외곽) |
+| `smsAggAll` | for 루프 N쿼리 | **UNION ALL 단일 쿼리** + JS 합산 |
+| `smsSelectAll` | for 루프 N쿼리 | **UNION ALL 단일 쿼리** + `_sms_table` 리터럴 보존 |
+| `smsMinAll` | for 루프 N쿼리 | **UNION ALL 단일 쿼리** (MIN 외곽) |
+| `smsGroupByAll` (신규) | results.ts 로컬 | **CT-04 승격** — UNION ALL + GROUP BY |
+| `smsBatchAggByGroup` (신규) | 없음 | **다중 campaign_id IN + GROUP BY 배치 집계** (sync-results 루프 최적화용) |
+| `getCampaignSmsTables` (신규) | 전역 스캔 | **회사 LIVE + 발송월 LOG = O(2~3)** |
+| `kakaoCountWhere` (신규) | results.ts 로컬 | CT-04 승격 |
+| `kakaoSelectWhere` (신규) | results.ts 로컬 | CT-04 승격 |
+| `kakaoGroupBy` (신규) | 없음 | 카카오 범용 GROUP BY |
+| `kakaoBatchAggByGroup` (신규) | 없음 | 카카오 다중 REQUEST_UID 배치 집계 |
+
+**whereClause 규약 유연화:** 모든 helper에 `normalizeWhere()` — `"WHERE ..."` 접두사 유무 자동 수용 (호출부 규약 차이 흡수)
+
+#### 🔄 sync-results 루프 배치화 (campaign-lifecycle.ts)
+
+**기존:**
+```
+for (const run of runs) {
+  smsAggAll(runTables, ..., [run.campaign_id])  // N개 run × N개 테이블 = N² 쿼리
+  kakaoAgg('REQUEST_UID = ?', [run.campaign_id]) // N개 쿼리
+}
+```
+
+**개선:**
+```
+회사/유저 조합별 그룹핑 → smsBatchAggByGroup(tables, 'app_etc1', aggFields, [id들])  // 1~2 쿼리
+kakaoBatchAggByGroup(allIds)  // 카카오 전체 1 쿼리
+for (const run of runs) { smsAggMap.get(run.campaign_id) ... }  // 메모리 조회
+```
+
+**쿼리 수: O(N²) → O(1)** — 고객사 수/캠페인 수 무관
+
+#### 📋 수정 파일 요약
+
+| 파일 | 변경 |
+|------|------|
+| `packages/backend/src/utils/sms-queue.ts` | CT-04 helper UNION ALL 재작성, 신규 함수 7개 추가 (`getCampaignSmsTables`, `smsGroupByAll`, `smsBatchAggByGroup`, `kakaoCountWhere`, `kakaoSelectWhere`, `kakaoGroupBy`, `kakaoBatchAggByGroup`), `getAllSmsTablesWithLogs` (사용 안함 유지) |
+| `packages/backend/src/routes/admin.ts` | sms-detail 라우트 — `getCampaignSmsTables` + `smsCountAll`/`smsSelectAll`, 카카오는 `kakaoCountWhere`/`kakaoSelectWhere`. 1186/1331 테스트 통계는 `getTestSmsTables()` + `smsAggAll`/`smsSelectAll` |
+| `packages/backend/src/routes/manage-users.ts` | 임시비밀번호 SMS INSERT — `SMSQ_SEND` 하드코딩 → `getAuthSmsTable()` 동적 조회 (시스템 SMS는 auth 라인 사용) |
+| `packages/backend/src/routes/billing.ts` | `getBillingCompanyTables`/`getBillingTestTables` 자체 헬퍼 → CT-04 `getCompanySmsTables`/`getTestSmsTables` 래퍼 + `getBillingLogTables`는 information_schema REGEXP로 변경 |
+| `packages/backend/src/utils/campaign-lifecycle.ts` | `syncCampaignResults` 루프 → 배치 집계 (AI runs + 직접발송 양쪽). `smsAggAll`/`kakaoAgg` import 제거 |
+| `packages/backend/src/routes/results.ts` | 로컬 `smsUnionCount`/`smsUnionGroupBy`/`kakaoCountWhere`/`kakaoSelectWhere` 제거, CT-04 import로 교체. `smsUnionSelect`만 호환 래퍼로 유지 (ORDER BY/LIMIT 후미구문 호환) |
+
+#### 📊 확장성 결과
+
+| 시나리오 | 이전 | 이후 |
+|---|---|---|
+| 캠페인 1건 상세 조회 | 27 테이블 × 2 = 54 쿼리 | **1 쿼리** (UNION ALL 2~3 테이블) |
+| 회사 1곳 sync (N runs) | N runs × 2 쿼리 = 2N | **1~2 쿼리** (회사당 + 카카오 1) |
+| 대시보드 차트 1건 | 이미 UNION ALL (기존) | 동일 (CT-04로 승격) |
+| 발송 70만건 | 140 배치 bulk INSERT (기존) | 동일 (변경 없음) |
+
+**고객사 1개 → 1000개로 확장되어도 단일 캠페인 조회 쿼리 수는 일정.**
+
+#### ⚠️ 배포 주의
+- **tp-push + tp-deploy-full 미실행 상태** (Harold님 오늘 밤 배포 계획)
+- 배포 후 전지영 주임님 기보 건과 무관, 버그 수정은 즉시 배포 필요
+
+#### 핵심 교훈 (D110 — 컨트롤타워 반복 승격)
+
+> **1. "동일 로직이 2곳 이상 = 즉시 컨트롤타워" 원칙이 또 적용됨.** `results.ts`가 이미 UNION ALL 패턴을 로컬로 검증해두고 있었는데 CT-04 미승격 → admin.ts/campaign-lifecycle.ts가 옛 for 루프 패턴을 그대로 씀 → 성능 격차. **검증된 로컬 패턴은 즉시 컨트롤타워로 승격해야 확장 이득이 발생.**
+>
+> **2. 하드코딩 테이블명(`SMSQ_SEND`)은 "숨어 있는 지뢰".** CLAUDE.md 4-2에 명시된 원칙이지만 admin.ts에 여전히 존재 → B-D110-01로 실화. 신규 파일 작성 시 `grep -rn "SMSQ_SEND"` 정기 스캔 필요.
+>
+> **3. "전역 스캔" 함수는 확장성 킬러.** 초기 수정 시 `getAllSmsTablesWithLogs()` (회사 무관 전역) 만들었다가 속도 저하 체감 → `getCampaignSmsTables(companyId, refDate, userId)` (해당 회사 발송월만)로 재설계. **캠페인 단일 조회는 항상 회사 + 발송월 기준으로 좁혀야 함.**
+>
+> **4. Promise.all 병렬화보다 UNION ALL 단일 쿼리가 상위.** Promise.all은 여전히 N회 왕복 + 커넥션 풀 점유. UNION ALL은 1회 왕복. 단, 호출부 규약(`WHERE` 접두사 유무)을 흡수하는 `normalizeWhere()` 필수.
+
+---
+
 ### 🔧 D109 — 0406+0407 PDF 버그 + 검수리스트 일괄 처리 (2026-04-07) — ✅ 배포완료
 
 > **배경:** 직원 검수리스트 + PDF 버그리포트 2일치(0406, 0407) 13건을 한 번에 잡음. 핵심은 컨트롤타워화 — 인라인 중복 함수 7개를 컨트롤타워 4개로 통합 + 백엔드 데이터 출처 시점 enum 변환으로 표시 경로 자동 정상화.

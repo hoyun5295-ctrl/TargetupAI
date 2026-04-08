@@ -1,7 +1,7 @@
 import { Sparkles } from 'lucide-react';
 import { useRef, useState } from 'react';
 import type { FieldMeta } from './DirectTargetFilterModal';
-import { formatPreviewValue, formatByType, buildAdMessageFront, replaceVarsByFieldMeta } from '../utils/formatDate';
+import { formatPreviewValue, formatByType, buildAdMessageFront, replaceVarsByFieldMeta, FRONT_FIELD_DISPLAY_MAP, reverseDisplayValueFront } from '../utils/formatDate';
 
 // ★ D43-3c: 정규식 특수문자 이스케이프
 const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -221,25 +221,14 @@ export default function TargetSendModal({
     replaceVarsByFieldMeta(text, recipient, variableFields as any);
 
   // ====== 셀 값 포맷 ======
-  // 성별 필드 자동 감지 + 한글 표시
-  const GENDER_FIELD_PATTERNS = ['gender', 'sex', '성별', '젠더'];
-  const isGenderField = (key: string) => {
-    const lower = key.toLowerCase().replace(/[\s_-]/g, '');
-    return GENDER_FIELD_PATTERNS.some(p => lower === p || lower.includes(p));
-  };
-  const GENDER_DISPLAY_MAP: Record<string, string> = {
-    'M': '남성', 'm': '남성', 'male': '남성', 'Male': '남성', 'MALE': '남성',
-    '남': '남성', '남자': '남성', '남성': '남성', '1': '남성',
-    'F': '여성', 'f': '여성', 'female': '여성', 'Female': '여성', 'FEMALE': '여성',
-    '여': '여성', '여자': '여성', '여성': '여성', '2': '여성', '0': '여성',
-  };
-
-  // ★ D104: formatByType 컨트롤타워 사용 — 인라인 toLocaleString 제거
+  // ★ D111 E1: 인라인 GENDER_DISPLAY_MAP/isGenderField 하드코딩 제거 →
+  //   FRONT_FIELD_DISPLAY_MAP 컨트롤타워 사용 (enum 필드 추가 시 한 곳만 수정).
+  //   '0':'여성' 같은 모호한 매핑 제거 — 백엔드 reverseDisplayValue와 동일 기준.
   const formatCellValue = (value: any, dataType: string, fieldKey?: string): string => {
     if (value == null || value === '') return '-';
-    // 성별 필드 → 한글 변환
-    if (fieldKey && isGenderField(fieldKey)) {
-      return GENDER_DISPLAY_MAP[String(value)] || String(value);
+    // enum 필드 (gender 등) → 한글 역변환 컨트롤타워
+    if (fieldKey && FRONT_FIELD_DISPLAY_MAP[fieldKey]) {
+      return reverseDisplayValueFront(fieldKey, value);
     }
     if (dataType === 'boolean') return value === true || value === 'true' ? '예' : '아니오';
     return formatByType(value, dataType);

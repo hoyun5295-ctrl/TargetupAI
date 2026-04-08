@@ -184,9 +184,20 @@ export function replaceVariables(
       .replace(/%기타3%/g, addressBookFields.extra3 || '')
       .replace(/%회신번호%/g, addressBookFields.callback || '');
 
-    // customer가 없으면 (DB에 없는 수신자) 이름도 주소록에서 치환
-    if (!customer) {
-      result = result.replace(/%이름%/g, addressBookFields.name || '');
+    // ★ D111 P2: 이름 폴백
+    //   - customer가 없으면 주소록 name 사용 (기존 로직)
+    //   - customer는 있지만 customer.name이 비어있으면 주소록 name으로 폴백 (NEW)
+    //   - customer.name이 있어도 아래 1단계 fieldMappings 치환이 동일한 결과를 내므로 덮어써도 무관
+    const customerNameEmpty = !customer || !customer.name || String(customer.name).trim() === '';
+    if (customerNameEmpty && addressBookFields.name) {
+      // 이름+고객명+성함 등 FIELD_MAP.aliases 키 전부 커버 (가장 흔한 한글 변수명)
+      result = result
+        .replace(/%이름%/g, addressBookFields.name)
+        .replace(/%고객명%/g, addressBookFields.name)
+        .replace(/%성함%/g, addressBookFields.name);
+    } else if (!customer) {
+      // customer도 없고 addressBookFields.name도 없으면 빈값으로 처리 (안전망 진입 전 선치환)
+      result = result.replace(/%이름%/g, '').replace(/%고객명%/g, '').replace(/%성함%/g, '');
     }
   }
 

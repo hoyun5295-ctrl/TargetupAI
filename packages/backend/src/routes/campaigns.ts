@@ -103,10 +103,12 @@ router.get('/', async (req: Request, res: Response) => {
     const params: any[] = [companyId];
     let paramIndex = 2;
 
-    // ★ D100: cancelled/draft 캠페인은 기본 제외 (캘린더/목록에 불필요한 건 표시 방지)
-    //   status 파라미터로 명시 요청 시에만 표시
+    // ★ D111 E3: draft만 제외 — cancelled는 캘린더에 취소 이력으로 표시 (회색/취소선 + 취소 사유)
+    //   이전(D100): cancelled도 제외 → PDF 지적 "취소 관련 이력이 남지 않음"
+    //   CalendarModal.tsx는 이미 cancelled 상태 스타일/사유 렌더링 로직 준비됨 → 백엔드만 포함시키면 즉시 표시
+    //   status 파라미터로 명시 조회 시에는 기존 동작 유지
     if (!status) {
-      whereClause += ` AND status NOT IN ('cancelled', 'draft')`;
+      whereClause += ` AND status NOT IN ('draft')`;
     }
 
     // 일반 사용자는 본인이 만든 캠페인만

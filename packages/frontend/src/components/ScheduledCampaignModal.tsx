@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { calculateSmsBytes } from '../utils/formatDate';
 
 interface ScheduledCampaignModalProps {
@@ -32,6 +32,10 @@ export default function ScheduledCampaignModal({
   const [messageEditProgress, setMessageEditProgress] = useState(0);
   const [messageEditing, setMessageEditing] = useState(false);
 
+  // ★ D111 P4: 캠페인 선택 race condition 차단 — 응답 도착 시점에 여전히 같은 캠페인이 선택돼 있는지 확인
+  //   (이전 버그: A 클릭 → B 클릭 → A 응답이 B 후에 도착 → B 수신자를 A로 덮어쓰기)
+  const latestSelectedIdRef = useRef<string | null>(null);
+
   const isWithin15Min = (scheduledAt: string | null) => {
     if (!scheduledAt) return false;
     return (new Date(scheduledAt).getTime() - Date.now()) < 15 * 60 * 1000;
@@ -44,7 +48,15 @@ export default function ScheduledCampaignModal({
       <div className="bg-white rounded-xl shadow-2xl w-[900px] max-h-[85vh] overflow-hidden">
         <div className="p-4 border-b bg-red-50 flex justify-between items-center">
           <h3 className="font-bold text-lg">⏰ 예약 대기 {scheduledCampaigns.length > 0 && `(${scheduledCampaigns.length}건)`}</h3>
-          <button onClick={() => { onClose(); setSelectedScheduled(null); }} className="text-gray-500 hover:text-gray-700 text-xl">✕</button>
+          <button onClick={() => {
+            // ★ D111 P4: 닫기 시 선택/수신자/ref 전부 초기화 (stale 데이터 잔존 방지)
+            onClose();
+            setSelectedScheduled(null);
+            setScheduledRecipients([]);
+            setScheduledRecipientsTotal(0);
+            setScheduledHasMore(false);
+            latestSelectedIdRef.current = null;
+          }} className="text-gray-500 hover:text-gray-700 text-xl">✕</button>
         </div>
         <div className="flex h-[70vh]">
           {/* 좌측: 캠페인 목록 */}
@@ -54,7 +66,12 @@ export default function ScheduledCampaignModal({
                 <div 
                   key={c.id} 
                   onClick={async () => {
+                    // ★ D111 P4: latest id 기록 + 선택 state 즉시 초기화 (이전 데이터 잔존 방지)
+                    latestSelectedIdRef.current = c.id;
                     setSelectedScheduled(c);
+                    setScheduledRecipients([]);
+                    setScheduledRecipientsTotal(0);
+                    setScheduledHasMore(false);
                     setScheduledLoading(true);
                     setScheduledSearch('');
                     try {
@@ -63,6 +80,8 @@ export default function ScheduledCampaignModal({
                         headers: { Authorization: `Bearer ${token}` }
                       });
                       const data = await res.json();
+                      // ★ D111 P4: race guard — 응답 도착 시점에 다른 캠페인으로 이동했으면 무시
+                      if (latestSelectedIdRef.current !== c.id) return;
                       if (data.success) {
                         setScheduledRecipients(data.recipients || []);
                         setScheduledRecipientsTotal(data.total || 0);
@@ -72,7 +91,8 @@ export default function ScheduledCampaignModal({
                     } catch (err) {
                       console.error(err);
                     } finally {
-                      setScheduledLoading(false);
+                      // latest와 같을 때만 로딩 해제
+                      if (latestSelectedIdRef.current === c.id) setScheduledLoading(false);
                     }
                   }}
                   className={`p-3 border rounded-lg cursor-pointer transition-all ${selectedScheduled?.id === c.id ? 'border-red-400 bg-red-50' : 'hover:border-gray-400'}`}
@@ -140,21 +160,26 @@ export default function ScheduledCampaignModal({
                   onChange={(e) => setScheduledSearch(e.target.value)}
                   onKeyDown={async (e) => {
                     if (e.key === 'Enter' && selectedScheduled) {
+                      const campaignIdAtSearch = selectedScheduled.id;  // ★ D111 P4: closure 고정
                       setScheduledLoading(true);
                       try {
                         const token = localStorage.getItem('token');
                         const searchParam = scheduledSearch ? `&search=${encodeURIComponent(scheduledSearch)}` : '';
-                        const res = await fetch(`/api/campaigns/${selectedScheduled.id}/recipients?limit=50&offset=0${searchParam}`, {
+                        const res = await fetch(`/api/campaigns/${campaignIdAtSearch}/recipients?limit=50&offset=0${searchParam}`, {
                           headers: { Authorization: `Bearer ${token}` }
                         });
                         const data = await res.json();
+                        // ★ D111 P4: race guard
+                        if (latestSelectedIdRef.current !== campaignIdAtSearch) return;
                         if (data.success) {
                           setScheduledRecipients(data.recipients || []);
                           setScheduledRecipientsTotal(data.total || 0);
                           setScheduledHasMore(data.hasMore || false);
                         }
                       } catch (err) { console.error(err); }
-                      finally { setScheduledLoading(false); }
+                      finally {
+                        if (latestSelectedIdRef.current === campaignIdAtSearch) setScheduledLoading(false);
+                      }
                     }
                   }}
                   className="flex-1 border rounded px-3 py-2 text-sm"
@@ -206,13 +231,16 @@ export default function ScheduledCampaignModal({
                           <td colSpan={4} className="py-3 text-center">
                             <button
                               onClick={async () => {
+                                const campaignIdAtLoad = selectedScheduled.id;  // ★ D111 P4: closure 고정
                                 try {
                                   const token = localStorage.getItem('token');
                                   const searchParam = scheduledSearch ? `&search=${encodeURIComponent(scheduledSearch)}` : '';
-                                  const res = await fetch(`/api/campaigns/${selectedScheduled.id}/recipients?limit=50&offset=${scheduledRecipients.length}${searchParam}`, {
+                                  const res = await fetch(`/api/campaigns/${campaignIdAtLoad}/recipients?limit=50&offset=${scheduledRecipients.length}${searchParam}`, {
                                     headers: { Authorization: `Bearer ${token}` }
                                   });
                                   const data = await res.json();
+                                  // ★ D111 P4: 다른 캠페인으로 이동했으면 더보기 결과 무시
+                                  if (latestSelectedIdRef.current !== campaignIdAtLoad) return;
                                   if (data.success) {
                                     setScheduledRecipients(prev => [...prev, ...(data.recipients || [])]);
                                     setScheduledHasMore(data.hasMore || false);

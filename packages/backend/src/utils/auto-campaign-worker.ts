@@ -53,7 +53,21 @@ import {
 // next_run_at 계산 (auto-campaigns.ts와 동일 로직)
 // ============================================================
 
-function calcNextRunAt(scheduleType: string, scheduleDay: number | null, scheduleTime: string): Date {
+/**
+ * ★ D111 E2: next_run_at 계산 컨트롤타워
+ *
+ * 이전: auto-campaigns.ts(routes)와 auto-campaign-worker.ts(utils) 2곳에 동일 로직 중복 →
+ *       한쪽 수정 시 불일치 → 발송 시각 오차 재발 위험.
+ * 이후: utils에 export — routes가 import해서 사용. 유일한 진입점.
+ *
+ * 로직:
+ * - 서버 타임존에 관계없이 KST 기준으로 다음 실행 시각 계산
+ * - Date.UTC + KST_OFFSET_MS 보정 (D83 — 이중변환 방지)
+ * - daily: 오늘 시각이 지났으면 내일
+ * - weekly: 이번 주 요일이 지났으면 다음 주
+ * - monthly: 이번 달 날짜가 지났으면 다음 달
+ */
+export function calcNextRunAt(scheduleType: string, scheduleDay: number | null, scheduleTime: string): Date {
   // ★ D83: 서버 타임존에 관계없이 정확한 KST→UTC 변환
   // 이전: toLocaleString + kstToUtc 조합 → KST 서버에서 이중 변환 → 9시간 오차
   const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
@@ -333,12 +347,16 @@ async function generateMessageForAutoCampaign(ac: any): Promise<void> {
           hour: '2-digit', minute: '2-digit', hour12: false,
         });
 
-        // ★ B6: CT-B auto-notify-message — dingbats/이모지 자동 sanitize + 옵션 A(=== 가로선)
+        // ★ D111 P5: (광고)+무료거부 부착 — isAd/opt080Number 전달 (buildAdMessage 내장)
+        const genOpt080 = ac.is_ad ? await getOpt080Number(ac.user_id, ac.company_id) : '';
         const genNotifyMsg = buildAiGeneratedNotifyMessage({
           campaignName: ac.campaign_name,
           scheduledDateStr,
           scheduledTimeStr,
+          messageType: ac.message_type,
           messageContent: generatedContent,
+          isAd: ac.is_ad ?? false,
+          opt080Number: genOpt080,
         });
 
         const genNotifyRows: any[][] = [];
@@ -451,7 +469,8 @@ async function sendPreNotification(ac: any): Promise<void> {
       ? ac.generated_message_content
       : ac.message_content;
 
-    // ★ B6: CT-B auto-notify-message — 옵션 A(=== 가로선) + dingbats/이모지 자동 sanitize
+    // ★ D111 P5: (광고)+무료거부 부착 — isAd/opt080Number 전달 (buildAdMessage 내장)
+    const preOpt080 = ac.is_ad ? await getOpt080Number(ac.user_id, ac.company_id) : '';
     const notifyMessage = buildPreNotifyMessage({
       campaignName: ac.campaign_name,
       scheduledDateStr,
@@ -459,6 +478,8 @@ async function sendPreNotification(ac: any): Promise<void> {
       targetCount,
       messageType: ac.message_type,
       messageContent,
+      isAd: ac.is_ad ?? false,
+      opt080Number: preOpt080,
     });
 
     // notify_phones에 알림 발송
@@ -893,7 +914,8 @@ async function executePreSendSpamTest(ac: any): Promise<void> {
     // 결과 판정
     const finalVariant = spamResult.variants[0];
     const isBlocked = finalVariant?.spamResult === 'blocked';
-    const resultLabel = isBlocked ? '차단 ✗' : '통과 ✓';
+    // ★ D111 P6: 순수 '통과'/'차단' 문자열로 단순화. 이전 '통과 ✓' → 빌더 내부 replace(✓→'통과')와 겹쳐 '통과 통과' 중복 발생
+    const resultLabel = isBlocked ? '차단' : '통과';
 
     console.log(`${logPrefix} 스팸테스트 완료 — ${resultLabel}`);
 
@@ -925,13 +947,17 @@ async function executePreSendSpamTest(ac: any): Promise<void> {
         hour: '2-digit', minute: '2-digit', hour12: false,
       });
 
-      // ★ B6: CT-B auto-notify-message — ⚠️ 이모지/dingbats 제거 + 옵션 A 디자인
+      // ★ D111 P5: (광고)+무료거부 부착 — isAd/opt080Number 전달 (buildAdMessage 내장)
+      const spamOpt080 = ac.is_ad ? await getOpt080Number(ac.user_id, ac.company_id) : '';
       const notifyMsg = buildSpamTestResultNotifyMessage({
         campaignName: ac.campaign_name,
         scheduledTimeStr,
         spamResultLabel: resultLabel,
         spamBlocked: isBlocked,
+        messageType: ac.message_type,
         messageContent,
+        isAd: ac.is_ad ?? false,
+        opt080Number: spamOpt080,
       });
 
       const notifyRows: any[][] = [];

@@ -41,9 +41,10 @@ api.interceptors.response.use(
 );
 
 // Auth API
+// ★ D111 P0: appSource='hanjul' 기본 (한줄로 메인 hanjul.ai). 슈퍼관리자 경로는 백엔드가 userType으로 'super'로 덮어씀
 export const authApi = {
-  login: (data: { loginId: string; password: string; userType?: string }) =>
-    api.post('/auth/login', data),
+  login: (data: { loginId: string; password: string; userType?: string; appSource?: string }) =>
+    api.post('/auth/login', { appSource: 'hanjul', ...data }),
 };
 
 // Companies API

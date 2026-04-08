@@ -3,7 +3,7 @@
 > **목적:** 버그의 발견→분석→수정→교차검증→완료를 체계적으로 관리하여 재발을 방지한다.  
 > **원칙:** (1) 추측성 땜질 금지 (2) 근본 원인 3줄 이내 특정 (3) 교차검증 통과 전까지 Closed 금지 (4) 재발 패턴 기록  
 > **SoT(진실의 원천):** STATUS.md + 이 문서. 채팅에서 떠도는 "수정 완료"는 교차검증 전까지 "임시"다.
-> **현황:** **2026-04-07 D109 ✅Harold님 검증완료 (자동발송 5건 직원 검증 대기).** D108 ✅배포완료. D106 ✅배포완료. D105 ✅배포완료. D104 ✅배포완료. D103 ✅배포완료. D102 ✅배포완료. D101 ✅배포완료. D99 ✅배포완료. D98 ✅배포완료. D97 ✅배포완료. D96 ✅배포완료. D95 ✅배포완료. D94 ✅배포완료. D91 ✅배포완료. D89 ✅배포완료. D88 ✅배포완료. D87 ✅배포완료. D79 ✅배포완료. D74 ✅배포완료. D73 ✅배포완료. D72 ✅배포완료. D71 ✅배포완료. D70 ✅배포완료. ✅Closed: B97-02(담당자 공유), B97-04(날짜밀림). ✅D109 9건(MMS첨부+광고080누락+캘린더광고+성별F+매장수정+LMS제목+머지토글+발송통계일월+컨트롤타워통합). 🔵Open: B97-03(전화번호 포맷). 보류 1건: B17-05(스팸테스트). 자동발송 5건(B4~B7+0407-4) 직원 검증 대기.
+> **현황:** **2026-04-08 D110 🟡코드수정완료-배포대기 (캠페인 상세조회 0건 + CT-04 UNION ALL 전면 승격).** D109 ✅Harold님 검증완료 (자동발송 5건 직원 검증 대기). D108 ✅배포완료. D106 ✅배포완료. D105 ✅배포완료. D104 ✅배포완료. D103 ✅배포완료. D102 ✅배포완료. D101 ✅배포완료. D99 ✅배포완료. D98 ✅배포완료. D97 ✅배포완료. D96 ✅배포완료. D95 ✅배포완료. D94 ✅배포완료. D91 ✅배포완료. D89 ✅배포완료. D88 ✅배포완료. D87 ✅배포완료. D79 ✅배포완료. D74 ✅배포완료. D73 ✅배포완료. D72 ✅배포완료. D71 ✅배포완료. D70 ✅배포완료. ✅Closed: B97-02(담당자 공유), B97-04(날짜밀림). ✅D109 9건. 🟡D110 1건(B-D110-01 캠페인상세조회0건 → CT-04 UNION ALL 전면 승격). 🔵Open: B97-03(전화번호 포맷). 보류 1건: B17-05(스팸테스트). 자동발송 5건(B4~B7+0407-4) 직원 검증 대기. **2026-04-08 예정: D110 배포 + 당일 보고 버그 추가 처리.**
 > **⚠️ 2026-02-26 코드 실물 검증:** GPT "미수정" 지적 5건 중 GP-01/03/05는 이미 코드에 반영됨 확인. GP-04는 풀 레벨로 보강. 문서의 "❌ 미수정" 표기가 실제 코드보다 뒤떨어져 있었음.
 
 ---
@@ -54,6 +54,71 @@
 3. **해결 옵션:** 2가지 이상 제시 (장단점/리스크/소요) → Harold님 선택
 4. **최소 수정:** 선택된 옵션으로 수정 + 관련 경로 전수 점검
 5. **교차검증:** 1-3의 2단계 프로토콜 실행
+
+---
+
+## 2-0) 📋 D110 — 캠페인 상세조회 0건 + CT-04 UNION ALL 전면 승격 (2026-04-08) — 🟡 코드수정완료-배포대기
+
+> **배경:** 슈퍼관리자 캠페인내역 [조회] 시 완료 캠페인 0건 표시. 단순 버그지만 Harold님 지시로 "발송·결과 경로 전체 성능 최적화"까지 확장.
+
+### B-D110-01 🟡 슈퍼관리자 캠페인 상세조회 0건 (완료 캠페인) — 수정완료-검증대기
+- **심각도:** 🔴 Critical
+- **현상:** AdminDashboard 발송통계 [조회] 클릭 → 모달에 "발송 내역이 없습니다" 표시. 통계 목록에는 건수 정상 표시, 상세만 0건
+- **근본 원인:**
+  1. `admin.ts` sms-detail 라우트(1534/1540)가 `FROM SMSQ_SEND` 단일 테이블 하드코딩
+  2. QTmsg Agent가 rsv1=5 완료 처리 시 데이터를 LIVE(`SMSQ_SEND_X`) → LOG(`SMSQ_SEND_X_YYYYMM`) 테이블로 이동
+  3. 완료된 캠페인 데이터는 LOG 테이블에만 존재 → LIVE만 보는 쿼리는 0건 반환
+- **CLAUDE.md 4-2 위반:** 하드코딩 테이블명. 다른 라우트(results.ts 등)는 CT-04 통과했으나 admin.ts는 누락
+- **수정:**
+  - 신규 컨트롤타워 `getCampaignSmsTables(companyId, refDate, userId)` — 회사 LIVE(1~2개) + 발송월 LOG(1개) = O(2~3) 테이블
+  - admin.ts sms-detail → `getCampaignSmsTables` + `smsCountAll` + `smsSelectAll` 컨트롤타워 사용
+  - 카카오 인라인 쿼리 2건 → `kakaoCountWhere` + `kakaoSelectWhere` 컨트롤타워 교체
+  - 추가로 admin.ts 1186/1331 테스트 통계도 `getTestSmsTables()` 동적 조회로 교체 (인라인 `SMS_TABLES.find('_10')` 하드코딩 제거)
+  - manage-users.ts 임시비번 SMS INSERT도 `getAuthSmsTable()` 사용 (SMSQ_SEND 하드코딩 제거)
+  - billing.ts 자체 헬퍼 3개 → CT-04 래퍼
+- **상태:** 🟡 수정완료-배포대기 (tp-push 예정)
+
+### 🚀 부가 최적화: CT-04 전면 UNION ALL 승격
+
+> Harold님 지시: "고객사가 늘어나도 가장 최적의 속도를 보장할 수 있도록 발송 및 결과 둘 다 체크해보도록하자"
+
+- **이전 CT-04 한계:**
+  - `smsCountAll`/`smsAggAll`/`smsSelectAll`/`smsMinAll` 모두 for 루프 N회 쿼리
+  - `results.ts`에 로컬 UNION ALL 헬퍼가 이미 존재했으나 CT-04 미승격 상태
+- **이후:**
+  - 4개 helper 전부 UNION ALL 단일 쿼리로 재작성
+  - `smsGroupByAll` 신규 (results.ts 로컬 함수 승격)
+  - `smsBatchAggByGroup` 신규 — 다중 campaign_id IN + GROUP BY 배치 집계
+  - `kakaoCountWhere`/`kakaoSelectWhere`/`kakaoGroupBy`/`kakaoBatchAggByGroup` 신규
+  - `normalizeWhere()` — "WHERE" 접두사 유무 자동 수용
+- **campaign-lifecycle.ts syncCampaignResults 루프 최적화:**
+  - 이전: `for (run of runs) smsAggAll(...)` — O(N × M) 쿼리
+  - 이후: 회사/유저 조합별 그룹핑 → `smsBatchAggByGroup` 배치 집계 + `kakaoBatchAggByGroup` 전체 1회 → **O(1~2) 쿼리**
+- **results.ts 로컬 헬퍼 제거:** `smsUnionCount`/`smsUnionGroupBy`/`kakaoCountWhere`/`kakaoSelectWhere` → CT-04 import로 교체. `smsUnionSelect`만 ORDER BY/LIMIT 후미구문 호환 래퍼로 유지
+
+### 📊 성능 영향
+
+| 시나리오 | 이전 | 이후 |
+|---|---|---|
+| 캠페인 1건 상세 조회 | 27테이블 × 2 = 54쿼리 | **1쿼리** |
+| 회사 1곳 sync (N runs) | 2N 쿼리 | **1~2 쿼리** |
+| 70만건 bulk INSERT | 140배치 (기존 유지) | 동일 |
+
+**고객사 수 무관 일정 성능 보장.**
+
+### 📋 수정 파일
+- `packages/backend/src/utils/sms-queue.ts` (CT-04 전면 재작성 + 신규 함수 7개)
+- `packages/backend/src/routes/admin.ts` (sms-detail 라우트 + 테스트 통계 + 카카오)
+- `packages/backend/src/routes/manage-users.ts` (auth SMS)
+- `packages/backend/src/routes/billing.ts` (CT-04 래퍼)
+- `packages/backend/src/utils/campaign-lifecycle.ts` (sync 배치 집계)
+- `packages/backend/src/routes/results.ts` (로컬 헬퍼 제거, CT-04 import)
+
+### 핵심 교훈
+1. **검증된 로컬 패턴은 즉시 컨트롤타워로 승격.** results.ts가 UNION ALL 패턴을 로컬로 가지고 있었는데 승격 지연 → admin.ts가 옛 for 루프 패턴 유지 → 성능 격차 + 하드코딩 버그까지 동반
+2. **하드코딩 테이블명은 숨어 있는 지뢰.** 주기적으로 `grep -rn "SMSQ_SEND"` 스캔 필요
+3. **전역 스캔 함수는 확장성 킬러.** 초기 `getAllSmsTablesWithLogs()`(전역) 설계가 느렸음 → `getCampaignSmsTables(회사, 발송월)` 로컬 스캔으로 재설계
+4. **Promise.all 병렬화 ≠ UNION ALL.** Promise.all은 N회 왕복, UNION ALL은 1회. 커넥션 풀 점유율도 UNION ALL이 압도적
 
 ---
 

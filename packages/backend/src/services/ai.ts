@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
-import { FIELD_MAP, getFieldByKey, getColumnFields } from '../utils/standard-field-map';
+import { FIELD_MAP, getFieldByKey, getColumnFields, applyFieldAliases } from '../utils/standard-field-map';
 import { query } from '../config/database';
 import { AI_MODELS, AI_MAX_TOKENS, TIMEOUTS } from '../config/defaults';
 import { buildFilterWhereClauseCompat } from '../utils/customer-filter';
@@ -316,6 +316,10 @@ function buildVarCatalogPrompt(
  * customer_schema에서 field_mappings, available_vars 추출
  * - customer_schema에 있으면 그대로 사용
  * - 없으면 FIELD_MAP(standard-field-map.ts) 기반 동적 생성
+ *
+ * ★ D111 P2: 최종 반환 전 FIELD_MAP.aliases 자동 보강
+ *   → isoi 사례처럼 customer_schema.field_mappings가 있든 없든 `%이름%`, `%전화번호%` 등 한글 동의어 자동 지원.
+ *   → 이미 등록된 키는 덮어쓰지 않으므로 customer_schema 우선순위 유지.
  */
 export function extractVarCatalog(customerSchema: any): {
   fieldMappings: Record<string, VarCatalogEntry>;
@@ -323,13 +327,28 @@ export function extractVarCatalog(customerSchema: any): {
 } {
   const schema = customerSchema || {};
 
-  // customer_schema에 field_mappings가 있으면 우선 사용
+  let result: { fieldMappings: Record<string, VarCatalogEntry>; availableVars: string[] };
+
+  // customer_schema에 field_mappings가 있으면 우선 사용 (원본 불변 유지 위해 얕은 복사)
   if (schema.field_mappings && Object.keys(schema.field_mappings).length > 0 && schema.available_vars?.length > 0) {
-    return { fieldMappings: schema.field_mappings, availableVars: schema.available_vars };
+    result = {
+      fieldMappings: { ...schema.field_mappings },
+      availableVars: [...schema.available_vars],
+    };
+  } else {
+    // 없으면 FIELD_MAP 기반 동적 생성
+    result = buildVarCatalogFromFieldMap();
   }
 
-  // 없으면 FIELD_MAP 기반 동적 생성
-  return buildVarCatalogFromFieldMap();
+  // ★ D111 P2: FIELD_MAP.aliases 자동 주입 — standard-field-map.ts 컨트롤타워 호출
+  //   인라인 로직 금지 — applyFieldAliases가 유일한 진입점
+  applyFieldAliases(
+    result.fieldMappings,
+    result.availableVars,
+    (col) => Object.values(result.fieldMappings).find((e: any) => e.column === col)
+  );
+
+  return result;
 }
 
 /**

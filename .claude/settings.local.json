@@ -117,7 +117,8 @@
       "Bash(grep -n \"from ''../utils/formatDate''\" packages/frontend/src/components/TargetSendModal.tsx)",
       "Bash(grep -n \"from ''../utils/formatDate''\" packages/frontend/src/components/AiCampaignResultPopup.tsx)",
       "Bash(grep -n \"from ''../utils/formatDate''\" packages/frontend/src/components/AiPreviewModal.tsx)",
-      "Bash(echo \"B=$?\")"
+      "Bash(echo \"B=$?\")",
+      "Bash(python -c ':*)"
     ]
   }
 }

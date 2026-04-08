@@ -28,9 +28,11 @@ api.interceptors.response.use(
 );
 
 // Auth
+// ★ D111 P0: appSource='hanjul' — 고객사 관리자(app.hanjul.ai)도 한줄로 서비스로 묶음.
+//   한줄로 메인과 같은 app_source라 동일 계정이 두 사이트에 동시 로그인하면 한쪽만 유지.
 export const authApi = {
-  login: (data: { loginId: string; password: string; loginSource?: string }) =>
-    api.post('/auth/login', data),
+  login: (data: { loginId: string; password: string; loginSource?: string; appSource?: string }) =>
+    api.post('/auth/login', { appSource: 'hanjul', ...data }),
   changePassword: (data: { currentPassword: string; newPassword: string }) =>
     api.post('/auth/change-password', data),
 };

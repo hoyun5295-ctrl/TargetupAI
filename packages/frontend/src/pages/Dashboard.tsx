@@ -32,6 +32,7 @@ import ResultsModal from '../components/ResultsModal';
 import ScheduledCampaignModal from '../components/ScheduledCampaignModal';
 import ScheduleTimeModal from '../components/ScheduleTimeModal';
 import CallbackConfirmModal, { type CallbackConfirmData } from '../components/CallbackConfirmModal';
+import NameEmptyWarningModal from '../components/NameEmptyWarningModal';
 import SendConfirmModal from '../components/SendConfirmModal';
 import SpamFilterLockModal from '../components/SpamFilterLockModal';
 import SpamFilterTestModal from '../components/SpamFilterTestModal';
@@ -353,11 +354,26 @@ export default function Dashboard() {
   };
 
   // 직접발송 실행 함수
-  const executeDirectSend = async (confirmCallbackExclusion?: boolean) => {
+  const executeDirectSend = async (confirmCallbackExclusion?: boolean, confirmNameEmpty?: boolean) => {
     if (isSending || directSending) return; // 교차 중복 발송 방지
     if (adTextEnabled && !optOutNumber) {
       setToast({ show: true, type: 'error', message: '광고 발송을 위해 수신거부번호(080) 설정이 필요합니다. 설정 > 발신번호 관리에서 등록해주세요.' });
       return;
+    }
+    // ★ D111 P2: %이름%/%고객명%/%성함% 변수가 있는데 이름 비어있는 수신자 경고
+    if (!confirmNameEmpty) {
+      const isAlimtalk = directSendChannel === 'kakao_alimtalk';
+      const msgForCheck = isAlimtalk || directSendChannel === 'rcs' ? kakaoMessage : directMessage;
+      const hasNameVar = /%(이름|고객명|성함)%/.test(msgForCheck || '');
+      if (hasNameVar && directRecipients && directRecipients.length > 0) {
+        const emptyCount = directRecipients.filter((r: any) => !r.name || String(r.name).trim() === '').length;
+        if (emptyCount > 0) {
+          // 발송 확인 모달을 닫고 이름 경고 모달 표시
+          setSendConfirm({ show: false, type: 'immediate', count: 0, unsubscribeCount: 0 });
+          setNameEmptyWarning({ show: true, emptyCount, totalCount: directRecipients.length, sendType: 'direct' });
+          return;
+        }
+      }
     }
     setDirectSending(true);
     try {
@@ -472,7 +488,20 @@ export default function Dashboard() {
   };
   
   // 직접타겟추출 발송 함수
-  const executeTargetSend = async (confirmCallbackExclusion?: boolean) => {
+  const executeTargetSend = async (confirmCallbackExclusion?: boolean, confirmNameEmpty?: boolean) => {
+    // ★ D111 P2: %이름%/%고객명%/%성함% 변수가 있는데 이름 비어있는 수신자 경고
+    if (!confirmNameEmpty) {
+      const msgForCheck = targetSendChannel === 'rcs' ? kakaoMessage : targetMessage;
+      const hasNameVar = /%(이름|고객명|성함)%/.test(msgForCheck || '');
+      if (hasNameVar && targetRecipients && targetRecipients.length > 0) {
+        const emptyCount = targetRecipients.filter((r: any) => !r.name || String(r.name).trim() === '').length;
+        if (emptyCount > 0) {
+          setSendConfirm({ show: false, type: 'immediate', count: 0, unsubscribeCount: 0 });
+          setNameEmptyWarning({ show: true, emptyCount, totalCount: targetRecipients.length, sendType: 'target' });
+          return;
+        }
+      }
+    }
     setTargetSending(true);
     try {
       const token = localStorage.getItem('token');
@@ -776,6 +805,14 @@ export default function Dashboard() {
   const [pendingAiCampaignId, setPendingAiCampaignId] = useState<string | null>(null);
   // 직접발송 확인 모달용 원본 요청 body 보관
   const [pendingDirectSendBody, setPendingDirectSendBody] = useState<any>(null);
+
+  // ★ D111 P2: 이름 비어있는 수신자 경고 모달 state
+  const [nameEmptyWarning, setNameEmptyWarning] = useState<{
+    show: boolean;
+    emptyCount: number;
+    totalCount: number;
+    sendType: 'direct' | 'target';
+  }>({ show: false, emptyCount: 0, totalCount: 0, sendType: 'direct' });
 
   // 전화번호 포맷팅 함수
   // ★ D97: formatPhoneNumber → formatDate.ts 컨트롤타워로 이관 (인라인 삭제)
@@ -1965,7 +2002,10 @@ const campaignData = {
             callbackNumbers={callbackNumbers}
             defaultCallback={selectedCallback}
             defaultUseIndividual={useIndividualCallback}
-            isAd={isAd}
+            /* ★ D111 P3: Dashboard 전역 isAd 대신 맞춤한줄에서 사용자가 토글한 값(customSendData.isAd)을 전달.
+               이전: isAd={isAd} → Dashboard 전역값 사용 → 광고 제외로 토글해도 미리보기에 (광고)+080 표시 (실발송은 정상).
+               crm/sh 계정은 전역 isAd=false라 영향 없었고, 나머지 계정만 재현됨. */
+            isAd={customSendData.isAd ?? false}
             optOutNumber={optOutNumber}
             phoneFields={phoneFields}
             subject={customSendData.variant?.subject}
@@ -3364,6 +3404,22 @@ const campaignData = {
         directSending={directSending}
         executeDirectSend={executeDirectSend}
         executeTargetSend={executeTargetSend}
+      />
+      {/* ★ D111 P2: 이름 비어있는 수신자 경고 모달 */}
+      <NameEmptyWarningModal
+        show={nameEmptyWarning.show}
+        emptyCount={nameEmptyWarning.emptyCount}
+        totalCount={nameEmptyWarning.totalCount}
+        sendType={nameEmptyWarning.sendType}
+        isSending={directSending || targetSending}
+        onCancel={() => setNameEmptyWarning({ show: false, emptyCount: 0, totalCount: 0, sendType: 'direct' })}
+        onConfirm={() => {
+          const st = nameEmptyWarning.sendType;
+          setNameEmptyWarning({ show: false, emptyCount: 0, totalCount: 0, sendType: 'direct' });
+          // 2번째 파라미터 confirmNameEmpty=true로 재호출 → 체크 스킵
+          if (st === 'direct') executeDirectSend(undefined, true);
+          else if (st === 'target') executeTargetSend(undefined, true);
+        }}
       />
       {/* ★ 미등록 회신번호 제외 확인 모달 */}
       <CallbackConfirmModal
