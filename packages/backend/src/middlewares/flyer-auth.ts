@@ -19,6 +19,7 @@ export interface FlyerJwtPayload {
   companyId: string;
   role: 'flyer_admin' | 'flyer_staff';
   loginId: string;
+  businessType: string; // D113: 업종 (mart/butcher 등)
   sessionId?: string;
 }
 
@@ -80,13 +81,28 @@ export const flyerAuthenticate = async (req: Request, res: Response, next: NextF
       return res.status(403).json({ error: '구독이 정지되었습니다. 관리자에게 문의해주세요.' });
     }
 
-    // 사용자 활성 확인
+    // 사용자 활성 + 매장별 과금 확인
     const userCheck = await query(
-      `SELECT deleted_at FROM flyer_users WHERE id = $1 AND company_id = $2`,
+      `SELECT deleted_at, payment_status, plan_expires_at, business_type FROM flyer_users WHERE id = $1 AND company_id = $2`,
       [decoded.userId, decoded.companyId]
     );
     if (userCheck.rows.length === 0 || userCheck.rows[0].deleted_at) {
       return res.status(401).json({ error: 'User not found or disabled' });
+    }
+
+    const u = userCheck.rows[0];
+    // D113: 매장별 과금 체크
+    if (u.payment_status === 'suspended') {
+      return res.status(403).json({ error: '매장 구독이 정지되었습니다. 관리자에게 문의해주세요.' });
+    }
+    if (u.plan_expires_at && new Date(u.plan_expires_at) < new Date()) {
+      return res.status(403).json({ error: '매장 구독 기간이 만료되었습니다.' });
+    }
+
+    // D113: JWT에 businessType 없으면 DB에서 보정 (기존 토큰 하위호환)
+    if (!decoded.businessType) {
+      decoded.businessType = u.business_type || 'mart';
+      req.flyerUser = decoded;
     }
 
     next();

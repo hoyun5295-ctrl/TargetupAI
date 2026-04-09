@@ -16,29 +16,114 @@
 
 ## 1) CURRENT_TASK (현재 집중 작업)
 
-### 🎯 D112 — 마트 대확장 프로젝트 (2026-04-09 설계 착수)
+### ✅ D112 — 마트 대확장 Phase 0 완료 (2026-04-09)
 
-> **배경:** 이사님(마트 업계 경력) 제안 + Harold님 방향 확정.
-> 전단AI를 "마트 대상 올인원 마케팅 솔루션"으로 대확장.
-> 요금제: 월 15만원 정액제 (브랜드 단위 과금인 한줄로와 완전 분리).
+> **Phase 0 — 인프라/격리/설계 전체 완료.**
+>
+> **완료 항목:**
+> - [x] 설계 문서 6종 (FLYER-SCHEMA/MART-ROADMAP/MIGRATION-PLAN/POS-AGENT/SUPERADMIN/BUGS)
+> - [x] flyer_* 12개 테이블 서버 DDL 실행 + 인덱스 + 슈퍼관리자 컬럼
+> - [x] 마트테스트 회사 이관 완료 (flyer_companies 1건)
+> - [x] CT-F01~F12 전단AI 전용 컨트롤타워 12개 + index.ts
+> - [x] middlewares/flyer-auth.ts + super-service-guard.ts
+> - [x] routes/flyer/ 11개 라우트 (auth/companies/customers/campaigns/unsubscribes/balance/stats/catalog/pos/address-books/sender-registration)
+> - [x] routes/admin/ 2개 (switch-service/flyer-admin)
+> - [x] routes/flyer/flyers.ts 수정 (flyerAuthenticate 전환 + store-scope 제거)
+> - [x] app.ts 마운트 전체 완료
+> - [x] flyer-frontend 8개 페이지 API 엔드포인트 /api/flyer/* 교체 (한줄로 API 잔존 0건)
+> - [x] 슈퍼관리자 ServiceSwitcher + FlyerAdminDashboard (한줄로 레이아웃 통일 + 주황 강조)
+> - [x] FLYER-SCHEMA.md 실서버 동기화 (login_id/gender/total_purchase_amount/callback phone ALTER 반영)
+> - [x] TypeScript 백엔드+프론트엔드 에러 0건 확인
+> - [x] 스키마 대조 전수 점검 + 코드 수정 완료
 >
 > **핵심 의사결정:**
-> 1. ✅ 계정/데이터 방식 B (flyer_* 테이블 완전 분리) — 한줄로 기간계 무접촉
-> 2. ✅ 슈퍼관리자 통합 + 상단 서비스 스위처 (URL/색상/권한 분리)
-> 3. ✅ POS Agent = SyncAgent 확장 + POS Adapter 패턴
-> 4. ✅ POS 고객은 전단AI 전용 격리 (한줄로 customers와 섞지 않음)
-> 5. ✅ 전단AI 작업 시 FLYER-*.md만 참조 (한줄로 status 건드리지 않음)
+> 1. ✅ 방식 B (flyer_* 완전 분리) — 한줄로 기간계 무접촉
+> 2. ✅ 슈퍼관리자 통합 (한줄로와 동일 레이아웃, 강조색만 주황)
+> 3. ✅ 용어: flyer_companies = **총판**, flyer_users = **매장** (사장님)
+> 4. ✅ 과금: 매장당 월 15만원, 총판 수수료 5만원
+> 5. ✅ 로그인: login_id 기반 (한줄로 users와 동일 패턴)
+> 6. ✅ 배포 완료 (서버 DDL + 1차 배포). 슈퍼관리자에서 전단AI 모드 전환 동작 확인
+
+---
+
+### 🔧 D113 — Phase A-1 업종체계 + 매장별 과금 + 템플릿 다양화 (코드 완료, DDL 미적용)
+
+> **목표:** POS 없이 즉시 효과 나는 기능 8개 순차 개발.
+> 로컬에서 전부 개발 완료 후 한 번에 배포.
 >
-> **작업 순서:**
-> - [x] Phase 0 설계 문서 6종 작성 (2026-04-09)
-> - [ ] Harold님 서버 데이터 조회 결과 공유 대기
-> - [ ] 4/13(월) 한줄로 이관 완료 대기 (전단AI 작업 일시 중단)
-> - [ ] 4/14(화) flyer_* 테이블 CREATE + 데이터 이관 착수
-> - [ ] 4/15~17 전단AI 백엔드 코드 분기 (`/api/flyer/*`)
-> - [ ] 4/18~ 슈퍼관리자 서비스 스위처 구현
-> - [ ] 이후 Phase A/B 기능 순차 구현 (FLYER-MART-ROADMAP.md)
+> **⚠️ 주의사항:**
+> - 한줄로 기간계 무접촉. flyer_* 테이블만 사용.
+> - 컨트롤타워(utils/flyer/) 먼저 → 라우트 → 프론트 순서.
+> - FLYER-SCHEMA.md 참조해서 컬럼명 정확히 확인 후 코드 작성.
+> - 새 테이블 필요 시 DDL은 코드에 넣지 말고, 완료 후 Harold님 서버 실행 명령어로 안내.
 >
-> **⚠️ 월요일(4/13) 한줄로 레거시 이관과 충돌 금지. 월요일 전단AI 작업 완전 금지.**
+> **개발 순서 (FLYER-MART-ROADMAP.md Phase A):**
+>
+> **1. 카탈로그DB (기능 15) — CT-F11 이미 있음**
+> - [ ] flyer-frontend에 카탈로그 관리 페이지 신설 (상품 추가/편집/삭제)
+> - [ ] 전단 생성 화면에 "내 상품" 사이드바 → 드래그로 전단에 추가
+> - [ ] 이전 전단에서 사용한 상품 자동 카탈로그 등록
+>
+> **2. 전단 템플릿 다양화 (기능 7)**
+> - [ ] 기존 3종(grid/list/highlight) → 업종별 확장 (마트/정육/수산/농산/베이커리)
+> - [ ] 시즌 템플릿 (명절/개업/창고대방출/신상입고)
+> - [ ] flyers 테이블에 template_category 컬럼 추가 필요
+>
+> **3. 인쇄 PDF 내보내기 (기능 17)**
+> - [ ] 공개 페이지 → A4/A3 PDF 변환 (puppeteer 서버사이드)
+> - [ ] flyer-frontend에 "PDF 다운로드" 버튼
+> - [ ] 레이아웃 옵션: A4/A3/반페이지
+>
+> **4. QR 체크인 쿠폰 (기능 8)**
+> - [ ] flyer_coupons / flyer_coupon_redemptions 테이블 신설
+> - [ ] 전단 하단 QR 자동 생성 → /q/:code 공개 페이지
+> - [ ] 쿠폰 사용 API (매장에서 스캔)
+> - [ ] 오프라인 방문율 측정 리포트
+>
+> **5. 카카오 브랜드메시지 배포 (기능 13)**
+> - [ ] 전단AI 전용 카카오 래퍼 (utils/flyer/flyer-brand-message.ts)
+> - [ ] SendPage에 "카카오 배포" 옵션 추가
+>
+> **6. 주간/월간 정기 자동발행 (기능 4)**
+> - [ ] flyer_auto_campaigns 테이블 신설
+> - [ ] flyer-auto-worker.ts (한줄로 auto-campaign-worker 패턴 복제)
+> - [ ] 프론트 자동발행 설정 UI
+>
+> **7. A/B 테스트 (기능 14)**
+> - [ ] 전단 2종 생성 → 수신자 랜덤 분할 → 클릭률 비교
+>
+> **8. 매장 직원 간편 모드 (기능 16)**
+> - [ ] 모바일 우선 UI: 사진→가격→전송 3단계
+> - [ ] flyer_staff 권한 전용 간편 화면
+>
+> **슈퍼관리자 기능 확장 (기능 개발과 병행):**
+> - [ ] 총판 상세 보기 (하위 매장 목록 + 매출 통계)
+> - [ ] 매장 생성/수정/삭제 (총판 하위)
+> - [ ] 정산 관리 (매장당 15만원 + 총판 수수료 5만원 계산)
+> - [ ] 캠페인 내역 조회
+> - [ ] 발송 통계 차트
+>
+> **현재 파일 구조:**
+> ```
+> packages/backend/src/
+> ├── middlewares/flyer-auth.ts, super-service-guard.ts
+> ├── routes/flyer/ (auth, companies, customers, campaigns, unsubscribes, balance, stats, catalog, pos, address-books, sender-registration, flyers, short-urls)
+> ├── routes/admin/ (switch-service, flyer-admin)
+> └── utils/flyer/ (CT-F01~F12 + index.ts)
+>     ├── flyer-sms-queue.ts (CT-F01)
+>     ├── flyer-unsubscribe-helper.ts (CT-F02)
+>     ├── flyer-billing.ts (CT-F03)
+>     ├── flyer-customer-filter.ts (CT-F04)
+>     ├── flyer-message.ts (CT-F05)
+>     ├── flyer-callback-filter.ts (CT-F06)
+>     ├── flyer-deduplicate.ts (CT-F07)
+>     ├── flyer-send.ts (CT-F08 — 발송 오케스트레이터)
+>     ├── flyer-stats.ts (CT-F09)
+>     ├── flyer-rfm.ts (CT-F10 — Phase B 스켈레톤)
+>     ├── flyer-catalog.ts (CT-F11)
+>     ├── flyer-pos-ingest.ts (CT-F12 — Phase B 스켈레톤)
+>     └── index.ts
+> ```
 
 ---
 

@@ -8,18 +8,26 @@ interface FlyerItem { name: string; originalPrice: number; salePrice: number; ba
 interface FlyerCategory { name: string; items: FlyerItem[]; }
 interface Flyer { id: string; title: string; store_name: string; period_start: string | null; period_end: string | null; categories: FlyerCategory[]; template: string; status: string; short_code: string | null; click_count: number; created_at: string; }
 
-const CATEGORY_PRESETS = ['청과/야채', '공산', '축산', '수산', '냉동', '유제품', '음료/주류', '생활용품'];
-const TEMPLATES = [
+// D113: 하드코딩 폴백용 (API 실패 시)
+const DEFAULT_CATEGORY_PRESETS = ['청과/야채', '공산', '축산', '수산', '냉동', '유제품', '음료/주류', '생활용품'];
+const DEFAULT_TEMPLATES: TemplateOption[] = [
   { value: 'grid', label: '가격 강조형', desc: '빨간 테마, 2열 카드', color: 'from-red-500 to-orange-500' },
   { value: 'list', label: '리스트형', desc: '블랙+골드 프리미엄', color: 'from-gray-800 to-amber-700' },
   { value: 'highlight', label: '특가 하이라이트', desc: '다크 모드, TODAY\'S PICK', color: 'from-orange-500 to-red-600' },
 ];
 
-export default function FlyerPage({ token }: { token: string }) {
+interface TemplateOption { value: string; label: string; desc: string; color: string; }
+
+export default function FlyerPage({ token, businessType = 'mart' }: { token: string; businessType?: string }) {
   const [flyers, setFlyers] = useState<Flyer[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editingFlyer, setEditingFlyer] = useState<Flyer | null>(null);
+
+  // D113: 업종별 동적 템플릿/카테고리
+  const [categoryPresets, setCategoryPresets] = useState<string[]>(DEFAULT_CATEGORY_PRESETS);
+  const [availableTemplates, setAvailableTemplates] = useState<TemplateOption[]>(DEFAULT_TEMPLATES);
+  const [defaultTemplate, setDefaultTemplate] = useState('grid');
 
   const [title, setTitle] = useState('');
   const [storeName, setStoreName] = useState('');
@@ -41,7 +49,24 @@ export default function FlyerPage({ token }: { token: string }) {
 
   useEffect(() => { loadFlyers(); }, [loadFlyers]);
 
-  const resetForm = () => { setTitle(''); setStoreName(''); setPeriodStart(''); setPeriodEnd(''); setTemplate('grid'); setCategories([{ name: '청과/야채', items: [{ name: '', originalPrice: 0, salePrice: 0 }] }]); setEditingFlyer(null); };
+  // D113: 업종별 템플릿/카테고리 동적 로딩
+  useEffect(() => {
+    apiFetch(`${API_BASE}/api/flyer/business-types`)
+      .then(res => res.ok ? res.json() : null)
+      .then((types: any[] | null) => {
+        if (!types || types.length === 0) return;
+        const myType = types.find((t: any) => t.type_code === businessType) || types[0];
+        if (myType.category_presets?.length) setCategoryPresets(myType.category_presets);
+        if (myType.templates?.length) setAvailableTemplates(myType.templates);
+        if (myType.default_template) {
+          setDefaultTemplate(myType.default_template);
+          setTemplate(myType.default_template);
+        }
+      })
+      .catch(() => {}); // 폴백: DEFAULT_* 유지
+  }, [businessType]);
+
+  const resetForm = () => { setTitle(''); setStoreName(''); setPeriodStart(''); setPeriodEnd(''); setTemplate(defaultTemplate); setCategories([{ name: categoryPresets[0] || '새 카테고리', items: [{ name: '', originalPrice: 0, salePrice: 0 }] }]); setEditingFlyer(null); };
 
   const handleSave = async () => {
     if (!title.trim()) { setAlert({ show: true, title: '입력 오류', message: '행사명을 입력해주세요.', type: 'error' }); return; }
@@ -137,7 +162,7 @@ export default function FlyerPage({ token }: { token: string }) {
                   <div className="px-4 py-3">
                     {(f.period_start || f.period_end) && <p className="text-xs text-text-muted mb-2">{fmtDate(f.period_start)} ~ {fmtDate(f.period_end)}</p>}
                     <div className="flex items-center gap-3 text-xs">
-                      <span className="text-text-muted">{TEMPLATES.find(t => t.value === f.template)?.label || f.template}</span>
+                      <span className="text-text-muted">{availableTemplates.find(t => t.value === f.template)?.label || f.template}</span>
                       {f.status === 'published' && <span className="text-primary-600 font-semibold">{f.click_count || 0} 클릭</span>}
                     </div>
                     {f.short_code && (
@@ -186,7 +211,7 @@ export default function FlyerPage({ token }: { token: string }) {
 
             <SectionCard title="디자인 템플릿" className="mb-4">
               <div className="grid grid-cols-3 gap-3">
-                {TEMPLATES.map(t => (
+                {availableTemplates.map(t => (
                   <button key={t.value} onClick={() => setTemplate(t.value)}
                     className={`rounded-xl border-2 text-left transition-all overflow-hidden ${template === t.value ? 'border-primary-500 shadow-elevated' : 'border-border hover:border-border-strong'}`}>
                     <div className={`h-3 bg-gradient-to-r ${t.color}`} />
@@ -399,7 +424,7 @@ function ProductRegistrationSection({ categories, setCategories, addCategory, re
 
       {/* 카테고리 추가 버튼들 */}
       <div className="flex flex-wrap gap-1 mb-4">
-        {CATEGORY_PRESETS.filter(p => !categories.some(c => c.name === p)).map(p => (
+        {categoryPresets.filter(p => !categories.some(c => c.name === p)).map(p => (
           <button key={p} onClick={() => { addCategory(p); setActiveTab(categories.length); }} className="px-2.5 py-1 text-xs bg-bg hover:bg-border/50 rounded-md text-text-secondary font-medium transition-colors">+{p}</button>
         ))}
       </div>

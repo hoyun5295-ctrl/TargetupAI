@@ -2,11 +2,12 @@
  * ★ CT-F03 — 전단AI 과금/결제 컨트롤타워
  *
  * 한줄로 utils/prepaid.ts와 완전 분리.
- * - 전단AI는 월 15만원 정액제 + 발송량 초과분 과금
+ * - 전단AI는 매장당 월 15만원 + 문자 100% 선불 (후불 없음)
+ * - 과금 주체: flyer_users (매장). flyer_companies(총판)는 상위 차단만.
  * - flyer_billing_history에 월별 청구 기록
- * - flyer_companies.plan_expires_at 관리
  *
- * 발송 시 차감 로직은 없음 (정액제). 단 월말 배치로 초과 발송량 계산하여 익월 청구에 포함.
+ * D113: 매장별 과금 체계로 전환. canFlyerStoreSend + deductFlyerPrepaid + refundFlyerPrepaid 신설.
+ * 기존 canFlyerCompanySend는 총판 레벨 체크용으로 유지 (하위호환).
  */
 
 import { query } from '../../config/database';
@@ -91,7 +92,8 @@ export async function recordFlyerMonthlyBilling(companyId: string, yearMonth: st
 }
 
 /**
- * 발송 가능 여부 확인 (결제 상태 + 플랜 만료).
+ * [하위호환] 총판(flyer_companies) 레벨 발송 가능 여부.
+ * 총판 정지 시 하위 전체 매장 차단. canFlyerStoreSend에서 내부 호출됨.
  */
 export async function canFlyerCompanySend(companyId: string): Promise<{ ok: boolean; reason?: string }> {
   const result = await query(
@@ -101,9 +103,107 @@ export async function canFlyerCompanySend(companyId: string): Promise<{ ok: bool
   if (result.rows.length === 0) return { ok: false, reason: 'company_not_found' };
 
   const c = result.rows[0];
-  if (c.payment_status === 'suspended') return { ok: false, reason: '구독이 정지되었습니다' };
+  if (c.payment_status === 'suspended') return { ok: false, reason: '총판 계정이 정지되었습니다' };
   if (c.plan_expires_at && new Date(c.plan_expires_at) < new Date()) {
-    return { ok: false, reason: '구독 기간이 만료되었습니다' };
+    return { ok: false, reason: '총판 구독 기간이 만료되었습니다' };
   }
   return { ok: true };
+}
+
+/**
+ * ★ D113: 매장(flyer_users) 레벨 발송 가능 여부 확인.
+ * 1. 매장 payment_status + plan_expires_at 체크
+ * 2. 총판(flyer_companies) 레벨도 체크 (상위 차단)
+ */
+export async function canFlyerStoreSend(userId: string): Promise<{ ok: boolean; reason?: string }> {
+  const userRes = await query(
+    `SELECT u.payment_status, u.plan_expires_at, u.company_id
+     FROM flyer_users u WHERE u.id = $1 AND u.deleted_at IS NULL`,
+    [userId]
+  );
+  if (userRes.rows.length === 0) return { ok: false, reason: '매장 정보를 찾을 수 없습니다' };
+
+  const u = userRes.rows[0];
+
+  // 매장 레벨 체크
+  if (u.payment_status === 'suspended') return { ok: false, reason: '매장 구독이 정지되었습니다' };
+  if (u.payment_status === 'pending') return { ok: false, reason: '매장 구독이 아직 활성화되지 않았습니다' };
+  if (u.plan_expires_at && new Date(u.plan_expires_at) < new Date()) {
+    return { ok: false, reason: '매장 구독 기간이 만료되었습니다' };
+  }
+
+  // 총판 레벨 체크
+  return canFlyerCompanySend(u.company_id);
+}
+
+/**
+ * ★ D113: 선불 잔액 차감 (Atomic).
+ * prepaid_balance >= totalAmount 조건부 UPDATE로 잔액 부족 시 실패 반환.
+ */
+export async function deductFlyerPrepaid(
+  userId: string,
+  count: number,
+  messageType: 'SMS' | 'LMS' | 'MMS'
+): Promise<{ ok: boolean; deducted?: number; balance?: number; reason?: string }> {
+  // 단가 조회
+  const priceRes = await query(
+    `SELECT sms_unit_price, lms_unit_price, mms_unit_price, prepaid_balance
+     FROM flyer_users WHERE id = $1 AND deleted_at IS NULL`,
+    [userId]
+  );
+  if (priceRes.rows.length === 0) return { ok: false, reason: '매장 정보를 찾을 수 없습니다' };
+
+  const u = priceRes.rows[0];
+  const priceMap: Record<string, number> = {
+    SMS: Number(u.sms_unit_price || 9),
+    LMS: Number(u.lms_unit_price || 29),
+    MMS: Number(u.mms_unit_price || 80),
+  };
+  const unitPrice = priceMap[messageType] || 9;
+  const totalAmount = Math.ceil(unitPrice * count);
+
+  // Atomic 차감: balance >= totalAmount 조건
+  const updateRes = await query(
+    `UPDATE flyer_users
+     SET prepaid_balance = prepaid_balance - $1
+     WHERE id = $2 AND prepaid_balance >= $1 AND deleted_at IS NULL
+     RETURNING prepaid_balance`,
+    [totalAmount, userId]
+  );
+
+  if (updateRes.rows.length === 0) {
+    const currentBalance = Number(u.prepaid_balance || 0);
+    return {
+      ok: false,
+      balance: currentBalance,
+      reason: `잔액이 부족합니다 (필요: ₩${totalAmount.toLocaleString()}, 잔액: ₩${currentBalance.toLocaleString()})`,
+    };
+  }
+
+  return {
+    ok: true,
+    deducted: totalAmount,
+    balance: Number(updateRes.rows[0].prepaid_balance),
+  };
+}
+
+/**
+ * ★ D113: 선불 잔액 환불 (발송 취소 시).
+ */
+export async function refundFlyerPrepaid(
+  userId: string,
+  amount: number
+): Promise<{ ok: boolean; balance?: number }> {
+  if (amount <= 0) return { ok: true };
+
+  const result = await query(
+    `UPDATE flyer_users
+     SET prepaid_balance = prepaid_balance + $1
+     WHERE id = $2 AND deleted_at IS NULL
+     RETURNING prepaid_balance`,
+    [amount, userId]
+  );
+
+  if (result.rows.length === 0) return { ok: false };
+  return { ok: true, balance: Number(result.rows[0].prepaid_balance) };
 }

@@ -121,7 +121,7 @@ function App() {
 
       {/* ── 페이지 ── */}
       <main className="max-w-6xl mx-auto px-6 py-6">
-        {currentPage === 'flyer' && <FlyerPage token={token} />}
+        {currentPage === 'flyer' && <FlyerPage token={token} businessType={user?.businessType || 'mart'} />}
         {currentPage === 'send' && <SendPage token={token} />}
         {currentPage === 'customers' && <CustomerPage token={token} />}
         {currentPage === 'results' && <ResultsPage token={token} />}

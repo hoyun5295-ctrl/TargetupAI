@@ -256,6 +256,248 @@ router.post('/users/:id/reset-password', async (req: Request, res: Response) => 
 });
 
 // ══════════════════════════════════════════
+// ★ D113: 매장(store) 관리 — flyer_users 확장 필드 기반
+// 슈퍼관리자만 생성/수정/입금확인/충전 가능
+// ══════════════════════════════════════════
+
+/**
+ * GET /stores — 매장 목록 (필터: companyId, businessType, paymentStatus)
+ */
+router.get('/stores', async (req: Request, res: Response) => {
+  try {
+    const { companyId, businessType, paymentStatus, search } = req.query;
+    const page = Math.max(1, parseInt(String(req.query.page || '1'), 10));
+    const limit = 20;
+    const offset = (page - 1) * limit;
+
+    let where = `u.deleted_at IS NULL`;
+    const params: any[] = [];
+    if (companyId) { params.push(companyId); where += ` AND u.company_id = $${params.length}`; }
+    if (businessType) { params.push(businessType); where += ` AND u.business_type = $${params.length}`; }
+    if (paymentStatus) { params.push(paymentStatus); where += ` AND u.payment_status = $${params.length}`; }
+    if (search) { params.push(`%${search}%`); where += ` AND (u.store_name ILIKE $${params.length} OR u.name ILIKE $${params.length} OR u.login_id ILIKE $${params.length})`; }
+
+    const countRes = await query(`SELECT COUNT(*)::int AS cnt FROM flyer_users u WHERE ${where}`, params);
+    params.push(limit, offset);
+    const listRes = await query(
+      `SELECT u.id, u.login_id, u.name, u.store_name, u.business_type,
+              u.business_number, u.payment_status, u.prepaid_balance,
+              u.monthly_fee, u.plan_started_at, u.plan_expires_at,
+              u.contact_name, u.contact_phone, u.role, u.last_login_at, u.created_at,
+              c.company_name
+       FROM flyer_users u
+       JOIN flyer_companies c ON c.id = u.company_id
+       WHERE ${where}
+       ORDER BY u.created_at DESC
+       LIMIT $${params.length - 1} OFFSET $${params.length}`,
+      params
+    );
+
+    return res.json({ items: listRes.rows, total: countRes.rows[0]?.cnt || 0, page, pageSize: limit });
+  } catch (error: any) {
+    console.error('[admin/flyer] stores list error:', error);
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
+
+/**
+ * POST /stores — 매장 생성 (사업자등록증 + 세금계산서 + 담당자 + 과금 정보)
+ */
+router.post('/stores', async (req: Request, res: Response) => {
+  try {
+    const {
+      company_id, login_id, password, name, phone, role,
+      business_type, store_name,
+      // 사업자등록증
+      business_number, business_reg_name, business_reg_owner,
+      business_category, business_item, business_address,
+      // 세금계산서
+      tax_email, tax_manager_name, tax_manager_phone,
+      // 담당자
+      contact_name, contact_phone, contact_email,
+      // 과금
+      monthly_fee, plan_started_at,
+      // 관리
+      memo,
+    } = req.body;
+
+    if (!company_id || !login_id || !password || !business_type) {
+      return res.status(400).json({ error: '총판, 아이디, 비밀번호, 업종은 필수입니다' });
+    }
+
+    // 총판 존재 확인
+    const companyCheck = await query(
+      `SELECT id FROM flyer_companies WHERE id = $1 AND deleted_at IS NULL`, [company_id]
+    );
+    if (companyCheck.rows.length === 0) {
+      return res.status(400).json({ error: '존재하지 않는 총판입니다' });
+    }
+
+    const hash = await bcrypt.hash(password, 10);
+    const result = await query(
+      `INSERT INTO flyer_users (
+        id, company_id, login_id, password_hash, name, phone, role,
+        business_type, store_name,
+        business_number, business_reg_name, business_reg_owner,
+        business_category, business_item, business_address,
+        tax_email, tax_manager_name, tax_manager_phone,
+        contact_name, contact_phone, contact_email,
+        monthly_fee, payment_status, plan_started_at,
+        memo, created_at
+      ) VALUES (
+        gen_random_uuid(), $1, $2, $3, $4, $5, $6,
+        $7, $8,
+        $9, $10, $11,
+        $12, $13, $14,
+        $15, $16, $17,
+        $18, $19, $20,
+        $21, 'pending', $22,
+        $23, NOW()
+      ) RETURNING id, login_id, store_name, business_type`,
+      [
+        company_id, login_id, hash, name || null, phone || null, role || 'flyer_admin',
+        business_type, store_name || name || null,
+        business_number || null, business_reg_name || null, business_reg_owner || null,
+        business_category || null, business_item || null, business_address || null,
+        tax_email || null, tax_manager_name || null, tax_manager_phone || null,
+        contact_name || null, contact_phone || null, contact_email || null,
+        monthly_fee || 150000, plan_started_at || null,
+        memo || null,
+      ]
+    );
+
+    return res.status(201).json(result.rows[0]);
+  } catch (error: any) {
+    console.error('[admin/flyer] store create error:', error);
+    if (error.code === '23505') {
+      return res.status(400).json({ error: '이미 존재하는 아이디입니다' });
+    }
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
+
+/**
+ * GET /stores/:id — 매장 상세
+ */
+router.get('/stores/:id', async (req: Request, res: Response) => {
+  try {
+    const result = await query(
+      `SELECT u.*, c.company_name
+       FROM flyer_users u
+       JOIN flyer_companies c ON c.id = u.company_id
+       WHERE u.id = $1 AND u.deleted_at IS NULL`,
+      [req.params.id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+
+    // 비밀번호 해시 제거
+    const store = result.rows[0];
+    delete store.password_hash;
+
+    return res.json(store);
+  } catch (error: any) {
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
+
+/**
+ * PUT /stores/:id — 매장 정보 수정
+ */
+router.put('/stores/:id', async (req: Request, res: Response) => {
+  try {
+    const fields = req.body;
+    const allowed = [
+      'name', 'phone', 'store_name', 'business_type',
+      'business_number', 'business_reg_name', 'business_reg_owner',
+      'business_category', 'business_item', 'business_address',
+      'tax_email', 'tax_manager_name', 'tax_manager_phone',
+      'contact_name', 'contact_phone', 'contact_email',
+      'monthly_fee', 'payment_status', 'plan_started_at', 'plan_expires_at',
+      'sms_unit_price', 'lms_unit_price', 'mms_unit_price',
+      'memo',
+    ];
+
+    const sets: string[] = [];
+    const params: any[] = [req.params.id];
+    for (const key of allowed) {
+      if (fields[key] !== undefined) {
+        params.push(fields[key]);
+        sets.push(`${key} = $${params.length}`);
+      }
+    }
+    if (sets.length === 0) return res.status(400).json({ error: 'Nothing to update' });
+
+    sets.push(`updated_at = NOW()`);
+    await query(`UPDATE flyer_users SET ${sets.join(', ')} WHERE id = $1 AND deleted_at IS NULL`, params);
+    return res.json({ message: '수정되었습니다' });
+  } catch (error: any) {
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
+
+/**
+ * POST /stores/:id/activate — 입금 확인 → 매장 활성화
+ * payment_status → 'active', plan_expires_at 설정
+ */
+router.post('/stores/:id/activate', async (req: Request, res: Response) => {
+  try {
+    const { months } = req.body; // 활성화 개월 수 (기본 1개월)
+    const m = Math.max(1, parseInt(String(months || '1'), 10));
+
+    const result = await query(
+      `UPDATE flyer_users
+       SET payment_status = 'active',
+           plan_started_at = COALESCE(plan_started_at, CURRENT_DATE),
+           plan_expires_at = CURRENT_DATE + ($1 || ' months')::interval,
+           updated_at = NOW()
+       WHERE id = $2 AND deleted_at IS NULL
+       RETURNING id, store_name, payment_status, plan_expires_at`,
+      [m, req.params.id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    return res.json(result.rows[0]);
+  } catch (error: any) {
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
+
+/**
+ * POST /stores/:id/charge — 선불 잔액 충전
+ */
+router.post('/stores/:id/charge', async (req: Request, res: Response) => {
+  try {
+    const { amount } = req.body;
+    const chargeAmount = parseInt(String(amount || '0'), 10);
+    if (chargeAmount <= 0) return res.status(400).json({ error: '충전 금액은 1원 이상' });
+
+    const result = await query(
+      `UPDATE flyer_users
+       SET prepaid_balance = prepaid_balance + $1, updated_at = NOW()
+       WHERE id = $2 AND deleted_at IS NULL
+       RETURNING id, store_name, prepaid_balance`,
+      [chargeAmount, req.params.id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    return res.json(result.rows[0]);
+  } catch (error: any) {
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ══════════════════════════════════════════
+// ★ D113: 업종 관리 (flyer_business_types)
+// ══════════════════════════════════════════
+router.get('/business-types', async (_req: Request, res: Response) => {
+  try {
+    const { getAllBusinessTypes } = await import('../../utils/flyer/flyer-business-types');
+    const types = await getAllBusinessTypes();
+    return res.json(types);
+  } catch (error: any) {
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ══════════════════════════════════════════
 // POS Agent 모니터링 (flyer_pos_agents)
 // ══════════════════════════════════════════
 router.get('/pos-agents', async (req: Request, res: Response) => {

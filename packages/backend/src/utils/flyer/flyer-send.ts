@@ -20,7 +20,7 @@ import {
   bulkInsertSmsQueue,
   toQtmsgType,
 } from './flyer-sms-queue';
-import { canFlyerCompanySend } from './flyer-billing';
+import { canFlyerStoreSend, deductFlyerPrepaid } from './flyer-billing';
 import { resolveFlyerCallback } from './flyer-callback-filter';
 import { deduplicateWithStats, FlyerRecipient } from './flyer-deduplicate';
 import { filterOutFlyerUnsubscribed } from './flyer-unsubscribe-helper';
@@ -69,8 +69,8 @@ export async function sendFlyerCampaign(params: FlyerSendParams): Promise<FlyerS
     skipDeduplicate = false,
   } = params;
 
-  // 1. 발송 가능 여부
-  const canSend = await canFlyerCompanySend(companyId);
+  // 1. 발송 가능 여부 (매장 + 총판 레벨)
+  const canSend = await canFlyerStoreSend(userId);
   if (!canSend.ok) {
     return {
       ok: false,
@@ -175,7 +175,24 @@ export async function sendFlyerCampaign(params: FlyerSendParams): Promise<FlyerS
   );
   const campaignId = campaignResult.rows[0].id;
 
-  // 8. 예약이면 지금 INSERT 안 하고 완료 (자동발송 워커가 처리 — 향후)
+  // 8. 선불 잔액 차감 (100% 선불 — 후불 없음)
+  const deductResult = await deductFlyerPrepaid(userId, working.length, messageType);
+  if (!deductResult.ok) {
+    // 잔액 부족 → 캠페인 취소 처리
+    await query(`UPDATE flyer_campaigns SET status = 'cancelled' WHERE id = $1`, [campaignId]);
+    return {
+      ok: false,
+      campaignId,
+      totalRequested: recipients.length,
+      deduplicated: dedupRemoved,
+      unsubscribedRemoved: unsubRemoved,
+      enqueued: 0,
+      callbackUsed: cb.callback,
+      error: deductResult.reason,
+    };
+  }
+
+  // 9. 예약이면 지금 INSERT 안 하고 완료 (자동발송 워커가 처리 — 향후)
   if (scheduleAt) {
     return {
       ok: true,
@@ -188,11 +205,11 @@ export async function sendFlyerCampaign(params: FlyerSendParams): Promise<FlyerS
     };
   }
 
-  // 9. MySQL 큐 bulk INSERT
+  // 10. MySQL 큐 bulk INSERT
   const tables = await getFlyerCompanySmsTables(companyId);
   await bulkInsertSmsQueue(tables, rowsForQueue, true); // useNow=true 즉시발송
 
-  // 10. 발송 상태 업데이트
+  // 11. 발송 상태 업데이트
   await query(
     `UPDATE flyer_campaigns SET sent_count = $1, status = 'sending', sent_at = NOW() WHERE id = $2`,
     [working.length, campaignId]

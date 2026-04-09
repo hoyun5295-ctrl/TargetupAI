@@ -59,6 +59,7 @@ import flyerCatalogRoutes from './routes/flyer/catalog';
 import flyerAddressBooksRoutes from './routes/flyer/address-books';
 import flyerSenderRegistrationRoutes from './routes/flyer/sender-registration';
 import flyerPosRoutes from './routes/flyer/pos';
+import flyerBusinessTypesRoutes from './routes/flyer/business-types';
 
 // DB 연결
 import './config/database';
@@ -142,6 +143,7 @@ app.use('/api/flyer/catalog', flyerCatalogRoutes);
 app.use('/api/flyer/address-books', flyerAddressBooksRoutes);
 app.use('/api/flyer/companies/sender-registration', flyerSenderRegistrationRoutes);
 app.use('/api/flyer/pos', flyerPosRoutes);
+app.use('/api/flyer/business-types', flyerBusinessTypesRoutes);
 
 // 전단AI 기존 라우트 (전단지 CRUD + 공개 페이지)
 app.use('/api/flyer/flyers', flyerRoutes);

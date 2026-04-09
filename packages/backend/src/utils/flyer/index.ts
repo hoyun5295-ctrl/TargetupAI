@@ -33,6 +33,9 @@ export {
   aggregateFlyerMonthlyUsage,
   recordFlyerMonthlyBilling,
   canFlyerCompanySend,
+  canFlyerStoreSend,
+  deductFlyerPrepaid,
+  refundFlyerPrepaid,
 } from './flyer-billing';
 
 // CT-F04: 고객 필터
@@ -95,3 +98,19 @@ export {
   ingestMembers,
   updateAgentHeartbeat,
 } from './flyer-pos-ingest';
+
+// CT-F13: 업종 레지스트리
+export {
+  getBusinessTypes,
+  getBusinessType,
+  getCategoryPresets,
+  getAvailableTemplates,
+  getAllBusinessTypes,
+  TEMPLATE_REGISTRY,
+  invalidateBusinessTypeCache,
+} from './flyer-business-types';
+export type { BusinessType, TemplateInfo } from './flyer-business-types';
+
+// CT-F14: 템플릿 렌더링 엔진
+export { renderTemplate } from './flyer-templates';
+export type { FlyerRenderData, FlyerRenderItem } from './flyer-templates';

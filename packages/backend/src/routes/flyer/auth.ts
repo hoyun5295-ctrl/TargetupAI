@@ -56,6 +56,7 @@ router.post('/login', async (req: Request, res: Response) => {
       companyId: user.company_id,
       role: user.role || 'flyer_admin',
       loginId: user.login_id,
+      businessType: user.business_type || 'mart', // D113: 업종
     };
     const token = generateFlyerToken(payload);
 
@@ -71,6 +72,8 @@ router.post('/login', async (req: Request, res: Response) => {
         loginId: user.login_id,
         name: user.name,
         role: user.role,
+        businessType: user.business_type || 'mart', // D113: 업종
+        storeName: user.store_name || user.name,     // D113: 매장명
         company: {
           id: user.company_id,
           name: user.company_name,
