@@ -117,7 +117,7 @@ router.post('/companies', async (req: Request, res: Response) => {
     await query(
       `INSERT INTO flyer_users (id, company_id, login_id, email, password_hash, name, role, created_at)
        VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, 'flyer_admin', NOW())`,
-      [companyId, admin_login_id, admin_email || null, hash, admin_name || owner_name || '관리자']
+      [companyId, admin_login_id, admin_email || '', hash, admin_name || owner_name || '관리자']
     );
 
     return res.status(201).json({ id: companyId, company_name });
@@ -232,7 +232,7 @@ router.post('/users', async (req: Request, res: Response) => {
       `INSERT INTO flyer_users (id, company_id, login_id, email, password_hash, name, role, created_at)
        VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, NOW())
        RETURNING id, login_id, name, role`,
-      [company_id, login_id, email || null, hash, name || null, role || 'flyer_staff']
+      [company_id, login_id, email || '', hash, name || null, role || 'flyer_staff']
     );
     return res.status(201).json(result.rows[0]);
   } catch (error: any) {
