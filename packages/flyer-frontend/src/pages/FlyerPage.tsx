@@ -644,15 +644,18 @@ function FlyerPreviewRenderer({ title, storeName, periodStart, periodEnd, catego
     </div>
   );
 
-  // ── 하이라이트형 (프리미엄 다크 + 골드) ──
+  // ── 공통 헬퍼 ──
   const allItems: (FlyerItem & { discount: number })[] = [];
   for (const cat of cleanCats) for (const item of cat.items) {
     if (item.originalPrice > 0) allItems.push({ ...item, discount: Math.round((1 - item.salePrice / item.originalPrice) * 100) });
   }
   allItems.sort((a, b) => b.discount - a.discount);
   const picks = allItems.slice(0, 4);
+  const maxDiscount = allItems.length > 0 ? allItems[0].discount : 0;
+  const featured = allItems[0] || null;
 
-  return (
+  // ── 하이라이트형 (프리미엄 다크 + 골드) ──
+  if (template === 'highlight') return (
     <div style={{ background: '#0f0f0f', minHeight: '100%', fontFamily: 'system-ui, sans-serif' }}>
       <div style={{ background: 'linear-gradient(180deg,#1a1a2e,#0f0f0f)', padding: '18px 10px 14px', textAlign: 'center', borderBottom: '2px solid #d4a844' }}>
         <p style={{ fontSize: 7, color: '#d4a844', letterSpacing: 3, margin: 0 }}>{storeName || '매장명'}</p>
@@ -695,6 +698,271 @@ function FlyerPreviewRenderer({ title, storeName, periodStart, periodEnd, catego
           </div>
         ))}
       </div>
+    </div>
+  );
+
+  // ── 신선식품 특화 (녹색 테마) ──
+  if (template === 'mart_fresh') return (
+    <div style={{ background: '#f0fdf4', minHeight: '100%', fontFamily: 'system-ui, sans-serif' }}>
+      <div style={{ background: 'linear-gradient(135deg,#16a34a,#15803d)', padding: '16px 10px 20px', textAlign: 'center', borderRadius: '0 0 50% 50% / 0 0 12px 12px' }}>
+        <p style={{ fontSize: 8, color: 'rgba(255,255,255,.8)', letterSpacing: 2, margin: 0 }}>{storeName || '매장명'}</p>
+        <p style={{ fontSize: 13, color: '#fff', fontWeight: 900, margin: '4px 0' }}>{title || '행사명'}</p>
+        {period && <p style={{ fontSize: 7, color: 'rgba(255,255,255,.7)', margin: 0 }}>{period}</p>}
+      </div>
+      <div style={{ padding: '6px 6px 12px' }}>
+        {cleanCats.map((cat, ci) => (
+          <div key={ci} style={{ marginBottom: 6 }}>
+            <p style={{ fontSize: 9, fontWeight: 800, color: '#15803d', margin: '8px 0 5px', paddingBottom: 4, borderBottom: '2px solid #bbf7d0' }}>🌿 {cat.name}</p>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 5 }}>
+              {cat.items.map((item, ii) => {
+                const disc = item.originalPrice > 0 ? Math.round((1 - item.salePrice / item.originalPrice) * 100) : 0;
+                return (
+                  <div key={ii} style={{ background: '#fff', borderRadius: 10, overflow: 'hidden', border: '1px solid #dcfce7', position: 'relative' }}>
+                    {disc > 0 && <span style={{ position: 'absolute', top: 4, left: 4, background: '#16a34a', color: '#fff', fontSize: 7, fontWeight: 800, padding: '1px 5px', borderRadius: 5, zIndex: 1 }}>-{disc}%</span>}
+                    <ImgOrEmoji item={item} h={55} />
+                    <div style={{ padding: '5px 6px 7px' }}>
+                      <p style={{ fontSize: 8, fontWeight: 700, margin: 0 }}>{item.name}</p>
+                      <span style={{ fontSize: 11, fontWeight: 900, color: '#16a34a' }}>{fmtPrice(item.salePrice)}원</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  // ── 주말특가 (보라+핑크, 대표 상품 배너) ──
+  if (template === 'mart_weekend') return (
+    <div style={{ background: '#fdf4ff', minHeight: '100%', fontFamily: 'system-ui, sans-serif' }}>
+      <div style={{ background: 'linear-gradient(135deg,#9333ea,#ec4899)', padding: '16px 10px 14px', textAlign: 'center' }}>
+        <p style={{ fontSize: 8, color: 'rgba(255,255,255,.85)', letterSpacing: 2, margin: 0 }}>{storeName || '매장명'}</p>
+        <p style={{ fontSize: 14, color: '#fff', fontWeight: 900, margin: '4px 0' }}>{title || '행사명'}</p>
+        {period && <p style={{ fontSize: 7, color: 'rgba(255,255,255,.7)', margin: 0 }}>{period}</p>}
+      </div>
+      <div style={{ padding: '8px 6px 12px' }}>
+        {featured && (
+          <div style={{ background: '#fff', borderRadius: 14, padding: 10, textAlign: 'center', boxShadow: '0 4px 12px rgba(147,51,234,.12)', marginBottom: 10, border: '2px solid #e9d5ff' }}>
+            <span style={{ display: 'inline-block', background: 'linear-gradient(135deg,#9333ea,#ec4899)', color: '#fff', fontSize: 8, fontWeight: 800, padding: '3px 10px', borderRadius: 10, marginBottom: 6 }}>BEST DEAL -{featured.discount}%</span>
+            <ImgOrEmoji item={featured} h={80} />
+            <p style={{ fontSize: 10, fontWeight: 800, margin: '6px 0 2px' }}>{featured.name}</p>
+            <span style={{ fontSize: 16, fontWeight: 900, color: '#9333ea' }}>₩{fmtPrice(featured.salePrice)}</span>
+          </div>
+        )}
+        {cleanCats.map((cat, ci) => (
+          <div key={ci} style={{ marginBottom: 6 }}>
+            <span style={{ display: 'inline-block', fontSize: 8, fontWeight: 700, color: '#fff', background: 'linear-gradient(135deg,#a855f7,#ec4899)', padding: '3px 8px', borderRadius: 10, margin: '6px 0 5px' }}>{cat.name}</span>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 5 }}>
+              {cat.items.map((item, ii) => (
+                <div key={ii} style={{ background: '#fff', borderRadius: 8, overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,.04)' }}>
+                  <ImgOrEmoji item={item} h={50} />
+                  <div style={{ padding: '4px 6px 6px' }}>
+                    <p style={{ fontSize: 7, fontWeight: 700, margin: 0 }}>{item.name}</p>
+                    <span style={{ fontSize: 10, fontWeight: 900, color: '#9333ea' }}>₩{fmtPrice(item.salePrice)}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  // ── 시즌 행사 (파랑+시안) ──
+  if (template === 'mart_seasonal') return (
+    <div style={{ background: '#f0f9ff', minHeight: '100%', fontFamily: 'system-ui, sans-serif' }}>
+      <div style={{ background: 'linear-gradient(135deg,#2563eb,#0891b2)', padding: '18px 10px 16px', textAlign: 'center' }}>
+        <p style={{ fontSize: 8, color: 'rgba(255,255,255,.8)', letterSpacing: 2, margin: 0 }}>{storeName || '매장명'}</p>
+        <p style={{ fontSize: 14, color: '#fff', fontWeight: 900, margin: '4px 0' }}>{title || '행사명'}</p>
+        {period && <span style={{ display: 'inline-block', fontSize: 8, fontWeight: 600, color: '#fff', background: 'rgba(255,255,255,.15)', padding: '3px 12px', borderRadius: 12, border: '1px solid rgba(255,255,255,.3)', marginTop: 4 }}>{period}</span>}
+      </div>
+      <div style={{ padding: '6px 6px 12px' }}>
+        {cleanCats.map((cat, ci) => (
+          <div key={ci} style={{ marginBottom: 6 }}>
+            <p style={{ fontSize: 9, fontWeight: 800, color: '#1e40af', margin: '8px 0 5px', display: 'flex', alignItems: 'center', gap: 4 }}>🎁 {cat.name}</p>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 5 }}>
+              {cat.items.map((item, ii) => {
+                const disc = item.originalPrice > 0 ? Math.round((1 - item.salePrice / item.originalPrice) * 100) : 0;
+                return (
+                  <div key={ii} style={{ background: '#fff', borderRadius: 10, overflow: 'hidden', border: '1px solid #e0f2fe' }}>
+                    <ImgOrEmoji item={item} h={55} />
+                    <div style={{ padding: '5px 6px 7px' }}>
+                      <p style={{ fontSize: 8, fontWeight: 700, margin: 0 }}>{item.name}</p>
+                      <div style={{ display: 'flex', alignItems: 'baseline', gap: 3, marginTop: 2 }}>
+                        {item.originalPrice > 0 && <span style={{ fontSize: 7, color: '#aaa', textDecoration: 'line-through' }}>{fmtPrice(item.originalPrice)}</span>}
+                        <span style={{ fontSize: 11, fontWeight: 900, color: '#2563eb' }}>{fmtPrice(item.salePrice)}원</span>
+                      </div>
+                      {disc > 0 && <span style={{ display: 'inline-block', fontSize: 6, fontWeight: 700, color: '#fff', background: '#0891b2', padding: '1px 5px', borderRadius: 6, marginTop: 2 }}>↓{disc}%</span>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  // ── 창고대방출 (노랑+빨강, 가격 최우선) ──
+  if (template === 'mart_clearance') return (
+    <div style={{ background: '#fffbeb', minHeight: '100%', fontFamily: 'system-ui, sans-serif' }}>
+      <div style={{ background: 'linear-gradient(135deg,#eab308,#dc2626)', padding: '14px 10px 12px', textAlign: 'center' }}>
+        <p style={{ fontSize: 7, color: '#fff', letterSpacing: 2, margin: 0 }}>{storeName || '매장명'}</p>
+        <p style={{ fontSize: 15, color: '#fff', fontWeight: 900, margin: '3px 0', textShadow: '0 2px 4px rgba(0,0,0,.2)' }}>{title || '행사명'}</p>
+        {maxDiscount > 0 && <span style={{ display: 'inline-block', background: '#fff', color: '#dc2626', fontSize: 9, fontWeight: 900, padding: '3px 12px', borderRadius: 12, margin: '4px 0' }}>최대 {maxDiscount}% 할인</span>}
+        {period && <p style={{ fontSize: 7, color: 'rgba(255,255,255,.85)', margin: '3px 0 0' }}>{period}</p>}
+      </div>
+      <div style={{ padding: '6px 6px 12px' }}>
+        {cleanCats.map((cat, ci) => (
+          <div key={ci} style={{ marginBottom: 6 }}>
+            <p style={{ fontSize: 9, fontWeight: 900, color: '#92400e', background: 'repeating-linear-gradient(45deg,#fef3c7,#fef3c7 8px,#fde68a 8px,#fde68a 16px)', padding: '5px 8px', borderRadius: 5, textAlign: 'center', margin: '8px 0 5px' }}>{cat.name}</p>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 5 }}>
+              {cat.items.map((item, ii) => {
+                const disc = item.originalPrice > 0 ? Math.round((1 - item.salePrice / item.originalPrice) * 100) : 0;
+                return (
+                  <div key={ii} style={{ background: '#fff', borderRadius: 8, padding: '8px 6px', textAlign: 'center', border: '2px solid #fde68a' }}>
+                    {disc > 0 && <p style={{ fontSize: 20, fontWeight: 900, color: '#dc2626', margin: 0, lineHeight: 1 }}>{disc}%<span style={{ fontSize: 9 }}>OFF</span></p>}
+                    <p style={{ fontSize: 12, fontWeight: 900, color: '#b91c1c', margin: '2px 0' }}>₩{fmtPrice(item.salePrice)}</p>
+                    {item.originalPrice > 0 && <p style={{ fontSize: 7, color: '#aaa', textDecoration: 'line-through', margin: 0 }}>₩{fmtPrice(item.originalPrice)}</p>}
+                    <p style={{ fontSize: 8, fontWeight: 700, color: '#333', margin: '3px 0 0' }}>{item.name}</p>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  // ── 프리미엄 정육 (다크+골드, 단일 컬럼) ──
+  if (template === 'butcher_premium') return (
+    <div style={{ background: '#0a0a0a', minHeight: '100%', fontFamily: 'system-ui, sans-serif' }}>
+      <div style={{ background: 'linear-gradient(180deg,#1a1a1a,#0a0a0a)', padding: '20px 10px 16px', textAlign: 'center', borderBottom: '3px solid #c9a84c' }}>
+        <p style={{ fontSize: 7, color: '#c9a84c', letterSpacing: 4, margin: 0 }}>{storeName || '매장명'}</p>
+        <p style={{ fontSize: 16, color: '#fff', fontWeight: 900, margin: '6px 0' }}>{title || '행사명'}</p>
+        {period && <p style={{ fontSize: 7, color: '#666', margin: 0 }}>{period}</p>}
+      </div>
+      <div style={{ padding: '8px 8px 12px' }}>
+        {cleanCats.map((cat, ci) => (
+          <div key={ci} style={{ marginBottom: 8 }}>
+            <p style={{ fontSize: 9, fontWeight: 800, color: '#c9a84c', textAlign: 'center', letterSpacing: 2, margin: '12px 0 8px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+              <span style={{ flex: 1, maxWidth: 40, height: 1, background: 'linear-gradient(90deg,transparent,#c9a84c)' }} />
+              {cat.name}
+              <span style={{ flex: 1, maxWidth: 40, height: 1, background: 'linear-gradient(90deg,#c9a84c,transparent)' }} />
+            </p>
+            {cat.items.map((item, ii) => {
+              const disc = item.originalPrice > 0 ? Math.round((1 - item.salePrice / item.originalPrice) * 100) : 0;
+              return (
+                <div key={ii} style={{ background: '#141414', border: '1px solid #2a2a2a', borderRadius: 10, overflow: 'hidden', marginBottom: 6 }}>
+                  <ImgOrEmoji item={item} h={90} />
+                  <div style={{ padding: '8px 10px 10px' }}>
+                    <p style={{ fontSize: 11, fontWeight: 800, color: '#fff', margin: 0 }}>{item.name}</p>
+                    {item.badge && <span style={{ display: 'inline-block', fontSize: 7, fontWeight: 700, color: '#c9a84c', border: '1px solid #c9a84c', padding: '1px 6px', borderRadius: 3, margin: '4px 0' }}>{item.badge}</span>}
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 4, marginTop: 3 }}>
+                      {item.originalPrice > 0 && <span style={{ fontSize: 8, color: '#555', textDecoration: 'line-through' }}>₩{fmtPrice(item.originalPrice)}</span>}
+                      <span style={{ fontSize: 15, fontWeight: 900, color: '#c9a84c' }}>₩{fmtPrice(item.salePrice)}</span>
+                    </div>
+                    {disc > 0 && <span style={{ display: 'inline-block', fontSize: 7, fontWeight: 700, background: '#c9a84c', color: '#000', padding: '2px 6px', borderRadius: 4, marginTop: 4 }}>-{disc}%</span>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  // ── 오늘의 고기 (빨강, 일일특가, Top 3) ──
+  if (template === 'butcher_daily') {
+    const top3 = allItems.slice(0, 3);
+    return (
+      <div style={{ background: '#fff1f2', minHeight: '100%', fontFamily: 'system-ui, sans-serif' }}>
+        <div style={{ background: 'linear-gradient(135deg,#dc2626,#e11d48)', padding: '16px 10px 14px', textAlign: 'center' }}>
+          <p style={{ fontSize: 8, color: 'rgba(255,255,255,.85)', letterSpacing: 2, margin: 0 }}>{storeName || '매장명'}</p>
+          <p style={{ fontSize: 14, color: '#fff', fontWeight: 900, margin: '4px 0' }}>{title || '행사명'}</p>
+          <span style={{ display: 'inline-block', background: '#fff', color: '#dc2626', fontSize: 8, fontWeight: 800, padding: '3px 10px', borderRadius: 10, marginTop: 4 }}>오늘만 이 가격!</span>
+        </div>
+        <div style={{ padding: '8px 6px 12px' }}>
+          {top3.length > 0 && (
+            <>
+              <p style={{ fontSize: 10, fontWeight: 900, color: '#dc2626', textAlign: 'center', margin: '6px 0 6px' }}>🥩 오늘의 추천</p>
+              {top3.map((item, i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#fff', borderRadius: 10, padding: 6, marginBottom: 5, borderLeft: '3px solid #dc2626', position: 'relative' }}>
+                  <div style={{ width: 44, height: 44, flexShrink: 0, borderRadius: 8, overflow: 'hidden' }}><ImgOrEmoji item={item} h={44} /></div>
+                  <div style={{ flex: 1 }}>
+                    <p style={{ fontSize: 9, fontWeight: 800, margin: 0 }}>{item.name}</p>
+                    <span style={{ fontSize: 12, fontWeight: 900, color: '#dc2626' }}>₩{fmtPrice(item.salePrice)}</span>
+                  </div>
+                  {item.discount > 0 && <span style={{ position: 'absolute', top: 4, right: 4, background: '#dc2626', color: '#fff', fontSize: 7, fontWeight: 800, padding: '1px 5px', borderRadius: 5 }}>{item.discount}%</span>}
+                </div>
+              ))}
+            </>
+          )}
+          {cleanCats.map((cat, ci) => (
+            <div key={ci} style={{ marginBottom: 6 }}>
+              <p style={{ fontSize: 9, fontWeight: 800, color: '#fff', background: 'linear-gradient(90deg,#dc2626,#e11d48)', padding: '5px 8px', borderRadius: 6, textAlign: 'center', margin: '8px 0 5px' }}>{cat.name}</p>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
+                {cat.items.map((item, ii) => (
+                  <div key={ii} style={{ background: '#fff', borderRadius: 8, padding: '8px 6px', textAlign: 'center' }}>
+                    <p style={{ fontSize: 8, fontWeight: 700, margin: 0 }}>{item.name}</p>
+                    <p style={{ fontSize: 11, fontWeight: 900, color: '#dc2626', margin: '2px 0 0' }}>₩{fmtPrice(item.salePrice)}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // ── 대용량 팩 (네이비, 절약액 강조) ──
+  if (template === 'butcher_bulk') return (
+    <div style={{ background: '#eef2ff', minHeight: '100%', fontFamily: 'system-ui, sans-serif' }}>
+      <div style={{ background: 'linear-gradient(135deg,#1e3a8a,#3730a3)', padding: '16px 10px 20px', textAlign: 'center', borderRadius: '0 0 50% 50% / 0 0 12px 12px' }}>
+        <p style={{ fontSize: 8, color: 'rgba(255,255,255,.8)', letterSpacing: 2, margin: 0 }}>{storeName || '매장명'}</p>
+        <p style={{ fontSize: 13, color: '#fff', fontWeight: 900, margin: '4px 0' }}>{title || '행사명'}</p>
+        <p style={{ fontSize: 9, fontWeight: 700, color: '#a5b4fc', margin: '3px 0' }}>대용량 특가 — 많이 살수록 이득!</p>
+        {period && <p style={{ fontSize: 7, color: 'rgba(255,255,255,.6)', margin: 0 }}>{period}</p>}
+      </div>
+      <div style={{ padding: '6px 6px 12px' }}>
+        {cleanCats.map((cat, ci) => (
+          <div key={ci} style={{ marginBottom: 6 }}>
+            <p style={{ fontSize: 9, fontWeight: 800, color: '#1e3a8a', margin: '8px 0 5px', display: 'flex', alignItems: 'center', gap: 4 }}>📦 {cat.name}</p>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 5 }}>
+              {cat.items.map((item, ii) => {
+                const disc = item.originalPrice > 0 ? Math.round((1 - item.salePrice / item.originalPrice) * 100) : 0;
+                const saving = item.originalPrice > 0 ? item.originalPrice - item.salePrice : 0;
+                return (
+                  <div key={ii} style={{ background: '#fff', borderRadius: 10, overflow: 'hidden', border: '1px solid #c7d2fe', textAlign: 'center' }}>
+                    <ImgOrEmoji item={item} h={50} />
+                    <div style={{ padding: '5px 6px 7px' }}>
+                      <p style={{ fontSize: 8, fontWeight: 800, margin: 0 }}>{item.name}</p>
+                      {item.badge && <span style={{ display: 'inline-block', fontSize: 7, fontWeight: 600, color: '#6366f1', background: '#eef2ff', padding: '1px 5px', borderRadius: 4, margin: '2px 0' }}>{item.badge}</span>}
+                      <p style={{ fontSize: 12, fontWeight: 900, color: '#1e3a8a', margin: '2px 0 0' }}>₩{fmtPrice(item.salePrice)}</p>
+                      {saving > 0 && <p style={{ fontSize: 7, fontWeight: 700, color: '#16a34a', margin: '1px 0 0' }}>₩{fmtPrice(saving)} 절약</p>}
+                      {disc > 0 && <span style={{ display: 'inline-block', fontSize: 6, fontWeight: 800, color: '#fff', background: '#4338ca', padding: '1px 5px', borderRadius: 4, marginTop: 2 }}>{disc}% OFF</span>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  // ── 폴백: 그리드형 스타일 ──
+  return (
+    <div style={{ background: '#f2f2f2', minHeight: '100%', fontFamily: 'system-ui, sans-serif', padding: 10 }}>
+      <p style={{ fontSize: 10, color: '#999', textAlign: 'center', marginTop: 30 }}>템플릿 미리보기 준비 중...</p>
     </div>
   );
 }
