@@ -64,6 +64,70 @@ export function formatDate(dateStr: string | null | undefined): string {
  * 사용처: Dashboard.tsx, TargetSendModal.tsx, AiCustomSendFlow.tsx,
  *          AiPreviewModal.tsx, DirectPreviewModal.tsx, AiCampaignResultPopup.tsx
  */
+/**
+ * ★ D111: 숫자 포맷팅 컨트롤타워 (프론트)
+ *
+ * 백엔드 backend/utils/format-number.ts 의 formatNumericLike 와 **완전 동일한 규칙**.
+ * 규칙 변경 시 반드시 양쪽 동시 수정 — 한쪽만 고치면 미리보기/실전송 불일치 재발.
+ *
+ * 정책 (Harold님 확정):
+ *   - 정수 그대로 (강제 소수점 금지): 50000 → "50,000" (NOT "50,000.00")
+ *   - trailing zero 제거: 50000.00 → "50,000"
+ *   - 유효 소수 보존: 50000.5 → "50,000.5", 50000.55 → "50,000.55"
+ *   - 전화번호(0시작/하이픈) 제외
+ *   - YYMMDD / YYYYMMDD 날짜 제외 (월/일 범위 검증)
+ *
+ * 숫자로 포맷 가능하면 문자열, 아니면 null 반환.
+ */
+export function formatNumericLike(value: any): string | null {
+  if (value === null || value === undefined) return null;
+
+  if (typeof value === 'number') {
+    if (!isFinite(value)) return null;
+    return formatFiniteNumberFront(value);
+  }
+
+  const str = String(value).trim();
+  if (!str) return null;
+
+  // 1. 전화번호 제외: 0 시작 순수 숫자
+  if (/^0\d+$/.test(str)) return null;
+
+  // 2. 하이픈 포함 숫자열 제외 (1800-8125 등)
+  if (/^\d[\d-]+\d$/.test(str) && str.includes('-')) return null;
+
+  // 3. 쉼표 제거 후 정수/소수 패턴 매칭
+  const clean = str.replace(/,/g, '');
+  if (!/^-?\d+(\.\d+)?$/.test(clean)) return null;
+
+  // 4. YYMMDD 날짜 제외
+  if (/^\d{6}$/.test(clean)) {
+    const mm = parseInt(clean.slice(2, 4), 10);
+    const dd = parseInt(clean.slice(4, 6), 10);
+    if (mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) return null;
+  }
+
+  // 5. YYYYMMDD 날짜 제외
+  if (/^\d{8}$/.test(clean)) {
+    const mm = parseInt(clean.slice(4, 6), 10);
+    const dd = parseInt(clean.slice(6, 8), 10);
+    if (mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) return null;
+  }
+
+  const num = Number(clean);
+  if (isNaN(num) || !isFinite(num)) return null;
+  return formatFiniteNumberFront(num);
+}
+
+function formatFiniteNumberFront(num: number): string {
+  if (Number.isInteger(num)) {
+    return num.toLocaleString('ko-KR');
+  }
+  const [intPart, decPart] = num.toString().split('.');
+  const intFormatted = Number(intPart).toLocaleString('ko-KR');
+  return decPart ? `${intFormatted}.${decPart}` : intFormatted;
+}
+
 export function formatPreviewValue(val: any): string {
   if (val == null || val === '') return '';
   const str = String(val);
@@ -79,30 +143,10 @@ export function formatPreviewValue(val: any): string {
   if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
     return formatDate(str);
   }
-  // ★ YYMMDD 날짜 보호: 6자리 숫자가 유효한 날짜 범위면 포맷팅 제외 (260331 → 260,331 방지)
-  if (/^\d{6}$/.test(str)) {
-    const mm = parseInt(str.slice(2, 4));
-    const dd = parseInt(str.slice(4, 6));
-    if (mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) return str;
-  }
-  // ★ YYYYMMDD 날짜 보호: 8자리도 동일 (20260331 → 20,260,331 방지)
-  if (/^\d{8}$/.test(str)) {
-    const mm = parseInt(str.slice(4, 6));
-    const dd = parseInt(str.slice(6, 8));
-    if (mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) return str;
-  }
-  // ★ 전화번호 보호: 숫자 포맷팅 제외 대상
-  // - 0으로 시작하는 순수 숫자 (01012345678 → 1,012,345,678 방지)
-  // - 하이픈 포함 숫자열 (1800-8125, 02-1234-5678 등 전화번호 형태)
-  const numStr = str.replace(/,/g, '');
-  if (/^0\d+$/.test(numStr)) return str;
-  if (/^\d[\d-]+\d$/.test(str) && str.includes('-')) return str;
-  // 숫자: 소수점 제거 + 천단위 쉼표
-  if (/^-?\d+(\.\d+)?$/.test(numStr)) {
-    const num = Number(numStr);
-    if (!isNaN(num) && Number.isFinite(num)) return num.toLocaleString('ko-KR');
-  }
-  return str;
+  // ★ D111: 숫자/전화/YYMMDD 처리를 formatNumericLike 컨트롤타워로 통합
+  //   이전: 인라인으로 정수/소수/전화번호/YYMMDD 규칙이 중복 구현됨 → 백엔드와 불일치 발생
+  const fmt = formatNumericLike(str);
+  return fmt !== null ? fmt : str;
 }
 
 export function formatDateTimeShort(dateStr: string | null | undefined): string {
@@ -269,27 +313,15 @@ function formatDatePreview(val: any): string {
 }
 
 /**
- * ★ D101: 숫자 값을 천단위 쉼표 포맷 (소수점 제거)
+ * ★ D111: 숫자 포맷 — formatNumericLike 컨트롤타워 호출 1줄로 통합
+ *   이전: 인라인으로 정수/소수/전화번호/YYMMDD 규칙이 중복 구현됨 (formatPreviewValue와 불일치)
+ *   변경: 공용 컨트롤타워로 규칙 한 곳에서 관리
  */
 function formatNumberPreview(val: any): string {
   if (val == null || val === '') return '';
   const str = String(val).trim();
-  // 0으로 시작하는 순수 숫자 (전화번호) — 포맷팅 제외
-  if (/^0\d+$/.test(str.replace(/,/g, ''))) return str;
-  // ★ D104: YYMMDD/YYYYMMDD 날짜 보호 (data_type 오감지 대응)
-  if (/^\d{6}$/.test(str)) {
-    const mm = parseInt(str.slice(2, 4)), dd = parseInt(str.slice(4, 6));
-    if (mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) return str;
-  }
-  if (/^\d{8}$/.test(str)) {
-    const mm = parseInt(str.slice(4, 6)), dd = parseInt(str.slice(6, 8));
-    if (mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) return str;
-  }
-  // 하이픈 포함 숫자열 (전화번호 형태) — 포맷팅 제외
-  if (/^\d[\d-]+\d$/.test(str) && str.includes('-')) return str;
-  const num = Number(str.replace(/,/g, ''));
-  if (!isNaN(num) && Number.isFinite(num)) return num.toLocaleString('ko-KR');
-  return str;
+  const fmt = formatNumericLike(str);
+  return fmt !== null ? fmt : str;
 }
 
 /**

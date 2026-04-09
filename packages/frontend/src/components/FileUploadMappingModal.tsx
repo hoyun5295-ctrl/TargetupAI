@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import UploadMappingConflictModal, { type MappingConflict, type ConflictResolution } from './UploadMappingConflictModal';
 import { formatPreviewValue } from '../utils/formatDate';
 
 // ─── 타입 ───
@@ -61,6 +62,13 @@ export default function FileUploadMappingModal({ show, onClose, onSaveStart, onP
   // 팝업 (어떤 필드의 선택 팝업이 열려 있는지 + 위치)
   const [activePopup, setActivePopup] = useState<string | null>(null);
   const [popupPos, setPopupPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
+
+  // ★ D111: 매핑 충돌 검증 상태
+  const [conflictModal, setConflictModal] = useState<{
+    show: boolean;
+    conflicts: MappingConflict[];
+    availableSlots: string[];
+  }>({ show: false, conflicts: [], availableSlots: [] });
 
   // 팝업 열기 (클릭 위치 기반)
   const openPopup = (key: string, e: React.MouseEvent) => {
@@ -272,7 +280,7 @@ export default function FileUploadMappingModal({ show, onClose, onSaveStart, onP
     setCustomSlots(newSlots);
   };
 
-  // 저장
+  // ★ D111: 매핑 충돌 검증 → 충돌 없으면 저장 / 있으면 모달 표시
   const handleSave = async () => {
     setLoading(true);
     try {
@@ -281,13 +289,57 @@ export default function FileUploadMappingModal({ show, onClose, onSaveStart, onP
         if (slot.label) customLabels[slot.fieldKey] = slot.label;
       }
 
+      // 1단계: 충돌 검증 (컨트롤타워 /validate-mapping)
+      const validateRes = await fetch('/api/upload/validate-mapping', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('token')}`,
+        },
+        body: JSON.stringify({ fileId, mapping, customLabels }),
+      });
+      const validateData = await validateRes.json();
+      if (!validateRes.ok || !validateData.success) {
+        alert(validateData.error || '매핑 검증 실패');
+        setLoading(false);
+        return;
+      }
+
+      const conflicts: MappingConflict[] = validateData.conflicts || [];
+      const errorConflicts = conflicts.filter((c: MappingConflict) => c.severity === 'error');
+
+      if (errorConflicts.length > 0) {
+        // 에러 충돌 있음 → 모달로 사용자 해결 유도
+        setConflictModal({
+          show: true,
+          conflicts,
+          availableSlots: validateData.availableSlots || [],
+        });
+        setLoading(false);
+        return;
+      }
+
+      // 충돌 없음 → 저장
+      await handleSaveCore(mapping, customLabels);
+    } catch {
+      alert('저장 요청 중 오류가 발생했습니다.');
+      setLoading(false);
+    }
+  };
+
+  // 실제 /save 호출 — 해결된 매핑 사용
+  const handleSaveCore = async (
+    finalMapping: Record<string, string | null>,
+    finalLabels: Record<string, string>
+  ) => {
+    try {
       const res = await fetch('/api/upload/save', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('token')}`
+          Authorization: `Bearer ${localStorage.getItem('token')}`,
         },
-        body: JSON.stringify({ fileId, mapping, customLabels })
+        body: JSON.stringify({ fileId, mapping: finalMapping, customLabels: finalLabels }),
       });
       const data = await res.json();
 
@@ -309,6 +361,36 @@ export default function FileUploadMappingModal({ show, onClose, onSaveStart, onP
     } finally {
       setLoading(false);
     }
+  };
+
+  // ★ D111: 충돌 모달에서 해결책 받아서 매핑 재구성 후 저장 진행
+  const handleConflictResolve = async (resolutions: ConflictResolution[]) => {
+    setConflictModal({ show: false, conflicts: [], availableSlots: [] });
+    setLoading(true);
+
+    // 기존 매핑/라벨 복사 후 resolution 반영
+    const newMapping: Record<string, string | null> = { ...mapping };
+    const newLabels: Record<string, string> = {};
+    for (const slot of customSlots) {
+      if (slot.label) newLabels[slot.fieldKey] = slot.label;
+    }
+
+    for (const r of resolutions) {
+      if (r.action === 'keep_existing') {
+        // 해당 컬럼을 업로드에서 제외
+        newMapping[r.header] = null;
+      } else if (r.action === 'overwrite') {
+        // 매핑 그대로 유지 — 백엔드가 기존 라벨/타입 덮어씀
+        // (no-op)
+      } else if (r.action === 'move_slot' && r.newSlot) {
+        // 사용자가 선택한 다른 슬롯으로 이동
+        const oldLabel = newLabels[newMapping[r.header] as string];
+        newMapping[r.header] = r.newSlot;
+        if (oldLabel) newLabels[r.newSlot] = oldLabel;
+      }
+    }
+
+    await handleSaveCore(newMapping, newLabels);
   };
 
   // 전체 닫기
@@ -696,6 +778,18 @@ export default function FileUploadMappingModal({ show, onClose, onSaveStart, onP
         )}
 
       </div>
+
+      {/* ★ D111: 매핑 충돌 해결 모달 */}
+      <UploadMappingConflictModal
+        show={conflictModal.show}
+        conflicts={conflictModal.conflicts}
+        availableSlots={conflictModal.availableSlots}
+        onCancel={() => {
+          setConflictModal({ show: false, conflicts: [], availableSlots: [] });
+          setLoading(false);
+        }}
+        onResolve={handleConflictResolve}
+      />
     </div>
   );
 }

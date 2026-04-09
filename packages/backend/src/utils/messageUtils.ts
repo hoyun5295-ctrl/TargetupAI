@@ -11,6 +11,7 @@
  */
 
 import { VarCatalogEntry, extractVarCatalog } from '../services/ai';
+import { formatNumericLike } from './format-number';
 import { reverseDisplayValue, FIELD_DISPLAY_MAP } from './standard-field-map';
 import { query } from '../config/database';
 
@@ -228,9 +229,9 @@ export function replaceVariables(
       // ★ B+0407-1: enum 필드(gender 등) → 한글 역변환 (FIELD_DISPLAY_MAP 컨트롤타워)
       displayValue = reverseDisplayValue(mapping.column, rawValue);
     } else if (mapping.type === 'number') {
-      // ★ D88+D102: PostgreSQL numeric→string 파싱 + 정수 반올림 + ko-KR 로케일 명시
-      const numVal = typeof rawValue === 'number' ? rawValue : Number(String(rawValue).replace(/,/g, ''));
-      displayValue = !isNaN(numVal) ? Math.round(numVal).toLocaleString('ko-KR') : String(rawValue);
+      // ★ D111: formatNumericLike 컨트롤타워 — 정수/소수 자동 포맷, trailing zero 제거, 전화/YYMMDD 제외
+      const fmt = formatNumericLike(rawValue);
+      displayValue = fmt !== null ? fmt : String(rawValue);
     } else if (mapping.type === 'date' && rawValue) {
       // ★ D100: 날짜 KST 고정 — 순수 YYYY-MM-DD는 new Date() 없이 직접 파싱 (하루 밀림 방지)
       displayValue = formatDateValue(rawValue);
@@ -239,14 +240,12 @@ export function replaceVariables(
       // ★ D100: 날짜 패턴 자동 감지 — 순수 YYYY-MM-DD는 직접 파싱, ISO는 KST 변환
       if (/^\d{4}-\d{2}-\d{2}($|T|\s)/.test(strVal)) {
         displayValue = formatDateValue(strVal);
-      // ★ D101: 소수점 숫자 자동 감지 — "50000.00" → "50,000" (field_type=VARCHAR인 기존 데이터 대응)
-      // 전화번호(0으로 시작)와 하이픈 포함 번호는 제외
-      } else if (/^-?\d+\.\d+$/.test(strVal.replace(/,/g, '')) && !/^0\d/.test(strVal)) {
-        // ★ D102: 정수 반올림 + ko-KR 로케일 명시 (소수점 2자리 제거)
-        const numVal = Number(strVal.replace(/,/g, ''));
-        displayValue = !isNaN(numVal) ? Math.round(numVal).toLocaleString('ko-KR') : strVal;
       } else {
-        displayValue = strVal;
+        // ★ D111: 정수/소수 자동 감지 — formatNumericLike 컨트롤타워 (field_type=VARCHAR 기존 데이터 대응)
+        //   이전: /^-?\d+\.\d+$/ (소수점 필수) 패턴 → 정수 50000 감지 못함 → 쉼표 없이 발송
+        //   변경: formatNumericLike — 정수도 감지, trailing zero 제거, 전화번호/YYMMDD 제외
+        const fmt = formatNumericLike(strVal);
+        displayValue = fmt !== null ? fmt : strVal;
       }
     }
 

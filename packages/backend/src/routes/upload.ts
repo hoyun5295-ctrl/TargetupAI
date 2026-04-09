@@ -7,6 +7,7 @@ import { query } from '../config/database';
 import { redis, AI_MODELS, AI_MAX_TOKENS, CACHE_TTL, TIMEOUTS, BATCH_SIZES } from '../config/defaults';
 import { normalizeByFieldKey, normalizeRegion, normalizeDate, normalizeCustomFieldValue } from '../utils/normalize';
 import { CATEGORY_LABELS, FIELD_MAP, getColumnFields, getCustomFields, getFieldByKey, upsertCustomFieldDefinitions } from '../utils/standard-field-map';
+import { validateUploadMapping } from '../utils/upload-mapping-validator';
 
 // ★ D79: 날짜 정규화는 컨트롤타워(normalize.ts)의 normalizeDate() 사용
 // 인라인 normalizeDate 제거 — 컨트롤타워 원칙 위반이었음
@@ -303,6 +304,73 @@ JSON 형식으로만 응답해줘 (다른 설명 없이):
   } catch (error: any) {
     console.error('매핑 에러:', error);
     return res.status(500).json({ error: error.message || '매핑 중 오류가 발생했습니다.' });
+  }
+});
+
+// ================================================================
+// POST /validate-mapping — 업로드 매핑 충돌 검증 (D111)
+// ================================================================
+// Harold님 지시: 기존 customer_field_definitions 와 매핑 충돌 사전 감지.
+// /mapping 직후 /save 호출 전에 반드시 이 API 통과.
+// 컨트롤타워: utils/upload-mapping-validator.ts validateUploadMapping
+// ================================================================
+router.post('/validate-mapping', authenticate, async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const { fileId, mapping, customLabels } = req.body as {
+      fileId: string;
+      mapping: Record<string, string | null>;
+      customLabels?: Record<string, string>;
+    };
+
+    if (!companyId) {
+      return res.status(403).json({ error: '권한이 없습니다.' });
+    }
+    if (!fileId || !mapping) {
+      return res.status(400).json({ error: 'fileId, mapping 은 필수입니다.' });
+    }
+
+    const uploadDir = path.join(__dirname, '../../uploads');
+    const safeFileId = path.basename(fileId);
+    const filePath = path.join(uploadDir, safeFileId);
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: '파일을 찾을 수 없습니다. 다시 업로드해주세요.' });
+    }
+
+    // 파일에서 샘플 20행 추출 — 타입 감지용
+    const workbook = XLSX.readFile(filePath, {
+      type: 'file',
+      cellFormula: false,
+      cellHTML: false,
+      cellStyles: false,
+      cellDates: true,
+      raw: false,
+      sheetStubs: false,
+    });
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const data = XLSX.utils.sheet_to_json(sheet, { header: 1 }) as any[][];
+    if (data.length === 0) {
+      return res.status(400).json({ error: '파일이 비어있습니다.' });
+    }
+    const headers = (data[0] as any[]).map((h: any) => String(h || ''));
+    const rows = data.slice(1, Math.min(21, data.length));
+
+    const sampleData: Record<string, any[]> = {};
+    headers.forEach((h, idx) => {
+      sampleData[h] = rows.map(r => r[idx]);
+    });
+
+    const result = await validateUploadMapping(
+      companyId,
+      mapping,
+      customLabels || {},
+      sampleData
+    );
+
+    return res.json({ success: true, ...result });
+  } catch (error: any) {
+    console.error('매핑 검증 에러:', error);
+    return res.status(500).json({ error: error.message || '매핑 검증 중 오류가 발생했습니다.' });
   }
 });
 
