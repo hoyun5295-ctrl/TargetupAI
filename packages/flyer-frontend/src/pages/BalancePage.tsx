@@ -37,9 +37,9 @@ export default function BalancePage({ token }: { token: string }) {
       if (endDate) params.set('endDate', endDate);
 
       const [bRes, tRes, sRes] = await Promise.all([
-        apiFetch(`${API_BASE}/api/balance`),
-        apiFetch(`${API_BASE}/api/balance/transactions?${params}`),
-        apiFetch(`${API_BASE}/api/balance/summary?months=6`),
+        apiFetch(`${API_BASE}/api/flyer/balance`),
+        apiFetch(`${API_BASE}/api/flyer/balance/transactions?${params}`),
+        apiFetch(`${API_BASE}/api/flyer/balance/summary?months=6`),
       ]);
       if (bRes.ok) setBalance(await bRes.json());
       if (tRes.ok) { const d = await tRes.json(); setTransactions(d.transactions || d || []); setTotal(d.total || 0); }
@@ -61,7 +61,7 @@ export default function BalancePage({ token }: { token: string }) {
 
     setDepositing(true);
     try {
-      const res = await apiFetch(`${API_BASE}/api/balance/deposit-request`, {
+      const res = await apiFetch(`${API_BASE}/api/flyer/balance/deposit-request`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ amount, depositorName: depositorName.trim() }),

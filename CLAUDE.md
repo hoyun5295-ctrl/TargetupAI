@@ -88,6 +88,8 @@
 
 ## 3. 필수 참조 문서 (status/ 폴더)
 
+### 3-1. 한줄로AI 작업 시 (기본)
+
 | 문서 | 용도 | 언제 읽나 |
 |------|------|-----------|
 | **STATUS.md** | 전체 프로젝트 현황 + CURRENT_TASK + 아키텍처 상세 | **매 세션 시작 시 반드시** |
@@ -95,6 +97,36 @@
 | **OPS.md** | 서버/배포/인프라/파일구조/Nginx/SSL | 서버 관련 작업 시 |
 | **SCHEMA.md** | PostgreSQL/MySQL 전체 DB 스키마 | 쿼리 작성/DB 작업 시 |
 | **FIELD-INTEGRATION.md** | 필드 매핑 통합 기준 문서 | 필드/매핑 관련 작업 시 |
+
+### 3-2. 전단AI 작업 시 (완전 분리 — D112~)
+
+> **⚠️ 전단AI 작업 시에는 아래 FLYER-*.md만 참조한다. 한줄로 STATUS.md/BUGS.md/SCHEMA.md 건드리지 않는다.**
+> **반대로 한줄로 작업 시에는 FLYER-*.md 건드리지 않는다.**
+> **이유:** 한줄로 레거시 이관(4/13)과 전단AI 대확장이 병렬 진행되므로 문서·데이터·코드 전부 격리 필요.
+
+| 문서 | 용도 |
+|------|------|
+| **FLYER-STATUS.md** | 전단AI CURRENT_TASK + 구현 현황 (전단AI 세션 시작 시 반드시) |
+| **FLYER-AI-DESIGN.md** | 초기 설계 + 컨셉 |
+| **FLYER-BUGS.md** | 전단AI 전용 버그 트래커 |
+| **FLYER-SCHEMA.md** | flyer_* 테이블 스키마 |
+| **FLYER-MART-ROADMAP.md** | 마트 18개 기능 마스터 로드맵 |
+| **FLYER-MIGRATION-PLAN.md** | 계정/데이터 완전 분리 이관 계획 (방식 B) |
+| **FLYER-POS-AGENT.md** | POS Agent(SyncAgent 확장) 설계 |
+| **FLYER-SUPERADMIN.md** | 슈퍼관리자 통합 + 서비스 스위처 설계 |
+
+**전단AI 코드 영역 (D112 이관 후):**
+- 백엔드 라우트: `packages/backend/src/routes/flyer/*` + `packages/backend/src/routes/admin/flyer/*`
+- 백엔드 유틸: `packages/backend/src/utils/flyer/*`
+- 프론트엔드: `packages/flyer-frontend/*`
+- DB 테이블: `flyer_*` prefix만
+
+**전단AI 작업 시 한줄로 건드리면 안 되는 것:**
+- ❌ `packages/backend/src/routes/campaigns.ts` (한줄로 기간계)
+- ❌ `packages/backend/src/routes/customers.ts`
+- ❌ `packages/backend/src/routes/companies.ts`
+- ❌ `packages/backend/src/utils/` CT-01~CT-15 (필요 시 `utils/flyer/`에 래퍼 복제)
+- ❌ companies/users/customers/campaigns 등 한줄로 테이블
 
 ---
 

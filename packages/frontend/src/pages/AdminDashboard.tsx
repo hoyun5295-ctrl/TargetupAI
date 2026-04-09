@@ -4,6 +4,7 @@ import { companiesApi, plansApi, billingApi } from '../api/client';
 import { useAuthStore } from '../stores/authStore';
 import { formatDateTime, formatDate, formatDateTimeShort, formatCampaignMessageForDisplay } from '../utils/formatDate';
 import SessionTimer from '../components/SessionTimer';
+import ServiceSwitcher from '../components/ServiceSwitcher'; // ★ D112
 import { COMPANY_NAME_EN, COMPANY_EMAIL } from '../constants/company';
 
 interface Company {
@@ -2132,7 +2133,30 @@ const handleApproveRequest = async (id: string) => {
       {/* 헤더 */}
       <header className="bg-white shadow">
         <div className="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
-        <h1 className="text-xl font-bold text-gray-800 cursor-pointer hover:text-blue-600 transition" onClick={() => window.location.reload()}>한줄로 시스템 관리</h1>
+        <div className="flex items-center gap-4">
+            <h1 className="text-xl font-bold text-gray-800 cursor-pointer hover:text-blue-600 transition" onClick={() => window.location.reload()}>시스템 관리</h1>
+            {/* ★ D112: 서비스 스위처 — 한줄로AI ↔ 전단AI 전환 */}
+            <ServiceSwitcher
+              currentService="hanjullo"
+              onSwitch={async (to) => {
+                if (to === 'flyer') {
+                  try {
+                    const token = localStorage.getItem('token');
+                    const res = await fetch('/api/admin/switch-service', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                      body: JSON.stringify({ to: 'flyer' }),
+                    });
+                    if (res.ok) {
+                      const data = await res.json();
+                      localStorage.setItem('token', data.token);
+                      navigate('/admin/flyer');
+                    }
+                  } catch (e) { console.error('서비스 전환 실패:', e); }
+                }
+              }}
+            />
+          </div>
           <div className="flex items-center gap-4">
             <SessionTimer />
             <span className="text-sm text-gray-600">{user?.name}님</span>

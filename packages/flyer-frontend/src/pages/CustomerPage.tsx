@@ -37,7 +37,7 @@ export default function CustomerPage({ token }: { token: string }) {
     try {
       const params = new URLSearchParams({ page: String(page), limit: String(PER_PAGE) });
       if (search.trim()) params.set('search', search.trim());
-      const res = await apiFetch(`${API_BASE}/api/customers?${params}`);
+      const res = await apiFetch(`${API_BASE}/api/flyer/customers?${params}`);
       if (res.ok) {
         const d = await res.json();
         setCustomers(d.customers || d.data || []);
@@ -62,7 +62,7 @@ export default function CustomerPage({ token }: { token: string }) {
     const formData = new FormData();
     formData.append('file', file);
     try {
-      const res = await apiFetch(`${API_BASE}/api/upload/parse?includeData=true`, {
+      const res = await apiFetch(`${API_BASE}/api/flyer/customers/upload-parse?includeData=true`, {
         method: 'POST', body: formData,
       });
       const data = await res.json();
@@ -88,7 +88,7 @@ export default function CustomerPage({ token }: { token: string }) {
     }
     setSaving(true);
     try {
-      const res = await apiFetch(`${API_BASE}/api/upload/save`, {
+      const res = await apiFetch(`${API_BASE}/api/flyer/customers/upload`, {
         method: 'POST', headers: jsonHeaders,
         body: JSON.stringify({ fileId, mapping: columnMapping }),
       });
@@ -108,7 +108,7 @@ export default function CustomerPage({ token }: { token: string }) {
   // 고객 삭제
   const handleDelete = async (id: string) => {
     try {
-      const res = await apiFetch(`${API_BASE}/api/customers/${id}`, { method: 'DELETE' });
+      const res = await apiFetch(`${API_BASE}/api/flyer/customers/${id}`, { method: 'DELETE' });
       if (res.ok) {
         setAlert({ show: true, title: '삭제 완료', message: '고객이 삭제되었습니다.', type: 'success' });
         setDeleteModal({ show: false, id: '', phone: '' });

@@ -29,7 +29,7 @@ export default function ResultsPage({ token }: { token: string }) {
       setLoading(true);
       try {
         const [cRes, fRes] = await Promise.all([
-          apiFetch(`${API_BASE}/api/v1/results?limit=50`),
+          apiFetch(`${API_BASE}/api/flyer/stats/results?limit=50`),
           apiFetch(`${API_BASE}/api/flyer/flyers`),
         ]);
         if (cRes.ok) { const d = await cRes.json(); setCampaigns(d.campaigns || d.results || []); }
@@ -52,7 +52,7 @@ export default function ResultsPage({ token }: { token: string }) {
     setDetailLoading(true);
     setDetailRecipients([]);
     try {
-      const res = await apiFetch(`${API_BASE}/api/v1/results/${c.id}/recipients?limit=100`);
+      const res = await apiFetch(`${API_BASE}/api/flyer/stats/results/${c.id}/recipients?limit=100`);
       if (res.ok) {
         const d = await res.json();
         setDetailRecipients(d.recipients || d.data || []);

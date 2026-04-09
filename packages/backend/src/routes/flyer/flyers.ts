@@ -2,8 +2,8 @@
  * ★ 전단AI: 전단지 CRUD API
  *
  * 마운트: /api/flyer/flyers
- * 권한: company_admin + company_user (authenticate 미들웨어)
- * 기존 컨트롤타워 재활용: store-scope.ts (브랜드 격리)
+ * 권한: flyer_admin + flyer_staff (flyerAuthenticate 미들웨어)
+ * ★ D112: 한줄로 authenticate → flyerAuthenticate 전환. store-scope 제거(전단AI는 회사 단위).
  */
 
 import { Request, Response, Router } from 'express';
@@ -13,8 +13,8 @@ import fs from 'fs';
 import multer from 'multer';
 import { v4 as uuidv4 } from 'uuid';
 import { query } from '../../config/database';
-import { authenticate } from '../../middlewares/auth';
-import { getStoreScope } from '../../utils/store-scope';
+import { flyerAuthenticate } from '../../middlewares/flyer-auth';
+// ★ D112: getStoreScope 제거. 전단AI는 store_code 없이 company_id 단위 격리.
 import { generateProductImage, generateFlyerImages, getGeneratedImageUrl } from '../../utils/product-images';
 import { LIMITS } from '../../config/defaults';
 
@@ -124,7 +124,7 @@ router.get('/flyer-mms/:companyId/:filename', (req: Request, res: Response) => {
 // ══════════════════════════════════════════
 // 이하 모든 라우트는 인증 필요
 // ══════════════════════════════════════════
-router.use(authenticate);
+router.use(flyerAuthenticate);
 
 // ============================================================
 // ★ 전단AI 전용 MMS 이미지 업로드 (한줄로 MMS 보관함과 완전 분리)
@@ -156,7 +156,7 @@ router.post('/mms-upload', (req: any, res: any) => {
     const files = req.files as Express.Multer.File[];
     if (!files || files.length === 0) return res.status(400).json({ error: '이미지 파일을 선택해주세요' });
 
-    const companyId = req.user.companyId;
+    const companyId = req.flyerUser!.companyId;
     if (!companyId) return res.status(400).json({ error: '회사 정보를 찾을 수 없습니다' });
 
     try {
@@ -224,7 +224,7 @@ router.post('/product-image', (req: Request, res: Response) => {
       return res.status(400).json({ error: '이미지 파일을 선택해주세요.' });
     }
 
-    const companyId = (req as any).user?.companyId;
+    const companyId = req.flyerUser?.companyId;
     if (!companyId) {
       return res.status(403).json({ error: '회사 정보가 없습니다.' });
     }
@@ -257,7 +257,7 @@ router.post('/product-image', (req: Request, res: Response) => {
 // ============================================================
 router.delete('/product-image', async (req: Request, res: Response) => {
   try {
-    const companyId = (req as any).user?.companyId;
+    const companyId = req.flyerUser?.companyId;
     if (!companyId) return res.status(403).json({ error: '회사 정보가 없습니다.' });
 
     const { url } = req.body;
@@ -301,8 +301,9 @@ function generateShortCode(length = 7): string {
 }
 
 // ── company_id 필수 체크 ──
+// ★ D112: req.flyerUser 기반으로 전환. req.user 미사용.
 function requireCompanyId(req: Request, res: Response): string | null {
-  const companyId = req.user?.companyId;
+  const companyId = req.flyerUser?.companyId;
   if (!companyId) {
     res.status(403).json({ error: '회사 정보가 없습니다.' });
     return null;
@@ -310,19 +311,8 @@ function requireCompanyId(req: Request, res: Response): string | null {
   return companyId;
 }
 
-// ── 브랜드 격리 헬퍼 ──
-async function applyStoreScope(companyId: string, userId: string, userType: string) {
-  // ★ D100: company_admin도 전체 접근 허용 (기존 'admin'만 체크 → company_admin 403 에러)
-  if (userType === 'super_admin' || userType === 'admin' || userType === 'company_admin') return { blocked: false, storeFilter: '', storeParams: [] as string[] };
-
-  const scope = await getStoreScope(companyId, userId);
-  if (scope.type === 'blocked') return { blocked: true, storeFilter: '', storeParams: [] };
-  if (scope.type === 'filtered' && scope.storeCodes.length > 0) {
-    const placeholders = scope.storeCodes.map((_, i) => `$${i + 1}`).join(',');
-    return { blocked: false, storeFilter: `AND store_code IN (${placeholders})`, storeParams: scope.storeCodes };
-  }
-  return { blocked: false, storeFilter: '', storeParams: [] };
-}
+// ★ D112: store-scope 제거. 전단AI는 company_id 단위 격리만 사용.
+// 기존 applyStoreScope 호출부는 no-op으로 처리.
 
 // ============================================================
 // POST / — 전단지 생성
@@ -331,7 +321,7 @@ router.post('/', async (req: Request, res: Response) => {
   try {
     const companyId = requireCompanyId(req, res);
     if (!companyId) return;
-    const { userId } = req.user!;
+    const { userId } = req.flyerUser!;
     const { title, store_name, period_start, period_end, categories, template, logo_url, store_code } = req.body;
 
     if (!title) {
@@ -360,12 +350,7 @@ router.get('/', async (req: Request, res: Response) => {
   try {
     const companyId = requireCompanyId(req, res);
     if (!companyId) return;
-    const { userId, userType } = req.user!;
-
-    const scope = await applyStoreScope(companyId, userId, userType);
-    if (scope.blocked) return res.status(403).json({ error: '접근 권한이 없습니다.' });
-
-    const params: any[] = [companyId, ...scope.storeParams];
+    // ★ D112: store-scope 제거. company_id만으로 격리.
     const result = await query(
       `SELECT f.*,
               TO_CHAR(f.period_start, 'YYYY-MM-DD') as period_start,
@@ -374,9 +359,9 @@ router.get('/', async (req: Request, res: Response) => {
               (SELECT COUNT(*) FROM url_clicks uc JOIN short_urls su ON su.id = uc.short_url_id WHERE su.flyer_id = f.id) as click_count
        FROM flyers f
        LEFT JOIN short_urls s ON s.flyer_id = f.id
-       WHERE f.company_id = $1 ${scope.storeFilter.replace(/\$(\d+)/g, (_, n) => `$${parseInt(n) + 1}`)}
+       WHERE f.company_id = $1
        ORDER BY f.created_at DESC`,
-      params
+      [companyId]
     );
 
     res.json(result.rows);

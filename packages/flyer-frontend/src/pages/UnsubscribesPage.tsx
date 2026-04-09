@@ -12,7 +12,7 @@ export default function UnsubscribesPage({ token }: { token: string }) {
   const [alert, setAlert] = useState<{ show: boolean; title: string; message: string; type: 'success' | 'error' | 'info' }>({ show: false, title: '', message: '', type: 'info' });
 
   const loadList = async () => {
-    try { const res = await apiFetch(`${API_BASE}/api/unsubscribes`); if (res.ok) { const d = await res.json(); setList(d.unsubscribes || d || []); } }
+    try { const res = await apiFetch(`${API_BASE}/api/flyer/unsubscribes`); if (res.ok) { const d = await res.json(); setList(d.unsubscribes || d || []); } }
     catch {} finally { setLoading(false); }
   };
   useEffect(() => { loadList(); }, [token]);
@@ -21,7 +21,7 @@ export default function UnsubscribesPage({ token }: { token: string }) {
     const cleaned = phone.trim().replace(/-/g, '');
     if (cleaned.length < 10) { setAlert({ show: true, title: '입력 오류', message: '유효한 전화번호를 입력해주세요.', type: 'error' }); return; }
     try {
-      const res = await apiFetch(`${API_BASE}/api/unsubscribes`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone: cleaned }) });
+      const res = await apiFetch(`${API_BASE}/api/flyer/unsubscribes`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone: cleaned }) });
       if (res.ok) { setAlert({ show: true, title: '등록 완료', message: '수신거부가 등록되었습니다.', type: 'success' }); setPhone(''); loadList(); }
       else { const e = await res.json(); setAlert({ show: true, title: '오류', message: e.error || '등록 실패', type: 'error' }); }
     } catch { setAlert({ show: true, title: '오류', message: '네트워크 오류', type: 'error' }); }

@@ -27,9 +27,9 @@ export default function SettingsPage({ token }: { token: string }) {
     (async () => {
       try {
         const [settRes, cbRes, reqRes] = await Promise.all([
-          apiFetch(`${API_BASE}/api/companies/settings`),
-          apiFetch(`${API_BASE}/api/companies/callback-numbers`),
-          apiFetch(`${API_BASE}/api/sender-registration/my`).catch(() => null),
+          apiFetch(`${API_BASE}/api/flyer/companies`),
+          apiFetch(`${API_BASE}/api/flyer/companies/callback-numbers`),
+          apiFetch(`${API_BASE}/api/flyer/companies/sender-registration/my`).catch(() => null),
         ]);
         if (settRes.ok) setSettings(await settRes.json());
         if (cbRes.ok) { const d = await cbRes.json(); setCallbackNumbers(d.numbers || d || []); }
@@ -61,7 +61,7 @@ export default function SettingsPage({ token }: { token: string }) {
       formData.append('documentTypes', JSON.stringify(regFiles.map(() => 'telecom_cert')));
       regFiles.forEach(f => formData.append('documents', f));
 
-      const res = await apiFetch(`${API_BASE}/api/sender-registration`, {
+      const res = await apiFetch(`${API_BASE}/api/flyer/companies/sender-registration`, {
         method: 'POST', body: formData,
       });
       if (res.ok) {
@@ -122,7 +122,7 @@ export default function SettingsPage({ token }: { token: string }) {
                 const phone = (settings?.reject_number || '').trim();
                 if (!phone) { setAlert({ show: true, title: '입력 오류', message: '080 번호를 입력해주세요.', type: 'error' }); return; }
                 try {
-                  const res = await apiFetch(`${API_BASE}/api/companies/settings`, {
+                  const res = await apiFetch(`${API_BASE}/api/flyer/companies`, {
                     method: 'PUT', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ reject_number: phone }),
                   });

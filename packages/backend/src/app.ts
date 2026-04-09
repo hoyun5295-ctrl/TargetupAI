@@ -41,9 +41,24 @@ import manageScheduledRoutes from './routes/manage-scheduled';
 import manageStatsRoutes from './routes/manage-stats';
 import senderRegistrationRoutes from './routes/sender-registration';
 
-// 전단AI 라우트
+// 전단AI 라우트 (기존)
 import flyerRoutes from './routes/flyer/flyers';
 import flyerPublicRoutes from './routes/flyer/short-urls';
+
+// ★ D112: 전단AI 완전 분리 라우트 (flyer_* 테이블 기반)
+import switchServiceRoutes from './routes/admin/switch-service';
+import flyerAdminRoutes from './routes/admin/flyer-admin';
+import flyerAuthRoutes from './routes/flyer/auth';
+import flyerCompaniesRoutes from './routes/flyer/companies';
+import flyerCustomersRoutes from './routes/flyer/customers';
+import flyerCampaignsRoutes from './routes/flyer/campaigns';
+import flyerUnsubscribesRoutes from './routes/flyer/unsubscribes';
+import flyerBalanceRoutes from './routes/flyer/balance';
+import flyerStatsRoutes from './routes/flyer/stats';
+import flyerCatalogRoutes from './routes/flyer/catalog';
+import flyerAddressBooksRoutes from './routes/flyer/address-books';
+import flyerSenderRegistrationRoutes from './routes/flyer/sender-registration';
+import flyerPosRoutes from './routes/flyer/pos';
 
 // DB 연결
 import './config/database';
@@ -111,7 +126,24 @@ app.use('/api/manage/scheduled', manageScheduledRoutes);
 app.use('/api/manage/stats', manageStatsRoutes);
 app.use('/api/sender-registration', senderRegistrationRoutes);
 
-// 전단AI 라우트 (기존 코드 수정 없이 격리)
+// ★ D112: 슈퍼관리자 서비스 스위처 + 전단AI 관리
+app.use('/api/admin/switch-service', switchServiceRoutes);
+app.use('/api/admin/flyer', flyerAdminRoutes);
+
+// ★ D112: 전단AI 완전 분리 라우트 (flyer_* 테이블 기반)
+app.use('/api/flyer/auth', flyerAuthRoutes);
+app.use('/api/flyer/companies', flyerCompaniesRoutes);
+app.use('/api/flyer/customers', flyerCustomersRoutes);
+app.use('/api/flyer/campaigns', flyerCampaignsRoutes);
+app.use('/api/flyer/unsubscribes', flyerUnsubscribesRoutes);
+app.use('/api/flyer/balance', flyerBalanceRoutes);
+app.use('/api/flyer/stats', flyerStatsRoutes);
+app.use('/api/flyer/catalog', flyerCatalogRoutes);
+app.use('/api/flyer/address-books', flyerAddressBooksRoutes);
+app.use('/api/flyer/companies/sender-registration', flyerSenderRegistrationRoutes);
+app.use('/api/flyer/pos', flyerPosRoutes);
+
+// 전단AI 기존 라우트 (전단지 CRUD + 공개 페이지)
 app.use('/api/flyer/flyers', flyerRoutes);
 app.use('/api/flyer/p', flyerPublicRoutes);  // 공개 페이지 (인증 불필요)
 

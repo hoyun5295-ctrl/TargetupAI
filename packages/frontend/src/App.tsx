@@ -16,6 +16,7 @@ import PrivacyPage from './pages/PrivacyPage';
 import TermsPage from './pages/TermsPage';
 import AutoSendPage from './pages/AutoSendPage';
 import KakaoRcsPage from './pages/KakaoRcsPage';
+import FlyerAdminDashboard from './pages/FlyerAdminDashboard'; // ★ D112
 
 // ★ 세션 타이머 Context — 헤더 등에서 남은 시간 표시용
 interface SessionTimerContextType {
@@ -161,6 +162,16 @@ function App() {
           element={
             <PrivateRoute allowedTypes={['super_admin']}>
               <AdminDashboard />
+            </PrivateRoute>
+          }
+        />
+
+        {/* ★ D112: 전단AI 슈퍼관리자 대시보드 */}
+        <Route
+          path="/admin/flyer"
+          element={
+            <PrivateRoute allowedTypes={['super_admin']}>
+              <FlyerAdminDashboard />
             </PrivateRoute>
           }
         />

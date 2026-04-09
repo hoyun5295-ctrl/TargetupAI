@@ -73,8 +73,8 @@ export default function SendPage({ token }: { token: string }) {
     (async () => {
       const [fRes, sRes, settRes] = await Promise.all([
         apiFetch(`${API_BASE}/api/flyer/flyers`).catch(() => null),
-        apiFetch(`${API_BASE}/api/companies/callback-numbers`).catch(() => null),
-        apiFetch(`${API_BASE}/api/companies/settings`).catch(() => null),
+        apiFetch(`${API_BASE}/api/flyer/companies/callback-numbers`).catch(() => null),
+        apiFetch(`${API_BASE}/api/flyer/companies`).catch(() => null),
       ]);
       if (fRes?.ok) { const d = await fRes.json(); setFlyers(d.filter((f: Flyer) => f.status === 'published' && f.short_code)); }
       if (sRes?.ok) { const d = await sRes.json(); const nums = (d.numbers || d || []).map((cb: any) => cb.phone || cb.phone_number || cb); setSenderNumbers(nums); if (nums.length > 0) setCallback(nums[0]); }
@@ -86,7 +86,7 @@ export default function SendPage({ token }: { token: string }) {
   useEffect(() => {
     if (recipientMode === 'address' && addressGroups.length === 0) {
       setAddressLoading(true);
-      apiFetch(`${API_BASE}/api/address-books/groups`)
+      apiFetch(`${API_BASE}/api/flyer/address-books/groups`)
         .then(r => r.ok ? r.json() : [])
         .then(d => setAddressGroups(d.groups || d || []))
         .catch(() => {})
@@ -127,7 +127,7 @@ export default function SendPage({ token }: { token: string }) {
     const formData = new FormData();
     formData.append('file', file);
     try {
-      const res = await apiFetch(`${API_BASE}/api/upload/parse?includeData=true`, {
+      const res = await apiFetch(`${API_BASE}/api/flyer/customers/upload-parse?includeData=true`, {
         method: 'POST', body: formData,
       });
       const data = await res.json();
@@ -166,7 +166,7 @@ export default function SendPage({ token }: { token: string }) {
   // 주소록 선택
   const handleAddressSelect = async (groupName: string) => {
     try {
-      const res = await apiFetch(`${API_BASE}/api/address-books/${encodeURIComponent(groupName)}`);
+      const res = await apiFetch(`${API_BASE}/api/flyer/address-books/${encodeURIComponent(groupName)}`);
       if (res.ok) {
         const data = await res.json();
         const contacts = (data.contacts || data || []).map((c: any) => ({
@@ -191,7 +191,7 @@ export default function SendPage({ token }: { token: string }) {
     try {
       const formData = new FormData();
       formData.append('file', file);
-      const res = await apiFetch(`${API_BASE}/api/upload/parse?includeData=true`, { method: 'POST', body: formData });
+      const res = await apiFetch(`${API_BASE}/api/flyer/customers/upload-parse?includeData=true`, { method: 'POST', body: formData });
       const data = await res.json();
       if (data.success) {
         const allData = data.allData || data.preview || [];
@@ -220,7 +220,7 @@ export default function SendPage({ token }: { token: string }) {
     setSavingAddress(true);
     try {
       const contacts = lines.map(p => ({ phone: p, name: '', extra1: '', extra2: '', extra3: '' }));
-      const res = await apiFetch(`${API_BASE}/api/address-books`, {
+      const res = await apiFetch(`${API_BASE}/api/flyer/address-books`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ groupName: newGroupName.trim(), contacts }),
       });
@@ -229,7 +229,7 @@ export default function SendPage({ token }: { token: string }) {
         setAlert({ show: true, title: '저장 완료', message: `"${newGroupName.trim()}" 주소록에 ${d.insertCount || lines.length}건 저장되었습니다.`, type: 'success' });
         setShowNewAddress(false); setNewGroupName(''); setNewGroupPhones(''); setAddrFilePhones([]); setAddrInputMode('text');
         // 주소록 리로드
-        const gRes = await apiFetch(`${API_BASE}/api/address-books/groups`);
+        const gRes = await apiFetch(`${API_BASE}/api/flyer/address-books/groups`);
         if (gRes.ok) { const g = await gRes.json(); setAddressGroups(g.groups || g || []); }
       } else {
         const e = await res.json();
@@ -243,7 +243,7 @@ export default function SendPage({ token }: { token: string }) {
   const [deleteGroup, setDeleteGroup] = useState<string>('');
   const handleDeleteGroup = async (groupName: string) => {
     try {
-      const res = await apiFetch(`${API_BASE}/api/address-books/${encodeURIComponent(groupName)}`, { method: 'DELETE' });
+      const res = await apiFetch(`${API_BASE}/api/flyer/address-books/${encodeURIComponent(groupName)}`, { method: 'DELETE' });
       if (res.ok) {
         setAlert({ show: true, title: '삭제 완료', message: `"${groupName}" 주소록이 삭제되었습니다.`, type: 'success' });
         setDeleteGroup('');
@@ -345,7 +345,7 @@ export default function SendPage({ token }: { token: string }) {
         // ★ 수신거부 필터링은 백엔드 direct-send가 자동 적용 (filterUnsubscribes는 UI 표시용)
       };
       if (scheduledAt) { body.scheduled = true; body.scheduledAt = scheduledAt; }
-      const res = await apiFetch(`${API_BASE}/api/campaigns/direct-send`, {
+      const res = await apiFetch(`${API_BASE}/api/flyer/campaigns/send`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });

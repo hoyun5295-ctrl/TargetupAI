@@ -14,10 +14,10 @@ export default function LoginPage({ onLogin }: Props) {
     e.preventDefault();
     setError(''); setLoading(true);
     try {
-      // ★ D111 P0: appSource='flyer' — 전단AI는 한줄로(hanjul)와 별개 세션으로 공존 허용
-      const res = await fetch(`${API_BASE}/api/auth/login`, {
+      // ★ D112: 전단AI 전용 인증 (/api/flyer/auth/login → flyer_users.login_id 기반)
+      const res = await fetch(`${API_BASE}/api/flyer/auth/login`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ loginId, password, appSource: 'flyer' }),
+        body: JSON.stringify({ login_id: loginId, password }),
       });
       const data = await res.json();
       if (res.ok && data.token) {

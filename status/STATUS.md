@@ -103,6 +103,62 @@
 ## 4) 🎯 CURRENT_TASK (현재 집중 작업)
 
 > **규칙:** 아래 목표에만 100% 리소스를 집중한다.
+> **⚠️ D-Day: 2026-04-13 레거시웹 업체 이관 개시.** 베이직 1개월 무료체험으로 QA + 박탈감 유도 전략. 직접발송만 완벽하면 레거시 사용자 불만 0.
+
+---
+
+### 🔧 D111 — 0408 검수 9건 + 오픈 전 결정사항 2건 (2026-04-09) — ✅ 배포완료
+
+> **배경:** 4/13 레거시 이관 D-4. 0408 직원 검수리스트/PDF 지적 9건 + 오픈 전 결정사항(업로드 매핑 충돌 / 소수점 포맷) 2건을 한 세션에 전수 수정. 컨트롤타워 원칙 + 매트릭스 전수 점검으로 재발 차단.
+
+#### 신규 컨트롤타워 (6개)
+| 컨트롤타워 | 역할 |
+|---|---|
+| `utils/session-manager.ts` | 세션 무효화/생성 단일 진입점. `app_source`(hanjul/flyer/super) 분리로 전단AI와 한줄로 공존 + 같은 앱 내 단일 세션 강제 |
+| `utils/campaign-validation.ts` | 과거 예약 차단 `validateScheduledAt()` — 파싱/과거/최대 365일 검증. POST `/`, `/direct-send`, PUT `/:id/reschedule` 3곳 통합 |
+| `utils/format-number.ts` (+ frontend `formatDate.ts` 동일 함수) | `formatNumericLike()` — 정수/소수 자동 포맷. trailing zero 제거, 전화번호/YYMMDD 제외. 백/프론트 완전 동일 규칙 |
+| `utils/upload-mapping-validator.ts` | 업로드 매핑 충돌 검증 `validateUploadMapping()`. 충돌 4종(slot_label/slot_type/label_moved/label_duplicate) × 해결 4종(유지/덮어쓰기/이동/취소) |
+| `standard-field-map.ts` `applyFieldAliases()` | FIELD_MAP aliases(`name:['이름','성함']`) 자동 주입 — `extractVarCatalog` 최종 반환 전 호출하여 모든 회사 자동 혜택 |
+| `components/NameEmptyWarningModal.tsx` / `UploadMappingConflictModal.tsx` | 재사용 가능 프론트 모달 2개 신설 |
+
+#### 해결 항목 (PDF 9건 + 결정사항 2건)
+| # | 영역 | 근본 원인 | 해결 |
+|---|---|---|---|
+| **P0** | 계정 중복접속 차단 | D100에서 "전단AI 401 방지"를 위해 5개 세션 허용했던 것이 "3명 동시 로그인 허용"으로 남음 | session-manager.ts + `app_source` 컬럼으로 서비스 분리. hanjul 1세션 + flyer 1세션 공존. 로그인 3곳(frontend/company-frontend/flyer-frontend) appSource 전달 + useSessionGuard storage 이벤트로 즉시 감지 |
+| **P2** | isoi 직접발송 `%이름%` NULL | customer_schema.field_mappings 비어있는 회사에서 FIELD_MAP fallback 시 displayName('고객명')만 등록 → `%이름%` 매칭 실패 → 안전망이 빈값 치환 | 4단계 방어: (1) FIELD_MAP.aliases + applyFieldAliases (2) replaceVariables 폴백 — customer.name 비면 addressBookFields.name 사용 (3) NameEmptyWarningModal — 프론트 경고 (4) 직접발송 + 직접타겟발송 양쪽 |
+| **P3** | 맞춤한줄 발송확정 (광고)+080 중복 | Dashboard.tsx 1968(미리보기) + 1664(실발송 body) 2곳 모두 `isAd={isAd}` Dashboard 전역 state 사용 → 맞춤한줄 Step 3에서 사용자 토글한 `customSendData.isAd` 무시 | 2곳 전부 `customSendData.isAd ?? false`로 변경 (미리보기와 실발송 동일) |
+| **P4** | 예약대기 race condition + 과거 예약 orphan | (1) onClick 핸들러가 state 초기화 없이 fetch → 응답 도착 순서 역전 시 덮어쓰기 (2) D110 UNION ALL 승격 시 outer `ORDER BY seqno`가 inner alias `idx`와 충돌 → MySQL 에러 → 0건 (3) POST /, direct-send, reschedule에 과거 예약 차단 검증 전무 (4) 기존 32건 orphan draft 누적 | (1) `latestSelectedIdRef` + 4곳 race guard + state 선초기화 (2) **`smsSelectAll` 컨트롤타워에 alias 자동 재작성** — `extractAliasMap` + `rewriteSuffixWithAliases` → outer suffix의 raw 컬럼명을 자동으로 inner alias로 치환 (3) campaign-validation.ts 신설 + 호출부 3곳 적용 (4) orphan 32건 서버에서 일괄 cancelled 처리 |
+| **P5** | 자동발송 사전알림 (광고) 누락 | CT-B `buildPreNotifyMessage`/`buildAiGeneratedNotifyMessage`/`buildSpamTestResultNotifyMessage` 3개 빌더가 `messageContent`를 순수 본문 그대로 push — buildAdMessage 호출 없음 | CT-B에 `isAd`/`opt080Number`/`messageType` 파라미터 추가 + `applyAdAndSanitize()` 내부 헬퍼 신설. auto-campaign-worker 호출부 3곳에서 `getOpt080Number` 조회 후 전달 |
+| **P6** | 자동발송 스팸결과 "통과 통과" 중복 | auto-campaign-worker가 `'통과 ✓'`를 spamResultLabel로 넘기는데, CT-B 빌더가 `.replace(/✓/g, '통과')` → `통과 통과` 중복 | 호출부 라벨 `'통과'/'차단'` 단순화 + 빌더 replace 제거 (sanitize strip만 유지) |
+| **E1** | 직접타겟발송 gender 'F' 노출 | TargetSendModal.tsx + DirectTargetFilterModal.tsx에 D109 이전의 인라인 `GENDER_DISPLAY_MAP`/`isGenderField` 하드코딩이 잔존 → D109 `FRONT_FIELD_DISPLAY_MAP` 컨트롤타워 미사용 | 인라인 하드코딩 2곳 전부 삭제 → `FRONT_FIELD_DISPLAY_MAP`/`reverseDisplayValueFront` 호출로 통합 |
+| **E2** | 자동발송 시간 불일치 | `calcNextRunAt` 로직이 `routes/auto-campaigns.ts` + `utils/auto-campaign-worker.ts` **2곳에 동일 코드 중복** — 한쪽 수정 시 불일치 재발 위험 | worker 하나로 통합 `export` + routes에서 import. 워커 주기 1분 + 정각 align 유지 |
+| **E3** | 캘린더 취소 이력 미표시 | D100에서 `cancelled/draft` 둘 다 캘린더 기본 제외 처리 — 취소 이력 확인 불가 | `draft`만 제외하도록 변경 (CalendarModal은 이미 cancelled 스타일/취소사유 렌더링 준비됨) |
+| **①** | 업로드 매핑 충돌 | AI 자동 매핑이 회차마다 같은 헤더를 다른 custom_N 슬롯에 배정 가능 + CT-07이 `ON CONFLICT DO UPDATE` 라 기존 라벨/타입 조용히 덮어씀 → 기존 고객과 신규 고객의 custom_fields 의미 불일치 → 타겟팅 오류 | upload-mapping-validator.ts + `POST /api/upload/validate-mapping` + UploadMappingConflictModal 신설. 업로드 흐름: parse → mapping → **validate-mapping** → save |
+| **②** | 숫자/소수점 포맷 미리보기 vs 실발송 불일치 | 백엔드 `replaceVariables`는 `/\d+\.\d+/` (소수점 필수) 패턴 → 정수 `50000` 감지 못함 → 쉼표 없이 발송. 프론트 formatPreviewValue는 정수도 감지 → 미리보기만 쉼표 | `formatNumericLike()` 컨트롤타워 백/프론트 동일 신설. messageUtils + formatPreviewValue + formatNumberPreview 3곳 통합. 규칙: 정수 그대로 / trailing zero 제거 / 유효 소수 보존 / 전화번호 / YYMMDD / YYYYMMDD 제외 |
+
+#### DB 마이그레이션
+```sql
+ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS app_source VARCHAR(20) NOT NULL DEFAULT 'hanjul';
+CREATE INDEX IF NOT EXISTS idx_user_sessions_user_app_active ON user_sessions(user_id, app_source) WHERE is_active = true;
+
+-- orphan draft 32건 정리
+UPDATE campaigns SET status='cancelled', cancel_reason='D111 P4: 과거 예약 orphan draft 일괄 정리'
+WHERE scheduled_at IS NOT NULL AND scheduled_at < NOW() AND status='draft';
+```
+
+#### 핵심 교훈 (D111)
+> **1. "동일 로직 2곳 이상 = 즉시 컨트롤타워" 원칙 또 적용됨.** `calcNextRunAt`이 routes/utils 2곳에 중복돼 있었고 한쪽 수정 시 불일치 위험. D110의 `smsSelectAll` UNION ALL 승격 시 호출부의 `ORDER BY seqno`/`ORDER BY msg_instm` 같은 raw 컬럼명 참조가 inner alias와 충돌 — **컨트롤타워가 alias 매핑을 자동 추출해서 suffix를 재작성하도록** 근본 수정. 호출부 땜질 3건은 전부 revert.
+>
+> **2. "설계 → 컨펌 → 전수 파악 → 구현 → 검증" 프로세스 재확인.** P3 수정 시 미리보기 prop 1줄만 고치고 "완료" 하려다 실발송 body도 같은 버그 있었음을 Harold님이 재현하시면서 발견. 이후 isAd 관련 호출부 매트릭스 전수 grep 후 2곳 동시 수정.
+>
+> **3. 자연어 "우기는" 행동 절대 금지.** 제가 배포 여부를 Harold님 기억보다 제 추측으로 판단해서 "배포 안 된 것 같다"고 우겼다가 서버 확인 결과 D111 완전 반영 상태였음. 서버 조회 명령어 먼저 안내하고 결과 기반으로 판단하는 원칙 철저 준수.
+>
+> **4. 5개 발송 경로 × 데이터 출처 매트릭스 유효.** D109에 이어 D111도 매트릭스 전수 점검으로 잔존 인라인(TargetSendModal/DirectTargetFilterModal의 GENDER_DISPLAY_MAP) 발견. 신규 컨트롤타워 만든 후 반드시 `grep -rn` 으로 기존 인라인 잔존 확인 필수.
+>
+> **5. 이관 D-4 리스크 관리.** 4/13 레거시 이관 전 마지막 세션이라 Harold님 예민도 극대. 땜질/대강 훑기 절대 금지, 컨트롤타워 + 전수 + 근본 원칙 철저히. 내일~12일까지 직원 자체 검증, 12일 코드 동결 추천.
+
+#### 산출물
+- **`status/한줄로_업데이트_검증가이드_2026-04-09.docx`** — 직원 검증용 Word 문서. 마지막 결정사항 2건(업로드 매핑 충돌 / 숫자 포맷)에 대한 수정 내용 + 5단계 검증 체크리스트. 표지+1번+2번+보고방법 4섹션.
 
 ---
 

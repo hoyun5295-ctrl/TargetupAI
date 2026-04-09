@@ -4,7 +4,7 @@
  * 한줄로AI와 완전 분리:
  * - localStorage 키: flyer_token (한줄로는 token)
  * - Context 없이 독립 동작
- * - 서버 세션 연장 API: /api/auth/extend-session (공유 API, stateless)
+ * - 서버 세션 연장 API: /api/flyer/auth/session-check (전단AI 전용)
  */
 import { useState, useEffect, useCallback, useRef } from 'react';
 
@@ -49,7 +49,7 @@ export function useSessionTimeout({ onLogout }: UseSessionTimeoutOptions): UseSe
     try {
       const token = localStorage.getItem('flyer_token');
       if (token) {
-        fetch('/api/auth/extend-session', {
+        fetch('/api/flyer/auth/session-check', {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${token}`,
