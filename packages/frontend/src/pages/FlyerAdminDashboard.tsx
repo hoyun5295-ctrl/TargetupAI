@@ -48,7 +48,8 @@ export default function FlyerAdminDashboard() {
   const [showCreateDist, setShowCreateDist] = useState(false);
   const [newDist, setNewDist] = useState({
     company_name: '', business_type: 'mart', owner_name: '', owner_phone: '',
-    address: '', admin_login_id: '', admin_password: '', admin_name: '',
+    address: '', business_number: '',
+    admin_login_id: '', admin_password: '', admin_name: '',
   });
 
   // D113: 매장 생성 모달
@@ -109,7 +110,7 @@ export default function FlyerAdminDashboard() {
       const res = await apiFetch('/api/admin/flyer/companies', { method: 'POST', body: JSON.stringify(newDist) });
       if (res.ok) {
         setShowCreateDist(false);
-        setNewDist({ company_name: '', business_type: 'mart', owner_name: '', owner_phone: '', address: '', admin_login_id: '', admin_password: '', admin_name: '' });
+        setNewDist({ company_name: '', business_type: 'mart', owner_name: '', owner_phone: '', address: '', business_number: '', admin_login_id: '', admin_password: '', admin_name: '' });
         loadDistributors(); loadStats();
         alert('총판이 생성되었습니다');
       } else { const err = await res.json(); alert(err.error || '생성 실패'); }
@@ -303,11 +304,12 @@ export default function FlyerAdminDashboard() {
                       <th className="text-left px-4 py-3">상태</th>
                       <th className="text-left px-4 py-3">POS</th>
                       <th className="text-left px-4 py-3">등록일</th>
+                      <th className="text-left px-4 py-3">관리</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y">
                     {distributors.length === 0 ? (
-                      <tr><td colSpan={7} className="text-center py-8 text-gray-400">등록된 총판이 없습니다</td></tr>
+                      <tr><td colSpan={8} className="text-center py-8 text-gray-400">등록된 총판이 없습니다</td></tr>
                     ) : distributors.map(d => (
                       <tr key={d.id} className="hover:bg-gray-50">
                         <td className="px-4 py-3 font-medium">{d.company_name}</td>
@@ -322,6 +324,9 @@ export default function FlyerAdminDashboard() {
                         </td>
                         <td className="px-4 py-3 text-gray-500">{d.pos_type || '-'}</td>
                         <td className="px-4 py-3 text-gray-400 text-xs">{d.created_at?.slice(0, 10)}</td>
+                        <td className="px-4 py-3">
+                          <button onClick={async () => { if (!confirm(`${d.company_name} 총판을 삭제하시겠습니까?`)) return; try { const r = await apiFetch(`/api/admin/flyer/companies/${d.id}`, { method: 'DELETE' }); if (r.ok) { loadDistributors(); loadStats(); } } catch {} }} className="px-2 py-1 text-xs text-red-500 hover:bg-red-50 rounded">삭제</button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -458,10 +463,15 @@ export default function FlyerAdminDashboard() {
                     className="w-full border rounded-lg px-3 py-2 text-sm" placeholder="010-0000-0000" />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">주소</label>
-                  <input value={newDist.address} onChange={e => setNewDist(p => ({...p, address: e.target.value}))}
-                    className="w-full border rounded-lg px-3 py-2 text-sm" />
+                  <label className="block text-sm font-medium text-gray-700 mb-1">사업자등록번호</label>
+                  <input value={newDist.business_number} onChange={e => setNewDist(p => ({...p, business_number: e.target.value}))}
+                    className="w-full border rounded-lg px-3 py-2 text-sm" placeholder="000-00-00000" />
                 </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">주소</label>
+                <input value={newDist.address} onChange={e => setNewDist(p => ({...p, address: e.target.value}))}
+                  className="w-full border rounded-lg px-3 py-2 text-sm" />
               </div>
               <hr className="my-2" />
               <p className="text-xs text-gray-500 font-medium">총판 관리자 계정</p>
