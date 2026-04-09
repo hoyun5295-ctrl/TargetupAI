@@ -134,25 +134,55 @@ export default function FlyerAdminDashboard() {
     } catch { alert('서버 오류'); }
   };
 
-  // D113: 입금 확인 (활성화)
-  const handleActivateStore = async (storeId: string) => {
-    const months = prompt('활성화 개월 수 (기본 1):', '1');
-    if (!months) return;
+  // D113: 입금확인/충전 모달
+  const [actionModal, setActionModal] = useState<{ type: 'activate' | 'charge' | 'delete_dist' | null; storeId?: string; distId?: string; storeName?: string }>({ type: null });
+  const [actionValue, setActionValue] = useState('');
+  const [actionResult, setActionResult] = useState('');
+
+  const openActivateModal = (storeId: string, storeName: string) => { setActionModal({ type: 'activate', storeId, storeName }); setActionValue('1'); setActionResult(''); };
+  const openChargeModal = (storeId: string, storeName: string) => { setActionModal({ type: 'charge', storeId, storeName }); setActionValue('100000'); setActionResult(''); };
+  const openDeleteDistModal = (distId: string, storeName: string) => { setActionModal({ type: 'delete_dist', distId, storeName }); setActionResult(''); };
+
+  const handleActionSubmit = async () => {
     try {
-      const res = await apiFetch(`/api/admin/flyer/stores/${storeId}/activate`, { method: 'POST', body: JSON.stringify({ months: parseInt(months) || 1 }) });
-      if (res.ok) { alert('매장이 활성화되었습니다'); loadStores(); }
-      else { const err = await res.json(); alert(err.error || '활성화 실패'); }
-    } catch { alert('서버 오류'); }
+      if (actionModal.type === 'activate' && actionModal.storeId) {
+        const res = await apiFetch(`/api/admin/flyer/stores/${actionModal.storeId}/activate`, { method: 'POST', body: JSON.stringify({ months: parseInt(actionValue) || 1 }) });
+        if (res.ok) { setActionResult('활성화 완료'); loadStores(); loadStats(); setTimeout(() => setActionModal({ type: null }), 1000); }
+        else { const err = await res.json(); setActionResult(err.error || '실패'); }
+      } else if (actionModal.type === 'charge' && actionModal.storeId) {
+        const res = await apiFetch(`/api/admin/flyer/stores/${actionModal.storeId}/charge`, { method: 'POST', body: JSON.stringify({ amount: parseInt(actionValue) || 0 }) });
+        if (res.ok) { const d = await res.json(); setActionResult(`충전 완료. 잔액: ₩${Number(d.prepaid_balance).toLocaleString()}`); loadStores(); setTimeout(() => setActionModal({ type: null }), 1500); }
+        else { const err = await res.json(); setActionResult(err.error || '실패'); }
+      } else if (actionModal.type === 'delete_dist' && actionModal.distId) {
+        const res = await apiFetch(`/api/admin/flyer/companies/${actionModal.distId}`, { method: 'DELETE' });
+        if (res.ok) { setActionResult('삭제 완료'); loadDistributors(); loadStats(); setTimeout(() => setActionModal({ type: null }), 1000); }
+        else { setActionResult('삭제 실패'); }
+      }
+    } catch { setActionResult('서버 오류'); }
   };
 
-  // D113: 잔액 충전
-  const handleChargeStore = async (storeId: string) => {
-    const amount = prompt('충전 금액 (원):', '100000');
-    if (!amount) return;
+  // D113: 매장 수정
+  const [editStore, setEditStore] = useState<Store | null>(null);
+  const [editStoreForm, setEditStoreForm] = useState<Record<string, string>>({});
+
+  const handleEditStore = (s: Store) => {
+    setEditStore(s);
+    setEditStoreForm({
+      store_name: s.store_name || '', business_type: s.business_type || 'mart',
+      business_number: s.business_number || '', contact_name: s.contact_name || '',
+      contact_phone: s.contact_phone || '', monthly_fee: String(s.monthly_fee || 150000),
+      payment_status: s.payment_status || 'pending',
+    });
+  };
+
+  const handleSaveEditStore = async () => {
+    if (!editStore) return;
     try {
-      const res = await apiFetch(`/api/admin/flyer/stores/${storeId}/charge`, { method: 'POST', body: JSON.stringify({ amount: parseInt(amount) || 0 }) });
-      if (res.ok) { const d = await res.json(); alert(`충전 완료. 잔액: ₩${Number(d.prepaid_balance).toLocaleString()}`); loadStores(); }
-      else { const err = await res.json(); alert(err.error || '충전 실패'); }
+      const body: Record<string, any> = { ...editStoreForm };
+      if (body.monthly_fee) body.monthly_fee = parseInt(body.monthly_fee) || 150000;
+      const res = await apiFetch(`/api/admin/flyer/stores/${editStore.id}`, { method: 'PUT', body: JSON.stringify(body) });
+      if (res.ok) { setEditStore(null); loadStores(); alert('수정되었습니다'); }
+      else { const err = await res.json(); alert(err.error || '수정 실패'); }
     } catch { alert('서버 오류'); }
   };
 
@@ -325,7 +355,7 @@ export default function FlyerAdminDashboard() {
                         <td className="px-4 py-3 text-gray-500">{d.pos_type || '-'}</td>
                         <td className="px-4 py-3 text-gray-400 text-xs">{d.created_at?.slice(0, 10)}</td>
                         <td className="px-4 py-3">
-                          <button onClick={async () => { if (!confirm(`${d.company_name} 총판을 삭제하시겠습니까?`)) return; try { const r = await apiFetch(`/api/admin/flyer/companies/${d.id}`, { method: 'DELETE' }); if (r.ok) { loadDistributors(); loadStats(); } } catch {} }} className="px-2 py-1 text-xs text-red-500 hover:bg-red-50 rounded">삭제</button>
+                          <button onClick={() => openDeleteDistModal(d.id, d.company_name)} className="px-2 py-1 text-xs text-red-500 hover:bg-red-50 rounded">삭제</button>
                         </td>
                       </tr>
                     ))}
@@ -379,9 +409,10 @@ export default function FlyerAdminDashboard() {
                         <td className="px-4 py-3">
                           <div className="flex gap-1">
                             {s.payment_status !== 'active' && (
-                              <button onClick={() => handleActivateStore(s.id)} className="px-2 py-1 text-xs bg-green-500 text-white rounded hover:bg-green-600">입금확인</button>
+                              <button onClick={() => openActivateModal(s.id, s.store_name || s.name)} className="px-2 py-1 text-xs bg-green-500 text-white rounded hover:bg-green-600">입금확인</button>
                             )}
-                            <button onClick={() => handleChargeStore(s.id)} className="px-2 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600">충전</button>
+                            <button onClick={() => openChargeModal(s.id, s.store_name || s.name)} className="px-2 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600">충전</button>
+                            <button onClick={() => handleEditStore(s)} className="px-2 py-1 text-xs bg-gray-500 text-white rounded hover:bg-gray-600">수정</button>
                           </div>
                         </td>
                       </tr>
@@ -652,6 +683,113 @@ export default function FlyerAdminDashboard() {
             <div className="flex justify-end gap-2 mt-6">
               <button onClick={() => setShowCreateStore(false)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">취소</button>
               <button onClick={handleCreateStore} className="px-4 py-2 text-sm bg-orange-500 text-white rounded-lg hover:bg-orange-600 font-medium">등록</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* D113: 입금확인/충전/삭제 모달 */}
+      {actionModal.type && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setActionModal({ type: null })}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm mx-4 p-6" onClick={e => e.stopPropagation()}>
+            <h3 className="text-lg font-bold text-gray-800 mb-4">
+              {actionModal.type === 'activate' ? '입금 확인 (매장 활성화)' :
+               actionModal.type === 'charge' ? '잔액 충전' :
+               '총판 삭제'}
+            </h3>
+            <p className="text-sm text-gray-500 mb-4">{actionModal.storeName || ''}</p>
+            {actionModal.type === 'activate' && (
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-1">활성화 개월 수</label>
+                <input type="number" value={actionValue} onChange={e => setActionValue(e.target.value)} min="1"
+                  className="w-full border rounded-lg px-3 py-2 text-sm" />
+              </div>
+            )}
+            {actionModal.type === 'charge' && (
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-1">충전 금액 (원)</label>
+                <input type="number" value={actionValue} onChange={e => setActionValue(e.target.value)} min="1000" step="10000"
+                  className="w-full border rounded-lg px-3 py-2 text-sm" />
+              </div>
+            )}
+            {actionModal.type === 'delete_dist' && (
+              <p className="text-sm text-red-500 mb-4">이 총판과 하위 데이터를 삭제합니다. 되돌릴 수 없습니다.</p>
+            )}
+            {actionResult && (
+              <p className={`text-sm mb-3 font-medium ${actionResult.includes('완료') ? 'text-green-600' : 'text-red-500'}`}>{actionResult}</p>
+            )}
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setActionModal({ type: null })} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">취소</button>
+              <button onClick={handleActionSubmit} className={`px-4 py-2 text-sm text-white rounded-lg font-medium ${
+                actionModal.type === 'delete_dist' ? 'bg-red-500 hover:bg-red-600' : 'bg-orange-500 hover:bg-orange-600'
+              }`}>
+                {actionModal.type === 'activate' ? '활성화' : actionModal.type === 'charge' ? '충전' : '삭제'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* D113: 매장 수정 모달 */}
+      {editStore && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setEditStore(null)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg mx-4 p-6" onClick={e => e.stopPropagation()}>
+            <h3 className="text-lg font-bold text-gray-800 mb-4">매장 수정 — {editStore.store_name || editStore.name}</h3>
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">매장명</label>
+                  <input value={editStoreForm.store_name || ''} onChange={e => setEditStoreForm(p => ({...p, store_name: e.target.value}))}
+                    className="w-full border rounded-lg px-3 py-2 text-sm" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">업종</label>
+                  <select value={editStoreForm.business_type || 'mart'} onChange={e => setEditStoreForm(p => ({...p, business_type: e.target.value}))}
+                    className="w-full border rounded-lg px-3 py-2 text-sm">
+                    {businessTypes.length > 0
+                      ? businessTypes.map(bt => <option key={bt.type_code} value={bt.type_code}>{bt.type_name}</option>)
+                      : <><option value="mart">마트</option><option value="butcher">정육점</option></>
+                    }
+                  </select>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">사업자등록번호</label>
+                  <input value={editStoreForm.business_number || ''} onChange={e => setEditStoreForm(p => ({...p, business_number: e.target.value}))}
+                    className="w-full border rounded-lg px-3 py-2 text-sm" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">상태</label>
+                  <select value={editStoreForm.payment_status || 'pending'} onChange={e => setEditStoreForm(p => ({...p, payment_status: e.target.value}))}
+                    className="w-full border rounded-lg px-3 py-2 text-sm">
+                    <option value="pending">대기</option>
+                    <option value="active">활성</option>
+                    <option value="suspended">정지</option>
+                  </select>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">담당자</label>
+                  <input value={editStoreForm.contact_name || ''} onChange={e => setEditStoreForm(p => ({...p, contact_name: e.target.value}))}
+                    className="w-full border rounded-lg px-3 py-2 text-sm" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">담당자 연락처</label>
+                  <input value={editStoreForm.contact_phone || ''} onChange={e => setEditStoreForm(p => ({...p, contact_phone: e.target.value}))}
+                    className="w-full border rounded-lg px-3 py-2 text-sm" />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">월정액 (원)</label>
+                <input type="number" value={editStoreForm.monthly_fee || '150000'} onChange={e => setEditStoreForm(p => ({...p, monthly_fee: e.target.value}))}
+                  className="w-full border rounded-lg px-3 py-2 text-sm" />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 mt-6">
+              <button onClick={() => setEditStore(null)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">취소</button>
+              <button onClick={handleSaveEditStore} className="px-4 py-2 text-sm bg-orange-500 text-white rounded-lg hover:bg-orange-600 font-medium">저장</button>
             </div>
           </div>
         </div>

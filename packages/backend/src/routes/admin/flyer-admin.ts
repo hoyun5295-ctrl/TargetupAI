@@ -270,7 +270,8 @@ router.get('/stores', async (req: Request, res: Response) => {
     const limit = 20;
     const offset = (page - 1) * limit;
 
-    let where = `u.deleted_at IS NULL`;
+    // store_name IS NOT NULL → 매장 등록(POST /stores)으로 생성된 계정만. 총판 자동생성 관리자 제외
+    let where = `u.deleted_at IS NULL AND u.store_name IS NOT NULL`;
     const params: any[] = [];
     if (companyId) { params.push(companyId); where += ` AND u.company_id = $${params.length}`; }
     if (businessType) { params.push(businessType); where += ` AND u.business_type = $${params.length}`; }
