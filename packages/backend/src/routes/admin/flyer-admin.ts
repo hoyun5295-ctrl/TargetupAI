@@ -336,7 +336,7 @@ router.post('/stores', async (req: Request, res: Response) => {
     const hash = await bcrypt.hash(password, 10);
     const result = await query(
       `INSERT INTO flyer_users (
-        id, company_id, login_id, password_hash, name, phone, role,
+        id, company_id, login_id, email, password_hash, name, phone, role,
         business_type, store_name,
         business_number, business_reg_name, business_reg_owner,
         business_category, business_item, business_address,
@@ -345,7 +345,7 @@ router.post('/stores', async (req: Request, res: Response) => {
         monthly_fee, payment_status, plan_started_at,
         memo, created_at
       ) VALUES (
-        gen_random_uuid(), $1, $2, $3, $4, $5, $6,
+        gen_random_uuid(), $1, $2, '', $3, $4, $5, $6,
         $7, $8,
         $9, $10, $11,
         $12, $13, $14,
