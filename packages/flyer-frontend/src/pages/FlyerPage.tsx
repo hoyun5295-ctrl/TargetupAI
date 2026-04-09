@@ -234,6 +234,7 @@ export default function FlyerPage({ token, businessType = 'mart' }: { token: str
               removeItem={removeItem}
               updateItem={updateItem}
               setAlert={setAlert}
+              categoryPresets={categoryPresets}
             />
 
             <div className="flex justify-end gap-3">
@@ -301,7 +302,7 @@ export default function FlyerPage({ token, businessType = 'mart' }: { token: str
 // ============================================================
 // 상품 등록 섹션 — 엑셀 업로드 + 카테고리 탭 방식
 // ============================================================
-function ProductRegistrationSection({ categories, setCategories, addCategory, removeCategory, updateCategoryName, addItem, removeItem, updateItem, setAlert }: {
+function ProductRegistrationSection({ categories, setCategories, addCategory, removeCategory, updateCategoryName, addItem, removeItem, updateItem, setAlert, categoryPresets }: {
   categories: FlyerCategory[];
   setCategories: (c: FlyerCategory[]) => void;
   addCategory: (name?: string) => void;
@@ -311,6 +312,7 @@ function ProductRegistrationSection({ categories, setCategories, addCategory, re
   removeItem: (ci: number, ii: number) => void;
   updateItem: (ci: number, ii: number, f: keyof FlyerItem, v: string | number) => void;
   setAlert: (a: { show: boolean; title: string; message: string; type: 'success' | 'error' | 'info' }) => void;
+  categoryPresets: string[];
 }) {
   const [activeTab, setActiveTab] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
