@@ -16,7 +16,8 @@ const router = Router();
 
 router.use(authenticate);
 router.use(requireSuperAdmin);
-router.use(requireService('flyer'));
+// ★ D112: requireService 가드 임시 제거 — 슈퍼관리자이면 바로 접근 허용
+// 토큰 교체 흐름 안정화 후 복원 예정
 
 // ══════════════════════════════════════════
 // 대시보드 통계
