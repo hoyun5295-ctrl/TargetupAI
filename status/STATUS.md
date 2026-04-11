@@ -107,6 +107,39 @@
 
 ---
 
+### 🔧 D114 — 0410 PDF 버그 10건 + 신규 기능 1건 (2026-04-12) — ✅ 배포완료
+
+> **배경:** 4/13 레거시 이관 직후. 직원 검수 PDF(한줄로_20260410.pdf) 11건 중 P11(스팸테스트 불안정 — 서버 확인 결과 테스트폰 앱 상태 문제로 코드 이슈 아님) 제외 10건 수정 + 엑셀 다운로드 신규 기능.
+
+#### 해결 항목 (10건)
+| # | 영역 | 근본 원인 | 해결 |
+|---|---|---|---|
+| **P1** | 고객 전체삭제 후 업로드 충돌 | delete-all이 customer_field_definitions/customer_stores/unsubscribes/customer_schema 미정리 | 4개 테이블 삭제 + customer_schema 초기화 추가 |
+| **P2** | 매핑 충돌 덮어쓰기 실패 | 고객 0명인데도 error 모달 표시 | 고객 0명이면 warning으로 격하 (3가지 충돌 타입 전부) |
+| **P3** | 수신거부 사용자 간 공유 | company_user 업로드 시 회사 전체 sms_opt_in=false 대상 INSERT | store_code 필터 추가 (본인 브랜드 범위만) |
+| **P4** | 직접발송 숫자 구분자 미적용 | 주소록 기타1/2/3 치환 시 formatNumericLike 미적용 | replaceVariables 0단계에 formatNumericLike 적용 |
+| **P5b** | 맞춤한줄 필드명 영문 출력 | RecommendTemplateModal에서 field key 그대로 표시 | FIELD_KEY_DISPLAY_MAP 컨트롤타워 + 한글 변환 |
+| **P6** | 자동발송 AI문안 알림 2건 중복 | runMessageGeneration에 잠금 없음 → 1분 간격 워커가 동일 캠페인 2번 픽업 | generating_at 컬럼 + 원자적 UPDATE RETURNING 잠금 |
+| **P7** | 자동발송 AI문안 변수 미치환 | personal_fields가 field key(['name']) → AI가 %name% 생성 → 매칭 실패 | getFieldByKey→displayName 변환 (['고객명']) |
+| **P8** | 자동발송 실행이력 3건 | 알림/스팸 run target_count=0 + 시간 불일치 + 실패건 성공 표시 | 건수 기록 + started_at 추가 + success_count=0 초기 + sync 연동 |
+| **P9** | 슈퍼관리자 고객사 고객 수 0 | companies.ts 목록 SELECT에 total_customers 서브쿼리 없음 | COUNT(*) 서브쿼리 추가 |
+| **P10** | 발송통계 엑셀 다운로드 (신규) | 기능 미존재 | admin.ts CSV 엔드포인트 + fetch+blob 다운로드 |
+
+#### DDL (실행 완료)
+```sql
+ALTER TABLE auto_campaigns ADD COLUMN IF NOT EXISTS generating_at TIMESTAMPTZ;
+```
+
+#### 수정 파일 (12개)
+customers.ts, upload-mapping-validator.ts, companies.ts, upload.ts, messageUtils.ts, auto-campaign-worker.ts, campaign-lifecycle.ts, AutoSendPage.tsx, RecommendTemplateModal.tsx, formatDate.ts, admin.ts, AdminDashboard.tsx
+
+#### 핵심 교훈 (D114)
+> 1. **전수 점검 3회 반복 — 매회 추가 발견.** 1차: 기본 수정. 2차: customer_stores 누락 + label_moved severity + CSV 이스케이핑 + window.open 인증 미전달 4건. 3차: spam_tested run target_count/started_at 미포함 1건. **처음부터 끝까지 데이터 흐름 추적하지 않으면 반드시 빠짐.**
+> 2. **SCHEMA.md 맹신 금지.** spam_filter_tests의 sms_table/sms_msgkey/started_at 컬럼이 SCHEMA.md에는 있지만 실제 DB에 없었음. 서버 `\d` 명령으로 실제 구조 확인 필수.
+> 3. **window.open은 Authorization 헤더를 보내지 않음.** 인증 필요 API의 파일 다운로드는 반드시 fetch+blob 패턴 사용.
+
+---
+
 ### 🔧 D111 — 0408 검수 9건 + 오픈 전 결정사항 2건 (2026-04-09) — ✅ 배포완료
 
 > **배경:** 4/13 레거시 이관 D-4. 0408 직원 검수리스트/PDF 지적 9건 + 오픈 전 결정사항(업로드 매핑 충돌 / 소수점 포맷) 2건을 한 세션에 전수 수정. 컨트롤타워 원칙 + 매트릭스 전수 점검으로 재발 차단.

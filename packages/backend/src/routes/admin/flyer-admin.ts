@@ -90,6 +90,9 @@ router.post('/companies', async (req: Request, res: Response) => {
     const {
       company_name, business_type, business_number, owner_name, owner_phone,
       address, store_hours, pos_type,
+      // ★ D114: 사업자등록증 + 세금계산서 전체 필드
+      business_reg_name, business_reg_owner, business_category, business_item, business_address,
+      tax_email, tax_manager_name, tax_manager_phone,
       admin_login_id, admin_password, admin_name, admin_email,
     } = req.body;
 
@@ -97,18 +100,32 @@ router.post('/companies', async (req: Request, res: Response) => {
       return res.status(400).json({ error: '회사명, 관리자 아이디, 비밀번호는 필수입니다' });
     }
 
+    // ★ D114: 총판명 중복 방지
+    const dupCheck = await query('SELECT id FROM flyer_companies WHERE company_name = $1 AND deleted_at IS NULL', [company_name]);
+    if (dupCheck.rows.length > 0) {
+      return res.status(400).json({ error: `"${company_name}" 총판이 이미 존재합니다.` });
+    }
+
     // 1. 회사 생성
     const companyRes = await query(
       `INSERT INTO flyer_companies
          (id, company_name, business_type, business_number, owner_name, owner_phone,
           address, store_hours, pos_type, plan_type, monthly_fee, payment_status,
-          plan_started_at, created_at)
+          plan_started_at,
+          business_reg_name, business_reg_owner, business_category, business_item, business_address,
+          tax_email, tax_manager_name, tax_manager_phone,
+          created_at)
        VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8,
-               'flyer_basic', 150000, 'active', CURRENT_DATE, NOW())
+               'flyer_basic', 150000, 'active', CURRENT_DATE,
+               $9, $10, $11, $12, $13, $14, $15, $16,
+               NOW())
        RETURNING id`,
       [company_name, business_type || 'mart', business_number || null,
        owner_name || null, owner_phone || null, address || null,
-       store_hours || null, pos_type || null]
+       store_hours || null, pos_type || null,
+       business_reg_name || null, business_reg_owner || null,
+       business_category || null, business_item || null, business_address || null,
+       tax_email || null, tax_manager_name || null, tax_manager_phone || null]
     );
     const companyId = companyRes.rows[0].id;
 
@@ -161,10 +178,13 @@ router.put('/companies/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const fields = req.body;
+    // ★ D114: 사업자등록증 전체 필드 + 세금계산서 허용 추가
     const allowed = [
       'company_name', 'business_type', 'business_number', 'owner_name', 'owner_phone',
       'address', 'store_hours', 'pos_type', 'monthly_fee', 'payment_status',
       'opt_out_080_number', 'sms_unit_price', 'lms_unit_price', 'mms_unit_price',
+      'business_reg_name', 'business_reg_owner', 'business_category', 'business_item',
+      'business_address', 'tax_email', 'tax_manager_name', 'tax_manager_phone',
     ];
 
     const sets: string[] = [];
