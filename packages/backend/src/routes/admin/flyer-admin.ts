@@ -457,26 +457,24 @@ router.put('/stores/:id', async (req: Request, res: Response) => {
 });
 
 /**
- * POST /stores/:id/activate — 입금 확인 → 매장 활성화
- * payment_status → 'active', plan_expires_at 설정
+ * POST /stores/:id/activate — 입금 확인 → 잔액 충전 (active 아님!)
+ * ★ D114: 입금확인 = 충전만. 매장 사장님이 "이용료 결제" 해야 active.
  */
 router.post('/stores/:id/activate', async (req: Request, res: Response) => {
   try {
-    const { months } = req.body; // 활성화 개월 수 (기본 1개월)
-    const m = Math.max(1, parseInt(String(months || '1'), 10));
+    const { amount } = req.body; // 입금 금액
+    const chargeAmount = parseInt(String(amount || '0'), 10);
+    if (chargeAmount <= 0) return res.status(400).json({ error: '입금 금액을 입력해주세요' });
 
     const result = await query(
       `UPDATE flyer_users
-       SET payment_status = 'active',
-           plan_started_at = COALESCE(plan_started_at, CURRENT_DATE),
-           plan_expires_at = CURRENT_DATE + ($1 || ' months')::interval,
-           updated_at = NOW()
+       SET prepaid_balance = prepaid_balance + $1, updated_at = NOW()
        WHERE id = $2 AND deleted_at IS NULL
-       RETURNING id, store_name, payment_status, plan_expires_at`,
-      [m, req.params.id]
+       RETURNING id, store_name, prepaid_balance, payment_status`,
+      [chargeAmount, req.params.id]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
-    return res.json(result.rows[0]);
+    return res.json({ ...result.rows[0], message: `₩${chargeAmount.toLocaleString()} 충전 완료. 매장에서 이용료 결제 시 활성화됩니다.` });
   } catch (error: any) {
     return res.status(500).json({ error: 'Server error' });
   }

@@ -154,15 +154,15 @@ export default function FlyerAdminDashboard() {
   const [actionValue, setActionValue] = useState('');
   const [actionResult, setActionResult] = useState('');
 
-  const openActivateModal = (storeId: string, storeName: string) => { setActionModal({ type: 'activate', storeId, storeName }); setActionValue('1'); setActionResult(''); };
+  const openActivateModal = (storeId: string, storeName: string) => { setActionModal({ type: 'activate', storeId, storeName }); setActionValue('150000'); setActionResult(''); };
   const openChargeModal = (storeId: string, storeName: string) => { setActionModal({ type: 'charge', storeId, storeName }); setActionValue('100000'); setActionResult(''); };
   const openDeleteDistModal = (distId: string, storeName: string) => { setActionModal({ type: 'delete_dist', distId, storeName }); setActionResult(''); };
 
   const handleActionSubmit = async () => {
     try {
       if (actionModal.type === 'activate' && actionModal.storeId) {
-        const res = await apiFetch(`/api/admin/flyer/stores/${actionModal.storeId}/activate`, { method: 'POST', body: JSON.stringify({ months: parseInt(actionValue) || 1 }) });
-        if (res.ok) { setActionResult('활성화 완료'); loadStores(); loadStats(); setTimeout(() => setActionModal({ type: null }), 1000); }
+        const res = await apiFetch(`/api/admin/flyer/stores/${actionModal.storeId}/activate`, { method: 'POST', body: JSON.stringify({ amount: parseInt(actionValue) || 0 }) });
+        if (res.ok) { const d = await res.json(); setActionResult(d.message || '충전 완료'); loadStores(); loadStats(); setTimeout(() => setActionModal({ type: null }), 1500); }
         else { const err = await res.json(); setActionResult(err.error || '실패'); }
       } else if (actionModal.type === 'charge' && actionModal.storeId) {
         const res = await apiFetch(`/api/admin/flyer/stores/${actionModal.storeId}/charge`, { method: 'POST', body: JSON.stringify({ amount: parseInt(actionValue) || 0 }) });
@@ -790,16 +790,17 @@ export default function FlyerAdminDashboard() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setActionModal({ type: null })}>
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm mx-4 p-6" onClick={e => e.stopPropagation()}>
             <h3 className="text-lg font-bold text-gray-800 mb-4">
-              {actionModal.type === 'activate' ? '입금 확인 (매장 활성화)' :
+              {actionModal.type === 'activate' ? '입금 확인 (잔액 충전)' :
                actionModal.type === 'charge' ? '잔액 충전' :
                '총판 삭제'}
             </h3>
             <p className="text-sm text-gray-500 mb-4">{actionModal.storeName || ''}</p>
             {actionModal.type === 'activate' && (
               <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700 mb-1">활성화 개월 수</label>
-                <input type="number" value={actionValue} onChange={e => setActionValue(e.target.value)} min="1"
+                <label className="block text-sm font-medium text-gray-700 mb-1">입금 금액 (원)</label>
+                <input type="number" value={actionValue} onChange={e => setActionValue(e.target.value)} min="1000" step="10000"
                   className="w-full border rounded-lg px-3 py-2 text-sm" />
+                <p className="text-xs text-gray-400 mt-1">입금 확인 시 잔액에 충전됩니다. 매장에서 이용료 결제 시 활성화됩니다.</p>
               </div>
             )}
             {actionModal.type === 'charge' && (
@@ -820,7 +821,7 @@ export default function FlyerAdminDashboard() {
               <button onClick={handleActionSubmit} className={`px-4 py-2 text-sm text-white rounded-lg font-medium ${
                 actionModal.type === 'delete_dist' ? 'bg-red-500 hover:bg-red-600' : 'bg-orange-500 hover:bg-orange-600'
               }`}>
-                {actionModal.type === 'activate' ? '활성화' : actionModal.type === 'charge' ? '충전' : '삭제'}
+                {actionModal.type === 'activate' ? '입금 확인' : actionModal.type === 'charge' ? '충전' : '삭제'}
               </button>
             </div>
           </div>

@@ -2,7 +2,7 @@
 
 > **한줄로 SCHEMA.md와 완전 분리.** 전단AI 전용 테이블(flyer_*)만 여기에 정의.
 > **방식 B 확정 (D112):** 한줄로 companies/users/customers 테이블과 완전 분리.
-> **최종 업데이트:** 2026-04-09 (D112 서버 DDL 실행 완료 + ALTER 반영)
+> **최종 업데이트:** 2026-04-12 (D114 flyer_companies 사업자등록증/세금계산서 컬럼 + flyer_business_types + flyer_users 확장 반영)
 
 ---
 
@@ -44,6 +44,14 @@
 | sms_unit_price | NUMERIC(8,2) DEFAULT 9.0 | SMS 단가 |
 | lms_unit_price | NUMERIC(8,2) DEFAULT 29.0 | LMS 단가 |
 | mms_unit_price | NUMERIC(8,2) DEFAULT 80.0 | MMS 단가 |
+| **business_reg_name** | VARCHAR(200) | ★ D114 사업자등록증 상호 |
+| **business_reg_owner** | VARCHAR(100) | ★ D114 대표자 |
+| **business_category** | VARCHAR(100) | ★ D114 업태 |
+| **business_item** | VARCHAR(100) | ★ D114 종목 |
+| **business_address** | TEXT | ★ D114 사업장 주소 |
+| **tax_email** | VARCHAR(200) | ★ D114 세금계산서 이메일 |
+| **tax_manager_name** | VARCHAR(100) | ★ D114 세금계산서 담당자 |
+| **tax_manager_phone** | VARCHAR(20) | ★ D114 세금계산서 담당자 연락처 |
 | created_at | TIMESTAMPTZ | |
 | updated_at | TIMESTAMPTZ | |
 | deleted_at | TIMESTAMPTZ | soft delete |
@@ -62,6 +70,26 @@
 | name | VARCHAR(100) | |
 | phone | VARCHAR(20) | |
 | role | VARCHAR(20) DEFAULT 'flyer_admin' | flyer_admin(사장)/flyer_staff(직원) |
+| **business_type** | VARCHAR(50) | ★ D113 매장 업종 (mart/butcher 등) |
+| **store_name** | VARCHAR(200) | ★ D113 매장명 |
+| **business_number** | VARCHAR(20) | ★ D113 사업자등록번호 |
+| **business_reg_name** | VARCHAR(200) | ★ D113 상호 |
+| **business_reg_owner** | VARCHAR(100) | ★ D113 대표자 |
+| **business_category** | VARCHAR(100) | ★ D113 업태 |
+| **business_item** | VARCHAR(100) | ★ D113 종목 |
+| **business_address** | TEXT | ★ D113 사업장 주소 |
+| **tax_email** | VARCHAR(200) | ★ D113 세금계산서 이메일 |
+| **tax_manager_name** | VARCHAR(100) | ★ D113 세금계산서 담당자 |
+| **tax_manager_phone** | VARCHAR(20) | ★ D113 세금계산서 담당자 연락처 |
+| **contact_name** | VARCHAR(100) | ★ D113 담당자명 |
+| **contact_phone** | VARCHAR(20) | ★ D113 담당자 연락처 |
+| **contact_email** | VARCHAR(200) | ★ D113 담당자 이메일 |
+| **monthly_fee** | INTEGER DEFAULT 150000 | ★ D113 월정액 |
+| **payment_status** | VARCHAR(20) DEFAULT 'pending' | ★ D113 pending/active/suspended |
+| **prepaid_balance** | INTEGER DEFAULT 0 | ★ D113 선불 잔액 |
+| **plan_started_at** | DATE | ★ D113 계약 시작일 |
+| **plan_expires_at** | DATE | ★ D113 계약 만료일 |
+| **memo** | TEXT | ★ D113 관리 메모 |
 | last_login_at | TIMESTAMPTZ | |
 | created_at | TIMESTAMPTZ | |
 | updated_at | TIMESTAMPTZ | |
@@ -283,6 +311,20 @@
 | created_at | TIMESTAMPTZ | |
 
 - UNIQUE: `(company_id, billing_month)`
+
+### 4-4. flyer_business_types — 업종 마스터 (D113)
+
+| 컬럼 | 타입 | 설명 |
+|------|------|------|
+| id | SERIAL PK | |
+| type_code | VARCHAR(30) UNIQUE NOT NULL | mart, butcher, seafood, bakery, cafe 등 |
+| type_name | VARCHAR(50) NOT NULL | 마트, 정육점, 수산, 베이커리, 카페 |
+| default_categories | JSONB | 업종별 기본 카테고리 (예: ["축산","수산","과일"]) |
+| is_active | BOOLEAN DEFAULT true | |
+| sort_order | INTEGER DEFAULT 0 | |
+| created_at | TIMESTAMPTZ | |
+
+**초기 데이터:** mart(마트), butcher(정육점)
 
 ---
 

@@ -24,8 +24,11 @@ export default function BalancePage({ token }: { token: string }) {
   const [depositorName, setDepositorName] = useState('');
   const [depositing, setDepositing] = useState(false);
 
+  // ★ D114: 이용료 결제
+  const [subscribing, setSubscribing] = useState(false);
+  const [planStatus, setPlanStatus] = useState<{ payment_status: string; plan_expires_at: string | null; monthly_fee: number }>({ payment_status: 'pending', plan_expires_at: null, monthly_fee: 150000 });
+
   const [alert, setAlert] = useState<{ show: boolean; title: string; message: string; type: 'success' | 'error' | 'info' }>({ show: false, title: '', message: '', type: 'info' });
-  // apiFetch가 자동으로 Authorization 헤더 추가
   const PER_PAGE = 20;
 
   const loadData = async () => {
@@ -41,7 +44,18 @@ export default function BalancePage({ token }: { token: string }) {
         apiFetch(`${API_BASE}/api/flyer/balance/transactions?${params}`),
         apiFetch(`${API_BASE}/api/flyer/balance/summary?months=6`),
       ]);
-      if (bRes.ok) setBalance(await bRes.json());
+      if (bRes.ok) {
+        const bData = await bRes.json();
+        setBalance(bData);
+        // ★ D114: 매장 구독 상태 (plan 응답에서 추출)
+        if (bData.plan) {
+          setPlanStatus({
+            payment_status: bData.plan.payment_status || 'pending',
+            plan_expires_at: bData.plan.plan_expires_at || null,
+            monthly_fee: Number(bData.plan.monthly_fee || 150000),
+          });
+        }
+      }
       if (tRes.ok) { const d = await tRes.json(); setTransactions(d.transactions || d || []); setTotal(d.total || 0); }
       if (sRes.ok) { const d = await sRes.json(); setSummary(d.summary || []); }
     } catch {}
@@ -78,6 +92,28 @@ export default function BalancePage({ token }: { token: string }) {
     finally { setDepositing(false); }
   };
 
+  // ★ D114: 이용료 결제 (잔액에서 15만원 차감 → 30일 active)
+  const handleSubscribe = async () => {
+    setSubscribing(true);
+    try {
+      const res = await apiFetch(`${API_BASE}/api/flyer/balance/subscribe`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setAlert({ show: true, title: '이용료 결제 완료', message: data.message, type: 'success' });
+        loadData();
+      } else {
+        setAlert({ show: true, title: '결제 실패', message: data.error || '결제에 실패했습니다.', type: 'error' });
+      }
+    } catch { setAlert({ show: true, title: '오류', message: '네트워크 오류', type: 'error' }); }
+    finally { setSubscribing(false); }
+  };
+
+  const isActive = planStatus.payment_status === 'active' && planStatus.plan_expires_at && new Date(planStatus.plan_expires_at) > new Date();
+  const daysLeft = planStatus.plan_expires_at ? Math.max(0, Math.ceil((new Date(planStatus.plan_expires_at).getTime() - Date.now()) / 86400000)) : 0;
+
   const typeLabel = (t: string) => {
     const map: Record<string, { variant: 'success' | 'error' | 'warn' | 'neutral'; label: string }> = {
       charge: { variant: 'success', label: '충전' },
@@ -100,6 +136,44 @@ export default function BalancePage({ token }: { token: string }) {
         {balance?.billing_type === 'prepaid' && (
           <Button onClick={() => setShowDeposit(!showDeposit)}>{showDeposit ? '닫기' : '충전 요청'}</Button>
         )}
+      </div>
+
+      {/* ★ D114: 이용료 결제 카드 */}
+      <div className={`rounded-2xl border-2 p-6 mb-6 ${isActive ? 'border-green-200 bg-green-50' : 'border-orange-300 bg-orange-50'}`}>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <div className={`w-14 h-14 rounded-full flex items-center justify-center ${isActive ? 'bg-green-100' : 'bg-orange-100'}`}>
+              <span className="text-2xl">{isActive ? '✅' : '🔒'}</span>
+            </div>
+            <div>
+              <h3 className="text-lg font-bold text-gray-800">
+                {isActive ? '전단AI 이용 중' : '전단AI 이용료 결제가 필요합니다'}
+              </h3>
+              <p className="text-sm text-gray-600 mt-0.5">
+                {isActive
+                  ? `${planStatus.plan_expires_at?.slice(0, 10)}까지 (${daysLeft}일 남음)`
+                  : `월 ₩${planStatus.monthly_fee.toLocaleString()} / 결제 후 30일간 전단 제작·발송 기능이 열립니다`
+                }
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            {isActive && daysLeft <= 7 && (
+              <span className="px-3 py-1 bg-amber-100 text-amber-700 text-xs font-bold rounded-full">곧 만료</span>
+            )}
+            <button
+              onClick={handleSubscribe}
+              disabled={subscribing}
+              className={`px-6 py-3 text-sm font-bold rounded-xl shadow-sm transition ${
+                isActive
+                  ? 'bg-green-600 text-white hover:bg-green-700'
+                  : 'bg-orange-500 text-white hover:bg-orange-600 animate-pulse'
+              } disabled:opacity-50`}
+            >
+              {subscribing ? '처리 중...' : isActive ? '30일 연장 결제' : `₩${planStatus.monthly_fee.toLocaleString()} 이용료 결제`}
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* 잔액 + 월별 요약 */}

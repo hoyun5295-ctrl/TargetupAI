@@ -8,13 +8,14 @@ import BalancePage from './pages/BalancePage';
 import UnsubscribesPage from './pages/UnsubscribesPage';
 import SettingsPage from './pages/SettingsPage';
 import CustomerPage from './pages/CustomerPage';
+import CatalogPage from './pages/CatalogPage';
 import { useSessionTimeout } from './hooks/useSessionTimeout';
 import SessionTimer from './components/SessionTimer';
 import SessionTimeoutModal from './components/SessionTimeoutModal';
 
 export const API_BASE = import.meta.env.VITE_API_URL || '';
 export function getToken(): string { return localStorage.getItem('flyer_token') || ''; }
-export type Page = 'flyer' | 'send' | 'customers' | 'results' | 'balance' | 'unsubscribes' | 'settings';
+export type Page = 'flyer' | 'send' | 'customers' | 'catalog' | 'results' | 'balance' | 'unsubscribes' | 'settings';
 
 /** 공통 fetch — 401 시 자동 로그아웃 */
 export async function apiFetch(url: string, options?: RequestInit): Promise<Response> {
@@ -36,6 +37,7 @@ const MAIN_MENUS: { key: Page; label: string; icon: string }[] = [
   { key: 'send', label: '발송', icon: '📨' },
   { key: 'customers', label: '고객DB', icon: '👥' },
   { key: 'results', label: '결과', icon: '📊' },
+  { key: 'catalog', label: '상품관리', icon: '📦' },
   { key: 'balance', label: '충전관리', icon: '💳' },
 ];
 
@@ -124,6 +126,7 @@ function App() {
         {currentPage === 'flyer' && <FlyerPage token={token} businessType={user?.businessType || 'mart'} />}
         {currentPage === 'send' && <SendPage token={token} />}
         {currentPage === 'customers' && <CustomerPage token={token} />}
+        {currentPage === 'catalog' && <CatalogPage token={token} />}
         {currentPage === 'results' && <ResultsPage token={token} />}
         {currentPage === 'balance' && <BalancePage token={token} />}
         {currentPage === 'unsubscribes' && <UnsubscribesPage token={token} />}

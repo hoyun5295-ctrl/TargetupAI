@@ -17,22 +17,36 @@ router.use(flyerAuthenticate);
  */
 router.get('/', async (req: Request, res: Response) => {
   try {
-    const { companyId } = req.flyerUser!;
+    const { companyId, userId } = req.flyerUser!;
 
-    const companyRes = await query(
-      `SELECT plan_type, monthly_fee, plan_started_at, plan_expires_at, payment_status,
-              sms_unit_price, lms_unit_price, mms_unit_price
-       FROM flyer_companies WHERE id = $1`,
-      [companyId]
+    // ★ D114: 매장(flyer_users) 정보 우선 — 이용료/잔액/구독상태는 매장 단위
+    const userRes = await query(
+      `SELECT u.monthly_fee, u.prepaid_balance, u.payment_status, u.plan_started_at, u.plan_expires_at,
+              c.sms_unit_price, c.lms_unit_price, c.mms_unit_price
+       FROM flyer_users u
+       JOIN flyer_companies c ON c.id = u.company_id
+       WHERE u.id = $1`,
+      [userId]
     );
-    if (companyRes.rows.length === 0) return res.status(404).json({ error: 'Company not found' });
+    if (userRes.rows.length === 0) return res.status(404).json({ error: 'Store not found' });
 
+    const store = userRes.rows[0];
     const now = new Date();
     const yearMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     const usage = await aggregateFlyerMonthlyUsage(companyId, yearMonth);
 
     return res.json({
-      plan: companyRes.rows[0],
+      balance: Number(store.prepaid_balance || 0),
+      billing_type: 'prepaid',
+      costPerSms: Number(store.sms_unit_price || 9),
+      costPerLms: Number(store.lms_unit_price || 29),
+      costPerMms: Number(store.mms_unit_price || 80),
+      plan: {
+        monthly_fee: Number(store.monthly_fee || 150000),
+        payment_status: store.payment_status,
+        plan_started_at: store.plan_started_at,
+        plan_expires_at: store.plan_expires_at,
+      },
       currentMonth: yearMonth,
       usage,
     });
@@ -125,6 +139,73 @@ router.post('/deposit-request', async (req: Request, res: Response) => {
     return res.json({ message: '입금 요청이 등록되었습니다', amount, depositorName });
   } catch (error: any) {
     return res.status(500).json({ error: 'Server error' });
+  }
+});
+
+/**
+ * ★ D114: POST /subscribe — 이용료 결제 (매장 사장님이 직접)
+ * 잔액에서 monthly_fee(15만원) 차감 → payment_status='active' + 30일 사용기간
+ * 잔액 부족 시 실패. 이미 active이고 만료 전이면 기간 연장(+30일).
+ */
+router.post('/subscribe', async (req: Request, res: Response) => {
+  try {
+    const userId = req.flyerUser!.userId;
+
+    // 매장 정보 조회
+    const userRes = await query(
+      `SELECT id, store_name, monthly_fee, prepaid_balance, payment_status, plan_expires_at
+       FROM flyer_users WHERE id = $1 AND deleted_at IS NULL`,
+      [userId]
+    );
+    if (userRes.rows.length === 0) return res.status(404).json({ error: '매장 정보를 찾을 수 없습니다' });
+
+    const store = userRes.rows[0];
+    const fee = Number(store.monthly_fee || 150000);
+    const balance = Number(store.prepaid_balance || 0);
+
+    if (balance < fee) {
+      return res.status(400).json({
+        error: `잔액이 부족합니다. 이용료 ₩${fee.toLocaleString()} / 현재 잔액 ₩${balance.toLocaleString()}`,
+        code: 'INSUFFICIENT_BALANCE',
+        required: fee,
+        balance,
+      });
+    }
+
+    // 잔액 차감 + active + 30일 (이미 active이면 기존 만료일에서 +30일 연장)
+    const result = await query(
+      `UPDATE flyer_users
+       SET prepaid_balance = prepaid_balance - $1,
+           payment_status = 'active',
+           plan_started_at = CASE WHEN payment_status != 'active' THEN CURRENT_DATE ELSE plan_started_at END,
+           plan_expires_at = CASE
+             WHEN payment_status = 'active' AND plan_expires_at > CURRENT_DATE
+               THEN plan_expires_at + INTERVAL '30 days'
+             ELSE CURRENT_DATE + INTERVAL '30 days'
+           END,
+           updated_at = NOW()
+       WHERE id = $2 AND prepaid_balance >= $1 AND deleted_at IS NULL
+       RETURNING id, store_name, prepaid_balance, payment_status, plan_started_at, plan_expires_at`,
+      [fee, userId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(400).json({ error: '결제 처리에 실패했습니다. 다시 시도해주세요.' });
+    }
+
+    const updated = result.rows[0];
+    console.log(`[flyer/balance] 이용료 결제: ${updated.store_name} ₩${fee.toLocaleString()} → 잔액 ₩${Number(updated.prepaid_balance).toLocaleString()}, 만료 ${updated.plan_expires_at}`);
+
+    return res.json({
+      success: true,
+      message: `이용료 ₩${fee.toLocaleString()} 결제 완료! 30일간 전단AI를 이용하실 수 있습니다.`,
+      fee,
+      balance: Number(updated.prepaid_balance),
+      plan_expires_at: updated.plan_expires_at,
+    });
+  } catch (error: any) {
+    console.error('[flyer/balance] subscribe error:', error);
+    return res.status(500).json({ error: '서버 오류가 발생했습니다' });
   }
 });
 
