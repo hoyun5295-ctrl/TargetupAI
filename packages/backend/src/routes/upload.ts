@@ -864,19 +864,23 @@ async function processUploadInBackground(
             console.log(`[업로드] 수신거부 자동등록(admin→브랜드배정): ${unsubResult.rowCount}건 (company: ${companyId})`);
           }
         } else {
-          // 브랜드 사용자 → 본인 user_id로 등록
+          // ★ D114 P3: 브랜드 사용자 → 본인 user_id + 본인 store_codes 범위 고객만 등록
+          // 이전: 회사 전체 sms_opt_in=false → 다른 사용자가 업로드한 수신거부까지 공유
+          // 수정: store_codes 매칭 고객만 (없으면 전체 — 단일 브랜드 회사)
+          const hasStoreCodes = userStoreCodes && userStoreCodes.length > 0;
           const unsubResult = await query(`
             INSERT INTO unsubscribes (company_id, user_id, phone, source)
             SELECT $1, $2, phone, 'db_upload'
             FROM customers
             WHERE company_id = $1 AND sms_opt_in = false AND is_active = true
+              ${hasStoreCodes ? 'AND store_code = ANY($3)' : ''}
               AND NOT EXISTS (
                 SELECT 1 FROM unsubscribes u WHERE u.user_id = $2 AND u.phone = customers.phone
               )
             ON CONFLICT (user_id, phone) DO NOTHING
-          `, [companyId, userId]);
+          `, hasStoreCodes ? [companyId, userId, userStoreCodes] : [companyId, userId]);
           if (unsubResult.rowCount && unsubResult.rowCount > 0) {
-            console.log(`[업로드] 수신거부 자동등록: ${unsubResult.rowCount}건 (company: ${companyId})`);
+            console.log(`[업로드] 수신거부 자동등록: ${unsubResult.rowCount}건 (company: ${companyId}, storeCodes: ${hasStoreCodes ? userStoreCodes.join(',') : 'all'})`);
           }
         }
       } catch (unsubError) {

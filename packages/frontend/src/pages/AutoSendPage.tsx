@@ -809,7 +809,12 @@ export default function AutoSendPage() {
                               </span>
                             )}
                           </div>
-                          <span className="text-xs text-gray-400">{formatDate(run.scheduled_at)}</span>
+                          {/* ★ D114 P8-2: 상태별 시간 표시 분기 — 알림/스팸은 실행 시각, 실발송은 예약 시각 */}
+                          <span className="text-xs text-gray-400">
+                            {run.status === 'notified' ? formatDate(run.notified_at || run.scheduled_at)
+                              : run.status === 'spam_tested' ? formatDate(run.started_at || run.scheduled_at)
+                              : formatDate(run.scheduled_at)}
+                          </span>
                         </div>
                         <div className="grid grid-cols-4 gap-2 text-center">
                           <div className="bg-gray-50 rounded-lg p-2">

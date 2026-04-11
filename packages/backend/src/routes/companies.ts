@@ -729,8 +729,10 @@ router.get('/', requireSuperAdmin, async (req: Request, res: Response) => {
     const total = parseInt(countResult.rows[0].count);
 
     params.push(Number(limit), offset);
+    // ★ D114 P9: total_customers 서브쿼리 추가 — 슈퍼관리자 고객사 목록에 고객 수 표시
     const result = await query(
-      `SELECT c.*, p.plan_name, p.plan_code
+      `SELECT c.*, p.plan_name, p.plan_code,
+              (SELECT COUNT(*) FROM customers WHERE company_id = c.id AND is_active = true) as total_customers
        FROM companies c
        LEFT JOIN plans p ON c.plan_id = p.id
        ${whereClause}

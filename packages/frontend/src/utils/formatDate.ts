@@ -343,6 +343,18 @@ export function formatByType(val: any, dataType?: string): string {
  *
  * ⚠️ 백엔드 standard-field-map.ts FIELD_DISPLAY_MAP과 반드시 동기화 유지.
  */
+// ★ D114 P5b: field key → 한글 표시명 매핑 (RecommendTemplateModal 등에서 사용)
+export const FIELD_KEY_DISPLAY_MAP: Record<string, string> = {
+  name: '고객명', phone: '전화번호', gender: '성별', age: '나이',
+  birth_date: '생일', email: '이메일', address: '주소', region: '지역',
+  grade: '등급', points: '포인트', sms_opt_in: '수신동의',
+  recent_purchase_date: '최근구매일', recent_purchase_amount: '최근구매금액',
+  total_purchase_amount: '누적구매금액', purchase_count: '구매횟수',
+  recent_purchase_store: '최근구매매장', registered_store: '등록매장',
+  registration_type: '등록유형', store_code: '매장코드',
+  store_name: '매장명', store_phone: '매장전화번호',
+};
+
 export const FRONT_FIELD_DISPLAY_MAP: Record<string, Record<string, string>> = {
   gender: {
     m: '남성', f: '여성',

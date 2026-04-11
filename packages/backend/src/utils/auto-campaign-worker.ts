@@ -40,6 +40,8 @@ import { resolveCustomerCallback } from './callback-filter';
 import { extractVarCatalog, generateMessages } from '../services/ai';
 import { autoSpamTestWithRegenerate } from './spam-test-queue';
 import { buildUnsubscribeFilter } from './unsubscribe-helper';
+// ★ D114 P7: personalFields → displayName 변환용
+import { getFieldByKey } from './standard-field-map';
 import { SEND_HOURS } from '../config/defaults';
 // ★ B5/B6: 신규 컨트롤타워
 import { fetchTargetSampleCustomer } from './target-sample';
@@ -131,6 +133,8 @@ async function runMessageGeneration(): Promise<void> {
 
   try {
     // D-2 범위: next_run_at이 24~48시간 이내 + AI 모드 + 아직 생성 안 한 건
+    // ★ D114 P6: generating_at IS NULL 조건 추가 — 중복 생성 방지
+    //   이전: 워커 1분 간격인데 AI 생성+스팸테스트 1분 이상 소요 → 같은 캠페인 2번 픽업 → 알림 2건
     const result = await query(
       `SELECT * FROM auto_campaigns
        WHERE status = 'active'
@@ -138,6 +142,7 @@ async function runMessageGeneration(): Promise<void> {
          AND next_run_at > NOW() + INTERVAL '24 hours'
          AND next_run_at <= NOW() + INTERVAL '48 hours'
          AND (generated_at IS NULL OR generated_at < NOW() - INTERVAL '48 hours')
+         AND (generating_at IS NULL OR generating_at < NOW() - INTERVAL '30 minutes')
        ORDER BY next_run_at ASC`
     );
 
@@ -146,7 +151,25 @@ async function runMessageGeneration(): Promise<void> {
     console.log(`${logPrefix} AI 문안 생성 대상 ${result.rows.length}건`);
 
     for (const ac of result.rows) {
-      await generateMessageForAutoCampaign(ac);
+      // ★ D114 P6: 원자적 잠금 — generating_at 마킹 (다음 워커 tick에서 skip)
+      const lockResult = await query(
+        `UPDATE auto_campaigns SET generating_at = NOW()
+         WHERE id = $1 AND (generating_at IS NULL OR generating_at < NOW() - INTERVAL '30 minutes')
+         RETURNING id`,
+        [ac.id]
+      );
+      if (lockResult.rows.length === 0) {
+        console.log(`${logPrefix} ${ac.id} 이미 생성 중 — skip`);
+        continue;
+      }
+
+      try {
+        await generateMessageForAutoCampaign(ac);
+      } catch (genErr) {
+        // 실패 시 잠금 해제 (다음 tick에서 재시도 가능)
+        await query('UPDATE auto_campaigns SET generating_at = NULL WHERE id = $1', [ac.id]);
+        console.error(`${logPrefix} ${ac.id} 생성 실패 → 잠금 해제:`, genErr);
+      }
     }
   } catch (err: any) {
     console.error(`${logPrefix} 문안 생성 워커 에러:`, err);
@@ -191,10 +214,29 @@ async function generateMessageForAutoCampaign(ac: any): Promise<void> {
     // ★ AI 메시지 생성 — services/ai.ts generateMessages() 재활용
     // message_type에 따라 SMS/LMS/MMS 전부 지원
     const channel = ac.message_type || 'SMS';
-    // ★ B+0407-4: 개인화 변수 — ac.personal_fields에서 가져와 generateMessages에 전달
-    //   누락 시 AI가 개인화 변수를 만들지 않는 버그 발생 (0407 PDF #6)
-    //   ⚠️ services/ai.ts 시그니처는 personalizationVars (이름 일치 필수)
-    const personalizationVars: string[] = Array.isArray(ac.personal_fields) ? ac.personal_fields : [];
+    // ★ D114 P7: 개인화 변수 — field key → displayName 변환
+    //   이전: ['name','birth_date'] → AI가 %name% 생성 → replaceVariables에서 매칭 실패 → NULL
+    //   수정: ['고객명','생일'] → AI가 %고객명% 생성 → replaceVariables에서 정상 매칭
+    const rawPersonalFields: string[] = Array.isArray(ac.personal_fields) ? ac.personal_fields : [];
+    // 커스텀 필드(custom_N) 라벨 조회
+    let customFieldLabels: Record<string, string> = {};
+    if (rawPersonalFields.some(k => k.startsWith('custom_'))) {
+      const cfdResult = await query(
+        `SELECT field_key, field_label FROM customer_field_definitions WHERE company_id = $1 AND field_key LIKE 'custom_%'`,
+        [ac.company_id]
+      );
+      for (const row of cfdResult.rows) {
+        customFieldLabels[row.field_key] = row.field_label;
+      }
+    }
+    const personalizationVars: string[] = rawPersonalFields.map(key => {
+      // FIELD_MAP에서 displayName 조회 (직접 컬럼 필드)
+      const field = getFieldByKey(key);
+      if (field) return field.displayName;
+      // 커스텀 필드는 customer_field_definitions 라벨
+      if (customFieldLabels[key]) return customFieldLabels[key];
+      return key; // 폴백
+    });
     const usePersonalization = personalizationVars.length > 0;
 
     const extraContext = {
@@ -502,6 +544,7 @@ async function sendPreNotification(ac: any): Promise<void> {
     }
 
     // auto_campaign_runs에 notified 기록
+    // ★ D114 P8-1: target_count/sent_count 추가 — 알림 발송 1건 기록 (0 표시 방지)
     const runNumberResult = await query(
       `SELECT COALESCE(MAX(run_number), 0) + 1 as next_run FROM auto_campaign_runs WHERE auto_campaign_id = $1`,
       [ac.id]
@@ -509,13 +552,15 @@ async function sendPreNotification(ac: any): Promise<void> {
     await query(
       `INSERT INTO auto_campaign_runs (
         auto_campaign_id, run_number, status, scheduled_at, notified_at, notify_message,
-        generated_message_content, generated_message_subject, ai_generation_status
-      ) VALUES ($1, $2, 'notified', $3, NOW(), $4, $5, $6, $7)`,
+        generated_message_content, generated_message_subject, ai_generation_status,
+        target_count, sent_count
+      ) VALUES ($1, $2, 'notified', $3, NOW(), $4, $5, $6, $7, $8, $8)`,
       [
         ac.id, runNumberResult.rows[0].next_run, ac.next_run_at, notifyMessage,
         ac.generated_message_content || null,
         ac.generated_message_subject || null,
         ac.ai_generate_enabled ? (ac.generated_message_content ? 'ai_generated' : 'ai_fallback') : 'fixed',
+        phones.length,  // 담당자 알림 대상 수 = 담당자 수
       ]
     );
 
@@ -742,10 +787,12 @@ async function executeAutoCampaign(ac: any): Promise<void> {
       }
     }
 
-    // ★ auto_campaign_runs 완료 처리
+    // ★ D114 P8-3: success_count 초기값 0 — 큐 INSERT 건수 ≠ 실제 전송 성공 건수
+    //   이전: success_count = sentCount (큐 INSERT 성공) → sync 전까지 "전부 성공" 오표시
+    //   수정: success_count = 0 초기 → syncCampaignResults에서 campaign_runs 갱신 시 auto_campaign_runs도 갱신
     await query(
       `UPDATE auto_campaign_runs SET
-        sent_count = $2, success_count = $2, fail_count = $3,
+        sent_count = $2, success_count = 0, fail_count = $3,
         status = $4, completed_at = NOW()
        WHERE id = $1`,
       [runId, sentCount, failCount, sentCount === 0 ? 'failed' : 'completed']

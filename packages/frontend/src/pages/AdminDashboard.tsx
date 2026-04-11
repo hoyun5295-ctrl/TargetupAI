@@ -3714,6 +3714,20 @@ const handleApproveRequest = async (id: string) => {
               >
                 조회
               </button>
+              {/* ★ D114 P10: 발송통계 엑셀(CSV) 다운로드 */}
+              <button
+                onClick={() => {
+                  const token = localStorage.getItem('token');
+                  const params = new URLSearchParams();
+                  if (statsStartDate) params.set('startDate', statsStartDate);
+                  if (statsEndDate) params.set('endDate', statsEndDate);
+                  if (statsCompanyFilter) params.set('companyId', statsCompanyFilter);
+                  window.open(`/api/admin/stats/export?${params.toString()}`, '_blank');
+                }}
+                className="px-4 py-1.5 bg-emerald-600 text-white rounded-lg text-sm hover:bg-emerald-700"
+              >
+                엑셀 다운로드
+              </button>
               <span className="text-sm text-gray-400 ml-auto">총 {statsTotal}건</span>
             </div>
 

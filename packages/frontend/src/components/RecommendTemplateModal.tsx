@@ -1,5 +1,6 @@
 import { Bookmark, ChevronLeft, ChevronRight, Pencil, Plus, Search, Sparkles, Trash2, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { FIELD_KEY_DISPLAY_MAP } from '../utils/formatDate';
 
 interface SavedSegment {
   id: string;
@@ -239,7 +240,7 @@ export default function RecommendTemplateModal({ show, onClose, onSelectHanjullo
                     <div className="text-xs text-gray-400 leading-relaxed line-clamp-2">
                       {seg.segment_type === 'hanjullo'
                         ? `"${seg.prompt}"`
-                        : seg.briefing ? seg.briefing.slice(0, 80) : `필드: ${seg.selected_fields?.join(', ') || '-'}`
+                        : seg.briefing ? seg.briefing.slice(0, 80) : `필드: ${seg.selected_fields?.map(k => FIELD_KEY_DISPLAY_MAP[k] || k).join(', ') || '-'}`
                       }
                     </div>
                     {isExample && (

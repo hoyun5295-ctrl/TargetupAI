@@ -179,10 +179,11 @@ export function replaceVariables(
   // 0단계: 주소록 기타 필드 치환 (직접발송 경로)
   // — fieldMappings에 없는 주소록 전용 변수를 먼저 치환하여 안전망에 잡히지 않도록
   if (addressBookFields) {
+    // ★ D114 P4: 주소록 기타 필드에 formatNumericLike 적용 — 직접발송 숫자 구분자 통일
     result = result
-      .replace(/%기타1%/g, addressBookFields.extra1 || '')
-      .replace(/%기타2%/g, addressBookFields.extra2 || '')
-      .replace(/%기타3%/g, addressBookFields.extra3 || '')
+      .replace(/%기타1%/g, formatNumericLike(addressBookFields.extra1) ?? (addressBookFields.extra1 || ''))
+      .replace(/%기타2%/g, formatNumericLike(addressBookFields.extra2) ?? (addressBookFields.extra2 || ''))
+      .replace(/%기타3%/g, formatNumericLike(addressBookFields.extra3) ?? (addressBookFields.extra3 || ''))
       .replace(/%회신번호%/g, addressBookFields.callback || '');
 
     // ★ D111 P2: 이름 폴백

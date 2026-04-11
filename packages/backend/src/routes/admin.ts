@@ -2757,4 +2757,83 @@ router.put('/rcs-templates/:id/reject', async (req: Request, res: Response) => {
   }
 });
 
+// ============================================================
+// ★ D114 P10: 발송통계 엑셀(CSV) 다운로드
+// 필요 데이터: 발송날짜 / 발송계정(사용자) / 문자타입별 총건수·성공·실패·대기
+// 계정별 사용 내역 필수 (거래내역서 발행용)
+// ============================================================
+router.get('/stats/export', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const { startDate, endDate, companyId } = req.query;
+
+    if (!startDate || !endDate) {
+      return res.status(400).json({ error: '시작일과 종료일을 입력해주세요.' });
+    }
+
+    let whereClause = `WHERE c.sent_at >= ($1 || ' 00:00:00+09')::timestamptz
+                          AND c.sent_at < ($2 || ' 00:00:00+09')::timestamptz + INTERVAL '1 day'`;
+    const params: any[] = [startDate, endDate];
+    let paramIdx = 3;
+
+    if (companyId) {
+      whereClause += ` AND c.company_id = $${paramIdx++}`;
+      params.push(companyId);
+    }
+
+    const result = await query(
+      `SELECT
+        TO_CHAR(c.sent_at AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD') as send_date,
+        co.company_name,
+        co.company_code,
+        u.login_id,
+        u.name as user_name,
+        c.message_type,
+        c.send_type,
+        COUNT(*) as campaign_count,
+        COALESCE(SUM(c.target_count), 0) as total_target,
+        COALESCE(SUM(c.sent_count), 0) as total_sent,
+        COALESCE(SUM(c.success_count), 0) as total_success,
+        COALESCE(SUM(c.fail_count), 0) as total_fail,
+        COALESCE(SUM(c.sent_count) - SUM(COALESCE(c.success_count,0)) - SUM(COALESCE(c.fail_count,0)), 0) as total_pending
+      FROM campaigns c
+      JOIN companies co ON c.company_id = co.id
+      LEFT JOIN users u ON c.created_by = u.id
+      ${whereClause}
+        AND c.status NOT IN ('draft', 'cancelled')
+      GROUP BY send_date, co.company_name, co.company_code, u.login_id, u.name, c.message_type, c.send_type
+      ORDER BY send_date DESC, co.company_name, u.login_id, c.message_type`,
+      params
+    );
+
+    // CSV 생성
+    const BOM = '\uFEFF';
+    const headers = ['발송일', '회사코드', '회사명', '계정ID', '사용자명', '문자타입', '발송유형', '캠페인수', '대상건수', '전송건수', '성공', '실패', '대기'];
+    const rows = result.rows.map((r: any) => [
+      r.send_date,
+      r.company_code || '',
+      r.company_name,
+      r.login_id || '-',
+      r.user_name || '-',
+      r.message_type,
+      r.send_type === 'auto' ? '자동' : r.send_type === 'direct' ? '직접' : 'AI',
+      r.campaign_count,
+      r.total_target,
+      r.total_sent,
+      r.total_success,
+      r.total_fail,
+      r.total_pending,
+    ].join(','));
+
+    const csv = BOM + headers.join(',') + '\n' + rows.join('\n');
+
+    const filename = `발송통계_${startDate}_${endDate}.csv`;
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"`);
+    res.send(csv);
+  } catch (error) {
+    console.error('[Admin] 발송통계 엑셀 다운로드 실패:', error);
+    res.status(500).json({ error: '다운로드에 실패했습니다.' });
+  }
+});
+
 export default router;

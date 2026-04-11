@@ -117,6 +117,14 @@ export async function validateUploadMapping(
      WHERE company_id = $1 AND field_key LIKE 'custom_%'`,
     [companyId]
   );
+
+  // ★ D114 P2: 고객 0명이면 충돌을 warning으로 격하 (기존 데이터 없으므로 의미 충돌 없음)
+  const customerCountResult = await query(
+    'SELECT COUNT(*) as cnt FROM customers WHERE company_id = $1 AND is_active = true',
+    [companyId]
+  );
+  const hasCustomers = parseInt(customerCountResult.rows[0].cnt) > 0;
+
   const existingByKey = new Map<string, { label: string; fieldType: string }>();
   const existingByLabel = new Map<string, { customKey: string; fieldType: string }>();
   for (const row of existingResult.rows) {
@@ -165,29 +173,39 @@ export async function validateUploadMapping(
     if (existing) {
       // 기존 슬롯에 이미 필드 정의 있음 → 라벨/타입 비교
       if (normalizeLabel(existing.label) !== normLabel) {
+        // ★ D114 P2: 고객 0명이면 warning으로 격하 — 기존 데이터가 없으므로 덮어쓰기 안전
+        const sev = hasCustomers ? 'error' : 'warning';
         conflicts.push({
           type: 'slot_label_conflict',
           customKey: fieldKey,
           header,
           proposed: { label: proposedLabel, fieldType: proposedType },
           existing: { customKey: fieldKey, label: existing.label, fieldType: existing.fieldType },
-          severity: 'error',
-          message: `"${fieldKey}" 슬롯에는 이미 "${existing.label}" (${existing.fieldType}) 필드가 저장되어 있습니다. "${proposedLabel}"로 덮어쓰면 기존 고객 데이터와 의미가 섞입니다.`,
-          resolveOptions: ['keep_existing', 'overwrite', 'move_slot', 'cancel'],
+          severity: sev,
+          message: hasCustomers
+            ? `"${fieldKey}" 슬롯에는 이미 "${existing.label}" (${existing.fieldType}) 필드가 저장되어 있습니다. "${proposedLabel}"로 덮어쓰면 기존 고객 데이터와 의미가 섞입니다.`
+            : `"${fieldKey}" 슬롯에 기존 정의 "${existing.label}"이 남아있지만 고객 데이터가 없어 안전하게 덮어쓸 수 있습니다.`,
+          resolveOptions: hasCustomers ? ['keep_existing', 'overwrite', 'move_slot', 'cancel'] : ['overwrite', 'cancel'],
         });
+        if (hasCustomers) continue;
+        // 고객 0명이면 warning이므로 계속 진행 (newFields에 추가하지 않고 그대로)
         continue;
       }
       if (existing.fieldType.toUpperCase() !== proposedType) {
+        const sev = hasCustomers ? 'error' : 'warning';
         conflicts.push({
           type: 'slot_type_conflict',
           customKey: fieldKey,
           header,
           proposed: { label: proposedLabel, fieldType: proposedType },
           existing: { customKey: fieldKey, label: existing.label, fieldType: existing.fieldType },
-          severity: 'error',
-          message: `"${fieldKey}" 슬롯의 타입이 기존 ${existing.fieldType}과 신규 ${proposedType}로 다릅니다. 타겟팅/미리보기가 오동작할 수 있습니다.`,
-          resolveOptions: ['keep_existing', 'overwrite', 'cancel'],
+          severity: sev,
+          message: hasCustomers
+            ? `"${fieldKey}" 슬롯의 타입이 기존 ${existing.fieldType}과 신규 ${proposedType}로 다릅니다. 타겟팅/미리보기가 오동작할 수 있습니다.`
+            : `"${fieldKey}" 슬롯의 타입이 다르지만 고객 데이터가 없어 안전하게 변경됩니다.`,
+          resolveOptions: hasCustomers ? ['keep_existing', 'overwrite', 'cancel'] : ['overwrite', 'cancel'],
         });
+        if (hasCustomers) continue;
         continue;
       }
       // 기존 라벨/타입 일치 — 정상 갱신

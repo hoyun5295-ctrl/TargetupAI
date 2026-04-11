@@ -264,6 +264,18 @@ export async function syncCampaignResults(companyId: string): Promise<SyncResult
               await prepaidRefund(campInfo.rows[0].company_id, effectiveFailCount, campInfo.rows[0].message_type, runInfo.rows[0].campaign_id, isTimedOut ? '타임아웃 실패 환불' : '발송 실패 환불');
             }
           }
+
+          // ★ D114 P8-3: auto_campaign_runs 연동 — 실제 전송 결과 반영
+          try {
+            await query(
+              `UPDATE auto_campaign_runs SET
+                success_count = $1, fail_count = $2
+               WHERE campaign_id = $3`,
+              [successCount, effectiveFailCount, runInfo.rows[0].campaign_id]
+            );
+          } catch (acrErr) {
+            // auto_campaign_runs에 해당 campaign_id가 없을 수 있음 (일반 캠페인)
+          }
         }
 
         // AI 학습 성과 데이터 업데이트
