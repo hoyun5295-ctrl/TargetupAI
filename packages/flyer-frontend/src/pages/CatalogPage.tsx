@@ -26,7 +26,7 @@ interface CatalogItem {
   created_at: string;
 }
 
-export default function CatalogPage({ token }: { token: string }) {
+export default function CatalogPage({ token: _token }: { token: string }) {
   const [items, setItems] = useState<CatalogItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -147,7 +147,7 @@ export default function CatalogPage({ token }: { token: string }) {
         </div>
       </div>
 
-      <SectionCard title="상품 카탈로그" description="전단 제작 시 자주 사용하는 상품을 미리 등록해두세요."
+      <SectionCard title="상품 카탈로그"
         action={<Button onClick={openCreateForm} size="sm">+ 상품 등록</Button>}>
 
         {/* 검색 + 필터 */}
@@ -286,7 +286,7 @@ export default function CatalogPage({ token }: { token: string }) {
         </div>
       )}
 
-      <AlertModal show={alert.show} title={alert.title} message={alert.message} type={alert.type} onClose={() => setAlert(p => ({ ...p, show: false }))} />
+      <AlertModal alert={alert} onClose={() => setAlert(p => ({ ...p, show: false }))} />
     </div>
   );
 }
