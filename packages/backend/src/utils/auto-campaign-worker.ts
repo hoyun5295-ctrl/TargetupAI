@@ -971,10 +971,12 @@ async function executePreSendSpamTest(ac: any): Promise<void> {
       `SELECT COALESCE(MAX(run_number), 0) + 1 as next_run FROM auto_campaign_runs WHERE auto_campaign_id = $1`,
       [ac.id]
     );
+    // ★ D114 P8-1: target_count/sent_count 추가 + started_at 기록 (0 표시 + 시간 불일치 방지)
     await query(
       `INSERT INTO auto_campaign_runs (
-        auto_campaign_id, run_number, status, scheduled_at, spam_test_result, ai_generation_status
-      ) VALUES ($1, $2, 'spam_tested', $3, $4, $5)`,
+        auto_campaign_id, run_number, status, scheduled_at, started_at,
+        spam_test_result, ai_generation_status, target_count, sent_count
+      ) VALUES ($1, $2, 'spam_tested', $3, NOW(), $4, $5, 3, 3)`,
       [
         ac.id, runNumberResult.rows[0].next_run, ac.next_run_at,
         JSON.stringify({ batchId: spamResult.batchId, isBlocked, result: resultLabel, variants: spamResult.variants }),

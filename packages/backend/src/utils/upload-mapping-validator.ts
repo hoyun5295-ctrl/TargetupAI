@@ -213,16 +213,21 @@ export async function validateUploadMapping(
       // 기존 슬롯 비어있음 → 신규 등록이지만 label_moved 검사 필요
       const movedFrom = existingByLabel.get(normLabel);
       if (movedFrom && movedFrom.customKey !== fieldKey) {
+        // ★ D114 P2: 고객 0명이면 warning으로 격하
+        const movedSev = hasCustomers ? 'error' : 'warning';
         conflicts.push({
           type: 'label_moved',
           customKey: fieldKey,
           header,
           proposed: { label: proposedLabel, fieldType: proposedType },
           existing: { customKey: movedFrom.customKey, label: proposedLabel, fieldType: movedFrom.fieldType },
-          severity: 'error',
-          message: `"${proposedLabel}"은(는) 이미 ${movedFrom.customKey} 슬롯에 저장되어 있습니다. 신규 업로드에서 ${fieldKey}로 배정되면 같은 라벨이 두 슬롯에 나뉘어 타겟팅 오류가 발생합니다.`,
-          resolveOptions: ['move_slot', 'cancel'],
+          severity: movedSev,
+          message: hasCustomers
+            ? `"${proposedLabel}"은(는) 이미 ${movedFrom.customKey} 슬롯에 저장되어 있습니다. 신규 업로드에서 ${fieldKey}로 배정되면 같은 라벨이 두 슬롯에 나뉘어 타겟팅 오류가 발생합니다.`
+            : `"${proposedLabel}"이 기존 ${movedFrom.customKey} 슬롯에 정의되어 있지만 고객 데이터가 없어 안전합니다.`,
+          resolveOptions: hasCustomers ? ['move_slot', 'cancel'] : ['overwrite', 'cancel'],
         });
+        if (hasCustomers) continue;
         continue;
       }
       newFields.push({ customKey: fieldKey, label: proposedLabel, fieldType: proposedType });

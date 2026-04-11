@@ -2805,15 +2805,19 @@ router.get('/stats/export', authenticate, requireSuperAdmin, async (req: Request
       params
     );
 
-    // CSV 생성
+    // CSV 생성 — 쉼표/큰따옴표 포함 값은 이스케이핑
     const BOM = '\uFEFF';
+    const csvEscape = (v: any) => {
+      const s = String(v ?? '');
+      return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g, '""')}"` : s;
+    };
     const headers = ['발송일', '회사코드', '회사명', '계정ID', '사용자명', '문자타입', '발송유형', '캠페인수', '대상건수', '전송건수', '성공', '실패', '대기'];
     const rows = result.rows.map((r: any) => [
       r.send_date,
-      r.company_code || '',
-      r.company_name,
-      r.login_id || '-',
-      r.user_name || '-',
+      csvEscape(r.company_code || ''),
+      csvEscape(r.company_name),
+      csvEscape(r.login_id || '-'),
+      csvEscape(r.user_name || '-'),
       r.message_type,
       r.send_type === 'auto' ? '자동' : r.send_type === 'direct' ? '직접' : 'AI',
       r.campaign_count,
@@ -2821,7 +2825,7 @@ router.get('/stats/export', authenticate, requireSuperAdmin, async (req: Request
       r.total_sent,
       r.total_success,
       r.total_fail,
-      r.total_pending,
+      Math.max(0, Number(r.total_pending) || 0),
     ].join(','));
 
     const csv = BOM + headers.join(',') + '\n' + rows.join('\n');

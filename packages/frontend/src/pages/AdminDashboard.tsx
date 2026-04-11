@@ -3714,15 +3714,28 @@ const handleApproveRequest = async (id: string) => {
               >
                 조회
               </button>
-              {/* ★ D114 P10: 발송통계 엑셀(CSV) 다운로드 */}
+              {/* ★ D114 P10: 발송통계 엑셀(CSV) 다운로드 — fetch+blob (Authorization 헤더 필수) */}
               <button
-                onClick={() => {
+                onClick={async () => {
                   const token = localStorage.getItem('token');
+                  if (!statsStartDate || !statsEndDate) { alert('시작일과 종료일을 선택해주세요.'); return; }
                   const params = new URLSearchParams();
-                  if (statsStartDate) params.set('startDate', statsStartDate);
-                  if (statsEndDate) params.set('endDate', statsEndDate);
+                  params.set('startDate', statsStartDate);
+                  params.set('endDate', statsEndDate);
                   if (statsCompanyFilter) params.set('companyId', statsCompanyFilter);
-                  window.open(`/api/admin/stats/export?${params.toString()}`, '_blank');
+                  try {
+                    const res = await fetch(`/api/admin/stats/export?${params.toString()}`, {
+                      headers: { Authorization: `Bearer ${token}` },
+                    });
+                    if (!res.ok) { const err = await res.json().catch(() => ({})); alert((err as any).error || '다운로드 실패'); return; }
+                    const blob = await res.blob();
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `발송통계_${statsStartDate}_${statsEndDate}.csv`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                  } catch { alert('다운로드 중 오류가 발생했습니다.'); }
                 }}
                 className="px-4 py-1.5 bg-emerald-600 text-white rounded-lg text-sm hover:bg-emerald-700"
               >
