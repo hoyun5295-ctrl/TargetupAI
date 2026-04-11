@@ -11,9 +11,9 @@ interface Flyer { id: string; title: string; store_name: string; period_start: s
 // D113: 하드코딩 폴백용 (API 실패 시)
 const DEFAULT_CATEGORY_PRESETS = ['청과/야채', '공산', '축산', '수산', '냉동', '유제품', '음료/주류', '생활용품'];
 const DEFAULT_TEMPLATES: TemplateOption[] = [
-  { value: 'grid', label: '가격 강조형', desc: '빨간 테마, 2열 카드', color: 'from-red-500 to-orange-500' },
-  { value: 'list', label: '리스트형', desc: '블랙+골드 프리미엄', color: 'from-gray-800 to-amber-700' },
-  { value: 'highlight', label: '특가 하이라이트', desc: '다크 모드, TODAY\'S PICK', color: 'from-orange-500 to-red-600' },
+  { value: 'grid', label: '가격 강조형', desc: '빨간 테마, 2열 카드', color: 'linear-gradient(to right, #ef4444, #f97316)' },
+  { value: 'list', label: '리스트형', desc: '딥블루, 깔끔 모던', color: 'linear-gradient(to right, #1d4ed8, #3b82f6)' },
+  { value: 'highlight', label: '특가 하이라이트', desc: '다크 모드, TOP PICK', color: 'linear-gradient(to right, #1f2937, #d97706)' },
 ];
 
 interface TemplateOption { value: string; label: string; desc: string; color: string; }
@@ -214,8 +214,9 @@ export default function FlyerPage({ token, businessType = 'mart' }: { token: str
                 {availableTemplates.map(t => (
                   <button key={t.value} onClick={() => setTemplate(t.value)}
                     className={`rounded-xl border-2 text-left transition-all overflow-hidden ${template === t.value ? 'border-primary-500 shadow-elevated' : 'border-border hover:border-border-strong'}`}>
-                    <div className={`h-3 bg-gradient-to-r ${t.color}`} />
-                    <div className="p-3">
+                    {/* ★ D114: 인라인 스타일 — Tailwind 동적 클래스 purge 방지 */}
+                    <div className="h-3 rounded-t-[10px]" style={{ background: t.color }} />
+                    <div className="p-3 text-center">
                       <div className="text-sm font-bold text-text">{t.label}</div>
                       <div className="text-xs text-text-muted mt-0.5">{t.desc}</div>
                     </div>

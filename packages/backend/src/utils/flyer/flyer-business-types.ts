@@ -28,11 +28,13 @@ export interface TemplateInfo {
   value: string;
   label: string;
   desc: string;
-  color: string; // tailwind gradient class for frontend card
+  color: string; // ★ D114: CSS gradient (인라인 스타일용) — Tailwind 동적 클래스는 purge됨
 }
 
 // ============================================================
 // 템플릿 메타데이터 레지스트리 (코드에서 정의)
+// ★ D114: color를 Tailwind 클래스 → CSS linear-gradient hex로 변경
+//   이유: API에서 동적으로 받아오는 Tailwind 클래스는 빌드 시 purge되어 색상 미표시
 // ============================================================
 
 export const TEMPLATE_REGISTRY: Record<string, TemplateInfo> = {
@@ -41,19 +43,19 @@ export const TEMPLATE_REGISTRY: Record<string, TemplateInfo> = {
     value: 'grid',
     label: '가격 강조형',
     desc: '빨간 테마, 2열 카드',
-    color: 'from-red-500 to-orange-500',
+    color: 'linear-gradient(to right, #ef4444, #f97316)',
   },
   list: {
     value: 'list',
     label: '리스트형',
     desc: '딥블루, 깔끔 모던',
-    color: 'from-blue-700 to-blue-500',
+    color: 'linear-gradient(to right, #1d4ed8, #3b82f6)',
   },
   highlight: {
     value: 'highlight',
     label: '특가 하이라이트',
     desc: '다크 모드, TOP PICK',
-    color: 'from-gray-800 to-amber-600',
+    color: 'linear-gradient(to right, #1f2937, #d97706)',
   },
 
   // --- 마트 전용 ---
@@ -61,25 +63,25 @@ export const TEMPLATE_REGISTRY: Record<string, TemplateInfo> = {
     value: 'mart_fresh',
     label: '신선식품 특화',
     desc: '녹색 테마, 농산물 강조',
-    color: 'from-green-500 to-emerald-600',
+    color: 'linear-gradient(to right, #22c55e, #059669)',
   },
   mart_weekend: {
     value: 'mart_weekend',
     label: '주말특가',
     desc: '보라+핑크, 주말 행사',
-    color: 'from-purple-500 to-pink-500',
+    color: 'linear-gradient(to right, #a855f7, #ec4899)',
   },
   mart_seasonal: {
     value: 'mart_seasonal',
     label: '시즌 행사',
     desc: '파랑+시안, 명절/절기',
-    color: 'from-blue-500 to-cyan-400',
+    color: 'linear-gradient(to right, #3b82f6, #22d3ee)',
   },
   mart_clearance: {
     value: 'mart_clearance',
     label: '창고대방출',
     desc: '노랑+빨강, 대량할인',
-    color: 'from-yellow-500 to-red-500',
+    color: 'linear-gradient(to right, #eab308, #ef4444)',
   },
 
   // --- 정육 전용 ---
@@ -87,19 +89,19 @@ export const TEMPLATE_REGISTRY: Record<string, TemplateInfo> = {
     value: 'butcher_premium',
     label: '프리미엄 정육',
     desc: '다크+골드, 한우 특화',
-    color: 'from-gray-900 to-amber-600',
+    color: 'linear-gradient(to right, #111827, #d97706)',
   },
   butcher_daily: {
     value: 'butcher_daily',
     label: '오늘의 고기',
     desc: '빨강, 일일특가',
-    color: 'from-red-600 to-rose-500',
+    color: 'linear-gradient(to right, #dc2626, #f43f5e)',
   },
   butcher_bulk: {
     value: 'butcher_bulk',
     label: '대용량 팩',
     desc: '네이비, 중량 강조',
-    color: 'from-blue-800 to-indigo-600',
+    color: 'linear-gradient(to right, #1e3a8a, #4f46e5)',
   },
 };
 
