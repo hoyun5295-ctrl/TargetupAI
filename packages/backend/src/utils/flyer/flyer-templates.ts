@@ -96,8 +96,7 @@ function htmlWrap(title: string, css: string, body: string, script?: string): st
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
-body{margin:0;padding:0}
-.page-wrap{max-width:480px;margin:0 auto;overflow-x:hidden}
+body{max-width:480px;margin:0 auto;overflow-x:clip}
 /* 카테고리 섹션 — sticky nav 가림 방지 */
 .sc{scroll-margin-top:56px}
 /* 공통 메타 칩 */
@@ -111,21 +110,18 @@ ${css}
 </style>
 </head>
 <body>
-<div class="page-wrap">
 ${body}
-</div>
 ${script ? `<script>${script}</script>` : ''}
 </body>
 </html>`;
 }
 
-/** 카테고리 탭 — page-wrap scroll + hashchange */
+/** 카테고리 탭 — scroll+hashchange, body overflow-x:clip (sticky 보존) */
 const STICKY_TAB_SCRIPT = `(function(){
 var ts=document.querySelectorAll('.ct');
 var ss=document.querySelectorAll('section.sc');
 var ni=document.querySelector('.ni');
 var nv=document.querySelector('.nav');
-var pw=document.querySelector('.page-wrap');
 if(!ts.length||!ss.length)return;
 function update(){
   var h=nv?nv.offsetHeight:50;
@@ -139,7 +135,6 @@ function update(){
 var tm=null;
 function onS(){if(tm)clearTimeout(tm);tm=setTimeout(update,80);}
 window.addEventListener('scroll',onS);
-if(pw)pw.addEventListener('scroll',onS);
 document.addEventListener('scroll',onS);
 window.addEventListener('hashchange',function(){setTimeout(update,100);});
 })();`;
