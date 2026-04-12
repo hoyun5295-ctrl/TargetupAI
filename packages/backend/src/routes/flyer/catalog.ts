@@ -5,8 +5,6 @@
  */
 
 import { Request, Response, Router } from 'express';
-import path from 'path';
-import fs from 'fs';
 import { query } from '../../config/database';
 import { flyerAuthenticate, requireFlyerAdmin } from '../../middlewares/flyer-auth';
 import { getCatalogItems, upsertCatalogItem, touchCatalogUsage } from '../../utils/flyer';
@@ -18,21 +16,6 @@ import {
 } from '../../utils/flyer/flyer-naver-search';
 
 const router = Router();
-
-// ★ 카탈로그 이미지 서빙 (공개 — 인증 불필요)
-router.get('/catalog-images/:companyId/:filename', (req: Request, res: Response) => {
-  const { companyId, filename } = req.params;
-  // 경로 traversal 방지
-  if (companyId.includes('..') || filename.includes('..')) return res.status(400).send('Invalid path');
-  const filePath = path.join(process.cwd(), 'uploads', 'catalog-images', companyId, filename);
-  if (!fs.existsSync(filePath)) return res.status(404).send('Not found');
-  const ext = path.extname(filename).toLowerCase();
-  const contentType = ext === '.png' ? 'image/png' : 'image/jpeg';
-  res.setHeader('Content-Type', contentType);
-  res.setHeader('Cache-Control', 'public, max-age=604800');
-  res.sendFile(filePath);
-});
-
 router.use(flyerAuthenticate);
 
 router.get('/', async (req: Request, res: Response) => {

@@ -65,6 +65,7 @@ import flyerCouponsRoutes, { publicRouter as flyerCouponPublicRoutes } from './r
 // DB 연결
 import './config/database';
 import { LIMITS } from './config/defaults';
+import path from 'path';
 
 const app = express();
 app.set('trust proxy', true);
@@ -146,8 +147,10 @@ app.use('/api/flyer/companies/sender-registration', flyerSenderRegistrationRoute
 app.use('/api/flyer/pos', flyerPosRoutes);
 app.use('/api/flyer/business-types', flyerBusinessTypesRoutes);
 
-app.use('/api/flyer/catalog-images', flyerCatalogRoutes);  // 카탈로그 이미지 공개 서빙 (인증 불필요)
 app.use('/api/flyer/coupons', flyerCouponsRoutes);
+
+// ★ 카탈로그 이미지 공개 서빙 (인증 불필요 — static)
+app.use('/api/flyer/catalog-images', express.static(path.join(process.cwd(), 'uploads', 'catalog-images')));
 
 // 전단AI 기존 라우트 (전단지 CRUD + 공개 페이지)
 app.use('/api/flyer/flyers', flyerRoutes);
