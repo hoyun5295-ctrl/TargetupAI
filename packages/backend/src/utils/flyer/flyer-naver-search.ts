@@ -14,7 +14,8 @@ import crypto from 'crypto';
 
 const NAVER_CLIENT_ID = process.env.NAVER_CLIENT_ID || '';
 const NAVER_CLIENT_SECRET = process.env.NAVER_CLIENT_SECRET || '';
-const SEARCH_API_URL = 'https://openapi.naver.com/v1/search/shop.json';
+const SHOP_API_URL = 'https://openapi.naver.com/v1/search/shop.json';
+const IMAGE_API_URL = 'https://openapi.naver.com/v1/search/image';
 
 // 이미지 저장 경로
 const IMAGE_DIR = path.join(process.cwd(), 'uploads', 'catalog-images');
@@ -40,9 +41,12 @@ export interface ImageSearchResult {
 }
 
 /**
- * ★ 네이버 쇼핑 검색 — 상품명으로 검색하여 후보 이미지 반환
+ * ★ 네이버 이미지 검색 — 상품명으로 검색하여 후보 이미지 반환
  *
- * @param query 상품명 (예: "카스 500ml", "삼겹살")
+ * 쇼핑 검색은 주류/담배 등 온라인 판매 금지 상품이 안 나옴.
+ * 이미지 검색은 모든 상품 커버 가능.
+ *
+ * @param query 상품명 (예: "카스 500ml", "처음처럼 소주")
  * @param display 결과 수 (기본 5, 최대 100)
  */
 export async function searchNaverShopping(
@@ -55,13 +59,15 @@ export async function searchNaverShopping(
   }
 
   try {
+    // ★ 이미지 검색 사용 (쇼핑 검색은 주류 등 미노출)
     const params = new URLSearchParams({
-      query,
+      query: query + ' 상품',  // "상품" 키워드 추가하여 상품 이미지 우선
       display: String(Math.min(display, 100)),
-      sort: 'sim', // 유사도 순
+      sort: 'sim',
+      filter: 'large',  // 큰 이미지만
     });
 
-    const res = await fetch(`${SEARCH_API_URL}?${params}`, {
+    const res = await fetch(`${IMAGE_API_URL}?${params}`, {
       headers: {
         'X-Naver-Client-Id': NAVER_CLIENT_ID,
         'X-Naver-Client-Secret': NAVER_CLIENT_SECRET,
@@ -69,7 +75,7 @@ export async function searchNaverShopping(
     });
 
     if (!res.ok) {
-      console.error(`[naver-search] API 오류: ${res.status} ${res.statusText}`);
+      console.error(`[naver-search] 이미지 API 오류: ${res.status} ${res.statusText}`);
       return { query, items: [], total: 0 };
     }
 
@@ -79,15 +85,15 @@ export async function searchNaverShopping(
       items: (data.items || []).map((item: any) => ({
         title: stripHtml(item.title || ''),
         link: item.link || '',
-        image: item.image || '',
-        lprice: item.lprice || '0',
-        hprice: item.hprice || '0',
-        mallName: item.mallName || '',
-        maker: item.maker || '',
-        brand: item.brand || '',
-        category1: item.category1 || '',
-        category2: item.category2 || '',
-        category3: item.category3 || '',
+        image: item.thumbnail || item.link || '',  // 이미지 검색은 thumbnail 필드
+        lprice: '0',
+        hprice: '0',
+        mallName: '',
+        maker: '',
+        brand: '',
+        category1: '',
+        category2: '',
+        category3: '',
       })),
       total: data.total || 0,
     };
