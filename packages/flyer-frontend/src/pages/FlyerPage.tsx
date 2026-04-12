@@ -422,6 +422,25 @@ function ProductRegistrationSection({ categories, setCategories, addCategory, re
   const [activeTab, setActiveTab] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // ★ 이미지 후보 선택기
+  const [imagePickerState, setImagePickerState] = useState<{ catIdx: number; itemIdx: number; candidates: Array<{ title: string; image: string }> } | null>(null);
+
+  const handlePickImage = async (imageUrl: string) => {
+    if (!imagePickerState) return;
+    try {
+      const res = await apiFetch(`${API_BASE}/api/flyer/catalog/select-image`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image_url: imageUrl }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        updateItem(imagePickerState.catIdx, imagePickerState.itemIdx, 'imageUrl', data.image_url);
+      }
+    } catch {}
+    setImagePickerState(null);
+  };
+
   // ★ 카탈로그 불러오기
   const [showCatalog, setShowCatalog] = useState(false);
   const [catalogItems, setCatalogItems] = useState<Array<{ id: string; product_name: string; category: string; default_price: number; image_url: string | null }>>([]);
@@ -644,16 +663,30 @@ function ProductRegistrationSection({ categories, setCategories, addCategory, re
                         className="flex-1 min-w-0 px-2.5 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 bg-surface"
                         onBlur={async (e) => {
                           const name = e.target.value.trim();
-                          if (!name || item.imageUrl) return; // 이름 없거나 이미 이미지 있으면 스킵
+                          if (!name || item.imageUrl) return;
                           try {
-                            const res = await apiFetch(`${API_BASE}/api/flyer/catalog/auto-match`, {
+                            // 1순위: 서버 카탈로그에서 동일 상품명 이미지 조회
+                            const catalogRes = await apiFetch(`${API_BASE}/api/flyer/catalog/find-image?name=${encodeURIComponent(name)}`);
+                            if (catalogRes.ok) {
+                              const catalogData = await catalogRes.json();
+                              if (catalogData.image_url) {
+                                updateItem(safeTab, ii, 'imageUrl', catalogData.image_url);
+                                return; // 서버 매칭 성공 → 검색 스킵
+                              }
+                            }
+                            // 2순위: 네이버 쇼핑 검색 → 후보 표시
+                            const catName = categories[safeTab]?.name || '';
+                            const searchQuery = catName ? `${name} ${catName}` : name;
+                            const res = await apiFetch(`${API_BASE}/api/flyer/catalog/search-image`, {
                               method: 'POST',
                               headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify({ product_name: name }),
+                              body: JSON.stringify({ product_name: searchQuery }),
                             });
                             if (res.ok) {
                               const data = await res.json();
-                              if (data.imageUrl) updateItem(safeTab, ii, 'imageUrl', data.imageUrl);
+                              if (data.items?.length > 0) {
+                                setImagePickerState({ catIdx: safeTab, itemIdx: ii, candidates: data.items });
+                              }
                             }
                           } catch {}
                         }} />
@@ -718,6 +751,27 @@ function ProductRegistrationSection({ categories, setCategories, addCategory, re
                 ))}
               </div>
             )}
+          </div>
+        </div>
+      )}
+      {/* ★ 이미지 후보 선택 팝업 */}
+      {imagePickerState && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={() => setImagePickerState(null)}>
+          <div className="bg-surface rounded-2xl w-full max-w-sm p-5" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-bold text-white">상품 이미지 선택</h3>
+              <button onClick={() => setImagePickerState(null)} className="text-text-tertiary hover:text-white text-xs">닫기</button>
+            </div>
+            <p className="text-xs text-text-tertiary mb-3">원하는 이미지를 클릭하세요</p>
+            <div className="grid grid-cols-3 gap-2">
+              {imagePickerState.candidates.map((c, i) => (
+                <button key={i} onClick={() => handlePickImage(c.image)}
+                  className="aspect-square border-2 border-border rounded-lg overflow-hidden hover:border-primary-500 transition-colors">
+                  <img src={c.image} alt={c.title} className="w-full h-full object-cover" />
+                </button>
+              ))}
+            </div>
+            <button onClick={() => setImagePickerState(null)} className="w-full mt-3 py-2 text-xs text-text-muted hover:text-text-secondary">이미지 없이 진행</button>
           </div>
         </div>
       )}

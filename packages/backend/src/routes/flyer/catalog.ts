@@ -62,6 +62,30 @@ router.delete('/:id', async (req: Request, res: Response) => {
 });
 
 // ============================================================
+// ★ 서버 카탈로그 이미지 우선 매칭 API
+// ============================================================
+
+/** GET /find-image?name=카스500ml — 서버에 저장된 동일 상품명 이미지 조회 (전 매장 공유) */
+router.get('/find-image', async (req: Request, res: Response) => {
+  try {
+    const name = req.query.name as string;
+    if (!name) return res.json({ image_url: null });
+
+    const result = await query(
+      `SELECT image_url FROM flyer_catalog
+       WHERE product_name = $1 AND image_url IS NOT NULL AND image_url != ''
+       ORDER BY usage_count DESC
+       LIMIT 1`,
+      [name.trim()]
+    );
+
+    return res.json({ image_url: result.rows[0]?.image_url || null });
+  } catch (error: any) {
+    return res.json({ image_url: null });
+  }
+});
+
+// ============================================================
 // ★ 네이버 쇼핑 이미지 검색 API (CT-F17)
 // ============================================================
 
