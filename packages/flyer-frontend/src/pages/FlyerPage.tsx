@@ -641,7 +641,22 @@ function ProductRegistrationSection({ categories, setCategories, addCategory, re
                         )}
                       </div>
                       <input type="text" value={item.name} onChange={e => updateItem(safeTab, ii, 'name', e.target.value)} placeholder="상품명"
-                        className="flex-1 min-w-0 px-2.5 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 bg-surface" />
+                        className="flex-1 min-w-0 px-2.5 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 bg-surface"
+                        onBlur={async (e) => {
+                          const name = e.target.value.trim();
+                          if (!name || item.imageUrl) return; // 이름 없거나 이미 이미지 있으면 스킵
+                          try {
+                            const res = await apiFetch(`${API_BASE}/api/flyer/catalog/auto-match`, {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ product_name: name }),
+                            });
+                            if (res.ok) {
+                              const data = await res.json();
+                              if (data.imageUrl) updateItem(safeTab, ii, 'imageUrl', data.imageUrl);
+                            }
+                          } catch {}
+                        }} />
                     </div>
                     <input type="number" value={item.originalPrice || ''} onChange={e => updateItem(safeTab, ii, 'originalPrice', Number(e.target.value))} placeholder="원가"
                       className="col-span-2 px-2.5 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 bg-surface" />
