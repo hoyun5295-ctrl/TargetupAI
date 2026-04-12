@@ -87,23 +87,20 @@ var ni=document.querySelector('.ni');
 var nv=document.querySelector('.nav');
 if(!ts.length||!ss.length)return;
 function setOn(idx){
-  for(var j=0;j<ts.length;j++){
-    ts[j].className=j===idx?'ct on':'ct';
-  }
-  if(ni&&ts[idx]){
-    ni.scrollLeft=ts[idx].offsetLeft-ni.offsetWidth/2+ts[idx].offsetWidth/2;
-  }
+  for(var j=0;j<ts.length;j++) ts[j].className=(j===idx)?'ct on':'ct';
+  if(ni&&ts[idx]) ni.scrollLeft=ts[idx].offsetLeft-ni.offsetWidth/2+ts[idx].offsetWidth/2;
+}
+function goTo(idx){
+  setOn(idx);
+  if(!ss[idx])return;
+  var h=nv?nv.offsetHeight:50;
+  var y=ss[idx].offsetTop-h-8;
+  document.documentElement.scrollTop=y;
+  document.body.scrollTop=y;
 }
 for(var i=0;i<ts.length;i++){
   (function(idx){
-    ts[idx].onclick=function(e){
-      e.preventDefault();
-      setOn(idx);
-      if(ss[idx]){
-        var h=nv?nv.offsetHeight:50;
-        window.scrollTo(0,ss[idx].offsetTop-h-8);
-      }
-    };
+    ts[idx].onclick=function(e){e.preventDefault();goTo(idx);return false;};
   })(i);
 }
 var tm=null;

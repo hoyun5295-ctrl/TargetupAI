@@ -115,20 +115,18 @@ ${script ? `<script>${script}</script>` : ''}
 </html>`;
 }
 
-/** 카테고리 탭 JS — 브라우저 기본 앵커이동 활용 + scroll시 탭 활성화 */
+/** 카테고리 탭 JS — 클릭=className만, 스크롤=탭바+활성 */
 const STICKY_TAB_SCRIPT = `(function(){
 var ts=document.querySelectorAll('.ct');
 var ss=document.querySelectorAll('section.sc');
 var ni=document.querySelector('.ni');
 var nv=document.querySelector('.nav');
 if(!ts.length||!ss.length)return;
-function setOn(idx){
-  for(var j=0;j<ts.length;j++) ts[j].className=(j===idx)?'ct on':'ct';
-  if(ni&&ts[idx]) ni.scrollLeft=ts[idx].offsetLeft-ni.offsetWidth/2+ts[idx].offsetWidth/2;
-}
 for(var i=0;i<ts.length;i++){
   (function(idx){
-    ts[idx].onclick=function(){ setOn(idx); };
+    ts[idx].onclick=function(){
+      for(var j=0;j<ts.length;j++) ts[j].className=(j===idx)?'ct on':'ct';
+    };
   })(i);
 }
 var tm=null;
@@ -140,7 +138,8 @@ window.onscroll=function(){
     for(var k=0;k<ss.length;k++){
       if(ss[k].getBoundingClientRect().top<=h+20)idx=k;
     }
-    setOn(idx);
+    for(var j=0;j<ts.length;j++) ts[j].className=(j===idx)?'ct on':'ct';
+    if(ni&&ts[idx]) ni.scrollLeft=ts[idx].offsetLeft-ni.offsetWidth/2+ts[idx].offsetWidth/2;
   },80);
 };
 })();`;
