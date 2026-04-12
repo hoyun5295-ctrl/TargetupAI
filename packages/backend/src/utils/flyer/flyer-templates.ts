@@ -19,6 +19,8 @@ export interface FlyerRenderData {
   title: string;
   period: string;
   categories: Array<{ name: string; items: FlyerRenderItem[] }>;
+  qrCodeDataUrl?: string;  // QR 쿠폰 이미지 (Data URL)
+  qrCouponText?: string;   // QR 쿠폰 안내 문구 (예: "스캔하고 5,000원 할인!")
 }
 
 export interface FlyerRenderItem {
@@ -89,13 +91,30 @@ const RENDERERS: Record<string, (d: FlyerRenderData) => string> = {
   butcher_bulk: renderButcherBulkTemplate,
 };
 
+/** QR 쿠폰 하단 섹션 — 모든 템플릿 공통 */
+function renderQrSection(d: FlyerRenderData): string {
+  if (!d.qrCodeDataUrl) return '';
+  return `
+  <div style="margin:24px auto 0;padding:20px;text-align:center;border-top:2px dashed #e0e0e0;max-width:340px">
+    <img src="${d.qrCodeDataUrl}" alt="QR 쿠폰" style="width:140px;height:140px;margin:0 auto 10px;display:block;border-radius:8px" />
+    <p style="font-size:15px;font-weight:700;color:#333;margin:0">${escapeHtml(d.qrCouponText || '스캔하고 할인 받으세요!')}</p>
+    <p style="font-size:11px;color:#999;margin-top:4px">QR 코드를 스마트폰 카메라로 스캔하세요</p>
+  </div>`;
+}
+
 /**
  * 단일 진입점. templateCode로 렌더러 선택. 미존재 시 grid 폴백.
  */
 export function renderTemplate(templateCode: string, data: FlyerRenderData): string {
   const renderer = RENDERERS[templateCode];
-  if (!renderer) return renderGridTemplate(data);
-  return renderer(data);
+  let html = renderer ? renderer(data) : renderGridTemplate(data);
+
+  // QR 쿠폰 섹션 자동 삽입 (</body> 앞)
+  if (data.qrCodeDataUrl) {
+    html = html.replace('</body>', renderQrSection(data) + '</body>');
+  }
+
+  return html;
 }
 
 // ============================================================

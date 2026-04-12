@@ -40,6 +40,12 @@ export default function FlyerPage({ token, businessType = 'mart' }: { token: str
   const [copyToast, setCopyToast] = useState(false);
   const [deleteModal, setDeleteModal] = useState<{ show: boolean; id: string; title: string }>({ show: false, id: '', title: '' });
 
+  // 쿠폰 연동 (발행 시)
+  const [couponModal, setCouponModal] = useState<{ show: boolean; flyerId: string }>({ show: false, flyerId: '' });
+  const [couponEnabled, setCouponEnabled] = useState(false);
+  const [couponForm, setCouponForm] = useState({ coupon_name: '', coupon_type: 'fixed' as 'fixed' | 'percent' | 'free_item', discount_value: '', min_purchase: '', max_issues: '', expires_at: '' });
+  const [couponSaving, setCouponSaving] = useState(false);
+
   const jsonHeaders = { 'Content-Type': 'application/json' };
 
   const loadFlyers = useCallback(async () => {
@@ -88,9 +94,43 @@ export default function FlyerPage({ token, businessType = 'mart' }: { token: str
     } catch { setAlert({ show: true, title: '오류', message: '네트워크 오류', type: 'error' }); }
   };
 
-  const handlePublish = async (id: string) => {
-    try { const res = await apiFetch(`${API_BASE}/api/flyer/flyers/${id}/publish`, { method: 'POST' }); if (res.ok) { const d = await res.json(); setAlert({ show: true, title: '발행 완료', message: `단축URL: ${d.short_url}`, type: 'success' }); loadFlyers(); } }
-    catch { setAlert({ show: true, title: '오류', message: '발행 실패', type: 'error' }); }
+  const handlePublish = (id: string) => {
+    setCouponModal({ show: true, flyerId: id });
+    setCouponEnabled(false);
+    setCouponForm({ coupon_name: '', coupon_type: 'fixed', discount_value: '', min_purchase: '', max_issues: '', expires_at: '' });
+  };
+
+  const executePublish = async () => {
+    const id = couponModal.flyerId;
+    setCouponSaving(true);
+    try {
+      // 1. 전단 발행
+      const res = await apiFetch(`${API_BASE}/api/flyer/flyers/${id}/publish`, { method: 'POST' });
+      if (!res.ok) { setAlert({ show: true, title: '오류', message: '발행 실패', type: 'error' }); return; }
+      const d = await res.json();
+
+      // 2. 쿠폰 생성 (활성화된 경우)
+      if (couponEnabled && couponForm.coupon_name && couponForm.discount_value) {
+        await apiFetch(`${API_BASE}/api/flyer/coupons`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            coupon_name: couponForm.coupon_name,
+            coupon_type: couponForm.coupon_type,
+            discount_value: Number(couponForm.discount_value),
+            min_purchase: couponForm.min_purchase ? Number(couponForm.min_purchase) : undefined,
+            max_issues: couponForm.max_issues ? Number(couponForm.max_issues) : undefined,
+            expires_at: couponForm.expires_at || undefined,
+            flyer_id: id,
+          }),
+        });
+      }
+
+      setCouponModal({ show: false, flyerId: '' });
+      setAlert({ show: true, title: '발행 완료', message: `단축URL: ${d.short_url}${couponEnabled ? '\nQR 쿠폰도 생성되었습니다!' : ''}`, type: 'success' });
+      loadFlyers();
+    } catch { setAlert({ show: true, title: '오류', message: '발행 실패', type: 'error' }); }
+    finally { setCouponSaving(false); }
   };
 
   const handleDelete = async (id: string) => {
@@ -289,6 +329,70 @@ export default function FlyerPage({ token, businessType = 'mart' }: { token: str
             <p className="text-[10px] text-text-muted text-center mt-3">
               {editingFlyer?.short_code ? '발행된 전단지 미리보기' : '입력 내용이 실시간 반영됩니다'}
             </p>
+          </div>
+        </div>
+      )}
+
+      {/* ── 발행 + 쿠폰 모달 ── */}
+      {couponModal.show && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={() => setCouponModal({ show: false, flyerId: '' })}>
+          <div className="bg-surface rounded-2xl w-full max-w-md p-6 space-y-4" onClick={e => e.stopPropagation()}>
+            <h3 className="text-lg font-bold text-white">전단지 발행</h3>
+
+            {/* 쿠폰 토글 */}
+            <div className="flex items-center justify-between bg-surface-secondary rounded-xl px-4 py-3">
+              <div>
+                <p className="text-sm font-semibold text-white">QR 쿠폰 추가</p>
+                <p className="text-xs text-text-tertiary">전단 하단에 QR 코드가 삽입됩니다</p>
+              </div>
+              <button
+                onClick={() => setCouponEnabled(!couponEnabled)}
+                className={`w-12 h-6 rounded-full transition-colors relative ${couponEnabled ? 'bg-primary-600' : 'bg-gray-600'}`}
+              >
+                <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full transition-transform shadow ${couponEnabled ? 'left-[26px]' : 'left-0.5'}`} />
+              </button>
+            </div>
+
+            {/* 쿠폰 설정 (토글 ON일 때만) */}
+            {couponEnabled && (
+              <div className="space-y-3 border border-border rounded-xl p-4">
+                <div>
+                  <label className="block text-xs text-text-secondary mb-1">쿠폰명 *</label>
+                  <Input value={couponForm.coupon_name} onChange={e => setCouponForm({ ...couponForm, coupon_name: e.target.value })} placeholder="예: 5,000원 할인 쿠폰" />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs text-text-secondary mb-1">할인 유형</label>
+                    <select className="w-full bg-surface-secondary border border-border rounded-lg px-3 py-2 text-sm text-white" value={couponForm.coupon_type} onChange={e => setCouponForm({ ...couponForm, coupon_type: e.target.value as any })}>
+                      <option value="fixed">정액 (원)</option>
+                      <option value="percent">퍼센트 (%)</option>
+                      <option value="free_item">증정품</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-text-secondary mb-1">할인값 *</label>
+                    <Input type="number" value={couponForm.discount_value} onChange={e => setCouponForm({ ...couponForm, discount_value: e.target.value })} placeholder="5000" />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs text-text-secondary mb-1">최대 발급수</label>
+                    <Input type="number" value={couponForm.max_issues} onChange={e => setCouponForm({ ...couponForm, max_issues: e.target.value })} placeholder="무제한" />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-text-secondary mb-1">만료일</label>
+                    <Input type="date" value={couponForm.expires_at} onChange={e => setCouponForm({ ...couponForm, expires_at: e.target.value })} />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="flex gap-2 pt-2">
+              <Button variant="secondary" className="flex-1" onClick={() => setCouponModal({ show: false, flyerId: '' })}>취소</Button>
+              <Button className="flex-1" onClick={executePublish} disabled={couponSaving}>
+                {couponSaving ? '처리 중...' : couponEnabled ? '발행 + 쿠폰 생성' : '발행하기'}
+              </Button>
+            </div>
           </div>
         </div>
       )}

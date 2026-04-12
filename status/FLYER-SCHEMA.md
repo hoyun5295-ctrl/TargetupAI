@@ -349,7 +349,70 @@
 
 ---
 
-## 7. 현재 서버 데이터 현황 (2026-04-09)
+## 7. QR 쿠폰 테이블 (D115, 2026-04-12)
+
+### flyer_coupon_campaigns — 쿠폰 캠페인
+
+```sql
+CREATE TABLE flyer_coupon_campaigns (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id UUID NOT NULL REFERENCES flyer_companies(id) ON DELETE CASCADE,
+  created_by UUID NOT NULL REFERENCES flyer_users(id),
+  flyer_id UUID,                              -- 연결된 전단지 (NULL=독립 쿠폰)
+  campaign_id UUID,                           -- 연결된 발송 캠페인
+  coupon_name VARCHAR(200) NOT NULL,          -- "5,000원 할인 쿠폰"
+  coupon_type VARCHAR(20) NOT NULL DEFAULT 'fixed',  -- fixed/percent/free_item
+  discount_value INTEGER NOT NULL DEFAULT 0,
+  discount_description TEXT,
+  min_purchase INTEGER DEFAULT 0,             -- 최소 구매금액
+  qr_code VARCHAR(20) UNIQUE NOT NULL,        -- 6자리 코드 (QR URL 구성)
+  qr_url TEXT,                                -- 전체 URL
+  qr_data_url TEXT,                           -- QR 이미지 Data URL
+  max_issues INTEGER,                         -- 최대 발급 수 (NULL=무제한)
+  issued_count INTEGER DEFAULT 0,
+  redeemed_count INTEGER DEFAULT 0,
+  total_redemption_amount INTEGER DEFAULT 0,
+  expires_at TIMESTAMPTZ,
+  status VARCHAR(20) DEFAULT 'active',        -- active/expired/disabled
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ
+);
+-- 인덱스: idx_fcc_company(company_id), idx_fcc_qr(qr_code)
+```
+
+### flyer_coupons — 개별 발급된 쿠폰
+
+```sql
+CREATE TABLE flyer_coupons (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  campaign_id UUID NOT NULL REFERENCES flyer_coupon_campaigns(id) ON DELETE CASCADE,
+  company_id UUID NOT NULL REFERENCES flyer_companies(id),
+  customer_phone VARCHAR(20) NOT NULL,        -- 수령 고객 전화번호
+  customer_name VARCHAR(100),
+  coupon_code VARCHAR(10) UNIQUE NOT NULL,    -- 4자리 개인 코드 (예: "A3K7")
+  status VARCHAR(20) DEFAULT 'issued',        -- issued/redeemed/expired
+  issued_at TIMESTAMPTZ DEFAULT NOW(),
+  redeemed_at TIMESTAMPTZ,
+  redeemed_by UUID REFERENCES flyer_users(id),
+  purchase_amount INTEGER,                    -- 실제 구매금액 (ROI 측정)
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+-- 인덱스: idx_fc_campaign(campaign_id), idx_fc_phone(customer_phone), idx_fc_code(coupon_code)
+```
+
+---
+
+## 8. POS Agent 컬럼 추가 (D115)
+
+```sql
+-- flyer_pos_agents 테이블에 AI 매핑 결과 저장 컬럼 추가
+ALTER TABLE flyer_pos_agents ADD COLUMN IF NOT EXISTS schema_mapping JSONB;
+-- Claude API로 분석한 POS DB 스키마 매핑 (테이블/컬럼/추출 SQL 쿼리)
+```
+
+---
+
+## 9. 현재 서버 데이터 현황 (2026-04-12)
 
 | 테이블 | 건수 | 비고 |
 |--------|------|------|

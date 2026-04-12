@@ -63,7 +63,7 @@ router.get('/:code', async (req: Request, res: Response) => {
     ).catch(err => console.error('[전단AI] 클릭 로그 실패:', err.message));
 
     // 전단지 페이지 렌더링
-    const html = renderFlyerPage(flyer);
+    const html = await renderFlyerPage(flyer);
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.send(html);
   } catch (err: any) {
@@ -136,7 +136,7 @@ function renderExpiredPage(storeName: string, title: string, endDate: string): s
 // ============================================================
 // 전단지 렌더링 — CT-F14 컨트롤타워 위임
 // ============================================================
-function renderFlyerPage(flyer: any): string {
+async function renderFlyerPage(flyer: any): Promise<string> {
   const categories = typeof flyer.categories === 'string' ? JSON.parse(flyer.categories) : (flyer.categories || []);
   const storeName = flyer.store_name || '';
   const title = flyer.title || '';
@@ -144,7 +144,26 @@ function renderFlyerPage(flyer: any): string {
   const periodEnd = flyer.period_end ? formatDate(flyer.period_end) : '';
   const period = periodStart && periodEnd ? `${periodStart} ~ ${periodEnd}` : (periodStart || periodEnd || '');
 
-  return renderTemplate(flyer.template || 'grid', { storeName, title, period, categories });
+  // QR 쿠폰 연결 확인
+  let qrCodeDataUrl: string | undefined;
+  let qrCouponText: string | undefined;
+  try {
+    const couponResult = await query(
+      `SELECT qr_data_url, coupon_name, discount_value, coupon_type, discount_description
+       FROM flyer_coupon_campaigns
+       WHERE flyer_id = $1 AND status = 'active'
+       LIMIT 1`,
+      [flyer.id]
+    );
+    if (couponResult.rows.length > 0) {
+      const c = couponResult.rows[0];
+      qrCodeDataUrl = c.qr_data_url;
+      qrCouponText = c.discount_description
+        || (c.coupon_type === 'percent' ? `스캔하고 ${c.discount_value}% 할인!` : `스캔하고 ${Number(c.discount_value).toLocaleString()}원 할인!`);
+    }
+  } catch {}
+
+  return renderTemplate(flyer.template || 'grid', { storeName, title, period, categories, qrCodeDataUrl, qrCouponText });
 }
 
 function formatDate(d: string | Date): string {

@@ -85,7 +85,7 @@ function App() {
           {/* 좌측: 로고 + 메인 메뉴 */}
           <div className="flex items-center">
             <button onClick={() => setCurrentPage('flyer')} className="mr-8 group">
-              <span className="text-sm font-bold text-text group-hover:text-primary-600 transition-colors">{user?.company?.name || '한줄전단'}</span>
+              <span className="text-sm font-bold text-text group-hover:text-primary-600 transition-colors">{user?.storeName || user?.name || '한줄전단'}</span>
             </button>
 
             <nav className="flex">
