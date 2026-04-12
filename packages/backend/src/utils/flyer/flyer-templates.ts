@@ -116,7 +116,7 @@ ${script ? `<script>${script}</script>` : ''}
 </html>`;
 }
 
-/** 카테고리 탭 — setInterval 100ms 폴링 (scroll 이벤트 무의존) */
+/** 카테고리 탭 JS — 외부 파일이 아닌 인라인 (CSP는 helmet 전 마운트로 우회) */
 const STICKY_TAB_SCRIPT = `(function(){
 var ts=document.querySelectorAll('.ct');
 var ss=document.querySelectorAll('section.sc');
@@ -130,6 +130,8 @@ setInterval(function(){
   for(var k=0;k<ss.length;k++){
     if(ss[k].getBoundingClientRect().top<=h+20)idx=k;
   }
+  var atBottom=(window.innerHeight+window.pageYOffset)>=document.body.scrollHeight-50;
+  if(atBottom)idx=ss.length-1;
   if(idx===last)return;
   last=idx;
   for(var j=0;j<ts.length;j++) ts[j].className=(j===idx)?'ct on':'ct';
