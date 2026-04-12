@@ -115,7 +115,7 @@ ${script ? `<script>${script}</script>` : ''}
 </html>`;
 }
 
-/** 스티키 카테고리 탭 JS — ES5 호환, onclick/onscroll 직접 할당 */
+/** 카테고리 탭 JS — 브라우저 기본 앵커이동 활용 + scroll시 탭 활성화 */
 const STICKY_TAB_SCRIPT = `(function(){
 var ts=document.querySelectorAll('.ct');
 var ss=document.querySelectorAll('section.sc');
@@ -123,23 +123,12 @@ var ni=document.querySelector('.ni');
 var nv=document.querySelector('.nav');
 if(!ts.length||!ss.length)return;
 function setOn(idx){
-  for(var j=0;j<ts.length;j++){
-    ts[j].className=j===idx?'ct on':'ct';
-  }
-  if(ni&&ts[idx]){
-    ni.scrollLeft=ts[idx].offsetLeft-ni.offsetWidth/2+ts[idx].offsetWidth/2;
-  }
+  for(var j=0;j<ts.length;j++) ts[j].className=(j===idx)?'ct on':'ct';
+  if(ni&&ts[idx]) ni.scrollLeft=ts[idx].offsetLeft-ni.offsetWidth/2+ts[idx].offsetWidth/2;
 }
 for(var i=0;i<ts.length;i++){
   (function(idx){
-    ts[idx].onclick=function(e){
-      e.preventDefault();
-      setOn(idx);
-      if(ss[idx]){
-        var h=nv?nv.offsetHeight:50;
-        window.scrollTo(0,ss[idx].offsetTop-h-8);
-      }
-    };
+    ts[idx].onclick=function(){ setOn(idx); };
   })(i);
 }
 var tm=null;
