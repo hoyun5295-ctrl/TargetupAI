@@ -4,16 +4,19 @@ import AlertModal from '../components/AlertModal';
 import { SectionCard, Button, Input, Badge, EmptyState, ConfirmModal, Toast } from '../components/ui';
 import { getProductDisplay } from '../utils/product-images';
 
-interface FlyerItem { name: string; originalPrice: number; salePrice: number; badge?: string; imageUrl?: string; }
+interface FlyerItem { name: string; originalPrice: number; salePrice: number; badge?: string; imageUrl?: string; unit?: string; origin?: string; cardDiscount?: string; }
 interface FlyerCategory { name: string; items: FlyerItem[]; }
 interface Flyer { id: string; title: string; store_name: string; period_start: string | null; period_end: string | null; categories: FlyerCategory[]; template: string; status: string; short_code: string | null; click_count: number; created_at: string; }
 
 // D113: 하드코딩 폴백용 (API 실패 시)
 const DEFAULT_CATEGORY_PRESETS = ['청과/야채', '공산', '축산', '수산', '냉동', '유제품', '음료/주류', '생활용품'];
 const DEFAULT_TEMPLATES: TemplateOption[] = [
-  { value: 'grid', label: '가격 강조형', desc: '빨간 테마, 2열 카드', color: 'linear-gradient(to right, #ef4444, #f97316)' },
-  { value: 'list', label: '리스트형', desc: '딥블루, 깔끔 모던', color: 'linear-gradient(to right, #1d4ed8, #3b82f6)' },
-  { value: 'highlight', label: '특가 하이라이트', desc: '다크 모드, TOP PICK', color: 'linear-gradient(to right, #1f2937, #d97706)' },
+  { value: 'grid', label: '가격 강조형', desc: '2열 카드 그리드, 가격 대형', color: 'linear-gradient(to right, #ef4444, #f97316)' },
+  { value: 'magazine', label: '매거진형', desc: '1열 매거진 레이아웃, 대형 이미지', color: 'linear-gradient(to right, #292524, #c2410c)' },
+  { value: 'editorial', label: '에디토리얼', desc: '풀블리드 이미지, 모던 타이포', color: 'linear-gradient(to right, #0f172a, #334155)' },
+  { value: 'showcase', label: '쇼케이스', desc: '대형 싱글 카드, 절약액 표시', color: 'linear-gradient(to right, #7c3aed, #ec4899)' },
+  { value: 'list', label: '리스트형', desc: '1열 매거진 (딥블루)', color: 'linear-gradient(to right, #1d4ed8, #3b82f6)' },
+  { value: 'highlight', label: '특가 하이라이트', desc: '다크 쇼케이스, 옐로 강조', color: 'linear-gradient(to right, #18181b, #facc15)' },
 ];
 
 interface TemplateOption { value: string; label: string; desc: string; color: string; }
@@ -620,12 +623,12 @@ function ProductRegistrationSection({ categories, setCategories, addCategory, re
               </div>
 
               <div className="space-y-2">
-                <div className="grid grid-cols-12 gap-2 text-[11px] font-semibold text-text-muted uppercase tracking-wider px-1">
-                  <div className="col-span-5">상품명</div><div className="col-span-2">원가</div><div className="col-span-2">할인가</div><div className="col-span-2">뱃지</div><div className="col-span-1"></div>
+                <div className="grid grid-cols-12 gap-2 text-[10px] font-semibold text-text-muted uppercase tracking-wider px-1">
+                  <div className="col-span-4">상품명</div><div className="col-span-2">원가/할인가</div><div className="col-span-2">규격/원산지</div><div className="col-span-2">뱃지</div><div className="col-span-1">카드할인</div><div className="col-span-1"></div>
                 </div>
                 {categories[safeTab].items.map((item, ii) => (
                   <div key={ii} className="grid grid-cols-12 gap-2 items-center">
-                    <div className="col-span-5 flex items-center gap-2">
+                    <div className="col-span-4 flex items-center gap-2">
                       <div className="relative flex-shrink-0">
                         <label className="cursor-pointer block w-9 h-9 rounded-lg border border-dashed border-border hover:border-primary-500 overflow-hidden flex items-center justify-center bg-bg/50 transition-colors">
                           {item.imageUrl ? (
@@ -691,12 +694,22 @@ function ProductRegistrationSection({ categories, setCategories, addCategory, re
                           } catch {}
                         }} />
                     </div>
-                    <input type="number" value={item.originalPrice || ''} onChange={e => updateItem(safeTab, ii, 'originalPrice', Number(e.target.value))} placeholder="원가"
-                      className="col-span-2 px-2.5 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 bg-surface" />
-                    <input type="number" value={item.salePrice || ''} onChange={e => updateItem(safeTab, ii, 'salePrice', Number(e.target.value))} placeholder="할인가"
-                      className="col-span-2 px-2.5 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 bg-surface" />
+                    <div className="col-span-2 flex flex-col gap-1">
+                      <input type="number" value={item.originalPrice || ''} onChange={e => updateItem(safeTab, ii, 'originalPrice', Number(e.target.value))} placeholder="원가"
+                        className="px-2 py-1.5 border border-border rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-primary-500 bg-surface" />
+                      <input type="number" value={item.salePrice || ''} onChange={e => updateItem(safeTab, ii, 'salePrice', Number(e.target.value))} placeholder="할인가"
+                        className="px-2 py-1.5 border border-border rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-primary-500 bg-surface" />
+                    </div>
+                    <div className="col-span-2 flex flex-col gap-1">
+                      <input type="text" value={item.unit || ''} onChange={e => updateItem(safeTab, ii, 'unit' as any, e.target.value)} placeholder="6kg/통"
+                        className="px-2 py-1.5 border border-border rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-primary-500 bg-surface" />
+                      <input type="text" value={item.origin || ''} onChange={e => updateItem(safeTab, ii, 'origin' as any, e.target.value)} placeholder="국내산"
+                        className="px-2 py-1.5 border border-border rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-primary-500 bg-surface" />
+                    </div>
                     <input type="text" value={item.badge || ''} onChange={e => updateItem(safeTab, ii, 'badge', e.target.value)} placeholder="뱃지"
-                      className="col-span-2 px-2.5 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 bg-surface" />
+                      className="col-span-2 px-2 py-1.5 border border-border rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-primary-500 bg-surface" />
+                    <input type="text" value={item.cardDiscount || ''} onChange={e => updateItem(safeTab, ii, 'cardDiscount' as any, e.target.value)} placeholder="농협5%"
+                      className="col-span-1 px-1.5 py-1.5 border border-border rounded-lg text-[10px] focus:outline-none focus:ring-1 focus:ring-primary-500 bg-surface" />
                     <button onClick={() => removeItem(safeTab, ii)} className="col-span-1 text-error-500/60 hover:text-error-500 text-center transition-colors">✕</button>
                   </div>
                 ))}
@@ -779,7 +792,36 @@ function ProductRegistrationSection({ categories, setCategories, addCategory, re
   );
 }
 
-// 프론트 자체 렌더링 미리보기 (미발행 전단지용) — 공개 페이지(short-urls.ts)와 동일 디자인
+// ============================================================
+// 프론트 자체 렌더링 미리보기 (미발행 전단지용) — CT-F14 V3 동기화
+// 4개 레이아웃 엔진: grid, magazine, editorial, showcase
+// ============================================================
+
+/** 엔진 분류: template code → layout engine */
+const ENGINE_MAP: Record<string, string> = {
+  grid: 'grid', mart_fresh: 'grid', mart_weekend: 'grid', mart_clearance: 'grid', butcher_daily: 'grid',
+  magazine: 'magazine', list: 'magazine', butcher_premium: 'magazine',
+  editorial: 'editorial', mart_seasonal: 'editorial',
+  showcase: 'showcase', highlight: 'showcase', butcher_bulk: 'showcase',
+};
+
+/** 테마 색상 (미리보기용 간소화) */
+const PREVIEW_THEMES: Record<string, { hero: string; price: string; bg: string; dark?: boolean; badge: string; chip: string; chipC: string }> = {
+  grid:             { hero: 'linear-gradient(145deg,#dc2626,#991b1b)', price: '#dc2626', bg: '#f3f4f6', badge: 'linear-gradient(135deg,#dc2626,#ea580c)', chip: '#fef2f2', chipC: '#b91c1c' },
+  magazine:         { hero: 'linear-gradient(160deg,#292524,#0c0a09)', price: '#c2410c', bg: '#fafaf9', badge: 'linear-gradient(135deg,#ea580c,#c2410c)', chip: '#fff7ed', chipC: '#9a3412' },
+  editorial:        { hero: 'linear-gradient(180deg,#0f172a,#1e293b)', price: '#0f172a', bg: '#fff', badge: 'linear-gradient(135deg,#ef4444,#dc2626)', chip: '#f1f5f9', chipC: '#334155' },
+  showcase:         { hero: 'linear-gradient(135deg,#7c3aed,#4c1d95)', price: '#7c3aed', bg: '#fafafa', badge: 'linear-gradient(135deg,#8b5cf6,#7c3aed)', chip: '#f5f3ff', chipC: '#6d28d9' },
+  highlight:        { hero: 'linear-gradient(145deg,#18181b,#09090b)', price: '#facc15', bg: '#0a0a0a', dark: true, badge: 'linear-gradient(135deg,#facc15,#eab308)', chip: 'rgba(250,204,21,.1)', chipC: '#facc15' },
+  list:             { hero: 'linear-gradient(160deg,#292524,#0c0a09)', price: '#c2410c', bg: '#fafaf9', badge: 'linear-gradient(135deg,#ea580c,#c2410c)', chip: '#fff7ed', chipC: '#9a3412' },
+  mart_fresh:       { hero: 'linear-gradient(145deg,#15803d,#14532d)', price: '#15803d', bg: '#f0fdf4', badge: 'linear-gradient(135deg,#16a34a,#15803d)', chip: '#dcfce7', chipC: '#166534' },
+  mart_weekend:     { hero: 'linear-gradient(145deg,#be185d,#831843)', price: '#be185d', bg: '#fdf2f8', badge: 'linear-gradient(135deg,#ec4899,#be185d)', chip: '#fce7f3', chipC: '#9d174d' },
+  mart_seasonal:    { hero: 'linear-gradient(145deg,#0c4a6e,#0369a1)', price: '#0369a1', bg: '#f0f9ff', badge: 'linear-gradient(135deg,#0284c7,#0369a1)', chip: '#e0f2fe', chipC: '#075985' },
+  mart_clearance:   { hero: 'linear-gradient(145deg,#b91c1c,#ef4444)', price: '#b91c1c', bg: '#fefce8', badge: 'linear-gradient(135deg,#dc2626,#b91c1c)', chip: '#fef9c3', chipC: '#92400e' },
+  butcher_premium:  { hero: 'linear-gradient(160deg,#1c1917,#000)', price: '#d9aa51', bg: '#0c0a09', dark: true, badge: 'linear-gradient(135deg,#d9aa51,#b8860b)', chip: 'rgba(217,170,81,.12)', chipC: '#d9aa51' },
+  butcher_daily:    { hero: 'linear-gradient(145deg,#991b1b,#dc2626)', price: '#b91c1c', bg: '#fef2f2', badge: 'linear-gradient(135deg,#dc2626,#b91c1c)', chip: '#fee2e2', chipC: '#991b1b' },
+  butcher_bulk:     { hero: 'linear-gradient(145deg,#312e81,#4338ca)', price: '#3730a3', bg: '#f5f3ff', badge: 'linear-gradient(135deg,#4f46e5,#3730a3)', chip: '#ede9fe', chipC: '#4338ca' },
+};
+
 function FlyerPreviewRenderer({ title, storeName, periodStart, periodEnd, categories, template }: {
   title: string; storeName: string; periodStart: string; periodEnd: string;
   categories: FlyerCategory[]; template: string;
@@ -789,10 +831,12 @@ function FlyerPreviewRenderer({ title, storeName, periodStart, periodEnd, catego
   const cleanCats = categories.map(c => ({ ...c, items: c.items.filter(i => i.name.trim()) })).filter(c => c.items.length > 0);
   const hasContent = title.trim() || cleanCats.length > 0;
   const period = (periodStart || periodEnd) ? `${fmtDate(periodStart)} ~ ${fmtDate(periodEnd)}` : '';
+  const th = PREVIEW_THEMES[template] || PREVIEW_THEMES.grid;
+  const engine = ENGINE_MAP[template] || 'grid';
 
   if (!hasContent) {
     return (
-      <div className="flex items-center justify-center h-full" style={{ background: template === 'highlight' ? '#0f0f0f' : '#f2f2f2' }}>
+      <div className="flex items-center justify-center h-full" style={{ background: th.dark ? '#0a0a0a' : '#f2f2f2' }}>
         <div className="text-center p-4">
           <p style={{ fontSize: 28 }}>📄</p>
           <p style={{ fontSize: 10, color: '#999', marginTop: 8 }}>상품을 입력하면<br />미리보기가 표시됩니다</p>
@@ -801,54 +845,90 @@ function FlyerPreviewRenderer({ title, storeName, periodStart, periodEnd, catego
     );
   }
 
-  const ImgOrEmoji = ({ item, h }: { item: FlyerItem; h: number }) => {
+  const ImgOrEmoji = ({ item, h, w }: { item: FlyerItem; h: number | string; w?: string }) => {
     const pd = getProductDisplay(item.name);
     const src = item.imageUrl ? `${API_BASE}${item.imageUrl}` : null;
-    if (src) return <img src={src} alt="" style={{ width: '100%', height: h, objectFit: 'cover' }} />;
-    const emojiBg = template === 'grid' ? 'linear-gradient(135deg,#fff5f5,#fef2f2)' : template === 'list' ? 'linear-gradient(135deg,#eff6ff,#dbeafe)' : 'linear-gradient(135deg,#1a1a2e,#2a2a3e)';
-    return <div style={{ width: '100%', height: h, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: h * 0.4, background: emojiBg }}>{pd.emoji}</div>;
+    const emojiBg = th.dark ? 'linear-gradient(135deg,#1a1a2e,#2a2a3e)' : `linear-gradient(135deg,${th.chip},${th.bg})`;
+    if (src) return <img src={src} alt="" style={{ width: w || '100%', height: h, objectFit: 'cover', display: 'block' }} />;
+    return <div style={{ width: w || '100%', height: h, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: typeof h === 'number' ? h * 0.4 : 28, background: emojiBg }}>{pd.emoji}</div>;
   };
 
-  // ── 그리드형 V2 (프리미엄 마트 전단 — 대형 가격, 카테고리 헤더) ──
-  if (template === 'grid') return (
-    <div style={{ background: '#f3f4f6', minHeight: '100%', fontFamily: 'system-ui, sans-serif' }}>
-      {/* 히어로 배너 */}
-      <div style={{ background: 'linear-gradient(145deg,#dc2626 0%,#b91c1c 40%,#991b1b 100%)', padding: '20px 10px 28px', textAlign: 'center', position: 'relative', overflow: 'hidden' }}>
-        <p style={{ fontSize: 10, color: 'rgba(255,255,255,.85)', letterSpacing: 2, fontWeight: 700, margin: 0 }}>{storeName || '매장명'}</p>
-        <p style={{ fontSize: 17, color: '#fff', fontWeight: 900, margin: '5px 0', lineHeight: 1.3, textShadow: '0 2px 8px rgba(0,0,0,.2)' }}>{title || '행사명'}</p>
-        {period && <div style={{ display: 'inline-block', marginTop: 8, background: 'rgba(0,0,0,.2)', borderRadius: 16, padding: '4px 12px', fontSize: 8, fontWeight: 600, color: 'rgba(255,255,255,.95)' }}>{period}</div>}
-        <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 14, background: '#f3f4f6', borderRadius: '14px 14px 0 0' }} />
+  /** 규격/원산지 칩 */
+  const MetaChips = ({ item }: { item: FlyerItem }) => {
+    if (!item.unit && !item.origin) return null;
+    return (
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 2, marginTop: 3 }}>
+        {item.unit && <span style={{ fontSize: 6, fontWeight: 600, padding: '1px 5px', borderRadius: 4, background: th.chip, color: th.chipC }}>{item.unit}</span>}
+        {item.origin && <span style={{ fontSize: 6, fontWeight: 600, padding: '1px 5px', borderRadius: 4, border: `1px solid ${th.chipC}`, color: th.chipC, background: 'transparent' }}>{item.origin}</span>}
       </div>
-      {/* 카테고리 탭 */}
-      <div style={{ background: '#fff', borderBottom: '1px solid #e5e7eb', padding: '0 6px', display: 'flex', overflow: 'auto', gap: 0 }}>
-        {cleanCats.map((cat, ci) => (
-          <span key={ci} style={{ padding: '8px 10px', fontSize: 8, fontWeight: 700, color: ci === 0 ? '#dc2626' : '#9ca3af', borderBottom: ci === 0 ? '2px solid #dc2626' : '2px solid transparent', whiteSpace: 'nowrap', flexShrink: 0 }}>{cat.name}</span>
-        ))}
-      </div>
-      {/* 상품 섹션 */}
+    );
+  };
+
+  /** 카드할인 */
+  const CardDiscount = ({ item }: { item: FlyerItem }) => {
+    if (!item.cardDiscount) return null;
+    return <p style={{ fontSize: 6, fontWeight: 700, color: '#16a34a', marginTop: 2 }}>💳 {item.cardDiscount}</p>;
+  };
+
+  // ── 히어로 배너 (공통) ──
+  const HeroBanner = ({ align = 'center' }: { align?: 'center' | 'left' }) => (
+    <div style={{ background: th.hero, padding: align === 'left' ? '18px 12px 22px' : '22px 10px 30px', textAlign: align, position: 'relative', overflow: 'hidden' }}>
+      <p style={{ fontSize: 8, color: 'rgba(255,255,255,.7)', letterSpacing: 3, fontWeight: 700, margin: 0 }}>{storeName || '매장명'}</p>
+      <p style={{ fontSize: 18, color: '#fff', fontWeight: 900, margin: '4px 0', lineHeight: 1.15, textShadow: '0 2px 8px rgba(0,0,0,.25)' }}>{title || '행사명'}</p>
+      {period && <div style={{ display: 'inline-block', marginTop: 6, background: 'rgba(255,255,255,.12)', borderRadius: 12, padding: '3px 10px', fontSize: 7, fontWeight: 600, color: 'rgba(255,255,255,.85)' }}>{period}</div>}
+      {engine === 'grid' && <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 12, background: th.bg, borderRadius: '12px 12px 0 0' }} />}
+      {engine === 'magazine' && <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 20, background: `linear-gradient(to top,${th.bg},transparent)` }} />}
+    </div>
+  );
+
+  // ── 카테고리 탭 (공통) ──
+  const CatTabs = ({ style: tabStyle }: { style?: 'pill' | 'underline' }) => (
+    <div style={{ background: th.dark ? '#141414' : '#fff', borderBottom: tabStyle === 'underline' ? `1px solid ${th.dark ? '#222' : '#e5e7eb'}` : 'none', padding: tabStyle === 'pill' ? '5px 6px' : '0 6px', display: 'flex', overflow: 'auto', gap: tabStyle === 'pill' ? 3 : 0 }}>
+      {cleanCats.map((cat, ci) => (
+        <span key={ci} style={{
+          padding: tabStyle === 'pill' ? '5px 10px' : '7px 9px',
+          fontSize: 8, fontWeight: 700, whiteSpace: 'nowrap' as const, flexShrink: 0,
+          ...(tabStyle === 'pill'
+            ? { color: ci === 0 ? '#fff' : (th.dark ? '#777' : '#9ca3af'), background: ci === 0 ? th.price : 'transparent', borderRadius: 10 }
+            : { color: ci === 0 ? th.price : (th.dark ? '#777' : '#9ca3af'), borderBottom: ci === 0 ? `2px solid ${th.price}` : '2px solid transparent' }
+          ),
+        }}>{cat.name}</span>
+      ))}
+    </div>
+  );
+
+  // ══════════════════════════════════════════
+  // ★ 엔진 1: GRID — 2열 카드 그리드
+  // ══════════════════════════════════════════
+  if (engine === 'grid') return (
+    <div style={{ background: th.bg, minHeight: '100%', fontFamily: 'system-ui, sans-serif' }}>
+      <HeroBanner />
+      <CatTabs style="pill" />
       <div style={{ padding: '2px 6px 12px' }}>
         {cleanCats.map((cat, ci) => (
           <div key={ci} style={{ marginBottom: 4 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, margin: '10px 0 7px', padding: '0 2px' }}>
-              <div style={{ width: 22, height: 22, borderRadius: 6, background: 'linear-gradient(135deg,#dc2626,#ea580c)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 9, fontWeight: 900, flexShrink: 0 }}>{String(ci + 1).padStart(2, '0')}</div>
-              <span style={{ fontSize: 11, fontWeight: 800, color: '#1a1a1a' }}>{cat.name}</span>
-              <span style={{ fontSize: 7, color: '#9ca3af', fontWeight: 600, marginLeft: 'auto' }}>{cat.items.length}개</span>
+              <div style={{ width: 22, height: 22, borderRadius: 6, background: th.badge, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 9, fontWeight: 900, flexShrink: 0 }}>{String(ci + 1).padStart(2, '0')}</div>
+              <span style={{ fontSize: 11, fontWeight: 800, color: th.dark ? '#eee' : '#1a1a1a' }}>{cat.name}</span>
+              <span style={{ fontSize: 7, color: th.dark ? '#555' : '#9ca3af', fontWeight: 600, marginLeft: 'auto' }}>{cat.items.length}개</span>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
               {cat.items.map((item, ii) => {
                 const discount = item.originalPrice > 0 ? Math.round((1 - item.salePrice / item.originalPrice) * 100) : 0;
                 return (
-                  <div key={ii} style={{ background: '#fff', borderRadius: 10, overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,.08),0 4px 12px rgba(0,0,0,.04)', position: 'relative' }}>
-                    {discount > 0 && <span style={{ position: 'absolute', top: 5, left: 5, background: 'linear-gradient(135deg,#dc2626,#ea580c)', color: '#fff', fontSize: 8, fontWeight: 800, padding: '2px 6px', borderRadius: 5, zIndex: 1, boxShadow: '0 2px 4px rgba(220,38,38,.3)' }}>{discount}%</span>}
+                  <div key={ii} style={{ background: th.dark ? '#141414' : '#fff', borderRadius: 10, overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,.08)', position: 'relative', border: th.dark ? '1px solid #222' : 'none' }}>
+                    {discount > 0 && <span style={{ position: 'absolute', top: 5, left: 5, background: th.badge, color: '#fff', fontSize: 8, fontWeight: 800, padding: '2px 6px', borderRadius: 5, zIndex: 1 }}>{discount}%</span>}
                     <ImgOrEmoji item={item} h={70} />
                     <div style={{ padding: '6px 7px 8px' }}>
-                      <p style={{ fontSize: 9, fontWeight: 700, color: '#1a1a1a', margin: 0, lineHeight: 1.3 }}>{item.name}</p>
-                      {item.originalPrice > 0 && item.originalPrice > item.salePrice && <p style={{ fontSize: 7, color: '#9ca3af', textDecoration: 'line-through', margin: '1px 0 0' }}>{fmtPrice(item.originalPrice)}원</p>}
+                      <p style={{ fontSize: 9, fontWeight: 700, color: th.dark ? '#eee' : '#1a1a1a', margin: 0, lineHeight: 1.3 }}>{item.name}</p>
+                      <MetaChips item={item} />
+                      {item.originalPrice > 0 && item.originalPrice > item.salePrice && <p style={{ fontSize: 7, color: th.dark ? '#555' : '#9ca3af', textDecoration: 'line-through', margin: '1px 0 0' }}>{fmtPrice(item.originalPrice)}원</p>}
                       <div style={{ display: 'flex', alignItems: 'baseline', gap: 1, marginTop: 1 }}>
-                        <span style={{ fontSize: 15, fontWeight: 900, color: '#dc2626', letterSpacing: -0.5 }}>{fmtPrice(item.salePrice)}</span>
-                        <span style={{ fontSize: 8, fontWeight: 700, color: '#dc2626' }}>원</span>
+                        <span style={{ fontSize: 16, fontWeight: 900, color: th.price, letterSpacing: -0.5 }}>{fmtPrice(item.salePrice)}</span>
+                        <span style={{ fontSize: 8, fontWeight: 700, color: th.price, opacity: 0.7 }}>원</span>
                       </div>
-                      {item.badge && <span style={{ fontSize: 6, fontWeight: 700, padding: '1px 5px', borderRadius: 4, display: 'inline-block', marginTop: 3, background: /특가|할인|초특가/.test(item.badge) ? '#fef2f2' : /인기|추천|프리미엄/.test(item.badge) ? '#eff6ff' : '#fffbeb', color: /특가|할인|초특가/.test(item.badge) ? '#dc2626' : /인기|추천|프리미엄/.test(item.badge) ? '#1d4ed8' : '#b45309', border: `1px solid ${/특가|할인|초특가/.test(item.badge) ? '#fecaca' : /인기|추천|프리미엄/.test(item.badge) ? '#bfdbfe' : '#fde68a'}` }}>{item.badge}</span>}
+                      <CardDiscount item={item} />
+                      {item.badge && <span style={{ fontSize: 6, fontWeight: 700, padding: '1px 5px', borderRadius: 4, display: 'inline-block', marginTop: 3, background: th.chip, color: th.chipC, border: `1px solid ${th.chipC}22` }}>{item.badge}</span>}
                     </div>
                   </div>
                 );
@@ -860,267 +940,98 @@ function FlyerPreviewRenderer({ title, storeName, periodStart, periodEnd, catego
     </div>
   );
 
-  // ── 리스트형 (밝은 톤 + 딥블루) ──
-  if (template === 'list') return (
-    <div style={{ background: '#f8f9fa', minHeight: '100%', fontFamily: 'system-ui, sans-serif' }}>
-      <div style={{ background: 'linear-gradient(135deg,#1e40af,#2563eb)', padding: '16px 10px 14px', textAlign: 'center', borderBottom: '3px solid #60a5fa' }}>
-        <p style={{ fontSize: 8, color: 'rgba(255,255,255,.75)', letterSpacing: 2, margin: 0 }}>{storeName || '매장명'}</p>
-        <p style={{ fontSize: 13, color: '#fff', fontWeight: 900, margin: '4px 0' }}>{title || '행사명'}</p>
-        {period && <p style={{ fontSize: 7, color: 'rgba(255,255,255,.65)', margin: 0 }}>{period}</p>}
-      </div>
-      <div style={{ padding: '6px 6px 12px' }}>
+  // ══════════════════════════════════════════
+  // ★ 엔진 2: MAGAZINE — 1열 매거진형 (좌: 텍스트+가격, 우: 대형이미지)
+  // ══════════════════════════════════════════
+  if (engine === 'magazine') return (
+    <div style={{ background: th.bg, minHeight: '100%', fontFamily: 'system-ui, sans-serif' }}>
+      <HeroBanner align="left" />
+      <CatTabs style="underline" />
+      <div style={{ padding: '0 7px 12px' }}>
         {cleanCats.map((cat, ci) => (
-          <div key={ci} style={{ marginBottom: 6 }}>
-            <span style={{ display: 'inline-block', fontSize: 8, fontWeight: 700, color: '#fff', background: 'linear-gradient(135deg,#2563eb,#1d4ed8)', padding: '3px 8px', borderRadius: 10, margin: '8px 0 5px' }}>{cat.name}</span>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              {cat.items.map((item, ii) => {
-                const discount = item.originalPrice > 0 ? Math.round((1 - item.salePrice / item.originalPrice) * 100) : 0;
-                return (
-                  <div key={ii} style={{ display: 'flex', alignItems: 'center', gap: 7, background: '#fff', borderRadius: 8, padding: 5, boxShadow: '0 1px 3px rgba(0,0,0,.04)', position: 'relative' }}>
-                    <div style={{ width: 42, height: 42, flexShrink: 0, borderRadius: 7, overflow: 'hidden' }}><ImgOrEmoji item={item} h={42} /></div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <p style={{ fontSize: 9, fontWeight: 700, color: '#1a1a1a', margin: 0 }}>{item.name}</p>
-                      {item.badge && <span style={{ fontSize: 6, color: '#2563eb', background: '#eff6ff', padding: '1px 4px', borderRadius: 3, fontWeight: 600 }}>{item.badge}</span>}
-                      <div style={{ display: 'flex', alignItems: 'baseline', gap: 3, marginTop: 1 }}>
-                        {item.originalPrice > 0 && <span style={{ fontSize: 7, color: '#aaa', textDecoration: 'line-through' }}>{fmtPrice(item.originalPrice)}</span>}
-                        <span style={{ fontSize: 11, fontWeight: 900, color: '#1e40af' }}>₩{fmtPrice(item.salePrice)}</span>
-                      </div>
-                    </div>
-                    {discount > 0 && <span style={{ position: 'absolute', top: 4, right: 4, background: '#ef4444', color: '#fff', fontSize: 7, fontWeight: 800, padding: '1px 4px', borderRadius: 4 }}>{discount}%</span>}
-                  </div>
-                );
-              })}
+          <div key={ci} style={{ marginBottom: 4 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5, margin: '14px 0 8px' }}>
+              <div style={{ width: 3, height: 16, borderRadius: 1, background: th.badge, flexShrink: 0 }} />
+              <span style={{ fontSize: 12, fontWeight: 900, color: th.dark ? '#eee' : '#1c1917' }}>{cat.name}</span>
             </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-
-  // ── 공통 헬퍼 ──
-  const allItems: (FlyerItem & { discount: number })[] = [];
-  for (const cat of cleanCats) for (const item of cat.items) {
-    if (item.originalPrice > 0) allItems.push({ ...item, discount: Math.round((1 - item.salePrice / item.originalPrice) * 100) });
-  }
-  allItems.sort((a, b) => b.discount - a.discount);
-  const picks = allItems.slice(0, 4);
-  const maxDiscount = allItems.length > 0 ? allItems[0].discount : 0;
-  const featured = allItems[0] || null;
-
-  // ── 하이라이트형 (프리미엄 다크 + 골드) ──
-  if (template === 'highlight') return (
-    <div style={{ background: '#0f0f0f', minHeight: '100%', fontFamily: 'system-ui, sans-serif' }}>
-      <div style={{ background: 'linear-gradient(180deg,#1a1a2e,#0f0f0f)', padding: '18px 10px 14px', textAlign: 'center', borderBottom: '2px solid #d4a844' }}>
-        <p style={{ fontSize: 7, color: '#d4a844', letterSpacing: 3, margin: 0 }}>{storeName || '매장명'}</p>
-        <p style={{ fontSize: 14, color: '#fff', fontWeight: 900, margin: '4px 0' }}>{title || '행사명'}</p>
-        {period && <p style={{ fontSize: 7, color: '#888', margin: 0 }}>{period}</p>}
-      </div>
-      <div style={{ padding: '6px 6px 12px' }}>
-        {picks.length > 0 && <>
-          <p style={{ textAlign: 'center', fontSize: 8, fontWeight: 800, color: '#d4a844', letterSpacing: 3, margin: '10px 0 6px' }}>TOP PICK</p>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 5, marginBottom: 10 }}>
-            {picks.map((p, i) => (
-              <div key={i} style={{ background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, overflow: 'hidden', position: 'relative' }}>
-                <ImgOrEmoji item={p} h={70} />
-                <span style={{ position: 'absolute', top: 4, left: 4, background: 'linear-gradient(135deg,#d4a844,#b8860b)', color: '#000', fontSize: 6, fontWeight: 800, padding: '2px 5px', borderRadius: 4 }}>{p.discount}% OFF</span>
-                <div style={{ padding: '5px 6px 7px' }}>
-                  <p style={{ fontSize: 8, fontWeight: 700, color: '#fff', margin: 0 }}>{p.name}</p>
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 3, marginTop: 2 }}>
-                    <span style={{ fontSize: 7, color: '#666', textDecoration: 'line-through' }}>{fmtPrice(p.originalPrice)}</span>
-                    <span style={{ fontSize: 12, fontWeight: 900, color: '#d4a844' }}>₩{fmtPrice(p.salePrice)}</span>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </>}
-        {cleanCats.map((cat, ci) => (
-          <div key={ci} style={{ marginBottom: 6 }}>
-            <p style={{ fontSize: 8, fontWeight: 700, color: '#d4a844', borderBottom: '1px solid #222', padding: '6px 0 4px', margin: '4px 0', letterSpacing: 1 }}>{cat.name}</p>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
-              {cat.items.map((item, ii) => (
-                <div key={ii} style={{ background: '#1a1a1a', borderRadius: 7, overflow: 'hidden', border: '1px solid #222' }}>
-                  <ImgOrEmoji item={item} h={45} />
-                  <div style={{ padding: '4px 5px 6px' }}>
-                    <p style={{ fontSize: 7, fontWeight: 600, color: '#ddd', margin: 0 }}>{item.name}</p>
-                    <p style={{ fontSize: 10, fontWeight: 900, color: '#d4a844', margin: '1px 0 0' }}>₩{fmtPrice(item.salePrice)}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-
-  // ── 신선식품 특화 (녹색 테마) ──
-  if (template === 'mart_fresh') return (
-    <div style={{ background: '#f0fdf4', minHeight: '100%', fontFamily: 'system-ui, sans-serif' }}>
-      <div style={{ background: 'linear-gradient(135deg,#16a34a,#15803d)', padding: '16px 10px 20px', textAlign: 'center', borderRadius: '0 0 50% 50% / 0 0 12px 12px' }}>
-        <p style={{ fontSize: 8, color: 'rgba(255,255,255,.8)', letterSpacing: 2, margin: 0 }}>{storeName || '매장명'}</p>
-        <p style={{ fontSize: 13, color: '#fff', fontWeight: 900, margin: '4px 0' }}>{title || '행사명'}</p>
-        {period && <p style={{ fontSize: 7, color: 'rgba(255,255,255,.7)', margin: 0 }}>{period}</p>}
-      </div>
-      <div style={{ padding: '6px 6px 12px' }}>
-        {cleanCats.map((cat, ci) => (
-          <div key={ci} style={{ marginBottom: 6 }}>
-            <p style={{ fontSize: 9, fontWeight: 800, color: '#15803d', margin: '8px 0 5px', paddingBottom: 4, borderBottom: '2px solid #bbf7d0' }}>🌿 {cat.name}</p>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 5 }}>
-              {cat.items.map((item, ii) => {
-                const disc = item.originalPrice > 0 ? Math.round((1 - item.salePrice / item.originalPrice) * 100) : 0;
-                return (
-                  <div key={ii} style={{ background: '#fff', borderRadius: 10, overflow: 'hidden', border: '1px solid #dcfce7', position: 'relative' }}>
-                    {disc > 0 && <span style={{ position: 'absolute', top: 4, left: 4, background: '#16a34a', color: '#fff', fontSize: 7, fontWeight: 800, padding: '1px 5px', borderRadius: 5, zIndex: 1 }}>-{disc}%</span>}
-                    <ImgOrEmoji item={item} h={55} />
-                    <div style={{ padding: '5px 6px 7px' }}>
-                      <p style={{ fontSize: 8, fontWeight: 700, margin: 0 }}>{item.name}</p>
-                      <span style={{ fontSize: 11, fontWeight: 900, color: '#16a34a' }}>{fmtPrice(item.salePrice)}원</span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-
-  // ── 주말특가 (보라+핑크, 대표 상품 배너) ──
-  if (template === 'mart_weekend') return (
-    <div style={{ background: '#fdf4ff', minHeight: '100%', fontFamily: 'system-ui, sans-serif' }}>
-      <div style={{ background: 'linear-gradient(135deg,#9333ea,#ec4899)', padding: '16px 10px 14px', textAlign: 'center' }}>
-        <p style={{ fontSize: 8, color: 'rgba(255,255,255,.85)', letterSpacing: 2, margin: 0 }}>{storeName || '매장명'}</p>
-        <p style={{ fontSize: 14, color: '#fff', fontWeight: 900, margin: '4px 0' }}>{title || '행사명'}</p>
-        {period && <p style={{ fontSize: 7, color: 'rgba(255,255,255,.7)', margin: 0 }}>{period}</p>}
-      </div>
-      <div style={{ padding: '8px 6px 12px' }}>
-        {featured && (
-          <div style={{ background: '#fff', borderRadius: 14, padding: 10, textAlign: 'center', boxShadow: '0 4px 12px rgba(147,51,234,.12)', marginBottom: 10, border: '2px solid #e9d5ff' }}>
-            <span style={{ display: 'inline-block', background: 'linear-gradient(135deg,#9333ea,#ec4899)', color: '#fff', fontSize: 8, fontWeight: 800, padding: '3px 10px', borderRadius: 10, marginBottom: 6 }}>BEST DEAL -{featured.discount}%</span>
-            <ImgOrEmoji item={featured} h={80} />
-            <p style={{ fontSize: 10, fontWeight: 800, margin: '6px 0 2px' }}>{featured.name}</p>
-            <span style={{ fontSize: 16, fontWeight: 900, color: '#9333ea' }}>₩{fmtPrice(featured.salePrice)}</span>
-          </div>
-        )}
-        {cleanCats.map((cat, ci) => (
-          <div key={ci} style={{ marginBottom: 6 }}>
-            <span style={{ display: 'inline-block', fontSize: 8, fontWeight: 700, color: '#fff', background: 'linear-gradient(135deg,#a855f7,#ec4899)', padding: '3px 8px', borderRadius: 10, margin: '6px 0 5px' }}>{cat.name}</span>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 5 }}>
-              {cat.items.map((item, ii) => (
-                <div key={ii} style={{ background: '#fff', borderRadius: 8, overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,.04)' }}>
-                  <ImgOrEmoji item={item} h={50} />
-                  <div style={{ padding: '4px 6px 6px' }}>
-                    <p style={{ fontSize: 7, fontWeight: 700, margin: 0 }}>{item.name}</p>
-                    <span style={{ fontSize: 10, fontWeight: 900, color: '#9333ea' }}>₩{fmtPrice(item.salePrice)}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-
-  // ── 시즌 행사 (파랑+시안) ──
-  if (template === 'mart_seasonal') return (
-    <div style={{ background: '#f0f9ff', minHeight: '100%', fontFamily: 'system-ui, sans-serif' }}>
-      <div style={{ background: 'linear-gradient(135deg,#2563eb,#0891b2)', padding: '18px 10px 16px', textAlign: 'center' }}>
-        <p style={{ fontSize: 8, color: 'rgba(255,255,255,.8)', letterSpacing: 2, margin: 0 }}>{storeName || '매장명'}</p>
-        <p style={{ fontSize: 14, color: '#fff', fontWeight: 900, margin: '4px 0' }}>{title || '행사명'}</p>
-        {period && <span style={{ display: 'inline-block', fontSize: 8, fontWeight: 600, color: '#fff', background: 'rgba(255,255,255,.15)', padding: '3px 12px', borderRadius: 12, border: '1px solid rgba(255,255,255,.3)', marginTop: 4 }}>{period}</span>}
-      </div>
-      <div style={{ padding: '6px 6px 12px' }}>
-        {cleanCats.map((cat, ci) => (
-          <div key={ci} style={{ marginBottom: 6 }}>
-            <p style={{ fontSize: 9, fontWeight: 800, color: '#1e40af', margin: '8px 0 5px', display: 'flex', alignItems: 'center', gap: 4 }}>🎁 {cat.name}</p>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 5 }}>
-              {cat.items.map((item, ii) => {
-                const disc = item.originalPrice > 0 ? Math.round((1 - item.salePrice / item.originalPrice) * 100) : 0;
-                return (
-                  <div key={ii} style={{ background: '#fff', borderRadius: 10, overflow: 'hidden', border: '1px solid #e0f2fe' }}>
-                    <ImgOrEmoji item={item} h={55} />
-                    <div style={{ padding: '5px 6px 7px' }}>
-                      <p style={{ fontSize: 8, fontWeight: 700, margin: 0 }}>{item.name}</p>
-                      <div style={{ display: 'flex', alignItems: 'baseline', gap: 3, marginTop: 2 }}>
-                        {item.originalPrice > 0 && <span style={{ fontSize: 7, color: '#aaa', textDecoration: 'line-through' }}>{fmtPrice(item.originalPrice)}</span>}
-                        <span style={{ fontSize: 11, fontWeight: 900, color: '#2563eb' }}>{fmtPrice(item.salePrice)}원</span>
-                      </div>
-                      {disc > 0 && <span style={{ display: 'inline-block', fontSize: 6, fontWeight: 700, color: '#fff', background: '#0891b2', padding: '1px 5px', borderRadius: 6, marginTop: 2 }}>↓{disc}%</span>}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-
-  // ── 창고대방출 (노랑+빨강, 가격 최우선) ──
-  if (template === 'mart_clearance') return (
-    <div style={{ background: '#fffbeb', minHeight: '100%', fontFamily: 'system-ui, sans-serif' }}>
-      <div style={{ background: 'linear-gradient(135deg,#eab308,#dc2626)', padding: '14px 10px 12px', textAlign: 'center' }}>
-        <p style={{ fontSize: 7, color: '#fff', letterSpacing: 2, margin: 0 }}>{storeName || '매장명'}</p>
-        <p style={{ fontSize: 15, color: '#fff', fontWeight: 900, margin: '3px 0', textShadow: '0 2px 4px rgba(0,0,0,.2)' }}>{title || '행사명'}</p>
-        {maxDiscount > 0 && <span style={{ display: 'inline-block', background: '#fff', color: '#dc2626', fontSize: 9, fontWeight: 900, padding: '3px 12px', borderRadius: 12, margin: '4px 0' }}>최대 {maxDiscount}% 할인</span>}
-        {period && <p style={{ fontSize: 7, color: 'rgba(255,255,255,.85)', margin: '3px 0 0' }}>{period}</p>}
-      </div>
-      <div style={{ padding: '6px 6px 12px' }}>
-        {cleanCats.map((cat, ci) => (
-          <div key={ci} style={{ marginBottom: 6 }}>
-            <p style={{ fontSize: 9, fontWeight: 900, color: '#92400e', background: 'repeating-linear-gradient(45deg,#fef3c7,#fef3c7 8px,#fde68a 8px,#fde68a 16px)', padding: '5px 8px', borderRadius: 5, textAlign: 'center', margin: '8px 0 5px' }}>{cat.name}</p>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 5 }}>
-              {cat.items.map((item, ii) => {
-                const disc = item.originalPrice > 0 ? Math.round((1 - item.salePrice / item.originalPrice) * 100) : 0;
-                return (
-                  <div key={ii} style={{ background: '#fff', borderRadius: 8, padding: '8px 6px', textAlign: 'center', border: '2px solid #fde68a' }}>
-                    {disc > 0 && <p style={{ fontSize: 20, fontWeight: 900, color: '#dc2626', margin: 0, lineHeight: 1 }}>{disc}%<span style={{ fontSize: 9 }}>OFF</span></p>}
-                    <p style={{ fontSize: 12, fontWeight: 900, color: '#b91c1c', margin: '2px 0' }}>₩{fmtPrice(item.salePrice)}</p>
-                    {item.originalPrice > 0 && <p style={{ fontSize: 7, color: '#aaa', textDecoration: 'line-through', margin: 0 }}>₩{fmtPrice(item.originalPrice)}</p>}
-                    <p style={{ fontSize: 8, fontWeight: 700, color: '#333', margin: '3px 0 0' }}>{item.name}</p>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-
-  // ── 프리미엄 정육 (다크+골드, 단일 컬럼) ──
-  if (template === 'butcher_premium') return (
-    <div style={{ background: '#0a0a0a', minHeight: '100%', fontFamily: 'system-ui, sans-serif' }}>
-      <div style={{ background: 'linear-gradient(180deg,#1a1a1a,#0a0a0a)', padding: '20px 10px 16px', textAlign: 'center', borderBottom: '3px solid #c9a84c' }}>
-        <p style={{ fontSize: 7, color: '#c9a84c', letterSpacing: 4, margin: 0 }}>{storeName || '매장명'}</p>
-        <p style={{ fontSize: 16, color: '#fff', fontWeight: 900, margin: '6px 0' }}>{title || '행사명'}</p>
-        {period && <p style={{ fontSize: 7, color: '#666', margin: 0 }}>{period}</p>}
-      </div>
-      <div style={{ padding: '8px 8px 12px' }}>
-        {cleanCats.map((cat, ci) => (
-          <div key={ci} style={{ marginBottom: 8 }}>
-            <p style={{ fontSize: 9, fontWeight: 800, color: '#c9a84c', textAlign: 'center', letterSpacing: 2, margin: '12px 0 8px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-              <span style={{ flex: 1, maxWidth: 40, height: 1, background: 'linear-gradient(90deg,transparent,#c9a84c)' }} />
-              {cat.name}
-              <span style={{ flex: 1, maxWidth: 40, height: 1, background: 'linear-gradient(90deg,#c9a84c,transparent)' }} />
-            </p>
             {cat.items.map((item, ii) => {
-              const disc = item.originalPrice > 0 ? Math.round((1 - item.salePrice / item.originalPrice) * 100) : 0;
+              const discount = item.originalPrice > 0 ? Math.round((1 - item.salePrice / item.originalPrice) * 100) : 0;
+              const imgRight = ii % 2 === 0;
               return (
-                <div key={ii} style={{ background: '#141414', border: '1px solid #2a2a2a', borderRadius: 10, overflow: 'hidden', marginBottom: 6 }}>
-                  <ImgOrEmoji item={item} h={90} />
-                  <div style={{ padding: '8px 10px 10px' }}>
-                    <p style={{ fontSize: 11, fontWeight: 800, color: '#fff', margin: 0 }}>{item.name}</p>
-                    {item.badge && <span style={{ display: 'inline-block', fontSize: 7, fontWeight: 700, color: '#c9a84c', border: '1px solid #c9a84c', padding: '1px 6px', borderRadius: 3, margin: '4px 0' }}>{item.badge}</span>}
-                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 4, marginTop: 3 }}>
-                      {item.originalPrice > 0 && <span style={{ fontSize: 8, color: '#555', textDecoration: 'line-through' }}>₩{fmtPrice(item.originalPrice)}</span>}
-                      <span style={{ fontSize: 15, fontWeight: 900, color: '#c9a84c' }}>₩{fmtPrice(item.salePrice)}</span>
+                <div key={ii} style={{ display: 'flex', flexDirection: imgRight ? 'row' : 'row-reverse', background: th.dark ? '#1c1917' : '#fff', borderRadius: 10, overflow: 'hidden', marginBottom: 7, boxShadow: '0 1px 4px rgba(0,0,0,.06)', border: th.dark ? '1px solid #292524' : 'none', minHeight: 88 }}>
+                  <div style={{ flex: 1, padding: '8px 9px 10px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                    {discount > 0 && <div style={{ display: 'flex', alignItems: 'baseline', gap: 1, marginBottom: 2 }}><span style={{ fontSize: 18, fontWeight: 900, color: th.price, lineHeight: 1 }}>{discount}</span><span style={{ fontSize: 7, fontWeight: 800, color: th.price }}>% OFF</span></div>}
+                    <p style={{ fontSize: 10, fontWeight: 800, color: th.dark ? '#eee' : '#1c1917', margin: 0, lineHeight: 1.3 }}>{item.name}</p>
+                    <MetaChips item={item} />
+                    {item.originalPrice > 0 && item.originalPrice > item.salePrice && <p style={{ fontSize: 7, color: th.dark ? '#666' : '#a8a29e', textDecoration: 'line-through', margin: '3px 0 0' }}>{fmtPrice(item.originalPrice)}원</p>}
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 1, marginTop: 1 }}>
+                      <span style={{ fontSize: 18, fontWeight: 900, color: th.price, letterSpacing: -1 }}>{fmtPrice(item.salePrice)}</span>
+                      <span style={{ fontSize: 8, fontWeight: 700, color: th.price, opacity: 0.7 }}>원</span>
                     </div>
-                    {disc > 0 && <span style={{ display: 'inline-block', fontSize: 7, fontWeight: 700, background: '#c9a84c', color: '#000', padding: '2px 6px', borderRadius: 4, marginTop: 4 }}>-{disc}%</span>}
+                    <CardDiscount item={item} />
+                    {item.badge && <span style={{ display: 'inline-block', fontSize: 6, fontWeight: 700, padding: '1px 5px', borderRadius: 4, marginTop: 3, background: th.chip, color: th.chipC }}>{item.badge}</span>}
+                  </div>
+                  <div style={{ width: '42%', flexShrink: 0, overflow: 'hidden' }}><ImgOrEmoji item={item} h="100%" /></div>
+                </div>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  // ══════════════════════════════════════════
+  // ★ 엔진 3: EDITORIAL — 풀블리드 이미지 + 오버레이
+  // ══════════════════════════════════════════
+  if (engine === 'editorial') return (
+    <div style={{ background: th.bg, minHeight: '100%', fontFamily: 'system-ui, sans-serif' }}>
+      <HeroBanner align="left" />
+      <CatTabs style="underline" />
+      <div style={{ padding: '0 0 12px' }}>
+        {cleanCats.map((cat, ci) => (
+          <div key={ci}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '12px 8px 8px' }}>
+              <span style={{ fontSize: 8, fontWeight: 800, color: th.price }}>{String(ci + 1).padStart(2, '0')}</span>
+              <span style={{ fontSize: 12, fontWeight: 900, color: '#111' }}>{cat.name}</span>
+              <div style={{ flex: 1, height: 1, background: '#e5e7eb', marginLeft: 4 }} />
+            </div>
+            {cat.items.map((item, ii) => {
+              const discount = item.originalPrice > 0 ? Math.round((1 - item.salePrice / item.originalPrice) * 100) : 0;
+              // 첫 상품 = 풀블리드 대형
+              if (ii === 0) return (
+                <div key={ii} style={{ position: 'relative', overflow: 'hidden', margin: '0 0 6px' }}>
+                  <ImgOrEmoji item={item} h={140} />
+                  <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, padding: '28px 10px 10px', background: 'linear-gradient(to top,rgba(0,0,0,.8),rgba(0,0,0,.3),transparent)' }}>
+                    {discount > 0 && <span style={{ display: 'inline-block', background: th.badge, color: '#fff', fontSize: 7, fontWeight: 800, padding: '2px 7px', borderRadius: 4, marginBottom: 4 }}>{discount}% OFF</span>}
+                    <p style={{ fontSize: 11, fontWeight: 800, color: '#fff', margin: 0, lineHeight: 1.3 }}>{item.name}</p>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 2, marginTop: 2 }}>
+                      {item.unit && <span style={{ fontSize: 6, fontWeight: 600, padding: '1px 4px', borderRadius: 3, background: 'rgba(255,255,255,.15)', color: '#fff' }}>{item.unit}</span>}
+                      {item.origin && <span style={{ fontSize: 6, fontWeight: 600, padding: '1px 4px', borderRadius: 3, border: '1px solid rgba(255,255,255,.3)', color: '#fff' }}>{item.origin}</span>}
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 1, marginTop: 2 }}>
+                      <span style={{ fontSize: 20, fontWeight: 900, color: '#fff', letterSpacing: -1 }}>{fmtPrice(item.salePrice)}</span>
+                      <span style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,.7)' }}>원</span>
+                    </div>
+                  </div>
+                </div>
+              );
+              // 나머지 = 일반 카드
+              return (
+                <div key={ii} style={{ background: '#fff', borderRadius: 8, overflow: 'hidden', margin: '0 7px 6px', boxShadow: '0 1px 3px rgba(0,0,0,.04)' }}>
+                  <div style={{ position: 'relative', width: '100%', height: 80, overflow: 'hidden' }}>
+                    {discount > 0 && <span style={{ position: 'absolute', top: 4, left: 4, background: th.badge, color: '#fff', fontSize: 7, fontWeight: 800, padding: '2px 6px', borderRadius: 4, zIndex: 1 }}>{discount}%</span>}
+                    <ImgOrEmoji item={item} h={80} />
+                  </div>
+                  <div style={{ padding: '6px 8px 8px' }}>
+                    <p style={{ fontSize: 9, fontWeight: 800, color: '#111', margin: 0 }}>{item.name}</p>
+                    <MetaChips item={item} />
+                    {item.originalPrice > 0 && item.originalPrice > item.salePrice && <p style={{ fontSize: 7, color: '#9ca3af', textDecoration: 'line-through', margin: '2px 0 0' }}>{fmtPrice(item.originalPrice)}원</p>}
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 1, marginTop: 1 }}>
+                      <span style={{ fontSize: 15, fontWeight: 900, color: th.price, letterSpacing: -0.5 }}>{fmtPrice(item.salePrice)}</span>
+                      <span style={{ fontSize: 7, fontWeight: 700, color: th.price, opacity: 0.7 }}>원</span>
+                    </div>
+                    <CardDiscount item={item} />
                   </div>
                 </div>
               );
@@ -1131,91 +1042,66 @@ function FlyerPreviewRenderer({ title, storeName, periodStart, periodEnd, catego
     </div>
   );
 
-  // ── 오늘의 고기 (빨강, 일일특가, Top 3) ──
-  if (template === 'butcher_daily') {
-    const top3 = allItems.slice(0, 3);
-    return (
-      <div style={{ background: '#fff1f2', minHeight: '100%', fontFamily: 'system-ui, sans-serif' }}>
-        <div style={{ background: 'linear-gradient(135deg,#dc2626,#e11d48)', padding: '16px 10px 14px', textAlign: 'center' }}>
-          <p style={{ fontSize: 8, color: 'rgba(255,255,255,.85)', letterSpacing: 2, margin: 0 }}>{storeName || '매장명'}</p>
-          <p style={{ fontSize: 14, color: '#fff', fontWeight: 900, margin: '4px 0' }}>{title || '행사명'}</p>
-          <span style={{ display: 'inline-block', background: '#fff', color: '#dc2626', fontSize: 8, fontWeight: 800, padding: '3px 10px', borderRadius: 10, marginTop: 4 }}>오늘만 이 가격!</span>
-        </div>
-        <div style={{ padding: '8px 6px 12px' }}>
-          {top3.length > 0 && (
-            <>
-              <p style={{ fontSize: 10, fontWeight: 900, color: '#dc2626', textAlign: 'center', margin: '6px 0 6px' }}>🥩 오늘의 추천</p>
-              {top3.map((item, i) => (
-                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#fff', borderRadius: 10, padding: 6, marginBottom: 5, borderLeft: '3px solid #dc2626', position: 'relative' }}>
-                  <div style={{ width: 44, height: 44, flexShrink: 0, borderRadius: 8, overflow: 'hidden' }}><ImgOrEmoji item={item} h={44} /></div>
-                  <div style={{ flex: 1 }}>
-                    <p style={{ fontSize: 9, fontWeight: 800, margin: 0 }}>{item.name}</p>
-                    <span style={{ fontSize: 12, fontWeight: 900, color: '#dc2626' }}>₩{fmtPrice(item.salePrice)}</span>
-                  </div>
-                  {item.discount > 0 && <span style={{ position: 'absolute', top: 4, right: 4, background: '#dc2626', color: '#fff', fontSize: 7, fontWeight: 800, padding: '1px 5px', borderRadius: 5 }}>{item.discount}%</span>}
-                </div>
-              ))}
-            </>
-          )}
-          {cleanCats.map((cat, ci) => (
-            <div key={ci} style={{ marginBottom: 6 }}>
-              <p style={{ fontSize: 9, fontWeight: 800, color: '#fff', background: 'linear-gradient(90deg,#dc2626,#e11d48)', padding: '5px 8px', borderRadius: 6, textAlign: 'center', margin: '8px 0 5px' }}>{cat.name}</p>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
-                {cat.items.map((item, ii) => (
-                  <div key={ii} style={{ background: '#fff', borderRadius: 8, padding: '8px 6px', textAlign: 'center' }}>
-                    <p style={{ fontSize: 8, fontWeight: 700, margin: 0 }}>{item.name}</p>
-                    <p style={{ fontSize: 11, fontWeight: 900, color: '#dc2626', margin: '2px 0 0' }}>₩{fmtPrice(item.salePrice)}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-  }
+  // ══════════════════════════════════════════
+  // ★ 엔진 4: SHOWCASE — 대형 싱글 카드
+  // ══════════════════════════════════════════
+  // 공통 헬퍼 (unused by new engines but kept for compatibility)
 
-  // ── 대용량 팩 (네이비, 절약액 강조) ──
-  if (template === 'butcher_bulk') return (
-    <div style={{ background: '#eef2ff', minHeight: '100%', fontFamily: 'system-ui, sans-serif' }}>
-      <div style={{ background: 'linear-gradient(135deg,#1e3a8a,#3730a3)', padding: '16px 10px 20px', textAlign: 'center', borderRadius: '0 0 50% 50% / 0 0 12px 12px' }}>
-        <p style={{ fontSize: 8, color: 'rgba(255,255,255,.8)', letterSpacing: 2, margin: 0 }}>{storeName || '매장명'}</p>
-        <p style={{ fontSize: 13, color: '#fff', fontWeight: 900, margin: '4px 0' }}>{title || '행사명'}</p>
-        <p style={{ fontSize: 9, fontWeight: 700, color: '#a5b4fc', margin: '3px 0' }}>대용량 특가 — 많이 살수록 이득!</p>
-        {period && <p style={{ fontSize: 7, color: 'rgba(255,255,255,.6)', margin: 0 }}>{period}</p>}
-      </div>
-      <div style={{ padding: '6px 6px 12px' }}>
+  // (engine === 'showcase' — below)
+
+  // ══════════════════════════════════════════
+  // ★ SHOWCASE ENGINE (폴백 포함 — 나머지 전부)
+  // ══════════════════════════════════════════
+  return (
+    <div style={{ background: th.bg, minHeight: '100%', fontFamily: 'system-ui, sans-serif' }}>
+      <HeroBanner />
+      <CatTabs style="pill" />
+      <div style={{ padding: '4px 7px 12px' }}>
         {cleanCats.map((cat, ci) => (
-          <div key={ci} style={{ marginBottom: 6 }}>
-            <p style={{ fontSize: 9, fontWeight: 800, color: '#1e3a8a', margin: '8px 0 5px', display: 'flex', alignItems: 'center', gap: 4 }}>📦 {cat.name}</p>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 5 }}>
-              {cat.items.map((item, ii) => {
-                const disc = item.originalPrice > 0 ? Math.round((1 - item.salePrice / item.originalPrice) * 100) : 0;
-                const saving = item.originalPrice > 0 ? item.originalPrice - item.salePrice : 0;
-                return (
-                  <div key={ii} style={{ background: '#fff', borderRadius: 10, overflow: 'hidden', border: '1px solid #c7d2fe', textAlign: 'center' }}>
-                    <ImgOrEmoji item={item} h={50} />
-                    <div style={{ padding: '5px 6px 7px' }}>
-                      <p style={{ fontSize: 8, fontWeight: 800, margin: 0 }}>{item.name}</p>
-                      {item.badge && <span style={{ display: 'inline-block', fontSize: 7, fontWeight: 600, color: '#6366f1', background: '#eef2ff', padding: '1px 5px', borderRadius: 4, margin: '2px 0' }}>{item.badge}</span>}
-                      <p style={{ fontSize: 12, fontWeight: 900, color: '#1e3a8a', margin: '2px 0 0' }}>₩{fmtPrice(item.salePrice)}</p>
-                      {saving > 0 && <p style={{ fontSize: 7, fontWeight: 700, color: '#16a34a', margin: '1px 0 0' }}>₩{fmtPrice(saving)} 절약</p>}
-                      {disc > 0 && <span style={{ display: 'inline-block', fontSize: 6, fontWeight: 800, color: '#fff', background: '#4338ca', padding: '1px 5px', borderRadius: 4, marginTop: 2 }}>{disc}% OFF</span>}
-                    </div>
-                  </div>
-                );
-              })}
+          <div key={ci} style={{ marginBottom: 4 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, margin: '12px 0 8px' }}>
+              <div style={{ width: 24, height: 24, borderRadius: 7, background: th.badge, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 11, fontWeight: 900, flexShrink: 0 }}>{(cat.name || '').charAt(0)}</div>
+              <span style={{ fontSize: 11, fontWeight: 900, color: th.dark ? '#eee' : '#18181b' }}>{cat.name}</span>
+              <span style={{ fontSize: 7, color: th.dark ? '#555' : '#a1a1aa', fontWeight: 600, marginLeft: 'auto' }}>{cat.items.length}개</span>
             </div>
+            {cat.items.map((item, ii) => {
+              const discount = item.originalPrice > 0 ? Math.round((1 - item.salePrice / item.originalPrice) * 100) : 0;
+              const saving = item.originalPrice > 0 ? item.originalPrice - item.salePrice : 0;
+              return (
+                <div key={ii} style={{ background: th.dark ? '#141414' : '#fff', borderRadius: 12, overflow: 'hidden', marginBottom: 8, boxShadow: '0 1px 4px rgba(0,0,0,.06)', border: th.dark ? '1px solid #222' : 'none' }}>
+                  <div style={{ position: 'relative', width: '100%', height: 110, overflow: 'hidden' }}>
+                    <ImgOrEmoji item={item} h={110} />
+                    {discount > 0 && <div style={{ position: 'absolute', top: 6, right: 6, width: 34, height: 34, borderRadius: '50%', background: th.badge, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column' }}>
+                      <span style={{ fontSize: 13, fontWeight: 900, color: th.dark ? '#000' : '#fff', lineHeight: 1 }}>{discount}</span>
+                      <span style={{ fontSize: 5, fontWeight: 800, color: th.dark ? 'rgba(0,0,0,.7)' : 'rgba(255,255,255,.8)', lineHeight: 1 }}>%할인</span>
+                    </div>}
+                  </div>
+                  <div style={{ padding: '8px 9px 10px' }}>
+                    <p style={{ fontSize: 11, fontWeight: 800, color: th.dark ? '#eee' : '#18181b', margin: 0, lineHeight: 1.35 }}>{item.name}</p>
+                    <MetaChips item={item} />
+                    <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginTop: 4 }}>
+                      <div>
+                        {item.originalPrice > 0 && item.originalPrice > item.salePrice && <p style={{ fontSize: 7, color: th.dark ? '#555' : '#a1a1aa', textDecoration: 'line-through', margin: '0 0 1px' }}>{fmtPrice(item.originalPrice)}원</p>}
+                        <div style={{ display: 'flex', alignItems: 'baseline', gap: 1 }}>
+                          <span style={{ fontSize: 20, fontWeight: 900, color: th.price, letterSpacing: -1 }}>{fmtPrice(item.salePrice)}</span>
+                          <span style={{ fontSize: 8, fontWeight: 700, color: th.price, opacity: 0.7 }}>원</span>
+                        </div>
+                      </div>
+                      {saving > 0 && <span style={{ fontSize: 7, fontWeight: 700, color: '#16a34a', background: th.dark ? 'rgba(74,222,128,.1)' : '#f0fdf4', padding: '2px 6px', borderRadius: 5, border: th.dark ? '1px solid rgba(74,222,128,.15)' : '1px solid #bbf7d0' }}>↓{fmtPrice(saving)}원 절약</span>}
+                    </div>
+                    <CardDiscount item={item} />
+                    {item.badge && <span style={{ display: 'inline-block', fontSize: 6, fontWeight: 700, padding: '1px 5px', borderRadius: 4, marginTop: 3, background: th.chip, color: th.chipC }}>{item.badge}</span>}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         ))}
       </div>
     </div>
   );
-
-  // ── 폴백: 그리드형 스타일 ──
-  return (
-    <div style={{ background: '#f2f2f2', minHeight: '100%', fontFamily: 'system-ui, sans-serif', padding: 10 }}>
-      <p style={{ fontSize: 10, color: '#999', textAlign: 'center', marginTop: 30 }}>템플릿 미리보기 준비 중...</p>
-    </div>
-  );
 }
+// ═══ END FlyerPreviewRenderer ═══
+// (orphaned old code removed — V3 engine handles all templates via ENGINE_MAP)
+
+// ═══ (V3: old per-template blocks removed — all templates route through 4 engines above) ═══

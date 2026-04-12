@@ -42,20 +42,38 @@ export const TEMPLATE_REGISTRY: Record<string, TemplateInfo> = {
   grid: {
     value: 'grid',
     label: '가격 강조형',
-    desc: '빨간 테마, 2열 카드',
+    desc: '2열 카드 그리드, 가격 대형',
     color: 'linear-gradient(to right, #ef4444, #f97316)',
+  },
+  magazine: {
+    value: 'magazine',
+    label: '매거진형',
+    desc: '1열 매거진 레이아웃, 대형 이미지',
+    color: 'linear-gradient(to right, #292524, #c2410c)',
+  },
+  editorial: {
+    value: 'editorial',
+    label: '에디토리얼',
+    desc: '풀블리드 이미지, 모던 타이포',
+    color: 'linear-gradient(to right, #0f172a, #334155)',
+  },
+  showcase: {
+    value: 'showcase',
+    label: '쇼케이스',
+    desc: '대형 싱글 카드, 절약액 표시',
+    color: 'linear-gradient(to right, #7c3aed, #ec4899)',
   },
   list: {
     value: 'list',
     label: '리스트형',
-    desc: '딥블루, 깔끔 모던',
+    desc: '1열 매거진 (딥블루)',
     color: 'linear-gradient(to right, #1d4ed8, #3b82f6)',
   },
   highlight: {
     value: 'highlight',
     label: '특가 하이라이트',
-    desc: '다크 모드, TOP PICK',
-    color: 'linear-gradient(to right, #1f2937, #d97706)',
+    desc: '다크 쇼케이스, 옐로 강조',
+    color: 'linear-gradient(to right, #18181b, #facc15)',
   },
 
   // --- 마트 전용 ---
@@ -174,7 +192,7 @@ export async function getCategoryPresets(typeCode: string): Promise<string[]> {
  */
 export async function getAvailableTemplates(typeCode: string): Promise<TemplateInfo[]> {
   // 공통 템플릿 (모든 업종 사용 가능)
-  const commonCodes = ['grid', 'list', 'highlight'];
+  const commonCodes = ['grid', 'magazine', 'editorial', 'showcase', 'list', 'highlight'];
 
   // 업종별 prefix로 매칭 (mart_ → 마트, butcher_ → 정육)
   const prefixMap: Record<string, string> = {

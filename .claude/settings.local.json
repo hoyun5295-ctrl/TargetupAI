@@ -128,7 +128,10 @@
       "WebFetch(domain:www.tomato-market.co.kr)",
       "WebFetch(domain:www.groket.kr)",
       "WebFetch(domain:www.temply.co.kr)",
-      "WebFetch(domain:martmonster.com)"
+      "WebFetch(domain:martmonster.com)",
+      "WebFetch(domain:hanjul-flyer.kr)",
+      "Bash(npx -p typescript tsc --noEmit --project packages/backend/tsconfig.json)",
+      "Bash(npx -p typescript@5.5.4 tsc --noEmit --project packages/backend/tsconfig.json)"
     ]
   }
 }
