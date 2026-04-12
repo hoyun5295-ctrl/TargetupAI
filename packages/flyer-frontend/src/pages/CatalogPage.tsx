@@ -9,7 +9,7 @@
  * API: /api/flyer/catalog (CT-F11)
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { API_BASE, apiFetch } from '../App';
 import { SectionCard, Button, Input } from '../components/ui';
 import AlertModal from '../components/AlertModal';
@@ -37,6 +37,115 @@ export default function CatalogPage({ token: _token }: { token: string }) {
   const [editingItem, setEditingItem] = useState<CatalogItem | null>(null);
   const [form, setForm] = useState({ product_name: '', category: '', default_price: '', description: '' });
   const [saving, setSaving] = useState(false);
+
+  // 이미지 검색 (네이버 쇼핑)
+  const [imageSearching, setImageSearching] = useState(false);
+  const [imageCandidates, setImageCandidates] = useState<Array<{ title: string; image: string; brand: string }>>([]);
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+
+  // CSV 일괄 등록 + 자동 이미지 매칭
+  const csvInputRef = useRef<HTMLInputElement>(null);
+  const [csvUploading, setCsvUploading] = useState(false);
+  const [csvProgress, setCsvProgress] = useState('');
+
+  const handleCsvUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = ''; // 같은 파일 재업로드 가능
+
+    setCsvUploading(true);
+    setCsvProgress('CSV 파일 읽는 중...');
+
+    try {
+      const text = await file.text();
+      const lines = text.split('\n').filter(l => l.trim());
+      if (lines.length < 2) {
+        setAlert({ show: true, title: '오류', message: 'CSV 파일에 데이터가 없습니다.', type: 'error' });
+        setCsvUploading(false);
+        return;
+      }
+
+      // 헤더 파싱 (상품명, 카테고리, 가격)
+      const header = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''));
+      const nameIdx = header.findIndex(h => /상품명|이름|name|품명/i.test(h));
+      const catIdx = header.findIndex(h => /카테고리|분류|category/i.test(h));
+      const priceIdx = header.findIndex(h => /가격|단가|price|원가/i.test(h));
+
+      if (nameIdx < 0) {
+        setAlert({ show: true, title: '오류', message: 'CSV에 "상품명" 컬럼이 필요합니다.', type: 'error' });
+        setCsvUploading(false);
+        return;
+      }
+
+      // 데이터 파싱
+      const products: Array<{ name: string; category: string; price: number }> = [];
+      for (let i = 1; i < lines.length; i++) {
+        const cols = lines[i].split(',').map(c => c.trim().replace(/^"|"$/g, ''));
+        const name = cols[nameIdx]?.trim();
+        if (!name) continue;
+        products.push({
+          name,
+          category: catIdx >= 0 ? (cols[catIdx] || '기타') : '기타',
+          price: priceIdx >= 0 ? parseInt(cols[priceIdx]) || 0 : 0,
+        });
+      }
+
+      if (products.length === 0) {
+        setAlert({ show: true, title: '오류', message: '유효한 상품이 없습니다.', type: 'error' });
+        setCsvUploading(false);
+        return;
+      }
+
+      // 1단계: 상품 일괄 등록
+      setCsvProgress(`${products.length}개 상품 등록 중...`);
+      for (const p of products) {
+        await apiFetch(`${API_BASE}/api/flyer/catalog`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ product_name: p.name, category: p.category, default_price: p.price }),
+        });
+      }
+
+      // 2단계: 네이버 쇼핑 배치 이미지 자동 매칭
+      setCsvProgress(`이미지 자동 매칭 중... (${products.length}개)`);
+      const batchRes = await apiFetch(`${API_BASE}/api/flyer/catalog/batch-match`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ products: products.map((p, i) => ({ name: p.name, index: i })) }),
+      });
+
+      let matchedCount = 0;
+      if (batchRes.ok) {
+        const batchData = await batchRes.json();
+        // 매칭된 이미지를 카탈로그에 업데이트
+        const allItems = await (await apiFetch(`${API_BASE}/api/flyer/catalog`)).json();
+        const itemList = Array.isArray(allItems) ? allItems : allItems.items || [];
+
+        for (const result of (batchData.results || [])) {
+          if (result.imageUrl) {
+            const matchItem = itemList.find((it: any) => it.product_name === result.name);
+            if (matchItem) {
+              await apiFetch(`${API_BASE}/api/flyer/catalog/select-image`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ image_url: result.imageUrl, catalog_id: matchItem.id }),
+              });
+              matchedCount++;
+            }
+          }
+        }
+      }
+
+      loadItems();
+      setAlert({ show: true, title: '등록 완료', message: `${products.length}개 상품 등록, ${matchedCount}개 이미지 자동 매칭 완료!`, type: 'success' });
+    } catch (err) {
+      console.error('CSV 업로드 실패:', err);
+      setAlert({ show: true, title: '오류', message: 'CSV 처리 중 오류가 발생했습니다.', type: 'error' });
+    } finally {
+      setCsvUploading(false);
+      setCsvProgress('');
+    }
+  };
 
   // 삭제 확인
   const [deleteTarget, setDeleteTarget] = useState<CatalogItem | null>(null);
@@ -69,6 +178,8 @@ export default function CatalogPage({ token: _token }: { token: string }) {
   const openCreateForm = () => {
     setEditingItem(null);
     setForm({ product_name: '', category: '', default_price: '', description: '' });
+    setSelectedImage(null);
+    setImageCandidates([]);
     setShowForm(true);
   };
 
@@ -80,7 +191,48 @@ export default function CatalogPage({ token: _token }: { token: string }) {
       default_price: item.default_price ? String(item.default_price) : '',
       description: item.description || '',
     });
+    setSelectedImage(item.image_url);
+    setImageCandidates([]);
     setShowForm(true);
+  };
+
+  // ★ 네이버 쇼핑 이미지 검색
+  const handleImageSearch = async () => {
+    if (!form.product_name.trim()) return;
+    setImageSearching(true);
+    try {
+      const res = await apiFetch(`${API_BASE}/api/flyer/catalog/search-image`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ product_name: form.product_name }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setImageCandidates(data.items || []);
+      }
+    } catch (e) {
+      console.error('이미지 검색 실패:', e);
+    } finally {
+      setImageSearching(false);
+    }
+  };
+
+  // ★ 이미지 선택 → 서버 저장
+  const handleSelectImage = async (imageUrl: string) => {
+    try {
+      const res = await apiFetch(`${API_BASE}/api/flyer/catalog/select-image`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image_url: imageUrl, catalog_id: editingItem?.id }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setSelectedImage(data.image_url);
+        setImageCandidates([]);
+      }
+    } catch (e) {
+      console.error('이미지 선택 실패:', e);
+    }
   };
 
   const handleSave = async () => {
@@ -148,7 +300,15 @@ export default function CatalogPage({ token: _token }: { token: string }) {
       </div>
 
       <SectionCard title="상품 카탈로그"
-        action={<Button onClick={openCreateForm} size="sm">+ 상품 등록</Button>}>
+        action={
+          <div className="flex gap-2">
+            <Button variant="secondary" size="sm" onClick={() => csvInputRef.current?.click()} disabled={csvUploading}>
+              {csvUploading ? csvProgress : '📄 CSV 일괄등록'}
+            </Button>
+            <Button onClick={openCreateForm} size="sm">+ 상품 등록</Button>
+            <input ref={csvInputRef} type="file" accept=".csv,.txt" onChange={handleCsvUpload} className="hidden" />
+          </div>
+        }>
 
         {/* 검색 + 필터 */}
         <div className="flex gap-3 mb-4">
@@ -251,6 +411,47 @@ export default function CatalogPage({ token: _token }: { token: string }) {
                 <label className="block text-sm font-medium text-gray-700 mb-1">설명 (선택)</label>
                 <textarea value={form.description} onChange={e => setForm(p => ({ ...p, description: e.target.value }))} rows={2}
                   className="w-full border rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-primary-300 transition resize-none" placeholder="상품 간단 설명" />
+              </div>
+
+              {/* ★ 상품 이미지 검색 */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-sm font-medium text-gray-700">상품 이미지</label>
+                  <button
+                    onClick={handleImageSearch}
+                    disabled={imageSearching || !form.product_name.trim()}
+                    className="text-xs text-primary-600 hover:text-primary-700 font-medium disabled:opacity-40"
+                  >
+                    {imageSearching ? '검색 중...' : '자동 검색'}
+                  </button>
+                </div>
+
+                {/* 선택된 이미지 */}
+                {selectedImage && (
+                  <div className="flex items-center gap-3 p-2 border rounded-lg bg-gray-50 mb-2">
+                    <img src={selectedImage.startsWith('http') ? selectedImage : `${API_BASE}${selectedImage}`} alt="선택됨" className="w-16 h-16 object-cover rounded-lg" />
+                    <div className="flex-1">
+                      <p className="text-xs text-gray-500">선택된 이미지</p>
+                    </div>
+                    <button onClick={() => setSelectedImage(null)} className="text-xs text-red-500 hover:text-red-600">제거</button>
+                  </div>
+                )}
+
+                {/* 이미지 후보 목록 */}
+                {imageCandidates.length > 0 && (
+                  <div className="grid grid-cols-5 gap-2">
+                    {imageCandidates.map((c, i) => (
+                      <button key={i} onClick={() => handleSelectImage(c.image)}
+                        className="border-2 rounded-lg overflow-hidden hover:border-primary-500 transition-colors border-gray-200 aspect-square">
+                        <img src={c.image} alt={c.title} className="w-full h-full object-cover" />
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {imageCandidates.length === 0 && !selectedImage && !imageSearching && (
+                  <p className="text-xs text-gray-400">상품명 입력 후 "자동 검색"을 누르면 이미지를 찾아줍니다</p>
+                )}
               </div>
             </div>
             <div className="flex justify-end gap-2 mt-6 pt-4 border-t">

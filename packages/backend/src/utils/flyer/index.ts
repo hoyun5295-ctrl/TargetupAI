@@ -127,6 +127,15 @@ export {
 } from './flyer-pos-ai';
 export type { PosRawSchema, SchemaMapping, PosTableInfo, PosColumnInfo } from './flyer-pos-ai';
 
+// CT-F17: 네이버 쇼핑 이미지 검색
+export {
+  searchNaverShopping,
+  downloadAndSaveImage,
+  autoMatchImage,
+  batchAutoMatchImages,
+} from './flyer-naver-search';
+export type { NaverShopItem, ImageSearchResult } from './flyer-naver-search';
+
 // CT-F13: 업종 레지스트리
 export {
   getBusinessTypes,

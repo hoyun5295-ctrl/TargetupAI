@@ -53,13 +53,51 @@
 **C. 이전 세션(D114) 완료 확인된 항목:**
 - [x] 슈퍼관리자 UI 개선 (총판 생성/수정 모달, 매장 등록, 중복방지 등)
 
-**D. 다음 세션 항목:**
-- [ ] DDL 실행 후 QR 쿠폰 E2E 테스트
-- [ ] 전단 템플릿에 QR 슬롯 추가 (flyer-templates.ts)
-- [ ] FlyerPage.tsx 쿠폰 토글 연동
-- [ ] FLYER-SCHEMA.md 업데이트 (flyer_coupon_*, flyer_business_types, flyer_users 확장)
-- [ ] POS Agent exe 빌드 (pkg) + 시스템 트레이 UI (다음 세션)
-- [ ] 실매장 투게더스 POS DB 구조 확인 (Harold님 원격 접속)
+**D. 추가 완료 (이번 세션 후반):**
+- [x] 전단 템플릿 QR 슬롯 — flyer-templates.ts `FlyerRenderData.qrCodeDataUrl` + 모든 템플릿 `</body>` 앞 QR 자동 삽입
+- [x] FlyerPage 쿠폰 토글 — 발행 버튼 → 모달(쿠폰 ON/OFF) → 할인유형/금액/만료일 설정 → 발행+쿠폰 동시 생성
+- [x] short-urls.ts — 전단에 연결된 쿠폰 자동 감지 → 공개 페이지 하단에 QR 이미지 삽입
+- [x] 헤더 정리 — 메인 4개(전단제작/발송/쿠폰/결과) + 더보기 드롭다운(고객DB/상품관리/충전관리/수신거부/설정)
+- [x] 좌측 상단 총판명 → 매장명(user.storeName) 변경
+- [x] FLYER-SCHEMA.md — flyer_coupon_campaigns + flyer_coupons + schema_mapping 문서화
+- [x] 과금 흐름 검증 — 3중 차단 확인 (미들웨어+canFlyerStoreSend+deductFlyerPrepaid)
+
+---
+
+### 🎯 다음 세션 CURRENT_TASK (D116~)
+
+> **아래 4개 영역을 다음 세션에서 순서대로 착수한다.**
+
+**1. 카탈로그DB 관리 페이지 + 전단 연동 (Phase A 핵심)**
+- [ ] flyer-frontend CatalogPage.tsx 고도화 — 상품 추가/편집/삭제 + 이미지 업로드
+- [ ] FlyerPage.tsx에 "내 상품" 사이드바 → 카탈로그에서 상품 선택 → 전단 카테고리에 자동 추가
+- [ ] 이전 전단에서 사용한 상품 → flyer_catalog 자동 등록 (발행 시점에 upsertCatalogItem 호출)
+- [ ] 상품 이미지 Pixabay 추가 수집 or DALL-E 생성 옵션 연동
+- [ ] 카탈로그 카테고리별 필터/검색 UI 개선
+
+**2. POS Agent exe 빌드 + 시스템 트레이 + 설치 마법사**
+- [ ] packages/pos-agent/ npm install (tedious/better-sqlite3/node-cron/node-fetch)
+- [ ] `tray.ts` — Windows 시스템 트레이 UI (systray2). 아이콘+상태표시+설정열기
+- [ ] `setup/wizard.ts` — CLI 초기 설정 마법사 (agent_key 입력 → DB 감지 → 연결 테스트 → 저장)
+- [ ] `setup/db-detector.ts` — POS 설치 폴더 스캔 + 프로세스 확인 + 포트 스캔
+- [ ] `pkg` 빌드 → `hanjul-pos-agent.exe` 단일 실행파일 생성
+- [ ] Windows 자동 시작 등록 (레지스트리 HKCU\Run)
+- [ ] 슈퍼관리자 FlyerAdminDashboard에 POS Agent 모니터링 탭 추가 (상태/마지막싱크/대기건수)
+- [ ] **Harold님 선행:** 투게더스 POS 매장 1곳 원격 접속(팀뷰어) → DB 엔진/테이블 구조/전화번호 마스킹 확인
+
+**3. 인쇄 PDF 내보내기**
+- [ ] 전단지 HTML → PDF 변환 (puppeteer 또는 html-pdf-node)
+- [ ] A4/전단지 사이즈 옵션 (210x297mm, 190x260mm)
+- [ ] FlyerPage에 "PDF 다운로드" 버튼 추가
+- [ ] 인쇄용 고해상도 이미지 처리 (300dpi)
+- [ ] QR 쿠폰이 있는 전단은 PDF에도 QR 포함
+
+**4. 카카오 브랜드메시지 연동**
+- [ ] 한줄로 CT-12 brand-message.ts 패턴 참조 → 전단AI 전용 래퍼 구현
+- [ ] flyer_campaigns.send_channel에 'kakao_brand' 옵션 추가
+- [ ] SendPage.tsx에 발송 채널 선택 (SMS/카카오) UI
+- [ ] 카카오 사업자 인증 + 템플릿 등록 (Harold님 사업자 연동 필요)
+- [ ] 발송 비용: 카카오 브랜드메시지 단가 CT-F03에 추가
 
 ---
 

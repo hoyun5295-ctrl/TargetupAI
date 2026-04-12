@@ -421,6 +421,36 @@ function ProductRegistrationSection({ categories, setCategories, addCategory, re
 }) {
   const [activeTab, setActiveTab] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // ★ 카탈로그 불러오기
+  const [showCatalog, setShowCatalog] = useState(false);
+  const [catalogItems, setCatalogItems] = useState<Array<{ id: string; product_name: string; category: string; default_price: number; image_url: string | null }>>([]);
+  const [catalogLoading, setCatalogLoading] = useState(false);
+
+  const loadCatalog = async () => {
+    setCatalogLoading(true);
+    try {
+      const res = await apiFetch(`${API_BASE}/api/flyer/catalog`);
+      if (res.ok) {
+        const data = await res.json();
+        setCatalogItems(Array.isArray(data) ? data : data.items || []);
+      }
+    } catch (e) { console.error(e); }
+    finally { setCatalogLoading(false); }
+  };
+
+  const handleCatalogSelect = (item: { product_name: string; default_price: number; image_url: string | null }) => {
+    const safeTab = Math.min(activeTab, Math.max(categories.length - 1, 0));
+    if (categories.length === 0) return;
+    const u = [...categories];
+    u[safeTab].items.push({
+      name: item.product_name,
+      originalPrice: item.default_price,
+      salePrice: item.default_price,
+      imageUrl: item.image_url || undefined,
+    });
+    setCategories(u);
+  };
   const jsonHeaders = { 'Content-Type': 'application/json' };
 
   // 활성 탭이 범위 밖이면 보정
@@ -622,7 +652,10 @@ function ProductRegistrationSection({ categories, setCategories, addCategory, re
                     <button onClick={() => removeItem(safeTab, ii)} className="col-span-1 text-error-500/60 hover:text-error-500 text-center transition-colors">✕</button>
                   </div>
                 ))}
-                <button onClick={() => addItem(safeTab)} className="w-full py-2 text-xs text-primary-600 hover:bg-primary-50 rounded-lg border border-dashed border-primary-500/30 transition-colors font-medium">+ 상품 추가</button>
+                <div className="flex gap-2">
+                  <button onClick={() => addItem(safeTab)} className="flex-1 py-2 text-xs text-primary-600 hover:bg-primary-50 rounded-lg border border-dashed border-primary-500/30 transition-colors font-medium">+ 상품 추가</button>
+                  <button onClick={() => { setShowCatalog(true); loadCatalog(); }} className="flex-1 py-2 text-xs text-text-secondary hover:bg-surface-hover rounded-lg border border-dashed border-border transition-colors font-medium">📦 카탈로그에서</button>
+                </div>
               </div>
             </div>
           )}
@@ -638,6 +671,41 @@ function ProductRegistrationSection({ categories, setCategories, addCategory, re
       )}
 
       <button onClick={() => addCategory()} className="w-full mt-3 py-2.5 text-sm text-text-secondary hover:bg-bg rounded-xl border border-dashed border-border transition-colors font-medium">+ 카테고리 추가</button>
+
+      {/* ★ 카탈로그 선택 모달 */}
+      {showCatalog && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={() => setShowCatalog(false)}>
+          <div className="bg-surface rounded-2xl w-full max-w-md max-h-[70vh] overflow-y-auto p-5" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-base font-bold text-white">카탈로그에서 상품 추가</h3>
+              <button onClick={() => setShowCatalog(false)} className="text-text-tertiary hover:text-white">X</button>
+            </div>
+            {catalogLoading ? (
+              <p className="text-center py-8 text-text-secondary">로딩 중...</p>
+            ) : catalogItems.length === 0 ? (
+              <p className="text-center py-8 text-text-tertiary">등록된 상품이 없습니다.<br/>상품관리에서 먼저 등록해주세요.</p>
+            ) : (
+              <div className="space-y-2">
+                {catalogItems.map(item => (
+                  <button key={item.id} onClick={() => { handleCatalogSelect(item); setAlert({ show: true, title: '추가됨', message: `"${item.product_name}" 추가`, type: 'success' }); }}
+                    className="w-full flex items-center gap-3 p-3 rounded-xl bg-surface-secondary hover:bg-surface-hover transition-colors text-left">
+                    {item.image_url ? (
+                      <img src={item.image_url.startsWith('http') ? item.image_url : `${API_BASE}${item.image_url}`} alt="" className="w-12 h-12 object-cover rounded-lg" />
+                    ) : (
+                      <div className="w-12 h-12 bg-bg rounded-lg flex items-center justify-center text-lg">📦</div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-white truncate">{item.product_name}</p>
+                      <p className="text-xs text-text-tertiary">{item.category} · {item.default_price?.toLocaleString()}원</p>
+                    </div>
+                    <span className="text-xs text-primary-500 font-medium">추가</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </SectionCard>
   );
 }
