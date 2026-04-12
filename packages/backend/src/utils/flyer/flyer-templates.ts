@@ -115,15 +115,16 @@ ${script ? `<script>${script}</script>` : ''}
 </html>`;
 }
 
-/** 스티키 카테고리 탭 JS (모든 레이아웃 공통) — scroll 이벤트 기반 (IO 폐기) */
+/** 스티키 카테고리 탭 JS — scroll 이벤트 기반, 탭 바 scrollLeft 직접 제어 */
 const STICKY_TAB_SCRIPT = `(function(){
-var ts=document.querySelectorAll('.ct'),ss=document.querySelectorAll('section.sc');
+var ts=document.querySelectorAll('.ct'),ss=document.querySelectorAll('section.sc'),ni=document.querySelector('.ni');
 if(!ts.length||!ss.length)return;
 ts.forEach(function(t,i){
   t.addEventListener('click',function(e){
     e.preventDefault();
     ts.forEach(function(x){x.classList.remove('on')});
     t.classList.add('on');
+    if(ni){var tl=t.offsetLeft,tw=t.offsetWidth,cw=ni.offsetWidth;ni.scrollTo({left:tl-cw/2+tw/2,behavior:'smooth'});}
     if(ss[i]){
       var nav=document.querySelector('.nav');
       var navH=nav?nav.offsetHeight:50;
@@ -132,20 +133,17 @@ ts.forEach(function(t,i){
     }
   });
 });
-var ticking=false;
+var prev=-1;
 window.addEventListener('scroll',function(){
-  if(ticking)return;
-  ticking=true;
   requestAnimationFrame(function(){
     var nav=document.querySelector('.nav');
     var navH=nav?nav.offsetHeight:50;
     var idx=0;
-    for(var i=0;i<ss.length;i++){
-      if(ss[i].getBoundingClientRect().top<=navH+20)idx=i;
-    }
+    for(var i=0;i<ss.length;i++){if(ss[i].getBoundingClientRect().top<=navH+20)idx=i;}
+    if(idx===prev)return;
+    prev=idx;
     ts.forEach(function(t,i){t.classList.toggle('on',i===idx)});
-    if(ts[idx])ts[idx].scrollIntoView({behavior:'smooth',block:'nearest',inline:'center'});
-    ticking=false;
+    if(ni&&ts[idx]){var tl=ts[idx].offsetLeft,tw=ts[idx].offsetWidth,cw=ni.offsetWidth;ni.scrollTo({left:tl-cw/2+tw/2,behavior:'smooth'});}
   });
 });
 })();`;
