@@ -154,8 +154,8 @@ app.use('/api/flyer/catalog-images', express.static(path.join(process.cwd(), 'up
 
 // 전단AI 기존 라우트 (전단지 CRUD + 공개 페이지)
 app.use('/api/flyer/flyers', flyerRoutes);
-app.use('/api/flyer/p', flyerPublicRoutes);  // 공개 페이지 (인증 불필요)
-app.use('/api/flyer/q', flyerCouponPublicRoutes);  // QR 쿠폰 공개 페이지 (인증 불필요)
+app.use('/api/flyer/p', helmet({ contentSecurityPolicy: false }), flyerPublicRoutes);  // 공개 페이지 — CSP 해제 (인라인 스크립트 필요)
+app.use('/api/flyer/q', helmet({ contentSecurityPolicy: false }), flyerCouponPublicRoutes);  // QR 쿠폰 공개 페이지
 
 // 404 처리
 app.use((req, res) => {
