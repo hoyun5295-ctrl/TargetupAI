@@ -457,11 +457,8 @@ export default function CouponPage({ token: _token }: { token: string }) {
       )}
 
       <AlertModal
-        isOpen={alert.show}
+        alert={alert}
         onClose={() => setAlert({ ...alert, show: false })}
-        title={alert.title}
-        message={alert.message}
-        type={alert.type}
       />
     </div>
   );
