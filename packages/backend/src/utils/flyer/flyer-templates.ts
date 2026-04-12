@@ -116,27 +116,25 @@ ${script ? `<script>${script}</script>` : ''}
 </html>`;
 }
 
-/** 카테고리 탭 — scroll+hashchange, body overflow-x:clip (sticky 보존) */
+/** 카테고리 탭 — setInterval 100ms 폴링 (scroll 이벤트 무의존) */
 const STICKY_TAB_SCRIPT = `(function(){
 var ts=document.querySelectorAll('.ct');
 var ss=document.querySelectorAll('section.sc');
 var ni=document.querySelector('.ni');
 var nv=document.querySelector('.nav');
 if(!ts.length||!ss.length)return;
-function update(){
+var last=-1;
+setInterval(function(){
   var h=nv?nv.offsetHeight:50;
   var idx=0;
   for(var k=0;k<ss.length;k++){
     if(ss[k].getBoundingClientRect().top<=h+20)idx=k;
   }
+  if(idx===last)return;
+  last=idx;
   for(var j=0;j<ts.length;j++) ts[j].className=(j===idx)?'ct on':'ct';
   if(ni&&ts[idx]) ni.scrollLeft=ts[idx].offsetLeft-ni.offsetWidth/2+ts[idx].offsetWidth/2;
-}
-var tm=null;
-function onS(){if(tm)clearTimeout(tm);tm=setTimeout(update,80);}
-window.addEventListener('scroll',onS);
-document.addEventListener('scroll',onS);
-window.addEventListener('hashchange',function(){setTimeout(update,100);});
+},100);
 })();`;
 
 // ============================================================
