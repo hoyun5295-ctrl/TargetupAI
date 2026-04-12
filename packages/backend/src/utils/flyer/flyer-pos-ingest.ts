@@ -1,11 +1,10 @@
 /**
  * ★ CT-F12 — 전단AI POS Agent 데이터 수신/정규화 컨트롤타워
  *
- * Phase B: POS Agent가 보내는 판매/재고/회원 데이터를
+ * POS Agent가 보내는 판매/재고/회원 데이터를
  * flyer_pos_sales, flyer_pos_inventory, flyer_customers에 저장.
  *
- * 설계: FLYER-POS-AGENT.md §3 서버 API 참조.
- * ⚠️ 스켈레톤 — Phase B 구현 시 채운다.
+ * 설계: FLYER-POS-AGENT.md §3 서버 API, FLYER-POS-AGENT-DEV.md
  */
 
 import { query } from '../../config/database';
@@ -46,6 +45,9 @@ export interface PosMember {
   birth_date?: string;
   grade?: string;
   points?: number;
+  total_purchase?: number;
+  last_purchase_at?: string;
+  sms_opt_in?: boolean;
 }
 
 export interface IngestResult {
@@ -72,43 +74,253 @@ export async function verifyPosAgent(agentKey: string): Promise<{
 }
 
 /**
- * 판매 데이터 수신 + 정규화 + flyer_pos_sales INSERT.
+ * ★ 판매 데이터 수신 + 정규화 + flyer_pos_sales UPSERT.
+ *
+ * - receipt_no + product_code + sold_at UNIQUE 기준 중복 방지
+ * - 매칭된 회원의 구매 통계 자동 업데이트
+ * - 카탈로그 자동 등록 (신상품 감지)
  */
 export async function ingestSales(
   companyId: string,
   agentId: string,
   items: PosSaleItem[]
 ): Promise<IngestResult> {
-  // Phase B 구현 시 작성
-  // 1. 각 item 정규화 (날짜, 금액, 회원 매칭)
-  // 2. UPSERT (receipt_no + product_code + sold_at UNIQUE)
-  // 3. 매칭된 customer의 purchase 통계 업데이트
-  return { accepted: 0, rejected: items.length, errors: [{ index: 0, reason: 'Not implemented (Phase B)' }] };
+  let accepted = 0;
+  let rejected = 0;
+  const errors: Array<{ index: number; reason: string }> = [];
+
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    try {
+      if (!item.receipt_no || !item.sold_at) {
+        rejected++;
+        errors.push({ index: i, reason: 'receipt_no와 sold_at 필수' });
+        continue;
+      }
+
+      // 판매 데이터 UPSERT
+      await query(
+        `INSERT INTO flyer_pos_sales
+           (company_id, pos_agent_id, receipt_no, sold_at,
+            product_code, product_name, category,
+            quantity, unit_price, sale_price, total_amount, cost_price,
+            pos_member_id, pos_raw)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+         ON CONFLICT (company_id, receipt_no, product_code, sold_at)
+         DO UPDATE SET
+           quantity = EXCLUDED.quantity,
+           sale_price = EXCLUDED.sale_price,
+           total_amount = EXCLUDED.total_amount,
+           pos_raw = EXCLUDED.pos_raw`,
+        [
+          companyId, agentId,
+          item.receipt_no, item.sold_at,
+          item.product_code || '', item.product_name || '',
+          item.category || null,
+          item.quantity || 1, item.unit_price || 0,
+          item.sale_price || 0, item.total_amount || 0,
+          item.cost_price || null,
+          item.pos_member_id || null,
+          item.raw ? JSON.stringify(item.raw) : null,
+        ]
+      );
+
+      // 회원 매칭 시 구매 통계 업데이트
+      if (item.pos_member_id) {
+        await query(
+          `UPDATE flyer_customers
+           SET total_purchase_amount = COALESCE(total_purchase_amount, 0) + $3,
+               purchase_count = COALESCE(purchase_count, 0) + 1,
+               last_purchase_at = GREATEST(last_purchase_at, $4::timestamptz),
+               updated_at = NOW()
+           WHERE company_id = $1 AND pos_member_id = $2`,
+          [companyId, item.pos_member_id, item.total_amount || item.sale_price || 0, item.sold_at]
+        );
+      }
+
+      // 카탈로그 자동 등록 (신상품)
+      if (item.product_code && item.product_name) {
+        await query(
+          `INSERT INTO flyer_catalog (company_id, product_name, category, default_price, pos_product_code)
+           VALUES ($1, $2, $3, $4, $5)
+           ON CONFLICT (company_id, pos_product_code) WHERE pos_product_code IS NOT NULL
+           DO UPDATE SET
+             default_price = EXCLUDED.default_price,
+             updated_at = NOW()`,
+          [companyId, item.product_name, item.category || '기타', item.sale_price || item.unit_price || 0, item.product_code]
+        );
+      }
+
+      accepted++;
+    } catch (err: any) {
+      rejected++;
+      errors.push({ index: i, reason: err.message });
+    }
+  }
+
+  return { accepted, rejected, errors: errors.slice(0, 20) }; // 에러 최대 20건
 }
 
 /**
- * 재고 스냅샷 수신.
+ * ★ 재고 스냅샷 수신 + 재고부족/유통기한 자동 감지.
  */
 export async function ingestInventory(
   companyId: string,
   agentId: string,
   items: PosInventoryItem[]
 ): Promise<IngestResult> {
-  // Phase B 구현 시 작성
-  return { accepted: 0, rejected: items.length, errors: [{ index: 0, reason: 'Not implemented (Phase B)' }] };
+  let accepted = 0;
+  let rejected = 0;
+  const errors: Array<{ index: number; reason: string }> = [];
+
+  const snapshotAt = new Date().toISOString();
+
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    try {
+      if (!item.product_code) {
+        rejected++;
+        errors.push({ index: i, reason: 'product_code 필수' });
+        continue;
+      }
+
+      const currentStock = item.current_stock ?? 0;
+      const isLowStock = currentStock <= 5 && currentStock >= 0;
+
+      let isExpiringSoon = false;
+      if (item.expiry_date) {
+        const expiry = new Date(item.expiry_date);
+        const now = new Date();
+        const diffDays = (expiry.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
+        isExpiringSoon = diffDays <= 7 && diffDays >= 0;
+      }
+
+      await query(
+        `INSERT INTO flyer_pos_inventory
+           (company_id, product_code, product_name, category,
+            current_stock, unit, cost_price, sale_price, expiry_date,
+            is_low_stock, is_expiring_soon, snapshot_at, pos_raw)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+         ON CONFLICT (company_id, product_code, snapshot_at)
+         DO UPDATE SET
+           current_stock = EXCLUDED.current_stock,
+           is_low_stock = EXCLUDED.is_low_stock,
+           is_expiring_soon = EXCLUDED.is_expiring_soon`,
+        [
+          companyId, item.product_code, item.product_name || '', item.category || null,
+          currentStock, item.unit || null,
+          item.cost_price || null, item.sale_price || null, item.expiry_date || null,
+          isLowStock, isExpiringSoon, snapshotAt,
+          item.raw ? JSON.stringify(item.raw) : null,
+        ]
+      );
+
+      accepted++;
+    } catch (err: any) {
+      rejected++;
+      errors.push({ index: i, reason: err.message });
+    }
+  }
+
+  return { accepted, rejected, errors: errors.slice(0, 20) };
 }
 
 /**
- * 회원 수신 → flyer_customers UPSERT.
+ * ★ 회원 수신 → flyer_customers UPSERT (phone 기준).
+ *
+ * - 전화번호 정규화 후 매칭
+ * - pos_member_id 연결
+ * - 마스킹된 번호 자동 스킵 + 경고
  */
 export async function ingestMembers(
   companyId: string,
   agentId: string,
   members: PosMember[]
 ): Promise<IngestResult> {
-  // Phase B 구현 시 작성
-  // phone 기준 UPSERT → pos_member_id 연결
-  return { accepted: 0, rejected: members.length, errors: [{ index: 0, reason: 'Not implemented (Phase B)' }] };
+  let accepted = 0;
+  let rejected = 0;
+  const errors: Array<{ index: number; reason: string }> = [];
+
+  for (let i = 0; i < members.length; i++) {
+    const m = members[i];
+    try {
+      if (!m.pos_member_id) {
+        rejected++;
+        errors.push({ index: i, reason: 'pos_member_id 필수' });
+        continue;
+      }
+
+      // 전화번호 정규화
+      const phone = m.phone ? normalizePhone(m.phone) : null;
+
+      // 마스킹된 전화번호 감지 → 스킵
+      if (m.phone && /\*/.test(m.phone)) {
+        rejected++;
+        errors.push({ index: i, reason: `마스킹된 전화번호: ${m.phone}` });
+        continue;
+      }
+
+      if (!phone) {
+        // 전화번호 없어도 pos_member_id로 기존 고객 업데이트 시도
+        const existing = await query(
+          `SELECT id FROM flyer_customers WHERE company_id = $1 AND pos_member_id = $2 LIMIT 1`,
+          [companyId, m.pos_member_id]
+        );
+        if (existing.rows.length > 0) {
+          await query(
+            `UPDATE flyer_customers SET
+               name = COALESCE($3, name),
+               gender = COALESCE($4, gender),
+               pos_grade = COALESCE($5, pos_grade),
+               pos_points = COALESCE($6, pos_points),
+               updated_at = NOW()
+             WHERE id = $2`,
+            [companyId, existing.rows[0].id, m.name, normalizeGender(m.gender), m.grade, m.points]
+          );
+          accepted++;
+        } else {
+          rejected++;
+          errors.push({ index: i, reason: '유효한 전화번호 없음' });
+        }
+        continue;
+      }
+
+      // phone 기준 UPSERT
+      await query(
+        `INSERT INTO flyer_customers
+           (company_id, phone, name, gender, birth_date,
+            pos_member_id, pos_grade, pos_points,
+            total_purchase_amount, last_purchase_at,
+            sms_opt_in, source)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pos_sync')
+         ON CONFLICT (company_id, phone) WHERE deleted_at IS NULL
+         DO UPDATE SET
+           name = COALESCE(EXCLUDED.name, flyer_customers.name),
+           gender = COALESCE(EXCLUDED.gender, flyer_customers.gender),
+           birth_date = COALESCE(EXCLUDED.birth_date, flyer_customers.birth_date),
+           pos_member_id = COALESCE(EXCLUDED.pos_member_id, flyer_customers.pos_member_id),
+           pos_grade = COALESCE(EXCLUDED.pos_grade, flyer_customers.pos_grade),
+           pos_points = COALESCE(EXCLUDED.pos_points, flyer_customers.pos_points),
+           total_purchase_amount = COALESCE(EXCLUDED.total_purchase_amount, flyer_customers.total_purchase_amount),
+           last_purchase_at = GREATEST(EXCLUDED.last_purchase_at, flyer_customers.last_purchase_at),
+           updated_at = NOW()`,
+        [
+          companyId, phone,
+          m.name || null, normalizeGender(m.gender), m.birth_date || null,
+          m.pos_member_id, m.grade || null, m.points || null,
+          m.total_purchase || null, m.last_purchase_at || null,
+          m.sms_opt_in !== false, // 기본 true
+        ]
+      );
+
+      accepted++;
+    } catch (err: any) {
+      rejected++;
+      errors.push({ index: i, reason: err.message });
+    }
+  }
+
+  return { accepted, rejected, errors: errors.slice(0, 20) };
 }
 
 /**
@@ -129,4 +341,15 @@ export async function updateAgentHeartbeat(
      WHERE id = $1`,
     [agentId, lastSyncAt, pendingCount, errorCount24h]
   );
+}
+
+/**
+ * 성별 코드 정규화
+ */
+function normalizeGender(gender?: string): string | null {
+  if (!gender) return null;
+  const g = gender.trim().toUpperCase();
+  if (['M', '남', '남성', '1', 'MALE'].includes(g)) return 'M';
+  if (['F', '여', '여성', '2', 'FEMALE'].includes(g)) return 'F';
+  return null;
 }

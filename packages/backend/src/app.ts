@@ -60,6 +60,7 @@ import flyerAddressBooksRoutes from './routes/flyer/address-books';
 import flyerSenderRegistrationRoutes from './routes/flyer/sender-registration';
 import flyerPosRoutes from './routes/flyer/pos';
 import flyerBusinessTypesRoutes from './routes/flyer/business-types';
+import flyerCouponsRoutes, { publicRouter as flyerCouponPublicRoutes } from './routes/flyer/coupons';
 
 // DB 연결
 import './config/database';
@@ -145,9 +146,12 @@ app.use('/api/flyer/companies/sender-registration', flyerSenderRegistrationRoute
 app.use('/api/flyer/pos', flyerPosRoutes);
 app.use('/api/flyer/business-types', flyerBusinessTypesRoutes);
 
+app.use('/api/flyer/coupons', flyerCouponsRoutes);
+
 // 전단AI 기존 라우트 (전단지 CRUD + 공개 페이지)
 app.use('/api/flyer/flyers', flyerRoutes);
 app.use('/api/flyer/p', flyerPublicRoutes);  // 공개 페이지 (인증 불필요)
+app.use('/api/flyer/q', flyerCouponPublicRoutes);  // QR 쿠폰 공개 페이지 (인증 불필요)
 
 // 404 처리
 app.use((req, res) => {

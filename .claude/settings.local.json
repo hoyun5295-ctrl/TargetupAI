@@ -123,7 +123,9 @@
       "Bash(NODE_PATH=$\\(npm root -g\\) node \"D111-검증가이드-생성.js\")",
       "Bash(find packages/flyer-frontend/src -name \"*.ts\" -exec grep -l \"axios\\\\|fetch\" {} \\\\;)",
       "Bash(grep -rn \"VITE_API\\\\|API_BASE\\\\|fetch\\(\" packages/flyer-frontend/src/pages/LoginPage.tsx packages/flyer-frontend/src/hooks/*.ts)",
-      "Bash(ls packages/backend/src/routes/admin*)"
+      "Bash(ls packages/backend/src/routes/admin*)",
+      "WebFetch(domain:www.togethers.kr)",
+      "WebFetch(domain:www.tomato-market.co.kr)"
     ]
   }
 }

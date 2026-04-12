@@ -19,43 +19,47 @@
 | **FLYER-MIGRATION-PLAN.md** | 계정/데이터 완전 분리 이관 계획 (방식 B) |
 | **FLYER-POS-AGENT.md** | POS Agent (SyncAgent 확장) 설계 |
 | **FLYER-SUPERADMIN.md** | 슈퍼관리자 통합 + 서비스 스위처 설계 |
+| **FLYER-QR-COUPON-DESIGN.md** | ★ D114 QR 체크인 쿠폰 구현 설계서 (즉시 개발용) |
+| **FLYER-POS-AGENT-DEV.md** | ★ D114 POS Agent 개발 설계서 (투게더스 우선, 즉시 개발용) |
 
-> **최종 업데이트:** 2026-04-09 (D113)
+> **최종 업데이트:** 2026-04-12 (D114)
 
 ---
 
 ## 1) CURRENT_TASK (현재 집중 작업)
 
-### 🎯 D114 — 다음 세션 즉시 착수 항목
+### 🎯 D115 — QR 쿠폰 + AI POS Agent 구현 (2026-04-12)
 
-> **D113에서 코드+배포 완료. 아래 미완료/개선 항목을 다음 세션에서 이어간다.**
+**★ 이번 세션 완료 항목:**
 
-**1. 슈퍼관리자 UI 개선 (긴급)**
-- [ ] 총판 생성 모달에 사업자등록증 전체 필드 추가 (업태/종목/주소/세금계산서/담당자 — 현재 일부만)
-- [ ] 총판 수정 모달 신설 (현재 없음)
-- [ ] 총판 상세 보기 (하위 매장 목록 + 매출 통계)
-- [ ] 매장 등록 모달 alert() 잔존 → 전부 커스텀 모달로 교체
-- [ ] 중복 총판 방지 (company_name UNIQUE 또는 UI 경고)
-- [ ] 전체 총판 카드 숫자가 삭제 후 갱신 안 됨 → loadStats 호출 확인
+**A. QR 체크인 쿠폰 (코드 완료, DDL 미적용)**
+- [x] CT-F15 flyer-coupons.ts — 쿠폰 컨트롤타워 (캠페인 CRUD + QR 생성 + claim + redeem + 통계)
+- [x] routes/flyer/coupons.ts — 인증 라우트 + 공개 라우트 (/q/:qrCode)
+- [x] app.ts 마운트 (/api/flyer/coupons + /api/flyer/q)
+- [x] CouponPage.tsx — 프론트 페이지 (목록/생성/사용처리/조회)
+- [x] App.tsx — '쿠폰' 메뉴 추가
+- [ ] **Harold님 실행 필요:** DDL (flyer_coupon_campaigns + flyer_coupons 2개 테이블)
+- [ ] flyer_coupon_campaigns에 qr_data_url TEXT 컬럼 추가 필요
 
-**2. FLYER-SCHEMA.md 업데이트 (필수)**
-- [ ] flyer_business_types 테이블 문서화
-- [ ] flyer_users 확장 컬럼 (~20개) 문서화
-- [ ] flyers/short_urls FK 변경 사항 반영 (companies → flyer_companies)
+**B. AI POS Agent (서버 + 클라이언트 코드 완료)**
+- [x] CT-F16 flyer-pos-ai.ts — AI 스키마 자동 분석 (Claude API)
+- [x] CT-F12 flyer-pos-ingest.ts — 스켈레톤 → 실제 구현 (sales/members/inventory UPSERT)
+- [x] routes/flyer/pos.ts — register + analyze-schema + config + push + heartbeat
+- [x] packages/pos-agent/ — 신규 패키지 (7개 모듈: config/logger/server-client/db-connector/schema-reader/data-extractor/scheduler)
+- [ ] **Harold님 실행 필요:** flyer_pos_agents에 `schema_mapping JSONB` 컬럼 ALTER
+- [ ] **Harold님 실행 필요:** pos-agent npm install (tedious/better-sqlite3/node-cron/node-fetch)
+- [ ] 실매장 테스트 (투게더스 POS 원격 접속 후)
 
-**3. 템플릿 디자인 고도화**
-- [ ] 10종 템플릿 실제 전단지 발행 후 공개 페이지 품질 확인 (미리보기 ↔ 공개 페이지 디자인 일치 검증)
-- [ ] 이미지 문제 근본 해결 (상품 이미지 부족 — Pixabay 추가 수집 또는 다른 방안)
-- [ ] 템플릿 선택 카드에 색상 바 렌더링 확인
+**C. 이전 세션(D114) 완료 확인된 항목:**
+- [x] 슈퍼관리자 UI 개선 (총판 생성/수정 모달, 매장 등록, 중복방지 등)
 
-**4. 카탈로그DB 연동 (Phase A 다음 기능)**
-- [ ] flyer-frontend에 카탈로그 관리 페이지 신설 (상품 추가/편집/삭제)
-- [ ] 전단 생성 화면에 "내 상품" 사이드바 → 드래그로 전단에 추가
-- [ ] 이전 전단에서 사용한 상품 자동 카탈로그 등록
-
-**5. 과금 흐름 검증**
-- [ ] 입금확인 → 매장 활성화 → 잔액 충전 → 전단 발행 → 발송 → 잔액 차감 전체 흐름 테스트
-- [ ] payment_status='pending' 매장의 발송 차단 확인
+**D. 다음 세션 항목:**
+- [ ] DDL 실행 후 QR 쿠폰 E2E 테스트
+- [ ] 전단 템플릿에 QR 슬롯 추가 (flyer-templates.ts)
+- [ ] FlyerPage.tsx 쿠폰 토글 연동
+- [ ] FLYER-SCHEMA.md 업데이트 (flyer_coupon_*, flyer_business_types, flyer_users 확장)
+- [ ] POS Agent exe 빌드 (pkg) + 시스템 트레이 UI (다음 세션)
+- [ ] 실매장 투게더스 POS DB 구조 확인 (Harold님 원격 접속)
 
 ---
 
@@ -130,7 +134,19 @@ packages/backend/src/
     ├── flyer-pos-ingest.ts        (CT-F12) POS Agent (Phase B 스켈레톤)
     ├── flyer-business-types.ts    (CT-F13) ★ D113 업종 레지스트리 + TEMPLATE_REGISTRY
     ├── flyer-templates.ts         (CT-F14) ★ D113 템플릿 렌더링 엔진 (10종)
+    ├── flyer-coupons.ts           (CT-F15) ★ D115 QR 쿠폰 (캠페인 CRUD + claim + redeem + QR 생성)
+    ├── flyer-pos-ai.ts            (CT-F16) ★ D115 POS AI 스키마 분석 (Claude API 자동 매핑)
     └── index.ts
+
+packages/pos-agent/src/              ← ★ D115 신규 패키지
+├── index.ts                         — 메인 엔트리 (등록→DB연결→AI분석→스케줄러)
+├── config.ts                        — 설정 관리 (agent-config.json)
+├── logger.ts                        — 파일 로깅
+├── server-client.ts                 — 서버 통신 (register/analyze/push/heartbeat)
+├── db-connector.ts                  — MS-SQL 접속 (tedious)
+├── schema-reader.ts                 — INFORMATION_SCHEMA 읽기 + 샘플 수집
+├── data-extractor.ts                — AI 매핑 기반 데이터 추출
+└── scheduler.ts                     — 주기적 작업 (node-cron)
 
 packages/flyer-frontend/src/pages/
 ├── LoginPage.tsx, FlyerPage.tsx, SendPage.tsx, ResultsPage.tsx
@@ -162,16 +178,36 @@ packages/frontend/src/pages/
 - [x] DB FK 정리 (flyers, short_urls → flyer_companies 참조)
 - [x] flyer_business_types 테이블 + flyer_users ~20컬럼 ALTER 완료
 
+### 프론트엔드 페이지 현황 (D115)
+```
+packages/flyer-frontend/src/pages/
+├── LoginPage.tsx, FlyerPage.tsx, SendPage.tsx, ResultsPage.tsx
+├── BalancePage.tsx, UnsubscribesPage.tsx, SettingsPage.tsx
+├── CustomerPage.tsx, CatalogPage.tsx
+└── CouponPage.tsx          ← ★ D115 신규 (QR 쿠폰)
+```
+
 ### 이전 Phase (MVP~2.5) ✅
 - Phase 1 (2026-03-29): DB + 백엔드 API + 공개페이지 3종 + 도메인
 - Phase 1.5 (2026-03-29): 프론트 8페이지
 - Phase 2 (2026-03-30~04-01): 상품 이미지 + 템플릿 개선 + Pixabay
 - Phase 2.5 (2026-04-01): 세션관리 + MMS + 중복제거 + 080 + 만료처리
 
+### Phase A-2 — QR 쿠폰 + AI POS Agent (D115, 2026-04-12)
+- [x] CT-F15 QR 쿠폰 컨트롤타워 (생성/수령/사용/통계/공개페이지)
+- [x] CT-F16 AI 스키마 분석 (Claude API → POS DB 자동 매핑)
+- [x] CT-F12 실제 구현 (sales/members/inventory UPSERT + 카탈로그 자동등록)
+- [x] routes/flyer/coupons.ts + routes/flyer/pos.ts 확장
+- [x] CouponPage.tsx + App.tsx 메뉴 (flyer-frontend)
+- [x] packages/pos-agent/ 신규 패키지 (MS-SQL 접속 + AI 분석 + 주기적 동기화)
+- [ ] DDL 미적용 (배포 전 Harold님 실행 필요)
+- [ ] 전단 템플릿 QR 슬롯
+- [ ] FlyerPage.tsx 쿠폰 토글 연동
+- [ ] POS Agent exe 빌드 + tray UI
+
 ### 미착수 (Phase A 나머지)
 - 카탈로그DB 관리 페이지 + 전단 연동
 - 인쇄 PDF 내보내기
-- QR 체크인 쿠폰
 - 카카오 브랜드메시지 배포
 - 주간/월간 정기 자동발행
 - A/B 테스트

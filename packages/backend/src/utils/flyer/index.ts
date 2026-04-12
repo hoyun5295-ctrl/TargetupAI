@@ -99,6 +99,34 @@ export {
   updateAgentHeartbeat,
 } from './flyer-pos-ingest';
 
+// CT-F15: QR 쿠폰
+export {
+  createCouponCampaign,
+  listCouponCampaigns,
+  getCouponCampaign,
+  updateCouponCampaign,
+  disableCouponCampaign,
+  getCampaignByQrCode,
+  claimCoupon,
+  redeemCoupon,
+  lookupCouponsByPhone,
+  getCouponStats,
+  listCoupons,
+  generateQrDataUrl,
+  renderCouponPage,
+  buildCouponSmsMessage,
+} from './flyer-coupons';
+export type { CouponCampaign, CouponStats, ClaimResult, RedeemResult } from './flyer-coupons';
+
+// CT-F16: POS AI 스키마 분석
+export {
+  analyzeSchema,
+  saveSchemaMapping,
+  getSchemaMapping,
+  detectPhoneFormat,
+} from './flyer-pos-ai';
+export type { PosRawSchema, SchemaMapping, PosTableInfo, PosColumnInfo } from './flyer-pos-ai';
+
 // CT-F13: 업종 레지스트리
 export {
   getBusinessTypes,
