@@ -115,37 +115,45 @@ ${script ? `<script>${script}</script>` : ''}
 </html>`;
 }
 
-/** 스티키 카테고리 탭 JS — scroll 이벤트 기반, 탭 바 scrollLeft 직접 제어 */
+/** 스티키 카테고리 탭 JS — ES5 호환, onclick/onscroll 직접 할당 */
 const STICKY_TAB_SCRIPT = `(function(){
-var ts=document.querySelectorAll('.ct'),ss=document.querySelectorAll('section.sc'),ni=document.querySelector('.ni');
+var ts=document.querySelectorAll('.ct');
+var ss=document.querySelectorAll('section.sc');
+var ni=document.querySelector('.ni');
+var nv=document.querySelector('.nav');
 if(!ts.length||!ss.length)return;
-ts.forEach(function(t,i){
-  t.addEventListener('click',function(e){
-    e.preventDefault();
-    ts.forEach(function(x){x.classList.remove('on')});
-    t.classList.add('on');
-    if(ni){var tl=t.offsetLeft,tw=t.offsetWidth,cw=ni.offsetWidth;ni.scrollTo({left:tl-cw/2+tw/2,behavior:'smooth'});}
-    if(ss[i]){
-      var nav=document.querySelector('.nav');
-      var navH=nav?nav.offsetHeight:50;
-      var top=ss[i].getBoundingClientRect().top+window.pageYOffset-navH-8;
-      window.scrollTo({top:top,behavior:'smooth'});
-    }
-  });
-});
-var prev=-1;
-window.addEventListener('scroll',function(){
-  requestAnimationFrame(function(){
-    var nav=document.querySelector('.nav');
-    var navH=nav?nav.offsetHeight:50;
+function setOn(idx){
+  for(var j=0;j<ts.length;j++){
+    ts[j].className=j===idx?'ct on':'ct';
+  }
+  if(ni&&ts[idx]){
+    ni.scrollLeft=ts[idx].offsetLeft-ni.offsetWidth/2+ts[idx].offsetWidth/2;
+  }
+}
+for(var i=0;i<ts.length;i++){
+  (function(idx){
+    ts[idx].onclick=function(e){
+      e.preventDefault();
+      setOn(idx);
+      if(ss[idx]){
+        var h=nv?nv.offsetHeight:50;
+        window.scrollTo(0,ss[idx].offsetTop-h-8);
+      }
+    };
+  })(i);
+}
+var tm=null;
+window.onscroll=function(){
+  if(tm)clearTimeout(tm);
+  tm=setTimeout(function(){
+    var h=nv?nv.offsetHeight:50;
     var idx=0;
-    for(var i=0;i<ss.length;i++){if(ss[i].getBoundingClientRect().top<=navH+20)idx=i;}
-    if(idx===prev)return;
-    prev=idx;
-    ts.forEach(function(t,i){t.classList.toggle('on',i===idx)});
-    if(ni&&ts[idx]){var tl=ts[idx].offsetLeft,tw=ts[idx].offsetWidth,cw=ni.offsetWidth;ni.scrollTo({left:tl-cw/2+tw/2,behavior:'smooth'});}
-  });
-});
+    for(var k=0;k<ss.length;k++){
+      if(ss[k].getBoundingClientRect().top<=h+20)idx=k;
+    }
+    setOn(idx);
+  },80);
+};
 })();`;
 
 // ============================================================

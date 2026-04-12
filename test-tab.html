@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>탭 테스트</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+.sc{scroll-margin-top:56px}
+body{font-family:'Noto Sans KR',sans-serif;background:#f3f4f6;color:#1a1a1a;max-width:480px;margin:0 auto;overflow-x:hidden;line-height:1.5}
+.h{position:relative;background:linear-gradient(145deg,#dc2626,#991b1b);padding:56px 24px 68px;text-align:center;overflow:hidden}
+.hs{font-size:14px;font-weight:700;color:rgba(255,255,255,.85);letter-spacing:6px;margin-bottom:16px;position:relative;z-index:2}
+.ht{font-size:34px;font-weight:900;color:#fff;line-height:1.15;position:relative;z-index:2}
+.hw{position:absolute;bottom:0;left:0;right:0;height:36px;background:#f3f4f6;border-radius:36px 36px 0 0;z-index:3}
+.nav{position:sticky;top:0;z-index:100;background:rgba(255,255,255,.96);backdrop-filter:blur(16px);box-shadow:0 1px 0 #e5e7eb}
+.ni{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none;padding:10px 10px;gap:6px}
+.ni::-webkit-scrollbar{display:none}
+.ct{flex-shrink:0;scroll-snap-align:start;padding:8px 18px;font-size:13px;font-weight:700;color:#9ca3af;white-space:nowrap;text-decoration:none;border-radius:20px;transition:all .2s ease;background:transparent;cursor:pointer}
+.ct.on{color:#fff;background:#dc2626;box-shadow:0 2px 8px rgba(220,38,38,.35)}
+.w{padding:6px 14px 32px}
+.sc{padding-top:28px}.sc:first-child{padding-top:16px}
+.sh{display:flex;align-items:center;gap:12px;margin-bottom:16px}
+.si{width:42px;height:42px;border-radius:13px;background:linear-gradient(135deg,#dc2626,#ea580c);display:flex;align-items:center;justify-content:center;color:#fff;font-size:14px;font-weight:900}
+.sn{font-size:20px;font-weight:900}
+.item{background:#fff;border-radius:16px;padding:20px;margin-bottom:12px;min-height:200px;display:flex;align-items:center;justify-content:center;font-size:24px;color:#666}
+</style>
+</head>
+<body>
+<div class="h">
+  <p class="hs">테스트 매장</p>
+  <h1 class="ht">탭 네비게이션 테스트</h1>
+  <div class="hw"></div>
+</div>
+<nav class="nav"><div class="ni">
+  <a class="ct on" href="#s0">청과/야채</a>
+  <a class="ct" href="#s1">축산</a>
+  <a class="ct" href="#s2">수산</a>
+  <a class="ct" href="#s3">유제품</a>
+  <a class="ct" href="#s4">냉동</a>
+  <a class="ct" href="#s5">음료/주류</a>
+</div></nav>
+<div class="w">
+  <section class="sc" id="s0">
+    <div class="sh"><div class="si">01</div><span class="sn">청과/야채</span></div>
+    <div class="item">🍅 대저토마토 6,980원</div>
+    <div class="item">🧅 양파 2,980원</div>
+    <div class="item">🍎 사과 9,900원</div>
+  </section>
+  <section class="sc" id="s1">
+    <div class="sh"><div class="si">02</div><span class="sn">축산</span></div>
+    <div class="item">🥩 한돈 삼겹살 12,900원</div>
+    <div class="item">🥩 한우 등심 39,800원</div>
+    <div class="item">🍗 닭가슴살 5,900원</div>
+  </section>
+  <section class="sc" id="s2">
+    <div class="sh"><div class="si">03</div><span class="sn">수산</span></div>
+    <div class="item">🐟 연어 14,900원</div>
+    <div class="item">🦐 새우 11,900원</div>
+    <div class="item">🐙 문어 19,900원</div>
+  </section>
+  <section class="sc" id="s3">
+    <div class="sh"><div class="si">04</div><span class="sn">유제품</span></div>
+    <div class="item">🥛 서울우유 2,480원</div>
+    <div class="item">🧀 슬라이스 치즈 4,900원</div>
+    <div class="item">🍦 아이스크림 3,900원</div>
+  </section>
+  <section class="sc" id="s4">
+    <div class="sh"><div class="si">05</div><span class="sn">냉동</span></div>
+    <div class="item">🥟 비비고 만두 6,900원</div>
+    <div class="item">🍕 피자 7,900원</div>
+    <div class="item">🌮 냉동 볶음밥 4,900원</div>
+  </section>
+  <section class="sc" id="s5">
+    <div class="sh"><div class="si">06</div><span class="sn">음료/주류</span></div>
+    <div class="item">🍺 카스 12캔 14,900원</div>
+    <div class="item">🥤 코카콜라 1.5L 2,900원</div>
+    <div class="item">☕ 맥심 커피 9,900원</div>
+  </section>
+</div>
+<script>
+(function(){
+var ts=document.querySelectorAll('.ct');
+var ss=document.querySelectorAll('section.sc');
+var ni=document.querySelector('.ni');
+var nv=document.querySelector('.nav');
+if(!ts.length||!ss.length)return;
+function setOn(idx){
+  for(var j=0;j<ts.length;j++){
+    ts[j].className=j===idx?'ct on':'ct';
+  }
+  if(ni&&ts[idx]){
+    ni.scrollLeft=ts[idx].offsetLeft-ni.offsetWidth/2+ts[idx].offsetWidth/2;
+  }
+}
+for(var i=0;i<ts.length;i++){
+  (function(idx){
+    ts[idx].onclick=function(e){
+      e.preventDefault();
+      setOn(idx);
+      if(ss[idx]){
+        var h=nv?nv.offsetHeight:50;
+        window.scrollTo(0,ss[idx].offsetTop-h-8);
+      }
+    };
+  })(i);
+}
+var tm=null;
+window.onscroll=function(){
+  if(tm)clearTimeout(tm);
+  tm=setTimeout(function(){
+    var h=nv?nv.offsetHeight:50;
+    var idx=0;
+    for(var k=0;k<ss.length;k++){
+      if(ss[k].getBoundingClientRect().top<=h+20)idx=k;
+    }
+    setOn(idx);
+  },80);
+};
+})();
+</script>
+</body>
+</html>

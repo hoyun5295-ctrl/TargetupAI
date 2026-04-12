@@ -131,7 +131,11 @@
       "WebFetch(domain:martmonster.com)",
       "WebFetch(domain:hanjul-flyer.kr)",
       "Bash(npx -p typescript tsc --noEmit --project packages/backend/tsconfig.json)",
-      "Bash(npx -p typescript@5.5.4 tsc --noEmit --project packages/backend/tsconfig.json)"
+      "Bash(npx -p typescript@5.5.4 tsc --noEmit --project packages/backend/tsconfig.json)",
+      "Bash(npx -y http-server -p 9999 --cors -c-1)",
+      "Bash(timeout 3)",
+      "Bash(curl -s http://localhost:9999/test-tab.html)",
+      "mcp__Claude_Preview__preview_start"
     ]
   }
 }
