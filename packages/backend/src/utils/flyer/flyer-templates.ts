@@ -115,9 +115,10 @@ ${script ? `<script>${script}</script>` : ''}
 </html>`;
 }
 
-/** 스티키 카테고리 탭 JS (모든 레이아웃 공통) — scroll-margin-top 활용 */
+/** 스티키 카테고리 탭 JS (모든 레이아웃 공통) — scroll 이벤트 기반 (IO 폐기) */
 const STICKY_TAB_SCRIPT = `(function(){
 var ts=document.querySelectorAll('.ct'),ss=document.querySelectorAll('section.sc');
+if(!ts.length||!ss.length)return;
 ts.forEach(function(t,i){
   t.addEventListener('click',function(e){
     e.preventDefault();
@@ -131,19 +132,22 @@ ts.forEach(function(t,i){
     }
   });
 });
-if('IntersectionObserver' in window){
-  var o=new IntersectionObserver(function(es){
-    es.forEach(function(e){
-      if(e.isIntersecting){
-        var id=e.target.id;
-        ts.forEach(function(t){t.classList.toggle('on',t.getAttribute('href')==='#'+id)});
-        var a=document.querySelector('.ct.on');
-        if(a)a.scrollIntoView({behavior:'smooth',block:'nearest',inline:'center'});
-      }
-    });
-  },{rootMargin:'-60px 0px -60% 0px',threshold:0});
-  ss.forEach(function(s){o.observe(s)});
-}
+var ticking=false;
+window.addEventListener('scroll',function(){
+  if(ticking)return;
+  ticking=true;
+  requestAnimationFrame(function(){
+    var nav=document.querySelector('.nav');
+    var navH=nav?nav.offsetHeight:50;
+    var idx=0;
+    for(var i=0;i<ss.length;i++){
+      if(ss[i].getBoundingClientRect().top<=navH+20)idx=i;
+    }
+    ts.forEach(function(t,i){t.classList.toggle('on',i===idx)});
+    if(ts[idx])ts[idx].scrollIntoView({behavior:'smooth',block:'nearest',inline:'center'});
+    ticking=false;
+  });
+});
 })();`;
 
 // ============================================================
