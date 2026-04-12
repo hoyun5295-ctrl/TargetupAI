@@ -96,6 +96,8 @@ function htmlWrap(title: string, css: string, body: string, script?: string): st
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{margin:0;padding:0}
+.page-wrap{max-width:480px;margin:0 auto;overflow-x:hidden}
 /* 카테고리 섹션 — sticky nav 가림 방지 */
 .sc{scroll-margin-top:56px}
 /* 공통 메타 칩 */
@@ -109,18 +111,21 @@ ${css}
 </style>
 </head>
 <body>
+<div class="page-wrap">
 ${body}
+</div>
 ${script ? `<script>${script}</script>` : ''}
 </body>
 </html>`;
 }
 
-/** 카테고리 탭 — hashchange+scroll capture, onclick 없음 */
+/** 카테고리 탭 — page-wrap scroll + hashchange */
 const STICKY_TAB_SCRIPT = `(function(){
 var ts=document.querySelectorAll('.ct');
 var ss=document.querySelectorAll('section.sc');
 var ni=document.querySelector('.ni');
 var nv=document.querySelector('.nav');
+var pw=document.querySelector('.page-wrap');
 if(!ts.length||!ss.length)return;
 function update(){
   var h=nv?nv.offsetHeight:50;
@@ -133,8 +138,9 @@ function update(){
 }
 var tm=null;
 function onS(){if(tm)clearTimeout(tm);tm=setTimeout(update,80);}
-window.addEventListener('scroll',onS,true);
-document.addEventListener('scroll',onS,true);
+window.addEventListener('scroll',onS);
+if(pw)pw.addEventListener('scroll',onS);
+document.addEventListener('scroll',onS);
 window.addEventListener('hashchange',function(){setTimeout(update,100);});
 })();`;
 
@@ -349,7 +355,7 @@ function renderGridEngine(d: FlyerRenderData, t: Theme): string {
   const darkMod = t.isDark ? `.c{border:1px solid ${t.borderColor}}` : '';
 
   const css = `
-body{font-family:'Noto Sans KR',sans-serif;background:${t.bg};color:${t.textColor};-webkit-font-smoothing:antialiased;max-width:480px;margin:0 auto;overflow-x:hidden;line-height:1.5}
+body{font-family:'Noto Sans KR',sans-serif;background:${t.bg};color:${t.textColor};-webkit-font-smoothing:antialiased;line-height:1.5}
 
 /* ═══ HERO — Poster with Decorative Shapes ═══ */
 .h{position:relative;background:${t.heroGradient};padding:56px 24px 68px;text-align:center;overflow:hidden}
@@ -468,7 +474,7 @@ function renderMagazineEngine(d: FlyerRenderData, t: Theme): string {
   const darkMod = t.isDark ? `.mc{border:1px solid ${t.borderColor}}` : '';
 
   const css = `
-body{font-family:'Noto Sans KR',sans-serif;background:${t.bg};color:${t.textColor};-webkit-font-smoothing:antialiased;max-width:480px;margin:0 auto;overflow-x:hidden;line-height:1.5}
+body{font-family:'Noto Sans KR',sans-serif;background:${t.bg};color:${t.textColor};-webkit-font-smoothing:antialiased;line-height:1.5}
 
 /* ═══ HERO — Editorial Masthead ═══ */
 .h{position:relative;background:${t.heroGradient};padding:44px 28px 56px;overflow:hidden}
@@ -597,7 +603,7 @@ function renderEditorialEngine(d: FlyerRenderData, t: Theme): string {
   }
 
   const css = `
-body{font-family:'Noto Sans KR',sans-serif;background:${t.bg};color:${t.textColor};-webkit-font-smoothing:antialiased;max-width:480px;margin:0 auto;overflow-x:hidden;line-height:1.5}
+body{font-family:'Noto Sans KR',sans-serif;background:${t.bg};color:${t.textColor};-webkit-font-smoothing:antialiased;line-height:1.5}
 
 /* ═══ HERO — Minimal Masthead ═══ */
 .h{background:${t.heroGradient};padding:48px 28px 44px;position:relative;overflow:hidden}
@@ -725,7 +731,7 @@ function renderShowcaseEngine(d: FlyerRenderData, t: Theme): string {
   const darkMod = t.isDark ? `.sc-card{border:1px solid ${t.borderColor}}` : '';
 
   const css = `
-body{font-family:'Noto Sans KR',sans-serif;background:${t.bg};color:${t.textColor};-webkit-font-smoothing:antialiased;max-width:480px;margin:0 auto;overflow-x:hidden;line-height:1.5}
+body{font-family:'Noto Sans KR',sans-serif;background:${t.bg};color:${t.textColor};-webkit-font-smoothing:antialiased;line-height:1.5}
 
 /* ═══ HERO — Bold Centered ═══ */
 .h{position:relative;background:${t.heroGradient};padding:60px 28px 70px;text-align:center;overflow:hidden}
