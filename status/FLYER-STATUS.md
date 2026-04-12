@@ -62,6 +62,15 @@
 - [x] FLYER-SCHEMA.md — flyer_coupon_campaigns + flyer_coupons + schema_mapping 문서화
 - [x] 과금 흐름 검증 — 3중 차단 확인 (미들웨어+canFlyerStoreSend+deductFlyerPrepaid)
 
+**E. 카탈로그 + 네이버 이미지 자동 매칭 (이번 세션 추가):**
+- [x] CT-F17 flyer-naver-search.ts — 네이버 이미지 검색 API 연동 (쇼핑→이미지 전환: 주류/담배도 검색 가능)
+- [x] catalog.ts — search-image / select-image / auto-match / batch-match / find-image 5개 API 추가
+- [x] CatalogPage.tsx — CSV 일괄등록 + 개별 이미지 검색(후보 5개) + 이미지 선택 저장
+- [x] FlyerPage — 상품명 입력→blur 시 서버 우선 매칭→없으면 네이버 이미지 후보 5개 팝업→사장님 선택
+- [x] FlyerPage — "카탈로그에서" 버튼 (카탈로그 상품 클릭→전단에 자동 추가)
+- [x] app.ts — catalog-images express.static 공개 서빙
+- [x] 이미지 서빙 경로: `/api/flyer/catalog-images/{companyId}/{filename}`
+
 ---
 
 ### 🎯 다음 세션 CURRENT_TASK (D116~)

@@ -118,62 +118,101 @@ export function renderTemplate(templateCode: string, data: FlyerRenderData): str
 }
 
 // ============================================================
-// 기존 템플릿 1: 그리드형 (빨간 테마, 2열 카드)
+// ★ 템플릿 1: 그리드형 V2 (프리미엄 마트 전단 — 대형 가격, 카테고리 탭)
 // ============================================================
 function renderGridTemplate(d: FlyerRenderData): string {
-  let itemsHtml = '';
-  for (const cat of d.categories) {
-    itemsHtml += `<div class="cat-title"><span class="cat-bar"></span>${escapeHtml(cat.name || '')}</div><div class="grid">`;
-    for (const item of (cat.items || [])) {
-      const productImg = resolveImg(item.name || '', 120, item.imageUrl);
+  // 카테고리 탭 HTML
+  const catTabs = d.categories.map((cat, i) =>
+    `<a class="cat-tab${i === 0 ? ' active' : ''}" href="#cat-${i}">${escapeHtml(cat.name || '')}</a>`
+  ).join('');
+
+  // 카테고리별 상품 섹션 HTML
+  let sectionsHtml = '';
+  for (let ci = 0; ci < d.categories.length; ci++) {
+    const cat = d.categories[ci];
+    const items = cat.items || [];
+    let cardsHtml = '';
+    for (const item of items) {
+      const productImg = resolveImg(item.name || '', 160, item.imageUrl);
       const discount = calcDiscount(item.originalPrice, item.salePrice);
-      itemsHtml += `<div class="card">
-        ${discount > 0 ? `<div class="badge">${discount}%</div>` : ''}
-        <div class="card-img">${productImg}</div>
+      const tagColor = item.badge && /특가|할인|초특가/.test(item.badge) ? 'red' : item.badge && /인기|추천|프리미엄/.test(item.badge) ? 'blue' : 'gold';
+      cardsHtml += `<div class="card">
+        <div class="card-img">
+          ${discount > 0 ? `<div class="badge-discount">${discount}%</div>` : ''}
+          ${productImg}
+        </div>
         <div class="card-body">
-          <div class="name">${escapeHtml(item.name || '')}</div>
-          <div class="price-row">
-            ${item.originalPrice ? `<span class="orig">${formatPrice(item.originalPrice)}</span>` : ''}
-            <span class="price">₩${formatPrice(item.salePrice || 0)}</span>
-          </div>
-          ${item.badge ? `<div class="tag">${escapeHtml(item.badge)}</div>` : ''}
+          <div class="card-name">${escapeHtml(item.name || '')}</div>
+          ${item.originalPrice && item.originalPrice > item.salePrice ? `<div class="card-orig">${formatPrice(item.originalPrice)}원</div>` : ''}
+          <div class="card-price"><span class="price-num">${formatPrice(item.salePrice || 0)}</span><span class="price-won">원</span></div>
+          ${item.badge ? `<span class="card-tag ${tagColor}">${escapeHtml(item.badge)}</span>` : ''}
         </div>
       </div>`;
     }
-    itemsHtml += '</div>';
+    sectionsHtml += `<section class="cat-section" id="cat-${ci}">
+      <div class="cat-header">
+        <div class="cat-icon">${String(ci + 1).padStart(2, '0')}</div>
+        <span class="cat-name">${escapeHtml(cat.name || '')}</span>
+        <span class="cat-count">${items.length}개 상품</span>
+      </div>
+      <div class="grid">${cardsHtml}</div>
+    </section>`;
   }
 
   return `${htmlHead(d.title, `
-  body{font-family:'Noto Sans KR',sans-serif;background:#f2f2f2;color:#222;-webkit-font-smoothing:antialiased}
-  .hero{background:linear-gradient(135deg,#dc2626 0%,#b91c1c 100%);color:#fff;text-align:center;padding:32px 16px 26px;position:relative;overflow:hidden}
-  .hero::after{content:'';position:absolute;bottom:-20px;left:50%;transform:translateX(-50%);width:140%;height:40px;background:#f2f2f2;border-radius:50% 50% 0 0}
-  .hero .store{font-size:12px;font-weight:500;letter-spacing:3px;text-transform:uppercase;opacity:.85;margin-bottom:8px}
-  .hero h1{font-size:22px;font-weight:900;line-height:1.35;text-shadow:0 2px 8px rgba(0,0,0,.15)}
-  .hero .period{margin-top:12px;font-size:12px;font-weight:600;background:rgba(255,255,255,.2);backdrop-filter:blur(4px);display:inline-block;padding:5px 16px;border-radius:20px}
-  .content{padding:12px 14px 20px;max-width:480px;margin:0 auto}
-  .cat-title{display:flex;align-items:center;gap:8px;font-size:15px;font-weight:800;color:#b91c1c;margin:18px 0 10px}
-  .cat-bar{width:4px;height:18px;background:linear-gradient(180deg,#dc2626,#f97316);border-radius:2px;flex-shrink:0}
+  :root{--red:#dc2626;--red-dark:#b91c1c;--orange:#ea580c;--bg:#f3f4f6;--card:#fff;--text:#1a1a1a;--text-sub:#6b7280;--text-muted:#9ca3af;--radius:16px}
+  body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text);-webkit-font-smoothing:antialiased;max-width:480px;margin:0 auto;overflow-x:hidden}
+
+  .hero{position:relative;background:linear-gradient(145deg,var(--red) 0%,var(--red-dark) 40%,#991b1b 100%);padding:36px 20px 44px;text-align:center;overflow:hidden}
+  .hero::before{content:'';position:absolute;inset:0;background:radial-gradient(circle at 20% 80%,rgba(249,115,22,.25) 0%,transparent 50%),radial-gradient(circle at 85% 20%,rgba(245,158,11,.2) 0%,transparent 40%);pointer-events:none}
+  .hero::after{content:'';position:absolute;top:-30px;right:-30px;width:120px;height:120px;border:3px solid rgba(255,255,255,.1);border-radius:50%;pointer-events:none}
+  .hero-store{font-size:13px;font-weight:700;color:rgba(255,255,255,.85);letter-spacing:2px;text-transform:uppercase;margin-bottom:8px}
+  .hero-title{font-size:28px;font-weight:900;color:#fff;line-height:1.3;text-shadow:0 2px 12px rgba(0,0,0,.2)}
+  .hero-period{display:inline-flex;align-items:center;gap:6px;margin-top:14px;background:rgba(0,0,0,.2);border-radius:24px;padding:7px 18px;font-size:12px;font-weight:600;color:rgba(255,255,255,.95)}
+  .hero-wave{position:absolute;bottom:0;left:0;right:0;height:24px;background:var(--bg);border-radius:24px 24px 0 0}
+
+  .cat-nav{position:sticky;top:0;z-index:100;background:var(--card);border-bottom:1px solid #e5e7eb;box-shadow:0 2px 8px rgba(0,0,0,.04)}
+  .cat-nav-inner{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none;padding:0 12px}
+  .cat-nav-inner::-webkit-scrollbar{display:none}
+  .cat-tab{flex-shrink:0;scroll-snap-align:start;padding:14px 16px;font-size:13px;font-weight:700;color:var(--text-sub);white-space:nowrap;text-decoration:none;border-bottom:2.5px solid transparent;transition:all .2s}
+  .cat-tab.active{color:var(--red);border-bottom-color:var(--red)}
+
+  .content{padding:4px 12px 24px}
+  .cat-section{padding-top:16px}
+  .cat-header{display:flex;align-items:center;gap:10px;margin-bottom:12px;padding:0 4px}
+  .cat-icon{width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,var(--red),var(--orange));display:flex;align-items:center;justify-content:center;color:#fff;font-size:15px;font-weight:900;flex-shrink:0;box-shadow:0 2px 6px rgba(220,38,38,.25)}
+  .cat-name{font-size:17px;font-weight:800;color:var(--text);letter-spacing:-.3px}
+  .cat-count{font-size:11px;font-weight:600;color:var(--text-muted);margin-left:auto}
+
   .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-  .card{background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.06);position:relative;transition:transform .15s}
-  .card-img{width:100%;height:120px;overflow:hidden;background:#f8f8f8;display:flex;align-items:center;justify-content:center}
-  .card-img .product-img{width:100%;height:120px;object-fit:cover}
-  .card-img .emoji-area{width:100%;height:120px;display:flex;align-items:center;justify-content:center;font-size:48px;background:linear-gradient(135deg,#fff5f5,#fef2f2)}
-  .card-body{padding:10px 12px 12px}
-  .card .name{font-size:13px;font-weight:700;line-height:1.35;margin-bottom:6px;color:#222}
-  .card .price-row{display:flex;align-items:baseline;gap:6px;flex-wrap:wrap}
-  .card .orig{font-size:11px;color:#aaa;text-decoration:line-through}
-  .card .price{font-size:19px;font-weight:900;color:#dc2626}
-  .card .badge{position:absolute;top:8px;left:8px;background:linear-gradient(135deg,#dc2626,#ea580c);color:#fff;font-size:11px;font-weight:800;padding:3px 8px;border-radius:8px;z-index:1;box-shadow:0 2px 4px rgba(220,38,38,.3)}
-  .card .tag{margin-top:6px;font-size:10px;color:#dc2626;font-weight:700;background:#fef2f2;padding:3px 8px;border-radius:6px;display:inline-block;border:1px solid #fecaca}
-  .footer{text-align:center;padding:24px 16px 32px;color:#bbb;font-size:11px}
+  .card{background:var(--card);border-radius:var(--radius);overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.08),0 4px 12px rgba(0,0,0,.04);position:relative}
+  .card-img{position:relative;width:100%;aspect-ratio:1/.85;overflow:hidden;background:#f8fafc}
+  .card-img .product-img{width:100%;height:100%;object-fit:cover;display:block}
+  .card-img .emoji-area{width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:52px;background:linear-gradient(145deg,#fef7f0,#fff5f5)}
+  .badge-discount{position:absolute;top:8px;left:8px;z-index:2;background:linear-gradient(135deg,var(--red),var(--orange));color:#fff;font-size:12px;font-weight:800;padding:4px 9px;border-radius:8px;box-shadow:0 2px 6px rgba(220,38,38,.35);line-height:1}
+  .card-body{padding:10px 12px 14px}
+  .card-name{font-size:14px;font-weight:700;color:var(--text);line-height:1.35;margin-bottom:2px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .card-orig{font-size:12px;font-weight:500;color:var(--text-muted);text-decoration:line-through;margin-bottom:2px}
+  .card-price{display:flex;align-items:baseline;gap:1px;line-height:1}
+  .price-num{font-size:24px;font-weight:900;color:var(--red);letter-spacing:-.5px}
+  .price-won{font-size:13px;font-weight:700;color:var(--red);margin-left:1px}
+  .card-tag{display:inline-flex;align-items:center;margin-top:6px;padding:3px 8px;font-size:10px;font-weight:700;border-radius:6px;line-height:1.3}
+  .card-tag.red{background:#fef2f2;color:var(--red);border:1px solid #fecaca}
+  .card-tag.gold{background:#fffbeb;color:#b45309;border:1px solid #fde68a}
+  .card-tag.blue{background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe}
+  .footer{text-align:center;padding:28px 16px 36px;border-top:1px solid #e5e7eb;margin:8px 12px 0;color:#bbb;font-size:11px}
+  @media(max-width:360px){.hero-title{font-size:24px}.price-num{font-size:20px}.card-name{font-size:13px}}
+  @media(min-width:420px){.price-num{font-size:26px}}
   `)}
 <body>
 <div class="hero">
-  <div class="store">${escapeHtml(d.storeName)}</div>
-  <h1>${escapeHtml(d.title)}</h1>
-  ${d.period ? `<div class="period">${escapeHtml(d.period)}</div>` : ''}
+  <div class="hero-store">${escapeHtml(d.storeName)}</div>
+  <h1 class="hero-title">${escapeHtml(d.title)}</h1>
+  ${d.period ? `<div class="hero-period">${escapeHtml(d.period)}</div>` : ''}
+  <div class="hero-wave"></div>
 </div>
-<div class="content">${itemsHtml}</div>
+<nav class="cat-nav"><div class="cat-nav-inner">${catTabs}</div></nav>
+<div class="content">${sectionsHtml}</div>
 ${footer()}
 </body>
 </html>`;
