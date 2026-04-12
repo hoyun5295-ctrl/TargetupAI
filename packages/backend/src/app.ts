@@ -71,6 +71,10 @@ const app = express();
 app.set('trust proxy', true);
 const PORT = process.env.PORT || 3000;
 
+// ★ 전단AI 공개 페이지 — helmet(CSP) 전에 마운트 (인라인 스크립트 필요)
+app.use('/api/flyer/p', flyerPublicRoutes);
+app.use('/api/flyer/q', flyerCouponPublicRoutes);
+
 // 미들웨어
 app.use(helmet());
 app.use(cors());
@@ -154,8 +158,7 @@ app.use('/api/flyer/catalog-images', express.static(path.join(process.cwd(), 'up
 
 // 전단AI 기존 라우트 (전단지 CRUD + 공개 페이지)
 app.use('/api/flyer/flyers', flyerRoutes);
-app.use('/api/flyer/p', helmet({ contentSecurityPolicy: false }), flyerPublicRoutes);  // 공개 페이지 — CSP 해제 (인라인 스크립트 필요)
-app.use('/api/flyer/q', helmet({ contentSecurityPolicy: false }), flyerCouponPublicRoutes);  // QR 쿠폰 공개 페이지
+// ★ /api/flyer/p, /api/flyer/q는 helmet 전에 마운트됨 (상단 참조)
 
 // 404 처리
 app.use((req, res) => {
