@@ -10,6 +10,54 @@
  */
 
 import puppeteer, { Browser } from 'puppeteer';
+import fs from 'fs';
+import path from 'path';
+
+// ============================================================
+// ★ 로컬 이미지를 base64 data URL로 인라인 변환
+// puppeteer setContent에서 HTTP 요청 불가 → 파일 직접 읽어서 인라인
+// ============================================================
+
+const UPLOAD_BASE = path.resolve(process.cwd(), 'uploads');
+const PRODUCT_IMAGE_DIR = process.env.PRODUCT_IMAGE_PATH || path.resolve('./uploads/product-images');
+
+function inlineLocalImages(html: string): string {
+  return html.replace(/src="([^"]+)"/g, (match, src: string) => {
+    // 외부 URL(http)이나 data URL은 그대로
+    if (src.startsWith('http') || src.startsWith('data:')) return match;
+
+    let filePath: string | null = null;
+
+    // /api/flyer/catalog-images/{companyId}/{filename}
+    const catalogMatch = src.match(/\/api\/flyer\/catalog-images\/([^/]+)\/([^/]+)$/);
+    if (catalogMatch) {
+      filePath = path.join(UPLOAD_BASE, 'catalog-images', catalogMatch[1], catalogMatch[2]);
+    }
+
+    // /api/flyer/flyers/flyer-products/{companyId}/{filename}
+    const productMatch = src.match(/\/api\/flyer\/flyers\/flyer-products\/([^/]+)\/([^/]+)$/);
+    if (productMatch) {
+      filePath = path.join(UPLOAD_BASE, 'flyer-products', productMatch[1], productMatch[2]);
+    }
+
+    // /api/flyer/flyers/product-images/{filename} (Pixabay 기본 이미지)
+    const pixabayMatch = src.match(/\/api\/flyer\/flyers\/product-images\/([^/]+)$/);
+    if (pixabayMatch) {
+      filePath = path.join(PRODUCT_IMAGE_DIR, decodeURIComponent(pixabayMatch[1]));
+    }
+
+    if (!filePath || !fs.existsSync(filePath)) return match;
+
+    try {
+      const buf = fs.readFileSync(filePath);
+      const ext = path.extname(filePath).toLowerCase();
+      const mime = ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg';
+      return `src="data:${mime};base64,${buf.toString('base64')}"`;
+    } catch {
+      return match;
+    }
+  });
+}
 
 // ============================================================
 // 싱글톤 브라우저 관리
@@ -93,14 +141,9 @@ export async function generatePdfFromHtml(
     // 모바일 전단지 뷰포트 (480px 기준)
     await page.setViewport({ width: 480, height: 800 });
 
-    // ★ baseUrl 설정 — 상대경로 이미지(/api/flyer/...)를 절대URL로 해석
-    const serverBaseUrl = options.baseUrl || process.env.FLYER_BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
-
-    // HTML 내 상대경로를 절대경로로 변환 (src="/api/... → src="http://localhost:4000/api/...)
-    const resolvedHtml = html.replace(
-      /src="(\/api\/[^"]+)"/g,
-      `src="${serverBaseUrl}$1"`
-    );
+    // ★ 이미지를 base64 data URL로 인라인 변환
+    // puppeteer setContent에서 localhost HTTP 요청이 불안정 → 파일 직접 읽어서 인라인
+    const resolvedHtml = inlineLocalImages(html);
 
     const setContentOptions: any = { waitUntil: 'networkidle0', timeout: 30000 };
 
