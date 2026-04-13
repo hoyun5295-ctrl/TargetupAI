@@ -22,6 +22,23 @@ import { renderFlyerPage } from './short-urls';
 import { renderPricePop, renderMultiPop, renderPromoPop } from '../../utils/flyer/product/flyer-pop-templates';
 import { classifyProducts } from '../../utils/flyer/product/flyer-category-classifier';
 
+/**
+ * ★ 카탈로그에 저장된 이미지로 빈 imageUrl 채우기
+ * 사장님이 직접 올린/선택한 이미지만 사용. 외부 검색 안 함.
+ */
+async function fillFromCatalog(items: any[], companyId: string): Promise<void> {
+  for (const item of items) {
+    if (item.imageUrl || !item.name?.trim()) continue;
+    try {
+      const r = await query(
+        `SELECT image_url FROM flyer_catalog WHERE company_id = $1 AND product_name = $2 AND image_url IS NOT NULL AND image_url != '' ORDER BY usage_count DESC LIMIT 1`,
+        [companyId, item.name.trim()]
+      );
+      if (r.rows[0]?.image_url) item.imageUrl = r.rows[0].image_url;
+    } catch {}
+  }
+}
+
 const PRODUCT_IMAGE_DIR = process.env.PRODUCT_IMAGE_PATH || path.resolve('./uploads/product-images');
 const FLYER_PRODUCT_DIR = process.env.FLYER_PRODUCT_PATH || path.resolve('./uploads/flyer-products');
 
@@ -740,6 +757,9 @@ router.post('/pop-pdf', async (req: Request, res: Response) => {
       return res.status(400).json({ error: '상품 정보(name, salePrice)가 필요합니다.' });
     }
 
+    // ★ 카탈로그에 저장된 이미지 우선 매칭
+    await fillFromCatalog([item], companyId);
+
     const html = renderPricePop(item, { storeName, colorTheme });
     const pdfBuffer = await generatePdfFromHtml(html, { format: 'A4' });
 
@@ -768,6 +788,7 @@ router.post('/multi-pop', async (req: Request, res: Response) => {
     }
     const validSplits = [2, 4, 8].includes(splits) ? splits : 4;
 
+    await fillFromCatalog(items, companyId);
     const html = renderMultiPop(items, validSplits, { storeName, colorTheme });
     const pdfBuffer = await generatePdfFromHtml(html, { format: 'A4' });
 
@@ -835,6 +856,9 @@ router.post('/:id/pop-all', async (req: Request, res: Response) => {
       }
     }
     if (allItems.length === 0) return res.status(400).json({ error: '상품이 없습니다.' });
+
+    // ★ 카탈로그 저장 이미지 우선 매칭
+    await fillFromCatalog(allItems, companyId);
 
     const { colorTheme } = req.body;
     // 8개 이하면 다분할 POP 1장, 아니면 개별 POP 연결
