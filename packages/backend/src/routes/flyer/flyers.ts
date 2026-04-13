@@ -764,16 +764,10 @@ router.post('/pop-pdf', async (req: Request, res: Response) => {
 
     await fillMissingImages([item], companyId);
 
-    const html = renderPricePop(item, { storeName, colorTheme, popTemplate });
-    const hasImgTag = html.includes('<img ');
-    console.log(`[POP-DEBUG] HTML img 태그 존재: ${hasImgTag}`);
-    if (hasImgTag) {
-      const imgMatch = html.match(/src="([^"]+)"/);
-      console.log(`[POP-DEBUG] img src: ${imgMatch?.[1]?.slice(0, 100)}`);
-    }
-
     const paperSize = req.body.paperSize || 'A4';
     const landscape = req.body.landscape || false;
+
+    const html = renderPricePop(item, { storeName, colorTheme, popTemplate, paperSize, landscape });
     const pdfBuffer = await generatePdfFromHtml(html, { format: paperSize, landscape });
 
     const safeName = (item.name || 'pop').replace(/[^가-힣a-zA-Z0-9_-]/g, '_').slice(0, 30);
@@ -801,10 +795,11 @@ router.post('/multi-pop', async (req: Request, res: Response) => {
     }
     const validSplits = [2, 4, 8, 16, 21, 35].includes(splits) ? splits : 4;
 
-    await fillMissingImages(items, companyId);
-    const html = renderMultiPop(items, validSplits, { storeName, colorTheme });
     const paperSize = req.body.paperSize || 'A4';
     const landscape = req.body.landscape || false;
+
+    await fillMissingImages(items, companyId);
+    const html = renderMultiPop(items, validSplits, { storeName, colorTheme, paperSize, landscape });
     const pdfBuffer = await generatePdfFromHtml(html, { format: paperSize, landscape });
 
     res.setHeader('Content-Type', 'application/pdf');

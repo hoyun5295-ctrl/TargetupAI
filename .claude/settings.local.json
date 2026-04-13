@@ -150,7 +150,12 @@
       "Bash(find send/ product/ pos/ coupon/ billing/ analytics/ config/ -name \"*.ts\" -exec sed -i \"s|from '../../config/database'|from '../../../config/database'|g\" {} +)",
       "Bash(sed -i \"s|from '../normalize-phone'|from '../../normalize-phone'|g\" send/flyer-deduplicate.ts pos/flyer-pos-ingest.ts coupon/flyer-coupons.ts)",
       "Bash(sed -i \"s|from '../sms-queue'|from '../../sms-queue'|g\" send/flyer-sms-queue.ts)",
-      "Bash(sed -i \"s|from '../../utils/product-images'|from '../../../utils/product-images'|g\" product/flyer-templates.ts)"
+      "Bash(sed -i \"s|from '../../utils/product-images'|from '../../../utils/product-images'|g\" product/flyer-templates.ts)",
+      "Bash(sed -i '/^function renderHotPop/,/return `<!DOCTYPE/{s/const disc = calcDisc/const paper = getPaperSize\\(opts\\);\\\\n  const disc = calcDisc/;}'  flyer-pop-templates.ts)",
+      "Bash(sed -i '/^function renderClassicPop/,/return `<!DOCTYPE/{s/const disc = calcDisc/const paper = getPaperSize\\(opts\\);\\\\n  const disc = calcDisc/;}'  flyer-pop-templates.ts)",
+      "Bash(sed -i '/^function renderSimplePop/,/return `<!DOCTYPE/{s/const disc = calcDisc/const paper = getPaperSize\\(opts\\);\\\\n  const disc = calcDisc/;}'  flyer-pop-templates.ts)",
+      "Bash(sed -i '/^function renderDarkPop/,/return `<!DOCTYPE/{s/const disc = calcDisc/const paper = getPaperSize\\(opts\\);\\\\n  const disc = calcDisc/;}'  flyer-pop-templates.ts)",
+      "Bash(sed -i '/^function renderJumboPop/,/return `<!DOCTYPE/{s/const disc = calcDisc/const paper = getPaperSize\\(opts\\);\\\\n  const disc = calcDisc/;}'  flyer-pop-templates.ts)"
     ]
   }
 }

@@ -30,6 +30,8 @@ export interface PopOptions {
   storeAddress?: string;
   colorTheme?: 'red' | 'yellow' | 'green' | 'blue' | 'black';
   popTemplate?: PopTemplate;
+  paperSize?: string;
+  landscape?: boolean;
 }
 
 export type PopTemplate = 'hot' | 'classic' | 'simple' | 'dark' | 'jumbo';
@@ -63,14 +65,34 @@ function metaText(item: PopItem): string {
 }
 
 const FONTS = `<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700;800;900&display=swap" rel="stylesheet">`;
-const PAGE_CSS = `@page{size:A4 portrait;margin:0}@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}*{margin:0;padding:0;box-sizing:border-box}`;
-const BODY_BASE = `font-family:'Noto Sans KR',sans-serif;width:210mm;height:297mm;overflow:hidden;display:flex;flex-direction:column`;
+
+/** 용지 사이즈별 너비/높이 (mm) */
+const PAPER_SIZES: Record<string, { w: number; h: number }> = {
+  A4: { w: 210, h: 297 }, A3: { w: 297, h: 420 }, A2: { w: 420, h: 594 },
+  A1: { w: 594, h: 841 }, A0: { w: 841, h: 1189 },
+  price_card: { w: 90, h: 55 },
+};
+
+function getPaperSize(opts: PopOptions): { w: number; h: number } {
+  const base = PAPER_SIZES[opts.paperSize || 'A4'] || PAPER_SIZES.A4;
+  if (opts.landscape) return { w: base.h, h: base.w };
+  return base;
+}
+
+function pageCss(paper: { w: number; h: number }): string {
+  return `@page{size:${paper.w}mm ${paper.h}mm;margin:0}@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}*{margin:0;padding:0;box-sizing:border-box}`;
+}
+
+function bodyBase(paper: { w: number; h: number }): string {
+  return `font-family:'Noto Sans KR',sans-serif;width:${paper.w}mm;height:${paper.h}mm;overflow:hidden;display:flex;flex-direction:column`;
+}
 
 // ============================================================
 // ① HOT 프라이스 — 이미지 크게 + 하단에 상품명/가격
 // ============================================================
 
 function renderHotPop(item: PopItem, opts: PopOptions): string {
+  const paper = getPaperSize(opts);
   const disc = calcDisc(item.originalPrice, item.salePrice);
   const hasOrig = item.originalPrice > 0 && item.originalPrice !== item.salePrice;
   const saved = hasOrig ? item.originalPrice - item.salePrice : 0;
@@ -78,8 +100,8 @@ function renderHotPop(item: PopItem, opts: PopOptions): string {
   const hasImage = !!item.imageUrl;
 
   return `<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8">${FONTS}<style>
-${PAGE_CSS}
-body{${BODY_BASE};background:#fff}
+${pageCss(paper)}
+body{${bodyBase(paper)};background:#fff}
 .banner{background:linear-gradient(135deg,#1a1a1a,#333);padding:5mm 10mm;text-align:center}
 .banner h1{font-size:22pt;font-weight:900;color:#fff;letter-spacing:2px}
 .banner span{color:#dc2626;font-style:italic}
@@ -120,6 +142,7 @@ ${hasImage ? `<div class="img-zone"><img src="${esc(item.imageUrl!)}" alt="" />$
 // ============================================================
 
 function renderClassicPop(item: PopItem, opts: PopOptions): string {
+  const paper = getPaperSize(opts);
   const disc = calcDisc(item.originalPrice, item.salePrice);
   const hasOrig = item.originalPrice > 0 && item.originalPrice !== item.salePrice;
   const saved = hasOrig ? item.originalPrice - item.salePrice : 0;
@@ -127,8 +150,8 @@ function renderClassicPop(item: PopItem, opts: PopOptions): string {
   const hasImage = !!item.imageUrl;
 
   return `<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8">${FONTS}<style>
-${PAGE_CSS}
-body{${BODY_BASE};background:#fff}
+${pageCss(paper)}
+body{${bodyBase(paper)};background:#fff}
 .hdr{background:#dc2626;color:#fff;padding:4mm 10mm;display:flex;justify-content:space-between;align-items:center}
 .hdr b{font-size:16pt;font-weight:900}
 .hdr span{font-size:13pt;font-weight:900;background:rgba(255,255,255,.2);padding:2mm 6mm;border-radius:4mm}
@@ -164,6 +187,7 @@ ${hasImage ? `<div class="img-zone"><img src="${esc(item.imageUrl!)}" alt="" />$
 // ============================================================
 
 function renderSimplePop(item: PopItem, opts: PopOptions): string {
+  const paper = getPaperSize(opts);
   const disc = calcDisc(item.originalPrice, item.salePrice);
   const hasOrig = item.originalPrice > 0 && item.originalPrice !== item.salePrice;
   const saved = hasOrig ? item.originalPrice - item.salePrice : 0;
@@ -171,8 +195,8 @@ function renderSimplePop(item: PopItem, opts: PopOptions): string {
   const hasImage = !!item.imageUrl;
 
   return `<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8">${FONTS}<style>
-${PAGE_CSS}
-body{${BODY_BASE};background:#fff;padding:10mm}
+${pageCss(paper)}
+body{${bodyBase(paper)};background:#fff;padding:10mm}
 .card{flex:1;border:1px solid #e5e7eb;border-radius:6mm;overflow:hidden;display:flex;flex-direction:column}
 .img-zone{flex:0 0 auto;height:155mm;background:#fafafa;position:relative;overflow:hidden;display:flex;align-items:center;justify-content:center}
 .img-zone img{max-width:90%;max-height:90%;object-fit:contain}
@@ -216,6 +240,7 @@ body{${BODY_BASE};background:#fff;padding:10mm}
 // ============================================================
 
 function renderDarkPop(item: PopItem, opts: PopOptions): string {
+  const paper = getPaperSize(opts);
   const disc = calcDisc(item.originalPrice, item.salePrice);
   const hasOrig = item.originalPrice > 0 && item.originalPrice !== item.salePrice;
   const saved = hasOrig ? item.originalPrice - item.salePrice : 0;
@@ -223,8 +248,8 @@ function renderDarkPop(item: PopItem, opts: PopOptions): string {
   const hasImage = !!item.imageUrl;
 
   return `<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8">${FONTS}<style>
-${PAGE_CSS}
-body{${BODY_BASE};background:#0a0a0a}
+${pageCss(paper)}
+body{${bodyBase(paper)};background:#0a0a0a}
 .hdr{background:linear-gradient(135deg,#1a1a1a,#111);padding:5mm 12mm;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #333}
 .hdr b{font-size:14pt;font-weight:900;color:#d4a853;letter-spacing:1px}
 .hdr span{font-size:11pt;font-weight:800;color:#d4a853;border:1px solid #d4a85350;padding:1.5mm 5mm;border-radius:3mm}
@@ -260,14 +285,15 @@ ${hasImage ? `<div class="img-zone"><img src="${esc(item.imageUrl!)}" alt="" />$
 // ============================================================
 
 function renderJumboPop(item: PopItem, opts: PopOptions): string {
+  const paper = getPaperSize(opts);
   const disc = calcDisc(item.originalPrice, item.salePrice);
   const hasOrig = item.originalPrice > 0 && item.originalPrice !== item.salePrice;
   const meta = metaText(item);
   const hasImage = !!item.imageUrl;
 
   return `<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8">${FONTS}<style>
-${PAGE_CSS}
-body{${BODY_BASE};background:#dc2626}
+${pageCss(paper)}
+body{${bodyBase(paper)};background:#dc2626}
 .top{padding:6mm 12mm;display:flex;justify-content:space-between;align-items:flex-start}
 .top-left .name{font-size:28pt;font-weight:900;color:#fff;line-height:1.1}
 .top-left .meta{font-size:10pt;color:rgba(255,255,255,.6);margin-top:1mm}
@@ -322,16 +348,20 @@ const SPLIT_LAYOUTS: Record<number, { cols: number; rows: number }> = {
 };
 
 export function renderMultiPop(items: PopItem[], splits: number, options: PopOptions = {}): string {
+  const paper = getPaperSize(options);
   const layout = SPLIT_LAYOUTS[splits] || { cols: Math.ceil(Math.sqrt(splits)), rows: Math.ceil(splits / Math.ceil(Math.sqrt(splits))) };
   const { cols, rows } = layout;
-  const cellW = `${100 / cols}%`;
-  const cellH = `${100 / rows}%`;
+  // ★ mm 고정 단위로 정확한 셀 크기 계산 (용지별 동적)
+  const hdrH = 8;
+  const gridH = paper.h - hdrH;
+  const cellWmm = Math.floor(paper.w / cols);
+  const cellHmm = Math.floor(gridH / rows);
   const isSmall = splits >= 16;
   const isTiny = splits >= 21;
-  const pSize = isTiny ? '14pt' : isSmall ? '18pt' : splits <= 2 ? '48pt' : splits <= 4 ? '36pt' : '24pt';
-  const nSize = isTiny ? '7pt' : isSmall ? '8pt' : splits <= 2 ? '16pt' : splits <= 4 ? '13pt' : '10pt';
-  const imgH = isTiny ? '30%' : isSmall ? '32%' : splits <= 2 ? '45%' : splits <= 4 ? '40%' : '35%';
-  const dSize = isTiny ? '6pt' : isSmall ? '8pt' : splits <= 4 ? '16pt' : '12pt';
+  const pSize = isTiny ? '12pt' : isSmall ? '16pt' : splits <= 2 ? '48pt' : splits <= 4 ? '36pt' : '22pt';
+  const nSize = isTiny ? '6pt' : isSmall ? '7pt' : splits <= 2 ? '16pt' : splits <= 4 ? '13pt' : '9pt';
+  const imgH = isTiny ? `${Math.floor(cellHmm * 0.3)}mm` : isSmall ? `${Math.floor(cellHmm * 0.35)}mm` : `${Math.floor(cellHmm * 0.4)}mm`;
+  const dSize = isTiny ? '5pt' : isSmall ? '7pt' : splits <= 4 ? '14pt' : '10pt';
 
   const cells = items.slice(0, splits).map(item => {
     const disc = calcDisc(item.originalPrice, item.salePrice);
@@ -347,12 +377,12 @@ export function renderMultiPop(items: PopItem[], splits: number, options: PopOpt
   }).join('');
 
   return `<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8">${FONTS}<style>
-${PAGE_CSS}
-body{font-family:'Noto Sans KR',sans-serif;width:210mm;height:297mm;overflow:hidden;display:flex;flex-direction:column}
-.hdr{background:#dc2626;color:#fff;padding:3mm 8mm;font-size:13pt;font-weight:900}
-.grid{display:flex;flex-wrap:wrap;flex:1}
-.cell{width:${cellW};height:${cellH};border:1px solid #eee;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:2mm;position:relative;background:#fff}
-.cimg{width:80%;height:${imgH};overflow:hidden;display:flex;align-items:center;justify-content:center;margin-bottom:1mm}
+${pageCss(paper)}
+body{font-family:'Noto Sans KR',sans-serif;width:${paper.w}mm;height:${paper.h}mm;overflow:hidden;display:flex;flex-direction:column}
+.hdr{background:#dc2626;color:#fff;padding:2mm 6mm;font-size:${isTiny ? '8pt' : '12pt'};font-weight:900;height:${hdrH}mm;display:flex;align-items:center}
+.grid{display:flex;flex-wrap:wrap;width:${paper.w}mm;height:${gridH}mm;overflow:hidden}
+.cell{width:${cellWmm}mm;height:${cellHmm}mm;border:0.5px solid #ddd;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:${isTiny ? '0.5mm' : '1.5mm'};position:relative;background:#fff;overflow:hidden}
+.cimg{width:${isTiny ? '70%' : '80%'};height:${imgH};overflow:hidden;display:flex;align-items:center;justify-content:center;margin-bottom:${isTiny ? '0' : '1mm'}}
 .cimg img{max-width:100%;max-height:100%;object-fit:contain}
 .disc{position:absolute;top:2mm;right:2mm;background:#dc2626;color:#fff;padding:1mm 3mm;border-radius:3mm;font-size:${dSize};font-weight:900}
 .cname{font-size:${nSize};font-weight:800;color:#1a1a1a;text-align:center;line-height:1.2;margin-bottom:1mm}
@@ -371,6 +401,7 @@ body{font-family:'Noto Sans KR',sans-serif;width:210mm;height:297mm;overflow:hid
 // ============================================================
 
 export function renderPromoPop(category: string, items: PopItem[], options: PopOptions = {}): string {
+  const paper = getPaperSize(options);
   const rows = items.slice(0, 12).map((item, i) => {
     const disc = calcDisc(item.originalPrice, item.salePrice);
     return `<tr style="background:${i % 2 === 0 ? '#fafafa' : '#fff'}">
@@ -382,8 +413,8 @@ export function renderPromoPop(category: string, items: PopItem[], options: PopO
   }).join('');
 
   return `<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8">${FONTS}<style>
-${PAGE_CSS}
-body{font-family:'Noto Sans KR',sans-serif;width:210mm;height:297mm;overflow:hidden;display:flex;flex-direction:column}
+${pageCss(paper)}
+body{font-family:'Noto Sans KR',sans-serif;width:${paper.w}mm;height:${paper.h}mm;overflow:hidden;display:flex;flex-direction:column}
 .hdr{background:#dc2626;color:#fff;padding:10mm 12mm;text-align:center}
 .hdr h1{font-size:40pt;font-weight:900;letter-spacing:2px}
 .hdr p{font-size:13pt;font-weight:600;margin-top:2mm;opacity:.8}

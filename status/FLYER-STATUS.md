@@ -103,32 +103,67 @@
 
 ---
 
-### 🎯 다음 세션 CURRENT_TASK (D118~) — 템플리 압도 완성
+### 🎯 D118 — 전단AI 고도화 + 컨트롤타워 도메인 분리 + POP 독립 메뉴 (2026-04-13) ✅ 배포완료
 
-> **12건 작업으로 템플리 대비 모든 면에서 월등한 수준 달성.**
+**A. 신규 기능 12건 (전부 구현, 배포됨)**
+- [x] 다분할 POP — renderMultiPop (2/4/8/16/21/35분할 동적 레이아웃)
+- [x] 전단→POP 일괄 생성 — POST /:id/pop-all (8개 이하 다분할, 초과 시 페이지 분리)
+- [x] 홍보POP (코너 안내판) — renderPromoPop 카테고리별 헤더+상품 리스트형
+- [x] 전단→SMS 원클릭 — 발행 후 "SMS발송" 버튼 (SendPage 연결)
+- [x] 드래그로 상품 순서 변경 — HTML5 DnD + 카테고리 간 이동
+- [x] 상품 복사 (기존→새 전단) — POST /:id/copy + FlyerPage "복사" 버튼
+- [x] 발송 후 데이터 자동 파기 — config/flyer-settings.ts (캠페인별+회사별)
+- [x] AI 문구 배치 생성 — POST /generate-batch-copy + "AI 일괄문구" 버튼
+- [x] POS 연동 대시보드 — FlyerAdminDashboard POS Agent 탭 (상태/싱크/하트비트)
+- [x] POS→전단 자동 추천 — getTopSellingProducts + "POS추천" 버튼
+- [x] QR 쿠폰 통계 대시보드 — getCouponDashboard + 7일 추이 바차트
+- [x] 네이버 이미지 품질 개선 — 쇼핑API 병행검색 + noimage 필터
 
-**POP 강화 (3건)**
-- [ ] 다분할 POP — A4에 2/4/8분할 레이아웃. renderMultiPop 함수
-- [ ] 전단→POP 일괄 생성 — 전단 전체 상품을 한번에 POP PDF. POST /:id/pop-all
-- [ ] 홍보POP (코너 안내판) — 카테고리별 헤더+상품 리스트형
+**B. 컨트롤타워 도메인 분리 (21개 파일 → 7개 도메인)**
+- [x] send/ — 발송 도메인 (CT-F01~F08, 7파일)
+- [x] product/ — 상품/전단 도메인 (CT-F11,F14,F17 + 보조, 7파일)
+- [x] pos/ — POS 도메인 (CT-F12,F16, 2파일)
+- [x] coupon/ — 쿠폰 도메인 (CT-F15, 1파일)
+- [x] billing/ — 과금 도메인 (CT-F03, 1파일)
+- [x] analytics/ — 분석 도메인 (CT-F09,F10, 2파일)
+- [x] config/ — 설정 도메인 (CT-F13 + flyer-settings.ts, 2파일)
+- [x] 라우트 인라인 query → CT 추출 (campaigns purge → config/, coupons dashboard → coupon/)
 
-**사용 편의성 (5건)**
-- [ ] 전단→SMS 원클릭 — 발행 완료 후 바로 "문자 발송" 버튼
-- [ ] 드래그로 상품 순서 변경 — FlyerPage drag handle
-- [ ] 상품 복사 (기존 전단→새 전단) — 전단 목록 "복사" 버튼
-- [ ] 발송 후 데이터 자동 파기 옵션 — N일 후 고객 데이터 자동 삭제
-- [ ] AI 문구 배치 생성 — 전체 상품 일괄 AI 문구 생성
+**C. POP 독립 메뉴 + 5종 템플릿 + 다양한 옵션**
+- [x] PopPage.tsx — 독립 POP 제작 페이지 (전단제작 수준 UX)
+- [x] POP 5종 디자인: HOT프라이스 / 클래식마트 / 심플화이트 / 다크프리미엄 / 대형가격
+- [x] 용지 6종: A4 / A3 / A2 / A1 / A0 / 프라이스카드(90×55mm)
+- [x] 분할 7종: 1장 / 2 / 4 / 8 / 16(4×4) / 21(7×3) / 35(7×5)
+- [x] 가로/세로 방향 선택
+- [x] 전단에서 상품 불러오기 (좌측 사이드바)
+- [x] 직접 입력 + CSV 업로드
+- [x] 이미지 업로드 / 네이버 검색 / 카탈로그 자동 매칭
+- [x] 스타일 복사 / 일괄 변경 (뱃지/원산지/할인율)
 
-**차별점 강화 (4건)**
-- [ ] POS 연동 대시보드 — 슈퍼관리자에 매장별 Agent 상태 모니터링
-- [ ] POS→전단 자동 추천 — 판매 데이터 기반 "잘 팔리는 상품" 추천
-- [ ] QR 쿠폰 사용 통계 대시보드 — 발급/사용/전환율 차트
-- [ ] 네이버 이미지 품질 개선 — 쇼핑 API 병행 + 크기/품질 필터링
+**D. PDF 이미지 렌더링 수정**
+- [x] puppeteer base64 인라인 변환 — 로컬 이미지를 data URL로 직접 삽입
+- [x] 카탈로그/Pixabay 이미지 자동 매칭 (fillMissingImages + resolveProductImageUrl)
+- [x] catalog-images / flyer-products / product-images 3개 경로 전부 지원
+
+**E. 템플릿 버그 수정**
+- [x] 미리보기 템플릿 변경 안 바뀌는 버그 — iframe → 실시간 렌더러로 교체
+- [x] Magazine 엔진 이미지 높이 불안정 — min-height + align-self:stretch
+- [x] Editorial 오버레이 z-index 누락 — z-index:2 추가
+
+**F. POP 고도화 (세션 후반)**
+- [x] POP 5종 디자인 시스템 — HOT프라이스/클래식마트/심플화이트/다크프리미엄/대형가격
+- [x] 용지 사이즈 동적 CSS — A0~A4 + 프라이스카드(90×55mm), mm 단위 정확 계산
+- [x] 분할 7종 (1/2/4/8/16/21/35) — SPLIT_LAYOUTS 동적 레이아웃 + 셀 mm 고정
+- [x] 가로/세로 방향 — getPaperSize()에서 landscape swap + puppeteer+HTML 양쪽 반영
+- [x] POP 이미지 크게 (A4 60%+) — 여백 최소화, 이미지 중심 레이아웃
+- [x] 스타일 복사/일괄 변경 — 뱃지/원산지/할인율 일괄 적용
+
+---
+
+### 🎯 다음 세션 CURRENT_TASK (D119~)
 
 **미완료 (이전 세션):**
 - [ ] 상품 이미지 DB 구축 — 마트 주요 상품 500개 누끼 이미지 수집
-- [ ] A4/전단지 사이즈 옵션 (210x297mm, 190x260mm)
-- [ ] FlyerPage에 "PDF 다운로드" 버튼 추가
 - [ ] 인쇄용 고해상도 이미지 처리 (300dpi)
 - [ ] QR 쿠폰이 있는 전단은 PDF에도 QR 포함
 
@@ -207,50 +242,54 @@
 
 ---
 
-## 5) 파일 구조 + 컨트롤타워
+## 5) 파일 구조 + 컨트롤타워 (D118 도메인 분리)
 
 ```
 packages/backend/src/
 ├── middlewares/flyer-auth.ts, super-service-guard.ts
 ├── routes/flyer/ (auth, companies, customers, campaigns, unsubscribes, balance,
 │                   stats, catalog, pos, address-books, sender-registration,
-│                   flyers, short-urls, business-types)
+│                   flyers, short-urls, business-types, coupons)
 ├── routes/admin/ (switch-service, flyer-admin)
-└── utils/flyer/ (CT-F01~F14 + index.ts)
-    ├── flyer-sms-queue.ts         (CT-F01) SMS 큐
-    ├── flyer-unsubscribe-helper.ts(CT-F02) 수신거부
-    ├── flyer-billing.ts           (CT-F03) 과금 — canFlyerStoreSend + deductFlyerPrepaid + refundFlyerPrepaid
-    ├── flyer-customer-filter.ts   (CT-F04) 고객 필터
-    ├── flyer-message.ts           (CT-F05) 메시지 치환 + 광고
-    ├── flyer-callback-filter.ts   (CT-F06) 회신번호
-    ├── flyer-deduplicate.ts       (CT-F07) 중복제거
-    ├── flyer-send.ts              (CT-F08) ★ 발송 오케스트레이터 (유일한 진입점)
-    ├── flyer-stats.ts             (CT-F09) 통계
-    ├── flyer-rfm.ts               (CT-F10) RFM (Phase B 스켈레톤)
-    ├── flyer-catalog.ts           (CT-F11) 카탈로그
-    ├── flyer-pos-ingest.ts        (CT-F12) POS Agent (Phase B 스켈레톤)
-    ├── flyer-business-types.ts    (CT-F13) ★ D113 업종 레지스트리 + TEMPLATE_REGISTRY
-    ├── flyer-templates.ts         (CT-F14) ★ D113 템플릿 렌더링 엔진 (10종)
-    ├── flyer-coupons.ts           (CT-F15) ★ D115 QR 쿠폰 (캠페인 CRUD + claim + redeem + QR 생성)
-    ├── flyer-pos-ai.ts            (CT-F16) ★ D115 POS AI 스키마 분석 (Claude API 자동 매핑)
-    └── index.ts
-
-packages/pos-agent/src/              ← ★ D115 신규 패키지
-├── index.ts                         — 메인 엔트리 (등록→DB연결→AI분석→스케줄러)
-├── config.ts                        — 설정 관리 (agent-config.json)
-├── logger.ts                        — 파일 로깅
-├── server-client.ts                 — 서버 통신 (register/analyze/push/heartbeat)
-├── db-connector.ts                  — MS-SQL 접속 (tedious)
-├── schema-reader.ts                 — INFORMATION_SCHEMA 읽기 + 샘플 수집
-├── data-extractor.ts                — AI 매핑 기반 데이터 추출
-└── scheduler.ts                     — 주기적 작업 (node-cron)
+└── utils/flyer/
+    ├── index.ts                    ← 도메인별 re-export (외부 import 경로 변경 없음)
+    ├── send/                       ★ 발송 도메인
+    │   ├── flyer-send.ts           (CT-F08) 오케스트레이터 (유일한 진입점)
+    │   ├── flyer-sms-queue.ts      (CT-F01) SMS 큐
+    │   ├── flyer-message.ts        (CT-F05) 메시지 치환 + 광고
+    │   ├── flyer-customer-filter.ts(CT-F04) 고객 필터
+    │   ├── flyer-callback-filter.ts(CT-F06) 회신번호
+    │   ├── flyer-deduplicate.ts    (CT-F07) 중복제거
+    │   └── flyer-unsubscribe-helper.ts (CT-F02) 수신거부
+    ├── product/                    ★ 상품/전단 도메인
+    │   ├── flyer-catalog.ts        (CT-F11) 카탈로그
+    │   ├── flyer-templates.ts      (CT-F14) 템플릿 렌더링 (8엔진 21테마)
+    │   ├── flyer-pop-templates.ts  POP 5종 (hot/classic/simple/dark/jumbo) + 분할 + 홍보
+    │   ├── flyer-pdf.ts            PDF 생성 (A0~A4 + 프라이스카드 + base64 이미지 인라인)
+    │   ├── flyer-ai-copy.ts        AI 문구 (단건+배치)
+    │   ├── flyer-naver-search.ts   (CT-F17) 네이버 쇼핑+이미지 병행 검색
+    │   └── flyer-category-classifier.ts 카테고리 자동 분류
+    ├── pos/                        ★ POS 도메인
+    │   ├── flyer-pos-ingest.ts     (CT-F12) 데이터 수신 + 인기상품 추천
+    │   └── flyer-pos-ai.ts         (CT-F16) AI 스키마 분석
+    ├── coupon/                     ★ 쿠폰 도메인
+    │   └── flyer-coupons.ts        (CT-F15) QR 쿠폰 + 대시보드 통계
+    ├── billing/                    ★ 과금 도메인
+    │   └── flyer-billing.ts        (CT-F03) 차감/환불/잔액
+    ├── analytics/                  ★ 분석 도메인
+    │   ├── flyer-stats.ts          (CT-F09) 발송 통계
+    │   └── flyer-rfm.ts            (CT-F10) RFM (Phase B)
+    └── config/                     ★ 설정 도메인
+        ├── flyer-business-types.ts (CT-F13) 업종 레지스트리
+        └── flyer-settings.ts       자동 파기 설정
 
 packages/flyer-frontend/src/pages/
-├── LoginPage.tsx, FlyerPage.tsx, SendPage.tsx, ResultsPage.tsx
-├── BalancePage.tsx, UnsubscribesPage.tsx, SettingsPage.tsx, CustomerPage.tsx
+├── LoginPage.tsx, FlyerPage.tsx, PopPage.tsx, SendPage.tsx, ResultsPage.tsx
+├── BalancePage.tsx, UnsubscribesPage.tsx, SettingsPage.tsx
+├── CustomerPage.tsx, CatalogPage.tsx, CouponPage.tsx
 
 packages/frontend/src/pages/
-└── FlyerAdminDashboard.tsx (슈퍼관리자 — 총판/매장 관리)
+└── FlyerAdminDashboard.tsx (슈퍼관리자 — 총판/매장 관리 + POS Agent 모니터링)
 ```
 
 ---
