@@ -1,0 +1,19 @@
+{
+  "serverUrl": "https://hanjul-flyer.kr",
+  "agentKey": "",
+  "db": {
+    "type": "mssql",
+    "host": "localhost",
+    "port": 1433,
+    "database": "",
+    "username": "sa",
+    "password": ""
+  },
+  "sync": {
+    "salesIntervalMinutes": 5,
+    "membersIntervalMinutes": 30,
+    "inventoryIntervalMinutes": 60,
+    "heartbeatIntervalSeconds": 60,
+    "batchSize": 500
+  }
+}

@@ -15,13 +15,15 @@ export interface AgentConfig {
 
   // POS DB 연결
   db: {
-    type: 'mssql' | 'mysql' | 'firebird';
+    type: 'mssql' | 'mysql' | 'sqlite';
     host: string;
     port: number;
     database: string;
     username: string;
     password: string;
     charset?: string;
+    /** SQLite 전용: DB 파일 경로 */
+    filePath?: string;
   };
 
   // 싱크 설정 (서버에서 동적 업데이트)

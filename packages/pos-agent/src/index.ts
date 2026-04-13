@@ -16,6 +16,7 @@ import { registerAgent, requestSchemaAnalysis, fetchConfig as fetchServerConfig 
 import { connect, disconnect, isConnected } from './db-connector';
 import { readSchema, collectSamples } from './schema-reader';
 import { startScheduler, stopScheduler, setSchemaMapping } from './scheduler';
+import { needsSetup, runSetupWizard } from './setup-wizard';
 
 async function main() {
   logger.info('=========================================');
@@ -23,10 +24,21 @@ async function main() {
   logger.info(`호스트: ${os.hostname()}`);
   logger.info('=========================================');
 
+  // 0. 설치 마법사 (첫 실행 또는 --setup 옵션)
+  const forceSetup = process.argv.includes('--setup');
+  if (forceSetup || needsSetup()) {
+    logger.info('설치 마법사를 시작합니다...');
+    const setupOk = await runSetupWizard();
+    if (!setupOk) {
+      logger.error('설치 마법사가 완료되지 않았습니다.');
+      process.exit(1);
+    }
+  }
+
   // 1. 설정 로드
   const config = loadConfig();
   if (!config.agentKey) {
-    logger.error('agent_key가 설정되지 않았습니다. agent-config.json에 agentKey를 입력하세요.');
+    logger.error('agent_key가 설정되지 않았습니다. --setup 옵션으로 다시 실행하세요.');
     process.exit(1);
   }
 

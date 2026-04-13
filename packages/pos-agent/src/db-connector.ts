@@ -1,20 +1,64 @@
 /**
- * POS DB 커넥터 — MS-SQL (tedious) 우선
+ * POS DB 커넥터 — MSSQL / MySQL / SQLite 3종 지원
  *
  * POS 매장 로컬 DB에 접속하여 데이터를 읽는다.
  * ⚠️ SELECT 권한만 사용 — INSERT/UPDATE/DELETE 절대 금지.
+ *
+ * 재연결: 연결 끊김 시 exponential backoff로 최대 5회 재시도.
  */
 
-import { Connection, Request as TediousRequest, ColumnValue } from 'tedious';
 import { getConfig } from './config';
 import { logger } from './logger';
 
-let connection: Connection | null = null;
+// ============================================================
+// 드라이버 타입 (동적 import)
+// ============================================================
 
-/** MS-SQL 연결 */
+let mssqlConnection: any = null;
+let mysqlConnection: any = null;
+let sqliteDb: any = null;
+
+const MAX_RETRY = 5;
+const RETRY_BASE_MS = 2000;
+
+// ============================================================
+// 연결
+// ============================================================
+
 export async function connect(): Promise<boolean> {
-  const config = getConfig();
-  const { host, port, database, username, password } = config.db;
+  const { type } = getConfig().db;
+
+  for (let attempt = 1; attempt <= MAX_RETRY; attempt++) {
+    try {
+      let ok = false;
+      if (type === 'mssql') ok = await connectMssql();
+      else if (type === 'mysql') ok = await connectMysql();
+      else if (type === 'sqlite') ok = connectSqlite();
+      else { logger.error(`지원하지 않는 DB 타입: ${type}`); return false; }
+
+      if (ok) return true;
+    } catch (err: any) {
+      logger.warn(`DB 연결 시도 ${attempt}/${MAX_RETRY} 실패: ${err.message}`);
+    }
+
+    if (attempt < MAX_RETRY) {
+      const delay = RETRY_BASE_MS * Math.pow(2, attempt - 1);
+      logger.info(`${delay}ms 후 재시도...`);
+      await sleep(delay);
+    }
+  }
+
+  logger.error(`DB 연결 ${MAX_RETRY}회 시도 실패`);
+  return false;
+}
+
+// ============================================================
+// MSSQL (tedious)
+// ============================================================
+
+async function connectMssql(): Promise<boolean> {
+  const { Connection } = require('tedious');
+  const { host, port, database, username, password } = getConfig().db;
 
   return new Promise((resolve) => {
     const conn = new Connection({
@@ -26,7 +70,7 @@ export async function connect(): Promise<boolean> {
       options: {
         database,
         port,
-        encrypt: false,          // 로컬 POS는 대부분 암호화 미사용
+        encrypt: false,
         trustServerCertificate: true,
         rowCollectionOnRequestCompletion: true,
         connectTimeout: 10000,
@@ -34,96 +78,192 @@ export async function connect(): Promise<boolean> {
       },
     });
 
-    conn.on('connect', (err) => {
+    conn.on('connect', (err: any) => {
       if (err) {
-        logger.error('MS-SQL 연결 실패:', err.message);
+        logger.error('MSSQL 연결 실패:', err.message);
         resolve(false);
       } else {
-        connection = conn;
-        logger.info(`MS-SQL 연결 성공: ${host}:${port}/${database}`);
+        mssqlConnection = conn;
+        logger.info(`MSSQL 연결 성공: ${host}:${port}/${database}`);
         resolve(true);
       }
     });
 
-    conn.on('error', (err) => {
-      logger.error('MS-SQL 연결 에러:', err.message);
-      connection = null;
+    conn.on('error', (err: any) => {
+      logger.error('MSSQL 연결 에러:', err.message);
+      mssqlConnection = null;
     });
 
     conn.connect();
   });
 }
 
-/** 연결 해제 */
+// ============================================================
+// MySQL (mysql2)
+// ============================================================
+
+async function connectMysql(): Promise<boolean> {
+  try {
+    const mysql = require('mysql2/promise');
+    const { host, port, database, username, password, charset } = getConfig().db;
+
+    const conn = await mysql.createConnection({
+      host, port, database,
+      user: username,
+      password,
+      charset: charset || 'utf8mb4',
+      connectTimeout: 10000,
+    });
+
+    mysqlConnection = conn;
+    logger.info(`MySQL 연결 성공: ${host}:${port}/${database}`);
+    return true;
+  } catch (err: any) {
+    logger.error('MySQL 연결 실패:', err.message);
+    return false;
+  }
+}
+
+// ============================================================
+// SQLite (better-sqlite3)
+// ============================================================
+
+function connectSqlite(): boolean {
+  try {
+    const Database = require('better-sqlite3');
+    const { filePath } = getConfig().db;
+
+    if (!filePath) {
+      logger.error('SQLite: filePath가 설정되지 않았습니다.');
+      return false;
+    }
+
+    sqliteDb = new Database(filePath, { readonly: true });
+    logger.info(`SQLite 연결 성공: ${filePath}`);
+    return true;
+  } catch (err: any) {
+    logger.error('SQLite 연결 실패:', err.message);
+    return false;
+  }
+}
+
+// ============================================================
+// 연결 해제
+// ============================================================
+
 export function disconnect(): void {
-  if (connection) {
-    connection.close();
-    connection = null;
-    logger.info('MS-SQL 연결 해제');
+  const { type } = getConfig().db;
+
+  if (type === 'mssql' && mssqlConnection) {
+    mssqlConnection.close();
+    mssqlConnection = null;
+  } else if (type === 'mysql' && mysqlConnection) {
+    mysqlConnection.end().catch(() => {});
+    mysqlConnection = null;
+  } else if (type === 'sqlite' && sqliteDb) {
+    sqliteDb.close();
+    sqliteDb = null;
   }
+
+  logger.info('DB 연결 해제');
 }
 
-/** 연결 상태 확인 */
 export function isConnected(): boolean {
-  return connection !== null;
+  const { type } = getConfig().db;
+  if (type === 'mssql') return mssqlConnection !== null;
+  if (type === 'mysql') return mysqlConnection !== null;
+  if (type === 'sqlite') return sqliteDb !== null;
+  return false;
 }
 
-/** SQL 쿼리 실행 (SELECT 전용) */
+// ============================================================
+// 쿼리 실행 (SELECT 전용)
+// ============================================================
+
 export async function executeQuery(sql: string, params?: any[]): Promise<any[]> {
-  if (!connection) {
-    throw new Error('DB 미연결 — connect() 먼저 실행');
+  const { type } = getConfig().db;
+
+  // 연결 끊김 시 자동 재연결
+  if (!isConnected()) {
+    logger.warn('DB 연결 끊김 — 재연결 시도');
+    const reconnected = await connect();
+    if (!reconnected) throw new Error('DB 재연결 실패');
   }
+
+  if (type === 'mssql') return executeMssql(sql, params);
+  if (type === 'mysql') return executeMysql(sql, params);
+  if (type === 'sqlite') return executeSqlite(sql, params);
+  throw new Error(`지원하지 않는 DB 타입: ${type}`);
+}
+
+// ── MSSQL 쿼리
+async function executeMssql(sql: string, params?: any[]): Promise<any[]> {
+  const { Request, TYPES } = require('tedious');
 
   return new Promise((resolve, reject) => {
     const rows: any[] = [];
-
-    const request = new TediousRequest(sql, (err, rowCount, resultRows) => {
-      if (err) {
-        reject(err);
-        return;
-      }
-
-      // tedious의 row 형식을 평범한 객체로 변환
+    const request = new Request(sql, (err: any, _rowCount: number, resultRows: any[]) => {
+      if (err) return reject(err);
       if (resultRows) {
         for (const row of resultRows) {
           const obj: Record<string, any> = {};
-          for (const col of row as ColumnValue[]) {
+          for (const col of row) {
             obj[col.metadata.colName] = col.value;
           }
           rows.push(obj);
         }
       }
-
       resolve(rows);
     });
 
-    // 파라미터 바인딩 (선택)
     if (params) {
       params.forEach((p, i) => {
-        const TYPES = require('tedious').TYPES;
-        if (typeof p === 'string') {
-          request.addParameter(`p${i}`, TYPES.NVarChar, p);
-        } else if (typeof p === 'number') {
-          request.addParameter(`p${i}`, TYPES.Int, p);
-        } else if (p instanceof Date) {
-          request.addParameter(`p${i}`, TYPES.DateTime, p);
-        }
+        if (typeof p === 'string') request.addParameter(`p${i}`, TYPES.NVarChar, p);
+        else if (typeof p === 'number') request.addParameter(`p${i}`, TYPES.Float, p);
+        else if (p instanceof Date) request.addParameter(`p${i}`, TYPES.DateTime, p);
       });
     }
 
-    connection!.execSql(request);
+    mssqlConnection.execSql(request);
   });
 }
 
-/** 연결 테스트 */
+// ── MySQL 쿼리
+async function executeMysql(sql: string, params?: any[]): Promise<any[]> {
+  const [rows] = await mysqlConnection.execute(sql, params || []);
+  return rows as any[];
+}
+
+// ── SQLite 쿼리
+function executeSqlite(sql: string, params?: any[]): any[] {
+  const stmt = sqliteDb.prepare(sql);
+  return params ? stmt.all(...params) : stmt.all();
+}
+
+// ============================================================
+// 연결 테스트
+// ============================================================
+
 export async function testConnection(): Promise<{ ok: boolean; error?: string }> {
   try {
     const connected = await connect();
     if (!connected) return { ok: false, error: 'Connection failed' };
 
-    await executeQuery('SELECT 1 AS test');
+    const { type } = getConfig().db;
+    if (type === 'mssql') await executeQuery('SELECT 1 AS test');
+    else if (type === 'mysql') await executeQuery('SELECT 1 AS test');
+    else if (type === 'sqlite') executeQuery('SELECT 1 AS test');
+
     return { ok: true };
   } catch (err: any) {
     return { ok: false, error: err.message };
   }
+}
+
+// ============================================================
+// 유틸
+// ============================================================
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }

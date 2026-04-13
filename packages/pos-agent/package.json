@@ -3,23 +3,32 @@
   "version": "1.0.0",
   "description": "한줄전단 POS Agent — 매장 POS DB에서 고객/매출/재고 자동 수집",
   "main": "dist/index.js",
+  "bin": "dist/index.js",
   "scripts": {
     "dev": "ts-node src/index.ts",
     "build": "tsc",
-    "build:exe": "tsc && pkg dist/index.js --target node18-win-x64 --output build/hanjul-pos-agent.exe",
+    "build:exe": "tsc && pkg . --target node18-win-x64 --output build/hanjul-pos-agent.exe",
+    "postbuild:exe": "node scripts/copy-native.js",
     "start": "node dist/index.js"
   },
   "dependencies": {
-    "tedious": "^18.6.1",
     "better-sqlite3": "^11.7.0",
+    "mysql2": "^3.16.2",
     "node-cron": "^3.0.3",
-    "node-fetch": "^2.7.0"
+    "node-fetch": "^2.7.0",
+    "tedious": "^18.6.1"
+  },
+  "pkg": {
+    "scripts": "dist/**/*.js",
+    "assets": [],
+    "targets": ["node18-win-x64"]
   },
   "devDependencies": {
-    "typescript": "^5.4.0",
-    "@types/node": "^20.0.0",
     "@types/better-sqlite3": "^7.6.0",
+    "@types/node": "^20.0.0",
     "@types/node-cron": "^3.0.0",
-    "@types/node-fetch": "^2.6.0"
+    "@types/node-fetch": "^2.6.0",
+    "pkg": "^5.8.1",
+    "typescript": "^5.4.0"
   }
 }

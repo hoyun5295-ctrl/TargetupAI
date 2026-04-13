@@ -73,41 +73,60 @@
 
 ---
 
-### 🎯 다음 세션 CURRENT_TASK (D116~)
+### 🎯 D117 — 전단AI 대규모 업그레이드 + POS Agent 완성 (2026-04-13) ✅
 
-> **아래 4개 영역을 다음 세션에서 순서대로 착수한다.**
+**A. 전단AI 기능 보강 6건 (전부 완료, 배포됨)**
+- [x] PDF 내보내기 — `flyer-pdf.ts` puppeteer 싱글톤, `flyers.ts` POST /:id/pdf
+- [x] AI 마케팅 문구 — `flyer-ai-copy.ts` 4종(조리팁/효능/보관법/매력포인트), `catalog.ts` POST /generate-copy
+- [x] 상품별 가격POP PDF — `flyer-pop-templates.ts` A4 1장 가격표 5색상, 매장명+이미지+뱃지+주소
+- [x] 8엔진 21테마 — 신규 4엔진(Compact3열/HeroBanner/Swipe/Mosaic) + 시즌6/행사5/업종확장
+- [x] 자동 카테고리 분류 — `flyer-category-classifier.ts` 키워드→카탈로그→AI 3단계
+- [x] 다이나믹 전단 — 외부링크/공지사항/GIF배너 (extra_data JSONB)
 
-**0. 전단 템플릿 V3 리뉴얼 — ✅ 구현 완료 (D116, 2026-04-12)**
-- [x] CT-F14 V3 — 4개 레이아웃 엔진 (Grid/Magazine/Editorial/Showcase) × 13개 테마
-- [x] FlyerRenderItem에 `unit`(규격), `origin`(원산지), `cardDiscount`(카드할인) 필드 추가
-- [x] FlyerPage.tsx 상품 입력 UI에 규격/원산지/카드할인 입력란 추가
-- [x] FlyerPreviewRenderer V3 — ENGINE_MAP 기반 4엔진 미리보기 동기화
-- [x] flyer-business-types.ts — magazine/editorial/showcase 3개 신규 템플릿 등록
-- [x] 가격 32~40px 대형화 + 히어로 배너 장식 (원형/스파클 SVG)
-- [x] 카테고리 탭 스크롤 추적 (setInterval 100ms 폴링) + 마지막 카테고리 하단 도달 감지
-- [x] helmet CSP 인라인 스크립트 차단 해결 — 공개 페이지 라우트를 helmet 전에 마운트
-- [x] body overflow-x:hidden → overflow-x:clip 교체 (sticky nav 보존)
-- [ ] 상품 이미지 DB 구축 — 마트 주요 상품 500개 누끼 이미지 수집 (Pixabay+직접촬영)
+**B. POS Agent 전면 개선 + exe 빌드 (완료)**
+- [x] db-connector.ts — MSSQL+MySQL+SQLite 3종 + exponential backoff 재연결
+- [x] schema-reader.ts — 3종 DB별 스키마 쿼리 + SQL Injection 제거
+- [x] data-extractor.ts — 파라미터 바인딩으로 SQL Injection 제거
+- [x] scheduler.ts — 재고 하드코딩 제거 + KST 자정 리셋 + 하트비트 연속실패 경고
+- [x] setup-wizard.ts — CLI 인터랙티브 설치 마법사 (ANSI 색상 박스 UI, 5단계)
+- [x] exe 빌드 완료 — `build/hanjul-pos-agent.exe` (97.7MB) + better_sqlite3.node
 
-**1. 카탈로그DB 관리 페이지 + 전단 연동 (Phase A 핵심)**
-- [ ] flyer-frontend CatalogPage.tsx 고도화 — 상품 추가/편집/삭제 + 이미지 업로드
-- [ ] FlyerPage.tsx에 "내 상품" 사이드바 → 카탈로그에서 상품 선택 → 전단 카테고리에 자동 추가
-- [ ] 이전 전단에서 사용한 상품 → flyer_catalog 자동 등록 (발행 시점에 upsertCatalogItem 호출)
-- [ ] 상품 이미지 Pixabay 추가 수집 or DALL-E 생성 옵션 연동
-- [ ] 카탈로그 카테고리별 필터/검색 UI 개선
+**C. 기타**
+- [x] flyer-naver-search.ts — 검색어 정제 (단위/수량 제거)
+- [x] ai.ts — callAIWithFallback export
+- [x] BUGS.md B97-03 Closed
 
-**2. POS Agent exe 빌드 + 시스템 트레이 + 설치 마법사**
-- [ ] packages/pos-agent/ npm install (tedious/better-sqlite3/node-cron/node-fetch)
-- [ ] `tray.ts` — Windows 시스템 트레이 UI (systray2). 아이콘+상태표시+설정열기
-- [ ] `setup/wizard.ts` — CLI 초기 설정 마법사 (agent_key 입력 → DB 감지 → 연결 테스트 → 저장)
-- [ ] `setup/db-detector.ts` — POS 설치 폴더 스캔 + 프로세스 확인 + 포트 스캔
-- [ ] `pkg` 빌드 → `hanjul-pos-agent.exe` 단일 실행파일 생성
-- [ ] Windows 자동 시작 등록 (레지스트리 HKCU\Run)
-- [ ] 슈퍼관리자 FlyerAdminDashboard에 POS Agent 모니터링 탭 추가 (상태/마지막싱크/대기건수)
-- [ ] **Harold님 선행:** 투게더스 POS 매장 1곳 원격 접속(팀뷰어) → DB 엔진/테이블 구조/전화번호 마스킹 확인
+**서버 DDL (적용 완료):**
+- `ALTER TABLE flyers ADD COLUMN extra_data JSONB DEFAULT '{}'`
+- `ALTER TABLE spam_filter_tests ALTER COLUMN variant_id TYPE varchar(10)`
+- 시스템 패키지: fonts-noto-cjk + puppeteer 의존 라이브러리
 
-**3. 인쇄 PDF 내보내기**
-- [ ] 전단지 HTML → PDF 변환 (puppeteer 또는 html-pdf-node)
+---
+
+### 🎯 다음 세션 CURRENT_TASK (D118~) — 템플리 압도 완성
+
+> **12건 작업으로 템플리 대비 모든 면에서 월등한 수준 달성.**
+
+**POP 강화 (3건)**
+- [ ] 다분할 POP — A4에 2/4/8분할 레이아웃. renderMultiPop 함수
+- [ ] 전단→POP 일괄 생성 — 전단 전체 상품을 한번에 POP PDF. POST /:id/pop-all
+- [ ] 홍보POP (코너 안내판) — 카테고리별 헤더+상품 리스트형
+
+**사용 편의성 (5건)**
+- [ ] 전단→SMS 원클릭 — 발행 완료 후 바로 "문자 발송" 버튼
+- [ ] 드래그로 상품 순서 변경 — FlyerPage drag handle
+- [ ] 상품 복사 (기존 전단→새 전단) — 전단 목록 "복사" 버튼
+- [ ] 발송 후 데이터 자동 파기 옵션 — N일 후 고객 데이터 자동 삭제
+- [ ] AI 문구 배치 생성 — 전체 상품 일괄 AI 문구 생성
+
+**차별점 강화 (4건)**
+- [ ] POS 연동 대시보드 — 슈퍼관리자에 매장별 Agent 상태 모니터링
+- [ ] POS→전단 자동 추천 — 판매 데이터 기반 "잘 팔리는 상품" 추천
+- [ ] QR 쿠폰 사용 통계 대시보드 — 발급/사용/전환율 차트
+- [ ] 네이버 이미지 품질 개선 — 쇼핑 API 병행 + 크기/품질 필터링
+
+**미완료 (이전 세션):**
+- [ ] 상품 이미지 DB 구축 — 마트 주요 상품 500개 누끼 이미지 수집
 - [ ] A4/전단지 사이즈 옵션 (210x297mm, 190x260mm)
 - [ ] FlyerPage에 "PDF 다운로드" 버튼 추가
 - [ ] 인쇄용 고해상도 이미지 처리 (300dpi)

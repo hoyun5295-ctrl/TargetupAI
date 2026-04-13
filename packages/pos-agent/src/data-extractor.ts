@@ -35,9 +35,9 @@ export async function extractAndPushSales(mapping: SchemaMapping): Promise<void>
   const lastSync = config.lastSalesSync || '2000-01-01T00:00:00';
 
   try {
-    // AI가 생성한 쿼리 실행 (:LAST_SYNC_AT placeholder 치환)
-    const sql = mapping.extractQueries.newSales.replace(/:LAST_SYNC_AT/g, `'${lastSync}'`);
-    const rows = await executeQuery(sql);
+    // AI가 생성한 쿼리 실행 — 파라미터 바인딩으로 SQL Injection 방지
+    const sql = bindSyncParam(mapping.extractQueries.newSales, getConfig().db.type);
+    const rows = await executeQuery(sql, [lastSync]);
 
     if (rows.length === 0) {
       logger.debug('새 판매 데이터 없음');
@@ -68,8 +68,8 @@ export async function extractAndPushMembers(mapping: SchemaMapping): Promise<voi
   const lastSync = config.lastMembersSync || '2000-01-01T00:00:00';
 
   try {
-    const sql = mapping.extractQueries.newMembers.replace(/:LAST_SYNC_AT/g, `'${lastSync}'`);
-    const rows = await executeQuery(sql);
+    const sql = bindSyncParam(mapping.extractQueries.newMembers, getConfig().db.type);
+    const rows = await executeQuery(sql, [lastSync]);
 
     if (rows.length === 0) {
       logger.debug('새 회원 데이터 없음');
@@ -142,4 +142,13 @@ function mapColumns(row: Record<string, any>, columnMapping: Record<string, stri
   result.raw = row;
 
   return result;
+}
+
+/**
+ * :LAST_SYNC_AT placeholder를 DB별 파라미터로 치환
+ * MSSQL: @p0, MySQL: ?, SQLite: ?
+ */
+function bindSyncParam(sql: string, dbType: string): string {
+  const placeholder = dbType === 'mssql' ? '@p0' : '?';
+  return sql.replace(/:LAST_SYNC_AT/g, placeholder);
 }

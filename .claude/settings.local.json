@@ -138,7 +138,10 @@
       "mcp__Claude_Preview__preview_start",
       "WebFetch(domain:kr.pinterest.com)",
       "Bash(grep -r \"TODO\\\\|FIXME\\\\|XXX\\\\|HACK\" /c/Users/ceo/projects/targetup/packages/backend/src/utils/flyer/flyer-pos*.ts)",
-      "Bash(grep -n \"queryTimeout\\\\|requestTimeout\\\\|connectTimeout\\\\|retryAttempts\\\\|retry\" /c/Users/ceo/projects/targetup/packages/pos-agent/src/*.ts)"
+      "Bash(grep -n \"queryTimeout\\\\|requestTimeout\\\\|connectTimeout\\\\|retryAttempts\\\\|retry\" /c/Users/ceo/projects/targetup/packages/pos-agent/src/*.ts)",
+      "Bash(npx pkg:*)",
+      "Bash(node scripts/copy-native.js)",
+      "WebFetch(domain:it.donga.com)"
     ]
   }
 }
