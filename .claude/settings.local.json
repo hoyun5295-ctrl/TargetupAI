@@ -141,7 +141,16 @@
       "Bash(grep -n \"queryTimeout\\\\|requestTimeout\\\\|connectTimeout\\\\|retryAttempts\\\\|retry\" /c/Users/ceo/projects/targetup/packages/pos-agent/src/*.ts)",
       "Bash(npx pkg:*)",
       "Bash(node scripts/copy-native.js)",
-      "WebFetch(domain:it.donga.com)"
+      "WebFetch(domain:it.donga.com)",
+      "Bash(mv flyer-pos-ingest.ts flyer-pos-ai.ts pos/)",
+      "Bash(mv flyer-coupons.ts coupon/)",
+      "Bash(mv flyer-billing.ts billing/)",
+      "Bash(mv flyer-stats.ts flyer-rfm.ts analytics/)",
+      "Bash(mv flyer-business-types.ts config/)",
+      "Bash(find send/ product/ pos/ coupon/ billing/ analytics/ config/ -name \"*.ts\" -exec sed -i \"s|from '../../config/database'|from '../../../config/database'|g\" {} +)",
+      "Bash(sed -i \"s|from '../normalize-phone'|from '../../normalize-phone'|g\" send/flyer-deduplicate.ts pos/flyer-pos-ingest.ts coupon/flyer-coupons.ts)",
+      "Bash(sed -i \"s|from '../sms-queue'|from '../../sms-queue'|g\" send/flyer-sms-queue.ts)",
+      "Bash(sed -i \"s|from '../../utils/product-images'|from '../../../utils/product-images'|g\" product/flyer-templates.ts)"
     ]
   }
 }

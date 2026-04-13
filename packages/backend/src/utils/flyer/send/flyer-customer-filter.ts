@@ -12,7 +12,7 @@
  * 마트 업종 특화 필드(RFM/POS)만 지원.
  */
 
-import { query } from '../../config/database';
+import { query } from '../../../config/database';
 
 export interface FlyerFilterInput {
   gender?: 'M' | 'F';

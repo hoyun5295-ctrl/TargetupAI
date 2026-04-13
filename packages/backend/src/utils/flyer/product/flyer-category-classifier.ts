@@ -9,8 +9,8 @@
  * 업종별 키워드 맵 지원 (mart/butcher).
  */
 
-import { query } from '../../config/database';
-import { callAIWithFallback } from '../../services/ai';
+import { query } from '../../../config/database';
+import { callAIWithFallback } from '../../../services/ai';
 
 // ============================================================
 // 업종별 키워드 규칙

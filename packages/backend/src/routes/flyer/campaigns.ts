@@ -12,6 +12,11 @@ import {
   sendFlyerCampaign,
   FlyerSendParams,
 } from '../../utils/flyer';
+import {
+  getAutoPurgeSettings,
+  updateAutoPurgeSettings,
+  setCampaignAutoPurge,
+} from '../../utils/flyer/config/flyer-settings';
 
 const router = Router();
 router.use(flyerAuthenticate);
@@ -64,26 +69,16 @@ router.post('/send', async (req: Request, res: Response) => {
 });
 
 // ============================================================
-// POST /:id/auto-purge — 발송 후 데이터 자동 파기 설정
+// POST /:id/auto-purge — 캠페인별 자동 파기 설정 (CT: config/flyer-settings)
 // ============================================================
 router.post('/:id/auto-purge', async (req: Request, res: Response) => {
   try {
     const { companyId } = req.flyerUser!;
-    const { purge_days } = req.body; // 0=비활성, 30/60/90일
-
+    const { purge_days } = req.body;
     if (purge_days != null && (purge_days < 0 || purge_days > 365)) {
       return res.status(400).json({ error: '파기 기간은 0~365일 사이여야 합니다.' });
     }
-
-    const { query: q } = require('../../config/database');
-    await q(
-      `UPDATE flyer_campaigns SET
-         extra_data = COALESCE(extra_data, '{}'::jsonb) || jsonb_build_object('auto_purge_days', $3),
-         updated_at = NOW()
-       WHERE id = $1 AND company_id = $2`,
-      [req.params.id, companyId, purge_days || 0]
-    );
-
+    await setCampaignAutoPurge(req.params.id, companyId, purge_days || 0);
     return res.json({ ok: true, purge_days: purge_days || 0 });
   } catch (error: any) {
     console.error('[flyer/campaigns] auto-purge error:', error);
@@ -92,18 +87,12 @@ router.post('/:id/auto-purge', async (req: Request, res: Response) => {
 });
 
 // ============================================================
-// GET /purge-settings — 회사 전체 자동 파기 설정 조회/수정
+// GET/POST /purge-settings — 회사 전체 자동 파기 설정 (CT: config/flyer-settings)
 // ============================================================
 router.get('/purge-settings', async (req: Request, res: Response) => {
   try {
-    const { companyId } = req.flyerUser!;
-    const { query: q } = require('../../config/database');
-    const result = await q(
-      `SELECT auto_purge_days FROM flyer_companies WHERE id = $1`,
-      [companyId]
-    );
-    const days = result.rows[0]?.auto_purge_days || 0;
-    return res.json({ auto_purge_days: days });
+    const result = await getAutoPurgeSettings(req.flyerUser!.companyId);
+    return res.json(result);
   } catch (error: any) {
     return res.status(500).json({ error: 'Server error' });
   }
@@ -111,14 +100,8 @@ router.get('/purge-settings', async (req: Request, res: Response) => {
 
 router.post('/purge-settings', async (req: Request, res: Response) => {
   try {
-    const { companyId } = req.flyerUser!;
-    const { auto_purge_days } = req.body;
-    const { query: q } = require('../../config/database');
-    await q(
-      `UPDATE flyer_companies SET auto_purge_days = $2 WHERE id = $1`,
-      [companyId, auto_purge_days || 0]
-    );
-    return res.json({ ok: true, auto_purge_days: auto_purge_days || 0 });
+    await updateAutoPurgeSettings(req.flyerUser!.companyId, req.body.auto_purge_days || 0);
+    return res.json({ ok: true, auto_purge_days: req.body.auto_purge_days || 0 });
   } catch (error: any) {
     return res.status(500).json({ error: 'Server error' });
   }

@@ -23,6 +23,7 @@ import {
   listCoupons,
   renderCouponPage,
   buildCouponSmsMessage,
+  getCouponDashboard,
 } from '../../utils/flyer';
 import { query } from '../../config/database';
 
@@ -272,67 +273,13 @@ router.post('/redeem', async (req: Request, res: Response) => {
 });
 
 // ============================================================
-// GET /dashboard — 쿠폰 통계 대시보드 (전체 집계)
+// GET /dashboard — 쿠폰 통계 대시보드 (CT: coupon/flyer-coupons getCouponDashboard)
 // ============================================================
 router.get('/dashboard', async (req: Request, res: Response) => {
   try {
     const { companyId } = (req as any).user;
-
-    // 전체 집계
-    const aggResult = await query(
-      `SELECT
-         COUNT(*) AS total_campaigns,
-         SUM(issued_count) AS total_issued,
-         SUM(redeemed_count) AS total_redeemed,
-         CASE WHEN SUM(issued_count) > 0
-              THEN ROUND(SUM(redeemed_count)::numeric / SUM(issued_count) * 100, 1)
-              ELSE 0 END AS conversion_rate
-       FROM flyer_coupon_campaigns
-       WHERE company_id = $1`,
-      [companyId]
-    );
-
-    // 최근 7일 일별 발급/사용 추이
-    const trendResult = await query(
-      `SELECT
-         TO_CHAR(c.issued_at, 'YYYY-MM-DD') AS date,
-         COUNT(*) AS issued,
-         COUNT(CASE WHEN c.status = 'redeemed' THEN 1 END) AS redeemed
-       FROM flyer_coupons c
-       JOIN flyer_coupon_campaigns cc ON cc.id = c.campaign_id
-       WHERE cc.company_id = $1
-         AND c.issued_at >= NOW() - INTERVAL '7 days'
-       GROUP BY TO_CHAR(c.issued_at, 'YYYY-MM-DD')
-       ORDER BY date`,
-      [companyId]
-    );
-
-    // 캠페인별 실적
-    const campaignResult = await query(
-      `SELECT id, coupon_name, coupon_type, discount_value,
-              issued_count, redeemed_count,
-              CASE WHEN issued_count > 0
-                   THEN ROUND(redeemed_count::numeric / issued_count * 100, 1)
-                   ELSE 0 END AS conversion_rate,
-              TO_CHAR(created_at, 'YYYY-MM-DD') AS created_at
-       FROM flyer_coupon_campaigns
-       WHERE company_id = $1
-       ORDER BY created_at DESC
-       LIMIT 20`,
-      [companyId]
-    );
-
-    const agg = aggResult.rows[0] || {};
-    return res.json({
-      summary: {
-        totalCampaigns: Number(agg.total_campaigns) || 0,
-        totalIssued: Number(agg.total_issued) || 0,
-        totalRedeemed: Number(agg.total_redeemed) || 0,
-        conversionRate: Number(agg.conversion_rate) || 0,
-      },
-      trend: trendResult.rows,
-      campaigns: campaignResult.rows,
-    });
+    const data = await getCouponDashboard(companyId);
+    return res.json(data);
   } catch (err: any) {
     console.error('[coupon] dashboard error:', err);
     return res.status(500).json({ error: '서버 오류' });

@@ -9,7 +9,7 @@
 
 import { Request, Response, Router } from 'express';
 import { query } from '../../config/database';
-import { renderTemplate } from '../../utils/flyer/flyer-templates';
+import { renderTemplate } from '../../utils/flyer/product/flyer-templates';
 
 const router = Router();
 

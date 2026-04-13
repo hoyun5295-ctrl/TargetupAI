@@ -17,10 +17,10 @@ import { flyerAuthenticate } from '../../middlewares/flyer-auth';
 // ★ D112: getStoreScope 제거. 전단AI는 store_code 없이 company_id 단위 격리.
 import { generateProductImage, generateFlyerImages, getGeneratedImageUrl } from '../../utils/product-images';
 import { LIMITS } from '../../config/defaults';
-import { generatePdfFromHtml } from '../../utils/flyer/flyer-pdf';
+import { generatePdfFromHtml } from '../../utils/flyer/product/flyer-pdf';
 import { renderFlyerPage } from './short-urls';
-import { renderPricePop, renderMultiPop, renderPromoPop } from '../../utils/flyer/flyer-pop-templates';
-import { classifyProducts } from '../../utils/flyer/flyer-category-classifier';
+import { renderPricePop, renderMultiPop, renderPromoPop } from '../../utils/flyer/product/flyer-pop-templates';
+import { classifyProducts } from '../../utils/flyer/product/flyer-category-classifier';
 
 const PRODUCT_IMAGE_DIR = process.env.PRODUCT_IMAGE_PATH || path.resolve('./uploads/product-images');
 const FLYER_PRODUCT_DIR = process.env.FLYER_PRODUCT_PATH || path.resolve('./uploads/flyer-products');

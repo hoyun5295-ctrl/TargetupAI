@@ -16,7 +16,7 @@ import {
   countFlyerCustomers,
   selectFlyerCustomers,
   FlyerFilterInput,
-} from '../../utils/flyer/flyer-customer-filter';
+} from '../../utils/flyer/send/flyer-customer-filter';
 import { normalizePhone } from '../../utils/normalize-phone';
 
 const router = Router();

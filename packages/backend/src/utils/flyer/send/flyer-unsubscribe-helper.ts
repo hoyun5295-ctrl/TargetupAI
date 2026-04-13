@@ -12,7 +12,7 @@
  *   )
  */
 
-import { query } from '../../config/database';
+import { query } from '../../../config/database';
 
 /**
  * 발송 WHERE 절에 삽입할 수신거부 제외 필터 생성.

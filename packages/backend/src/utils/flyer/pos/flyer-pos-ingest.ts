@@ -7,8 +7,8 @@
  * 설계: FLYER-POS-AGENT.md §3 서버 API, FLYER-POS-AGENT-DEV.md
  */
 
-import { query } from '../../config/database';
-import { normalizePhone } from '../normalize-phone';
+import { query } from '../../../config/database';
+import { normalizePhone } from '../../normalize-phone';
 
 export interface PosSaleItem {
   receipt_no: string;

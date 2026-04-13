@@ -13,7 +13,7 @@
  * 신규 필드: unit(규격), origin(원산지), cardDiscount(카드할인)
  */
 
-import { renderProductImage, resolveProductImageUrl } from '../../utils/product-images';
+import { renderProductImage, resolveProductImageUrl } from '../../../utils/product-images';
 
 // ============================================================
 // 공통 타입 + 유틸

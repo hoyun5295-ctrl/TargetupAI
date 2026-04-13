@@ -10,7 +10,7 @@
  * 기존 canFlyerCompanySend는 총판 레벨 체크용으로 유지 (하위호환).
  */
 
-import { query } from '../../config/database';
+import { query } from '../../../config/database';
 
 export interface FlyerBillingSummary {
   company_id: string;

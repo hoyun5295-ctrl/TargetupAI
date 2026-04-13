@@ -7,7 +7,7 @@
  * ⚠️ 스켈레톤 — Phase A 구현 시 채운다.
  */
 
-import { query } from '../../config/database';
+import { query } from '../../../config/database';
 
 export interface CatalogItem {
   id: string;

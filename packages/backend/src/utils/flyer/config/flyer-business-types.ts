@@ -9,7 +9,7 @@
  * 템플릿 추가: TEMPLATE_REGISTRY + CT-F14 렌더러 추가
  */
 
-import { query } from '../../config/database';
+import { query } from '../../../config/database';
 
 // ============================================================
 // 인터페이스

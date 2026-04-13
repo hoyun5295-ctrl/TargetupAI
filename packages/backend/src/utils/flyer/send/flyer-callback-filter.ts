@@ -7,7 +7,7 @@
  * - 개별 회신번호 기능은 Phase B 이후 (지금은 단일 기본값 사용)
  */
 
-import { query } from '../../config/database';
+import { query } from '../../../config/database';
 
 export interface CallbackResolveResult {
   callback: string | null;

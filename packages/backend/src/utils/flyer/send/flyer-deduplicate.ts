@@ -5,7 +5,7 @@
  * 전단AI 발송 경로 전용으로 재사용.
  */
 
-import { normalizePhone } from '../normalize-phone';
+import { normalizePhone } from '../../normalize-phone';
 
 export interface FlyerRecipient {
   phone: string;

@@ -12,7 +12,7 @@
  */
 
 import Anthropic from '@anthropic-ai/sdk';
-import { query } from '../../config/database';
+import { query } from '../../../config/database';
 
 // ============================================================
 // 인터페이스

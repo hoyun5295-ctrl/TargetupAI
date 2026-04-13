@@ -8,7 +8,7 @@
  * - Phase B: flyer_pos_sales 기반 ROI 집계
  */
 
-import { query } from '../../config/database';
+import { query } from '../../../config/database';
 
 export interface FlyerDashboardStats {
   totalCustomers: number;

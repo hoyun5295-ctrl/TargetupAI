@@ -13,8 +13,8 @@ import {
   downloadAndSaveImage,
   autoMatchImage,
   batchAutoMatchImages,
-} from '../../utils/flyer/flyer-naver-search';
-import { generateProductCopy, generateBatchProductCopy, CopyType, COPY_TYPE_LABELS } from '../../utils/flyer/flyer-ai-copy';
+} from '../../utils/flyer/product/flyer-naver-search';
+import { generateProductCopy, generateBatchProductCopy, CopyType, COPY_TYPE_LABELS } from '../../utils/flyer/product/flyer-ai-copy';
 
 const router = Router();
 router.use(flyerAuthenticate);

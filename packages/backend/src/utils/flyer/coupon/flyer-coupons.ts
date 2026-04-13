@@ -9,8 +9,8 @@
 
 import crypto from 'crypto';
 import QRCode from 'qrcode';
-import { query } from '../../config/database';
-import { normalizePhone } from '../normalize-phone';
+import { query } from '../../../config/database';
+import { normalizePhone } from '../../normalize-phone';
 
 // ============================================================
 // 인터페이스
@@ -534,6 +534,54 @@ export function renderCouponPage(campaign: any): string {
 </script>
 </body>
 </html>`;
+}
+
+// ============================================================
+// 쿠폰 대시보드 통계 (전체 집계 + 7일 추이 + 캠페인별 실적)
+// ============================================================
+
+export interface CouponDashboardData {
+  summary: { totalCampaigns: number; totalIssued: number; totalRedeemed: number; conversionRate: number };
+  trend: Array<{ date: string; issued: number; redeemed: number }>;
+  campaigns: Array<{ id: string; coupon_name: string; coupon_type: string; discount_value: number; issued_count: number; redeemed_count: number; conversion_rate: number; created_at: string }>;
+}
+
+export async function getCouponDashboard(companyId: string): Promise<CouponDashboardData> {
+  const [aggResult, trendResult, campaignResult] = await Promise.all([
+    query(
+      `SELECT COUNT(*) AS total_campaigns, SUM(issued_count) AS total_issued, SUM(redeemed_count) AS total_redeemed,
+              CASE WHEN SUM(issued_count) > 0 THEN ROUND(SUM(redeemed_count)::numeric / SUM(issued_count) * 100, 1) ELSE 0 END AS conversion_rate
+       FROM flyer_coupon_campaigns WHERE company_id = $1`,
+      [companyId]
+    ),
+    query(
+      `SELECT TO_CHAR(c.issued_at, 'YYYY-MM-DD') AS date, COUNT(*) AS issued,
+              COUNT(CASE WHEN c.status = 'redeemed' THEN 1 END) AS redeemed
+       FROM flyer_coupons c JOIN flyer_coupon_campaigns cc ON cc.id = c.campaign_id
+       WHERE cc.company_id = $1 AND c.issued_at >= NOW() - INTERVAL '7 days'
+       GROUP BY TO_CHAR(c.issued_at, 'YYYY-MM-DD') ORDER BY date`,
+      [companyId]
+    ),
+    query(
+      `SELECT id, coupon_name, coupon_type, discount_value, issued_count, redeemed_count,
+              CASE WHEN issued_count > 0 THEN ROUND(redeemed_count::numeric / issued_count * 100, 1) ELSE 0 END AS conversion_rate,
+              TO_CHAR(created_at, 'YYYY-MM-DD') AS created_at
+       FROM flyer_coupon_campaigns WHERE company_id = $1 ORDER BY created_at DESC LIMIT 20`,
+      [companyId]
+    ),
+  ]);
+
+  const agg = aggResult.rows[0] || {};
+  return {
+    summary: {
+      totalCampaigns: Number(agg.total_campaigns) || 0,
+      totalIssued: Number(agg.total_issued) || 0,
+      totalRedeemed: Number(agg.total_redeemed) || 0,
+      conversionRate: Number(agg.conversion_rate) || 0,
+    },
+    trend: trendResult.rows,
+    campaigns: campaignResult.rows,
+  };
 }
 
 /** 쿠폰 수령 완료 SMS 메시지 생성 */

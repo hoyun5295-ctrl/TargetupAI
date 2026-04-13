@@ -14,13 +14,13 @@
  *   7. flyer_campaigns 레코드 생성/업데이트
  */
 
-import { query } from '../../config/database';
+import { query } from '../../../config/database';
 import {
   getFlyerCompanySmsTables,
   bulkInsertSmsQueue,
   toQtmsgType,
 } from './flyer-sms-queue';
-import { canFlyerStoreSend, deductFlyerPrepaid } from './flyer-billing';
+import { canFlyerStoreSend, deductFlyerPrepaid } from '../billing/flyer-billing';
 import { resolveFlyerCallback } from './flyer-callback-filter';
 import { deduplicateWithStats, FlyerRecipient } from './flyer-deduplicate';
 import { filterOutFlyerUnsubscribed } from './flyer-unsubscribe-helper';

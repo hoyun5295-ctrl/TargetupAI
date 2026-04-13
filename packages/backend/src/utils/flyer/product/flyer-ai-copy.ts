@@ -5,7 +5,7 @@
  * ai.ts의 callAIWithFallback() 재활용.
  */
 
-import { callAIWithFallback } from '../../services/ai';
+import { callAIWithFallback } from '../../../services/ai';
 
 // ============================================================
 // 문구 유형 정의

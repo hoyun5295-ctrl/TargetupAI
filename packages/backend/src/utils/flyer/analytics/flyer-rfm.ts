@@ -7,7 +7,7 @@
  * ⚠️ 스켈레톤 — Phase B 구현 시 채운다. 지금은 인터페이스만 정의.
  */
 
-import { query } from '../../config/database';
+import { query } from '../../../config/database';
 
 export type RfmSegment = 'champion' | 'loyal' | 'new' | 'at_risk' | 'lost' | 'whale' | 'unknown';
 

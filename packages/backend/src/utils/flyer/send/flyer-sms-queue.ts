@@ -9,7 +9,7 @@
  * ⚠️ flyer_companies.line_group_id 컬럼이 반드시 있어야 함 (FLYER-SCHEMA.md 참조)
  */
 
-import { query } from '../../config/database';
+import { query } from '../../../config/database';
 
 // 라인그룹 캐시 (간단한 메모리 캐시, TTL 5분)
 const TTL = 5 * 60 * 1000;
@@ -66,4 +66,4 @@ export {
   insertTestSmsQueue,
   getTestSmsTables,
   getAuthSmsTable,
-} from '../sms-queue';
+} from '../../sms-queue';

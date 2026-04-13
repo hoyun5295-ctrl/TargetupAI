@@ -508,7 +508,7 @@ router.post('/stores/:id/charge', async (req: Request, res: Response) => {
 // ══════════════════════════════════════════
 router.get('/business-types', async (_req: Request, res: Response) => {
   try {
-    const { getAllBusinessTypes } = await import('../../utils/flyer/flyer-business-types');
+    const { getAllBusinessTypes } = await import('../../utils/flyer/config/flyer-business-types');
     const types = await getAllBusinessTypes();
     return res.json(types);
   } catch (error: any) {
