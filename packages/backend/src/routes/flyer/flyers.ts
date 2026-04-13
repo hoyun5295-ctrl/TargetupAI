@@ -21,21 +21,26 @@ import { generatePdfFromHtml } from '../../utils/flyer/product/flyer-pdf';
 import { renderFlyerPage } from './short-urls';
 import { renderPricePop, renderMultiPop, renderPromoPop } from '../../utils/flyer/product/flyer-pop-templates';
 import { classifyProducts } from '../../utils/flyer/product/flyer-category-classifier';
+import { resolveProductImageUrl } from '../../utils/product-images';
 
 /**
- * ★ 카탈로그에 저장된 이미지로 빈 imageUrl 채우기
- * 사장님이 직접 올린/선택한 이미지만 사용. 외부 검색 안 함.
+ * ★ 이미지 없는 상품에 이미지 자동 매칭
+ * 우선순위: ① 카탈로그 저장 이미지 → ② Pixabay 기본 이미지(PRODUCT_MAP)
  */
-async function fillFromCatalog(items: any[], companyId: string): Promise<void> {
+async function fillMissingImages(items: any[], companyId: string): Promise<void> {
   for (const item of items) {
     if (item.imageUrl || !item.name?.trim()) continue;
     try {
+      // 1순위: 카탈로그에 사장님이 저장한 이미지
       const r = await query(
         `SELECT image_url FROM flyer_catalog WHERE company_id = $1 AND product_name = $2 AND image_url IS NOT NULL AND image_url != '' ORDER BY usage_count DESC LIMIT 1`,
         [companyId, item.name.trim()]
       );
-      if (r.rows[0]?.image_url) item.imageUrl = r.rows[0].image_url;
+      if (r.rows[0]?.image_url) { item.imageUrl = r.rows[0].image_url; continue; }
     } catch {}
+    // 2순위: Pixabay 기본 이미지 (product-images PRODUCT_MAP)
+    const pixabayUrl = resolveProductImageUrl(item.name);
+    if (pixabayUrl) item.imageUrl = pixabayUrl;
   }
 }
 
@@ -757,10 +762,25 @@ router.post('/pop-pdf', async (req: Request, res: Response) => {
       return res.status(400).json({ error: '상품 정보(name, salePrice)가 필요합니다.' });
     }
 
+    // ★ 디버그: 프론트에서 넘어온 item 확인
+    console.log(`[POP-DEBUG] 프론트 전달 item.imageUrl: "${item.imageUrl || '(없음)'}"`);
+    console.log(`[POP-DEBUG] 상품명: "${item.name}", companyId: ${companyId}`);
+
     // ★ 카탈로그에 저장된 이미지 우선 매칭
-    await fillFromCatalog([item], companyId);
+    await fillMissingImages([item], companyId);
+
+    console.log(`[POP-DEBUG] fillMissingImages 후 item.imageUrl: "${item.imageUrl || '(없음)'}"`);
 
     const html = renderPricePop(item, { storeName, colorTheme });
+
+    // ★ 디버그: HTML에 img 태그가 있는지
+    const hasImgTag = html.includes('<img ');
+    console.log(`[POP-DEBUG] HTML img 태그 존재: ${hasImgTag}`);
+    if (hasImgTag) {
+      const imgMatch = html.match(/src="([^"]+)"/);
+      console.log(`[POP-DEBUG] img src: ${imgMatch?.[1]?.slice(0, 100)}`);
+    }
+
     const pdfBuffer = await generatePdfFromHtml(html, { format: 'A4' });
 
     const safeName = (item.name || 'pop').replace(/[^가-힣a-zA-Z0-9_-]/g, '_').slice(0, 30);
@@ -788,7 +808,7 @@ router.post('/multi-pop', async (req: Request, res: Response) => {
     }
     const validSplits = [2, 4, 8].includes(splits) ? splits : 4;
 
-    await fillFromCatalog(items, companyId);
+    await fillMissingImages(items, companyId);
     const html = renderMultiPop(items, validSplits, { storeName, colorTheme });
     const pdfBuffer = await generatePdfFromHtml(html, { format: 'A4' });
 
@@ -858,7 +878,7 @@ router.post('/:id/pop-all', async (req: Request, res: Response) => {
     if (allItems.length === 0) return res.status(400).json({ error: '상품이 없습니다.' });
 
     // ★ 카탈로그 저장 이미지 우선 매칭
-    await fillFromCatalog(allItems, companyId);
+    await fillMissingImages(allItems, companyId);
 
     const { colorTheme } = req.body;
     // 8개 이하면 다분할 POP 1장, 아니면 개별 POP 연결
