@@ -366,6 +366,7 @@ export default function FlyerPage({ token, businessType = 'mart' }: { token: str
               setAlert={setAlert}
               categoryPresets={categoryPresets}
               aiCopyLoading={aiCopyLoading}
+              setAiCopyLoading={setAiCopyLoading}
               handleAiCopy={handleAiCopy}
               handlePopPdf={handlePopPdf}
               extraData={extraData}
@@ -498,7 +499,7 @@ export default function FlyerPage({ token, businessType = 'mart' }: { token: str
 // ============================================================
 // 상품 등록 섹션 — 엑셀 업로드 + 카테고리 탭 방식
 // ============================================================
-function ProductRegistrationSection({ categories, setCategories, addCategory, removeCategory, updateCategoryName, addItem, removeItem, updateItem, setAlert, categoryPresets, aiCopyLoading, handleAiCopy, handlePopPdf, extraData, setExtraData }: {
+function ProductRegistrationSection({ categories, setCategories, addCategory, removeCategory, updateCategoryName, addItem, removeItem, updateItem, setAlert, categoryPresets, aiCopyLoading, setAiCopyLoading, handleAiCopy, handlePopPdf, extraData, setExtraData }: {
   categories: FlyerCategory[];
   setCategories: (c: FlyerCategory[]) => void;
   addCategory: (name?: string) => void;
@@ -510,6 +511,7 @@ function ProductRegistrationSection({ categories, setCategories, addCategory, re
   setAlert: (a: { show: boolean; title: string; message: string; type: 'success' | 'error' | 'info' }) => void;
   categoryPresets: string[];
   aiCopyLoading: string | null;
+  setAiCopyLoading: (v: string | null) => void;
   handleAiCopy: (ci: number, ii: number, copyType: string) => void;
   handlePopPdf: (ci: number, ii: number) => void;
   extraData: { externalLinks?: Array<{ label: string; url: string; icon: string }>; announcements?: Array<{ title: string; content: string }>; bannerGifUrl?: string };
