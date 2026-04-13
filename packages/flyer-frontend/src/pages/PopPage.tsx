@@ -8,7 +8,7 @@
 
 import { useState, useCallback, useRef } from 'react';
 import { API_BASE, apiFetch } from '../App';
-import { SectionCard, Button, Input, Badge, EmptyState } from '../components/ui';
+import { Button, EmptyState } from '../components/ui';
 import AlertModal from '../components/AlertModal';
 
 interface PopItem {
@@ -73,7 +73,6 @@ export default function PopPage({ token: _token }: { token: string }) {
   const [popTemplate, setPopTemplate] = useState<'hot' | 'classic' | 'simple' | 'dark' | 'jumbo'>('hot');
   const [paperSize, setPaperSize] = useState<PaperSize>('A4');
   const [landscape, setLandscape] = useState(false);
-  const [orientation, setOrientation] = useState<'portrait' | 'landscape'>('portrait');
   const [loading, setLoading] = useState(false);
   const [alert, setAlert] = useState<{ show: boolean; title: string; message: string; type: 'success' | 'error' | 'info' }>({ show: false, title: '', message: '', type: 'info' });
 
@@ -329,12 +328,12 @@ export default function PopPage({ token: _token }: { token: string }) {
             <div>
               <p className="text-[10px] font-semibold text-text-muted mb-1.5">용지 방향</p>
               <div className="grid grid-cols-2 gap-1">
-                <button onClick={() => setOrientation('portrait')}
-                  className={`py-2 rounded-lg text-xs font-bold ${orientation === 'portrait' ? 'bg-primary-600 text-white' : 'bg-bg text-text-secondary'}`}>
+                <button onClick={() => setLandscape(false)}
+                  className={`py-2 rounded-lg text-xs font-bold ${!landscape ? 'bg-primary-600 text-white' : 'bg-bg text-text-secondary'}`}>
                   세로
                 </button>
-                <button onClick={() => setOrientation('landscape')}
-                  className={`py-2 rounded-lg text-xs font-bold ${orientation === 'landscape' ? 'bg-primary-600 text-white' : 'bg-bg text-text-secondary'}`}>
+                <button onClick={() => setLandscape(true)}
+                  className={`py-2 rounded-lg text-xs font-bold ${landscape ? 'bg-primary-600 text-white' : 'bg-bg text-text-secondary'}`}>
                   가로
                 </button>
               </div>
