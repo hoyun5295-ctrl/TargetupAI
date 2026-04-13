@@ -132,7 +132,7 @@ dmRouter.post('/upload-image', (req: any, res: any) => {
       const filePath = path.join(companyDir, filename);
       fs.writeFileSync(filePath, file.buffer);
       results.push({
-        url: `/api/dm/images/${companyId}/${filename}`,
+        url: `/api/flyer/p/dm-images/${companyId}/${filename}`,
         filename,
         size: file.size,
       });
@@ -236,7 +236,7 @@ dmRouter.post('/:id/publish', async (req: any, res: any) => {
     if (!result) return res.status(404).json({ error: 'DM을 찾을 수 없습니다.' });
     return res.json({
       short_code: result.short_code,
-      short_url: `https://hanjul-flyer.kr/d/${result.short_code}`,
+      short_url: `https://hanjul-flyer.kr/dm-${result.short_code}`,
     });
   } catch (err: any) {
     console.error('[DM발행] 오류:', err.message);

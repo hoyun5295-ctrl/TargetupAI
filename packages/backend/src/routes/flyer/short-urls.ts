@@ -10,8 +10,59 @@
 import { Request, Response, Router } from 'express';
 import { query } from '../../config/database';
 import { renderTemplate } from '../../utils/flyer/product/flyer-templates';
+import { getDmByCode, trackDmView } from '../../utils/dm/dm-builder';
+import { renderDmViewerHtml, renderDmErrorHtml } from '../../utils/dm/dm-viewer';
 
 const router = Router();
+
+// ============================================================
+// GET /dm-:code — 모바일 DM 공개 뷰어 (hanjul-flyer.kr/dm-코드)
+// ★ 전단 /:code 보다 먼저 등록하여 dm- prefix 우선 매칭
+// ============================================================
+router.get('/dm-:code', async (req: Request, res: Response) => {
+  try {
+    const dm = await getDmByCode(req.params.code);
+    if (!dm) return res.status(404).send(renderDmErrorHtml('존재하지 않는 DM입니다.'));
+
+    const phone = (req.query.p as string) || null;
+    const pages = Array.isArray(dm.pages) ? dm.pages : JSON.parse(dm.pages || '[]');
+    const ip = req.ip || req.socket?.remoteAddress || null;
+    const ua = req.headers['user-agent'] || null;
+    trackDmView(dm.id, dm.company_id, phone, 1, pages.length, 0, ip, ua).catch(() => {});
+
+    const html = renderDmViewerHtml(dm, '/api/flyer/p');
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
+  } catch (err: any) {
+    console.error('[DM뷰어] 오류:', err.message);
+    res.status(500).send(renderDmErrorHtml('일시적 오류가 발생했습니다.'));
+  }
+});
+
+// DM 열람 추적 (공개)
+router.post('/dm-:code/track', async (req: Request, res: Response) => {
+  try {
+    const dm = await getDmByCode(req.params.code);
+    if (!dm) return res.status(404).json({ error: 'Not found' });
+    const { phone, page_reached, total_pages, duration } = req.body;
+    const ip = req.ip || req.socket?.remoteAddress || null;
+    const ua = req.headers['user-agent'] || null;
+    await trackDmView(dm.id, dm.company_id, phone || null, page_reached || 1, total_pages || 0, duration || 0, ip, ua);
+    res.json({ ok: true });
+  } catch (err: any) {
+    console.error('[DM추적] 오류:', err.message);
+    res.status(500).json({ error: 'Internal error' });
+  }
+});
+
+// DM 이미지 서빙 (공개)
+router.get('/dm-images/:companyId/:filename', (req: Request, res: Response) => {
+  const path_ = require('path');
+  const fs_ = require('fs');
+  const filePath = path_.join(process.cwd(), 'uploads', 'dm-images', req.params.companyId, req.params.filename);
+  if (!fs_.existsSync(filePath)) return res.status(404).send('Not found');
+  res.sendFile(filePath);
+});
 
 // ============================================================
 // GET /:code — 전단지 공개 페이지 렌더링 + 클릭 로그

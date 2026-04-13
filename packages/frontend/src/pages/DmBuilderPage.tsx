@@ -218,7 +218,7 @@ export default function DmBuilderPage() {
 
   const copyUrl = () => {
     if (!shortCode) return;
-    navigator.clipboard.writeText(`https://hanjul-flyer.kr/d/${shortCode}`);
+    navigator.clipboard.writeText(`https://hanjul-flyer.kr/dm-${shortCode}`);
     showToast('success', 'URL이 복사되었습니다.');
   };
 
@@ -380,7 +380,7 @@ export default function DmBuilderPage() {
               <div className="bg-green-50 rounded-xl border border-green-200 p-4 space-y-2">
                 <div className="text-xs font-bold text-green-700">✅ 발행됨</div>
                 <div className="flex items-center gap-1.5">
-                  <input readOnly value={`https://hanjul-flyer.kr/d/${shortCode}`}
+                  <input readOnly value={`https://hanjul-flyer.kr/dm-${shortCode}`}
                     className="flex-1 border rounded px-2 py-1.5 text-xs bg-white text-gray-700 font-mono" />
                   <button onClick={copyUrl} className="px-2 py-1.5 bg-green-600 text-white text-xs rounded hover:bg-green-700">복사</button>
                 </div>

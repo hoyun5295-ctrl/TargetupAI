@@ -25,8 +25,8 @@ function youtubeEmbedUrl(url: string): string | null {
 
 function inlineImage(src: string): string {
   if (!src || src.startsWith('data:') || src.startsWith('http')) return src;
-  // /api/dm/images/{companyId}/{filename}
-  const m = src.match(/\/api\/dm\/images\/([^/]+)\/([^/]+)$/);
+  // /api/flyer/p/dm-images/{companyId}/{filename} 또는 /api/dm/images/{companyId}/{filename}
+  const m = src.match(/\/(?:api\/dm\/images|api\/flyer\/p\/dm-images)\/([^/]+)\/([^/]+)$/);
   if (!m) return src;
   const filePath = path.join(DM_IMAGE_DIR, m[1], m[2]);
   if (!fs.existsSync(filePath)) return src;
@@ -213,7 +213,7 @@ body{font-family:'Noto Sans KR',sans-serif;background:#fff;overflow-x:hidden;-we
   var current = 0;
   var startX = 0, diffX = 0, dragging = false;
   var startTime = Date.now();
-  var CODE = '${dm.short_code || ''}';
+  var CODE = 'dm-${dm.short_code || ''}';
   var TRACK_URL = '${trackApiBase}';
   var PHONE = new URLSearchParams(location.search).get('p') || '';
 
