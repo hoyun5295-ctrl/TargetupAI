@@ -17,6 +17,10 @@ import { flyerAuthenticate } from '../../middlewares/flyer-auth';
 // ★ D112: getStoreScope 제거. 전단AI는 store_code 없이 company_id 단위 격리.
 import { generateProductImage, generateFlyerImages, getGeneratedImageUrl } from '../../utils/product-images';
 import { LIMITS } from '../../config/defaults';
+import { generatePdfFromHtml } from '../../utils/flyer/flyer-pdf';
+import { renderFlyerPage } from './short-urls';
+import { renderPricePop } from '../../utils/flyer/flyer-pop-templates';
+import { classifyProducts } from '../../utils/flyer/flyer-category-classifier';
 
 const PRODUCT_IMAGE_DIR = process.env.PRODUCT_IMAGE_PATH || path.resolve('./uploads/product-images');
 const FLYER_PRODUCT_DIR = process.env.FLYER_PRODUCT_PATH || path.resolve('./uploads/flyer-products');
@@ -322,18 +326,18 @@ router.post('/', async (req: Request, res: Response) => {
     const companyId = requireCompanyId(req, res);
     if (!companyId) return;
     const { userId } = req.flyerUser!;
-    const { title, store_name, period_start, period_end, categories, template, logo_url, store_code } = req.body;
+    const { title, store_name, period_start, period_end, categories, template, logo_url, store_code, extra_data } = req.body;
 
     if (!title) {
       return res.status(400).json({ error: '행사명(title)은 필수입니다.' });
     }
 
     const result = await query(
-      `INSERT INTO flyers (company_id, user_id, store_code, title, store_name, period_start, period_end, categories, template, logo_url)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      `INSERT INTO flyers (company_id, user_id, store_code, title, store_name, period_start, period_end, categories, template, logo_url, extra_data)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
        RETURNING *`,
       [companyId, userId, store_code || null, title, store_name || null, period_start || null, period_end || null,
-       JSON.stringify(categories || []), template || 'grid', logo_url || null]
+       JSON.stringify(categories || []), template || 'grid', logo_url || null, JSON.stringify(extra_data || {})]
     );
 
     res.status(201).json(result.rows[0]);
@@ -492,7 +496,7 @@ router.put('/:id', async (req: Request, res: Response) => {
     const companyId = requireCompanyId(req, res);
     if (!companyId) return;
     const { id } = req.params;
-    const { title, store_name, period_start, period_end, categories, template, logo_url } = req.body;
+    const { title, store_name, period_start, period_end, categories, template, logo_url, extra_data } = req.body;
 
     const existing = await query('SELECT id, status FROM flyers WHERE id = $1 AND company_id = $2', [id, companyId]);
     if (existing.rows.length === 0) {
@@ -508,11 +512,13 @@ router.put('/:id', async (req: Request, res: Response) => {
         categories = COALESCE($7, categories),
         template = COALESCE($8, template),
         logo_url = COALESCE($9, logo_url),
+        extra_data = COALESCE($10, extra_data),
         updated_at = now()
        WHERE id = $1 AND company_id = $2
        RETURNING *`,
       [id, companyId, title || null, store_name || null, period_start || null, period_end || null,
-       categories ? JSON.stringify(categories) : null, template || null, logo_url || null]
+       categories ? JSON.stringify(categories) : null, template || null, logo_url || null,
+       extra_data ? JSON.stringify(extra_data) : null]
     );
 
     res.json(result.rows[0]);
@@ -648,6 +654,103 @@ router.get('/:id/stats', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[전단AI] 클릭 통계 조회 실패:', err.message);
     res.status(500).json({ error: '클릭 통계 조회에 실패했습니다.' });
+  }
+});
+
+// ══════════════════════════════════════════
+// POST /:id/pdf — 전단지 PDF 다운로드
+// ══════════════════════════════════════════
+router.post('/:id/pdf', async (req: Request, res: Response) => {
+  try {
+    const companyId = requireCompanyId(req, res);
+    if (!companyId) return;
+    const { id } = req.params;
+
+    // 전단지 조회 (short-urls.ts와 동일한 데이터 형식)
+    const result = await query(
+      `SELECT f.*,
+              TO_CHAR(f.period_start, 'YYYY-MM-DD') as period_start,
+              TO_CHAR(f.period_end, 'YYYY-MM-DD') as period_end
+       FROM flyers f
+       WHERE f.id = $1 AND f.company_id = $2`,
+      [id, companyId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: '전단지를 찾을 수 없습니다.' });
+    }
+
+    const flyer = result.rows[0];
+
+    // HTML 렌더링 (공개 페이지와 동일)
+    const html = await renderFlyerPage(flyer);
+
+    // PDF 변환
+    const pdfBuffer = await generatePdfFromHtml(html, {
+      format: 'A4',
+    });
+
+    const safeName = (flyer.title || 'flyer').replace(/[^가-힣a-zA-Z0-9_-]/g, '_').slice(0, 50);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(safeName)}.pdf"`);
+    res.setHeader('Content-Length', pdfBuffer.length);
+    res.send(pdfBuffer);
+  } catch (err: any) {
+    console.error('[전단AI] PDF 생성 실패:', err.message);
+    res.status(500).json({ error: 'PDF 생성에 실패했습니다.' });
+  }
+});
+
+// ══════════════════════════════════════════
+// POST /classify-products — 상품 자동 카테고리 분류
+// ══════════════════════════════════════════
+router.post('/classify-products', async (req: Request, res: Response) => {
+  try {
+    const companyId = requireCompanyId(req, res);
+    if (!companyId) return;
+
+    const { items, business_type } = req.body;
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: '상품 목록이 필요합니다.' });
+    }
+
+    const classified = await classifyProducts(
+      items.map((it: any) => ({ name: String(it.name || '').trim() })).filter((it: any) => it.name),
+      business_type || 'mart',
+      companyId
+    );
+
+    return res.json({ classified });
+  } catch (err: any) {
+    console.error('[전단AI] 자동 분류 실패:', err.message);
+    return res.status(500).json({ error: '자동 분류에 실패했습니다.' });
+  }
+});
+
+// ══════════════════════════════════════════
+// POST /pop-pdf — 상품 1개 가격POP PDF 다운로드
+// ══════════════════════════════════════════
+router.post('/pop-pdf', async (req: Request, res: Response) => {
+  try {
+    const companyId = requireCompanyId(req, res);
+    if (!companyId) return;
+
+    const { item, storeName, colorTheme } = req.body;
+    if (!item || !item.name || item.salePrice == null) {
+      return res.status(400).json({ error: '상품 정보(name, salePrice)가 필요합니다.' });
+    }
+
+    const html = renderPricePop(item, { storeName, colorTheme });
+    const pdfBuffer = await generatePdfFromHtml(html, { format: 'A4' });
+
+    const safeName = (item.name || 'pop').replace(/[^가-힣a-zA-Z0-9_-]/g, '_').slice(0, 30);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(safeName)}_POP.pdf"`);
+    res.setHeader('Content-Length', pdfBuffer.length);
+    res.send(pdfBuffer);
+  } catch (err: any) {
+    console.error('[전단AI] POP PDF 생성 실패:', err.message);
+    res.status(500).json({ error: 'POP PDF 생성에 실패했습니다.' });
   }
 });
 

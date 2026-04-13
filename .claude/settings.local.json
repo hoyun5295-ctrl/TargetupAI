@@ -135,7 +135,8 @@
       "Bash(npx -y http-server -p 9999 --cors -c-1)",
       "Bash(timeout 3)",
       "Bash(curl -s http://localhost:9999/test-tab.html)",
-      "mcp__Claude_Preview__preview_start"
+      "mcp__Claude_Preview__preview_start",
+      "WebFetch(domain:kr.pinterest.com)"
     ]
   }
 }

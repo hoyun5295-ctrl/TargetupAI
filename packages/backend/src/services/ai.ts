@@ -19,7 +19,7 @@ const openai = new OpenAI({
 // ============================================================
 // AI 호출 (Claude → gpt-5.1 자동 fallback)
 // ============================================================
-async function callAIWithFallback(params: {
+export async function callAIWithFallback(params: {
   system: string;
   userMessage: string;
   maxTokens: number;

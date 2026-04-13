@@ -38,89 +38,36 @@ export interface TemplateInfo {
 // ============================================================
 
 export const TEMPLATE_REGISTRY: Record<string, TemplateInfo> = {
-  // --- 공통 (모든 업종 사용 가능) ---
-  grid: {
-    value: 'grid',
-    label: '가격 강조형',
-    desc: '2열 카드 그리드, 가격 대형',
-    color: 'linear-gradient(to right, #ef4444, #f97316)',
-  },
-  magazine: {
-    value: 'magazine',
-    label: '매거진형',
-    desc: '1열 매거진 레이아웃, 대형 이미지',
-    color: 'linear-gradient(to right, #292524, #c2410c)',
-  },
-  editorial: {
-    value: 'editorial',
-    label: '에디토리얼',
-    desc: '풀블리드 이미지, 모던 타이포',
-    color: 'linear-gradient(to right, #0f172a, #334155)',
-  },
-  showcase: {
-    value: 'showcase',
-    label: '쇼케이스',
-    desc: '대형 싱글 카드, 절약액 표시',
-    color: 'linear-gradient(to right, #7c3aed, #ec4899)',
-  },
-  list: {
-    value: 'list',
-    label: '리스트형',
-    desc: '1열 매거진 (딥블루)',
-    color: 'linear-gradient(to right, #1d4ed8, #3b82f6)',
-  },
-  highlight: {
-    value: 'highlight',
-    label: '특가 하이라이트',
-    desc: '다크 쇼케이스, 옐로 강조',
-    color: 'linear-gradient(to right, #18181b, #facc15)',
-  },
+  // ━━ 기본 (8개 엔진 대표) ━━
+  grid:             { value: 'grid', label: '가격 강조형', desc: '2열 카드, 가격 대형 강조', color: 'linear-gradient(to right, #ef4444, #f97316)' },
+  magazine:         { value: 'magazine', label: '매거진형', desc: '1열 좌우교대, 대형 이미지', color: 'linear-gradient(to right, #292524, #c2410c)' },
+  editorial:        { value: 'editorial', label: '에디토리얼', desc: '첫상품 풀블리드 + 2열', color: 'linear-gradient(to right, #0f172a, #334155)' },
+  showcase:         { value: 'showcase', label: '쇼케이스', desc: '대형 싱글 카드, 절약액', color: 'linear-gradient(to right, #7c3aed, #ec4899)' },
+  highlight:        { value: 'highlight', label: '특가 하이라이트', desc: '다크+옐로, 임팩트 강조', color: 'linear-gradient(to right, #18181b, #facc15)' },
 
-  // --- 마트 전용 ---
-  mart_fresh: {
-    value: 'mart_fresh',
-    label: '신선식품 특화',
-    desc: '녹색 테마, 농산물 강조',
-    color: 'linear-gradient(to right, #22c55e, #059669)',
-  },
-  mart_weekend: {
-    value: 'mart_weekend',
-    label: '주말특가',
-    desc: '보라+핑크, 주말 행사',
-    color: 'linear-gradient(to right, #a855f7, #ec4899)',
-  },
-  mart_seasonal: {
-    value: 'mart_seasonal',
-    label: '시즌 행사',
-    desc: '파랑+시안, 명절/절기',
-    color: 'linear-gradient(to right, #3b82f6, #22d3ee)',
-  },
-  mart_clearance: {
-    value: 'mart_clearance',
-    label: '창고대방출',
-    desc: '노랑+빨강, 대량할인',
-    color: 'linear-gradient(to right, #eab308, #ef4444)',
-  },
+  // ━━ 시즌 (모든 업종 공통) ━━
+  season_newyear:   { value: 'season_newyear', label: '설날 특선', desc: '빨강+금색, 대형 쇼케이스', color: 'linear-gradient(to right, #dc2626, #ca8a04)' },
+  season_chuseok:   { value: 'season_chuseok', label: '추석 한가위', desc: '남색+주황, 풀블리드', color: 'linear-gradient(to right, #1e40af, #f59e0b)' },
+  season_summer:    { value: 'season_summer', label: '여름 시원특가', desc: '시안+블루, 3열 촘촘', color: 'linear-gradient(to right, #06b6d4, #0891b2)' },
+  season_winter:    { value: 'season_winter', label: '겨울 따뜻특가', desc: '딥로즈, 매거진형', color: 'linear-gradient(to right, #be123c, #fb7185)' },
+  season_christmas: { value: 'season_christmas', label: '크리스마스', desc: '그린+레드, 가로 스크롤', color: 'linear-gradient(to right, #15803d, #dc2626)' },
 
-  // --- 정육 전용 ---
-  butcher_premium: {
-    value: 'butcher_premium',
-    label: '프리미엄 정육',
-    desc: '다크+골드, 한우 특화',
-    color: 'linear-gradient(to right, #111827, #d97706)',
-  },
-  butcher_daily: {
-    value: 'butcher_daily',
-    label: '오늘의 고기',
-    desc: '빨강, 일일특가',
-    color: 'linear-gradient(to right, #dc2626, #f43f5e)',
-  },
-  butcher_bulk: {
-    value: 'butcher_bulk',
-    label: '대용량 팩',
-    desc: '네이비, 중량 강조',
-    color: 'linear-gradient(to right, #1e3a8a, #4f46e5)',
-  },
+  // ━━ 행사 유형 (모든 업종 공통) ━━
+  event_bogo:       { value: 'event_bogo', label: '1+1 / 2+1', desc: '오렌지, 2열 혜택 강조', color: 'linear-gradient(to right, #f97316, #ea580c)' },
+  event_timesale:   { value: 'event_timesale', label: '타임세일', desc: '블랙+레드, 가로 스크롤', color: 'linear-gradient(to right, #171717, #ef4444)' },
+  event_membership: { value: 'event_membership', label: '멤버십 데이', desc: '퍼플, 대+소 타일 교차', color: 'linear-gradient(to right, #7e22ce, #a855f7)' },
+  event_grand_open: { value: 'event_grand_open', label: '그랜드 오픈', desc: '블랙+골드, 풀블리드', color: 'linear-gradient(to right, #1c1917, #fbbf24)' },
+
+  // ━━ 마트 확장 ━━
+  mart_fresh:       { value: 'mart_fresh', label: '신선식품 특화', desc: '녹색, 2열 그리드', color: 'linear-gradient(to right, #22c55e, #059669)' },
+  mart_clearance:   { value: 'mart_clearance', label: '창고대방출', desc: '노랑+빨강, 3열 촘촘', color: 'linear-gradient(to right, #eab308, #ef4444)' },
+  mart_general:     { value: 'mart_general', label: '공산품 특가', desc: '슬레이트, 3열 깔끔', color: 'linear-gradient(to right, #475569, #6366f1)' },
+  mart_seafood:     { value: 'mart_seafood', label: '수산 코너', desc: '딥블루, 대형배너+리스트', color: 'linear-gradient(to right, #1d4ed8, #3b82f6)' },
+
+  // ━━ 정육 확장 ━━
+  butcher_premium:  { value: 'butcher_premium', label: '프리미엄 정육', desc: '다크+골드, 매거진형', color: 'linear-gradient(to right, #111827, #d97706)' },
+  butcher_hanwoo:   { value: 'butcher_hanwoo', label: '한우 전문', desc: '블랙+앰버, 대형배너', color: 'linear-gradient(to right, #1c1917, #f59e0b)' },
+  butcher_giftset:  { value: 'butcher_giftset', label: '선물세트', desc: '앰버+골드, 타일 교차', color: 'linear-gradient(to right, #92400e, #d97706)' },
 };
 
 // ============================================================
@@ -192,7 +139,11 @@ export async function getCategoryPresets(typeCode: string): Promise<string[]> {
  */
 export async function getAvailableTemplates(typeCode: string): Promise<TemplateInfo[]> {
   // 공통 템플릿 (모든 업종 사용 가능)
-  const commonCodes = ['grid', 'magazine', 'editorial', 'showcase', 'list', 'highlight'];
+  const commonCodes = [
+    'grid', 'magazine', 'editorial', 'showcase', 'highlight',
+    'season_newyear', 'season_chuseok', 'season_summer', 'season_winter', 'season_christmas',
+    'event_bogo', 'event_timesale', 'event_membership', 'event_grand_open',
+  ];
 
   // 업종별 prefix로 매칭 (mart_ → 마트, butcher_ → 정육)
   const prefixMap: Record<string, string> = {

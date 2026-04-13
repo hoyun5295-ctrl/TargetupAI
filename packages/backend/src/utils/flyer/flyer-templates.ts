@@ -26,6 +26,12 @@ export interface FlyerRenderData {
   categories: Array<{ name: string; items: FlyerRenderItem[] }>;
   qrCodeDataUrl?: string;
   qrCouponText?: string;
+  /** 외부 링크 (밴드/쇼핑몰/전화/지도/인스타/블로그) */
+  externalLinks?: Array<{ label: string; url: string; icon: string }>;
+  /** 공지사항/게시판 */
+  announcements?: Array<{ title: string; content: string }>;
+  /** GIF 배너 URL */
+  bannerGifUrl?: string;
 }
 
 export interface FlyerRenderItem {
@@ -40,6 +46,8 @@ export interface FlyerRenderItem {
   origin?: string;
   /** 카드할인 (e.g. "농협카드 5% 추가", "삼성카드 10%") */
   cardDiscount?: string;
+  /** AI 마케팅 문구 (e.g. "🍖 겉바속촉! 에어프라이어 180도 15분이면 완성") */
+  aiCopy?: string;
 }
 
 function esc(str: string): string {
@@ -80,6 +88,54 @@ function renderCardDiscount(item: FlyerRenderItem, iconColor: string): string {
   return `<div class="cd"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="${iconColor}" stroke-width="2.5"><rect x="1" y="4" width="22" height="16" rx="3"/><path d="M1 10h22"/></svg><span>${esc(item.cardDiscount)}</span></div>`;
 }
 
+function renderAiCopy(item: FlyerRenderItem, color: string): string {
+  if (!item.aiCopy) return '';
+  return `<p class="ac">${esc(item.aiCopy)}</p>`;
+}
+
+// ============================================================
+// 다이나믹 섹션 (외부링크 + 공지 + GIF 배너)
+// ============================================================
+
+const LINK_ICONS: Record<string, string> = {
+  band: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v8M8 12h8"/></svg>',
+  shop: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 01-8 0"/></svg>',
+  phone: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>',
+  map: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>',
+  instagram: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="20" rx="5"/><path d="M16 11.37A4 4 0 1112.63 8 4 4 0 0116 11.37z"/><circle cx="17.5" cy="6.5" r="1.5"/></svg>',
+  blog: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z"/><path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z"/></svg>',
+  link: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>',
+};
+
+function renderDynamicSection(d: FlyerRenderData): string {
+  const parts: string[] = [];
+
+  // GIF 배너
+  if (d.bannerGifUrl) {
+    parts.push(`<div class="dyn-gif"><img src="${esc(d.bannerGifUrl)}" alt="배너" style="width:100%;border-radius:12px"/></div>`);
+  }
+
+  // 외부 링크
+  if (d.externalLinks && d.externalLinks.length > 0) {
+    const links = d.externalLinks.map(l => {
+      const icon = LINK_ICONS[l.icon] || LINK_ICONS.link;
+      return `<a href="${esc(l.url)}" target="_blank" rel="noopener noreferrer" class="dyn-link">${icon}<span>${esc(l.label)}</span></a>`;
+    }).join('');
+    parts.push(`<div class="dyn-links">${links}</div>`);
+  }
+
+  // 공지사항
+  if (d.announcements && d.announcements.length > 0) {
+    const items = d.announcements.map(a =>
+      `<details class="dyn-ann"><summary>${esc(a.title)}</summary><p>${esc(a.content)}</p></details>`
+    ).join('');
+    parts.push(`<div class="dyn-anns"><div class="dyn-anns-title">공지사항</div>${items}</div>`);
+  }
+
+  if (parts.length === 0) return '';
+  return `<div class="dyn-section">${parts.join('')}</div>`;
+}
+
 // ============================================================
 // 공통 HTML 베이스 (head + body 감싸기)
 // ============================================================
@@ -106,6 +162,23 @@ body{max-width:480px;margin:0 auto;overflow-x:clip}
 /* 카드할인 */
 .cd{display:flex;align-items:center;gap:4px;margin-top:6px;font-size:10px;font-weight:700;color:#16a34a}
 .cd svg{flex-shrink:0}
+/* AI 마케팅 문구 */
+.ac{font-size:11px;color:#666;margin-top:4px;line-height:1.4;letter-spacing:-0.2px}
+/* 다이나믹 섹션 */
+.dyn-section{padding:16px 12px}
+.dyn-gif{margin-bottom:12px}
+.dyn-links{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-bottom:12px}
+.dyn-link{display:flex;flex-direction:column;align-items:center;gap:4px;padding:10px 14px;border-radius:12px;background:#f5f5f5;text-decoration:none;color:#333;font-size:11px;font-weight:600;min-width:72px;transition:background .2s}
+.dyn-link:active{background:#e5e5e5}
+.dyn-anns{margin-bottom:8px}.dyn-anns-title{font-size:13px;font-weight:700;margin-bottom:8px;color:#333}
+.dyn-ann{background:#f9fafb;border-radius:10px;margin-bottom:6px;border:1px solid #e5e7eb}
+.dyn-ann summary{padding:10px 14px;font-size:12px;font-weight:600;color:#374151;cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center}
+.dyn-ann summary::after{content:'▸';font-size:10px;color:#9ca3af;transition:transform .2s}
+.dyn-ann[open] summary::after{transform:rotate(90deg)}
+.dyn-ann p{padding:0 14px 10px;font-size:11px;color:#6b7280;line-height:1.6}
+/* 인쇄/PDF 최적화 */
+@media print{body{max-width:none;margin:0}img{-webkit-print-color-adjust:exact;print-color-adjust:exact}.nav{position:static!important}}
+@page{margin:8mm}
 ${css}
 </style>
 </head>
@@ -288,6 +361,191 @@ const THEMES: Record<string, Theme> = {
     heroAccent: 'rgba(99,102,241,.12)', borderColor: '#c4b5fd',
     chipBg: '#ede9fe', chipColor: '#4338ca', cardDiscountColor: '#059669',
   },
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // 시즌 테마 (6개) — 모든 업종 공통
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  season_newyear: {
+    name: '설날 특선', bg: '#fef2f2', cardBg: '#fff', textColor: '#1a1a1a', textSub: '#78350f', textMuted: '#a16207',
+    heroGradient: 'linear-gradient(145deg,#991b1b 0%,#b91c1c 30%,#dc2626 100%)',
+    heroPattern: 'radial-gradient(circle at 80% 30%,rgba(234,179,8,.35) 0%,transparent 50%),radial-gradient(circle at 20% 80%,rgba(234,179,8,.2) 0%,transparent 40%)',
+    priceColor: '#b91c1c', badgeGradient: 'linear-gradient(135deg,#dc2626,#ca8a04)', badgeShadow: 'rgba(185,28,28,.35)',
+    catIconGradient: 'linear-gradient(135deg,#dc2626,#ca8a04)', tabActiveColor: '#b91c1c',
+    tagColors: { red: '#dc2626', gold: '#ca8a04', blue: '#b91c1c' }, emojiBg: 'linear-gradient(145deg,#fef2f2,#fef9c3)',
+    heroAccent: 'rgba(234,179,8,.2)', borderColor: '#fde68a',
+    chipBg: '#fef9c3', chipColor: '#92400e', cardDiscountColor: '#b91c1c',
+  },
+  season_chuseok: {
+    name: '추석 한가위', bg: '#fffbeb', cardBg: '#fff', textColor: '#1c1917', textSub: '#57534e', textMuted: '#a8a29e',
+    heroGradient: 'linear-gradient(160deg,#1e3a5f 0%,#1e40af 40%,#3b82f6 100%)',
+    heroPattern: 'radial-gradient(circle at 50% 30%,rgba(251,191,36,.3) 0%,transparent 50%)',
+    priceColor: '#1e40af', badgeGradient: 'linear-gradient(135deg,#f59e0b,#d97706)', badgeShadow: 'rgba(245,158,11,.35)',
+    catIconGradient: 'linear-gradient(135deg,#2563eb,#1e40af)', tabActiveColor: '#1e40af',
+    tagColors: { red: '#dc2626', gold: '#d97706', blue: '#1e40af' }, emojiBg: 'linear-gradient(145deg,#fffbeb,#fef3c7)',
+    heroAccent: 'rgba(251,191,36,.15)', borderColor: '#fde68a',
+    chipBg: '#fef3c7', chipColor: '#92400e', cardDiscountColor: '#059669',
+  },
+  season_summer: {
+    name: '여름 시원특가', bg: '#ecfeff', cardBg: '#fff', textColor: '#164e63', textSub: '#155e75', textMuted: '#67e8f9',
+    heroGradient: 'linear-gradient(145deg,#0891b2 0%,#06b6d4 40%,#22d3ee 100%)',
+    heroPattern: 'radial-gradient(circle at 70% 20%,rgba(56,189,248,.3) 0%,transparent 50%),radial-gradient(circle at 20% 80%,rgba(34,211,238,.2) 0%,transparent 40%)',
+    priceColor: '#0e7490', badgeGradient: 'linear-gradient(135deg,#06b6d4,#0891b2)', badgeShadow: 'rgba(8,145,178,.35)',
+    catIconGradient: 'linear-gradient(135deg,#06b6d4,#22d3ee)', tabActiveColor: '#0891b2',
+    tagColors: { red: '#dc2626', gold: '#b45309', blue: '#0891b2' }, emojiBg: 'linear-gradient(145deg,#ecfeff,#cffafe)',
+    heroAccent: 'rgba(34,211,238,.15)', borderColor: '#a5f3fc',
+    chipBg: '#cffafe', chipColor: '#155e75', cardDiscountColor: '#dc2626',
+  },
+  season_winter: {
+    name: '겨울 따뜻특가', bg: '#fff1f2', cardBg: '#fff', textColor: '#1c1917', textSub: '#57534e', textMuted: '#a8a29e',
+    heroGradient: 'linear-gradient(160deg,#881337 0%,#be123c 40%,#e11d48 100%)',
+    heroPattern: 'radial-gradient(circle at 30% 70%,rgba(251,113,133,.2) 0%,transparent 50%)',
+    priceColor: '#be123c', badgeGradient: 'linear-gradient(135deg,#e11d48,#be123c)', badgeShadow: 'rgba(190,18,60,.3)',
+    catIconGradient: 'linear-gradient(135deg,#e11d48,#fb7185)', tabActiveColor: '#be123c',
+    tagColors: { red: '#e11d48', gold: '#b45309', blue: '#7c3aed' }, emojiBg: 'linear-gradient(145deg,#fff1f2,#ffe4e6)',
+    heroAccent: 'rgba(251,113,133,.1)', borderColor: '#fecdd3',
+    chipBg: '#ffe4e6', chipColor: '#9f1239', cardDiscountColor: '#059669',
+  },
+  season_christmas: {
+    name: '크리스마스', bg: '#052e16', cardBg: '#14532d', textColor: '#f0fdf4', textSub: '#86efac', textMuted: '#4ade80',
+    heroGradient: 'linear-gradient(145deg,#14532d 0%,#166534 40%,#15803d 100%)',
+    heroPattern: 'radial-gradient(circle at 80% 20%,rgba(220,38,38,.25) 0%,transparent 50%),radial-gradient(circle at 20% 80%,rgba(234,179,8,.15) 0%,transparent 40%)',
+    priceColor: '#fbbf24', badgeGradient: 'linear-gradient(135deg,#dc2626,#b91c1c)', badgeShadow: 'rgba(220,38,38,.3)',
+    catIconGradient: 'linear-gradient(135deg,#dc2626,#fbbf24)', tabActiveColor: '#fbbf24',
+    tagColors: { red: '#ef4444', gold: '#fbbf24', blue: '#86efac' }, emojiBg: 'linear-gradient(145deg,#14532d,#166534)',
+    isDark: true, heroAccent: 'rgba(220,38,38,.1)', borderColor: '#166534',
+    chipBg: 'rgba(220,38,38,.15)', chipColor: '#fca5a5', cardDiscountColor: '#fbbf24',
+  },
+  season_spring: {
+    name: '봄맞이 행사', bg: '#fdf2f8', cardBg: '#fff', textColor: '#1a1a1a', textSub: '#6b7280', textMuted: '#d946ef',
+    heroGradient: 'linear-gradient(145deg,#ec4899 0%,#d946ef 40%,#a855f7 100%)',
+    heroPattern: 'radial-gradient(circle at 30% 70%,rgba(244,114,182,.25) 0%,transparent 50%),radial-gradient(circle at 80% 20%,rgba(192,132,252,.2) 0%,transparent 40%)',
+    priceColor: '#c026d3', badgeGradient: 'linear-gradient(135deg,#ec4899,#d946ef)', badgeShadow: 'rgba(217,70,239,.3)',
+    catIconGradient: 'linear-gradient(135deg,#ec4899,#a855f7)', tabActiveColor: '#c026d3',
+    tagColors: { red: '#e11d48', gold: '#d97706', blue: '#9333ea' }, emojiBg: 'linear-gradient(145deg,#fdf2f8,#fae8ff)',
+    heroAccent: 'rgba(192,132,252,.12)', borderColor: '#f0abfc',
+    chipBg: '#fae8ff', chipColor: '#86198f', cardDiscountColor: '#059669',
+  },
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // 행사 유형 테마 (5개) — 모든 업종 공통
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  event_bogo: {
+    name: '1+1 / 2+1', bg: '#fff7ed', cardBg: '#fff', textColor: '#1a1a1a', textSub: '#92400e', textMuted: '#b45309',
+    heroGradient: 'linear-gradient(145deg,#c2410c 0%,#ea580c 40%,#f97316 100%)',
+    heroPattern: 'radial-gradient(circle at 20% 80%,rgba(251,146,60,.3) 0%,transparent 50%)',
+    priceColor: '#c2410c', badgeGradient: 'linear-gradient(135deg,#f97316,#ea580c)', badgeShadow: 'rgba(234,88,12,.35)',
+    catIconGradient: 'linear-gradient(135deg,#f97316,#ea580c)', tabActiveColor: '#ea580c',
+    tagColors: { red: '#dc2626', gold: '#ea580c', blue: '#1d4ed8' }, emojiBg: 'linear-gradient(145deg,#fff7ed,#ffedd5)',
+    heroAccent: 'rgba(251,146,60,.15)', borderColor: '#fed7aa',
+    chipBg: '#ffedd5', chipColor: '#9a3412', cardDiscountColor: '#15803d',
+  },
+  event_timesale: {
+    name: '타임세일', bg: '#0f0f0f', cardBg: '#1a1a1a', textColor: '#fafafa', textSub: '#a3a3a3', textMuted: '#737373',
+    heroGradient: 'linear-gradient(145deg,#0a0a0a 0%,#171717 40%,#1f1f1f 100%)',
+    heroPattern: 'radial-gradient(circle at 50% 50%,rgba(239,68,68,.12) 0%,transparent 60%)',
+    priceColor: '#ef4444', badgeGradient: 'linear-gradient(135deg,#ef4444,#dc2626)', badgeShadow: 'rgba(239,68,68,.3)',
+    catIconGradient: 'linear-gradient(135deg,#ef4444,#f87171)', tabActiveColor: '#ef4444',
+    tagColors: { red: '#ef4444', gold: '#fbbf24', blue: '#60a5fa' }, emojiBg: 'linear-gradient(145deg,#171717,#262626)',
+    isDark: true, heroAccent: 'rgba(239,68,68,.08)', borderColor: '#262626',
+    chipBg: 'rgba(239,68,68,.12)', chipColor: '#f87171', cardDiscountColor: '#4ade80',
+  },
+  event_membership: {
+    name: '멤버십 데이', bg: '#faf5ff', cardBg: '#fff', textColor: '#1a1a1a', textSub: '#6b21a8', textMuted: '#a78bfa',
+    heroGradient: 'linear-gradient(145deg,#581c87 0%,#7e22ce 40%,#9333ea 100%)',
+    heroPattern: 'radial-gradient(circle at 80% 30%,rgba(192,132,252,.25) 0%,transparent 50%),radial-gradient(circle at 20% 70%,rgba(168,85,247,.15) 0%,transparent 40%)',
+    priceColor: '#7e22ce', badgeGradient: 'linear-gradient(135deg,#9333ea,#7e22ce)', badgeShadow: 'rgba(126,34,206,.3)',
+    catIconGradient: 'linear-gradient(135deg,#9333ea,#a855f7)', tabActiveColor: '#7e22ce',
+    tagColors: { red: '#dc2626', gold: '#d97706', blue: '#7e22ce' }, emojiBg: 'linear-gradient(145deg,#faf5ff,#f3e8ff)',
+    heroAccent: 'rgba(168,85,247,.1)', borderColor: '#e9d5ff',
+    chipBg: '#f3e8ff', chipColor: '#6b21a8', cardDiscountColor: '#059669',
+  },
+  event_coupon: {
+    name: '할인쿠폰 특가', bg: '#f0fdf4', cardBg: '#fff', textColor: '#1a1a1a', textSub: '#166534', textMuted: '#4ade80',
+    heroGradient: 'linear-gradient(145deg,#166534 0%,#15803d 40%,#16a34a 100%)',
+    heroPattern: 'radial-gradient(circle at 70% 30%,rgba(250,204,21,.25) 0%,transparent 50%)',
+    priceColor: '#15803d', badgeGradient: 'linear-gradient(135deg,#16a34a,#ca8a04)', badgeShadow: 'rgba(22,163,74,.3)',
+    catIconGradient: 'linear-gradient(135deg,#16a34a,#ca8a04)', tabActiveColor: '#15803d',
+    tagColors: { red: '#dc2626', gold: '#ca8a04', blue: '#16a34a' }, emojiBg: 'linear-gradient(145deg,#f0fdf4,#dcfce7)',
+    heroAccent: 'rgba(250,204,21,.12)', borderColor: '#bbf7d0',
+    chipBg: '#dcfce7', chipColor: '#14532d', cardDiscountColor: '#ca8a04',
+  },
+  event_grand_open: {
+    name: '그랜드 오픈', bg: '#0c0a09', cardBg: '#1c1917', textColor: '#fafaf9', textSub: '#d6d3d1', textMuted: '#a8a29e',
+    heroGradient: 'linear-gradient(160deg,#0c0a09 0%,#1c1917 40%,#292524 100%)',
+    heroPattern: 'radial-gradient(circle at 50% 50%,rgba(234,179,8,.12) 0%,transparent 50%),radial-gradient(circle at 80% 20%,rgba(217,119,6,.08) 0%,transparent 40%)',
+    priceColor: '#fbbf24', badgeGradient: 'linear-gradient(135deg,#fbbf24,#d97706)', badgeShadow: 'rgba(251,191,36,.3)',
+    catIconGradient: 'linear-gradient(135deg,#fbbf24,#f59e0b)', tabActiveColor: '#fbbf24',
+    tagColors: { red: '#ef4444', gold: '#fbbf24', blue: '#93c5fd' }, emojiBg: 'linear-gradient(145deg,#1c1917,#292524)',
+    isDark: true, heroAccent: 'rgba(234,179,8,.08)', borderColor: '#44403c',
+    chipBg: 'rgba(251,191,36,.12)', chipColor: '#fbbf24', cardDiscountColor: '#4ade80',
+  },
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // 업종 확장 테마 (6개)
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  mart_seafood: {
+    name: '수산 코너', bg: '#eff6ff', cardBg: '#fff', textColor: '#1e3a5f', textSub: '#1e40af', textMuted: '#93c5fd',
+    heroGradient: 'linear-gradient(145deg,#1e3a8a 0%,#1d4ed8 40%,#2563eb 100%)',
+    heroPattern: 'radial-gradient(circle at 80% 80%,rgba(59,130,246,.2) 0%,transparent 50%)',
+    priceColor: '#1d4ed8', badgeGradient: 'linear-gradient(135deg,#2563eb,#1d4ed8)', badgeShadow: 'rgba(29,78,216,.35)',
+    catIconGradient: 'linear-gradient(135deg,#3b82f6,#2563eb)', tabActiveColor: '#1d4ed8',
+    tagColors: { red: '#dc2626', gold: '#b45309', blue: '#1d4ed8' }, emojiBg: 'linear-gradient(145deg,#eff6ff,#dbeafe)',
+    heroAccent: 'rgba(59,130,246,.1)', borderColor: '#bfdbfe',
+    chipBg: '#dbeafe', chipColor: '#1e40af', cardDiscountColor: '#dc2626',
+  },
+  mart_produce: {
+    name: '청과 코너', bg: '#fefce8', cardBg: '#fff', textColor: '#1a1a1a', textSub: '#4d7c0f', textMuted: '#84cc16',
+    heroGradient: 'linear-gradient(145deg,#3f6212 0%,#4d7c0f 40%,#65a30d 100%)',
+    heroPattern: 'radial-gradient(circle at 30% 70%,rgba(163,230,53,.2) 0%,transparent 50%),radial-gradient(circle at 70% 20%,rgba(250,204,21,.15) 0%,transparent 40%)',
+    priceColor: '#4d7c0f', badgeGradient: 'linear-gradient(135deg,#84cc16,#65a30d)', badgeShadow: 'rgba(77,124,15,.3)',
+    catIconGradient: 'linear-gradient(135deg,#84cc16,#65a30d)', tabActiveColor: '#4d7c0f',
+    tagColors: { red: '#dc2626', gold: '#ca8a04', blue: '#4d7c0f' }, emojiBg: 'linear-gradient(145deg,#fefce8,#ecfccb)',
+    heroAccent: 'rgba(163,230,53,.12)', borderColor: '#d9f99d',
+    chipBg: '#ecfccb', chipColor: '#3f6212', cardDiscountColor: '#dc2626',
+  },
+  mart_general: {
+    name: '공산품 특가', bg: '#f8fafc', cardBg: '#fff', textColor: '#1e293b', textSub: '#475569', textMuted: '#94a3b8',
+    heroGradient: 'linear-gradient(145deg,#334155 0%,#475569 40%,#64748b 100%)',
+    heroPattern: 'radial-gradient(circle at 20% 80%,rgba(99,102,241,.12) 0%,transparent 50%)',
+    priceColor: '#dc2626', badgeGradient: 'linear-gradient(135deg,#475569,#334155)', badgeShadow: 'rgba(51,65,85,.3)',
+    catIconGradient: 'linear-gradient(135deg,#6366f1,#4f46e5)', tabActiveColor: '#4f46e5',
+    tagColors: { red: '#dc2626', gold: '#b45309', blue: '#4f46e5' }, emojiBg: 'linear-gradient(145deg,#f8fafc,#f1f5f9)',
+    heroAccent: 'rgba(99,102,241,.06)', borderColor: '#e2e8f0',
+    chipBg: '#f1f5f9', chipColor: '#334155', cardDiscountColor: '#16a34a',
+  },
+  butcher_hanwoo: {
+    name: '한우 전문', bg: '#1c1917', cardBg: '#292524', textColor: '#fafaf9', textSub: '#e7e5e4', textMuted: '#a8a29e',
+    heroGradient: 'linear-gradient(160deg,#0c0a09 0%,#1c1917 50%,#292524 100%)',
+    heroPattern: 'radial-gradient(ellipse at 50% 50%,rgba(180,83,9,.1) 0%,transparent 60%),radial-gradient(circle at 80% 20%,rgba(217,119,6,.08) 0%,transparent 40%)',
+    priceColor: '#f59e0b', badgeGradient: 'linear-gradient(135deg,#f59e0b,#d97706)', badgeShadow: 'rgba(245,158,11,.3)',
+    catIconGradient: 'linear-gradient(135deg,#f59e0b,#d97706)', tabActiveColor: '#f59e0b',
+    tagColors: { red: '#ef4444', gold: '#f59e0b', blue: '#93c5fd' }, emojiBg: 'linear-gradient(145deg,#292524,#44403c)',
+    isDark: true, heroAccent: 'rgba(180,83,9,.08)', borderColor: '#44403c',
+    chipBg: 'rgba(245,158,11,.12)', chipColor: '#fbbf24', cardDiscountColor: '#4ade80',
+  },
+  butcher_import: {
+    name: '수입육 특가', bg: '#f8fafc', cardBg: '#fff', textColor: '#0f172a', textSub: '#334155', textMuted: '#64748b',
+    heroGradient: 'linear-gradient(145deg,#0f172a 0%,#1e293b 40%,#334155 100%)',
+    heroPattern: 'radial-gradient(circle at 80% 30%,rgba(239,68,68,.15) 0%,transparent 50%)',
+    priceColor: '#dc2626', badgeGradient: 'linear-gradient(135deg,#dc2626,#0f172a)', badgeShadow: 'rgba(15,23,42,.3)',
+    catIconGradient: 'linear-gradient(135deg,#dc2626,#ef4444)', tabActiveColor: '#dc2626',
+    tagColors: { red: '#dc2626', gold: '#b45309', blue: '#1e40af' }, emojiBg: 'linear-gradient(145deg,#f8fafc,#f1f5f9)',
+    heroAccent: 'rgba(239,68,68,.06)', borderColor: '#e2e8f0',
+    chipBg: '#fee2e2', chipColor: '#991b1b', cardDiscountColor: '#059669',
+  },
+  butcher_giftset: {
+    name: '선물세트', bg: '#fdf2f8', cardBg: '#fff', textColor: '#1c1917', textSub: '#78350f', textMuted: '#b45309',
+    heroGradient: 'linear-gradient(160deg,#78350f 0%,#92400e 30%,#b45309 100%)',
+    heroPattern: 'radial-gradient(circle at 70% 30%,rgba(234,179,8,.25) 0%,transparent 50%),radial-gradient(circle at 20% 80%,rgba(180,83,9,.15) 0%,transparent 40%)',
+    priceColor: '#92400e', badgeGradient: 'linear-gradient(135deg,#d97706,#b45309)', badgeShadow: 'rgba(146,64,14,.35)',
+    catIconGradient: 'linear-gradient(135deg,#d97706,#f59e0b)', tabActiveColor: '#b45309',
+    tagColors: { red: '#dc2626', gold: '#d97706', blue: '#7c3aed' }, emojiBg: 'linear-gradient(145deg,#fffbeb,#fef3c7)',
+    heroAccent: 'rgba(234,179,8,.12)', borderColor: '#fde68a',
+    chipBg: '#fef3c7', chipColor: '#78350f', cardDiscountColor: '#059669',
+  },
 };
 
 // ============================================================
@@ -337,6 +595,7 @@ function renderGridEngine(d: FlyerRenderData, t: Theme): string {
           ${hasOrig ? `<p class="co">${fmtPrice(item.originalPrice)}원</p>` : ''}
           <p class="cp"><span class="pn">${fmtPrice(item.salePrice || 0)}</span><span class="pw">원</span></p>
           ${renderCardDiscount(item, t.cardDiscountColor)}
+          ${renderAiCopy(item, t.textSub)}
           ${item.badge ? `<span class="tg ${tagType}">${esc(item.badge)}</span>` : ''}
         </div>
       </div>`;
@@ -451,6 +710,7 @@ function renderMagazineEngine(d: FlyerRenderData, t: Theme): string {
           ${hasOrig ? `<p class="mo">${fmtPrice(item.originalPrice)}원</p>` : ''}
           <div class="mp"><span class="mp-n">${fmtPrice(item.salePrice || 0)}</span><span class="mp-w">원</span></div>
           ${renderCardDiscount(item, t.cardDiscountColor)}
+          ${renderAiCopy(item, t.textSub)}
           ${item.badge ? `<span class="tg ${tagType}">${esc(item.badge)}</span>` : ''}
         </div>
         <div class="mi">${img}</div>
@@ -570,6 +830,7 @@ function renderEditorialEngine(d: FlyerRenderData, t: Theme): string {
             ${hasOrig ? `<p class="ef-og">정가 ${fmtPrice(item.originalPrice)}원</p>` : ''}
             <div class="ef-pr"><span class="ef-pn">${fmtPrice(item.salePrice || 0)}</span><span class="ef-pw">원</span></div>
             ${renderCardDiscount(item, '#4ade80')}
+            ${renderAiCopy(item, 'rgba(255,255,255,.7)')}
           </div>
         </div>`;
       } else {
@@ -582,6 +843,7 @@ function renderEditorialEngine(d: FlyerRenderData, t: Theme): string {
             ${hasOrig ? `<p class="ec-og">${fmtPrice(item.originalPrice)}원</p>` : ''}
             <div class="ec-pr"><span class="ec-pn">${fmtPrice(item.salePrice || 0)}</span><span class="ec-pw">원</span></div>
             ${renderCardDiscount(item, t.cardDiscountColor)}
+            ${renderAiCopy(item, t.textSub)}
             ${item.badge ? `<span class="tg ${tagType}">${esc(item.badge)}</span>` : ''}
           </div>
         </div>`;
@@ -711,6 +973,7 @@ function renderShowcaseEngine(d: FlyerRenderData, t: Theme): string {
             </div>` : ''}
           </div>
           ${renderCardDiscount(item, t.cardDiscountColor)}
+          ${renderAiCopy(item, t.textSub)}
         </div>
       </div>`;
     }
@@ -801,30 +1064,322 @@ ${darkMod}
 }
 
 // ============================================================
-// 렌더러 맵 — 4개 엔진 × 다양한 테마 조합
+// 엔진 5: COMPACT — 3열 소형 카드 (촘촘한 가격 나열)
+// ============================================================
+
+function renderCompactEngine(d: FlyerRenderData, t: Theme): string {
+  const catTabs = renderCatTabs(d);
+  let sections = '';
+  for (let ci = 0; ci < d.categories.length; ci++) {
+    const cat = d.categories[ci];
+    let cards = '';
+    for (const item of (cat.items || [])) {
+      const img = resolveImg(item.name || '', 120, item.imageUrl);
+      const disc = calcDisc(item.originalPrice, item.salePrice);
+      const hasOrig = item.originalPrice > 0 && item.originalPrice !== item.salePrice;
+      cards += `<div class="cc">
+        <div class="cc-img">${disc > 0 ? `<span class="cc-bd">${disc}%</span>` : ''}${img}</div>
+        <p class="cc-nm">${esc(item.name || '')}</p>
+        ${hasOrig ? `<p class="cc-og">${fmtPrice(item.originalPrice)}원</p>` : ''}
+        <p class="cc-pr"><span class="cc-pn">${fmtPrice(item.salePrice || 0)}</span><span class="cc-pw">원</span></p>
+        ${renderAiCopy(item, t.textSub)}
+      </div>`;
+    }
+    sections += `<section class="sc" id="s${ci}">
+      <div class="sh"><span class="si" style="background:${t.catIconGradient}"></span><span class="sn" style="color:${t.textColor}">${esc(cat.name)}</span></div>
+      <div class="cg">${cards}</div>
+    </section>`;
+  }
+  const css = `
+.h{background:${t.heroGradient};${t.heroPattern ? `background-image:${t.heroPattern},${t.heroGradient};` : ''}color:#fff;padding:28px 20px 20px;text-align:center;position:relative;overflow:hidden}
+.hs{font-size:11px;opacity:.7;letter-spacing:2px;margin-bottom:6px}.ht{font-size:22px;font-weight:800;line-height:1.3}.hp{font-size:12px;opacity:.8;margin-top:8px;display:inline-flex;align-items:center;gap:4px}
+.nav{background:${t.cardBg};position:sticky;top:0;z-index:10;border-bottom:1px solid ${t.borderColor};box-shadow:0 1px 4px rgba(0,0,0,.05)}
+.ni{display:flex;overflow-x:auto;gap:0;scrollbar-width:none;-webkit-overflow-scrolling:touch}.ni::-webkit-scrollbar{display:none}
+.ct{flex-shrink:0;padding:10px 16px;font-size:12px;font-weight:600;color:${t.textMuted};border-bottom:2px solid transparent;white-space:nowrap;text-decoration:none}
+.ct.on{color:${t.tabActiveColor};border-bottom-color:${t.tabActiveColor}}
+.w{padding:12px 10px;background:${t.bg}}
+.sh{display:flex;align-items:center;gap:8px;padding:12px 4px 8px}.si{width:4px;height:18px;border-radius:2px;flex-shrink:0}.sn{font-size:14px;font-weight:700}
+.cg{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.cc{background:${t.cardBg};border-radius:10px;padding:8px;border:1px solid ${t.borderColor};text-align:center}
+.cc-img{position:relative;aspect-ratio:1/1;overflow:hidden;border-radius:8px;margin-bottom:6px;background:${t.emojiBg}}
+.cc-img img,.cc-img span{width:100%;height:100%;object-fit:cover;display:flex;align-items:center;justify-content:center;font-size:32px}
+.cc-bd{position:absolute;top:4px;left:4px;font-size:10px;font-weight:800;color:#fff;background:${t.badgeGradient};padding:2px 6px;border-radius:6px;z-index:1}
+.cc-nm{font-size:11px;font-weight:600;color:${t.textColor};line-height:1.3;margin-bottom:2px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.cc-og{font-size:10px;color:${t.textMuted};text-decoration:line-through}
+.cc-pr{margin-top:2px}.cc-pn{font-size:16px;font-weight:900;color:${t.priceColor}}.cc-pw{font-size:10px;font-weight:600;color:${t.priceColor};margin-left:1px}
+.ft{text-align:center;padding:20px;font-size:11px;color:${t.textMuted}}
+`;
+  const body = `<div class="h"><p class="hs">${esc(d.storeName)}</p><h1 class="ht">${esc(d.title)}</h1>
+  ${d.period ? `<div class="hp"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>${esc(d.period)}</div>` : ''}</div>
+<nav class="nav"><div class="ni">${catTabs}</div></nav>
+<div class="w">${sections}</div>
+<div class="ft">hanjul-flyer.kr</div>`;
+  return htmlWrap(d.title || d.storeName, css, body, STICKY_TAB_SCRIPT);
+}
+
+// ============================================================
+// 엔진 6: HERO BANNER — 상위 3개 대형 배너 + 나머지 컴팩트 리스트
+// ============================================================
+
+function renderHeroBannerEngine(d: FlyerRenderData, t: Theme): string {
+  const catTabs = renderCatTabs(d);
+  let sections = '';
+  for (let ci = 0; ci < d.categories.length; ci++) {
+    const cat = d.categories[ci];
+    const items = cat.items || [];
+    let cards = '';
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      const img = resolveImg(item.name || '', i < 3 ? 320 : 100, item.imageUrl);
+      const disc = calcDisc(item.originalPrice, item.salePrice);
+      const hasOrig = item.originalPrice > 0 && item.originalPrice !== item.salePrice;
+      if (i < 3) {
+        // 상위 3개: 대형 배너
+        cards += `<div class="hb-hero">
+          <div class="hb-img">${disc > 0 ? `<span class="hb-disc">${disc}%</span>` : ''}${img}</div>
+          <div class="hb-info">
+            <p class="hb-nm">${esc(item.name || '')}</p>
+            ${renderMetaChips(item, t.chipBg, t.chipColor)}
+            ${hasOrig ? `<p class="hb-og">${fmtPrice(item.originalPrice)}원</p>` : ''}
+            <div class="hb-pr"><span class="hb-pn">${fmtPrice(item.salePrice || 0)}</span><span class="hb-pw">원</span></div>
+            ${renderCardDiscount(item, t.cardDiscountColor)}
+            ${renderAiCopy(item, t.textSub)}
+          </div>
+        </div>`;
+      } else {
+        // 나머지: 가로 리스트 (이미지 좌 + 정보 우)
+        cards += `<div class="hb-row">
+          <div class="hb-thumb">${img}</div>
+          <div class="hb-detail">
+            <p class="hb-rnm">${esc(item.name || '')}</p>
+            ${hasOrig ? `<span class="hb-rog">${fmtPrice(item.originalPrice)}원</span>` : ''}
+            <span class="hb-rpn">${fmtPrice(item.salePrice || 0)}원</span>
+            ${disc > 0 ? `<span class="hb-rtag">${disc}%</span>` : ''}
+          </div>
+        </div>`;
+      }
+    }
+    sections += `<section class="sc" id="s${ci}">
+      <div class="sh"><span class="si" style="background:${t.catIconGradient}"></span><span class="sn" style="color:${t.textColor}">${esc(cat.name)}</span></div>
+      ${cards}
+    </section>`;
+  }
+  const css = `
+.h{background:${t.heroGradient};${t.heroPattern ? `background-image:${t.heroPattern},${t.heroGradient};` : ''}color:#fff;padding:28px 20px 20px;text-align:center;position:relative;overflow:hidden}
+.hs{font-size:11px;opacity:.7;letter-spacing:2px;margin-bottom:6px}.ht{font-size:22px;font-weight:800;line-height:1.3}.hp{font-size:12px;opacity:.8;margin-top:8px;display:inline-flex;align-items:center;gap:4px}
+.nav{background:${t.cardBg};position:sticky;top:0;z-index:10;border-bottom:1px solid ${t.borderColor}}
+.ni{display:flex;overflow-x:auto;gap:0;scrollbar-width:none}.ni::-webkit-scrollbar{display:none}
+.ct{flex-shrink:0;padding:10px 16px;font-size:12px;font-weight:600;color:${t.textMuted};border-bottom:2px solid transparent;white-space:nowrap;text-decoration:none}
+.ct.on{color:${t.tabActiveColor};border-bottom-color:${t.tabActiveColor}}
+.w{padding:12px;background:${t.bg}}
+.sh{display:flex;align-items:center;gap:8px;padding:12px 4px 8px}.si{width:4px;height:18px;border-radius:2px;flex-shrink:0}.sn{font-size:14px;font-weight:700}
+.hb-hero{background:${t.cardBg};border-radius:14px;overflow:hidden;margin-bottom:10px;border:1px solid ${t.borderColor}}
+.hb-img{position:relative;aspect-ratio:16/9;overflow:hidden;background:${t.emojiBg}}
+.hb-img img,.hb-img span{width:100%;height:100%;object-fit:cover;display:flex;align-items:center;justify-content:center;font-size:48px}
+.hb-disc{position:absolute;top:10px;right:10px;font-size:18px;font-weight:900;color:#fff;background:${t.badgeGradient};padding:6px 14px;border-radius:20px;box-shadow:0 2px 8px ${t.badgeShadow};z-index:1}
+.hb-info{padding:12px 14px}
+.hb-nm{font-size:16px;font-weight:700;color:${t.textColor};margin-bottom:4px}
+.hb-og{font-size:12px;color:${t.textMuted};text-decoration:line-through;margin-top:4px}
+.hb-pr{margin-top:2px}.hb-pn{font-size:28px;font-weight:900;color:${t.priceColor}}.hb-pw{font-size:14px;font-weight:700;color:${t.priceColor};margin-left:2px}
+.hb-row{display:flex;gap:12px;align-items:center;padding:10px;background:${t.cardBg};border-radius:10px;margin-bottom:6px;border:1px solid ${t.borderColor}}
+.hb-thumb{width:64px;height:64px;border-radius:8px;overflow:hidden;flex-shrink:0;background:${t.emojiBg}}
+.hb-thumb img,.hb-thumb span{width:100%;height:100%;object-fit:cover;display:flex;align-items:center;justify-content:center;font-size:28px}
+.hb-detail{flex:1;min-width:0}
+.hb-rnm{font-size:13px;font-weight:600;color:${t.textColor};white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hb-rog{font-size:11px;color:${t.textMuted};text-decoration:line-through;margin-right:6px}
+.hb-rpn{font-size:16px;font-weight:800;color:${t.priceColor}}
+.hb-rtag{font-size:11px;font-weight:700;color:#fff;background:${t.badgeGradient};padding:2px 6px;border-radius:4px;margin-left:6px}
+.ft{text-align:center;padding:20px;font-size:11px;color:${t.textMuted}}
+`;
+  const body = `<div class="h"><p class="hs">${esc(d.storeName)}</p><h1 class="ht">${esc(d.title)}</h1>
+  ${d.period ? `<div class="hp"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>${esc(d.period)}</div>` : ''}</div>
+<nav class="nav"><div class="ni">${catTabs}</div></nav>
+<div class="w">${sections}</div>
+<div class="ft">hanjul-flyer.kr</div>`;
+  return htmlWrap(d.title || d.storeName, css, body, STICKY_TAB_SCRIPT);
+}
+
+// ============================================================
+// 엔진 7: SWIPE — 카테고리별 가로 스크롤 카드
+// ============================================================
+
+function renderSwipeEngine(d: FlyerRenderData, t: Theme): string {
+  const catTabs = renderCatTabs(d);
+  let sections = '';
+  for (let ci = 0; ci < d.categories.length; ci++) {
+    const cat = d.categories[ci];
+    let cards = '';
+    for (const item of (cat.items || [])) {
+      const img = resolveImg(item.name || '', 200, item.imageUrl);
+      const disc = calcDisc(item.originalPrice, item.salePrice);
+      const hasOrig = item.originalPrice > 0 && item.originalPrice !== item.salePrice;
+      cards += `<div class="sw-card">
+        <div class="sw-img">${disc > 0 ? `<span class="sw-bd">${disc}%</span>` : ''}${img}</div>
+        <div class="sw-body">
+          <p class="sw-nm">${esc(item.name || '')}</p>
+          ${hasOrig ? `<p class="sw-og">${fmtPrice(item.originalPrice)}원</p>` : ''}
+          <p class="sw-pr"><span class="sw-pn">${fmtPrice(item.salePrice || 0)}</span><span class="sw-pw">원</span></p>
+          ${renderAiCopy(item, t.textSub)}
+        </div>
+      </div>`;
+    }
+    sections += `<section class="sc" id="s${ci}">
+      <div class="sh"><span class="si" style="background:${t.catIconGradient}"></span><span class="sn" style="color:${t.textColor}">${esc(cat.name)}</span></div>
+      <div class="sw-track">${cards}</div>
+    </section>`;
+  }
+  const css = `
+.h{background:${t.heroGradient};${t.heroPattern ? `background-image:${t.heroPattern},${t.heroGradient};` : ''}color:#fff;padding:28px 20px 20px;text-align:center;position:relative;overflow:hidden}
+.hs{font-size:11px;opacity:.7;letter-spacing:2px;margin-bottom:6px}.ht{font-size:22px;font-weight:800;line-height:1.3}.hp{font-size:12px;opacity:.8;margin-top:8px;display:inline-flex;align-items:center;gap:4px}
+.nav{background:${t.cardBg};position:sticky;top:0;z-index:10;border-bottom:1px solid ${t.borderColor}}
+.ni{display:flex;overflow-x:auto;gap:0;scrollbar-width:none}.ni::-webkit-scrollbar{display:none}
+.ct{flex-shrink:0;padding:10px 16px;font-size:12px;font-weight:600;color:${t.textMuted};border-bottom:2px solid transparent;white-space:nowrap;text-decoration:none}
+.ct.on{color:${t.tabActiveColor};border-bottom-color:${t.tabActiveColor}}
+.w{padding:12px 0;background:${t.bg}}
+.sh{display:flex;align-items:center;gap:8px;padding:12px 16px 8px}.si{width:4px;height:18px;border-radius:2px;flex-shrink:0}.sn{font-size:14px;font-weight:700}
+.sw-track{display:flex;overflow-x:auto;gap:10px;padding:0 16px 12px;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+.sw-track::-webkit-scrollbar{display:none}
+.sw-card{flex:0 0 160px;scroll-snap-align:start;background:${t.cardBg};border-radius:12px;overflow:hidden;border:1px solid ${t.borderColor}}
+.sw-img{position:relative;aspect-ratio:1/1;overflow:hidden;background:${t.emojiBg}}
+.sw-img img,.sw-img span{width:100%;height:100%;object-fit:cover;display:flex;align-items:center;justify-content:center;font-size:40px}
+.sw-bd{position:absolute;top:6px;left:6px;font-size:11px;font-weight:800;color:#fff;background:${t.badgeGradient};padding:3px 8px;border-radius:8px;z-index:1}
+.sw-body{padding:10px}
+.sw-nm{font-size:12px;font-weight:600;color:${t.textColor};line-height:1.3;margin-bottom:4px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.sw-og{font-size:10px;color:${t.textMuted};text-decoration:line-through}
+.sw-pr{margin-top:2px}.sw-pn{font-size:20px;font-weight:900;color:${t.priceColor}}.sw-pw{font-size:11px;font-weight:600;color:${t.priceColor};margin-left:1px}
+.ft{text-align:center;padding:20px;font-size:11px;color:${t.textMuted}}
+`;
+  const body = `<div class="h"><p class="hs">${esc(d.storeName)}</p><h1 class="ht">${esc(d.title)}</h1>
+  ${d.period ? `<div class="hp"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>${esc(d.period)}</div>` : ''}</div>
+<nav class="nav"><div class="ni">${catTabs}</div></nav>
+<div class="w">${sections}</div>
+<div class="ft">hanjul-flyer.kr</div>`;
+  return htmlWrap(d.title || d.storeName, css, body, STICKY_TAB_SCRIPT);
+}
+
+// ============================================================
+// 엔진 8: MOSAIC — 대형+소형 타일 교차 배치
+// ============================================================
+
+function renderMosaicEngine(d: FlyerRenderData, t: Theme): string {
+  const catTabs = renderCatTabs(d);
+  let sections = '';
+  for (let ci = 0; ci < d.categories.length; ci++) {
+    const cat = d.categories[ci];
+    const items = cat.items || [];
+    let cards = '';
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      const disc = calcDisc(item.originalPrice, item.salePrice);
+      const hasOrig = item.originalPrice > 0 && item.originalPrice !== item.salePrice;
+      // 패턴: 0=대형(2열), 1,2=소형(1열씩), 3=대형, 4,5=소형, ...
+      const isLarge = i % 3 === 0;
+      const img = resolveImg(item.name || '', isLarge ? 320 : 180, item.imageUrl);
+      if (isLarge) {
+        cards += `<div class="ms-lg">
+          <div class="ms-limg">${disc > 0 ? `<span class="ms-bd">${disc}%</span>` : ''}${img}</div>
+          <div class="ms-lbody">
+            <p class="ms-lnm">${esc(item.name || '')}</p>
+            ${renderMetaChips(item, t.chipBg, t.chipColor)}
+            ${hasOrig ? `<p class="ms-log">${fmtPrice(item.originalPrice)}원</p>` : ''}
+            <div class="ms-lpr"><span class="ms-lpn">${fmtPrice(item.salePrice || 0)}</span><span class="ms-lpw">원</span></div>
+            ${renderCardDiscount(item, t.cardDiscountColor)}
+            ${renderAiCopy(item, t.textSub)}
+            ${item.badge ? `<span class="ms-tag" style="background:${t.badgeGradient};color:#fff">${esc(item.badge)}</span>` : ''}
+          </div>
+        </div>`;
+      } else {
+        cards += `<div class="ms-sm">
+          <div class="ms-simg">${disc > 0 ? `<span class="ms-sbd">${disc}%</span>` : ''}${img}</div>
+          <p class="ms-snm">${esc(item.name || '')}</p>
+          ${hasOrig ? `<p class="ms-sog">${fmtPrice(item.originalPrice)}원</p>` : ''}
+          <p class="ms-spr"><span class="ms-spn">${fmtPrice(item.salePrice || 0)}</span><span class="ms-spw">원</span></p>
+          ${renderAiCopy(item, t.textSub)}
+        </div>`;
+      }
+    }
+    sections += `<section class="sc" id="s${ci}">
+      <div class="sh"><span class="si" style="background:${t.catIconGradient}"></span><span class="sn" style="color:${t.textColor}">${esc(cat.name)}</span></div>
+      <div class="ms-grid">${cards}</div>
+    </section>`;
+  }
+  const css = `
+.h{background:${t.heroGradient};${t.heroPattern ? `background-image:${t.heroPattern},${t.heroGradient};` : ''}color:#fff;padding:28px 20px 20px;text-align:center;position:relative;overflow:hidden}
+.hs{font-size:11px;opacity:.7;letter-spacing:2px;margin-bottom:6px}.ht{font-size:22px;font-weight:800;line-height:1.3}.hp{font-size:12px;opacity:.8;margin-top:8px;display:inline-flex;align-items:center;gap:4px}
+.nav{background:${t.cardBg};position:sticky;top:0;z-index:10;border-bottom:1px solid ${t.borderColor}}
+.ni{display:flex;overflow-x:auto;gap:0;scrollbar-width:none}.ni::-webkit-scrollbar{display:none}
+.ct{flex-shrink:0;padding:10px 16px;font-size:12px;font-weight:600;color:${t.textMuted};border-bottom:2px solid transparent;white-space:nowrap;text-decoration:none}
+.ct.on{color:${t.tabActiveColor};border-bottom-color:${t.tabActiveColor}}
+.w{padding:12px;background:${t.bg}}
+.sh{display:flex;align-items:center;gap:8px;padding:12px 4px 8px}.si{width:4px;height:18px;border-radius:2px;flex-shrink:0}.sn{font-size:14px;font-weight:700}
+.ms-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.ms-lg{grid-column:1/-1;background:${t.cardBg};border-radius:14px;overflow:hidden;border:1px solid ${t.borderColor};display:flex;gap:0}
+.ms-limg{position:relative;width:45%;flex-shrink:0;aspect-ratio:1/1;overflow:hidden;background:${t.emojiBg}}
+.ms-limg img,.ms-limg span{width:100%;height:100%;object-fit:cover;display:flex;align-items:center;justify-content:center;font-size:48px}
+.ms-bd{position:absolute;top:8px;left:8px;font-size:14px;font-weight:900;color:#fff;background:${t.badgeGradient};padding:4px 10px;border-radius:10px;z-index:1}
+.ms-lbody{padding:14px;flex:1;display:flex;flex-direction:column;justify-content:center}
+.ms-lnm{font-size:16px;font-weight:700;color:${t.textColor};line-height:1.3;margin-bottom:4px}
+.ms-log{font-size:12px;color:${t.textMuted};text-decoration:line-through;margin-top:4px}
+.ms-lpr{margin-top:4px}.ms-lpn{font-size:30px;font-weight:900;color:${t.priceColor}}.ms-lpw{font-size:14px;font-weight:700;color:${t.priceColor};margin-left:2px}
+.ms-tag{display:inline-block;font-size:10px;font-weight:700;padding:3px 8px;border-radius:6px;margin-top:6px}
+.ms-sm{background:${t.cardBg};border-radius:12px;padding:10px;border:1px solid ${t.borderColor};text-align:center}
+.ms-simg{position:relative;aspect-ratio:1/0.85;overflow:hidden;border-radius:8px;margin-bottom:6px;background:${t.emojiBg}}
+.ms-simg img,.ms-simg span{width:100%;height:100%;object-fit:cover;display:flex;align-items:center;justify-content:center;font-size:36px}
+.ms-sbd{position:absolute;top:4px;left:4px;font-size:10px;font-weight:800;color:#fff;background:${t.badgeGradient};padding:2px 6px;border-radius:6px;z-index:1}
+.ms-snm{font-size:12px;font-weight:600;color:${t.textColor};line-height:1.3;margin-bottom:2px}
+.ms-sog{font-size:10px;color:${t.textMuted};text-decoration:line-through}
+.ms-spr{margin-top:2px}.ms-spn{font-size:20px;font-weight:900;color:${t.priceColor}}.ms-spw{font-size:10px;font-weight:600;color:${t.priceColor};margin-left:1px}
+.ft{text-align:center;padding:20px;font-size:11px;color:${t.textMuted}}
+`;
+  const body = `<div class="h"><p class="hs">${esc(d.storeName)}</p><h1 class="ht">${esc(d.title)}</h1>
+  ${d.period ? `<div class="hp"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>${esc(d.period)}</div>` : ''}</div>
+<nav class="nav"><div class="ni">${catTabs}</div></nav>
+<div class="w">${sections}</div>
+<div class="ft">hanjul-flyer.kr</div>`;
+  return htmlWrap(d.title || d.storeName, css, body, STICKY_TAB_SCRIPT);
+}
+
+// ============================================================
+// 렌더러 맵 — 8개 엔진 × 다양한 테마 조합
 // ============================================================
 
 const RENDERERS: Record<string, (d: FlyerRenderData) => string> = {
-  // 엔진 1: GRID — 2열 카드 그리드
+  // ━━ 엔진 1: GRID — 2열 카드 그리드 ━━
   grid:             d => renderGridEngine(d, THEMES.grid),
   mart_fresh:       d => renderGridEngine(d, THEMES.mart_fresh),
-  mart_weekend:     d => renderGridEngine(d, THEMES.mart_weekend),
-  mart_clearance:   d => renderGridEngine(d, THEMES.mart_clearance),
-  butcher_daily:    d => renderGridEngine(d, THEMES.butcher_daily),
+  event_bogo:       d => renderGridEngine(d, THEMES.event_bogo),
 
-  // 엔진 2: MAGAZINE — 1열 매거진형
+  // ━━ 엔진 2: MAGAZINE — 1열 매거진형 ━━
   magazine:         d => renderMagazineEngine(d, THEMES.magazine),
-  list:             d => renderMagazineEngine(d, THEMES.magazine),   // list → magazine 업그레이드
   butcher_premium:  d => renderMagazineEngine(d, THEMES.butcher_premium),
+  season_winter:    d => renderMagazineEngine(d, THEMES.season_winter),
 
-  // 엔진 3: EDITORIAL — 풀블리드 에디토리얼
+  // ━━ 엔진 3: EDITORIAL — 풀블리드 에디토리얼 ━━
   editorial:        d => renderEditorialEngine(d, THEMES.editorial),
-  mart_seasonal:    d => renderEditorialEngine(d, THEMES.mart_seasonal),
+  season_chuseok:   d => renderEditorialEngine(d, THEMES.season_chuseok),
+  event_grand_open: d => renderEditorialEngine(d, THEMES.event_grand_open),
 
-  // 엔진 4: SHOWCASE — 대형 싱글 카드
+  // ━━ 엔진 4: SHOWCASE — 대형 싱글 카드 ━━
   showcase:         d => renderShowcaseEngine(d, THEMES.showcase),
   highlight:        d => renderShowcaseEngine(d, THEMES.highlight),
-  butcher_bulk:     d => renderShowcaseEngine(d, THEMES.butcher_bulk),
+  season_newyear:   d => renderShowcaseEngine(d, THEMES.season_newyear),
+
+  // ━━ 엔진 5: COMPACT — 3열 소형 카드 ━━
+  mart_clearance:   d => renderCompactEngine(d, THEMES.mart_clearance),
+  mart_general:     d => renderCompactEngine(d, THEMES.mart_general),
+  season_summer:    d => renderCompactEngine(d, THEMES.season_summer),
+
+  // ━━ 엔진 6: HERO BANNER — 대형배너 + 리스트 ━━
+  butcher_hanwoo:   d => renderHeroBannerEngine(d, THEMES.butcher_hanwoo),
+  mart_seafood:     d => renderHeroBannerEngine(d, THEMES.mart_seafood),
+
+  // ━━ 엔진 7: SWIPE — 가로 스크롤 ━━
+  event_timesale:   d => renderSwipeEngine(d, THEMES.event_timesale),
+  season_christmas: d => renderSwipeEngine(d, THEMES.season_christmas),
+
+  // ━━ 엔진 8: MOSAIC — 대+소 타일 교차 ━━
+  butcher_giftset:  d => renderMosaicEngine(d, THEMES.butcher_giftset),
+  event_membership: d => renderMosaicEngine(d, THEMES.event_membership),
 };
 
 /**
@@ -833,6 +1388,12 @@ const RENDERERS: Record<string, (d: FlyerRenderData) => string> = {
 export function renderTemplate(templateCode: string, data: FlyerRenderData): string {
   const renderer = RENDERERS[templateCode];
   let html = renderer ? renderer(data) : renderGridEngine(data, THEMES.grid);
+
+  // 다이나믹 섹션 (외부링크/공지/GIF) — 상품 뒤, QR 앞에 삽입
+  const dynHtml = renderDynamicSection(data);
+  if (dynHtml) {
+    html = html.replace('</body>', dynHtml + '</body>');
+  }
 
   if (data.qrCodeDataUrl) {
     html = html.replace('</body>', renderQrSection(data) + '</body>');

@@ -14,6 +14,7 @@ import {
   autoMatchImage,
   batchAutoMatchImages,
 } from '../../utils/flyer/flyer-naver-search';
+import { generateProductCopy, CopyType, COPY_TYPE_LABELS } from '../../utils/flyer/flyer-ai-copy';
 
 const router = Router();
 router.use(flyerAuthenticate);
@@ -169,6 +170,36 @@ router.post('/batch-match', async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('[flyer/catalog] batch-match error:', error);
     return res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ══════════════════════════════════════════
+// POST /generate-copy — AI 마케팅 문구 생성
+// ══════════════════════════════════════════
+router.post('/generate-copy', async (req: Request, res: Response) => {
+  try {
+    const { product_name, category, copy_type } = req.body;
+
+    if (!product_name || typeof product_name !== 'string') {
+      return res.status(400).json({ error: '상품명이 필요합니다.' });
+    }
+
+    const validTypes: CopyType[] = ['recipe', 'benefit', 'storage', 'selling_point'];
+    if (!copy_type || !validTypes.includes(copy_type)) {
+      return res.status(400).json({ error: `유효한 문구 유형: ${validTypes.join(', ')}` });
+    }
+
+    const copy = await generateProductCopy(product_name, category || null, copy_type as CopyType);
+
+    return res.json({
+      copy,
+      copy_type,
+      copy_type_label: COPY_TYPE_LABELS[copy_type as CopyType],
+      product_name,
+    });
+  } catch (error: any) {
+    console.error('[flyer/catalog] generate-copy error:', error);
+    return res.status(500).json({ error: 'AI 문구 생성에 실패했습니다.' });
   }
 });
 

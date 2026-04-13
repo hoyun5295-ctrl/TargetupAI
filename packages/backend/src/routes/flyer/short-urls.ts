@@ -136,7 +136,7 @@ function renderExpiredPage(storeName: string, title: string, endDate: string): s
 // ============================================================
 // 전단지 렌더링 — CT-F14 컨트롤타워 위임
 // ============================================================
-async function renderFlyerPage(flyer: any): Promise<string> {
+export async function renderFlyerPage(flyer: any): Promise<string> {
   const categories = typeof flyer.categories === 'string' ? JSON.parse(flyer.categories) : (flyer.categories || []);
   const storeName = flyer.store_name || '';
   const title = flyer.title || '';
@@ -163,7 +163,17 @@ async function renderFlyerPage(flyer: any): Promise<string> {
     }
   } catch {}
 
-  return renderTemplate(flyer.template || 'grid', { storeName, title, period, categories, qrCodeDataUrl, qrCouponText });
+  // extra_data 파싱 (외부링크/공지/GIF)
+  const extraData = typeof flyer.extra_data === 'string'
+    ? JSON.parse(flyer.extra_data || '{}')
+    : (flyer.extra_data || {});
+
+  return renderTemplate(flyer.template || 'grid', {
+    storeName, title, period, categories, qrCodeDataUrl, qrCouponText,
+    externalLinks: extraData.externalLinks,
+    announcements: extraData.announcements,
+    bannerGifUrl: extraData.bannerGifUrl,
+  });
 }
 
 function formatDate(d: string | Date): string {

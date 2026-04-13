@@ -4,9 +4,9 @@ import AlertModal from '../components/AlertModal';
 import { SectionCard, Button, Input, Badge, EmptyState, ConfirmModal, Toast } from '../components/ui';
 import { getProductDisplay } from '../utils/product-images';
 
-interface FlyerItem { name: string; originalPrice: number; salePrice: number; badge?: string; imageUrl?: string; unit?: string; origin?: string; cardDiscount?: string; }
+interface FlyerItem { name: string; originalPrice: number; salePrice: number; badge?: string; imageUrl?: string; unit?: string; origin?: string; cardDiscount?: string; aiCopy?: string; }
 interface FlyerCategory { name: string; items: FlyerItem[]; }
-interface Flyer { id: string; title: string; store_name: string; period_start: string | null; period_end: string | null; categories: FlyerCategory[]; template: string; status: string; short_code: string | null; click_count: number; created_at: string; }
+interface Flyer { id: string; title: string; store_name: string; period_start: string | null; period_end: string | null; categories: FlyerCategory[]; template: string; status: string; short_code: string | null; click_count: number; created_at: string; extra_data?: any; }
 
 // D113: 하드코딩 폴백용 (API 실패 시)
 const DEFAULT_CATEGORY_PRESETS = ['청과/야채', '공산', '축산', '수산', '냉동', '유제품', '음료/주류', '생활용품'];
@@ -82,7 +82,7 @@ export default function FlyerPage({ token, businessType = 'mart' }: { token: str
     const clean = categories.map(c => ({ ...c, items: c.items.filter(i => i.name.trim()) })).filter(c => c.items.length > 0);
     if (clean.length === 0) { setAlert({ show: true, title: '입력 오류', message: '최소 1개 상품을 입력해주세요.', type: 'error' }); return; }
     try {
-      const body = { title: title.trim(), store_name: storeName.trim(), period_start: periodStart || null, period_end: periodEnd || null, categories: clean, template };
+      const body = { title: title.trim(), store_name: storeName.trim(), period_start: periodStart || null, period_end: periodEnd || null, categories: clean, template, extra_data: extraData };
       const url = editingFlyer ? `${API_BASE}/api/flyer/flyers/${editingFlyer.id}` : `${API_BASE}/api/flyer/flyers`;
       const res = await apiFetch(url, { method: editingFlyer ? 'PUT' : 'POST', headers: jsonHeaders, body: JSON.stringify(body) });
       if (res.ok) {
@@ -145,10 +145,69 @@ export default function FlyerPage({ token, businessType = 'mart' }: { token: str
     setEditingFlyer(f); setTitle(f.title); setStoreName(f.store_name || ''); setPeriodStart(f.period_start || ''); setPeriodEnd(f.period_end || ''); setTemplate(f.template || 'grid');
     const cats = typeof f.categories === 'string' ? JSON.parse(f.categories) : (f.categories || []);
     setCategories(cats.length > 0 ? cats : [{ name: '청과/야채', items: [{ name: '', originalPrice: 0, salePrice: 0 }] }]);
+    const ed = typeof f.extra_data === 'string' ? JSON.parse(f.extra_data || '{}') : (f.extra_data || {});
+    setExtraData(ed);
     setShowForm(true);
   };
 
   const handleCopyUrl = (code: string) => { navigator.clipboard.writeText(`https://hanjul-flyer.kr/${code}`); setCopyToast(true); setTimeout(() => setCopyToast(false), 2000); };
+
+  const handleDownloadPdf = async (id: string, title: string) => {
+    try {
+      const res = await apiFetch(`${API_BASE}/api/flyer/flyers/${id}/pdf`, { method: 'POST' });
+      if (!res.ok) throw new Error('PDF 생성 실패');
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${title || 'flyer'}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+    } catch { setAlert({ show: true, title: '오류', message: 'PDF 다운로드에 실패했습니다.', type: 'error' }); }
+  };
+
+  const [aiCopyLoading, setAiCopyLoading] = useState<string | null>(null);
+  const [extraData, setExtraData] = useState<{
+    externalLinks?: Array<{ label: string; url: string; icon: string }>;
+    announcements?: Array<{ title: string; content: string }>;
+    bannerGifUrl?: string;
+  }>({});
+  const handleAiCopy = async (ci: number, ii: number, copyType: string) => {
+    const item = categories[ci]?.items[ii];
+    if (!item?.name) { setAlert({ show: true, title: '알림', message: '상품명을 먼저 입력해주세요.', type: 'info' }); return; }
+    const key = `${ci}-${ii}`;
+    setAiCopyLoading(key);
+    try {
+      const res = await apiFetch(`${API_BASE}/api/flyer/catalog/generate-copy`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ product_name: item.name, category: categories[ci].name, copy_type: copyType })
+      });
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      updateItem(ci, ii, 'aiCopy' as any, data.copy);
+    } catch { setAlert({ show: true, title: '오류', message: 'AI 문구 생성 실패', type: 'error' }); }
+    finally { setAiCopyLoading(null); }
+  };
+
+  const handlePopPdf = async (ci: number, ii: number) => {
+    const item = categories[ci]?.items[ii];
+    if (!item?.name || !item.salePrice) { setAlert({ show: true, title: '알림', message: '상품명과 할인가를 입력해주세요.', type: 'info' }); return; }
+    try {
+      const res = await apiFetch(`${API_BASE}/api/flyer/flyers/pop-pdf`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item, storeName })
+      });
+      if (!res.ok) throw new Error();
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `${item.name}_POP.pdf`;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+    } catch { setAlert({ show: true, title: '오류', message: 'POP PDF 다운로드 실패', type: 'error' }); }
+  };
 
   const addCategory = (name?: string) => setCategories([...categories, { name: name || '새 카테고리', items: [{ name: '', originalPrice: 0, salePrice: 0 }] }]);
   const removeCategory = (idx: number) => setCategories(categories.filter((_, i) => i !== idx));
@@ -221,6 +280,7 @@ export default function FlyerPage({ token, businessType = 'mart' }: { token: str
                       <button onClick={() => handleEdit(f)} className="text-[11px] text-text-secondary hover:text-text font-medium">수정</button>
                       {f.status !== 'published' && <button onClick={() => handlePublish(f.id)} className="text-[11px] text-success-600 hover:text-success-500 font-semibold">발행</button>}
                       {f.short_code && <a href={`https://hanjul-flyer.kr/${f.short_code}`} target="_blank" rel="noopener noreferrer" className="text-[11px] text-primary-600 hover:text-primary-700 font-medium">미리보기</a>}
+                      {f.status === 'published' && <button onClick={() => handleDownloadPdf(f.id, f.title)} className="text-[11px] text-indigo-600 hover:text-indigo-700 font-medium">PDF</button>}
                       <button onClick={() => setDeleteModal({ show: true, id: f.id, title: f.title })} className="text-[11px] text-error-500 hover:text-error-600 font-medium">삭제</button>
                     </div>
                   </div>
@@ -510,7 +570,7 @@ function ProductRegistrationSection({ categories, setCategories, addCategory, re
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = (ev) => {
+    reader.onload = async (ev) => {
       try {
         const text = ev.target?.result as string;
         const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
@@ -542,6 +602,33 @@ function ProductRegistrationSection({ categories, setCategories, addCategory, re
           return;
         }
 
+        const totalItems = newCategories.reduce((sum, c) => sum + c.items.length, 0);
+
+        // 카테고리가 전부 '기타'면 → 자동분류 시도
+        const allEtc = newCategories.every(c => c.name === '기타');
+        if (allEtc && totalItems > 0) {
+          try {
+            const allItems = newCategories.flatMap(c => c.items);
+            const res = await apiFetch(`${API_BASE}/api/flyer/flyers/classify-products`, {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ items: allItems.map(i => ({ name: i.name })) })
+            });
+            if (res.ok) {
+              const data = await res.json();
+              const autoCategories: FlyerCategory[] = Object.entries(data.classified as Record<string, string[]>)
+                .map(([catName, names]) => ({
+                  name: catName,
+                  items: (names as string[]).map(n => allItems.find(i => i.name === n) || { name: n, originalPrice: 0, salePrice: 0 })
+                }));
+              if (autoCategories.length > 0) {
+                setCategories(autoCategories);
+                setAlert({ show: true, title: '자동 분류 완료', message: `${autoCategories.length}개 카테고리, ${totalItems}개 상품이 자동 분류되었습니다.`, type: 'success' });
+                return;
+              }
+            }
+          } catch {} // 자동분류 실패 시 원본 그대로 진행
+        }
+
         // 기존 카테고리에 머지 (같은 이름이면 추가, 새 이름이면 새 탭)
         const merged = [...categories];
         for (const newCat of newCategories) {
@@ -554,7 +641,6 @@ function ProductRegistrationSection({ categories, setCategories, addCategory, re
         }
 
         setCategories(merged);
-        const totalItems = newCategories.reduce((sum, c) => sum + c.items.length, 0);
         setAlert({ show: true, title: '업로드 완료', message: `${newCategories.length}개 카테고리, ${totalItems}개 상품이 등록되었습니다.`, type: 'success' });
       } catch {
         setAlert({ show: true, title: '업로드 오류', message: '파일 형식이 올바르지 않습니다.', type: 'error' });
@@ -710,8 +796,23 @@ function ProductRegistrationSection({ categories, setCategories, addCategory, re
                       className="col-span-2 px-2 py-1.5 border border-border rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-primary-500 bg-surface" />
                     <input type="text" value={item.cardDiscount || ''} onChange={e => updateItem(safeTab, ii, 'cardDiscount' as any, e.target.value)} placeholder="농협5%"
                       className="col-span-1 px-1.5 py-1.5 border border-border rounded-lg text-[10px] focus:outline-none focus:ring-1 focus:ring-primary-500 bg-surface" />
-                    <button onClick={() => removeItem(safeTab, ii)} className="col-span-1 text-error-500/60 hover:text-error-500 text-center transition-colors">✕</button>
+                    <div className="col-span-1 flex gap-0.5 items-center justify-center">
+                      <div className="relative group">
+                        <button className={`text-[10px] px-1 py-0.5 rounded ${aiCopyLoading === `${safeTab}-${ii}` ? 'text-gray-400' : 'text-purple-500 hover:bg-purple-50'}`}
+                          disabled={aiCopyLoading === `${safeTab}-${ii}`}>
+                          {aiCopyLoading === `${safeTab}-${ii}` ? '...' : 'AI'}
+                        </button>
+                        <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-50 hidden group-hover:block min-w-[100px]">
+                          {[['recipe','조리팁'],['benefit','효능'],['storage','보관법'],['selling_point','매력포인트']].map(([k,l]) => (
+                            <button key={k} onClick={() => handleAiCopy(safeTab, ii, k)} className="block w-full text-left px-3 py-1.5 text-[11px] hover:bg-purple-50 text-gray-700">{l}</button>
+                          ))}
+                        </div>
+                      </div>
+                      <button onClick={() => handlePopPdf(safeTab, ii)} className="text-[10px] px-1 py-0.5 rounded text-indigo-500 hover:bg-indigo-50" title="가격표 PDF">POP</button>
+                      <button onClick={() => removeItem(safeTab, ii)} className="text-error-500/60 hover:text-error-500 transition-colors">✕</button>
+                    </div>
                   </div>
+                  {item.aiCopy && <div className="col-span-12 -mt-1 mb-1 px-1"><p className="text-[10px] text-purple-500 truncate">{item.aiCopy}</p></div>}
                 ))}
                 <div className="flex gap-2">
                   <button onClick={() => addItem(safeTab)} className="flex-1 py-2 text-xs text-primary-600 hover:bg-primary-50 rounded-lg border border-dashed border-primary-500/30 transition-colors font-medium">+ 상품 추가</button>
@@ -722,6 +823,70 @@ function ProductRegistrationSection({ categories, setCategories, addCategory, re
           )}
         </>
       )}
+
+      {/* ══════ 추가 요소 (외부링크/공지/GIF) ══════ */}
+      <div className="mt-4 border border-border rounded-xl bg-surface overflow-hidden">
+        <button onClick={() => {
+          const el = document.getElementById('extra-section');
+          if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+        }} className="w-full px-4 py-3 text-left text-sm font-semibold text-text-secondary hover:bg-surface-hover flex justify-between items-center">
+          <span>추가 요소 (링크/공지/GIF)</span>
+          <span className="text-xs text-text-muted">{(extraData.externalLinks?.length || 0) + (extraData.announcements?.length || 0) + (extraData.bannerGifUrl ? 1 : 0)}개</span>
+        </button>
+        <div id="extra-section" style={{ display: 'none' }} className="px-4 pb-4 space-y-3">
+          {/* 외부 링크 */}
+          <div>
+            <p className="text-xs font-semibold text-text-secondary mb-2">외부 링크</p>
+            {(extraData.externalLinks || []).map((link, i) => (
+              <div key={i} className="flex gap-1 mb-1.5 items-center">
+                <select value={link.icon} onChange={e => {
+                  const u = [...(extraData.externalLinks || [])]; u[i].icon = e.target.value; setExtraData({ ...extraData, externalLinks: u });
+                }} className="px-1.5 py-1 border border-border rounded text-[10px] bg-surface w-16">
+                  {['phone','shop','band','map','instagram','blog','link'].map(ic => <option key={ic} value={ic}>{ic}</option>)}
+                </select>
+                <input value={link.label} onChange={e => {
+                  const u = [...(extraData.externalLinks || [])]; u[i].label = e.target.value; setExtraData({ ...extraData, externalLinks: u });
+                }} placeholder="라벨" className="flex-1 px-2 py-1 border border-border rounded text-xs bg-surface" />
+                <input value={link.url} onChange={e => {
+                  const u = [...(extraData.externalLinks || [])]; u[i].url = e.target.value; setExtraData({ ...extraData, externalLinks: u });
+                }} placeholder="URL (tel:031-xxx 등)" className="flex-[2] px-2 py-1 border border-border rounded text-xs bg-surface" />
+                <button onClick={() => {
+                  const u = (extraData.externalLinks || []).filter((_, j) => j !== i); setExtraData({ ...extraData, externalLinks: u });
+                }} className="text-error-500/60 hover:text-error-500 text-xs">✕</button>
+              </div>
+            ))}
+            <button onClick={() => setExtraData({ ...extraData, externalLinks: [...(extraData.externalLinks || []), { label: '', url: '', icon: 'phone' }] })}
+              className="text-[11px] text-primary-600 hover:text-primary-700 font-medium">+ 링크 추가</button>
+          </div>
+
+          {/* 공지사항 */}
+          <div>
+            <p className="text-xs font-semibold text-text-secondary mb-2">공지사항</p>
+            {(extraData.announcements || []).map((ann, i) => (
+              <div key={i} className="flex gap-1 mb-1.5 items-start">
+                <input value={ann.title} onChange={e => {
+                  const u = [...(extraData.announcements || [])]; u[i].title = e.target.value; setExtraData({ ...extraData, announcements: u });
+                }} placeholder="제목" className="w-24 px-2 py-1 border border-border rounded text-xs bg-surface" />
+                <input value={ann.content} onChange={e => {
+                  const u = [...(extraData.announcements || [])]; u[i].content = e.target.value; setExtraData({ ...extraData, announcements: u });
+                }} placeholder="내용" className="flex-1 px-2 py-1 border border-border rounded text-xs bg-surface" />
+                <button onClick={() => {
+                  const u = (extraData.announcements || []).filter((_, j) => j !== i); setExtraData({ ...extraData, announcements: u });
+                }} className="text-error-500/60 hover:text-error-500 text-xs mt-1">✕</button>
+              </div>
+            ))}
+            <button onClick={() => setExtraData({ ...extraData, announcements: [...(extraData.announcements || []), { title: '', content: '' }] })}
+              className="text-[11px] text-primary-600 hover:text-primary-700 font-medium">+ 공지 추가</button>
+          </div>
+
+          {/* GIF 배너 URL */}
+          <div>
+            <p className="text-xs font-semibold text-text-secondary mb-2">GIF 배너 URL</p>
+            <input value={extraData.bannerGifUrl || ''} onChange={e => setExtraData({ ...extraData, bannerGifUrl: e.target.value || undefined })}
+              placeholder="https://... (GIF 이미지 URL)" className="w-full px-2 py-1.5 border border-border rounded text-xs bg-surface" />
+          </div>
+        </div>
+      </div>
 
       {/* 카테고리 0개일 때 */}
       {categories.length === 0 && (
@@ -799,27 +964,44 @@ function ProductRegistrationSection({ categories, setCategories, addCategory, re
 
 /** 엔진 분류: template code → layout engine */
 const ENGINE_MAP: Record<string, string> = {
-  grid: 'grid', mart_fresh: 'grid', mart_weekend: 'grid', mart_clearance: 'grid', butcher_daily: 'grid',
-  magazine: 'magazine', list: 'magazine', butcher_premium: 'magazine',
-  editorial: 'editorial', mart_seasonal: 'editorial',
-  showcase: 'showcase', highlight: 'showcase', butcher_bulk: 'showcase',
+  grid: 'grid', mart_fresh: 'grid', event_bogo: 'grid',
+  magazine: 'magazine', butcher_premium: 'magazine', season_winter: 'magazine',
+  editorial: 'editorial', season_chuseok: 'editorial', event_grand_open: 'editorial',
+  showcase: 'showcase', highlight: 'showcase', season_newyear: 'showcase',
+  mart_clearance: 'compact', mart_general: 'compact', season_summer: 'compact',
+  butcher_hanwoo: 'hero', mart_seafood: 'hero',
+  event_timesale: 'swipe', season_christmas: 'swipe',
+  butcher_giftset: 'mosaic', event_membership: 'mosaic',
 };
 
 /** 테마 색상 (미리보기용 간소화) */
 const PREVIEW_THEMES: Record<string, { hero: string; price: string; bg: string; dark?: boolean; badge: string; chip: string; chipC: string }> = {
+  // 기본
   grid:             { hero: 'linear-gradient(145deg,#dc2626,#991b1b)', price: '#dc2626', bg: '#f3f4f6', badge: 'linear-gradient(135deg,#dc2626,#ea580c)', chip: '#fef2f2', chipC: '#b91c1c' },
   magazine:         { hero: 'linear-gradient(160deg,#292524,#0c0a09)', price: '#c2410c', bg: '#fafaf9', badge: 'linear-gradient(135deg,#ea580c,#c2410c)', chip: '#fff7ed', chipC: '#9a3412' },
   editorial:        { hero: 'linear-gradient(180deg,#0f172a,#1e293b)', price: '#0f172a', bg: '#fff', badge: 'linear-gradient(135deg,#ef4444,#dc2626)', chip: '#f1f5f9', chipC: '#334155' },
   showcase:         { hero: 'linear-gradient(135deg,#7c3aed,#4c1d95)', price: '#7c3aed', bg: '#fafafa', badge: 'linear-gradient(135deg,#8b5cf6,#7c3aed)', chip: '#f5f3ff', chipC: '#6d28d9' },
   highlight:        { hero: 'linear-gradient(145deg,#18181b,#09090b)', price: '#facc15', bg: '#0a0a0a', dark: true, badge: 'linear-gradient(135deg,#facc15,#eab308)', chip: 'rgba(250,204,21,.1)', chipC: '#facc15' },
-  list:             { hero: 'linear-gradient(160deg,#292524,#0c0a09)', price: '#c2410c', bg: '#fafaf9', badge: 'linear-gradient(135deg,#ea580c,#c2410c)', chip: '#fff7ed', chipC: '#9a3412' },
+  // 시즌
+  season_newyear:   { hero: 'linear-gradient(145deg,#991b1b,#dc2626)', price: '#b91c1c', bg: '#fef2f2', badge: 'linear-gradient(135deg,#dc2626,#ca8a04)', chip: '#fef9c3', chipC: '#92400e' },
+  season_chuseok:   { hero: 'linear-gradient(160deg,#1e3a5f,#3b82f6)', price: '#1e40af', bg: '#fffbeb', badge: 'linear-gradient(135deg,#f59e0b,#d97706)', chip: '#fef3c7', chipC: '#92400e' },
+  season_summer:    { hero: 'linear-gradient(145deg,#0891b2,#22d3ee)', price: '#0e7490', bg: '#ecfeff', badge: 'linear-gradient(135deg,#06b6d4,#0891b2)', chip: '#cffafe', chipC: '#155e75' },
+  season_winter:    { hero: 'linear-gradient(160deg,#881337,#e11d48)', price: '#be123c', bg: '#fff1f2', badge: 'linear-gradient(135deg,#e11d48,#be123c)', chip: '#ffe4e6', chipC: '#9f1239' },
+  season_christmas: { hero: 'linear-gradient(145deg,#14532d,#15803d)', price: '#fbbf24', bg: '#052e16', dark: true, badge: 'linear-gradient(135deg,#dc2626,#b91c1c)', chip: 'rgba(220,38,38,.15)', chipC: '#fca5a5' },
+  // 행사
+  event_bogo:       { hero: 'linear-gradient(145deg,#c2410c,#f97316)', price: '#c2410c', bg: '#fff7ed', badge: 'linear-gradient(135deg,#f97316,#ea580c)', chip: '#ffedd5', chipC: '#9a3412' },
+  event_timesale:   { hero: 'linear-gradient(145deg,#0a0a0a,#1f1f1f)', price: '#ef4444', bg: '#0f0f0f', dark: true, badge: 'linear-gradient(135deg,#ef4444,#dc2626)', chip: 'rgba(239,68,68,.12)', chipC: '#f87171' },
+  event_membership: { hero: 'linear-gradient(145deg,#581c87,#9333ea)', price: '#7e22ce', bg: '#faf5ff', badge: 'linear-gradient(135deg,#9333ea,#7e22ce)', chip: '#f3e8ff', chipC: '#6b21a8' },
+  event_grand_open: { hero: 'linear-gradient(160deg,#0c0a09,#292524)', price: '#fbbf24', bg: '#0c0a09', dark: true, badge: 'linear-gradient(135deg,#fbbf24,#d97706)', chip: 'rgba(251,191,36,.12)', chipC: '#fbbf24' },
+  // 마트
   mart_fresh:       { hero: 'linear-gradient(145deg,#15803d,#14532d)', price: '#15803d', bg: '#f0fdf4', badge: 'linear-gradient(135deg,#16a34a,#15803d)', chip: '#dcfce7', chipC: '#166534' },
-  mart_weekend:     { hero: 'linear-gradient(145deg,#be185d,#831843)', price: '#be185d', bg: '#fdf2f8', badge: 'linear-gradient(135deg,#ec4899,#be185d)', chip: '#fce7f3', chipC: '#9d174d' },
-  mart_seasonal:    { hero: 'linear-gradient(145deg,#0c4a6e,#0369a1)', price: '#0369a1', bg: '#f0f9ff', badge: 'linear-gradient(135deg,#0284c7,#0369a1)', chip: '#e0f2fe', chipC: '#075985' },
   mart_clearance:   { hero: 'linear-gradient(145deg,#b91c1c,#ef4444)', price: '#b91c1c', bg: '#fefce8', badge: 'linear-gradient(135deg,#dc2626,#b91c1c)', chip: '#fef9c3', chipC: '#92400e' },
+  mart_general:     { hero: 'linear-gradient(145deg,#334155,#64748b)', price: '#dc2626', bg: '#f8fafc', badge: 'linear-gradient(135deg,#475569,#334155)', chip: '#f1f5f9', chipC: '#334155' },
+  mart_seafood:     { hero: 'linear-gradient(145deg,#1e3a8a,#2563eb)', price: '#1d4ed8', bg: '#eff6ff', badge: 'linear-gradient(135deg,#2563eb,#1d4ed8)', chip: '#dbeafe', chipC: '#1e40af' },
+  // 정육
   butcher_premium:  { hero: 'linear-gradient(160deg,#1c1917,#000)', price: '#d9aa51', bg: '#0c0a09', dark: true, badge: 'linear-gradient(135deg,#d9aa51,#b8860b)', chip: 'rgba(217,170,81,.12)', chipC: '#d9aa51' },
-  butcher_daily:    { hero: 'linear-gradient(145deg,#991b1b,#dc2626)', price: '#b91c1c', bg: '#fef2f2', badge: 'linear-gradient(135deg,#dc2626,#b91c1c)', chip: '#fee2e2', chipC: '#991b1b' },
-  butcher_bulk:     { hero: 'linear-gradient(145deg,#312e81,#4338ca)', price: '#3730a3', bg: '#f5f3ff', badge: 'linear-gradient(135deg,#4f46e5,#3730a3)', chip: '#ede9fe', chipC: '#4338ca' },
+  butcher_hanwoo:   { hero: 'linear-gradient(160deg,#0c0a09,#292524)', price: '#f59e0b', bg: '#1c1917', dark: true, badge: 'linear-gradient(135deg,#f59e0b,#d97706)', chip: 'rgba(245,158,11,.12)', chipC: '#fbbf24' },
+  butcher_giftset:  { hero: 'linear-gradient(160deg,#78350f,#b45309)', price: '#92400e', bg: '#fdf2f8', badge: 'linear-gradient(135deg,#d97706,#b45309)', chip: '#fef3c7', chipC: '#78350f' },
 };
 
 function FlyerPreviewRenderer({ title, storeName, periodStart, periodEnd, categories, template }: {

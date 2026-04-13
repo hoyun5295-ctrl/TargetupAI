@@ -77,16 +77,17 @@
 
 > **아래 4개 영역을 다음 세션에서 순서대로 착수한다.**
 
-**0. 전단 템플릿 대폭 리뉴얼 — 템플리 수준 이상 (최우선)**
-- [ ] 템플리 스타일 **1열 리스트형 레이아웃** 신규 추가 — 좌측(가격+텍스트) + 우측(큰 이미지)
-- [ ] 가격 **압도적 대형화** (21,900 수준, 화면의 주인공)
-- [ ] 상품 상세 필드 추가: **규격**(6kg/통, 500ml), **원산지**(국내산), **카드할인**(농협/삼성)
-- [ ] FlyerRenderData에 `unit`(규격), `origin`(원산지), `cardDiscount`(카드할인) 필드 추가
-- [ ] FlyerRenderItem 확장 → FlyerPage 상품 입력 UI에 규격/원산지 입력란 추가
-- [ ] 히어로 배너 디자인 고도화 — 꽃잎/별/패턴 장식 + "봄이 한 가득!" 같은 시즌 감성
-- [ ] 전단 프론트 미리보기(FlyerPreviewRenderer)도 동기화 업데이트
-- [ ] 상품 이미지 DB 구축 시작 — 마트 주요 상품 500개 누끼 이미지 수집 (Pixabay+직접촬영)
-- [ ] 참고: 템플리 스크린샷 `C:\Users\ceo\Downloads\` 에 있음
+**0. 전단 템플릿 V3 리뉴얼 — ✅ 구현 완료 (D116, 2026-04-12)**
+- [x] CT-F14 V3 — 4개 레이아웃 엔진 (Grid/Magazine/Editorial/Showcase) × 13개 테마
+- [x] FlyerRenderItem에 `unit`(규격), `origin`(원산지), `cardDiscount`(카드할인) 필드 추가
+- [x] FlyerPage.tsx 상품 입력 UI에 규격/원산지/카드할인 입력란 추가
+- [x] FlyerPreviewRenderer V3 — ENGINE_MAP 기반 4엔진 미리보기 동기화
+- [x] flyer-business-types.ts — magazine/editorial/showcase 3개 신규 템플릿 등록
+- [x] 가격 32~40px 대형화 + 히어로 배너 장식 (원형/스파클 SVG)
+- [x] 카테고리 탭 스크롤 추적 (setInterval 100ms 폴링) + 마지막 카테고리 하단 도달 감지
+- [x] helmet CSP 인라인 스크립트 차단 해결 — 공개 페이지 라우트를 helmet 전에 마운트
+- [x] body overflow-x:hidden → overflow-x:clip 교체 (sticky nav 보존)
+- [ ] 상품 이미지 DB 구축 — 마트 주요 상품 500개 누끼 이미지 수집 (Pixabay+직접촬영)
 
 **1. 카탈로그DB 관리 페이지 + 전단 연동 (Phase A 핵심)**
 - [ ] flyer-frontend CatalogPage.tsx 고도화 — 상품 추가/편집/삭제 + 이미지 업로드
@@ -359,3 +360,7 @@ docker exec -it targetup-postgres psql -U targetup targetup
 | FK가 한줄로 테이블 참조 | D112 이관 시 flyers/short_urls FK 교체 누락 → D113에서 발견. 이관 시 **모든 FK 대상 테이블** 전수 확인 필수 |
 | tsc --noEmit ≠ tsc -b | 프론트 빌드는 `tsc -b` 사용. `--noEmit`으로만 체크하면 빌드 에러 놓침 |
 | window.prompt/confirm 사용 금지 | 모든 확인/입력 대화상자는 커스텀 모달 컴포넌트 사용 |
+| ★ helmet() CSP가 인라인 스크립트 차단 | 공개 페이지처럼 인라인 `<script>` 필요한 라우트는 **helmet() 전에 마운트**. `app.use(helmet())` 아래에 두면 CSP `script-src 'self'`가 인라인 JS 차단 |
+| ★ JS 안 될 때 콘솔 에러 먼저 확인 | 추측 수정 절대 금지. F12 콘솔 에러 또는 디버그 div 화면 표시로 JS 실행 여부부터 확인. D116에서 13번 배포한 교훈 |
+| ★ body overflow-x:hidden이 sticky 깨뜨림 | overflow-x:hidden → CSS spec에 의해 body가 scroll container → position:sticky 무력화 + scroll 이벤트 미전파. **overflow-x:clip** 사용 |
+| ★ 마지막 카테고리 탭 활성화 | 마지막 카테고리는 페이지 끝이라 threshold 미도달. `(innerHeight+pageYOffset)>=scrollHeight-50`이면 마지막 탭 활성화 |
