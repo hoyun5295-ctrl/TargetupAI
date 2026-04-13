@@ -69,6 +69,7 @@ export default function DashboardHeader({
   const menuItems: MenuItem[] = [
     { label: 'AI 분석', onClick: () => lockGuard(onAnalysis), color: 'gold', locked: isSubscriptionLocked, path: '/' },
     { label: '자동발송', onClick: () => lockGuard(() => navigate('/auto-send')), color: 'gold', locked: isSubscriptionLocked, path: '/auto-send' },
+    { label: '모바일DM', onClick: () => lockGuard(() => navigate('/dm-builder')), color: 'gold', locked: isSubscriptionLocked, path: '/dm-builder' },
     { label: '카카오&RCS', onClick: () => navigate('/kakao-rcs'), color: 'green', path: '/kakao-rcs' },
     { label: '직접발송', onClick: onDirectSend, color: 'green', path: '/' },
     { label: '캘린더', onClick: (isSubscriptionLocked || isCalendarLocked)

@@ -17,6 +17,7 @@ import TermsPage from './pages/TermsPage';
 import AutoSendPage from './pages/AutoSendPage';
 import KakaoRcsPage from './pages/KakaoRcsPage';
 import FlyerAdminDashboard from './pages/FlyerAdminDashboard'; // ★ D112
+import DmBuilderPage from './pages/DmBuilderPage'; // ★ 모바일 DM 빌더
 
 // ★ 세션 타이머 Context — 헤더 등에서 남은 시간 표시용
 interface SessionTimerContextType {
@@ -238,6 +239,16 @@ function App() {
           element={
             <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
               <KakaoRcsPage />
+            </PrivateRoute>
+          }
+        />
+
+        {/* ★ 모바일 DM 빌더 (프로 요금제 이상) */}
+        <Route
+          path="/dm-builder"
+          element={
+            <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
+              <DmBuilderPage />
             </PrivateRoute>
           }
         />

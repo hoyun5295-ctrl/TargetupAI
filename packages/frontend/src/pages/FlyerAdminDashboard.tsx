@@ -567,9 +567,9 @@ export default function FlyerAdminDashboard() {
       {/* 총판 등록 모달 */}
       {showCreateDist && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowCreateDist(false)}>
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg mx-4 p-6" onClick={e => e.stopPropagation()}>
-            <h3 className="text-lg font-bold text-gray-800 mb-4">총판 등록</h3>
-            <div className="space-y-3">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg mx-4 max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <h3 className="text-lg font-bold text-gray-800 px-6 pt-6 pb-3 shrink-0">총판 등록</h3>
+            <div className="space-y-3 overflow-y-auto px-6 flex-1">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">총판명 *</label>
                 <input value={newDist.company_name} onChange={e => setNewDist(p => ({...p, company_name: e.target.value}))}
@@ -682,7 +682,7 @@ export default function FlyerAdminDashboard() {
                 </div>
               </div>
             </div>
-            <div className="flex justify-end gap-2 mt-6">
+            <div className="flex justify-end gap-2 px-6 py-4 border-t shrink-0">
               <button onClick={() => setShowCreateDist(false)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">취소</button>
               <button onClick={handleCreateDist} className="px-4 py-2 text-sm bg-orange-500 text-white rounded-lg hover:bg-orange-600 font-medium">등록</button>
             </div>
@@ -691,10 +691,10 @@ export default function FlyerAdminDashboard() {
       )}
       {/* D113: 매장 등록 모달 */}
       {showCreateStore && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 overflow-y-auto py-8" onClick={() => setShowCreateStore(false)}>
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl mx-4 p-6" onClick={e => e.stopPropagation()}>
-            <h3 className="text-lg font-bold text-gray-800 mb-4">매장 등록</h3>
-            <div className="space-y-3 max-h-[70vh] overflow-y-auto pr-2">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowCreateStore(false)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl mx-4 max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <h3 className="text-lg font-bold text-gray-800 px-6 pt-6 pb-3 shrink-0">매장 등록</h3>
+            <div className="space-y-3 overflow-y-auto px-6 flex-1">
               {/* 기본 정보 */}
               <p className="text-xs text-orange-600 font-bold">기본 정보</p>
               <div className="grid grid-cols-2 gap-3">
@@ -838,7 +838,7 @@ export default function FlyerAdminDashboard() {
                 </div>
               </div>
             </div>
-            <div className="flex justify-end gap-2 mt-6">
+            <div className="flex justify-end gap-2 px-6 py-4 border-t shrink-0">
               <button onClick={() => setShowCreateStore(false)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">취소</button>
               <button onClick={handleCreateStore} className="px-4 py-2 text-sm bg-orange-500 text-white rounded-lg hover:bg-orange-600 font-medium">등록</button>
             </div>
@@ -891,9 +891,9 @@ export default function FlyerAdminDashboard() {
 
       {/* D113→D114: 매장 수정 모달 (전체 필드) */}
       {editStore && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 overflow-y-auto py-8" onClick={() => setEditStore(null)}>
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl mx-4 p-6 animate-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center gap-3 mb-5">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setEditStore(null)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl mx-4 max-h-[90vh] flex flex-col animate-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center gap-3 px-6 pt-6 pb-3 shrink-0">
               <div className="w-10 h-10 rounded-full bg-orange-100 flex items-center justify-center">
                 <svg className="w-5 h-5 text-orange-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
               </div>
@@ -902,7 +902,7 @@ export default function FlyerAdminDashboard() {
                 <p className="text-sm text-gray-500">{editStore.store_name || editStore.name}</p>
               </div>
             </div>
-            <div className="space-y-3 max-h-[65vh] overflow-y-auto pr-2">
+            <div className="space-y-3 overflow-y-auto px-6 flex-1">
               <p className="text-xs text-orange-600 font-bold">기본 정보</p>
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -957,7 +957,7 @@ export default function FlyerAdminDashboard() {
                 </div>
               </div>
             </div>
-            <div className="flex justify-end gap-2 mt-6 pt-4 border-t">
+            <div className="flex justify-end gap-2 px-6 py-4 border-t shrink-0">
               <button onClick={() => setEditStore(null)} className="px-5 py-2.5 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition">취소</button>
               <button onClick={handleSaveEditStore} className="px-5 py-2.5 text-sm bg-orange-500 text-white rounded-lg hover:bg-orange-600 font-medium shadow-sm transition">저장</button>
             </div>
@@ -967,9 +967,9 @@ export default function FlyerAdminDashboard() {
 
       {/* ★ D114: 총판 수정 모달 (예쁜 버전 — 아이콘+제목+설명+animate) */}
       {editDist && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 overflow-y-auto py-8" onClick={() => setEditDist(null)}>
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl mx-4 p-6 animate-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center gap-3 mb-5">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setEditDist(null)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl mx-4 max-h-[90vh] flex flex-col animate-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center gap-3 px-6 pt-6 pb-3 shrink-0">
               <div className="w-10 h-10 rounded-full bg-orange-100 flex items-center justify-center">
                 <svg className="w-5 h-5 text-orange-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg>
               </div>
@@ -978,7 +978,7 @@ export default function FlyerAdminDashboard() {
                 <p className="text-sm text-gray-500">{editDist.company_name}</p>
               </div>
             </div>
-            <div className="space-y-3 max-h-[65vh] overflow-y-auto pr-2">
+            <div className="space-y-3 overflow-y-auto px-6 flex-1">
               <p className="text-xs text-orange-600 font-bold">기본 정보</p>
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -1080,7 +1080,7 @@ export default function FlyerAdminDashboard() {
                 </div>
               </div>
             </div>
-            <div className="flex justify-end gap-2 mt-6 pt-4 border-t">
+            <div className="flex justify-end gap-2 px-6 py-4 border-t shrink-0">
               <button onClick={() => setEditDist(null)} className="px-5 py-2.5 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition">취소</button>
               <button onClick={handleSaveEditDist} className="px-5 py-2.5 text-sm bg-orange-500 text-white rounded-lg hover:bg-orange-600 font-medium shadow-sm transition">저장</button>
             </div>

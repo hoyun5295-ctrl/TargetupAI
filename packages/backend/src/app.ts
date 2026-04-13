@@ -44,6 +44,8 @@ import senderRegistrationRoutes from './routes/sender-registration';
 // 전단AI 라우트 (기존)
 import flyerRoutes from './routes/flyer/flyers';
 import flyerPublicRoutes from './routes/flyer/short-urls';
+// ★ 모바일 DM 빌더 (한줄로 AI 프로 기능)
+import { dmPublicRouter, dmRouter } from './routes/dm';
 
 // ★ D112: 전단AI 완전 분리 라우트 (flyer_* 테이블 기반)
 import switchServiceRoutes from './routes/admin/switch-service';
@@ -73,6 +75,8 @@ const PORT = process.env.PORT || 3000;
 
 // ★ 전단AI 공개 페이지 — helmet(CSP) 전에 마운트 (인라인 스크립트 필요)
 app.use('/api/flyer/p', flyerPublicRoutes);
+// ★ 모바일 DM 공개 뷰어 — helmet 전에 마운트 (인라인 스크립트 필요)
+app.use('/api/dm/v', dmPublicRouter);
 app.use('/api/flyer/q', flyerCouponPublicRoutes);
 
 // 미들웨어
@@ -125,6 +129,7 @@ app.use('/api/sms-templates', smsTemplatesRoutes);
 app.use('/api/mms-images', mmsImagesRoutes);
 app.use('/api/auto-campaigns', autoCampaignsRoutes);
 app.use('/api/saved-segments', savedSegmentsRoutes);
+app.use('/api/dm', dmRouter);
 
 // 공용 관리 라우트 (슈퍼관리자 + 고객사관리자)
 app.use('/api/manage/users', manageUsersRoutes);
