@@ -61,6 +61,45 @@ function cleanProductName(raw: string): string {
     .trim() || raw.trim();
 }
 
+/**
+ * ★ 네이버 쇼핑 API 검색 — 상품 이미지 + 가격 정보
+ * 이미지 검색보다 상품 이미지가 정확하지만 주류/담배는 안 나옴.
+ */
+async function searchShopApi(q: string, display: number): Promise<NaverShopItem[]> {
+  if (!NAVER_CLIENT_ID || !NAVER_CLIENT_SECRET) return [];
+  try {
+    const params = new URLSearchParams({
+      query: cleanProductName(q),
+      display: String(Math.min(display, 100)),
+      sort: 'sim',
+    });
+    const res = await fetch(`${SHOP_API_URL}?${params}`, {
+      headers: { 'X-Naver-Client-Id': NAVER_CLIENT_ID, 'X-Naver-Client-Secret': NAVER_CLIENT_SECRET },
+    });
+    if (!res.ok) return [];
+    const data = await res.json() as any;
+    return (data.items || [])
+      .filter((item: any) => {
+        // ★ 품질 필터: 이미지 URL 존재 + 최소 200px 이상 (네이버 쇼핑 이미지는 보통 정사각형)
+        const img = item.image || '';
+        return img && !img.includes('noimage') && !img.includes('no_img');
+      })
+      .map((item: any) => ({
+        title: stripHtml(item.title || ''),
+        link: item.link || '',
+        image: item.image || '',
+        lprice: item.lprice || '0',
+        hprice: item.hprice || '0',
+        mallName: item.mallName || '',
+        maker: item.maker || '',
+        brand: item.brand || '',
+        category1: item.category1 || '',
+        category2: item.category2 || '',
+        category3: item.category3 || '',
+      }));
+  } catch { return []; }
+}
+
 export async function searchNaverShopping(
   query: string,
   display: number = 5
@@ -93,23 +132,34 @@ export async function searchNaverShopping(
     }
 
     const data = await res.json() as any;
-    return {
-      query,
-      items: (data.items || []).map((item: any) => ({
+    const imageItems: NaverShopItem[] = (data.items || [])
+      .filter((item: any) => {
+        // ★ 품질 필터: noimage 제외 + 기본 유효성
+        const img = item.thumbnail || item.link || '';
+        return img && !img.includes('noimage') && !img.includes('no_img');
+      })
+      .map((item: any) => ({
         title: stripHtml(item.title || ''),
         link: item.link || '',
-        image: item.thumbnail || item.link || '',  // 이미지 검색은 thumbnail 필드
-        lprice: '0',
-        hprice: '0',
-        mallName: '',
-        maker: '',
-        brand: '',
-        category1: '',
-        category2: '',
-        category3: '',
-      })),
-      total: data.total || 0,
-    };
+        image: item.thumbnail || item.link || '',
+        lprice: '0', hprice: '0', mallName: '', maker: '', brand: '',
+        category1: '', category2: '', category3: '',
+      }));
+
+    // ★ 쇼핑 API 병행 검색 (더 정확한 상품 이미지)
+    const shopItems = await searchShopApi(query, display);
+
+    // ★ 쇼핑 API 결과 우선, 이미지 검색 보충 (중복 제거)
+    const seenImages = new Set<string>();
+    const merged: NaverShopItem[] = [];
+    for (const item of [...shopItems, ...imageItems]) {
+      if (seenImages.has(item.image)) continue;
+      seenImages.add(item.image);
+      merged.push(item);
+      if (merged.length >= display) break;
+    }
+
+    return { query, items: merged, total: data.total || 0 };
   } catch (err: any) {
     console.error('[naver-search] 검색 실패:', err.message);
     return { query, items: [], total: 0 };

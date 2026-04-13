@@ -761,7 +761,7 @@ body{font-family:'Noto Sans KR',sans-serif;background:${t.bg};color:${t.textColo
 ${darkMod}
 .mc.flip{flex-direction:row-reverse}
 .mt{flex:1;padding:18px 18px 20px;display:flex;flex-direction:column;justify-content:center;min-width:0}
-.mi{width:45%;flex-shrink:0;position:relative;overflow:hidden}
+.mi{width:45%;flex-shrink:0;position:relative;overflow:hidden;min-height:170px;align-self:stretch}
 .mi .product-img{width:100%;height:100%;object-fit:cover;display:block}
 .mi .emoji-area{width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:56px;background:${t.emojiBg}}
 
@@ -890,7 +890,7 @@ body{font-family:'Noto Sans KR',sans-serif;background:${t.bg};color:${t.textColo
 .ef-img{height:280px;overflow:hidden}
 .ef-img .product-img{width:100%;height:100%;object-fit:cover;display:block}
 .ef-img .emoji-area{width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:80px;background:${t.emojiBg}}
-.ef-ov{position:absolute;bottom:0;left:0;right:0;padding:24px 20px;background:linear-gradient(to top,rgba(0,0,0,.85) 0%,rgba(0,0,0,.4) 60%,transparent 100%)}
+.ef-ov{position:absolute;bottom:0;left:0;right:0;padding:24px 20px;background:linear-gradient(to top,rgba(0,0,0,.85) 0%,rgba(0,0,0,.4) 60%,transparent 100%);z-index:2}
 .ef-dc{display:inline-block;background:${t.badgeGradient};color:#fff;font-size:12px;font-weight:800;padding:4px 12px;border-radius:8px;margin-bottom:8px;box-shadow:0 2px 8px ${t.badgeShadow}}
 .ef-nm{font-size:20px;font-weight:800;color:#fff;line-height:1.3;margin-bottom:2px}
 .ef-og{font-size:12px;color:rgba(255,255,255,.5);text-decoration:line-through;margin-top:6px}

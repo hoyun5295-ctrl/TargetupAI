@@ -73,7 +73,7 @@
 
 ---
 
-### 🎯 D117 — 전단AI 대규모 업그레이드 + POS Agent 완성 (2026-04-13) ✅
+### 🎯 D117 — 전단AI 대규모 업그레이드 + POS Agent 완성 (2026-04-13) ✅ 배포완료
 
 **A. 전단AI 기능 보강 6건 (전부 완료, 배포됨)**
 - [x] PDF 내보내기 — `flyer-pdf.ts` puppeteer 싱글톤, `flyers.ts` POST /:id/pdf

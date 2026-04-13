@@ -344,6 +344,78 @@ export async function updateAgentHeartbeat(
 }
 
 /**
+ * ★ POS 판매 데이터 기반 인기 상품 TOP N 추천.
+ * 최근 period일간 판매 수량 기준 정렬.
+ */
+export async function getTopSellingProducts(
+  companyId: string,
+  limit: number = 20,
+  period: number = 30
+): Promise<Array<{ product_name: string; product_code: string; category: string | null; total_qty: number; total_amount: number; avg_price: number; image_url: string | null }>> {
+  const result = await query(
+    `SELECT
+       s.product_name,
+       s.product_code,
+       s.category,
+       SUM(s.quantity) AS total_qty,
+       SUM(s.total_amount) AS total_amount,
+       ROUND(AVG(s.sale_price)) AS avg_price,
+       (SELECT c.image_url FROM flyer_catalog c WHERE c.company_id = $1 AND c.product_name = s.product_name LIMIT 1) AS image_url
+     FROM flyer_pos_sales s
+     WHERE s.company_id = $1
+       AND s.sold_at >= NOW() - ($3 || ' days')::INTERVAL
+       AND s.product_name IS NOT NULL AND s.product_name != ''
+     GROUP BY s.product_name, s.product_code, s.category
+     ORDER BY total_qty DESC
+     LIMIT $2`,
+    [companyId, limit, String(period)]
+  );
+  return result.rows.map(r => ({
+    product_name: r.product_name,
+    product_code: r.product_code,
+    category: r.category,
+    total_qty: Number(r.total_qty),
+    total_amount: Number(r.total_amount),
+    avg_price: Number(r.avg_price),
+    image_url: r.image_url,
+  }));
+}
+
+/**
+ * ★ POS Agent 상태 목록 (슈퍼관리자 대시보드용).
+ */
+export async function getPosAgentStatusList(): Promise<Array<{
+  agentId: string; companyId: string; companyName: string; storeName: string;
+  syncStatus: string; lastSyncAt: string | null; lastHeartbeat: string | null;
+  posType: string; dbType: string; errorCount: number;
+}>> {
+  const result = await query(
+    `SELECT pa.id AS agent_id, pa.company_id,
+            fc.company_name, fu.store_name,
+            pa.sync_status, pa.last_sync_at, pa.last_heartbeat,
+            pa.pos_type, pa.db_type,
+            (SELECT COUNT(*) FROM flyer_pos_sales ps
+             WHERE ps.pos_agent_id = pa.id AND ps.created_at >= NOW() - INTERVAL '24 hours') AS recent_sales
+     FROM flyer_pos_agents pa
+     JOIN flyer_companies fc ON fc.id = pa.company_id
+     LEFT JOIN flyer_users fu ON fu.company_id = pa.company_id AND fu.role = 'flyer_admin' LIMIT 1
+     ORDER BY pa.last_heartbeat DESC NULLS LAST`
+  );
+  return result.rows.map(r => ({
+    agentId: r.agent_id,
+    companyId: r.company_id,
+    companyName: r.company_name || '',
+    storeName: r.store_name || '',
+    syncStatus: r.sync_status || 'unknown',
+    lastSyncAt: r.last_sync_at,
+    lastHeartbeat: r.last_heartbeat,
+    posType: r.pos_type || '',
+    dbType: r.db_type || '',
+    errorCount: Number(r.recent_sales) || 0,
+  }));
+}
+
+/**
  * 성별 코드 정규화
  */
 function normalizeGender(gender?: string): string | null {

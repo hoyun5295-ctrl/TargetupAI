@@ -113,9 +113,26 @@ export default function FlyerAdminDashboard() {
     } catch {}
   }, [apiFetch]);
 
+  // ★ POS Agent 상태 목록
+  const [posAgents, setPosAgents] = useState<Array<{
+    agentId: string; companyId: string; companyName: string; storeName: string;
+    syncStatus: string; lastSyncAt: string | null; lastHeartbeat: string | null;
+    posType: string; dbType: string; errorCount: number;
+  }>>([]);
+  const [posLoading, setPosLoading] = useState(false);
+
+  const loadPosAgents = useCallback(async () => {
+    setPosLoading(true);
+    try {
+      const res = await apiFetch('/api/flyer/pos/agents');
+      if (res.ok) setPosAgents(await res.json());
+    } catch {} finally { setPosLoading(false); }
+  }, [apiFetch]);
+
   useEffect(() => { loadStats(); loadBusinessTypes(); }, [loadStats, loadBusinessTypes]);
   useEffect(() => { if (activeTab === 'distributors') loadDistributors(); }, [activeTab, loadDistributors]);
   useEffect(() => { if (activeTab === 'stores') loadStores(); }, [activeTab, loadStores]);
+  useEffect(() => { if (activeTab === 'posAgents') loadPosAgents(); }, [activeTab, loadPosAgents]);
 
   const handleCreateDist = async () => {
     if (!newDist.company_name || !newDist.admin_login_id || !newDist.admin_password) {
@@ -494,9 +511,53 @@ export default function FlyerAdminDashboard() {
 
             {/* POS Agent */}
             {activeTab === 'posAgents' && (
-              <div className="text-center py-12 text-gray-400">
-                <p className="text-lg mb-1">POS Agent 모니터링</p>
-                <p className="text-sm">Phase B에서 구현 예정</p>
+              <div>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-bold text-gray-800">POS Agent 모니터링</h3>
+                  <button onClick={loadPosAgents} className="text-sm text-orange-600 hover:text-orange-700 font-medium">새로고침</button>
+                </div>
+                {posLoading ? <div className="text-center py-8 text-gray-400">로딩 중...</div> :
+                posAgents.length === 0 ? <div className="text-center py-12 text-gray-400"><p className="text-lg mb-1">등록된 POS Agent 없음</p><p className="text-sm">매장에 POS Agent를 설치하면 여기에 표시됩니다.</p></div> : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-gray-50 text-gray-600">
+                        <tr>
+                          <th className="px-4 py-3 text-left font-medium">총판/매장</th>
+                          <th className="px-4 py-3 text-left font-medium">POS 종류</th>
+                          <th className="px-4 py-3 text-center font-medium">상태</th>
+                          <th className="px-4 py-3 text-left font-medium">마지막 동기화</th>
+                          <th className="px-4 py-3 text-left font-medium">마지막 하트비트</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {posAgents.map(a => (
+                          <tr key={a.agentId} className="hover:bg-gray-50">
+                            <td className="px-4 py-3">
+                              <div className="font-semibold text-gray-800">{a.storeName || a.companyName}</div>
+                              <div className="text-xs text-gray-400">{a.companyName}</div>
+                            </td>
+                            <td className="px-4 py-3 text-gray-600">{a.posType || '-'} / {a.dbType || '-'}</td>
+                            <td className="px-4 py-3 text-center">
+                              <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold ${
+                                a.syncStatus === 'connected' ? 'bg-green-100 text-green-700' :
+                                a.syncStatus === 'error' ? 'bg-red-100 text-red-700' :
+                                'bg-gray-100 text-gray-600'
+                              }`}>
+                                <span className={`w-1.5 h-1.5 rounded-full ${
+                                  a.syncStatus === 'connected' ? 'bg-green-500' :
+                                  a.syncStatus === 'error' ? 'bg-red-500' : 'bg-gray-400'
+                                }`} />
+                                {a.syncStatus === 'connected' ? '연결됨' : a.syncStatus === 'error' ? '오류' : '대기'}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-gray-500 text-xs">{a.lastSyncAt ? new Date(a.lastSyncAt).toLocaleString('ko') : '-'}</td>
+                            <td className="px-4 py-3 text-gray-500 text-xs">{a.lastHeartbeat ? new Date(a.lastHeartbeat).toLocaleString('ko') : '-'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             )}
           </div>

@@ -141,6 +141,29 @@ export default function FlyerPage({ token, businessType = 'mart' }: { token: str
     catch { setAlert({ show: true, title: '오류', message: '삭제 실패', type: 'error' }); }
   };
 
+  // ★ POP 일괄 PDF 다운로드
+  const handlePopAll = async (id: string) => {
+    try {
+      const res = await apiFetch(`${API_BASE}/api/flyer/flyers/${id}/pop-all`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify({}) });
+      if (!res.ok) throw new Error();
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'all_pop.pdf';
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+    } catch { setAlert({ show: true, title: '오류', message: 'POP 일괄 다운로드 실패', type: 'error' }); }
+  };
+
+  // ★ 전단지 복사
+  const handleCopy = async (id: string) => {
+    try {
+      const res = await apiFetch(`${API_BASE}/api/flyer/flyers/${id}/copy`, { method: 'POST' });
+      if (res.ok) { setAlert({ show: true, title: '복사 완료', message: '전단지가 복사되었습니다.', type: 'success' }); loadFlyers(); }
+      else { setAlert({ show: true, title: '오류', message: '복사 실패', type: 'error' }); }
+    } catch { setAlert({ show: true, title: '오류', message: '네트워크 오류', type: 'error' }); }
+  };
+
   const handleEdit = (f: Flyer) => {
     setEditingFlyer(f); setTitle(f.title); setStoreName(f.store_name || ''); setPeriodStart(f.period_start || ''); setPeriodEnd(f.period_end || ''); setTemplate(f.template || 'grid');
     const cats = typeof f.categories === 'string' ? JSON.parse(f.categories) : (f.categories || []);
@@ -281,6 +304,9 @@ export default function FlyerPage({ token, businessType = 'mart' }: { token: str
                       {f.status !== 'published' && <button onClick={() => handlePublish(f.id)} className="text-[11px] text-success-600 hover:text-success-500 font-semibold">발행</button>}
                       {f.short_code && <a href={`https://hanjul-flyer.kr/${f.short_code}`} target="_blank" rel="noopener noreferrer" className="text-[11px] text-primary-600 hover:text-primary-700 font-medium">미리보기</a>}
                       {f.status === 'published' && <button onClick={() => handleDownloadPdf(f.id, f.title)} className="text-[11px] text-indigo-600 hover:text-indigo-700 font-medium">PDF</button>}
+                      {f.status === 'published' && <button onClick={() => handlePopAll(f.id)} className="text-[11px] text-orange-600 hover:text-orange-700 font-medium">POP</button>}
+                      <button onClick={() => handleCopy(f.id)} className="text-[11px] text-teal-600 hover:text-teal-700 font-medium">복사</button>
+                      {f.status === 'published' && f.short_code && <button onClick={() => { window.location.href = `/send?flyer=${f.short_code}`; }} className="text-[11px] text-blue-600 hover:text-blue-700 font-semibold">SMS발송</button>}
                       <button onClick={() => setDeleteModal({ show: true, id: f.id, title: f.title })} className="text-[11px] text-error-500 hover:text-error-600 font-medium">삭제</button>
                     </div>
                   </div>
@@ -381,11 +407,8 @@ export default function FlyerPage({ token, businessType = 'mart' }: { token: str
                   </div>
                   {/* 콘텐츠 */}
                   <div className="overflow-y-auto" style={{ height: 460 }}>
-                    {editingFlyer?.short_code ? (
-                      <iframe src={`${API_BASE}/api/flyer/p/${editingFlyer.short_code}`} className="w-full border-0" style={{ height: 460, transform: 'scale(0.66)', transformOrigin: 'top left', width: '152%' }} title="미리보기" />
-                    ) : (
-                      <FlyerPreviewRenderer title={title} storeName={storeName} periodStart={periodStart} periodEnd={periodEnd} categories={categories} template={template} />
-                    )}
+                    {/* ★ 수정 모드에서도 항상 실시간 렌더러 사용 — 템플릿 변경이 즉시 반영되도록 */}
+                    <FlyerPreviewRenderer title={title} storeName={storeName} periodStart={periodStart} periodEnd={periodEnd} categories={categories} template={template} />
                   </div>
                   {/* 홈 인디케이터 */}
                   <div className="flex justify-center py-2 bg-white">
@@ -714,8 +737,30 @@ function ProductRegistrationSection({ categories, setCategories, addCategory, re
               <div className="flex justify-between items-center mb-3">
                 <input type="text" value={categories[safeTab].name} onChange={e => updateCategoryName(safeTab, e.target.value)}
                   className="font-bold text-sm text-text border-b border-transparent hover:border-border-strong focus:border-primary-500 focus:outline-none pb-1 bg-transparent" />
-                <button onClick={() => { removeCategory(safeTab); setActiveTab(Math.max(0, safeTab - 1)); }}
-                  className="text-xs text-error-500 hover:text-error-600 font-medium">카테고리 삭제</button>
+                <div className="flex gap-2 items-center">
+                  <button onClick={async () => {
+                    const items = categories[safeTab].items.filter(i => i.name.trim());
+                    if (items.length === 0) { setAlert({ show: true, title: '알림', message: '상품을 먼저 입력해주세요.', type: 'info' }); return; }
+                    setAiCopyLoading('batch');
+                    try {
+                      const res = await apiFetch(`${API_BASE}/api/flyer/catalog/generate-batch-copy`, {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ items: items.map(i => ({ name: i.name, category: categories[safeTab].name })), copy_type: 'selling_point' })
+                      });
+                      if (res.ok) {
+                        const data = await res.json();
+                        const u = [...categories];
+                        u[safeTab].items.forEach(item => { if (data.copies[item.name]) { item.aiCopy = data.copies[item.name]; } });
+                        setCategories(u);
+                        setAlert({ show: true, title: 'AI 문구 생성 완료', message: `${Object.keys(data.copies).length}개 상품에 문구가 적용되었습니다.`, type: 'success' });
+                      }
+                    } catch { setAlert({ show: true, title: '오류', message: 'AI 배치 문구 생성 실패', type: 'error' }); }
+                    finally { setAiCopyLoading(null); }
+                  }} className={`text-xs px-2 py-1 rounded ${aiCopyLoading === 'batch' ? 'text-gray-400 bg-gray-100' : 'text-purple-600 bg-purple-50 hover:bg-purple-100'} font-medium`}
+                    disabled={aiCopyLoading === 'batch'}>{aiCopyLoading === 'batch' ? 'AI 생성중...' : 'AI 일괄문구'}</button>
+                  <button onClick={() => { removeCategory(safeTab); setActiveTab(Math.max(0, safeTab - 1)); }}
+                    className="text-xs text-error-500 hover:text-error-600 font-medium">카테고리 삭제</button>
+                </div>
               </div>
 
               <div className="space-y-2">
@@ -723,8 +768,31 @@ function ProductRegistrationSection({ categories, setCategories, addCategory, re
                   <div className="col-span-4">상품명</div><div className="col-span-2">원가/할인가</div><div className="col-span-2">규격/원산지</div><div className="col-span-2">뱃지</div><div className="col-span-1">카드할인</div><div className="col-span-1"></div>
                 </div>
                 {categories[safeTab].items.map((item, ii) => (
-                  <div key={ii} className="grid grid-cols-12 gap-2 items-center">
+                  <div key={ii} className="grid grid-cols-12 gap-2 items-center"
+                    draggable
+                    onDragStart={(e) => { e.dataTransfer.setData('text/plain', JSON.stringify({ catIdx: safeTab, itemIdx: ii })); e.dataTransfer.effectAllowed = 'move'; (e.currentTarget as HTMLElement).style.opacity = '0.4'; }}
+                    onDragEnd={(e) => { (e.currentTarget as HTMLElement).style.opacity = '1'; }}
+                    onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; (e.currentTarget as HTMLElement).style.borderTop = '2px solid #6366f1'; }}
+                    onDragLeave={(e) => { (e.currentTarget as HTMLElement).style.borderTop = ''; }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      (e.currentTarget as HTMLElement).style.borderTop = '';
+                      try {
+                        const src = JSON.parse(e.dataTransfer.getData('text/plain'));
+                        const u = [...categories];
+                        const [moved] = u[src.catIdx].items.splice(src.itemIdx, 1);
+                        if (src.catIdx === safeTab) {
+                          const targetIdx = ii > src.itemIdx ? ii - 1 : ii;
+                          u[safeTab].items.splice(targetIdx, 0, moved);
+                        } else {
+                          u[safeTab].items.splice(ii, 0, moved);
+                        }
+                        setCategories(u);
+                      } catch {}
+                    }}
+                  >
                     <div className="col-span-4 flex items-center gap-2">
+                      <span className="cursor-grab text-text-muted text-xs select-none" title="드래그하여 순서 변경">⠿</span>
                       <div className="relative flex-shrink-0">
                         <label className="cursor-pointer block w-9 h-9 rounded-lg border border-dashed border-border hover:border-primary-500 overflow-hidden flex items-center justify-center bg-bg/50 transition-colors">
                           {item.imageUrl ? (
@@ -827,6 +895,20 @@ function ProductRegistrationSection({ categories, setCategories, addCategory, re
                 <div className="flex gap-2">
                   <button onClick={() => addItem(safeTab)} className="flex-1 py-2 text-xs text-primary-600 hover:bg-primary-50 rounded-lg border border-dashed border-primary-500/30 transition-colors font-medium">+ 상품 추가</button>
                   <button onClick={() => { setShowCatalog(true); loadCatalog(); }} className="flex-1 py-2 text-xs text-text-secondary hover:bg-surface-hover rounded-lg border border-dashed border-border transition-colors font-medium">📦 카탈로그에서</button>
+                  <button onClick={async () => {
+                    try {
+                      const res = await apiFetch(`${API_BASE}/api/flyer/pos/top-selling?limit=10&period=30`);
+                      if (!res.ok) { setAlert({ show: true, title: '알림', message: 'POS 데이터가 없습니다.', type: 'info' }); return; }
+                      const data = await res.json();
+                      if (!data || data.length === 0) { setAlert({ show: true, title: '알림', message: '판매 데이터가 없습니다.', type: 'info' }); return; }
+                      const u = [...categories];
+                      data.forEach((p: any) => {
+                        u[safeTab].items.push({ name: p.product_name, originalPrice: p.avg_price, salePrice: p.avg_price, imageUrl: p.image_url || undefined, badge: `${p.total_qty}개 판매` });
+                      });
+                      setCategories(u);
+                      setAlert({ show: true, title: 'POS 추천', message: `${data.length}개 인기 상품이 추가되었습니다.`, type: 'success' });
+                    } catch { setAlert({ show: true, title: '오류', message: 'POS 추천 조회 실패', type: 'error' }); }
+                  }} className="py-2 px-3 text-xs text-green-600 hover:bg-green-50 rounded-lg border border-dashed border-green-500/30 transition-colors font-medium">📊 POS추천</button>
                 </div>
               </div>
             </div>

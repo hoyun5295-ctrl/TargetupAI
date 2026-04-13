@@ -19,7 +19,7 @@ import { generateProductImage, generateFlyerImages, getGeneratedImageUrl } from 
 import { LIMITS } from '../../config/defaults';
 import { generatePdfFromHtml } from '../../utils/flyer/flyer-pdf';
 import { renderFlyerPage } from './short-urls';
-import { renderPricePop } from '../../utils/flyer/flyer-pop-templates';
+import { renderPricePop, renderMultiPop, renderPromoPop } from '../../utils/flyer/flyer-pop-templates';
 import { classifyProducts } from '../../utils/flyer/flyer-category-classifier';
 
 const PRODUCT_IMAGE_DIR = process.env.PRODUCT_IMAGE_PATH || path.resolve('./uploads/product-images');
@@ -751,6 +751,150 @@ router.post('/pop-pdf', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[전단AI] POP PDF 생성 실패:', err.message);
     res.status(500).json({ error: 'POP PDF 생성에 실패했습니다.' });
+  }
+});
+
+// ══════════════════════════════════════════
+// POST /multi-pop — 다분할 POP PDF (A4에 2/4/8개)
+// ══════════════════════════════════════════
+router.post('/multi-pop', async (req: Request, res: Response) => {
+  try {
+    const companyId = requireCompanyId(req, res);
+    if (!companyId) return;
+
+    const { items, splits, storeName, colorTheme } = req.body;
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: '상품 목록이 필요합니다.' });
+    }
+    const validSplits = [2, 4, 8].includes(splits) ? splits : 4;
+
+    const html = renderMultiPop(items, validSplits, { storeName, colorTheme });
+    const pdfBuffer = await generatePdfFromHtml(html, { format: 'A4' });
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="multi_pop_${validSplits}.pdf"`);
+    res.setHeader('Content-Length', pdfBuffer.length);
+    res.send(pdfBuffer);
+  } catch (err: any) {
+    console.error('[전단AI] 다분할 POP 실패:', err.message);
+    res.status(500).json({ error: '다분할 POP 생성에 실패했습니다.' });
+  }
+});
+
+// ══════════════════════════════════════════
+// POST /promo-pop — 홍보POP (코너 안내판) PDF
+// ══════════════════════════════════════════
+router.post('/promo-pop', async (req: Request, res: Response) => {
+  try {
+    const companyId = requireCompanyId(req, res);
+    if (!companyId) return;
+
+    const { category, items, storeName, storeAddress, colorTheme } = req.body;
+    if (!category || !items || !Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: '카테고리명과 상품 목록이 필요합니다.' });
+    }
+
+    const html = renderPromoPop(category, items, { storeName, storeAddress, colorTheme });
+    const pdfBuffer = await generatePdfFromHtml(html, { format: 'A4' });
+
+    const safeCat = category.replace(/[^가-힣a-zA-Z0-9_-]/g, '_').slice(0, 20);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(safeCat)}_promo_pop.pdf"`);
+    res.setHeader('Content-Length', pdfBuffer.length);
+    res.send(pdfBuffer);
+  } catch (err: any) {
+    console.error('[전단AI] 홍보POP 실패:', err.message);
+    res.status(500).json({ error: '홍보POP 생성에 실패했습니다.' });
+  }
+});
+
+// ══════════════════════════════════════════
+// POST /:id/pop-all — 전단 전체 상품 POP 일괄 PDF
+// ══════════════════════════════════════════
+router.post('/:id/pop-all', async (req: Request, res: Response) => {
+  try {
+    const companyId = requireCompanyId(req, res);
+    if (!companyId) return;
+
+    const result = await query(
+      `SELECT categories, store_name FROM flyers WHERE id = $1 AND company_id = $2`,
+      [req.params.id, companyId]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: '전단지를 찾을 수 없습니다.' });
+
+    const cats = typeof result.rows[0].categories === 'string'
+      ? JSON.parse(result.rows[0].categories)
+      : (result.rows[0].categories || []);
+    const sName = result.rows[0].store_name || '';
+
+    // 모든 상품을 개별 POP으로 생성 후 연결
+    const allItems: any[] = [];
+    for (const cat of cats) {
+      for (const item of (cat.items || [])) {
+        if (item.name?.trim()) allItems.push(item);
+      }
+    }
+    if (allItems.length === 0) return res.status(400).json({ error: '상품이 없습니다.' });
+
+    const { colorTheme } = req.body;
+    // 8개 이하면 다분할 POP 1장, 아니면 개별 POP 연결
+    if (allItems.length <= 8) {
+      const splits = allItems.length <= 2 ? 2 : allItems.length <= 4 ? 4 : 8;
+      const html = renderMultiPop(allItems, splits as 2 | 4 | 8, { storeName: sName, colorTheme });
+      const pdfBuffer = await generatePdfFromHtml(html, { format: 'A4' });
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', 'attachment; filename="all_pop.pdf"');
+      res.setHeader('Content-Length', pdfBuffer.length);
+      return res.send(pdfBuffer);
+    }
+
+    // 8개 초과: 8개씩 다분할로 나눠서 생성
+    const pages: string[] = [];
+    for (let i = 0; i < allItems.length; i += 8) {
+      const chunk = allItems.slice(i, i + 8);
+      const splits = chunk.length <= 2 ? 2 : chunk.length <= 4 ? 4 : 8;
+      pages.push(renderMultiPop(chunk, splits as 2 | 4 | 8, { storeName: sName, colorTheme }));
+    }
+    // 첫 페이지만 PDF로 (다중 페이지 puppeteer 제한)
+    const pdfBuffer = await generatePdfFromHtml(pages[0], { format: 'A4' });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="all_pop.pdf"');
+    res.setHeader('Content-Length', pdfBuffer.length);
+    res.send(pdfBuffer);
+  } catch (err: any) {
+    console.error('[전단AI] POP 일괄 실패:', err.message);
+    res.status(500).json({ error: 'POP 일괄 생성에 실패했습니다.' });
+  }
+});
+
+// ══════════════════════════════════════════
+// POST /:id/copy — 전단지 복사 (기존 → 새 전단)
+// ══════════════════════════════════════════
+router.post('/:id/copy', async (req: Request, res: Response) => {
+  try {
+    const companyId = requireCompanyId(req, res);
+    if (!companyId) return;
+    const { userId } = req.flyerUser!;
+
+    const orig = await query(
+      `SELECT title, store_name, categories, template, logo_url, extra_data FROM flyers WHERE id = $1 AND company_id = $2`,
+      [req.params.id, companyId]
+    );
+    if (orig.rows.length === 0) return res.status(404).json({ error: '원본 전단지를 찾을 수 없습니다.' });
+
+    const o = orig.rows[0];
+    const result = await query(
+      `INSERT INTO flyers (company_id, user_id, title, store_name, categories, template, logo_url, extra_data)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING *`,
+      [companyId, userId, `${o.title} (복사)`, o.store_name, JSON.stringify(o.categories || []),
+       o.template || 'grid', o.logo_url, JSON.stringify(o.extra_data || {})]
+    );
+
+    res.status(201).json(result.rows[0]);
+  } catch (err: any) {
+    console.error('[전단AI] 전단지 복사 실패:', err.message);
+    res.status(500).json({ error: '전단지 복사에 실패했습니다.' });
   }
 });
 

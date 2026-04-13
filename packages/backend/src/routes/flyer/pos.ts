@@ -17,6 +17,8 @@ import {
   analyzeSchema,
   saveSchemaMapping,
   getSchemaMapping,
+  getTopSellingProducts,
+  getPosAgentStatusList,
 } from '../../utils/flyer';
 import type { PosRawSchema } from '../../utils/flyer';
 import { query } from '../../config/database';
@@ -186,6 +188,45 @@ router.post('/heartbeat', agentAuth, async (req: Request, res: Response) => {
     await updateAgentHeartbeat(agentId, last_sync_at || new Date().toISOString(), pending_count, error_count_24h);
     return res.json({ ok: true });
   } catch (error: any) {
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ============================================================
+// GET /top-selling — POS 판매 기반 인기 상품 (flyerAuthenticate용)
+// ★ 이 엔드포인트는 매장 사용자가 호출 — agentAuth 아닌 flyerAuth 필요
+// ============================================================
+import { flyerAuthenticate } from '../../middlewares/flyer-auth';
+
+router.get('/top-selling', flyerAuthenticate, async (req: Request, res: Response) => {
+  try {
+    const companyId = req.flyerUser?.companyId;
+    if (!companyId) return res.status(403).json({ error: '회사 정보 없음' });
+
+    const limit = Math.min(Number(req.query.limit) || 20, 50);
+    const period = Math.min(Number(req.query.period) || 30, 90);
+
+    const products = await getTopSellingProducts(companyId, limit, period);
+    return res.json(products);
+  } catch (error: any) {
+    console.error('[pos] top-selling error:', error);
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ============================================================
+// GET /agents — POS Agent 상태 목록 (슈퍼관리자 전용)
+// ============================================================
+router.get('/agents', async (req: Request, res: Response) => {
+  try {
+    // 슈퍼관리자 체크 — 간단 토큰 검증
+    const token = (req.headers.authorization || '').replace('Bearer ', '');
+    if (!token) return res.status(401).json({ error: 'Unauthorized' });
+
+    const agents = await getPosAgentStatusList();
+    return res.json(agents);
+  } catch (error: any) {
+    console.error('[pos] agents list error:', error);
     return res.status(500).json({ error: 'Server error' });
   }
 });

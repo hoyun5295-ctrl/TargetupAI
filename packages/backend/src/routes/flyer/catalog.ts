@@ -14,7 +14,7 @@ import {
   autoMatchImage,
   batchAutoMatchImages,
 } from '../../utils/flyer/flyer-naver-search';
-import { generateProductCopy, CopyType, COPY_TYPE_LABELS } from '../../utils/flyer/flyer-ai-copy';
+import { generateProductCopy, generateBatchProductCopy, CopyType, COPY_TYPE_LABELS } from '../../utils/flyer/flyer-ai-copy';
 
 const router = Router();
 router.use(flyerAuthenticate);
@@ -200,6 +200,34 @@ router.post('/generate-copy', async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('[flyer/catalog] generate-copy error:', error);
     return res.status(500).json({ error: 'AI 문구 생성에 실패했습니다.' });
+  }
+});
+
+// ============================================================
+// POST /generate-batch-copy — AI 문구 배치 생성 (전체 상품 일괄)
+// ============================================================
+router.post('/generate-batch-copy', async (req: Request, res: Response) => {
+  try {
+    const { items, copy_type } = req.body;
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: '상품 목록이 필요합니다.' });
+    }
+    const validType: CopyType = ['recipe', 'benefit', 'storage', 'selling_point'].includes(copy_type) ? copy_type : 'selling_point';
+
+    const result = await generateBatchProductCopy(
+      items.map((it: any) => ({ name: String(it.name || ''), category: it.category || '' })),
+      validType
+    );
+
+    return res.json({
+      copies: result,
+      copy_type: validType,
+      copy_type_label: COPY_TYPE_LABELS[validType],
+      count: Object.keys(result).length,
+    });
+  } catch (error: any) {
+    console.error('[flyer/catalog] batch-copy error:', error);
+    return res.status(500).json({ error: 'AI 배치 문구 생성에 실패했습니다.' });
   }
 });
 

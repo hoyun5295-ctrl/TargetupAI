@@ -101,6 +101,106 @@ function fmtPrice(price: number): string {
 /**
  * 상품 1개 → A4 1장 가격POP HTML
  */
+/**
+ * 다분할 POP — A4 한 장에 2/4/8개 상품
+ */
+export function renderMultiPop(items: PopItem[], splits: 2 | 4 | 8, options: PopOptions = {}): string {
+  const t = COLOR_THEMES[options.colorTheme || 'red'];
+  const cols = splits <= 2 ? 1 : 2;
+  const rows = Math.ceil(splits / cols);
+  const cellW = cols === 1 ? '100%' : '50%';
+  const cellH = `${100 / rows}%`;
+  const priceFontSize = splits <= 2 ? '48pt' : splits <= 4 ? '36pt' : '24pt';
+  const nameFontSize = splits <= 2 ? '20pt' : splits <= 4 ? '16pt' : '12pt';
+
+  const cells = items.slice(0, splits).map(item => {
+    const disc = item.originalPrice > 0 && item.salePrice > 0 && item.originalPrice > item.salePrice
+      ? Math.round((1 - item.salePrice / item.originalPrice) * 100) : 0;
+    const hasOrig = item.originalPrice > 0 && item.originalPrice !== item.salePrice;
+    return `<div class="cell">
+      ${disc > 0 ? `<div class="disc-badge">${disc}%</div>` : ''}
+      ${item.imageUrl ? `<img src="${esc(item.imageUrl)}" class="cell-img" onerror="this.style.display='none'" />` : ''}
+      <div class="cell-name">${esc(item.name)}</div>
+      ${item.unit || item.origin ? `<div class="cell-meta">${esc([item.origin, item.unit].filter(Boolean).join(' · '))}</div>` : ''}
+      ${hasOrig ? `<div class="cell-orig">${fmtPrice(item.originalPrice)}원</div>` : ''}
+      <div class="cell-price">${fmtPrice(item.salePrice)}<span class="won">원</span></div>
+      ${item.badge ? `<div class="cell-badge">${esc(item.badge)}</div>` : ''}
+      ${item.cardDiscount ? `<div class="cell-card">${esc(item.cardDiscount)}</div>` : ''}
+    </div>`;
+  }).join('');
+
+  return `<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><title>다분할 POP</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700;800;900&display=swap" rel="stylesheet">
+<style>
+@page{size:A4 portrait;margin:0}@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Noto Sans KR',sans-serif;width:210mm;height:297mm;background:#fff;overflow:hidden}
+.header{width:100%;padding:4mm 8mm;background:${t.badgeBg};color:${t.badgeColor};display:flex;justify-content:space-between;align-items:center}
+.header-store{font-size:14pt;font-weight:800}
+.grid{display:flex;flex-wrap:wrap;width:100%;height:calc(297mm - 16mm)}
+.cell{width:${cellW};height:${cellH};border:0.5px solid #eee;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:3mm;position:relative;background:${t.bg}}
+.disc-badge{position:absolute;top:2mm;right:2mm;background:${t.badgeBg};color:${t.badgeColor};padding:1.5mm 4mm;border-radius:3mm;font-size:${splits <= 4 ? '14pt' : '10pt'};font-weight:900}
+.cell-img{max-width:${splits <= 2 ? '40mm' : splits <= 4 ? '28mm' : '18mm'};max-height:${splits <= 2 ? '40mm' : splits <= 4 ? '28mm' : '18mm'};object-fit:contain;margin-bottom:2mm;border-radius:2mm}
+.cell-name{font-size:${nameFontSize};font-weight:800;text-align:center;color:${t.textColor};margin-bottom:1mm;line-height:1.3}
+.cell-meta{font-size:${splits <= 4 ? '9pt' : '7pt'};color:${t.subColor};margin-bottom:1mm}
+.cell-orig{font-size:${splits <= 4 ? '12pt' : '9pt'};color:${t.subColor};text-decoration:line-through}
+.cell-price{font-size:${priceFontSize};font-weight:900;color:${t.priceColor};line-height:1.1}.won{font-size:${splits <= 4 ? '16pt' : '12pt'};font-weight:700}
+.cell-badge{background:${t.accent};color:#fff;padding:1mm 3mm;border-radius:2mm;font-size:${splits <= 4 ? '9pt' : '7pt'};font-weight:700;margin-top:1mm}
+.cell-card{font-size:${splits <= 4 ? '8pt' : '6pt'};color:#16a34a;font-weight:700;margin-top:1mm}
+</style></head><body>
+<div class="header"><span class="header-store">${esc(options.storeName || '')}</span></div>
+<div class="grid">${cells}</div>
+</body></html>`;
+}
+
+/**
+ * 홍보POP (코너 안내판) — 카테고리 헤더 + 상품 리스트형
+ */
+export function renderPromoPop(category: string, items: PopItem[], options: PopOptions = {}): string {
+  const t = COLOR_THEMES[options.colorTheme || 'red'];
+  const rows = items.slice(0, 12).map((item, i) => {
+    const disc = item.originalPrice > 0 && item.salePrice > 0 && item.originalPrice > item.salePrice
+      ? Math.round((1 - item.salePrice / item.originalPrice) * 100) : 0;
+    return `<tr class="${i % 2 === 0 ? 'even' : ''}">
+      <td class="rank">${i + 1}</td>
+      <td class="pname">${esc(item.name)}${item.badge ? ` <span class="badge">${esc(item.badge)}</span>` : ''}</td>
+      ${item.origin ? `<td class="origin">${esc(item.origin)}</td>` : '<td class="origin"></td>'}
+      <td class="price">${fmtPrice(item.salePrice)}원${disc > 0 ? ` <span class="disc">${disc}%↓</span>` : ''}</td>
+    </tr>`;
+  }).join('');
+
+  return `<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><title>${esc(category)} 코너 안내</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700;800;900&display=swap" rel="stylesheet">
+<style>
+@page{size:A4 portrait;margin:0}@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Noto Sans KR',sans-serif;width:210mm;height:297mm;background:#fff;overflow:hidden;display:flex;flex-direction:column}
+.header{background:${t.badgeBg};color:${t.badgeColor};padding:10mm 12mm;text-align:center}
+.header h1{font-size:36pt;font-weight:900;letter-spacing:2px}
+.header p{font-size:14pt;font-weight:600;margin-top:2mm;opacity:0.85}
+.store{font-size:11pt;font-weight:700;padding:3mm 12mm;background:${t.accent}10;color:${t.textColor};text-align:right}
+table{width:100%;border-collapse:collapse;flex:1}
+th{background:${t.accent}15;color:${t.textColor};font-size:12pt;font-weight:700;padding:3mm 4mm;text-align:left;border-bottom:2px solid ${t.accent}}
+td{padding:3mm 4mm;font-size:12pt;border-bottom:1px solid #eee;color:${t.textColor}}
+tr.even{background:#fafafa}
+.rank{width:8mm;text-align:center;font-weight:800;color:${t.accent}}
+.pname{font-weight:700}
+.badge{display:inline-block;background:${t.badgeBg};color:${t.badgeColor};font-size:8pt;font-weight:700;padding:0.5mm 2mm;border-radius:2mm;vertical-align:middle}
+.origin{font-size:10pt;color:${t.subColor};width:20mm}
+.price{text-align:right;font-weight:800;color:${t.priceColor};font-size:14pt;white-space:nowrap}
+.disc{font-size:9pt;color:${t.accent};font-weight:700}
+.footer{padding:4mm 12mm;text-align:center;font-size:9pt;color:${t.subColor};border-top:1px solid #eee}
+</style></head><body>
+<div class="header"><h1>${esc(category)}</h1><p>오늘의 추천 상품</p></div>
+<div class="store">${esc(options.storeName || '')}</div>
+<table><tr><th></th><th>상품명</th><th>원산지</th><th style="text-align:right">가격</th></tr>${rows}</table>
+<div class="footer">hanjul-flyer.kr${options.storeAddress ? ' | ' + esc(options.storeAddress) : ''}</div>
+</body></html>`;
+}
+
+/**
+ * 상품 1개 → A4 1장 가격POP HTML
+ */
 export function renderPricePop(item: PopItem, options: PopOptions = {}): string {
   const t = COLOR_THEMES[options.colorTheme || 'red'];
   const disc = item.originalPrice > 0 && item.salePrice > 0 && item.originalPrice > item.salePrice
@@ -114,11 +214,12 @@ export function renderPricePop(item: PopItem, options: PopOptions = {}): string 
   if (item.origin) chips.push(esc(item.origin));
   if (item.unit) chips.push(esc(item.unit));
 
-  // 이미지 처리
+  // 이미지 처리 — 이미지 없으면 상품 이니셜 원형 표시
   const hasImage = !!item.imageUrl;
+  const initial = (item.name || '').charAt(0);
   const imageHtml = hasImage
-    ? `<div class="img-wrap"><img src="${esc(item.imageUrl!)}" alt="${esc(item.name)}" /></div>`
-    : '';
+    ? `<div class="img-wrap"><img src="${esc(item.imageUrl!)}" alt="${esc(item.name)}" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'" /><div class="img-fallback" style="display:none">${esc(initial)}</div></div>`
+    : `<div class="img-wrap"><div class="img-fallback">${esc(initial)}</div></div>`;
 
   return `<!DOCTYPE html>
 <html lang="ko">
@@ -152,6 +253,7 @@ export function renderPricePop(item: PopItem, options: PopOptions = {}): string 
   /* ── 상품 이미지 ── */
   .img-wrap { width: 100%; display: flex; justify-content: center; padding: 8mm 20mm 4mm; }
   .img-wrap img { max-width: 60mm; max-height: 60mm; object-fit: contain; border-radius: 4mm; }
+  .img-fallback { width: 50mm; height: 50mm; border-radius: 50%; background: ${t.accent}15; color: ${t.accent}; display: flex; align-items: center; justify-content: center; font-size: 48pt; font-weight: 900; }
   /* ── 본문 ── */
   .content { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 4mm 15mm; }
   .disc-badge {

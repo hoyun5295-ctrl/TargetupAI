@@ -97,6 +97,8 @@ export {
   ingestInventory,
   ingestMembers,
   updateAgentHeartbeat,
+  getTopSellingProducts,
+  getPosAgentStatusList,
 } from './flyer-pos-ingest';
 
 // CT-F15: QR 쿠폰

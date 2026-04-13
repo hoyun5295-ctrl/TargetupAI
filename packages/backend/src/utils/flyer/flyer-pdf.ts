@@ -93,10 +93,18 @@ export async function generatePdfFromHtml(
     // 모바일 전단지 뷰포트 (480px 기준)
     await page.setViewport({ width: 480, height: 800 });
 
-    // HTML 세팅 — baseUrl이 있으면 이미지 상대경로 해결
+    // ★ baseUrl 설정 — 상대경로 이미지(/api/flyer/...)를 절대URL로 해석
+    const serverBaseUrl = options.baseUrl || process.env.FLYER_BASE_URL || `http://localhost:${process.env.PORT || 4000}`;
+
+    // HTML 내 상대경로를 절대경로로 변환 (src="/api/... → src="http://localhost:4000/api/...)
+    const resolvedHtml = html.replace(
+      /src="(\/api\/[^"]+)"/g,
+      `src="${serverBaseUrl}$1"`
+    );
+
     const setContentOptions: any = { waitUntil: 'networkidle0', timeout: 30000 };
 
-    await page.setContent(html, setContentOptions);
+    await page.setContent(resolvedHtml, setContentOptions);
 
     // 이미지 로딩 대기 (최대 5초)
     await page.evaluate(`

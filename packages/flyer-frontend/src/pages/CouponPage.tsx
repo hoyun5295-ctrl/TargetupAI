@@ -213,12 +213,23 @@ export default function CouponPage({ token: _token }: { token: string }) {
   const conversionRate = (c: CouponCampaign) =>
     c.issued_count > 0 ? Math.round(c.redeemed_count / c.issued_count * 100) : 0;
 
+  // ★ 통계 대시보드
+  const [dashboardData, setDashboardData] = useState<{ summary: any; trend: any[]; campaigns: any[] } | null>(null);
+  const [showDashboard, setShowDashboard] = useState(false);
+  const loadDashboard = async () => {
+    try {
+      const res = await apiFetch(`${API_BASE}/api/flyer/coupons/dashboard`);
+      if (res.ok) { setDashboardData(await res.json()); setShowDashboard(true); }
+    } catch { setAlert({ show: true, title: '오류', message: '통계 조회 실패', type: 'error' }); }
+  };
+
   return (
     <div className="space-y-6">
       {/* 헤더 */}
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-bold text-white">QR 쿠폰</h2>
         <div className="flex gap-2">
+          <Button variant="ghost" onClick={loadDashboard}>통계</Button>
           <Button variant="secondary" onClick={() => setShowRedeem(true)}>
             쿠폰 사용 처리
           </Button>
@@ -451,6 +462,81 @@ export default function CouponPage({ token: _token }: { token: string }) {
             <div className="flex gap-2 pt-2">
               <Button variant="secondary" className="flex-1" onClick={() => setShowRedeem(false)}>취소</Button>
               <Button className="flex-1" onClick={handleRedeem} disabled={redeeming}>{redeeming ? '처리 중...' : '사용 확인'}</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ★ 통계 대시보드 모달 */}
+      {showDashboard && dashboardData && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={() => setShowDashboard(false)}>
+          <div className="bg-surface rounded-2xl w-full max-w-2xl p-6 max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-lg font-bold text-white">쿠폰 통계 대시보드</h3>
+              <button onClick={() => setShowDashboard(false)} className="text-text-muted hover:text-white text-xl">✕</button>
+            </div>
+
+            {/* 서머리 카드 */}
+            <div className="grid grid-cols-4 gap-3 mb-6">
+              {[
+                { label: '총 캠페인', value: dashboardData.summary.totalCampaigns, color: 'text-blue-400' },
+                { label: '총 발급', value: dashboardData.summary.totalIssued, color: 'text-green-400' },
+                { label: '총 사용', value: dashboardData.summary.totalRedeemed, color: 'text-orange-400' },
+                { label: '전환율', value: `${dashboardData.summary.conversionRate}%`, color: 'text-purple-400' },
+              ].map((s, i) => (
+                <div key={i} className="bg-surface-secondary rounded-xl p-4 text-center">
+                  <p className="text-xs text-text-muted mb-1">{s.label}</p>
+                  <p className={`text-2xl font-bold ${s.color}`}>{typeof s.value === 'number' ? s.value.toLocaleString() : s.value}</p>
+                </div>
+              ))}
+            </div>
+
+            {/* 7일 추이 (간단 바 차트) */}
+            {dashboardData.trend.length > 0 && (
+              <div className="mb-6">
+                <p className="text-sm font-semibold text-text-secondary mb-3">최근 7일 추이</p>
+                <div className="flex items-end gap-1 h-24">
+                  {dashboardData.trend.map((d: any, i: number) => {
+                    const maxVal = Math.max(...dashboardData.trend.map((t: any) => Number(t.issued) || 1));
+                    const h = Math.max(((Number(d.issued) || 0) / maxVal) * 100, 4);
+                    const rh = Math.max(((Number(d.redeemed) || 0) / maxVal) * 100, 0);
+                    return (
+                      <div key={i} className="flex-1 flex flex-col items-center gap-0.5">
+                        <div className="w-full flex gap-0.5 items-end justify-center" style={{ height: '80px' }}>
+                          <div className="w-3 bg-green-500 rounded-t" style={{ height: `${h}%` }} title={`발급 ${d.issued}`} />
+                          <div className="w-3 bg-orange-500 rounded-t" style={{ height: `${rh}%` }} title={`사용 ${d.redeemed}`} />
+                        </div>
+                        <span className="text-[9px] text-text-muted">{d.date?.slice(5)}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="flex gap-4 justify-center mt-2 text-[10px] text-text-muted">
+                  <span><span className="inline-block w-2 h-2 bg-green-500 rounded mr-1" />발급</span>
+                  <span><span className="inline-block w-2 h-2 bg-orange-500 rounded mr-1" />사용</span>
+                </div>
+              </div>
+            )}
+
+            {/* 캠페인별 실적 */}
+            <div>
+              <p className="text-sm font-semibold text-text-secondary mb-3">캠페인별 실적</p>
+              <div className="space-y-2">
+                {dashboardData.campaigns.map((c: any) => (
+                  <div key={c.id} className="flex items-center justify-between bg-surface-secondary rounded-lg px-4 py-3">
+                    <div>
+                      <span className="font-semibold text-sm text-white">{c.coupon_name}</span>
+                      <span className="ml-2 text-xs text-text-muted">{c.created_at}</span>
+                    </div>
+                    <div className="flex items-center gap-4 text-xs">
+                      <span className="text-green-400">발급 {c.issued_count}</span>
+                      <span className="text-orange-400">사용 {c.redeemed_count}</span>
+                      <span className={`font-bold ${Number(c.conversion_rate) > 20 ? 'text-purple-400' : 'text-text-muted'}`}>{c.conversion_rate}%</span>
+                    </div>
+                  </div>
+                ))}
+                {dashboardData.campaigns.length === 0 && <p className="text-center text-text-muted text-sm py-4">캠페인 데이터가 없습니다.</p>}
+              </div>
             </div>
           </div>
         </div>
