@@ -811,8 +811,8 @@ function ProductRegistrationSection({ categories, setCategories, addCategory, re
                       <button onClick={() => handlePopPdf(safeTab, ii)} className="text-[10px] px-1 py-0.5 rounded text-indigo-500 hover:bg-indigo-50" title="가격표 PDF">POP</button>
                       <button onClick={() => removeItem(safeTab, ii)} className="text-error-500/60 hover:text-error-500 transition-colors">✕</button>
                     </div>
+                    {item.aiCopy && <div className="col-span-12 -mt-1 mb-1 px-1"><p className="text-[10px] text-purple-500 truncate">{item.aiCopy}</p></div>}
                   </div>
-                  {item.aiCopy && <div className="col-span-12 -mt-1 mb-1 px-1"><p className="text-[10px] text-purple-500 truncate">{item.aiCopy}</p></div>}
                 ))}
                 <div className="flex gap-2">
                   <button onClick={() => addItem(safeTab)} className="flex-1 py-2 text-xs text-primary-600 hover:bg-primary-50 rounded-lg border border-dashed border-primary-500/30 transition-colors font-medium">+ 상품 추가</button>
