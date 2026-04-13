@@ -108,14 +108,11 @@ export function renderPricePop(item: PopItem, options: PopOptions = {}): string 
     ? Math.round((1 - item.salePrice / item.originalPrice) * 100) : 0;
   const hasOrig = item.originalPrice > 0 && item.originalPrice !== item.salePrice;
   const saved = hasOrig ? item.originalPrice - item.salePrice : 0;
-  const chips: string[] = [];
-  if (item.origin) chips.push(esc(item.origin));
-  if (item.unit) chips.push(esc(item.unit));
+  const meta: string[] = [];
+  if (item.unit) meta.push(esc(item.unit));
+  if (item.origin) meta.push(esc(item.origin));
 
   const hasImage = !!item.imageUrl;
-  const imageSection = hasImage
-    ? `<div class="img-area"><img src="${esc(item.imageUrl!)}" alt="" onerror="this.parentElement.style.display='none'" /></div>`
-    : '';
 
   return `<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8">
 <title>${esc(item.name)} POP</title>
@@ -124,70 +121,60 @@ export function renderPricePop(item: PopItem, options: PopOptions = {}): string 
 @page{size:A4 portrait;margin:0}
 @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'Noto Sans KR',sans-serif;width:210mm;height:297mm;overflow:hidden;display:flex;flex-direction:column}
+body{font-family:'Noto Sans KR',sans-serif;width:210mm;height:297mm;overflow:hidden;display:flex;flex-direction:column;background:#fff}
 
-/* ── 상단: 매장명 + 뱃지 ── */
-.top{background:${t.headerBg};color:${t.headerColor};padding:8mm 10mm;display:flex;justify-content:space-between;align-items:center}
-.top-store{font-size:20pt;font-weight:900;letter-spacing:1px}
-.top-badge{font-size:16pt;font-weight:900;background:rgba(255,255,255,.2);padding:3mm 8mm;border-radius:5mm}
+/* ── 헤더 (컴팩트) ── */
+.hdr{background:${t.headerBg};color:${t.headerColor};padding:5mm 10mm;display:flex;justify-content:space-between;align-items:center}
+.hdr-title{font-size:16pt;font-weight:900;letter-spacing:.5px}
+.hdr-badge{font-size:14pt;font-weight:900;background:rgba(255,255,255,.2);padding:2mm 6mm;border-radius:4mm}
 
-/* ── 할인율 구역 (강렬) ── */
-.disc-zone{background:${t.discBg};display:flex;align-items:center;justify-content:center;padding:${disc > 0 ? '12mm 0' : '4mm 0'};position:relative}
-.disc-burst{width:55mm;height:55mm;position:relative;display:flex;align-items:center;justify-content:center}
-.disc-burst::before{content:'';position:absolute;inset:0;background:${t.discBg};border-radius:50%;box-shadow:0 0 0 4mm ${t.discBg},0 4px 20px rgba(0,0,0,.2)}
-.disc-num{font-size:72pt;font-weight:900;color:${t.discColor};position:relative;z-index:1;line-height:1}
-.disc-pct{font-size:24pt;font-weight:800;color:${t.discColor};position:relative;z-index:1}
-.disc-label{position:absolute;bottom:-2mm;font-size:14pt;font-weight:800;color:${t.discColor};background:${t.headerBg};padding:1mm 6mm;border-radius:3mm;z-index:2}
+/* ── 이미지 영역 (A4의 45%) ── */
+.img-zone{flex:0 0 auto;height:120mm;display:flex;align-items:center;justify-content:center;background:#f9fafb;position:relative;overflow:hidden}
+.img-zone img{max-width:140mm;max-height:110mm;object-fit:contain}
+.disc-tag{position:absolute;top:6mm;right:8mm;background:${t.discBg};color:${t.discColor};width:22mm;height:22mm;border-radius:50%;display:flex;flex-direction:column;align-items:center;justify-content:center;box-shadow:0 2px 10px rgba(0,0,0,.2)}
+.disc-tag .dn{font-size:28pt;font-weight:900;line-height:1}
+.disc-tag .dp{font-size:10pt;font-weight:700}
+.badge-tag{position:absolute;top:6mm;left:8mm;background:${t.badgeBg};color:${t.badgeColor};padding:2mm 5mm;border-radius:3mm;font-size:12pt;font-weight:800}
 
-/* ── 상품 이미지 ── */
-.img-area{display:flex;justify-content:center;padding:6mm 15mm 2mm;background:${t.bodyBg}}
-.img-area img{max-width:55mm;max-height:55mm;object-fit:contain;border-radius:3mm}
+/* ── 상품 정보 ── */
+.info{flex:1;display:flex;flex-direction:column;justify-content:center;padding:6mm 15mm;gap:2mm}
+.name{font-size:30pt;font-weight:900;color:#1a1a1a;line-height:1.2}
+.meta{font-size:12pt;color:#888;font-weight:600}
+.orig-row{display:flex;align-items:center;gap:4mm;margin-top:2mm}
+.orig{font-size:16pt;color:#bbb;text-decoration:line-through;font-weight:600}
+.saved{font-size:12pt;font-weight:700;color:${t.savedColor};background:${t.savedBg};padding:1.5mm 5mm;border-radius:3mm}
+.card{font-size:11pt;font-weight:700;color:#16a34a}
 
-/* ── 메인 본문 ── */
-.main{flex:1;background:${t.bodyBg};display:flex;flex-direction:column;align-items:center;justify-content:center;padding:4mm 12mm;gap:3mm}
-.name{font-size:32pt;font-weight:900;color:${t.bodyColor};text-align:center;line-height:1.2;letter-spacing:-1px}
-.chips{display:flex;gap:3mm;flex-wrap:wrap;justify-content:center}
-.chip{font-size:11pt;font-weight:700;padding:2mm 5mm;border-radius:4mm;background:${t.borderColor}15;color:${t.borderColor};border:1.5px solid ${t.borderColor}40}
-.orig{font-size:22pt;color:${t.origColor};text-decoration:line-through;font-weight:600}
+/* ── 가격 바 (하단, 초대형) ── */
+.price-bar{background:${t.priceBg};padding:8mm 15mm;display:flex;align-items:baseline;justify-content:flex-end;gap:3mm}
+.price{font-size:88pt;font-weight:900;color:${t.priceColor};line-height:1;letter-spacing:-3px}
+.won{font-size:30pt;font-weight:800;color:${t.priceColor}}
 
-/* ── 가격 구역 (초대형) ── */
-.price-zone{background:${t.priceBg};width:100%;padding:8mm 10mm;display:flex;align-items:baseline;justify-content:center;gap:3mm;border-top:3px solid ${t.borderColor}}
-.price{font-size:90pt;font-weight:900;color:${t.priceColor};line-height:1;letter-spacing:-3px}
-.won{font-size:32pt;font-weight:800;color:${t.priceColor}}
-
-/* ── 절약/카드/AI문구 ── */
-.saved{font-size:16pt;font-weight:800;background:${t.savedBg};color:${t.savedColor};padding:2.5mm 8mm;border-radius:4mm;text-align:center}
-.card{font-size:13pt;font-weight:700;color:#16a34a}
-.ai-copy{font-size:11pt;color:${t.origColor};text-align:center;line-height:1.4}
-
-/* ── 하단 ── */
-.bottom{background:${t.headerBg};color:${t.headerColor};padding:4mm 10mm;display:flex;justify-content:space-between;align-items:center;font-size:10pt;font-weight:600}
+/* ── 푸터 ── */
+.ftr{background:${t.headerBg};color:${t.headerColor};padding:3mm 10mm;display:flex;justify-content:space-between;font-size:9pt;font-weight:600}
 </style></head><body>
-<div class="top">
-  <span class="top-store">${esc(options.storeName || '')}</span>
-  ${item.badge ? `<span class="top-badge">${esc(item.badge)}</span>` : ''}
+<div class="hdr">
+  <span class="hdr-title">${esc(options.storeName || 'HOT 프라이스')}</span>
+  ${item.badge ? `<span class="hdr-badge">${esc(item.badge)}</span>` : ''}
 </div>
-${disc > 0 ? `<div class="disc-zone">
-  <div class="disc-burst">
-    <span class="disc-num">${disc}</span><span class="disc-pct">%</span>
-  </div>
-  <span class="disc-label">할인</span>
-</div>` : ''}
-${imageSection}
-<div class="main">
+${hasImage ? `<div class="img-zone">
+  <img src="${esc(item.imageUrl!)}" alt="" onerror="this.parentElement.style.background='#f3f4f6'" />
+  ${disc > 0 ? `<div class="disc-tag"><span class="dn">${disc}</span><span class="dp">%</span></div>` : ''}
+</div>` : (disc > 0 ? `<div class="img-zone" style="height:60mm;background:${t.discBg}">
+  <div style="text-align:center"><span style="font-size:72pt;font-weight:900;color:${t.discColor}">${disc}</span><span style="font-size:24pt;font-weight:800;color:${t.discColor}">%</span><div style="font-size:16pt;font-weight:800;color:${t.discColor}">할인</div></div>
+</div>` : '')}
+<div class="info">
   <div class="name">${esc(item.name)}</div>
-  ${chips.length > 0 ? `<div class="chips">${chips.map(c => `<span class="chip">${c}</span>`).join('')}</div>` : ''}
-  ${hasOrig ? `<div class="orig">${fmtPrice(item.originalPrice)}원</div>` : ''}
-  ${saved > 0 ? `<div class="saved">${fmtPrice(saved)}원 절약!</div>` : ''}
+  ${meta.length > 0 ? `<div class="meta">${meta.join(' / ')}</div>` : ''}
+  ${hasOrig ? `<div class="orig-row"><span class="orig">정상가 ${fmtPrice(item.originalPrice)}원</span>${saved > 0 ? `<span class="saved">${fmtPrice(saved)}원 절약</span>` : ''}</div>` : ''}
   ${item.cardDiscount ? `<div class="card">${esc(item.cardDiscount)}</div>` : ''}
-  ${item.aiCopy ? `<div class="ai-copy">${esc(item.aiCopy)}</div>` : ''}
 </div>
-<div class="price-zone">
+<div class="price-bar">
   <span class="price">${fmtPrice(item.salePrice)}</span>
   <span class="won">원</span>
 </div>
-<div class="bottom">
-  <span>${esc(options.storeName || '')}${options.storeAddress ? ' · ' + esc(options.storeAddress) : ''}</span>
+<div class="ftr">
+  <span>${esc(options.storeName || '')}</span>
   <span>hanjul-flyer.kr</span>
 </div>
 </body></html>`;

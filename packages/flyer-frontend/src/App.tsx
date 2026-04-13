@@ -10,13 +10,14 @@ import SettingsPage from './pages/SettingsPage';
 import CustomerPage from './pages/CustomerPage';
 import CatalogPage from './pages/CatalogPage';
 import CouponPage from './pages/CouponPage';
+import PopPage from './pages/PopPage';
 import { useSessionTimeout } from './hooks/useSessionTimeout';
 import SessionTimer from './components/SessionTimer';
 import SessionTimeoutModal from './components/SessionTimeoutModal';
 
 export const API_BASE = import.meta.env.VITE_API_URL || '';
 export function getToken(): string { return localStorage.getItem('flyer_token') || ''; }
-export type Page = 'flyer' | 'send' | 'customers' | 'catalog' | 'coupons' | 'results' | 'balance' | 'unsubscribes' | 'settings';
+export type Page = 'flyer' | 'send' | 'pop' | 'customers' | 'catalog' | 'coupons' | 'results' | 'balance' | 'unsubscribes' | 'settings';
 
 /** 공통 fetch — 401 시 자동 로그아웃 */
 export async function apiFetch(url: string, options?: RequestInit): Promise<Response> {
@@ -35,6 +36,7 @@ export async function apiFetch(url: string, options?: RequestInit): Promise<Resp
 
 const MAIN_MENUS: { key: Page; label: string }[] = [
   { key: 'flyer', label: '전단제작' },
+  { key: 'pop', label: 'POP제작' },
   { key: 'send', label: '발송' },
   { key: 'coupons', label: '쿠폰' },
   { key: 'results', label: '결과' },
@@ -153,6 +155,7 @@ function App() {
       {/* ── 페이지 ── */}
       <main className="max-w-6xl mx-auto px-6 py-6">
         {currentPage === 'flyer' && <FlyerPage token={token} businessType={user?.businessType || 'mart'} />}
+        {currentPage === 'pop' && <PopPage token={token} />}
         {currentPage === 'send' && <SendPage token={token} />}
         {currentPage === 'customers' && <CustomerPage token={token} />}
         {currentPage === 'catalog' && <CatalogPage token={token} />}
