@@ -43,18 +43,24 @@ export function formatNumericLike(value: any): string | null {
   const clean = str.replace(/,/g, '');
   if (!/^-?\d+(\.\d+)?$/.test(clean)) return null;
 
-  // 4. YYMMDD (6자리) 날짜 제외 — 월/일 범위 검증
+  // 4. YYMMDD (6자리) 날짜 → 날짜 형태 문자열 반환 (PPT#1: 숫자 제외만이 아니라 날짜로 변환)
   if (/^\d{6}$/.test(clean)) {
     const mm = parseInt(clean.slice(2, 4), 10);
     const dd = parseInt(clean.slice(4, 6), 10);
-    if (mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) return null;
+    if (mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) {
+      const yy = parseInt(clean.slice(0, 2), 10);
+      const yyyy = yy >= 50 ? 1900 + yy : 2000 + yy;
+      return `${yyyy}.${String(mm).padStart(2, '0')}.${String(dd).padStart(2, '0')}`;
+    }
   }
 
-  // 5. YYYYMMDD (8자리) 날짜 제외 — 월/일 범위 검증
+  // 5. YYYYMMDD (8자리) 날짜 → 날짜 형태 문자열 반환 (PPT#1: 숫자 제외만이 아니라 날짜로 변환)
   if (/^\d{8}$/.test(clean)) {
     const mm = parseInt(clean.slice(4, 6), 10);
     const dd = parseInt(clean.slice(6, 8), 10);
-    if (mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) return null;
+    if (mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) {
+      return `${clean.slice(0, 4)}.${clean.slice(4, 6)}.${clean.slice(6, 8)}`;
+    }
   }
 
   const num = Number(clean);

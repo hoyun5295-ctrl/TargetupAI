@@ -57,6 +57,7 @@ function App() {
     return saved ? JSON.parse(saved) : null;
   });
   const [currentPage, setCurrentPage] = useState<Page>('flyer');
+  const [showMore, setShowMore] = useState(false);
 
   const handleLogin = (t: string, u: any) => { setToken(t); setUser(u); };
   const handleLogout = () => {
@@ -76,7 +77,6 @@ function App() {
 
   if (!token || !user) return <LoginPage onLogin={handleLogin} />;
 
-  const [showMore, setShowMore] = useState(false);
   const isMoreActive = MORE_MENUS.some(m => m.key === currentPage);
 
   return (

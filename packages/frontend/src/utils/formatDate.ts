@@ -100,18 +100,24 @@ export function formatNumericLike(value: any): string | null {
   const clean = str.replace(/,/g, '');
   if (!/^-?\d+(\.\d+)?$/.test(clean)) return null;
 
-  // 4. YYMMDD 날짜 제외
+  // 4. YYMMDD 날짜 → 날짜 문자열 반환 (PPT#1: 백엔드 format-number.ts와 동기화)
   if (/^\d{6}$/.test(clean)) {
     const mm = parseInt(clean.slice(2, 4), 10);
     const dd = parseInt(clean.slice(4, 6), 10);
-    if (mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) return null;
+    if (mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) {
+      const yy = parseInt(clean.slice(0, 2), 10);
+      const yyyy = yy >= 50 ? 1900 + yy : 2000 + yy;
+      return `${yyyy}.${String(mm).padStart(2, '0')}.${String(dd).padStart(2, '0')}`;
+    }
   }
 
-  // 5. YYYYMMDD 날짜 제외
+  // 5. YYYYMMDD 날짜 → 날짜 문자열 반환 (PPT#1: 백엔드 format-number.ts와 동기화)
   if (/^\d{8}$/.test(clean)) {
     const mm = parseInt(clean.slice(4, 6), 10);
     const dd = parseInt(clean.slice(6, 8), 10);
-    if (mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) return null;
+    if (mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) {
+      return `${clean.slice(0, 4)}.${clean.slice(4, 6)}.${clean.slice(6, 8)}`;
+    }
   }
 
   const num = Number(clean);
@@ -142,6 +148,24 @@ export function formatPreviewValue(val: any): string {
   // 순수 날짜(YYYY-MM-DD)
   if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
     return formatDate(str);
+  }
+  // ★ PPT#1: YYYYMMDD 8자리 날짜 패턴 → 날짜 형태로 표시 (커스텀필드 숫자처리 방지)
+  if (/^\d{8}$/.test(str)) {
+    const mm = parseInt(str.slice(4, 6), 10);
+    const dd = parseInt(str.slice(6, 8), 10);
+    if (mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) {
+      return formatDate(`${str.slice(0, 4)}-${str.slice(4, 6)}-${str.slice(6, 8)}`);
+    }
+  }
+  // ★ PPT#1: YYMMDD 6자리 날짜 패턴 → 날짜 형태로 표시
+  if (/^\d{6}$/.test(str)) {
+    const mm = parseInt(str.slice(2, 4), 10);
+    const dd = parseInt(str.slice(4, 6), 10);
+    if (mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) {
+      const yy = parseInt(str.slice(0, 2), 10);
+      const yyyy = yy >= 50 ? 1900 + yy : 2000 + yy;
+      return formatDate(`${yyyy}-${str.slice(2, 4)}-${str.slice(4, 6)}`);
+    }
   }
   // ★ D111: 숫자/전화/YYMMDD 처리를 formatNumericLike 컨트롤타워로 통합
   //   이전: 인라인으로 정수/소수/전화번호/YYMMDD 규칙이 중복 구현됨 → 백엔드와 불일치 발생
@@ -675,13 +699,14 @@ export function buildAdMessageFront(
   isAd: boolean,
   optOutNumber: string
 ): string {
-  if (!isAd || !optOutNumber) return message;
+  if (!isAd) return message;
 
   const isSms = msgType === 'SMS';
   const adPrefix = isSms ? '(광고)' : '(광고) ';
-  const rejectFooter = isSms
-    ? `\n무료거부${optOutNumber.replace(/-/g, '')}`
-    : `\n무료수신거부 ${optOutNumber}`;
+  // ★ PPT#3: 080번호 없어도 (광고)+무료거부까지는 붙이고, 번호만 비움
+  const rejectFooter = optOutNumber
+    ? (isSms ? `\n무료거부${optOutNumber.replace(/-/g, '')}` : `\n무료수신거부 ${optOutNumber}`)
+    : (isSms ? `\n무료거부` : `\n무료수신거부`);
 
   // ★ D103+B 후속: 중복 방지 안전장치 — 백엔드 buildAdMessage와 동일 처리
   //   D103 이전에 발송된 캠페인이나, message_content에 이미 (광고)/무료거부가 포함된 경우

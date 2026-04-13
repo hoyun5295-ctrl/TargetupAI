@@ -32,7 +32,7 @@ router.post('/generate-message', async (req: Request, res: Response) => {
       return res.status(403).json({ error: '회사 권한이 필요합니다' });
     }
 
-    const { prompt, filters, productName, discountRate, eventName, brandName, channel, isAd, usePersonalization, personalizationVars } = req.body;
+    const { prompt, filters, productName, discountRate, eventName, brandName, channel, isAd, usePersonalization, personalizationVars, personalFields } = req.body;
 
     if (!prompt) {
       return res.status(400).json({ error: '프롬프트를 입력해주세요' });
@@ -108,7 +108,7 @@ router.post('/generate-message', async (req: Request, res: Response) => {
       isAd,
       rejectNumber: companyInfo.reject_number,
       usePersonalization,
-      personalizationVars,
+      personalizationVars: personalizationVars || personalFields,
       availableVarsCatalog: varCatalog,
       availableVars: availableVars,
     };

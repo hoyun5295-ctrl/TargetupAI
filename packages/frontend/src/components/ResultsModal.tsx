@@ -652,6 +652,7 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
                       <tr>
                         <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500">날짜</th>
                         <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500">발송자</th>
+                        <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500">문안</th>
                         <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500">유형</th>
                         <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500">통신사</th>
                         <th className="px-3 py-2 text-center text-xs font-semibold text-gray-500">판정</th>
@@ -659,7 +660,7 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
                     </thead>
                     <tbody>
                     {(!spamFilterList || spamFilterList.length === 0) ? (
-                        <tr><td colSpan={5} className="px-3 py-8 text-center text-gray-400">스팸필터 테스트 이력이 없습니다</td></tr>
+                        <tr><td colSpan={6} className="px-3 py-8 text-center text-gray-400">스팸필터 테스트 이력이 없습니다</td></tr>
                       ) : (
                         spamFilterList
                           .slice((spamCurrentPage - 1) * itemsPerPage, spamCurrentPage * itemsPerPage)
@@ -669,6 +670,9 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
                               {new Date(t.sentAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
                             </td>
                             <td className="px-3 py-2 text-xs text-gray-700">{t.senderName || '-'}</td>
+                            <td className="px-3 py-2 text-xs text-gray-600 max-w-[200px] truncate" title={t.content || ''}>
+                              {t.content ? (t.content.length > 30 ? t.content.slice(0, 30) + '...' : t.content) : '-'}
+                            </td>
                             <td className="px-3 py-2">
                               <span className={`px-2 py-0.5 rounded text-xs font-medium ${t.type === 'SMS' ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'bg-violet-50 text-violet-700 border border-violet-200'}`}>
                                 {t.type}

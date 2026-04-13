@@ -258,12 +258,12 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
     return num;
   };
 
-  // 광고 접미사 텍스트
+  // 광고 접미사 텍스트 — ★ PPT#3: 080번호 없어도 무료거부까지 표시
   const getAdSuffix = () => {
-    if (!isAd || !optOutNumber) return '';
+    if (!isAd) return '';
     return messageType === 'SMS'
-      ? `무료거부${optOutNumber.replace(/-/g, '')}`
-      : `무료수신거부 ${formatRejectNumber(optOutNumber)}`;
+      ? `무료거부${optOutNumber ? optOutNumber.replace(/-/g, '') : ''}`
+      : `무료수신거부${optOutNumber ? ` ${formatRejectNumber(optOutNumber)}` : ''}`;
   };
 
   // ★ D86: AI 기반 타겟 자동 추출 — recommend-target 컨트롤타워 재활용 (한줄로와 동일 로직)
@@ -378,7 +378,8 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
     } else {
       if (!messageContent.trim()) { setError('메시지 내용을 입력해주세요.'); setStep(5); return; }
     }
-    if (!callbackNumber) { setError('발신번호를 선택해주세요.'); setStep(5); return; }
+    // ★ PPT#7: 수신자별 회신번호 사용 시 callbackNumber 미필수
+    if (!useIndividualCallback && !callbackNumber) { setError('발신번호를 선택해주세요.'); setStep(5); return; }
     if (messageType === 'MMS' && mmsUploadedImages.length === 0 && !aiGenerateEnabled) { setError('MMS 이미지를 첨부해주세요.'); setStep(5); return; }
     if ((messageType === 'LMS' || messageType === 'MMS') && !messageSubject.trim() && !aiGenerateEnabled) { setError('LMS/MMS는 제목을 입력해주세요.'); setStep(5); return; }
 
@@ -1119,8 +1120,16 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
                       <label className="block text-xs font-semibold text-gray-600 mb-1.5">발신번호 (수신자에게 표시되는 번호)</label>
                       {callbackNumbers.length > 0 ? (
                         <select
-                          value={callbackNumber}
-                          onChange={e => setCallbackNumber(e.target.value)}
+                          value={useIndividualCallback ? '__individual__' : callbackNumber}
+                          onChange={e => {
+                            if (e.target.value === '__individual__') {
+                              setUseIndividualCallback(true);
+                              setCallbackNumber('');
+                            } else {
+                              setUseIndividualCallback(false);
+                              setCallbackNumber(e.target.value);
+                            }
+                          }}
                           className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                         >
                           <option value="">발신번호 선택</option>
@@ -1129,11 +1138,14 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
                               {cb.phone}{cb.label ? ` (${cb.label})` : ''}{cb.is_default ? ' ⭐ 기본' : ''}
                             </option>
                           ))}
+                          <option value="__individual__">수신자별 회신번호 칼럼 사용</option>
                         </select>
                       ) : (
                         <p className="text-sm text-red-500 py-2">등록된 발신번호가 없습니다. 설정에서 발신번호를 등록해주세요.</p>
                       )}
-                      <p className="text-xs text-gray-400 mt-1.5">수신자별 회신번호 칼럼에 값이 있는 경우, 해당 번호로 자동 발송됩니다.</p>
+                      {useIndividualCallback && (
+                        <p className="text-xs text-emerald-600 mt-1.5">각 수신자의 회신번호 칼럼 값으로 발송됩니다</p>
+                      )}
                     </div>
                   </div>
                 )}

@@ -279,6 +279,11 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
   // 스팸필터 열기
   const handleSpamFilter = () => {
     if (isSpamFilterLocked) { setShowSpamFilterLock(true); return; }
+    // ★ PPT#4: 발송리스트 없으면 스팸테스트 차단
+    if (!directRecipients || directRecipients.length === 0) {
+      setToast({ show: true, type: 'error', message: '발송리스트를 먼저 업로드해주세요.' });
+      return;
+    }
     const msg = directMessage || '';
     const cb = selectedCallback || '';
     const firstR = directRecipients[0];
