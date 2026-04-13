@@ -7,7 +7,7 @@
  * 4. 미리보기 + PDF 다운로드 (개별/전체)
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import { API_BASE, apiFetch } from '../App';
 import { SectionCard, Button, Input, Badge, EmptyState } from '../components/ui';
 import AlertModal from '../components/AlertModal';
