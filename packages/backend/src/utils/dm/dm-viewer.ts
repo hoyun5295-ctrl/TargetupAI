@@ -36,22 +36,29 @@ function inlineImage(src: string): string {
   return `data:${mime};base64,${buf.toString('base64')}`;
 }
 
-// ────────────────── 헤더 템플릿 3종 ──────────────────
+// ────────────────── 헤더 템플릿 4종 ──────────────────
 
 function renderHeader(template: string, data: any, storeName: string): string {
   const d = data || {};
   switch (template) {
-    case 'brand':
-      return `<div style="background:${d.bgColor || '#1a1a1a'};color:#fff;padding:32px 20px;text-align:center">
-        ${d.logoUrl ? `<img src="${d.logoUrl}" style="max-height:48px;margin-bottom:12px" alt="">` : ''}
-        <div style="font-size:22px;font-weight:800;letter-spacing:-0.5px">${storeName || ''}</div>
-        ${d.slogan ? `<div style="font-size:13px;opacity:0.7;margin-top:6px">${d.slogan}</div>` : ''}
+    case 'banner':
+      return ''; // 풀 배너는 첫 페이지 이미지가 대체하므로 헤더 없음
+    case 'countdown':
+      const eventDate = d.eventDate ? new Date(d.eventDate) : null;
+      const dday = eventDate ? Math.ceil((eventDate.getTime() - Date.now()) / 86400000) : 0;
+      const ddayText = dday > 0 ? `D-${dday}` : dday === 0 ? 'D-Day' : `D+${Math.abs(dday)}`;
+      return `<div style="background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:#fff;padding:24px 20px;text-align:center">
+        <div style="font-size:36px;font-weight:900;letter-spacing:2px">${ddayText}</div>
+        ${d.eventTitle ? `<div style="font-size:14px;opacity:0.9;margin-top:8px;font-weight:500">${d.eventTitle}</div>` : ''}
+        <div style="font-size:12px;opacity:0.6;margin-top:4px">${storeName || ''}</div>
       </div>`;
-    case 'minimal':
-      return `<div style="padding:16px 20px;border-bottom:1px solid #eee">
-        <div style="font-size:15px;font-weight:700;color:#333">${storeName || ''}</div>
+    case 'coupon':
+      return `<div style="background:linear-gradient(135deg,#f093fb 0%,#f5576c 100%);color:#fff;padding:24px 20px;text-align:center">
+        ${d.discount ? `<div style="font-size:16px;font-weight:700;margin-bottom:6px">${d.discount}</div>` : ''}
+        ${d.couponCode ? `<div style="background:rgba(255,255,255,0.25);display:inline-block;padding:8px 24px;border-radius:8px;font-size:20px;font-weight:900;letter-spacing:3px;font-family:monospace">${d.couponCode}</div>` : ''}
+        <div style="font-size:11px;opacity:0.7;margin-top:8px">${storeName || ''}</div>
       </div>`;
-    default: // 'default'
+    default: // 'logo'
       return `<div style="background:#fff;padding:16px 20px;border-bottom:2px solid #f0f0f0;display:flex;align-items:center;justify-content:space-between">
         <div style="display:flex;align-items:center;gap:10px">
           ${d.logoUrl ? `<img src="${d.logoUrl}" style="height:32px;border-radius:6px" alt="">` : ''}
@@ -62,30 +69,37 @@ function renderHeader(template: string, data: any, storeName: string): string {
   }
 }
 
-// ────────────────── 푸터 템플릿 3종 ──────────────────
+// ────────────────── 푸터 템플릿 4종 ──────────────────
 
 function renderFooter(template: string, data: any, storeName: string): string {
   const d = data || {};
   switch (template) {
-    case 'contact':
-      return `<div style="background:#f8f8f8;padding:20px;text-align:center;border-top:1px solid #eee">
-        ${d.hours ? `<div style="font-size:13px;color:#666;margin-bottom:6px">영업시간: ${d.hours}</div>` : ''}
-        ${d.phone ? `<div style="font-size:13px;color:#666;margin-bottom:6px">${d.phone}</div>` : ''}
-        ${d.mapUrl ? `<a href="${d.mapUrl}" style="font-size:13px;color:#2563eb;text-decoration:underline" target="_blank">매장 위치 보기</a>` : ''}
+    case 'cta':
+      const ctaColor = d.ctaColor || '#4f46e5';
+      return `<div style="padding:20px;text-align:center;border-top:1px solid #eee">
+        ${d.ctaUrl ? `<a href="${d.ctaUrl}" style="display:inline-block;background:${ctaColor};color:#fff;padding:14px 48px;border-radius:12px;font-size:16px;font-weight:700;text-decoration:none;letter-spacing:0.5px" target="_blank">${d.ctaText || '자세히 보기'}</a>` :
+        `<div style="background:${ctaColor};color:#fff;padding:14px 48px;border-radius:12px;font-size:16px;font-weight:700;display:inline-block">${d.ctaText || '자세히 보기'}</div>`}
       </div>`;
     case 'social':
       return `<div style="background:#f8f8f8;padding:20px;text-align:center;border-top:1px solid #eee">
-        <div style="font-size:12px;color:#999;margin-bottom:8px">${storeName || ''}</div>
-        <div style="display:flex;justify-content:center;gap:16px">
-          ${d.instagram ? `<a href="${d.instagram}" style="font-size:13px;color:#e1306c" target="_blank">Instagram</a>` : ''}
-          ${d.kakao ? `<a href="${d.kakao}" style="font-size:13px;color:#fae100" target="_blank">카카오</a>` : ''}
-          ${d.blog ? `<a href="${d.blog}" style="font-size:13px;color:#03c75a" target="_blank">블로그</a>` : ''}
+        <div style="font-size:12px;color:#999;margin-bottom:10px">${storeName || ''}</div>
+        <div style="display:flex;justify-content:center;gap:20px">
+          ${d.instagram ? `<a href="${d.instagram}" style="font-size:13px;color:#e1306c;font-weight:500" target="_blank">Instagram</a>` : ''}
+          ${d.youtube ? `<a href="${d.youtube}" style="font-size:13px;color:#ff0000;font-weight:500" target="_blank">YouTube</a>` : ''}
+          ${d.kakao ? `<a href="${d.kakao}" style="font-size:13px;color:#371d1e;font-weight:500" target="_blank">카카오</a>` : ''}
         </div>
       </div>`;
-    default: // 'default'
-      return `<div style="background:#f8f8f8;padding:16px 20px;text-align:center;border-top:1px solid #eee">
-        ${d.address ? `<div style="font-size:12px;color:#888">${d.address}</div>` : ''}
-        ${d.phone ? `<div style="font-size:12px;color:#888;margin-top:4px">${d.phone}</div>` : ''}
+    case 'promo':
+      return `<div style="background:linear-gradient(135deg,#ffecd2 0%,#fcb69f 100%);padding:24px 20px;text-align:center;border-top:1px solid #eee">
+        ${d.promoDesc ? `<div style="font-size:14px;font-weight:600;color:#333;margin-bottom:8px">${d.promoDesc}</div>` : ''}
+        ${d.promoCode ? `<div style="background:#fff;display:inline-block;padding:8px 24px;border-radius:8px;font-size:18px;font-weight:900;letter-spacing:2px;font-family:monospace;color:#e74c3c;border:2px dashed #e74c3c">${d.promoCode}</div>` : ''}
+        ${d.promoUrl ? `<div style="margin-top:12px"><a href="${d.promoUrl}" style="font-size:13px;color:#e74c3c;font-weight:600;text-decoration:underline" target="_blank">지금 사용하기 →</a></div>` : ''}
+      </div>`;
+    default: // 'cs'
+      return `<div style="background:#f8f8f8;padding:20px;text-align:center;border-top:1px solid #eee">
+        ${d.website ? `<a href="${d.website}" style="font-size:12px;color:#2563eb;text-decoration:none" target="_blank">${d.website.replace(/^https?:\/\//, '')}</a>` : ''}
+        ${d.phone ? `<div style="font-size:12px;color:#888;margin-top:4px">고객센터 ${d.phone}</div>` : ''}
+        ${d.email ? `<div style="font-size:12px;color:#888;margin-top:2px">${d.email}</div>` : ''}
         <div style="font-size:11px;color:#bbb;margin-top:8px">&copy; ${storeName || ''}</div>
       </div>`;
   }
@@ -104,7 +118,32 @@ export function renderDmViewerHtml(dm: any, trackApiBase: string): string {
   const slidesHtml = pages.sort((a: any, b: any) => (a.order || 0) - (b.order || 0)).map((p: any, i: number) => {
     const imgSrc = p.imageUrl ? inlineImage(p.imageUrl) : '';
     const embedUrl = p.videoUrl ? youtubeEmbedUrl(p.videoUrl) : null;
+    const layout = p.layout || 'full-image';
 
+    // text-card 레이아웃
+    if (layout === 'text-card') {
+      return `<div class="dm-slide" data-page="${i + 1}">
+        <div style="min-height:400px;background:${p.bgColor || '#1a1a2e'};color:${p.textColor || '#fff'};display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px 24px;text-align:center">
+          ${p.heading ? `<div style="font-size:24px;font-weight:800;line-height:1.4">${p.heading}</div>` : ''}
+          ${p.caption ? `<div style="font-size:14px;opacity:0.8;margin-top:12px;line-height:1.6">${p.caption}</div>` : ''}
+        </div>
+      </div>`;
+    }
+
+    // cta-card 레이아웃
+    if (layout === 'cta-card') {
+      return `<div class="dm-slide" data-page="${i + 1}">
+        ${imgSrc ? `<img src="${imgSrc}" alt="" style="width:100%;display:block;object-fit:cover">` : ''}
+        ${p.caption ? `<div style="padding:12px 16px;font-size:14px;color:#333;line-height:1.6">${p.caption}</div>` : ''}
+        ${p.ctaUrl ? `<div style="padding:8px 16px 16px;text-align:center">
+          <a href="${p.ctaUrl}" target="_blank" style="display:inline-block;background:#4f46e5;color:#fff;padding:14px 48px;border-radius:12px;font-size:15px;font-weight:700;text-decoration:none">${p.ctaText || '자세히 보기'}</a>
+        </div>` : (p.ctaText ? `<div style="padding:8px 16px 16px;text-align:center">
+          <div style="display:inline-block;background:#4f46e5;color:#fff;padding:14px 48px;border-radius:12px;font-size:15px;font-weight:700">${p.ctaText}</div>
+        </div>` : '')}
+      </div>`;
+    }
+
+    // full-image / video (기본)
     return `<div class="dm-slide" data-page="${i + 1}">
       ${imgSrc ? `<img src="${imgSrc}" alt="" style="width:100%;display:block;object-fit:cover">` : ''}
       ${embedUrl ? `<div style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden;margin:${imgSrc ? '12px 0 0' : '0'}">
