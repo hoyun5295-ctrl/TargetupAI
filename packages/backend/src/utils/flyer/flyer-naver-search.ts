@@ -49,6 +49,18 @@ export interface ImageSearchResult {
  * @param query 상품명 (예: "카스 500ml", "처음처럼 소주")
  * @param display 결과 수 (기본 5, 최대 100)
  */
+/**
+ * 상품명에서 단위/수량/규격을 제거하여 핵심 품명만 추출.
+ * "바나나 1송이" → "바나나", "청송사과 20kg" → "청송사과", "카스 500ml 24캔" → "카스"
+ */
+function cleanProductName(raw: string): string {
+  return raw
+    .replace(/\d+\s*(송이|개|캔|병|팩|박스|봉|입|매|kg|g|ml|l|리터|줄|세트|인분|포기|단|묶음|통|ea|봉지)/gi, '')
+    .replace(/\([^)]*\)/g, '')       // 괄호 내용 제거
+    .replace(/\s+/g, ' ')
+    .trim() || raw.trim();
+}
+
 export async function searchNaverShopping(
   query: string,
   display: number = 5
@@ -59,9 +71,10 @@ export async function searchNaverShopping(
   }
 
   try {
-    // ★ 이미지 검색 사용 (쇼핑 검색은 주류 등 미노출)
+    // ★ 상품명 정제 후 검색 (단위/수량 제거 → 핵심 품명만)
+    const cleanQuery = cleanProductName(query);
     const params = new URLSearchParams({
-      query: query + ' 상품',  // "상품" 키워드 추가하여 상품 이미지 우선
+      query: cleanQuery + ' 식품',  // "식품" 키워드로 식품 이미지 우선
       display: String(Math.min(display, 100)),
       sort: 'sim',
       filter: 'large',  // 큰 이미지만
