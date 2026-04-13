@@ -94,7 +94,7 @@ export async function generatePdfFromHtml(
     await page.setViewport({ width: 480, height: 800 });
 
     // ★ baseUrl 설정 — 상대경로 이미지(/api/flyer/...)를 절대URL로 해석
-    const serverBaseUrl = options.baseUrl || process.env.FLYER_BASE_URL || `http://localhost:${process.env.PORT || 4000}`;
+    const serverBaseUrl = options.baseUrl || process.env.FLYER_BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
 
     // HTML 내 상대경로를 절대경로로 변환 (src="/api/... → src="http://localhost:4000/api/...)
     const resolvedHtml = html.replace(
