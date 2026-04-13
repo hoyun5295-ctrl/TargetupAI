@@ -5,6 +5,7 @@
  * 본사 → 고객에게 보내는 브랜드 이벤트/프로모션 모바일 DM 제작.
  */
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 
 const api = axios.create({ baseURL: '/api' });
@@ -73,6 +74,7 @@ const PAGE_LAYOUTS = [
 ];
 
 export default function DmBuilderPage() {
+  const navigate = useNavigate();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [title, setTitle] = useState('');
   const [brandName, setBrandName] = useState('');
@@ -305,6 +307,9 @@ export default function DmBuilderPage() {
       <div className="bg-white border-b sticky top-0 z-30">
         <div className="max-w-[1440px] mx-auto px-6 h-14 flex items-center justify-between">
           <div className="flex items-center gap-3">
+            <button onClick={() => navigate('/dashboard')} className="text-gray-400 hover:text-gray-700 transition" title="대시보드로 돌아가기">
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+            </button>
             <span className="text-xl">📱</span>
             <h1 className="text-lg font-bold text-gray-800">모바일 DM 제작</h1>
             <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded">브랜드 → 고객 이벤트 DM</span>

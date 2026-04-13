@@ -107,6 +107,36 @@
 
 ---
 
+### 🔧 D119 — 0413 직원검수 7건 + 전단AI 흰화면 + 모바일DM 빌더 신규 (2026-04-13) — ✅ 배포완료
+
+> **배경:** 직원 디버깅 PPT(한줄로_20260413.pptx) 7건 수정 + 전단AI 로그인 흰화면 + 총판모달 스크롤 + **모바일DM 빌더 신규 기능 (프로 요금제 이상)**
+
+#### 한줄로AI 버그 수정 7건
+| # | 영역 | 원인 | 해결 |
+|---|---|---|---|
+| **#1** | 고객DB 커스텀필드 날짜값 숫자처리 | CustomerDBModal에서 인라인 `Number().toLocaleString()` 사용 → YYYYMMDD 날짜에 쉼표 | formatPreviewValue 컨트롤타워 교체 + formatNumericLike에서 YYYYMMDD/YYMMDD → 날짜 문자열 반환 (백엔드 format-number.ts 동기화) |
+| **#2** | 스팸필터 이력에 문안 미표시 | ResultsModal 테이블에 "문안" 컬럼 자체 없음 (API는 content 이미 제공) | 문안 컬럼 추가 (30자 truncate + title) |
+| **#3** | (광고)+080 표기 누락 | `!isAd \|\| !optOutNumber`이면 통째로 안 붙임 → 080 미할당 계정 전부 누락 | `!isAd`만 체크 + 080 없어도 (광고)+무료거부 부착 (프론트 buildAdMessageFront + 백엔드 buildAdMessage + AutoSendFormModal getAdSuffix) |
+| **#4** | 직접발송 리스트 없이 스팸테스트 | directRecipients[0] undefined → target-sample.ts가 DB 임의 고객 반환 | DirectSendPanel에서 리스트 0건이면 토스트 + 차단 |
+| **#5** | 회신번호 취소 시 다른 타겟수 취소건 | draft→cancelled 전환 후 sent_count=0인 건이 캘린더/최근캠페인에 표시 | `NOT (status='cancelled' AND COALESCE(sent_count,0)=0)` 조건 추가 |
+| **#6** | 자동발송 AI문구추천 개인화 미적용 | 프론트 `personalFields` → 백엔드 `personalizationVars` 키 불일치 | ai.ts에서 `personalFields` destructure + fallback |
+| **#7** | 자동발송 회신번호 AI모드 선택 불가 | AI모드 발신번호 select에 `__individual__` 옵션 없음 + validation에 `useIndividualCallback` 체크 누락 | 양쪽 추가 |
+
+#### 전단AI 수정
+- **로그인 흰 화면:** App.tsx `useState(showMore)`가 조건부 return 뒤에 선언 → React Hooks 규칙 위반. 조건부 return 전으로 이동
+- **총판/매장 등록·수정 모달 4개:** `max-h-[90vh] flex flex-col` + 본문 `overflow-y-auto` + 버튼 `shrink-0 border-t` 하단 고정
+
+#### 모바일 DM 빌더 (신규 — 프로 요금제 이상)
+- **DB:** `dm_pages` + `dm_views` 테이블, `plans.dm_builder_enabled` 컬럼
+- **백엔드 CT:** `utils/dm/dm-builder.ts` (CRUD+발행+추적+통계), `utils/dm/dm-viewer.ts` (공개 뷰어 HTML)
+- **백엔드 라우트:** `routes/dm.ts` (인증 CRUD+이미지업로드) + `routes/flyer/short-urls.ts`에 DM 공개 뷰어 합류 (`/dm-:code`)
+- **프론트:** `DmBuilderPage.tsx` (3컬럼 레이아웃), App.tsx `/dm-builder` 라우트, DashboardHeader "모바일DM" 메뉴
+- **기능:** 이미지/동영상/텍스트카드/CTA카드 4종 레이아웃, 상단 4종(로고/풀배너/카운트다운/쿠폰), 하단 4종(고객센터/CTA버튼/SNS/프로모코드)
+- **발행 URL:** `https://hanjul-flyer.kr/dm-코드` (Nginx 수정 없이 기존 프록시 활용)
+- **열람 추적:** `?p=전화번호` 파라미터로 고객별 페이지 도달/체류시간 추적
+
+---
+
 ### 🔧 D114 — 0410 PDF 버그 10건 + 신규 기능 1건 (2026-04-12) — ✅ 배포완료
 
 > **배경:** 4/13 레거시 이관 직후. 직원 검수 PDF(한줄로_20260410.pdf) 11건 중 P11(스팸테스트 불안정 — 서버 확인 결과 테스트폰 앱 상태 문제로 코드 이슈 아님) 제외 10건 수정 + 엑셀 다운로드 신규 기능.
