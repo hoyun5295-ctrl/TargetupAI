@@ -115,9 +115,19 @@ function releaseSemaphore(): void {
 // PDF 생성 함수
 // ============================================================
 
+export type PaperSize = 'A4' | 'A3' | 'A2' | 'A1' | 'A0' | 'price_card' | 'Letter';
+
+/** 커스텀 사이즈 매핑 (puppeteer가 지원하지 않는 사이즈) */
+const CUSTOM_SIZES: Record<string, { width: string; height: string }> = {
+  A2: { width: '420mm', height: '594mm' },
+  A1: { width: '594mm', height: '841mm' },
+  A0: { width: '841mm', height: '1189mm' },
+  price_card: { width: '90mm', height: '55mm' },
+};
+
 export interface PdfOptions {
-  /** 용지 크기 (기본 A4) */
-  format?: 'A4' | 'A3' | 'Letter';
+  /** 용지 크기 */
+  format?: PaperSize;
   /** 가로 모드 (기본 false) */
   landscape?: boolean;
   /** HTML 내 상대경로 이미지의 base URL */
@@ -158,13 +168,22 @@ export async function generatePdfFromHtml(
       )
     `).catch(() => {});
 
-    const pdf = await page.pdf({
-      format: options.format || 'A4',
+    // ★ 커스텀 사이즈 지원 (A0/A1/A2/프라이스카드)
+    const fmt = options.format || 'A4';
+    const customSize = CUSTOM_SIZES[fmt];
+    const pdfOpts: any = {
       landscape: options.landscape || false,
       printBackground: true,
       preferCSSPageSize: false,
       margin: options.margin || { top: '0', bottom: '0', left: '0', right: '0' },
-    });
+    };
+    if (customSize) {
+      pdfOpts.width = options.landscape ? customSize.height : customSize.width;
+      pdfOpts.height = options.landscape ? customSize.width : customSize.height;
+    } else {
+      pdfOpts.format = fmt as any;
+    }
+    const pdf = await page.pdf(pdfOpts);
 
     return Buffer.from(pdf);
   } finally {

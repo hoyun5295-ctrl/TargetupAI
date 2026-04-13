@@ -757,23 +757,14 @@ router.post('/pop-pdf', async (req: Request, res: Response) => {
     const companyId = requireCompanyId(req, res);
     if (!companyId) return;
 
-    const { item, storeName, colorTheme } = req.body;
+    const { item, storeName, colorTheme, popTemplate } = req.body;
     if (!item || !item.name || item.salePrice == null) {
       return res.status(400).json({ error: '상품 정보(name, salePrice)가 필요합니다.' });
     }
 
-    // ★ 디버그: 프론트에서 넘어온 item 확인
-    console.log(`[POP-DEBUG] 프론트 전달 item.imageUrl: "${item.imageUrl || '(없음)'}"`);
-    console.log(`[POP-DEBUG] 상품명: "${item.name}", companyId: ${companyId}`);
-
-    // ★ 카탈로그에 저장된 이미지 우선 매칭
     await fillMissingImages([item], companyId);
 
-    console.log(`[POP-DEBUG] fillMissingImages 후 item.imageUrl: "${item.imageUrl || '(없음)'}"`);
-
-    const html = renderPricePop(item, { storeName, colorTheme });
-
-    // ★ 디버그: HTML에 img 태그가 있는지
+    const html = renderPricePop(item, { storeName, colorTheme, popTemplate });
     const hasImgTag = html.includes('<img ');
     console.log(`[POP-DEBUG] HTML img 태그 존재: ${hasImgTag}`);
     if (hasImgTag) {
@@ -781,7 +772,9 @@ router.post('/pop-pdf', async (req: Request, res: Response) => {
       console.log(`[POP-DEBUG] img src: ${imgMatch?.[1]?.slice(0, 100)}`);
     }
 
-    const pdfBuffer = await generatePdfFromHtml(html, { format: 'A4' });
+    const paperSize = req.body.paperSize || 'A4';
+    const landscape = req.body.landscape || false;
+    const pdfBuffer = await generatePdfFromHtml(html, { format: paperSize, landscape });
 
     const safeName = (item.name || 'pop').replace(/[^가-힣a-zA-Z0-9_-]/g, '_').slice(0, 30);
     res.setHeader('Content-Type', 'application/pdf');
@@ -795,7 +788,7 @@ router.post('/pop-pdf', async (req: Request, res: Response) => {
 });
 
 // ══════════════════════════════════════════
-// POST /multi-pop — 다분할 POP PDF (A4에 2/4/8개)
+// POST /multi-pop — 다분할 POP PDF
 // ══════════════════════════════════════════
 router.post('/multi-pop', async (req: Request, res: Response) => {
   try {
@@ -806,11 +799,13 @@ router.post('/multi-pop', async (req: Request, res: Response) => {
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: '상품 목록이 필요합니다.' });
     }
-    const validSplits = [2, 4, 8].includes(splits) ? splits : 4;
+    const validSplits = [2, 4, 8, 16, 21, 35].includes(splits) ? splits : 4;
 
     await fillMissingImages(items, companyId);
     const html = renderMultiPop(items, validSplits, { storeName, colorTheme });
-    const pdfBuffer = await generatePdfFromHtml(html, { format: 'A4' });
+    const paperSize = req.body.paperSize || 'A4';
+    const landscape = req.body.landscape || false;
+    const pdfBuffer = await generatePdfFromHtml(html, { format: paperSize, landscape });
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="multi_pop_${validSplits}.pdf"`);
