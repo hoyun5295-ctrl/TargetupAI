@@ -16,7 +16,7 @@ import { createHash } from 'crypto';
 import { mysqlQuery, query } from '../config/database';
 import { TIMEOUTS } from '../config/defaults';
 import { extractVarCatalog } from '../services/ai';
-import { replaceVariables, enrichWithCustomFields, buildAdMessage, prepareFieldMappings } from '../utils/messageUtils';
+import { replaceVariables, enrichWithCustomFields, buildAdMessage, buildAdSubject, prepareFieldMappings } from '../utils/messageUtils';
 import { getTestSmsTables, toQtmsgType, insertTestSmsQueue } from './sms-queue';
 import { SUCCESS_CODES, PENDING_CODES, SPAM_RESULT } from '../utils/sms-result-map';
 import { prepaidDeduct } from '../utils/prepaid';
@@ -628,6 +628,8 @@ export async function autoSpamTestWithRegenerate(params: {
       // ★ D102: (광고)+080 — CT-AD 컨트롤타워 사용
       const msgTypeForAd = isLmsType ? 'LMS' : 'SMS';
       const testMessage = buildAdMessage(currentMessage, msgTypeForAd, isAd, rejectNumber || '');
+      // ★ KISA 2026-05: 제목(광고) — buildAdSubject 컨트롤타워 사용
+      const testSubject = buildAdSubject(currentSubject || '', msgTypeForAd, isAd);
 
       // 메시지 내용 구성
       const smsContent = !isLmsType ? testMessage : undefined;
@@ -641,7 +643,7 @@ export async function autoSpamTestWithRegenerate(params: {
         messageContentSms: smsContent,
         messageContentLms: lmsContent,
         messageType,
-        subject: currentSubject,
+        subject: testSubject,
         firstRecipient,
         source: 'auto_ai',
         variantId: variant.variantId,

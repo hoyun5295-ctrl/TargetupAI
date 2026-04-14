@@ -351,14 +351,14 @@ router.post('/test-send', async (req: Request, res: Response) => {
     for (const contact of managerContacts) {
       try {
         const cleanPhone = normalizePhone(contact.phone);
-        // ★ D103: prepareSendMessage 컨트롤타워 — 변수 치환 + (광고)+080 한 함수로 통합
-        const testMsg = prepareSendMessage(messageContent, testFirstCustomer, testFieldMappings, {
+        // ★ D103: prepareSendMessage 컨트롤타워 — 변수 치환 + (광고)+080 + ★ KISA 2026-05 제목(광고) 통합
+        const { message: testMsg, subject: testSubject } = prepareSendMessage(messageContent, testFirstCustomer, testFieldMappings, {
           msgType: messageType || 'SMS', isAd: isAd || false, opt080Number: testOpt080,
+          subject: req.body.subject || '',
         });
 
         if (testChannel === 'sms' || testChannel === 'both') {
           // ★ D103: insertTestSmsQueue 컨트롤타워 사용 (인라인 INSERT 제거)
-          const testSubject = req.body.subject || '';
           await insertTestSmsQueue(cleanPhone, callbackNumber, testMsg, messageType || 'SMS', 'test', testSubject, {
             companyId, billId: testBillId, mmsImages: mmsImagePaths,
           });
@@ -802,12 +802,11 @@ const aiSmsRows: any[][] = [];
 const aiKakaoQueue: any[] = [];
 
 for (const customer of filteredCustomers) {
-  // ★ D103: prepareSendMessage 컨트롤타워 — 변수 치환 + (광고)+080 한 함수로 통합
-  const personalizedMessage = prepareSendMessage(campaign.message_content || '', customer, fieldMappings, {
+  // ★ D103: prepareSendMessage 컨트롤타워 — 변수 치환 + (광고)+080 + ★ KISA 2026-05 제목(광고) 통합
+  const { message: personalizedMessage, subject: personalizedSubject } = prepareSendMessage(campaign.message_content || '', customer, fieldMappings, {
     msgType: campaign.message_type, isAd: campaign.is_ad || false, opt080Number,
+    subject: campaign.subject || '',
   });
-  // ★ D28: 제목은 고정값 그대로 사용 (머지 치환 완전 제거)
-  const personalizedSubject = campaign.subject || '';
 
   // ★ D103: resolveCustomerCallback 컨트롤타워 — 개별회신번호 resolve 통합
   const customerCallback = resolveCustomerCallback(customer, useIndividualCallback, campaign.callback_number || defaultCallback);
@@ -1518,7 +1517,7 @@ router.post('/direct-send', async (req: Request, res: Response) => {
         // ★ D103: prepareSendMessage 컨트롤타워 — 변수 치환 + (광고)+080 한 함수로 통합
         const cleanPhone = normalizePhone(recipient.phone);
         const dbCustomer = directCustomerMap.get(cleanPhone) || null;
-        const finalMessage = prepareSendMessage(message, dbCustomer, directFieldMappings, {
+        const { message: finalMessage, subject: finalSubject } = prepareSendMessage(message, dbCustomer, directFieldMappings, {
           msgType, isAd: adEnabled, opt080Number: directOpt080,
           addressBookFields: {
             name: recipient.name,
@@ -1527,9 +1526,8 @@ router.post('/direct-send', async (req: Request, res: Response) => {
             extra3: recipient.extra3,
             callback: recipient.callback,
           },
+          subject: subject || '',
         });
-
-        const finalSubject = subject || '';
 
         // ★ C3: 분할전송 시간 계산
         let sendTime: string;
@@ -2147,18 +2145,19 @@ router.put('/:id/message', async (req: Request, res: Response) => {
         for (const recipient of batch) {
           const customer = customerMap.get(recipient.dest_no) || {};
 
-          // ★ D103: prepareSendMessage 컨트롤타워 — 변수 치환 + (광고)+080 한 함수로 통합
-          const finalMessage = prepareSendMessage(message, customer, editFieldMappings, {
+          // ★ D103: prepareSendMessage 컨트롤타워 — 변수 치환 + (광고)+080 + ★ KISA 2026-05 제목(광고) 통합
+          const { message: finalMessage, subject: finalSubject } = prepareSendMessage(message, customer, editFieldMappings, {
             msgType, isAd: adEnabled, opt080Number: optOut080,
+            subject: subject || '',
           });
 
           // SQL escape
           const escapedMessage = finalMessage.replace(/'/g, "''");
           cases.push(`WHEN seqno = ${recipient.seqno} THEN '${escapedMessage}'`);
 
-          // ★ D28: 제목은 고정값 그대로 사용 (머지 치환 완전 제거)
-          if (subject && (msgType === 'LMS' || msgType === 'MMS')) {
-            const escapedSubject = subject.replace(/'/g, "''");
+          // ★ KISA 2026-05: 제목도 (광고) 포함하여 UPDATE
+          if (finalSubject && (msgType === 'LMS' || msgType === 'MMS')) {
+            const escapedSubject = finalSubject.replace(/'/g, "''");
             titleCases.push(`WHEN seqno = ${recipient.seqno} THEN '${escapedSubject}'`);
           }
 

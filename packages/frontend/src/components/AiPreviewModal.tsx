@@ -1,5 +1,5 @@
 import React from 'react';
-import { replaceVarsBySampleCustomer, calculateSmsBytes } from '../utils/formatDate';
+import { replaceVarsBySampleCustomer, calculateSmsBytes, buildAdSubjectFront } from '../utils/formatDate';
 
 interface AiPreviewModalProps {
   show: boolean;
@@ -83,7 +83,7 @@ export default function AiPreviewModal(props: AiPreviewModalProps) {
                 {(selectedChannel === 'LMS' || selectedChannel === 'MMS') && (
                   <div className="px-4 py-2 bg-orange-50 border-b border-orange-200 shrink-0">
                     <span className="text-sm font-bold text-orange-700">
-                      {aiResult?.messages?.[selectedAiMsgIdx]?.subject || 'LMS 제목'}
+                      {buildAdSubjectFront(aiResult?.messages?.[selectedAiMsgIdx]?.subject || 'LMS 제목', selectedChannel, isAd ?? true)}
                     </span>
                   </div>
                 )}

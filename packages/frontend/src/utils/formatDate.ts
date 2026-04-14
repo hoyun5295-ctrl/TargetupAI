@@ -753,6 +753,20 @@ export function buildAdMessageFront(
 }
 
 /**
+ * ★ KISA 2026-05: LMS/MMS 제목에 (광고) 자동 부착 (프론트 미리보기/표시용)
+ * - 백엔드 messageUtils.ts buildAdSubject와 동일 로직
+ * - isAd=true + LMS/MMS일 때만 제목 앞에 "(광고) " 접두사
+ * - 중복 방지: 이미 (광고)로 시작하면 안 붙임
+ */
+export function buildAdSubjectFront(subject: string, msgType: string, isAd: boolean): string {
+  if (!isAd) return subject;
+  if (msgType !== 'LMS' && msgType !== 'MMS') return subject;
+  if (!subject) return '(광고)';
+  if (subject.startsWith('(광고)')) return subject;
+  return `(광고) ${subject}`;
+}
+
+/**
  * ★ B2 후속: D103 위반 데이터(message_content에 (광고)/무료거부가 이미 포함된 캠페인) 정규화
  *
  * 컨트롤타워가 표시 직전에 본문에서 (광고) 접두사 + 무료거부 푸터를 제거하여

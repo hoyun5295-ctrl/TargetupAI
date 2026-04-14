@@ -3,7 +3,7 @@ import { Request, Response, Router } from 'express';
 import { mysqlQuery, query } from '../config/database';
 import { TIMEOUTS } from '../config/defaults';
 import { authenticate } from '../middlewares/auth';
-import { replaceVariables, prepareFieldMappings, getOpt080Number } from '../utils/messageUtils';
+import { replaceVariables, prepareFieldMappings, getOpt080Number, buildAdSubject } from '../utils/messageUtils';
 import { SUCCESS_CODES, PENDING_CODES, SPAM_RESULT } from '../utils/sms-result-map';
 import { prepaidDeduct, prepaidRefund } from '../utils/prepaid';
 import { getTestSmsTables, toQtmsgType, insertTestSmsQueue } from '../utils/sms-queue';
@@ -197,7 +197,9 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
         const content = replaceVariables(rawContent || '', firstCustomer, spamFieldMappings, spamAddressBookFields);
 
         // QTmsg 테스트 라인으로 발송
-        const titleStr = (msgType === 'LMS' || msgType === 'MMS') ? (subject || '') : '';
+        // ★ KISA 2026-05: 본문에 (광고) 포함 여부로 광고 판단 → 제목에도 (광고) 부착
+        const isAdDetected = (content || '').startsWith('(광고)');
+        const titleStr = (msgType === 'LMS' || msgType === 'MMS') ? buildAdSubject(subject || '', msgType, isAdDetected) : '';
         await insertTestSmsQueue(
           device.phone,
           callbackNumber,

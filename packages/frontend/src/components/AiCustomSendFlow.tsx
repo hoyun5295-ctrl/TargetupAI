@@ -18,7 +18,7 @@ import {
   XCircle
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { formatPreviewValue, calculateSmsBytes, replaceMessageVars, buildAdMessageFront } from '../utils/formatDate';
+import { formatPreviewValue, calculateSmsBytes, replaceMessageVars, buildAdMessageFront, buildAdSubjectFront } from '../utils/formatDate';
 import { highlightVars } from '../utils/highlightVars';
 
 interface AiCustomSendFlowProps {
@@ -855,7 +855,7 @@ export default function AiCustomSendFlow({
                           {/* LMS/MMS 제목 */}
                           {(channel === 'LMS' || channel === 'MMS') && msg.subject && (
                             <div className="px-4 py-1.5 bg-orange-50 border-b border-orange-200 shrink-0">
-                              <span className="text-[11px] font-bold text-orange-700">{msg.subject}</span>
+                              <span className="text-[11px] font-bold text-orange-700">{buildAdSubjectFront(msg.subject, channel, isAdLocal)}</span>
                             </div>
                           )}
                           {/* 메시지 영역 */}
@@ -1059,7 +1059,7 @@ export default function AiCustomSendFlow({
                     </div>
                     {(channel === 'LMS' || channel === 'MMS') && variants[selectedVariantIdx]?.subject && (
                       <div className="px-4 py-2 bg-orange-50 border-b border-orange-200">
-                        <span className="text-sm font-bold text-orange-700">{variants[selectedVariantIdx].subject}</span>
+                        <span className="text-sm font-bold text-orange-700">{buildAdSubjectFront(variants[selectedVariantIdx].subject, channel, isAdLocal)}</span>
                       </div>
                     )}
                     <div className="flex-1 overflow-y-auto p-3 bg-gradient-to-b from-purple-50/30 to-white">

@@ -759,11 +759,11 @@ async function executeAutoCampaign(ac: any): Promise<void> {
 
     const autoSmsRows: any[][] = [];
     for (const customer of filteredCustomers) {
-      // ★ D103: prepareSendMessage 컨트롤타워 — 변수 치환 + (광고)+080 한 함수로 통합
-      const personalizedMessage = prepareSendMessage(messageContent, customer, fieldMappings, {
+      // ★ D103: prepareSendMessage 컨트롤타워 — 변수 치환 + (광고)+080 + ★ KISA 2026-05 제목(광고) 통합
+      const { message: personalizedMessage, subject: personalizedSubject } = prepareSendMessage(messageContent, customer, fieldMappings, {
         msgType: ac.message_type, isAd: ac.is_ad ?? false, opt080Number: autoOpt080,
+        subject: messageSubject || '',
       });
-      const personalizedSubject = messageSubject;
       const cleanPhone = normalizePhone(customer.phone);
       // ★ D103: resolveCustomerCallback 컨트롤타워 — 개별회신번호 resolve 통합
       const callback = resolveCustomerCallback(customer, ac.use_individual_callback || false, ac.callback_number);

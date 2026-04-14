@@ -361,10 +361,29 @@ export function buildAdMessage(
 }
 
 /**
+ * ★ KISA 2026-05: LMS/MMS 제목에 (광고) 자동 부착
+ * - isAd=true + LMS/MMS일 때만 제목 앞에 "(광고) " 접두사
+ * - SMS는 제목 필드 없으므로 원본 반환
+ * - 중복 방지: 이미 (광고)로 시작하면 안 붙임
+ * - prepareSendMessage 내부에서 호출됨 (컨트롤타워 단일 진입점)
+ * - spam-test-queue.ts처럼 prepareSendMessage 미사용 경로에서는 직접 import
+ */
+export function buildAdSubject(subject: string, msgType: string, isAd: boolean): string {
+  if (!isAd) return subject;
+  if (msgType !== 'LMS' && msgType !== 'MMS') return subject;
+  if (!subject) return '(광고)';
+  if (subject.startsWith('(광고)')) return subject; // 중복 방지
+  return `(광고) ${subject}`;
+}
+
+/**
  * ★ D103: 발송 메시지 최종 준비 컨트롤타워
  * 모든 발송 경로(AI즉시/AI예약/직접/타겟/자동발송)의 유일한 진입점.
  * 변수 치환 → (광고)+080 조합을 한 함수로 통합.
  * 각 발송 경로에서 replaceVariables + buildAdMessage를 인라인으로 호출하던 패턴을 제거.
+ *
+ * ★ KISA 2026-05: subject도 통합 처리. isAd=true + LMS/MMS일 때 제목에 (광고) 자동 부착.
+ *   호출부에서 subject를 별도 처리할 필요 없이 반환값의 subject를 그대로 사용.
  */
 export function prepareSendMessage(
   template: string,
@@ -375,13 +394,16 @@ export function prepareSendMessage(
     isAd: boolean;
     opt080Number: string;
     addressBookFields?: AddressBookFields;
+    subject?: string;
   }
-): string {
+): { message: string; subject: string } {
   // 1. 변수 치환
   let msg = replaceVariables(template, customer, fieldMappings, options.addressBookFields);
-  // 2. (광고)+080 (중복 방지 안전장치 내장)
+  // 2. (광고)+080 본문 (중복 방지 안전장치 내장)
   msg = buildAdMessage(msg, options.msgType, options.isAd, options.opt080Number);
-  return msg;
+  // 3. ★ KISA 2026-05: 제목 (광고) 부착 (isAd + LMS/MMS만)
+  const subj = buildAdSubject(options.subject || '', options.msgType, options.isAd);
+  return { message: msg, subject: subj };
 }
 
 /**

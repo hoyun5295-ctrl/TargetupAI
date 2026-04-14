@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { formatPreviewValue, buildAdMessageFront, replaceVarsBySampleCustomer } from '../utils/formatDate';
+import { formatPreviewValue, buildAdMessageFront, buildAdSubjectFront, replaceVarsBySampleCustomer } from '../utils/formatDate';
 import { highlightVars } from '../utils/highlightVars';
 
 interface AiCampaignResultPopupProps {
@@ -221,7 +221,7 @@ export default function AiCampaignResultPopup({
                           {/* LMS/MMS 제목 */}
                           {(selectedChannel === 'LMS' || selectedChannel === 'MMS') && msg.subject && (
                             <div className="px-4 py-1.5 bg-orange-50 border-b border-orange-200 shrink-0">
-                              <span className="text-[11px] font-bold text-orange-700">{msg.subject}</span>
+                              <span className="text-[11px] font-bold text-orange-700">{buildAdSubjectFront(msg.subject, selectedChannel, isAd)}</span>
                             </div>
                           )}
                           {/* 메시지 영역 */}
