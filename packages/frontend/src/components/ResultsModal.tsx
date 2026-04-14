@@ -262,6 +262,15 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
 
         {/* 콘텐츠 */}
         <div className="flex-1 overflow-y-auto p-5" style={{ overscrollBehavior: 'contain' }}>
+          {/* 캘린더 버튼 — 우측 상단 고정 */}
+          <div className="flex justify-end mb-3">
+            <button
+              onClick={() => setShowCalendar(true)}
+              className="px-4 py-1.5 rounded-lg text-sm font-medium bg-purple-500 text-white hover:bg-purple-600 transition-colors"
+            >
+              📅 캘린더
+            </button>
+          </div>
           {activeTab === 'summary' && (
             <div className="space-y-4">
               {/* 기간 선택 + 필터 */}
@@ -710,16 +719,6 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
                     <button onClick={() => setSpamCurrentPage(p => Math.min(Math.ceil(spamFilterList.length / itemsPerPage), p + 1))} disabled={spamCurrentPage >= Math.ceil(spamFilterList.length / itemsPerPage)} className="px-3 py-1 text-sm rounded-md border bg-white hover:bg-gray-50 disabled:opacity-40">다음</button>
                   </div>
                 )}
-              </div>
-
-              {/* 캘린더 버튼 */}
-              <div className="mt-6 flex justify-center">
-                <button
-                  onClick={() => setShowCalendar(true)}
-                  className="px-8 py-3.5 bg-purple-500 hover:bg-purple-600 text-white font-bold text-base rounded-xl shadow-lg shadow-purple-200 transition-all hover:shadow-xl hover:shadow-purple-300 flex items-center gap-2.5"
-                >
-                  📅 발송 캘린더 보기
-                </button>
               </div>
             </div>
           )}
