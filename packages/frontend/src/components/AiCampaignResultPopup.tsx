@@ -354,11 +354,21 @@ onClick={() => {
   const msg = aiResult?.messages?.[selectedAiMsgIdx]?.message_text || campaign.messageContent || '';
                     const cb = selectedCallback || '';
                     const sc = sampleCustomer || {};
-                    // ★ D121: 미리보기와 동일한 데이터를 스팸필터에도 전달
-                    // sampleCustomer 있으면 치환, 없으면 원본 유지 (removeUnmatched:false로 변수 보존)
+                    // ★ D121: 미리보기와 동일한 데이터+aliasMap으로 스팸필터에도 치환
                     const hasSample = sc && Object.keys(sc).length > 0;
                     const replaceVars = (text: string) => hasSample
-                      ? replaceVarsBySampleCustomer(text, sc, { removeUnmatched: false })
+                      ? replaceVarsBySampleCustomer(text, sc, {
+                          removeUnmatched: true,
+                          aliasMap: {
+                            '이름': ['고객명', '성함', '고객이름'],
+                            '고객등급': ['등급', '멤버십등급', '회원등급'],
+                            '등록매장정보': ['매장명', '매장', '지점', '등록매장'],
+                            '최근구매매장': ['구매매장', '최근매장'],
+                            '보유포인트': ['포인트', '적립금'],
+                            '최근구매금액': ['구매금액', '구매액'],
+                            '누적구매금액': ['총구매금액', '총구매액', '누적구매'],
+                          },
+                        })
                       : text;
                     const smsRaw = buildAdMessageFront(msg, 'SMS', isAd, optOutNumber);
                     const lmsRaw = buildAdMessageFront(msg, 'LMS', isAd, optOutNumber);

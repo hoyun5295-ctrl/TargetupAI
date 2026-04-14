@@ -983,10 +983,10 @@ export default function AiCustomSendFlow({
                       const cb = selectedCallback || '';
                       // ★ D88: sampleData(타겟 필터 매칭 샘플) 우선 사용, 없으면 sampleCustomer(prop) 폴백
                       const sc = (Object.keys(sampleData).length > 0 ? sampleData : sampleCustomer) || {};
-                      // ★ D121: 미리보기와 동일한 데이터를 스팸필터에도 전달 (sampleCustomer 없으면 변수 보존)
+                      // ★ D121: 미리보기와 동일한 데이터+aliasMap으로 스팸필터에도 치환
                       const hasSample = sc && Object.keys(sc).length > 0;
                       const replaceVars = (text: string) => hasSample
-                        ? replaceMessageVars(text, availableFields, sc, { removeUnmatched: false })
+                        ? replaceMessageVars(text, availableFields, sc, { removeUnmatched: true })
                         : text;
                       const smsRaw = buildAdMessageFront(msg, 'SMS', isAdLocal, optOutNumber);
                       const lmsRaw = buildAdMessageFront(msg, 'LMS', isAdLocal, optOutNumber);
