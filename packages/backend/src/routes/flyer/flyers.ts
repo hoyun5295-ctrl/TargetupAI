@@ -376,7 +376,8 @@ router.get('/', async (req: Request, res: Response) => {
   try {
     const companyId = requireCompanyId(req, res);
     if (!companyId) return;
-    // ★ D112: store-scope 제거. company_id만으로 격리.
+    const { userId } = req.flyerUser!;
+    // ★ D120: user_id 기반 격리 — 같은 총판 내 매장별 전단 분리
     const result = await query(
       `SELECT f.*,
               TO_CHAR(f.period_start, 'YYYY-MM-DD') as period_start,
@@ -385,9 +386,9 @@ router.get('/', async (req: Request, res: Response) => {
               (SELECT COUNT(*) FROM url_clicks uc JOIN short_urls su ON su.id = uc.short_url_id WHERE su.flyer_id = f.id) as click_count
        FROM flyers f
        LEFT JOIN short_urls s ON s.flyer_id = f.id
-       WHERE f.company_id = $1
+       WHERE f.company_id = $1 AND f.user_id = $2
        ORDER BY f.created_at DESC`,
-      [companyId]
+      [companyId, userId]
     );
 
     res.json(result.rows);
