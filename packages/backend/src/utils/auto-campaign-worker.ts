@@ -37,7 +37,7 @@ import {
 import { prepaidDeduct, prepaidRefund } from './prepaid';
 import { normalizePhone } from './normalize-phone';
 import { resolveCustomerCallback } from './callback-filter';
-import { extractVarCatalog, generateMessages } from '../services/ai';
+import { extractVarCatalog, filterVarCatalogByData, generateMessages } from '../services/ai';
 import { autoSpamTestWithRegenerate } from './spam-test-queue';
 import { buildUnsubscribeFilter } from './unsubscribe-helper';
 // ★ D114 P7: personalFields → displayName 변환용
@@ -199,6 +199,9 @@ async function generateMessageForAutoCampaign(ac: any): Promise<void> {
     }
 
     const { fieldMappings: varCatalog, availableVars } = extractVarCatalog(companyInfo.customer_schema);
+
+    // ★ D121: 실제 데이터가 있는 필드만 남김 — filterVarCatalogByData 컨트롤타워
+    await filterVarCatalogByData(varCatalog, availableVars, ac.company_id);
 
     // 타겟 통계 조회 (간략)
     const statsResult = await query(

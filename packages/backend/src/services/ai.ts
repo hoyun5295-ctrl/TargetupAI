@@ -352,6 +352,59 @@ export function extractVarCatalog(customerSchema: any): {
 }
 
 /**
+ * ★ D121: 실제 데이터가 있는 필드만 남기도록 varCatalog/availableVars 필터링
+ * enabled-fields와 동일한 COUNT FILTER 패턴 — 데이터 없는 필드를 AI가 사용하면 빈 공간 발생
+ * routes/ai.ts(generate-messages) + auto-campaign-worker.ts 양쪽에서 호출하는 컨트롤타워
+ */
+export async function filterVarCatalogByData(
+  varCatalog: Record<string, VarCatalogEntry>,
+  availableVars: string[],
+  companyId: string
+): Promise<void> {
+  // 1. 직접 컬럼 필드 — COUNT FILTER로 데이터 유무 확인
+  const detectableFields = getColumnFields().filter(f => f.fieldKey !== 'name' && f.fieldKey !== 'phone');
+  const countFilters = detectableFields.map(f => {
+    const col = f.columnName;
+    if (f.dataType === 'number') return `COUNT(*) FILTER (WHERE ${col} IS NOT NULL AND ${col} > 0) as cnt_${f.fieldKey}`;
+    if (f.dataType === 'date' || f.dataType === 'boolean') return `COUNT(*) FILTER (WHERE ${col} IS NOT NULL) as cnt_${f.fieldKey}`;
+    return `COUNT(*) FILTER (WHERE ${col} IS NOT NULL AND ${col} != '') as cnt_${f.fieldKey}`;
+  });
+  if (countFilters.length > 0) {
+    const dataCheck = await query(`SELECT ${countFilters.join(', ')} FROM customers WHERE company_id = $1 AND is_active = true`, [companyId]);
+    const dc = dataCheck.rows[0] || {};
+    for (const f of detectableFields) {
+      if (parseInt(dc[`cnt_${f.fieldKey}`] || '0') === 0) {
+        if (varCatalog[f.displayName]) {
+          delete varCatalog[f.displayName];
+          const idx = availableVars.indexOf(f.displayName);
+          if (idx >= 0) availableVars.splice(idx, 1);
+        }
+      }
+    }
+  }
+
+  // 2. 커스텀 필드 — varCatalog에 storageType='custom_fields'인 항목 중 데이터 없는 것 제거
+  const customEntries = Object.entries(varCatalog).filter(([_, v]) => v.storageType === 'custom_fields');
+  if (customEntries.length > 0) {
+    const safeEntries = customEntries.filter(([_, v]) => /^custom_\d+$/.test(v.column));
+    if (safeEntries.length > 0) {
+      const customCountFilters = safeEntries.map(([_, v]) =>
+        `COUNT(*) FILTER (WHERE custom_fields->>'${v.column}' IS NOT NULL AND custom_fields->>'${v.column}' != '') as cnt_${v.column}`
+      );
+      const customCheck = await query(`SELECT ${customCountFilters.join(', ')} FROM customers WHERE company_id = $1 AND is_active = true`, [companyId]);
+      const cc = customCheck.rows[0] || {};
+      for (const [label, entry] of safeEntries) {
+        if (parseInt(cc[`cnt_${entry.column}`] || '0') === 0) {
+          delete varCatalog[label];
+          const idx = availableVars.indexOf(label);
+          if (idx >= 0) availableVars.splice(idx, 1);
+        }
+      }
+    }
+  }
+}
+
+/**
  * 프롬프트에서 개인화 관련 키워드를 감지하여 사용 가능한 변수 중 관련된 것을 추출
  * - 하드코딩이 아닌 field_mappings 기반 동적 감지
  */

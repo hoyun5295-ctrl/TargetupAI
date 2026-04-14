@@ -431,13 +431,19 @@ export default function TargetSendModal({
               {/* LMS/MMS 제목 */}
               {(targetMsgType === 'LMS' || targetMsgType === 'MMS') && (
                 <div className="px-4 pt-3">
-                  <input
-                    type="text"
-                    value={targetSubject}
-                    onChange={(e) => setTargetSubject(e.target.value)}
-                    placeholder="제목 (필수)"
-                    className="w-full px-3 py-2 border border-orange-300 bg-orange-50 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 placeholder-orange-400"
-                  />
+                  <div className="relative">
+                    {adTextEnabled && (
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-orange-600 font-medium pointer-events-none select-none">(광고) </span>
+                    )}
+                    <input
+                      type="text"
+                      value={targetSubject}
+                      onChange={(e) => setTargetSubject(e.target.value)}
+                      placeholder={adTextEnabled ? "제목 입력 (필수)" : "제목 (필수)"}
+                      style={adTextEnabled ? { paddingLeft: '52px' } : {}}
+                      className="w-full px-3 py-2 border border-orange-300 bg-orange-50 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 placeholder-orange-400"
+                    />
+                  </div>
                 </div>
               )}
 

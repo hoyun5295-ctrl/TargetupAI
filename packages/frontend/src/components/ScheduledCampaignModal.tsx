@@ -408,13 +408,19 @@ export default function ScheduledCampaignModal({
             {(selectedScheduled?.message_type === 'LMS' || selectedScheduled?.message_type === 'MMS') && (
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">제목</label>
-                <input
-                  type="text"
-                  value={editSubject}
-                  onChange={(e) => setEditSubject(e.target.value)}
-                  className="w-full border rounded-lg px-3 py-2"
-                  placeholder="제목 입력"
-                />
+                <div className="relative">
+                  {selectedScheduled?.is_ad && (
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-orange-600 font-medium pointer-events-none select-none">(광고) </span>
+                  )}
+                  <input
+                    type="text"
+                    value={editSubject}
+                    onChange={(e) => setEditSubject(e.target.value)}
+                    className="w-full border rounded-lg px-3 py-2"
+                    placeholder={selectedScheduled?.is_ad ? "제목 입력" : "제목 입력"}
+                    style={selectedScheduled?.is_ad ? { paddingLeft: '52px' } : {}}
+                  />
+                </div>
               </div>
             )}
             <div>

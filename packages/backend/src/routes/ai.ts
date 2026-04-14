@@ -1,7 +1,7 @@
 import { Request, Response, Router } from 'express';
 import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
-import { checkAPIStatus, extractVarCatalog, generateCustomMessages, generateMessages, parseBriefing, recommendTarget, countFilteredCustomers, relaxFilters, recommendNextCampaign } from '../services/ai';
+import { checkAPIStatus, extractVarCatalog, filterVarCatalogByData, generateCustomMessages, generateMessages, parseBriefing, recommendTarget, countFilteredCustomers, relaxFilters, recommendNextCampaign } from '../services/ai';
 import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getGenderVariants, getRegionVariants } from '../utils/normalize';
 import { FIELD_MAP, FIELD_DISPLAY_MAP, reverseDisplayValue } from '../utils/standard-field-map';
 import { isValidCustomFieldKey } from '../utils/safe-field-name';
@@ -67,6 +67,10 @@ router.post('/generate-message', async (req: Request, res: Response) => {
         };
       }
     }
+
+    // ★ D121: 실제 데이터가 있는 필드만 남김 — filterVarCatalogByData 컨트롤타워
+    // 데이터 없는 필드를 AI가 사용하면 빈 공간 발생 방지
+    await filterVarCatalogByData(varCatalog, availableVars, companyId);
 
     // 타겟 정보 조회
     let targetQuery = 'SELECT COUNT(*) as total FROM customers WHERE company_id = $1 AND is_active = true AND sms_opt_in = true';

@@ -210,14 +210,20 @@ export default function AiCampaignSendModal({
               {(selectedChannel === 'LMS' || selectedChannel === 'MMS') && (
                 <div>
                   <label className="text-sm font-semibold text-gray-700 mb-2 block">📄 LMS 제목</label>
-                  <input
-                    type="text"
-                    value={editSubject}
-                    onChange={(e) => setEditSubject(e.target.value)}
-                    placeholder="LMS 제목을 입력하세요"
-                    maxLength={40}
-                    className="w-full border-2 rounded-lg px-4 py-2.5 text-sm focus:border-orange-400 focus:outline-none"
-                  />
+                  <div className="relative">
+                    {isAd && (
+                      <span className="absolute left-4 top-1/2 -translate-y-1/2 text-sm text-orange-600 font-medium pointer-events-none select-none">(광고) </span>
+                    )}
+                    <input
+                      type="text"
+                      value={editSubject}
+                      onChange={(e) => setEditSubject(e.target.value)}
+                      placeholder={isAd ? "제목 입력" : "LMS 제목을 입력하세요"}
+                      style={isAd ? { paddingLeft: '56px' } : {}}
+                      maxLength={40}
+                      className="w-full border-2 rounded-lg px-4 py-2.5 text-sm focus:border-orange-400 focus:outline-none"
+                    />
+                  </div>
                   <div className="text-xs text-gray-400 mt-1 text-right">{editSubject.length}/40자</div>
                 </div>
               )}
