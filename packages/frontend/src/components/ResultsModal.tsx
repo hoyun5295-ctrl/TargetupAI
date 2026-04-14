@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { calculateSmsBytes, mmsServerPathToUrl, formatCampaignMessageForDisplay } from '../utils/formatDate';
+import { calculateSmsBytes, mmsServerPathToUrl, formatCampaignMessageForDisplay, buildAdSubjectFront } from '../utils/formatDate';
 import CalendarModal from './CalendarModal';
 
 interface ResultsModalProps {
@@ -825,7 +825,7 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                             <div className="bg-white rounded-2xl rounded-tl-sm p-3 shadow-sm border border-gray-100 text-[11.5px] leading-[1.7] whitespace-pre-wrap break-all text-gray-700 max-w-[95%]">
                               {/* ★ D91: LMS/MMS 제목 표시 */}
                               {(selectedCampaign.message_type === 'LMS' || selectedCampaign.message_type === 'MMS' || selectedCampaign.message_type === 'L' || selectedCampaign.message_type === 'M') && (selectedCampaign.subject || selectedCampaign.message_subject) && (
-                                <div className="font-bold text-gray-900 mb-1 pb-1 border-b border-gray-200">{selectedCampaign.subject || selectedCampaign.message_subject}</div>
+                                <div className="font-bold text-gray-900 mb-1 pb-1 border-b border-gray-200">{buildAdSubjectFront(selectedCampaign.subject || selectedCampaign.message_subject || '', selectedCampaign.message_type, selectedCampaign.is_ad ?? false)}</div>
                               )}
                               {/* ★ B2: 컨트롤타워 — 실발송 텍스트(MySQL) 우선, 없으면 순수본문에 (광고)+080 부착 */}
                               {formatCampaignMessageForDisplay(selectedCampaign, messages[0]?.msg_contents)}
@@ -859,7 +859,7 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                         { label: '캠페인명', value: selectedCampaign.campaign_name },
                         // ★ D91: LMS/MMS 제목 표시
                         ...((selectedCampaign.message_type === 'LMS' || selectedCampaign.message_type === 'MMS' || selectedCampaign.message_type === 'L' || selectedCampaign.message_type === 'M') && (selectedCampaign.subject || selectedCampaign.message_subject)
-                          ? [{ label: '제목', value: selectedCampaign.subject || selectedCampaign.message_subject }]
+                          ? [{ label: '제목', value: buildAdSubjectFront(selectedCampaign.subject || selectedCampaign.message_subject || '', selectedCampaign.message_type, selectedCampaign.is_ad ?? false) }]
                           : []),
                         { label: '유형', value: `${selectedCampaign.send_type === 'direct' ? '수동' : 'AI'} / ${msgTypeLabel[selectedCampaign.message_type] || selectedCampaign.message_type}` },
                         { label: '발송자', value: selectedCampaign.created_by_name || '-' },

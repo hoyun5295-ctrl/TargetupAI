@@ -14,7 +14,7 @@
 
 import { useEffect, useState, useMemo, useRef } from 'react';
 import { aiApi } from '../api/client';
-import { calculateSmsBytes, buildAdMessageFront, replaceMessageVars } from '../utils/formatDate';
+import { calculateSmsBytes, buildAdMessageFront, buildAdSubjectFront, replaceMessageVars } from '../utils/formatDate';
 import AiMessageSuggestModal from './AiMessageSuggestModal';
 import SpamFilterTestModal from './SpamFilterTestModal';
 
@@ -1350,7 +1350,7 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
             messageContentLms={buildAdMessageFront(preReplacedMsg, 'LMS', isAd, optOutNumber)}
             callbackNumber={callbackNumber}
             messageType={messageType}
-            subject={messageSubject}
+            subject={buildAdSubjectFront(messageSubject, messageType, isAd)}
             firstRecipient={spamSampleCustomer}
           />
         );

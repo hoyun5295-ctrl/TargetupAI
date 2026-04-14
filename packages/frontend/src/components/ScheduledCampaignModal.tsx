@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { calculateSmsBytes } from '../utils/formatDate';
+import { calculateSmsBytes, buildAdSubjectFront } from '../utils/formatDate';
 
 interface ScheduledCampaignModalProps {
   show: boolean;
@@ -127,7 +127,7 @@ export default function ScheduledCampaignModal({
                       {/* LMS/MMS 제목 표시 */}
                       {(selectedScheduled.message_type === 'LMS' || selectedScheduled.message_type === 'MMS') && (selectedScheduled.message_subject || selectedScheduled.subject) && (
                         <div className="text-sm text-blue-600 mt-1">
-                          📋 제목: {selectedScheduled.message_subject || selectedScheduled.subject}
+                          📋 제목: {buildAdSubjectFront(selectedScheduled.message_subject || selectedScheduled.subject || '', selectedScheduled.message_type, selectedScheduled.is_ad ?? false)}
                         </div>
                       )}
                       {/* 회신번호 표시 */}

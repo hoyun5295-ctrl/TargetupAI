@@ -9,7 +9,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import AutoSendFormModal from '../components/AutoSendFormModal';
-import { formatCampaignMessageForDisplay } from '../utils/formatDate';
+import { formatCampaignMessageForDisplay, buildAdSubjectFront } from '../utils/formatDate';
 
 // ============================================================
 // 타입
@@ -691,7 +691,7 @@ export default function AutoSendPage() {
                         className="w-full border border-violet-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
                       />
                     ) : (
-                      <p className="text-sm text-gray-800 bg-gray-50 rounded-lg px-3 py-2">{messageModal.subject || '-'}</p>
+                      <p className="text-sm text-gray-800 bg-gray-50 rounded-lg px-3 py-2">{buildAdSubjectFront(messageModal.subject || '-', messageModal.messageType || 'LMS', messageModal.isAd ?? false)}</p>
                     )}
                   </div>
                 )}

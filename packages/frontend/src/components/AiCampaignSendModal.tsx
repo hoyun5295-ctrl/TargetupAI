@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { highlightVars, mergeAndHighlightVars } from '../utils/highlightVars';
-import { formatPhoneNumber, buildAdMessageFront } from '../utils/formatDate';
+import { formatPhoneNumber, buildAdMessageFront, buildAdSubjectFront } from '../utils/formatDate';
 
 interface AiCampaignSendModalProps {
   onClose: () => void;
@@ -150,7 +150,7 @@ export default function AiCampaignSendModal({
                   {/* ★ B-D75-01: LMS/MMS 제목 표시 (editSubject 기반) */}
                   {(selectedChannel === 'LMS' || selectedChannel === 'MMS') && editSubject && (
                     <div className="px-4 py-2 bg-orange-50 border-b border-orange-200 shrink-0">
-                      <span className="text-sm font-bold text-orange-700">{editSubject}</span>
+                      <span className="text-sm font-bold text-orange-700">{buildAdSubjectFront(editSubject, selectedChannel, isAd)}</span>
                     </div>
                   )}
                   {/* 메시지 영역 */}

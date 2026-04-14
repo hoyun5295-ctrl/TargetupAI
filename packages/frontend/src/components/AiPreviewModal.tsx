@@ -36,6 +36,7 @@ export default function AiPreviewModal(props: AiPreviewModalProps) {
     mmsUploadedImages,
     wrapAdText,
     sampleCustomer,
+    isAd,
   } = props;
 
   if (!show) return null;
