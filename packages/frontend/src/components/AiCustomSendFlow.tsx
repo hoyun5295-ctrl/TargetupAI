@@ -990,7 +990,7 @@ export default function AiCustomSendFlow({
                       const smsMsg = replaceVars(smsRaw);
                       const lmsMsg = replaceVars(lmsRaw);
                       const subj = variants[selectedVariantIdx]?.subject || '';
-                      setSpamFilterData({ sms: smsMsg, lms: lmsMsg, callback: cb, msgType: channel, subject: subj, firstRecipient: sc });
+                      setSpamFilterData({ sms: smsMsg, lms: lmsMsg, callback: cb, msgType: channel, subject: subj, isAd: isAdLocal, firstRecipient: sc });
                       setShowSpamFilter(true);
                     }}
                     disabled={variants.length === 0}

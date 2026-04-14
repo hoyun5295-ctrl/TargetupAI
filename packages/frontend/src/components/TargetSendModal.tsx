@@ -360,7 +360,7 @@ export default function TargetSendModal({
     const lmsRaw = buildAdMessageFront(msg, 'LMS', adTextEnabled, optOutNumber);
     const smsMsg = replaceVars(smsRaw, firstR);
     const lmsMsg = replaceVars(lmsRaw, firstR);
-    setSpamFilterData({ sms: smsMsg, lms: lmsMsg, callback: cb, msgType: targetMsgType, subject: targetSubject || '', firstRecipient: firstR || undefined });
+    setSpamFilterData({ sms: smsMsg, lms: lmsMsg, callback: cb, msgType: targetMsgType, subject: targetSubject || '', isAd: adTextEnabled, firstRecipient: firstR || undefined });
     setShowSpamFilter(true);
   };
 

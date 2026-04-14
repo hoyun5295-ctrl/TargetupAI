@@ -299,7 +299,7 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
     const lmsRaw = buildAdMessageFront(msg, 'LMS', adTextEnabled, optOutNumber);
     const smsMsg = replaceVars(smsRaw);
     const lmsMsg = replaceVars(lmsRaw);
-    setSpamFilterData({ sms: smsMsg, lms: lmsMsg, callback: cb, msgType: directMsgType, subject: directSubject || '', firstRecipient: firstR || undefined });
+    setSpamFilterData({ sms: smsMsg, lms: lmsMsg, callback: cb, msgType: directMsgType, subject: directSubject || '', isAd: adTextEnabled, firstRecipient: firstR || undefined });
     setShowSpamFilter(true);
   };
 

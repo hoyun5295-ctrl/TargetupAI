@@ -194,7 +194,7 @@ export default function Dashboard() {
   const [customFlowPreload, setCustomFlowPreload] = useState<{selectedFields: string[]; briefing: string; url: string; channel: string; isAd: boolean} | null>(null);
   const [lastSendConfig, setLastSendConfig] = useState<{type: 'hanjullo' | 'custom'; prompt?: string; autoRelax?: boolean; selectedFields?: string[]; briefing?: string; url?: string; channel?: string; isAd?: boolean} | null>(null);
   const [showSpamFilter, setShowSpamFilter] = useState(false);
-  const [spamFilterData, setSpamFilterData] = useState<{sms?: string; lms?: string; callback: string; msgType: 'SMS'|'LMS'|'MMS'; subject?: string; firstRecipient?: Record<string, any>}>({callback:'',msgType:'SMS'});
+  const [spamFilterData, setSpamFilterData] = useState<{sms?: string; lms?: string; callback: string; msgType: 'SMS'|'LMS'|'MMS'; subject?: string; isAd?: boolean; firstRecipient?: Record<string, any>}>({callback:'',msgType:'SMS'});
   const [sampleCustomer, setSampleCustomer] = useState<Record<string, string>>({});
   // ★ D85: column 키 raw 데이터 — 백엔드 replaceVariables용 (담당자테스트/스팸테스트)
   const [sampleCustomerRaw, setSampleCustomerRaw] = useState<Record<string, any>>({});
@@ -1913,6 +1913,7 @@ const campaignData = {
           callbackNumber={spamFilterData.callback}
           messageType={spamFilterData.msgType}
           subject={spamFilterData.subject}
+          isAd={spamFilterData.isAd}
           firstRecipient={spamFilterData.firstRecipient}
         />
       )}

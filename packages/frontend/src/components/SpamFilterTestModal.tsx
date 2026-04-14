@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useAuthStore } from '../stores/authStore';
-import { formatPhoneNumber, replaceDirectVars } from '../utils/formatDate';
+import { formatPhoneNumber, replaceDirectVars, buildAdSubjectFront } from '../utils/formatDate';
 
 interface SpamFilterTestModalProps {
   onClose: () => void;
@@ -9,6 +9,7 @@ interface SpamFilterTestModalProps {
   callbackNumber: string;
   messageType: 'SMS' | 'LMS' | 'MMS';
   subject?: string;
+  isAd?: boolean;
   firstRecipient?: Record<string, any>;
 }
 
@@ -40,6 +41,7 @@ export default function SpamFilterTestModal({
   callbackNumber,
   messageType,
   subject,
+  isAd,
   firstRecipient
 }: SpamFilterTestModalProps) {
   const token = useAuthStore((s) => s.token);
@@ -325,7 +327,7 @@ export default function SpamFilterTestModal({
                       <div className="w-7 h-7 rounded-full bg-blue-100 flex items-center justify-center shrink-0 text-xs">📱</div>
                       <div className="bg-white rounded-2xl rounded-tl-sm p-3 shadow-sm border border-gray-100 text-[12px] leading-[1.7] whitespace-pre-wrap break-all text-gray-700 max-w-[95%]">
                         {subject && (messageType === 'LMS' || messageType === 'MMS') && (
-                          <div className="font-bold text-gray-800 mb-1 pb-1 border-b border-gray-100">{subject}</div>
+                          <div className="font-bold text-gray-800 mb-1 pb-1 border-b border-gray-100">{buildAdSubjectFront(subject, messageType, isAd ?? false)}</div>
                         )}
                         {previewMessage || '메시지 없음'}
                       </div>
