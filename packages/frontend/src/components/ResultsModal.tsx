@@ -261,16 +261,14 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
         </div>
 
         {/* 콘텐츠 */}
-        <div className="flex-1 overflow-y-auto p-5" style={{ overscrollBehavior: 'contain' }}>
-          {/* 캘린더 버튼 — 우측 상단 고정 */}
-          <div className="flex justify-end mb-3">
-            <button
-              onClick={() => setShowCalendar(true)}
-              className="px-4 py-1.5 rounded-lg text-sm font-medium bg-purple-500 text-white hover:bg-purple-600 transition-colors"
-            >
-              📅 캘린더
-            </button>
-          </div>
+        <div className="flex-1 overflow-y-auto p-5 relative" style={{ overscrollBehavior: 'contain' }}>
+          {/* 캘린더 버튼 — 우측 상단 (필터 행과 동일 선상) */}
+          <button
+            onClick={() => setShowCalendar(true)}
+            className="absolute top-4 right-5 px-4 py-1.5 rounded-lg text-sm font-medium bg-purple-500 text-white hover:bg-purple-600 transition-colors z-10"
+          >
+            📅 캘린더
+          </button>
           {activeTab === 'summary' && (
             <div className="space-y-4">
               {/* 기간 선택 + 필터 */}
