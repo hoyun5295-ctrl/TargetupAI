@@ -44,6 +44,8 @@
 | CT-12 | brand-message.ts | 브랜드메시지 발송/검증 (자유형 8종 + 기본형 템플릿, D97) |
 | CT-14 | deduplicate.ts | 수신자 중복제거 — phone 기준 normalizePhone (D98) |
 | CT-15 | saved-segments.ts | AI 발송 템플릿 저장/조회/수정/삭제/touch (D107) |
+| CT-DM | dm/dm-builder.ts | **(D119 신설)** 모바일 DM CRUD + 단축URL 발행 + 열람 추적(UPSERT) + 통계 집계 |
+| CT-DM2 | dm/dm-viewer.ts | **(D119 신설)** 모바일 DM 공개 뷰어 HTML 렌더러 — 상단 4종 + 하단 4종 + 스와이프 + 추적 JS |
 | CT-A | target-sample.ts | **(D109 신설)** 자동발송/캠페인 미리보기/스팸테스트 첫 고객 조회 단일 진입점 — store_code 격리 + 수신거부 제외 + enum 역변환 자동 |
 | CT-B | auto-notify-message.ts | **(D109 신설)** 자동발송 담당자 알림 메시지 빌더 — buildAiGeneratedNotifyMessage/buildPreNotifyMessage/buildSpamTestResultNotifyMessage + sanitizeSmsText (dingbats/이모지 자동 제거 + 옵션 A `===` 가로선 디자인) |
 | — | messageUtils.ts | 변수 치환 (5개 발송 경로 통합) + buildAdMessage (광고+080 전경로 D102) + getOpt080Number (080번호 조회 D102) + prepareFieldMappings (schema+varCatalog+enrich D102) + **prepareSendMessage (변수치환+광고080 통합 D103)** + **replaceVariables enum 역변환 (D109)** |

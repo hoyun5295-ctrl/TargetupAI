@@ -87,6 +87,7 @@ router.put('/settings', authenticate, async (req: Request, res: Response) => {
         brand_name = COALESCE($1, brand_name),
         business_type = COALESCE($2, business_type),
         reject_number = COALESCE($3, reject_number),
+        opt_out_080_number = COALESCE($3, opt_out_080_number),
         manager_phone = COALESCE($4, manager_phone),
         monthly_budget = COALESCE($5, monthly_budget),
         cost_per_sms = COALESCE($6, cost_per_sms),

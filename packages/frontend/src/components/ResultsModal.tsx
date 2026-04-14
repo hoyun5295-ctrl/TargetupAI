@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { calculateSmsBytes, mmsServerPathToUrl, formatCampaignMessageForDisplay } from '../utils/formatDate';
+import CalendarModal from './CalendarModal';
 
 interface ResultsModalProps {
   onClose: () => void;
@@ -29,6 +30,7 @@ function MessageCell({ content, maxWidth, onShowDetail }: { content: string; max
 
 export default function ResultsModal({ onClose, token }: ResultsModalProps) {
   const [activeTab, setActiveTab] = useState<'summary' | 'test'>('summary');
+  const [showCalendar, setShowCalendar] = useState(false);
   const [testStats, setTestStats] = useState<any>(null);
   const [testList, setTestList] = useState<any[]>([]);
   const [spamFilterList, setSpamFilterList] = useState<any[]>([]);
@@ -256,6 +258,12 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
               {tab.label}
             </button>
           ))}
+          <button
+            onClick={() => setShowCalendar(true)}
+            className="ml-auto px-4 py-2 my-1 mr-2 text-sm font-medium text-purple-600 bg-purple-50 hover:bg-purple-100 rounded-lg transition-colors flex items-center gap-1.5"
+          >
+            📅 캘린더
+          </button>
         </div>
 
         {/* 콘텐츠 */}
@@ -670,9 +678,11 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
                               {new Date(t.sentAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
                             </td>
                             <td className="px-3 py-2 text-xs text-gray-700">{t.senderName || '-'}</td>
-                            <td className="px-3 py-2 text-xs text-gray-600 max-w-[200px] truncate" title={t.content || ''}>
-                              {t.content ? (t.content.length > 30 ? t.content.slice(0, 30) + '...' : t.content) : '-'}
-                            </td>
+                            <MessageCell
+                              content={t.content || ''}
+                              maxWidth="max-w-[200px]"
+                              onShowDetail={setMsgDetailContent}
+                            />
                             <td className="px-3 py-2">
                               <span className={`px-2 py-0.5 rounded text-xs font-medium ${t.type === 'SMS' ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'bg-violet-50 text-violet-700 border border-violet-200'}`}>
                                 {t.type}
@@ -1078,26 +1088,47 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
             {toast.message}
           </div>
         )}
-        {/* ★ D93: 메시지 상세보기 모달 — 클릭으로 열리는 스크롤 가능 모달 */}
+        {/* ★ D93→D120: 메시지 상세보기 모달 — 핸드폰 프레임 스타일 */}
         {msgDetailContent !== null && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[80]" onClick={() => setMsgDetailContent(null)}>
-            <div className="bg-white rounded-xl shadow-2xl w-[400px] max-h-[70vh] flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
-              <div className="px-5 py-3 border-b bg-gray-50 flex justify-between items-center">
-                <h4 className="text-sm font-bold text-gray-700">💬 메시지 내용</h4>
-                <button onClick={() => setMsgDetailContent(null)} className="text-gray-400 hover:text-gray-600 text-lg">✕</button>
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[80] animate-in fade-in duration-150" onClick={() => setMsgDetailContent(null)}>
+            <div className="bg-white rounded-2xl shadow-2xl w-[400px] overflow-hidden animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
+              <div className="p-4 border-b bg-emerald-50 flex justify-between items-center">
+                <h3 className="font-bold text-lg">📱 메시지 내용</h3>
+                <button onClick={() => setMsgDetailContent(null)} className="text-gray-500 hover:text-gray-700 text-xl">✕</button>
               </div>
-              <div className="p-5 overflow-y-auto flex-1" style={{ overscrollBehavior: 'contain' }}>
-                <div className="whitespace-pre-wrap text-sm text-gray-700 leading-relaxed break-all">
-                  {msgDetailContent}
+              <div className="p-4">
+                <div className="mx-auto w-[280px]">
+                  <div className="rounded-[1.8rem] p-[3px] bg-gradient-to-b from-purple-400 to-purple-600 shadow-lg shadow-purple-200">
+                    <div className="bg-white rounded-[1.6rem] overflow-hidden flex flex-col" style={{ height: '420px' }}>
+                      <div className="px-4 py-2.5 bg-gradient-to-r from-gray-50 to-gray-100 flex justify-between items-center shrink-0 border-b">
+                        <span className="text-[11px] text-gray-400 font-medium">문자메시지</span>
+                        <span className="text-[11px] font-bold text-purple-600">{calculateSmsBytes(msgDetailContent) > 90 ? 'LMS' : 'SMS'}</span>
+                      </div>
+                      <div className="flex-1 overflow-y-auto p-3 bg-gradient-to-b from-purple-50/30 to-white">
+                        <div className="flex gap-2 mt-1">
+                          <div className="w-7 h-7 rounded-full bg-purple-100 flex items-center justify-center shrink-0 text-xs">📱</div>
+                          <div className="bg-white rounded-2xl rounded-tl-sm p-3 shadow-sm border border-gray-100 text-[12px] leading-[1.6] whitespace-pre-wrap break-all text-gray-700 max-w-[95%]">
+                            {msgDetailContent}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="px-3 py-2 border-t bg-gray-50 text-center shrink-0">
+                        <span className="text-[10px] text-gray-400">
+                          {calculateSmsBytes(msgDetailContent)} / {calculateSmsBytes(msgDetailContent) > 90 ? 2000 : 90} bytes
+                        </span>
+                      </div>
+                    </div>
+                  </div>
                 </div>
-              </div>
-              <div className="px-5 py-3 border-t">
-                <button onClick={() => setMsgDetailContent(null)} className="w-full py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm font-medium text-gray-600">확인</button>
               </div>
             </div>
           </div>
         )}
       </div>
+      {/* 캘린더 모달 */}
+      {showCalendar && (
+        <CalendarModal onClose={() => setShowCalendar(false)} token={token} />
+      )}
     </div>
   );
 }

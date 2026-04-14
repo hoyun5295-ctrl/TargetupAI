@@ -6,9 +6,10 @@ interface CalendarModalProps {
   onClose: () => void;
   token: string | null;
   onEdit?: (campaign: any) => void;
+  embedded?: boolean;
 }
 
-export default function CalendarModal({ onClose, token, onEdit }: CalendarModalProps) {
+export default function CalendarModal({ onClose, token, onEdit, embedded }: CalendarModalProps) {
   const [campaigns, setCampaigns] = useState<any[]>([]);
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<number | null>(null);
@@ -74,15 +75,14 @@ export default function CalendarModal({ onClose, token, onEdit }: CalendarModalP
 
   const selectedDateCampaigns = selectedDate ? getCampaignsForDay(selectedDate) : [];
 
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-xl shadow-2xl w-[900px] max-h-[650px] overflow-hidden">
+  const calendarContent = (
+    <>
         {/* 헤더 */}
         <div className="flex justify-between items-center p-4 border-b bg-gray-50">
           <button onClick={() => setCurrentDate(new Date(year, month - 1, 1))} className="px-3 py-1 hover:bg-gray-200 rounded">←</button>
           <h2 className="text-lg font-bold">{year}년 {month + 1}월</h2>
           <button onClick={() => setCurrentDate(new Date(year, month + 1, 1))} className="px-3 py-1 hover:bg-gray-200 rounded">→</button>
-          <button onClick={onClose} className="ml-4 text-gray-500 hover:text-gray-700 text-xl">✕</button>
+          {!embedded && <button onClick={onClose} className="ml-4 text-gray-500 hover:text-gray-700 text-xl">✕</button>}
         </div>
 
         <div className="flex">
@@ -412,6 +412,17 @@ export default function CalendarModal({ onClose, token, onEdit }: CalendarModalP
             )}
           </div>
         </div>
+    </>
+  );
+
+  if (embedded) {
+    return <div className="bg-white rounded-xl overflow-hidden">{calendarContent}</div>;
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-xl shadow-2xl w-[900px] max-h-[650px] overflow-hidden">
+        {calendarContent}
       </div>
     </div>
   );
