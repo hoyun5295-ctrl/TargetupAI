@@ -125,13 +125,41 @@
 |---|---|---|
 | **#1** | 전단지 목록 user_id 격리 | flyers.ts GET / — company_id만 필터 → user_id 추가. 같은 총판 내 다른 매장 사용자 전단 격리 |
 
-#### 수정 파일 6개
+#### 0414 PDF 디버깅 8건
+| # | 영역 | 해결 |
+|---|---|---|
+| **P1** | 평균주문금액 날짜변환 | formatPreviewValue에 fieldLabel 키워드 판정 추가 (금액→숫자, 생일→날짜). CustomerDBModal "이름" 하드코딩→동적 |
+| **P2** | 개인화/특수문자 커서 위치 | AutoSendFormModal+DirectSendPanel에 onSelect 커서 추적 + selectionStart 기반 삽입 |
+| **P3** | 예약취소 미표시 | 미확정 draft DELETE 처리 + campaigns.ts/results.ts sent_count=0 제외조건 제거 |
+| **P4** | 상세내역 시간 라벨 | "요청시간"→"등록일시", "발송시간"→"발송일시" |
+| **P5** | 취소건 파란색 | cancelled 건 발송일시 회색+취소선+(예약취소) 표기 |
+| **P6** | 캘린더 테스트탭 | 요약탭에서만 표시 + 무료/만료 사용자 잠금 |
+| **P7** | 자동발송 이력 통계 | 알림류 run INSERT에 success_count 즉시 기록 (sync 대상 아님) |
+| **P8** | AI문구 영문변수 | AutoSendFormModal personalFields 영문key→한글displayName 변환 |
+
+#### AI 문안 생성 프롬프트 고도화
+- BRAND_SYSTEM_PROMPT에 고성과 마케팅 작성 기법 추가
+- 제목 기법(호기심, 알림형식, 긴급성) + 본문 구조(가격비교, 넘버링, CTA)
+- 3가지 variant 차별화 강화 (감성/혜택강조/MZ)
+- 계절감 반영 필수 + 프롬프트에 없는 정보 날조 금지 원칙 강화
+- campaigns 실발송 성공 문안 자동 조회 → 프롬프트 few-shot 레퍼런스 (실데이터 쌓이면 자동 활용)
+
+#### 수정 파일 총 14개
 - `AiPreviewModal.tsx` — 핸드폰 프레임 전면 리뉴얼
 - `DashboardHeader.tsx` — AI분석 + 캘린더 메뉴 제거
-- `ResultsModal.tsx` — 캘린더 버튼 + 스팸필터 MessageCell + 메시지 모달 핸드폰 프레임
+- `ResultsModal.tsx` — 캘린더 버튼 + 스팸필터 MessageCell + 메시지 모달 핸드폰 프레임 + P4/P5/P6
 - `CalendarModal.tsx` — embedded prop 추가
-- `companies.ts` (백엔드) — opt_out_080_number 동기화
-- `flyers.ts` (백엔드) — user_id 격리
+- `CustomerDBModal.tsx` — P1 하드코딩 제거 + fieldLabel 전달
+- `formatDate.ts` — P1 formatPreviewValue fieldLabel 키워드 판정
+- `AutoSendFormModal.tsx` — P2 커서위치 삽입 + P8 personalFields 한글변환
+- `DirectSendPanel.tsx` — P2 커서위치 삽입
+- `Dashboard.tsx` — P3 DELETE + P6 캘린더 props 전달
+- `companies.ts` (백엔드) — 080 opt_out_080_number 동기화
+- `campaigns.ts` (백엔드) — P3 draft DELETE + sent_count 조건 제거
+- `results.ts` (백엔드) — P3 sent_count 조건 제거
+- `auto-campaign-worker.ts` (백엔드) — P7 알림 run success_count
+- `ai.ts` + `routes/ai.ts` (백엔드) — AI 프롬프트 고도화 + 레퍼런스 문안 자동 조회
+- `flyers.ts` (백엔드) — 전단AI user_id 격리
 
 #### 전단AI 사업 확장 회의
 - 회의록: `status/전단AI_회의록_20260414.docx`
