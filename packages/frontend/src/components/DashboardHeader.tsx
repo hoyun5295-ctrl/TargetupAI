@@ -71,9 +71,6 @@ export default function DashboardHeader({
     { label: '모바일DM', onClick: () => lockGuard(() => navigate('/dm-builder')), color: 'gold', locked: isSubscriptionLocked, path: '/dm-builder' },
     { label: '카카오&RCS', onClick: () => navigate('/kakao-rcs'), color: 'green', path: '/kakao-rcs' },
     { label: '직접발송', onClick: onDirectSend, color: 'green', path: '/' },
-    { label: '캘린더', onClick: (isSubscriptionLocked || isCalendarLocked)
-        ? () => isSubscriptionLocked ? onSubscriptionLocked?.() : onFeatureLocked?.('캘린더', '스타터')
-        : onCalendar, color: 'gold', locked: isSubscriptionLocked || isCalendarLocked, path: '/calendar' },
     { label: '발송결과', onClick: onResults, color: 'green', path: '/' },
     { label: '수신거부', onClick: () => navigate('/unsubscribes'), color: 'gold', path: '/unsubscribes' },
     { label: '설정', onClick: () => navigate('/settings'), color: 'green', path: '/settings' },

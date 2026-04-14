@@ -258,12 +258,6 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
               {tab.label}
             </button>
           ))}
-          <button
-            onClick={() => setShowCalendar(true)}
-            className="ml-auto px-4 py-2 my-1 mr-2 text-sm font-medium text-purple-600 bg-purple-50 hover:bg-purple-100 rounded-lg transition-colors flex items-center gap-1.5"
-          >
-            📅 캘린더
-          </button>
         </div>
 
         {/* 콘텐츠 */}
@@ -716,6 +710,16 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
                     <button onClick={() => setSpamCurrentPage(p => Math.min(Math.ceil(spamFilterList.length / itemsPerPage), p + 1))} disabled={spamCurrentPage >= Math.ceil(spamFilterList.length / itemsPerPage)} className="px-3 py-1 text-sm rounded-md border bg-white hover:bg-gray-50 disabled:opacity-40">다음</button>
                   </div>
                 )}
+              </div>
+
+              {/* 캘린더 버튼 */}
+              <div className="mt-6 flex justify-center">
+                <button
+                  onClick={() => setShowCalendar(true)}
+                  className="px-8 py-3.5 bg-purple-500 hover:bg-purple-600 text-white font-bold text-base rounded-xl shadow-lg shadow-purple-200 transition-all hover:shadow-xl hover:shadow-purple-300 flex items-center gap-2.5"
+                >
+                  📅 발송 캘린더 보기
+                </button>
               </div>
             </div>
           )}
