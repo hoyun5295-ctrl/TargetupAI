@@ -354,8 +354,12 @@ onClick={() => {
   const msg = aiResult?.messages?.[selectedAiMsgIdx]?.message_text || campaign.messageContent || '';
                     const cb = selectedCallback || '';
                     const sc = sampleCustomer || {};
-                    // ★ B+0407-1: 인라인 제거 — replaceVarsBySampleCustomer 컨트롤타워 사용
-                    const replaceVars = (text: string) => replaceVarsBySampleCustomer(text, sc, { removeUnmatched: true });
+                    // ★ D121: 미리보기와 동일한 데이터를 스팸필터에도 전달
+                    // sampleCustomer 있으면 치환, 없으면 원본 유지 (removeUnmatched:false로 변수 보존)
+                    const hasSample = sc && Object.keys(sc).length > 0;
+                    const replaceVars = (text: string) => hasSample
+                      ? replaceVarsBySampleCustomer(text, sc, { removeUnmatched: false })
+                      : text;
                     const smsRaw = buildAdMessageFront(msg, 'SMS', isAd, optOutNumber);
                     const lmsRaw = buildAdMessageFront(msg, 'LMS', isAd, optOutNumber);
                     const smsMsg = replaceVars(smsRaw);
