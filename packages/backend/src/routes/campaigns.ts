@@ -104,11 +104,9 @@ router.get('/', async (req: Request, res: Response) => {
     const params: any[] = [companyId];
     let paramIndex = 2;
 
-    // ★ D111 E3 + PPT#5: draft 제외 + 발송 실적 없이 취소된 캠페인 제외
-    //   cancelled는 캘린더에 취소 이력으로 표시하되, sent_count=0인 취소건(회신번호 확인 취소 등)은 제외
-    //   이유: 개별회신번호 미등록 안내 → 취소 시 draft가 cancelled로 전환되어 "다른 타겟수의 취소건" 표시
+    // ★ D120: 미확정 draft는 DELETE되므로 sent_count=0 제외 조건 불필요. cancelled 전부 표시.
     if (!status) {
-      whereClause += ` AND status NOT IN ('draft') AND NOT (status = 'cancelled' AND COALESCE(sent_count, 0) = 0)`;
+      whereClause += ` AND status NOT IN ('draft')`;
     }
 
     // 일반 사용자는 본인이 만든 캠페인만
@@ -2281,15 +2279,14 @@ router.delete('/:id', async (req: Request, res: Response) => {
       }
     }
 
-    // 상태를 cancelled로 변경 (기록 보존)
-    await query(
-      `UPDATE campaigns SET status = 'cancelled', updated_at = NOW() WHERE id = $1 AND company_id = $2`,
-      [campaignId, companyId]
-    );
+    // ★ D120: 미확정 draft 캠페인은 cancelled 보존 대신 완전 삭제
+    // 회신번호 확인 취소 등 예약 확정 전 포기한 건 — DB에 남겨둘 이유 없음
+    await query(`DELETE FROM campaign_runs WHERE campaign_id = $1`, [campaignId]);
+    await query(`DELETE FROM campaigns WHERE id = $1 AND company_id = $2`, [campaignId, companyId]);
 
-    console.log(`[캠페인취소-draft] campaign_id=${campaignId}, name="${campaign.campaign_name}", by user=${userId}`);
+    console.log(`[캠페인삭제-draft] campaign_id=${campaignId}, name="${campaign.campaign_name}", by user=${userId}`);
 
-    return res.json({ success: true, message: '예약이 취소되었습니다.' });
+    return res.json({ success: true, message: '취소되었습니다.' });
 
   } catch (error) {
     console.error('[캠페인취소-draft] 오류:', error);

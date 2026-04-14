@@ -422,8 +422,8 @@ export default function CustomerDBModal({ onClose, token, userType }: CustomerDB
               <thead className="bg-gray-50 sticky top-0 z-10">
                 <tr>
                   <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500 w-12 whitespace-nowrap">#</th>
-                  <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-500 whitespace-nowrap">이름</th>
-                  <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-500 whitespace-nowrap">전화번호</th>
+                  <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-500 whitespace-nowrap">{fieldColumns.find(f => f.field_key === 'name')?.field_label || '고객명'}</th>
+                  <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-500 whitespace-nowrap">{fieldColumns.find(f => f.field_key === 'phone')?.field_label || '전화번호'}</th>
                   {fieldColumns.filter(f => !['name', 'phone'].includes(f.field_key)).map(f => (
                     <th key={f.field_key} className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500 whitespace-nowrap">
                       {f.field_label || f.display_name || f.field_key}
@@ -456,11 +456,11 @@ export default function CustomerDBModal({ onClose, token, userType }: CustomerDB
                           // ★ D93: DATE/DATETIME/TIMESTAMP 타입 + 날짜 직접 컬럼 전부 formatDate 적용
                           display = val ? formatDate(String(val)) : '-';
                         } else if (f.field_key === 'total_purchase_amount' || f.field_key === 'recent_purchase_amount' || f.field_key === 'points' || f.field_key === 'purchase_count') {
-                          // ★ D89→PPT#1: formatPreviewValue 컨트롤타워 사용 (YYYYMMDD 날짜 판별 포함)
-                          display = val != null ? formatPreviewValue(val) : '-';
+                          // ★ D89→D120: formatPreviewValue + fieldLabel 전달로 숫자/날짜 판정
+                          display = val != null ? formatPreviewValue(val, { fieldLabel: f.field_label || f.display_name || f.field_key }) : '-';
                         } else if ((f.field_type === 'NUMBER' || f.data_type === 'number') && val != null) {
-                          // ★ D98→PPT#1: 커스텀 숫자 필드 — formatPreviewValue로 날짜 패턴 자동 판별
-                          display = formatPreviewValue(val);
+                          // ★ D98→D120: 커스텀 숫자 필드 — fieldLabel 기반 숫자/날짜 판정
+                          display = formatPreviewValue(val, { fieldLabel: f.field_label || f.display_name || f.field_key });
                         } else if (f.field_key === 'grade') {
                           return (
                             <td key={f.field_key} className="px-3 py-2.5 text-center whitespace-nowrap">
@@ -532,8 +532,8 @@ export default function CustomerDBModal({ onClose, token, userType }: CustomerDB
                           ? fieldColumns.find((f: any) => f.field_key === key)
                           : null;
                         const displayLabel = fieldDef?.field_label || fieldDef?.display_name || key;
-                        // ★ D89→PPT#1: formatPreviewValue 컨트롤타워 사용 (날짜/숫자 자동 판별)
-                        const displayValue = value != null ? formatPreviewValue(value) : '-';
+                        // ★ D89→D120: formatPreviewValue + fieldLabel 전달로 숫자/날짜 판정
+                        const displayValue = value != null ? formatPreviewValue(value, { fieldLabel: displayLabel }) : '-';
                         return (
                           <div key={key} className="flex items-center py-2.5 border-b border-gray-100">
                             <span className="w-24 flex-shrink-0 text-xs text-gray-400">{displayLabel}</span>

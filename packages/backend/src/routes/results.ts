@@ -180,8 +180,7 @@ router.get('/campaigns', async (req: Request, res: Response) => {
     let paramIndex = 2;
 
     // ★ D98: draft도 목록에 포함 (실패로 표시 — 직원 요청)
-    // ★ D102: 미발송 취소 캠페인 숨김 (회신번호 변경 등으로 draft→cancelled, sent_count=0인 건)
-    whereClause += ` AND NOT (status = 'cancelled' AND COALESCE(sent_count, 0) = 0)`;
+    // ★ D120: 미확정 draft는 DELETE되므로 sent_count=0 제외 조건 불필요. cancelled 전부 표시.
 
     if (userType === 'company_user') {
       whereClause += ` AND created_by = $${paramIndex++}`;

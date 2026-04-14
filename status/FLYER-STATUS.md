@@ -22,11 +22,33 @@
 | **FLYER-QR-COUPON-DESIGN.md** | ★ D114 QR 체크인 쿠폰 구현 설계서 (즉시 개발용) |
 | **FLYER-POS-AGENT-DEV.md** | ★ D114 POS Agent 개발 설계서 (투게더스 우선, 즉시 개발용) |
 
-> **최종 업데이트:** 2026-04-12 (D114)
+> **최종 업데이트:** 2026-04-14 (D120)
 
 ---
 
 ## 1) CURRENT_TASK (현재 집중 작업)
+
+### 🎯 D120 — user_id 격리 + 사업 확장 설계 (2026-04-14)
+
+**★ 이번 세션 완료 항목:**
+
+**A. user_id 기반 데이터 격리 (긴급)**
+- [x] flyers.ts GET / — company_id만 필터 → user_id 추가 (같은 총판 내 매장별 전단 분리)
+- [ ] **미완료 — 다음 세션:** customers.ts, catalog.ts, address-books.ts, coupons.ts, stats.ts 전체 user_id 격리 필요
+- [ ] **미완료 — 다음 세션:** flyer_customers, flyer_catalog 테이블에 user_id 컬럼 추가 (ALTER TABLE)
+
+**B. 사업 확장 회의 + 설계**
+- [x] 회의록: `status/전단AI_회의록_20260414.docx`
+- [x] 설계서: `status/FLYER-EXPANSION-DESIGN.md`
+- 4단계 로드맵: 수신자별 단축URL → 인쇄용 전단 → 장바구니/주문 → POS 자동 생성
+- 목표: 마트 2,000개+, 월 순수익 1.4억원
+
+**C. 선결 과제 (Harold님 액션)**
+- [ ] 투게더스 POS 데이터 샘플 3~4건 수령
+- [ ] 투게더스 테스트 아이디 확보
+- [ ] 짧은 도메인 구매 (hjl.kr 등)
+
+---
 
 ### 🎯 D115 — QR 쿠폰 + AI POS Agent 구현 (2026-04-12)
 

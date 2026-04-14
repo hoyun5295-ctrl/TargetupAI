@@ -157,7 +157,8 @@
       "Bash(sed -i '/^function renderDarkPop/,/return `<!DOCTYPE/{s/const disc = calcDisc/const paper = getPaperSize\\(opts\\);\\\\n  const disc = calcDisc/;}'  flyer-pop-templates.ts)",
       "Bash(sed -i '/^function renderJumboPop/,/return `<!DOCTYPE/{s/const disc = calcDisc/const paper = getPaperSize\\(opts\\);\\\\n  const disc = calcDisc/;}'  flyer-pop-templates.ts)",
       "Bash(git log:*)",
-      "Bash(python -m markitdown \"C:\\\\Users\\\\ceo\\\\OneDrive\\\\문서\\\\카카오톡 받은 파일\\\\한줄로_20260413.pptx\")"
+      "Bash(python -m markitdown \"C:\\\\Users\\\\ceo\\\\OneDrive\\\\문서\\\\카카오톡 받은 파일\\\\한줄로_20260413.pptx\")",
+      "Bash(node tmp_meeting_doc.js)"
     ]
   }
 }

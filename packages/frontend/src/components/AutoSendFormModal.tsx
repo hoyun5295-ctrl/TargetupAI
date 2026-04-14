@@ -12,7 +12,7 @@
  * ★ D83 교훈: 타겟 필터 없이({}) 발송 = 전체 고객 발송 사고 → 필터 필수 검증
  */
 
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useRef } from 'react';
 import { aiApi } from '../api/client';
 import { calculateSmsBytes, buildAdMessageFront, replaceMessageVars } from '../utils/formatDate';
 import AiMessageSuggestModal from './AiMessageSuggestModal';
@@ -317,12 +317,17 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
     setAiHelperLoading(true);
     setAiHelperResults([]);
     try {
+      // ★ D120 P8: 영문 field_key → 한글 displayName 변환 (AI가 %고객명% 생성하도록)
+      const personalFieldLabels = selectedFields.map(key => {
+        const f = availableFields.find(af => af.field_key === key);
+        return f?.field_label || f?.display_name || key;
+      });
       const res = await aiApi.generateMessage({
         prompt: aiHelperPrompt,
         channel: messageType,
         isAd: isAd,
         usePersonalization: selectedFields.length > 0,
-        personalFields: selectedFields,
+        personalFields: personalFieldLabels,
       });
       setAiHelperResults(res.data.variants || []);
       setAiHelperRecommendation(res.data.recommendation || '');
@@ -342,9 +347,25 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
     setToast({ show: true, type: 'success', message: 'AI 추천 문구가 적용되었습니다.' });
   };
 
-  // 변수 삽입
+  // ★ D120: 변수 삽입 — 커서 위치에 삽입 (문안 끝이 아닌 커서 깜빡이는 곳)
+  const msgTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const msgCursorPosRef = useRef<number>(0);
   const insertVariable = (varName: string) => {
-    setMessageContent((prev: string) => prev + varName);
+    const pos = msgCursorPosRef.current;
+    setMessageContent((prev: string) => {
+      const before = prev.slice(0, pos);
+      const after = prev.slice(pos);
+      return before + varName + after;
+    });
+    const newPos = pos + varName.length;
+    msgCursorPosRef.current = newPos;
+    setTimeout(() => {
+      if (msgTextareaRef.current) {
+        msgTextareaRef.current.focus();
+        msgTextareaRef.current.selectionStart = newPos;
+        msgTextareaRef.current.selectionEnd = newPos;
+      }
+    }, 0);
   };
 
   // MMS 이미지 업로드
@@ -950,11 +971,14 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
                         <span className="absolute left-0 top-0 text-sm text-orange-600 font-medium pointer-events-none select-none">(광고) </span>
                       )}
                       <textarea
+                        ref={msgTextareaRef}
                         value={messageContent}
                         onChange={e => {
                           const text = e.target.value;
                           setMessageContent(text);
+                          msgCursorPosRef.current = e.target.selectionStart;
                         }}
+                        onSelect={e => { msgCursorPosRef.current = (e.target as HTMLTextAreaElement).selectionStart; }}
                         placeholder="전송하실 내용을 입력하세요."
                         style={isAd ? { textIndent: '42px' } : {}}
                         className={`w-full resize-none border-0 focus:outline-none text-sm leading-relaxed ${messageType === 'SMS' ? 'h-[180px]' : 'h-[140px]'}`}

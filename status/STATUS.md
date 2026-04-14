@@ -107,6 +107,40 @@
 
 ---
 
+### 🔧 D120 — UI 통일 + 캘린더 이동 + 080 버그 + 전단AI user_id 격리 (2026-04-14) — 🟡 수정완료-검증대기
+
+> **배경:** 한줄로AI UI 통일감 작업 + 080 수신거부 저장 버그 + 전단AI 사용자별 데이터 격리
+
+#### 한줄로AI 수정 5건
+| # | 영역 | 변경 |
+|---|---|---|
+| **#1** | AiPreviewModal 핸드폰 프레임 리뉴얼 | 960px 텍스트 모달 → 400px 핸드폰 프레임 (맞춤한줄과 통일). 하단 버튼 4개 제거 (문안선택 화면에 이미 있음). 인라인 replaceAllVars → replaceVarsBySampleCustomer 컨트롤타워 |
+| **#2** | DashboardHeader 메뉴 정리 | AI 분석 + 캘린더 메뉴 제거 (캘린더는 발송결과 모달로 이동) |
+| **#3** | ResultsModal 캘린더 + 메시지 모달 | 콘텐츠 우측 상단에 캘린더 버튼(보라색) 추가 → CalendarModal 트리거. 스팸필터 이력 문안 클릭 가능(MessageCell 컨트롤타워). 메시지 상세 모달 핸드폰 프레임 리뉴얼 |
+| **#4** | 080 수신거부 저장 버그 | PUT /settings에서 reject_number만 UPDATE → opt_out_080_number도 동기화. 근본 원인: GET은 opt_out_080_number를 읽는데 PUT은 reject_number에만 저장 |
+| **#5** | CalendarModal embedded prop | 향후 임베드 가능하도록 embedded 옵션 추가 |
+
+#### 전단AI 수정 1건
+| # | 영역 | 변경 |
+|---|---|---|
+| **#1** | 전단지 목록 user_id 격리 | flyers.ts GET / — company_id만 필터 → user_id 추가. 같은 총판 내 다른 매장 사용자 전단 격리 |
+
+#### 수정 파일 6개
+- `AiPreviewModal.tsx` — 핸드폰 프레임 전면 리뉴얼
+- `DashboardHeader.tsx` — AI분석 + 캘린더 메뉴 제거
+- `ResultsModal.tsx` — 캘린더 버튼 + 스팸필터 MessageCell + 메시지 모달 핸드폰 프레임
+- `CalendarModal.tsx` — embedded prop 추가
+- `companies.ts` (백엔드) — opt_out_080_number 동기화
+- `flyers.ts` (백엔드) — user_id 격리
+
+#### 전단AI 사업 확장 회의
+- 회의록: `status/전단AI_회의록_20260414.docx`
+- 설계서: `status/FLYER-EXPANSION-DESIGN.md`
+- 4단계: 수신자별 단축URL → 인쇄용 전단 → 장바구니/주문 → POS 자동 생성
+- 목표: 마트 2,000개+, 월 순수익 1.4억원
+
+---
+
 ### 🔧 D119 — 0413 직원검수 7건 + 전단AI 흰화면 + 모바일DM 빌더 신규 (2026-04-13) — ✅ 배포완료
 
 > **배경:** 직원 디버깅 PPT(한줄로_20260413.pptx) 7건 수정 + 전단AI 로그인 흰화면 + 총판모달 스크롤 + **모바일DM 빌더 신규 기능 (프로 요금제 이상)**

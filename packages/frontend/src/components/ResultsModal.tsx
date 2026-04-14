@@ -5,6 +5,10 @@ import CalendarModal from './CalendarModal';
 interface ResultsModalProps {
   onClose: () => void;
   token: string | null;
+  customerDbEnabled?: boolean;
+  isSubscriptionLocked?: boolean;
+  onFeatureLocked?: (featureName: string, requiredPlan: string) => void;
+  onSubscriptionLocked?: () => void;
 }
 
 // STATUS_CODE_MAP 삭제 — 백엔드 API가 status_label, status_type, carrier_label을 직접 전달
@@ -28,7 +32,7 @@ function MessageCell({ content, maxWidth, onShowDetail }: { content: string; max
   );
 }
 
-export default function ResultsModal({ onClose, token }: ResultsModalProps) {
+export default function ResultsModal({ onClose, token, customerDbEnabled, isSubscriptionLocked, onFeatureLocked, onSubscriptionLocked }: ResultsModalProps) {
   const [activeTab, setActiveTab] = useState<'summary' | 'test'>('summary');
   const [showCalendar, setShowCalendar] = useState(false);
   const [testStats, setTestStats] = useState<any>(null);
@@ -262,13 +266,23 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
 
         {/* 콘텐츠 */}
         <div className="flex-1 overflow-y-auto p-5 relative" style={{ overscrollBehavior: 'contain' }}>
-          {/* 캘린더 버튼 — 우측 상단 (필터 행과 동일 선상) */}
-          <button
-            onClick={() => setShowCalendar(true)}
-            className="absolute top-4 right-5 px-4 py-1.5 rounded-lg text-sm font-medium bg-purple-500 text-white hover:bg-purple-600 transition-colors z-10"
-          >
-            📅 캘린더
-          </button>
+          {/* ★ D120 P6: 캘린더 버튼 — 요약 탭에서만 + 무료 사용자 차단 */}
+          {activeTab === 'summary' && (
+            <button
+              onClick={() => {
+                if (isSubscriptionLocked) { onSubscriptionLocked?.(); return; }
+                if (customerDbEnabled === false) { onFeatureLocked?.('캘린더', '스타터'); return; }
+                setShowCalendar(true);
+              }}
+              className={`absolute top-4 right-5 px-4 py-1.5 rounded-lg text-sm font-medium transition-colors z-10 ${
+                isSubscriptionLocked || customerDbEnabled === false
+                  ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                  : 'bg-purple-500 text-white hover:bg-purple-600'
+              }`}
+            >
+              {(isSubscriptionLocked || customerDbEnabled === false) && <span className="mr-1">🔒</span>}📅 캘린더
+            </button>
+          )}
           {activeTab === 'summary' && (
             <div className="space-y-4">
               {/* 기간 선택 + 필터 */}
@@ -405,10 +419,17 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
                           </td>
                           <td className="px-3 py-2.5 text-center text-xs">
                             {c.scheduled_at ? (
-                              <span className="text-blue-600">
-                                {new Date(c.scheduled_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
-                                <span className="text-[10px] ml-1 text-blue-400">(예약)</span>
-                              </span>
+                              c.status === 'cancelled' ? (
+                                <span className="text-gray-400 line-through">
+                                  {new Date(c.scheduled_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                                  <span className="text-[10px] ml-1">(예약취소)</span>
+                                </span>
+                              ) : (
+                                <span className="text-blue-600">
+                                  {new Date(c.scheduled_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                                  <span className="text-[10px] ml-1 text-blue-400">(예약)</span>
+                                </span>
+                              )
                             ) : c.sent_at ? (
                               <span className="text-gray-500">{new Date(c.sent_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
                             ) : '-'}
@@ -948,8 +969,8 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
                       <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-500">수신번호</th>
                       <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-500">회신번호</th>
                       <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-500">메시지내용</th>
-                      <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500">요청시간</th>
-                      <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500">발송시간</th>
+                      <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500">등록일시</th>
+                      <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500">발송일시</th>
                       <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500">전송결과</th>
                       <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500">결과코드</th>
                       <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500">통신사</th>
@@ -1105,10 +1126,10 @@ export default function ResultsModal({ onClose, token }: ResultsModalProps) {
                         <span className="text-[11px] text-gray-400 font-medium">문자메시지</span>
                         <span className="text-[11px] font-bold text-purple-600">{calculateSmsBytes(msgDetailContent) > 90 ? 'LMS' : 'SMS'}</span>
                       </div>
-                      <div className="flex-1 overflow-y-auto p-3 bg-gradient-to-b from-purple-50/30 to-white">
+                      <div className="flex-1 overflow-y-auto p-3 bg-gradient-to-b from-purple-50/30 to-white select-text">
                         <div className="flex gap-2 mt-1">
                           <div className="w-7 h-7 rounded-full bg-purple-100 flex items-center justify-center shrink-0 text-xs">📱</div>
-                          <div className="bg-white rounded-2xl rounded-tl-sm p-3 shadow-sm border border-gray-100 text-[12px] leading-[1.6] whitespace-pre-wrap break-all text-gray-700 max-w-[95%]">
+                          <div className="bg-white rounded-2xl rounded-tl-sm p-3 shadow-sm border border-gray-100 text-[12px] leading-[1.6] whitespace-pre-wrap break-all text-gray-700 max-w-[95%] select-text cursor-text">
                             {msgDetailContent}
                           </div>
                         </div>

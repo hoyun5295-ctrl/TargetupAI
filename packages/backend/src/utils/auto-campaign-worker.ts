@@ -549,18 +549,19 @@ async function sendPreNotification(ac: any): Promise<void> {
       `SELECT COALESCE(MAX(run_number), 0) + 1 as next_run FROM auto_campaign_runs WHERE auto_campaign_id = $1`,
       [ac.id]
     );
+    // ★ D120 P7: 알림류 run은 sync 대상이 아니므로 success_count를 즉시 기록
     await query(
       `INSERT INTO auto_campaign_runs (
         auto_campaign_id, run_number, status, scheduled_at, notified_at, notify_message,
         generated_message_content, generated_message_subject, ai_generation_status,
-        target_count, sent_count
-      ) VALUES ($1, $2, 'notified', $3, NOW(), $4, $5, $6, $7, $8, $8)`,
+        target_count, sent_count, success_count
+      ) VALUES ($1, $2, 'notified', $3, NOW(), $4, $5, $6, $7, $8, $8, $8)`,
       [
         ac.id, runNumberResult.rows[0].next_run, ac.next_run_at, notifyMessage,
         ac.generated_message_content || null,
         ac.generated_message_subject || null,
         ac.ai_generate_enabled ? (ac.generated_message_content ? 'ai_generated' : 'ai_fallback') : 'fixed',
-        phones.length,  // 담당자 알림 대상 수 = 담당자 수
+        phones.length,
       ]
     );
 
@@ -971,12 +972,12 @@ async function executePreSendSpamTest(ac: any): Promise<void> {
       `SELECT COALESCE(MAX(run_number), 0) + 1 as next_run FROM auto_campaign_runs WHERE auto_campaign_id = $1`,
       [ac.id]
     );
-    // ★ D114 P8-1: target_count/sent_count 추가 + started_at 기록 (0 표시 + 시간 불일치 방지)
+    // ★ D114 P8-1 + D120 P7: target_count/sent_count/success_count 추가 (알림류 run은 sync 대상 아님 → 즉시 기록)
     await query(
       `INSERT INTO auto_campaign_runs (
         auto_campaign_id, run_number, status, scheduled_at, started_at,
-        spam_test_result, ai_generation_status, target_count, sent_count
-      ) VALUES ($1, $2, 'spam_tested', $3, NOW(), $4, $5, 3, 3)`,
+        spam_test_result, ai_generation_status, target_count, sent_count, success_count
+      ) VALUES ($1, $2, 'spam_tested', $3, NOW(), $4, $5, 3, 3, 3)`,
       [
         ac.id, runNumberResult.rows[0].next_run, ac.next_run_at,
         JSON.stringify({ batchId: spamResult.batchId, isBlocked, result: resultLabel, variants: spamResult.variants }),

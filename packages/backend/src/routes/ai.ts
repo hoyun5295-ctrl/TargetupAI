@@ -96,6 +96,21 @@ router.post('/generate-message', async (req: Request, res: Response) => {
       kakaoSenderKey = kakaoResult.rows[0]?.profile_key;
     }
 
+    // ★ D120: 고객사 최근 실제 발송 성공 문안 자동 조회 — AI few-shot 학습용
+    // spam_filter_tests가 아닌 campaigns(실제 발송 성공)에서 가져와야 검증된 문안만 포함
+    const recentMsgResult = await query(`
+      SELECT DISTINCT message_content as content
+      FROM campaigns
+      WHERE company_id = $1 AND status = 'completed'
+        AND success_count > 0
+        AND message_content IS NOT NULL
+        AND LENGTH(message_content) > 30
+        AND sent_at > NOW() - INTERVAL '30 days'
+      ORDER BY content
+      LIMIT 10
+    `, [companyId]);
+    const recentMessages: string[] = recentMsgResult.rows.map((r: any) => r.content);
+
     const extraContext = {
       productName,
       discountRate,
@@ -111,6 +126,7 @@ router.post('/generate-message', async (req: Request, res: Response) => {
       personalizationVars: personalizationVars || personalFields,
       availableVarsCatalog: varCatalog,
       availableVars: availableVars,
+      recentMessages,
     };
 
     const result = await generateMessages(prompt, targetInfo, extraContext);

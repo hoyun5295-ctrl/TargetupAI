@@ -8,7 +8,7 @@
  * 컨트롤타워: formatDate.ts의 DIRECT_VAR_MAP, DIRECT_FIELD_LABELS, DIRECT_MAPPING_FIELDS, replaceDirectVars
  */
 
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import {
   calculateSmsBytes,
   formatPreviewValue,
@@ -159,6 +159,10 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
     getFullMessage, getMaxByteMessage, formatPhoneNumber, formatRejectNumber,
     onClose,
   } = props;
+
+  // ★ D120: 커서 위치 기반 변수 삽입용 ref
+  const directTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const directCursorPosRef = useRef<number>(0);
 
   // ============================================================
   // 내부 state (직접발송 전용 — Dashboard에서 이동)
@@ -447,8 +451,10 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                     <span className="absolute left-0 top-0 text-sm text-orange-600 font-medium pointer-events-none select-none">(광고) </span>
                   )}
                   <textarea
+                    ref={directTextareaRef}
                     value={directMessage}
-                    onChange={(e) => setDirectMessage(e.target.value)}
+                    onChange={(e) => { setDirectMessage(e.target.value); directCursorPosRef.current = e.target.selectionStart; }}
+                    onSelect={(e) => { directCursorPosRef.current = (e.target as HTMLTextAreaElement).selectionStart; }}
                     placeholder="전송하실 내용을 입력하세요."
                     style={adTextEnabled ? { textIndent: '42px' } : {}}
                     className={`w-full resize-none border-0 focus:outline-none text-sm leading-relaxed ${directMsgType === 'SMS' ? 'h-[180px]' : 'h-[140px]'}`}
@@ -551,7 +557,23 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                     {DIRECT_VAR_MAP.map(v => (
                       <button
                         key={v.fieldKey}
-                        onClick={() => setDirectMessage(prev => prev + v.variable)}
+                        onClick={() => {
+                          const pos = directCursorPosRef.current;
+                          setDirectMessage(prev => {
+                            const before = prev.slice(0, pos);
+                            const after = prev.slice(pos);
+                            return before + v.variable + after;
+                          });
+                          const newPos = pos + v.variable.length;
+                          directCursorPosRef.current = newPos;
+                          setTimeout(() => {
+                            if (directTextareaRef.current) {
+                              directTextareaRef.current.focus();
+                              directTextareaRef.current.selectionStart = newPos;
+                              directTextareaRef.current.selectionEnd = newPos;
+                            }
+                          }, 0);
+                        }}
                         className={`flex-1 py-2 text-sm bg-white border rounded-lg font-medium ${v.fieldKey === 'callback' ? 'hover:bg-blue-50 text-blue-700' : 'hover:bg-gray-100'}`}
                       >{v.label}</button>
                     ))}

@@ -2851,7 +2851,7 @@ const campaignData = {
             }
           }}
         />
-        {showResults && <ResultsModal onClose={() => setShowResults(false)} token={localStorage.getItem('token')} />}
+        {showResults && <ResultsModal onClose={() => setShowResults(false)} token={localStorage.getItem('token')} customerDbEnabled={planInfo?.customer_db_enabled} isSubscriptionLocked={isSubscriptionLocked} onFeatureLocked={(name, plan) => { /* 업그레이드 모달 등 */ }} onSubscriptionLocked={() => setShowSubscriptionLock(true)} />}
         {showCustomerDB && <CustomerDBModal onClose={() => setShowCustomerDB(false)} token={localStorage.getItem('token')} userType={user?.userType} />}
         {showCalendar && <CalendarModal onClose={() => setShowCalendar(false)} token={localStorage.getItem('token')} onEdit={(campaign) => {
           setShowCalendar(false);
@@ -3428,9 +3428,12 @@ const campaignData = {
       <CallbackConfirmModal
         data={callbackConfirm}
         onClose={async () => {
-          // ★ D95: 확인 모달 취소 시 pending draft 캠페인 정리 (중복 예약 방지)
+          // ★ D120: 확인 모달 취소 시 미확정 draft 캠페인 완전 삭제 (cancelled 잔류 방지)
           if (pendingAiCampaignId) {
-            try { await campaignsApi.cancel(pendingAiCampaignId); } catch { /* 이미 없으면 무시 */ }
+            try {
+              const token = localStorage.getItem('token');
+              await fetch(`/api/campaigns/${pendingAiCampaignId}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+            } catch { /* 이미 없으면 무시 */ }
           }
           setCallbackConfirm(defaultCallbackConfirm);
           setPendingAiCampaignId(null);

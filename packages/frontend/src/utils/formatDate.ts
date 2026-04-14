@@ -134,7 +134,21 @@ function formatFiniteNumberFront(num: number): string {
   return decPart ? `${intFormatted}.${decPart}` : intFormatted;
 }
 
-export function formatPreviewValue(val: any): string {
+// ★ D120: 필드명 키워드 기반 숫자/날짜 판정 — 금액 필드의 6/8자리 숫자를 날짜로 잘못 변환하는 버그 방지
+const NUMERIC_FIELD_KEYWORDS = ['금액', '구매', '매출', '포인트', '잔액', '가격', '횟수', '건수', '카운트', '수량', '비용', '평균', '합계', '총액', 'amount', 'price', 'count', 'point'];
+const DATE_FIELD_KEYWORDS = ['생일', '생년월일', '가입일', '구매일', '날짜', '등록일', '방문일', '기념일', '결혼', 'date', 'birth'];
+
+function isNumericFieldByLabel(label: string): boolean {
+  const lower = label.toLowerCase();
+  return NUMERIC_FIELD_KEYWORDS.some(k => lower.includes(k));
+}
+
+function isDateFieldByLabel(label: string): boolean {
+  const lower = label.toLowerCase();
+  return DATE_FIELD_KEYWORDS.some(k => lower.includes(k));
+}
+
+export function formatPreviewValue(val: any, opts?: { fieldLabel?: string }): string {
   if (val == null || val === '') return '';
   const str = String(val);
   // 날짜: ISO 형식(YYYY-MM-DDT...) — KST 변환 후 날짜 추출 (하루 밀림 방지)
@@ -148,6 +162,23 @@ export function formatPreviewValue(val: any): string {
   // 순수 날짜(YYYY-MM-DD)
   if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
     return formatDate(str);
+  }
+  // ★ D120: 필드명 키워드가 전달되면 숫자/날짜 판정 — 6/8자리 모호한 숫자 처리
+  // fieldLabel이 없으면 기존 동작 100% 유지 (하위호환)
+  if (opts?.fieldLabel) {
+    if (isNumericFieldByLabel(opts.fieldLabel)) {
+      // 금액/포인트/횟수 키워드 → 6/8자리 날짜 변환 스킵, 숫자 포맷팅만
+      const clean = str.replace(/,/g, '');
+      if (/^0\d+$/.test(clean)) return clean; // 0으로 시작 보호
+      const num = Number(clean);
+      if (!isNaN(num)) {
+        if (Number.isInteger(num)) return num.toLocaleString('ko-KR');
+        const [intPart, decPart] = num.toString().split('.');
+        return Number(intPart).toLocaleString('ko-KR') + (decPart ? '.' + decPart : '');
+      }
+      return str;
+    }
+    // 날짜 키워드 → 기존 6/8자리 날짜 변환 진행 (아래로 fall-through)
   }
   // ★ PPT#1: YYYYMMDD 8자리 날짜 패턴 → 날짜 형태로 표시 (커스텀필드 숫자처리 방지)
   if (/^\d{8}$/.test(str)) {
