@@ -129,10 +129,37 @@ export default function FlyerAdminDashboard() {
     } catch {} finally { setPosLoading(false); }
   }, [apiFetch]);
 
+  // ★ 감사로그
+  const [auditLogs, setAuditLogs] = useState<any[]>([]);
+  const [auditTotal, setAuditTotal] = useState(0);
+  const [auditPage, setAuditPage] = useState(1);
+  const [auditActionLabels, setAuditActionLabels] = useState<Record<string, string>>({});
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [auditFilter, setAuditFilter] = useState({ action: '', from_date: '', to_date: '' });
+
+  const loadAuditLogs = useCallback(async (page = 1) => {
+    setAuditLoading(true);
+    try {
+      const params = new URLSearchParams({ page: String(page), limit: '30' });
+      if (auditFilter.action) params.set('action', auditFilter.action);
+      if (auditFilter.from_date) params.set('from_date', auditFilter.from_date);
+      if (auditFilter.to_date) params.set('to_date', auditFilter.to_date);
+      const res = await apiFetch(`/api/admin/flyer/audit-logs?${params}`);
+      if (res.ok) {
+        const data = await res.json();
+        setAuditLogs(data.logs || []);
+        setAuditTotal(data.total || 0);
+        setAuditPage(page);
+        if (data.actionLabels) setAuditActionLabels(data.actionLabels);
+      }
+    } catch {} finally { setAuditLoading(false); }
+  }, [apiFetch, auditFilter]);
+
   useEffect(() => { loadStats(); loadBusinessTypes(); }, [loadStats, loadBusinessTypes]);
   useEffect(() => { if (activeTab === 'distributors') loadDistributors(); }, [activeTab, loadDistributors]);
   useEffect(() => { if (activeTab === 'stores') loadStores(); }, [activeTab, loadStores]);
   useEffect(() => { if (activeTab === 'posAgents') loadPosAgents(); }, [activeTab, loadPosAgents]);
+  useEffect(() => { if (activeTab === 'auditLogs') loadAuditLogs(1); }, [activeTab, loadAuditLogs]);
 
   const handleCreateDist = async () => {
     if (!newDist.company_name || !newDist.admin_login_id || !newDist.admin_password) {
@@ -282,9 +309,10 @@ export default function FlyerAdminDashboard() {
     },
     {
       label: '시스템', color: 'gray',
-      tabs: ['posAgents'],
+      tabs: ['posAgents', 'auditLogs'],
       items: [
         { key: 'posAgents', label: 'POS Agent' },
+        { key: 'auditLogs', label: '감사로그' },
       ],
     },
   ];
@@ -557,6 +585,105 @@ export default function FlyerAdminDashboard() {
                       </tbody>
                     </table>
                   </div>
+                )}
+              </div>
+            )}
+
+            {/* ★ 감사로그 */}
+            {activeTab === 'auditLogs' && (
+              <div>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-bold text-gray-800">감사로그</h3>
+                  <button onClick={() => loadAuditLogs(1)} className="text-sm text-orange-600 hover:text-orange-700 font-medium">새로고침</button>
+                </div>
+                {/* 필터 */}
+                <div className="flex flex-wrap gap-3 mb-4">
+                  <select
+                    value={auditFilter.action}
+                    onChange={e => setAuditFilter(prev => ({ ...prev, action: e.target.value }))}
+                    className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white"
+                  >
+                    <option value="">전체 액션</option>
+                    {Object.entries(auditActionLabels).map(([key, label]) => (
+                      <option key={key} value={key}>{label}</option>
+                    ))}
+                  </select>
+                  <input
+                    type="date" value={auditFilter.from_date}
+                    onChange={e => setAuditFilter(prev => ({ ...prev, from_date: e.target.value }))}
+                    className="border border-gray-200 rounded-lg px-3 py-2 text-sm"
+                  />
+                  <span className="text-gray-400 self-center">~</span>
+                  <input
+                    type="date" value={auditFilter.to_date}
+                    onChange={e => setAuditFilter(prev => ({ ...prev, to_date: e.target.value }))}
+                    className="border border-gray-200 rounded-lg px-3 py-2 text-sm"
+                  />
+                  <button
+                    onClick={() => loadAuditLogs(1)}
+                    className="bg-orange-500 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-orange-600"
+                  >조회</button>
+                </div>
+                {/* 결과 */}
+                {auditLoading ? <div className="text-center py-8 text-gray-400">로딩 중...</div> :
+                auditLogs.length === 0 ? <div className="text-center py-12 text-gray-400"><p className="text-lg mb-1">감사로그가 없습니다</p><p className="text-sm">사용자 접속/활동 이력이 여기에 표시됩니다.</p></div> : (
+                  <>
+                    <div className="text-sm text-gray-500 mb-2">총 {auditTotal.toLocaleString()}건</div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead className="bg-gray-50 text-gray-600">
+                          <tr>
+                            <th className="px-4 py-3 text-left font-medium">시각</th>
+                            <th className="px-4 py-3 text-left font-medium">사용자</th>
+                            <th className="px-4 py-3 text-left font-medium">매장</th>
+                            <th className="px-4 py-3 text-center font-medium">액션</th>
+                            <th className="px-4 py-3 text-left font-medium">상세</th>
+                            <th className="px-4 py-3 text-left font-medium">IP</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                          {auditLogs.map((log: any) => {
+                            const actionLabel = auditActionLabels[log.action] || log.action;
+                            const actionColor = log.action === 'login' ? 'bg-blue-100 text-blue-700'
+                              : log.action.includes('delete') ? 'bg-red-100 text-red-700'
+                              : log.action.includes('send') ? 'bg-green-100 text-green-700'
+                              : 'bg-gray-100 text-gray-600';
+                            return (
+                              <tr key={log.id} className="hover:bg-gray-50">
+                                <td className="px-4 py-3 text-gray-500 text-xs whitespace-nowrap">{new Date(log.createdAt || log.created_at).toLocaleString('ko')}</td>
+                                <td className="px-4 py-3">
+                                  <div className="font-semibold text-gray-800">{log.userName || log.user_name || '-'}</div>
+                                  <div className="text-xs text-gray-400">{log.loginId || log.login_id || ''}</div>
+                                </td>
+                                <td className="px-4 py-3 text-gray-600 text-xs">{log.storeName || log.store_name || log.companyName || log.company_name || '-'}</td>
+                                <td className="px-4 py-3 text-center">
+                                  <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-semibold ${actionColor}`}>{actionLabel}</span>
+                                </td>
+                                <td className="px-4 py-3 text-gray-500 text-xs max-w-[200px] truncate">
+                                  {log.details ? (typeof log.details === 'string' ? log.details : JSON.stringify(log.details).slice(0, 80)) : '-'}
+                                </td>
+                                <td className="px-4 py-3 text-gray-400 text-xs">{log.ipAddress || log.ip_address || '-'}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                    {/* 페이지네이션 */}
+                    {auditTotal > 30 && (
+                      <div className="flex justify-center gap-2 mt-4">
+                        <button
+                          onClick={() => loadAuditLogs(auditPage - 1)} disabled={auditPage <= 1}
+                          className="px-3 py-1.5 rounded-lg text-sm border border-gray-200 disabled:opacity-30 hover:bg-gray-50"
+                        >이전</button>
+                        <span className="px-3 py-1.5 text-sm text-gray-500">{auditPage} / {Math.ceil(auditTotal / 30)}</span>
+                        <button
+                          onClick={() => loadAuditLogs(auditPage + 1)} disabled={auditPage >= Math.ceil(auditTotal / 30)}
+                          className="px-3 py-1.5 rounded-lg text-sm border border-gray-200 disabled:opacity-30 hover:bg-gray-50"
+                        >다음</button>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             )}
