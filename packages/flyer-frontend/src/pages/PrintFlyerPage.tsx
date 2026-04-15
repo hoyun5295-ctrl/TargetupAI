@@ -379,7 +379,6 @@ export default function PrintFlyerPage({ token: _token }: { token: string }) {
             </button>
           ))}
         </div>
-        </div>
       </SectionCard>
 
       {/* 매장 헤더 미리보기 */}
