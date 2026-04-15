@@ -13,7 +13,7 @@
  *   - GET /api/flyer/catalog/search-image?q=상품명 (네이버 이미지 검색)
  */
 
-import { useState, useCallback, useRef } from 'react';
+import { useState, useRef } from 'react';
 import { API_BASE, apiFetch } from '../App';
 import { SectionCard, Button, Input, Select } from '../components/ui';
 import AlertModal from '../components/AlertModal';
@@ -107,7 +107,7 @@ export default function PrintFlyerPage({ token: _token }: { token: string }) {
   // 상태
   const [generating, setGenerating] = useState(false);
   const [pdfUrl, setPdfUrl] = useState('');
-  const [alert, setAlert] = useState<{ isOpen: boolean; title: string; message: string; type: 'success' | 'error' | 'info' }>({ isOpen: false, title: '', message: '', type: 'info' });
+  const [alert, setAlert] = useState<{ show: boolean; title: string; message: string; type: 'success' | 'error' | 'info' }>({ show: false, title: '', message: '', type: 'info' });
 
   // ============================================================
   // 카테고리 관리
@@ -172,8 +172,8 @@ export default function PrintFlyerPage({ token: _token }: { token: string }) {
   };
 
   const confirmAddProduct = () => {
-    if (!addForm.name.trim()) { setAlert({ isOpen: true, title: '입력 오류', message: '상품명을 입력해주세요', type: 'error' }); return; }
-    if (!addForm.price) { setAlert({ isOpen: true, title: '입력 오류', message: '판매가를 입력해주세요', type: 'error' }); return; }
+    if (!addForm.name.trim()) { setAlert({ show: true, title: '입력 오류', message: '상품명을 입력해주세요', type: 'error' }); return; }
+    if (!addForm.price) { setAlert({ show: true, title: '입력 오류', message: '판매가를 입력해주세요', type: 'error' }); return; }
 
     const newItem: ProductItem = {
       id: genId(),
@@ -249,7 +249,7 @@ export default function PrintFlyerPage({ token: _token }: { token: string }) {
         return updated;
       });
 
-      setAlert({ isOpen: true, title: 'CSV 업로드 완료', message: `${rows.length}개 상품이 추가되었습니다`, type: 'success' });
+      setAlert({ show: true, title: 'CSV 업로드 완료', message: `${rows.length}개 상품이 추가되었습니다`, type: 'success' });
     };
     reader.readAsText(file, 'UTF-8');
     if (fileRef.current) fileRef.current.value = '';
@@ -260,8 +260,8 @@ export default function PrintFlyerPage({ token: _token }: { token: string }) {
   // ============================================================
   const generatePdf = async () => {
     const totalProducts = categories.reduce((s, c) => s + c.items.length, 0);
-    if (!title.trim()) { setAlert({ isOpen: true, title: '입력 오류', message: '전단 제목을 입력해주세요', type: 'error' }); return; }
-    if (totalProducts === 0) { setAlert({ isOpen: true, title: '입력 오류', message: '상품을 1개 이상 추가해주세요', type: 'error' }); return; }
+    if (!title.trim()) { setAlert({ show: true, title: '입력 오류', message: '전단 제목을 입력해주세요', type: 'error' }); return; }
+    if (totalProducts === 0) { setAlert({ show: true, title: '입력 오류', message: '상품을 1개 이상 추가해주세요', type: 'error' }); return; }
 
     setGenerating(true);
     try {
@@ -294,13 +294,13 @@ export default function PrintFlyerPage({ token: _token }: { token: string }) {
       if (res.ok) {
         const data = await res.json();
         setPdfUrl(`${API_BASE}${data.pdfUrl}`);
-        setAlert({ isOpen: true, title: '생성 완료', message: '인쇄 전단이 생성되었습니다. PDF를 다운로드하세요.', type: 'success' });
+        setAlert({ show: true, title: '생성 완료', message: '인쇄 전단이 생성되었습니다. PDF를 다운로드하세요.', type: 'success' });
       } else {
         const err = await res.json().catch(() => ({ error: '생성 실패' }));
-        setAlert({ isOpen: true, title: '생성 실패', message: err.error || '인쇄 전단 생성에 실패했습니다.', type: 'error' });
+        setAlert({ show: true, title: '생성 실패', message: err.error || '인쇄 전단 생성에 실패했습니다.', type: 'error' });
       }
     } catch (err: any) {
-      setAlert({ isOpen: true, title: '생성 실패', message: err.message || '서버 오류', type: 'error' });
+      setAlert({ show: true, title: '생성 실패', message: err.message || '서버 오류', type: 'error' });
     }
     setGenerating(false);
   };
@@ -386,8 +386,8 @@ export default function PrintFlyerPage({ token: _token }: { token: string }) {
         <div className="grid grid-cols-3 gap-4 p-4 bg-bg rounded-xl border border-border">
           <div className="text-center p-4 border border-dashed border-border rounded-lg">
             <div className="text-xs text-text-secondary mb-2">마트 로고 및 주소</div>
-            <Input size="sm" placeholder="매장명" value={store.storeName} onChange={e => setStore(s => ({ ...s, storeName: e.target.value }))} className="mb-2" />
-            <Input size="sm" placeholder="주소" value={store.address} onChange={e => setStore(s => ({ ...s, address: e.target.value }))} />
+            <Input placeholder="매장명" value={store.storeName} onChange={e => setStore(s => ({ ...s, storeName: e.target.value }))} className="mb-2" />
+            <Input placeholder="주소" value={store.address} onChange={e => setStore(s => ({ ...s, address: e.target.value }))} />
           </div>
           <div className="text-center p-4 border border-dashed border-border rounded-lg">
             <div className="text-xs text-text-secondary mb-2">매장 약도</div>
@@ -395,8 +395,8 @@ export default function PrintFlyerPage({ token: _token }: { token: string }) {
           </div>
           <div className="text-center p-4 border border-dashed border-border rounded-lg">
             <div className="text-xs text-text-secondary mb-2">전화번호 및 QR</div>
-            <Input size="sm" placeholder="전화번호" value={store.phone} onChange={e => setStore(s => ({ ...s, phone: e.target.value }))} className="mb-2" />
-            <Input size="sm" placeholder="영업시간" value={store.hours} onChange={e => setStore(s => ({ ...s, hours: e.target.value }))} />
+            <Input placeholder="전화번호" value={store.phone} onChange={e => setStore(s => ({ ...s, phone: e.target.value }))} className="mb-2" />
+            <Input placeholder="영업시간" value={store.hours} onChange={e => setStore(s => ({ ...s, hours: e.target.value }))} />
           </div>
         </div>
       </SectionCard>
@@ -584,11 +584,8 @@ export default function PrintFlyerPage({ token: _token }: { token: string }) {
 
       {/* 알림 모달 */}
       <AlertModal
-        isOpen={alert.isOpen}
-        onClose={() => setAlert(a => ({ ...a, isOpen: false }))}
-        title={alert.title}
-        message={alert.message}
-        type={alert.type}
+        alert={alert}
+        onClose={() => setAlert(a => ({ ...a, show: false }))}
       />
     </div>
   );
