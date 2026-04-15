@@ -323,10 +323,17 @@ export default function PrintFlyerPage({ token: _token }: { token: string }) {
         </div>
         <div className="flex items-center gap-3">
           {pdfUrl && (
-            <a href={pdfUrl} target="_blank" rel="noreferrer"
+            <button onClick={async () => {
+              const res = await apiFetch(pdfUrl);
+              if (res.ok) {
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a'); a.href = url; a.download = 'print-flyer.pdf'; a.click(); URL.revokeObjectURL(url);
+              }
+            }}
               className="px-4 py-2 bg-primary-600 text-white text-sm font-semibold rounded-xl hover:bg-primary-700 transition">
               PDF 다운로드
-            </a>
+            </button>
           )}
           <Button size="sm" variant="secondary" onClick={() => fileRef.current?.click()}>
             CSV 일괄 업로드
