@@ -18,6 +18,7 @@ import { flyerAuthenticate } from '../../middlewares/flyer-auth';
 import { generateProductImage, generateFlyerImages, getGeneratedImageUrl } from '../../utils/product-images';
 import { LIMITS } from '../../config/defaults';
 import { generatePdfFromHtml } from '../../utils/flyer/product/flyer-pdf';
+import { renderPrintFlyer, getAvailableThemes, getThemeByName, PrintProduct } from '../../utils/flyer/product/flyer-print-renderer';
 import { renderFlyerPage } from './short-urls';
 import { renderPricePop, renderMultiPop, renderPromoPop } from '../../utils/flyer/product/flyer-pop-templates';
 import { classifyProducts } from '../../utils/flyer/product/flyer-category-classifier';
@@ -931,6 +932,102 @@ router.post('/:id/copy', async (req: Request, res: Response) => {
     console.error('[전단AI] 전단지 복사 실패:', err.message);
     res.status(500).json({ error: '전단지 복사에 실패했습니다.' });
   }
+});
+
+// ══════════════════════════════════════════
+// ★ Phase 2: POST /print-flyer — 인쇄용 전단 생성 (CSV → HTML → PDF)
+// ══════════════════════════════════════════
+router.post('/print-flyer', async (req: Request, res: Response) => {
+  try {
+    const companyId = requireCompanyId(req, res);
+    if (!companyId) return;
+    const userId = (req as any).flyerUser?.userId;
+
+    const { title, period, products, paperSize, theme, storeName } = req.body;
+
+    if (!title || !products || !Array.isArray(products) || products.length === 0) {
+      return res.status(400).json({ error: '제목과 상품 목록이 필요합니다' });
+    }
+
+    // 매장 정보 조회
+    const storeResult = await query(
+      `SELECT fu.store_name, fu.store_address, fu.store_phone, fu.store_hours
+       FROM flyer_users fu WHERE fu.id = $1`,
+      [userId]
+    );
+    const storeInfo = storeResult.rows[0] || {};
+
+    // 인쇄용 전단 HTML 렌더링
+    const html = renderPrintFlyer({
+      store: {
+        storeName: storeName || storeInfo.store_name || '',
+        address: storeInfo.store_address || '',
+        phone: storeInfo.store_phone || '',
+        hours: storeInfo.store_hours || '',
+      },
+      title,
+      period: period || '',
+      products: (products as PrintProduct[]).map(p => ({
+        ...p,
+        promoType: p.promoType || 'general',
+      })),
+      theme: theme ? getThemeByName(theme) : undefined,
+      paperSize: paperSize || 'A4',
+    });
+
+    // HTML → PDF (300dpi)
+    const pdfBuffer = await generatePdfFromHtml(html, {
+      format: paperSize || 'A4',
+      margin: { top: '3mm', bottom: '3mm', left: '3mm', right: '3mm' },
+    });
+
+    // flyers에 레코드 생성 (인쇄용)
+    const flyerResult = await query(
+      `INSERT INTO flyers (company_id, created_by, title, store_name, template, categories, status)
+       VALUES ($1, $2, $3, $4, 'print', $5, 'print_draft')
+       RETURNING id`,
+      [companyId, userId, title, storeName || storeInfo.store_name || '', JSON.stringify(products)]
+    );
+    const flyerId = flyerResult.rows[0].id;
+
+    // PDF 파일 저장
+    const fs = require('fs');
+    const path = require('path');
+    const pdfDir = path.join(process.cwd(), 'uploads', 'print-flyers');
+    if (!fs.existsSync(pdfDir)) fs.mkdirSync(pdfDir, { recursive: true });
+    const pdfPath = path.join(pdfDir, `${flyerId}.pdf`);
+    fs.writeFileSync(pdfPath, pdfBuffer);
+
+    return res.json({
+      flyerId,
+      pdfUrl: `/api/flyer/flyers/print-flyer/${flyerId}/pdf`,
+    });
+  } catch (err: any) {
+    console.error('[전단AI] 인쇄 전단 생성 실패:', err.message);
+    res.status(500).json({ error: '인쇄 전단 생성에 실패했습니다.' });
+  }
+});
+
+// GET /print-flyer/:id/pdf — 인쇄용 PDF 다운로드
+router.get('/print-flyer/:id/pdf', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const fs = require('fs');
+    const path = require('path');
+    const pdfPath = path.join(process.cwd(), 'uploads', 'print-flyers', `${id}.pdf`);
+    if (!fs.existsSync(pdfPath)) return res.status(404).json({ error: 'PDF를 찾을 수 없습니다' });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="print-flyer-${id}.pdf"`);
+    res.sendFile(pdfPath);
+  } catch (err: any) {
+    console.error('[전단AI] PDF 다운로드 실패:', err.message);
+    res.status(500).json({ error: 'PDF 다운로드에 실패했습니다.' });
+  }
+});
+
+// GET /print-flyer/themes — 사용 가능한 인쇄 테마 목록
+router.get('/print-flyer/themes', (_req: Request, res: Response) => {
+  res.json(getAvailableThemes());
 });
 
 export default router;

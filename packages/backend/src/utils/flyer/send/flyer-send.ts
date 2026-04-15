@@ -25,6 +25,7 @@ import { resolveFlyerCallback } from './flyer-callback-filter';
 import { deduplicateWithStats, FlyerRecipient } from './flyer-deduplicate';
 import { filterOutFlyerUnsubscribed } from './flyer-unsubscribe-helper';
 import { prepareFlyerSendMessage, FlyerCustomerVars } from './flyer-message';
+import { generateTrackingUrls } from './flyer-short-code';
 
 export type FlyerMessageType = 'SMS' | 'LMS' | 'MMS';
 
@@ -139,19 +140,12 @@ export async function sendFlyerCampaign(params: FlyerSendParams): Promise<FlyerS
   // 6. 변수 치환 + (광고) 부착 → 메시지 최종본 생성
   // bulkInsertSmsQueue rows 형식: [dest_no, call_back, msg_contents, msg_type, title_str, sendTime, app_etc1(campaignId), app_etc2(companyId), file_name1, file_name2, file_name3]
   const mmsImages = mmsImagePaths || [];
-  const rowsForQueue: any[][] = working.map(r => [
-    r.phone,                                                                  // dest_no
-    cb.callback!,                                                             // call_back
-    prepareFlyerSendMessage(messageTemplate, r as FlyerCustomerVars, isAd, opt080), // msg_contents
-    toQtmsgType(messageType),                                                 // msg_type
-    subject || '',                                                            // title_str
-    '',                                                                       // sendTime (useNow=true이면 무시)
-    '',                                                                       // app_etc1 (campaignId — 아래에서 설정)
-    companyId,                                                                // app_etc2
-    mmsImages[0] || '',                                                       // file_name1
-    mmsImages[1] || '',                                                       // file_name2
-    mmsImages[2] || '',                                                       // file_name3
-  ]);
+
+  // ★ Phase 1: 수신자별 메시지 생성 (추적 URL 치환은 campaignId 확보 후 진행)
+  // 먼저 공통 메시지 생성 → 추적 URL 삽입은 9.5단계에서 처리
+  const baseMessages = working.map(r =>
+    prepareFlyerSendMessage(messageTemplate, r as FlyerCustomerVars, isAd, opt080)
+  );
 
   // 7. flyer_campaigns 레코드 생성
   const campaignResult = await query(
@@ -205,7 +199,48 @@ export async function sendFlyerCampaign(params: FlyerSendParams): Promise<FlyerS
     };
   }
 
-  // 10. MySQL 큐 bulk INSERT
+  // 9.5 ★ Phase 1: 수신자별 추적 URL 생성 + 메시지에 삽입
+  //   flyerId가 있으면 개인별 추적 URL 생성, 없으면 공통 메시지 그대로 사용
+  let finalMessages = baseMessages;
+  if (flyerId) {
+    try {
+      const phones = working.map(r => r.phone);
+      const urlMap = await generateTrackingUrls(flyerId, companyId, campaignId, phones);
+
+      // 메시지 내 {url} 플레이스홀더를 개인별 URL로 치환
+      // {url} 없으면 메시지 끝에 URL 추가
+      finalMessages = baseMessages.map((msg, idx) => {
+        const phone = working[idx].phone;
+        const personalUrl = urlMap.get(phone);
+        if (!personalUrl) return msg;
+
+        if (msg.includes('{url}')) {
+          return msg.replace('{url}', personalUrl);
+        }
+        // {url} 플레이스홀더가 없으면 그대로 유지 (URL 미삽입)
+        return msg;
+      });
+    } catch (err: any) {
+      // ★ 추적 URL 생성 실패해도 발송 자체는 진행 (기간계 안정성)
+      console.error('[CT-F18] 추적 URL 생성 실패 (발송은 계속):', err.message);
+    }
+  }
+
+  // 10. MySQL 큐 bulk INSERT (수신자별 메시지로 생성)
+  const rowsForQueue: any[][] = working.map((r, idx) => [
+    r.phone,                     // dest_no
+    cb.callback!,                // call_back
+    finalMessages[idx],          // msg_contents (개인별 URL 포함 가능)
+    toQtmsgType(messageType),    // msg_type
+    subject || '',               // title_str
+    '',                          // sendTime
+    campaignId,                  // app_etc1
+    companyId,                   // app_etc2
+    mmsImages[0] || '',          // file_name1
+    mmsImages[1] || '',          // file_name2
+    mmsImages[2] || '',          // file_name3
+  ]);
+
   const tables = await getFlyerCompanySmsTables(companyId);
   await bulkInsertSmsQueue(tables, rowsForQueue, true); // useNow=true 즉시발송
 

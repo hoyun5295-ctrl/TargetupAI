@@ -7,6 +7,7 @@
 import { Request, Response, Router } from 'express';
 import { flyerAuthenticate } from '../../middlewares/flyer-auth';
 import { getFlyerDashboardStats, getFlyerCampaignResults } from '../../utils/flyer';
+import { getTrackingStats } from '../../utils/flyer/send/flyer-short-code';
 
 const router = Router();
 router.use(flyerAuthenticate);
@@ -64,6 +65,33 @@ router.get('/results/:id/recipients', async (req: Request, res: Response) => {
     });
   } catch (error: any) {
     console.error('[flyer/stats] recipients error:', error);
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
+
+/**
+ * ★ Phase 1: GET /tracking/:flyerId — 수신자별 클릭 추적 통계
+ * 응답: { totalSent, totalClicked, clickRate, clickedList, notClickedList }
+ */
+router.get('/tracking/:flyerId', async (req: Request, res: Response) => {
+  try {
+    const { companyId } = req.flyerUser!;
+    const { flyerId } = req.params;
+    const campaignId = req.query.campaignId as string | undefined;
+
+    // 해당 회사의 전단지인지 확인
+    const flyerCheck = await (await import('../../config/database')).query(
+      `SELECT id FROM flyers WHERE id = $1 AND company_id = $2`,
+      [flyerId, companyId]
+    );
+    if (flyerCheck.rows.length === 0) {
+      return res.status(404).json({ error: '전단지를 찾을 수 없습니다' });
+    }
+
+    const stats = await getTrackingStats(flyerId, campaignId);
+    return res.json(stats);
+  } catch (error: any) {
+    console.error('[flyer/stats] tracking error:', error);
     return res.status(500).json({ error: 'Server error' });
   }
 });

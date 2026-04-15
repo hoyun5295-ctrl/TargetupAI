@@ -13,6 +13,7 @@ import {
   ingestSales,
   ingestInventory,
   ingestMembers,
+  ingestPromotions,
   updateAgentHeartbeat,
   analyzeSchema,
   saveSchemaMapping,
@@ -169,6 +170,7 @@ router.post('/push', agentAuth, async (req: Request, res: Response) => {
       case 'sales': result = await ingestSales(companyId, agentId, items); break;
       case 'inventory': result = await ingestInventory(companyId, agentId, items); break;
       case 'members': result = await ingestMembers(companyId, agentId, items); break;
+      case 'promotions': result = await ingestPromotions(companyId, agentId, items); break;
       default: return res.status(400).json({ error: `Unknown type: ${type}` });
     }
     return res.json(result);

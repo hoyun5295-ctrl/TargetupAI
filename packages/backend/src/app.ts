@@ -63,6 +63,9 @@ import flyerSenderRegistrationRoutes from './routes/flyer/sender-registration';
 import flyerPosRoutes from './routes/flyer/pos';
 import flyerBusinessTypesRoutes from './routes/flyer/business-types';
 import flyerCouponsRoutes, { publicRouter as flyerCouponPublicRoutes } from './routes/flyer/coupons';
+import flyerCartPublicRoutes from './routes/flyer/carts';
+import flyerOrdersRoutes from './routes/flyer/orders';
+import { startAutoFlyerWorker } from './utils/flyer/pos/flyer-pos-auto';
 
 // DB 연결
 import './config/database';
@@ -78,6 +81,8 @@ app.use('/api/flyer/p', flyerPublicRoutes);
 // ★ 모바일 DM 공개 뷰어 — helmet 전에 마운트 (인라인 스크립트 필요)
 app.use('/api/dm/v', dmPublicRouter);
 app.use('/api/flyer/q', flyerCouponPublicRoutes);
+// ★ Phase 3: 장바구니 공개 API (인증 불필요 — phone 기반)
+app.use('/api/flyer/cart', flyerCartPublicRoutes);
 
 // 미들웨어
 app.use(helmet());
@@ -157,6 +162,8 @@ app.use('/api/flyer/pos', flyerPosRoutes);
 app.use('/api/flyer/business-types', flyerBusinessTypesRoutes);
 
 app.use('/api/flyer/coupons', flyerCouponsRoutes);
+// ★ Phase 3: 주문 관리 (인증 필요)
+app.use('/api/flyer/orders', flyerOrdersRoutes);
 
 // ★ 카탈로그 이미지 공개 서빙 (인증 불필요 — static)
 app.use('/api/flyer/catalog-images', express.static(path.join(process.cwd(), 'uploads', 'catalog-images')));
@@ -207,6 +214,9 @@ app.listen(PORT, () => {
 
   // ★ D78: 스팸테스트 큐 워커 시작 (3초 간격)
   startSpamTestQueueWorker();
+
+  // ★ Phase 4: POS 자동 전단 생성 워커 시작 (5분 간격)
+  startAutoFlyerWorker();
 });
 
 export default app;

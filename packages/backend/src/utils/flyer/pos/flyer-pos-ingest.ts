@@ -415,6 +415,66 @@ export async function getPosAgentStatusList(): Promise<Array<{
   }));
 }
 
+// ============================================================
+// ★ Phase 4: 할인/행사 정보 수신 (POS Agent → flyer_pos_promotions)
+// ============================================================
+
+export interface PosPromotionItem {
+  product_code: string;
+  product_name: string;
+  original_price?: number;
+  promo_price: number;
+  promo_type?: string; // 'discount' | 'bogo' | 'bundle' etc.
+  starts_at?: string; // ISO datetime
+  ends_at?: string;
+}
+
+export async function ingestPromotions(
+  companyId: string,
+  posAgentId: string,
+  items: PosPromotionItem[],
+): Promise<{ accepted: number; rejected: number; errors: any[] }> {
+  let accepted = 0;
+  let rejected = 0;
+  const errors: any[] = [];
+
+  for (let i = 0; i < items.length; i++) {
+    const p = items[i];
+    try {
+      if (!p.product_name || !p.promo_price) {
+        rejected++;
+        errors.push({ index: i, reason: '상품명/할인가 누락' });
+        continue;
+      }
+
+      await query(
+        `INSERT INTO flyer_pos_promotions
+           (company_id, pos_agent_id, product_code, product_name,
+            original_price, promo_price, promo_type, starts_at, ends_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         ON CONFLICT (company_id, product_code, starts_at) DO UPDATE SET
+           promo_price = EXCLUDED.promo_price,
+           ends_at = EXCLUDED.ends_at,
+           is_processed = false`,
+        [
+          companyId, posAgentId,
+          p.product_code || null, p.product_name,
+          p.original_price || null, p.promo_price,
+          p.promo_type || 'discount',
+          p.starts_at || new Date().toISOString(),
+          p.ends_at || null,
+        ]
+      );
+      accepted++;
+    } catch (err: any) {
+      rejected++;
+      errors.push({ index: i, reason: err.message });
+    }
+  }
+
+  return { accepted, rejected, errors: errors.slice(0, 20) };
+}
+
 /**
  * 성별 코드 정규화
  */

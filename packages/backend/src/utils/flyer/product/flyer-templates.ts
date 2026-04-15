@@ -32,6 +32,12 @@ export interface FlyerRenderData {
   announcements?: Array<{ title: string; content: string }>;
   /** GIF 배너 URL */
   bannerGifUrl?: string;
+  /** Phase 1+3: 수신자 전화번호 (tracking URL에서 식별) */
+  trackingPhone?: string;
+  /** Phase 3: 전단지 ID (장바구니 API용) */
+  flyerId?: string;
+  /** Phase 3: 회사 ID */
+  companyId?: string;
 }
 
 export interface FlyerRenderItem {
@@ -66,6 +72,19 @@ function toAbsUrl(url: string | null): string | null {
 
 function calcDisc(orig: number, sale: number): number {
   return orig > 0 ? Math.round((1 - sale / orig) * 100) : 0;
+}
+
+/** Phase 3: 상품 카드에 data-product 속성 생성 (장바구니 JS에서 읽음) */
+function productDataAttr(item: FlyerRenderItem, catName?: string): string {
+  const data = {
+    name: item.name,
+    originalPrice: item.originalPrice,
+    salePrice: item.salePrice,
+    imageUrl: toAbsUrl(item.imageUrl || '') || '',
+    unit: item.unit || '',
+    category: catName || '',
+  };
+  return ` data-product="${esc(JSON.stringify(data))}"`;
 }
 
 function resolveImg(name: string, size: number, imageUrl?: string | null): string {
@@ -1399,7 +1418,225 @@ export function renderTemplate(templateCode: string, data: FlyerRenderData): str
     html = html.replace('</body>', renderQrSection(data) + '</body>');
   }
 
+  // ★ Phase 3: 장바구니 JS 주입 (trackingPhone이 있을 때만 활성화)
+  if (data.trackingPhone && data.flyerId) {
+    html = html.replace('</body>', renderCartScript(data) + '</body>');
+  }
+
   return html;
+}
+
+// ============================================================
+// ★ Phase 3: 장바구니 인라인 JS + CSS (뷰어에 주입)
+// ============================================================
+
+function renderCartScript(d: FlyerRenderData): string {
+  const apiBase = process.env.FLYER_API_BASE_URL || '';
+  const phone = d.trackingPhone || '';
+  const flyerId = d.flyerId || '';
+
+  return `
+<style>
+.cart-fab{position:fixed;bottom:0;left:0;right:0;z-index:9999;padding:12px 16px;display:none;
+  background:linear-gradient(135deg,#1a1a2e 0%,#16213e 100%);box-shadow:0 -4px 20px rgba(0,0,0,0.3);
+  border-radius:20px 20px 0 0;animation:cartSlideUp .3s ease}
+@keyframes cartSlideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
+.cart-fab-inner{display:flex;align-items:center;justify-content:space-between;max-width:480px;margin:0 auto}
+.cart-info{display:flex;align-items:center;gap:10px;color:#fff}
+.cart-badge{background:#ff6b6b;color:#fff;border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700}
+.cart-text{font-size:14px;line-height:1.3}
+.cart-text b{font-size:16px;color:#ffd93d}
+.cart-btn{background:linear-gradient(135deg,#ff6b6b,#ee5a24);color:#fff;border:none;padding:10px 24px;border-radius:12px;font-size:14px;font-weight:700;cursor:pointer;white-space:nowrap}
+.cart-btn:active{transform:scale(0.95)}
+.cart-sheet{position:fixed;inset:0;z-index:10000;display:none}
+.cart-overlay{position:absolute;inset:0;background:rgba(0,0,0,0.5)}
+.cart-panel{position:absolute;bottom:0;left:0;right:0;max-height:85vh;background:#fff;border-radius:20px 20px 0 0;
+  overflow-y:auto;animation:cartSlideUp .3s ease;padding:0 0 env(safe-area-inset-bottom)}
+.cart-handle{width:40px;height:4px;background:#ddd;border-radius:2px;margin:12px auto}
+.cart-header{padding:0 20px 12px;border-bottom:1px solid #f0f0f0;display:flex;justify-content:space-between;align-items:center}
+.cart-header h3{font-size:18px;margin:0}
+.cart-clear{font-size:13px;color:#999;background:none;border:none;cursor:pointer}
+.cart-items{padding:12px 20px}
+.cart-item{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid #f5f5f5}
+.cart-item-img{width:56px;height:56px;border-radius:10px;object-fit:cover;background:#f5f5f5}
+.cart-item-info{flex:1;min-width:0}
+.cart-item-name{font-size:14px;font-weight:600;color:#333;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cart-item-price{font-size:15px;font-weight:700;color:#ee5a24;margin-top:2px}
+.cart-qty{display:flex;align-items:center;gap:8px}
+.cart-qty button{width:28px;height:28px;border-radius:50%;border:1px solid #ddd;background:#fff;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.cart-qty span{font-size:14px;min-width:20px;text-align:center}
+.cart-footer{padding:16px 20px;border-top:2px solid #f0f0f0;background:#fafafa}
+.cart-total{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+.cart-total-label{font-size:14px;color:#666}
+.cart-total-price{font-size:22px;font-weight:800;color:#1a1a2e}
+.cart-order-btn{width:100%;padding:14px;border:none;border-radius:14px;font-size:16px;font-weight:700;color:#fff;
+  background:linear-gradient(135deg,#ff6b6b,#ee5a24);cursor:pointer}
+.cart-order-btn:active{transform:scale(0.98)}
+.cart-order-form{padding:16px 20px}
+.cart-form-group{margin-bottom:14px}
+.cart-form-group label{display:block;font-size:13px;color:#666;margin-bottom:6px}
+.cart-form-group input,.cart-form-group textarea,.cart-form-group select{width:100%;padding:10px 14px;border:1px solid #ddd;border-radius:10px;font-size:14px;font-family:inherit}
+.cart-form-group textarea{height:60px;resize:none}
+.cart-radio-group{display:flex;gap:10px}
+.cart-radio-group label{flex:1;padding:10px;border:2px solid #eee;border-radius:10px;text-align:center;font-size:13px;cursor:pointer}
+.cart-radio-group input:checked+label,.cart-radio-group label.sel{border-color:#ee5a24;background:#fff5f2;color:#ee5a24}
+.cart-radio-group input{display:none}
+.cart-success{text-align:center;padding:40px 20px}
+.cart-success h3{font-size:20px;margin:12px 0 8px;color:#333}
+.cart-success p{font-size:14px;color:#888}
+.add-cart-toast{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,0.8);color:#fff;
+  padding:12px 24px;border-radius:12px;font-size:14px;z-index:10001;animation:toastFade .5s ease forwards;pointer-events:none}
+@keyframes toastFade{0%{opacity:0;transform:translate(-50%,-50%) scale(0.8)}20%{opacity:1;transform:translate(-50%,-50%) scale(1)}80%{opacity:1}100%{opacity:0}}
+</style>
+<div class="cart-fab" id="cartFab">
+  <div class="cart-fab-inner">
+    <div class="cart-info"><div class="cart-badge" id="cartCount">0</div>
+      <div class="cart-text"><span id="cartItemText">0</span>\uAC1C \uC0C1\uD488<br><b id="cartTotalText">0\uC6D0</b></div>
+    </div>
+    <button class="cart-btn" onclick="openCartSheet()">\uC7A5\uBC14\uAD6C\uB2C8 \uBCF4\uAE30</button>
+  </div>
+</div>
+<div class="cart-sheet" id="cartSheet"><div class="cart-overlay" onclick="closeCartSheet()"></div>
+  <div class="cart-panel"><div class="cart-handle"></div><div id="cartContent"></div></div>
+</div>
+<script>
+(function(){
+  var API='${apiBase}/api/flyer/cart';
+  var PHONE='${phone}';
+  var FID='${flyerId}';
+  var cart={items:[]};
+  function fmt(n){return n.toLocaleString();}
+
+  // ★ 상품 카드에 "담기" 버튼 자동 추가
+  // data-product 속성이 있으면 사용, 없으면 카드 내 텍스트에서 추출
+  var cards=document.querySelectorAll('[data-product]');
+  if(cards.length===0){
+    // 폴백: .card, .cc, .sw-card, .mg-card, .ed-card, .sc-card, .hb-card, .ms-tile 등 카드 엘리먼트에서 추출
+    cards=document.querySelectorAll('.card,.cc,.sw-card,.mg-card,.ed-card,.sc-card,.hb-card,.ms-tile,.hb-item');
+  }
+  cards.forEach(function(el){
+    var btn=document.createElement('button');
+    btn.textContent='+';
+    btn.style.cssText='position:absolute;bottom:6px;right:6px;width:32px;height:32px;border-radius:50%;border:none;background:linear-gradient(135deg,#ff6b6b,#ee5a24);color:#fff;font-size:18px;font-weight:700;cursor:pointer;z-index:10;box-shadow:0 2px 8px rgba(238,90,36,0.4)';
+    btn.onclick=function(e){
+      e.preventDefault();e.stopPropagation();
+      var d=el.getAttribute('data-product');
+      if(d){addToCart(JSON.parse(d));return;}
+      // 폴백: 카드 내부에서 상품명/가격 추출
+      var nameEl=el.querySelector('[class*=name],[class*=nm]');
+      var priceEl=el.querySelector('[class*=sale],[class*=price],[class*=pr]');
+      var imgEl=el.querySelector('img');
+      var name=nameEl?nameEl.textContent.trim():'';
+      var priceText=priceEl?priceEl.textContent.replace(/[^0-9]/g,''):'0';
+      addToCart({name:name,salePrice:parseInt(priceText)||0,originalPrice:0,imageUrl:imgEl?imgEl.src:'',unit:'',category:''});
+    };
+    el.style.position='relative';
+    el.appendChild(btn);
+  });
+
+  function addToCart(item){
+    if(!PHONE)return;
+    var found=false;
+    cart.items.forEach(function(c){if(c.productName===item.name&&c.price===item.salePrice){c.quantity++;found=true;}});
+    if(!found) cart.items.push({productName:item.name,price:item.salePrice||item.originalPrice,quantity:1,imageUrl:item.imageUrl||'',category:item.category||'',unit:item.unit||''});
+    updateFab();showToast(item.name+' \uB2F4\uAE40');
+    fetch(API+'/'+FID+'/add',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({phone:PHONE,item:{productName:item.name,price:item.salePrice||item.originalPrice,quantity:1,imageUrl:item.imageUrl,unit:item.unit}})}).catch(function(){});
+  }
+
+  function updateFab(){
+    var cnt=cart.items.reduce(function(s,i){return s+i.quantity;},0);
+    var total=cart.items.reduce(function(s,i){return s+i.price*i.quantity;},0);
+    document.getElementById('cartFab').style.display=cnt>0?'block':'none';
+    document.getElementById('cartCount').textContent=cnt;
+    document.getElementById('cartItemText').textContent=cnt;
+    document.getElementById('cartTotalText').textContent=fmt(total)+'\uC6D0';
+  }
+
+  function showToast(msg){
+    var t=document.createElement('div');t.className='add-cart-toast';t.textContent=msg;
+    document.body.appendChild(t);setTimeout(function(){t.remove();},600);
+  }
+
+  window.openCartSheet=function(){
+    document.getElementById('cartSheet').style.display='block';
+    renderCartContent();
+  };
+  window.closeCartSheet=function(){document.getElementById('cartSheet').style.display='none';};
+
+  function renderCartContent(){
+    var el=document.getElementById('cartContent');
+    if(cart.items.length===0){el.innerHTML='<div style="text-align:center;padding:60px 20px;color:#999">\uC7A5\uBC14\uAD6C\uB2C8\uAC00 \uBE44\uC5B4\uC788\uC2B5\uB2C8\uB2E4</div>';return;}
+    var total=cart.items.reduce(function(s,i){return s+i.price*i.quantity;},0);
+    var h='<div class="cart-header"><h3>\uC7A5\uBC14\uAD6C\uB2C8</h3><button class="cart-clear" onclick="clearAllCart()">\uC804\uCCB4 \uC0AD\uC81C</button></div>';
+    h+='<div class="cart-items">';
+    cart.items.forEach(function(item,idx){
+      h+='<div class="cart-item">';
+      h+=item.imageUrl?'<img class="cart-item-img" src="'+item.imageUrl+'">':'<div class="cart-item-img"></div>';
+      h+='<div class="cart-item-info"><div class="cart-item-name">'+item.productName+'</div><div class="cart-item-price">'+fmt(item.price)+'\uC6D0</div></div>';
+      h+='<div class="cart-qty"><button onclick="changeQty('+idx+',-1)">\u2212</button><span>'+item.quantity+'</span><button onclick="changeQty('+idx+',1)">+</button></div>';
+      h+='</div>';
+    });
+    h+='</div>';
+    h+='<div class="cart-footer"><div class="cart-total"><span class="cart-total-label">\uCD1D \uAE08\uC561</span><span class="cart-total-price">'+fmt(total)+'\uC6D0</span></div>';
+    h+='<button class="cart-order-btn" onclick="showOrderForm()">\uC8FC\uBB38\uD558\uAE30</button></div>';
+    el.innerHTML=h;
+  }
+
+  window.changeQty=function(idx,delta){
+    cart.items[idx].quantity+=delta;
+    if(cart.items[idx].quantity<=0) cart.items.splice(idx,1);
+    updateFab();renderCartContent();
+    syncCart();
+  };
+
+  window.clearAllCart=function(){
+    cart.items=[];updateFab();renderCartContent();
+    fetch(API+'/'+FID+'?phone='+PHONE,{method:'DELETE'}).catch(function(){});
+  };
+
+  function syncCart(){
+    fetch(API+'/'+FID,{method:'PUT',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({phone:PHONE,items:cart.items})}).catch(function(){});
+  }
+
+  window.showOrderForm=function(){
+    var total=cart.items.reduce(function(s,i){return s+i.price*i.quantity;},0);
+    var el=document.getElementById('cartContent');
+    el.innerHTML='<div class="cart-header"><h3>\uC8FC\uBB38\uC815\uBCF4</h3></div>'+
+    '<div class="cart-order-form">'+
+    '<div class="cart-form-group"><label>\uC774\uB984</label><input id="oName" placeholder="\uC774\uB984\uC744 \uC785\uB825\uD574\uC8FC\uC138\uC694"></div>'+
+    '<div class="cart-form-group"><label>\uC218\uB839 \uBC29\uBC95</label>'+
+    '<div class="cart-radio-group"><input type="radio" name="pickup" id="pStore" value="store_pickup" checked><label for="pStore" class="sel" onclick="this.parentNode.querySelectorAll(\'label\').forEach(function(l){l.classList.remove(\'sel\')});this.classList.add(\'sel\')">\uB9E4\uC7A5 \uBC29\uBB38</label>'+
+    '<input type="radio" name="pickup" id="pDlv" value="delivery"><label for="pDlv" onclick="this.parentNode.querySelectorAll(\'label\').forEach(function(l){l.classList.remove(\'sel\')});this.classList.add(\'sel\')">\uBC30\uB2EC</label></div></div>'+
+    '<div class="cart-form-group"><label>\uC694\uCCAD\uC0AC\uD56D</label><textarea id="oNote" placeholder="\uC694\uCCAD\uC0AC\uD56D\uC744 \uC785\uB825\uD574\uC8FC\uC138\uC694"></textarea></div>'+
+    '<div class="cart-footer"><div class="cart-total"><span class="cart-total-label">\uCD1D \uAE08\uC561</span><span class="cart-total-price">'+fmt(total)+'\uC6D0</span></div>'+
+    '<button class="cart-order-btn" onclick="submitOrder()">\uC8FC\uBB38 \uD655\uC815</button></div></div>';
+  };
+
+  window.submitOrder=function(){
+    var name=document.getElementById('oName').value;
+    var pickup=document.querySelector('input[name=pickup]:checked').value;
+    var note=document.getElementById('oNote').value;
+    fetch(API+'/'+FID+'/order',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({phone:PHONE,customerName:name,pickupType:pickup,note:note})})
+    .then(function(r){return r.json();})
+    .then(function(){
+      cart.items=[];updateFab();
+      document.getElementById('cartContent').innerHTML='<div class="cart-success"><div style="font-size:48px">\u2705</div><h3>\uC8FC\uBB38\uC774 \uC811\uC218\uB418\uC5C8\uC2B5\uB2C8\uB2E4</h3><p>\uB9E4\uC7A5\uC5D0\uC11C \uD655\uC778 \uD6C4 \uC5F0\uB77D\uB4DC\uB9AC\uACA0\uC2B5\uB2C8\uB2E4</p>'+
+      '<button style="margin-top:20px;padding:12px 32px;border:none;border-radius:10px;background:#333;color:#fff;font-size:14px;cursor:pointer" onclick="closeCartSheet()">\uB2EB\uAE30</button></div>';
+    })
+    .catch(function(){alert('\uC8FC\uBB38 \uC811\uC218\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4. \uB2E4\uC2DC \uC2DC\uB3C4\uD574\uC8FC\uC138\uC694.');});
+  };
+
+  // 초기 장바구니 로드
+  if(PHONE){
+    fetch(API+'/'+FID+'?phone='+PHONE).then(function(r){return r.json();}).then(function(data){
+      if(data.items&&data.items.length>0){cart.items=data.items;updateFab();}
+    }).catch(function(){});
+  }
+})();
+</script>`;
 }
 
 // 하위호환 export

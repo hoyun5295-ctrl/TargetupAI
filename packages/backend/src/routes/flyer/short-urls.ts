@@ -76,7 +76,8 @@ router.get('/:code', async (req: Request, res: Response) => {
       `SELECT f.*,
               TO_CHAR(f.period_start, 'YYYY-MM-DD') as period_start,
               TO_CHAR(f.period_end, 'YYYY-MM-DD') as period_end,
-              su.id as short_url_id, su.expires_at
+              su.id as short_url_id, su.expires_at,
+              su.phone as tracking_phone, su.url_type, su.campaign_id as tracking_campaign_id
        FROM short_urls su
        JOIN flyers f ON f.id = su.flyer_id
        WHERE su.code = $1`,
@@ -105,16 +106,17 @@ router.get('/:code', async (req: Request, res: Response) => {
       }
     }
 
-    // 클릭 로그 기록 (비동기 — 페이지 렌더링 차단하지 않음)
+    // ★ Phase 1: 클릭 로그에 phone 포함 (tracking URL이면 수신자 식별 가능)
     const ip = req.ip || req.socket.remoteAddress || null;
     const userAgent = req.headers['user-agent'] || null;
+    const trackingPhone = flyer.tracking_phone || null;
     query(
-      'INSERT INTO url_clicks (short_url_id, ip, user_agent) VALUES ($1, $2, $3)',
-      [flyer.short_url_id, ip, userAgent]
+      'INSERT INTO url_clicks (short_url_id, ip, user_agent, phone) VALUES ($1, $2, $3, $4)',
+      [flyer.short_url_id, ip, userAgent, trackingPhone]
     ).catch(err => console.error('[전단AI] 클릭 로그 실패:', err.message));
 
-    // 전단지 페이지 렌더링
-    const html = await renderFlyerPage(flyer);
+    // ★ Phase 3: tracking URL이면 phone을 뷰어 컨텍스트에 전달 (장바구니 식별용)
+    const html = await renderFlyerPage(flyer, trackingPhone);
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.send(html);
   } catch (err: any) {
@@ -187,7 +189,7 @@ function renderExpiredPage(storeName: string, title: string, endDate: string): s
 // ============================================================
 // 전단지 렌더링 — CT-F14 컨트롤타워 위임
 // ============================================================
-export async function renderFlyerPage(flyer: any): Promise<string> {
+export async function renderFlyerPage(flyer: any, trackingPhone?: string | null): Promise<string> {
   const categories = typeof flyer.categories === 'string' ? JSON.parse(flyer.categories) : (flyer.categories || []);
   const storeName = flyer.store_name || '';
   const title = flyer.title || '';
@@ -224,6 +226,9 @@ export async function renderFlyerPage(flyer: any): Promise<string> {
     externalLinks: extraData.externalLinks,
     announcements: extraData.announcements,
     bannerGifUrl: extraData.bannerGifUrl,
+    trackingPhone: trackingPhone || undefined,
+    flyerId: flyer.id,
+    companyId: flyer.company_id,
   });
 }
 

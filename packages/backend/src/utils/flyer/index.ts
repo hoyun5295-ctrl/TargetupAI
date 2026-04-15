@@ -122,6 +122,7 @@ export {
   ingestSales,
   ingestInventory,
   ingestMembers,
+  ingestPromotions,
   updateAgentHeartbeat,
   getTopSellingProducts,
   getPosAgentStatusList,

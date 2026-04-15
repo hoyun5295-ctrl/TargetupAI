@@ -11,13 +11,15 @@ import CustomerPage from './pages/CustomerPage';
 import CatalogPage from './pages/CatalogPage';
 import CouponPage from './pages/CouponPage';
 import PopPage from './pages/PopPage';
+import OrdersPage from './pages/OrdersPage';
+import PrintFlyerPage from './pages/PrintFlyerPage';
 import { useSessionTimeout } from './hooks/useSessionTimeout';
 import SessionTimer from './components/SessionTimer';
 import SessionTimeoutModal from './components/SessionTimeoutModal';
 
 export const API_BASE = import.meta.env.VITE_API_URL || '';
 export function getToken(): string { return localStorage.getItem('flyer_token') || ''; }
-export type Page = 'flyer' | 'send' | 'pop' | 'customers' | 'catalog' | 'coupons' | 'results' | 'balance' | 'unsubscribes' | 'settings';
+export type Page = 'flyer' | 'send' | 'pop' | 'customers' | 'catalog' | 'coupons' | 'orders' | 'print-flyer' | 'results' | 'balance' | 'unsubscribes' | 'settings';
 
 /** 공통 fetch — 401 시 자동 로그아웃 */
 export async function apiFetch(url: string, options?: RequestInit): Promise<Response> {
@@ -39,12 +41,14 @@ const MAIN_MENUS: { key: Page; label: string }[] = [
   { key: 'pop', label: 'POP제작' },
   { key: 'send', label: '발송' },
   { key: 'coupons', label: '쿠폰' },
+  { key: 'orders', label: '주문' },
   { key: 'results', label: '결과' },
 ];
 
 const MORE_MENUS: { key: Page; label: string; icon: string }[] = [
   { key: 'customers', label: '고객DB', icon: '👥' },
   { key: 'catalog', label: '상품관리', icon: '📦' },
+  { key: 'print-flyer', label: '인쇄전단', icon: '🖨️' },
   { key: 'balance', label: '충전관리', icon: '💳' },
   { key: 'unsubscribes', label: '수신거부', icon: '🚫' },
   { key: 'settings', label: '설정', icon: '⚙️' },
@@ -160,6 +164,8 @@ function App() {
         {currentPage === 'customers' && <CustomerPage token={token} />}
         {currentPage === 'catalog' && <CatalogPage token={token} />}
         {currentPage === 'coupons' && <CouponPage token={token} />}
+        {currentPage === 'orders' && <OrdersPage token={token} />}
+        {currentPage === 'print-flyer' && <PrintFlyerPage token={token} />}
         {currentPage === 'results' && <ResultsPage token={token} />}
         {currentPage === 'balance' && <BalancePage token={token} />}
         {currentPage === 'unsubscribes' && <UnsubscribesPage token={token} />}

@@ -166,6 +166,15 @@
 - **하나씩 천천히 뜯어보고 제대로 체크** — 한 건씩 코드를 직접 읽고, 근본 원인을 정확히 파악한 후 수정한다.
 - 병렬로 대충 보다가 빠뜨리는 게 반복되어 온 패턴. 느려도 정확하게.
 
+### 4-9. 스킬 최대 활용 원칙 (필수)
+- 모든 작업에서 사용 가능한 스킬(engineering, marketing, design, docx, pptx, xlsx, pdf 등)을 **최대한 조합**하여 최적의 결과물을 만든다.
+- 코드 작업: `engineering:code-review`, `engineering:testing-strategy`, `engineering:debug` 등 적극 활용.
+- UI 작업: `frontend-design`, `design:accessibility-review`, `design:ux-copy` 조합.
+- 문서/자료: `docx`, `pptx`, `xlsx`, `pdf` + `marketing:draft-content` 조합.
+- 배포 전: `engineering:deploy-checklist` 활용.
+- 설계: `engineering:system-design`, `engineering:architecture` 활용.
+- Harold님이 스킬을 지정하지 않아도 **작업 성격에 맞는 스킬을 자동 판단하여 사용**한다.
+
 ### 4-8. ⚠️ 두 번 세 번 꼼꼼히 살펴보기 (D70 교훈 — 극히 중요)
 - **수정한 코드가 실제로 "그 값"을 쓰는지 끝까지 추적한다.**
   - 예: 대시보드에 "성공건수"로 표시하는데 실제 변수가 `totalSent`(발송건수)인지 `totalSuccess`(성공건수)인지 — 변수명만 보지 말고 **값의 출처(DB 컬럼, 쿼리)까지** 추적.
