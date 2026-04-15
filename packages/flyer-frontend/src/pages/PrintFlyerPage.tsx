@@ -17,6 +17,7 @@ import { useState, useRef } from 'react';
 import { API_BASE, apiFetch } from '../App';
 import { SectionCard, Button, Input, Select } from '../components/ui';
 import AlertModal from '../components/AlertModal';
+import ExcelUploadModal, { type MappedProduct } from '../components/ExcelUploadModal';
 
 // ============================================================
 // 타입
@@ -100,8 +101,10 @@ export default function PrintFlyerPage({ token: _token }: { token: string }) {
   const [searchLoading, setSearchLoading] = useState(false);
   const [selectedImage, setSelectedImage] = useState('');
 
-  // CSV 업로드
-  const fileRef = useRef<HTMLInputElement>(null);
+  // 엑셀 업로드 모달
+  const [showExcelModal, setShowExcelModal] = useState(false);
+
+  // 이미지 업로드용
   const imageUploadRef = useRef<HTMLInputElement>(null);
 
   // 상태
@@ -199,61 +202,43 @@ export default function PrintFlyerPage({ token: _token }: { token: string }) {
   };
 
   // ============================================================
-  // CSV 일괄 업로드
+  // 엑셀 업로드 완료 → 카테고리별 자동 배치
   // ============================================================
-  const handleCsvUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const text = reader.result as string;
-      const lines = text.split('\n').filter(l => l.trim());
-      if (lines.length < 2) return;
+  const handleExcelComplete = (mappedProducts: MappedProduct[]) => {
+    const newCategories = new Map<string, ProductItem[]>();
 
-      // 헤더 스킵
-      const rows = lines.slice(1);
-      const newCategories = new Map<string, ProductItem[]>();
-
-      for (const row of rows) {
-        const cols = row.split(',').map(c => c.trim().replace(/^"|"$/g, ''));
-        if (cols.length < 3) continue;
-
-        const [category, name, price, originalPrice, unit] = cols;
-        if (!name) continue;
-
-        const cat = category || '기타';
-        if (!newCategories.has(cat)) newCategories.set(cat, []);
-        newCategories.get(cat)!.push({
-          id: genId(),
-          name,
-          price: Number(price) || 0,
-          originalPrice: Number(originalPrice) || 0,
-          unit: unit || '',
-          category: cat,
-          imageUrl: '',
-          aiCopy: '',
-        });
-      }
-
-      // 기존 카테고리에 추가 또는 새 카테고리 생성
-      setCategories(prev => {
-        const updated = [...prev];
-        for (const [catName, items] of newCategories) {
-          const existing = updated.find(c => c.name === catName);
-          if (existing) {
-            existing.items = [...existing.items, ...items];
-          } else {
-            updated.push({ id: genId(), name: catName, items });
-          }
-        }
-        return updated;
+    for (const p of mappedProducts) {
+      const cat = p.category || '기타';
+      if (!newCategories.has(cat)) newCategories.set(cat, []);
+      newCategories.get(cat)!.push({
+        id: genId(),
+        name: p.productName,
+        price: p.salePrice,
+        originalPrice: p.originalPrice,
+        unit: p.unit,
+        category: cat,
+        imageUrl: p.imageUrl,
+        aiCopy: '',
       });
+    }
 
-      setAlert({ show: true, title: 'CSV 업로드 완료', message: `${rows.length}개 상품이 추가되었습니다`, type: 'success' });
-    };
-    reader.readAsText(file, 'UTF-8');
-    if (fileRef.current) fileRef.current.value = '';
+    setCategories(prev => {
+      const updated = [...prev];
+      for (const [catName, items] of newCategories) {
+        const existing = updated.find(c => c.name === catName);
+        if (existing) {
+          existing.items = [...existing.items, ...items];
+        } else {
+          updated.push({ id: genId(), name: catName, items });
+        }
+      }
+      return updated;
+    });
+
+    setAlert({ show: true, title: '엑셀 업로드 완료', message: `${mappedProducts.length}개 상품이 카테고리별로 추가되었습니다`, type: 'success' });
   };
+
+  // CSV 업로드 제거 — ExcelUploadModal로 통합 (CT-F24)
 
   // ============================================================
   // PDF 생성
@@ -335,10 +320,9 @@ export default function PrintFlyerPage({ token: _token }: { token: string }) {
               PDF 다운로드
             </button>
           )}
-          <Button size="sm" variant="secondary" onClick={() => fileRef.current?.click()}>
-            CSV 일괄 업로드
+          <Button size="sm" variant="secondary" onClick={() => setShowExcelModal(true)}>
+            엑셀 업로드
           </Button>
-          <input ref={fileRef} type="file" accept=".csv,.txt" className="hidden" onChange={handleCsvUpload} />
         </div>
       </div>
 
@@ -593,6 +577,13 @@ export default function PrintFlyerPage({ token: _token }: { token: string }) {
       <AlertModal
         alert={alert}
         onClose={() => setAlert(a => ({ ...a, show: false }))}
+      />
+
+      {/* 엑셀 업로드 + AI 매핑 모달 */}
+      <ExcelUploadModal
+        isOpen={showExcelModal}
+        onClose={() => setShowExcelModal(false)}
+        onComplete={handleExcelComplete}
       />
     </div>
   );

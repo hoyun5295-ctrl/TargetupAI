@@ -19,6 +19,7 @@ import { generateProductImage, generateFlyerImages, getGeneratedImageUrl } from 
 import { LIMITS } from '../../config/defaults';
 import { generatePdfFromHtml } from '../../utils/flyer/product/flyer-pdf';
 import { renderPrintFlyer, getAvailableThemes, getThemeByName, PrintProduct } from '../../utils/flyer/product/flyer-print-renderer';
+import { mapFlyerExcelHeaders, applyFlyerMapping, getFlyerMappingFields } from '../../utils/flyer/product/flyer-excel-mapper';
 import { renderFlyerPage } from './short-urls';
 import { renderPricePop, renderMultiPop, renderPromoPop } from '../../utils/flyer/product/flyer-pop-templates';
 import { classifyProducts } from '../../utils/flyer/product/flyer-category-classifier';
@@ -1031,6 +1032,83 @@ router.get('/print-flyer/:id/pdf', async (req: Request, res: Response) => {
 // GET /print-flyer/themes — 사용 가능한 인쇄 테마 목록
 router.get('/print-flyer/themes', (_req: Request, res: Response) => {
   res.json(getAvailableThemes());
+});
+
+// ══════════════════════════════════════════
+// ★ CT-F24: 엑셀 업로드 + AI 자동 매핑
+// ══════════════════════════════════════════
+
+/** POST /upload-excel — 엑셀 파일 업로드 → 헤더 추출 + AI 매핑 */
+const excelUpload = multer({ dest: '/tmp/flyer-excel/', limits: { fileSize: 10 * 1024 * 1024 } });
+router.post('/upload-excel', excelUpload.single('file'), async (req: Request, res: Response) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: '파일이 없습니다' });
+
+    const xlsx = require('xlsx');
+    const workbook = xlsx.readFile(req.file.path);
+    const sheetName = workbook.SheetNames[0];
+    const sheet = workbook.Sheets[sheetName];
+    const jsonData = xlsx.utils.sheet_to_json(sheet, { defval: '' });
+
+    if (!jsonData || jsonData.length === 0) {
+      return res.status(400).json({ error: '엑셀에 데이터가 없습니다' });
+    }
+
+    const headers = Object.keys(jsonData[0]);
+
+    // AI 자동 매핑
+    const mappingResult = await mapFlyerExcelHeaders(headers);
+
+    // 임시 파일 삭제
+    try { fs.unlinkSync(req.file.path); } catch {}
+
+    return res.json({
+      ...mappingResult,
+      headers,
+      preview: jsonData.slice(0, 5), // 미리보기 5행
+      totalRows: jsonData.length,
+      fields: getFlyerMappingFields(),
+    });
+  } catch (err: any) {
+    console.error('[전단AI] 엑셀 업로드 실패:', err.message);
+    res.status(500).json({ error: err.message || '엑셀 처리에 실패했습니다' });
+  }
+});
+
+/** POST /apply-excel-mapping — 매핑 확정 → 상품 배열 반환 */
+router.post('/apply-excel-mapping', excelUpload.single('file'), async (req: Request, res: Response) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: '파일이 없습니다' });
+
+    const mappingJson = req.body.mapping;
+    if (!mappingJson) return res.status(400).json({ error: 'mapping 필수' });
+
+    const mapping = typeof mappingJson === 'string' ? JSON.parse(mappingJson) : mappingJson;
+
+    const xlsx = require('xlsx');
+    const workbook = xlsx.readFile(req.file.path);
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const jsonData = xlsx.utils.sheet_to_json(sheet, { defval: '' });
+
+    const products = applyFlyerMapping(jsonData, mapping);
+
+    try { fs.unlinkSync(req.file.path); } catch {}
+
+    return res.json({
+      success: true,
+      products,
+      totalRows: jsonData.length,
+      mappedCount: products.length,
+    });
+  } catch (err: any) {
+    console.error('[전단AI] 매핑 적용 실패:', err.message);
+    res.status(500).json({ error: err.message || '매핑 적용에 실패했습니다' });
+  }
+});
+
+/** GET /mapping-fields — 매핑 대상 필드 목록 (프론트 UI용) */
+router.get('/mapping-fields', (_req: Request, res: Response) => {
+  res.json(getFlyerMappingFields());
 });
 
 export default router;
