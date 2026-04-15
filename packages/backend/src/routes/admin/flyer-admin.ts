@@ -584,4 +584,28 @@ router.get('/billing', async (req: Request, res: Response) => {
   }
 });
 
+// ============================================================
+// ★ 감사로그 조회 (슈퍼관리자)
+// ============================================================
+import { queryFlyerAuditLogs, AUDIT_ACTION_LABELS } from '../../utils/flyer/audit/flyer-audit-log';
+
+router.get('/audit-logs', async (req: Request, res: Response) => {
+  try {
+    const { company_id, user_id, action, from_date, to_date, page, limit } = req.query;
+    const result = await queryFlyerAuditLogs({
+      companyId: company_id as string,
+      userId: user_id as string,
+      action: action as string,
+      fromDate: from_date as string,
+      toDate: to_date as string,
+      page: page ? parseInt(String(page), 10) : 1,
+      limit: limit ? parseInt(String(limit), 10) : 50,
+    });
+    return res.json({ ...result, actionLabels: AUDIT_ACTION_LABELS });
+  } catch (error: any) {
+    console.error('[flyer-admin] audit-logs error:', error);
+    return res.status(500).json({ error: '감사로그 조회 실패' });
+  }
+});
+
 export default router;

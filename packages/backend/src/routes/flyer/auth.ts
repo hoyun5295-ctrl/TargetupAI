@@ -16,6 +16,7 @@ import {
   generateFlyerToken,
   FlyerJwtPayload,
 } from '../../middlewares/flyer-auth';
+import { logFlyerAudit } from '../../utils/flyer/audit/flyer-audit-log';
 
 const router = Router();
 
@@ -64,6 +65,16 @@ router.post('/login', async (req: Request, res: Response) => {
       `UPDATE flyer_users SET last_login_at = NOW() WHERE id = $1`,
       [user.id]
     );
+
+    // ★ 감사로그 기록 (비동기 — 실패해도 로그인 영향 없음)
+    logFlyerAudit({
+      userId: user.id,
+      companyId: user.company_id,
+      action: 'login',
+      details: { login_id: user.login_id, store_name: user.store_name },
+      ipAddress: req.ip || req.socket?.remoteAddress || null,
+      userAgent: req.headers['user-agent'] || null,
+    }).catch(() => {});
 
     return res.json({
       token,
