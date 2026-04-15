@@ -1,29 +1,56 @@
 /**
- * 전단AI 인쇄 전단 생성 페이지
+ * ★ 전단AI 인쇄전단 에디터 (완전 재작성)
  *
- * 기능:
- *   - CSV 파일 업로드 (드래그&드롭 + 클릭)
- *   - 기본 설정 폼 (제목, 기간, 용지, 테마)
- *   - 상품 목록 편집 (행사구분/상품명/원가/할인가/단위/카테고리)
- *   - 인쇄 전단 생성 → PDF 다운로드
+ * 마트 전단지 레이아웃 기반 인터랙티브 에디터:
+ *   - 상단: 매장 정보 (로고/주소/전화/QR)
+ *   - 카테고리별 상품 그리드 (4열)
+ *   - + 버튼 → 상품 추가 모달 (네이버 이미지 자동검색 + 서버 폴백 + 직접 업로드)
+ *   - CSV 일괄 업로드 → 카테고리별 자동 배치
+ *   - 최종 → puppeteer 300dpi PDF 출력
  *
- * API: POST /api/flyer/flyers/print-flyer
+ * API:
+ *   - POST /api/flyer/flyers/print-flyer (PDF 생성)
+ *   - GET /api/flyer/catalog/search-image?q=상품명 (네이버 이미지 검색)
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { API_BASE, apiFetch } from '../App';
 import { SectionCard, Button, Input, Select } from '../components/ui';
 import AlertModal from '../components/AlertModal';
 
-interface Product {
+// ============================================================
+// 타입
+// ============================================================
+interface ProductItem {
   id: string;
-  eventType: string;   // 메인/서브/일반
   name: string;
-  price: string;       // 할인가(판매가)
-  originalPrice: string; // 원가
+  price: number;
+  originalPrice: number;
   unit: string;
   category: string;
+  imageUrl: string;
+  aiCopy: string;
 }
+
+interface Category {
+  id: string;
+  name: string;
+  items: ProductItem[];
+}
+
+interface StoreInfo {
+  storeName: string;
+  address: string;
+  phone: string;
+  hours: string;
+}
+
+// ============================================================
+// 기본 카테고리
+// ============================================================
+const DEFAULT_CATEGORIES = [
+  '축산', '정육', '과일', '채소', '수산', '유제품', '가공식품', '주류', '생활용품', '베이커리'
+];
 
 const PAPER_SIZES = [
   { value: 'A4', label: 'A4 (210x297mm)' },
@@ -31,437 +58,538 @@ const PAPER_SIZES = [
   { value: 'tabloid', label: '타블로이드 (279x432mm)' },
 ];
 
-const THEMES = [
-  { value: 'fresh_green', label: '신선한 그린' },
-  { value: 'warm_orange', label: '따뜻한 오렌지' },
-  { value: 'cool_blue', label: '시원한 블루' },
-  { value: 'premium_dark', label: '프리미엄 다크' },
+const TEMPLATES = [
+  { value: 'spring', label: '봄 세일', desc: '4열 그리드 / 핑크+퍼플 그라데이션' },
+  { value: 'summer', label: '여름 특가', desc: '3열 대형 / 시원한 블루 그라데이션' },
+  { value: 'autumn', label: '가을 수확', desc: '2열 대형 + 4열 / 오렌지 그라데이션' },
+  { value: 'winter', label: '겨울 행사', desc: '4열 + 5열 / 딥블루 그라데이션' },
+  { value: 'chuseok', label: '추석 한가위', desc: '3열 선물세트 / 전통 레드+골드' },
+  { value: 'seol', label: '설 명절', desc: '2열 선물세트 / 전통 블루+골드' },
+  { value: 'basic_green', label: '기본 (그린)', desc: '4열 표준 / 깔끔한 그린' },
+  { value: 'basic_red', label: '기본 (레드)', desc: '4열 컴팩트 / 강렬한 레드' },
+  { value: 'basic_blue', label: '기본 (블루)', desc: '3열 표준 / 시원한 블루' },
 ];
 
-const EVENT_TYPES = [
-  { value: '메인', label: '메인' },
-  { value: '서브', label: '서브' },
-  { value: '일반', label: '일반' },
-];
+let idCounter = 0;
+function genId() { return `p_${Date.now()}_${++idCounter}`; }
 
-let productIdCounter = 0;
-function genId() {
-  productIdCounter += 1;
-  return `p_${Date.now()}_${productIdCounter}`;
-}
-
-/** CSV 텍스트를 Product[] 배열로 변환 */
-function parseCsv(text: string): Product[] {
-  const lines = text.split(/\r?\n/).filter(l => l.trim());
-  if (lines.length < 2) return [];
-
-  // 첫 행은 헤더 — 건너뜀
-  const dataLines = lines.slice(1);
-  return dataLines.map(line => {
-    const cols = line.split(',').map(c => c.trim());
-    return {
-      id: genId(),
-      eventType: cols[0] || '일반',
-      name: cols[1] || '',
-      price: cols[2] || '',
-      originalPrice: cols[3] || '',
-      unit: cols[4] || '',
-      category: cols[5] || '',
-    };
-  }).filter(p => p.name); // 상품명 없는 행 제외
-}
-
+// ============================================================
+// 메인 컴포넌트
+// ============================================================
 export default function PrintFlyerPage({ token: _token }: { token: string }) {
   // 기본 설정
   const [title, setTitle] = useState('');
   const [periodStart, setPeriodStart] = useState('');
   const [periodEnd, setPeriodEnd] = useState('');
   const [paperSize, setPaperSize] = useState('A4');
-  const [theme, setTheme] = useState('fresh_green');
+  const [templateCode, setTemplateCode] = useState('basic_green');
 
-  // 상품 목록
-  const [products, setProducts] = useState<Product[]>([]);
+  // 매장 정보
+  const [store, setStore] = useState<StoreInfo>({ storeName: '', address: '', phone: '', hours: '' });
 
-  // 파일 업로드 상태
-  const [dragOver, setDragOver] = useState(false);
-  const [fileName, setFileName] = useState('');
+  // 카테고리 + 상품
+  const [categories, setCategories] = useState<Category[]>(
+    DEFAULT_CATEGORIES.slice(0, 4).map(name => ({ id: genId(), name, items: [] }))
+  );
 
-  // 생성 상태
+  // 상품 추가 모달
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [addTargetCatId, setAddTargetCatId] = useState('');
+  const [addForm, setAddForm] = useState({ name: '', price: '', originalPrice: '', unit: '', imageUrl: '', aiCopy: '' });
+  const [searchImages, setSearchImages] = useState<Array<{ image: string; title: string }>>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [selectedImage, setSelectedImage] = useState('');
+
+  // CSV 업로드
+  const fileRef = useRef<HTMLInputElement>(null);
+  const imageUploadRef = useRef<HTMLInputElement>(null);
+
+  // 상태
   const [generating, setGenerating] = useState(false);
   const [pdfUrl, setPdfUrl] = useState('');
-  const [flyerId, setFlyerId] = useState('');
+  const [alert, setAlert] = useState<{ isOpen: boolean; title: string; message: string; type: 'success' | 'error' | 'info' }>({ isOpen: false, title: '', message: '', type: 'info' });
 
-  // 알림
-  const [alert, setAlert] = useState<{ show: boolean; title: string; message: string; type: 'success' | 'error' | 'info' }>({
-    show: false, title: '', message: '', type: 'info',
-  });
+  // ============================================================
+  // 카테고리 관리
+  // ============================================================
+  const addCategory = () => {
+    const name = prompt('카테고리 이름을 입력하세요');
+    if (!name) return;
+    setCategories(prev => [...prev, { id: genId(), name, items: [] }]);
+  };
 
-  // ────── CSV 파일 처리 ──────
-  const handleFile = useCallback((file: File) => {
-    if (!file.name.toLowerCase().endsWith('.csv')) {
-      setAlert({ show: true, title: '파일 오류', message: 'CSV 파일만 업로드 가능합니다.', type: 'error' });
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const text = e.target?.result as string;
-      const parsed = parseCsv(text);
-      if (parsed.length === 0) {
-        setAlert({ show: true, title: '파싱 오류', message: 'CSV에서 상품 데이터를 찾을 수 없습니다.\n포맷: 행사구분,상품명,가격,원가,단위,카테고리', type: 'error' });
-        return;
+  const removeCategory = (catId: string) => {
+    if (!confirm('이 카테고리를 삭제하시겠습니까?')) return;
+    setCategories(prev => prev.filter(c => c.id !== catId));
+  };
+
+  const renameCat = (catId: string) => {
+    const cat = categories.find(c => c.id === catId);
+    if (!cat) return;
+    const name = prompt('카테고리 이름', cat.name);
+    if (!name) return;
+    setCategories(prev => prev.map(c => c.id === catId ? { ...c, name } : c));
+  };
+
+  // ============================================================
+  // 상품 추가 모달
+  // ============================================================
+  const openAddModal = (catId: string) => {
+    setAddTargetCatId(catId);
+    setAddForm({ name: '', price: '', originalPrice: '', unit: '', imageUrl: '', aiCopy: '' });
+    setSearchImages([]);
+    setSelectedImage('');
+    setShowAddModal(true);
+  };
+
+  const searchProductImage = async () => {
+    if (!addForm.name.trim()) return;
+    setSearchLoading(true);
+    try {
+      const res = await apiFetch(`${API_BASE}/api/flyer/catalog/search-image`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ product_name: addForm.name.trim() }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setSearchImages(data.items || []);
       }
-      setProducts(parsed);
-      setFileName(file.name);
-      setPdfUrl('');
-      setFlyerId('');
+    } catch { /* ignore */ }
+    setSearchLoading(false);
+  };
+
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      setSelectedImage(dataUrl);
+      setAddForm(prev => ({ ...prev, imageUrl: dataUrl }));
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const confirmAddProduct = () => {
+    if (!addForm.name.trim()) { setAlert({ isOpen: true, title: '입력 오류', message: '상품명을 입력해주세요', type: 'error' }); return; }
+    if (!addForm.price) { setAlert({ isOpen: true, title: '입력 오류', message: '판매가를 입력해주세요', type: 'error' }); return; }
+
+    const newItem: ProductItem = {
+      id: genId(),
+      name: addForm.name.trim(),
+      price: Number(addForm.price) || 0,
+      originalPrice: Number(addForm.originalPrice) || 0,
+      unit: addForm.unit,
+      category: categories.find(c => c.id === addTargetCatId)?.name || '',
+      imageUrl: selectedImage || addForm.imageUrl || '',
+      aiCopy: addForm.aiCopy,
+    };
+
+    setCategories(prev => prev.map(c =>
+      c.id === addTargetCatId ? { ...c, items: [...c.items, newItem] } : c
+    ));
+    setShowAddModal(false);
+  };
+
+  const removeProduct = (catId: string, productId: string) => {
+    setCategories(prev => prev.map(c =>
+      c.id === catId ? { ...c, items: c.items.filter(i => i.id !== productId) } : c
+    ));
+  };
+
+  // ============================================================
+  // CSV 일괄 업로드
+  // ============================================================
+  const handleCsvUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const text = reader.result as string;
+      const lines = text.split('\n').filter(l => l.trim());
+      if (lines.length < 2) return;
+
+      // 헤더 스킵
+      const rows = lines.slice(1);
+      const newCategories = new Map<string, ProductItem[]>();
+
+      for (const row of rows) {
+        const cols = row.split(',').map(c => c.trim().replace(/^"|"$/g, ''));
+        if (cols.length < 3) continue;
+
+        const [category, name, price, originalPrice, unit] = cols;
+        if (!name) continue;
+
+        const cat = category || '기타';
+        if (!newCategories.has(cat)) newCategories.set(cat, []);
+        newCategories.get(cat)!.push({
+          id: genId(),
+          name,
+          price: Number(price) || 0,
+          originalPrice: Number(originalPrice) || 0,
+          unit: unit || '',
+          category: cat,
+          imageUrl: '',
+          aiCopy: '',
+        });
+      }
+
+      // 기존 카테고리에 추가 또는 새 카테고리 생성
+      setCategories(prev => {
+        const updated = [...prev];
+        for (const [catName, items] of newCategories) {
+          const existing = updated.find(c => c.name === catName);
+          if (existing) {
+            existing.items = [...existing.items, ...items];
+          } else {
+            updated.push({ id: genId(), name: catName, items });
+          }
+        }
+        return updated;
+      });
+
+      setAlert({ isOpen: true, title: 'CSV 업로드 완료', message: `${rows.length}개 상품이 추가되었습니다`, type: 'success' });
     };
     reader.readAsText(file, 'UTF-8');
-  }, []);
+    if (fileRef.current) fileRef.current.value = '';
+  };
 
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setDragOver(false);
-    const file = e.dataTransfer.files[0];
-    if (file) handleFile(file);
-  }, [handleFile]);
-
-  const handleFileInput = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) handleFile(file);
-    e.target.value = '';
-  }, [handleFile]);
-
-  // ────── 상품 편집 ──────
-  const updateProduct = useCallback((id: string, field: keyof Product, value: string) => {
-    setProducts(prev => prev.map(p => p.id === id ? { ...p, [field]: value } : p));
-  }, []);
-
-  const removeProduct = useCallback((id: string) => {
-    setProducts(prev => prev.filter(p => p.id !== id));
-  }, []);
-
-  // ────── 인쇄 전단 생성 ──────
-  const handleGenerate = async () => {
-    if (!title.trim()) {
-      setAlert({ show: true, title: '입력 오류', message: '전단 제목을 입력해주세요.', type: 'error' });
-      return;
-    }
-    if (!periodStart || !periodEnd) {
-      setAlert({ show: true, title: '입력 오류', message: '행사 기간을 설정해주세요.', type: 'error' });
-      return;
-    }
-    if (products.length === 0) {
-      setAlert({ show: true, title: '입력 오류', message: 'CSV 파일을 업로드하여 상품을 추가해주세요.', type: 'error' });
-      return;
-    }
+  // ============================================================
+  // PDF 생성
+  // ============================================================
+  const generatePdf = async () => {
+    const totalProducts = categories.reduce((s, c) => s + c.items.length, 0);
+    if (!title.trim()) { setAlert({ isOpen: true, title: '입력 오류', message: '전단 제목을 입력해주세요', type: 'error' }); return; }
+    if (totalProducts === 0) { setAlert({ isOpen: true, title: '입력 오류', message: '상품을 1개 이상 추가해주세요', type: 'error' }); return; }
 
     setGenerating(true);
-    setPdfUrl('');
-    setFlyerId('');
-
     try {
+      const products = categories.flatMap(cat =>
+        cat.items.map(item => ({
+          productName: item.name,
+          salePrice: item.price,
+          originalPrice: item.originalPrice,
+          unit: item.unit,
+          category: cat.name,
+          imageUrl: item.imageUrl,
+          aiCopy: item.aiCopy,
+          promoType: item.originalPrice > 0 && item.originalPrice !== item.price
+            ? (Math.round((1 - item.price / item.originalPrice) * 100) >= 30 ? 'main' : 'sub')
+            : 'general',
+        }))
+      );
+
+      const period = periodStart && periodEnd ? `${periodStart} ~ ${periodEnd}` : '';
       const res = await apiFetch(`${API_BASE}/api/flyer/flyers/print-flyer`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          title: title.trim(),
-          period: { start: periodStart, end: periodEnd },
-          products: products.map(p => ({
-            eventType: p.eventType,
-            name: p.name,
-            price: p.price,
-            originalPrice: p.originalPrice,
-            unit: p.unit,
-            category: p.category,
-          })),
-          paperSize,
-          theme,
+          title, period, products, paperSize,
+          templateCode,
+          storeName: store.storeName,
         }),
       });
 
       if (res.ok) {
         const data = await res.json();
-        setPdfUrl(data.pdfUrl || '');
-        setFlyerId(data.flyerId || '');
-        setAlert({ show: true, title: '생성 완료', message: '인쇄 전단이 생성되었습니다.\nPDF를 다운로드하세요.', type: 'success' });
+        setPdfUrl(`${API_BASE}${data.pdfUrl}`);
+        setAlert({ isOpen: true, title: '생성 완료', message: '인쇄 전단이 생성되었습니다. PDF를 다운로드하세요.', type: 'success' });
       } else {
-        const err = await res.json().catch(() => ({ error: '알 수 없는 오류' }));
-        setAlert({ show: true, title: '생성 실패', message: err.error || '오류가 발생했습니다.', type: 'error' });
+        const err = await res.json().catch(() => ({ error: '생성 실패' }));
+        setAlert({ isOpen: true, title: '생성 실패', message: err.error || '인쇄 전단 생성에 실패했습니다.', type: 'error' });
       }
-    } catch {
-      setAlert({ show: true, title: '오류', message: '네트워크 오류가 발생했습니다.', type: 'error' });
-    } finally {
-      setGenerating(false);
+    } catch (err: any) {
+      setAlert({ isOpen: true, title: '생성 실패', message: err.message || '서버 오류', type: 'error' });
     }
+    setGenerating(false);
   };
 
-  // ────── 렌더링 ──────
+  // ============================================================
+  // 총 상품 수
+  // ============================================================
+  const totalProducts = categories.reduce((s, c) => s + c.items.length, 0);
+
+  // ============================================================
+  // 렌더링
+  // ============================================================
   return (
     <div className="space-y-6">
       {/* 헤더 */}
       <div className="flex items-center justify-between">
-        <h2 className="text-xl font-bold text-white">인쇄 전단 생성</h2>
-        {pdfUrl && (
-          <a
-            href={pdfUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-2 px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white text-sm font-semibold rounded-xl transition-colors"
-          >
-            PDF 다운로드
-          </a>
-        )}
-      </div>
-
-      {/* CSV 업로드 영역 */}
-      <SectionCard title="상품 데이터 업로드">
-        <div
-          className={`relative border-2 border-dashed rounded-xl p-8 text-center transition-colors cursor-pointer
-            ${dragOver
-              ? 'border-primary-500 bg-primary-500/10'
-              : fileName
-                ? 'border-success-500/50 bg-success-500/5'
-                : 'border-border hover:border-text-muted'
-            }`}
-          onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-          onDragLeave={() => setDragOver(false)}
-          onDrop={handleDrop}
-          onClick={() => document.getElementById('csv-file-input')?.click()}
-        >
-          <input
-            id="csv-file-input"
-            type="file"
-            accept=".csv"
-            className="hidden"
-            onChange={handleFileInput}
-          />
-          {fileName ? (
-            <div>
-              <p className="text-3xl mb-2">📄</p>
-              <p className="text-sm font-semibold text-text">{fileName}</p>
-              <p className="text-xs text-text-secondary mt-1">{products.length}개 상품 로드됨 &#183; 클릭하여 다시 업로드</p>
-            </div>
-          ) : (
-            <div>
-              <p className="text-3xl mb-2">📁</p>
-              <p className="text-sm text-text-secondary mb-1">CSV 파일을 드래그하거나 클릭하여 업로드</p>
-              <p className="text-xs text-text-muted">포맷: 행사구분, 상품명, 가격, 원가, 단위, 카테고리</p>
-            </div>
-          )}
+        <div>
+          <h2 className="text-lg font-bold text-text">인쇄 전단 에디터</h2>
+          <p className="text-xs text-text-secondary mt-1">마트 전단지 레이아웃으로 인쇄용 PDF를 생성합니다</p>
         </div>
-      </SectionCard>
+        <div className="flex items-center gap-3">
+          {pdfUrl && (
+            <a href={pdfUrl} target="_blank" rel="noreferrer"
+              className="px-4 py-2 bg-primary-600 text-white text-sm font-semibold rounded-xl hover:bg-primary-700 transition">
+              PDF 다운로드
+            </a>
+          )}
+          <Button size="sm" variant="secondary" onClick={() => fileRef.current?.click()}>
+            CSV 일괄 업로드
+          </Button>
+          <input ref={fileRef} type="file" accept=".csv,.txt" className="hidden" onChange={handleCsvUpload} />
+        </div>
+      </div>
 
       {/* 기본 설정 */}
       <SectionCard title="기본 설정">
         <div className="space-y-4">
-          <Input
-            label="전단 제목"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="예: 4월 신선식품 대특가"
-          />
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Input
-              label="행사 시작일"
-              type="date"
-              value={periodStart}
-              onChange={(e) => setPeriodStart(e.target.value)}
-            />
-            <Input
-              label="행사 종료일"
-              type="date"
-              value={periodEnd}
-              onChange={(e) => setPeriodEnd(e.target.value)}
-            />
+          <div>
+            <label className="block text-xs font-medium text-text-secondary mb-1">전단 제목</label>
+            <Input value={title} onChange={e => setTitle(e.target.value)} placeholder="예: 봄맞이 특가전" />
           </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Select
-              label="용지 크기"
-              value={paperSize}
-              onChange={(e) => setPaperSize(e.target.value)}
-            >
-              {PAPER_SIZES.map(s => (
-                <option key={s.value} value={s.value}>{s.label}</option>
-              ))}
-            </Select>
-
-            <Select
-              label="테마"
-              value={theme}
-              onChange={(e) => setTheme(e.target.value)}
-            >
-              {THEMES.map(t => (
-                <option key={t.value} value={t.value}>{t.label}</option>
-              ))}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-text-secondary mb-1">행사 시작일</label>
+              <Input type="date" value={periodStart} onChange={e => setPeriodStart(e.target.value)} />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-text-secondary mb-1">행사 종료일</label>
+              <Input type="date" value={periodEnd} onChange={e => setPeriodEnd(e.target.value)} />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-text-secondary mb-1">용지 크기</label>
+            <Select value={paperSize} onChange={e => setPaperSize(e.target.value)}>
+              {PAPER_SIZES.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
             </Select>
           </div>
         </div>
       </SectionCard>
 
-      {/* 상품 목록 편집 */}
-      {products.length > 0 && (
+      {/* 템플릿 선택 */}
+      <SectionCard title="템플릿 선택">
+        <div className="grid grid-cols-3 gap-3">
+          {TEMPLATES.map(tpl => (
+            <button
+              key={tpl.value}
+              onClick={() => setTemplateCode(tpl.value)}
+              className={`p-4 rounded-xl border-2 text-left transition ${
+                templateCode === tpl.value
+                  ? 'border-primary-500 bg-primary-50/50 ring-2 ring-primary-200'
+                  : 'border-border hover:border-primary-300'
+              }`}
+            >
+              <div className="text-sm font-bold text-text">{tpl.label}</div>
+              <div className="text-[11px] text-text-secondary mt-1">{tpl.desc}</div>
+            </button>
+          ))}
+        </div>
+        </div>
+      </SectionCard>
+
+      {/* 매장 헤더 미리보기 */}
+      <SectionCard title="매장 정보 (전단 상단)">
+        <div className="grid grid-cols-3 gap-4 p-4 bg-bg rounded-xl border border-border">
+          <div className="text-center p-4 border border-dashed border-border rounded-lg">
+            <div className="text-xs text-text-secondary mb-2">마트 로고 및 주소</div>
+            <Input size="sm" placeholder="매장명" value={store.storeName} onChange={e => setStore(s => ({ ...s, storeName: e.target.value }))} className="mb-2" />
+            <Input size="sm" placeholder="주소" value={store.address} onChange={e => setStore(s => ({ ...s, address: e.target.value }))} />
+          </div>
+          <div className="text-center p-4 border border-dashed border-border rounded-lg">
+            <div className="text-xs text-text-secondary mb-2">매장 약도</div>
+            <div className="text-xs text-text-secondary/50">(이미지 업로드 예정)</div>
+          </div>
+          <div className="text-center p-4 border border-dashed border-border rounded-lg">
+            <div className="text-xs text-text-secondary mb-2">전화번호 및 QR</div>
+            <Input size="sm" placeholder="전화번호" value={store.phone} onChange={e => setStore(s => ({ ...s, phone: e.target.value }))} className="mb-2" />
+            <Input size="sm" placeholder="영업시간" value={store.hours} onChange={e => setStore(s => ({ ...s, hours: e.target.value }))} />
+          </div>
+        </div>
+      </SectionCard>
+
+      {/* 카테고리별 상품 그리드 */}
+      {categories.map(cat => (
         <SectionCard
-          title={`상품 목록 (${products.length}개)`}
+          key={cat.id}
+          title={cat.name}
           action={
-            <span className="text-xs text-text-muted">행사구분을 변경하거나 불필요한 상품을 삭제하세요</span>
+            <div className="flex items-center gap-2">
+              <button onClick={() => renameCat(cat.id)} className="text-xs text-text-secondary hover:text-text">이름변경</button>
+              <button onClick={() => removeCategory(cat.id)} className="text-xs text-error-500 hover:text-error-600">삭제</button>
+            </div>
           }
         >
-          {/* 데스크톱: 테이블 */}
-          <div className="hidden sm:block overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border">
-                  <th className="px-3 py-2 text-left text-xs font-semibold text-text-secondary">행사구분</th>
-                  <th className="px-3 py-2 text-left text-xs font-semibold text-text-secondary">상품명</th>
-                  <th className="px-3 py-2 text-right text-xs font-semibold text-text-secondary">원가</th>
-                  <th className="px-3 py-2 text-right text-xs font-semibold text-text-secondary">할인가</th>
-                  <th className="px-3 py-2 text-left text-xs font-semibold text-text-secondary">단위</th>
-                  <th className="px-3 py-2 text-left text-xs font-semibold text-text-secondary">카테고리</th>
-                  <th className="px-3 py-2 w-10"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {products.map((p, idx) => (
-                  <tr
-                    key={p.id}
-                    className={`border-b border-border/30 transition-colors hover:bg-bg/50 ${
-                      idx % 2 === 0 ? '' : 'bg-bg/20'
-                    }`}
-                  >
-                    <td className="px-3 py-2">
-                      <select
-                        className="bg-surface-secondary border border-border rounded-lg px-2 py-1 text-sm text-text w-20"
-                        value={p.eventType}
-                        onChange={(e) => updateProduct(p.id, 'eventType', e.target.value)}
-                      >
-                        {EVENT_TYPES.map(et => (
-                          <option key={et.value} value={et.value}>{et.label}</option>
-                        ))}
-                      </select>
-                    </td>
-                    <td className="px-3 py-2">
-                      <span className="text-text font-medium">{p.name}</span>
-                    </td>
-                    <td className="px-3 py-2 text-right">
-                      {p.originalPrice ? (
-                        <span className="text-text-muted line-through">{Number(p.originalPrice).toLocaleString()}원</span>
-                      ) : (
-                        <span className="text-text-muted">-</span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2 text-right">
-                      <span className="text-primary-600 font-bold">
-                        {p.price ? `${Number(p.price).toLocaleString()}원` : '-'}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2 text-text-secondary">{p.unit || '-'}</td>
-                    <td className="px-3 py-2">
-                      <span className="px-2 py-0.5 bg-bg rounded-full text-xs text-text-secondary">{p.category || '-'}</span>
-                    </td>
-                    <td className="px-3 py-2">
-                      <button
-                        className="text-text-muted hover:text-error-500 transition-colors text-sm"
-                        onClick={() => removeProduct(p.id)}
-                        title="삭제"
-                      >
-                        &#10005;
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          {/* 모바일: 카드형 */}
-          <div className="sm:hidden space-y-3">
-            {products.map(p => (
-              <div key={p.id} className="bg-surface-secondary rounded-xl p-4">
-                <div className="flex items-start justify-between mb-2">
-                  <div className="flex-1">
-                    <span className="text-text font-semibold">{p.name}</span>
-                    <span className="ml-2 px-2 py-0.5 bg-bg rounded-full text-xs text-text-secondary">{p.category || '-'}</span>
-                  </div>
-                  <button
-                    className="text-text-muted hover:text-error-500 transition-colors text-sm ml-2"
-                    onClick={() => removeProduct(p.id)}
-                  >
-                    &#10005;
-                  </button>
-                </div>
-                <div className="flex items-center gap-3 text-sm mb-2">
-                  {p.originalPrice && (
-                    <span className="text-text-muted line-through">{Number(p.originalPrice).toLocaleString()}원</span>
+          <div className="grid grid-cols-4 gap-3">
+            {/* 기존 상품들 */}
+            {cat.items.map(item => (
+              <div key={item.id} className="relative group border border-border rounded-xl overflow-hidden bg-bg hover:border-primary-300 transition">
+                {/* 이미지 영역 */}
+                <div className="aspect-square bg-surface flex items-center justify-center overflow-hidden">
+                  {item.imageUrl ? (
+                    <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="text-3xl opacity-20">📦</div>
                   )}
-                  <span className="text-primary-600 font-bold">
-                    {p.price ? `${Number(p.price).toLocaleString()}원` : '-'}
-                  </span>
-                  {p.unit && <span className="text-text-muted">/ {p.unit}</span>}
                 </div>
-                <select
-                  className="bg-surface border border-border rounded-lg px-2 py-1 text-xs text-text"
-                  value={p.eventType}
-                  onChange={(e) => updateProduct(p.id, 'eventType', e.target.value)}
-                >
-                  {EVENT_TYPES.map(et => (
-                    <option key={et.value} value={et.value}>{et.label}</option>
-                  ))}
-                </select>
+                {/* 정보 */}
+                <div className="p-2.5">
+                  <div className="text-xs font-semibold text-text truncate">{item.name}</div>
+                  {item.unit && <div className="text-[10px] text-text-secondary">{item.unit}</div>}
+                  <div className="flex items-baseline gap-1.5 mt-1">
+                    <span className="text-sm font-bold text-primary-600">{item.price.toLocaleString()}원</span>
+                    {item.originalPrice > 0 && item.originalPrice !== item.price && (
+                      <span className="text-[10px] text-text-secondary line-through">{item.originalPrice.toLocaleString()}원</span>
+                    )}
+                  </div>
+                  {item.originalPrice > 0 && item.originalPrice !== item.price && (
+                    <span className="inline-block mt-1 px-1.5 py-0.5 text-[10px] font-bold bg-error-500 text-white rounded">
+                      {Math.round((1 - item.price / item.originalPrice) * 100)}% OFF
+                    </span>
+                  )}
+                </div>
+                {/* 삭제 버튼 */}
+                <button
+                  onClick={() => removeProduct(cat.id, item.id)}
+                  className="absolute top-1.5 right-1.5 w-6 h-6 bg-error-500 text-white rounded-full text-xs opacity-0 group-hover:opacity-100 transition flex items-center justify-center"
+                >x</button>
               </div>
             ))}
+
+            {/* + 상품 추가 버튼 */}
+            <button
+              onClick={() => openAddModal(cat.id)}
+              className="aspect-square border-2 border-dashed border-border rounded-xl flex flex-col items-center justify-center gap-2 hover:border-primary-400 hover:bg-primary-50/30 transition cursor-pointer group"
+            >
+              <div className="w-10 h-10 rounded-full bg-primary-100 text-primary-600 flex items-center justify-center text-xl font-light group-hover:bg-primary-200 transition">+</div>
+              <span className="text-xs text-text-secondary group-hover:text-primary-600">상품 추가</span>
+            </button>
           </div>
         </SectionCard>
-      )}
+      ))}
 
-      {/* 빈 상태 */}
-      {products.length === 0 && !fileName && (
-        <SectionCard>
-          <div className="text-center py-12">
-            <p className="text-4xl mb-3">🖨️</p>
-            <p className="text-text-secondary mb-2">CSV 파일을 업로드하여 인쇄용 전단을 자동 생성하세요</p>
-            <p className="text-xs text-text-muted">행사구분, 상품명, 가격, 원가, 단위, 카테고리 순서의 CSV 파일을 준비해주세요</p>
-          </div>
-        </SectionCard>
-      )}
+      {/* 카테고리 추가 */}
+      <button
+        onClick={addCategory}
+        className="w-full py-4 border-2 border-dashed border-border rounded-xl text-sm text-text-secondary hover:border-primary-400 hover:text-primary-600 transition"
+      >
+        + 카테고리 추가
+      </button>
 
-      {/* 생성 버튼 + PDF 다운로드 */}
-      {products.length > 0 && (
-        <div className="space-y-4">
-          <Button
-            className="w-full"
-            size="lg"
-            onClick={handleGenerate}
-            disabled={generating}
-          >
-            {generating ? '전단 생성 중...' : '인쇄 전단 생성'}
-          </Button>
+      {/* 하단 생성 버튼 */}
+      <div className="sticky bottom-0 bg-bg/80 backdrop-blur-sm border-t border-border py-4 -mx-6 px-6 flex items-center justify-between">
+        <div className="text-sm text-text-secondary">
+          {categories.length}개 카테고리 / <b className="text-text">{totalProducts}개</b> 상품
+        </div>
+        <Button size="lg" onClick={generatePdf} disabled={generating || totalProducts === 0}>
+          {generating ? '생성 중...' : '인쇄 전단 생성'}
+        </Button>
+      </div>
 
-          {pdfUrl && (
-            <SectionCard>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-semibold text-text">인쇄 전단이 준비되었습니다</p>
-                  {flyerId && <p className="text-xs text-text-muted mt-0.5">ID: {flyerId}</p>}
+      {/* ============================================================ */}
+      {/* 상품 추가 모달 */}
+      {/* ============================================================ */}
+      {showAddModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50" onClick={() => setShowAddModal(false)}>
+          <div className="bg-surface rounded-2xl shadow-2xl w-full max-w-lg mx-4 max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            {/* 헤더 */}
+            <div className="px-6 py-4 border-b border-border flex items-center justify-between shrink-0">
+              <h3 className="text-sm font-bold text-text">상품 추가 — {categories.find(c => c.id === addTargetCatId)?.name}</h3>
+              <button onClick={() => setShowAddModal(false)} className="text-text-secondary hover:text-text text-lg">&times;</button>
+            </div>
+
+            {/* 본문 */}
+            <div className="p-6 overflow-y-auto space-y-4">
+              {/* 상품명 + 이미지 검색 */}
+              <div>
+                <label className="block text-xs font-medium text-text-secondary mb-1">상품명 *</label>
+                <div className="flex gap-2">
+                  <Input
+                    value={addForm.name}
+                    onChange={e => setAddForm(f => ({ ...f, name: e.target.value }))}
+                    placeholder="예: 한우 등심 1++"
+                    className="flex-1"
+                    onKeyDown={e => e.key === 'Enter' && searchProductImage()}
+                  />
+                  <Button size="sm" variant="secondary" onClick={searchProductImage} disabled={searchLoading}>
+                    {searchLoading ? '검색...' : '이미지 검색'}
+                  </Button>
                 </div>
-                <a
-                  href={pdfUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 px-5 py-2.5 bg-primary-600 hover:bg-primary-700 text-white text-sm font-semibold rounded-xl transition-colors"
-                >
-                  PDF 다운로드
-                </a>
               </div>
-            </SectionCard>
-          )}
+
+              {/* 이미지 검색 결과 */}
+              {searchImages.length > 0 && (
+                <div>
+                  <label className="block text-xs font-medium text-text-secondary mb-2">이미지 선택 (클릭)</label>
+                  <div className="grid grid-cols-4 gap-2 max-h-40 overflow-y-auto">
+                    {searchImages.map((img, idx) => (
+                      <button
+                        key={idx}
+                        onClick={() => { setSelectedImage(img.image); setAddForm(f => ({ ...f, imageUrl: img.image })); }}
+                        className={`aspect-square rounded-lg overflow-hidden border-2 transition ${
+                          selectedImage === img.image ? 'border-primary-500 ring-2 ring-primary-200' : 'border-border hover:border-primary-300'
+                        }`}
+                      >
+                        <img src={img.image} alt="" className="w-full h-full object-cover" />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* 선택된 이미지 + 직접 업로드 */}
+              <div className="flex items-center gap-4">
+                <div className="w-20 h-20 rounded-xl border border-border overflow-hidden bg-bg flex items-center justify-center shrink-0">
+                  {selectedImage ? (
+                    <img src={selectedImage} alt="" className="w-full h-full object-cover" />
+                  ) : (
+                    <span className="text-2xl opacity-20">📷</span>
+                  )}
+                </div>
+                <div className="flex-1">
+                  <button
+                    onClick={() => imageUploadRef.current?.click()}
+                    className="text-xs text-primary-600 hover:text-primary-700 font-medium"
+                  >직접 이미지 업로드</button>
+                  <input ref={imageUploadRef} type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
+                  {selectedImage && (
+                    <button
+                      onClick={() => { setSelectedImage(''); setAddForm(f => ({ ...f, imageUrl: '' })); }}
+                      className="block text-xs text-error-500 mt-1"
+                    >이미지 제거</button>
+                  )}
+                </div>
+              </div>
+
+              {/* 가격 */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-text-secondary mb-1">판매가 *</label>
+                  <Input type="number" value={addForm.price} onChange={e => setAddForm(f => ({ ...f, price: e.target.value }))} placeholder="0" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-text-secondary mb-1">원가 (할인 표시용)</label>
+                  <Input type="number" value={addForm.originalPrice} onChange={e => setAddForm(f => ({ ...f, originalPrice: e.target.value }))} placeholder="0" />
+                </div>
+              </div>
+
+              {/* 단위 */}
+              <div>
+                <label className="block text-xs font-medium text-text-secondary mb-1">단위/규격</label>
+                <Input value={addForm.unit} onChange={e => setAddForm(f => ({ ...f, unit: e.target.value }))} placeholder="예: 100g, 1팩, 1kg" />
+              </div>
+            </div>
+
+            {/* 하단 버튼 */}
+            <div className="px-6 py-4 border-t border-border flex justify-end gap-2 shrink-0">
+              <Button variant="secondary" onClick={() => setShowAddModal(false)}>취소</Button>
+              <Button onClick={confirmAddProduct}>추가</Button>
+            </div>
+          </div>
         </div>
       )}
 
+      {/* 알림 모달 */}
       <AlertModal
-        alert={alert}
-        onClose={() => setAlert({ ...alert, show: false })}
+        isOpen={alert.isOpen}
+        onClose={() => setAlert(a => ({ ...a, isOpen: false }))}
+        title={alert.title}
+        message={alert.message}
+        type={alert.type}
       />
     </div>
   );

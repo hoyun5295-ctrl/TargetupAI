@@ -943,7 +943,7 @@ router.post('/print-flyer', async (req: Request, res: Response) => {
     if (!companyId) return;
     const userId = (req as any).flyerUser?.userId;
 
-    const { title, period, products, paperSize, theme, storeName } = req.body;
+    const { title, period, products, paperSize, templateCode, storeName } = req.body;
 
     if (!title || !products || !Array.isArray(products) || products.length === 0) {
       return res.status(400).json({ error: '제목과 상품 목록이 필요합니다' });
@@ -974,8 +974,8 @@ router.post('/print-flyer', async (req: Request, res: Response) => {
         ...p,
         promoType: p.promoType || 'general',
       })),
-      theme: theme ? getThemeByName(theme) : undefined,
-      paperSize: paperSize || 'A4',
+      templateCode: templateCode || 'basic_green',
+      paperSize: paperSize || 'A3',
     });
 
     // HTML → PDF (300dpi)

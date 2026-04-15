@@ -39,6 +39,7 @@ export async function apiFetch(url: string, options?: RequestInit): Promise<Resp
 const MAIN_MENUS: { key: Page; label: string }[] = [
   { key: 'flyer', label: '전단제작' },
   { key: 'pop', label: 'POP제작' },
+  { key: 'print-flyer', label: '인쇄전단' },
   { key: 'send', label: '발송' },
   { key: 'coupons', label: '쿠폰' },
   { key: 'orders', label: '주문' },
@@ -48,7 +49,6 @@ const MAIN_MENUS: { key: Page; label: string }[] = [
 const MORE_MENUS: { key: Page; label: string; icon: string }[] = [
   { key: 'customers', label: '고객DB', icon: '👥' },
   { key: 'catalog', label: '상품관리', icon: '📦' },
-  { key: 'print-flyer', label: '인쇄전단', icon: '🖨️' },
   { key: 'balance', label: '충전관리', icon: '💳' },
   { key: 'unsubscribes', label: '수신거부', icon: '🚫' },
   { key: 'settings', label: '설정', icon: '⚙️' },

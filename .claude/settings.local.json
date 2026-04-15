@@ -173,7 +173,8 @@
       "Bash(grep -E \"\\\\.class$|\\\\.xml$\")",
       "Bash(unzip -l /c/Users/ceo/projects/gabia-event-admin/event/admin-api/event-admin-server-1.0.5.jar)",
       "Bash(grep \"\\\\.class$\")",
-      "Bash(grep -A 10 \"CREATE TABLE \\\\`kakao_alim_talk_template_button\\\\`\\\\|CREATE TABLE \\\\`kakao_alim_talk_template_review\\\\`\" /c/Users/ceo/projects/gabia-event-admin/event_admin.sql)"
+      "Bash(grep -A 10 \"CREATE TABLE \\\\`kakao_alim_talk_template_button\\\\`\\\\|CREATE TABLE \\\\`kakao_alim_talk_template_review\\\\`\" /c/Users/ceo/projects/gabia-event-admin/event_admin.sql)",
+      "WebFetch(domain:pagination.com)"
     ]
   }
 }
