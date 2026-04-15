@@ -164,7 +164,16 @@
       "Bash(rm _check.txt)",
       "Bash(node build-whitepaper-v2.js)",
       "Bash(xargs ls:*)",
-      "Bash(node_modules/.bin/tsc --noEmit -p tsconfig.app.json)"
+      "Bash(node_modules/.bin/tsc --noEmit -p tsconfig.app.json)",
+      "Bash(jar tf:*)",
+      "Bash(grep -A 20 \"CREATE TABLE \\\\`kakao_alim_talk_template\\\\`\" /c/Users/ceo/projects/gabia-event-admin/event_admin.sql)",
+      "Bash(grep -A 15 \"CREATE TABLE \\\\`kakao_sender_profile\\\\`\\\\|CREATE TABLE \\\\`user\\\\`\\\\|CREATE TABLE \\\\`kakao_friend_talk_template\\\\`\" /c/Users/ceo/projects/gabia-event-admin/event_admin.sql)",
+      "Bash(grep -h \"api\\\\|/user\\\\|/template\\\\|/kakao\\\\|/sms\" /c/Users/ceo/projects/gabia-event-admin/event/admin/js/app.*.js)",
+      "Bash(jar -tf event-admin-server-1.0.5.jar)",
+      "Bash(grep -E \"\\\\.class$|\\\\.xml$\")",
+      "Bash(unzip -l /c/Users/ceo/projects/gabia-event-admin/event/admin-api/event-admin-server-1.0.5.jar)",
+      "Bash(grep \"\\\\.class$\")",
+      "Bash(grep -A 10 \"CREATE TABLE \\\\`kakao_alim_talk_template_button\\\\`\\\\|CREATE TABLE \\\\`kakao_alim_talk_template_review\\\\`\" /c/Users/ceo/projects/gabia-event-admin/event_admin.sql)"
     ]
   }
 }

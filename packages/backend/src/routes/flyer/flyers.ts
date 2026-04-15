@@ -951,8 +951,11 @@ router.post('/print-flyer', async (req: Request, res: Response) => {
 
     // 매장 정보 조회
     const storeResult = await query(
-      `SELECT fu.store_name, fu.store_address, fu.store_phone, fu.store_hours
-       FROM flyer_users fu WHERE fu.id = $1`,
+      `SELECT fu.store_name, fu.business_address, fu.phone,
+              fc.store_hours, fc.address as company_address
+       FROM flyer_users fu
+       LEFT JOIN flyer_companies fc ON fc.id = fu.company_id
+       WHERE fu.id = $1`,
       [userId]
     );
     const storeInfo = storeResult.rows[0] || {};
@@ -961,8 +964,8 @@ router.post('/print-flyer', async (req: Request, res: Response) => {
     const html = renderPrintFlyer({
       store: {
         storeName: storeName || storeInfo.store_name || '',
-        address: storeInfo.store_address || '',
-        phone: storeInfo.store_phone || '',
+        address: storeInfo.business_address || storeInfo.company_address || '',
+        phone: storeInfo.phone || '',
         hours: storeInfo.store_hours || '',
       },
       title,
