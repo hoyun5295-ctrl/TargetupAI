@@ -986,7 +986,7 @@ router.post('/print-flyer', async (req: Request, res: Response) => {
 
     // flyers에 레코드 생성 (인쇄용)
     const flyerResult = await query(
-      `INSERT INTO flyers (company_id, created_by, title, store_name, template, categories, status)
+      `INSERT INTO flyers (company_id, user_id, title, store_name, template, categories, status)
        VALUES ($1, $2, $3, $4, 'print', $5, 'print_draft')
        RETURNING id`,
       [companyId, userId, title, storeName || storeInfo.store_name || '', JSON.stringify(products)]
