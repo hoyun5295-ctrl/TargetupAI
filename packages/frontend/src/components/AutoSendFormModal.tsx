@@ -15,6 +15,7 @@
 import { useEffect, useState, useMemo, useRef } from 'react';
 import { aiApi } from '../api/client';
 import { calculateSmsBytes, buildAdMessageFront, buildAdSubjectFront, replaceMessageVars, formatPhoneNumber } from '../utils/formatDate';
+import { insertAtCursorPos } from '../utils/textInsert';
 import AiMessageSuggestModal from './AiMessageSuggestModal';
 import SpamFilterTestModal from './SpamFilterTestModal';
 // ★ D123 P11: 미등록 회신번호 확인 모달 (한줄로 발송과 동일 패턴)
@@ -345,25 +346,17 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
     setToast({ show: true, type: 'success', message: 'AI 추천 문구가 적용되었습니다.' });
   };
 
-  // ★ D120: 변수 삽입 — 커서 위치에 삽입 (문안 끝이 아닌 커서 깜빡이는 곳)
+  // ★ D120: 변수 삽입 — 커서 위치에 삽입 (D124 컨트롤타워 insertAtCursorPos)
   const msgTextareaRef = useRef<HTMLTextAreaElement>(null);
   const msgCursorPosRef = useRef<number>(0);
   const insertVariable = (varName: string) => {
-    const pos = msgCursorPosRef.current;
-    setMessageContent((prev: string) => {
-      const before = prev.slice(0, pos);
-      const after = prev.slice(pos);
-      return before + varName + after;
-    });
-    const newPos = pos + varName.length;
-    msgCursorPosRef.current = newPos;
-    setTimeout(() => {
-      if (msgTextareaRef.current) {
-        msgTextareaRef.current.focus();
-        msgTextareaRef.current.selectionStart = newPos;
-        msgTextareaRef.current.selectionEnd = newPos;
-      }
-    }, 0);
+    insertAtCursorPos(
+      msgCursorPosRef.current,
+      varName,
+      setMessageContent,
+      msgTextareaRef.current,
+      msgCursorPosRef,
+    );
   };
 
   // MMS 이미지 업로드

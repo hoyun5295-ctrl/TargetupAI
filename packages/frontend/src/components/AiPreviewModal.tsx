@@ -9,7 +9,7 @@ interface AiPreviewModalProps {
   selectedAiMsgIdx: number;
   useIndividualCallback: boolean;
   selectedCallback: string;
-  mmsUploadedImages: {serverPath: string; url: string; filename: string; size: number}[];
+  mmsUploadedImages: {serverPath: string; url: string; filename: string; originalName?: string; size: number}[];
   testSentResult: string | null;
   testSending: boolean;
   testCooldown: boolean;

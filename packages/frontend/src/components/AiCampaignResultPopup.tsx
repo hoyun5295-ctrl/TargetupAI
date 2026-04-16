@@ -31,8 +31,8 @@ interface AiCampaignResultPopupProps {
   setSpamFilterData: (data: any) => void;
   setShowMmsUploadModal: (v: boolean) => void;
   // MMS
-  mmsUploadedImages: {serverPath: string; url: string; filename: string; size: number}[];
-  setMmsUploadedImages: React.Dispatch<React.SetStateAction<{serverPath: string; url: string; filename: string; size: number}[]>>;
+  mmsUploadedImages: {serverPath: string; url: string; filename: string; originalName?: string; size: number}[];
+  setMmsUploadedImages: React.Dispatch<React.SetStateAction<{serverPath: string; url: string; filename: string; originalName?: string; size: number}[]>>;
   // Utils
   wrapAdText: (text: string) => string;
   calculateBytes: (text: string) => number;

@@ -42,6 +42,8 @@ import UploadProgressModal from '../components/UploadProgressModal';
 import UploadResultModal from '../components/UploadResultModal';
 import { useAuthStore } from '../stores/authStore';
 import { formatDate, formatPreviewValue, formatByType, calculateSmsBytes, truncateToSmsBytes, DIRECT_VAR_MAP, DIRECT_VAR_TO_FIELD, DIRECT_FIELD_LABELS, DIRECT_MAPPING_FIELDS, replaceDirectVars, formatPhoneNumber, mmsServerPathToUrl, resolveRecipientCallback, buildAdMessageFront } from '../utils/formatDate';
+import { insertAtCursorOrAppend } from '../utils/textInsert';
+import { getMmsImagePath, getMmsImageDisplayName } from '../utils/mmsImage';
 import DirectSendPanel from '../components/DirectSendPanel';
 
 interface Stats {
@@ -408,7 +410,7 @@ export default function Dashboard() {
         scheduledAt: reserveEnabled && reserveDateTime ? new Date(reserveDateTime).toISOString() : null,
         splitEnabled: isAlimtalk ? false : splitEnabled,
         splitCount: isAlimtalk ? null : (splitEnabled ? splitCount : null),
-        mmsImagePaths: isAlimtalk ? [] : mmsUploadedImages.map(img => img.serverPath),
+        mmsImagePaths: isAlimtalk ? [] : mmsUploadedImages.map(img => ({ path: img.serverPath, originalName: img.originalName || '' })),
         ...(confirmCallbackExclusion ? { confirmCallbackExclusion: true } : {}),
         // ★ D102: 중복제거/수신거부제거 사용자 선택 전달
         dedupEnabled: sendConfirm.dedupEnabled ?? true,
@@ -539,7 +541,7 @@ export default function Dashboard() {
           scheduledAt: reserveEnabled && reserveDateTime ? new Date(reserveDateTime).toISOString() : null,
           splitEnabled: splitEnabled,
           splitCount: splitEnabled ? splitCount : null,
-          mmsImagePaths: mmsUploadedImages.map(img => img.serverPath),
+          mmsImagePaths: mmsUploadedImages.map(img => ({ path: img.serverPath, originalName: img.originalName || '' })),
           ...(confirmCallbackExclusion ? { confirmCallbackExclusion: true } : {}),
           // ★ D102: 중복제거/수신거부제거 사용자 선택 전달
           dedupEnabled: sendConfirm.dedupEnabled ?? true,
@@ -648,7 +650,8 @@ export default function Dashboard() {
   };
 
   // MMS 이미지 (서버 업로드 방식)
-  const [mmsUploadedImages, setMmsUploadedImages] = useState<{serverPath: string; url: string; filename: string; size: number}[]>([]);
+  // ★ D124 N4: originalName 필드 추가 — 업로드한 원본 파일명 표시용 (DB mms_image_paths 객체 배열 전송에도 사용)
+  const [mmsUploadedImages, setMmsUploadedImages] = useState<{serverPath: string; url: string; filename: string; originalName?: string; size: number}[]>([]);
   const [mmsUploading, setMmsUploading] = useState(false);
   const [showMmsUploadModal, setShowMmsUploadModal] = useState(false);
 
@@ -1540,7 +1543,7 @@ const campaignData = {
       individualCallbackColumn: _useIndividualCallback ? (modalData?.individualCallbackColumn ?? individualCallbackColumn) : undefined,
       // ★ B-D75-01: 모달에서 수정된 제목 우선 사용
       subject: modalData?.subject ?? selectedMsg.subject ?? '',
-      mmsImagePaths: mmsUploadedImages.map(img => img.serverPath),
+      mmsImagePaths: mmsUploadedImages.map(img => ({ path: img.serverPath, originalName: img.originalName || '' })),
     };
 
     const response = await campaignsApi.create(campaignData);
@@ -1673,7 +1676,7 @@ const campaignData = {
         //   기존: variant.subject 만 사용 → 사용자 제목 수정이 무시되어 원본 제목으로 발송됨
         subject: modalData.subject ?? variant.subject ?? '',
         // ★ B1: MMS 채널일 때 첨부 이미지 경로 전달 (이전: 빈 배열 하드코딩으로 첨부 누락)
-        mmsImagePaths: channelType === 'MMS' ? mmsUploadedImages.map(img => img.serverPath) : [],
+        mmsImagePaths: channelType === 'MMS' ? mmsUploadedImages.map(img => ({ path: img.serverPath, originalName: img.originalName || '' })) : [],
       };
 
       console.log('=== AI 맞춤한줄 발송 디버깅 ===');
@@ -1772,7 +1775,7 @@ const campaignData = {
           messageType: selectedChannel,
           isAd: isAd,
           subject: selectedMsg.subject || '',
-          mmsImagePaths: mmsUploadedImages.map(img => img.serverPath),
+          mmsImagePaths: mmsUploadedImages.map(img => ({ path: img.serverPath, originalName: img.originalName || '' })),
           // ★ D85: column 키 raw 데이터 전달 — replaceVariables가 customer[column]으로 접근
           sampleCustomer: sampleCustomerRaw && Object.keys(sampleCustomerRaw).length > 0 ? sampleCustomerRaw : undefined,
         }),
@@ -1816,7 +1819,7 @@ const campaignData = {
           messageType: targetMsgType,
           isAd: adTextEnabled,
           subject: targetSubject || '',
-          mmsImagePaths: mmsUploadedImages.map(img => img.serverPath),
+          mmsImagePaths: mmsUploadedImages.map(img => ({ path: img.serverPath, originalName: img.originalName || '' })),
           // ★ D85: column 키 raw 데이터 전달
           sampleCustomer: sampleCustomerRaw && Object.keys(sampleCustomerRaw).length > 0 ? sampleCustomerRaw : undefined,
         }),
@@ -3201,8 +3204,11 @@ const campaignData = {
                   <button
                     key={i}
                     onClick={() => {
-                      if (showSpecialChars === 'target') setTargetMessage(prev => prev + char);
-                      else setDirectMessage(prev => prev + char);
+                      // ★ D124 N3: 컨트롤타워 insertAtCursorOrAppend — 커서 위치 삽입 (fallback: 끝에 붙임)
+                      const kind = showSpecialChars; // 'target' | 'direct'
+                      const ta = document.querySelector<HTMLTextAreaElement>(`textarea[data-char-target="${kind}"]`);
+                      const setter = kind === 'target' ? setTargetMessage : setDirectMessage;
+                      insertAtCursorOrAppend(ta, char, setter);
                       setShowSpecialChars(null);
                     }}
                     className="w-10 h-10 flex items-center justify-center text-lg border rounded-lg hover:bg-purple-50 hover:border-purple-300 transition-colors"
@@ -3260,15 +3266,18 @@ const campaignData = {
                           }
                           // ★ D100: MMS 이미지 복원 — JSON 문자열/배열 양쪽 대응
                           //   DB에 JSON.stringify()로 저장 → 조회 시 string으로 반환 → Array.isArray 실패 → 이미지 미복원
+                          // ★ D124 N4: 배열 항목이 객체(신규: {path, originalName}) 또는 문자열(과거) 혼재 → 컨트롤타워 사용
                           let mmsPaths = t.mms_image_paths;
                           if (typeof mmsPaths === 'string') {
                             try { mmsPaths = JSON.parse(mmsPaths); } catch { mmsPaths = null; }
                           }
                           if (t.message_type === 'MMS' && mmsPaths && Array.isArray(mmsPaths)) {
-                            setMmsUploadedImages(mmsPaths.map((p: string, i: number) => {
-                              const apiUrl = mmsServerPathToUrl(p);
-                              const parts = p.replace(/\\/g, '/').split('/');
-                              return { serverPath: p, url: apiUrl, filename: parts[parts.length - 1] || `image_${i + 1}`, size: 0 };
+                            setMmsUploadedImages(mmsPaths.map((item: any, i: number) => {
+                              const serverPath = getMmsImagePath(item);
+                              const originalName = typeof item === 'object' && item?.originalName ? item.originalName : undefined;
+                              const apiUrl = mmsServerPathToUrl(serverPath);
+                              const filename = getMmsImageDisplayName(item, `image_${i + 1}`);
+                              return { serverPath, url: apiUrl, filename, originalName, size: 0 };
                             }));
                           }
                           setShowTemplateBox(null);
@@ -3327,7 +3336,7 @@ const campaignData = {
                     const content = showTemplateSave === 'target' ? targetMessage : directMessage;
                     const msgType = showTemplateSave === 'target' ? targetMsgType : directMsgType;
                     const subject = showTemplateSave === 'target' ? targetSubject : directSubject;
-                    const imagePaths = msgType === 'MMS' ? mmsUploadedImages.map(img => img.serverPath) : undefined;
+                    const imagePaths = msgType === 'MMS' ? mmsUploadedImages.map(img => ({ path: img.serverPath, originalName: img.originalName || '' })) : undefined;
                     const ok = await saveTemplate(templateSaveName.trim(), content, msgType, subject, imagePaths);
                     if (ok) setShowTemplateSave(null);
                   }}

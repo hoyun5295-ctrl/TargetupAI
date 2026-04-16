@@ -24,6 +24,7 @@ import {
   bulkInsertSmsQueue, insertAlimtalkQueue, toQtmsgType, insertTestSmsQueue
 } from '../utils/sms-queue';
 import { prepaidDeduct, prepaidRefund } from '../utils/prepaid';
+import { normalizeMmsImagePaths, type MmsImageItem } from '../utils/mms-image-util';
 import { buildDateRangeFilter } from '../utils/stats-aggregation';
 import { cancelCampaign, syncCampaignResults } from '../utils/campaign-lifecycle';
 import { buildFilterQueryCompat } from '../utils/customer-filter';
@@ -338,7 +339,11 @@ router.post('/test-send', async (req: Request, res: Response) => {
     // 담당자별로 테스트 전용 라인으로 INSERT
     const testTables = await getTestSmsTables();
     const msgType = toQtmsgType(messageType || 'SMS');
-    const mmsImagePaths: string[] = req.body.mmsImagePaths || [];
+    // ★ D124 N4: mmsImagePaths 객체 배열 허용 (frontend가 {path, originalName} 전송)
+    //   - DB 저장: 객체 배열 그대로 JSONB로 저장 (originalName 표시 용도)
+    //   - QTmsg INSERT: normalizeMmsImagePaths로 절대경로만 추출
+    const mmsImagePathsRaw: MmsImageItem[] = req.body.mmsImagePaths || [];
+    const mmsImagePaths: string[] = normalizeMmsImagePaths(mmsImagePathsRaw);
     // ★ D100: bill_id에 userId 저장 (사용자별 테스트 결과 필터 + 사용금액 격리)
     //   기존 testBillId 사용 → 결과 조회 시 bill_id=userId 필터와 불일치 → company_user 결과 미표시
     const testBillId = userId || '';
@@ -779,7 +784,8 @@ const sendTime = isScheduled
   : toKoreaTimeStr(new Date());  // 즉시발송도 JS 타임스탬프를 파라미터로 전달
 
 // MMS 이미지 경로 (campaigns 테이블에서 가져옴)
-const campaignMmsImages: string[] = campaign.mms_image_paths || [];
+// ★ D124 N4: mms_image_paths가 객체 배열({path, originalName}) 또는 문자열 배열 혼재 가능 → 정규화
+const campaignMmsImages: string[] = normalizeMmsImagePaths(campaign.mms_image_paths);
 const aiMsgTypeCode = toQtmsgType(campaign.message_type);
 
 // 카카오 설정 (campaigns 테이블에서)
@@ -1550,11 +1556,13 @@ router.post('/direct-send', async (req: Request, res: Response) => {
         // ★ D103: resolveCustomerCallback 컨트롤타워
         const recipientCallback = resolveCustomerCallback(recipient, useIndividualCallback, callback);
 
+        // ★ D124 N4: mmsImagePaths가 객체 배열({path, originalName}) 또는 문자열 배열 혼재 가능 → 정규화
+        const directMmsPaths = normalizeMmsImagePaths(mmsImagePaths);
         directSmsRows.push([
           cleanPhone, recipientCallback, finalMessage,
           toQtmsgType(msgType),
           finalSubject, sendTime, campaignId, companyId,
-          (mmsImagePaths || [])[0] || '', (mmsImagePaths || [])[1] || '', (mmsImagePaths || [])[2] || ''
+          directMmsPaths[0] || '', directMmsPaths[1] || '', directMmsPaths[2] || ''
         ]);
       }
 

@@ -64,7 +64,9 @@ router.post('/upload', authenticate, (req: any, res: any) => {
         fs.mkdirSync(companyDir, { recursive: true });
       }
 
-      const results: { serverPath: string; url: string; filename: string; size: number }[] = [];
+      // ★ D124 N4: originalName(업로드 원본 파일명) 응답에 포함 — 표시용
+      //   multer가 latin1로 읽는 한글 파일명을 utf-8로 복원 (보편적 패턴)
+      const results: { serverPath: string; url: string; filename: string; originalName: string; size: number }[] = [];
 
       for (const file of files) {
         // 파일 크기 재검증 (안전장치)
@@ -82,10 +84,20 @@ router.post('/upload', authenticate, (req: any, res: any) => {
         // 절대경로 (QTmsg Agent가 접근할 경로)
         const absolutePath = path.resolve(filePath);
 
+        // ★ 한글 파일명 복원: multer가 latin1로 인코딩된 것을 utf-8로 재해석
+        let originalName = file.originalname;
+        try {
+          const buf = Buffer.from(file.originalname, 'latin1');
+          const utf8 = buf.toString('utf8');
+          // utf-8로 디코딩한 결과가 replace char(\uFFFD) 미포함이면 채택
+          if (!utf8.includes('\uFFFD')) originalName = utf8;
+        } catch { /* ignore */ }
+
         results.push({
           serverPath: absolutePath,
           url: `/api/mms-images/${companyId}/${filename}`,
           filename: filename,
+          originalName,
           size: file.size,
         });
       }

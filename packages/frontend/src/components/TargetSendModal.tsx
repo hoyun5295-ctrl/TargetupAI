@@ -2,6 +2,7 @@ import { Sparkles } from 'lucide-react';
 import { useRef, useState } from 'react';
 import type { FieldMeta } from './DirectTargetFilterModal';
 import { formatPreviewValue, formatByType, buildAdMessageFront, replaceVarsByFieldMeta, FRONT_FIELD_DISPLAY_MAP, reverseDisplayValueFront } from '../utils/formatDate';
+import { insertAtCursor } from '../utils/textInsert';
 
 // ★ D43-3c: 정규식 특수문자 이스케이프
 const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -190,29 +191,12 @@ export default function TargetSendModal({
     return emojiPattern.test(text);
   };
 
-  // ====== ★ 커서 위치에 변수 삽입 (버그 수정) ======
+  // ====== ★ 커서 위치에 변수 삽입 — D124 컨트롤타워(insertAtCursor) ======
   const insertVariable = (variable: string, target: 'sms' | 'kakao') => {
     const ref = target === 'sms' ? smsTextareaRef : kakaoTextareaRef;
-    const currentValue = target === 'sms' ? targetMessage : kakaoMessage;
     const setter = target === 'sms' ? setTargetMessage : setKakaoMessage;
-
-    const ta = ref.current;
-    if (!ta) {
-      setter(currentValue + variable);
-      return;
-    }
-    const start = ta.selectionStart;
-    const end = ta.selectionEnd;
-    const before = currentValue.substring(0, start);
-    const after = currentValue.substring(end);
-    const newValue = before + variable + after;
-    setter(newValue);
-    requestAnimationFrame(() => {
-      const newPos = start + variable.length;
-      ta.selectionStart = newPos;
-      ta.selectionEnd = newPos;
-      ta.focus();
-    });
+    const ok = insertAtCursor(ref.current, variable, setter);
+    if (!ok) setter(prev => prev + variable); // fallback: 끝에 붙임
   };
 
   // ====== ★ B+0407-1: 인라인 replaceVars 제거 — replaceVarsByFieldMeta 컨트롤타워 사용 ======
@@ -455,6 +439,7 @@ export default function TargetSendModal({
                   )}
                   <textarea
                     ref={smsTextareaRef}
+                    data-char-target="target"
                     value={targetMessage}
                     onChange={(e) => {
                       const text = e.target.value;
@@ -911,21 +896,9 @@ export default function TargetSendModal({
             </div>
 
             {/* 하단 버튼 */}
+            {/* ★ D124 N1: 중복제거 버튼 제거 — 직접타겟발송은 앞 단에서 이미 중복 제거된 데이터. 상단 체크박스(D123)와 함께 버튼도 제거 */}
             <div className="mt-3 flex justify-between items-center">
               <div className="flex gap-2">
-                <button
-                  onClick={() => {
-                    const seen = new Set<string>();
-                    const deduped = targetRecipients.filter(r => {
-                      if (seen.has(r.phone)) return false;
-                      seen.add(r.phone);
-                      return true;
-                    });
-                    setTargetRecipients(deduped);
-                    setSelectedPhones(new Set());
-                  }}
-                  className="px-3 py-1.5 text-sm border rounded-lg hover:bg-gray-50"
-                >중복제거</button>
                 <button
                   onClick={() => {
                     if (selectedPhones.size === 0) return;

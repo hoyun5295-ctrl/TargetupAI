@@ -60,7 +60,7 @@ interface AiCustomSendFlowProps {
     isAd: boolean;
   };
   // ★ B1: MMS 이미지 첨부 (Dashboard에서 props 전달 — 한줄로 AI와 동일 패턴)
-  mmsUploadedImages?: { serverPath: string; url: string; filename: string; size: number }[];
+  mmsUploadedImages?: { serverPath: string; url: string; filename: string; originalName?: string; size: number }[];
   onMmsImageUpload?: (files: FileList | null) => void;
   onMmsImageRemove?: (index: number) => void;
   mmsUploading?: boolean;
@@ -650,7 +650,7 @@ export default function AiCustomSendFlow({
                         <div className="flex flex-wrap gap-2">
                           {mmsUploadedImages.map((img, idx) => (
                             <div key={idx} className="relative w-16 h-16 rounded border border-violet-300 overflow-hidden">
-                              <img src={img.url} alt={img.filename} className="w-full h-full object-cover" />
+                              <img src={img.url} alt={img.originalName || img.filename} title={img.originalName || img.filename} className="w-full h-full object-cover" />
                               {onMmsImageRemove && (
                                 <button
                                   onClick={() => onMmsImageRemove(idx)}

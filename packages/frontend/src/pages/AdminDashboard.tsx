@@ -3562,7 +3562,8 @@ const handleApproveRequest = async (id: string) => {
                   <tr>
                     <th className="px-3 py-3 text-left text-gray-600 font-medium">회사(계정)</th>
                     <th className="px-3 py-3 text-left text-gray-600 font-medium">캠페인명</th>
-                    <th className="px-3 py-3 text-center text-gray-600 font-medium">발송시간</th>
+                    <th className="px-3 py-3 text-center text-gray-600 font-medium">등록일시</th>
+                    <th className="px-3 py-3 text-center text-gray-600 font-medium">발송일시</th>
                     <th className="px-3 py-3 text-center text-gray-600 font-medium">유형</th>
                     <th className="px-3 py-3 text-center text-gray-600 font-medium">문자</th>
                     <th className="px-3 py-3 text-center text-gray-600 font-medium">총건수</th>
@@ -3575,7 +3576,7 @@ const handleApproveRequest = async (id: string) => {
                 </thead>
                 <tbody className="divide-y">
                   {allCampaigns.length === 0 ? (
-                    <tr><td colSpan={11} className="px-4 py-12 text-center text-gray-400">캠페인이 없습니다.</td></tr>
+                    <tr><td colSpan={12} className="px-4 py-12 text-center text-gray-400">캠페인이 없습니다.</td></tr>
                   ) : allCampaigns.map((c: any) => {
                     const sent = parseInt(c.total_sent) || 0;
                     const success = parseInt(c.total_success) || 0;
@@ -3588,6 +3589,9 @@ const handleApproveRequest = async (id: string) => {
                         {c.created_by_login && <div className="text-xs text-gray-400">{c.created_by_login}</div>}
                       </td>
                       <td className="px-3 py-3 font-medium text-gray-900">{c.name}</td>
+                      <td className="px-3 py-3 text-center text-gray-500 text-xs whitespace-nowrap">
+                        {c.created_at ? formatDateTimeShort(c.created_at) : '-'}
+                      </td>
                       <td className="px-3 py-3 text-center text-gray-500 text-xs whitespace-nowrap">
                         {c.last_sent_at ? formatDateTimeShort(c.last_sent_at) : c.scheduled_at ? formatDateTimeShort(c.scheduled_at) : '-'}
                       </td>
@@ -5819,7 +5823,8 @@ const handleApproveRequest = async (id: string) => {
                   <thead className="bg-gray-50 sticky top-0">
                     <tr>
                       <th className="px-3 py-2.5 text-center text-xs font-medium text-gray-500 whitespace-nowrap">No.</th>
-                      <th className="px-3 py-2.5 text-center text-xs font-medium text-gray-500 whitespace-nowrap">발송요청</th>
+                      <th className="px-3 py-2.5 text-center text-xs font-medium text-gray-500 whitespace-nowrap">등록일시</th>
+                      <th className="px-3 py-2.5 text-center text-xs font-medium text-gray-500 whitespace-nowrap">발송일시</th>
                       <th className="px-3 py-2.5 text-center text-xs font-medium text-gray-500 whitespace-nowrap">수신번호</th>
                       <th className="px-3 py-2.5 text-center text-xs font-medium text-gray-500 whitespace-nowrap">회신번호</th>
                       <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-500 whitespace-nowrap">메시지 내용</th>
@@ -5830,13 +5835,15 @@ const handleApproveRequest = async (id: string) => {
                   </thead>
                   <tbody className="divide-y divide-gray-100">
                     {smsDetailRows.length === 0 ? (
-                      <tr><td colSpan={8} className="px-4 py-12 text-center text-gray-400">
+                      <tr><td colSpan={9} className="px-4 py-12 text-center text-gray-400">
                         {smsDetailCampaign?.status === 'scheduled' ? '아직 발송 전입니다.' : '발송 내역이 없습니다.'}
                       </td></tr>
                     ) : smsDetailRows.map((r: any, idx: number) => (
                       <tr key={r.seqno} className="hover:bg-blue-50/30">
                         <td className="px-3 py-2 text-center text-xs text-gray-400">{(smsDetailPage - 1) * 50 + idx + 1}</td>
-                        <td className="px-3 py-2 text-center text-xs text-gray-500 whitespace-nowrap">{r.sendreqTime ? new Date(r.sendreqTime).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '-'}</td>
+                        {/* ★ D124: 등록일시 = 캠페인 created_at (모든 행 동일) */}
+                        <td className="px-3 py-2 text-center text-xs text-gray-500 whitespace-nowrap">{smsDetailCampaign?.created_at ? new Date(smsDetailCampaign.created_at).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '-'}</td>
+                        <td className="px-3 py-2 text-center text-xs text-gray-500 whitespace-nowrap">{r.mobsendTime ? new Date(r.mobsendTime).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '-'}</td>
                         <td className="px-3 py-2 text-center text-gray-700 font-mono text-xs">{r.destNo}</td>
                         <td className="px-3 py-2 text-center text-gray-500 font-mono text-xs">{r.callBack}</td>
                         <td className="px-3 py-2 text-gray-700 text-xs max-w-xs">
@@ -6588,12 +6595,13 @@ const handleApproveRequest = async (id: string) => {
                             <th className="px-4 py-2.5 text-center text-gray-600 font-medium">실패</th>
                             <th className="px-4 py-2.5 text-center text-gray-600 font-medium">타입</th>
                             <th className="px-4 py-2.5 text-left text-gray-600 font-medium">메시지내용</th>
-                            <th className="px-4 py-2.5 text-center text-gray-600 font-medium">발송시간</th>
+                            <th className="px-4 py-2.5 text-center text-gray-600 font-medium">등록일시</th>
+                            <th className="px-4 py-2.5 text-center text-gray-600 font-medium">발송일시</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-200">
                           {statsDetail.campaigns?.length === 0 ? (
-                            <tr><td colSpan={9} className="px-4 py-8 text-center text-gray-400">데이터가 없습니다.</td></tr>
+                            <tr><td colSpan={11} className="px-4 py-8 text-center text-gray-400">데이터가 없습니다.</td></tr>
                           ) : statsDetail.campaigns?.map((c: any, idx: number) => (
                             <tr key={idx} className="hover:bg-white">
                               <td className="px-4 py-2.5 font-medium text-gray-900 max-w-[200px] truncate" title={c.campaign_name}>
@@ -6637,7 +6645,10 @@ const handleApproveRequest = async (id: string) => {
                                 ) : '-'}
                               </td>
                               <td className="px-4 py-2.5 text-center text-gray-500 font-mono text-xs">
-                                {c.sent_at ? new Date(c.sent_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit' }) : '-'}
+                                {c.created_at ? new Date(c.created_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '-'}
+                              </td>
+                              <td className="px-4 py-2.5 text-center text-gray-500 font-mono text-xs">
+                                {c.sent_at ? new Date(c.sent_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '-'}
                               </td>
                             </tr>
                           ))}

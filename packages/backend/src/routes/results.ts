@@ -39,16 +39,17 @@ function formatCsvDateTime(val: any): string {
 //   - sendreq_time: 우리 앱 NOW() → KST → DATE_ADD 불필요
 //   - mobsend_time: QTmsg Agent → UTC → DATE_ADD(+9h) 필요
 //   - repmsg_recvtm: QTmsg Agent → UTC → DATE_ADD(+9h) 필요
-/** 상세조회용 SMS 필드 (seqno 포함) */
+// ★ D124: UI 발송내역(ResultsModal)은 수신확인 컬럼 제거하지만, 엑셀다운로드는 3컬럼 유지
+//   (전송요청시간/발송시간/수신확인시간) — 지연/클레임 관리용 외부 엑셀 유지 요구
+/** 상세조회용 SMS 필드 (seqno 포함) — UI만 사용, 수신확인 없음 */
 const SMS_DETAIL_FIELDS = `seqno, dest_no, call_back, msg_type, msg_contents, status_code, mob_company,
   sendreq_time,
   DATE_ADD(mobsend_time, INTERVAL 9 HOUR) AS mobsend_time,
-  DATE_ADD(repmsg_recvtm, INTERVAL 9 HOUR) AS repmsg_recvtm,
   'sms' AS _channel, sendreq_time AS _sort_time,
   '' AS kakao_bubble_type, '' AS kakao_report_code,
   '' AS resend_type, '' AS resend_report_code`;
 
-/** 엑셀 export용 SMS 필드 (seqno 제외) */
+/** 엑셀 export용 SMS 필드 (seqno 제외) — 엑셀 3컬럼 유지: 전송요청/발송/수신확인 */
 const SMS_EXPORT_FIELDS = `dest_no, call_back, msg_type, msg_contents, status_code, mob_company,
   sendreq_time,
   DATE_ADD(mobsend_time, INTERVAL 9 HOUR) AS mobsend_time,
@@ -491,11 +492,12 @@ router.get('/campaigns/:id/messages', async (req: Request, res: Response) => {
       else if (status === 'fail') kakaoWhere += ` AND REPORT_CODE != '0000' AND STATUS IN ('3','4')`;
 
       // 카카오 통합 필드 (SMS와 UNION ALL 호환 — 동일 컬럼 이름으로 매핑)
+      // ★ D124: 수신확인(repmsg_recvtm) 제거 — SMS_DETAIL_FIELDS와 스키마 일치
       const kakaoFields = `ID AS seqno, PHONE_NUMBER AS dest_no, '-' AS call_back, 'KAKAO' AS msg_type,
         MESSAGE AS msg_contents,
         CASE WHEN REPORT_CODE='0000' THEN 1800 WHEN STATUS='1' THEN 100 ELSE 9999 END AS status_code,
         '카카오' AS mob_company,
-        REQUEST_DATE AS sendreq_time, RESPONSE_DATE AS mobsend_time, REPORT_DATE AS repmsg_recvtm,
+        REQUEST_DATE AS sendreq_time, RESPONSE_DATE AS mobsend_time,
         'kakao' AS _channel, REQUEST_DATE AS _sort_time,
         CHAT_BUBBLE_TYPE AS kakao_bubble_type, REPORT_CODE AS kakao_report_code,
         RESEND_MT_TYPE AS resend_type, RESEND_REPORT_CODE AS resend_report_code`;
@@ -627,11 +629,14 @@ router.get('/campaigns/:id/export', async (req: Request, res: Response) => {
     if (!companyId) return res.status(403).json({ error: '권한이 필요합니다.' });
 
     const campaignResult = await query(
-      `SELECT campaign_name, send_channel FROM campaigns WHERE id = $1 AND company_id = $2`,
+      `SELECT campaign_name, send_channel, created_at FROM campaigns WHERE id = $1 AND company_id = $2`,
       [id, companyId]
     );
     if (campaignResult.rows.length === 0) return res.status(404).json({ error: '캠페인을 찾을 수 없습니다.' });
     const sendChannel = campaignResult.rows[0].send_channel || 'sms';
+    // ★ D124: "전송요청시간(=등록일시)"은 한줄로에서 발송을 건 시간 = 캠페인 created_at
+    //   (sendreq_time은 QTmsg 큐 INSERT 시간 → 발송 직전/예약 시점이라 의미 다름)
+    const campaignCreatedAt = campaignResult.rows[0].created_at;
 
     // statusMap, carrierMap → sms-result-map.ts의 getStatusLabel(), getCarrierLabel() 사용
 
@@ -649,6 +654,7 @@ router.get('/campaigns/:id/export', async (req: Request, res: Response) => {
     }
 
     if (sendChannel === 'kakao' || sendChannel === 'both') {
+      // ★ D124: 엑셀은 전송요청/발송/수신확인 3컬럼 유지 (UI 발송내역만 수신확인 제거)
       const kakaoFields = `PHONE_NUMBER AS dest_no, '-' AS call_back,
         CONCAT('카카오(', COALESCE(CHAT_BUBBLE_TYPE, 'TEXT'), ')') AS msg_type,
         MESSAGE AS msg_contents,
@@ -661,6 +667,7 @@ router.get('/campaigns/:id/export', async (req: Request, res: Response) => {
     }
 
     // CSV 헤더 스트리밍 시작
+    // ★ D124: 엑셀 3컬럼 유지 (UI만 수신확인 제거). 첫 컬럼(전송요청시간)은 캠페인 created_at으로 채움
     const BOM = '\uFEFF';
     const headers = '수신번호,회신번호,메시지유형,메시지내용,전송결과,결과코드,통신사,전송요청시간,발송시간,수신확인시간';
 
@@ -707,7 +714,10 @@ router.get('/campaigns/:id/export', async (req: Request, res: Response) => {
           `"${(m.msg_contents || '').replace(/"/g, '""')}"`,
           statusDisplay, m.status_code,
           carrierDisplay,
-          formatCsvDateTime(m.sendreq_time), formatCsvDateTime(m.mobsend_time), formatCsvDateTime(m.repmsg_recvtm)
+          // ★ D124: 전송요청시간 = 캠페인 created_at (모든 행 동일)
+          formatCsvDateTime(campaignCreatedAt),
+          formatCsvDateTime(m.mobsend_time),
+          formatCsvDateTime(m.repmsg_recvtm),
         ].join(',') + '\n');
       }
 

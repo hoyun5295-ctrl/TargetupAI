@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { calculateSmsBytes, mmsServerPathToUrl, formatCampaignMessageForDisplay, buildAdSubjectFront, formatPhoneNumber } from '../utils/formatDate';
+import { getMmsImagePath, getMmsImageDisplayName } from '../utils/mmsImage';
 import CalendarModal from './CalendarModal';
 
 interface ResultsModalProps {
@@ -829,9 +830,11 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                               {/* ★ D123 P5: 호버 시 파일명 툴팁 + 클릭 시 확대 모달 */}
                               {selectedCampaign.mms_image_paths && Array.isArray(selectedCampaign.mms_image_paths) && selectedCampaign.mms_image_paths.length > 0 && (
                                 <div className="mt-2 pt-2 border-t border-gray-100 flex gap-1.5">
-                                  {selectedCampaign.mms_image_paths.map((imgPath: string, idx: number) => {
-                                    const filename = String(imgPath || '').replace(/\\/g, '/').split('/').pop() || `이미지${idx+1}`;
-                                    const url = mmsServerPathToUrl(imgPath);
+                                  {/* ★ D124 N4: 객체({path, originalName}) / 문자열 양쪽 수용 — 원본 파일명 우선 표시 */}
+                                  {selectedCampaign.mms_image_paths.map((imgItem: any, idx: number) => {
+                                    const serverPath = getMmsImagePath(imgItem);
+                                    const filename = getMmsImageDisplayName(imgItem, `이미지${idx+1}`);
+                                    const url = mmsServerPathToUrl(serverPath);
                                     return (
                                       <img
                                         key={idx}
@@ -903,9 +906,10 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
         )}
 
         {/* ==================== 발송 내역 팝업 ==================== */}
+        {/* ★ D124: 모달 폭 960→1300px 확대 + 각 셀 whitespace-nowrap — 수신번호/날짜/결과코드 줄바꿈 방지 */}
         {showSendDetail && selectedCampaign && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[70]">
-            <div className="bg-white rounded-xl shadow-2xl w-[960px] max-h-[85vh] overflow-hidden flex flex-col">
+            <div className="bg-white rounded-xl shadow-2xl w-[1300px] max-w-[95vw] max-h-[85vh] overflow-hidden flex flex-col">
               {/* 헤더 */}
               <div className="flex justify-between items-center px-6 py-4 border-b">
                 <div>
@@ -979,7 +983,6 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                       <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-500">메시지내용</th>
                       <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500">등록일시</th>
                       <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500">발송일시</th>
-                      <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500">수신확인</th>
                       <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500">전송결과</th>
                       <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500">결과코드</th>
                       <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500">통신사</th>
@@ -987,9 +990,9 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                   </thead>
                   <tbody>
                     {messageLoading ? (
-                      <tr><td colSpan={10} className="py-10 text-center text-gray-400">조회 중...</td></tr>
+                      <tr><td colSpan={9} className="py-10 text-center text-gray-400">조회 중...</td></tr>
                     ) : messages.length === 0 ? (
-                      <tr><td colSpan={10} className="py-10 text-center text-gray-400">
+                      <tr><td colSpan={9} className="py-10 text-center text-gray-400">
                         {selectedCampaign?.status === 'cancelled'
                           ? '취소된 캠페인입니다. 대기중이던 메시지는 취소 시 삭제되었습니다.'
                           : messageSearchValue ? '검색 결과가 없습니다.' : '데이터가 없습니다.'}
@@ -1001,24 +1004,24 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                         return (
                           <tr key={m.seqno} className="border-t hover:bg-gray-50 transition-colors">
                             <td className="px-3 py-2.5 text-center text-xs text-gray-400">{(messagePage - 1) * messagePerPage + idx + 1}</td>
-                            <td className="px-3 py-2.5 font-mono text-xs">{formatPhone(m.dest_no)}</td>
-                            <td className="px-3 py-2.5 font-mono text-xs text-gray-600">{formatPhone(m.call_back)}</td>
+                            <td className="px-3 py-2.5 font-mono text-xs whitespace-nowrap">{formatPhone(m.dest_no)}</td>
+                            <td className="px-3 py-2.5 font-mono text-xs text-gray-600 whitespace-nowrap">{formatPhone(m.call_back)}</td>
                             <MessageCell
                               content={m.msg_contents || ''}
                               onShowDetail={setMsgDetailContent}
                             />
-                            <td className="px-3 py-2.5 text-center text-xs text-gray-500">{formatDateTime(m.sendreq_time)}</td>
-                            <td className="px-3 py-2.5 text-center text-xs text-gray-500">{formatDateTime(m.mobsend_time)}</td>
-                            <td className="px-3 py-2.5 text-center text-xs text-gray-500">{formatDateTime(m.repmsg_recvtm)}</td>
-                            <td className="px-3 py-2.5 text-center">
+                            {/* ★ D124: 등록일시 = 캠페인 created_at (한줄로에서 발송을 건 시간). 모든 행 동일 */}
+                            <td className="px-3 py-2.5 text-center text-xs text-gray-500 whitespace-nowrap">{selectedCampaign.created_at ? formatDateTime(selectedCampaign.created_at) : '-'}</td>
+                            <td className="px-3 py-2.5 text-center text-xs text-gray-500 whitespace-nowrap">{formatDateTime(m.mobsend_time)}</td>
+                            <td className="px-3 py-2.5 text-center whitespace-nowrap">
                               <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${
                                 statusInfo.type === 'success' ? 'bg-green-50 text-green-700' : statusInfo.type === 'pending' ? 'bg-yellow-50 text-yellow-700' : 'bg-red-50 text-red-700'
                               }`}>
                                 {statusInfo.type === 'success' ? '성공' : statusInfo.type === 'pending' ? '대기' : '실패'}
                               </span>
                             </td>
-                            <td className="px-3 py-2.5 text-center text-xs text-gray-500">{m.status_code} ({statusInfo.label})</td>
-                            <td className="px-3 py-2.5 text-center text-xs font-medium">{carrier}</td>
+                            <td className="px-3 py-2.5 text-center text-xs text-gray-500 whitespace-nowrap">{m.status_code} ({statusInfo.label})</td>
+                            <td className="px-3 py-2.5 text-center text-xs font-medium whitespace-nowrap">{carrier}</td>
                           </tr>
                         );
                       })

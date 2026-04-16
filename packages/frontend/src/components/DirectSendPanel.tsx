@@ -20,6 +20,7 @@ import {
   buildAdMessageFront,
   detectPhoneHeaders,
 } from '../utils/formatDate';
+import { insertAtCursorPos } from '../utils/textInsert';
 
 // ============================================================
 // Props 인터페이스
@@ -458,6 +459,7 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                   )}
                   <textarea
                     ref={directTextareaRef}
+                    data-char-target="direct"
                     value={directMessage}
                     onChange={(e) => { setDirectMessage(e.target.value); directCursorPosRef.current = e.target.selectionStart; }}
                     onSelect={(e) => { directCursorPosRef.current = (e.target as HTMLTextAreaElement).selectionStart; }}
@@ -564,21 +566,14 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                       <button
                         key={v.fieldKey}
                         onClick={() => {
-                          const pos = directCursorPosRef.current;
-                          setDirectMessage(prev => {
-                            const before = prev.slice(0, pos);
-                            const after = prev.slice(pos);
-                            return before + v.variable + after;
-                          });
-                          const newPos = pos + v.variable.length;
-                          directCursorPosRef.current = newPos;
-                          setTimeout(() => {
-                            if (directTextareaRef.current) {
-                              directTextareaRef.current.focus();
-                              directTextareaRef.current.selectionStart = newPos;
-                              directTextareaRef.current.selectionEnd = newPos;
-                            }
-                          }, 0);
+                          // ★ D124 N3: 컨트롤타워 insertAtCursorPos (cursorPosRef 기반 삽입)
+                          insertAtCursorPos(
+                            directCursorPosRef.current,
+                            v.variable,
+                            setDirectMessage,
+                            directTextareaRef.current,
+                            directCursorPosRef,
+                          );
                         }}
                         className={`flex-1 py-2 text-sm bg-white border rounded-lg font-medium ${v.fieldKey === 'callback' ? 'hover:bg-blue-50 text-blue-700' : 'hover:bg-gray-100'}`}
                       >{v.label}</button>

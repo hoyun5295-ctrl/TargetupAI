@@ -174,7 +174,10 @@
       "Bash(unzip -l /c/Users/ceo/projects/gabia-event-admin/event/admin-api/event-admin-server-1.0.5.jar)",
       "Bash(grep \"\\\\.class$\")",
       "Bash(grep -A 10 \"CREATE TABLE \\\\`kakao_alim_talk_template_button\\\\`\\\\|CREATE TABLE \\\\`kakao_alim_talk_template_review\\\\`\" /c/Users/ceo/projects/gabia-event-admin/event_admin.sql)",
-      "WebFetch(domain:pagination.com)"
+      "WebFetch(domain:pagination.com)",
+      "Bash(node tmp_build_docx.js)",
+      "Bash(rm -f tmp_page_*.png tmp_proposal_*.png tmp_build_docx.js)",
+      "Bash(ls tmp_*)"
     ]
   }
 }

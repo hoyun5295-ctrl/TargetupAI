@@ -1311,6 +1311,7 @@ router.get('/stats/send/detail', authenticate, requireSuperAdmin, async (req: Re
         c.success_count,
         c.fail_count,
         c.target_count,
+        c.created_at,
         c.sent_at
       FROM campaigns c
       LEFT JOIN users u ON c.created_by = u.id
@@ -1541,13 +1542,14 @@ router.get('/campaigns/:id/sms-detail', authenticate, requireSuperAdmin, async (
       totalSms = await smsCountAll(smsTables, mysqlWhere, mysqlParams);
 
       // 전체 테이블에서 수집 후 seqno DESC 정렬 + 인메모리 페이지네이션
-      // ★ D123: mobsend_time/repmsg_recvtm은 QTmsg Agent가 UTC로 저장 → DATE_ADD +9h로 KST 변환
+      // ★ D124: 수신확인(repmsg_recvtm) 전경로 제거 — 등록/발송 2컬럼 통일
+      //   sendreq_time: 우리 앱 NOW() → KST (DATE_ADD 불필요)
+      //   mobsend_time: QTmsg Agent → UTC → DATE_ADD(+9h) 필요
       const allRows = await smsSelectAll(
         smsTables,
         `seqno, dest_no, call_back, msg_contents, msg_type, status_code, mob_company,
          sendreq_time,
-         DATE_ADD(mobsend_time, INTERVAL 9 HOUR) AS mobsend_time,
-         DATE_ADD(repmsg_recvtm, INTERVAL 9 HOUR) AS repmsg_recvtm`,
+         DATE_ADD(mobsend_time, INTERVAL 9 HOUR) AS mobsend_time`,
         mysqlWhere,
         mysqlParams
       );
@@ -1567,7 +1569,6 @@ router.get('/campaigns/:id/sms-detail', authenticate, requireSuperAdmin, async (
           carrier: getCarrierLabel(r.mob_company),
           sendreqTime: r.sendreq_time,
           mobsendTime: r.mobsend_time,
-          recvTime: r.repmsg_recvtm,
           channel: 'sms',
         });
       });
