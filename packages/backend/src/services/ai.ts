@@ -233,11 +233,42 @@ function getKoreanNowTime(): string {
   });
 }
 
-// 080번호 하이픈 포맷팅 (0801111111 → 080-111-1111)
+// ★ D123 P6: 전화번호 하이픈 포맷팅 — 02 지역번호/대표번호/050X/080 전부 정확 처리
+//   프론트의 formatPhoneNumber(formatDate.ts)와 동일 규칙. 백엔드 전용 (바이트 계산용)
 function formatRejectNumber(num: string): string {
-  const clean = num.replace(/-/g, '');
-  if (clean.length === 10) {
+  if (!num) return '';
+  const clean = num.replace(/\D/g, '');
+  // 휴대폰 11자리: 010-XXXX-XXXX
+  if (clean.length === 11 && clean.startsWith('01')) {
+    return `${clean.slice(0, 3)}-${clean.slice(3, 7)}-${clean.slice(7)}`;
+  }
+  // 휴대폰 10자리 (구형): 01X-XXX-XXXX
+  if (clean.length === 10 && clean.startsWith('01')) {
     return `${clean.slice(0, 3)}-${clean.slice(3, 6)}-${clean.slice(6)}`;
+  }
+  // 서울 02 (9자리): 02-XXX-XXXX
+  if (clean.length === 9 && clean.startsWith('02')) {
+    return `${clean.slice(0, 2)}-${clean.slice(2, 5)}-${clean.slice(5)}`;
+  }
+  // 서울 02 (10자리): 02-XXXX-XXXX
+  if (clean.length === 10 && clean.startsWith('02')) {
+    return `${clean.slice(0, 2)}-${clean.slice(2, 6)}-${clean.slice(6)}`;
+  }
+  // 대표번호 8자리 (15XX/16XX/18XX): 1XXX-XXXX
+  if (clean.length === 8 && clean.startsWith('1')) {
+    return `${clean.slice(0, 4)}-${clean.slice(4)}`;
+  }
+  // 050X 인터넷전화 12자리: 050X-XXXX-XXXX
+  if (clean.length === 12 && clean.startsWith('050')) {
+    return `${clean.slice(0, 4)}-${clean.slice(4, 8)}-${clean.slice(8)}`;
+  }
+  // 기타 지역번호 10자리: 0XX-XXX-XXXX
+  if (clean.length === 10 && clean.startsWith('0')) {
+    return `${clean.slice(0, 3)}-${clean.slice(3, 6)}-${clean.slice(6)}`;
+  }
+  // 기타 지역번호 11자리: 0XX-XXXX-XXXX
+  if (clean.length === 11 && clean.startsWith('0')) {
+    return `${clean.slice(0, 3)}-${clean.slice(3, 7)}-${clean.slice(7)}`;
   }
   return num;
 }
@@ -532,6 +563,14 @@ SMS/LMS/MMS: 이모지 절대 금지! 아래 특수문자만 사용:
 ### ⛔ 구분선 절대 금지!
 ━━━, ───, ═══, ___, --- 등 가로줄/구분선 금지! 연속 특수문자(●●●)로 줄 만드는 것도 금지!
 줄바꿈(빈 줄)으로 단락 구분하세요.
+
+### ⛔ 과도한 줄바꿈 금지 (★ D123 P12 강화)
+- **빈 줄(연속 줄바꿈)은 단락이 바뀔 때만 사용.** 한 문장마다 빈 줄을 넣지 마세요.
+- **빈 줄 최대 3개 이내** — 타업체 광고 문안처럼 내실있고 빽빽한 느낌을 유지.
+- **3줄 연속 빈 줄(\\n\\n\\n) 금지** — 인위적으로 늘리지 마세요.
+- **의미 단위로 묶어서 쓰기:** 인사+혜택을 한 단락으로, 기간+CTA를 한 단락으로. 모든 줄을 쪼개지 마세요.
+- 나쁜 예: "안녕하세요.\\n\\n김철수님.\\n\\n오늘은 특별한 날이에요.\\n\\n봄 맞이 특가를 진행합니다."
+- 좋은 예: "안녕하세요 김철수님! 오늘은 특별한 날이에요.\\n봄 맞이 특가 진행 중이니 놓치지 마세요.\\n3/15까지, ○○에서 기다립니다."
 
 카카오만: 이모지 사용 가능하나 절제 (1~2개 포인트)
 
@@ -909,6 +948,15 @@ ${usePersonalization ? `- 사용할 개인화 변수: ${personalizationTags}
         // ★ 안전장치: 구분선 자동 제거 (모바일 줄넘김 방지)
         msgField = msgField.replace(/[━─═＿_~\-]{3,}/g, '');
         msgField = msgField.replace(/\n{3,}/g, '\n\n'); // 빈줄 3개 이상 → 2개로
+        // ★ D123 P12: 빈 줄(\n\n) 최대 3개로 제한 — 타 업체 대비 과도한 줄바꿈 방지
+        //   직원 지적: "줄바꿈이 많아 내용만 길어지는 느낌" → 첫 3개 빈 줄만 유지, 나머지는 단일 줄바꿈으로 축소
+        {
+          let dnCount = 0;
+          msgField = msgField.replace(/\n\n/g, (m: string) => {
+            dnCount++;
+            return dnCount <= 3 ? m : '\n';
+          });
+        }
         // ★ 안전장치: SMS/LMS/MMS 이모지 강제 제거 (카카오만 허용)
         if (channel !== '카카오' && channel !== 'KAKAO') {
           msgField = stripEmojis(msgField);

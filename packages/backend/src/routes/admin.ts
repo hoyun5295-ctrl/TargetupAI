@@ -1541,10 +1541,13 @@ router.get('/campaigns/:id/sms-detail', authenticate, requireSuperAdmin, async (
       totalSms = await smsCountAll(smsTables, mysqlWhere, mysqlParams);
 
       // 전체 테이블에서 수집 후 seqno DESC 정렬 + 인메모리 페이지네이션
+      // ★ D123: mobsend_time/repmsg_recvtm은 QTmsg Agent가 UTC로 저장 → DATE_ADD +9h로 KST 변환
       const allRows = await smsSelectAll(
         smsTables,
         `seqno, dest_no, call_back, msg_contents, msg_type, status_code, mob_company,
-         sendreq_time, mobsend_time, repmsg_recvtm`,
+         sendreq_time,
+         DATE_ADD(mobsend_time, INTERVAL 9 HOUR) AS mobsend_time,
+         DATE_ADD(repmsg_recvtm, INTERVAL 9 HOUR) AS repmsg_recvtm`,
         mysqlWhere,
         mysqlParams
       );

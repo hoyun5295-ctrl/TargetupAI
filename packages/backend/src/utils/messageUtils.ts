@@ -170,7 +170,8 @@ export function replaceVariables(
   template: string,
   customer: Record<string, any> | null,
   fieldMappings: Record<string, VarCatalogEntry>,
-  addressBookFields?: AddressBookFields
+  addressBookFields?: AddressBookFields,
+  options?: { skipNumberFormatting?: boolean }
 ): string {
   if (!template) return '';
 
@@ -179,11 +180,16 @@ export function replaceVariables(
   // 0단계: 주소록 기타 필드 치환 (직접발송 경로)
   // — fieldMappings에 없는 주소록 전용 변수를 먼저 치환하여 안전망에 잡히지 않도록
   if (addressBookFields) {
-    // ★ D114 P4: 주소록 기타 필드에 formatNumericLike 적용 — 직접발송 숫자 구분자 통일
+    // ★ D123: 직접발송은 고객 원본 데이터 그대로 (skipNumberFormatting=true), AI발송만 포맷팅
+    const fmtExtra = (val: string | undefined) => {
+      if (!val) return '';
+      if (options?.skipNumberFormatting) return val;  // 직접발송: 원본 그대로
+      return formatNumericLike(val) ?? val;           // AI발송: 숫자 포맷팅
+    };
     result = result
-      .replace(/%기타1%/g, formatNumericLike(addressBookFields.extra1) ?? (addressBookFields.extra1 || ''))
-      .replace(/%기타2%/g, formatNumericLike(addressBookFields.extra2) ?? (addressBookFields.extra2 || ''))
-      .replace(/%기타3%/g, formatNumericLike(addressBookFields.extra3) ?? (addressBookFields.extra3 || ''))
+      .replace(/%기타1%/g, fmtExtra(addressBookFields.extra1))
+      .replace(/%기타2%/g, fmtExtra(addressBookFields.extra2))
+      .replace(/%기타3%/g, fmtExtra(addressBookFields.extra3))
       .replace(/%회신번호%/g, addressBookFields.callback || '');
 
     // ★ D111 P2: 이름 폴백
@@ -230,9 +236,13 @@ export function replaceVariables(
       // ★ B+0407-1: enum 필드(gender 등) → 한글 역변환 (FIELD_DISPLAY_MAP 컨트롤타워)
       displayValue = reverseDisplayValue(mapping.column, rawValue);
     } else if (mapping.type === 'number') {
-      // ★ D111: formatNumericLike 컨트롤타워 — 정수/소수 자동 포맷, trailing zero 제거, 전화/YYMMDD 제외
-      const fmt = formatNumericLike(rawValue);
-      displayValue = fmt !== null ? fmt : String(rawValue);
+      // ★ D123: 직접발송은 원본 그대로, AI발송만 숫자 포맷팅
+      if (options?.skipNumberFormatting) {
+        displayValue = String(rawValue);
+      } else {
+        const fmt = formatNumericLike(rawValue);
+        displayValue = fmt !== null ? fmt : String(rawValue);
+      }
     } else if (mapping.type === 'date' && rawValue) {
       // ★ D100: 날짜 KST 고정 — 순수 YYYY-MM-DD는 new Date() 없이 직접 파싱 (하루 밀림 방지)
       displayValue = formatDateValue(rawValue);
@@ -242,11 +252,13 @@ export function replaceVariables(
       if (/^\d{4}-\d{2}-\d{2}($|T|\s)/.test(strVal)) {
         displayValue = formatDateValue(strVal);
       } else {
-        // ★ D111: 정수/소수 자동 감지 — formatNumericLike 컨트롤타워 (field_type=VARCHAR 기존 데이터 대응)
-        //   이전: /^-?\d+\.\d+$/ (소수점 필수) 패턴 → 정수 50000 감지 못함 → 쉼표 없이 발송
-        //   변경: formatNumericLike — 정수도 감지, trailing zero 제거, 전화번호/YYMMDD 제외
-        const fmt = formatNumericLike(strVal);
-        displayValue = fmt !== null ? fmt : strVal;
+        // ★ D123: 직접발송은 원본 그대로, AI발송만 숫자 자동 포맷팅
+        if (options?.skipNumberFormatting) {
+          displayValue = strVal;
+        } else {
+          const fmt = formatNumericLike(strVal);
+          displayValue = fmt !== null ? fmt : strVal;
+        }
       }
     }
 
@@ -316,8 +328,9 @@ export async function getOpt080Number(userId: string | null, companyId: string):
     const userOpt = userResult.rows[0]?.opt_out_080_number;
     if (userOpt) return userOpt;
   }
-  const compResult = await query('SELECT opt_out_080_number FROM companies WHERE id = $1', [companyId]);
-  return compResult.rows[0]?.opt_out_080_number || '';
+  // ★ D123: opt_out_080_number가 비어있으면 reject_number 폴백 (D120 이전 데이터 호환)
+  const compResult = await query(`SELECT COALESCE(NULLIF(opt_out_080_number, ''), reject_number) AS opt080 FROM companies WHERE id = $1`, [companyId]);
+  return compResult.rows[0]?.opt080 || '';
 }
 
 /**
@@ -395,10 +408,11 @@ export function prepareSendMessage(
     opt080Number: string;
     addressBookFields?: AddressBookFields;
     subject?: string;
+    skipNumberFormatting?: boolean;  // ★ D123: 직접발송은 고객 원본 데이터 그대로
   }
 ): { message: string; subject: string } {
   // 1. 변수 치환
-  let msg = replaceVariables(template, customer, fieldMappings, options.addressBookFields);
+  let msg = replaceVariables(template, customer, fieldMappings, options.addressBookFields, { skipNumberFormatting: options.skipNumberFormatting });
   // 2. (광고)+080 본문 (중복 방지 안전장치 내장)
   msg = buildAdMessage(msg, options.msgType, options.isAd, options.opt080Number);
   // 3. ★ KISA 2026-05: 제목 (광고) 부착 (isAd + LMS/MMS만)

@@ -22,13 +22,63 @@
 | **FLYER-QR-COUPON-DESIGN.md** | ★ D114 QR 체크인 쿠폰 구현 설계서 (즉시 개발용) |
 | **FLYER-POS-AGENT-DEV.md** | ★ D114 POS Agent 개발 설계서 (투게더스 우선, 즉시 개발용) |
 
-> **최종 업데이트:** 2026-04-14 (D120)
+> **최종 업데이트:** 2026-04-15 (D122)
 
 ---
 
 ## 1) CURRENT_TASK (현재 집중 작업)
 
-### 🎯 D120 — user_id 격리 + 사업 확장 설계 (2026-04-14)
+### 🎯 D122 — 전단AI 대규모 업데이트 (2026-04-15) — ✅ 배포완료
+
+**★ 이번 세션 완료 항목:**
+
+**A. 인쇄전단 시스템 (신규)**
+- [x] flyer-print-renderer.ts — HTML→PDF 렌더러. 한국 마트 규격(A3/B4/A4/8절/타블로이드) 5종 + 9가지 테마(봄/여름/가을/겨울/추석/설+기본3색)
+- [x] PrintFlyerPage.tsx — 인쇄전단 에디터. 제목/기간/용지크기/템플릿 선택 → 카테고리별 상품 그리드 에디터 → 네이버 이미지 자동검색+직접업로드 → 300dpi PDF 생성
+- [x] flyers.ts — 인쇄전단 CRUD 라우트 (생성/조회/수정/PDF다운로드)
+- [x] 백엔드 컬럼 정리: created_by→user_id, store_address→business_address
+- [x] PDF 다운로드 토큰 인증 수정
+- [x] App.tsx 인쇄전단 메뉴 이동/개선
+
+**B. 장바구니/주문 시스템 (신규)**
+- [x] flyer-carts.ts (CT-F19) — phone 기반 장바구니 UPSERT, flyer_id+phone당 1개 유지
+- [x] flyer-orders.ts (CT-F20) — 주문 생명주기 (pending→confirmed→ready→completed/cancelled), 공개API+인증API 분리, 일일 통계
+- [x] carts.ts / orders.ts — 라우트 마운트
+- [x] OrdersPage.tsx — 주문관리 대시보드 (요약카드 4개 + 상태탭 + 상태진행 버튼)
+
+**C. POS 자동전단 생성 (신규)**
+- [x] flyer-pos-auto.ts (CT-F22) — 5분 간격 미처리 할인건 감지 → 카탈로그 이미지 매칭 → 할인율 분류(메인30%↑/서브10%↑/일반) → auto_draft 자동 생성
+
+**D. 수신자별 단축URL 추적 (신규)**
+- [x] flyer-short-code.ts (CT-F18) — base62 5자리 코드(9억 조합), 배치 INSERT 5000단위, 90일 만료, 클릭통계(유니크phone/첫클릭/총클릭)
+
+**E. 감사로그 (신규)**
+- [x] flyer-audit-log.ts (CT-F23) — 13가지 액션 기록 (로그인/전단생성/발송/주문상태/설정 등), 비동기 처리
+- [x] flyer-admin.ts — 슈퍼관리자 감사로그 조회/필터링 API
+- [x] auth.ts — 로그인 시 감사로그 기록
+- [x] FlyerAdminDashboard.tsx — 슈퍼관리자 UI에 감사로그 탭 추가
+
+**F. 엑셀 AI 자동매핑 (신규)**
+- [x] flyer-excel-mapper.ts (CT-F24) — 엑셀 헤더→상품필드 AI 매핑 (Claude주/GPT폴백). 할인율 기반 promoType 자동분류
+- [x] ExcelUploadModal.tsx — 공용 3단계 모달 (업로드→매핑확인→미리보기). 매핑필드 select 변경 가능
+
+**G. 배경제거 (신규)**
+- [x] flyer-rembg.ts — rembg Docker 서비스 호출 (15초 타임아웃, 실패 시 원본 폴백)
+
+**H. 전단 오류 수정 (3건)**
+- [x] 전단생성 실패 오류 수정
+- [x] 인쇄전단 렌더링/이벤트 핸들링 오류 수정
+- [x] 인쇄전단 업데이트 로직 안정화
+
+**I. 미완료 (다음 세션)**
+- [ ] flyer_customers, flyer_catalog 테이블에 user_id 컬럼 추가 (ALTER TABLE)
+- [ ] customers.ts, catalog.ts, address-books.ts, coupons.ts, stats.ts user_id 격리
+- [ ] 투게더스 POS 데이터 샘플 수령 (Harold님 액션)
+- [ ] 짧은 도메인 구매 hjl.kr (Harold님 액션)
+
+---
+
+### 🎯 D120 — user_id 격리 + 사업 확장 설계 (2026-04-14) — ✅ 배포완료
 
 **★ 이번 세션 완료 항목:**
 

@@ -813,14 +813,7 @@ export default function TargetSendModal({
                   onChange={(e) => { setTargetListSearch(e.target.value); setTargetListPage(0); }}
                   className="border rounded-lg px-3 py-1.5 text-sm w-48"
                 />
-                <label className="flex items-center gap-1 text-sm text-gray-600">
-                  <input type="checkbox" checked={dedupEnabled} onChange={e => setDedupEnabled(e.target.checked)} className="rounded accent-emerald-600" />
-                  중복제거
-                </label>
-                <label className="flex items-center gap-1 text-sm text-gray-600">
-                  <input type="checkbox" checked={unsubFilterEnabled} onChange={e => setUnsubFilterEnabled(e.target.checked)} className="rounded accent-emerald-600" />
-                  수신거부제거
-                </label>
+                {/* ★ D123: 중복제거/수신거부제거 체크박스 제거 — 직접타겟발송은 앞 단에서 이미 처리된 데이터 */}
               </div>
             </div>
 

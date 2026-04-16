@@ -791,7 +791,9 @@ export default function AutoSendPage() {
                     const statusMap: Record<string, { label: string; color: string }> = {
                       completed: { label: '완료', color: 'bg-green-100 text-green-700' },
                       sending: { label: '발송중', color: 'bg-blue-100 text-blue-700' },
-                      notified: { label: '알림발송', color: 'bg-violet-100 text-violet-700' },
+                      notified: { label: '사전알림', color: 'bg-violet-100 text-violet-700' },
+                      ai_generated_notified: { label: 'AI문안알림', color: 'bg-purple-100 text-purple-700' },  // ★ D123 P8
+                      spam_tested: { label: '스팸테스트', color: 'bg-amber-100 text-amber-700' },
                       pending: { label: '대기', color: 'bg-gray-100 text-gray-600' },
                       failed: { label: '실패', color: 'bg-red-100 text-red-700' },
                       cancelled: { label: '취소', color: 'bg-amber-100 text-amber-700' },
@@ -811,7 +813,7 @@ export default function AutoSendPage() {
                           </div>
                           {/* ★ D114 P8-2: 상태별 시간 표시 분기 — 알림/스팸은 실행 시각, 실발송은 예약 시각 */}
                           <span className="text-xs text-gray-400">
-                            {run.status === 'notified' ? formatDate(run.notified_at || run.scheduled_at)
+                            {(run.status === 'notified' || run.status === 'ai_generated_notified') ? formatDate(run.notified_at || run.scheduled_at)
                               : run.status === 'spam_tested' ? formatDate(run.started_at || run.scheduled_at)
                               : formatDate(run.scheduled_at)}
                           </span>

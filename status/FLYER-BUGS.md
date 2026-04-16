@@ -3,17 +3,34 @@
 > **한줄로 BUGS.md와 완전 분리.** 전단AI 관련 버그만 여기에 기록한다.
 > 한줄로 버그는 `status/BUGS.md` 참조.
 >
-> **최종 업데이트:** 2026-04-14 (D120)
+> **최종 업데이트:** 2026-04-15 (D122)
 
 ---
 
-## 📋 D120 — user_id 격리 미비 (2026-04-14) — 🟡 수정중
+## 📋 D122 — 전단AI 대규모 업데이트 (2026-04-15) — ✅ 배포완료
+
+### BF122-01 전단생성 실패 오류 🔴
+- **수정:** flyers.ts 전단 생성 로직 오류 수정
+- **상태:** ✅ 배포완료
+
+### BF122-02 인쇄전단 렌더링 오류 🟠
+- **수정:** PrintFlyerPage 렌더링/이벤트 핸들링 수정
+- **상태:** ✅ 배포완료
+
+### BF122-03 인쇄전단 백엔드 컬럼 불일치 🟠
+- **원인:** created_by/store_address 컬럼명이 실제 테이블과 불일치
+- **수정:** created_by→user_id, store_address→business_address 변경
+- **상태:** ✅ 배포완료
+
+---
+
+## 📋 D120 — user_id 격리 미비 (2026-04-14) — 🟡 부분수정
 
 ### BF120-01 같은 총판 내 다른 매장 사용자 전단 노출 🔴
 - **증상:** 인비토마트오금점이 등록한 전단이 인비토마트가락점에서도 보임
 - **원인:** flyers.ts GET / 쿼리에 `WHERE company_id = $1`만 있고 `user_id` 필터 없음
 - **수정:** `AND f.user_id = $2` 추가 (flyers.ts:388)
-- **상태:** 전단 목록은 수정 완료. 나머지 라우트(customers/catalog/address-books/coupons/stats) 미완료 → 다음 세션
+- **상태:** ✅ 전단 목록 수정완료, 배포됨
 
 ### BF120-02 전체 데이터 user_id 격리 필요 (미완료) 🔴
 - **영향 범위:** customers.ts, catalog.ts, address-books.ts, coupons.ts, stats.ts

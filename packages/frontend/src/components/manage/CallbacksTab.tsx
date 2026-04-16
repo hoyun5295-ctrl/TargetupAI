@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { manageCallbacksApi } from '../../api/client';
 import CustomModal from '../CustomModal';
 import Toast from '../Toast';
-import { formatDate } from '../../utils/formatDate';
+import { formatDate, formatPhoneNumber } from '../../utils/formatDate';
 
 interface CallbackNumber {
   id: string;
@@ -388,12 +388,8 @@ export default function CallbacksTab() {
     } finally { setRegSubmitting(false); }
   };
 
-  const formatPhone = (phone: string) => {
-    const c = phone.replace(/\D/g, '');
-    if (c.length === 11) return `${c.slice(0,3)}-${c.slice(3,7)}-${c.slice(7)}`;
-    if (c.length === 10) return `${c.slice(0,3)}-${c.slice(3,6)}-${c.slice(6)}`;
-    return phone;
-  };
+  // ★ D123 P6: 인라인 제거 → formatPhoneNumber 컨트롤타워 사용
+  const formatPhone = formatPhoneNumber;
 
   const statusLabel = (status: string) => {
     switch (status) {

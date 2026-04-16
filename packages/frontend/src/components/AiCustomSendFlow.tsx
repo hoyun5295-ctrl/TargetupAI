@@ -18,7 +18,7 @@ import {
   XCircle
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { formatPreviewValue, calculateSmsBytes, replaceMessageVars, buildAdMessageFront, buildAdSubjectFront } from '../utils/formatDate';
+import { formatPreviewValue, calculateSmsBytes, replaceMessageVars, buildAdMessageFront, buildAdSubjectFront, formatPhoneNumber } from '../utils/formatDate';
 import { highlightVars } from '../utils/highlightVars';
 
 interface AiCustomSendFlowProps {
@@ -294,11 +294,8 @@ export default function AiCustomSendFlow({
   // ★ D95: 바이트 계산 — formatDate.ts 컨트롤타워 사용
   const calculateBytes = calculateSmsBytes;
 
-  const formatRejectNumber = (num: string) => {
-    const clean = num.replace(/-/g, '');
-    if (clean.length === 10) return `${clean.slice(0,3)}-${clean.slice(3,6)}-${clean.slice(6)}`;
-    return num;
-  };
+  // ★ D123 P6: 인라인 제거 → formatPhoneNumber 컨트롤타워 사용
+  const formatRejectNumber = formatPhoneNumber;
 
   // ★ D102: buildAdMessageFront 컨트롤타워 사용
   const wrapAdText = (msg: string) => {

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { formatDate, formatPreviewValue } from '../utils/formatDate';
+import { formatDate, formatPreviewValue, formatPhoneNumber } from '../utils/formatDate';
 
 interface CustomerDBModalProps {
   onClose: () => void;
@@ -235,13 +235,8 @@ export default function CustomerDBModal({ onClose, token, userType }: CustomerDB
     return true;
   };
 
-  const formatPhone = (phone: string) => {
-    if (!phone) return '-';
-    const cleaned = phone.replace(/\D/g, '');
-    if (cleaned.length === 11) return `${cleaned.slice(0, 3)}-${cleaned.slice(3, 7)}-${cleaned.slice(7)}`;
-    if (cleaned.length === 10) return `${cleaned.slice(0, 3)}-${cleaned.slice(3, 6)}-${cleaned.slice(6)}`;
-    return phone;
-  };
+  // ★ D123 P6: 인라인 제거 → formatPhoneNumber 컨트롤타워 사용 (02 지역번호, 대표번호, 050X 전부 정확 처리)
+  const formatPhone = (phone: string) => phone ? formatPhoneNumber(phone) : '-';
 
   const totalPages = Math.ceil(total / limit);
 

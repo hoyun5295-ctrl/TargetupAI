@@ -14,9 +14,11 @@
 
 import { useEffect, useState, useMemo, useRef } from 'react';
 import { aiApi } from '../api/client';
-import { calculateSmsBytes, buildAdMessageFront, buildAdSubjectFront, replaceMessageVars } from '../utils/formatDate';
+import { calculateSmsBytes, buildAdMessageFront, buildAdSubjectFront, replaceMessageVars, formatPhoneNumber } from '../utils/formatDate';
 import AiMessageSuggestModal from './AiMessageSuggestModal';
 import SpamFilterTestModal from './SpamFilterTestModal';
+// ★ D123 P11: 미등록 회신번호 확인 모달 (한줄로 발송과 동일 패턴)
+import CallbackConfirmModal, { CallbackConfirmData } from './CallbackConfirmModal';
 
 interface AutoSendFormModalProps {
   campaign: any | null;  // null = 생성, 있으면 수정
@@ -125,6 +127,8 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
   // ★ D86: D-1 사전 알림 (Step 4 하단)
   const [preNotify, setPreNotify] = useState(campaign?.pre_notify ?? true);
   const [notifyPhones, setNotifyPhones] = useState<string[]>(campaign?.notify_phones || []);
+  // ★ D123 P11: 미등록 회신번호 확인 모달 데이터
+  const [callbackConfirmData, setCallbackConfirmData] = useState<CallbackConfirmData | null>(null);
   const [notifyPhoneInput, setNotifyPhoneInput] = useState('');
 
   // AI 문구 추천
@@ -249,14 +253,8 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
     }
   }, [msgBytes]);
 
-  // 080 무료거부 포맷
-  const formatRejectNumber = (num: string) => {
-    if (!num) return '';
-    const clean = num.replace(/[^0-9]/g, '');
-    if (clean.length === 11) return `${clean.slice(0, 3)}-${clean.slice(3, 7)}-${clean.slice(7)}`;
-    if (clean.length === 10) return `${clean.slice(0, 3)}-${clean.slice(3, 6)}-${clean.slice(6)}`;
-    return num;
-  };
+  // ★ D123 P6: 인라인 제거 → formatPhoneNumber 컨트롤타워 사용
+  const formatRejectNumber = formatPhoneNumber;
 
   // 광고 접미사 텍스트 — ★ PPT#3: 080번호 없어도 무료거부까지 표시
   const getAdSuffix = () => {
@@ -404,6 +402,12 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
     if (messageType === 'MMS' && mmsUploadedImages.length === 0 && !aiGenerateEnabled) { setError('MMS 이미지를 첨부해주세요.'); setStep(5); return; }
     if ((messageType === 'LMS' || messageType === 'MMS') && !messageSubject.trim() && !aiGenerateEnabled) { setError('LMS/MMS는 제목을 입력해주세요.'); setStep(5); return; }
 
+    // ★ D123 P11: force=true일 때 미등록 회신번호 검증 스킵 (사용자가 "제외하고 생성" 선택한 경우)
+    await submitWithForce(false);
+  };
+
+  /** 실제 자동발송 생성/수정 요청 — force=true면 미등록 회신번호 검증 스킵 */
+  const submitWithForce = async (force: boolean) => {
     setSaving(true);
     try {
       const body: any = {
@@ -427,8 +431,11 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
         ai_tone: aiGenerateEnabled ? aiTone : null,
         fallback_message_content: aiGenerateEnabled ? fallbackMessageContent.trim() : null,
         // ★ D86: D-1 사전 알림
-        pre_notify: preNotify,
-        notify_phones: preNotify && notifyPhones.length > 0 ? notifyPhones : null,
+        // ★ D123 P9: 담당자 알림 항상 ON (토글 제거) + 번호 필수
+        pre_notify: true,
+        notify_phones: notifyPhones.length > 0 ? notifyPhones : null,
+        // ★ D123 P11: force=true이면 백엔드에서 미등록 회신번호 pre-flight 검증 스킵
+        force,
       };
 
       const url = isEdit ? `/api/auto-campaigns/${campaign.id}` : '/api/auto-campaigns';
@@ -445,6 +452,19 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
 
       if (!res.ok) {
         const data = await res.json();
+        // ★ D123 P11: 미등록 회신번호 있으면 모달 표시
+        if (res.status === 409 && data.code === 'UNREGISTERED_CALLBACKS') {
+          setCallbackConfirmData({
+            show: true,
+            callbackMissingCount: data.callbackMissingCount || 0,
+            callbackUnregisteredCount: data.callbackUnregisteredCount || 0,
+            unregisteredDetails: data.unregisteredDetails || [],
+            remainingCount: data.remainingCount || 0,
+            message: messageContent,
+            sendType: 'auto',
+          });
+          return;
+        }
         setError(data.error || '저장에 실패했습니다.');
         return;
       }
@@ -470,6 +490,12 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
     // ★ D86: 타겟 필터 필수 — D83 교훈 (빈 필터 = 전체 고객 발송 사고)
     if (step === 3 && (!targetFilter || Object.keys(targetFilter).length === 0)) {
       setError('발송 대상 필터를 설정해주세요. 필터 없이는 전체 고객에게 발송됩니다.');
+      return false;
+    }
+    // ★ D123 P9: Step 4 — D-1 사전알림 담당자 전화번호 필수화
+    //   pre_notify 토글 제거됨 (항상 ON). AI 생성/스팸테스트 결과 수신을 위해 담당자 번호 필수
+    if (step === 4 && notifyPhones.length === 0) {
+      setError('알림 받을 담당자 전화번호를 1개 이상 추가해주세요. AI 문안 생성 결과와 스팸테스트 결과를 수신하려면 담당자 번호가 필요합니다.');
       return false;
     }
     return true;
@@ -788,20 +814,13 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
                   </select>
                 </div>
 
-                {/* ★ D86: D-1 사전 알림 설정 */}
+                {/* ★ D123 P9: 사전알림 토글 제거 — 담당자 알림(AI 문안 생성/스팸테스트 결과/D-1 사전알림) 수신을 위해 항상 ON */}
                 <div className="border-t border-gray-200 pt-4 mt-4">
-                  <div className="flex items-center justify-between mb-3">
-                    <div>
-                      <label className="text-sm font-medium text-gray-700">D-1 사전 알림</label>
-                      <p className="text-xs text-gray-500 mt-0.5">발송 전날 담당자에게 알림 메시지를 보냅니다</p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setPreNotify(!preNotify)}
-                      className={`relative w-11 h-6 rounded-full transition-colors ${preNotify ? 'bg-blue-600' : 'bg-gray-300'}`}
-                    >
-                      <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${preNotify ? 'translate-x-5' : ''}`} />
-                    </button>
+                  <div className="mb-3">
+                    <label className="text-sm font-medium text-gray-700">담당자 알림 번호 <span className="text-red-500">*</span></label>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      AI 문안 생성 결과, 스팸테스트 결과, D-1 사전알림을 수신할 담당자 번호 (필수)
+                    </p>
                   </div>
 
                   {preNotify && (
@@ -853,8 +872,8 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
                           ))}
                         </div>
                       )}
-                      {preNotify && notifyPhones.length === 0 && (
-                        <p className="text-xs text-amber-600">📌 전화번호를 추가하지 않으면 사전 알림이 발송되지 않습니다.</p>
+                      {notifyPhones.length === 0 && (
+                        <p className="text-xs text-red-600">⚠️ 담당자 번호를 1개 이상 추가해야 다음 단계로 진행할 수 있습니다.</p>
                       )}
                     </div>
                   )}
@@ -1210,11 +1229,11 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
                       {scheduleType === 'monthly' && `매월 ${scheduleDay}일 ${scheduleTime}`}
                     </span>
                   </div>
-                  {/* ★ D86: D-1 사전 알림 */}
+                  {/* ★ D123 P9: 담당자 알림 (항상 ON, 번호 필수) */}
                   <div className="flex justify-between">
-                    <span className="text-gray-500">D-1 알림</span>
-                    <span className={preNotify ? 'text-blue-700 font-medium' : 'text-gray-400'}>
-                      {preNotify ? (notifyPhones.length > 0 ? `ON (${notifyPhones.length}명)` : 'ON (알림번호 미입력)') : 'OFF'}
+                    <span className="text-gray-500">담당자 알림</span>
+                    <span className="text-blue-700 font-medium">
+                      {notifyPhones.length}명
                     </span>
                   </div>
                   <div className="flex justify-between">
@@ -1362,6 +1381,19 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
         );
       })()}
 
+      {/* ★ D123 P11: 미등록 회신번호 확인 모달 (한줄로 발송과 동일 패턴) */}
+      {callbackConfirmData && (
+        <CallbackConfirmModal
+          data={callbackConfirmData}
+          onClose={() => setCallbackConfirmData(null)}
+          onConfirm={() => {
+            setCallbackConfirmData(null);
+            // 사용자가 "제외하고 생성" 선택 → force=true로 재호출 (백엔드 pre-flight 검증 스킵)
+            submitWithForce(true);
+          }}
+          isSending={saving}
+        />
+      )}
     </>
   );
 }

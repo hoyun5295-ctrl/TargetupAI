@@ -418,6 +418,31 @@ async function generateMessageForAutoCampaign(ac: any): Promise<void> {
         if (genNotifyRows.length > 0) {
           await bulkInsertSmsQueue(companyTables, genNotifyRows, true);
           console.log(`${logPrefix} AI 문안 생성 알림 → ${genNotifyRows.length}명`);
+
+          // ★ D123 P8: AI 문안 생성 알림도 이력에 기록 (이전에는 INSERT 누락 → 이력 탭에 안 나옴)
+          //   status='ai_generated_notified' / target=sent=success=phones.length (알림류 run은 sync 대상 아님 → 즉시 기록)
+          try {
+            const runNumberResult = await query(
+              `SELECT COALESCE(MAX(run_number), 0) + 1 as next_run FROM auto_campaign_runs WHERE auto_campaign_id = $1`,
+              [ac.id]
+            );
+            await query(
+              `INSERT INTO auto_campaign_runs (
+                auto_campaign_id, run_number, status, scheduled_at, notified_at, notify_message,
+                generated_message_content, generated_message_subject, ai_generation_status,
+                target_count, sent_count, success_count
+              ) VALUES ($1, $2, 'ai_generated_notified', $3, NOW(), $4, $5, $6, $7, $8, $8, $8)`,
+              [
+                ac.id, runNumberResult.rows[0].next_run, ac.next_run_at, genNotifyMsg,
+                generatedContent,
+                generatedSubject || null,
+                aiGenerationStatus,
+                genNotifyRows.length,
+              ]
+            );
+          } catch (runInsertErr) {
+            console.error(`${logPrefix} AI 생성 알림 run 기록 실패 (무시):`, runInsertErr);
+          }
         }
       } catch (notifyErr) {
         console.error(`${logPrefix} AI 문안 생성 알림 발송 실패 (무시):`, notifyErr);

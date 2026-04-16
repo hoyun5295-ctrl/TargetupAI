@@ -383,7 +383,8 @@ export default function ScheduledCampaignModal({
             >✕</button>
           </div>
           <div className="p-4">
-            <div className="bg-gray-100 rounded-lg p-4 whitespace-pre-wrap text-sm leading-relaxed max-h-[400px] overflow-y-auto">
+            {/* ★ D123 P7: 드래그 복사 가능하도록 select-text + cursor-text 명시 */}
+            <div className="bg-gray-100 rounded-lg p-4 whitespace-pre-wrap text-sm leading-relaxed max-h-[400px] overflow-y-auto select-text cursor-text">
               {messagePreview.message}
             </div>
           </div>

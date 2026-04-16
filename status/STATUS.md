@@ -107,7 +107,157 @@
 
 ---
 
-### 🔧 D120 — UI 통일 + 캘린더 이동 + 080 버그 + 전단AI user_id 격리 (2026-04-14) — 🟡 수정완료-검증대기
+### 🔧 D123 — 0415 직원 검수 12건 전수 수정 (2026-04-16) — 🟡 수정완료-배포대기
+
+> **배경:** 직원 검수 PDF(한줄로_20260415.pdf) 12건 전수 수정. 080번호 누락 / 직접발송 숫자 콤마 / 직접타겟발송 체크박스 / 발송결과 상세 시간 / MMS 이미지 / 회신번호 하이픈 / 예약대기 드래그 / 자동발송 5건 / AI 줄바꿈 과다.
+> **관련 인프라 복구:** 동일 세션에서 레거시 서버(invitobiz.com) 템플릿관리자 QTmsg Agent 문자발송 복구(MySQL 3306→3388 socat 포워딩) + 이니시스 PG 카드결제 복구(Tomcat setenv.sh에 JAVA_HOME=Oracle JDK 1.7.0_45 고정 — Java 8 설치로 alternatives 바뀌면서 SSL 컨텍스트 초기화 실패). 한줄로 프로젝트 범위 밖이지만 같은 세션에서 처리.
+
+#### 수정 12건
+
+| # | 영역 | 근본 원인 | 해결 |
+|---|---|---|---|
+| **P1** | 080번호 누락 (auto_sync OFF) | `getOpt080Number()`가 users.opt_out_080_number → companies.opt_out_080_number만 조회, D120 이전 데이터는 companies.opt_out_080_number NULL이고 reject_number에만 값 존재 → 080번호 빈값 반환 → (광고)+080 누락 | `getOpt080Number()` company 폴백을 `COALESCE(NULLIF(opt_out_080_number, ''), reject_number)`로 변경. 컨트롤타워 1곳 수정으로 5개 발송 경로 + 스팸테스트 12곳 전체 자동 반영. Harold님 일괄 동기화 SQL 실행 완료 |
+| **P2** | 직접발송 숫자 콤마 자동 변환 | `replaceVariables()`가 모든 발송 경로에서 `formatNumericLike()` 무조건 호출 → 직접발송도 고객 업로드 원본(1000, 250103)이 1,000 / 250,103으로 변환되어 나감 | `replaceVariables()`에 `skipNumberFormatting` 옵션 추가. `prepareSendMessage()` 옵션 전달. 직접발송 3곳(SMS/카카오/알림톡) `skipNumberFormatting: true`. 프론트 `replaceDirectVars`도 `formatPreviewValue` 제거하여 raw 값 표시 |
+| **P3** | 직접타겟발송 중복제거/수신거부제거 체크박스 무의미 | 앞 단에서 이미 중복 제거 + 수신거부 필터 적용된 데이터가 넘어오는데 추가 체크박스 UI 존재 | TargetSendModal 체크박스 2개 UI 제거 (state는 유지 — 백엔드 API 하위호환) |
+| **P4** | 발송결과 상세 시간 컬럼 부족 + admin.ts UTC 그대로 표시 | (1) ResultsModal 상세 테이블에 "수신확인"(repmsg_recvtm) 컬럼 없음 (2) admin.ts sms-detail 쿼리가 `DATE_ADD +9h` 없이 raw SELECT → 슈퍼관리자 화면에서 UTC 그대로 표시 | ResultsModal에 "수신확인" 컬럼 + `formatDateTime(m.repmsg_recvtm)` 추가 (colSpan 9→10). admin.ts sms-detail 쿼리에 `DATE_ADD(mobsend_time/repmsg_recvtm, INTERVAL 9 HOUR)` 추가 |
+| **P5** | MMS 캠페인 상세 이미지 너무 작음(64px) + 파일명 불가 | `mms_image_paths` 렌더링 시 `w-16 h-16` 고정, alt/title 없음 → 날짜/사은품 등 비슷한 이미지 구분 불가 | 경로에서 파일명 추출하여 `title` 속성(호버 툴팁) + 에메랄드 링 hover + `onClick` 전체화면 확대 모달. `enlargedImage` state + full-screen overlay(z-[90], 배경/✕ 클릭 닫기, 하단 파일명 카드) |
+| **P6** | 회신번호 하이픈 불일치 (02-3449-0012 → 023-449-0012) | 인라인 `formatPhone` 함수가 **9곳**에 중복 정의, 10자리 → 3-3-4 단순 분할로 서울 02를 지역번호 0XX로 오인. CLAUDE.md 컨트롤타워 원칙 위반 상태 | `formatPhoneNumber()` 컨트롤타워로 통일. 050X 12자리(0507-1234-5678) 케이스 추가. 9곳 인라인 전부 제거 + import 교체 — ResultsModal/Settings/Unsubscribes/CustomerDBModal/CallbacksTab/AiCustomSendFlow/Dashboard/AutoSendFormModal. 백엔드 services/ai.ts `formatRejectNumber`도 동일 규칙으로 보강 |
+| **P7** | 예약대기 메시지 상세보기 드래그 복사 불가 | 상위에 `select-none`은 없지만 명시적 `select-text` 미지정으로 상속/기본 스타일에서 드래그 차단 | ScheduledCampaignModal 본문 div에 `select-text cursor-text` 명시 |
+| **P8** | 자동발송 이력 통계 (D-2 AI 생성 알림 미기록) | `runMessageGeneration()`이 담당자 AI 생성 알림 SMS 발송 후 `auto_campaign_runs INSERT`를 아예 안 함 → 이력 탭에 AI 생성 알림 회차 자체가 안 보임 | `runMessageGeneration()` 알림 발송 직후 `auto_campaign_runs INSERT` 추가 (status='ai_generated_notified', target/sent/success = phones.length). AutoSendPage.tsx `statusMap`에 `ai_generated_notified`(AI문안알림) + `spam_tested`(스팸테스트) 라벨 추가. 시간 분기도 포함 |
+| **P9** | 자동발송 담당자번호 미입력 시 다음 단계 진행 가능 | `canProceed()` Step 4 검증 누락 + pre_notify 토글 OFF 가능 → AI 생성/스팸테스트/D-1 알림 수신 못 함 | AutoSendFormModal: **pre_notify 토글 완전 제거** (항상 true 고정). `canProceed()` Step 4에 `notifyPhones.length === 0` 차단 추가. 경고 메시지 "📌"→"⚠️", 빨간색. 5단계 확인 화면 단순화 |
+| **P10** | 담당자 알림 특수문자 누락 | `applyAdAndSanitize()`가 messageContent에 `sanitizeSmsText()` 강제 적용 → 실제 발송에는 ★/※/▼ 나가지만 담당자 알림에는 제거되어 발송 | `applyAd()`로 함수명 변경 + sanitize 제거. messageContent 원본 그대로. 알림 템플릿 고정 부분은 영향 없음. 호출부 3곳 교체 |
+| **P11** | 자동발송 미등록 회신번호 — "생성 실패" 메시지만 | 생성 API에 pre-flight validation 없음. 실제 발송 시점 CT-08이 자동 제외하지만 고객은 이유 모름 | auto-campaigns.ts POST에 pre-flight — `use_individual_callback=true` + `force !== true`이면 고객 조회 → CT-08 `filterByIndividualCallback` → 미등록 있으면 `409 code='UNREGISTERED_CALLBACKS'` 응답. CallbackConfirmModal sendType에 `'auto'` 추가. AutoSendFormModal에 `submitWithForce(force)` 함수 — 409 응답 시 모달 표시, "제외하고 생성" 클릭 시 `force=true`로 재호출 |
+| **P12** | AI 추천 문안 줄바꿈 과다 (타 업체 대비 내실 없어 보임) | BRAND_SYSTEM_PROMPT에 빈 줄 총량 제약 없음. Post-processing도 `\n{3,}→\n\n`만 처리 | 프롬프트에 "과도한 줄바꿈 금지" 섹션 추가 (빈 줄 3개 이내, 의미 단위 묶기, 좋은 예/나쁜 예 쌍). Post-processing에 빈 줄(`\n\n`) 최대 3개 제한 로직 추가 (3개 초과분은 단일 줄바꿈으로 축소) |
+
+#### 수정 파일 총 약 20개
+
+**백엔드:**
+- `messageUtils.ts` — getOpt080Number(P1), replaceVariables+prepareSendMessage(P2)
+- `campaigns.ts` — 직접발송 3곳 skipNumberFormatting(P2)
+- `admin.ts` — sms-detail DATE_ADD(P4)
+- `services/ai.ts` — formatRejectNumber 보강(P6), BRAND_SYSTEM_PROMPT 줄바꿈 제약(P12), post-processing 빈줄 최대 3개(P12)
+- `auto-campaign-worker.ts` — runMessageGeneration INSERT(P8)
+- `auto-notify-message.ts` — applyAd messageContent sanitize 제외(P10)
+- `auto-campaigns.ts` — POST pre-flight validation(P11)
+
+**프론트엔드:**
+- `TargetSendModal.tsx` — 체크박스 제거(P3)
+- `ResultsModal.tsx` — 수신확인 컬럼(P4), MMS 확대 모달(P5), formatPhone 교체(P6)
+- `CustomerDBModal.tsx`, `CallbacksTab.tsx`, `Settings.tsx`, `Unsubscribes.tsx` — formatPhone 컨트롤타워화(P6)
+- `AiCustomSendFlow.tsx`, `Dashboard.tsx`, `AutoSendFormModal.tsx` — formatRejectNumber 컨트롤타워화(P6)
+- `formatDate.ts` — formatPhoneNumber 050X 12자리 보강(P6), replaceDirectVars raw 값(P2)
+- `ScheduledCampaignModal.tsx` — select-text cursor-text(P7)
+- `AutoSendPage.tsx` — statusMap + 시간 분기(P8)
+- `AutoSendFormModal.tsx` — 토글 제거+필수화(P9), CallbackConfirmModal 연동(P11)
+- `CallbackConfirmModal.tsx` — sendType 'auto' 추가(P11)
+
+#### 핵심 교훈 (D123)
+> 1. **자동발송 5단계 라이프사이클 전수 이해 필수.** runMessageGeneration/runPreNotification/runPreSendSpamTest/executeAutoCampaign 각각 auto_campaign_runs INSERT 방식이 다름 → 하나만 보면 누락 발견 못 함.
+> 2. **컨트롤타워 형태로 통합되어 있어도 소비처 전수 확인 필수.** formatPhone 인라인 9곳 중복(formatDate.ts에 formatPhoneNumber 있지만 import 안 함). 기존 컨트롤타워가 있다는 사실만으로 안심하지 말고 grep으로 인라인 패턴 전수 확인.
+> 3. **settings 저장 시 양쪽 필드 동기화 원칙(D120)은 기존 데이터에 소급 적용 안 됨.** DB 마이그레이션 또는 읽기 쪽 폴백 로직으로 커버.
+> 4. **AI 프롬프트 제약은 프롬프트+post-processing 이중 안전장치.** 프롬프트만 바꾸면 AI가 무시할 수 있음 → 코드에서 강제 축소 로직 추가.
+> 5. **"기능 잠금"은 진짜 잠금 + UX 명시 2중 효과 필요.** 자동발송 담당자 번호처럼 필수 기능은 UI에서 토글 자체를 제거하고 필수 표시.
+
+---
+
+### 🔧 D122 — 전단AI 대규모 업데이트 + 한줄로 카카오추천 제거 (2026-04-15) — ✅ 배포완료
+
+> **배경:** 전단AI 인쇄전단/장바구니/주문/POS자동/감사로그/엑셀매핑 등 엔터프라이즈급 기능 대량 추가. 한줄로 AI 추천에서 카카오 채널 추천 제거.
+
+#### 전단AI 신규 기능 (10건)
+| # | 영역 | 내용 |
+|---|---|---|
+| **#1** | 인쇄전단 시스템 | PrintFlyerPage.tsx + flyer-print-renderer.ts — 한국 마트 규격(A3/B4/A4/8절/타블로이드) 5종 + 9가지 테마(봄/여름/가을/겨울/추석/설+기본3색). 카테고리별 상품 그리드 에디터, 네이버 이미지 자동검색+직접업로드, 300dpi PDF 생성 |
+| **#2** | 장바구니/주문 | flyer-carts.ts(CT-F19) + flyer-orders.ts(CT-F20) + OrdersPage.tsx — phone 기반 장바구니 UPSERT, 주문 생명주기(pending→confirmed→ready→completed/cancelled), 요약 카드 4개 + 상태탭 필터 |
+| **#3** | POS 자동전단 생성 | flyer-pos-auto.ts(CT-F22) — 5분 간격 미처리 할인건 감지 → 카탈로그 이미지 매칭 → 할인율 분류(메인30%↑/서브10%↑/일반) → auto_draft 자동 생성 |
+| **#4** | 수신자별 단축URL 추적 | flyer-short-code.ts(CT-F18) — base62 5자리 코드(9억 조합), 배치 INSERT 5000단위, 90일 만료, 클릭통계(유니크phone/첫클릭/총클릭) |
+| **#5** | 감사로그 | flyer-audit-log.ts(CT-F23) — 로그인/전단생성/발송/주문/설정 등 13가지 액션 기록. 비동기 처리. 슈퍼관리자 FlyerAdminDashboard에 조회UI 추가 |
+| **#6** | 엑셀 AI 자동매핑 | flyer-excel-mapper.ts(CT-F24) + ExcelUploadModal.tsx — 엑셀 헤더→상품필드 AI 매핑(Claude주/GPT폴백). 3단계(업로드→매핑확인→미리보기). 할인율 기반 promoType 자동분류 |
+| **#7** | 배경제거 | flyer-rembg.ts — rembg Docker 서비스 호출(15초 타임아웃), 실패 시 원본 폴백 |
+| **#8** | 인쇄전단 백엔드 수정 | flyers.ts — created_by→user_id, store_address→business_address 컬럼 변경 |
+| **#9** | PDF 다운로드 토큰 | 인쇄전단 PDF 다운로드 시 인증 토큰 처리 수정 |
+| **#10** | 인쇄전단 메뉴 이동 | App.tsx 메뉴 구조 개선, 인쇄전단 메뉴 위치 조정 |
+
+#### 전단AI 오류 수정 (3건)
+| # | 영역 | 해결 |
+|---|---|---|
+| **F1** | 전단생성 실패 | flyers.ts 전단 생성 로직 오류 수정 |
+| **F2** | 인쇄전단 오류 | PrintFlyerPage 렌더링/이벤트 핸들링 수정 |
+| **F3** | 전단 업데이트 | 인쇄전단 업데이트 로직 안정화 |
+
+#### 한줄로AI 수정 (1건)
+| # | 영역 | 변경 |
+|---|---|---|
+| **#1** | 추천카카오 제거 | AI 추천에서 카카오 채널 추천 옵션 제거 (ai.ts) |
+
+#### 수정 파일 총 31개
+- **전단AI 백엔드 (16개):** flyers.ts, carts.ts, orders.ts, pos.ts, short-urls.ts, stats.ts, flyer-admin.ts, auth.ts, app.ts, flyer-audit-log.ts, flyer-carts.ts, flyer-orders.ts, flyer-pos-auto.ts, flyer-pos-ingest.ts, flyer-print-renderer.ts, flyer-rembg.ts, flyer-templates.ts, flyer-send.ts, flyer-short-code.ts, flyer-excel-mapper.ts, index.ts
+- **전단AI 프론트 (4개):** App.tsx, PrintFlyerPage.tsx, OrdersPage.tsx, ExcelUploadModal.tsx
+- **한줄로 (2개):** ai.ts, FlyerAdminDashboard.tsx
+- **기타:** CLAUDE.md, InvitoAI_Technical_Whitepaper_2026.docx
+
+---
+
+### 🔧 D121 — KISA subject(광고) 전경로 + AI 문안 4차/5차 강화 + 빈필드 제외 (2026-04-14~15) — ✅ 배포완료
+
+> **배경:** KISA 2026-05 LMS/MMS 제목(광고) 의무 표기 전경로 적용 + AI 문안 생성 프롬프트 4차(감각언어/사용시나리오/업종별킬포인트) + 5차(소비자심리학/브랜드품격) 대규모 강화 + 빈 필드 변수 자동 제외
+
+#### KISA subject(광고) 전경로 적용
+**컨트롤타워 신설:**
+- `messageUtils.ts` — `buildAdSubject(subject, msgType, isAd)` 신설
+- `prepareSendMessage` 반환값 `{message, subject}`로 확장
+- `formatDate.ts` — `buildAdSubjectFront` (프론트 미리보기용)
+
+| 구분 | 적용 위치 | 건수 |
+|---|---|---|
+| **백엔드 발송** | campaigns.ts(AI/테스트/직접/예약수정 4곳), auto-campaign-worker.ts(1곳), spam-test-queue.ts(1곳), spam-filter.ts(1곳) | 7곳 |
+| **프론트 제목 입력란** | DirectSendPanel/TargetSendModal/AutoSendFormModal/AiCampaignSendModal/ScheduledCampaignModal | 5곳 |
+| **프론트 제목 표시** | AiCampaignResultPopup/AiPreviewModal/AiCustomSendFlow/ScheduledCampaignModal/ResultsModal | 5곳+(2추가) |
+| **스팸필터 isAd prop** | SpamFilterTestModal + 호출부(Dashboard/AiCampaignResultPopup/AiCustomSendFlow/DirectSendPanel/TargetSendModal) | 5곳 |
+
+#### AI 문안 생성 프롬프트 4차+5차 강화
+**4차 — BRAND_SYSTEM_PROMPT 전면 교체:**
+- 사용 시나리오 기법 (고객 생활 속 제품 사용 장면)
+- 감각 언어 가이드 (오감 자극 표현)
+- 업종별 킬 포인트 10개 업종
+- 문장 리듬 (짧은↔긴 교차)
+- A/B/C variant 설득 전략 자체 분리
+- "왜 지금, 왜 나한테, 왜 이 브랜드" 3박자
+- generateCustomMessages systemPrompt도 동일 적용
+
+**5차 — 소비자 심리학 + 브랜드 품격:**
+- AI 사고 과정 강제 (브랜드 이미지? 페인포인트? 감정? 과장 없이?)
+- 소비자 심리 5가지: 손실회피/호기심갭/소속감·자부심/자연스러운긴급성/1:1대화 착각
+- 전부 좋은 예+나쁜 예 쌍 — 과장/허풍 금지, 브랜드 품격 유지
+- 느낌표 최대 2~3개, 과장 형용사 금지
+
+#### 개인화 변수 데이터 필터링 (filterVarCatalogByData)
+- `services/ai.ts` — `filterVarCatalogByData(varCatalog, availableVars, companyId)` 신설
+- 직접 컬럼/커스텀 필드 데이터 0건이면 varCatalog에서 제거 → AI가 빈 필드 변수 사용 방지
+- 적용: routes/ai.ts generate-messages + auto-campaign-worker.ts
+
+#### 스팸필터 개인화 치환 불일치 수정
+- **원인:** sampleCustomer 키 "이름" vs 메시지 변수 %고객명% — 미리보기에는 aliasMap 있지만 스팸필터에는 누락
+- **수정:** AiCampaignResultPopup + AiCustomSendFlow 스팸필터 데이터에 aliasMap 적용
+
+#### 스팸필터테스트 고객일치화 수정
+- **원인:** 스팸필터 테스트 시 sampleCustomer가 없거나 타겟 무관 고객 사용
+- **수정:** 미리보기와 동일한 sampleCustomer 전달
+
+#### 수정 파일 총 21개
+- **백엔드 (7개):** ai.ts(routes), ai.ts(services), campaigns.ts, spam-filter.ts, auto-campaign-worker.ts, messageUtils.ts, spam-test-queue.ts
+- **프론트 (13개):** AiCampaignResultPopup, AiCampaignSendModal, AiCustomSendFlow, AiPreviewModal, AutoSendFormModal, DirectSendPanel, ResultsModal, ScheduledCampaignModal, SpamFilterTestModal, TargetSendModal, AutoSendPage, Dashboard, formatDate.ts
+- **문서 (1개):** STATUS.md
+
+#### 핵심 교훈 (D121)
+> 1. **전수파악 없이 "다 했다" 보고 금지** — subject(광고) 적용을 4번 배포시킴. 매번 추가 발견.
+> 2. **발송 경로뿐 아니라 표시 경로(미리보기/스팸필터/발송확인 모달) 전수 필수.**
+> 3. **컨트롤타워를 만들면 호출부에서 각각 호출 X → 단일 진입점(prepareSendMessage)에서 처리.**
+> 4. **동일 기능(변수 치환)을 여러 곳에서 호출할 때 옵션(aliasMap 등)도 동일해야 함.**
+
+---
+
+### 🔧 D120 — UI 통일 + 캘린더 이동 + 080 버그 + 전단AI user_id 격리 (2026-04-14) — ✅ 배포완료
 
 > **배경:** 한줄로AI UI 통일감 작업 + 080 수신거부 저장 버그 + 전단AI 사용자별 데이터 격리
 
@@ -145,7 +295,7 @@
 - **LMS 적정 길이:** 600~1200바이트 권장, 300바이트 미만 실격
 - **계절감 + 월별 이벤트** 반영 필수
 - campaigns 실발송 성공 문안 자동 조회 → 프롬프트 few-shot 레퍼런스
-- ⚠️ **잔존 과제:** 제미나이 대비 제품 사용 시나리오, 감각적 표현 부족 → 다음 세션 추가 고도화 필요
+- ~~⚠️ 잔존 과제: 제미나이 대비 제품 사용 시나리오, 감각적 표현 부족~~ → **D121에서 4차/5차 프롬프트 강화로 해결 완료**
 
 #### 수정 파일 총 14개
 - `AiPreviewModal.tsx` — 핸드폰 프레임 전면 리뉴얼

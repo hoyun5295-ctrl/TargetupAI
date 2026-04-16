@@ -1855,15 +1855,8 @@ const campaignData = {
 
   // ★ D95: SMS 바이트 자르기 — formatDate.ts 컨트롤타워 사용 (alias)
 
-  // 광고문구 포함된 최종 메시지
-  // 080번호 하이픈 포맷팅 (0801111111 → 080-111-1111)
-  const formatRejectNumber = (num: string) => {
-    const clean = num.replace(/-/g, '');
-    if (clean.length === 10) {
-      return `${clean.slice(0,3)}-${clean.slice(3,6)}-${clean.slice(6)}`;
-    }
-    return num;
-  };
+  // ★ D123 P6: 인라인 제거 → formatPhoneNumber 컨트롤타워 사용 (02/대표번호/050X 전부 정확 처리)
+  const formatRejectNumber = formatPhoneNumber;
 
   // ★ AI추천 미리보기용 광고 문구 래핑 — D102: buildAdMessageFront 컨트롤타워 사용
   const wrapAdText = (msg: string, channel?: string) => {

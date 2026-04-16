@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { formatDateTime } from '../utils/formatDate';
+import { formatDateTime, formatPhoneNumber } from '../utils/formatDate';
 
 export default function Unsubscribes() {
   const navigate = useNavigate();
@@ -177,26 +177,11 @@ export default function Unsubscribes() {
     setTimeout(() => setToast({ show: false, type: '', message: '' }), 5000);
   };
 
-  // D43-4: 080번호 포맷팅 (동적)
-  const format080Number = (num: string) => {
-    const cleaned = num.replace(/\D/g, '');
-    if (cleaned.length === 11) {
-      return `${cleaned.slice(0, 3)}-${cleaned.slice(3, 6)}-${cleaned.slice(6)}`;
-    }
-    if (cleaned.length === 12) {
-      return `${cleaned.slice(0, 3)}-${cleaned.slice(3, 7)}-${cleaned.slice(7)}`;
-    }
-    // 이미 포맷팅 되어있으면 그대로
-    if (num.includes('-')) return num;
-    return num;
-  };
+  // ★ D123 P6: 인라인 제거 → formatPhoneNumber 컨트롤타워 사용 (02/대표번호/050X/080 전부 정확 처리)
+  const format080Number = formatPhoneNumber;
 
-  const formatPhone = (phone: string) => {
-    if (phone.length === 11) {
-      return `${phone.slice(0, 3)}-${phone.slice(3, 7)}-${phone.slice(7)}`;
-    }
-    return phone;
-  };
+  // ★ D123 P6: 인라인 제거 → formatPhoneNumber 컨트롤타워 사용
+  const formatPhone = formatPhoneNumber;
 
   const sourceLabel: Record<string, { text: string; color: string }> = {
     '080_ars': { text: '080 ARS', color: 'bg-orange-100 text-orange-700' },

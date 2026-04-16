@@ -45,10 +45,15 @@ export interface AutoCampaignNotifyContext {
 /**
  * ★ D111 P5: messageContent에 (광고)+무료거부 부착.
  * D103 buildAdMessage 안전장치(중복 방지) 내장 — 이미 붙어있으면 건드리지 않음.
- * isAd=false거나 opt080Number 없으면 sanitize만 적용하고 원본 반환.
+ * isAd=false거나 opt080Number 없으면 원본 반환.
+ *
+ * ★ D123 P10: sanitize 제외 — 담당자 알림에도 실제 발송 본문과 동일한 특수문자 유지
+ *   이전: sanitizeSmsText(messageContent) → ★/※/▼ 등 제거 → 담당자 알림과 실제 발송 내용 불일치
+ *   변경: messageContent는 원본 그대로, 알림 템플릿 고정 부분만 sanitize 적용
+ *   배경: EUC-KR 우려는 alert 템플릿(예: "[자동발송]") 고정 부분에 한정. 본문은 실제 발송과 동일해야 함
  */
-function applyAdAndSanitize(ctx: AutoCampaignNotifyContext): string {
-  const raw = sanitizeSmsText(ctx.messageContent || '');
+function applyAd(ctx: AutoCampaignNotifyContext): string {
+  const raw = ctx.messageContent || '';
   if (!raw) return '';
   return buildAdMessage(
     raw,
@@ -112,7 +117,7 @@ export function buildAiGeneratedNotifyMessage(ctx: AutoCampaignNotifyContext): s
   }
   lines.push('');
   lines.push('=== AI 생성 문안 ===');
-  lines.push(applyAdAndSanitize(ctx));
+  lines.push(applyAd(ctx));
   lines.push('');
   lines.push('[안내] 문안 수정이 필요하면 관리자 페이지에서 수정해주세요.');
   return lines.join('\n');
@@ -150,7 +155,7 @@ export function buildPreNotifyMessage(ctx: AutoCampaignNotifyContext): string {
   }
   lines.push('');
   lines.push('=== 발송 문안 ===');
-  lines.push(applyAdAndSanitize(ctx));
+  lines.push(applyAd(ctx));
   lines.push('');
   lines.push('[안내] 취소하려면 관리자 페이지에서 자동발송을 일시정지해주세요.');
   return lines.join('\n');
@@ -190,7 +195,7 @@ export function buildSpamTestResultNotifyMessage(ctx: AutoCampaignNotifyContext)
   if (ctx.messageContent) {
     lines.push('');
     lines.push('=== 발송 문안 ===');
-    lines.push(applyAdAndSanitize(ctx));
+    lines.push(applyAd(ctx));
   }
   if (ctx.spamBlocked) {
     lines.push('');

@@ -1517,6 +1517,7 @@ router.post('/direct-send', async (req: Request, res: Response) => {
         // ★ D103: prepareSendMessage 컨트롤타워 — 변수 치환 + (광고)+080 한 함수로 통합
         const cleanPhone = normalizePhone(recipient.phone);
         const dbCustomer = directCustomerMap.get(cleanPhone) || null;
+        // ★ D123: 직접발송은 고객이 올린 데이터 그대로 (숫자 콤마 자동변환 안 함)
         const { message: finalMessage, subject: finalSubject } = prepareSendMessage(message, dbCustomer, directFieldMappings, {
           msgType, isAd: adEnabled, opt080Number: directOpt080,
           addressBookFields: {
@@ -1527,6 +1528,7 @@ router.post('/direct-send', async (req: Request, res: Response) => {
             callback: recipient.callback,
           },
           subject: subject || '',
+          skipNumberFormatting: true,
         });
 
         // ★ C3: 분할전송 시간 계산
@@ -1569,13 +1571,14 @@ router.post('/direct-send', async (req: Request, res: Response) => {
           // ★ D102: 항상 백엔드 replaceVariables 컨트롤타워 사용 (customMessages 분기 제거)
           const cleanKakaoPhone = normalizePhone(recipient.phone);
           const dbKakaoCustomer = directCustomerMap.get(cleanKakaoPhone) || null;
+          // ★ D123: 직접발송 카카오도 고객 원본 데이터 그대로
           const finalMessage = replaceVariables(message, dbKakaoCustomer, directFieldMappings, {
             name: recipient.name,
             extra1: recipient.extra1,
             extra2: recipient.extra2,
             extra3: recipient.extra3,
             callback: recipient.callback,
-          });
+          }, { skipNumberFormatting: true });
 
           // ★ C3: 분할전송 시간 계산 (오버플로우 방지 — calcSplitSendTime 적용)
           let kakaoSendTime: string | undefined;
@@ -1650,10 +1653,11 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       const alimtalkRows = filteredRecipients.map((recipient: any, i: number) => {
         // ★ D102: 항상 백엔드 replaceVariables 컨트롤타워 사용
         const dbAlimCustomer = directCustomerMap.get(normalizePhone(recipient.phone)) || null;
+        // ★ D123: 직접발송 알림톡도 고객 원본 데이터 그대로
         const finalMessage = replaceVariables(message, dbAlimCustomer, directFieldMappings, {
           name: recipient.name, extra1: recipient.extra1, extra2: recipient.extra2,
           extra3: recipient.extra3, callback: recipient.callback,
-        });
+        }, { skipNumberFormatting: true });
         return {
           phone: normalizePhone(recipient.phone),
           callback: normalizePhone(callback),

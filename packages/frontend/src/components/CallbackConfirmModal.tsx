@@ -21,8 +21,8 @@ interface CallbackConfirmData {
   unregisteredDetails: UnregisteredDetail[];
   remainingCount: number;
   message: string;
-  /** 확인 후 실행할 발송 경로 식별자 */
-  sendType: 'direct' | 'target' | 'ai' | 'aiCustom';
+  /** 확인 후 실행할 발송 경로 식별자 — 'auto'는 D123 P11 자동발송 생성 경로 */
+  sendType: 'direct' | 'target' | 'ai' | 'aiCustom' | 'auto';
 }
 
 interface CallbackConfirmModalProps {
@@ -132,7 +132,9 @@ export default function CallbackConfirmModal({
                   <span className="animate-spin">⏳</span> 처리중...
                 </span>
               ) : (
-                `제외하고 발송 (${data.remainingCount.toLocaleString()}명)`
+                data.sendType === 'auto'
+                  ? `제외하고 생성 (${data.remainingCount.toLocaleString()}명)`
+                  : `제외하고 발송 (${data.remainingCount.toLocaleString()}명)`
               )}
             </button>
           )}

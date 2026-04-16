@@ -20,6 +20,8 @@ import { buildFilterQueryCompat } from '../utils/customer-filter';
 import { buildUnsubscribeFilter, CAMPAIGN_OPT080_SELECT_EXPR, buildCampaignOpt080LeftJoin } from '../utils/unsubscribe-helper';
 import { fetchTargetSampleCustomer } from '../utils/target-sample';
 import { kstToUtc, calcNextRunAt } from '../utils/auto-campaign-worker';
+// ★ D123 P11: 미등록 회신번호 pre-flight 검증
+import { filterByIndividualCallback } from '../utils/callback-filter';
 
 const router = Router();
 
@@ -421,6 +423,69 @@ router.post('/', async (req: Request, res: Response) => {
       );
       if (cbCheck.rows.length === 0) {
         return res.status(400).json({ error: '등록되지 않은 발신번호입니다.' });
+      }
+    }
+
+    // ★ D123 P11: 개별회신번호 사용 시 미등록 회신번호 pre-flight 검증
+    //   이전: 검증 없이 생성 → 실제 발송 때 CT-08이 자동 제외 (고객은 이유 모름)
+    //   변경: 생성 시점에 target_filter로 고객 샘플링 → CT-08 필터링 → 미등록 있으면 모달로 확인 요청
+    //   force=true 플래그가 있으면 검증 스킵 (프론트에서 "제외하고 생성" 선택한 경우)
+    const forceCreate = req.body.force === true;
+    if (use_individual_callback && !forceCreate) {
+      try {
+        const filterResult = buildFilterQueryCompat(target_filter || {}, companyId);
+        const finalStoreCode = store_code || userStoreCode || null;
+        let storeFilter = '';
+        const storeParams: any[] = [];
+        if (finalStoreCode) {
+          storeFilter = ` AND c.store_code = $${filterResult.nextIndex}`;
+          storeParams.push(finalStoreCode);
+        }
+        const unsubParamIdx = filterResult.nextIndex + storeParams.length;
+        const unsubFilter = buildUnsubscribeFilter(`$${unsubParamIdx}`, 'c.phone');
+
+        // 고객 조회 (phone/callback/store_phone + custom_fields)
+        const customersResult = await query(
+          `SELECT c.id, c.phone, c.callback, c.store_phone, c.custom_fields
+           FROM customers c
+           WHERE c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true
+           ${filterResult.where}${storeFilter}${unsubFilter}`,
+          [companyId, ...filterResult.params, ...storeParams, userId]
+        );
+
+        if (customersResult.rows.length > 0) {
+          const cbResult = await filterByIndividualCallback(customersResult.rows, companyId);
+
+          // 미등록 회신번호가 있으면 모달용 데이터 반환 (에러 아님)
+          if (cbResult.callbackUnregisteredCount > 0 || cbResult.callbackMissingCount > 0) {
+            // 미등록 회신번호별 제외 건수 집계
+            const unregisteredDetailsMap = new Map<string, number>();
+            for (const c of customersResult.rows) {
+              const cb = (c.callback || c.store_phone || '').replace(/-/g, '');
+              if (!cb) continue;
+              // 등록된 번호인지 체크 (cbResult.filtered에 포함되지 않았으면 미등록)
+              const isFiltered = cbResult.filtered.find((f: any) => f.id === c.id);
+              if (!isFiltered) {
+                unregisteredDetailsMap.set(cb, (unregisteredDetailsMap.get(cb) || 0) + 1);
+              }
+            }
+            const unregisteredDetails = Array.from(unregisteredDetailsMap.entries()).map(([phone, excludedCount]) => ({
+              phone, excludedCount,
+            }));
+
+            return res.status(409).json({
+              code: 'UNREGISTERED_CALLBACKS',
+              callbackMissingCount: cbResult.callbackMissingCount,
+              callbackUnregisteredCount: cbResult.callbackUnregisteredCount,
+              unregisteredDetails,
+              remainingCount: cbResult.filtered.length,
+              totalCount: customersResult.rows.length,
+            });
+          }
+        }
+      } catch (cbErr: any) {
+        // pre-flight 검증 실패 시 생성은 진행 (실제 발송 때 CT-08이 재검증)
+        console.error('[auto-campaigns] 미등록 회신번호 pre-flight 검증 실패 (무시):', cbErr);
       }
     }
 

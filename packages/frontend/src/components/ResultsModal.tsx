@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { calculateSmsBytes, mmsServerPathToUrl, formatCampaignMessageForDisplay, buildAdSubjectFront } from '../utils/formatDate';
+import { calculateSmsBytes, mmsServerPathToUrl, formatCampaignMessageForDisplay, buildAdSubjectFront, formatPhoneNumber } from '../utils/formatDate';
 import CalendarModal from './CalendarModal';
 
 interface ResultsModalProps {
@@ -66,6 +66,7 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
   const [cancelTarget, setCancelTarget] = useState<any>(null);
   const [toast, setToast] = useState<{show: boolean, type: 'success' | 'error', message: string}>({show: false, type: 'success', message: ''});
   const [msgDetailContent, setMsgDetailContent] = useState<string | null>(null);
+  const [enlargedImage, setEnlargedImage] = useState<{ url: string; filename: string } | null>(null); // ★ D123 P5: MMS 이미지 클릭 확대
 
   // 필터 상태
   const [filterType, setFilterType] = useState('all');
@@ -195,13 +196,8 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
     return new Date(dt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
   };
 
-  const formatPhone = (phone: string) => {
-    if (!phone) return '-';
-    const c = phone.replace(/\D/g, '');
-    if (c.length === 11) return `${c.slice(0,3)}-${c.slice(3,7)}-${c.slice(7)}`;
-    if (c.length === 10) return `${c.slice(0,3)}-${c.slice(3,6)}-${c.slice(6)}`;
-    return phone;
-  };
+  // ★ D123 P6: 인라인 제거 → formatPhoneNumber 컨트롤타워 사용 (02 지역번호, 대표번호, 050X 전부 정확 처리)
+  const formatPhone = (phone: string) => phone ? formatPhoneNumber(phone) : '-';
 
   // 필터링
   const filteredCampaigns = campaigns.filter(c => {
@@ -830,11 +826,23 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                               {/* ★ B2: 컨트롤타워 — 실발송 텍스트(MySQL) 우선, 없으면 순수본문에 (광고)+080 부착 */}
                               {formatCampaignMessageForDisplay(selectedCampaign, messages[0]?.msg_contents)}
                               {/* ★ D98: MMS 이미지 표시 — mmsServerPathToUrl 컨트롤타워 사용 */}
+                              {/* ★ D123 P5: 호버 시 파일명 툴팁 + 클릭 시 확대 모달 */}
                               {selectedCampaign.mms_image_paths && Array.isArray(selectedCampaign.mms_image_paths) && selectedCampaign.mms_image_paths.length > 0 && (
                                 <div className="mt-2 pt-2 border-t border-gray-100 flex gap-1.5">
-                                  {selectedCampaign.mms_image_paths.map((imgPath: string, idx: number) => (
-                                    <img key={idx} src={mmsServerPathToUrl(imgPath)} alt={`MMS ${idx+1}`} className="w-16 h-16 object-cover rounded border" />
-                                  ))}
+                                  {selectedCampaign.mms_image_paths.map((imgPath: string, idx: number) => {
+                                    const filename = String(imgPath || '').replace(/\\/g, '/').split('/').pop() || `이미지${idx+1}`;
+                                    const url = mmsServerPathToUrl(imgPath);
+                                    return (
+                                      <img
+                                        key={idx}
+                                        src={url}
+                                        alt={filename}
+                                        title={filename}
+                                        onClick={() => setEnlargedImage({ url, filename })}
+                                        className="w-16 h-16 object-cover rounded border cursor-pointer hover:ring-2 hover:ring-emerald-400 transition"
+                                      />
+                                    );
+                                  })}
                                 </div>
                               )}
                             </div>
@@ -971,6 +979,7 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                       <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-500">메시지내용</th>
                       <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500">등록일시</th>
                       <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500">발송일시</th>
+                      <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500">수신확인</th>
                       <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500">전송결과</th>
                       <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500">결과코드</th>
                       <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500">통신사</th>
@@ -978,9 +987,9 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                   </thead>
                   <tbody>
                     {messageLoading ? (
-                      <tr><td colSpan={9} className="py-10 text-center text-gray-400">조회 중...</td></tr>
+                      <tr><td colSpan={10} className="py-10 text-center text-gray-400">조회 중...</td></tr>
                     ) : messages.length === 0 ? (
-                      <tr><td colSpan={9} className="py-10 text-center text-gray-400">
+                      <tr><td colSpan={10} className="py-10 text-center text-gray-400">
                         {selectedCampaign?.status === 'cancelled'
                           ? '취소된 캠페인입니다. 대기중이던 메시지는 취소 시 삭제되었습니다.'
                           : messageSearchValue ? '검색 결과가 없습니다.' : '데이터가 없습니다.'}
@@ -1000,6 +1009,7 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                             />
                             <td className="px-3 py-2.5 text-center text-xs text-gray-500">{formatDateTime(m.sendreq_time)}</td>
                             <td className="px-3 py-2.5 text-center text-xs text-gray-500">{formatDateTime(m.mobsend_time)}</td>
+                            <td className="px-3 py-2.5 text-center text-xs text-gray-500">{formatDateTime(m.repmsg_recvtm)}</td>
                             <td className="px-3 py-2.5 text-center">
                               <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${
                                 statusInfo.type === 'success' ? 'bg-green-50 text-green-700' : statusInfo.type === 'pending' ? 'bg-yellow-50 text-yellow-700' : 'bg-red-50 text-red-700'
@@ -1108,6 +1118,29 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
             toast.type === 'success' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'
           }`}>
             {toast.message}
+          </div>
+        )}
+        {/* ★ D123 P5: MMS 이미지 확대 모달 */}
+        {enlargedImage && (
+          <div
+            className="fixed inset-0 bg-black/80 flex items-center justify-center z-[90] animate-in fade-in duration-150 p-6"
+            onClick={() => setEnlargedImage(null)}
+          >
+            <div className="relative max-w-[90vw] max-h-[90vh] flex flex-col items-center" onClick={(e) => e.stopPropagation()}>
+              <button
+                onClick={() => setEnlargedImage(null)}
+                className="absolute top-2 right-2 z-10 w-8 h-8 bg-white/90 rounded-full flex items-center justify-center text-gray-700 hover:bg-white shadow"
+                aria-label="닫기"
+              >✕</button>
+              <img
+                src={enlargedImage.url}
+                alt={enlargedImage.filename}
+                className="max-w-[90vw] max-h-[80vh] object-contain rounded-lg shadow-2xl animate-in zoom-in-95 duration-200"
+              />
+              <div className="mt-3 px-4 py-2 bg-white/90 rounded-lg text-sm text-gray-700 font-medium shadow">
+                {enlargedImage.filename}
+              </div>
+            </div>
           </div>
         )}
         {/* ★ D93→D120: 메시지 상세보기 모달 — 핸드폰 프레임 스타일 */}

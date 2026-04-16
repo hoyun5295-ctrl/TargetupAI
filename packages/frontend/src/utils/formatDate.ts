@@ -291,10 +291,10 @@ export function replaceDirectVars(
   for (const { variable, fieldKey, label } of DIRECT_VAR_MAP) {
     const val = recipient[fieldKey];
     const hasVal = val != null && String(val).trim();
-    // ★ callback(회신번호)은 전화번호이므로 숫자 포맷팅(formatPreviewValue) 적용 금지
+    // ★ D123: 직접발송은 고객이 올린 데이터 그대로 출력 (숫자 콤마 자동변환 안 함)
     let displayVal: string;
     if (hasVal) {
-      displayVal = fieldKey === 'callback' ? String(val).trim() : formatPreviewValue(val);
+      displayVal = String(val).trim();  // 원본 그대로 — formatPreviewValue 제거
     } else if (fieldKey === 'callback') {
       displayVal = fallbackCallback || '';
     } else {
@@ -644,6 +644,10 @@ export function formatPhoneNumber(phone: string): string {
   // 대표번호 8자리 (15XX, 16XX, 18XX): 1XXX-XXXX
   if (cleaned.length === 8 && cleaned.startsWith('1')) {
     return `${cleaned.slice(0, 4)}-${cleaned.slice(4)}`;
+  }
+  // ★ D123 P6: 050X 인터넷전화 12자리 — 0504/0507 등: 050X-XXXX-XXXX
+  if (cleaned.length === 12 && cleaned.startsWith('050')) {
+    return `${cleaned.slice(0, 4)}-${cleaned.slice(4, 8)}-${cleaned.slice(8)}`;
   }
   // 기타 지역번호 10자리: 0XX-XXX-XXXX
   if (cleaned.length === 10 && cleaned.startsWith('0')) {
