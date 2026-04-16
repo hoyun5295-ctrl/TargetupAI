@@ -43,7 +43,7 @@ import UploadResultModal from '../components/UploadResultModal';
 import { useAuthStore } from '../stores/authStore';
 import { formatDate, formatPreviewValue, formatByType, calculateSmsBytes, truncateToSmsBytes, DIRECT_VAR_MAP, DIRECT_VAR_TO_FIELD, DIRECT_FIELD_LABELS, DIRECT_MAPPING_FIELDS, replaceDirectVars, formatPhoneNumber, mmsServerPathToUrl, resolveRecipientCallback, buildAdMessageFront } from '../utils/formatDate';
 import { insertAtCursorOrAppend } from '../utils/textInsert';
-import { getMmsImagePath, getMmsImageDisplayName } from '../utils/mmsImage';
+import { getMmsImagePath, getMmsImageDisplayName, type MmsImageItem } from '../utils/mmsImage';
 import DirectSendPanel from '../components/DirectSendPanel';
 
 interface Stats {
@@ -1137,7 +1137,8 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
   };
 
   // SMS 템플릿 저장
-  const saveTemplate = async (name: string, content: string, msgType: string, subject: string, mmsImagePaths?: string[]) => {
+  // ★ D124 N4: mmsImagePaths는 객체 배열({path, originalName}) 또는 문자열 배열 혼재 허용
+  const saveTemplate = async (name: string, content: string, msgType: string, subject: string, mmsImagePaths?: MmsImageItem[]) => {
     try {
       const token = localStorage.getItem('token');
       const res = await fetch('/api/sms-templates', {

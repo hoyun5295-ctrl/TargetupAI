@@ -192,11 +192,13 @@ export default function TargetSendModal({
   };
 
   // ====== ★ 커서 위치에 변수 삽입 — D124 컨트롤타워(insertAtCursor) ======
+  //   setter는 props로 내려받은 (msg: string) => void 형태라 updater 패턴 불가 → currentValue 직접 사용
   const insertVariable = (variable: string, target: 'sms' | 'kakao') => {
     const ref = target === 'sms' ? smsTextareaRef : kakaoTextareaRef;
+    const currentValue = target === 'sms' ? targetMessage : kakaoMessage;
     const setter = target === 'sms' ? setTargetMessage : setKakaoMessage;
     const ok = insertAtCursor(ref.current, variable, setter);
-    if (!ok) setter(prev => prev + variable); // fallback: 끝에 붙임
+    if (!ok) setter(currentValue + variable); // fallback: 현재 값 + 끝에 붙임
   };
 
   // ====== ★ B+0407-1: 인라인 replaceVars 제거 — replaceVarsByFieldMeta 컨트롤타워 사용 ======
