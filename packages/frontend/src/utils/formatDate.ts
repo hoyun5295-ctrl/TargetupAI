@@ -739,9 +739,10 @@ export function buildAdMessageFront(
   const isSms = msgType === 'SMS';
   const adPrefix = isSms ? '(광고)' : '(광고) ';
   // ★ PPT#3: 080번호 없어도 (광고)+무료거부까지는 붙이고, 번호만 비움
+  // ★ D124: 무료수신거부 앞에 빈 줄 1개 강제 (\n\n) — 백엔드 buildAdMessage와 동기화
   const rejectFooter = optOutNumber
-    ? (isSms ? `\n무료거부${optOutNumber.replace(/-/g, '')}` : `\n무료수신거부 ${optOutNumber}`)
-    : (isSms ? `\n무료거부` : `\n무료수신거부`);
+    ? (isSms ? `\n\n무료거부${optOutNumber.replace(/-/g, '')}` : `\n\n무료수신거부 ${optOutNumber}`)
+    : (isSms ? `\n\n무료거부` : `\n\n무료수신거부`);
 
   // ★ D103+B 후속: 중복 방지 안전장치 — 백엔드 buildAdMessage와 동일 처리
   //   D103 이전에 발송된 캠페인이나, message_content에 이미 (광고)/무료거부가 포함된 경우
@@ -753,7 +754,10 @@ export function buildAdMessageFront(
   const finalPrefix = hasAdPrefix ? '' : adPrefix;
   const finalFooter = hasRejectFooter ? '' : rejectFooter;
 
-  return `${finalPrefix}${message}${finalFooter}`;
+  // ★ D124: 본문 끝 개행 정규화 — 본문이 이미 \n으로 끝나면 trimEnd 후 빈 줄 부착 (\n\n\n 방지)
+  const body = finalFooter ? message.replace(/\n+$/, '') : message;
+
+  return `${finalPrefix}${body}${finalFooter}`;
 }
 
 /**
