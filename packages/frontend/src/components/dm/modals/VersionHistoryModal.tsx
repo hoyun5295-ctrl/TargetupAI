@@ -9,7 +9,7 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
-import { useDmBuilderStore } from '../../../stores/dmBuilderStore';
+import { useDmBuilderStore, selectAllSectionsFlat } from '../../../stores/dmBuilderStore';
 import { diffByLine, type DiffChunk } from '../../../utils/dm-text-diff';
 import ModalBase, { ModalButton } from './ModalBase';
 
@@ -33,7 +33,8 @@ type Version = {
 
 export default function VersionHistoryModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const dmId = useDmBuilderStore((s) => s.dmId);
-  const currentSections = useDmBuilderStore((s) => s.sections);
+  /** 버전 diff는 전체 DM(모든 페이지의 섹션) 기준 */
+  const currentSections = useDmBuilderStore(selectAllSectionsFlat);
   const loadDm = useDmBuilderStore((s) => s.loadDm);
   const setToast = useDmBuilderStore((s) => s.setToast);
 

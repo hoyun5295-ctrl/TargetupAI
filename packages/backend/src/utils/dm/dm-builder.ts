@@ -17,9 +17,10 @@ export interface DmPageInput {
   footer_template?: string;
   header_data?: Record<string, any>;
   footer_data?: Record<string, any>;
-  pages?: DmSlide[];
+  /** D119 DmSlide[] 또는 D128 DmPageGroup[] (pages 컬럼 공유) */
+  pages?: DmSlide[] | DmPageGroup[];
   settings?: Record<string, any>;
-  // D125 section-based
+  // D125 section-based (하위호환 flat)
   layout_mode?: 'scroll' | 'slides' | 'scroll_snap';
   sections?: any[];
   brand_kit?: Record<string, any>;
@@ -35,6 +36,51 @@ export interface DmSlide {
   videoUrl?: string;
   videoType?: 'youtube' | 'direct';
   caption?: string;
+}
+
+/** D128 V4 — 페이지 계층 (페이지 안에 여러 섹션 조립) */
+export interface DmPageGroup {
+  id: string;
+  name?: string;
+  sections: any[];
+}
+
+/**
+ * DM 저장된 구조(pages/sections)에서 전체 섹션을 flat 배열로 추출.
+ * - pages가 D128 새 구조면 pages.flatMap(p => p.sections)
+ * - 아니면 sections 필드 그대로
+ * - 둘 다 없으면 []
+ * 검수/AI 개선/테스트 발송 등 섹션 단위 작업에 사용.
+ */
+export function extractFlatSectionsFromDm(dm: any): any[] {
+  let rawPages = dm?.pages;
+  if (typeof rawPages === 'string') { try { rawPages = JSON.parse(rawPages); } catch { rawPages = null; } }
+  if (Array.isArray(rawPages) && rawPages.length > 0 && rawPages[0] && Array.isArray(rawPages[0].sections)) {
+    return rawPages.flatMap((p: any) => Array.isArray(p.sections) ? p.sections : []);
+  }
+  let rawSections = dm?.sections;
+  if (typeof rawSections === 'string') { try { rawSections = JSON.parse(rawSections); } catch { rawSections = null; } }
+  if (Array.isArray(rawSections)) return rawSections;
+  return [];
+}
+
+/**
+ * DM에서 페이지 구조(DmPageGroup[]) 추출.
+ * 없으면 sections를 단일 페이지로 감싸서 반환.
+ */
+export function extractPagesFromDm(dm: any): DmPageGroup[] {
+  let rawPages = dm?.pages;
+  if (typeof rawPages === 'string') { try { rawPages = JSON.parse(rawPages); } catch { rawPages = null; } }
+  if (Array.isArray(rawPages) && rawPages.length > 0 && rawPages[0] && Array.isArray(rawPages[0].sections)) {
+    return rawPages.map((p: any, i: number): DmPageGroup => ({
+      id: p.id || `p-${i}`,
+      name: p.name,
+      sections: Array.isArray(p.sections) ? p.sections : [],
+    }));
+  }
+  const flat = extractFlatSectionsFromDm(dm);
+  if (flat.length > 0) return [{ id: 'p-legacy', sections: flat }];
+  return [];
 }
 
 // ────────────────── CRUD ──────────────────

@@ -8,7 +8,7 @@
  *  4. "재검수" / "발행" 버튼
  */
 import { useEffect, useMemo } from 'react';
-import { useDmBuilderStore } from '../../../stores/dmBuilderStore';
+import { useDmBuilderStore, selectAllSectionsFlat } from '../../../stores/dmBuilderStore';
 import ModalBase, { ModalButton } from './ModalBase';
 
 const AREA_LABELS: Record<string, string> = {
@@ -48,7 +48,8 @@ export default function ValidationModal({ open, onClose }: { open: boolean; onCl
   const result = useDmBuilderStore((s) => s.validationResult);
   const running = useDmBuilderStore((s) => s.validationRunning);
   const selectSection = useDmBuilderStore((s) => s.selectSection);
-  const sections = useDmBuilderStore((s) => s.sections);
+  /** 검수는 전체 DM(모든 페이지의 섹션) 대상 */
+  const sections = useDmBuilderStore(selectAllSectionsFlat);
 
   useEffect(() => {
     if (!open) return;

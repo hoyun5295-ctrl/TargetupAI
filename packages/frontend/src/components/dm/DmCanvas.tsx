@@ -1,12 +1,13 @@
 /**
- * DmCanvas — 중앙 캔버스 영역 (모바일 프레임 + 섹션 나열)
+ * DmCanvas — 중앙 캔버스 영역 (D128 V4)
  *
- * D127 V3: 3모드 렌더링
- *  - scroll      : 전체 길이 세로 나열 (기존)
- *  - scroll_snap : 프레임 높이 고정 + 세로 CSS scroll-snap (1섹션=1페이지)
- *  - slides      : 프레임 높이 고정 + 가로 CSS scroll-snap (좌우 스와이프)
+ * 페이지 계층 구조:
+ *  - 에디터는 "현재 페이지"의 섹션만 렌더 (세로 스크롤)
+ *  - 페이지 전환은 좌측 PageList에서 클릭
+ *  - 레이아웃 모드(scroll/scroll_snap/slides)는 뷰어에서 페이지 간 전환 방식을 결정
+ *  - 에디터 상단에 현재 페이지 배지 + 페이지 네비게이션 힌트
  */
-import { useDmBuilderStore, type LayoutMode } from '../../stores/dmBuilderStore';
+import { useDmBuilderStore } from '../../stores/dmBuilderStore';
 import MobileFrame from './MobileFrame';
 import { SectionRenderer } from './canvas';
 
@@ -14,10 +15,9 @@ export type DmCanvasProps = {
   onPromptClick?: () => void;
 };
 
-const FRAME_HEIGHT = 680;
-
 export default function DmCanvas({ onPromptClick }: DmCanvasProps) {
-  const sections = useDmBuilderStore((s) => s.sections);
+  const pages = useDmBuilderStore((s) => s.pages);
+  const currentPageIndex = useDmBuilderStore((s) => s.currentPageIndex);
   const storeName = useDmBuilderStore((s) => s.storeName);
   const selectedSectionId = useDmBuilderStore((s) => s.selectedSectionId);
   const hoveredSectionId = useDmBuilderStore((s) => s.hoveredSectionId);
@@ -27,6 +27,7 @@ export default function DmCanvas({ onPromptClick }: DmCanvasProps) {
   const updateSectionProps = useDmBuilderStore((s) => s.updateSectionProps);
   const layoutMode = useDmBuilderStore((s) => s.layoutMode);
   const setOpenModal = useDmBuilderStore((s) => s.setOpenModal);
+  const selectPage = useDmBuilderStore((s) => s.selectPage);
   const handlePromptClick = onPromptClick || (() => setOpenModal('ai-prompt'));
 
   const brandKitStyle: React.CSSProperties = {
@@ -36,7 +37,17 @@ export default function DmCanvas({ onPromptClick }: DmCanvasProps) {
     ...(brandKit.background_color ? { ['--dm-bg' as any]: brandKit.background_color } : {}),
   };
 
+  const currentPage = pages[currentPageIndex];
+  const sections = currentPage?.sections || [];
   const sortedSections = sections.slice().sort((a, b) => a.order - b.order);
+  const pageLabel = currentPage?.name || `페이지 ${currentPageIndex + 1}`;
+  const totalPages = pages.length;
+
+  const modeLabel: Record<string, string> = {
+    scroll: '📜 긴 스크롤 (페이지 연결)',
+    scroll_snap: '📍 세로 페이지 스냅',
+    slides: '🎴 좌우 슬라이드',
+  };
 
   return (
     <div
@@ -44,36 +55,86 @@ export default function DmCanvas({ onPromptClick }: DmCanvasProps) {
         flex: 1,
         overflow: 'auto',
         background: 'var(--dm-neutral-100)',
-        padding: '32px 16px',
+        padding: '24px 16px',
         display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'flex-start',
+        flexDirection: 'column',
+        alignItems: 'center',
       }}
       onClick={() => selectSection(null)}
     >
+      {/* 상단 페이지 네비게이션 바 */}
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          marginBottom: 12,
+          padding: '6px 10px',
+          background: '#fff',
+          border: '1px solid var(--dm-neutral-200)',
+          borderRadius: 999,
+          fontSize: 12,
+          color: 'var(--dm-neutral-700)',
+        }}
+      >
+        <button
+          onClick={() => selectPage(currentPageIndex - 1)}
+          disabled={currentPageIndex <= 0}
+          style={navBtn(currentPageIndex <= 0)}
+          title="이전 페이지"
+        >
+          ‹
+        </button>
+        <span style={{ fontWeight: 700, color: 'var(--dm-neutral-900)', minWidth: 60, textAlign: 'center' }}>
+          {pageLabel}
+        </span>
+        <span style={{ fontSize: 11, color: 'var(--dm-neutral-500)' }}>
+          {currentPageIndex + 1} / {totalPages}
+        </span>
+        <button
+          onClick={() => selectPage(currentPageIndex + 1)}
+          disabled={currentPageIndex >= totalPages - 1}
+          style={navBtn(currentPageIndex >= totalPages - 1)}
+          title="다음 페이지"
+        >
+          ›
+        </button>
+        <span
+          style={{
+            marginLeft: 6,
+            fontSize: 10,
+            padding: '2px 8px',
+            background: 'var(--dm-primary-light)',
+            color: 'var(--dm-primary)',
+            borderRadius: 10,
+            fontWeight: 700,
+          }}
+          title="발행되면 이 방식으로 페이지가 전환돼요"
+        >
+          {modeLabel[layoutMode] || layoutMode}
+        </span>
+      </div>
+
       <div className="dm-builder" style={brandKitStyle}>
         <MobileFrame>
           {sortedSections.length === 0 ? (
-            <EmptyCanvas onPromptClick={handlePromptClick} />
+            <EmptyCanvas onPromptClick={handlePromptClick} pageLabel={pageLabel} />
           ) : (
-            <SectionsStage mode={layoutMode}>
+            <div>
               {sortedSections.map((section) => (
-                <SectionStageItem key={section.id} mode={layoutMode}>
-                  <SectionRenderer
-                    section={section}
-                    storeName={storeName}
-                    selected={selectedSectionId === section.id}
-                    hovered={hoveredSectionId === section.id}
-                    onSelect={selectSection}
-                    onHover={hoverSection}
-                    onEditSection={updateSectionProps}
-                  />
-                </SectionStageItem>
+                <SectionRenderer
+                  key={section.id}
+                  section={section}
+                  storeName={storeName}
+                  selected={selectedSectionId === section.id}
+                  hovered={hoveredSectionId === section.id}
+                  onSelect={selectSection}
+                  onHover={hoverSection}
+                  onEditSection={updateSectionProps}
+                />
               ))}
-              {layoutMode !== 'scroll' && (
-                <ModeBadge mode={layoutMode} total={sortedSections.length} />
-              )}
-            </SectionsStage>
+            </div>
           )}
         </MobileFrame>
       </div>
@@ -81,120 +142,24 @@ export default function DmCanvas({ onPromptClick }: DmCanvasProps) {
   );
 }
 
-// ────────────── Stage (3모드 컨테이너) ──────────────
-
-function SectionsStage({ mode, children }: { mode: LayoutMode; children: React.ReactNode }) {
-  if (mode === 'scroll_snap') {
-    return (
-      <div
-        style={{
-          height: FRAME_HEIGHT,
-          overflowY: 'auto',
-          overflowX: 'hidden',
-          scrollSnapType: 'y mandatory',
-          position: 'relative',
-        }}
-      >
-        {children}
-      </div>
-    );
-  }
-  if (mode === 'slides') {
-    return (
-      <div
-        style={{
-          height: FRAME_HEIGHT,
-          overflowX: 'auto',
-          overflowY: 'hidden',
-          scrollSnapType: 'x mandatory',
-          display: 'flex',
-          flexDirection: 'row',
-          position: 'relative',
-        }}
-      >
-        {children}
-      </div>
-    );
-  }
-  // scroll (기본)
-  return <div>{children}</div>;
+function navBtn(disabled: boolean): React.CSSProperties {
+  return {
+    width: 26,
+    height: 26,
+    border: 'none',
+    background: disabled ? 'var(--dm-neutral-100)' : 'var(--dm-neutral-50)',
+    color: disabled ? 'var(--dm-neutral-300)' : 'var(--dm-neutral-700)',
+    borderRadius: '50%',
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    fontSize: 16,
+    lineHeight: 1,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  };
 }
 
-function SectionStageItem({ mode, children }: { mode: LayoutMode; children: React.ReactNode }) {
-  if (mode === 'scroll_snap') {
-    return (
-      <div
-        style={{
-          minHeight: FRAME_HEIGHT,
-          scrollSnapAlign: 'start',
-          scrollSnapStop: 'always',
-          display: 'flex',
-          flexDirection: 'column',
-          justifyContent: 'center',
-        }}
-      >
-        {children}
-      </div>
-    );
-  }
-  if (mode === 'slides') {
-    return (
-      <div
-        style={{
-          flex: '0 0 100%',
-          width: '100%',
-          height: FRAME_HEIGHT,
-          overflowY: 'auto',
-          scrollSnapAlign: 'start',
-          scrollSnapStop: 'always',
-        }}
-      >
-        {children}
-      </div>
-    );
-  }
-  return <>{children}</>;
-}
-
-function ModeBadge({ mode, total }: { mode: LayoutMode; total: number }) {
-  const label =
-    mode === 'scroll_snap' ? `세로 스냅 · ${total}페이지`
-    : mode === 'slides' ? `좌우 슬라이드 · ${total}페이지`
-    : '';
-  if (!label) return null;
-  return (
-    <div
-      style={{
-        position: 'sticky',
-        bottom: 8,
-        left: 0,
-        right: 0,
-        textAlign: 'center',
-        pointerEvents: 'none',
-        zIndex: 20,
-      }}
-    >
-      <span
-        style={{
-          display: 'inline-block',
-          padding: '4px 10px',
-          fontSize: 10,
-          fontWeight: 700,
-          color: '#fff',
-          background: 'rgba(17,24,39,0.7)',
-          borderRadius: 999,
-          backdropFilter: 'blur(4px)',
-        }}
-      >
-        {label}
-      </span>
-    </div>
-  );
-}
-
-// ────────────── Empty ──────────────
-
-function EmptyCanvas({ onPromptClick }: { onPromptClick?: () => void }) {
+function EmptyCanvas({ onPromptClick, pageLabel }: { onPromptClick?: () => void; pageLabel: string }) {
   return (
     <div
       onClick={(e) => e.stopPropagation()}
@@ -206,7 +171,7 @@ function EmptyCanvas({ onPromptClick }: { onPromptClick?: () => void }) {
     >
       <div style={{ fontSize: 48, marginBottom: 16 }}>📱</div>
       <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--dm-neutral-900)', marginBottom: 8 }}>
-        빈 캔버스예요
+        "{pageLabel}"에 섹션이 없어요
       </div>
       <div style={{ fontSize: 13, lineHeight: 1.6, marginBottom: 24 }}>
         한 줄 프롬프트로 AI가 구조·카피까지 만들어줘요.<br />

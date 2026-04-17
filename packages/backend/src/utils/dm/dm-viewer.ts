@@ -260,7 +260,7 @@ body{font-family:'Noto Sans KR',sans-serif;background:#fff;overflow-x:hidden;-we
 </html>`;
 }
 
-// ────────────────── 섹션 기반 세로 스크롤 뷰어 (D125 프로모델) ──────────────────
+// ────────────────── 섹션/페이지 기반 뷰어 (D125~D128) ──────────────────
 
 function parseSections(raw: any): Section[] {
   if (!raw) return [];
@@ -276,6 +276,27 @@ function parseSections(raw: any): Section[] {
   return [];
 }
 
+/** D128 페이지 계층 타입 (뷰어 내부용) */
+type DmPageGroup = { id: string; name?: string; sections: Section[] };
+
+/** dm.pages / dm.sections 양쪽 지원하여 DmPageGroup[] 반환 */
+function parsePages(dm: any): DmPageGroup[] {
+  let raw = dm.pages;
+  if (typeof raw === 'string') { try { raw = JSON.parse(raw); } catch { raw = null; } }
+  // D128 new 구조 (배열 원소에 sections 필드 존재)
+  if (Array.isArray(raw) && raw.length > 0 && raw[0] && Array.isArray(raw[0].sections)) {
+    return raw.map((p: any, i: number): DmPageGroup => ({
+      id: p.id || `p-${i}`,
+      name: p.name,
+      sections: Array.isArray(p.sections) ? p.sections : [],
+    }));
+  }
+  // D125~D127 legacy: sections 컬럼을 단일 페이지로 감싸기
+  const secs = parseSections(dm.sections);
+  if (secs.length > 0) return [{ id: 'p-legacy', sections: secs }];
+  return [];
+}
+
 function parseBrandKit(raw: any): DmBrandKit | undefined {
   if (!raw) return undefined;
   if (typeof raw === 'string') {
@@ -287,43 +308,49 @@ function parseBrandKit(raw: any): DmBrandKit | undefined {
 
 type SectionsLayoutMode = 'scroll' | 'scroll_snap' | 'slides';
 
-function renderSectionsHtml(
+function renderPagesHtml(
   dm: any,
   trackApiBase: string,
-  resolvedSections?: Section[],
+  resolvedPages?: DmPageGroup[],
   mode: SectionsLayoutMode = 'scroll',
 ): string {
-  const sections: Section[] = resolvedSections || parseSections(dm.sections);
+  const pages: DmPageGroup[] = resolvedPages || parsePages(dm);
   const brandKit: DmBrandKit | undefined = parseBrandKit(dm.brand_kit);
   const storeName = dm.store_name || '';
   const title = dm.title || '모바일 DM';
   const shortCode = dm.short_code || '';
 
-  const hasCountdown = sections.some(s => s.type === 'countdown');
-  const totalSections = sections.length;
+  const allSections: Section[] = pages.flatMap((p) => p.sections);
+  const hasCountdown = allSections.some((s) => s.type === 'countdown');
+  const totalPages = pages.length;
 
-  const sectionsHtml = renderSections(sections, {
-    brandKit,
-    storeName,
-    trackApiBase,
-    shortCode,
-    isPreview: !!resolvedSections,
-  });
+  const pagesHtml = pages.map((page, i) => {
+    const secHtml = renderSections(page.sections, {
+      brandKit,
+      storeName,
+      trackApiBase,
+      shortCode,
+      isPreview: !!resolvedPages,
+    });
+    return `<section class="dm-page" data-page-idx="${i}" data-page-id="${escapeHtml(page.id)}">${secHtml}</section>`;
+  }).join('');
 
   const tokensCss = renderDmTokensCss(brandKit);
   const baseCss = renderDmBaseCss();
 
-  // 모드별 뷰어 CSS (body / .dm-viewer / .dm-section-wrap)
+  // 모드별 뷰어 CSS (페이지 단위 스냅/슬라이드, 페이지 내부는 세로 스크롤)
   const modeCss = (() => {
     if (mode === 'scroll_snap') {
       return `
 html,body{height:100%;margin:0;overflow:hidden}
 .dm-viewer{height:100%;overflow-y:auto;overflow-x:hidden;scroll-snap-type:y mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none}
 .dm-viewer::-webkit-scrollbar{display:none}
-.dm-section-wrap{min-height:100vh;scroll-snap-align:start;scroll-snap-stop:always;display:flex;flex-direction:column;justify-content:center;position:relative}
+.dm-page{min-height:100vh;scroll-snap-align:start;scroll-snap-stop:always;position:relative;overflow-y:auto;-webkit-overflow-scrolling:touch}
+.dm-page::-webkit-scrollbar{display:none}
 .dm-page-dots{position:fixed;right:10px;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;gap:6px;z-index:50}
-.dm-page-dots .dot{width:6px;height:6px;border-radius:50%;background:rgba(0,0,0,0.25);transition:all 200ms}
+.dm-page-dots .dot{width:6px;height:6px;border-radius:50%;background:rgba(0,0,0,0.25);transition:all 200ms;cursor:pointer}
 .dm-page-dots .dot.active{background:var(--dm-primary);height:20px;border-radius:3px}
+.dm-section-wrap{position:relative}
 `;
     }
     if (mode === 'slides') {
@@ -331,26 +358,30 @@ html,body{height:100%;margin:0;overflow:hidden}
 html,body{height:100%;margin:0;overflow:hidden;touch-action:pan-y}
 .dm-viewer{height:100%;display:flex;flex-direction:row;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none}
 .dm-viewer::-webkit-scrollbar{display:none}
-.dm-section-wrap{flex:0 0 100%;width:100vw;height:100vh;scroll-snap-align:start;scroll-snap-stop:always;overflow-y:auto;position:relative;-webkit-overflow-scrolling:touch}
-.dm-section-wrap::-webkit-scrollbar{display:none}
+.dm-page{flex:0 0 100%;width:100vw;height:100vh;scroll-snap-align:start;scroll-snap-stop:always;overflow-y:auto;position:relative;-webkit-overflow-scrolling:touch}
+.dm-page::-webkit-scrollbar{display:none}
 .dm-page-dots{position:fixed;left:0;right:0;bottom:14px;display:flex;flex-direction:row;gap:6px;justify-content:center;z-index:50}
-.dm-page-dots .dot{width:6px;height:6px;border-radius:50%;background:rgba(0,0,0,0.25);transition:all 200ms}
+.dm-page-dots .dot{width:6px;height:6px;border-radius:50%;background:rgba(0,0,0,0.25);transition:all 200ms;cursor:pointer}
 .dm-page-dots .dot.active{background:var(--dm-primary);width:20px;border-radius:3px}
 .dm-page-counter{position:fixed;top:12px;right:12px;background:rgba(0,0,0,0.55);color:#fff;font-size:11px;padding:4px 10px;border-radius:12px;z-index:60}
+.dm-section-wrap{position:relative}
 `;
     }
+    // scroll: 페이지 구분선만
     return `
+.dm-page{position:relative}
+.dm-page + .dm-page{border-top:1px dashed var(--dm-neutral-200);margin-top:24px;padding-top:24px}
 .dm-section-wrap{position:relative}
 `;
   })();
 
   const dotsHtml =
-    mode !== 'scroll' && totalSections > 0
-      ? `<div class="dm-page-dots">${sections.map((_, i) => `<span class="dot${i === 0 ? ' active' : ''}" data-idx="${i}"></span>`).join('')}</div>`
+    mode !== 'scroll' && totalPages > 0
+      ? `<div class="dm-page-dots">${pages.map((_, i) => `<span class="dot${i === 0 ? ' active' : ''}" data-idx="${i}"></span>`).join('')}</div>`
       : '';
   const counterHtml =
-    mode === 'slides' && totalSections > 0
-      ? `<div class="dm-page-counter"><span id="dm-cur">1</span> / ${totalSections}</div>`
+    mode === 'slides' && totalPages > 0
+      ? `<div class="dm-page-counter"><span id="dm-cur">1</span> / ${totalPages}</div>`
       : '';
 
   return `<!DOCTYPE html>
@@ -372,7 +403,7 @@ ${modeCss}
 </head>
 <body data-layout-mode="${mode}">
 <div class="dm-viewer">
-${sectionsHtml}
+${pagesHtml}
 </div>
 ${dotsHtml}
 ${counterHtml}
@@ -383,12 +414,13 @@ ${counterHtml}
   var TRACK_URL = '${escapeHtml(trackApiBase)}';
   var PHONE = new URLSearchParams(location.search).get('p') || '';
   var MODE = document.body.getAttribute('data-layout-mode') || 'scroll';
-  var TOTAL = ${totalSections};
+  var TOTAL_PAGES = ${totalPages};
   var startTime = Date.now();
   var sectionInteractions = {};
   var pageReached = 1;
   var currentIdx = 0;
-  var wraps = Array.prototype.slice.call(document.querySelectorAll('.dm-section-wrap'));
+  var pageEls = Array.prototype.slice.call(document.querySelectorAll('.dm-page'));
+  var sectionEls = Array.prototype.slice.call(document.querySelectorAll('.dm-section-wrap'));
   var dots = Array.prototype.slice.call(document.querySelectorAll('.dm-page-dots .dot'));
   var counter = document.getElementById('dm-cur');
 
@@ -398,7 +430,7 @@ ${counterHtml}
     var body = JSON.stringify(Object.assign({
       phone: PHONE,
       page_reached: pageReached,
-      total_pages: TOTAL || 1,
+      total_pages: TOTAL_PAGES || 1,
       duration: dur,
       section_interactions: sectionInteractions
     }, extra || {}));
@@ -410,16 +442,29 @@ ${counterHtml}
   }
 
   function updateCurrent(idx) {
-    if (idx < 0 || idx >= wraps.length) return;
+    if (idx < 0 || idx >= pageEls.length) return;
     currentIdx = idx;
     if (idx + 1 > pageReached) pageReached = idx + 1;
     dots.forEach(function(d, i){ d.classList.toggle('active', i === idx); });
     if (counter) counter.textContent = String(idx + 1);
   }
 
-  if ('IntersectionObserver' in window) {
-    var io = new IntersectionObserver(function(entries){
+  // 페이지 단위 가시성 → 현재 페이지 추적 + dots/counter 갱신
+  if ('IntersectionObserver' in window && pageEls.length > 0) {
+    var pageObserver = new IntersectionObserver(function(entries){
       var best = null;
+      entries.forEach(function(e){
+        if (e.isIntersecting && (!best || e.intersectionRatio > best.intersectionRatio)) best = e;
+      });
+      if (best) {
+        var idx = pageEls.indexOf(best.target);
+        if (idx >= 0) updateCurrent(idx);
+      }
+    }, { threshold: [0.3, 0.6, 0.9] });
+    pageEls.forEach(function(el){ pageObserver.observe(el); });
+
+    // 섹션 단위 뷰 카운트 (섹션별 성과)
+    var sectionObserver = new IntersectionObserver(function(entries){
       entries.forEach(function(e){
         if (e.isIntersecting) {
           var sid = e.target.getAttribute('data-section-id');
@@ -427,30 +472,26 @@ ${counterHtml}
             sectionInteractions[sid] = sectionInteractions[sid] || { views: 0, clicks: 0 };
             sectionInteractions[sid].views++;
           }
-          if (!best || e.intersectionRatio > best.intersectionRatio) best = e;
         }
       });
-      if (best) {
-        var idx = wraps.indexOf(best.target);
-        if (idx >= 0) updateCurrent(idx);
-      }
-    }, { threshold: [0.3, 0.6, 0.9] });
-    wraps.forEach(function(el){ io.observe(el); });
+    }, { threshold: 0.5 });
+    sectionEls.forEach(function(el){ sectionObserver.observe(el); });
   }
 
-  // dots 클릭 → 해당 섹션으로 이동
+  // dots 클릭 → 해당 페이지로 이동
   dots.forEach(function(d, i){
     d.addEventListener('click', function(){
-      if (!wraps[i]) return;
+      if (!pageEls[i]) return;
       if (MODE === 'slides') {
         var viewer = document.querySelector('.dm-viewer');
         if (viewer) viewer.scrollTo({ left: i * viewer.clientWidth, behavior: 'smooth' });
       } else {
-        wraps[i].scrollIntoView({ behavior: 'smooth', block: 'start' });
+        pageEls[i].scrollIntoView({ behavior: 'smooth', block: 'start' });
       }
     });
   });
 
+  // 섹션 클릭 → 클릭 카운트
   document.addEventListener('click', function(e){
     var wrap = e.target.closest && e.target.closest('.dm-section-wrap');
     if (wrap) {
@@ -475,31 +516,29 @@ ${hasCountdown ? COUNTDOWN_SCRIPT : ''}
 
 /**
  * DM layout_mode별 분기:
- *   - scroll      : 섹션 기반 긴 세로 스크롤
- *   - scroll_snap : 섹션 기반 세로 페이지 스냅 (1섹션=1페이지)
- *   - slides      : 섹션 기반 좌우 슬라이드 (1섹션=1페이지)
- *   - (legacy)    : pages[] 기반 D119 슬라이드 (sections 없을 때 폴백)
+ *   - scroll      : 페이지를 세로로 이어붙인 긴 스크롤
+ *   - scroll_snap : 페이지 단위 세로 스냅 (페이지 내부는 세로 스크롤)
+ *   - slides      : 페이지 단위 가로 슬라이드 (페이지 내부는 세로 스크롤)
+ *   - (legacy)    : dm.pages[]가 D119 slides 구조일 때 폴백
  */
-function resolveSectionsMode(dm: any, sectionsArr: Section[]): SectionsLayoutMode | null {
-  if (sectionsArr.length === 0) return null;
+function resolvePagesMode(dm: any, pages: DmPageGroup[]): SectionsLayoutMode | null {
+  if (pages.length === 0) return null;
   const m = dm.layout_mode;
   if (m === 'scroll_snap') return 'scroll_snap';
   if (m === 'slides') return 'slides';
-  if (m === 'scroll') return 'scroll';
-  // 명시적 layout_mode 없지만 sections 존재 → scroll 기본
   return 'scroll';
 }
 
 export function renderDmViewerHtml(dm: any, trackApiBase: string): string {
-  const sectionsArr = parseSections(dm.sections);
-  const mode = resolveSectionsMode(dm, sectionsArr);
+  const pages = parsePages(dm);
+  const mode = resolvePagesMode(dm, pages);
   if (mode === null) return renderLegacySlidesHtml(dm, trackApiBase);
-  return renderSectionsHtml(dm, trackApiBase, undefined, mode);
+  return renderPagesHtml(dm, trackApiBase, undefined, mode);
 }
 
 /**
  * 샘플 고객 데이터로 변수 치환 후 뷰어 HTML 렌더 (에디터 미리보기/검수용).
- * 섹션 기반 3모드 모두 지원. legacy slides(pages[])는 기존 경로 그대로.
+ * 페이지 단위로 섹션들을 치환 후 렌더.
  */
 export async function renderDmViewerHtmlWithCustomer(
   dm: any,
@@ -507,11 +546,15 @@ export async function renderDmViewerHtmlWithCustomer(
   customer: Record<string, any> | null,
   companyId: string,
 ): Promise<string> {
-  const sectionsArr = parseSections(dm.sections);
-  const mode = resolveSectionsMode(dm, sectionsArr);
+  const pages = parsePages(dm);
+  const mode = resolvePagesMode(dm, pages);
   if (mode === null) return renderLegacySlidesHtml(dm, trackApiBase);
-  const resolved = await resolveSections(sectionsArr, customer, companyId);
-  return renderSectionsHtml(dm, trackApiBase, resolved, mode);
+  const resolvedPages: DmPageGroup[] = [];
+  for (const p of pages) {
+    const resolvedSecs = await resolveSections(p.sections, customer, companyId);
+    resolvedPages.push({ id: p.id, name: p.name, sections: resolvedSecs });
+  }
+  return renderPagesHtml(dm, trackApiBase, resolvedPages, mode);
 }
 
 // ────────────────── 만료/404 에러 페이지 ──────────────────

@@ -33,6 +33,13 @@ export type DmBrandKit = {
 export type LayoutMode = 'scroll' | 'slides' | 'scroll_snap';
 export type ApprovalStatus = 'draft' | 'review' | 'approved' | 'published';
 
+/** 페이지 계층 — 1 페이지에 여러 섹션을 조립 (D128 V4) */
+export type DmPage = {
+  id: string;
+  name?: string;
+  sections: Section[];
+};
+
 export type ValidationItem = {
   area: string;
   severity: 'fatal' | 'recommend' | 'improve';
@@ -62,6 +69,10 @@ export type DmBuilderState = {
   dmId: string | null;
   title: string;
   storeName: string;
+  /** D128 V4 — 페이지 계층 (pages[currentPageIndex].sections가 현재 편집 중인 섹션) */
+  pages: DmPage[];
+  currentPageIndex: number;
+  /** pages[currentPageIndex].sections 동기 뷰 (기존 호출부 하위호환용) */
   sections: Section[];
   brandKit: DmBrandKit;
   layoutMode: LayoutMode;
@@ -96,7 +107,15 @@ export type DmBuilderState = {
   setLayoutMode: (mode: LayoutMode) => void;
   setAiPrompt: (prompt: string) => void;
 
-  // ── Actions: Section CRUD ──
+  // ── Actions: Page CRUD (D128 V4) ──
+  addPage: (name?: string) => void;
+  removePage: (idx: number) => void;
+  duplicatePage: (idx: number) => void;
+  renamePage: (idx: number, name: string) => void;
+  reorderPages: (fromIdx: number, toIdx: number) => void;
+  selectPage: (idx: number) => void;
+
+  // ── Actions: Section CRUD (현재 페이지 대상) ──
   setSections: (sections: Section[]) => void;
   addSection: (type: SectionType, afterId?: string) => void;
   removeSection: (id: string) => void;
@@ -134,9 +153,19 @@ const DEFAULT_BRAND_KIT: DmBrandKit = {
   tone: 'friendly',
 };
 
+function newPageId(): string {
+  return (typeof crypto !== 'undefined' && crypto.randomUUID)
+    ? crypto.randomUUID()
+    : `page-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function emptyPage(name?: string): DmPage {
+  return { id: newPageId(), name, sections: [] };
+}
+
 const INITIAL_STATE: Pick<
   DmBuilderState,
-  | 'dmId' | 'title' | 'storeName' | 'sections' | 'brandKit' | 'layoutMode'
+  | 'dmId' | 'title' | 'storeName' | 'pages' | 'currentPageIndex' | 'sections' | 'brandKit' | 'layoutMode'
   | 'approvalStatus' | 'templateId' | 'aiPrompt'
   | 'selectedSectionId' | 'hoveredSectionId' | 'isDirty' | 'lastSavedAt'
   | 'isSaving' | 'loadError' | 'aiGenerating' | 'validationResult'
@@ -145,6 +174,8 @@ const INITIAL_STATE: Pick<
   dmId: null,
   title: '',
   storeName: '',
+  pages: [emptyPage()],
+  currentPageIndex: 0,
   sections: [],
   brandKit: { ...DEFAULT_BRAND_KIT },
   layoutMode: 'scroll',
@@ -183,6 +214,58 @@ function markDirty<T extends Partial<DmBuilderState>>(patch: T): T & { isDirty: 
   return { ...patch, isDirty: true };
 }
 
+/**
+ * 현재 페이지의 sections를 갱신 + top-level sections 동기 미러 유지.
+ * 모든 섹션 CRUD 액션의 공통 진입점.
+ */
+function updateCurrentPageSections(
+  state: DmBuilderState,
+  updater: (sections: Section[]) => Section[],
+): Pick<DmBuilderState, 'pages' | 'sections'> {
+  const idx = state.currentPageIndex;
+  const page = state.pages[idx];
+  if (!page) return { pages: state.pages, sections: state.sections };
+  const nextSections = normalizeOrder(updater(page.sections));
+  const nextPages = state.pages.map((p, i) =>
+    i === idx ? { ...p, sections: nextSections } : p,
+  );
+  return { pages: nextPages, sections: nextSections };
+}
+
+/**
+ * API 응답 dm을 pages 계층 구조로 정규화.
+ * - new: dm.pages = [{id, name?, sections}]           → 그대로 사용
+ * - legacy D125~D127: dm.sections = Section[]         → [{id, sections}]로 감싸기
+ * - legacy D119: dm.pages = [{imageUrl, ...}] (slides) → 변환기 통해 이미 sections로 이관됐음 가정
+ * - 빈 DM                                              → [emptyPage()]
+ */
+function normalizePagesFromDm(dm: any): DmPage[] {
+  // dm.pages가 새 구조인지 검사 (배열 원소에 sections 필드 존재)
+  let rawPages = dm.pages;
+  if (typeof rawPages === 'string') {
+    try { rawPages = JSON.parse(rawPages); } catch { rawPages = null; }
+  }
+  if (Array.isArray(rawPages) && rawPages.length > 0 && rawPages[0] && Array.isArray(rawPages[0].sections)) {
+    return rawPages.map((p: any): DmPage => ({
+      id: p.id || newPageId(),
+      name: p.name,
+      sections: normalizeOrder(Array.isArray(p.sections) ? p.sections : []),
+    }));
+  }
+
+  // sections 컬럼 폴백
+  let rawSections = dm.sections;
+  if (typeof rawSections === 'string') {
+    try { rawSections = JSON.parse(rawSections); } catch { rawSections = null; }
+  }
+  if (Array.isArray(rawSections) && rawSections.length > 0) {
+    return [{ id: newPageId(), sections: normalizeOrder(rawSections) }];
+  }
+
+  // 완전 빈 DM
+  return [emptyPage()];
+}
+
 // ────────────── 스토어 ──────────────
 
 export const useDmBuilderStore = create<DmBuilderState>((set, get) => ({
@@ -205,47 +288,148 @@ export const useDmBuilderStore = create<DmBuilderState>((set, get) => ({
   setLayoutMode: (layoutMode) => set(markDirty({ layoutMode })),
   setAiPrompt: (aiPrompt) => set(markDirty({ aiPrompt })),
 
-  // ── Section CRUD ──
+  // ── Page CRUD (D128 V4) ──
+  addPage: (name) => {
+    set((s) => {
+      const np = emptyPage(name);
+      const nextPages = [...s.pages, np];
+      return markDirty({
+        pages: nextPages,
+        currentPageIndex: nextPages.length - 1,
+        sections: np.sections,
+        selectedSectionId: null,
+      });
+    });
+    scheduleAutosave(() => { if (get().dmId) void get().save({ silent: true }); });
+  },
+
+  removePage: (idx) => {
+    set((s) => {
+      if (idx < 0 || idx >= s.pages.length) return s;
+      if (s.pages.length <= 1) {
+        return { toast: { type: 'error', message: '페이지는 최소 1개 이상 필요해요.' } } as Partial<DmBuilderState>;
+      }
+      const nextPages = s.pages.filter((_, i) => i !== idx);
+      const newCurrent = Math.max(0, Math.min(s.currentPageIndex, nextPages.length - 1));
+      return markDirty({
+        pages: nextPages,
+        currentPageIndex: newCurrent,
+        sections: nextPages[newCurrent]?.sections || [],
+        selectedSectionId: null,
+      });
+    });
+    scheduleAutosave(() => { if (get().dmId) void get().save({ silent: true }); });
+  },
+
+  duplicatePage: (idx) => {
+    set((s) => {
+      if (idx < 0 || idx >= s.pages.length) return s;
+      const src = s.pages[idx];
+      const clone: DmPage = {
+        id: newPageId(),
+        name: src.name ? `${src.name} 복사` : undefined,
+        sections: src.sections.map((sec) => ({
+          ...sec,
+          id: (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : `${sec.type}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          props: JSON.parse(JSON.stringify(sec.props)),
+          variable_fallbacks: sec.variable_fallbacks ? JSON.parse(JSON.stringify(sec.variable_fallbacks)) : [],
+        })),
+      };
+      const nextPages = [...s.pages.slice(0, idx + 1), clone, ...s.pages.slice(idx + 1)];
+      return markDirty({
+        pages: nextPages,
+        currentPageIndex: idx + 1,
+        sections: clone.sections,
+        selectedSectionId: null,
+      });
+    });
+    scheduleAutosave(() => { if (get().dmId) void get().save({ silent: true }); });
+  },
+
+  renamePage: (idx, name) => {
+    set((s) => {
+      if (idx < 0 || idx >= s.pages.length) return s;
+      const nextPages = s.pages.map((p, i) => (i === idx ? { ...p, name } : p));
+      return markDirty({ pages: nextPages });
+    });
+    scheduleAutosave(() => { if (get().dmId) void get().save({ silent: true }); });
+  },
+
+  reorderPages: (fromIdx, toIdx) => {
+    set((s) => {
+      if (fromIdx < 0 || fromIdx >= s.pages.length || toIdx < 0 || toIdx >= s.pages.length) return s;
+      if (fromIdx === toIdx) return s;
+      const nextPages = s.pages.slice();
+      const [moved] = nextPages.splice(fromIdx, 1);
+      nextPages.splice(toIdx, 0, moved);
+      // 현재 페이지 추적 갱신
+      const currentId = s.pages[s.currentPageIndex]?.id;
+      const newCurrent = currentId ? nextPages.findIndex((p) => p.id === currentId) : s.currentPageIndex;
+      return markDirty({
+        pages: nextPages,
+        currentPageIndex: newCurrent >= 0 ? newCurrent : 0,
+        sections: nextPages[newCurrent >= 0 ? newCurrent : 0]?.sections || [],
+      });
+    });
+    scheduleAutosave(() => { if (get().dmId) void get().save({ silent: true }); });
+  },
+
+  selectPage: (idx) => {
+    set((s) => {
+      if (idx < 0 || idx >= s.pages.length || idx === s.currentPageIndex) return s;
+      return {
+        currentPageIndex: idx,
+        sections: s.pages[idx]?.sections || [],
+        selectedSectionId: null,
+      };
+    });
+  },
+
+  // ── Section CRUD (현재 페이지 대상) ──
   setSections: (sections) => {
-    set(markDirty({ sections: normalizeOrder(sections) }));
+    set((s) => markDirty(updateCurrentPageSections(s, () => sections)));
     scheduleAutosave(() => { if (get().dmId) void get().save({ silent: true }); });
   },
 
   addSection: (type, afterId) => {
-    const { sections } = get();
-    if (isMaxCountExceeded(sections, type)) {
-      set({ toast: { type: 'error', message: `${SECTION_META[type].label}은(는) 최대 ${SECTION_META[type].maxCount}개까지 추가할 수 있어요.` } });
+    const state = get();
+    const cur = state.pages[state.currentPageIndex]?.sections || [];
+    if (isMaxCountExceeded(cur, type)) {
+      set({ toast: { type: 'error', message: `${SECTION_META[type].label}은(는) 이 페이지에 최대 ${SECTION_META[type].maxCount}개까지 추가할 수 있어요.` } });
       return;
     }
-    const afterIdx = afterId ? sections.findIndex((s) => s.id === afterId) : sections.length - 1;
-    const insertAt = afterIdx >= 0 ? afterIdx + 1 : sections.length;
-    const next = sections.slice();
+    const afterIdx = afterId ? cur.findIndex((s) => s.id === afterId) : cur.length - 1;
+    const insertAt = afterIdx >= 0 ? afterIdx + 1 : cur.length;
     const created = newSection(type, insertAt);
-    next.splice(insertAt, 0, created);
-    const normalized = normalizeOrder(next);
-    set(markDirty({ sections: normalized, selectedSectionId: created.id }));
+    set((s) => markDirty({
+      ...updateCurrentPageSections(s, (list) => {
+        const next = list.slice();
+        next.splice(insertAt, 0, created);
+        return next;
+      }),
+      selectedSectionId: created.id,
+    }));
     scheduleAutosave(() => { if (get().dmId) void get().save({ silent: true }); });
   },
 
   removeSection: (id) => {
-    const next = get().sections.filter((s) => s.id !== id);
-    const normalized = normalizeOrder(next);
     set((s) => markDirty({
-      sections: normalized,
+      ...updateCurrentPageSections(s, (list) => list.filter((sec) => sec.id !== id)),
       selectedSectionId: s.selectedSectionId === id ? null : s.selectedSectionId,
     }));
     scheduleAutosave(() => { if (get().dmId) void get().save({ silent: true }); });
   },
 
   duplicateSection: (id) => {
-    const { sections } = get();
-    const src = sections.find((s) => s.id === id);
+    const state = get();
+    const cur = state.pages[state.currentPageIndex]?.sections || [];
+    const src = cur.find((s) => s.id === id);
     if (!src) return;
-    if (isMaxCountExceeded(sections, src.type)) {
-      set({ toast: { type: 'error', message: `${SECTION_META[src.type].label}은(는) 최대 ${SECTION_META[src.type].maxCount}개까지 추가할 수 있어요.` } });
+    if (isMaxCountExceeded(cur, src.type)) {
+      set({ toast: { type: 'error', message: `${SECTION_META[src.type].label}은(는) 이 페이지에 최대 ${SECTION_META[src.type].maxCount}개까지 추가할 수 있어요.` } });
       return;
     }
-    const idx = sections.findIndex((s) => s.id === id);
+    const idx = cur.findIndex((s) => s.id === id);
     const clone: Section = {
       ...src,
       id: (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : `${src.type}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -253,20 +437,29 @@ export const useDmBuilderStore = create<DmBuilderState>((set, get) => ({
       props: JSON.parse(JSON.stringify(src.props)),
       variable_fallbacks: src.variable_fallbacks ? JSON.parse(JSON.stringify(src.variable_fallbacks)) : [],
     };
-    const next = sections.slice();
-    next.splice(idx + 1, 0, clone);
-    set(markDirty({ sections: normalizeOrder(next), selectedSectionId: clone.id }));
+    set((s) => markDirty({
+      ...updateCurrentPageSections(s, (list) => {
+        const next = list.slice();
+        next.splice(idx + 1, 0, clone);
+        return next;
+      }),
+      selectedSectionId: clone.id,
+    }));
     scheduleAutosave(() => { if (get().dmId) void get().save({ silent: true }); });
   },
 
   reorderSections: (fromIdx, toIdx) => {
-    const { sections } = get();
-    if (fromIdx < 0 || fromIdx >= sections.length || toIdx < 0 || toIdx >= sections.length) return;
-    if (fromIdx === toIdx) return;
-    const next = sections.slice();
-    const [moved] = next.splice(fromIdx, 1);
-    next.splice(toIdx, 0, moved);
-    set(markDirty({ sections: normalizeOrder(next) }));
+    set((s) => {
+      const cur = s.pages[s.currentPageIndex]?.sections || [];
+      if (fromIdx < 0 || fromIdx >= cur.length || toIdx < 0 || toIdx >= cur.length) return s;
+      if (fromIdx === toIdx) return s;
+      return markDirty(updateCurrentPageSections(s, (list) => {
+        const next = list.slice();
+        const [moved] = next.splice(fromIdx, 1);
+        next.splice(toIdx, 0, moved);
+        return next;
+      }));
+    });
     scheduleAutosave(() => { if (get().dmId) void get().save({ silent: true }); });
   },
 
@@ -280,28 +473,30 @@ export const useDmBuilderStore = create<DmBuilderState>((set, get) => ({
   },
 
   updateSectionProps: (id, patch) => {
-    const next = get().sections.map((s) =>
-      s.id === id ? { ...s, props: { ...s.props, ...patch } as SectionProps } : s
-    );
-    set(markDirty({ sections: next }));
+    set((s) => markDirty(updateCurrentPageSections(s, (list) =>
+      list.map((sec) => sec.id === id ? { ...sec, props: { ...sec.props, ...patch } as SectionProps } : sec),
+    )));
     scheduleAutosave(() => { if (get().dmId) void get().save({ silent: true }); });
   },
 
   setSectionVisible: (id, visible) => {
-    const next = get().sections.map((s) => (s.id === id ? { ...s, visible } : s));
-    set(markDirty({ sections: next }));
+    set((s) => markDirty(updateCurrentPageSections(s, (list) =>
+      list.map((sec) => sec.id === id ? { ...sec, visible } : sec),
+    )));
     scheduleAutosave(() => { if (get().dmId) void get().save({ silent: true }); });
   },
 
   setSectionVariant: (id, style_variant) => {
-    const next = get().sections.map((s) => (s.id === id ? { ...s, style_variant } : s));
-    set(markDirty({ sections: next }));
+    set((s) => markDirty(updateCurrentPageSections(s, (list) =>
+      list.map((sec) => sec.id === id ? { ...sec, style_variant } : sec),
+    )));
     scheduleAutosave(() => { if (get().dmId) void get().save({ silent: true }); });
   },
 
   toggleSectionLock: (id) => {
-    const next = get().sections.map((s) => (s.id === id ? { ...s, ai_locked: !s.ai_locked } : s));
-    set(markDirty({ sections: next }));
+    set((s) => markDirty(updateCurrentPageSections(s, (list) =>
+      list.map((sec) => sec.id === id ? { ...sec, ai_locked: !sec.ai_locked } : sec),
+    )));
   },
 
   // ── UI ──
@@ -310,10 +505,10 @@ export const useDmBuilderStore = create<DmBuilderState>((set, get) => ({
   setToast: (toast) => set({ toast }),
   setOpenModal: (openModal) => set({ openModal }),
 
-  // ── AI 적용 ──
+  // ── AI 적용 (현재 페이지의 sections 교체) ──
   applyAiGenerated: (sections, brandKit, prompt) => {
     set((s) => markDirty({
-      sections: normalizeOrder(sections),
+      ...updateCurrentPageSections(s, () => sections),
       brandKit: brandKit ? { ...s.brandKit, ...brandKit } : s.brandKit,
       aiPrompt: prompt !== undefined ? prompt : s.aiPrompt,
       selectedSectionId: null,
@@ -328,8 +523,7 @@ export const useDmBuilderStore = create<DmBuilderState>((set, get) => ({
     try {
       const res = await api.get(`/dm/${id}`);
       const dm = res.data as any;
-      const rawSections: Section[] = Array.isArray(dm.sections) ? dm.sections
-        : (typeof dm.sections === 'string' ? (() => { try { return JSON.parse(dm.sections); } catch { return []; } })() : []);
+      const pages = normalizePagesFromDm(dm);
       const rawBrand = dm.brand_kit
         ? (typeof dm.brand_kit === 'string' ? (() => { try { return JSON.parse(dm.brand_kit); } catch { return {}; } })() : dm.brand_kit)
         : {};
@@ -337,7 +531,9 @@ export const useDmBuilderStore = create<DmBuilderState>((set, get) => ({
         dmId: dm.id,
         title: dm.title || '',
         storeName: dm.store_name || '',
-        sections: normalizeOrder(rawSections),
+        pages,
+        currentPageIndex: 0,
+        sections: pages[0]?.sections || [],
         brandKit: { ...DEFAULT_BRAND_KIT, ...rawBrand },
         layoutMode: dm.layout_mode || 'scroll',
         approvalStatus: dm.approval_status || 'draft',
@@ -360,10 +556,13 @@ export const useDmBuilderStore = create<DmBuilderState>((set, get) => ({
     if (s.isSaving) return;
     set({ isSaving: true });
     try {
+      // pages 구조로 저장 + 하위호환을 위해 전체 섹션 flat도 동봉
+      const flatSections = s.pages.flatMap((p) => p.sections);
       const body = {
         title: s.title,
         store_name: s.storeName,
-        sections: s.sections,
+        pages: s.pages,
+        sections: flatSections,
         brand_kit: s.brandKit,
         layout_mode: s.layoutMode,
         template_id: s.templateId,
@@ -385,18 +584,29 @@ export const useDmBuilderStore = create<DmBuilderState>((set, get) => ({
 
   createNew: (opts) => {
     if (autosaveTimer) { clearTimeout(autosaveTimer); autosaveTimer = null; }
+    const initialPage = emptyPage();
     set({
       ...INITIAL_STATE,
       title: opts?.title || '',
       storeName: opts?.storeName || '',
       layoutMode: opts?.layoutMode || 'scroll',
+      pages: [initialPage],
+      currentPageIndex: 0,
+      sections: initialPage.sections,
       brandKit: { ...DEFAULT_BRAND_KIT },
     });
   },
 
   reset: () => {
     if (autosaveTimer) { clearTimeout(autosaveTimer); autosaveTimer = null; }
-    set({ ...INITIAL_STATE, brandKit: { ...DEFAULT_BRAND_KIT } });
+    const initialPage = emptyPage();
+    set({
+      ...INITIAL_STATE,
+      pages: [initialPage],
+      currentPageIndex: 0,
+      sections: initialPage.sections,
+      brandKit: { ...DEFAULT_BRAND_KIT },
+    });
   },
 
   // ── Validation ──
@@ -423,5 +633,21 @@ export const useDmBuilderStore = create<DmBuilderState>((set, get) => ({
 
 export const selectSelectedSection = (state: DmBuilderState): Section | null => {
   if (!state.selectedSectionId) return null;
-  return state.sections.find((s) => s.id === state.selectedSectionId) || null;
+  // 현재 페이지에서 먼저 찾고, 없으면 전체 페이지에서 찾기
+  const cur = state.pages[state.currentPageIndex]?.sections || [];
+  const inCur = cur.find((s) => s.id === state.selectedSectionId);
+  if (inCur) return inCur;
+  for (const p of state.pages) {
+    const f = p.sections.find((s) => s.id === state.selectedSectionId);
+    if (f) return f;
+  }
+  return null;
 };
+
+/** 전체 페이지의 섹션을 평평하게 반환 (검수/AI개선 등 전역 작업용) */
+export const selectAllSectionsFlat = (state: DmBuilderState): Section[] =>
+  state.pages.flatMap((p) => p.sections);
+
+/** 현재 페이지 객체 */
+export const selectCurrentPage = (state: DmBuilderState): DmPage | null =>
+  state.pages[state.currentPageIndex] || null;

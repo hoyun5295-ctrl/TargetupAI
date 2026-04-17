@@ -183,7 +183,10 @@
       "Bash(echo \"---frontend exit: $?---\")",
       "Bash(echo \"---exit: $?---\")",
       "Bash(npx tsc *)",
-      "Bash(echo \"EXIT: $?\")"
+      "Bash(echo \"EXIT: $?\")",
+      "Bash(echo \"BACKEND EXIT: $?\")",
+      "Bash(echo \"FRONTEND EXIT: $?\")",
+      "Bash(echo \"FE EXIT: $?\")"
     ]
   }
 }

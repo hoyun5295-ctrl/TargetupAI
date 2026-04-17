@@ -19,6 +19,7 @@ import {
   createDm, updateDm, deleteDm, getDmList, getDmDetail, getDmByCode,
   publishDm, trackDmView, getDmStats,
   saveDmVersion, listDmVersions, restoreDmVersion, setApprovalStatus,
+  extractFlatSectionsFromDm, extractPagesFromDm,
 } from '../utils/dm/dm-builder';
 import { renderDmViewerHtml, renderDmViewerHtmlWithCustomer, renderDmErrorHtml } from '../utils/dm/dm-viewer';
 import {
@@ -410,9 +411,12 @@ dmRouter.post('/:id/convert-to-scroll', async (req: any, res: any) => {
       pages: dm.pages,
     });
 
+    // D128: 변환 결과를 단일 페이지로 감싸서 저장 (향후 페이지 분할 편집 가능)
+    const convertedPages = [{ id: 'p-converted', sections }];
     const updated = await updateDm(req.params.id, companyId, {
       layout_mode: 'scroll',
       sections,
+      pages: convertedPages,
       approval_status: 'draft',
     } as any);
 
@@ -518,7 +522,7 @@ dmRouter.post('/:id/versions', async (req: any, res: any) => {
     if (!dm) return res.status(404).json({ error: 'DM을 찾을 수 없어요.' });
     const label = (req.body?.label || `수동저장 ${new Date().toLocaleString('ko-KR')}`) as string;
     const note = (req.body?.note || null) as string | null;
-    const sections = typeof dm.sections === 'string' ? JSON.parse(dm.sections) : (dm.sections || []);
+    const sections = extractFlatSectionsFromDm(dm);
     const brandKit = typeof dm.brand_kit === 'string' ? JSON.parse(dm.brand_kit) : (dm.brand_kit || {});
     const version = await saveDmVersion(req.params.id, label, sections, brandKit, note, userId);
     return res.json({ version });
@@ -688,7 +692,7 @@ dmRouter.post('/:id/validate', async (req: any, res: any) => {
     const samples = await selectSampleCustomers(companyId);
     const result = await validateDm(
       {
-        sections: dm.sections,
+        sections: extractFlatSectionsFromDm(dm),
         brand_kit: dm.brand_kit,
         scheduled_at: dm.scheduled_at || null,
         publish_mode: (req.body?.publish_mode as 'now' | 'scheduled' | 'approval_required') || 'now',
@@ -898,7 +902,7 @@ dmPublicRouter.get('/ab/:code', async (req: Request, res: Response) => {
     const phone = (req.query.p as string) || null;
     const ip = req.ip || req.socket?.remoteAddress || null;
     const ua = req.headers['user-agent'] || null;
-    const totalPages = Array.isArray(dm.pages) ? dm.pages.length : (dm.sections?.length || 0);
+    const totalPages = extractPagesFromDm(dm).length || 1;
     trackAbTestView(test.id, variant, pageId, dm.company_id, phone, 1, totalPages, 0, ip, ua).catch(() => {});
 
     // 쿠키 발급 (30일)
