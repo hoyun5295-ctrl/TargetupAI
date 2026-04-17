@@ -948,11 +948,14 @@ router.post('/print-flyer', async (req: Request, res: Response) => {
     if (!companyId) return;
     const userId = (req as any).flyerUser?.userId;
 
-    const { title, period, products, paperSize, templateCode, storeName, autoRembg, autoMatchImage } = req.body;
+    const { title, period, products, paperSize, templateCode, storeName, autoRembg, autoMatchImage, format: reqFormat } = req.body;
 
     if (!title || !products || !Array.isArray(products) || products.length === 0) {
       return res.status(400).json({ error: '제목과 상품 목록이 필요합니다' });
     }
+
+    // ★ D129: format = 'pdf'(기본, 인쇄용) 또는 'png'(빠른확인용)
+    const format: 'pdf' | 'png' = reqFormat === 'png' ? 'png' : 'pdf';
 
     // 매장 정보 조회
     const storeResult = await query(
@@ -1011,8 +1014,8 @@ router.post('/print-flyer', async (req: Request, res: Response) => {
         products: processedProducts,
       },
       timeoutMs: 90000,
+      format,
     });
-    const pdfBuffer = renderResult.pdf;
     // paperSize는 manifest가 용지(2절/A3/B4 등) 결정 → 호환성 위해 파라미터 유지만 함
     void paperSize;
 
@@ -1025,18 +1028,33 @@ router.post('/print-flyer', async (req: Request, res: Response) => {
     );
     const flyerId = flyerResult.rows[0].id;
 
-    // PDF 파일 저장
+    // 파일 저장 — format에 따라 PDF 또는 PNG
     const fs = require('fs');
     const path = require('path');
-    const pdfDir = path.join(process.cwd(), 'uploads', 'print-flyers');
-    if (!fs.existsSync(pdfDir)) fs.mkdirSync(pdfDir, { recursive: true });
-    const pdfPath = path.join(pdfDir, `${flyerId}.pdf`);
-    fs.writeFileSync(pdfPath, pdfBuffer);
+    const outDir = path.join(process.cwd(), 'uploads', 'print-flyers');
+    if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
 
-    return res.json({
-      flyerId,
-      pdfUrl: `/api/flyer/flyers/print-flyer/${flyerId}/pdf`,
-    });
+    if (format === 'pdf' && renderResult.pdf) {
+      const pdfPath = path.join(outDir, `${flyerId}.pdf`);
+      fs.writeFileSync(pdfPath, renderResult.pdf);
+      return res.json({
+        flyerId,
+        format: 'pdf',
+        pdfUrl: `/api/flyer/flyers/print-flyer/${flyerId}/pdf`,
+      });
+    }
+
+    if (format === 'png' && renderResult.png) {
+      const pngPath = path.join(outDir, `${flyerId}.png`);
+      fs.writeFileSync(pngPath, renderResult.png);
+      return res.json({
+        flyerId,
+        format: 'png',
+        pngUrl: `/api/flyer/flyers/print-flyer/${flyerId}/png`,
+      });
+    }
+
+    return res.status(500).json({ error: '전단 렌더링 결과가 비어있습니다' });
   } catch (err: any) {
     console.error('[전단AI] 인쇄 전단 생성 실패:', err.message);
     res.status(500).json({ error: '인쇄 전단 생성에 실패했습니다.' });
@@ -1057,6 +1075,23 @@ router.get('/print-flyer/:id/pdf', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[전단AI] PDF 다운로드 실패:', err.message);
     res.status(500).json({ error: 'PDF 다운로드에 실패했습니다.' });
+  }
+});
+
+// ★ D129 GET /print-flyer/:id/png — 확인용 PNG 다운로드
+router.get('/print-flyer/:id/png', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const fs = require('fs');
+    const path = require('path');
+    const pngPath = path.join(process.cwd(), 'uploads', 'print-flyers', `${id}.png`);
+    if (!fs.existsSync(pngPath)) return res.status(404).json({ error: 'PNG를 찾을 수 없습니다' });
+    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Content-Disposition', `attachment; filename="print-flyer-${id}.png"`);
+    res.sendFile(pngPath);
+  } catch (err: any) {
+    console.error('[전단AI] PNG 다운로드 실패:', err.message);
+    res.status(500).json({ error: 'PNG 다운로드에 실패했습니다.' });
   }
 });
 

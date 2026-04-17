@@ -150,8 +150,11 @@ async function renderOne(templateId: string) {
   const outDir = path.resolve(process.cwd(), 'packages/backend/pdfs');
   fs.mkdirSync(outDir, { recursive: true });
 
-  const pdfPath = path.join(outDir, `${templateId}_test.pdf`);
-  fs.writeFileSync(pdfPath, result.pdf);
+  if (result.pdf) {
+    const pdfPath = path.join(outDir, `${templateId}_test.pdf`);
+    fs.writeFileSync(pdfPath, result.pdf);
+    console.log('   PDF      :', pdfPath, '(' + (result.pdf.length / 1024).toFixed(1) + ' KB)');
+  }
 
   if (result.screenshot) {
     const pngPath = path.join(outDir, `${templateId}_test.png`);
@@ -163,7 +166,6 @@ async function renderOne(templateId: string) {
     fs.writeFileSync(htmlPath, result.html);
   }
 
-  console.log('   PDF      :', pdfPath, '(' + (result.pdf.length / 1024).toFixed(1) + ' KB)');
   console.log('   용지     :', result.paperSize, '(' + result.orientation + ')');
   console.log('   페이지   :', result.pageCount);
   console.log('   소요시간 :', Date.now() - t0, 'ms');

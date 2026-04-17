@@ -29,11 +29,18 @@ export interface RenderFlyerPdfOptions {
   debug?: boolean;
   /** Paged.js 폴리필 비활성화 (단순 HTML → PDF 모드, 다중페이지 분할 불필요 시) */
   skipPagedJs?: boolean;
+  /** 출력 포맷 — 'pdf'(기본, 인쇄업체 제출용) 또는 'png'(확인용 고해상도 이미지) */
+  format?: 'pdf' | 'png';
+  /** PNG 모드 전용: deviceScaleFactor 기본 3 (≈288dpi). 인쇄 확인용이라 300dpi 근접 */
+  pngScale?: number;
 }
 
 export interface RenderFlyerPdfResult {
-  pdf: Buffer;
-  /** debug=true 일 때만 생성 — 실제 렌더 결과를 눈으로 검수하기 위한 PNG */
+  /** format='pdf' 이면 존재 */
+  pdf?: Buffer;
+  /** format='png' 이면 존재. debug=true 에서도 검수용 스크린샷으로 생성됨 */
+  png?: Buffer;
+  /** (하위호환) screenshot = png alias */
   screenshot?: Buffer;
   /** debug=true 일 때만 생성 — 조립된 최종 HTML 문자열 (슬롯 주입 전) */
   html?: string;
@@ -41,6 +48,7 @@ export interface RenderFlyerPdfResult {
   durationMs: number;
   paperSize: PaperSizeKey;
   orientation: Orientation;
+  format: 'pdf' | 'png';
 }
 
 // ============================================================
@@ -135,12 +143,13 @@ export async function renderFlyerPdf(options: RenderFlyerPdfOptions): Promise<Re
   const startedAt = Date.now();
   const timeoutMs = options.timeoutMs || 60000;
   const log = (...a: any[]) => { if (options.debug) console.log('[paged-pdf]', ...a); };
+  const format: 'pdf' | 'png' = options.format === 'png' ? 'png' : 'pdf';
 
   // 1) 템플릿 로드
   const tpl = await loadTemplate(options.templateId);
   const paperSize = tpl.manifest.paper.size;
   const orientation = tpl.manifest.paper.orientation || 'portrait';
-  log('template loaded', { id: tpl.manifest.id, paper: paperSize, orientation });
+  log('template loaded', { id: tpl.manifest.id, paper: paperSize, orientation, format });
 
   // 2) 슬롯 데이터 resolve
   const slotData = resolveSlotData(tpl.manifest, options.input);
@@ -156,11 +165,14 @@ export async function renderFlyerPdf(options: RenderFlyerPdfOptions): Promise<Re
   try {
     const dims = getPaperDimensions(paperSize, orientation);
     // 뷰포트 — CSS mm 단위와 정합되도록 96dpi 기준 px 계산
+    // PNG 모드는 확인용 고해상도 — 기본 deviceScaleFactor 3 (≈288dpi, 300dpi 근접)
+    // PDF 모드는 벡터로 저장되므로 deviceScaleFactor 2 면 충분
     const MM_TO_PX_96 = 96 / 25.4;
+    const deviceScaleFactor = format === 'png' ? (options.pngScale || 3) : 2;
     await page.setViewport({
       width: Math.round(dims.widthMm * MM_TO_PX_96),
       height: Math.round(dims.heightMm * MM_TO_PX_96),
-      deviceScaleFactor: 2,
+      deviceScaleFactor,
     });
 
     // 콘솔 로그를 Node stdout으로 (디버깅)
@@ -183,50 +195,63 @@ export async function renderFlyerPdf(options: RenderFlyerPdfOptions): Promise<Re
     }
 
     // 페이지 수 조회 (Paged.js 생성 .pagedjs_page 개수)
-    // ※ page.evaluate에 문자열을 넘겨 Node TS가 DOM lib 없이도 컴파일되게 함
     const pageCount = options.skipPagedJs
       ? 1
       : ((await page.evaluate('document.querySelectorAll(".pagedjs_page").length')) as number) || 1;
     log('page count', pageCount);
 
-    // PDF 생성
-    const pdfOpts: any = {
-      printBackground: true,
-      preferCSSPageSize: true,
-      margin: { top: '0', bottom: '0', left: '0', right: '0' },
-    };
+    let pdfBuffer: Buffer | undefined;
+    let pngBuffer: Buffer | undefined;
 
-    // preferCSSPageSize가 안 먹히는 경우 대비 명시 width/height
-    if (!options.skipPagedJs) {
-      // Paged.js가 .pagedjs_page 에 명시적 width/height를 mm로 박음 → preferCSSPageSize OK
+    if (format === 'pdf') {
+      // ── 인쇄용 PDF ──
+      const pdfOpts: any = {
+        printBackground: true,
+        preferCSSPageSize: true,
+        margin: { top: '0', bottom: '0', left: '0', right: '0' },
+      };
+      if (options.skipPagedJs) {
+        pdfOpts.width = `${dims.widthMm}mm`;
+        pdfOpts.height = `${dims.heightMm}mm`;
+      }
+      const raw = await page.pdf(pdfOpts);
+      pdfBuffer = Buffer.from(raw);
+      log('pdf generated', pdfBuffer.length);
     } else {
-      pdfOpts.width = `${dims.widthMm}mm`;
-      pdfOpts.height = `${dims.heightMm}mm`;
+      // ── 확인용 PNG (고해상도 풀페이지 스크린샷) ──
+      // Paged.js 사용 시 .pagedjs_page 컨테이너가 생성되므로 그걸 캡처하는 게 정확,
+      // skipPagedJs면 body 자체를 캡처
+      const raw = await page.screenshot({
+        type: 'png',
+        fullPage: true,
+        omitBackground: false,
+      });
+      pngBuffer = Buffer.from(raw);
+      log('png generated', pngBuffer.length);
     }
 
-    const pdfBuffer = await page.pdf(pdfOpts);
-    log('pdf generated', pdfBuffer.length);
-
-    // debug 모드 — 렌더 결과를 눈으로 검수하기 위한 PNG + HTML 반환
+    // debug 모드 — 렌더 결과를 눈으로 검수하기 위한 PNG (format=pdf 일 때 추가 생성)
     let screenshotBuffer: Buffer | undefined;
-    if (options.debug) {
+    if (options.debug && format === 'pdf') {
       try {
         const raw = await page.screenshot({ type: 'png', fullPage: true });
         screenshotBuffer = Buffer.from(raw);
-        log('screenshot captured', screenshotBuffer.length);
+        log('debug screenshot captured', screenshotBuffer.length);
       } catch (e) {
-        log('screenshot failed', e);
+        log('debug screenshot failed', e);
       }
     }
 
     return {
-      pdf: Buffer.from(pdfBuffer),
-      screenshot: screenshotBuffer,
+      pdf: pdfBuffer,
+      png: pngBuffer,
+      screenshot: screenshotBuffer || pngBuffer,
       html: options.debug ? html : undefined,
       pageCount,
       durationMs: Date.now() - startedAt,
       paperSize,
       orientation,
+      format,
     };
   } finally {
     await page.close().catch(() => {});

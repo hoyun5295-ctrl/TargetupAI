@@ -257,13 +257,17 @@ export default function PrintFlyerPage({ token: _token }: { token: string }) {
   // CSV 업로드 제거 — ExcelUploadModal로 통합 (CT-F24)
 
   // ============================================================
-  // PDF 생성
+  // 전단 발행 (format 별 분기) — ★ D129: PNG(빠른확인) / PDF(인쇄용)
   // ============================================================
-  const generatePdf = async () => {
+  const [pngUrl, setPngUrl] = useState('');
+  const [generatingFormat, setGeneratingFormat] = useState<'' | 'pdf' | 'png'>('');
+
+  const generate = async (format: 'pdf' | 'png') => {
     const totalProducts = categories.reduce((s, c) => s + c.items.length, 0);
     if (!title.trim()) { setAlert({ show: true, title: '입력 오류', message: '전단 제목을 입력해주세요', type: 'error' }); return; }
     if (totalProducts === 0) { setAlert({ show: true, title: '입력 오류', message: '상품을 1개 이상 추가해주세요', type: 'error' }); return; }
 
+    setGeneratingFormat(format);
     setGenerating(true);
     try {
       const products = categories.flatMap(cat =>
@@ -289,23 +293,39 @@ export default function PrintFlyerPage({ token: _token }: { token: string }) {
           title, period, products,
           templateCode,
           storeName: store.storeName,
-          autoRembg: useAutoRembg,        // ★ D129 V2: 서버에서 rembg 자동 처리
-          autoMatchImage: true,            // ★ D129 V2: 이미지 없는 상품은 서버에서 자동 검색(Unsplash fallback)
+          autoRembg: useAutoRembg,
+          autoMatchImage: true,
+          format,                    // ★ D129: 'pdf' or 'png'
         }),
       });
 
       if (res.ok) {
         const data = await res.json();
-        setPdfUrl(`${API_BASE}${data.pdfUrl}`);
-        setAlert({ show: true, title: '생성 완료', message: '인쇄 전단이 생성되었습니다. PDF를 다운로드하세요.', type: 'success' });
+        if (format === 'pdf' && data.pdfUrl) {
+          setPdfUrl(`${API_BASE}${data.pdfUrl}`);
+          setAlert({ show: true, title: '인쇄용 PDF 발행 완료', message: 'PDF 다운로드 버튼을 눌러 인쇄업체 제출용 파일을 받으세요.', type: 'success' });
+        } else if (format === 'png' && data.pngUrl) {
+          setPngUrl(`${API_BASE}${data.pngUrl}`);
+          setAlert({ show: true, title: '빠른확인 PNG 발행 완료', message: '확인용 이미지가 준비됐습니다. 다운로드하여 내용을 검토하세요.', type: 'success' });
+        }
       } else {
         const err = await res.json().catch(() => ({ error: '생성 실패' }));
-        setAlert({ show: true, title: '생성 실패', message: err.error || '인쇄 전단 생성에 실패했습니다.', type: 'error' });
+        setAlert({ show: true, title: '발행 실패', message: err.error || '전단 발행에 실패했습니다.', type: 'error' });
       }
     } catch (err: any) {
-      setAlert({ show: true, title: '생성 실패', message: err.message || '서버 오류', type: 'error' });
+      setAlert({ show: true, title: '발행 실패', message: err.message || '서버 오류', type: 'error' });
     }
     setGenerating(false);
+    setGeneratingFormat('');
+  };
+
+  const downloadFile = async (url: string, filename: string) => {
+    const res = await apiFetch(url);
+    if (!res.ok) return;
+    const blob = await res.blob();
+    const objUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = objUrl; a.download = filename; a.click();
+    URL.revokeObjectURL(objUrl);
   };
 
   // ============================================================
@@ -322,20 +342,19 @@ export default function PrintFlyerPage({ token: _token }: { token: string }) {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-lg font-bold text-text">인쇄 전단 에디터</h2>
-          <p className="text-xs text-text-secondary mt-1">마트 전단지 레이아웃으로 인쇄용 PDF를 생성합니다</p>
+          <p className="text-xs text-text-secondary mt-1">빠른확인용 PNG 이미지 또는 인쇄업체 제출용 PDF를 발행합니다</p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
+          {pngUrl && (
+            <button onClick={() => downloadFile(pngUrl, `print-flyer-${Date.now()}.png`)}
+              className="px-4 py-2 bg-amber-500 text-white text-sm font-semibold rounded-xl hover:bg-amber-600 transition inline-flex items-center gap-1.5">
+              🖼 PNG 다운로드
+            </button>
+          )}
           {pdfUrl && (
-            <button onClick={async () => {
-              const res = await apiFetch(pdfUrl);
-              if (res.ok) {
-                const blob = await res.blob();
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a'); a.href = url; a.download = 'print-flyer.pdf'; a.click(); URL.revokeObjectURL(url);
-              }
-            }}
-              className="px-4 py-2 bg-primary-600 text-white text-sm font-semibold rounded-xl hover:bg-primary-700 transition">
-              PDF 다운로드
+            <button onClick={() => downloadFile(pdfUrl, `print-flyer-${Date.now()}.pdf`)}
+              className="px-4 py-2 bg-primary-600 text-white text-sm font-semibold rounded-xl hover:bg-primary-700 transition inline-flex items-center gap-1.5">
+              📄 PDF 다운로드
             </button>
           )}
           <Button size="sm" variant="secondary" onClick={() => setShowExcelModal(true)}>
@@ -521,14 +540,40 @@ export default function PrintFlyerPage({ token: _token }: { token: string }) {
         + 카테고리 추가
       </button>
 
-      {/* 하단 생성 버튼 */}
-      <div className="sticky bottom-0 bg-bg/80 backdrop-blur-sm border-t border-border py-4 -mx-6 px-6 flex items-center justify-between">
+      {/* 하단 발행 버튼 2개 — ★ D129 V2 */}
+      <div className="sticky bottom-0 bg-bg/80 backdrop-blur-sm border-t border-border py-4 -mx-6 px-6 flex items-center justify-between gap-3">
         <div className="text-sm text-text-secondary">
           {categories.length}개 카테고리 / <b className="text-text">{totalProducts}개</b> 상품
         </div>
-        <Button size="lg" onClick={generatePdf} disabled={generating || totalProducts === 0}>
-          {generating ? '생성 중...' : '인쇄 전단 생성'}
-        </Button>
+        <div className="flex items-center gap-3">
+          {/* 빠른확인 - PNG */}
+          <button
+            onClick={() => generate('png')}
+            disabled={generating || totalProducts === 0}
+            className="px-5 py-3 rounded-xl border-2 border-amber-400 bg-amber-50 text-amber-700 text-sm font-bold hover:bg-amber-100 disabled:opacity-40 disabled:cursor-not-allowed transition inline-flex items-center gap-2"
+            title="확인용 PNG 이미지로 발행 (빠름, 뷰어에서 즉시 열림)"
+          >
+            <span className="text-base">🖼</span>
+            <span className="flex flex-col items-start leading-tight">
+              <span className="text-[10px] font-semibold text-amber-600">빠른확인</span>
+              <span>{generatingFormat === 'png' ? '생성 중...' : 'PNG 발행'}</span>
+            </span>
+          </button>
+
+          {/* 인쇄용 - PDF */}
+          <button
+            onClick={() => generate('pdf')}
+            disabled={generating || totalProducts === 0}
+            className="px-5 py-3 rounded-xl bg-primary-600 text-white text-sm font-bold hover:bg-primary-700 disabled:opacity-40 disabled:cursor-not-allowed transition inline-flex items-center gap-2 shadow-md"
+            title="인쇄업체 제출용 PDF로 발행 (벡터, 고품질)"
+          >
+            <span className="text-base">📄</span>
+            <span className="flex flex-col items-start leading-tight">
+              <span className="text-[10px] font-semibold text-primary-100">인쇄용</span>
+              <span>{generatingFormat === 'pdf' ? '생성 중...' : 'PDF 발행'}</span>
+            </span>
+          </button>
+        </div>
       </div>
 
       {/* ============================================================ */}
