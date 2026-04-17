@@ -208,25 +208,96 @@ export default function ExcelUploadModal({ isOpen, onClose, onComplete }: Props)
             <div
               onDragOver={e => { e.preventDefault(); setDragOver(true); }}
               onDragLeave={() => setDragOver(false)}
-              onDrop={handleDrop}
-              onClick={() => fileRef.current?.click()}
-              className={`border-2 border-dashed rounded-2xl p-16 text-center cursor-pointer transition ${
-                dragOver ? 'border-primary-400 bg-primary-50/30' : 'border-border hover:border-primary-300'
+              onDrop={uploading ? undefined : handleDrop}
+              onClick={uploading ? undefined : () => fileRef.current?.click()}
+              className={`relative border-2 border-dashed rounded-2xl text-center transition overflow-hidden min-h-[280px] flex items-center justify-center ${
+                uploading
+                  ? 'border-primary-300 bg-gradient-to-br from-primary-50/60 via-surface to-primary-50/40 cursor-default'
+                  : dragOver
+                    ? 'border-primary-400 bg-primary-50/30 cursor-pointer'
+                    : 'border-border hover:border-primary-300 cursor-pointer'
               }`}
             >
               <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleInputChange} />
               {uploading ? (
-                <div>
-                  <div className="text-2xl mb-3 animate-spin">&#9881;</div>
-                  <p className="text-sm text-text-secondary">AI가 분석 중...</p>
+                <div className="w-full px-8 py-4 flex flex-col items-center gap-5">
+                  {/* SVG 링 스피너 — transform-origin 고정으로 흔들림 제거 */}
+                  <div className="relative w-16 h-16" aria-label="분석 중">
+                    <svg className="absolute inset-0 w-full h-full" viewBox="0 0 50 50">
+                      <defs>
+                        <linearGradient id="spinnerGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                          <stop offset="0%" stopColor="var(--color-primary-400, #a78bfa)" />
+                          <stop offset="100%" stopColor="var(--color-primary-600, #7c3aed)" />
+                        </linearGradient>
+                      </defs>
+                      <circle cx="25" cy="25" r="20" fill="none" stroke="currentColor" strokeWidth="3" className="text-primary-100" />
+                      <circle
+                        cx="25" cy="25" r="20"
+                        fill="none" stroke="url(#spinnerGrad)" strokeWidth="3" strokeLinecap="round"
+                        strokeDasharray="60 126"
+                        style={{ transformOrigin: '50% 50%', animation: 'excel-spin 1s linear infinite' }}
+                      />
+                    </svg>
+                    {/* 중앙 AI 뱃지 */}
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <div className="text-[11px] font-bold text-primary-600 tracking-wider">AI</div>
+                    </div>
+                  </div>
+
+                  {/* 타이틀 */}
+                  <div className="space-y-1">
+                    <p className="text-sm font-semibold text-text">AI가 엑셀을 분석하고 있습니다</p>
+                    <p className="text-xs text-text-secondary">컬럼명을 자동으로 매핑하는 중… 잠시만 기다려주세요.</p>
+                  </div>
+
+                  {/* 단계 progress dots (3단계) */}
+                  <div className="flex items-center gap-2 mt-1">
+                    <div className="flex items-center gap-1.5 text-[11px] text-primary-600 font-semibold">
+                      <span className="w-1.5 h-1.5 rounded-full bg-primary-500" style={{ animation: 'excel-dot 1.4s ease-in-out infinite' }} />
+                      <span>파일 분석</span>
+                    </div>
+                    <span className="text-border">·</span>
+                    <div className="flex items-center gap-1.5 text-[11px] text-text-secondary">
+                      <span className="w-1.5 h-1.5 rounded-full bg-border" style={{ animation: 'excel-dot 1.4s ease-in-out infinite', animationDelay: '0.2s' }} />
+                      <span>AI 매핑</span>
+                    </div>
+                    <span className="text-border">·</span>
+                    <div className="flex items-center gap-1.5 text-[11px] text-text-secondary">
+                      <span className="w-1.5 h-1.5 rounded-full bg-border" style={{ animation: 'excel-dot 1.4s ease-in-out infinite', animationDelay: '0.4s' }} />
+                      <span>미리보기 생성</span>
+                    </div>
+                  </div>
+
+                  {/* 진행바 (indeterminate) */}
+                  <div className="w-3/4 h-1 bg-primary-100 rounded-full overflow-hidden mt-1">
+                    <div
+                      className="h-full w-1/3 bg-gradient-to-r from-primary-400 to-primary-600 rounded-full"
+                      style={{ animation: 'excel-bar 1.6s ease-in-out infinite' }}
+                    />
+                  </div>
                 </div>
               ) : (
-                <div>
-                  <div className="text-4xl mb-4 opacity-30">&#128196;</div>
-                  <p className="text-sm font-medium text-text mb-1">파일을 드래그하거나 클릭하세요</p>
-                  <p className="text-xs text-text-secondary">.xlsx, .xls, .csv 지원 (최대 10MB)</p>
+                <div className="px-8 py-4">
+                  <div className="mx-auto w-14 h-14 mb-4 rounded-2xl bg-primary-50 flex items-center justify-center">
+                    <svg viewBox="0 0 24 24" fill="none" className="w-7 h-7 text-primary-500" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M12 3v12m0 0l-4-4m4 4l4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                      <path d="M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  </div>
+                  <p className="text-sm font-semibold text-text mb-1">파일을 드래그하거나 클릭하세요</p>
+                  <p className="text-xs text-text-secondary">.xlsx, .xls, .csv 지원 · 최대 10MB · AI가 자동으로 컬럼을 매핑합니다</p>
                 </div>
               )}
+
+              {/* 로컬 keyframes — 모달 내부에서만 동작 */}
+              <style>{`
+                @keyframes excel-spin { to { transform: rotate(360deg); } }
+                @keyframes excel-dot { 0%, 100% { opacity: 0.35; transform: scale(0.85); } 50% { opacity: 1; transform: scale(1.15); } }
+                @keyframes excel-bar {
+                  0% { transform: translateX(-100%); }
+                  100% { transform: translateX(300%); }
+                }
+              `}</style>
             </div>
           )}
 
