@@ -6,10 +6,11 @@
  * 우측: POP 설정 (분할/색상/방향) + 다운로드
  */
 
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback } from 'react';
 import { API_BASE, apiFetch } from '../App';
 import { Button, EmptyState } from '../components/ui';
 import AlertModal from '../components/AlertModal';
+import ExcelUploadModal, { type MappedProduct } from '../components/ExcelUploadModal';
 
 interface PopItem {
   name: string;
@@ -84,7 +85,6 @@ export default function PopPage({ token: _token }: { token: string }) {
   // 이미지 검색 팝업
   const [imgPicker, setImgPicker] = useState<{ idx: number; candidates: Array<{ title: string; image: string }> } | null>(null);
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const loadFlyers = useCallback(async () => {
     if (flyersLoaded) return;
@@ -150,32 +150,26 @@ export default function PopPage({ token: _token }: { token: string }) {
     setImgPicker(null);
   };
 
-  // CSV 업로드
-  const handleCsvUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]; if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const text = ev.target?.result as string;
-      const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
-      const startIdx = lines[0]?.includes('상품명') || lines[0]?.includes('카테고리') ? 1 : 0;
-      const parsed: PopItem[] = [];
-      for (let i = startIdx; i < lines.length; i++) {
-        const cols = lines[i].split(',').map(c => c.trim());
-        if (cols.length < 2) continue;
-        const hasCategory = cols.length >= 4;
-        const name = hasCategory ? cols[1] : cols[0];
-        const orig = Number(hasCategory ? cols[2] : cols[1]) || 0;
-        const sale = Number(hasCategory ? cols[3] : cols[2]) || 0;
-        const badge = (hasCategory ? cols[4] : cols[3]) || '';
-        if (name) parsed.push({ name, originalPrice: orig, salePrice: sale || orig, badge, selected: true });
-      }
-      if (parsed.length > 0) {
-        setItems(prev => [...prev, ...parsed]);
-        setAlert({ show: true, title: '업로드 완료', message: `${parsed.length}개 상품이 추가되었습니다.`, type: 'success' });
-      }
-    };
-    reader.readAsText(file, 'UTF-8');
-    e.target.value = '';
+  // ★ D129: ExcelUploadModal (AI 자동매핑) onComplete — CSV 수동파싱 제거
+  // 3경로(인쇄전단/전단/POP) 공용 AI 매핑 모달 통일
+  const [showExcelModal, setShowExcelModal] = useState(false);
+  const handleExcelComplete = (mappedProducts: MappedProduct[]) => {
+    if (mappedProducts.length === 0) {
+      setAlert({ show: true, title: '업로드 오류', message: '유효한 상품 데이터가 없습니다.', type: 'error' });
+      return;
+    }
+    const parsed: PopItem[] = mappedProducts.map(p => ({
+      name: p.productName,
+      originalPrice: p.originalPrice || 0,
+      salePrice: p.salePrice || p.originalPrice || 0,
+      badge: '',
+      unit: p.unit,
+      origin: p.origin,
+      imageUrl: p.imageUrl,
+      selected: true,
+    }));
+    setItems(prev => [...prev, ...parsed]);
+    setAlert({ show: true, title: 'AI 자동매핑 완료', message: `${parsed.length}개 상품이 추가되었습니다.`, type: 'success' });
   };
 
   // PDF 다운로드
@@ -247,11 +241,10 @@ export default function PopPage({ token: _token }: { token: string }) {
           {activeSource === 'direct' && (
             <div className="space-y-2">
               <Button className="w-full" onClick={addItem}>+ 상품 추가</Button>
-              <Button variant="secondary" className="w-full" onClick={() => fileInputRef.current?.click()}>
-                CSV 업로드
+              <Button variant="secondary" className="w-full" onClick={() => setShowExcelModal(true)}>
+                🤖 엑셀/CSV AI 자동매핑
               </Button>
-              <input ref={fileInputRef} type="file" accept=".csv,.txt" onChange={handleCsvUpload} className="hidden" />
-              <p className="text-[10px] text-text-muted text-center">상품명,원가,할인가,뱃지</p>
+              <p className="text-[10px] text-text-muted text-center">헤더 자동 매핑 (.xlsx/.xls/.csv)</p>
             </div>
           )}
 
@@ -497,7 +490,7 @@ export default function PopPage({ token: _token }: { token: string }) {
             <div className="flex justify-between items-center pt-2">
               <div className="flex gap-2">
                 <Button variant="ghost" size="sm" onClick={addItem}>+ 상품 추가</Button>
-                <Button variant="ghost" size="sm" onClick={() => fileInputRef.current?.click()}>CSV 업로드</Button>
+                <Button variant="ghost" size="sm" onClick={() => setShowExcelModal(true)}>🤖 엑셀/CSV AI 자동매핑</Button>
               </div>
               <Button onClick={() => downloadPop()} disabled={selectedCount === 0 || loading}>
                 {loading ? '생성 중...' : `${paperSize} ${splits === 1 ? '개별' : splits + '분할'} POP (${selectedCount}개)`}
@@ -506,6 +499,13 @@ export default function PopPage({ token: _token }: { token: string }) {
           </div>
         )}
       </div>
+
+      {/* ★ D129: 엑셀/CSV AI 자동매핑 모달 (3경로 공용) */}
+      <ExcelUploadModal
+        isOpen={showExcelModal}
+        onClose={() => setShowExcelModal(false)}
+        onComplete={handleExcelComplete}
+      />
 
       {/* ═══ 이미지 검색 팝업 ═══ */}
       {imgPicker && (

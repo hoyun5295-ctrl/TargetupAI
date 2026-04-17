@@ -19,6 +19,10 @@ import { generateProductImage, generateFlyerImages, getGeneratedImageUrl } from 
 import { LIMITS } from '../../config/defaults';
 import { generatePdfFromHtml } from '../../utils/flyer/product/flyer-pdf';
 import { renderPrintFlyer, getAvailableThemes, getThemeByName, PrintProduct } from '../../utils/flyer/product/flyer-print-renderer';
+// ★ D129 인쇄전단 V2 — 2절 + Line B 신규 렌더러 + 템플릿 레지스트리 + 이미지 파이프라인
+import { renderFlyerPdf } from '../../utils/flyer/product/print/renderer/paged-pdf';
+import { listTemplates } from '../../utils/flyer/product/print/renderer/template-registry';
+import { processProductImages } from '../../utils/flyer/product/print/pipeline/image-pipeline';
 import { mapFlyerExcelHeaders, applyFlyerMapping, getFlyerMappingFields } from '../../utils/flyer/product/flyer-excel-mapper';
 import { renderFlyerPage } from './short-urls';
 import { renderPricePop, renderMultiPop, renderPromoPop } from '../../utils/flyer/product/flyer-pop-templates';
@@ -944,7 +948,7 @@ router.post('/print-flyer', async (req: Request, res: Response) => {
     if (!companyId) return;
     const userId = (req as any).flyerUser?.userId;
 
-    const { title, period, products, paperSize, templateCode, storeName } = req.body;
+    const { title, period, products, paperSize, templateCode, storeName, autoRembg, autoMatchImage } = req.body;
 
     if (!title || !products || !Array.isArray(products) || products.length === 0) {
       return res.status(400).json({ error: '제목과 상품 목록이 필요합니다' });
@@ -961,29 +965,56 @@ router.post('/print-flyer', async (req: Request, res: Response) => {
     );
     const storeInfo = storeResult.rows[0] || {};
 
-    // 인쇄용 전단 HTML 렌더링
-    const html = renderPrintFlyer({
-      store: {
-        storeName: storeName || storeInfo.store_name || '',
-        address: storeInfo.business_address || storeInfo.company_address || '',
-        phone: storeInfo.phone || '',
-        hours: storeInfo.store_hours || '',
-      },
-      title,
-      period: period || '',
-      products: (products as PrintProduct[]).map(p => ({
-        ...p,
-        promoType: p.promoType || 'general',
-      })),
-      templateCode: templateCode || 'basic_green',
-      paperSize: paperSize || 'A3',
+    // ★ D129: V2 렌더러 (Paged.js + Puppeteer)
+    // templateCode(프론트 전달) → templateId 매핑. 유효성 검증 후 없으면 mart_spring_v1 폴백.
+    const VALID_TEMPLATES = new Set(['mart_spring_v1', 'mart_hot_v1', 'mart_premium_v1', 'mart_weekend_v1']);
+    const incomingTpl = typeof templateCode === 'string' && templateCode ? templateCode : 'mart_spring_v1';
+    const resolvedTemplateId = VALID_TEMPLATES.has(incomingTpl) ? incomingTpl : 'mart_spring_v1';
+
+    const rawProducts = (products as PrintProduct[]).map(p => ({
+      productName: p.productName,
+      originalPrice: p.originalPrice,
+      salePrice: p.salePrice,
+      unit: p.unit,
+      category: p.category,
+      imageUrl: p.imageUrl,
+      promoType: p.promoType || 'general',
+      aiCopy: p.aiCopy,
+      origin: p.origin,
+    }));
+
+    // ★ D129 V2 이미지 파이프라인 — 기존 자산만 재사용
+    //   1) PRODUCT_MAP(getProductDisplay) → 2) 네이버 쇼핑 → 3) rembg 배경제거
+    //   옵션 둘 다 false면 no-op 반환 (원본 그대로)
+    const processedProducts = await processProductImages(rawProducts, {
+      autoRembg: autoRembg === true,
+      autoMatchImage: autoMatchImage === true,
+      companyId,
+    }).catch(err => {
+      console.warn('[print-flyer] image-pipeline 실패, 원본 사용:', err?.message || err);
+      return rawProducts;
     });
 
-    // HTML → PDF (300dpi)
-    const pdfBuffer = await generatePdfFromHtml(html, {
-      format: paperSize || 'A4',
-      margin: { top: '3mm', bottom: '3mm', left: '3mm', right: '3mm' },
+    const renderResult = await renderFlyerPdf({
+      templateId: resolvedTemplateId,
+      input: {
+        store: {
+          name: storeName || storeInfo.store_name || '',
+          address: storeInfo.business_address || storeInfo.company_address || '',
+          phone: storeInfo.phone || '',
+          hours: storeInfo.store_hours || '',
+        },
+        heroTitle: title,
+        slotOverrides: {
+          hero_period: period ? { value: period } : undefined,
+        },
+        products: processedProducts,
+      },
+      timeoutMs: 90000,
     });
+    const pdfBuffer = renderResult.pdf;
+    // paperSize는 manifest가 용지(2절/A3/B4 등) 결정 → 호환성 위해 파라미터 유지만 함
+    void paperSize;
 
     // flyers에 레코드 생성 (인쇄용)
     const flyerResult = await query(
@@ -1029,9 +1060,33 @@ router.get('/print-flyer/:id/pdf', async (req: Request, res: Response) => {
   }
 });
 
-// GET /print-flyer/themes — 사용 가능한 인쇄 테마 목록
+// GET /print-flyer/themes — 사용 가능한 인쇄 테마 목록 (V1 legacy)
 router.get('/print-flyer/themes', (_req: Request, res: Response) => {
   res.json(getAvailableThemes());
+});
+
+// ★ D129 GET /print-templates — V2 템플릿 목록 (mart_spring/hot/premium/weekend)
+router.get('/print-templates', (_req: Request, res: Response) => {
+  try {
+    const all = listTemplates();
+    // 프론트에 보여줄 메타 정보 보강 (한국어 라벨 + 추천 시즌 + 팔레트 hint)
+    const enrich = (id: string) => {
+      const base = all.find(t => t.id === id);
+      if (!base) return null;
+      const meta: Record<string, any> = {
+        mart_spring_v1:   { label: '봄세일 (파스텔)',        mood: '부드러움',   palette: ['#4F46E5', '#FFB7D5', '#FFD33D'], recommended: '봄 · 시즌 행사' },
+        mart_hot_v1:      { label: 'HOT특가 (레드핫)',       mood: '파격',      palette: ['#E8331F', '#FF8F2B', '#FFD33D'], recommended: '특가 · 파격 세일' },
+        mart_premium_v1:  { label: '프리미엄 (다크+골드)',   mood: '엘레강스',   palette: ['#0B1428', '#C9A961', '#F7F3E9'], recommended: '한우 · 수입산 · 고급' },
+        mart_weekend_v1:  { label: '주말대박 (일렉트릭)',    mood: '임팩트',     palette: ['#7C3AED', '#FDE047', '#EC4899'], recommended: '주말 · 금토일 한정' },
+      };
+      return { ...base, ...(meta[id] || {}) };
+    };
+    const result = all.map(t => enrich(t.id)).filter(Boolean);
+    res.json(result);
+  } catch (err: any) {
+    console.error('[print-templates]', err);
+    res.status(500).json({ error: err?.message || 'failed to list templates' });
+  }
 });
 
 // ══════════════════════════════════════════

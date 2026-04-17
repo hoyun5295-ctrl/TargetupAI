@@ -4,800 +4,573 @@
   <meta charset="UTF-8">
   <title></title>
   <style>/* ============================================================
-   mart_spring_v1 v3.0 — 2절 세로 봄세일 템플릿
-   545 × 788 mm (한국 동네마트 실무 표준 규격)
-   한줄전단AI 고유 디자인: 인디고 프라이머리 + 스프링 파스텔 + 매거진 모듈러
-   Quality Target: 프로 인쇄전단 70~80% 수준
+   mart_hot_v1 v2.0 — 2절 세로 HOT 파격특가 (극적 재설계)
+   545 × 788 mm · 다크 배경 + 빨강/옐로 번쩍
+   Palette: Deep Black #0A0A0A + Fire Red #E8190F + Electric Yellow #FFE100
    ============================================================ */
 
 @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.css');
+@import url('https://cdn.jsdelivr.net/gh/projectnoonnu/2406-3@1.0/Paperlogy-9Black.css');
 
-@page {
-  size: 545mm 788mm;
-  margin: 0;
-  marks: none;
-}
+@page { size: 545mm 788mm; margin: 0; marks: none; }
+@media print { .flyer-page-original { display: none !important; } }
 
-@media print {
-  .flyer-page-original { display: none !important; }
-}
-
-/* ---------- 디자인 토큰 v3 ---------- */
 :root {
-  /* Brand (한줄로) */
-  --c-primary:       #4F46E5;
-  --c-primary-dark:  #3730A3;
-  --c-primary-light: #EEF2FF;
-  --c-primary-tint:  #C7D2FE;
+  --c-fire:          #E8190F;
+  --c-fire-dark:     #9B0A02;
+  --c-fire-bright:   #FF3020;
+  --c-yellow:        #FFE100;
+  --c-yellow-dark:   #F5B800;
+  --c-orange:        #FF7A0E;
 
-  /* Spring Accent */
-  --c-pink:          #FF5B7C;
-  --c-pink-light:    #FFE4EC;
-  --c-pink-soft:     #FFB7D5;
-  --c-green:         #76C35C;
-  --c-green-light:   #E8F5E0;
-  --c-yellow:        #FFD33D;
-  --c-yellow-light:  #FFF4C2;
-  --c-peach:         #FF8F66;
-
-  /* Sale */
-  --c-sale:          #EF2E55;
-  --c-sale-dark:     #B91C3E;
-  --c-price-sub:     #4F46E5;
-
-  /* Surface */
-  --c-page:          #FFF9F3;
+  --c-black:         #0A0A0A;
+  --c-black-soft:    #1A1A1A;
+  --c-smoke:         #2A1A1A;
+  --c-page:          #FFF4DE;
   --c-card:          #FFFFFF;
-  --c-section-hero:  linear-gradient(135deg, #E0E7FF 0%, #FFE4EC 55%, #FFF4C2 100%);
-  --c-section-main:  #FFF1F4;
-  --c-section-recommend: #EEF2FF;
-  --c-section-fresh: #F0FDF4;
-  --c-divider:       #E5E7EB;
+  --c-card-deep:     #1A0808;
 
-  /* Text */
-  --c-text:          #0F172A;
-  --c-text-alt:      #1E293B;
-  --c-muted:         #64748B;
-  --c-subtle:        #94A3B8;
-  --c-on-brand:      #FFFFFF;
-  --c-strike:        #A3A9B8;
+  --c-text-dark:     #0A0A0A;
+  --c-text-light:    #FFFFFF;
+  --c-muted:         #5A3F3F;
+  --c-subtle:        #9E7575;
+  --c-strike:        #A89080;
 
-  /* Radius */
-  --r-card:          6mm;
-  --r-card-lg:       8mm;
-  --r-md:            3mm;
+  --r-card:          3mm;
+  --r-card-lg:       5mm;
   --r-pill:          999mm;
 
-  /* Shadow */
-  --sh-card: 0 0.6mm 1.4mm rgba(15,23,42,0.04), 0 2mm 6mm rgba(15,23,42,0.08);
-  --sh-card-hover: 0 1mm 3mm rgba(15,23,42,0.05), 0 3mm 10mm rgba(79,70,229,0.15);
-  --sh-badge: 0 1mm 3mm rgba(239,46,85,0.30);
-
-  /* Font */
-  --f-base: 'Pretendard Variable', 'Pretendard', -apple-system, BlinkMacSystemFont, sans-serif;
+  --sh-card: 0 1mm 2mm rgba(0,0,0,0.12), 0 3mm 8mm rgba(232,25,15,0.15);
+  --sh-card-hero: 0 2mm 4mm rgba(0,0,0,0.20), 0 6mm 14mm rgba(232,25,15,0.28);
+  --f-base: 'Pretendard Variable', 'Pretendard', sans-serif;
+  --f-display: 'Paperlogy', 'Pretendard Variable', sans-serif;
 }
 
-/* ---------- Reset ---------- */
 * { box-sizing: border-box; margin: 0; padding: 0; }
-
 html, body {
-  width: 545mm;
-  height: 788mm;
+  width: 545mm; height: 788mm;
   font-family: var(--f-base);
-  color: var(--c-text);
+  color: var(--c-text-dark);
   background: var(--c-page);
   font-feature-settings: 'tnum' 1, 'ss01' 1;
   -webkit-print-color-adjust: exact;
   print-color-adjust: exact;
 }
-
 img { max-width: 100%; height: auto; display: block; }
 
-/* ---------- 레이아웃 ---------- */
 .flyer-page {
-  width: 545mm;
-  height: 788mm;
-  padding: 0;
+  width: 545mm; height: 788mm;
   display: grid;
+  grid-template-rows: 22mm 186mm 18mm 188mm 18mm 112mm 18mm 212mm 14mm;
   background: var(--c-page);
-  background-image:
-    radial-gradient(circle at 12mm 12mm, rgba(255,183,213,0.12) 0.6mm, transparent 0.7mm),
-    radial-gradient(circle at 40mm 30mm, rgba(255,211,61,0.10) 0.5mm, transparent 0.6mm);
-  background-size: 60mm 60mm, 80mm 80mm;
   position: relative;
   overflow: hidden;
-  grid-template-rows:
-    22mm      /* 1. 마스트헤드 */
-    178mm     /* 2. 히어로 (확장) */
-    18mm      /* 3. 섹션 01 헤더 */
-    180mm     /* 4. 메인 그리드 (혼합 사이즈) */
-    18mm      /* 5. 섹션 02 헤더 */
-    110mm     /* 6. 서브 그리드 8칸 */
-    20mm      /* 7. 섹션 03 헤더 */
-    228mm     /* 8. FRESH 4블록 (2x2) */
-    14mm;     /* 9. 푸터 */
 }
 
-/* ============================================================
-   1. 마스트헤드 (얇은 수평 바)
-   ============================================================ */
+/* 경고 테이프 하단 띠 — 노랑/검정 대각선 반복 */
+.flyer-page::after {
+  content: '';
+  position: absolute;
+  left: 0; right: 0; bottom: 14mm;
+  height: 4mm;
+  background: repeating-linear-gradient(
+    -45deg,
+    var(--c-yellow) 0 6mm,
+    var(--c-black) 6mm 12mm
+  );
+  z-index: 5;
+}
+
+/* ============================================================ 1. 마스트헤드 — 검은 띠 */
 .masthead {
   display: grid;
   grid-template-columns: auto 1fr auto;
   align-items: center;
   gap: 6mm;
   padding: 0 10mm;
-  background: var(--c-card);
-  border-bottom: 0.4mm solid var(--c-divider);
+  background: var(--c-black);
+  color: var(--c-yellow);
   height: 22mm;
   position: relative;
+  z-index: 2;
+  border-bottom: 3mm solid var(--c-fire);
 }
-.masthead::after {
+.masthead::before {
   content: '';
   position: absolute;
-  left: 0; right: 0; bottom: 0;
-  height: 1.2mm;
-  background: linear-gradient(90deg, var(--c-primary) 0%, var(--c-pink) 50%, var(--c-yellow) 100%);
+  left: 0; right: 0; bottom: -3mm;
+  height: 3mm;
+  background: repeating-linear-gradient(
+    -45deg,
+    var(--c-yellow) 0 4mm,
+    var(--c-black) 4mm 8mm
+  );
 }
-
 .ai-mark {
-  display: inline-flex;
-  align-items: center;
-  gap: 1.5mm;
-  font-size: 3.4mm;
-  font-weight: 800;
-  color: #FFFFFF;
-  background: linear-gradient(135deg, var(--c-primary) 0%, var(--c-primary-dark) 100%);
-  padding: 1.8mm 4mm;
-  border-radius: var(--r-pill);
-  letter-spacing: -0.01em;
-  box-shadow: 0 0.4mm 1.5mm rgba(79,70,229,0.35);
+  display: inline-flex; align-items: center; gap: 1.5mm;
+  font-size: 3.6mm; font-weight: 900;
+  color: var(--c-black);
+  background: var(--c-yellow);
+  padding: 2mm 5mm;
+  letter-spacing: 0.15em;
+  border-radius: 0;
+  transform: skewX(-8deg);
+  box-shadow: 0.6mm 0.6mm 0 var(--c-fire);
 }
-.ai-mark::before {
-  content: '✦';
-  color: var(--c-yellow);
-  font-size: 3.8mm;
-}
+.ai-mark > * { display: inline-block; transform: skewX(8deg); }
+.ai-mark::before { content: '⚠'; font-size: 4mm; color: var(--c-fire); transform: skewX(8deg); }
 
 .masthead-store-row {
-  display: flex;
-  align-items: baseline;
-  gap: 5mm;
-  justify-content: center;
-  color: var(--c-text);
-  overflow: hidden;
+  display: flex; align-items: baseline; gap: 5mm;
+  justify-content: center; overflow: hidden;
 }
 .masthead-store-row .store-name {
-  font-size: 6.2mm;
-  font-weight: 900;
-  color: var(--c-primary-dark);
+  font-size: 7mm; font-weight: 900; color: var(--c-yellow);
   letter-spacing: -0.03em;
+  font-family: var(--f-display), var(--f-base);
+  text-shadow: 0.5mm 0.5mm 0 var(--c-fire-dark);
 }
-.masthead-store-row .divider {
-  color: var(--c-subtle);
-  font-weight: 300;
-}
-.masthead-store-row .meta {
-  color: var(--c-muted);
-  font-size: 3.4mm;
-  font-weight: 600;
-}
+.masthead-store-row .divider { color: rgba(255,225,0,0.35); }
+.masthead-store-row .meta { color: rgba(255,255,255,0.85); font-size: 3.4mm; font-weight: 600; }
 
-.masthead-qr {
-  display: flex;
-  align-items: center;
-  gap: 2.5mm;
-}
+.masthead-qr { display: flex; align-items: center; gap: 2.5mm; }
 .masthead-qr .qr-code {
-  width: 13mm;
-  height: 13mm;
-  background: var(--c-card);
-  border: 0.4mm solid var(--c-divider);
-  border-radius: 2mm;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--c-muted);
-  font-size: 2.6mm;
+  width: 13mm; height: 13mm;
+  background: var(--c-yellow);
+  border: 0.4mm solid var(--c-fire);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--c-black); font-size: 2.6mm;
 }
 .masthead-qr .qr-code.empty {
   background:
-    repeating-linear-gradient(0deg, #0f172a 0 0.5mm, transparent 0.5mm 1.1mm),
-    repeating-linear-gradient(90deg, #0f172a 0 0.5mm, transparent 0.5mm 1.1mm);
-  background-color: #fff;
+    repeating-linear-gradient(0deg, var(--c-black) 0 0.5mm, transparent 0.5mm 1.1mm),
+    repeating-linear-gradient(90deg, var(--c-black) 0 0.5mm, transparent 0.5mm 1.1mm);
+  background-color: var(--c-yellow);
 }
-.masthead-qr .qr-label {
-  font-size: 2.8mm;
-  color: var(--c-muted);
-  line-height: 1.25;
-  text-align: right;
-}
-.masthead-qr .qr-label strong {
-  color: var(--c-text);
-  font-weight: 800;
-  display: block;
-  font-size: 3.4mm;
-}
+.masthead-qr .qr-label { font-size: 2.8mm; color: rgba(255,255,255,0.85); line-height: 1.25; text-align: right; }
+.masthead-qr .qr-label strong { color: var(--c-yellow); font-weight: 900; display: block; font-size: 3.4mm; letter-spacing: 0.06em; }
 
-/* ============================================================
-   2. 히어로 (대형 매거진 타이포 + 스프링 일러스트)
-   ============================================================ */
+/* ============================================================ 2. 히어로 — 극적 재설계 */
 .hero {
-  background: var(--c-section-hero);
-  padding: 12mm 14mm 14mm;
+  background:
+    radial-gradient(circle at 70% 30%, var(--c-fire) 0%, transparent 50%),
+    linear-gradient(180deg, var(--c-black) 0%, var(--c-smoke) 100%);
+  padding: 12mm 14mm 12mm;
   display: grid;
   grid-template-columns: 1fr auto;
   grid-template-rows: auto 1fr auto;
-  gap: 3mm 10mm;
-  border-bottom: 0.4mm solid var(--c-divider);
+  gap: 3mm 6mm;
   position: relative;
   overflow: hidden;
+  color: var(--c-yellow);
+  border-bottom: 3mm solid var(--c-yellow);
 }
-
-/* 배경 장식 — 좌상단 꽃 덩어리 */
+/* 배경 그리드 패턴 */
 .hero::before {
   content: '';
   position: absolute;
-  left: -10mm; top: -10mm;
-  width: 90mm; height: 90mm;
-  background: radial-gradient(circle at center, var(--c-pink-soft) 0%, rgba(255,183,213,0.35) 40%, transparent 70%);
-  pointer-events: none;
+  inset: 0;
+  background-image:
+    repeating-linear-gradient(0deg, rgba(255,225,0,0.04) 0 0.2mm, transparent 0.2mm 8mm),
+    repeating-linear-gradient(90deg, rgba(255,225,0,0.04) 0 0.2mm, transparent 0.2mm 8mm);
 }
-/* 배경 장식 — 우하단 꽃 덩어리 */
+/* 주변 빨간 글로우 */
 .hero::after {
   content: '';
   position: absolute;
-  right: -20mm; bottom: -30mm;
-  width: 120mm; height: 120mm;
-  background: radial-gradient(circle at center, var(--c-yellow-light) 0%, rgba(255,244,194,0.45) 40%, transparent 72%);
+  right: -30mm; top: -30mm;
+  width: 180mm; height: 180mm;
+  background: radial-gradient(circle, var(--c-fire) 0%, transparent 65%);
+  opacity: 0.55;
   pointer-events: none;
 }
 
 .hero-kicker-row {
-  grid-column: 1 / 3;
-  grid-row: 1;
-  display: flex;
-  align-items: center;
-  gap: 4mm;
-  z-index: 2;
+  grid-column: 1 / 3; grid-row: 1;
+  display: flex; align-items: center; gap: 4mm; z-index: 2;
 }
 .hero-kicker {
-  font-size: 5mm;
-  font-weight: 900;
-  color: var(--c-pink);
-  letter-spacing: 0.22em;
-  text-transform: uppercase;
-  line-height: 1;
+  font-size: 5mm; font-weight: 900;
+  color: var(--c-black);
+  background: var(--c-yellow);
+  letter-spacing: 0.28em;
+  line-height: 1; padding: 2mm 5mm;
+  transform: skewX(-8deg);
+  box-shadow: 0.6mm 0.6mm 0 var(--c-fire);
 }
+.hero-kicker > * { display: inline-block; transform: skewX(8deg); }
 .hero-kicker-line {
-  flex: 1;
-  height: 0.5mm;
-  background: linear-gradient(90deg, var(--c-pink) 0%, transparent 100%);
+  flex: 1; height: 0.6mm;
+  background: linear-gradient(90deg, var(--c-yellow) 0%, transparent 100%);
 }
 .hero-kicker-date {
-  font-size: 3.6mm;
-  font-weight: 700;
-  color: var(--c-muted);
-  letter-spacing: 0.04em;
+  font-size: 3.8mm; font-weight: 900; color: var(--c-yellow);
+  letter-spacing: 0.08em;
+  padding: 1mm 3mm; border: 0.4mm solid var(--c-yellow);
 }
 
 .hero-main {
-  grid-column: 1;
-  grid-row: 2;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  z-index: 2;
+  grid-column: 1; grid-row: 2;
+  display: flex; flex-direction: column; justify-content: center; z-index: 2;
 }
 .hero-title {
-  font-size: 78mm;
+  font-size: 76mm;
   font-weight: 900;
-  line-height: 0.92;
-  letter-spacing: -0.06em;
-  color: var(--c-text);
-  font-family: var(--f-base);
-  text-shadow: 0 0 0 transparent;
+  line-height: 0.88;
+  letter-spacing: -0.07em;
+  color: var(--c-yellow);
+  display: flex; align-items: flex-end;
+  gap: 3mm;
   position: relative;
-  display: inline-flex;
-  align-items: flex-end;
-  gap: 4mm;
+  font-family: var(--f-display), var(--f-base);
+  text-shadow:
+    1.2mm 1.2mm 0 var(--c-fire-dark),
+    2mm 2mm 0 var(--c-black);
+}
+.hero-title > span:first-child {
+  color: var(--c-yellow);
 }
 .hero-title .accent {
-  color: var(--c-primary);
-  position: relative;
-  display: inline-block;
-}
-.hero-title .accent::after {
-  content: '';
-  position: absolute;
-  left: 2mm; bottom: 2mm;
-  width: calc(100% - 4mm);
-  height: 6mm;
+  color: var(--c-fire-bright);
   background: var(--c-yellow);
-  z-index: -1;
-  opacity: 0.85;
-  border-radius: 1mm;
+  padding: 1mm 4mm 2mm;
+  transform: rotate(-3deg);
+  text-shadow: none;
+  box-shadow: 0.8mm 0.8mm 0 var(--c-black);
+  border-radius: 1.5mm;
+  font-size: 82mm;
 }
 .hero-title-stamp {
-  position: absolute;
-  top: -6mm;
-  right: -8mm;
-  width: 30mm;
-  height: 30mm;
-  background: var(--c-sale);
-  color: #fff;
+  position: absolute; top: -4mm; right: 0;
+  width: 38mm; height: 38mm;
+  background: var(--c-fire);
+  color: var(--c-yellow);
   border-radius: 50%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
   font-weight: 900;
   transform: rotate(-12deg);
-  box-shadow: 0 1.5mm 4mm rgba(239,46,85,0.35);
-  font-size: 5mm;
-  line-height: 1;
+  box-shadow: 0 2mm 6mm rgba(0,0,0,0.5), 0 0 0 1.2mm var(--c-yellow), 0 0 0 2mm var(--c-fire-dark);
+  font-size: 5mm; line-height: 1;
+  font-family: var(--f-display), var(--f-base);
 }
-.hero-title-stamp .big {
-  font-size: 11mm;
-  font-weight: 900;
-}
-.hero-title-stamp .mini {
-  font-size: 3mm;
-  margin-top: 1mm;
-  letter-spacing: 0.1em;
-}
+.hero-title-stamp .mini { font-size: 3.4mm; letter-spacing: 0.2em; color: var(--c-yellow); }
+.hero-title-stamp .big { font-size: 15mm; margin: 0.5mm 0; font-weight: 900; color: var(--c-yellow); text-shadow: 0.5mm 0.5mm 0 var(--c-black); }
 
 .hero-illustration {
-  grid-column: 2;
-  grid-row: 2;
-  width: 120mm;
-  height: 120mm;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 2;
-  position: relative;
+  grid-column: 2; grid-row: 2;
+  width: 130mm; height: 130mm;
+  display: flex; align-items: center; justify-content: center;
+  z-index: 2; position: relative;
 }
-.hero-illustration svg {
-  width: 100%;
-  height: 100%;
-}
+.hero-illustration svg { width: 100%; height: 100%; filter: drop-shadow(0 0 6mm rgba(255,225,0,0.4)); }
 
 .hero-bottom {
-  grid-column: 1 / 3;
-  grid-row: 3;
-  display: flex;
-  align-items: center;
-  gap: 6mm;
-  z-index: 2;
+  grid-column: 1 / 3; grid-row: 3;
+  display: flex; align-items: center; gap: 4mm; z-index: 2;
   margin-top: 2mm;
 }
 .hero-period {
-  display: inline-flex;
-  align-items: center;
-  gap: 3mm;
+  display: inline-flex; align-items: center; gap: 3mm;
   padding: 4mm 8mm;
-  background: var(--c-primary);
-  color: var(--c-on-brand);
-  border-radius: var(--r-pill);
-  font-size: 7mm;
-  font-weight: 800;
+  background: var(--c-yellow);
+  color: var(--c-black);
+  font-size: 7.5mm;
+  font-weight: 900;
   letter-spacing: -0.02em;
-  box-shadow: 0 1mm 3mm rgba(79,70,229,0.28);
+  font-family: var(--f-display), var(--f-base);
+  transform: skewX(-8deg);
+  box-shadow: 0.8mm 0.8mm 0 var(--c-fire-dark);
 }
-.hero-period::before {
-  content: '📅';
-  font-size: 6mm;
-}
+.hero-period > * { display: inline-block; transform: skewX(8deg); }
+.hero-period::before { content: '🔥'; font-size: 7mm; }
 .hero-subcopy {
-  font-size: 6.2mm;
-  font-weight: 600;
-  color: var(--c-text-alt);
-  letter-spacing: -0.02em;
-  line-height: 1.35;
-  flex: 1;
+  font-size: 5.6mm; font-weight: 800;
+  color: var(--c-yellow);
+  letter-spacing: -0.02em; line-height: 1.35; flex: 1;
+  text-shadow: 0.5mm 0.5mm 0 var(--c-black);
 }
 
-/* ============================================================
-   섹션 헤더 공통
-   ============================================================ */
+/* ============================================================ 섹션 헤더 */
 .section-header {
-  display: flex;
-  align-items: center;
-  gap: 4mm;
+  display: flex; align-items: center; gap: 4mm;
   padding: 0 14mm;
   background: var(--c-page);
   position: relative;
+  z-index: 1;
 }
 .section-header::before {
   content: '';
-  position: absolute;
-  left: 14mm; top: 0;
-  width: calc(100% - 28mm);
-  height: 0.6mm;
-  background: linear-gradient(90deg, var(--c-text) 0%, var(--c-text) 60%, transparent 100%);
+  position: absolute; left: 14mm; top: 0;
+  width: calc(100% - 28mm); height: 1.2mm;
+  background: var(--c-black);
+}
+.section-header::after {
+  content: '';
+  position: absolute; left: 14mm; top: 1.4mm;
+  width: calc(100% - 28mm); height: 0.4mm;
+  background: var(--c-fire);
 }
 .section-number {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 12mm;
-  height: 12mm;
-  border-radius: 2mm;
-  background: var(--c-primary);
-  color: #fff;
-  font-size: 4.6mm;
-  font-weight: 900;
-  letter-spacing: 0.05em;
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 12mm; height: 12mm;
+  background: var(--c-fire); color: var(--c-yellow);
+  font-size: 4.8mm; font-weight: 900;
   padding: 0 3mm;
-  box-shadow: 0 0.8mm 2mm rgba(79,70,229,0.25);
+  box-shadow: 0.8mm 0.8mm 0 var(--c-black);
+  font-family: var(--f-display), var(--f-base);
+  transform: rotate(-4deg);
 }
 .section-title {
-  font-size: 10mm;
-  font-weight: 900;
-  color: var(--c-text);
-  letter-spacing: -0.04em;
-  line-height: 1;
+  font-size: 11mm; font-weight: 900;
+  color: var(--c-black); letter-spacing: -0.04em; line-height: 1;
+  font-family: var(--f-display), var(--f-base);
 }
 .section-title .accent {
-  color: var(--c-sale);
+  color: var(--c-fire);
+  background: var(--c-yellow);
+  padding: 0.5mm 2.5mm;
+  box-shadow: 0.4mm 0.4mm 0 var(--c-black);
 }
 .section-sublabel {
-  font-size: 3.8mm;
-  color: var(--c-muted);
-  font-weight: 600;
-  margin-left: auto;
-  letter-spacing: -0.01em;
+  font-size: 3.8mm; color: var(--c-text-dark);
+  font-weight: 900; margin-left: auto; letter-spacing: 0.06em;
 }
 .section-sublabel .chip {
-  display: inline-block;
-  padding: 1mm 3mm;
-  background: var(--c-green-light);
-  color: var(--c-green);
-  border-radius: var(--r-pill);
-  font-size: 3.2mm;
-  font-weight: 800;
-  margin-left: 2mm;
-  letter-spacing: 0.04em;
+  display: inline-block; padding: 1mm 3mm;
+  background: var(--c-fire); color: var(--c-yellow);
+  font-size: 3.2mm; font-weight: 900; margin-left: 2mm; letter-spacing: 0.08em;
+  transform: skewX(-8deg);
 }
+.section-recommend-header .section-number { background: var(--c-black); color: var(--c-yellow); }
+.section-fresh-header .section-number { background: var(--c-fire-dark); }
 
-/* 섹션 01 — 오늘의 특가 (핑크 계열) */
-.section-main-header .section-number { background: var(--c-sale); box-shadow: 0 0.8mm 2mm rgba(239,46,85,0.30); }
-/* 섹션 02 — 베스트 픽 (인디고) */
-.section-recommend-header .section-number { background: var(--c-primary); }
-/* 섹션 03 — 신선 코너 (그린) */
-.section-fresh-header .section-number { background: var(--c-green); box-shadow: 0 0.8mm 2mm rgba(118,195,92,0.30); }
-
-/* ============================================================
-   3~4. 메인 그리드 (01 오늘의 특가) — 혼합 사이즈 (2 hero + 4 standard)
-   ============================================================ */
+/* ============================================================ 3~4. 메인 — 파격특가 (극대) */
 .section-main {
   padding: 6mm 10mm 0;
-  background: var(--c-section-main);
+  background: var(--c-page);
   position: relative;
-}
-.section-main::before {
-  content: '';
-  position: absolute;
-  right: 12mm; top: 4mm;
-  width: 30mm; height: 30mm;
-  background-image: radial-gradient(circle, var(--c-pink-soft) 0%, transparent 70%);
-  opacity: 0.5;
+  z-index: 1;
 }
 .main-grid {
   display: grid;
   grid-template-columns: repeat(6, 1fr);
   grid-template-rows: 1fr 1fr;
-  gap: 3mm;
-  height: 100%;
+  gap: 3mm; height: 100%;
 }
-/* 카드1, 2 = 2개의 HERO (각 2x2 span) — 좌측 절반 */
 .main-grid > .card-main:nth-child(1),
-.main-grid > .card-main:nth-child(2) {
-  grid-column: span 2;
-  grid-row: span 2;
-}
-/* 카드3~6 = 1x1 (우측 2열 x 2행, 정확히 4셀 = 4카드) */
+.main-grid > .card-main:nth-child(2) { grid-column: span 2; grid-row: span 2; }
 
 .card-main {
   background: var(--c-card);
   border-radius: var(--r-card-lg);
   padding: 4mm 4mm 3mm;
-  display: flex;
-  flex-direction: column;
-  position: relative;
-  overflow: hidden;
+  display: flex; flex-direction: column;
+  position: relative; overflow: hidden;
   box-shadow: var(--sh-card);
-  border: 0.3mm solid rgba(15,23,42,0.04);
+  border: 0.6mm solid var(--c-black);
 }
 .card-main::before {
-  content: '';
-  position: absolute;
-  top: 0; left: 0;
-  width: 100%;
-  height: 1.2mm;
-  background: linear-gradient(90deg, var(--c-sale) 0%, var(--c-pink) 100%);
+  content: ''; position: absolute; top: 0; left: 0;
+  width: 100%; height: 2.5mm;
+  background: repeating-linear-gradient(
+    -45deg,
+    var(--c-yellow) 0 4mm,
+    var(--c-black) 4mm 8mm
+  );
 }
-/* 좌하단 미니 꽃 장식 (라디얼 3겹 꽃잎) */
-.card-main::after {
-  content: '';
-  position: absolute;
-  right: 4mm; bottom: 4mm;
-  width: 8mm; height: 8mm;
-  background-image:
-    radial-gradient(circle at 3mm 3mm, var(--c-pink-soft) 1.4mm, transparent 1.6mm),
-    radial-gradient(circle at 5mm 3mm, var(--c-pink) 1.2mm, transparent 1.4mm),
-    radial-gradient(circle at 4mm 5mm, var(--c-yellow) 1mm, transparent 1.2mm),
-    radial-gradient(circle at 4mm 4mm, var(--c-yellow-light) 0.6mm, transparent 0.8mm);
-  opacity: 0.5;
-  pointer-events: none;
+.main-grid > .card-main:nth-child(1),
+.main-grid > .card-main:nth-child(2) {
+  box-shadow: var(--sh-card-hero);
+  border: 0.8mm solid var(--c-fire);
+}
+.main-grid > .card-main:nth-child(1)::before,
+.main-grid > .card-main:nth-child(2)::before {
+  background: repeating-linear-gradient(
+    -45deg,
+    var(--c-fire) 0 4mm,
+    var(--c-black) 4mm 8mm
+  );
 }
 
-/* 메인카드 좌상단 리본 배지 */
 .card-main .ribbon-badge {
-  position: absolute;
-  top: 3mm;
-  left: -4mm;
-  background: var(--c-sale);
-  color: #fff;
-  font-size: 3.4mm;
-  font-weight: 900;
-  padding: 1.6mm 4mm 1.6mm 5mm;
-  letter-spacing: -0.01em;
-  box-shadow: 0 1mm 2mm rgba(239,46,85,0.35);
+  position: absolute; top: 4.5mm; left: -4mm;
+  background: var(--c-fire); color: var(--c-yellow);
+  font-size: 3.6mm; font-weight: 900;
+  padding: 1.8mm 4mm 1.8mm 5mm;
   z-index: 3;
   transform: skewX(-8deg);
+  box-shadow: 0.6mm 0.6mm 0 var(--c-black);
+  letter-spacing: 0.02em;
+  font-family: var(--f-display), var(--f-base);
 }
 .card-main .ribbon-badge > span { display: inline-block; transform: skewX(8deg); }
 .card-main .ribbon-badge::after {
-  content: '';
-  position: absolute;
-  left: 0; bottom: -2mm;
-  border-top: 2mm solid var(--c-sale-dark);
+  content: ''; position: absolute; left: 0; bottom: -2mm;
+  border-top: 2mm solid var(--c-fire-dark);
   border-left: 3mm solid transparent;
-  opacity: 0.7;
 }
 
-/* 우상단 원형 할인 스탬프 */
 .card-main .discount-stamp {
-  position: absolute;
-  top: 3mm;
-  right: 3mm;
-  width: 18mm;
-  height: 18mm;
-  background: var(--c-primary);
-  color: #fff;
+  position: absolute; top: 3mm; right: 3mm;
+  width: 22mm; height: 22mm;
+  background: var(--c-yellow); color: var(--c-fire);
   border-radius: 50%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
   font-weight: 900;
-  transform: rotate(8deg);
+  transform: rotate(10deg);
   z-index: 3;
-  box-shadow: 0 1mm 3mm rgba(79,70,229,0.30);
+  box-shadow: 0.8mm 0.8mm 0 var(--c-black), 0 0 0 1mm var(--c-fire);
   line-height: 1;
+  font-family: var(--f-display), var(--f-base);
+  border: 0.8mm solid var(--c-fire);
 }
-.card-main .discount-stamp .pct {
-  font-size: 7.4mm;
-  font-weight: 900;
-  letter-spacing: -0.04em;
-}
-.card-main .discount-stamp .off {
-  font-size: 3mm;
-  font-weight: 800;
-  margin-top: 0.6mm;
-  letter-spacing: 0.06em;
-}
+.card-main .discount-stamp .pct { font-size: 9mm; letter-spacing: -0.04em; color: var(--c-fire); }
+.card-main .discount-stamp .off { font-size: 3mm; margin-top: 0.4mm; letter-spacing: 0.12em; color: var(--c-black); font-weight: 900; }
 
 .card-main .product-image {
-  width: 100%;
-  flex: 1;
-  object-fit: contain;
-  background: linear-gradient(135deg, #FFF0F3 0%, #FFE4EC 100%);
-  border-radius: var(--r-card);
-  padding: 3mm;
-  min-height: 40mm;
+  width: 100%; flex: 1; object-fit: contain;
+  background:
+    repeating-linear-gradient(-45deg, #FFF4DE 0 4mm, #FFE4BA 4mm 8mm);
+  border-radius: var(--r-card); padding: 3mm; min-height: 40mm;
 }
-/* 히어로 카드 1,2 이미지 크게 */
 .card-main:nth-child(1) .product-image,
-.card-main:nth-child(2) .product-image { min-height: 90mm; }
+.card-main:nth-child(2) .product-image { min-height: 94mm; }
 
-.card-main .product-meta {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5mm;
-  margin-top: 3mm;
-}
+.card-main .product-meta { display: flex; flex-direction: column; gap: 0.5mm; margin-top: 3mm; }
 .card-main .original-price {
-  font-size: 3.6mm;
-  color: var(--c-strike);
+  font-size: 3.6mm; color: var(--c-strike);
   text-decoration: line-through;
-  text-decoration-thickness: 0.3mm;
-  font-weight: 600;
-  letter-spacing: -0.01em;
+  text-decoration-thickness: 0.5mm;
+  text-decoration-color: var(--c-fire);
+  font-weight: 700;
 }
 .card-main .sale-price {
-  font-weight: 900;
-  color: var(--c-sale);
-  line-height: 1;
-  letter-spacing: -0.05em;
-  display: flex;
-  align-items: baseline;
-  gap: 0.5mm;
-  font-size: 15mm;
+  font-weight: 900; color: var(--c-fire);
+  line-height: 1; letter-spacing: -0.05em;
+  display: flex; align-items: baseline; gap: 0.5mm;
+  font-size: 17mm;
+  font-family: var(--f-display), var(--f-base);
+  text-shadow: 0.4mm 0.4mm 0 var(--c-black);
 }
-/* 히어로 카드 1,2 가격 초대형 */
 .card-main:nth-child(1) .sale-price,
-.card-main:nth-child(2) .sale-price { font-size: 26mm; }
+.card-main:nth-child(2) .sale-price { font-size: 32mm; text-shadow: 0.8mm 0.8mm 0 var(--c-black); }
 .card-main .sale-price .won {
-  font-size: 5.5mm;
-  color: var(--c-text);
-  font-weight: 800;
+  font-size: 5.5mm; color: var(--c-black); font-weight: 900;
+  text-shadow: none;
 }
 .card-main:nth-child(1) .sale-price .won,
-.card-main:nth-child(2) .sale-price .won { font-size: 9mm; }
+.card-main:nth-child(2) .sale-price .won { font-size: 11mm; }
+
 .card-main .product-name {
-  font-size: 4.4mm;
-  font-weight: 800;
-  color: var(--c-text);
-  margin-top: 1.5mm;
-  letter-spacing: -0.03em;
-  line-height: 1.15;
-  display: flex;
-  align-items: baseline;
-  gap: 2mm;
-  flex-wrap: wrap;
+  font-size: 4.6mm; font-weight: 900; color: var(--c-black);
+  margin-top: 1.5mm; letter-spacing: -0.03em; line-height: 1.15;
+  display: flex; align-items: baseline; gap: 2mm; flex-wrap: wrap;
 }
 .card-main:nth-child(1) .product-name,
-.card-main:nth-child(2) .product-name { font-size: 7mm; }
-.card-main .product-name .unit {
-  font-size: 3.2mm;
-  color: var(--c-muted);
-  font-weight: 600;
-}
+.card-main:nth-child(2) .product-name { font-size: 8mm; }
+.card-main .product-name .unit { font-size: 3.2mm; color: var(--c-muted); font-weight: 700; }
 .card-main:nth-child(1) .product-name .unit,
-.card-main:nth-child(2) .product-name .unit { font-size: 4.2mm; }
+.card-main:nth-child(2) .product-name .unit { font-size: 4.6mm; }
+
 .card-main .ai-copy {
-  font-size: 3.2mm;
-  color: var(--c-primary-dark);
-  font-weight: 700;
-  margin-top: 1mm;
-  padding: 1mm 2.5mm;
-  background: var(--c-primary-light);
-  border-radius: var(--r-pill);
+  font-size: 3.2mm; color: var(--c-yellow);
+  font-weight: 900; margin-top: 1.5mm;
+  padding: 1mm 3mm;
+  background: var(--c-black);
   align-self: flex-start;
-  letter-spacing: -0.01em;
+  transform: skewX(-8deg);
+  letter-spacing: 0.04em;
 }
 .card-main:nth-child(1) .ai-copy,
-.card-main:nth-child(2) .ai-copy { font-size: 4mm; padding: 1.5mm 3.5mm; }
+.card-main:nth-child(2) .ai-copy { font-size: 4.2mm; padding: 1.4mm 4mm; }
+.card-main .ai-copy > * { display: inline-block; transform: skewX(8deg); }
 
-/* ============================================================
-   5~6. 추천 그리드 (02 베스트픽) — 8칸
-   ============================================================ */
+/* ============================================================ 5~6. 베스트 */
 .section-recommend {
   padding: 6mm 10mm 0;
-  background: var(--c-section-recommend);
+  background: var(--c-black);
   position: relative;
+  z-index: 1;
 }
 .section-recommend::before {
-  content: '';
+  content: 'HOT PICKS';
   position: absolute;
-  left: 12mm; top: 4mm;
-  width: 24mm; height: 24mm;
-  background-image: radial-gradient(circle, var(--c-primary-tint) 0%, transparent 70%);
+  top: 2mm; right: 14mm;
+  font-size: 4mm; font-weight: 900;
+  color: var(--c-yellow);
+  letter-spacing: 0.3em;
+  font-family: var(--f-display), var(--f-base);
   opacity: 0.4;
 }
 .recommend-grid {
   display: grid;
   grid-template-columns: repeat(8, 1fr);
-  gap: 2.5mm;
-  height: 100%;
+  gap: 2.5mm; height: 100%;
 }
 .card-sub {
   background: var(--c-card);
-  border-radius: var(--r-card);
   padding: 2.8mm;
-  display: flex;
-  flex-direction: column;
-  position: relative;
-  overflow: hidden;
-  box-shadow: var(--sh-card);
-  border: 0.3mm solid rgba(15,23,42,0.04);
+  display: flex; flex-direction: column;
+  position: relative; overflow: hidden;
+  border: 0.4mm solid var(--c-yellow);
+  border-radius: var(--r-card);
+  box-shadow: 0.6mm 0.6mm 0 var(--c-fire);
 }
 .card-sub::before {
-  content: '';
-  position: absolute;
-  top: 0; left: 0; right: 0;
-  height: 0.8mm;
-  background: var(--c-primary);
+  content: ''; position: absolute; top: 0; left: 0; right: 0;
+  height: 1.4mm;
+  background: repeating-linear-gradient(-45deg, var(--c-yellow) 0 2mm, var(--c-fire) 2mm 4mm);
 }
-
-/* 서브카드 좌상단 미니 뱃지 */
 .card-sub .mini-badge {
-  position: absolute;
-  top: 2mm;
-  left: 2mm;
-  background: var(--c-primary);
-  color: #fff;
-  font-size: 2.6mm;
-  font-weight: 900;
-  padding: 0.6mm 1.8mm;
-  border-radius: 1.5mm;
-  letter-spacing: -0.02em;
-  z-index: 2;
-  line-height: 1;
+  position: absolute; top: 2mm; left: 2mm;
+  background: var(--c-fire); color: var(--c-yellow);
+  font-size: 2.8mm; font-weight: 900;
+  padding: 0.8mm 2mm;
+  letter-spacing: 0.04em;
+  z-index: 2; line-height: 1;
+  transform: skewX(-8deg);
+  box-shadow: 0.4mm 0.4mm 0 var(--c-black);
 }
-.card-sub .mini-badge.hot { background: var(--c-sale); }
-.card-sub .mini-badge.new { background: var(--c-green); }
-.card-sub .mini-badge.best { background: var(--c-yellow); color: var(--c-text); }
-.card-sub .mini-badge.pick { background: var(--c-pink); }
+.card-sub .mini-badge.hot { background: var(--c-fire); color: var(--c-yellow); }
+.card-sub .mini-badge.best { background: var(--c-yellow); color: var(--c-black); }
+.card-sub .mini-badge.pick { background: var(--c-black); color: var(--c-yellow); }
+.card-sub .mini-badge.new { background: var(--c-fire-dark); color: var(--c-yellow); }
 
 .card-sub .product-image {
-  width: 100%;
-  height: 44mm;
-  object-fit: contain;
-  background: linear-gradient(135deg, var(--c-primary-light) 0%, #fff 100%);
-  border-radius: var(--r-md);
-  padding: 2mm;
+  width: 100%; height: 44mm; object-fit: contain;
+  background: repeating-linear-gradient(-45deg, #FFF4DE 0 3mm, #FFE4BA 3mm 6mm);
+  border-radius: 2mm; padding: 2mm;
 }
-.card-sub .original-price {
-  font-size: 2.8mm;
-  color: var(--c-strike);
-  text-decoration: line-through;
-  font-weight: 500;
-  margin-top: 2mm;
-}
+.card-sub .original-price { font-size: 2.8mm; color: var(--c-strike); text-decoration: line-through; font-weight: 600; margin-top: 2mm; }
 .card-sub .sale-price {
-  font-size: 8.5mm;
-  font-weight: 900;
-  color: var(--c-price-sub);
-  line-height: 1;
-  letter-spacing: -0.04em;
-  display: flex;
-  align-items: baseline;
-  gap: 0.3mm;
-  margin-top: 0.4mm;
+  font-size: 9.5mm; font-weight: 900;
+  color: var(--c-fire);
+  line-height: 1; letter-spacing: -0.04em;
+  display: flex; align-items: baseline; gap: 0.3mm; margin-top: 0.4mm;
+  font-family: var(--f-display), var(--f-base);
+  text-shadow: 0.3mm 0.3mm 0 var(--c-black);
 }
-.card-sub .sale-price .won {
-  font-size: 3.5mm;
-  color: var(--c-text);
-  font-weight: 800;
-}
+.card-sub .sale-price .won { font-size: 3.5mm; color: var(--c-black); font-weight: 900; text-shadow: none; }
 .card-sub .product-name {
-  font-size: 3.4mm;
-  font-weight: 800;
-  color: var(--c-text);
-  margin-top: 1mm;
-  letter-spacing: -0.03em;
-  line-height: 1.2;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
+  font-size: 3.4mm; font-weight: 900; color: var(--c-black);
+  margin-top: 1mm; letter-spacing: -0.03em; line-height: 1.2;
+  overflow: hidden; text-overflow: ellipsis;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
 }
-.card-sub .product-name .unit {
-  color: var(--c-muted);
-  font-weight: 600;
-  font-size: 2.8mm;
-  margin-left: 1mm;
-}
+.card-sub .product-name .unit { color: var(--c-muted); font-weight: 700; font-size: 2.8mm; margin-left: 1mm; }
 
-/* ============================================================
-   7~8. FRESH 4블록 (03 신선코너) — 2x2 카테고리 블록
-   ============================================================ */
+/* ============================================================ 7~8. FRESH */
 .section-fresh {
-  padding: 6mm 10mm 0;
-  background: var(--c-section-fresh);
+  padding: 6mm 10mm 2mm;
+  background: var(--c-page);
   position: relative;
+  z-index: 1;
 }
 .fresh-4blocks {
   display: grid;
   grid-template-columns: 1fr 1fr;
   grid-template-rows: 1fr 1fr;
-  gap: 4mm;
-  height: 100%;
+  gap: 4mm; height: 100%;
 }
 .fresh-block {
   background: var(--c-card);
@@ -808,72 +581,53 @@ img { max-width: 100%; height: auto; display: block; }
   gap: 2.5mm;
   overflow: hidden;
   box-shadow: var(--sh-card);
-  border: 0.3mm solid rgba(15,23,42,0.04);
+  border: 0.6mm solid var(--c-black);
   position: relative;
 }
 .fresh-block::before {
-  content: '';
-  position: absolute;
-  top: 0; left: 0; right: 0;
-  height: 1.2mm;
-  background: var(--c-green);
+  content: ''; position: absolute; top: 0; left: 0; right: 0;
+  height: 2mm;
 }
-.fresh-block.meat::before { background: #E8331F; }
-.fresh-block.fish::before { background: #1E6FEB; }
-.fresh-block.fruit::before { background: #FF8F2B; }
-.fresh-block.liquor::before { background: #6D28D9; }
+.fresh-block.meat::before { background: var(--c-fire); }
+.fresh-block.fish::before { background: var(--c-black); }
+.fresh-block.fruit::before { background: var(--c-orange); }
+.fresh-block.liquor::before { background: var(--c-fire-dark); }
 
 .fresh-block-header {
-  display: flex;
-  align-items: center;
-  gap: 3mm;
+  display: flex; align-items: center; gap: 3mm;
   padding-bottom: 2mm;
-  border-bottom: 0.4mm solid var(--c-divider);
+  border-bottom: 0.6mm solid var(--c-black);
 }
 .fresh-block-header .cat-icon {
-  width: 10mm;
-  height: 10mm;
-  border-radius: 2.4mm;
-  background: var(--c-green-light);
-  color: var(--c-green);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 6mm;
-  font-weight: 900;
+  width: 11mm; height: 11mm;
+  background: var(--c-fire); color: var(--c-yellow);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 6mm; font-weight: 900;
+  border-radius: 2mm;
+  box-shadow: 0.5mm 0.5mm 0 var(--c-black);
 }
-.fresh-block.meat .cat-icon { background: #FFE4E6; color: #E8331F; }
-.fresh-block.fish .cat-icon { background: #DBEAFE; color: #1E6FEB; }
-.fresh-block.fruit .cat-icon { background: #FFEDD5; color: #FF8F2B; }
-.fresh-block.liquor .cat-icon { background: #EDE9FE; color: #6D28D9; }
+.fresh-block.fish .cat-icon { background: var(--c-black); color: var(--c-yellow); }
+.fresh-block.fruit .cat-icon { background: var(--c-orange); color: var(--c-yellow); }
+.fresh-block.liquor .cat-icon { background: var(--c-fire-dark); color: var(--c-yellow); }
 
 .fresh-block-header .cat-label {
-  font-size: 6.5mm;
-  font-weight: 900;
-  color: var(--c-text);
+  font-size: 7mm; font-weight: 900; color: var(--c-black);
   letter-spacing: -0.03em;
+  font-family: var(--f-display), var(--f-base);
 }
-.fresh-block-header .cat-desc {
-  font-size: 2.8mm;
-  color: var(--c-muted);
-  font-weight: 600;
-  line-height: 1.3;
-  letter-spacing: -0.01em;
-}
+.fresh-block-header .cat-desc { font-size: 2.8mm; color: var(--c-muted); font-weight: 700; line-height: 1.3; letter-spacing: -0.01em; }
 .fresh-block-header .cat-badge {
   margin-left: auto;
-  background: var(--c-green);
-  color: #fff;
-  font-size: 2.8mm;
-  font-weight: 900;
-  padding: 0.8mm 2.5mm;
-  border-radius: var(--r-pill);
-  letter-spacing: 0.06em;
+  background: var(--c-fire); color: var(--c-yellow);
+  font-size: 3mm; font-weight: 900;
+  padding: 1mm 3mm;
+  letter-spacing: 0.1em;
+  transform: skewX(-8deg);
+  box-shadow: 0.4mm 0.4mm 0 var(--c-black);
 }
-.fresh-block.meat .cat-badge { background: #E8331F; }
-.fresh-block.fish .cat-badge { background: #1E6FEB; }
-.fresh-block.fruit .cat-badge { background: #FF8F2B; }
-.fresh-block.liquor .cat-badge { background: #6D28D9; }
+.fresh-block.fish .cat-badge { background: var(--c-black); color: var(--c-yellow); }
+.fresh-block.fruit .cat-badge { background: var(--c-orange); color: var(--c-yellow); }
+.fresh-block.liquor .cat-badge { background: var(--c-fire-dark); color: var(--c-yellow); }
 
 .fresh-grid {
   display: grid;
@@ -882,117 +636,61 @@ img { max-width: 100%; height: auto; display: block; }
   gap: 2mm;
 }
 .card-fresh {
-  background: #fff;
-  border-radius: var(--r-md);
+  background: #fff; border-radius: 2mm;
   padding: 2mm;
-  display: flex;
-  flex-direction: column;
-  position: relative;
-  overflow: hidden;
-  border: 0.3mm solid rgba(15,23,42,0.06);
+  display: flex; flex-direction: column;
+  position: relative; overflow: hidden;
+  border: 0.3mm solid var(--c-black);
 }
 .card-fresh .mini-badge {
-  position: absolute;
-  top: 1.2mm;
-  right: 1.2mm;
-  background: var(--c-sale);
-  color: #fff;
-  font-size: 2.4mm;
-  font-weight: 900;
-  padding: 0.5mm 1.5mm;
-  border-radius: 1mm;
-  line-height: 1;
-  z-index: 2;
+  position: absolute; top: 1.2mm; right: 1.2mm;
+  background: var(--c-fire); color: var(--c-yellow);
+  font-size: 2.6mm; font-weight: 900;
+  padding: 0.4mm 1.5mm;
+  line-height: 1; z-index: 2;
+  transform: skewX(-8deg);
+  box-shadow: 0.2mm 0.2mm 0 var(--c-black);
 }
 .card-fresh .product-image {
-  width: 100%;
-  height: 22mm;
-  object-fit: contain;
-  background: #FBFEFB;
+  width: 100%; height: 22mm; object-fit: contain;
+  background: #FFF7E6;
   border-radius: 1.5mm;
 }
 .card-fresh .sale-price {
-  font-size: 6.2mm;
-  font-weight: 900;
-  color: var(--c-sale);
-  line-height: 1;
-  letter-spacing: -0.04em;
+  font-size: 6.8mm; font-weight: 900;
+  color: var(--c-fire);
+  line-height: 1; letter-spacing: -0.04em;
   margin-top: 1.2mm;
-  display: flex;
-  align-items: baseline;
-  gap: 0.3mm;
+  display: flex; align-items: baseline; gap: 0.3mm;
+  font-family: var(--f-display), var(--f-base);
 }
-.card-fresh .sale-price .won {
-  font-size: 2.6mm;
-  color: var(--c-text);
-  font-weight: 800;
-}
-.card-fresh .original-price {
-  font-size: 2.4mm;
-  color: var(--c-strike);
-  text-decoration: line-through;
-  font-weight: 500;
-}
+.card-fresh .sale-price .won { font-size: 2.8mm; color: var(--c-black); font-weight: 900; }
+.card-fresh .original-price { font-size: 2.4mm; color: var(--c-strike); text-decoration: line-through; font-weight: 600; }
 .card-fresh .product-name {
-  font-size: 3mm;
-  font-weight: 800;
-  color: var(--c-text);
-  letter-spacing: -0.03em;
-  line-height: 1.15;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-size: 3mm; font-weight: 900; color: var(--c-black);
+  letter-spacing: -0.03em; line-height: 1.15;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   margin-top: 0.4mm;
 }
-.card-fresh .product-name .unit {
-  font-size: 2.4mm;
-  color: var(--c-muted);
-  font-weight: 600;
-  margin-left: 0.6mm;
-}
+.card-fresh .product-name .unit { font-size: 2.4mm; color: var(--c-muted); font-weight: 700; margin-left: 0.6mm; }
 
-/* ============================================================
-   9. 푸터
-   ============================================================ */
+/* ============================================================ 9. 푸터 */
 .footer {
-  display: grid;
-  grid-template-rows: auto auto;
-  gap: 1mm;
-  padding: 2.5mm 14mm;
-  background: var(--c-primary-dark);
-  color: #fff;
-  border-top: 0.4mm solid var(--c-primary);
+  display: grid; grid-template-rows: auto auto;
+  gap: 1mm; padding: 2.5mm 14mm;
+  background: var(--c-black); color: var(--c-yellow);
+  position: relative; z-index: 1;
 }
-.footer-notice {
-  font-size: 2.4mm;
-  color: rgba(255,255,255,0.72);
-  line-height: 1.4;
-  font-weight: 500;
-}
+.footer-notice { font-size: 2.4mm; color: rgba(255,225,0,0.75); line-height: 1.4; font-weight: 600; }
 .footer-brand {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 3mm;
-  color: rgba(255,255,255,0.8);
-  font-weight: 600;
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 3mm; color: rgba(255,225,0,0.85); font-weight: 700;
 }
-.footer-brand .brand-mark {
-  color: var(--c-yellow);
-  font-weight: 900;
-  font-size: 3.6mm;
-  letter-spacing: -0.02em;
-}
+.footer-brand .brand-mark { color: var(--c-yellow); font-weight: 900; font-size: 3.8mm; letter-spacing: 0.04em; font-family: var(--f-display), var(--f-base); }
 
-/* ============================================================
-   유틸 — 빈 이미지 폴백
-   ============================================================ */
 .product-image.empty {
-  background: var(--c-divider);
-  color: var(--c-subtle);
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  background: var(--c-page); color: var(--c-subtle);
+  display: flex; align-items: center; justify-content: center;
   font-size: 2.8mm;
 }
 </style>
@@ -1000,10 +698,8 @@ img { max-width: 100%; height: auto; display: block; }
 <body>
   <div class="flyer-page">
 
-    <!-- ═══════════════ 1. 마스트헤드 ═══════════════ -->
     <header class="masthead" data-slot="masthead">
-      <div class="ai-mark">AI 자동 제작</div>
-
+      <div class="ai-mark"><span>TODAY HOT</span></div>
       <div class="masthead-store-row">
         <span class="store-name" data-bind="store.name">테스트마켓</span>
         <span class="divider">|</span>
@@ -1013,109 +709,102 @@ img { max-width: 100%; height: auto; display: block; }
         <span class="divider">·</span>
         <span class="meta" data-bind="store.hours">08:00~22:00</span>
       </div>
-
       <div class="masthead-qr">
         <div class="qr-label">
-          <strong>온라인 쇼핑몰</strong>
+          <strong>LIVE 특가</strong>
           QR로 바로가기
         </div>
         <div class="qr-code empty" data-bind-bg="qr.imageUrl">QR</div>
       </div>
     </header>
 
-    <!-- ═══════════════ 2. 히어로 ═══════════════ -->
     <section class="hero">
       <div class="hero-kicker-row">
-        <div class="hero-kicker">SPRING SALE</div>
+        <div class="hero-kicker"><span>⚡ FLASH SALE</span></div>
         <div class="hero-kicker-line"></div>
-        <div class="hero-kicker-date">2026 · SEASONAL FESTIVAL</div>
+        <div class="hero-kicker-date">LIMITED · 7 DAYS ONLY</div>
       </div>
 
       <div class="hero-main">
         <h1 class="hero-title" data-slot="hero_title">
-          <span>봄</span><span class="accent">세일</span>
+          <span>HOT</span><span class="accent">특가</span>
           <div class="hero-title-stamp">
             <span class="mini">MAX</span>
-            <span class="big">50%</span>
+            <span class="big">70%</span>
             <span class="mini">OFF</span>
           </div>
         </h1>
       </div>
 
-      <!-- ─── 스프링 일러스트 (inline SVG) ─── -->
+      <!-- 불꽃 + 번개 + 폭발 일러스트 (극대) -->
       <div class="hero-illustration" aria-hidden="true">
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" fill="none">
           <defs>
-            <radialGradient id="heroBg" cx="50%" cy="50%">
-              <stop offset="0%" stop-color="#FFF4C2" stop-opacity="0.5"/>
-              <stop offset="100%" stop-color="#FFF4C2" stop-opacity="0"/>
+            <radialGradient id="hotBurst" cx="50%" cy="50%">
+              <stop offset="0%" stop-color="#FFE100" stop-opacity="0.95"/>
+              <stop offset="50%" stop-color="#FF7A0E" stop-opacity="0.6"/>
+              <stop offset="100%" stop-color="#E8190F" stop-opacity="0"/>
             </radialGradient>
+            <linearGradient id="flameHotOuter" x1="50%" y1="100%" x2="50%" y2="0%">
+              <stop offset="0%" stop-color="#FFE100"/>
+              <stop offset="45%" stop-color="#FF7A0E"/>
+              <stop offset="100%" stop-color="#E8190F"/>
+            </linearGradient>
+            <linearGradient id="flameHotInner" x1="50%" y1="100%" x2="50%" y2="0%">
+              <stop offset="0%" stop-color="#FFFFFF"/>
+              <stop offset="60%" stop-color="#FFE100"/>
+              <stop offset="100%" stop-color="#FF7A0E"/>
+            </linearGradient>
           </defs>
-          <circle cx="200" cy="200" r="190" fill="url(#heroBg)"/>
-          <g opacity="0.96">
-            <circle cx="120" cy="130" r="32" fill="#FFB7D5"/>
-            <circle cx="150" cy="110" r="28" fill="#FF8FB8"/>
-            <circle cx="148" cy="152" r="30" fill="#FFC6DF"/>
-            <circle cx="108" cy="160" r="26" fill="#FF8FB8"/>
-            <circle cx="135" cy="135" r="12" fill="#FFF1A8"/>
+          <!-- 폭발 빛 -->
+          <circle cx="200" cy="200" r="190" fill="url(#hotBurst)"/>
+          <!-- 광선 8방향 -->
+          <g fill="#FFE100" opacity="0.85">
+            <polygon points="200,10 212,180 188,180" />
+            <polygon points="200,390 212,220 188,220" />
+            <polygon points="10,200 180,212 180,188" />
+            <polygon points="390,200 220,212 220,188" />
+            <polygon points="55,55 192,197 197,192" opacity="0.6"/>
+            <polygon points="345,55 208,197 203,192" opacity="0.6"/>
+            <polygon points="55,345 192,203 197,208" opacity="0.6"/>
+            <polygon points="345,345 208,203 203,208" opacity="0.6"/>
           </g>
-          <g opacity="0.95">
-            <circle cx="290" cy="105" r="26" fill="#FFE29F"/>
-            <circle cx="312" cy="88" r="22" fill="#FFD166"/>
-            <circle cx="318" cy="122" r="24" fill="#FFDA7D"/>
-            <circle cx="283" cy="130" r="20" fill="#FFD166"/>
-            <circle cx="303" cy="110" r="9" fill="#FF8F66"/>
+          <!-- 불꽃 본체 -->
+          <path d="M 200 380 C 120 360 70 300 90 220 C 110 180 150 175 160 140 C 165 115 150 90 175 60 C 195 100 195 135 215 135 C 240 135 225 80 255 50 C 260 100 300 115 305 170 C 315 220 340 240 320 300 C 300 360 270 385 200 380 Z" fill="url(#flameHotOuter)" stroke="#0A0A0A" stroke-width="3"/>
+          <path d="M 200 370 C 150 350 115 305 128 245 C 142 210 172 208 180 180 C 185 160 175 142 195 120 C 208 150 208 175 223 175 C 243 175 233 135 253 115 C 258 150 285 162 288 205 C 294 240 312 255 298 300 C 284 345 255 365 200 370 Z" fill="url(#flameHotInner)"/>
+          <!-- 번개 정중앙 -->
+          <path d="M 200 155 L 170 225 L 198 225 L 180 290 L 235 210 L 207 210 L 225 155 Z" fill="#FFE100" stroke="#0A0A0A" stroke-width="3" stroke-linejoin="round"/>
+          <!-- 흰 하이라이트 -->
+          <circle cx="180" cy="320" r="12" fill="#FFF" opacity="0.85"/>
+          <circle cx="225" cy="300" r="7" fill="#FFF" opacity="0.7"/>
+          <!-- 튀는 불꽃 입자 -->
+          <g fill="#FFE100" stroke="#0A0A0A" stroke-width="1.5">
+            <polygon points="90,90 96,106 112,108 100,120 105,138 90,128 75,138 80,120 68,108 84,106" />
+            <polygon points="310,90 316,106 332,108 320,120 325,138 310,128 295,138 300,120 288,108 304,106" opacity="0.9"/>
+            <polygon points="90,310 96,326 112,328 100,340 105,358 90,348 75,358 80,340 68,328 84,326" opacity="0.85"/>
+            <polygon points="310,310 316,326 332,328 320,340 325,358 310,348 295,358 300,340 288,328 304,326" />
           </g>
-          <g opacity="0.94">
-            <circle cx="80" cy="310" r="24" fill="#C8E9A0"/>
-            <circle cx="108" cy="298" r="20" fill="#A3D977"/>
-            <circle cx="96" cy="330" r="22" fill="#C8E9A0"/>
-            <circle cx="68" cy="335" r="18" fill="#A3D977"/>
-            <circle cx="92" cy="315" r="7" fill="#FFF1A8"/>
-          </g>
-          <g opacity="0.94">
-            <circle cx="300" cy="290" r="22" fill="#FFB7D5"/>
-            <circle cx="322" cy="278" r="18" fill="#FF8FB8"/>
-            <circle cx="318" cy="308" r="20" fill="#FFC6DF"/>
-            <circle cx="290" cy="315" r="16" fill="#FF8FB8"/>
-          </g>
-          <g stroke="#5FA85A" stroke-width="5" stroke-linecap="round" fill="none">
-            <path d="M 200 400 Q 180 320 200 230"/>
-            <path d="M 200 360 Q 240 340 275 335"/>
-            <path d="M 200 320 Q 160 310 135 305"/>
-            <path d="M 200 280 Q 235 265 258 260"/>
-          </g>
-          <g fill="#5FA85A" opacity="0.92">
-            <ellipse cx="275" cy="332" rx="20" ry="9" transform="rotate(20 275 332)"/>
-            <ellipse cx="135" cy="302" rx="18" ry="8" transform="rotate(-15 135 302)"/>
-            <ellipse cx="258" cy="258" rx="16" ry="7" transform="rotate(15 258 258)"/>
-          </g>
-          <g>
-            <circle cx="350" cy="200" r="6" fill="#FFB7D5"/>
-            <circle cx="50" cy="210" r="5" fill="#FFE29F"/>
-            <circle cx="370" cy="250" r="4" fill="#FFB7D5"/>
-            <circle cx="30" cy="250" r="4" fill="#C8E9A0"/>
-            <circle cx="380" cy="160" r="5" fill="#FFE29F"/>
-            <circle cx="20" cy="160" r="4" fill="#FFB7D5"/>
-          </g>
-          <g fill="#FFF" stroke="#5FA85A" stroke-width="2">
-            <path d="M 210 80 L 215 92 L 228 94 L 218 102 L 221 115 L 210 108 L 199 115 L 202 102 L 192 94 L 205 92 Z" opacity="0.95"/>
+          <!-- 작은 점 파티클 -->
+          <g fill="#E8190F">
+            <circle cx="40" cy="180" r="5"/>
+            <circle cx="360" cy="180" r="5"/>
+            <circle cx="200" cy="60" r="4"/>
+            <circle cx="200" cy="340" r="4"/>
           </g>
         </svg>
       </div>
 
       <div class="hero-bottom">
-        <div class="hero-period" data-slot="hero_period">04.17 (목) ~ 04.23 (수)</div>
-        <div class="hero-subcopy" data-slot="hero_subcopy">봄맞이 인기상품 알뜰 가격으로 만나보세요</div>
+        <div class="hero-period" data-slot="hero_period"><span>04.17 (목) ~ 04.23 (수)</span></div>
+        <div class="hero-subcopy" data-slot="hero_subcopy">이번주 단 7일, 놓치면 후회합니다</div>
       </div>
     </section>
 
-    <!-- ═══════════════ 3. 섹션 01 — 오늘의 특가 ═══════════════ -->
     <div class="section-header section-main-header" data-slot="section_main">
       <span class="section-number">01</span>
-      <span class="section-title" data-bind="label">오늘의 <span class="accent">특가</span></span>
+      <span class="section-title" data-bind="label">오늘의 <span class="accent">파격특가</span></span>
       <span class="section-sublabel" data-bind="sublabel">
-        이번주 딱 <strong>7일간</strong><span class="chip">HOT</span>
+        TODAY ONLY<span class="chip">지금 아니면 없음</span>
       </span>
     </div>
     <section class="section-main">
@@ -1135,17 +824,16 @@ img { max-width: 100%; height: auto; display: block; }
                 <span data-bind="productName">상품명</span>
                 <span class="unit" data-bind="unit"></span>
               </div>
-              <div class="ai-copy" data-bind="aiCopy" data-bind-show="aiCopy"></div>
+              <div class="ai-copy" data-bind-show="aiCopy"><span data-bind="aiCopy"></span></div>
             </div>
           </div>
         </template>
       </div>
     </section>
 
-    <!-- ═══════════════ 4. 섹션 02 — 베스트픽 ═══════════════ -->
     <div class="section-header section-recommend-header" data-slot="section_recommend">
       <span class="section-number">02</span>
-      <span class="section-title" data-bind="label">베스트 픽</span>
+      <span class="section-title" data-bind="label">초특가 <span class="accent">BEST</span></span>
       <span class="section-sublabel" data-bind="sublabel">엄선된 추천 상품</span>
     </div>
     <section class="section-recommend">
@@ -1165,24 +853,22 @@ img { max-width: 100%; height: auto; display: block; }
       </div>
     </section>
 
-    <!-- ═══════════════ 5. 섹션 03 — 신선코너 (4블록) ═══════════════ -->
     <div class="section-header section-fresh-header" data-slot="section_fresh">
       <span class="section-number">03</span>
-      <span class="section-title" data-bind="label">신선 코너</span>
-      <span class="section-sublabel" data-bind="sublabel">매일 들어오는 신선한 상품<span class="chip">FRESH</span></span>
+      <span class="section-title" data-bind="label">신선코너 <span class="accent">HOT PICK</span></span>
+      <span class="section-sublabel" data-bind="sublabel">매일 입고 신선함 그대로<span class="chip">FRESH</span></span>
     </div>
     <section class="section-fresh">
       <div class="fresh-4blocks">
 
-        <!-- 블록 1 — 축산 -->
         <div class="fresh-block meat">
           <div class="fresh-block-header">
             <div class="cat-icon">🥩</div>
             <div>
               <div class="cat-label" data-slot-meta="fresh_block_1.categoryLabel">축산</div>
-              <div class="cat-desc">한우 · 돼지 · 닭 · 햄·소시지</div>
+              <div class="cat-desc">한우 · 돼지 · 닭 · 햄소시지</div>
             </div>
-            <div class="cat-badge">FRESH</div>
+            <div class="cat-badge">HOT</div>
           </div>
           <div class="fresh-grid" data-slot="fresh_block_1">
             <template data-role="card">
@@ -1200,7 +886,6 @@ img { max-width: 100%; height: auto; display: block; }
           </div>
         </div>
 
-        <!-- 블록 2 — 수산 -->
         <div class="fresh-block fish">
           <div class="fresh-block-header">
             <div class="cat-icon">🐟</div>
@@ -1208,7 +893,7 @@ img { max-width: 100%; height: auto; display: block; }
               <div class="cat-label" data-slot-meta="fresh_block_2.categoryLabel">수산</div>
               <div class="cat-desc">생선 · 해산물 · 회 · 젓갈</div>
             </div>
-            <div class="cat-badge">FRESH</div>
+            <div class="cat-badge">HOT</div>
           </div>
           <div class="fresh-grid" data-slot="fresh_block_2">
             <template data-role="card">
@@ -1226,7 +911,6 @@ img { max-width: 100%; height: auto; display: block; }
           </div>
         </div>
 
-        <!-- 블록 3 — 청과 -->
         <div class="fresh-block fruit">
           <div class="fresh-block-header">
             <div class="cat-icon">🍎</div>
@@ -1234,7 +918,7 @@ img { max-width: 100%; height: auto; display: block; }
               <div class="cat-label" data-slot-meta="fresh_block_3.categoryLabel">청과</div>
               <div class="cat-desc">과일 · 채소 · 나물 · 건어물</div>
             </div>
-            <div class="cat-badge">FRESH</div>
+            <div class="cat-badge">HOT</div>
           </div>
           <div class="fresh-grid" data-slot="fresh_block_3">
             <template data-role="card">
@@ -1252,7 +936,6 @@ img { max-width: 100%; height: auto; display: block; }
           </div>
         </div>
 
-        <!-- 블록 4 — 주류/음료 -->
         <div class="fresh-block liquor">
           <div class="fresh-block-header">
             <div class="cat-icon">🍾</div>
@@ -1260,7 +943,7 @@ img { max-width: 100%; height: auto; display: block; }
               <div class="cat-label" data-slot-meta="fresh_block_4.categoryLabel">주류</div>
               <div class="cat-desc">소주 · 맥주 · 와인 · 음료</div>
             </div>
-            <div class="cat-badge">FRESH</div>
+            <div class="cat-badge">HOT</div>
           </div>
           <div class="fresh-grid" data-slot="fresh_block_4">
             <template data-role="card">
@@ -1281,13 +964,12 @@ img { max-width: 100%; height: auto; display: block; }
       </div>
     </section>
 
-    <!-- ═══════════════ 9. 푸터 ═══════════════ -->
     <footer class="footer">
       <div class="footer-notice" data-slot="footer_notice">
         행사상품은 조기 품절될 수 있습니다. 사진은 이미지컷이며 실제와 다를 수 있습니다.
       </div>
       <div class="footer-brand">
-        <span data-slot="footer_brand"><span class="brand-mark">✦ 한줄로</span> · hanjul.ai</span>
+        <span data-slot="footer_brand"><span class="brand-mark">⚡ 한줄로</span> · hanjul.ai</span>
         <span>AI가 자동 생성한 전단입니다 · 2026.04.17</span>
       </div>
     </footer>

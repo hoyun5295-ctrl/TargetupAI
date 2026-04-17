@@ -1,64 +1,78 @@
 /* ============================================================
-   mart_spring_v1 v2.0 — 2절 세로 봄세일 템플릿
+   mart_spring_v1 v3.0 — 2절 세로 봄세일 템플릿
    545 × 788 mm (한국 동네마트 실무 표준 규격)
-   Line B 친근 파스텔 모듈러 — 한줄전단AI 고유 디자인
+   한줄전단AI 고유 디자인: 인디고 프라이머리 + 스프링 파스텔 + 매거진 모듈러
+   Quality Target: 프로 인쇄전단 70~80% 수준
    ============================================================ */
 
-/* ---------- Pretendard 단일 폰트 (CDN 안정) ---------- */
 @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.css');
 
-/* ---------- Paged.js @page — 2절 세로 ---------- */
 @page {
   size: 545mm 788mm;
   margin: 0;
   marks: none;
 }
 
-/* Paged.js 원본 중복 제거 */
 @media print {
   .flyer-page-original { display: none !important; }
 }
 
-/* ---------- 디자인 토큰 ---------- */
+/* ---------- 디자인 토큰 v3 ---------- */
 :root {
-  /* Brand */
+  /* Brand (한줄로) */
   --c-primary:       #4F46E5;
+  --c-primary-dark:  #3730A3;
   --c-primary-light: #EEF2FF;
+  --c-primary-tint:  #C7D2FE;
 
-  /* Semantic */
-  --c-accent:        #FB7185;
-  --c-accent-light:  #FFE4E6;
-  --c-sale:          #EF4444;
-  --c-price-main:    #EF4444;
+  /* Spring Accent */
+  --c-pink:          #FF5B7C;
+  --c-pink-light:    #FFE4EC;
+  --c-pink-soft:     #FFB7D5;
+  --c-green:         #76C35C;
+  --c-green-light:   #E8F5E0;
+  --c-yellow:        #FFD33D;
+  --c-yellow-light:  #FFF4C2;
+  --c-peach:         #FF8F66;
+
+  /* Sale */
+  --c-sale:          #EF2E55;
+  --c-sale-dark:     #B91C3E;
   --c-price-sub:     #4F46E5;
-  --c-fresh:         #10B981;
-  --c-fresh-light:   #D1FAE5;
 
   /* Surface */
-  --c-page:          #FAFAFA;
+  --c-page:          #FFF9F3;
   --c-card:          #FFFFFF;
-  --c-section-a:     #FFF7ED;
-  --c-section-b:     #F0FDF4;
-  --c-section-c:     #FEF3F2;
+  --c-section-hero:  linear-gradient(135deg, #E0E7FF 0%, #FFE4EC 55%, #FFF4C2 100%);
+  --c-section-main:  #FFF1F4;
+  --c-section-recommend: #EEF2FF;
+  --c-section-fresh: #F0FDF4;
   --c-divider:       #E5E7EB;
 
   /* Text */
   --c-text:          #0F172A;
+  --c-text-alt:      #1E293B;
   --c-muted:         #64748B;
   --c-subtle:        #94A3B8;
   --c-on-brand:      #FFFFFF;
-  --c-strike:        #94A3B8;
+  --c-strike:        #A3A9B8;
 
   /* Radius */
-  --r-card:          20px;
-  --r-md:            12px;
-  --r-pill:          999px;
+  --r-card:          6mm;
+  --r-card-lg:       8mm;
+  --r-md:            3mm;
+  --r-pill:          999mm;
+
+  /* Shadow */
+  --sh-card: 0 0.6mm 1.4mm rgba(15,23,42,0.04), 0 2mm 6mm rgba(15,23,42,0.08);
+  --sh-card-hover: 0 1mm 3mm rgba(15,23,42,0.05), 0 3mm 10mm rgba(79,70,229,0.15);
+  --sh-badge: 0 1mm 3mm rgba(239,46,85,0.30);
 
   /* Font */
   --f-base: 'Pretendard Variable', 'Pretendard', -apple-system, BlinkMacSystemFont, sans-serif;
 }
 
-/* ---------- Reset & Base ---------- */
+/* ---------- Reset ---------- */
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
 html, body {
@@ -74,352 +88,683 @@ html, body {
 
 img { max-width: 100%; height: auto; display: block; }
 
+/* ---------- 레이아웃 ---------- */
 .flyer-page {
   width: 545mm;
   height: 788mm;
   padding: 0;
   display: grid;
-  grid-template-rows:
-    24mm    /* 1. 마스트헤드 */
-    120mm   /* 2. 히어로 */
-    14mm    /* 3. 섹션 01 헤더 */
-    130mm   /* 4. 메인 그리드 (6칸) */
-    14mm    /* 5. 섹션 02 헤더 */
-    100mm   /* 6. 추천 그리드 (8칸) */
-    18mm    /* 7. 섹션 03 헤더 */
-    340mm   /* 8. FRESH 4블록 (2x2) */
-    28mm;   /* 9. 푸터 */
   background: var(--c-page);
+  background-image:
+    radial-gradient(circle at 12mm 12mm, rgba(255,183,213,0.12) 0.6mm, transparent 0.7mm),
+    radial-gradient(circle at 40mm 30mm, rgba(255,211,61,0.10) 0.5mm, transparent 0.6mm);
+  background-size: 60mm 60mm, 80mm 80mm;
   position: relative;
   overflow: hidden;
+  grid-template-rows:
+    22mm      /* 1. 마스트헤드 */
+    178mm     /* 2. 히어로 (확장) */
+    18mm      /* 3. 섹션 01 헤더 */
+    180mm     /* 4. 메인 그리드 (혼합 사이즈) */
+    18mm      /* 5. 섹션 02 헤더 */
+    110mm     /* 6. 서브 그리드 8칸 */
+    20mm      /* 7. 섹션 03 헤더 */
+    228mm     /* 8. FRESH 4블록 (2x2) */
+    14mm;     /* 9. 푸터 */
 }
 
 /* ============================================================
-   1. 마스트헤드 — 얇은 수평 바
+   1. 마스트헤드 (얇은 수평 바)
    ============================================================ */
 .masthead {
   display: grid;
   grid-template-columns: auto 1fr auto;
   align-items: center;
-  gap: 20px;
-  padding: 0 28px;
+  gap: 6mm;
+  padding: 0 10mm;
   background: var(--c-card);
-  border-bottom: 1px solid var(--c-divider);
-  height: 24mm;
+  border-bottom: 0.4mm solid var(--c-divider);
+  height: 22mm;
+  position: relative;
+}
+.masthead::after {
+  content: '';
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 1.2mm;
+  background: linear-gradient(90deg, var(--c-primary) 0%, var(--c-pink) 50%, var(--c-yellow) 100%);
 }
 
 .ai-mark {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--c-primary);
-  background: var(--c-primary-light);
-  padding: 6px 14px;
+  gap: 1.5mm;
+  font-size: 3.4mm;
+  font-weight: 800;
+  color: #FFFFFF;
+  background: linear-gradient(135deg, var(--c-primary) 0%, var(--c-primary-dark) 100%);
+  padding: 1.8mm 4mm;
   border-radius: var(--r-pill);
   letter-spacing: -0.01em;
+  box-shadow: 0 0.4mm 1.5mm rgba(79,70,229,0.35);
+}
+.ai-mark::before {
+  content: '✦';
+  color: var(--c-yellow);
+  font-size: 3.8mm;
 }
 
 .masthead-store-row {
   display: flex;
-  align-items: center;
-  gap: 20px;
+  align-items: baseline;
+  gap: 5mm;
   justify-content: center;
   color: var(--c-text);
-  font-size: 14px;
-  font-weight: 500;
   overflow: hidden;
 }
 .masthead-store-row .store-name {
-  font-size: 22px;
-  font-weight: 800;
-  color: var(--c-primary);
-  letter-spacing: -0.02em;
+  font-size: 6.2mm;
+  font-weight: 900;
+  color: var(--c-primary-dark);
+  letter-spacing: -0.03em;
 }
 .masthead-store-row .divider {
   color: var(--c-subtle);
+  font-weight: 300;
 }
 .masthead-store-row .meta {
   color: var(--c-muted);
-  font-size: 13px;
-  font-weight: 500;
+  font-size: 3.4mm;
+  font-weight: 600;
 }
 
 .masthead-qr {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 2.5mm;
 }
 .masthead-qr .qr-code {
-  width: 48px;
-  height: 48px;
+  width: 13mm;
+  height: 13mm;
   background: var(--c-card);
-  border: 1px solid var(--c-divider);
-  border-radius: 8px;
+  border: 0.4mm solid var(--c-divider);
+  border-radius: 2mm;
   display: flex;
   align-items: center;
   justify-content: center;
   color: var(--c-muted);
-  font-size: 10px;
+  font-size: 2.6mm;
 }
 .masthead-qr .qr-code.empty {
   background:
-    repeating-linear-gradient(0deg, #0f172a 0 2px, transparent 2px 4px),
-    repeating-linear-gradient(90deg, #0f172a 0 2px, transparent 2px 4px);
+    repeating-linear-gradient(0deg, #0f172a 0 0.5mm, transparent 0.5mm 1.1mm),
+    repeating-linear-gradient(90deg, #0f172a 0 0.5mm, transparent 0.5mm 1.1mm);
   background-color: #fff;
 }
 .masthead-qr .qr-label {
-  font-size: 11px;
+  font-size: 2.8mm;
   color: var(--c-muted);
-  line-height: 1.3;
+  line-height: 1.25;
+  text-align: right;
 }
 .masthead-qr .qr-label strong {
   color: var(--c-text);
-  font-weight: 700;
+  font-weight: 800;
   display: block;
-  font-size: 13px;
+  font-size: 3.4mm;
 }
 
 /* ============================================================
-   2. 히어로 — 매거진 스타일 대형 타이포
+   2. 히어로 (대형 매거진 타이포 + 스프링 일러스트)
    ============================================================ */
 .hero {
-  background: var(--c-card);
-  padding: 24px 40px 32px;
+  background: var(--c-section-hero);
+  padding: 12mm 14mm 14mm;
   display: grid;
-  grid-template-rows: auto auto auto 1fr;
-  gap: 10px;
-  border-bottom: 1px solid var(--c-divider);
+  grid-template-columns: 1fr auto;
+  grid-template-rows: auto 1fr auto;
+  gap: 3mm 10mm;
+  border-bottom: 0.4mm solid var(--c-divider);
   position: relative;
+  overflow: hidden;
+}
+
+/* 배경 장식 — 좌상단 꽃 덩어리 */
+.hero::before {
+  content: '';
+  position: absolute;
+  left: -10mm; top: -10mm;
+  width: 90mm; height: 90mm;
+  background: radial-gradient(circle at center, var(--c-pink-soft) 0%, rgba(255,183,213,0.35) 40%, transparent 70%);
+  pointer-events: none;
+}
+/* 배경 장식 — 우하단 꽃 덩어리 */
+.hero::after {
+  content: '';
+  position: absolute;
+  right: -20mm; bottom: -30mm;
+  width: 120mm; height: 120mm;
+  background: radial-gradient(circle at center, var(--c-yellow-light) 0%, rgba(255,244,194,0.45) 40%, transparent 72%);
+  pointer-events: none;
+}
+
+.hero-kicker-row {
+  grid-column: 1 / 3;
+  grid-row: 1;
+  display: flex;
+  align-items: center;
+  gap: 4mm;
+  z-index: 2;
 }
 .hero-kicker {
-  font-size: 18px;
-  font-weight: 700;
-  color: var(--c-accent);
-  letter-spacing: 0.12em;
+  font-size: 5mm;
+  font-weight: 900;
+  color: var(--c-pink);
+  letter-spacing: 0.22em;
   text-transform: uppercase;
+  line-height: 1;
+}
+.hero-kicker-line {
+  flex: 1;
+  height: 0.5mm;
+  background: linear-gradient(90deg, var(--c-pink) 0%, transparent 100%);
+}
+.hero-kicker-date {
+  font-size: 3.6mm;
+  font-weight: 700;
+  color: var(--c-muted);
+  letter-spacing: 0.04em;
+}
+
+.hero-main {
+  grid-column: 1;
+  grid-row: 2;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  z-index: 2;
 }
 .hero-title {
-  font-size: 220px;
+  font-size: 78mm;
   font-weight: 900;
-  line-height: 0.95;
-  letter-spacing: -0.04em;
+  line-height: 0.92;
+  letter-spacing: -0.06em;
   color: var(--c-text);
   font-family: var(--f-base);
-  padding: 0;
+  text-shadow: 0 0 0 transparent;
+  position: relative;
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 4mm;
 }
 .hero-title .accent {
   color: var(--c-primary);
+  position: relative;
+  display: inline-block;
+}
+.hero-title .accent::after {
+  content: '';
+  position: absolute;
+  left: 2mm; bottom: 2mm;
+  width: calc(100% - 4mm);
+  height: 6mm;
+  background: var(--c-yellow);
+  z-index: -1;
+  opacity: 0.85;
+  border-radius: 1mm;
+}
+.hero-title-stamp {
+  position: absolute;
+  top: -6mm;
+  right: -8mm;
+  width: 30mm;
+  height: 30mm;
+  background: var(--c-sale);
+  color: #fff;
+  border-radius: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-weight: 900;
+  transform: rotate(-12deg);
+  box-shadow: 0 1.5mm 4mm rgba(239,46,85,0.35);
+  font-size: 5mm;
+  line-height: 1;
+}
+.hero-title-stamp .big {
+  font-size: 11mm;
+  font-weight: 900;
+}
+.hero-title-stamp .mini {
+  font-size: 3mm;
+  margin-top: 1mm;
+  letter-spacing: 0.1em;
+}
+
+.hero-illustration {
+  grid-column: 2;
+  grid-row: 2;
+  width: 120mm;
+  height: 120mm;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+  position: relative;
+}
+.hero-illustration svg {
+  width: 100%;
+  height: 100%;
+}
+
+.hero-bottom {
+  grid-column: 1 / 3;
+  grid-row: 3;
+  display: flex;
+  align-items: center;
+  gap: 6mm;
+  z-index: 2;
+  margin-top: 2mm;
 }
 .hero-period {
   display: inline-flex;
   align-items: center;
-  gap: 14px;
-  padding: 10px 20px;
+  gap: 3mm;
+  padding: 4mm 8mm;
   background: var(--c-primary);
   color: var(--c-on-brand);
   border-radius: var(--r-pill);
-  font-size: 28px;
-  font-weight: 700;
-  width: fit-content;
-  letter-spacing: -0.01em;
+  font-size: 7mm;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  box-shadow: 0 1mm 3mm rgba(79,70,229,0.28);
+}
+.hero-period::before {
+  content: '📅';
+  font-size: 6mm;
 }
 .hero-subcopy {
-  font-size: 22px;
-  font-weight: 500;
-  color: var(--c-muted);
-  margin-top: 4px;
-  letter-spacing: -0.01em;
-  line-height: 1.4;
+  font-size: 6.2mm;
+  font-weight: 600;
+  color: var(--c-text-alt);
+  letter-spacing: -0.02em;
+  line-height: 1.35;
+  flex: 1;
 }
 
 /* ============================================================
-   섹션 공통 — 번호 + 타이틀 + 디바이더
+   섹션 헤더 공통
    ============================================================ */
 .section-header {
   display: flex;
-  align-items: baseline;
-  gap: 18px;
-  padding: 0 40px;
-  border-top: 2px solid var(--c-text);
-  padding-top: 8px;
+  align-items: center;
+  gap: 4mm;
+  padding: 0 14mm;
   background: var(--c-page);
+  position: relative;
+}
+.section-header::before {
+  content: '';
+  position: absolute;
+  left: 14mm; top: 0;
+  width: calc(100% - 28mm);
+  height: 0.6mm;
+  background: linear-gradient(90deg, var(--c-text) 0%, var(--c-text) 60%, transparent 100%);
 }
 .section-number {
-  font-size: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 12mm;
+  height: 12mm;
+  border-radius: 2mm;
+  background: var(--c-primary);
+  color: #fff;
+  font-size: 4.6mm;
   font-weight: 900;
-  color: var(--c-accent);
-  letter-spacing: 0.08em;
+  letter-spacing: 0.05em;
+  padding: 0 3mm;
+  box-shadow: 0 0.8mm 2mm rgba(79,70,229,0.25);
 }
 .section-title {
-  font-size: 42px;
+  font-size: 10mm;
   font-weight: 900;
   color: var(--c-text);
-  letter-spacing: -0.03em;
+  letter-spacing: -0.04em;
+  line-height: 1;
+}
+.section-title .accent {
+  color: var(--c-sale);
 }
 .section-sublabel {
-  font-size: 16px;
+  font-size: 3.8mm;
   color: var(--c-muted);
-  font-weight: 500;
+  font-weight: 600;
   margin-left: auto;
+  letter-spacing: -0.01em;
+}
+.section-sublabel .chip {
+  display: inline-block;
+  padding: 1mm 3mm;
+  background: var(--c-green-light);
+  color: var(--c-green);
+  border-radius: var(--r-pill);
+  font-size: 3.2mm;
+  font-weight: 800;
+  margin-left: 2mm;
+  letter-spacing: 0.04em;
 }
 
+/* 섹션 01 — 오늘의 특가 (핑크 계열) */
+.section-main-header .section-number { background: var(--c-sale); box-shadow: 0 0.8mm 2mm rgba(239,46,85,0.30); }
+/* 섹션 02 — 베스트 픽 (인디고) */
+.section-recommend-header .section-number { background: var(--c-primary); }
+/* 섹션 03 — 신선 코너 (그린) */
+.section-fresh-header .section-number { background: var(--c-green); box-shadow: 0 0.8mm 2mm rgba(118,195,92,0.30); }
+
 /* ============================================================
-   3~4. 메인 그리드 (01 오늘의 특가) — 6칸
+   3~4. 메인 그리드 (01 오늘의 특가) — 혼합 사이즈 (2 hero + 4 standard)
    ============================================================ */
 .section-main {
-  padding: 14px 32px 0;
-  background: var(--c-page);
+  padding: 6mm 10mm 0;
+  background: var(--c-section-main);
+  position: relative;
+}
+.section-main::before {
+  content: '';
+  position: absolute;
+  right: 12mm; top: 4mm;
+  width: 30mm; height: 30mm;
+  background-image: radial-gradient(circle, var(--c-pink-soft) 0%, transparent 70%);
+  opacity: 0.5;
 }
 .main-grid {
   display: grid;
   grid-template-columns: repeat(6, 1fr);
-  gap: 10px;
+  grid-template-rows: 1fr 1fr;
+  gap: 3mm;
+  height: 100%;
 }
+/* 카드1, 2 = 2개의 HERO (각 2x2 span) — 좌측 절반 */
+.main-grid > .card-main:nth-child(1),
+.main-grid > .card-main:nth-child(2) {
+  grid-column: span 2;
+  grid-row: span 2;
+}
+/* 카드3~6 = 1x1 (우측 2열 x 2행, 정확히 4셀 = 4카드) */
+
 .card-main {
   background: var(--c-card);
-  border: 1px solid var(--c-divider);
-  border-radius: var(--r-card);
-  padding: 14px;
+  border-radius: var(--r-card-lg);
+  padding: 4mm 4mm 3mm;
   display: flex;
   flex-direction: column;
-  align-items: stretch;
-  justify-content: space-between;
   position: relative;
   overflow: hidden;
+  box-shadow: var(--sh-card);
+  border: 0.3mm solid rgba(15,23,42,0.04);
 }
-.card-main::after {
+.card-main::before {
   content: '';
   position: absolute;
   top: 0; left: 0;
   width: 100%;
-  height: 4px;
-  background: var(--c-accent);
+  height: 1.2mm;
+  background: linear-gradient(90deg, var(--c-sale) 0%, var(--c-pink) 100%);
 }
-.card-main .product-image {
-  width: 100%;
-  height: 56mm;
-  object-fit: contain;
-  background: var(--c-section-a);
-  border-radius: 12px;
-  padding: 6px;
-}
-.card-main .discount-badge {
+/* 좌하단 미니 꽃 장식 (라디얼 3겹 꽃잎) */
+.card-main::after {
+  content: '';
   position: absolute;
-  top: 18px;
-  left: 18px;
+  right: 4mm; bottom: 4mm;
+  width: 8mm; height: 8mm;
+  background-image:
+    radial-gradient(circle at 3mm 3mm, var(--c-pink-soft) 1.4mm, transparent 1.6mm),
+    radial-gradient(circle at 5mm 3mm, var(--c-pink) 1.2mm, transparent 1.4mm),
+    radial-gradient(circle at 4mm 5mm, var(--c-yellow) 1mm, transparent 1.2mm),
+    radial-gradient(circle at 4mm 4mm, var(--c-yellow-light) 0.6mm, transparent 0.8mm);
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/* 메인카드 좌상단 리본 배지 */
+.card-main .ribbon-badge {
+  position: absolute;
+  top: 3mm;
+  left: -4mm;
   background: var(--c-sale);
   color: #fff;
-  font-size: 14px;
+  font-size: 3.4mm;
   font-weight: 900;
-  padding: 4px 10px;
-  border-radius: var(--r-pill);
+  padding: 1.6mm 4mm 1.6mm 5mm;
   letter-spacing: -0.01em;
+  box-shadow: 0 1mm 2mm rgba(239,46,85,0.35);
+  z-index: 3;
+  transform: skewX(-8deg);
 }
+.card-main .ribbon-badge > span { display: inline-block; transform: skewX(8deg); }
+.card-main .ribbon-badge::after {
+  content: '';
+  position: absolute;
+  left: 0; bottom: -2mm;
+  border-top: 2mm solid var(--c-sale-dark);
+  border-left: 3mm solid transparent;
+  opacity: 0.7;
+}
+
+/* 우상단 원형 할인 스탬프 */
+.card-main .discount-stamp {
+  position: absolute;
+  top: 3mm;
+  right: 3mm;
+  width: 18mm;
+  height: 18mm;
+  background: var(--c-primary);
+  color: #fff;
+  border-radius: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-weight: 900;
+  transform: rotate(8deg);
+  z-index: 3;
+  box-shadow: 0 1mm 3mm rgba(79,70,229,0.30);
+  line-height: 1;
+}
+.card-main .discount-stamp .pct {
+  font-size: 7.4mm;
+  font-weight: 900;
+  letter-spacing: -0.04em;
+}
+.card-main .discount-stamp .off {
+  font-size: 3mm;
+  font-weight: 800;
+  margin-top: 0.6mm;
+  letter-spacing: 0.06em;
+}
+
+.card-main .product-image {
+  width: 100%;
+  flex: 1;
+  object-fit: contain;
+  background: linear-gradient(135deg, #FFF0F3 0%, #FFE4EC 100%);
+  border-radius: var(--r-card);
+  padding: 3mm;
+  min-height: 40mm;
+}
+/* 히어로 카드 1,2 이미지 크게 */
+.card-main:nth-child(1) .product-image,
+.card-main:nth-child(2) .product-image { min-height: 90mm; }
+
 .card-main .product-meta {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  margin-top: 12px;
+  gap: 0.5mm;
+  margin-top: 3mm;
 }
 .card-main .original-price {
-  font-size: 16px;
+  font-size: 3.6mm;
   color: var(--c-strike);
   text-decoration: line-through;
-  text-decoration-thickness: 1px;
-  font-weight: 500;
+  text-decoration-thickness: 0.3mm;
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
 .card-main .sale-price {
-  font-size: 48px;
   font-weight: 900;
   color: var(--c-sale);
   line-height: 1;
-  letter-spacing: -0.04em;
+  letter-spacing: -0.05em;
   display: flex;
   align-items: baseline;
-  gap: 2px;
+  gap: 0.5mm;
+  font-size: 15mm;
 }
+/* 히어로 카드 1,2 가격 초대형 */
+.card-main:nth-child(1) .sale-price,
+.card-main:nth-child(2) .sale-price { font-size: 26mm; }
 .card-main .sale-price .won {
-  font-size: 22px;
+  font-size: 5.5mm;
   color: var(--c-text);
-  font-weight: 700;
+  font-weight: 800;
 }
+.card-main:nth-child(1) .sale-price .won,
+.card-main:nth-child(2) .sale-price .won { font-size: 9mm; }
 .card-main .product-name {
-  font-size: 18px;
+  font-size: 4.4mm;
   font-weight: 800;
   color: var(--c-text);
-  margin-top: 4px;
-  letter-spacing: -0.02em;
-  line-height: 1.2;
+  margin-top: 1.5mm;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+  display: flex;
+  align-items: baseline;
+  gap: 2mm;
+  flex-wrap: wrap;
 }
+.card-main:nth-child(1) .product-name,
+.card-main:nth-child(2) .product-name { font-size: 7mm; }
 .card-main .product-name .unit {
-  font-size: 13px;
+  font-size: 3.2mm;
   color: var(--c-muted);
-  font-weight: 500;
-  margin-left: 4px;
+  font-weight: 600;
 }
+.card-main:nth-child(1) .product-name .unit,
+.card-main:nth-child(2) .product-name .unit { font-size: 4.2mm; }
+.card-main .ai-copy {
+  font-size: 3.2mm;
+  color: var(--c-primary-dark);
+  font-weight: 700;
+  margin-top: 1mm;
+  padding: 1mm 2.5mm;
+  background: var(--c-primary-light);
+  border-radius: var(--r-pill);
+  align-self: flex-start;
+  letter-spacing: -0.01em;
+}
+.card-main:nth-child(1) .ai-copy,
+.card-main:nth-child(2) .ai-copy { font-size: 4mm; padding: 1.5mm 3.5mm; }
 
 /* ============================================================
    5~6. 추천 그리드 (02 베스트픽) — 8칸
    ============================================================ */
 .section-recommend {
-  padding: 14px 32px 0;
-  background: var(--c-page);
+  padding: 6mm 10mm 0;
+  background: var(--c-section-recommend);
+  position: relative;
+}
+.section-recommend::before {
+  content: '';
+  position: absolute;
+  left: 12mm; top: 4mm;
+  width: 24mm; height: 24mm;
+  background-image: radial-gradient(circle, var(--c-primary-tint) 0%, transparent 70%);
+  opacity: 0.4;
 }
 .recommend-grid {
   display: grid;
   grid-template-columns: repeat(8, 1fr);
-  gap: 8px;
+  gap: 2.5mm;
+  height: 100%;
 }
 .card-sub {
   background: var(--c-card);
-  border: 1px solid var(--c-divider);
   border-radius: var(--r-card);
-  padding: 10px;
+  padding: 2.8mm;
   display: flex;
   flex-direction: column;
-  align-items: stretch;
-  justify-content: space-between;
   position: relative;
   overflow: hidden;
+  box-shadow: var(--sh-card);
+  border: 0.3mm solid rgba(15,23,42,0.04);
 }
+.card-sub::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 0.8mm;
+  background: var(--c-primary);
+}
+
+/* 서브카드 좌상단 미니 뱃지 */
+.card-sub .mini-badge {
+  position: absolute;
+  top: 2mm;
+  left: 2mm;
+  background: var(--c-primary);
+  color: #fff;
+  font-size: 2.6mm;
+  font-weight: 900;
+  padding: 0.6mm 1.8mm;
+  border-radius: 1.5mm;
+  letter-spacing: -0.02em;
+  z-index: 2;
+  line-height: 1;
+}
+.card-sub .mini-badge.hot { background: var(--c-sale); }
+.card-sub .mini-badge.new { background: var(--c-green); }
+.card-sub .mini-badge.best { background: var(--c-yellow); color: var(--c-text); }
+.card-sub .mini-badge.pick { background: var(--c-pink); }
+
 .card-sub .product-image {
   width: 100%;
-  height: 40mm;
+  height: 44mm;
   object-fit: contain;
-  background: var(--c-primary-light);
-  border-radius: 10px;
-  padding: 4px;
-}
-.card-sub .sale-price {
-  font-size: 30px;
-  font-weight: 900;
-  color: var(--c-price-sub);
-  line-height: 1;
-  letter-spacing: -0.03em;
-  margin-top: 8px;
-  display: flex;
-  align-items: baseline;
-  gap: 1px;
-}
-.card-sub .sale-price .won {
-  font-size: 15px;
-  color: var(--c-text);
-  font-weight: 700;
+  background: linear-gradient(135deg, var(--c-primary-light) 0%, #fff 100%);
+  border-radius: var(--r-md);
+  padding: 2mm;
 }
 .card-sub .original-price {
-  font-size: 12px;
+  font-size: 2.8mm;
   color: var(--c-strike);
   text-decoration: line-through;
   font-weight: 500;
+  margin-top: 2mm;
+}
+.card-sub .sale-price {
+  font-size: 8.5mm;
+  font-weight: 900;
+  color: var(--c-price-sub);
+  line-height: 1;
+  letter-spacing: -0.04em;
+  display: flex;
+  align-items: baseline;
+  gap: 0.3mm;
+  margin-top: 0.4mm;
+}
+.card-sub .sale-price .won {
+  font-size: 3.5mm;
+  color: var(--c-text);
+  font-weight: 800;
 }
 .card-sub .product-name {
-  font-size: 14px;
-  font-weight: 700;
+  font-size: 3.4mm;
+  font-weight: 800;
   color: var(--c-text);
-  margin-top: 2px;
-  letter-spacing: -0.02em;
+  margin-top: 1mm;
+  letter-spacing: -0.03em;
   line-height: 1.2;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -427,150 +772,211 @@ img { max-width: 100%; height: auto; display: block; }
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
 }
+.card-sub .product-name .unit {
+  color: var(--c-muted);
+  font-weight: 600;
+  font-size: 2.8mm;
+  margin-left: 1mm;
+}
 
 /* ============================================================
    7~8. FRESH 4블록 (03 신선코너) — 2x2 카테고리 블록
    ============================================================ */
 .section-fresh {
-  padding: 14px 32px 0;
-  background: var(--c-page);
+  padding: 6mm 10mm 0;
+  background: var(--c-section-fresh);
+  position: relative;
 }
 .fresh-4blocks {
   display: grid;
   grid-template-columns: 1fr 1fr;
   grid-template-rows: 1fr 1fr;
-  gap: 14px;
+  gap: 4mm;
   height: 100%;
 }
 .fresh-block {
   background: var(--c-card);
-  border-radius: var(--r-card);
-  border: 1px solid var(--c-divider);
-  padding: 14px 16px;
+  border-radius: var(--r-card-lg);
+  padding: 4mm 4mm 3mm;
   display: grid;
   grid-template-rows: auto 1fr;
-  gap: 10px;
+  gap: 2.5mm;
   overflow: hidden;
+  box-shadow: var(--sh-card);
+  border: 0.3mm solid rgba(15,23,42,0.04);
+  position: relative;
 }
+.fresh-block::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 1.2mm;
+  background: var(--c-green);
+}
+.fresh-block.meat::before { background: #E8331F; }
+.fresh-block.fish::before { background: #1E6FEB; }
+.fresh-block.fruit::before { background: #FF8F2B; }
+.fresh-block.liquor::before { background: #6D28D9; }
+
 .fresh-block-header {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--c-divider);
+  gap: 3mm;
+  padding-bottom: 2mm;
+  border-bottom: 0.4mm solid var(--c-divider);
 }
 .fresh-block-header .cat-icon {
-  width: 30px;
-  height: 30px;
-  border-radius: 8px;
-  background: var(--c-fresh-light);
-  color: var(--c-fresh);
+  width: 10mm;
+  height: 10mm;
+  border-radius: 2.4mm;
+  background: var(--c-green-light);
+  color: var(--c-green);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 16px;
+  font-size: 6mm;
   font-weight: 900;
 }
+.fresh-block.meat .cat-icon { background: #FFE4E6; color: #E8331F; }
+.fresh-block.fish .cat-icon { background: #DBEAFE; color: #1E6FEB; }
+.fresh-block.fruit .cat-icon { background: #FFEDD5; color: #FF8F2B; }
+.fresh-block.liquor .cat-icon { background: #EDE9FE; color: #6D28D9; }
+
 .fresh-block-header .cat-label {
-  font-size: 22px;
+  font-size: 6.5mm;
   font-weight: 900;
   color: var(--c-text);
-  letter-spacing: -0.02em;
+  letter-spacing: -0.03em;
+}
+.fresh-block-header .cat-desc {
+  font-size: 2.8mm;
+  color: var(--c-muted);
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
 }
 .fresh-block-header .cat-badge {
   margin-left: auto;
-  background: var(--c-fresh);
+  background: var(--c-green);
   color: #fff;
-  font-size: 10px;
-  font-weight: 800;
-  padding: 3px 8px;
+  font-size: 2.8mm;
+  font-weight: 900;
+  padding: 0.8mm 2.5mm;
   border-radius: var(--r-pill);
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
 }
+.fresh-block.meat .cat-badge { background: #E8331F; }
+.fresh-block.fish .cat-badge { background: #1E6FEB; }
+.fresh-block.fruit .cat-badge { background: #FF8F2B; }
+.fresh-block.liquor .cat-badge { background: #6D28D9; }
 
 .fresh-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  grid-auto-rows: 1fr;
-  gap: 6px;
+  grid-template-rows: repeat(2, 1fr);
+  gap: 2mm;
 }
 .card-fresh {
-  background: var(--c-section-b);
-  border-radius: 12px;
-  padding: 8px;
+  background: #fff;
+  border-radius: var(--r-md);
+  padding: 2mm;
   display: flex;
   flex-direction: column;
-  align-items: stretch;
-  justify-content: space-between;
+  position: relative;
   overflow: hidden;
+  border: 0.3mm solid rgba(15,23,42,0.06);
+}
+.card-fresh .mini-badge {
+  position: absolute;
+  top: 1.2mm;
+  right: 1.2mm;
+  background: var(--c-sale);
+  color: #fff;
+  font-size: 2.4mm;
+  font-weight: 900;
+  padding: 0.5mm 1.5mm;
+  border-radius: 1mm;
+  line-height: 1;
+  z-index: 2;
 }
 .card-fresh .product-image {
   width: 100%;
-  height: 28mm;
+  height: 22mm;
   object-fit: contain;
-  background: transparent;
+  background: #FBFEFB;
+  border-radius: 1.5mm;
 }
 .card-fresh .sale-price {
-  font-size: 22px;
+  font-size: 6.2mm;
   font-weight: 900;
   color: var(--c-sale);
   line-height: 1;
-  letter-spacing: -0.03em;
-  margin-top: 4px;
+  letter-spacing: -0.04em;
+  margin-top: 1.2mm;
   display: flex;
   align-items: baseline;
-  gap: 1px;
+  gap: 0.3mm;
 }
 .card-fresh .sale-price .won {
-  font-size: 11px;
+  font-size: 2.6mm;
   color: var(--c-text);
-  font-weight: 700;
+  font-weight: 800;
 }
 .card-fresh .original-price {
-  font-size: 10px;
+  font-size: 2.4mm;
   color: var(--c-strike);
   text-decoration: line-through;
   font-weight: 500;
 }
 .card-fresh .product-name {
-  font-size: 12px;
-  font-weight: 700;
+  font-size: 3mm;
+  font-weight: 800;
   color: var(--c-text);
-  letter-spacing: -0.02em;
-  line-height: 1.2;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  margin-top: 0.4mm;
+}
+.card-fresh .product-name .unit {
+  font-size: 2.4mm;
+  color: var(--c-muted);
+  font-weight: 600;
+  margin-left: 0.6mm;
 }
 
 /* ============================================================
-   9. 푸터 — 유의사항 + 한줄로 워터마크
+   9. 푸터
    ============================================================ */
 .footer {
   display: grid;
-  grid-template-rows: 1fr auto;
-  gap: 6px;
-  padding: 10px 32px;
-  background: var(--c-card);
-  border-top: 1px solid var(--c-divider);
+  grid-template-rows: auto auto;
+  gap: 1mm;
+  padding: 2.5mm 14mm;
+  background: var(--c-primary-dark);
+  color: #fff;
+  border-top: 0.4mm solid var(--c-primary);
 }
 .footer-notice {
-  font-size: 11px;
-  color: var(--c-muted);
-  line-height: 1.5;
-  font-weight: 400;
+  font-size: 2.4mm;
+  color: rgba(255,255,255,0.72);
+  line-height: 1.4;
+  font-weight: 500;
 }
 .footer-brand {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 12px;
-  color: var(--c-subtle);
-  font-weight: 500;
+  font-size: 3mm;
+  color: rgba(255,255,255,0.8);
+  font-weight: 600;
 }
 .footer-brand .brand-mark {
-  color: var(--c-primary);
-  font-weight: 700;
+  color: var(--c-yellow);
+  font-weight: 900;
+  font-size: 3.6mm;
+  letter-spacing: -0.02em;
 }
 
 /* ============================================================
@@ -582,5 +988,5 @@ img { max-width: 100%; height: auto; display: block; }
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 11px;
+  font-size: 2.8mm;
 }

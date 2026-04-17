@@ -86,18 +86,48 @@ function matchCategory(p: RawProduct, prefer: string[] | undefined): boolean {
 }
 
 /**
+ * 할인율 → 리본 텍스트 자동 선택 (메인 카드용)
+ */
+function ribbonTextByRate(rate: number, isTopItem: boolean): string {
+  if (isTopItem && rate >= 40) return '한정특가';
+  if (rate >= 50) return '파격세일';
+  if (rate >= 40) return 'BEST특가';
+  if (rate >= 30) return '오늘특가';
+  if (rate >= 20) return '알뜰세일';
+  if (rate > 0) return '할인';
+  return '';
+}
+
+/**
+ * 할인율 → 서브 카드 뱃지 (색상 분기용 kind + text)
+ */
+function badgeByRate(rate: number, index: number): { kind: string; text: string } {
+  if (rate >= 45) return { kind: 'hot', text: 'HOT' };
+  if (rate >= 35) return { kind: 'best', text: 'BEST' };
+  if (rate >= 25) return { kind: 'pick', text: 'PICK' };
+  if (rate >= 15) return { kind: 'new', text: '추천' };
+  return { kind: '', text: ['BEST', 'PICK', 'HOT', '추천'][index % 4] };
+}
+
+/**
  * 상품을 카드용 뷰모델로 변환
  * (브라우저 runtime에서 data-bind 키로 참조)
  */
-function toCardViewModel(p: RawProduct) {
+function toCardViewModel(p: RawProduct, index = 0) {
   const hasOriginal = typeof p.originalPrice === 'number' && p.originalPrice > 0 && p.originalPrice !== p.salePrice;
+  const rate = discountRate(p);
+  const isTop = index === 0;
+  const badge = badgeByRate(rate, index);
   return {
     productName: p.productName || '',
     unit: p.unit || '',
     imageUrl: p.imageUrl || '',
     salePriceNumber: formatNumber(p.salePrice),
     originalPrice: hasOriginal ? formatNumber(p.originalPrice) + '원' : '',
-    discountRate: discountRate(p),
+    discountRate: rate > 0 ? rate : '',
+    ribbonText: ribbonTextByRate(rate, isTop),
+    badgeKind: badge.kind,
+    badgeText: badge.text,
     aiCopy: p.aiCopy || '',
     origin: p.origin || '',
   };
@@ -174,7 +204,7 @@ function resolveProductGrid(slot: SlotDefinition, input: RawFlyerInput): any {
       break;
   }
 
-  const items = pool.slice(0, maxItems).map(toCardViewModel);
+  const items = pool.slice(0, maxItems).map((p, i) => toCardViewModel(p, i));
 
   return {
     items,
@@ -229,7 +259,7 @@ function resolveCategoryGrid(slot: SlotDefinition, input: RawFlyerInput, usedCat
   }
 
   pool.sort((a, b) => discountRate(b) - discountRate(a));
-  const items = pool.slice(0, maxItems).map(toCardViewModel);
+  const items = pool.slice(0, maxItems).map((p, i) => toCardViewModel(p, i));
 
   return {
     items,
@@ -316,6 +346,22 @@ export const FILL_RUNTIME = String.raw`
   }
 
   function fillBindings(root, context) {
+    // data-bind-show="field" → 값이 비어 있으면 숨김 (먼저 처리)
+    var showEls = root.querySelectorAll('[data-bind-show]');
+    for (var i = 0; i < showEls.length; i++) {
+      var el = showEls[i];
+      var v = setByPath(context, el.getAttribute('data-bind-show'));
+      if (v === undefined || v === null || v === '' || v === 0 || v === '0') {
+        el.style.display = 'none';
+      }
+    }
+    // data-bind-class-suffix="field" → field 값을 클래스 접미사로 추가
+    var clsEls = root.querySelectorAll('[data-bind-class-suffix]');
+    for (var i = 0; i < clsEls.length; i++) {
+      var el = clsEls[i];
+      var v = setByPath(context, el.getAttribute('data-bind-class-suffix'));
+      if (v) el.classList.add(String(v));
+    }
     // data-bind="field" → textContent
     var textEls = root.querySelectorAll('[data-bind]');
     for (var i = 0; i < textEls.length; i++) {
@@ -386,6 +432,10 @@ export const FILL_RUNTIME = String.raw`
       fillBindings(wrapper, item);
       // wrapper 내용을 slotEl에 이동
       while (wrapper.firstChild) slotEl.appendChild(wrapper.firstChild);
+    }
+    // ★ 복제 완료 후 template 엘리먼트 제거 — nth-child 레이아웃 계산 방해 방지
+    if (tmpl.parentNode === slotEl) {
+      slotEl.removeChild(tmpl);
     }
   }
 

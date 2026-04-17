@@ -1,0 +1,38 @@
+{
+  "id": "mart_premium_v1",
+  "version": "1.0.0",
+  "name": "마트 프리미엄 2절 세로 (다크네이비 + 골드 엘레강스)",
+  "description": "한우 · 수입산 · 프리미엄 특가 전용. 다크 네이비 배경 + 골드 액센트. 고급스러운 엘레강스 톤. 정육점·프리미엄마트 특선코너 주간지.",
+  "industry": "mart",
+  "season": "general",
+  "paper": { "size": "j2", "orientation": "portrait" },
+  "pages": 1,
+  "assets": { "html": "template.html", "css": "template.css", "preview": "preview.png" },
+  "slots": [
+    { "id": "masthead", "type": "store_header", "required": true, "includes": ["aiMark", "store", "qr"], "position": { "css": ".masthead" } },
+    { "id": "hero_title", "type": "typography", "required": true, "editable": true, "maxLength": 16, "fallback": "PREMIUM", "position": { "css": ".hero-title" } },
+    { "id": "hero_period", "type": "text", "required": false, "editable": true, "fallback": "04.17 (목) ~ 04.23 (수)", "position": { "css": ".hero-period" } },
+    { "id": "hero_subcopy", "type": "text", "required": false, "editable": true, "maxLength": 60, "fallback": "엄선된 프리미엄 상품, 품격있는 식탁을 제안합니다", "position": { "css": ".hero-subcopy" } },
+
+    { "id": "section_main", "type": "section_banner", "required": true, "label": "PREMIUM SELECTION", "number": "01", "position": { "css": ".section-main-header" } },
+    { "id": "main_grid", "type": "product_grid", "required": true, "cols": 6, "rows": 1, "minItems": 4, "maxItems": 6,
+      "selection": { "mode": "highest_discount", "filter": { "promoType": "main" } }, "cardVariant": "main", "overflow": "shrink", "position": { "css": ".main-grid" } },
+
+    { "id": "section_recommend", "type": "section_banner", "required": true, "label": "CURATED PICKS", "number": "02", "position": { "css": ".section-recommend-header" } },
+    { "id": "recommend_grid", "type": "product_grid", "required": true, "cols": 8, "rows": 1, "minItems": 6, "maxItems": 8,
+      "selection": { "mode": "highest_discount", "filter": { "promoType": "sub" } }, "cardVariant": "sub", "overflow": "shrink", "position": { "css": ".recommend-grid" } },
+
+    { "id": "section_fresh", "type": "section_banner", "required": true, "label": "FRESH COLLECTION", "sublabel": "매일 엄선된 신선 상품", "number": "03", "position": { "css": ".section-fresh-header" } },
+    { "id": "fresh_block_1", "type": "category_grid", "required": true, "cols": 4, "rows": 2,
+      "category": { "mode": "auto", "prefer": ["축산", "정육", "한우", "돼지고기", "닭고기"] }, "cardVariant": "fresh", "overflow": "shrink", "position": { "css": ".fresh-block-1" } },
+    { "id": "fresh_block_2", "type": "category_grid", "required": true, "cols": 4, "rows": 2,
+      "category": { "mode": "auto", "prefer": ["수산", "해산물", "생선"] }, "cardVariant": "fresh", "overflow": "shrink", "position": { "css": ".fresh-block-2" } },
+    { "id": "fresh_block_3", "type": "category_grid", "required": true, "cols": 4, "rows": 2,
+      "category": { "mode": "auto", "prefer": ["청과", "과일", "채소", "야채"] }, "cardVariant": "fresh", "overflow": "shrink", "position": { "css": ".fresh-block-3" } },
+    { "id": "fresh_block_4", "type": "category_grid", "required": true, "cols": 4, "rows": 2,
+      "category": { "mode": "auto", "prefer": ["주류", "술", "와인", "음료"] }, "cardVariant": "fresh", "overflow": "shrink", "position": { "css": ".fresh-block-4" } },
+
+    { "id": "footer_notice", "type": "footer_notice", "required": false, "editable": true, "fallback": "행사상품은 조기 품절될 수 있습니다. 사진은 이미지컷이며 실제와 다를 수 있습니다.", "position": { "css": ".footer-notice" } },
+    { "id": "footer_brand", "type": "text", "required": false, "fallback": "◆ 한줄로 · hanjul.ai", "position": { "css": ".footer-brand" } }
+  ]
+}

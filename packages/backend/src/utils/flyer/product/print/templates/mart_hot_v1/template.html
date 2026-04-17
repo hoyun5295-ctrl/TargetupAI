@@ -8,10 +8,8 @@
 <body>
   <div class="flyer-page">
 
-    <!-- ═══════════════ 1. 마스트헤드 ═══════════════ -->
     <header class="masthead" data-slot="masthead">
-      <div class="ai-mark">AI 자동 제작</div>
-
+      <div class="ai-mark"><span>TODAY HOT</span></div>
       <div class="masthead-store-row">
         <span class="store-name" data-bind="store.name">테스트마켓</span>
         <span class="divider">|</span>
@@ -21,109 +19,102 @@
         <span class="divider">·</span>
         <span class="meta" data-bind="store.hours">08:00~22:00</span>
       </div>
-
       <div class="masthead-qr">
         <div class="qr-label">
-          <strong>온라인 쇼핑몰</strong>
+          <strong>LIVE 특가</strong>
           QR로 바로가기
         </div>
         <div class="qr-code empty" data-bind-bg="qr.imageUrl">QR</div>
       </div>
     </header>
 
-    <!-- ═══════════════ 2. 히어로 ═══════════════ -->
     <section class="hero">
       <div class="hero-kicker-row">
-        <div class="hero-kicker">SPRING SALE</div>
+        <div class="hero-kicker"><span>⚡ FLASH SALE</span></div>
         <div class="hero-kicker-line"></div>
-        <div class="hero-kicker-date">2026 · SEASONAL FESTIVAL</div>
+        <div class="hero-kicker-date">LIMITED · 7 DAYS ONLY</div>
       </div>
 
       <div class="hero-main">
         <h1 class="hero-title" data-slot="hero_title">
-          <span>봄</span><span class="accent">세일</span>
+          <span>HOT</span><span class="accent">특가</span>
           <div class="hero-title-stamp">
             <span class="mini">MAX</span>
-            <span class="big">50%</span>
+            <span class="big">70%</span>
             <span class="mini">OFF</span>
           </div>
         </h1>
       </div>
 
-      <!-- ─── 스프링 일러스트 (inline SVG) ─── -->
+      <!-- 불꽃 + 번개 + 폭발 일러스트 (극대) -->
       <div class="hero-illustration" aria-hidden="true">
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" fill="none">
           <defs>
-            <radialGradient id="heroBg" cx="50%" cy="50%">
-              <stop offset="0%" stop-color="#FFF4C2" stop-opacity="0.5"/>
-              <stop offset="100%" stop-color="#FFF4C2" stop-opacity="0"/>
+            <radialGradient id="hotBurst" cx="50%" cy="50%">
+              <stop offset="0%" stop-color="#FFE100" stop-opacity="0.95"/>
+              <stop offset="50%" stop-color="#FF7A0E" stop-opacity="0.6"/>
+              <stop offset="100%" stop-color="#E8190F" stop-opacity="0"/>
             </radialGradient>
+            <linearGradient id="flameHotOuter" x1="50%" y1="100%" x2="50%" y2="0%">
+              <stop offset="0%" stop-color="#FFE100"/>
+              <stop offset="45%" stop-color="#FF7A0E"/>
+              <stop offset="100%" stop-color="#E8190F"/>
+            </linearGradient>
+            <linearGradient id="flameHotInner" x1="50%" y1="100%" x2="50%" y2="0%">
+              <stop offset="0%" stop-color="#FFFFFF"/>
+              <stop offset="60%" stop-color="#FFE100"/>
+              <stop offset="100%" stop-color="#FF7A0E"/>
+            </linearGradient>
           </defs>
-          <circle cx="200" cy="200" r="190" fill="url(#heroBg)"/>
-          <g opacity="0.96">
-            <circle cx="120" cy="130" r="32" fill="#FFB7D5"/>
-            <circle cx="150" cy="110" r="28" fill="#FF8FB8"/>
-            <circle cx="148" cy="152" r="30" fill="#FFC6DF"/>
-            <circle cx="108" cy="160" r="26" fill="#FF8FB8"/>
-            <circle cx="135" cy="135" r="12" fill="#FFF1A8"/>
+          <!-- 폭발 빛 -->
+          <circle cx="200" cy="200" r="190" fill="url(#hotBurst)"/>
+          <!-- 광선 8방향 -->
+          <g fill="#FFE100" opacity="0.85">
+            <polygon points="200,10 212,180 188,180" />
+            <polygon points="200,390 212,220 188,220" />
+            <polygon points="10,200 180,212 180,188" />
+            <polygon points="390,200 220,212 220,188" />
+            <polygon points="55,55 192,197 197,192" opacity="0.6"/>
+            <polygon points="345,55 208,197 203,192" opacity="0.6"/>
+            <polygon points="55,345 192,203 197,208" opacity="0.6"/>
+            <polygon points="345,345 208,203 203,208" opacity="0.6"/>
           </g>
-          <g opacity="0.95">
-            <circle cx="290" cy="105" r="26" fill="#FFE29F"/>
-            <circle cx="312" cy="88" r="22" fill="#FFD166"/>
-            <circle cx="318" cy="122" r="24" fill="#FFDA7D"/>
-            <circle cx="283" cy="130" r="20" fill="#FFD166"/>
-            <circle cx="303" cy="110" r="9" fill="#FF8F66"/>
+          <!-- 불꽃 본체 -->
+          <path d="M 200 380 C 120 360 70 300 90 220 C 110 180 150 175 160 140 C 165 115 150 90 175 60 C 195 100 195 135 215 135 C 240 135 225 80 255 50 C 260 100 300 115 305 170 C 315 220 340 240 320 300 C 300 360 270 385 200 380 Z" fill="url(#flameHotOuter)" stroke="#0A0A0A" stroke-width="3"/>
+          <path d="M 200 370 C 150 350 115 305 128 245 C 142 210 172 208 180 180 C 185 160 175 142 195 120 C 208 150 208 175 223 175 C 243 175 233 135 253 115 C 258 150 285 162 288 205 C 294 240 312 255 298 300 C 284 345 255 365 200 370 Z" fill="url(#flameHotInner)"/>
+          <!-- 번개 정중앙 -->
+          <path d="M 200 155 L 170 225 L 198 225 L 180 290 L 235 210 L 207 210 L 225 155 Z" fill="#FFE100" stroke="#0A0A0A" stroke-width="3" stroke-linejoin="round"/>
+          <!-- 흰 하이라이트 -->
+          <circle cx="180" cy="320" r="12" fill="#FFF" opacity="0.85"/>
+          <circle cx="225" cy="300" r="7" fill="#FFF" opacity="0.7"/>
+          <!-- 튀는 불꽃 입자 -->
+          <g fill="#FFE100" stroke="#0A0A0A" stroke-width="1.5">
+            <polygon points="90,90 96,106 112,108 100,120 105,138 90,128 75,138 80,120 68,108 84,106" />
+            <polygon points="310,90 316,106 332,108 320,120 325,138 310,128 295,138 300,120 288,108 304,106" opacity="0.9"/>
+            <polygon points="90,310 96,326 112,328 100,340 105,358 90,348 75,358 80,340 68,328 84,326" opacity="0.85"/>
+            <polygon points="310,310 316,326 332,328 320,340 325,358 310,348 295,358 300,340 288,328 304,326" />
           </g>
-          <g opacity="0.94">
-            <circle cx="80" cy="310" r="24" fill="#C8E9A0"/>
-            <circle cx="108" cy="298" r="20" fill="#A3D977"/>
-            <circle cx="96" cy="330" r="22" fill="#C8E9A0"/>
-            <circle cx="68" cy="335" r="18" fill="#A3D977"/>
-            <circle cx="92" cy="315" r="7" fill="#FFF1A8"/>
-          </g>
-          <g opacity="0.94">
-            <circle cx="300" cy="290" r="22" fill="#FFB7D5"/>
-            <circle cx="322" cy="278" r="18" fill="#FF8FB8"/>
-            <circle cx="318" cy="308" r="20" fill="#FFC6DF"/>
-            <circle cx="290" cy="315" r="16" fill="#FF8FB8"/>
-          </g>
-          <g stroke="#5FA85A" stroke-width="5" stroke-linecap="round" fill="none">
-            <path d="M 200 400 Q 180 320 200 230"/>
-            <path d="M 200 360 Q 240 340 275 335"/>
-            <path d="M 200 320 Q 160 310 135 305"/>
-            <path d="M 200 280 Q 235 265 258 260"/>
-          </g>
-          <g fill="#5FA85A" opacity="0.92">
-            <ellipse cx="275" cy="332" rx="20" ry="9" transform="rotate(20 275 332)"/>
-            <ellipse cx="135" cy="302" rx="18" ry="8" transform="rotate(-15 135 302)"/>
-            <ellipse cx="258" cy="258" rx="16" ry="7" transform="rotate(15 258 258)"/>
-          </g>
-          <g>
-            <circle cx="350" cy="200" r="6" fill="#FFB7D5"/>
-            <circle cx="50" cy="210" r="5" fill="#FFE29F"/>
-            <circle cx="370" cy="250" r="4" fill="#FFB7D5"/>
-            <circle cx="30" cy="250" r="4" fill="#C8E9A0"/>
-            <circle cx="380" cy="160" r="5" fill="#FFE29F"/>
-            <circle cx="20" cy="160" r="4" fill="#FFB7D5"/>
-          </g>
-          <g fill="#FFF" stroke="#5FA85A" stroke-width="2">
-            <path d="M 210 80 L 215 92 L 228 94 L 218 102 L 221 115 L 210 108 L 199 115 L 202 102 L 192 94 L 205 92 Z" opacity="0.95"/>
+          <!-- 작은 점 파티클 -->
+          <g fill="#E8190F">
+            <circle cx="40" cy="180" r="5"/>
+            <circle cx="360" cy="180" r="5"/>
+            <circle cx="200" cy="60" r="4"/>
+            <circle cx="200" cy="340" r="4"/>
           </g>
         </svg>
       </div>
 
       <div class="hero-bottom">
-        <div class="hero-period" data-slot="hero_period">04.17 (목) ~ 04.23 (수)</div>
-        <div class="hero-subcopy" data-slot="hero_subcopy">봄맞이 인기상품 알뜰 가격으로 만나보세요</div>
+        <div class="hero-period" data-slot="hero_period"><span>04.17 (목) ~ 04.23 (수)</span></div>
+        <div class="hero-subcopy" data-slot="hero_subcopy">이번주 단 7일, 놓치면 후회합니다</div>
       </div>
     </section>
 
-    <!-- ═══════════════ 3. 섹션 01 — 오늘의 특가 ═══════════════ -->
     <div class="section-header section-main-header" data-slot="section_main">
       <span class="section-number">01</span>
-      <span class="section-title" data-bind="label">오늘의 <span class="accent">특가</span></span>
+      <span class="section-title" data-bind="label">오늘의 <span class="accent">파격특가</span></span>
       <span class="section-sublabel" data-bind="sublabel">
-        이번주 딱 <strong>7일간</strong><span class="chip">HOT</span>
+        TODAY ONLY<span class="chip">지금 아니면 없음</span>
       </span>
     </div>
     <section class="section-main">
@@ -143,17 +134,16 @@
                 <span data-bind="productName">상품명</span>
                 <span class="unit" data-bind="unit"></span>
               </div>
-              <div class="ai-copy" data-bind="aiCopy" data-bind-show="aiCopy"></div>
+              <div class="ai-copy" data-bind-show="aiCopy"><span data-bind="aiCopy"></span></div>
             </div>
           </div>
         </template>
       </div>
     </section>
 
-    <!-- ═══════════════ 4. 섹션 02 — 베스트픽 ═══════════════ -->
     <div class="section-header section-recommend-header" data-slot="section_recommend">
       <span class="section-number">02</span>
-      <span class="section-title" data-bind="label">베스트 픽</span>
+      <span class="section-title" data-bind="label">초특가 <span class="accent">BEST</span></span>
       <span class="section-sublabel" data-bind="sublabel">엄선된 추천 상품</span>
     </div>
     <section class="section-recommend">
@@ -173,24 +163,22 @@
       </div>
     </section>
 
-    <!-- ═══════════════ 5. 섹션 03 — 신선코너 (4블록) ═══════════════ -->
     <div class="section-header section-fresh-header" data-slot="section_fresh">
       <span class="section-number">03</span>
-      <span class="section-title" data-bind="label">신선 코너</span>
-      <span class="section-sublabel" data-bind="sublabel">매일 들어오는 신선한 상품<span class="chip">FRESH</span></span>
+      <span class="section-title" data-bind="label">신선코너 <span class="accent">HOT PICK</span></span>
+      <span class="section-sublabel" data-bind="sublabel">매일 입고 신선함 그대로<span class="chip">FRESH</span></span>
     </div>
     <section class="section-fresh">
       <div class="fresh-4blocks">
 
-        <!-- 블록 1 — 축산 -->
         <div class="fresh-block meat">
           <div class="fresh-block-header">
             <div class="cat-icon">🥩</div>
             <div>
               <div class="cat-label" data-slot-meta="fresh_block_1.categoryLabel">축산</div>
-              <div class="cat-desc">한우 · 돼지 · 닭 · 햄·소시지</div>
+              <div class="cat-desc">한우 · 돼지 · 닭 · 햄소시지</div>
             </div>
-            <div class="cat-badge">FRESH</div>
+            <div class="cat-badge">HOT</div>
           </div>
           <div class="fresh-grid" data-slot="fresh_block_1">
             <template data-role="card">
@@ -208,7 +196,6 @@
           </div>
         </div>
 
-        <!-- 블록 2 — 수산 -->
         <div class="fresh-block fish">
           <div class="fresh-block-header">
             <div class="cat-icon">🐟</div>
@@ -216,7 +203,7 @@
               <div class="cat-label" data-slot-meta="fresh_block_2.categoryLabel">수산</div>
               <div class="cat-desc">생선 · 해산물 · 회 · 젓갈</div>
             </div>
-            <div class="cat-badge">FRESH</div>
+            <div class="cat-badge">HOT</div>
           </div>
           <div class="fresh-grid" data-slot="fresh_block_2">
             <template data-role="card">
@@ -234,7 +221,6 @@
           </div>
         </div>
 
-        <!-- 블록 3 — 청과 -->
         <div class="fresh-block fruit">
           <div class="fresh-block-header">
             <div class="cat-icon">🍎</div>
@@ -242,7 +228,7 @@
               <div class="cat-label" data-slot-meta="fresh_block_3.categoryLabel">청과</div>
               <div class="cat-desc">과일 · 채소 · 나물 · 건어물</div>
             </div>
-            <div class="cat-badge">FRESH</div>
+            <div class="cat-badge">HOT</div>
           </div>
           <div class="fresh-grid" data-slot="fresh_block_3">
             <template data-role="card">
@@ -260,7 +246,6 @@
           </div>
         </div>
 
-        <!-- 블록 4 — 주류/음료 -->
         <div class="fresh-block liquor">
           <div class="fresh-block-header">
             <div class="cat-icon">🍾</div>
@@ -268,7 +253,7 @@
               <div class="cat-label" data-slot-meta="fresh_block_4.categoryLabel">주류</div>
               <div class="cat-desc">소주 · 맥주 · 와인 · 음료</div>
             </div>
-            <div class="cat-badge">FRESH</div>
+            <div class="cat-badge">HOT</div>
           </div>
           <div class="fresh-grid" data-slot="fresh_block_4">
             <template data-role="card">
@@ -289,13 +274,12 @@
       </div>
     </section>
 
-    <!-- ═══════════════ 9. 푸터 ═══════════════ -->
     <footer class="footer">
       <div class="footer-notice" data-slot="footer_notice">
         행사상품은 조기 품절될 수 있습니다. 사진은 이미지컷이며 실제와 다를 수 있습니다.
       </div>
       <div class="footer-brand">
-        <span data-slot="footer_brand"><span class="brand-mark">✦ 한줄로</span> · hanjul.ai</span>
+        <span data-slot="footer_brand"><span class="brand-mark">⚡ 한줄로</span> · hanjul.ai</span>
         <span>AI가 자동 생성한 전단입니다 · 2026.04.17</span>
       </div>
     </footer>

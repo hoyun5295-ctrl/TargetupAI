@@ -91,6 +91,51 @@ pm2 restart all
 pm2 status
 ```
 
+### 2-2-B. 서버 배포 — flyer-frontend만 빌드 (전단AI 전용, D129+)
+
+> **전단AI 프론트엔드만 수정/배포할 때 사용.** 한줄로(frontend/company-frontend)와 완전 분리.
+> 동일 서버(58.227.193.62), 동일 레포(`targetup-app`) 내 `packages/flyer-frontend/` 만 빌드.
+> pm2 재시작 불필요 (정적 파일, dist/ 갱신 즉시 Nginx 서빙).
+
+```bash
+# 1. 로컬에서 코드 push (PowerShell)
+tp-push "전단AI 프론트 수정"
+
+# 2. 서버 SSH 접속
+ssh administrator@58.227.193.62
+
+# 3. 레포 최신화
+cd /home/administrator/targetup-app
+git pull
+
+# 4. flyer-frontend 빌드
+cd packages/flyer-frontend
+npm install          # 의존성 변경 시만
+npm run build        # tsc -b && vite build (약 30초~2분)
+
+# 5. 빌드 결과 확인
+ls -lh dist/
+
+# 6. (선택) Nginx 리로드 — 보통 불필요
+# sudo systemctl reload nginx
+
+# 7. 브라우저에서 Ctrl+F5로 캐시 무시 리로드
+```
+
+**⚠️ 주의사항:**
+- `packages/backend` 는 절대 건드리지 않는다 (한줄로 기간계)
+- pm2 restart 불필요 — 정적 파일
+- 최초 빌드에서 `vite-plugin-javascript-obfuscator` 에러 시 → `npm install` 한 번 더
+
+**★ 백엔드도 같이 바꿨을 때 (예: routes/flyer/* 수정):**
+```bash
+# backend 빌드 추가 + pm2 restart 필요
+cd /home/administrator/targetup-app/packages/backend && npm run build
+pm2 restart all
+```
+
+---
+
 ### 2-3. QTmsg 발송 엔진 (로컬 - 개발용)
 ```bash
 cd C:\projects\qtmsg\bin

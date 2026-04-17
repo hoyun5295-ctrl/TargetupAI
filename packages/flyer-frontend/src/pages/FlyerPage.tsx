@@ -3,6 +3,7 @@ import { API_BASE, apiFetch } from '../App';
 import AlertModal from '../components/AlertModal';
 import { SectionCard, Button, Input, Badge, EmptyState, ConfirmModal, Toast } from '../components/ui';
 import { getProductDisplay } from '../utils/product-images';
+import ExcelUploadModal, { type MappedProduct } from '../components/ExcelUploadModal';
 
 interface FlyerItem { name: string; originalPrice: number; salePrice: number; badge?: string; imageUrl?: string; unit?: string; origin?: string; cardDiscount?: string; aiCopy?: string; }
 interface FlyerCategory { name: string; items: FlyerItem[]; }
@@ -518,7 +519,8 @@ function ProductRegistrationSection({ categories, setCategories, addCategory, re
   setExtraData: (d: any) => void;
 }) {
   const [activeTab, setActiveTab] = useState(0);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  // ★ D129: CSV 수동 파싱 → 공용 AI 매핑 모달로 교체 (인쇄전단/전단/POP 3경로 통일)
+  const [showExcelModal, setShowExcelModal] = useState(false);
 
   // ★ 이미지 후보 선택기
   const [imagePickerState, setImagePickerState] = useState<{ catIdx: number; itemIdx: number; candidates: Array<{ title: string; image: string }> } | null>(null);
@@ -599,107 +601,58 @@ function ProductRegistrationSection({ categories, setCategories, addCategory, re
     URL.revokeObjectURL(url);
   };
 
-  // 엑셀/CSV 파일 업로드 파싱
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  // ★ D129: ExcelUploadModal(AI 자동매핑) onComplete 핸들러 — CSV 수동파싱 제거
+  // 3경로(인쇄전단/전단/POP) 공용 AI 매핑 모달로 통일
+  const handleExcelComplete = (mappedProducts: MappedProduct[]) => {
+    if (mappedProducts.length === 0) {
+      setAlert({ show: true, title: '업로드 오류', message: '유효한 상품 데이터가 없습니다.', type: 'error' });
+      return;
+    }
+    // 카테고리별로 그룹핑 (AI가 이미 분류했거나, 없으면 '기타')
+    const grouped: Record<string, FlyerItem[]> = {};
+    for (const p of mappedProducts) {
+      const cat = p.category || '기타';
+      if (!grouped[cat]) grouped[cat] = [];
+      grouped[cat].push({
+        name: p.productName,
+        originalPrice: p.originalPrice || 0,
+        salePrice: p.salePrice || 0,
+        unit: p.unit,
+        origin: p.origin,
+        imageUrl: p.imageUrl,
+      });
+    }
+    const newCategories: FlyerCategory[] = Object.entries(grouped).map(([name, items]) => ({ name, items }));
 
-    const reader = new FileReader();
-    reader.onload = async (ev) => {
-      try {
-        const text = ev.target?.result as string;
-        const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
-
-        // 헤더 스킵 (첫 줄이 '카테고리'로 시작하면)
-        const startIdx = lines[0]?.includes('카테고리') ? 1 : 0;
-
-        const parsed: Record<string, FlyerItem[]> = {};
-        for (let i = startIdx; i < lines.length; i++) {
-          const cols = lines[i].split(',').map(c => c.trim());
-          if (cols.length < 3) continue;
-
-          const catName = cols[0] || '기타';
-          const itemName = cols[1] || '';
-          const originalPrice = Number(cols[2]) || 0;
-          const salePrice = Number(cols[3]) || 0;
-          const badge = cols[4] || '';
-
-          if (!itemName) continue;
-
-          if (!parsed[catName]) parsed[catName] = [];
-          parsed[catName].push({ name: itemName, originalPrice, salePrice, badge });
-        }
-
-        const newCategories: FlyerCategory[] = Object.entries(parsed).map(([name, items]) => ({ name, items }));
-
-        if (newCategories.length === 0) {
-          setAlert({ show: true, title: '업로드 오류', message: '유효한 상품 데이터가 없습니다. 예시 파일 형식을 확인해주세요.', type: 'error' });
-          return;
-        }
-
-        const totalItems = newCategories.reduce((sum, c) => sum + c.items.length, 0);
-
-        // 카테고리가 전부 '기타'면 → 자동분류 시도
-        const allEtc = newCategories.every(c => c.name === '기타');
-        if (allEtc && totalItems > 0) {
-          try {
-            const allItems = newCategories.flatMap(c => c.items);
-            const res = await apiFetch(`${API_BASE}/api/flyer/flyers/classify-products`, {
-              method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ items: allItems.map(i => ({ name: i.name })) })
-            });
-            if (res.ok) {
-              const data = await res.json();
-              const autoCategories: FlyerCategory[] = Object.entries(data.classified as Record<string, string[]>)
-                .map(([catName, names]) => ({
-                  name: catName,
-                  items: (names as string[]).map(n => allItems.find(i => i.name === n) || { name: n, originalPrice: 0, salePrice: 0 })
-                }));
-              if (autoCategories.length > 0) {
-                setCategories(autoCategories);
-                setAlert({ show: true, title: '자동 분류 완료', message: `${autoCategories.length}개 카테고리, ${totalItems}개 상품이 자동 분류되었습니다.`, type: 'success' });
-                return;
-              }
-            }
-          } catch {} // 자동분류 실패 시 원본 그대로 진행
-        }
-
-        // 기존 카테고리에 머지 (같은 이름이면 추가, 새 이름이면 새 탭)
-        const merged = [...categories];
-        for (const newCat of newCategories) {
-          const existIdx = merged.findIndex(c => c.name === newCat.name);
-          if (existIdx >= 0) {
-            merged[existIdx].items = [...merged[existIdx].items, ...newCat.items];
-          } else {
-            merged.push(newCat);
-          }
-        }
-
-        setCategories(merged);
-        setAlert({ show: true, title: '업로드 완료', message: `${newCategories.length}개 카테고리, ${totalItems}개 상품이 등록되었습니다.`, type: 'success' });
-      } catch {
-        setAlert({ show: true, title: '업로드 오류', message: '파일 형식이 올바르지 않습니다.', type: 'error' });
+    // 기존 카테고리에 머지 (같은 이름이면 추가, 새 이름이면 새 탭)
+    const merged = [...categories];
+    for (const newCat of newCategories) {
+      const existIdx = merged.findIndex(c => c.name === newCat.name);
+      if (existIdx >= 0) {
+        merged[existIdx].items = [...merged[existIdx].items, ...newCat.items];
+      } else {
+        merged.push(newCat);
       }
-    };
-    reader.readAsText(file, 'UTF-8');
-    // 같은 파일 재업로드 가능하도록 초기화
-    e.target.value = '';
+    }
+    setCategories(merged);
+
+    const totalItems = mappedProducts.length;
+    setAlert({ show: true, title: 'AI 자동매핑 완료', message: `${newCategories.length}개 카테고리, ${totalItems}개 상품이 등록되었습니다.`, type: 'success' });
   };
 
   const totalItems = categories.reduce((sum, c) => sum + c.items.filter(i => i.name.trim()).length, 0);
 
   return (
     <SectionCard title={`상품 등록 (${totalItems}개)`} className="mb-4">
-      {/* 엑셀 업로드 / 예시 다운로드 */}
+      {/* 엑셀/CSV AI 자동매핑 업로드 / 예시 다운로드 */}
       <div className="flex items-center gap-2 mb-4">
         <button onClick={downloadTemplate} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-primary-600 bg-primary-50 hover:bg-primary-100 rounded-lg transition-colors">
           <span>📋</span> 예시파일 다운로드
         </button>
-        <button onClick={() => fileInputRef.current?.click()} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-success-600 bg-success-50 hover:bg-success-100 rounded-lg transition-colors">
-          <span>📥</span> 엑셀/CSV 업로드
+        <button onClick={() => setShowExcelModal(true)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-success-600 bg-success-50 hover:bg-success-100 rounded-lg transition-colors">
+          <span>🤖</span> 엑셀/CSV AI 자동매핑
         </button>
-        <input ref={fileInputRef} type="file" accept=".csv,.txt" onChange={handleFileUpload} className="hidden" />
-        <span className="text-[10px] text-text-muted ml-1">CSV 형식 (엑셀에서 다른이름으로 저장 → CSV)</span>
+        <span className="text-[10px] text-text-muted ml-1">헤더 자동 매핑 + 카테고리 자동 분류 (.xlsx/.xls/.csv 지원)</span>
       </div>
 
       {/* 카테고리 추가 버튼들 */}
@@ -1047,6 +1000,13 @@ function ProductRegistrationSection({ categories, setCategories, addCategory, re
           </div>
         </div>
       )}
+
+      {/* ★ D129: 엑셀/CSV AI 자동매핑 모달 (3경로 공용) */}
+      <ExcelUploadModal
+        isOpen={showExcelModal}
+        onClose={() => setShowExcelModal(false)}
+        onComplete={handleExcelComplete}
+      />
     </SectionCard>
   );
 }

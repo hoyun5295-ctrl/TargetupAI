@@ -13,9 +13,9 @@
  *   - GET /api/flyer/catalog/search-image?q=상품명 (네이버 이미지 검색)
  */
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { API_BASE, apiFetch } from '../App';
-import { SectionCard, Button, Input, Select } from '../components/ui';
+import { SectionCard, Button, Input } from '../components/ui';
 import AlertModal from '../components/AlertModal';
 import ExcelUploadModal, { type MappedProduct } from '../components/ExcelUploadModal';
 
@@ -53,22 +53,21 @@ const DEFAULT_CATEGORIES = [
   '축산', '정육', '과일', '채소', '수산', '유제품', '가공식품', '주류', '생활용품', '베이커리'
 ];
 
-const PAPER_SIZES = [
-  { value: 'A4', label: 'A4 (210x297mm)' },
-  { value: 'B4', label: 'B4 (257x364mm)' },
-  { value: 'tabloid', label: '타블로이드 (279x432mm)' },
-];
-
-const TEMPLATES = [
-  { value: 'spring', label: '봄 세일', desc: '4열 그리드 / 핑크+퍼플 그라데이션' },
-  { value: 'summer', label: '여름 특가', desc: '3열 대형 / 시원한 블루 그라데이션' },
-  { value: 'autumn', label: '가을 수확', desc: '2열 대형 + 4열 / 오렌지 그라데이션' },
-  { value: 'winter', label: '겨울 행사', desc: '4열 + 5열 / 딥블루 그라데이션' },
-  { value: 'chuseok', label: '추석 한가위', desc: '3열 선물세트 / 전통 레드+골드' },
-  { value: 'seol', label: '설 명절', desc: '2열 선물세트 / 전통 블루+골드' },
-  { value: 'basic_green', label: '기본 (그린)', desc: '4열 표준 / 깔끔한 그린' },
-  { value: 'basic_red', label: '기본 (레드)', desc: '4열 컴팩트 / 강렬한 레드' },
-  { value: 'basic_blue', label: '기본 (블루)', desc: '3열 표준 / 시원한 블루' },
+// ★ D129 V2: 인쇄전단 4종 기본 템플릿 (2절 545×788mm 고정)
+// 백엔드 /api/flyer/flyers/print-templates 에서도 동일 메타 반환
+interface PrintTemplateMeta {
+  id: string;
+  label: string;
+  mood: string;
+  palette: string[];
+  recommended: string;
+  paper: string;
+}
+const TEMPLATES_V2_FALLBACK: PrintTemplateMeta[] = [
+  { id: 'mart_spring_v1',  label: '봄세일 (파스텔)',       mood: '부드러움',   palette: ['#4F46E5', '#FFB7D5', '#FFD33D'], recommended: '봄 · 시즌 행사',         paper: 'j2' },
+  { id: 'mart_hot_v1',     label: 'HOT특가 (레드핫)',       mood: '파격',      palette: ['#E8331F', '#FF8F2B', '#FFD33D'], recommended: '특가 · 파격 세일',      paper: 'j2' },
+  { id: 'mart_premium_v1', label: '프리미엄 (다크+골드)',   mood: '엘레강스',   palette: ['#0B1428', '#C9A961', '#F7F3E9'], recommended: '한우 · 수입산 · 고급',  paper: 'j2' },
+  { id: 'mart_weekend_v1', label: '주말대박 (일렉트릭)',    mood: '임팩트',     palette: ['#7C3AED', '#FDE047', '#EC4899'], recommended: '주말 · 금토일 한정',     paper: 'j2' },
 ];
 
 let idCounter = 0;
@@ -82,8 +81,25 @@ export default function PrintFlyerPage({ token: _token }: { token: string }) {
   const [title, setTitle] = useState('');
   const [periodStart, setPeriodStart] = useState('');
   const [periodEnd, setPeriodEnd] = useState('');
-  const [paperSize, setPaperSize] = useState('A4');
-  const [templateCode, setTemplateCode] = useState('basic_green');
+  const [templateCode, setTemplateCode] = useState('mart_spring_v1');
+
+  // ★ D129 V2 템플릿 메타 (서버 /print-templates 에서 fetch. 실패 시 fallback 사용)
+  const [templates, setTemplates] = useState<PrintTemplateMeta[]>(TEMPLATES_V2_FALLBACK);
+
+  // 이미지 자동 배경제거 (rembg) 사용 여부
+  const [useAutoRembg, setUseAutoRembg] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await apiFetch(`${API_BASE}/api/flyer/flyers/print-templates`);
+        if (res.ok) {
+          const list = await res.json();
+          if (Array.isArray(list) && list.length > 0) setTemplates(list);
+        }
+      } catch { /* fallback 유지 */ }
+    })();
+  }, []);
 
   // 매장 정보
   const [store, setStore] = useState<StoreInfo>({ storeName: '', address: '', phone: '', hours: '' });
@@ -270,9 +286,11 @@ export default function PrintFlyerPage({ token: _token }: { token: string }) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          title, period, products, paperSize,
+          title, period, products,
           templateCode,
           storeName: store.storeName,
+          autoRembg: useAutoRembg,        // ★ D129 V2: 서버에서 rembg 자동 처리
+          autoMatchImage: true,            // ★ D129 V2: 이미지 없는 상품은 서버에서 자동 검색(Unsplash fallback)
         }),
       });
 
@@ -343,33 +361,76 @@ export default function PrintFlyerPage({ token: _token }: { token: string }) {
               <Input type="date" value={periodEnd} onChange={e => setPeriodEnd(e.target.value)} />
             </div>
           </div>
-          <div>
-            <label className="block text-xs font-medium text-text-secondary mb-1">용지 크기</label>
-            <Select value={paperSize} onChange={e => setPaperSize(e.target.value)}>
-              {PAPER_SIZES.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
-            </Select>
+          <div className="flex items-center gap-3 text-xs text-text-secondary">
+            <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-primary-50 text-primary-700 font-semibold">
+              📐 2절 세로 (545×788mm)
+            </span>
+            <span>인쇄소 표준 2절 사이즈로 자동 출력 (300dpi PDF)</span>
           </div>
         </div>
       </SectionCard>
 
-      {/* 템플릿 선택 */}
-      <SectionCard title="템플릿 선택">
-        <div className="grid grid-cols-3 gap-3">
-          {TEMPLATES.map(tpl => (
-            <button
-              key={tpl.value}
-              onClick={() => setTemplateCode(tpl.value)}
-              className={`p-4 rounded-xl border-2 text-left transition ${
-                templateCode === tpl.value
-                  ? 'border-primary-500 bg-primary-50/50 ring-2 ring-primary-200'
-                  : 'border-border hover:border-primary-300'
-              }`}
-            >
-              <div className="text-sm font-bold text-text">{tpl.label}</div>
-              <div className="text-[11px] text-text-secondary mt-1">{tpl.desc}</div>
-            </button>
-          ))}
+      {/* ★ D129 V2 템플릿 선택 */}
+      <SectionCard title="템플릿 선택 (AI 자동 제작)">
+        <div className="grid grid-cols-2 gap-3">
+          {templates.map(tpl => {
+            const selected = templateCode === tpl.id;
+            return (
+              <button
+                key={tpl.id}
+                onClick={() => setTemplateCode(tpl.id)}
+                className={`p-4 rounded-xl border-2 text-left transition relative overflow-hidden ${
+                  selected
+                    ? 'border-primary-500 bg-primary-50/50 ring-2 ring-primary-200 shadow-lg'
+                    : 'border-border hover:border-primary-300 hover:shadow'
+                }`}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-bold text-text truncate">{tpl.label}</div>
+                    <div className="text-[11px] text-text-secondary mt-0.5">{tpl.mood}</div>
+                    <div className="text-[10px] text-text-secondary/70 mt-1.5">{tpl.recommended}</div>
+                  </div>
+                  {selected && (
+                    <span className="shrink-0 px-2 py-0.5 text-[10px] font-bold bg-primary-500 text-white rounded-full">선택됨</span>
+                  )}
+                </div>
+                {/* 팔레트 미리보기 */}
+                <div className="flex gap-1 mt-3">
+                  {tpl.palette.map((color, i) => (
+                    <div
+                      key={i}
+                      className="flex-1 h-8 rounded-md border border-black/5"
+                      style={{ backgroundColor: color }}
+                    />
+                  ))}
+                </div>
+              </button>
+            );
+          })}
         </div>
+        <div className="mt-3 text-[11px] text-text-secondary">
+          💡 템플릿을 선택하면 해당 성격/컬러로 AI가 자동 레이아웃 + 가격 강조 + 카테고리 배치를 완성합니다.
+        </div>
+      </SectionCard>
+
+      {/* 이미지 자동 배경제거 옵션 */}
+      <SectionCard title="AI 이미지 처리 옵션">
+        <label className="flex items-center gap-3 cursor-pointer p-3 rounded-xl bg-bg border border-border hover:border-primary-300 transition">
+          <input
+            type="checkbox"
+            checked={useAutoRembg}
+            onChange={e => setUseAutoRembg(e.target.checked)}
+            className="w-5 h-5 accent-primary-500"
+          />
+          <div className="flex-1">
+            <div className="text-sm font-semibold text-text">상품 이미지 자동 배경제거</div>
+            <div className="text-[11px] text-text-secondary mt-0.5">
+              업로드한 상품 이미지의 배경을 AI가 자동으로 제거합니다 (rembg). 깔끔한 인쇄 품질 보장.
+            </div>
+          </div>
+          <span className="text-[10px] px-2 py-1 rounded-full bg-green-100 text-green-700 font-bold">추천</span>
+        </label>
       </SectionCard>
 
       {/* 매장 헤더 미리보기 */}

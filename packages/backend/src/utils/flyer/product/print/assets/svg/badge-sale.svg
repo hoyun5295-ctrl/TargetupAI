@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" fill="none">
+  <defs>
+    <radialGradient id="saleBg" cx="50%" cy="35%">
+      <stop offset="0%" stop-color="#FF5B7C"/>
+      <stop offset="100%" stop-color="#E8331F"/>
+    </radialGradient>
+  </defs>
+  <path d="M 100 6 L 118 28 L 147 18 L 152 48 L 180 56 L 170 82 L 194 100 L 170 118 L 180 144 L 152 152 L 147 182 L 118 172 L 100 194 L 82 172 L 53 182 L 48 152 L 20 144 L 30 118 L 6 100 L 30 82 L 20 56 L 48 48 L 53 18 L 82 28 Z" fill="url(#saleBg)"/>
+  <path d="M 100 14 L 114 30 L 137 22 L 141 46 L 164 52 L 156 74 L 176 88 L 156 102 L 164 124 L 141 130 L 137 154 L 114 146 L 100 162 L 86 146 L 63 154 L 59 130 L 36 124 L 44 102 L 24 88 L 44 74 L 36 52 L 59 46 L 63 22 L 86 30 Z" fill="none" stroke="#FFF" stroke-width="1.5" stroke-dasharray="3 2"/>
+  <text x="100" y="90" font-family="'Pretendard', Arial, sans-serif" font-size="46" font-weight="900" fill="#FFF" text-anchor="middle" letter-spacing="-2">SALE</text>
+  <text x="100" y="128" font-family="'Pretendard', Arial, sans-serif" font-size="20" font-weight="800" fill="#FFF4B2" text-anchor="middle" letter-spacing="1">HOT DEAL</text>
+</svg>

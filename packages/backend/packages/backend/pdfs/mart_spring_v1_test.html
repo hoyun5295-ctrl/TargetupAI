@@ -99,13 +99,6 @@ img { max-width: 100%; height: auto; display: block; }
   height: 788mm;
   padding: 0;
   display: grid;
-  background: var(--c-page);
-  background-image:
-    radial-gradient(circle at 12mm 12mm, rgba(255,183,213,0.12) 0.6mm, transparent 0.7mm),
-    radial-gradient(circle at 40mm 30mm, rgba(255,211,61,0.10) 0.5mm, transparent 0.6mm);
-  background-size: 60mm 60mm, 80mm 80mm;
-  position: relative;
-  overflow: hidden;
   grid-template-rows:
     22mm      /* 1. 마스트헤드 */
     178mm     /* 2. 히어로 (확장) */
@@ -116,6 +109,9 @@ img { max-width: 100%; height: auto; display: block; }
     20mm      /* 7. 섹션 03 헤더 */
     228mm     /* 8. FRESH 4블록 (2x2) */
     14mm;     /* 9. 푸터 */
+  background: var(--c-page);
+  position: relative;
+  overflow: hidden;
 }
 
 /* ============================================================
@@ -487,17 +483,22 @@ img { max-width: 100%; height: auto; display: block; }
 .main-grid {
   display: grid;
   grid-template-columns: repeat(6, 1fr);
-  grid-template-rows: 1fr 1fr;
+  grid-auto-rows: 1fr;
   gap: 3mm;
   height: 100%;
 }
-/* 카드1, 2 = 2개의 HERO (각 2x2 span) — 좌측 절반 */
-.main-grid > .card-main:nth-child(1),
-.main-grid > .card-main:nth-child(2) {
-  grid-column: span 2;
+/* 첫 번째 카드 = HERO (3x2 span) */
+.main-grid > .card-main:nth-child(1) {
+  grid-column: span 3;
   grid-row: span 2;
 }
-/* 카드3~6 = 1x1 (우측 2열 x 2행, 정확히 4셀 = 4카드) */
+/* 2~3번째 = FEATURED (1x2 height) */
+.main-grid > .card-main:nth-child(2),
+.main-grid > .card-main:nth-child(3) {
+  grid-column: span 1;
+  grid-row: span 2;
+}
+/* 나머지는 1x1 */
 
 .card-main {
   background: var(--c-card);
@@ -517,20 +518,6 @@ img { max-width: 100%; height: auto; display: block; }
   width: 100%;
   height: 1.2mm;
   background: linear-gradient(90deg, var(--c-sale) 0%, var(--c-pink) 100%);
-}
-/* 좌하단 미니 꽃 장식 (라디얼 3겹 꽃잎) */
-.card-main::after {
-  content: '';
-  position: absolute;
-  right: 4mm; bottom: 4mm;
-  width: 8mm; height: 8mm;
-  background-image:
-    radial-gradient(circle at 3mm 3mm, var(--c-pink-soft) 1.4mm, transparent 1.6mm),
-    radial-gradient(circle at 5mm 3mm, var(--c-pink) 1.2mm, transparent 1.4mm),
-    radial-gradient(circle at 4mm 5mm, var(--c-yellow) 1mm, transparent 1.2mm),
-    radial-gradient(circle at 4mm 4mm, var(--c-yellow-light) 0.6mm, transparent 0.8mm);
-  opacity: 0.5;
-  pointer-events: none;
 }
 
 /* 메인카드 좌상단 리본 배지 */
@@ -599,9 +586,7 @@ img { max-width: 100%; height: auto; display: block; }
   padding: 3mm;
   min-height: 40mm;
 }
-/* 히어로 카드 1,2 이미지 크게 */
-.card-main:nth-child(1) .product-image,
-.card-main:nth-child(2) .product-image { min-height: 90mm; }
+.card-main:nth-child(1) .product-image { min-height: 100mm; }
 
 .card-main .product-meta {
   display: flex;
@@ -627,16 +612,15 @@ img { max-width: 100%; height: auto; display: block; }
   gap: 0.5mm;
   font-size: 15mm;
 }
-/* 히어로 카드 1,2 가격 초대형 */
-.card-main:nth-child(1) .sale-price,
-.card-main:nth-child(2) .sale-price { font-size: 26mm; }
+.card-main:nth-child(1) .sale-price { font-size: 28mm; }
+.card-main:nth-child(2) .sale-price,
+.card-main:nth-child(3) .sale-price { font-size: 18mm; }
 .card-main .sale-price .won {
   font-size: 5.5mm;
   color: var(--c-text);
   font-weight: 800;
 }
-.card-main:nth-child(1) .sale-price .won,
-.card-main:nth-child(2) .sale-price .won { font-size: 9mm; }
+.card-main:nth-child(1) .sale-price .won { font-size: 10mm; }
 .card-main .product-name {
   font-size: 4.4mm;
   font-weight: 800;
@@ -649,15 +633,13 @@ img { max-width: 100%; height: auto; display: block; }
   gap: 2mm;
   flex-wrap: wrap;
 }
-.card-main:nth-child(1) .product-name,
-.card-main:nth-child(2) .product-name { font-size: 7mm; }
+.card-main:nth-child(1) .product-name { font-size: 7.5mm; }
 .card-main .product-name .unit {
   font-size: 3.2mm;
   color: var(--c-muted);
   font-weight: 600;
 }
-.card-main:nth-child(1) .product-name .unit,
-.card-main:nth-child(2) .product-name .unit { font-size: 4.2mm; }
+.card-main:nth-child(1) .product-name .unit { font-size: 4.6mm; }
 .card-main .ai-copy {
   font-size: 3.2mm;
   color: var(--c-primary-dark);
@@ -669,8 +651,7 @@ img { max-width: 100%; height: auto; display: block; }
   align-self: flex-start;
   letter-spacing: -0.01em;
 }
-.card-main:nth-child(1) .ai-copy,
-.card-main:nth-child(2) .ai-copy { font-size: 4mm; padding: 1.5mm 3.5mm; }
+.card-main:nth-child(1) .ai-copy { font-size: 4.2mm; padding: 1.5mm 3.5mm; }
 
 /* ============================================================
    5~6. 추천 그리드 (02 베스트픽) — 8칸
@@ -1414,10 +1395,6 @@ img { max-width: 100%; height: auto; display: block; }
       fillBindings(wrapper, item);
       // wrapper 내용을 slotEl에 이동
       while (wrapper.firstChild) slotEl.appendChild(wrapper.firstChild);
-    }
-    // ★ 복제 완료 후 template 엘리먼트 제거 — nth-child 레이아웃 계산 방해 방지
-    if (tmpl.parentNode === slotEl) {
-      slotEl.removeChild(tmpl);
     }
   }
 

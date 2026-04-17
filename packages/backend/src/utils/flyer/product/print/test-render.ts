@@ -70,12 +70,12 @@ const dummyInput: RawFlyerInput = {
   },
   products: [
     // ══════════════ 메인 6칸 (promoType=main) — 할인율 높은 순 ══════════════
-    { productName: '양파', salePrice: 1000, originalPrice: 3500, unit: '1망', promoType: 'main', category: '청과', imageUrl: svgPlaceholder('양파', PALETTE.main.bg, PALETTE.main.fg) },
-    { productName: '바나나', salePrice: 1000, originalPrice: 3500, unit: '1송이', promoType: 'main', category: '청과', imageUrl: svgPlaceholder('바나나', PALETTE.main.bg, PALETTE.main.fg) },
-    { productName: '과자 모음', salePrice: 1111, originalPrice: 3990, unit: '1세트', promoType: 'main', category: '가공식품', imageUrl: svgPlaceholder('과자', PALETTE.main.bg, PALETTE.main.fg) },
-    { productName: '빵', salePrice: 1000, originalPrice: 3000, unit: '1봉', promoType: 'main', category: '가공식품', imageUrl: svgPlaceholder('빵', PALETTE.main.bg, PALETTE.main.fg) },
-    { productName: '삼겹살', salePrice: 990, originalPrice: 2900, unit: '100g', promoType: 'main', category: '축산', imageUrl: svgPlaceholder('삼겹살', PALETTE.main.bg, PALETTE.main.fg) },
-    { productName: '갈치', salePrice: 2900, originalPrice: 7900, unit: '1마리', promoType: 'main', category: '수산', imageUrl: svgPlaceholder('갈치', PALETTE.main.bg, PALETTE.main.fg) },
+    { productName: '한우 등심', salePrice: 12900, originalPrice: 28900, unit: '100g', promoType: 'main', category: '축산', aiCopy: '제주 1등급 한우', imageUrl: svgPlaceholder('한우', PALETTE.main.bg, PALETTE.main.fg) },
+    { productName: '완도 전복', salePrice: 1943, originalPrice: 2775, unit: '1미', promoType: 'main', category: '수산', aiCopy: '자연산 킹사이즈', imageUrl: svgPlaceholder('전복', PALETTE.main.bg, PALETTE.main.fg) },
+    { productName: '제주 딸기', salePrice: 3990, originalPrice: 7900, unit: '500g', promoType: 'main', category: '청과', aiCopy: '당도 12브릭스', imageUrl: svgPlaceholder('딸기', PALETTE.main.bg, PALETTE.main.fg) },
+    { productName: '수입 오렌지', salePrice: 9990, originalPrice: 15900, unit: '8개입', promoType: 'main', category: '청과', imageUrl: svgPlaceholder('오렌지', PALETTE.main.bg, PALETTE.main.fg) },
+    { productName: '삼다수', salePrice: 990, originalPrice: 1500, unit: '2L', promoType: 'main', category: '음료', imageUrl: svgPlaceholder('삼다수', PALETTE.main.bg, PALETTE.main.fg) },
+    { productName: '스위티오 바나나', salePrice: 3990, originalPrice: 5900, unit: '1송이', promoType: 'main', category: '청과', imageUrl: svgPlaceholder('바나나', PALETTE.main.bg, PALETTE.main.fg) },
 
     // ══════════════ 추천 8칸 (promoType=sub) ══════════════
     { productName: '사과', salePrice: 3900, originalPrice: 6900, unit: '5개', promoType: 'sub', category: '청과', imageUrl: svgPlaceholder('사과', PALETTE.sub.bg, PALETTE.sub.fg) },
@@ -130,56 +130,61 @@ const dummyInput: RawFlyerInput = {
 };
 
 // ─── 메인 ──────────────────────────────────────────────────────
+// CLI 인자로 템플릿 ID 지정 가능. 없으면 mart_spring_v1 사용.
+// npx tsx ...test-render.ts [templateId] — 'all' 이면 4종 전부 렌더
+const ALL_TEMPLATES = ['mart_spring_v1', 'mart_hot_v1', 'mart_premium_v1', 'mart_weekend_v1'];
+
+async function renderOne(templateId: string) {
+  console.log('━'.repeat(60));
+  console.log('▶', templateId);
+  console.log('━'.repeat(60));
+
+  const t0 = Date.now();
+  const result = await renderFlyerPdf({
+    templateId,
+    input: dummyInput,
+    debug: true,
+    timeoutMs: 90000,
+  });
+
+  const outDir = path.resolve(process.cwd(), 'packages/backend/pdfs');
+  fs.mkdirSync(outDir, { recursive: true });
+
+  const pdfPath = path.join(outDir, `${templateId}_test.pdf`);
+  fs.writeFileSync(pdfPath, result.pdf);
+
+  if (result.screenshot) {
+    const pngPath = path.join(outDir, `${templateId}_test.png`);
+    fs.writeFileSync(pngPath, result.screenshot);
+    console.log('   PNG      :', pngPath, '(' + (result.screenshot.length / 1024).toFixed(1) + ' KB)');
+  }
+  if (result.html) {
+    const htmlPath = path.join(outDir, `${templateId}_test.html`);
+    fs.writeFileSync(htmlPath, result.html);
+  }
+
+  console.log('   PDF      :', pdfPath, '(' + (result.pdf.length / 1024).toFixed(1) + ' KB)');
+  console.log('   용지     :', result.paperSize, '(' + result.orientation + ')');
+  console.log('   페이지   :', result.pageCount);
+  console.log('   소요시간 :', Date.now() - t0, 'ms');
+}
+
 async function main() {
-  console.log('━'.repeat(60));
-  console.log('인쇄전단 V2 — 테스트 렌더 v2 (2절 + Line B)');
-  console.log('━'.repeat(60));
-  console.log('  템플릿 : mart_spring_v1 v2.0');
-  console.log('  용지   : 2절 545×788mm (한국 동네마트 표준)');
-  console.log('  상품수 :', dummyInput.products.length, '개');
-  console.log('');
+  const arg = process.argv[2] || 'mart_spring_v1';
+  const targets = arg === 'all' ? ALL_TEMPLATES : [arg];
+  console.log('상품수 :', dummyInput.products.length, '개, 대상 템플릿:', targets);
 
   const t0 = Date.now();
   try {
-    const result = await renderFlyerPdf({
-      templateId: 'mart_spring_v1',
-      input: dummyInput,
-      debug: true,
-      timeoutMs: 90000,
-    });
-
-    const outDir = path.resolve(process.cwd(), 'packages/backend/pdfs');
-    fs.mkdirSync(outDir, { recursive: true });
-
-    const pdfPath = path.join(outDir, 'mart_spring_v1_test.pdf');
-    fs.writeFileSync(pdfPath, result.pdf);
-
-    if (result.screenshot) {
-      const pngPath = path.join(outDir, 'mart_spring_v1_test.png');
-      fs.writeFileSync(pngPath, result.screenshot);
-      console.log('   PNG      :', pngPath);
-      console.log('               ', (result.screenshot.length / 1024).toFixed(1), 'KB');
+    for (const id of targets) {
+      try {
+        await renderOne(id);
+      } catch (e: any) {
+        console.error('❌', id, '렌더 실패:', e?.message || e);
+      }
     }
-    if (result.html) {
-      const htmlPath = path.join(outDir, 'mart_spring_v1_test.html');
-      fs.writeFileSync(htmlPath, result.html);
-      console.log('   HTML     :', htmlPath, '(디버그 dump)');
-    }
-
-    console.log('');
-    console.log('✅ 렌더 완료');
-    console.log('   PDF      :', pdfPath);
-    console.log('   용지     :', result.paperSize, '(' + result.orientation + ')');
-    console.log('   페이지   :', result.pageCount);
-    console.log('   용량     :', (result.pdf.length / 1024).toFixed(1), 'KB');
-    console.log('   소요시간 :', result.durationMs, 'ms');
-    console.log('   전체     :', Date.now() - t0, 'ms');
-  } catch (err: any) {
-    console.error('');
-    console.error('❌ 렌더 실패');
-    console.error('   error:', err?.message || err);
-    if (err?.stack) console.error(err.stack);
-    process.exitCode = 1;
+    console.log('━'.repeat(60));
+    console.log('✅ 전체 완료 —', Date.now() - t0, 'ms');
   } finally {
     await closePdfBrowser().catch(() => {});
   }
