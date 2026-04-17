@@ -2159,6 +2159,14 @@ const handleApproveRequest = async (id: string) => {
           </div>
           <div className="flex items-center gap-4">
             <SessionTimer />
+            {/* ★ D130: 알림톡 발신프로필 관리 — IMC 연동 (Phase 0 수령 후 정상 동작) */}
+            <button
+              onClick={() => navigate('/admin/alimtalk-senders')}
+              className="text-xs px-3 py-1.5 bg-green-50 hover:bg-green-100 text-green-700 rounded-lg"
+              title="휴머스온 IMC 발신프로필 등록·080 설정"
+            >
+              알림톡 발신프로필
+            </button>
             <span className="text-sm text-gray-600">{user?.name}님</span>
             <button
               onClick={handleLogout}

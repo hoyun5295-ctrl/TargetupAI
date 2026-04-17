@@ -107,6 +107,57 @@
 
 ---
 
+### 📨 D130 — 알림톡/브랜드메시지 IMC 연동 Phase 1 (2026-04-18) — 🟡 코드 완비, 월요일 API 수령 후 연동테스트
+
+> **배경:** 레거시에서 수동으로 하던 "템플릿 관리자 + 발신프로필 등록"을 한줄로에 재구현 + 휴머스온 IMC API 연동으로 자동화.
+> 승인 상태는 웹훅으로 실시간 반영 → 발송 시 `status='APPROVED'`만 노출 → 레거시의 수동 확인 절차 제거.
+> **설계서:** [`status/ALIMTALK-DESIGN.md`](ALIMTALK-DESIGN.md) (1,735줄)
+> **플랜:** [`.claude/plans/hidden-twirling-waffle.md`](../.claude/plans/hidden-twirling-waffle.md)
+
+#### Day 1 완료 (2026-04-18)
+**DB (Harold님 서버 psql 직접 실행):**
+- ALTER `kakao_sender_profiles` +13 컬럼 / ALTER `kakao_templates` +14 컬럼
+- CREATE 5종: `brand_message_templates` / `kakao_alarm_users` / `kakao_sender_categories` / `kakao_template_categories` / `kakao_webhook_events` / `kakao_image_uploads`
+- 인덱스 전부 포함, 모두 IF NOT EXISTS + nullable (기간계 무접촉)
+
+**백엔드 (tsc 0 — Harold님 `npm install axios form-data` 필요):**
+- **CT-16** `utils/alimtalk-api.ts` — 39개 함수 (발신프로필 11 + 템플릿 13 + 알림수신자 4 + 카테고리 2 + 이미지 9). Lazy init, env 미설정 시에도 부팅 가능
+- **CT-17** `utils/alimtalk-result-map.ts` — IMC 응답코드 맵 + 리포트 코드 맵 (resolveImcCode, resolveReportCode)
+- **CT-18** `utils/alimtalk-webhook-handler.ts` — processKakaoWebhook + verifyWebhookSignature (HMAC-SHA256) + isAllowedWebhookIp + generateMessageKey(CR_/DS_/TS_/AC_)
+- `utils/alimtalk-jobs.ts` — 카테고리 일일 동기화(03:00 KST) / 검수 템플릿 폴링(5분) / 발신프로필 상태(1시간). env 미설정 시 no-op
+- `routes/alimtalk.ts` — 33 엔드포인트 전부 구현 (발신프로필 + 카테고리 + 템플릿 + 브랜드 + 이미지 + 알림수신자 + 웹훅)
+- `app.ts` — 라우트 등록 + webhook raw body parser + scheduler
+- `routes/companies.ts` — kakao-profiles/kakao-templates 기존 섹션에 @deprecated 주석만 추가 (로직 수정 0)
+
+**프론트 (tsc 0 통과):**
+- `pages/AlimtalkTemplatesPage.tsx` — 고객사 템플릿 목록 + 상태 배지(DRAFT/REQUESTED/REVIEWING/APPROVED/REJECTED/DORMANT) + 필터 + 검수요청/취소/삭제
+- `pages/AlimtalkSendersPage.tsx` — 슈퍼관리자 발신프로필 목록 + 등록 Wizard + 080 설정 + 휴면해제
+- `components/alimtalk/SenderRegistrationWizard.tsx` — 3-Step (채널ID/카테고리 → 인증번호 요청 → 인증번호 입력)
+- `components/alimtalk/UnsubscribeSettingModal.tsx` — 080 무료수신거부 설정
+- `components/alimtalk/AlimtalkTemplateFormV2.tsx` — **16조합 동적 UI** (BA/EX/AD/MI × NONE/TEXT/IMAGE/ITEM_LIST) + 실시간 미리보기
+- `components/alimtalk/AlimtalkPreview.tsx` — 카톡 말풍선 실시간 렌더
+- `components/alimtalk/ButtonEditor.tsx` — 버튼 9종 타입(WL/AL/DS/BK/MD/BF/BC/AC/PD) 최대 5개
+- `components/alimtalk/QuickReplyEditor.tsx` — 빠른답장 5종 타입 최대 10개
+- `components/alimtalk/ItemListEditor.tsx` — header + highlight + list(10) + summary
+- `components/alimtalk/KakaoChannelImageUpload.tsx` — 업로드 타입 9종 공용 래퍼
+- `components/alimtalk/AlarmUserManager.tsx` — 검수 알림 수신자 회사당 10명 관리
+- `App.tsx` — `/alimtalk-templates` (고객사) + `/admin/alimtalk-senders` (슈퍼관리자) 라우트
+- `DashboardHeader.tsx` — "알림톡" 메뉴 추가 (카카오&RCS 옆)
+- `AdminDashboard.tsx` — 헤더 "알림톡 발신프로필" 버튼
+
+**DB/컨트롤타워 보존:**
+- ❌ 수정 금지: `utils/brand-message.ts` (CT-12), `utils/sms-queue.ts` (CT-04), `routes/campaigns.ts` 5경로, `routes/auto-campaigns.ts`, `utils/auto-campaign-worker.ts` — 기간계 무접촉
+
+#### 월요일(2026-04-21) 연동테스트 대기 (Phase 0 수령 필요)
+- [ ] `IMC_API_KEY_SANDBOX` + `IMC_BASE_URL_STG` → 샌드박스 카테고리 조회 curl
+- [ ] 발신프로필 token 요청 → 카톡 수신 → createSender E2E
+- [ ] 템플릿 등록 → 검수요청 → 승인 → 발송 E2E
+- [ ] `IMC_WEBHOOK_ALLOWED_IPS` + `IMC_WEBHOOK_HMAC_SECRET` → 실 IMC 웹훅 수신
+- [ ] 이미지 업로드 9종 실테스트
+- [ ] Phase 2 착수: campaigns.ts 5경로 `channel='alimtalk'` 분기
+
+---
+
 ### 🎨 D126 V2 + D127 V3 + D128 V4 — DM 빌더 고도화 (2026-04-17) — ✅ 전 구간 완료, 배포 대기
 
 > **배경:** D125 V1 이후 연속 세션. V2 고도화 → V3 페이징 3모드 → V4 페이지 계층 구조까지 진행.

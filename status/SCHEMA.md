@@ -20,9 +20,15 @@
 | 9 | customer_field_definitions | 고객 필드 정의 |
 | 10 | customers | 고객 |
 | 11 | file_uploads | 파일 업로드 |
-| 12 | kakao_sender_profiles | 카카오 발신 프로필 |
-| 13 | kakao_templates | 카카오 템플릿 |
-| 14 | kakao_friendtalk_images | 카카오 친구톡 이미지 |
+| 12 | kakao_sender_profiles | 카카오 발신 프로필 (D130 IMC 확장) |
+| 13 | kakao_templates | 카카오 알림톡 템플릿 (D130 IMC 확장) |
+| 14 | kakao_friendtalk_images | 카카오 친구톡 이미지 (레거시) |
+| 14-A | **brand_message_templates** | **브랜드메시지 템플릿 (D130 신설, 검수 없음)** |
+| 14-B | **kakao_alarm_users** | **알림톡 검수 알림 수신자 (D130 신설, 회사당 10명)** |
+| 14-C | **kakao_sender_categories** | **발신프로필 카테고리 캐시 (D130, 3단 트리)** |
+| 14-D | **kakao_template_categories** | **템플릿 카테고리 캐시 (D130, flat 6자리)** |
+| 14-E | **kakao_webhook_events** | **IMC 웹훅 이벤트 로그 (D130, idempotency)** |
+| 14-F | **kakao_image_uploads** | **IMC 이미지 업로드 캐시 (D130)** |
 | 15 | messages | 메시지 (월별 파티션) |
 | 16 | mobile_dm_requests | 모바일 DM 요청 |
 | 17 | opt_outs | 수신거부 (user_id 기준) |
@@ -365,16 +371,34 @@
 | completed_at | timestamptz |
 
 ### kakao_sender_profiles (카카오 발신 프로필)
-| 컬럼 | 타입 |
-|------|------|
-| id | uuid PK |
-| company_id | uuid FK |
-| profile_key | varchar(100) |
-| profile_name | varchar(100) |
-| is_active | boolean |
-| created_at | timestamp |
+| 컬럼 | 타입 | 비고 |
+|------|------|------|
+| id | uuid PK | |
+| company_id | uuid FK | |
+| profile_key | varchar(100) | IMC senderKey |
+| profile_name | varchar(100) | 내부 관리명 |
+| is_active | boolean | |
+| created_at | timestamp | |
+| **yellow_id** | varchar(50) | **D130: 카카오 채널 ID(@시작)** |
+| **admin_phone_number** | varchar(20) | **D130: 채널 관리자 휴대폰** |
+| **category_code** | varchar(11) | **D130: 11자리(대+중+소)** |
+| **category_name_cache** | varchar(255) | **D130: 표시명 캐시** |
+| **top_sender_yn** | char(1) DEFAULT 'N' | **D130: 최상위 발신 여부** |
+| **custom_sender_key** | varchar(40) | **D130: 고객사 지정 키** |
+| **status** | varchar(20) DEFAULT 'PENDING' | **D130: PENDING/NORMAL/BLOCKED/DELETED/DORMANT** |
+| **unsubscribe_phone** | varchar(15) | **D130: 080 무료수신거부 번호** |
+| **unsubscribe_auth** | varchar(10) | **D130: 080 인증번호** |
+| **marketing_agree_file_key** | varchar(100) | **D130: 광고동의 증적 파일 키** |
+| **brand_targeting_yn** | char(1) DEFAULT 'N' | **D130: 브랜드 M/N 타겟팅 사용 여부** |
+| **registered_at** | timestamptz | **D130: 등록 시각** |
+| **updated_at** | timestamptz DEFAULT now() | **D130: 최종 갱신** |
 
-### kakao_templates (카카오 알림톡 템플릿)
+인덱스: `idx_ksp_company_status(company_id, status)`, `idx_ksp_yellow_id(company_id, yellow_id) UNIQUE WHERE yellow_id IS NOT NULL`
+
+### kakao_templates (카카오 알림톡 템플릿) — D130 IMC 확장
+> **D130 신규 컬럼 14개 (nullable):** `template_key`, `custom_template_code`, `emphasize_subtitle`, `template_header`, `item_highlight(jsonb)`, `item_list(jsonb)`, `item_summary(jsonb)`, `represent_link(jsonb)`, `preview_message`, `alarm_phone_numbers`, `service_mode(PRD/STG)`, `image_name`, `highlight_image_name`, `last_synced_at`.
+> **인덱스:** `idx_kt_company_template_key UNIQUE`, `idx_kt_status`, `idx_kt_profile_id`.
+
 | 컬럼 | 타입 |
 |------|------|
 | id | uuid PK |
@@ -403,7 +427,7 @@
 | reviewed_at | timestamptz |
 | reviewed_by | uuid |
 
-### kakao_friendtalk_images (카카오 친구톡 이미지)
+### kakao_friendtalk_images (카카오 친구톡 이미지, 레거시)
 | 컬럼 | 타입 |
 |------|------|
 | id | uuid PK |
@@ -418,6 +442,106 @@
 | status | varchar(20) |
 | created_at | timestamp |
 | processed_at | timestamp |
+
+> **D130 이후:** 알림톡/브랜드메시지 IMC 이미지 업로드는 `kakao_image_uploads` 사용. 이 테이블은 레거시 호환용으로 유지.
+
+### brand_message_templates (브랜드메시지 템플릿, D130 신설)
+| 컬럼 | 타입 | 비고 |
+|------|------|------|
+| id | uuid PK | |
+| company_id | uuid FK → companies(id) ON DELETE CASCADE | |
+| profile_id | uuid FK → kakao_sender_profiles(id) ON DELETE CASCADE | |
+| template_key | varchar(128) NOT NULL | IMC templateKey |
+| custom_template_code | varchar(30) | 고객사 관리코드 |
+| manage_name | varchar(30) NOT NULL | 관리명 |
+| chat_bubble_type | varchar(20) NOT NULL | TEXT/IMAGE/WIDE/WIDE_ITEM_LIST/CAROUSEL_FEED/PREMIUM_VIDEO/COMMERCE/CAROUSEL_COMMERCE |
+| adult_yn | char(1) DEFAULT 'N' | 성인용 여부 |
+| header | varchar(20) | WIDE_ITEM_LIST 필수 |
+| content | text | 타입별 글자수 상이 |
+| additional_content | varchar(34) | COMMERCE 전용 |
+| attachment | jsonb | {image/video/commerce/item} |
+| carousel | jsonb | {head, list[], tail} |
+| buttons | jsonb DEFAULT '[]' | |
+| coupon | jsonb | |
+| variables | text[] DEFAULT ARRAY[]::text[] | 최대 20개 |
+| status | varchar(20) DEFAULT 'ACTIVE' | ACTIVE/DELETED (검수 없음) |
+| created_at | timestamptz | |
+| updated_at | timestamptz | |
+| deleted_at | timestamptz | |
+
+인덱스: `idx_bmt_company_template_key(company_id, template_key) UNIQUE`, `idx_bmt_company_status`, `idx_bmt_profile_id`
+
+### kakao_alarm_users (알림톡 검수 알림 수신자, D130 신설)
+| 컬럼 | 타입 | 비고 |
+|------|------|------|
+| id | uuid PK | |
+| company_id | uuid FK ON DELETE CASCADE | |
+| name | varchar(30) | 선택 |
+| phone_number | varchar(20) NOT NULL | |
+| active_yn | char(1) DEFAULT 'Y' | |
+| imc_alarm_user_id | varchar(50) | IMC alarmUserId |
+| created_at | timestamptz | |
+| updated_at | timestamptz | |
+
+인덱스: `idx_kau_company_active(company_id, active_yn)`, `idx_kau_company_phone(company_id, phone_number) UNIQUE`
+
+### kakao_sender_categories (발신프로필 카테고리 캐시, D130 신설)
+| 컬럼 | 타입 | 비고 |
+|------|------|------|
+| category_code | varchar(11) PK | 11자리 |
+| parent_code | varchar(11) | |
+| level | smallint | 1(대)/2(중)/3(소) |
+| name | varchar(100) | |
+| active_yn | char(1) DEFAULT 'Y' | |
+| synced_at | timestamptz | 매일 03:00 KST |
+
+인덱스: `idx_ksc_parent(parent_code, level)`
+
+### kakao_template_categories (템플릿 카테고리 캐시, D130 신설)
+| 컬럼 | 타입 | 비고 |
+|------|------|------|
+| category_code | varchar(6) PK | 6자리 |
+| name | varchar(100) | |
+| active_yn | char(1) DEFAULT 'Y' | |
+| synced_at | timestamptz | |
+
+### kakao_webhook_events (IMC 웹훅 이벤트, D130 신설 — idempotency)
+| 컬럼 | 타입 | 비고 |
+|------|------|------|
+| event_id | uuid PK | **IMC eventId — 중복 차단 보장** |
+| batch_id | uuid | |
+| server_key | varchar(100) | |
+| message_key | varchar(128) | CR_/DS_/TS_/AC_ 접두사 |
+| report_type | varchar(10) | SM/LM/MM/AT/FT/RCS |
+| report_code | varchar(10) | |
+| resend | boolean DEFAULT false | 부달 여부 |
+| received_at | timestamptz | IMC 표기 시각 |
+| net_info | varchar(20) | |
+| processed_at | timestamptz DEFAULT now() | |
+| process_status | varchar(20) DEFAULT 'PENDING' | PENDING/OK/FAILED |
+| error_message | text | |
+| raw_payload | jsonb NOT NULL | 원본 payload 보존 |
+
+인덱스: `idx_kwe_message_key`, `idx_kwe_batch_id`, `idx_kwe_status WHERE process_status != 'OK'`
+
+### kakao_image_uploads (IMC 이미지 업로드 캐시, D130 신설)
+| 컬럼 | 타입 | 비고 |
+|------|------|------|
+| id | uuid PK | |
+| company_id | uuid FK | |
+| user_id | uuid FK | |
+| upload_type | varchar(30) NOT NULL | alimtalk_template/alimtalk_highlight/brand_default/brand_wide/brand_wide_list_first/brand_wide_list/brand_carousel_feed/brand_carousel_commerce/marketing_agree |
+| image_name | varchar(100) NOT NULL | IMC 반환 파일명 |
+| image_url | varchar(500) NOT NULL | IMC 반환 URL |
+| original_filename | varchar(200) | |
+| file_size | integer | bytes |
+| width | integer | |
+| height | integer | |
+| ratio | numeric(6,4) | 세로/가로 |
+| created_at | timestamptz | |
+| expired_at | timestamptz | IMC 만료 시점 (있을 시) |
+
+인덱스: `idx_kiu_company_type(company_id, upload_type)`
 
 ### messages (메시지) — 월별 파티션 (messages_2026_01~12)
 | 컬럼 | 타입 |

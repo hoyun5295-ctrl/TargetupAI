@@ -18,6 +18,9 @@ import AutoSendPage from './pages/AutoSendPage';
 import KakaoRcsPage from './pages/KakaoRcsPage';
 import FlyerAdminDashboard from './pages/FlyerAdminDashboard'; // ★ D112
 import DmBuilderPage from './pages/DmBuilderPage'; // ★ 모바일 DM 빌더
+// ★ D130: 알림톡 IMC 연동 페이지
+import AlimtalkSendersPage from './pages/AlimtalkSendersPage';
+import AlimtalkTemplatesPage from './pages/AlimtalkTemplatesPage';
 
 // ★ 세션 타이머 Context — 헤더 등에서 남은 시간 표시용
 interface SessionTimerContextType {
@@ -239,6 +242,26 @@ function App() {
           element={
             <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
               <KakaoRcsPage />
+            </PrivateRoute>
+          }
+        />
+
+        {/* ★ D130: 알림톡 템플릿 관리 (고객사) — IMC 연동 */}
+        <Route
+          path="/alimtalk-templates"
+          element={
+            <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
+              <AlimtalkTemplatesPage />
+            </PrivateRoute>
+          }
+        />
+
+        {/* ★ D130: 발신프로필 관리 (슈퍼관리자) */}
+        <Route
+          path="/admin/alimtalk-senders"
+          element={
+            <PrivateRoute allowedTypes={['super_admin']}>
+              <AlimtalkSendersPage />
             </PrivateRoute>
           }
         />

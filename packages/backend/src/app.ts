@@ -30,9 +30,12 @@ import spamFilterRoutes from './routes/spam-filter';
 import analysisRoutes from './routes/analysis';
 import autoCampaignsRoutes from './routes/auto-campaigns';
 import savedSegmentsRoutes from './routes/saved-segments';
+// ★ D130: 휴머스온 IMC 알림톡/브랜드메시지 관리
+import alimtalkRoutes from './routes/alimtalk';
 import { startAutoCampaignScheduler } from './utils/auto-campaign-worker';
 import { ensureMonthlyLogTables } from './utils/sms-queue';
 import { startSpamTestQueueWorker } from './utils/spam-test-queue';
+import { startAlimtalkScheduler } from './utils/alimtalk-jobs';
 
 // 공용 관리 라우트 (슈퍼관리자 + 고객사관리자)
 import manageUsersRoutes from './routes/manage-users';
@@ -88,6 +91,9 @@ app.use('/api/flyer/cart', flyerCartPublicRoutes);
 app.use(helmet());
 app.use(cors());
 app.use(morgan('dev'));
+// ★ D130: 휴머스온 IMC 웹훅은 HMAC 검증을 위해 raw body 필요
+//    express.json()이 먼저 파싱하면 rawBody 손실되므로 이 경로만 선처리
+app.use('/api/alimtalk/webhook', express.raw({ type: '*/*', limit: '10mb' }));
 app.use(express.json({ limit: LIMITS.requestBodySize }));
 app.use('/api/upload', uploadRoutes);
 app.use('/api/sync', syncRoutes);
@@ -134,6 +140,8 @@ app.use('/api/sms-templates', smsTemplatesRoutes);
 app.use('/api/mms-images', mmsImagesRoutes);
 app.use('/api/auto-campaigns', autoCampaignsRoutes);
 app.use('/api/saved-segments', savedSegmentsRoutes);
+// ★ D130: 알림톡/브랜드메시지 IMC 연동 (발신프로필/템플릿/검수/웹훅/이미지/알림수신자)
+app.use('/api/alimtalk', alimtalkRoutes);
 app.use('/api/dm', dmRouter);
 
 // 공용 관리 라우트 (슈퍼관리자 + 고객사관리자)
@@ -217,6 +225,9 @@ app.listen(PORT, () => {
 
   // ★ Phase 4: POS 자동 전단 생성 워커 시작 (5분 간격)
   startAutoFlyerWorker();
+
+  // ★ D130: 알림톡 배치 스케줄러 (카테고리=매일 03:00 KST, 템플릿상태=5분, 발신프로필=1시간)
+  startAlimtalkScheduler();
 });
 
 export default app;
