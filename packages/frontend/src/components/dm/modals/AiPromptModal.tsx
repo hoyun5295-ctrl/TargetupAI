@@ -62,14 +62,17 @@ export default function AiPromptModal({ open, onClose }: { open: boolean; onClos
     setStep('generating');
 
     try {
-      // 1. parse-prompt
+      // 1. parse-prompt — 백엔드 응답: { spec: {...} } 또는 (폴백) 직접 spec
       const parseRes = await api.post('/dm/ai/parse-prompt', { prompt });
-      const parsedSpec = parseRes.data;
+      const parsedSpec = parseRes.data?.spec ?? parseRes.data;
+      if (!parsedSpec || typeof parsedSpec !== 'object') {
+        throw new Error('AI 응답 형식이 올바르지 않아요.');
+      }
       setSpec(parsedSpec);
 
       // 2. recommend-layout
       const layoutRes = await api.post('/dm/ai/recommend-layout', { spec: parsedSpec });
-      const recSections: Section[] = layoutRes.data.sections || [];
+      const recSections: Section[] = layoutRes.data?.sections || [];
       setSections(recSections);
 
       setStep('preview');
