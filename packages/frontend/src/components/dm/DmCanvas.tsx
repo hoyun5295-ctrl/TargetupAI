@@ -18,6 +18,9 @@ export default function DmCanvas({ onPromptClick }: DmCanvasProps) {
   const selectSection = useDmBuilderStore((s) => s.selectSection);
   const hoverSection = useDmBuilderStore((s) => s.hoverSection);
   const brandKit = useDmBuilderStore((s) => s.brandKit);
+  const updateSectionProps = useDmBuilderStore((s) => s.updateSectionProps);
+  const setOpenModal = useDmBuilderStore((s) => s.setOpenModal);
+  const handlePromptClick = onPromptClick || (() => setOpenModal('ai-prompt'));
 
   const brandKitStyle: React.CSSProperties = {
     ...(brandKit.primary_color ? { ['--dm-primary' as any]: brandKit.primary_color } : {}),
@@ -42,7 +45,7 @@ export default function DmCanvas({ onPromptClick }: DmCanvasProps) {
       <div className="dm-builder" style={brandKitStyle}>
         <MobileFrame>
           {sections.length === 0 ? (
-            <EmptyCanvas onPromptClick={onPromptClick} />
+            <EmptyCanvas onPromptClick={handlePromptClick} />
           ) : (
             <div>
               {sections
@@ -57,6 +60,7 @@ export default function DmCanvas({ onPromptClick }: DmCanvasProps) {
                     hovered={hoveredSectionId === section.id}
                     onSelect={selectSection}
                     onHover={hoverSection}
+                    onEditSection={updateSectionProps}
                   />
                 ))}
             </div>

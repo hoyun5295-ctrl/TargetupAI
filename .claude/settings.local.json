@@ -181,7 +181,9 @@
       "Bash(grep -E \"dm-tokens|dm\\\\\\\\\\\\\\\\tokens\")",
       "Bash(echo \"---backend exit: $?---\")",
       "Bash(echo \"---frontend exit: $?---\")",
-      "Bash(echo \"---exit: $?---\")"
+      "Bash(echo \"---exit: $?---\")",
+      "Bash(npx tsc *)",
+      "Bash(echo \"EXIT: $?\")"
     ]
   }
 }

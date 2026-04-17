@@ -2,6 +2,8 @@
  * VideoSection — 영상 (YouTube embed 또는 direct video)
  */
 import type { VideoProps } from '../../../utils/dm-section-defaults';
+import InlineEditable from './InlineEditable';
+import type { EditHandler } from './SectionRenderer';
 
 function youtubeEmbedUrl(url: string): string | null {
   if (!url) return null;
@@ -11,8 +13,9 @@ function youtubeEmbedUrl(url: string): string | null {
   return null;
 }
 
-export default function VideoSection({ props }: { props: VideoProps }) {
+export default function VideoSection({ props, onEdit }: { props: VideoProps; onEdit?: EditHandler }) {
   const embed = props.video_type === 'youtube' ? youtubeEmbedUrl(props.video_url) : null;
+  const editable = !!onEdit;
 
   return (
     <div className="dm-section dm-video" style={{ padding: 0, background: 'var(--dm-neutral-900)' }}>
@@ -34,10 +37,17 @@ export default function VideoSection({ props }: { props: VideoProps }) {
           style={{ width: '100%', display: 'block' }}
         />
       ) : null}
-      {props.caption && (
-        <div className="dm-text-small" style={{ padding: 'var(--dm-sp-3) var(--dm-sp-5)', color: 'var(--dm-neutral-600)', background: 'var(--dm-bg)' }}>
-          {props.caption}
-        </div>
+      {(props.caption || editable) && (
+        <InlineEditable
+          className="dm-text-small"
+          style={{ padding: 'var(--dm-sp-3) var(--dm-sp-5)', color: 'var(--dm-neutral-600)', background: 'var(--dm-bg)' }}
+          value={props.caption || ''}
+          placeholder="영상 설명 (선택)"
+          onChange={(v) => onEdit?.({ caption: v } as Partial<VideoProps>)}
+          disabled={!editable}
+          multiline
+          maxLength={200}
+        />
       )}
     </div>
   );

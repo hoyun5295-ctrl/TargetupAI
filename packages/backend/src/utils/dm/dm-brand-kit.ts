@@ -73,8 +73,19 @@ export async function updateCompanyBrandKit(companyId: string, patch: Partial<Dm
   return merged;
 }
 
-/** AI가 URL에서 메타 태그/로고 기반 자동 제안 — V2 구현 예정 (placeholder) */
-export async function suggestBrandKitFromUrl(_url: string): Promise<Partial<DmBrandKit>> {
-  // TODO: V2 — og:image/apple-touch-icon 기반 로고 추출, 컬러 추출
-  return {};
+/** URL에서 메타 태그/로고/테마컬러 추출 → DmBrandKit 부분값 반환 (D126 V2) */
+export async function suggestBrandKitFromUrl(url: string): Promise<Partial<DmBrandKit>> {
+  const { extractBrandFromUrl, toBrandKitPatch } = await import('./dm-brand-extractor');
+  const result = await extractBrandFromUrl(url);
+  return toBrandKitPatch(result);
+}
+
+/** 추출 결과 원본(프리뷰 포함)도 함께 반환 — 프론트에서 확인 UI에 사용 */
+export async function previewBrandExtract(url: string) {
+  const { extractBrandFromUrl, toBrandKitPatch } = await import('./dm-brand-extractor');
+  const result = await extractBrandFromUrl(url);
+  return {
+    raw: result,
+    patch: toBrandKitPatch(result),
+  };
 }

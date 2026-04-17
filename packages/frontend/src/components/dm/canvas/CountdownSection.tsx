@@ -3,6 +3,8 @@
  */
 import { useEffect, useState } from 'react';
 import type { CountdownProps } from '../../../utils/dm-section-defaults';
+import InlineEditable from './InlineEditable';
+import type { EditHandler } from './SectionRenderer';
 
 function calcDiff(end: string): { d: number; h: number; m: number; s: number } {
   if (!end) return { d: 0, h: 0, m: 0, s: 0 };
@@ -17,8 +19,9 @@ function calcDiff(end: string): { d: number; h: number; m: number; s: number } {
 
 const pad = (n: number) => String(n).padStart(2, '0');
 
-export default function CountdownSection({ props }: { props: CountdownProps }) {
+export default function CountdownSection({ props, onEdit }: { props: CountdownProps; onEdit?: EditHandler }) {
   const [t, setT] = useState(() => calcDiff(props.end_datetime));
+  const editable = !!onEdit;
 
   useEffect(() => {
     if (!props.end_datetime) return;
@@ -35,9 +38,15 @@ export default function CountdownSection({ props }: { props: CountdownProps }) {
 
   return (
     <div className="dm-section dm-countdown" style={{ padding: 'var(--dm-sp-6) var(--dm-sp-5)', background: 'var(--dm-neutral-900)', color: '#fff', textAlign: 'center' }}>
-      <div className="dm-text-h3" style={{ color: 'var(--dm-accent)', fontWeight: 700, marginBottom: 'var(--dm-sp-3)' }}>
-        {props.urgency_text || '마감까지'}
-      </div>
+      <InlineEditable
+        className="dm-text-h3"
+        style={{ color: 'var(--dm-accent)', fontWeight: 700, marginBottom: 'var(--dm-sp-3)' }}
+        value={props.urgency_text || '마감까지'}
+        placeholder="마감 안내 문구"
+        onChange={(v) => onEdit?.({ urgency_text: v } as Partial<CountdownProps>)}
+        disabled={!editable}
+        maxLength={40}
+      />
       <div style={{ display: 'flex', gap: 'var(--dm-sp-3)', justifyContent: 'center', flexWrap: 'wrap' }}>
         {units.filter(u => u.show).map((u, i) => (
           <div key={i} style={{ background: 'rgba(255,255,255,0.1)', borderRadius: 'var(--dm-radius-md)', padding: 'var(--dm-sp-3) var(--dm-sp-4)', minWidth: 64 }}>

@@ -14,6 +14,12 @@ import DmTopBar from '../components/dm/DmTopBar';
 import DmLeftPanel from '../components/dm/DmLeftPanel';
 import DmCanvas from '../components/dm/DmCanvas';
 import DmRightPanel from '../components/dm/DmRightPanel';
+import AiPromptModal from '../components/dm/modals/AiPromptModal';
+import AiImproveModal from '../components/dm/modals/AiImproveModal';
+import ValidationModal from '../components/dm/modals/ValidationModal';
+import VersionHistoryModal from '../components/dm/modals/VersionHistoryModal';
+import BrandKitModal from '../components/dm/modals/BrandKitModal';
+import AbTestModal from '../components/dm/modals/AbTestModal';
 import '../styles/dm-builder.css';
 
 const api = axios.create({ baseURL: '/api' });
@@ -125,9 +131,10 @@ export default function DmBuilderPage() {
         <TopBarWithBack onBack={handleBackToList} />
         <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
           <DmLeftPanel />
-          <DmCanvas onPromptClick={() => setToast({ type: 'info', message: 'AI 프롬프트는 다음 단계에서 준비 중이에요.' })} />
+          <DmCanvas />
           <DmRightPanel />
         </div>
+        <EditorModals />
         {toast && <Toast toast={toast} />}
       </div>
     );
@@ -181,17 +188,56 @@ export default function DmBuilderPage() {
 
 function TopBarWithBack({ onBack }: { onBack: () => void }) {
   const saveStore = useDmBuilderStore((s) => s.save);
+  const dmId = useDmBuilderStore((s) => s.dmId);
+  const setToast = useDmBuilderStore((s) => s.setToast);
+
+  const handleTestSend = async () => {
+    if (!dmId) {
+      setToast({ type: 'error', message: '먼저 저장 후 테스트 발송이 가능해요.' });
+      return;
+    }
+    try {
+      await api.post(`/dm/${dmId}/test-send`, { sample_key: 'vip' });
+      setToast({ type: 'success', message: '테스트 발송 요청을 보냈어요.' });
+    } catch (err: any) {
+      setToast({ type: 'error', message: err?.response?.data?.error || '테스트 발송 실패' });
+    }
+  };
+
   return (
     <DmTopBar
-      onPromptClick={() => alert('AI 프롬프트 — 9단계에서 구현 예정')}
-      onAiImproveClick={() => alert('AI 개선 — 9단계에서 구현 예정')}
-      onValidateClick={() => alert('검수 — 11단계에서 구현 예정')}
-      onTestSendClick={() => alert('테스트 발송 — 14단계에서 구현 예정')}
+      onTestSendClick={handleTestSend}
       onPublishClick={async () => {
         await saveStore();
+        if (dmId) {
+          try {
+            await api.post(`/dm/${dmId}/publish`);
+            setToast({ type: 'success', message: '발행했어요.' });
+          } catch (err: any) {
+            setToast({ type: 'error', message: err?.response?.data?.error || '발행 실패' });
+            return;
+          }
+        }
         onBack();
       }}
     />
+  );
+}
+
+function EditorModals() {
+  const openModal = useDmBuilderStore((s) => s.openModal);
+  const setOpenModal = useDmBuilderStore((s) => s.setOpenModal);
+  const close = () => setOpenModal(null);
+
+  return (
+    <>
+      <AiPromptModal open={openModal === 'ai-prompt'} onClose={close} />
+      <AiImproveModal open={openModal === 'ai-improve'} onClose={close} />
+      <ValidationModal open={openModal === 'validation'} onClose={close} />
+      <VersionHistoryModal open={openModal === 'version-history'} onClose={close} />
+      <BrandKitModal open={openModal === 'brand-kit'} onClose={close} />
+      <AbTestModal open={openModal === 'ab-test'} onClose={close} />
+    </>
   );
 }
 

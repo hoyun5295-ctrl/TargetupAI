@@ -48,6 +48,15 @@ export type ValidationResult = {
   checked_at: string;
 };
 
+export type ModalKey =
+  | 'ai-prompt'
+  | 'ai-improve'
+  | 'validation'
+  | 'version-history'
+  | 'brand-kit'
+  | 'ab-test'
+  | null;
+
 export type DmBuilderState = {
   // ── Entity ──
   dmId: string | null;
@@ -72,6 +81,9 @@ export type DmBuilderState = {
   aiGenerating: boolean;
   validationResult: ValidationResult | null;
   validationRunning: boolean;
+
+  // ── Modal ──
+  openModal: ModalKey;
 
   // ── Toast ──
   toast: { type: 'success' | 'error' | 'info'; message: string } | null;
@@ -100,6 +112,7 @@ export type DmBuilderState = {
   selectSection: (id: string | null) => void;
   hoverSection: (id: string | null) => void;
   setToast: (toast: DmBuilderState['toast']) => void;
+  setOpenModal: (key: ModalKey) => void;
 
   // ── Actions: AI 적용 ──
   applyAiGenerated: (sections: Section[], brandKit?: DmBrandKit, prompt?: string) => void;
@@ -127,7 +140,7 @@ const INITIAL_STATE: Pick<
   | 'approvalStatus' | 'templateId' | 'aiPrompt'
   | 'selectedSectionId' | 'hoveredSectionId' | 'isDirty' | 'lastSavedAt'
   | 'isSaving' | 'loadError' | 'aiGenerating' | 'validationResult'
-  | 'validationRunning' | 'toast'
+  | 'validationRunning' | 'openModal' | 'toast'
 > = {
   dmId: null,
   title: '',
@@ -147,6 +160,7 @@ const INITIAL_STATE: Pick<
   aiGenerating: false,
   validationResult: null,
   validationRunning: false,
+  openModal: null,
   toast: null,
 };
 
@@ -294,6 +308,7 @@ export const useDmBuilderStore = create<DmBuilderState>((set, get) => ({
   selectSection: (id) => set({ selectedSectionId: id }),
   hoverSection: (id) => set({ hoveredSectionId: id }),
   setToast: (toast) => set({ toast }),
+  setOpenModal: (openModal) => set({ openModal }),
 
   // ── AI 적용 ──
   applyAiGenerated: (sections, brandKit, prompt) => {

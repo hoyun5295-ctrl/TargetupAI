@@ -34,6 +34,13 @@ import { listTemplates, getTemplate, instantiateTemplate } from '../utils/dm/dm-
 import { insertTestSmsQueue } from '../utils/sms-queue';
 import { sanitizeSmsText } from '../utils/auto-notify-message';
 import { convertLegacyToSections } from '../utils/dm/dm-legacy-converter';
+import { previewBrandExtract } from '../utils/dm/dm-brand-kit';
+import {
+  createAbTest, getAbTest, getAbTestByShortCode, listAbTests, updateAbTest,
+  deleteAbTest, startAbTest, pauseAbTest, completeAbTest, aggregateResults,
+  pickVariant, variantToPageId, trackAbTestView,
+  type AbVariantKey,
+} from '../utils/dm/dm-ab-test';
 
 const DM_IMAGE_DIR = path.join(process.cwd(), 'uploads', 'dm-images');
 
@@ -717,5 +724,228 @@ dmRouter.post('/ai/improve', async (req: any, res: any) => {
   } catch (err: any) {
     console.error('[DM AI improve] 오류:', err.message);
     return res.status(500).json({ error: err.message || 'AI 개선 제안 실패' });
+  }
+});
+
+// ============================================================
+//  브랜드킷 URL 자동추출 (D126 V2)
+// ============================================================
+
+// POST /api/dm/brand-kit/extract — URL에서 og:image/favicon/theme-color 추출
+dmRouter.post('/brand-kit/extract', async (req: any, res: any) => {
+  try {
+    const url = (req.body?.url || '').toString().trim();
+    if (!url) return res.status(400).json({ error: 'url 필요' });
+    const result = await previewBrandExtract(url);
+    return res.json(result);
+  } catch (err: any) {
+    console.error('[DM 브랜드추출] 오류:', err.message);
+    return res.status(500).json({ error: err.message || '브랜드 추출 실패' });
+  }
+});
+
+// ============================================================
+//  A/B 테스트 CRUD (D126 V2)
+// ============================================================
+
+// GET /api/dm/ab-tests — 목록
+dmRouter.get('/ab-tests', async (req: any, res: any) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
+    const tests = await listAbTests(companyId);
+    return res.json({ tests });
+  } catch (err: any) {
+    console.error('[AB목록] 오류:', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/dm/ab-tests — 신규 생성
+dmRouter.post('/ab-tests', async (req: any, res: any) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
+
+    const body = req.body || {};
+    if (!body.name || !body.variant_a_page_id || !body.variant_b_page_id) {
+      return res.status(400).json({ error: 'name / variant_a_page_id / variant_b_page_id 필수' });
+    }
+    const test = await createAbTest(companyId, req.user?.id || null, {
+      name: body.name,
+      description: body.description,
+      variant_a_page_id: body.variant_a_page_id,
+      variant_b_page_id: body.variant_b_page_id,
+      variant_c_page_id: body.variant_c_page_id || null,
+      variant_a_weight: body.variant_a_weight,
+      variant_b_weight: body.variant_b_weight,
+      variant_c_weight: body.variant_c_weight,
+      primary_metric: body.primary_metric,
+    });
+    return res.json({ test });
+  } catch (err: any) {
+    console.error('[AB생성] 오류:', err.message);
+    return res.status(400).json({ error: err.message || '생성 실패' });
+  }
+});
+
+// GET /api/dm/ab-tests/:id — 상세 + 최신 집계
+dmRouter.get('/ab-tests/:id', async (req: any, res: any) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
+    const summary = await aggregateResults(req.params.id, companyId);
+    if (!summary) return res.status(404).json({ error: '찾을 수 없습니다.' });
+    return res.json(summary);
+  } catch (err: any) {
+    console.error('[AB상세] 오류:', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /api/dm/ab-tests/:id — 수정
+dmRouter.put('/ab-tests/:id', async (req: any, res: any) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
+    const updated = await updateAbTest(req.params.id, companyId, req.body || {});
+    if (!updated) return res.status(404).json({ error: '찾을 수 없습니다.' });
+    return res.json({ test: updated });
+  } catch (err: any) {
+    console.error('[AB수정] 오류:', err.message);
+    return res.status(400).json({ error: err.message || '수정 실패' });
+  }
+});
+
+// POST /api/dm/ab-tests/:id/start — 시작 (short_code 발급 + status='running')
+dmRouter.post('/ab-tests/:id/start', async (req: any, res: any) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
+    const test = await startAbTest(req.params.id, companyId);
+    if (!test) return res.status(404).json({ error: '찾을 수 없습니다.' });
+    return res.json({ test });
+  } catch (err: any) {
+    console.error('[AB시작] 오류:', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/dm/ab-tests/:id/pause — 일시정지
+dmRouter.post('/ab-tests/:id/pause', async (req: any, res: any) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
+    const test = await pauseAbTest(req.params.id, companyId);
+    if (!test) return res.status(404).json({ error: '실행 중인 테스트가 아닙니다.' });
+    return res.json({ test });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/dm/ab-tests/:id/complete — 종료 + result_summary 고정
+dmRouter.post('/ab-tests/:id/complete', async (req: any, res: any) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
+    const test = await completeAbTest(req.params.id, companyId);
+    if (!test) return res.status(404).json({ error: '찾을 수 없습니다.' });
+    return res.json({ test });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/dm/ab-tests/:id
+dmRouter.delete('/ab-tests/:id', async (req: any, res: any) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
+    const ok = await deleteAbTest(req.params.id, companyId);
+    if (!ok) return res.status(404).json({ error: '찾을 수 없습니다.' });
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================
+//  A/B 테스트 공개 뷰어 (인증 불필요 — dmPublicRouter에 등록)
+// ============================================================
+
+// GET /api/dm/v/ab/:code — variant 선택 + 해당 DM 렌더
+dmPublicRouter.get('/ab/:code', async (req: Request, res: Response) => {
+  try {
+    const test = await getAbTestByShortCode(req.params.code);
+    if (!test) return res.status(404).send(renderDmErrorHtml('A/B 테스트를 찾을 수 없어요.'));
+
+    // 쿠키 스티키
+    const cookieName = `dm_ab_${test.id.replace(/-/g, '')}`;
+    const raw = req.headers.cookie || '';
+    const match = raw.match(new RegExp(`${cookieName}=(a|b|c)`));
+    const existing = match ? (match[1] as AbVariantKey) : undefined;
+    const variant = pickVariant(test, existing);
+
+    const pageId = variantToPageId(test, variant);
+    if (!pageId) return res.status(404).send(renderDmErrorHtml('선택된 variant DM이 없습니다.'));
+
+    const dmRes = await query(`SELECT * FROM dm_pages WHERE id = $1`, [pageId]);
+    const dm = dmRes.rows[0];
+    if (!dm) return res.status(404).send(renderDmErrorHtml('DM을 찾을 수 없어요.'));
+
+    // 첫 진입 추적 (variant 정보 함께)
+    const phone = (req.query.p as string) || null;
+    const ip = req.ip || req.socket?.remoteAddress || null;
+    const ua = req.headers['user-agent'] || null;
+    const totalPages = Array.isArray(dm.pages) ? dm.pages.length : (dm.sections?.length || 0);
+    trackAbTestView(test.id, variant, pageId, dm.company_id, phone, 1, totalPages, 0, ip, ua).catch(() => {});
+
+    // 쿠키 발급 (30일)
+    if (!existing) {
+      res.setHeader(
+        'Set-Cookie',
+        `${cookieName}=${variant}; Path=/; Max-Age=2592000; HttpOnly; SameSite=Lax`,
+      );
+    }
+
+    const html = renderDmViewerHtml(dm, '/api/dm/v');
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
+  } catch (err: any) {
+    console.error('[AB뷰어] 오류:', err.message);
+    res.status(500).send(renderDmErrorHtml('일시적 오류가 발생했습니다.'));
+  }
+});
+
+// POST /api/dm/v/ab/:code/track — A/B 열람 진행 추적
+dmPublicRouter.post('/ab/:code/track', async (req: Request, res: Response) => {
+  try {
+    const test = await getAbTestByShortCode(req.params.code);
+    if (!test) return res.status(404).json({ error: 'Not found' });
+
+    const cookieName = `dm_ab_${test.id.replace(/-/g, '')}`;
+    const raw = req.headers.cookie || '';
+    const match = raw.match(new RegExp(`${cookieName}=(a|b|c)`));
+    const variant: AbVariantKey = match ? (match[1] as AbVariantKey) : 'a';
+    const pageId = variantToPageId(test, variant);
+    if (!pageId) return res.status(404).json({ error: 'variant page not found' });
+
+    const { phone, page_reached, total_pages, duration } = req.body || {};
+    const ip = req.ip || req.socket?.remoteAddress || null;
+    const ua = req.headers['user-agent'] || null;
+
+    await trackAbTestView(
+      test.id, variant, pageId, test.company_id,
+      phone || null,
+      page_reached || 1,
+      total_pages || 0,
+      duration || 0,
+      ip, ua,
+    );
+    return res.json({ ok: true, variant });
+  } catch (err: any) {
+    console.error('[AB추적] 오류:', err.message);
+    return res.status(500).json({ error: 'Internal error' });
   }
 });

@@ -258,3 +258,251 @@
 
 .dm-safe-area-top    { padding-top:    env(safe-area-inset-top);    }
 .dm-safe-area-bottom { padding-bottom: env(safe-area-inset-bottom); }
+
+/* ─────────── Style Variants (data-variant) ───────────
+ *
+ * .dm-section-wrap[data-variant="..."] 속성으로 섹션마다 다른 톤을 적용.
+ * brand_kit 색상이 :root에 주입되어 있으므로, variant는 타이포/레이아웃/여백 위주로 조정.
+ *
+ * 11종 variant:
+ *  - default              (기본 — variant 미지정 시)
+ *  - beauty-elegant       (뷰티 · 서체 강조 · 넓은 여백)
+ *  - beauty-natural       (뷰티 · 자연주의 · 그린톤 강조)
+ *  - fashion-editorial    (패션 · 에디토리얼 · 샤프 타이포)
+ *  - fashion-street       (패션 · 스트리트 · 볼드/각진 버튼)
+ *  - food-warm            (푸드 · 따뜻한 질감)
+ *  - food-fresh           (푸드 · 프레시 · 깔끔한 라인)
+ *  - lifestyle-cozy       (라이프 · 코지 · 라운드)
+ *  - luxury-dark          (럭셔리 · 다크 + 골드 액센트)
+ *  - minimal-clean        (미니멀 · 블랙/화이트)
+ *  - vibrant-playful      (밝음 · 다채로움 · 큰 라운드)
+ */
+
+/* default ---------------------------------------------- */
+.dm-section-wrap[data-variant="default"],
+.dm-section-wrap:not([data-variant]) {
+  /* 기본은 :root 토큰 그대로 */
+}
+
+/* beauty-elegant --------------------------------------- */
+.dm-section-wrap[data-variant="beauty-elegant"] {
+  font-family: var(--dm-font-serif);
+  letter-spacing: 0.01em;
+}
+.dm-section-wrap[data-variant="beauty-elegant"] .dm-text-hero,
+.dm-section-wrap[data-variant="beauty-elegant"] .dm-text-h1 {
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+.dm-section-wrap[data-variant="beauty-elegant"] .dm-cta {
+  border-radius: 0;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+/* beauty-natural --------------------------------------- */
+.dm-section-wrap[data-variant="beauty-natural"] {
+  --dm-accent: #84cc16;
+  background: linear-gradient(180deg, #f7fbf3 0%, var(--dm-bg) 100%);
+}
+.dm-section-wrap[data-variant="beauty-natural"] .dm-cta-primary {
+  background: linear-gradient(135deg, #84cc16, #22c55e);
+}
+
+/* fashion-editorial ------------------------------------ */
+.dm-section-wrap[data-variant="fashion-editorial"] {
+  --dm-primary: #000;
+  --dm-primary-hover: #262626;
+  --dm-bg: #fafaf7;
+}
+.dm-section-wrap[data-variant="fashion-editorial"] .dm-text-hero,
+.dm-section-wrap[data-variant="fashion-editorial"] .dm-text-h1 {
+  font-weight: 900;
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
+.dm-section-wrap[data-variant="fashion-editorial"] .dm-cta {
+  border-radius: 0;
+  border: 2px solid #000;
+  background: #fff;
+  color: #000;
+}
+.dm-section-wrap[data-variant="fashion-editorial"] .dm-cta-primary {
+  background: #000;
+  color: #fff;
+}
+
+/* fashion-street --------------------------------------- */
+.dm-section-wrap[data-variant="fashion-street"] {
+  --dm-primary: #ef4444;
+  --dm-accent: #fbbf24;
+}
+.dm-section-wrap[data-variant="fashion-street"] .dm-text-hero,
+.dm-section-wrap[data-variant="fashion-street"] .dm-text-h1 {
+  font-weight: 900;
+  text-transform: uppercase;
+}
+.dm-section-wrap[data-variant="fashion-street"] .dm-cta {
+  border-radius: 4px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* food-warm -------------------------------------------- */
+.dm-section-wrap[data-variant="food-warm"] {
+  --dm-primary: #ea580c;
+  --dm-primary-hover: #c2410c;
+  --dm-accent: #f59e0b;
+  background: #fff7ed;
+}
+.dm-section-wrap[data-variant="food-warm"] .dm-cta-primary {
+  background: linear-gradient(135deg, #ea580c, #d97706);
+  box-shadow: 0 6px 20px rgba(234, 88, 12, 0.25);
+}
+
+/* food-fresh ------------------------------------------- */
+.dm-section-wrap[data-variant="food-fresh"] {
+  --dm-primary: #059669;
+  --dm-primary-hover: #047857;
+  background: #f0fdf4;
+}
+.dm-section-wrap[data-variant="food-fresh"] .dm-cta {
+  border-radius: var(--dm-radius-full);
+}
+
+/* lifestyle-cozy --------------------------------------- */
+.dm-section-wrap[data-variant="lifestyle-cozy"] {
+  --dm-primary: #d97706;
+  --dm-accent: #a78bfa;
+  background: #fffbeb;
+}
+.dm-section-wrap[data-variant="lifestyle-cozy"] .dm-cta,
+.dm-section-wrap[data-variant="lifestyle-cozy"] img {
+  border-radius: var(--dm-radius-xl);
+}
+
+/* luxury-dark ------------------------------------------ */
+.dm-section-wrap[data-variant="luxury-dark"] {
+  --dm-primary: #d4af37;
+  --dm-primary-hover: #b8952f;
+  --dm-bg: #0b0b0b;
+  background: #0b0b0b;
+  color: #f5f5f5;
+}
+.dm-section-wrap[data-variant="luxury-dark"] .dm-text-hero,
+.dm-section-wrap[data-variant="luxury-dark"] .dm-text-h1,
+.dm-section-wrap[data-variant="luxury-dark"] .dm-text-h2 {
+  font-family: var(--dm-font-serif);
+  font-weight: 400;
+  letter-spacing: 0.05em;
+}
+.dm-section-wrap[data-variant="luxury-dark"] .dm-cta-primary {
+  background: #d4af37;
+  color: #0b0b0b;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+}
+.dm-section-wrap[data-variant="luxury-dark"] .dm-cta-outline {
+  border-color: #d4af37;
+  color: #d4af37;
+}
+
+/* minimal-clean ---------------------------------------- */
+.dm-section-wrap[data-variant="minimal-clean"] {
+  --dm-primary: #171717;
+  --dm-primary-hover: #000;
+  background: #fff;
+}
+.dm-section-wrap[data-variant="minimal-clean"] .dm-text-hero,
+.dm-section-wrap[data-variant="minimal-clean"] .dm-text-h1 {
+  font-weight: 300;
+  letter-spacing: -0.02em;
+}
+.dm-section-wrap[data-variant="minimal-clean"] .dm-cta {
+  border-radius: 2px;
+  font-weight: 500;
+}
+
+/* vibrant-playful -------------------------------------- */
+.dm-section-wrap[data-variant="vibrant-playful"] {
+  --dm-primary: #ec4899;
+  --dm-primary-hover: #db2777;
+  --dm-accent: #8b5cf6;
+}
+.dm-section-wrap[data-variant="vibrant-playful"] .dm-cta-primary {
+  background: linear-gradient(135deg, #ec4899, #8b5cf6);
+  border-radius: var(--dm-radius-full);
+  font-weight: 700;
+  box-shadow: 0 8px 24px rgba(236, 72, 153, 0.3);
+}
+.dm-section-wrap[data-variant="vibrant-playful"] img {
+  border-radius: var(--dm-radius-xl);
+}
+
+/* ─────────── 인라인 편집 (contentEditable) ───────────
+ * D126 V2 — 캔버스에서 직접 카피 편집 시 시각 피드백
+ */
+
+[data-dm-editable="true"] {
+  outline: 1px dashed transparent;
+  outline-offset: 2px;
+  transition: outline-color var(--dm-motion-duration-hover) var(--dm-motion-easing-out);
+  cursor: text;
+  min-height: 1em;
+  border-radius: var(--dm-radius-sm);
+}
+
+[data-dm-editable="true"]:hover {
+  outline-color: var(--dm-primary-light);
+}
+
+[data-dm-editable="true"]:focus {
+  outline: 2px solid var(--dm-primary);
+  outline-offset: 2px;
+  background: var(--dm-primary-light);
+}
+
+[data-dm-editable="true"][data-dm-empty="true"]::before {
+  content: attr(data-dm-placeholder);
+  color: var(--dm-neutral-400);
+  pointer-events: none;
+}
+
+/* ─────────── 검수 / AI 제안 하이라이트 ─────────── */
+
+.dm-diff-insert {
+  background: #d1fae5;
+  color: #065f46;
+  padding: 0 2px;
+  border-radius: 2px;
+  text-decoration: none;
+}
+
+.dm-diff-delete {
+  background: #fee2e2;
+  color: #991b1b;
+  padding: 0 2px;
+  border-radius: 2px;
+  text-decoration: line-through;
+}
+
+.dm-diff-replace-before {
+  background: #fee2e2;
+  color: #991b1b;
+  padding: 0 2px;
+  border-radius: 2px;
+  text-decoration: line-through;
+}
+
+.dm-diff-replace-after {
+  background: #d1fae5;
+  color: #065f46;
+  padding: 0 2px;
+  border-radius: 2px;
+}
+
+.dm-validation-fatal    { color: #dc2626; }
+.dm-validation-recommend { color: #d97706; }
+.dm-validation-improve  { color: #2563eb; }

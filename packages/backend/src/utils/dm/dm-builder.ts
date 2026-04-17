@@ -128,8 +128,10 @@ export async function listDmVersions(dmId: string, companyId: string): Promise<a
   const own = await query(`SELECT id FROM dm_pages WHERE id = $1 AND company_id = $2`, [dmId, companyId]);
   if (own.rows.length === 0) return [];
   const res = await query(
-    `SELECT id, version_label, version_number, note, created_by, created_at
-     FROM dm_versions WHERE dm_id = $1 ORDER BY version_number DESC`,
+    `SELECT id, version_label, version_number, note, created_by, created_at,
+            sections, brand_kit
+     FROM dm_versions WHERE dm_id = $1 ORDER BY version_number DESC
+     LIMIT 50`,
     [dmId],
   );
   return res.rows;
