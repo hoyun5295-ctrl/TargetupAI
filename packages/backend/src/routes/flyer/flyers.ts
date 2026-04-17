@@ -384,6 +384,7 @@ router.get('/', async (req: Request, res: Response) => {
     if (!companyId) return;
     const { userId } = req.flyerUser!;
     // ★ D120: user_id 기반 격리 — 같은 총판 내 매장별 전단 분리
+    // ★ D129: 인쇄전단(template='print')은 전용 목록(GET /print-flyers)에서 제공 → 여기선 제외
     const result = await query(
       `SELECT f.*,
               TO_CHAR(f.period_start, 'YYYY-MM-DD') as period_start,
@@ -393,6 +394,7 @@ router.get('/', async (req: Request, res: Response) => {
        FROM flyers f
        LEFT JOIN short_urls s ON s.flyer_id = f.id
        WHERE f.company_id = $1 AND f.user_id = $2
+         AND (f.template IS NULL OR f.template != 'print')
        ORDER BY f.created_at DESC`,
       [companyId, userId]
     );
@@ -401,6 +403,48 @@ router.get('/', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[전단AI] 전단지 목록 조회 실패:', err.message);
     res.status(500).json({ error: '전단지 목록 조회에 실패했습니다.' });
+  }
+});
+
+// ============================================================
+// ★ D129 GET /print-flyers — 인쇄전단 전용 목록 조회
+//   (기존 GET / 와 완전 분리 — PrintFlyerPage 상단 목록용)
+// ============================================================
+router.get('/print-flyers', async (req: Request, res: Response) => {
+  try {
+    const companyId = requireCompanyId(req, res);
+    if (!companyId) return;
+    const { userId } = req.flyerUser!;
+
+    const result = await query(
+      `SELECT f.id, f.title, f.store_name, f.status, f.categories, f.created_at, f.updated_at
+         FROM flyers f
+        WHERE f.company_id = $1 AND f.user_id = $2 AND f.template = 'print'
+        ORDER BY f.created_at DESC`,
+      [companyId, userId]
+    );
+
+    const outDir = path.join(process.cwd(), 'uploads', 'print-flyers');
+    const rows = result.rows.map((r: any) => {
+      const pdfPath = path.join(outDir, `${r.id}.pdf`);
+      const pngPath = path.join(outDir, `${r.id}.png`);
+      return {
+        id: r.id,
+        title: r.title,
+        store_name: r.store_name,
+        status: r.status,
+        categories: r.categories,
+        created_at: r.created_at,
+        updated_at: r.updated_at,
+        pdfUrl: fs.existsSync(pdfPath) ? `/api/flyer/flyers/print-flyer/${r.id}/pdf` : null,
+        pngUrl: fs.existsSync(pngPath) ? `/api/flyer/flyers/print-flyer/${r.id}/png` : null,
+      };
+    });
+
+    res.json(rows);
+  } catch (err: any) {
+    console.error('[전단AI] 인쇄전단 목록 조회 실패:', err.message);
+    res.status(500).json({ error: '인쇄전단 목록 조회에 실패했습니다.' });
   }
 });
 
@@ -576,6 +620,18 @@ router.delete('/:id', async (req: Request, res: Response) => {
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: '전단지를 찾을 수 없습니다.' });
+    }
+
+    // ★ D129: 인쇄전단 파일(pdf/png)도 존재 시 정리
+    try {
+      const printDir = path.join(process.cwd(), 'uploads', 'print-flyers');
+      const pdfPath = path.join(printDir, `${id}.pdf`);
+      const pngPath = path.join(printDir, `${id}.png`);
+      if (fs.existsSync(pdfPath)) fs.unlinkSync(pdfPath);
+      if (fs.existsSync(pngPath)) fs.unlinkSync(pngPath);
+    } catch (cleanupErr: any) {
+      // 파일 정리 실패는 삭제 자체를 막지 않음 (DB는 이미 삭제됨)
+      console.warn('[전단AI] 인쇄전단 파일 정리 실패(무시):', cleanupErr?.message);
     }
 
     res.json({ success: true });

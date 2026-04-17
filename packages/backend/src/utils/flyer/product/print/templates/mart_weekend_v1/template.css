@@ -265,10 +265,10 @@ img { max-width: 100%; height: auto; display: block; }
 }
 .hero-right .price-main .won { font-size: 7mm; color: var(--c-purple-dark); text-shadow: none; }
 .hero-right .product-name {
-  font-size: 4mm; font-weight: 900; color: var(--c-purple-dark);
+  font-size: 5.5mm; font-weight: 900; color: var(--c-purple-dark);
   letter-spacing: -0.02em;
 }
-.hero-right .product-name .unit { font-size: 3mm; color: var(--c-muted); font-weight: 700; }
+.hero-right .product-name .unit { font-size: 3.6mm; color: var(--c-muted); font-weight: 700; }
 
 /* ════════ 섹션 헤더 ════════ */
 .section-header {
@@ -392,12 +392,12 @@ img { max-width: 100%; height: auto; display: block; }
 .card-main .info-left { grid-column: 1; display: flex; flex-direction: column; gap: 0.2mm; }
 .card-main .info-right { grid-column: 2; text-align: right; }
 .card-main .product-name {
-  font-size: 4mm; font-weight: 900; color: var(--c-text);
+  font-size: 5.4mm; font-weight: 900; color: var(--c-text);
   letter-spacing: -0.03em; line-height: 1.1;
   overflow: hidden; text-overflow: ellipsis;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
 }
-.card-main .product-name .unit { font-size: 2.8mm; color: var(--c-muted); font-weight: 700; margin-left: 1mm; }
+.card-main .product-name .unit { font-size: 3.4mm; color: var(--c-muted); font-weight: 700; margin-left: 1mm; }
 .card-main .original-price {
   font-size: 2.8mm; color: var(--c-strike);
   text-decoration: line-through; text-decoration-thickness: 0.3mm;
@@ -483,11 +483,11 @@ img { max-width: 100%; height: auto; display: block; }
 }
 .card-sub .product-name {
   grid-column: 1;
-  font-size: 2.6mm; font-weight: 900; color: var(--c-text);
+  font-size: 3.6mm; font-weight: 900; color: var(--c-text);
   letter-spacing: -0.03em; line-height: 1.05;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.card-sub .product-name .unit { color: var(--c-muted); font-weight: 700; font-size: 2.2mm; }
+.card-sub .product-name .unit { color: var(--c-muted); font-weight: 700; font-size: 2.8mm; }
 .card-sub .original-price {
   grid-column: 1;
   font-size: 2mm; color: var(--c-strike);
@@ -608,11 +608,11 @@ img { max-width: 100%; height: auto; display: block; }
 }
 .card-fresh .product-name {
   grid-column: 1;
-  font-size: 2.2mm; font-weight: 900; color: var(--c-text);
+  font-size: 3mm; font-weight: 900; color: var(--c-text);
   letter-spacing: -0.03em; line-height: 1;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.card-fresh .product-name .unit { font-size: 1.8mm; color: var(--c-muted); font-weight: 700; }
+.card-fresh .product-name .unit { font-size: 2.4mm; color: var(--c-muted); font-weight: 700; }
 .card-fresh .original-price {
   grid-column: 1;
   font-size: 1.6mm; color: var(--c-strike);

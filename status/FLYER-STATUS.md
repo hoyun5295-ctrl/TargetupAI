@@ -22,11 +22,37 @@
 | **FLYER-QR-COUPON-DESIGN.md** | ★ D114 QR 체크인 쿠폰 구현 설계서 (즉시 개발용) |
 | **FLYER-POS-AGENT-DEV.md** | ★ D114 POS Agent 개발 설계서 (투게더스 우선, 즉시 개발용) |
 
-> **최종 업데이트:** 2026-04-15 (D122)
+> **최종 업데이트:** 2026-04-17 저녁 (D129 — 인쇄전단 V2 4종 v3.0 완성 + 상품명 폰트 확대 + 인쇄전단 전용 목록 분리)
 
 ---
 
 ## 1) CURRENT_TASK (현재 집중 작업)
+
+### 🎯 D129 — 인쇄전단 V2 재설계 (2026-04-17) — ✅ 4종 v3.0 완성 + 상품명 확대 + 목록 분리
+
+**★ 6차 세션 (2026-04-17 저녁 이어서):**
+- [x] **4종 템플릿 상품명 폰트 일괄 확대** — "상품명 너무 작다" 피드백 반영
+  - hero-right .product-name: 3.8~5.4mm → 5.2~6.8mm (+37%)
+  - card-main .product-name: 3.8~4.2mm → 5.2~5.6mm (+35~38%)
+  - card-sub .product-name: 2.6mm → 3.6mm (+38%)
+  - card-fresh .product-name: 2.2mm → 3mm (+36%)
+  - unit 단위 텍스트도 동반 상향
+  - 4종(spring/hot/premium/weekend) 전수 적용 + `test-render.ts all` 검증 완료 (PDF/PNG 전부 생성 성공)
+
+- [x] **(C)안 — 인쇄전단 전용 목록 분리** — "인쇄전단이 전단지 관리에 섞여 나온다" 구조적 버그 해결
+  - **백엔드** `flyers.ts`:
+    - 기존 `GET /` 에 `AND (template IS NULL OR template != 'print')` 가드 1줄 추가 → FlyerPage에서 인쇄전단 자동 제외
+    - 신규 `GET /print-flyers` 라우트: `template='print'` 필터 + `uploads/print-flyers/{id}.{pdf,png}` 존재 여부로 pdfUrl/pngUrl 동적 반환
+    - `DELETE /:id` 확장: 인쇄전단 파일(pdf/png) 존재 시 `fs.unlinkSync()` 정리 (실패해도 DB 삭제 차단하지 않음)
+  - **프론트** `PrintFlyerPage.tsx`:
+    - 상단에 "📁 내 인쇄전단 (N건)" SectionCard 신설 — 카드 그리드 UI(FlyerPage 스타일 차용)
+    - 각 카드: 제목 + 매장명 + "인쇄전단" Badge + 2절 세로 표기 + PDF/PNG 다운로드 + 삭제
+    - 비어있으면 EmptyState, 삭제는 ConfirmModal
+    - 발행 완료 후 `loadPrintFlyers()` 자동 갱신
+  - **FlyerPage.tsx 무수정** (백엔드 가드 1줄로 자동 해결)
+  - 타입체크 backend + flyer-frontend 0 errors
+
+---
 
 ### 🎯 D129 — 인쇄전단 V2 재설계 (2026-04-17) — ✅ 퀄리티 고도화 + 4종 기본 템플릿 완료
 

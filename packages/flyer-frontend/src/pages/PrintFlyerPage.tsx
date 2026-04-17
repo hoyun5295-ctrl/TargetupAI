@@ -15,7 +15,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { API_BASE, apiFetch } from '../App';
-import { SectionCard, Button, Input } from '../components/ui';
+import { SectionCard, Button, Input, Badge, EmptyState, ConfirmModal } from '../components/ui';
 import AlertModal from '../components/AlertModal';
 import ExcelUploadModal, { type MappedProduct } from '../components/ExcelUploadModal';
 
@@ -44,6 +44,19 @@ interface StoreInfo {
   address: string;
   phone: string;
   hours: string;
+}
+
+// ★ D129: 인쇄전단 목록 아이템 (GET /print-flyers 응답)
+interface PrintFlyerItem {
+  id: string;
+  title: string;
+  store_name: string | null;
+  status: string;
+  categories: any;
+  created_at: string;
+  updated_at: string;
+  pdfUrl: string | null;
+  pngUrl: string | null;
 }
 
 // ============================================================
@@ -127,6 +140,47 @@ export default function PrintFlyerPage({ token: _token }: { token: string }) {
   const [generating, setGenerating] = useState(false);
   const [pdfUrl, setPdfUrl] = useState('');
   const [alert, setAlert] = useState<{ show: boolean; title: string; message: string; type: 'success' | 'error' | 'info' }>({ show: false, title: '', message: '', type: 'info' });
+
+  // ★ D129: 인쇄전단 목록 state
+  const [flyerList, setFlyerList] = useState<PrintFlyerItem[]>([]);
+  const [loadingFlyerList, setLoadingFlyerList] = useState(false);
+  const [deleteModal, setDeleteModal] = useState<{ show: boolean; id: string; title: string }>({ show: false, id: '', title: '' });
+
+  const loadPrintFlyers = async () => {
+    setLoadingFlyerList(true);
+    try {
+      const res = await apiFetch(`${API_BASE}/api/flyer/flyers/print-flyers`);
+      if (res.ok) {
+        const data = await res.json();
+        setFlyerList(Array.isArray(data) ? data : []);
+      }
+    } catch { /* ignore */ }
+    setLoadingFlyerList(false);
+  };
+
+  useEffect(() => { loadPrintFlyers(); }, []);
+
+  const handleDeleteFlyer = async (id: string) => {
+    try {
+      const res = await apiFetch(`${API_BASE}/api/flyer/flyers/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        setAlert({ show: true, title: '삭제 완료', message: '인쇄전단이 삭제되었습니다.', type: 'success' });
+        setDeleteModal({ show: false, id: '', title: '' });
+        loadPrintFlyers();
+      } else {
+        setAlert({ show: true, title: '삭제 실패', message: '삭제에 실패했습니다.', type: 'error' });
+      }
+    } catch {
+      setAlert({ show: true, title: '삭제 실패', message: '서버 오류', type: 'error' });
+    }
+  };
+
+  const fmtDate = (iso: string) => {
+    try {
+      const d = new Date(iso);
+      return `${d.getFullYear()}.${d.getMonth() + 1}.${d.getDate()}`;
+    } catch { return ''; }
+  };
 
   // ============================================================
   // 카테고리 관리
@@ -308,6 +362,8 @@ export default function PrintFlyerPage({ token: _token }: { token: string }) {
           setPngUrl(`${API_BASE}${data.pngUrl}`);
           setAlert({ show: true, title: '빠른확인 PNG 발행 완료', message: '확인용 이미지가 준비됐습니다. 다운로드하여 내용을 검토하세요.', type: 'success' });
         }
+        // ★ D129: 발행 완료 후 목록 즉시 갱신
+        loadPrintFlyers();
       } else {
         const err = await res.json().catch(() => ({ error: '생성 실패' }));
         setAlert({ show: true, title: '발행 실패', message: err.error || '전단 발행에 실패했습니다.', type: 'error' });
@@ -338,6 +394,80 @@ export default function PrintFlyerPage({ token: _token }: { token: string }) {
   // ============================================================
   return (
     <div className="space-y-6">
+      {/* ★ D129: 내 인쇄전단 목록 */}
+      <SectionCard title={`📁 내 인쇄전단 ${flyerList.length > 0 ? `(${flyerList.length}건)` : ''}`}>
+        {loadingFlyerList ? (
+          <div className="text-center py-10 text-text-muted text-sm">로딩 중...</div>
+        ) : flyerList.length === 0 ? (
+          <EmptyState
+            icon="🖨"
+            title="아직 발행한 인쇄전단이 없습니다"
+            description="아래 에디터에서 상품을 입력하고 PDF/PNG로 발행해보세요"
+          />
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {flyerList.map(f => {
+              return (
+                <div key={f.id} className="bg-surface border border-border rounded-xl overflow-hidden shadow-card hover:shadow-elevated transition-shadow">
+                  <div className="px-4 py-3 border-b bg-bg border-border">
+                    <div className="flex justify-between items-start gap-2">
+                      <div className="flex-1 min-w-0">
+                        <h3 className="font-bold text-sm text-text truncate">{f.title}</h3>
+                        {f.store_name && <p className="text-xs text-text-muted mt-0.5 truncate">{f.store_name}</p>}
+                      </div>
+                      <Badge variant="neutral">인쇄전단</Badge>
+                    </div>
+                  </div>
+                  <div className="px-4 py-3">
+                    <div className="flex items-center gap-2 text-xs text-text-muted">
+                      <span>📐 2절 세로 (545×788mm)</span>
+                    </div>
+                    <div className="mt-2 flex gap-2 text-[11px]">
+                      {f.pdfUrl && (
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-primary-50 text-primary-700 font-semibold">PDF</span>
+                      )}
+                      {f.pngUrl && (
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 font-semibold">PNG</span>
+                      )}
+                      {!f.pdfUrl && !f.pngUrl && (
+                        <span className="text-text-muted">파일 없음 (재발행 필요)</span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="px-4 py-2 bg-bg border-t border-border flex justify-between items-center">
+                    <span className="text-[11px] text-text-muted">{fmtDate(f.created_at)}</span>
+                    <div className="flex gap-2">
+                      {f.pdfUrl && (
+                        <button
+                          onClick={() => downloadFile(`${API_BASE}${f.pdfUrl}`, `${f.title || 'print-flyer'}.pdf`)}
+                          className="text-[11px] text-indigo-600 hover:text-indigo-700 font-medium"
+                        >
+                          📄 PDF
+                        </button>
+                      )}
+                      {f.pngUrl && (
+                        <button
+                          onClick={() => downloadFile(`${API_BASE}${f.pngUrl}`, `${f.title || 'print-flyer'}.png`)}
+                          className="text-[11px] text-amber-600 hover:text-amber-700 font-medium"
+                        >
+                          🖼 PNG
+                        </button>
+                      )}
+                      <button
+                        onClick={() => setDeleteModal({ show: true, id: f.id, title: f.title })}
+                        className="text-[11px] text-error-500 hover:text-error-600 font-medium"
+                      >
+                        삭제
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </SectionCard>
+
       {/* 헤더 */}
       <div className="flex items-center justify-between">
         <div>
@@ -683,6 +813,18 @@ export default function PrintFlyerPage({ token: _token }: { token: string }) {
       <AlertModal
         alert={alert}
         onClose={() => setAlert(a => ({ ...a, show: false }))}
+      />
+
+      {/* ★ D129: 인쇄전단 삭제 확인 모달 */}
+      <ConfirmModal
+        show={deleteModal.show}
+        icon="🗑️"
+        title="인쇄전단 삭제"
+        message={`"${deleteModal.title}"을(를) 삭제하시겠습니까?\nPDF/PNG 파일도 함께 삭제됩니다.`}
+        danger
+        confirmLabel="삭제"
+        onConfirm={() => handleDeleteFlyer(deleteModal.id)}
+        onCancel={() => setDeleteModal({ show: false, id: '', title: '' })}
       />
 
       {/* 엑셀 업로드 + AI 매핑 모달 */}
