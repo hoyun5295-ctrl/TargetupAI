@@ -1,40 +1,21 @@
 /**
  * dm-viewer.ts — 모바일 DM 공개 뷰어 HTML 렌더러
  *
+ * D119: 슬라이드 기반 (pages[])
+ * D125: 섹션 기반 세로 스크롤 (sections[]) 추가 — layout_mode로 분기
+ *
  * 인라인 HTML/CSS/JS로 서버사이드 렌더링.
- * 외부 CDN 의존 없음. 터치 스와이프 + 열람 추적.
+ * 이미지: base64 인라인 (외부 CDN 의존 최소화).
+ * 폰트: Pretendard CDN + 시스템 폰트 fallback 체인.
  */
-import fs from 'fs';
-import path from 'path';
+import { inlineImage, youtubeEmbedUrl } from './dm-viewer-utils';
+import { renderSections, COUNTDOWN_SCRIPT, escapeHtml } from './dm-section-renderer';
+import { renderDmTokensCss, renderDmBaseCss } from './dm-tokens';
+import { resolveSections } from './dm-variable-resolver';
+import type { Section } from './dm-section-registry';
+import type { DmBrandKit } from './dm-tokens';
 
-const DM_IMAGE_DIR = path.join(process.cwd(), 'uploads', 'dm-images');
-
-// ────────────────── YouTube URL → embed 변환 ──────────────────
-
-function youtubeEmbedUrl(url: string): string | null {
-  if (!url) return null;
-  // youtube.com/watch?v=XXX
-  let m = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([A-Za-z0-9_-]{11})/);
-  if (m) return `https://www.youtube.com/embed/${m[1]}?rel=0&playsinline=1`;
-  // 이미 embed URL
-  if (url.includes('youtube.com/embed/')) return url;
-  return null;
-}
-
-// ────────────────── 이미지 base64 인라인 ──────────────────
-
-function inlineImage(src: string): string {
-  if (!src || src.startsWith('data:') || src.startsWith('http')) return src;
-  // /api/flyer/p/dm-images/{companyId}/{filename} 또는 /api/dm/images/{companyId}/{filename}
-  const m = src.match(/\/(?:api\/dm\/images|api\/flyer\/p\/dm-images)\/([^/]+)\/([^/]+)$/);
-  if (!m) return src;
-  const filePath = path.join(DM_IMAGE_DIR, m[1], m[2]);
-  if (!fs.existsSync(filePath)) return src;
-  const buf = fs.readFileSync(filePath);
-  const ext = path.extname(filePath).toLowerCase();
-  const mime = ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg';
-  return `data:${mime};base64,${buf.toString('base64')}`;
-}
+export { inlineImage, youtubeEmbedUrl };
 
 // ────────────────── 헤더 템플릿 4종 ──────────────────
 
@@ -105,9 +86,9 @@ function renderFooter(template: string, data: any, storeName: string): string {
   }
 }
 
-// ────────────────── 메인 뷰어 HTML ──────────────────
+// ────────────────── 레거시 슬라이드 뷰어 (D119 기본형 하위호환) ──────────────────
 
-export function renderDmViewerHtml(dm: any, trackApiBase: string): string {
+function renderLegacySlidesHtml(dm: any, trackApiBase: string): string {
   const pages: any[] = Array.isArray(dm.pages) ? dm.pages : (typeof dm.pages === 'string' ? JSON.parse(dm.pages) : []);
   const headerData = typeof dm.header_data === 'string' ? JSON.parse(dm.header_data) : (dm.header_data || {});
   const footerData = typeof dm.footer_data === 'string' ? JSON.parse(dm.footer_data) : (dm.footer_data || {});
@@ -277,6 +258,158 @@ body{font-family:'Noto Sans KR',sans-serif;background:#fff;overflow-x:hidden;-we
 </script>
 </body>
 </html>`;
+}
+
+// ────────────────── 섹션 기반 세로 스크롤 뷰어 (D125 프로모델) ──────────────────
+
+function parseSections(raw: any): Section[] {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw as Section[];
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? (parsed as Section[]) : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+function parseBrandKit(raw: any): DmBrandKit | undefined {
+  if (!raw) return undefined;
+  if (typeof raw === 'string') {
+    try { return JSON.parse(raw) as DmBrandKit; } catch { return undefined; }
+  }
+  if (typeof raw === 'object') return raw as DmBrandKit;
+  return undefined;
+}
+
+function renderSectionsHtml(dm: any, trackApiBase: string, resolvedSections?: Section[]): string {
+  const sections: Section[] = resolvedSections || parseSections(dm.sections);
+  const brandKit: DmBrandKit | undefined = parseBrandKit(dm.brand_kit);
+  const storeName = dm.store_name || '';
+  const title = dm.title || '모바일 DM';
+  const shortCode = dm.short_code || '';
+
+  const hasCountdown = sections.some(s => s.type === 'countdown');
+
+  const sectionsHtml = renderSections(sections, {
+    brandKit,
+    storeName,
+    trackApiBase,
+    shortCode,
+    isPreview: !!resolvedSections,
+  });
+
+  const tokensCss = renderDmTokensCss(brandKit);
+  const baseCss = renderDmBaseCss();
+
+  return `<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
+<meta name="format-detection" content="telephone=no">
+<title>${escapeHtml(storeName ? `${storeName} - ${title}` : title)}</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css" onerror="this.remove()">
+<style>
+${tokensCss}
+${baseCss}
+.cd-unit{background:rgba(255,255,255,0.1);border-radius:var(--dm-radius-md);padding:var(--dm-sp-3) var(--dm-sp-4);min-width:64px}
+.cd-num{font-size:var(--dm-fs-h1);font-weight:900;font-family:var(--dm-font-mono);color:#fff}
+.cd-lbl{font-size:var(--dm-fs-tiny);opacity:0.8;margin-top:2px}
+.dm-section-wrap{position:relative}
+</style>
+</head>
+<body>
+<div class="dm-viewer">
+${sectionsHtml}
+</div>
+
+<script>
+(function(){
+  var CODE = 'dm-${escapeHtml(shortCode)}';
+  var TRACK_URL = '${escapeHtml(trackApiBase)}';
+  var PHONE = new URLSearchParams(location.search).get('p') || '';
+  var startTime = Date.now();
+  var sectionInteractions = {};
+
+  function sendTrack(extra) {
+    if (!CODE) return;
+    var dur = Math.round((Date.now() - startTime) / 1000);
+    var body = JSON.stringify(Object.assign({
+      phone: PHONE,
+      page_reached: 1,
+      total_pages: 1,
+      duration: dur,
+      section_interactions: sectionInteractions
+    }, extra || {}));
+    if (navigator.sendBeacon) {
+      navigator.sendBeacon(TRACK_URL + '/' + CODE + '/track', new Blob([body], {type:'application/json'}));
+    } else {
+      fetch(TRACK_URL + '/' + CODE + '/track', { method:'POST', headers:{'Content-Type':'application/json'}, body: body, keepalive: true }).catch(function(){});
+    }
+  }
+
+  if ('IntersectionObserver' in window) {
+    var io = new IntersectionObserver(function(entries){
+      entries.forEach(function(e){
+        if (e.isIntersecting) {
+          var sid = e.target.getAttribute('data-section-id');
+          if (sid) {
+            sectionInteractions[sid] = sectionInteractions[sid] || { views: 0, clicks: 0 };
+            sectionInteractions[sid].views++;
+          }
+        }
+      });
+    }, { threshold: 0.5 });
+    document.querySelectorAll('.dm-section-wrap').forEach(function(el){ io.observe(el); });
+  }
+
+  document.addEventListener('click', function(e){
+    var wrap = e.target.closest && e.target.closest('.dm-section-wrap');
+    if (wrap) {
+      var sid = wrap.getAttribute('data-section-id');
+      if (sid) {
+        sectionInteractions[sid] = sectionInteractions[sid] || { views: 0, clicks: 0 };
+        sectionInteractions[sid].clicks++;
+      }
+    }
+  }, true);
+
+  window.addEventListener('beforeunload', function(){ sendTrack(); });
+  sendTrack();
+})();
+${hasCountdown ? COUNTDOWN_SCRIPT : ''}
+</script>
+</body>
+</html>`;
+}
+
+// ────────────────── 메인 디스패처 (layout_mode 분기) ──────────────────
+
+export function renderDmViewerHtml(dm: any, trackApiBase: string): string {
+  const sectionsArr = parseSections(dm.sections);
+  const useSections = dm.layout_mode === 'scroll' && sectionsArr.length > 0;
+  return useSections ? renderSectionsHtml(dm, trackApiBase) : renderLegacySlidesHtml(dm, trackApiBase);
+}
+
+/**
+ * 샘플 고객 데이터로 변수 치환 후 뷰어 HTML 렌더 (에디터 미리보기/검수용).
+ * layout_mode='scroll' 전용. slides 모드는 기존 경로 그대로.
+ */
+export async function renderDmViewerHtmlWithCustomer(
+  dm: any,
+  trackApiBase: string,
+  customer: Record<string, any> | null,
+  companyId: string,
+): Promise<string> {
+  const sectionsArr = parseSections(dm.sections);
+  const useSections = dm.layout_mode === 'scroll' && sectionsArr.length > 0;
+  if (!useSections) return renderLegacySlidesHtml(dm, trackApiBase);
+  const resolved = await resolveSections(sectionsArr, customer, companyId);
+  return renderSectionsHtml(dm, trackApiBase, resolved);
 }
 
 // ────────────────── 만료/404 에러 페이지 ──────────────────

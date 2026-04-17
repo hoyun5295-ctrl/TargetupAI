@@ -107,6 +107,95 @@
 
 ---
 
+### 🎨 D125 — 모바일 DM 빌더 프로모델 v1 구현 (2026-04-17~) — 🟢 설계 완료 / 구현 예정
+
+> **배경:** D119 기본형 DM 빌더(슬라이드 기반) → **실전 프로모델**로 전면 재설계.
+> 프로 요금제(월 100만원) 핵심 차별화 기능. "MVP 아니고 실전 프로모델"(Harold님 2026-04-16 지시).
+> **설계서:** [`status/DM-PRO-DESIGN.md`](DM-PRO-DESIGN.md) — 19섹션, 완료 체크리스트 포함.
+>
+> **핵심 변경:**
+> - 구조: 슬라이드 → **섹션 기반 세로 스크롤** (섹션 11종 × 업종별 스타일 3~5 변형)
+> - 편집: 입력폼 → **WYSIWYG 캔버스 직접 편집** (자체 구현 + dnd-kit)
+> - AI 엔진 4모듈 신설: Prompt Parser / Layout Recommender / Copy Generator / Tone Transformer
+> - 검수 엔진: 10영역 × 3등급 자동 검사
+> - 개인화 변수 + fallback + 샘플 A/B/empty 렌더링
+> - 브랜드 킷 (컬러·로고·폰트·톤) + 템플릿 7카테고리
+> - 버전 관리 + 승인 플로우
+> - 디자인 시스템 (WCAG AA + 320~430px + 토큰 기반)
+>
+> **하위호환:** 기존 DM `layout_mode='slides'` 유지. dm-viewer가 신구 모두 렌더링.
+>
+> **구현 의존성 그래프 (14단계):**
+> 1. DB 마이그레이션 (§4-1, Harold님 직접 실행 안내 방식)
+> 2. 섹션 렌더러 11종 (백엔드 + 프론트 Canvas)
+> 3. 디자인 토큰 (dm-tokens.ts)
+> 4. 프론트 에디터 뼈대 (3분할 + Zustand)
+> 5. 섹션 DnD + 인라인 편집 + 속성 패널
+> 6. AI 엔진 4모듈 (기존 callAIWithFallback 재활용)
+> 7. 변수 바인딩 + fallback + 샘플 렌더링
+> 8. 검수 엔진 + UI
+> 9. 브랜드 킷 + 템플릿 7카테고리
+> 10. 버전 관리 + 승인 플로우
+> 11. 테스트 발송 (insertTestSmsQueue 재활용)
+> 12. 기존 DM 자동 변환 (dm-legacy-converter.ts)
+> 13. 통합 QA + 디자인 폴리싱
+> 14. 문서화
+>
+> **다음 세션 진입:** `status/DM-PRO-DESIGN.md` 읽고 [1] DB 마이그레이션부터 착수.
+
+---
+
+### 🔧 D124 — 0416 직원 검수 5건 + 필드명 통일 + 무료수신거부 빈줄 (2026-04-16) — 🟡 수정완료-배포대기
+
+> **배경:** 직원 검수 PDF(한줄로_20260416.pdf) 5건. D123 후속 수정 + 추가 UX/AI 개선.
+
+#### 수정 5건 + 부가 2건
+
+| # | 영역 | 근본 원인 | 해결 |
+|---|---|---|---|
+| **N1** | 직접타겟발송 하단 "중복제거" 버튼 잔존 | D123 P3에서 상단 체크박스만 제거, 하단 버튼 놓침 | TargetSendModal.tsx 하단 버튼 삭제. 선택삭제/전체삭제 유지 |
+| **N2** | 발송결과 시간/엑셀/웹 불일치 | "등록일시" 값이 sendreq_time(QTmsg INSERT)이라 "한줄로에서 발송을 건 시간" 의미와 불일치. 엑셀 필드명·순서도 웹과 다름 | **UI 2컬럼 수신확인 제거 / 엑셀 3컬럼 유지** + **등록일시 값 = 캠페인 `created_at`** (ResultsModal/엑셀/AdminDashboard 3곳 동기화) + 엑셀 헤더 웹과 순서·이름 통일(수신번호,회신번호,메시지내용,등록일시,발송일시,전송결과,결과코드,통신사,메시지유형,수신확인시간) + 발송 내역 모달 960→1300px + 셀 whitespace-nowrap |
+| **N3** | 특수문자 선택 시 문안 끝에 붙음 | Dashboard 특수문자 모달이 `setMessage(prev => prev + char)` — 개인화 변수는 이미 커서 삽입 | **신규 컨트롤타워 `utils/textInsert.ts`** (insertAtCursor / insertAtCursorOrAppend / insertAtCursorPos 3함수) + 4곳 인라인 제거 (Dashboard 특수문자 / DirectSendPanel 자동입력 / TargetSendModal insertVariable / AutoSendFormModal insertVariable) + textarea `data-char-target` 속성 |
+| **N4** | MMS 이미지 호버 시 UUID 파일명 표시 | DB `mms_image_paths`가 문자열 배열(절대경로)만 저장. 원본 파일명 기록 없음 | `mms_image_paths` JSONB를 **객체 배열({path, originalName})로 확장** + **컨트롤타워 2종 신설** (백엔드 mms-image-util.ts / 프론트 mmsImage.ts) + 업로드 응답에 originalName(한글 latin1→utf8 복원) + 소비처 전수 호환 (Dashboard 7곳 / campaigns.ts / ResultsModal / AiCustomSendFlow / props 타입 3곳) |
+| **N5** | AI 문안 하단(마무리/연락처) 줄바꿈 없이 붙음 | D123 P12 `dnCount ≤ 3` 강제 축소가 자연스러운 단락 구분까지 파괴 | BRAND_SYSTEM_PROMPT 재작성("마무리 앞 빈 줄 필수" 명시) + post-processing dnCount 제거. `\n{3,}→\n\n` 방어선만 유지 |
+| **+α** | 무료수신거부 앞에 빈 줄 없음 | `buildAdMessage`가 `\n무료수신거부`만 부착 | `\n\n무료수신거부`로 변경(백·프론트 동기) + 본문 끝 개행 정규화(`\n+$`) + 5경로 + 스팸테스트 + 표시경로 자동 반영 |
+| **+β** | DM 빌더 프로모델 설계서 | MVP → 실전 프로모델 방향 전환 | **DM-PRO-DESIGN.md 19섹션 완성** — 다음 세션부터 구현 착수 |
+
+#### 수정 파일 총 약 18개
+
+**백엔드:**
+- `utils/messageUtils.ts` — buildAdMessage `\n\n무료수신거부` + 본문 끝 개행 정규화(N5/+α), replaceVariables skipNumberFormatting(D123 P2 유지)
+- `routes/campaigns.ts` — 직접발송 3곳 skipNumberFormatting(D123 P2), MMS path normalizeMmsImagePaths(N4)
+- `routes/admin.ts` — `/stats/send/detail` SELECT c.created_at(N2), `/sms-detail` recvTime 반환 제거(N2)
+- `routes/results.ts` — SMS_DETAIL/EXPORT_FIELDS, 카카오 UNION ALL 필드, CSV 헤더/데이터 재정렬(N2)
+- `routes/mms-images.ts` — originalName 응답 포함, latin1→utf8 복원(N4)
+- `services/ai.ts` — BRAND_SYSTEM_PROMPT 재작성, dnCount 제거(N5)
+- **신설** `utils/mms-image-util.ts` — MMS 경로/파일명 컨트롤타워(N4)
+
+**프론트엔드:**
+- `components/TargetSendModal.tsx` — 하단 중복제거 버튼 제거(N1), insertAtCursor 사용(N3), data-char-target(N3)
+- `components/DirectSendPanel.tsx` — insertAtCursorPos 사용(N3), data-char-target(N3)
+- `components/AutoSendFormModal.tsx` — insertAtCursorPos 사용(N3)
+- `components/ResultsModal.tsx` — 수신확인 컬럼 제거, 등록일시=selectedCampaign.created_at, 모달 1300px, whitespace-nowrap, getMmsImageDisplayName(N2/N4)
+- `components/AiCustomSendFlow.tsx` — img alt/title originalName 우선(N4)
+- `pages/AdminDashboard.tsx` — 캠페인리스트/SMS상세/통계모달 등록/발송 2컬럼(N2)
+- `pages/Dashboard.tsx` — 특수문자 모달 컨트롤타워(N3), mmsUploadedImages state+7곳 body 객체배열(N4), saveTemplate 타입(N4), 템플릿 복원 호환(N4)
+- `utils/formatDate.ts` — buildAdMessageFront `\n\n무료수신거부`(+α)
+- **신설** `utils/textInsert.ts` — 커서 삽입 컨트롤타워(N3)
+- **신설** `utils/mmsImage.ts` — MMS 경로/파일명 컨트롤타워(N4)
+
+#### 핵심 교훈 (D124)
+
+> 1. **SQL 파일 자동생성 금지** — OPS.md 기반 Harold님 직접 실행 안내로 대체. feedback_no_sql_generation.md 메모리 기록.
+> 2. **MVP 마인드 탈피** — 프로 요금제 차별화 기능은 "월 100만원 값어치" 기준. 기능·디자인 동시 완성도.
+> 3. **컬럼 통일 요구는 순서·이름 양쪽** — 데이터 의미 같아도 헤더명·순서 다르면 직원 혼란. 웹 기준으로 엑셀 맞춤.
+> 4. **동일 로직 2곳 이상 = 즉시 컨트롤타워** 원칙 4번 반복 적용 (N3 커서삽입 4곳→textInsert.ts / N4 MMS 경로 추출 여러 곳→mmsImage.ts).
+> 5. **JSONB 구조 확장 > DB 스키마 변경** — mms_image_paths 객체 배열 / dm_pages layout_mode 등 하위호환 JSONB 확장이 안전.
+> 6. **컨트롤타워 함수 시그니처는 범용 우선** — `(newValue: string) => void`가 React Dispatch와 일반 콜백 양쪽 호환 → TargetSendModal props 형태도 수용.
+> 7. **"재작업"은 사용자 의도 재확인부터** — N2는 PDF 오독으로 3번 뒤집음 (엑셀 3컬럼 유지 / 등록일시=created_at 의미). "제대로 읽기"가 "빠르게 수정"보다 우선.
+
+---
+
 ### 🔧 D123 — 0415 직원 검수 12건 전수 수정 + 레거시 인프라 복구 + 영업총판 제안서 (2026-04-16) — ✅ 배포완료
 
 > **배경:** 직원 검수 PDF(한줄로_20260415.pdf) 12건 전수 수정. 080번호 누락 / 직접발송 숫자 콤마 / 직접타겟발송 체크박스 / 발송결과 상세 시간 / MMS 이미지 / 회신번호 하이픈 / 예약대기 드래그 / 자동발송 5건 / AI 줄바꿈 과다.

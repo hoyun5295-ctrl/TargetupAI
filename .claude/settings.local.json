@@ -177,7 +177,11 @@
       "WebFetch(domain:pagination.com)",
       "Bash(node tmp_build_docx.js)",
       "Bash(rm -f tmp_page_*.png tmp_proposal_*.png tmp_build_docx.js)",
-      "Bash(ls tmp_*)"
+      "Bash(ls tmp_*)",
+      "Bash(grep -E \"dm-tokens|dm\\\\\\\\\\\\\\\\tokens\")",
+      "Bash(echo \"---backend exit: $?---\")",
+      "Bash(echo \"---frontend exit: $?---\")",
+      "Bash(echo \"---exit: $?---\")"
     ]
   }
 }

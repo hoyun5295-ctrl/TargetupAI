@@ -12,12 +12,20 @@ import { query } from '../../config/database';
 export interface DmPageInput {
   title: string;
   store_name?: string;
+  // Legacy (D119 slides)
   header_template?: string;
   footer_template?: string;
   header_data?: Record<string, any>;
   footer_data?: Record<string, any>;
-  pages: DmSlide[];
+  pages?: DmSlide[];
   settings?: Record<string, any>;
+  // D125 section-based
+  layout_mode?: 'scroll' | 'slides';
+  sections?: any[];
+  brand_kit?: Record<string, any>;
+  template_id?: string;
+  ai_prompt?: string;
+  approval_status?: 'draft' | 'review' | 'approved' | 'published' | 'rejected';
 }
 
 export interface DmSlide {
@@ -32,15 +40,27 @@ export interface DmSlide {
 // ────────────────── CRUD ──────────────────
 
 export async function createDm(companyId: string, userId: string, data: DmPageInput) {
+  const layoutMode = data.layout_mode || (Array.isArray(data.sections) && data.sections.length > 0 ? 'scroll' : 'slides');
   const result = await query(
-    `INSERT INTO dm_pages (company_id, created_by, title, store_name, header_template, footer_template, header_data, footer_data, pages, settings)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+    `INSERT INTO dm_pages (
+       company_id, created_by, title, store_name,
+       header_template, footer_template, header_data, footer_data,
+       pages, settings,
+       layout_mode, sections, brand_kit, template_id, ai_prompt, approval_status
+     )
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
      RETURNING *`,
     [
       companyId, userId, data.title, data.store_name || null,
       data.header_template || 'default', data.footer_template || 'default',
       JSON.stringify(data.header_data || {}), JSON.stringify(data.footer_data || {}),
       JSON.stringify(data.pages || []), JSON.stringify(data.settings || {}),
+      layoutMode,
+      data.sections ? JSON.stringify(data.sections) : null,
+      data.brand_kit ? JSON.stringify(data.brand_kit) : null,
+      data.template_id || null,
+      data.ai_prompt || null,
+      data.approval_status || 'draft',
     ]
   );
   return result.rows[0];
@@ -59,6 +79,13 @@ export async function updateDm(id: string, companyId: string, data: Partial<DmPa
   if (data.footer_data !== undefined) { sets.push(`footer_data = $${idx++}`); params.push(JSON.stringify(data.footer_data)); }
   if (data.pages !== undefined) { sets.push(`pages = $${idx++}`); params.push(JSON.stringify(data.pages)); }
   if (data.settings !== undefined) { sets.push(`settings = $${idx++}`); params.push(JSON.stringify(data.settings)); }
+  // D125
+  if (data.layout_mode !== undefined) { sets.push(`layout_mode = $${idx++}`); params.push(data.layout_mode); }
+  if (data.sections !== undefined) { sets.push(`sections = $${idx++}`); params.push(JSON.stringify(data.sections)); }
+  if (data.brand_kit !== undefined) { sets.push(`brand_kit = $${idx++}`); params.push(JSON.stringify(data.brand_kit)); }
+  if (data.template_id !== undefined) { sets.push(`template_id = $${idx++}`); params.push(data.template_id); }
+  if (data.ai_prompt !== undefined) { sets.push(`ai_prompt = $${idx++}`); params.push(data.ai_prompt); }
+  if (data.approval_status !== undefined) { sets.push(`approval_status = $${idx++}`); params.push(data.approval_status); }
 
   if (sets.length === 0) return null;
 
@@ -70,6 +97,71 @@ export async function updateDm(id: string, companyId: string, data: Partial<DmPa
     params
   );
   return result.rows[0] || null;
+}
+
+// ────────────────── 버전 관리 (D125 §13) ──────────────────
+
+export async function saveDmVersion(
+  dmId: string,
+  label: string,
+  sections: any[],
+  brandKit: any,
+  note: string | null,
+  userId: string,
+): Promise<any> {
+  const res = await query(
+    `SELECT COALESCE(MAX(version_number), 0) + 1 AS next FROM dm_versions WHERE dm_id = $1`,
+    [dmId],
+  );
+  const versionNumber = res.rows[0]?.next || 1;
+  const ins = await query(
+    `INSERT INTO dm_versions (dm_id, version_label, version_number, sections, brand_kit, note, created_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     RETURNING *`,
+    [dmId, label, versionNumber, JSON.stringify(sections), JSON.stringify(brandKit || {}), note, userId],
+  );
+  return ins.rows[0];
+}
+
+export async function listDmVersions(dmId: string, companyId: string): Promise<any[]> {
+  // company_id 소속 확인
+  const own = await query(`SELECT id FROM dm_pages WHERE id = $1 AND company_id = $2`, [dmId, companyId]);
+  if (own.rows.length === 0) return [];
+  const res = await query(
+    `SELECT id, version_label, version_number, note, created_by, created_at
+     FROM dm_versions WHERE dm_id = $1 ORDER BY version_number DESC`,
+    [dmId],
+  );
+  return res.rows;
+}
+
+export async function restoreDmVersion(dmId: string, versionId: string, companyId: string): Promise<any | null> {
+  const own = await query(`SELECT id FROM dm_pages WHERE id = $1 AND company_id = $2`, [dmId, companyId]);
+  if (own.rows.length === 0) return null;
+  const vRes = await query(`SELECT sections, brand_kit FROM dm_versions WHERE id = $1 AND dm_id = $2`, [versionId, dmId]);
+  if (vRes.rows.length === 0) return null;
+  const v = vRes.rows[0];
+  const upd = await query(
+    `UPDATE dm_pages SET sections = $1, brand_kit = $2, updated_at = NOW()
+     WHERE id = $3 AND company_id = $4 RETURNING *`,
+    [v.sections, v.brand_kit, dmId, companyId],
+  );
+  return upd.rows[0] || null;
+}
+
+// ────────────────── 승인 플로우 (D125 §13-3) ──────────────────
+
+export async function setApprovalStatus(
+  dmId: string,
+  companyId: string,
+  status: 'draft' | 'review' | 'approved' | 'published' | 'rejected',
+): Promise<any | null> {
+  const res = await query(
+    `UPDATE dm_pages SET approval_status = $1, updated_at = NOW()
+     WHERE id = $2 AND company_id = $3 RETURNING *`,
+    [status, dmId, companyId],
+  );
+  return res.rows[0] || null;
 }
 
 export async function deleteDm(id: string, companyId: string) {

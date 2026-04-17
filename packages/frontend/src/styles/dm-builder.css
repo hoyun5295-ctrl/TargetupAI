@@ -1,0 +1,260 @@
+/**
+ * dm-builder.css — 모바일 DM 빌더 전역 스타일 (CSS 변수 + 리셋 + 공통 유틸)
+ *
+ * ⚠️ 값의 원천: packages/frontend/src/utils/dm-tokens.ts
+ *    변경 시 TS 토큰 파일도 동기 수정 필수 (SSOT).
+ *
+ * 사용: DmBuilderPage에서 import 1회 (전역 스코프).
+ *       뷰어 HTML은 백엔드에서 동일 :root 블록을 인라인 주입.
+ */
+
+/* ─────────── Design Tokens (CSS 변수) ─────────── */
+
+:root {
+  /* Neutral */
+  --dm-neutral-0:    #ffffff;
+  --dm-neutral-50:   #fafafa;
+  --dm-neutral-100:  #f5f5f5;
+  --dm-neutral-200:  #e5e5e5;
+  --dm-neutral-300:  #d4d4d4;
+  --dm-neutral-400:  #a3a3a3;
+  --dm-neutral-500:  #737373;
+  --dm-neutral-600:  #525252;
+  --dm-neutral-700:  #404040;
+  --dm-neutral-800:  #262626;
+  --dm-neutral-900:  #171717;
+  --dm-neutral-1000: #000000;
+
+  /* Brand (brand_kit으로 override 가능) */
+  --dm-primary:       #4f46e5;
+  --dm-primary-hover: #4338ca;
+  --dm-primary-light: #eef2ff;
+  --dm-accent:        #f59e0b;
+  --dm-secondary:     var(--dm-neutral-700);
+  --dm-neutral:       var(--dm-neutral-700);
+  --dm-bg:            var(--dm-neutral-0);
+
+  /* Semantic */
+  --dm-success: #10b981;
+  --dm-warning: #f59e0b;
+  --dm-error:   #ef4444;
+  --dm-info:    #3b82f6;
+
+  /* Typography */
+  --dm-font-primary: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, system-ui, Roboto, "Helvetica Neue", "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+  --dm-font-serif:   "Noto Serif KR", serif;
+  --dm-font-mono:    "JetBrains Mono", Menlo, Consolas, monospace;
+
+  /* Scale */
+  --dm-fs-hero:  32px;
+  --dm-fs-h1:    24px;
+  --dm-fs-h2:    20px;
+  --dm-fs-h3:    18px;
+  --dm-fs-body:  15px;
+  --dm-fs-small: 13px;
+  --dm-fs-tiny:  11px;
+
+  --dm-lh-hero:  1.2;
+  --dm-lh-h1:    1.3;
+  --dm-lh-h2:    1.4;
+  --dm-lh-h3:    1.4;
+  --dm-lh-body:  1.6;
+  --dm-lh-small: 1.5;
+  --dm-lh-tiny:  1.4;
+
+  /* Spacing (4px 단위) */
+  --dm-sp-0:  0;
+  --dm-sp-1:  4px;
+  --dm-sp-2:  8px;
+  --dm-sp-3:  12px;
+  --dm-sp-4:  16px;
+  --dm-sp-5:  20px;
+  --dm-sp-6:  24px;
+  --dm-sp-8:  32px;
+  --dm-sp-10: 40px;
+  --dm-sp-12: 48px;
+  --dm-sp-16: 64px;
+  --dm-sp-20: 80px;
+
+  /* Radius */
+  --dm-radius-none: 0;
+  --dm-radius-sm:   4px;
+  --dm-radius-md:   8px;
+  --dm-radius-lg:   12px;
+  --dm-radius-xl:   16px;
+  --dm-radius-2xl:  24px;
+  --dm-radius-full: 9999px;
+
+  /* Shadow */
+  --dm-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --dm-shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.08), 0 2px 4px -1px rgba(0, 0, 0, 0.04);
+  --dm-shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+  --dm-shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+
+  /* Layout */
+  --dm-mobile-min:     320px;
+  --dm-mobile-default: 375px;
+  --dm-mobile-max:     430px;
+  --dm-canvas-padding: 16px;
+
+  /* Motion */
+  --dm-motion-duration-fast:    100ms;
+  --dm-motion-duration-hover:   150ms;
+  --dm-motion-duration-section: 240ms;
+  --dm-motion-easing-out:       cubic-bezier(0.22, 1, 0.36, 1);
+  --dm-motion-easing-in:        cubic-bezier(0.55, 0, 0.68, 0.53);
+}
+
+/* ─────────── 접근성: 모션 감소 ─────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dm-motion-duration-fast:    0ms;
+    --dm-motion-duration-hover:   0ms;
+    --dm-motion-duration-section: 0ms;
+  }
+}
+
+/* ─────────── DM 빌더 전용 스코프 (다른 페이지 영향 방지) ─────────── */
+
+.dm-builder,
+.dm-canvas,
+.dm-section {
+  font-family: var(--dm-font-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  box-sizing: border-box;
+}
+
+.dm-builder *,
+.dm-builder *::before,
+.dm-builder *::after {
+  box-sizing: border-box;
+}
+
+/* ─────────── 모바일 프레임 ─────────── */
+
+.dm-mobile-frame {
+  width: var(--dm-mobile-default);
+  max-width: var(--dm-mobile-max);
+  min-width: var(--dm-mobile-min);
+  margin: 0 auto;
+  background: var(--dm-bg);
+  box-shadow: var(--dm-shadow-xl);
+  border-radius: var(--dm-radius-2xl);
+  overflow: hidden;
+  position: relative;
+}
+
+/* ─────────── 섹션 공통 ─────────── */
+
+.dm-section {
+  position: relative;
+  transition: outline var(--dm-motion-duration-hover) var(--dm-motion-easing-out);
+}
+
+.dm-section[data-hovered="true"] {
+  outline: 2px dashed var(--dm-primary);
+  outline-offset: -2px;
+}
+
+.dm-section[data-selected="true"] {
+  outline: 2px solid var(--dm-primary);
+  outline-offset: -2px;
+}
+
+.dm-section[data-hidden="true"] {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+/* ─────────── DnD 오버레이 ─────────── */
+
+.dm-section[data-dragging="true"] {
+  box-shadow: var(--dm-shadow-lg);
+  transform: scale(1.02);
+  z-index: 10;
+}
+
+.dm-drop-indicator {
+  height: 3px;
+  background: var(--dm-primary);
+  border-radius: var(--dm-radius-full);
+  margin: var(--dm-sp-1) 0;
+}
+
+/* ─────────── 섹션 진입/이탈 애니메이션 ─────────── */
+
+@keyframes dm-section-enter {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes dm-section-exit {
+  from { opacity: 1; transform: translateY(0); }
+  to   { opacity: 0; transform: translateY(-10px); }
+}
+
+.dm-section-enter {
+  animation: dm-section-enter var(--dm-motion-duration-section) var(--dm-motion-easing-out);
+}
+
+/* ─────────── CTA 공통 ─────────── */
+
+.dm-cta {
+  display: inline-block;
+  padding: var(--dm-sp-3) var(--dm-sp-6);
+  min-height: 44px;
+  min-width: 44px;
+  border-radius: var(--dm-radius-lg);
+  font-size: var(--dm-fs-body);
+  font-weight: 700;
+  text-decoration: none;
+  text-align: center;
+  cursor: pointer;
+  transition: transform var(--dm-motion-duration-fast) var(--dm-motion-easing-out),
+              background var(--dm-motion-duration-hover) var(--dm-motion-easing-out);
+}
+
+.dm-cta:hover  { background: var(--dm-primary-hover); }
+.dm-cta:active { transform: scale(0.98); }
+
+.dm-cta-primary   { background: var(--dm-primary); color: #fff; }
+.dm-cta-secondary { background: var(--dm-neutral-100); color: var(--dm-neutral-900); }
+.dm-cta-outline   { background: transparent; border: 2px solid var(--dm-primary); color: var(--dm-primary); }
+
+/* ─────────── 타이포 유틸 ─────────── */
+
+.dm-text-hero  { font-size: var(--dm-fs-hero);  line-height: var(--dm-lh-hero);  font-weight: 800; letter-spacing: -0.02em; }
+.dm-text-h1    { font-size: var(--dm-fs-h1);    line-height: var(--dm-lh-h1);    font-weight: 700; letter-spacing: -0.01em; }
+.dm-text-h2    { font-size: var(--dm-fs-h2);    line-height: var(--dm-lh-h2);    font-weight: 700; }
+.dm-text-h3    { font-size: var(--dm-fs-h3);    line-height: var(--dm-lh-h3);    font-weight: 600; }
+.dm-text-body  { font-size: var(--dm-fs-body);  line-height: var(--dm-lh-body);  font-weight: 400; }
+.dm-text-small { font-size: var(--dm-fs-small); line-height: var(--dm-lh-small); font-weight: 400; }
+.dm-text-tiny  { font-size: var(--dm-fs-tiny);  line-height: var(--dm-lh-tiny);  font-weight: 400; }
+
+/* ─────────── 반응형 (모바일 전용 3단계) ─────────── */
+
+@media (max-width: 430px) {
+  .dm-mobile-frame { width: 100vw; max-width: 100vw; border-radius: 0; }
+}
+
+@media (max-width: 375px) {
+  :root {
+    --dm-fs-hero: 28px;
+    --dm-fs-h1:   22px;
+  }
+}
+
+@media (max-width: 320px) {
+  :root {
+    --dm-fs-hero: 24px;
+    --dm-fs-h1:   20px;
+    --dm-canvas-padding: 12px;
+  }
+}
+
+/* ─────────── 세이프 에어리어 ─────────── */
+
+.dm-safe-area-top    { padding-top:    env(safe-area-inset-top);    }
+.dm-safe-area-bottom { padding-bottom: env(safe-area-inset-bottom); }
