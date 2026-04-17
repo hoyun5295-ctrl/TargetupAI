@@ -142,29 +142,6 @@ export default function FlyerPage({ token, businessType = 'mart' }: { token: str
     catch { setAlert({ show: true, title: '오류', message: '삭제 실패', type: 'error' }); }
   };
 
-  // ★ POP 일괄 PDF 다운로드
-  const handlePopAll = async (id: string) => {
-    try {
-      const res = await apiFetch(`${API_BASE}/api/flyer/flyers/${id}/pop-all`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify({}) });
-      if (!res.ok) throw new Error();
-      const blob = await res.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url; a.download = 'all_pop.pdf';
-      document.body.appendChild(a); a.click(); document.body.removeChild(a);
-      window.URL.revokeObjectURL(url);
-    } catch { setAlert({ show: true, title: '오류', message: 'POP 일괄 다운로드 실패', type: 'error' }); }
-  };
-
-  // ★ 전단지 복사
-  const handleCopy = async (id: string) => {
-    try {
-      const res = await apiFetch(`${API_BASE}/api/flyer/flyers/${id}/copy`, { method: 'POST' });
-      if (res.ok) { setAlert({ show: true, title: '복사 완료', message: '전단지가 복사되었습니다.', type: 'success' }); loadFlyers(); }
-      else { setAlert({ show: true, title: '오류', message: '복사 실패', type: 'error' }); }
-    } catch { setAlert({ show: true, title: '오류', message: '네트워크 오류', type: 'error' }); }
-  };
-
   const handleEdit = (f: Flyer) => {
     setEditingFlyer(f); setTitle(f.title); setStoreName(f.store_name || ''); setPeriodStart(f.period_start || ''); setPeriodEnd(f.period_end || ''); setTemplate(f.template || 'grid');
     const cats = typeof f.categories === 'string' ? JSON.parse(f.categories) : (f.categories || []);
@@ -175,22 +152,6 @@ export default function FlyerPage({ token, businessType = 'mart' }: { token: str
   };
 
   const handleCopyUrl = (code: string) => { navigator.clipboard.writeText(`https://hanjul-flyer.kr/${code}`); setCopyToast(true); setTimeout(() => setCopyToast(false), 2000); };
-
-  const handleDownloadPdf = async (id: string, title: string) => {
-    try {
-      const res = await apiFetch(`${API_BASE}/api/flyer/flyers/${id}/pdf`, { method: 'POST' });
-      if (!res.ok) throw new Error('PDF 생성 실패');
-      const blob = await res.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${title || 'flyer'}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      window.URL.revokeObjectURL(url);
-    } catch { setAlert({ show: true, title: '오류', message: 'PDF 다운로드에 실패했습니다.', type: 'error' }); }
-  };
 
   const [aiCopyLoading, setAiCopyLoading] = useState<string | null>(null);
   const [extraData, setExtraData] = useState<{
@@ -304,10 +265,6 @@ export default function FlyerPage({ token, businessType = 'mart' }: { token: str
                       <button onClick={() => handleEdit(f)} className="text-[11px] text-text-secondary hover:text-text font-medium">수정</button>
                       {f.status !== 'published' && <button onClick={() => handlePublish(f.id)} className="text-[11px] text-success-600 hover:text-success-500 font-semibold">발행</button>}
                       {f.short_code && <a href={`https://hanjul-flyer.kr/${f.short_code}`} target="_blank" rel="noopener noreferrer" className="text-[11px] text-primary-600 hover:text-primary-700 font-medium">미리보기</a>}
-                      {f.status === 'published' && <button onClick={() => handleDownloadPdf(f.id, f.title)} className="text-[11px] text-indigo-600 hover:text-indigo-700 font-medium">PDF</button>}
-                      {f.status === 'published' && <button onClick={() => handlePopAll(f.id)} className="text-[11px] text-orange-600 hover:text-orange-700 font-medium">POP</button>}
-                      <button onClick={() => handleCopy(f.id)} className="text-[11px] text-teal-600 hover:text-teal-700 font-medium">복사</button>
-                      {f.status === 'published' && f.short_code && <button onClick={() => { window.location.href = `/send?flyer=${f.short_code}`; }} className="text-[11px] text-blue-600 hover:text-blue-700 font-semibold">SMS발송</button>}
                       <button onClick={() => setDeleteModal({ show: true, id: f.id, title: f.title })} className="text-[11px] text-error-500 hover:text-error-600 font-medium">삭제</button>
                     </div>
                   </div>
