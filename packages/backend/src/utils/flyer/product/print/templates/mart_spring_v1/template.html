@@ -8,30 +8,32 @@
 <body>
   <div class="flyer-page">
 
-    <!-- ═══════════════ 1. 마스트헤드 ═══════════════ -->
+    <!-- ════════ 1. 마스트헤드 4칼럼 ════════ -->
     <header class="masthead" data-slot="masthead">
       <div class="ai-mark">AI 자동 제작</div>
-
       <div class="masthead-store-row">
         <span class="store-name" data-bind="store.name">테스트마켓</span>
-        <span class="divider">|</span>
-        <span class="meta" data-bind="store.address">의정부시 우리동 1번지</span>
-        <span class="divider">·</span>
-        <span class="meta" data-bind="store.phone">031-000-0000</span>
-        <span class="divider">·</span>
-        <span class="meta" data-bind="store.hours">08:00~22:00</span>
+        <span class="meta-line">
+          <span data-bind="store.address">의정부시 우리동 1번지</span>
+          <span class="divider">·</span>
+          <span data-bind="store.phone">031-000-0000</span>
+          <span class="divider">·</span>
+          <span data-bind="store.hours">08:00~22:00</span>
+          <span class="divider">·</span>
+          <span>3만원 이상 무료배송</span>
+        </span>
       </div>
-
+      <div class="masthead-shop">
+        <strong>온라인 쇼핑몰</strong>
+        <span>QR → 간편 장보기</span>
+      </div>
       <div class="masthead-qr">
-        <div class="qr-label">
-          <strong>온라인 쇼핑몰</strong>
-          QR로 바로가기
-        </div>
+        <div class="qr-label"><strong>QR 쇼핑</strong>바로가기</div>
         <div class="qr-code empty" data-bind-bg="qr.imageUrl">QR</div>
       </div>
     </header>
 
-    <!-- ═══════════════ 2. 히어로 ═══════════════ -->
+    <!-- ════════ 2. 히어로 ════════ -->
     <section class="hero">
       <div class="hero-kicker-row">
         <div class="hero-kicker">SPRING SALE</div>
@@ -42,89 +44,23 @@
       <div class="hero-main">
         <h1 class="hero-title" data-slot="hero_title">
           <span>봄</span><span class="accent">세일</span>
-          <div class="hero-title-stamp">
-            <span class="mini">MAX</span>
-            <span class="big">50%</span>
-            <span class="mini">OFF</span>
-          </div>
         </h1>
-      </div>
-
-      <!-- ─── 스프링 일러스트 (inline SVG) ─── -->
-      <div class="hero-illustration" aria-hidden="true">
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" fill="none">
-          <defs>
-            <radialGradient id="heroBg" cx="50%" cy="50%">
-              <stop offset="0%" stop-color="#FFF4C2" stop-opacity="0.5"/>
-              <stop offset="100%" stop-color="#FFF4C2" stop-opacity="0"/>
-            </radialGradient>
-          </defs>
-          <circle cx="200" cy="200" r="190" fill="url(#heroBg)"/>
-          <g opacity="0.96">
-            <circle cx="120" cy="130" r="32" fill="#FFB7D5"/>
-            <circle cx="150" cy="110" r="28" fill="#FF8FB8"/>
-            <circle cx="148" cy="152" r="30" fill="#FFC6DF"/>
-            <circle cx="108" cy="160" r="26" fill="#FF8FB8"/>
-            <circle cx="135" cy="135" r="12" fill="#FFF1A8"/>
-          </g>
-          <g opacity="0.95">
-            <circle cx="290" cy="105" r="26" fill="#FFE29F"/>
-            <circle cx="312" cy="88" r="22" fill="#FFD166"/>
-            <circle cx="318" cy="122" r="24" fill="#FFDA7D"/>
-            <circle cx="283" cy="130" r="20" fill="#FFD166"/>
-            <circle cx="303" cy="110" r="9" fill="#FF8F66"/>
-          </g>
-          <g opacity="0.94">
-            <circle cx="80" cy="310" r="24" fill="#C8E9A0"/>
-            <circle cx="108" cy="298" r="20" fill="#A3D977"/>
-            <circle cx="96" cy="330" r="22" fill="#C8E9A0"/>
-            <circle cx="68" cy="335" r="18" fill="#A3D977"/>
-            <circle cx="92" cy="315" r="7" fill="#FFF1A8"/>
-          </g>
-          <g opacity="0.94">
-            <circle cx="300" cy="290" r="22" fill="#FFB7D5"/>
-            <circle cx="322" cy="278" r="18" fill="#FF8FB8"/>
-            <circle cx="318" cy="308" r="20" fill="#FFC6DF"/>
-            <circle cx="290" cy="315" r="16" fill="#FF8FB8"/>
-          </g>
-          <g stroke="#5FA85A" stroke-width="5" stroke-linecap="round" fill="none">
-            <path d="M 200 400 Q 180 320 200 230"/>
-            <path d="M 200 360 Q 240 340 275 335"/>
-            <path d="M 200 320 Q 160 310 135 305"/>
-            <path d="M 200 280 Q 235 265 258 260"/>
-          </g>
-          <g fill="#5FA85A" opacity="0.92">
-            <ellipse cx="275" cy="332" rx="20" ry="9" transform="rotate(20 275 332)"/>
-            <ellipse cx="135" cy="302" rx="18" ry="8" transform="rotate(-15 135 302)"/>
-            <ellipse cx="258" cy="258" rx="16" ry="7" transform="rotate(15 258 258)"/>
-          </g>
-          <g>
-            <circle cx="350" cy="200" r="6" fill="#FFB7D5"/>
-            <circle cx="50" cy="210" r="5" fill="#FFE29F"/>
-            <circle cx="370" cy="250" r="4" fill="#FFB7D5"/>
-            <circle cx="30" cy="250" r="4" fill="#C8E9A0"/>
-            <circle cx="380" cy="160" r="5" fill="#FFE29F"/>
-            <circle cx="20" cy="160" r="4" fill="#FFB7D5"/>
-          </g>
-          <g fill="#FFF" stroke="#5FA85A" stroke-width="2">
-            <path d="M 210 80 L 215 92 L 228 94 L 218 102 L 221 115 L 210 108 L 199 115 L 202 102 L 192 94 L 205 92 Z" opacity="0.95"/>
-          </g>
-        </svg>
-      </div>
-
-      <div class="hero-bottom">
-        <div class="hero-period" data-slot="hero_period">04.17 (목) ~ 04.23 (수)</div>
         <div class="hero-subcopy" data-slot="hero_subcopy">봄맞이 인기상품 알뜰 가격으로 만나보세요</div>
+        <div class="hero-period" data-slot="hero_period">04.17 (목) ~ 04.23 (수)</div>
+      </div>
+
+      <div class="hero-right">
+        <div class="tag">오늘의 특가</div>
+        <div class="price-main"><span>12,900</span><span class="won">원</span></div>
+        <div class="product-name">한돈 삼겹살 <span class="unit">1kg</span></div>
       </div>
     </section>
 
-    <!-- ═══════════════ 3. 섹션 01 — 오늘의 특가 ═══════════════ -->
+    <!-- ════════ 3. 섹션 01 ════════ -->
     <div class="section-header section-main-header" data-slot="section_main">
       <span class="section-number">01</span>
       <span class="section-title" data-bind="label">오늘의 <span class="accent">특가</span></span>
-      <span class="section-sublabel" data-bind="sublabel">
-        이번주 딱 <strong>7일간</strong><span class="chip">HOT</span>
-      </span>
+      <span class="section-sublabel" data-bind="sublabel">이번주 딱 7일간<span class="chip">HOT</span></span>
     </div>
     <section class="section-main">
       <div class="main-grid" data-slot="main_grid">
@@ -137,20 +73,24 @@
             </div>
             <img class="product-image" data-bind-src="imageUrl" alt="">
             <div class="product-meta">
-              <div class="original-price" data-bind="originalPrice">3,000원</div>
-              <div class="sale-price"><span data-bind="salePriceNumber">1,000</span><span class="won">원</span></div>
-              <div class="product-name">
-                <span data-bind="productName">상품명</span>
-                <span class="unit" data-bind="unit"></span>
+              <div class="info-left">
+                <div class="original-price" data-bind="originalPrice">3,000원</div>
+                <div class="product-name">
+                  <span data-bind="productName">상품명</span>
+                  <span class="unit" data-bind="unit"></span>
+                </div>
+                <div class="ai-copy" data-bind-show="aiCopy"><span data-bind="aiCopy"></span></div>
               </div>
-              <div class="ai-copy" data-bind="aiCopy" data-bind-show="aiCopy"></div>
+              <div class="info-right">
+                <div class="sale-price"><span data-bind="salePriceNumber">1,000</span><span class="won">원</span></div>
+              </div>
             </div>
           </div>
         </template>
       </div>
     </section>
 
-    <!-- ═══════════════ 4. 섹션 02 — 베스트픽 ═══════════════ -->
+    <!-- ════════ 4. 섹션 02 베스트픽 ════════ -->
     <div class="section-header section-recommend-header" data-slot="section_recommend">
       <span class="section-number">02</span>
       <span class="section-title" data-bind="label">베스트 픽</span>
@@ -162,33 +102,34 @@
           <div class="card-sub">
             <div class="mini-badge" data-bind-class-suffix="badgeKind"><span data-bind="badgeText">BEST</span></div>
             <img class="product-image" data-bind-src="imageUrl" alt="">
-            <div class="original-price" data-bind="originalPrice">2,500원</div>
-            <div class="sale-price"><span data-bind="salePriceNumber">1,111</span><span class="won">원</span></div>
-            <div class="product-name">
-              <span data-bind="productName">상품명</span>
-              <span class="unit" data-bind="unit"></span>
+            <div class="product-meta-sub">
+              <div class="original-price" data-bind="originalPrice"></div>
+              <div class="product-name">
+                <span data-bind="productName">상품명</span>
+                <span class="unit" data-bind="unit"></span>
+              </div>
+              <div class="sale-price"><span data-bind="salePriceNumber">1,111</span><span class="won">원</span></div>
             </div>
           </div>
         </template>
       </div>
     </section>
 
-    <!-- ═══════════════ 5. 섹션 03 — 신선코너 (4블록) ═══════════════ -->
+    <!-- ════════ 5. 섹션 03 신선 코너 ════════ -->
     <div class="section-header section-fresh-header" data-slot="section_fresh">
       <span class="section-number">03</span>
-      <span class="section-title" data-bind="label">신선 코너</span>
+      <span class="section-title" data-bind="label">신선 <span class="accent">코너</span></span>
       <span class="section-sublabel" data-bind="sublabel">매일 들어오는 신선한 상품<span class="chip">FRESH</span></span>
     </div>
     <section class="section-fresh">
       <div class="fresh-4blocks">
 
-        <!-- 블록 1 — 축산 -->
         <div class="fresh-block meat">
           <div class="fresh-block-header">
             <div class="cat-icon">🥩</div>
             <div>
               <div class="cat-label" data-slot-meta="fresh_block_1.categoryLabel">축산</div>
-              <div class="cat-desc">한우 · 돼지 · 닭 · 햄·소시지</div>
+              <div class="cat-desc">한우·돼지·닭·햄소시지</div>
             </div>
             <div class="cat-badge">FRESH</div>
           </div>
@@ -197,24 +138,25 @@
               <div class="card-fresh">
                 <div class="mini-badge" data-bind-show="discountRate"><span data-bind="discountRate">30</span>%</div>
                 <img class="product-image" data-bind-src="imageUrl" alt="">
-                <div class="original-price" data-bind="originalPrice"></div>
-                <div class="sale-price"><span data-bind="salePriceNumber">1,000</span><span class="won">원</span></div>
-                <div class="product-name">
-                  <span data-bind="productName">상품명</span>
-                  <span class="unit" data-bind="unit"></span>
+                <div class="fresh-meta">
+                  <div class="original-price" data-bind="originalPrice"></div>
+                  <div class="product-name">
+                    <span data-bind="productName">상품명</span>
+                    <span class="unit" data-bind="unit"></span>
+                  </div>
+                  <div class="sale-price"><span data-bind="salePriceNumber">1,000</span><span class="won">원</span></div>
                 </div>
               </div>
             </template>
           </div>
         </div>
 
-        <!-- 블록 2 — 수산 -->
         <div class="fresh-block fish">
           <div class="fresh-block-header">
             <div class="cat-icon">🐟</div>
             <div>
               <div class="cat-label" data-slot-meta="fresh_block_2.categoryLabel">수산</div>
-              <div class="cat-desc">생선 · 해산물 · 회 · 젓갈</div>
+              <div class="cat-desc">생선·해산물·회·젓갈</div>
             </div>
             <div class="cat-badge">FRESH</div>
           </div>
@@ -223,24 +165,25 @@
               <div class="card-fresh">
                 <div class="mini-badge" data-bind-show="discountRate"><span data-bind="discountRate">30</span>%</div>
                 <img class="product-image" data-bind-src="imageUrl" alt="">
-                <div class="original-price" data-bind="originalPrice"></div>
-                <div class="sale-price"><span data-bind="salePriceNumber">1,000</span><span class="won">원</span></div>
-                <div class="product-name">
-                  <span data-bind="productName">상품명</span>
-                  <span class="unit" data-bind="unit"></span>
+                <div class="fresh-meta">
+                  <div class="original-price" data-bind="originalPrice"></div>
+                  <div class="product-name">
+                    <span data-bind="productName">상품명</span>
+                    <span class="unit" data-bind="unit"></span>
+                  </div>
+                  <div class="sale-price"><span data-bind="salePriceNumber">1,000</span><span class="won">원</span></div>
                 </div>
               </div>
             </template>
           </div>
         </div>
 
-        <!-- 블록 3 — 청과 -->
         <div class="fresh-block fruit">
           <div class="fresh-block-header">
             <div class="cat-icon">🍎</div>
             <div>
               <div class="cat-label" data-slot-meta="fresh_block_3.categoryLabel">청과</div>
-              <div class="cat-desc">과일 · 채소 · 나물 · 건어물</div>
+              <div class="cat-desc">과일·채소·나물·건어물</div>
             </div>
             <div class="cat-badge">FRESH</div>
           </div>
@@ -249,24 +192,25 @@
               <div class="card-fresh">
                 <div class="mini-badge" data-bind-show="discountRate"><span data-bind="discountRate">30</span>%</div>
                 <img class="product-image" data-bind-src="imageUrl" alt="">
-                <div class="original-price" data-bind="originalPrice"></div>
-                <div class="sale-price"><span data-bind="salePriceNumber">1,000</span><span class="won">원</span></div>
-                <div class="product-name">
-                  <span data-bind="productName">상품명</span>
-                  <span class="unit" data-bind="unit"></span>
+                <div class="fresh-meta">
+                  <div class="original-price" data-bind="originalPrice"></div>
+                  <div class="product-name">
+                    <span data-bind="productName">상품명</span>
+                    <span class="unit" data-bind="unit"></span>
+                  </div>
+                  <div class="sale-price"><span data-bind="salePriceNumber">1,000</span><span class="won">원</span></div>
                 </div>
               </div>
             </template>
           </div>
         </div>
 
-        <!-- 블록 4 — 주류/음료 -->
         <div class="fresh-block liquor">
           <div class="fresh-block-header">
             <div class="cat-icon">🍾</div>
             <div>
               <div class="cat-label" data-slot-meta="fresh_block_4.categoryLabel">주류</div>
-              <div class="cat-desc">소주 · 맥주 · 와인 · 음료</div>
+              <div class="cat-desc">소주·맥주·와인·음료</div>
             </div>
             <div class="cat-badge">FRESH</div>
           </div>
@@ -275,11 +219,13 @@
               <div class="card-fresh">
                 <div class="mini-badge" data-bind-show="discountRate"><span data-bind="discountRate">30</span>%</div>
                 <img class="product-image" data-bind-src="imageUrl" alt="">
-                <div class="original-price" data-bind="originalPrice"></div>
-                <div class="sale-price"><span data-bind="salePriceNumber">1,000</span><span class="won">원</span></div>
-                <div class="product-name">
-                  <span data-bind="productName">상품명</span>
-                  <span class="unit" data-bind="unit"></span>
+                <div class="fresh-meta">
+                  <div class="original-price" data-bind="originalPrice"></div>
+                  <div class="product-name">
+                    <span data-bind="productName">상품명</span>
+                    <span class="unit" data-bind="unit"></span>
+                  </div>
+                  <div class="sale-price"><span data-bind="salePriceNumber">1,000</span><span class="won">원</span></div>
                 </div>
               </div>
             </template>
@@ -289,14 +235,14 @@
       </div>
     </section>
 
-    <!-- ═══════════════ 9. 푸터 ═══════════════ -->
+    <!-- ════════ 6. 푸터 ════════ -->
     <footer class="footer">
       <div class="footer-notice" data-slot="footer_notice">
         행사상품은 조기 품절될 수 있습니다. 사진은 이미지컷이며 실제와 다를 수 있습니다.
       </div>
       <div class="footer-brand">
         <span data-slot="footer_brand"><span class="brand-mark">✦ 한줄로</span> · hanjul.ai</span>
-        <span>AI가 자동 생성한 전단입니다 · 2026.04.17</span>
+        <span>AI가 자동 생성한 전단 · 2026.04.17</span>
       </div>
     </footer>
 

@@ -68,105 +68,50 @@
       "position": { "css": ".section-main-header" }
     },
     {
-      "id": "main_grid",
-      "type": "product_grid",
-      "required": true,
-      "cols": 6, "rows": 1,
-      "minItems": 4, "maxItems": 6,
-      "selection": {
-        "mode": "highest_discount",
-        "filter": { "promoType": "main" }
-      },
-      "cardVariant": "main",
-      "overflow": "shrink",
-      "position": { "css": ".main-grid" }
+      "id": "main_grid", "type": "product_grid", "required": true,
+      "cols": 4, "rows": 2, "minItems": 6, "maxItems": 8,
+      "selection": { "mode": "highest_discount", "filter": { "promoType": "main" } },
+      "cardVariant": "main", "overflow": "shrink", "position": { "css": ".main-grid" }
     },
     {
-      "id": "section_recommend",
-      "type": "section_banner",
-      "required": true,
-      "label": "베스트 픽",
-      "number": "02",
+      "id": "section_recommend", "type": "section_banner", "required": true,
+      "label": "베스트 픽", "number": "02",
       "position": { "css": ".section-recommend-header" }
     },
     {
-      "id": "recommend_grid",
-      "type": "product_grid",
-      "required": true,
-      "cols": 8, "rows": 1,
-      "minItems": 6, "maxItems": 8,
-      "selection": {
-        "mode": "highest_discount",
-        "filter": { "promoType": "sub" }
-      },
-      "cardVariant": "sub",
-      "overflow": "shrink",
-      "position": { "css": ".recommend-grid" }
+      "id": "recommend_grid", "type": "product_grid", "required": true,
+      "cols": 6, "rows": 2, "minItems": 8, "maxItems": 12,
+      "selection": { "mode": "highest_discount", "filter": { "promoType": "sub" } },
+      "cardVariant": "sub", "overflow": "shrink", "position": { "css": ".recommend-grid" }
     },
     {
-      "id": "section_fresh",
-      "type": "section_banner",
-      "required": true,
-      "label": "신선 코너",
-      "sublabel": "매일 들어오는 신선한 상품",
-      "number": "03",
+      "id": "section_fresh", "type": "section_banner", "required": true,
+      "label": "신선 코너", "sublabel": "매일 들어오는 신선한 상품", "number": "03",
       "position": { "css": ".section-fresh-header" }
     },
     {
-      "id": "fresh_block_1",
-      "type": "category_grid",
-      "required": true,
-      "cols": 4, "rows": 2,
-      "category": {
-        "mode": "auto",
-        "prefer": ["축산", "정육", "한우", "돼지고기", "닭고기"]
-      },
-      "cardVariant": "fresh",
-      "overflow": "shrink",
-      "position": { "css": ".fresh-block-1" },
-      "note": "좌상 블록 — 축산/정육"
+      "id": "fresh_block_1", "type": "category_grid", "required": true,
+      "cols": 4, "rows": 3, "maxItems": 12,
+      "category": { "mode": "auto", "prefer": ["축산", "정육", "한우", "돼지고기", "닭고기"] },
+      "cardVariant": "fresh", "overflow": "shrink", "position": { "css": ".fresh-block-1" }
     },
     {
-      "id": "fresh_block_2",
-      "type": "category_grid",
-      "required": true,
-      "cols": 4, "rows": 2,
-      "category": {
-        "mode": "auto",
-        "prefer": ["수산", "해산물", "생선"]
-      },
-      "cardVariant": "fresh",
-      "overflow": "shrink",
-      "position": { "css": ".fresh-block-2" },
-      "note": "우상 블록 — 수산"
+      "id": "fresh_block_2", "type": "category_grid", "required": true,
+      "cols": 4, "rows": 3, "maxItems": 12,
+      "category": { "mode": "auto", "prefer": ["수산", "해산물", "생선"] },
+      "cardVariant": "fresh", "overflow": "shrink", "position": { "css": ".fresh-block-2" }
     },
     {
-      "id": "fresh_block_3",
-      "type": "category_grid",
-      "required": true,
-      "cols": 4, "rows": 2,
-      "category": {
-        "mode": "auto",
-        "prefer": ["청과", "과일", "채소", "야채"]
-      },
-      "cardVariant": "fresh",
-      "overflow": "shrink",
-      "position": { "css": ".fresh-block-3" },
-      "note": "좌하 블록 — 청과/과채"
+      "id": "fresh_block_3", "type": "category_grid", "required": true,
+      "cols": 4, "rows": 3, "maxItems": 12,
+      "category": { "mode": "auto", "prefer": ["청과", "과일", "채소", "야채"] },
+      "cardVariant": "fresh", "overflow": "shrink", "position": { "css": ".fresh-block-3" }
     },
     {
-      "id": "fresh_block_4",
-      "type": "category_grid",
-      "required": true,
-      "cols": 4, "rows": 2,
-      "category": {
-        "mode": "auto",
-        "prefer": ["주류", "술", "와인", "음료"]
-      },
-      "cardVariant": "fresh",
-      "overflow": "shrink",
-      "position": { "css": ".fresh-block-4" },
-      "note": "우하 블록 — 주류/음료"
+      "id": "fresh_block_4", "type": "category_grid", "required": true,
+      "cols": 4, "rows": 3, "maxItems": 12,
+      "category": { "mode": "auto", "prefer": ["주류", "술", "와인", "음료"] },
+      "cardVariant": "fresh", "overflow": "shrink", "position": { "css": ".fresh-block-4" }
     },
     {
       "id": "footer_notice",

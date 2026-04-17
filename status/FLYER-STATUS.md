@@ -66,6 +66,68 @@
 - [x] **flyers.ts print-flyer 라우트 통합** — `autoRembg`/`autoMatchImage` 수용 + `processProductImages()` 호출 + `processedProducts`를 renderFlyerPdf에 주입
 - [x] 백엔드/프론트 타입 체크 통과 + 봄 템플릿 렌더 재검증 (2.1MB PDF 정상 생성)
 
+**★ 5차 세션 — 세션 마무리 시점(2026-04-17 저녁) 진행 스냅샷:**
+
+### ✅ 이번 세션 완료
+- **PDF/PNG 분리 발행 시스템**
+  - paged-pdf.ts `format: 'pdf' | 'png'` 옵션 추가, PNG는 deviceScaleFactor 3(≈288dpi) 적용
+  - /print-flyer POST body에 `format` 수용, `/print-flyer/:id/png` 다운로드 라우트 신설
+  - PrintFlyerPage 하단에 **🖼 빠른확인 PNG** + **📄 인쇄용 PDF** 버튼 2개 분리
+  - 상단에도 각각의 다운로드 버튼 분리(PNG=앰버, PDF=인디고)
+- **엑셀 AI 매핑 3경로 통일** — FlyerPage/PopPage/PrintFlyerPage 전부 ExcelUploadModal 사용, 구 CSV 수동파싱 제거
+- **ExcelUploadModal 로딩 UI 고도화** — 톱니바퀴 이모지(흔들림) 제거 → SVG 링 스피너 + 3단계 progress dots + indeterminate progress bar + min-height 280mm 고정
+- **이미지 파이프라인 기존 자산 재사용**
+  - Unsplash/Pexels 완전 삭제 (한국 마트 매칭 부적합)
+  - `product-images.ts getProductDisplay()` PRODUCT_MAP(60개) + `flyer-naver-search searchNaverShopping()` 만 사용
+  - rembg 결과는 data URL 인라인으로 Puppeteer 네트워크 의존 제거
+- **HOT 템플릿 v3.0 전면 재설계(정보 밀도 극대화)**
+  - 카드 수 **46 → 68개** (+48%): 메인 6→8(4×2), 베스트 8→12(6×2), FRESH 32→48(블록당 4×3)
+  - 여백 축소: padding 6→1.5~3mm, gap 3→1mm
+  - 마스트헤드 4칼럼(AI마크/매장정보/쇼핑몰배너/QR) — 영업시간/배송시간/무료배송조건까지 노출
+  - 경고 테이프 띠 + **TIME ATTACK D-7~D-1** 카운트다운 바 신설
+  - 히어로 좌(타이포 + 서브카피 + 기간) + 우(가격 폭탄 박스 rotate 2°)
+  - 카드 내부 4요소(원가 취소선 + 상품명+단위 + 할인도장 + 할인가)를 grid 2열로 압축
+
+### ⏳ 다음 세션 착수 과제 (우선순위)
+
+#### 1. 템플릿 나머지 3종 고도화 (HOT v3.0과 동급 밀도로)
+- [ ] **프리미엄 v2.0 재설계** — "Chapter I/II/III 매거진 갤러리" 컨셉
+  - 단일 칼럼 수직 스택, **1 상품 = 1 섹션** 대형 배치
+  - edge-to-edge 이미지 + 우측 40% 정보 (serif 이탤릭 2줄 영문+한글 상품명)
+  - 여백 극대화 (프리미엄 특성) 하되 정보 밀도는 확보
+  - 로마 숫자 섹션(Chapter I/II/III)
+- [ ] **주말 v2.0 재설계** — "FRI-SAT-SUN 3일 파티" 컨셉
+  - 상단 **FRI/SAT/SUN 3블록 지그재그** 카운트다운 바
+  - 메인 카드 지그재그 배치(좌/우 번갈아 들여쓰기)
+  - 가격 **말풍선** 컨테이너 (꼬리 달린 bubble)
+  - 페이지에 컨페티 파티클 랜덤 50~80개
+  - 무지개 그라디언트 섹션 구분선
+- [ ] **봄 v3.2** — 디자인 유지하되 여백만 축소 (카드 밀도 HOT v3.0 수준으로)
+
+#### 2. 실제 상품 이미지 자산 적용
+- [ ] Harold님 6만장 이미지 수령 후 서버 업로드 경로 결정
+- [ ] PRODUCT_MAP 확장 or 새 `flyer_image_library` 테이블 결정 (pg_trgm 유사도 검색)
+- [ ] 네이버 쇼핑 API 검색 파라미터 튜닝 (현재 첫 결과만 취득 → 상품명 유사도 검증 추가)
+
+#### 3. HOT v3.0 렌더 검증 + 튜닝
+- [ ] 실제 렌더 후 카드 overflow/가독성 체크 (카드 작아서 상품명 2줄 잘릴 가능성)
+- [ ] 마스트헤드 4칼럼이 좁은 상품명 길 때 wrap 되는지 확인
+- [ ] PNG 모드에서 deviceScaleFactor 3 용량 적정한지 (예상 15~30MB)
+
+#### 4. 템플릿 공통 확장 (여유 있으면)
+- [ ] "사장님 한마디" 영역 (푸터 위 띠) 4종 공통 추가
+- [ ] 섹션 헤더에 일러스트 아이콘 추가 (매거진 레퍼런스)
+- [ ] 행사가/회원가 이중 가격 표기 옵션 (홈플러스 스타일)
+
+### 🧭 다음 세션 시작 시 체크리스트
+1. 본 FLYER-STATUS.md 5차 세션 섹션부터 다시 읽기
+2. `packages/backend/src/utils/flyer/product/print/templates/mart_hot_v1/*` 현재 v3.0 상태 확인
+3. HOT 먼저 렌더해서 **v3.0 실제 결과물부터 눈으로 검수** (`npx tsx packages/backend/src/utils/flyer/product/print/test-render.ts mart_hot_v1`)
+4. 문제 없으면 프리미엄 v2.0 착수, 문제 있으면 HOT 튜닝 후 진행
+5. **경쟁 AI 전단 레퍼런스(1400×2000px 바나나/양파 전단)** 밀도를 목표로 — 카드 절대 작게 시작하지 말 것
+
+---
+
 **★ 4차 세션 — 템플릿 퀄리티 극대화 + 기존 자산 재사용 (2026-04-17 D129 완성):**
 - [x] **image-pipeline.ts 축소** — Unsplash/Pexels 완전 삭제. 기존 자산만 재사용:
   - 1순위 `product-images.ts getProductDisplay()` (PRODUCT_MAP 60개 한국 마트 상품)
