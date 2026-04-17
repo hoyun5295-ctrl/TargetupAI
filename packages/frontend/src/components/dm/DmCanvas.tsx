@@ -1,14 +1,20 @@
 /**
  * DmCanvas — 중앙 캔버스 영역 (모바일 프레임 + 섹션 나열)
- * 빈 상태일 때는 CTA 안내.
+ *
+ * D127 V3: 3모드 렌더링
+ *  - scroll      : 전체 길이 세로 나열 (기존)
+ *  - scroll_snap : 프레임 높이 고정 + 세로 CSS scroll-snap (1섹션=1페이지)
+ *  - slides      : 프레임 높이 고정 + 가로 CSS scroll-snap (좌우 스와이프)
  */
-import { useDmBuilderStore } from '../../stores/dmBuilderStore';
+import { useDmBuilderStore, type LayoutMode } from '../../stores/dmBuilderStore';
 import MobileFrame from './MobileFrame';
 import { SectionRenderer } from './canvas';
 
 export type DmCanvasProps = {
   onPromptClick?: () => void;
 };
+
+const FRAME_HEIGHT = 680;
 
 export default function DmCanvas({ onPromptClick }: DmCanvasProps) {
   const sections = useDmBuilderStore((s) => s.sections);
@@ -19,6 +25,7 @@ export default function DmCanvas({ onPromptClick }: DmCanvasProps) {
   const hoverSection = useDmBuilderStore((s) => s.hoverSection);
   const brandKit = useDmBuilderStore((s) => s.brandKit);
   const updateSectionProps = useDmBuilderStore((s) => s.updateSectionProps);
+  const layoutMode = useDmBuilderStore((s) => s.layoutMode);
   const setOpenModal = useDmBuilderStore((s) => s.setOpenModal);
   const handlePromptClick = onPromptClick || (() => setOpenModal('ai-prompt'));
 
@@ -28,6 +35,8 @@ export default function DmCanvas({ onPromptClick }: DmCanvasProps) {
     ...(brandKit.accent_color ? { ['--dm-accent' as any]: brandKit.accent_color } : {}),
     ...(brandKit.background_color ? { ['--dm-bg' as any]: brandKit.background_color } : {}),
   };
+
+  const sortedSections = sections.slice().sort((a, b) => a.order - b.order);
 
   return (
     <div
@@ -44,16 +53,13 @@ export default function DmCanvas({ onPromptClick }: DmCanvasProps) {
     >
       <div className="dm-builder" style={brandKitStyle}>
         <MobileFrame>
-          {sections.length === 0 ? (
+          {sortedSections.length === 0 ? (
             <EmptyCanvas onPromptClick={handlePromptClick} />
           ) : (
-            <div>
-              {sections
-                .slice()
-                .sort((a, b) => a.order - b.order)
-                .map((section) => (
+            <SectionsStage mode={layoutMode}>
+              {sortedSections.map((section) => (
+                <SectionStageItem key={section.id} mode={layoutMode}>
                   <SectionRenderer
-                    key={section.id}
                     section={section}
                     storeName={storeName}
                     selected={selectedSectionId === section.id}
@@ -62,14 +68,131 @@ export default function DmCanvas({ onPromptClick }: DmCanvasProps) {
                     onHover={hoverSection}
                     onEditSection={updateSectionProps}
                   />
-                ))}
-            </div>
+                </SectionStageItem>
+              ))}
+              {layoutMode !== 'scroll' && (
+                <ModeBadge mode={layoutMode} total={sortedSections.length} />
+              )}
+            </SectionsStage>
           )}
         </MobileFrame>
       </div>
     </div>
   );
 }
+
+// ────────────── Stage (3모드 컨테이너) ──────────────
+
+function SectionsStage({ mode, children }: { mode: LayoutMode; children: React.ReactNode }) {
+  if (mode === 'scroll_snap') {
+    return (
+      <div
+        style={{
+          height: FRAME_HEIGHT,
+          overflowY: 'auto',
+          overflowX: 'hidden',
+          scrollSnapType: 'y mandatory',
+          position: 'relative',
+        }}
+      >
+        {children}
+      </div>
+    );
+  }
+  if (mode === 'slides') {
+    return (
+      <div
+        style={{
+          height: FRAME_HEIGHT,
+          overflowX: 'auto',
+          overflowY: 'hidden',
+          scrollSnapType: 'x mandatory',
+          display: 'flex',
+          flexDirection: 'row',
+          position: 'relative',
+        }}
+      >
+        {children}
+      </div>
+    );
+  }
+  // scroll (기본)
+  return <div>{children}</div>;
+}
+
+function SectionStageItem({ mode, children }: { mode: LayoutMode; children: React.ReactNode }) {
+  if (mode === 'scroll_snap') {
+    return (
+      <div
+        style={{
+          minHeight: FRAME_HEIGHT,
+          scrollSnapAlign: 'start',
+          scrollSnapStop: 'always',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'center',
+        }}
+      >
+        {children}
+      </div>
+    );
+  }
+  if (mode === 'slides') {
+    return (
+      <div
+        style={{
+          flex: '0 0 100%',
+          width: '100%',
+          height: FRAME_HEIGHT,
+          overflowY: 'auto',
+          scrollSnapAlign: 'start',
+          scrollSnapStop: 'always',
+        }}
+      >
+        {children}
+      </div>
+    );
+  }
+  return <>{children}</>;
+}
+
+function ModeBadge({ mode, total }: { mode: LayoutMode; total: number }) {
+  const label =
+    mode === 'scroll_snap' ? `세로 스냅 · ${total}페이지`
+    : mode === 'slides' ? `좌우 슬라이드 · ${total}페이지`
+    : '';
+  if (!label) return null;
+  return (
+    <div
+      style={{
+        position: 'sticky',
+        bottom: 8,
+        left: 0,
+        right: 0,
+        textAlign: 'center',
+        pointerEvents: 'none',
+        zIndex: 20,
+      }}
+    >
+      <span
+        style={{
+          display: 'inline-block',
+          padding: '4px 10px',
+          fontSize: 10,
+          fontWeight: 700,
+          color: '#fff',
+          background: 'rgba(17,24,39,0.7)',
+          borderRadius: 999,
+          backdropFilter: 'blur(4px)',
+        }}
+      >
+        {label}
+      </span>
+    </div>
+  );
+}
+
+// ────────────── Empty ──────────────
 
 function EmptyCanvas({ onPromptClick }: { onPromptClick?: () => void }) {
   return (

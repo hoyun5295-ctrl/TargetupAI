@@ -20,7 +20,7 @@ export interface DmPageInput {
   pages?: DmSlide[];
   settings?: Record<string, any>;
   // D125 section-based
-  layout_mode?: 'scroll' | 'slides';
+  layout_mode?: 'scroll' | 'slides' | 'scroll_snap';
   sections?: any[];
   brand_kit?: Record<string, any>;
   template_id?: string;

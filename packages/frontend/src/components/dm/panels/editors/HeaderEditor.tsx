@@ -19,7 +19,7 @@ export default function HeaderEditor({ props, onUpdate }: EditorProps<HeaderProp
       </Field>
 
       <Field label="브랜드명">
-        <TextInput value={props.brand_name} onChange={(v) => onUpdate({ brand_name: v })} placeholder="시세이도" />
+        <TextInput value={props.brand_name} onChange={(v) => onUpdate({ brand_name: v })} placeholder="브랜드명" />
       </Field>
 
       {(props.variant === 'logo' || !props.variant) && (

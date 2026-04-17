@@ -84,17 +84,40 @@ function SortableRow({ section }: { section: Section }) {
   };
 
   return (
-    <div ref={setNodeRef} style={style} onClick={() => selectSection(section.id)}>
-      <button
+    <div
+      ref={setNodeRef}
+      style={style}
+      onClick={() => { if (!isDragging) selectSection(section.id); }}
+    >
+      <div
         {...attributes}
         {...listeners}
         onClick={(e) => e.stopPropagation()}
+        onPointerDown={(e) => e.stopPropagation()}
         title="드래그하여 순서 변경"
         aria-label="드래그 핸들"
-        style={{ width: 16, height: 22, padding: 0, border: 'none', background: 'transparent', cursor: 'grab', fontSize: 12, color: 'var(--dm-neutral-400)', lineHeight: 1 }}
+        role="button"
+        tabIndex={0}
+        style={{
+          width: 24,
+          height: 32,
+          padding: 0,
+          border: 'none',
+          background: 'transparent',
+          cursor: isDragging ? 'grabbing' : 'grab',
+          fontSize: 16,
+          color: 'var(--dm-neutral-400)',
+          lineHeight: 1,
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          touchAction: 'none',
+          userSelect: 'none',
+          flexShrink: 0,
+        }}
       >
         ⋮⋮
-      </button>
+      </div>
 
       <span style={{ fontSize: 16 }}>{meta.icon}</span>
 

@@ -285,7 +285,14 @@ function parseBrandKit(raw: any): DmBrandKit | undefined {
   return undefined;
 }
 
-function renderSectionsHtml(dm: any, trackApiBase: string, resolvedSections?: Section[]): string {
+type SectionsLayoutMode = 'scroll' | 'scroll_snap' | 'slides';
+
+function renderSectionsHtml(
+  dm: any,
+  trackApiBase: string,
+  resolvedSections?: Section[],
+  mode: SectionsLayoutMode = 'scroll',
+): string {
   const sections: Section[] = resolvedSections || parseSections(dm.sections);
   const brandKit: DmBrandKit | undefined = parseBrandKit(dm.brand_kit);
   const storeName = dm.store_name || '';
@@ -293,6 +300,7 @@ function renderSectionsHtml(dm: any, trackApiBase: string, resolvedSections?: Se
   const shortCode = dm.short_code || '';
 
   const hasCountdown = sections.some(s => s.type === 'countdown');
+  const totalSections = sections.length;
 
   const sectionsHtml = renderSections(sections, {
     brandKit,
@@ -304,6 +312,46 @@ function renderSectionsHtml(dm: any, trackApiBase: string, resolvedSections?: Se
 
   const tokensCss = renderDmTokensCss(brandKit);
   const baseCss = renderDmBaseCss();
+
+  // 모드별 뷰어 CSS (body / .dm-viewer / .dm-section-wrap)
+  const modeCss = (() => {
+    if (mode === 'scroll_snap') {
+      return `
+html,body{height:100%;margin:0;overflow:hidden}
+.dm-viewer{height:100%;overflow-y:auto;overflow-x:hidden;scroll-snap-type:y mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+.dm-viewer::-webkit-scrollbar{display:none}
+.dm-section-wrap{min-height:100vh;scroll-snap-align:start;scroll-snap-stop:always;display:flex;flex-direction:column;justify-content:center;position:relative}
+.dm-page-dots{position:fixed;right:10px;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;gap:6px;z-index:50}
+.dm-page-dots .dot{width:6px;height:6px;border-radius:50%;background:rgba(0,0,0,0.25);transition:all 200ms}
+.dm-page-dots .dot.active{background:var(--dm-primary);height:20px;border-radius:3px}
+`;
+    }
+    if (mode === 'slides') {
+      return `
+html,body{height:100%;margin:0;overflow:hidden;touch-action:pan-y}
+.dm-viewer{height:100%;display:flex;flex-direction:row;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+.dm-viewer::-webkit-scrollbar{display:none}
+.dm-section-wrap{flex:0 0 100%;width:100vw;height:100vh;scroll-snap-align:start;scroll-snap-stop:always;overflow-y:auto;position:relative;-webkit-overflow-scrolling:touch}
+.dm-section-wrap::-webkit-scrollbar{display:none}
+.dm-page-dots{position:fixed;left:0;right:0;bottom:14px;display:flex;flex-direction:row;gap:6px;justify-content:center;z-index:50}
+.dm-page-dots .dot{width:6px;height:6px;border-radius:50%;background:rgba(0,0,0,0.25);transition:all 200ms}
+.dm-page-dots .dot.active{background:var(--dm-primary);width:20px;border-radius:3px}
+.dm-page-counter{position:fixed;top:12px;right:12px;background:rgba(0,0,0,0.55);color:#fff;font-size:11px;padding:4px 10px;border-radius:12px;z-index:60}
+`;
+    }
+    return `
+.dm-section-wrap{position:relative}
+`;
+  })();
+
+  const dotsHtml =
+    mode !== 'scroll' && totalSections > 0
+      ? `<div class="dm-page-dots">${sections.map((_, i) => `<span class="dot${i === 0 ? ' active' : ''}" data-idx="${i}"></span>`).join('')}</div>`
+      : '';
+  const counterHtml =
+    mode === 'slides' && totalSections > 0
+      ? `<div class="dm-page-counter"><span id="dm-cur">1</span> / ${totalSections}</div>`
+      : '';
 
   return `<!DOCTYPE html>
 <html lang="ko">
@@ -319,29 +367,38 @@ ${baseCss}
 .cd-unit{background:rgba(255,255,255,0.1);border-radius:var(--dm-radius-md);padding:var(--dm-sp-3) var(--dm-sp-4);min-width:64px}
 .cd-num{font-size:var(--dm-fs-h1);font-weight:900;font-family:var(--dm-font-mono);color:#fff}
 .cd-lbl{font-size:var(--dm-fs-tiny);opacity:0.8;margin-top:2px}
-.dm-section-wrap{position:relative}
+${modeCss}
 </style>
 </head>
-<body>
+<body data-layout-mode="${mode}">
 <div class="dm-viewer">
 ${sectionsHtml}
 </div>
+${dotsHtml}
+${counterHtml}
 
 <script>
 (function(){
   var CODE = 'dm-${escapeHtml(shortCode)}';
   var TRACK_URL = '${escapeHtml(trackApiBase)}';
   var PHONE = new URLSearchParams(location.search).get('p') || '';
+  var MODE = document.body.getAttribute('data-layout-mode') || 'scroll';
+  var TOTAL = ${totalSections};
   var startTime = Date.now();
   var sectionInteractions = {};
+  var pageReached = 1;
+  var currentIdx = 0;
+  var wraps = Array.prototype.slice.call(document.querySelectorAll('.dm-section-wrap'));
+  var dots = Array.prototype.slice.call(document.querySelectorAll('.dm-page-dots .dot'));
+  var counter = document.getElementById('dm-cur');
 
   function sendTrack(extra) {
     if (!CODE) return;
     var dur = Math.round((Date.now() - startTime) / 1000);
     var body = JSON.stringify(Object.assign({
       phone: PHONE,
-      page_reached: 1,
-      total_pages: 1,
+      page_reached: pageReached,
+      total_pages: TOTAL || 1,
       duration: dur,
       section_interactions: sectionInteractions
     }, extra || {}));
@@ -352,8 +409,17 @@ ${sectionsHtml}
     }
   }
 
+  function updateCurrent(idx) {
+    if (idx < 0 || idx >= wraps.length) return;
+    currentIdx = idx;
+    if (idx + 1 > pageReached) pageReached = idx + 1;
+    dots.forEach(function(d, i){ d.classList.toggle('active', i === idx); });
+    if (counter) counter.textContent = String(idx + 1);
+  }
+
   if ('IntersectionObserver' in window) {
     var io = new IntersectionObserver(function(entries){
+      var best = null;
       entries.forEach(function(e){
         if (e.isIntersecting) {
           var sid = e.target.getAttribute('data-section-id');
@@ -361,11 +427,29 @@ ${sectionsHtml}
             sectionInteractions[sid] = sectionInteractions[sid] || { views: 0, clicks: 0 };
             sectionInteractions[sid].views++;
           }
+          if (!best || e.intersectionRatio > best.intersectionRatio) best = e;
         }
       });
-    }, { threshold: 0.5 });
-    document.querySelectorAll('.dm-section-wrap').forEach(function(el){ io.observe(el); });
+      if (best) {
+        var idx = wraps.indexOf(best.target);
+        if (idx >= 0) updateCurrent(idx);
+      }
+    }, { threshold: [0.3, 0.6, 0.9] });
+    wraps.forEach(function(el){ io.observe(el); });
   }
+
+  // dots 클릭 → 해당 섹션으로 이동
+  dots.forEach(function(d, i){
+    d.addEventListener('click', function(){
+      if (!wraps[i]) return;
+      if (MODE === 'slides') {
+        var viewer = document.querySelector('.dm-viewer');
+        if (viewer) viewer.scrollTo({ left: i * viewer.clientWidth, behavior: 'smooth' });
+      } else {
+        wraps[i].scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    });
+  });
 
   document.addEventListener('click', function(e){
     var wrap = e.target.closest && e.target.closest('.dm-section-wrap');
@@ -389,15 +473,33 @@ ${hasCountdown ? COUNTDOWN_SCRIPT : ''}
 
 // ────────────────── 메인 디스패처 (layout_mode 분기) ──────────────────
 
+/**
+ * DM layout_mode별 분기:
+ *   - scroll      : 섹션 기반 긴 세로 스크롤
+ *   - scroll_snap : 섹션 기반 세로 페이지 스냅 (1섹션=1페이지)
+ *   - slides      : 섹션 기반 좌우 슬라이드 (1섹션=1페이지)
+ *   - (legacy)    : pages[] 기반 D119 슬라이드 (sections 없을 때 폴백)
+ */
+function resolveSectionsMode(dm: any, sectionsArr: Section[]): SectionsLayoutMode | null {
+  if (sectionsArr.length === 0) return null;
+  const m = dm.layout_mode;
+  if (m === 'scroll_snap') return 'scroll_snap';
+  if (m === 'slides') return 'slides';
+  if (m === 'scroll') return 'scroll';
+  // 명시적 layout_mode 없지만 sections 존재 → scroll 기본
+  return 'scroll';
+}
+
 export function renderDmViewerHtml(dm: any, trackApiBase: string): string {
   const sectionsArr = parseSections(dm.sections);
-  const useSections = dm.layout_mode === 'scroll' && sectionsArr.length > 0;
-  return useSections ? renderSectionsHtml(dm, trackApiBase) : renderLegacySlidesHtml(dm, trackApiBase);
+  const mode = resolveSectionsMode(dm, sectionsArr);
+  if (mode === null) return renderLegacySlidesHtml(dm, trackApiBase);
+  return renderSectionsHtml(dm, trackApiBase, undefined, mode);
 }
 
 /**
  * 샘플 고객 데이터로 변수 치환 후 뷰어 HTML 렌더 (에디터 미리보기/검수용).
- * layout_mode='scroll' 전용. slides 모드는 기존 경로 그대로.
+ * 섹션 기반 3모드 모두 지원. legacy slides(pages[])는 기존 경로 그대로.
  */
 export async function renderDmViewerHtmlWithCustomer(
   dm: any,
@@ -406,10 +508,10 @@ export async function renderDmViewerHtmlWithCustomer(
   companyId: string,
 ): Promise<string> {
   const sectionsArr = parseSections(dm.sections);
-  const useSections = dm.layout_mode === 'scroll' && sectionsArr.length > 0;
-  if (!useSections) return renderLegacySlidesHtml(dm, trackApiBase);
+  const mode = resolveSectionsMode(dm, sectionsArr);
+  if (mode === null) return renderLegacySlidesHtml(dm, trackApiBase);
   const resolved = await resolveSections(sectionsArr, customer, companyId);
-  return renderSectionsHtml(dm, trackApiBase, resolved);
+  return renderSectionsHtml(dm, trackApiBase, resolved, mode);
 }
 
 // ────────────────── 만료/404 에러 페이지 ──────────────────

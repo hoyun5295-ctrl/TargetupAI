@@ -80,7 +80,7 @@ export async function syncCustomerOptIn(companyId: string, phones: string[], opt
  *
  * - 브랜드 사용자 → 본인 user_id로 등록
  * - 고객사관리자(admin) → 고객의 store_code 기준으로 올바른 브랜드 사용자에게 자동 배정
- *   (한 고객이 CPB 소속이면 → 시세이도_CPB user_id로 등록)
+ *   (예: 한 고객이 특정 브랜드 소속이면 → 해당 브랜드 user_id로 등록)
  *   매칭되는 브랜드 사용자가 없으면 등록 스킵 (admin user_id로 잘못 등록하지 않음)
  *
  * @param companyId  회사 ID

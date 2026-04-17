@@ -30,7 +30,7 @@ export type DmBrandKit = {
   sns?: { instagram?: string; youtube?: string; kakao?: string; naver?: string };
 };
 
-export type LayoutMode = 'scroll' | 'slides';
+export type LayoutMode = 'scroll' | 'slides' | 'scroll_snap';
 export type ApprovalStatus = 'draft' | 'review' | 'approved' | 'published';
 
 export type ValidationItem = {
@@ -120,7 +120,7 @@ export type DmBuilderState = {
   // ── Actions: Persistence ──
   loadDm: (id: string) => Promise<void>;
   save: (opts?: { silent?: boolean }) => Promise<void>;
-  createNew: (opts?: { title?: string; storeName?: string }) => void;
+  createNew: (opts?: { title?: string; storeName?: string; layoutMode?: LayoutMode }) => void;
   reset: () => void;
 
   // ── Actions: Validation ──
@@ -389,6 +389,7 @@ export const useDmBuilderStore = create<DmBuilderState>((set, get) => ({
       ...INITIAL_STATE,
       title: opts?.title || '',
       storeName: opts?.storeName || '',
+      layoutMode: opts?.layoutMode || 'scroll',
       brandKit: { ...DEFAULT_BRAND_KIT },
     });
   },

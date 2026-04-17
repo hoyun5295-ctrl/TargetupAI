@@ -20,6 +20,8 @@ import ValidationModal from '../components/dm/modals/ValidationModal';
 import VersionHistoryModal from '../components/dm/modals/VersionHistoryModal';
 import BrandKitModal from '../components/dm/modals/BrandKitModal';
 import AbTestModal from '../components/dm/modals/AbTestModal';
+import LayoutModePickerModal from '../components/dm/modals/LayoutModePickerModal';
+import type { LayoutMode } from '../stores/dmBuilderStore';
 import '../styles/dm-builder.css';
 
 const api = axios.create({ baseURL: '/api' });
@@ -79,9 +81,15 @@ export default function DmBuilderPage() {
     return () => clearTimeout(t);
   }, [toast, setToast]);
 
+  const [layoutPickerOpen, setLayoutPickerOpen] = useState(false);
+
   const handleCreateNew = () => {
     setLegacyDmError(null);
-    createNew();
+    setLayoutPickerOpen(true);
+  };
+
+  const handleLayoutPicked = (layoutMode: LayoutMode) => {
+    createNew({ layoutMode });
     setMode('edit');
   };
 
@@ -181,6 +189,12 @@ export default function DmBuilderPage() {
         )}
       </main>
 
+      <LayoutModePickerModal
+        open={layoutPickerOpen}
+        onClose={() => setLayoutPickerOpen(false)}
+        onSelect={handleLayoutPicked}
+      />
+
       {toast && <Toast toast={toast} />}
     </div>
   );
@@ -248,7 +262,7 @@ function EmptyList({ onCreateNew }: { onCreateNew: () => void }) {
       <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--dm-neutral-900)', marginBottom: 8 }}>아직 만든 DM이 없어요</div>
       <div style={{ fontSize: 13, color: 'var(--dm-neutral-600)', marginBottom: 24, lineHeight: 1.6 }}>
         한 줄 프롬프트로 AI가 구조·카피를 자동 생성해줘요.<br />
-        "시세이도 봄 신상 프로모션, 30대 여성, 20% 할인, 오늘 자정 마감"처럼 입력해 보세요.
+        "봄 신상 프로모션, 30대 여성, 20% 할인, 오늘 자정 마감"처럼 입력해 보세요.
       </div>
       <button
         onClick={onCreateNew}

@@ -12,7 +12,7 @@
  * 모달은 store.openModal 상태로 관리 (DmBuilderPage에서 렌더링).
  */
 import { useNavigate } from 'react-router-dom';
-import { useDmBuilderStore } from '../../stores/dmBuilderStore';
+import { useDmBuilderStore, type LayoutMode } from '../../stores/dmBuilderStore';
 
 export type DmTopBarProps = {
   onTestSendClick?: () => void;
@@ -29,6 +29,8 @@ export default function DmTopBar({ onTestSendClick, onPublishClick }: DmTopBarPr
   const save = useDmBuilderStore((s) => s.save);
   const validationResult = useDmBuilderStore((s) => s.validationResult);
   const setOpenModal = useDmBuilderStore((s) => s.setOpenModal);
+  const layoutMode = useDmBuilderStore((s) => s.layoutMode);
+  const setLayoutMode = useDmBuilderStore((s) => s.setLayoutMode);
 
   const canPublish = validationResult?.can_publish !== false;
 
@@ -88,6 +90,9 @@ export default function DmTopBar({ onTestSendClick, onPublishClick }: DmTopBarPr
 
       <div style={{ flex: 1 }} />
 
+      {/* 레이아웃 모드 세그먼트 토글 */}
+      <LayoutModeToggle value={layoutMode} onChange={setLayoutMode} />
+
       {/* AI 그룹 */}
       <ToolbarGroup>
         <IconButton onClick={() => setOpenModal('ai-prompt')} title="한 줄 프롬프트 → AI 초안" label="프롬프트" emoji="⚡" />
@@ -118,6 +123,57 @@ export default function DmTopBar({ onTestSendClick, onPublishClick }: DmTopBarPr
       >
         🚀 발행
       </button>
+    </div>
+  );
+}
+
+function LayoutModeToggle({ value, onChange }: { value: LayoutMode; onChange: (m: LayoutMode) => void }) {
+  const MODES: Array<{ key: LayoutMode; icon: string; label: string; tooltip: string }> = [
+    { key: 'scroll',      icon: '📜', label: '스크롤', tooltip: '긴 세로 스크롤' },
+    { key: 'scroll_snap', icon: '📍', label: '스냅',   tooltip: '세로 페이지 스냅 (1섹션=1페이지)' },
+    { key: 'slides',      icon: '🎴', label: '슬라이드', tooltip: '좌우 스와이프 슬라이드' },
+  ];
+  return (
+    <div
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        padding: 2,
+        borderRadius: 8,
+        background: 'var(--dm-neutral-50)',
+        border: '1px solid var(--dm-neutral-200)',
+        flexShrink: 0,
+      }}
+    >
+      {MODES.map((m) => {
+        const active = value === m.key;
+        return (
+          <button
+            key={m.key}
+            onClick={() => onChange(m.key)}
+            title={m.tooltip}
+            style={{
+              height: 28,
+              padding: '0 10px',
+              border: 'none',
+              background: active ? 'var(--dm-primary)' : 'transparent',
+              color: active ? '#fff' : 'var(--dm-neutral-700)',
+              fontSize: 11,
+              fontWeight: 600,
+              borderRadius: 6,
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              whiteSpace: 'nowrap',
+              transition: 'all 120ms',
+            }}
+          >
+            <span>{m.icon}</span>
+            <span>{m.label}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }
