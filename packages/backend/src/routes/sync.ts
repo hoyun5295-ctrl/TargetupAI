@@ -377,8 +377,8 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
     const failures: Array<{ phone: string; reason: string }> = [];
 
     // ── FIELD_MAP 기반 동적 컬럼 목록 (하드코딩 금지) ──
-    const columnFieldDefs = getColumnFields();    // 필수 17개
-    const customFieldDefs = getCustomFields();    // 커스텀 15개
+    const columnFieldDefs = getColumnFields();    // 고정 21개 (storageType='column')
+    const customFieldDefs = getCustomFields();    // 커스텀 15개 (storageType='custom_fields' — custom_1~15)
     const columnNames = columnFieldDefs.map(f => f.columnName);
     const currentYear = new Date().getFullYear();
 

@@ -189,7 +189,10 @@
       "Bash(echo \"FE EXIT: $?\")",
       "WebFetch(domain:designwiz.com)",
       "WebFetch(domain:mart-ye.com)",
-      "Bash(echo \"EXIT_CODE=$?\")"
+      "Bash(echo \"EXIT_CODE=$?\")",
+      "Bash(cmd.exe //c \"build-installer.bat 1.4.1\")",
+      "Bash(\"/c/Program Files \\(x86\\)/NSIS/makensis.exe\" //V3 //INPUTCHARSET UTF8 //DPRODUCT_VERSION=1.4.1 /c/Users/ceo/projects/sync-agent/installer/sync-agent-installer.nsi)",
+      "Bash(npx tsx *)"
     ]
   }
 }

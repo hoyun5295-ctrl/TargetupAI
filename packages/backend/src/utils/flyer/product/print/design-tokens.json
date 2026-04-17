@@ -1,139 +1,140 @@
 {
   "$schema": "./design-tokens.schema.json",
-  "version": "1.0.0",
-  "description": "인쇄전단 V2 (D129) 디자인 토큰 — 샘플1(TEST THE MARKET 봄세일) 기준 추출. 모든 템플릿은 이 토큰을 참조한다.",
-  "source": "sample1_test_the_market_spring_sale.png",
+  "version": "2.0.0",
+  "description": "인쇄전단 V2 (D129) 디자인 토큰 — Line B 친근 파스텔 모듈러. 샘플1 추종 폐기하고 한줄전단AI 고유 정체성 반영.",
+  "basis": "한줄로 Primary #4F46E5 + 파스텔 서브 + 매거진 모듈러 레이아웃",
   "updatedAt": "2026-04-17",
 
   "colors": {
     "brand": {
-      "primary":   { "value": "#2E4B88", "note": "헤더 진파랑 — 매장 정보 텍스트" },
-      "secondary": { "value": "#7FC5DD", "note": "헤더 배경 파스텔 블루" },
-      "accent":    { "value": "#9B6BD8", "note": "QR 박스 보라" }
+      "primary":   { "value": "#4F46E5", "note": "한줄로 인디고 — 브랜드 식별" },
+      "primaryLight": { "value": "#EEF2FF", "note": "Primary 연한 배경" },
+      "secondary": { "value": "#6366F1", "note": "보조 인디고" }
     },
 
     "semantic": {
-      "sale":      { "value": "#E53527", "note": "세일 빨강 — 정상가 취소선/할인강조" },
-      "priceMain": { "value": "#D9232A", "note": "메인 가격 빨강" },
-      "priceSub":  { "value": "#6ABD45", "note": "서브 가격 초록 — 대비용" },
-      "fresh":     { "value": "#6ABD45", "note": "신선 초록" },
-      "urgent":    { "value": "#D9443D", "note": "FRESH 섹션 띠 진빨강" },
-      "warn":      { "value": "#F5A623", "note": "주의 주황" }
+      "accent":    { "value": "#FB7185", "note": "따뜻한 핑크 — 세일/강조" },
+      "accentLight": { "value": "#FFE4E6", "note": "accent 연한 배경" },
+      "sale":      { "value": "#EF4444", "note": "세일 빨강 — 가격 강조" },
+      "priceMain": { "value": "#EF4444", "note": "메인 가격" },
+      "priceSub":  { "value": "#4F46E5", "note": "서브 가격 — 대비용" },
+      "fresh":     { "value": "#10B981", "note": "신선 에메랄드" },
+      "freshLight":{ "value": "#D1FAE5", "note": "신선 연한 배경" },
+      "warn":      { "value": "#F59E0B", "note": "주의 앰버" },
+      "info":      { "value": "#0EA5E9", "note": "정보 블루" }
     },
 
     "surface": {
-      "page":       { "value": "#FFFFFF", "note": "기본 용지 배경" },
-      "cardMain":   { "value": "#F5E0B8", "note": "메인 상품 카드 살구색" },
-      "cardSub":    { "value": "#C8E6A8", "note": "서브 상품 카드 연두" },
-      "stripeA":    { "value": "#FFF066", "note": "카테고리 지그재그 노랑" },
-      "stripeB":    { "value": "#DFF1C4", "note": "카테고리 지그재그 연두" },
-      "bannerRed":  { "value": "#E8383A", "note": "섹션 배너 빨강 띠" },
-      "bannerGreen":{ "value": "#5FBC3B", "note": "섹션 배너 초록 띠" },
-      "divider":    { "value": "#E5E7EB", "note": "구분선 회색" }
+      "page":       { "value": "#FAFAFA", "note": "페이지 베이스 — 부드러운 웜 화이트" },
+      "card":       { "value": "#FFFFFF", "note": "카드 배경" },
+      "cardMuted":  { "value": "#F8FAFC", "note": "카드 대체 배경 (지그재그용)" },
+      "sectionA":   { "value": "#FFF7ED", "note": "섹션 A 배경 — 따뜻한 크림" },
+      "sectionB":   { "value": "#F0FDF4", "note": "섹션 B 배경 — 신선 연녹" },
+      "sectionC":   { "value": "#FEF3F2", "note": "섹션 C 배경 — 따뜻한 핑크" },
+      "divider":    { "value": "#E5E7EB", "note": "디바이더 회색" }
     },
 
     "text": {
-      "default":    { "value": "#111111" },
-      "muted":      { "value": "#6B7280" },
-      "onBrand":    { "value": "#FFFFFF" },
-      "strikethrough": { "value": "#E53527", "note": "정상가 취소선 빨강" }
+      "default":    { "value": "#0F172A", "note": "슬레이트 900 — 본문 메인" },
+      "muted":      { "value": "#64748B", "note": "슬레이트 500 — 보조" },
+      "subtle":     { "value": "#94A3B8", "note": "슬레이트 400 — 메타" },
+      "onBrand":    { "value": "#FFFFFF", "note": "brand 배경 위" },
+      "strikethrough": { "value": "#94A3B8", "note": "정상가 취소선 — 너무 강하지 않게" }
     },
 
     "border": {
-      "cardMain":   { "value": "#E8823A", "note": "메인 카드 주황 테두리" },
-      "cardSub":    { "value": "#7DB935", "note": "서브 카드 초록 테두리" }
+      "card":       { "value": "#E5E7EB", "note": "카드 기본 테두리" },
+      "cardHover":  { "value": "#4F46E5", "note": "카드 강조 테두리" }
     }
   },
 
   "typography": {
     "fontFamilies": {
-      "hero":    { "value": "'BM Hanna Pro', 'BM Hanna 11yrs Old', sans-serif", "source": "배민 한나체 (우아한형제들 무료상업용)", "usage": "히어로 타이틀 '봄세일의특가전'" },
-      "display": { "value": "'Yanolja Yache', 'BM Jua', sans-serif", "source": "야놀자야체 / 배민 주아체 (무료상업용)", "usage": "서브 히어로·섹션 배너" },
-      "heading": { "value": "'BM JUA', 'GmarketSans', sans-serif", "source": "배민 주아체 / 지마켓산스 (무료상업용)", "usage": "섹션 타이틀·카테고리명" },
-      "price":   { "value": "'GmarketSansBold', 'Pretendard', sans-serif", "source": "지마켓산스 Bold (무료상업용)", "usage": "가격 숫자 — 숫자 가독성 최고" },
-      "body":    { "value": "'Pretendard', 'NanumSquare', sans-serif", "source": "Pretendard (오픈소스) / 나눔스퀘어 (무료상업용)", "usage": "상품명·본문·매장정보" },
-      "caption": { "value": "'Pretendard', sans-serif", "source": "Pretendard", "usage": "하단 유의사항·fine print" }
+      "hero":    { "value": "'Pretendard Variable', 'Pretendard', sans-serif", "weight": 900, "usage": "히어로 타이틀" },
+      "display": { "value": "'Pretendard Variable', 'Pretendard', sans-serif", "weight": 800, "usage": "섹션 타이틀 / 섹션 번호" },
+      "heading": { "value": "'Pretendard Variable', 'Pretendard', sans-serif", "weight": 700, "usage": "카테고리명" },
+      "price":   { "value": "'Pretendard Variable', 'Pretendard', sans-serif", "weight": 900, "features": "'tnum' 1", "usage": "가격 숫자 (tabular-nums)" },
+      "body":    { "value": "'Pretendard Variable', 'Pretendard', sans-serif", "weight": 500, "usage": "본문 / 상품명" },
+      "caption": { "value": "'Pretendard Variable', 'Pretendard', sans-serif", "weight": 400, "usage": "유의사항 / 메타" }
     },
 
     "fontSources": {
-      "note": "Phase 1에서는 CDN/self-host 모두 허용. Phase 2에 assets/fonts/로 통합 예정.",
+      "note": "Pretendard 단일 폰트 — orioncactus/pretendard jsdelivr. 과거 noonfonts CDN 404 이슈로 다중 폰트 포기.",
       "cdn": {
-        "pretendard": "https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.css",
-        "bm_jua":     "https://cdn.jsdelivr.net/gh/projectnoonnu/noonfonts_one@1.0/BMJUA.woff",
-        "bm_hanna":   "https://cdn.jsdelivr.net/gh/projectnoonnu/noonfonts_two@1.2/BMHANNAPro.woff",
-        "gmarket_bold": "https://cdn.jsdelivr.net/gh/projectnoonnu/noonfonts_2001@1.1/GmarketSansBold.woff",
-        "yanolja_yache": "https://cdn.jsdelivr.net/gh/projectnoonnu/noonfonts_2206-02@1.1/YanoljaYacheR.woff",
-        "nanum_square": "https://hangeul.pstatic.net/hangeul_static/css/nanum-square.css"
+        "pretendard_variable": "https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.css"
       },
       "license": {
-        "pretendard":     "SIL Open Font License 1.1 (오픈소스, 상업사용 가능)",
-        "bm_jua":         "우아한형제들 무료상업용 (재배포·수정 금지)",
-        "bm_hanna":       "우아한형제들 무료상업용",
-        "gmarket_sans":   "지마켓 무료상업용 (상업 인쇄 OK)",
-        "yanolja_yache":  "야놀자 무료상업용 (상업 인쇄 OK)",
-        "nanum_square":   "네이버 무료상업용"
-      }
+        "pretendard": "SIL Open Font License 1.1 (오픈소스, 상업사용 가능)"
+      },
+      "weight_range": "Pretendard Variable은 45~900 단계별 weight 지원 → 단일 폰트로도 계층 구조 표현 충분"
     },
 
     "scale": {
-      "hero":       { "sizePx": 180, "lineHeight": 1.0, "weight": 900, "letterSpacing": "-0.02em" },
-      "subHero":    { "sizePx": 64,  "lineHeight": 1.2, "weight": 800 },
-      "sectionBanner": { "sizePx": 52, "lineHeight": 1.15, "weight": 900 },
-      "sectionTitle": { "sizePx": 40, "lineHeight": 1.2, "weight": 800 },
-      "categoryLabel": { "sizePx": 28, "lineHeight": 1.2, "weight": 800 },
-      "priceMain":  { "sizePx": 72,  "lineHeight": 1.0, "weight": 900 },
-      "priceSub":   { "sizePx": 48,  "lineHeight": 1.0, "weight": 900 },
-      "originalPrice": { "sizePx": 22, "lineHeight": 1.2, "weight": 500, "decoration": "line-through" },
-      "productName": { "sizePx": 26, "lineHeight": 1.2, "weight": 700 },
-      "unit":        { "sizePx": 18, "lineHeight": 1.2, "weight": 500 },
-      "storeInfo":   { "sizePx": 20, "lineHeight": 1.4, "weight": 600 },
-      "caption":     { "sizePx": 12, "lineHeight": 1.3, "weight": 400 }
+      "heroTitle":    { "sizePx": 220, "lineHeight": 1.0,  "weight": 900, "letterSpacing": "-0.04em" },
+      "heroPeriod":   { "sizePx": 48,  "lineHeight": 1.2,  "weight": 700 },
+      "sectionNumber":{ "sizePx": 28,  "lineHeight": 1.0,  "weight": 900, "letterSpacing": "0.1em" },
+      "sectionTitle": { "sizePx": 54,  "lineHeight": 1.1,  "weight": 900, "letterSpacing": "-0.02em" },
+      "categoryLabel":{ "sizePx": 36,  "lineHeight": 1.2,  "weight": 800 },
+      "priceMain":    { "sizePx": 78,  "lineHeight": 0.95, "weight": 900 },
+      "priceSub":     { "sizePx": 54,  "lineHeight": 0.95, "weight": 900 },
+      "priceWonUnit": { "sizePx": 36,  "lineHeight": 1.0,  "weight": 700 },
+      "originalPrice":{ "sizePx": 22,  "lineHeight": 1.2,  "weight": 500, "decoration": "line-through" },
+      "productName":  { "sizePx": 28,  "lineHeight": 1.2,  "weight": 700 },
+      "productUnit":  { "sizePx": 20,  "lineHeight": 1.2,  "weight": 500 },
+      "storeInfo":    { "sizePx": 24,  "lineHeight": 1.4,  "weight": 600 },
+      "brandMark":    { "sizePx": 18,  "lineHeight": 1.0,  "weight": 700 },
+      "caption":      { "sizePx": 14,  "lineHeight": 1.4,  "weight": 400 },
+      "micro":        { "sizePx": 11,  "lineHeight": 1.3,  "weight": 400 }
     }
   },
 
   "spacing": {
     "unit": 4,
     "scale": {
-      "xs":  4,
-      "sm":  8,
-      "md":  16,
-      "lg":  24,
-      "xl":  32,
-      "2xl": 48,
-      "3xl": 64,
-      "section": 40,
-      "cardInner": 12,
-      "gridGap": 8
+      "xs":    4,
+      "sm":    8,
+      "md":    16,
+      "lg":    24,
+      "xl":    32,
+      "2xl":   48,
+      "3xl":   64,
+      "section": 32,
+      "cardInner": 16,
+      "gridGap": 12
     }
   },
 
   "radius": {
-    "sm":  6,
-    "md":  12,
-    "lg":  20,
-    "pill": 999,
-    "card": 14
+    "xs":    4,
+    "sm":    8,
+    "md":    12,
+    "lg":    16,
+    "xl":    20,
+    "pill":  999,
+    "card":  20
   },
 
   "shadow": {
-    "card":  "0 2px 8px rgba(0,0,0,0.08)",
-    "hero":  "0 6px 24px rgba(0,0,0,0.15)",
-    "badge": "0 2px 4px rgba(0,0,0,0.2)"
+    "none":  "none",
+    "sm":    "0 1px 2px rgba(15,23,42,0.04)",
+    "card":  "0 2px 6px rgba(15,23,42,0.06)",
+    "hero":  "0 8px 24px rgba(79,70,229,0.12)",
+    "badge": "0 1px 3px rgba(0,0,0,0.1)"
   },
 
   "border": {
-    "thin":  "1px solid #E5E7EB",
-    "card":  "2px solid var(--border-cardMain)",
-    "badge": "3px solid #FFFFFF"
+    "thin":   "1px solid #E5E7EB",
+    "card":   "1px solid #E5E7EB",
+    "divider":"1px solid #E5E7EB",
+    "accent": "2px solid #4F46E5"
   },
 
-  "effects": {
-    "priceStrikeAngle": -8,
-    "badgePulse": false,
-    "cardStripePattern": {
-      "type": "zigzag",
-      "colors": ["stripeA", "stripeB"],
-      "direction": "alternating-rows"
-    }
+  "signatures": {
+    "note": "한줄전단AI 시그니처 요소 — 모든 템플릿 공통",
+    "aiMark":       { "text": "⚡ AI 생성", "color": "primary", "sizePx": 14 },
+    "sectionNumber":{ "prefix": "0", "format": "{num} {label}", "note": "01 오늘의특가 / 02 베스트픽 / 03 신선코너" },
+    "footerWatermark": { "template": "🔵 한줄로 · hanjul.ai · {date}", "color": "muted" },
+    "cardCornerRadius": 20,
+    "sectionGap": "32px"
   }
 }

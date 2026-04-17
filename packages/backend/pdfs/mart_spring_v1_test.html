@@ -1,0 +1,966 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title></title>
+  <style>/* ============================================================
+   mart_spring_v1 v2.0 — 2절 세로 봄세일 템플릿
+   545 × 788 mm (한국 동네마트 실무 표준 규격)
+   Line B 친근 파스텔 모듈러 — 한줄전단AI 고유 디자인
+   ============================================================ */
+
+/* ---------- Pretendard 단일 폰트 (CDN 안정) ---------- */
+@import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.css');
+
+/* ---------- Paged.js @page — 2절 세로 ---------- */
+@page {
+  size: 545mm 788mm;
+  margin: 0;
+  marks: none;
+}
+
+/* Paged.js 원본 중복 제거 */
+@media print {
+  .flyer-page-original { display: none !important; }
+}
+
+/* ---------- 디자인 토큰 ---------- */
+:root {
+  /* Brand */
+  --c-primary:       #4F46E5;
+  --c-primary-light: #EEF2FF;
+
+  /* Semantic */
+  --c-accent:        #FB7185;
+  --c-accent-light:  #FFE4E6;
+  --c-sale:          #EF4444;
+  --c-price-main:    #EF4444;
+  --c-price-sub:     #4F46E5;
+  --c-fresh:         #10B981;
+  --c-fresh-light:   #D1FAE5;
+
+  /* Surface */
+  --c-page:          #FAFAFA;
+  --c-card:          #FFFFFF;
+  --c-section-a:     #FFF7ED;
+  --c-section-b:     #F0FDF4;
+  --c-section-c:     #FEF3F2;
+  --c-divider:       #E5E7EB;
+
+  /* Text */
+  --c-text:          #0F172A;
+  --c-muted:         #64748B;
+  --c-subtle:        #94A3B8;
+  --c-on-brand:      #FFFFFF;
+  --c-strike:        #94A3B8;
+
+  /* Radius */
+  --r-card:          20px;
+  --r-md:            12px;
+  --r-pill:          999px;
+
+  /* Font */
+  --f-base: 'Pretendard Variable', 'Pretendard', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+/* ---------- Reset & Base ---------- */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  width: 545mm;
+  height: 788mm;
+  font-family: var(--f-base);
+  color: var(--c-text);
+  background: var(--c-page);
+  font-feature-settings: 'tnum' 1, 'ss01' 1;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+img { max-width: 100%; height: auto; display: block; }
+
+.flyer-page {
+  width: 545mm;
+  height: 788mm;
+  padding: 0;
+  display: grid;
+  grid-template-rows:
+    24mm    /* 1. 마스트헤드 */
+    120mm   /* 2. 히어로 */
+    14mm    /* 3. 섹션 01 헤더 */
+    130mm   /* 4. 메인 그리드 (6칸) */
+    14mm    /* 5. 섹션 02 헤더 */
+    100mm   /* 6. 추천 그리드 (8칸) */
+    18mm    /* 7. 섹션 03 헤더 */
+    340mm   /* 8. FRESH 4블록 (2x2) */
+    28mm;   /* 9. 푸터 */
+  background: var(--c-page);
+  position: relative;
+  overflow: hidden;
+}
+
+/* ============================================================
+   1. 마스트헤드 — 얇은 수평 바
+   ============================================================ */
+.masthead {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 20px;
+  padding: 0 28px;
+  background: var(--c-card);
+  border-bottom: 1px solid var(--c-divider);
+  height: 24mm;
+}
+
+.ai-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--c-primary);
+  background: var(--c-primary-light);
+  padding: 6px 14px;
+  border-radius: var(--r-pill);
+  letter-spacing: -0.01em;
+}
+
+.masthead-store-row {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  justify-content: center;
+  color: var(--c-text);
+  font-size: 14px;
+  font-weight: 500;
+  overflow: hidden;
+}
+.masthead-store-row .store-name {
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--c-primary);
+  letter-spacing: -0.02em;
+}
+.masthead-store-row .divider {
+  color: var(--c-subtle);
+}
+.masthead-store-row .meta {
+  color: var(--c-muted);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.masthead-qr {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.masthead-qr .qr-code {
+  width: 48px;
+  height: 48px;
+  background: var(--c-card);
+  border: 1px solid var(--c-divider);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--c-muted);
+  font-size: 10px;
+}
+.masthead-qr .qr-code.empty {
+  background:
+    repeating-linear-gradient(0deg, #0f172a 0 2px, transparent 2px 4px),
+    repeating-linear-gradient(90deg, #0f172a 0 2px, transparent 2px 4px);
+  background-color: #fff;
+}
+.masthead-qr .qr-label {
+  font-size: 11px;
+  color: var(--c-muted);
+  line-height: 1.3;
+}
+.masthead-qr .qr-label strong {
+  color: var(--c-text);
+  font-weight: 700;
+  display: block;
+  font-size: 13px;
+}
+
+/* ============================================================
+   2. 히어로 — 매거진 스타일 대형 타이포
+   ============================================================ */
+.hero {
+  background: var(--c-card);
+  padding: 24px 40px 32px;
+  display: grid;
+  grid-template-rows: auto auto auto 1fr;
+  gap: 10px;
+  border-bottom: 1px solid var(--c-divider);
+  position: relative;
+}
+.hero-kicker {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--c-accent);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.hero-title {
+  font-size: 220px;
+  font-weight: 900;
+  line-height: 0.95;
+  letter-spacing: -0.04em;
+  color: var(--c-text);
+  font-family: var(--f-base);
+  padding: 0;
+}
+.hero-title .accent {
+  color: var(--c-primary);
+}
+.hero-period {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 20px;
+  background: var(--c-primary);
+  color: var(--c-on-brand);
+  border-radius: var(--r-pill);
+  font-size: 28px;
+  font-weight: 700;
+  width: fit-content;
+  letter-spacing: -0.01em;
+}
+.hero-subcopy {
+  font-size: 22px;
+  font-weight: 500;
+  color: var(--c-muted);
+  margin-top: 4px;
+  letter-spacing: -0.01em;
+  line-height: 1.4;
+}
+
+/* ============================================================
+   섹션 공통 — 번호 + 타이틀 + 디바이더
+   ============================================================ */
+.section-header {
+  display: flex;
+  align-items: baseline;
+  gap: 18px;
+  padding: 0 40px;
+  border-top: 2px solid var(--c-text);
+  padding-top: 8px;
+  background: var(--c-page);
+}
+.section-number {
+  font-size: 22px;
+  font-weight: 900;
+  color: var(--c-accent);
+  letter-spacing: 0.08em;
+}
+.section-title {
+  font-size: 42px;
+  font-weight: 900;
+  color: var(--c-text);
+  letter-spacing: -0.03em;
+}
+.section-sublabel {
+  font-size: 16px;
+  color: var(--c-muted);
+  font-weight: 500;
+  margin-left: auto;
+}
+
+/* ============================================================
+   3~4. 메인 그리드 (01 오늘의 특가) — 6칸
+   ============================================================ */
+.section-main {
+  padding: 14px 32px 0;
+  background: var(--c-page);
+}
+.main-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 10px;
+}
+.card-main {
+  background: var(--c-card);
+  border: 1px solid var(--c-divider);
+  border-radius: var(--r-card);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: space-between;
+  position: relative;
+  overflow: hidden;
+}
+.card-main::after {
+  content: '';
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%;
+  height: 4px;
+  background: var(--c-accent);
+}
+.card-main .product-image {
+  width: 100%;
+  height: 56mm;
+  object-fit: contain;
+  background: var(--c-section-a);
+  border-radius: 12px;
+  padding: 6px;
+}
+.card-main .discount-badge {
+  position: absolute;
+  top: 18px;
+  left: 18px;
+  background: var(--c-sale);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 900;
+  padding: 4px 10px;
+  border-radius: var(--r-pill);
+  letter-spacing: -0.01em;
+}
+.card-main .product-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 12px;
+}
+.card-main .original-price {
+  font-size: 16px;
+  color: var(--c-strike);
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+  font-weight: 500;
+}
+.card-main .sale-price {
+  font-size: 48px;
+  font-weight: 900;
+  color: var(--c-sale);
+  line-height: 1;
+  letter-spacing: -0.04em;
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+}
+.card-main .sale-price .won {
+  font-size: 22px;
+  color: var(--c-text);
+  font-weight: 700;
+}
+.card-main .product-name {
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--c-text);
+  margin-top: 4px;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+.card-main .product-name .unit {
+  font-size: 13px;
+  color: var(--c-muted);
+  font-weight: 500;
+  margin-left: 4px;
+}
+
+/* ============================================================
+   5~6. 추천 그리드 (02 베스트픽) — 8칸
+   ============================================================ */
+.section-recommend {
+  padding: 14px 32px 0;
+  background: var(--c-page);
+}
+.recommend-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 8px;
+}
+.card-sub {
+  background: var(--c-card);
+  border: 1px solid var(--c-divider);
+  border-radius: var(--r-card);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: space-between;
+  position: relative;
+  overflow: hidden;
+}
+.card-sub .product-image {
+  width: 100%;
+  height: 40mm;
+  object-fit: contain;
+  background: var(--c-primary-light);
+  border-radius: 10px;
+  padding: 4px;
+}
+.card-sub .sale-price {
+  font-size: 30px;
+  font-weight: 900;
+  color: var(--c-price-sub);
+  line-height: 1;
+  letter-spacing: -0.03em;
+  margin-top: 8px;
+  display: flex;
+  align-items: baseline;
+  gap: 1px;
+}
+.card-sub .sale-price .won {
+  font-size: 15px;
+  color: var(--c-text);
+  font-weight: 700;
+}
+.card-sub .original-price {
+  font-size: 12px;
+  color: var(--c-strike);
+  text-decoration: line-through;
+  font-weight: 500;
+}
+.card-sub .product-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--c-text);
+  margin-top: 2px;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+/* ============================================================
+   7~8. FRESH 4블록 (03 신선코너) — 2x2 카테고리 블록
+   ============================================================ */
+.section-fresh {
+  padding: 14px 32px 0;
+  background: var(--c-page);
+}
+.fresh-4blocks {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 14px;
+  height: 100%;
+}
+.fresh-block {
+  background: var(--c-card);
+  border-radius: var(--r-card);
+  border: 1px solid var(--c-divider);
+  padding: 14px 16px;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 10px;
+  overflow: hidden;
+}
+.fresh-block-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--c-divider);
+}
+.fresh-block-header .cat-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: var(--c-fresh-light);
+  color: var(--c-fresh);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  font-weight: 900;
+}
+.fresh-block-header .cat-label {
+  font-size: 22px;
+  font-weight: 900;
+  color: var(--c-text);
+  letter-spacing: -0.02em;
+}
+.fresh-block-header .cat-badge {
+  margin-left: auto;
+  background: var(--c-fresh);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  padding: 3px 8px;
+  border-radius: var(--r-pill);
+  letter-spacing: 0.08em;
+}
+
+.fresh-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  grid-auto-rows: 1fr;
+  gap: 6px;
+}
+.card-fresh {
+  background: var(--c-section-b);
+  border-radius: 12px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: space-between;
+  overflow: hidden;
+}
+.card-fresh .product-image {
+  width: 100%;
+  height: 28mm;
+  object-fit: contain;
+  background: transparent;
+}
+.card-fresh .sale-price {
+  font-size: 22px;
+  font-weight: 900;
+  color: var(--c-sale);
+  line-height: 1;
+  letter-spacing: -0.03em;
+  margin-top: 4px;
+  display: flex;
+  align-items: baseline;
+  gap: 1px;
+}
+.card-fresh .sale-price .won {
+  font-size: 11px;
+  color: var(--c-text);
+  font-weight: 700;
+}
+.card-fresh .original-price {
+  font-size: 10px;
+  color: var(--c-strike);
+  text-decoration: line-through;
+  font-weight: 500;
+}
+.card-fresh .product-name {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--c-text);
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ============================================================
+   9. 푸터 — 유의사항 + 한줄로 워터마크
+   ============================================================ */
+.footer {
+  display: grid;
+  grid-template-rows: 1fr auto;
+  gap: 6px;
+  padding: 10px 32px;
+  background: var(--c-card);
+  border-top: 1px solid var(--c-divider);
+}
+.footer-notice {
+  font-size: 11px;
+  color: var(--c-muted);
+  line-height: 1.5;
+  font-weight: 400;
+}
+.footer-brand {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--c-subtle);
+  font-weight: 500;
+}
+.footer-brand .brand-mark {
+  color: var(--c-primary);
+  font-weight: 700;
+}
+
+/* ============================================================
+   유틸 — 빈 이미지 폴백
+   ============================================================ */
+.product-image.empty {
+  background: var(--c-divider);
+  color: var(--c-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+}
+</style>
+</head>
+<body>
+  <div class="flyer-page">
+
+    <!-- ═══════════════ 1. 마스트헤드 (얇은 바) ═══════════════ -->
+    <header class="masthead" data-slot="masthead">
+      <div class="ai-mark">⚡ AI 생성</div>
+
+      <div class="masthead-store-row">
+        <span class="store-name" data-bind="store.name">테스트마켓</span>
+        <span class="divider">·</span>
+        <span class="meta" data-bind="store.address">의정부시 우리동 1번지</span>
+        <span class="divider">·</span>
+        <span class="meta" data-bind="store.phone">031-000-0000</span>
+        <span class="divider">·</span>
+        <span class="meta" data-bind="store.hours">08:00~22:00</span>
+      </div>
+
+      <div class="masthead-qr">
+        <div class="qr-label">
+          <strong>온라인 쇼핑몰</strong>
+          바로가기
+        </div>
+        <div class="qr-code empty" data-bind-bg="qr.imageUrl">QR</div>
+      </div>
+    </header>
+
+    <!-- ═══════════════ 2. 히어로 ═══════════════ -->
+    <section class="hero">
+      <div class="hero-kicker">SPRING SALE</div>
+      <h1 class="hero-title" data-slot="hero_title">봄 <span class="accent">세일</span></h1>
+      <div class="hero-period" data-slot="hero_period">🗓 04.17 (목) ~ 04.23 (수)</div>
+      <div class="hero-subcopy" data-slot="hero_subcopy">봄맞이 인기상품 알뜰 가격으로 만나보세요</div>
+    </section>
+
+    <!-- ═══════════════ 3. 섹션 01 — 오늘의 특가 ═══════════════ -->
+    <div class="section-header section-main-header" data-slot="section_main">
+      <span class="section-number">01</span>
+      <span class="section-title" data-bind="label">오늘의 특가</span>
+    </div>
+    <section class="section-main">
+      <div class="main-grid" data-slot="main_grid">
+        <template data-role="card">
+          <div class="card-main">
+            <img class="product-image" data-bind-src="imageUrl" alt="">
+            <div class="product-meta">
+              <div class="original-price" data-bind="originalPrice">3,000원</div>
+              <div class="sale-price"><span data-bind="salePriceNumber">1,000</span><span class="won">원</span></div>
+              <div class="product-name">
+                <span data-bind="productName">상품명</span>
+                <span class="unit" data-bind="unit"></span>
+              </div>
+            </div>
+          </div>
+        </template>
+      </div>
+    </section>
+
+    <!-- ═══════════════ 4. 섹션 02 — 베스트픽 ═══════════════ -->
+    <div class="section-header section-recommend-header" data-slot="section_recommend">
+      <span class="section-number">02</span>
+      <span class="section-title" data-bind="label">베스트 픽</span>
+    </div>
+    <section class="section-recommend">
+      <div class="recommend-grid" data-slot="recommend_grid">
+        <template data-role="card">
+          <div class="card-sub">
+            <img class="product-image" data-bind-src="imageUrl" alt="">
+            <div class="original-price" data-bind="originalPrice">2,500원</div>
+            <div class="sale-price"><span data-bind="salePriceNumber">1,111</span><span class="won">원</span></div>
+            <div class="product-name" data-bind="productName">상품명</div>
+          </div>
+        </template>
+      </div>
+    </section>
+
+    <!-- ═══════════════ 5. 섹션 03 — 신선코너 (4블록) ═══════════════ -->
+    <div class="section-header section-fresh-header" data-slot="section_fresh">
+      <span class="section-number">03</span>
+      <span class="section-title" data-bind="label">신선 코너</span>
+      <span class="section-sublabel" data-bind="sublabel">매일 들어오는 신선한 상품</span>
+    </div>
+    <section class="section-fresh">
+      <div class="fresh-4blocks">
+
+        <!-- 블록 1 — 축산 -->
+        <div class="fresh-block">
+          <div class="fresh-block-header">
+            <div class="cat-icon">🥩</div>
+            <div class="cat-label" data-slot-meta="fresh_block_1.categoryLabel">축산</div>
+            <div class="cat-badge">FRESH</div>
+          </div>
+          <div class="fresh-grid" data-slot="fresh_block_1">
+            <template data-role="card">
+              <div class="card-fresh">
+                <img class="product-image" data-bind-src="imageUrl" alt="">
+                <div class="original-price" data-bind="originalPrice"></div>
+                <div class="sale-price"><span data-bind="salePriceNumber">1,000</span><span class="won">원</span></div>
+                <div class="product-name" data-bind="productName">상품명</div>
+              </div>
+            </template>
+          </div>
+        </div>
+
+        <!-- 블록 2 — 수산 -->
+        <div class="fresh-block">
+          <div class="fresh-block-header">
+            <div class="cat-icon">🐟</div>
+            <div class="cat-label" data-slot-meta="fresh_block_2.categoryLabel">수산</div>
+            <div class="cat-badge">FRESH</div>
+          </div>
+          <div class="fresh-grid" data-slot="fresh_block_2">
+            <template data-role="card">
+              <div class="card-fresh">
+                <img class="product-image" data-bind-src="imageUrl" alt="">
+                <div class="original-price" data-bind="originalPrice"></div>
+                <div class="sale-price"><span data-bind="salePriceNumber">1,000</span><span class="won">원</span></div>
+                <div class="product-name" data-bind="productName">상품명</div>
+              </div>
+            </template>
+          </div>
+        </div>
+
+        <!-- 블록 3 — 청과 -->
+        <div class="fresh-block">
+          <div class="fresh-block-header">
+            <div class="cat-icon">🍎</div>
+            <div class="cat-label" data-slot-meta="fresh_block_3.categoryLabel">청과</div>
+            <div class="cat-badge">FRESH</div>
+          </div>
+          <div class="fresh-grid" data-slot="fresh_block_3">
+            <template data-role="card">
+              <div class="card-fresh">
+                <img class="product-image" data-bind-src="imageUrl" alt="">
+                <div class="original-price" data-bind="originalPrice"></div>
+                <div class="sale-price"><span data-bind="salePriceNumber">1,000</span><span class="won">원</span></div>
+                <div class="product-name" data-bind="productName">상품명</div>
+              </div>
+            </template>
+          </div>
+        </div>
+
+        <!-- 블록 4 — 주류/음료 -->
+        <div class="fresh-block">
+          <div class="fresh-block-header">
+            <div class="cat-icon">🍾</div>
+            <div class="cat-label" data-slot-meta="fresh_block_4.categoryLabel">주류</div>
+            <div class="cat-badge">FRESH</div>
+          </div>
+          <div class="fresh-grid" data-slot="fresh_block_4">
+            <template data-role="card">
+              <div class="card-fresh">
+                <img class="product-image" data-bind-src="imageUrl" alt="">
+                <div class="original-price" data-bind="originalPrice"></div>
+                <div class="sale-price"><span data-bind="salePriceNumber">1,000</span><span class="won">원</span></div>
+                <div class="product-name" data-bind="productName">상품명</div>
+              </div>
+            </template>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ═══════════════ 9. 푸터 ═══════════════ -->
+    <footer class="footer">
+      <div class="footer-notice" data-slot="footer_notice">
+        행사상품은 조기 품절될 수 있습니다. 사진은 이미지컷이며 실제와 다를 수 있습니다.
+      </div>
+      <div class="footer-brand">
+        <span data-slot="footer_brand"><span class="brand-mark">🔵 한줄로</span> · hanjul.ai</span>
+        <span>AI가 자동 생성한 전단입니다 · 2026.04.17</span>
+      </div>
+    </footer>
+
+  </div>
+
+<script>window.__SLOT_DATA = {"masthead":{"store":{"name":"테스트마켓","address":"의정부시 우리동 1번지","phone":"031-000-0000","hours":"08:00~22:00","deliveryHours":"10:00~19:00","logoUrl":"","mapUrl":""},"qr":{"title":"온라인 쇼핑몰","subtitle":"테스트마켓","imageUrl":""}},"hero_title":{"value":"봄 세일"},"hero_period":{"value":"04.17 (목) ~ 04.23 (수)"},"hero_subcopy":{"value":"봄맞이 인기상품 알뜰 가격으로 만나보세요"},"section_main":{"label":"오늘의 특가","sublabel":""},"main_grid":{"items":[{"productName":"과자 모음","unit":"1세트","imageUrl":"data:image/svg+xml;utf8,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'300'%20height%3D'300'%20viewBox%3D'0%200%20300%20300'%3E%20%3Crect%20width%3D'300'%20height%3D'300'%20fill%3D'%23FFE4E6'%2F%3E%20%3Ccircle%20cx%3D'150'%20cy%3D'130'%20r%3D'60'%20fill%3D'%23BE123C'%20opacity%3D'0.12'%2F%3E%20%3Ctext%20x%3D'150'%20y%3D'215'%20font-family%3D'Pretendard%2C%20Arial%2C%20sans-serif'%20font-size%3D'32'%20font-weight%3D'700'%20fill%3D'%23BE123C'%20text-anchor%3D'middle'%3E%EA%B3%BC%EC%9E%90%3C%2Ftext%3E%20%3C%2Fsvg%3E","salePriceNumber":"1,111","originalPrice":"3,990원","discountRate":72,"aiCopy":"","origin":""},{"productName":"양파","unit":"1망","imageUrl":"data:image/svg+xml;utf8,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'300'%20height%3D'300'%20viewBox%3D'0%200%20300%20300'%3E%20%3Crect%20width%3D'300'%20height%3D'300'%20fill%3D'%23FFE4E6'%2F%3E%20%3Ccircle%20cx%3D'150'%20cy%3D'130'%20r%3D'60'%20fill%3D'%23BE123C'%20opacity%3D'0.12'%2F%3E%20%3Ctext%20x%3D'150'%20y%3D'215'%20font-family%3D'Pretendard%2C%20Arial%2C%20sans-serif'%20font-size%3D'32'%20font-weight%3D'700'%20fill%3D'%23BE123C'%20text-anchor%3D'middle'%3E%EC%96%91%ED%8C%8C%3C%2Ftext%3E%20%3C%2Fsvg%3E","salePriceNumber":"1,000","originalPrice":"3,500원","discountRate":71,"aiCopy":"","origin":""},{"productName":"바나나","unit":"1송이","imageUrl":"data:image/svg+xml;utf8,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'300'%20height%3D'300'%20viewBox%3D'0%200%20300%20300'%3E%20%3Crect%20width%3D'300'%20height%3D'300'%20fill%3D'%23FFE4E6'%2F%3E%20%3Ccircle%20cx%3D'150'%20cy%3D'130'%20r%3D'60'%20fill%3D'%23BE123C'%20opacity%3D'0.12'%2F%3E%20%3Ctext%20x%3D'150'%20y%3D'215'%20font-family%3D'Pretendard%2C%20Arial%2C%20sans-serif'%20font-size%3D'32'%20font-weight%3D'700'%20fill%3D'%23BE123C'%20text-anchor%3D'middle'%3E%EB%B0%94%EB%82%98%EB%82%98%3C%2Ftext%3E%20%3C%2Fsvg%3E","salePriceNumber":"1,000","originalPrice":"3,500원","discountRate":71,"aiCopy":"","origin":""},{"productName":"빵","unit":"1봉","imageUrl":"data:image/svg+xml;utf8,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'300'%20height%3D'300'%20viewBox%3D'0%200%20300%20300'%3E%20%3Crect%20width%3D'300'%20height%3D'300'%20fill%3D'%23FFE4E6'%2F%3E%20%3Ccircle%20cx%3D'150'%20cy%3D'130'%20r%3D'60'%20fill%3D'%23BE123C'%20opacity%3D'0.12'%2F%3E%20%3Ctext%20x%3D'150'%20y%3D'215'%20font-family%3D'Pretendard%2C%20Arial%2C%20sans-serif'%20font-size%3D'32'%20font-weight%3D'700'%20fill%3D'%23BE123C'%20text-anchor%3D'middle'%3E%EB%B9%B5%3C%2Ftext%3E%20%3C%2Fsvg%3E","salePriceNumber":"1,000","originalPrice":"3,000원","discountRate":67,"aiCopy":"","origin":""},{"productName":"삼겹살","unit":"100g","imageUrl":"data:image/svg+xml;utf8,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'300'%20height%3D'300'%20viewBox%3D'0%200%20300%20300'%3E%20%3Crect%20width%3D'300'%20height%3D'300'%20fill%3D'%23FFE4E6'%2F%3E%20%3Ccircle%20cx%3D'150'%20cy%3D'130'%20r%3D'60'%20fill%3D'%23BE123C'%20opacity%3D'0.12'%2F%3E%20%3Ctext%20x%3D'150'%20y%3D'215'%20font-family%3D'Pretendard%2C%20Arial%2C%20sans-serif'%20font-size%3D'32'%20font-weight%3D'700'%20fill%3D'%23BE123C'%20text-anchor%3D'middle'%3E%EC%82%BC%EA%B2%B9%EC%82%B4%3C%2Ftext%3E%20%3C%2Fsvg%3E","salePriceNumber":"990","originalPrice":"2,900원","discountRate":66,"aiCopy":"","origin":""},{"productName":"갈치","unit":"1마리","imageUrl":"data:image/svg+xml;utf8,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'300'%20height%3D'300'%20viewBox%3D'0%200%20300%20300'%3E%20%3Crect%20width%3D'300'%20height%3D'300'%20fill%3D'%23FFE4E6'%2F%3E%20%3Ccircle%20cx%3D'150'%20cy%3D'130'%20r%3D'60'%20fill%3D'%23BE123C'%20opacity%3D'0.12'%2F%3E%20%3Ctext%20x%3D'150'%20y%3D'215'%20font-family%3D'Pretendard%2C%20Arial%2C%20sans-serif'%20font-size%3D'32'%20font-weight%3D'700'%20fill%3D'%23BE123C'%20text-anchor%3D'middle'%3E%EA%B0%88%EC%B9%98%3C%2Ftext%3E%20%3C%2Fsvg%3E","salePriceNumber":"2,900","originalPrice":"7,900원","discountRate":63,"aiCopy":"","origin":""}],"minItems":4,"maxItems":6,"underfilled":false},"section_recommend":{"label":"베스트 픽","sublabel":""},"recommend_grid":{"items":[{"productName":"사과","unit":"5개","imageUrl":"data:image/svg+xml;utf8,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'300'%20height%3D'300'%20viewBox%3D'0%200%20300%20300'%3E%20%3Crect%20width%3D'300'%20height%3D'300'%20fill%3D'%23EEF2FF'%2F%3E%20%3Ccircle%20cx%3D'150'%20cy%3D'130'%20r%3D'60'%20fill%3D'%233730A3'%20opacity%3D'0.12'%2F%3E%20%3Ctext%20x%3D'150'%20y%3D'215'%20font-family%3D'Pretendard%2C%20Arial%2C%20sans-serif'%20font-size%3D'32'%20font-weight%3D'700'%20fill%3D'%233730A3'%20text-anchor%3D'middle'%3E%EC%82%AC%EA%B3%BC%3C%2Ftext%3E%20%3C%2Fsvg%3E","salePriceNumber":"3,900","originalPrice":"6,900원","discountRate":43,"aiCopy":"","origin":""},{"productName":"김치","unit":"1kg","imageUrl":"data:image/svg+xml;utf8,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'300'%20height%3D'300'%20viewBox%3D'0%200%20300%20300'%3E%20%3Crect%20width%3D'300'%20height%3D'300'%20fill%3D'%23EEF2FF'%2F%3E%20%3Ccircle%20cx%3D'150'%20cy%3D'130'%20r%3D'60'%20fill%3D'%233730A3'%20opacity%3D'0.12'%2F%3E%20%3Ctext%20x%3D'150'%20y%3D'215'%20font-family%3D'Pretendard%2C%20Arial%2C%20sans-serif'%20font-size%3D'32'%20font-weight%3D'700'%20fill%3D'%233730A3'%20text-anchor%3D'middle'%3E%EA%B9%80%EC%B9%98%3C%2Ftext%3E%20%3C%2Fsvg%3E","salePriceNumber":"6,900","originalPrice":"11,900원","discountRate":42,"aiCopy":"","origin":""},{"productName":"딸기","unit":"500g","imageUrl":"data:image/svg+xml;utf8,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'300'%20height%3D'300'%20viewBox%3D'0%200%20300%20300'%3E%20%3Crect%20width%3D'300'%20height%3D'300'%20fill%3D'%23EEF2FF'%2F%3E%20%3Ccircle%20cx%3D'150'%20cy%3D'130'%20r%3D'60'%20fill%3D'%233730A3'%20opacity%3D'0.12'%2F%3E%20%3Ctext%20x%3D'150'%20y%3D'215'%20font-family%3D'Pretendard%2C%20Arial%2C%20sans-serif'%20font-size%3D'32'%20font-weight%3D'700'%20fill%3D'%233730A3'%20text-anchor%3D'middle'%3E%EB%94%B8%EA%B8%B0%3C%2Ftext%3E%20%3C%2Fsvg%3E","salePriceNumber":"5,900","originalPrice":"9,900원","discountRate":40,"aiCopy":"","origin":""},{"productName":"두부","unit":"300g","imageUrl":"data:image/svg+xml;utf8,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'300'%20height%3D'300'%20viewBox%3D'0%200%20300%20300'%3E%20%3Crect%20width%3D'300'%20height%3D'300'%20fill%3D'%23EEF2FF'%2F%3E%20%3Ccircle%20cx%3D'150'%20cy%3D'130'%20r%3D'60'%20fill%3D'%233730A3'%20opacity%3D'0.12'%2F%3E%20%3Ctext%20x%3D'150'%20y%3D'215'%20font-family%3D'Pretendard%2C%20Arial%2C%20sans-serif'%20font-size%3D'32'%20font-weight%3D'700'%20fill%3D'%233730A3'%20text-anchor%3D'middle'%3E%EB%91%90%EB%B6%80%3C%2Ftext%3E%20%3C%2Fsvg%3E","salePriceNumber":"1,500","originalPrice":"2,500원","discountRate":40,"aiCopy":"","origin":""},{"productName":"참외","unit":"3개","imageUrl":"data:image/svg+xml;utf8,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'300'%20height%3D'300'%20viewBox%3D'0%200%20300%20300'%3E%20%3Crect%20width%3D'300'%20height%3D'300'%20fill%3D'%23EEF2FF'%2F%3E%20%3Ccircle%20cx%3D'150'%20cy%3D'130'%20r%3D'60'%20fill%3D'%233730A3'%20opacity%3D'0.12'%2F%3E%20%3Ctext%20x%3D'150'%20y%3D'215'%20font-family%3D'Pretendard%2C%20Arial%2C%20sans-serif'%20font-size%3D'32'%20font-weight%3D'700'%20fill%3D'%233730A3'%20text-anchor%3D'middle'%3E%EC%B0%B8%EC%99%B8%3C%2Ftext%3E%20%3C%2Fsvg%3E","salePriceNumber":"4,900","originalPrice":"7,900원","discountRate":38,"aiCopy":"","origin":""},{"productName":"계란","unit":"30구","imageUrl":"data:image/svg+xml;utf8,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'300'%20height%3D'300'%20viewBox%3D'0%200%20300%20300'%3E%20%3Crect%20width%3D'300'%20height%3D'300'%20fill%3D'%23EEF2FF'%2F%3E%20%3Ccircle%20cx%3D'150'%20cy%3D'130'%20r%3D'60'%20fill%3D'%233730A3'%20opacity%3D'0.12'%2F%3E%20%3Ctext%20x%3D'150'%20y%3D'215'%20font-family%3D'Pretendard%2C%20Arial%2C%20sans-serif'%20font-size%3D'32'%20font-weight%3D'700'%20fill%3D'%233730A3'%20text-anchor%3D'middle'%3E%EA%B3%84%EB%9E%80%3C%2Ftext%3E%20%3C%2Fsvg%3E","salePriceNumber":"4,900","originalPrice":"7,900원","discountRate":38,"aiCopy":"","origin":""},{"productName":"우유","unit":"1L","imageUrl":"data:image/svg+xml;utf8,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'300'%20height%3D'300'%20viewBox%3D'0%200%20300%20300'%3E%20%3Crect%20width%3D'300'%20height%3D'300'%20fill%3D'%23EEF2FF'%2F%3E%20%3Ccircle%20cx%3D'150'%20cy%3D'130'%20r%3D'60'%20fill%3D'%233730A3'%20opacity%3D'0.12'%2F%3E%20%3Ctext%20x%3D'150'%20y%3D'215'%20font-family%3D'Pretendard%2C%20Arial%2C%20sans-serif'%20font-size%3D'32'%20font-weight%3D'700'%20fill%3D'%233730A3'%20text-anchor%3D'middle'%3E%EC%9A%B0%EC%9C%A0%3C%2Ftext%3E%20%3C%2Fsvg%3E","salePriceNumber":"2,500","originalPrice":"3,900원","discountRate":36,"aiCopy":"","origin":""},{"productName":"라면","unit":"5개","imageUrl":"data:image/svg+xml;utf8,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'300'%20height%3D'300'%20viewBox%3D'0%200%20300%20300'%3E%20%3Crect%20width%3D'300'%20height%3D'300'%20fill%3D'%23EEF2FF'%2F%3E%20%3Ccircle%20cx%3D'150'%20cy%3D'130'%20r%3D'60'%20fill%3D'%233730A3'%20opacity%3D'0.12'%2F%3E%20%3Ctext%20x%3D'150'%20y%3D'215'%20font-family%3D'Pretendard%2C%20Arial%2C%20sans-serif'%20font-size%3D'32'%20font-weight%3D'700'%20fill%3D'%233730A3'%20text-anchor%3D'middle'%3E%EB%9D%BC%EB%A9%B4%3C%2Ftext%3E%20%3C%2Fsvg%3E","salePriceNumber":"3,900","originalPrice":"5,900원","discountRate":34,"aiCopy":"","origin":""}],"minItems":6,"maxItems":8,"underfilled":false},"section_fresh":{"label":"신선 코너","sublabel":"매일 들어오는 신선한 상품"},"fresh_block_1":{"items":[{"productName":"삼겹살","unit":"100g","imageUrl":"data:image/svg+xml;utf8,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'300'%20height%3D'300'%20viewBox%3D'0%200%20300%20300'%3E%20%3Crect%20width%3D'300'%20height%3D'300'%20fill%3D'%23FFE4E6'%2F%3E%20%3Ccircle%20cx%3D'150'%20cy%3D'130'%20r%3D'60'%20fill%3D'%23BE123C'%20opacity%3D'0.12'%2F%3E%20%3Ctext%20x%3D'150'%20y%3D'215'%20font-family%3D'Pretendard%2C%20Arial%2C%20sans-serif'%20font-size%3D'32'%20font-weight%3D'700'%20fill%3D'%23BE123C'%20text-anchor%3D'middle'%3E%EC%82%BC%EA%B2%B9%EC%82%B4%3C%2Ftext%3E%20%3C%2Fsvg%3E","salePriceNumber":"990","originalPrice":"2,900원","discountRate":66,"aiCopy":"","origin":""},{"productName":"계란","unit":"30구","imageUrl":"data:image/svg+xml;utf8,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'300'%20height%3D'300'%20viewBox%3D'0%200%20300%20300'%3E%20%3Crect%20width%3D'300'%20height%3D'300'%20fill%3D'%23EEF2FF'%2F%3E%20%3Ccircle%20cx%3D'150'%20cy%3D'130'%20r%3D'60'%20fill%3D'%233730A3'%20opacity%3D'0.12'%2F%3E%20%3Ctext%20x%3D'150'%20y%3D'215'%20font-family%3D'Pretendard%2C%20Arial%2C%20sans-serif'%20font-size%3D'32'%20font-weight%3D'700'%20fill%3D'%233730A3'%20text-anchor%3D'middle'%3E%EA%B3%84%EB%9E%80%3C%2Ftext%3E%20%3C%2Fsvg%3E","salePriceNumber":"4,900","originalPrice":"7,900원","discountRate":38,"aiCopy":"","origin":""},{"productName":"돼지 목살","unit":"100g","imageUrl":"data:image/svg+xml;utf8,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'300'%20height%3D'300'%20viewBox%3D'0%200%20300%20300'%3E%20%3Crect%20width%3D'300'%20height%3D'300'%20fill%3D'%23FEF3F2'%2F%3E%20%3Ccircle%20cx%3D'150'%20cy%3D'130'%20r%3D'60'%20fill%3D'%23BE123C'%20opacity%3D'0.12'%2F%3E%20%3Ctext%20x%3D'150'%20y%3D'215'%20font-family%3D'Pretendard%2C%20Arial%2C%20sans-serif'%20font-size%3D'32'%20font-weight%3D'700'%20fill%3D'%23BE123C'%20text-anchor%3D'middle'%3E%EB%AA%A9%EC%82%B4%3C%2Ftext%3E%20%3C%2Fsvg%3E","salePriceNumber":"9,900","originalPrice":"14,900원","discountRate":34,"aiCopy":"","origin":""},{"productName":"베이컨","unit":"300g","imageUrl":"data:image/svg+xml;utf8,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'300'%20height%3D'300'%20viewBox%3D'0%200%20300%20300'%3E%20%3Crect%20width%3D'300'%20height%3D'300'%20fill%3D'%23FEF3F2'%2F%3E%20%3Ccircle%20cx%3D'150'%20cy%3D'130'%20r%3D'60'%20fill%3D'%23BE123C'%20opacity%3D'0.12'%2F%3E%20%3Ctext%20x%3D'150'%20y%3D'215'%20font-family%3D'Pretendard%2C%20Arial%2C%20sans-serif'%20font-size%3D'32'%20font-weight%3D'700'%20fill%3D'%23BE123C'%20text-anchor%3D'middle'%3E%EB%B2%A0%EC%9D%B4%EC%BB%A8%3C%2Ftext%3E%20%3C%2Fsvg%3E","salePriceNumber":"5,900","originalPrice":"8,900원","discountRate":34,"aiCopy":"","origin":""},{"productName":"햄","unit":"340g","imageUrl":"data:image/svg+xml;utf8,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'300'%20height%3D'300'%20viewBox%3D'0%200%20300%20300'%3E%20%3Crect%20width%3D'300'%20height%3D'300'%20fill%3D'%23FEF3F2'%2F%3E%20%3Ccircle%20cx%3D'150'%20cy%3D'130'%20r%3D'60'%20fill%3D'%23BE123C'%20opacity%3D'0.12'%2F%3E%20%3Ctext%20x%3D'150'%20y%3D'215'%20font-family%3D'Pretendard%2C%20Arial%2C%20sans-serif'%20font-size%3D'32'%20font-weight%3D'700'%20fill%3D'%23BE123C'%20text-anchor%3D'middle'%3E%ED%96%84%3C%2Ftext%3E%20%3C%2Fsvg%3E","salePriceNumber":"3,900","originalPrice":"5,900원","discountRate":34,"aiCopy":"","origin":""},{"productName":"갈비세트","unit":"1kg","imageUrl":"data:image/svg+xml;utf8,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'300'%20height%3D'300'%20viewBox%3D'0%200%20300%20300'%3E%20%3Crect%20width%3D'300'%20height%3D'300'%20fill%3D'%23FEF3F2'%2F%3E%20%3Ccircle%20cx%3D'150'%20cy%3D'130'%20r%3D'60'%20fill%3D'%23BE123C'%20opacity%3D'0.12'%2F%3E%20%3Ctext%20x%3D'150'%20y%3D'215'%20font-family%3D'Pretendard%2C%20Arial%2C%20sans-serif'%20font-size%3D'32'%20font-weight%3D'700'%20fill%3D'%23BE123C'%20text-anchor%3D'middle'%3E%EA%B0%88%EB%B9%84%3C%2Ftext%3E%20%3C%2Fsvg%3E","salePriceNumber":"19,900","originalPrice":"29,900원","discountRate":33,"aiCopy":"","origin":""},{"productName":"한우 등심","unit":"100g","imageUrl":"data:image/svg+xml;utf8,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'300'%20height%3D'300'%20viewBox%3D'0%200%20300%20300'%3E%20%3Crect%20width%3D'300'%20height%3D'300'%20fill%3D'%23FEF3F2'%2F%3E%20%3Ccircle%20cx%3D'150'%20cy%3D'130'%20r%3D'60'%20fill%3D'%23BE123C'%20opacity%3D'0.12'%2F%3E%20%3Ctext%20x%3D'150'%20y%3D'215'%20font-family%3D'Pretendard%2C%20Arial%2C%20sans-serif'%20font-size%3D'32'%20font-weight%3D'700'%20fill%3D'%23BE123C'%20text-anchor%3D'middle'%3E%EB%93%B1%EC%8B%AC%3C%2Ftext%3E%20%3C%2Fsvg%3E","salePriceNumber":"19,900","originalPrice":"28,900원","discountRate":31,"aiCopy":"","origin":""},{"productName":"오리훈제","unit":"500g","imageUrl":"data:image/svg+xml;utf8,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'300'%20height%3D'300'%20viewBox%3D'0%200%20300%20300'%3E%20%3Crect%20width%3D'300'%20height%3D'300'%20fill%3D'%23FEF3F2'%2F%3E%20%3Ccircle%20cx%3D'150'%20cy%3D'130'%20r%3D'60'%20fill%3D'%23BE123C'%20opacity%3D'0.12'%2F%3E%20%3Ctext%20x%3D'150'%20y%3D'215'%20font-family%3D'Pretendard%2C%20Arial%2C%20sans-serif'%20font-size%3D'32'%20font-weight%3D'700'%20fill%3D'%23BE123C'%20text-anchor%3D'middle'%3E%EC%98%A4%EB%A6%AC%3C%2Ftext%3E%20%3C%2Fsvg%3E","salePriceNumber":"8,900","originalPrice":"12,900원","discountRate":31,"aiCopy":"","origin":""}],"categoryLabel":"축산","cols":4,"rows":2},"fresh_block_2":{"items":[{"productName":"갈치","unit":"1마리","imageUrl":"data:image/svg+xml;utf8,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'300'%20height%3D'300'%20viewBox%3D'0%200%20300%20300'%3E%20%3Crect%20width%3D'300'%20height%3D'300'%20fill%3D'%23FFE4E6'%2F%3E%20%3Ccircle%20cx%3D'150'%20cy%3D'130'%20r%3D'60'%20fill%3D'%23BE123C'%20opacity%3D'0.12'%2F%3E%20%3Ctext%20x%3D'150'%20y%3D'215'%20font-family%3D'Pretendard%2C%20Arial%2C%20sans-serif'%20font-size%3D'32'%20font-weight%3D'700'%20fill%3D'%23BE123C'%20text-anchor%3D'middle'%3E%EA%B0%88%EC%B9%98%3C%2Ftext%3E%20%3C%2Fsvg%3E","salePriceNumber":"2,900","originalPrice":"7,900원","discountRate":63,"aiCopy":"","origin":""},{"productName":"고등어","unit":"2마리","imageUrl":"data:image/svg+xml;utf8,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'300'%20height%3D'300'%20viewBox%3D'0%200%20300%20300'%3E%20%3Crect%20width%3D'300'%20height%3D'300'%20fill%3D'%23EFF6FF'%2F%3E%20%3Ccircle%20cx%3D'150'%20cy%3D'130'%20r%3D'60'%20fill%3D'%231E40AF'%20opacity%3D'0.12'%2F%3E%20%3Ctext%20x%3D'150'%20y%3D'215'%20font-family%3D'Pretendard%2C%20Arial%2C%20sans-serif'%20font-size%3D'32'%20font-weight%3D'700'%20fill%3D'%231E40AF'%20text-anchor%3D'middle'%3E%EA%B3%A0%EB%93%B1%EC%96%B4%3C%2Ftext%3E%20%3C%2Fsvg%3E","salePriceNumber":"3,900","originalPrice":"6,900원","discountRate":43,"aiCopy":"","origin":""},{"productName":"오징어","unit":"1마리","imageUrl":"data:image/svg+xml;utf8,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'300'%20height%3D'300'%20viewBox%3D'0%200%20300%20300'%3E%20%3Crect%20width%3D'300'%20height%3D'300'%20fill%3D'%23EFF6FF'%2F%3E%20%3Ccircle%20cx%3D'150'%20cy%3D'130'%20r%3D'60'%20fill%3D'%231E40AF'%20opacity%3D'0.12'%2F%3E%20%3Ctext%20x%3D'150'%20y%3D'215'%20font-family%3D'Pretendard%2C%20Arial%2C%20sans-serif'%20font-size%3D'32'%20font-weight%3D'700'%20fill%3D'%231E40AF'%20text-anchor%3D'middle'%3E%EC%98%A4%EC%A7%95%EC%96%B4%3C%2Ftext%3E%20%3C%2Fsvg%3E","salePriceNumber":"2,900","originalPrice":"4,900원","discountRate":41,"aiCopy":"","origin":""},{"productName":"새우","unit":"500g","imageUrl":"data:image/svg+xml;utf8,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'300'%20height%3D'300'%20viewBox%3D'0%200%20300%20300'%3E%20%3Crect%20width%3D'300'%20height%3D'300'%20fill%3D'%23EFF6FF'%2F%3E%20%3Ccircle%20cx%3D'150'%20cy%3D'130'%20r%3D'60'%20fill%3D'%231E40AF'%20opacity%3D'0.12'%2F%3E%20%3Ctext%20x%3D'150'%20y%3D'215'%20font-family%3D'Pretendard%2C%20Arial%2C%20sans-serif'%20font-size%3D'32'%20font-weight%3D'700'%20fill%3D'%231E40AF'%20text-anchor%3D'middle'%3E%EC%83%88%EC%9A%B0%3C%2Ftext%3E%20%3C%2Fsvg%3E","salePriceNumber":"9,900","originalPrice":"14,900원","discountRate":34,"aiCopy":"","origin":""},{"productName":"조기","unit":"3마리","imageUrl":"data:image/svg+xml;utf8,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'300'%20height%3D'300'%20viewBox%3D'0%200%20300%20300'%3E%20%3Crect%20width%3D'300'%20height%3D'300'%20fill%3D'%23EFF6FF'%2F%3E%20%3Ccircle%20cx%3D'150'%20cy%3D'130'%20r%3D'60'%20fill%3D'%231E40AF'%20opacity%3D'0.12'%2F%3E%20%3Ctext%20x%3D'150'%20y%3D'215'%20font-family%3D'Pretendard%2C%20Arial%2C%20sans-serif'%20font-size%3D'32'%20font-weight%3D'700'%20fill%3D'%231E40AF'%20text-anchor%3D'middle'%3E%EC%A1%B0%EA%B8%B0%3C%2Ftext%3E%20%3C%2Fsvg%3E","salePriceNumber":"5,900","originalPrice":"8,900원","discountRate":34,"aiCopy":"","origin":""},{"productName":"꽁치","unit":"5마리","imageUrl":"data:image/svg+xml;utf8,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'300'%20height%3D'300'%20viewBox%3D'0%200%20300%20300'%3E%20%3Crect%20width%3D'300'%20height%3D'300'%20fill%3D'%23EFF6FF'%2F%3E%20%3Ccircle%20cx%3D'150'%20cy%3D'130'%20r%3D'60'%20fill%3D'%231E40AF'%20opacity%3D'0.12'%2F%3E%20%3Ctext%20x%3D'150'%20y%3D'215'%20font-family%3D'Pretendard%2C%20Arial%2C%20sans-serif'%20font-size%3D'32'%20font-weight%3D'700'%20fill%3D'%231E40AF'%20text-anchor%3D'middle'%3E%EA%BD%81%EC%B9%98%3C%2Ftext%3E%20%3C%2Fsvg%3E","salePriceNumber":"3,900","originalPrice":"5,900원","discountRate":34,"aiCopy":"","origin":""},{"productName":"참치회","unit":"200g","imageUrl":"data:image/svg+xml;utf8,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'300'%20height%3D'300'%20viewBox%3D'0%200%20300%20300'%3E%20%3Crect%20width%3D'300'%20height%3D'300'%20fill%3D'%23EFF6FF'%2F%3E%20%3Ccircle%20cx%3D'150'%20cy%3D'130'%20r%3D'60'%20fill%3D'%231E40AF'%20opacity%3D'0.12'%2F%3E%20%3Ctext%20x%3D'150'%20y%3D'215'%20font-family%3D'Pretendard%2C%20Arial%2C%20sans-serif'%20font-size%3D'32'%20font-weight%3D'700'%20fill%3D'%231E40AF'%20text-anchor%3D'middle'%3E%EC%B0%B8%EC%B9%98%3C%2Ftext%3E%20%3C%2Fsvg%3E","salePriceNumber":"19,900","originalPrice":"29,900원","discountRate":33,"aiCopy":"","origin":""},{"productName":"연어","unit":"300g","imageUrl":"data:image/svg+xml;utf8,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'300'%20height%3D'300'%20viewBox%3D'0%200%20300%20300'%3E%20%3Crect%20width%3D'300'%20height%3D'300'%20fill%3D'%23EFF6FF'%2F%3E%20%3Ccircle%20cx%3D'150'%20cy%3D'130'%20r%3D'60'%20fill%3D'%231E40AF'%20opacity%3D'0.12'%2F%3E%20%3Ctext%20x%3D'150'%20y%3D'215'%20font-family%3D'Pretendard%2C%20Arial%2C%20sans-serif'%20font-size%3D'32'%20font-weight%3D'700'%20fill%3D'%231E40AF'%20text-anchor%3D'middle'%3E%EC%97%B0%EC%96%B4%3C%2Ftext%3E%20%3C%2Fsvg%3E","salePriceNumber":"12,900","originalPrice":"18,900원","discountRate":32,"aiCopy":"","origin":""}],"categoryLabel":"수산","cols":4,"rows":2},"fresh_block_3":{"items":[{"productName":"양파","unit":"1망","imageUrl":"data:image/svg+xml;utf8,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'300'%20height%3D'300'%20viewBox%3D'0%200%20300%20300'%3E%20%3Crect%20width%3D'300'%20height%3D'300'%20fill%3D'%23FFE4E6'%2F%3E%20%3Ccircle%20cx%3D'150'%20cy%3D'130'%20r%3D'60'%20fill%3D'%23BE123C'%20opacity%3D'0.12'%2F%3E%20%3Ctext%20x%3D'150'%20y%3D'215'%20font-family%3D'Pretendard%2C%20Arial%2C%20sans-serif'%20font-size%3D'32'%20font-weight%3D'700'%20fill%3D'%23BE123C'%20text-anchor%3D'middle'%3E%EC%96%91%ED%8C%8C%3C%2Ftext%3E%20%3C%2Fsvg%3E","salePriceNumber":"1,000","originalPrice":"3,500원","discountRate":71,"aiCopy":"","origin":""},{"productName":"바나나","unit":"1송이","imageUrl":"data:image/svg+xml;utf8,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'300'%20height%3D'300'%20viewBox%3D'0%200%20300%20300'%3E%20%3Crect%20width%3D'300'%20height%3D'300'%20fill%3D'%23FFE4E6'%2F%3E%20%3Ccircle%20cx%3D'150'%20cy%3D'130'%20r%3D'60'%20fill%3D'%23BE123C'%20opacity%3D'0.12'%2F%3E%20%3Ctext%20x%3D'150'%20y%3D'215'%20font-family%3D'Pretendard%2C%20Arial%2C%20sans-serif'%20font-size%3D'32'%20font-weight%3D'700'%20fill%3D'%23BE123C'%20text-anchor%3D'middle'%3E%EB%B0%94%EB%82%98%EB%82%98%3C%2Ftext%3E%20%3C%2Fsvg%3E","salePriceNumber":"1,000","originalPrice":"3,500원","discountRate":71,"aiCopy":"","origin":""},{"productName":"사과","unit":"5개","imageUrl":"data:image/svg+xml;utf8,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'300'%20height%3D'300'%20viewBox%3D'0%200%20300%20300'%3E%20%3Crect%20width%3D'300'%20height%3D'300'%20fill%3D'%23EEF2FF'%2F%3E%20%3Ccircle%20cx%3D'150'%20cy%3D'130'%20r%3D'60'%20fill%3D'%233730A3'%20opacity%3D'0.12'%2F%3E%20%3Ctext%20x%3D'150'%20y%3D'215'%20font-family%3D'Pretendard%2C%20Arial%2C%20sans-serif'%20font-size%3D'32'%20font-weight%3D'700'%20fill%3D'%233730A3'%20text-anchor%3D'middle'%3E%EC%82%AC%EA%B3%BC%3C%2Ftext%3E%20%3C%2Fsvg%3E","salePriceNumber":"3,900","originalPrice":"6,900원","discountRate":43,"aiCopy":"","origin":""},{"productName":"귤","unit":"1kg","imageUrl":"data:image/svg+xml;utf8,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'300'%20height%3D'300'%20viewBox%3D'0%200%20300%20300'%3E%20%3Crect%20width%3D'300'%20height%3D'300'%20fill%3D'%23FFFBEB'%2F%3E%20%3Ccircle%20cx%3D'150'%20cy%3D'130'%20r%3D'60'%20fill%3D'%23B45309'%20opacity%3D'0.12'%2F%3E%20%3Ctext%20x%3D'150'%20y%3D'215'%20font-family%3D'Pretendard%2C%20Arial%2C%20sans-serif'%20font-size%3D'32'%20font-weight%3D'700'%20fill%3D'%23B45309'%20text-anchor%3D'middle'%3E%EA%B7%A4%3C%2Ftext%3E%20%3C%2Fsvg%3E","salePriceNumber":"3,900","originalPrice":"6,900원","discountRate":43,"aiCopy":"","origin":""},{"productName":"감자","unit":"1kg","imageUrl":"data:image/svg+xml;utf8,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'300'%20height%3D'300'%20viewBox%3D'0%200%20300%20300'%3E%20%3Crect%20width%3D'300'%20height%3D'300'%20fill%3D'%23FFFBEB'%2F%3E%20%3Ccircle%20cx%3D'150'%20cy%3D'130'%20r%3D'60'%20fill%3D'%23B45309'%20opacity%3D'0.12'%2F%3E%20%3Ctext%20x%3D'150'%20y%3D'215'%20font-family%3D'Pretendard%2C%20Arial%2C%20sans-serif'%20font-size%3D'32'%20font-weight%3D'700'%20fill%3D'%23B45309'%20text-anchor%3D'middle'%3E%EA%B0%90%EC%9E%90%3C%2Ftext%3E%20%3C%2Fsvg%3E","salePriceNumber":"2,900","originalPrice":"4,900원","discountRate":41,"aiCopy":"","origin":""},{"productName":"딸기","unit":"500g","imageUrl":"data:image/svg+xml;utf8,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'300'%20height%3D'300'%20viewBox%3D'0%200%20300%20300'%3E%20%3Crect%20width%3D'300'%20height%3D'300'%20fill%3D'%23EEF2FF'%2F%3E%20%3Ccircle%20cx%3D'150'%20cy%3D'130'%20r%3D'60'%20fill%3D'%233730A3'%20opacity%3D'0.12'%2F%3E%20%3Ctext%20x%3D'150'%20y%3D'215'%20font-family%3D'Pretendard%2C%20Arial%2C%20sans-serif'%20font-size%3D'32'%20font-weight%3D'700'%20fill%3D'%233730A3'%20text-anchor%3D'middle'%3E%EB%94%B8%EA%B8%B0%3C%2Ftext%3E%20%3C%2Fsvg%3E","salePriceNumber":"5,900","originalPrice":"9,900원","discountRate":40,"aiCopy":"","origin":""},{"productName":"당근","unit":"500g","imageUrl":"data:image/svg+xml;utf8,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'300'%20height%3D'300'%20viewBox%3D'0%200%20300%20300'%3E%20%3Crect%20width%3D'300'%20height%3D'300'%20fill%3D'%23FFFBEB'%2F%3E%20%3Ccircle%20cx%3D'150'%20cy%3D'130'%20r%3D'60'%20fill%3D'%23B45309'%20opacity%3D'0.12'%2F%3E%20%3Ctext%20x%3D'150'%20y%3D'215'%20font-family%3D'Pretendard%2C%20Arial%2C%20sans-serif'%20font-size%3D'32'%20font-weight%3D'700'%20fill%3D'%23B45309'%20text-anchor%3D'middle'%3E%EB%8B%B9%EA%B7%BC%3C%2Ftext%3E%20%3C%2Fsvg%3E","salePriceNumber":"1,500","originalPrice":"2,500원","discountRate":40,"aiCopy":"","origin":""},{"productName":"참외","unit":"3개","imageUrl":"data:image/svg+xml;utf8,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'300'%20height%3D'300'%20viewBox%3D'0%200%20300%20300'%3E%20%3Crect%20width%3D'300'%20height%3D'300'%20fill%3D'%23EEF2FF'%2F%3E%20%3Ccircle%20cx%3D'150'%20cy%3D'130'%20r%3D'60'%20fill%3D'%233730A3'%20opacity%3D'0.12'%2F%3E%20%3Ctext%20x%3D'150'%20y%3D'215'%20font-family%3D'Pretendard%2C%20Arial%2C%20sans-serif'%20font-size%3D'32'%20font-weight%3D'700'%20fill%3D'%233730A3'%20text-anchor%3D'middle'%3E%EC%B0%B8%EC%99%B8%3C%2Ftext%3E%20%3C%2Fsvg%3E","salePriceNumber":"4,900","originalPrice":"7,900원","discountRate":38,"aiCopy":"","origin":""}],"categoryLabel":"청과","cols":4,"rows":2},"fresh_block_4":{"items":[{"productName":"와인 레드","unit":"750ml","imageUrl":"data:image/svg+xml;utf8,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'300'%20height%3D'300'%20viewBox%3D'0%200%20300%20300'%3E%20%3Crect%20width%3D'300'%20height%3D'300'%20fill%3D'%23F3F4F6'%2F%3E%20%3Ccircle%20cx%3D'150'%20cy%3D'130'%20r%3D'60'%20fill%3D'%23374151'%20opacity%3D'0.12'%2F%3E%20%3Ctext%20x%3D'150'%20y%3D'215'%20font-family%3D'Pretendard%2C%20Arial%2C%20sans-serif'%20font-size%3D'32'%20font-weight%3D'700'%20fill%3D'%23374151'%20text-anchor%3D'middle'%3E%EC%99%80%EC%9D%B8%3C%2Ftext%3E%20%3C%2Fsvg%3E","salePriceNumber":"9,900","originalPrice":"15,900원","discountRate":38,"aiCopy":"","origin":""},{"productName":"위스키","unit":"700ml","imageUrl":"data:image/svg+xml;utf8,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'300'%20height%3D'300'%20viewBox%3D'0%200%20300%20300'%3E%20%3Crect%20width%3D'300'%20height%3D'300'%20fill%3D'%23F3F4F6'%2F%3E%20%3Ccircle%20cx%3D'150'%20cy%3D'130'%20r%3D'60'%20fill%3D'%23374151'%20opacity%3D'0.12'%2F%3E%20%3Ctext%20x%3D'150'%20y%3D'215'%20font-family%3D'Pretendard%2C%20Arial%2C%20sans-serif'%20font-size%3D'32'%20font-weight%3D'700'%20fill%3D'%23374151'%20text-anchor%3D'middle'%3E%EC%9C%84%EC%8A%A4%ED%82%A4%3C%2Ftext%3E%20%3C%2Fsvg%3E","salePriceNumber":"29,900","originalPrice":"45,900원","discountRate":35,"aiCopy":"","origin":""},{"productName":"막걸리","unit":"1병","imageUrl":"data:image/svg+xml;utf8,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'300'%20height%3D'300'%20viewBox%3D'0%200%20300%20300'%3E%20%3Crect%20width%3D'300'%20height%3D'300'%20fill%3D'%23F3F4F6'%2F%3E%20%3Ccircle%20cx%3D'150'%20cy%3D'130'%20r%3D'60'%20fill%3D'%23374151'%20opacity%3D'0.12'%2F%3E%20%3Ctext%20x%3D'150'%20y%3D'215'%20font-family%3D'Pretendard%2C%20Arial%2C%20sans-serif'%20font-size%3D'32'%20font-weight%3D'700'%20fill%3D'%23374151'%20text-anchor%3D'middle'%3E%EB%A7%89%EA%B1%B8%EB%A6%AC%3C%2Ftext%3E%20%3C%2Fsvg%3E","salePriceNumber":"1,500","originalPrice":"2,000원","discountRate":25,"aiCopy":"","origin":""},{"productName":"카스","unit":"1병","imageUrl":"data:image/svg+xml;utf8,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'300'%20height%3D'300'%20viewBox%3D'0%200%20300%20300'%3E%20%3Crect%20width%3D'300'%20height%3D'300'%20fill%3D'%23F3F4F6'%2F%3E%20%3Ccircle%20cx%3D'150'%20cy%3D'130'%20r%3D'60'%20fill%3D'%23374151'%20opacity%3D'0.12'%2F%3E%20%3Ctext%20x%3D'150'%20y%3D'215'%20font-family%3D'Pretendard%2C%20Arial%2C%20sans-serif'%20font-size%3D'32'%20font-weight%3D'700'%20fill%3D'%23374151'%20text-anchor%3D'middle'%3E%EC%B9%B4%EC%8A%A4%3C%2Ftext%3E%20%3C%2Fsvg%3E","salePriceNumber":"1,790","originalPrice":"2,290원","discountRate":22,"aiCopy":"","origin":""},{"productName":"테라","unit":"1병","imageUrl":"data:image/svg+xml;utf8,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'300'%20height%3D'300'%20viewBox%3D'0%200%20300%20300'%3E%20%3Crect%20width%3D'300'%20height%3D'300'%20fill%3D'%23F3F4F6'%2F%3E%20%3Ccircle%20cx%3D'150'%20cy%3D'130'%20r%3D'60'%20fill%3D'%23374151'%20opacity%3D'0.12'%2F%3E%20%3Ctext%20x%3D'150'%20y%3D'215'%20font-family%3D'Pretendard%2C%20Arial%2C%20sans-serif'%20font-size%3D'32'%20font-weight%3D'700'%20fill%3D'%23374151'%20text-anchor%3D'middle'%3E%ED%85%8C%EB%9D%BC%3C%2Ftext%3E%20%3C%2Fsvg%3E","salePriceNumber":"1,890","originalPrice":"2,390원","discountRate":21,"aiCopy":"","origin":""},{"productName":"클라우드","unit":"1병","imageUrl":"data:image/svg+xml;utf8,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'300'%20height%3D'300'%20viewBox%3D'0%200%20300%20300'%3E%20%3Crect%20width%3D'300'%20height%3D'300'%20fill%3D'%23F3F4F6'%2F%3E%20%3Ccircle%20cx%3D'150'%20cy%3D'130'%20r%3D'60'%20fill%3D'%23374151'%20opacity%3D'0.12'%2F%3E%20%3Ctext%20x%3D'150'%20y%3D'215'%20font-family%3D'Pretendard%2C%20Arial%2C%20sans-serif'%20font-size%3D'32'%20font-weight%3D'700'%20fill%3D'%23374151'%20text-anchor%3D'middle'%3E%ED%81%B4%EB%9D%BC%EC%9A%B0%EB%93%9C%3C%2Ftext%3E%20%3C%2Fsvg%3E","salePriceNumber":"1,990","originalPrice":"2,490원","discountRate":20,"aiCopy":"","origin":""},{"productName":"참이슬","unit":"1병","imageUrl":"data:image/svg+xml;utf8,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'300'%20height%3D'300'%20viewBox%3D'0%200%20300%20300'%3E%20%3Crect%20width%3D'300'%20height%3D'300'%20fill%3D'%23F3F4F6'%2F%3E%20%3Ccircle%20cx%3D'150'%20cy%3D'130'%20r%3D'60'%20fill%3D'%23374151'%20opacity%3D'0.12'%2F%3E%20%3Ctext%20x%3D'150'%20y%3D'215'%20font-family%3D'Pretendard%2C%20Arial%2C%20sans-serif'%20font-size%3D'32'%20font-weight%3D'700'%20fill%3D'%23374151'%20text-anchor%3D'middle'%3E%EC%B0%B8%EC%9D%B4%EC%8A%AC%3C%2Ftext%3E%20%3C%2Fsvg%3E","salePriceNumber":"1,590","originalPrice":"1,890원","discountRate":16,"aiCopy":"","origin":""}],"categoryLabel":"주류","cols":4,"rows":2},"footer_notice":{"text":"행사상품은 조기 품절될 수 있습니다. 사진은 이미지컷이며 실제와 다를 수 있습니다. 단가 사정에 따라 냉동으로 대체될 수 있습니다."},"footer_brand":{"value":"🔵 한줄로 · hanjul.ai"}};</script>
+<script>
+        window.PagedConfig = {
+          auto: false,
+          after: function(flow) {
+            // ★ Paged.js가 원본 콘텐츠를 body에 남겨두는 문제 — 원본 숨김 처리
+            // (Puppeteer가 원본+pagedjs_pages 둘 다 인쇄해서 페이지 수가 배가되는 현상 방지)
+            try {
+              var nodes = document.querySelectorAll('body > :not(.pagedjs_pages):not(script):not(style):not(link)');
+              for (var i = 0; i < nodes.length; i++) {
+                nodes[i].style.display = 'none';
+              }
+            } catch (e) {
+              console.error('[paged] dedup error', e);
+            }
+            window.__PAGED_DONE = true;
+          }
+        };</script>
+<script>
+(function(){
+  var data = window.__SLOT_DATA || {};
+
+  function setByPath(obj, path) {
+    if (!obj || !path) return undefined;
+    var parts = String(path).split('.');
+    var cur = obj;
+    for (var i = 0; i < parts.length; i++) {
+      if (cur == null) return undefined;
+      cur = cur[parts[i]];
+    }
+    return cur;
+  }
+
+  function fillBindings(root, context) {
+    // data-bind="field" → textContent
+    var textEls = root.querySelectorAll('[data-bind]');
+    for (var i = 0; i < textEls.length; i++) {
+      var el = textEls[i];
+      var v = setByPath(context, el.getAttribute('data-bind'));
+      if (v !== undefined && v !== null && v !== '') {
+        el.textContent = String(v);
+      }
+    }
+    // data-bind-src="field" → img.src
+    var srcEls = root.querySelectorAll('[data-bind-src]');
+    for (var i = 0; i < srcEls.length; i++) {
+      var el = srcEls[i];
+      var v = setByPath(context, el.getAttribute('data-bind-src'));
+      if (v) el.setAttribute('src', String(v));
+      else el.classList.add('empty');
+    }
+    // data-bind-bg="field" → background-image
+    var bgEls = root.querySelectorAll('[data-bind-bg]');
+    for (var i = 0; i < bgEls.length; i++) {
+      var el = bgEls[i];
+      var v = setByPath(context, el.getAttribute('data-bind-bg'));
+      if (v) {
+        el.style.backgroundImage = "url('" + String(v).replace(/'/g, "\\'") + "')";
+        el.style.backgroundSize = 'cover';
+        el.style.backgroundPosition = 'center';
+        el.textContent = '';
+      }
+    }
+  }
+
+  function fillTextSlot(slotEl, value) {
+    if (!value) return;
+    if (typeof value === 'string') slotEl.textContent = value;
+    else if (value.value != null) slotEl.textContent = String(value.value);
+  }
+
+  function fillSectionBanner(slotEl, value) {
+    if (!value) return;
+    fillBindings(slotEl, value);
+  }
+
+  function fillStoreHeader(slotEl, value) {
+    if (!value) return;
+    fillBindings(slotEl, value);
+  }
+
+  function fillFooterNotice(slotEl, value) {
+    if (!value) return;
+    if (value.text) slotEl.textContent = value.text;
+  }
+
+  function fillGrid(slotEl, value) {
+    if (!value || !Array.isArray(value.items)) return;
+    // <template data-role="card"> 추출
+    var tmpl = slotEl.querySelector('template[data-role="card"]');
+    if (!tmpl) return;
+    // 기존 자식(템플릿 외) 제거
+    var clones = slotEl.querySelectorAll(':scope > :not(template)');
+    for (var c = 0; c < clones.length; c++) clones[c].remove();
+    // 각 아이템별 복제 삽입
+    for (var i = 0; i < value.items.length; i++) {
+      var item = value.items[i];
+      var frag = tmpl.content.cloneNode(true);
+      // 복제된 조각 안에서 data-bind* 처리
+      var wrapper = document.createElement('div');
+      wrapper.appendChild(frag);
+      fillBindings(wrapper, item);
+      // wrapper 내용을 slotEl에 이동
+      while (wrapper.firstChild) slotEl.appendChild(wrapper.firstChild);
+    }
+  }
+
+  function fillCategoryGrid(slotEl, value) {
+    fillGrid(slotEl, value);
+    // data-slot-meta="slotId.categoryLabel" 요소가 있으면 카테고리 라벨 주입
+  }
+
+  // 카테고리 라벨을 data-slot-meta 기반으로 처리
+  var metaEls = document.querySelectorAll('[data-slot-meta]');
+  for (var m = 0; m < metaEls.length; m++) {
+    var metaEl = metaEls[m];
+    var spec = metaEl.getAttribute('data-slot-meta');
+    if (!spec) continue;
+    var dot = spec.indexOf('.');
+    if (dot < 0) continue;
+    var slotId = spec.slice(0, dot);
+    var field = spec.slice(dot + 1);
+    var slotValue = data[slotId];
+    if (slotValue && slotValue[field]) {
+      metaEl.textContent = String(slotValue[field]);
+    }
+  }
+
+  // 각 슬롯 ID별로 채우기 (v2 — Line B 클래스명 인식)
+  var slotEls = document.querySelectorAll('[data-slot]');
+  for (var i = 0; i < slotEls.length; i++) {
+    var el = slotEls[i];
+    var id = el.getAttribute('data-slot');
+    var value = data[id];
+    if (value === undefined) continue;
+
+    // ── 그리드 계열 (product_grid / category_grid) ──
+    if (el.classList.contains('main-grid') ||
+        el.classList.contains('recommend-grid') ||
+        el.classList.contains('fresh-grid')) {
+      fillGrid(el, value);
+    }
+    // ── 푸터 유의사항 ──
+    else if (el.classList.contains('footer-notice')) {
+      fillFooterNotice(el, value);
+    }
+    // ── 마스트헤드 (매장 헤더) ──
+    else if (el.classList.contains('masthead')) {
+      fillStoreHeader(el, value);
+    }
+    // ── 히어로 타이틀 / 히어로 기간 / 히어로 서브카피 / 푸터 브랜드 (단일 텍스트) ──
+    else if (el.classList.contains('hero-title') ||
+             el.classList.contains('hero-period') ||
+             el.classList.contains('hero-subcopy') ||
+             el.classList.contains('footer-brand')) {
+      fillTextSlot(el, value);
+    }
+    // ── 섹션 헤더 (v2: 번호+타이틀+서브라벨 구조) ──
+    else if (el.classList.contains('section-main-header') ||
+             el.classList.contains('section-recommend-header') ||
+             el.classList.contains('section-fresh-header') ||
+             el.classList.contains('section-banner-main') ||
+             el.classList.contains('section-banner-recommend') ||
+             el.classList.contains('section-banner-fresh')) {
+      fillSectionBanner(el, value);
+    }
+    // ── fallback: data-bind 기반 텍스트 바인딩 ──
+    else {
+      fillTextSlot(el, value);
+    }
+  }
+
+  window.__SLOTS_FILLED = true;
+})();
+</script>
+<script src="https://unpkg.com/pagedjs@0.4.3/dist/paged.polyfill.js" crossorigin="anonymous"></script>
+<script>
+      (async function(){
+        // 슬롯 채움 완료 대기
+        for (var i = 0; i < 100 && !window.__SLOTS_FILLED; i++) {
+          await new Promise(function(r){ setTimeout(r, 20); });
+        }
+        // Paged.js polyfill 로드 완료 대기
+        for (var i = 0; i < 200 && !window.PagedPolyfill; i++) {
+          await new Promise(function(r){ setTimeout(r, 30); });
+        }
+        if (window.PagedPolyfill) {
+          try { await window.PagedPolyfill.preview(); }
+          catch (e) { console.error('[paged] preview error', e); window.__PAGED_DONE = true; }
+        } else {
+          console.warn('[paged] Paged.js polyfill 미로드 — skip');
+          window.__PAGED_DONE = true;
+        }
+      })();</script>
+
+</body>
+</html>

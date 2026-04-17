@@ -1,11 +1,11 @@
 {
   "id": "mart_spring_v1",
-  "version": "1.0.0",
-  "name": "마트 봄세일 A3 세로형",
-  "description": "샘플1(TEST THE MARKET 봄세일의특가전) 기준 1:1 재현. 4섹션 구조: 매장헤더 → 히어로타이틀 → 메인4칸 → 추천5칸 → FRESH 카테고리 좌우 2분할.",
+  "version": "2.0.0",
+  "name": "마트 봄세일 2절 세로 (Line B 친근 파스텔 모듈러)",
+  "description": "한줄전단AI 고유 디자인 — 2절(545×788mm) 한국 동네마트 실무 표준. 샘플1 추종 폐기, 매거진 모듈러 레이아웃. 섹션 번호(01/02/03/04) + 4카테고리 블록(축산/수산/청과/주류).",
   "industry": "mart",
   "season": "spring",
-  "paper": { "size": "A3", "orientation": "portrait" },
+  "paper": { "size": "j2", "orientation": "portrait" },
   "pages": 1,
   "assets": {
     "html": "template.html",
@@ -16,143 +16,172 @@
 
   "slots": [
     {
-      "id": "store_masthead",
+      "id": "masthead",
       "type": "store_header",
       "required": true,
-      "includes": ["logo", "name", "hours", "phone", "address", "map", "qr_online"],
-      "layout": "3col",
+      "includes": ["aiMark", "store", "qr"],
+      "layout": "horizontal_bar",
       "position": { "css": ".masthead" },
-      "note": "샘플1 상단 3분할: 매장정보|약도|전화+QR+온라인몰 배너"
+      "note": "얇은 수평 바: 좌측 AI마크+매장정보, 우측 QR (샘플1 3분할과 다른 모던 바 스타일)"
     },
     {
       "id": "hero_title",
       "type": "typography",
       "required": true,
       "editable": true,
-      "maxLength": 14,
-      "fallback": "봄세일의특가전",
-      "effects": ["gradient", "outline", "illustration"],
+      "maxLength": 16,
+      "fallback": "봄 세일",
+      "effects": [],
       "aiGenerate": {
-        "prompt": "마트 봄 시즌 세일 메인 카피, 8~14자. 컬러풀 일러스트 타이포 스타일.",
+        "prompt": "마트 봄 시즌 세일 메인 카피, 2~8자 간결, 매거진 타이포 느낌",
         "variants": 3
       },
       "position": { "css": ".hero-title" }
+    },
+    {
+      "id": "hero_period",
+      "type": "text",
+      "required": false,
+      "editable": true,
+      "fallback": "04.17 (목) ~ 04.23 (수)",
+      "position": { "css": ".hero-period" }
     },
     {
       "id": "hero_subcopy",
       "type": "text",
       "required": false,
       "editable": true,
-      "maxLength": 40,
-      "fallback": "봄날 혜택 봄맞이 인기상품 특가 퍼레이드!",
+      "maxLength": 60,
+      "fallback": "봄맞이 인기상품 알뜰 가격으로 만나보세요",
       "aiGenerate": {
-        "prompt": "히어로 서브카피, 20~40자. 활기찬 톤.",
+        "prompt": "히어로 서브카피, 20~50자, 차분하고 신뢰감 있는 톤",
         "variants": 3
       },
       "position": { "css": ".hero-subcopy" }
     },
     {
-      "id": "section_banner_main",
+      "id": "section_main",
       "type": "section_banner",
       "required": true,
-      "label": "지금 딱 필요한 상품들만 모아 가!",
-      "svgAsset": "banners/save_wallet_red.svg",
-      "editableText": true,
-      "position": { "css": ".section-banner-main" }
+      "label": "오늘의 특가",
+      "number": "01",
+      "position": { "css": ".section-main-header" }
     },
     {
       "id": "main_grid",
       "type": "product_grid",
       "required": true,
-      "cols": 4, "rows": 1,
-      "minItems": 3, "maxItems": 4,
+      "cols": 6, "rows": 1,
+      "minItems": 4, "maxItems": 6,
       "selection": {
         "mode": "highest_discount",
         "filter": { "promoType": "main" }
       },
       "cardVariant": "main",
       "overflow": "shrink",
-      "position": { "css": ".main-grid" },
-      "note": "샘플1 최상단 메인 4칸 — 살구색 배경 + 주황 테두리 + 큰 가격 빨강"
+      "position": { "css": ".main-grid" }
     },
     {
-      "id": "section_banner_recommend",
+      "id": "section_recommend",
       "type": "section_banner",
       "required": true,
-      "label": "알뜰쇼핑 찬스를 잡으세요 강력추천!",
-      "svgAsset": "banners/save_wallet_green.svg",
-      "editableText": true,
-      "position": { "css": ".section-banner-recommend" }
+      "label": "베스트 픽",
+      "number": "02",
+      "position": { "css": ".section-recommend-header" }
     },
     {
       "id": "recommend_grid",
       "type": "product_grid",
       "required": true,
-      "cols": 5, "rows": 1,
-      "minItems": 4, "maxItems": 5,
+      "cols": 8, "rows": 1,
+      "minItems": 6, "maxItems": 8,
       "selection": {
         "mode": "highest_discount",
         "filter": { "promoType": "sub" }
       },
       "cardVariant": "sub",
       "overflow": "shrink",
-      "position": { "css": ".recommend-grid" },
-      "note": "샘플1 2번째 섹션 5칸 — 연두 배경 + 초록 테두리 + 정상가 취소선 강조"
+      "position": { "css": ".recommend-grid" }
     },
     {
-      "id": "section_banner_fresh",
+      "id": "section_fresh",
       "type": "section_banner",
       "required": true,
-      "label": "자연에서 신선한 그대로",
-      "sublabel": "신선코너 1차식품 일자별 파격세일",
-      "svgAsset": "banners/fresh_stripe_red.svg",
-      "editableText": true,
-      "position": { "css": ".section-banner-fresh" }
+      "label": "신선 코너",
+      "sublabel": "매일 들어오는 신선한 상품",
+      "number": "03",
+      "position": { "css": ".section-fresh-header" }
     },
     {
-      "id": "fresh_left",
+      "id": "fresh_block_1",
       "type": "category_grid",
       "required": true,
-      "cols": 3, "rows": 3,
+      "cols": 4, "rows": 2,
       "category": {
         "mode": "auto",
         "prefer": ["축산", "정육", "한우", "돼지고기", "닭고기"]
       },
       "cardVariant": "fresh",
-      "stripePattern": true,
       "overflow": "shrink",
-      "position": { "css": ".fresh-left" },
-      "note": "좌측 카테고리 — 샘플1은 지그재그 노랑/연두 배경"
+      "position": { "css": ".fresh-block-1" },
+      "note": "좌상 블록 — 축산/정육"
     },
     {
-      "id": "fresh_right",
+      "id": "fresh_block_2",
       "type": "category_grid",
       "required": true,
-      "cols": 3, "rows": 3,
+      "cols": 4, "rows": 2,
       "category": {
         "mode": "auto",
-        "prefer": ["수산", "해산물", "과일", "청과", "채소"]
+        "prefer": ["수산", "해산물", "생선"]
       },
       "cardVariant": "fresh",
-      "stripePattern": true,
       "overflow": "shrink",
-      "position": { "css": ".fresh-right" }
+      "position": { "css": ".fresh-block-2" },
+      "note": "우상 블록 — 수산"
+    },
+    {
+      "id": "fresh_block_3",
+      "type": "category_grid",
+      "required": true,
+      "cols": 4, "rows": 2,
+      "category": {
+        "mode": "auto",
+        "prefer": ["청과", "과일", "채소", "야채"]
+      },
+      "cardVariant": "fresh",
+      "overflow": "shrink",
+      "position": { "css": ".fresh-block-3" },
+      "note": "좌하 블록 — 청과/과채"
+    },
+    {
+      "id": "fresh_block_4",
+      "type": "category_grid",
+      "required": true,
+      "cols": 4, "rows": 2,
+      "category": {
+        "mode": "auto",
+        "prefer": ["주류", "술", "와인", "음료"]
+      },
+      "cardVariant": "fresh",
+      "overflow": "shrink",
+      "position": { "css": ".fresh-block-4" },
+      "note": "우하 블록 — 주류/음료"
     },
     {
       "id": "footer_notice",
       "type": "footer_notice",
       "required": false,
       "editable": true,
-      "fallback": "행사상품은 조기 품절될 수 있습니다. 사진은 이미지컷이며 실제와 다를 수 있습니다. 단가 사정에 따라 냉동으로 대체될 수 있습니다. 먹거리 상품은 유통기한 확인하세요.",
+      "fallback": "행사상품은 조기 품절될 수 있습니다. 사진은 이미지컷이며 실제와 다를 수 있습니다.",
       "position": { "css": ".footer-notice" }
     },
     {
-      "id": "deco_flower_top",
-      "type": "decoration",
+      "id": "footer_brand",
+      "type": "text",
       "required": false,
-      "svgAsset": "deco/spring_flower_pink.svg",
-      "static": true,
-      "position": { "css": ".deco-flower-top" }
+      "fallback": "🔵 한줄로 · hanjul.ai",
+      "position": { "css": ".footer-brand" }
     }
   ]
 }

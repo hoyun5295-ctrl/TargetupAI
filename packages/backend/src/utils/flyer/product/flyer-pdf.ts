@@ -80,6 +80,14 @@ async function getBrowser(): Promise<Browser> {
   return browser;
 }
 
+/**
+ * ★ D129 인쇄전단 V2 — paged-pdf.ts 등 외부 모듈에서 동일 싱글톤을 공유하기 위한 export.
+ * 내부용 getBrowser()는 그대로 두고 얇은 래퍼만 제공.
+ */
+export async function getPuppeteerBrowser(): Promise<Browser> {
+  return getBrowser();
+}
+
 // 프로세스 종료 시 cleanup
 process.on('exit', () => { browser?.close().catch(() => {}); });
 process.on('SIGINT', () => { browser?.close().catch(() => {}); process.exit(0); });

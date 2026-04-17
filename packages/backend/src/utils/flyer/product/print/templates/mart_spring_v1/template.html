@@ -8,90 +8,71 @@
 <body>
   <div class="flyer-page">
 
-    <!-- ═══════════════ 1. 마스트헤드 (매장정보 3분할) ═══════════════ -->
-    <header class="masthead" data-slot="store_masthead">
+    <!-- ═══════════════ 1. 마스트헤드 (얇은 바) ═══════════════ -->
+    <header class="masthead" data-slot="masthead">
+      <div class="ai-mark">⚡ AI 생성</div>
 
-      <div class="masthead-store">
-        <div class="store-logo" data-bind="store.name">TEST THE MARKET</div>
-        <div class="store-slogan">365일 최저가격! 친절하고, 알차고, 신선한 우리동네 1등마켓</div>
-        <div class="store-meta">
-          <span class="label">영업시간</span>
-          <span data-bind="store.hours">08:00~22:00</span>
-          &nbsp;·&nbsp;
-          <span class="label">배송시간</span>
-          <span data-bind="store.deliveryHours">10:00~19:00</span>
-        </div>
-        <div class="store-meta">
-          <span class="label">영업문의</span>
-          <span data-bind="store.phone">031)000-0000</span>
-        </div>
-        <div class="store-meta" style="font-size:2.5mm; opacity:0.85;">
-          ※3만원이상 구매시 무료배송
-        </div>
-      </div>
-
-      <div class="masthead-map">
-        <div class="map-img" data-bind-bg="store.mapUrl">약도 영역</div>
-        <div class="map-address" data-bind="store.address">의정부시 우리동 1번지</div>
+      <div class="masthead-store-row">
+        <span class="store-name" data-bind="store.name">테스트마켓</span>
+        <span class="divider">·</span>
+        <span class="meta" data-bind="store.address">의정부시 우리동 1번지</span>
+        <span class="divider">·</span>
+        <span class="meta" data-bind="store.phone">031-000-0000</span>
+        <span class="divider">·</span>
+        <span class="meta" data-bind="store.hours">08:00~22:00</span>
       </div>
 
       <div class="masthead-qr">
-        <div>
-          <div class="qr-subtitle" data-bind="qr.subtitle">테스트마켓</div>
-          <div class="qr-title" data-bind="qr.title">온라인 쇼핑몰</div>
-          <div class="qr-desc">
-            1. 간단하게 회원가입만으로 스마트한 쇼핑<br>
-            2. 간편하게 휴대폰으로 장보기
-          </div>
+        <div class="qr-label">
+          <strong>온라인 쇼핑몰</strong>
+          바로가기
         </div>
-        <div class="qr-code" data-bind-bg="qr.imageUrl">QR</div>
+        <div class="qr-code empty" data-bind-bg="qr.imageUrl">QR</div>
       </div>
-
     </header>
 
     <!-- ═══════════════ 2. 히어로 ═══════════════ -->
     <section class="hero">
-      <div class="hero-pretitle">장바구니 필수아이템 알뜰찬스!</div>
-      <h1 class="hero-title" data-slot="hero_title">봄세일의특가전</h1>
-      <div class="hero-subcopy" data-slot="hero_subcopy">봄날 혜택 봄맞이 인기상품 특가 퍼레이드!</div>
+      <div class="hero-kicker">SPRING SALE</div>
+      <h1 class="hero-title" data-slot="hero_title">봄 <span class="accent">세일</span></h1>
+      <div class="hero-period" data-slot="hero_period">🗓 04.17 (목) ~ 04.23 (수)</div>
+      <div class="hero-subcopy" data-slot="hero_subcopy">봄맞이 인기상품 알뜰 가격으로 만나보세요</div>
     </section>
 
-    <!-- ═══════════════ 3. 메인 4칸 ═══════════════ -->
+    <!-- ═══════════════ 3. 섹션 01 — 오늘의 특가 ═══════════════ -->
+    <div class="section-header section-main-header" data-slot="section_main">
+      <span class="section-number">01</span>
+      <span class="section-title" data-bind="label">오늘의 특가</span>
+    </div>
     <section class="section-main">
-      <div class="section-banner-main" data-slot="section_banner_main">
-        <div class="banner-badge">내지갑<br>지키기</div>
-        <div class="banner-text" data-bind="label">지금 딱 필요한 상품들만 모아 가!</div>
-        <div class="banner-tag">알뜰장보기<br>초특가전</div>
-      </div>
       <div class="main-grid" data-slot="main_grid">
         <template data-role="card">
           <div class="card-main">
             <img class="product-image" data-bind-src="imageUrl" alt="">
-            <div class="original-price" data-bind="originalPrice">1,000원</div>
-            <div class="sale-price"><span data-bind="salePriceNumber">1,000</span><span class="won">원</span></div>
-            <div class="product-name">
-              <span data-bind="productName">상품명</span>
-              <span class="unit" data-bind="unit"></span>
+            <div class="product-meta">
+              <div class="original-price" data-bind="originalPrice">3,000원</div>
+              <div class="sale-price"><span data-bind="salePriceNumber">1,000</span><span class="won">원</span></div>
+              <div class="product-name">
+                <span data-bind="productName">상품명</span>
+                <span class="unit" data-bind="unit"></span>
+              </div>
             </div>
           </div>
         </template>
       </div>
     </section>
 
-    <!-- ═══════════════ 4. 추천 5칸 ═══════════════ -->
+    <!-- ═══════════════ 4. 섹션 02 — 베스트픽 ═══════════════ -->
+    <div class="section-header section-recommend-header" data-slot="section_recommend">
+      <span class="section-number">02</span>
+      <span class="section-title" data-bind="label">베스트 픽</span>
+    </div>
     <section class="section-recommend">
-      <div class="section-banner-recommend" data-slot="section_banner_recommend">
-        <div class="banner-badge">내지갑<br>지키기</div>
-        <div class="banner-text" data-bind="label">알뜰쇼핑 찬스를 잡으세요 강력추천!</div>
-        <div class="banner-tag">알뜰 장보기<br>초특가전</div>
-      </div>
       <div class="recommend-grid" data-slot="recommend_grid">
         <template data-role="card">
           <div class="card-sub">
             <img class="product-image" data-bind-src="imageUrl" alt="">
-            <div class="original-price">
-              정상가 <span class="strike" data-bind="originalPrice">1,111원</span>
-            </div>
+            <div class="original-price" data-bind="originalPrice">2,500원</div>
             <div class="sale-price"><span data-bind="salePriceNumber">1,111</span><span class="won">원</span></div>
             <div class="product-name" data-bind="productName">상품명</div>
           </div>
@@ -99,48 +80,103 @@
       </div>
     </section>
 
-    <!-- ═══════════════ 5. FRESH 배너 ═══════════════ -->
-    <section class="section-banner-fresh" data-slot="section_banner_fresh">
-      <div class="fresh-main">자연<em>에서</em> 신선한 <em>그대로</em></div>
-      <div class="fresh-sub" data-bind="sublabel">신선코너 1차식품 일자별 파격세일</div>
-    </section>
-
-    <!-- ═══════════════ 6. FRESH 좌우 2분할 ═══════════════ -->
+    <!-- ═══════════════ 5. 섹션 03 — 신선코너 (4블록) ═══════════════ -->
+    <div class="section-header section-fresh-header" data-slot="section_fresh">
+      <span class="section-number">03</span>
+      <span class="section-title" data-bind="label">신선 코너</span>
+      <span class="section-sublabel" data-bind="sublabel">매일 들어오는 신선한 상품</span>
+    </div>
     <section class="section-fresh">
+      <div class="fresh-4blocks">
 
-      <div class="fresh-column">
-        <div class="fresh-category-label" data-slot-meta="fresh_left.categoryLabel">축산</div>
-        <div class="fresh-grid" data-slot="fresh_left">
-          <template data-role="card">
-            <div class="card-fresh">
-              <img class="product-image" data-bind-src="imageUrl" alt="">
-              <div class="original-price" data-bind="originalPrice">1원</div>
-              <div class="sale-price"><span data-bind="salePriceNumber">1</span><span class="won">원</span></div>
-              <div class="product-name" data-bind="productName">상품명</div>
-            </div>
-          </template>
+        <!-- 블록 1 — 축산 -->
+        <div class="fresh-block">
+          <div class="fresh-block-header">
+            <div class="cat-icon">🥩</div>
+            <div class="cat-label" data-slot-meta="fresh_block_1.categoryLabel">축산</div>
+            <div class="cat-badge">FRESH</div>
+          </div>
+          <div class="fresh-grid" data-slot="fresh_block_1">
+            <template data-role="card">
+              <div class="card-fresh">
+                <img class="product-image" data-bind-src="imageUrl" alt="">
+                <div class="original-price" data-bind="originalPrice"></div>
+                <div class="sale-price"><span data-bind="salePriceNumber">1,000</span><span class="won">원</span></div>
+                <div class="product-name" data-bind="productName">상품명</div>
+              </div>
+            </template>
+          </div>
         </div>
-      </div>
 
-      <div class="fresh-column">
-        <div class="fresh-category-label" data-slot-meta="fresh_right.categoryLabel">수산</div>
-        <div class="fresh-grid" data-slot="fresh_right">
-          <template data-role="card">
-            <div class="card-fresh">
-              <img class="product-image" data-bind-src="imageUrl" alt="">
-              <div class="original-price" data-bind="originalPrice">1원</div>
-              <div class="sale-price green"><span data-bind="salePriceNumber">1</span><span class="won">원</span></div>
-              <div class="product-name" data-bind="productName">상품명</div>
-            </div>
-          </template>
+        <!-- 블록 2 — 수산 -->
+        <div class="fresh-block">
+          <div class="fresh-block-header">
+            <div class="cat-icon">🐟</div>
+            <div class="cat-label" data-slot-meta="fresh_block_2.categoryLabel">수산</div>
+            <div class="cat-badge">FRESH</div>
+          </div>
+          <div class="fresh-grid" data-slot="fresh_block_2">
+            <template data-role="card">
+              <div class="card-fresh">
+                <img class="product-image" data-bind-src="imageUrl" alt="">
+                <div class="original-price" data-bind="originalPrice"></div>
+                <div class="sale-price"><span data-bind="salePriceNumber">1,000</span><span class="won">원</span></div>
+                <div class="product-name" data-bind="productName">상품명</div>
+              </div>
+            </template>
+          </div>
         </div>
-      </div>
 
+        <!-- 블록 3 — 청과 -->
+        <div class="fresh-block">
+          <div class="fresh-block-header">
+            <div class="cat-icon">🍎</div>
+            <div class="cat-label" data-slot-meta="fresh_block_3.categoryLabel">청과</div>
+            <div class="cat-badge">FRESH</div>
+          </div>
+          <div class="fresh-grid" data-slot="fresh_block_3">
+            <template data-role="card">
+              <div class="card-fresh">
+                <img class="product-image" data-bind-src="imageUrl" alt="">
+                <div class="original-price" data-bind="originalPrice"></div>
+                <div class="sale-price"><span data-bind="salePriceNumber">1,000</span><span class="won">원</span></div>
+                <div class="product-name" data-bind="productName">상품명</div>
+              </div>
+            </template>
+          </div>
+        </div>
+
+        <!-- 블록 4 — 주류/음료 -->
+        <div class="fresh-block">
+          <div class="fresh-block-header">
+            <div class="cat-icon">🍾</div>
+            <div class="cat-label" data-slot-meta="fresh_block_4.categoryLabel">주류</div>
+            <div class="cat-badge">FRESH</div>
+          </div>
+          <div class="fresh-grid" data-slot="fresh_block_4">
+            <template data-role="card">
+              <div class="card-fresh">
+                <img class="product-image" data-bind-src="imageUrl" alt="">
+                <div class="original-price" data-bind="originalPrice"></div>
+                <div class="sale-price"><span data-bind="salePriceNumber">1,000</span><span class="won">원</span></div>
+                <div class="product-name" data-bind="productName">상품명</div>
+              </div>
+            </template>
+          </div>
+        </div>
+
+      </div>
     </section>
 
-    <!-- ═══════════════ 7. 푸터 ═══════════════ -->
-    <footer class="footer-notice" data-slot="footer_notice">
-      행사상품은 조기 품절될 수 있습니다. 사진은 이미지컷이며 실제와 다를 수 있습니다.
+    <!-- ═══════════════ 9. 푸터 ═══════════════ -->
+    <footer class="footer">
+      <div class="footer-notice" data-slot="footer_notice">
+        행사상품은 조기 품절될 수 있습니다. 사진은 이미지컷이며 실제와 다를 수 있습니다.
+      </div>
+      <div class="footer-brand">
+        <span data-slot="footer_brand"><span class="brand-mark">🔵 한줄로</span> · hanjul.ai</span>
+        <span>AI가 자동 생성한 전단입니다 · 2026.04.17</span>
+      </div>
     </footer>
 
   </div>
