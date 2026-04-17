@@ -8,114 +8,76 @@
 <body>
   <div class="flyer-page">
 
+    <!-- ════════ 1. 마스트헤드 ════════ -->
     <header class="masthead" data-slot="masthead">
       <div class="ai-mark"><span>TODAY HOT</span></div>
+
       <div class="masthead-store-row">
         <span class="store-name" data-bind="store.name">테스트마켓</span>
-        <span class="divider">|</span>
-        <span class="meta" data-bind="store.address">의정부시 우리동 1번지</span>
-        <span class="divider">·</span>
-        <span class="meta" data-bind="store.phone">031-000-0000</span>
-        <span class="divider">·</span>
-        <span class="meta" data-bind="store.hours">08:00~22:00</span>
+        <span class="meta-line">
+          <span data-bind="store.address">의정부시 우리동 1번지</span>
+          <span class="divider">·</span>
+          <span data-bind="store.phone">031-000-0000</span>
+          <span class="divider">·</span>
+          <span data-bind="store.hours">08:00~22:00</span>
+          <span class="divider">·</span>
+          <span>3만원 이상 무료배송</span>
+        </span>
       </div>
+
+      <div class="masthead-shop">
+        <strong>온라인 쇼핑몰 OPEN!</strong>
+        <span>QR → 간편 장보기</span>
+      </div>
+
       <div class="masthead-qr">
-        <div class="qr-label">
-          <strong>LIVE 특가</strong>
-          QR로 바로가기
-        </div>
+        <div class="qr-label"><strong>LIVE 특가</strong>QR 바로가기</div>
         <div class="qr-code empty" data-bind-bg="qr.imageUrl">QR</div>
       </div>
     </header>
 
-    <section class="hero">
-      <div class="hero-kicker-row">
-        <div class="hero-kicker"><span>⚡ FLASH SALE</span></div>
-        <div class="hero-kicker-line"></div>
-        <div class="hero-kicker-date">LIMITED · 7 DAYS ONLY</div>
-      </div>
+    <!-- ════════ 경고 테이프 띠 ════════ -->
+    <div class="warning-tape"></div>
 
-      <div class="hero-main">
+    <!-- ════════ 2. 히어로 — 좌: 타이포 / 우: 가격 폭탄 ════════ -->
+    <section class="hero">
+      <div class="hero-left">
+        <div class="hero-kicker"><span>⚡ FLASH SALE · 7DAYS ONLY</span></div>
         <h1 class="hero-title" data-slot="hero_title">
           <span>HOT</span><span class="accent">특가</span>
-          <div class="hero-title-stamp">
-            <span class="mini">MAX</span>
-            <span class="big">70%</span>
-            <span class="mini">OFF</span>
-          </div>
         </h1>
-      </div>
-
-      <!-- 불꽃 + 번개 + 폭발 일러스트 (극대) -->
-      <div class="hero-illustration" aria-hidden="true">
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" fill="none">
-          <defs>
-            <radialGradient id="hotBurst" cx="50%" cy="50%">
-              <stop offset="0%" stop-color="#FFE100" stop-opacity="0.95"/>
-              <stop offset="50%" stop-color="#FF7A0E" stop-opacity="0.6"/>
-              <stop offset="100%" stop-color="#E8190F" stop-opacity="0"/>
-            </radialGradient>
-            <linearGradient id="flameHotOuter" x1="50%" y1="100%" x2="50%" y2="0%">
-              <stop offset="0%" stop-color="#FFE100"/>
-              <stop offset="45%" stop-color="#FF7A0E"/>
-              <stop offset="100%" stop-color="#E8190F"/>
-            </linearGradient>
-            <linearGradient id="flameHotInner" x1="50%" y1="100%" x2="50%" y2="0%">
-              <stop offset="0%" stop-color="#FFFFFF"/>
-              <stop offset="60%" stop-color="#FFE100"/>
-              <stop offset="100%" stop-color="#FF7A0E"/>
-            </linearGradient>
-          </defs>
-          <!-- 폭발 빛 -->
-          <circle cx="200" cy="200" r="190" fill="url(#hotBurst)"/>
-          <!-- 광선 8방향 -->
-          <g fill="#FFE100" opacity="0.85">
-            <polygon points="200,10 212,180 188,180" />
-            <polygon points="200,390 212,220 188,220" />
-            <polygon points="10,200 180,212 180,188" />
-            <polygon points="390,200 220,212 220,188" />
-            <polygon points="55,55 192,197 197,192" opacity="0.6"/>
-            <polygon points="345,55 208,197 203,192" opacity="0.6"/>
-            <polygon points="55,345 192,203 197,208" opacity="0.6"/>
-            <polygon points="345,345 208,203 203,208" opacity="0.6"/>
-          </g>
-          <!-- 불꽃 본체 -->
-          <path d="M 200 380 C 120 360 70 300 90 220 C 110 180 150 175 160 140 C 165 115 150 90 175 60 C 195 100 195 135 215 135 C 240 135 225 80 255 50 C 260 100 300 115 305 170 C 315 220 340 240 320 300 C 300 360 270 385 200 380 Z" fill="url(#flameHotOuter)" stroke="#0A0A0A" stroke-width="3"/>
-          <path d="M 200 370 C 150 350 115 305 128 245 C 142 210 172 208 180 180 C 185 160 175 142 195 120 C 208 150 208 175 223 175 C 243 175 233 135 253 115 C 258 150 285 162 288 205 C 294 240 312 255 298 300 C 284 345 255 365 200 370 Z" fill="url(#flameHotInner)"/>
-          <!-- 번개 정중앙 -->
-          <path d="M 200 155 L 170 225 L 198 225 L 180 290 L 235 210 L 207 210 L 225 155 Z" fill="#FFE100" stroke="#0A0A0A" stroke-width="3" stroke-linejoin="round"/>
-          <!-- 흰 하이라이트 -->
-          <circle cx="180" cy="320" r="12" fill="#FFF" opacity="0.85"/>
-          <circle cx="225" cy="300" r="7" fill="#FFF" opacity="0.7"/>
-          <!-- 튀는 불꽃 입자 -->
-          <g fill="#FFE100" stroke="#0A0A0A" stroke-width="1.5">
-            <polygon points="90,90 96,106 112,108 100,120 105,138 90,128 75,138 80,120 68,108 84,106" />
-            <polygon points="310,90 316,106 332,108 320,120 325,138 310,128 295,138 300,120 288,108 304,106" opacity="0.9"/>
-            <polygon points="90,310 96,326 112,328 100,340 105,358 90,348 75,358 80,340 68,328 84,326" opacity="0.85"/>
-            <polygon points="310,310 316,326 332,328 320,340 325,358 310,348 295,358 300,340 288,328 304,326" />
-          </g>
-          <!-- 작은 점 파티클 -->
-          <g fill="#E8190F">
-            <circle cx="40" cy="180" r="5"/>
-            <circle cx="360" cy="180" r="5"/>
-            <circle cx="200" cy="60" r="4"/>
-            <circle cx="200" cy="340" r="4"/>
-          </g>
-        </svg>
-      </div>
-
-      <div class="hero-bottom">
-        <div class="hero-period" data-slot="hero_period"><span>04.17 (목) ~ 04.23 (수)</span></div>
         <div class="hero-subcopy" data-slot="hero_subcopy">이번주 단 7일, 놓치면 후회합니다</div>
+        <div class="hero-period" data-slot="hero_period"><span>🔥 04.17 (목) ~ 04.23 (수)</span></div>
+      </div>
+
+      <div class="hero-right">
+        <div class="tag">오늘의 파격</div>
+        <div class="price-label">단일 최저가</div>
+        <div class="price-main"><span>990</span><span class="won">원</span></div>
+        <div class="product-name">삼겹살 <span class="unit">100g</span></div>
       </div>
     </section>
 
+    <!-- ════════ 3. 타임어택 카운트다운 바 ════════ -->
+    <div class="time-attack">
+      <div class="ta-label">▶ TIME ATTACK</div>
+      <div class="ta-days">
+        <div class="ta-day active">D-7</div>
+        <div class="ta-day active">D-6</div>
+        <div class="ta-day">D-5</div>
+        <div class="ta-day">D-4</div>
+        <div class="ta-day">D-3</div>
+        <div class="ta-day">D-2</div>
+        <div class="ta-day">D-1</div>
+      </div>
+      <div class="ta-urgent">⚠ 재고 소진 시 조기 마감</div>
+    </div>
+
+    <!-- ════════ 4. 섹션 01 — 오늘의 파격특가 ════════ -->
     <div class="section-header section-main-header" data-slot="section_main">
       <span class="section-number">01</span>
       <span class="section-title" data-bind="label">오늘의 <span class="accent">파격특가</span></span>
-      <span class="section-sublabel" data-bind="sublabel">
-        TODAY ONLY<span class="chip">지금 아니면 없음</span>
-      </span>
+      <span class="section-sublabel" data-bind="sublabel">TODAY ONLY · 지금 아니면 없음</span>
     </div>
     <section class="section-main">
       <div class="main-grid" data-slot="main_grid">
@@ -128,19 +90,24 @@
             </div>
             <img class="product-image" data-bind-src="imageUrl" alt="">
             <div class="product-meta">
-              <div class="original-price" data-bind="originalPrice">3,000원</div>
-              <div class="sale-price"><span data-bind="salePriceNumber">1,000</span><span class="won">원</span></div>
-              <div class="product-name">
-                <span data-bind="productName">상품명</span>
-                <span class="unit" data-bind="unit"></span>
+              <div class="info-left">
+                <div class="original-price" data-bind="originalPrice">3,000원</div>
+                <div class="product-name">
+                  <span data-bind="productName">상품명</span>
+                  <span class="unit" data-bind="unit"></span>
+                </div>
+                <div class="ai-copy" data-bind-show="aiCopy"><span data-bind="aiCopy"></span></div>
               </div>
-              <div class="ai-copy" data-bind-show="aiCopy"><span data-bind="aiCopy"></span></div>
+              <div class="info-right">
+                <div class="sale-price"><span data-bind="salePriceNumber">1,000</span><span class="won">원</span></div>
+              </div>
             </div>
           </div>
         </template>
       </div>
     </section>
 
+    <!-- ════════ 5. 섹션 02 — 초특가 BEST ════════ -->
     <div class="section-header section-recommend-header" data-slot="section_recommend">
       <span class="section-number">02</span>
       <span class="section-title" data-bind="label">초특가 <span class="accent">BEST</span></span>
@@ -152,21 +119,24 @@
           <div class="card-sub">
             <div class="mini-badge" data-bind-class-suffix="badgeKind"><span data-bind="badgeText">BEST</span></div>
             <img class="product-image" data-bind-src="imageUrl" alt="">
-            <div class="original-price" data-bind="originalPrice">2,500원</div>
-            <div class="sale-price"><span data-bind="salePriceNumber">1,111</span><span class="won">원</span></div>
-            <div class="product-name">
-              <span data-bind="productName">상품명</span>
-              <span class="unit" data-bind="unit"></span>
+            <div class="product-meta-sub">
+              <div class="original-price" data-bind="originalPrice"></div>
+              <div class="product-name">
+                <span data-bind="productName">상품명</span>
+                <span class="unit" data-bind="unit"></span>
+              </div>
+              <div class="sale-price"><span data-bind="salePriceNumber">1,111</span><span class="won">원</span></div>
             </div>
           </div>
         </template>
       </div>
     </section>
 
+    <!-- ════════ 6. 섹션 03 — 신선코너 HOT PICK ════════ -->
     <div class="section-header section-fresh-header" data-slot="section_fresh">
       <span class="section-number">03</span>
       <span class="section-title" data-bind="label">신선코너 <span class="accent">HOT PICK</span></span>
-      <span class="section-sublabel" data-bind="sublabel">매일 입고 신선함 그대로<span class="chip">FRESH</span></span>
+      <span class="section-sublabel" data-bind="sublabel">매일 입고 · 신선함 그대로 · FRESH</span>
     </div>
     <section class="section-fresh">
       <div class="fresh-4blocks">
@@ -176,7 +146,7 @@
             <div class="cat-icon">🥩</div>
             <div>
               <div class="cat-label" data-slot-meta="fresh_block_1.categoryLabel">축산</div>
-              <div class="cat-desc">한우 · 돼지 · 닭 · 햄소시지</div>
+              <div class="cat-desc">한우·돼지·닭·햄소시지</div>
             </div>
             <div class="cat-badge">HOT</div>
           </div>
@@ -185,11 +155,13 @@
               <div class="card-fresh">
                 <div class="mini-badge" data-bind-show="discountRate"><span data-bind="discountRate">30</span>%</div>
                 <img class="product-image" data-bind-src="imageUrl" alt="">
-                <div class="original-price" data-bind="originalPrice"></div>
-                <div class="sale-price"><span data-bind="salePriceNumber">1,000</span><span class="won">원</span></div>
-                <div class="product-name">
-                  <span data-bind="productName">상품명</span>
-                  <span class="unit" data-bind="unit"></span>
+                <div class="fresh-meta">
+                  <div class="original-price" data-bind="originalPrice"></div>
+                  <div class="product-name">
+                    <span data-bind="productName">상품명</span>
+                    <span class="unit" data-bind="unit"></span>
+                  </div>
+                  <div class="sale-price"><span data-bind="salePriceNumber">1,000</span><span class="won">원</span></div>
                 </div>
               </div>
             </template>
@@ -201,7 +173,7 @@
             <div class="cat-icon">🐟</div>
             <div>
               <div class="cat-label" data-slot-meta="fresh_block_2.categoryLabel">수산</div>
-              <div class="cat-desc">생선 · 해산물 · 회 · 젓갈</div>
+              <div class="cat-desc">생선·해산물·회·젓갈</div>
             </div>
             <div class="cat-badge">HOT</div>
           </div>
@@ -210,11 +182,13 @@
               <div class="card-fresh">
                 <div class="mini-badge" data-bind-show="discountRate"><span data-bind="discountRate">30</span>%</div>
                 <img class="product-image" data-bind-src="imageUrl" alt="">
-                <div class="original-price" data-bind="originalPrice"></div>
-                <div class="sale-price"><span data-bind="salePriceNumber">1,000</span><span class="won">원</span></div>
-                <div class="product-name">
-                  <span data-bind="productName">상품명</span>
-                  <span class="unit" data-bind="unit"></span>
+                <div class="fresh-meta">
+                  <div class="original-price" data-bind="originalPrice"></div>
+                  <div class="product-name">
+                    <span data-bind="productName">상품명</span>
+                    <span class="unit" data-bind="unit"></span>
+                  </div>
+                  <div class="sale-price"><span data-bind="salePriceNumber">1,000</span><span class="won">원</span></div>
                 </div>
               </div>
             </template>
@@ -226,7 +200,7 @@
             <div class="cat-icon">🍎</div>
             <div>
               <div class="cat-label" data-slot-meta="fresh_block_3.categoryLabel">청과</div>
-              <div class="cat-desc">과일 · 채소 · 나물 · 건어물</div>
+              <div class="cat-desc">과일·채소·나물·건어물</div>
             </div>
             <div class="cat-badge">HOT</div>
           </div>
@@ -235,11 +209,13 @@
               <div class="card-fresh">
                 <div class="mini-badge" data-bind-show="discountRate"><span data-bind="discountRate">30</span>%</div>
                 <img class="product-image" data-bind-src="imageUrl" alt="">
-                <div class="original-price" data-bind="originalPrice"></div>
-                <div class="sale-price"><span data-bind="salePriceNumber">1,000</span><span class="won">원</span></div>
-                <div class="product-name">
-                  <span data-bind="productName">상품명</span>
-                  <span class="unit" data-bind="unit"></span>
+                <div class="fresh-meta">
+                  <div class="original-price" data-bind="originalPrice"></div>
+                  <div class="product-name">
+                    <span data-bind="productName">상품명</span>
+                    <span class="unit" data-bind="unit"></span>
+                  </div>
+                  <div class="sale-price"><span data-bind="salePriceNumber">1,000</span><span class="won">원</span></div>
                 </div>
               </div>
             </template>
@@ -251,7 +227,7 @@
             <div class="cat-icon">🍾</div>
             <div>
               <div class="cat-label" data-slot-meta="fresh_block_4.categoryLabel">주류</div>
-              <div class="cat-desc">소주 · 맥주 · 와인 · 음료</div>
+              <div class="cat-desc">소주·맥주·와인·음료</div>
             </div>
             <div class="cat-badge">HOT</div>
           </div>
@@ -260,11 +236,13 @@
               <div class="card-fresh">
                 <div class="mini-badge" data-bind-show="discountRate"><span data-bind="discountRate">30</span>%</div>
                 <img class="product-image" data-bind-src="imageUrl" alt="">
-                <div class="original-price" data-bind="originalPrice"></div>
-                <div class="sale-price"><span data-bind="salePriceNumber">1,000</span><span class="won">원</span></div>
-                <div class="product-name">
-                  <span data-bind="productName">상품명</span>
-                  <span class="unit" data-bind="unit"></span>
+                <div class="fresh-meta">
+                  <div class="original-price" data-bind="originalPrice"></div>
+                  <div class="product-name">
+                    <span data-bind="productName">상품명</span>
+                    <span class="unit" data-bind="unit"></span>
+                  </div>
+                  <div class="sale-price"><span data-bind="salePriceNumber">1,000</span><span class="won">원</span></div>
                 </div>
               </div>
             </template>
@@ -274,13 +252,14 @@
       </div>
     </section>
 
+    <!-- ════════ 7. 푸터 ════════ -->
     <footer class="footer">
       <div class="footer-notice" data-slot="footer_notice">
         행사상품은 조기 품절될 수 있습니다. 사진은 이미지컷이며 실제와 다를 수 있습니다.
       </div>
       <div class="footer-brand">
         <span data-slot="footer_brand"><span class="brand-mark">⚡ 한줄로</span> · hanjul.ai</span>
-        <span>AI가 자동 생성한 전단입니다 · 2026.04.17</span>
+        <span>AI가 자동 생성한 전단 · 2026.04.17</span>
       </div>
     </footer>
 
