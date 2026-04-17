@@ -107,41 +107,62 @@
 
 ---
 
-### 🎨 D125 — 모바일 DM 빌더 프로모델 v1 구현 (2026-04-17~) — 🟢 설계 완료 / 구현 예정
+### 🎨 D126 — DM 빌더 프로모델 V2 UX 고도화 (2026-04-18~) — 🟢 착수 대기
 
-> **배경:** D119 기본형 DM 빌더(슬라이드 기반) → **실전 프로모델**로 전면 재설계.
-> 프로 요금제(월 100만원) 핵심 차별화 기능. "MVP 아니고 실전 프로모델"(Harold님 2026-04-16 지시).
-> **설계서:** [`status/DM-PRO-DESIGN.md`](DM-PRO-DESIGN.md) — 19섹션, 완료 체크리스트 포함.
+> **배경:** D125 V1에서 핵심 엔진(섹션/AI/검수/변수/브랜드킷/버전/테스트발송/레거시변환) 전 구간 완료. V2는 **UX 고도화 + 성과 최적화** 중심.
+> **메모리:** [`project_d125.md`](../.claude/projects/C--Users-ceo-projects-targetup/memory/project_d125.md) — V1 구현 상세 + V2 로드맵
 >
-> **핵심 변경:**
-> - 구조: 슬라이드 → **섹션 기반 세로 스크롤** (섹션 11종 × 업종별 스타일 3~5 변형)
-> - 편집: 입력폼 → **WYSIWYG 캔버스 직접 편집** (자체 구현 + dnd-kit)
-> - AI 엔진 4모듈 신설: Prompt Parser / Layout Recommender / Copy Generator / Tone Transformer
-> - 검수 엔진: 10영역 × 3등급 자동 검사
-> - 개인화 변수 + fallback + 샘플 A/B/empty 렌더링
-> - 브랜드 킷 (컬러·로고·폰트·톤) + 템플릿 7카테고리
-> - 버전 관리 + 승인 플로우
-> - 디자인 시스템 (WCAG AA + 320~430px + 토큰 기반)
+> **V2 우선순위 (메모리 project_d125.md "다음 세션 과제" 8건):**
+> 1. **인라인 텍스트 편집** — 캔버스 섹션 내 contentEditable로 직접 카피 수정
+> 2. **AI 프롬프트 UX 모달** — DmTopBar `⚡ 프롬프트` 버튼 → 한 줄 입력 → 초안 자동 적용
+> 3. **AI 개선 diff UI** — `✨ AI 개선` → 제안 목록 + 수락/거부 체크박스
+> 4. **검수 모달 UI** — `🔍 검수` → 10영역 색상 표시 + 자동 수정 버튼 + 해당 섹션 스크롤
+> 5. **버전 히스토리 UI** — 좌측 하단 탭 / side-by-side diff / 복원 버튼
+> 6. **브랜드킷 자동 추출** — URL 입력 → og:image/favicon 파싱 → 로고+컬러 자동
+> 7. **섹션 style_variant 상세 CSS** — beauty-elegant / fashion-editorial / food-warm 등 실제 스타일 분기
+> 8. **A/B 버전 + 성과 비교** — 동일 DM 2가지 버전 발행 후 추적 비교
 >
-> **하위호환:** 기존 DM `layout_mode='slides'` 유지. dm-viewer가 신구 모두 렌더링.
+> **다음 세션 진입 명령어 (한 줄):**
+> ```
+> @memory project_d125.md 읽고 D126 V2 1번(인라인 텍스트 편집)부터 착수. 14단계처럼 꼼꼼하게 진행.
+> ```
+> 또는 더 짧게:
+> ```
+> D126 V2 시작 — project_d125.md 참조
+> ```
+
+---
+
+### 🎨 D125 — 모바일 DM 빌더 프로모델 v1 구현 (2026-04-17) — ✅ **전 구간 완료**
+
+> **배경:** D119 슬라이드형 DM → **섹션 기반 실전 프로모델**로 전면 재설계. "MVP 아니고 실전 프로모델" (Harold님 2026-04-16 지시).
+> **설계서:** [`status/DM-PRO-DESIGN.md`](DM-PRO-DESIGN.md) 19섹션 + **메모리 [`project_d125.md`](../.claude/projects/C--Users-ceo-projects-targetup/memory/project_d125.md) 구현 상세**
 >
-> **구현 의존성 그래프 (14단계):**
-> 1. DB 마이그레이션 (§4-1, Harold님 직접 실행 안내 방식)
-> 2. 섹션 렌더러 11종 (백엔드 + 프론트 Canvas)
-> 3. 디자인 토큰 (dm-tokens.ts)
-> 4. 프론트 에디터 뼈대 (3분할 + Zustand)
-> 5. 섹션 DnD + 인라인 편집 + 속성 패널
-> 6. AI 엔진 4모듈 (기존 callAIWithFallback 재활용)
-> 7. 변수 바인딩 + fallback + 샘플 렌더링
-> 8. 검수 엔진 + UI
-> 9. 브랜드 킷 + 템플릿 7카테고리
-> 10. 버전 관리 + 승인 플로우
-> 11. 테스트 발송 (insertTestSmsQueue 재활용)
-> 12. 기존 DM 자동 변환 (dm-legacy-converter.ts)
-> 13. 통합 QA + 디자인 폴리싱
-> 14. 문서화
+> **완료 집계:**
+> - 의존성 그래프 14단계 + 통합 QA **전 구간 완료**
+> - 신설/수정 **37파일** (백엔드 14 + 프론트 23)
+> - 신설 API 라우트 **19개** (`/ai/*` 5, `/templates/*` 3, `/brand-kit` 2, `/versions/*` 3, 승인 3, 검수/변수/샘플/테스트/변환 각 1)
+> - 신설 컨트롤타워 **11개** (dm-tokens/section-registry/section-renderer/viewer-utils/ai/validate/variable-resolver/sample-customer/brand-kit/template-registry/legacy-converter)
+> - TypeScript 타입 에러 **0건** (백엔드·프론트 모두)
 >
-> **다음 세션 진입:** `status/DM-PRO-DESIGN.md` 읽고 [1] DB 마이그레이션부터 착수.
+> **완료 영역:**
+> - DB: dm_pages 7컬럼 + dm_versions + dm_templates + section_interactions (Harold님 실행 완료)
+> - 디자인 토큰 3파일 (color/typography/spacing/radius/shadow/motion) + CSS 변수 234줄
+> - 섹션 시스템 11종 (backend/frontend SSOT 미러)
+> - 에디터 3분할 (좌 섹션목록+추가 / 중 모바일프레임+캔버스 / 우 필드에디터)
+> - @dnd-kit/sortable 세로 DnD
+> - 필드 에디터 11종 + 공용 컨트롤 7종
+> - AI 4모듈 (Prompt Parser / Layout Recommender / Copy Generator / Tone Transformer) + improve 보너스
+> - 변수 바인딩 + fallback + VIP/Newbie/Empty 3종 샘플 렌더링
+> - 검수 10영역 × 3등급 (fatal/recommend/improve)
+> - 브랜드킷 + 템플릿 7카테고리 (뷰티/패션/긴급/포인트/재방문/오프라인/VIP)
+> - 버전 관리 스냅샷/복원 + 승인 플로우 (draft→review→approved/rejected→published)
+> - 테스트 발송 (insertTestSmsQueue 재활용, 최대 5명, LMS)
+> - 레거시 변환 (slides→scroll 자동)
+>
+> **배포:** Harold님 `tp-push` + `tp-deploy-full` 직접 실행 대기
+>
+> **V2 이관:** D126 섹션 참조 (메모리 project_d125.md)
 
 ---
 
