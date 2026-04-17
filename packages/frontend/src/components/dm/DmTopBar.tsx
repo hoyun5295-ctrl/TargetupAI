@@ -15,11 +15,12 @@ import { useNavigate } from 'react-router-dom';
 import { useDmBuilderStore, type LayoutMode } from '../../stores/dmBuilderStore';
 
 export type DmTopBarProps = {
+  onBack?: () => void;
   onTestSendClick?: () => void;
   onPublishClick?: () => void;
 };
 
-export default function DmTopBar({ onTestSendClick, onPublishClick }: DmTopBarProps) {
+export default function DmTopBar({ onBack, onTestSendClick, onPublishClick }: DmTopBarProps) {
   const navigate = useNavigate();
   const title = useDmBuilderStore((s) => s.title);
   const setTitle = useDmBuilderStore((s) => s.setTitle);
@@ -57,7 +58,7 @@ export default function DmTopBar({ onTestSendClick, onPublishClick }: DmTopBarPr
       }}
     >
       <button
-        onClick={() => navigate('/dm-builder')}
+        onClick={() => (onBack ? onBack() : navigate('/dm-builder'))}
         style={{ background: 'transparent', border: 'none', fontSize: 20, cursor: 'pointer', padding: 8, borderRadius: 8, color: 'var(--dm-neutral-700)', flexShrink: 0 }}
         title="목록으로"
       >

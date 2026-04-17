@@ -107,29 +107,55 @@
 
 ---
 
-### 🎨 D126 — DM 빌더 프로모델 V2 UX 고도화 (2026-04-18~) — 🟢 착수 대기
+### 🎨 D126 V2 + D127 V3 + D128 V4 — DM 빌더 고도화 (2026-04-17) — ✅ 전 구간 완료, 배포 대기
 
-> **배경:** D125 V1에서 핵심 엔진(섹션/AI/검수/변수/브랜드킷/버전/테스트발송/레거시변환) 전 구간 완료. V2는 **UX 고도화 + 성과 최적화** 중심.
-> **메모리:** [`project_d125.md`](../.claude/projects/C--Users-ceo-projects-targetup/memory/project_d125.md) — V1 구현 상세 + V2 로드맵
->
-> **V2 우선순위 (메모리 project_d125.md "다음 세션 과제" 8건):**
-> 1. **인라인 텍스트 편집** — 캔버스 섹션 내 contentEditable로 직접 카피 수정
-> 2. **AI 프롬프트 UX 모달** — DmTopBar `⚡ 프롬프트` 버튼 → 한 줄 입력 → 초안 자동 적용
-> 3. **AI 개선 diff UI** — `✨ AI 개선` → 제안 목록 + 수락/거부 체크박스
-> 4. **검수 모달 UI** — `🔍 검수` → 10영역 색상 표시 + 자동 수정 버튼 + 해당 섹션 스크롤
-> 5. **버전 히스토리 UI** — 좌측 하단 탭 / side-by-side diff / 복원 버튼
-> 6. **브랜드킷 자동 추출** — URL 입력 → og:image/favicon 파싱 → 로고+컬러 자동
-> 7. **섹션 style_variant 상세 CSS** — beauty-elegant / fashion-editorial / food-warm 등 실제 스타일 분기
-> 8. **A/B 버전 + 성과 비교** — 동일 DM 2가지 버전 발행 후 추적 비교
->
-> **다음 세션 진입 명령어 (한 줄):**
-> ```
-> @memory project_d125.md 읽고 D126 V2 1번(인라인 텍스트 편집)부터 착수. 14단계처럼 꼼꼼하게 진행.
-> ```
-> 또는 더 짧게:
-> ```
-> D126 V2 시작 — project_d125.md 참조
-> ```
+> **배경:** D125 V1 이후 연속 세션. V2 고도화 → V3 페이징 3모드 → V4 페이지 계층 구조까지 진행.
+> **메모리:** [`project_d126.md`](../.claude/projects/C--Users-ceo-projects-targetup/memory/project_d126.md) (V2) + [`project_d127_d128.md`](../.claude/projects/C--Users-ceo-projects-targetup/memory/project_d127_d128.md) (V3+V4)
+
+#### D126 V2 — 8과제 + 공용 인프라 3종 (완료, 배포)
+- 인라인 텍스트 편집(11섹션) / AI 프롬프트 모달 / AI 개선 diff / 검수 모달 / 버전 히스토리 / 브랜드킷 URL 추출 / A/B 테스트 / style_variant 10종 CSS
+- ModalBase / LCS text-diff / Zustand openModal 중앙화
+- **26파일 신설/수정, 11개 라우트, DDL 3종 실행 완료**
+
+#### D126 V2 배포 후 수정 3건 (완료)
+- AI 프롬프트 모달 런타임 에러 — `parseRes.data?.spec ?? parseRes.data` unwrap 수정
+- 공용 SaaS 시세이도 브랜드명 3곳 제거 (DmBuilderPage/HeaderEditor/unsubscribe-helper 주석)
+- 섹션 드래그 재정렬 동작 — @dnd-kit 핸들 `touchAction:'none'` + `<button>`→`<div>`
+
+#### D127 V3 — 페이징 3모드 (완료)
+- `layout_mode`에 `scroll_snap` 추가, 총 3종 (scroll / scroll_snap / slides)
+- LayoutModePickerModal 신설 (신규 DM 생성 시 카드 선택)
+- DmTopBar 3모드 세그먼트 토글 (편집 중 자유 전환)
+- dm-viewer.ts 모드별 CSS/JS 분기 + dots + counter + IntersectionObserver 추적
+
+#### D128 V4 — 페이지 계층 구조 (완료)
+- 구조: `sections: Section[]` → `pages: DmPage[]` (1페이지 = 여러 섹션 조립)
+- layout_mode는 **페이지 간 전환 방식**만 결정
+- 좌측 패널 2단계: 상단 페이지 목록(이름/복제/삭제/이동) + 하단 현재 페이지 섹션 목록
+- DmCanvas 상단 페이지 네비게이션 바 (◁ 페이지명 ▷ 모드 배지)
+- 뷰어 `renderPagesHtml`로 재작성 (페이지 단위 스냅/슬라이드, 페이지 내부는 세로 스크롤)
+- **DDL 변경 없음** — 기존 `dm_pages.pages`/`sections` JSONB 컬럼 재활용, 런타임 구조 확장
+- 하위호환: 스토어 top-level `sections`를 pages[currentPageIndex].sections 뷰로 유지 → 기존 10+ 파일 호출부 무수정
+
+#### 레거시 인프라 복구 (관련 작업, 완료)
+- 레거시 kkotemp Agent MySQL 연결 실패 → socat systemd 영구화
+- `/etc/systemd/system/socat-mysql.service` + `Restart=always` → SIGKILL 시 819ms 자동 복구
+- rc.local 중복 라인 sed로 주석 처리
+- 참조 문서: `C:\Users\ceo\Downloads\INVITO-INFRA-HANDOVER.md`
+
+#### 배포 대기 (Harold님 직접)
+```powershell
+tp-push
+tp-deploy-full
+```
+- DDL: D126 V2용 3종(brand_kit/dm_ab_tests/dm_views 확장) 이미 실행 완료, D127/D128 DDL 추가 없음
+- 타입: 백엔드 tsc 0건 / 프론트 tsc 0건
+
+#### 다음 세션 후보
+- D128 배포 후 실사용 피드백 반영
+- 페이지 단위 AI 개선 (현재는 현재 페이지만)
+- 페이지 단위 A/B 테스트 (variant = 페이지 레이아웃)
+- 페이지 간 드래그 재정렬 (현재 ⋯ 메뉴의 위/아래 버튼만)
 
 ---
 

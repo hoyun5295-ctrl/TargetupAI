@@ -1,0 +1,689 @@
+/* ============================================================
+   mart_spring_v1 — A3 세로 봄세일 템플릿
+   샘플1(TEST THE MARKET 봄세일의특가전) 1:1 재현
+   Paged.js + Puppeteer 렌더 전용
+   ============================================================ */
+
+/* ---------- 무료 상업용 한글 폰트 (CDN) ---------- */
+@import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.css');
+
+@font-face {
+  font-family: 'BM Hanna Pro';
+  src: url('https://cdn.jsdelivr.net/gh/projectnoonnu/noonfonts_two@1.2/BMHANNAPro.woff') format('woff');
+  font-display: swap;
+}
+@font-face {
+  font-family: 'BM Jua';
+  src: url('https://cdn.jsdelivr.net/gh/projectnoonnu/noonfonts_one@1.0/BMJUA.woff') format('woff');
+  font-display: swap;
+}
+@font-face {
+  font-family: 'GmarketSansBold';
+  src: url('https://cdn.jsdelivr.net/gh/projectnoonnu/noonfonts_2001@1.1/GmarketSansBold.woff') format('woff');
+  font-display: swap;
+}
+@font-face {
+  font-family: 'YanoljaYache';
+  src: url('https://cdn.jsdelivr.net/gh/projectnoonnu/noonfonts_2206-02@1.1/YanoljaYacheR.woff') format('woff');
+  font-display: swap;
+}
+
+/* ---------- Paged.js @page (A3 세로 — 297×420mm) ---------- */
+@page {
+  size: 297mm 420mm;
+  margin: 0;
+  marks: none;
+}
+
+/* ---------- 디자인 토큰 (design-tokens.json과 동기화) ---------- */
+:root {
+  /* Brand */
+  --c-brand-primary:   #2E4B88;
+  --c-brand-secondary: #7FC5DD;
+  --c-brand-accent:    #9B6BD8;
+
+  /* Semantic */
+  --c-sale:       #E53527;
+  --c-price-main: #D9232A;
+  --c-price-sub:  #6ABD45;
+  --c-fresh:      #6ABD45;
+  --c-urgent:     #D9443D;
+
+  /* Surface */
+  --c-page:       #FFFFFF;
+  --c-card-main:  #F5E0B8;
+  --c-card-sub:   #C8E6A8;
+  --c-stripe-a:   #FFF066;
+  --c-stripe-b:   #DFF1C4;
+  --c-banner-red: #E8383A;
+  --c-banner-green: #5FBC3B;
+  --c-divider:    #E5E7EB;
+
+  /* Text */
+  --c-text:       #111111;
+  --c-text-muted: #6B7280;
+  --c-text-on-brand: #FFFFFF;
+  --c-text-strike: #E53527;
+
+  /* Border */
+  --c-border-main: #E8823A;
+  --c-border-sub:  #7DB935;
+
+  /* Fonts */
+  --f-hero:    'BM Hanna Pro', 'BM Jua', sans-serif;
+  --f-display: 'YanoljaYache', 'BM Jua', sans-serif;
+  --f-heading: 'BM Jua', 'GmarketSansBold', sans-serif;
+  --f-price:   'GmarketSansBold', 'Pretendard', sans-serif;
+  --f-body:    'Pretendard', 'NanumSquare', sans-serif;
+}
+
+/* ---------- Reset & Base ---------- */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  width: 297mm;
+  height: 420mm;
+  font-family: var(--f-body);
+  color: var(--c-text);
+  background: var(--c-page);
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+  font-feature-settings: 'tnum' 1;
+}
+
+img { max-width: 100%; height: auto; display: block; }
+
+/* ============================================================
+   페이지 레이아웃 (그리드)
+   총 420mm 높이 — 섹션별 할당
+   ============================================================ */
+.flyer-page {
+  width: 297mm;
+  height: 420mm;
+  display: grid;
+  grid-template-rows:
+    45mm   /* 1. 마스트헤드 */
+    55mm   /* 2. 히어로 */
+    78mm   /* 3. 메인 4칸 */
+    62mm   /* 4. 추천 5칸 */
+    22mm   /* 5. FRESH 배너 */
+    148mm  /* 6. FRESH 좌우 2분할 */
+    10mm;  /* 7. 푸터 */
+  overflow: hidden;
+  position: relative;
+}
+
+/* ============================================================
+   1. 마스트헤드 (매장정보 3분할)
+   ============================================================ */
+.masthead {
+  display: grid;
+  grid-template-columns: 110mm 85mm 102mm;
+  background: var(--c-brand-secondary);
+  border-bottom: 2mm solid #FFFFFF;
+}
+
+.masthead-store {
+  background: var(--c-brand-secondary);
+  padding: 6mm 8mm;
+  color: var(--c-brand-primary);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2mm;
+}
+.masthead-store .store-logo {
+  font-family: var(--f-heading);
+  font-size: 16mm;
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: -0.5mm;
+  color: #FFFFFF;
+  text-shadow: 0.5mm 0.5mm 0 var(--c-brand-primary);
+}
+.masthead-store .store-slogan {
+  font-size: 3mm;
+  font-weight: 600;
+  color: var(--c-brand-primary);
+  margin-bottom: 1.5mm;
+}
+.masthead-store .store-meta {
+  font-size: 3.2mm;
+  line-height: 1.4;
+  color: var(--c-brand-primary);
+  font-weight: 600;
+}
+.masthead-store .store-meta .label {
+  font-weight: 900;
+  margin-right: 1mm;
+}
+
+.masthead-map {
+  background: #FFFFFF;
+  padding: 4mm;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-left: 1mm solid var(--c-brand-secondary);
+  border-right: 1mm solid var(--c-brand-secondary);
+}
+.masthead-map .map-img {
+  width: 100%;
+  height: 28mm;
+  background: #F3F4F6;
+  border: 0.5mm solid var(--c-divider);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 3mm;
+  color: var(--c-text-muted);
+}
+.masthead-map .map-address {
+  font-size: 3mm;
+  margin-top: 2mm;
+  color: var(--c-text);
+  font-weight: 700;
+}
+
+.masthead-qr {
+  background: var(--c-brand-accent);
+  padding: 5mm;
+  display: grid;
+  grid-template-columns: 1fr 24mm;
+  gap: 3mm;
+  align-items: center;
+  color: #FFFFFF;
+}
+.masthead-qr .qr-title {
+  font-family: var(--f-heading);
+  font-size: 7mm;
+  font-weight: 900;
+  line-height: 1.1;
+  color: #FFFFFF;
+  margin-bottom: 2mm;
+}
+.masthead-qr .qr-subtitle {
+  font-size: 3.5mm;
+  font-weight: 700;
+  background: #FFFFFF;
+  color: var(--c-brand-accent);
+  padding: 1mm 2mm;
+  border-radius: 1mm;
+  display: inline-block;
+  margin-bottom: 2mm;
+}
+.masthead-qr .qr-desc {
+  font-size: 2.8mm;
+  line-height: 1.5;
+  font-weight: 500;
+}
+.masthead-qr .qr-code {
+  width: 24mm;
+  height: 24mm;
+  background: #FFFFFF;
+  border-radius: 2mm;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #000;
+  font-size: 2.5mm;
+  padding: 2mm;
+}
+
+/* ============================================================
+   2. 히어로 섹션
+   ============================================================ */
+.hero {
+  position: relative;
+  background: linear-gradient(180deg, #BFE1F0 0%, #EAF5FB 100%);
+  padding: 4mm 10mm;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.hero::before,
+.hero::after {
+  content: '';
+  position: absolute;
+  background-repeat: no-repeat;
+  background-size: contain;
+  opacity: 0.7;
+}
+.hero::before {
+  top: 2mm; left: 3mm;
+  width: 25mm; height: 25mm;
+  background: radial-gradient(circle, #FFB7D3 30%, transparent 32%) 0 0 / 8mm 8mm;
+}
+.hero::after {
+  top: 2mm; right: 3mm;
+  width: 25mm; height: 25mm;
+  background: radial-gradient(circle, #FFB7D3 30%, transparent 32%) 0 0 / 8mm 8mm;
+}
+
+.hero-pretitle {
+  font-family: var(--f-heading);
+  font-size: 5.5mm;
+  font-weight: 900;
+  color: var(--c-brand-primary);
+  background: #FFFFFF;
+  padding: 1.5mm 5mm;
+  border-radius: 999px;
+  margin-bottom: 3mm;
+  box-shadow: 0 1mm 2mm rgba(0,0,0,0.1);
+  z-index: 1;
+}
+
+.hero-title {
+  font-family: var(--f-hero);
+  font-size: 36mm;
+  font-weight: 900;
+  line-height: 0.95;
+  letter-spacing: -1mm;
+  z-index: 1;
+  margin-bottom: 2mm;
+  background: linear-gradient(90deg, #2E4B88 0%, #E53527 40%, #F5A623 70%, #2E4B88 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  text-shadow:
+    0.8mm 0.8mm 0 #FFFFFF,
+    1.2mm 1.2mm 0 var(--c-brand-primary);
+  filter: drop-shadow(0 0 1mm rgba(46,75,136,0.3));
+}
+
+.hero-subcopy {
+  font-family: var(--f-display);
+  font-size: 7mm;
+  font-weight: 900;
+  color: #FFFFFF;
+  background: var(--c-sale);
+  padding: 2mm 8mm;
+  border-radius: 999px;
+  box-shadow: 0 2mm 4mm rgba(229,53,39,0.3);
+  z-index: 1;
+  white-space: nowrap;
+}
+
+/* ============================================================
+   3. 메인 4칸 그리드
+   ============================================================ */
+.section-main {
+  display: grid;
+  grid-template-rows: 14mm 1fr;
+  padding: 0 5mm 3mm;
+  background: #FFFFFF;
+}
+.section-banner-main {
+  display: grid;
+  grid-template-columns: 32mm 1fr 32mm;
+  align-items: center;
+  background: linear-gradient(90deg, #FBA57A 0%, #F89D70 100%);
+  border-radius: 2mm;
+  padding: 1mm 3mm;
+  height: 12mm;
+  margin-bottom: 2mm;
+}
+.section-banner-main .banner-badge {
+  background: #E8383A;
+  color: #FFFFFF;
+  font-family: var(--f-heading);
+  font-size: 5mm;
+  font-weight: 900;
+  padding: 1.5mm 2mm;
+  border-radius: 1mm;
+  text-align: center;
+  line-height: 1.1;
+}
+.section-banner-main .banner-text {
+  font-family: var(--f-heading);
+  font-size: 7mm;
+  font-weight: 900;
+  color: #FFFFFF;
+  text-align: center;
+  text-shadow: 0.5mm 0.5mm 0 #8B3A1A;
+}
+.section-banner-main .banner-tag {
+  background: #6ABD45;
+  color: #FFFFFF;
+  font-family: var(--f-heading);
+  font-size: 4mm;
+  font-weight: 900;
+  padding: 1mm 2mm;
+  border-radius: 1mm;
+  text-align: center;
+  line-height: 1.2;
+}
+
+.main-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 2mm;
+}
+.card-main {
+  background: var(--c-card-main);
+  border: 1mm solid var(--c-border-main);
+  border-radius: 2mm;
+  padding: 3mm;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  position: relative;
+}
+.card-main .product-image {
+  width: 100%;
+  height: 32mm;
+  object-fit: contain;
+  background: #FFFFFF;
+  border-radius: 1mm;
+  padding: 1mm;
+}
+.card-main .original-price {
+  font-family: var(--f-body);
+  font-size: 3.5mm;
+  color: var(--c-text);
+  text-decoration: line-through;
+  text-decoration-color: var(--c-text-strike);
+  text-decoration-thickness: 0.5mm;
+  margin-top: 2mm;
+}
+.card-main .sale-price {
+  font-family: var(--f-price);
+  font-size: 12mm;
+  font-weight: 900;
+  color: var(--c-price-main);
+  line-height: 1;
+  margin-top: 0.5mm;
+}
+.card-main .sale-price .won {
+  font-size: 7mm;
+  margin-left: 0.5mm;
+}
+.card-main .product-name {
+  font-family: var(--f-heading);
+  font-size: 4mm;
+  font-weight: 900;
+  color: var(--c-text);
+  margin-top: 1mm;
+  text-align: center;
+}
+.card-main .product-name .unit {
+  font-size: 3mm;
+  font-weight: 500;
+  margin-left: 1mm;
+}
+
+/* ============================================================
+   4. 추천 5칸 그리드
+   ============================================================ */
+.section-recommend {
+  display: grid;
+  grid-template-rows: 14mm 1fr;
+  padding: 0 5mm 3mm;
+  background: #FFFFFF;
+}
+.section-banner-recommend {
+  display: grid;
+  grid-template-columns: 32mm 1fr 32mm;
+  align-items: center;
+  background: linear-gradient(90deg, #C8E6A8 0%, #B8DE93 100%);
+  border-radius: 2mm;
+  padding: 1mm 3mm;
+  height: 12mm;
+  margin-bottom: 2mm;
+}
+.section-banner-recommend .banner-badge {
+  background: #E8383A;
+  color: #FFFFFF;
+  font-family: var(--f-heading);
+  font-size: 5mm;
+  font-weight: 900;
+  padding: 1.5mm 2mm;
+  border-radius: 1mm;
+  text-align: center;
+  line-height: 1.1;
+}
+.section-banner-recommend .banner-text {
+  font-family: var(--f-heading);
+  font-size: 7mm;
+  font-weight: 900;
+  color: var(--c-brand-primary);
+  text-align: center;
+  text-shadow: 0.3mm 0.3mm 0 #FFFFFF;
+}
+.section-banner-recommend .banner-tag {
+  background: #6ABD45;
+  color: #FFFFFF;
+  font-family: var(--f-heading);
+  font-size: 4mm;
+  font-weight: 900;
+  padding: 1mm 2mm;
+  border-radius: 1mm;
+  text-align: center;
+  line-height: 1.2;
+}
+
+.recommend-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 2mm;
+}
+.card-sub {
+  background: var(--c-card-sub);
+  border: 0.8mm solid var(--c-border-sub);
+  border-radius: 2mm;
+  padding: 2mm;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  position: relative;
+}
+.card-sub .product-image {
+  width: 100%;
+  height: 24mm;
+  object-fit: contain;
+  background: #FFFFFF;
+  border-radius: 1mm;
+  padding: 1mm;
+}
+.card-sub .original-price {
+  background: #5B7F36;
+  color: #FFFFFF;
+  font-size: 2.8mm;
+  font-weight: 700;
+  padding: 0.8mm 2mm;
+  border-radius: 0.8mm;
+  margin-top: 1.5mm;
+}
+.card-sub .original-price .strike {
+  text-decoration: line-through;
+  text-decoration-color: var(--c-sale);
+  text-decoration-thickness: 0.4mm;
+}
+.card-sub .sale-price {
+  font-family: var(--f-price);
+  font-size: 9mm;
+  font-weight: 900;
+  color: var(--c-price-main);
+  line-height: 1;
+  margin-top: 0.5mm;
+}
+.card-sub .sale-price .won {
+  font-size: 5mm;
+  margin-left: 0.3mm;
+}
+.card-sub .product-name {
+  font-family: var(--f-heading);
+  font-size: 3.5mm;
+  font-weight: 900;
+  color: var(--c-text);
+  margin-top: 0.5mm;
+  text-align: center;
+}
+
+/* ============================================================
+   5. FRESH 섹션 배너
+   ============================================================ */
+.section-banner-fresh {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background:
+    repeating-linear-gradient(90deg, var(--c-banner-red) 0, var(--c-banner-red) 8mm, #FFFFFF 8mm, #FFFFFF 12mm);
+  padding: 2mm;
+  position: relative;
+  color: #FFFFFF;
+}
+.section-banner-fresh .fresh-main {
+  font-family: var(--f-hero);
+  font-size: 11mm;
+  font-weight: 900;
+  color: #FFFFFF;
+  text-shadow: 0.6mm 0.6mm 0 var(--c-banner-red);
+  background: var(--c-banner-red);
+  padding: 0 5mm;
+  letter-spacing: -0.5mm;
+}
+.section-banner-fresh .fresh-main em {
+  font-style: normal;
+  color: #FFF066;
+  text-shadow: 0.6mm 0.6mm 0 var(--c-banner-red);
+  margin: 0 1mm;
+}
+.section-banner-fresh .fresh-sub {
+  font-family: var(--f-heading);
+  font-size: 3.5mm;
+  font-weight: 700;
+  color: var(--c-text);
+  background: #FFFFFF;
+  padding: 0.8mm 3mm;
+  margin-top: 1mm;
+  border-radius: 1mm;
+}
+
+/* ============================================================
+   6. FRESH 좌우 2분할 카테고리
+   ============================================================ */
+.section-fresh {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2mm;
+  padding: 2mm 5mm;
+  background: #FFFFFF;
+}
+.fresh-column {
+  display: flex;
+  flex-direction: column;
+  gap: 1mm;
+}
+.fresh-category-label {
+  background: var(--c-fresh);
+  color: #FFFFFF;
+  font-family: var(--f-heading);
+  font-size: 4.5mm;
+  font-weight: 900;
+  padding: 1.5mm 3mm;
+  border-radius: 1mm;
+  text-align: left;
+  position: relative;
+}
+.fresh-category-label::before {
+  content: 'FRESH';
+  font-family: var(--f-price);
+  font-size: 3.5mm;
+  background: #FFFFFF;
+  color: var(--c-fresh);
+  padding: 0.3mm 1.5mm;
+  border-radius: 0.8mm;
+  margin-right: 2mm;
+  display: inline-block;
+}
+.fresh-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-auto-rows: 1fr;
+  gap: 1mm;
+  flex: 1;
+}
+.card-fresh {
+  border-radius: 1.5mm;
+  padding: 1.5mm;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 40mm;
+}
+/* 지그재그 색상 패턴 */
+.fresh-grid .card-fresh:nth-child(odd)  { background: var(--c-stripe-a); }
+.fresh-grid .card-fresh:nth-child(even) { background: var(--c-stripe-b); }
+
+.card-fresh .product-image {
+  width: 100%;
+  height: 22mm;
+  object-fit: contain;
+  background: transparent;
+}
+.card-fresh .original-price {
+  font-size: 3mm;
+  color: var(--c-text);
+  text-decoration: line-through;
+  text-decoration-color: var(--c-sale);
+  text-decoration-thickness: 0.4mm;
+  margin-top: 1mm;
+  font-weight: 600;
+}
+.card-fresh .sale-price {
+  font-family: var(--f-price);
+  font-size: 8mm;
+  font-weight: 900;
+  color: var(--c-price-main);
+  line-height: 1;
+}
+.card-fresh .sale-price.green {
+  color: var(--c-price-sub);
+}
+.card-fresh .sale-price .won {
+  font-size: 4.5mm;
+}
+.card-fresh .product-name {
+  font-family: var(--f-heading);
+  font-size: 3.2mm;
+  font-weight: 900;
+  color: var(--c-text);
+  text-align: center;
+  line-height: 1.1;
+}
+
+/* ============================================================
+   7. 푸터
+   ============================================================ */
+.footer-notice {
+  background: #F9FAFB;
+  padding: 2mm 8mm;
+  font-size: 2.2mm;
+  color: var(--c-text-muted);
+  text-align: center;
+  line-height: 1.3;
+  border-top: 0.3mm solid var(--c-divider);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ============================================================
+   유틸: 상품 이미지 없음 폴백
+   ============================================================ */
+.product-image.empty {
+  background: #F3F4F6;
+  color: var(--c-text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 3mm;
+}

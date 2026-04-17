@@ -21,6 +21,7 @@ import VersionHistoryModal from '../components/dm/modals/VersionHistoryModal';
 import BrandKitModal from '../components/dm/modals/BrandKitModal';
 import AbTestModal from '../components/dm/modals/AbTestModal';
 import LayoutModePickerModal from '../components/dm/modals/LayoutModePickerModal';
+import ModalBase, { ModalButton } from '../components/dm/modals/ModalBase';
 import type { LayoutMode } from '../stores/dmBuilderStore';
 import '../styles/dm-builder.css';
 
@@ -57,6 +58,8 @@ export default function DmBuilderPage() {
   const reset = useDmBuilderStore((s) => s.reset);
   const toast = useDmBuilderStore((s) => s.toast);
   const setToast = useDmBuilderStore((s) => s.setToast);
+  const isDirty = useDmBuilderStore((s) => s.isDirty);
+  const [confirmBackOpen, setConfirmBackOpen] = useState(false);
 
   const refreshList = useCallback(async () => {
     setListLoading(true);
@@ -132,17 +135,34 @@ export default function DmBuilderPage() {
     setMode('list');
   };
 
+  // ← 상단바 뒤로가기: 변경사항 있으면 경고 모달, 없으면 즉시 목록으로
+  const handleBackRequest = () => {
+    if (isDirty) {
+      setConfirmBackOpen(true);
+    } else {
+      handleBackToList();
+    }
+  };
+
   // ── 편집 모드 ──
   if (mode === 'edit') {
     return (
       <div className="dm-builder" style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
-        <TopBarWithBack onBack={handleBackToList} />
+        <TopBarWithBack onBack={handleBackRequest} onPublishDone={handleBackToList} />
         <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
           <DmLeftPanel />
           <DmCanvas />
           <DmRightPanel />
         </div>
         <EditorModals />
+        <ConfirmDiscardModal
+          open={confirmBackOpen}
+          onClose={() => setConfirmBackOpen(false)}
+          onConfirm={() => {
+            setConfirmBackOpen(false);
+            handleBackToList();
+          }}
+        />
         {toast && <Toast toast={toast} />}
       </div>
     );
@@ -200,7 +220,7 @@ export default function DmBuilderPage() {
   );
 }
 
-function TopBarWithBack({ onBack }: { onBack: () => void }) {
+function TopBarWithBack({ onBack, onPublishDone }: { onBack: () => void; onPublishDone: () => void }) {
   const saveStore = useDmBuilderStore((s) => s.save);
   const dmId = useDmBuilderStore((s) => s.dmId);
   const setToast = useDmBuilderStore((s) => s.setToast);
@@ -220,6 +240,7 @@ function TopBarWithBack({ onBack }: { onBack: () => void }) {
 
   return (
     <DmTopBar
+      onBack={onBack}
       onTestSendClick={handleTestSend}
       onPublishClick={async () => {
         await saveStore();
@@ -232,9 +253,41 @@ function TopBarWithBack({ onBack }: { onBack: () => void }) {
             return;
           }
         }
-        onBack();
+        onPublishDone();
       }}
     />
+  );
+}
+
+// ← 경고 모달: 편집 중 뒤로가기 시 확인
+function ConfirmDiscardModal({
+  open,
+  onClose,
+  onConfirm,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <ModalBase
+      open={open}
+      onClose={onClose}
+      title="편집을 취소하고 나가시겠어요?"
+      subtitle="저장하지 않은 모든 변경사항이 사라집니다."
+      size="sm"
+      footer={
+        <>
+          <ModalButton variant="secondary" onClick={onClose}>계속 편집</ModalButton>
+          <ModalButton variant="danger" onClick={onConfirm}>나가기</ModalButton>
+        </>
+      }
+    >
+      <div style={{ fontSize: 13, color: '#4b5563', lineHeight: 1.6 }}>
+        지금 나가면 이번 편집 세션의 변경 내용이 모두 사라지고 되돌릴 수 없어요.
+        계속 편집하려면 <strong>"계속 편집"</strong>을, 나가려면 <strong>"나가기"</strong>를 선택하세요.
+      </div>
+    </ModalBase>
   );
 }
 

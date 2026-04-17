@@ -186,7 +186,10 @@
       "Bash(echo \"EXIT: $?\")",
       "Bash(echo \"BACKEND EXIT: $?\")",
       "Bash(echo \"FRONTEND EXIT: $?\")",
-      "Bash(echo \"FE EXIT: $?\")"
+      "Bash(echo \"FE EXIT: $?\")",
+      "WebFetch(domain:designwiz.com)",
+      "WebFetch(domain:mart-ye.com)",
+      "Bash(echo \"EXIT_CODE=$?\")"
     ]
   }
 }

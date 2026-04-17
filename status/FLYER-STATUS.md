@@ -28,6 +28,77 @@
 
 ## 1) CURRENT_TASK (현재 집중 작업)
 
+### 🎯 D129 — 인쇄전단 V2 재설계 (2026-04-17) — 🔨 진행중
+
+**배경:** Harold님 "인쇄전단 울트라 허접" 피드백. 첨부 샘플 `TEST THE MARKET 봄세일의특가전` 수준 타겟 (이마트급 주간지 불필요, 동네마트 상업용 퀄리티).
+
+**★ 결정사항 (2026-04-17 컨펌 완료):**
+- 디자인 제작: **AI 활용 스피드 제작 (외주 X)**
+- MVP: **A3 세로 1종(mart_spring_v1) 완벽 재현부터** — 추가는 그 다음
+- 엔진: **Paged.js + Puppeteer** (기존 flyer-print-renderer.ts는 `legacy/`로 격리 예정)
+- 이미지 AI: rembg 자체호스팅(기존) → 외부 API 폴백 (Phase 2)
+- 엑셀: AI 자동분류 + 수동 보정 UI
+- 테스트 매장: **가상 매장** (Harold님과 직접 생성)
+- 폰트: **무료 상업용** — Pretendard / 지마켓산스 / 배민한나·주아체 / 야놀자야체 / 나눔스퀘어
+- 규격: **1절/2절/4절/A3/B4/A4/8절/16절/타블로이드 전부 커버** (★ 2절 최우선 추가 — 현재 누락, 8절 272×394로 수정)
+
+**★ 파일 구조 (신규 — `packages/backend/src/utils/flyer/product/print/`):**
+```
+print/
+├── templates/
+│   ├── mart_spring_v1/        ← 샘플1(봄세일) 1:1 재현
+│   │   ├── manifest.json      ← 슬롯 정의
+│   │   ├── template.html      ← Figma → HTML 이식
+│   │   ├── template.css       ← @page CSS + 컴포넌트
+│   │   └── preview.png
+├── renderer/
+│   ├── slot-filler.ts         ← 슬롯에 데이터 주입
+│   ├── paged-pdf.ts           ← Paged.js + Puppeteer 통합
+│   ├── asset-resolver.ts      ← SVG/이미지/폰트 경로 해석
+│   └── template-registry.ts   ← 템플릿 로딩/캐시
+├── pipeline/
+│   ├── product-classifier.ts  ← flyer-category-classifier.ts 확장
+│   ├── image-processor.ts     ← 배경제거+크롭+통일
+│   └── layout-optimizer.ts    ← 상품수→슬롯 자동선택
+├── assets/
+│   ├── fonts/                 ← 무료 상업용 폰트 목록
+│   ├── svg/                   ← 섹션 배너/배지/프레임
+│   └── illustrations/         ← AI 생성 히어로 타이포
+├── PAPER-SIZES.ts             ← 용지 9종 상수 (2절 포함)
+├── design-tokens.json         ← 컬러/타이포/간격 토큰
+└── SLOT-MANIFEST-SPEC.md      ← 슬롯 스펙 v1 문서
+```
+
+**★ Phase 로드맵:**
+- **Phase 1 (진행중, 2~3주):** mart_spring_v1 재현 + 슬롯엔진 + Paged.js + 엑셀→슬롯 자동배치
+- Phase 2 (3~4주): 템플릿 10~15종 + 이미지 AI + 브랜드킷(로고+컬러+폰트) + 프리뷰 갤러리
+- Phase 3 (4~6주): AI 카피/레이아웃 자동선택 + 다중 페이지 분할 + 배치 렌더 큐
+- Phase 4 (8주+): 모션 전단(MP4) + AI 레이아웃 생성 + A/B 테스트
+
+**★ Step 1 체크리스트 (2026-04-17 본 세션):**
+- [x] FLYER-STATUS.md D129 추가
+- [ ] print/ 폴더 스켈레톤 (templates/renderer/pipeline/assets)
+- [ ] PAPER-SIZES.ts (용지 9종, 2절 545×788 신규, 8절 272×394 수정)
+- [ ] design-tokens.json v1 (샘플1에서 컬러/폰트/간격 추출)
+- [ ] SLOT-MANIFEST-SPEC.md v1 (JSON 스키마 + 슬롯 타입 정의)
+- [ ] mart_spring_v1/manifest.json 초안
+
+**★ Harold님 지원 대기 (Phase 2 진입 시):**
+- [ ] **Ideogram API 키** (한글 일러스트 타이포 양산)
+- [ ] **remove.bg 또는 Removal.AI API 키** (rembg 품질 폴백)
+- [ ] **Unsplash/Pexels 무료 키** (배경 이미지)
+- [ ] rembg Docker **GPU/CPU 여부 확인**
+- [ ] (선택) 친한 인쇄소 1곳 — Phase 3 실제 인쇄 검증용
+
+**⚠️ 다음 세션 이어받기 가이드:**
+1. 본 D129 섹션 먼저 읽기 → 결정사항/파일구조/체크리스트 확인
+2. `SLOT-MANIFEST-SPEC.md` 읽고 슬롯 타입 이해
+3. `design-tokens.json` + `PAPER-SIZES.ts`가 Lock 되어 있는지 확인
+4. mart_spring_v1 템플릿이 manifest.json + template.html/css까지 있는지 확인
+5. 없으면 Step 1 체크리스트 이어서 진행
+
+---
+
 ### 🎯 D122 — 전단AI 대규모 업데이트 (2026-04-15) — ✅ 배포완료
 
 **★ 이번 세션 완료 항목:**
