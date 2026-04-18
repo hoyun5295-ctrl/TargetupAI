@@ -1,9 +1,12 @@
 /**
- * 발신프로필 등록 3-Step 위저드 (슈퍼관리자 전용)
+ * 발신프로필 등록 3-Step 위저드
  *
  * Step 1: 채널ID + 전화번호 + 카테고리 선택 + 회사 귀속
  * Step 2: 인증번호 요청 (카톡으로 6자리 수신)
  * Step 3: 인증번호 입력 + 최종 등록
+ *
+ * companies.length === 1 → 고객사 관리자 모드 (귀속 회사 드롭다운 숨김 + 자동 선택)
+ * companies.length  >= 2 → 슈퍼관리자 모드 (드롭다운 노출)
  */
 
 import { useEffect, useState } from 'react';
@@ -39,8 +42,11 @@ export default function SenderRegistrationWizard({
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  // companies가 1개만 전달되면 고객사 관리자 모드 — 자동 선택 + 드롭다운 숨김
+  const singleCompany = companies.length === 1 ? companies[0] : null;
+
   // Step 1
-  const [targetCompanyId, setTargetCompanyId] = useState('');
+  const [targetCompanyId, setTargetCompanyId] = useState(singleCompany?.id || '');
   const [profileName, setProfileName] = useState('');
   const [yellowId, setYellowId] = useState('@');
   const [phoneNumber, setPhoneNumber] = useState('');
@@ -167,20 +173,28 @@ export default function SenderRegistrationWizard({
           {/* Step 1 */}
           {step === 1 && (
             <>
-              <StepGrid label="귀속 회사">
-                <select
-                  value={targetCompanyId}
-                  onChange={(e) => setTargetCompanyId(e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm"
-                >
-                  <option value="">선택</option>
-                  {companies.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.company_name}
-                    </option>
-                  ))}
-                </select>
-              </StepGrid>
+              {/* 귀속 회사: 고객사 admin은 본인 회사 자동 고정(UI 미노출), 슈퍼관리자만 드롭다운 */}
+              {!singleCompany && companies.length >= 2 && (
+                <StepGrid label="귀속 회사">
+                  <select
+                    value={targetCompanyId}
+                    onChange={(e) => setTargetCompanyId(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm"
+                  >
+                    <option value="">선택</option>
+                    {companies.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.company_name}
+                      </option>
+                    ))}
+                  </select>
+                </StepGrid>
+              )}
+              {companies.length === 0 && (
+                <p className="text-[11px] text-red-600">
+                  회사 정보를 불러오지 못했습니다. 로그아웃 후 다시 로그인해주세요.
+                </p>
+              )}
 
               <StepGrid label="프로필 이름 (관리용)">
                 <input
@@ -258,7 +272,9 @@ export default function SenderRegistrationWizard({
                 </div>
                 {categories.length === 0 && (
                   <p className="text-[11px] text-amber-600">
-                    카테고리 캐시가 비어 있습니다. 슈퍼관리자 화면에서 &quot;카테고리 동기화&quot; 실행 후 다시 시도하세요.
+                    {singleCompany
+                      ? '카테고리 정보가 준비 중입니다. 잠시 후 다시 시도하거나 관리자에게 문의하세요.'
+                      : '카테고리 캐시가 비어 있습니다. 상단 "카테고리 동기화" 버튼을 실행 후 다시 시도하세요.'}
                   </p>
                 )}
               </div>

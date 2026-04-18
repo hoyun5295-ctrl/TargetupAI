@@ -15,6 +15,7 @@ import AlimtalkTemplateFormV2, { type TemplateFormData } from './AlimtalkTemplat
 import AlarmUserManager from './AlarmUserManager';
 import SenderRegistrationWizard from './SenderRegistrationWizard';
 import UnsubscribeSettingModal from './UnsubscribeSettingModal';
+import { useAuthStore } from '../../stores/authStore';
 
 interface Template {
   id: string;
@@ -121,18 +122,24 @@ export default function AlimtalkManagementSection() {
   const [unsubTarget, setUnsubTarget] = useState<Profile | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
-  // 내 회사 정보 (Wizard에 전달)
-  const [myCompany, setMyCompany] = useState<{ id: string; company_name: string } | null>(null);
+  // 내 회사 정보 (Wizard에 전달) — authStore에서 직접 참조 (별도 API 호출 불필요)
+  const authUser = useAuthStore((s) => s.user);
+  const myCompany = useMemo(
+    () =>
+      authUser?.company?.id
+        ? { id: authUser.company.id, company_name: authUser.company.name || '' }
+        : null,
+    [authUser],
+  );
 
   const load = async () => {
     setLoading(true);
     try {
       const headers = { Authorization: `Bearer ${getToken()}` };
-      const [tRes, pRes, cRes, meRes] = await Promise.all([
+      const [tRes, pRes, cRes] = await Promise.all([
         fetch('/api/alimtalk/templates', { headers }),
         fetch('/api/alimtalk/senders', { headers }),
         fetch('/api/alimtalk/categories/template', { headers }),
-        fetch('/api/companies/me', { headers }).catch(() => null),
       ]);
       const tData = await tRes.json();
       if (tRes.ok && tData.success) setTemplates(tData.templates || []);
@@ -142,12 +149,6 @@ export default function AlimtalkManagementSection() {
 
       const cData = await cRes.json();
       if (cRes.ok && cData.success) setCategories(cData.categories || []);
-
-      if (meRes?.ok) {
-        const meData = await meRes.json();
-        const c = meData.company || meData;
-        if (c?.id) setMyCompany({ id: c.id, company_name: c.company_name || c.name || '' });
-      }
     } finally {
       setLoading(false);
     }
