@@ -457,7 +457,7 @@ router.delete('/companies/:id', authenticate, requireSuperAdmin, async (req: Req
     
     // 해당 회사 사용자도 비활성화
     await query(
-      "UPDATE users SET status = 'inactive', updated_at = NOW() WHERE company_id = $1",
+      "UPDATE users SET status = 'dormant', updated_at = NOW() WHERE company_id = $1",
       [id]
     );
     
@@ -1733,7 +1733,7 @@ router.put('/companies/:id/fields', authenticate, requireSuperAdmin, async (req:
 });
 
 // ===== 정산서 이메일 발송 =====
-router.post('/billing/:id/send-email', async (req: any, res) => {
+router.post('/billing/:id/send-email', authenticate, requireSuperAdmin, async (req: any, res) => {
   try {
     const { id } = req.params;
     const { to, subject, body_html } = req.body;
@@ -2490,7 +2490,7 @@ router.put('/companies/:id/sync-keys', authenticate, requireSuperAdmin, async (r
 // ═══════════════════════════════════════════════════════════
 
 // GET /api/admin/kakao-profiles — 전체 고객사 발신 프로필 목록
-router.get('/kakao-profiles', async (req: Request, res: Response) => {
+router.get('/kakao-profiles', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
     const companyId = req.query.company_id as string | undefined;
     let sql = `SELECT ksp.*, c.company_name
@@ -2509,7 +2509,7 @@ router.get('/kakao-profiles', async (req: Request, res: Response) => {
 });
 
 // POST /api/admin/kakao-profiles — 슈퍼관리자가 고객사 발신 프로필 등록
-router.post('/kakao-profiles', async (req: Request, res: Response) => {
+router.post('/kakao-profiles', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
     const { companyId, profileName, profileKey } = req.body;
     if (!companyId || !profileName || !profileKey) {
@@ -2528,7 +2528,7 @@ router.post('/kakao-profiles', async (req: Request, res: Response) => {
 });
 
 // DELETE /api/admin/kakao-profiles/:id — 슈퍼관리자가 발신 프로필 삭제
-router.delete('/kakao-profiles/:id', async (req: Request, res: Response) => {
+router.delete('/kakao-profiles/:id', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     await query('DELETE FROM kakao_sender_profiles WHERE id = $1', [id]);
@@ -2540,7 +2540,7 @@ router.delete('/kakao-profiles/:id', async (req: Request, res: Response) => {
 });
 
 // GET /api/admin/kakao-templates — 전체 고객사 알림톡 템플릿 목록
-router.get('/kakao-templates', async (req: Request, res: Response) => {
+router.get('/kakao-templates', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
     const status = req.query.status as string | undefined;
     const companyId = req.query.company_id as string | undefined;
@@ -2572,7 +2572,7 @@ router.get('/kakao-templates', async (req: Request, res: Response) => {
 });
 
 // PUT /api/admin/kakao-templates/:id/approve — 알림톡 템플릿 승인
-router.put('/kakao-templates/:id/approve', async (req: Request, res: Response) => {
+router.put('/kakao-templates/:id/approve', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const adminId = (req as any).user?.id;
@@ -2603,7 +2603,7 @@ router.put('/kakao-templates/:id/approve', async (req: Request, res: Response) =
 });
 
 // PUT /api/admin/kakao-templates/:id/reject — 알림톡 템플릿 반려
-router.put('/kakao-templates/:id/reject', async (req: Request, res: Response) => {
+router.put('/kakao-templates/:id/reject', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const adminId = (req as any).user?.id;
@@ -2637,7 +2637,7 @@ router.put('/kakao-templates/:id/reject', async (req: Request, res: Response) =>
 });
 
 // POST /api/admin/kakao-templates/manual — 기존 템플릿 수동 등록 (승인 상태로 직접 저장)
-router.post('/kakao-templates/manual', async (req: Request, res: Response) => {
+router.post('/kakao-templates/manual', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
     const adminId = (req as any).user?.id;
     const {
@@ -2674,7 +2674,7 @@ router.post('/kakao-templates/manual', async (req: Request, res: Response) => {
 });
 
 // GET /api/admin/rcs-templates — 전체 고객사 RCS 템플릿 목록
-router.get('/rcs-templates', async (req: Request, res: Response) => {
+router.get('/rcs-templates', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
     const status = req.query.status as string | undefined;
     const companyId = req.query.company_id as string | undefined;
@@ -2705,7 +2705,7 @@ router.get('/rcs-templates', async (req: Request, res: Response) => {
 });
 
 // PUT /api/admin/rcs-templates/:id/approve — RCS 템플릿 승인
-router.put('/rcs-templates/:id/approve', async (req: Request, res: Response) => {
+router.put('/rcs-templates/:id/approve', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const adminId = (req as any).user?.id;
@@ -2731,7 +2731,7 @@ router.put('/rcs-templates/:id/approve', async (req: Request, res: Response) => 
 });
 
 // PUT /api/admin/rcs-templates/:id/reject — RCS 템플릿 반려
-router.put('/rcs-templates/:id/reject', async (req: Request, res: Response) => {
+router.put('/rcs-templates/:id/reject', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const adminId = (req as any).user?.id;

@@ -33,8 +33,12 @@ const storage = multer.diskStorage({
   }
 });
 
-const upload = multer({ 
+const upload = multer({
   storage,
+  limits: {
+    fileSize: 50 * 1024 * 1024, // 50MB — 엑셀 업로드 상한
+    files: 1,
+  },
   fileFilter: (req, file, cb) => {
     const allowedTypes = ['.xlsx', '.xls', '.csv'];
     const ext = path.extname(file.originalname).toLowerCase();

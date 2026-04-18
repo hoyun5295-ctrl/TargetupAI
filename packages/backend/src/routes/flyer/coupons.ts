@@ -136,7 +136,7 @@ router.use(flyerAuthenticate);
 /** POST / — 쿠폰 캠페인 생성 */
 router.post('/', async (req: Request, res: Response) => {
   try {
-    const { companyId, userId } = (req as any).user;
+    const { companyId, userId } = req.flyerUser!;
     const { coupon_name, coupon_type, discount_value, discount_description, min_purchase, max_issues, expires_at, flyer_id } = req.body;
 
     if (!coupon_name || !coupon_type || discount_value === undefined) {
@@ -166,7 +166,7 @@ router.post('/', async (req: Request, res: Response) => {
 /** GET / — 쿠폰 캠페인 목록 */
 router.get('/', async (req: Request, res: Response) => {
   try {
-    const { companyId } = (req as any).user;
+    const { companyId } = req.flyerUser!;
     const campaigns = await listCouponCampaigns(companyId);
     return res.json(campaigns);
   } catch (err: any) {
@@ -177,7 +177,7 @@ router.get('/', async (req: Request, res: Response) => {
 /** GET /lookup — 전화번호로 미사용 쿠폰 조회 */
 router.get('/lookup', async (req: Request, res: Response) => {
   try {
-    const { companyId } = (req as any).user;
+    const { companyId } = req.flyerUser!;
     const phone = req.query.phone as string;
     if (!phone) return res.status(400).json({ error: 'phone 필수' });
 
@@ -191,7 +191,7 @@ router.get('/lookup', async (req: Request, res: Response) => {
 /** GET /:id — 쿠폰 캠페인 상세 */
 router.get('/:id', async (req: Request, res: Response) => {
   try {
-    const { companyId } = (req as any).user;
+    const { companyId } = req.flyerUser!;
     const campaign = await getCouponCampaign(req.params.id, companyId);
     if (!campaign) return res.status(404).json({ error: '캠페인을 찾을 수 없습니다.' });
     return res.json(campaign);
@@ -203,7 +203,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 /** GET /:id/stats — 통계 */
 router.get('/:id/stats', async (req: Request, res: Response) => {
   try {
-    const { companyId } = (req as any).user;
+    const { companyId } = req.flyerUser!;
     const stats = await getCouponStats(req.params.id, companyId);
     if (!stats) return res.status(404).json({ error: '캠페인을 찾을 수 없습니다.' });
     return res.json(stats);
@@ -215,7 +215,7 @@ router.get('/:id/stats', async (req: Request, res: Response) => {
 /** GET /:id/coupons — 발급된 쿠폰 목록 */
 router.get('/:id/coupons', async (req: Request, res: Response) => {
   try {
-    const { companyId } = (req as any).user;
+    const { companyId } = req.flyerUser!;
     const coupons = await listCoupons(req.params.id, companyId);
     return res.json(coupons);
   } catch (err: any) {
@@ -226,7 +226,7 @@ router.get('/:id/coupons', async (req: Request, res: Response) => {
 /** PUT /:id — 쿠폰 캠페인 수정 */
 router.put('/:id', async (req: Request, res: Response) => {
   try {
-    const { companyId } = (req as any).user;
+    const { companyId } = req.flyerUser!;
     const { coupon_name, discount_value, discount_description, min_purchase, max_issues, expires_at } = req.body;
 
     const updated = await updateCouponCampaign(req.params.id, companyId, {
@@ -248,7 +248,7 @@ router.put('/:id', async (req: Request, res: Response) => {
 /** DELETE /:id — 비활성화 */
 router.delete('/:id', async (req: Request, res: Response) => {
   try {
-    const { companyId } = (req as any).user;
+    const { companyId } = req.flyerUser!;
     const ok = await disableCouponCampaign(req.params.id, companyId);
     if (!ok) return res.status(404).json({ error: '캠페인을 찾을 수 없습니다.' });
     return res.json({ ok: true });
@@ -260,7 +260,7 @@ router.delete('/:id', async (req: Request, res: Response) => {
 /** POST /redeem — 쿠폰 사용 처리 */
 router.post('/redeem', async (req: Request, res: Response) => {
   try {
-    const { companyId, userId } = (req as any).user;
+    const { companyId, userId } = req.flyerUser!;
     const { coupon_code, purchase_amount } = req.body;
 
     if (!coupon_code) return res.status(400).json({ error: 'coupon_code 필수' });
@@ -277,7 +277,7 @@ router.post('/redeem', async (req: Request, res: Response) => {
 // ============================================================
 router.get('/dashboard', async (req: Request, res: Response) => {
   try {
-    const { companyId } = (req as any).user;
+    const { companyId } = req.flyerUser!;
     const data = await getCouponDashboard(companyId);
     return res.json(data);
   } catch (err: any) {

@@ -107,34 +107,44 @@
 
 ---
 
-### 🔗 Sync Agent v1.5.0 — 설계 완료, 다음 세션 구현 착수 (2026-04-18)
+### 🔗 Sync Agent v1.5.0 — ✅ Day 1~3 전구간 구현 + 배포 완료 (2026-04-18)
 
-> **배경:** 한줄로AI 최신화 맞춰 싱크에이전트 재정의 + Claude Opus 4.7 기반 AI 자동 매핑 + Linux/Windows 전 환경 커버.
-> **설계서:** [`status/SYNC-AGENT-V1.5.0-DESIGN.md`](SYNC-AGENT-V1.5.0-DESIGN.md) (~900줄, 이번 세션 T-1~T-6 6개 주제 토론으로 확정)
-> **다음 세션 프롬프트:** [`status/SYNC-AGENT-V1.5.0-NEXT-SESSION-PROMPT.md`](SYNC-AGENT-V1.5.0-NEXT-SESSION-PROMPT.md) — 복붙용
-> **QA:** 서팀장이 v1.5.0 완성본으로 E2E 테스트 (A~F 시나리오)
+> **배경:** 한줄로AI 최신화 맞춰 싱크에이전트 재정의 + AI 자동 매핑 + Linux/Windows 전 환경 커버.
+> **설계서:** [`status/SYNC-AGENT-V1.5.0-DESIGN.md`](SYNC-AGENT-V1.5.0-DESIGN.md)
+> **QA 가이드:** [`status/SYNC-AGENT-V1.5.0-QA-GUIDE.md`](SYNC-AGENT-V1.5.0-QA-GUIDE.md) — 8개 시나리오 (A~H)
+> **릴리스 노트:** [`status/SYNC-AGENT-V1.5.0-RELEASE-NOTES.md`](SYNC-AGENT-V1.5.0-RELEASE-NOTES.md)
+> **고객 배포용 매뉴얼:** [`sync-agent/SyncAgent_설치매뉴얼_v1_5.docx`](../sync-agent/SyncAgent_설치매뉴얼_v1_5.docx) (내부 스키마/AI 모델명 전부 배제)
+> **다음 세션 핸드오프:** [`status/SYNC-AGENT-V1.5.0-SESSION-HANDOFF.md`](SYNC-AGENT-V1.5.0-SESSION-HANDOFF.md)
 > **배포:** v1.5.0 빅뱅. 파일럿 없음 (기존 사용자 0).
 
-#### 🎯 핵심 확정 사항 (T-1~T-6)
-| 영역 | 확정 |
-|------|------|
-| AI 매핑 | Claude **Opus 4.7** 최초 설치 1회만. upload.ts /mapping 프롬프트 복제. 프롬프트 캐싱 + Sonnet/로컬 폴백 |
-| PII | **컬럼명만** 전송. 샘플 데이터 외부 전송 금지 |
-| 싱크 주기 | **6시간 고정** (하루 4회). Heartbeat 1h, 큐재전송 30분. 설정 폴링 제거 (싱크 응답에 config) |
-| 브랜드 격리 | `store_code` AI 자동 매핑 + **시스템 가상 user** (`is_system=true`) |
-| 수신거부 | **upload.ts admin 패턴 복제** — 시스템 user + admin + store_code 담당 user 3단 배정 |
-| 삭제 감지 | **없음** (한줄로 표준). `sms_opt_in` 변경으로 자동 처리 |
-| UUID | `customers.id` 유지 + `customer_code` 신규 (`{login_id}-000001`, UI 숨김) |
-| 엑셀 업로드 차단 | 싱크 사용 중 회사만. 직접발송/수신거부/AI는 허용 |
-| 버전 | **v1.5.0 빅뱅** (v1.4.1 중간 릴리스 스킵) |
+#### ✅ 완료 (2026-04-18 단일 세션)
+- **Day 1 백엔드** (7파일): `utils/ai-mapping.ts` CT + `routes/sync.ts` 확장 (`/ai-mapping`, `/field-map`, 응답 config, 3단 수신거부) + `auth.ts` is_system 차단 + `middlewares/sync-active-check.ts` + `routes/customers.ts`/`upload.ts` blockIfSyncActive + `routes/companies.ts` 시스템 user 자동 생성
+- **Day 2 Agent** (14파일): types/customer.ts 레거시 9개 제거 / normalize/phone.ts normalizeStorePhone / scheduler 6h주기 + pollRemoteConfig 제거 + applyRemoteConfig / api/client.ts setRemoteConfigHandler + aiMapping + getFieldMap / setup/ai-mapping-client.ts 신규 / mapping/index.ts suggestMappingWithAI / setup-html.ts Step 4 AI 버튼 / cli.ts AI 대화형 / edit-config.ts aiRemap / index.ts ApiClient↔Scheduler 연결
+- **Day 3 프론트** (2파일): `SyncActiveBlockModal.tsx` 신규 + `Dashboard.tsx` sync_block_active 수신 + 업로드 3곳 체크
+- **DB 마이그레이션 적용**: users.is_system + customers.customer_code + customer_code_sequences + plans.ai_mapping_monthly_quota + companies.ai_mapping_calls_month/last_month. user_type CHECK 제약 확장 ('system' 허용). 9개 회사 시스템 user 자동 생성 + customer_code `{company_code}-000001` 부여
+- **tsc 0 에러 전영역** (backend + sync-agent + frontend)
+- **Git push**: commit `c5f2393` ("0418 싱크에이전트 대규모 업데이트 및 마이그레이션")
+- **tp-deploy-full 배포 완료**
+- **고객 배포용 매뉴얼 docx 작성** (내부 스키마 전부 배제 버전)
 
-#### 구현 예정 (3일)
-- **Day 1** (4/19): 백엔드 `utils/ai-mapping.ts` + `routes/sync.ts` 확장 + DB 마이그레이션 SQL
-- **Day 2** (4/20): Agent 설치 마법사 AI 매핑 UI + scheduler 주기 조정 + Zod/normalize 정리
-- **Day 3** (4/21): 프론트 `SyncActiveBlockModal` + UUID UI 숨김 + Linux/Windows 빌드 + 서팀장 QA 전달
+#### 🚧 다음 세션 (2026-04-21 월~)
+1. **sync-agent 빌드** — Harold님 로컬 PowerShell:
+   ```powershell
+   cd sync-agent
+   npm run build:exe                             # Windows exe
+   npm run build:linux                           # Linux 바이너리
+   bash installer/build-linux-package.sh 1.5.0   # Linux tar.gz
+   installer\build-installer.bat 1.5.0           # Windows 인스톨러 (NSIS)
+   ```
+2. **GitHub Releases v1.5.0 등록** — 빌드 산출물 업로드 (exe는 100MB 초과 가능 → Release로 배포, git 미커밋)
+3. **서팀장 QA** — `SYNC-AGENT-V1.5.0-QA-GUIDE.md` 8개 시나리오 E2E 테스트
+4. **QA 이슈 반영** (발생 시 BUGS.md 등록 후 수정)
+5. **첫 고객사 배포** — Windows 인스톨러 + 매뉴얼 docx 전달
 
-#### 기존 Gap 병합 처리 (M-1~M-5)
-- Zod 레거시 필드 9개 제거 / `normalizeStorePhone` 추가 / `customer_schema` 동기화 / FIELD_MAP 동적 조회 / Oracle 설치 가이드
+#### ⚠️ 배포 중 배운 교훈
+- **GitHub 100MB 제한**: 빌드 산출물(.exe, linux 바이너리, zip)은 반드시 `.gitignore`로 제외. `sync-agent/release/`, `installer/release/`, `*.exe`, `*.zip` 추가됨. 배포는 **GitHub Releases** 사용 권장 (2GB까지)
+- **fail2ban restart 주의**: `systemctl restart fail2ban` 하면 Currently banned 목록이 리셋됨 → 공격자 IP 다시 차단되지 않음. 영구 차단이 필요하면 iptables 사용. 이번엔 원래 10개 차단 수동 복구 완료
+- **서버 비밀번호 실수 방지**: SSH 키 인증은 로컬 PC 해킹 시 동일 리스크라 Harold님 보류. 대신 신중하게 한 번에 입력 + 실수 시 핫스팟으로 IP 밴 해제하는 방식 유지
 
 ---
 

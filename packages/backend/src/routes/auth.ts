@@ -1,5 +1,6 @@
 import bcrypt from 'bcryptjs';
 import { Request, Response, Router } from 'express';
+import rateLimit from 'express-rate-limit';
 import { query } from '../config/database';
 import { TIMEOUTS } from '../config/defaults';
 import { authenticate, generateToken, JwtPayload } from '../middlewares/auth';
@@ -7,7 +8,17 @@ import { rotateUserSession, normalizeAppSource, newSessionId } from '../utils/se
 
 const router = Router();
 
-router.post('/login', async (req: Request, res: Response) => {
+// 로그인 brute-force 방어: IP당 1분 최대 10회 실패. 성공 요청은 카운트 제외.
+const loginLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
+  message: { error: '로그인 시도가 너무 많습니다. 잠시 후 다시 시도해주세요.' },
+});
+
+router.post('/login', loginLimiter, async (req: Request, res: Response) => {
   try {
     const { loginId, password, userType } = req.body;
     // ★ D111 P0: app_source 기반 단일 세션 — 'hanjul' | 'flyer' | 'super'

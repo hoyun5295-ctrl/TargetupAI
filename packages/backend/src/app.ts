@@ -89,7 +89,28 @@ app.use('/api/flyer/cart', flyerCartPublicRoutes);
 
 // 미들웨어
 app.use(helmet());
-app.use(cors());
+
+// ★ CORS 화이트리스트 — CORS_ORIGIN 환경변수의 도메인만 허용 (운영)
+// 안전장치: CORS_ORIGIN 미설정이면 기존 동작(전면 허용) 유지 → 서비스 무중단 보장
+//   운영 배포 후 .env에 운영 도메인을 명시적으로 추가하면 자동으로 strict 모드 전환
+const corsAllowedOrigins = (process.env.CORS_ORIGIN || '')
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean);
+if (corsAllowedOrigins.length === 0) {
+  console.warn('[CORS] CORS_ORIGIN 미설정 — 전 origin 허용 중. 운영 배포 시 .env에 운영 도메인 추가 필수');
+}
+app.use(cors({
+  origin: (origin, cb) => {
+    if (corsAllowedOrigins.length === 0) return cb(null, true); // fallback: 전면 허용
+    if (process.env.NODE_ENV !== 'production') return cb(null, true);
+    if (!origin) return cb(null, true); // curl / same-origin / server-to-server
+    if (corsAllowedOrigins.includes(origin)) return cb(null, true);
+    cb(new Error(`CORS blocked: ${origin}`));
+  },
+  credentials: true,
+}));
+
 app.use(morgan('dev'));
 // ★ D130: 휴머스온 IMC 웹훅은 HMAC 검증을 위해 raw body 필요
 //    express.json()이 먼저 파싱하면 rawBody 손실되므로 이 경로만 선처리

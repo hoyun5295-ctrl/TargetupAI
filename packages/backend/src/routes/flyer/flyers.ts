@@ -529,6 +529,30 @@ router.get('/product-image-status', async (req: Request, res: Response) => {
   }
 });
 
+// ★ D129 GET /print-templates — V2 템플릿 목록 (mart_spring/hot/premium/weekend)
+// ★ 라우트 순서: /:id 보다 반드시 먼저 선언 (Express는 정의 순서로 매칭)
+router.get('/print-templates', (_req: Request, res: Response) => {
+  try {
+    const all = listTemplates();
+    const enrich = (id: string) => {
+      const base = all.find(t => t.id === id);
+      if (!base) return null;
+      const meta: Record<string, any> = {
+        mart_spring_v1:   { label: '봄세일 (파스텔)',        mood: '부드러움',   palette: ['#4F46E5', '#FFB7D5', '#FFD33D'], recommended: '봄 · 시즌 행사' },
+        mart_hot_v1:      { label: 'HOT특가 (레드핫)',       mood: '파격',      palette: ['#E8331F', '#FF8F2B', '#FFD33D'], recommended: '특가 · 파격 세일' },
+        mart_premium_v1:  { label: '프리미엄 (다크+골드)',   mood: '엘레강스',   palette: ['#0B1428', '#C9A961', '#F7F3E9'], recommended: '한우 · 수입산 · 고급' },
+        mart_weekend_v1:  { label: '주말대박 (일렉트릭)',    mood: '임팩트',     palette: ['#7C3AED', '#FDE047', '#EC4899'], recommended: '주말 · 금토일 한정' },
+      };
+      return { ...base, ...(meta[id] || {}) };
+    };
+    const result = all.map(t => enrich(t.id)).filter(Boolean);
+    res.json(result);
+  } catch (err: any) {
+    console.error('[print-templates]', err);
+    res.status(500).json({ error: err?.message || 'failed to list templates' });
+  }
+});
+
 // ============================================================
 // GET /:id — 전단지 상세 조회
 // ============================================================
@@ -1156,29 +1180,7 @@ router.get('/print-flyer/themes', (_req: Request, res: Response) => {
   res.json(getAvailableThemes());
 });
 
-// ★ D129 GET /print-templates — V2 템플릿 목록 (mart_spring/hot/premium/weekend)
-router.get('/print-templates', (_req: Request, res: Response) => {
-  try {
-    const all = listTemplates();
-    // 프론트에 보여줄 메타 정보 보강 (한국어 라벨 + 추천 시즌 + 팔레트 hint)
-    const enrich = (id: string) => {
-      const base = all.find(t => t.id === id);
-      if (!base) return null;
-      const meta: Record<string, any> = {
-        mart_spring_v1:   { label: '봄세일 (파스텔)',        mood: '부드러움',   palette: ['#4F46E5', '#FFB7D5', '#FFD33D'], recommended: '봄 · 시즌 행사' },
-        mart_hot_v1:      { label: 'HOT특가 (레드핫)',       mood: '파격',      palette: ['#E8331F', '#FF8F2B', '#FFD33D'], recommended: '특가 · 파격 세일' },
-        mart_premium_v1:  { label: '프리미엄 (다크+골드)',   mood: '엘레강스',   palette: ['#0B1428', '#C9A961', '#F7F3E9'], recommended: '한우 · 수입산 · 고급' },
-        mart_weekend_v1:  { label: '주말대박 (일렉트릭)',    mood: '임팩트',     palette: ['#7C3AED', '#FDE047', '#EC4899'], recommended: '주말 · 금토일 한정' },
-      };
-      return { ...base, ...(meta[id] || {}) };
-    };
-    const result = all.map(t => enrich(t.id)).filter(Boolean);
-    res.json(result);
-  } catch (err: any) {
-    console.error('[print-templates]', err);
-    res.status(500).json({ error: err?.message || 'failed to list templates' });
-  }
-});
+// ★ D129 /print-templates 는 /:id 보다 먼저 선언되어야 하므로 위쪽(1155줄 근처)으로 이동됨
 
 // ══════════════════════════════════════════
 // ★ CT-F24: 엑셀 업로드 + AI 자동 매핑
