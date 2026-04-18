@@ -117,6 +117,17 @@ router.post('/login', async (req: Request, res: Response) => {
 
     const user = result.rows[0];
 
+    // ===== SyncAgent v1.5.0: is_system 계정 로그인 차단 =====
+    // 시스템 가상 user (싱크에이전트 uploaded_by 기록용)는 로그인 불가.
+    if (user.is_system === true) {
+      await query(
+        `INSERT INTO audit_logs (id, user_id, action, target_type, details, ip_address, user_agent, created_at)
+         VALUES (gen_random_uuid(), $1, 'login_blocked', 'user', $2, $3, $4, NOW())`,
+        [user.id, JSON.stringify({ loginId, reason: 'system_account' }), req.ip, req.headers['user-agent'] || '']
+      );
+      return res.status(403).json({ error: '시스템 계정은 로그인할 수 없습니다.' });
+    }
+
     // ===== 계정 상태 체크 =====
     if (!user.is_active || user.status !== 'active') {
       const statusReason = !user.is_active ? 'account_disabled' : `account_${user.status}`;

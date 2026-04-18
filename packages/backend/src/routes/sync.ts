@@ -6,7 +6,14 @@ import { Request, Response, Router } from 'express';
 import { query } from '../config/database';
 import { TIMEOUTS, RATE_LIMITS, BATCH_SIZES } from '../config/defaults';
 import { normalizePhone, normalizeRegion, normalizeDate, normalizeCustomFieldValue } from '../utils/normalize';
-import { getColumnFields, getCustomFields, upsertCustomFieldDefinitions } from '../utils/standard-field-map';
+import {
+  FIELD_MAP,
+  CATEGORY_LABELS,
+  getColumnFields,
+  getCustomFields,
+  upsertCustomFieldDefinitions,
+} from '../utils/standard-field-map';
+import { callAiMapping, AiMappingQuotaExceeded, AiMappingUnavailable, SupportedDbType, MappingTarget } from '../utils/ai-mapping';
 
 const router = Router();
 
@@ -159,6 +166,137 @@ async function syncAuth(req: SyncAuthRequest, res: Response, next: Function) {
 
 // 모든 sync 라우트에 인증 + rate limit 적용
 router.use(ipRateLimit, syncAuth, companyRateLimit);
+
+// ============================================
+// 공통 헬퍼 — 설정 응답 + 수신거부 3단 배정
+// ============================================
+
+/**
+ * Agent 응답용 config 조회 — 설정 폴링 제거 대체 (설계서 10-2).
+ * 응답의 config 필드에 포함되어 Agent가 버전 비교 후 스케줄러 재시작.
+ *
+ * 우선순위:
+ *   1. sync_agents.config JSONB (슈퍼관리자가 sys.hanjullo.com에서 수정한 값)
+ *   2. sync_agents.sync_interval_customers / sync_interval_purchases (레거시)
+ *   3. v1.5.0 기본값 (고객 360분, 구매 360분, Heartbeat 60분, 큐재전송 30분)
+ */
+async function getSyncConfigForAgent(companyId: string): Promise<{
+  syncIntervalCustomers: number;
+  syncIntervalPurchases: number;
+  heartbeatInterval: number;
+  queueRetryInterval: number;
+  version: string;
+}> {
+  const res = await query(
+    `SELECT id, config, sync_interval_customers, sync_interval_purchases, updated_at
+     FROM sync_agents
+     WHERE company_id = $1 AND status = 'active'
+     ORDER BY updated_at DESC LIMIT 1`,
+    [companyId]
+  );
+  const agent = res.rows[0];
+  const config = agent?.config || {};
+  return {
+    syncIntervalCustomers: Number(config.sync_interval_customers ?? agent?.sync_interval_customers ?? 360),
+    syncIntervalPurchases: Number(config.sync_interval_purchases ?? agent?.sync_interval_purchases ?? 360),
+    heartbeatInterval: Number(config.heartbeat_interval ?? 60),
+    queueRetryInterval: Number(config.queue_retry_interval ?? 30),
+    version: agent?.updated_at ? new Date(agent.updated_at).toISOString() : new Date().toISOString(),
+  };
+}
+
+/**
+ * sms_opt_in=false 고객 → unsubscribes 3단 배정.
+ * upload.ts admin 경로(:829-889) 패턴을 복제:
+ *   1. 시스템 가상 user (is_system=true)에게 INSERT
+ *   2. 회사의 admin user들에게 INSERT (관리 가시성)
+ *   3. store_code 담당 company_user들에게 INSERT (브랜드별 필터링)
+ *
+ * ⚠️ 이 로직은 sync.ts 외부에서 복제 금지. 싱크 경로의 유일한 수신거부 진입점.
+ */
+async function registerSyncUnsubscribes(companyId: string, companyName?: string): Promise<void> {
+  try {
+    // 1. 시스템 user 조회 (없으면 즉시 생성 — 마이그레이션 누락 방어)
+    let sysUserRes = await query(
+      `SELECT id FROM users WHERE company_id = $1 AND is_system = true LIMIT 1`,
+      [companyId]
+    );
+    let systemUserId: string | null = sysUserRes.rows[0]?.id || null;
+    if (!systemUserId) {
+      try {
+        const created = await query(
+          `INSERT INTO users (id, company_id, login_id, user_type, name, is_active, is_system, password_hash, status)
+           VALUES (gen_random_uuid(), $1, 'system_sync_' || $1::text, 'system', '싱크에이전트 (시스템)', true, true, '', 'active')
+           ON CONFLICT DO NOTHING
+           RETURNING id`,
+          [companyId]
+        );
+        systemUserId = created.rows[0]?.id || null;
+        if (!systemUserId) {
+          // 경합으로 이미 생성된 경우 재조회
+          const re = await query(
+            `SELECT id FROM users WHERE company_id = $1 AND is_system = true LIMIT 1`,
+            [companyId]
+          );
+          systemUserId = re.rows[0]?.id || null;
+        }
+        if (systemUserId) {
+          console.log(`[Sync] 시스템 user 자동 생성/조회 (company: ${companyName}, userId: ${systemUserId})`);
+        }
+      } catch (sysErr) {
+        console.error('[Sync] 시스템 user 생성 실패 (is_system 컬럼 미적용 가능성):', sysErr);
+      }
+    }
+
+    // 2. 시스템 user에게 INSERT (source='sync')
+    if (systemUserId) {
+      const r1 = await query(
+        `INSERT INTO unsubscribes (company_id, user_id, phone, source)
+         SELECT $1, $2, phone, 'sync'
+         FROM customers
+         WHERE company_id = $1 AND sms_opt_in = false AND is_active = true
+           AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $2 AND u.phone = customers.phone)
+         ON CONFLICT (user_id, phone) DO NOTHING`,
+        [companyId, systemUserId]
+      );
+      if (r1.rowCount && r1.rowCount > 0) {
+        console.log(`[Sync] 수신거부 자동등록(system): ${r1.rowCount}건 (company: ${companyName})`);
+      }
+    }
+
+    // 3. 회사 admin user들에게 INSERT (관리 가시성)
+    const r2 = await query(
+      `INSERT INTO unsubscribes (company_id, user_id, phone, source)
+       SELECT c.company_id, u.id, c.phone, 'sync'
+       FROM customers c
+       JOIN users u ON u.company_id = c.company_id AND u.user_type = 'admin' AND COALESCE(u.is_system, false) = false
+       WHERE c.company_id = $1 AND c.sms_opt_in = false AND c.is_active = true
+       ON CONFLICT (user_id, phone) DO NOTHING`,
+      [companyId]
+    );
+    if (r2.rowCount && r2.rowCount > 0) {
+      console.log(`[Sync] 수신거부 자동등록(admin): ${r2.rowCount}건 (company: ${companyName})`);
+    }
+
+    // 4. store_code 담당 company_user들에게 INSERT (브랜드별 필터링)
+    const r3 = await query(
+      `INSERT INTO unsubscribes (company_id, user_id, phone, source)
+       SELECT c.company_id, u.id, c.phone, 'sync'
+       FROM customers c
+       JOIN users u ON u.company_id = c.company_id
+         AND u.user_type = 'user'
+         AND c.store_code = ANY(u.store_codes)
+       WHERE c.company_id = $1 AND c.sms_opt_in = false AND c.is_active = true
+       ON CONFLICT (user_id, phone) DO NOTHING`,
+      [companyId]
+    );
+    if (r3.rowCount && r3.rowCount > 0) {
+      console.log(`[Sync] 수신거부 자동등록(store_code 담당): ${r3.rowCount}건 (company: ${companyName})`);
+    }
+  } catch (unsubError) {
+    console.error('[Sync] 수신거부 자동등록 실패:', unsubError);
+  }
+}
 
 // ============================================
 // POST /api/sync/register - Agent 최초 등록
@@ -584,31 +722,12 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
       );
     }
 
-    // ===== sms_opt_in=false 고객 → unsubscribes 자동 등록 =====
-    try {
-      const userForUnsub = await query(
-        `SELECT id FROM users WHERE company_id = $1 AND is_active = true ORDER BY created_at ASC LIMIT 1`,
-        [companyId]
-      );
-      const syncUserId = userForUnsub.rows[0]?.id;
-      if (syncUserId) {
-        const unsubResult = await query(`
-          INSERT INTO unsubscribes (company_id, user_id, phone, source)
-          SELECT $1, $2, phone, 'sync'
-          FROM customers
-          WHERE company_id = $1 AND sms_opt_in = false AND is_active = true
-            AND NOT EXISTS (
-              SELECT 1 FROM unsubscribes u WHERE u.user_id = $2 AND u.phone = customers.phone
-            )
-          ON CONFLICT (user_id, phone) DO NOTHING
-        `, [companyId, syncUserId]);
-        if (unsubResult.rowCount && unsubResult.rowCount > 0) {
-          console.log(`[Sync] 수신거부 자동등록: ${unsubResult.rowCount}건 (company: ${req.companyName})`);
-        }
-      }
-    } catch (unsubError) {
-      console.error('[Sync] 수신거부 자동등록 실패:', unsubError);
-    }
+
+    // ===== sms_opt_in=false 고객 → unsubscribes 3단 배정 (system + admin + store_code user) =====
+    await registerSyncUnsubscribes(companyId, req.companyName);
+
+    // ===== Agent 설정 응답 (설정 폴링 제거 대체) =====
+    const agentConfig = await getSyncConfigForAgent(companyId);
 
     console.log(`[Sync] Customers: ${upsertedCount} upserted, ${failedCount} failed (company: ${req.companyName})`);
 
@@ -618,7 +737,8 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
         upsertedCount,
         failedCount,
         failures: failures.slice(0, 50) // 최대 50건만 리턴
-      }
+      },
+      config: agentConfig
     });
   } catch (error) {
     console.error('[Sync Customers Error]', error);
@@ -782,6 +902,9 @@ router.post('/purchases', async (req: SyncAuthRequest, res: Response) => {
       );
     }
 
+    // ===== Agent 설정 응답 (설정 폴링 제거 대체) =====
+    const agentConfig = await getSyncConfigForAgent(companyId);
+
     console.log(`[Sync] Purchases: ${insertedCount} inserted, ${failedCount} failed (company: ${req.companyName})`);
 
     return res.json({
@@ -790,7 +913,8 @@ router.post('/purchases', async (req: SyncAuthRequest, res: Response) => {
         insertedCount,
         failedCount,
         failures: failures.slice(0, 50)
-      }
+      },
+      config: agentConfig
     });
   } catch (error) {
     console.error('[Sync Purchases Error]', error);
@@ -1079,6 +1203,22 @@ router.post('/field-definitions', async (req: SyncAuthRequest, res: Response) =>
     }));
     const upsertedCount = await upsertCustomFieldDefinitions(companyId, mapped);
 
+    // ===== M-3: customer_schema 자동 갱신 (upload.ts 동일 로직) =====
+    try {
+      await query(`
+        UPDATE companies SET customer_schema = (
+          SELECT jsonb_build_object(
+            'genders', (SELECT array_agg(DISTINCT gender) FROM customers WHERE company_id = $1 AND gender IS NOT NULL),
+            'grades', (SELECT array_agg(DISTINCT grade) FROM customers WHERE company_id = $1 AND grade IS NOT NULL),
+            'custom_field_keys', (SELECT array_agg(DISTINCT k) FROM customers, jsonb_object_keys(custom_fields) k WHERE company_id = $1),
+            'store_codes', (SELECT array_agg(DISTINCT store_code) FROM customer_stores WHERE company_id = $1)
+          )
+        ) WHERE id = $1
+      `, [companyId]);
+    } catch (schemaErr) {
+      console.error('[Sync] customer_schema 갱신 실패:', schemaErr);
+    }
+
     return res.json({
       success: true,
       data: { upsertedCount }
@@ -1088,6 +1228,111 @@ router.post('/field-definitions', async (req: SyncAuthRequest, res: Response) =>
     return res.status(500).json({
       success: false,
       error: 'Failed to register field definitions'
+    });
+  }
+});
+
+// ============================================
+// POST /api/sync/ai-mapping — Claude Opus 4.7 컬럼 자동 매핑 (설계서 §5)
+// ============================================
+// Agent 설치 마법사 Step 4에서 호출.
+// 컬럼명 목록만 전송(PII 금지). 서버 환경변수 ANTHROPIC_API_KEY 사용.
+// 쿼터: 회사당 월 10회 (plans.ai_mapping_monthly_quota).
+router.post('/ai-mapping', async (req: SyncAuthRequest, res: Response) => {
+  try {
+    const companyId = req.companyId!;
+    const { target, tableName, dbType, columns } = req.body as {
+      target?: MappingTarget;
+      tableName?: string;
+      dbType?: SupportedDbType;
+      columns?: string[];
+    };
+
+    if (!target || !['customers', 'purchases'].includes(target)) {
+      return res.status(400).json({
+        success: false,
+        error: 'target은 customers 또는 purchases여야 합니다.'
+      });
+    }
+    if (!columns || !Array.isArray(columns) || columns.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'columns 배열이 필요합니다.'
+      });
+    }
+    if (!dbType || !['mssql', 'mysql', 'oracle', 'postgres', 'excel', 'csv'].includes(dbType)) {
+      return res.status(400).json({
+        success: false,
+        error: 'dbType은 mssql/mysql/oracle/postgres/excel/csv 중 하나여야 합니다.'
+      });
+    }
+
+    const result = await callAiMapping(companyId, {
+      target,
+      tableName: tableName || '',
+      dbType,
+      columns,
+    });
+
+    return res.json({
+      success: true,
+      data: result
+    });
+  } catch (error: any) {
+    if (error instanceof AiMappingQuotaExceeded) {
+      return res.status(429).json({
+        success: false,
+        error: error.message,
+        code: error.code,
+        limit: error.limit,
+        used: error.used,
+      });
+    }
+    if (error instanceof AiMappingUnavailable) {
+      return res.status(503).json({
+        success: false,
+        error: error.message,
+        code: 'AI_MAPPING_UNAVAILABLE',
+      });
+    }
+    console.error('[Sync AI Mapping Error]', error);
+    return res.status(500).json({
+      success: false,
+      error: 'AI 매핑 처리 실패'
+    });
+  }
+});
+
+// ============================================
+// GET /api/sync/field-map — FIELD_MAP 동적 전달 (M-4)
+// Agent가 서버 FIELD_MAP 정의를 최신으로 수신.
+// 설치 시 1회 호출 + config.enc 캐시.
+// ============================================
+router.get('/field-map', async (_req: SyncAuthRequest, res: Response) => {
+  try {
+    return res.json({
+      success: true,
+      data: {
+        fieldMap: FIELD_MAP.map(f => ({
+          fieldKey: f.fieldKey,
+          category: f.category,
+          displayName: f.displayName,
+          aliases: f.aliases || [],
+          dataType: f.dataType,
+          storageType: f.storageType,
+          columnName: f.columnName,
+          normalizeFunction: f.normalizeFunction || null,
+          sortOrder: f.sortOrder,
+        })),
+        categoryLabels: CATEGORY_LABELS,
+        version: new Date().toISOString(),
+      }
+    });
+  } catch (error) {
+    console.error('[Sync Field Map Error]', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to retrieve field map'
     });
   }
 });

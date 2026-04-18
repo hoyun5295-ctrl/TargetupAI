@@ -107,7 +107,38 @@
 
 ---
 
-### 📨 D130 — 알림톡/브랜드메시지 IMC 연동 Phase 1 (2026-04-18) — ✅ Day 2 완료, 배포 대기
+### 🔗 Sync Agent v1.5.0 — 설계 완료, 다음 세션 구현 착수 (2026-04-18)
+
+> **배경:** 한줄로AI 최신화 맞춰 싱크에이전트 재정의 + Claude Opus 4.7 기반 AI 자동 매핑 + Linux/Windows 전 환경 커버.
+> **설계서:** [`status/SYNC-AGENT-V1.5.0-DESIGN.md`](SYNC-AGENT-V1.5.0-DESIGN.md) (~900줄, 이번 세션 T-1~T-6 6개 주제 토론으로 확정)
+> **다음 세션 프롬프트:** [`status/SYNC-AGENT-V1.5.0-NEXT-SESSION-PROMPT.md`](SYNC-AGENT-V1.5.0-NEXT-SESSION-PROMPT.md) — 복붙용
+> **QA:** 서팀장이 v1.5.0 완성본으로 E2E 테스트 (A~F 시나리오)
+> **배포:** v1.5.0 빅뱅. 파일럿 없음 (기존 사용자 0).
+
+#### 🎯 핵심 확정 사항 (T-1~T-6)
+| 영역 | 확정 |
+|------|------|
+| AI 매핑 | Claude **Opus 4.7** 최초 설치 1회만. upload.ts /mapping 프롬프트 복제. 프롬프트 캐싱 + Sonnet/로컬 폴백 |
+| PII | **컬럼명만** 전송. 샘플 데이터 외부 전송 금지 |
+| 싱크 주기 | **6시간 고정** (하루 4회). Heartbeat 1h, 큐재전송 30분. 설정 폴링 제거 (싱크 응답에 config) |
+| 브랜드 격리 | `store_code` AI 자동 매핑 + **시스템 가상 user** (`is_system=true`) |
+| 수신거부 | **upload.ts admin 패턴 복제** — 시스템 user + admin + store_code 담당 user 3단 배정 |
+| 삭제 감지 | **없음** (한줄로 표준). `sms_opt_in` 변경으로 자동 처리 |
+| UUID | `customers.id` 유지 + `customer_code` 신규 (`{login_id}-000001`, UI 숨김) |
+| 엑셀 업로드 차단 | 싱크 사용 중 회사만. 직접발송/수신거부/AI는 허용 |
+| 버전 | **v1.5.0 빅뱅** (v1.4.1 중간 릴리스 스킵) |
+
+#### 구현 예정 (3일)
+- **Day 1** (4/19): 백엔드 `utils/ai-mapping.ts` + `routes/sync.ts` 확장 + DB 마이그레이션 SQL
+- **Day 2** (4/20): Agent 설치 마법사 AI 매핑 UI + scheduler 주기 조정 + Zod/normalize 정리
+- **Day 3** (4/21): 프론트 `SyncActiveBlockModal` + UUID UI 숨김 + Linux/Windows 빌드 + 서팀장 QA 전달
+
+#### 기존 Gap 병합 처리 (M-1~M-5)
+- Zod 레거시 필드 9개 제거 / `normalizeStorePhone` 추가 / `customer_schema` 동기화 / FIELD_MAP 동적 조회 / Oracle 설치 가이드
+
+---
+
+### 📨 D130 — 알림톡/브랜드메시지 IMC 연동 Phase 1 (2026-04-18) — ✅ Day 3 배포 완료, 월요일(2026-04-21) 실점검 대기
 
 > **배경:** 레거시에서 수동으로 하던 "템플릿 관리자 + 발신프로필 등록"을 한줄로에 재구현 + 휴머스온 IMC API 연동으로 자동화.
 > 승인 상태는 웹훅으로 실시간 반영 → 발송 시 `status='APPROVED'`만 노출 → 레거시의 수동 확인 절차 제거.
@@ -187,19 +218,81 @@
 - `components/alimtalk/AlimtalkTemplateFormV2.tsx` — `approval_status === 'APPROVED'` 프로필만 드롭다운 노출. 미등록/미승인 상태 안내 문구 + select 비활성화
 - `components/alimtalk/AlimtalkManagementSection.tsx` — Template 인터페이스에 `created_by/_name/_login_id` 추가, 목록 테이블에 "등록자" 컬럼 신설(이름 + 로그인 ID 병기)
 
-#### ⚠️ 오늘 커밋/배포 상태
-- **로컬:** Day 1 + Day 2 전 과제 완료, 백엔드/프론트 tsc 0, **미커밋**
-- **서버 DB:** Day 2 DDL 실행 완료. 승인 5컬럼 + `created_by` 적용됨
-- **서버 코드:** 2026-04-18 오전 기본 구조만 반영. 오후 + 연속 세션분 미반영
-- **권장 배포:** `tp-push "0418 D130 Day 2 승인 워크플로우 + 소유자 체크 완료"` → `tp-deploy-full`
+#### ✅ Day 3 완료 (2026-04-18 야간 연속 세션) — 알림톡 발송창 전구간
 
-#### 월요일(2026-04-21) 연동테스트 대기 (Phase 0 수령 필요)
+**전제 확인 (Harold님 지시):**
+- 휴머스온 IMC 발송 API 별도 호출 없음 → QTmsg Agent가 기존 `SMSQ_SEND`에 `msg_type='K'`로 INSERT하면 자동 발송 (QTmsg 매뉴얼 ver4.0 §5 + sample_insert.sql 검증 완료)
+- Phase 0 수령 없이도 발송 자체는 가동 가능 (템플릿 승인만 IMC 검수 필요)
+
+**슈퍼관리자 UI 정리:**
+- AdminDashboard 상단 "알림톡 발신프로필" 별도 버튼 제거
+- 발송 관리 탭 내부 레거시 발신프로필 섹션(Sender Key 수동 입력) + 등록 모달 + 관련 state/handler 전부 제거
+- 신규 `components/alimtalk/AlimtalkSendersSection.tsx` — AlimtalkSendersPage의 main 부분을 섹션으로 분리 → AdminDashboard 임베드. AlimtalkSendersPage는 wrapper로 축소.
+
+**SenderRegistrationWizard 고객사 admin 모드 UX 개선:**
+- `/api/companies/me` 가상 API 호출 제거 → `useAuthStore.user.company` 직접 참조
+- `companies.length === 1`이면 귀속 회사 드롭다운 자체 숨김 (고객사 admin은 본인 회사 자동 고정)
+- 카테고리 캐시 비어있을 때 안내 문구를 `singleCompany` 여부에 따라 분기
+
+**신규 공용 컨트롤타워:** `components/alimtalk/AlimtalkChannelPanel.tsx` — 설계서 §6-3-D 반영
+- 발신프로필 드롭다운 (승인된 것만, 1개면 자동 고정)
+- 템플릿 드롭다운 (status APPROVED/APR/A/approved 호환)
+- 변수 자동 매핑 (`#{...}` 추출 + 고객 필드 드롭다운 + `@@fieldKey@@` placeholder)
+- 부달 5종 (N/S/L/A/B) + A/B 때만 대체 문구 입력
+- 미리보기 (원본/치환 토글, 말풍선 + 강조 타이틀 + 버튼)
+- `convertButtonsToQTmsg()` export — QTmsg `{"name1","type1","url1_1","url1_2",...}` 변환
+- 단가 표시 제외 (Harold님 지시: 후불 위주라 불필요)
+
+**3경로 발송창 Panel 적용:**
+- `DirectSendPanel.tsx` — 알림톡 블록 전체 Panel 교체 + props에 `alimtalkSenders`/`alimtalkProfileId`/`alimtalkNextContents` 추가
+- `TargetSendModal.tsx` — 알림톡 블록 Panel 교체 + 동일 props
+- `AutoSendFormModal.tsx` — Step 5 탭에 🔔 알림톡 추가, `channel === 'alimtalk'`이면 SMS/LMS/MMS UI 전체 숨김 + Panel 임베드 + 폴백용 발신번호 필드, handleSubmit body에 `channel`/`alimtalk_*` 필드 포함
+
+**버그 수정:** `Dashboard.tsx:540` 타겟발송 `sendChannel: 'kakao'` → `'alimtalk'` (백엔드 `directChannel === 'alimtalk'` 체크와 정합 불일치 해소)
+
+**백엔드:**
+- `campaigns.ts /direct-send` — 알림톡 분기에 `alimtalkProfileId`/`alimtalkVariableMap`/`alimtalkNextContents` 파라미터 + 승인 이중 가드(템플릿 status + 프로필 approval_status) + `k_etc_json`에 senderkey 자동 포함 + `#{변수}` 백엔드 치환
+- `auto-campaigns.ts POST/PUT` — `channel`/`alimtalk_profile_id`/`alimtalk_template_id`/`alimtalk_template_code`/`alimtalk_variable_map`/`alimtalk_next_type`/`alimtalk_next_contents` 7개 컬럼 INSERT/UPDATE
+- `auto-campaign-worker.ts executeAutoCampaign` — `channel === 'alimtalk'` 분기 → `insertAlimtalkQueue` 호출 (승인 가드 + variable map 치환 + senderkey etcJson)
+- `alimtalk-senders` 화면용 DB/SELECT 정상. Dashboard.tsx `loadKakaoTemplates`는 `/api/alimtalk/senders` 병렬 로드로 `alimtalkSenders` 세팅
+
+**검증:**
+- 백엔드 `npx tsc --noEmit` 0 에러
+- 프론트 `npx tsc --noEmit` 0 에러
+- 잔존 인라인 알림톡 UI 0건 (DirectSendPanel/TargetSendModal/AutoSendFormModal 전부 Panel)
+
+#### ✅ 배포 완료 (2026-04-18 야간, Harold님 직접 실행)
+- **로컬:** Day 1 + Day 2 + Day 3 전 과제 완료, 백엔드/프론트 tsc 0
+- **서버 DB:** Day 2 DDL + Day 3 `auto_campaigns` 알림톡 7컬럼 전부 반영
+- **서버 코드:** `tp-push` → `tp-deploy-full` 실행 완료
+- **다음 단계:** 월요일(2026-04-21) Phase 0 수령 후 실점검 → 핸드오프 §5 체크리스트 기반
+
+#### 🚨 배포 전 Harold님 DB ALTER 필수
+
+```sql
+BEGIN;
+ALTER TABLE auto_campaigns
+  ADD COLUMN IF NOT EXISTS channel                 varchar(20) DEFAULT 'sms',
+  ADD COLUMN IF NOT EXISTS alimtalk_profile_id     uuid REFERENCES kakao_sender_profiles(id),
+  ADD COLUMN IF NOT EXISTS alimtalk_template_id    uuid REFERENCES kakao_templates(id),
+  ADD COLUMN IF NOT EXISTS alimtalk_template_code  varchar(50),
+  ADD COLUMN IF NOT EXISTS alimtalk_variable_map   jsonb DEFAULT '{}'::jsonb,
+  ADD COLUMN IF NOT EXISTS alimtalk_next_type      varchar(1) DEFAULT 'L',
+  ADD COLUMN IF NOT EXISTS alimtalk_next_contents  text;
+CREATE INDEX IF NOT EXISTS idx_auto_campaigns_channel
+  ON auto_campaigns(company_id, channel);
+COMMIT;
+```
+
+검증: `\d auto_campaigns` → 기존 컬럼 + 신규 7개 확인. 롤백은 동일 컬럼 DROP.
+
+#### 월요일(2026-04-21) 연동테스트 대기 (IMC 검수만 Phase 0 필요)
 - [ ] `IMC_API_KEY_SANDBOX` + `IMC_BASE_URL_STG` → 샌드박스 카테고리 조회 curl
-- [ ] 발신프로필 token 요청 → 카톡 수신 → createSender E2E
+- [ ] 발신프로필 token 요청 → 카톡 수신 → createSender E2E (IMC 연동 후 템플릿 승인 가능해짐)
 - [ ] 템플릿 등록 → 검수요청 → 승인 → 발송 E2E
 - [ ] `IMC_WEBHOOK_ALLOWED_IPS` + `IMC_WEBHOOK_HMAC_SECRET` → 실 IMC 웹훅 수신
 - [ ] 이미지 업로드 9종 실테스트
-- [ ] Phase 2 착수: campaigns.ts 5경로 `channel='alimtalk'` 분기
+- [ ] 발송 자체는 QTmsg Agent가 처리하므로 IMC 발송 API 연동 불필요
 
 ---
 

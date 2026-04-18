@@ -13,6 +13,7 @@ import { validateUploadMapping } from '../utils/upload-mapping-validator';
 // 인라인 normalizeDate 제거 — 컨트롤타워 원칙 위반이었음
 
 import { authenticate } from '../middlewares/auth';
+import { blockIfSyncActive } from '../middlewares/sync-active-check';
 
 const router = Router();
 
@@ -377,7 +378,7 @@ router.post('/validate-mapping', authenticate, async (req: Request, res: Respons
 // ================================================================
 // POST /save — 백그라운드 처리 (즉시 반환)
 // ================================================================
-router.post('/save', authenticate, async (req: Request, res: Response) => {
+router.post('/save', authenticate, blockIfSyncActive, async (req: Request, res: Response) => {
   try {
     const { fileId, mapping, customLabels } = req.body;
     const companyId = req.user?.companyId;

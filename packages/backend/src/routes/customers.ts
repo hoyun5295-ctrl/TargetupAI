@@ -9,6 +9,7 @@ import { getStoreScope } from '../utils/store-scope';
 import { buildDynamicFilterCompat } from '../utils/customer-filter';
 import { getTestSmsTables } from '../utils/sms-queue';
 import { detectPhoneFields } from '../utils/callback-filter';
+import { blockIfSyncActive } from '../middlewares/sync-active-check';
 
 const router = Router();
 
@@ -271,7 +272,7 @@ router.get('/fields', async (req: Request, res: Response) => {
 });
 
 // POST /api/customers - 고객 추가 (단건)
-router.post('/', async (req: Request, res: Response) => {
+router.post('/', blockIfSyncActive, async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
 
@@ -360,7 +361,7 @@ router.post('/', async (req: Request, res: Response) => {
 });
 
 // POST /api/customers/bulk - 고객 일괄 추가
-router.post('/bulk', async (req: Request, res: Response) => {
+router.post('/bulk', blockIfSyncActive, async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
 
@@ -1312,7 +1313,7 @@ router.get('/enabled-fields', async (req: Request, res: Response) => {
 // ====== 고객 삭제 API ======
 
 // DELETE /api/customers/:id - 개별 삭제 (고객사관리자, 슈퍼관리자만)
-router.delete('/:id', async (req: Request, res: Response) => {
+router.delete('/:id', blockIfSyncActive, async (req: Request, res: Response) => {
   try {
     let companyId = req.user?.companyId;
     const userId = req.user?.userId;
@@ -1370,7 +1371,7 @@ router.delete('/:id', async (req: Request, res: Response) => {
 });
 
 // POST /api/customers/bulk-delete - 선택 삭제 (고객사관리자, 슈퍼관리자만)
-router.post('/bulk-delete', async (req: Request, res: Response) => {
+router.post('/bulk-delete', blockIfSyncActive, async (req: Request, res: Response) => {
   try {
     let companyId = req.user?.companyId;
     const userId = req.user?.userId;
@@ -1446,7 +1447,7 @@ router.post('/bulk-delete', async (req: Request, res: Response) => {
 });
 
 // POST /api/customers/delete-all - 전체 삭제 (슈퍼관리자만)
-router.post('/delete-all', async (req: Request, res: Response) => {
+router.post('/delete-all', blockIfSyncActive, async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
     const userId = req.user?.userId;

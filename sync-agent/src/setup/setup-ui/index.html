@@ -1,0 +1,770 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sync Agent 설치 마법사</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', -apple-system, sans-serif;
+      background: #f0f4f8;
+      color: #1a202c;
+      min-height: 100vh;
+    }
+
+    .container {
+      max-width: 640px;
+      margin: 40px auto;
+      padding: 0 20px;
+    }
+
+    .header {
+      text-align: center;
+      margin-bottom: 32px;
+    }
+    .header h1 {
+      font-size: 24px;
+      font-weight: 700;
+      color: #2d3748;
+    }
+    .header p {
+      color: #718096;
+      margin-top: 8px;
+      font-size: 14px;
+    }
+
+    /* Steps indicator */
+    .steps {
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+      margin-bottom: 32px;
+    }
+    .step-dot {
+      width: 12px; height: 12px;
+      border-radius: 50%;
+      background: #cbd5e0;
+      transition: all 0.3s;
+    }
+    .step-dot.active { background: #3182ce; transform: scale(1.3); }
+    .step-dot.done { background: #48bb78; }
+
+    /* Card */
+    .card {
+      background: white;
+      border-radius: 12px;
+      padding: 32px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+    .card h2 {
+      font-size: 18px;
+      margin-bottom: 4px;
+      color: #2d3748;
+    }
+    .card .subtitle {
+      color: #718096;
+      font-size: 13px;
+      margin-bottom: 24px;
+    }
+
+    /* Form */
+    .form-group {
+      margin-bottom: 16px;
+    }
+    .form-group label {
+      display: block;
+      font-size: 13px;
+      font-weight: 600;
+      color: #4a5568;
+      margin-bottom: 4px;
+    }
+    .form-group input, .form-group select {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      font-size: 14px;
+      transition: border-color 0.2s;
+      outline: none;
+    }
+    .form-group input:focus, .form-group select:focus {
+      border-color: #3182ce;
+      box-shadow: 0 0 0 3px rgba(49,130,206,0.1);
+    }
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    /* Buttons */
+    .btn {
+      padding: 10px 20px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      transition: all 0.2s;
+    }
+    .btn-primary {
+      background: #3182ce;
+      color: white;
+    }
+    .btn-primary:hover { background: #2c5282; }
+    .btn-primary:disabled { background: #a0aec0; cursor: not-allowed; }
+    .btn-secondary {
+      background: #edf2f7;
+      color: #4a5568;
+    }
+    .btn-secondary:hover { background: #e2e8f0; }
+    .btn-success {
+      background: #48bb78;
+      color: white;
+    }
+    .btn-success:hover { background: #38a169; }
+
+    .btn-row {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 24px;
+    }
+
+    /* Status messages */
+    .status {
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 13px;
+      margin-top: 12px;
+      display: none;
+    }
+    .status.show { display: block; }
+    .status.success { background: #f0fff4; color: #276749; border: 1px solid #c6f6d5; }
+    .status.error { background: #fed7d7; color: #9b2c2c; border: 1px solid #feb2b2; }
+    .status.info { background: #ebf8ff; color: #2a4365; border: 1px solid #bee3f8; }
+
+    /* Table/Column selection */
+    .select-list {
+      max-height: 200px;
+      overflow-y: auto;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      margin-top: 8px;
+    }
+    .select-item {
+      padding: 8px 12px;
+      cursor: pointer;
+      font-size: 13px;
+      border-bottom: 1px solid #f7fafc;
+      transition: background 0.1s;
+    }
+    .select-item:hover { background: #ebf8ff; }
+    .select-item.selected { background: #bee3f8; font-weight: 600; }
+
+    /* Mapping table */
+    .mapping-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+      margin-top: 12px;
+    }
+    .mapping-table th {
+      background: #f7fafc;
+      padding: 8px 10px;
+      text-align: left;
+      font-weight: 600;
+      border-bottom: 2px solid #e2e8f0;
+    }
+    .mapping-table td {
+      padding: 6px 10px;
+      border-bottom: 1px solid #f0f0f0;
+    }
+    .mapping-table select {
+      width: 100%;
+      padding: 4px 8px;
+      border: 1px solid #e2e8f0;
+      border-radius: 4px;
+      font-size: 13px;
+    }
+    .mapping-table .arrow {
+      text-align: center;
+      color: #a0aec0;
+    }
+
+    /* Hidden step */
+    .step-panel { display: none; }
+    .step-panel.active { display: block; }
+
+    /* Complete screen */
+    .complete-icon {
+      text-align: center;
+      font-size: 64px;
+      margin-bottom: 16px;
+    }
+    .complete-text {
+      text-align: center;
+      color: #4a5568;
+    }
+
+    /* Spinner */
+    .spinner {
+      display: inline-block;
+      width: 16px; height: 16px;
+      border: 2px solid #e2e8f0;
+      border-top: 2px solid #3182ce;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+      vertical-align: middle;
+      margin-right: 6px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <div class="header">
+    <h1>🔄 Sync Agent 설치 마법사</h1>
+    <p>고객사 DB와 한줄로를 연결합니다</p>
+  </div>
+
+  <div class="steps">
+    <div class="step-dot active" data-step="0"></div>
+    <div class="step-dot" data-step="1"></div>
+    <div class="step-dot" data-step="2"></div>
+    <div class="step-dot" data-step="3"></div>
+    <div class="step-dot" data-step="4"></div>
+  </div>
+
+  <!-- ═══ Step 0: API 키 입력 ═══ -->
+  <div class="card step-panel active" data-step="0">
+    <h2>1. 한줄로 API 연결</h2>
+    <p class="subtitle">한줄로에서 발급받은 API 키를 입력하세요</p>
+
+    <div class="form-group">
+      <label>서버 URL</label>
+      <input type="text" id="serverUrl" value="https://hanjul.ai" />
+    </div>
+    <div class="form-group">
+      <label>API Key</label>
+      <input type="text" id="apiKey" placeholder="발급받은 API Key 입력" />
+    </div>
+    <div class="form-group">
+      <label>API Secret</label>
+      <input type="password" id="apiSecret" placeholder="발급받은 API Secret 입력" />
+    </div>
+
+    <div class="btn-row">
+      <div></div>
+      <button class="btn btn-primary" onclick="goStep(1)">다음 →</button>
+    </div>
+  </div>
+
+  <!-- ═══ Step 1: DB 접속정보 ═══ -->
+  <div class="card step-panel" data-step="1">
+    <h2>2. DB 접속 설정</h2>
+    <p class="subtitle">고객사 POS/ERP 데이터베이스 정보를 입력하세요</p>
+
+    <div class="form-group">
+      <label>DB 종류</label>
+      <select id="dbType">
+        <option value="mssql">MSSQL (SQL Server)</option>
+        <option value="mysql">MySQL / MariaDB</option>
+        <option value="oracle">Oracle</option>
+        <option value="postgres">PostgreSQL</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>호스트</label>
+        <input type="text" id="dbHost" value="localhost" />
+      </div>
+      <div class="form-group">
+        <label>포트</label>
+        <input type="number" id="dbPort" value="1433" />
+      </div>
+    </div>
+    <div class="form-group">
+      <label>DB 이름</label>
+      <input type="text" id="dbName" placeholder="데이터베이스명" />
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>사용자</label>
+        <input type="text" id="dbUser" placeholder="DB 계정" />
+      </div>
+      <div class="form-group">
+        <label>비밀번호</label>
+        <input type="password" id="dbPassword" placeholder="DB 비밀번호" />
+      </div>
+    </div>
+
+    <button class="btn btn-success" onclick="testDbConnection()" id="btnTestDb">
+      🔌 접속 테스트
+    </button>
+    <div id="dbStatus" class="status"></div>
+
+    <div class="btn-row">
+      <button class="btn btn-secondary" onclick="goStep(0)">← 이전</button>
+      <button class="btn btn-primary" onclick="loadTables()" id="btnNext1" disabled>다음 →</button>
+    </div>
+  </div>
+
+  <!-- ═══ Step 2: 테이블 선택 ═══ -->
+  <div class="card step-panel" data-step="2">
+    <h2>3. 테이블 선택</h2>
+    <p class="subtitle">고객 테이블과 구매 테이블을 선택하세요</p>
+
+    <div class="form-group">
+      <label>고객 테이블</label>
+      <select id="customerTable"></select>
+    </div>
+    <div class="form-group">
+      <label>구매 테이블</label>
+      <select id="purchaseTable"></select>
+    </div>
+
+    <div id="tableStatus" class="status"></div>
+
+    <div class="btn-row">
+      <button class="btn btn-secondary" onclick="goStep(1)">← 이전</button>
+      <button class="btn btn-primary" onclick="loadColumns()">다음 →</button>
+    </div>
+  </div>
+
+  <!-- ═══ Step 3: 컬럼 매핑 ═══ -->
+  <div class="card step-panel" data-step="3">
+    <h2>4. 컬럼 매핑</h2>
+    <p class="subtitle">DB 컬럼을 한줄로 필드에 매핑하세요</p>
+
+    <h3 style="font-size:14px; margin-bottom:8px;">고객 테이블 매핑</h3>
+    <div style="overflow-x:auto;">
+      <table class="mapping-table" id="customerMappingTable">
+        <thead>
+          <tr><th>DB 컬럼</th><th class="arrow">→</th><th>한줄로 필드</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <h3 style="font-size:14px; margin:16px 0 8px;">구매 테이블 매핑</h3>
+    <div style="overflow-x:auto;">
+      <table class="mapping-table" id="purchaseMappingTable">
+        <thead>
+          <tr><th>DB 컬럼</th><th class="arrow">→</th><th>한줄로 필드</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn btn-secondary" onclick="goStep(2)">← 이전</button>
+      <button class="btn btn-primary" onclick="goStep(4)">다음 →</button>
+    </div>
+  </div>
+
+  <!-- ═══ Step 4: 동기화 설정 + 저장 ═══ -->
+  <div class="card step-panel" data-step="4">
+    <h2>5. 동기화 설정</h2>
+    <p class="subtitle">동기화 주기와 기타 옵션을 설정합니다</p>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label>고객 동기화 주기 (분)</label>
+        <select id="customerInterval">
+          <option value="30">30분</option>
+          <option value="60" selected>1시간</option>
+          <option value="120">2시간</option>
+          <option value="360">6시간 (하루 4회)</option>
+          <option value="720">12시간 (하루 2회)</option>
+          <option value="1440">24시간 (하루 1회)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>구매 동기화 주기 (분)</label>
+        <select id="purchaseInterval">
+          <option value="30" selected>30분</option>
+          <option value="60">1시간</option>
+          <option value="120">2시간</option>
+          <option value="360">6시간</option>
+          <option value="720">12시간</option>
+          <option value="1440">24시간</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label>Agent 이름 (식별용)</label>
+      <input type="text" id="agentName" value="sync-agent-001" />
+    </div>
+
+    <div id="saveStatus" class="status"></div>
+
+    <div class="btn-row">
+      <button class="btn btn-secondary" onclick="goStep(3)">← 이전</button>
+      <button class="btn btn-primary" onclick="saveConfig()" id="btnSave">
+        💾 설치 완료
+      </button>
+    </div>
+  </div>
+
+  <!-- ═══ Complete ═══ -->
+  <div class="card step-panel" data-step="5">
+    <div class="complete-icon">✅</div>
+    <h2 style="text-align:center;">설치 완료!</h2>
+    <p class="complete-text" style="margin-top:12px;">
+      Sync Agent가 설정되었습니다.<br>
+      잠시 후 자동으로 동기화가 시작됩니다.
+    </p>
+    <p class="complete-text" style="margin-top:16px; font-size:13px; color:#a0aec0;">
+      이 창은 닫으셔도 됩니다.
+    </p>
+  </div>
+</div>
+
+<script>
+  // ═══ State ═══
+  let currentStep = 0;
+  let dbConnected = false;
+
+  // 한줄로 표준 필드
+  const CUSTOMER_FIELDS = [
+    { value: '', label: '— 매핑 안 함 —' },
+    { value: 'phone', label: 'phone (전화번호) ★필수' },
+    { value: 'name', label: 'name (고객명)' },
+    { value: 'gender', label: 'gender (성별)' },
+    { value: 'birth_date', label: 'birth_date (생년월일)' },
+    { value: 'email', label: 'email (이메일)' },
+    { value: 'address', label: 'address (주소)' },
+    { value: 'region', label: 'region (지역)' },
+    { value: 'grade', label: 'grade (등급)' },
+    { value: 'points', label: 'points (포인트)' },
+    { value: 'store_code', label: 'store_code (매장코드)' },
+    { value: 'store_name', label: 'store_name (매장명)' },
+    { value: 'sms_opt_in', label: 'sms_opt_in (수신동의)' },
+    { value: 'recent_purchase_date', label: 'recent_purchase_date (최근구매일)' },
+    { value: 'recent_purchase_amount', label: 'recent_purchase_amount (최근구매금액)' },
+    { value: 'total_purchase_amount', label: 'total_purchase_amount (총구매금액)' },
+    { value: 'purchase_count', label: 'purchase_count (구매횟수)' },
+  ];
+
+  const PURCHASE_FIELDS = [
+    { value: '', label: '— 매핑 안 함 —' },
+    { value: 'customer_phone', label: 'customer_phone (고객전화) ★필수' },
+    { value: 'purchase_date', label: 'purchase_date (구매일시) ★필수' },
+    { value: 'store_code', label: 'store_code (매장코드)' },
+    { value: 'store_name', label: 'store_name (매장명)' },
+    { value: 'product_code', label: 'product_code (상품코드)' },
+    { value: 'product_name', label: 'product_name (상품명)' },
+    { value: 'quantity', label: 'quantity (수량)' },
+    { value: 'unit_price', label: 'unit_price (단가)' },
+    { value: 'total_amount', label: 'total_amount (총금액) ★필수' },
+  ];
+
+  // 자동 매핑은 서버 API (/api/setup/auto-mapping)로 처리
+  // 복합 패턴 우선순위 적용 (STORE_NM → store_name, PROD_NM → product_name)
+
+  // DB 타입별 기본 포트
+  const DEFAULT_PORTS = { mssql: 1433, mysql: 3306, oracle: 1521, postgres: 5432 };
+
+  // ═══ Step Navigation ═══
+  function goStep(step) {
+    // 유효성 검사
+    if (step === 1 && currentStep === 0) {
+      if (!$('apiKey').value.trim() || !$('apiSecret').value.trim()) {
+        alert('API Key와 Secret을 입력하세요.');
+        return;
+      }
+    }
+
+    document.querySelectorAll('.step-panel').forEach(el => el.classList.remove('active'));
+    document.querySelectorAll('.step-dot').forEach((el, i) => {
+      el.classList.remove('active', 'done');
+      if (i < step) el.classList.add('done');
+      if (i === step) el.classList.add('active');
+    });
+    document.querySelector(`.step-panel[data-step="${step}"]`).classList.add('active');
+    currentStep = step;
+  }
+
+  // ═══ DB Connection Test ═══
+  async function testDbConnection() {
+    const btn = $('btnTestDb');
+    const status = $('dbStatus');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span>접속 테스트 중...';
+    showStatus(status, 'info', '접속 테스트 중...');
+
+    try {
+      const res = await fetch('/api/setup/test-db', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(getDbConfig()),
+      });
+      const data = await res.json();
+
+      if (data.success) {
+        showStatus(status, 'success', '✅ ' + data.message);
+        $('btnNext1').disabled = false;
+        dbConnected = true;
+      } else {
+        showStatus(status, 'error', '❌ ' + data.message);
+        $('btnNext1').disabled = true;
+      }
+    } catch (err) {
+      showStatus(status, 'error', '❌ 서버 연결 실패: ' + err.message);
+    }
+
+    btn.disabled = false;
+    btn.innerHTML = '🔌 접속 테스트';
+  }
+
+  // ═══ Load Tables ═══
+  async function loadTables() {
+    const status = $('tableStatus');
+    showStatus(status, 'info', '<span class="spinner"></span>테이블 목록 조회 중...');
+
+    try {
+      const res = await fetch('/api/setup/tables', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(getDbConfig()),
+      });
+      const data = await res.json();
+
+      if (data.success && data.tables.length > 0) {
+        const custSelect = $('customerTable');
+        const purchSelect = $('purchaseTable');
+        custSelect.innerHTML = '';
+        purchSelect.innerHTML = '';
+
+        for (const table of data.tables) {
+          custSelect.add(new Option(table, table));
+          purchSelect.add(new Option(table, table));
+        }
+
+        // 자동 선택 추측
+        autoSelectTable(custSelect, ['customer', 'cust', 'member', 'client']);
+        autoSelectTable(purchSelect, ['purchase', 'order', 'sale', 'buy', 'transaction']);
+
+        showStatus(status, 'success', `✅ ${data.tables.length}개 테이블 발견`);
+        goStep(2);
+      } else {
+        showStatus(status, 'error', '테이블을 찾을 수 없습니다.');
+      }
+    } catch (err) {
+      showStatus(status, 'error', '❌ ' + err.message);
+    }
+  }
+
+  // ═══ Load Columns & Build Mapping (서버 API 기반 자동매핑) ═══
+  async function loadColumns() {
+    const custTable = $('customerTable').value;
+    const purchTable = $('purchaseTable').value;
+
+    if (!custTable || !purchTable) {
+      alert('테이블을 선택하세요.');
+      return;
+    }
+
+    try {
+      // 고객 테이블 컬럼
+      const custRes = await fetch('/api/setup/columns', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...getDbConfig(), tableName: custTable }),
+      });
+      const custData = await custRes.json();
+
+      // 구매 테이블 컬럼
+      const purchRes = await fetch('/api/setup/columns', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...getDbConfig(), tableName: purchTable }),
+      });
+      const purchData = await purchRes.json();
+
+      if (custData.success && purchData.success) {
+        // 서버 API로 자동 매핑 추천 받기
+        const custColNames = custData.columns.map(c => c.name);
+        const purchColNames = purchData.columns.map(c => c.name);
+
+        const [custAutoRes, purchAutoRes] = await Promise.all([
+          fetch('/api/setup/auto-mapping', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ columns: custColNames, target: 'customers' }),
+          }).then(r => r.json()),
+          fetch('/api/setup/auto-mapping', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ columns: purchColNames, target: 'purchases' }),
+          }).then(r => r.json()),
+        ]);
+
+        const custAutoMapping = custAutoRes.success ? custAutoRes.mapping : {};
+        const purchAutoMapping = purchAutoRes.success ? purchAutoRes.mapping : {};
+
+        buildMappingTable('customerMappingTable', custData.columns, CUSTOMER_FIELDS, custAutoMapping);
+        buildMappingTable('purchaseMappingTable', purchData.columns, PURCHASE_FIELDS, purchAutoMapping);
+
+        // 매핑 결과 요약 표시
+        const custMatched = Object.keys(custAutoMapping).length;
+        const purchMatched = Object.keys(purchAutoMapping).length;
+        console.log(`자동 매핑: 고객 ${custMatched}/${custColNames.length}, 구매 ${purchMatched}/${purchColNames.length}`);
+
+        goStep(3);
+      }
+    } catch (err) {
+      alert('컬럼 조회 실패: ' + err.message);
+    }
+  }
+
+  function buildMappingTable(tableId, columns, targetFields, autoMapping) {
+    const tbody = $(tableId).querySelector('tbody');
+    tbody.innerHTML = '';
+
+    for (const col of columns) {
+      const tr = document.createElement('tr');
+      // 서버 API 추천 결과 사용
+      const suggested = autoMapping[col.name] || '';
+
+      tr.innerHTML = `
+        <td><strong>${col.name}</strong><br><span style="color:#a0aec0;font-size:11px;">${col.dataType}${col.nullable ? ', null가능' : ''}</span></td>
+        <td class="arrow">→</td>
+        <td>
+          <select data-source="${col.name}">
+            ${targetFields.map(f =>
+              `<option value="${f.value}" ${f.value === suggested ? 'selected' : ''}>${f.label}</option>`
+            ).join('')}
+          </select>
+        </td>
+      `;
+      tbody.appendChild(tr);
+    }
+  }
+
+  function autoSelectTable(selectEl, keywords) {
+    for (const option of selectEl.options) {
+      const lower = option.value.toLowerCase();
+      if (keywords.some(k => lower.includes(k))) {
+        selectEl.value = option.value;
+        return;
+      }
+    }
+  }
+
+  // ═══ Save Config ═══
+  async function saveConfig() {
+    const btn = $('btnSave');
+    const status = $('saveStatus');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span>저장 중...';
+
+    // 매핑 수집
+    const customerMapping = collectMapping('customerMappingTable');
+    const purchaseMapping = collectMapping('purchaseMappingTable');
+
+    // phone 필수 확인
+    if (!Object.values(customerMapping).includes('phone')) {
+      showStatus(status, 'error', '❌ 고객 테이블에서 phone(전화번호) 매핑은 필수입니다.');
+      btn.disabled = false;
+      btn.innerHTML = '💾 설치 완료';
+      return;
+    }
+
+    const config = {
+      server: {
+        baseUrl: $('serverUrl').value.trim(),
+        apiKey: $('apiKey').value.trim(),
+        apiSecret: $('apiSecret').value.trim(),
+      },
+      database: {
+        type: $('dbType').value,
+        host: $('dbHost').value.trim(),
+        port: parseInt($('dbPort').value, 10),
+        database: $('dbName').value.trim(),
+        username: $('dbUser').value.trim(),
+        password: $('dbPassword').value.trim(),
+        queryTimeout: 30000,
+      },
+      sync: {
+        customerInterval: parseInt($('customerInterval').value, 10),
+        purchaseInterval: parseInt($('purchaseInterval').value, 10),
+        batchSize: 4000,
+        customerTable: $('customerTable').value,
+        purchaseTable: $('purchaseTable').value,
+        timestampColumn: 'updated_at',
+        fallbackToFullSync: true,
+      },
+      mapping: {
+        customers: customerMapping,
+        purchases: purchaseMapping,
+      },
+      agent: {
+        name: $('agentName').value.trim(),
+        version: '0.1.0',
+      },
+      log: { level: 'info' },
+    };
+
+    try {
+      const res = await fetch('/api/setup/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ config }),
+      });
+      const data = await res.json();
+
+      if (data.success) {
+        goStep(5);
+      } else {
+        showStatus(status, 'error', '❌ ' + data.message);
+      }
+    } catch (err) {
+      showStatus(status, 'error', '❌ ' + err.message);
+    }
+
+    btn.disabled = false;
+    btn.innerHTML = '💾 설치 완료';
+  }
+
+  function collectMapping(tableId) {
+    const mapping = {};
+    const selects = $(tableId).querySelectorAll('select[data-source]');
+    selects.forEach(sel => {
+      if (sel.value) {
+        mapping[sel.dataset.source] = sel.value;
+      }
+    });
+    return mapping;
+  }
+
+  // ═══ Helpers ═══
+  function $(id) { return document.getElementById(id); }
+
+  function getDbConfig() {
+    return {
+      type: $('dbType').value,
+      host: $('dbHost').value.trim(),
+      port: $('dbPort').value,
+      database: $('dbName').value.trim(),
+      username: $('dbUser').value.trim(),
+      password: $('dbPassword').value.trim(),
+    };
+  }
+
+  function showStatus(el, type, msg) {
+    el.className = `status show ${type}`;
+    el.innerHTML = msg;
+  }
+
+  // DB 타입 변경 시 포트 자동 변경
+  $('dbType').addEventListener('change', function() {
+    $('dbPort').value = DEFAULT_PORTS[this.value] || 1433;
+  });
+</script>
+
+</body>
+</html>

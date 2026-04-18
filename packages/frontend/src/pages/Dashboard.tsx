@@ -37,6 +37,7 @@ import SendConfirmModal from '../components/SendConfirmModal';
 import SpamFilterLockModal from '../components/SpamFilterLockModal';
 import SpamFilterTestModal from '../components/SpamFilterTestModal';
 import SubscriptionLockModal from '../components/SubscriptionLockModal';
+import SyncActiveBlockModal from '../components/SyncActiveBlockModal';
 import TodayStatsModal from '../components/TodayStatsModal';
 import UploadProgressModal from '../components/UploadProgressModal';
 import UploadResultModal from '../components/UploadResultModal';
@@ -218,6 +219,9 @@ export default function Dashboard() {
   // 5개 카드 모달 state
   const [showRecentCampaigns, setShowRecentCampaigns] = useState(false);
   const [showFileUpload, setShowFileUpload] = useState(false);
+  // v1.5.0: 싱크에이전트 사용 중 업로드/수정/삭제 차단 모달 (설계서 §4-4)
+  const [showSyncActiveBlock, setShowSyncActiveBlock] = useState(false);
+  const [syncBlockActive, setSyncBlockActive] = useState(false);
   const [showDirectTargeting, setShowDirectTargeting] = useState(false);
   // 직접 타겟 관련 state → DirectTargetFilterModal로 이동 (D43-3)
   const [showTemplates, setShowTemplates] = useState(false);
@@ -896,6 +900,19 @@ export default function Dashboard() {
 
   const [optOutNumber, setOptOutNumber] = useState('');
 
+  // v1.5.0: 파일 업로드 오픈 전 싱크 차단 체크 (설계서 §4-4)
+  const openFileUpload = () => {
+    if (syncBlockActive) {
+      setShowSyncActiveBlock(true);
+      return;
+    }
+    if (isSubscriptionLocked) {
+      setShowSubscriptionLock(true);
+      return;
+    }
+    setShowFileUpload(true);
+  };
+
   // 업로드 저장 시작 → 프로그레스 모달 표시 + 폴링
   const handleUploadSaveStart = (savedFileId: string, totalRows: number) => {
     setShowFileUpload(false);
@@ -1138,6 +1155,8 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
         if (settingsData.company_name) {
           setCompanyNameFromDB(settingsData.company_name);
         }
+        // v1.5.0: 싱크 차단 플래그 수신
+        setSyncBlockActive(!!settingsData.sync_block_active);
       }
       const cbRes = await fetch('/api/companies/callback-numbers', {
         headers: { Authorization: `Bearer ${token}` }
@@ -2290,7 +2309,7 @@ const campaignData = {
                       </div>
                       <div className="text-sm text-gray-600 font-medium mb-3">고객 DB를 업로드하면 현황을 확인할 수 있습니다</div>
                       <button
-                        onClick={() => { if (isSubscriptionLocked) { setShowSubscriptionLock(true); return; } setShowFileUpload(true); }}
+                        onClick={() => { openFileUpload(); }}
                         className="px-5 py-2 bg-gray-900 text-white text-xs font-medium rounded-xl hover:bg-gray-800 transition-colors shadow-sm"
                       >
                         고객 DB 업로드
@@ -2434,7 +2453,7 @@ const campaignData = {
                 </button>
                 {!hideFileUpload && (
                 <button 
-                  onClick={() => setShowFileUpload(true)}
+                  onClick={() => openFileUpload()}
                   className="p-5 bg-slate-600 hover:bg-slate-700 rounded-xl transition-all hover:shadow-lg text-right flex-1 flex flex-col justify-between"
                 >
                   <div>
@@ -2521,6 +2540,8 @@ const campaignData = {
                 {/* 고객 DB 업로드 */}
                 <button
                   onClick={() => {
+                    // v1.5.0: 싱크 사용 중 최우선 차단
+                    if (syncBlockActive) { setShowSyncActiveBlock(true); return; }
                     if (isSubscriptionLocked) { setShowSubscriptionLock(true); return; }
                     // D53: 고객DB 게이팅
                     if (isCustomerDbLocked) { setPlanUpgradeFeature('고객 DB 업로드'); setPlanUpgradeRequired('스타터'); setShowPlanUpgradeModal(true); return; }
@@ -3527,6 +3548,8 @@ const campaignData = {
       <LineGroupErrorModal show={showLineGroupError} onClose={() => setShowLineGroupError(false)} />
 
       <SubscriptionLockModal show={showSubscriptionLock} onClose={() => setShowSubscriptionLock(false)} />
+      {/* v1.5.0: 싱크에이전트 사용 중 차단 모달 (설계서 §4-4) */}
+      <SyncActiveBlockModal isOpen={showSyncActiveBlock} onClose={() => setShowSyncActiveBlock(false)} />
 
       <AnalysisModal
         show={showAnalysis}

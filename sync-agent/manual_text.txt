@@ -1,0 +1,342 @@
+
+
+Sync Agent
+설치 및 설정 매뉴얼
+한줄로 데이터 동기화 에이전트
+Windows / Linux 듀얼 지원
+
+INVITO (인비토)
+버전 1.4.0 | 2026년 3월
+
+1. 개요
+Sync Agent는 고객사 로컬 DB(POS, ERP, CRM 등)의 고객 및 구매 데이터를 한줄로 서버로 자동 동기화하는 에이전트입니다. 표준 필드 17개에 자동 매핑하고, 나머지 컬럼은 커스텀 필드(최대 15개)로 유연하게 수집합니다.
+설치 후 별도의 작업 없이 자동으로 데이터가 동기화되며, 원격 모니터링을 통해 관리할 수 있습니다.
+1.1 시스템 요구사항
+항목
+Windows
+Linux
+OS
+Windows 10/11, Server 2016+
+Ubuntu 20.04+, CentOS 7+, RHEL 7+, Debian 10+
+CPU
+x64 (64비트)
+x64 (64비트)
+메모리
+512MB 이상
+512MB 이상
+디스크
+200MB 이상
+200MB 이상
+네트워크
+HTTPS(443) 아웃바운드 허용
+HTTPS(443) 아웃바운드 허용
+권한
+관리자 권한 (서비스 설치 시)
+root 권한 (서비스 설치 시)
+1.2 지원 데이터베이스
+DB
+기본 포트
+드라이버
+비고
+MSSQL
+1433
+mssql/tedious
+한국 POS/ERP 주력
+MySQL / MariaDB
+3306
+mysql2
+중소형 시스템
+Oracle
+1521
+oracledb
+대기업/공공
+PostgreSQL
+5432
+pg
+최신 시스템
+
+2. 사전 준비
+2.1 한줄로 API 키 발급
+설치 전 한줄로 관리자에게 아래 정보를 요청하세요:
+API Key — Agent 인증용 키
+API Secret — Agent 인증용 시크릿
+서버 URL — 한줄로 서버 주소 (예: https://hanjul.ai)
+⚠️ API Key/Secret은 고객사별로 고유합니다. 외부에 노출되지 않도록 주의하세요.
+2.2 고객사 DB 읽기 전용 계정 생성
+Sync Agent는 고객사 DB에 읽기(SELECT) 전용으로 접속합니다. 보안을 위해 전용 읽기 계정을 생성해주세요.
+MSSQL
+CREATE LOGIN sync_reader WITH PASSWORD = 'secure_password';
+USE [고객DB]; CREATE USER sync_reader FOR LOGIN sync_reader;
+GRANT SELECT ON [고객테이블] TO sync_reader;
+GRANT SELECT ON [구매테이블] TO sync_reader;
+MySQL / MariaDB
+CREATE USER 'sync_reader'@'localhost' IDENTIFIED BY 'secure_password';
+GRANT SELECT ON 고객DB.고객테이블 TO 'sync_reader'@'localhost';
+GRANT SELECT ON 고객DB.구매테이블 TO 'sync_reader'@'localhost';
+FLUSH PRIVILEGES;
+Oracle
+CREATE USER sync_reader IDENTIFIED BY secure_password;
+GRANT CONNECT TO sync_reader;
+GRANT SELECT ON 스키마.고객테이블 TO sync_reader;
+GRANT SELECT ON 스키마.구매테이블 TO sync_reader;
+PostgreSQL
+CREATE ROLE sync_reader WITH LOGIN PASSWORD 'secure_password';
+GRANT CONNECT ON DATABASE 고객db TO sync_reader;
+GRANT USAGE ON SCHEMA public TO sync_reader;
+GRANT SELECT ON 고객테이블, 구매테이블 TO sync_reader;
+2.3 방화벽 확인
+Agent가 접속해야 하는 네트워크 경로를 확인하세요:
+출발
+도착
+포트
+프로토콜
+Agent 서버
+hanjul.ai
+443
+HTTPS (아웃바운드)
+Agent 서버
+고객사 DB
+DB 포트 (인바운드)
+TCP
+
+3. Windows 설치
+3.1 설치 파일 다운로드
+관리자에게 전달받은 설치 파일을 준비합니다:
+SyncAgent-Setup-1.4.0.exe (약 18MB)
+3.2 설치 프로그램 실행
+SyncAgent-Setup-1.4.0.exe를 더블클릭하여 실행합니다. 설치 경로를 선택하고 (기본: C:\Program Files\SyncAgent), ‘설치’ 버튼을 클릭합니다.
+설치 옵션에서 'Windows 서비스로 등록' 체크박스를 선택하면 부팅 시 자동 시작됩니다.
+3.3 설치 마법사 (초기 설정)
+설치 완료 후 설치 마법사가 자동으로 실행됩니다. 또는 수동으로 실행할 수 있습니다:
+sync-agent.exe --setup
+브라우저에서 http://localhost:9876 이 자동으로 열리며, 5단계 위저드를 따라 설정합니다:
+Step 1: API 연결
+한줄로 서버 URL, API Key, API Secret을 입력하고 '연결 테스트' 버튼으로 확인합니다.
+Step 2: DB 설정
+고객사 DB 접속 정보를 입력합니다 (DB 타입, 호스트, 포트, DB명, 사용자, 비밀번호). '접속 테스트' 버튼으로 연결을 확인합니다.
+Step 3: 테이블 선택
+DB 접속 성공 시 테이블 목록이 자동으로 표시됩니다. 고객 테이블과 구매 테이블을 선택합니다. 이후 각 테이블별로 증분 동기화에 사용할 수정일시(timestamp) 컬럼을 지정합니다. 자동 감지된 컬럼이 표시되며, 필요 시 수동으로 변경할 수 있습니다.
+Step 4: 컬럼 매핑
+고객사 DB의 컬럼명을 한줄로 표준 필드(17개)에 매핑합니다. 자동 추천된 매핑을 확인하고, 필요 시 수정합니다. 표준 필드에 매핑되지 않은 컬럼은 커스텀 필드 슬롯(custom_1~custom_15)에 자동 배정되며, 라벨을 지정할 수 있습니다.
+⚠️ phone(전화번호) 필드 매핑은 필수입니다. 매핑되지 않으면 동기화가 불가합니다.
+Step 5: 동기화 설정
+동기화 주기와 Agent 이름을 설정합니다. 기본값: 고객 60분, 구매 30분.
+설정 완료 시 config.enc 파일이 AES-256-GCM으로 암호화 저장됩니다.
+3.4 Windows 서비스 등록
+관리자 권한의 PowerShell에서 실행합니다:
+sync-agent.exe --install-service
+서비스가 등록되면 PC 부팅 시 자동으로 Sync Agent가 시작됩니다. 실패 시 60초 후 자동 재시작 (최대 3회).
+서비스 관리 명령
+명령
+설명
+sync-agent --service-status
+서비스 상태 확인
+sc start SyncAgent
+서비스 시작
+sc stop SyncAgent
+서비스 중지
+sync-agent --uninstall-service
+서비스 제거 (관리자 권한)
+
+4. Linux 설치
+4.1 바이너리 배포
+관리자에게 전달받은 바이너리 파일을 서버에 업로드합니다:
+# 바이너리를 /opt/sync-agent/ 디렉토리에 배치
+sudo mkdir -p /opt/sync-agent
+sudo cp sync-agent /opt/sync-agent/
+sudo chmod 755 /opt/sync-agent/sync-agent
+필요 디렉토리를 생성합니다:
+sudo mkdir -p /opt/sync-agent/{data,logs,temp}
+4.2 설치 마법사 (초기 설정)
+Linux에서는 터미널 기반 CLI 설치 마법사가 자동으로 실행됩니다. 브라우저나 포트 개방이 필요 없습니다:
+cd /opt/sync-agent
+./sync-agent --setup
+터미널에서 대화형으로 5단계 설정을 진행합니다. 번호를 입력하여 선택하고, 텍스트를 직접 입력합니다:
+Step 1: API 연결
+한줄로 서버 URL, API Key, API Secret을 입력합니다.
+Step 2: DB 접속 설정
+DB 종류를 번호로 선택한 후 호스트, 포트, DB명, 사용자, 비밀번호를 입력합니다. 입력 완료 후 자동으로 접속 테스트가 수행됩니다. 실패 시 재입력할 수 있습니다.
+Step 3: 테이블 선택
+DB 접속 후 테이블 목록이 번호와 함께 표시됩니다. 고객 테이블과 구매 테이블을 각각 번호로 선택합니다. 이후 각 테이블별로 증분 동기화 기준이 되는 수정일시(timestamp) 컬럼을 지정합니다. 자동 감지된 컬럼이 제안되며, 확인하거나 다른 컬럼을 선택할 수 있습니다.
+Step 4: 컬럼 매핑
+자동 매핑 결과가 표 형태로 표시됩니다. 매핑이 올바르면 ‘n’을 입력하여 그대로 진행합니다. 수정이 필요하면 ‘y’를 입력하여 컬럼 번호를 선택하고, 매핑 대상 필드를 번호로 지정합니다. 수정을 마치면 ‘0’을 입력하여 완료합니다.
+⚠️ phone(전화번호) 필드 매핑은 필수입니다. 매핑되지 않으면 동기화가 불가합니다.
+Step 5: 동기화 설정
+동기화 주기와 Agent 이름을 설정합니다. 기본값: 고객 60분, 구매 30분. 설정 요약이 표시되며, 확인하면 config.enc가 AES-256-GCM으로 암호화 저장됩니다.
+✅ CLI 마법사는 브라우저나 포트 개방 없이 SSH 터미널에서 바로 실행할 수 있어 보안상 안전합니다.
+웹 UI 마법사 (선택사항)
+데스크톱 환경이 있는 경우 웹 UI 마법사를 강제로 실행할 수 있습니다:
+./sync-agent --setup-web
+SSH 터널링으로 원격 접속도 가능합니다: ssh -L 9876:localhost:9876 user@서버IP 실행 후 로컬 브라우저에서 http://localhost:9876 접속.
+4.3 systemd 서비스 등록
+root 권한으로 서비스를 등록합니다:
+sudo ./sync-agent --install-service
+이 명령은 다음 작업을 수행합니다:
+/etc/systemd/system/sync-agent.service unit 파일 생성
+systemctl daemon-reload 실행
+서비스 활성화 (부팅 시 자동 시작)
+서비스 즉시 시작
+서비스 설정: 실패 시 60초 후 자동 재시작, 10분 내 최대 3회 시도.
+서비스 관리 명령
+명령
+설명
+sync-agent --service-status
+서비스 상태 확인
+sudo systemctl status sync-agent
+상세 상태 확인
+sudo systemctl start sync-agent
+서비스 시작
+sudo systemctl stop sync-agent
+서비스 중지
+sudo systemctl restart sync-agent
+서비스 재시작
+journalctl -u sync-agent -f
+실시간 로그 확인
+journalctl -u sync-agent -n 100
+최근 로그 100줄 확인
+sudo sync-agent --uninstall-service
+서비스 제거
+
+5. 설정 파일 구조
+5.1 파일 위치
+파일
+Windows
+Linux
+암호화 설정
+data\config.enc
+data/config.enc
+암호화 키
+data\agent.key
+data/agent.key
+동기화 상태
+data\sync_state.json
+data/sync_state.json
+오프라인 큐
+data\queue.db
+data/queue.db
+로그
+logs\sync-YYYY-MM-DD.log
+logs/sync-YYYY-MM-DD.log
+5.2 설정 우선순위
+Agent는 다음 순서로 설정을 로드합니다:
+.env 파일 (개발/테스트 모드)
+data/config.enc + data/agent.key (프로덕션 — AES-256-GCM 암호화)
+data/config.json (레거시 — 감지 시 자동으로 enc로 마이그레이션 후 삭제)
+⚠️ config.enc와 agent.key 파일은 절대 외부에 유출되지 않도록 관리하세요. 이 파일에 DB 접속 정보와 API 키가 암호화되어 저장됩니다.
+5.3 환경 변수 (.env) — 개발/테스트용
+개발 환경에서는 .env 파일로 직접 설정할 수 있습니다:
+⚠️ .env 파일은 개발/테스트 전용입니다. 운영(프로덕션) 환경에서는 반드시 설치 마법사를 통해 생성된 config.enc(AES-256-GCM 암호화)를 사용하세요. .env 파일은 평문으로 저장되므로 DB 접속 정보와 API 키가 노출될 수 있습니다.
+SYNC_SERVER_URL=https://hanjul.ai
+SYNC_API_KEY=your-api-key
+SYNC_API_SECRET=your-api-secret
+DB_TYPE=mysql
+DB_HOST=localhost
+DB_PORT=3306
+DB_NAME=pos_db
+DB_USER=sync_reader
+DB_PASSWORD=secure_password
+
+6. 동기화 동작 확인
+6.1 최초 실행
+Agent가 처음 시작되면 다음 순서로 동작합니다:
+한줄로 서버에 Agent 등록 (최초 1회)
+커스텀 필드 라벨을 서버에 등록 (custom_fields 매핑이 있는 경우, 최초 1회). 이후 전체 동기화 실행 (고객 + 구매 데이터 전체 전송, 4,000건씩 배치)
+이후 설정된 주기에 따라 증분 동기화 자동 반복
+6.2 로그 확인
+Windows
+type logs\sync-%date:~0,4%-%date:~5,2%-%date:~8,2%.log
+Linux
+tail -f logs/sync-$(date +%Y-%m-%d).log
+또는 systemd 저널:
+journalctl -u sync-agent -f
+6.3 정상 동작 확인 포인트
+Heartbeat 로그: 5분마다 'Heartbeat 전송 성공' 메시지
+동기화 로그: 설정 주기마다 '동기화 완료' + 건수 표시
+한줄로 대시보드: 고객사 관리자 페이지에서 Agent 상태가 녹색(정상)으로 표시
+6.4 동기화 주기
+데이터
+기본 주기
+설정 범위
+비고
+고객 정보
+60분
+5분 ~ 24시간
+변경 빈도 낮음
+구매 내역
+30분
+5분 ~ 12시간
+실시간에 가까울수록 좋음
+Heartbeat
+5분
+고정
+Agent 생존 확인
+
+7. 자동 업데이트
+Sync Agent는 Heartbeat(5분 주기)마다 서버에서 최신 버전을 확인하고, 새 버전이 있으면 자동으로 업데이트합니다.
+7.1 업데이트 흐름
+Heartbeat 시 서버에서 최신 버전 확인
+새 버전 감지 시 바이너리 다운로드 (temp 폴더)
+SHA-256 체크섬 검증
+OS별 교체 스크립트 생성 → 현재 바이너리 백업 → 새 버전 적용 → Agent 재시작
+업데이트 실패 시 자동 롤백됩니다. 강제 업데이트 플래그가 설정된 경우 즉시 업데이트가 진행됩니다.
+8. CLI 명령 요약
+명령
+설명
+sync-agent
+Agent 실행 (동기화 시작)
+sync-agent --setup
+설치 마법사 실행 (Windows: 웹 UI, Linux: CLI 자동 감지)
+sync-agent --setup-web
+웹 UI 마법사 강제 실행 (브라우저)
+sync-agent --setup-cli
+CLI 마법사 강제 실행 (터미널)
+sync-agent --edit-config
+설정 편집 (대화형 CLI, 재설정 없이 부분 수정, 커스텀 필드 라벨 편집 포함)
+sync-agent --show-config
+현재 설정 조회 (민감정보 마스킹)
+sync-agent --install-service
+OS 서비스로 등록 (자동 시작)
+sync-agent --uninstall-service
+OS 서비스 제거
+sync-agent --service-status
+서비스 상태 확인
+Windows에서는 sync-agent.exe, Linux에서는 ./sync-agent 로 실행합니다.
+9. 오프라인 내성 (네트워크 단절 시 동작)
+Sync Agent는 네트워크 장애 시에도 데이터 손실 없이 동작합니다.
+오프라인 큐 (queue.db)
+한줄로 서버에 접속할 수 없을 때, 동기화 데이터는 로컬 큐(data/queue.db)에 자동 저장됩니다. 네트워크가 복구되면 5분 주기로 큐에 쌀인 데이터를 자동 재전송합니다. 전송 성공 시 큐에서 삭제됩니다.
+동기화 상태 (sync_state.json)
+data/sync_state.json은 마지막 동기화 시각, Agent ID, 총 동기화 건수 등을 기록합니다. 이 파일이 손상되거나 삭제되면 Agent는 다음 실행 시 전체 동기화(Full Sync)를 자동으로 수행합니다. 데이터 손실은 없으며, 최초 실행과 동일하게 전체 데이터를 다시 동기화합니다.
+장애 알림
+Heartbeat 3회 연속 실패, 동기화 5회 연속 실패, 또는 DB 접속 장애 시 설정된 이메일로 자동 알림이 발송됩니다.
+10. 트러블슈팅 (FAQ)
+Q1. DB 접속이 실패합니다.
+→ DB 서버가 실행 중인지 확인합니다. 호스트/포트/계정 정보가 정확한지 --edit-config로 확인합니다. 방화벽에서 Agent 서버 → DB 서버 간 해당 포트(예: MySQL 3306)가 허용되어 있는지 확인합니다. Oracle의 경우 TNS 설정이 필요할 수 있습니다.
+Q2. 한줄로 서버에 접속할 수 없습니다 (API 오류).
+→ 방화벽에서 HTTPS(443) 아웃바운드가 허용되어 있는지 확인합니다. API Key/Secret이 만료되지 않았는지 한줄로 관리자에게 확인합니다. --show-config로 현재 서버 URL이 정확한지 확인합니다.
+Q3. 한글이 깨져서 동기화됩니다.
+→ MySQL 이중 인코딩 문제일 수 있습니다. Agent는 최초 연결 시 자동으로 이중 인코딩을 감지하고 보정합니다(needsEncodingFix 자동 감지). 문제가 지속되면 logs 폴더의 로그 파일에서 “이중 인코딩 확정” 또는 “정상 인코딩” 메시지를 확인하세요.
+Q4. 동기화가 멈춰 있습니다 (Heartbeat만 전송).
+→ 증분 동기화 기준 컬럼(timestamp)이 잘못 설정되어 있을 수 있습니다. --edit-config로 고객/구매 테이블의 timestamp 컬럼이 실제 DB 컬럼명과 일치하는지 확인하세요. 변경된 데이터가 없으면 정상적으로 건수 0으로 표시됩니다.
+Q5. 설정을 변경하고 싶습니다 (DB 주소, 매핑 등).
+→ sync-agent --edit-config 명령으로 설정을 부분 수정할 수 있습니다. 서버/DB/동기화/매핑/커스텀 필드 라벨/Agent 섹션별로 수정 가능합니다. 수정 후 서비스 재시작이 필요합니다.
+Q6. 전체 재동기화를 하고 싶습니다.
+→ data/sync_state.json 파일을 삭제하고 Agent를 재시작하면 최초 실행과 동일하게 전체 동기화가 수행됩니다. 기존 데이터는 서버에서 UPSERT로 처리되므로 중복 문제는 없습니다.
+11. 제거 및 재설치
+11.1 Windows 완전 제거
+1) 제어판 → 프로그램 제거에서 “Sync Agent”를 선택하여 제거합니다. 서비스 중지 및 레지스트리 정리가 자동으로 수행됩니다. 2) 제거 시 설정 파일(data 폴더)과 로그(logs 폴더) 보존 여부를 묻습니다. 재설치 예정이면 “아니오”를 선택하여 설정을 유지하세요.
+11.2 Linux 완전 제거
+1) sudo ./sync-agent --uninstall-service (서비스 제거). 2) sudo rm -rf /opt/sync-agent (전체 삭제). 설정을 유지하려면 data 폴더를 백업한 후 삭제하세요.
+11.3 재설치
+기존 설정을 유지한 채 재설치하면 data 폴더(config.enc, agent.key, sync_state.json)가 그대로 유지되어 설치 마법사를 다시 실행할 필요 없습니다. 완전 초기화가 필요하면 data 폴더를 삭제한 후 --setup으로 재설정하세요.
+12. 버전 히스토리
+v1.4.0 (2026-03-07)
+한줄로 DB 동적 전환 반영. 표준 필드 17개 + 커스텀 필드(custom_fields JSONB) 15슬롯 체계 도입. 신규 필드 4개(store_phone, registration_type, registered_store, recent_purchase_store) 추가. 커스텀 필드 자동 배정 + 라벨 등록(field-definitions API). 이메일 정규화(trim+lowercase) 추가. needsEncodingFix 자동 감지 확인. TS 빌드 에러 수정(BUG-011).
+v1.3.0 (2026-02-25)
+--edit-config CLI 추가. 테이블별 timestamp 컬럼 분리. 한글 인코딩 깨짐 해결(cp1252 역매핑). 20만 고객 + 50만 구매 동기화 100% 성공.
+v1.2.0 (2026-02-14)
+CLI 설치 마법사(Linux 헤드리스 대응). OS 자동 감지. NSIS 설치파일 18MB + Linux zip 37MB.
+v1.1.0 (2026-02-11)
+Oracle/PostgreSQL/Excel/CSV 지원. 자동 업데이트. 듀얼 OS. AES-256-GCM 설정 암호화. 이메일 알림.
+v1.0.0 (2026-02-10)
+최초 릴리스. 코어 파이프라인, 설치 마법사 웹 UI, exe 빌드.

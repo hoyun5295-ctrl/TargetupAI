@@ -1,0 +1,21 @@
+node_modules/
+dist/
+data/
+logs/
+.env
+*.enc
+
+# 빌드 산출물 — GitHub 100MB 제한 회피 (2026-04-18)
+# .exe / linux 바이너리 / zip은 빌드 후 로컬에서 배포, git 커밋 금지
+release/
+installer/release/
+installer/*.exe
+installer/*.zip
+*.exe
+*.zip
+*.tar.gz
+
+# 설치 마법사 Word 문서(배포 산출물)
+SyncAgent_*.docx
+src.zip
+unpacked/

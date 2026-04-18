@@ -25,9 +25,17 @@ router.get('/settings', authenticate, async (req: Request, res: Response) => {
         send_start_hour, send_end_hour, daily_limit_per_customer,
         holiday_send_allowed, duplicate_prevention_days,
         target_strategy, cross_category_allowed, excluded_segments,
-        approval_required
+        approval_required, use_db_sync
       FROM companies WHERE id = $1
     `, [companyId]);
+
+    // v1.5.0: 싱크 사용 중 여부 (프론트 SyncActiveBlockModal 표시용)
+    // companies.use_db_sync=true AND active Agent 하나 이상 있으면 true
+    const syncActive = await query(
+      `SELECT 1 FROM sync_agents WHERE company_id = $1 AND status = 'active' LIMIT 1`,
+      [companyId]
+    );
+    const syncBlockActive = !!result.rows[0]?.use_db_sync && syncActive.rows.length > 0;
 
     const row = result.rows[0] || {};
     // ★ D102: getOpt080Number 컨트롤타워 사용 (인라인 조회 제거)
@@ -54,7 +62,10 @@ router.get('/settings', authenticate, async (req: Request, res: Response) => {
       [companyId]
     );
     row.kakao_profiles = kakaoProfilesResult.rows;
-    
+
+    // v1.5.0: 싱크 차단 모달 판정 플래그
+    row.sync_block_active = syncBlockActive;
+
     res.json(row);
   } catch (error) {
     console.error('설정 조회 에러:', error);
@@ -816,6 +827,31 @@ router.post('/', requireSuperAdmin, async (req: Request, res: Response) => {
         req.user?.userId
       ]
     );
+
+    const newCompanyId = result.rows[0].id;
+
+    // ===== SyncAgent v1.5.0: 시스템 가상 user + customer_code 시퀀스 자동 생성 =====
+    // 설계서 §9-3 — 트리거 대신 애플리케이션 로직 선택(추천 B안).
+    try {
+      await query(
+        `INSERT INTO users (id, company_id, login_id, user_type, name, is_active, is_system, password_hash, status)
+         VALUES (gen_random_uuid(), $1, 'system_sync_' || $1::text, 'system', '싱크에이전트 (시스템)', true, true, '', 'active')
+         ON CONFLICT DO NOTHING`,
+        [newCompanyId]
+      );
+    } catch (sysErr) {
+      console.error('[Company Create] 시스템 user 생성 실패:', sysErr);
+    }
+    try {
+      await query(
+        `INSERT INTO customer_code_sequences (company_id, last_number)
+         VALUES ($1, 0)
+         ON CONFLICT (company_id) DO NOTHING`,
+        [newCompanyId]
+      );
+    } catch (seqErr) {
+      console.error('[Company Create] customer_code_sequences 초기화 실패:', seqErr);
+    }
 
     return res.status(201).json({
       message: '고객사가 생성되었습니다.',
