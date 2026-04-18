@@ -20,6 +20,12 @@ import AiMessageSuggestModal from './AiMessageSuggestModal';
 import SpamFilterTestModal from './SpamFilterTestModal';
 // ★ D123 P11: 미등록 회신번호 확인 모달 (한줄로 발송과 동일 패턴)
 import CallbackConfirmModal, { CallbackConfirmData } from './CallbackConfirmModal';
+// ★ D130: 알림톡 공용 패널 (설계서 §6-3-D)
+import AlimtalkChannelPanel, {
+  type AlimtalkChannelState,
+  type AlimtalkSenderProfile,
+  type AlimtalkTemplate,
+} from './alimtalk/AlimtalkChannelPanel';
 
 interface AutoSendFormModalProps {
   campaign: any | null;  // null = 생성, 있으면 수정
@@ -92,6 +98,21 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
     campaign?.schedule_time ? (typeof campaign.schedule_time === 'string' ? campaign.schedule_time.slice(0, 5) : '10:00') : '10:00'
   );
   const [messageType, setMessageType] = useState<'SMS' | 'LMS' | 'MMS'>(campaign?.message_type || 'SMS');
+  // ★ D130: 발송 채널 (sms / alimtalk) — 알림톡 선택 시 SMS/LMS/MMS UI 숨김
+  const [channel, setChannel] = useState<'sms' | 'alimtalk'>(
+    campaign?.channel === 'alimtalk' ? 'alimtalk' : 'sms',
+  );
+  // ★ D130: 알림톡 state (설계서 §6-3-D)
+  const [alimtalkSenders, setAlimtalkSenders] = useState<AlimtalkSenderProfile[]>([]);
+  const [alimtalkTemplates, setAlimtalkTemplates] = useState<AlimtalkTemplate[]>([]);
+  const [alimtalkState, setAlimtalkState] = useState<AlimtalkChannelState>({
+    profileId: campaign?.alimtalk_profile_id || '',
+    templateCode: campaign?.alimtalk_template_code || '',
+    templateId: campaign?.alimtalk_template_id || '',
+    variableMap: campaign?.alimtalk_variable_map || {},
+    nextType: campaign?.alimtalk_next_type || 'L',
+    nextContents: campaign?.alimtalk_next_contents || '',
+  });
   const [messageContent, setMessageContent] = useState(campaign?.message_content || '');
   const [messageSubject, setMessageSubject] = useState(campaign?.message_subject || '');
   const [callbackNumber, setCallbackNumber] = useState(campaign?.callback_number || '');
@@ -227,6 +248,21 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
           const fieldsData = await fieldsRes.json();
           setAvailableFields(fieldsData.fields || []);
           if (fieldsData.categories) setCategoryLabels({ ...DEFAULT_CATEGORY_LABELS, ...fieldsData.categories });
+        }
+
+        // ★ D130: 알림톡 템플릿 + 발신프로필 로드
+        const [tplRes, sndRes] = await Promise.all([
+          fetch('/api/alimtalk/templates', { headers: { Authorization: `Bearer ${getToken()}` } }).catch(() => null),
+          fetch('/api/alimtalk/senders', { headers: { Authorization: `Bearer ${getToken()}` } }).catch(() => null),
+        ]);
+        if (tplRes?.ok) {
+          const data = await tplRes.json();
+          setAlimtalkTemplates(data.templates || []);
+        }
+        if (sndRes?.ok) {
+          const data = await sndRes.json();
+          const approved = (data.profiles || []).filter((p: any) => p.approval_status === 'APPROVED');
+          setAlimtalkSenders(approved);
         }
       } catch {}
       finally { setFieldsLoading(false); }
@@ -387,13 +423,20 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
     if (aiGenerateEnabled) {
       if (!aiPrompt.trim()) { setError('AI 마케팅 컨셉을 입력해주세요.'); setStep(5); return; }
       if (!fallbackMessageContent.trim()) { setError('AI 생성 실패 시 사용할 폴백 메시지를 입력해주세요.'); setStep(5); return; }
+    } else if (channel === 'alimtalk') {
+      // ★ D130: 알림톡 검증
+      if (!alimtalkState.profileId) { setError('발신프로필을 선택해주세요.'); setStep(5); return; }
+      if (!alimtalkState.templateCode) { setError('알림톡 템플릿을 선택해주세요.'); setStep(5); return; }
+      if (['A', 'B'].includes(alimtalkState.nextType) && !alimtalkState.nextContents.trim()) {
+        setError('부달 A/B 타입은 대체 문구가 필요합니다.'); setStep(5); return;
+      }
     } else {
       if (!messageContent.trim()) { setError('메시지 내용을 입력해주세요.'); setStep(5); return; }
     }
-    // ★ PPT#7: 수신자별 회신번호 사용 시 callbackNumber 미필수
+    // ★ PPT#7: 수신자별 회신번호 사용 시 callbackNumber 미필수 (알림톡도 폴백 SMS용 발신번호 필요)
     if (!useIndividualCallback && !callbackNumber) { setError('발신번호를 선택해주세요.'); setStep(5); return; }
-    if (messageType === 'MMS' && mmsUploadedImages.length === 0 && !aiGenerateEnabled) { setError('MMS 이미지를 첨부해주세요.'); setStep(5); return; }
-    if ((messageType === 'LMS' || messageType === 'MMS') && !messageSubject.trim() && !aiGenerateEnabled) { setError('LMS/MMS는 제목을 입력해주세요.'); setStep(5); return; }
+    if (channel === 'sms' && messageType === 'MMS' && mmsUploadedImages.length === 0 && !aiGenerateEnabled) { setError('MMS 이미지를 첨부해주세요.'); setStep(5); return; }
+    if (channel === 'sms' && (messageType === 'LMS' || messageType === 'MMS') && !messageSubject.trim() && !aiGenerateEnabled) { setError('LMS/MMS는 제목을 입력해주세요.'); setStep(5); return; }
 
     // ★ D123 P11: force=true일 때 미등록 회신번호 검증 스킵 (사용자가 "제외하고 생성" 선택한 경우)
     await submitWithForce(false);
@@ -429,6 +472,16 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
         notify_phones: notifyPhones.length > 0 ? notifyPhones : null,
         // ★ D123 P11: force=true이면 백엔드에서 미등록 회신번호 pre-flight 검증 스킵
         force,
+        // ★ D130: 알림톡 필드 (channel='alimtalk'일 때만)
+        channel,
+        ...(channel === 'alimtalk' ? {
+          alimtalk_profile_id: alimtalkState.profileId || null,
+          alimtalk_template_id: alimtalkState.templateId || null,
+          alimtalk_template_code: alimtalkState.templateCode || null,
+          alimtalk_variable_map: alimtalkState.variableMap || {},
+          alimtalk_next_type: alimtalkState.nextType || 'L',
+          alimtalk_next_contents: (alimtalkState.nextType === 'A' || alimtalkState.nextType === 'B') ? alimtalkState.nextContents : null,
+        } : {}),
       };
 
       const url = isEdit ? `/api/auto-campaigns/${campaign.id}` : '/api/auto-campaigns';
@@ -889,28 +942,51 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
                   <label htmlFor="isAd" className="text-sm text-gray-700">광고 메시지 (080 수신거부 포함)</label>
                 </div>
 
-                {/* SMS/LMS/MMS 탭 토글 */}
+                {/* SMS/LMS/MMS/알림톡 탭 토글 — D130 알림톡 추가 */}
                 <div className="flex bg-gray-50 rounded-lg p-0.5">
                   <button
-                    onClick={() => { setMessageType('SMS'); setMmsUploadedImages([]); }}
-                    className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-colors ${messageType === 'SMS' ? 'bg-white shadow text-emerald-600' : 'text-gray-500 hover:text-gray-700'}`}
+                    onClick={() => { setChannel('sms'); setMessageType('SMS'); setMmsUploadedImages([]); }}
+                    className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-colors ${channel === 'sms' && messageType === 'SMS' ? 'bg-white shadow text-emerald-600' : 'text-gray-500 hover:text-gray-700'}`}
                   >
                     SMS
                   </button>
                   <button
-                    onClick={() => { setMessageType('LMS'); setMmsUploadedImages([]); }}
-                    className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-colors ${messageType === 'LMS' ? 'bg-white shadow text-emerald-600' : 'text-gray-500 hover:text-gray-700'}`}
+                    onClick={() => { setChannel('sms'); setMessageType('LMS'); setMmsUploadedImages([]); }}
+                    className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-colors ${channel === 'sms' && messageType === 'LMS' ? 'bg-white shadow text-emerald-600' : 'text-gray-500 hover:text-gray-700'}`}
                   >
                     LMS
                   </button>
                   <button
-                    onClick={() => { setMessageType('MMS'); }}
-                    className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-colors ${messageType === 'MMS' ? 'bg-white shadow text-emerald-600' : 'text-gray-500 hover:text-gray-700'}`}
+                    onClick={() => { setChannel('sms'); setMessageType('MMS'); }}
+                    className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-colors ${channel === 'sms' && messageType === 'MMS' ? 'bg-white shadow text-emerald-600' : 'text-gray-500 hover:text-gray-700'}`}
                   >
                     MMS
                   </button>
+                  <button
+                    onClick={() => { setChannel('alimtalk'); setMmsUploadedImages([]); }}
+                    className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-colors ${channel === 'alimtalk' ? 'bg-white shadow text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+                  >
+                    🔔 알림톡
+                  </button>
                 </div>
 
+                {/* ★ D130: 알림톡 채널 선택 시 공용 Panel */}
+                {channel === 'alimtalk' && (
+                  <AlimtalkChannelPanel
+                    senders={alimtalkSenders}
+                    templates={alimtalkTemplates}
+                    customerFieldOptions={(availableFields || []).map((f) => ({
+                      key: f.field_key,
+                      label: f.display_name || f.field_label || f.field_key,
+                    }))}
+                    value={alimtalkState}
+                    onChange={setAlimtalkState}
+                  />
+                )}
+
+                {/* ★ D130: SMS/LMS/MMS 채널 전용 UI — 알림톡 선택 시 전체 숨김 */}
+                {channel === 'sms' && (
+                <>
                 {/* ★ AI 문안 자동생성 토글 (프로 이상만 표시) */}
                 {aiPremiumEnabled && (
                   <div
@@ -1189,6 +1265,30 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
                         <p className="text-xs text-emerald-600 mt-1.5">각 수신자의 회신번호 칼럼 값으로 발송됩니다</p>
                       )}
                     </div>
+                  </div>
+                )}
+                </>
+                )}
+                {/* ★ D130: 알림톡 선택 시 발신번호 입력란 (기존 SMS용 발신번호는 채널 내 포함되므로 여기서 받음) */}
+                {channel === 'alimtalk' && (
+                  <div className="px-3 py-2.5 border rounded-lg bg-white">
+                    <label className="block text-xs font-semibold text-gray-600 mb-1.5">발신번호 (수신자 거부 시 폴백 SMS/LMS용)</label>
+                    {callbackNumbers.length > 0 ? (
+                      <select
+                        value={callbackNumber}
+                        onChange={e => setCallbackNumber(e.target.value)}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      >
+                        <option value="">발신번호 선택</option>
+                        {callbackNumbers.map(cb => (
+                          <option key={cb.id} value={cb.phone}>
+                            {cb.phone}{cb.label ? ` (${cb.label})` : ''}{cb.is_default ? ' ⭐ 기본' : ''}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <p className="text-sm text-red-500 py-2">등록된 발신번호가 없습니다.</p>
+                    )}
                   </div>
                 )}
               </div>

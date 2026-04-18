@@ -280,17 +280,33 @@ export default function Dashboard() {
   const [kakaoTemplates, setKakaoTemplates] = useState<any[]>([]);
   const [kakaoSelectedTemplate, setKakaoSelectedTemplate] = useState<any>(null);
   const [kakaoTemplateVars, setKakaoTemplateVars] = useState<Record<string, string>>({});
-  const [alimtalkFallback, setAlimtalkFallback] = useState<'N' | 'S' | 'L'>('L'); // 알림톡 실패 시 폴백: N=없음, S=SMS, L=LMS
+  const [alimtalkFallback, setAlimtalkFallback] = useState<'N' | 'S' | 'L' | 'A' | 'B'>('L'); // 알림톡 실패 시 폴백: N=없음, S=SMS, L=LMS, A=SMS+대체문구, B=LMS+대체문구 (D130)
+  // ★ D130 알림톡 전용 추가 state (SMS/RCS/LMS/MMS와 무관)
+  const [alimtalkProfileId, setAlimtalkProfileId] = useState<string>('');
+  const [alimtalkNextContents, setAlimtalkNextContents] = useState<string>('');
+  const [alimtalkSenders, setAlimtalkSenders] = useState<any[]>([]);
   const kakaoEnabled = !!(user as any)?.company?.kakaoEnabled;
-  // 카카오 템플릿 로드
+  // 카카오 템플릿 + 발신프로필 로드 (D130)
   const loadKakaoTemplates = async () => {
     try {
       const token = localStorage.getItem('token');
-      // ★ D94: 승인된 알림톡 템플릿만 로드
-      const res = await fetch('/api/companies/kakao-templates?status=approved', { headers: { Authorization: `Bearer ${token}` } });
-      if (res.ok) {
-        const data = await res.json();
+      const headers = { Authorization: `Bearer ${token}` };
+      // ★ D130: D94 호환 — kakao-templates status=approved 로드 + 신규 /api/alimtalk/senders 로드
+      const [tplRes, sndRes] = await Promise.all([
+        fetch('/api/companies/kakao-templates?status=approved', { headers }),
+        fetch('/api/alimtalk/senders', { headers }).catch(() => null),
+      ]);
+      if (tplRes.ok) {
+        const data = await tplRes.json();
         setKakaoTemplates(data.templates || []);
+      }
+      if (sndRes?.ok) {
+        const data = await sndRes.json();
+        // 승인된 발신프로필만 노출
+        const approved = (data.profiles || []).filter(
+          (p: any) => p.approval_status === 'APPROVED',
+        );
+        setAlimtalkSenders(approved);
       }
     } catch {}
   };
@@ -415,11 +431,15 @@ export default function Dashboard() {
         // ★ D102: 중복제거/수신거부제거 사용자 선택 전달
         dedupEnabled: sendConfirm.dedupEnabled ?? true,
         unsubFilterEnabled: sendConfirm.unsubFilterEnabled ?? true,
-        // 알림톡 전용 파라미터
+        // 알림톡 전용 파라미터 (D130: 설계서 §6-3-D 반영 — profileId + nextContents + variableMap)
         ...(isAlimtalk && kakaoSelectedTemplate ? {
+          alimtalkProfileId: alimtalkProfileId || kakaoSelectedTemplate.profile_id || '',
           alimtalkTemplateCode: kakaoSelectedTemplate.template_code || '',
+          alimtalkTemplateId: kakaoSelectedTemplate.id || '',
+          alimtalkVariableMap: kakaoTemplateVars,
           alimtalkButtonJson: convertButtonsToQTmsg(kakaoSelectedTemplate.buttons) || null,
           alimtalkNextType: alimtalkFallback,
+          alimtalkNextContents: (alimtalkFallback === 'A' || alimtalkFallback === 'B') ? alimtalkNextContents : '',
         } : {}),
       };
       const res = await fetch('/api/campaigns/direct-send', {
@@ -521,6 +541,20 @@ export default function Dashboard() {
         callback: resolveRecipientCallback(r, useIndividualCallback, individualCallbackColumn),
       }));
 
+      const isTargetAlimtalk = targetSendChannel === 'kakao_alimtalk';
+      const targetConvertButtons = (buttons: any[]) => {
+        if (!buttons || buttons.length === 0) return null;
+        const obj: Record<string, string> = {};
+        buttons.forEach((btn: any, i: number) => {
+          const n = i + 1;
+          obj[`name${n}`] = btn.name || '';
+          const typeMap: Record<string, string> = { WL: '2', AL: '3', DS: '1', BK: '4', MD: '5', CA: '6' };
+          obj[`type${n}`] = typeMap[btn.linkType] || '2';
+          obj[`url${n}_1`] = btn.linkM || btn.linkP || '';
+          obj[`url${n}_2`] = btn.linkP || '';
+        });
+        return JSON.stringify(obj);
+      };
       const res = await fetch('/api/campaigns/direct-send', {
         method: 'POST',
         headers: {
@@ -528,24 +562,35 @@ export default function Dashboard() {
           'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify({
-          msgType: targetSendChannel === 'rcs' ? 'LMS' : targetMsgType,
-          sendChannel: targetSendChannel === 'sms' ? 'sms' : targetSendChannel === 'rcs' ? 'rcs' : 'kakao',
+          msgType: targetSendChannel === 'rcs' ? 'LMS' : isTargetAlimtalk ? 'LMS' : targetMsgType,
+          // ★ D130: 알림톡 매핑 버그 수정 — 'kakao' → 'alimtalk' (백엔드 directChannel === 'alimtalk' 체크와 정합)
+          sendChannel: targetSendChannel === 'sms' ? 'sms' : targetSendChannel === 'rcs' ? 'rcs' : 'alimtalk',
           subject: targetSubject,
-          message: targetSendChannel === 'rcs' ? kakaoMessage : targetMessage,
-          callback: useIndividualCallback ? null : selectedCallback,
-          useIndividualCallback: useIndividualCallback,
-          individualCallbackColumn: useIndividualCallback ? individualCallbackColumn : undefined,
+          message: isTargetAlimtalk ? (kakaoSelectedTemplate?.content || '') : targetSendChannel === 'rcs' ? kakaoMessage : targetMessage,
+          callback: isTargetAlimtalk ? (callbackNumbers[0]?.phone || '') : (useIndividualCallback ? null : selectedCallback),
+          useIndividualCallback: isTargetAlimtalk ? false : useIndividualCallback,
+          individualCallbackColumn: (!isTargetAlimtalk && useIndividualCallback) ? individualCallbackColumn : undefined,
           recipients: recipientsForSend,
-          adEnabled: adTextEnabled,
+          adEnabled: isTargetAlimtalk ? false : adTextEnabled,
           scheduled: reserveEnabled,
           scheduledAt: reserveEnabled && reserveDateTime ? new Date(reserveDateTime).toISOString() : null,
-          splitEnabled: splitEnabled,
-          splitCount: splitEnabled ? splitCount : null,
-          mmsImagePaths: mmsUploadedImages.map(img => ({ path: img.serverPath, originalName: img.originalName || '' })),
+          splitEnabled: isTargetAlimtalk ? false : splitEnabled,
+          splitCount: isTargetAlimtalk ? null : (splitEnabled ? splitCount : null),
+          mmsImagePaths: isTargetAlimtalk ? [] : mmsUploadedImages.map(img => ({ path: img.serverPath, originalName: img.originalName || '' })),
           ...(confirmCallbackExclusion ? { confirmCallbackExclusion: true } : {}),
           // ★ D102: 중복제거/수신거부제거 사용자 선택 전달
           dedupEnabled: sendConfirm.dedupEnabled ?? true,
           unsubFilterEnabled: sendConfirm.unsubFilterEnabled ?? true,
+          // ★ D130 알림톡 전용 파라미터 (설계서 §6-3-D)
+          ...(isTargetAlimtalk && kakaoSelectedTemplate ? {
+            alimtalkProfileId: alimtalkProfileId || kakaoSelectedTemplate.profile_id || '',
+            alimtalkTemplateCode: kakaoSelectedTemplate.template_code || '',
+            alimtalkTemplateId: kakaoSelectedTemplate.id || '',
+            alimtalkVariableMap: kakaoTemplateVars,
+            alimtalkButtonJson: targetConvertButtons(kakaoSelectedTemplate.buttons) || null,
+            alimtalkNextType: alimtalkFallback,
+            alimtalkNextContents: (alimtalkFallback === 'A' || alimtalkFallback === 'B') ? alimtalkNextContents : '',
+          } : {}),
         })
       });
       const data = await res.json();
@@ -2952,6 +2997,13 @@ const campaignData = {
         setKakaoSelectedTemplate={setKakaoSelectedTemplate}
         kakaoTemplateVars={kakaoTemplateVars}
         setKakaoTemplateVars={setKakaoTemplateVars}
+        alimtalkFallback={alimtalkFallback}
+        setAlimtalkFallback={setAlimtalkFallback}
+        alimtalkSenders={alimtalkSenders}
+        alimtalkProfileId={alimtalkProfileId}
+        setAlimtalkProfileId={setAlimtalkProfileId}
+        alimtalkNextContents={alimtalkNextContents}
+        setAlimtalkNextContents={setAlimtalkNextContents}
         selectedCallback={selectedCallback}
         setSelectedCallback={setSelectedCallback}
         useIndividualCallback={useIndividualCallback}
@@ -3168,6 +3220,9 @@ const campaignData = {
           kakaoTemplateVars={kakaoTemplateVars} setKakaoTemplateVars={setKakaoTemplateVars}
           alimtalkFallback={alimtalkFallback} setAlimtalkFallback={setAlimtalkFallback}
           kakaoMessage={kakaoMessage} setKakaoMessage={setKakaoMessage}
+          alimtalkSenders={alimtalkSenders}
+          alimtalkProfileId={alimtalkProfileId} setAlimtalkProfileId={setAlimtalkProfileId}
+          alimtalkNextContents={alimtalkNextContents} setAlimtalkNextContents={setAlimtalkNextContents}
           rcsTemplates={rcsTemplates}
           rcsSelectedTemplate={rcsSelectedTemplate} setRcsSelectedTemplate={setRcsSelectedTemplate}
           setShowDirectPreview={setShowDirectPreview}

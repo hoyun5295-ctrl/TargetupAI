@@ -1,0 +1,751 @@
+                                                                                                            QTmsg 사용설명서 4.0
+
+QTmsg
+
+- 문자 에어전트 사용설명서
+(2023.07.31)
+
+                                                                                                                              1
+                                                                                                            QTmsg 사용설명서 4.0
+
+1. 개요
+
+    본 문서는 문자 에이전트를 이용하여 문자를 전송하려는 사용자를 위한 설명서이다.
+    본 문자 에이전트는 SMS(단문), LMS(장문), MMS(첨부파일포함), KMS(알림톡),FMS(친
+   구톡),GMS(친구톡 파일첨부)을 지원하며 실행파일로 동작하는 Agent이다.
+
+2. QTmsg Agent 프로그램 설치환경
+
+     1) 사전설치
+           본 Agent는 실행파일로 동작하는 버전으로서 사전패키지 설치는 없으며 운영체제
+           에 맞는 실행파일을 공급받아야 한다.
+
+     2) DBMS지원
+           Oracle(9이상), MSSQL(2000이상), Mysql(maria,오로라포함,mysql5.8이상권장),
+           mongo(3.4이상)
+
+     3) 실행가능 운영체제(인텔,ARM7:라즈)
+           리눅스 CENT7.5이상(Redhat/Fedora포함), Ubuntu 18.04이상
+
+3. QTmsg Agent 설치 및 실행/종료 방법
+
+     -. 설치
+          운영실에서 배포된 zip파일을 운영대상 서버에 전송한 뒤에 압축을 풀면 된다.
+
+     -. Agent 프로그램 실행
+             Agent 패키지 파일을 풀면 해당 폴더(directory)에 아래 파일이 있는데 이를
+             실행하면 된다.
+            리눅스: ./start.sh
+            윈도우 : command창에서 1회만 실행하여 테스트할 때는 test.cmd를 클릭하여
+                         테스트 한다.
+                  윈도우 서비스로 설치 하려면 install_winservice.bat을 관리자 권한으로
+                  더블클릭한다.
+             *. 실행결과는 logs폴더(directory) 밑에 …txt파일 내용을 확인한다.
+
+     -. Agent 프로그램 종료
+            bin폴더(directory)에서 다음을 실행한다.
+            리눅스 : ./stop.sh
+            윈도우 : command창에서 실행했다면 command창을 닫는다.
+                     윈도우 서비스에서 설치를 해제하려면 uninstall_winservice.bat를
+                     더블클릭한다.
+
+                                                                                                                              2
+                                                                                                   QTmsg 사용설명서 4.0
+
+-. 리눅스 systemctl 기능관련 서비스 등록 방법
+    본 패키지 파일 배포시 함께 배포되는 doc밑에qtmsg.service파일내용에서 아래의
+    exec stop start 내용을 설치된 directory path로 변경하여 저장한 뒤에
+    /etc/systemd/system directory로 copy한뒤에 동작 명령을 수행한다.
+    (qtmsg 파일은 Agent실행파일임)
+    ---- exec path관련 ---
+    ExecStart=/home/qtmsg/4.0.x.x/qtmsg start
+    ExecStop=/home/qtmsg/4.0.x.x/qtmsg stop
+    ---- 동작명령 ----
+    위 copy명령 포함하여 명령은 전부 리눅스 root 사용자로 로그인하여 수행한다.
+    systemctl start qtmsg[엔터] : 실행
+    systemctl stop qtmsg[엔터] : 중지
+    systemctl enable qtmsg[엔터] : 리눅스 재기동시 자동실행
+    systemctl disable qtmsg[엔터] : 리눅스 재기동시 자동실행 중지
+
+                                                                                                                      3
+                                                                                                            QTmsg 사용설명서 4.0
+
+4. QTmsg 동작위한 기본설정
+
+  -. 개요
+       본 Agent는 중계서버에 접속하기 위한 Bind ID, Bind 비밀번호와 DBMS접속
+     정보가 사전에 세팅되어 있어야 동작한다. 세팅파일은 conf밑에 qtmsg.xml이다.
+         Bind ID와 Bind 비밀번호는 사전에 운영실에서 해당 ID를 발급한 뒤에 패키지파일
+         에 사전에 세팅하여 배포하므로 고객사에서 세팅하지 않아도 되며 DBMS만 세팅하여
+         운영하면 된다.
+         *. Agent 중복실행제한 : 중계서버에서는 bind id가 유일해야 하기 때문에
+             동일 Bind ID로 이중실행(다른서버포함)되는 경우 문제가 되므로 한 개만
+             실행하며 강제로 실행하는 경우 실행이 안된다.
+               필요에 따라서 2개 이상 Agent실행이 필요한 경우 운영실에 요청하여 추가
+               발급받고 운영실에 세팅 지원요청한다.
+               (2개실행:관리 포트를 별도로 세팅 : qtmsg.xml파일 admin_port tag숫자)
+         *. Agent 2개를 이용한 이중화 관련 설명
+             Agent를 상시 2개로 운영하여 나누어서 발송되도록 하며 1개가 다운되면 다른
+               1개가 자동으로 발송되도록 이중화 구현이 가능하며 이렇게 하려는 경우
+               rsv1 상태 값에 대하여 양쪽 Agent가 충돌하지 않도록 커스톰이 필요하다.
+               본 사항이 필요한 경우 운영실에 별도 요청하여 xml파일의 상태
+               값 커스톰된 2개의 Agent를 받도록 한다.
+
+    -. 발송요청 및 결과 테이블(DBMS)생성
+         발송요청 테이블(SMSQ_SEND)과 결과 테이블(SMSQ_SEND_YYYYMM)은
+         2개 모두 Agent처음 실행 시 DB에 없으면 자동으로 생성된다.
+         ( table 생성시 option이 필요한 경우 qtmsg.xml의 create sql을 수정한다 )
+         단, mongo DB의 경우 nosql이므로 따로 생성하지 않는다.
+
+  -. DBMS관련 세팅은 DBMS ip주소, DBMS유형, DB name(service name), DB user,
+     DB User password, port번호(DBMS socket listen port)를 conf밑에 qtmsg.xml
+     파일에 세팅한 뒤에 저장 하는 것이다.
+     *. 테이블명은 필요에 따라서 변경하여 사용할 수 있다.(2개 Agent실행시 각각 별도
+     테이블 운영가능하며 이중화인 경우 동일테이블이 된다.)
+     -------------- DBMS설정 관련 : 파일 : conf 하부에 qtmsg.xml---------
+     <DB>
+     <!-- DB서버의 IP주소 또는 HOST명 넣음 -->
+     <server>127.0.0.1</server>
+     <!-- DB종류 mssql, mssql2000,mysql, oracle,mongo 중 한개 지정 -->
+     <type>mysql</type>
+
+                                                                                                                              4
+                                                                                                            QTmsg 사용설명서 4.0
+
+     <!-- DB instance name -->
+     <dbname></dbname>
+     <!-- DB로그인ID -->
+     <user> </user>
+     <!-- DB Password : Agent 1회이상 실행하면 비밀번호를 암호화하여 encrypt_pass로
+바꾼다. 비밀번호 재세팅하려면 tag명을 다시 아래와 같이 변경해야 하다. -->
+     <pass></pass>
+     <!-- port -1로 넣으면 default값으로 함 -
+     <port>-1</port>
+     <!-- 대상 table name -->
+     <tablename>SMSQ_SEND</tablename>
+     <!-- LOG테이블명 : SMSQ_SEND_$(YYYYMM) 으로하면 매달 자동생성함.
+
+             YYYY로 하면 매년, 변수가 없으면 단일 테이블임 -->
+     <tablename_log>SMSQ_SEND_$(YYYYMM)</tablename_log>
+  -. 본 agent는 1초 이내 동일대상번호에 동일내용으로 발송하는 경우 자동거절하는 기능
+이 있으며 다음의 tag를 통하여 동작여부 및 세팅사항을 수정할 수 있다. 기본은 1초 이내
+200개를 저장하여 거절 통제하도록 되어 있다.(파일 : qtmsg.xml). 1초를 0으로 하면
+disable로서 기능 미동작 한다.
+       <dupl_send_max_second>1</dupl_send_max_second>
+       <!-- 동일착신번호 동일내용 중복위한 저장 문자개수 -->
+       <dupl_send_save_count>200</dupl_send_save_count>
+
+                                                                                                                              5
+                                                                                                            QTmsg 사용설명서 4.0
+
+5. QTmsg 문자 발송요청 방법
+
+   -. 개요
+      문자 발송요청은 SMSQ_SEND테이블에 문자 발송내용 데이터를 insert시키면 되며
+      Sql은 내용은 DBMS별로 아래 예시 참조한다.
+     전송결과는 일정시간(SMS,LMS:최장2일)이내 이통사로부터 수신된 결과가
+     SMSQ_SEND_YYYYMM (월별)테이블에 저장된다.
+
+  -. 문자 전송 상태 확인
+       전송상태는 Rsv1필드로 확인할 수 있으며 다음과 같은 상태를 가진다.
+         1: 발송대기, 2:Agent처리중, 3:서버로전송요청완료,4:결과수신완료,5:월별처리완료
+
+   -. 발송요청 DBMS테이블 명세(그림1)
+
+                                                                                                                              6
+                                                       QTmsg 사용설명서 4.0
+
+   -. 기존 타사 테이블을 사용하는 고객사에서 카카오톡(알리톡등) 발송기능을 추가하려는
+       경우 아래의 카카오톡관련 DB 필드들을 기존테이블에 추가(alter sql이용)하고
+       커스토마이징된 당사 Agent를 이용하면 된다.
+
+   -. 카카오톡(알림톡 및 친구톡)발송요청의 경우 아래의 필드에 값을 넣는다.
+               K_template_code : 카카오톡 가입하고 템플릿(내용) 등록한 뒤에 운영실로
+                           부터 수신한 템플릿코드를 넣는다.
+               K_next_contents:카카오톡 실패후 전환재발송시 사용할 대체문구
+               K_next_type : 카카오톡으로 보내서 실패한 경우 다음에 문자로 재전송할 지침.
+                              N:보내지 말고 에러처리, S:기존카톡문구로 SMS로 발송, L:기존카톡
+                              문구로 LMS로 발송, A:대체문구(k_net_contents)로 보내며 SMS로
+                               발송. B:대체문구로 보내며 LMS로 발송.
+               K_button_json : 카카오톡(알림톡)으로 보낼 때 버튼을 1개 이상 사용하는
+                           경우 사용한다. 내용은 기본적으로 json형식을 이용하며 json변수는
+                            1개의 버튼당 name1,type1,url1_1, url1_2 형태의 4개 변수가
+                            필요하며 변수명 뒤의 숫자 “1”은 최대 5까지 가능하다.
+                            즉, 버튼은 한 개의 메시지당 최대 5개까지 붙여서 보낼 수 있다.
+                예시) 버튼 2개 보내는 경우. Json 특성상 순서는 key:data만 맞으면 되며
+                         Json 변수들 순서는 상관없다.
+
+             {“name1”:”버튼1명”,”type1”:”2”,”url1_1”:”https://naver.com”,”url1_2”:””,
+“name2”:”버튼2명”,”type2”:”2”,”url2_1”:”https://naver.com”,”url2_2”:””}
+
+            *. K_button_json내 변수들 및 코드 값 설명(전부 소문자임)
+
+버튼필드명    설명                                  기타설명
+
+name숫자   버튼명
+type숫자
+url숫자_1                                            -----버튼타입(type) 코드 설명
+         버튼타입(오른쪽 코드참조)
+url숫자_2
+                                                   1: 배송조회 : URL없음(카톡제공)
+         버튼눌렀을때 URL1, 웹링크의
+
+                                                   2: 웹링크 : url1개 필수(모바일필수,PC옵션)
+         경우 모바일 URL, 앱링크의
+
+                                                   3: 앱링크 : url2개 필수(안드로이드,IOS)
+         경우 안드로이드 APP URL
+
+                                                   4: 봇키워드 : 미적용
+
+         버튼눌렀을때       URL2,  웹링크의            메시지전달  :  미적용
+                                         5:
+
+         경우  PC  URL,  앱링크의  경우              채널추가
+                                   6:
+
+         IOS APP URL
+
+K_etc_json : 친구톡등에서 사용하는 첨부파일 클릭시 URL등을 json형식으로
+
+넣도록 한다.
+
+img_url, img_link필드값을 넣어주면 친구톡 첨부파일이미지
+
+URL(image_url)과 그를 눌렀을 때 동작하는 url(image_link)을 넣어 준다.
+
+예){“img_url”,
+
+”http://mudage.kakao.com/dn/ujxXB/btqt6DU/Hoson9gmM8K1wsgK/
+
+                                                                                  7
+                                                                                                        QTmsg 사용설명서 4.0
+
+         img_l.jpg”:”img_link”:”http://naver.com”}
+   *. 친구톡 첨부파일 문자에서의 jpg이미지파일은 사전에 운영절차에 의거 사전에 업로
+   드 해 두어야 하며 MMS파일 첨부방식으로도 사용 가능하다. 바로 아래 참조.
+
+     *. 강조표기 타이틀
+         아래와 같이 json기준 title변수를 추가로 넣으면 되며 사전에 템플릿 등록 신청에
+
+   서 강조표기 등록(변수형)이 되어 있어야 한다.
+         {“title”:”강조형변수대체내용”}
+
+-. 친구톡(F)/친구톡파일첨부(G)에서의 문자별 senderkey(발송프로필키) 삽입관련
+   에이전트에서 알림톡발송의 경우 사전 등록된 템플릿코드를 이용하여 중계서버에서
+   senderkey를 넣어서 발송해 주는 기능을 지원(우선순위 최상위임)하지만 친구톡의 경
+   우에는 템플릿코드를 사전등록하지 않으므로 senderkey를 문자별로 다르게 보내려는
+   경우에는 k_etc_json필드에 json변수명 senderkey로 하여 해당 값을 추가하여 보내
+   면 문자별로 다른 senderkey로 발송한다.예) {“senderkey”:”43243213432”}
+
+-. 중계사 식별 코드 삽입방법
+   사용목적) 본 Agent를 이용하여 문자발송시 문자별로 발송하는 중계사가 다른경우 식
+   별코드를 삽입하여 발송할 때 사용함.
+   방법) k_etc_json 필드(DB)에 “sendercode”:”중계사식별코드”로서 변수를 추가하여
+   넣으면 됨.
+
+-. 카카오톡 발송 실패 결과 후 일반문자 전환재발송 관련
+   설명) 카카오톡 발송 후 실패 시 일반문자로 발송요청하려면 k_next_type field에
+   S,L,A,B(세부사항 테이블설명서 참조:그림1)의 값을 넣으면 된다.
+   방법2가지) 일반문자 전환 재발송은 Agent주관하여 진행하는 방법과 서버에서 진행 한
+   뒤 결과만 내려주는 방법이 있으며 default는 Agent주관 방법이다. 서버에서 재발송
+   진행한 뒤 결과만 내려주는 경우에는 결과코드는 일반문자 성공의 경우 SMS는
+   7830,LMS는 7831이며 Agent주관의 경우에는 카톡과 다른 DB record로서 6(SMS)
+   또는 1000(LMS/MMS)로 입력된다. 해당 record에 원래 카톡문자 순번값은 k_oriseq
+   에 저장된다.
+   결과 확인 및 재발송 절차설명) Agent주관 방법
+   1) 카카오톡 발송 실패는 3초 이내에 Agent에서 중계서버로부터 결과를 수신하여 DB
+        의 status_code필드에 결과 값을 세팅한다.
+   2) Agent는 결과 세팅 후 바로 일반 문자로 발송하라는 지침이 있는 경우 일반문자로
+        발송요청하고 해당 근거를 DB에(SMSQ_SEND)에 insert하여 준다. 이때 문자유형
+        은 발송지침(k_next_type)에 근거하여 msg_type에 해당 값을 자동 세팅한다.
+   3) 이후 Agent는 일정 시간 뒤 일반문자 발송 결과를 수신하면 DB의 status_code에
+        결과 코드 값을 세팅한다.
+
+                                                                                                                           8
+                                                                                                        QTmsg 사용설명서 4.0
+
+-. 친구톡 파일첨부 발송방법(G:msg_type)
+   SMSQ_SEND테이블의 File_name1필드에 파일 name(path포함)을 넣어서 insert하
+   면 된다. 친구톡 파일 첨부의 경우에는 아래의 사양기준이다(카카오톡사 제한)
+       권장 사이즈 : 720px*720px (일반)
+       제한 사이즈 - 가로 500px 미만 또는 가로:세로 비율이 2:1 미만 또는 3:4 초과시
+   업로드
+       파일형식 및 크기 : jpg, png / 최대 500KB
+   *. 주의 : 파일 첨부기능을 이용하려는 경우에는 사전에 운영자에게 문의하여 해당 기
+   능 중계에서 지원되는지 사전 확인한다.(사유:중계서버 사유에 따라서 기능은 막힐 수
+   있다)
+
+-. 카카오톡 sender key관련(발송프로필키)
+   카카오톡 sender key는 중계업체가 변경되는 경우 카카오회사로부터 새로 발급받게 되
+   며 해당 sender key는 다음의 3가지 방법으로 문자발송시 세팅하여 카톡문자 전송한
+   다.
+    1) 중계사 서버에 템플릿 코드 매핑관리를 통하여 템플릿코드별로 sender key를 등
+          록하여 알아서 발송함. 이 경우 agent side(고객사 DB등)에서는 신경쓰지 않아도
+          되며 템플릿 코드를 참조하는 알림톡(KMS)만 해당하고 친구톡은 아래 참조한다.
+    2) Agent가 바라보는 문자 DB테이블에 다양한 문자별로 여러 개의 sender key로서
+          문자를 발송하는 친구톡등의 경우에는 새로운 중계사로 변경하는 경우 신규 발급
+          된 sender key를 고객사 발송프로그램에서 DB에 발송 데이터 입력하여 발송요청
+          할 때 새것으로 해야 한다.
+    3) 고객사에서는 새로운 sender key로 발송프로그램을 변경하는 작업이 어려운 경우
+          에는 xml커스토마이징 처리를 통하여 새로운 sender key로 select(fetch) sql수
+          준에서 변경이 가능하므로 본 중계서버 운영실에 요청하면 세팅(커스톰)가능하다.
+          이 경우 sender가 새롭게 추가되거나 변경되거나 하는 경우에 매번 xml파일을
+          수정하고 agent를 재기동 해야 한다. 변경이 없는 경우에 추천한다.
+
+-. 문자 발송 요청 위한 Insert sql구문 예시
+  --- 즉시발송--- mysql , maria, 오로라 동일
+  insert into SMSQ_SEND(dest_no,call_back,msg_contents , sendreq_time )
+  values('0111111111','0111111111','SMS송신시험...',now() );
+
+  --- 즉시발송 --- oracle
+  insert into SMSQ_SEND( seqno, dest_no , call_back, msg_contents ,
+  sendreq_time)
+
+                                                                                                                           9
+                                                                                                      QTmsg 사용설명서 4.0
+
+values( SEQ_SMSQ_SEND.NextVal, '0111111111','0111111111','SMS송신시험...',
+sysdate );
+
+---- 즉시발송 --- MSSQL
+insert into SMSQ_SEND(
+
+    dest_no,
+    call_back,
+    msg_contents,
+    sendreq_time
+) values (
+    '0111111111',
+    '0111111111',
+    '즉시전송시험',
+    getdate()
+);
+
+--- 예약발송 : mssql , mysql 동일.
+--- 방법 : 향후 보낼 미래의 예약시간을 sendreq_time필드에 값으로서 넣음
+
+   예) 2020년 5월 15일 13시 00분 33초에 보낸다.
+insert into SMSQ_SEND( dest_no,call_back, msg_contents ,sendreq_time )
+values( '0111111111','0111111111','시험.','2020-05-15 13:00:33' );
+
+--- 예약발송 --- oracle
+insert into SMSQ_SEND( seqno, dest_min,call_back,msg_contents
+,sendreq_time )
+values( SEQ_SMSQ_SEND.NextVal, '010000000,'0100000000','한글관련 시
+험.',to_date('2020-05-15 13:00:33','YYYY-MM-DD HH24:MI:SS')
+);
+
+----- 카카오톡 전송예시(알림톡) SQL(mysql)
+---- mysql 예시
+insert into SMSQ_SEND (dest_no,call_back,
+
+   msg_contents,
+   msg_instm,sendreq_time, Msg_Type , title_Str,
+   k_template_code,
+   k_next_type ,
+
+                                                                                                                       10
+                                                                                                      QTmsg 사용설명서 4.0
+
+   k_button_json
+) values ( '0100000000', '01000000000',
+'[AA몰]\n안녕하세요.\n주문해 주셔서 감사합니다.\n- 주문자 : 홍길동5\n- 주문
+번호 : 주문번호5\n- 결제금액 : 324,342,220\n\n▶AA몰 공식홈페이지
+\nhttp://theamall.com\n\n▶문의사항은 웹사이트\n1:1 문의게시판 이용\n\n▶
+카카오톡 플러스친구\n< AA몰/@aamall >',
+
+  now(),now(),
+  'K', '제목입니다',
+  'template_code_0001',
+  'L' ,
+  '{"name1":"주문정보 확인하기","url1_1":"http://aamall.com/ orderlist","type1":"2"}'
+ );
+---- mssql 예시 ----
+insert into SMSQ_SEND (dest_no,call_back,
+
+      msg_contents,
+      msg_instm,sendreq_time,
+      Msg_Type , title_Str,
+      k_template_code,
+      k_next_type ,
+      k_button_json
+ ) values ( '0100000000', '01000000000',
+    '[AA몰]' +
+    char(10) + '안녕하세요.' +
+    char(10) + '주문해 주셔서 감사합니다.' +
+    char(10) + '- 주문자 : 홍길동5' +
+    char(10) + '- 주문번호 : 주문번호5' +
+    char(10) + '- 결제금액 : 324,342,220' +
+    char(10) + char(10) + '▶AAmall 공식홈페이지' +
+    char(10) + 'http://AAmall.com' +
+    char(10) + char(10) + '▶문의사항은 웹사이트' +
+    char(10) + '1:1 문의게시판 이용' +
+    char(10) + char(10) + '▶카카오톡 플러스친구' +
+    char(10) + '< AA몰/@AAmall >' ,
+    getdate(),getdate(),
+    'K', '제목입니다',
+    'template_code_0001',
+
+                                                                                                                       11
+                                                       QTmsg 사용설명서 4.0
+
+    'L' ,
+   '{"name1":"주문정보 확인하기","url1_1":"http://AAmall.com","type1":"2"}'
+);
+
+--- oracle 예시
+
+insert into SMSQ_SEND (dest_no,call_back,
+
+        seqno,
+
+        msg_contents,
+
+        msg_instm,sendreq_time, Msg_Type , title_Str,
+
+        k_template_code,
+
+        k_next_type ,
+
+        k_button_json
+
+   ) values (
+
+   SEQ_SMSQ_SEND.NextVal,
+
+   '0100000000', '01000000000',
+
+   '[AA몰]’
+
+    || chr(10) || '안녕하세요.' || chr(10) || '주문해 주셔서 감사합니다.'
+
+    || chr(10) || '- 주문자 : 홍길동5' || chr(10) || '- 주문번호 : 주문번호5'
+
+    || chr(10) || '- 결제금액 : 324,342,220' || chr(10) || chr(10) || '▶AA몰 공식홈
+
+페이지'
+
+    || chr(10) || 'http://aamall.com' || chr(10) || chr(10) || '▶문의사항은 웹사이트
+
+'
+
+    || chr(10) || '1:1 문의게시판 이용' || chr(10) || chr(10) || '▶카카오톡 플러스친
+
+구'
+
+    || chr(10) || '< AA몰/@aamall >',
+
+    sysdate, sysdate ,
+
+    'K', '제목입니다',
+
+    'template_code_0001',
+
+    'L' ,                               확인하기","url1_1":"http://aamall.com/
+    '{"name1":"주문정보
+
+orderlist","type1":"2"}'
+
+    );
+
+---- mongo DB sql예시
+
+발송요청)
+
+db.SMSQ_SEND.insertOne ( { msg_type:"L", dest_no: "01011110001", call_back:
+
+"01000001111",  msg_contents:"test문자",  sendreq_time:"2021-12-13  13:00:00",
+
+                                                                     12
+                                                                                                            QTmsg 사용설명서 4.0
+
+     msg_instm:"2021-06-13 13:00:00", rsv1:"1",status_code:"100"} )
+     발송결과확인)
+     > db.SMSQ_SEND_202201.find()
+{ "_id" : ObjectId("61e4c569344f4154b0933e29"), "call_back" : "01000001111", "deliver_req_info" :
+"3448:61e4c569344f4154b0933e29:B0002::20220117102636:L:01053254395:01027833478",
+
+"past_delivertm" : "20220117102636", "dest_no" : "01011110001", "sendreq_time" : "2021-06-13
+
+13:00:00", "msg_instm" : "2021-06-13 13:00:00", "repmsg_recvtm" : "2022-01-17 10:26:45",
+"msg_type" : "L", "msg_contents" : "test 문자", "rsv1" : "3", "mobsend_time" : "20220117102636",
+"status_code" : "3006", "mob_company" : "0" }
+
+6. MMS문자 첨부파일 추가정보
+
+        1) 문자의 MMS 첨부파일 크기는 300 kbyte를 권장한다.(이통사 권장사항임)
+                이통사 권장은 300 kbyte이나 실제로 스마트폰으로 전송하면 1mega byte도
+                잘 수신되나 피처폰 고려하여 300kbyte까지 보장한다.
+
+         2) 문자의 MMS 첨부파일 개수의 경우 Agent는 5개까지 가능하며 이통사 보장 최
+         소 건수는 3건이며 이통사에 따라서 5개까지 가능할 수 도 있다.
+        3) MMS첨부파일 확장자 및 유형
+
+           이통사에서는 jpg를 표준지원 형식으로 보장하며 png확장자 파일은 중계(또는 통
+            신사)에서 거절되는 경우가 있으므로 jpg로만 보낼 것을 권장한다.
+           단, GIF형식은 지원하지 않는다.(이통사 제약임)
+         4) 웹사이트보관 첨부파일 추가하여 문자발송 하는 기능
+           DB table의 첨부파일 field에 아래와 같은 형태로 넣으면 해당 웹사이트에서 해당
+           파일을 다운받아서 보내준다. 단, 웹의 특성상 문자 건당 웹통신(socket open)이
+           발생하므로 속도는 1건당 최소 0.1초이상 걸리므로 대량발송 시 속도가 많이 저하
+           될 수 있다.
+
+                예) http://www.naver.com/abcd/kkk.jpg
+        5) 문자유형을 ‘L’로 한 뒤에 파일을 첨부(file_name#에 파일명 추가)하여도 이는
+
+             무시된다.
+         6) 문자유형을 ‘M’으로 한 뒤에 파일을 첨부하지 않거나 file_name#필드의 파일명
+         을 이용하여 파일이 실제 있는지 점검한 뒤에 파일이 없는 경우에는 에러 처리한
+         다.(에러 코드 : 9007). 단, 문자유형을 ‘M’으로 하고 LMS와 MMS가 파일 첨부 여
+         부에 따라서 자동으로 동작하게 하는 방법이 있는데 아래 option을 yes로 하면 된
+         다.(파일: qtmsg.xml). 수정 후 Agent재기동 해야 반영됨.(아래동일)
+
+               <AutoSelect_Mms_Lms_Flag>no</AutoSelect_Mms_Lms_Flag>
+         7) 첨부파일의 크기는 최대 2메가 바이트로 제한하며 xml파일에서 수정할수 있으며
+         아래의 tag를 수정하면 된다. 4메가 이상은 통신상 중계서버에서 안된다.
+
+                                                                                                                            13
+                                              QTmsg 사용설명서 4.0
+
+               <mms_file_size_limit>2097152</mms_file_size_limit>
+
+7. 문자전송결과코드 설명
+
+  -. 아래 문자전송결과 코드는 SMSQ_SEND(결과:SMSQ_SEND_YYYYMM)
+      테이블의 status_code field의 결과코드이다.
+
+   -. 카카오톡 실패시 SMS/LMS전환재전송관련 결과코드(서버에서 발송하는 경우)
+     전화 재발송 결과가 SMS인 경우 성공은 7830이며 LMS성공은 7831이다.
+
+     ---- 일반 SMS ----  설명                                 코드값
+코드명                                                 (STATUS_CODE)
+                       센터 서버로 메시지 보내기 전 송신대기
+E_READY                                                     100
+E_SYSFAIL              시스템 장애                                1
+E_AUTO_FAIL                                                  2
+E_FORMAT_ERR           인증실패(엔진 내부적으로 사용)                     3
+E_NOT_BIND                                                   4
+                       SMS 메시지 형식 오류
+E_NO_SMSNUM                                                  5
+                       Bind       가   안된      상태에서
+E_SENT                                                       6
+E_EXPIRED              메시지송신요청(엔진내부사용)                       7
+E_POWEROFF                                                   8
+E_SHADE                콜백번호 및 메시지 수신번호의 형식이                  9
+E_MSG_FULL                                                   10
+E_ETC                  잘못됨                                   11
+E_PORTED_OUT                                                 13
+E_FWD                  휴대폰으로 메시지 전송성공                        14
+E_NPDB_SYNC                                                  15
+E_SPAM                 비가입자, 결번, 서비스정지                       16
+
+E_ABANDONED            Power-off                             40
+E_EXPIRED2                                                   41
+E_DELETED              음영지역                                  45
+E_UNKNOWN                                                    90
+                       단말기 메시지 Full
+
+                       기타실패
+
+                       다른데로 번호이동된 가입자(못찾는 경우)
+
+                       착신전환 회수 초과
+
+                       NPDB 오류(이통산 위치관련 정보 DB 오류)
+
+                       이통사 또는 센터쪽에서 스펨단어가
+
+                       SMS 메시지 내용 중에 있는 것으로 판단되어
+
+                       메시지가 걸러짐
+
+                       전송 실패 (무선망단) – 콜백 KTF
+
+                       전송 실패 (무선망 à 단말기) – 콜백 KTF
+
+                       메시지 삭제됨 – 콜백 KTF
+
+                       메시지 타입오류 – 콜백 KTF
+
+                                                                   14
+                                                      QTmsg 사용설명서 4.0
+
+E_TIMEOUT_DEL             (이통사)DELIVER_ACK 을 못 받은 경우     91
+E_TIMEOUT_MSG                                            92
+E_DAY_LIMIT_COUNT         (이통사)REPORT 를 못 받은 경우          50
+
+E_TOT_LIMIT_COUNT         1 일 제한 건수를 넘어서는 메시지            51
+
+E_SPAM_WORD               전송건수임(사업부에 연락하여 제한을 풀면         52
+E_SPAM_TELNO                                             53
+E_SPAM_WORD_TELNO         전송가능함)                         54
+E_BILL_LIMIT_OVER                                        55
+E_REJECT_SMS              총 메시지 전송건수 제약을 넘어서 메시지         500
+                                                         56
+E_DAY_LIMIT_COUNT_SMS     송신함(사업부에 연락하여 제한을 풀면           57
+E_TOT_LIMIT_COUNT_SMS                                    58
+E_DAY_LIMIT_COUNT_LMS     전송가능함)                         59
+E_TOT_LIMIT_COUNT_LMS                                    60
+E_DAY_LIMIT_COUNT_MMS     릴레이(센터)서버에서      판단할        때  61
+E_TOT_LIMIT_COUNT_MMS                                    62
+E_SAME_DESTNO_CONTENTS    메시지내용중에 SPAM 단어가 있음.           70
+E_INDEX_NO_DUP                                           71
+E_REJECT_TIME             릴레이(선터)서버에서 판단할 콜백번호 또는
+                                                          코드값
+                          메시지수신 번호가 스펨번호임.
+
+                          스펨오류 : 단어조합하여 점검
+
+                          선불인 경우: 잔액부족 오류
+
+                          SMS 메시지가 스펨으로 판단되어
+
+                          전송거절(릴레이서버 또는 SMS_C 에서 거절)
+
+                          SMS 에 대하여 당일 누적전송건 초과하여
+
+                          전송요청함(중계서버 세팅)
+
+                          SMS 에 대하여 누적 총전송건 초과하여
+
+                          전송요청함(중계서버 세팅)
+
+                          LMS 에 대하여 당일 누적전송건 초과하여
+
+                          전송요청함(중계서버 세팅)
+
+                          LMS 에 대하여 누적 총전송건 초과하여
+
+                          전송요청함(중계서버 세팅)
+
+                          MMS 에 대하여 당일 누적전송건 초과하여
+
+                          전송요청함(중계서버 세팅)
+
+                          MMS 에 대하여 누적 총전송건 초과하여
+
+                          전송요청함(중계서버 세팅)
+
+                          동일 대상/내용으로 1 초 이내 연속전송요청
+
+                          동일순번(seqno 필드)으로 전송요청함
+
+                          전송 금지시간대에
+
+                          전송요청(중계서버세팅사항임)
+
+--- LMS MMS 카카오톡 관련 ----               설명
+                    코드명
+
+                                                         15
+                    QTmsg 사용설명서 4.0
+
+E_OK                성공                            1000
+E_PARTOK            부분성공                          1100
+E_FORMAT_ERR        포멧 관련 알 수 없는 오류 발생            2000
+E_ADDR_ERR          주소(포멧) 에러                     2001
+E_CONTENTLENTH_ERR  Content-length 오류             2002
+                    MIME 형식 오류 ( 컨텐츠 개체, 사이즈, 타입
+E_MIME_ERR          등의 오류)                        2003
+E_MSGID_ERR         Message ID 오류 (중복, 부재)        2004
+E_HEAD_ERR          Head 내 각 필드의 부적절              2005
+E_BODY_ERR          Body 내 각 필드의 부적절              2006
+E_MEDIA_ERR         지원하지 않는 미디어 존재                2007
+E_NO_NUM            비가입자, 결번, 서비스정지               2008
+E_NOMMSPHONE        MMS 를 미 지원 단말                 3000
+E_MSGFULL           단말 수신용량 초과                    3001
+E_EXPIRED           전송 시간 초과                      3002
+E_NOREADPHONE       읽기 확인 미 지원 단말                 3003
+E_POWEROFF          전원꺼짐                          3004
+E_SHADE             음영지역                          3005
+E_ETC               기타                            3006
+E_SYS_FAIL          서버실패(프로세스또는 시스템 에러)           4000
+E_AUTH_FAIL         MMS 발송 거절(서버거절)               4001
+E_NET_FAIL          네트웍 에러 발생                     4002
+E_BUSY_FAIL         서비스의 일시적인 에러                  4003
+E_PORTED            번호이동에러                        5000
+E_OLD_REQTIME       유효시간 초과                       9001
+E_PHONE_NUM         폰넘버 에러                        9002
+E_SPAM_NUM          스펨 번호(스펨테이블 사용시)              9003
+E_LO_TIMEOUT        이통사에서 응답없음                    9004
+E_FILE_SIZE         파일크기 오류                       9005
+E_FILE_FORMAT       지원되지 않는 파일                    9006
+E_FILE_VALID        파일오류                          9007
+E_LIMIT_COUNT       제한시간내 전송량 초과                  5001
+E_DAY_LIMIT         일일최대전송량초과                     5002
+E_MONTH_LIMIT       월간최대전송량초과                     5003
+E_DUPLICATE_SEND    중복전송에러                        5004
+
+                                                     16
+                       QTmsg 사용설명서 4.0
+
+E_REM_ERR              잔액부족에러(선불경우)               5005
+--- 이하 카카오톡(KMS)
+E_K_OK                 전달성공                       1800
+E_K_FORMAT             카카오 형식오류                   7101
+E_K_SENDERKEY_ERR      senderkey 유효하기 않음          7103
+E_K_NOT_FOUND_PROFILE  발신프로필이 존재하지 않음             7105
+E_K_DEL_PROFILE        삭제된 발신프로필                  7106
+E_K_BLOCK_RECV         차단 발생 발신프로필                7107
+E_K_BLOCK_YELLOWID     차단상태 옐로아이디                 7108
+E_K_CLOSED_YELLOWID    닫힌 상태 옐로아이디                7109
+E_K_DEL_YELLOWID       삭제된 옐로아이디                  7100
+E_K_NOT_FRIEND         친구톡전송시 친구대상 아님             7203
+E_K_TEMPLATE_MISMATCH  템플릿 불일치                    7204
+E_K_ETC_ERROR          기타에러                       7300
+E_K_MAYNOT_SUCCESS     성공불확실(30 일 이내 수신가능)        7305
+E_K_KAO_SYSERR         카카오 시스템 오류                 7306
+E_K_TELNO_ERR          전화번호 오류                    7308
+EK_K_MSG_NOT_TOBE      메시지가 존재하지 않음               7311
+E_K_MSG_LEN_OVER       메시지 길이 초과                  7314
+E_K_TEMPLATE_NOTFOUND  템플릿 없음                     7315
+E_K_CANNOT_SEND_MSG    메시지 전송 불가                  7318
+E_K_NOT_SENDTIME       메시지 발송 불가 시간               7322
+E_K_NOT_FOUND_MSGGRP   메시지 그룹정보를 찾을수 없음           7323
+E_K_CANNOT_SEND_IMG    메시지 포함된 이미지를 전송할 수없음       7324
+E_K_SEND_TIMEOUT       타임아웃                       7421
+E_K_RESEND_SMS         카카오톡실패후 SMS 전송성공           7830
+E_K_RESEND_SMS         카카오톡실패후 LMS 전송성공           7831
+                       카톡에 대하여 당일 누적전송건 초과하여
+E_DAY_LIMIT_COUNT_KMS  전송요청함(중계서버 세팅)              63
+                       카톡에 대하여 누적 총전송건 초과하여
+E_TOT_LIMIT_COUNT_KMS  전송요청함(중계서버 세팅)              64
+                       카톡친구톡(파일미첨부)에 대하여 당일
+E_DAY_LIMIT_COUNT_FMS  누적전송건 초과하여 전송요청함(중계서버 세팅)   65
+                       카톡치구톡(파일미첨부)에 대하여 누적 총전송건
+E_TOT_LIMIT_COUNT_FMS  초과하여 전송요청함(중계서버 세팅)         66
+
+                                                  17
+                                            QTmsg 사용설명서 4.0
+
+E_DAY_LIMIT_COUNT_GMS  카톡친구톡(파일첨부)에 대하여 당일 누적전송건  67
+
+E_TOT_LIMIT_COUNT_GMS  초과하여 전송요청함(중계서버 세팅)
+
+--- SMS LMS공통 ----     카톡친구톡(파일첨부)에 대하여 누적 총전송건   68
+E_REG_NO
+E_NO_RULE              초과하여 전송요청함(중계서버 세팅)
+E_CM_CALLBACK_SPAM
+E_CM_NO_SPACE          발신번호 미등록(발번변작금지관련)         9008
+E_CM_LIMIT_TIME        발신번호세칙에러(KISA 기준)          9009
+E_CM_STEAL_NO          콜백번호 또는 수신번호 스펨처리          9010
+E_CM_RCV_REJECT_NO     착발신번호중 한 개가 공백임            9011
+                       금지시간대 거절                   9012
+2023.03.04추가           번호도용(기존문자피싱)-번호변작에 의한 차단   9013
+E_GCD_ERR_S            착신번호수신거절                   9014
+E_GCD_ERR_M
+                       중계사식별코드에러(SMS)              23
+                       중계사식별코드에러(LMS/MMS)         2323
+
+부록) 카카오톡 발송시 이미지 아이콘 명칭
+     설명: 카카오 템플릿 등록시 아래의 (명칭)으로 등록요청하거나 변수명에 아래의 (명칭)으로 입력
+
+                                                                                                                            18
+                                                                                                            QTmsg 사용설명서 4.0
+하여 카카오톡 문자 발송하면 해당 위치에 아래의 이모티콘이 자동으로 변경되어 들어감.
+
+                                                                                                                            19
+QTmsg 사용설명서 4.0
+                           20
+

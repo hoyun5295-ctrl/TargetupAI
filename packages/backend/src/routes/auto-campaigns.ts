@@ -366,6 +366,9 @@ router.post('/', async (req: Request, res: Response) => {
       use_individual_callback, // ★ D93: 수신자별 회신번호 칼럼 사용
       // ★ AI 프리미엄 필드 (기능 3)
       ai_generate_enabled, ai_prompt, ai_tone, fallback_message_content,
+      // ★ D130: 알림톡 필드 (설계서 §6-3-D)
+      channel, alimtalk_profile_id, alimtalk_template_id, alimtalk_template_code,
+      alimtalk_variable_map, alimtalk_next_type, alimtalk_next_contents,
     } = req.body;
 
     // 필수값 검증
@@ -506,6 +509,8 @@ router.post('/', async (req: Request, res: Response) => {
         use_individual_callback,
         ai_generate_enabled, ai_prompt, ai_tone, fallback_message_content,
         personal_fields,
+        channel, alimtalk_profile_id, alimtalk_template_id, alimtalk_template_code,
+        alimtalk_variable_map, alimtalk_next_type, alimtalk_next_contents,
         status, next_run_at
       ) VALUES (
         $1, $2, $3, $4,
@@ -515,7 +520,9 @@ router.post('/', async (req: Request, res: Response) => {
         $18,
         $19, $20, $21, $22,
         $23,
-        'active', $24
+        $24, $25, $26, $27,
+        $28::jsonb, $29, $30,
+        'active', $31
       ) RETURNING *`,
       [
         companyId, userId, campaign_name.trim(), description || null,
@@ -525,6 +532,13 @@ router.post('/', async (req: Request, res: Response) => {
         use_individual_callback ?? false,
         ai_generate_enabled ?? false, ai_prompt?.trim() || null, ai_tone || 'friendly', fallback_message_content?.trim() || null,
         Array.isArray(personal_fields) && personal_fields.length > 0 ? personal_fields : null,
+        channel === 'alimtalk' ? 'alimtalk' : 'sms',
+        alimtalk_profile_id || null,
+        alimtalk_template_id || null,
+        alimtalk_template_code || null,
+        JSON.stringify(alimtalk_variable_map || {}),
+        alimtalk_next_type || 'L',
+        alimtalk_next_contents || null,
         nextRunAt,
       ]
     );
@@ -572,6 +586,9 @@ router.put('/:id', async (req: Request, res: Response) => {
       ai_generate_enabled, ai_prompt, ai_tone, fallback_message_content,
       // ★ B+0407-4: 개인화 필드 (AI 문안 생성 시 변수 전달용)
       personal_fields,
+      // ★ D130: 알림톡 필드
+      channel, alimtalk_profile_id, alimtalk_template_id, alimtalk_template_code,
+      alimtalk_variable_map, alimtalk_next_type, alimtalk_next_contents,
     } = req.body;
 
     // 스케줄 변경 시 유효성 검증
@@ -652,6 +669,13 @@ router.put('/:id', async (req: Request, res: Response) => {
         generated_message_subject = CASE WHEN $23::boolean THEN NULL ELSE generated_message_subject END,
         generated_at = CASE WHEN $23::boolean THEN NULL ELSE generated_at END,
         personal_fields = COALESCE($24, personal_fields),
+        channel = COALESCE($25, channel),
+        alimtalk_profile_id = COALESCE($26, alimtalk_profile_id),
+        alimtalk_template_id = COALESCE($27, alimtalk_template_id),
+        alimtalk_template_code = COALESCE($28, alimtalk_template_code),
+        alimtalk_variable_map = COALESCE($29::jsonb, alimtalk_variable_map),
+        alimtalk_next_type = COALESCE($30, alimtalk_next_type),
+        alimtalk_next_contents = COALESCE($31, alimtalk_next_contents),
         updated_at = NOW()
       WHERE id = $1 AND company_id = $18
       RETURNING *`,
@@ -681,6 +705,14 @@ router.put('/:id', async (req: Request, res: Response) => {
         clearGenerated,
         // ★ B+0407-4: personal_fields (개인화 변수)
         Array.isArray(personal_fields) ? personal_fields : null,
+        // ★ D130: 알림톡 필드
+        channel || null,
+        alimtalk_profile_id || null,
+        alimtalk_template_id || null,
+        alimtalk_template_code || null,
+        alimtalk_variable_map !== undefined ? JSON.stringify(alimtalk_variable_map) : null,
+        alimtalk_next_type || null,
+        alimtalk_next_contents !== undefined ? alimtalk_next_contents : null,
       ]
     );
 

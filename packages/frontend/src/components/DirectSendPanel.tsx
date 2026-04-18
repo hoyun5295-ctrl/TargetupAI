@@ -21,6 +21,11 @@ import {
   detectPhoneHeaders,
 } from '../utils/formatDate';
 import { insertAtCursorPos } from '../utils/textInsert';
+import AlimtalkChannelPanel, {
+  type AlimtalkChannelState,
+  type AlimtalkSenderProfile,
+  type AlimtalkTemplate,
+} from './alimtalk/AlimtalkChannelPanel';
 
 // ============================================================
 // Props 인터페이스
@@ -76,16 +81,23 @@ export interface DirectSendPanelProps {
   setSpamFilterData: (d: any) => void;
   setShowSpamFilter: (b: boolean) => void;
 
-  // 카카오
+  // 카카오 (알림톡 전용 — SMS/RCS는 건드리지 않음)
   kakaoTemplates: any[];
   kakaoSelectedTemplate: any;
   setKakaoSelectedTemplate: (t: any) => void;
   kakaoTemplateVars: Record<string, string>;
   setKakaoTemplateVars: React.Dispatch<React.SetStateAction<Record<string, string>>>;
-  alimtalkFallback: 'N' | 'S' | 'L';
-  setAlimtalkFallback: (f: 'N' | 'S' | 'L') => void;
+  alimtalkFallback: 'N' | 'S' | 'L' | 'A' | 'B';           // ★ D130: A/B 타입 확장
+  setAlimtalkFallback: (f: 'N' | 'S' | 'L' | 'A' | 'B') => void;
   kakaoMessage: string;
   setKakaoMessage: (m: string) => void;
+  // ★ D130 신규 알림톡 필드 (설계서 §6-3-D)
+  alimtalkSenders?: AlimtalkSenderProfile[];               // 승인된 발신프로필 목록
+  alimtalkProfileId?: string;                              // 선택된 발신프로필 id
+  setAlimtalkProfileId?: (id: string) => void;
+  alimtalkNextContents?: string;                           // A/B 대체 문구
+  setAlimtalkNextContents?: (v: string) => void;
+  customerFieldOptions?: { key: string; label: string }[]; // 변수 매핑용 고객 필드
 
   // RCS
   rcsTemplates: any[];
@@ -150,6 +162,13 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
     kakaoTemplateVars, setKakaoTemplateVars,
     alimtalkFallback, setAlimtalkFallback,
     kakaoMessage, setKakaoMessage,
+    // ★ D130 신규
+    alimtalkSenders = [],
+    alimtalkProfileId = '',
+    setAlimtalkProfileId,
+    alimtalkNextContents = '',
+    setAlimtalkNextContents,
+    customerFieldOptions = [],
     rcsTemplates, rcsSelectedTemplate, setRcsSelectedTemplate,
     setShowDirectPreview, setShowSpecialChars, setShowTemplateBox,
     setShowTemplateSave, setTemplateSaveName, loadTemplates,
@@ -269,7 +288,7 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
   const handleAlimtalkSend = async () => {
     if (directRecipients.length === 0) { setToast({ show: true, type: 'error', message: '수신자를 추가해주세요' }); return; }
     if (!kakaoSelectedTemplate) { setToast({ show: true, type: 'error', message: '템플릿을 선택해주세요' }); return; }
-    if (kakaoSelectedTemplate.status !== 'approved') { setToast({ show: true, type: 'error', message: '승인된 템플릿만 발송 가능합니다' }); return; }
+    if (!['approved', 'APPROVED', 'APR', 'A'].includes(kakaoSelectedTemplate.status)) { setToast({ show: true, type: 'error', message: '승인된 템플릿만 발송 가능합니다' }); return; }
     let finalContent = kakaoSelectedTemplate.content;
     Object.entries(kakaoTemplateVars).forEach(([k, v]) => { finalContent = finalContent.replace(new RegExp(k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), v); });
     setKakaoMessage(finalContent);
@@ -694,111 +713,51 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
               </div>
             )}
 
-            {/* === 카카오 알림톡 채널 === */}
+            {/* === 카카오 알림톡 채널 (D130: AlimtalkChannelPanel 공용 컨트롤타워) === */}
             {directSendChannel === 'kakao_alimtalk' && (
-              <div className="border-2 border-blue-200 rounded-2xl overflow-hidden bg-white shadow-sm">
-                <div className="p-4">
-                  <div className="flex items-center gap-2 mb-3">
-                    <span className="text-lg">🔔</span>
-                    <span className="text-sm font-semibold text-blue-800">알림톡 (템플릿 기반)</span>
-                  </div>
-                  {kakaoTemplates.length === 0 ? (
-                    <div className="text-center py-12">
-                      <div className="text-4xl mb-3">📋</div>
-                      <p className="text-sm text-gray-500 font-medium">등록된 알림톡 템플릿이 없습니다</p>
-                      <p className="text-xs text-gray-400 mt-1">카카오&RCS → 알림톡 템플릿에서 등록해주세요</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-2 max-h-[300px] overflow-y-auto">
-                      {kakaoTemplates.map((t: any) => (
-                        <div key={t.id}
-                          onClick={() => {
-                            setKakaoSelectedTemplate(t);
-                            const vars: Record<string, string> = {};
-                            (t.content?.match(/#{[^}]+}/g) || []).forEach((v: string) => { vars[v] = ''; });
-                            setKakaoTemplateVars(vars);
-                          }}
-                          className={`p-3 border rounded-lg cursor-pointer transition-colors ${kakaoSelectedTemplate?.id === t.id ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-blue-300'}`}
-                        >
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm font-medium">{t.template_name}</span>
-                            <span className={`text-xs px-2 py-0.5 rounded-full ${t.status === 'approved' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
-                              {t.status === 'approved' ? '승인' : t.status}
-                            </span>
-                          </div>
-                          <p className="text-xs text-gray-500 mt-1 line-clamp-2">{t.content}</p>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  {kakaoSelectedTemplate && Object.keys(kakaoTemplateVars).length > 0 && (
-                    <div className="mt-3 pt-3 border-t">
-                      <p className="text-xs font-semibold text-gray-600 mb-2">변수 매핑</p>
-                      {Object.keys(kakaoTemplateVars).map(varKey => (
-                        <div key={varKey} className="flex items-center gap-2 mb-1.5">
-                          <span className="text-xs text-blue-600 font-mono w-24 shrink-0">{varKey}</span>
-                          <input type="text" value={kakaoTemplateVars[varKey]} onChange={(e) => setKakaoTemplateVars(prev => ({ ...prev, [varKey]: e.target.value }))} placeholder="값 입력" className="flex-1 border rounded px-2 py-1 text-xs" />
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  {/* 대체발송 설정 */}
-                  <div className="mt-3 pt-3 border-t">
-                    <p className="text-xs font-semibold text-gray-600 mb-2">대체발송 설정</p>
-                    <p className="text-xs text-gray-400 mb-2">알림톡 발송 실패 시 문자로 대체 발송합니다</p>
-                    <div className="flex gap-1.5">
-                      {([
-                        { value: 'L' as const, label: 'LMS 대체', desc: '실패 시 LMS로 발송' },
-                        { value: 'S' as const, label: 'SMS 대체', desc: '실패 시 SMS로 발송' },
-                        { value: 'N' as const, label: '대체 안함', desc: '실패 시 발송하지 않음' },
-                      ]).map(opt => (
-                        <button key={opt.value} onClick={() => setAlimtalkFallback(opt.value)}
-                          className={`flex-1 py-2 text-xs font-medium rounded-lg border transition-colors ${alimtalkFallback === opt.value ? 'bg-blue-50 border-blue-400 text-blue-700' : 'bg-white border-gray-200 text-gray-500 hover:border-blue-300'}`}
-                        >{opt.label}</button>
-                      ))}
-                    </div>
-                  </div>
-                  {/* 미리보기 */}
-                  {kakaoSelectedTemplate && (
-                    <div className="mt-3 pt-3 border-t">
-                      <p className="text-xs font-semibold text-gray-600 mb-2">미리보기</p>
-                      <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-3 text-xs">
-                        {kakaoSelectedTemplate.emphasize_type === 'TEXT' && kakaoSelectedTemplate.emphasize_title && (
-                          <div className="font-bold text-sm text-gray-900 mb-2 pb-2 border-b border-yellow-200">
-                            {(() => {
-                              let title = kakaoSelectedTemplate.emphasize_title;
-                              Object.entries(kakaoTemplateVars).forEach(([k, v]) => { title = title.replace(new RegExp(k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), v || k); });
-                              return title;
-                            })()}
-                          </div>
-                        )}
-                        <div className="whitespace-pre-wrap text-gray-700 leading-relaxed">
-                          {(() => {
-                            let content = kakaoSelectedTemplate.content;
-                            Object.entries(kakaoTemplateVars).forEach(([k, v]) => { content = content.replace(new RegExp(k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), v || k); });
-                            return content;
-                          })()}
-                        </div>
-                        {kakaoSelectedTemplate.buttons && kakaoSelectedTemplate.buttons.length > 0 && (
-                          <div className="mt-3 pt-2 border-t border-yellow-200 space-y-1.5">
-                            {kakaoSelectedTemplate.buttons.map((btn: any, i: number) => (
-                              <div key={i} className="text-center py-1.5 bg-yellow-100 rounded-lg text-xs font-medium text-yellow-800">
-                                {btn.name || btn.linkType}
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </div>
-                <div className="px-3 py-2 border-t">
+              <div className="space-y-2">
+                <AlimtalkChannelPanel
+                  senders={alimtalkSenders}
+                  templates={kakaoTemplates as AlimtalkTemplate[]}
+                  customerFieldOptions={customerFieldOptions}
+                  value={{
+                    profileId: alimtalkProfileId,
+                    templateCode: kakaoSelectedTemplate?.template_code || '',
+                    templateId: kakaoSelectedTemplate?.id || '',
+                    variableMap: kakaoTemplateVars,
+                    nextType: alimtalkFallback,
+                    nextContents: alimtalkNextContents,
+                  }}
+                  onChange={(v: AlimtalkChannelState) => {
+                    if (setAlimtalkProfileId) setAlimtalkProfileId(v.profileId);
+                    const nextTpl =
+                      kakaoTemplates.find((t: any) => t.id === v.templateId) || null;
+                    setKakaoSelectedTemplate(nextTpl);
+                    setKakaoTemplateVars(v.variableMap);
+                    setAlimtalkFallback(v.nextType);
+                    if (setAlimtalkNextContents) setAlimtalkNextContents(v.nextContents);
+                  }}
+                />
+                <div className="bg-white rounded-2xl border-2 border-blue-200 px-3 py-2">
                   <button
                     onClick={handleAlimtalkSend}
-                    disabled={!kakaoSelectedTemplate || kakaoSelectedTemplate?.status !== 'approved'}
-                    className={`w-full py-3 rounded-xl font-bold text-base transition-colors ${kakaoSelectedTemplate?.status === 'approved' ? 'bg-blue-500 hover:bg-blue-600 text-white' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}`}
+                    disabled={
+                      !kakaoSelectedTemplate ||
+                      !['approved', 'APPROVED', 'APR', 'A'].includes(
+                        kakaoSelectedTemplate?.status,
+                      )
+                    }
+                    className={`w-full py-3 rounded-xl font-bold text-base transition-colors ${
+                      ['approved', 'APPROVED', 'APR', 'A'].includes(
+                        kakaoSelectedTemplate?.status,
+                      )
+                        ? 'bg-blue-500 hover:bg-blue-600 text-white'
+                        : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                    }`}
                   >
-                    {!kakaoSelectedTemplate ? '템플릿을 선택해주세요' : '🔔 알림톡 발송하기'}
+                    {!kakaoSelectedTemplate
+                      ? '템플릿을 선택해주세요'
+                      : '🔔 알림톡 발송하기'}
                   </button>
                 </div>
               </div>

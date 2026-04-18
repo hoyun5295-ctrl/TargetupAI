@@ -5,6 +5,7 @@ import { useAuthStore } from '../stores/authStore';
 import { formatDateTime, formatDate, formatDateTimeShort, formatCampaignMessageForDisplay } from '../utils/formatDate';
 import SessionTimer from '../components/SessionTimer';
 import ServiceSwitcher from '../components/ServiceSwitcher'; // ★ D112
+import AlimtalkSendersSection from '../components/alimtalk/AlimtalkSendersSection'; // ★ D130
 import { COMPANY_NAME_EN, COMPANY_EMAIL } from '../constants/company';
 
 interface Company {
@@ -353,11 +354,8 @@ const [emailSending, setEmailSending] = useState(false);
   const [templateFilter, setTemplateFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
   const [templateSubTab, setTemplateSubTab] = useState<'alimtalk' | 'rcs'>('alimtalk');
   const [showManualTemplateForm, setShowManualTemplateForm] = useState(false);
-  const [adminProfiles, setAdminProfiles] = useState<any[]>([]);
-  const [showProfileForm, setShowProfileForm] = useState(false);
-  const [profileForm, setProfileForm] = useState({ companyId: '', profileName: '', profileKey: '' });
-  const [profileSaving, setProfileSaving] = useState(false);
   const [manualForm, setManualForm] = useState({ companyId: '', templateCode: '', templateName: '', category: '', messageType: 'BA', content: '' });
+  // ★ D130: 레거시 adminProfiles/showProfileForm/profileForm/profileSaving 제거 — AlimtalkSendersSection이 자체 관리
 
   // 커스텀 모달 상태
   const [modal, setModal] = useState<ModalState>({ type: null, title: '', message: '' });
@@ -399,7 +397,7 @@ useEffect(() => { if (activeTab === 'deposits') loadChargeManagement(1); }, [act
 useEffect(() => { if (activeTab === 'stats') loadSendStats(1); }, [activeTab]);
 useEffect(() => { if (activeTab === 'syncAgents') loadSyncAgents(); }, [activeTab]);
 useEffect(() => { if (activeTab === 'auditLogs') loadAuditLogs(1); }, [activeTab]);
-useEffect(() => { if (activeTab === 'templates') { loadAdminTemplates(); loadAdminRcsTemplates(); loadAdminProfiles(); } }, [activeTab, templateFilter]);
+useEffect(() => { if (activeTab === 'templates') { loadAdminTemplates(); loadAdminRcsTemplates(); } }, [activeTab, templateFilter]);
 useEffect(() => { if (activeTab === 'callbacks') { loadSenderRegPendingCount(); } }, [activeTab]);
 useEffect(() => { if (activeTab === 'callbacks' && callbackSubTab === 'registrations') { loadSenderRegistrations(senderRegFilter); } }, [activeTab, callbackSubTab, senderRegFilter]);
 useEffect(() => { if (activeTab === 'callbacks' && callbackSubTab === 'managers') { loadAllManagers(); } }, [activeTab, callbackSubTab, mgrFilter]);
@@ -419,14 +417,7 @@ const loadAdminTemplates = async () => {
   setTemplatesLoading(false);
 };
 
-const loadAdminProfiles = async () => {
-  try {
-    const tk = localStorage.getItem('token');
-    const res = await fetch('/api/admin/kakao-profiles', { headers: { Authorization: `Bearer ${tk}` } });
-    const data = await res.json();
-    if (data.success) setAdminProfiles(data.profiles || []);
-  } catch { /* ignore */ }
-};
+// ★ D130: 레거시 loadAdminProfiles 제거 — AlimtalkSendersSection이 /api/alimtalk/senders 사용
 
 const loadAdminRcsTemplates = async () => {
   try {
@@ -2159,14 +2150,6 @@ const handleApproveRequest = async (id: string) => {
           </div>
           <div className="flex items-center gap-4">
             <SessionTimer />
-            {/* ★ D130: 알림톡 발신프로필 관리 — IMC 연동 (Phase 0 수령 후 정상 동작) */}
-            <button
-              onClick={() => navigate('/admin/alimtalk-senders')}
-              className="text-xs px-3 py-1.5 bg-green-50 hover:bg-green-100 text-green-700 rounded-lg"
-              title="휴머스온 IMC 발신프로필 등록·080 설정"
-            >
-              알림톡 발신프로필
-            </button>
             <span className="text-sm text-gray-600">{user?.name}님</span>
             <button
               onClick={handleLogout}
@@ -3831,64 +3814,8 @@ const handleApproveRequest = async (id: string) => {
       {/* ═══ 템플릿 관리 탭 ═══ */}
       {activeTab === 'templates' && (
         <div className="space-y-4">
-        {/* 발신 프로필 관리 */}
-        <div className="bg-white rounded-lg shadow">
-          <div className="px-6 py-4 border-b flex justify-between items-center">
-            <div>
-              <h2 className="text-lg font-semibold">👤 발신 프로필 관리</h2>
-              <p className="text-xs text-gray-500 mt-1">고객사별 카카오톡 발신 프로필(Sender Key) 관리</p>
-            </div>
-            <button onClick={() => { setProfileForm({ companyId: '', profileName: '', profileKey: '' }); setShowProfileForm(true); }}
-              className="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-lg text-sm font-medium">
-              + 프로필 등록
-            </button>
-          </div>
-          <div className="px-6 py-4">
-            {adminProfiles.length === 0 ? (
-              <p className="text-sm text-gray-400 text-center py-4">등록된 발신 프로필이 없습니다</p>
-            ) : (
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50 border-b">
-                  <tr>
-                    <th className="px-3 py-2 text-left font-medium text-gray-600">고객사</th>
-                    <th className="px-3 py-2 text-left font-medium text-gray-600">프로필명</th>
-                    <th className="px-3 py-2 text-left font-medium text-gray-600">Sender Key</th>
-                    <th className="px-3 py-2 text-left font-medium text-gray-600">등록일</th>
-                    <th className="px-3 py-2 text-center font-medium text-gray-600">관리</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {adminProfiles.map((p: any) => (
-                    <tr key={p.id} className="hover:bg-gray-50">
-                      <td className="px-3 py-2">{p.company_name || '-'}</td>
-                      <td className="px-3 py-2 font-medium">{p.profile_name}</td>
-                      <td className="px-3 py-2 font-mono text-xs text-gray-500">{p.profile_key?.slice(0, 12)}...</td>
-                      <td className="px-3 py-2 text-gray-500">{p.created_at ? new Date(p.created_at).toLocaleDateString('ko-KR') : '-'}</td>
-                      <td className="px-3 py-2 text-center">
-                        <button onClick={() => {
-                          setModal({
-                            type: 'confirm', title: '프로필 삭제', message: `"${p.profile_name}" 프로필을 삭제하시겠습니까?`, variant: 'warning',
-                            onConfirm: async () => {
-                              try {
-                                const token = localStorage.getItem('token');
-                                const res = await fetch(`/api/admin/kakao-profiles/${p.id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
-                                const data = await res.json();
-                                if (data.success) {
-                                  setAdminProfiles((prev: any[]) => prev.filter((x: any) => x.id !== p.id));
-                                  setModal({ type: 'alert', title: '삭제 완료', message: '프로필이 삭제되었습니다', variant: 'success' });
-                                } else { setModal({ type: 'alert', title: '삭제 실패', message: data.error || '삭제 실패', variant: 'error' }); }
-                              } catch { setModal({ type: 'alert', title: '오류', message: '서버 오류', variant: 'error' }); }
-                            }
-                          });
-                        }} className="text-red-500 hover:text-red-700 text-xs">삭제</button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-        </div>
+        {/* 발신 프로필 관리 — D130 AlimtalkSendersSection (IMC 연동 + 승인 워크플로우) */}
+        <AlimtalkSendersSection />
 
         {/* 템플릿 관리 */}
         <div className="bg-white rounded-lg shadow">
@@ -4033,80 +3960,7 @@ const handleApproveRequest = async (id: string) => {
         </div>
       )}
 
-      {/* 발신 프로필 등록 모달 */}
-      {showProfileForm && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden"
-               style={{ animation: 'zoomIn 0.2s ease-out' }}>
-            <div className="px-6 py-4 border-b bg-gradient-to-r from-amber-50 to-white flex justify-between items-center">
-              <div>
-                <h3 className="text-lg font-bold text-gray-900">발신 프로필 등록</h3>
-                <p className="text-xs text-gray-500 mt-0.5">카카오톡 채널의 Sender Key를 등록합니다</p>
-              </div>
-              <button onClick={() => setShowProfileForm(false)} className="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
-            </div>
-            <div className="px-6 py-4 space-y-4">
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">고객사 <span className="text-red-500">*</span></label>
-                <select value={profileForm.companyId} onChange={e => setProfileForm({ ...profileForm, companyId: e.target.value })}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-200">
-                  <option value="">고객사 선택</option>
-                  {companies.map((c: any) => <option key={c.id} value={c.id}>{c.companyName || c.company_name}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">프로필 이름 <span className="text-red-500">*</span></label>
-                <input value={profileForm.profileName} onChange={e => setProfileForm({ ...profileForm, profileName: e.target.value })}
-                  placeholder="예: 브랜드명, 매장명"
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-200" />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Sender Key <span className="text-red-500">*</span></label>
-                <input value={profileForm.profileKey} onChange={e => setProfileForm({ ...profileForm, profileKey: e.target.value })}
-                  placeholder="카카오톡 채널에서 발급받은 키"
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-amber-200" />
-                <p className="text-xs text-gray-400 mt-1">카카오 비즈니스 채널 관리자에서 확인할 수 있습니다</p>
-              </div>
-            </div>
-            <div className="px-6 py-3 border-t bg-gray-50 flex justify-end gap-3">
-              <button onClick={() => setShowProfileForm(false)}
-                className="px-5 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-sm transition">취소</button>
-              <button
-                onClick={async () => {
-                  if (!profileForm.companyId || !profileForm.profileName || !profileForm.profileKey) {
-                    setModal({ type: 'alert', title: '입력 오류', message: '모든 필수 항목을 입력해주세요', variant: 'error' });
-                    return;
-                  }
-                  setProfileSaving(true);
-                  try {
-                    const token = localStorage.getItem('token');
-                    const res = await fetch('/api/admin/kakao-profiles', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                      body: JSON.stringify(profileForm),
-                    });
-                    const data = await res.json();
-                    if (data.success) {
-                      setShowProfileForm(false);
-                      loadAdminProfiles();
-                      setModal({ type: 'alert', title: '등록 완료', message: '발신 프로필이 등록되었습니다', variant: 'success' });
-                    } else {
-                      setModal({ type: 'alert', title: '등록 실패', message: data.error || '등록 실패', variant: 'error' });
-                    }
-                  } catch {
-                    setModal({ type: 'alert', title: '오류', message: '서버 오류', variant: 'error' });
-                  } finally {
-                    setProfileSaving(false);
-                  }
-                }}
-                disabled={profileSaving}
-                className="px-5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-medium transition disabled:opacity-50">
-                {profileSaving ? '등록 중...' : '등록'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* ★ D130: 레거시 발신 프로필 등록 모달(Sender Key 수동 입력) 제거됨 — AlimtalkSendersSection의 SenderRegistrationWizard로 대체 */}
 
       {/* 수동 등록 모달 */}
       {showManualTemplateForm && (

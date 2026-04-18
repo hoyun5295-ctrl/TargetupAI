@@ -1268,10 +1268,14 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       kakaoCarouselJson,    // 캐러셀 JSON
       kakaoResendType,      // SM/LM/NO
       targetFilter,         // 금액필터 등 타겟 조건
-      // 알림톡 필드
-      alimtalkTemplateCode, // 알림톡 템플릿 코드
-      alimtalkButtonJson,   // 알림톡 버튼 JSON (k_button_json 형식)
-      alimtalkNextType,     // 실패 시 폴백 (N/S/L)
+      // 알림톡 필드 (D130: 설계서 §6-3-D 반영)
+      alimtalkTemplateCode,  // 알림톡 템플릿 코드
+      alimtalkTemplateId,    // (선택) PG kakao_templates.id — 승인 상태 이중 가드용
+      alimtalkProfileId,     // (선택) 발신프로필 id — 승인/소속 검증용
+      alimtalkVariableMap,   // { "#{name}": "@@name@@" | "직접값" } — 프론트 수동 매핑
+      alimtalkButtonJson,    // 알림톡 버튼 JSON (k_button_json 형식)
+      alimtalkNextType,      // 실패 시 폴백 (N/S/L/A/B)
+      alimtalkNextContents,  // A/B 타입일 때 대체 문구 (k_next_contents)
       // ★ D102: 중복제거/수신거부제거 사용자 선택 (기본 true)
       dedupEnabled = true,
       unsubFilterEnabled = true,
@@ -1651,28 +1655,83 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       }
     }
 
-    // ★ 알림톡 발송 (CT-04 insertAlimtalkQueue 사용)
+    // ★ 알림톡 발송 (CT-04 insertAlimtalkQueue 사용 / D130: 설계서 §6-3-D 반영)
     let directAlimtalkSentCount = 0;
     if (directChannel === 'alimtalk') {
       if (!alimtalkTemplateCode) {
         return res.status(400).json({ success: false, error: '알림톡 템플릿 코드가 필요합니다' });
       }
 
-      const alimtalkRows = filteredRecipients.map((recipient: any, i: number) => {
-        // ★ D102: 항상 백엔드 replaceVariables 컨트롤타워 사용
+      // ★ D130: 승인 이중 가드 — 발신프로필 APPROVED + 템플릿 APPROVED 확인
+      const gateCheck = await query(
+        `SELECT t.id AS tid,
+                t.status AS tstatus,
+                p.id AS pid,
+                p.approval_status,
+                p.profile_key
+           FROM kakao_templates t
+           JOIN kakao_sender_profiles p ON p.id = t.profile_id
+          WHERE t.company_id = $1
+            AND t.template_code = $2
+          LIMIT 1`,
+        [companyId, alimtalkTemplateCode]
+      );
+      if (gateCheck.rows.length === 0) {
+        return res.status(404).json({ success: false, error: '템플릿을 찾을 수 없습니다' });
+      }
+      const gate = gateCheck.rows[0];
+      if (!['APPROVED', 'APR', 'A'].includes(String(gate.tstatus).toUpperCase())) {
+        return res.status(400).json({ success: false, error: '승인 완료된 템플릿만 발송할 수 있습니다' });
+      }
+      if (gate.approval_status !== 'APPROVED') {
+        return res.status(400).json({ success: false, error: '승인 완료된 발신프로필만 사용할 수 있습니다' });
+      }
+
+      // ★ D130: k_etc_json 빌드 — senderkey(발신프로필 키) + 강조 타이틀 등
+      const etcObj: Record<string, string> = {};
+      if (gate.profile_key) etcObj.senderkey = gate.profile_key;
+      const etcJson = Object.keys(etcObj).length > 0 ? JSON.stringify(etcObj) : null;
+
+      // ★ D130: 프론트에서 온 variableMap을 백엔드 변수 치환용 extra 인자로 변환
+      //   "@@fieldKey@@" 형태는 recipient/dbCustomer에서 자동 치환, 그 외는 직접값
+      const toExtraFromVarMap = (recipient: any, dbCustomer: any): Record<string, string> => {
+        const out: Record<string, string> = {};
+        if (!alimtalkVariableMap || typeof alimtalkVariableMap !== 'object') return out;
+        for (const [rawKey, rawVal] of Object.entries(alimtalkVariableMap)) {
+          const cleanKey = String(rawKey).replace(/^#\{|\}$/g, '').trim();
+          const v = String(rawVal || '');
+          if (v.startsWith('@@') && v.endsWith('@@')) {
+            const fieldKey = v.slice(2, -2);
+            const source = dbCustomer?.[fieldKey] ?? recipient?.[fieldKey] ?? '';
+            out[cleanKey] = String(source ?? '');
+          } else {
+            out[cleanKey] = v;
+          }
+        }
+        return out;
+      };
+
+      const alimtalkRows = filteredRecipients.map((recipient: any) => {
         const dbAlimCustomer = directCustomerMap.get(normalizePhone(recipient.phone)) || null;
-        // ★ D123: 직접발송 알림톡도 고객 원본 데이터 그대로
-        const finalMessage = replaceVariables(message, dbAlimCustomer, directFieldMappings, {
+        const extraVars = toExtraFromVarMap(recipient, dbAlimCustomer);
+        // 템플릿 content를 #{변수} 치환 — QTmsg 알림톡은 본문이 필수
+        let finalMessage = replaceVariables(message, dbAlimCustomer, directFieldMappings, {
           name: recipient.name, extra1: recipient.extra1, extra2: recipient.extra2,
           extra3: recipient.extra3, callback: recipient.callback,
         }, { skipNumberFormatting: true });
+        // #{key} 추가 치환
+        for (const [k, v] of Object.entries(extraVars)) {
+          finalMessage = finalMessage.replace(new RegExp(`#\\{${k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\}`, 'g'), v);
+        }
         return {
           phone: normalizePhone(recipient.phone),
           callback: normalizePhone(callback),
           message: finalMessage,
           templateCode: alimtalkTemplateCode,
           nextType: alimtalkNextType || 'L',
+          nextContents: (alimtalkNextType === 'A' || alimtalkNextType === 'B') ? (alimtalkNextContents || '') : undefined,
           buttonJson: alimtalkButtonJson || null,
+          etcJson: etcJson || undefined,
           companyId,
         };
       });

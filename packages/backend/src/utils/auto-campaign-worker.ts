@@ -782,28 +782,97 @@ async function executeAutoCampaign(ac: any): Promise<void> {
       }
     }
 
-    // ★ D102: (광고)+080 — CT-AD 컨트롤타워 사용 (기존 누락 수정)
-    const autoOpt080 = (ac.is_ad) ? await getOpt080Number(ac.user_id, ac.company_id) : '';
+    // ★ D130: 알림톡 분기 — channel='alimtalk'이면 insertAlimtalkQueue 사용 (SMS/LMS/MMS 경로 분리)
+    let sentCount = 0;
+    if (ac.channel === 'alimtalk') {
+      // 승인 이중 가드
+      if (!ac.alimtalk_template_code || !ac.alimtalk_profile_id) {
+        console.warn(`${logPrefix} 알림톡 템플릿/발신프로필 미설정 — 발송 스킵`);
+        await query(
+          `UPDATE auto_campaign_runs SET status = 'failed', completed_at = NOW(), cancel_reason = $2 WHERE id = $1`,
+          [runId, '알림톡 템플릿 또는 발신프로필 미설정']
+        );
+        await advanceNextRun(ac);
+        return;
+      }
+      const gate = await query(
+        `SELECT t.status AS tstatus, p.approval_status, p.profile_key
+           FROM kakao_templates t
+           JOIN kakao_sender_profiles p ON p.id = t.profile_id
+          WHERE t.id = $1 AND t.company_id = $2 LIMIT 1`,
+        [ac.alimtalk_template_id, ac.company_id]
+      );
+      if (gate.rows.length === 0 || !['APPROVED', 'APR', 'A'].includes(String(gate.rows[0].tstatus).toUpperCase()) || gate.rows[0].approval_status !== 'APPROVED') {
+        console.warn(`${logPrefix} 알림톡 가드 실패 (템플릿/프로필 미승인)`);
+        await query(
+          `UPDATE auto_campaign_runs SET status = 'failed', completed_at = NOW(), cancel_reason = $2 WHERE id = $1`,
+          [runId, '알림톡 템플릿 또는 발신프로필이 승인되지 않음']
+        );
+        await advanceNextRun(ac);
+        return;
+      }
+      const senderKey = gate.rows[0].profile_key;
+      const etcJson = JSON.stringify({ senderkey: senderKey });
 
-    const autoSmsRows: any[][] = [];
-    for (const customer of filteredCustomers) {
-      // ★ D103: prepareSendMessage 컨트롤타워 — 변수 치환 + (광고)+080 + ★ KISA 2026-05 제목(광고) 통합
-      const { message: personalizedMessage, subject: personalizedSubject } = prepareSendMessage(messageContent, customer, fieldMappings, {
-        msgType: ac.message_type, isAd: ac.is_ad ?? false, opt080Number: autoOpt080,
-        subject: messageSubject || '',
+      const { insertAlimtalkQueue } = await import('./sms-queue');
+      const alimRows = filteredCustomers.map((customer: any) => {
+        // 템플릿 기반 content 치환 + #{변수} variable map 적용
+        let finalMessage = messageContent;
+        const { message: personalizedMessage } = prepareSendMessage(finalMessage, customer, fieldMappings, {
+          msgType: 'LMS', isAd: false, opt080Number: '', subject: '',
+        });
+        finalMessage = personalizedMessage;
+        // alimtalk_variable_map: { "#{name}": "@@field@@" | "직접값" }
+        const varMap = ac.alimtalk_variable_map || {};
+        for (const [rawKey, rawVal] of Object.entries(varMap)) {
+          const cleanKey = String(rawKey).replace(/^#\{|\}$/g, '').trim();
+          const v = String(rawVal || '');
+          const resolved = v.startsWith('@@') && v.endsWith('@@')
+            ? String((customer as any)[v.slice(2, -2)] ?? '')
+            : v;
+          finalMessage = finalMessage.replace(
+            new RegExp(`#\\{${cleanKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\}`, 'g'),
+            resolved,
+          );
+        }
+        const cleanPhone = normalizePhone(customer.phone);
+        const callback = resolveCustomerCallback(customer, ac.use_individual_callback || false, ac.callback_number);
+        return {
+          phone: cleanPhone,
+          callback,
+          message: finalMessage,
+          templateCode: ac.alimtalk_template_code,
+          nextType: ac.alimtalk_next_type || 'L',
+          nextContents: (ac.alimtalk_next_type === 'A' || ac.alimtalk_next_type === 'B') ? (ac.alimtalk_next_contents || '') : undefined,
+          etcJson,
+          companyId: ac.company_id,
+        };
       });
-      const cleanPhone = normalizePhone(customer.phone);
-      // ★ D103: resolveCustomerCallback 컨트롤타워 — 개별회신번호 resolve 통합
-      const callback = resolveCustomerCallback(customer, ac.use_individual_callback || false, ac.callback_number);
+      sentCount = await insertAlimtalkQueue(companyTables, alimRows);
+    } else {
+      // ★ D102: (광고)+080 — CT-AD 컨트롤타워 사용 (기존 누락 수정)
+      const autoOpt080 = (ac.is_ad) ? await getOpt080Number(ac.user_id, ac.company_id) : '';
 
-      autoSmsRows.push([
-        cleanPhone, callback, personalizedMessage, msgTypeCode,
-        personalizedSubject, sendTime, campaignId, ac.company_id,
-        mmsImages[0] || '', mmsImages[1] || '', mmsImages[2] || ''
-      ]);
+      const autoSmsRows: any[][] = [];
+      for (const customer of filteredCustomers) {
+        // ★ D103: prepareSendMessage 컨트롤타워 — 변수 치환 + (광고)+080 + ★ KISA 2026-05 제목(광고) 통합
+        const { message: personalizedMessage, subject: personalizedSubject } = prepareSendMessage(messageContent, customer, fieldMappings, {
+          msgType: ac.message_type, isAd: ac.is_ad ?? false, opt080Number: autoOpt080,
+          subject: messageSubject || '',
+        });
+        const cleanPhone = normalizePhone(customer.phone);
+        // ★ D103: resolveCustomerCallback 컨트롤타워 — 개별회신번호 resolve 통합
+        const callback = resolveCustomerCallback(customer, ac.use_individual_callback || false, ac.callback_number);
+
+        autoSmsRows.push([
+          cleanPhone, callback, personalizedMessage, msgTypeCode,
+          personalizedSubject, sendTime, campaignId, ac.company_id,
+          mmsImages[0] || '', mmsImages[1] || '', mmsImages[2] || ''
+        ]);
+      }
+
+      sentCount = await bulkInsertSmsQueue(companyTables, autoSmsRows, true);
     }
-
-    const sentCount = await bulkInsertSmsQueue(companyTables, autoSmsRows, true);
 
     // ★ 부분 실패 시 환불
     const failCount = filteredCustomers.length - sentCount;
