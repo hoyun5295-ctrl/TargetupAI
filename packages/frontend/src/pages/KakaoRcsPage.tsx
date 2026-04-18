@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import AlimtalkTemplateFormModal from '../components/AlimtalkTemplateFormModal';
 import RcsTemplateFormModal from '../components/RcsTemplateFormModal';
 import BrandMessageEditor from '../components/BrandMessageEditor';
 import DirectTargetFilterModal from '../components/DirectTargetFilterModal';
-import { formatPhoneNumber } from '../utils/formatDate';
+// ★ D130: 알림톡 통합 관리 (IMC 연동)
+import AlimtalkManagementSection from '../components/alimtalk/AlimtalkManagementSection';
 
 function getToken(): string {
   return localStorage.getItem('token') || '';
@@ -29,15 +29,9 @@ export default function KakaoRcsPage() {
   const [brandLockedModal, setBrandLockedModal] = useState(false);
   const isBrandLocked = !['ENTERPRISE'].includes(planCode);
 
-  // 알림톡
-  const [alimtalkTemplates, setAlimtalkTemplates] = useState<any[]>([]);
-  const [alimtalkFilter, setAlimtalkFilter] = useState('');
-  const [showAlimtalkForm, setShowAlimtalkForm] = useState(false);
-  const [editingAlimtalk, setEditingAlimtalk] = useState<any>(null);
+  // 알림톡 탭은 D130 `<AlimtalkManagementSection />`이 전담 — 상태는 해당 컴포넌트 내부에서 관리.
+  // 브랜드메시지 탭용 프로필 목록만 KakaoRcsPage에서 유지.
   const [profiles, setProfiles] = useState<any[]>([]);
-  const [showProfileForm, setShowProfileForm] = useState(false);
-  const [profileForm, setProfileForm] = useState({ profileName: '', profileKey: '' });
-  const [profileSaving, setProfileSaving] = useState(false);
 
   // RCS
   const [rcsTemplates, setRcsTemplates] = useState<any[]>([]);
@@ -58,18 +52,7 @@ export default function KakaoRcsPage() {
     return () => clearTimeout(t);
   }, [toast.show]);
 
-  const fetchAlimtalkTemplates = useCallback(async () => {
-    try {
-      const params = new URLSearchParams();
-      if (alimtalkFilter) params.set('status', alimtalkFilter);
-      const res = await fetch(`/api/companies/kakao-templates?${params}`, {
-        headers: { Authorization: `Bearer ${getToken()}` },
-      });
-      const data = await res.json();
-      if (data.success) setAlimtalkTemplates(data.templates);
-    } catch { /* ignore */ }
-  }, [alimtalkFilter]);
-
+  // RCS 템플릿 조회
   const fetchRcsTemplates = useCallback(async () => {
     try {
       const params = new URLSearchParams();
@@ -82,9 +65,10 @@ export default function KakaoRcsPage() {
     } catch { /* ignore */ }
   }, [rcsFilter]);
 
+  // 프로필 조회 (브랜드메시지 탭 BrandMessageEditor 전달용)
   const fetchProfiles = useCallback(async () => {
     try {
-      const res = await fetch('/api/companies/kakao-profiles', {
+      const res = await fetch('/api/alimtalk/senders', {
         headers: { Authorization: `Bearer ${getToken()}` },
       });
       const data = await res.json();
@@ -94,7 +78,7 @@ export default function KakaoRcsPage() {
 
   useEffect(() => {
     setLoading(true);
-    Promise.all([fetchAlimtalkTemplates(), fetchRcsTemplates(), fetchProfiles()])
+    Promise.all([fetchRcsTemplates(), fetchProfiles()])
       .finally(() => setLoading(false));
 
     // 플랜 정보 조회 (브랜드메시지 게이팅용)
@@ -102,26 +86,24 @@ export default function KakaoRcsPage() {
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d?.plan_code) setPlanCode(d.plan_code); })
       .catch(() => {});
-  }, [fetchAlimtalkTemplates, fetchRcsTemplates, fetchProfiles]);
+  }, [fetchRcsTemplates, fetchProfiles]);
 
-  const deleteTemplate = async (type: 'kakao' | 'rcs', id: string, name: string) => {
+  // RCS 템플릿 삭제 (알림톡은 Section 내부에서 담당)
+  const deleteRcsTemplate = async (id: string, name: string) => {
     setConfirmModal({
       show: true,
       title: '템플릿 삭제',
       message: `"${name}"을(를) 삭제하시겠습니까? 승인대기 상태만 삭제 가능합니다.`,
       onConfirm: async () => {
         try {
-          const endpoint = type === 'kakao'
-            ? `/api/companies/kakao-templates/${id}`
-            : `/api/companies/rcs-templates/${id}`;
-          const res = await fetch(endpoint, {
+          const res = await fetch(`/api/companies/rcs-templates/${id}`, {
             method: 'DELETE',
             headers: { Authorization: `Bearer ${getToken()}` },
           });
           const data = await res.json();
           if (data.success) {
             setToast({ show: true, type: 'success', message: '삭제되었습니다' });
-            type === 'kakao' ? fetchAlimtalkTemplates() : fetchRcsTemplates();
+            fetchRcsTemplates();
           } else {
             setToast({ show: true, type: 'error', message: data.error || '삭제 실패' });
           }
@@ -191,146 +173,8 @@ export default function KakaoRcsPage() {
       {/* 컨텐츠 */}
       <div className="max-w-6xl mx-auto px-6 py-6">
 
-        {/* ═══ 알림톡 템플릿 탭 ═══ */}
-        {activeTab === 'alimtalk' && (
-          <div>
-            {/* 발신 프로필 관리 */}
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 mb-5">
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-2">
-                  <span className="text-lg">👤</span>
-                  <h3 className="text-sm font-bold text-gray-800">발신 프로필</h3>
-                  <span className="text-xs text-gray-400">카카오톡 채널에서 발급받은 발신 프로필 키를 등록합니다</span>
-                </div>
-                <button
-                  onClick={() => { setProfileForm({ profileName: '', profileKey: '' }); setShowProfileForm(true); }}
-                  className="px-3 py-1.5 bg-amber-100 hover:bg-amber-200 text-amber-700 rounded-lg text-xs font-medium transition"
-                >
-                  + 프로필 등록
-                </button>
-              </div>
-              {profiles.length === 0 ? (
-                <div className="text-center py-4 text-gray-400 text-sm">
-                  등록된 발신 프로필이 없습니다. 카카오톡 채널의 Sender Key를 등록해주세요.
-                </div>
-              ) : (
-                <div className="flex flex-wrap gap-2">
-                  {profiles.map((p: any) => (
-                    <div key={p.id} className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                      <span className="text-sm font-medium text-amber-800">{p.profile_name}</span>
-                      <span className="text-xs text-amber-500 font-mono">{p.profile_key?.slice(0, 8)}...</span>
-                      <button
-                        onClick={() => {
-                          setConfirmModal({
-                            show: true, title: '프로필 삭제', message: `"${p.profile_name}" 프로필을 삭제하시겠습니까?`,
-                            onConfirm: async () => {
-                              try {
-                                const res = await fetch(`/api/companies/kakao-profiles/${p.id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${getToken()}` } });
-                                const data = await res.json();
-                                if (data.success) { setToast({ show: true, type: 'success', message: '삭제되었습니다' }); fetchProfiles(); }
-                                else { setToast({ show: true, type: 'error', message: data.error || '삭제 실패' }); }
-                              } catch { setToast({ show: true, type: 'error', message: '서버 오류' }); }
-                              setConfirmModal(prev => ({ ...prev, show: false }));
-                            }
-                          });
-                        }}
-                        className="text-amber-400 hover:text-red-500 text-xs ml-1"
-                      >✕</button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* 필터 + 등록 버튼 */}
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex gap-2">
-                {[
-                  { value: '', label: '전체' },
-                  { value: 'pending', label: '승인대기' },
-                  { value: 'approved', label: '승인' },
-                  { value: 'rejected', label: '반려' },
-                ].map(f => (
-                  <button key={f.value}
-                    onClick={() => setAlimtalkFilter(f.value)}
-                    className={`px-3 py-1.5 rounded-full text-xs font-medium transition ${
-                      alimtalkFilter === f.value
-                        ? 'bg-amber-600 text-white'
-                        : 'bg-white text-gray-600 border border-gray-300 hover:bg-gray-50'
-                    }`}>
-                    {f.label}
-                  </button>
-                ))}
-              </div>
-              <button onClick={() => { setEditingAlimtalk(null); setShowAlimtalkForm(true); }}
-                className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-medium transition">
-                + 템플릿 등록 요청
-              </button>
-            </div>
-
-            {/* 목록 */}
-            {loading ? (
-              <div className="text-center py-16 text-gray-400">로딩 중...</div>
-            ) : alimtalkTemplates.length === 0 ? (
-              <div className="text-center py-16">
-                <div className="text-4xl mb-3">💬</div>
-                <p className="text-gray-500">등록된 알림톡 템플릿이 없습니다</p>
-                <p className="text-sm text-gray-400 mt-1">템플릿을 등록하면 카카오 검수 후 발송에 사용할 수 있습니다</p>
-              </div>
-            ) : (
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50 border-b border-gray-200">
-                    <tr>
-                      <th className="px-4 py-3 text-left font-medium text-gray-600">템플릿명</th>
-                      <th className="px-4 py-3 text-left font-medium text-gray-600">카테고리</th>
-                      <th className="px-4 py-3 text-left font-medium text-gray-600">유형</th>
-                      <th className="px-4 py-3 text-center font-medium text-gray-600">상태</th>
-                      <th className="px-4 py-3 text-left font-medium text-gray-600">등록일</th>
-                      <th className="px-4 py-3 text-center font-medium text-gray-600">관리</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {alimtalkTemplates.map(t => {
-                      const badge = STATUS_BADGE[t.status] || STATUS_BADGE.pending;
-                      return (
-                        <tr key={t.id} className="hover:bg-gray-50 transition">
-                          <td className="px-4 py-3">
-                            <div className="font-medium text-gray-900">{t.template_name}</div>
-                            {t.template_code && <div className="text-xs text-gray-400">{t.template_code}</div>}
-                          </td>
-                          <td className="px-4 py-3 text-gray-600">{t.category || '-'}</td>
-                          <td className="px-4 py-3 text-gray-600">{t.message_type || 'BA'}</td>
-                          <td className="px-4 py-3 text-center">
-                            <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${badge.bg} ${badge.text}`}>
-                              {badge.label}
-                            </span>
-                            {t.status === 'rejected' && t.reject_reason && (
-                              <div className="text-xs text-red-400 mt-0.5" title={t.reject_reason}>
-                                {t.reject_reason.length > 20 ? t.reject_reason.slice(0, 20) + '...' : t.reject_reason}
-                              </div>
-                            )}
-                          </td>
-                          <td className="px-4 py-3 text-gray-500">{formatDate(t.created_at)}</td>
-                          <td className="px-4 py-3 text-center">
-                            {['pending', 'rejected'].includes(t.status) && (
-                              <div className="flex gap-1 justify-center">
-                                <button onClick={() => { setEditingAlimtalk(t); setShowAlimtalkForm(true); }}
-                                  className="text-xs text-blue-600 hover:text-blue-700">수정</button>
-                                <button onClick={() => deleteTemplate('kakao', t.id, t.template_name)}
-                                  className="text-xs text-red-500 hover:text-red-700">삭제</button>
-                              </div>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        )}
+        {/* ═══ 알림톡 템플릿 탭 (D130 — IMC 연동 통합 섹션) ═══ */}
+        {activeTab === 'alimtalk' && <AlimtalkManagementSection />}
 
         {/* ═══ 브랜드메시지 탭 ═══ */}
         {activeTab === 'brand' && (
@@ -403,7 +247,7 @@ export default function KakaoRcsPage() {
                               <div className="flex gap-1 justify-center">
                                 <button onClick={() => { setEditingRcs(t); setShowRcsForm(true); }}
                                   className="text-xs text-blue-600 hover:text-blue-700">수정</button>
-                                <button onClick={() => deleteTemplate('rcs', t.id, t.template_name)}
+                                <button onClick={() => deleteRcsTemplate(t.id, t.template_name)}
                                   className="text-xs text-red-500 hover:text-red-700">삭제</button>
                               </div>
                             )}
@@ -420,14 +264,7 @@ export default function KakaoRcsPage() {
       </div>
 
       {/* ═══ 모달들 ═══ */}
-      {showAlimtalkForm && (
-        <AlimtalkTemplateFormModal
-          template={editingAlimtalk}
-          profiles={profiles}
-          onClose={() => { setShowAlimtalkForm(false); setEditingAlimtalk(null); }}
-          onSuccess={() => { setShowAlimtalkForm(false); setEditingAlimtalk(null); fetchAlimtalkTemplates(); setToast({ show: true, type: 'success', message: '저장되었습니다' }); }}
-        />
-      )}
+      {/* ★ D130: 알림톡 관련 모달(등록/수정/Wizard/알림수신자)은 AlimtalkManagementSection 내부에서 관리 */}
 
       {showRcsForm && (
         <RcsTemplateFormModal
@@ -462,71 +299,7 @@ export default function KakaoRcsPage() {
         </div>
       )}
 
-      {/* 발신 프로필 등록 모달 */}
-      {showProfileForm && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden"
-               style={{ animation: 'zoomIn 0.2s ease-out' }}>
-            <div className="px-6 py-4 border-b bg-gradient-to-r from-amber-50 to-white flex justify-between items-center">
-              <div>
-                <h3 className="text-lg font-bold text-gray-900">발신 프로필 등록</h3>
-                <p className="text-xs text-gray-500 mt-0.5">카카오톡 채널의 Sender Key를 등록합니다</p>
-              </div>
-              <button onClick={() => setShowProfileForm(false)} className="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
-            </div>
-            <div className="px-6 py-4 space-y-4">
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">프로필 이름 <span className="text-red-500">*</span></label>
-                <input value={profileForm.profileName} onChange={e => setProfileForm({ ...profileForm, profileName: e.target.value })}
-                  placeholder="예: 브랜드명, 매장명"
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-200" />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Sender Key <span className="text-red-500">*</span></label>
-                <input value={profileForm.profileKey} onChange={e => setProfileForm({ ...profileForm, profileKey: e.target.value })}
-                  placeholder="카카오톡 채널에서 발급받은 키"
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-amber-200" />
-                <p className="text-xs text-gray-400 mt-1">카카오 비즈니스 채널 관리자에서 확인할 수 있습니다</p>
-              </div>
-            </div>
-            <div className="px-6 py-3 border-t bg-gray-50 flex justify-end gap-3">
-              <button onClick={() => setShowProfileForm(false)}
-                className="px-5 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-sm transition">취소</button>
-              <button
-                onClick={async () => {
-                  if (!profileForm.profileName || !profileForm.profileKey) {
-                    setToast({ show: true, type: 'error', message: '프로필 이름과 Sender Key를 입력해주세요' });
-                    return;
-                  }
-                  setProfileSaving(true);
-                  try {
-                    const res = await fetch('/api/companies/kakao-profiles', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
-                      body: JSON.stringify(profileForm),
-                    });
-                    const data = await res.json();
-                    if (data.success) {
-                      setShowProfileForm(false);
-                      setToast({ show: true, type: 'success', message: '발신 프로필이 등록되었습니다' });
-                      fetchProfiles();
-                    } else {
-                      setToast({ show: true, type: 'error', message: data.error || '등록 실패' });
-                    }
-                  } catch {
-                    setToast({ show: true, type: 'error', message: '서버 오류' });
-                  } finally {
-                    setProfileSaving(false);
-                  }
-                }}
-                disabled={profileSaving}
-                className="px-5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-medium transition disabled:opacity-50">
-                {profileSaving ? '등록 중...' : '등록'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* ★ D130: 레거시 발신 프로필 등록 모달(Sender Key 수동 입력)은 AlimtalkManagementSection의 Wizard로 대체됨 */}
 
       {/* 브랜드메시지 잠금 모달 */}
       {brandLockedModal && (

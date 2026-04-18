@@ -136,9 +136,10 @@ router.use(authenticate as any);
 // 발신프로필 (Sender) — 11개, 슈퍼관리자 전용
 // ──────────────────────────────────────────────────────────
 
+// 인증번호 요청 — 고객사 관리자 OK (IMC가 카톡 인증으로 본인확인 보장)
 router.post(
   '/senders/token',
-  requireSuperAdmin as any,
+  requireCompanyAdmin as any,
   async (req: Request, res: Response) => {
     try {
       const { yellowId, phoneNumber } = req.body || {};
@@ -155,9 +156,12 @@ router.post(
   },
 );
 
+// 발신프로필 등록 — 고객사 관리자 OK
+// IMC 카톡 인증이 이미 본인확인 처리하므로, 고객사가 자체 등록 가능.
+// targetCompanyId는 슈퍼관리자만 지정 가능 (다른 회사 귀속). 고객사는 본인 회사 자동 귀속.
 router.post(
   '/senders',
-  requireSuperAdmin as any,
+  requireCompanyAdmin as any,
   async (req: Request, res: Response) => {
     try {
       const {
@@ -167,15 +171,25 @@ router.post(
         categoryCode,
         topSenderKeyYn,
         customSenderKey,
-        companyId: targetCompanyId, // 슈퍼관리자가 어떤 회사에 귀속시킬지
+        companyId: targetCompanyIdInBody,
         profileName,
       } = req.body || {};
 
-      if (!token || !yellowId || !phoneNumber || !categoryCode || !targetCompanyId) {
+      if (!token || !yellowId || !phoneNumber || !categoryCode) {
         return res.status(400).json({
           success: false,
-          error: 'token/yellowId/phoneNumber/categoryCode/companyId는 필수입니다',
+          error: 'token/yellowId/phoneNumber/categoryCode는 필수입니다',
         });
+      }
+
+      // 슈퍼관리자만 다른 회사 귀속 가능. 일반 고객사는 본인 회사 고정.
+      const isSuperAdmin = req.user?.userType === 'super_admin';
+      const targetCompanyId = isSuperAdmin
+        ? targetCompanyIdInBody || req.user?.companyId
+        : req.user?.companyId;
+
+      if (!targetCompanyId) {
+        return res.status(400).json({ success: false, error: 'companyId 필요' });
       }
 
       const r = await imc.createSender({

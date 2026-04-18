@@ -70,7 +70,6 @@ export default function DashboardHeader({
     { label: '자동발송', onClick: () => lockGuard(() => navigate('/auto-send')), color: 'gold', locked: isSubscriptionLocked, path: '/auto-send' },
     { label: '모바일DM', onClick: () => lockGuard(() => navigate('/dm-builder')), color: 'gold', locked: isSubscriptionLocked, path: '/dm-builder' },
     { label: '카카오&RCS', onClick: () => navigate('/kakao-rcs'), color: 'green', path: '/kakao-rcs' },
-    { label: '알림톡', onClick: () => navigate('/alimtalk-templates'), color: 'gold', path: '/alimtalk-templates' },
     { label: '직접발송', onClick: onDirectSend, color: 'green', path: '/' },
     { label: '발송결과', onClick: onResults, color: 'green', path: '/' },
     { label: '수신거부', onClick: () => navigate('/unsubscribes'), color: 'gold', path: '/unsubscribes' },
