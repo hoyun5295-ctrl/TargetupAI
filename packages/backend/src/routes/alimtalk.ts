@@ -213,13 +213,21 @@ router.post(
         /* 카테고리 조회 실패 무시 */
       }
 
+      // 슈퍼관리자가 직접 등록한 경우 즉시 APPROVED, 고객사 등록은 PENDING_APPROVAL.
+      const approvalStatus = isSuperAdmin ? 'APPROVED' : 'PENDING_APPROVAL';
+
       const ins = await query(
         `INSERT INTO kakao_sender_profiles
            (company_id, profile_key, profile_name, is_active,
             yellow_id, admin_phone_number, category_code, category_name_cache,
             top_sender_yn, custom_sender_key, status,
+            approval_status, approval_requested_at,
+            approved_at, approved_by,
             registered_at, updated_at)
-         VALUES ($1,$2,$3,true,$4,$5,$6,$7,$8,$9,$10,now(),now())
+         VALUES ($1,$2,$3,true,$4,$5,$6,$7,$8,$9,$10,
+                 $11, now(),
+                 $12, $13,
+                 now(), now())
          RETURNING *`,
         [
           targetCompanyId,
@@ -232,10 +240,73 @@ router.post(
           topSenderKeyYn || 'N',
           customSenderKey || null,
           r.data.status || 'NORMAL',
+          approvalStatus,
+          isSuperAdmin ? new Date() : null,
+          isSuperAdmin ? req.user?.userId || null : null,
         ],
       );
 
       res.status(201).json({ success: true, profile: ins.rows[0], imc: r });
+    } catch (err) {
+      return handleImcError(res, err);
+    }
+  },
+);
+
+// ── 승인/반려 (슈퍼관리자 전용) ─────────────────────
+router.put(
+  '/senders/:id/approve',
+  requireSuperAdmin as any,
+  async (req: Request, res: Response) => {
+    try {
+      const r = await query(
+        `UPDATE kakao_sender_profiles
+            SET approval_status = 'APPROVED',
+                approved_at = now(),
+                approved_by = $1,
+                reject_reason = NULL,
+                updated_at = now()
+          WHERE id = $2
+          RETURNING *`,
+        [req.user?.userId || null, req.params.id],
+      );
+      if (r.rows.length === 0) {
+        return res.status(404).json({ success: false, error: '발신프로필 없음' });
+      }
+      res.json({ success: true, profile: r.rows[0] });
+    } catch (err) {
+      return handleImcError(res, err);
+    }
+  },
+);
+
+router.put(
+  '/senders/:id/reject',
+  requireSuperAdmin as any,
+  async (req: Request, res: Response) => {
+    try {
+      const { rejectReason } = req.body || {};
+      if (!rejectReason || String(rejectReason).trim().length < 3) {
+        return res.status(400).json({
+          success: false,
+          error: '반려 사유(3자 이상)를 입력하세요',
+        });
+      }
+      const r = await query(
+        `UPDATE kakao_sender_profiles
+            SET approval_status = 'REJECTED',
+                reject_reason = $1,
+                approved_at = NULL,
+                approved_by = NULL,
+                updated_at = now()
+          WHERE id = $2
+          RETURNING *`,
+        [String(rejectReason).slice(0, 500), req.params.id],
+      );
+      if (r.rows.length === 0) {
+        return res.status(404).json({ success: false, error: '발신프로필 없음' });
+      }
+      res.json({ success: true, profile: r.rows[0] });
     } catch (err) {
       return handleImcError(res, err);
     }
@@ -489,10 +560,17 @@ router.get('/templates', async (req: Request, res: Response) => {
       params.push(profileId);
       where.push(`t.profile_id = $${params.length}`);
     }
+    // 소유자 필터: company_user는 본인 등록 템플릿만 (D130 §2-2)
+    if (req.user?.userType === 'company_user') {
+      params.push(req.user.userId);
+      where.push(`t.created_by = $${params.length}`);
+    }
     const r = await query(
-      `SELECT t.*, p.profile_key, p.profile_name
+      `SELECT t.*, p.profile_key, p.profile_name,
+              u.name AS created_by_name, u.login_id AS created_by_login_id
          FROM kakao_templates t
          LEFT JOIN kakao_sender_profiles p ON p.id = t.profile_id
+         LEFT JOIN users u ON u.id = t.created_by
         WHERE ${where.join(' AND ')}
         ORDER BY t.updated_at DESC NULLS LAST, t.created_at DESC`,
       params,
@@ -503,25 +581,36 @@ router.get('/templates', async (req: Request, res: Response) => {
   }
 });
 
+// 템플릿 등록: 모든 로그인 사용자 허용 (정책 D130 §2-2 — 개인 자산)
 router.post(
   '/templates',
-  requireCompanyAdmin as any,
   async (req: Request, res: Response) => {
     try {
       const companyId = requireCompany(req, res);
       if (!companyId) return;
+      const userId = req.user?.userId;
+      if (!userId) {
+        return res.status(401).json({ success: false, error: '인증 필요' });
+      }
       const { profileId, ...body } = req.body || {};
       if (!profileId) {
         return res.status(400).json({ success: false, error: 'profileId는 필수입니다' });
       }
 
+      // 승인된 발신프로필만 사용 허용 (D130 §2-1)
       const prof = await query(
-        `SELECT profile_key FROM kakao_sender_profiles
+        `SELECT profile_key, approval_status FROM kakao_sender_profiles
           WHERE id = $1 AND company_id = $2`,
         [profileId, companyId],
       );
       if (prof.rows.length === 0 || !prof.rows[0].profile_key) {
         return res.status(404).json({ success: false, error: '발신프로필 없음' });
+      }
+      if (prof.rows[0].approval_status !== 'APPROVED') {
+        return res.status(400).json({
+          success: false,
+          error: '승인 완료된 발신프로필만 사용할 수 있습니다',
+        });
       }
       const senderKey = prof.rows[0].profile_key;
       const templateKey: string =
@@ -543,11 +632,11 @@ router.post(
             image_name, extra_content, ad_content, security_flag, quick_replies,
             template_header, item_highlight, item_list, item_summary, represent_link,
             preview_message, alarm_phone_numbers, service_mode, custom_template_code,
-            created_at, updated_at, last_synced_at)
+            created_by, created_at, updated_at, last_synced_at)
          VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::text[],'REQUESTED',
                  $9,$10,$11,$12,$13,$14,$15,$16,$17,$18::jsonb,
                  $19,$20::jsonb,$21::jsonb,$22::jsonb,$23::jsonb,
-                 $24,$25,$26,$27,now(),now(),now())
+                 $24,$25,$26,$27,$28,now(),now(),now())
          RETURNING *`,
         [
           companyId,
@@ -583,6 +672,7 @@ router.post(
           body.alarmPhoneNumber || null,
           body.serviceMode || 'PRD',
           body.customTemplateCode || null,
+          userId,
         ],
       );
 
@@ -593,28 +683,61 @@ router.post(
   },
 );
 
-// 공용 헬퍼: templateCode → {senderKey, companyId} 찾기
+// 공용 헬퍼: templateCode → {senderKey, id, createdBy} 찾기
+// user 정보가 전달되면 company_user는 본인 소유만 접근 허용 (소유자 체크 D130)
+type TemplateCtx = { senderKey: string; id: string; createdBy: string | null };
+
 async function resolveTemplateContext(
   companyId: string,
   templateCode: string,
-): Promise<{ senderKey: string; id: string } | null> {
+  user?: { userId: string; userType: string } | undefined,
+): Promise<TemplateCtx | null | 'forbidden'> {
   const r = await query(
-    `SELECT t.id, p.profile_key
+    `SELECT t.id, t.created_by, p.profile_key
        FROM kakao_templates t
        JOIN kakao_sender_profiles p ON p.id = t.profile_id
       WHERE t.template_code = $1 AND t.company_id = $2`,
     [templateCode, companyId],
   );
   if (r.rows.length === 0) return null;
-  return { senderKey: r.rows[0].profile_key, id: r.rows[0].id };
+  const row = r.rows[0];
+  if (user?.userType === 'company_user' && row.created_by !== user.userId) {
+    return 'forbidden';
+  }
+  return { senderKey: row.profile_key, id: row.id, createdBy: row.created_by };
+}
+
+// 컨트롤타워: 템플릿 접근 체크 + companyId 확보 + 404/403 응답 일원화 (D130)
+// 호출부에서 companyId 추출 + resolveTemplateContext 2단계 반복을 단일 호출로 통합
+async function requireTemplateAccess(
+  req: Request,
+  res: Response,
+): Promise<({ companyId: string } & TemplateCtx) | null> {
+  const companyId = requireCompany(req, res);
+  if (!companyId) return null;
+  const ctx = await resolveTemplateContext(
+    companyId,
+    req.params.templateCode,
+    req.user,
+  );
+  if (ctx === null) {
+    res.status(404).json({ success: false, error: '템플릿 없음' });
+    return null;
+  }
+  if (ctx === 'forbidden') {
+    res.status(403).json({
+      success: false,
+      error: '본인이 등록한 템플릿만 접근할 수 있습니다',
+    });
+    return null;
+  }
+  return { companyId, ...ctx };
 }
 
 router.get('/templates/:templateCode', async (req: Request, res: Response) => {
   try {
-    const companyId = requireCompany(req, res);
-    if (!companyId) return;
-    const ctx = await resolveTemplateContext(companyId, req.params.templateCode);
-    if (!ctx) return res.status(404).json({ success: false, error: '템플릿 없음' });
+    const ctx = await requireTemplateAccess(req, res);
+    if (!ctx) return;
 
     // IMC 최신 상태 동기화
     try {
@@ -632,9 +755,11 @@ router.get('/templates/:templateCode', async (req: Request, res: Response) => {
     }
 
     const row = await query(
-      `SELECT t.*, p.profile_key, p.profile_name
+      `SELECT t.*, p.profile_key, p.profile_name,
+              u.name AS created_by_name, u.login_id AS created_by_login_id
          FROM kakao_templates t
          LEFT JOIN kakao_sender_profiles p ON p.id = t.profile_id
+         LEFT JOIN users u ON u.id = t.created_by
         WHERE t.id = $1`,
       [ctx.id],
     );
@@ -644,15 +769,13 @@ router.get('/templates/:templateCode', async (req: Request, res: Response) => {
   }
 });
 
+// 템플릿 수정: 본인 소유 + company_admin/super_admin (D130 §2-2, requireTemplateAccess 내 체크)
 router.put(
   '/templates/:templateCode',
-  requireCompanyAdmin as any,
   async (req: Request, res: Response) => {
     try {
-      const companyId = requireCompany(req, res);
-      if (!companyId) return;
-      const ctx = await resolveTemplateContext(companyId, req.params.templateCode);
-      if (!ctx) return res.status(404).json({ success: false, error: '템플릿 없음' });
+      const ctx = await requireTemplateAccess(req, res);
+      if (!ctx) return;
       const r = await imc.updateAlimtalkTemplate(
         ctx.senderKey,
         req.params.templateCode,
@@ -671,13 +794,10 @@ router.put(
 
 router.delete(
   '/templates/:templateCode',
-  requireCompanyAdmin as any,
   async (req: Request, res: Response) => {
     try {
-      const companyId = requireCompany(req, res);
-      if (!companyId) return;
-      const ctx = await resolveTemplateContext(companyId, req.params.templateCode);
-      if (!ctx) return res.status(404).json({ success: false, error: '템플릿 없음' });
+      const ctx = await requireTemplateAccess(req, res);
+      if (!ctx) return;
       const r = await imc.deleteAlimtalkTemplate(ctx.senderKey, req.params.templateCode);
       await query(
         `UPDATE kakao_templates SET status='DELETED', updated_at=now() WHERE id=$1`,
@@ -692,13 +812,10 @@ router.delete(
 
 router.post(
   '/templates/:templateCode/inspect',
-  requireCompanyAdmin as any,
   async (req: Request, res: Response) => {
     try {
-      const companyId = requireCompany(req, res);
-      if (!companyId) return;
-      const ctx = await resolveTemplateContext(companyId, req.params.templateCode);
-      if (!ctx) return res.status(404).json({ success: false, error: '템플릿 없음' });
+      const ctx = await requireTemplateAccess(req, res);
+      if (!ctx) return;
       const r = await imc.requestInspection(
         ctx.senderKey,
         req.params.templateCode,
@@ -719,14 +836,11 @@ router.post(
 
 router.post(
   '/templates/:templateCode/inspect-with-file',
-  requireCompanyAdmin as any,
   upload.single('file'),
   async (req: Request, res: Response) => {
     try {
-      const companyId = requireCompany(req, res);
-      if (!companyId) return;
-      const ctx = await resolveTemplateContext(companyId, req.params.templateCode);
-      if (!ctx) return res.status(404).json({ success: false, error: '템플릿 없음' });
+      const ctx = await requireTemplateAccess(req, res);
+      if (!ctx) return;
       const file = (req as any).file;
       if (!file) {
         return res.status(400).json({ success: false, error: '첨부파일이 필요합니다' });
@@ -753,13 +867,10 @@ router.post(
 
 router.put(
   '/templates/:templateCode/cancel-inspect',
-  requireCompanyAdmin as any,
   async (req: Request, res: Response) => {
     try {
-      const companyId = requireCompany(req, res);
-      if (!companyId) return;
-      const ctx = await resolveTemplateContext(companyId, req.params.templateCode);
-      if (!ctx) return res.status(404).json({ success: false, error: '템플릿 없음' });
+      const ctx = await requireTemplateAccess(req, res);
+      if (!ctx) return;
       const r = await imc.cancelInspection(ctx.senderKey, req.params.templateCode);
       await query(
         `UPDATE kakao_templates SET status='DRAFT', updated_at=now() WHERE id=$1`,
@@ -774,13 +885,10 @@ router.put(
 
 router.put(
   '/templates/:templateCode/release',
-  requireCompanyAdmin as any,
   async (req: Request, res: Response) => {
     try {
-      const companyId = requireCompany(req, res);
-      if (!companyId) return;
-      const ctx = await resolveTemplateContext(companyId, req.params.templateCode);
-      if (!ctx) return res.status(404).json({ success: false, error: '템플릿 없음' });
+      const ctx = await requireTemplateAccess(req, res);
+      if (!ctx) return;
       const r = await imc.releaseTemplateDormant(ctx.senderKey, req.params.templateCode);
       await query(
         `UPDATE kakao_templates SET status='APPROVED', updated_at=now() WHERE id=$1`,
@@ -795,11 +903,8 @@ router.put(
 
 router.patch(
   '/templates/:templateCode/custom-code',
-  requireCompanyAdmin as any,
   async (req: Request, res: Response) => {
     try {
-      const companyId = requireCompany(req, res);
-      if (!companyId) return;
       const { customTemplateCode } = req.body || {};
       if (!customTemplateCode) {
         return res.status(400).json({
@@ -807,8 +912,8 @@ router.patch(
           error: 'customTemplateCode는 필수입니다',
         });
       }
-      const ctx = await resolveTemplateContext(companyId, req.params.templateCode);
-      if (!ctx) return res.status(404).json({ success: false, error: '템플릿 없음' });
+      const ctx = await requireTemplateAccess(req, res);
+      if (!ctx) return;
       const r = await imc.updateCustomCode(
         ctx.senderKey,
         req.params.templateCode,
@@ -827,17 +932,14 @@ router.patch(
 
 router.patch(
   '/templates/:templateCode/exposure',
-  requireCompanyAdmin as any,
   async (req: Request, res: Response) => {
     try {
-      const companyId = requireCompany(req, res);
-      if (!companyId) return;
       const { exposureYn } = req.body || {};
       if (exposureYn !== 'Y' && exposureYn !== 'N') {
         return res.status(400).json({ success: false, error: 'exposureYn는 Y/N' });
       }
-      const ctx = await resolveTemplateContext(companyId, req.params.templateCode);
-      if (!ctx) return res.status(404).json({ success: false, error: '템플릿 없음' });
+      const ctx = await requireTemplateAccess(req, res);
+      if (!ctx) return;
       const r = await imc.updateExposure(
         ctx.senderKey,
         req.params.templateCode,
@@ -852,17 +954,14 @@ router.patch(
 
 router.patch(
   '/templates/:templateCode/service-mode',
-  requireCompanyAdmin as any,
   async (req: Request, res: Response) => {
     try {
-      const companyId = requireCompany(req, res);
-      if (!companyId) return;
       const { serviceMode } = req.body || {};
       if (serviceMode !== 'PRD' && serviceMode !== 'STG') {
         return res.status(400).json({ success: false, error: 'serviceMode는 PRD/STG' });
       }
-      const ctx = await resolveTemplateContext(companyId, req.params.templateCode);
-      if (!ctx) return res.status(404).json({ success: false, error: '템플릿 없음' });
+      const ctx = await requireTemplateAccess(req, res);
+      if (!ctx) return;
       const r = await imc.updateServiceMode(
         ctx.senderKey,
         req.params.templateCode,

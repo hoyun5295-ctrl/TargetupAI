@@ -58,8 +58,12 @@ git push
 # 5. 배포 자동화 (PowerShell 프로필 함수)
 tp-push "커밋메시지"     # 타입체크 → git add → commit → push (메시지 생략 시 자동 타임스탬프)
 tp-deploy               # 서버 git pull → pm2 restart all (백엔드만)
-tp-deploy-full          # 서버 git pull → backend build → frontend build → pm2 restart all
+tp-deploy-full          # 서버 git pull → backend(npm install + build) → frontend build → flyer-frontend build → pm2 restart all
 ```
+
+> **⚠️ D130 (2026-04-18) 변경:** `tp-deploy-full`에 **backend `npm install`** + **`flyer-frontend` 빌드** 추가. 새 의존성 추가 시 별도 서버 SSH 없이 자동 처리됨.
+>
+> **교훈:** `$cmds = @(...) -join " && "` + `ssh remote $cmds` PowerShell 배열 패턴이 긴 체인 전달 시 서버 sshd에서 `Connection closed by port 22` 발생 가능. → 반드시 **한 줄 쌍따옴표 방식** `ssh remote "cmd1 && cmd2 && ..."`로 작성.
 
 ### 2-2. 서버 배포 (SSH 접속 후)
 ```bash

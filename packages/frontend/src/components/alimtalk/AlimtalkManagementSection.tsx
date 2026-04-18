@@ -50,6 +50,9 @@ interface Template {
   created_at: string;
   updated_at: string;
   last_synced_at: string | null;
+  created_by: string | null;
+  created_by_name: string | null;
+  created_by_login_id: string | null;
 }
 
 interface Profile {
@@ -62,6 +65,10 @@ interface Profile {
   status: string;
   unsubscribe_phone: string | null;
   unsubscribe_auth: string | null;
+  approval_status: string | null;
+  approval_requested_at: string | null;
+  approved_at: string | null;
+  reject_reason: string | null;
 }
 
 interface CategoryOption {
@@ -93,6 +100,12 @@ const SENDER_STATUS_LABELS: Record<string, { label: string; cls: string }> = {
   DORMANT: { label: '휴면',     cls: 'bg-amber-100 text-amber-700' },
   BLOCKED: { label: '차단',     cls: 'bg-red-100 text-red-700' },
   DELETED: { label: '삭제',     cls: 'bg-gray-200 text-gray-500' },
+};
+
+const APPROVAL_LABELS: Record<string, { label: string; cls: string }> = {
+  PENDING_APPROVAL: { label: '슈퍼관리자 승인대기', cls: 'bg-amber-100 text-amber-700' },
+  APPROVED:         { label: '승인 완료',           cls: 'bg-emerald-100 text-emerald-700' },
+  REJECTED:         { label: '반려',                cls: 'bg-red-100 text-red-700' },
 };
 
 export default function AlimtalkManagementSection() {
@@ -259,8 +272,9 @@ export default function AlimtalkManagementSection() {
                   <th className="text-left px-3 py-2">프로필</th>
                   <th className="text-left px-3 py-2">채널ID</th>
                   <th className="text-left px-3 py-2">카테고리</th>
-                  <th className="text-center px-3 py-2">상태</th>
-                  <th className="text-center px-3 py-2">080 수신거부</th>
+                  <th className="text-center px-3 py-2">승인</th>
+                  <th className="text-center px-3 py-2">IMC 상태</th>
+                  <th className="text-center px-3 py-2">080</th>
                   <th className="text-right px-3 py-2">관리</th>
                 </tr>
               </thead>
@@ -271,6 +285,10 @@ export default function AlimtalkManagementSection() {
                       label: p.status,
                       cls: 'bg-gray-100 text-gray-500',
                     };
+                  const ap = APPROVAL_LABELS[p.approval_status || 'PENDING_APPROVAL'] || {
+                    label: p.approval_status || '-',
+                    cls: 'bg-gray-100 text-gray-500',
+                  };
                   return (
                     <tr key={p.id} className="border-t border-gray-100">
                       <td className="px-3 py-2">
@@ -278,12 +296,22 @@ export default function AlimtalkManagementSection() {
                         <div className="text-[10px] text-gray-400 font-mono">
                           {p.profile_key?.slice(0, 24)}…
                         </div>
+                        {p.approval_status === 'REJECTED' && p.reject_reason && (
+                          <div className="text-[11px] text-red-500 mt-0.5">
+                            반려: {p.reject_reason}
+                          </div>
+                        )}
                       </td>
                       <td className="px-3 py-2 font-mono text-gray-600">
                         {p.yellow_id || '-'}
                       </td>
                       <td className="px-3 py-2 text-gray-600">
                         {p.category_name_cache || '-'}
+                      </td>
+                      <td className="text-center px-3 py-2">
+                        <span className={`inline-block px-2 py-0.5 rounded ${ap.cls}`}>
+                          {ap.label}
+                        </span>
                       </td>
                       <td className="text-center px-3 py-2">
                         <span className={`inline-block px-2 py-0.5 rounded ${st.cls}`}>
@@ -313,6 +341,13 @@ export default function AlimtalkManagementSection() {
                 })}
               </tbody>
             </table>
+
+            {/* 승인 안내 */}
+            {profiles.some((p) => p.approval_status === 'PENDING_APPROVAL') && (
+              <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                ℹ️ <strong>슈퍼관리자 승인 대기 중</strong>인 발신프로필은 템플릿 등록·발송에 사용할 수 없습니다. 승인 완료 후 자동으로 활성화됩니다.
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -379,6 +414,7 @@ export default function AlimtalkManagementSection() {
               <tr>
                 <th className="text-left px-4 py-2">템플릿</th>
                 <th className="text-left px-4 py-2">프로필</th>
+                <th className="text-left px-4 py-2">등록자</th>
                 <th className="text-center px-4 py-2">유형</th>
                 <th className="text-center px-4 py-2">상태</th>
                 <th className="text-left px-4 py-2">업데이트</th>
@@ -409,6 +445,20 @@ export default function AlimtalkManagementSection() {
                     </td>
                     <td className="px-4 py-2 text-xs text-gray-600">
                       {t.profile_name || '-'}
+                    </td>
+                    <td className="px-4 py-2 text-xs text-gray-600">
+                      {t.created_by_name ? (
+                        <>
+                          <div>{t.created_by_name}</div>
+                          {t.created_by_login_id && (
+                            <div className="text-[10px] text-gray-400 font-mono">
+                              {t.created_by_login_id}
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <span className="text-gray-300">-</span>
+                      )}
                     </td>
                     <td className="text-center px-4 py-2 text-xs text-gray-600">
                       {t.message_type}/{t.emphasize_type}

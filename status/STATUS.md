@@ -107,12 +107,19 @@
 
 ---
 
-### 📨 D130 — 알림톡/브랜드메시지 IMC 연동 Phase 1 (2026-04-18) — 🟡 코드 완비, 월요일 API 수령 후 연동테스트
+### 📨 D130 — 알림톡/브랜드메시지 IMC 연동 Phase 1 (2026-04-18) — ✅ Day 2 완료, 배포 대기
 
 > **배경:** 레거시에서 수동으로 하던 "템플릿 관리자 + 발신프로필 등록"을 한줄로에 재구현 + 휴머스온 IMC API 연동으로 자동화.
 > 승인 상태는 웹훅으로 실시간 반영 → 발송 시 `status='APPROVED'`만 노출 → 레거시의 수동 확인 절차 제거.
 > **설계서:** [`status/ALIMTALK-DESIGN.md`](ALIMTALK-DESIGN.md) (1,735줄)
 > **플랜:** [`.claude/plans/hidden-twirling-waffle.md`](../.claude/plans/hidden-twirling-waffle.md)
+> **🚨 다음 세션 필독:** [`status/D130-SESSION-HANDOFF.md`](D130-SESSION-HANDOFF.md) — 현재 진행 상태 스냅샷 + Day 2 착수 순서 완전본
+
+#### 🎯 Harold님 확정 정책 (2026-04-18 세션 종료 시점)
+| 자원 | 등록 | 승인 | 조회·사용 범위 |
+|------|------|------|-------------|
+| **발신프로필** (회사 자산) | `company_admin`만 | `super_admin`만 | 회사 전체 공유 (승인 완료된 것만) |
+| **알림톡 템플릿** (개인 자산) | 모든 로그인 사용자 | 카카오 검수 | `company_user`: 본인 등록 것만 / `company_admin`: 회사 전체 / `super_admin`: 전체 |
 
 #### Day 1 완료 (2026-04-18)
 **DB (Harold님 서버 psql 직접 실행):**
@@ -147,6 +154,44 @@
 
 **DB/컨트롤타워 보존:**
 - ❌ 수정 금지: `utils/brand-message.ts` (CT-12), `utils/sms-queue.ts` (CT-04), `routes/campaigns.ts` 5경로, `routes/auto-campaigns.ts`, `utils/auto-campaign-worker.ts` — 기간계 무접촉
+
+#### 🛠️ Day 1 추가 실수 수정 (2026-04-18 오후)
+- ✅ 헤더 **"알림톡" 중복 메뉴 제거** — `카카오&RCS` 탭 안에 이미 있었음
+- ✅ `/alimtalk-templates` 라우트 제거 + `pages/AlimtalkTemplatesPage.tsx` 삭제
+- ✅ `components/alimtalk/AlimtalkManagementSection.tsx` 신규 — KakaoRcsPage 알림톡 탭 내부에 통합 렌더
+- ✅ KakaoRcsPage 레거시 state/모달 정리 (기존 AlimtalkTemplateFormModal 제거)
+- ✅ 발신프로필 등록 권한 `super_admin` → `company_admin` 완화 (이후 Harold님 정책 확정으로 유지)
+- ✅ 백엔드 승인/반려 엔드포인트 추가: `PUT /senders/:id/approve`, `PUT /senders/:id/reject` (super_admin 전용)
+- ✅ POST `/senders` 등록 시 `approval_status` 자동 설정 (super_admin=APPROVED, company_admin=PENDING_APPROVAL)
+- ✅ AlimtalkManagementSection에 승인 상태 배지 + "승인 대기 중 안내" 문구 추가
+- ✅ `tp-deploy-full` PowerShell 프로필 롤백 (`$cmds` 배열 방식 → 한 줄 쌍따옴표 방식, `Connection closed` 재발 방지) + `backend npm install` + `flyer-frontend` 빌드 포함
+
+#### ✅ Day 2 완료 (2026-04-18 오후 연속 세션)
+
+**DB ALTER (Harold님 서버 psql 실행 완료):**
+- `kakao_sender_profiles` +5컬럼 — `approval_status`(DEFAULT 'PENDING_APPROVAL')/`approval_requested_at`/`approved_at`/`approved_by`/`reject_reason` + idx
+- `kakao_templates` +1컬럼 — `created_by uuid REFERENCES users(id)` + idx
+- 검증 통과: `\d kakao_sender_profiles` 24컬럼 / `\d kakao_templates` 41컬럼
+- 기존 프로필 2건은 테스트 데이터(테스트계정2/인비토, yellow_id 없음)로 PENDING_APPROVAL 상태 유지
+
+**백엔드 템플릿 소유자 체크 (tsc 0):**
+- `resolveTemplateContext` 시그니처 확장 — user 파라미터 추가, `company_user`이면 `created_by = userId` 체크, forbidden 반환
+- **신규 컨트롤타워 `requireTemplateAccess(req, res)`** — `companyId` 확보 + `resolveTemplateContext` + 404/403 응답 일원화. 13개 호출부의 2단계 패턴을 1단계로 축약
+- `POST /templates` — `requireCompanyAdmin` 제거(모든 로그인 사용자 허용) + INSERT에 `created_by` 추가 + 승인되지 않은 발신프로필 사용 차단
+- `GET /templates` — `company_user`면 `WHERE created_by = $N` 필터 + `LEFT JOIN users u ON u.id = t.created_by` + 응답에 `created_by_name`/`created_by_login_id`
+- `GET /templates/:templateCode` — `requireTemplateAccess` 적용 + 응답 쿼리에도 users join
+- `PUT/DELETE/inspect/inspect-with-file/cancel-inspect/release/custom-code/exposure/service-mode` 9개 라우트 — `requireCompanyAdmin` 제거 + `requireTemplateAccess`로 소유자 체크 일원화 (인라인 2단계 패턴 0건)
+
+**프론트 (tsc 0):**
+- `pages/AlimtalkSendersPage.tsx` — 승인/반려 UI 완성. 4탭 필터(전체/승인대기/승인완료/반려 + 카운트 배지), 승인 액션, 반려 사유 모달(3자 이상, 최대 500자), 재승인 액션, 반려 사유 인라인 표시, 커스텀 모달(window.confirm/alert 미사용 정책 준수)
+- `components/alimtalk/AlimtalkTemplateFormV2.tsx` — `approval_status === 'APPROVED'` 프로필만 드롭다운 노출. 미등록/미승인 상태 안내 문구 + select 비활성화
+- `components/alimtalk/AlimtalkManagementSection.tsx` — Template 인터페이스에 `created_by/_name/_login_id` 추가, 목록 테이블에 "등록자" 컬럼 신설(이름 + 로그인 ID 병기)
+
+#### ⚠️ 오늘 커밋/배포 상태
+- **로컬:** Day 1 + Day 2 전 과제 완료, 백엔드/프론트 tsc 0, **미커밋**
+- **서버 DB:** Day 2 DDL 실행 완료. 승인 5컬럼 + `created_by` 적용됨
+- **서버 코드:** 2026-04-18 오전 기본 구조만 반영. 오후 + 연속 세션분 미반영
+- **권장 배포:** `tp-push "0418 D130 Day 2 승인 워크플로우 + 소유자 체크 완료"` → `tp-deploy-full`
 
 #### 월요일(2026-04-21) 연동테스트 대기 (Phase 0 수령 필요)
 - [ ] `IMC_API_KEY_SANDBOX` + `IMC_BASE_URL_STG` → 샌드박스 카테고리 조회 curl

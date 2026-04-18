@@ -2592,3 +2592,61 @@
 ---
 
 *최종 업데이트: 2026-03-19 D83. B20-01~03 3건 🟡수정완료-배포대기. 다음 세션 TODO: 자동발송 target_filter UI 구현, 커스텀 필드 dropdown 확인, D-1 알림 설정 점검.*
+
+---
+
+## D130 (2026-04-18) — 알림톡 IMC 연동 관련 이슈
+
+### B30-01: 헤더 "알림톡" 메뉴 중복 생성 🟡
+
+| 항목 | 내용 |
+|------|------|
+| **심각도** | 🟡 Minor (UX 중복) |
+| **상태** | ✅ 수정완료-배포대기 (2026-04-18 오후) |
+| **리포터** | Harold님 |
+| **증상** | 대시보드 헤더에 "카카오&RCS"가 이미 있는데 "알림톡" 메뉴를 추가 생성 → 카카오&RCS 탭 안의 알림톡 템플릿과 기능 중복 |
+| **근본 원인** | AI가 CLAUDE.md "수정 전 실제 화면 확인 필수" 원칙 위반. `KakaoRcsPage` 3탭 구조(알림톡/브랜드/RCS)를 확인하지 않고 `/alimtalk-templates` 별도 라우트 + 헤더 메뉴 추가 |
+| **수정** | (1) `DashboardHeader` "알림톡" 메뉴 제거 (2) `App.tsx` `/alimtalk-templates` 라우트 제거 (3) `pages/AlimtalkTemplatesPage.tsx` 삭제 → `components/alimtalk/AlimtalkManagementSection.tsx`로 전환 (4) `KakaoRcsPage` 알림톡 탭 내부에 `<AlimtalkManagementSection />` 단일 렌더 |
+| **수정 파일** | DashboardHeader.tsx, App.tsx, KakaoRcsPage.tsx, (신규) AlimtalkManagementSection.tsx, (삭제) AlimtalkTemplatesPage.tsx |
+| **교훈** | 신규 페이지/라우트/메뉴 추가 전 기존 메뉴 구조 + 같은 기능 하는 탭·섹션 존재 여부 grep + 시각적 확인 필수 (D116 탭 하이라이트 사고 교훈과 동일 계열) |
+
+### B30-02: tp-deploy-full `Connection closed by port 22` 간헐 발생 🟡
+
+| 항목 | 내용 |
+|------|------|
+| **심각도** | 🟡 Major (배포 중단) |
+| **상태** | ✅ 수정완료 (2026-04-18 오후) |
+| **리포터** | Harold님 |
+| **증상** | 개선된 `tp-deploy-full` 실행 시 `Connection closed by 58.227.193.62 port 22`로 abort. 동시에 `ssh administrator@58.227.193.62 "echo OK"`는 성공 → 서버 정상, 프로필 문제 |
+| **근본 원인** | `$cmds = @(...) -join " && "` + `ssh remote $cmds` PowerShell 배열 패턴으로 긴 체인 전달 시 서버 sshd가 예외 처리 → 연결 종료. `bito-deploy-full`는 동일 패턴이지만 체인이 짧아 문제 없었음. tp는 backend+frontend+flyer-frontend 3패키지 연속이라 길이가 큼 |
+| **수정** | 기존 한 줄 쌍따옴표 방식으로 롤백. 내용만 확장(backend `npm install` + flyer-frontend 빌드 추가) |
+| **수정 파일** | `C:\Users\ceo\OneDrive\문서\WindowsPowerShell\Microsoft.PowerShell_profile.ps1` (로컬만, 커밋 대상 아님) |
+| **교훈** | PowerShell에서 SSH로 bash 체인을 전달할 때는 반드시 **한 줄 쌍따옴표** 방식. 배열 + `-join`은 짧은 체인에서만 안전. OPS.md에도 교훈 추가함 |
+
+### B30-03: `tp-deploy-full`에 `npm install` 누락 🟡
+
+| 항목 | 내용 |
+|------|------|
+| **심각도** | 🟡 Minor (의존성 추가 시마다 수동 개입 필요) |
+| **상태** | ✅ 수정완료 (2026-04-18) |
+| **리포터** | Harold님 + AI 발견 |
+| **증상** | backend `package.json`에 axios/form-data 추가 후 tp-deploy-full 실행 → 서버 tsc 빌드에서 `Cannot find module 'axios'` 에러 → 배포 중단. 별도로 서버 SSH 접속해 `npm install` 수동 실행 필요 |
+| **근본 원인** | 기존 tp-deploy-full 스크립트가 `git pull → npm run build → pm2 restart`만 수행. `npm install` 단계 부재 → package.json 변경 시마다 수동 해결 |
+| **수정** | tp-deploy-full에 `cd packages/backend && npm install && npm run build` 추가 (backend만 — 의존성 변경 잦음). frontend/flyer-frontend는 build만 유지 |
+| **교훈** | 의존성 추가 PR 전에 서버 배포 스크립트가 `npm install`을 포함하는지 먼저 확인. 미포함 시 스크립트 개선을 먼저 별도 PR로 분리 |
+
+### B30-04: `packages/backend/node_modules/.package-lock.json` Git tracked 🟢
+
+| 항목 | 내용 |
+|------|------|
+| **심각도** | 🟢 Low (배포 성공하지만 diff 노이즈) |
+| **상태** | 🔵 발견됨-미조치 (2026-04-18, 다음 세션 별도 처리) |
+| **리포터** | AI (배포 로그 관찰) |
+| **증상** | `tp-push` 커밋 diff에 `packages/backend/node_modules/.package-lock.json` 113줄 + 포함됨. 일반적으로 `node_modules/` 전체가 `.gitignore` 되어야 하는데 해당 파일이 과거 어느 시점에 실수 커밋된 후 tracked 상태 유지 |
+| **근본 원인** | `.gitignore`가 `node_modules/**`를 커버하지 못하거나, 해당 파일이 이미 tracked된 상태라 `git rm --cached` 필요 |
+| **수정 계획** | 다음 세션 별도 분리 작업: (1) `.gitignore` 점검 (2) `git rm --cached packages/backend/node_modules/.package-lock.json` (3) 같은 패턴 다른 파일 스캔 |
+| **교훈** | `.gitignore`에 `node_modules/` 추가했어도 이미 tracked된 파일은 `git rm --cached`로 명시 제거 필요 |
+
+---
+
+*D130 최종 업데이트: 2026-04-18 저녁 세션 종료. B30-01~03 ✅수정완료-배포대기, B30-04 🔵다음 세션 별도 처리. Day 2 착수 가이드는 [`status/D130-SESSION-HANDOFF.md`](D130-SESSION-HANDOFF.md) 참조.*

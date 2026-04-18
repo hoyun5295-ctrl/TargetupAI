@@ -56,7 +56,12 @@ export interface TemplateFormData {
 
 interface Props {
   template?: Partial<TemplateFormData> & { id?: string; template_code?: string } | null;
-  profiles: { id: string; profile_key: string; profile_name: string }[];
+  profiles: {
+    id: string;
+    profile_key: string;
+    profile_name: string;
+    approval_status?: string | null;
+  }[];
   categories: { category_code: string; name: string }[];
   onClose: () => void;
   onSuccess: () => void;
@@ -282,18 +287,40 @@ export default function AlimtalkTemplateFormV2({
                 <label className="block text-xs font-medium text-gray-600 mb-1">
                   발신 프로필 <span className="text-red-500">*</span>
                 </label>
-                <select
-                  value={form.profile_id}
-                  onChange={(e) => setForm({ ...form, profile_id: e.target.value })}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm"
-                >
-                  <option value="">선택</option>
-                  {profiles.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.profile_name} ({p.profile_key.slice(0, 10)}…)
-                    </option>
-                  ))}
-                </select>
+                {(() => {
+                  const approvedProfiles = profiles.filter(
+                    (p) => (p.approval_status || 'PENDING_APPROVAL') === 'APPROVED',
+                  );
+                  const hasAny = profiles.length > 0;
+                  const hasApproved = approvedProfiles.length > 0;
+                  return (
+                    <>
+                      <select
+                        value={form.profile_id}
+                        onChange={(e) => setForm({ ...form, profile_id: e.target.value })}
+                        disabled={!hasApproved}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm disabled:bg-gray-100 disabled:text-gray-400"
+                      >
+                        <option value="">선택</option>
+                        {approvedProfiles.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.profile_name} ({p.profile_key.slice(0, 10)}…)
+                          </option>
+                        ))}
+                      </select>
+                      {!hasAny && (
+                        <p className="mt-1 text-[11px] text-red-600">
+                          등록된 발신프로필이 없습니다. 슈퍼관리자에게 등록을 요청해주세요.
+                        </p>
+                      )}
+                      {hasAny && !hasApproved && (
+                        <p className="mt-1 text-[11px] text-amber-600">
+                          승인된 발신프로필이 없습니다. 슈퍼관리자 승인 후 사용할 수 있습니다.
+                        </p>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">
