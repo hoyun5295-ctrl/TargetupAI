@@ -76,7 +76,9 @@ import { LIMITS } from './config/defaults';
 import path from 'path';
 
 const app = express();
-app.set('trust proxy', true);
+// ★ trust proxy: 'loopback'(127.0.0.1)만 신뢰 → Nginx가 앞단에 있어 여기만 허용
+//   이전 true 설정은 모든 프록시 신뢰로 X-Forwarded-For 헤더 위조 시 rate limit 우회 가능
+app.set('trust proxy', 'loopback');
 const PORT = process.env.PORT || 3000;
 
 // ★ 전단AI 공개 페이지 — helmet(CSP) 전에 마운트 (인라인 스크립트 필요)
