@@ -102,10 +102,9 @@ if (maxAge) {
   params.push(Number(maxAge));
 }
 if (grade) {
-  const grf = buildGradeFilter(String(grade), paramIndex);
-  whereClause += grf.sql;
-  params.push(...grf.params);
-  paramIndex = grf.nextIndex;
+  // ★ D131 후속(2026-04-21): 원본 보존 — variant 확장 제거, DB 저장값과 정확히 일치하는 것만 매칭
+  whereClause += ` AND grade = $${paramIndex++}`;
+  params.push(String(grade));
 }
 // ★ B17-01: 수신거부 user_id 기준 통일
 if (smsOptIn === 'true') {
@@ -812,10 +811,9 @@ router.post('/filter-count', async (req: Request, res: Response) => {
         }
       }
       if (grade) {
-        const grf = buildGradeFilter(String(grade), paramIndex);
-        whereClause += grf.sql;
-        params.push(...grf.params);
-        paramIndex = grf.nextIndex;
+        // ★ D131 후속(2026-04-21): 원본 보존 — variant 확장 제거
+        whereClause += ` AND grade = $${paramIndex++}`;
+        params.push(String(grade));
       }
       if (region) {
         const regionResult = buildRegionFilter(String(region), paramIndex);
@@ -914,10 +912,9 @@ router.post('/extract', async (req: Request, res: Response) => {
         }
       }
       if (grade) {
-        const grf = buildGradeFilter(String(grade), paramIndex);
-        whereClause += grf.sql;
-        params.push(...grf.params);
-        paramIndex = grf.nextIndex;
+        // ★ D131 후속(2026-04-21): 원본 보존 — variant 확장 제거
+        whereClause += ` AND grade = $${paramIndex++}`;
+        params.push(String(grade));
       }
       if (region) {
         const regionResult = buildRegionFilter(String(region), paramIndex);

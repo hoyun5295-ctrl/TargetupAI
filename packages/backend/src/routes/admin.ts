@@ -18,6 +18,7 @@ const router = Router();
 // 전체 사용자 목록 조회
 router.get('/users', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
+    // ★ D131 후속(2026-04-21): system_sync_xxx Sync Agent 가상 계정 목록 노출 제외
     const result = await query(`
       SELECT
         u.id, u.login_id, u.name, u.email, u.phone, u.department,
@@ -31,6 +32,7 @@ router.get('/users', authenticate, requireSuperAdmin, async (req: Request, res: 
       FROM users u
       LEFT JOIN companies c ON u.company_id = c.id
       LEFT JOIN sms_line_groups lg ON u.line_group_id = lg.id
+      WHERE COALESCE(u.is_system, false) = false
       ORDER BY u.created_at DESC
     `);
     
@@ -62,8 +64,9 @@ router.post('/users', authenticate, requireSuperAdmin, async (req: Request, res:
       [companyId]
     );
     if (companyResult.rows.length > 0 && companyResult.rows[0].max_users) {
+      // ★ D131 후속: max_users 상한 체크에서 system 가상 계정 제외
       const userCountResult = await query(
-        'SELECT COUNT(*) FROM users WHERE company_id = $1 AND is_active = true',
+        'SELECT COUNT(*) FROM users WHERE company_id = $1 AND is_active = true AND COALESCE(is_system, false) = false',
         [companyId]
       );
       const currentUsers = parseInt(userCountResult.rows[0].count);
@@ -345,7 +348,7 @@ router.get('/companies/:id', authenticate, requireSuperAdmin, async (req: Reques
     const result = await query(`
       SELECT c.*, p.plan_name,
         (SELECT COUNT(*) FROM customers WHERE company_id = c.id) as total_customers,
-        (SELECT COUNT(*) FROM users WHERE company_id = c.id) as total_users
+        (SELECT COUNT(*) FROM users WHERE company_id = c.id AND COALESCE(is_system, false) = false) as total_users
       FROM companies c
       LEFT JOIN plans p ON c.plan_id = p.id
       WHERE c.id = $1

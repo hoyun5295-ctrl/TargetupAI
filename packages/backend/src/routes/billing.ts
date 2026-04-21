@@ -470,9 +470,10 @@ router.get('/list', async (req: Request, res: Response) => {
 // GET /company-users/:companyId - 고객사 사용자 목록
 router.get('/company-users/:companyId', async (req: Request, res: Response) => {
   try {
+    // ★ D131 후속: billing 고객사 사용자 목록에서 system 가상 계정 제외
     const result = await pool.query(
       `SELECT id, name, login_id, department, role
-       FROM users WHERE company_id = $1 AND is_active = true
+       FROM users WHERE company_id = $1 AND is_active = true AND COALESCE(is_system, false) = false
        ORDER BY name`,
       [req.params.companyId]
     );

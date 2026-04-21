@@ -167,10 +167,11 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
             params.push(...gf.params);
             paramIndex = gf.nextIndex;
           } else if (field === 'grade') {
-            const grf = buildGradeFilter(String(value), paramIndex);
-            sql += grf.sql;
-            params.push(...grf.params);
-            paramIndex = grf.nextIndex;
+            // ★ D131 후속(2026-04-21): 원본 보존 원칙 — variant 확장(getGradeVariants) 제거.
+            //   DB에 저장된 원본 값(예: '골든')과 사용자 선택값('골든')이 정확히 일치해야 매칭.
+            //   filter-options API가 DISTINCT grade 기반 드롭다운 제공하므로 오입력 없음.
+            sql += ` AND ${col(alias, field)} = $${paramIndex++}`;
+            params.push(value);
           } else if (field === 'region') {
             const rf = buildRegionFilter(String(value), paramIndex);
             sql += rf.sql;
@@ -380,21 +381,20 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
     params.push(Number(maxAge));
   }
 
-  // grade (normalize.ts 변형값 매칭) — alias 미적용 (헬퍼가 직접 생성)
+  // ★ D131 후속(2026-04-21): grade는 원본 보존 — variant 확장(buildGradeFilter/getGradeVariants) 제거.
+  //   DB에 저장된 원본 값과 필터 입력값이 정확히 일치해야 매칭.
+  //   AI는 filter-options API(DB DISTINCT)를 통해 실제 고객사 원본 값으로 filter 생성.
   const gradeFilter = filters.grade;
   const grade = getValue(gradeFilter);
   if (grade) {
     const gradeOp = gradeFilter?.operator || 'eq';
     if (gradeOp === 'in' && Array.isArray(grade)) {
-      const gradeResult = buildGradeFilter(grade, paramIndex);
-      sql += gradeResult.sql;
-      params.push(...gradeResult.params);
-      paramIndex = gradeResult.nextIndex;
+      const placeholders = grade.map(() => `$${paramIndex++}`).join(', ');
+      sql += ` AND grade IN (${placeholders})`;
+      params.push(...grade);
     } else {
-      const gradeResult = buildGradeFilter(String(grade), paramIndex);
-      sql += gradeResult.sql;
-      params.push(...gradeResult.params);
-      paramIndex = gradeResult.nextIndex;
+      sql += ` AND grade = $${paramIndex++}`;
+      params.push(String(grade));
     }
   }
 

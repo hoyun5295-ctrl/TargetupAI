@@ -280,10 +280,11 @@ router.get('/company-users', async (req: Request, res: Response) => {
       return res.status(401).json({ success: false, error: '인증 필요' });
     }
 
+    // ★ D131 후속: 사용자 목록에서 system_sync 가상 계정 제외
     const result = await query(
       `SELECT id, name, email, user_type, store_codes
        FROM users
-       WHERE company_id = $1 AND is_active = true
+       WHERE company_id = $1 AND is_active = true AND COALESCE(is_system, false) = false
        ORDER BY user_type ASC, name ASC`,
       [companyId]
     );

@@ -24,19 +24,23 @@ router.get('/', async (req: Request, res: Response) => {
   try {
     const companyScope = getCompanyScope(req);
 
+    // ★ D131 후속(2026-04-21): system_sync_xxx 가상 계정(Sync Agent 인증용)은 UI 목록에서 제외.
+    //   회사 생성 시 companies.ts에서 `user_type='system', is_system=true`로 자동 INSERT됨.
+    //   사용자 관리 화면(고객사관리자/슈퍼관리자)에 노출되면 실제 사용자 수 오인 + 레이아웃 깨짐(긴 UUID).
     let sql = `
-      SELECT 
+      SELECT
         u.id, u.login_id, u.name, u.email, u.phone, u.department,
         u.user_type, u.status, u.company_id, u.last_login_at, u.created_at,
         u.store_codes,
         c.company_name, c.store_code_list
       FROM users u
       LEFT JOIN companies c ON u.company_id = c.id
+      WHERE COALESCE(u.is_system, false) = false
     `;
     const params: any[] = [];
 
     if (companyScope) {
-      sql += ' WHERE u.company_id = $1';
+      sql += ' AND u.company_id = $1';
       params.push(companyScope);
     }
 
@@ -101,8 +105,9 @@ router.post('/', async (req: Request, res: Response) => {
       [targetCompanyId]
     );
     if (companyCheck.rows.length > 0 && companyCheck.rows[0].max_users) {
+      // ★ D131 후속: max_users 상한 체크에서 system 가상 계정 제외
       const userCount = await pool.query(
-        'SELECT COUNT(*) FROM users WHERE company_id = $1 AND is_active = true',
+        'SELECT COUNT(*) FROM users WHERE company_id = $1 AND is_active = true AND COALESCE(is_system, false) = false',
         [targetCompanyId]
       );
       const currentUsers = parseInt(userCount.rows[0].count);
