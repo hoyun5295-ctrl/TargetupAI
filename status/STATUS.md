@@ -137,12 +137,44 @@
 > - Agent uncaughtException 핸들러 점검 (version check 500에서 복구 로직)
 > - `sync_logs.failures` JSONB 기록 경로 검증
 >
-> **🚨 다음 세션 최우선 과제 — Agent v1.5.1 CWD 패치:**
+> **🚨 다음 세션 최우선 과제 — Agent v1.5.1 CWD 패치:** ✅ **2026-04-21 저녁 세션 완료**
 > - 지시서: [`status/SYNC-AGENT-CWD-PATCH-v1.5.1.md`](SYNC-AGENT-CWD-PATCH-v1.5.1.md)
 > - 증상: Windows 서비스로 실행 시 1053 에러 (cwd=System32 → config/data 경로 틀어짐)
-> - 수정: `sync-agent/src/index.ts` 최상단에 `process.chdir(path.dirname(process.execPath))` 추가 (3줄)
-> - 빌드 후 수란님(서수란)에게 새 exe 전달 → 재설치 → Windows 서비스 정상 작동 검증
-> - **세션 시작 시 이 지시서만 보고 바로 실행. 추측/우회 탐색 금지.**
+> - 수정: `sync-agent/src/index.ts` 최상단에 `process.chdir(path.dirname(process.execPath))` 추가 (3줄) — 배포 완료
+
+---
+
+### 🔥 D131 (2026-04-21 저녁) — Agent v1.5.1 + 알림톡 IMC 6005 + 담당자테스트 9007 + PPT 9건 일괄 처리
+
+> **세션 기록:** [`.claude/projects/.../memory/project_d131.md`](../.claude/projects/C--Users-ceo-projects-targetup/memory/project_d131.md) — 8섹션 전수 기록
+>
+> **싱크에이전트 v1.5.1** (수란님 긴급):
+> - Windows 서비스 1053 에러 cwd 교정 (patch 3줄)
+> - 버전 0.1.0 → 1.5.1 통일 (6곳)
+> - **normalize 전면 미러링**: `sync-agent/src/normalize/index.ts`를 백엔드 `utils/normalize.ts`와 1:1 복제 + `field-map.ts` 신설 + 개별 6파일 삭제. 서수란 팀장 제보(포인트 "1,800"→NULL, 등급 한글→영문) 근본 해결.
+> - 빌드: `sync-agent.exe` v1.5.1 (113.9MB) + `SyncAgent-Setup-1.5.1.exe` NSIS (19.4MB). 구버전 삭제 완료.
+>
+> **알림톡 IMC 템플릿 등록 6005 해결**:
+> - 근본: `templateKey` 길이. IMC 공식 문서 128자 표기 but 실제 20자 (휴머스온 인정). `T{base36}` 20자 교정.
+> - `handleImcError` IMC 응답 body + `createAlimtalkTemplate` 요청/응답 로깅 추가 (이전엔 서버 로그 0건).
+> - 이중 래핑 자동 unwrap (D130 §2-1 블로커 해결).
+> - 부수: 검수 알림 수신자 10→3명 + name 필수 + 동일 yellow_id 중복 등록 409 + `customSenderKey` UI/백엔드 제거 + `SenderData` 11필드 확장 + `listSenders` 파라미터 스펙 준수 + `syncSenderStatusJob`에 uuid→yellow_id 동기화.
+>
+> **담당자 테스트 9007 파일 오류** (37% 실패, 서수란 팀장 제보):
+> - 근본: MMS + 이미지 0장 → QTmsg Agent가 파일 없음 → status_code=9007 반려 → 단말 미도달.
+> - **3계층 가드**: `utils/mms-validator.ts` 컨트롤타워 신설 (인라인 3곳 작성 후 Harold님 지적받아 리팩터) → 라우트 3곳(test-send/direct-send/POST /) CT 호출 + `insertTestSmsQueue` throw + 프론트 4곳(handleTestSend/handleTargetTestSend/executeTargetSend/handleAiCampaignSend selectedChannel 교정).
+>
+> **PPT 9건 일괄 수정** (서수란 팀장):
+> - #2 SMS 광고 빈줄 `\n\n→\n` (buildAdMessage 백/프론트 미러) · #4 맞춤한줄 MMS 이미지명 · #5 엑셀 수신확인시간 헤더 제거 · #6 취소건 `(예약취소)` · #7 MMS 미리보기 일관성 · #8 기간조회 limit 50→2000 · #9 예약대기 이미지명 · #10 자동발송 스팸필터 샘플 callback 폴백
+>
+> **FileUploadMappingModal violet 톤업** (전단AI 스타일 이식):
+> - 헤더 그라디언트 + AI 이모지 뱃지 · 드래그/드롭 영역 + SVG 스피너 + 3단계 dots + 진행바 · 안내카드 드래그영역 밖 분리(눌린 느낌 수정) · rounded-2xl + 그림자
+>
+> **DB 정리**: `kakao_sender_profiles` truncated row 1건 삭제 완료.
+>
+> **메모리 반영**: `feedback_mirror_hanjul_standard.md` D131 추가 교훈 — Agent 미러 범위는 파일 단위로 전체 복제, 개별 분기 금지.
+>
+> **배포 대기**: Harold님 `tp-push` + `tp-deploy-full` + 수란님 exe 전달 + NSIS Setup 배포.
 
 ---
 
