@@ -291,10 +291,12 @@ async function main(): Promise<void> {
       log.info('🧪 DRY RUN — 스케줄러 없이 종료');
     }
   } else {
+    // ★ D131 후속(2026-04-21): HeartbeatManager 생성하되 첫 send()는 나중으로 미룸.
+    //   scheduler 생성 + setCommandHandler 등록 후에 전송해야 commands 수신 시 실제 실행됨.
+    //   (기존 순서: new Heartbeat → send → new Scheduler → setCommandHandler → 첫 heartbeat가 handler 없이 실행되어 명령 유실)
     let heartbeat: HeartbeatManager | null = null;
     if (apiClient) {
       heartbeat = new HeartbeatManager(apiClient, syncState, queue, config, alertManager);
-      await heartbeat.send();
     }
 
     // ★ v1.4.1: 구매 테이블 빈 문자열이면 enablePurchase=false (구매 동기화 자체를 스킵)
@@ -318,6 +320,11 @@ async function main(): Promise<void> {
       heartbeat.setCommandHandler((commands) => {
         scheduler.applyRemoteConfig({ commands });
       });
+    }
+
+    // ★ D131 후속: 모든 handler 등록 완료 후 첫 heartbeat 전송 (명령 즉시 실행 가능)
+    if (heartbeat) {
+      await heartbeat.send();
     }
 
     scheduler.start();

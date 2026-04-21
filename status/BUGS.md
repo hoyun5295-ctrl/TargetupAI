@@ -2807,3 +2807,57 @@ Agent 문제 대응 시 필요.
 - Agent 식별은 `agent_name + company_id`. 자동 유니크 제약은 실전 운영 유연성(여러 매장 대응)과 충돌
 - 삭제는 수동 + 안전장치(활성 Agent 차단) 병행이 운영 안전 위 유리
 - `sync_logs` CASCADE 동작은 스키마 DDL에 이미 정의되어 있어야 함 — 만약 없으면 삭제 실패 → DDL 확인 필요
+
+---
+
+### B31-05: heartbeat 응답의 명령 전달 파이프라인 누락 (F31-01 1차 누락, 2차 실행 순서)
+
+| 항목 | 내용 |
+|------|------|
+| **심각도** | 🔴 Critical (F31-01 pause/resume이 실제로는 동작 안 하던 상태) |
+| **상태** | 🟡 수정완료-배포대기 (2026-04-21) |
+| **리포터** | Harold님 WSL 재테스트 중 발견 |
+| **증상** | pause 명령 등록 후 Agent 재실행 → `commandHandler 미등록 — 명령 실행 불가` 워닝 → 명령 유실 (백엔드는 전달과 함께 큐 비움) |
+
+**근본 원인 (2단계)**:
+1. **1차**: 백엔드 `/api/sync/heartbeat` 라우트가 `sync_agents.config.commands`를 응답에 담지 않음. Agent의 `HeartbeatManager.send()`는 commands 처리 TODO로 방치. 싱크 요청(customers/purchases)에서만 commands 전달되는데 데이터 0건이면 요청 자체 없어 명령 영영 수신 불가.
+2. **2차 (1차 수정 후 발견)**: Agent `index.ts`에서 `heartbeat.send()`가 `scheduler` 생성 및 `heartbeat.setCommandHandler()` 등록 **전**에 호출되어, 첫 heartbeat 응답의 commands가 handler 없는 상태로 도달 → 실행 불가 + 백엔드가 전달 시 큐 비웠으므로 **명령 유실**.
+
+**수정 내역**:
+
+**백엔드** ([packages/backend/src/routes/sync.ts:409-451](packages/backend/src/routes/sync.ts:409)):
+- heartbeat 라우트 UPDATE에 `RETURNING config` 추가
+- `currentConfig.commands` 꺼내 응답 최상위 `remoteConfig: { commands: [...] }` 실어 전달
+- 전달 성공 시 큐 비움 (At-Most-Once 의도 — 중복 실행 방지)
+
+**Agent 타입** ([sync-agent/src/types/api.ts:11-22](sync-agent/src/types/api.ts:11)):
+- `ApiResponse`에 `remoteConfig?: RemoteConfig` + `detail?: string` 추가
+
+**Agent API 클라이언트** ([sync-agent/src/api/client.ts](sync-agent/src/api/client.ts)):
+- axios error interceptor에 `serverDetail` 추출 (B31-02 원인 추적용)
+- `heartbeat()` 응답 최상위 `remoteConfig`를 `HeartbeatResponse`에 병합
+
+**Agent heartbeat** ([sync-agent/src/heartbeat/index.ts](sync-agent/src/heartbeat/index.ts)):
+- `setCommandHandler(handler)` 퍼블릭 메서드
+- 응답의 commands 수신 시 TODO 제거하고 실제 `this.commandHandler(commands)` 호출
+- handler 미등록 시 warn 로그 (디버깅 보조)
+
+**Agent 메인** ([sync-agent/src/index.ts](sync-agent/src/index.ts)):
+- ★ **순서 변경**: `new HeartbeatManager` → `new Scheduler` → `setRemoteConfigHandler` → **`setCommandHandler`** → `await heartbeat.send()` → `scheduler.start()`
+- 첫 heartbeat가 모든 handler 등록 완료 후 실행되도록 조정 — 명령 수신 시 즉시 실행 가능
+
+**At-Most-Once vs At-Least-Once 트레이드오프**:
+- 현재: 백엔드가 commands 응답 시 즉시 큐 비움 → Agent 수신 실패 시 명령 유실 (At-Most-Once)
+- Phase 2 개선 방향: Agent가 명령 수행 후 ACK 엔드포인트 호출 → 서버가 ACK 받은 후에만 큐 비움 (At-Least-Once). 지금은 Agent 쪽에서 실패 케이스 없게 실행 순서만 보장
+
+**검증 시나리오**:
+1. UI에서 pause 명령 등록
+2. Agent 재실행
+3. 첫 heartbeat 발송 → 응답 `remoteConfig.commands` 수신 → `scheduler.applyRemoteConfig` → `processCommands` → pause 실행
+4. Agent 로그에 `⏸️ 스케줄러 일시정지 (heartbeat는 유지)` 출력
+5. 다음 heartbeat에서 `status: 'paused'` 전송 → UI 뱃지 `⏸ 일시정지`
+
+**교훈**:
+- 핸들러/콜백 기반 설계에서 **초기 호출 시점과 핸들러 등록 시점의 순서**는 반드시 검증. "생성 → 즉시 실행 → 나중에 handler 등록" 패턴은 첫 실행 기회를 날림
+- At-Most-Once / At-Least-Once 선택은 문서화 필수. 명령 유실 가능성은 운영 사고로 이어질 수 있음
+- TODO 주석이 남아있는 코드 경로는 **테스트 통과 전 반드시 실제 구현** — 이 케이스는 "Agent 실행 로그에 `수신` 메시지는 찍히는데 실제 실행 안 되는" 함정 유발
