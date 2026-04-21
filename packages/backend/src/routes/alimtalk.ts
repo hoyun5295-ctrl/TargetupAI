@@ -183,10 +183,10 @@ router.post(
         phoneNumber,
         categoryCode,
         topSenderKeyYn,
-        customSenderKey,
         companyId: targetCompanyIdInBody,
         profileName,
       } = req.body || {};
+      // D131: customSenderKey 파라미터 폐지. 휴머스온 IMC가 senderKey를 API로 자동 발급.
 
       if (!token || !yellowId || !phoneNumber || !categoryCode) {
         return res.status(400).json({
@@ -205,13 +205,29 @@ router.post(
         return res.status(400).json({ success: false, error: 'companyId 필요' });
       }
 
+      // D131: 동일 회사 내 동일 yellow_id 발신프로필 중복 등록 방지 (Harold님 지시).
+      //       IMC 측에서 동일 채널로 재등록 시도해도 key가 바뀌어 DB에 row만 늘어나는 문제 방지.
+      const dup = await query(
+        `SELECT id, profile_key, approval_status, status
+           FROM kakao_sender_profiles
+          WHERE company_id = $1 AND yellow_id = $2
+          LIMIT 1`,
+        [targetCompanyId, yellowId],
+      );
+      if (dup.rows.length > 0) {
+        return res.status(409).json({
+          success: false,
+          error: `이미 등록된 발신프로필입니다 (${yellowId}). 기존 프로필을 사용하거나 삭제 후 재등록 하세요.`,
+          existingProfileId: dup.rows[0].id,
+        });
+      }
+
       const r = await imc.createSender({
         token,
         yellowId,
         phoneNumber,
         categoryCode,
         topSenderKeyYn,
-        customSenderKey,
       });
       if (r.code !== '0000' || !r.data?.senderKey) {
         return res.status(400).json({ success: false, code: r.code, error: r.message });
@@ -251,7 +267,7 @@ router.post(
           categoryCode,
           categoryNameCache,
           topSenderKeyYn || 'N',
-          customSenderKey || null,
+          null, // D131: custom_sender_key 폐지 — IMC가 자동 발급
           r.data.status || 'NORMAL',
           approvalStatus,
           isSuperAdmin ? new Date() : null,
@@ -1430,16 +1446,20 @@ router.post(
       if (!phoneNumber) {
         return res.status(400).json({ success: false, error: 'phoneNumber 필수' });
       }
-      // 회사당 10명 제한 (IMC 정책과 동일)
+      // D131: IMC 스펙상 name은 required (10_56_14_문자 관리.txt).
+      if (!name || !String(name).trim()) {
+        return res.status(400).json({ success: false, error: '수신자 이름은 필수입니다' });
+      }
+      // D131: 회사당 3명 제한 (Harold님 지시, IMC 정책 10명 대비 한줄로는 3명으로 제한)
       const cnt = await query(
         `SELECT COUNT(*)::int AS c FROM kakao_alarm_users
           WHERE company_id = $1 AND COALESCE(active_yn,'Y') = 'Y'`,
         [companyId],
       );
-      if ((cnt.rows[0]?.c ?? 0) >= 10 && (activeYn || 'Y') === 'Y') {
+      if ((cnt.rows[0]?.c ?? 0) >= 3 && (activeYn || 'Y') === 'Y') {
         return res.status(400).json({
           success: false,
-          error: '활성 알림 수신자는 회사당 최대 10명입니다',
+          error: '활성 알림 수신자는 최대 3명까지 등록 가능합니다',
         });
       }
       // ★ IMC 실제 스펙 검증 (10_56_14_문자 관리.txt):

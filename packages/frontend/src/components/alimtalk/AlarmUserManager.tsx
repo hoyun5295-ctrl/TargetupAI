@@ -1,8 +1,11 @@
 /**
  * 알림톡 검수 결과 알림 수신자 관리 (고객사)
  *
- * 최대 10명 (IMC 정책).
+ * 최대 3명 (한줄로 정책 — Harold님 지시 D131).
+ * IMC 자체 정책은 10명이지만, 한줄로는 운영 단순화를 위해 3명으로 제한.
  */
+
+const MAX_ALARM_USERS = 3;
 
 import { useEffect, useState } from 'react';
 
@@ -52,6 +55,10 @@ export default function AlarmUserManager({ onClose }: Props) {
 
   const add = async () => {
     setErr(null);
+    if (activeCount >= MAX_ALARM_USERS) {
+      return setErr(`검수 알림 수신자는 최대 ${MAX_ALARM_USERS}명까지 등록 가능합니다`);
+    }
+    if (!newName.trim()) return setErr('수신자 이름을 입력하세요 (IMC 필수)');
     if (!/^01\d{8,9}$/.test(newPhone.replace(/\D/g, '')))
       return setErr('휴대폰 번호 형식을 확인하세요');
     setAdding(true);
@@ -113,7 +120,7 @@ export default function AlarmUserManager({ onClose }: Props) {
           <div>
             <h2 className="text-lg font-bold text-gray-900">검수 알림 수신자</h2>
             <p className="text-xs text-gray-500 mt-0.5">
-              활성 {activeCount}/10명 · 템플릿 검수 결과 카톡 알림 대상
+              활성 {activeCount}/{MAX_ALARM_USERS}명 · 템플릿 검수 결과 카톡 알림 대상
             </p>
           </div>
           <button
@@ -128,13 +135,13 @@ export default function AlarmUserManager({ onClose }: Props) {
         <div className="px-6 py-3 border-b bg-gray-50 flex gap-2 items-end">
           <div className="flex-1">
             <label className="block text-[11px] font-medium text-gray-600 mb-1">
-              이름
+              이름 <span className="text-red-500">*</span>
             </label>
             <input
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
               maxLength={30}
-              placeholder="(선택)"
+              placeholder="홍길동"
               className="w-full border border-gray-300 rounded px-2 py-1 text-sm"
             />
           </div>
@@ -152,7 +159,7 @@ export default function AlarmUserManager({ onClose }: Props) {
           </div>
           <button
             type="button"
-            disabled={adding || activeCount >= 10}
+            disabled={adding || activeCount >= MAX_ALARM_USERS}
             onClick={add}
             className="px-4 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded text-sm disabled:opacity-50"
           >

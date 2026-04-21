@@ -263,10 +263,16 @@ export async function syncSenderStatusJob(): Promise<void> {
     return;
   }
 
-  let rows: Array<{ id: string; profile_key: string; status: string }> = [];
+  // D131: yellow_id / category_name_cache 도 함께 동기화 (IMC uuid → yellow_id)
+  let rows: Array<{
+    id: string;
+    profile_key: string;
+    status: string | null;
+    yellow_id: string | null;
+  }> = [];
   try {
     const res = await query(
-      `SELECT id, profile_key, status
+      `SELECT id, profile_key, status, yellow_id
          FROM kakao_sender_profiles
         WHERE profile_key IS NOT NULL
           AND COALESCE(status, 'PENDING') NOT IN ('DELETED')
@@ -287,14 +293,19 @@ export async function syncSenderStatusJob(): Promise<void> {
       if (res.code !== '0000' || !res.data) continue;
 
       const latestStatus = res.data.status;
-      if (!latestStatus || latestStatus === row.status) continue;
+      const latestUuid = res.data.uuid;
+
+      const statusChanged = latestStatus && latestStatus !== row.status;
+      const uuidChanged = latestUuid && latestUuid !== row.yellow_id;
+      if (!statusChanged && !uuidChanged) continue;
 
       await query(
         `UPDATE kakao_sender_profiles
-            SET status     = $1,
+            SET status     = COALESCE($1, status),
+                yellow_id  = COALESCE($2, yellow_id),
                 updated_at = now()
-          WHERE id = $2`,
-        [latestStatus, row.id],
+          WHERE id = $3`,
+        [latestStatus || null, latestUuid || null, row.id],
       );
       updated++;
     } catch (err) {

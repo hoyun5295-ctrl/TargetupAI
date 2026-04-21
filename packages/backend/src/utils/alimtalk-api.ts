@@ -126,21 +126,49 @@ export interface SenderCreateRequest {
   phoneNumber: string;
   categoryCode: string;
   topSenderKeyYn?: 'Y' | 'N';
-  customSenderKey?: string;
+  // D131: customSenderKey 폐지 — IMC가 자동 발급
 }
 
+/**
+ * SenderData — IMC 실 응답 필드 (11_04_55, 11_05_12 스펙 대조 완료 D131).
+ * 실제 응답 예시 (D131 운영 서버 실측):
+ *   { senderKey, uuid:"@invitocorp", name, status:"A", block, dormant,
+ *     profileStatus:"A", category, alimtalk, brandMessage, bizchat, brandtalk,
+ *     unsubscribePhoneNumber, unsubscribeAuthNumber, topSenderKey, topSenderKeyYn,
+ *     customSenderKey, createdAt, modifiedAt, channelKey, businessProfile,
+ *     commitalCompanyName, businessType, marketingAgreeFileUrl }
+ */
 export interface SenderData {
   senderKey: string;
-  yellowId: string;
-  status: string;
+  uuid?: string;                // IMC: 플러스친구 채널 ID (우리 DB yellow_id에 대응)
+  name?: string;                // 채널 이름
+  status: string;               // 프로필 상태 (A:정상, S, D:삭제)
+  profileStatus?: string;       // 플러스친구 상태 (A/C/B/E/D)
   phoneNumber?: string;
   categoryCode?: string;
+  category?: string;            // 업종 구분 코드 (0~9자)
   customSenderKey?: string;
+  topSenderKey?: string;
   topSenderKeyYn?: 'Y' | 'N';
+  alimtalk?: boolean;           // 알림톡 사용 여부 ← 6005 원인 식별용 핵심 필드
+  brandMessage?: boolean;       // 브랜드메시지 사용 여부
+  bizchat?: boolean;
+  brandtalk?: boolean;
+  block?: boolean;
+  dormant?: boolean;
+  businessProfile?: boolean;
+  businessType?: string | null;
+  channelKey?: string | null;
+  commitalCompanyName?: string | null;
   unsubscribePhoneNumber?: string;
   unsubscribeAuthNumber?: string;
+  marketingAgreeFileUrl?: string;
   registeredAt?: string;
   updatedAt?: string;
+  createdAt?: string;
+  modifiedAt?: string;
+  // 하위호환: IMC 응답에 yellowId 대신 uuid가 내려오지만, 기존 호출부와 호환 위해 유지
+  yellowId?: string;
   [key: string]: any;
 }
 
@@ -158,8 +186,30 @@ export async function createSender(
   return res.data;
 }
 
+/**
+ * 발신프로필 목록 조회 — IMC 공식 파라미터 (11_04_55_발신프로필 목록 조회.txt 대조 D131)
+ *   정식 필드: name, profileStatus, senderKey, status, uuid, customSenderKey,
+ *             block, dormant, alimtalk, brandMessage, category, categoryCode,
+ *             page(0~), size(1~100)
+ *   과거 잘못된 필드명(count, yellowId)을 IMC 스펙에 맞춰 교정.
+ */
 export async function listSenders(
-  params: { page?: number; count?: number; yellowId?: string; status?: string } = {},
+  params: {
+    name?: string;
+    profileStatus?: string;
+    senderKey?: string;
+    status?: string;
+    uuid?: string;
+    customSenderKey?: string;
+    block?: boolean;
+    dormant?: boolean;
+    alimtalk?: boolean;
+    brandMessage?: boolean;
+    category?: string;
+    categoryCode?: string;
+    page?: number;
+    size?: number;
+  } = {},
 ): Promise<ImcResponse<{ list: SenderData[]; total?: number }>> {
   const res = await getClient().get('/kakao-management/api/v1/sender', { params });
   return res.data;

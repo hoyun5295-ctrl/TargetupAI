@@ -54,7 +54,8 @@ export default function SenderRegistrationWizard({
 
   // Step 3
   const [token, setToken] = useState('');
-  const [customSenderKey, setCustomSenderKey] = useState('');
+  // D131: customSenderKey 필드 제거. 휴머스온 IMC가 senderKey를 API로 자동 발급하므로
+  //       고객사 직접 입력 항목 불필요 (기존 고객사는 인비토가 일괄 등록).
 
   // 카테고리 (3단 트리)
   const [categories, setCategories] = useState<CategoryNode[]>([]);
@@ -134,7 +135,6 @@ export default function SenderRegistrationWizard({
           categoryCode,
           companyId: targetCompanyId,
           profileName: profileName || yellowId,
-          customSenderKey: customSenderKey || undefined,
         }),
       });
       const data = await res.json();
@@ -279,15 +279,6 @@ export default function SenderRegistrationWizard({
                 )}
               </div>
 
-              <StepGrid label="고객사 발신프로필 키 (선택)">
-                <input
-                  value={customSenderKey}
-                  onChange={(e) => setCustomSenderKey(e.target.value)}
-                  maxLength={40}
-                  placeholder="임의 지정 (선택)"
-                  className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm"
-                />
-              </StepGrid>
             </>
           )}
 
