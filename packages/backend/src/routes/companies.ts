@@ -895,14 +895,14 @@ router.post('/:id/grant-trial', requireSuperAdmin, async (req: Request, res: Res
       return res.status(404).json({ error: '고객사를 찾을 수 없습니다.' });
     }
 
-    // PRO plan id 조회
-    const proRes = await query(
-      `SELECT id FROM plans WHERE plan_code = 'PRO' AND is_active = true LIMIT 1`,
+    // TRIAL plan id 조회 (무료체험 전용 plan — PRO와 동일 기능)
+    const trialRes = await query(
+      `SELECT id FROM plans WHERE plan_code = 'TRIAL' AND is_active = true LIMIT 1`,
     );
-    if (proRes.rows.length === 0) {
-      return res.status(500).json({ error: 'PRO 요금제가 존재하지 않습니다. 슈퍼관리자에게 문의하세요.' });
+    if (trialRes.rows.length === 0) {
+      return res.status(500).json({ error: '무료체험(TRIAL) 요금제가 존재하지 않습니다. 슈퍼관리자에게 문의하세요.' });
     }
-    const proPlanId = proRes.rows[0].id;
+    const trialPlanId = trialRes.rows[0].id;
 
     const updated = await query(
       `UPDATE companies
@@ -912,7 +912,7 @@ router.post('/:id/grant-trial', requireSuperAdmin, async (req: Request, res: Res
               updated_at          = NOW()
         WHERE id = $3
       RETURNING id, plan_id, subscription_status, trial_expires_at`,
-      [proPlanId, days, id],
+      [trialPlanId, days, id],
     );
 
     return res.json({

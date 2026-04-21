@@ -44,7 +44,7 @@ export async function runTrialDowngradeJob(): Promise<{ downgraded: number }> {
   }
   const freePlanId = freeRes.rows[0].id;
 
-  // 만료 대상 일괄 강등
+  // 만료 대상 일괄 강등 (plan_code='TRIAL' + subscription_status='trial' + 만료됨)
   const res = await query(
     `UPDATE companies c
         SET plan_id             = $1,
@@ -52,7 +52,7 @@ export async function runTrialDowngradeJob(): Promise<{ downgraded: number }> {
             updated_at          = NOW()
        FROM plans p
       WHERE c.plan_id = p.id
-        AND p.plan_code = 'PRO'
+        AND p.plan_code = 'TRIAL'
         AND c.subscription_status = 'trial'
         AND c.trial_expires_at IS NOT NULL
         AND c.trial_expires_at < NOW()
