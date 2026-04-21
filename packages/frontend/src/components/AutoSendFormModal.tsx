@@ -1459,16 +1459,21 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
 
       {/* 스팸필터 테스트 모달 */}
       {/* ★ D106: 미리보기용 변수 치환 — replaceMessageVars로 필드매핑 변수(%고객명% 등) 치환 후 전달 */}
+      {/* ★ D131: 수신자별 회신번호 모드일 때 샘플 고객의 callback/store_phone/phone을 SpamFilter에 전달
+                  (서수란 팀장 제보 — '발신번호가 선택되지 않았습니다'로 진행 불가 이슈) */}
       {showSpamFilter && (() => {
         const preReplacedMsg = spamSampleCustomer
           ? replaceMessageVars(messageContent, availableFields, spamSampleCustomer, { removeUnmatched: true })
           : messageContent;
+        const effectiveCallback = useIndividualCallback
+          ? (spamSampleCustomer?.callback || spamSampleCustomer?.store_phone || spamSampleCustomer?.phone || callbackNumber)
+          : callbackNumber;
         return (
           <SpamFilterTestModal
             onClose={() => setShowSpamFilter(false)}
             messageContentSms={buildAdMessageFront(preReplacedMsg, 'SMS', isAd, optOutNumber)}
             messageContentLms={buildAdMessageFront(preReplacedMsg, 'LMS', isAd, optOutNumber)}
-            callbackNumber={callbackNumber}
+            callbackNumber={effectiveCallback}
             messageType={messageType}
             subject={buildAdSubjectFront(messageSubject, messageType, isAd)}
             firstRecipient={spamSampleCustomer}

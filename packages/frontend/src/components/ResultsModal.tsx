@@ -112,7 +112,11 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
       const from = startDate.replace(/-/g, '').slice(0, 6);
       const summaryRes = await fetch(`/api/v1/results/summary?from=${from}&fromDate=${startDate}&toDate=${endDate}`, { headers: { Authorization: `Bearer ${token}` } });
       setSummary(await summaryRes.json());
-      const campaignsRes = await fetch(`/api/v1/results/campaigns?from=${from}&fromDate=${startDate}&toDate=${endDate}&limit=50`, { headers: { Authorization: `Bearer ${token}` } });
+      // ★ D131: 기간 조회 시 limit=50 → 2000 상향 (서수란 팀장 제보 — 5페이지에서 끊기는 문제)
+      //   원인: 백엔드는 page/limit 서버 페이지네이션 지원하지만 프론트가 page 파라미터 전달 안 하고
+      //         클라이언트 사이드 페이지네이션(filteredCampaigns.length 기반)으로 구현돼 있어 현재 페이지 크기가 곧 전체 상한.
+      //   TODO(기간계 개선): 진짜 서버사이드 페이지네이션으로 전환 — page 상태 변경 시 fetch 재호출 + total 기반 totalPages.
+      const campaignsRes = await fetch(`/api/v1/results/campaigns?from=${from}&fromDate=${startDate}&toDate=${endDate}&limit=2000`, { headers: { Authorization: `Bearer ${token}` } });
       const campaignsData = await campaignsRes.json();
       setCampaigns(campaignsData.campaigns || []);
     } catch (error) {
@@ -875,7 +879,8 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                         { label: '전송건수', value: `${(selectedCampaign.target_count || selectedCampaign.sent_count || 0).toLocaleString()}건` },
                         { label: '성공 / 실패', value: `${(selectedCampaign.success_count || 0).toLocaleString()} / ${(selectedCampaign.fail_count || 0).toLocaleString()}` },
                         { label: '등록일시', value: new Date(selectedCampaign.created_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) },
-                        { label: '발송일시', value: selectedCampaign.sent_at ? new Date(selectedCampaign.sent_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : selectedCampaign.scheduled_at ? `${new Date(selectedCampaign.scheduled_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })} (예약)` : '-' },
+                        // ★ D131: 취소 건은 (예약) 대신 (예약취소)로 표시 (서수란 팀장 제보)
+                        { label: '발송일시', value: selectedCampaign.sent_at ? new Date(selectedCampaign.sent_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : selectedCampaign.scheduled_at ? `${new Date(selectedCampaign.scheduled_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })} (${selectedCampaign.status === 'cancelled' ? '예약취소' : '예약'})` : '-' },
                       ].map(row => (
                         <div key={row.label} className="flex px-4 py-2.5 text-sm">
                           <span className="w-24 flex-shrink-0 text-gray-500">{row.label}</span>
@@ -1176,21 +1181,18 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                           <span className="text-[11px] font-bold text-purple-600">{typeLabel}</span>
                         </div>
                         <div className="flex-1 overflow-y-auto p-3 bg-gradient-to-b from-purple-50/30 to-white select-text">
-                          {/* ★ B7: 공용 컴포넌트 MmsImagePreview 사용 */}
-                          {isMms && hasImages && (
-                            <div className="mb-2">
-                              <MmsImagePreview
-                                images={mmsImages!}
-                                size="md"
-                                onImageClick={(url, filename) => setEnlargedImage({ url, filename })}
-                                compact
-                              />
-                            </div>
-                          )}
-                          <div className="flex gap-2 mt-1">
+                          {/* ★ D131: 첫 화면(폰프레임)과 동일 구조 — 이미지는 본문 아래, size=sm (일관성) */}
+                          <div className="flex gap-2">
                             <div className="w-7 h-7 rounded-full bg-purple-100 flex items-center justify-center shrink-0 text-xs">📱</div>
                             <div className="bg-white rounded-2xl rounded-tl-sm p-3 shadow-sm border border-gray-100 text-[12px] leading-[1.6] whitespace-pre-wrap break-all text-gray-700 max-w-[95%] select-text cursor-text">
                               {content}
+                              {isMms && hasImages && (
+                                <MmsImagePreview
+                                  images={mmsImages!}
+                                  size="sm"
+                                  onImageClick={(url, filename) => setEnlargedImage({ url, filename })}
+                                />
+                              )}
                             </div>
                           </div>
                         </div>

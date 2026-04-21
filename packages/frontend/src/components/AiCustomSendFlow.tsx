@@ -649,11 +649,12 @@ export default function AiCustomSendFlow({
                       </div>
                       {mmsUploadedImages && mmsUploadedImages.length > 0 ? (
                         <div className="flex flex-wrap gap-2 items-center">
-                          {/* ★ B3: 공용 컴포넌트 (onRemove 포함) */}
+                          {/* ★ D131: 맞춤한줄 MMS 이미지 하단 이미지명 표시 — 직접발송/직접타겟/한줄로와 일관성 */}
                           <MmsImagePreview
                             images={mmsUploadedImages}
                             size="sm"
                             compact
+                            showFilename
                             borderColor="border border-violet-300"
                             onRemove={onMmsImageRemove}
                           />

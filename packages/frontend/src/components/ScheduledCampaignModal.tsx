@@ -146,7 +146,8 @@ export default function ScheduledCampaignModal({
                         if (!Array.isArray(mmsImages) || mmsImages.length === 0) return null;
                         return (
                           <div className="mt-2">
-                            <MmsImagePreview images={mmsImages} size="sm" compact />
+                            {/* ★ D131: 예약대기도 결과 페이지처럼 이미지 하단에 파일명 표시 (서수란 팀장 제보) */}
+                            <MmsImagePreview images={mmsImages} size="sm" compact showFilename />
                           </div>
                         );
                       })()}

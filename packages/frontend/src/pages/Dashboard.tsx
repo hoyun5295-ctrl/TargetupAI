@@ -523,13 +523,11 @@ export default function Dashboard() {
   
   // 직접타겟추출 발송 함수
   const executeTargetSend = async (confirmCallbackExclusion?: boolean, confirmNameEmpty?: boolean) => {
-    // ★ B2(0417 PDF #2): MMS 이미지 첨부 검증 — SMS 채널일 때만
-    if (targetSendChannel === 'sms') {
-      const mmsErr = validateMmsBeforeSend(targetMsgType, mmsUploadedImages.length);
-      if (mmsErr) {
-        setToast({ show: true, type: 'error', message: mmsErr });
-        return;
-      }
+    // ★ D131: MMS 이미지 첨부 검증 — 채널 조건 제거 (MMS msgType은 어떤 채널에서도 이미지 필수)
+    const mmsErr = validateMmsBeforeSend(targetMsgType, mmsUploadedImages.length);
+    if (mmsErr) {
+      setToast({ show: true, type: 'error', message: mmsErr });
+      return;
     }
     // ★ D111 P2: %이름%/%고객명%/%성함% 변수가 있는데 이름 비어있는 수신자 경고
     if (!confirmNameEmpty) {
@@ -1514,9 +1512,9 @@ const handleAiCampaignSend = async (modalData?: {
   subject?: string;
 }) => {
   if (isSending || directSending) return; // 교차 중복 발송 방지
-  // ★ B2(0417 PDF #2): MMS 이미지 첨부 검증 (한줄로 AI)
-  const aiChannel = aiResult?.recommendedChannel || 'SMS';
-  const mmsErr = validateMmsBeforeSend(aiChannel, mmsUploadedImages.length);
+  // ★ D131: MMS 이미지 첨부 검증 (한줄로 AI) — 사용자가 AI 추천 채널을 override할 수 있으므로
+  //         AI 추천값(recommendedChannel)이 아닌 실제 선택값(selectedChannel) 기준으로 검증.
+  const mmsErr = validateMmsBeforeSend(selectedChannel, mmsUploadedImages.length);
   if (mmsErr) {
     setToast({ show: true, type: 'error', message: mmsErr });
     return;

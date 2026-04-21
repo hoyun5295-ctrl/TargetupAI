@@ -359,10 +359,11 @@ export function buildAdMessage(
   const isLms = msgType === 'LMS' || msgType === 'MMS';
   const adPrefix = isLms ? '(광고) ' : '(광고)';
   // ★ PPT#3: 080번호 없어도 (광고)+무료거부까지는 붙이고, 번호만 비움
-  // ★ D124: 무료수신거부 앞에 빈 줄 1개 강제 (\n\n) — 본문과 시각적 구분 (Harold님 요청)
+  // ★ D124: LMS/MMS는 무료수신거부 앞 빈 줄 1개 강제 (\n\n) — 가독성 (Harold님 요청)
+  // ★ D131: SMS는 90byte 제약으로 빈 줄 1개가 본문 공간을 압박 → \n 한 줄만 (서수란 팀장 제보)
   const rejectFooter = opt080Number
-    ? (isLms ? `\n\n무료수신거부 ${opt080Number}` : `\n\n무료거부${opt080Number.replace(/-/g, '')}`)
-    : (isLms ? `\n\n무료수신거부` : `\n\n무료거부`);
+    ? (isLms ? `\n\n무료수신거부 ${opt080Number}` : `\n무료거부${opt080Number.replace(/-/g, '')}`)
+    : (isLms ? `\n\n무료수신거부` : `\n무료거부`);
 
   // ★ D103: 중복 방지 안전장치 — 이미 (광고)가 있으면 접두사 안 붙임, 이미 수신거부가 있으면 푸터 안 붙임
   const hasAdPrefix = message.startsWith('(광고)');

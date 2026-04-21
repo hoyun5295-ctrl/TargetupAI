@@ -669,9 +669,9 @@ router.get('/campaigns/:id/export', async (req: Request, res: Response) => {
 
     // CSV 헤더 스트리밍 시작
     // ★ D124: 웹 발송상세 UI와 컬럼명·순서 통일 (등록일시/발송일시 — 캠페인 created_at 기준)
-    //   공통 8컬럼(수신번호→통신사)은 웹과 완전 일치, 엑셀 전용 2컬럼(메시지유형·수신확인시간)만 맨 뒤 추가
+    // ★ D131: 수신확인시간 컬럼 자체 제거 (서수란 팀장 제보 — B10에서 값만 제거됐고 헤더가 남아있었음)
     const BOM = '\uFEFF';
-    const headers = '수신번호,회신번호,메시지내용,등록일시,발송일시,전송결과,결과코드,통신사,메시지유형,수신확인시간';
+    const headers = '수신번호,회신번호,메시지내용,등록일시,발송일시,전송결과,결과코드,통신사,메시지유형';
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename=send_detail_${id}.csv`);
@@ -711,7 +711,7 @@ router.get('/campaigns/:id/export', async (req: Request, res: Response) => {
           carrierDisplay = getCarrierLabel(m.mob_company);
         }
 
-        // ★ D124: 헤더 순서(수신번호,회신번호,메시지내용,등록일시,발송일시,전송결과,결과코드,통신사,메시지유형,수신확인시간)와 일치
+        // ★ D131: 헤더 순서(수신번호→메시지유형)와 일치 — 수신확인시간 컬럼 제거됨
         res.write([
           m.dest_no,
           m.call_back,
@@ -722,7 +722,6 @@ router.get('/campaigns/:id/export', async (req: Request, res: Response) => {
           m.status_code,
           carrierDisplay,
           msgTypeDisplay,                       // 메시지유형 (SMS/LMS/MMS/카카오) — 엑셀 전용
-          formatCsvDateTime(m.repmsg_recvtm),   // 수신확인시간 — 엑셀 전용
         ].join(',') + '\n');
       }
 

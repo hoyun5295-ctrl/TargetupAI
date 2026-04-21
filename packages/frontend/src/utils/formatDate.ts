@@ -757,10 +757,12 @@ export function buildAdMessageFront(
   const isSms = msgType === 'SMS';
   const adPrefix = isSms ? '(광고)' : '(광고) ';
   // ★ PPT#3: 080번호 없어도 (광고)+무료거부까지는 붙이고, 번호만 비움
-  // ★ D124: 무료수신거부 앞에 빈 줄 1개 강제 (\n\n) — 백엔드 buildAdMessage와 동기화
+  // ★ D124: LMS/MMS는 무료수신거부 앞 빈 줄 1개 강제 (\n\n) — 가독성
+  // ★ D131: SMS는 90byte 제약으로 빈 줄이 본문 공간 압박 → \n 한 줄 (서수란 팀장 제보)
+  //         백엔드 messageUtils.ts buildAdMessage와 동일 규칙 유지 (미러).
   const rejectFooter = optOutNumber
-    ? (isSms ? `\n\n무료거부${optOutNumber.replace(/-/g, '')}` : `\n\n무료수신거부 ${optOutNumber}`)
-    : (isSms ? `\n\n무료거부` : `\n\n무료수신거부`);
+    ? (isSms ? `\n무료거부${optOutNumber.replace(/-/g, '')}` : `\n\n무료수신거부 ${optOutNumber}`)
+    : (isSms ? `\n무료거부` : `\n\n무료수신거부`);
 
   // ★ D103+B 후속: 중복 방지 안전장치 — 백엔드 buildAdMessage와 동일 처리
   //   D103 이전에 발송된 캠페인이나, message_content에 이미 (광고)/무료거부가 포함된 경우

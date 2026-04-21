@@ -25,6 +25,7 @@ import {
 } from '../utils/sms-queue';
 import { prepaidDeduct, prepaidRefund } from '../utils/prepaid';
 import { normalizeMmsImagePaths, type MmsImageItem } from '../utils/mms-image-util';
+import { validateMmsPayload } from '../utils/mms-validator';
 import { buildDateRangeFilter } from '../utils/stats-aggregation';
 import { cancelCampaign, syncCampaignResults } from '../utils/campaign-lifecycle';
 import { buildFilterQueryCompat } from '../utils/customer-filter';
@@ -271,17 +272,10 @@ router.post('/test-send', async (req: Request, res: Response) => {
       return res.status(400).json({ error: '메시지 내용이 필요합니다.' });
     }
 
-    // ★ D131: MMS 이미지 첨부 필수 가드 (담당자 테스트 9007 파일 오류 37% 발생 대응)
-    //   MMS 타입 선택 + 이미지 0장 → 통신사가 "파일 없음"으로 거부 (status_code=9007).
-    //   프론트 일부 경로(맞춤한줄 제외)에 가드 누락 → 백엔드 원천 차단으로 일원화.
-    if (String(messageType || '').toUpperCase() === 'MMS') {
-      const rawMmsCheck = (req.body.mmsImagePaths || []) as unknown[];
-      if (!Array.isArray(rawMmsCheck) || rawMmsCheck.length === 0) {
-        return res.status(400).json({
-          error: 'MMS는 이미지 첨부가 필수입니다. 이미지를 업로드하거나 발송타입을 SMS/LMS로 변경해주세요.',
-          code: 'MMS_IMAGE_REQUIRED',
-        });
-      }
+    // ★ D131: MMS 이미지 첨부 필수 가드 — mms-validator 컨트롤타워 (9007 파일 오류 방지)
+    const testMmsCheck = validateMmsPayload(messageType, req.body.mmsImagePaths);
+    if (!testMmsCheck.ok) {
+      return res.status(400).json({ error: testMmsCheck.error, code: testMmsCheck.code });
     }
 
     // 테스트 채널 (기본 sms)
@@ -480,6 +474,12 @@ router.post('/', async (req: Request, res: Response) => {
 
     if (!campaignName || !messageType || !messageContent) {
       return res.status(400).json({ error: '필수 항목을 입력하세요.' });
+    }
+
+    // ★ D131: MMS 이미지 첨부 필수 가드 — mms-validator 컨트롤타워
+    const aiMmsCheck = validateMmsPayload(messageType, mmsImagePaths);
+    if (!aiMmsCheck.ok) {
+      return res.status(400).json({ error: aiMmsCheck.error, code: aiMmsCheck.code });
     }
 
     // ★ D111 P4: 예약 시각 검증 — 컨트롤타워 validateScheduledAt (인라인 검증 금지)
@@ -1299,6 +1299,12 @@ router.post('/direct-send', async (req: Request, res: Response) => {
 
     if (!recipients || recipients.length === 0) {
       return res.status(400).json({ success: false, error: '수신자가 없습니다' });
+    }
+
+    // ★ D131: MMS 이미지 첨부 필수 가드 — mms-validator 컨트롤타워
+    const directMmsCheck = validateMmsPayload(msgType, mmsImagePaths);
+    if (!directMmsCheck.ok) {
+      return res.status(400).json({ success: false, error: directMmsCheck.error, code: directMmsCheck.code });
     }
 
     // ★ D111 P4: 예약 시각 검증 — 컨트롤타워 validateScheduledAt
