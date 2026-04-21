@@ -8,6 +8,7 @@ import { redis, AI_MODELS, AI_MAX_TOKENS, CACHE_TTL, TIMEOUTS, BATCH_SIZES } fro
 import { normalizeByFieldKey, normalizeRegion, normalizeDate, normalizeCustomFieldValue } from '../utils/normalize';
 import { CATEGORY_LABELS, FIELD_MAP, getColumnFields, getCustomFields, getFieldByKey, upsertCustomFieldDefinitions } from '../utils/standard-field-map';
 import { validateUploadMapping } from '../utils/upload-mapping-validator';
+import { createCustomerUpsertBuilder } from '../utils/customer-upsert';
 
 // ★ D79: 날짜 정규화는 컨트롤타워(normalize.ts)의 normalizeDate() 사용
 // 인라인 normalizeDate 제거 — 컨트롤타워 원칙 위반이었음
@@ -536,11 +537,15 @@ async function processUploadInBackground(
     const BATCH_SIZE = BATCH_SIZES.customerUpload;
     const hasFileStoreCode = Object.values(mapping).includes('store_code');
 
+    // ★ 2026-04-21: customer-upsert.ts 컨트롤타워 사용 (sync.ts와 공용 — region 중복 구조적 차단)
+    const uploadUpsertBuilder = createCustomerUpsertBuilder({
+      source: 'upload',
+      includeUploadedBy: true,
+    });
+
     for (let i = 0; i < rows.length; i += BATCH_SIZE) {
       const batch = rows.slice(i, i + BATCH_SIZE);
-      const values: any[] = [];
-      const placeholders: string[] = [];
-      let paramIndex = 1;
+      const batchRows: Record<string, any>[] = []; // 컨트롤타워 buildBatch 입력
       const batchPhones: string[] = [];
       const seenInBatch = new Set<string>();
 
@@ -641,26 +646,26 @@ async function processUploadInBackground(
           if (firstToken) derivedRegion = normalizeRegion(firstToken);
         }
 
-        // ── INSERT 값 빌드 (FIELD_MAP 기반 동적) ──
-        const columnFieldDefs = getColumnFields(); // 직접 컬럼 필드 (sortOrder 순)
-        const rowValues: any[] = [companyId]; // company_id
+        // ── INSERT 값 빌드 (FIELD_MAP 기반 동적, customer-upsert 컨트롤타워에 위임) ──
+        const columnFieldDefs = getColumnFields();
+        const batchRow: Record<string, any> = {};
 
         for (const field of columnFieldDefs) {
           if (field.fieldKey === 'sms_opt_in') {
             // 수신동의: 미제공 시 기본 true
             const val = record[field.fieldKey];
-            rowValues.push(val !== null && val !== undefined ? val : true);
+            batchRow[field.columnName] = val !== null && val !== undefined ? val : true;
           } else if (field.fieldKey === 'region') {
             // region: 파생값(normalizeRegion 적용) 우선 사용
-            rowValues.push(derivedRegion ?? record[field.fieldKey] ?? null);
+            batchRow[field.columnName] = derivedRegion ?? record[field.fieldKey] ?? null;
           } else {
-            rowValues.push(record[field.fieldKey] ?? null);
+            batchRow[field.columnName] = record[field.fieldKey] ?? null;
           }
         }
 
-        // 파생 컬럼 (region은 FIELD_MAP 순회에서 처리됨)
-        rowValues.push(derivedBirthYear);
-        rowValues.push(derivedBirthMonthDay);
+        // 파생 컬럼 (region은 FIELD_MAP columnName 순회에서 이미 담김)
+        batchRow.birth_year = derivedBirthYear;
+        batchRow.birth_month_day = derivedBirthMonthDay;
 
         // custom_fields JSONB 빌드 — normalizeCustomFieldValue 컨트롤타워 사용
         const customObj: Record<string, any> = {};
@@ -669,53 +674,20 @@ async function processUploadInBackground(
             customObj[cf.columnName] = normalizeCustomFieldValue(record[cf.fieldKey]);
           }
         }
-        rowValues.push(Object.keys(customObj).length > 0 ? JSON.stringify(customObj) : null);
+        batchRow.custom_fields = Object.keys(customObj).length > 0 ? JSON.stringify(customObj) : null;
 
-        // uploaded_by
-        rowValues.push(userId || null);
-
-        values.push(...rowValues);
-
-        // 플레이스홀더: 파라미터 N개(동적) + 리터럴 3개 ('upload', NOW(), NOW())
-        const paramCount = rowValues.length;
-        const paramList = Array.from({ length: paramCount }, (_, j) => `$${paramIndex + j}`).join(', ');
-        placeholders.push(`(${paramList}, 'upload', NOW(), NOW())`);
-        paramIndex += paramCount;
+        batchRows.push(batchRow);
       }
 
-      if (placeholders.length > 0) {
+      if (batchRows.length > 0) {
         try {
-          // ── 동적 INSERT + ON CONFLICT ──
-          const columnFieldDefs = getColumnFields();
-          const columnNames = columnFieldDefs.map(f => f.columnName);
-          const insertCols = [
-            'company_id', ...columnNames,
-            'birth_year', 'birth_month_day', 'custom_fields',
-            'uploaded_by', 'source', 'created_at', 'updated_at'
-          ].join(', ');
-
-          // ON CONFLICT UPDATE: phone, store_code 제외 (UNIQUE 키)
-          const updateExclusions = new Set(['phone', 'store_code']);
-          const updateClauses = [
-            ...columnNames
-              .filter(c => !updateExclusions.has(c))
-              .map(c => `${c} = COALESCE(EXCLUDED.${c}, customers.${c})`),
-            'birth_year = COALESCE(EXCLUDED.birth_year, customers.birth_year)',
-            'birth_month_day = COALESCE(EXCLUDED.birth_month_day, customers.birth_month_day)',
-            `custom_fields = CASE WHEN EXCLUDED.custom_fields IS NOT NULL THEN COALESCE(customers.custom_fields, '{}'::jsonb) || EXCLUDED.custom_fields ELSE customers.custom_fields END`,
-            'uploaded_by = COALESCE(EXCLUDED.uploaded_by, customers.uploaded_by)',
-            `source = CASE WHEN customers.source = 'sync' THEN 'sync' ELSE 'upload' END`,
-            'updated_at = NOW()'
-          ].join(',\n              ');
-
-          const result = await query(`
-            INSERT INTO customers (${insertCols})
-            VALUES ${placeholders.join(', ')}
-            ON CONFLICT (company_id, COALESCE(store_code, '__NONE__'), phone) 
-            DO UPDATE SET 
-              ${updateClauses}
-            RETURNING (xmax = 0) as is_insert, phone
-          `, values);
+          // ── 컨트롤타워 buildBatch 호출 — insertCols/updateClauses/values 구성 전부 위임 ──
+          const { sql, values: queryValues } = uploadUpsertBuilder.buildBatch(
+            companyId,
+            batchRows,
+            userId || null,
+          );
+          const result = await query(sql, queryValues);
 
           result.rows.forEach((r: any) => {
             if (r.is_insert) insertCount++;

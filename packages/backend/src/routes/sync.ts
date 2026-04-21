@@ -14,6 +14,7 @@ import {
   upsertCustomFieldDefinitions,
 } from '../utils/standard-field-map';
 import { callAiMapping, AiMappingQuotaExceeded, AiMappingUnavailable, SupportedDbType, MappingTarget } from '../utils/ai-mapping';
+import { createCustomerUpsertBuilder } from '../utils/customer-upsert';
 
 const router = Router();
 
@@ -625,61 +626,24 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
       validRows.push(row);
     }
 
-    // 2단계: 벌크 UPSERT (500건씩 청크) — FIELD_MAP 동적 INSERT
-    const insertCols = [
-      'company_id', ...columnNames,
-      'birth_year', 'birth_month_day', 'region', 'custom_fields',
-      'source', 'created_at', 'updated_at'
-    ];
-    // row당 파라미터 = company_id(1) + 필수17개 + 파생3개 + custom_fields(1) = 22
-    const PARAMS_PER_ROW = 1 + columnNames.length + 3 + 1; // 22
+    // 2단계: 벌크 UPSERT (500건씩 청크) — customer-upsert.ts 컨트롤타워 사용
+    // ★ 2026-04-21: 기존 인라인 INSERT 구성이 'region' 중복으로 PostgreSQL "multiple assignments"
+    //   에러를 유발 → full sync 전건 실패. 컨트롤타워로 통합해서 구조적으로 재발 차단.
+    const upsertBuilder = createCustomerUpsertBuilder({
+      source: 'sync',
+      includeUploadedBy: false,
+    });
     const CHUNK_SIZE = 500;
 
     for (let i = 0; i < validRows.length; i += CHUNK_SIZE) {
       const chunk = validRows.slice(i, i + CHUNK_SIZE);
       try {
-        const values: any[] = [];
-        const valueClauses: string[] = [];
-
-        for (let j = 0; j < chunk.length; j++) {
-          const offset = j * PARAMS_PER_ROW;
-          const paramList = Array.from({ length: PARAMS_PER_ROW }, (_, k) => `$${offset + k + 1}`).join(',');
-          valueClauses.push(`(${paramList},'sync',NOW(),NOW())`);
-
-          const r = chunk[j];
-          values.push(companyId);
-          for (const col of columnNames) {
-            values.push(r[col] ?? null);
-          }
-          values.push(r.birth_year, r.birth_month_day, r.region, r.custom_fields);
-        }
-
-        // ON CONFLICT UPDATE: phone, store_code 제외 (UNIQUE 키 구성요소)
-        const updateExclusions = new Set(['phone', 'store_code']);
-        const updateClauses = [
-          ...columnNames
-            .filter(c => !updateExclusions.has(c))
-            .map(c => `${c} = COALESCE(EXCLUDED.${c}, customers.${c})`),
-          'birth_year = COALESCE(EXCLUDED.birth_year, customers.birth_year)',
-          'birth_month_day = COALESCE(EXCLUDED.birth_month_day, customers.birth_month_day)',
-          'region = COALESCE(EXCLUDED.region, customers.region)',
-          `custom_fields = CASE WHEN EXCLUDED.custom_fields IS NOT NULL THEN COALESCE(customers.custom_fields, '{}'::jsonb) || EXCLUDED.custom_fields ELSE customers.custom_fields END`,
-          `source = 'sync'`,
-          'updated_at = NOW()'
-        ].join(',\n            ');
-
-        const result = await query(
-          `INSERT INTO customers (${insertCols.join(', ')})
-          VALUES ${valueClauses.join(',')}
-          ON CONFLICT (company_id, COALESCE(store_code, '__NONE__'), phone) DO UPDATE SET
-            ${updateClauses}`,
-          values
-        );
-
+        const { sql, values } = upsertBuilder.buildBatch(companyId, chunk);
+        const result = await query(sql, values);
         upsertedCount += result.rowCount || chunk.length;
 
-        // customer_stores 벌크 처리
-        const storeRows = chunk.filter(r => r.store_code);
+        // customer_stores 벌크 처리 (sync 경로 전용 — upload.ts는 별도 매핑 로직 사용)
+        const storeRows = chunk.filter((r: any) => r.store_code);
         if (storeRows.length > 0) {
           const storeValues: any[] = [];
           const storeValueClauses: string[] = [];
