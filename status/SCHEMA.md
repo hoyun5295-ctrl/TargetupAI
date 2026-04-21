@@ -632,8 +632,8 @@
 | 컬럼 | 타입 | 비고 |
 |------|------|------|
 | id | uuid PK | |
-| plan_code | varchar(20) | FREE/STARTER/BASIC/PRO/BUSINESS/ENTERPRISE |
-| plan_name | varchar(50) | FREE="미가입" (CT-17 이후) |
+| plan_code | varchar(20) | FREE/**TRIAL**/STARTER/BASIC/PRO/BUSINESS/ENTERPRISE (D132 TRIAL 추가) |
+| plan_name | varchar(50) | FREE="미가입", **TRIAL="무료체험"** (PRO와 기능 동일, D132) |
 | max_customers | integer | 고객DB 관리 최대 인원 |
 | monthly_price | numeric(12,2) | |
 | is_active | boolean | |

@@ -144,6 +144,61 @@
 
 ---
 
+### 💎 D132 (2026-04-22) — CT-17 요금제 게이팅 + 30일 PRO 무료체험 시스템 (🔄 DDL Step 2 + 배포 대기)
+
+> **세션 기록:** [`.claude/projects/.../memory/project_plan_gating_policy.md`](../.claude/projects/C--Users-ceo-projects-targetup/memory/project_plan_gating_policy.md)
+> **정책 문서 SoT:** 위 메모리 파일 §1~§9
+>
+> **배경:** Harold님 5회 정책 교정 끝에 2단계 구조 확정 — FREE(미가입) / TRIAL(무료체험=PRO와 동일 기능). 기존 `plan_code='FREE' && created_at+7d` 자동 체험 로직 폐기, 모바일 DM 게이팅 누락 버그(BASIC에서도 열림) 동시 해결.
+>
+> **매트릭스 (Harold님 확정):**
+> | 기능 | FREE(미가입) | STARTER+ | BASIC+ | PRO/TRIAL+ |
+> |---|---|---|---|---|
+> | 직접발송·수신거부·발송결과·예약(직접) | ✅ | ✅ | ✅ | ✅ |
+> | 고객DB·직접타겟발송·AI자동매핑·스팸필터수동 | ❌ | ✅ | ✅ | ✅ |
+> | AI 메시지·AI 타겟 | ❌ | ❌ | ✅ | ✅ |
+> | 자동발송·모바일DM·AI프리미엄·스팸자동화 | ❌ | ❌ | ❌ | ✅ |
+>
+> **주소록 한도(direct_recipient_limit):** FREE=99,999 / STARTER=100k / BASIC=300k / PRO+=NULL(무제한)
+>
+> **코드 수정 완료 (배포 대기):**
+> - `utils/plan-guard.ts` 신설 (CT-17, FeatureKey 10종)
+> - `utils/trial-downgrade-worker.ts` 신설 (매일 04:00 KST, **plan_code='TRIAL'** 대상)
+> - `routes/ai.ts` 5곳 인라인 → canUseFeature
+> - `routes/auto-campaigns.ts` checkPlanGating CT-17 래퍼
+> - `routes/companies.ts` plan-info SELECT 교체 + **grant-trial(TRIAL plan 사용)** + revoke-trial API
+> - `routes/dm.ts` requirePlanFeature('mobile_dm') 미들웨어 (누락 버그 해결)
+> - `app.ts` startTrialDowngradeWorker 등록
+> - 프론트: `DmBuilderPage.tsx` 가드 · `AdminDashboard.tsx` 30일 PRO 체험 부여 버튼 · `PricingPage.tsx` "무료체험중(요금제 프로플랜 체험) D-N" 표시 + TRIAL plan 카드 제외 + STARTER/PRO 기능 문구 · `Dashboard.tsx` AI 발송 템플릿 isAiMessagingLocked 추가
+>
+> **DB DDL 실행 완료 (Step 1):**
+> - plans 테이블 4컬럼 추가 (mobile_dm_enabled / ai_mapping_enabled / target_send_enabled / direct_recipient_limit)
+> - FREE plan: plan_name='미가입', 플래그 전부 false, direct_recipient_limit=99999, max_customers=99999
+> - STARTER+: 기능 플래그 정책대로 설정
+> - direct_recipient_limit 정책 반영 (FREE=99,999, STARTER/BASIC=max_customers, PRO+=NULL)
+>
+> **🔴 DB DDL 남은 작업 (Step 2 — 다음 세션 Harold님 실행):**
+> 1. **TRIAL plan INSERT** (PRO와 기능 동일):
+>    ```bash
+>    docker exec -i targetup-postgres psql -U targetup targetup -c "INSERT INTO plans (plan_code, plan_name, max_customers, monthly_price, is_active, customer_db_enabled, target_send_enabled, ai_mapping_enabled, spam_filter_enabled, ai_messaging_enabled, ai_premium_enabled, auto_campaign_enabled, auto_spam_test_enabled, mobile_dm_enabled, max_auto_campaigns, direct_recipient_limit) VALUES ('TRIAL', '무료체험', 1000000, 0, true, true, true, true, true, true, true, true, true, true, 5, NULL);"
+>    ```
+> 2. **기존 체험 중 회사 plan_id=TRIAL로 이동** (현재 PRO plan으로 잘못 부여된 테스트계정):
+>    ```bash
+>    docker exec -i targetup-postgres psql -U targetup targetup -c "UPDATE companies SET plan_id = (SELECT id FROM plans WHERE plan_code='TRIAL') WHERE subscription_status = 'trial';"
+>    ```
+> 3. **배포:** `tp-push` → `tp-deploy-full`
+>
+> **다음 세션 검증 체크리스트:**
+> - [ ] 슈퍼관리자 → 고객사 상세 설정 모달 → 요금제 드롭다운에 "**무료체험 (1,000,000명)**" 노출
+> - [ ] 체험 부여받은 계정 `/pricing` → "무료체험중 (요금제 프로플랜 체험) D-30"
+> - [ ] AI 기능/자동발송/모바일DM 정상 열림
+> - [ ] BASIC 이하 계정: 모바일 DM 진입 → 보라 가드 화면
+> - [ ] FREE 계정: AI 발송 템플릿 카드 🔒 표시 + 클릭 시 업그레이드 안내
+> - [ ] pm2 로그: `[trial-downgrade][scheduler] started` 확인
+> - [ ] 필요 시 Cron 즉시 테스트 (회사 trial_expires_at 과거로 세팅 후 `runTrialDowngradeJob()` 호출)
+
+---
+
 ### 🔥 D131 (2026-04-21 저녁) — Agent v1.5.1 + 알림톡 IMC 6005 + 담당자테스트 9007 + PPT 9건 일괄 처리
 
 > **세션 기록:** [`.claude/projects/.../memory/project_d131.md`](../.claude/projects/C--Users-ceo-projects-targetup/memory/project_d131.md) — 8섹션 전수 기록

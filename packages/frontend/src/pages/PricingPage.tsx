@@ -266,6 +266,9 @@ export default function PricingPage() {
           const daysRemaining = isOnTrial && companyInfo.trial_expires_at
             ? Math.max(0, Math.ceil((new Date(companyInfo.trial_expires_at).getTime() - Date.now()) / 86400000))
             : 0;
+          // ★ 체험 중인 플랜과 동일한 max_customers를 가진 유료 플랜 이름 동적 매칭 (TRIAL=1M → PRO)
+          const equivalentPlan = plans.find(p => Number(p.max_customers) === Number(companyInfo.max_customers));
+          const equivalentPlanName = equivalentPlan?.plan_name || '프로';
           return (
           <div className="bg-white rounded-xl shadow-sm p-6 mb-8">
             <h2 className="text-lg font-semibold mb-4">현재 이용 중인 플랜</h2>
@@ -296,17 +299,6 @@ export default function PricingPage() {
                     </span>
                   )}
                 </div>
-                {isOnTrial && companyInfo.trial_expires_at && (
-                  <p className="text-sm text-gray-600 mt-2">
-                    체험 만료: <b>{formatDate(companyInfo.trial_expires_at)}</b>
-                    <span className="text-orange-600 font-medium ml-1">
-                      ({daysRemaining}일 남음)
-                    </span>
-                    <span className="block text-xs text-gray-400 mt-0.5">
-                      체험 기간 중 AI·자동발송·모바일 DM 등 PRO 전 기능 이용 가능. 만료 시 자동으로 미가입 상태로 전환됩니다.
-                    </span>
-                  </p>
-                )}
                 {isTrialExpired && (
                   <p className="text-sm text-gray-600 mt-2">
                     무료체험이 종료되어 미가입 상태로 전환되었습니다. 직접발송 등 기본 기능은 계속 이용 가능합니다. 아래에서 요금제를 선택해 주세요.
@@ -320,7 +312,41 @@ export default function PricingPage() {
                 </div>
               </div>
             </div>
-            
+
+            {/* ★ CT-17: 무료체험 안내 카드 — 동급 유료 플랜 명시 + 이용 가능 기능 + 만료일·D-N 재강조 */}
+            {isOnTrial && (
+              <div className="mt-5 p-4 bg-gradient-to-r from-violet-50 via-purple-50 to-violet-50 border border-violet-200 rounded-xl">
+                <div className="flex items-start gap-3">
+                  <div className="w-10 h-10 bg-gradient-to-br from-violet-500 to-purple-600 rounded-xl flex items-center justify-center flex-shrink-0 shadow-md shadow-violet-200">
+                    <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+                    </svg>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-bold text-violet-900">
+                      현재 무료체험 중인 요금제는 <span className="text-purple-700">{equivalentPlanName} 플랜</span>입니다
+                    </p>
+                    <p className="text-xs text-violet-700 mt-1 leading-relaxed">
+                      고객 DB {formatNumber(Number(companyInfo.max_customers))}명 · AI 메시지 · 자동발송 · 모바일 DM · AI 프리미엄 · 스팸필터 자동화 전 기능 이용 가능
+                    </p>
+                    {companyInfo.trial_expires_at && (
+                      <div className="mt-3 pt-3 border-t border-violet-200/70 flex items-center justify-between flex-wrap gap-2">
+                        <div className="flex items-center gap-1.5 text-xs text-violet-800">
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
+                          <span>체험 만료 <b className="font-bold">{formatDate(companyInfo.trial_expires_at)}</b> · <b className="font-bold text-purple-700">{daysRemaining}일</b> 남음</span>
+                        </div>
+                        <span className="text-[11px] text-violet-500">
+                          만료 시 자동으로 미가입 상태 전환
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
             <div className="mt-4">
               <div className="h-3 bg-gray-200 rounded-full overflow-hidden">
                 <div 
@@ -369,7 +395,10 @@ export default function PricingPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
           {plans.map((plan) => {
             const isCurrentPlan = companyInfo?.plan_id === plan.id;
-            const isUpgrade = companyInfo && (companyInfo.plan_code === 'FREE' || plan.max_customers > (companyInfo.max_customers || 0));
+            // ★ CT-17: FREE(미가입) / TRIAL(무료체험)은 아직 유료 구독이 아니므로 모든 유료 플랜이 "업그레이드".
+            //   유료 가입자만 max_customers 크기 비교로 업/다운을 구분한다.
+            const isFreeOrTrial = companyInfo?.plan_code === 'FREE' || companyInfo?.plan_code === 'TRIAL';
+            const isUpgrade = companyInfo && (isFreeOrTrial || plan.max_customers > (companyInfo.max_customers || 0));
             const isRecommended = plan.id === recommendedPlanId && companyInfo?.plan_code === 'FREE';
             
             return (
@@ -503,8 +532,11 @@ export default function PricingPage() {
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
             <div className="p-6">
               <h3 className="text-lg font-semibold mb-4">
-                {selectedPlan && companyInfo && selectedPlan.max_customers > (companyInfo.max_customers || 0)
-                  ? '업그레이드 신청' : '다운그레이드 신청'}
+                {selectedPlan && companyInfo && (
+                  companyInfo.plan_code === 'FREE' ||
+                  companyInfo.plan_code === 'TRIAL' ||
+                  selectedPlan.max_customers > (companyInfo.max_customers || 0)
+                ) ? '업그레이드 신청' : '다운그레이드 신청'}
               </h3>
               
               <div className="bg-blue-50 rounded-lg p-4 mb-4">
