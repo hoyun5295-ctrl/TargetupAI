@@ -60,8 +60,11 @@ export default function PricingPage() {
         headers: { Authorization: `Bearer ${token}` },
       });
       const plansData = await plansRes.json();
+      // CT-17: FREE(미가입) + TRIAL(무료체험) 은 유료 요금제 카드에서 제외
+      //   · FREE = 요금제 미가입 상태, 사용자가 선택 대상 아님
+      //   · TRIAL = 슈퍼관리자가 부여하는 체험 plan, 사용자 선택 대상 아님
       const sortedPlans = (plansData.plans || [])
-        .filter((p: Plan) => p.plan_code !== 'FREE' && p.is_active)
+        .filter((p: Plan) => p.plan_code !== 'FREE' && p.plan_code !== 'TRIAL' && p.is_active)
         .sort((a: Plan, b: Plan) => a.monthly_price - b.monthly_price);
       setPlans(sortedPlans);
 
