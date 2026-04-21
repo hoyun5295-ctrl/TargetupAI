@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useAuthStore } from '../stores/authStore';
-import { formatDateTime, formatCampaignMessageForDisplay } from '../utils/formatDate';
+import { formatDateTime, formatCampaignMessageForDisplay, mmsServerPathToUrl } from '../utils/formatDate';
+import { getMmsImagePath, getMmsImageDisplayName } from '../utils/mmsImage';
 
 interface CalendarModalProps {
   onClose: () => void;
@@ -266,6 +267,32 @@ export default function CalendarModal({ onClose, token, onEdit, embedded }: Cale
                   {selectedCampaign.message_content && (
                     <div className="pt-3 border-t">
                       <div className="text-gray-500 mb-2">💬 메시지</div>
+                      {/* ★ B7(0417 PDF #7): MMS 이미지 표시 */}
+                      {(() => {
+                        let mmsImages = selectedCampaign.mms_image_paths;
+                        if (typeof mmsImages === 'string') {
+                          try { mmsImages = JSON.parse(mmsImages); } catch { mmsImages = null; }
+                        }
+                        if (!Array.isArray(mmsImages) || mmsImages.length === 0) return null;
+                        return (
+                          <div className="flex flex-wrap gap-1.5 mb-2 min-w-0 max-w-full">
+                            {mmsImages.map((imgItem: any, idx: number) => {
+                              const serverPath = getMmsImagePath(imgItem);
+                              const filename = getMmsImageDisplayName(imgItem, `이미지${idx + 1}`);
+                              const url = mmsServerPathToUrl(serverPath);
+                              return (
+                                <img
+                                  key={idx}
+                                  src={url}
+                                  alt={filename}
+                                  title={filename}
+                                  className="w-14 h-14 object-cover rounded border shrink-0"
+                                />
+                              );
+                            })}
+                          </div>
+                        );
+                      })()}
                       <div className="bg-white rounded-lg p-3 text-xs text-gray-700 whitespace-pre-wrap border max-h-24 overflow-y-auto">
                         {/* ★ B2: 컨트롤타워 — opt_out_080_number 기반 (광고)+080 부착 */}
                         {formatCampaignMessageForDisplay(selectedCampaign)}

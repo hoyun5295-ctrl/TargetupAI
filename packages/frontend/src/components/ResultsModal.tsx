@@ -66,7 +66,14 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
   const itemsPerPage = 10;
   const [cancelTarget, setCancelTarget] = useState<any>(null);
   const [toast, setToast] = useState<{show: boolean, type: 'success' | 'error', message: string}>({show: false, type: 'success', message: ''});
-  const [msgDetailContent, setMsgDetailContent] = useState<string | null>(null);
+  // ★ B6+B7(0417 PDF #6 #7): msgDetailContent state 확장
+  //   #6 타입라벨 오류(바이트 기반 판정 → 실제 msgType 우선) + #7 MMS 이미지 누락(mmsImages 전달)
+  //   호출부 4곳(L412/649/703/1011)에서 객체로 wrapping하여 전달.
+  const [msgDetailContent, setMsgDetailContent] = useState<{
+    content: string;
+    msgType?: string;
+    mmsImages?: any[];
+  } | null>(null);
   const [enlargedImage, setEnlargedImage] = useState<{ url: string; filename: string } | null>(null); // ★ D123 P5: MMS 이미지 클릭 확대
 
   // 필터 상태
@@ -409,7 +416,11 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                           <td className="px-3 py-2.5 text-center text-xs text-gray-600">{c.created_by_name || '-'}</td>
                           <MessageCell
                             content={formatCampaignMessageForDisplay(c)}
-                            onShowDetail={setMsgDetailContent}
+                            onShowDetail={(content) => setMsgDetailContent({
+                              content,
+                              msgType: c.message_type,
+                              mmsImages: Array.isArray(c.mms_image_paths) ? c.mms_image_paths : (typeof c.mms_image_paths === 'string' ? (() => { try { return JSON.parse(c.mms_image_paths); } catch { return []; } })() : []),
+                            })}
                           />
                           <td className="px-3 py-2.5 text-center text-xs text-gray-500">
                           {new Date(c.created_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
@@ -646,7 +657,7 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                             <MessageCell
                               content={t.content || ''}
                               maxWidth="max-w-[300px]"
-                              onShowDetail={setMsgDetailContent}
+                              onShowDetail={(content) => setMsgDetailContent({ content, msgType: t.type })}
                             />
                             <td className="px-3 py-2 text-center">
                               <span className={`px-2 py-0.5 rounded text-xs font-medium ${
@@ -700,7 +711,7 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                             <MessageCell
                               content={t.content || ''}
                               maxWidth="max-w-[200px]"
-                              onShowDetail={setMsgDetailContent}
+                              onShowDetail={(content) => setMsgDetailContent({ content, msgType: t.type })}
                             />
                             <td className="px-3 py-2">
                               <span className={`px-2 py-0.5 rounded text-xs font-medium ${t.type === 'SMS' ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'bg-violet-50 text-violet-700 border border-violet-200'}`}>
@@ -1009,7 +1020,11 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                             <td className="px-3 py-2.5 font-mono text-xs text-gray-600 whitespace-nowrap">{formatPhone(m.call_back)}</td>
                             <MessageCell
                               content={m.msg_contents || ''}
-                              onShowDetail={setMsgDetailContent}
+                              onShowDetail={(content) => setMsgDetailContent({
+                                content,
+                                msgType: m.msg_type, // 'S'/'L'/'M' (MySQL)
+                                mmsImages: Array.isArray(selectedCampaign?.mms_image_paths) ? selectedCampaign.mms_image_paths : [],
+                              })}
                             />
                             {/* ★ D124: 등록일시 = 캠페인 created_at (한줄로에서 발송을 건 시간). 모든 행 동일 */}
                             <td className="px-3 py-2.5 text-center text-xs text-gray-500 whitespace-nowrap">{selectedCampaign.created_at ? formatDateTime(selectedCampaign.created_at) : '-'}</td>
@@ -1148,41 +1163,74 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
           </div>
         )}
         {/* ★ D93→D120: 메시지 상세보기 모달 — 핸드폰 프레임 스타일 */}
-        {msgDetailContent !== null && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[80] animate-in fade-in duration-150" onClick={() => setMsgDetailContent(null)}>
-            <div className="bg-white rounded-2xl shadow-2xl w-[400px] overflow-hidden animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
-              <div className="p-4 border-b bg-emerald-50 flex justify-between items-center">
-                <h3 className="font-bold text-lg">📱 메시지 내용</h3>
-                <button onClick={() => setMsgDetailContent(null)} className="text-gray-500 hover:text-gray-700 text-xl">✕</button>
-              </div>
-              <div className="p-4">
-                <div className="mx-auto w-[280px]">
-                  <div className="rounded-[1.8rem] p-[3px] bg-gradient-to-b from-purple-400 to-purple-600 shadow-lg shadow-purple-200">
-                    <div className="bg-white rounded-[1.6rem] overflow-hidden flex flex-col" style={{ height: '420px' }}>
-                      <div className="px-4 py-2.5 bg-gradient-to-r from-gray-50 to-gray-100 flex justify-between items-center shrink-0 border-b">
-                        <span className="text-[11px] text-gray-400 font-medium">문자메시지</span>
-                        <span className="text-[11px] font-bold text-purple-600">{calculateSmsBytes(msgDetailContent) > 90 ? 'LMS' : 'SMS'}</span>
-                      </div>
-                      <div className="flex-1 overflow-y-auto p-3 bg-gradient-to-b from-purple-50/30 to-white select-text">
-                        <div className="flex gap-2 mt-1">
-                          <div className="w-7 h-7 rounded-full bg-purple-100 flex items-center justify-center shrink-0 text-xs">📱</div>
-                          <div className="bg-white rounded-2xl rounded-tl-sm p-3 shadow-sm border border-gray-100 text-[12px] leading-[1.6] whitespace-pre-wrap break-all text-gray-700 max-w-[95%] select-text cursor-text">
-                            {msgDetailContent}
+        {/* ★ B6+B7(0417 PDF #6 #7): msgType 우선 타입 판정 + MMS 이미지 표시 */}
+        {msgDetailContent !== null && (() => {
+          const { content, msgType, mmsImages } = msgDetailContent;
+          // #6 타입 판정: 명시 msgType 우선 (MMS/M, LMS/L, SMS/S). 없으면 바이트 기반 추정
+          const typeLabel =
+            (msgType === 'MMS' || msgType === 'M') ? 'MMS' :
+            (msgType === 'LMS' || msgType === 'L') ? 'LMS' :
+            (msgType === 'SMS' || msgType === 'S') ? 'SMS' :
+            (calculateSmsBytes(content) > 90 ? 'LMS' : 'SMS');
+          const isMms = typeLabel === 'MMS';
+          const maxBytes = typeLabel === 'SMS' ? 90 : 2000;
+          const hasImages = Array.isArray(mmsImages) && mmsImages.length > 0;
+          return (
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[80] animate-in fade-in duration-150" onClick={() => setMsgDetailContent(null)}>
+              <div className="bg-white rounded-2xl shadow-2xl w-[400px] overflow-hidden animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
+                <div className="p-4 border-b bg-emerald-50 flex justify-between items-center">
+                  <h3 className="font-bold text-lg">📱 메시지 내용</h3>
+                  <button onClick={() => setMsgDetailContent(null)} className="text-gray-500 hover:text-gray-700 text-xl">✕</button>
+                </div>
+                <div className="p-4">
+                  <div className="mx-auto w-[280px]">
+                    <div className="rounded-[1.8rem] p-[3px] bg-gradient-to-b from-purple-400 to-purple-600 shadow-lg shadow-purple-200">
+                      <div className="bg-white rounded-[1.6rem] overflow-hidden flex flex-col" style={{ height: '460px' }}>
+                        <div className="px-4 py-2.5 bg-gradient-to-r from-gray-50 to-gray-100 flex justify-between items-center shrink-0 border-b">
+                          <span className="text-[11px] text-gray-400 font-medium">문자메시지</span>
+                          <span className="text-[11px] font-bold text-purple-600">{typeLabel}</span>
+                        </div>
+                        <div className="flex-1 overflow-y-auto p-3 bg-gradient-to-b from-purple-50/30 to-white select-text">
+                          {/* ★ B7: MMS 이미지 표시 — flex-wrap + object-cover로 프레임 내 정렬 */}
+                          {isMms && hasImages && (
+                            <div className="flex flex-wrap gap-1.5 mb-2 min-w-0 max-w-full">
+                              {mmsImages!.map((imgItem: any, idx: number) => {
+                                const serverPath = getMmsImagePath(imgItem);
+                                const filename = getMmsImageDisplayName(imgItem, `이미지${idx + 1}`);
+                                const url = mmsServerPathToUrl(serverPath);
+                                return (
+                                  <img
+                                    key={idx}
+                                    src={url}
+                                    alt={filename}
+                                    title={filename}
+                                    onClick={() => setEnlargedImage({ url, filename })}
+                                    className="w-20 h-20 object-cover rounded border shrink-0 cursor-pointer hover:ring-2 hover:ring-purple-400 transition"
+                                  />
+                                );
+                              })}
+                            </div>
+                          )}
+                          <div className="flex gap-2 mt-1">
+                            <div className="w-7 h-7 rounded-full bg-purple-100 flex items-center justify-center shrink-0 text-xs">📱</div>
+                            <div className="bg-white rounded-2xl rounded-tl-sm p-3 shadow-sm border border-gray-100 text-[12px] leading-[1.6] whitespace-pre-wrap break-all text-gray-700 max-w-[95%] select-text cursor-text">
+                              {content}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                      <div className="px-3 py-2 border-t bg-gray-50 text-center shrink-0">
-                        <span className="text-[10px] text-gray-400">
-                          {calculateSmsBytes(msgDetailContent)} / {calculateSmsBytes(msgDetailContent) > 90 ? 2000 : 90} bytes
-                        </span>
+                        <div className="px-3 py-2 border-t bg-gray-50 text-center shrink-0">
+                          <span className="text-[10px] text-gray-400">
+                            {calculateSmsBytes(content)} / {maxBytes} bytes
+                          </span>
+                        </div>
                       </div>
                     </div>
                   </div>
                 </div>
               </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
       </div>
       {/* 캘린더 모달 */}
       {showCalendar && (

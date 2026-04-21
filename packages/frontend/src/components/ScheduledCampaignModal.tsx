@@ -1,5 +1,6 @@
 import React, { useState, useRef } from 'react';
-import { calculateSmsBytes, buildAdSubjectFront } from '../utils/formatDate';
+import { calculateSmsBytes, buildAdSubjectFront, mmsServerPathToUrl } from '../utils/formatDate';
+import { getMmsImagePath, getMmsImageDisplayName } from '../utils/mmsImage';
 
 interface ScheduledCampaignModalProps {
   show: boolean;
@@ -136,6 +137,32 @@ export default function ScheduledCampaignModal({
                           📞 회신번호: {selectedScheduled.callback_number}
                         </div>
                       )}
+                      {/* ★ B7(0417 PDF #7): MMS 이미지 표시 */}
+                      {(() => {
+                        let mmsImages = selectedScheduled.mms_image_paths;
+                        if (typeof mmsImages === 'string') {
+                          try { mmsImages = JSON.parse(mmsImages); } catch { mmsImages = null; }
+                        }
+                        if (!Array.isArray(mmsImages) || mmsImages.length === 0) return null;
+                        return (
+                          <div className="flex flex-wrap gap-1.5 mt-2 min-w-0 max-w-full">
+                            {mmsImages.map((imgItem: any, idx: number) => {
+                              const serverPath = getMmsImagePath(imgItem);
+                              const filename = getMmsImageDisplayName(imgItem, `이미지${idx + 1}`);
+                              const url = mmsServerPathToUrl(serverPath);
+                              return (
+                                <img
+                                  key={idx}
+                                  src={url}
+                                  alt={filename}
+                                  title={filename}
+                                  className="w-16 h-16 object-cover rounded border shrink-0"
+                                />
+                              );
+                            })}
+                          </div>
+                        );
+                      })()}
                     </div>
                     <div className="flex gap-2">
                       <button

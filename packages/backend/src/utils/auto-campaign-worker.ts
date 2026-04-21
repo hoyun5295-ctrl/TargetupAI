@@ -266,9 +266,11 @@ async function generateMessageForAutoCampaign(ac: any): Promise<void> {
     let spamTestResult: any = null;
 
     if (aiResult.variants && aiResult.variants.length > 0) {
-      // ★ 스팸테스트 — CT-09 autoSpamTestWithRegenerate 재활용
-      // 프로 이상이므로 스팸테스트 가능
-      let testedVariants = aiResult.variants;
+      // ★ B12(0417 PDF #12): 요청A — 3개 variant → 1개로 축소
+      //   기존: AI가 3 variant 생성 → 스팸테스트 3회 → 첫번째만 사용 = 2/3 낭비
+      //   변경: 1 variant만 테스트. 차단 시 CT-09 재생성 로직(최대 2회) 유지.
+      //   Harold님 지시 2026-04-21.
+      let testedVariants = aiResult.variants.slice(0, 1);
 
       if (ac.callback_number && channel !== '카카오') {
         // ★ B5: 타겟 첫 고객 조회 — CT-A target-sample.ts (인라인 SELECT 제거)
@@ -287,7 +289,8 @@ async function generateMessageForAutoCampaign(ac: any): Promise<void> {
             userId: ac.user_id,
             callbackNumber: ac.callback_number,
             messageType: channel as 'SMS' | 'LMS' | 'MMS',
-            variants: aiResult.variants.map((v: any) => ({
+            // ★ B12: testedVariants(1개) 전달 — 스팸테스트 3회 → 1회
+            variants: testedVariants.map((v: any) => ({
               variantId: v.variant_id || v.variantId || 'A',
               messageText: v.message_text || v.sms_text || v.lms_text || '',
               subject: v.subject,

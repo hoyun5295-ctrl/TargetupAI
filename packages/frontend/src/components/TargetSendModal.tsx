@@ -3,6 +3,7 @@ import { useRef, useState } from 'react';
 import type { FieldMeta } from './DirectTargetFilterModal';
 import { formatPreviewValue, formatByType, buildAdMessageFront, replaceVarsByFieldMeta, FRONT_FIELD_DISPLAY_MAP, reverseDisplayValueFront } from '../utils/formatDate';
 import { insertAtCursor } from '../utils/textInsert';
+import { getMmsImageDisplayName } from '../utils/mmsImage';
 import AlimtalkChannelPanel, {
   type AlimtalkChannelState,
   type AlimtalkSenderProfile,
@@ -581,9 +582,19 @@ export default function TargetSendModal({
                     <span className="text-xs font-semibold text-gray-600">🖼️ MMS 이미지</span>
                     {mmsUploadedImages.length > 0 ? (
                       <div className="flex items-center gap-1">
-                        {mmsUploadedImages.map((img, idx) => (
-                          <img key={idx} src={img.url} alt="" className="w-10 h-10 object-cover rounded border" />
-                        ))}
+                        {/* ★ B3(0417 PDF #3): 파일명 hover 툴팁 */}
+                        {mmsUploadedImages.map((img: any, idx: number) => {
+                          const fname = getMmsImageDisplayName(img, `이미지${idx + 1}`);
+                          return (
+                            <img
+                              key={idx}
+                              src={img.url}
+                              alt={fname}
+                              title={fname}
+                              className="w-10 h-10 object-cover rounded border"
+                            />
+                          );
+                        })}
                         <span className="text-xs text-purple-600 ml-1">✏️ 수정</span>
                       </div>
                     ) : (

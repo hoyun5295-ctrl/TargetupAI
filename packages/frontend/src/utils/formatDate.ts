@@ -1,6 +1,24 @@
 // ★ D89: 날짜 포맷팅 유틸 — 순수 날짜(YYYY-MM-DD)는 UTC 변환 없이 직접 파싱
 
 /**
+ * ★ B2(0417 PDF #2): MMS 발송 전 이미지 첨부 검증 컨트롤타워
+ *   MMS 유형 선택 후 이미지 0장인 상태로 발송 시 과금 혼동(MMS 단가) 발생 → 차단.
+ *   5개 발송 경로(직접/직접타겟/한줄로AI/맞춤한줄/자동발송) 전부 동일 검증.
+ *
+ * @param msgType 'SMS' | 'LMS' | 'MMS' | 'S' | 'L' | 'M' | 기타
+ * @param imageCount 첨부된 MMS 이미지 수
+ * @returns 에러 메시지(차단 필요 시) 또는 null(통과)
+ */
+export function validateMmsBeforeSend(msgType: string | undefined | null, imageCount: number): string | null {
+  const isMms = msgType === 'MMS' || msgType === 'M';
+  if (isMms && (!imageCount || imageCount === 0)) {
+    return 'MMS는 이미지 첨부가 필수입니다. 이미지를 업로드하거나 발송타입을 SMS/LMS로 변경해주세요.';
+  }
+  return null;
+}
+
+
+/**
  * timezone 정보 없는 timestamp를 UTC로 처리
  * ⚠️ 순수 날짜(YYYY-MM-DD)에는 사용하지 않는다 — formatDate에서 별도 처리
  */

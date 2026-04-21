@@ -1,5 +1,6 @@
 import type { FieldMeta } from './DirectTargetFilterModal';
 import { replaceDirectVars, replaceVarsByFieldMeta } from '../utils/formatDate';
+import { getMmsImageDisplayName } from '../utils/mmsImage';
 
 interface DirectPreviewModalProps {
   show: boolean;
@@ -67,9 +68,19 @@ export default function DirectPreviewModal({
                 )}
                 {/* 메시지 영역 */}
                 <div className="flex-1 overflow-y-auto p-3 bg-gradient-to-b from-emerald-50/30 to-white">
-                  {mmsUploadedImages.length > 0 && mmsUploadedImages.map((img, idx) => (
-                    <img key={idx} src={img.url} alt="" className="w-full h-auto rounded mb-1.5" />
-                  ))}
+                  {/* ★ B3(0417 PDF #3): 파일명 hover 툴팁 */}
+                  {mmsUploadedImages.length > 0 && mmsUploadedImages.map((img: any, idx: number) => {
+                    const fname = getMmsImageDisplayName(img, `이미지${idx + 1}`);
+                    return (
+                      <img
+                        key={idx}
+                        src={img.url}
+                        alt={fname}
+                        title={fname}
+                        className="w-full h-auto rounded mb-1.5"
+                      />
+                    );
+                  })}
                   <div className="flex gap-2 mt-1">
                     <div className="w-7 h-7 rounded-full bg-emerald-100 flex items-center justify-center shrink-0 text-xs">📱</div>
                     <div className="bg-white rounded-2xl rounded-tl-sm p-3 shadow-sm border border-gray-100 text-[13px] leading-[1.7] whitespace-pre-wrap text-gray-700 max-w-[95%]">

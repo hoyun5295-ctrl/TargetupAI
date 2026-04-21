@@ -42,7 +42,7 @@ import TodayStatsModal from '../components/TodayStatsModal';
 import UploadProgressModal from '../components/UploadProgressModal';
 import UploadResultModal from '../components/UploadResultModal';
 import { useAuthStore } from '../stores/authStore';
-import { formatDate, formatPreviewValue, formatByType, calculateSmsBytes, truncateToSmsBytes, DIRECT_VAR_MAP, DIRECT_VAR_TO_FIELD, DIRECT_FIELD_LABELS, DIRECT_MAPPING_FIELDS, replaceDirectVars, formatPhoneNumber, mmsServerPathToUrl, resolveRecipientCallback, buildAdMessageFront } from '../utils/formatDate';
+import { formatDate, formatPreviewValue, formatByType, calculateSmsBytes, truncateToSmsBytes, DIRECT_VAR_MAP, DIRECT_VAR_TO_FIELD, DIRECT_FIELD_LABELS, DIRECT_MAPPING_FIELDS, replaceDirectVars, formatPhoneNumber, mmsServerPathToUrl, resolveRecipientCallback, buildAdMessageFront, validateMmsBeforeSend } from '../utils/formatDate';
 import { insertAtCursorOrAppend } from '../utils/textInsert';
 import { getMmsImagePath, getMmsImageDisplayName, type MmsImageItem } from '../utils/mmsImage';
 import DirectSendPanel from '../components/DirectSendPanel';
@@ -378,6 +378,14 @@ export default function Dashboard() {
   // 직접발송 실행 함수
   const executeDirectSend = async (confirmCallbackExclusion?: boolean, confirmNameEmpty?: boolean) => {
     if (isSending || directSending) return; // 교차 중복 발송 방지
+    // ★ B2(0417 PDF #2): MMS 이미지 첨부 검증 (과금 혼동 방지) — SMS 채널일 때만
+    if (directSendChannel === 'sms') {
+      const mmsErr = validateMmsBeforeSend(directMsgType, mmsUploadedImages.length);
+      if (mmsErr) {
+        setToast({ show: true, type: 'error', message: mmsErr });
+        return;
+      }
+    }
     if (adTextEnabled && !optOutNumber) {
       setToast({ show: true, type: 'error', message: '광고 발송을 위해 수신거부번호(080) 설정이 필요합니다. 설정 > 발신번호 관리에서 등록해주세요.' });
       return;
@@ -515,6 +523,14 @@ export default function Dashboard() {
   
   // 직접타겟추출 발송 함수
   const executeTargetSend = async (confirmCallbackExclusion?: boolean, confirmNameEmpty?: boolean) => {
+    // ★ B2(0417 PDF #2): MMS 이미지 첨부 검증 — SMS 채널일 때만
+    if (targetSendChannel === 'sms') {
+      const mmsErr = validateMmsBeforeSend(targetMsgType, mmsUploadedImages.length);
+      if (mmsErr) {
+        setToast({ show: true, type: 'error', message: mmsErr });
+        return;
+      }
+    }
     // ★ D111 P2: %이름%/%고객명%/%성함% 변수가 있는데 이름 비어있는 수신자 경고
     if (!confirmNameEmpty) {
       const msgForCheck = targetSendChannel === 'rcs' ? kakaoMessage : targetMessage;
@@ -1202,13 +1218,14 @@ const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<s
 
   // SMS 템플릿 저장
   // ★ D124 N4: mmsImagePaths는 객체 배열({path, originalName}) 또는 문자열 배열 혼재 허용
-  const saveTemplate = async (name: string, content: string, msgType: string, subject: string, mmsImagePaths?: MmsImageItem[]) => {
+  // ★ B1(0417 PDF #1): isAd 전달 — 저장 시점의 광고 체크박스 상태를 DB에 왕복
+  const saveTemplate = async (name: string, content: string, msgType: string, subject: string, mmsImagePaths?: MmsImageItem[], isAd?: boolean) => {
     try {
       const token = localStorage.getItem('token');
       const res = await fetch('/api/sms-templates', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ templateName: name, messageType: msgType, subject: subject || null, content, mmsImagePaths: mmsImagePaths || null })
+        body: JSON.stringify({ templateName: name, messageType: msgType, subject: subject || null, content, mmsImagePaths: mmsImagePaths || null, isAd: typeof isAd === 'boolean' ? isAd : adTextEnabled })
       });
       const data = await res.json();
       if (data.success) {
@@ -1497,6 +1514,13 @@ const handleAiCampaignSend = async (modalData?: {
   subject?: string;
 }) => {
   if (isSending || directSending) return; // 교차 중복 발송 방지
+  // ★ B2(0417 PDF #2): MMS 이미지 첨부 검증 (한줄로 AI)
+  const aiChannel = aiResult?.recommendedChannel || 'SMS';
+  const mmsErr = validateMmsBeforeSend(aiChannel, mmsUploadedImages.length);
+  if (mmsErr) {
+    setToast({ show: true, type: 'error', message: mmsErr });
+    return;
+  }
   if (adTextEnabled && !optOutNumber) {
     setToast({ show: true, type: 'error', message: '광고 발송을 위해 수신거부번호(080) 설정이 필요합니다. 설정 > 발신번호 관리에서 등록해주세요.' });
     return;
@@ -1689,6 +1713,11 @@ const campaignData = {
     subject?: string;
   }) => {
     if (isSending || directSending || !customSendData) return; // 교차 중복 발송 방지
+    // ★ B2(0417 PDF #2): MMS 이미지 첨부 검증 (맞춤한줄)
+    if (customSendData.channel === 'MMS' && mmsUploadedImages.length === 0) {
+      setToast({ show: true, type: 'error', message: 'MMS는 이미지 첨부가 필수입니다. 이미지를 업로드하거나 발송타입을 SMS/LMS로 변경해주세요.' });
+      return;
+    }
     if (adTextEnabled && !optOutNumber) {
       setToast({ show: true, type: 'error', message: '광고 발송을 위해 수신거부번호(080) 설정이 필요합니다. 설정 > 발신번호 관리에서 등록해주세요.' });
       return;
@@ -3341,6 +3370,9 @@ const campaignData = {
                             if (t.subject) setDirectSubject(t.subject);
                             if (t.message_type) setDirectMsgType(t.message_type);
                           }
+                          // ★ B1(0417 PDF #1): 저장 시점의 광고 체크박스 상태 복원
+                          //   t.is_ad === false 만 OFF로, NULL/undefined/true는 ON 유지(레거시 호환)
+                          setAdTextEnabled(t.is_ad !== false);
                           // ★ D100: MMS 이미지 복원 — JSON 문자열/배열 양쪽 대응
                           //   DB에 JSON.stringify()로 저장 → 조회 시 string으로 반환 → Array.isArray 실패 → 이미지 미복원
                           // ★ D124 N4: 배열 항목이 객체(신규: {path, originalName}) 또는 문자열(과거) 혼재 → 컨트롤타워 사용

@@ -375,10 +375,11 @@ router.post('/', async (req: Request, res: Response) => {
     if (!campaign_name?.trim()) {
       return res.status(400).json({ error: '자동발송 이름을 입력해주세요.' });
     }
-    if (!['monthly', 'weekly', 'daily'].includes(schedule_type)) {
-      return res.status(400).json({ error: '스케줄 유형은 monthly, weekly, daily 중 하나여야 합니다.' });
+    // ★ B11(0417 PDF #11): 'daily' 제거 — D-2 AI 자동생성 시점 구조적 모순으로 폐지
+    if (!['monthly', 'weekly'].includes(schedule_type)) {
+      return res.status(400).json({ error: '스케줄 유형은 monthly, weekly 중 하나여야 합니다.' });
     }
-    if (schedule_type !== 'daily' && (schedule_day === null || schedule_day === undefined)) {
+    if (schedule_day === null || schedule_day === undefined) {
       return res.status(400).json({ error: '발송일/요일을 선택해주세요.' });
     }
     if (schedule_type === 'monthly' && (schedule_day < 1 || schedule_day > 28)) {
@@ -596,8 +597,9 @@ router.put('/:id', async (req: Request, res: Response) => {
     const finalScheduleDay = schedule_day !== undefined ? schedule_day : ownership.campaign.schedule_day;
     const finalScheduleTime = schedule_time || ownership.campaign.schedule_time;
 
-    if (schedule_type && !['monthly', 'weekly', 'daily'].includes(schedule_type)) {
-      return res.status(400).json({ error: '스케줄 유형은 monthly, weekly, daily 중 하나여야 합니다.' });
+    // ★ B11(0417 PDF #11): 'daily' 제거
+    if (schedule_type && !['monthly', 'weekly'].includes(schedule_type)) {
+      return res.status(400).json({ error: '스케줄 유형은 monthly, weekly 중 하나여야 합니다.' });
     }
 
     // ★ AI 문안생성 모드 활성화/수정 시: 프리미엄 게이팅 + 필수값 검증

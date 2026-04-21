@@ -72,48 +72,59 @@ export default function MmsUploadModal({
           <div className="grid grid-cols-3 gap-4">
             {[0, 1, 2].map(slotIdx => {
               const img = mmsUploadedImages[slotIdx];
+              // ★ B3(0417 PDF #3): 파일명 라벨 표시 — 통계(ResultsModal)와 동일한 원본 파일명
+              const filenameDisplay = img ? (img.originalName || img.filename || `이미지 ${slotIdx + 1}`) : '';
               return (
-                <div key={slotIdx} className="aspect-square relative">
-                  {img ? (
-                    /* 업로드 완료 슬롯 */
-                    <div className="w-full h-full rounded-xl border-2 border-green-300 bg-green-50 overflow-hidden relative group">
-                      <img
-                        src={img.url}
-                        alt={`이미지 ${slotIdx + 1}`}
-                        className="w-full h-full object-cover"
-                       
-                      />
-                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center">
-                        <button
-                          onClick={() => handleMmsImageRemove(slotIdx)}
-                          className="opacity-0 group-hover:opacity-100 transition-opacity bg-red-500 hover:bg-red-600 text-white rounded-full w-8 h-8 flex items-center justify-center text-sm font-bold shadow-lg"
-                        >×</button>
+                <div key={slotIdx} className="flex flex-col">
+                  <div className="aspect-square relative">
+                    {img ? (
+                      /* 업로드 완료 슬롯 */
+                      <div className="w-full h-full rounded-xl border-2 border-green-300 bg-green-50 overflow-hidden relative group">
+                        <img
+                          src={img.url}
+                          alt={filenameDisplay}
+                          title={filenameDisplay}
+                          className="w-full h-full object-cover"
+                        />
+                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center">
+                          <button
+                            onClick={() => handleMmsImageRemove(slotIdx)}
+                            className="opacity-0 group-hover:opacity-100 transition-opacity bg-red-500 hover:bg-red-600 text-white rounded-full w-8 h-8 flex items-center justify-center text-sm font-bold shadow-lg"
+                          >×</button>
+                        </div>
+                        <div className="absolute bottom-1 right-1 bg-green-600 text-white text-[10px] px-1.5 py-0.5 rounded-full font-bold">
+                          {(img.size / 1024).toFixed(0)}KB
+                        </div>
+                        <div className="absolute top-1 left-1 bg-green-600 text-white text-[10px] w-5 h-5 rounded-full flex items-center justify-center font-bold">
+                          {slotIdx + 1}
+                        </div>
                       </div>
-                      <div className="absolute bottom-1 right-1 bg-green-600 text-white text-[10px] px-1.5 py-0.5 rounded-full font-bold">
-                        {(img.size / 1024).toFixed(0)}KB
-                      </div>
-                      <div className="absolute top-1 left-1 bg-green-600 text-white text-[10px] w-5 h-5 rounded-full flex items-center justify-center font-bold">
-                        {slotIdx + 1}
-                      </div>
-                    </div>
-                  ) : (
-                    /* 빈 슬롯 */
-                    <label className={`w-full h-full rounded-xl border-2 border-dashed border-gray-300 bg-gray-50 flex flex-col items-center justify-center cursor-pointer hover:border-amber-400 hover:bg-amber-50 transition-all ${mmsUploading ? 'opacity-50 pointer-events-none' : ''}`}>
-                      <div className="text-3xl text-gray-300 mb-2">+</div>
-                      <div className="text-xs text-gray-400 font-medium">이미지 {slotIdx + 1}</div>
-                      <div className="text-[10px] text-gray-300 mt-1">JPG · 300KB</div>
-                      <input
-                        type="file"
-                        accept=".jpg,.jpeg"
-                        className="hidden"
-                        onChange={(e) => {
-                          const file = e.target.files?.[0];
-                          if (file) handleMmsSlotUpload(file, slotIdx);
-                          e.target.value = '';
-                        }}
-                      />
-                    </label>
-                  )}
+                    ) : (
+                      /* 빈 슬롯 */
+                      <label className={`w-full h-full rounded-xl border-2 border-dashed border-gray-300 bg-gray-50 flex flex-col items-center justify-center cursor-pointer hover:border-amber-400 hover:bg-amber-50 transition-all ${mmsUploading ? 'opacity-50 pointer-events-none' : ''}`}>
+                        <div className="text-3xl text-gray-300 mb-2">+</div>
+                        <div className="text-xs text-gray-400 font-medium">이미지 {slotIdx + 1}</div>
+                        <div className="text-[10px] text-gray-300 mt-1">JPG · 300KB</div>
+                        <input
+                          type="file"
+                          accept=".jpg,.jpeg"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) handleMmsSlotUpload(file, slotIdx);
+                            e.target.value = '';
+                          }}
+                        />
+                      </label>
+                    )}
+                  </div>
+                  {/* ★ B3: 이미지 하단 파일명 — 동일 이미지/변경 여부 식별용 */}
+                  <div
+                    className="mt-1 text-[11px] text-gray-600 text-center truncate px-1 min-h-[18px]"
+                    title={filenameDisplay}
+                  >
+                    {filenameDisplay}
+                  </div>
                 </div>
               );
             })}

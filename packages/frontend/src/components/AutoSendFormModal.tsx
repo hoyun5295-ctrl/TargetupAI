@@ -15,6 +15,7 @@
 import { useEffect, useState, useMemo, useRef } from 'react';
 import { aiApi } from '../api/client';
 import { calculateSmsBytes, buildAdMessageFront, buildAdSubjectFront, replaceMessageVars, formatPhoneNumber } from '../utils/formatDate';
+import { getMmsImageDisplayName } from '../utils/mmsImage';
 import { insertAtCursorPos } from '../utils/textInsert';
 import AiMessageSuggestModal from './AiMessageSuggestModal';
 import SpamFilterTestModal from './SpamFilterTestModal';
@@ -44,10 +45,11 @@ interface FieldItem {
   is_custom: boolean;
 }
 
+// ★ B11(0417 PDF #11): '매일' 제거 — D-2 AI 문안 자동생성 시점 구조적 모순
+//   매일 반복 주기 시 D-2와 D-day가 항상 겹쳐 AI 생성/담당자 알림 미실행. 회의 결과 매일 주기 폐지.
 const SCHEDULE_TYPES = [
   { value: 'monthly', label: '매월' },
   { value: 'weekly', label: '매주' },
-  { value: 'daily', label: '매일' },
 ];
 
 const WEEKDAYS = ['일요일', '월요일', '화요일', '수요일', '목요일', '금요일', '토요일'];
@@ -450,7 +452,8 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
         campaign_name: campaignName.trim(),
         description: description.trim() || null,
         schedule_type: scheduleType,
-        schedule_day: scheduleType === 'daily' ? null : scheduleDay,
+        // ★ B11(0417 PDF #11): 'daily' 제거 후 scheduleDay 항상 전송 (monthly=1~28, weekly=0~6)
+        schedule_day: scheduleDay,
         schedule_time: scheduleTime,
         // ★ D86: 사용자가 설정한 타겟 필터 — 빈 객체면 백엔드에서 거부됨
         target_filter: targetFilter,
@@ -1092,9 +1095,19 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
                           <span className="text-xs font-semibold text-gray-600">🖼️ MMS 이미지</span>
                           {mmsUploadedImages.length > 0 ? (
                             <div className="flex items-center gap-1">
-                              {mmsUploadedImages.map((img, idx) => (
-                                <img key={idx} src={img.url} alt="" className="w-10 h-10 object-cover rounded border" />
-                              ))}
+                              {/* ★ B3(0417 PDF #3): 파일명 hover 툴팁 */}
+                              {mmsUploadedImages.map((img: any, idx: number) => {
+                                const fname = getMmsImageDisplayName(img, `이미지${idx + 1}`);
+                                return (
+                                  <img
+                                    key={idx}
+                                    src={img.url}
+                                    alt={fname}
+                                    title={fname}
+                                    className="w-10 h-10 object-cover rounded border"
+                                  />
+                                );
+                              })}
                               <button
                                 onClick={() => setMmsUploadedImages([])}
                                 className="text-xs text-red-500 ml-1 hover:underline"
@@ -1195,7 +1208,10 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
                             setToast({ show: true, type: 'error', message: '메시지를 먼저 입력해주세요.' });
                             return;
                           }
-                          if (!callbackNumber) {
+                          // ★ B9(0417 PDF #9): 수신자별 회신번호 모드(useIndividualCallback)에서는 callbackNumber가 빈 값이 정상.
+                          //   이 경우 스팸테스트는 첫 샘플 고객의 callback(또는 store_phone)으로 진행.
+                          //   일반 모드(대표번호 사용)에서만 발신번호 필수 체크.
+                          if (!useIndividualCallback && !callbackNumber) {
                             setToast({ show: true, type: 'error', message: '발신번호를 먼저 선택해주세요.' });
                             return;
                           }
@@ -1388,9 +1404,19 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
                 )}
                 {messageType === 'MMS' && mmsUploadedImages.length > 0 && (
                   <div className="flex gap-2">
-                    {mmsUploadedImages.map((img, idx) => (
-                      <img key={idx} src={img.url} alt="" className="w-16 h-16 object-cover rounded-lg border" />
-                    ))}
+                    {/* ★ B3(0417 PDF #3): 파일명 hover 툴팁 */}
+                    {mmsUploadedImages.map((img: any, idx: number) => {
+                      const fname = getMmsImageDisplayName(img, `이미지${idx + 1}`);
+                      return (
+                        <img
+                          key={idx}
+                          src={img.url}
+                          alt={fname}
+                          title={fname}
+                          className="w-16 h-16 object-cover rounded-lg border"
+                        />
+                      );
+                    })}
                   </div>
                 )}
               </div>

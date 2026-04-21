@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { formatPreviewValue, buildAdMessageFront, buildAdSubjectFront, replaceVarsBySampleCustomer } from '../utils/formatDate';
 import { highlightVars } from '../utils/highlightVars';
+import { getMmsImageDisplayName } from '../utils/mmsImage';
 
 interface AiCampaignResultPopupProps {
   show: boolean;
@@ -306,9 +307,19 @@ export default function AiCampaignResultPopup({
               >
                 {mmsUploadedImages.length > 0 ? (
                   <div className="flex items-center gap-3">
-                    {mmsUploadedImages.map((img, idx) => (
-                      <img key={idx} src={img.url} alt="" className="w-16 h-16 object-cover rounded-lg border shadow-sm" />
-                    ))}
+                    {/* ★ B3(0417 PDF #3): 파일명 hover 툴팁 */}
+                    {mmsUploadedImages.map((img: any, idx: number) => {
+                      const fname = getMmsImageDisplayName(img, `이미지${idx + 1}`);
+                      return (
+                        <img
+                          key={idx}
+                          src={img.url}
+                          alt={fname}
+                          title={fname}
+                          className="w-16 h-16 object-cover rounded-lg border shadow-sm"
+                        />
+                      );
+                    })}
                     <div className="text-sm text-purple-600 font-medium">✏️ {mmsUploadedImages.length}장 첨부됨 (클릭하여 수정)</div>
                   </div>
                 ) : (

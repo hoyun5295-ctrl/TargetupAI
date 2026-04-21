@@ -216,6 +216,7 @@ router.get('/', async (req: Request, res: Response) => {
         TO_CHAR(c.event_start_date, 'YYYY-MM-DD') as event_start_date,
         TO_CHAR(c.event_end_date, 'YYYY-MM-DD') as event_end_date,
         c.message_content, c.message_template, c.subject, c.message_subject, c.is_ad, c.callback_number,
+        c.mms_image_paths,
         ${CAMPAIGN_OPT080_SELECT_EXPR}
        FROM campaigns c
        ${CAMPAIGN_OPT080_LEFT_JOIN}

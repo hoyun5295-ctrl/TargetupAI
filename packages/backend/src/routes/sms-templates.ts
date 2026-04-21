@@ -8,6 +8,7 @@ const router = Router();
 router.use(authenticate);
 
 // 템플릿 목록 조회
+// ★ B1(0417 PDF #1): is_ad 컬럼 추가 — 저장 시점의 광고 ON/OFF 상태 복원용
 router.get('/', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
@@ -15,7 +16,7 @@ router.get('/', async (req: Request, res: Response) => {
     if (!companyId) return res.status(403).json({ error: '권한이 없습니다.' });
 
     const result = await query(
-      `SELECT id, template_name, message_type, subject, content, mms_image_paths, created_at
+      `SELECT id, template_name, message_type, subject, content, mms_image_paths, is_ad, created_at
        FROM sms_templates
        WHERE company_id = $1 AND user_id = $2
        ORDER BY created_at DESC
@@ -31,13 +32,14 @@ router.get('/', async (req: Request, res: Response) => {
 });
 
 // 템플릿 저장
+// ★ B1(0417 PDF #1): isAd 필드 저장 — 프론트 adTextEnabled 상태를 DB에 왕복
 router.post('/', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
     const userId = req.user?.userId;
     if (!companyId) return res.status(403).json({ error: '권한이 없습니다.' });
 
-    const { templateName, messageType, subject, content, mmsImagePaths } = req.body;
+    const { templateName, messageType, subject, content, mmsImagePaths, isAd } = req.body;
 
     if (!templateName || !content) {
       return res.status(400).json({ error: '템플릿명과 내용은 필수입니다.' });
@@ -52,11 +54,14 @@ router.post('/', async (req: Request, res: Response) => {
       return res.status(409).json({ error: '같은 이름의 템플릿이 이미 존재합니다.' });
     }
 
+    // isAd 미전달 시 true (레거시 호환: 기존 템플릿은 전부 광고 ON으로 간주)
+    const isAdValue = typeof isAd === 'boolean' ? isAd : true;
+
     const result = await query(
-      `INSERT INTO sms_templates (id, company_id, user_id, template_name, message_type, subject, content, mms_image_paths, created_at, updated_at)
-       VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
-       RETURNING id, template_name, message_type, subject, content, mms_image_paths, created_at`,
-      [companyId, userId, templateName, messageType || 'SMS', subject || null, content, mmsImagePaths ? JSON.stringify(mmsImagePaths) : null]
+      `INSERT INTO sms_templates (id, company_id, user_id, template_name, message_type, subject, content, mms_image_paths, is_ad, created_at, updated_at)
+       VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
+       RETURNING id, template_name, message_type, subject, content, mms_image_paths, is_ad, created_at`,
+      [companyId, userId, templateName, messageType || 'SMS', subject || null, content, mmsImagePaths ? JSON.stringify(mmsImagePaths) : null, isAdValue]
     );
 
     return res.json({ success: true, template: result.rows[0], message: '템플릿이 저장되었습니다.' });
