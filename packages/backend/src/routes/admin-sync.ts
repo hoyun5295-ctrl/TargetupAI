@@ -318,16 +318,37 @@ router.post('/agents/:agentId/command', authenticate, requireSuperAdmin, async (
 
     commands.push(newCommand);
 
-    // config.commands 업데이트
-    await query(
-      `UPDATE sync_agents SET config = jsonb_set(COALESCE(config, '{}'), '{commands}', $1::jsonb), updated_at = NOW() WHERE id = $2`,
-      [JSON.stringify(commands), agentId]
-    );
+    // ★ D131 후속(2026-04-21): pause/resume 명령 등록 시 sync_agents.status도 즉시 업데이트.
+    //   이유: UI가 DB status 기반으로 재개/일시정지 버튼 활성화를 판단하는데
+    //   heartbeat 주기(최대 60분)로 인한 시차 때문에 "실제 Agent는 paused인데 UI는 active"
+    //   모순 발생 → 사용자가 재개 못 누르는 UX 결함. 명령 등록 = 의도된 상태로 DB 선반영.
+    //   Agent가 heartbeat self-report 시 덮어쓰기 구조라 최종 일관성 유지됨.
+    const intendedStatus: Record<string, string> = {
+      pause: 'paused',
+      resume: 'active',
+    };
+    const nextStatus = intendedStatus[type];
+    if (nextStatus) {
+      await query(
+        `UPDATE sync_agents
+         SET config = jsonb_set(COALESCE(config, '{}'), '{commands}', $1::jsonb),
+             status = $2,
+             updated_at = NOW()
+         WHERE id = $3`,
+        [JSON.stringify(commands), nextStatus, agentId]
+      );
+    } else {
+      await query(
+        `UPDATE sync_agents SET config = jsonb_set(COALESCE(config, '{}'), '{commands}', $1::jsonb), updated_at = NOW() WHERE id = $2`,
+        [JSON.stringify(commands), agentId]
+      );
+    }
 
     res.json({
       success: true,
       command_id: commandId,
-      message: '명령이 등록되었습니다. Agent가 다음 config 조회 시 실행합니다.'
+      message: '명령이 등록되었습니다. Agent가 다음 config 조회 시 실행합니다.',
+      statusUpdated: nextStatus || null,
     });
   } catch (error) {
     console.error('Sync Agent 명령 등록 실패:', error);

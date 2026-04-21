@@ -7664,7 +7664,12 @@ const handleApproveRequest = async (id: string) => {
             </div>
             <div className="p-5 space-y-3">
               <label className="text-xs text-gray-500 font-medium mb-1.5 block">명령 유형</label>
-              {/* ★ D131 후속(2026-04-21): 현재 상태 안내 + 명령 enable/disable */}
+              {/* ★ D131 후속(2026-04-21 3차 수정): 자동 선택/비활성 로직 복원.
+                  백엔드가 pause/resume 명령 등록 시 sync_agents.status를 즉시 UPDATE하므로
+                  UI가 DB 실시간 상태 기반으로 재개/일시정지 활성화 판단 가능 (heartbeat 지연 없음).
+                  - paused: pause/full_sync 비활성 (무의미), resume/restart 활성
+                  - active: resume 비활성 (재개할 게 없음), pause/full_sync/restart 활성
+                  - offline: 경고 + 모두 활성 (Agent 복귀 후 실행) */}
               {(() => {
                 const isPaused = syncSelectedAgent.status === 'paused';
                 const isOffline = syncSelectedAgent.status === 'inactive' || syncSelectedAgent.status === 'error';
@@ -7681,27 +7686,25 @@ const handleApproveRequest = async (id: string) => {
                       </div>
                     )}
                     <div className="space-y-2">
-                      <label className={`flex items-center gap-3 p-3 border rounded-lg cursor-pointer transition-colors ${syncCommandType === 'full_sync' ? 'border-emerald-500 bg-emerald-50' : 'hover:bg-gray-50'} ${isPaused ? 'opacity-50 pointer-events-none' : ''}`}>
+                      <label className={`flex items-center gap-3 p-3 border rounded-lg transition-colors ${syncCommandType === 'full_sync' ? 'border-emerald-500 bg-emerald-50' : 'hover:bg-gray-50'} ${isPaused ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}>
                         <input type="radio" name="cmdType" value="full_sync" checked={syncCommandType === 'full_sync'} onChange={() => setSyncCommandType('full_sync')} className="text-emerald-600" disabled={isPaused} />
                         <div>
                           <div className="text-sm font-medium text-gray-800">🔄 전체 동기화</div>
-                          <div className="text-xs text-gray-500">모든 고객/구매 데이터를 다시 동기화합니다{isPaused ? ' (일시정지 중 — 재개 후 실행)' : ''}</div>
+                          <div className="text-xs text-gray-500">{isPaused ? '일시정지 중 — 재개 후 실행 가능' : '모든 고객/구매 데이터를 다시 동기화합니다'}</div>
                         </div>
                       </label>
-                      {/* ★ D131 후속: pause 옵션 */}
-                      <label className={`flex items-center gap-3 p-3 border rounded-lg cursor-pointer transition-colors ${syncCommandType === 'pause' ? 'border-orange-500 bg-orange-50' : 'hover:bg-gray-50'} ${isPaused ? 'opacity-50 pointer-events-none' : ''}`}>
+                      <label className={`flex items-center gap-3 p-3 border rounded-lg transition-colors ${syncCommandType === 'pause' ? 'border-orange-500 bg-orange-50' : 'hover:bg-gray-50'} ${isPaused ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}>
                         <input type="radio" name="cmdType" value="pause" checked={syncCommandType === 'pause'} onChange={() => setSyncCommandType('pause')} className="text-orange-600" disabled={isPaused} />
                         <div>
                           <div className="text-sm font-medium text-gray-800">⏸️ 동기화 일시정지</div>
-                          <div className="text-xs text-gray-500">스케줄러만 중단 (Agent는 계속 살아있음, heartbeat 유지)</div>
+                          <div className="text-xs text-gray-500">{isPaused ? '이미 일시정지 상태입니다' : '스케줄러만 중단 (Agent는 계속 살아있음, heartbeat 유지)'}</div>
                         </div>
                       </label>
-                      {/* ★ D131 후속: resume 옵션 */}
-                      <label className={`flex items-center gap-3 p-3 border rounded-lg cursor-pointer transition-colors ${syncCommandType === 'resume' ? 'border-blue-500 bg-blue-50' : 'hover:bg-gray-50'} ${!isPaused ? 'opacity-50 pointer-events-none' : ''}`}>
+                      <label className={`flex items-center gap-3 p-3 border rounded-lg transition-colors ${syncCommandType === 'resume' ? 'border-blue-500 bg-blue-50' : 'hover:bg-gray-50'} ${!isPaused ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}>
                         <input type="radio" name="cmdType" value="resume" checked={syncCommandType === 'resume'} onChange={() => setSyncCommandType('resume')} className="text-blue-600" disabled={!isPaused} />
                         <div>
                           <div className="text-sm font-medium text-gray-800">▶️ 동기화 재개</div>
-                          <div className="text-xs text-gray-500">일시정지된 스케줄러를 다시 시작합니다</div>
+                          <div className="text-xs text-gray-500">{!isPaused ? '이미 실행 중입니다' : '일시정지된 스케줄러를 다시 시작합니다'}</div>
                         </div>
                       </label>
                       <label className={`flex items-center gap-3 p-3 border rounded-lg cursor-pointer transition-colors ${syncCommandType === 'restart' ? 'border-emerald-500 bg-emerald-50' : 'hover:bg-gray-50'}`}>
@@ -7715,7 +7718,7 @@ const handleApproveRequest = async (id: string) => {
                   </>
                 );
               })()}
-              <p className="text-xs text-gray-400">Agent가 다음 config 조회 시 명령을 실행합니다.</p>
+              <p className="text-xs text-gray-400">명령 등록 시 상태가 즉시 반영됩니다. Agent는 다음 heartbeat(최대 60분) 때 실제 실행합니다.</p>
             </div>
             <div className="flex border-t">
               <button

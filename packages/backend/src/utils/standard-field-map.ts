@@ -234,6 +234,29 @@ export function fieldKeyToSqlRef(fieldKey: string): string | null {
  * @param definitions  { fieldKey: 'custom_1', label: '평균주문금액', fieldType?: 'VARCHAR' }[]
  * @returns upsert된 건수
  */
+// ★ D131 후속(2026-04-21): customer_field_definitions.field_type CHECK 제약 허용값 매핑.
+//   DB 제약: CHECK (field_type IN ('INT', 'VARCHAR', 'DATE', 'BOOLEAN'))
+//   Agent는 'string'/'number'/'date'/'boolean' 일반 타입으로 보냄 → 서버에서 DB 허용값으로 변환.
+//   2026-04-21 B31-02 근본 원인: Agent가 'string' 보내고 DB가 거부하여 500 발생.
+const FIELD_TYPE_DB_MAP: Record<string, string> = {
+  // 문자열 계열 → VARCHAR
+  'string': 'VARCHAR', 'str': 'VARCHAR', 'varchar': 'VARCHAR', 'text': 'VARCHAR',
+  // 숫자 계열 → INT (DB 제약이 NUMBER/NUMERIC/FLOAT 미허용이므로 INT로 통일)
+  'number': 'INT', 'num': 'INT', 'int': 'INT', 'integer': 'INT', 'numeric': 'INT', 'float': 'INT', 'double': 'INT',
+  // 날짜 계열 → DATE
+  'date': 'DATE', 'datetime': 'DATE', 'timestamp': 'DATE', 'timestamptz': 'DATE',
+  // 불리언 계열 → BOOLEAN
+  'boolean': 'BOOLEAN', 'bool': 'BOOLEAN',
+  // 이미 DB 허용값 (대문자)이면 그대로
+  'VARCHAR': 'VARCHAR', 'INT': 'INT', 'DATE': 'DATE', 'BOOLEAN': 'BOOLEAN',
+};
+
+function toDbFieldType(input: string | undefined): string {
+  if (!input) return 'VARCHAR';
+  const mapped = FIELD_TYPE_DB_MAP[input] || FIELD_TYPE_DB_MAP[input.toLowerCase()];
+  return mapped || 'VARCHAR'; // 모르는 값은 안전하게 VARCHAR
+}
+
 export async function upsertCustomFieldDefinitions(
   companyId: string,
   definitions: Array<{ fieldKey: string; label: string; fieldType?: string }>
@@ -246,6 +269,8 @@ export async function upsertCustomFieldDefinitions(
   for (const def of definitions) {
     if (!def.fieldKey.startsWith('custom_')) continue;
     const displayOrder = parseInt(def.fieldKey.replace('custom_', '')) || 0;
+    // ★ D131 후속: Agent가 보낸 일반 타입명을 DB CHECK 제약 허용값으로 변환
+    const dbFieldType = toDbFieldType(def.fieldType);
     try {
       await query(
         `INSERT INTO customer_field_definitions (id, company_id, field_key, field_label, field_type, display_order, is_hidden, created_at)
@@ -254,7 +279,7 @@ export async function upsertCustomFieldDefinitions(
            field_label = EXCLUDED.field_label,
            field_type = EXCLUDED.field_type,
            display_order = EXCLUDED.display_order`,
-        [companyId, def.fieldKey, def.label, def.fieldType || 'VARCHAR', displayOrder]
+        [companyId, def.fieldKey, def.label, dbFieldType, displayOrder]
       );
       upsertedCount++;
     } catch (err) {
