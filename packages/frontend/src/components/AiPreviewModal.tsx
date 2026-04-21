@@ -1,6 +1,6 @@
 import React from 'react';
 import { replaceVarsBySampleCustomer, calculateSmsBytes, buildAdSubjectFront } from '../utils/formatDate';
-import { getMmsImageDisplayName } from '../utils/mmsImage';
+import MmsImagePreview from './shared/MmsImagePreview';
 
 interface AiPreviewModalProps {
   show: boolean;
@@ -91,22 +91,16 @@ export default function AiPreviewModal(props: AiPreviewModalProps) {
                 )}
                 {/* 메시지 영역 */}
                 <div className="flex-1 overflow-y-auto p-3 bg-gradient-to-b from-purple-50/30 to-white">
-                  {/* MMS 이미지 — B3(0417 PDF #3): 파일명 hover 툴팁 */}
+                  {/* ★ B3: 공용 컴포넌트 MmsImagePreview 사용 */}
                   {mmsUploadedImages.length > 0 && (
                     <div className="mb-2">
-                      {mmsUploadedImages.map((img: any, idx: number) => {
-                        const fname = getMmsImageDisplayName(img, `이미지${idx + 1}`);
-                        return (
-                          <img
-                            key={idx}
-                            src={img.url}
-                            alt={fname}
-                            title={fname}
-                            className="w-full h-auto rounded border border-purple-200 mb-1"
-                            style={{ maxHeight: '160px', objectFit: 'cover' }}
-                          />
-                        );
-                      })}
+                      <MmsImagePreview
+                        images={mmsUploadedImages}
+                        size="full"
+                        maxHeight="160px"
+                        borderColor="border border-purple-200"
+                        compact
+                      />
                     </div>
                   )}
                   <div className="flex gap-2 mt-1">

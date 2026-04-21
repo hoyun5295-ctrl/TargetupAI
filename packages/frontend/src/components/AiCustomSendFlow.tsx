@@ -20,7 +20,7 @@ import {
 import { useEffect, useRef, useState } from 'react';
 import { formatPreviewValue, calculateSmsBytes, replaceMessageVars, buildAdMessageFront, buildAdSubjectFront, formatPhoneNumber } from '../utils/formatDate';
 import { highlightVars } from '../utils/highlightVars';
-import { getMmsImageDisplayName } from '../utils/mmsImage';
+import MmsImagePreview from './shared/MmsImagePreview';
 
 interface AiCustomSendFlowProps {
   onClose: () => void;
@@ -648,19 +648,15 @@ export default function AiCustomSendFlow({
                         <span className="text-[10px] text-violet-500">JPG / 300KB 이하</span>
                       </div>
                       {mmsUploadedImages && mmsUploadedImages.length > 0 ? (
-                        <div className="flex flex-wrap gap-2">
-                          {mmsUploadedImages.map((img, idx) => (
-                            <div key={idx} className="relative w-16 h-16 rounded border border-violet-300 overflow-hidden">
-                              <img src={img.url} alt={img.originalName || img.filename} title={img.originalName || img.filename} className="w-full h-full object-cover" />
-                              {onMmsImageRemove && (
-                                <button
-                                  onClick={() => onMmsImageRemove(idx)}
-                                  className="absolute top-0 right-0 w-4 h-4 bg-red-500 text-white text-[10px] rounded-bl flex items-center justify-center hover:bg-red-600"
-                                  title="삭제"
-                                >×</button>
-                              )}
-                            </div>
-                          ))}
+                        <div className="flex flex-wrap gap-2 items-center">
+                          {/* ★ B3: 공용 컴포넌트 (onRemove 포함) */}
+                          <MmsImagePreview
+                            images={mmsUploadedImages}
+                            size="sm"
+                            compact
+                            borderColor="border border-violet-300"
+                            onRemove={onMmsImageRemove}
+                          />
                           {mmsUploadedImages.length < 3 && onMmsImageUpload && (
                             <label className="w-16 h-16 border-2 border-dashed border-violet-300 rounded flex items-center justify-center cursor-pointer hover:bg-violet-100 text-violet-500 text-xs">
                               + 추가
@@ -891,23 +887,16 @@ export default function AiCustomSendFlow({
                               <div className="flex gap-2">
                                 <div className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-xs bg-purple-100">📱</div>
                                 <div className="rounded-2xl rounded-tl-sm p-3 shadow-sm border text-[12px] leading-[1.6] whitespace-pre-wrap break-all overflow-hidden text-gray-700 max-w-[95%] bg-white border-gray-100">
-                                  {/* ★ B1 후속: MMS 첨부 이미지 미리보기 */}
-                                  {/* ★ B3(0417 PDF #3): 파일명 hover 툴팁 */}
+                                  {/* ★ B3: 공용 컴포넌트 MmsImagePreview 사용 */}
                                   {channel === 'MMS' && mmsUploadedImages && mmsUploadedImages.length > 0 && (
-                                    <div className="flex flex-wrap gap-1 mb-1.5">
-                                      {mmsUploadedImages.map((img: any, i: number) => {
-                                        const fname = getMmsImageDisplayName(img, `이미지${i + 1}`);
-                                        return (
-                                          <img
-                                            key={i}
-                                            src={img.url}
-                                            alt={fname}
-                                            title={fname}
-                                            className="w-full h-auto rounded border border-purple-200"
-                                            style={{ maxHeight: '120px', objectFit: 'cover' }}
-                                          />
-                                        );
-                                      })}
+                                    <div className="mb-1.5">
+                                      <MmsImagePreview
+                                        images={mmsUploadedImages}
+                                        size="full"
+                                        maxHeight="120px"
+                                        borderColor="border border-purple-200"
+                                        compact
+                                      />
                                     </div>
                                   )}
                                   {highlightVars(wrapAdText(msg.message_text || ''))}
@@ -1093,23 +1082,16 @@ export default function AiCustomSendFlow({
                       <div className="flex gap-2 mt-1">
                         <div className="w-7 h-7 rounded-full bg-purple-100 flex items-center justify-center shrink-0 text-xs">📱</div>
                         <div className="bg-white rounded-2xl rounded-tl-sm p-3 shadow-sm border border-gray-100 text-[12px] leading-[1.6] whitespace-pre-wrap break-all text-gray-700 max-w-[95%]">
-                          {/* ★ B1 후속: 미리보기 모달에도 MMS 이미지 표시 */}
-                          {/* ★ B3(0417 PDF #3): 파일명 hover 툴팁 */}
+                          {/* ★ B3: 공용 컴포넌트 MmsImagePreview 사용 */}
                           {channel === 'MMS' && mmsUploadedImages && mmsUploadedImages.length > 0 && (
-                            <div className="flex flex-wrap gap-1 mb-2">
-                              {mmsUploadedImages.map((img: any, i: number) => {
-                                const fname = getMmsImageDisplayName(img, `이미지${i + 1}`);
-                                return (
-                                  <img
-                                    key={i}
-                                    src={img.url}
-                                    alt={fname}
-                                    title={fname}
-                                    className="w-full h-auto rounded border border-purple-200"
-                                    style={{ maxHeight: '160px', objectFit: 'cover' }}
-                                  />
-                                );
-                              })}
+                            <div className="mb-2">
+                              <MmsImagePreview
+                                images={mmsUploadedImages}
+                                size="full"
+                                maxHeight="160px"
+                                borderColor="border border-purple-200"
+                                compact
+                              />
                             </div>
                           )}
                           {Object.keys(sampleData).length > 0 && !showVarsHighlightOnly

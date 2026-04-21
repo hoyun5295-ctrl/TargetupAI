@@ -15,7 +15,7 @@
 import { useEffect, useState, useMemo, useRef } from 'react';
 import { aiApi } from '../api/client';
 import { calculateSmsBytes, buildAdMessageFront, buildAdSubjectFront, replaceMessageVars, formatPhoneNumber } from '../utils/formatDate';
-import { getMmsImageDisplayName } from '../utils/mmsImage';
+import MmsImagePreview from './shared/MmsImagePreview';
 import { insertAtCursorPos } from '../utils/textInsert';
 import AiMessageSuggestModal from './AiMessageSuggestModal';
 import SpamFilterTestModal from './SpamFilterTestModal';
@@ -1095,19 +1095,8 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
                           <span className="text-xs font-semibold text-gray-600">🖼️ MMS 이미지</span>
                           {mmsUploadedImages.length > 0 ? (
                             <div className="flex items-center gap-1">
-                              {/* ★ B3(0417 PDF #3): 파일명 hover 툴팁 */}
-                              {mmsUploadedImages.map((img: any, idx: number) => {
-                                const fname = getMmsImageDisplayName(img, `이미지${idx + 1}`);
-                                return (
-                                  <img
-                                    key={idx}
-                                    src={img.url}
-                                    alt={fname}
-                                    title={fname}
-                                    className="w-10 h-10 object-cover rounded border"
-                                  />
-                                );
-                              })}
+                              {/* ★ B3: 공용 컴포넌트 MmsImagePreview 사용 */}
+                              <MmsImagePreview images={mmsUploadedImages} size="xs" compact />
                               <button
                                 onClick={() => setMmsUploadedImages([])}
                                 className="text-xs text-red-500 ml-1 hover:underline"
@@ -1403,21 +1392,8 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
                 </div>
                 )}
                 {messageType === 'MMS' && mmsUploadedImages.length > 0 && (
-                  <div className="flex gap-2">
-                    {/* ★ B3(0417 PDF #3): 파일명 hover 툴팁 */}
-                    {mmsUploadedImages.map((img: any, idx: number) => {
-                      const fname = getMmsImageDisplayName(img, `이미지${idx + 1}`);
-                      return (
-                        <img
-                          key={idx}
-                          src={img.url}
-                          alt={fname}
-                          title={fname}
-                          className="w-16 h-16 object-cover rounded-lg border"
-                        />
-                      );
-                    })}
-                  </div>
+                  /* ★ B3: 공용 컴포넌트 MmsImagePreview 사용 */
+                  <MmsImagePreview images={mmsUploadedImages} size="sm" compact />
                 )}
               </div>
             )}

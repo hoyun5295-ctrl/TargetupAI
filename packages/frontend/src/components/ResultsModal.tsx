@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { calculateSmsBytes, mmsServerPathToUrl, formatCampaignMessageForDisplay, buildAdSubjectFront, formatPhoneNumber } from '../utils/formatDate';
-import { getMmsImagePath, getMmsImageDisplayName } from '../utils/mmsImage';
+import { calculateSmsBytes, formatCampaignMessageForDisplay, buildAdSubjectFront, formatPhoneNumber } from '../utils/formatDate';
+import MmsImagePreview from './shared/MmsImagePreview';
 import CalendarModal from './CalendarModal';
 
 interface ResultsModalProps {
@@ -837,28 +837,13 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                               )}
                               {/* ★ B2: 컨트롤타워 — 실발송 텍스트(MySQL) 우선, 없으면 순수본문에 (광고)+080 부착 */}
                               {formatCampaignMessageForDisplay(selectedCampaign, messages[0]?.msg_contents)}
-                              {/* ★ D98: MMS 이미지 표시 — mmsServerPathToUrl 컨트롤타워 사용 */}
-                              {/* ★ D123 P5: 호버 시 파일명 툴팁 + 클릭 시 확대 모달 */}
-                              {/* ★ B11(0417 PDF #5): flex-wrap + min-w-0 + object-contain — 3장 이상/가로 긴 이미지 프레임 오버플로우 방지 */}
+                              {/* ★ B5/B7: 공용 컴포넌트 MmsImagePreview 사용 (클릭 확대 지원) */}
                               {selectedCampaign.mms_image_paths && Array.isArray(selectedCampaign.mms_image_paths) && selectedCampaign.mms_image_paths.length > 0 && (
-                                <div className="mt-2 pt-2 border-t border-gray-100 flex flex-wrap gap-1.5 min-w-0 max-w-full">
-                                  {/* ★ D124 N4: 객체({path, originalName}) / 문자열 양쪽 수용 — 원본 파일명 우선 표시 */}
-                                  {selectedCampaign.mms_image_paths.map((imgItem: any, idx: number) => {
-                                    const serverPath = getMmsImagePath(imgItem);
-                                    const filename = getMmsImageDisplayName(imgItem, `이미지${idx+1}`);
-                                    const url = mmsServerPathToUrl(serverPath);
-                                    return (
-                                      <img
-                                        key={idx}
-                                        src={url}
-                                        alt={filename}
-                                        title={filename}
-                                        onClick={() => setEnlargedImage({ url, filename })}
-                                        className="w-16 h-16 object-cover rounded border cursor-pointer hover:ring-2 hover:ring-emerald-400 transition shrink-0"
-                                      />
-                                    );
-                                  })}
-                                </div>
+                                <MmsImagePreview
+                                  images={selectedCampaign.mms_image_paths}
+                                  size="sm"
+                                  onImageClick={(url, filename) => setEnlargedImage({ url, filename })}
+                                />
                               )}
                             </div>
                           </div>
@@ -1191,24 +1176,15 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                           <span className="text-[11px] font-bold text-purple-600">{typeLabel}</span>
                         </div>
                         <div className="flex-1 overflow-y-auto p-3 bg-gradient-to-b from-purple-50/30 to-white select-text">
-                          {/* ★ B7: MMS 이미지 표시 — flex-wrap + object-cover로 프레임 내 정렬 */}
+                          {/* ★ B7: 공용 컴포넌트 MmsImagePreview 사용 */}
                           {isMms && hasImages && (
-                            <div className="flex flex-wrap gap-1.5 mb-2 min-w-0 max-w-full">
-                              {mmsImages!.map((imgItem: any, idx: number) => {
-                                const serverPath = getMmsImagePath(imgItem);
-                                const filename = getMmsImageDisplayName(imgItem, `이미지${idx + 1}`);
-                                const url = mmsServerPathToUrl(serverPath);
-                                return (
-                                  <img
-                                    key={idx}
-                                    src={url}
-                                    alt={filename}
-                                    title={filename}
-                                    onClick={() => setEnlargedImage({ url, filename })}
-                                    className="w-20 h-20 object-cover rounded border shrink-0 cursor-pointer hover:ring-2 hover:ring-purple-400 transition"
-                                  />
-                                );
-                              })}
+                            <div className="mb-2">
+                              <MmsImagePreview
+                                images={mmsImages!}
+                                size="md"
+                                onImageClick={(url, filename) => setEnlargedImage({ url, filename })}
+                                compact
+                              />
                             </div>
                           )}
                           <div className="flex gap-2 mt-1">

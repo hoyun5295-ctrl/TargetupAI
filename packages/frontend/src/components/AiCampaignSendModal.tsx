@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { highlightVars, mergeAndHighlightVars } from '../utils/highlightVars';
 import { formatPhoneNumber, buildAdMessageFront, buildAdSubjectFront } from '../utils/formatDate';
+import MmsImagePreview from './shared/MmsImagePreview';
 
 interface AiCampaignSendModalProps {
   onClose: () => void;
@@ -170,10 +171,10 @@ export default function AiCampaignSendModal({
                         >머지 결과</button>
                       </div>
                     )}
-                    {/* MMS 이미지 */}
-                    {mmsImages && mmsImages.length > 0 && mmsImages.map((img, idx) => (
-                      <img key={idx} src={img.url} alt="" className="w-full h-auto rounded mb-1.5" />
-                    ))}
+                    {/* ★ B3/B7: 공용 컴포넌트 MmsImagePreview 사용 */}
+                    {mmsImages && mmsImages.length > 0 && (
+                      <MmsImagePreview images={mmsImages} size="full" compact />
+                    )}
                     <div className="flex gap-2 mt-1">
                       <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-xs bg-emerald-100`}>📱</div>
                       <div className={`rounded-2xl rounded-tl-sm p-3 shadow-sm border text-[12px] leading-[1.7] whitespace-pre-wrap break-all text-gray-700 max-w-[95%] bg-white border-gray-100`}>

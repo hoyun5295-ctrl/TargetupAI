@@ -44,7 +44,7 @@ import UploadResultModal from '../components/UploadResultModal';
 import { useAuthStore } from '../stores/authStore';
 import { formatDate, formatPreviewValue, formatByType, calculateSmsBytes, truncateToSmsBytes, DIRECT_VAR_MAP, DIRECT_VAR_TO_FIELD, DIRECT_FIELD_LABELS, DIRECT_MAPPING_FIELDS, replaceDirectVars, formatPhoneNumber, mmsServerPathToUrl, resolveRecipientCallback, buildAdMessageFront, validateMmsBeforeSend } from '../utils/formatDate';
 import { insertAtCursorOrAppend } from '../utils/textInsert';
-import { getMmsImagePath, getMmsImageDisplayName, type MmsImageItem } from '../utils/mmsImage';
+import { getMmsImagePath, getMmsImageDisplayName, toMmsImagePaths, type MmsImageItem } from '../utils/mmsImage';
 import DirectSendPanel from '../components/DirectSendPanel';
 
 interface Stats {
@@ -438,7 +438,7 @@ export default function Dashboard() {
         scheduledAt: reserveEnabled && reserveDateTime ? new Date(reserveDateTime).toISOString() : null,
         splitEnabled: isAlimtalk ? false : splitEnabled,
         splitCount: isAlimtalk ? null : (splitEnabled ? splitCount : null),
-        mmsImagePaths: isAlimtalk ? [] : mmsUploadedImages.map(img => ({ path: img.serverPath, originalName: img.originalName || '' })),
+        mmsImagePaths: isAlimtalk ? [] : toMmsImagePaths(mmsUploadedImages),
         ...(confirmCallbackExclusion ? { confirmCallbackExclusion: true } : {}),
         // ★ D102: 중복제거/수신거부제거 사용자 선택 전달
         dedupEnabled: sendConfirm.dedupEnabled ?? true,
@@ -596,7 +596,7 @@ export default function Dashboard() {
           scheduledAt: reserveEnabled && reserveDateTime ? new Date(reserveDateTime).toISOString() : null,
           splitEnabled: isTargetAlimtalk ? false : splitEnabled,
           splitCount: isTargetAlimtalk ? null : (splitEnabled ? splitCount : null),
-          mmsImagePaths: isTargetAlimtalk ? [] : mmsUploadedImages.map(img => ({ path: img.serverPath, originalName: img.originalName || '' })),
+          mmsImagePaths: isTargetAlimtalk ? [] : toMmsImagePaths(mmsUploadedImages),
           ...(confirmCallbackExclusion ? { confirmCallbackExclusion: true } : {}),
           // ★ D102: 중복제거/수신거부제거 사용자 선택 전달
           dedupEnabled: sendConfirm.dedupEnabled ?? true,
@@ -1632,7 +1632,7 @@ const campaignData = {
       individualCallbackColumn: _useIndividualCallback ? (modalData?.individualCallbackColumn ?? individualCallbackColumn) : undefined,
       // ★ B-D75-01: 모달에서 수정된 제목 우선 사용
       subject: modalData?.subject ?? selectedMsg.subject ?? '',
-      mmsImagePaths: mmsUploadedImages.map(img => ({ path: img.serverPath, originalName: img.originalName || '' })),
+      mmsImagePaths: toMmsImagePaths(mmsUploadedImages),
     };
 
     const response = await campaignsApi.create(campaignData);
@@ -1770,7 +1770,7 @@ const campaignData = {
         //   기존: variant.subject 만 사용 → 사용자 제목 수정이 무시되어 원본 제목으로 발송됨
         subject: modalData.subject ?? variant.subject ?? '',
         // ★ B1: MMS 채널일 때 첨부 이미지 경로 전달 (이전: 빈 배열 하드코딩으로 첨부 누락)
-        mmsImagePaths: channelType === 'MMS' ? mmsUploadedImages.map(img => ({ path: img.serverPath, originalName: img.originalName || '' })) : [],
+        mmsImagePaths: channelType === 'MMS' ? toMmsImagePaths(mmsUploadedImages) : [],
       };
 
       console.log('=== AI 맞춤한줄 발송 디버깅 ===');
@@ -1869,7 +1869,7 @@ const campaignData = {
           messageType: selectedChannel,
           isAd: isAd,
           subject: selectedMsg.subject || '',
-          mmsImagePaths: mmsUploadedImages.map(img => ({ path: img.serverPath, originalName: img.originalName || '' })),
+          mmsImagePaths: toMmsImagePaths(mmsUploadedImages),
           // ★ D85: column 키 raw 데이터 전달 — replaceVariables가 customer[column]으로 접근
           sampleCustomer: sampleCustomerRaw && Object.keys(sampleCustomerRaw).length > 0 ? sampleCustomerRaw : undefined,
         }),
@@ -1913,7 +1913,7 @@ const campaignData = {
           messageType: targetMsgType,
           isAd: adTextEnabled,
           subject: targetSubject || '',
-          mmsImagePaths: mmsUploadedImages.map(img => ({ path: img.serverPath, originalName: img.originalName || '' })),
+          mmsImagePaths: toMmsImagePaths(mmsUploadedImages),
           // ★ D85: column 키 raw 데이터 전달
           sampleCustomer: sampleCustomerRaw && Object.keys(sampleCustomerRaw).length > 0 ? sampleCustomerRaw : undefined,
         }),
@@ -3445,7 +3445,7 @@ const campaignData = {
                     const content = showTemplateSave === 'target' ? targetMessage : directMessage;
                     const msgType = showTemplateSave === 'target' ? targetMsgType : directMsgType;
                     const subject = showTemplateSave === 'target' ? targetSubject : directSubject;
-                    const imagePaths = msgType === 'MMS' ? mmsUploadedImages.map(img => ({ path: img.serverPath, originalName: img.originalName || '' })) : undefined;
+                    const imagePaths = msgType === 'MMS' ? toMmsImagePaths(mmsUploadedImages) : undefined;
                     const ok = await saveTemplate(templateSaveName.trim(), content, msgType, subject, imagePaths);
                     if (ok) setShowTemplateSave(null);
                   }}

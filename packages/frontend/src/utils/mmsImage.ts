@@ -37,3 +37,17 @@ export function getMmsImageDisplayName(item: MmsImageItem | any, fallback = ''):
   const p = getMmsImagePath(item);
   return p.replace(/\\/g, '/').split('/').pop() || fallback;
 }
+
+/**
+ * 발송 payload 조립 컨트롤타워 — Dashboard 7곳의 인라인 `.map(img => ({ path, originalName }))` 통합.
+ * 업로드 직후 객체 `{serverPath, url, filename, originalName?, size}`를 DB 저장용 `{path, originalName}`으로 변환.
+ */
+export function toMmsImagePaths(
+  images: Array<{ serverPath?: string; path?: string; originalName?: string } | any>,
+): Array<{ path: string; originalName: string }> {
+  if (!Array.isArray(images)) return [];
+  return images.map((img: any) => ({
+    path: img?.serverPath || img?.path || '',
+    originalName: img?.originalName || '',
+  }));
+}

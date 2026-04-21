@@ -21,6 +21,7 @@ import {
   detectPhoneHeaders,
 } from '../utils/formatDate';
 import { insertAtCursorPos } from '../utils/textInsert';
+import MmsImagePreview from './shared/MmsImagePreview';
 import AlimtalkChannelPanel, {
   type AlimtalkChannelState,
   type AlimtalkSenderProfile,
@@ -494,25 +495,14 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                   </div>
                 )}
 
-                {/* MMS 이미지 미리보기 — B3(0417 PDF #3): 파일명 hover 툴팁 */}
+                {/* ★ B3: MMS 이미지 미리보기 — 공용 컴포넌트 MmsImagePreview 사용 */}
                 {directMsgType === 'MMS' && (
                   <div className="mt-2 pt-2 border-t cursor-pointer hover:bg-amber-50/50 transition-colors rounded-lg p-2" onClick={() => setShowMmsUploadModal(true)}>
                     <div className="flex items-center gap-2">
                       <span className="text-xs font-semibold text-gray-600">🖼️ MMS 이미지</span>
                       {mmsUploadedImages.length > 0 ? (
                         <div className="flex items-center gap-1">
-                          {mmsUploadedImages.map((img: any, idx: number) => {
-                            const fname = img.originalName || img.filename || `이미지${idx + 1}`;
-                            return (
-                              <img
-                                key={idx}
-                                src={img.url}
-                                alt={fname}
-                                title={fname}
-                                className="w-10 h-10 object-cover rounded border"
-                              />
-                            );
-                          })}
+                          <MmsImagePreview images={mmsUploadedImages} size="xs" compact />
                           <span className="text-xs text-purple-600 ml-1">✏️ 수정</span>
                         </div>
                       ) : (

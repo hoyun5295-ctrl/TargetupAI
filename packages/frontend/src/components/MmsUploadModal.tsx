@@ -1,4 +1,5 @@
 import React from 'react';
+import { getMmsImageDisplayName } from '../utils/mmsImage';
 
 interface MmsUploadModalProps {
   show: boolean;
@@ -73,7 +74,8 @@ export default function MmsUploadModal({
             {[0, 1, 2].map(slotIdx => {
               const img = mmsUploadedImages[slotIdx];
               // ★ B3(0417 PDF #3): 파일명 라벨 표시 — 통계(ResultsModal)와 동일한 원본 파일명
-              const filenameDisplay = img ? (img.originalName || img.filename || `이미지 ${slotIdx + 1}`) : '';
+              //   컨트롤타워 getMmsImageDisplayName: originalName > filename > path basename > fallback
+              const filenameDisplay = img ? getMmsImageDisplayName(img, `이미지 ${slotIdx + 1}`) : '';
               return (
                 <div key={slotIdx} className="flex flex-col">
                   <div className="aspect-square relative">
