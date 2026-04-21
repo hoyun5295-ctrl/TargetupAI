@@ -646,8 +646,19 @@ router.post(
         });
       }
       const senderKey = prof.rows[0].profile_key;
+      // D131: IMC 실제 제한은 templateKey **최대 20자** (공식 문서 오표기 128자 → 휴머스온 확인됨 2026-04-21).
+      //       과거 생성 규칙(`TPL_${companyId12}_${timestamp}` = 29자)이 IMC 6005 유발.
+      //       `T{base36 timestamp(~9)}{base36 random(10)}` = 20자 고정, 충돌 가능성 사실상 0.
+      const rawKey = typeof body.templateKey === 'string' ? body.templateKey.trim() : '';
+      if (rawKey && rawKey.length > 20) {
+        return res.status(400).json({
+          success: false,
+          error: 'templateKey는 최대 20자까지 허용됩니다 (IMC 제한)',
+        });
+      }
       const templateKey: string =
-        body.templateKey || `TPL_${companyId.replace(/-/g, '').slice(0, 12)}_${Date.now()}`;
+        rawKey ||
+        `T${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`.slice(0, 20);
 
       const r = await imc.createAlimtalkTemplate(senderKey, {
         ...body,
