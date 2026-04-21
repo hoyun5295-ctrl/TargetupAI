@@ -19,12 +19,16 @@ const router = Router();
 // ----------------------------------------------------------------------------
 // 온라인 상태 판정 헬퍼
 // ----------------------------------------------------------------------------
+// ★ 2026-04-21 Harold님 지시 A안: Agent heartbeat 주기(60분)에 맞춰 판정 기준 완화
+//   근거: sync-agent/src/scheduler/index.ts:125 `cron.schedule('0 * * * *', ...)` = 매 정각 1회
+//   문제: 이전 10분/30분 기준은 60분 주기 Agent를 "정상"인데도 하루의 1/3 시간 동안 "지연"으로 표시
+//   수정: online=1주기+여유(70분), delayed=2주기+여유(130분), offline=2주기 초과
 function getOnlineStatus(lastHeartbeatAt: string | null): 'online' | 'delayed' | 'offline' {
   if (!lastHeartbeatAt) return 'offline';
   const diffMinutes = (Date.now() - new Date(lastHeartbeatAt).getTime()) / (1000 * 60);
-  if (diffMinutes <= 10) return 'online';
-  if (diffMinutes <= 30) return 'delayed';
-  return 'offline';
+  if (diffMinutes <= 70) return 'online';    // 1주기(60분) + 10분 여유
+  if (diffMinutes <= 130) return 'delayed';  // 2주기(120분) + 10분 여유 — 한 번 놓침 허용
+  return 'offline';                          // 2주기 초과 = 확실한 이상
 }
 
 
