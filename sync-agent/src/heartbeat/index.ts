@@ -24,6 +24,8 @@ export class HeartbeatManager {
   private startTime: number;
   private updateManager: UpdateManager;
   private alertManager: AlertManager | null;
+  // ★ D131 후속(2026-04-21): 원격 pause 상태 반영 — send() 시 status='paused' 전송
+  private paused = false;
 
   constructor(
     apiClient: ApiClient,
@@ -46,6 +48,11 @@ export class HeartbeatManager {
     );
   }
 
+  // ★ D131 후속(2026-04-21): Scheduler의 pause/resume에서 호출 → send() 시점에 status 반영
+  setPaused(paused: boolean): void {
+    this.paused = paused;
+  }
+
   /**
    * Heartbeat 1회 전송
    */
@@ -57,7 +64,8 @@ export class HeartbeatManager {
       const response = await this.apiClient.heartbeat({
         agentId: state.agentId || '',
         agentVersion: this.config.agent.version,
-        status: 'active',
+        // ★ D131 후속: paused 상태면 'paused' 보고, 아니면 'active'
+        status: this.paused ? 'paused' : 'active',
         osInfo: `${os.platform()} ${os.release()}`,
         dbType: this.config.database.type,
         lastSyncAt: state.lastCustomerSyncAt || state.lastPurchaseSyncAt || null,

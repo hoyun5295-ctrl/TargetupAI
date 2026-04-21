@@ -112,7 +112,9 @@ export interface RemoteConfig {
 
 export interface AgentCommand {
   id?: string;
-  type: 'full_sync' | 'restart' | 'update_config';
+  // ★ D131 후속(2026-04-21): pause/resume 추가 — 슈퍼관리자 UI에서 원격 동기화 제어
+  //   pause: 스케줄러 stop (heartbeat 유지), resume: 재개, restart: 프로세스 종료 후 서비스 재시작
+  type: 'full_sync' | 'restart' | 'update_config' | 'pause' | 'resume';
   payload?: unknown;
   issuedAt?: string;
 }

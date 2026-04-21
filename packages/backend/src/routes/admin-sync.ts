@@ -284,11 +284,13 @@ router.post('/agents/:agentId/command', authenticate, requireSuperAdmin, async (
     const { agentId } = req.params;
     const { type } = req.body;
 
-    // type 검증
-    if (!type || !['full_sync', 'restart'].includes(type)) {
+    // ★ D131 후속(2026-04-21): pause/resume 추가 — 원격 동기화 중단/재개 지원
+    //   pause: Agent 스케줄러 stop (heartbeat 유지), resume: 재개
+    const ALLOWED_COMMAND_TYPES = ['full_sync', 'restart', 'pause', 'resume'] as const;
+    if (!type || !ALLOWED_COMMAND_TYPES.includes(type)) {
       return res.status(400).json({
         success: false,
-        error: 'type은 full_sync 또는 restart여야 합니다.'
+        error: `type은 ${ALLOWED_COMMAND_TYPES.join(' | ')} 중 하나여야 합니다.`
       });
     }
 
@@ -330,6 +332,62 @@ router.post('/agents/:agentId/command', authenticate, requireSuperAdmin, async (
   } catch (error) {
     console.error('Sync Agent 명령 등록 실패:', error);
     res.status(500).json({ success: false, error: 'Sync Agent 명령 등록 실패' });
+  }
+});
+
+
+// ----------------------------------------------------------------------------
+// DELETE /api/admin/sync/agents/:agentId — Agent 레코드 삭제
+// ★ D131 후속(2026-04-21): 버려진/중복 Agent 정리용
+//   활성(online) Agent는 기본 차단 → force=true 쿼리로 강제 삭제 가능.
+//   sync_logs는 FK CASCADE로 함께 삭제됨 (스키마 DDL 기준).
+// ----------------------------------------------------------------------------
+router.delete('/agents/:agentId', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const { agentId } = req.params;
+    const force = req.query.force === 'true';
+
+    // Agent 존재 + heartbeat 최신성 확인
+    const agentResult = await query(
+      `SELECT id, agent_name, company_id, status, last_heartbeat_at,
+              EXTRACT(EPOCH FROM (NOW() - last_heartbeat_at)) / 60 AS minutes_since_heartbeat
+       FROM sync_agents WHERE id = $1`,
+      [agentId]
+    );
+
+    if (agentResult.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Agent를 찾을 수 없습니다.' });
+    }
+
+    const agent = agentResult.rows[0];
+    const minutesSinceHeartbeat = Number(agent.minutes_since_heartbeat ?? 99999);
+
+    // 활성 Agent(30분 이내 heartbeat) 삭제 방지 — force=true일 때만 허용
+    if (!force && minutesSinceHeartbeat < 30) {
+      return res.status(409).json({
+        success: false,
+        error: `Agent가 활성 상태입니다 (마지막 heartbeat ${Math.round(minutesSinceHeartbeat)}분 전). 먼저 일시정지/중지한 뒤 삭제하거나 ?force=true 로 강제 삭제하세요.`,
+        code: 'AGENT_ACTIVE',
+      });
+    }
+
+    // 삭제 (sync_logs는 FK CASCADE)
+    const deleteResult = await query(
+      `DELETE FROM sync_agents WHERE id = $1 RETURNING id, agent_name`,
+      [agentId]
+    );
+
+    console.log(`[Admin Sync] Agent 삭제: ${agent.agent_name} (id=${agentId}, company=${agent.company_id}, force=${force})`);
+
+    return res.json({
+      success: true,
+      deleted: deleteResult.rows[0],
+      forced: force,
+    });
+  } catch (error) {
+    console.error('[Admin Sync] Agent 삭제 실패:', error);
+    const msg = error instanceof Error ? error.message : String(error);
+    return res.status(500).json({ success: false, error: 'Agent 삭제 실패', detail: msg });
   }
 });
 

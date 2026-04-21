@@ -6,7 +6,9 @@
 
 export type SyncTarget = 'customers' | 'purchases';
 export type SyncMode = 'incremental' | 'full';
-export type AgentStatus = 'active' | 'inactive' | 'error';
+// ★ D131 후속(2026-04-21): 'paused' 추가 — 원격 pause 명령 수신 후 Agent 살아있으나 동기화 중단 상태.
+//   Agent는 heartbeat 계속 전송(서버에 살아있음 인지), 고객/구매 cron은 stop. resume 명령 수신 시 'active' 복귀.
+export type AgentStatus = 'active' | 'paused' | 'inactive' | 'error';
 
 // ─── 동기화 상태 (로컬 저장) ────────────────────────────
 

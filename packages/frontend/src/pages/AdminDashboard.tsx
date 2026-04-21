@@ -319,7 +319,11 @@ const [emailSending, setEmailSending] = useState(false);
   const [showSyncConfigModal, setShowSyncConfigModal] = useState(false);
   const [syncConfigForm, setSyncConfigForm] = useState({ sync_interval_customers: 60, sync_interval_purchases: 30 });
   const [showSyncCommandModal, setShowSyncCommandModal] = useState(false);
-  const [syncCommandType, setSyncCommandType] = useState<'full_sync' | 'restart'>('full_sync');
+  // ★ D131 후속(2026-04-21): Agent 삭제 모달 상태
+  const [showSyncDeleteModal, setShowSyncDeleteModal] = useState(false);
+  const [syncDeleting, setSyncDeleting] = useState(false);
+  // ★ D131 후속(2026-04-21): 'pause' | 'resume' 추가 — 원격 동기화 제어
+  const [syncCommandType, setSyncCommandType] = useState<'full_sync' | 'restart' | 'pause' | 'resume'>('full_sync');
 
   // ===== 감사 로그 =====
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
@@ -622,6 +626,41 @@ const handleSyncConfigSave = async () => {
   }
 };
 
+// ★ D131 후속(2026-04-21): Agent 삭제 (버려진/중복 정리)
+//   활성 Agent(30분 이내 heartbeat)는 서버에서 409 반환 → force=true로 강제 가능.
+const handleSyncDelete = async (force = false) => {
+  if (!syncSelectedAgent) return;
+  setSyncDeleting(true);
+  try {
+    const token = localStorage.getItem('token');
+    const url = `/api/admin/sync/agents/${syncSelectedAgent.id}${force ? '?force=true' : ''}`;
+    const res = await fetch(url, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${token}` },
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      if (data.code === 'AGENT_ACTIVE') {
+        // 활성 Agent — 사용자에게 강제 삭제 여부 확인
+        if (window.confirm(`${data.error}\n\n그래도 강제 삭제하시겠습니까?`)) {
+          await handleSyncDelete(true);
+          return;
+        }
+        setSyncDeleting(false);
+        return;
+      }
+      throw new Error(data.error || 'Agent 삭제 실패');
+    }
+    setShowSyncDeleteModal(false);
+    showAlert('성공', `${data.deleted?.agent_name || 'Agent'}를 삭제했습니다${data.forced ? ' (강제)' : ''}.`, 'success');
+    loadSyncAgents();
+  } catch (e: any) {
+    showAlert('오류', e.message || 'Agent 삭제 실패', 'error');
+  } finally {
+    setSyncDeleting(false);
+  }
+};
+
 const handleSyncCommand = async () => {
   if (!syncSelectedAgent) return;
   try {
@@ -633,15 +672,29 @@ const handleSyncCommand = async () => {
     });
     if (!res.ok) throw new Error('명령 전송 실패');
     setShowSyncCommandModal(false);
-    showAlert('성공', '명령이 등록되었습니다. Agent가 다음 config 조회 시 실행합니다.', 'success');
+    // ★ D131 후속(2026-04-21): 명령 전송 후 목록 즉시 재조회 — Agent가 실제 pause/resume 수행 후
+    //   다음 heartbeat(최대 60분 소요)에 status 반영될 때까지 UI는 기존 상태로 보임.
+    //   명령 전송 직후 최소한 "명령 큐에 등록됐다"는 피드백과 함께 목록 리프레시.
+    const commandLabels: Record<string, string> = {
+      full_sync: '전체 동기화',
+      pause: '일시정지',
+      resume: '재개',
+      restart: '재시작',
+    };
+    const label = commandLabels[syncCommandType] || syncCommandType;
+    showAlert('성공', `${label} 명령이 등록되었습니다. Agent가 다음 heartbeat(최대 60분)에 수행하고 상태가 반영됩니다.`, 'success');
+    loadSyncAgents();
   } catch (e) {
     showAlert('오류', '명령 전송 실패', 'error');
   }
 };
 
-const getSyncOnlineBadge = (status: string) => {
-  if (status === 'online') return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">● 정상</span>;
-  if (status === 'delayed') return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-700">● 지연</span>;
+// ★ D131 후속(2026-04-21): DB의 status='paused'면 online 여부와 무관하게 "일시정지" 표시
+//   Agent는 살아있으나(heartbeat 정상) 스케줄러만 pause된 상태.
+const getSyncOnlineBadge = (onlineStatus: string, dbStatus?: string) => {
+  if (dbStatus === 'paused') return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-700">⏸ 일시정지</span>;
+  if (onlineStatus === 'online') return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">● 정상</span>;
+  if (onlineStatus === 'delayed') return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-700">● 지연</span>;
   return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">● 오프라인</span>;
 };
 
@@ -7166,7 +7219,7 @@ const handleApproveRequest = async (id: string) => {
                       <td className="px-4 py-3 text-gray-700">{agent.agent_name || '-'}</td>
                       <td className="px-4 py-3 text-gray-500">{agent.agent_version || '-'}</td>
                       <td className="px-4 py-3 text-gray-500">{agent.db_type || '-'}</td>
-                      <td className="px-4 py-3 text-center">{getSyncOnlineBadge(agent.online_status)}</td>
+                      <td className="px-4 py-3 text-center">{getSyncOnlineBadge(agent.online_status, agent.status)}</td>
                       <td className="px-4 py-3 text-gray-500">{syncTimeAgo(agent.last_heartbeat_at)}</td>
                       <td className="px-4 py-3 text-gray-500">{syncTimeAgo(agent.last_sync_at)}</td>
                       <td className="px-4 py-3 text-right text-gray-700">{(agent.total_customers_synced || 0).toLocaleString()}</td>
@@ -7197,12 +7250,23 @@ const handleApproveRequest = async (id: string) => {
                           <button
                             onClick={() => {
                               setSyncSelectedAgent(agent);
-                              setSyncCommandType('full_sync');
+                              // ★ D131 후속: paused 상태면 기본값을 'resume'으로 자동 선택
+                              setSyncCommandType(agent.status === 'paused' ? 'resume' : 'full_sync');
                               setShowSyncCommandModal(true);
                             }}
                             className="text-emerald-600 hover:text-emerald-800 text-xs font-medium px-2 py-1 rounded hover:bg-emerald-50"
                           >
                             명령
+                          </button>
+                          {/* ★ D131 후속(2026-04-21): 삭제 버튼 — 버려진/중복 Agent 정리 */}
+                          <button
+                            onClick={() => {
+                              setSyncSelectedAgent(agent);
+                              setShowSyncDeleteModal(true);
+                            }}
+                            className="text-red-600 hover:text-red-800 text-xs font-medium px-2 py-1 rounded hover:bg-red-50"
+                          >
+                            삭제
                           </button>
                         </div>
                       </td>
@@ -7405,7 +7469,7 @@ const handleApproveRequest = async (id: string) => {
                     </div>
                     <div className="bg-gray-50 rounded-lg p-3">
                       <div className="text-xs text-gray-400 mb-1">상태</div>
-                      <div>{getSyncOnlineBadge(syncAgentDetail.agent?.online_status)}</div>
+                      <div>{getSyncOnlineBadge(syncAgentDetail.agent?.online_status, syncAgentDetail.agent?.status)}</div>
                     </div>
                   </div>
 
@@ -7533,6 +7597,56 @@ const handleApproveRequest = async (id: string) => {
         </div>
       )}
 
+      {/* ★ D131 후속(2026-04-21): Sync Agent 삭제 확인 모달 */}
+      {showSyncDeleteModal && syncSelectedAgent && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl shadow-2xl w-[420px] overflow-hidden animate-in fade-in zoom-in">
+            <div className="p-5 border-b bg-gradient-to-r from-red-50 to-orange-50">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center">
+                  <svg className="w-5 h-5 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M8 7V4a2 2 0 012-2h4a2 2 0 012 2v3" /></svg>
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-gray-800">Agent 삭제</h3>
+                  <p className="text-xs text-gray-500">{syncSelectedAgent.company_name} · {syncSelectedAgent.agent_name}</p>
+                </div>
+              </div>
+            </div>
+            <div className="p-5 space-y-3">
+              <p className="text-sm text-gray-700">
+                이 Agent 레코드를 서버에서 <b className="text-red-600">영구 삭제</b>합니다.
+              </p>
+              <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-xs text-gray-600 space-y-1.5">
+                <div className="flex justify-between"><span className="text-gray-500">Agent ID</span><span className="font-mono">{String(syncSelectedAgent.id).slice(0, 13)}…</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">버전</span><span>{syncSelectedAgent.agent_version || '-'}</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">마지막 heartbeat</span><span>{syncTimeAgo(syncSelectedAgent.last_heartbeat_at)}</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">동기화된 고객</span><span>{(syncSelectedAgent.total_customers_synced || 0).toLocaleString()}건</span></div>
+              </div>
+              <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-1">
+                <div>⚠️ 이미 동기화된 고객 데이터는 유지되지만 <b>해당 Agent의 동기화 이력(sync_logs)은 함께 삭제</b>됩니다.</div>
+                <div>⚠️ Agent가 아직 실행 중이면 다음 heartbeat 때 자동 재등록되어 레코드가 다시 생길 수 있습니다. 먼저 Agent 프로세스를 종료하세요.</div>
+              </div>
+            </div>
+            <div className="flex border-t">
+              <button
+                onClick={() => setShowSyncDeleteModal(false)}
+                disabled={syncDeleting}
+                className="flex-1 px-4 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors border-r disabled:opacity-50"
+              >
+                취소
+              </button>
+              <button
+                onClick={() => handleSyncDelete(false)}
+                disabled={syncDeleting}
+                className="flex-1 px-4 py-3 text-red-600 font-medium hover:bg-red-50 transition-colors disabled:opacity-50"
+              >
+                {syncDeleting ? '삭제 중...' : '삭제'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Sync 명령 전송 모달 */}
       {showSyncCommandModal && syncSelectedAgent && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
@@ -7550,22 +7664,57 @@ const handleApproveRequest = async (id: string) => {
             </div>
             <div className="p-5 space-y-3">
               <label className="text-xs text-gray-500 font-medium mb-1.5 block">명령 유형</label>
-              <div className="space-y-2">
-                <label className={`flex items-center gap-3 p-3 border rounded-lg cursor-pointer transition-colors ${syncCommandType === 'full_sync' ? 'border-emerald-500 bg-emerald-50' : 'hover:bg-gray-50'}`}>
-                  <input type="radio" name="cmdType" value="full_sync" checked={syncCommandType === 'full_sync'} onChange={() => setSyncCommandType('full_sync')} className="text-emerald-600" />
-                  <div>
-                    <div className="text-sm font-medium text-gray-800">전체 동기화</div>
-                    <div className="text-xs text-gray-500">모든 고객/구매 데이터를 다시 동기화합니다</div>
-                  </div>
-                </label>
-                <label className={`flex items-center gap-3 p-3 border rounded-lg cursor-pointer transition-colors ${syncCommandType === 'restart' ? 'border-emerald-500 bg-emerald-50' : 'hover:bg-gray-50'}`}>
-                  <input type="radio" name="cmdType" value="restart" checked={syncCommandType === 'restart'} onChange={() => setSyncCommandType('restart')} className="text-emerald-600" />
-                  <div>
-                    <div className="text-sm font-medium text-gray-800">Agent 재시작</div>
-                    <div className="text-xs text-gray-500">Agent 프로세스를 재시작합니다</div>
-                  </div>
-                </label>
-              </div>
+              {/* ★ D131 후속(2026-04-21): 현재 상태 안내 + 명령 enable/disable */}
+              {(() => {
+                const isPaused = syncSelectedAgent.status === 'paused';
+                const isOffline = syncSelectedAgent.status === 'inactive' || syncSelectedAgent.status === 'error';
+                return (
+                  <>
+                    {isOffline && (
+                      <div className="px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-700">
+                        ⚠️ Agent 오프라인 상태입니다. 명령은 Agent 복귀 후 실행됩니다.
+                      </div>
+                    )}
+                    {isPaused && (
+                      <div className="px-3 py-2 rounded-lg bg-orange-50 border border-orange-200 text-xs text-orange-700">
+                        ⏸️ 현재 일시정지 상태입니다. <b>재개</b> 명령을 선택하세요.
+                      </div>
+                    )}
+                    <div className="space-y-2">
+                      <label className={`flex items-center gap-3 p-3 border rounded-lg cursor-pointer transition-colors ${syncCommandType === 'full_sync' ? 'border-emerald-500 bg-emerald-50' : 'hover:bg-gray-50'} ${isPaused ? 'opacity-50 pointer-events-none' : ''}`}>
+                        <input type="radio" name="cmdType" value="full_sync" checked={syncCommandType === 'full_sync'} onChange={() => setSyncCommandType('full_sync')} className="text-emerald-600" disabled={isPaused} />
+                        <div>
+                          <div className="text-sm font-medium text-gray-800">🔄 전체 동기화</div>
+                          <div className="text-xs text-gray-500">모든 고객/구매 데이터를 다시 동기화합니다{isPaused ? ' (일시정지 중 — 재개 후 실행)' : ''}</div>
+                        </div>
+                      </label>
+                      {/* ★ D131 후속: pause 옵션 */}
+                      <label className={`flex items-center gap-3 p-3 border rounded-lg cursor-pointer transition-colors ${syncCommandType === 'pause' ? 'border-orange-500 bg-orange-50' : 'hover:bg-gray-50'} ${isPaused ? 'opacity-50 pointer-events-none' : ''}`}>
+                        <input type="radio" name="cmdType" value="pause" checked={syncCommandType === 'pause'} onChange={() => setSyncCommandType('pause')} className="text-orange-600" disabled={isPaused} />
+                        <div>
+                          <div className="text-sm font-medium text-gray-800">⏸️ 동기화 일시정지</div>
+                          <div className="text-xs text-gray-500">스케줄러만 중단 (Agent는 계속 살아있음, heartbeat 유지)</div>
+                        </div>
+                      </label>
+                      {/* ★ D131 후속: resume 옵션 */}
+                      <label className={`flex items-center gap-3 p-3 border rounded-lg cursor-pointer transition-colors ${syncCommandType === 'resume' ? 'border-blue-500 bg-blue-50' : 'hover:bg-gray-50'} ${!isPaused ? 'opacity-50 pointer-events-none' : ''}`}>
+                        <input type="radio" name="cmdType" value="resume" checked={syncCommandType === 'resume'} onChange={() => setSyncCommandType('resume')} className="text-blue-600" disabled={!isPaused} />
+                        <div>
+                          <div className="text-sm font-medium text-gray-800">▶️ 동기화 재개</div>
+                          <div className="text-xs text-gray-500">일시정지된 스케줄러를 다시 시작합니다</div>
+                        </div>
+                      </label>
+                      <label className={`flex items-center gap-3 p-3 border rounded-lg cursor-pointer transition-colors ${syncCommandType === 'restart' ? 'border-emerald-500 bg-emerald-50' : 'hover:bg-gray-50'}`}>
+                        <input type="radio" name="cmdType" value="restart" checked={syncCommandType === 'restart'} onChange={() => setSyncCommandType('restart')} className="text-emerald-600" />
+                        <div>
+                          <div className="text-sm font-medium text-gray-800">🔁 Agent 재시작</div>
+                          <div className="text-xs text-gray-500">Agent 프로세스를 종료 (서비스로 설치된 경우 자동 재시작)</div>
+                        </div>
+                      </label>
+                    </div>
+                  </>
+                );
+              })()}
               <p className="text-xs text-gray-400">Agent가 다음 config 조회 시 명령을 실행합니다.</p>
             </div>
             <div className="flex border-t">

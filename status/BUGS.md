@@ -2714,3 +2714,96 @@ Sync Agent v1.5.1 리눅스 바이너리를 WSL Ubuntu에서 CSV 20컬럼 100건
 3. `sync-agent` Windows 바이너리도 재빌드 권장 (미러 유지)
 
 Harold님 `tp-deploy-full` 배포 + Sync Agent v1.5.1 재빌드 후 고객사 배포 필요.
+
+---
+
+## D131 후속 (2026-04-21 저녁 Part 2) — Sync Agent 원격 pause/resume 기능 추가
+
+슈퍼관리자 UI에서 Sync Agent의 동기화를 **원격으로 일시정지/재개**할 수 있는 기능.
+D131 Sync Agent 리눅스 테스트 중 Harold님이 제안 — 운영 중 고객사 요청으로 임시 중단하거나,
+Agent 문제 대응 시 필요.
+
+### F31-01: Sync Agent 원격 pause/resume 명령
+
+| 항목 | 내용 |
+|------|------|
+| **분류** | ✨ 기능 추가 (Feature) |
+| **상태** | 🟡 수정완료-배포대기 (2026-04-21) |
+| **리포터** | Harold님 (UI 필요성 제안) |
+| **범위** | Agent + Backend + Frontend 전체 |
+
+**변경 내역**:
+
+1. **Agent** ([sync-agent/src/types/sync.ts](sync-agent/src/types/sync.ts), [types/api.ts](sync-agent/src/types/api.ts), [scheduler/index.ts](sync-agent/src/scheduler/index.ts), [heartbeat/index.ts](sync-agent/src/heartbeat/index.ts)):
+   - `AgentStatus`에 `'paused'` 추가
+   - `AgentCommand.type`에 `'pause' | 'resume'` 추가
+   - `Scheduler.pause()/resume()/isPaused()` 퍼블릭 메서드 추가
+   - cron 실행 분기에 `if (this.paused) skip` 추가 (고객/구매/큐재전송) — **heartbeat는 유지**하여 서버가 "살아있음 + 일시정지 중" 인지 가능
+   - `processCommands` switch에 `pause`/`resume` case 추가
+   - `HeartbeatManager.setPaused()` — Scheduler pause/resume에서 호출 → send 시 `status: 'paused'` 전송
+
+2. **Backend** ([packages/backend/src/routes/admin-sync.ts](packages/backend/src/routes/admin-sync.ts)):
+   - `POST /agents/:id/command` 허용 type에 `pause`/`resume` 추가
+   - sync_agents.status는 varchar(20) 기존 필드 재활용 (Agent heartbeat가 `'paused'` self-report)
+   - CHECK 제약이 있다면 DDL에서 확장 필요 (DDL 안내문 참조)
+
+3. **Frontend** ([packages/frontend/src/pages/AdminDashboard.tsx](packages/frontend/src/pages/AdminDashboard.tsx)):
+   - "명령 전송" 모달에 4개 라디오: 전체동기화 / **일시정지** / **재개** / 재시작
+   - 현재 상태(active/paused/offline)별로 선택지 자동 활성/비활성:
+     - paused일 때 → full_sync/pause disabled, resume enabled, 기본값 'resume'
+     - active일 때 → resume disabled, 기본값 'full_sync'
+     - offline일 때 → 경고 메시지 표시 ("Agent 복귀 후 실행됩니다")
+   - 테이블 상태 컬럼에 ⏸ 일시정지 주황 배지 추가 (`getSyncOnlineBadge(online, dbStatus)`)
+   - 명령 전송 후 `loadSyncAgents()` 즉시 호출 — UI 리프레시
+
+**안전장치** (D131 교훈 반영):
+- Agent 오프라인일 때 경고 표시 (명령은 복귀 후 실행됨 — 즉시 효과 없음)
+- 중복 방지: paused 중에 pause 다시 선택 불가 (UI에서 disabled)
+- 수행 시점: Agent는 **다음 heartbeat(최대 60분)** 때 명령 수신 → 실행
+  - 즉각 반영 필요 시 Agent 개별 heartbeat 간격 조정 또는 `api:client`에 별도 command polling 추가 필요 (Phase 2)
+
+**교훈**:
+- 기존 `status` 필드 재활용 설계 — 별도 `paused` BOOLEAN 컬럼 추가 없이 enum 값만 확장 (최소 DDL)
+- Scheduler.stop() ≠ pause() — stop은 cron task destroy, pause는 실행 분기에서 skip만. 재개 시 cron 재생성 불필요
+- heartbeat는 pause 시에도 유지 → 서버가 "살아있지만 일시정지"를 정확히 구분 가능
+
+**Phase 2 (이번 범위 제외)**:
+- stop (완전 종료, systemd/Windows service 연동)
+- 명령 즉시 반영 (heartbeat 간격 외 별도 polling)
+- 명령 이력 테이블 (`sync_agent_commands`: 누가/언제/무슨 명령/ack)
+- 스케줄러 선별 제어 (고객만 / 구매만 pause)
+
+---
+
+### F31-02: Sync Agent 레코드 삭제 기능
+
+| 항목 | 내용 |
+|------|------|
+| **분류** | ✨ 기능 추가 (Feature) |
+| **상태** | 🟡 수정완료-배포대기 (2026-04-21) |
+| **리포터** | Harold님 (중복/버려진 Agent 정리 필요성 제안) |
+| **배경** | 같은 회사에 오래된/버려진 Agent 레코드가 영구히 남아있어 모니터링 UI 어수선 (예: 테스트계정에 sync-agent-linux-test + debug-test-agent 1.2.0 55일 전 오프라인이 공존) |
+
+**설계 결정**:
+- **자동 덮어쓰기 금지**: Agent는 `agent_name`+`company_id`로 식별 → 이름이 다르면 별개. 동일 이름 재등록 시 이미 UPDATE 동작 중 (정상). 동일 회사에 여러 Agent(운영/테스트/매장별 등) 운영은 정당한 use case라 강제 유니크 제약 불가.
+- **수동 삭제 선택**: 슈퍼관리자가 오프라인 상태의 Agent를 명시적으로 정리.
+
+**백엔드** ([packages/backend/src/routes/admin-sync.ts](packages/backend/src/routes/admin-sync.ts)):
+- `DELETE /api/admin/sync/agents/:agentId` 신설
+- 활성(30분 이내 heartbeat) Agent는 기본 차단 → 409 응답 + `code: 'AGENT_ACTIVE'`
+- `?force=true` 쿼리 지정 시 강제 삭제
+- `sync_logs`는 FK CASCADE로 함께 정리 (스키마 DDL 기준)
+- 삭제 이력 console.log (운영 추적용)
+
+**프론트엔드** ([packages/frontend/src/pages/AdminDashboard.tsx](packages/frontend/src/pages/AdminDashboard.tsx)):
+- 관리 컬럼에 빨간색 "삭제" 버튼 추가 (상세/설정/명령 옆)
+- 확인 모달: Agent 정보 요약 + 경고 메시지 2건
+  - ⚠️ 동기화된 고객 데이터는 유지되나 `sync_logs` 함께 삭제
+  - ⚠️ Agent 프로세스 실행 중이면 다음 heartbeat 때 자동 재등록 가능 → 먼저 프로세스 종료 필요
+- 409 활성 Agent 응답 시 `window.confirm`으로 force 옵션 재확인 → 확인 시 `?force=true` 재호출
+- 삭제 후 `loadSyncAgents()` 자동 리프레시
+
+**교훈**:
+- Agent 식별은 `agent_name + company_id`. 자동 유니크 제약은 실전 운영 유연성(여러 매장 대응)과 충돌
+- 삭제는 수동 + 안전장치(활성 Agent 차단) 병행이 운영 안전 위 유리
+- `sync_logs` CASCADE 동작은 스키마 DDL에 이미 정의되어 있어야 함 — 만약 없으면 삭제 실패 → DDL 확인 필요

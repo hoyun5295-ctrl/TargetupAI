@@ -42,6 +42,10 @@ export class Scheduler {
   private config: SchedulerConfig;
   private tasks: cron.ScheduledTask[] = [];
   private running = false;
+  // ★ D131 후속(2026-04-21): 원격 pause 명령 상태 플래그
+  //   true면 customer/purchase/queue cron 작업의 실행 분기에서 즉시 skip.
+  //   heartbeat는 계속 돌아서 서버에 살아있음 신호 유지.
+  private paused = false;
 
   /** 동시 실행 방지 플래그 */
   private customerSyncing = false;
@@ -77,6 +81,11 @@ export class Scheduler {
     const custCron = this.minutesToCron(this.config.customerIntervalMin);
     this.tasks.push(
       cron.schedule(custCron, async () => {
+        // ★ D131 후속: paused면 즉시 skip (cron task는 돌지만 동기화 로직 자체 스킵)
+        if (this.paused) {
+          logger.debug('⏸️  일시정지 상태 — 고객 동기화 스킵');
+          return;
+        }
         if (this.customerSyncing) {
           logger.debug('고객 동기화 이미 실행 중 — 스킵');
           return;
@@ -99,6 +108,11 @@ export class Scheduler {
       const purchCron = this.minutesToCron(this.config.purchaseIntervalMin);
       this.tasks.push(
         cron.schedule(purchCron, async () => {
+          // ★ D131 후속: paused면 스킵
+          if (this.paused) {
+            logger.debug('⏸️  일시정지 상태 — 구매 동기화 스킵');
+            return;
+          }
           if (this.purchaseSyncing) {
             logger.debug('구매 동기화 이미 실행 중 — 스킵');
             return;
@@ -238,6 +252,17 @@ export class Scheduler {
             process.exit(0);
             break;
 
+          // ★ D131 후속(2026-04-21): 원격 pause/resume
+          case 'pause':
+            logger.info('⏸️  원격 명령: 동기화 일시정지');
+            this.pause();
+            break;
+
+          case 'resume':
+            logger.info('▶️  원격 명령: 동기화 재개');
+            this.resume();
+            break;
+
           default:
             logger.warn(`알 수 없는 원격 명령: ${cmd.type}`);
         }
@@ -254,6 +279,11 @@ export class Scheduler {
    * 큐에 쌓인 항목 재전송
    */
   private async processQueue(): Promise<void> {
+    // ★ D131 후속: paused면 큐 재전송도 스킵 (데이터 저장은 큐에 계속 쌓이지만 송신 중단)
+    if (this.paused) {
+      logger.debug('⏸️  일시정지 상태 — 큐 재전송 스킵');
+      return;
+    }
     if (this.queueProcessing || !this.apiClient) return;
     this.queueProcessing = true;
 
@@ -311,6 +341,39 @@ export class Scheduler {
     this.tasks = [];
     this.running = false;
     logger.info('스케줄러 중지');
+  }
+
+  // ─── 일시정지/재개 (D131 후속 — 원격 UI 명령용) ─────────
+  //
+  // pause(): cron task 자체는 살아있지만 실행 분기에서 즉시 return.
+  //   → 동기화/큐 재전송 모두 skip. heartbeat는 계속 전송 (서버에 살아있음 + status='paused' 보고).
+  // resume(): paused 플래그만 해제. cron task는 다음 스케줄에서 정상 실행.
+  //
+  // stop()과의 차이: stop()은 cron task 자체 destroy. pause()는 유지 (재개 시 재생성 불필요).
+
+  pause(): void {
+    if (this.paused) {
+      logger.info('이미 일시정지 상태');
+      return;
+    }
+    this.paused = true;
+    // heartbeat에 status 반영 — send() 시점에 isPaused() 체크
+    this.heartbeat?.setPaused(true);
+    logger.info('⏸️  스케줄러 일시정지 (heartbeat는 유지)');
+  }
+
+  resume(): void {
+    if (!this.paused) {
+      logger.info('이미 실행 중');
+      return;
+    }
+    this.paused = false;
+    this.heartbeat?.setPaused(false);
+    logger.info('▶️  스케줄러 재개');
+  }
+
+  isPaused(): boolean {
+    return this.paused;
   }
 
   // 분 단위를 cron 표현식으로 변환
