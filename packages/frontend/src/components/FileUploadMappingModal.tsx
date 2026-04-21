@@ -469,20 +469,7 @@ export default function FileUploadMappingModal({ show, onClose, onSaveStart, onP
             </div>
             <div className="p-6 space-y-6 overflow-y-auto">
               {!fileHeaders.length ? (
-                <label
-                  htmlFor="file-upload-modal"
-                  onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setDragActive(true); }}
-                  onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setDragActive(true); }}
-                  onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setDragActive(false); }}
-                  onDrop={(e) => {
-                    e.preventDefault(); e.stopPropagation(); setDragActive(false);
-                    const file = e.dataTransfer?.files?.[0];
-                    if (file) handleFileSelect(file);
-                  }}
-                  className={`relative block border-2 border-dashed rounded-xl text-center cursor-pointer transition-colors ${
-                    dragActive ? 'border-violet-500 bg-violet-50' : 'border-gray-300 hover:border-violet-400 hover:bg-violet-50/30'
-                  } ${loading ? 'cursor-wait' : ''}`}
-                >
+                <>
                   <input
                     type="file"
                     accept=".xlsx,.xls,.csv"
@@ -494,84 +481,102 @@ export default function FileUploadMappingModal({ show, onClose, onSaveStart, onP
                     id="file-upload-modal"
                     disabled={loading}
                   />
-                  {loading ? (
-                    <div className="w-full px-8 py-10 flex flex-col items-center gap-5">
-                      <div className="relative w-16 h-16" aria-label="분석 중">
-                        <svg className="absolute inset-0 w-full h-full" viewBox="0 0 50 50">
-                          <defs>
-                            <linearGradient id="fumMappingSpin" x1="0%" y1="0%" x2="100%" y2="100%">
-                              <stop offset="0%" stopColor="#a78bfa" />
-                              <stop offset="100%" stopColor="#7c3aed" />
-                            </linearGradient>
-                          </defs>
-                          <circle cx="25" cy="25" r="20" fill="none" stroke="#ede9fe" strokeWidth="3" />
-                          <circle
-                            cx="25" cy="25" r="20"
-                            fill="none" stroke="url(#fumMappingSpin)" strokeWidth="3" strokeLinecap="round"
-                            strokeDasharray="60 126"
-                            style={{ transformOrigin: '50% 50%', animation: 'fum-spin 1s linear infinite' }}
+                  <label
+                    htmlFor="file-upload-modal"
+                    onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setDragActive(true); }}
+                    onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setDragActive(true); }}
+                    onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setDragActive(false); }}
+                    onDrop={(e) => {
+                      e.preventDefault(); e.stopPropagation(); setDragActive(false);
+                      const file = e.dataTransfer?.files?.[0];
+                      if (file) handleFileSelect(file);
+                    }}
+                    className={`relative flex items-center justify-center border-2 border-dashed rounded-2xl text-center transition-colors min-h-[280px] ${
+                      dragActive ? 'border-violet-500 bg-violet-50' : 'border-gray-300 hover:border-violet-400 hover:bg-violet-50/30'
+                    } ${loading ? 'cursor-wait' : 'cursor-pointer'}`}
+                  >
+                    {loading ? (
+                      <div className="w-full px-8 py-12 flex flex-col items-center gap-5">
+                        <div className="relative w-16 h-16" aria-label="분석 중">
+                          <svg className="absolute inset-0 w-full h-full" viewBox="0 0 50 50">
+                            <defs>
+                              <linearGradient id="fumMappingSpin" x1="0%" y1="0%" x2="100%" y2="100%">
+                                <stop offset="0%" stopColor="#a78bfa" />
+                                <stop offset="100%" stopColor="#7c3aed" />
+                              </linearGradient>
+                            </defs>
+                            <circle cx="25" cy="25" r="20" fill="none" stroke="#ede9fe" strokeWidth="3" />
+                            <circle
+                              cx="25" cy="25" r="20"
+                              fill="none" stroke="url(#fumMappingSpin)" strokeWidth="3" strokeLinecap="round"
+                              strokeDasharray="60 126"
+                              style={{ transformOrigin: '50% 50%', animation: 'fum-spin 1s linear infinite' }}
+                            />
+                          </svg>
+                          <div className="absolute inset-0 flex items-center justify-center">
+                            <div className="text-[11px] font-bold text-violet-600 tracking-wider">AI</div>
+                          </div>
+                        </div>
+                        <div className="space-y-1">
+                          <p className="text-sm font-semibold text-gray-800">AI가 엑셀을 분석하고 있습니다</p>
+                          <p className="text-xs text-gray-500">컬럼명을 자동으로 매핑하는 중… 잠시만 기다려주세요.</p>
+                        </div>
+                        <div className="flex items-center gap-2 mt-1">
+                          <div className="flex items-center gap-1.5 text-[11px] text-violet-600 font-semibold">
+                            <span className="w-1.5 h-1.5 rounded-full bg-violet-500" style={{ animation: 'fum-dot 1.4s ease-in-out infinite' }} />
+                            <span>파일 분석</span>
+                          </div>
+                          <span className="text-gray-300">·</span>
+                          <div className="flex items-center gap-1.5 text-[11px] text-gray-500">
+                            <span className="w-1.5 h-1.5 rounded-full bg-gray-300" style={{ animation: 'fum-dot 1.4s ease-in-out infinite', animationDelay: '0.2s' }} />
+                            <span>AI 매핑</span>
+                          </div>
+                          <span className="text-gray-300">·</span>
+                          <div className="flex items-center gap-1.5 text-[11px] text-gray-500">
+                            <span className="w-1.5 h-1.5 rounded-full bg-gray-300" style={{ animation: 'fum-dot 1.4s ease-in-out infinite', animationDelay: '0.4s' }} />
+                            <span>미리보기 생성</span>
+                          </div>
+                        </div>
+                        <div className="w-3/4 h-1 bg-violet-100 rounded-full overflow-hidden mt-1">
+                          <div
+                            className="h-full w-1/3 bg-gradient-to-r from-violet-400 to-violet-600 rounded-full"
+                            style={{ animation: 'fum-bar 1.6s ease-in-out infinite' }}
                           />
-                        </svg>
-                        <div className="absolute inset-0 flex items-center justify-center">
-                          <div className="text-[11px] font-bold text-violet-600 tracking-wider">AI</div>
                         </div>
                       </div>
-                      <div className="space-y-1">
-                        <p className="text-sm font-semibold text-gray-800">AI가 엑셀을 분석하고 있습니다</p>
-                        <p className="text-xs text-gray-500">컬럼명을 자동으로 매핑하는 중… 잠시만 기다려주세요.</p>
-                      </div>
-                      <div className="flex items-center gap-2 mt-1">
-                        <div className="flex items-center gap-1.5 text-[11px] text-violet-600 font-semibold">
-                          <span className="w-1.5 h-1.5 rounded-full bg-violet-500" style={{ animation: 'fum-dot 1.4s ease-in-out infinite' }} />
-                          <span>파일 분석</span>
+                    ) : (
+                      <div className="px-10 py-14 flex flex-col items-center">
+                        <div className="w-16 h-16 mb-5 rounded-2xl bg-violet-50 flex items-center justify-center">
+                          <svg viewBox="0 0 24 24" fill="none" className="w-8 h-8 text-violet-500" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M12 3v12m0 0l-4-4m4 4l4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                            <path d="M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                          </svg>
                         </div>
-                        <span className="text-gray-300">·</span>
-                        <div className="flex items-center gap-1.5 text-[11px] text-gray-500">
-                          <span className="w-1.5 h-1.5 rounded-full bg-gray-300" style={{ animation: 'fum-dot 1.4s ease-in-out infinite', animationDelay: '0.2s' }} />
-                          <span>AI 매핑</span>
-                        </div>
-                        <span className="text-gray-300">·</span>
-                        <div className="flex items-center gap-1.5 text-[11px] text-gray-500">
-                          <span className="w-1.5 h-1.5 rounded-full bg-gray-300" style={{ animation: 'fum-dot 1.4s ease-in-out infinite', animationDelay: '0.4s' }} />
-                          <span>미리보기 생성</span>
-                        </div>
+                        <p className="text-base font-semibold text-gray-800 mb-1.5">파일을 드래그하거나 클릭하세요</p>
+                        <p className="text-xs text-gray-500">.xlsx, .xls, .csv 지원 · 최대 10MB · AI가 자동으로 컬럼을 매핑합니다</p>
                       </div>
-                      <div className="w-3/4 h-1 bg-violet-100 rounded-full overflow-hidden mt-1">
-                        <div
-                          className="h-full w-1/3 bg-gradient-to-r from-violet-400 to-violet-600 rounded-full"
-                          style={{ animation: 'fum-bar 1.6s ease-in-out infinite' }}
-                        />
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="px-8 py-10">
-                      <div className="mx-auto w-14 h-14 mb-4 rounded-2xl bg-violet-50 flex items-center justify-center">
-                        <svg viewBox="0 0 24 24" fill="none" className="w-7 h-7 text-violet-500" xmlns="http://www.w3.org/2000/svg">
-                          <path d="M12 3v12m0 0l-4-4m4 4l4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                          <path d="M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                        </svg>
-                      </div>
-                      <p className="text-sm font-semibold text-gray-800 mb-1">파일을 드래그하거나 클릭하세요</p>
-                      <p className="text-xs text-gray-500">.xlsx, .xls, .csv 지원 · 최대 10MB · AI가 자동으로 컬럼을 매핑합니다</p>
-                      <div className="mt-6 bg-gray-50 rounded-lg p-4 text-left">
-                        <h4 className="font-semibold text-gray-700 mb-2 text-sm">📋 업로드 안내</h4>
-                        <ul className="text-xs text-gray-600 space-y-1">
-                          <li>• 첫 번째 행은 컬럼명으로 인식됩니다</li>
-                          <li>• 전화번호 컬럼은 필수입니다</li>
-                          <li>• AI가 자동으로 컬럼을 매핑합니다</li>
-                        </ul>
-                      </div>
-                    </div>
-                  )}
-                  <style>{`
-                    @keyframes fum-spin { to { transform: rotate(360deg); } }
-                    @keyframes fum-dot { 0%, 100% { opacity: 0.35; transform: scale(0.85); } 50% { opacity: 1; transform: scale(1.15); } }
-                    @keyframes fum-bar {
-                      0% { transform: translateX(-100%); }
-                      100% { transform: translateX(300%); }
-                    }
-                  `}</style>
-                </label>
+                    )}
+                    <style>{`
+                      @keyframes fum-spin { to { transform: rotate(360deg); } }
+                      @keyframes fum-dot { 0%, 100% { opacity: 0.35; transform: scale(0.85); } 50% { opacity: 1; transform: scale(1.15); } }
+                      @keyframes fum-bar {
+                        0% { transform: translateX(-100%); }
+                        100% { transform: translateX(300%); }
+                      }
+                    `}</style>
+                  </label>
+                  {/* ★ D131: 안내 카드는 드래그 영역 밖으로 분리 — 중첩으로 세로 눌림 방지 */}
+                  <div className="bg-gray-50 rounded-xl p-4">
+                    <h4 className="font-semibold text-gray-700 mb-2 text-sm flex items-center gap-1.5">
+                      <span>📋</span> 업로드 안내
+                    </h4>
+                    <ul className="text-xs text-gray-600 space-y-1">
+                      <li>• 첫 번째 행은 컬럼명으로 인식됩니다</li>
+                      <li>• 전화번호 컬럼은 필수입니다</li>
+                      <li>• AI가 자동으로 컬럼을 매핑합니다</li>
+                    </ul>
+                  </div>
+                </>
               ) : (
                 <>
                   <div className="bg-violet-50 border border-violet-200 rounded-xl p-4 flex items-center justify-between">
