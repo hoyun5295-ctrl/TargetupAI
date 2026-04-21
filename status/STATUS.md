@@ -144,12 +144,11 @@
 
 ---
 
-### 💎 D132 (2026-04-22) — CT-17 요금제 게이팅 + 30일 PRO 무료체험 시스템 (🔄 DDL Step 2 + 배포 대기)
+### 💎 D132 (2026-04-22) — CT-17 요금제 게이팅 + 30일 PRO 무료체험 + subscription_status 네이밍 정리 (✅ 배포+검증 완료)
 
 > **세션 기록:** [`.claude/projects/.../memory/project_plan_gating_policy.md`](../.claude/projects/C--Users-ceo-projects-targetup/memory/project_plan_gating_policy.md)
-> **정책 문서 SoT:** 위 메모리 파일 §1~§9
 >
-> **배경:** Harold님 5회 정책 교정 끝에 2단계 구조 확정 — FREE(미가입) / TRIAL(무료체험=PRO와 동일 기능). 기존 `plan_code='FREE' && created_at+7d` 자동 체험 로직 폐기, 모바일 DM 게이팅 누락 버그(BASIC에서도 열림) 동시 해결.
+> **배경:** Harold님 5회 정책 교정 끝에 2단계 구조 확정 — FREE(미가입) / TRIAL(무료체험=PRO와 동일 기능). 기존 `plan_code='FREE' && created_at+7d` 자동 체험 로직 폐기, 모바일 DM 게이팅 누락 버그(BASIC에서도 열림) 동시 해결. **오후 추가 세션에서 subscription_status 네이밍 충돌('active' 중복) 근본 정리 + 대시보드 요금제 현황 카드 D-N 뱃지 추가.**
 >
 > **매트릭스 (Harold님 확정):**
 > | 기능 | FREE(미가입) | STARTER+ | BASIC+ | PRO/TRIAL+ |
@@ -161,41 +160,69 @@
 >
 > **주소록 한도(direct_recipient_limit):** FREE=99,999 / STARTER=100k / BASIC=300k / PRO+=NULL(무제한)
 >
-> **코드 수정 완료 (배포 대기):**
-> - `utils/plan-guard.ts` 신설 (CT-17, FeatureKey 10종)
-> - `utils/trial-downgrade-worker.ts` 신설 (매일 04:00 KST, **plan_code='TRIAL'** 대상)
-> - `routes/ai.ts` 5곳 인라인 → canUseFeature
-> - `routes/auto-campaigns.ts` checkPlanGating CT-17 래퍼
+> ---
+>
+> #### 🅰️ 오전 세션 (CT-17 게이팅 시스템)
+>
+> **백엔드:**
+> - `utils/plan-guard.ts` **신설** (CT-17, FeatureKey 10종: basic_send / customer_db / target_send / ai_mapping / spam_filter / ai_messaging / ai_premium / auto_campaign / mobile_dm / auto_spam_test)
+> - `utils/trial-downgrade-worker.ts` **신설** — 매일 04:00 KST, `plan_code='TRIAL'` + 만료 조건으로 자동 강등
+> - `routes/ai.ts` 5곳 인라인 → canUseFeature CT 호출 통일
+> - `routes/auto-campaigns.ts` checkPlanGating CT-17 래퍼 재작성
 > - `routes/companies.ts` plan-info SELECT 교체 + **grant-trial(TRIAL plan 사용)** + revoke-trial API
-> - `routes/dm.ts` requirePlanFeature('mobile_dm') 미들웨어 (누락 버그 해결)
-> - `app.ts` startTrialDowngradeWorker 등록
-> - 프론트: `DmBuilderPage.tsx` 가드 · `AdminDashboard.tsx` 30일 PRO 체험 부여 버튼 · `PricingPage.tsx` "무료체험중(요금제 프로플랜 체험) D-N" 표시 + TRIAL plan 카드 제외 + STARTER/PRO 기능 문구 · `Dashboard.tsx` AI 발송 템플릿 isAiMessagingLocked 추가
+> - `routes/dm.ts` `requirePlanFeature('mobile_dm')` 미들웨어 (D131 BASIC 누락 버그 해결)
+> - `app.ts` `startTrialDowngradeWorker()` 등록
 >
-> **DB DDL 실행 완료 (Step 1):**
-> - plans 테이블 4컬럼 추가 (mobile_dm_enabled / ai_mapping_enabled / target_send_enabled / direct_recipient_limit)
-> - FREE plan: plan_name='미가입', 플래그 전부 false, direct_recipient_limit=99999, max_customers=99999
+> **프론트:**
+> - `DmBuilderPage.tsx` 403 PLAN_FEATURE_LOCKED 수신 시 violet 가드 화면
+> - `AdminDashboard.tsx` 고객사 상세 → "30일 PRO 체험 부여/취소" 버튼 + 모달
+> - `PricingPage.tsx` violet 안내 카드 — "현재 무료체험 중인 요금제는 **프로 플랜**입니다" + 기능 나열 + D-N + 만료일 + TRIAL plan 카드 제외
+> - `Dashboard.tsx` AI 발송 템플릿 카드 `isAiMessagingLocked` 잠금 표시 (FREE에서 403 토스트 방지)
+>
+> **DB DDL Step 1:**
+> - plans 테이블 4컬럼 추가: `mobile_dm_enabled` / `ai_mapping_enabled` / `target_send_enabled` / `direct_recipient_limit`
+> - FREE plan: `plan_name='미가입'`, 플래그 전부 false, `direct_recipient_limit=99999`, `max_customers=99999`
 > - STARTER+: 기능 플래그 정책대로 설정
-> - direct_recipient_limit 정책 반영 (FREE=99,999, STARTER/BASIC=max_customers, PRO+=NULL)
 >
-> **🔴 DB DDL 남은 작업 (Step 2 — 다음 세션 Harold님 실행):**
-> 1. **TRIAL plan INSERT** (PRO와 기능 동일):
->    ```bash
->    docker exec -i targetup-postgres psql -U targetup targetup -c "INSERT INTO plans (plan_code, plan_name, max_customers, monthly_price, is_active, customer_db_enabled, target_send_enabled, ai_mapping_enabled, spam_filter_enabled, ai_messaging_enabled, ai_premium_enabled, auto_campaign_enabled, auto_spam_test_enabled, mobile_dm_enabled, max_auto_campaigns, direct_recipient_limit) VALUES ('TRIAL', '무료체험', 1000000, 0, true, true, true, true, true, true, true, true, true, true, 5, NULL);"
->    ```
-> 2. **기존 체험 중 회사 plan_id=TRIAL로 이동** (현재 PRO plan으로 잘못 부여된 테스트계정):
->    ```bash
->    docker exec -i targetup-postgres psql -U targetup targetup -c "UPDATE companies SET plan_id = (SELECT id FROM plans WHERE plan_code='TRIAL') WHERE subscription_status = 'trial';"
->    ```
-> 3. **배포:** `tp-push` → `tp-deploy-full`
+> **DB DDL Step 2 (오전 말미 실행):**
+> - **TRIAL plan INSERT** (PRO와 기능 동일, `monthly_price=0`)
+> - 기존 체험 회사 → `plan_id=TRIAL`로 이동
 >
-> **다음 세션 검증 체크리스트:**
-> - [ ] 슈퍼관리자 → 고객사 상세 설정 모달 → 요금제 드롭다운에 "**무료체험 (1,000,000명)**" 노출
-> - [ ] 체험 부여받은 계정 `/pricing` → "무료체험중 (요금제 프로플랜 체험) D-30"
-> - [ ] AI 기능/자동발송/모바일DM 정상 열림
-> - [ ] BASIC 이하 계정: 모바일 DM 진입 → 보라 가드 화면
-> - [ ] FREE 계정: AI 발송 템플릿 카드 🔒 표시 + 클릭 시 업그레이드 안내
-> - [ ] pm2 로그: `[trial-downgrade][scheduler] started` 확인
-> - [ ] 필요 시 Cron 즉시 테스트 (회사 trial_expires_at 과거로 세팅 후 `runTrialDowngradeJob()` 호출)
+> ---
+>
+> #### 🅱️ 오후 세션 (subscription_status 네이밍 정리 + D-N 뱃지 추가)
+>
+> **🚨 발견된 3중 버그 (오후 실화면 검증 중):**
+> 1. `admin.ts:384,1031` — 슈퍼관리자 요금제 수정/승인 API가 `subscription_status='active'`로 무조건 덮어쓰기 → grant-trial 후 저장 버튼만 눌러도 'trial' → 'active' 파괴
+> 2. `trial-downgrade-worker` SQL에 `AND c.subscription_status='trial'` 조건 → 'active'로 바뀐 체험은 **영원히 강등 못 하는 무제한 체험 버그**
+> 3. `PricingPage.isOnTrial` 판정이 `subscription_status='trial'` 기반 → 'active'로 바뀌면 D-N·violet 카드·안내 전부 미표시
+>
+> **🔍 근본 원인 추적:**
+> - `companies.status`('active'/'inactive'/'terminated')와 `subscription_status`('trial'/'active'/'trial_expired'/...) 두 다른 컬럼에 **`'active'` 값이 공존** → 업계 표준('paid')과도 불일치 (CT-17 설계서는 'paid'로 정의했으나 코드는 'active' 사용)
+> - 'active'는 회사 운영 상태 용도, 구독 상태는 `'paid'`가 표준. **오픈 D-Day 전에 근본 정리**가 맞다 판단 (Harold님 지시)
+>
+> **✅ 근본 수정 (옵션 B — 'paid'로 통일):**
+> - `utils/plan-guard.ts` `SubscriptionStatus` 타입에서 `'active'` 제거, `'paid'` 공식화 / `isTrialActive` 판정을 `plan_code='TRIAL'` 기반 (subscription_status 의존 제거)
+> - `utils/trial-downgrade-worker.ts` SQL에서 `subscription_status='trial'` 조건 제거 — `plan_code='TRIAL' + trial_expires_at<NOW()` 만으로 강등
+> - `routes/admin.ts:384` 회사 수정 API: `planId` 있으면 **TRIAL→'trial' / 그 외→'paid'** 분기 (과거: 무조건 'active')
+> - `routes/admin.ts:1031` 요금제 승인 API: 동일 분기 로직
+> - `routes/companies.ts` revoke-trial 조건을 `plan_code='TRIAL'` 기반으로 (subscription_status 무관 — 'active'로 오염된 체험도 취소 가능) / grant-trial RETURNING에 `plan_code` 추가
+> - `PricingPage.tsx` `isOnTrial = plan_code==='TRIAL' && !!trial_expires_at` (견고화) / `isUpgrade` 로직에 TRIAL 추가 → 무료체험 사용자 모든 카드 "업그레이드 신청" (다운그레이드 개념 제거)
+> - `AdminDashboard.tsx` grant-trial 응답 후 `planCode: 'PRO'` 하드코딩 → API 응답 `plan_code` 사용
+> - `Dashboard.tsx` 요금제 현황 카드에 **violet D-N 뱃지** — "요금제 만료 D-30" (PricingPage와 톤 통일)
+>
+> **DB 마이그레이션 (5단계, 모두 성공):**
+> 1. CHECK constraint 사전 점검 — 없음 확인 (0 rows)
+> 2. TRIAL plan인데 'active'로 오염된 1건 → 'trial' 복구 (테스트계정)
+> 3. 남은 `'active'` 9건 → `'paid'` 마이그레이션
+> 4. 검증: `paid: 9 / trial: 1` — `'active'` 0건
+> 5. 테스트계정 재확인: `trial | 2026-05-21 | TRIAL` ✓
+>
+> **검증 결과:**
+> - ✅ 대시보드 요금제 현황: "무료체험" + violet "요금제 만료 D-30" 뱃지
+> - ✅ `/pricing`: "무료체험중 (요금제 프로플랜 체험) D-30" + violet 안내 카드 "현재 무료체험 중인 요금제는 **프로 플랜**입니다" + 기능 6종 나열 + 만료일 + 29일 남음
+> - ✅ 요금제 비교 카드 5개 전부 **"업그레이드 신청"** (다운그레이드 완전 제거)
+> - ✅ Harold님 실화면 최종 검증 통과
 
 ---
 
