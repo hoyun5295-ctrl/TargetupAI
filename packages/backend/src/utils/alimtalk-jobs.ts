@@ -41,6 +41,21 @@ function logErr(tag: string, err: any) {
 // 1) 카테고리 일일 동기화 (매일 03:00 KST)
 // ════════════════════════════════════════════════════════════
 
+/**
+ * IMC 응답에서 실제 데이터 배열 추출.
+ * 실측된 운영 IMC 응답 구조 (2026-04-18):
+ *   GET /sender/category  → { code:'0000', data: { code:200, data: [...] } }   — 이중 래핑
+ *   GET /alimtalk/template/category → (동일 구조 가능성 있음, 안전하게 동일 처리)
+ * 우리 백엔드 타입은 data가 배열이라 가정했지만 실제는 객체로 래핑되어 있어
+ * `Array.isArray(res.data)` 만으로는 silent skip되던 버그를 흡수.
+ */
+function extractImcList(res: any): any[] {
+  if (Array.isArray(res?.data?.data)) return res.data.data;
+  if (Array.isArray(res?.data)) return res.data;
+  if (Array.isArray(res?.data?.list)) return res.data.list;
+  return [];
+}
+
 export async function syncCategoriesJob(): Promise<void> {
   if (!envReady()) {
     log('categorySync', 'env 미설정 — skip');
@@ -48,33 +63,103 @@ export async function syncCategoriesJob(): Promise<void> {
   }
 
   // ── 발신프로필 카테고리 (3단 트리, code 11자리)
+  //    IMC 실제 응답: flat 배열 { code:"00100010001", name:"건강,병원,종합병원" }
+  //    code = 3(대) + 4(중) + 4(소). name = "대,중,소" 콤마 구분.
+  //    우리 DB(kakao_sender_categories)는 3단 트리(parent_code + level)를 기대 → 자체 재구성.
   try {
-    const senderRes = await imc.listSenderCategories();
-    if (senderRes.code === '0000' && Array.isArray(senderRes.data)) {
-      for (const node of senderRes.data) {
+    const senderRes = (await imc.listSenderCategories()) as any;
+    const leafs = extractImcList(senderRes);
+    if (senderRes?.code === '0000' && leafs.length > 0) {
+      const seen = new Set<string>();
+      let leafCount = 0;
+      let ancestorCount = 0;
+      for (const leaf of leafs) {
+        const code: string = String(leaf?.code || '');
+        const nameRaw: string = String(leaf?.name || '');
+        if (code.length !== 11) continue;
+
+        const parts = nameRaw.split(',').map((s) => s.trim()).filter(Boolean);
+        // name이 "대,중,소" 3분할 안 되면 통째로 소분류 이름으로만 쓰고 부모 이름은 code 기반 placeholder
+        const [l1Name = `대분류${code.slice(0, 3)}`, l2Name = `중분류${code.slice(3, 7)}`, l3Name = nameRaw] = parts.length >= 3
+          ? parts
+          : [undefined, undefined, nameRaw];
+
+        const l1Code = code.slice(0, 3);
+        const l2Code = code.slice(0, 7);
+        const l3Code = code;
+
+        // Level 1 (대분류) — 처음 본 코드만 INSERT
+        if (!seen.has(l1Code)) {
+          seen.add(l1Code);
+          await query(
+            `INSERT INTO kakao_sender_categories (category_code, parent_code, level, name, active_yn, synced_at)
+             VALUES ($1, NULL, 1, $2, 'Y', now())
+             ON CONFLICT (category_code) DO UPDATE SET
+               parent_code = EXCLUDED.parent_code,
+               level       = EXCLUDED.level,
+               name        = EXCLUDED.name,
+               active_yn   = 'Y',
+               synced_at   = now()`,
+            [l1Code, l1Name],
+          );
+          ancestorCount++;
+        }
+        // Level 2 (중분류)
+        if (!seen.has(l2Code)) {
+          seen.add(l2Code);
+          await query(
+            `INSERT INTO kakao_sender_categories (category_code, parent_code, level, name, active_yn, synced_at)
+             VALUES ($1, $2, 2, $3, 'Y', now())
+             ON CONFLICT (category_code) DO UPDATE SET
+               parent_code = EXCLUDED.parent_code,
+               level       = EXCLUDED.level,
+               name        = EXCLUDED.name,
+               active_yn   = 'Y',
+               synced_at   = now()`,
+            [l2Code, l1Code, l2Name],
+          );
+          ancestorCount++;
+        }
+        // Level 3 (소분류) — leaf는 항상 INSERT
         await query(
           `INSERT INTO kakao_sender_categories (category_code, parent_code, level, name, active_yn, synced_at)
-           VALUES ($1, $2, $3, $4, 'Y', now())
+           VALUES ($1, $2, 3, $3, 'Y', now())
            ON CONFLICT (category_code) DO UPDATE SET
              parent_code = EXCLUDED.parent_code,
              level       = EXCLUDED.level,
              name        = EXCLUDED.name,
              active_yn   = 'Y',
              synced_at   = now()`,
-          [node.code, node.parentCode ?? null, node.level, node.name],
+          [l3Code, l2Code, l3Name],
         );
+        leafCount++;
       }
-      log('categorySync', `sender 카테고리 ${senderRes.data.length}건 동기화`);
+      log(
+        'categorySync',
+        `sender 카테고리 L3 ${leafCount}건 + L1/L2 ${ancestorCount}건 동기화 (총 ${leafCount + ancestorCount}건)`,
+      );
+    } else {
+      logErr(
+        'categorySync-sender',
+        new Error(
+          `응답 구조 불일치 or 빈 배열 — code=${senderRes?.code}, leafCount=${leafs.length}, keys=${
+            senderRes?.data ? Object.keys(senderRes.data).slice(0, 5).join(',') : 'n/a'
+          }`,
+        ),
+      );
     }
   } catch (err) {
     logErr('categorySync-sender', err);
   }
 
   // ── 템플릿 카테고리 (flat, code 6자리)
+  //    동일 IMC 이중 래핑 가능성 대응 (기존에 42건 들어온 건 다른 경로였을 수 있음)
   try {
-    const tplRes = await imc.listTemplateCategories();
-    if (tplRes.code === '0000' && Array.isArray(tplRes.data)) {
-      for (const c of tplRes.data) {
+    const tplRes = (await imc.listTemplateCategories()) as any;
+    const list = extractImcList(tplRes);
+    if (tplRes?.code === '0000' && list.length > 0) {
+      for (const c of list) {
+        if (!c?.code) continue;
         await query(
           `INSERT INTO kakao_template_categories (category_code, name, active_yn, synced_at)
            VALUES ($1, $2, 'Y', now())
@@ -82,10 +167,17 @@ export async function syncCategoriesJob(): Promise<void> {
              name      = EXCLUDED.name,
              active_yn = 'Y',
              synced_at = now()`,
-          [c.code, c.name],
+          [String(c.code), String(c.name || '')],
         );
       }
-      log('categorySync', `template 카테고리 ${tplRes.data.length}건 동기화`);
+      log('categorySync', `template 카테고리 ${list.length}건 동기화`);
+    } else {
+      logErr(
+        'categorySync-template',
+        new Error(
+          `응답 구조 불일치 or 빈 배열 — code=${tplRes?.code}, list=${list.length}`,
+        ),
+      );
     }
   } catch (err) {
     logErr('categorySync-template', err);

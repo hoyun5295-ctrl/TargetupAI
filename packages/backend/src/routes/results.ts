@@ -38,9 +38,11 @@ function formatCsvDateTime(val: any): string {
 // ★ D98: MySQL 서버 TZ=KST(+09:00)이지만, QTmsg Agent가 mobsend_time/repmsg_recvtm을 UTC로 기록
 //   - sendreq_time: 우리 앱 NOW() → KST → DATE_ADD 불필요
 //   - mobsend_time: QTmsg Agent → UTC → DATE_ADD(+9h) 필요
-//   - repmsg_recvtm: QTmsg Agent → UTC → DATE_ADD(+9h) 필요
-// ★ D124: UI 발송내역(ResultsModal)은 수신확인 컬럼 제거하지만, 엑셀다운로드는 3컬럼 유지
-//   (전송요청시간/발송시간/수신확인시간) — 지연/클레임 관리용 외부 엑셀 유지 요구
+//   - repmsg_recvtm: QTmsg Agent → UTC → DATE_ADD(+9h) 필요 (현재 미사용 — B10 참조)
+// ★ D124: UI 발송내역(ResultsModal)은 수신확인 컬럼 제거
+// ★ B10(0417 PDF #4): 엑셀다운로드에서도 수신확인시간 컬럼 제거
+//   사유: 고객이 "발송일시 vs 수신확인시간" 차이로 지연수신 오해/클레임 소지
+//   → UI와 엑셀 전부 2컬럼 유지(전송요청/발송)로 통일
 /** 상세조회용 SMS 필드 (seqno 포함) — UI만 사용, 수신확인 없음 */
 const SMS_DETAIL_FIELDS = `seqno, dest_no, call_back, msg_type, msg_contents, status_code, mob_company,
   sendreq_time,
@@ -49,11 +51,10 @@ const SMS_DETAIL_FIELDS = `seqno, dest_no, call_back, msg_type, msg_contents, st
   '' AS kakao_bubble_type, '' AS kakao_report_code,
   '' AS resend_type, '' AS resend_report_code`;
 
-/** 엑셀 export용 SMS 필드 (seqno 제외) — 엑셀 3컬럼 유지: 전송요청/발송/수신확인 */
+/** 엑셀 export용 SMS 필드 (seqno 제외) — 엑셀 2컬럼 유지: 전송요청/발송 (B10: 수신확인 제거) */
 const SMS_EXPORT_FIELDS = `dest_no, call_back, msg_type, msg_contents, status_code, mob_company,
   sendreq_time,
   DATE_ADD(mobsend_time, INTERVAL 9 HOUR) AS mobsend_time,
-  DATE_ADD(repmsg_recvtm, INTERVAL 9 HOUR) AS repmsg_recvtm,
   'sms' AS _channel, NULL AS report_code_raw`;
 
 // ===== UNION ALL 기반 MySQL 헬퍼 — CT-04(sms-queue.ts)로 승격됨 =====

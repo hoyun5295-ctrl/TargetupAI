@@ -392,6 +392,9 @@ export default function SpamFilterTestModal({
                 <div>• 통신사별 테스트폰에 실제 발송하여 수신 여부를 확인합니다</div>
                 <div>• 입력한 메시지 원문 그대로 발송됩니다</div>
                 <div>• 결과는 100% 보장이 아닌 참고용입니다</div>
+                {messageType === 'MMS' && (
+                  <div>• 이미지는 스팸에 영향이 없어 테스트 발송 시 제외됩니다</div>
+                )}
               </div>
 
               {error && <div className="mt-3 p-3 bg-red-50 text-red-600 rounded-lg text-sm">{error}</div>}

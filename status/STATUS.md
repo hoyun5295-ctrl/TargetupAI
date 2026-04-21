@@ -103,7 +103,15 @@
 ## 4) 🎯 CURRENT_TASK (현재 집중 작업)
 
 > **규칙:** 아래 목표에만 100% 리소스를 집중한다.
-> **⚠️ D-Day: 2026-04-13 레거시웹 업체 이관 개시.** 베이직 1개월 무료체험으로 QA + 박탈감 유도 전략. 직접발송만 완벽하면 레거시 사용자 불만 0.
+> **⚠️ D-Day: 2026-05-05 새벽 레거시 이관 실행 (Harold + Claude 공동).** 2026-05-06 전체 이관 완료 + 레거시 차단.
+>
+> **이관 정책 확정 (2026-04-20, 영업팀장 컨펌 완료):**
+> - **주소록 이관 X** — 레거시 "쌓아두기" 관행(gwss 샘플 CREATEDT 2.5년) → 각 고객사가 한줄로에 신규 엑셀 재업로드
+> - **이관 대상 3종**: 수신거부(BLOCKEDNUM 33만) + 회신번호(MEMBER_SEND_NUM 3천) + 예약발송(MSGSUMMARY 76건)
+> - **FREE 플랜 상한 10만명** 확정 (Brevo/솔라피 벤치마크)
+> - **예약발송 이관 순서 (중복 발송 방지):** ① 한줄로 campaigns INSERT → ② 레거시 RESERVEYN=0 UPDATE → ③ 레거시 Agent 중지
+> - 서팀장 그룹핑 리스트(레거시 USERID → 한줄로 user_id 매핑) 대기 중
+> - 상세: [`status/LEGACY-MIGRATION.md`](LEGACY-MIGRATION.md)
 
 ---
 
@@ -127,16 +135,22 @@
 - **tp-deploy-full 배포 완료**
 - **고객 배포용 매뉴얼 docx 작성** (내부 스키마 전부 배제 버전)
 
-#### 🚧 다음 세션 (2026-04-21 월~)
-1. **sync-agent 빌드** — Harold님 로컬 PowerShell:
-   ```powershell
-   cd sync-agent
-   npm run build:exe                             # Windows exe
-   npm run build:linux                           # Linux 바이너리
-   bash installer/build-linux-package.sh 1.5.0   # Linux tar.gz
-   installer\build-installer.bat 1.5.0           # Windows 인스톨러 (NSIS)
-   ```
-2. **GitHub Releases v1.5.0 등록** — 빌드 산출물 업로드 (exe는 100MB 초과 가능 → Release로 배포, git 미커밋)
+#### ✅ 빌드 완료 (2026-04-20)
+1. **sync-agent 빌드 — 4개 산출물 전부 생성**:
+   - `sync-agent/release/sync-agent.exe` (108.7MB, Windows pkg)
+   - `sync-agent/release/sync-agent` (121.8MB, Linux pkg)
+   - `sync-agent/installer/SyncAgent-Setup-1.5.0.exe` (18.5MB, NSIS)
+   - `sync-agent/installer/SyncAgent-1.5.0-linux-x64.tar.gz` (36.4MB)
+2. **불필요 파일 정리** — sync-agent/ 폴더 1.7GB → 532MB (구버전 인스톨러 12개 + 오래된 로그 삭제)
+
+#### ⚠️ 빌드 중 이슈 기록 (향후 정리 필요)
+- **`build-installer.bat` 인코딩**: BOM 없는 UTF-8 → PowerShell에서 cmd.exe 파싱 시 한글 깨져 `'S' is not recognized` 등 에러. 우회책으로 PowerShell에서 `makensis.exe` 직접 호출. **향후 수정 필요:** UTF-8 BOM 추가 또는 CP949 재저장
+- **`package.json` version `"0.1.0"` 방치**: 빌드 CLI 인자로 버전 주입하는 구조라 기능상 무해하지만 `"1.5.0"` 정정 권장
+- **pkg 경고 무시 OK**: `Cannot resolve 'mod'`, `xdg-open`, `Failed to make bytecode` 등 v1.4 동일 경고로 실제 동작 영향 없음
+
+#### 🚧 남은 작업 (다음 세션 — Harold님 직접)
+1. **GitHub Releases v1.5.0 등록** — 4개 빌드 산출물 업로드
+2. **`sync_releases` 테이블 v1.5.0 INSERT** — 자동 업데이트 활성화 (서버 PG에서 실행)
 3. **서팀장 QA** — `SYNC-AGENT-V1.5.0-QA-GUIDE.md` 8개 시나리오 E2E 테스트
 4. **QA 이슈 반영** (발생 시 BUGS.md 등록 후 수정)
 5. **첫 고객사 배포** — Windows 인스톨러 + 매뉴얼 docx 전달
@@ -296,13 +310,24 @@ COMMIT;
 
 검증: `\d auto_campaigns` → 기존 컬럼 + 신규 7개 확인. 롤백은 동일 컬럼 DROP.
 
-#### 월요일(2026-04-21) 연동테스트 대기 (IMC 검수만 Phase 0 필요)
-- [ ] `IMC_API_KEY_SANDBOX` + `IMC_BASE_URL_STG` → 샌드박스 카테고리 조회 curl
-- [ ] 발신프로필 token 요청 → 카톡 수신 → createSender E2E (IMC 연동 후 템플릿 승인 가능해짐)
-- [ ] 템플릿 등록 → 검수요청 → 승인 → 발송 E2E
-- [ ] `IMC_WEBHOOK_ALLOWED_IPS` + `IMC_WEBHOOK_HMAC_SECRET` → 실 IMC 웹훅 수신
-- [ ] 이미지 업로드 9종 실테스트
-- [ ] 발송 자체는 QTmsg Agent가 처리하므로 IMC 발송 API 연동 불필요
+#### Phase 0 일부 수령 (2026-04-18 야간, 세션 종료 직전)
+- ✅ **IMC API Key (운영계)** 수령 — 서버 `.env`에 `IMC_API_KEY`로 주입 필요 (Key 값은 대화 로그 보안상 여기 기록 안 함)
+- ✅ **Webhook 발신 IP**: `121.189.17.243`, `121.189.17.244` → `IMC_WEBHOOK_ALLOWED_IPS`
+- ✅ **운영 Base URL**: `https://msg-api.humuson.com` → `IMC_BASE_URL_PRD`
+- ✅ **API 문서**: `https://msg-api.humuson.com/docs/getting-started?version=v1.0.0`
+- ✅ **우리 Webhook URL 결정**: `https://app.hanjul.ai/api/alimtalk/webhook`
+- ⏳ **Harold님 응답 필요**: 인비토 서버 공인 IP (`curl ifconfig.me`) 확인 후 휴머스온에 전달 → 방화벽 화이트리스트
+- ❌ **미수령 — 추가 요청 필수**: `IMC_WEBHOOK_HMAC_SECRET` (우리 `verifyWebhookSignature()`가 검증 강제, 없으면 실 웹훅 401)
+- ❌ **미수령 — 선택적 요청**: `IMC_API_KEY_SANDBOX` + `IMC_BASE_URL_STG` (샌드박스 E2E 없이 운영계 직행 시 카톡 실발송 주의)
+
+#### 월요일(2026-04-21) 실점검 체크리스트
+- [ ] 서버 공인 IP 확인 + 휴머스온 방화벽 추가 요청
+- [ ] Webhook HMAC Secret 수령 + `.env` 주입
+- [ ] `.env` 주입(IMC_ENV=PRD, IMC_API_KEY, IMC_BASE_URL_PRD, IMC_WEBHOOK_ALLOWED_IPS, IMC_WEBHOOK_HMAC_SECRET) + `pm2 restart all`
+- [ ] 카테고리 동기화 1회 실행 → `kakao_sender_categories` 채워짐 확인
+- [ ] 발신프로필 Wizard 3-Step E2E (token 요청 → 카톡 인증번호 수신 → createSender)
+- [ ] 슈퍼관리자 승인 → 템플릿 등록 → 검수요청 → IMC 웹훅 수신 → 승인 처리
+- [ ] 3경로 실발송 (직접/타겟/자동) — 본인 번호로 1건씩, `SMSQ_SEND` msg_type='K' INSERT 확인
 
 ---
 

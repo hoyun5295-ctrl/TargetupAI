@@ -828,8 +828,9 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                               {formatCampaignMessageForDisplay(selectedCampaign, messages[0]?.msg_contents)}
                               {/* ★ D98: MMS 이미지 표시 — mmsServerPathToUrl 컨트롤타워 사용 */}
                               {/* ★ D123 P5: 호버 시 파일명 툴팁 + 클릭 시 확대 모달 */}
+                              {/* ★ B11(0417 PDF #5): flex-wrap + min-w-0 + object-contain — 3장 이상/가로 긴 이미지 프레임 오버플로우 방지 */}
                               {selectedCampaign.mms_image_paths && Array.isArray(selectedCampaign.mms_image_paths) && selectedCampaign.mms_image_paths.length > 0 && (
-                                <div className="mt-2 pt-2 border-t border-gray-100 flex gap-1.5">
+                                <div className="mt-2 pt-2 border-t border-gray-100 flex flex-wrap gap-1.5 min-w-0 max-w-full">
                                   {/* ★ D124 N4: 객체({path, originalName}) / 문자열 양쪽 수용 — 원본 파일명 우선 표시 */}
                                   {selectedCampaign.mms_image_paths.map((imgItem: any, idx: number) => {
                                     const serverPath = getMmsImagePath(imgItem);
@@ -842,7 +843,7 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                                         alt={filename}
                                         title={filename}
                                         onClick={() => setEnlargedImage({ url, filename })}
-                                        className="w-16 h-16 object-cover rounded border cursor-pointer hover:ring-2 hover:ring-emerald-400 transition"
+                                        className="w-16 h-16 object-cover rounded border cursor-pointer hover:ring-2 hover:ring-emerald-400 transition shrink-0"
                                       />
                                     );
                                   })}
