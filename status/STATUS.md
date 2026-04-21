@@ -115,6 +115,37 @@
 
 ---
 
+### 🚑 D131 (2026-04-21) — 싱크에이전트 실점검 이슈 3건 해결 + D130 이슈 일괄 정리
+
+> **문서**: [`status/SYNC-AGENT-TROUBLESHOOTING.md`](SYNC-AGENT-TROUBLESHOOTING.md) — 진단 체크리스트 + 에러 유형별 대응 + Agent 재시작
+>
+> **실점검 이슈 (sync-agent-001, 인비토 MS-SQL 테스트):**
+> 1. 상태값 "지연" 오표시 — Agent heartbeat 60분 주기 vs 서버 판정 10/30분 불일치 → `admin-sync.ts` 70/130분으로 완화
+> 2. `POST /api/sync/customers` 1500건 전건 실패 — `insertCols`에 region 중복 → **CT-16 `customer-upsert.ts` 신설** + upload.ts/sync.ts/customers.ts(단건/벌크) 전부 `createCustomerUpsertBuilder().buildBatch()` 호출로 통합
+> 3. `GET /api/sync/version` 500 → Agent 크래시 — `sync_releases.checksum` 컬럼 누락 → `ALTER ADD COLUMN` 완료
+>
+> **D130 관련 동시 수정:**
+> - 알림톡 템플릿 등록 권한: `POST /alimtalk/templates` `requireCompanyAdmin` 추가 + 프론트 `AlimtalkManagementSection` `canManage` 조건부 UI 3곳
+> - `auto_campaigns` D130 알림톡 컬럼 7개 추가 (`channel`, `alimtalk_profile_id`, `alimtalk_template_id`, `alimtalk_template_code`, `alimtalk_variable_map`, `alimtalk_next_type`, `alimtalk_next_contents`)
+> - 자동발송 '매일' 주기 제거 (D-2 AI 생성 시점 구조적 모순) — frontend SCHEDULE_TYPES + backend validation
+>
+> **0417 PDF 12건 검수 수정 (B1~B12):** 보관함 광고 상태 DB 왕복(is_ad 컬럼) + MMS 이미지 공용 컴포넌트 `MmsImagePreview` 신설 + 5경로 MMS 이미지 차단 검증(`validateMmsBeforeSend`) + 자동발송 스팸필터/제외하고 생성 버그 + AI 문안 3→1 variant 등
+>
+> **잔여 과제 (오픈 후):**
+> - 중복 인덱스 `customers_company_store_phone_unique_idx` DROP (D131 실수로 추가)
+> - 중복 UNIQUE 제약 `customers_company_phone_unique` DROP
+> - Agent uncaughtException 핸들러 점검 (version check 500에서 복구 로직)
+> - `sync_logs.failures` JSONB 기록 경로 검증
+>
+> **🚨 다음 세션 최우선 과제 — Agent v1.5.1 CWD 패치:**
+> - 지시서: [`status/SYNC-AGENT-CWD-PATCH-v1.5.1.md`](SYNC-AGENT-CWD-PATCH-v1.5.1.md)
+> - 증상: Windows 서비스로 실행 시 1053 에러 (cwd=System32 → config/data 경로 틀어짐)
+> - 수정: `sync-agent/src/index.ts` 최상단에 `process.chdir(path.dirname(process.execPath))` 추가 (3줄)
+> - 빌드 후 수란님(서수란)에게 새 exe 전달 → 재설치 → Windows 서비스 정상 작동 검증
+> - **세션 시작 시 이 지시서만 보고 바로 실행. 추측/우회 탐색 금지.**
+
+---
+
 ### 🔗 Sync Agent v1.5.0 — ✅ Day 1~3 전구간 구현 + 배포 완료 (2026-04-18)
 
 > **배경:** 한줄로AI 최신화 맞춰 싱크에이전트 재정의 + AI 자동 매핑 + Linux/Windows 전 환경 커버.

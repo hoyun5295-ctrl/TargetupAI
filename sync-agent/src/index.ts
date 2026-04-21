@@ -40,6 +40,17 @@ import { HeartbeatManager } from './heartbeat';
 import { Scheduler } from './scheduler';
 import { AlertManager, loadAlertConfig } from './alert';
 
+// ★ v1.5.1: Windows 서비스 실행 시 cwd=C:\Windows\System32 → config/data/logs 경로 틀어짐
+//   → 바이너리 실행 경로(process.execPath) 기준으로 cwd 강제 설정
+//   (콘솔 실행 시에도 동일하게 동작 — 멱등, 부작용 없음)
+try {
+  const __execDir = require('path').dirname(process.execPath);
+  process.chdir(__execDir);
+} catch (err) {
+  // chdir 실패는 치명적 아님 — 콘솔 실행 경로에서는 기존 동작 유지
+  console.error('[startup] chdir failed:', (err as Error)?.message);
+}
+
 // 환경변수 로드 (.env가 있는 경우만)
 dotenv.config();
 

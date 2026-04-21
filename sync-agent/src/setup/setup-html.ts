@@ -958,7 +958,7 @@ export const SETUP_HTML = `<!DOCTYPE html>
       },
       agent: {
         name: $('agentName').value.trim(),
-        version: '0.1.0',
+        version: '1.5.1',
       },
       log: { level: 'info' },
     };

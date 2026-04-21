@@ -44,6 +44,8 @@
 | CT-12 | brand-message.ts | 브랜드메시지 발송/검증 (자유형 8종 + 기본형 템플릿, D97) |
 | CT-14 | deduplicate.ts | 수신자 중복제거 — phone 기준 normalizePhone (D98) |
 | CT-15 | saved-segments.ts | AI 발송 템플릿 저장/조회/수정/삭제/touch (D107) |
+| CT-16 | customer-upsert.ts | **(D131 신설)** customers 테이블 UPSERT 단일 진입점 — `createCustomerUpsertBuilder({source:'upload'\|'sync'\|'manual', includeUploadedBy, returning})` + `buildBatch()` — FIELD_MAP 기반 `insertCols`/`updateClauses`/`values` 동적 조립. **region 중복 같은 실수가 구조적으로 불가능**. routes: upload.ts / sync.ts / customers.ts(단건/벌크) 전부 이 빌더 사용 |
+| CT-SA | SYNC-AGENT-TROUBLESHOOTING.md | **(D131 신설)** 싱크에이전트 이슈 발생 시 반드시 먼저 참조. § 3 진단 체크리스트 + § 4 에러 유형별 1차 대응 + § 5 Agent 재시작 방법 + § 6 SQL 쿼리 |
 | CT-DM | dm/dm-builder.ts | **(D119 신설)** 모바일 DM CRUD + 단축URL 발행 + 열람 추적(UPSERT) + 통계 집계 |
 | CT-DM2 | dm/dm-viewer.ts | **(D119 신설)** 모바일 DM 공개 뷰어 HTML 렌더러 — 상단 4종 + 하단 4종 + 스와이프 + 추적 JS |
 | CT-A | target-sample.ts | **(D109 신설)** 자동발송/캠페인 미리보기/스팸테스트 첫 고객 조회 단일 진입점 — store_code 격리 + 수신거부 제외 + enum 역변환 자동 |
@@ -99,6 +101,8 @@
 | **OPS.md** | 서버/배포/인프라/파일구조/Nginx/SSL | 서버 관련 작업 시 |
 | **SCHEMA.md** | PostgreSQL/MySQL 전체 DB 스키마 | 쿼리 작성/DB 작업 시 |
 | **FIELD-INTEGRATION.md** | 필드 매핑 통합 기준 문서 | 필드/매핑 관련 작업 시 |
+| **SYNC-AGENT-TROUBLESHOOTING.md** | 싱크에이전트 이슈 진단 체크리스트 + 에러 유형별 대응 + Agent 재시작 방법 | **싱크에이전트 관련 이슈/동기화 실패 시 반드시 먼저** |
+| **SYNC-AGENT-CWD-PATCH-v1.5.1.md** | Agent v1.5.1 1053 에러 근본 패치 작업 지시서 (코드 3줄 + 빌드 + 배포) | **Agent 1053/서비스 시작 실패 관련 작업 시 이 문서만 보고 진행** |
 
 ### 3-2. 전단AI 작업 시 (완전 분리 — D112~)
 
@@ -582,6 +586,10 @@ PostgreSQL campaigns/campaign_runs 생성
 | **5경로 매트릭스 점검 미수행** | 경로 하나(직접타겟발송)만 보고 fix → 한줄로AI/맞춤한줄/자동발송에서 또 발견 → 산발 추적 반복 | **5개 발송 경로 × 데이터 출처 × 표시 시점 매트릭스 한 번에 점검.** (한줄로AI/맞춤한줄/직접발송/직접타겟발송/자동발송) × (미리보기/스팸필터/담당자테스트/실제발송) × (sample 출처 API). 매트릭스 표 작성 후 fix (D109) |
 | **자연어 자유 입력 필드 수정 가능 UX의 함정** | 맞춤한줄 발송대상 카드에서 자연어 필드(매장/구매기간/기타)를 input으로 수정 가능하게 해놨는데, 백엔드 recount-target은 자연어 파싱을 다시 못 함 → 사용자가 수정해도 originalTargetFilters 그대로 → "수정해도 안 바뀜" | **자연어 필드는 read-only.** 변경하려면 이전 단계(브리핑)로 돌아가서 새로 입력. 발송대상 카드 + 프로모션 카드 양쪽 수정 기능 제거 (D109) |
 | **`setStatsView(key); setTimeout(() => loadFn(), 0)` 패턴** | React state는 batched라 setTimeout 0 안에서도 statsView가 stale → 일/월 토글이 한 번씩 어긋남 | **함수 시그니처에 viewOverride 추가 + `loadFn(1, key)` 명시 전달.** setTimeout/setState 우회 트릭 금지 (D109) |
+| **싱크에이전트 heartbeat 주기와 서버 판정 기준 불일치** | Agent `cron.schedule('0 * * * *')` = 60분 주기인데 admin-sync.ts getOnlineStatus는 ≤10분/≤30분 판정 → 정상 Agent가 하루 1/3 시간 "지연" 표시 | **Agent 주기 × 서버 판정 기준 동기화 필수.** admin-sync.ts 70분/130분으로 완화 (1주기+여유/2주기+여유) (D131) |
+| **customers INSERT에 region 중복 → 전건 실패** | sync.ts가 upload.ts 패턴 복제 원칙(feedback_mirror_hanjul_standard.md) 위반, `insertCols`에 `'region'`을 직접 추가. FIELD_MAP `columnNames`에 이미 region이 있는데 중복 → PostgreSQL `multiple assignments to same column` → full sync 1500건 전건 실패 | **CT-16 customer-upsert.ts 신설.** upload.ts / sync.ts / customers.ts(단건/벌크) 모두 `createCustomerUpsertBuilder().buildBatch()` 호출. region 중복 같은 실수가 구조적으로 불가능. 2곳 이상 동일 UPSERT 로직 = 즉시 컨트롤타워화 (D131) |
+| **"부차적 에러"가 실사용 critical path에서 치명적** | `[Sync Version Error] column "checksum" does not exist`를 "Agent 버전 체크만 영향"으로 분류. 실제는 Agent가 `GET /api/sync/version` 500 받고 프로세스 크래시 → 47분 이상 heartbeat 중단 | **에러 분류 시 "critical path 여부" 반드시 확인.** 사이드 이펙트(Agent 크래시 등)까지 따져보고 우선순위 매김. sync_releases 스키마 변경이 한줄로AI와 Agent 양쪽 배포에 반영됐는지 확인 필수 (D131) |
+| **Agent 크래시인데 슈퍼관리자 UI에서 명령만 쌓는 착각** | Harold님이 "전체동기화" 여러 번 누름 → sync_agents.config.commands에 명령 5건 쌓임. **Agent가 죽어있으면 명령이 아무리 쌓여도 pull 안 함** → UI 행동과 실제 동작이 단절 | **싱크에이전트 이슈 시 항상 nginx access 로그로 Agent 요청 도달 여부 먼저 확인.** 기록 없으면 Agent 프로세스 측 문제. UI 버튼 여러 번 누름 금지 (D131) |
 
 ### ⚠️ 필수 체크 원칙 1: 유틸 함수 수정/추가 시 소비처 전수 확인
 

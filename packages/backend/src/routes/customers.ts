@@ -10,6 +10,7 @@ import { buildDynamicFilterCompat } from '../utils/customer-filter';
 import { getTestSmsTables } from '../utils/sms-queue';
 import { detectPhoneFields } from '../utils/callback-filter';
 import { blockIfSyncActive } from '../middlewares/sync-active-check';
+import { createCustomerUpsertBuilder } from '../utils/customer-upsert';
 
 const router = Router();
 
@@ -314,30 +315,28 @@ router.post('/', blockIfSyncActive, async (req: Request, res: Response) => {
       }
     }
 
-    const result = await query(
-      `INSERT INTO customers (
-        company_id, phone, name, gender, birth_date, email, address,
-        grade, points, store_code, store_name, sms_opt_in, custom_fields
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-      ON CONFLICT (company_id, COALESCE(store_code, '__NONE__'), phone) DO UPDATE SET
-        name = EXCLUDED.name,
-        gender = EXCLUDED.gender,
-        birth_date = EXCLUDED.birth_date,
-        email = EXCLUDED.email,
-        address = EXCLUDED.address,
-        grade = EXCLUDED.grade,
-        points = EXCLUDED.points,
-        store_code = EXCLUDED.store_code,
-        store_name = EXCLUDED.store_name,
-        sms_opt_in = EXCLUDED.sms_opt_in,
-        custom_fields = COALESCE(customers.custom_fields, '{}') || EXCLUDED.custom_fields,
-        updated_at = CURRENT_TIMESTAMP
-      RETURNING *`,
-      [
-        companyId, phone, name, gender, birthDate, email, address,
-        grade, points, storeCode, storeName, smsOptIn ?? true, customFields || {}
-      ]
-    );
+    // ★ customer-upsert.ts 컨트롤타워 사용 (upload/sync와 동일 진입점, 인라인 INSERT 제거)
+    const manualUpsertBuilder = createCustomerUpsertBuilder({
+      source: 'manual',
+      includeUploadedBy: false,
+      returning: 'all',
+    });
+    const manualRow: Record<string, any> = {
+      phone,
+      name,
+      gender,
+      birth_date: birthDate,
+      email,
+      address,
+      grade,
+      points,
+      store_code: storeCode,
+      store_name: storeName,
+      sms_opt_in: smsOptIn ?? true,
+      custom_fields: customFields ? JSON.stringify(customFields) : null,
+    };
+    const { sql: manualSql, values: manualValues } = manualUpsertBuilder.buildBatch(companyId, [manualRow]);
+    const result = await query(manualSql, manualValues);
 
     // customer_stores N:N 매핑 (store_code가 있을 때)
     const customerId = result.rows[0]?.id;
@@ -408,39 +407,38 @@ router.post('/bulk', blockIfSyncActive, async (req: Request, res: Response) => {
     let failCount = 0;
     const errors: string[] = [];
 
+    // ★ customer-upsert.ts 컨트롤타워로 벌크 INSERT 통합 (upload/sync와 동일 진입점)
+    const bulkUpsertBuilder = createCustomerUpsertBuilder({
+      source: 'manual',
+      includeUploadedBy: false,
+    });
+    const bulkRows: Record<string, any>[] = [];
     for (const customer of customers) {
-      try {
-        if (!customer.phone) {
-          failCount++;
-          errors.push(`전화번호 없음: ${JSON.stringify(customer)}`);
-          continue;
-        }
-
-        await query(
-          `INSERT INTO customers (
-            company_id, phone, name, gender, birth_date, email,
-            grade, points, sms_opt_in, custom_fields
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-          ON CONFLICT (company_id, COALESCE(store_code, '__NONE__'), phone) DO UPDATE SET
-            name = EXCLUDED.name,
-            gender = EXCLUDED.gender,
-            birth_date = EXCLUDED.birth_date,
-            email = EXCLUDED.email,
-            grade = EXCLUDED.grade,
-            points = EXCLUDED.points,
-            sms_opt_in = EXCLUDED.sms_opt_in,
-            custom_fields = COALESCE(customers.custom_fields, '{}') || EXCLUDED.custom_fields,
-            updated_at = CURRENT_TIMESTAMP`,
-          [
-            companyId, customer.phone, customer.name, customer.gender,
-            customer.birthDate, customer.email, customer.grade,
-            customer.points, customer.smsOptIn ?? true, customer.customFields || {}
-          ]
-        );
-        successCount++;
-      } catch (err) {
+      if (!customer.phone) {
         failCount++;
-        errors.push(`오류: ${customer.phone}`);
+        errors.push(`전화번호 없음: ${JSON.stringify(customer)}`);
+        continue;
+      }
+      bulkRows.push({
+        phone: customer.phone,
+        name: customer.name,
+        gender: customer.gender,
+        birth_date: customer.birthDate,
+        email: customer.email,
+        grade: customer.grade,
+        points: customer.points,
+        sms_opt_in: customer.smsOptIn ?? true,
+        custom_fields: customer.customFields ? JSON.stringify(customer.customFields) : null,
+      });
+    }
+    if (bulkRows.length > 0) {
+      try {
+        const { sql: bulkSql, values: bulkValues } = bulkUpsertBuilder.buildBatch(companyId, bulkRows);
+        await query(bulkSql, bulkValues);
+        successCount = bulkRows.length;
+      } catch (err: any) {
+        failCount += bulkRows.length;
+        errors.push(`벌크 INSERT 오류: ${err?.message || 'unknown'}`);
       }
     }
 

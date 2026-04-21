@@ -319,7 +319,7 @@ function buildConfigFromEnv(): Record<string, unknown> {
     },
     agent: {
       name: env.AGENT_NAME || 'sync-agent-001',
-      version: '0.1.0',
+      version: '1.5.1',
     },
     log: {
       level: env.LOG_LEVEL || 'info',

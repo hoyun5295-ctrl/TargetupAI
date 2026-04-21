@@ -563,7 +563,9 @@ export function normalizeByFieldKey(fieldKey: string, value: any): any {
     case 'normalizeGender':
       return normalizeGender(value);
     case 'parseInt': {
-      const num = parseInt(String(value), 10);
+      // D131: 쉼표 포함 숫자("1,800") 파싱 지원 — 서수란 팀장 제보(Agent 동일 이슈 동시 해결)
+      const cleaned = String(value).replace(/,/g, '').replace(/\s/g, '').trim();
+      const num = parseInt(cleaned, 10);
       return isNaN(num) ? null : num;
     }
     case 'normalizeDate':

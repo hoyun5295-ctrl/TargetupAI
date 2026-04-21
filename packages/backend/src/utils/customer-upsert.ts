@@ -23,12 +23,14 @@
 
 import { getColumnFields } from './standard-field-map';
 
-export type CustomerUpsertSource = 'upload' | 'sync';
+export type CustomerUpsertSource = 'upload' | 'sync' | 'manual';
 
 export interface CustomerUpsertBuilderOptions {
   source: CustomerUpsertSource;
-  /** upload 경로만 true. sync는 system 계정이므로 uploaded_by 컬럼 제외. */
+  /** upload 경로만 true. sync/manual은 uploaded_by 컬럼 제외. */
   includeUploadedBy: boolean;
+  /** RETURNING 절 제어 — 단건 API는 'all' (전체 row 반환), 배치는 'insert_phone' (기본) */
+  returning?: 'insert_phone' | 'all';
 }
 
 export interface CustomerUpsertBuilder {
@@ -79,7 +81,10 @@ export function createCustomerUpsertBuilder(
     3 + // birth_year, birth_month_day, custom_fields
     (options.includeUploadedBy ? 1 : 0);
 
-  const sourceLiteral = options.source === 'upload' ? "'upload'" : "'sync'";
+  const sourceLiteral =
+    options.source === 'upload' ? "'upload'" :
+    options.source === 'sync' ? "'sync'" :
+    "'manual'";
 
   // ON CONFLICT UPDATE 절 — phone/store_code는 UNIQUE 키 구성요소이므로 UPDATE에서 제외
   const updateExclusions = new Set(['phone', 'store_code']);
@@ -93,12 +98,15 @@ export function createCustomerUpsertBuilder(
     ...(options.includeUploadedBy
       ? ['uploaded_by = COALESCE(EXCLUDED.uploaded_by, customers.uploaded_by)']
       : []),
-    // source 덮어쓰기 규칙:
-    //   - upload: 기존 sync 데이터는 유지 (sync > upload 우선순위), 아니면 'upload'로 전환
-    //   - sync: 항상 'sync' (Agent 원본이 정답)
+    // source 덮어쓰기 규칙 (우선순위: sync > upload > manual):
+    //   - upload: 기존 sync 유지, 아니면 'upload'
+    //   - sync:   항상 'sync' (Agent 원본이 정답)
+    //   - manual: 기존 sync/upload 유지, 아니면 'manual'
     options.source === 'upload'
       ? `source = CASE WHEN customers.source = 'sync' THEN 'sync' ELSE 'upload' END`
-      : `source = 'sync'`,
+      : options.source === 'sync'
+      ? `source = 'sync'`
+      : `source = CASE WHEN customers.source IN ('sync','upload') THEN customers.source ELSE 'manual' END`,
     'updated_at = NOW()',
   ].join(',\n              ');
 
@@ -138,12 +146,16 @@ export function createCustomerUpsertBuilder(
       placeholders.push(`(${paramList}, ${sourceLiteral}, NOW(), NOW())`);
       values.push(...rowValues);
     }
+    const returningClause =
+      options.returning === 'all'
+        ? 'RETURNING *, (xmax = 0) as is_insert'
+        : 'RETURNING (xmax = 0) as is_insert, phone';
     const sql = `
       INSERT INTO customers (${insertCols.join(', ')})
       VALUES ${placeholders.join(', ')}
       ON CONFLICT (company_id, COALESCE(store_code, '__NONE__'), phone) DO UPDATE SET
               ${updateClauses}
-      RETURNING (xmax = 0) as is_insert, phone
+      ${returningClause}
     `;
     return { sql, values };
   };

@@ -90,7 +90,7 @@ const MappingConfigSchema = z.object({
 const AgentMetaSchema = z.object({
   id: z.string().uuid().nullish(),
   name: z.string().min(1).default('sync-agent-001'),
-  version: z.string().default('0.1.0'),
+  version: z.string().default('1.5.1'),
 });
 
 // ─── 로깅 설정 ──────────────────────────────────────────
