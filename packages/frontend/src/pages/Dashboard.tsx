@@ -2243,13 +2243,21 @@ const campaignData = {
                 <div className="text-lg font-bold text-gray-800 mb-1">
                   {planInfo?.plan_name || '로딩...'}
                 </div>
-                {planInfo?.plan_code === 'FREE' && !planInfo?.is_trial_expired && (
-                  <div className="text-xs text-orange-500 font-medium">
-                    트라이얼 D-{Math.max(0, Math.ceil((new Date(planInfo.trial_expires_at).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)))}
-                  </div>
-                )}
-                {planInfo?.plan_code === 'FREE' && planInfo?.is_trial_expired && (
-                  <div className="text-xs text-red-500 font-medium">트라이얼 만료</div>
+                {/* ★ CT-17: TRIAL 체험 중 → 요금제 만료 D-N 뱃지 (PricingPage와 톤 통일) */}
+                {planInfo?.plan_code === 'TRIAL' && planInfo?.trial_expires_at && (() => {
+                  const daysLeft = Math.max(0, Math.ceil((new Date(planInfo.trial_expires_at).getTime() - Date.now()) / 86400000));
+                  return (
+                    <div className="inline-flex items-center gap-1 mb-1 px-2 py-0.5 bg-violet-100 text-violet-700 rounded-full">
+                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      <span className="text-[11px] font-bold whitespace-nowrap">요금제 만료 D-{daysLeft}</span>
+                    </div>
+                  );
+                })()}
+                {/* 체험 만료 후 FREE 강등 마커 */}
+                {planInfo?.subscription_status === 'trial_expired' && (
+                  <div className="text-xs text-red-500 font-medium">체험 만료</div>
                 )}
                 {planInfo?.plan_code !== 'FREE' && planInfo?.max_customers && (
                   <div className="mt-1">
