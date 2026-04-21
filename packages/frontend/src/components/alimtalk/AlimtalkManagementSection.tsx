@@ -75,6 +75,9 @@ interface Profile {
 interface CategoryOption {
   category_code: string;
   name: string;
+  group_name?: string | null;
+  inclusion?: string | null;
+  exclusion?: string | null;
 }
 
 function getToken() {
@@ -220,7 +223,6 @@ export default function AlimtalkManagementSection() {
     profile_id: t.profile_id,
     manageName: t.template_name,
     customTemplateCode: t.custom_template_code || '',
-    serviceMode: (t.service_mode as 'PRD' | 'STG') || 'PRD',
     categoryCode: t.category_code || t.category || '',
     messageType: t.message_type as any,
     emphasizeType: t.emphasize_type as any,
@@ -236,9 +238,7 @@ export default function AlimtalkManagementSection() {
     itemList: Array.isArray(t.item_list) ? t.item_list : [],
     summary: t.item_summary || null,
     buttons: Array.isArray(t.buttons) ? t.buttons : [],
-    quickReplies: Array.isArray(t.quick_replies) ? t.quick_replies : [],
     securityFlag: t.security_flag || false,
-    alarmPhoneNumber: t.alarm_phone_numbers || '',
   });
 
   const canRegisterTemplate = profiles.length > 0;

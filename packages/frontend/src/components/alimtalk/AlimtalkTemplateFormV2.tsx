@@ -11,7 +11,6 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import ButtonEditor, { type AlimtalkButton } from './ButtonEditor';
-import QuickReplyEditor, { type AlimtalkQuickReply } from './QuickReplyEditor';
 import ItemListEditor, {
   type ItemHighlight,
   type ItemListEntry,
@@ -30,7 +29,6 @@ export interface TemplateFormData {
   profile_id: string;
   manageName: string;
   customTemplateCode?: string;
-  serviceMode: 'PRD' | 'STG';
   categoryCode: string;
   messageType: MsgType;
   emphasizeType: EmphType;
@@ -49,9 +47,7 @@ export interface TemplateFormData {
   itemList: ItemListEntry[];
   summary: ItemSummary | null;
   buttons: AlimtalkButton[];
-  quickReplies: AlimtalkQuickReply[];
   securityFlag: boolean;
-  alarmPhoneNumber: string;
 }
 
 interface Props {
@@ -62,7 +58,13 @@ interface Props {
     profile_name: string;
     approval_status?: string | null;
   }[];
-  categories: { category_code: string; name: string }[];
+  categories: {
+    category_code: string;
+    name: string;
+    group_name?: string | null;
+    inclusion?: string | null;
+    exclusion?: string | null;
+  }[];
   onClose: () => void;
   onSuccess: () => void;
 }
@@ -93,7 +95,6 @@ function initialForm(seed?: Partial<TemplateFormData> | null): TemplateFormData 
     profile_id: seed?.profile_id || '',
     manageName: seed?.manageName || '',
     customTemplateCode: seed?.customTemplateCode || '',
-    serviceMode: seed?.serviceMode || 'PRD',
     categoryCode: seed?.categoryCode || '',
     messageType: (seed?.messageType as MsgType) || 'BA',
     emphasizeType: (seed?.emphasizeType as EmphType) || 'NONE',
@@ -109,9 +110,7 @@ function initialForm(seed?: Partial<TemplateFormData> | null): TemplateFormData 
     itemList: (seed?.itemList as ItemListEntry[]) || [],
     summary: (seed?.summary as ItemSummary) || null,
     buttons: (seed?.buttons as AlimtalkButton[]) || [],
-    quickReplies: (seed?.quickReplies as AlimtalkQuickReply[]) || [],
     securityFlag: seed?.securityFlag || false,
-    alarmPhoneNumber: seed?.alarmPhoneNumber || '',
   };
 }
 
@@ -174,7 +173,6 @@ export default function AlimtalkTemplateFormV2({
     if ((form.messageType === 'EX' || form.messageType === 'MI') && !form.extra.trim())
       return '부가정보형/복합형은 부가정보(extra)가 필수입니다';
     if (form.buttons.length > 5) return '버튼은 최대 5개';
-    if (form.quickReplies.length > 10) return '빠른답장은 최대 10개';
     return null;
   };
 
@@ -192,11 +190,13 @@ export default function AlimtalkTemplateFormV2({
         : `/api/alimtalk/templates`;
 
       // IMC 스펙에 맞춘 payload 조립
+      // - serviceMode: 백엔드에서 'PRD' 기본값 처리 (UI 노출 안 함)
+      // - quickReplyList: 템플릿 등록 필수 항목 아님 (UI 제거)
+      // - alarmPhoneNumber: 알림수신자 별도 관리 화면 사용 (UI 제거)
       const payload: any = {
         profileId: form.profile_id,
         manageName: form.manageName,
         customTemplateCode: form.customTemplateCode || undefined,
-        serviceMode: form.serviceMode,
         categoryCode: form.categoryCode,
         templateMessageType: form.messageType,
         templateEmphasizeType: form.emphasizeType,
@@ -205,8 +205,6 @@ export default function AlimtalkTemplateFormV2({
         templateExtra: form.extra || undefined,
         securityFlag: form.securityFlag,
         buttonList: form.buttons,
-        quickReplyList: form.quickReplies,
-        alarmPhoneNumber: form.alarmPhoneNumber || undefined,
       };
 
       if (form.emphasizeType === 'TEXT') {
@@ -281,62 +279,45 @@ export default function AlimtalkTemplateFormV2({
         <div className="grid grid-cols-1 md:grid-cols-[1fr_360px] flex-1 overflow-hidden">
           {/* Left: Form */}
           <div className="px-6 py-4 overflow-y-auto space-y-4 border-r border-gray-100">
-            {/* 발신 프로필 + 서비스모드 */}
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">
-                  발신 프로필 <span className="text-red-500">*</span>
-                </label>
-                {(() => {
-                  const approvedProfiles = profiles.filter(
-                    (p) => (p.approval_status || 'PENDING_APPROVAL') === 'APPROVED',
-                  );
-                  const hasAny = profiles.length > 0;
-                  const hasApproved = approvedProfiles.length > 0;
-                  return (
-                    <>
-                      <select
-                        value={form.profile_id}
-                        onChange={(e) => setForm({ ...form, profile_id: e.target.value })}
-                        disabled={!hasApproved}
-                        className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm disabled:bg-gray-100 disabled:text-gray-400"
-                      >
-                        <option value="">선택</option>
-                        {approvedProfiles.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.profile_name} ({p.profile_key.slice(0, 10)}…)
-                          </option>
-                        ))}
-                      </select>
-                      {!hasAny && (
-                        <p className="mt-1 text-[11px] text-red-600">
-                          등록된 발신프로필이 없습니다. 슈퍼관리자에게 등록을 요청해주세요.
-                        </p>
-                      )}
-                      {hasAny && !hasApproved && (
-                        <p className="mt-1 text-[11px] text-amber-600">
-                          승인된 발신프로필이 없습니다. 슈퍼관리자 승인 후 사용할 수 있습니다.
-                        </p>
-                      )}
-                    </>
-                  );
-                })()}
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">
-                  서비스 모드
-                </label>
-                <select
-                  value={form.serviceMode}
-                  onChange={(e) =>
-                    setForm({ ...form, serviceMode: e.target.value as 'PRD' | 'STG' })
-                  }
-                  className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm"
-                >
-                  <option value="PRD">운영 (PRD)</option>
-                  <option value="STG">스테이징 (STG)</option>
-                </select>
-              </div>
+            {/* 발신 프로필 */}
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">
+                발신 프로필 <span className="text-red-500">*</span>
+              </label>
+              {(() => {
+                const approvedProfiles = profiles.filter(
+                  (p) => (p.approval_status || 'PENDING_APPROVAL') === 'APPROVED',
+                );
+                const hasAny = profiles.length > 0;
+                const hasApproved = approvedProfiles.length > 0;
+                return (
+                  <>
+                    <select
+                      value={form.profile_id}
+                      onChange={(e) => setForm({ ...form, profile_id: e.target.value })}
+                      disabled={!hasApproved}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm disabled:bg-gray-100 disabled:text-gray-400"
+                    >
+                      <option value="">선택</option>
+                      {approvedProfiles.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.profile_name} ({p.profile_key.slice(0, 10)}…)
+                        </option>
+                      ))}
+                    </select>
+                    {!hasAny && (
+                      <p className="mt-1 text-[11px] text-red-600">
+                        등록된 발신프로필이 없습니다. 슈퍼관리자에게 등록을 요청해주세요.
+                      </p>
+                    )}
+                    {hasAny && !hasApproved && (
+                      <p className="mt-1 text-[11px] text-amber-600">
+                        승인된 발신프로필이 없습니다. 슈퍼관리자 승인 후 사용할 수 있습니다.
+                      </p>
+                    )}
+                  </>
+                );
+              })()}
             </div>
 
             {/* 관리 이름 + 고객사 코드 */}
@@ -369,25 +350,15 @@ export default function AlimtalkTemplateFormV2({
               </div>
             </div>
 
-            {/* 카테고리 + 메시지유형 + 강조유형 */}
-            <div className="grid grid-cols-3 gap-3">
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">
-                  카테고리 <span className="text-red-500">*</span>
-                </label>
-                <select
-                  value={form.categoryCode}
-                  onChange={(e) => setForm({ ...form, categoryCode: e.target.value })}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm"
-                >
-                  <option value="">선택</option>
-                  {categories.map((c) => (
-                    <option key={c.category_code} value={c.category_code}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
+            {/* 카테고리 (대분류 → 소분류 2단) */}
+            <CategoryPicker
+              categories={categories}
+              value={form.categoryCode}
+              onChange={(code) => setForm({ ...form, categoryCode: code })}
+            />
+
+            {/* 메시지유형 + 강조유형 */}
+            <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">
                   메시지 유형
@@ -540,14 +511,8 @@ export default function AlimtalkTemplateFormV2({
               forceChannelAdd={forceChannelAdd}
             />
 
-            {/* 빠른답장 */}
-            <QuickReplyEditor
-              replies={form.quickReplies}
-              onChange={(r) => setForm({ ...form, quickReplies: r })}
-            />
-
-            {/* 보안 + 알림번호 */}
-            <div className="grid grid-cols-2 gap-3 items-end">
+            {/* 보안 템플릿 */}
+            <div>
               <div className="flex items-center gap-2">
                 <input
                   type="checkbox"
@@ -560,17 +525,9 @@ export default function AlimtalkTemplateFormV2({
                   보안 템플릿 (개인정보 포함)
                 </label>
               </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">
-                  검수 완료 알림 번호 <span className="text-gray-400">(콤마 구분, 최대 10개)</span>
-                </label>
-                <input
-                  value={form.alarmPhoneNumber}
-                  onChange={(e) => setForm({ ...form, alarmPhoneNumber: e.target.value })}
-                  placeholder="01012345678,01098765432"
-                  className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm"
-                />
-              </div>
+              <p className="mt-1 ml-6 text-[11px] text-gray-500 leading-relaxed">
+                보안 템플릿 체크 시, 메인 디바이스 모바일 외 모든 서브 디바이스에서는 메시지 내용이 노출되지 않습니다.
+              </p>
             </div>
           </div>
 
@@ -590,7 +547,6 @@ export default function AlimtalkTemplateFormV2({
               itemList={form.itemList}
               summary={form.summary}
               buttons={form.buttons}
-              quickReplies={form.quickReplies}
               profileName={profileName}
             />
           </div>
@@ -648,6 +604,119 @@ function VariableChips({ content }: { content: string }) {
           {v}
         </span>
       ))}
+    </div>
+  );
+}
+
+/**
+ * 템플릿 카테고리 2단 선택기
+ *
+ * - IMC 응답: `{ code, name, groupName, inclusion, exclusion }`
+ *   대분류(groupName) → 소분류(code+name) 2단 구조.
+ * - group_name이 비어있는 레거시 데이터가 섞여 있으면 단일 드롭다운으로 안전 폴백.
+ * - 소분류 선택 시 inclusion/exclusion 힌트 박스 노출 — 올바른 카테고리 선택 유도.
+ */
+function CategoryPicker({
+  categories,
+  value,
+  onChange,
+}: {
+  categories: {
+    category_code: string;
+    name: string;
+    group_name?: string | null;
+    inclusion?: string | null;
+    exclusion?: string | null;
+  }[];
+  value: string;
+  onChange: (code: string) => void;
+}) {
+  const hasGroups = categories.some((c) => !!c.group_name);
+  const selected = categories.find((c) => c.category_code === value) || null;
+
+  // fallback: group_name 데이터가 없으면 단일 드롭다운
+  if (!hasGroups) {
+    return (
+      <div>
+        <label className="block text-xs font-medium text-gray-600 mb-1">
+          카테고리 <span className="text-red-500">*</span>
+        </label>
+        <select
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm"
+        >
+          <option value="">선택</option>
+          {categories.map((c) => (
+            <option key={c.category_code} value={c.category_code}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+      </div>
+    );
+  }
+
+  // 대분류 목록 (정렬 유지)
+  const groups: string[] = [];
+  for (const c of categories) {
+    const g = c.group_name || '기타';
+    if (!groups.includes(g)) groups.push(g);
+  }
+
+  const currentGroup = selected?.group_name || '';
+  const subItems = categories.filter(
+    (c) => (c.group_name || '기타') === currentGroup,
+  );
+
+  return (
+    <div>
+      <label className="block text-xs font-medium text-gray-600 mb-1">
+        카테고리 <span className="text-red-500">*</span>
+      </label>
+      <div className="grid grid-cols-2 gap-2">
+        <select
+          value={currentGroup}
+          onChange={(e) => {
+            const g = e.target.value;
+            // 대분류 변경 시 해당 그룹의 첫 소분류로 자동 선택
+            const first = categories.find((c) => (c.group_name || '기타') === g);
+            onChange(first?.category_code || '');
+          }}
+          className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm"
+        >
+          <option value="">대분류 선택</option>
+          {groups.map((g) => (
+            <option key={g} value={g}>
+              {g}
+            </option>
+          ))}
+        </select>
+        <select
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          disabled={!currentGroup}
+          className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm disabled:bg-gray-100 disabled:text-gray-400"
+        >
+          <option value="">소분류 선택</option>
+          {subItems.map((c) => (
+            <option key={c.category_code} value={c.category_code}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+      </div>
+      {selected?.inclusion && (
+        <div className="mt-1.5 rounded-md border border-amber-100 bg-amber-50/70 px-2.5 py-1.5 text-[11px] text-amber-800 leading-relaxed">
+          <span className="font-semibold">포함:</span> {selected.inclusion}
+          {selected.exclusion && (
+            <>
+              <br />
+              <span className="font-semibold">제외:</span> {selected.exclusion}
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }

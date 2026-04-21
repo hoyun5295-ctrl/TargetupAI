@@ -953,6 +953,12 @@ export const uploadMarketingAgreeFile = (
 export interface TemplateCategoryItem {
   code: string;
   name: string;
+  /** 대분류 이름 (예: "회원", "구매", "예약") — 실제 IMC 응답에 포함됨 */
+  groupName?: string;
+  /** 카테고리 포함 대상 설명 (UX 가이드용) */
+  inclusion?: string;
+  /** 카테고리 제외 대상 설명 (UX 가이드용) */
+  exclusion?: string;
 }
 
 export async function listTemplateCategories(): Promise<

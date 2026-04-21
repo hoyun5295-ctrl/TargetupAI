@@ -498,12 +498,19 @@
 인덱스: `idx_ksc_parent(parent_code, level)`
 
 ### kakao_template_categories (템플릿 카테고리 캐시, D130 신설)
+> **D131 후속 확장:** IMC 실제 응답에 `groupName` (대분류) + `inclusion`/`exclusion` (UX 가이드)가 포함됨. 3컬럼 추가로 2단 드롭다운(대분류→소분류) UI + 카테고리 선택 가이드 표시 가능.
+
 | 컬럼 | 타입 | 비고 |
 |------|------|------|
-| category_code | varchar(6) PK | 6자리 |
-| name | varchar(100) | |
+| category_code | varchar(6) PK | 6자리 (예: `001001`) |
+| name | varchar(100) | 소분류 이름 (예: `회원가입`) |
+| **group_name** | varchar(30) | **대분류 이름 (예: `회원`, `구매`, `예약`) — D131 추가** |
+| **inclusion** | text | **카테고리 포함 대상 설명 (UX 가이드) — D131 추가** |
+| **exclusion** | text | **카테고리 제외 대상 설명 (UX 가이드) — D131 추가** |
 | active_yn | char(1) DEFAULT 'Y' | |
 | synced_at | timestamptz | |
+
+인덱스: `idx_ktc_group_name(group_name)`
 
 ### kakao_webhook_events (IMC 웹훅 이벤트, D130 신설 — idempotency)
 | 컬럼 | 타입 | 비고 |

@@ -6,7 +6,6 @@
  */
 
 import type { AlimtalkButton } from './ButtonEditor';
-import type { AlimtalkQuickReply } from './QuickReplyEditor';
 import type { ItemHighlight, ItemListEntry, ItemSummary } from './ItemListEditor';
 
 interface Props {
@@ -23,7 +22,6 @@ interface Props {
   itemList?: ItemListEntry[];
   summary?: ItemSummary | null;
   buttons?: AlimtalkButton[];
-  quickReplies?: AlimtalkQuickReply[];
   profileName?: string;
 }
 
@@ -41,7 +39,6 @@ export default function AlimtalkPreview({
   itemList,
   summary,
   buttons,
-  quickReplies,
   profileName,
 }: Props) {
   const highlightVars = content
@@ -168,19 +165,6 @@ export default function AlimtalkPreview({
         )}
       </div>
 
-      {/* 빠른답장 */}
-      {quickReplies && quickReplies.length > 0 && (
-        <div className="mt-2 flex flex-wrap gap-1">
-          {quickReplies.map((q, i) => (
-            <span
-              key={i}
-              className="text-xs px-3 py-1 bg-white border border-amber-200 rounded-full text-amber-700"
-            >
-              {q.name || '(답장)'}
-            </span>
-          ))}
-        </div>
-      )}
     </div>
   );
 }

@@ -152,8 +152,9 @@ export async function syncCategoriesJob(): Promise<void> {
     logErr('categorySync-sender', err);
   }
 
-  // ── 템플릿 카테고리 (flat, code 6자리)
-  //    동일 IMC 이중 래핑 가능성 대응 (기존에 42건 들어온 건 다른 경로였을 수 있음)
+  // ── 템플릿 카테고리 (flat, code 6자리 + groupName 대분류)
+  //    IMC 실측 응답 (2026-04-21): { code, name, groupName, inclusion, exclusion }
+  //    동일 IMC 이중 래핑 가능성은 extractImcList()로 흡수.
   try {
     const tplRes = (await imc.listTemplateCategories()) as any;
     const list = extractImcList(tplRes);
@@ -161,16 +162,26 @@ export async function syncCategoriesJob(): Promise<void> {
       for (const c of list) {
         if (!c?.code) continue;
         await query(
-          `INSERT INTO kakao_template_categories (category_code, name, active_yn, synced_at)
-           VALUES ($1, $2, 'Y', now())
+          `INSERT INTO kakao_template_categories
+             (category_code, name, group_name, inclusion, exclusion, active_yn, synced_at)
+           VALUES ($1, $2, $3, $4, $5, 'Y', now())
            ON CONFLICT (category_code) DO UPDATE SET
-             name      = EXCLUDED.name,
-             active_yn = 'Y',
-             synced_at = now()`,
-          [String(c.code), String(c.name || '')],
+             name       = EXCLUDED.name,
+             group_name = EXCLUDED.group_name,
+             inclusion  = EXCLUDED.inclusion,
+             exclusion  = EXCLUDED.exclusion,
+             active_yn  = 'Y',
+             synced_at  = now()`,
+          [
+            String(c.code),
+            String(c.name || ''),
+            c.groupName ? String(c.groupName) : null,
+            c.inclusion ? String(c.inclusion) : null,
+            c.exclusion ? String(c.exclusion) : null,
+          ],
         );
       }
-      log('categorySync', `template 카테고리 ${list.length}건 동기화`);
+      log('categorySync', `template 카테고리 ${list.length}건 동기화 (groupName 포함)`);
     } else {
       logErr(
         'categorySync-template',

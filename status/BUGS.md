@@ -2861,3 +2861,27 @@ Agent 문제 대응 시 필요.
 - 핸들러/콜백 기반 설계에서 **초기 호출 시점과 핸들러 등록 시점의 순서**는 반드시 검증. "생성 → 즉시 실행 → 나중에 handler 등록" 패턴은 첫 실행 기회를 날림
 - At-Most-Once / At-Least-Once 선택은 문서화 필수. 명령 유실 가능성은 운영 사고로 이어질 수 있음
 - TODO 주석이 남아있는 코드 경로는 **테스트 통과 전 반드시 실제 구현** — 이 케이스는 "Agent 실행 로그에 `수신` 메시지는 찍히는데 실제 실행 안 되는" 함정 유발
+
+---
+
+### B31-06: 실시간 상태 반영 + B31-02 DB CHECK 제약 확정
+
+| 항목 | 내용 |
+|------|------|
+| **심각도** | 🟠 Major (UX 결함) + 🔴 Critical (B31-02 원인 확정) |
+| **상태** | ✅ Closed-배포완료 (2026-04-21 Harold님 실시간 뱃지 전환 검증 완료) |
+| **리포터** | Harold님 |
+
+**B31-06 UI 시차 문제**: pause 명령 보낸 후 Agent는 실제 paused인데 UI 상태 뱃지는 여전히 `● 정상` (heartbeat 60분 주기 지연). 재개 버튼 자동 비활성화 로직이 "실제 paused인데 UI는 active로 봐서 재개 못 누르는" 모순 유발.
+
+**해결 — 명령 의도 즉시 DB 선반영**: [admin-sync.ts POST command](packages/backend/src/routes/admin-sync.ts:317)에서 `pause` 명령 등록 시 `UPDATE sync_agents SET status='paused'`, `resume` 시 `status='active'` 동시 UPDATE. Agent heartbeat self-report가 나중에 덮어쓰는 구조라 최종 일관성 유지. UI는 즉시 뱃지 전환 + 재개 버튼 자동 활성화 복원.
+
+**B31-02 근본 원인 확정**: `customer_field_definitions.field_type` CHECK 제약이 `'INT' | 'VARCHAR' | 'DATE' | 'BOOLEAN'` 4개만 허용하는데 Sync Agent가 `'string'` 보냄 → 전건 거부.
+
+**해결**: CT-07 `upsertCustomFieldDefinitions`에 `FIELD_TYPE_DB_MAP` 변환 추가. Agent 일반 타입(`string`/`number`/`date`/`boolean`)을 DB 허용값(`VARCHAR`/`INT`/`DATE`/`BOOLEAN`)으로 매핑. 모르는 값은 `VARCHAR` fallback (안전). Agent 재빌드 불필요.
+
+**교훈 (Harold님 반복 강조)**:
+- **"제대로 하라"는 1회 배포로 완결**. 부분 수정 + 재배포 반복은 땜질. CLAUDE.md `feedback_no_patchwork.md` 정면 위반 반복 → 반성
+- **원격 제어 UX는 명령 의도 즉시 반영**이 원칙. heartbeat 주기에 UI를 묶지 말 것
+- DB CHECK 제약 확정은 **추측 대신 `pg_get_constraintdef`로 먼저 조회**. B31-02 초반 방어 코드만 넣고 원인 확정 늦어진 게 시간 낭비 유발
+- 자동 비활성 UX 로직은 **상태 반영 지연과 동시에 설계**. 둘 중 하나만 고치면 반대 사례에서 UX 망가짐

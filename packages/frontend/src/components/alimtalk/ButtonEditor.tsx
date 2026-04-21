@@ -44,7 +44,7 @@ interface Props {
 
 const BUTTON_TYPES: { value: ButtonLinkType; label: string; hint: string }[] = [
   { value: 'WL', label: '웹링크',        hint: '모바일/PC URL' },
-  { value: 'AL', label: '앱링크',        hint: 'Android/iOS scheme' },
+  { value: 'AL', label: '앱링크',        hint: '모바일/PC URL + Android/iOS scheme' },
   { value: 'DS', label: '배송조회',      hint: '택배사 연동' },
   { value: 'BK', label: '봇키워드',      hint: '봇 이벤트' },
   { value: 'MD', label: '메시지전달',    hint: 'chatExtra' },
@@ -190,19 +190,35 @@ function ButtonRow({
       )}
 
       {btn.type === 'AL' && (
-        <div className="grid grid-cols-2 gap-2">
-          <input
-            value={btn.schemeAndroid || ''}
-            onChange={(e) => onPatch({ schemeAndroid: e.target.value })}
-            placeholder="Android scheme"
-            className="border border-gray-300 rounded px-2 py-1 text-xs"
-          />
-          <input
-            value={btn.schemeIos || ''}
-            onChange={(e) => onPatch({ schemeIos: e.target.value })}
-            placeholder="iOS scheme"
-            className="border border-gray-300 rounded px-2 py-1 text-xs"
-          />
+        <div className="space-y-1.5">
+          <div className="grid grid-cols-2 gap-2">
+            <input
+              value={btn.urlMobile || ''}
+              onChange={(e) => onPatch({ urlMobile: e.target.value })}
+              placeholder="모바일 URL"
+              className="border border-gray-300 rounded px-2 py-1 text-xs"
+            />
+            <input
+              value={btn.urlPc || ''}
+              onChange={(e) => onPatch({ urlPc: e.target.value })}
+              placeholder="PC URL (선택)"
+              className="border border-gray-300 rounded px-2 py-1 text-xs"
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <input
+              value={btn.schemeAndroid || ''}
+              onChange={(e) => onPatch({ schemeAndroid: e.target.value })}
+              placeholder="Android scheme"
+              className="border border-gray-300 rounded px-2 py-1 text-xs"
+            />
+            <input
+              value={btn.schemeIos || ''}
+              onChange={(e) => onPatch({ schemeIos: e.target.value })}
+              placeholder="iOS scheme"
+              className="border border-gray-300 rounded px-2 py-1 text-xs"
+            />
+          </div>
         </div>
       )}
 

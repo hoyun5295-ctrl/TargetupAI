@@ -548,8 +548,10 @@ router.get('/categories/sender', async (_req: Request, res: Response) => {
 router.get('/categories/template', async (_req: Request, res: Response) => {
   try {
     const r = await query(
-      `SELECT category_code, name FROM kakao_template_categories
-        WHERE active_yn = 'Y' ORDER BY category_code ASC`,
+      `SELECT category_code, name, group_name, inclusion, exclusion
+         FROM kakao_template_categories
+        WHERE active_yn = 'Y'
+        ORDER BY group_name NULLS LAST, category_code ASC`,
     );
     res.json({ success: true, categories: r.rows });
   } catch (err) {
