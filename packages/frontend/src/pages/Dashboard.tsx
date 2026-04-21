@@ -144,10 +144,11 @@ export default function Dashboard() {
 
   const [stats, setStats] = useState<Stats | null>(null);
   const [planInfo, setPlanInfo] = useState<PlanInfo | null>(null);
-  // 트라이얼 만료도 subscription 잠금으로 처리 (FREE plan + 7일 경과)
+  // ★ CT-17 (2026-04-22): subscription_status === expired/suspended 만 전체 잠금.
+  //   FREE(미가입) 자체는 기본 발송/수신거부/발송결과 허용 → 전체 잠금 아님.
+  //   각 기능(AI·자동발송·모바일DM)은 plans 플래그 기반 개별 잠금으로 처리.
   const isSubscriptionLocked = planInfo
-    ? (planInfo.subscription_status === 'expired' || planInfo.subscription_status === 'suspended'
-       || (planInfo.plan_code === 'FREE' && planInfo.is_trial_expired))
+    ? (planInfo.subscription_status === 'expired' || planInfo.subscription_status === 'suspended')
     : (subscriptionStatus === 'expired' || subscriptionStatus === 'suspended');
   // D53: DB 플래그 기반 게이팅 (하드코딩 가격 체크 제거)
   // ★ D88: 구독 만료 시에도 모든 기능 잠금
@@ -2649,10 +2650,10 @@ const campaignData = {
                     <div className="text-xl font-bold text-green-700">{recentCampaigns.length}건</div>
                   </div>
 
-                  {/* AI 발송 템플릿 */}
-                  <div onClick={() => { if (isSubscriptionLocked) { setShowSubscriptionLock(true); return; } setShowTemplates(true); }} className={`bg-white/50 shadow-sm rounded-xl p-6 min-h-[140px] cursor-pointer hover:shadow-lg transition-all text-center border border-green-200 ${isSubscriptionLocked ? 'opacity-60' : ''}`}>
+                  {/* AI 발송 템플릿 — AI 기능이므로 ai_messaging 잠금도 체크 (CT-17) */}
+                  <div onClick={() => { if (isSubscriptionLocked || isAiMessagingLocked) { setShowSubscriptionLock(true); return; } setShowTemplates(true); }} className={`bg-white/50 shadow-sm rounded-xl p-6 min-h-[140px] cursor-pointer hover:shadow-lg transition-all text-center border border-green-200 ${(isSubscriptionLocked || isAiMessagingLocked) ? 'opacity-60' : ''}`}>
                     <Sparkles className="w-8 h-8 mx-auto mb-3 text-green-600" />
-                    <div className="font-semibold text-gray-800 mb-1">{isSubscriptionLocked ? '🔒 ' : ''}AI 발송 템플릿</div>
+                    <div className="font-semibold text-gray-800 mb-1">{(isSubscriptionLocked || isAiMessagingLocked) ? '🔒 ' : ''}AI 발송 템플릿</div>
                     <div className="text-xs text-gray-500 mb-3">저장 & 바로 실행</div>
                     <div className="text-xl font-bold text-green-700">관리</div>
                   </div>

@@ -20,8 +20,10 @@ interface CompanyInfo {
   max_customers: number;
   current_customers: number;
   created_at: string;
-  trial_expires_at: string;
+  trial_expires_at: string | null;
   is_trial_expired: boolean;
+  // ★ CT-17 (2026-04-22)
+  subscription_status?: string | null; // 'trial' | 'trial_expired' | 'paid' | 'active' | 'expired' | 'suspended'
 }
 
 export default function PricingPage() {
@@ -253,27 +255,58 @@ export default function PricingPage() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 py-8">
-        {companyInfo && (
+        {companyInfo && (() => {
+          // ★ CT-17: 30일 PRO 무료체험 상태 계산
+          const isOnTrial = companyInfo.subscription_status === 'trial' && !!companyInfo.trial_expires_at;
+          const isTrialExpired = companyInfo.subscription_status === 'trial_expired';
+          const isUnsubscribed = companyInfo.plan_code === 'FREE' && !isTrialExpired;
+          const daysRemaining = isOnTrial && companyInfo.trial_expires_at
+            ? Math.max(0, Math.ceil((new Date(companyInfo.trial_expires_at).getTime() - Date.now()) / 86400000))
+            : 0;
+          return (
           <div className="bg-white rounded-xl shadow-sm p-6 mb-8">
             <h2 className="text-lg font-semibold mb-4">현재 이용 중인 플랜</h2>
             <div className="flex items-center justify-between">
               <div>
-                <div className="flex items-center gap-3">
+                <div className="flex items-baseline gap-2 flex-wrap">
                   <span className="text-2xl font-bold text-blue-600">
-                    {companyInfo.plan_name}
+                    {isOnTrial ? '무료체험중' : (isTrialExpired ? '미가입' : companyInfo.plan_name)}
                   </span>
-                  {companyInfo.plan_code === 'FREE' && (
-                    <span className="px-2 py-1 bg-yellow-100 text-yellow-800 text-xs rounded-full">
-                      {companyInfo.is_trial_expired ? '체험 만료' : '무료 체험 중'}
+                  {isOnTrial && (
+                    <span className="text-sm text-gray-500 font-medium">
+                      (요금제 프로플랜 체험)
+                    </span>
+                  )}
+                  {isOnTrial && (
+                    <span className="px-2.5 py-1 bg-violet-100 text-violet-800 text-xs font-bold rounded-full whitespace-nowrap">
+                      D-{daysRemaining}
+                    </span>
+                  )}
+                  {isTrialExpired && (
+                    <span className="px-2.5 py-1 bg-red-100 text-red-700 text-xs font-bold rounded-full">
+                      체험 만료
+                    </span>
+                  )}
+                  {isUnsubscribed && (
+                    <span className="px-2.5 py-1 bg-gray-100 text-gray-700 text-xs font-bold rounded-full">
+                      요금제 미가입
                     </span>
                   )}
                 </div>
-                {companyInfo.plan_code === 'FREE' && !companyInfo.is_trial_expired && (
-                  <p className="text-sm text-gray-500 mt-1">
-                    체험 기간: {formatDate(companyInfo.trial_expires_at)}까지 
+                {isOnTrial && companyInfo.trial_expires_at && (
+                  <p className="text-sm text-gray-600 mt-2">
+                    체험 만료: <b>{formatDate(companyInfo.trial_expires_at)}</b>
                     <span className="text-orange-600 font-medium ml-1">
-                      (D-{Math.max(0, Math.ceil((new Date(companyInfo.trial_expires_at).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)))})
+                      ({daysRemaining}일 남음)
                     </span>
+                    <span className="block text-xs text-gray-400 mt-0.5">
+                      체험 기간 중 AI·자동발송·모바일 DM 등 PRO 전 기능 이용 가능. 만료 시 자동으로 미가입 상태로 전환됩니다.
+                    </span>
+                  </p>
+                )}
+                {isTrialExpired && (
+                  <p className="text-sm text-gray-600 mt-2">
+                    무료체험이 종료되어 미가입 상태로 전환되었습니다. 직접발송 등 기본 기능은 계속 이용 가능합니다. 아래에서 요금제를 선택해 주세요.
                   </p>
                 )}
               </div>
@@ -301,7 +334,7 @@ export default function PricingPage() {
               </div>
             </div>
 
-            {companyInfo.plan_code === 'FREE' && companyInfo.is_trial_expired && (
+            {isTrialExpired && (
               <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg">
                 <p className="text-sm text-red-700">
                   ⚠️ 무료 체험 기간이 만료되었습니다. AI 기능을 계속 사용하려면 유료 플랜으로 업그레이드해주세요.
@@ -309,7 +342,8 @@ export default function PricingPage() {
               </div>
             )}
           </div>
-        )}
+          );
+        })()}
 
         {/* 대기 중 신청 배너 */}
         {hasPending && (
