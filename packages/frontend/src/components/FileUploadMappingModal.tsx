@@ -460,11 +460,12 @@ export default function FileUploadMappingModal({ show, onClose, onSaveStart, onP
         {/* ===== Step 1: 파일 업로드 ===== */}
         {step === 'upload' && (
           <>
-            <div className="p-4 border-b bg-gradient-to-r from-green-50 to-emerald-50 flex justify-between items-center shrink-0">
-              <h3 className="font-bold text-lg flex items-center gap-2">
-                <span>📤</span> 고객 DB 업로드
+            <div className="p-5 border-b bg-gradient-to-r from-violet-50 to-purple-50 flex justify-between items-center shrink-0">
+              <h3 className="font-bold text-lg flex items-center gap-2.5 text-gray-800">
+                <span className="w-8 h-8 rounded-xl bg-violet-100 flex items-center justify-center text-violet-600">📤</span>
+                고객 DB 업로드
               </h3>
-              <button onClick={handleClose} className="text-gray-500 hover:text-gray-700 text-xl leading-none">✕</button>
+              <button onClick={handleClose} className="text-gray-400 hover:text-gray-700 text-xl leading-none transition-colors">✕</button>
             </div>
             <div className="p-6 space-y-6 overflow-y-auto">
               {!fileHeaders.length ? (
@@ -573,7 +574,7 @@ export default function FileUploadMappingModal({ show, onClose, onSaveStart, onP
                 </label>
               ) : (
                 <>
-                  <div className="bg-green-50 border border-green-200 rounded-lg p-4 flex items-center justify-between">
+                  <div className="bg-violet-50 border border-violet-200 rounded-xl p-4 flex items-center justify-between">
                     <div className="flex items-center gap-3">
                       <span className="text-2xl">📄</span>
                       <div>
@@ -581,32 +582,32 @@ export default function FileUploadMappingModal({ show, onClose, onSaveStart, onP
                         <div className="text-sm text-gray-500">총 {fileTotalRows.toLocaleString()}건의 데이터</div>
                       </div>
                     </div>
-                    <button onClick={() => { setUploadedFile(null); setFileHeaders([]); setFilePreview([]); setFileTotalRows(0); setFileId(''); }} className="text-gray-400 hover:text-red-500">✕ 다시 선택</button>
+                    <button onClick={() => { setUploadedFile(null); setFileHeaders([]); setFilePreview([]); setFileTotalRows(0); setFileId(''); }} className="text-gray-400 hover:text-red-500 transition-colors">✕ 다시 선택</button>
                   </div>
                   <div>
                     <h4 className="font-semibold text-gray-700 mb-3">📋 감지된 컬럼 ({fileHeaders.length}개)</h4>
                     <div className="flex flex-wrap gap-2">
                       {fileHeaders.map((h, i) => (
-                        <span key={i} className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm">{h}</span>
+                        <span key={i} className="px-3 py-1 bg-violet-50 text-violet-700 border border-violet-100 rounded-full text-sm">{h}</span>
                       ))}
                     </div>
                   </div>
                   <div>
                     <h4 className="font-semibold text-gray-700 mb-3">👀 데이터 미리보기 (상위 5건)</h4>
-                    <div className="overflow-x-auto border rounded-lg">
+                    <div className="overflow-x-auto border border-gray-200 rounded-xl">
                       <table className="w-full text-sm">
                         <thead className="bg-gray-50">
                           <tr>
                             {fileHeaders.map((h, i) => (
-                              <th key={i} className="px-3 py-2 text-left font-medium text-gray-600 border-b whitespace-nowrap">{h}</th>
+                              <th key={i} className="px-3 py-2.5 text-left font-medium text-gray-600 border-b border-gray-200 whitespace-nowrap">{h}</th>
                             ))}
                           </tr>
                         </thead>
                         <tbody>
                           {filePreview.map((row: any, rowIdx: number) => (
-                            <tr key={rowIdx} className="hover:bg-gray-50">
+                            <tr key={rowIdx} className="hover:bg-violet-50/40 transition-colors">
                               {fileHeaders.map((h, colIdx) => (
-                                <td key={colIdx} className="px-3 py-2 border-b text-gray-700 whitespace-nowrap">{row[h] != null ? formatPreviewValue(row[h]) : '-'}</td>
+                                <td key={colIdx} className="px-3 py-2 border-b border-gray-100 text-gray-700 whitespace-nowrap">{row[h] != null ? formatPreviewValue(row[h]) : '-'}</td>
                               ))}
                             </tr>
                           ))}
@@ -617,7 +618,7 @@ export default function FileUploadMappingModal({ show, onClose, onSaveStart, onP
                   <button
                     onClick={handleAiMapping}
                     disabled={loading}
-                    className="w-full py-4 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-lg font-medium hover:from-green-700 hover:to-emerald-700 flex items-center justify-center gap-2 text-lg disabled:opacity-50"
+                    className="w-full py-4 bg-gradient-to-r from-violet-600 to-purple-600 text-white rounded-xl font-semibold hover:from-violet-700 hover:to-purple-700 flex items-center justify-center gap-2 text-base disabled:opacity-50 shadow-sm shadow-violet-200/60 transition-all"
                   >
                     {loading ? (<><span className="animate-spin">⏳</span>AI가 컬럼을 분석하고 있습니다...</>) : (<><span>🤖</span>AI 자동 매핑 시작</>)}
                   </button>
@@ -631,24 +632,25 @@ export default function FileUploadMappingModal({ show, onClose, onSaveStart, onP
         {step === 'mapping' && (
           <>
             {/* 헤더 */}
-            <div className="p-4 border-b bg-green-50 flex justify-between items-center shrink-0">
-              <h3 className="font-bold text-lg flex items-center gap-2">
-                <span>🤖</span> AI 매핑 결과
+            <div className="p-5 border-b bg-gradient-to-r from-violet-50 to-purple-50 flex justify-between items-center shrink-0">
+              <h3 className="font-bold text-lg flex items-center gap-2.5 text-gray-800">
+                <span className="w-8 h-8 rounded-xl bg-violet-100 flex items-center justify-center text-violet-600">🤖</span>
+                AI 매핑 결과
               </h3>
-              <button onClick={handleClose} className="text-gray-500 hover:text-gray-700 text-xl leading-none">✕</button>
+              <button onClick={handleClose} className="text-gray-400 hover:text-gray-700 text-xl leading-none transition-colors">✕</button>
             </div>
 
             {/* 스크롤 영역 */}
             <div className="p-6 space-y-5 overflow-y-auto flex-1">
 
               {/* 파일 정보 */}
-              <div className="bg-green-50 border border-green-200 rounded-lg p-3 flex items-center justify-center gap-3">
+              <div className="bg-violet-50 border border-violet-200 rounded-xl p-3 flex items-center justify-center gap-3">
                 <span className="text-xl">📄</span>
                 <div className="text-center">
                   <span className="font-semibold text-gray-800">{uploadedFile?.name}</span>
                   <span className="text-sm text-gray-500 ml-2">총 {fileTotalRows.toLocaleString()}건</span>
                 </div>
-                <span className="ml-3 text-xs px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded-full">
+                <span className="ml-3 text-xs px-2.5 py-0.5 bg-violet-100 text-violet-700 rounded-full font-semibold">
                   매핑 {mappedStandardCount + mappedCustomCount}/{standardFields.length + customSlots.length}
                 </span>
               </div>
@@ -690,7 +692,7 @@ export default function FileUploadMappingModal({ show, onClose, onSaveStart, onP
                                     <div className="inline-flex items-center gap-1">
                                       <button
                                         onClick={(e) => openPopup(field.fieldKey, e)}
-                                        className="px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded text-xs hover:bg-emerald-100 transition-colors truncate max-w-[120px]"
+                                        className="px-2 py-0.5 bg-violet-50 text-violet-700 border border-violet-200 rounded text-xs hover:bg-violet-100 transition-colors truncate max-w-[120px]"
                                       >
                                         {mapped}
                                       </button>
@@ -704,7 +706,7 @@ export default function FileUploadMappingModal({ show, onClose, onSaveStart, onP
                                   ) : (
                                     <button
                                       onClick={(e) => openPopup(field.fieldKey, e)}
-                                      className="px-2 py-0.5 bg-gray-50 text-gray-400 border border-dashed border-gray-300 rounded text-xs hover:border-blue-400 hover:text-blue-500 hover:bg-blue-50 transition-colors"
+                                      className="px-2 py-0.5 bg-gray-50 text-gray-400 border border-dashed border-gray-300 rounded text-xs hover:border-violet-400 hover:text-violet-500 hover:bg-violet-50 transition-colors"
                                     >
                                       클릭하여 선택
                                     </button>
@@ -744,7 +746,7 @@ export default function FileUploadMappingModal({ show, onClose, onSaveStart, onP
                           value={slot.label}
                           onChange={(e) => updateCustomLabel(index, e.target.value)}
                           placeholder="라벨명 (예: 마일리지)"
-                          className="px-2 py-1 border border-gray-300 rounded text-xs w-[130px] focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-200"
+                          className="px-2 py-1 border border-gray-300 rounded text-xs w-[130px] focus:outline-none focus:border-violet-400 focus:ring-1 focus:ring-violet-200"
                         />
                         {/* 화살표 */}
                         <span className="text-gray-300 text-xs">←</span>
@@ -754,7 +756,7 @@ export default function FileUploadMappingModal({ show, onClose, onSaveStart, onP
                             <div className="inline-flex items-center gap-1">
                               <button
                                 onClick={(e) => openPopup(`custom_slot_${index}`, e)}
-                                className="px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded text-xs hover:bg-emerald-100 transition-colors truncate max-w-[120px]"
+                                className="px-2 py-0.5 bg-violet-50 text-violet-700 border border-violet-200 rounded text-xs hover:bg-violet-100 transition-colors truncate max-w-[120px]"
                               >
                                 {slot.excelColumn}
                               </button>
@@ -768,7 +770,7 @@ export default function FileUploadMappingModal({ show, onClose, onSaveStart, onP
                           ) : (
                             <button
                               onClick={(e) => openPopup(`custom_slot_${index}`, e)}
-                              className="px-2 py-0.5 bg-gray-50 text-gray-400 border border-dashed border-gray-300 rounded text-xs hover:border-blue-400 hover:text-blue-500 hover:bg-blue-50 transition-colors"
+                              className="px-2 py-0.5 bg-gray-50 text-gray-400 border border-dashed border-gray-300 rounded text-xs hover:border-violet-400 hover:text-violet-500 hover:bg-violet-50 transition-colors"
                             >
                               클릭하여 선택
                             </button>
@@ -795,7 +797,7 @@ export default function FileUploadMappingModal({ show, onClose, onSaveStart, onP
                 {customSlots.length < 15 && (
                   <button
                     onClick={addCustomSlot}
-                    className="w-full py-2 border-2 border-dashed border-gray-300 rounded-lg text-xs text-gray-500 hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50 transition-colors flex items-center justify-center gap-1"
+                    className="w-full py-2 border-2 border-dashed border-gray-300 rounded-lg text-xs text-gray-500 hover:border-violet-400 hover:text-violet-600 hover:bg-violet-50 transition-colors flex items-center justify-center gap-1"
                   >
                     <span className="text-lg leading-none">+</span> 커스텀 필드 추가
                   </button>
@@ -834,7 +836,7 @@ export default function FileUploadMappingModal({ show, onClose, onSaveStart, onP
               <button
                 onClick={handleSave}
                 disabled={!hasPhone || loading}
-                className="flex-1 py-3 bg-green-700 text-white rounded-lg font-medium hover:bg-green-800 flex items-center justify-center gap-2 text-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                className="flex-1 py-3 bg-gradient-to-r from-violet-600 to-purple-600 text-white rounded-xl font-semibold hover:from-violet-700 hover:to-purple-700 flex items-center justify-center gap-2 text-base disabled:opacity-50 disabled:cursor-not-allowed shadow-sm shadow-violet-200/60 transition-all"
               >
                 {loading ? (
                   <><span className="animate-spin">⏳</span>요청 중...</>
