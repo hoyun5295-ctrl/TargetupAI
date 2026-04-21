@@ -581,9 +581,13 @@ router.get('/templates', async (req: Request, res: Response) => {
   }
 });
 
-// 템플릿 등록: 모든 로그인 사용자 허용 (정책 D130 §2-2 — 개인 자산)
+// 템플릿 등록: 고객사관리자(admin)만 허용 (Harold님 지시 2026-04-21)
+//   기존 D130 §2-2 "모든 로그인 사용자 허용" 정책 폐기.
+//   사유: 발신프로필과 동일한 관리 단위로 통일 (/senders/token, /senders = requireCompanyAdmin).
+//   기존에 company_user가 등록한 템플릿은 소유자 체크(requireTemplateAccess)로 조회/수정/삭제만 가능.
 router.post(
   '/templates',
+  requireCompanyAdmin as any,
   async (req: Request, res: Response) => {
     try {
       const companyId = requireCompany(req, res);

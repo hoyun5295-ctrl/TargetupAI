@@ -131,6 +131,10 @@ export default function AlimtalkManagementSection() {
         : null,
     [authUser],
   );
+  // ★ 2026-04-21 Harold님 지시: 발신프로필/템플릿 등록은 고객사관리자(admin)만.
+  //   백엔드 requireCompanyAdmin(company_admin || super_admin)과 완전 동일한 조건.
+  const canManage =
+    authUser?.userType === 'company_admin' || authUser?.userType === 'super_admin';
 
   const load = async () => {
     setLoading(true);
@@ -251,19 +255,28 @@ export default function AlimtalkManagementSection() {
               카카오톡 채널을 연결하면 즉시 사용 가능합니다
             </span>
           </div>
-          <button
-            type="button"
-            onClick={() => setShowWizard(true)}
-            className="px-3 py-1.5 bg-amber-100 hover:bg-amber-200 text-amber-700 rounded-lg text-xs font-medium transition"
-          >
-            + 발신프로필 등록
-          </button>
+          {/* ★ 권한: 고객사관리자(company_admin/super_admin)만 발신프로필 등록 가능 */}
+          {canManage && (
+            <button
+              type="button"
+              onClick={() => setShowWizard(true)}
+              className="px-3 py-1.5 bg-amber-100 hover:bg-amber-200 text-amber-700 rounded-lg text-xs font-medium transition"
+            >
+              + 발신프로필 등록
+            </button>
+          )}
         </div>
 
         {profiles.length === 0 ? (
           <div className="text-center py-4 text-gray-400 text-sm">
-            등록된 발신프로필이 없습니다. 카카오 채널 ID(@시작)와 관리자 휴대폰을 준비하신 후
-            <strong className="text-amber-600"> "+ 발신프로필 등록"</strong>을 눌러주세요.
+            {canManage ? (
+              <>
+                등록된 발신프로필이 없습니다. 카카오 채널 ID(@시작)와 관리자 휴대폰을 준비하신 후
+                <strong className="text-amber-600"> "+ 발신프로필 등록"</strong>을 눌러주세요.
+              </>
+            ) : (
+              <>등록된 발신프로필이 없습니다. 고객사관리자에게 발신프로필 등록을 요청해주세요.</>
+            )}
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -372,22 +385,27 @@ export default function AlimtalkManagementSection() {
           ))}
         </div>
         <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={() => setShowAlarm(true)}
-            className="px-3 py-1.5 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg"
-          >
-            검수 알림 수신자
-          </button>
-          <button
-            type="button"
-            onClick={() => setEditing(null)}
-            disabled={!canRegisterTemplate}
-            className="px-4 py-1.5 text-sm bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-medium transition disabled:opacity-50"
-            title={canRegisterTemplate ? undefined : '발신프로필을 먼저 등록하세요'}
-          >
-            + 템플릿 등록
-          </button>
+          {/* ★ 검수 알림 수신자 관리 + 템플릿 등록: 고객사관리자만 (백엔드 requireCompanyAdmin) */}
+          {canManage && (
+            <>
+              <button
+                type="button"
+                onClick={() => setShowAlarm(true)}
+                className="px-3 py-1.5 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg"
+              >
+                검수 알림 수신자
+              </button>
+              <button
+                type="button"
+                onClick={() => setEditing(null)}
+                disabled={!canRegisterTemplate}
+                className="px-4 py-1.5 text-sm bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-medium transition disabled:opacity-50"
+                title={canRegisterTemplate ? undefined : '발신프로필을 먼저 등록하세요'}
+              >
+                + 템플릿 등록
+              </button>
+            </>
+          )}
         </div>
       </div>
 

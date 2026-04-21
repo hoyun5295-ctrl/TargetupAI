@@ -1,12 +1,29 @@
 # D130 알림톡/브랜드메시지 IMC 연동 — 세션 핸드오프 문서
 
-> **작성일:** 2026-04-18 (Day 1 + Day 2 + Day 3 연속 세션 완료 — 알림톡 발송창 전구간 포함)
-> **다음 세션 착수 전:** `CLAUDE.md` → `status/ALIMTALK-DESIGN.md` → **본 문서** 순서로 읽기.
-> **핵심:** Day 3까지 승인 워크플로우 + 템플릿 소유자 체크 + **발송창 3경로(직접/타겟/자동) 공용 컨트롤타워 `AlimtalkChannelPanel`** + 백엔드 발송 분기 전부 완료. `auto_campaigns` DB ALTER 실행 후 배포 가능.
+> **작성일:** 2026-04-18 (Day 1~3 완료) + 2026-04-21 화요일 (Phase 0 수령 + 전수감사 + 버그 7건 수정)
+> **다음 세션 착수 전:** `CLAUDE.md` → **`status/D130-NEXT-ACTIONS.md`** → `status/ALIMTALK-DESIGN.md` → 본 문서 순서로 읽기.
+> **핵심:** Day 1~3으로 발송창 전구간 배포 완료. 2026-04-21 Phase 0 수령 + Harold님이 `imc_extracted/` 55개 공식 문서 제공 → Agent 오판으로 17건 "없음"이라 답했다가 직접 대조 결과 7건 버그 수정. 남은 블로커 4건은 `D130-NEXT-ACTIONS.md`에 정리.
 
 ---
 
 ## 1. 전체 진행 상태 요약
+
+### 🔄 2026-04-21 화요일 새로 진행된 것
+- ✅ IMC Phase 0 수령 (운영 API Key + Webhook IP + Base URL) 서버 `.env` 주입 완료
+- ✅ 카테고리 동기화 실행 → `kakao_sender_categories` 272건, `kakao_template_categories` 42건 DB 반영
+- ✅ Harold님이 `C:\Users\ceo\Downloads\imc_extracted\` 55개 IMC 공식 스펙 페이지 저장 제공
+- ✅ 버그 7건 발견·수정 + tsc 0 + tp-deploy-full 완료 (2026-04-21 11:02:39 KST 재시작)
+  1. sender 카테고리 이중 래핑 `data.data` + flat 11자리 → L1/L2/L3 재구성
+  2. `/comment-with-file` → `/comment/file` + multipart `file` → `attachment`
+  3. `/exposure` → `/show-yn` + body `exposureYn` → `showYn`
+  4. `/comment-cancel` → `/comment/cancel`
+  5. Button/QuickReply camelCase → snake_case 자동 변환 `normalizeTemplateBodyForImc`
+  6. 알림수신자 `alarmUserId` → `alarmUserKey`
+  7. 카카오 리포트 코드 1001~1004 오매핑 교정 + 11 → 55개 확장
+- ⏳ Wizard 3-Step / 템플릿 등록 / 검수요청 실점검 진행 중
+- 🔴 **남은 블로커 4건 → [`D130-NEXT-ACTIONS.md`](D130-NEXT-ACTIONS.md) 참조**
+
+### 전체 표
 
 | 영역 | 상태 | 비고 |
 |------|------|------|

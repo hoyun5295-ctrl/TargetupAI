@@ -162,7 +162,9 @@
 
 ---
 
-### 📨 D130 — 알림톡/브랜드메시지 IMC 연동 Phase 1 (2026-04-18) — ✅ Day 3 배포 완료, 월요일(2026-04-21) 실점검 대기
+### 📨 D130 — 알림톡/브랜드메시지 IMC 연동 Phase 1 — 🔄 2026-04-21 화요일 실점검 + 전수감사 진행 중
+
+> **다음 세션 필독:** [`status/D130-NEXT-ACTIONS.md`](D130-NEXT-ACTIONS.md) — 남은 블로커 + 우선순위 + 실패 대응 가이드 포함
 
 > **배경:** 레거시에서 수동으로 하던 "템플릿 관리자 + 발신프로필 등록"을 한줄로에 재구현 + 휴머스온 IMC API 연동으로 자동화.
 > 승인 상태는 웹훅으로 실시간 반영 → 발송 시 `status='APPROVED'`만 노출 → 레거시의 수동 확인 절차 제거.
@@ -285,11 +287,51 @@
 - 프론트 `npx tsc --noEmit` 0 에러
 - 잔존 인라인 알림톡 UI 0건 (DirectSendPanel/TargetSendModal/AutoSendFormModal 전부 Panel)
 
-#### ✅ 배포 완료 (2026-04-18 야간, Harold님 직접 실행)
-- **로컬:** Day 1 + Day 2 + Day 3 전 과제 완료, 백엔드/프론트 tsc 0
-- **서버 DB:** Day 2 DDL + Day 3 `auto_campaigns` 알림톡 7컬럼 전부 반영
-- **서버 코드:** `tp-push` → `tp-deploy-full` 실행 완료
-- **다음 단계:** 월요일(2026-04-21) Phase 0 수령 후 실점검 → 핸드오프 §5 체크리스트 기반
+#### ✅ 2026-04-18 야간 배포 완료 (Day 1+2+3)
+- 로컬: 백엔드/프론트 tsc 0
+- 서버 DB: Day 2 DDL + Day 3 `auto_campaigns` 알림톡 7컬럼 반영
+- 서버 코드: tp-deploy-full 완료
+
+#### 🔄 2026-04-21 화요일 — Phase 0 수령 + 전수감사 + 버그 7건 수정
+
+**Phase 0 (IMC 운영 API 키) 수령:**
+- ✅ `IMC_API_KEY` (운영계) — 서버 `.env` 주입 + pm2 restart 완료
+- ✅ `IMC_BASE_URL_PRD=https://msg-api.humuson.com`
+- ✅ `IMC_WEBHOOK_ALLOWED_IPS=121.189.17.243,121.189.17.244`
+- ❌ `IMC_WEBHOOK_HMAC_SECRET` — 폴링으로 대체, Phase 2 전 수령 필요
+- ❌ `IMC_API_KEY_SANDBOX` — Phase 1은 운영계 관리 API로 충분
+
+**IMC 스펙 전수감사 (Harold님이 `C:\Users\ceo\Downloads\imc_extracted\` 55개 공식 문서 페이지 직접 저장해서 제공):**
+- Day 1~3 구현이 설계서 추측 기반이었음이 드러남 → 버그 7건 발견·수정
+- 직접 Read한 파일 15개 (템플릿 13 + 알림수신자 2 + 응답코드 1)
+- 미직접 대조 파일 17개 (발신프로필 9 + 템플릿 카테고리 2 + 알림수신자 2 + 브랜드메시지 5) → `D130-NEXT-ACTIONS.md §3`에 목록
+
+**확정·수정된 버그 7건 (tsc 0):**
+1. `listSenderCategories` 응답 이중 래핑 `data.data` + flat 11자리 (2026-04-21 오전 실측 후 서버 DB 272건 반영 완료)
+2. 알림톡 검수요청(첨부): `/comment-with-file` → `/comment/file`, multipart `file` → `attachment`
+3. 알림톡 노출 여부 수정: `/exposure` → `/show-yn`, body `exposureYn` → `showYn`
+4. 알림톡 검수요청 취소: `/comment-cancel` → `/comment/cancel`
+5. Button/QuickReply 필드명 camelCase → snake_case 자동 변환 (`normalizeTemplateBodyForImc`)
+6. 알림수신자 `alarmUserId` → `alarmUserKey` (body + URL path + DB INSERT 값)
+7. 카카오 리포트 코드 1001~1004 오매핑 교정 + 11개 → 55개 확장
+
+**남은 🔴 블로커 (다음 세션 착수 시점):**
+- 2-1: `createAlimtalkTemplate` 응답 이중 래핑 가능성 → Harold님 실점검 시 `template_code` null 여부 확인으로 확정
+- 2-2: `listSenders` 파라미터 불일치 (`count→size`, `yellowId→uuid`, 12개 필터 누락) — 발신프로필 목록 조회 시 영향
+- 2-3: `SenderData` 인터페이스 필드 불일치 (`yellowId→uuid` + 누락 7개)
+- 2-4: 웹훅 HMAC 검증 강제 — Phase 2 전환 시점 대응, 지금은 폴링으로 커버
+
+**실점검 진행 상태 (2026-04-21 11:02 KST 배포 직후):**
+- ✅ 알림톡 스케줄러 3종 가동 (`[alimtalk-jobs][scheduler] started`)
+- ✅ `GET /api/alimtalk/categories/sender 200 23587 bytes` — Wizard 카테고리 드롭다운 정상 로드 가능
+- ⏳ Wizard 3-Step 등록 / 슈퍼관리자 승인 / 고객사 템플릿 등록 + 검수요청 테스트 대기
+
+#### 🚨 다음 세션 즉시 할 일
+
+1. [`status/D130-NEXT-ACTIONS.md`](D130-NEXT-ACTIONS.md) 정독
+2. Harold님 실점검 진행 상황 확인 (Wizard 통과? 템플릿 등록 성공?)
+3. 실패 로그 있으면 해당 IMC 스펙 파일 직접 Read → 즉시 수정
+4. 실점검 막힘없이 통과했으면 §3 미대조 파일 순차 Read + 블로커 2-2, 2-3 수정 기반
 
 #### 🚨 배포 전 Harold님 DB ALTER 필수
 
