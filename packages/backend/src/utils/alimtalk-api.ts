@@ -362,13 +362,68 @@ export interface AlimtalkTemplateData extends AlimtalkTemplateCreateRequest {
   [key: string]: any;
 }
 
+/**
+ * 버튼/퀵리플라이 필드명 camelCase → snake_case 변환 (IMC 문서 규약).
+ * Frontend ButtonEditor/QuickReplyEditor는 camelCase 타입을 쓰므로 IMC 전송 직전에 변환.
+ * 이미 snake_case가 세팅된 필드는 그대로 유지(idempotent).
+ *
+ * IMC 실 스펙 (10_57_49_문자 관리.txt):
+ *   buttonList[i]: { name, type, url_mobile, url_pc, scheme_android, scheme_ios,
+ *                    chat_extra, chat_event, biz_form_id, plugin_id, relay_id,
+ *                    oneclick_id, product_id, tel_number, map_address,
+ *                    map_coordinates, target }
+ *   quickReplyList[i]: buttonList와 유사 + biz_form_id
+ */
+function toImcButton(b: any): any {
+  if (!b || typeof b !== 'object') return b;
+  const pick = <K extends string>(camel: K, snake: string) =>
+    b[snake] !== undefined ? b[snake] : b[camel];
+  const out: Record<string, any> = {};
+  if (b.name !== undefined) out.name = b.name;
+  if (b.type !== undefined) out.type = b.type;
+  const map: Array<[string, string]> = [
+    ['urlMobile', 'url_mobile'],
+    ['urlPc', 'url_pc'],
+    ['schemeAndroid', 'scheme_android'],
+    ['schemeIos', 'scheme_ios'],
+    ['chatExtra', 'chat_extra'],
+    ['chatEvent', 'chat_event'],
+    ['bizFormId', 'biz_form_id'],
+    ['pluginId', 'plugin_id'],
+    ['relayId', 'relay_id'],
+    ['oneclickId', 'oneclick_id'],
+    ['productId', 'product_id'],
+    ['telNumber', 'tel_number'],
+    ['mapAddress', 'map_address'],
+    ['mapCoordinates', 'map_coordinates'],
+  ];
+  for (const [camel, snake] of map) {
+    const v = pick(camel, snake);
+    if (v !== undefined && v !== null && v !== '') out[snake] = v;
+  }
+  if (b.target !== undefined) out.target = b.target;
+  return out;
+}
+
+/** IMC 전송 직전 body 정규화: buttonList/quickReplyList 각 항목을 snake_case 변환 */
+function normalizeTemplateBodyForImc<T extends Record<string, any>>(body: T): T {
+  const out: any = { ...body };
+  if (Array.isArray(body.buttonList)) {
+    out.buttonList = body.buttonList.map(toImcButton);
+  }
+  if (Array.isArray(body.quickReplyList)) {
+    out.quickReplyList = body.quickReplyList.map(toImcButton);
+  }
+  return out as T;
+}
+
 export async function createAlimtalkTemplate(
   senderKey: string,
   body: AlimtalkTemplateCreateRequest,
 ): Promise<ImcResponse<{ templateCode: string }>> {
   const res = await getClient().post(
     `/kakao-management/api/v1/sender/${senderKey}/alimtalk/template`,
-    body,
+    normalizeTemplateBodyForImc(body),
   );
   return res.data;
 }
@@ -380,7 +435,7 @@ export async function updateAlimtalkTemplate(
 ): Promise<ImcResponse> {
   const res = await getClient().put(
     `/kakao-management/api/v1/sender/${senderKey}/alimtalk/template/${templateCode}`,
-    body,
+    normalizeTemplateBodyForImc(body as any),
   );
   return res.data;
 }
@@ -449,11 +504,14 @@ export async function requestInspectionWithFile(
   fileBuffer: Buffer,
   fileName: string,
 ): Promise<ImcResponse> {
+  // ★ IMC 실제 스펙 검증 (10_57_41_문자 관리.txt):
+  //   URL: POST /sender/{senderKey}/alimtalk/template/{templateKey}/comment/file
+  //   multipart fields: comment (string, required), attachment (binary, required)
   const form = new FormData();
   form.append('comment', comment);
-  form.append('file', fileBuffer, fileName);
+  form.append('attachment', fileBuffer, fileName);
   const res = await getClient().post(
-    `/kakao-management/api/v1/sender/${senderKey}/alimtalk/template/${templateCode}/comment-with-file`,
+    `/kakao-management/api/v1/sender/${senderKey}/alimtalk/template/${templateCode}/comment/file`,
     form,
     { headers: { ...form.getHeaders(), 'x-imc-api-key': getApiKey() } },
   );
@@ -464,8 +522,10 @@ export async function cancelInspection(
   senderKey: string,
   templateCode: string,
 ): Promise<ImcResponse> {
+  // ★ IMC 실제 스펙 검증 (10_58_01_문자 관리.txt):
+  //   URL: PUT /sender/{senderKey}/alimtalk/template/{templateKey}/comment/cancel
   const res = await getClient().put(
-    `/kakao-management/api/v1/sender/${senderKey}/alimtalk/template/${templateCode}/comment-cancel`,
+    `/kakao-management/api/v1/sender/${senderKey}/alimtalk/template/${templateCode}/comment/cancel`,
   );
   return res.data;
 }
@@ -495,11 +555,14 @@ export async function updateCustomCode(
 export async function updateExposure(
   senderKey: string,
   templateCode: string,
-  exposureYn: 'Y' | 'N',
+  showYn: 'Y' | 'N',
 ): Promise<ImcResponse> {
+  // ★ IMC 실제 스펙 검증 (10_58_41_문자 관리.txt):
+  //   URL: PATCH /sender/{senderKey}/alimtalk/template/{templateKey}/show-yn
+  //   body field: showYn (우리 옛 이름 exposureYn은 틀림)
   const res = await getClient().patch(
-    `/kakao-management/api/v1/sender/${senderKey}/alimtalk/template/${templateCode}/exposure`,
-    { exposureYn },
+    `/kakao-management/api/v1/sender/${senderKey}/alimtalk/template/${templateCode}/show-yn`,
+    { showYn },
   );
   return res.data;
 }
@@ -520,8 +583,13 @@ export async function updateServiceMode(
 // 알림톡 검수 알림 수신자 — 4개
 // ════════════════════════════════════════════════════════════
 
+/**
+ * IMC 실 스펙 검증 (10_56_14, 10_56_22):
+ *   등록 body 필수: alarmUserKey(고객사 발번, required), name, phoneNumber, activeYn
+ *   수정/삭제 URL path: /alarm-users/{alarmUserKey}  ← id 아님, Key
+ */
 export interface AlarmUser {
-  alarmUserId?: string;
+  alarmUserKey: string;         // 고객사가 지정하는 식별 키 (required)
   name: string;
   phoneNumber: string;
   activeYn: 'Y' | 'N';
@@ -544,8 +612,8 @@ export async function listAlarmUsers(
 }
 
 export async function createAlarmUser(
-  body: Omit<AlarmUser, 'alarmUserId'>,
-): Promise<ImcResponse<{ alarmUserId: string }>> {
+  body: AlarmUser,
+): Promise<ImcResponse<AlarmUser>> {
   const res = await getClient().post(
     '/kakao-management/api/v1/alimtalk/template/alarm-users',
     body,
@@ -554,21 +622,21 @@ export async function createAlarmUser(
 }
 
 export async function updateAlarmUser(
-  alarmUserId: string,
-  body: Partial<AlarmUser>,
+  alarmUserKey: string,
+  body: Omit<Partial<AlarmUser>, 'alarmUserKey'>,
 ): Promise<ImcResponse> {
   const res = await getClient().put(
-    `/kakao-management/api/v1/alimtalk/template/alarm-users/${alarmUserId}`,
+    `/kakao-management/api/v1/alimtalk/template/alarm-users/${alarmUserKey}`,
     body,
   );
   return res.data;
 }
 
 export async function deleteAlarmUser(
-  alarmUserId: string,
+  alarmUserKey: string,
 ): Promise<ImcResponse> {
   const res = await getClient().delete(
-    `/kakao-management/api/v1/alimtalk/template/alarm-users/${alarmUserId}`,
+    `/kakao-management/api/v1/alimtalk/template/alarm-users/${alarmUserKey}`,
   );
   return res.data;
 }

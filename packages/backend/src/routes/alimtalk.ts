@@ -1425,12 +1425,17 @@ router.post(
           error: '활성 알림 수신자는 회사당 최대 10명입니다',
         });
       }
+      // ★ IMC 실제 스펙 검증 (10_56_14_문자 관리.txt):
+      //   등록 body 필수: alarmUserKey(고객사 발번) + name + phoneNumber + activeYn
+      //   alarmUserKey를 고객사가 지정해서 보내야 함. 우리 DB company_id + phone_number로 생성.
+      const alarmUserKey = `${companyId.replace(/-/g, '').slice(0, 12)}_${phoneNumber}`;
       const imcRes = await imc.createAlarmUser({
+        alarmUserKey,
         name,
         phoneNumber,
         activeYn: activeYn || 'Y',
       });
-      if (imcRes.code !== '0000' || !imcRes.data?.alarmUserId) {
+      if (imcRes.code !== '0000') {
         return res.status(400).json({
           success: false,
           code: imcRes.code,
@@ -1447,7 +1452,7 @@ router.post(
            imc_alarm_user_id = EXCLUDED.imc_alarm_user_id,
            updated_at = now()
          RETURNING *`,
-        [companyId, name || null, phoneNumber, activeYn || 'Y', imcRes.data.alarmUserId],
+        [companyId, name || null, phoneNumber, activeYn || 'Y', alarmUserKey],
       );
       res.status(201).json({ success: true, user: ins.rows[0], imc: imcRes });
     } catch (err) { return handleImcError(res, err); }
