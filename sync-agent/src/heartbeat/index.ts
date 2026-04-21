@@ -11,6 +11,7 @@ import type { SyncStateManager } from '../sync/state';
 import type { QueueManager } from '../queue';
 import type { AgentConfig } from '../config';
 import type { AlertManager } from '../alert';
+import type { AgentCommand } from '../types/api';
 import { UpdateManager } from '../updater';
 import { getLogger } from '../logger';
 
@@ -26,6 +27,11 @@ export class HeartbeatManager {
   private alertManager: AlertManager | null;
   // ★ D131 후속(2026-04-21): 원격 pause 상태 반영 — send() 시 status='paused' 전송
   private paused = false;
+  // ★ D131 후속(2026-04-21): heartbeat 응답으로 받은 commands를 scheduler로 전달하는 콜백.
+  //   index.ts에서 scheduler.applyRemoteConfig로 연결.
+  //   기존엔 싱크 응답(customers/purchases)에서만 commands 받았는데 0건이면 요청 자체 안 감 → 명령 누락.
+  //   heartbeat 경로 추가로 안정적 전달 보장.
+  private commandHandler: ((commands: AgentCommand[]) => void) | null = null;
 
   constructor(
     apiClient: ApiClient,
@@ -51,6 +57,11 @@ export class HeartbeatManager {
   // ★ D131 후속(2026-04-21): Scheduler의 pause/resume에서 호출 → send() 시점에 status 반영
   setPaused(paused: boolean): void {
     this.paused = paused;
+  }
+
+  // ★ D131 후속(2026-04-21): scheduler와 연결할 명령 처리 콜백 등록 (index.ts에서 호출)
+  setCommandHandler(handler: (commands: AgentCommand[]) => void): void {
+    this.commandHandler = handler;
   }
 
   /**
@@ -80,11 +91,17 @@ export class HeartbeatManager {
       if (response) {
         logger.debug('Heartbeat 전송 성공', { uptime: `${uptime}s` });
 
-        // 서버에서 원격 명령이 있으면 처리
-        if (response.remoteConfig?.commands) {
-          for (const cmd of response.remoteConfig.commands) {
-            logger.info(`원격 명령 수신: ${cmd.type}`, { payload: cmd.payload });
-            // TODO: 명령 처리 (full_sync, restart 등)
+        // ★ D131 후속(2026-04-21): 서버 원격 명령을 scheduler로 전달하여 실제 실행.
+        //   기존엔 로그만 찍고 TODO로 방치 → pause/resume이 실행되지 않던 버그.
+        const commands = response.remoteConfig?.commands;
+        if (Array.isArray(commands) && commands.length > 0) {
+          for (const cmd of commands) {
+            logger.info(`📡 원격 명령 수신 (heartbeat): ${cmd.type}`, { commandId: cmd.id });
+          }
+          if (this.commandHandler) {
+            this.commandHandler(commands);
+          } else {
+            logger.warn('commandHandler 미등록 — 명령 실행 불가 (index.ts 연결 확인)');
           }
         }
 

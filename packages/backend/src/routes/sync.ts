@@ -406,8 +406,12 @@ router.post('/heartbeat', async (req: SyncAuthRequest, res: Response) => {
       });
     }
 
-    await query(
-      `UPDATE sync_agents 
+    // ★ D131 후속(2026-04-21): heartbeat 응답에 pending commands 전달 + 전달 후 큐에서 제거.
+    //   기존엔 commands를 싱크 응답(customers/purchases POST)에서만 전달했으나,
+    //   Agent가 변경분 0건이면 POST 자체를 안 보내 명령이 영영 수신 안 되는 케이스 발생.
+    //   heartbeat 응답으로도 commands 전달하여 pause/resume/restart를 안정적으로 전달.
+    const { rows: configRows } = await query(
+      `UPDATE sync_agents
        SET agent_version = COALESCE($1, agent_version),
            status = COALESCE($2, status),
            os_info = COALESCE($3, os_info),
@@ -418,14 +422,28 @@ router.post('/heartbeat', async (req: SyncAuthRequest, res: Response) => {
            queued_items = COALESCE($7, queued_items),
            uptime = COALESCE($8, uptime),
            updated_at = NOW()
-       WHERE id = $9`,
+       WHERE id = $9
+       RETURNING config`,
       [agentVersion, status, osInfo, dbType, lastSyncAt,
        totalCustomersSynced, queuedItems, uptime, agentId]
     );
 
+    const currentConfig = configRows[0]?.config || {};
+    const pendingCommands: any[] = Array.isArray(currentConfig.commands) ? currentConfig.commands : [];
+
+    // commands 전달할 게 있으면 큐 비워서 중복 실행 방지 (At-Most-Once 의도)
+    if (pendingCommands.length > 0) {
+      const newConfig = { ...currentConfig, commands: [] };
+      await query(
+        `UPDATE sync_agents SET config = $1::jsonb WHERE id = $2`,
+        [JSON.stringify(newConfig), agentId]
+      );
+    }
+
     return res.json({
       success: true,
-      data: { acknowledged: true }
+      data: { acknowledged: true },
+      remoteConfig: pendingCommands.length > 0 ? { commands: pendingCommands } : undefined,
     });
   } catch (error) {
     console.error('[Sync Heartbeat Error]', error);

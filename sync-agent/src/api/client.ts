@@ -72,9 +72,15 @@ export class ApiClient {
         return response;
       },
       (error: AxiosError) => {
+        // ★ D131 후속(2026-04-21): 서버 응답 body의 detail/error 메시지까지 로깅.
+        //   기존엔 'Request failed with status code 500'만 노출되어 원인 추적 불가.
+        //   B31-02 CT-07 field-definitions 500 원인 확정을 위해 본문 상세 포함.
+        const body = error.response?.data as any;
+        const bodyDetail = body?.detail || body?.error?.message || body?.error;
         logger.error(`← ERROR ${error.response?.status ?? 'NETWORK'} ${error.config?.url}`, {
           message: error.message,
           status: error.response?.status,
+          serverDetail: typeof bodyDetail === 'string' ? bodyDetail : bodyDetail ? JSON.stringify(bodyDetail) : undefined,
         });
         throw error;
       },
@@ -141,7 +147,14 @@ export class ApiClient {
         ENDPOINTS.HEARTBEAT,
         request,
       );
-      return data.data ?? null;
+      // ★ D131 후속(2026-04-21): 서버 응답 최상위 remoteConfig를 HeartbeatResponse로 병합.
+      //   백엔드가 heartbeat 응답 최상위에 remoteConfig.commands를 실어 보냄.
+      //   기존엔 data.data만 반환해서 commands를 놓침 → pause/resume 명령 영영 수신 못 함.
+      const result = (data.data ?? {}) as HeartbeatResponse;
+      if (data.remoteConfig) {
+        result.remoteConfig = data.remoteConfig;
+      }
+      return result;
     } catch (error) {
       logger.warn('Heartbeat 전송 실패 (무시하고 계속)', {
         error: error instanceof Error ? error.message : String(error),

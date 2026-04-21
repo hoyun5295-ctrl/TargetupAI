@@ -312,6 +312,14 @@ async function main(): Promise<void> {
       });
     }
 
+    // ★ D131 후속(2026-04-21): heartbeat 응답의 commands도 scheduler로 연결.
+    //   싱크 요청 0건이면 응답 자체가 없어 명령 수신 못 하는 문제 해결.
+    if (heartbeat) {
+      heartbeat.setCommandHandler((commands) => {
+        scheduler.applyRemoteConfig({ commands });
+      });
+    }
+
     scheduler.start();
 
     log.info('');

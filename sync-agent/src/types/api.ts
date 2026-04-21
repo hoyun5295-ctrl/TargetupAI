@@ -11,11 +11,16 @@ import type { Purchase } from './purchase';
 export interface ApiResponse<T = unknown> {
   success: boolean;
   data?: T;
+  // ★ D131 후속(2026-04-21): heartbeat/sync 응답 최상위에 원격 설정/명령 포함 가능.
+  //   서버가 sync_agents.config.commands를 꺼내 여기에 실어 보냄 (heartbeat 라우트 추가 전달 경로).
+  remoteConfig?: import('./api').RemoteConfig;
   error?: {
     code: string;
     message: string;
     details?: unknown;
   };
+  // ★ D131 후속: 서버 에러 응답 상세 (예: CT-07 field-definitions 500 원인 추적)
+  detail?: string;
 }
 
 // ─── POST /api/sync/customers ───────────────────────────
