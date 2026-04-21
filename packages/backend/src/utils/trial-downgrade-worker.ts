@@ -13,10 +13,11 @@
  *   ↳ 기준 설계: auto-campaign-worker.ts / alimtalk-jobs.ts 의 setInterval 패턴 준수.
  *
  * 🔒 대상 회사 조건
- *   - plan_code = 'PRO'
- *   - subscription_status = 'trial'
+ *   - plan_code = 'TRIAL' (무료체험 plan)
  *   - trial_expires_at IS NOT NULL AND trial_expires_at < NOW()
- *   ※ subscription_status='paid' 는 제외 (정식 구독자는 영향 없음)
+ *   ※ subscription_status 조건은 의도적으로 제거 — admin.ts 요금제 승인 등 다른 경로가 'paid'로 덮어쓰는 케이스가 있어
+ *     'trial'만 검사하면 체험이 영원히 강등 안 되는 치명 버그 발생. plan_code='TRIAL'은 grant/revoke/Cron 3곳에서만 바뀌므로 견고함.
+ *   ※ 정식 구독은 plan_code가 STARTER/BASIC/PRO/BUSINESS/ENTERPRISE로 바뀌므로 자동 제외됨.
  */
 
 import { query } from '../config/database';
@@ -44,7 +45,8 @@ export async function runTrialDowngradeJob(): Promise<{ downgraded: number }> {
   }
   const freePlanId = freeRes.rows[0].id;
 
-  // 만료 대상 일괄 강등 (plan_code='TRIAL' + subscription_status='trial' + 만료됨)
+  // 만료 대상 일괄 강등 (plan_code='TRIAL' + 만료됨)
+  // ※ subscription_status 조건 없음 — 'trial'/'paid' 어느 쪽으로 바뀌어 있어도 강등. plan_code가 진실의 원천.
   const res = await query(
     `UPDATE companies c
         SET plan_id             = $1,
@@ -53,7 +55,6 @@ export async function runTrialDowngradeJob(): Promise<{ downgraded: number }> {
        FROM plans p
       WHERE c.plan_id = p.id
         AND p.plan_code = 'TRIAL'
-        AND c.subscription_status = 'trial'
         AND c.trial_expires_at IS NOT NULL
         AND c.trial_expires_at < NOW()
     RETURNING c.id, c.company_name`,

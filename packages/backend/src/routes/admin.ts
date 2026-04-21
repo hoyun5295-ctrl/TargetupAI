@@ -381,17 +381,25 @@ router.put('/companies/:id', authenticate, requireSuperAdmin, async (req: Reques
   } = req.body;
   
   try {
-    const finalSubscriptionStatus = planId ? 'active' : (subscriptionStatus || null);
+    // ★ CT-17: planId 변경 시 TRIAL plan이면 'trial' 유지, 그 외 유료 플랜이면 'paid'(정식 구독).
+    //   (과거 버그 ①: planId 있으면 무조건 'active'로 덮어써서 grant-trial 직후 재저장 시 체험 상태 파괴)
+    //   (네이밍 정리 ②: 'active'는 companies.status(운영 활성)와 네이밍 충돌 → 구독 상태는 'paid'로 통일)
+    let finalSubscriptionStatus: string | null = subscriptionStatus || null;
+    if (planId) {
+      const planCodeRes = await query(`SELECT plan_code FROM plans WHERE id = $1`, [planId]);
+      const isTrialPlan = planCodeRes.rows[0]?.plan_code === 'TRIAL';
+      finalSubscriptionStatus = isTrialPlan ? 'trial' : 'paid';
+    }
 
     const result = await query(`
-      UPDATE companies 
+      UPDATE companies
       SET company_name = COALESCE($1, company_name),
           contact_name = COALESCE($2, contact_name),
           contact_email = COALESCE($3, contact_email),
           contact_phone = COALESCE($4, contact_phone),
           status = COALESCE($5, status),
           plan_id = COALESCE($6, plan_id),
-          subscription_status = CASE WHEN $6 IS NOT NULL THEN 'active' ELSE COALESCE($31, subscription_status) END,
+          subscription_status = CASE WHEN $6 IS NOT NULL THEN $31::varchar ELSE COALESCE($31, subscription_status) END,
           reject_number = COALESCE($7, reject_number),
           brand_name = COALESCE($8, brand_name),
           send_start_hour = COALESCE($9, send_start_hour),
@@ -1026,10 +1034,14 @@ router.put('/plan-requests/:id/approve', authenticate, requireSuperAdmin, async 
       return res.status(400).json({ error: '이미 처리된 신청입니다.' });
     }
     
-    // 회사 플랜 변경 + 구독 활성화
+    // ★ CT-17: 요금제 승인 시 TRIAL plan이면 'trial' 유지, 그 외는 'paid'(정식 구독).
+    //   (과거: 무조건 'active'로 덮어써서 ① 체험 상태 파괴 ② companies.status='active'와 네이밍 충돌)
+    const approvedPlanRes = await query(`SELECT plan_code FROM plans WHERE id = $1`, [request.requested_plan_id]);
+    const approvedIsTrial = approvedPlanRes.rows[0]?.plan_code === 'TRIAL';
+    const approvedStatus = approvedIsTrial ? 'trial' : 'paid';
     await query(
-      `UPDATE companies SET plan_id = $1, subscription_status = 'active', updated_at = NOW() WHERE id = $2`,
-      [request.requested_plan_id, request.company_id]
+      `UPDATE companies SET plan_id = $1, subscription_status = $2, updated_at = NOW() WHERE id = $3`,
+      [request.requested_plan_id, approvedStatus, request.company_id]
     );
     
     // 신청 상태 변경

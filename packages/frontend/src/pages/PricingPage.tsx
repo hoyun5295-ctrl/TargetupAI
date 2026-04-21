@@ -23,7 +23,7 @@ interface CompanyInfo {
   trial_expires_at: string | null;
   is_trial_expired: boolean;
   // ★ CT-17 (2026-04-22)
-  subscription_status?: string | null; // 'trial' | 'trial_expired' | 'paid' | 'active' | 'expired' | 'suspended'
+  subscription_status?: string | null; // 'trial' | 'trial_expired' | 'paid' | 'expired' | 'suspended' (※ 'active'는 네이밍 충돌로 2026-04-22 폐지, 'paid'로 통일)
 }
 
 export default function PricingPage() {
@@ -260,7 +260,10 @@ export default function PricingPage() {
       <main className="max-w-7xl mx-auto px-4 py-8">
         {companyInfo && (() => {
           // ★ CT-17: 30일 PRO 무료체험 상태 계산
-          const isOnTrial = companyInfo.subscription_status === 'trial' && !!companyInfo.trial_expires_at;
+          //   plan_code='TRIAL'을 진실의 원천으로 사용 (subscription_status에 의존하지 않음).
+          //   이유: admin.ts 요금제 승인 API 등 여러 경로가 subscription_status를 'paid'로 덮어쓰는 이슈가 있어
+          //   subscription_status 기반 판정은 견고하지 않음. plan_code는 grant-trial/revoke-trial/Cron 강등 3곳에서만 변경됨.
+          const isOnTrial = companyInfo.plan_code === 'TRIAL' && !!companyInfo.trial_expires_at;
           const isTrialExpired = companyInfo.subscription_status === 'trial_expired';
           const isUnsubscribed = companyInfo.plan_code === 'FREE' && !isTrialExpired;
           const daysRemaining = isOnTrial && companyInfo.trial_expires_at

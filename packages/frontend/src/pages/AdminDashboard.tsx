@@ -1878,7 +1878,8 @@ const handleApproveRequest = async (id: string) => {
           subscriptionStatus: data.company.subscription_status || 'trial',
           trialExpiresAt: data.company.trial_expires_at || '',
           planId: data.company.plan_id || prev.planId,
-          planCode: 'PRO',
+          // ★ API 응답의 plan_code 사용 (TRIAL 부여 시 'TRIAL'). 과거 'PRO' 하드코딩은 UI 혼란 유발
+          planCode: data.company.plan_code || 'TRIAL',
         }));
       }
       showAlert('성공', data.message || '30일 PRO 체험이 부여되었습니다.', 'success');
@@ -1905,7 +1906,8 @@ const handleApproveRequest = async (id: string) => {
           ...prev,
           subscriptionStatus: data.company.subscription_status || 'trial_expired',
           planId: data.company.plan_id || prev.planId,
-          planCode: 'FREE',
+          // ★ API 응답의 plan_code 사용 (revoke 시 'FREE'로 강등). 응답에 plan_code 없을 때만 폴백
+          planCode: data.company.plan_code || 'FREE',
         }));
       }
       showAlert('완료', data.message || '무료체험이 취소되었습니다.', 'success');

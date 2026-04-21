@@ -904,14 +904,16 @@ router.post('/:id/grant-trial', requireSuperAdmin, async (req: Request, res: Res
     }
     const trialPlanId = trialRes.rows[0].id;
 
+    // ★ RETURNING에 plan_code 포함 — AdminDashboard 가 응답값으로 planCode 표시
     const updated = await query(
-      `UPDATE companies
+      `UPDATE companies c
           SET plan_id             = $1,
               subscription_status = 'trial',
               trial_expires_at    = NOW() + ($2::int || ' days')::interval,
               updated_at          = NOW()
-        WHERE id = $3
-      RETURNING id, plan_id, subscription_status, trial_expires_at`,
+        WHERE c.id = $3
+      RETURNING c.id, c.plan_id, c.subscription_status, c.trial_expires_at,
+                (SELECT plan_code FROM plans WHERE id = $1) AS plan_code`,
       [trialPlanId, days, id],
     );
 
@@ -930,6 +932,8 @@ router.post('/:id/grant-trial', requireSuperAdmin, async (req: Request, res: Res
  * POST /api/companies/:id/revoke-trial
  *   - 활성 체험 즉시 종료 → plan_id=FREE + subscription_status='trial_expired'
  *   - 정식 구독(subscription_status='paid')은 대상 아님
+ *   - 조건: plan_code='TRIAL' 인 경우만 (subscription_status 값에 무관 — 'active'/'trial' 둘 다 허용)
+ *     ※ 과거 subscription_status='trial' 조건만으로는 admin.ts가 'active'로 덮어쓴 케이스에서 취소 불가했음.
  */
 router.post('/:id/revoke-trial', requireSuperAdmin, async (req: Request, res: Response) => {
   try {
@@ -944,13 +948,16 @@ router.post('/:id/revoke-trial', requireSuperAdmin, async (req: Request, res: Re
     const freePlanId = freeRes.rows[0].id;
 
     const updated = await query(
-      `UPDATE companies
+      `UPDATE companies c
           SET plan_id             = $1,
               subscription_status = 'trial_expired',
               updated_at          = NOW()
-        WHERE id = $2
-          AND subscription_status = 'trial'
-      RETURNING id, plan_id, subscription_status, trial_expires_at`,
+         FROM plans p
+        WHERE c.id = $2
+          AND c.plan_id = p.id
+          AND p.plan_code = 'TRIAL'
+      RETURNING c.id, c.plan_id, c.subscription_status, c.trial_expires_at,
+                (SELECT plan_code FROM plans WHERE id = $1) AS plan_code`,
       [freePlanId, id],
     );
 

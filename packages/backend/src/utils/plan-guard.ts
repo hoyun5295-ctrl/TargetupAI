@@ -44,10 +44,16 @@ export type FeatureKey =
   | 'mobile_dm'         // 모바일 DM 빌더                          — PRO+
   | 'auto_spam_test';   // 스팸테스트 자동화                       — PRO+
 
+/**
+ * 구독 상태.
+ *   ※ 네이밍 주의: companies.status('active'/'inactive'/'terminated')와 혼동 금지.
+ *     여기 subscription_status는 구독 관점(유료 가입 여부)이며 'paid'로 통일.
+ *     (2026-04-22 이전에는 'active'를 혼용했으나 네이밍 충돌로 'paid' 일원화)
+ */
 export type SubscriptionStatus =
   | 'trial'           // 30일 PRO 체험 중
   | 'trial_expired'   // 체험 만료 (FREE 강등 후 마커)
-  | 'paid'            // 정식 구독
+  | 'paid'            // 정식 구독 (과거 'active' 대체)
   | 'expired'         // 구독 만료
   | 'suspended'       // 정지
   | null;
@@ -121,8 +127,10 @@ export async function loadPlanContext(companyId: string): Promise<PlanContext | 
   const subscriptionStatus: SubscriptionStatus = (row.subscription_status || null) as SubscriptionStatus;
   const trialExpiresAt: Date | null = row.trial_expires_at ? new Date(row.trial_expires_at) : null;
   const now = Date.now();
+  // ★ isTrialActive 판정은 plan_code='TRIAL'을 진실의 원천으로 사용.
+  //   subscription_status는 admin.ts 요금제 수정 등 경로에서 'paid'로 덮어써질 수 있어 견고하지 않음.
   const isTrialActive =
-    subscriptionStatus === 'trial' &&
+    planCode === 'TRIAL' &&
     trialExpiresAt !== null &&
     trialExpiresAt.getTime() > now;
 
