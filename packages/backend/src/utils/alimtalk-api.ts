@@ -472,8 +472,6 @@ export async function createAlimtalkTemplate(
   body: AlimtalkTemplateCreateRequest,
 ): Promise<ImcResponse<{ templateCode: string }>> {
   const normalized = normalizeTemplateBodyForImc(body);
-  // D131: IMC 에러(특히 6005 INTERNAL_SERVER_ERROR) 원인 추적용 payload 로깅.
-  // 민감정보(API Key 등)는 header라 body에 포함 안 됨 → 안전.
   try {
     console.log(
       `[alimtalk][createTemplate] senderKey=${senderKey} payload=${JSON.stringify(normalized).slice(0, 2000)}`,
@@ -485,7 +483,23 @@ export async function createAlimtalkTemplate(
     `/kakao-management/api/v1/sender/${senderKey}/alimtalk/template`,
     normalized,
   );
-  return res.data;
+  // D131: sender 카테고리와 동일한 이중 래핑 대응 (D130 블로커 §2-1).
+  //   IMC가 `{code,message,data:{data:{templateCode}}}` 형태로 내려주는 경우가 있어
+  //   routes/alimtalk.ts 의 `r.data.templateCode` 접근이 undefined → 400 반환 이슈.
+  //   여기서 unwrap하여 소비부 코드 단순화 + 실제 응답 구조도 로깅.
+  const data: any = res.data;
+  try {
+    console.log(
+      `[alimtalk][createTemplate] response=${JSON.stringify(data).slice(0, 1500)}`,
+    );
+  } catch {
+    /* noop */
+  }
+  if (data && data.data && typeof data.data === 'object' && !data.data.templateCode
+      && data.data.data && typeof data.data.data === 'object' && data.data.data.templateCode) {
+    data.data = data.data.data;
+  }
+  return data;
 }
 
 export async function updateAlimtalkTemplate(
