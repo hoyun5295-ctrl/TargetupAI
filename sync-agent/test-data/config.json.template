@@ -1,0 +1,60 @@
+{
+  "server": {
+    "baseUrl": "https://app.hanjul.ai",
+    "apiKey": "__PLACEHOLDER_API_KEY__",
+    "apiSecret": "__PLACEHOLDER_API_SECRET__"
+  },
+  "database": {
+    "type": "csv",
+    "filePath": "./test-data/customers.csv",
+    "encoding": "utf-8",
+    "delimiter": ",",
+    "watchMode": false
+  },
+  "sync": {
+    "customerInterval": 60,
+    "purchaseInterval": 30,
+    "batchSize": 4000,
+    "customerTable": "customers",
+    "purchaseTable": "",
+    "timestampColumn": "updated_at",
+    "fallbackToFullSync": true
+  },
+  "mapping": {
+    "customers": {
+      "고객명": "name",
+      "전화번호": "phone",
+      "성별": "gender",
+      "나이": "age",
+      "생년월일": "birth_date",
+      "이메일": "email",
+      "주소": "address",
+      "최근구매매장": "recent_purchase_store",
+      "최근구매금액": "recent_purchase_amount",
+      "누적구매금액": "total_purchase_amount",
+      "브랜드": "store_code",
+      "등록구분": "registration_type",
+      "등록매장": "registered_store",
+      "매장전화번호": "store_phone",
+      "고객등급": "grade",
+      "보유포인트": "points",
+      "수신동의여부": "sms_opt_in",
+      "선호스타일": "custom_1",
+      "최근방문일": "recent_purchase_date",
+      "방문횟수": "purchase_count"
+    },
+    "purchases": {},
+    "customFieldLabels": {
+      "custom_1": "선호스타일"
+    }
+  },
+  "agent": {
+    "name": "sync-agent-linux-test",
+    "version": "1.5.1"
+  },
+  "log": {
+    "level": "info",
+    "maxFiles": 7,
+    "maxSize": "20m"
+  }
+}

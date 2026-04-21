@@ -1167,6 +1167,16 @@ router.post('/field-definitions', async (req: SyncAuthRequest, res: Response) =>
     }));
     const upsertedCount = await upsertCustomFieldDefinitions(companyId, mapped);
 
+    // ★ D131 후속(2026-04-21): 전부 실패하면 success=false로 응답 (Agent 재시도 유도).
+    //   기존 코드는 upsertedCount=0 이어도 success:true → Agent가 재시도 안 함 → 라벨 영구 미등록.
+    if (mapped.length > 0 && upsertedCount === 0) {
+      return res.status(500).json({
+        success: false,
+        error: 'All field definitions failed to upsert',
+        detail: '서버 로그에서 [CT-07] 실패 상세 확인 필요',
+      });
+    }
+
     // ===== M-3: customer_schema 자동 갱신 (upload.ts 동일 로직) =====
     try {
       await query(`
@@ -1188,10 +1198,14 @@ router.post('/field-definitions', async (req: SyncAuthRequest, res: Response) =>
       data: { upsertedCount }
     });
   } catch (error) {
+    // ★ D131 후속(2026-04-21): Agent 로그에서 원인 추적 가능하도록 에러 메시지를 응답에 포함.
+    //   (stack은 보안상 서버 console에만, 메시지는 운영에서도 공개 OK)
+    const errorMsg = error instanceof Error ? error.message : String(error);
     console.error('[Sync Field Definitions Error]', error);
     return res.status(500).json({
       success: false,
-      error: 'Failed to register field definitions'
+      error: 'Failed to register field definitions',
+      detail: errorMsg,
     });
   }
 });

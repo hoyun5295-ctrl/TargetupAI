@@ -213,9 +213,17 @@ async function main(): Promise<void> {
         field_type: 'string' as const,
       }));
 
-      await apiClient.registerFieldDefinitions({ definitions });
-      syncState.setFieldDefinitionsRegistered(true);
-      log.info('✅ 커스텀 필드 정의 서버 등록 완료');
+      // ★ D131 후속(2026-04-21): api/client.ts의 registerFieldDefinitions는 실패 시 null 반환
+      //   (내부 catch로 warn만 찍고 resolve). 이전엔 반환값 무시하고 "✅ 완료" 오기 로그가 찍혔고
+      //   실패해도 setFieldDefinitionsRegistered(true)가 설정되어 재시도 기회를 잃었음.
+      const result = await apiClient.registerFieldDefinitions({ definitions });
+      if (result !== null) {
+        syncState.setFieldDefinitionsRegistered(true);
+        log.info('✅ 커스텀 필드 정의 서버 등록 완료');
+      } else {
+        // result=null: api/client.ts가 이미 warn 로그 찍음. 다음 실행 때 재시도.
+        log.warn('커스텀 필드 정의 서버 등록 실패 — 다음 실행 시 재시도');
+      }
     } catch (error) {
       log.warn('커스텀 필드 정의 등록 실패 (동기화는 계속 진행)', {
         error: error instanceof Error ? error.message : String(error),

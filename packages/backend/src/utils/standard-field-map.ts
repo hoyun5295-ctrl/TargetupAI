@@ -238,23 +238,36 @@ export async function upsertCustomFieldDefinitions(
   companyId: string,
   definitions: Array<{ fieldKey: string; label: string; fieldType?: string }>
 ): Promise<number> {
+  // ★ D131 후속(2026-04-21): 개별 INSERT try/catch로 단일 행 실패가 전체 500을 유발하지 않도록.
+  //   원인 분석용 상세 로그 + 실패한 정의는 스킵하고 나머지 계속 처리.
+  //   2026-04-21 Sync Agent 리눅스 테스트에서 이 함수 호출이 500 내던 이슈 근본 방어.
   let upsertedCount = 0;
+  const failures: Array<{ fieldKey: string; error: string }> = [];
   for (const def of definitions) {
     if (!def.fieldKey.startsWith('custom_')) continue;
     const displayOrder = parseInt(def.fieldKey.replace('custom_', '')) || 0;
-    await query(
-      `INSERT INTO customer_field_definitions (id, company_id, field_key, field_label, field_type, display_order, is_hidden, created_at)
-       VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, false, NOW())
-       ON CONFLICT (company_id, field_key) DO UPDATE SET
-         field_label = EXCLUDED.field_label,
-         field_type = EXCLUDED.field_type,
-         display_order = EXCLUDED.display_order`,
-      [companyId, def.fieldKey, def.label, def.fieldType || 'VARCHAR', displayOrder]
-    );
-    upsertedCount++;
+    try {
+      await query(
+        `INSERT INTO customer_field_definitions (id, company_id, field_key, field_label, field_type, display_order, is_hidden, created_at)
+         VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, false, NOW())
+         ON CONFLICT (company_id, field_key) DO UPDATE SET
+           field_label = EXCLUDED.field_label,
+           field_type = EXCLUDED.field_type,
+           display_order = EXCLUDED.display_order`,
+        [companyId, def.fieldKey, def.label, def.fieldType || 'VARCHAR', displayOrder]
+      );
+      upsertedCount++;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      failures.push({ fieldKey: def.fieldKey, error: msg });
+      console.error(`[CT-07] ${def.fieldKey} upsert 실패 (company=${companyId}):`, msg);
+    }
   }
   if (upsertedCount > 0) {
     console.log(`[CT-07] 커스텀 필드 정의 ${upsertedCount}개 upsert (company: ${companyId})`);
+  }
+  if (failures.length > 0) {
+    console.warn(`[CT-07] ${failures.length}건 실패 (company: ${companyId}):`, failures);
   }
   return upsertedCount;
 }

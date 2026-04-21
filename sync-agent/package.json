@@ -8,12 +8,18 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "bundle": "node esbuild.config.js",
-    "build:exe": "npm run bundle && pkg dist/bundle.js --targets node20-win-x64 --output release/sync-agent.exe",
-    "build:linux": "npm run bundle && pkg dist/bundle.js --targets node20-linux-x64 --output release/sync-agent",
-    "build:all": "npm run bundle && pkg dist/bundle.js --targets node20-win-x64 --output release/sync-agent.exe && pkg dist/bundle.js --targets node20-linux-x64 --output release/sync-agent",
+    "prebundle:wasm": "node -e \"require('fs').mkdirSync('dist',{recursive:true});require('fs').copyFileSync('node_modules/sql.js/dist/sql-wasm.wasm','dist/sql-wasm.wasm')\"",
+    "build:exe": "npm run bundle && npm run prebundle:wasm && pkg dist/bundle.js --targets node20-win-x64 --output release/sync-agent.exe",
+    "build:linux": "npm run bundle && npm run prebundle:wasm && pkg dist/bundle.js --targets node20-linux-x64 --output release/sync-agent",
+    "build:all": "npm run bundle && npm run prebundle:wasm && pkg dist/bundle.js --targets node20-win-x64 --output release/sync-agent.exe && pkg dist/bundle.js --targets node20-linux-x64 --output release/sync-agent",
     "lint": "eslint src/",
     "test": "vitest run",
     "test:watch": "vitest"
+  },
+  "pkg": {
+    "assets": [
+      "dist/sql-wasm.wasm"
+    ]
   },
   "dependencies": {
     "@inquirer/prompts": "^8.2.0",

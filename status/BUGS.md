@@ -2650,3 +2650,67 @@
 ---
 
 *D130 최종 업데이트: 2026-04-18 저녁 세션 종료. B30-01~03 ✅수정완료-배포대기, B30-04 🔵다음 세션 별도 처리. Day 2 착수 가이드는 [`status/D130-SESSION-HANDOFF.md`](D130-SESSION-HANDOFF.md) 참조.*
+
+---
+
+## D131 후속 (2026-04-21 저녁) — Sync Agent 리눅스 로컬 테스트 중 발견
+
+Sync Agent v1.5.1 리눅스 바이너리를 WSL Ubuntu에서 CSV 20컬럼 100건 더미로 검증 중 발견한 이슈 4건. 14개 핵심 항목은 모두 프로덕션급 통과 — 아래는 부가 이슈들.
+
+### B31-01: sql-wasm.wasm이 pkg 바이너리에 embed되지 않음
+
+| 항목 | 내용 |
+|------|------|
+| **심각도** | 🟠 Major (Linux 재설치마다 재발 위험) |
+| **상태** | 🟡 수정완료-배포대기 (2026-04-21) |
+| **리포터** | AI (테스트 실행 중 발견) |
+| **증상** | WSL에서 `./sync-agent` 실행 시 `File '/**/sync-agent/dist/sql-wasm.wasm' was not included into executable at compilation stage` 에러로 즉시 종료. Windows release 폴더에는 동봉되어 있어 문제 없었지만 Linux 바이너리 첫 배포에서 발현 |
+| **근본 원인** | `package.json` `scripts.build:linux`가 `pkg dist/bundle.js --targets ...` 만 호출. pkg의 기본 asset 검출이 sql.js wasm을 못 찾음. `pkg.assets` 설정도 부재 |
+| **수정 내역** | (1) `package.json`에 `prebundle:wasm` 스크립트 추가 (`node_modules/sql.js/dist/sql-wasm.wasm` → `dist/sql-wasm.wasm` 복사) (2) `pkg.assets: ["dist/sql-wasm.wasm"]` 추가 (3) `build:exe/build:linux/build:all` 모두 `prebundle:wasm` 선행 (4) `setup-wsl.sh`에 wasm 복사 안전망 추가 (pkg embed 실패 시 폴백) |
+| **교훈** | pkg 바이너리는 `require('xlsx')` 같은 dynamic import + wasm을 자동 검출 못함. asset을 명시하지 않으면 런타임 실패. Windows는 release 옆에 복사된 wasm이 우연히 같은 디렉토리에 있어 보였던 것 |
+
+### B31-02: POST /api/sync/field-definitions 500 에러 (원인 미확정)
+
+| 항목 | 내용 |
+|------|------|
+| **심각도** | 🟡 Minor (동기화 본류는 정상, 커스텀 필드 라벨 등록만 실패) |
+| **상태** | 🟡 방어코드완료-근본원인 미확정 (2026-04-21) |
+| **리포터** | AI (테스트 실행 로그) |
+| **증상** | Agent 최초 실행 시 `POST /api/sync/field-definitions` 500 응답. 커스텀 필드 라벨(`선호스타일 → custom_1`)이 `customer_field_definitions` 테이블에 등록되지 않음. 단 고객 동기화(customers INSERT)는 정상 동작 |
+| **근본 원인** | **미확정** — 서버 PM2 로그의 `[Sync Field Definitions Error]` 출력 확인 필요. 추정: (a) `customer_field_definitions` 테이블 UNIQUE(company_id, field_key) 제약 미적용 시 ON CONFLICT 실패 (b) `companies.customer_schema` UPDATE 서브쿼리의 `jsonb_object_keys(custom_fields)`가 NULL 처리 미흡 (try/catch로 잡히므로 이건 500 원인 아님 — 제외) |
+| **방어 코드** | (1) `upsertCustomFieldDefinitions` 개별 INSERT try/catch — 단일 실패가 전체 500 유발하지 않고 실패 건만 스킵 (2) 라우트 에러 응답에 `detail: error.message` 포함 (운영 로그에도 스택 기록) (3) `upsertedCount === 0 && definitions.length > 0`이면 500 반환 (부분실패도 success=true 되던 오기 차단) |
+| **Agent 쪽 대응** | `api/client.ts`의 `registerFieldDefinitions`는 실패 시 null 반환 → `index.ts`가 반환값 체크 후 `setFieldDefinitionsRegistered(true)` 조건부 설정 → 다음 실행 때 재시도 |
+| **교훈** | 500 디버깅은 응답에 error.message를 포함해야 Agent 로그에서 추적 가능. 컨트롤타워 함수는 for-loop 내부 try/catch로 단일 실패 격리 |
+
+### B31-03: Zod 이메일 검증이 한글 로컬파트 거부
+
+| 항목 | 내용 |
+|------|------|
+| **심각도** | 🟠 Major (실제 한국 고객사 DB 업로드 시 재현 가능) |
+| **상태** | 🟡 수정완료-배포대기 (2026-04-21) |
+| **리포터** | AI (테스트 실행 로그 — 100건 중 75건 탈락) |
+| **증상** | `email: "김민수759@kakao.com"` 같은 한글 로컬파트 이메일이 `[VALIDATION_FAILED] email: Invalid email`로 Zod 검증 실패 → customer 레코드 전체 탈락 |
+| **근본 원인** | `sync-agent/src/types/customer.ts:28` `z.string().email()`이 RFC 5322 엄격 regex로 ASCII 로컬파트만 허용. 한국 실운영 DB는 한글 로컬파트 이메일 저장 사례 존재 |
+| **수정 내역** | `email: z.preprocess((v) => (v === '' ? null : v), z.string().nullish())` — 형식 검증 제거, 빈 문자열만 null 처리. 잘못된 이메일은 DB 저장은 허용하되 메일 발송 API 시점에 처리 |
+| **교훈** | SaaS는 고객사 실데이터 형식을 엄격히 검증하면 기본값이 "전부 탈락"으로 기울어짐. 특히 한국 도메인 특화 이슈(한글 로컬파트) 사전 고려 필요 |
+
+### B31-04: 커스텀 필드 등록 실패 후 "✅ 완료" 오기 로그
+
+| 항목 | 내용 |
+|------|------|
+| **심각도** | 🟡 Minor (로그만 잘못됨, 동작은 정상) |
+| **상태** | 🟡 수정완료-배포대기 (2026-04-21) |
+| **리포터** | AI (B31-02 동반 발견) |
+| **증상** | `api:client`는 `warn [api:client] 커스텀 필드 정의 등록 실패` 찍은 후 null resolve → `main`은 반환값 무시하고 `info [main] ✅ 커스텀 필드 정의 서버 등록 완료` 오기 출력. 또한 `setFieldDefinitionsRegistered(true)`가 실패에도 호출되어 재시도 기회 상실 |
+| **근본 원인** | `sync-agent/src/index.ts:216~218` 반환값 미체크 |
+| **수정 내역** | 반환값 null 체크 → 성공 시만 상태 마킹 + ✅ 로그. 실패 시 `warn [main] 커스텀 필드 정의 서버 등록 실패 — 다음 실행 시 재시도` |
+| **교훈** | "내부에서 catch하고 null resolve" 패턴은 호출부가 반환값 체크 안 하면 실패가 감춰짐. try/catch + return null 조합 사용 시 호출부 null 가드 필수 |
+
+---
+
+**D131 후속 배포 필요 항목**:
+1. `packages/backend` — `utils/standard-field-map.ts` + `routes/sync.ts` 방어 코드 (B31-02)
+2. `sync-agent` — Linux 바이너리 재빌드(B31-01) + 이메일 Zod(B31-03) + 오기 로그(B31-04)
+3. `sync-agent` Windows 바이너리도 재빌드 권장 (미러 유지)
+
+Harold님 `tp-deploy-full` 배포 + Sync Agent v1.5.1 재빌드 후 고객사 배포 필요.

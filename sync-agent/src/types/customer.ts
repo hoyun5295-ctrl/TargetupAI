@@ -25,7 +25,11 @@ export const CustomerSchema = z.object({
   birth_year: z.number().int().nullish(),
   birth_month_day: z.string().nullish(),  // MM-DD
   age: z.number().int().nullish(),
-  email: z.preprocess((v) => (v === '' ? null : v), z.string().email().nullish()),
+  // ★ D131 후속(2026-04-21): 한국 고객 DB에는 한글 로컬파트 이메일("김민수@kakao.com")이 흔함.
+  //   Zod .email()은 RFC 5322 엄격 regex로 한글 거부 → 전체 레코드 탈락 발생.
+  //   실고객사 데이터를 받아들이는 원칙상 형식 검증 제거 + 빈 문자열만 null 처리.
+  //   잘못된 이메일은 서버 쪽 표시 시점에서만 처리 (예: 메일 발송 API 미지원 표시).
+  email: z.preprocess((v) => (v === '' ? null : v), z.string().nullish()),
 
   // 주소/지역
   address: z.string().nullish(),
