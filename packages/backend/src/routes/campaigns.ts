@@ -271,6 +271,19 @@ router.post('/test-send', async (req: Request, res: Response) => {
       return res.status(400).json({ error: '메시지 내용이 필요합니다.' });
     }
 
+    // ★ D131: MMS 이미지 첨부 필수 가드 (담당자 테스트 9007 파일 오류 37% 발생 대응)
+    //   MMS 타입 선택 + 이미지 0장 → 통신사가 "파일 없음"으로 거부 (status_code=9007).
+    //   프론트 일부 경로(맞춤한줄 제외)에 가드 누락 → 백엔드 원천 차단으로 일원화.
+    if (String(messageType || '').toUpperCase() === 'MMS') {
+      const rawMmsCheck = (req.body.mmsImagePaths || []) as unknown[];
+      if (!Array.isArray(rawMmsCheck) || rawMmsCheck.length === 0) {
+        return res.status(400).json({
+          error: 'MMS는 이미지 첨부가 필수입니다. 이미지를 업로드하거나 발송타입을 SMS/LMS로 변경해주세요.',
+          code: 'MMS_IMAGE_REQUIRED',
+        });
+      }
+    }
+
     // 테스트 채널 (기본 sms)
     const testChannel = req.body.sendChannel || 'sms';
     const testKakaoSenderKey = req.body.kakaoSenderKey || '';

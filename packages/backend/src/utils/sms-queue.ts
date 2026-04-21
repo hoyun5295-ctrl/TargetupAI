@@ -149,6 +149,12 @@ export async function insertTestSmsQueue(
   const testTables = await getTestSmsTables();
   const table = testTables[0];
   const mType = toQtmsgType(msgType);
+  // ★ D131: MMS 타입인데 이미지 0장이면 원천 거부 (status_code=9007 파일 오류 방지).
+  //   실측 2026-04-21: 담당자 테스트 MMS 19건 중 7건(37%)이 이미지 없이 INSERT → 전부 9007.
+  //   호출부가 이미지 체크 안 하고 넘기는 실수를 컨트롤타워에서 원천 차단.
+  if (mType === 'M' && (!extra?.mmsImages || extra.mmsImages.filter(Boolean).length === 0)) {
+    throw new Error('MMS는 이미지 첨부가 필수입니다 (insertTestSmsQueue)');
+  }
   if (extra?.companyId || extra?.billId || extra?.mmsImages) {
     // campaigns.ts test-send 호환 (app_etc2=companyId, bill_id=userId, file_name)
     await mysqlQuery(

@@ -1857,6 +1857,13 @@ const campaignData = {
         setTestSending(false);
         return;
       }
+      // ★ D131: MMS + 이미지 0장 차단 (QTmsg Agent 9007 파일 오류 방지)
+      //   서수란 팀장 제보(2026-04-21) — 담당자 테스트 MMS 37% 실패 원인.
+      if (selectedChannel === 'MMS' && mmsUploadedImages.length === 0) {
+        setToast({ show: true, type: 'error', message: 'MMS는 이미지 첨부가 필수입니다. 이미지를 업로드하거나 발송타입을 SMS/LMS로 변경해주세요.' });
+        setTestSending(false);
+        return;
+      }
       const token = localStorage.getItem('token');
       const res = await fetch('/api/campaigns/test-send', {
         method: 'POST',
@@ -1900,6 +1907,12 @@ const campaignData = {
     try {
       if (!targetMessage.trim()) {
         setToast({ show: true, type: 'error', message: '메시지를 입력해주세요' });
+        setTestSending(false);
+        return;
+      }
+      // ★ D131: MMS + 이미지 0장 차단 (QTmsg Agent 9007 파일 오류 방지)
+      if (targetMsgType === 'MMS' && mmsUploadedImages.length === 0) {
+        setToast({ show: true, type: 'error', message: 'MMS는 이미지 첨부가 필수입니다. 이미지를 업로드하거나 발송타입을 SMS/LMS로 변경해주세요.' });
         setTestSending(false);
         return;
       }
