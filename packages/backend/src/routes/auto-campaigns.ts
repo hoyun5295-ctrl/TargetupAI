@@ -22,6 +22,8 @@ import { fetchTargetSampleCustomer } from '../utils/target-sample';
 import { kstToUtc, calcNextRunAt } from '../utils/auto-campaign-worker';
 // ★ D123 P11: 미등록 회신번호 pre-flight 검증
 import { filterByIndividualCallback } from '../utils/callback-filter';
+// ★ CT-17: 요금제/트라이얼/기능 게이팅 컨트롤타워
+import { loadPlanContext, canUseFeature, resolveMaxAutoCampaigns, type PlanContext } from '../utils/plan-guard';
 
 const router = Router();
 
@@ -31,65 +33,32 @@ router.use(authenticate);
 // 공통 헬퍼
 // ============================================================
 
-/** 요금제 게이팅 + 최대 활성 수 조회
- * - plans.auto_campaign_enabled / max_auto_campaigns 기본 참조
- * - companies.auto_campaign_override가 NULL이 아니면 회사별 오버라이드 우선 적용
- *   (특정 업체에 서비스로 자동발송 N건 제공 시 사용)
+/** 자동발송 요금제 게이팅 (CT-17 래퍼)
+ *  plan-guard.canUseFeature('auto_campaign') + resolveMaxAutoCampaigns 조합.
+ *  회사별 auto_campaign_override(D76)는 canUseFeature 내부에서 처리.
  */
 async function checkPlanGating(companyId: string): Promise<{
   allowed: boolean;
   maxAutoCampaigns: number | null;
   errorMsg?: string;
+  ctx?: PlanContext;
 }> {
-  const result = await query(
-    `SELECT p.auto_campaign_enabled, p.max_auto_campaigns, p.plan_code, c.auto_campaign_override,
-            c.subscription_status,
-            NOW() > c.created_at + INTERVAL '7 days' as is_trial_expired
-     FROM companies c
-     LEFT JOIN plans p ON c.plan_id = p.id
-     WHERE c.id = $1`,
-    [companyId]
-  );
-  const row = result.rows[0];
-
-  // ★ D88: 구독 만료/트라이얼 만료 시 차단
-  if (row?.subscription_status === 'expired' || row?.subscription_status === 'suspended') {
-    return { allowed: false, maxAutoCampaigns: null, errorMsg: '구독이 만료되었습니다. 요금제를 갱신해주세요.' };
+  const ctx = await loadPlanContext(companyId);
+  if (!ctx) {
+    return { allowed: false, maxAutoCampaigns: null, errorMsg: '회사 정보를 찾을 수 없습니다.' };
   }
-  if (row?.plan_code === 'FREE' && row?.is_trial_expired) {
-    return { allowed: false, maxAutoCampaigns: null, errorMsg: '무료체험이 만료되었습니다. 요금제를 업그레이드해주세요.' };
+  const check = canUseFeature(ctx, 'auto_campaign');
+  if (!check.allowed) {
+    return { allowed: false, maxAutoCampaigns: null, errorMsg: check.errorMsg, ctx };
   }
-
-  // 회사별 오버라이드가 있으면 플랜 설정보다 우선
-  if (row?.auto_campaign_override != null) {
-    const override = Number(row.auto_campaign_override);
-    if (override <= 0) {
-      return { allowed: false, maxAutoCampaigns: null, errorMsg: '자동발송이 비활성화되어 있습니다.' };
-    }
-    return { allowed: true, maxAutoCampaigns: override };
-  }
-
-  // 오버라이드 없으면 플랜 설정 따름
-  if (!row?.auto_campaign_enabled) {
-    return {
-      allowed: false,
-      maxAutoCampaigns: null,
-      errorMsg: '자동발송은 프로 요금제 이상에서 이용 가능합니다.',
-    };
-  }
-  return { allowed: true, maxAutoCampaigns: row.max_auto_campaigns };
+  return { allowed: true, maxAutoCampaigns: resolveMaxAutoCampaigns(ctx), ctx };
 }
 
-/** AI 프리미엄 게이팅 체크 (ai_generate_enabled 사용 시) */
+/** AI 프리미엄 게이팅 (CT-17 래퍼) */
 async function checkAiPremiumGating(companyId: string): Promise<boolean> {
-  const result = await query(
-    `SELECT p.ai_premium_enabled
-     FROM companies c
-     LEFT JOIN plans p ON c.plan_id = p.id
-     WHERE c.id = $1`,
-    [companyId]
-  );
-  return result.rows[0]?.ai_premium_enabled === true;
+  const ctx = await loadPlanContext(companyId);
+  if (!ctx) return false;
+  return canUseFeature(ctx, 'ai_premium').allowed;
 }
 
 /** 활성 자동캠페인 수 제한 체크 */
@@ -223,13 +192,8 @@ router.get('/', async (req: Request, res: Response) => {
     }
 
     // 요금제 정보도 함께 조회 (프론트에서 게이팅 판단용) + 회사별 오버라이드 반영 + 구독 상태
-    const planResult = await query(
-      `SELECT p.auto_campaign_enabled, p.max_auto_campaigns, p.ai_premium_enabled, p.plan_code,
-              c.auto_campaign_override, c.subscription_status,
-              NOW() > c.created_at + INTERVAL '7 days' as is_trial_expired
-       FROM companies c LEFT JOIN plans p ON c.plan_id = p.id WHERE c.id = $1`,
-      [companyId]
-    );
+    // ★ CT-17: PlanContext 기반 프론트 전달
+    const planCtx = await loadPlanContext(companyId);
 
     // ★ B2: opt_out_080_number 포함을 위해 LEFT JOIN (자동발송은 ac.user_id 기반)
     const result = await query(
@@ -247,21 +211,16 @@ router.get('/', async (req: Request, res: Response) => {
 
     const activeCount = result.rows.filter(r => r.status === 'active').length;
 
-    // 회사별 오버라이드 반영하여 프론트에 전달
-    const planRow = planResult.rows[0];
+    // ★ CT-17: canUseFeature 통해 프론트 게이팅 값 결정
     let planForFront = { auto_campaign_enabled: false, max_auto_campaigns: null as number | null, ai_premium_enabled: false };
-
-    // ★ D88: 구독/트라이얼 만료 시 auto_campaign_enabled = false 강제
-    const isSubscriptionBlocked = planRow?.subscription_status === 'expired' || planRow?.subscription_status === 'suspended'
-      || (planRow?.plan_code === 'FREE' && planRow?.is_trial_expired);
-
-    if (isSubscriptionBlocked) {
-      planForFront = { auto_campaign_enabled: false, max_auto_campaigns: null, ai_premium_enabled: false };
-    } else if (planRow?.auto_campaign_override != null) {
-      const override = Number(planRow.auto_campaign_override);
-      planForFront = { auto_campaign_enabled: override > 0, max_auto_campaigns: override > 0 ? override : null, ai_premium_enabled: planRow.ai_premium_enabled ?? false };
-    } else if (planRow) {
-      planForFront = { auto_campaign_enabled: planRow.auto_campaign_enabled, max_auto_campaigns: planRow.max_auto_campaigns, ai_premium_enabled: planRow.ai_premium_enabled ?? false };
+    if (planCtx) {
+      const autoOk = canUseFeature(planCtx, 'auto_campaign').allowed;
+      const premiumOk = canUseFeature(planCtx, 'ai_premium').allowed;
+      planForFront = {
+        auto_campaign_enabled: autoOk,
+        max_auto_campaigns: autoOk ? resolveMaxAutoCampaigns(planCtx) : null,
+        ai_premium_enabled: premiumOk,
+      };
     }
 
     res.json({

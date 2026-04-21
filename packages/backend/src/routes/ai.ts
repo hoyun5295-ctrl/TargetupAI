@@ -9,6 +9,7 @@ import { getStoreScope } from '../utils/store-scope';
 import { buildFilterWhereClauseCompat } from '../utils/customer-filter';
 import { aggregateCampaignPerformance } from '../utils/stats-aggregation';
 import { formatDateValue, getOpt080Number } from '../utils/messageUtils';
+import { loadPlanContext, canUseFeature } from '../utils/plan-guard';
 
 
 // ★ D79: 인라인 래퍼 제거 → CT-01 buildFilterWhereClauseCompat 직접 사용
@@ -153,18 +154,14 @@ router.post('/recommend-target', async (req: Request, res: Response) => {
       return res.status(403).json({ error: '회사 권한이 필요합니다' });
     }
 
-    // ★ D53: 요금제 게이팅 — ai_messaging_enabled 체크
-    const planCheck = await query(
-      `SELECT p.ai_messaging_enabled FROM companies c
-       LEFT JOIN plans p ON c.plan_id = p.id
-       WHERE c.id = $1`,
-      [companyId]
-    );
-    if (!planCheck.rows[0]?.ai_messaging_enabled) {
-      return res.status(403).json({
-        error: 'AI 추천 발송은 베이직 이상 요금제에서 이용 가능합니다.',
-        code: 'PLAN_FEATURE_LOCKED'
-      });
+    // ★ CT-17: 요금제 게이팅 — ai_messaging (BASIC+)
+    {
+      const ctx = await loadPlanContext(companyId);
+      if (!ctx) return res.status(404).json({ error: '회사 정보를 찾을 수 없습니다.' });
+      const check = canUseFeature(ctx, 'ai_messaging');
+      if (!check.allowed) {
+        return res.status(403).json({ error: check.errorMsg, code: check.errorCode });
+      }
     }
 
     const { objective } = req.body;
@@ -240,12 +237,9 @@ router.post('/recommend-target', async (req: Request, res: Response) => {
     const autoRelaxRequested = req.body.auto_relax !== false;
 
     if (actualCount === 0 && Object.keys(result.filters).length > 0 && autoRelaxRequested) {
-      // 프로 이상 게이팅 체크
-      const premiumCheck = await query(
-        `SELECT p.ai_premium_enabled FROM companies c LEFT JOIN plans p ON c.plan_id = p.id WHERE c.id = $1`,
-        [companyId]
-      );
-      const isPremium = premiumCheck.rows[0]?.ai_premium_enabled === true;
+      // ★ CT-17: AI 프리미엄 게이팅 (PRO+)
+      const premiumCtx = await loadPlanContext(companyId);
+      const isPremium = premiumCtx ? canUseFeature(premiumCtx, 'ai_premium').allowed : false;
 
       if (isPremium) {
         console.log('[AI] 0명 매칭 → 자동 조건완화 시도 (프로 이상)');
@@ -409,16 +403,14 @@ router.post('/recommend-next-campaign', async (req: Request, res: Response) => {
       return res.status(403).json({ error: '회사 권한이 필요합니다' });
     }
 
-    // ★ 프로 이상 게이팅
-    const premiumCheck = await query(
-      `SELECT p.ai_premium_enabled FROM companies c LEFT JOIN plans p ON c.plan_id = p.id WHERE c.id = $1`,
-      [companyId]
-    );
-    if (!premiumCheck.rows[0]?.ai_premium_enabled) {
-      return res.status(403).json({
-        error: 'AI 캠페인 추천은 프로 이상 요금제에서 이용 가능합니다.',
-        code: 'PLAN_FEATURE_LOCKED'
-      });
+    // ★ CT-17: AI 프리미엄 게이팅 (PRO+)
+    {
+      const ctx = await loadPlanContext(companyId);
+      if (!ctx) return res.status(404).json({ error: '회사 정보를 찾을 수 없습니다.' });
+      const check = canUseFeature(ctx, 'ai_premium');
+      if (!check.allowed) {
+        return res.status(403).json({ error: check.errorMsg, code: check.errorCode });
+      }
     }
 
     const { months } = req.body;
@@ -613,18 +605,14 @@ router.post('/parse-briefing', authenticate, async (req: Request, res: Response)
       return res.status(403).json({ error: '회사 권한이 필요합니다' });
     }
 
-    // ★ D53: 요금제 게이팅 — ai_messaging_enabled 체크
-    const planCheck = await query(
-      `SELECT p.ai_messaging_enabled FROM companies c
-       LEFT JOIN plans p ON c.plan_id = p.id
-       WHERE c.id = $1`,
-      [companyId]
-    );
-    if (!planCheck.rows[0]?.ai_messaging_enabled) {
-      return res.status(403).json({
-        error: 'AI 맞춤한줄은 베이직 이상 요금제에서 이용 가능합니다.',
-        code: 'PLAN_FEATURE_LOCKED'
-      });
+    // ★ CT-17: 요금제 게이팅 — ai_messaging (BASIC+)
+    {
+      const ctx = await loadPlanContext(companyId);
+      if (!ctx) return res.status(404).json({ error: '회사 정보를 찾을 수 없습니다.' });
+      const check = canUseFeature(ctx, 'ai_messaging');
+      if (!check.allowed) {
+        return res.status(403).json({ error: check.errorMsg, code: check.errorCode });
+      }
     }
 
     const { briefing } = req.body;
@@ -717,18 +705,14 @@ router.post('/generate-custom', authenticate, async (req: Request, res: Response
       return res.status(403).json({ error: '회사 권한이 필요합니다' });
     }
 
-    // ★ D53: 요금제 게이팅 — ai_messaging_enabled 체크
-    const planCheck = await query(
-      `SELECT p.ai_messaging_enabled FROM companies c
-       LEFT JOIN plans p ON c.plan_id = p.id
-       WHERE c.id = $1`,
-      [companyId]
-    );
-    if (!planCheck.rows[0]?.ai_messaging_enabled) {
-      return res.status(403).json({
-        error: 'AI 맞춤한줄은 베이직 이상 요금제에서 이용 가능합니다.',
-        code: 'PLAN_FEATURE_LOCKED'
-      });
+    // ★ CT-17: 요금제 게이팅 — ai_messaging (BASIC+)
+    {
+      const ctx = await loadPlanContext(companyId);
+      if (!ctx) return res.status(404).json({ error: '회사 정보를 찾을 수 없습니다.' });
+      const check = canUseFeature(ctx, 'ai_messaging');
+      if (!check.allowed) {
+        return res.status(403).json({ error: check.errorMsg, code: check.errorCode });
+      }
     }
 
     const { briefing, promotionCard, personalFields, fieldLabels, url, tone, brandName, channel, isAd } = req.body;

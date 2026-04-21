@@ -36,6 +36,8 @@ import { startAutoCampaignScheduler } from './utils/auto-campaign-worker';
 import { ensureMonthlyLogTables } from './utils/sms-queue';
 import { startSpamTestQueueWorker } from './utils/spam-test-queue';
 import { startAlimtalkScheduler } from './utils/alimtalk-jobs';
+// ★ CT-17: 30일 PRO 무료체험 자동 강등 Cron (2026-04-22)
+import { startTrialDowngradeWorker } from './utils/trial-downgrade-worker';
 
 // 공용 관리 라우트 (슈퍼관리자 + 고객사관리자)
 import manageUsersRoutes from './routes/manage-users';
@@ -251,6 +253,9 @@ app.listen(PORT, () => {
 
   // ★ D130: 알림톡 배치 스케줄러 (카테고리=매일 03:00 KST, 템플릿상태=5분, 발신프로필=1시간)
   startAlimtalkScheduler();
+
+  // ★ CT-17: 30일 PRO 무료체험 자동 강등 (매일 04:00 KST)
+  startTrialDowngradeWorker();
 });
 
 export default app;

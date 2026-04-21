@@ -49,6 +49,8 @@ export default function DmBuilderPage() {
   const [list, setList] = useState<DmListItem[]>([]);
   const [listLoading, setListLoading] = useState(false);
   const [legacyDmError, setLegacyDmError] = useState<string | null>(null);
+  // ★ CT-17: 요금제 게이팅 (mobile_dm — PRO+)
+  const [planLocked, setPlanLocked] = useState<{ msg: string } | null>(null);
 
   const dmId = useDmBuilderStore((s) => s.dmId);
   const layoutMode = useDmBuilderStore((s) => s.layoutMode);
@@ -67,8 +69,14 @@ export default function DmBuilderPage() {
       const res = await api.get('/dm');
       const items = Array.isArray(res.data) ? res.data : res.data.items || [];
       setList(items);
+      setPlanLocked(null);
     } catch (err: any) {
-      setToast({ type: 'error', message: err?.response?.data?.error || '목록 로드 실패' });
+      // ★ CT-17: 403 PLAN_FEATURE_LOCKED → 요금제 가드 화면 표시
+      if (err?.response?.status === 403 && err?.response?.data?.code === 'PLAN_FEATURE_LOCKED') {
+        setPlanLocked({ msg: err.response.data.error || '모바일 DM은 프로 요금제 이상에서 이용 가능합니다.' });
+      } else {
+        setToast({ type: 'error', message: err?.response?.data?.error || '목록 로드 실패' });
+      }
     } finally {
       setListLoading(false);
     }
@@ -164,6 +172,43 @@ export default function DmBuilderPage() {
           }}
         />
         {toast && <Toast toast={toast} />}
+      </div>
+    );
+  }
+
+  // ── 요금제 게이팅 (CT-17, mobile_dm) ──
+  if (planLocked) {
+    return (
+      <div style={{ minHeight: '100vh', background: 'var(--dm-neutral-100)', fontFamily: 'var(--dm-font-primary)', display: 'flex', flexDirection: 'column' }}>
+        <header style={{ background: 'var(--dm-bg)', borderBottom: '1px solid var(--dm-neutral-200)', padding: '16px 32px', display: 'flex', alignItems: 'center', gap: 16 }}>
+          <button onClick={() => navigate('/')} style={{ background: 'transparent', border: 'none', fontSize: 20, cursor: 'pointer', padding: 8, borderRadius: 8 }} title="대시보드로">←</button>
+          <h1 style={{ fontSize: 20, fontWeight: 800, color: 'var(--dm-neutral-900)', margin: 0 }}>모바일 DM 빌더</h1>
+          <span style={{ fontSize: 11, padding: '3px 8px', background: 'var(--dm-primary-light)', color: 'var(--dm-primary)', borderRadius: 12, fontWeight: 700 }}>PRO</span>
+        </header>
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 32 }}>
+          <div style={{ maxWidth: 480, textAlign: 'center', background: '#fff', border: '1px solid var(--dm-neutral-200)', borderRadius: 16, padding: '40px 32px', boxShadow: '0 10px 30px rgba(15,23,42,0.06)' }}>
+            <div style={{ width: 64, height: 64, borderRadius: 16, margin: '0 auto 20px', background: 'linear-gradient(135deg,#a78bfa,#7c3aed)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28 }}>📱</div>
+            <h2 style={{ margin: '0 0 8px', fontSize: 20, fontWeight: 800, color: 'var(--dm-neutral-900)' }}>프로 요금제 전용 기능</h2>
+            <p style={{ margin: '0 0 24px', fontSize: 14, color: 'var(--dm-neutral-600)', lineHeight: 1.6 }}>
+              {planLocked.msg}<br />
+              업그레이드하시면 AI 구조·카피 자동 생성, 검수 10종, A/B 테스트까지 바로 이용하실 수 있어요.
+            </p>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
+              <button
+                onClick={() => navigate('/pricing')}
+                style={{ height: 44, padding: '0 24px', background: 'var(--dm-primary)', color: '#fff', border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: 'pointer' }}
+              >
+                요금제 안내 보기
+              </button>
+              <button
+                onClick={() => navigate('/')}
+                style={{ height: 44, padding: '0 20px', background: '#fff', color: 'var(--dm-neutral-700)', border: '1px solid var(--dm-neutral-300)', borderRadius: 10, fontSize: 14, fontWeight: 600, cursor: 'pointer' }}
+              >
+                대시보드로
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     );
   }

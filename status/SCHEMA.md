@@ -621,25 +621,40 @@
 | started_at | timestamp |
 | completed_at | timestamp |
 
-### plans (요금제)
+### plans (요금제) — CT-17 확장 (2026-04-22)
+> **CT-17 정책 (2026-04-22 Harold님 확정):**
+> - FREE(미가입) = 레거시 이관 고객 중 유료 미가입 상태. 직접발송·수신거부·발송결과·예약(직접) + 직접발송 주소록 99,999건까지. 나머지 전부 잠금.
+> - STARTER+ = 고객DB·직접타겟발송·AI 자동매핑·스팸필터 수동 테스트
+> - BASIC+ = AI 메시지·AI 타겟·엑셀AI매핑(generateMessages/recommendTarget/parseBriefing)
+> - PRO+ = 자동발송·모바일DM·AI 프리미엄(auto-relax 등)·스팸자동화
+> - 판정은 plans 플래그가 진실의 원천. plan_code 하드코딩 금지 (`utils/plan-guard.ts` 경유).
+
 | 컬럼 | 타입 | 비고 |
 |------|------|------|
 | id | uuid PK | |
 | plan_code | varchar(20) | FREE/STARTER/BASIC/PRO/BUSINESS/ENTERPRISE |
-| plan_name | varchar(50) | |
-| max_customers | integer | |
+| plan_name | varchar(50) | FREE="미가입" (CT-17 이후) |
+| max_customers | integer | 고객DB 관리 최대 인원 |
 | monthly_price | numeric(12,2) | |
 | is_active | boolean | |
 | trial_days | integer | |
 | ai_analysis_level | varchar(20) | none/basic/advanced (기본 none) |
-| customer_db_enabled | boolean | D53: 고객DB/타겟팅 잠금 (기본 false) |
-| spam_filter_enabled | boolean | D53: 스팸필터 잠금 (기본 false) |
-| ai_messaging_enabled | boolean | D53: AI발송 잠금 (기본 false) |
-| auto_campaign_enabled | boolean | D69: 자동발송 잠금 (기본 false, PRO 이상 true) ✅ 적용 완료 |
-| max_auto_campaigns | integer | D69: 동시 활성 자동캠페인 수 제한 (PRO: 5, BUSINESS: 10, ENTERPRISE: NULL=무제한) |
-| auto_spam_test_enabled | boolean DEFAULT false | 자동 스팸필터 테스트 기능 잠금 |
-| ai_premium_enabled | boolean DEFAULT false | D80: AI 프리미엄 기능 게이팅 (PRO 이상 true) — 자동조건완화, 성과기반추천, 자동문안생성 |
+| customer_db_enabled | boolean | 고객DB 업로드·관리·필터·조회. FREE=false, STARTER+ true |
+| **target_send_enabled** | **boolean DEFAULT false** | **CT-17: 직접타겟발송(필터 추출 발송). STARTER+ true** |
+| **ai_mapping_enabled** | **boolean DEFAULT false** | **CT-17: 엑셀 업로드 AI 자동매핑. STARTER+ true** |
+| spam_filter_enabled | boolean | 스팸필터 수동 테스트. FREE=false, STARTER+ true |
+| ai_messaging_enabled | boolean | AI 메시지 생성/AI 타겟 추천/엑셀AI매핑. BASIC+ true |
+| auto_campaign_enabled | boolean | 자동발송. PRO+ true |
+| max_auto_campaigns | integer | 동시 활성 자동캠페인 (PRO:5, BUSINESS:10, ENTERPRISE:NULL=무제한) |
+| auto_spam_test_enabled | boolean DEFAULT false | 자동 스팸필터 테스트. PRO+ true |
+| ai_premium_enabled | boolean DEFAULT false | AI 프리미엄 (auto-relax/추천캠페인/AI문안생성). PRO+ true |
+| **mobile_dm_enabled** | **boolean DEFAULT false** | **CT-17: 모바일 DM 빌더. PRO+ true** |
+| **direct_recipient_limit** | **integer** | **CT-17: 직접발송 주소록 최대 건수. FREE=99,999, 나머지 NULL(무제한)** |
 | created_at | timestamp | |
+
+**companies 추가 컬럼 (CT-17 활용):**
+- `subscription_status` varchar(20) — `null | 'trial' | 'trial_expired' | 'paid' | 'active' | 'expired' | 'suspended'`
+- `trial_expires_at` timestamp — 30일 PRO 무료체험 만료 시각. `utils/trial-downgrade-worker.ts` Cron(매일 04:00 KST)이 만료 시 자동 강등.
 
 ### saved_segments (저장 세그먼트 — D107)
 | 컬럼 | 타입 | 비고 |

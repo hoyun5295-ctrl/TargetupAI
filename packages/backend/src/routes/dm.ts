@@ -42,6 +42,8 @@ import {
   pickVariant, variantToPageId, trackAbTestView,
   type AbVariantKey,
 } from '../utils/dm/dm-ab-test';
+// ★ CT-17: 모바일 DM 빌더는 PRO 이상만 사용 가능
+import { requirePlanFeature } from '../utils/plan-guard';
 
 const DM_IMAGE_DIR = path.join(process.cwd(), 'uploads', 'dm-images');
 
@@ -112,6 +114,8 @@ dmPublicRouter.post('/:code/track', async (req: Request, res: Response) => {
 
 export const dmRouter = Router();
 dmRouter.use(authenticate);
+// ★ CT-17: mobile_dm 요금제 게이팅 (PRO+) — 인증 직후 전 라우트 적용
+dmRouter.use(requirePlanFeature('mobile_dm'));
 
 // 이미지 업로드 (2MB, JPG/PNG/WebP)
 const dmImageUpload = multer({

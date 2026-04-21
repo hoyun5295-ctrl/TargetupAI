@@ -189,13 +189,13 @@ export default function PricingPage() {
 
   const getPlanFeatures = (planCode: string) => {
     const features: Record<string, string[]> = {
-      STARTER: ['기본 SMS/LMS/MMS 발송', '엑셀 업로드', '캘린더 관리', '발송 결과 조회', '스팸필터 테스트'],
-      BASIC: ['STARTER 기능 포함', 'AI 타겟 추천', 'AI 문구 생성', 'AI 추천발송', 'AI 자동매핑'],
+      STARTER: ['기본 SMS/LMS/MMS 발송', '엑셀 업로드 · AI 자동매핑', '직접타겟발송', '캘린더 관리', '발송 결과 조회', '스팸필터 테스트'],
+      BASIC: ['STARTER 기능 포함', 'AI 타겟 추천', 'AI 문구 생성', 'AI 추천발송'],
       PRO: [
         'BASIC 기능 포함',
-        'AI 타겟추천',
-        '캠페인 성과분석 · 리타겟팅',
         '자동발송 5건 · AI 문안생성',
+        '캠페인 성과분석 · 리타겟팅',
+        '모바일 DM 제작',
         '스팸필터 테스트 자동화',
         '실시간 DB 동기화',
       ],

@@ -113,6 +113,9 @@ export default function AdminDashboard() {
     lineGroupId: '',
     kakaoEnabled: false,
     subscriptionStatus: 'trial',
+    // ★ CT-17: 30일 PRO 체험 관리 (표시용)
+    trialExpiresAt: '' as string | null | '',
+    planCode: '',
   });
   const [editCompanyTab, setEditCompanyTab] = useState<'basic' | 'send' | 'cost' | 'ai' | 'store' | 'fields' | 'cards' | 'customers' | 'sync'>('basic');
   const [standardFields, setStandardFields] = useState<any[]>([]);
@@ -1843,12 +1846,72 @@ const handleApproveRequest = async (id: string) => {
           lineGroupId: c.line_group_id || '',
           kakaoEnabled: c.kakao_enabled ?? false,
           subscriptionStatus: c.subscription_status || 'trial',
+          // ★ CT-17
+          trialExpiresAt: c.trial_expires_at || '',
+          planCode: c.plan_code || '',
         });
         setEditCompanyTab('basic');
         setShowEditCompanyModal(true);
       }
     } catch (error) {
       console.error('회사 정보 로드 실패:', error);
+    }
+  };
+
+  // ★ CT-17: 30일 PRO 무료체험 부여
+  const handleGrantTrial = async () => {
+    if (!editCompany.id) return;
+    if (!confirm(`"${editCompany.companyName}" 에 30일 PRO 무료체험을 부여할까요?\n(30일 후 자동으로 미가입(FREE)으로 강등됩니다)`)) return;
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`/api/companies/${editCompany.id}/grant-trial`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ days: 30 }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || '체험 부여 실패');
+      // 모달 state 갱신 (모달은 열린 채 유지)
+      if (data.company) {
+        setEditCompany((prev) => ({
+          ...prev,
+          subscriptionStatus: data.company.subscription_status || 'trial',
+          trialExpiresAt: data.company.trial_expires_at || '',
+          planId: data.company.plan_id || prev.planId,
+          planCode: 'PRO',
+        }));
+      }
+      showAlert('성공', data.message || '30일 PRO 체험이 부여되었습니다.', 'success');
+      loadData();
+    } catch (err: any) {
+      showAlert('실패', err?.message || '체험 부여 실패', 'error');
+    }
+  };
+
+  // ★ CT-17: 체험 즉시 취소 (FREE 강등)
+  const handleRevokeTrial = async () => {
+    if (!editCompany.id) return;
+    if (!confirm(`"${editCompany.companyName}" 의 무료체험을 즉시 취소하고 미가입(FREE)으로 강등할까요?`)) return;
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`/api/companies/${editCompany.id}/revoke-trial`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || '체험 취소 실패');
+      if (data.company) {
+        setEditCompany((prev) => ({
+          ...prev,
+          subscriptionStatus: data.company.subscription_status || 'trial_expired',
+          planId: data.company.plan_id || prev.planId,
+          planCode: 'FREE',
+        }));
+      }
+      showAlert('완료', data.message || '무료체험이 취소되었습니다.', 'success');
+      loadData();
+    } catch (err: any) {
+      showAlert('실패', err?.message || '체험 취소 실패', 'error');
     }
   };
 
@@ -4833,11 +4896,48 @@ const handleApproveRequest = async (id: string) => {
                       onChange={(e) => setEditCompany({ ...editCompany, subscriptionStatus: e.target.value })}
                       className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
                       <option value="trial">체험 (trial)</option>
+                      <option value="trial_expired">체험만료 (trial_expired)</option>
+                      <option value="paid">정식 구독 (paid)</option>
                       <option value="active">정상 구독 (active)</option>
                       <option value="expired">만료 (expired)</option>
                       <option value="suspended">정지 (suspended)</option>
                     </select>
-                    <p className="text-xs text-gray-400 mt-1">expired/suspended 시 대시보드 AI 기능이 잠깁니다 (직접발송·충전은 허용)</p>
+                    <p className="text-xs text-gray-400 mt-1">expired/suspended 시 전 기능 차단. trial_expired 는 FREE plan 자동 강등 후 마커.</p>
+                  </div>
+                  {/* ★ CT-17: 30일 PRO 무료체험 관리 */}
+                  <div className="col-span-2 rounded-lg border border-violet-200 bg-violet-50/40 p-3">
+                    <div className="flex items-center justify-between gap-3 flex-wrap">
+                      <div>
+                        <p className="text-sm font-semibold text-violet-900">30일 PRO 무료체험</p>
+                        {editCompany.subscriptionStatus === 'trial' && editCompany.trialExpiresAt ? (
+                          <p className="text-xs text-violet-700 mt-0.5">
+                            체험 중 — 만료: <b>{new Date(editCompany.trialExpiresAt).toLocaleString('ko-KR')}</b>
+                            {' '}
+                            (D-{Math.max(0, Math.ceil((new Date(editCompany.trialExpiresAt).getTime() - Date.now()) / 86400000))})
+                          </p>
+                        ) : (
+                          <p className="text-xs text-violet-600 mt-0.5">체험 미부여 상태. 부여 시 즉시 PRO 전 기능 개방, 30일 후 자동 FREE(미가입) 강등.</p>
+                        )}
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={handleGrantTrial}
+                          className="px-3 py-2 bg-violet-600 hover:bg-violet-700 text-white rounded-lg text-xs font-semibold"
+                        >
+                          30일 PRO 체험 부여
+                        </button>
+                        {editCompany.subscriptionStatus === 'trial' && (
+                          <button
+                            type="button"
+                            onClick={handleRevokeTrial}
+                            className="px-3 py-2 bg-white border border-red-200 text-red-600 hover:bg-red-50 rounded-lg text-xs font-semibold"
+                          >
+                            체험 취소
+                          </button>
+                        )}
+                      </div>
+                    </div>
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">최대 사용자 수</label>

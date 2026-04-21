@@ -155,8 +155,8 @@ router.get('/my-plan', async (req: Request, res: Response) => {
         p.ai_premium_enabled,
         c.subscription_status,
         c.created_at,
-        c.created_at + INTERVAL '7 days' as trial_expires_at,
-        NOW() > c.created_at + INTERVAL '7 days' as is_trial_expired,
+        c.trial_expires_at,
+        (c.trial_expires_at IS NOT NULL AND c.trial_expires_at < NOW()) AS is_trial_expired,
         (SELECT COUNT(*) FROM customers WHERE company_id = c.id) as current_customers
       FROM companies c
       LEFT JOIN plans p ON c.plan_id = p.id
@@ -864,6 +864,108 @@ router.post('/', requireSuperAdmin, async (req: Request, res: Response) => {
       return res.status(400).json({ error: '이미 존재하는 고객사 코드입니다.' });
     }
     return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// ============================================================
+// ★ CT-17: 30일 PRO 무료체험 부여/취소 (슈퍼관리자 전용)
+//   - grant-trial : 회사에 30일 동안 PRO 기능 개방
+//   - revoke-trial: 즉시 취소 (FREE 강등)
+//   - 만료 자동 강등: utils/trial-downgrade-worker.ts (Cron 매일 04:00 KST)
+// ============================================================
+
+/**
+ * POST /api/companies/:id/grant-trial
+ * body: { days?: number = 30 }
+ */
+router.post('/:id/grant-trial', requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const days = Math.max(1, Math.min(Number((req.body as any)?.days) || 30, 365));
+
+    // 회사 존재 확인
+    const companyRes = await query(
+      `SELECT c.id, p.plan_code
+         FROM companies c
+         LEFT JOIN plans p ON c.plan_id = p.id
+        WHERE c.id = $1`,
+      [id],
+    );
+    if (companyRes.rows.length === 0) {
+      return res.status(404).json({ error: '고객사를 찾을 수 없습니다.' });
+    }
+
+    // PRO plan id 조회
+    const proRes = await query(
+      `SELECT id FROM plans WHERE plan_code = 'PRO' AND is_active = true LIMIT 1`,
+    );
+    if (proRes.rows.length === 0) {
+      return res.status(500).json({ error: 'PRO 요금제가 존재하지 않습니다. 슈퍼관리자에게 문의하세요.' });
+    }
+    const proPlanId = proRes.rows[0].id;
+
+    const updated = await query(
+      `UPDATE companies
+          SET plan_id             = $1,
+              subscription_status = 'trial',
+              trial_expires_at    = NOW() + ($2::int || ' days')::interval,
+              updated_at          = NOW()
+        WHERE id = $3
+      RETURNING id, plan_id, subscription_status, trial_expires_at`,
+      [proPlanId, days, id],
+    );
+
+    return res.json({
+      success: true,
+      message: `${days}일 PRO 무료체험이 부여되었습니다.`,
+      company: updated.rows[0],
+    });
+  } catch (err) {
+    console.error('grant-trial 실패:', err);
+    return res.status(500).json({ error: '체험 부여 실패' });
+  }
+});
+
+/**
+ * POST /api/companies/:id/revoke-trial
+ *   - 활성 체험 즉시 종료 → plan_id=FREE + subscription_status='trial_expired'
+ *   - 정식 구독(subscription_status='paid')은 대상 아님
+ */
+router.post('/:id/revoke-trial', requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    const freeRes = await query(
+      `SELECT id FROM plans WHERE plan_code = 'FREE' LIMIT 1`,
+    );
+    if (freeRes.rows.length === 0) {
+      return res.status(500).json({ error: 'FREE 요금제가 존재하지 않습니다.' });
+    }
+    const freePlanId = freeRes.rows[0].id;
+
+    const updated = await query(
+      `UPDATE companies
+          SET plan_id             = $1,
+              subscription_status = 'trial_expired',
+              updated_at          = NOW()
+        WHERE id = $2
+          AND subscription_status = 'trial'
+      RETURNING id, plan_id, subscription_status, trial_expires_at`,
+      [freePlanId, id],
+    );
+
+    if (updated.rows.length === 0) {
+      return res.status(400).json({ error: '취소할 활성 체험이 없습니다.' });
+    }
+
+    return res.json({
+      success: true,
+      message: '무료체험이 취소되고 미가입(FREE) 상태로 전환되었습니다.',
+      company: updated.rows[0],
+    });
+  } catch (err) {
+    console.error('revoke-trial 실패:', err);
+    return res.status(500).json({ error: '체험 취소 실패' });
   }
 });
 
