@@ -56,6 +56,19 @@ function handleImcError(res: Response, err: any): Response {
       mapped.kind === 'user_error' || mapped.kind === 'inspect' ? 400
       : mapped.kind === 'retryable' ? 503
       : 500;
+    // D131: IMC 에러 진단 — 실제 응답 body + httpStatus를 서버 로그에 찍어 원인 추적.
+    // 기존에는 ImcApiError일 때 console 출력이 없어 pm2 로그로 원인 파악 불가.
+    try {
+      const bodyPreview =
+        err.responseBody !== undefined
+          ? JSON.stringify(err.responseBody).slice(0, 2000)
+          : 'n/a';
+      console.error(
+        `[alimtalk][IMC ${err.code}] ${err.message} http=${err.httpStatus} kind=${mapped.kind} body=${bodyPreview}`,
+      );
+    } catch {
+      console.error(`[alimtalk][IMC ${err.code}] ${err.message} http=${err.httpStatus}`);
+    }
     return res.status(statusHttp).json({
       success: false,
       code: err.code,

@@ -421,9 +421,19 @@ export async function createAlimtalkTemplate(
   senderKey: string,
   body: AlimtalkTemplateCreateRequest,
 ): Promise<ImcResponse<{ templateCode: string }>> {
+  const normalized = normalizeTemplateBodyForImc(body);
+  // D131: IMC 에러(특히 6005 INTERNAL_SERVER_ERROR) 원인 추적용 payload 로깅.
+  // 민감정보(API Key 등)는 header라 body에 포함 안 됨 → 안전.
+  try {
+    console.log(
+      `[alimtalk][createTemplate] senderKey=${senderKey} payload=${JSON.stringify(normalized).slice(0, 2000)}`,
+    );
+  } catch {
+    /* noop */
+  }
   const res = await getClient().post(
     `/kakao-management/api/v1/sender/${senderKey}/alimtalk/template`,
-    normalizeTemplateBodyForImc(body),
+    normalized,
   );
   return res.data;
 }
