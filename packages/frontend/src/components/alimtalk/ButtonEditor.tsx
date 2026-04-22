@@ -286,7 +286,7 @@ function ButtonRow({
         <p className="text-[11px] text-amber-600 ml-8">
           {removeLocked
             ? '채널추가형 메시지는 "채널 추가" 버튼이 필수입니다 (삭제 불가)'
-            : 'IMC 정책상 "채널 추가" 버튼의 버튼명은 수정할 수 없습니다'}
+            : '카카오 정책상 "채널 추가" 버튼의 버튼명은 수정할 수 없습니다'}
         </p>
       )}
     </div>

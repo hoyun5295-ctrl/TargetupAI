@@ -334,7 +334,7 @@ export default function AlimtalkTemplateFormV2({
               {isEdit ? '알림톡 템플릿 수정 (D130)' : '알림톡 템플릿 등록'}
             </h2>
             <p className="text-xs text-gray-500 mt-0.5">
-              휴머스온 IMC 검수 후 승인되면 발송 가능합니다
+              카카오 검수 승인 후 발송할 수 있습니다
             </p>
           </div>
           <button

@@ -358,21 +358,31 @@ export function buildAdMessage(
 
   const isLms = msgType === 'LMS' || msgType === 'MMS';
   const adPrefix = isLms ? '(광고) ' : '(광고)';
-  // ★ PPT#3: 080번호 없어도 (광고)+무료거부까지는 붙이고, 번호만 비움
-  // ★ D124: LMS/MMS는 무료수신거부 앞 빈 줄 1개 강제 (\n\n) — 가독성 (Harold님 요청)
-  // ★ D131: SMS는 90byte 제약으로 빈 줄 1개가 본문 공간을 압박 → \n 한 줄만 (서수란 팀장 제보)
-  const rejectFooter = opt080Number
-    ? (isLms ? `\n\n무료수신거부 ${opt080Number}` : `\n무료거부${opt080Number.replace(/-/g, '')}`)
-    : (isLms ? `\n\n무료수신거부` : `\n무료거부`);
 
-  // ★ D103: 중복 방지 안전장치 — 이미 (광고)가 있으면 접두사 안 붙임, 이미 수신거부가 있으면 푸터 안 붙임
+  // ★ D136 (D2 재수정): 본문 끝 개행을 **고객 입력 그대로 보존** (제한 없음, Harold님 지시)
+  //   - 기존 `message.replace(/\n+$/, '')`가 고객이 의도적으로 입력한 줄바꿈까지 전부 제거 → D2 버그
+  //   - 정책:
+  //     · 최소 개행 보장: SMS=1, LMS/MMS=2 (D124 가독성)
+  //     · 최대 개행 제한 없음: 고객이 10줄 띄우면 10줄 그대로 발송
+  //   - AI 문안은 본문에 이미 "[브랜드명]\n\n무료수신거부 080..."을 포함해서 생성하므로
+  //     hasRejectFooter=true → finalFooter='' → body=message 원본 그대로 (AI 포맷 훼손 X).
+  //   - D102/D103 안전장치(중복 방지)는 그대로 유지.
   const hasAdPrefix = message.startsWith('(광고)');
   const hasRejectFooter = /무료수신거부|무료거부/.test(message);
 
   const finalPrefix = hasAdPrefix ? '' : adPrefix;
-  const finalFooter = hasRejectFooter ? '' : rejectFooter;
 
-  // ★ D124: 본문 끝 개행 정규화 — 본문이 이미 \n으로 끝나면 trimEnd 후 빈 줄 부착 (\n\n\n 방지)
+  // 본문 끝 개행 카운트 + 최소 보장
+  const trailingMatch = message.match(/\n*$/);
+  const trailingCount = trailingMatch ? trailingMatch[0].length : 0;
+  const minBreaks = isLms ? 2 : 1;
+  const actualBreaks = Math.max(trailingCount, minBreaks);
+
+  const rejectText = opt080Number
+    ? (isLms ? `무료수신거부 ${opt080Number}` : `무료거부${opt080Number.replace(/-/g, '')}`)
+    : (isLms ? `무료수신거부` : `무료거부`);
+
+  const finalFooter = hasRejectFooter ? '' : `${'\n'.repeat(actualBreaks)}${rejectText}`;
   const body = finalFooter ? message.replace(/\n+$/, '') : message;
 
   return `${finalPrefix}${body}${finalFooter}`;

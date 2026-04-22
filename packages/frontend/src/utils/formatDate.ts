@@ -166,8 +166,12 @@ function isDateFieldByLabel(label: string): boolean {
   return DATE_FIELD_KEYWORDS.some(k => lower.includes(k));
 }
 
-export function formatPreviewValue(val: any, opts?: { fieldLabel?: string }): string {
+export function formatPreviewValue(val: any, opts?: { fieldLabel?: string; fieldKey?: string }): string {
   if (val == null || val === '') return '';
+  // ★ D136 (D7-2): 커스텀필드는 고객사 업로드 원본 그대로 표시 — 숫자 콤마/날짜 변환 금지
+  //   Harold님 원칙: 고정필드(FIELD_MAP column)만 매핑된 형식으로 보여주고, custom_1~15는 고객 데이터 훼손 금지.
+  //   14자리 varchar "20260416150000" → "20,260,416,150,000" 콤마 적용되던 버그 차단.
+  if (opts?.fieldKey?.startsWith('custom_')) return String(val);
   const str = String(val);
   // 날짜: ISO 형식(YYYY-MM-DDT...) — KST 변환 후 날짜 추출 (하루 밀림 방지)
   if (/^\d{4}-\d{2}-\d{2}(T|\s)/.test(str)) {
@@ -400,12 +404,19 @@ function formatNumberPreview(val: any): string {
 /**
  * ★ D101: 필드 data_type 기반 포맷팅 (type-aware)
  * date → formatDatePreview, number → formatNumberPreview, 기타 → formatPreviewValue
+ *
+ * ★ D136 (D7-2 Harold님 원칙): 3번째 인자 fieldKey 추가.
+ *   커스텀필드(custom_1~15)는 고객사 업로드 원본 그대로 표시.
+ *   data_type 무시하고 String(val) 반환 — 숫자 콤마/날짜 변환/포맷팅 금지.
+ *   고정필드(FIELD_MAP column)만 매핑된 형식으로 포맷팅.
  */
-export function formatByType(val: any, dataType?: string): string {
+export function formatByType(val: any, dataType?: string, fieldKey?: string): string {
   if (val == null || val === '') return '';
+  // 커스텀필드: 원본 그대로 (Harold님 원칙 — 고객사 데이터 훼손 금지)
+  if (fieldKey && fieldKey.startsWith('custom_')) return String(val);
   if (dataType === 'date') return formatDatePreview(val);
   if (dataType === 'number') return formatNumberPreview(val);
-  return formatPreviewValue(val);
+  return formatPreviewValue(val, { fieldKey });
 }
 
 /**
@@ -464,11 +475,12 @@ export function replaceMessageVars(
   }
 
   // ★ B+0407-1: enum 필드 우선 역변환 (gender 'F' → '여성'). formatByType보다 먼저 적용.
+  // ★ D136 (D7-2): fieldKey 전달 — 커스텀필드(custom_1~15)는 formatByType에서 원본 그대로 반환.
   const renderValue = (fieldKey: string | undefined, val: any, dt: string | undefined): string => {
     if (fieldKey && FRONT_FIELD_DISPLAY_MAP[fieldKey]) {
       return reverseDisplayValueFront(fieldKey, val);
     }
-    return formatByType(val, dt);
+    return formatByType(val, dt, fieldKey);
   };
 
   // 필드 정의 기반 치환 (field_label → field_key 매핑)
@@ -563,7 +575,8 @@ export function replaceVarsByFieldMeta(
       if (FRONT_FIELD_DISPLAY_MAP[fm.field_key]) {
         display = reverseDisplayValueFront(fm.field_key, rawValue);
       } else {
-        display = formatByType(rawValue, fm.data_type);
+        // ★ D136 (D7-2): fieldKey 전달 — 커스텀필드 원본 그대로 반환
+        display = formatByType(rawValue, fm.data_type, fm.field_key);
       }
     } else {
       display = fallback ? (fm.display_name || fm.field_key) : '';
@@ -755,26 +768,28 @@ export function buildAdMessageFront(
   if (!isAd) return message;
 
   const isSms = msgType === 'SMS';
+  const isLms = !isSms; // LMS/MMS
   const adPrefix = isSms ? '(광고)' : '(광고) ';
-  // ★ PPT#3: 080번호 없어도 (광고)+무료거부까지는 붙이고, 번호만 비움
-  // ★ D124: LMS/MMS는 무료수신거부 앞 빈 줄 1개 강제 (\n\n) — 가독성
-  // ★ D131: SMS는 90byte 제약으로 빈 줄이 본문 공간 압박 → \n 한 줄 (서수란 팀장 제보)
-  //         백엔드 messageUtils.ts buildAdMessage와 동일 규칙 유지 (미러).
-  const rejectFooter = optOutNumber
-    ? (isSms ? `\n무료거부${optOutNumber.replace(/-/g, '')}` : `\n\n무료수신거부 ${optOutNumber}`)
-    : (isSms ? `\n무료거부` : `\n\n무료수신거부`);
 
-  // ★ D103+B 후속: 중복 방지 안전장치 — 백엔드 buildAdMessage와 동일 처리
-  //   D103 이전에 발송된 캠페인이나, message_content에 이미 (광고)/무료거부가 포함된 경우
-  //   formatCampaignMessageForDisplay → buildAdMessageFront 호출 시 또 부착되어 "(광고)(광고)" 중복 발생.
-  //   이미 부착된 메시지는 건드리지 않는다.
+  // ★ D136 (D2 재수정): 백엔드 messageUtils.ts buildAdMessage와 완전 동일 규칙 (미러).
+  //   - 본문 끝 개행 고객 입력 그대로 보존 (제한 없음)
+  //   - 최소 개행 보장: SMS=1, LMS/MMS=2 (D124 가독성)
+  //   - AI 문안은 이미 "[브랜드명]\n\n무료수신거부 080..."을 포함하므로 hasRejectFooter=true → 원본 유지
   const hasAdPrefix = message.startsWith('(광고)');
   const hasRejectFooter = /무료수신거부|무료거부/.test(message);
 
   const finalPrefix = hasAdPrefix ? '' : adPrefix;
-  const finalFooter = hasRejectFooter ? '' : rejectFooter;
 
-  // ★ D124: 본문 끝 개행 정규화 — 본문이 이미 \n으로 끝나면 trimEnd 후 빈 줄 부착 (\n\n\n 방지)
+  const trailingMatch = message.match(/\n*$/);
+  const trailingCount = trailingMatch ? trailingMatch[0].length : 0;
+  const minBreaks = isLms ? 2 : 1;
+  const actualBreaks = Math.max(trailingCount, minBreaks);
+
+  const rejectText = optOutNumber
+    ? (isSms ? `무료거부${optOutNumber.replace(/-/g, '')}` : `무료수신거부 ${optOutNumber}`)
+    : (isSms ? `무료거부` : `무료수신거부`);
+
+  const finalFooter = hasRejectFooter ? '' : `${'\n'.repeat(actualBreaks)}${rejectText}`;
   const body = finalFooter ? message.replace(/\n+$/, '') : message;
 
   return `${finalPrefix}${body}${finalFooter}`;

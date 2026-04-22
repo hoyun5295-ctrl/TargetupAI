@@ -425,7 +425,7 @@ export default function AlimtalkManagementSection() {
           </p>
           {filter === 'ALL' && (
             <p className="text-xs text-gray-400 mt-1">
-              템플릿을 등록하면 휴머스온 검수 후 발송에 사용 가능합니다
+              템플릿을 등록하면 카카오 검수 후 발송에 사용할 수 있습니다
             </p>
           )}
         </div>

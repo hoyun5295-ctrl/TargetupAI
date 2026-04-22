@@ -324,6 +324,23 @@ router.get('/download', async (req: Request, res: Response) => {
       customFieldDefs = [];
     }
 
+    // ★ D136 (D1-2): customer_field_definitions 미등록 상태에서도 JSONB에 실제 저장된 key 출력.
+    //   원인: Sync Agent가 고객 데이터 API(/api/sync/customers)만 호출하고 field-definitions API를 건너뛴 케이스.
+    //   값은 저장됐지만 라벨 정의가 없어 downloads에서 누락되던 버그.
+    //   정의에 등록된 key는 기존 라벨 그대로, 정의에 없는 key는 key 자체를 라벨로 사용 (union).
+    const definedKeys = new Set(customFieldDefs.map(cf => cf.key));
+    const jsonbKeys = new Set<string>();
+    for (const r of result.rows) {
+      if (r.custom_fields && typeof r.custom_fields === 'object') {
+        for (const k of Object.keys(r.custom_fields)) jsonbKeys.add(k);
+      }
+    }
+    for (const k of Array.from(jsonbKeys).sort()) {
+      if (!definedKeys.has(k)) {
+        customFieldDefs.push({ key: k, label: k });
+      }
+    }
+
     // 표준 컬럼 헤더 + transform (enum 역변환 포함)
     const standardHeaders: { key: string; label: string; transform?: (v: any) => any }[] = [
       { key: 'name', label: '이름' },
@@ -348,14 +365,31 @@ router.get('/download', async (req: Request, res: Response) => {
       { key: 'recent_purchase_date', label: '최근구매일' },
     ];
 
+    // ★ D136 (D1-1): 해당 고객사가 실제 데이터를 보유한 컬럼만 출력.
+    //   기존: standardHeaders 19개 + customFieldDefs 전부 항상 출력 → 매칭 안 한 빈 컬럼까지 노출.
+    //   수정: rows 전체를 미리 스캔해서 "한 건이라도 값이 있는" 컬럼만 activeHeaders로 유지.
+    //   phone/name은 필수이므로 데이터 없어도 유지.
+    const hasValue = (v: any): boolean => {
+      if (v === null || v === undefined || v === '') return false;
+      if (typeof v === 'boolean') return true; // sms_opt_in false도 유효
+      return true;
+    };
+    const activeStandardHeaders = standardHeaders.filter(h => {
+      if (h.key === 'name' || h.key === 'phone') return true;
+      return result.rows.some((r: any) => hasValue(r[h.key]));
+    });
+    const activeCustomFieldDefs = customFieldDefs.filter(cf =>
+      result.rows.some((r: any) => hasValue(r.custom_fields?.[cf.key])),
+    );
+
     // Row 변환 (숫자/문자 혼합 + custom_fields 평면화)
     const rows = result.rows.map((c: any) => {
       const row: Record<string, any> = {};
-      for (const h of standardHeaders) {
+      for (const h of activeStandardHeaders) {
         const raw = c[h.key];
         row[h.label] = h.transform ? h.transform(raw) : (raw === null || raw === undefined ? '' : raw);
       }
-      for (const cf of customFieldDefs) {
+      for (const cf of activeCustomFieldDefs) {
         row[cf.label] = c.custom_fields?.[cf.key] ?? '';
       }
       return row;

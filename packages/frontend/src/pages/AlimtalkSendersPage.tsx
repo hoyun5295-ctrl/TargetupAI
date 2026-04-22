@@ -20,7 +20,7 @@ export default function AlimtalkSendersPage() {
           <h1 className="text-lg font-bold text-gray-900">
             알림톡/브랜드메시지 발신프로필
           </h1>
-          <p className="text-xs text-gray-500">슈퍼관리자 · 휴머스온 IMC 연동</p>
+          <p className="text-xs text-gray-500">슈퍼관리자 · 알림톡 발신프로필 관리</p>
         </div>
         <button
           type="button"

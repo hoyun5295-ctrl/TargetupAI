@@ -41,13 +41,21 @@ export function getMmsImageDisplayName(item: MmsImageItem | any, fallback = ''):
 /**
  * 발송 payload 조립 컨트롤타워 — Dashboard 7곳의 인라인 `.map(img => ({ path, originalName }))` 통합.
  * 업로드 직후 객체 `{serverPath, url, filename, originalName?, size}`를 DB 저장용 `{path, originalName}`으로 변환.
+ *
+ * ★ D136 (D3): 빈 슬롯(null/undefined/path 없음) 자동 제외 + 순서 compact.
+ *   기존: 사용자가 UI에서 이미지 1/2/3 중 슬롯 2,3에만 업로드 → `[null, img2, img3]`로 배열 저장 →
+ *         map 결과 3개 `{path:'', ...}, {path:img2, ...}, {path:img3, ...}` → DB에 빈 객체 포함 →
+ *         예약대기/발송결과/캘린더에서 3장 카운트 + 빈 슬롯 엑박 표시 버그.
+ *   수정: filter로 빈 슬롯 제거 → 실제 업로드된 이미지만 순서대로 압축. UI는 그대로 유지.
  */
 export function toMmsImagePaths(
   images: Array<{ serverPath?: string; path?: string; originalName?: string } | any>,
 ): Array<{ path: string; originalName: string }> {
   if (!Array.isArray(images)) return [];
-  return images.map((img: any) => ({
-    path: img?.serverPath || img?.path || '',
-    originalName: img?.originalName || '',
-  }));
+  return images
+    .filter((img: any) => !!(img?.serverPath || img?.path))
+    .map((img: any) => ({
+      path: img?.serverPath || img?.path || '',
+      originalName: img?.originalName || '',
+    }));
 }

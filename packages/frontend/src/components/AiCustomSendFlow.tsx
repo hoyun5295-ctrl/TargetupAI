@@ -17,9 +17,10 @@ import {
   X,
   XCircle
 } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
-import { formatPreviewValue, calculateSmsBytes, replaceMessageVars, buildAdMessageFront, buildAdSubjectFront, formatPhoneNumber } from '../utils/formatDate';
-import { highlightVars } from '../utils/highlightVars';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { formatPreviewValue, calculateSmsBytes, replaceMessageVars, buildAdMessageFront, buildAdSubjectFront, formatPhoneNumber, formatByType, reverseDisplayValueFront, FRONT_FIELD_DISPLAY_MAP } from '../utils/formatDate';
+import { highlightVars, mergeAndHighlightVars } from '../utils/highlightVars';
+import { toMmsImagePaths } from '../utils/mmsImage';
 import MmsImagePreview from './shared/MmsImagePreview';
 
 interface AiCustomSendFlowProps {
@@ -222,6 +223,9 @@ export default function AiCustomSendFlow({
         return;
       }
       // ★ D103: 순수 본문만. (광고)+080은 백엔드 test-send에서 추가
+      // ★ D136 (D4): MMS 채널 담당자테스트 시 업로드된 이미지 전달 — 기존 `mmsImagePaths: []` 하드코딩으로
+      //   validateMmsBeforeSend 3계층 가드(mms-validator) 발동 → "MMS는 이미지 첨부 필수" 에러로 차단되던 버그.
+      //   Dashboard.tsx와 동일하게 toMmsImagePaths 컨트롤타워 사용.
       const token = localStorage.getItem('token');
       const res = await fetch('/api/campaigns/test-send', {
         method: 'POST',
@@ -231,7 +235,7 @@ export default function AiCustomSendFlow({
           messageType: channel,
           isAd: isAdLocal,
           subject: selectedMsg.subject || '',
-          mmsImagePaths: [],
+          mmsImagePaths: channel === 'MMS' ? toMmsImagePaths(mmsUploadedImages) : [],
           // ★ D83: 미리보기와 동일한 샘플 고객으로 개인화 치환 (불일치 버그 수정)
           sampleCustomer: sampleData && Object.keys(sampleData).length > 0 ? sampleData : undefined,
         }),
@@ -304,8 +308,26 @@ export default function AiCustomSendFlow({
     return buildAdMessageFront(msg, channel, isAdLocal, optOutNumber);
   };
 
-  // ★ D95: replaceMessageVars 컨트롤타워 사용
+  // ★ D95: replaceMessageVars 컨트롤타워 사용 (바이트계산·평문 치환용)
   const replaceSampleVars = (text: string) => replaceMessageVars(text, availableFields, sampleData);
+
+  // ★ D136 (D5): 머지 결과 탭에서 치환된 값도 강조(초록 span) 표시하기 위한 displayName 키 객체.
+  //   기존 `replaceSampleVars`는 평문만 반환 → AiCampaignSendModal처럼 mergeAndHighlightVars 사용.
+  //   enum 역변환(gender F→여성) + 타입 포맷 + 커스텀필드 원본 보존(D136) 규칙 적용 후 displayName 키로 저장.
+  const sampleCustomerDisplay = useMemo(() => {
+    const result: Record<string, string | number> = {};
+    for (const f of availableFields) {
+      const val = (sampleData as any)?.[f.field_key];
+      if (val == null || val === '') continue;
+      const label = f.field_label || (f as any).display_name || f.field_key;
+      const dt = (f as any).data_type || ((f as any).field_type ? String((f as any).field_type).toLowerCase() : undefined);
+      const display = FRONT_FIELD_DISPLAY_MAP[f.field_key]
+        ? reverseDisplayValueFront(f.field_key, val)
+        : formatByType(val, dt, f.field_key);
+      result[label] = display;
+    }
+    return result;
+  }, [availableFields, sampleData]);
 
   // 커스텀 alert 표시
   const showAlert = (title: string, message: string, type: 'error' | 'warning' | 'info' = 'error') => {
@@ -1095,8 +1117,9 @@ export default function AiCustomSendFlow({
                               />
                             </div>
                           )}
+                          {/* ★ D136 (D5): 머지 결과 탭도 강조 span 유지 — mergeAndHighlightVars 사용 (컨트롤타워) */}
                           {Object.keys(sampleData).length > 0 && !showVarsHighlightOnly
-                            ? replaceSampleVars(wrapAdText(variants[selectedVariantIdx]?.message_text || ''))
+                            ? mergeAndHighlightVars(wrapAdText(variants[selectedVariantIdx]?.message_text || ''), sampleCustomerDisplay)
                             : highlightVars(wrapAdText(variants[selectedVariantIdx]?.message_text || ''))}
                         </div>
                       </div>

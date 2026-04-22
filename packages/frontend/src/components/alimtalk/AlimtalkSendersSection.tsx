@@ -251,7 +251,7 @@ export default function AlimtalkSendersSection() {
         <div>
           <h2 className="text-lg font-semibold">👤 발신 프로필 관리</h2>
           <p className="text-xs text-gray-500 mt-1">
-            휴머스온 IMC 연동 · 등록 요청 → 슈퍼관리자 승인 → 회사 전체 공유
+            알림톡 발신프로필 · 등록 요청 → 슈퍼관리자 승인 → 회사 전체 공유
           </p>
         </div>
         <div className="flex gap-2">
@@ -340,7 +340,7 @@ export default function AlimtalkSendersSection() {
                   <th className="text-left px-4 py-2">채널ID</th>
                   <th className="text-left px-4 py-2">카테고리</th>
                   <th className="text-center px-4 py-2">승인</th>
-                  <th className="text-center px-4 py-2">IMC</th>
+                  <th className="text-center px-4 py-2">상태</th>
                   <th className="text-center px-4 py-2">080</th>
                   <th className="text-center px-4 py-2">브랜드M/N</th>
                   <th className="text-right px-4 py-2">관리</th>

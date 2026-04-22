@@ -104,6 +104,47 @@
 
 > **규칙:** 아래 목표에만 100% 리소스를 집중한다.
 > **⚠️ D-Day: 2026-05-05 새벽 레거시 이관 최종 단계 (Harold + Claude 공동).** 예약발송 + 레거시 Agent 차단.
+
+---
+
+### 🔴 D136 (2026-04-22 밤) — PDF `한줄로_20260422.pdf` 디버깅 9건 + 추가 2건
+
+> **PDF:** `C:\Users\ceo\OneDrive\문서\카카오톡 받은 파일\한줄로_20260422.pdf` 9건
+> **세션 완료분 (타입체크 통과, 배포 대기):**
+>
+> | # | 제목 | 상태 | 파일 |
+> |---|------|------|------|
+> | D2 | 직접발송 무료거부 위 줄바꿈 과잉 제거 (고객 개행 100% 보존, AI 프롬프트 갱신) | ✅ | `messageUtils.ts` + `formatDate.ts` + `services/ai.ts` |
+> | D3 | MMS 이미지 1/2/3 순서 어긋남 (toMmsImagePaths 빈슬롯 compact) | ✅ | `utils/mmsImage.ts` |
+> | D4 | 맞춤한줄 MMS 담당자테스트 거부 (mmsImagePaths 하드코딩 수정) | ✅ | `AiCustomSendFlow.tsx:234` |
+> | D5 | 맞춤한줄 머지결과 강조색 사라짐 (mergeAndHighlightVars 교체) | ✅ | `AiCustomSendFlow.tsx` |
+> | D7-1 | 등급 NORMAL/SILVER 잔존 — 서버 dist trim 정상 확인. **시세이도 재업로드 대기** | 🟡 코드 OK / Harold님 재업로드 필요 | — |
+> | D7-2 | 커스텀필드 varchar 숫자 콤마 — 원본 보존 원칙 구현 (formatByType fieldKey 가드) | ✅ | `formatDate.ts` + `feedback_custom_field_raw_preserve.md` |
+> | D1-1 | 엑셀 다운로드 매칭 안 한 컬럼 빈값 출력 (activeHeaders 필터) | ✅ | `routes/customers.ts download` |
+> | D1-2 | 엑셀 다운로드 커스텀필드 빈값 (JSONB key fallback) | 🟡 부분해결 | `routes/customers.ts download` |
+> | — | 알림톡 템플릿등록 팝업 "휴머스온 IMC" 노출 → "카카오 검수" 중립화 (6곳) | ✅ | frontend alimtalk 전체 |
+> | — | 슈퍼관리자 발신번호 회사별 페이징 10개씩 (금강제화 160개 무한 스크롤) | ✅ | `AdminDashboard.tsx` |
+>
+> **🔥 즉시 수정 필요 (다음 세션 최우선):**
+>
+> | # | 제목 | 이유 |
+> |---|------|------|
+> | **D1-2 (근본)** | `sync.ts /customers`에서 `customer_field_definitions` 자동 UPSERT | Sync Agent가 field-definitions API 미호출 → suran 계정 라벨 0건 / 시세이도는 upload.ts 정상 |
+> | **D1 (근본)** | `routes/customers.ts download`를 `enabled-fields` 로직과 100% 동일하게 재작성 | Harold님 원칙: "고객DB 현황에 보이는 내역 그대로 다운로드". 현재 standardHeaders 하드코딩 → 화면과 불일치 가능 |
+> | **D6** | 예약대기 MMS 이미지 클릭 시 확대 화면 (발송결과처럼) | `ScheduledCampaignModal.tsx` MMS 썸네일 클릭 이벤트 + 확대 모달 |
+> | **D8** | 슈퍼관리자 대시보드 카드 선택 — 고객 업로드 컬럼 기준으로 동적 확장 (현재 7개 고정) | D133 후속. 회의 합의 내용 구현 미완 |
+> | **D9-(a)** | 담당브랜드 없는 중간관리자(suran)에서 수신거부 자동 업로드 안 됨 (중간관리자 5건, suran 0건) | `admin-sync.ts` 또는 `upload.ts` 수신거부 처리 경로 |
+> | **D9-(b)** | gwchae/sgbaek 담당브랜드 지정됐으나 "분류코드 없어 전체 접근"으로 표시됨 + 실제 DB조회 안 됨 | `store-scope.ts` (CT-02) 또는 사용자 관리 UI |
+> | **알림톡 B7** | 강조 이미지 업로드 실패 (800x400 25.3KB JPG) — pm2 로그 재현 후 진단 | Harold님 업로드 재시도 + 로그 확인 |
+>
+> **배포 순서 (오늘 세션 완료분):**
+> 1. `tp-push "D136 디버깅 9건 수정"` → `tp-deploy-full`
+> 2. Harold님 실서버 검증:
+>    - 직접발송 줄바꿈 (고객 여러 줄 띄운 것 그대로 유지)
+>    - MMS 이미지 2번 슬롯에만 업로드 → 1장 카운트 + 엑박 없음
+>    - 맞춤한줄 MMS 담당자테스트 + 머지결과 강조색
+>    - 엑셀 다운로드 (suran 계정에서 custom_1/custom_2 값 나옴)
+> 3. 다음 세션: 즉시 수정 필요 6건 착수
 >
 > **📊 이관 진행 현황 (2026-04-22 D134/D135 선제 완료):**
 > | 종류 | 건수 | 상태 | 일자 |

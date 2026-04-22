@@ -58,7 +58,7 @@ export default function AlarmUserManager({ onClose }: Props) {
     if (activeCount >= MAX_ALARM_USERS) {
       return setErr(`검수 알림 수신자는 최대 ${MAX_ALARM_USERS}명까지 등록 가능합니다`);
     }
-    if (!newName.trim()) return setErr('수신자 이름을 입력하세요 (IMC 필수)');
+    if (!newName.trim()) return setErr('수신자 이름을 입력하세요 (필수)');
     if (!/^01\d{8,9}$/.test(newPhone.replace(/\D/g, '')))
       return setErr('휴대폰 번호 형식을 확인하세요');
     setAdding(true);
