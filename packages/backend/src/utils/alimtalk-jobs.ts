@@ -15,6 +15,8 @@
 
 import { query } from '../config/database';
 import * as imc from './alimtalk-api';
+import { getAuthSmsTable, bulkInsertSmsQueue } from './sms-queue';
+import { buildTemplateInspectionNotifyMessage } from './auto-notify-message';
 
 // ════════════════════════════════════════════════════════════
 // 공통 유틸
@@ -210,7 +212,10 @@ export async function syncPendingTemplatesJob(): Promise<void> {
     company_id: string;
     profile_key: string;
     template_code: string;
+    template_name: string;
+    profile_name: string | null;
     status: string;
+    alarm_notified_status: string | null;
   }> = [];
 
   try {
@@ -218,8 +223,11 @@ export async function syncPendingTemplatesJob(): Promise<void> {
       `SELECT t.id,
               t.company_id,
               p.profile_key,
+              p.profile_name,
               t.template_code,
-              t.status
+              t.template_name,
+              t.status,
+              t.alarm_notified_status
          FROM kakao_templates t
          JOIN kakao_sender_profiles p ON p.id = t.profile_id
         WHERE t.status IN ('REQUESTED','REVIEWING','REQ','REV')
@@ -235,6 +243,7 @@ export async function syncPendingTemplatesJob(): Promise<void> {
   if (rows.length === 0) return;
 
   let updated = 0;
+  let notified = 0;
   for (const row of rows) {
     try {
       const res = await imc.getAlimtalkTemplate(
@@ -246,6 +255,8 @@ export async function syncPendingTemplatesJob(): Promise<void> {
       const latestStatus = (res.data as any).status;
       if (!latestStatus) continue;
 
+      const rejectReason = (res.data as any).rejectReason ?? null;
+
       await query(
         `UPDATE kakao_templates
             SET status          = $1,
@@ -253,15 +264,137 @@ export async function syncPendingTemplatesJob(): Promise<void> {
                 last_synced_at  = now(),
                 updated_at      = now()
           WHERE id = $3`,
-        [latestStatus, (res.data as any).rejectReason ?? null, row.id],
+        [latestStatus, rejectReason, row.id],
       );
       updated++;
+
+      // ★ D135+: 검수 상태 종결 전환 감지 → 담당자 SMS 자동 알림
+      //   IMC createAlarmUser 권한 없음(4032) → 한줄로가 직접 kakao_alarm_users + QTmsg 인증 라인으로 발송.
+      //   alarm_notified_status 컬럼으로 중복 알림 차단 (동일 상태 재발송 X).
+      const terminal = toTerminalStatus(latestStatus);
+      if (terminal && row.alarm_notified_status !== terminal) {
+        try {
+          const count = await notifyTemplateInspectionResult({
+            companyId: row.company_id,
+            profileKey: row.profile_key,
+            templateName: row.template_name,
+            profileName: row.profile_name,
+            status: terminal,
+            rejectReason,
+          });
+          await query(
+            `UPDATE kakao_templates SET alarm_notified_status = $1 WHERE id = $2`,
+            [terminal, row.id],
+          );
+          if (count > 0) notified += count;
+          log(
+            'pendingTemplateSync',
+            `alarmNotify ${terminal} ${row.template_name} → ${count}명`,
+          );
+        } catch (notifyErr) {
+          logErr(`pendingTemplateSync-alarmNotify-${row.template_code}`, notifyErr);
+        }
+      }
     } catch (err) {
       logErr(`pendingTemplateSync-${row.template_code}`, err);
       // 개별 템플릿 실패해도 계속
     }
   }
-  log('pendingTemplateSync', `${updated}/${rows.length}건 상태 갱신`);
+  log(
+    'pendingTemplateSync',
+    `${updated}/${rows.length}건 상태 갱신 (담당자 알림 ${notified}건)`,
+  );
+}
+
+/**
+ * IMC status 값을 내부 terminal 상태(APPROVED/REJECTED)로 정규화.
+ * 검수 진행 중(REQUESTED/REVIEWING/REQ/REV) 또는 기타 상태는 null 반환 (알림 대상 아님).
+ */
+function toTerminalStatus(status: string): 'APPROVED' | 'REJECTED' | null {
+  const s = String(status || '').toUpperCase();
+  if (s === 'APR' || s === 'APPROVED') return 'APPROVED';
+  if (s === 'REJ' || s === 'REJECTED') return 'REJECTED';
+  return null;
+}
+
+/**
+ * 템플릿 검수 결과 담당자 알림 SMS 발송.
+ *
+ * 동작:
+ *   1) kakao_alarm_users에서 해당 회사의 active_yn='Y' 수신자 조회
+ *   2) 한 명도 없으면 0 반환 (정상 종료)
+ *   3) 발송 callback은 해당 발신프로필의 admin_phone_number 사용
+ *      (관리자가 카톡 인증으로 본인확인한 번호 — 회신 들어와도 본인에게 감)
+ *   4) getAuthSmsTable() 인증 라인에 bulkInsertSmsQueue로 LMS 발송
+ *
+ * 반환: 실제 발송 대상 수신자 수.
+ */
+async function notifyTemplateInspectionResult(params: {
+  companyId: string;
+  profileKey: string;
+  templateName: string;
+  profileName: string | null;
+  status: 'APPROVED' | 'REJECTED';
+  rejectReason: string | null;
+}): Promise<number> {
+  // 1) 활성 수신자 조회
+  const usersRes = await query(
+    `SELECT name, phone_number
+       FROM kakao_alarm_users
+      WHERE company_id = $1 AND COALESCE(active_yn, 'Y') = 'Y'`,
+    [params.companyId],
+  );
+  const users = usersRes.rows || [];
+  if (users.length === 0) return 0;
+
+  // 2) 해당 발신프로필 관리자 번호 조회 (callback으로 사용)
+  const profRes = await query(
+    `SELECT admin_phone_number FROM kakao_sender_profiles WHERE profile_key = $1 LIMIT 1`,
+    [params.profileKey],
+  );
+  const callback = String(profRes.rows[0]?.admin_phone_number || '').replace(/\D/g, '');
+  if (!callback) {
+    // callback 미등록 시 발송 불가. 로그만 남기고 스킵 (기간계 안정성 우선)
+    logErr(
+      'notifyTemplateInspectionResult',
+      new Error(`profile.admin_phone_number 없음 — profile_key=${params.profileKey}`),
+    );
+    return 0;
+  }
+
+  // 3) 메시지 빌드
+  const notifyMessage = buildTemplateInspectionNotifyMessage({
+    templateName: params.templateName,
+    profileName: params.profileName,
+    status: params.status,
+    rejectReason: params.rejectReason,
+  });
+  const titleStr = `[알림톡 ${params.status === 'APPROVED' ? '승인' : '반려'}] ${params.templateName}`.slice(0, 40);
+
+  // 4) 인증 라인 bulk INSERT (LMS, useNow=true)
+  const authTable = await getAuthSmsTable();
+  const rows: any[][] = [];
+  for (const u of users) {
+    const cleanPhone = String(u.phone_number || '').replace(/\D/g, '');
+    if (!/^01\d{8,9}$/.test(cleanPhone)) continue;
+    rows.push([
+      cleanPhone,        // dest_no
+      callback,          // call_back
+      notifyMessage,     // msg_contents
+      'L',               // msg_type (LMS)
+      titleStr,          // title_str
+      null,              // sendreq_time (useNow=true로 NOW() 사용)
+      '',                // app_etc1
+      params.companyId,  // app_etc2
+      '',                // file_name1
+      '',                // file_name2
+      '',                // file_name3
+    ]);
+  }
+  if (rows.length === 0) return 0;
+
+  await bulkInsertSmsQueue([authTable], rows, true);
+  return rows.length;
 }
 
 // ════════════════════════════════════════════════════════════

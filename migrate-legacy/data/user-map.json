@@ -1,0 +1,1130 @@
+{
+  "ABCOZX": {
+    "user_id": "2848d5aa-f003-4787-9102-e155608a1406",
+    "company_id": "ecb714dc-ee06-4869-9c2d-7139b6960369",
+    "company_code": "augustinus",
+    "user_type": "admin",
+    "name": "아우구스티누스 바더",
+    "is_new_admin": false
+  },
+  "acehardware01": {
+    "user_id": "6229750b-3b64-4b08-bb12-0a9b945884d4",
+    "company_id": "8afb2332-813e-493f-95c7-cf1f65db3fe7",
+    "company_code": "acehardware",
+    "user_type": "admin",
+    "name": "에이스하드웨어 관리자",
+    "is_new_admin": true
+  },
+  "ACEMKT": {
+    "user_id": "08e08201-a19c-4d08-9654-49296bfe10af",
+    "company_id": "8afb2332-813e-493f-95c7-cf1f65db3fe7",
+    "company_code": "acehardware",
+    "user_type": "user",
+    "name": "에이스하드웨어_마케팅",
+    "is_new_admin": false
+  },
+  "ACEON": {
+    "user_id": "2dbe6aa5-5da2-4973-94b0-af44f22d6541",
+    "company_id": "8afb2332-813e-493f-95c7-cf1f65db3fe7",
+    "company_code": "acehardware",
+    "user_type": "user",
+    "name": "에이스하드웨어_온라인",
+    "is_new_admin": false
+  },
+  "afexkorea": {
+    "user_id": "0ced7bc1-e4b0-40a9-9232-3fe59852ca07",
+    "company_id": "9423394c-1ac9-452b-91bf-3d4753d4d2ab",
+    "company_code": "afex",
+    "user_type": "admin",
+    "name": "주식회사 중평알앤에스",
+    "is_new_admin": false
+  },
+  "ananti01": {
+    "user_id": "9badf4da-2dce-422e-9e51-4532c471f29a",
+    "company_id": "5f1fde65-01a8-446b-a712-b34828b40509",
+    "company_code": "ananti",
+    "user_type": "admin",
+    "name": "아난티 관리자",
+    "is_new_admin": true
+  },
+  "ahbusan": {
+    "user_id": "d788dce4-35ec-45ff-abe7-8dc7f558b49a",
+    "company_id": "5f1fde65-01a8-446b-a712-b34828b40509",
+    "company_code": "ananti",
+    "user_type": "user",
+    "name": "아난티_커넥트팀(코브 부산)",
+    "is_new_admin": false
+  },
+  "bsuhee1225": {
+    "user_id": "8f558293-a3ea-4381-9785-176ee0b8094d",
+    "company_id": "5f1fde65-01a8-446b-a712-b34828b40509",
+    "company_code": "ananti",
+    "user_type": "user",
+    "name": "아난티_배수희",
+    "is_new_admin": false
+  },
+  "dh200601": {
+    "user_id": "e0d8d3f3-9e13-40fa-b4e8-a57b251c9a8d",
+    "company_id": "5f1fde65-01a8-446b-a712-b34828b40509",
+    "company_code": "ananti",
+    "user_type": "user",
+    "name": "아난티_커넥트팀 안다희",
+    "is_new_admin": false
+  },
+  "mink95": {
+    "user_id": "5d1950ec-dc64-4a24-a183-6119f54586b5",
+    "company_id": "5f1fde65-01a8-446b-a712-b34828b40509",
+    "company_code": "ananti",
+    "user_type": "user",
+    "name": "아난티_김민경",
+    "is_new_admin": false
+  },
+  "moonjh0404": {
+    "user_id": "86c9cfbe-cf8c-403c-a332-6865074b1f36",
+    "company_id": "5f1fde65-01a8-446b-a712-b34828b40509",
+    "company_code": "ananti",
+    "user_type": "user",
+    "name": "아난티_문정호",
+    "is_new_admin": false
+  },
+  "SOOBIN02": {
+    "user_id": "664549d2-f26d-44e0-9619-f9064b7494a6",
+    "company_id": "5f1fde65-01a8-446b-a712-b34828b40509",
+    "company_code": "ananti",
+    "user_type": "user",
+    "name": "아난티_박수빈",
+    "is_new_admin": false
+  },
+  "shw115": {
+    "user_id": "2585501a-decd-45cb-8021-3ba2c203409a",
+    "company_id": "5f1fde65-01a8-446b-a712-b34828b40509",
+    "company_code": "ananti",
+    "user_type": "user",
+    "name": "아난티_신혜원",
+    "is_new_admin": false
+  },
+  "hyobin17": {
+    "user_id": "7f1e200d-a79f-4ef1-8221-afc75f9ab445",
+    "company_id": "5f1fde65-01a8-446b-a712-b34828b40509",
+    "company_code": "ananti",
+    "user_type": "user",
+    "name": "아난티_장효빈",
+    "is_new_admin": false
+  },
+  "amc2020": {
+    "user_id": "09bf3ef9-2c2f-4c31-af72-5b468c93c67c",
+    "company_id": "191b1dae-3155-4a83-b6d5-70e477b635f8",
+    "company_code": "amcommerce",
+    "user_type": "admin",
+    "name": "(주)에이엠커머스",
+    "is_new_admin": false
+  },
+  "arnew": {
+    "user_id": "f99a54f7-2af0-479a-931f-e9015406b3c7",
+    "company_id": "62ffa713-521b-4720-aeec-976d1fa5b815",
+    "company_code": "arnew",
+    "user_type": "admin",
+    "name": "아르뉴",
+    "is_new_admin": false
+  },
+  "babynews": {
+    "user_id": "3e4ab264-8ba9-4642-b2c0-724d97978ec5",
+    "company_id": "c4e06607-7681-4813-8ef3-04b538ee225d",
+    "company_code": "bacon",
+    "user_type": "admin",
+    "name": "주식회사 베이컨",
+    "is_new_admin": false
+  },
+  "banilaco": {
+    "user_id": "dd207f8c-67fe-405b-a4cd-d1131690d174",
+    "company_id": "7bca94c7-25af-4ea4-809f-e65c50ee3929",
+    "company_code": "banilaco",
+    "user_type": "admin",
+    "name": "바닐라코",
+    "is_new_admin": false
+  },
+  "beigic": {
+    "user_id": "bcea2626-2b68-4f39-a294-8ab907254727",
+    "company_id": "a33445aa-a2bd-4fd7-9159-f2757a117d6d",
+    "company_code": "paige",
+    "user_type": "admin",
+    "name": "주식회사 페이지",
+    "is_new_admin": false
+  },
+  "benetton01": {
+    "user_id": "28f1a106-b72d-4c51-b09a-de4c9f962866",
+    "company_id": "d6b3d71c-ed35-4d49-ab72-0392cf789d9e",
+    "company_code": "benetton",
+    "user_type": "admin",
+    "name": "베네통 관리자",
+    "is_new_admin": true
+  },
+  "benetton": {
+    "user_id": "ff702325-6051-459c-b498-894524a59321",
+    "company_id": "d6b3d71c-ed35-4d49-ab72-0392cf789d9e",
+    "company_code": "benetton",
+    "user_type": "user",
+    "name": "베네통",
+    "is_new_admin": false
+  },
+  "benetton1": {
+    "user_id": "2414b1ee-ff60-4cc8-8bc2-5456bc2f9a35",
+    "company_id": "d6b3d71c-ed35-4d49-ab72-0392cf789d9e",
+    "company_code": "benetton",
+    "user_type": "user",
+    "name": "베네통1",
+    "is_new_admin": false
+  },
+  "benetton2": {
+    "user_id": "5cf42d2c-4b39-44c2-929c-c0ce300f6056",
+    "company_id": "d6b3d71c-ed35-4d49-ab72-0392cf789d9e",
+    "company_code": "benetton",
+    "user_type": "user",
+    "name": "베네통2",
+    "is_new_admin": false
+  },
+  "benetton3": {
+    "user_id": "560da0df-7720-40a6-9243-c43f921c8e13",
+    "company_id": "d6b3d71c-ed35-4d49-ab72-0392cf789d9e",
+    "company_code": "benetton",
+    "user_type": "user",
+    "name": "베네통3",
+    "is_new_admin": false
+  },
+  "benetton4": {
+    "user_id": "33a7b2d2-9236-40cd-bf95-6ca19a265b9f",
+    "company_id": "d6b3d71c-ed35-4d49-ab72-0392cf789d9e",
+    "company_code": "benetton",
+    "user_type": "user",
+    "name": "베네통4",
+    "is_new_admin": false
+  },
+  "benetton5": {
+    "user_id": "2f4bb415-a1db-48b6-adbc-883d57013f86",
+    "company_id": "d6b3d71c-ed35-4d49-ab72-0392cf789d9e",
+    "company_code": "benetton",
+    "user_type": "user",
+    "name": "베네통5",
+    "is_new_admin": false
+  },
+  "benjefe01": {
+    "user_id": "bc5044b9-9b30-42b8-907b-f91b682ced0f",
+    "company_id": "8200b378-3245-4297-ad0d-c312cedb6d36",
+    "company_code": "benjefe",
+    "user_type": "admin",
+    "name": "벤제프 관리자",
+    "is_new_admin": true
+  },
+  "benjefe": {
+    "user_id": "3054ed64-30d0-46c5-86d9-24ce5f188db2",
+    "company_id": "8200b378-3245-4297-ad0d-c312cedb6d36",
+    "company_code": "benjefe",
+    "user_type": "user",
+    "name": "벤제프",
+    "is_new_admin": false
+  },
+  "benjefe1": {
+    "user_id": "92e24661-b5a7-44ad-a010-4f2dd214da1e",
+    "company_id": "8200b378-3245-4297-ad0d-c312cedb6d36",
+    "company_code": "benjefe",
+    "user_type": "user",
+    "name": "벤제프1",
+    "is_new_admin": false
+  },
+  "benjefe2": {
+    "user_id": "c950f3ec-3e94-4a08-b28f-1d36907484b6",
+    "company_id": "8200b378-3245-4297-ad0d-c312cedb6d36",
+    "company_code": "benjefe",
+    "user_type": "user",
+    "name": "벤제프2",
+    "is_new_admin": false
+  },
+  "benjefe3": {
+    "user_id": "2b8c077f-41b3-4d56-a611-dccc456ae811",
+    "company_id": "8200b378-3245-4297-ad0d-c312cedb6d36",
+    "company_code": "benjefe",
+    "user_type": "user",
+    "name": "벤제프3",
+    "is_new_admin": false
+  },
+  "carrotglobal01": {
+    "user_id": "2d102323-5a36-44ad-8d2a-2e8a209a241b",
+    "company_id": "e8f0ffa7-2e59-4e2c-ad9f-b762c1d81f98",
+    "company_code": "carrotglobal",
+    "user_type": "admin",
+    "name": "캐럿글로벌 관리자",
+    "is_new_admin": true
+  },
+  "bhappy1": {
+    "user_id": "27efadac-ce78-4807-8556-d2b2f04192fc",
+    "company_id": "e8f0ffa7-2e59-4e2c-ad9f-b762c1d81f98",
+    "company_code": "carrotglobal",
+    "user_type": "user",
+    "name": "(주)캐럿글로벌1",
+    "is_new_admin": false
+  },
+  "bhappy2": {
+    "user_id": "6c168da8-6b69-4f6c-8241-d39d0c27349d",
+    "company_id": "e8f0ffa7-2e59-4e2c-ad9f-b762c1d81f98",
+    "company_code": "carrotglobal",
+    "user_type": "user",
+    "name": "(주)캐럿글로벌2",
+    "is_new_admin": false
+  },
+  "bhappy4": {
+    "user_id": "60da2b1d-8fe4-4bc8-8b95-915dfb67d94f",
+    "company_id": "e8f0ffa7-2e59-4e2c-ad9f-b762c1d81f98",
+    "company_code": "carrotglobal",
+    "user_type": "user",
+    "name": "(주)캐럿글로벌4_박교영",
+    "is_new_admin": false
+  },
+  "biellee4040": {
+    "user_id": "08d7a463-361d-455f-ad77-4318494ffa95",
+    "company_id": "806d13d7-4fea-4188-b4d4-ca2d46ecfe2e",
+    "company_code": "nsb",
+    "user_type": "admin",
+    "name": "엔에스비",
+    "is_new_admin": false
+  },
+  "efolium01": {
+    "user_id": "fb05a153-f4cd-41a5-b5d6-11e53f882e48",
+    "company_id": "9b30c75a-3d79-43b0-9438-9a617137df67",
+    "company_code": "efolium",
+    "user_type": "admin",
+    "name": "이폴리움 관리자",
+    "is_new_admin": true
+  },
+  "efolium": {
+    "user_id": "b7d2f5a9-008a-4223-8259-b367b0aa70f6",
+    "company_id": "9b30c75a-3d79-43b0-9438-9a617137df67",
+    "company_code": "efolium",
+    "user_type": "user",
+    "name": "이폴리움",
+    "is_new_admin": false
+  },
+  "blanc101": {
+    "user_id": "895fea82-74e2-4746-8e52-4d3f46c705ef",
+    "company_id": "9b30c75a-3d79-43b0-9438-9a617137df67",
+    "company_code": "efolium",
+    "user_type": "user",
+    "name": "이폴리움1",
+    "is_new_admin": false
+  },
+  "cats0901": {
+    "user_id": "3bee5aa9-9152-439d-8a45-08a2e8e54c10",
+    "company_id": "96ed922b-f310-4fc6-bced-1351330618bc",
+    "company_code": "catsfactory",
+    "user_type": "admin",
+    "name": "캣츠팩토리",
+    "is_new_admin": true
+  },
+  "crocodile01": {
+    "user_id": "c17cb58a-fb58-499c-8d74-9212d2d17a93",
+    "company_id": "dcee2110-0e59-4ae5-9ab4-da5742739bce",
+    "company_code": "crocodile",
+    "user_type": "admin",
+    "name": "크로커다일 관리자",
+    "is_new_admin": true
+  },
+  "cdfasms123": {
+    "user_id": "e6c217ce-7f9d-41e3-a01d-a3874906ad46",
+    "company_id": "dcee2110-0e59-4ae5-9ab4-da5742739bce",
+    "company_code": "crocodile",
+    "user_type": "user",
+    "name": "크로커다일(알파)",
+    "is_new_admin": false
+  },
+  "pdfasms123": {
+    "user_id": "6c058340-723b-4626-b79e-5538a988638d",
+    "company_id": "dcee2110-0e59-4ae5-9ab4-da5742739bce",
+    "company_code": "crocodile",
+    "user_type": "user",
+    "name": "피에르가르뎅(플러스)",
+    "is_new_admin": false
+  },
+  "ydfasms123": {
+    "user_id": "507a29ab-8101-42cd-90e3-b47c9e470388",
+    "company_id": "dcee2110-0e59-4ae5-9ab4-da5742739bce",
+    "company_code": "crocodile",
+    "user_type": "user",
+    "name": "크로커다일(여명)",
+    "is_new_admin": false
+  },
+  "choisun": {
+    "user_id": "e4b4824c-6357-4e23-afe1-7bd371f0b2b1",
+    "company_id": "0d20b03b-4c66-4205-ae81-a3b53a70481d",
+    "company_code": "choisun",
+    "user_type": "admin",
+    "name": "최선어학원",
+    "is_new_admin": false
+  },
+  "cnxsol": {
+    "user_id": "51145618-3db7-4c80-98b6-bc9686e34aa0",
+    "company_id": "2e5aae2e-e2c2-4139-8f44-7e17d61cbc43",
+    "company_code": "connexsol",
+    "user_type": "admin",
+    "name": "코넥스솔루션",
+    "is_new_admin": false
+  },
+  "comvita01": {
+    "user_id": "3fea2de3-1eb4-4f96-9e6f-aadc711029a3",
+    "company_id": "db4b30be-56fd-4a5e-888f-cfb14e4b99e3",
+    "company_code": "comvita",
+    "user_type": "admin",
+    "name": "콤비타코리아 관리자",
+    "is_new_admin": true
+  },
+  "comvita": {
+    "user_id": "6d762f77-7a6b-466c-b9f7-5914a6aa22c3",
+    "company_id": "db4b30be-56fd-4a5e-888f-cfb14e4b99e3",
+    "company_code": "comvita",
+    "user_type": "user",
+    "name": "(주)콤비타코리아",
+    "is_new_admin": false
+  },
+  "comvitaon": {
+    "user_id": "c86742b5-35ad-49e5-bf1c-5cd0cacb73aa",
+    "company_id": "db4b30be-56fd-4a5e-888f-cfb14e4b99e3",
+    "company_code": "comvita",
+    "user_type": "user",
+    "name": "(주)콤비타코리아_온라인",
+    "is_new_admin": false
+  },
+  "coreya": {
+    "user_id": "4e18d171-db24-413a-811f-7172f7475d2d",
+    "company_id": "144f5470-bb23-4e9f-93e1-af0ae8478ea3",
+    "company_code": "jisam",
+    "user_type": "admin",
+    "name": "지삼유통",
+    "is_new_admin": false
+  },
+  "crispyba": {
+    "user_id": "aa20a4f5-7889-4e59-8d60-bb771cdc659f",
+    "company_id": "ccef7e86-ad74-49f7-8b7b-9586fc4175ca",
+    "company_code": "crispybaba",
+    "user_type": "admin",
+    "name": "(주)경희 크리스피바바",
+    "is_new_admin": false
+  },
+  "dongkook01": {
+    "user_id": "c7fff07f-4f4c-453a-b12f-42a5709562a1",
+    "company_id": "5daf2432-89b1-460c-881c-c129ec8a861b",
+    "company_code": "dongkook",
+    "user_type": "admin",
+    "name": "동국제약 관리자",
+    "is_new_admin": true
+  },
+  "dkpharm2": {
+    "user_id": "e69750e9-63fb-4eab-9857-6d204d5b0c5e",
+    "company_id": "5daf2432-89b1-460c-881c-c129ec8a861b",
+    "company_code": "dongkook",
+    "user_type": "user",
+    "name": "동국제약_센텔리안",
+    "is_new_admin": false
+  },
+  "dkpharm": {
+    "user_id": "d86e38f6-625c-4340-a397-5afe03d85483",
+    "company_id": "5daf2432-89b1-460c-881c-c129ec8a861b",
+    "company_code": "dongkook",
+    "user_type": "user",
+    "name": "동국제약_생활건강",
+    "is_new_admin": false
+  },
+  "dp26": {
+    "user_id": "c61a2e07-c541-4881-b9ac-8b73c13ad550",
+    "company_id": "cca68c71-4be9-46a5-a6ae-aa52674e8e4b",
+    "company_code": "knoumedia",
+    "user_type": "admin",
+    "name": "방통대 미디어영상학과",
+    "is_new_admin": false
+  },
+  "dp35": {
+    "user_id": "26e0a14c-a808-45f7-bd5a-44d6f871faaf",
+    "company_id": "65f18e25-2049-483c-8db1-f5c5b6b0e90e",
+    "company_code": "knoustat",
+    "user_type": "admin",
+    "name": "방통대 통계 데이터과학과",
+    "is_new_admin": false
+  },
+  "dsfashion": {
+    "user_id": "beca95c3-7f43-4c7a-9004-748db06c5f4e",
+    "company_id": "4fede2b0-75e9-4477-b52f-4b1f97d91747",
+    "company_code": "dsfashion",
+    "user_type": "admin",
+    "name": "디에스패션컴퍼니",
+    "is_new_admin": false
+  },
+  "elensilia": {
+    "user_id": "9652f68b-de4a-4a39-a28c-66e4f6140a0d",
+    "company_id": "b657b9fb-91ab-440c-98d4-00d1d6edd687",
+    "company_code": "elensilia",
+    "user_type": "admin",
+    "name": "태영_엘렌실라",
+    "is_new_admin": false
+  },
+  "Everych": {
+    "user_id": "b2e9243a-6a24-47a2-813c-f87f9620155d",
+    "company_id": "45ec5da2-2f4f-4184-9e2d-bfef5705ed11",
+    "company_code": "everych",
+    "user_type": "admin",
+    "name": "에브리치",
+    "is_new_admin": false
+  },
+  "giantg": {
+    "user_id": "1b3259a5-b8ee-47ed-a00a-c7ee7ce8c7ec",
+    "company_id": "57e17bd3-0008-4b1d-acff-7d13d76a3956",
+    "company_code": "giantgolf",
+    "user_type": "admin",
+    "name": "자이언트골프앤투어_광주점",
+    "is_new_admin": false
+  },
+  "guess": {
+    "user_id": "fbf3d065-ce61-433a-853f-4b8aed6e08e1",
+    "company_id": "a844d2f2-23de-4157-bd27-1a0b37c60810",
+    "company_code": "guesskorea",
+    "user_type": "admin",
+    "name": "게스코리아",
+    "is_new_admin": false
+  },
+  "hpio": {
+    "user_id": "8c3a75e2-6a54-4873-bd79-65e9852f7243",
+    "company_id": "1adb0197-3927-4907-a07b-3631fb61cb5b",
+    "company_code": "hpio",
+    "user_type": "admin",
+    "name": "에이치피오_덴프스",
+    "is_new_admin": false
+  },
+  "idlook01": {
+    "user_id": "492d8da4-14c4-497c-ba1a-747e882eaa72",
+    "company_id": "807cc016-1050-43ae-8bed-67822ab101c0",
+    "company_code": "idlook",
+    "user_type": "admin",
+    "name": "아이디룩 관리자",
+    "is_new_admin": true
+  },
+  "idlook": {
+    "user_id": "4d72f303-917b-473c-8ea3-be2f4e023d55",
+    "company_id": "807cc016-1050-43ae-8bed-67822ab101c0",
+    "company_code": "idlook",
+    "user_type": "user",
+    "name": "아이디룩_온라인",
+    "is_new_admin": false
+  },
+  "idlookcs": {
+    "user_id": "a383477e-3be3-483b-80d5-6fd4432f4012",
+    "company_id": "807cc016-1050-43ae-8bed-67822ab101c0",
+    "company_code": "idlook",
+    "user_type": "user",
+    "name": "아이디룩_CS",
+    "is_new_admin": false
+  },
+  "idlookcs2": {
+    "user_id": "33b0cacb-0dd7-499f-a3da-e08bdf09a3ce",
+    "company_id": "807cc016-1050-43ae-8bed-67822ab101c0",
+    "company_code": "idlook",
+    "user_type": "user",
+    "name": "아이디룩_온라인CS",
+    "is_new_admin": false
+  },
+  "idlooksms": {
+    "user_id": "2676872a-45d4-43f8-a1e1-0ddc926ef707",
+    "company_id": "807cc016-1050-43ae-8bed-67822ab101c0",
+    "company_code": "idlook",
+    "user_type": "user",
+    "name": "아이디룩_영업/마케팅",
+    "is_new_admin": false
+  },
+  "isae01": {
+    "user_id": "85b25b5b-f6a2-4e0e-b5af-b011e359b7a1",
+    "company_id": "682956b7-37a3-46b5-9868-b63011bda47b",
+    "company_code": "isae",
+    "user_type": "admin",
+    "name": "이새에프앤씨 관리자",
+    "is_new_admin": true
+  },
+  "isae": {
+    "user_id": "b8e4e4e3-a8a7-4c83-86d3-712501588c7a",
+    "company_id": "682956b7-37a3-46b5-9868-b63011bda47b",
+    "company_code": "isae",
+    "user_type": "user",
+    "name": "이새에프앤씨",
+    "is_new_admin": false
+  },
+  "isaeshop": {
+    "user_id": "2aaad081-c8f4-41e8-8b36-30dfb5d201a8",
+    "company_id": "682956b7-37a3-46b5-9868-b63011bda47b",
+    "company_code": "isae",
+    "user_type": "user",
+    "name": "이새에프앤씨_온라인",
+    "is_new_admin": false
+  },
+  "jessinewyork01": {
+    "user_id": "649e3864-62bc-4e51-803f-e61f1889ba93",
+    "company_id": "a589f07e-66c5-4d8b-9603-ecc1c640b84a",
+    "company_code": "jessinewyork",
+    "user_type": "admin",
+    "name": "제시뉴욕 관리자",
+    "is_new_admin": true
+  },
+  "jessi": {
+    "user_id": "7ebf89b0-77e4-4344-ab05-b2e8f31bcabd",
+    "company_id": "a589f07e-66c5-4d8b-9603-ecc1c640b84a",
+    "company_code": "jessinewyork",
+    "user_type": "user",
+    "name": "제시뉴욕_대행",
+    "is_new_admin": false
+  },
+  "jessi1": {
+    "user_id": "098f67cd-40a4-4594-8473-fff27cccddef",
+    "company_id": "a589f07e-66c5-4d8b-9603-ecc1c640b84a",
+    "company_code": "jessinewyork",
+    "user_type": "user",
+    "name": "제시뉴욕1_한승호",
+    "is_new_admin": false
+  },
+  "jessi2": {
+    "user_id": "9f3b355c-aa1d-4882-9f86-bd20d84ee6f4",
+    "company_id": "a589f07e-66c5-4d8b-9603-ecc1c640b84a",
+    "company_code": "jessinewyork",
+    "user_type": "user",
+    "name": "제시뉴욕2_김윤석",
+    "is_new_admin": false
+  },
+  "jessi3": {
+    "user_id": "e3eebb7b-3693-40f8-8421-9935bc3b8cb0",
+    "company_id": "a589f07e-66c5-4d8b-9603-ecc1c640b84a",
+    "company_code": "jessinewyork",
+    "user_type": "user",
+    "name": "제시뉴욕3_민정환",
+    "is_new_admin": false
+  },
+  "jessi4": {
+    "user_id": "1f8df10c-fcf3-4e65-9335-59bf831d4894",
+    "company_id": "a589f07e-66c5-4d8b-9603-ecc1c640b84a",
+    "company_code": "jessinewyork",
+    "user_type": "user",
+    "name": "제시뉴욕4_박지영",
+    "is_new_admin": false
+  },
+  "kumkang01": {
+    "user_id": "9bda8768-6b0d-41f2-b3ea-3ef343677240",
+    "company_id": "bb1fc50b-7c5b-4080-827e-aef587bcd082",
+    "company_code": "kumkang",
+    "user_type": "admin",
+    "name": "금강제화 관리자",
+    "is_new_admin": true
+  },
+  "kumkang": {
+    "user_id": "d57575e0-da65-477e-ad91-f99ce79ebf82",
+    "company_id": "bb1fc50b-7c5b-4080-827e-aef587bcd082",
+    "company_code": "kumkang",
+    "user_type": "user",
+    "name": "금강제화",
+    "is_new_admin": false
+  },
+  "kumkang2": {
+    "user_id": "bcd7ac48-8523-4833-8b26-1abdf5cc03ad",
+    "company_id": "bb1fc50b-7c5b-4080-827e-aef587bcd082",
+    "company_code": "kumkang",
+    "user_type": "user",
+    "name": "금강제화_상설점",
+    "is_new_admin": false
+  },
+  "kumkang3": {
+    "user_id": "352ce092-9acc-4f16-9932-51cb46e07cdd",
+    "company_id": "bb1fc50b-7c5b-4080-827e-aef587bcd082",
+    "company_code": "kumkang",
+    "user_type": "user",
+    "name": "금강제화_대리점",
+    "is_new_admin": false
+  },
+  "kumkang4": {
+    "user_id": "3a2e2a98-443b-4a15-b0a3-0cd9ea5d6ed4",
+    "company_id": "bb1fc50b-7c5b-4080-827e-aef587bcd082",
+    "company_code": "kumkang",
+    "user_type": "user",
+    "name": "금강제화_이비즈",
+    "is_new_admin": false
+  },
+  "creationl01": {
+    "user_id": "408d0701-4e34-4548-b2c3-b26d434f20ed",
+    "company_id": "88289818-1e7c-4c0b-a7c6-e09ffdd8913b",
+    "company_code": "creationl",
+    "user_type": "admin",
+    "name": "크리에이션엘 관리자",
+    "is_new_admin": true
+  },
+  "louisquatorze1": {
+    "user_id": "dbc1188d-cf58-4ffb-a4b1-f4de769d1e24",
+    "company_id": "88289818-1e7c-4c0b-a7c6-e09ffdd8913b",
+    "company_code": "creationl",
+    "user_type": "user",
+    "name": "태진인터내셔날_직영점",
+    "is_new_admin": false
+  },
+  "louisquatorze3": {
+    "user_id": "08bb8933-ce2a-47d2-b6e5-0f37b1b4c51a",
+    "company_id": "88289818-1e7c-4c0b-a7c6-e09ffdd8913b",
+    "company_code": "creationl",
+    "user_type": "user",
+    "name": "태진인터내셔날_고객지원팀",
+    "is_new_admin": false
+  },
+  "laprairie01": {
+    "user_id": "1a927b8e-eb81-4c07-983d-c2a534ecb44d",
+    "company_id": "df63bcb0-3900-4a1c-8ad0-93c6b5a1db04",
+    "company_code": "laprairie",
+    "user_type": "admin",
+    "name": "라프레리 관리자",
+    "is_new_admin": true
+  },
+  "laprairie": {
+    "user_id": "5af44b15-cfe5-4869-bc36-bc245de365ea",
+    "company_id": "df63bcb0-3900-4a1c-8ad0-93c6b5a1db04",
+    "company_code": "laprairie",
+    "user_type": "user",
+    "name": "라프레리_대행",
+    "is_new_admin": false
+  },
+  "laprairieak": {
+    "user_id": "32133d0f-375e-4c43-b371-6c73e40ccb44",
+    "company_id": "df63bcb0-3900-4a1c-8ad0-93c6b5a1db04",
+    "company_code": "laprairie",
+    "user_type": "user",
+    "name": "AK플라자 분당점 라프레리",
+    "is_new_admin": false
+  },
+  "lpcom": {
+    "user_id": "1c373b69-4ca0-46f6-83ab-d4918613c25c",
+    "company_id": "df63bcb0-3900-4a1c-8ad0-93c6b5a1db04",
+    "company_code": "laprairie",
+    "user_type": "user",
+    "name": "라프레리_com전용",
+    "is_new_admin": false
+  },
+  "lpglgg": {
+    "user_id": "5c882d74-7b64-42cf-a233-424f7d7733f2",
+    "company_id": "df63bcb0-3900-4a1c-8ad0-93c6b5a1db04",
+    "company_code": "laprairie",
+    "user_type": "user",
+    "name": "갤러리아 광교 라프레리",
+    "is_new_admin": false
+  },
+  "lphdmd": {
+    "user_id": "47930a43-cd91-452a-bec0-d9fafedb9562",
+    "company_id": "df63bcb0-3900-4a1c-8ad0-93c6b5a1db04",
+    "company_code": "laprairie",
+    "user_type": "user",
+    "name": "현대백화점 목동점 라프레리",
+    "is_new_admin": false
+  },
+  "lpkglhq": {
+    "user_id": "27bf7220-704c-45aa-99d4-b3fdeb31d1bf",
+    "company_id": "df63bcb0-3900-4a1c-8ad0-93c6b5a1db04",
+    "company_code": "laprairie",
+    "user_type": "user",
+    "name": "갤러리아백화점 라프레리",
+    "is_new_admin": false
+  },
+  "lpkhdch": {
+    "user_id": "dfb9985a-3d76-4094-9ff1-59ef1b6ad5ab",
+    "company_id": "df63bcb0-3900-4a1c-8ad0-93c6b5a1db04",
+    "company_code": "laprairie",
+    "user_type": "user",
+    "name": "현대백화점 천호점 라프레리",
+    "is_new_admin": false
+  },
+  "lpkhdcx": {
+    "user_id": "221a4ada-ad83-41ac-ba6c-89a0ba2a7ed1",
+    "company_id": "df63bcb0-3900-4a1c-8ad0-93c6b5a1db04",
+    "company_code": "laprairie",
+    "user_type": "user",
+    "name": "현대백화점 무역센터점 라프레리",
+    "is_new_admin": false
+  },
+  "lpkhdhq": {
+    "user_id": "2bc166dc-936c-46eb-9b76-1b3d4f1e88ad",
+    "company_id": "df63bcb0-3900-4a1c-8ad0-93c6b5a1db04",
+    "company_code": "laprairie",
+    "user_type": "user",
+    "name": "현대백화점 압구정본점 라프레리",
+    "is_new_admin": false
+  },
+  "lpkhdpg": {
+    "user_id": "04f8bc6a-e30b-4daf-b86a-ca934bc8e07a",
+    "company_id": "df63bcb0-3900-4a1c-8ad0-93c6b5a1db04",
+    "company_code": "laprairie",
+    "user_type": "user",
+    "name": "현대백화점 판교점 라프레리",
+    "is_new_admin": false
+  },
+  "lpkhdus": {
+    "user_id": "96739fcb-c4dc-44c3-a4f4-b734e8cb82fa",
+    "company_id": "df63bcb0-3900-4a1c-8ad0-93c6b5a1db04",
+    "company_code": "laprairie",
+    "user_type": "user",
+    "name": "현대백화점 울산점 라프레리",
+    "is_new_admin": false
+  },
+  "lpkltbs": {
+    "user_id": "4a5c3890-bcce-44d6-ab9e-d4fbddbc21ea",
+    "company_id": "df63bcb0-3900-4a1c-8ad0-93c6b5a1db04",
+    "company_code": "laprairie",
+    "user_type": "user",
+    "name": "롯데백화점 부산점 라프레리",
+    "is_new_admin": false
+  },
+  "lpkltgj": {
+    "user_id": "3d260325-5941-4ea0-a913-45e670ec3d9e",
+    "company_id": "df63bcb0-3900-4a1c-8ad0-93c6b5a1db04",
+    "company_code": "laprairie",
+    "user_type": "user",
+    "name": "롯데백화점 광주점 라프레리",
+    "is_new_admin": false
+  },
+  "lpklthq": {
+    "user_id": "df427a90-7ccf-490e-b236-e3daccce69eb",
+    "company_id": "df63bcb0-3900-4a1c-8ad0-93c6b5a1db04",
+    "company_code": "laprairie",
+    "user_type": "user",
+    "name": "롯데백화점 본점 라프레리",
+    "is_new_admin": false
+  },
+  "lpkltjs": {
+    "user_id": "b6b7c0a3-f5ad-455d-be5c-44862512b95a",
+    "company_id": "df63bcb0-3900-4a1c-8ad0-93c6b5a1db04",
+    "company_code": "laprairie",
+    "user_type": "user",
+    "name": "롯데백화점 잠실점 라프레리",
+    "is_new_admin": false
+  },
+  "lpkltkn": {
+    "user_id": "d9ddcea5-608b-4b00-a4d8-eddb4534db1d",
+    "company_id": "df63bcb0-3900-4a1c-8ad0-93c6b5a1db04",
+    "company_code": "laprairie",
+    "user_type": "user",
+    "name": "롯데백화점 강남점 라프레리",
+    "is_new_admin": false
+  },
+  "lpksgct": {
+    "user_id": "a3f592a9-0127-4411-ae38-bf00a0a9f3e4",
+    "company_id": "df63bcb0-3900-4a1c-8ad0-93c6b5a1db04",
+    "company_code": "laprairie",
+    "user_type": "user",
+    "name": "신세계백화점 센텀시티점 라프레리",
+    "is_new_admin": false
+  },
+  "lpksgdg": {
+    "user_id": "0f0bcede-f3cf-469f-9558-c55cf9c70ded",
+    "company_id": "df63bcb0-3900-4a1c-8ad0-93c6b5a1db04",
+    "company_code": "laprairie",
+    "user_type": "user",
+    "name": "신세계백화점 대구점 라프레리",
+    "is_new_admin": false
+  },
+  "lpksggg": {
+    "user_id": "3509dd16-10ac-44c2-9923-b9fbe308e522",
+    "company_id": "df63bcb0-3900-4a1c-8ad0-93c6b5a1db04",
+    "company_code": "laprairie",
+    "user_type": "user",
+    "name": "신세계백화점 경기점 라프레리",
+    "is_new_admin": false
+  },
+  "lpksghq": {
+    "user_id": "cb9368af-6ae9-421d-b17b-a9e87cc8a6c6",
+    "company_id": "df63bcb0-3900-4a1c-8ad0-93c6b5a1db04",
+    "company_code": "laprairie",
+    "user_type": "user",
+    "name": "신세계백화점 본점 라프레리",
+    "is_new_admin": false
+  },
+  "lpksgkn": {
+    "user_id": "e26d36eb-4044-405b-8884-10663fd5c881",
+    "company_id": "df63bcb0-3900-4a1c-8ad0-93c6b5a1db04",
+    "company_code": "laprairie",
+    "user_type": "user",
+    "name": "신세계백화점 강남점 라프레리",
+    "is_new_admin": false
+  },
+  "hddg2135": {
+    "user_id": "38e28ba2-6678-4f47-b007-2fa5a413ca08",
+    "company_id": "df63bcb0-3900-4a1c-8ad0-93c6b5a1db04",
+    "company_code": "laprairie",
+    "user_type": "user",
+    "name": "현대백화점 대구점 라프레리",
+    "is_new_admin": false
+  },
+  "mariooutlet01": {
+    "user_id": "54305e4c-0b4f-4e17-945b-11c444c3bcbb",
+    "company_id": "9c228259-a3ca-4832-9feb-d25572717697",
+    "company_code": "mariooutlet",
+    "user_type": "admin",
+    "name": "마리오아울렛 관리자",
+    "is_new_admin": true
+  },
+  "mario1": {
+    "user_id": "a5ca1306-420b-4922-ad9c-d702384191ce",
+    "company_id": "9c228259-a3ca-4832-9feb-d25572717697",
+    "company_code": "mariooutlet",
+    "user_type": "user",
+    "name": "마리오_마케팅팀1",
+    "is_new_admin": false
+  },
+  "mario2": {
+    "user_id": "d2afddb5-223e-42d9-82a1-05b4afb7d033",
+    "company_id": "9c228259-a3ca-4832-9feb-d25572717697",
+    "company_code": "mariooutlet",
+    "user_type": "user",
+    "name": "마리오_마케팅팀2",
+    "is_new_admin": false
+  },
+  "mario4": {
+    "user_id": "e82573d9-daf3-4aa0-a94b-be75372e06cf",
+    "company_id": "9c228259-a3ca-4832-9feb-d25572717697",
+    "company_code": "mariooutlet",
+    "user_type": "user",
+    "name": "마리오_마케팅팀3",
+    "is_new_admin": false
+  },
+  "mario6": {
+    "user_id": "e1daaa58-1891-4da0-8cfe-f3c50528bdd1",
+    "company_id": "9c228259-a3ca-4832-9feb-d25572717697",
+    "company_code": "mariooutlet",
+    "user_type": "user",
+    "name": "마리오_Ebiz2",
+    "is_new_admin": false
+  },
+  "metrocity01": {
+    "user_id": "4166a98b-8f55-4150-8c07-eab7fb929852",
+    "company_id": "70abccd0-d4d6-4bb1-ab31-3b2202aa5060",
+    "company_code": "metrocity",
+    "user_type": "admin",
+    "name": "메트로시티 관리자",
+    "is_new_admin": true
+  },
+  "metrocity": {
+    "user_id": "2534e775-68bf-4fb3-bdf7-aba9e3d861ed",
+    "company_id": "70abccd0-d4d6-4bb1-ab31-3b2202aa5060",
+    "company_code": "metrocity",
+    "user_type": "user",
+    "name": "메트로시티_대행",
+    "is_new_admin": false
+  },
+  "metrocity2": {
+    "user_id": "09ada015-a9bd-49e1-a87e-842bfb3306ef",
+    "company_id": "70abccd0-d4d6-4bb1-ab31-3b2202aa5060",
+    "company_code": "metrocity",
+    "user_type": "user",
+    "name": "메트로시티",
+    "is_new_admin": false
+  },
+  "songzio01": {
+    "user_id": "dcb27878-89b7-421f-a516-87a51f836284",
+    "company_id": "e5ed0dad-4c8f-4c23-827b-a7305e505426",
+    "company_code": "songzio",
+    "user_type": "admin",
+    "name": "송지오옴므 관리자",
+    "is_new_admin": true
+  },
+  "songzio": {
+    "user_id": "41798390-79c6-4719-902d-3f983c521c9e",
+    "company_id": "e5ed0dad-4c8f-4c23-827b-a7305e505426",
+    "company_code": "songzio",
+    "user_type": "user",
+    "name": "송지오옴므",
+    "is_new_admin": false
+  },
+  "songzio1": {
+    "user_id": "2f3ad563-470a-4df8-870c-b460f7f6e7ba",
+    "company_id": "e5ed0dad-4c8f-4c23-827b-a7305e505426",
+    "company_code": "songzio",
+    "user_type": "user",
+    "name": "송지오옴므_여성",
+    "is_new_admin": false
+  },
+  "soongsil": {
+    "user_id": "ee742ed6-61d4-4984-8ca1-0795fb267f84",
+    "company_id": "4a107cef-67da-4390-88de-1f2049baee71",
+    "company_code": "soongsil",
+    "user_type": "admin",
+    "name": "숭실원격평생교육원",
+    "is_new_admin": false
+  },
+  "soos": {
+    "user_id": "b5a36679-666c-4d72-ab26-1f6d88971de0",
+    "company_id": "3935a718-e997-4b55-99d1-ac62d226d51b",
+    "company_code": "soos",
+    "user_type": "admin",
+    "name": "수스_대행",
+    "is_new_admin": false
+  },
+  "techfood": {
+    "user_id": "83bccc1f-102f-4fb9-aba8-d59273c9199a",
+    "company_id": "12f8602f-b7f7-43e8-915a-57b57ae49110",
+    "company_code": "techfood",
+    "user_type": "admin",
+    "name": "주식회사 테크푸드",
+    "is_new_admin": false
+  },
+  "toun28": {
+    "user_id": "6c04e7cf-3142-41d7-918b-f4ea2e0e1eee",
+    "company_id": "b2d11f56-384c-474c-bff0-576e4912e2b9",
+    "company_code": "toun28",
+    "user_type": "admin",
+    "name": "toun28",
+    "is_new_admin": false
+  },
+  "Treksta": {
+    "user_id": "23b997af-bf33-4b66-9923-59872a951403",
+    "company_id": "9f508edd-ce63-4764-9bdd-bd92c485d525",
+    "company_code": "treksta",
+    "user_type": "admin",
+    "name": "트렉스타",
+    "is_new_admin": false
+  },
+  "speakingworks": {
+    "user_id": "74d497e2-f134-489b-a5e7-36d623a06843",
+    "company_id": "2239adb7-d9f4-4bd5-91b5-a808d2a74d20",
+    "company_code": "easyschool",
+    "user_type": "admin",
+    "name": "금정이지어학원",
+    "is_new_admin": false
+  },
+  "skincure": {
+    "user_id": "04f2510f-631f-48c5-bccb-44fb49230874",
+    "company_id": "96a4d972-d244-42c3-a0ae-807645d14769",
+    "company_code": "skincure",
+    "user_type": "admin",
+    "name": "스킨큐어",
+    "is_new_admin": false
+  },
+  "miguhara": {
+    "user_id": "8a593d5e-6734-4010-9194-66533925f817",
+    "company_id": "e0de7586-aee8-4ae7-a8c8-b41cf4605e9e",
+    "company_code": "miguhara",
+    "user_type": "admin",
+    "name": "미구하라_대행",
+    "is_new_admin": false
+  },
+  "nain": {
+    "user_id": "e521cba0-0cf1-4728-9198-3d60a1250e07",
+    "company_id": "cfb0c259-5e4d-4ecd-a401-67afaacd281d",
+    "company_code": "nain",
+    "user_type": "admin",
+    "name": "나인",
+    "is_new_admin": false
+  },
+  "pckr": {
+    "user_id": "c8ba180f-2986-43d2-9e35-7b51e54ac01a",
+    "company_id": "d67bb301-0fb3-459e-a42f-f58fb5d6f0bb",
+    "company_code": "paulaschoice",
+    "user_type": "admin",
+    "name": "폴라초이스코리아",
+    "is_new_admin": false
+  },
+  "quiksilver": {
+    "user_id": "cca941ee-fab2-4627-bbde-2a74164d0421",
+    "company_id": "9496d070-3090-4477-8b14-95952765c071",
+    "company_code": "brk",
+    "user_type": "admin",
+    "name": "주식회사 비알케이컴퍼니",
+    "is_new_admin": false
+  },
+  "repair": {
+    "user_id": "01e2bbee-ffe7-4547-bc76-2b0c557e7b16",
+    "company_id": "4bc0b9d3-f135-4dba-b7de-8967950cb16e",
+    "company_code": "fnda",
+    "user_type": "admin",
+    "name": "에프앤드에이",
+    "is_new_admin": false
+  },
+  "reskin": {
+    "user_id": "f7eebf99-d046-4149-97ad-4e9d9284da7a",
+    "company_id": "72fe2231-4efe-4388-8c62-08c4033a470a",
+    "company_code": "reskin",
+    "user_type": "admin",
+    "name": "리스킨_대행",
+    "is_new_admin": false
+  },
+  "rudtjr": {
+    "user_id": "531ea22f-5683-46ad-9eda-e97f9a3b65f1",
+    "company_id": "7a0b6c45-b088-4aa3-96b2-4772440e66b5",
+    "company_code": "familytwo",
+    "user_type": "admin",
+    "name": "패밀리투",
+    "is_new_admin": false
+  },
+  "martsmart": {
+    "user_id": "1ca3fc0c-fdbd-4707-8add-44404d6d542d",
+    "company_id": "7b7a663b-a0d1-4972-9f9e-1cc980f65c14",
+    "company_code": "martsmart",
+    "user_type": "admin",
+    "name": "마트스마트",
+    "is_new_admin": false
+  },
+  "mdysresort": {
+    "user_id": "51c91229-bf44-47dc-9d1d-52958e981c3b",
+    "company_id": "f02dde2c-f0bb-4af8-9150-15e651076192",
+    "company_code": "mdysresort",
+    "user_type": "admin",
+    "name": "무주덕유산리조트",
+    "is_new_admin": false
+  },
+  "lululemon44117": {
+    "user_id": "8a9eb03d-7942-4935-972a-a50bd1fe3b1c",
+    "company_id": "c9772fc2-f16b-4919-9760-20ef1d501e40",
+    "company_code": "lululemon",
+    "user_type": "admin",
+    "name": "룰루레몬애틀라티카코리아유한회사",
+    "is_new_admin": false
+  },
+  "lumourkorea": {
+    "user_id": "e0d672f7-b2ba-45b0-ad1a-de8e2b55e1bc",
+    "company_id": "08d11593-74b6-4c47-b6b3-43fa000d1dfc",
+    "company_code": "lumourkorea",
+    "user_type": "admin",
+    "name": "라무르코리아",
+    "is_new_admin": false
+  },
+  "letsrun": {
+    "user_id": "5f8a7548-45b1-4ec0-8b10-8ef19daef8ad",
+    "company_id": "c0080fe5-9611-45d6-873c-c62052820ca7",
+    "company_code": "letsrun",
+    "user_type": "admin",
+    "name": "한국마사회",
+    "is_new_admin": false
+  },
+  "labelyoung": {
+    "user_id": "b8fc353b-37a1-4934-8e02-caec314ad5e1",
+    "company_id": "932bc9c5-df2b-4418-af42-723c004b15a1",
+    "company_code": "labelyoung",
+    "user_type": "admin",
+    "name": "라벨영화장품",
+    "is_new_admin": false
+  },
+  "kbjfood": {
+    "user_id": "3999c173-e718-470c-931f-bf2d831381df",
+    "company_id": "05f568c8-99cc-4291-a9c4-51d0d056d6f6",
+    "company_code": "kbjfood",
+    "user_type": "admin",
+    "name": "강복자식품",
+    "is_new_admin": false
+  },
+  "KISA1": {
+    "user_id": "b31144fa-889a-4995-bb6e-51ee83f1b031",
+    "company_id": "6bdfd642-aeee-446d-b6ae-6f8365f3e820",
+    "company_code": "kisa1",
+    "user_type": "admin",
+    "name": "KISA 테스트_1",
+    "is_new_admin": false
+  },
+  "icemanim": {
+    "user_id": "d74b11a0-1661-4c70-8ef3-b78eae7d33f1",
+    "company_id": "aab44666-8ed2-4663-92c9-0c5b6cc08534",
+    "company_code": "chaumet",
+    "user_type": "admin",
+    "name": "쇼메",
+    "is_new_admin": false
+  }
+}

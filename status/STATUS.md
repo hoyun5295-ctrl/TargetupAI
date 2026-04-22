@@ -103,15 +103,30 @@
 ## 4) 🎯 CURRENT_TASK (현재 집중 작업)
 
 > **규칙:** 아래 목표에만 100% 리소스를 집중한다.
-> **⚠️ D-Day: 2026-05-05 새벽 레거시 이관 실행 (Harold + Claude 공동).** 2026-05-06 전체 이관 완료 + 레거시 차단.
+> **⚠️ D-Day: 2026-05-05 새벽 레거시 이관 최종 단계 (Harold + Claude 공동).** 예약발송 + 레거시 Agent 차단.
 >
-> **이관 정책 확정 (2026-04-20, 영업팀장 컨펌 완료):**
+> **📊 이관 진행 현황 (2026-04-22 D134/D135 선제 완료):**
+> | 종류 | 건수 | 상태 | 일자 |
+> |---|---:|---|---|
+> | 계정 (companies 62 + users 141) | — | ✅ | D134 2026-04-22 밤 |
+> | 회신번호 callback_numbers + assignments | 1,492 + 1,051 | ✅ | D135 2026-04-22 오후 |
+> | 수신거부 unsubscribes | 321,389 | ✅ | D135 2026-04-22 오후 |
+> | 레거시 서버 팝업 교체 (migration-popup.jsp) | 10,457→13,924 bytes | ✅ | D135 2026-04-22 저녁 |
+> | 레거시 `/transition` 랜딩 배포 (Nginx) | 47,736 bytes | ✅ | D135 2026-04-22 저녁 |
+> | 주소록 | — | ⛔ 포기 | — |
+> | **선불 잔액 이관 준비** (34사 / 20,398,110원) | 🟡 준비완료 | ⏳ 5/5 재조회후 UPDATE | 런북: `migrate-legacy/D-DAY-PREPAID-RUNBOOK.md` |
+> | **예약발송 76건 + Agent 차단** | 76 | ⏳ **5/5 남음** | 2026-05-05 새벽 |
+>
+> **D135 정합성 검증**: 141명 login_id 전원 expected vs actual 완전 일치 PASS ✅
+> **전환 안내 UI 검증**: Harold님 시크릿창 실화면 전 항목 통과 ✅
+>
+> **이관 정책 (2026-04-20, 영업팀장 컨펌 완료):**
 > - **주소록 이관 X** — 레거시 "쌓아두기" 관행(gwss 샘플 CREATEDT 2.5년) → 각 고객사가 한줄로에 신규 엑셀 재업로드
 > - **이관 대상 3종**: 수신거부(BLOCKEDNUM 33만) + 회신번호(MEMBER_SEND_NUM 3천) + 예약발송(MSGSUMMARY 76건)
 > - **FREE 플랜 상한 10만명** 확정 (Brevo/솔라피 벤치마크)
 > - **예약발송 이관 순서 (중복 발송 방지):** ① 한줄로 campaigns INSERT → ② 레거시 RESERVEYN=0 UPDATE → ③ 레거시 Agent 중지
-> - 서팀장 그룹핑 리스트(레거시 USERID → 한줄로 user_id 매핑) 대기 중
-> - 상세: [`status/LEGACY-MIGRATION.md`](LEGACY-MIGRATION.md)
+> - 제외 대상: 90일 미사용(lush*/labnosh/amanex 등) + 이미 이관(gwss/isoi/shiseido* — 직원 직접 재업로드 예정)
+> - 상세: [`status/LEGACY-MIGRATION.md`](LEGACY-MIGRATION.md) + [`migrate-legacy/`](../migrate-legacy/) 작업 디렉토리
 
 ---
 
@@ -226,7 +241,108 @@
 
 ---
 
-### 📊 D133 (2026-04-22 밤) — 대시보드 카드 상세 개선 + 고객 DB 다운로드 (Phase A+B 통합 — 🟡 수정완료-배포대기)
+### 🚛 D135 (2026-04-22) — 레거시 회신번호+수신거부 이관 + 전환 안내 팝업/랜딩 배포 (✅ 완료)
+
+> **세션 기록:** [`.claude/projects/.../memory/project_d135_legacy_callbacks_unsubs.md`](../.claude/projects/C--Users-ceo-projects-targetup/memory/project_d135_legacy_callbacks_unsubs.md)
+>
+> **배경:** D134 ID 이관 다음날 Harold님 "미리 옮기자" 지시로 5/5 D-Day 전 선제 진행. 레거시 Agent 아직 구동 중이라 예약발송은 5/5에 남김. 오후 데이터 이관 + 저녁 전환 안내 UI 배포까지 한 세션에 통합.
+
+> **🎨 저녁 추가 작업 — 전환 안내 UI 2중 레이어 배포:**
+> - **팝업 (footer include)** `/www/usom/WebContent/inc/migration-popup.jsp` 10,457 → **13,924 bytes** 교체
+>   - D-Day 실시간 카운트다운 배지 (pulse 애니메이션)
+>   - 혜택 배너 최상단에 ✅ "회신번호·수신거부 자동이관 완료" 1줄 추가
+>   - 임시 비번 `qwer1234!` 하드코딩 → "안내받으신 임시 비밀번호" **추상화** (공개 페이지 자격증명 노출 금지)
+>   - 보조 outline CTA "자세한 내용을 확인하세요" → `/transition` 연결
+>   - 커스텀 스크롤바 (`scrollbar-width:thin` + 상하 20px margin)
+> - **랜딩** `https://www.invitobiz.com/transition` 신규 배포 (`/usr/local/nginx/html/transition.html` 47,736 bytes)
+>   - Claude.ai `frontend-design` artifact 초안 → Claude Code가 비번 5곳 제거 / Cloudflare email 난독화 제거 / `app.hanjul.ai`→`hanjul.ai` 전역 / `11년`→`10년` / Footer 중복 링크 제거
+>   - Nginx 설정: `charset utf-8;` 앵커로 sed 안전 삽입 — `location = /transition` exact match (기존 `location /` Tomcat 프록시 영향 0)
+>   - 구성: Hero D-Day count-up + Core 3 + 3-step Guide + Migration Checklist + Big CTA + FAQ + Footer
+> - **로컬 원본**: `docs/legacy-popup.html` / `docs/transition.html` / `docs/migration-popup.jsp`
+> - **배포 절차 8단계** 전부 Harold님 SSH 실행 (CLAUDE.md 원칙 — AI는 서버 접속 금지, 명령어만 안내) → 브라우저 시크릿창 실화면 검증 통과
+>
+> **🎓 핵심 교훈 (메모리 반영):**
+> 1. **공개 페이지 임시비번 하드코딩 금지** — `feedback_no_secret_in_public_page.md` 신설. qwer1234! 노출이 Claude 수동편집 + Claude.ai artifact 양쪽에서 재발 → grep 검증 루틴 필수
+> 2. **Nginx 1.6.3 단일파일 sed 안전 삽입** — `charset utf-8;` 유일 라인 앵커로 사용하여 다른 server 블록 영향 없이 삽입, diff로 정확히 추가 라인만 확인 후 reload
+> 3. **JSP include는 컴파일 시점 include** — `<%@ include %>`는 호출하는 쪽(footer.jsp) touch로 재컴파일 유도, Tomcat 재시작 불필요
+>
+> ---
+>
+> **📊 오후 데이터 이관 결과:**
+>
+> **이관 결과:**
+> | 테이블 | INSERT | 비고 |
+> |---|---:|---|
+> | callback_numbers | 1,492 | label='레거시', 단독 scope='all' / 다중 scope='assigned' |
+> | callback_number_assignments | 1,051 | 다중회사 18곳 배정, assigned_by=해당 company admin |
+> | unsubscribes | 321,389 | source='legacy_migration', user 265,619 + admin 합집합 55,770 (D88 정책) |
+>
+> **정합성 검증 PASS (141/141):** `expected-per-user.json` ↔ `verify_actual.csv` 자동 비교 — 단독회사 admin, 다중회사 user 개별 배정, 다중회사 admin 합집합 DISTINCT 전부 일치.
+>
+> **발생 이슈 + 해결:**
+> 1. `assigned_by` NOT NULL (SCHEMA.md 불일치, D134 교훈 재발) → `admin_user_id` 채움, 전면 롤백 후 재실행
+> 2. `unsubscribes` UNIQUE(user_id, phone) 실제 DB엔 없음 (SCHEMA.md 불일치) → ON CONFLICT 제거, JS Map DISTINCT로 대체
+> 3. Oracle `BLOCKEDNUM.CREATEDT` NULL + `MEMBER_SEND_NUM.REG_DT` VARCHAR2 → 타임스탬프 덤프 제외, USERID+PHONE 2컬럼만
+> 4. sqlplus 로케일 → `LANG=C NLS_LANG=AMERICAN_AMERICA.UTF8`
+> 5. oracle `su - oracle` 다단 명령 붙여넣기로 4회 비번 실패 (계정잠금 직전) → `whoami` 확인 후 우회
+> 6. BLOCKEDNUM 58,209건(18%) 정규화 탈락 중 94%가 빈 phone — 레거시 "쌓아두기" 관행 실증
+> 7. Windows SCP 0바이트 문제 → `cat` 결과 채팅 붙여넣기 우회
+>
+> **작업 디렉토리** `migrate-legacy/`:
+> - scripts 7종: build-user-map / analyze-coverage / gen-dump-sql(+v2) / build-migration-sql / gen-verify-sql / compare-verification
+> - data: 매핑 JSON 3종 + 원본 CSV 2종 + 이관 SQL 2종 + expected/actual + verification-report.json
+> - 5/5 예약발송 이관 시 동일 디렉토리 재활용
+>
+> **핵심 교훈:**
+> 1. **SCHEMA.md 맹신 금지 — D134/D135 연속 재발**. SQL 작성 전 `information_schema.columns` + `pg_constraint` 선행 필수
+> 2. **다단 SSH 명령 블록 일괄 붙여넣기 금지** — 엔터 타이밍 어긋남으로 비번란에 잔여 문자 → 계정잠금 위험
+> 3. **expected vs actual 자동 비교 스크립트**가 정합성 보증의 표준 — 141명 unsub/cb_assign 완전 일치 확인
+> 4. **레거시 Oracle DATE vs VARCHAR2 혼재** — 덤프 전 `DESC TABLE` 필수
+> 5. **다중회사 admin 합집합 (D88 정책) 정상 동작 확인** — 18개 전 회사에서 검증
+
+---
+
+### 🔄 D134 (2026-04-22 밤늦게) — 레거시 ID 일괄 이관 (62 회사 + 141 사용자) + 후속 UI 수정 (✅ 완료)
+
+> **세션 기록:** [`.claude/projects/.../memory/project_d134_legacy_migration.md`](../.claude/projects/C--Users-ceo-projects-targetup/memory/project_d134_legacy_migration.md)
+>
+> **배경:** 오픈 D-Day(5/5) 대비. 서팀장 `ID 신규생성리스트.xlsx`(123명 / 62 회사, 이관완료 6명 제외) 기준 회사·사용자 일괄 SQL 생성·실행. 직원 수작업 며칠→SQL 한 번에 처리.
+>
+> **규칙 (Harold님 확정):**
+> - 단독 회사 (1명, 44개) → 기존 유저ID 그대로 `admin` 승격 (회신번호 등록 권한 필수)
+> - 다중 회사 (2명+, 18개) → 영문명+`01`/`a` 신규 `admin` ID 18개 생성 + 기존 멤버 전부 `user`
+> - 접미 규칙: 영문명에 숫자 포함 → `a` / 없음 → `01`
+> - 임시 비밀번호 `qwer1234!` + `must_change_password=true`
+>
+> **자동화:** `_temp_generate_sql.js` — xlsx 읽기 + bcryptjs hash + UUID 생성 + SQL 조립 → `legacy_migration.sql` 53KB → `psql -1` 단일 트랜잭션 실행
+>
+> **🚨 발생 이슈 + 수정:**
+> 1. `users_user_type_check` CHECK 위반 — DB 허용값 `('admin','user','system')`인데 코드 용어 `company_admin`/`company_user`로 INSERT 시도 → `admin`/`user` 교정 후 재실행 성공
+> 2. 슈퍼관리자 고객사 목록 "총 20개" 표시 — `companiesApi.list()` 기본 limit 20 → `{ limit: 1000 }` 교정 (`AdminDashboard.tsx:997`)
+> 3. 사용자 목록 회사 그룹 무한 스크롤 — `userPage` state + 20개씩 페이지네이션 + 검색/필터 변경 시 1페이지 리셋
+>
+> **최종 검증:**
+> - companies 10 → **72** (신규 62)
+> - users 30 → **171** (admin 69 / user 93 / system 9)
+> - login_id 중복 0건
+> - 슈퍼관리자 UI 정상 표시
+>
+> **배포 완료:** DB INSERT 성공 + 프론트 UI 수정 `tp-deploy-full` 배포
+>
+> **남은 작업 (오픈 D-Day까지):**
+> - 영업팀 임시 비밀번호 안내 (`qwer1234!` + 다중 회사 18개 관리자 ID)
+> - 영문명 검색권장 19개 서팀장 확정 시 변경 (bacon/paige/nsb/jisam/chaumet 등)
+>
+> **핵심 교훈 (CLAUDE.md 반영):**
+> 1. DB CHECK 제약은 `pg_constraint` 쿼리 선행 필수 (SCHEMA.md 맹신 금지)
+> 2. INSERT 사전 충돌 검사는 UNIQUE + CHECK 둘 다
+> 3. 프론트 `pagination.total` vs `배열.length` 혼동 주의 (큰 리스트는 `{limit:1000}` 명시)
+> 4. xlsx 병합셀 `sheet_to_json` 무시 → `sheet['!merges']` 상속 처리 필수
+> 5. 코드 용어(company_admin) vs DB 실값(admin) 불일치 문서화 필요
+
+---
+
+### 📊 D133 (2026-04-22 밤) — 대시보드 카드 상세 개선 + 고객 DB 다운로드 (Phase A+B 통합 — ✅ 배포+실화면 검증 완료)
 
 > **세션 기록:** [`.claude/projects/.../memory/project_dashboard_card_detail.md`](../.claude/projects/C--Users-ceo-projects-targetup/memory/project_dashboard_card_detail.md)
 >

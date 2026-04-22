@@ -1,0 +1,848 @@
+{
+  "ABCOZX": {
+    "company_code": "augustinus",
+    "user_type": "admin",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 0
+  },
+  "acehardware01": {
+    "company_code": "acehardware",
+    "user_type": "admin",
+    "unsub_cnt": 7853,
+    "cb_assign_cnt": 0
+  },
+  "ACEMKT": {
+    "company_code": "acehardware",
+    "user_type": "user",
+    "unsub_cnt": 7853,
+    "cb_assign_cnt": 8
+  },
+  "ACEON": {
+    "company_code": "acehardware",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 8
+  },
+  "afexkorea": {
+    "company_code": "afex",
+    "user_type": "admin",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 0
+  },
+  "ananti01": {
+    "company_code": "ananti",
+    "user_type": "admin",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 0
+  },
+  "ahbusan": {
+    "company_code": "ananti",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 4
+  },
+  "bsuhee1225": {
+    "company_code": "ananti",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 1
+  },
+  "dh200601": {
+    "company_code": "ananti",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 1
+  },
+  "mink95": {
+    "company_code": "ananti",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 1
+  },
+  "moonjh0404": {
+    "company_code": "ananti",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 1
+  },
+  "SOOBIN02": {
+    "company_code": "ananti",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 1
+  },
+  "shw115": {
+    "company_code": "ananti",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 1
+  },
+  "hyobin17": {
+    "company_code": "ananti",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 1
+  },
+  "amc2020": {
+    "company_code": "amcommerce",
+    "user_type": "admin",
+    "unsub_cnt": 5831,
+    "cb_assign_cnt": 0
+  },
+  "arnew": {
+    "company_code": "arnew",
+    "user_type": "admin",
+    "unsub_cnt": 75,
+    "cb_assign_cnt": 0
+  },
+  "babynews": {
+    "company_code": "bacon",
+    "user_type": "admin",
+    "unsub_cnt": 8360,
+    "cb_assign_cnt": 0
+  },
+  "banilaco": {
+    "company_code": "banilaco",
+    "user_type": "admin",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 0
+  },
+  "beigic": {
+    "company_code": "paige",
+    "user_type": "admin",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 0
+  },
+  "benetton01": {
+    "company_code": "benetton",
+    "user_type": "admin",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 0
+  },
+  "benetton": {
+    "company_code": "benetton",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 1
+  },
+  "benetton1": {
+    "company_code": "benetton",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 1
+  },
+  "benetton2": {
+    "company_code": "benetton",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 1
+  },
+  "benetton3": {
+    "company_code": "benetton",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 1
+  },
+  "benetton4": {
+    "company_code": "benetton",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 1
+  },
+  "benetton5": {
+    "company_code": "benetton",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 1
+  },
+  "benjefe01": {
+    "company_code": "benjefe",
+    "user_type": "admin",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 0
+  },
+  "benjefe": {
+    "company_code": "benjefe",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 182
+  },
+  "benjefe1": {
+    "company_code": "benjefe",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 1
+  },
+  "benjefe2": {
+    "company_code": "benjefe",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 1
+  },
+  "benjefe3": {
+    "company_code": "benjefe",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 1
+  },
+  "carrotglobal01": {
+    "company_code": "carrotglobal",
+    "user_type": "admin",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 0
+  },
+  "bhappy1": {
+    "company_code": "carrotglobal",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 2
+  },
+  "bhappy2": {
+    "company_code": "carrotglobal",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 1
+  },
+  "bhappy4": {
+    "company_code": "carrotglobal",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 2
+  },
+  "biellee4040": {
+    "company_code": "nsb",
+    "user_type": "admin",
+    "unsub_cnt": 7,
+    "cb_assign_cnt": 0
+  },
+  "efolium01": {
+    "company_code": "efolium",
+    "user_type": "admin",
+    "unsub_cnt": 248,
+    "cb_assign_cnt": 0
+  },
+  "efolium": {
+    "company_code": "efolium",
+    "user_type": "user",
+    "unsub_cnt": 248,
+    "cb_assign_cnt": 1
+  },
+  "blanc101": {
+    "company_code": "efolium",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 1
+  },
+  "cats0901": {
+    "company_code": "catsfactory",
+    "user_type": "admin",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 0
+  },
+  "crocodile01": {
+    "company_code": "crocodile",
+    "user_type": "admin",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 0
+  },
+  "cdfasms123": {
+    "company_code": "crocodile",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 1
+  },
+  "pdfasms123": {
+    "company_code": "crocodile",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 1
+  },
+  "ydfasms123": {
+    "company_code": "crocodile",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 1
+  },
+  "choisun": {
+    "company_code": "choisun",
+    "user_type": "admin",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 0
+  },
+  "cnxsol": {
+    "company_code": "connexsol",
+    "user_type": "admin",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 0
+  },
+  "comvita01": {
+    "company_code": "comvita",
+    "user_type": "admin",
+    "unsub_cnt": 371,
+    "cb_assign_cnt": 0
+  },
+  "comvita": {
+    "company_code": "comvita",
+    "user_type": "user",
+    "unsub_cnt": 371,
+    "cb_assign_cnt": 1
+  },
+  "comvitaon": {
+    "company_code": "comvita",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 1
+  },
+  "coreya": {
+    "company_code": "jisam",
+    "user_type": "admin",
+    "unsub_cnt": 755,
+    "cb_assign_cnt": 0
+  },
+  "crispyba": {
+    "company_code": "crispybaba",
+    "user_type": "admin",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 0
+  },
+  "dongkook01": {
+    "company_code": "dongkook",
+    "user_type": "admin",
+    "unsub_cnt": 704,
+    "cb_assign_cnt": 0
+  },
+  "dkpharm2": {
+    "company_code": "dongkook",
+    "user_type": "user",
+    "unsub_cnt": 704,
+    "cb_assign_cnt": 3
+  },
+  "dkpharm": {
+    "company_code": "dongkook",
+    "user_type": "user",
+    "unsub_cnt": 107,
+    "cb_assign_cnt": 3
+  },
+  "dp26": {
+    "company_code": "knoumedia",
+    "user_type": "admin",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 0
+  },
+  "dp35": {
+    "company_code": "knoustat",
+    "user_type": "admin",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 0
+  },
+  "dsfashion": {
+    "company_code": "dsfashion",
+    "user_type": "admin",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 0
+  },
+  "elensilia": {
+    "company_code": "elensilia",
+    "user_type": "admin",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 0
+  },
+  "Everych": {
+    "company_code": "everych",
+    "user_type": "admin",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 0
+  },
+  "giantg": {
+    "company_code": "giantgolf",
+    "user_type": "admin",
+    "unsub_cnt": 1601,
+    "cb_assign_cnt": 0
+  },
+  "guess": {
+    "company_code": "guesskorea",
+    "user_type": "admin",
+    "unsub_cnt": 8828,
+    "cb_assign_cnt": 0
+  },
+  "hpio": {
+    "company_code": "hpio",
+    "user_type": "admin",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 0
+  },
+  "idlook01": {
+    "company_code": "idlook",
+    "user_type": "admin",
+    "unsub_cnt": 14427,
+    "cb_assign_cnt": 0
+  },
+  "idlook": {
+    "company_code": "idlook",
+    "user_type": "user",
+    "unsub_cnt": 11595,
+    "cb_assign_cnt": 1
+  },
+  "idlookcs": {
+    "company_code": "idlook",
+    "user_type": "user",
+    "unsub_cnt": 3,
+    "cb_assign_cnt": 1
+  },
+  "idlookcs2": {
+    "company_code": "idlook",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 1
+  },
+  "idlooksms": {
+    "company_code": "idlook",
+    "user_type": "user",
+    "unsub_cnt": 3012,
+    "cb_assign_cnt": 81
+  },
+  "isae01": {
+    "company_code": "isae",
+    "user_type": "admin",
+    "unsub_cnt": 2312,
+    "cb_assign_cnt": 0
+  },
+  "isae": {
+    "company_code": "isae",
+    "user_type": "user",
+    "unsub_cnt": 2310,
+    "cb_assign_cnt": 150
+  },
+  "isaeshop": {
+    "company_code": "isae",
+    "user_type": "user",
+    "unsub_cnt": 347,
+    "cb_assign_cnt": 3
+  },
+  "jessinewyork01": {
+    "company_code": "jessinewyork",
+    "user_type": "admin",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 0
+  },
+  "jessi": {
+    "company_code": "jessinewyork",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 189
+  },
+  "jessi1": {
+    "company_code": "jessinewyork",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 1
+  },
+  "jessi2": {
+    "company_code": "jessinewyork",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 1
+  },
+  "jessi3": {
+    "company_code": "jessinewyork",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 1
+  },
+  "jessi4": {
+    "company_code": "jessinewyork",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 2
+  },
+  "kumkang01": {
+    "company_code": "kumkang",
+    "user_type": "admin",
+    "unsub_cnt": 29851,
+    "cb_assign_cnt": 0
+  },
+  "kumkang": {
+    "company_code": "kumkang",
+    "user_type": "user",
+    "unsub_cnt": 29851,
+    "cb_assign_cnt": 127
+  },
+  "kumkang2": {
+    "company_code": "kumkang",
+    "user_type": "user",
+    "unsub_cnt": 29851,
+    "cb_assign_cnt": 62
+  },
+  "kumkang3": {
+    "company_code": "kumkang",
+    "user_type": "user",
+    "unsub_cnt": 29851,
+    "cb_assign_cnt": 46
+  },
+  "kumkang4": {
+    "company_code": "kumkang",
+    "user_type": "user",
+    "unsub_cnt": 29851,
+    "cb_assign_cnt": 1
+  },
+  "creationl01": {
+    "company_code": "creationl",
+    "user_type": "admin",
+    "unsub_cnt": 1,
+    "cb_assign_cnt": 0
+  },
+  "louisquatorze1": {
+    "company_code": "creationl",
+    "user_type": "user",
+    "unsub_cnt": 1,
+    "cb_assign_cnt": 3
+  },
+  "louisquatorze3": {
+    "company_code": "creationl",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 4
+  },
+  "laprairie01": {
+    "company_code": "laprairie",
+    "user_type": "admin",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 0
+  },
+  "laprairie": {
+    "company_code": "laprairie",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 47
+  },
+  "laprairieak": {
+    "company_code": "laprairie",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 1
+  },
+  "lpcom": {
+    "company_code": "laprairie",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 2
+  },
+  "lpglgg": {
+    "company_code": "laprairie",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 2
+  },
+  "lphdmd": {
+    "company_code": "laprairie",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 1
+  },
+  "lpkglhq": {
+    "company_code": "laprairie",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 1
+  },
+  "lpkhdch": {
+    "company_code": "laprairie",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 1
+  },
+  "lpkhdcx": {
+    "company_code": "laprairie",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 1
+  },
+  "lpkhdhq": {
+    "company_code": "laprairie",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 1
+  },
+  "lpkhdpg": {
+    "company_code": "laprairie",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 1
+  },
+  "lpkhdus": {
+    "company_code": "laprairie",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 1
+  },
+  "lpkltbs": {
+    "company_code": "laprairie",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 1
+  },
+  "lpkltgj": {
+    "company_code": "laprairie",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 1
+  },
+  "lpklthq": {
+    "company_code": "laprairie",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 1
+  },
+  "lpkltjs": {
+    "company_code": "laprairie",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 1
+  },
+  "lpkltkn": {
+    "company_code": "laprairie",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 1
+  },
+  "lpksgct": {
+    "company_code": "laprairie",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 1
+  },
+  "lpksgdg": {
+    "company_code": "laprairie",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 1
+  },
+  "lpksggg": {
+    "company_code": "laprairie",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 1
+  },
+  "lpksghq": {
+    "company_code": "laprairie",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 1
+  },
+  "lpksgkn": {
+    "company_code": "laprairie",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 1
+  },
+  "hddg2135": {
+    "company_code": "laprairie",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 2
+  },
+  "mariooutlet01": {
+    "company_code": "mariooutlet",
+    "user_type": "admin",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 0
+  },
+  "mario1": {
+    "company_code": "mariooutlet",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 1
+  },
+  "mario2": {
+    "company_code": "mariooutlet",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 6
+  },
+  "mario4": {
+    "company_code": "mariooutlet",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 1
+  },
+  "mario6": {
+    "company_code": "mariooutlet",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 2
+  },
+  "metrocity01": {
+    "company_code": "metrocity",
+    "user_type": "admin",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 0
+  },
+  "metrocity": {
+    "company_code": "metrocity",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 29
+  },
+  "metrocity2": {
+    "company_code": "metrocity",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 29
+  },
+  "songzio01": {
+    "company_code": "songzio",
+    "user_type": "admin",
+    "unsub_cnt": 3,
+    "cb_assign_cnt": 0
+  },
+  "songzio": {
+    "company_code": "songzio",
+    "user_type": "user",
+    "unsub_cnt": 3,
+    "cb_assign_cnt": 1
+  },
+  "songzio1": {
+    "company_code": "songzio",
+    "user_type": "user",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 1
+  },
+  "soongsil": {
+    "company_code": "soongsil",
+    "user_type": "admin",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 0
+  },
+  "soos": {
+    "company_code": "soos",
+    "user_type": "admin",
+    "unsub_cnt": 3,
+    "cb_assign_cnt": 0
+  },
+  "techfood": {
+    "company_code": "techfood",
+    "user_type": "admin",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 0
+  },
+  "toun28": {
+    "company_code": "toun28",
+    "user_type": "admin",
+    "unsub_cnt": 22590,
+    "cb_assign_cnt": 0
+  },
+  "Treksta": {
+    "company_code": "treksta",
+    "user_type": "admin",
+    "unsub_cnt": 69,
+    "cb_assign_cnt": 0
+  },
+  "speakingworks": {
+    "company_code": "easyschool",
+    "user_type": "admin",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 0
+  },
+  "skincure": {
+    "company_code": "skincure",
+    "user_type": "admin",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 0
+  },
+  "miguhara": {
+    "company_code": "miguhara",
+    "user_type": "admin",
+    "unsub_cnt": 549,
+    "cb_assign_cnt": 0
+  },
+  "nain": {
+    "company_code": "nain",
+    "user_type": "admin",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 0
+  },
+  "pckr": {
+    "company_code": "paulaschoice",
+    "user_type": "admin",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 0
+  },
+  "quiksilver": {
+    "company_code": "brk",
+    "user_type": "admin",
+    "unsub_cnt": 6384,
+    "cb_assign_cnt": 0
+  },
+  "repair": {
+    "company_code": "fnda",
+    "user_type": "admin",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 0
+  },
+  "reskin": {
+    "company_code": "reskin",
+    "user_type": "admin",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 0
+  },
+  "rudtjr": {
+    "company_code": "familytwo",
+    "user_type": "admin",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 0
+  },
+  "martsmart": {
+    "company_code": "martsmart",
+    "user_type": "admin",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 0
+  },
+  "mdysresort": {
+    "company_code": "mdysresort",
+    "user_type": "admin",
+    "unsub_cnt": 1,
+    "cb_assign_cnt": 0
+  },
+  "lululemon44117": {
+    "company_code": "lululemon",
+    "user_type": "admin",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 0
+  },
+  "lumourkorea": {
+    "company_code": "lumourkorea",
+    "user_type": "admin",
+    "unsub_cnt": 37,
+    "cb_assign_cnt": 0
+  },
+  "letsrun": {
+    "company_code": "letsrun",
+    "user_type": "admin",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 0
+  },
+  "labelyoung": {
+    "company_code": "labelyoung",
+    "user_type": "admin",
+    "unsub_cnt": 62431,
+    "cb_assign_cnt": 0
+  },
+  "kbjfood": {
+    "company_code": "kbjfood",
+    "user_type": "admin",
+    "unsub_cnt": 2139,
+    "cb_assign_cnt": 0
+  },
+  "KISA1": {
+    "company_code": "kisa1",
+    "user_type": "admin",
+    "unsub_cnt": 0,
+    "cb_assign_cnt": 0
+  },
+  "icemanim": {
+    "company_code": "chaumet",
+    "user_type": "admin",
+    "unsub_cnt": 1,
+    "cb_assign_cnt": 0
+  }
+}

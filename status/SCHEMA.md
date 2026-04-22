@@ -395,8 +395,9 @@
 
 인덱스: `idx_ksp_company_status(company_id, status)`, `idx_ksp_yellow_id(company_id, yellow_id) UNIQUE WHERE yellow_id IS NOT NULL`
 
-### kakao_templates (카카오 알림톡 템플릿) — D130 IMC 확장
+### kakao_templates (카카오 알림톡 템플릿) — D130 IMC 확장 + D135 검수알림
 > **D130 신규 컬럼 14개 (nullable):** `template_key`, `custom_template_code`, `emphasize_subtitle`, `template_header`, `item_highlight(jsonb)`, `item_list(jsonb)`, `item_summary(jsonb)`, `represent_link(jsonb)`, `preview_message`, `alarm_phone_numbers`, `service_mode(PRD/STG)`, `image_name`, `highlight_image_name`, `last_synced_at`.
+> **D135 추가 컬럼 1개 (nullable):** `alarm_notified_status varchar(10)` — 마지막 담당자 SMS 알림 발송 상태(APPROVED/REJECTED). IMC createAlarmUser 권한(4032) 이슈로 한줄로가 직접 `syncPendingTemplatesJob`에서 발송. 중복 알림 차단용.
 > **인덱스:** `idx_kt_company_template_key UNIQUE`, `idx_kt_status`, `idx_kt_profile_id`.
 
 | 컬럼 | 타입 |
@@ -426,6 +427,7 @@
 | requested_at | timestamptz |
 | reviewed_at | timestamptz |
 | reviewed_by | uuid |
+| alarm_notified_status | varchar(10) NULL — D135+ |
 
 ### kakao_friendtalk_images (카카오 친구톡 이미지, 레거시)
 | 컬럼 | 타입 |

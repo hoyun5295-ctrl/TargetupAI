@@ -42,6 +42,73 @@ export interface AutoCampaignNotifyContext {
   opt080Number?: string;
 }
 
+// ════════════════════════════════════════════════════════════
+// 알림톡 템플릿 검수 결과 알림 (D135+, IMC createAlarmUser 대체)
+// ════════════════════════════════════════════════════════════
+
+export interface TemplateInspectionNotifyContext {
+  templateName: string;
+  profileName?: string | null;
+  status: 'APPROVED' | 'REJECTED';
+  rejectReason?: string | null;
+}
+
+/**
+ * 알림톡 템플릿 검수 결과 알림 메시지 빌더.
+ *
+ * 배경 (D135+):
+ *   이전에는 휴머스온 IMC `createAlarmUser` API로 검수 알림 수신자를 등록하면
+ *   IMC가 승인/반려 시점에 자동으로 카톡 알림을 보내는 구조로 설계되어 있었으나,
+ *   해당 API가 인비토 API 키에 활성화되어 있지 않아 4032 에러로 전면 거부됨.
+ *
+ * 대체 설계:
+ *   - IMC 호출 제거. 한줄로가 직접 SMS로 담당자에게 알림.
+ *   - `alimtalk-jobs.ts` `syncPendingTemplatesJob` 5분 폴링에서 APR/REJ 전환을 감지하면
+ *     `kakao_alarm_users` 활성 수신자 조회 → 인증 라인(getAuthSmsTable)으로 SMS 발송.
+ *   - 추후 한줄로 자체 알림톡 템플릿이 승인되면 SMS→알림톡 전환 예정 (Harold님 로드맵).
+ *
+ * 출력 예시 (승인):
+ *   [알림톡 템플릿 승인]
+ *
+ *   템플릿: 주문 완료 안내
+ *   발신프로필: 주식회사 인비토
+ *
+ *   검수가 승인되었습니다. 이제 발송에 사용할 수 있습니다.
+ *
+ * 출력 예시 (반려):
+ *   [알림톡 템플릿 반려]
+ *
+ *   템플릿: 주문 완료 안내
+ *   발신프로필: 주식회사 인비토
+ *
+ *   반려 사유: 변수명 #{주문번호}에 공백 포함됨
+ *
+ *   관리자 페이지에서 내용을 수정한 뒤 재검수요청 해주세요.
+ */
+export function buildTemplateInspectionNotifyMessage(
+  ctx: TemplateInspectionNotifyContext,
+): string {
+  const lines: string[] = [];
+  const approved = ctx.status === 'APPROVED';
+  lines.push(approved ? '[알림톡 템플릿 승인]' : '[알림톡 템플릿 반려]');
+  lines.push('');
+  lines.push(`템플릿: ${sanitizeSmsText(ctx.templateName)}`);
+  if (ctx.profileName) {
+    lines.push(`발신프로필: ${sanitizeSmsText(ctx.profileName)}`);
+  }
+  lines.push('');
+  if (approved) {
+    lines.push('검수가 승인되었습니다. 이제 발송에 사용할 수 있습니다.');
+  } else {
+    if (ctx.rejectReason) {
+      lines.push(`반려 사유: ${sanitizeSmsText(ctx.rejectReason)}`);
+      lines.push('');
+    }
+    lines.push('관리자 페이지에서 내용을 수정한 뒤 재검수요청 해주세요.');
+  }
+  return lines.join('\n');
+}
+
 /**
  * ★ D111 P5: messageContent에 (광고)+무료거부 부착.
  * D103 buildAdMessage 안전장치(중복 방지) 내장 — 이미 붙어있으면 건드리지 않음.

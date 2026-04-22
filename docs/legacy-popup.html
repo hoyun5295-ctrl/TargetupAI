@@ -24,6 +24,10 @@
       <div style="font-size:22px;font-weight:800;color:#fff;letter-spacing:-0.5px;line-height:1">한줄로<span style="color:#a7f3d0;margin-left:2px">AI</span></div>
     </div>
     <div style="position:relative">
+      <div style="display:inline-flex;align-items:center;gap:7px;padding:6px 12px;background:rgba(255,255,255,0.14);border:1px solid rgba(252,165,165,0.35);border-radius:999px;margin-bottom:12px;font-size:11px;font-weight:600;color:#fff;letter-spacing:0.2px;backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)">
+        <span style="width:6px;height:6px;border-radius:50%;background:#fca5a5;box-shadow:0 0 0 0 rgba(252,165,165,0.7);animation:hjpPulse 1.8s ease-in-out infinite"></span>
+        <span>2026.05.06 레거시 서비스 종료 · D-<span id="hjpDaysLeft">–</span></span>
+      </div>
       <h2 style="margin:0 0 6px;font-size:20px;font-weight:700;color:#fff;letter-spacing:-0.3px">AI 비즈메세징 플랫폼</h2>
       <p style="margin:0;font-size:13px;color:rgba(255,255,255,0.65);font-weight:400">AI 타겟 분석부터 캠페인 발송까지, 기업형 비즈메세징을 한번에</p>
     </div>
@@ -32,8 +36,9 @@
   <!-- ===== 안내 메시지 ===== -->
   <div style="padding:28px 40px 0">
     <p style="margin:0;font-size:15px;color:#374151;line-height:1.85;word-break:keep-all;text-align:center">
-      그동안 이용해주신 고객사 여러분께 감사드리며,<br>
-      AI 시대를 맞이하여 <b style="color:#059669">한줄로AI</b> 서비스를 오픈하였습니다.
+      그동안 이용해주신 고객사 여러분께 감사드립니다.<br>
+      <b style="color:#dc2626">2026년 5월 6일부로 invitobiz.com 발송이 종료</b>되며,<br>
+      후속 서비스 <b style="color:#059669">한줄로AI</b>에서 이어 이용하실 수 있습니다.
     </p>
   </div>
 
@@ -73,6 +78,10 @@
   <div style="padding:20px 40px 0">
     <div style="background:linear-gradient(135deg,#ecfdf5,#f0f9ff);border:1px solid #d1fae5;border-radius:14px;padding:18px 20px;display:flex;flex-direction:column;gap:10px">
       <div style="display:flex;align-items:flex-start;gap:10px">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#059669" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;margin-top:4px"><polyline points="20 6 9 17 4 12"/></svg>
+        <span style="font-size:13px;color:#1f2937;line-height:1.6"><b style="color:#059669">회신번호 · 수신거부 목록은 자동 이관 완료</b> — 재등록 불필요</span>
+      </div>
+      <div style="display:flex;align-items:flex-start;gap:10px">
         <div style="width:6px;height:6px;border-radius:50%;background:#059669;flex-shrink:0;margin-top:7px"></div>
         <span style="font-size:13px;color:#1f2937;line-height:1.6">기존과 동일한 발송 기능이 <b style="color:#059669">모두 내장</b>되어 있습니다</span>
       </div>
@@ -86,7 +95,7 @@
       </div>
       <div style="display:flex;align-items:flex-start;gap:10px">
         <div style="width:6px;height:6px;border-radius:50%;background:#0284c7;flex-shrink:0;margin-top:7px"></div>
-        <span style="font-size:13px;color:#1f2937;line-height:1.6"><b style="color:#0284c7">기존 아이디</b>와 <b style="color:#0284c7">관리자가 안내한 임시 비밀번호</b>로 로그인 후 원하는 비밀번호로 변경해 주세요</span>
+        <span style="font-size:13px;color:#1f2937;line-height:1.6"><b style="color:#0284c7">기존 아이디</b>와 <b style="color:#0284c7">안내받으신 임시 비밀번호</b>로 로그인 후 비밀번호를 변경해 주세요</span>
       </div>
     </div>
   </div>
@@ -107,6 +116,14 @@
     </a>
   </div>
 
+  <!-- ===== 보조 CTA (자세한 내용) ===== -->
+  <div style="padding:10px 40px 0">
+    <a href="/transition" id="hjpCtaSub" style="display:flex;align-items:center;justify-content:center;gap:8px;padding:14.5px 24px;background:#fff;color:#059669;font-size:15px;font-weight:600;border-radius:14px;text-decoration:none;letter-spacing:0.2px;border:1.5px solid #059669;transition:all .2s" onmouseover="this.style.background='#f0fdf4';this.style.borderColor='#047857';this.style.color='#047857'" onmouseout="this.style.background='#fff';this.style.borderColor='#059669';this.style.color='#059669'">
+      자세한 내용을 확인하세요
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg>
+    </a>
+  </div>
+
   <!-- ===== 하단 ===== -->
   <div style="padding:16px 40px 18px;margin-top:20px;display:flex;justify-content:space-between;align-items:center;border-top:1px solid #f3f4f6">
     <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px;color:#9ca3af;user-select:none">
@@ -122,6 +139,13 @@
 <style>
 @keyframes hjpIn{from{opacity:0}to{opacity:1}}
 @keyframes hjpSlide{from{opacity:0;transform:scale(.96) translateY(12px)}to{opacity:1;transform:scale(1) translateY(0)}}
+@keyframes hjpPulse{0%,100%{opacity:1;transform:scale(1);box-shadow:0 0 0 0 rgba(252,165,165,0.6)}50%{opacity:.7;transform:scale(1.25);box-shadow:0 0 0 4px rgba(252,165,165,0)}}
+/* 커스텀 스크롤바 — 둥근 모서리 안쪽에 위치하도록 얇고 상하 여백 적용 */
+#hjpCard{scrollbar-width:thin;scrollbar-color:rgba(15,23,42,0.22) transparent}
+#hjpCard::-webkit-scrollbar{width:6px}
+#hjpCard::-webkit-scrollbar-track{background:transparent;margin:20px 0}
+#hjpCard::-webkit-scrollbar-thumb{background:rgba(15,23,42,0.18);border-radius:10px}
+#hjpCard::-webkit-scrollbar-thumb:hover{background:rgba(15,23,42,0.35)}
 @media(max-width:480px){
   #hjpCard{border-radius:20px 20px 0 0!important;max-height:95vh!important;margin-top:auto!important}
   #hanjulPopup{align-items:flex-end!important}
@@ -142,6 +166,13 @@ function closeHanjulPopup(){
     var el=document.getElementById('hanjulPopup');
     if(el)el.style.display='none';
   }
+})();
+(function(){
+  // 2026-05-06 00:00 KST 까지 남은 일수 실시간 계산
+  var deadline=new Date('2026-05-06T00:00:00+09:00');
+  var days=Math.max(0,Math.ceil((deadline-new Date())/86400000));
+  var el=document.getElementById('hjpDaysLeft');
+  if(el)el.textContent=days;
 })();
 </script>
 

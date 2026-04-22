@@ -1,0 +1,312 @@
+{
+  "augustinus": {
+    "company_id": "ecb714dc-ee06-4869-9c2d-7139b6960369",
+    "company_name": "아우구스티누스 바더",
+    "display_name": "아우구스티누스 바더"
+  },
+  "acehardware": {
+    "company_id": "8afb2332-813e-493f-95c7-cf1f65db3fe7",
+    "company_name": "에이스하드웨어",
+    "display_name": "에이스하드웨어"
+  },
+  "afex": {
+    "company_id": "9423394c-1ac9-452b-91bf-3d4753d4d2ab",
+    "company_name": "주식회사 중평알앤에스",
+    "display_name": "주식회사 중평알앤에스"
+  },
+  "ananti": {
+    "company_id": "5f1fde65-01a8-446b-a712-b34828b40509",
+    "company_name": "아난티",
+    "display_name": "아난티"
+  },
+  "amcommerce": {
+    "company_id": "191b1dae-3155-4a83-b6d5-70e477b635f8",
+    "company_name": "(주)에이엠커머스",
+    "display_name": "(주)에이엠커머스"
+  },
+  "arnew": {
+    "company_id": "62ffa713-521b-4720-aeec-976d1fa5b815",
+    "company_name": "아르뉴",
+    "display_name": "아르뉴"
+  },
+  "bacon": {
+    "company_id": "c4e06607-7681-4813-8ef3-04b538ee225d",
+    "company_name": "주식회사 베이컨",
+    "display_name": "주식회사 베이컨"
+  },
+  "banilaco": {
+    "company_id": "7bca94c7-25af-4ea4-809f-e65c50ee3929",
+    "company_name": "바닐라코",
+    "display_name": "바닐라코"
+  },
+  "paige": {
+    "company_id": "a33445aa-a2bd-4fd7-9159-f2757a117d6d",
+    "company_name": "주식회사 페이지",
+    "display_name": "주식회사 페이지"
+  },
+  "benetton": {
+    "company_id": "d6b3d71c-ed35-4d49-ab72-0392cf789d9e",
+    "company_name": "베네통",
+    "display_name": "베네통"
+  },
+  "benjefe": {
+    "company_id": "8200b378-3245-4297-ad0d-c312cedb6d36",
+    "company_name": "벤제프",
+    "display_name": "벤제프"
+  },
+  "carrotglobal": {
+    "company_id": "e8f0ffa7-2e59-4e2c-ad9f-b762c1d81f98",
+    "company_name": "캐럿글로벌",
+    "display_name": "캐럿글로벌"
+  },
+  "nsb": {
+    "company_id": "806d13d7-4fea-4188-b4d4-ca2d46ecfe2e",
+    "company_name": "엔에스비",
+    "display_name": "엔에스비"
+  },
+  "efolium": {
+    "company_id": "9b30c75a-3d79-43b0-9438-9a617137df67",
+    "company_name": "이폴리움",
+    "display_name": "이폴리움"
+  },
+  "catsfactory": {
+    "company_id": "96ed922b-f310-4fc6-bced-1351330618bc",
+    "company_name": "캣츠팩토리",
+    "display_name": "캣츠팩토리"
+  },
+  "crocodile": {
+    "company_id": "dcee2110-0e59-4ae5-9ab4-da5742739bce",
+    "company_name": "크로커다일",
+    "display_name": "크로커다일"
+  },
+  "choisun": {
+    "company_id": "0d20b03b-4c66-4205-ae81-a3b53a70481d",
+    "company_name": "최선어학원",
+    "display_name": "최선어학원"
+  },
+  "connexsol": {
+    "company_id": "2e5aae2e-e2c2-4139-8f44-7e17d61cbc43",
+    "company_name": "코넥스솔루션",
+    "display_name": "코넥스솔루션"
+  },
+  "comvita": {
+    "company_id": "db4b30be-56fd-4a5e-888f-cfb14e4b99e3",
+    "company_name": "콤비타코리아",
+    "display_name": "콤비타코리아"
+  },
+  "jisam": {
+    "company_id": "144f5470-bb23-4e9f-93e1-af0ae8478ea3",
+    "company_name": "지삼유통",
+    "display_name": "지삼유통"
+  },
+  "crispybaba": {
+    "company_id": "ccef7e86-ad74-49f7-8b7b-9586fc4175ca",
+    "company_name": "(주)경희 크리스피바바",
+    "display_name": "(주)경희 크리스피바바"
+  },
+  "dongkook": {
+    "company_id": "5daf2432-89b1-460c-881c-c129ec8a861b",
+    "company_name": "동국제약",
+    "display_name": "동국제약"
+  },
+  "knoumedia": {
+    "company_id": "cca68c71-4be9-46a5-a6ae-aa52674e8e4b",
+    "company_name": "방통대 미디어영상학과",
+    "display_name": "방통대 미디어영상학과"
+  },
+  "knoustat": {
+    "company_id": "65f18e25-2049-483c-8db1-f5c5b6b0e90e",
+    "company_name": "방통대 통계 데이터과학과",
+    "display_name": "방통대 통계 데이터과학과"
+  },
+  "dsfashion": {
+    "company_id": "4fede2b0-75e9-4477-b52f-4b1f97d91747",
+    "company_name": "디에스패션컴퍼니",
+    "display_name": "디에스패션컴퍼니"
+  },
+  "elensilia": {
+    "company_id": "b657b9fb-91ab-440c-98d4-00d1d6edd687",
+    "company_name": "태영_엘렌실라",
+    "display_name": "태영_엘렌실라"
+  },
+  "everych": {
+    "company_id": "45ec5da2-2f4f-4184-9e2d-bfef5705ed11",
+    "company_name": "에브리치",
+    "display_name": "에브리치"
+  },
+  "giantgolf": {
+    "company_id": "57e17bd3-0008-4b1d-acff-7d13d76a3956",
+    "company_name": "자이언트골프앤투어_광주점",
+    "display_name": "자이언트골프앤투어_광주점"
+  },
+  "guesskorea": {
+    "company_id": "a844d2f2-23de-4157-bd27-1a0b37c60810",
+    "company_name": "게스코리아",
+    "display_name": "게스코리아"
+  },
+  "hpio": {
+    "company_id": "1adb0197-3927-4907-a07b-3631fb61cb5b",
+    "company_name": "에이치피오_덴프스",
+    "display_name": "에이치피오_덴프스"
+  },
+  "idlook": {
+    "company_id": "807cc016-1050-43ae-8bed-67822ab101c0",
+    "company_name": "아이디룩",
+    "display_name": "아이디룩"
+  },
+  "isae": {
+    "company_id": "682956b7-37a3-46b5-9868-b63011bda47b",
+    "company_name": "이새에프앤씨",
+    "display_name": "이새에프앤씨"
+  },
+  "jessinewyork": {
+    "company_id": "a589f07e-66c5-4d8b-9603-ecc1c640b84a",
+    "company_name": "제시뉴욕",
+    "display_name": "제시뉴욕"
+  },
+  "kumkang": {
+    "company_id": "bb1fc50b-7c5b-4080-827e-aef587bcd082",
+    "company_name": "금강제화",
+    "display_name": "금강제화"
+  },
+  "creationl": {
+    "company_id": "88289818-1e7c-4c0b-a7c6-e09ffdd8913b",
+    "company_name": "크리에이션엘",
+    "display_name": "크리에이션엘"
+  },
+  "laprairie": {
+    "company_id": "df63bcb0-3900-4a1c-8ad0-93c6b5a1db04",
+    "company_name": "라프레리",
+    "display_name": "라프레리"
+  },
+  "mariooutlet": {
+    "company_id": "9c228259-a3ca-4832-9feb-d25572717697",
+    "company_name": "마리오아울렛",
+    "display_name": "마리오아울렛"
+  },
+  "metrocity": {
+    "company_id": "70abccd0-d4d6-4bb1-ab31-3b2202aa5060",
+    "company_name": "메트로시티",
+    "display_name": "메트로시티"
+  },
+  "songzio": {
+    "company_id": "e5ed0dad-4c8f-4c23-827b-a7305e505426",
+    "company_name": "송지오옴므",
+    "display_name": "송지오옴므"
+  },
+  "soongsil": {
+    "company_id": "4a107cef-67da-4390-88de-1f2049baee71",
+    "company_name": "숭실원격평생교육원",
+    "display_name": "숭실원격평생교육원"
+  },
+  "soos": {
+    "company_id": "3935a718-e997-4b55-99d1-ac62d226d51b",
+    "company_name": "수스_대행",
+    "display_name": "수스_대행"
+  },
+  "techfood": {
+    "company_id": "12f8602f-b7f7-43e8-915a-57b57ae49110",
+    "company_name": "주식회사 테크푸드",
+    "display_name": "주식회사 테크푸드"
+  },
+  "toun28": {
+    "company_id": "b2d11f56-384c-474c-bff0-576e4912e2b9",
+    "company_name": "toun28",
+    "display_name": "toun28"
+  },
+  "treksta": {
+    "company_id": "9f508edd-ce63-4764-9bdd-bd92c485d525",
+    "company_name": "트렉스타",
+    "display_name": "트렉스타"
+  },
+  "easyschool": {
+    "company_id": "2239adb7-d9f4-4bd5-91b5-a808d2a74d20",
+    "company_name": "금정이지어학원",
+    "display_name": "금정이지어학원"
+  },
+  "skincure": {
+    "company_id": "96a4d972-d244-42c3-a0ae-807645d14769",
+    "company_name": "스킨큐어",
+    "display_name": "스킨큐어"
+  },
+  "miguhara": {
+    "company_id": "e0de7586-aee8-4ae7-a8c8-b41cf4605e9e",
+    "company_name": "미구하라_대행",
+    "display_name": "미구하라_대행"
+  },
+  "nain": {
+    "company_id": "cfb0c259-5e4d-4ecd-a401-67afaacd281d",
+    "company_name": "나인",
+    "display_name": "나인"
+  },
+  "paulaschoice": {
+    "company_id": "d67bb301-0fb3-459e-a42f-f58fb5d6f0bb",
+    "company_name": "폴라초이스코리아",
+    "display_name": "폴라초이스코리아"
+  },
+  "brk": {
+    "company_id": "9496d070-3090-4477-8b14-95952765c071",
+    "company_name": "주식회사 비알케이컴퍼니",
+    "display_name": "주식회사 비알케이컴퍼니"
+  },
+  "fnda": {
+    "company_id": "4bc0b9d3-f135-4dba-b7de-8967950cb16e",
+    "company_name": "에프앤드에이",
+    "display_name": "에프앤드에이"
+  },
+  "reskin": {
+    "company_id": "72fe2231-4efe-4388-8c62-08c4033a470a",
+    "company_name": "리스킨_대행",
+    "display_name": "리스킨_대행"
+  },
+  "familytwo": {
+    "company_id": "7a0b6c45-b088-4aa3-96b2-4772440e66b5",
+    "company_name": "패밀리투",
+    "display_name": "패밀리투"
+  },
+  "martsmart": {
+    "company_id": "7b7a663b-a0d1-4972-9f9e-1cc980f65c14",
+    "company_name": "마트스마트",
+    "display_name": "마트스마트"
+  },
+  "mdysresort": {
+    "company_id": "f02dde2c-f0bb-4af8-9150-15e651076192",
+    "company_name": "무주덕유산리조트",
+    "display_name": "무주덕유산리조트"
+  },
+  "lululemon": {
+    "company_id": "c9772fc2-f16b-4919-9760-20ef1d501e40",
+    "company_name": "룰루레몬애틀라티카코리아유한회사",
+    "display_name": "룰루레몬애틀라티카코리아유한회사"
+  },
+  "lumourkorea": {
+    "company_id": "08d11593-74b6-4c47-b6b3-43fa000d1dfc",
+    "company_name": "라무르코리아",
+    "display_name": "라무르코리아"
+  },
+  "letsrun": {
+    "company_id": "c0080fe5-9611-45d6-873c-c62052820ca7",
+    "company_name": "한국마사회",
+    "display_name": "한국마사회"
+  },
+  "labelyoung": {
+    "company_id": "932bc9c5-df2b-4418-af42-723c004b15a1",
+    "company_name": "라벨영화장품",
+    "display_name": "라벨영화장품"
+  },
+  "kbjfood": {
+    "company_id": "05f568c8-99cc-4291-a9c4-51d0d056d6f6",
+    "company_name": "강복자식품",
+    "display_name": "강복자식품"
+  },
+  "kisa1": {
+    "company_id": "6bdfd642-aeee-446d-b6ae-6f8365f3e820",
+    "company_name": "KISA 테스트_1",
+    "display_name": "KISA 테스트_1"
+  },
+  "chaumet": {
+    "company_id": "aab44666-8ed2-4663-92c9-0c5b6cc08534",
+    "company_name": "쇼메",
+    "display_name": "쇼메"
+  }
+}

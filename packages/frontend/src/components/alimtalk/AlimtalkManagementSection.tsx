@@ -43,6 +43,12 @@ interface Template {
   item_highlight: any;
   item_list: any;
   item_summary: any;
+  represent_link: {
+    urlMobile?: string;
+    urlPc?: string;
+    schemeAndroid?: string;
+    schemeIos?: string;
+  } | null;
   preview_message: string | null;
   alarm_phone_numbers: string | null;
   service_mode: string;
@@ -239,6 +245,12 @@ export default function AlimtalkManagementSection() {
     summary: t.item_summary || null,
     buttons: Array.isArray(t.buttons) ? t.buttons : [],
     securityFlag: t.security_flag || false,
+    // ★ D135+ (B4): 대표링크 복원 (JSONB represent_link)
+    representLinkEnabled: !!t.represent_link?.urlMobile,
+    representLinkMobile: t.represent_link?.urlMobile || '',
+    representLinkPc: t.represent_link?.urlPc || '',
+    representLinkIosScheme: t.represent_link?.schemeIos || '',
+    representLinkAndroidScheme: t.represent_link?.schemeAndroid || '',
   });
 
   const canRegisterTemplate = profiles.length > 0;
@@ -287,18 +299,14 @@ export default function AlimtalkManagementSection() {
                   <th className="text-left px-3 py-2">채널ID</th>
                   <th className="text-left px-3 py-2">카테고리</th>
                   <th className="text-center px-3 py-2">승인</th>
-                  <th className="text-center px-3 py-2">IMC 상태</th>
                   <th className="text-center px-3 py-2">080</th>
                   <th className="text-right px-3 py-2">관리</th>
                 </tr>
               </thead>
               <tbody>
                 {profiles.map((p) => {
-                  const st =
-                    SENDER_STATUS_LABELS[p.status] || {
-                      label: p.status,
-                      cls: 'bg-gray-100 text-gray-500',
-                    };
+                  // ★ D135+: "IMC 상태" 컬럼 삭제. 상위 사업자(휴머스온) 승인 여부를 고객사가 볼 필요 없음.
+                  //   발신프로필 상태는 내부 polling(syncSenderStatusJob)으로만 추적하고 UI 미노출.
                   const ap = APPROVAL_LABELS[p.approval_status || 'PENDING_APPROVAL'] || {
                     label: p.approval_status || '-',
                     cls: 'bg-gray-100 text-gray-500',
@@ -325,11 +333,6 @@ export default function AlimtalkManagementSection() {
                       <td className="text-center px-3 py-2">
                         <span className={`inline-block px-2 py-0.5 rounded ${ap.cls}`}>
                           {ap.label}
-                        </span>
-                      </td>
-                      <td className="text-center px-3 py-2">
-                        <span className={`inline-block px-2 py-0.5 rounded ${st.cls}`}>
-                          {st.label}
                         </span>
                       </td>
                       <td className="text-center px-3 py-2">

@@ -48,6 +48,12 @@ export interface TemplateFormData {
   summary: ItemSummary | null;
   buttons: AlimtalkButton[];
   securityFlag: boolean;
+  // ★ D135+ (B4) 대표링크: 말풍선 전역 클릭 시 이동. 변수 사용 불가, 고정 URL 1조.
+  representLinkEnabled: boolean;
+  representLinkMobile: string;
+  representLinkPc: string;
+  representLinkIosScheme: string;
+  representLinkAndroidScheme: string;
 }
 
 interface Props {
@@ -111,6 +117,12 @@ function initialForm(seed?: Partial<TemplateFormData> | null): TemplateFormData 
     summary: (seed?.summary as ItemSummary) || null,
     buttons: (seed?.buttons as AlimtalkButton[]) || [],
     securityFlag: seed?.securityFlag || false,
+    // ★ D135+ (B4): 기존값이 있으면 활성화 유지
+    representLinkEnabled: !!seed?.representLinkEnabled || !!seed?.representLinkMobile,
+    representLinkMobile: seed?.representLinkMobile || '',
+    representLinkPc: seed?.representLinkPc || '',
+    representLinkIosScheme: seed?.representLinkIosScheme || '',
+    representLinkAndroidScheme: seed?.representLinkAndroidScheme || '',
   };
 }
 
@@ -125,6 +137,9 @@ export default function AlimtalkTemplateFormV2({
   const [form, setForm] = useState<TemplateFormData>(() => initialForm(template));
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<{ type: 'error' | 'success'; message: string } | null>(null);
+
+  // ★ D135+ (B5): 미리보기 메시지 체크박스 — 기존값이 있으면 ON으로 초기화
+  const [previewEnabled, setPreviewEnabled] = useState(() => !!template?.previewMessage);
 
   useEffect(() => {
     if (!toast) return;
@@ -144,6 +159,14 @@ export default function AlimtalkTemplateFormV2({
       }
     }
   }, [form.messageType]);
+
+  // ── D135+ (B5): 보안 템플릿 체크 시 미리보기 메시지 자동 해제 (IMC 정책: 보안 템플릿은 미리보기 불가)
+  useEffect(() => {
+    if (form.securityFlag && (previewEnabled || form.previewMessage)) {
+      setPreviewEnabled(false);
+      setForm((f) => ({ ...f, previewMessage: '' }));
+    }
+  }, [form.securityFlag]);
 
   const forceChannelAdd = form.messageType === 'AD' || form.messageType === 'MI';
 
@@ -169,10 +192,34 @@ export default function AlimtalkTemplateFormV2({
     if (form.emphasizeType === 'ITEM_LIST') {
       if (!form.itemList || form.itemList.length === 0)
         return '아이템리스트에 최소 1개 이상 항목이 필요합니다';
+      // ★ D135+ (B8): 이미지/헤더/하이라이트 중 1개 이상 필수
+      const hasImage = !!form.imageUrl;
+      const hasHeader = !!form.header.trim();
+      const hasHighlight = !!form.highlight;
+      if (!hasImage && !hasHeader && !hasHighlight) {
+        return '아이템리스트는 이미지·헤더·하이라이트 중 1개 이상을 입력해야 합니다';
+      }
+      if (hasHeader && form.header.length > 16)
+        return '헤더는 최대 16자';
+      if (hasHighlight && form.highlight) {
+        if (!form.highlight.title.trim())
+          return '하이라이트 타이틀을 입력하세요';
+      }
     }
     if ((form.messageType === 'EX' || form.messageType === 'MI') && !form.extra.trim())
       return '부가정보형/복합형은 부가정보(extra)가 필수입니다';
     if (form.buttons.length > 5) return '버튼은 최대 5개';
+    // ★ D135+ (B4): 대표링크 검증
+    if (form.representLinkEnabled) {
+      if (!form.representLinkMobile.trim())
+        return '대표링크 Mobile URL은 필수입니다';
+      if (!/^https?:\/\//i.test(form.representLinkMobile.trim()))
+        return '대표링크 Mobile URL은 http:// 또는 https:// 로 시작해야 합니다';
+      if (form.representLinkPc && !/^https?:\/\//i.test(form.representLinkPc.trim()))
+        return '대표링크 PC URL은 http:// 또는 https:// 로 시작해야 합니다';
+      if (form.representLinkMobile.length > 500 || form.representLinkPc.length > 500)
+        return '대표링크 URL은 각 500자 이내';
+    }
     return null;
   };
 
@@ -220,9 +267,24 @@ export default function AlimtalkTemplateFormV2({
       if (form.emphasizeType === 'ITEM_LIST') {
         if (form.header) payload.templateHeader = form.header;
         if (form.highlight) payload.templateItemHighlight = form.highlight;
+        // ★ D135+ (B8): 대표 이미지 포함
+        if (form.imageUrl) {
+          payload.templateImageName = form.imageName;
+          payload.templateImageUrl = form.imageUrl;
+        }
         payload.templateItem = {
           list: form.itemList,
           ...(form.summary ? { summary: form.summary } : {}),
+        };
+      }
+
+      // ★ D135+ (B4): 대표링크 payload
+      if (form.representLinkEnabled && form.representLinkMobile.trim()) {
+        payload.templateRepresentLink = {
+          urlMobile: form.representLinkMobile.trim(),
+          ...(form.representLinkPc.trim() ? { urlPc: form.representLinkPc.trim() } : {}),
+          ...(form.representLinkIosScheme.trim() ? { schemeIos: form.representLinkIosScheme.trim() } : {}),
+          ...(form.representLinkAndroidScheme.trim() ? { schemeAndroid: form.representLinkAndroidScheme.trim() } : {}),
         };
       }
 
@@ -241,6 +303,15 @@ export default function AlimtalkTemplateFormV2({
           message: data?.error || `저장 실패 (${res.status})`,
         });
         return;
+      }
+      // ★ D135+ (B9): 등록 성공 + 자동 검수요청 실패 시 사용자에게 안내
+      //   (템플릿 자체는 DRAFT로 저장됨 → 목록에서 '검수요청' 버튼으로 수동 재시도 가능)
+      if (!isEdit && data.inspectionError) {
+        alert(
+          `템플릿은 등록되었으나 자동 검수요청에 실패했습니다.\n` +
+          `사유: ${data.inspectionError}\n\n` +
+          `목록에서 '검수요청' 버튼으로 다시 시도할 수 있습니다.`,
+        );
       }
       onSuccess();
     } catch (e: any) {
@@ -435,9 +506,14 @@ export default function AlimtalkTemplateFormV2({
               </div>
             )}
 
-            {/* ITEM_LIST 강조 */}
+            {/* ITEM_LIST 강조 — D135+ (B8) 이미지 사용 + 헤더/하이라이트 체크박스 */}
             {form.emphasizeType === 'ITEM_LIST' && (
               <ItemListEditor
+                imageUrl={form.imageUrl}
+                imageName={form.imageName}
+                onImageChange={(url, name) =>
+                  setForm({ ...form, imageUrl: url, imageName: name })
+                }
                 header={form.header}
                 onHeaderChange={(v) => setForm({ ...form, header: v })}
                 highlight={form.highlight}
@@ -472,17 +548,42 @@ export default function AlimtalkTemplateFormV2({
               <VariableChips content={form.content} />
             </div>
 
-            {/* 미리보기 메시지 */}
+            {/* 미리보기 메시지 — D135+ (B5): 체크박스 + 보안템플릿 시 자동 비활성 */}
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">
-                미리보기 메시지 <span className="text-gray-400">(앱 알림 문구, 최대 40자)</span>
-              </label>
-              <input
-                value={form.previewMessage}
-                onChange={(e) => setForm({ ...form, previewMessage: e.target.value })}
-                maxLength={40}
-                className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm"
-              />
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="previewMsgToggle"
+                  checked={previewEnabled && !form.securityFlag}
+                  disabled={form.securityFlag}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setPreviewEnabled(checked);
+                    if (!checked) setForm({ ...form, previewMessage: '' });
+                  }}
+                  className="w-4 h-4 text-amber-600 border-gray-300 rounded disabled:opacity-50"
+                />
+                <label htmlFor="previewMsgToggle" className="text-sm text-gray-700">
+                  미리보기 메시지 설정
+                  <span className="ml-2 text-[11px] text-gray-400">
+                    (앱 알림 문구, 변수 사용 불가)
+                  </span>
+                </label>
+              </div>
+              {form.securityFlag && (
+                <p className="mt-1 ml-6 text-[11px] text-gray-500">
+                  보안 템플릿은 미리보기 메시지를 설정할 수 없습니다.
+                </p>
+              )}
+              {previewEnabled && !form.securityFlag && (
+                <input
+                  value={form.previewMessage}
+                  onChange={(e) => setForm({ ...form, previewMessage: e.target.value })}
+                  maxLength={40}
+                  placeholder="최대 40자 (예: 주문이 접수되었습니다)"
+                  className="mt-2 w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm"
+                />
+              )}
             </div>
 
             {/* 부가정보 (EX/MI) */}
@@ -510,6 +611,84 @@ export default function AlimtalkTemplateFormV2({
               onChange={(b) => setForm({ ...form, buttons: b })}
               forceChannelAdd={forceChannelAdd}
             />
+
+            {/* 대표링크 — D135+ (B4): 말풍선 전역 클릭 시 이동 (변수 사용 불가, 고정 URL) */}
+            <div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="representLinkToggle"
+                  checked={form.representLinkEnabled}
+                  onChange={(e) => setForm({ ...form, representLinkEnabled: e.target.checked })}
+                  className="w-4 h-4 text-amber-600 border-gray-300 rounded"
+                />
+                <label htmlFor="representLinkToggle" className="text-sm text-gray-700 font-medium">
+                  대표링크 설정
+                  <span className="ml-2 text-[11px] text-gray-400">
+                    (말풍선 전역 클릭, 변수 사용 불가)
+                  </span>
+                </label>
+              </div>
+              {form.representLinkEnabled && (
+                <div className="mt-2 space-y-2 rounded-xl border border-amber-200 bg-amber-50/40 p-3">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[11px] text-gray-600 mb-1">
+                        Mobile URL <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        value={form.representLinkMobile}
+                        onChange={(e) => setForm({ ...form, representLinkMobile: e.target.value })}
+                        placeholder="https://"
+                        maxLength={500}
+                        className="w-full border border-gray-300 rounded px-2 py-1 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] text-gray-600 mb-1">
+                        PC URL <span className="text-gray-400">(선택)</span>
+                      </label>
+                      <input
+                        value={form.representLinkPc}
+                        onChange={(e) => setForm({ ...form, representLinkPc: e.target.value })}
+                        placeholder="https://"
+                        maxLength={500}
+                        className="w-full border border-gray-300 rounded px-2 py-1 text-sm"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[11px] text-gray-600 mb-1">
+                        iOS scheme <span className="text-gray-400">(선택)</span>
+                      </label>
+                      <input
+                        value={form.representLinkIosScheme}
+                        onChange={(e) => setForm({ ...form, representLinkIosScheme: e.target.value })}
+                        placeholder="예: myapp://path"
+                        maxLength={500}
+                        className="w-full border border-gray-300 rounded px-2 py-1 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] text-gray-600 mb-1">
+                        Android scheme <span className="text-gray-400">(선택)</span>
+                      </label>
+                      <input
+                        value={form.representLinkAndroidScheme}
+                        onChange={(e) => setForm({ ...form, representLinkAndroidScheme: e.target.value })}
+                        placeholder="예: myapp://path"
+                        maxLength={500}
+                        className="w-full border border-gray-300 rounded px-2 py-1 text-sm"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-gray-500">
+                    https:// 또는 http:// 로 시작해야 하며, 각 항목 최대 500자. 웹링크/앱링크 버튼 가이드와 동일 기준이 적용됩니다.
+                  </p>
+                </div>
+              )}
+            </div>
 
             {/* 보안 템플릿 */}
             <div>

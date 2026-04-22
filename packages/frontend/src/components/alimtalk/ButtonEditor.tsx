@@ -71,9 +71,15 @@ export default function ButtonEditor({
     onChange(buttons.filter((_, i) => i !== idx));
   };
 
+  // ★ D135+ (B6): AC 타입 버튼은 IMC 정책상 name이 반드시 "채널 추가"여야 함.
+  //   기존: forceChannelAdd(AD/MI 타입)일 때만 name 고정 → 기본형(BA)에서 사용자가 AC 수동 추가 시
+  //         name 자유 편집 가능 → IMC가 `buttonList[i] AC 버튼명은 "채널 추가"로만 설정 가능` 에러 반환.
+  //   수정: type 전환/추가와 관계없이 type='AC'면 항상 name='채널 추가' 강제. forceChannelAdd 무관.
   const updateBtn = (idx: number, patch: Partial<AlimtalkButton>) => {
     const next = buttons.slice();
-    next[idx] = { ...next[idx], ...patch };
+    const merged = { ...next[idx], ...patch };
+    if (merged.type === 'AC') merged.name = '채널 추가';
+    next[idx] = merged;
     onChange(next);
   };
 
@@ -105,7 +111,8 @@ export default function ButtonEditor({
           idx={idx}
           btn={btn}
           disabled={disabled}
-          acLocked={!!(forceChannelAdd && btn.type === 'AC')}
+          nameLocked={btn.type === 'AC'}
+          removeLocked={!!(forceChannelAdd && btn.type === 'AC')}
           onPatch={(p) => updateBtn(idx, p)}
           onRemove={() => removeBtn(idx)}
         />
@@ -118,14 +125,18 @@ function ButtonRow({
   idx,
   btn,
   disabled,
-  acLocked,
+  nameLocked,
+  removeLocked,
   onPatch,
   onRemove,
 }: {
   idx: number;
   btn: AlimtalkButton;
   disabled?: boolean;
-  acLocked?: boolean;
+  /** type='AC'일 때 name 편집 잠금 (IMC 정책: AC 버튼명은 "채널 추가" 고정) */
+  nameLocked?: boolean;
+  /** AD/MI 타입에서 강제 삽입된 AC 버튼 → 타입/삭제 잠금 */
+  removeLocked?: boolean;
   onPatch: (p: Partial<AlimtalkButton>) => void;
   onRemove: () => void;
 }) {
@@ -134,7 +145,7 @@ function ButtonRow({
     [btn.type],
   );
 
-  const rowDisabled = disabled || acLocked;
+  const typeLocked = disabled || removeLocked;
 
   return (
     <div className="mb-2 bg-gray-50 p-2 rounded-lg space-y-1.5">
@@ -142,7 +153,7 @@ function ButtonRow({
         <span className="text-[11px] text-gray-400 w-6">{idx + 1}.</span>
         <select
           value={btn.type}
-          disabled={rowDisabled}
+          disabled={typeLocked}
           onChange={(e) => onPatch({ type: e.target.value as ButtonLinkType })}
           className="border border-gray-300 rounded px-2 py-1 text-xs w-24 disabled:bg-gray-200"
         >
@@ -154,7 +165,8 @@ function ButtonRow({
         </select>
         <input
           value={btn.name}
-          disabled={rowDisabled}
+          disabled={disabled || nameLocked}
+          readOnly={nameLocked}
           onChange={(e) => onPatch({ name: e.target.value })}
           placeholder="버튼명 (최대 14자)"
           maxLength={14}
@@ -163,8 +175,8 @@ function ButtonRow({
         <button
           type="button"
           onClick={onRemove}
-          disabled={rowDisabled}
-          className={`text-sm px-1 ${rowDisabled ? 'text-gray-300 cursor-not-allowed' : 'text-red-400 hover:text-red-600'}`}
+          disabled={disabled || removeLocked}
+          className={`text-sm px-1 ${disabled || removeLocked ? 'text-gray-300 cursor-not-allowed' : 'text-red-400 hover:text-red-600'}`}
         >
           &times;
         </button>
@@ -270,9 +282,11 @@ function ButtonRow({
         />
       )}
 
-      {btn.type === 'AC' && acLocked && (
+      {btn.type === 'AC' && (
         <p className="text-[11px] text-amber-600 ml-8">
-          채널추가형 메시지는 &quot;채널 추가&quot; 버튼이 필수입니다 (삭제 불가)
+          {removeLocked
+            ? '채널추가형 메시지는 "채널 추가" 버튼이 필수입니다 (삭제 불가)'
+            : 'IMC 정책상 "채널 추가" 버튼의 버튼명은 수정할 수 없습니다'}
         </p>
       )}
     </div>

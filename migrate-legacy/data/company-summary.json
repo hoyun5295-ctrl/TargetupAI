@@ -1,0 +1,1029 @@
+{
+  "augustinus": {
+    "company_id": "ecb714dc-ee06-4869-9c2d-7139b6960369",
+    "company_name": "아우구스티누스 바더",
+    "admin_count": 1,
+    "user_count": 0,
+    "total": 1,
+    "is_multi": false,
+    "admin_login_ids": [
+      "ABCOZX"
+    ],
+    "admin_user_ids": [
+      "2848d5aa-f003-4787-9102-e155608a1406"
+    ],
+    "user_login_ids": []
+  },
+  "acehardware": {
+    "company_id": "8afb2332-813e-493f-95c7-cf1f65db3fe7",
+    "company_name": "에이스하드웨어",
+    "admin_count": 1,
+    "user_count": 2,
+    "total": 3,
+    "is_multi": true,
+    "admin_login_ids": [
+      "acehardware01"
+    ],
+    "admin_user_ids": [
+      "6229750b-3b64-4b08-bb12-0a9b945884d4"
+    ],
+    "user_login_ids": [
+      "ACEMKT",
+      "ACEON"
+    ]
+  },
+  "afex": {
+    "company_id": "9423394c-1ac9-452b-91bf-3d4753d4d2ab",
+    "company_name": "주식회사 중평알앤에스",
+    "admin_count": 1,
+    "user_count": 0,
+    "total": 1,
+    "is_multi": false,
+    "admin_login_ids": [
+      "afexkorea"
+    ],
+    "admin_user_ids": [
+      "0ced7bc1-e4b0-40a9-9232-3fe59852ca07"
+    ],
+    "user_login_ids": []
+  },
+  "ananti": {
+    "company_id": "5f1fde65-01a8-446b-a712-b34828b40509",
+    "company_name": "아난티",
+    "admin_count": 1,
+    "user_count": 8,
+    "total": 9,
+    "is_multi": true,
+    "admin_login_ids": [
+      "ananti01"
+    ],
+    "admin_user_ids": [
+      "9badf4da-2dce-422e-9e51-4532c471f29a"
+    ],
+    "user_login_ids": [
+      "ahbusan",
+      "bsuhee1225",
+      "dh200601",
+      "mink95",
+      "moonjh0404",
+      "SOOBIN02",
+      "shw115",
+      "hyobin17"
+    ]
+  },
+  "amcommerce": {
+    "company_id": "191b1dae-3155-4a83-b6d5-70e477b635f8",
+    "company_name": "(주)에이엠커머스",
+    "admin_count": 1,
+    "user_count": 0,
+    "total": 1,
+    "is_multi": false,
+    "admin_login_ids": [
+      "amc2020"
+    ],
+    "admin_user_ids": [
+      "09bf3ef9-2c2f-4c31-af72-5b468c93c67c"
+    ],
+    "user_login_ids": []
+  },
+  "arnew": {
+    "company_id": "62ffa713-521b-4720-aeec-976d1fa5b815",
+    "company_name": "아르뉴",
+    "admin_count": 1,
+    "user_count": 0,
+    "total": 1,
+    "is_multi": false,
+    "admin_login_ids": [
+      "arnew"
+    ],
+    "admin_user_ids": [
+      "f99a54f7-2af0-479a-931f-e9015406b3c7"
+    ],
+    "user_login_ids": []
+  },
+  "bacon": {
+    "company_id": "c4e06607-7681-4813-8ef3-04b538ee225d",
+    "company_name": "주식회사 베이컨",
+    "admin_count": 1,
+    "user_count": 0,
+    "total": 1,
+    "is_multi": false,
+    "admin_login_ids": [
+      "babynews"
+    ],
+    "admin_user_ids": [
+      "3e4ab264-8ba9-4642-b2c0-724d97978ec5"
+    ],
+    "user_login_ids": []
+  },
+  "banilaco": {
+    "company_id": "7bca94c7-25af-4ea4-809f-e65c50ee3929",
+    "company_name": "바닐라코",
+    "admin_count": 1,
+    "user_count": 0,
+    "total": 1,
+    "is_multi": false,
+    "admin_login_ids": [
+      "banilaco"
+    ],
+    "admin_user_ids": [
+      "dd207f8c-67fe-405b-a4cd-d1131690d174"
+    ],
+    "user_login_ids": []
+  },
+  "paige": {
+    "company_id": "a33445aa-a2bd-4fd7-9159-f2757a117d6d",
+    "company_name": "주식회사 페이지",
+    "admin_count": 1,
+    "user_count": 0,
+    "total": 1,
+    "is_multi": false,
+    "admin_login_ids": [
+      "beigic"
+    ],
+    "admin_user_ids": [
+      "bcea2626-2b68-4f39-a294-8ab907254727"
+    ],
+    "user_login_ids": []
+  },
+  "benetton": {
+    "company_id": "d6b3d71c-ed35-4d49-ab72-0392cf789d9e",
+    "company_name": "베네통",
+    "admin_count": 1,
+    "user_count": 6,
+    "total": 7,
+    "is_multi": true,
+    "admin_login_ids": [
+      "benetton01"
+    ],
+    "admin_user_ids": [
+      "28f1a106-b72d-4c51-b09a-de4c9f962866"
+    ],
+    "user_login_ids": [
+      "benetton",
+      "benetton1",
+      "benetton2",
+      "benetton3",
+      "benetton4",
+      "benetton5"
+    ]
+  },
+  "benjefe": {
+    "company_id": "8200b378-3245-4297-ad0d-c312cedb6d36",
+    "company_name": "벤제프",
+    "admin_count": 1,
+    "user_count": 4,
+    "total": 5,
+    "is_multi": true,
+    "admin_login_ids": [
+      "benjefe01"
+    ],
+    "admin_user_ids": [
+      "bc5044b9-9b30-42b8-907b-f91b682ced0f"
+    ],
+    "user_login_ids": [
+      "benjefe",
+      "benjefe1",
+      "benjefe2",
+      "benjefe3"
+    ]
+  },
+  "carrotglobal": {
+    "company_id": "e8f0ffa7-2e59-4e2c-ad9f-b762c1d81f98",
+    "company_name": "캐럿글로벌",
+    "admin_count": 1,
+    "user_count": 3,
+    "total": 4,
+    "is_multi": true,
+    "admin_login_ids": [
+      "carrotglobal01"
+    ],
+    "admin_user_ids": [
+      "2d102323-5a36-44ad-8d2a-2e8a209a241b"
+    ],
+    "user_login_ids": [
+      "bhappy1",
+      "bhappy2",
+      "bhappy4"
+    ]
+  },
+  "nsb": {
+    "company_id": "806d13d7-4fea-4188-b4d4-ca2d46ecfe2e",
+    "company_name": "엔에스비",
+    "admin_count": 1,
+    "user_count": 0,
+    "total": 1,
+    "is_multi": false,
+    "admin_login_ids": [
+      "biellee4040"
+    ],
+    "admin_user_ids": [
+      "08d7a463-361d-455f-ad77-4318494ffa95"
+    ],
+    "user_login_ids": []
+  },
+  "efolium": {
+    "company_id": "9b30c75a-3d79-43b0-9438-9a617137df67",
+    "company_name": "이폴리움",
+    "admin_count": 1,
+    "user_count": 2,
+    "total": 3,
+    "is_multi": true,
+    "admin_login_ids": [
+      "efolium01"
+    ],
+    "admin_user_ids": [
+      "fb05a153-f4cd-41a5-b5d6-11e53f882e48"
+    ],
+    "user_login_ids": [
+      "efolium",
+      "blanc101"
+    ]
+  },
+  "catsfactory": {
+    "company_id": "96ed922b-f310-4fc6-bced-1351330618bc",
+    "company_name": "캣츠팩토리",
+    "admin_count": 1,
+    "user_count": 0,
+    "total": 1,
+    "is_multi": false,
+    "admin_login_ids": [
+      "cats0901"
+    ],
+    "admin_user_ids": [
+      "3bee5aa9-9152-439d-8a45-08a2e8e54c10"
+    ],
+    "user_login_ids": []
+  },
+  "crocodile": {
+    "company_id": "dcee2110-0e59-4ae5-9ab4-da5742739bce",
+    "company_name": "크로커다일",
+    "admin_count": 1,
+    "user_count": 3,
+    "total": 4,
+    "is_multi": true,
+    "admin_login_ids": [
+      "crocodile01"
+    ],
+    "admin_user_ids": [
+      "c17cb58a-fb58-499c-8d74-9212d2d17a93"
+    ],
+    "user_login_ids": [
+      "cdfasms123",
+      "pdfasms123",
+      "ydfasms123"
+    ]
+  },
+  "choisun": {
+    "company_id": "0d20b03b-4c66-4205-ae81-a3b53a70481d",
+    "company_name": "최선어학원",
+    "admin_count": 1,
+    "user_count": 0,
+    "total": 1,
+    "is_multi": false,
+    "admin_login_ids": [
+      "choisun"
+    ],
+    "admin_user_ids": [
+      "e4b4824c-6357-4e23-afe1-7bd371f0b2b1"
+    ],
+    "user_login_ids": []
+  },
+  "connexsol": {
+    "company_id": "2e5aae2e-e2c2-4139-8f44-7e17d61cbc43",
+    "company_name": "코넥스솔루션",
+    "admin_count": 1,
+    "user_count": 0,
+    "total": 1,
+    "is_multi": false,
+    "admin_login_ids": [
+      "cnxsol"
+    ],
+    "admin_user_ids": [
+      "51145618-3db7-4c80-98b6-bc9686e34aa0"
+    ],
+    "user_login_ids": []
+  },
+  "comvita": {
+    "company_id": "db4b30be-56fd-4a5e-888f-cfb14e4b99e3",
+    "company_name": "콤비타코리아",
+    "admin_count": 1,
+    "user_count": 2,
+    "total": 3,
+    "is_multi": true,
+    "admin_login_ids": [
+      "comvita01"
+    ],
+    "admin_user_ids": [
+      "3fea2de3-1eb4-4f96-9e6f-aadc711029a3"
+    ],
+    "user_login_ids": [
+      "comvita",
+      "comvitaon"
+    ]
+  },
+  "jisam": {
+    "company_id": "144f5470-bb23-4e9f-93e1-af0ae8478ea3",
+    "company_name": "지삼유통",
+    "admin_count": 1,
+    "user_count": 0,
+    "total": 1,
+    "is_multi": false,
+    "admin_login_ids": [
+      "coreya"
+    ],
+    "admin_user_ids": [
+      "4e18d171-db24-413a-811f-7172f7475d2d"
+    ],
+    "user_login_ids": []
+  },
+  "crispybaba": {
+    "company_id": "ccef7e86-ad74-49f7-8b7b-9586fc4175ca",
+    "company_name": "(주)경희 크리스피바바",
+    "admin_count": 1,
+    "user_count": 0,
+    "total": 1,
+    "is_multi": false,
+    "admin_login_ids": [
+      "crispyba"
+    ],
+    "admin_user_ids": [
+      "aa20a4f5-7889-4e59-8d60-bb771cdc659f"
+    ],
+    "user_login_ids": []
+  },
+  "dongkook": {
+    "company_id": "5daf2432-89b1-460c-881c-c129ec8a861b",
+    "company_name": "동국제약",
+    "admin_count": 1,
+    "user_count": 2,
+    "total": 3,
+    "is_multi": true,
+    "admin_login_ids": [
+      "dongkook01"
+    ],
+    "admin_user_ids": [
+      "c7fff07f-4f4c-453a-b12f-42a5709562a1"
+    ],
+    "user_login_ids": [
+      "dkpharm2",
+      "dkpharm"
+    ]
+  },
+  "knoumedia": {
+    "company_id": "cca68c71-4be9-46a5-a6ae-aa52674e8e4b",
+    "company_name": "방통대 미디어영상학과",
+    "admin_count": 1,
+    "user_count": 0,
+    "total": 1,
+    "is_multi": false,
+    "admin_login_ids": [
+      "dp26"
+    ],
+    "admin_user_ids": [
+      "c61a2e07-c541-4881-b9ac-8b73c13ad550"
+    ],
+    "user_login_ids": []
+  },
+  "knoustat": {
+    "company_id": "65f18e25-2049-483c-8db1-f5c5b6b0e90e",
+    "company_name": "방통대 통계 데이터과학과",
+    "admin_count": 1,
+    "user_count": 0,
+    "total": 1,
+    "is_multi": false,
+    "admin_login_ids": [
+      "dp35"
+    ],
+    "admin_user_ids": [
+      "26e0a14c-a808-45f7-bd5a-44d6f871faaf"
+    ],
+    "user_login_ids": []
+  },
+  "dsfashion": {
+    "company_id": "4fede2b0-75e9-4477-b52f-4b1f97d91747",
+    "company_name": "디에스패션컴퍼니",
+    "admin_count": 1,
+    "user_count": 0,
+    "total": 1,
+    "is_multi": false,
+    "admin_login_ids": [
+      "dsfashion"
+    ],
+    "admin_user_ids": [
+      "beca95c3-7f43-4c7a-9004-748db06c5f4e"
+    ],
+    "user_login_ids": []
+  },
+  "elensilia": {
+    "company_id": "b657b9fb-91ab-440c-98d4-00d1d6edd687",
+    "company_name": "태영_엘렌실라",
+    "admin_count": 1,
+    "user_count": 0,
+    "total": 1,
+    "is_multi": false,
+    "admin_login_ids": [
+      "elensilia"
+    ],
+    "admin_user_ids": [
+      "9652f68b-de4a-4a39-a28c-66e4f6140a0d"
+    ],
+    "user_login_ids": []
+  },
+  "everych": {
+    "company_id": "45ec5da2-2f4f-4184-9e2d-bfef5705ed11",
+    "company_name": "에브리치",
+    "admin_count": 1,
+    "user_count": 0,
+    "total": 1,
+    "is_multi": false,
+    "admin_login_ids": [
+      "Everych"
+    ],
+    "admin_user_ids": [
+      "b2e9243a-6a24-47a2-813c-f87f9620155d"
+    ],
+    "user_login_ids": []
+  },
+  "giantgolf": {
+    "company_id": "57e17bd3-0008-4b1d-acff-7d13d76a3956",
+    "company_name": "자이언트골프앤투어_광주점",
+    "admin_count": 1,
+    "user_count": 0,
+    "total": 1,
+    "is_multi": false,
+    "admin_login_ids": [
+      "giantg"
+    ],
+    "admin_user_ids": [
+      "1b3259a5-b8ee-47ed-a00a-c7ee7ce8c7ec"
+    ],
+    "user_login_ids": []
+  },
+  "guesskorea": {
+    "company_id": "a844d2f2-23de-4157-bd27-1a0b37c60810",
+    "company_name": "게스코리아",
+    "admin_count": 1,
+    "user_count": 0,
+    "total": 1,
+    "is_multi": false,
+    "admin_login_ids": [
+      "guess"
+    ],
+    "admin_user_ids": [
+      "fbf3d065-ce61-433a-853f-4b8aed6e08e1"
+    ],
+    "user_login_ids": []
+  },
+  "hpio": {
+    "company_id": "1adb0197-3927-4907-a07b-3631fb61cb5b",
+    "company_name": "에이치피오_덴프스",
+    "admin_count": 1,
+    "user_count": 0,
+    "total": 1,
+    "is_multi": false,
+    "admin_login_ids": [
+      "hpio"
+    ],
+    "admin_user_ids": [
+      "8c3a75e2-6a54-4873-bd79-65e9852f7243"
+    ],
+    "user_login_ids": []
+  },
+  "idlook": {
+    "company_id": "807cc016-1050-43ae-8bed-67822ab101c0",
+    "company_name": "아이디룩",
+    "admin_count": 1,
+    "user_count": 4,
+    "total": 5,
+    "is_multi": true,
+    "admin_login_ids": [
+      "idlook01"
+    ],
+    "admin_user_ids": [
+      "492d8da4-14c4-497c-ba1a-747e882eaa72"
+    ],
+    "user_login_ids": [
+      "idlook",
+      "idlookcs",
+      "idlookcs2",
+      "idlooksms"
+    ]
+  },
+  "isae": {
+    "company_id": "682956b7-37a3-46b5-9868-b63011bda47b",
+    "company_name": "이새에프앤씨",
+    "admin_count": 1,
+    "user_count": 2,
+    "total": 3,
+    "is_multi": true,
+    "admin_login_ids": [
+      "isae01"
+    ],
+    "admin_user_ids": [
+      "85b25b5b-f6a2-4e0e-b5af-b011e359b7a1"
+    ],
+    "user_login_ids": [
+      "isae",
+      "isaeshop"
+    ]
+  },
+  "jessinewyork": {
+    "company_id": "a589f07e-66c5-4d8b-9603-ecc1c640b84a",
+    "company_name": "제시뉴욕",
+    "admin_count": 1,
+    "user_count": 5,
+    "total": 6,
+    "is_multi": true,
+    "admin_login_ids": [
+      "jessinewyork01"
+    ],
+    "admin_user_ids": [
+      "649e3864-62bc-4e51-803f-e61f1889ba93"
+    ],
+    "user_login_ids": [
+      "jessi",
+      "jessi1",
+      "jessi2",
+      "jessi3",
+      "jessi4"
+    ]
+  },
+  "kumkang": {
+    "company_id": "bb1fc50b-7c5b-4080-827e-aef587bcd082",
+    "company_name": "금강제화",
+    "admin_count": 1,
+    "user_count": 4,
+    "total": 5,
+    "is_multi": true,
+    "admin_login_ids": [
+      "kumkang01"
+    ],
+    "admin_user_ids": [
+      "9bda8768-6b0d-41f2-b3ea-3ef343677240"
+    ],
+    "user_login_ids": [
+      "kumkang",
+      "kumkang2",
+      "kumkang3",
+      "kumkang4"
+    ]
+  },
+  "creationl": {
+    "company_id": "88289818-1e7c-4c0b-a7c6-e09ffdd8913b",
+    "company_name": "크리에이션엘",
+    "admin_count": 1,
+    "user_count": 2,
+    "total": 3,
+    "is_multi": true,
+    "admin_login_ids": [
+      "creationl01"
+    ],
+    "admin_user_ids": [
+      "408d0701-4e34-4548-b2c3-b26d434f20ed"
+    ],
+    "user_login_ids": [
+      "louisquatorze1",
+      "louisquatorze3"
+    ]
+  },
+  "laprairie": {
+    "company_id": "df63bcb0-3900-4a1c-8ad0-93c6b5a1db04",
+    "company_name": "라프레리",
+    "admin_count": 1,
+    "user_count": 22,
+    "total": 23,
+    "is_multi": true,
+    "admin_login_ids": [
+      "laprairie01"
+    ],
+    "admin_user_ids": [
+      "1a927b8e-eb81-4c07-983d-c2a534ecb44d"
+    ],
+    "user_login_ids": [
+      "laprairie",
+      "laprairieak",
+      "lpcom",
+      "lpglgg",
+      "lphdmd",
+      "lpkglhq",
+      "lpkhdch",
+      "lpkhdcx",
+      "lpkhdhq",
+      "lpkhdpg",
+      "lpkhdus",
+      "lpkltbs",
+      "lpkltgj",
+      "lpklthq",
+      "lpkltjs",
+      "lpkltkn",
+      "lpksgct",
+      "lpksgdg",
+      "lpksggg",
+      "lpksghq",
+      "lpksgkn",
+      "hddg2135"
+    ]
+  },
+  "mariooutlet": {
+    "company_id": "9c228259-a3ca-4832-9feb-d25572717697",
+    "company_name": "마리오아울렛",
+    "admin_count": 1,
+    "user_count": 4,
+    "total": 5,
+    "is_multi": true,
+    "admin_login_ids": [
+      "mariooutlet01"
+    ],
+    "admin_user_ids": [
+      "54305e4c-0b4f-4e17-945b-11c444c3bcbb"
+    ],
+    "user_login_ids": [
+      "mario1",
+      "mario2",
+      "mario4",
+      "mario6"
+    ]
+  },
+  "metrocity": {
+    "company_id": "70abccd0-d4d6-4bb1-ab31-3b2202aa5060",
+    "company_name": "메트로시티",
+    "admin_count": 1,
+    "user_count": 2,
+    "total": 3,
+    "is_multi": true,
+    "admin_login_ids": [
+      "metrocity01"
+    ],
+    "admin_user_ids": [
+      "4166a98b-8f55-4150-8c07-eab7fb929852"
+    ],
+    "user_login_ids": [
+      "metrocity",
+      "metrocity2"
+    ]
+  },
+  "songzio": {
+    "company_id": "e5ed0dad-4c8f-4c23-827b-a7305e505426",
+    "company_name": "송지오옴므",
+    "admin_count": 1,
+    "user_count": 2,
+    "total": 3,
+    "is_multi": true,
+    "admin_login_ids": [
+      "songzio01"
+    ],
+    "admin_user_ids": [
+      "dcb27878-89b7-421f-a516-87a51f836284"
+    ],
+    "user_login_ids": [
+      "songzio",
+      "songzio1"
+    ]
+  },
+  "soongsil": {
+    "company_id": "4a107cef-67da-4390-88de-1f2049baee71",
+    "company_name": "숭실원격평생교육원",
+    "admin_count": 1,
+    "user_count": 0,
+    "total": 1,
+    "is_multi": false,
+    "admin_login_ids": [
+      "soongsil"
+    ],
+    "admin_user_ids": [
+      "ee742ed6-61d4-4984-8ca1-0795fb267f84"
+    ],
+    "user_login_ids": []
+  },
+  "soos": {
+    "company_id": "3935a718-e997-4b55-99d1-ac62d226d51b",
+    "company_name": "수스_대행",
+    "admin_count": 1,
+    "user_count": 0,
+    "total": 1,
+    "is_multi": false,
+    "admin_login_ids": [
+      "soos"
+    ],
+    "admin_user_ids": [
+      "b5a36679-666c-4d72-ab26-1f6d88971de0"
+    ],
+    "user_login_ids": []
+  },
+  "techfood": {
+    "company_id": "12f8602f-b7f7-43e8-915a-57b57ae49110",
+    "company_name": "주식회사 테크푸드",
+    "admin_count": 1,
+    "user_count": 0,
+    "total": 1,
+    "is_multi": false,
+    "admin_login_ids": [
+      "techfood"
+    ],
+    "admin_user_ids": [
+      "83bccc1f-102f-4fb9-aba8-d59273c9199a"
+    ],
+    "user_login_ids": []
+  },
+  "toun28": {
+    "company_id": "b2d11f56-384c-474c-bff0-576e4912e2b9",
+    "company_name": "toun28",
+    "admin_count": 1,
+    "user_count": 0,
+    "total": 1,
+    "is_multi": false,
+    "admin_login_ids": [
+      "toun28"
+    ],
+    "admin_user_ids": [
+      "6c04e7cf-3142-41d7-918b-f4ea2e0e1eee"
+    ],
+    "user_login_ids": []
+  },
+  "treksta": {
+    "company_id": "9f508edd-ce63-4764-9bdd-bd92c485d525",
+    "company_name": "트렉스타",
+    "admin_count": 1,
+    "user_count": 0,
+    "total": 1,
+    "is_multi": false,
+    "admin_login_ids": [
+      "Treksta"
+    ],
+    "admin_user_ids": [
+      "23b997af-bf33-4b66-9923-59872a951403"
+    ],
+    "user_login_ids": []
+  },
+  "easyschool": {
+    "company_id": "2239adb7-d9f4-4bd5-91b5-a808d2a74d20",
+    "company_name": "금정이지어학원",
+    "admin_count": 1,
+    "user_count": 0,
+    "total": 1,
+    "is_multi": false,
+    "admin_login_ids": [
+      "speakingworks"
+    ],
+    "admin_user_ids": [
+      "74d497e2-f134-489b-a5e7-36d623a06843"
+    ],
+    "user_login_ids": []
+  },
+  "skincure": {
+    "company_id": "96a4d972-d244-42c3-a0ae-807645d14769",
+    "company_name": "스킨큐어",
+    "admin_count": 1,
+    "user_count": 0,
+    "total": 1,
+    "is_multi": false,
+    "admin_login_ids": [
+      "skincure"
+    ],
+    "admin_user_ids": [
+      "04f2510f-631f-48c5-bccb-44fb49230874"
+    ],
+    "user_login_ids": []
+  },
+  "miguhara": {
+    "company_id": "e0de7586-aee8-4ae7-a8c8-b41cf4605e9e",
+    "company_name": "미구하라_대행",
+    "admin_count": 1,
+    "user_count": 0,
+    "total": 1,
+    "is_multi": false,
+    "admin_login_ids": [
+      "miguhara"
+    ],
+    "admin_user_ids": [
+      "8a593d5e-6734-4010-9194-66533925f817"
+    ],
+    "user_login_ids": []
+  },
+  "nain": {
+    "company_id": "cfb0c259-5e4d-4ecd-a401-67afaacd281d",
+    "company_name": "나인",
+    "admin_count": 1,
+    "user_count": 0,
+    "total": 1,
+    "is_multi": false,
+    "admin_login_ids": [
+      "nain"
+    ],
+    "admin_user_ids": [
+      "e521cba0-0cf1-4728-9198-3d60a1250e07"
+    ],
+    "user_login_ids": []
+  },
+  "paulaschoice": {
+    "company_id": "d67bb301-0fb3-459e-a42f-f58fb5d6f0bb",
+    "company_name": "폴라초이스코리아",
+    "admin_count": 1,
+    "user_count": 0,
+    "total": 1,
+    "is_multi": false,
+    "admin_login_ids": [
+      "pckr"
+    ],
+    "admin_user_ids": [
+      "c8ba180f-2986-43d2-9e35-7b51e54ac01a"
+    ],
+    "user_login_ids": []
+  },
+  "brk": {
+    "company_id": "9496d070-3090-4477-8b14-95952765c071",
+    "company_name": "주식회사 비알케이컴퍼니",
+    "admin_count": 1,
+    "user_count": 0,
+    "total": 1,
+    "is_multi": false,
+    "admin_login_ids": [
+      "quiksilver"
+    ],
+    "admin_user_ids": [
+      "cca941ee-fab2-4627-bbde-2a74164d0421"
+    ],
+    "user_login_ids": []
+  },
+  "fnda": {
+    "company_id": "4bc0b9d3-f135-4dba-b7de-8967950cb16e",
+    "company_name": "에프앤드에이",
+    "admin_count": 1,
+    "user_count": 0,
+    "total": 1,
+    "is_multi": false,
+    "admin_login_ids": [
+      "repair"
+    ],
+    "admin_user_ids": [
+      "01e2bbee-ffe7-4547-bc76-2b0c557e7b16"
+    ],
+    "user_login_ids": []
+  },
+  "reskin": {
+    "company_id": "72fe2231-4efe-4388-8c62-08c4033a470a",
+    "company_name": "리스킨_대행",
+    "admin_count": 1,
+    "user_count": 0,
+    "total": 1,
+    "is_multi": false,
+    "admin_login_ids": [
+      "reskin"
+    ],
+    "admin_user_ids": [
+      "f7eebf99-d046-4149-97ad-4e9d9284da7a"
+    ],
+    "user_login_ids": []
+  },
+  "familytwo": {
+    "company_id": "7a0b6c45-b088-4aa3-96b2-4772440e66b5",
+    "company_name": "패밀리투",
+    "admin_count": 1,
+    "user_count": 0,
+    "total": 1,
+    "is_multi": false,
+    "admin_login_ids": [
+      "rudtjr"
+    ],
+    "admin_user_ids": [
+      "531ea22f-5683-46ad-9eda-e97f9a3b65f1"
+    ],
+    "user_login_ids": []
+  },
+  "martsmart": {
+    "company_id": "7b7a663b-a0d1-4972-9f9e-1cc980f65c14",
+    "company_name": "마트스마트",
+    "admin_count": 1,
+    "user_count": 0,
+    "total": 1,
+    "is_multi": false,
+    "admin_login_ids": [
+      "martsmart"
+    ],
+    "admin_user_ids": [
+      "1ca3fc0c-fdbd-4707-8add-44404d6d542d"
+    ],
+    "user_login_ids": []
+  },
+  "mdysresort": {
+    "company_id": "f02dde2c-f0bb-4af8-9150-15e651076192",
+    "company_name": "무주덕유산리조트",
+    "admin_count": 1,
+    "user_count": 0,
+    "total": 1,
+    "is_multi": false,
+    "admin_login_ids": [
+      "mdysresort"
+    ],
+    "admin_user_ids": [
+      "51c91229-bf44-47dc-9d1d-52958e981c3b"
+    ],
+    "user_login_ids": []
+  },
+  "lululemon": {
+    "company_id": "c9772fc2-f16b-4919-9760-20ef1d501e40",
+    "company_name": "룰루레몬애틀라티카코리아유한회사",
+    "admin_count": 1,
+    "user_count": 0,
+    "total": 1,
+    "is_multi": false,
+    "admin_login_ids": [
+      "lululemon44117"
+    ],
+    "admin_user_ids": [
+      "8a9eb03d-7942-4935-972a-a50bd1fe3b1c"
+    ],
+    "user_login_ids": []
+  },
+  "lumourkorea": {
+    "company_id": "08d11593-74b6-4c47-b6b3-43fa000d1dfc",
+    "company_name": "라무르코리아",
+    "admin_count": 1,
+    "user_count": 0,
+    "total": 1,
+    "is_multi": false,
+    "admin_login_ids": [
+      "lumourkorea"
+    ],
+    "admin_user_ids": [
+      "e0d672f7-b2ba-45b0-ad1a-de8e2b55e1bc"
+    ],
+    "user_login_ids": []
+  },
+  "letsrun": {
+    "company_id": "c0080fe5-9611-45d6-873c-c62052820ca7",
+    "company_name": "한국마사회",
+    "admin_count": 1,
+    "user_count": 0,
+    "total": 1,
+    "is_multi": false,
+    "admin_login_ids": [
+      "letsrun"
+    ],
+    "admin_user_ids": [
+      "5f8a7548-45b1-4ec0-8b10-8ef19daef8ad"
+    ],
+    "user_login_ids": []
+  },
+  "labelyoung": {
+    "company_id": "932bc9c5-df2b-4418-af42-723c004b15a1",
+    "company_name": "라벨영화장품",
+    "admin_count": 1,
+    "user_count": 0,
+    "total": 1,
+    "is_multi": false,
+    "admin_login_ids": [
+      "labelyoung"
+    ],
+    "admin_user_ids": [
+      "b8fc353b-37a1-4934-8e02-caec314ad5e1"
+    ],
+    "user_login_ids": []
+  },
+  "kbjfood": {
+    "company_id": "05f568c8-99cc-4291-a9c4-51d0d056d6f6",
+    "company_name": "강복자식품",
+    "admin_count": 1,
+    "user_count": 0,
+    "total": 1,
+    "is_multi": false,
+    "admin_login_ids": [
+      "kbjfood"
+    ],
+    "admin_user_ids": [
+      "3999c173-e718-470c-931f-bf2d831381df"
+    ],
+    "user_login_ids": []
+  },
+  "kisa1": {
+    "company_id": "6bdfd642-aeee-446d-b6ae-6f8365f3e820",
+    "company_name": "KISA 테스트_1",
+    "admin_count": 1,
+    "user_count": 0,
+    "total": 1,
+    "is_multi": false,
+    "admin_login_ids": [
+      "KISA1"
+    ],
+    "admin_user_ids": [
+      "b31144fa-889a-4995-bb6e-51ee83f1b031"
+    ],
+    "user_login_ids": []
+  },
+  "chaumet": {
+    "company_id": "aab44666-8ed2-4663-92c9-0c5b6cc08534",
+    "company_name": "쇼메",
+    "admin_count": 1,
+    "user_count": 0,
+    "total": 1,
+    "is_multi": false,
+    "admin_login_ids": [
+      "icemanim"
+    ],
+    "admin_user_ids": [
+      "d74b11a0-1661-4c70-8ef3-b78eae7d33f1"
+    ],
+    "user_login_ids": []
+  }
+}

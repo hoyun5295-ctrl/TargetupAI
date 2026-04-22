@@ -1,0 +1,1505 @@
+{
+  "source_totals": {
+    "blockednum_total": 583104,
+    "member_send_num_total": 6229
+  },
+  "coverage": {
+    "blockednum": {
+      "matched_userids": 33,
+      "matched_count": 329292,
+      "case_insensitive_matched": 0,
+      "case_insensitive_count": 0,
+      "unmatched_userids": 59,
+      "unmatched_count": 253812
+    },
+    "member_send_num": {
+      "matched_userids": 123,
+      "matched_count": 1650,
+      "case_insensitive_matched": 0,
+      "case_insensitive_count": 0,
+      "unmatched_userids": 347,
+      "unmatched_count": 4579
+    }
+  },
+  "blockednum": {
+    "matched": {
+      "ACEMKT": 7853,
+      "Treksta": 69,
+      "amc2020": 6328,
+      "arnew": 84,
+      "babynews": 8360,
+      "biellee4040": 8,
+      "comvita": 374,
+      "coreya": 1303,
+      "dkpharm": 107,
+      "dkpharm2": 706,
+      "efolium": 249,
+      "giantg": 1601,
+      "guess": 8828,
+      "icemanim": 1,
+      "idlook": 11597,
+      "idlookcs": 3,
+      "idlooksms": 3013,
+      "isae": 55025,
+      "isaeshop": 347,
+      "kbjfood": 2141,
+      "kumkang": 29858,
+      "kumkang2": 29858,
+      "kumkang3": 29858,
+      "kumkang4": 29858,
+      "labelyoung": 64428,
+      "louisquatorze1": 1,
+      "lumourkorea": 37,
+      "mdysresort": 1,
+      "miguhara": 549,
+      "quiksilver": 7499,
+      "songzio": 3,
+      "soos": 7,
+      "toun28": 29338
+    },
+    "case_insensitive": {},
+    "unmatched": {
+      "amanex": 30151,
+      "atoknell": 780,
+      "berluti": 313,
+      "bigsalemart4900": 2,
+      "chichera": 1,
+      "dk001": 27,
+      "dk002": 15,
+      "dk003": 28,
+      "erborian": 499,
+      "follkor": 1936,
+      "foodinno": 1783,
+      "foodnsoul": 61,
+      "framex": 37,
+      "giant4224": 1600,
+      "giant464": 1600,
+      "giant503": 1601,
+      "giantb": 1600,
+      "giantd": 1601,
+      "giantus": 1600,
+      "gwss": 4332,
+      "homemart": 94,
+      "homemart5": 1578,
+      "homemart6": 65,
+      "homemart8": 127,
+      "homemart9": 1302,
+      "isoioff": 15581,
+      "kindmy95": 74,
+      "kiwooda": 4,
+      "kumkang5": 28077,
+      "labnosh": 35916,
+      "lemeridien": 204,
+      "lemeridien04": 34,
+      "loccitane": 17008,
+      "loccitane2": 7419,
+      "louis": 12820,
+      "louisquatorze": 1,
+      "lushCRM": 10115,
+      "lushCS": 6884,
+      "lushHR": 6883,
+      "lushIT": 6884,
+      "lushbrand": 6884,
+      "lushdigital": 6884,
+      "lushsales": 6903,
+      "lushshops": 6938,
+      "madoross": 1,
+      "mandom": 852,
+      "melvita": 2214,
+      "mypet": 17750,
+      "ole01": 1,
+      "richmart": 1194,
+      "seoulcoach": 22,
+      "shesmadam": 428,
+      "skwldy1": 121,
+      "smartlove": 3,
+      "ssom": 261,
+      "twelve": 110,
+      "wonshin": 3,
+      "zinwoncnc": 2605,
+      "zionfood": 1
+    }
+  },
+  "member_send_num": {
+    "matched": {
+      "ABCOZX": 2,
+      "ACEMKT": 8,
+      "ACEON": 8,
+      "Everych": 3,
+      "KISA1": 1,
+      "SOOBIN02": 1,
+      "Treksta": 22,
+      "afexkorea": 3,
+      "ahbusan": 4,
+      "amc2020": 2,
+      "arnew": 1,
+      "babynews": 8,
+      "banilaco": 1,
+      "beigic": 1,
+      "benetton": 1,
+      "benetton1": 1,
+      "benetton2": 1,
+      "benetton3": 1,
+      "benetton4": 1,
+      "benetton5": 1,
+      "benjefe": 182,
+      "benjefe1": 1,
+      "benjefe2": 1,
+      "benjefe3": 1,
+      "bhappy1": 2,
+      "bhappy2": 1,
+      "bhappy4": 2,
+      "biellee4040": 3,
+      "blanc101": 1,
+      "bsuhee1225": 1,
+      "cats0901": 6,
+      "cdfasms123": 1,
+      "choisun": 73,
+      "cnxsol": 8,
+      "comvita": 1,
+      "comvitaon": 1,
+      "coreya": 4,
+      "crispyba": 36,
+      "dh200601": 1,
+      "dkpharm": 3,
+      "dkpharm2": 3,
+      "dp26": 3,
+      "dp35": 1,
+      "dsfashion": 1,
+      "efolium": 1,
+      "elensilia": 3,
+      "giantg": 1,
+      "guess": 1,
+      "hddg2135": 3,
+      "hpio": 2,
+      "hyobin17": 1,
+      "icemanim": 1,
+      "idlook": 1,
+      "idlookcs": 1,
+      "idlookcs2": 1,
+      "idlooksms": 81,
+      "isae": 150,
+      "isaeshop": 3,
+      "jessi": 189,
+      "jessi1": 1,
+      "jessi2": 1,
+      "jessi3": 1,
+      "jessi4": 2,
+      "kbjfood": 4,
+      "kumkang": 127,
+      "kumkang2": 62,
+      "kumkang3": 46,
+      "kumkang4": 1,
+      "labelyoung": 2,
+      "laprairie": 47,
+      "laprairieak": 1,
+      "letsrun": 6,
+      "louisquatorze1": 3,
+      "louisquatorze3": 4,
+      "lpcom": 2,
+      "lpglgg": 2,
+      "lphdmd": 1,
+      "lpkglhq": 1,
+      "lpkhdch": 1,
+      "lpkhdcx": 1,
+      "lpkhdhq": 1,
+      "lpkhdpg": 1,
+      "lpkhdus": 1,
+      "lpkltbs": 1,
+      "lpkltgj": 1,
+      "lpklthq": 1,
+      "lpkltjs": 1,
+      "lpkltkn": 1,
+      "lpksgct": 1,
+      "lpksgdg": 1,
+      "lpksggg": 1,
+      "lpksghq": 1,
+      "lpksgkn": 1,
+      "lululemon44117": 1,
+      "lumourkorea": 1,
+      "mario1": 1,
+      "mario2": 6,
+      "mario4": 1,
+      "mario6": 2,
+      "martsmart": 3,
+      "mdysresort": 17,
+      "metrocity": 29,
+      "metrocity2": 29,
+      "miguhara": 1,
+      "mink95": 1,
+      "moonjh0404": 1,
+      "nain": 3,
+      "pckr": 1,
+      "pdfasms123": 1,
+      "quiksilver": 16,
+      "repair": 1,
+      "reskin": 3,
+      "rudtjr": 4,
+      "shw115": 1,
+      "skincure": 2,
+      "songzio": 1,
+      "songzio1": 1,
+      "soongsil": 8,
+      "soos": 332,
+      "speakingworks": 1,
+      "techfood": 2,
+      "toun28": 3,
+      "ydfasms123": 1
+    },
+    "case_insensitive": {},
+    "unmatched": {
+      "1717": 1,
+      "ACEKH": 1,
+      "Haroutine": 1,
+      "KISA2": 2,
+      "Lesson1872": 2,
+      "VITRO": 4,
+      "ab10703": 1,
+      "aioli": 1,
+      "aioli2": 1,
+      "alicceshop": 1,
+      "amanex": 152,
+      "amanexanaldo": 193,
+      "amanexys": 177,
+      "ative": 1,
+      "atoknell": 1,
+      "aucom123": 1,
+      "balan": 1,
+      "banilaco1": 3,
+      "bbongdderak": 1,
+      "beigebeige": 4,
+      "berluti": 13,
+      "bhappy3": 1,
+      "bhappy5": 1,
+      "bigsalemart4900": 1,
+      "bluecom": 1,
+      "bmi0717": 1,
+      "boba1980": 1,
+      "bobbibrown": 5,
+      "bobki": 2,
+      "bonghan": 1,
+      "calliaco": 2,
+      "caolion": 3,
+      "carrot1": 1,
+      "carrotglobal": 6,
+      "cat0901": 1,
+      "ceo": 10,
+      "chantecaille": 5,
+      "cherrykoko": 1,
+      "chichera": 1,
+      "choi40179": 2,
+      "chungbuk": 1,
+      "classycp": 2,
+      "cloudcat": 2,
+      "csinfo": 4,
+      "d17188": 1,
+      "ddingdong": 7,
+      "dk001": 1,
+      "dk002": 1,
+      "dk003": 1,
+      "dk004": 1,
+      "dkcos": 2,
+      "dp21": 13,
+      "dreamit": 1,
+      "easyedu1": 2,
+      "elemis": 1,
+      "epicpay": 1,
+      "erborian": 3,
+      "follkor": 16,
+      "foodinno": 177,
+      "foodnsoul": 1,
+      "framex": 3,
+      "froebel": 2,
+      "furina": 16,
+      "g1230": 1,
+      "giant4224": 9,
+      "giant464": 1,
+      "giant503": 8,
+      "giantb": 1,
+      "giantcw": 1,
+      "giantd": 6,
+      "giantus": 1,
+      "giftsmart": 2,
+      "girin0515": 2,
+      "gnco": 1,
+      "gnco1": 1,
+      "gosister": 2,
+      "gramicci": 2,
+      "greenvet7": 1,
+      "gucci": 1,
+      "gwchae": 409,
+      "gwss": 2,
+      "gyeongnammaster": 1,
+      "haeya": 1,
+      "hatson": 2,
+      "heritagefloss": 1,
+      "hjl": 1,
+      "hkjhw0516": 1,
+      "hkjhw0517": 1,
+      "hkjhw0518": 1,
+      "homemart": 1,
+      "homemart5": 1,
+      "homemart6": 1,
+      "homemart8": 1,
+      "homemart9": 3,
+      "hong1004": 1,
+      "hong381": 2,
+      "hotel2023": 1,
+      "hsh": 3,
+      "icfroebel": 1,
+      "ilsoon": 2,
+      "isoi": 3,
+      "isoics": 3,
+      "isoioff": 11,
+      "itteam": 12,
+      "jambangee": 2,
+      "jayong": 1,
+      "jejusunresort": 5,
+      "jessiT": 173,
+      "jessipjs": 1,
+      "joymadam": 1,
+      "jsa1976": 2,
+      "keli00": 1,
+      "kevin1234": 1,
+      "khfnb": 1,
+      "kiditem": 1,
+      "kimdanbi": 156,
+      "kindmy123": 1,
+      "kindmy95": 2,
+      "kiwooda": 1,
+      "kjinc": 1,
+      "kkeh8025": 1,
+      "kmart7778": 2,
+      "koicc": 29,
+      "koicc5013": 1,
+      "koiccds1": 1,
+      "koiccds10": 1,
+      "koiccds11": 1,
+      "koiccds12": 1,
+      "koiccds13": 1,
+      "koiccds14": 1,
+      "koiccds16": 1,
+      "koiccds17": 1,
+      "koiccds18": 1,
+      "koiccds19": 1,
+      "koiccds2": 1,
+      "koiccds20": 1,
+      "koiccds21": 1,
+      "koiccds23": 1,
+      "koiccds24": 1,
+      "koiccds25": 1,
+      "koiccds26": 1,
+      "koiccds27": 1,
+      "koiccds3": 1,
+      "koiccds4": 1,
+      "koiccds5": 1,
+      "koiccds6": 1,
+      "koiccds7": 1,
+      "koiccds8": 1,
+      "koiccds9": 1,
+      "kra": 36,
+      "kra01": 1,
+      "kra02": 2,
+      "kra03": 1,
+      "kra04": 3,
+      "kra05": 1,
+      "kra06": 1,
+      "kra07": 2,
+      "kra08": 1,
+      "kra09": 1,
+      "kra10": 1,
+      "kra11": 2,
+      "kra12": 1,
+      "kra13": 2,
+      "kra14": 1,
+      "kra15": 3,
+      "kra16": 1,
+      "kra17": 1,
+      "kra18": 1,
+      "kra19": 1,
+      "kra20": 1,
+      "kra21": 1,
+      "kra22": 1,
+      "kra23": 1,
+      "kra24": 1,
+      "kra25": 1,
+      "kra26": 1,
+      "kra27": 1,
+      "kra28": 3,
+      "kra29": 1,
+      "kumkang5": 127,
+      "kyobeer": 1,
+      "kyoscm": 5,
+      "labnosh": 8,
+      "labnosh1": 5,
+      "lacoste": 279,
+      "lemeridien": 14,
+      "lemeridien01": 2,
+      "lemeridien02": 3,
+      "lemeridien03": 3,
+      "lemeridien04": 5,
+      "letskoona": 4,
+      "linecampus": 2,
+      "lko455": 1,
+      "loccitane": 77,
+      "loccitane1": 1,
+      "loccitane2": 1,
+      "logona": 1,
+      "lotte0008": 1,
+      "louis": 2,
+      "louisquatorze": 100,
+      "lpkcrm": 27,
+      "lpkdbpl": 1,
+      "lpkgltw1": 1,
+      "lpkhdbs": 1,
+      "ltbd2167": 1,
+      "lushCRM": 1,
+      "lushCS": 1,
+      "lushHR": 3,
+      "lushIT": 1,
+      "lushbrand": 5,
+      "lushdigital": 1,
+      "lushsales": 81,
+      "lushshops": 84,
+      "lyj4589": 1,
+      "maatila": 1,
+      "madoross": 8,
+      "mandom": 1,
+      "mario3": 2,
+      "mario5": 2,
+      "mart119": 1,
+      "marttest000": 1,
+      "marttest001": 1,
+      "mediquitous2": 2,
+      "melvita": 4,
+      "mggeneralins": 2,
+      "mggeneralins1": 1,
+      "mggeneralins2": 1,
+      "mggeneralins3": 1,
+      "mggeneralins4": 1,
+      "milvuscoex": 16,
+      "milvuskra": 1,
+      "minhee129": 1,
+      "minjun050": 1,
+      "mino3003": 1,
+      "moon130013": 1,
+      "mypet": 2,
+      "ncits": 1,
+      "newera": 25,
+      "oit05": 5,
+      "ole01": 1,
+      "olzen": 1,
+      "paulnk": 19,
+      "paycoin": 1,
+      "phhp010": 1,
+      "pump": 1,
+      "pzchicago": 2,
+      "qaz8712": 1,
+      "queen2547": 1,
+      "raidpc": 1,
+      "realcocoglobal": 2,
+      "rebuy": 1,
+      "recre": 1,
+      "redit": 1,
+      "reebonz": 1,
+      "reebonzmkt": 1,
+      "reebonzrentit": 1,
+      "reebonzvintage": 1,
+      "ribbontie": 1,
+      "richmart": 2,
+      "riedelkr": 1,
+      "rotary": 1,
+      "rudtjr11": 4,
+      "sc1": 8,
+      "sc2": 2,
+      "school1004": 5,
+      "sendio": 2,
+      "seoulcoach": 4,
+      "sfunz1234": 1,
+      "sfunz2014": 1,
+      "sfunz3003": 3,
+      "sgbaek": 835,
+      "shesmadam": 1,
+      "shespop": 2,
+      "shinwon": 1,
+      "shiseido": 134,
+      "shiseido1": 42,
+      "shiseido2": 18,
+      "shiseido3": 22,
+      "shiseido4": 54,
+      "shiseido5": 1,
+      "shiseido6": 3,
+      "sisun": 3,
+      "skwldy": 3,
+      "skwldy1": 2,
+      "smartlove": 1,
+      "snueasy": 2,
+      "sol": 1,
+      "soyun0911": 2,
+      "sprc": 1,
+      "ssom": 217,
+      "ssongbyssong": 1,
+      "sstsoz": 1,
+      "stripes": 1,
+      "subin77": 3,
+      "sugarfun": 1,
+      "superbly": 1,
+      "surane": 155,
+      "tbhglobal": 1,
+      "tbswyt": 1,
+      "testid": 1,
+      "testsms": 5,
+      "tfcom": 2,
+      "thankyouajh": 1,
+      "thejany": 1,
+      "themart0700": 1,
+      "thesale": 1,
+      "tlsdydwhd123": 1,
+      "toms": 3,
+      "tonymoly": 1,
+      "toocoolnw": 2,
+      "top0013": 2,
+      "top0083": 1,
+      "top1008": 1,
+      "top711211": 1,
+      "top711212": 1,
+      "top711213": 1,
+      "top711214": 1,
+      "toyoulake9": 1,
+      "trebisegm": 1,
+      "trebisejj": 1,
+      "trebisejj2": 1,
+      "trebiselfyj": 1,
+      "trebiseswyt": 1,
+      "trebiseswyt2": 1,
+      "trebiseusjj": 1,
+      "tt0735": 1,
+      "twelve": 4,
+      "venturesquare": 1,
+      "victoriashoes": 2,
+      "vivienne": 1,
+      "wegocamp": 1,
+      "wmall": 1,
+      "wmallsejong01": 1,
+      "wmallsejong03": 3,
+      "wonshin": 128,
+      "wonshin2": 3,
+      "wonshink": 1,
+      "woori": 1,
+      "yadah": 1,
+      "yeonjis": 1,
+      "youusj": 2,
+      "zinwoncnc": 1,
+      "zionfood": 5,
+      "zionfood1": 1,
+      "zionfood2": 10,
+      "ziosongzio": 1,
+      "zkfflsxm1": 1
+    }
+  },
+  "blocked_by_company": {
+    "acehardware": {
+      "company_id": "8afb2332-813e-493f-95c7-cf1f65db3fe7",
+      "company_name": "에이스하드웨어",
+      "is_multi": true,
+      "userids": {
+        "ACEMKT": 7853
+      },
+      "total": 7853
+    },
+    "treksta": {
+      "company_id": "9f508edd-ce63-4764-9bdd-bd92c485d525",
+      "company_name": "트렉스타",
+      "is_multi": false,
+      "userids": {
+        "Treksta": 69
+      },
+      "total": 69
+    },
+    "amcommerce": {
+      "company_id": "191b1dae-3155-4a83-b6d5-70e477b635f8",
+      "company_name": "(주)에이엠커머스",
+      "is_multi": false,
+      "userids": {
+        "amc2020": 6328
+      },
+      "total": 6328
+    },
+    "arnew": {
+      "company_id": "62ffa713-521b-4720-aeec-976d1fa5b815",
+      "company_name": "아르뉴",
+      "is_multi": false,
+      "userids": {
+        "arnew": 84
+      },
+      "total": 84
+    },
+    "bacon": {
+      "company_id": "c4e06607-7681-4813-8ef3-04b538ee225d",
+      "company_name": "주식회사 베이컨",
+      "is_multi": false,
+      "userids": {
+        "babynews": 8360
+      },
+      "total": 8360
+    },
+    "nsb": {
+      "company_id": "806d13d7-4fea-4188-b4d4-ca2d46ecfe2e",
+      "company_name": "엔에스비",
+      "is_multi": false,
+      "userids": {
+        "biellee4040": 8
+      },
+      "total": 8
+    },
+    "comvita": {
+      "company_id": "db4b30be-56fd-4a5e-888f-cfb14e4b99e3",
+      "company_name": "콤비타코리아",
+      "is_multi": true,
+      "userids": {
+        "comvita": 374
+      },
+      "total": 374
+    },
+    "jisam": {
+      "company_id": "144f5470-bb23-4e9f-93e1-af0ae8478ea3",
+      "company_name": "지삼유통",
+      "is_multi": false,
+      "userids": {
+        "coreya": 1303
+      },
+      "total": 1303
+    },
+    "dongkook": {
+      "company_id": "5daf2432-89b1-460c-881c-c129ec8a861b",
+      "company_name": "동국제약",
+      "is_multi": true,
+      "userids": {
+        "dkpharm": 107,
+        "dkpharm2": 706
+      },
+      "total": 813
+    },
+    "efolium": {
+      "company_id": "9b30c75a-3d79-43b0-9438-9a617137df67",
+      "company_name": "이폴리움",
+      "is_multi": true,
+      "userids": {
+        "efolium": 249
+      },
+      "total": 249
+    },
+    "giantgolf": {
+      "company_id": "57e17bd3-0008-4b1d-acff-7d13d76a3956",
+      "company_name": "자이언트골프앤투어_광주점",
+      "is_multi": false,
+      "userids": {
+        "giantg": 1601
+      },
+      "total": 1601
+    },
+    "guesskorea": {
+      "company_id": "a844d2f2-23de-4157-bd27-1a0b37c60810",
+      "company_name": "게스코리아",
+      "is_multi": false,
+      "userids": {
+        "guess": 8828
+      },
+      "total": 8828
+    },
+    "chaumet": {
+      "company_id": "aab44666-8ed2-4663-92c9-0c5b6cc08534",
+      "company_name": "쇼메",
+      "is_multi": false,
+      "userids": {
+        "icemanim": 1
+      },
+      "total": 1
+    },
+    "idlook": {
+      "company_id": "807cc016-1050-43ae-8bed-67822ab101c0",
+      "company_name": "아이디룩",
+      "is_multi": true,
+      "userids": {
+        "idlook": 11597,
+        "idlookcs": 3,
+        "idlooksms": 3013
+      },
+      "total": 14613
+    },
+    "isae": {
+      "company_id": "682956b7-37a3-46b5-9868-b63011bda47b",
+      "company_name": "이새에프앤씨",
+      "is_multi": true,
+      "userids": {
+        "isae": 55025,
+        "isaeshop": 347
+      },
+      "total": 55372
+    },
+    "kbjfood": {
+      "company_id": "05f568c8-99cc-4291-a9c4-51d0d056d6f6",
+      "company_name": "강복자식품",
+      "is_multi": false,
+      "userids": {
+        "kbjfood": 2141
+      },
+      "total": 2141
+    },
+    "kumkang": {
+      "company_id": "bb1fc50b-7c5b-4080-827e-aef587bcd082",
+      "company_name": "금강제화",
+      "is_multi": true,
+      "userids": {
+        "kumkang": 29858,
+        "kumkang2": 29858,
+        "kumkang3": 29858,
+        "kumkang4": 29858
+      },
+      "total": 119432
+    },
+    "labelyoung": {
+      "company_id": "932bc9c5-df2b-4418-af42-723c004b15a1",
+      "company_name": "라벨영화장품",
+      "is_multi": false,
+      "userids": {
+        "labelyoung": 64428
+      },
+      "total": 64428
+    },
+    "creationl": {
+      "company_id": "88289818-1e7c-4c0b-a7c6-e09ffdd8913b",
+      "company_name": "크리에이션엘",
+      "is_multi": true,
+      "userids": {
+        "louisquatorze1": 1
+      },
+      "total": 1
+    },
+    "lumourkorea": {
+      "company_id": "08d11593-74b6-4c47-b6b3-43fa000d1dfc",
+      "company_name": "라무르코리아",
+      "is_multi": false,
+      "userids": {
+        "lumourkorea": 37
+      },
+      "total": 37
+    },
+    "mdysresort": {
+      "company_id": "f02dde2c-f0bb-4af8-9150-15e651076192",
+      "company_name": "무주덕유산리조트",
+      "is_multi": false,
+      "userids": {
+        "mdysresort": 1
+      },
+      "total": 1
+    },
+    "miguhara": {
+      "company_id": "e0de7586-aee8-4ae7-a8c8-b41cf4605e9e",
+      "company_name": "미구하라_대행",
+      "is_multi": false,
+      "userids": {
+        "miguhara": 549
+      },
+      "total": 549
+    },
+    "brk": {
+      "company_id": "9496d070-3090-4477-8b14-95952765c071",
+      "company_name": "주식회사 비알케이컴퍼니",
+      "is_multi": false,
+      "userids": {
+        "quiksilver": 7499
+      },
+      "total": 7499
+    },
+    "songzio": {
+      "company_id": "e5ed0dad-4c8f-4c23-827b-a7305e505426",
+      "company_name": "송지오옴므",
+      "is_multi": true,
+      "userids": {
+        "songzio": 3
+      },
+      "total": 3
+    },
+    "soos": {
+      "company_id": "3935a718-e997-4b55-99d1-ac62d226d51b",
+      "company_name": "수스_대행",
+      "is_multi": false,
+      "userids": {
+        "soos": 7
+      },
+      "total": 7
+    },
+    "toun28": {
+      "company_id": "b2d11f56-384c-474c-bff0-576e4912e2b9",
+      "company_name": "toun28",
+      "is_multi": false,
+      "userids": {
+        "toun28": 29338
+      },
+      "total": 29338
+    }
+  },
+  "send_num_by_company": {
+    "augustinus": {
+      "company_id": "ecb714dc-ee06-4869-9c2d-7139b6960369",
+      "company_name": "아우구스티누스 바더",
+      "is_multi": false,
+      "userids": {
+        "ABCOZX": 2
+      },
+      "total": 2
+    },
+    "acehardware": {
+      "company_id": "8afb2332-813e-493f-95c7-cf1f65db3fe7",
+      "company_name": "에이스하드웨어",
+      "is_multi": true,
+      "userids": {
+        "ACEMKT": 8,
+        "ACEON": 8
+      },
+      "total": 16
+    },
+    "everych": {
+      "company_id": "45ec5da2-2f4f-4184-9e2d-bfef5705ed11",
+      "company_name": "에브리치",
+      "is_multi": false,
+      "userids": {
+        "Everych": 3
+      },
+      "total": 3
+    },
+    "kisa1": {
+      "company_id": "6bdfd642-aeee-446d-b6ae-6f8365f3e820",
+      "company_name": "KISA 테스트_1",
+      "is_multi": false,
+      "userids": {
+        "KISA1": 1
+      },
+      "total": 1
+    },
+    "ananti": {
+      "company_id": "5f1fde65-01a8-446b-a712-b34828b40509",
+      "company_name": "아난티",
+      "is_multi": true,
+      "userids": {
+        "SOOBIN02": 1,
+        "ahbusan": 4,
+        "bsuhee1225": 1,
+        "dh200601": 1,
+        "hyobin17": 1,
+        "mink95": 1,
+        "moonjh0404": 1,
+        "shw115": 1
+      },
+      "total": 11
+    },
+    "treksta": {
+      "company_id": "9f508edd-ce63-4764-9bdd-bd92c485d525",
+      "company_name": "트렉스타",
+      "is_multi": false,
+      "userids": {
+        "Treksta": 22
+      },
+      "total": 22
+    },
+    "afex": {
+      "company_id": "9423394c-1ac9-452b-91bf-3d4753d4d2ab",
+      "company_name": "주식회사 중평알앤에스",
+      "is_multi": false,
+      "userids": {
+        "afexkorea": 3
+      },
+      "total": 3
+    },
+    "amcommerce": {
+      "company_id": "191b1dae-3155-4a83-b6d5-70e477b635f8",
+      "company_name": "(주)에이엠커머스",
+      "is_multi": false,
+      "userids": {
+        "amc2020": 2
+      },
+      "total": 2
+    },
+    "arnew": {
+      "company_id": "62ffa713-521b-4720-aeec-976d1fa5b815",
+      "company_name": "아르뉴",
+      "is_multi": false,
+      "userids": {
+        "arnew": 1
+      },
+      "total": 1
+    },
+    "bacon": {
+      "company_id": "c4e06607-7681-4813-8ef3-04b538ee225d",
+      "company_name": "주식회사 베이컨",
+      "is_multi": false,
+      "userids": {
+        "babynews": 8
+      },
+      "total": 8
+    },
+    "banilaco": {
+      "company_id": "7bca94c7-25af-4ea4-809f-e65c50ee3929",
+      "company_name": "바닐라코",
+      "is_multi": false,
+      "userids": {
+        "banilaco": 1
+      },
+      "total": 1
+    },
+    "paige": {
+      "company_id": "a33445aa-a2bd-4fd7-9159-f2757a117d6d",
+      "company_name": "주식회사 페이지",
+      "is_multi": false,
+      "userids": {
+        "beigic": 1
+      },
+      "total": 1
+    },
+    "benetton": {
+      "company_id": "d6b3d71c-ed35-4d49-ab72-0392cf789d9e",
+      "company_name": "베네통",
+      "is_multi": true,
+      "userids": {
+        "benetton": 1,
+        "benetton1": 1,
+        "benetton2": 1,
+        "benetton3": 1,
+        "benetton4": 1,
+        "benetton5": 1
+      },
+      "total": 6
+    },
+    "benjefe": {
+      "company_id": "8200b378-3245-4297-ad0d-c312cedb6d36",
+      "company_name": "벤제프",
+      "is_multi": true,
+      "userids": {
+        "benjefe": 182,
+        "benjefe1": 1,
+        "benjefe2": 1,
+        "benjefe3": 1
+      },
+      "total": 185
+    },
+    "carrotglobal": {
+      "company_id": "e8f0ffa7-2e59-4e2c-ad9f-b762c1d81f98",
+      "company_name": "캐럿글로벌",
+      "is_multi": true,
+      "userids": {
+        "bhappy1": 2,
+        "bhappy2": 1,
+        "bhappy4": 2
+      },
+      "total": 5
+    },
+    "nsb": {
+      "company_id": "806d13d7-4fea-4188-b4d4-ca2d46ecfe2e",
+      "company_name": "엔에스비",
+      "is_multi": false,
+      "userids": {
+        "biellee4040": 3
+      },
+      "total": 3
+    },
+    "efolium": {
+      "company_id": "9b30c75a-3d79-43b0-9438-9a617137df67",
+      "company_name": "이폴리움",
+      "is_multi": true,
+      "userids": {
+        "blanc101": 1,
+        "efolium": 1
+      },
+      "total": 2
+    },
+    "catsfactory": {
+      "company_id": "96ed922b-f310-4fc6-bced-1351330618bc",
+      "company_name": "캣츠팩토리",
+      "is_multi": false,
+      "userids": {
+        "cats0901": 6
+      },
+      "total": 6
+    },
+    "crocodile": {
+      "company_id": "dcee2110-0e59-4ae5-9ab4-da5742739bce",
+      "company_name": "크로커다일",
+      "is_multi": true,
+      "userids": {
+        "cdfasms123": 1,
+        "pdfasms123": 1,
+        "ydfasms123": 1
+      },
+      "total": 3
+    },
+    "choisun": {
+      "company_id": "0d20b03b-4c66-4205-ae81-a3b53a70481d",
+      "company_name": "최선어학원",
+      "is_multi": false,
+      "userids": {
+        "choisun": 73
+      },
+      "total": 73
+    },
+    "connexsol": {
+      "company_id": "2e5aae2e-e2c2-4139-8f44-7e17d61cbc43",
+      "company_name": "코넥스솔루션",
+      "is_multi": false,
+      "userids": {
+        "cnxsol": 8
+      },
+      "total": 8
+    },
+    "comvita": {
+      "company_id": "db4b30be-56fd-4a5e-888f-cfb14e4b99e3",
+      "company_name": "콤비타코리아",
+      "is_multi": true,
+      "userids": {
+        "comvita": 1,
+        "comvitaon": 1
+      },
+      "total": 2
+    },
+    "jisam": {
+      "company_id": "144f5470-bb23-4e9f-93e1-af0ae8478ea3",
+      "company_name": "지삼유통",
+      "is_multi": false,
+      "userids": {
+        "coreya": 4
+      },
+      "total": 4
+    },
+    "crispybaba": {
+      "company_id": "ccef7e86-ad74-49f7-8b7b-9586fc4175ca",
+      "company_name": "(주)경희 크리스피바바",
+      "is_multi": false,
+      "userids": {
+        "crispyba": 36
+      },
+      "total": 36
+    },
+    "dongkook": {
+      "company_id": "5daf2432-89b1-460c-881c-c129ec8a861b",
+      "company_name": "동국제약",
+      "is_multi": true,
+      "userids": {
+        "dkpharm": 3,
+        "dkpharm2": 3
+      },
+      "total": 6
+    },
+    "knoumedia": {
+      "company_id": "cca68c71-4be9-46a5-a6ae-aa52674e8e4b",
+      "company_name": "방통대 미디어영상학과",
+      "is_multi": false,
+      "userids": {
+        "dp26": 3
+      },
+      "total": 3
+    },
+    "knoustat": {
+      "company_id": "65f18e25-2049-483c-8db1-f5c5b6b0e90e",
+      "company_name": "방통대 통계 데이터과학과",
+      "is_multi": false,
+      "userids": {
+        "dp35": 1
+      },
+      "total": 1
+    },
+    "dsfashion": {
+      "company_id": "4fede2b0-75e9-4477-b52f-4b1f97d91747",
+      "company_name": "디에스패션컴퍼니",
+      "is_multi": false,
+      "userids": {
+        "dsfashion": 1
+      },
+      "total": 1
+    },
+    "elensilia": {
+      "company_id": "b657b9fb-91ab-440c-98d4-00d1d6edd687",
+      "company_name": "태영_엘렌실라",
+      "is_multi": false,
+      "userids": {
+        "elensilia": 3
+      },
+      "total": 3
+    },
+    "giantgolf": {
+      "company_id": "57e17bd3-0008-4b1d-acff-7d13d76a3956",
+      "company_name": "자이언트골프앤투어_광주점",
+      "is_multi": false,
+      "userids": {
+        "giantg": 1
+      },
+      "total": 1
+    },
+    "guesskorea": {
+      "company_id": "a844d2f2-23de-4157-bd27-1a0b37c60810",
+      "company_name": "게스코리아",
+      "is_multi": false,
+      "userids": {
+        "guess": 1
+      },
+      "total": 1
+    },
+    "laprairie": {
+      "company_id": "df63bcb0-3900-4a1c-8ad0-93c6b5a1db04",
+      "company_name": "라프레리",
+      "is_multi": true,
+      "userids": {
+        "hddg2135": 3,
+        "laprairie": 47,
+        "laprairieak": 1,
+        "lpcom": 2,
+        "lpglgg": 2,
+        "lphdmd": 1,
+        "lpkglhq": 1,
+        "lpkhdch": 1,
+        "lpkhdcx": 1,
+        "lpkhdhq": 1,
+        "lpkhdpg": 1,
+        "lpkhdus": 1,
+        "lpkltbs": 1,
+        "lpkltgj": 1,
+        "lpklthq": 1,
+        "lpkltjs": 1,
+        "lpkltkn": 1,
+        "lpksgct": 1,
+        "lpksgdg": 1,
+        "lpksggg": 1,
+        "lpksghq": 1,
+        "lpksgkn": 1
+      },
+      "total": 72
+    },
+    "hpio": {
+      "company_id": "1adb0197-3927-4907-a07b-3631fb61cb5b",
+      "company_name": "에이치피오_덴프스",
+      "is_multi": false,
+      "userids": {
+        "hpio": 2
+      },
+      "total": 2
+    },
+    "chaumet": {
+      "company_id": "aab44666-8ed2-4663-92c9-0c5b6cc08534",
+      "company_name": "쇼메",
+      "is_multi": false,
+      "userids": {
+        "icemanim": 1
+      },
+      "total": 1
+    },
+    "idlook": {
+      "company_id": "807cc016-1050-43ae-8bed-67822ab101c0",
+      "company_name": "아이디룩",
+      "is_multi": true,
+      "userids": {
+        "idlook": 1,
+        "idlookcs": 1,
+        "idlookcs2": 1,
+        "idlooksms": 81
+      },
+      "total": 84
+    },
+    "isae": {
+      "company_id": "682956b7-37a3-46b5-9868-b63011bda47b",
+      "company_name": "이새에프앤씨",
+      "is_multi": true,
+      "userids": {
+        "isae": 150,
+        "isaeshop": 3
+      },
+      "total": 153
+    },
+    "jessinewyork": {
+      "company_id": "a589f07e-66c5-4d8b-9603-ecc1c640b84a",
+      "company_name": "제시뉴욕",
+      "is_multi": true,
+      "userids": {
+        "jessi": 189,
+        "jessi1": 1,
+        "jessi2": 1,
+        "jessi3": 1,
+        "jessi4": 2
+      },
+      "total": 194
+    },
+    "kbjfood": {
+      "company_id": "05f568c8-99cc-4291-a9c4-51d0d056d6f6",
+      "company_name": "강복자식품",
+      "is_multi": false,
+      "userids": {
+        "kbjfood": 4
+      },
+      "total": 4
+    },
+    "kumkang": {
+      "company_id": "bb1fc50b-7c5b-4080-827e-aef587bcd082",
+      "company_name": "금강제화",
+      "is_multi": true,
+      "userids": {
+        "kumkang": 127,
+        "kumkang2": 62,
+        "kumkang3": 46,
+        "kumkang4": 1
+      },
+      "total": 236
+    },
+    "labelyoung": {
+      "company_id": "932bc9c5-df2b-4418-af42-723c004b15a1",
+      "company_name": "라벨영화장품",
+      "is_multi": false,
+      "userids": {
+        "labelyoung": 2
+      },
+      "total": 2
+    },
+    "letsrun": {
+      "company_id": "c0080fe5-9611-45d6-873c-c62052820ca7",
+      "company_name": "한국마사회",
+      "is_multi": false,
+      "userids": {
+        "letsrun": 6
+      },
+      "total": 6
+    },
+    "creationl": {
+      "company_id": "88289818-1e7c-4c0b-a7c6-e09ffdd8913b",
+      "company_name": "크리에이션엘",
+      "is_multi": true,
+      "userids": {
+        "louisquatorze1": 3,
+        "louisquatorze3": 4
+      },
+      "total": 7
+    },
+    "lululemon": {
+      "company_id": "c9772fc2-f16b-4919-9760-20ef1d501e40",
+      "company_name": "룰루레몬애틀라티카코리아유한회사",
+      "is_multi": false,
+      "userids": {
+        "lululemon44117": 1
+      },
+      "total": 1
+    },
+    "lumourkorea": {
+      "company_id": "08d11593-74b6-4c47-b6b3-43fa000d1dfc",
+      "company_name": "라무르코리아",
+      "is_multi": false,
+      "userids": {
+        "lumourkorea": 1
+      },
+      "total": 1
+    },
+    "mariooutlet": {
+      "company_id": "9c228259-a3ca-4832-9feb-d25572717697",
+      "company_name": "마리오아울렛",
+      "is_multi": true,
+      "userids": {
+        "mario1": 1,
+        "mario2": 6,
+        "mario4": 1,
+        "mario6": 2
+      },
+      "total": 10
+    },
+    "martsmart": {
+      "company_id": "7b7a663b-a0d1-4972-9f9e-1cc980f65c14",
+      "company_name": "마트스마트",
+      "is_multi": false,
+      "userids": {
+        "martsmart": 3
+      },
+      "total": 3
+    },
+    "mdysresort": {
+      "company_id": "f02dde2c-f0bb-4af8-9150-15e651076192",
+      "company_name": "무주덕유산리조트",
+      "is_multi": false,
+      "userids": {
+        "mdysresort": 17
+      },
+      "total": 17
+    },
+    "metrocity": {
+      "company_id": "70abccd0-d4d6-4bb1-ab31-3b2202aa5060",
+      "company_name": "메트로시티",
+      "is_multi": true,
+      "userids": {
+        "metrocity": 29,
+        "metrocity2": 29
+      },
+      "total": 58
+    },
+    "miguhara": {
+      "company_id": "e0de7586-aee8-4ae7-a8c8-b41cf4605e9e",
+      "company_name": "미구하라_대행",
+      "is_multi": false,
+      "userids": {
+        "miguhara": 1
+      },
+      "total": 1
+    },
+    "nain": {
+      "company_id": "cfb0c259-5e4d-4ecd-a401-67afaacd281d",
+      "company_name": "나인",
+      "is_multi": false,
+      "userids": {
+        "nain": 3
+      },
+      "total": 3
+    },
+    "paulaschoice": {
+      "company_id": "d67bb301-0fb3-459e-a42f-f58fb5d6f0bb",
+      "company_name": "폴라초이스코리아",
+      "is_multi": false,
+      "userids": {
+        "pckr": 1
+      },
+      "total": 1
+    },
+    "brk": {
+      "company_id": "9496d070-3090-4477-8b14-95952765c071",
+      "company_name": "주식회사 비알케이컴퍼니",
+      "is_multi": false,
+      "userids": {
+        "quiksilver": 16
+      },
+      "total": 16
+    },
+    "fnda": {
+      "company_id": "4bc0b9d3-f135-4dba-b7de-8967950cb16e",
+      "company_name": "에프앤드에이",
+      "is_multi": false,
+      "userids": {
+        "repair": 1
+      },
+      "total": 1
+    },
+    "reskin": {
+      "company_id": "72fe2231-4efe-4388-8c62-08c4033a470a",
+      "company_name": "리스킨_대행",
+      "is_multi": false,
+      "userids": {
+        "reskin": 3
+      },
+      "total": 3
+    },
+    "familytwo": {
+      "company_id": "7a0b6c45-b088-4aa3-96b2-4772440e66b5",
+      "company_name": "패밀리투",
+      "is_multi": false,
+      "userids": {
+        "rudtjr": 4
+      },
+      "total": 4
+    },
+    "skincure": {
+      "company_id": "96a4d972-d244-42c3-a0ae-807645d14769",
+      "company_name": "스킨큐어",
+      "is_multi": false,
+      "userids": {
+        "skincure": 2
+      },
+      "total": 2
+    },
+    "songzio": {
+      "company_id": "e5ed0dad-4c8f-4c23-827b-a7305e505426",
+      "company_name": "송지오옴므",
+      "is_multi": true,
+      "userids": {
+        "songzio": 1,
+        "songzio1": 1
+      },
+      "total": 2
+    },
+    "soongsil": {
+      "company_id": "4a107cef-67da-4390-88de-1f2049baee71",
+      "company_name": "숭실원격평생교육원",
+      "is_multi": false,
+      "userids": {
+        "soongsil": 8
+      },
+      "total": 8
+    },
+    "soos": {
+      "company_id": "3935a718-e997-4b55-99d1-ac62d226d51b",
+      "company_name": "수스_대행",
+      "is_multi": false,
+      "userids": {
+        "soos": 332
+      },
+      "total": 332
+    },
+    "easyschool": {
+      "company_id": "2239adb7-d9f4-4bd5-91b5-a808d2a74d20",
+      "company_name": "금정이지어학원",
+      "is_multi": false,
+      "userids": {
+        "speakingworks": 1
+      },
+      "total": 1
+    },
+    "techfood": {
+      "company_id": "12f8602f-b7f7-43e8-915a-57b57ae49110",
+      "company_name": "주식회사 테크푸드",
+      "is_multi": false,
+      "userids": {
+        "techfood": 2
+      },
+      "total": 2
+    },
+    "toun28": {
+      "company_id": "b2d11f56-384c-474c-bff0-576e4912e2b9",
+      "company_name": "toun28",
+      "is_multi": false,
+      "userids": {
+        "toun28": 3
+      },
+      "total": 3
+    }
+  },
+  "zero_data_companies": {
+    "blockednum": [
+      "augustinus",
+      "afex",
+      "ananti",
+      "banilaco",
+      "paige",
+      "benetton",
+      "benjefe",
+      "carrotglobal",
+      "catsfactory",
+      "crocodile",
+      "choisun",
+      "connexsol",
+      "crispybaba",
+      "knoumedia",
+      "knoustat",
+      "dsfashion",
+      "elensilia",
+      "everych",
+      "hpio",
+      "jessinewyork",
+      "laprairie",
+      "mariooutlet",
+      "metrocity",
+      "soongsil",
+      "techfood",
+      "easyschool",
+      "skincure",
+      "nain",
+      "paulaschoice",
+      "fnda",
+      "reskin",
+      "familytwo",
+      "martsmart",
+      "lululemon",
+      "letsrun",
+      "kisa1"
+    ],
+    "member_send_num": []
+  }
+}

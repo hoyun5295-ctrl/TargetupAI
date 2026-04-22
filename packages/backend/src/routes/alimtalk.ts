@@ -662,14 +662,50 @@ router.post(
         rawKey ||
         `T${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`.slice(0, 20);
 
-      const r = await imc.createAlimtalkTemplate(senderKey, {
+      // ─────────────────────────────────────────
+      // 1) IMC 등록
+      //    D135+ (B3 복구): IMC는 성공했는데 DB INSERT 실패로 한줄로 DB에만 없는 상태
+      //    → 재등록 시 IMC가 4014 반환 → listAlimtalkTemplates로 templateCode 복구 후 DB INSERT
+      // ─────────────────────────────────────────
+      let r = await imc.createAlimtalkTemplate(senderKey, {
         ...body,
         templateKey,
       });
-      if (r.code !== '0000' || !r.data?.templateCode) {
-        return res.status(400).json({ success: false, code: r.code, error: r.message });
+      let templateCode: string | null = r.data?.templateCode || null;
+
+      // B3 복구 경로: 4014 템플릿키 중복 → IMC에서 기존 템플릿 조회
+      if (r.code === '4014' && !templateCode) {
+        try {
+          const lst = await imc.listAlimtalkTemplates({ page: 0, count: 100 });
+          const items: any[] =
+            (lst.data as any)?.list ||
+            (lst.data as any)?.data?.list ||
+            [];
+          const found = items.find((t: any) => t.templateKey === templateKey);
+          if (found?.templateCode) {
+            templateCode = found.templateCode;
+            r = { code: '0000', message: 'OK (B3 복구: 기존 IMC 템플릿 연결)', data: found };
+            console.log(
+              `[alimtalk][B3 복구] templateKey=${templateKey} → templateCode=${templateCode}`,
+            );
+          }
+        } catch (lookupErr: any) {
+          console.error('[alimtalk][B3 복구 실패]', lookupErr?.message || lookupErr);
+        }
       }
 
+      if (r.code !== '0000' || !templateCode) {
+        return res.status(400).json({
+          success: false,
+          code: r.code,
+          error: r.message || '등록 실패',
+        });
+      }
+
+      // ─────────────────────────────────────────
+      // 2) DB INSERT — status는 DRAFT로 시작. B9 자동 검수요청 성공 시 REQUESTED로 승격.
+      //    (기존에는 'REQUESTED'로 하드코딩 → 실제 IMC는 '등록' 상태라 불일치 — D135+ 교정)
+      // ─────────────────────────────────────────
       const ins = await query(
         `INSERT INTO kakao_templates
            (company_id, profile_id, template_code, template_key, template_name,
@@ -679,7 +715,7 @@ router.post(
             template_header, item_highlight, item_list, item_summary, represent_link,
             preview_message, alarm_phone_numbers, service_mode, custom_template_code,
             created_by, created_at, updated_at, last_synced_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::text[],'REQUESTED',
+         VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::text[],'DRAFT',
                  $9,$10,$11,$12,$13,$14,$15,$16,$17,$18::jsonb,
                  $19,$20::jsonb,$21::jsonb,$22::jsonb,$23::jsonb,
                  $24,$25,$26,$27,$28,now(),now(),now())
@@ -687,7 +723,7 @@ router.post(
         [
           companyId,
           profileId,
-          r.data.templateCode,
+          templateCode,
           templateKey,
           body.manageName,
           body.templateContent,
@@ -722,7 +758,51 @@ router.post(
         ],
       );
 
-      res.status(201).json({ success: true, template: ins.rows[0], imc: r });
+      // ─────────────────────────────────────────
+      // 3) B9: 등록 성공 직후 자동 검수요청 (휴머스온 스펙: 등록/검수요청 API 분리)
+      //    실패해도 템플릿 등록 자체는 성공 — status='DRAFT' 유지하여 사용자가 수동 재요청 가능
+      // ─────────────────────────────────────────
+      let inspectionRequested = false;
+      let inspectionError: string | null = null;
+      try {
+        const inspectRes = await imc.requestInspection(
+          senderKey,
+          templateCode,
+          body.inspectionComment || '',
+        );
+        if (inspectRes.code === '0000') {
+          inspectionRequested = true;
+          await query(
+            `UPDATE kakao_templates
+                SET status = 'REQUESTED',
+                    requested_at = now(),
+                    updated_at = now(),
+                    last_synced_at = now()
+              WHERE id = $1`,
+            [ins.rows[0].id],
+          );
+          ins.rows[0].status = 'REQUESTED';
+        } else {
+          inspectionError = inspectRes.message || `검수요청 실패 (${inspectRes.code})`;
+          console.warn(
+            `[alimtalk][auto-inspect 실패] ${templateCode} code=${inspectRes.code} msg=${inspectRes.message}`,
+          );
+        }
+      } catch (inspectErr: any) {
+        inspectionError = inspectErr?.message || '검수요청 중 오류';
+        console.error(
+          `[alimtalk][auto-inspect 예외] ${templateCode}`,
+          inspectErr?.message || inspectErr,
+        );
+      }
+
+      res.status(201).json({
+        success: true,
+        template: ins.rows[0],
+        imc: r,
+        inspectionRequested,
+        inspectionError,
+      });
     } catch (err) {
       return handleImcError(res, err);
     }
@@ -1459,11 +1539,10 @@ router.post(
       if (!phoneNumber) {
         return res.status(400).json({ success: false, error: 'phoneNumber 필수' });
       }
-      // D131: IMC 스펙상 name은 required (10_56_14_문자 관리.txt).
       if (!name || !String(name).trim()) {
         return res.status(400).json({ success: false, error: '수신자 이름은 필수입니다' });
       }
-      // D131: 회사당 3명 제한 (Harold님 지시, IMC 정책 10명 대비 한줄로는 3명으로 제한)
+      // 회사당 3명 제한 (한줄로 자체 정책)
       const cnt = await query(
         `SELECT COUNT(*)::int AS c FROM kakao_alarm_users
           WHERE company_id = $1 AND COALESCE(active_yn,'Y') = 'Y'`,
@@ -1475,23 +1554,10 @@ router.post(
           error: '활성 알림 수신자는 최대 3명까지 등록 가능합니다',
         });
       }
-      // ★ IMC 실제 스펙 검증 (10_56_14_문자 관리.txt):
-      //   등록 body 필수: alarmUserKey(고객사 발번) + name + phoneNumber + activeYn
-      //   alarmUserKey를 고객사가 지정해서 보내야 함. 우리 DB company_id + phone_number로 생성.
+      // ★ D135+: IMC createAlarmUser 호출 제거 (4032 AUTH 이슈).
+      //   검수 결과 알림은 한줄로가 직접 `syncPendingTemplatesJob`에서 SMS로 발송.
+      //   imc_alarm_user_id는 내부 식별자로만 유지 (향후 IMC 전환 대비).
       const alarmUserKey = `${companyId.replace(/-/g, '').slice(0, 12)}_${phoneNumber}`;
-      const imcRes = await imc.createAlarmUser({
-        alarmUserKey,
-        name,
-        phoneNumber,
-        activeYn: activeYn || 'Y',
-      });
-      if (imcRes.code !== '0000') {
-        return res.status(400).json({
-          success: false,
-          code: imcRes.code,
-          error: imcRes.message,
-        });
-      }
       const ins = await query(
         `INSERT INTO kakao_alarm_users
            (company_id, name, phone_number, active_yn, imc_alarm_user_id)
@@ -1504,7 +1570,7 @@ router.post(
          RETURNING *`,
         [companyId, name || null, phoneNumber, activeYn || 'Y', alarmUserKey],
       );
-      res.status(201).json({ success: true, user: ins.rows[0], imc: imcRes });
+      res.status(201).json({ success: true, user: ins.rows[0] });
     } catch (err) { return handleImcError(res, err); }
   },
 );
@@ -1517,28 +1583,40 @@ router.put(
       const companyId = requireCompany(req, res);
       if (!companyId) return;
       const row = await query(
-        `SELECT imc_alarm_user_id FROM kakao_alarm_users
+        `SELECT id FROM kakao_alarm_users
           WHERE id = $1 AND company_id = $2`,
         [req.params.id, companyId],
       );
-      if (row.rows.length === 0 || !row.rows[0].imc_alarm_user_id) {
+      if (row.rows.length === 0) {
         return res.status(404).json({ success: false, error: '수신자 없음' });
       }
-      const imcRes = await imc.updateAlarmUser(
-        row.rows[0].imc_alarm_user_id,
-        req.body || {},
-      );
+      // ★ D135+: IMC updateAlarmUser 호출 제거. DB UPDATE만.
       const { name, phoneNumber, activeYn } = req.body || {};
-      await query(
+      // 활성 전환 시 3명 제한 재검증 (본인 제외)
+      if (activeYn === 'Y') {
+        const cnt = await query(
+          `SELECT COUNT(*)::int AS c FROM kakao_alarm_users
+            WHERE company_id = $1 AND COALESCE(active_yn,'Y') = 'Y' AND id <> $2`,
+          [companyId, req.params.id],
+        );
+        if ((cnt.rows[0]?.c ?? 0) >= 3) {
+          return res.status(400).json({
+            success: false,
+            error: '활성 알림 수신자는 최대 3명까지 등록 가능합니다',
+          });
+        }
+      }
+      const upd = await query(
         `UPDATE kakao_alarm_users
             SET name = COALESCE($1,name),
                 phone_number = COALESCE($2,phone_number),
                 active_yn = COALESCE($3,active_yn),
                 updated_at = now()
-          WHERE id = $4`,
+          WHERE id = $4
+          RETURNING *`,
         [name, phoneNumber, activeYn, req.params.id],
       );
-      res.json({ success: imcRes.code === '0000', imc: imcRes });
+      res.json({ success: true, user: upd.rows[0] });
     } catch (err) { return handleImcError(res, err); }
   },
 );
@@ -1551,16 +1629,16 @@ router.delete(
       const companyId = requireCompany(req, res);
       if (!companyId) return;
       const row = await query(
-        `SELECT imc_alarm_user_id FROM kakao_alarm_users
+        `SELECT id FROM kakao_alarm_users
           WHERE id = $1 AND company_id = $2`,
         [req.params.id, companyId],
       );
-      if (row.rows.length === 0 || !row.rows[0].imc_alarm_user_id) {
+      if (row.rows.length === 0) {
         return res.status(404).json({ success: false, error: '수신자 없음' });
       }
-      const imcRes = await imc.deleteAlarmUser(row.rows[0].imc_alarm_user_id);
+      // ★ D135+: IMC deleteAlarmUser 호출 제거. DB DELETE만.
       await query(`DELETE FROM kakao_alarm_users WHERE id = $1`, [req.params.id]);
-      res.json({ success: imcRes.code === '0000', imc: imcRes });
+      res.json({ success: true });
     } catch (err) { return handleImcError(res, err); }
   },
 );

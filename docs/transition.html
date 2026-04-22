@@ -1,0 +1,797 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>서비스 전환 안내 · INVITO → 한줄로</title>
+<meta name="description" content="2026년 5월 6일 invitobiz.com 서비스가 종료되고 한줄로(hanjul.ai)로 전환됩니다. 계정·회신번호·수신거부 자동 이관 완료. 기존 USERID와 안내받으신 임시 비밀번호로 로그인하세요.">
+
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        fontFamily: {
+          sans: ['"Pretendard Variable"','Pretendard','-apple-system','BlinkMacSystemFont','system-ui','"Malgun Gothic"','sans-serif'],
+          mono: ['"JetBrains Mono"','ui-monospace','"SF Mono"','Menlo','Consolas','monospace'],
+        },
+        colors: {
+          ink:    { 950:'#0b0b0f', 900:'#111115', 800:'#1c1c21', 700:'#2a2a31', 600:'#4a4a55', 500:'#6b6b76', 400:'#9898a2', 300:'#c7c7cf', 200:'#e4e4e8', 100:'#efeff2', 50:'#f7f7f9' },
+          canvas: { DEFAULT:'#fafaf9', warm:'#f5f5f3' },
+          violet: { 50:'#f5f3ff', 100:'#ede9fe', 200:'#ddd6fe', 300:'#c4b5fd', 400:'#a78bfa', 500:'#8b5cf6', 600:'#7c3aed', 700:'#6d28d9', 800:'#5b21b6', 900:'#4c1d95', 950:'#2e1065' },
+        },
+        letterSpacing: { tightest: '-0.045em' },
+      }
+    }
+  }
+</script>
+
+<style>
+  html { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; text-rendering: optimizeLegibility; }
+  body { font-feature-settings: "ss01","ss02","cv01","cv11"; font-family: 'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, system-ui, 'Malgun Gothic', sans-serif; background:#fafaf9; color:#0b0b0f; word-break: keep-all; overflow-x: hidden; }
+
+  /* Display numerals for the D-Day — rely on Pretendard tabular nums */
+  .num { font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1; }
+
+  /* Grain texture via SVG data URI — very subtle */
+  .grain { position: absolute; inset:0; pointer-events:none; opacity:.35; mix-blend-mode: multiply;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.05  0 0 0 0 0.05  0 0 0 0 0.08  0 0 0 0.18 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>"); }
+
+  /* Faint grid backdrop on hero */
+  .grid-lines { position:absolute; inset:0; pointer-events:none;
+    background-image:
+      linear-gradient(to right, rgba(11,11,15,0.045) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(11,11,15,0.045) 1px, transparent 1px);
+    background-size: 80px 80px;
+    mask-image: radial-gradient(ellipse 80% 60% at 70% 40%, black 40%, transparent 85%);
+    -webkit-mask-image: radial-gradient(ellipse 80% 60% at 70% 40%, black 40%, transparent 85%);
+  }
+
+  /* Gradient blob behind D-Day */
+  .halo { position:absolute; border-radius:999px; filter: blur(60px); opacity:.55; pointer-events:none; }
+
+  /* Reveal on load */
+  .reveal { opacity: 0; transform: translateY(14px); transition: opacity .9s cubic-bezier(.2,.7,.2,1), transform .9s cubic-bezier(.2,.7,.2,1); }
+  .revealed { opacity: 1; transform: translateY(0); }
+
+  /* Stagger helpers */
+  .d-1 { transition-delay: .05s } .d-2 { transition-delay: .12s } .d-3 { transition-delay: .2s }
+  .d-4 { transition-delay: .28s } .d-5 { transition-delay: .36s } .d-6 { transition-delay: .44s }
+  .d-7 { transition-delay: .52s } .d-8 { transition-delay: .6s } .d-9 { transition-delay: .68s }
+
+  /* Ticker dot */
+  .pulse { position:relative; }
+  .pulse::before { content:""; position:absolute; inset:-4px; border-radius:999px; background:rgba(124,58,237,.45); animation: pulse 2s ease-out infinite; }
+  @keyframes pulse { 0%{ transform: scale(.6); opacity:.6 } 70%{ transform: scale(2.2); opacity:0 } 100%{ opacity:0 } }
+
+  /* CTA */
+  .cta { position: relative; overflow: hidden; isolation: isolate; }
+  .cta::before { content:""; position:absolute; inset:-40%; background: conic-gradient(from 0deg, rgba(196,181,253,0) 0deg, rgba(196,181,253,.8) 90deg, rgba(124,58,237,.9) 180deg, rgba(196,181,253,.8) 270deg, rgba(196,181,253,0) 360deg); z-index:-2; opacity:0; transition: opacity .5s; animation: spin 7s linear infinite; }
+  .cta::after { content:""; position:absolute; inset:1.5px; border-radius: inherit; background: linear-gradient(135deg, #7c3aed 0%, #6d28d9 50%, #5b21b6 100%); z-index:-1; }
+  .cta:hover::before { opacity: 1 }
+  .cta:hover .cta-arrow { transform: translateX(4px); }
+  .cta-arrow { transition: transform .35s cubic-bezier(.2,.7,.2,1); }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Step rules */
+  .step-rule { background: linear-gradient(to right, #c4b5fd, transparent); }
+
+  /* Copy chip */
+  .copychip { transition: background-color .18s, color .18s, border-color .18s; }
+  .copychip:hover { background:#ede9fe; color:#4c1d95; border-color:#c4b5fd; }
+  .copychip.copied { background:#7c3aed; color:#fff; border-color:#7c3aed; }
+
+  /* FAQ */
+  details[open] .faq-chev { transform: rotate(45deg); }
+  .faq-chev { transition: transform .2s ease; }
+  details summary::-webkit-details-marker { display:none; }
+
+  /* Marquee-ish divider ticker (hero top bar) */
+  .ticker-track { display: inline-flex; gap: 3rem; white-space: nowrap; animation: slide 40s linear infinite; }
+  @keyframes slide { from { transform: translateX(0) } to { transform: translateX(-50%) } }
+
+  /* Print: keep it readable */
+  @media print { .no-print { display:none!important; } }
+
+  /* Anchor scroll offset for sticky nav */
+  section[id] { scroll-margin-top: 88px; }
+
+  @media (max-width: 640px) {
+    .hero-num { font-size: 140px !important; line-height: .9 !important; }
+  }
+</style>
+</head>
+
+<body class="antialiased">
+
+<!-- ============ TOP TICKER ============ -->
+<div class="no-print relative border-b border-ink-200 bg-ink-950 text-white overflow-hidden">
+  <div class="py-2 overflow-hidden">
+    <div class="ticker-track font-mono text-[11px] tracking-[0.22em] uppercase">
+      <span class="flex items-center gap-3"><span class="w-1.5 h-1.5 rounded-full bg-violet-400 pulse"></span> Service Migration Notice</span>
+      <span class="opacity-60">·</span>
+      <span>invitobiz.com → hanjul.ai</span>
+      <span class="opacity-60">·</span>
+      <span>Legacy sunset &nbsp;2026.05.06 00:00 KST</span>
+      <span class="opacity-60">·</span>
+      <span>Accounts · Opt-outs · Sender numbers migrated</span>
+      <span class="opacity-60">·</span>
+      <span class="flex items-center gap-3"><span class="w-1.5 h-1.5 rounded-full bg-violet-400 pulse"></span> Service Migration Notice</span>
+      <span class="opacity-60">·</span>
+      <span>invitobiz.com → hanjul.ai</span>
+      <span class="opacity-60">·</span>
+      <span>Legacy sunset &nbsp;2026.05.06 00:00 KST</span>
+      <span class="opacity-60">·</span>
+      <span>Accounts · Opt-outs · Sender numbers migrated</span>
+    </div>
+  </div>
+</div>
+
+<!-- ============ NAV ============ -->
+<header class="no-print sticky top-0 z-40 backdrop-blur-md bg-canvas/75 border-b border-ink-200/70">
+  <div class="max-w-[1200px] mx-auto px-6 md:px-10 h-[68px] flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <div class="flex items-center gap-2">
+        <span class="font-mono text-[11px] tracking-[0.28em] uppercase text-ink-500">Invito</span>
+        <svg width="14" height="10" viewBox="0 0 14 10" class="text-ink-400"><path d="M1 5h11M8 1l4 4-4 4" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span class="font-mono text-[11px] tracking-[0.28em] uppercase text-violet-700">한줄로</span>
+      </div>
+    </div>
+    <nav class="hidden md:flex items-center gap-8 text-[13px] text-ink-600">
+      <a href="#guide" class="hover:text-ink-900 transition">전환 가이드</a>
+      <a href="#migrated" class="hover:text-ink-900 transition">이관 현황</a>
+      <a href="#faq" class="hover:text-ink-900 transition">FAQ</a>
+      <a href="#contact" class="hover:text-ink-900 transition">문의</a>
+    </nav>
+    <a href="https://hanjul.ai" target="_blank" rel="noopener"
+       class="inline-flex items-center gap-1.5 text-[13px] font-medium text-white bg-ink-950 hover:bg-violet-700 transition-colors px-4 h-9 rounded-full">
+      바로가기
+      <svg width="12" height="10" viewBox="0 0 14 10"><path d="M1 5h11M8 1l4 4-4 4" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </a>
+  </div>
+</header>
+
+<!-- ============ HERO ============ -->
+<section class="relative overflow-hidden">
+  <div class="grid-lines"></div>
+  <!-- violet halo behind number -->
+  <div class="halo" style="top:-10%; right:-5%; width:720px; height:720px; background: radial-gradient(circle at 40% 40%, #c4b5fd 0%, rgba(196,181,253,0) 60%);"></div>
+  <div class="halo" style="top:30%; right:18%; width:520px; height:520px; background: radial-gradient(circle, #a78bfa 0%, rgba(167,139,250,0) 65%); opacity:.35;"></div>
+
+  <div class="relative max-w-[1200px] mx-auto px-6 md:px-10 pt-16 md:pt-24 pb-14 md:pb-24">
+
+    <!-- eyebrow row -->
+    <div class="reveal d-1 flex flex-wrap items-center gap-3 mb-10 md:mb-14">
+      <span class="inline-flex items-center gap-2 font-mono text-[11px] tracking-[0.22em] uppercase text-ink-600 bg-white border border-ink-200 rounded-full px-3 py-1.5">
+        <span class="w-1.5 h-1.5 rounded-full bg-violet-600 pulse"></span>
+        Notice · 2026.05.06 Sunset
+      </span>
+      <span class="font-mono text-[11px] tracking-[0.22em] uppercase text-ink-400">Vol. 01 / Migration Guide</span>
+    </div>
+
+    <!-- two column -->
+    <div class="grid grid-cols-12 gap-6 md:gap-10 items-start">
+
+      <!-- LEFT: headline -->
+      <div class="col-span-12 lg:col-span-7">
+        <h1 class="reveal d-2 font-sans font-semibold tracking-tightest text-ink-950 text-[44px] sm:text-[56px] md:text-[72px] lg:text-[80px] leading-[1.02]">
+          레거시의 마지막 장.<br>
+          <span class="relative inline-block">
+            <span class="relative z-10">다음 줄은 <span class="italic font-serif" style="font-family: 'Times New Roman', ui-serif, serif; font-weight: 500;">한줄로</span>.</span>
+            <span class="absolute -bottom-1 left-0 right-0 h-[10px] bg-violet-200/80 -z-0"></span>
+          </span>
+        </h1>
+
+        <p class="reveal d-3 mt-7 md:mt-9 text-[17px] md:text-[19px] leading-[1.75] text-ink-600 max-w-[560px]">
+          2026년 5월 6일 00시를 기해 <span class="text-ink-900 font-medium">invitobiz.com</span> 메시지 발송이 종료됩니다.
+          지금부터는 신규 플랫폼 <span class="text-violet-700 font-medium">한줄로(hanjul.ai)</span>에서 이어서 이용하실 수 있으며,
+          계정·회신번호·수신거부 목록은 이미 이관되어 있습니다.
+        </p>
+
+        <!-- meta row -->
+        <div class="reveal d-4 mt-10 md:mt-12 grid grid-cols-3 gap-4 md:gap-8 max-w-[560px]">
+          <div class="pt-4 border-t border-ink-300">
+            <div class="font-mono text-[10px] tracking-[0.22em] uppercase text-ink-500">Cutoff</div>
+            <div class="mt-2 text-[15px] md:text-[17px] text-ink-900 font-medium num">2026.05.06</div>
+          </div>
+          <div class="pt-4 border-t border-ink-300">
+            <div class="font-mono text-[10px] tracking-[0.22em] uppercase text-ink-500">New URL</div>
+            <div class="mt-2 text-[15px] md:text-[17px] text-ink-900 font-medium">hanjul.ai</div>
+          </div>
+          <div class="pt-4 border-t border-ink-300">
+            <div class="font-mono text-[10px] tracking-[0.22em] uppercase text-ink-500">Support</div>
+            <div class="mt-2 text-[15px] md:text-[17px] text-ink-900 font-medium num">1800-8125</div>
+          </div>
+        </div>
+
+        <!-- CTAs -->
+        <div class="reveal d-5 mt-10 md:mt-12 flex flex-wrap items-center gap-3 no-print">
+          <a href="https://hanjul.ai" target="_blank" rel="noopener"
+             class="cta group inline-flex items-center gap-3 text-white font-medium text-[15px] pl-6 pr-5 h-14 rounded-full">
+            <span class="relative z-10">한줄로 로그인하러 가기</span>
+            <span class="relative z-10 flex items-center justify-center w-8 h-8 rounded-full bg-white/15 backdrop-blur-sm cta-arrow">
+              <svg width="14" height="12" viewBox="0 0 14 10"><path d="M1 5h11M8 1l4 4-4 4" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </span>
+          </a>
+          <a href="#guide"
+             class="inline-flex items-center gap-2 text-[14px] font-medium text-ink-900 border border-ink-300 hover:border-ink-900 transition-colors px-5 h-14 rounded-full bg-white/60">
+            전환 가이드 보기
+          </a>
+        </div>
+      </div>
+
+      <!-- RIGHT: D-DAY editorial block -->
+      <div class="col-span-12 lg:col-span-5 relative">
+        <div class="reveal d-3 relative">
+          <!-- frame label -->
+          <div class="flex items-center justify-between mb-3 md:mb-5">
+            <div class="font-mono text-[10px] tracking-[0.22em] uppercase text-ink-500">Fig. 01 — Countdown</div>
+            <div class="font-mono text-[10px] tracking-[0.22em] uppercase text-ink-500 num" id="now-label">KST</div>
+          </div>
+
+          <!-- the number -->
+          <div class="relative">
+            <div class="hero-num num font-semibold tracking-tightest text-ink-950 leading-[0.88] text-[180px] md:text-[220px] lg:text-[260px]" style="letter-spacing: -0.06em;">
+              <span id="dday">—</span>
+            </div>
+            <div class="absolute -top-2 -right-2 md:-right-6 rotate-[8deg] font-mono text-[10px] tracking-[0.22em] uppercase text-violet-700 bg-violet-100 border border-violet-200 rounded-full px-2.5 py-1">D–Day</div>
+          </div>
+
+          <!-- caption -->
+          <div class="mt-3 md:mt-5 flex items-start justify-between gap-6 pt-4 border-t border-ink-300">
+            <div>
+              <div class="font-mono text-[10px] tracking-[0.22em] uppercase text-ink-500">Remaining</div>
+              <div class="mt-1 text-[14px] text-ink-800"><span id="dday-days" class="num">—</span>일 <span class="text-ink-500">/ <span id="dday-hms" class="num">—:—:—</span></span></div>
+            </div>
+            <div class="text-right">
+              <div class="font-mono text-[10px] tracking-[0.22em] uppercase text-ink-500">Until</div>
+              <div class="mt-1 text-[14px] text-ink-800 num">2026 · 05 · 06 · 00:00</div>
+            </div>
+          </div>
+
+          <!-- progress -->
+          <div class="mt-5">
+            <div class="h-[3px] w-full bg-ink-200 rounded-full overflow-hidden">
+              <div id="progress-bar" class="h-full bg-gradient-to-r from-violet-400 via-violet-600 to-violet-800 rounded-full" style="width:0%"></div>
+            </div>
+            <div class="mt-2 flex items-center justify-between font-mono text-[10px] tracking-[0.22em] uppercase text-ink-500">
+              <span>Notice published</span>
+              <span id="progress-pct" class="num">0%</span>
+              <span>Sunset</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <div class="grain"></div>
+</section>
+
+<!-- ============ CORE 3 MESSAGES ============ -->
+<section class="relative border-t border-ink-200 bg-white">
+  <div class="max-w-[1200px] mx-auto px-6 md:px-10 py-16 md:py-24">
+
+    <div class="reveal flex items-end justify-between mb-10 md:mb-14">
+      <div>
+        <div class="font-mono text-[10px] tracking-[0.22em] uppercase text-ink-500 mb-3">§ 01 — What's changing</div>
+        <h2 class="text-ink-950 font-semibold tracking-tightest text-[30px] md:text-[42px] leading-[1.1]">세 줄로 요약.</h2>
+      </div>
+      <div class="hidden md:block text-right font-mono text-[10px] tracking-[0.22em] uppercase text-ink-400">
+        Summary<br>for busy operators
+      </div>
+    </div>
+
+    <div class="grid grid-cols-12 gap-0 border-t border-ink-200">
+      <!-- item 01 -->
+      <div class="reveal d-1 col-span-12 md:col-span-4 border-b md:border-b-0 md:border-r border-ink-200 py-10 md:py-12 md:pr-10">
+        <div class="flex items-center gap-3 mb-8">
+          <div class="font-mono text-[11px] tracking-[0.22em] text-ink-400 num">01</div>
+          <div class="flex-1 h-px bg-ink-200"></div>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+        </div>
+        <h3 class="text-[22px] md:text-[26px] leading-[1.25] text-ink-950 font-semibold tracking-tight mb-3">계정 이관 완료</h3>
+        <p class="text-[14.5px] leading-[1.8] text-ink-600">기존 USERID는 그대로입니다. 임시 비밀번호로 처음 로그인하면 비밀번호 변경 화면이 자동으로 열립니다.</p>
+      </div>
+      <!-- item 02 -->
+      <div class="reveal d-2 col-span-12 md:col-span-4 border-b md:border-b-0 md:border-r border-ink-200 py-10 md:py-12 md:px-10">
+        <div class="flex items-center gap-3 mb-8">
+          <div class="font-mono text-[11px] tracking-[0.22em] text-ink-400 num">02</div>
+          <div class="flex-1 h-px bg-ink-200"></div>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+        </div>
+        <h3 class="text-[22px] md:text-[26px] leading-[1.25] text-ink-950 font-semibold tracking-tight mb-3">수신거부 이관 완료</h3>
+        <p class="text-[14.5px] leading-[1.8] text-ink-600">법적 의무 사항인 수신거부 목록과 등록된 회신번호(발신번호)는 100% 안전하게 이관되었습니다.</p>
+      </div>
+      <!-- item 03 -->
+      <div class="reveal d-3 col-span-12 md:col-span-4 py-10 md:py-12 md:pl-10">
+        <div class="flex items-center gap-3 mb-8">
+          <div class="font-mono text-[11px] tracking-[0.22em] text-ink-400 num">03</div>
+          <div class="flex-1 h-px bg-ink-200"></div>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+        </div>
+        <h3 class="text-[22px] md:text-[26px] leading-[1.25] text-ink-950 font-semibold tracking-tight mb-3">주소록만 새로 업로드</h3>
+        <p class="text-[14.5px] leading-[1.8] text-ink-600">깨끗한 시작을 위해 주소록(고객 DB)은 엑셀 파일로 다시 업로드해 주세요. 업로드 마법사가 안내합니다.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 3-STEP GUIDE ============ -->
+<section id="guide" class="relative bg-canvas border-t border-ink-200">
+  <div class="max-w-[1200px] mx-auto px-6 md:px-10 py-16 md:py-24">
+
+    <div class="reveal mb-10 md:mb-14 flex items-end justify-between">
+      <div>
+        <div class="font-mono text-[10px] tracking-[0.22em] uppercase text-ink-500 mb-3">§ 02 — How to switch</div>
+        <h2 class="text-ink-950 font-semibold tracking-tightest text-[30px] md:text-[42px] leading-[1.1]">3단계면 끝납니다.</h2>
+        <p class="mt-4 text-[15px] text-ink-600 max-w-[520px]">평균 4분 내외. 두 번째 단계의 임시 비밀번호는 아래에서 바로 복사할 수 있습니다.</p>
+      </div>
+      <div class="hidden lg:flex items-center gap-2 font-mono text-[11px] tracking-[0.22em] uppercase text-ink-500">
+        <span class="w-8 h-px bg-ink-400"></span>
+        <span>≈ 4 min</span>
+      </div>
+    </div>
+
+    <div class="relative">
+      <!-- horizontal connector (desktop) -->
+      <div class="hidden md:block absolute top-[34px] left-[8%] right-[8%] h-px bg-gradient-to-r from-violet-200 via-violet-400 to-violet-200"></div>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-6 md:gap-8">
+
+        <!-- step 01 -->
+        <div class="reveal d-1 relative">
+          <div class="relative flex items-center gap-4 mb-6">
+            <div class="relative z-10 w-[68px] h-[68px] rounded-full bg-white border border-ink-200 flex items-center justify-center shadow-[0_1px_0_rgba(11,11,15,0.04),0_12px_24px_-12px_rgba(124,58,237,0.35)]">
+              <span class="num font-mono text-[22px] text-violet-700 font-semibold">01</span>
+            </div>
+            <div class="flex-1 font-mono text-[10px] tracking-[0.22em] uppercase text-ink-500">Open</div>
+          </div>
+          <h3 class="text-[20px] font-semibold text-ink-950 tracking-tight mb-2">한줄로에 접속</h3>
+          <p class="text-[14px] leading-[1.8] text-ink-600 mb-5">브라우저에서 <span class="text-ink-900 font-medium">hanjul.ai</span>로 이동합니다. 기존 invitobiz.com 북마크는 더 이상 사용하지 않습니다.</p>
+          <a href="https://hanjul.ai" target="_blank" rel="noopener"
+             class="inline-flex items-center gap-2 text-[13px] font-mono tracking-wider text-violet-700 hover:text-violet-900 transition">
+            <span class="underline underline-offset-4 decoration-violet-300 hover:decoration-violet-700">hanjul.ai</span>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M8 7h9v9"/></svg>
+          </a>
+        </div>
+
+        <!-- step 02 -->
+        <div class="reveal d-2 relative">
+          <div class="relative flex items-center gap-4 mb-6">
+            <div class="relative z-10 w-[68px] h-[68px] rounded-full bg-violet-600 text-white flex items-center justify-center shadow-[0_14px_32px_-10px_rgba(124,58,237,0.55)]">
+              <span class="num font-mono text-[22px] font-semibold">02</span>
+            </div>
+            <div class="flex-1 font-mono text-[10px] tracking-[0.22em] uppercase text-ink-500">Sign in</div>
+          </div>
+          <h3 class="text-[20px] font-semibold text-ink-950 tracking-tight mb-2">기존 아이디 + 임시 비밀번호</h3>
+          <p class="text-[14px] leading-[1.8] text-ink-600 mb-5">invitobiz.com에서 쓰던 <span class="text-ink-900 font-medium">USERID 그대로</span> 입력하고, <span class="text-ink-900 font-medium">관리자에게 안내받으신 임시 비밀번호</span>로 로그인합니다.</p>
+
+          <div class="rounded-xl border border-ink-200 bg-white p-4">
+            <div class="font-mono text-[10px] tracking-[0.22em] uppercase text-ink-500 mb-1.5">Temporary password</div>
+            <div class="text-[14px] text-ink-900 leading-[1.6]">관리자에게 안내받으신 <span class="font-medium">임시 비밀번호</span>를 입력해 주세요.<br><span class="text-ink-500 text-[12.5px]">안내 받지 못하셨다면 <span class="font-medium text-ink-800 num">1800-8125</span> 로 문의하세요.</span></div>
+          </div>
+          <div class="mt-3 font-mono text-[11px] tracking-[0.14em] text-ink-500">첫 로그인 후 비밀번호 변경 화면이 자동으로 표시됩니다.</div>
+        </div>
+
+        <!-- step 03 -->
+        <div class="reveal d-3 relative">
+          <div class="relative flex items-center gap-4 mb-6">
+            <div class="relative z-10 w-[68px] h-[68px] rounded-full bg-white border border-ink-200 flex items-center justify-center shadow-[0_1px_0_rgba(11,11,15,0.04),0_12px_24px_-12px_rgba(124,58,237,0.35)]">
+              <span class="num font-mono text-[22px] text-violet-700 font-semibold">03</span>
+            </div>
+            <div class="flex-1 font-mono text-[10px] tracking-[0.22em] uppercase text-ink-500">Import</div>
+          </div>
+          <h3 class="text-[20px] font-semibold text-ink-950 tracking-tight mb-2">주소록 엑셀 업로드</h3>
+          <p class="text-[14px] leading-[1.8] text-ink-600 mb-5">좌측 메뉴 <span class="text-ink-900 font-medium">주소록 → 엑셀 업로드</span>에서 .xlsx 파일을 올리면 자동으로 컬럼 매핑과 중복 제거가 진행됩니다.</p>
+          <!-- mini mock -->
+          <div class="rounded-xl border border-ink-200 bg-white overflow-hidden">
+            <div class="flex items-center justify-between px-4 py-2.5 bg-ink-50 border-b border-ink-200">
+              <div class="flex items-center gap-1.5">
+                <span class="w-2 h-2 rounded-full bg-ink-200"></span>
+                <span class="w-2 h-2 rounded-full bg-ink-200"></span>
+                <span class="w-2 h-2 rounded-full bg-ink-200"></span>
+              </div>
+              <div class="font-mono text-[10px] tracking-[0.16em] uppercase text-ink-500">contacts_2026.xlsx</div>
+            </div>
+            <div class="p-4 font-mono text-[11px] text-ink-600 leading-[1.9]">
+              <div><span class="text-ink-400">→</span> parsing rows <span class="text-ink-950">· 1,248</span></div>
+              <div><span class="text-ink-400">→</span> deduplication <span class="text-violet-700">· 92 merged</span></div>
+              <div><span class="text-ink-400">→</span> opt-out check <span class="text-violet-700">· 3 excluded</span></div>
+              <div><span class="text-ink-400">✓</span> <span class="text-ink-950">ready to send</span></div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ MIGRATION CHECKLIST ============ -->
+<section id="migrated" class="relative bg-white border-t border-ink-200">
+  <div class="max-w-[1200px] mx-auto px-6 md:px-10 py-16 md:py-24">
+
+    <div class="reveal flex items-end justify-between mb-10 md:mb-14">
+      <div>
+        <div class="font-mono text-[10px] tracking-[0.22em] uppercase text-ink-500 mb-3">§ 03 — Migration status</div>
+        <h2 class="text-ink-950 font-semibold tracking-tightest text-[30px] md:text-[42px] leading-[1.1]">이관 현황.</h2>
+      </div>
+      <div class="hidden md:flex items-center gap-3 font-mono text-[11px] tracking-[0.22em] uppercase">
+        <span class="w-1.5 h-1.5 rounded-full bg-violet-600"></span>
+        <span class="text-ink-700 num">2 of 3 auto-migrated</span>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
+
+      <!-- 회신번호 -->
+      <div class="reveal d-1 relative rounded-2xl border border-ink-200 bg-canvas p-6 md:p-7 overflow-hidden">
+        <div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-violet-400 to-violet-700"></div>
+        <div class="flex items-start justify-between mb-6">
+          <div class="w-10 h-10 rounded-xl bg-violet-100 text-violet-700 flex items-center justify-center">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.3 1.7.5 2.5a2 2 0 0 1-.5 2.1L8 9.4a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.5c.8.3 1.6.4 2.5.5a2 2 0 0 1 1.7 2z"/></svg>
+          </div>
+          <span class="inline-flex items-center gap-1.5 text-[11px] font-mono tracking-wider text-violet-700 bg-violet-50 border border-violet-200 rounded-full px-2.5 py-1">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+            DONE
+          </span>
+        </div>
+        <div class="font-mono text-[10px] tracking-[0.22em] uppercase text-ink-500 mb-2">Item 01</div>
+        <h3 class="text-[20px] font-semibold text-ink-950 tracking-tight mb-2">회신번호 (발신번호)</h3>
+        <p class="text-[13.5px] leading-[1.75] text-ink-600">등록·승인된 발신번호 전체가 한줄로 계정에 그대로 연결되어 있습니다.</p>
+        <div class="mt-5 pt-5 border-t border-ink-200 font-mono text-[11px] text-ink-500 flex items-center justify-between">
+          <span>status</span>
+          <span class="text-violet-700">auto_migrated</span>
+        </div>
+      </div>
+
+      <!-- 수신거부 -->
+      <div class="reveal d-2 relative rounded-2xl border border-ink-200 bg-canvas p-6 md:p-7 overflow-hidden">
+        <div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-violet-400 to-violet-700"></div>
+        <div class="flex items-start justify-between mb-6">
+          <div class="w-10 h-10 rounded-xl bg-violet-100 text-violet-700 flex items-center justify-center">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>
+          </div>
+          <span class="inline-flex items-center gap-1.5 text-[11px] font-mono tracking-wider text-violet-700 bg-violet-50 border border-violet-200 rounded-full px-2.5 py-1">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+            DONE
+          </span>
+        </div>
+        <div class="font-mono text-[10px] tracking-[0.22em] uppercase text-ink-500 mb-2">Item 02</div>
+        <h3 class="text-[20px] font-semibold text-ink-950 tracking-tight mb-2">수신거부 목록</h3>
+        <p class="text-[13.5px] leading-[1.75] text-ink-600">법적 의무 사항으로 100% 이관 완료. 기존에 수신거부한 수신자는 자동 제외됩니다.</p>
+        <div class="mt-5 pt-5 border-t border-ink-200 font-mono text-[11px] text-ink-500 flex items-center justify-between">
+          <span>status</span>
+          <span class="text-violet-700">auto_migrated · 100%</span>
+        </div>
+      </div>
+
+      <!-- 주소록 -->
+      <div class="reveal d-3 relative rounded-2xl border-2 border-dashed border-violet-300 bg-violet-50/50 p-6 md:p-7 overflow-hidden">
+        <div class="flex items-start justify-between mb-6">
+          <div class="w-10 h-10 rounded-xl bg-white border border-violet-200 text-violet-700 flex items-center justify-center">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          </div>
+          <span class="inline-flex items-center gap-1.5 text-[11px] font-mono tracking-wider text-violet-800 bg-white border border-violet-300 rounded-full px-2.5 py-1">
+            <span class="w-1.5 h-1.5 rounded-full bg-violet-600"></span>
+            YOUR TURN
+          </span>
+        </div>
+        <div class="font-mono text-[10px] tracking-[0.22em] uppercase text-ink-500 mb-2">Item 03</div>
+        <h3 class="text-[20px] font-semibold text-ink-950 tracking-tight mb-2">주소록 (고객 DB)</h3>
+        <p class="text-[13.5px] leading-[1.75] text-ink-700">깨끗한 데이터 시작을 위해 엑셀 업로드로 직접 가져와 주세요. .xlsx / .csv 모두 지원.</p>
+        <div class="mt-5 pt-5 border-t border-violet-200 font-mono text-[11px] text-ink-500 flex items-center justify-between">
+          <span>status</span>
+          <span class="text-violet-800">manual_upload · pending</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ BIG CTA ============ -->
+<section class="relative overflow-hidden border-t border-ink-200 bg-ink-950 text-white">
+  <div class="absolute inset-0 opacity-50" style="background: radial-gradient(ellipse 60% 70% at 70% 50%, rgba(139,92,246,0.35), rgba(11,11,15,0) 60%);"></div>
+  <div class="absolute inset-0 opacity-40" style="background: radial-gradient(ellipse 50% 50% at 10% 100%, rgba(196,181,253,0.18), rgba(11,11,15,0) 60%);"></div>
+  <div class="grid-lines opacity-30" style="filter: invert(1);"></div>
+
+  <div class="relative max-w-[1200px] mx-auto px-6 md:px-10 py-20 md:py-28">
+    <div class="grid grid-cols-12 gap-8 items-end">
+      <div class="col-span-12 md:col-span-8">
+        <div class="reveal font-mono text-[10px] tracking-[0.22em] uppercase text-violet-300 mb-6">§ 04 — Continue</div>
+        <h2 class="reveal d-1 font-semibold tracking-tightest text-[44px] md:text-[72px] leading-[1] text-white">
+          지금 이어서<br>
+          <span class="text-violet-300">한 줄로</span> 시작하세요.
+        </h2>
+        <p class="reveal d-2 mt-6 md:mt-8 text-[16px] md:text-[18px] leading-[1.8] text-white/70 max-w-[520px]">
+          기존 USERID 그대로 로그인됩니다. 관리자에게 안내받으신 임시 비밀번호를 준비해 주세요.
+        </p>
+      </div>
+      <div class="col-span-12 md:col-span-4 flex md:justify-end no-print">
+        <a href="https://hanjul.ai" target="_blank" rel="noopener"
+           class="reveal d-3 cta group inline-flex items-center gap-4 text-white font-medium text-[16px] pl-7 pr-6 h-16 rounded-full">
+          <span class="relative z-10">한줄로 바로가기</span>
+          <span class="relative z-10 flex items-center justify-center w-10 h-10 rounded-full bg-white/15 backdrop-blur-sm cta-arrow">
+            <svg width="16" height="14" viewBox="0 0 14 10"><path d="M1 5h11M8 1l4 4-4 4" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </span>
+        </a>
+      </div>
+    </div>
+
+    <div class="mt-16 md:mt-20 pt-8 border-t border-white/10 grid grid-cols-2 md:grid-cols-3 gap-6 text-[13px]">
+      <div>
+        <div class="font-mono text-[10px] tracking-[0.22em] uppercase text-white/40 mb-2">New URL</div>
+        <div class="text-white">hanjul.ai</div>
+      </div>
+      <div>
+        <div class="font-mono text-[10px] tracking-[0.22em] uppercase text-white/40 mb-2">Legacy sunset</div>
+        <div class="text-white num">2026.05.06 · 00:00 KST</div>
+      </div>
+      <div>
+        <div class="font-mono text-[10px] tracking-[0.22em] uppercase text-white/40 mb-2">Username</div>
+        <div class="text-white">기존 USERID 그대로</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ FAQ ============ -->
+<section id="faq" class="relative bg-canvas border-t border-ink-200">
+  <div class="max-w-[1200px] mx-auto px-6 md:px-10 py-16 md:py-24">
+
+    <div class="grid grid-cols-12 gap-10">
+      <div class="col-span-12 md:col-span-4 reveal">
+        <div class="font-mono text-[10px] tracking-[0.22em] uppercase text-ink-500 mb-3">§ 05 — Questions</div>
+        <h2 class="text-ink-950 font-semibold tracking-tightest text-[30px] md:text-[42px] leading-[1.1] mb-6">자주 묻는 질문.</h2>
+        <p class="text-[15px] text-ink-600 leading-[1.8]">
+          답이 없으신가요? <a href="mailto:mobile@invitocorp.com" class="text-violet-700 underline underline-offset-4 decoration-violet-300 hover:decoration-violet-700">mobile@invitocorp.com</a> 또는 고객센터 <span class="text-ink-900 font-medium num">1800-8125</span>로 문의해 주세요.
+        </p>
+      </div>
+
+      <div class="col-span-12 md:col-span-8 reveal d-1">
+        <div class="border-t border-ink-200">
+
+          <details class="group border-b border-ink-200 py-5">
+            <summary class="flex items-start justify-between gap-6 cursor-pointer list-none">
+              <div class="flex gap-5">
+                <span class="font-mono text-[11px] tracking-[0.22em] text-ink-400 pt-1.5 num">Q1</span>
+                <h3 class="text-[17px] md:text-[18px] font-semibold text-ink-950">기존 invitobiz.com에서 보내던 설정이 그대로 옮겨지나요?</h3>
+              </div>
+              <span class="faq-chev text-ink-400 pt-1 shrink-0">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+              </span>
+            </summary>
+            <div class="pt-4 pl-12 pr-10 text-[14.5px] leading-[1.85] text-ink-600">
+              계정(USERID)·회신번호(발신번호)·수신거부 목록은 모두 자동 이관되어 있습니다. 단, 주소록(고객 DB)은 데이터 품질 검증 차원에서 자동 이관 대상에서 제외되며, 한줄로의 주소록 메뉴에서 엑셀로 다시 업로드하시면 됩니다.
+            </div>
+          </details>
+
+          <details class="group border-b border-ink-200 py-5">
+            <summary class="flex items-start justify-between gap-6 cursor-pointer list-none">
+              <div class="flex gap-5">
+                <span class="font-mono text-[11px] tracking-[0.22em] text-ink-400 pt-1.5 num">Q2</span>
+                <h3 class="text-[17px] md:text-[18px] font-semibold text-ink-950">임시 비밀번호로 로그인이 안 됩니다.</h3>
+              </div>
+              <span class="faq-chev text-ink-400 pt-1 shrink-0">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+              </span>
+            </summary>
+            <div class="pt-4 pl-12 pr-10 text-[14.5px] leading-[1.85] text-ink-600">
+              USERID는 대소문자를 구분합니다. 관리자에게 안내받으신 임시 비밀번호를 정확히 입력하셨는지 확인해 주세요. 그래도 안 되시면 <span class="text-ink-900 font-medium num">1800-8125</span> 로 연락 주시면 즉시 재설정해 드립니다.
+            </div>
+          </details>
+
+          <details class="group border-b border-ink-200 py-5">
+            <summary class="flex items-start justify-between gap-6 cursor-pointer list-none">
+              <div class="flex gap-5">
+                <span class="font-mono text-[11px] tracking-[0.22em] text-ink-400 pt-1.5 num">Q3</span>
+                <h3 class="text-[17px] md:text-[18px] font-semibold text-ink-950">주소록 엑셀 양식이 따로 있나요?</h3>
+              </div>
+              <span class="faq-chev text-ink-400 pt-1 shrink-0">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+              </span>
+            </summary>
+            <div class="pt-4 pl-12 pr-10 text-[14.5px] leading-[1.85] text-ink-600">
+              업로드 단계에서 컬럼 매핑 UI가 제공되므로 양식이 달라도 괜찮습니다. 이름·휴대폰번호·태그·메모 컬럼을 선택해 연결하시면 자동으로 정규화·중복 제거·수신거부 필터링까지 처리됩니다.
+            </div>
+          </details>
+
+          <details class="group border-b border-ink-200 py-5">
+            <summary class="flex items-start justify-between gap-6 cursor-pointer list-none">
+              <div class="flex gap-5">
+                <span class="font-mono text-[11px] tracking-[0.22em] text-ink-400 pt-1.5 num">Q4</span>
+                <h3 class="text-[17px] md:text-[18px] font-semibold text-ink-950">5월 6일 이후에는 invitobiz.com이 어떻게 되나요?</h3>
+              </div>
+              <span class="faq-chev text-ink-400 pt-1 shrink-0">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+              </span>
+            </summary>
+            <div class="pt-4 pl-12 pr-10 text-[14.5px] leading-[1.85] text-ink-600">
+              2026년 5월 6일 00시(KST)부터 invitobiz.com에서의 신규 발송이 중단됩니다. 일정 기간 동안 과거 발송 이력 조회는 가능하도록 유지되며, 이후 안내에 따라 단계적으로 서비스가 종료될 예정입니다.
+            </div>
+          </details>
+
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ CONTACT / FOOTER ============ -->
+<footer id="contact" class="relative bg-white border-t border-ink-200">
+  <div class="max-w-[1200px] mx-auto px-6 md:px-10 py-14 md:py-16">
+    <div class="grid grid-cols-12 gap-8">
+      <div class="col-span-12 md:col-span-5">
+        <div class="flex items-center gap-2 mb-6">
+          <span class="font-mono text-[11px] tracking-[0.28em] uppercase text-ink-500">Invito</span>
+          <svg width="14" height="10" viewBox="0 0 14 10" class="text-ink-400"><path d="M1 5h11M8 1l4 4-4 4" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span class="font-mono text-[11px] tracking-[0.28em] uppercase text-violet-700">한줄로</span>
+        </div>
+        <p class="text-[14px] leading-[1.85] text-ink-600 max-w-[420px]">
+          10년간 기업형 SMS/LMS/MMS 마케팅을 운영해 온 INVITO의 다음 세대 플랫폼, <span class="text-ink-900 font-medium">한줄로</span>.
+          더 빠르고, 더 안정적이며, 더 현대적인 기반 위에서 메시지를 보내세요.
+        </p>
+      </div>
+      <div class="col-span-6 md:col-span-3">
+        <div class="font-mono text-[10px] tracking-[0.22em] uppercase text-ink-500 mb-4">Support</div>
+        <ul class="space-y-2 text-[14px] text-ink-800">
+          <li><a href="tel:1800-8125" class="hover:text-violet-700 transition num">1800-8125</a></li>
+          <li><a href="mailto:mobile@invitocorp.com" class="hover:text-violet-700 transition">mobile@invitocorp.com</a></li>
+          <li class="text-ink-500">평일 10:00 – 18:00 KST</li>
+        </ul>
+      </div>
+      <div class="col-span-6 md:col-span-4">
+        <div class="font-mono text-[10px] tracking-[0.22em] uppercase text-ink-500 mb-4">Links</div>
+        <ul class="space-y-2 text-[14px] text-ink-800">
+          <li><a href="https://hanjul.ai" target="_blank" rel="noopener" class="hover:text-violet-700 transition">hanjul.ai — 제품 소개 · 로그인</a></li>
+          <li><a href="#guide" class="hover:text-violet-700 transition">전환 가이드 다시 보기</a></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="mt-12 pt-6 border-t border-ink-200 flex flex-wrap items-center justify-between gap-4 font-mono text-[11px] tracking-[0.14em] text-ink-400 uppercase">
+      <div>© <span class="num">2026</span> INVITO · All rights reserved</div>
+      <div>Transition Notice · v1.0 · <span class="num" id="build-stamp">—</span></div>
+    </div>
+  </div>
+</footer>
+
+<!-- ============ SCRIPTS ============ -->
+<script>
+(function(){
+  // ---------- Reveal on load ----------
+  requestAnimationFrame(function(){
+    document.querySelectorAll('.reveal').forEach(function(el){
+      el.classList.add('revealed');
+    });
+  });
+
+  // ---------- D-Day counter ----------
+  var deadline = new Date('2026-05-06T00:00:00+09:00');
+  // Use a fixed "start" so the progress bar is meaningful:
+  var noticeStart = new Date('2026-04-01T00:00:00+09:00');
+
+  function pad(n){ return n < 10 ? '0'+n : ''+n; }
+
+  function tick(){
+    var now = new Date();
+    var diffMs = deadline - now;
+    if (diffMs < 0) diffMs = 0;
+    var totalSec = Math.floor(diffMs / 1000);
+    var days = Math.ceil(diffMs / 86400000);
+    var hours = Math.floor((diffMs % 86400000)/3600000);
+    var mins = Math.floor((diffMs % 3600000)/60000);
+    var secs = Math.floor((diffMs % 60000)/1000);
+
+    var dEl = document.getElementById('dday-days');
+    var hEl = document.getElementById('dday-hms');
+    if (dEl) dEl.textContent = days;
+    if (hEl) hEl.textContent = pad(hours)+':'+pad(mins)+':'+pad(secs);
+
+    // progress: from noticeStart → deadline
+    var total = deadline - noticeStart;
+    var elapsed = now - noticeStart;
+    var pct = Math.max(0, Math.min(100, (elapsed/total)*100));
+    var bar = document.getElementById('progress-bar');
+    var pctEl = document.getElementById('progress-pct');
+    if (bar) bar.style.width = pct.toFixed(1) + '%';
+    if (pctEl) pctEl.textContent = pct.toFixed(0) + '%';
+  }
+
+  // Count-up animation for the big D-Day number
+  function animateDDay(){
+    var target = Math.max(0, Math.ceil((deadline - new Date())/86400000));
+    var el = document.getElementById('dday');
+    if (!el) return;
+    var start = performance.now();
+    var duration = 1400;
+    var from = Math.min(target + 24, target === 0 ? 8 : target + 24);
+    function ease(t){ return 1 - Math.pow(1 - t, 3); }
+    function frame(now){
+      var t = Math.min(1, (now - start) / duration);
+      var v = Math.round(from + (target - from) * ease(t));
+      el.textContent = v;
+      if (t < 1) requestAnimationFrame(frame);
+      else el.textContent = target;
+    }
+    requestAnimationFrame(frame);
+  }
+
+  tick();
+  setInterval(tick, 1000);
+  // Small delay so the count-up plays after the reveal fade
+  setTimeout(animateDDay, 250);
+
+  // ---------- KST label ----------
+  var nowLabel = document.getElementById('now-label');
+  if (nowLabel) {
+    var now = new Date();
+    var y = now.getFullYear();
+    var m = pad(now.getMonth()+1);
+    var d = pad(now.getDate());
+    nowLabel.textContent = y+'.'+m+'.'+d+' · KST';
+  }
+
+  // ---------- Build stamp ----------
+  var bs = document.getElementById('build-stamp');
+  if (bs) {
+    var n = new Date();
+    bs.textContent = n.getFullYear()+''+pad(n.getMonth()+1)+pad(n.getDate());
+  }
+
+  // ---------- Copy chips ----------
+  document.querySelectorAll('[data-copy]').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var text = btn.getAttribute('data-copy');
+      var label = btn.querySelector('span');
+      var original = label ? label.textContent : '복사';
+      var done = function(){
+        btn.classList.add('copied');
+        if (label) label.textContent = '복사됨';
+        setTimeout(function(){
+          btn.classList.remove('copied');
+          if (label) label.textContent = original;
+        }, 1400);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done).catch(function(){
+          // fallback
+          var ta = document.createElement('textarea');
+          ta.value = text; document.body.appendChild(ta); ta.select();
+          try { document.execCommand('copy'); } catch(e){}
+          document.body.removeChild(ta);
+          done();
+        });
+      } else {
+        var ta = document.createElement('textarea');
+        ta.value = text; document.body.appendChild(ta); ta.select();
+        try { document.execCommand('copy'); } catch(e){}
+        document.body.removeChild(ta);
+        done();
+      }
+    });
+  });
+
+  // ---------- Smooth anchor scrolling ----------
+  document.querySelectorAll('a[href^="#"]').forEach(function(a){
+    a.addEventListener('click', function(e){
+      var id = a.getAttribute('href');
+      if (id.length > 1) {
+        var tgt = document.querySelector(id);
+        if (tgt) {
+          e.preventDefault();
+          window.scrollTo({ top: tgt.getBoundingClientRect().top + window.scrollY - 72, behavior: 'smooth' });
+        }
+      }
+    });
+  });
+})();
+</script>
+
+</body>
+</html>

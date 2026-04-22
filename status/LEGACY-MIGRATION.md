@@ -1,10 +1,42 @@
 # 레거시 → 한줄로 이관 설계서
 
-> **작성일**: 2026-04-20
-> **상태**: 정책 확정 완료, 서팀장 그룹핑 자료 대기 중
-> **D-Day**: 2026-05-05 새벽 (Harold님 + Claude 공동 작업)
+> **작성일**: 2026-04-20 / **최종 갱신**: 2026-04-22 (D135)
+> **진행 상태**: ✅ 계정(D134) + ✅ 회신번호·수신거부(D135) 완료 / ⏳ 예약발송+Agent차단 5/5 D-Day 남음
+> **D-Day**: 2026-05-05 새벽 (Harold님 + Claude 공동 작업) — 예약발송 76건 + 레거시 Agent 중지
 > **레거시**: INVITO 다우클라우드 서버 (Oracle 11g)
-> **관련 문서**: `C:\Users\ceo\Downloads\INVITO-INFRA-HANDOVER.md`
+> **관련 문서**: `C:\Users\ceo\Downloads\INVITO-INFRA-HANDOVER.md`, 메모리 `project_d134_legacy_migration.md` / `project_d135_legacy_callbacks_unsubs.md`
+
+---
+
+## 🎯 완료 진행 현황 (2026-04-22 시점)
+
+### 데이터 이관
+| 종류 | 예상 건수 | 실제 이관 | 세션 | 비고 |
+|---|---:|---:|---|---|
+| 계정 (companies) | 62 | **62** | D134 | 단독 44 / 다중 18 |
+| 계정 (users) | 141 | **141** | D134 | admin 69(기존 7+신규 62) / user 93 |
+| 회신번호 callback_numbers | 1,492 | **1,492** | D135 | label='레거시' |
+| 회신번호 assignments | 1,051 | **1,051** | D135 | 다중회사만, assigned_by=company admin |
+| 수신거부 unsubscribes | 321,389 | **321,389** | D135 | source='legacy_migration' (user 265,619 + admin 합집합 55,770) |
+| 주소록 | — | ⛔ 포기 | — | 고객사 직접 재업로드 정책 |
+| **선불 잔액 (billing_type+balance)** | 34사 / 20,398,110원 | ⏳ | 2026-05-05 | 4/22 스냅샷 준비 완료, D-Day 재조회 후 UPDATE (`D-DAY-PREPAID-RUNBOOK.md`) |
+| 예약발송 | 76 | ⏳ | 2026-05-05 | 한줄로 INSERT → 레거시 RESERVEYN=0 순서 엄수 |
+
+### 레거시 서버 전환 안내 UI (D135 저녁 배포 완료)
+| 항목 | 경로 | 크기 | 상태 |
+|---|---|---:|:---:|
+| 팝업 (전 페이지 footer include) | `/www/usom/WebContent/inc/migration-popup.jsp` | 13,924 bytes | ✅ |
+| 랜딩 페이지 | `https://www.invitobiz.com/transition` = `/usr/local/nginx/html/transition.html` | 47,736 bytes | ✅ |
+| Nginx location 추가 | `charset utf-8;` 앵커 sed 삽입 + reload | — | ✅ |
+| 쿠키 동작 | `hanjul_popup_closed=1` 당일 만료 — "오늘 다시 보지 않음" | — | ✅ |
+| 브라우저 실화면 검증 | Harold님 시크릿창 전 항목 통과 | — | ✅ |
+
+**로컬 원본** (git 추적 권장): `docs/legacy-popup.html` / `docs/transition.html` / `docs/migration-popup.jsp`
+**서버 백업**: `migration-popup.jsp.bak.20260422_154934` + `nginx.conf.bak.20260422_153900` 자동 생성
+
+**정합성 검증**: D135 141명 login_id 전원 expected vs actual 완전 일치 PASS (`migrate-legacy/data/verification-report.json`)
+
+**이관 작업 디렉토리**: `migrate-legacy/` — scripts 7종 + data(JSON/CSV/SQL) 전부 보존. 5/5 예약발송 이관 시 재활용 가능.
 
 ---
 

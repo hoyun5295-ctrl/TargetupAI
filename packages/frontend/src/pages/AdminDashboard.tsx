@@ -195,6 +195,9 @@ const [messageDetailContent, setMessageDetailContent] = useState<{ name: string;
   const [showCallbackModal, setShowCallbackModal] = useState(false);
   const [callbackSearch, setCallbackSearch] = useState('');
   const [expandedCallbackCompanies, setExpandedCallbackCompanies] = useState<Set<string>>(new Set());
+  // ★ D135+ (B10): 회사별 발신번호 페이지네이션 — 한 회사당 160개 등 무한 스크롤 방지, 10개씩 페이징
+  const [callbackCompanyPages, setCallbackCompanyPages] = useState<Record<string, number>>({});
+  const CALLBACKS_PER_COMPANY_PAGE = 10;
   const [newCallback, setNewCallback] = useState({
     companyId: '',
     phone: '',
@@ -2980,39 +2983,104 @@ const handleApproveRequest = async (id: string) => {
                               <span className="text-sm text-gray-500">{group.items.length}개</span>
                             </div>
                           </button>
-                          {isExpanded && (
-                            <table className="w-full text-sm">
-                              <thead className="bg-gray-50/50">
-                                <tr>
-                                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 whitespace-nowrap">발신번호</th>
-                                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 whitespace-nowrap">별칭</th>
-                                  <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 whitespace-nowrap">대표</th>
-                                  <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 whitespace-nowrap">등록일</th>
-                                  <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 whitespace-nowrap">관리</th>
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-gray-100">
-                                {group.items.map((cb: any) => (
-                                  <tr key={cb.id} className="hover:bg-blue-50/30">
-                                    <td className="px-4 py-2.5 font-medium text-gray-900">{cb.phone}</td>
-                                    <td className="px-4 py-2.5 text-gray-500">{cb.label || '-'}</td>
-                                    <td className="px-4 py-2.5 text-center">
-                                      {cb.is_default ? (
-                                        <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">대표</span>
-                                      ) : (
-                                        <button onClick={() => handleSetDefault(cb.id)} className="text-blue-600 hover:text-blue-800 text-xs">대표설정</button>
+                          {isExpanded && (() => {
+                            // ★ D135+ (B10): 회사당 10개씩 페이징. 금강제화 등 160개 업체 무한 스크롤 방지.
+                            const currentPage = callbackCompanyPages[cid] || 1;
+                            const totalItems = group.items.length;
+                            const totalPages = Math.max(1, Math.ceil(totalItems / CALLBACKS_PER_COMPANY_PAGE));
+                            const safePage = Math.min(currentPage, totalPages);
+                            const startIdx = (safePage - 1) * CALLBACKS_PER_COMPANY_PAGE;
+                            const endIdx = Math.min(startIdx + CALLBACKS_PER_COMPANY_PAGE, totalItems);
+                            const paged = group.items.slice(startIdx, endIdx);
+                            const setCompanyPage = (p: number) =>
+                              setCallbackCompanyPages(prev => ({ ...prev, [cid]: Math.max(1, Math.min(totalPages, p)) }));
+                            // 페이지 번호 목록 (7개 이상이면 축약: 1 ... n-1 n n+1 ... N)
+                            const pageNums: (number | string)[] = [];
+                            if (totalPages <= 7) {
+                              for (let i = 1; i <= totalPages; i++) pageNums.push(i);
+                            } else {
+                              pageNums.push(1);
+                              if (safePage > 3) pageNums.push('...');
+                              for (let i = Math.max(2, safePage - 1); i <= Math.min(totalPages - 1, safePage + 1); i++) pageNums.push(i);
+                              if (safePage < totalPages - 2) pageNums.push('...');
+                              pageNums.push(totalPages);
+                            }
+                            return (
+                              <>
+                                <table className="w-full text-sm">
+                                  <thead className="bg-gray-50/50">
+                                    <tr>
+                                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 whitespace-nowrap">발신번호</th>
+                                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 whitespace-nowrap">별칭</th>
+                                      <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 whitespace-nowrap">대표</th>
+                                      <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 whitespace-nowrap">등록일</th>
+                                      <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 whitespace-nowrap">관리</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-gray-100">
+                                    {paged.map((cb: any) => (
+                                      <tr key={cb.id} className="hover:bg-blue-50/30">
+                                        <td className="px-4 py-2.5 font-medium text-gray-900">{cb.phone}</td>
+                                        <td className="px-4 py-2.5 text-gray-500">{cb.label || '-'}</td>
+                                        <td className="px-4 py-2.5 text-center">
+                                          {cb.is_default ? (
+                                            <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">대표</span>
+                                          ) : (
+                                            <button onClick={() => handleSetDefault(cb.id)} className="text-blue-600 hover:text-blue-800 text-xs">대표설정</button>
+                                          )}
+                                        </td>
+                                        <td className="px-4 py-2.5 text-center text-gray-500">{formatDate(cb.created_at)}</td>
+                                        <td className="px-4 py-2.5 text-center">
+                                          <button onClick={() => setEditingCallback({ id: cb.id, phone: cb.phone, label: cb.label || '' })} className="text-blue-600 hover:text-blue-800 text-sm mr-2">수정</button>
+                                          <button onClick={() => handleDeleteCallback(cb.id, cb.phone)} className="text-red-600 hover:text-red-800 text-sm">삭제</button>
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                                {totalPages > 1 && (
+                                  <div className="px-4 py-2.5 border-t bg-gray-50/30 flex items-center justify-between">
+                                    <span className="text-xs text-gray-500">
+                                      {startIdx + 1}~{endIdx} / {totalItems}개
+                                    </span>
+                                    <div className="flex items-center gap-1">
+                                      <button
+                                        onClick={() => setCompanyPage(safePage - 1)}
+                                        disabled={safePage === 1}
+                                        className="px-2.5 py-1 text-xs rounded border bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition"
+                                      >
+                                        이전
+                                      </button>
+                                      {pageNums.map((p, i) =>
+                                        p === '...' ? (
+                                          <span key={`d-${cid}-${i}`} className="px-1.5 text-gray-400">…</span>
+                                        ) : (
+                                          <button
+                                            key={`p-${cid}-${p}`}
+                                            onClick={() => setCompanyPage(p as number)}
+                                            className={`px-2.5 py-1 text-xs rounded transition ${
+                                              p === safePage
+                                                ? 'bg-blue-600 text-white'
+                                                : 'bg-white border text-gray-600 hover:bg-gray-50'
+                                            }`}
+                                          >
+                                            {p}
+                                          </button>
+                                        )
                                       )}
-                                    </td>
-                                    <td className="px-4 py-2.5 text-center text-gray-500">{formatDate(cb.created_at)}</td>
-                                    <td className="px-4 py-2.5 text-center">
-                                      <button onClick={() => setEditingCallback({ id: cb.id, phone: cb.phone, label: cb.label || '' })} className="text-blue-600 hover:text-blue-800 text-sm mr-2">수정</button>
-                                      <button onClick={() => handleDeleteCallback(cb.id, cb.phone)} className="text-red-600 hover:text-red-800 text-sm">삭제</button>
-                                    </td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          )}
+                                      <button
+                                        onClick={() => setCompanyPage(safePage + 1)}
+                                        disabled={safePage === totalPages}
+                                        className="px-2.5 py-1 text-xs rounded border bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition"
+                                      >
+                                        다음
+                                      </button>
+                                    </div>
+                                  </div>
+                                )}
+                              </>
+                            );
+                          })()}
                         </div>
                       );
                     })}

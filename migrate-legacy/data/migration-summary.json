@@ -1,0 +1,20 @@
+{
+  "generated_at": "2026-04-22T05:56:02.788Z",
+  "callback": {
+    "source_rows_csv": 1650,
+    "invalid_phone_skipped": 0,
+    "unmapped_userid_skipped": 0,
+    "callback_numbers_rows": 1492,
+    "assignments_rows": 1051,
+    "solo_companies_with_data": 44,
+    "multi_companies_with_data": 18
+  },
+  "unsubscribe": {
+    "source_rows_csv": 329292,
+    "invalid_phone_skipped": 58209,
+    "unmapped_userid_skipped": 0,
+    "user_direct_pairs": 265619,
+    "admin_union_pairs": 55770,
+    "total_unsubscribes_rows": 321389
+  }
+}

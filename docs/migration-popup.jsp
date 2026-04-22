@@ -5,65 +5,88 @@
   - 삽입: footer.jsp 맨 끝에 <%@ include file="migration-popup.jsp" %> 1줄
   - 제거: footer.jsp include 1줄 삭제 + 본 파일 rm
   - 공유 Pretendard 웹폰트를 내부에서 1회 주입 (중복 주입은 브라우저가 자동 무시)
+  - 최종 업데이트: 2026-04-22
+    · D-Day 배지 + 실시간 카운트다운
+    · 회신번호/수신거부 자동이관 완료 표시
+    · 임시 비밀번호 추상화 ("안내받으신 임시 비밀번호")
+    · 보조 CTA "자세한 내용을 확인하세요" → /transition 랜딩 페이지 연결
+    · 커스텀 스크롤바 (둥근 모서리 대응)
 --%>
 <!-- HANJUL_MIGRATION_POPUP_START -->
 <link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/variable/pretendardvariable.css" rel="stylesheet">
+
 <div id="hanjulPopup" style="position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;background:rgba(15,23,42,0.6);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);animation:hjpIn .3s ease;font-family:'Pretendard Variable','Pretendard',-apple-system,'Malgun Gothic',sans-serif">
 <div id="hjpCard" style="width:520px;max-width:92vw;max-height:90vh;overflow-y:auto;border-radius:24px;background:#fff;box-shadow:0 25px 50px -12px rgba(0,0,0,0.4),0 0 0 1px rgba(255,255,255,0.1);animation:hjpSlide .45s cubic-bezier(.175,.885,.32,1.1)">
 
-  <!-- 상단 히어로 -->
+  <!-- ===== 상단 히어로 ===== -->
   <div style="position:relative;padding:40px 40px 32px;background:linear-gradient(135deg,#059669 0%,#0f766e 35%,#155e75 65%,#1e40af 100%);border-radius:24px 24px 0 0;overflow:hidden">
+    <!-- 데코 -->
     <div style="position:absolute;top:-80px;right:-80px;width:240px;height:240px;border-radius:50%;border:1px solid rgba(255,255,255,0.08)"></div>
     <div style="position:absolute;top:-40px;right:-40px;width:160px;height:160px;border-radius:50%;border:1px solid rgba(255,255,255,0.05)"></div>
     <div style="position:absolute;bottom:-60px;left:-60px;width:200px;height:200px;border-radius:50%;background:rgba(255,255,255,0.03)"></div>
+    <!-- 로고 (텍스트 로고 — 외부 이미지 의존 제거) -->
     <div style="position:relative;margin-bottom:14px;display:flex;align-items:center;gap:8px">
       <div style="width:32px;height:32px;border-radius:8px;background:rgba(255,255,255,0.15);display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:800;color:#fff;letter-spacing:-0.5px">한</div>
       <div style="font-size:22px;font-weight:800;color:#fff;letter-spacing:-0.5px;line-height:1">한줄로<span style="color:#a7f3d0;margin-left:2px">AI</span></div>
     </div>
     <div style="position:relative">
+      <div style="display:inline-flex;align-items:center;gap:7px;padding:6px 12px;background:rgba(255,255,255,0.14);border:1px solid rgba(252,165,165,0.35);border-radius:999px;margin-bottom:12px;font-size:11px;font-weight:600;color:#fff;letter-spacing:0.2px;backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)">
+        <span style="width:6px;height:6px;border-radius:50%;background:#fca5a5;box-shadow:0 0 0 0 rgba(252,165,165,0.7);animation:hjpPulse 1.8s ease-in-out infinite"></span>
+        <span>2026.05.06 레거시 서비스 종료 · D-<span id="hjpDaysLeft">–</span></span>
+      </div>
       <h2 style="margin:0 0 6px;font-size:20px;font-weight:700;color:#fff;letter-spacing:-0.3px">AI 비즈메세징 플랫폼</h2>
       <p style="margin:0;font-size:13px;color:rgba(255,255,255,0.65);font-weight:400">AI 타겟 분석부터 캠페인 발송까지, 기업형 비즈메세징을 한번에</p>
     </div>
   </div>
 
-  <!-- 안내 메시지 -->
+  <!-- ===== 안내 메시지 ===== -->
   <div style="padding:28px 40px 0">
     <p style="margin:0;font-size:15px;color:#374151;line-height:1.85;word-break:keep-all;text-align:center">
-      그동안 이용해주신 고객사 여러분께 감사드리며,<br>
-      AI 시대를 맞이하여 <b style="color:#059669">한줄로AI</b> 서비스를 오픈하였습니다.
+      그동안 이용해주신 고객사 여러분께 감사드립니다.<br>
+      <b style="color:#dc2626">2026년 5월 6일부로 invitobiz.com 발송이 종료</b>되며,<br>
+      후속 서비스 <b style="color:#059669">한줄로AI</b>에서 이어 이용하실 수 있습니다.
     </p>
   </div>
 
-  <!-- 대표 기능 그리드 -->
+  <!-- ===== 대표 기능 그리드 ===== -->
   <div style="padding:24px 40px 0">
     <div style="font-size:12px;font-weight:600;color:#9ca3af;letter-spacing:2px;margin-bottom:14px">FEATURES</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+
       <div style="padding:16px;background:#f0fdf4;border-radius:14px;border:1px solid #dcfce7">
         <div style="font-size:20px;margin-bottom:8px">&#9889;</div>
         <div style="font-size:13px;font-weight:700;color:#065f46;margin-bottom:4px">AI 한줄로</div>
         <div style="font-size:11px;color:#6b7280;line-height:1.5">한 줄 입력으로 타겟 추출부터<br>메시지 생성, 발송까지 자동</div>
       </div>
+
       <div style="padding:16px;background:#eff6ff;border-radius:14px;border:1px solid #dbeafe">
         <div style="font-size:20px;margin-bottom:8px">&#127919;</div>
         <div style="font-size:13px;font-weight:700;color:#1e40af;margin-bottom:4px">AI 맞춤타겟</div>
         <div style="font-size:11px;color:#6b7280;line-height:1.5">고객 DB 분석으로 최적의<br>타겟 자동 추출 및 세그먼트</div>
       </div>
+
       <div style="padding:16px;background:#fefce8;border-radius:14px;border:1px solid #fef08a">
         <div style="font-size:20px;margin-bottom:8px">&#128640;</div>
         <div style="font-size:13px;font-weight:700;color:#854d0e;margin-bottom:4px">자동발송</div>
         <div style="font-size:11px;color:#6b7280;line-height:1.5">매월/매주/매일 반복 발송을<br>한 번 설정으로 자동 운영</div>
       </div>
+
       <div style="padding:16px;background:#fdf2f8;border-radius:14px;border:1px solid #fce7f3">
         <div style="font-size:20px;margin-bottom:8px">&#128737;</div>
         <div style="font-size:13px;font-weight:700;color:#9d174d;margin-bottom:4px">스팸필터 테스트</div>
         <div style="font-size:11px;color:#6b7280;line-height:1.5">SKT/KT/LGU+ 3사<br>실시간 스팸 여부 사전 검증</div>
       </div>
+
     </div>
   </div>
 
-  <!-- 혜택 + 이관 안내 -->
+  <!-- ===== 혜택 배너 ===== -->
   <div style="padding:20px 40px 0">
     <div style="background:linear-gradient(135deg,#ecfdf5,#f0f9ff);border:1px solid #d1fae5;border-radius:14px;padding:18px 20px;display:flex;flex-direction:column;gap:10px">
+      <div style="display:flex;align-items:flex-start;gap:10px">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#059669" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;margin-top:4px"><polyline points="20 6 9 17 4 12"/></svg>
+        <span style="font-size:13px;color:#1f2937;line-height:1.6"><b style="color:#059669">회신번호 · 수신거부 목록은 자동 이관 완료</b> — 재등록 불필요</span>
+      </div>
       <div style="display:flex;align-items:flex-start;gap:10px">
         <div style="width:6px;height:6px;border-radius:50%;background:#059669;flex-shrink:0;margin-top:7px"></div>
         <span style="font-size:13px;color:#1f2937;line-height:1.6">기존과 동일한 발송 기능이 <b style="color:#059669">모두 내장</b>되어 있습니다</span>
@@ -78,12 +101,12 @@
       </div>
       <div style="display:flex;align-items:flex-start;gap:10px">
         <div style="width:6px;height:6px;border-radius:50%;background:#0284c7;flex-shrink:0;margin-top:7px"></div>
-        <span style="font-size:13px;color:#1f2937;line-height:1.6"><b style="color:#0284c7">기존 아이디</b>와 <b style="color:#0284c7">관리자가 안내한 임시 비밀번호</b>로 로그인 후 원하는 비밀번호로 변경해 주세요</span>
+        <span style="font-size:13px;color:#1f2937;line-height:1.6"><b style="color:#0284c7">기존 아이디</b>와 <b style="color:#0284c7">안내받으신 임시 비밀번호</b>로 로그인 후 비밀번호를 변경해 주세요</span>
       </div>
     </div>
   </div>
 
-  <!-- 문의 안내 -->
+  <!-- ===== 문의 안내 ===== -->
   <div style="padding:14px 40px 0">
     <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:12px;padding:12px 16px;display:flex;align-items:center;gap:10px">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#c2410c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
@@ -91,7 +114,7 @@
     </div>
   </div>
 
-  <!-- CTA -->
+  <!-- ===== CTA 버튼 ===== -->
   <div style="padding:24px 40px 0">
     <a href="https://hanjul.ai/" target="_blank" id="hjpCta" style="display:flex;align-items:center;justify-content:center;gap:8px;padding:16px 24px;background:#059669;color:#fff;font-size:15px;font-weight:600;border-radius:14px;text-decoration:none;letter-spacing:0.2px;transition:all .2s;box-shadow:0 4px 14px rgba(5,150,105,0.3)" onmouseover="this.style.background='#047857';this.style.transform='translateY(-1px)';this.style.boxShadow='0 8px 24px rgba(5,150,105,0.35)'" onmouseout="this.style.background='#059669';this.style.transform='';this.style.boxShadow='0 4px 14px rgba(5,150,105,0.3)'">
       한줄로AI 바로가기
@@ -99,7 +122,15 @@
     </a>
   </div>
 
-  <!-- 하단 -->
+  <!-- ===== 보조 CTA (자세한 내용) ===== -->
+  <div style="padding:10px 40px 0">
+    <a href="/transition" id="hjpCtaSub" style="display:flex;align-items:center;justify-content:center;gap:8px;padding:14.5px 24px;background:#fff;color:#059669;font-size:15px;font-weight:600;border-radius:14px;text-decoration:none;letter-spacing:0.2px;border:1.5px solid #059669;transition:all .2s" onmouseover="this.style.background='#f0fdf4';this.style.borderColor='#047857';this.style.color='#047857'" onmouseout="this.style.background='#fff';this.style.borderColor='#059669';this.style.color='#059669'">
+      자세한 내용을 확인하세요
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg>
+    </a>
+  </div>
+
+  <!-- ===== 하단 ===== -->
   <div style="padding:16px 40px 18px;margin-top:20px;display:flex;justify-content:space-between;align-items:center;border-top:1px solid #f3f4f6">
     <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px;color:#9ca3af;user-select:none">
       <input type="checkbox" id="hanjulPopupClose" style="width:14px;height:14px;accent-color:#059669;cursor:pointer">
@@ -114,6 +145,13 @@
 <style>
 @keyframes hjpIn{from{opacity:0}to{opacity:1}}
 @keyframes hjpSlide{from{opacity:0;transform:scale(.96) translateY(12px)}to{opacity:1;transform:scale(1) translateY(0)}}
+@keyframes hjpPulse{0%,100%{opacity:1;transform:scale(1);box-shadow:0 0 0 0 rgba(252,165,165,0.6)}50%{opacity:.7;transform:scale(1.25);box-shadow:0 0 0 4px rgba(252,165,165,0)}}
+/* 커스텀 스크롤바 — 둥근 모서리 안쪽에 위치하도록 얇고 상하 여백 적용 */
+#hjpCard{scrollbar-width:thin;scrollbar-color:rgba(15,23,42,0.22) transparent}
+#hjpCard::-webkit-scrollbar{width:6px}
+#hjpCard::-webkit-scrollbar-track{background:transparent;margin:20px 0}
+#hjpCard::-webkit-scrollbar-thumb{background:rgba(15,23,42,0.18);border-radius:10px}
+#hjpCard::-webkit-scrollbar-thumb:hover{background:rgba(15,23,42,0.35)}
 @media(max-width:480px){
   #hjpCard{border-radius:20px 20px 0 0!important;max-height:95vh!important;margin-top:auto!important}
   #hanjulPopup{align-items:flex-end!important}
@@ -134,6 +172,13 @@ function closeHanjulPopup(){
     var el=document.getElementById('hanjulPopup');
     if(el)el.style.display='none';
   }
+})();
+(function(){
+  // 2026-05-06 00:00 KST 까지 남은 일수 실시간 계산
+  var deadline=new Date('2026-05-06T00:00:00+09:00');
+  var days=Math.max(0,Math.ceil((deadline-new Date())/86400000));
+  var el=document.getElementById('hjpDaysLeft');
+  if(el)el.textContent=days;
 })();
 </script>
 <!-- HANJUL_MIGRATION_POPUP_END -->
