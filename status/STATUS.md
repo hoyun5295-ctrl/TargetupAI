@@ -262,7 +262,12 @@
 > - 하드코딩 금지 (cardId/라벨/field_key 동적), 기간계 무접촉, 인라인 금지(3컴포넌트 별도 파일), 하위호환(DirectTargetFilterModal)
 > - 타입 체크 백엔드/프론트 모두 **0 error**
 >
-> **배포 대기:** `tp-push` → `tp-deploy-full`
+> **🛠 덤 — CT-07 `field_type_check` 위반 근본 방어 (체크리스트 처리):** 로그 추적 결과 upload.ts:793 `fieldType = 'NUMBER'` 하드코딩(비표준) + CT-07 `toDbFieldType`의 대소문자 폴백 일부 엣지 취약. 3중 방어:
+> 1. `upload.ts:793` `'NUMBER'` → `'INT'` (DB CHECK 표준값 직접 사용, 호출부 통일)
+> 2. `utils/standard-field-map.ts` `FIELD_TYPE_DB_MAP`에 대문자 변형 8종 명시 추가 (`NUMBER`/`STRING`/`DATETIME`/`FLOAT`/`DECIMAL`/`BIGINT`/`TIMESTAMP`/`BIT`) + `toDbFieldType`에 `String(input).trim()` + 대문자/소문자 2단 폴백 + 매핑 실패 시 warning 로그
+> 3. upsert 에러 로그에 `inputType` + `dbType` + `labelLen` 명시 — 재발 시 즉시 원인 특정
+>
+> **배포 (✅ 반영 완료):** `tp-push` → 서버 `git pull` + `npm run build` + `pm2 restart all`. grep 6건으로 dist/ 전수 확인 완료.
 >
 > **검증 체크리스트 (배포 후):**
 > - [ ] DB 현황 count 카드에 violet/green/red 델타 뱃지 (`↑ +240 (+2.4%) 지난달 대비`)

@@ -994,7 +994,7 @@ const handleSendBillingEmail = async () => {
   const loadData = async () => {
     try {
       const [companiesRes, plansRes] = await Promise.all([
-        companiesApi.list(),
+        companiesApi.list({ limit: 1000 }),
         plansApi.list(),
       ]);
       setCompanies(companiesRes.data.companies);
