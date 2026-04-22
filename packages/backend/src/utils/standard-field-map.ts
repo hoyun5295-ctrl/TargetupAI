@@ -234,26 +234,39 @@ export function fieldKeyToSqlRef(fieldKey: string): string | null {
  * @param definitions  { fieldKey: 'custom_1', label: '평균주문금액', fieldType?: 'VARCHAR' }[]
  * @returns upsert된 건수
  */
-// ★ D131 후속(2026-04-21): customer_field_definitions.field_type CHECK 제약 허용값 매핑.
+// ★ D131 후속(2026-04-21) → D133 강화(2026-04-22): customer_field_definitions.field_type CHECK 제약 허용값 매핑.
 //   DB 제약: CHECK (field_type IN ('INT', 'VARCHAR', 'DATE', 'BOOLEAN'))
-//   Agent는 'string'/'number'/'date'/'boolean' 일반 타입으로 보냄 → 서버에서 DB 허용값으로 변환.
-//   2026-04-21 B31-02 근본 원인: Agent가 'string' 보내고 DB가 거부하여 500 발생.
+//   Agent/upload/sync 어디서든 보낼 수 있는 값을 전부 DB 허용값으로 수렴시킴.
+//   D133 추가: 'NUMBER'/'STRING'/'DATETIME' 같은 대문자 변형도 직접 매핑 등록(대소문자 폴백에 의존하지 않고 명시).
 const FIELD_TYPE_DB_MAP: Record<string, string> = {
   // 문자열 계열 → VARCHAR
-  'string': 'VARCHAR', 'str': 'VARCHAR', 'varchar': 'VARCHAR', 'text': 'VARCHAR',
+  'string': 'VARCHAR', 'str': 'VARCHAR', 'varchar': 'VARCHAR', 'text': 'VARCHAR', 'char': 'VARCHAR',
+  'STRING': 'VARCHAR', 'STR': 'VARCHAR', 'TEXT': 'VARCHAR', 'CHAR': 'VARCHAR',
   // 숫자 계열 → INT (DB 제약이 NUMBER/NUMERIC/FLOAT 미허용이므로 INT로 통일)
-  'number': 'INT', 'num': 'INT', 'int': 'INT', 'integer': 'INT', 'numeric': 'INT', 'float': 'INT', 'double': 'INT',
+  'number': 'INT', 'num': 'INT', 'int': 'INT', 'integer': 'INT', 'numeric': 'INT', 'float': 'INT', 'double': 'INT', 'decimal': 'INT', 'bigint': 'INT',
+  'NUMBER': 'INT', 'NUM': 'INT', 'INTEGER': 'INT', 'NUMERIC': 'INT', 'FLOAT': 'INT', 'DOUBLE': 'INT', 'DECIMAL': 'INT', 'BIGINT': 'INT',
   // 날짜 계열 → DATE
-  'date': 'DATE', 'datetime': 'DATE', 'timestamp': 'DATE', 'timestamptz': 'DATE',
+  'date': 'DATE', 'datetime': 'DATE', 'timestamp': 'DATE', 'timestamptz': 'DATE', 'time': 'DATE',
+  'DATETIME': 'DATE', 'TIMESTAMP': 'DATE', 'TIMESTAMPTZ': 'DATE', 'TIME': 'DATE',
   // 불리언 계열 → BOOLEAN
-  'boolean': 'BOOLEAN', 'bool': 'BOOLEAN',
+  'boolean': 'BOOLEAN', 'bool': 'BOOLEAN', 'bit': 'BOOLEAN',
+  'BOOL': 'BOOLEAN', 'BIT': 'BOOLEAN',
   // 이미 DB 허용값 (대문자)이면 그대로
   'VARCHAR': 'VARCHAR', 'INT': 'INT', 'DATE': 'DATE', 'BOOLEAN': 'BOOLEAN',
 };
 
-function toDbFieldType(input: string | undefined): string {
+function toDbFieldType(input: string | undefined | null): string {
   if (!input) return 'VARCHAR';
-  const mapped = FIELD_TYPE_DB_MAP[input] || FIELD_TYPE_DB_MAP[input.toLowerCase()];
+  const trimmed = String(input).trim();
+  if (!trimmed) return 'VARCHAR';
+  // 1차: 원본, 2차: 소문자, 3차: 대문자 폴백 (엣지케이스 대비)
+  const mapped =
+    FIELD_TYPE_DB_MAP[trimmed] ||
+    FIELD_TYPE_DB_MAP[trimmed.toLowerCase()] ||
+    FIELD_TYPE_DB_MAP[trimmed.toUpperCase()];
+  if (!mapped) {
+    console.warn(`[CT-07] 알 수 없는 field_type "${input}" → VARCHAR 폴백. FIELD_TYPE_DB_MAP 확장 검토 필요`);
+  }
   return mapped || 'VARCHAR'; // 모르는 값은 안전하게 VARCHAR
 }
 
@@ -285,7 +298,11 @@ export async function upsertCustomFieldDefinitions(
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       failures.push({ fieldKey: def.fieldKey, error: msg });
-      console.error(`[CT-07] ${def.fieldKey} upsert 실패 (company=${companyId}):`, msg);
+      // ★ D133: 진단성 강화 — 원본 input + 매핑된 dbType + label 길이 동시 기록
+      console.error(
+        `[CT-07] ${def.fieldKey} upsert 실패 (company=${companyId}, inputType="${def.fieldType ?? 'undefined'}", dbType="${dbFieldType}", labelLen=${(def.label ?? '').length}):`,
+        msg,
+      );
     }
   }
   if (upsertedCount > 0) {

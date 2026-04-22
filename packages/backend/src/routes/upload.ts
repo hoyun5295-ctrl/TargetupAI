@@ -789,8 +789,9 @@ async function processUploadInBackground(
               });
               const allNumeric = sampleVals.every((v: any) => !isNaN(Number(v)) && String(v).trim() !== '');
               // 날짜 패턴을 먼저 체크 (6자리 날짜가 숫자로 잘못 분류되는 것 방지)
+              // ★ DB CHECK 허용값(INT/VARCHAR/DATE/BOOLEAN) 표준값 직접 사용 — CT-07 toDbFieldType 경유 시에도 매핑되지만 호출부 통일성 위해 표준값 원본 유지
               if (allDate && looksLikeDate6) fieldType = 'DATE';
-              else if (allNumeric) fieldType = 'NUMBER';
+              else if (allNumeric) fieldType = 'INT';
             }
             customMappings.push({ fieldKey, label, fieldType });
           }

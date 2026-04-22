@@ -293,9 +293,10 @@ router.get('/download', async (req: Request, res: Response) => {
       params
     );
 
-    // 커스텀 필드 라벨 조회 — 스키마 컬럼 호환 + try-catch 폴백
-    //   · display_name/field_label/label 셋 중 있는 것 사용 (COALESCE)
-    //   · is_active 조건 생략 (컬럼 없을 수도)
+    // 커스텀 필드 라벨 조회 — 실 스키마 기준 (field_label / display_order / is_hidden)
+    //   · 라벨: field_label 직접 사용 (+ display_name/label 호환용 COALESCE — 다른 환경 대비)
+    //   · 정렬: display_order 우선, field_key 보조
+    //   · is_hidden=true 제외 (숨김 필드 다운로드 제외)
     //   · 쿼리 실패 시 빈 배열 폴백 → 표준 컬럼만 다운로드 (에러로 전체 막히지 않음)
     let customFieldDefs: { key: string; label: string }[] = [];
     try {
@@ -303,13 +304,15 @@ router.get('/download', async (req: Request, res: Response) => {
         `SELECT field_key,
                 COALESCE(
                   to_jsonb(cfd.*) ->> 'display_name',
-                  to_jsonb(cfd.*) ->> 'field_label',
+                  field_label,
                   to_jsonb(cfd.*) ->> 'label',
                   field_key
                 ) AS label
            FROM customer_field_definitions cfd
-          WHERE company_id = $1 AND field_key LIKE 'custom_%'
-          ORDER BY field_key`,
+          WHERE company_id = $1
+            AND field_key LIKE 'custom_%'
+            AND COALESCE(is_hidden, false) = false
+          ORDER BY COALESCE(display_order, 999), field_key`,
         [companyId]
       );
       customFieldDefs = defRes.rows.map((r: any) => ({
