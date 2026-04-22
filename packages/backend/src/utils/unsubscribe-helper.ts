@@ -90,6 +90,57 @@ export async function syncCustomerOptIn(companyId: string, phones: string[], opt
  * @param source     등록 경로 ('manual', 'upload', 'db_upload' 등)
  * @returns 실제 INSERT된 건수
  */
+/**
+ * ★ D136 (2026-04-22) 신설: 회사 전체 sms_opt_in=false 고객 → company_user 자동 배정 (bulk).
+ *
+ * 배경:
+ *   sync.ts(동기화)와 upload.ts(업로드) 2곳에 동일 패턴 `c.store_code = ANY(u.store_codes)`가
+ *   인라인으로 중복. getStoreScope(CT-02) 4단계 판정을 반영하지 못해 유령 배정 버그 발생.
+ *
+ * 판정 (getStoreScope와 동일):
+ *   - no_filter-1: 회사 customer_stores 체계 없음           → 전체 user에게 전체 고객 배정
+ *   - no_filter-2: store_codes 배정됐으나 실존 매칭 0       → 유령 배정, 전체 고객 배정
+ *   - filtered   : customer_stores 실존 매칭 + store_code   → 해당 user에게 해당 store 고객만
+ *   - blocked    : store_codes 미배정 + 체계 있음            → 스킵 (INSERT 없음)
+ *
+ * @param companyId  회사 ID
+ * @param source     등록 경로 ('sync', 'db_upload' 등)
+ * @returns 실제 INSERT된 총 건수
+ */
+export async function registerBulkCompanyUserUnsubscribes(
+  companyId: string,
+  source: string,
+): Promise<number> {
+  const result = await query(
+    `INSERT INTO unsubscribes (company_id, user_id, phone, source)
+     SELECT c.company_id, u.id, c.phone, $2
+     FROM customers c
+     JOIN users u ON u.company_id = c.company_id
+       AND u.user_type = 'user'
+       AND COALESCE(u.is_active, true) = true
+     WHERE c.company_id = $1
+       AND c.sms_opt_in = false
+       AND c.is_active = true
+       AND (
+         NOT EXISTS (SELECT 1 FROM customer_stores cs WHERE cs.company_id = $1)
+         OR
+         (u.store_codes IS NOT NULL AND array_length(u.store_codes, 1) > 0
+          AND NOT EXISTS (SELECT 1 FROM customer_stores cs
+                           WHERE cs.company_id = $1
+                             AND cs.store_code = ANY(u.store_codes)))
+         OR
+         (u.store_codes IS NOT NULL AND array_length(u.store_codes, 1) > 0
+          AND c.store_code = ANY(u.store_codes)
+          AND EXISTS (SELECT 1 FROM customer_stores cs
+                       WHERE cs.company_id = $1
+                         AND cs.store_code = ANY(u.store_codes)))
+       )
+     ON CONFLICT (user_id, phone) DO NOTHING`,
+    [companyId, source],
+  );
+  return result.rowCount || 0;
+}
+
 export async function registerUnsubscribe(
   companyId: string,
   userId: string,
@@ -100,15 +151,34 @@ export async function registerUnsubscribe(
   let insertCount = 0;
 
   if (userType === 'company_admin') {
-    // admin → 고객의 store_code 기준 브랜드 사용자 찾아서 등록
+    // ★ D136 (2026-04-22) 개선: admin 수동/개별 수신거부 등록 시 company_user 자동 배정을
+    //   getStoreScope(CT-02) 4단계 판정으로 재작성 (기존 `ANY(u.store_codes)` 단일 조건의 유령 배정 버그 해결).
+    //   - no_filter-1: customer_stores 체계 없음 → 모든 company_user에게 등록
+    //   - no_filter-2: store_codes 배정됐으나 customer_stores 실존 매칭 0 → 유령, 전체 등록
+    //   - filtered   : 실존 매칭 + c.store_code 매칭 → 해당 user만
+    //   - blocked    : store_codes 미배정 → 스킵
     const result = await query(
       `INSERT INTO unsubscribes (company_id, user_id, phone, source)
        SELECT $1, u.id, $3, $4
        FROM customers c
        JOIN users u ON u.company_id = c.company_id
          AND u.user_type = 'user'
-         AND c.store_code = ANY(u.store_codes)
+         AND COALESCE(u.is_active, true) = true
        WHERE c.company_id = $1 AND c.phone = $3
+         AND (
+           NOT EXISTS (SELECT 1 FROM customer_stores cs WHERE cs.company_id = $1)
+           OR
+           (u.store_codes IS NOT NULL AND array_length(u.store_codes, 1) > 0
+            AND NOT EXISTS (SELECT 1 FROM customer_stores cs
+                             WHERE cs.company_id = $1
+                               AND cs.store_code = ANY(u.store_codes)))
+           OR
+           (u.store_codes IS NOT NULL AND array_length(u.store_codes, 1) > 0
+            AND c.store_code = ANY(u.store_codes)
+            AND EXISTS (SELECT 1 FROM customer_stores cs
+                         WHERE cs.company_id = $1
+                           AND cs.store_code = ANY(u.store_codes)))
+         )
        ON CONFLICT (user_id, phone) DO NOTHING`,
       [companyId, userId, phone, source]
     );

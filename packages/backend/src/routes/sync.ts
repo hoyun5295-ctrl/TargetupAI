@@ -15,6 +15,7 @@ import {
 } from '../utils/standard-field-map';
 import { callAiMapping, AiMappingQuotaExceeded, AiMappingUnavailable, SupportedDbType, MappingTarget } from '../utils/ai-mapping';
 import { createCustomerUpsertBuilder } from '../utils/customer-upsert';
+import { registerBulkCompanyUserUnsubscribes } from '../utils/unsubscribe-helper';
 
 const router = Router();
 
@@ -279,50 +280,12 @@ async function registerSyncUnsubscribes(companyId: string, companyName?: string)
       console.log(`[Sync] 수신거부 자동등록(admin): ${r2.rowCount}건 (company: ${companyName})`);
     }
 
-    // 4. company_user들에게 INSERT — getStoreScope(CT-02)와 동일 판정 기준
-    // ★ D136 (2026-04-22) 재작성:
-    //   기존 `c.store_code = ANY(u.store_codes)` 단일 조건은 다음 두 케이스를 모두 놓침.
-    //     - (A) suran 케이스: store_codes=NULL → ANY(NULL) → 매칭 0건
-    //     - (B) gwchae/sgbaek 케이스: 브랜드 체계 없는 회사(customer_stores 0건)에
-    //           수동 store_codes 배정 → customers.store_code NULL이라 매칭 0건
-    //   해결: getStoreScope의 4단계 판정을 SQL에 그대로 이식.
-    //     - no_filter  : customer_stores 없음 OR store_codes 배정됐으나 실존 매칭 0 → 전체 고객
-    //     - filtered   : customer_stores 있음 AND store_codes 실존 매칭 → 해당 store 고객
-    //     - blocked    : customer_stores 있음 AND store_codes 미배정/빈 배열 → 스킵
-    const r3 = await query(
-      `INSERT INTO unsubscribes (company_id, user_id, phone, source)
-       SELECT c.company_id, u.id, c.phone, 'sync'
-       FROM customers c
-       JOIN users u ON u.company_id = c.company_id
-         AND u.user_type = 'user'
-         AND COALESCE(u.is_active, true) = true
-       WHERE c.company_id = $1
-         AND c.sms_opt_in = false
-         AND c.is_active = true
-         AND (
-           -- (no_filter-1) 회사에 customer_stores 체계 없음 → 전체 고객 매칭
-           NOT EXISTS (SELECT 1 FROM customer_stores cs WHERE cs.company_id = $1)
-           OR
-           -- (no_filter-2) store_codes 배정됐으나 customer_stores 실존 매칭 0 → 유령 배정, 전체 고객 매칭
-           (u.store_codes IS NOT NULL
-            AND array_length(u.store_codes, 1) > 0
-            AND NOT EXISTS (SELECT 1 FROM customer_stores cs
-                             WHERE cs.company_id = $1
-                               AND cs.store_code = ANY(u.store_codes)))
-           OR
-           -- (filtered) customer_stores 실존 매칭 있음 → 해당 store_code 고객만
-           (u.store_codes IS NOT NULL
-            AND array_length(u.store_codes, 1) > 0
-            AND c.store_code = ANY(u.store_codes)
-            AND EXISTS (SELECT 1 FROM customer_stores cs
-                         WHERE cs.company_id = $1
-                           AND cs.store_code = ANY(u.store_codes)))
-         )
-       ON CONFLICT (user_id, phone) DO NOTHING`,
-      [companyId]
-    );
-    if (r3.rowCount && r3.rowCount > 0) {
-      console.log(`[Sync] 수신거부 자동등록(company_user, CT-02 판정): ${r3.rowCount}건 (company: ${companyName})`);
+    // 4. company_user들에게 INSERT — CT-03 registerBulkCompanyUserUnsubscribes
+    // ★ D136 (2026-04-22): sync.ts + upload.ts + unsubscribe-helper.ts 3곳에 분산된
+    //   동일 SQL 패턴을 CT-03 컨트롤타워 함수로 통합. getStoreScope 4단계 판정 이식.
+    const r3Count = await registerBulkCompanyUserUnsubscribes(companyId, 'sync');
+    if (r3Count > 0) {
+      console.log(`[Sync] 수신거부 자동등록(company_user, CT-03): ${r3Count}건 (company: ${companyName})`);
     }
   } catch (unsubError) {
     console.error('[Sync] 수신거부 자동등록 실패:', unsubError);

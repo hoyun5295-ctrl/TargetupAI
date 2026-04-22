@@ -626,9 +626,13 @@ router.put('/companies/:id/dashboard-cards', authenticate, requireSuperAdmin, as
     // cardCount는 더 이상 4/8 제한 없음 — 프론트에서 6개씩 페이징 표시
     // 하위호환: cardCount가 전달되면 cards.length로 자동 설정
     const effectiveCardCount = cards.length;
+    // ★ D136 (2026-04-22 PDF #8): 동적 카드 추가로 상한은 고정 풀 17개를 초과할 수 있음 →
+    //   단순 상한 17 → 실용 상한 50으로 완화 (고정 17 + 커스텀 15 여유 + 버퍼).
+    //   실제 풀에 없는 cardId는 validateCardIds에서 걸러짐 → 과잉 상한 방지.
     // ★ 빈 배열 허용 — 0개 선택 시 고객사 대시보드에 DB현황 미표시
-    if (cards.length > DASHBOARD_CARD_POOL.length) {
-      return res.status(400).json({ error: `카드는 최대 ${DASHBOARD_CARD_POOL.length}개까지 선택 가능합니다.` });
+    const MAX_DASHBOARD_CARDS = 50;
+    if (cards.length > MAX_DASHBOARD_CARDS) {
+      return res.status(400).json({ error: `카드는 최대 ${MAX_DASHBOARD_CARDS}개까지 선택 가능합니다.` });
     }
 
     // 카드 ID 유효성

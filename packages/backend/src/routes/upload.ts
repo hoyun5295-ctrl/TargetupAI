@@ -9,6 +9,7 @@ import { normalizeByFieldKey, normalizeRegion, normalizeDate, normalizeCustomFie
 import { CATEGORY_LABELS, FIELD_MAP, getColumnFields, getCustomFields, getFieldByKey, upsertCustomFieldDefinitions } from '../utils/standard-field-map';
 import { validateUploadMapping } from '../utils/upload-mapping-validator';
 import { createCustomerUpsertBuilder } from '../utils/customer-upsert';
+import { registerBulkCompanyUserUnsubscribes } from '../utils/unsubscribe-helper';
 
 // ★ D79: 날짜 정규화는 컨트롤타워(normalize.ts)의 normalizeDate() 사용
 // 인라인 normalizeDate 제거 — 컨트롤타워 원칙 위반이었음
@@ -827,19 +828,12 @@ async function processUploadInBackground(
             console.log(`[업로드] 수신거부 자동등록(admin 본인): ${adminUnsubResult.rowCount}건 (company: ${companyId})`);
           }
 
-          // admin → 각 고객의 store_code 기준 브랜드 사용자에게도 자동 배정
-          const unsubResult = await query(`
-            INSERT INTO unsubscribes (company_id, user_id, phone, source)
-            SELECT c.company_id, u.id, c.phone, 'db_upload'
-            FROM customers c
-            JOIN users u ON u.company_id = c.company_id
-              AND u.user_type = 'user'
-              AND c.store_code = ANY(u.store_codes)
-            WHERE c.company_id = $1 AND c.sms_opt_in = false AND c.is_active = true
-            ON CONFLICT (user_id, phone) DO NOTHING
-          `, [companyId]);
-          if (unsubResult.rowCount && unsubResult.rowCount > 0) {
-            console.log(`[업로드] 수신거부 자동등록(admin→브랜드배정): ${unsubResult.rowCount}건 (company: ${companyId})`);
+          // ★ D136 (2026-04-22): admin → company_user 자동 배정을 CT-03 registerBulkCompanyUserUnsubscribes로 통합.
+          //   기존 `c.store_code = ANY(u.store_codes)` 단일 조건 → getStoreScope 4단계 판정.
+          //   sync.ts + upload.ts + unsubscribe-helper.ts 3곳 분산 패턴을 단일 컨트롤타워로 통일.
+          const unsubCount = await registerBulkCompanyUserUnsubscribes(companyId, 'db_upload');
+          if (unsubCount > 0) {
+            console.log(`[업로드] 수신거부 자동등록(admin→브랜드배정, CT-03): ${unsubCount}건 (company: ${companyId})`);
           }
         } else {
           // ★ D114 P3: 브랜드 사용자 → 본인 user_id + 본인 store_codes 범위 고객만 등록
