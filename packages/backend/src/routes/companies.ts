@@ -378,6 +378,11 @@ interface CardDataResult {
   icon: string;
   value: number | { label: string; count: number }[];
   hasData: boolean;
+  // ★ D132 Phase A: 델타 뱃지용 (30일 전 동일 시점 대비)
+  delta?: number | null;          // 증감 값 (음수 가능)
+  deltaPercent?: number | null;   // % (소수점 1자리)
+  deltaBaseline?: string;         // 비교 기준일 ISO
+  hasTrend?: boolean;             // 델타 표시 가능 여부 (distribution/특수 카드는 false)
 }
 
 /**
@@ -404,24 +409,36 @@ async function aggregateDashboardCards(companyId: string, cardIds: string[], use
   }
 
   // ── 1단계: customers 통합 집계 (데이터 존재 여부 포함) ──
+  // ★ D132 Phase A: 30일 전 동일 시점 카운트 동시 집계 (델타 뱃지용)
+  //   방식: created_at <= NOW() - INTERVAL '30 days' 필터로 30일 전 상태 근사
+  //   ※ 업데이트/삭제된 고객은 반영 안 됨 — 추세 표시 목적이라 허용
   const month = (new Date().getMonth() + 1).toString().padStart(2, '0');
   const baseResult = await query(`
     SELECT
       COUNT(*)::int                                                                          as total_customers,
+      COUNT(*) FILTER (WHERE created_at <= NOW() - INTERVAL '30 days')::int                  as total_customers_30d,
       COUNT(*) FILTER (WHERE gender = 'M')::int                                              as gender_male,
+      COUNT(*) FILTER (WHERE gender = 'M' AND created_at <= NOW() - INTERVAL '30 days')::int as gender_male_30d,
       COUNT(*) FILTER (WHERE gender = 'F')::int                                              as gender_female,
+      COUNT(*) FILTER (WHERE gender = 'F' AND created_at <= NOW() - INTERVAL '30 days')::int as gender_female_30d,
       COUNT(*) FILTER (WHERE gender IS NOT NULL)::int                                        as has_gender_data,
       COUNT(*) FILTER (WHERE birth_month_day LIKE $2)::int                                   as birthday_this_month,
       COUNT(*) FILTER (WHERE birth_month_day IS NOT NULL)::int                               as has_birthday_data,
       COUNT(*) FILTER (WHERE email IS NOT NULL)::int                                         as email_has,
+      COUNT(*) FILTER (WHERE email IS NOT NULL AND created_at <= NOW() - INTERVAL '30 days')::int as email_has_30d,
       COUNT(*) FILTER (WHERE sms_opt_in = true)::int                                         as opt_in_count,
+      COUNT(*) FILTER (WHERE sms_opt_in = true AND created_at <= NOW() - INTERVAL '30 days')::int as opt_in_count_30d,
       COUNT(*) FILTER (WHERE sms_opt_in IS NOT NULL)::int                                    as has_opt_in_data,
       COUNT(*) FILTER (WHERE created_at >= date_trunc('month', NOW()))::int                  as new_this_month,
+      COUNT(*) FILTER (WHERE created_at >= date_trunc('month', NOW() - INTERVAL '1 month') AND created_at < date_trunc('month', NOW()))::int as new_last_month,
       COALESCE(SUM(total_purchase_amount), 0)::numeric                                       as total_purchase_sum,
+      COALESCE(SUM(total_purchase_amount) FILTER (WHERE created_at <= NOW() - INTERVAL '30 days'), 0)::numeric as total_purchase_sum_30d,
       COUNT(*) FILTER (WHERE total_purchase_amount IS NOT NULL AND total_purchase_amount > 0)::int as has_purchase_data,
       COUNT(*) FILTER (WHERE recent_purchase_date >= (NOW() - INTERVAL '30 days')::date)::int     as recent_30d_purchase,
+      COUNT(*) FILTER (WHERE recent_purchase_date >= (NOW() - INTERVAL '60 days')::date AND recent_purchase_date < (NOW() - INTERVAL '30 days')::date)::int as recent_30d_purchase_prev,
       COUNT(*) FILTER (WHERE recent_purchase_date IS NOT NULL)::int                               as has_recent_purchase_data,
       COUNT(*) FILTER (WHERE recent_purchase_date IS NOT NULL AND recent_purchase_date < (NOW() - INTERVAL '90 days')::date)::int as inactive_90d,
+      COUNT(*) FILTER (WHERE recent_purchase_date IS NOT NULL AND recent_purchase_date < (NOW() - INTERVAL '120 days')::date)::int as inactive_90d_prev,
       COUNT(*) FILTER (WHERE age IS NOT NULL)::int                                           as has_age_data,
       COUNT(*) FILTER (WHERE grade IS NOT NULL)::int                                         as has_grade_data,
       COUNT(*) FILTER (WHERE region IS NOT NULL)::int                                        as has_region_data,
@@ -432,6 +449,18 @@ async function aggregateDashboardCards(companyId: string, cardIds: string[], use
 
   const base = baseResult.rows[0];
   const totalCustomers = parseInt(base.total_customers);
+
+  // ★ 델타 계산 헬퍼 — 30일 전 값 대비 절대 증감 + %
+  //   hasData=false거나 30일 전 값 0이면서 현재값 0이면 델타 생략
+  const baseline30dIso = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+  const calcDelta = (current: number, prev: number, hasData: boolean): { delta: number | null; deltaPercent: number | null; hasTrend: boolean } => {
+    if (!hasData) return { delta: null, deltaPercent: null, hasTrend: false };
+    // 30일 전 기준 데이터가 아예 없던 신규 회사는 hasTrend=false
+    if (prev === 0 && current === 0) return { delta: null, deltaPercent: null, hasTrend: false };
+    const delta = current - prev;
+    const deltaPercent = prev === 0 ? null : Math.round((delta / prev) * 1000) / 10;
+    return { delta, deltaPercent, hasTrend: true };
+  };
 
   // ── 2단계: 각 카드별 결과 조립 ──
   for (const cardId of cardIds) {
@@ -618,6 +647,25 @@ async function aggregateDashboardCards(companyId: string, cardIds: string[], use
       }
     }
 
+    // ★ D132 Phase A: cardId별 30일 전 값 매핑 (delta 뱃지 계산용)
+    //   count 타입 + 외부 테이블 카드만. distribution/rate/sum은 Phase B에서 확장
+    let prev30d: number | null = null;
+    switch (cardId) {
+      case 'total_customers': prev30d = parseInt(base.total_customers_30d); break;
+      case 'gender_male':     prev30d = parseInt(base.gender_male_30d); break;
+      case 'gender_female':   prev30d = parseInt(base.gender_female_30d); break;
+      case 'opt_in_count':    prev30d = parseInt(base.opt_in_count_30d); break;
+      case 'new_this_month':  prev30d = parseInt(base.new_last_month); break;
+      case 'recent_30d_purchase': prev30d = parseInt(base.recent_30d_purchase_prev); break;
+      case 'inactive_90d':    prev30d = parseInt(base.inactive_90d_prev); break;
+      // email_rate / total_purchase_sum / distribution / 외부테이블(opt_out_count/active_campaigns/monthly_spend): Phase B에서 확장
+    }
+
+    const currentNum = typeof value === 'number' ? value : 0;
+    const trendInfo = prev30d !== null
+      ? calcDelta(currentNum, prev30d, hasData)
+      : { delta: null, deltaPercent: null, hasTrend: false };
+
     results.push({
       cardId: def.cardId,
       label: def.label,
@@ -625,6 +673,10 @@ async function aggregateDashboardCards(companyId: string, cardIds: string[], use
       icon: def.icon,
       value,
       hasData,
+      delta: trendInfo.delta,
+      deltaPercent: trendInfo.deltaPercent,
+      deltaBaseline: trendInfo.hasTrend ? baseline30dIso : undefined,
+      hasTrend: trendInfo.hasTrend,
     });
   }
 
@@ -711,6 +763,254 @@ router.get('/dashboard-cards', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('대시보드 카드 조회 실패:', error);
     res.status(500).json({ error: '대시보드 카드 조회 실패' });
+  }
+});
+
+// ===== D132 Phase B: 대시보드 카드 상세 API =====
+// GET /api/companies/dashboard-cards/:cardId/detail
+//   카드 타입별 상세 데이터 (trend 6개월 / breakdown 성별·연령·등급 / topList 생일 카드)
+//   CT-02 store-scope 재활용 + DASHBOARD_CARD_POOL의 cardId 검증
+router.get('/dashboard-cards/:cardId/detail', async (req: Request, res: Response) => {
+  try {
+    const companyId = (req as any).user?.companyId;
+    const userId = (req as any).user?.userId;
+    const userType = (req as any).user?.userType;
+    if (!companyId) return res.status(401).json({ error: '인증 필요' });
+
+    const cardId = req.params.cardId;
+    const def = getCardDef(cardId);
+    if (!def) return res.status(404).json({ error: '존재하지 않는 카드입니다.' });
+
+    const q = (req.query.q as string) || '';
+    const page = Math.max(0, parseInt((req.query.page as string) || '0'));
+    const limit = Math.min(100, parseInt((req.query.limit as string) || '20'));
+
+    // 브랜드 격리 (CT-02)
+    let customerStoreFilter = '';
+    const isCompanyUser = userType === 'company_user' && userId;
+    if (isCompanyUser) {
+      const scope = await getStoreScope(companyId, userId);
+      if (scope.type === 'blocked') {
+        return res.json({ cardId, label: def.label, type: def.type, blocked: true });
+      }
+      if (scope.type === 'filtered') {
+        customerStoreFilter = ` AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = '${companyId}' AND store_code = ANY(ARRAY[${scope.storeCodes.map(s => `'${s}'`).join(',')}]::text[]))`;
+      }
+    }
+
+    const month = (new Date().getMonth() + 1).toString().padStart(2, '0');
+
+    // 카드별 WHERE 조건 (customers 테이블)
+    const CARD_WHERE_MAP: Record<string, string> = {
+      total_customers: '',
+      gender_male: ` AND gender = 'M'`,
+      gender_female: ` AND gender = 'F'`,
+      birthday_this_month: ` AND birth_month_day LIKE '${month}-%'`,
+      opt_in_count: ` AND sms_opt_in = true`,
+      new_this_month: ` AND created_at >= date_trunc('month', NOW())`,
+      recent_30d_purchase: ` AND recent_purchase_date >= (NOW() - INTERVAL '30 days')::date`,
+      inactive_90d: ` AND recent_purchase_date IS NOT NULL AND recent_purchase_date < (NOW() - INTERVAL '90 days')::date`,
+    };
+
+    const cardWhere = CARD_WHERE_MAP[cardId] ?? '';
+    const baseWhere = `WHERE company_id = $1 AND is_active = true${cardWhere}${customerStoreFilter}`;
+
+    // 응답 구조
+    const response: any = {
+      cardId,
+      label: def.label,
+      type: def.type,
+      icon: def.icon,
+    };
+
+    // ── 1. trend: 6개월 누적 월별 추이 (count 카드에만) ──
+    const TREND_CARD_IDS = ['total_customers', 'gender_male', 'gender_female', 'opt_in_count', 'new_this_month', 'recent_30d_purchase', 'inactive_90d'];
+    if (TREND_CARD_IDS.includes(cardId)) {
+      // 각 월 말 기준 "카드 조건에 해당하는 고객 수" 누적
+      //   ※ new_this_month는 해당 월의 신규 수 (다른 카드와 다름)
+      let trendSql: string;
+      if (cardId === 'new_this_month') {
+        // 해당 월 범위에 created_at이 포함된 수
+        trendSql = `
+          SELECT to_char(gs, 'YYYY-MM') as month,
+            (SELECT COUNT(*) FROM customers
+               WHERE company_id = $1 AND is_active = true${customerStoreFilter}
+                 AND created_at >= gs AND created_at < gs + INTERVAL '1 month') as value
+          FROM generate_series(
+            date_trunc('month', NOW() - INTERVAL '5 months'),
+            date_trunc('month', NOW()),
+            '1 month'
+          ) gs
+          ORDER BY gs
+        `;
+      } else if (cardId === 'recent_30d_purchase') {
+        // 각 월 말 기준 "최근 30일 구매" 카운트
+        trendSql = `
+          SELECT to_char(gs, 'YYYY-MM') as month,
+            (SELECT COUNT(*) FROM customers
+               WHERE company_id = $1 AND is_active = true${customerStoreFilter}
+                 AND recent_purchase_date >= (gs + INTERVAL '1 month' - INTERVAL '30 days')::date
+                 AND recent_purchase_date < (gs + INTERVAL '1 month')::date) as value
+          FROM generate_series(
+            date_trunc('month', NOW() - INTERVAL '5 months'),
+            date_trunc('month', NOW()),
+            '1 month'
+          ) gs
+          ORDER BY gs
+        `;
+      } else if (cardId === 'inactive_90d') {
+        trendSql = `
+          SELECT to_char(gs, 'YYYY-MM') as month,
+            (SELECT COUNT(*) FROM customers
+               WHERE company_id = $1 AND is_active = true${customerStoreFilter}
+                 AND recent_purchase_date IS NOT NULL
+                 AND recent_purchase_date < ((gs + INTERVAL '1 month') - INTERVAL '90 days')::date) as value
+          FROM generate_series(
+            date_trunc('month', NOW() - INTERVAL '5 months'),
+            date_trunc('month', NOW()),
+            '1 month'
+          ) gs
+          ORDER BY gs
+        `;
+      } else {
+        // total/male/female/opt_in: 월 말 기준 누적 (created_at < 월말)
+        const condForTrend = cardId === 'gender_male' ? ` AND gender = 'M'` : cardId === 'gender_female' ? ` AND gender = 'F'` : cardId === 'opt_in_count' ? ` AND sms_opt_in = true` : '';
+        trendSql = `
+          SELECT to_char(gs, 'YYYY-MM') as month,
+            (SELECT COUNT(*) FROM customers
+               WHERE company_id = $1 AND is_active = true${customerStoreFilter}${condForTrend}
+                 AND created_at < gs + INTERVAL '1 month') as value
+          FROM generate_series(
+            date_trunc('month', NOW() - INTERVAL '5 months'),
+            date_trunc('month', NOW()),
+            '1 month'
+          ) gs
+          ORDER BY gs
+        `;
+      }
+      const trendRes = await query(trendSql, [companyId]);
+      response.trend = trendRes.rows.map((r: any) => ({ month: r.month, value: parseInt(r.value) || 0 }));
+    }
+
+    // ── 2. breakdown: 성별/연령/등급 분포 (count 카드에만) ──
+    const BREAKDOWN_CARD_IDS = ['total_customers', 'gender_male', 'gender_female', 'birthday_this_month', 'opt_in_count', 'new_this_month', 'recent_30d_purchase', 'inactive_90d'];
+    if (BREAKDOWN_CARD_IDS.includes(cardId)) {
+      const [genderRes, ageRes, gradeRes, regionRes] = await Promise.all([
+        query(`SELECT COALESCE(gender, '미상') as label, COUNT(*)::int as count FROM customers ${baseWhere} GROUP BY gender ORDER BY count DESC`, [companyId]),
+        query(`
+          SELECT
+            CASE
+              WHEN age IS NULL THEN '미상'
+              WHEN age < 20 THEN '10대 이하'
+              WHEN age < 30 THEN '20대'
+              WHEN age < 40 THEN '30대'
+              WHEN age < 50 THEN '40대'
+              WHEN age < 60 THEN '50대'
+              ELSE '60대 이상'
+            END as label,
+            COUNT(*)::int as count
+          FROM customers ${baseWhere}
+          GROUP BY 1
+          ORDER BY MIN(COALESCE(age, 999))
+        `, [companyId]),
+        query(`SELECT COALESCE(grade, '미상') as label, COUNT(*)::int as count FROM customers ${baseWhere} GROUP BY grade ORDER BY count DESC LIMIT 8`, [companyId]),
+        query(`SELECT COALESCE(region, '미상') as label, COUNT(*)::int as count FROM customers ${baseWhere} GROUP BY region ORDER BY count DESC LIMIT 6`, [companyId]),
+      ]);
+
+      // gender enum 역변환
+      const mapGenderLabel = (raw: string) => (raw === 'M' ? '남성' : raw === 'F' ? '여성' : raw);
+
+      response.breakdown = {
+        byGender: genderRes.rows.map((r: any) => ({ label: mapGenderLabel(r.label), count: parseInt(r.count) })),
+        byAge: ageRes.rows.map((r: any) => ({ label: r.label, count: parseInt(r.count) })),
+        byGrade: gradeRes.rows.map((r: any) => ({ label: r.label, count: parseInt(r.count) })),
+        byRegion: regionRes.rows.map((r: any) => ({ label: r.label, count: parseInt(r.count) })),
+      };
+    }
+
+    // ── 3. topList: 생일 카드 전용 고객 리스트 (검색 + 페이지네이션) ──
+    if (cardId === 'birthday_this_month') {
+      let topWhere = baseWhere;
+      const topParams: any[] = [companyId];
+      let topParamIdx = 2;
+
+      if (q) {
+        topWhere += ` AND (name ILIKE $${topParamIdx} OR phone ILIKE $${topParamIdx})`;
+        topParams.push(`%${q}%`);
+        topParamIdx++;
+      }
+
+      const countRes = await query(`SELECT COUNT(*)::int as total FROM customers ${topWhere}`, topParams);
+      const total = parseInt(countRes.rows[0]?.total || 0);
+
+      topParams.push(limit, page * limit);
+      const listRes = await query(`
+        SELECT id, name, phone, gender, grade, birth_month_day,
+               TO_CHAR(recent_purchase_date, 'YYYY-MM-DD') as recent_purchase_date,
+               total_purchase_amount
+          FROM customers ${topWhere}
+         ORDER BY birth_month_day ASC NULLS LAST, name ASC
+         LIMIT $${topParamIdx} OFFSET $${topParamIdx + 1}
+      `, topParams);
+
+      response.topList = {
+        items: listRes.rows.map((r: any) => ({
+          id: r.id,
+          name: r.name,
+          phone: r.phone,
+          gender: r.gender === 'M' ? '남성' : r.gender === 'F' ? '여성' : r.gender || '',
+          grade: r.grade || '',
+          birth_month_day: r.birth_month_day || '',
+          recent_purchase_date: r.recent_purchase_date || '',
+          total_purchase_amount: r.total_purchase_amount != null ? Number(r.total_purchase_amount) : 0,
+        })),
+        total,
+        page,
+        limit,
+      };
+    }
+
+    // ── 4. distribution 카드 전체 확장 리스트 ──
+    const DISTRIBUTION_EXPAND: Record<string, string> = {
+      age_distribution: `
+        SELECT
+          CASE
+            WHEN age < 20 THEN '10대 이하'
+            WHEN age < 30 THEN '20대'
+            WHEN age < 40 THEN '30대'
+            WHEN age < 50 THEN '40대'
+            WHEN age < 60 THEN '50대'
+            ELSE '60대 이상'
+          END as label, COUNT(*)::int as count
+        FROM customers WHERE company_id = $1 AND is_active = true AND age IS NOT NULL${customerStoreFilter}
+        GROUP BY 1 ORDER BY MIN(age)
+      `,
+      grade_distribution: `
+        SELECT grade as label, COUNT(*)::int as count
+        FROM customers WHERE company_id = $1 AND is_active = true AND grade IS NOT NULL${customerStoreFilter}
+        GROUP BY grade ORDER BY count DESC
+      `,
+      region_top: `
+        SELECT region as label, COUNT(*)::int as count
+        FROM customers WHERE company_id = $1 AND is_active = true AND region IS NOT NULL${customerStoreFilter}
+        GROUP BY region ORDER BY count DESC LIMIT 20
+      `,
+      store_distribution: `
+        SELECT COALESCE(registered_store, recent_purchase_store) as label, COUNT(*)::int as count
+        FROM customers WHERE company_id = $1 AND is_active = true
+          AND (registered_store IS NOT NULL OR recent_purchase_store IS NOT NULL)${customerStoreFilter}
+        GROUP BY COALESCE(registered_store, recent_purchase_store) ORDER BY count DESC LIMIT 30
+      `,
+    };
+    if (DISTRIBUTION_EXPAND[cardId]) {
+      const distRes = await query(DISTRIBUTION_EXPAND[cardId], [companyId]);
+      response.fullDistribution = distRes.rows.map((r: any) => ({ label: r.label, count: parseInt(r.count) }));
+    }
+
+    res.json(response);
+  } catch (error) {
+    console.error('카드 상세 조회 실패:', error);
+    res.status(500).json({ error: '카드 상세 조회 실패' });
   }
 });
 

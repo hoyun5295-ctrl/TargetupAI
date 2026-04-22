@@ -34,6 +34,9 @@ export default function CustomerDBModal({ onClose, token, userType }: CustomerDB
   // 동적 컬럼 (field_definitions 기반)
   const [fieldColumns, setFieldColumns] = useState<any[]>([]);
 
+  // ★ D132 Phase A: 다운로드 상태
+  const [downloading, setDownloading] = useState(false);
+
   useEffect(() => {
     fetchEnabledFieldsAndOptions();
     fetchCustomers(1);
@@ -240,6 +243,53 @@ export default function CustomerDBModal({ onClose, token, userType }: CustomerDB
 
   const totalPages = Math.ceil(total / limit);
 
+  // ★ D132 Phase A: 현재 필터 조건으로 XLSX 다운로드
+  const handleDownload = async () => {
+    if (downloading || total === 0) return;
+    setDownloading(true);
+    try {
+      const params = new URLSearchParams();
+      if (filterSmsOptIn === 'true') params.set('smsOptIn', 'true');
+      if (filterSmsOptIn === 'false') params.set('smsOptIn', 'false');
+      if (filterStoreCode !== 'all') params.set('filterStoreCode', filterStoreCode);
+      if (activeFilters.length > 0) {
+        const filtersObj: Record<string, any> = {};
+        for (const af of activeFilters) {
+          if (af.op === 'between' && af.valueMax) {
+            filtersObj[af.field] = { operator: 'between', value: [af.value, af.valueMax] };
+          } else {
+            filtersObj[af.field] = { operator: af.op, value: af.value };
+          }
+        }
+        params.set('filters', JSON.stringify(filtersObj));
+      }
+
+      const res = await fetch(`/api/customers/download?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const errMsg = await res.text().catch(() => '');
+        throw new Error(errMsg || '다운로드 실패');
+      }
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const ts = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '').slice(0, 14);
+      a.download = `customers_${ts}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err: any) {
+      console.error('고객 DB 다운로드 실패:', err);
+      alert(`다운로드 실패: ${err?.message || '알 수 없는 오류'}`);
+    } finally {
+      setDownloading(false);
+    }
+  };
+
   // 상세보기 필드 (기본 + field_definitions 동적 확장)
   const baseDetailFields: { key: string; label: string; format?: (v: any) => string }[] = [
     { key: 'name', label: '이름' },
@@ -283,7 +333,21 @@ export default function CustomerDBModal({ onClose, token, userType }: CustomerDB
             <h3 className="text-lg font-bold text-gray-800">고객 DB 조회</h3>
             <span className="text-sm text-gray-500">총 {total.toLocaleString()}명</span>
           </div>
-          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-200 text-gray-400 hover:text-gray-600 transition-colors text-lg">&times;</button>
+          <div className="flex items-center gap-2">
+            {/* ★ D132 Phase A: 현재 필터 조건 XLSX 다운로드 */}
+            <button
+              onClick={handleDownload}
+              disabled={downloading || total === 0}
+              title={total === 0 ? '다운로드할 고객이 없습니다' : '현재 필터 조건의 고객 리스트를 엑셀로 다운로드합니다'}
+              className="px-3 py-1.5 text-xs font-semibold bg-gradient-to-r from-violet-600 to-purple-600 text-white rounded-lg shadow-sm shadow-violet-200/60 hover:from-violet-700 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center gap-1.5"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+              {downloading ? '다운로드 중...' : '엑셀 다운로드'}
+            </button>
+            <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-200 text-gray-400 hover:text-gray-600 transition-colors text-lg">&times;</button>
+          </div>
         </div>
 
         {/* 필터 (한 줄 통합) */}

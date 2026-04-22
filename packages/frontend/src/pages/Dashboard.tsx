@@ -12,6 +12,8 @@ import AiSendTypeModal from '../components/AiSendTypeModal';
 import AnalysisModal from '../components/AnalysisModal';
 import BalanceModals from '../components/BalanceModals';
 import CalendarModal from '../components/CalendarModal';
+import DeltaBadge from '../components/dashboard/DeltaBadge';
+import CardDetailModal, { type CardTargetFilterOutput } from '../components/dashboard/CardDetailModal';
 import CampaignSuccessModal from '../components/CampaignSuccessModal';
 import { LmsConvertModal, SmsConvertModal } from '../components/ChannelConvertModals';
 import CustomerDBModal from '../components/CustomerDBModal';
@@ -117,6 +119,11 @@ interface DashboardCardData {
   icon: string;
   value: number | { label: string; count: number }[];
   hasData: boolean;
+  // ★ D132 Phase A: 델타 뱃지
+  delta?: number | null;
+  deltaPercent?: number | null;
+  deltaBaseline?: string;
+  hasTrend?: boolean;
 }
 
 interface DashboardCardsResponse {
@@ -224,6 +231,9 @@ export default function Dashboard() {
   const [showSyncActiveBlock, setShowSyncActiveBlock] = useState(false);
   const [syncBlockActive, setSyncBlockActive] = useState(false);
   const [showDirectTargeting, setShowDirectTargeting] = useState(false);
+  // ★ D132 Phase B: 대시보드 카드 상세 모달
+  const [detailCard, setDetailCard] = useState<DashboardCardData | null>(null);
+  const [cardTargetFilters, setCardTargetFilters] = useState<CardTargetFilterOutput | undefined>(undefined);
   // 직접 타겟 관련 state → DirectTargetFilterModal로 이동 (D43-3)
   const [showTemplates, setShowTemplates] = useState(false);
   const [showInsights, setShowInsights] = useState(false);
@@ -2403,7 +2413,11 @@ const campaignData = {
                           const items = card.value.slice(0, 3);
                           const maxCount = Math.max(...items.map(it => it.count), 1);
                           return (
-                            <div key={card.cardId} className="p-4 rounded-xl border border-gray-100 hover:shadow-md hover:-translate-y-0.5 transition-all">
+                            <div
+                              key={card.cardId}
+                              onClick={() => setDetailCard(card)}
+                              className="p-4 rounded-xl border border-gray-100 hover:shadow-md hover:-translate-y-0.5 hover:border-violet-200 cursor-pointer transition-all"
+                            >
                               <div className="flex items-center gap-2 mb-3">
                                 <div className={`w-7 h-7 rounded-lg ${color.iconBg} flex items-center justify-center`}>
                                   <IconComp className={`w-3.5 h-3.5 ${color.accent}`} />
@@ -2438,7 +2452,11 @@ const campaignData = {
                         else { suffix = '명'; }
 
                         return (
-                          <div key={card.cardId} className="p-4 rounded-xl border border-gray-100 hover:shadow-md hover:-translate-y-0.5 transition-all">
+                          <div
+                            key={card.cardId}
+                            onClick={() => setDetailCard(card)}
+                            className="p-4 rounded-xl border border-gray-100 hover:shadow-md hover:-translate-y-0.5 hover:border-violet-200 cursor-pointer transition-all"
+                          >
                             <div className="flex items-center gap-2 mb-3">
                               <div className={`w-8 h-8 rounded-xl ${color.iconBg} flex items-center justify-center`}>
                                 <IconComp className={`w-4 h-4 ${color.accent}`} />
@@ -2448,6 +2466,13 @@ const campaignData = {
                             <div className="text-2xl font-bold text-gray-900 tracking-tight">
                               {displayVal}<span className="text-sm font-normal text-gray-400 ml-0.5">{suffix}</span>
                             </div>
+                            {/* ★ D132 Phase A: 델타 뱃지 — 30일 전 동일 시점 대비 증감 */}
+                            {card.hasTrend && card.delta !== null && card.delta !== undefined && (
+                              <div className="mt-2 flex items-center gap-1.5">
+                                <DeltaBadge delta={card.delta} deltaPercent={card.deltaPercent} baseline={card.deltaBaseline} suffix={suffix} />
+                                <span className="text-[10px] text-gray-400">지난달 대비</span>
+                              </div>
+                            )}
                           </div>
                         );
                       })}
@@ -3013,8 +3038,19 @@ const campaignData = {
         {/* 직접 타겟 설정 모달 (D43-3: 컴포넌트 분리) */}
         <DirectTargetFilterModal
           show={showDirectTargeting}
-          onClose={() => setShowDirectTargeting(false)}
+          onClose={() => { setShowDirectTargeting(false); setCardTargetFilters(undefined); }}
           onExtracted={handleTargetExtracted}
+          initialFilters={cardTargetFilters}
+        />
+
+        {/* ★ D132 Phase B: 대시보드 카드 클릭 → 상세 모달 */}
+        <CardDetailModal
+          card={detailCard}
+          onClose={() => setDetailCard(null)}
+          onTargetSend={(filters) => {
+            setCardTargetFilters(filters);
+            setShowDirectTargeting(true);
+          }}
         />
 
         <FileUploadMappingModal

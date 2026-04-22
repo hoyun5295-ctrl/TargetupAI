@@ -1,4 +1,5 @@
 import { Request, Response, Router } from 'express';
+import * as XLSX from 'xlsx';
 import { query, mysqlQuery } from '../config/database';
 import { authenticate } from '../middlewares/auth';
 import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getGenderVariants } from '../utils/normalize';
@@ -177,6 +178,187 @@ if (smsOptIn === 'true') {
   } catch (error) {
     console.error('고객 목록 조회 오류:', error);
     return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// ★ D132 Phase A: GET /api/customers/download - 현재 필터 조건 고객 리스트 XLSX 다운로드
+//   CT-01 buildDynamicFilterCompat 재활용 (인라인 쿼리 금지).
+//   GET /api/customers 와 동일한 WHERE 절 로직을 적용하되 limit 없이 전체 매칭 고객 내보냄.
+router.get('/download', async (req: Request, res: Response) => {
+  try {
+    let companyId = req.user?.companyId;
+    const userId = req.user?.userId;
+    const userType = req.user?.userType;
+
+    if (userType === 'super_admin' && req.query.companyId) {
+      companyId = req.query.companyId as string;
+    }
+    if (!companyId) {
+      return res.status(403).json({ error: '회사 권한이 필요합니다' });
+    }
+
+    const { filters, search, smsOptIn } = req.query;
+
+    let whereClause = 'WHERE company_id = $1 AND is_active = true';
+    const params: any[] = [companyId];
+    let paramIndex = 2;
+
+    // 브랜드 격리 (CT-02)
+    if (userType === 'company_user' && userId) {
+      const scope = await getStoreScope(companyId, userId);
+      if (scope.type === 'filtered') {
+        whereClause += ` AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = $1 AND store_code = ANY($${paramIndex++}::text[]))`;
+        params.push(scope.storeCodes);
+      } else if (scope.type === 'blocked') {
+        return res.status(403).json({ error: '접근 권한이 없습니다' });
+      }
+    }
+
+    // 사용자별 필터
+    const filterUserId = req.query.filterUserId as string;
+    if (filterUserId && (userType === 'company_admin' || userType === 'super_admin')) {
+      const fuResult = await query('SELECT store_codes FROM users WHERE id = $1 AND company_id = $2', [filterUserId, companyId]);
+      const fuStoreCodes = fuResult.rows[0]?.store_codes;
+      if (fuStoreCodes && fuStoreCodes.length > 0) {
+        whereClause += ` AND store_code = ANY($${paramIndex++}::text[])`;
+        params.push(fuStoreCodes);
+      } else {
+        whereClause += ` AND uploaded_by = $${paramIndex++}`;
+        params.push(filterUserId);
+      }
+    }
+
+    // 브랜드(store_code) 필터
+    const filterStoreCode = req.query.filterStoreCode as string;
+    if (filterStoreCode && (userType === 'company_admin' || userType === 'super_admin')) {
+      whereClause += ` AND store_code = $${paramIndex++}`;
+      params.push(filterStoreCode);
+    }
+
+    // 동적 필터 (CT-01)
+    if (filters) {
+      const parsedFilters = typeof filters === 'string' ? JSON.parse(filters) : filters;
+      const filterResult = buildDynamicFilterCompat(parsedFilters, paramIndex);
+      whereClause += filterResult.where;
+      params.push(...filterResult.params);
+      paramIndex = filterResult.nextIndex;
+    }
+
+    // 수신동의 필터
+    if (smsOptIn === 'true') {
+      whereClause += ` AND sms_opt_in = true AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${paramIndex} AND u.phone = customers_unified.phone)`;
+      params.push(userId);
+      paramIndex++;
+    } else if (smsOptIn === 'false') {
+      whereClause += ` AND (sms_opt_in = false OR EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${paramIndex} AND u.phone = customers_unified.phone))`;
+      params.push(userId);
+      paramIndex++;
+    }
+
+    // 검색어
+    if (search) {
+      const searchStr = String(search);
+      const cleanSearch = searchStr.replace(/-/g, '');
+      if (/^\d+$/.test(cleanSearch)) {
+        if (cleanSearch.length === 4) {
+          whereClause += ` AND (REPLACE(phone, '-', '') LIKE $${paramIndex} OR REPLACE(phone, '-', '') LIKE $${paramIndex + 1})`;
+          params.push(`___${cleanSearch}____`, `_______${cleanSearch}`);
+          paramIndex++;
+        } else {
+          whereClause += ` AND REPLACE(phone, '-', '') LIKE $${paramIndex}`;
+          params.push(`%${cleanSearch}%`);
+        }
+      } else {
+        whereClause += ` AND (name ILIKE $${paramIndex} OR phone ILIKE $${paramIndex})`;
+        params.push(`%${searchStr}%`);
+      }
+      paramIndex++;
+    }
+
+    // 수신거부 반영된 sms_opt_in
+    const unsubCaseIdx = paramIndex++;
+    params.push(userId);
+
+    const result = await query(
+      `SELECT name, phone, gender, TO_CHAR(birth_date, 'YYYY-MM-DD') as birth_date, age, email, address, region,
+              grade, points,
+              CASE WHEN EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${unsubCaseIdx} AND u.phone = customers_unified.phone)
+                   THEN false ELSE sms_opt_in END as sms_opt_in,
+              store_code, store_name, registered_store, recent_purchase_store, store_phone,
+              total_purchase_amount, recent_purchase_amount, purchase_count,
+              TO_CHAR(recent_purchase_date, 'YYYY-MM-DD') as recent_purchase_date, custom_fields
+       FROM customers_unified
+       ${whereClause}
+       ORDER BY created_at DESC`,
+      params
+    );
+
+    // 커스텀 필드 라벨 조회 (customer_field_definitions)
+    const defRes = await query(
+      `SELECT field_key, display_name
+         FROM customer_field_definitions
+        WHERE company_id = $1 AND field_key LIKE 'custom_%' AND is_active = true
+        ORDER BY field_key`,
+      [companyId]
+    );
+    const customFieldDefs: { key: string; label: string }[] = defRes.rows.map((r: any) => ({
+      key: r.field_key,
+      label: r.display_name || r.field_key,
+    }));
+
+    // 표준 컬럼 헤더 + transform (enum 역변환 포함)
+    const standardHeaders: { key: string; label: string; transform?: (v: any) => any }[] = [
+      { key: 'name', label: '이름' },
+      { key: 'phone', label: '전화번호' },
+      { key: 'gender', label: '성별', transform: (v) => (v === 'M' ? '남성' : v === 'F' ? '여성' : v || '') },
+      { key: 'birth_date', label: '생년월일' },
+      { key: 'age', label: '나이' },
+      { key: 'email', label: '이메일' },
+      { key: 'address', label: '주소' },
+      { key: 'region', label: '지역' },
+      { key: 'grade', label: '등급' },
+      { key: 'points', label: '포인트' },
+      { key: 'sms_opt_in', label: '수신동의', transform: (v) => (v === true || v === 'true' ? 'Y' : 'N') },
+      { key: 'store_code', label: '매장코드' },
+      { key: 'store_name', label: '매장명' },
+      { key: 'registered_store', label: '등록매장' },
+      { key: 'recent_purchase_store', label: '최근구매매장' },
+      { key: 'store_phone', label: '매장전화' },
+      { key: 'total_purchase_amount', label: '총구매금액' },
+      { key: 'recent_purchase_amount', label: '최근구매금액' },
+      { key: 'purchase_count', label: '구매횟수' },
+      { key: 'recent_purchase_date', label: '최근구매일' },
+    ];
+
+    // Row 변환 (숫자/문자 혼합 + custom_fields 평면화)
+    const rows = result.rows.map((c: any) => {
+      const row: Record<string, any> = {};
+      for (const h of standardHeaders) {
+        const raw = c[h.key];
+        row[h.label] = h.transform ? h.transform(raw) : (raw === null || raw === undefined ? '' : raw);
+      }
+      for (const cf of customFieldDefs) {
+        row[cf.label] = c.custom_fields?.[cf.key] ?? '';
+      }
+      return row;
+    });
+
+    // XLSX 생성
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, '고객DB');
+    const buffer: Buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+    // 파일명 (영문 + 타임스탬프 — 브라우저 호환성)
+    const ts = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '').slice(0, 14);
+    const filename = `customers_${ts}.xlsx`;
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(buffer);
+  } catch (error) {
+    console.error('고객 다운로드 오류:', error);
+    return res.status(500).json({ error: '다운로드 중 오류가 발생했습니다.' });
   }
 });
 

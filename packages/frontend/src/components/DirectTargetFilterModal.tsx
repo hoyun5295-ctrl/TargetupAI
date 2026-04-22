@@ -16,9 +16,15 @@ interface DirectTargetFilterModalProps {
   onClose: () => void;
   // ★ D43-3c: fieldsMeta 추가
   onExtracted: (recipients: any[], count: number, fieldsMeta: FieldMeta[], selectedCallbackPhone?: string, phoneFields?: string[]) => void;
+  // ★ D132 Phase B: 외부에서 초기 필터 주입 (대시보드 카드 상세 모달 "타겟 발송 바로가기" 연계)
+  //   undefined면 기존 동작(sms_opt_in 기본 체크). 주입 시 해당 필드/값 자동 세팅.
+  initialFilters?: {
+    selectedFields?: string[];
+    filterValues?: Record<string, any>;
+  };
 }
 
-export default function DirectTargetFilterModal({ show, onClose, onExtracted }: DirectTargetFilterModalProps) {
+export default function DirectTargetFilterModal({ show, onClose, onExtracted, initialFilters }: DirectTargetFilterModalProps) {
   // 필드 데이터
   const [enabledFields, setEnabledFields] = useState<any[]>([]);
   const [extractedPhoneFields, setExtractedPhoneFields] = useState<string[]>([]);
@@ -101,13 +107,28 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
         if (data.phoneFields) setExtractedPhoneFields(data.phoneFields);
         setFieldsLoaded(true);
 
-        // sms_opt_in 기본 선택 (수신동의 고객만)
-        const smsField = (data.fields || []).find((f: any) =>
-          f.field_key === 'sms_opt_in' || f.field_key === 'opt_in_sms'
-        );
-        if (smsField) {
-          setSelectedFields(new Set([smsField.field_key]));
-          setFilterValues({ [smsField.field_key]: 'true' });
+        // ★ D132 Phase B: initialFilters 주입 시 우선 세팅 (대시보드 카드 상세 연계)
+        if (initialFilters && (initialFilters.selectedFields?.length || initialFilters.filterValues)) {
+          const sel = new Set<string>(initialFilters.selectedFields || []);
+          // sms_opt_in 은 항상 기본 체크 (수신동의 필터)
+          const smsField = (data.fields || []).find((f: any) =>
+            f.field_key === 'sms_opt_in' || f.field_key === 'opt_in_sms'
+          );
+          if (smsField) sel.add(smsField.field_key);
+          setSelectedFields(sel);
+          setFilterValues({
+            ...(smsField ? { [smsField.field_key]: 'true' } : {}),
+            ...(initialFilters.filterValues || {}),
+          });
+        } else {
+          // sms_opt_in 기본 선택 (수신동의 고객만) — 기존 동작
+          const smsField = (data.fields || []).find((f: any) =>
+            f.field_key === 'sms_opt_in' || f.field_key === 'opt_in_sms'
+          );
+          if (smsField) {
+            setSelectedFields(new Set([smsField.field_key]));
+            setFilterValues({ [smsField.field_key]: 'true' });
+          }
         }
       }
     } catch (error) {
