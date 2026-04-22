@@ -186,6 +186,9 @@ const [messageDetailContent, setMessageDetailContent] = useState<{ name: string;
   const [userSearch, setUserSearch] = useState('');
   const [userCompanyFilter, setUserCompanyFilter] = useState('all');
   const [expandedCompanies, setExpandedCompanies] = useState<Set<string>>(new Set());
+  // ★ 회사 그룹 20개씩 페이지네이션
+  const [userPage, setUserPage] = useState(1);
+  const USERS_COMPANIES_PER_PAGE = 20;
 
   // 발신번호 관리
   const [callbackNumbers, setCallbackNumbers] = useState<any[]>([]);
@@ -2545,7 +2548,7 @@ const handleApproveRequest = async (id: string) => {
                 <input
                   type="text"
                   value={userSearch}
-                  onChange={(e) => setUserSearch(e.target.value)}
+                  onChange={(e) => { setUserSearch(e.target.value); setUserPage(1); }}
                   placeholder="🔍 아이디, 이름으로 검색..."
                   className="w-full max-w-xs px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
                 />
@@ -2554,7 +2557,7 @@ const handleApproveRequest = async (id: string) => {
                 <label className="text-sm text-gray-600">회사:</label>
                 <select
                   value={userCompanyFilter}
-                  onChange={(e) => setUserCompanyFilter(e.target.value)}
+                  onChange={(e) => { setUserCompanyFilter(e.target.value); setUserPage(1); }}
                   className="px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
                 >
                   <option value="all">전체</option>
@@ -2609,9 +2612,18 @@ const handleApproveRequest = async (id: string) => {
                   );
                 }
 
+                // ★ 회사 그룹 20개씩 페이지네이션
+                const totalUserPages = Math.max(1, Math.ceil(companyIds.length / USERS_COMPANIES_PER_PAGE));
+                const safeUserPage = Math.min(Math.max(1, userPage), totalUserPages);
+                const pagedCompanyIds = companyIds.slice(
+                  (safeUserPage - 1) * USERS_COMPANIES_PER_PAGE,
+                  safeUserPage * USERS_COMPANIES_PER_PAGE
+                );
+
                 return (
+                  <>
                   <div className="divide-y">
-                    {companyIds.map(companyId => {
+                    {pagedCompanyIds.map(companyId => {
                       const group = groupedUsers[companyId];
                       const isExpanded = expandedCompanies.has(companyId);
                       
@@ -2695,6 +2707,36 @@ const handleApproveRequest = async (id: string) => {
                       );
                     })}
                   </div>
+                  {/* ★ 회사 그룹 페이지네이션 */}
+                  {totalUserPages > 1 && (
+                    <div className="px-6 py-4 border-t flex items-center justify-between bg-gray-50">
+                      <span className="text-sm text-gray-500">
+                        총 {companyIds.length}개 회사 중 {(safeUserPage - 1) * USERS_COMPANIES_PER_PAGE + 1}-{Math.min(safeUserPage * USERS_COMPANIES_PER_PAGE, companyIds.length)}
+                      </span>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => setUserPage(p => Math.max(1, p - 1))}
+                          disabled={safeUserPage === 1}
+                          className="px-3 py-1.5 text-sm rounded-md border bg-white hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
+                        >◀ 이전</button>
+                        {Array.from({ length: totalUserPages }, (_, i) => i + 1).map(p => (
+                          <button
+                            key={p}
+                            onClick={() => setUserPage(p)}
+                            className={`min-w-[36px] px-3 py-1.5 text-sm rounded-md transition-colors ${
+                              p === safeUserPage ? 'bg-blue-600 text-white' : 'bg-white border hover:bg-gray-100'
+                            }`}
+                          >{p}</button>
+                        ))}
+                        <button
+                          onClick={() => setUserPage(p => Math.min(totalUserPages, p + 1))}
+                          disabled={safeUserPage === totalUserPages}
+                          className="px-3 py-1.5 text-sm rounded-md border bg-white hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
+                        >다음 ▶</button>
+                      </div>
+                    </div>
+                  )}
+                  </>
                 );
               })()}
             </div>
