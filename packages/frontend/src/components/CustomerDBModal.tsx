@@ -516,10 +516,13 @@ export default function CustomerDBModal({ onClose, token, userType }: CustomerDB
                           display = val ? formatDate(String(val)) : '-';
                         } else if (f.field_key === 'total_purchase_amount' || f.field_key === 'recent_purchase_amount' || f.field_key === 'points' || f.field_key === 'purchase_count') {
                           // ★ D89→D120: formatPreviewValue + fieldLabel 전달로 숫자/날짜 판정
-                          display = val != null ? formatPreviewValue(val, { fieldLabel: f.field_label || f.display_name || f.field_key }) : '-';
+                          // ★ D136 재발방지 (2026-04-22 P1): fieldKey 전달 — 커스텀필드 가드 작동 보장
+                          display = val != null ? formatPreviewValue(val, { fieldLabel: f.field_label || f.display_name || f.field_key, fieldKey: f.field_key }) : '-';
                         } else if ((f.field_type === 'NUMBER' || f.data_type === 'number') && val != null) {
                           // ★ D98→D120: 커스텀 숫자 필드 — fieldLabel 기반 숫자/날짜 판정
-                          display = formatPreviewValue(val, { fieldLabel: f.field_label || f.display_name || f.field_key });
+                          // ★ D136 재발방지 (2026-04-22 P1): fieldKey 필수 전달 — 커스텀 숫자 필드(custom_2 등)
+                          //   data_type='number' 자동 감지된 varchar "20260416150000"가 콤마 포맷되는 버그 차단
+                          display = formatPreviewValue(val, { fieldLabel: f.field_label || f.display_name || f.field_key, fieldKey: f.field_key });
                         } else if (f.field_key === 'grade') {
                           return (
                             <td key={f.field_key} className="px-3 py-2.5 text-center whitespace-nowrap">
@@ -592,7 +595,8 @@ export default function CustomerDBModal({ onClose, token, userType }: CustomerDB
                           : null;
                         const displayLabel = fieldDef?.field_label || fieldDef?.display_name || key;
                         // ★ D89→D120: formatPreviewValue + fieldLabel 전달로 숫자/날짜 판정
-                        const displayValue = value != null ? formatPreviewValue(value, { fieldLabel: displayLabel }) : '-';
+                        // ★ D136 재발방지 (2026-04-22 P1): custom_fields JSONB 키는 자체가 fieldKey — 그대로 전달하여 커스텀 가드 작동
+                        const displayValue = value != null ? formatPreviewValue(value, { fieldLabel: displayLabel, fieldKey: key }) : '-';
                         return (
                           <div key={key} className="flex items-center py-2.5 border-b border-gray-100">
                             <span className="w-24 flex-shrink-0 text-xs text-gray-400">{displayLabel}</span>
