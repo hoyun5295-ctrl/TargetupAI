@@ -293,18 +293,33 @@ router.get('/download', async (req: Request, res: Response) => {
       params
     );
 
-    // 커스텀 필드 라벨 조회 (customer_field_definitions)
-    const defRes = await query(
-      `SELECT field_key, display_name
-         FROM customer_field_definitions
-        WHERE company_id = $1 AND field_key LIKE 'custom_%' AND is_active = true
-        ORDER BY field_key`,
-      [companyId]
-    );
-    const customFieldDefs: { key: string; label: string }[] = defRes.rows.map((r: any) => ({
-      key: r.field_key,
-      label: r.display_name || r.field_key,
-    }));
+    // 커스텀 필드 라벨 조회 — 스키마 컬럼 호환 + try-catch 폴백
+    //   · display_name/field_label/label 셋 중 있는 것 사용 (COALESCE)
+    //   · is_active 조건 생략 (컬럼 없을 수도)
+    //   · 쿼리 실패 시 빈 배열 폴백 → 표준 컬럼만 다운로드 (에러로 전체 막히지 않음)
+    let customFieldDefs: { key: string; label: string }[] = [];
+    try {
+      const defRes = await query(
+        `SELECT field_key,
+                COALESCE(
+                  to_jsonb(cfd.*) ->> 'display_name',
+                  to_jsonb(cfd.*) ->> 'field_label',
+                  to_jsonb(cfd.*) ->> 'label',
+                  field_key
+                ) AS label
+           FROM customer_field_definitions cfd
+          WHERE company_id = $1 AND field_key LIKE 'custom_%'
+          ORDER BY field_key`,
+        [companyId]
+      );
+      customFieldDefs = defRes.rows.map((r: any) => ({
+        key: r.field_key,
+        label: r.label || r.field_key,
+      }));
+    } catch (err) {
+      console.warn('[customers/download] customer_field_definitions 조회 실패 — custom_fields 동적 컬럼 없이 진행:', (err as any)?.message);
+      customFieldDefs = [];
+    }
 
     // 표준 컬럼 헤더 + transform (enum 역변환 포함)
     const standardHeaders: { key: string; label: string; transform?: (v: any) => any }[] = [

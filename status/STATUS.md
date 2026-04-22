@@ -226,6 +226,55 @@
 
 ---
 
+### 📊 D133 (2026-04-22 밤) — 대시보드 카드 상세 개선 + 고객 DB 다운로드 (Phase A+B 통합 — 🟡 수정완료-배포대기)
+
+> **세션 기록:** [`.claude/projects/.../memory/project_dashboard_card_detail.md`](../.claude/projects/C--Users-ceo-projects-targetup/memory/project_dashboard_card_detail.md)
+>
+> **배경:** Harold님 대시보드 피드백 2건 — (1) DB 현황 카드 "언밸런스" (count 카드 숫자만 / distribution 카드 프로그레스바 꽉 참 → 밀도 불균형) (2) 각 카드 클릭 시 세부 지표 모달 원함. 추가 요청: 고객DB 현황 모달에 필터 조건 유지된 채 엑셀 다운로드.
+>
+> **✅ Phase A — 델타 뱃지 + 고객 DB 다운로드:**
+> - 백엔드 `routes/companies.ts` `CardDataResult` 인터페이스 4필드(delta/deltaPercent/deltaBaseline/hasTrend) 확장 + `aggregateDashboardCards`에 30일 전 동일 시점 카운트 동시 집계 + `calcDelta` 헬퍼 추가. count 카드 7종 델타 계산 (total/gender_male/gender_female/opt_in_count/new_this_month/recent_30d_purchase/inactive_90d)
+> - 백엔드 `routes/customers.ts` `GET /api/customers/download` 신설 — **CT-01 `buildDynamicFilterCompat` 재활용** + XLSX 응답. 한글 헤더 20컬럼 + gender enum 역변환(M→남성/F→여성) + sms_opt_in Y/N 변환 + customer_field_definitions 기반 custom_fields 평면화(동적 컬럼)
+> - 프론트 `components/dashboard/DeltaBadge.tsx` **신설** — 증가 green / 감소 red / 변화없음 gray 뱃지 (PricingPage violet 톤)
+> - 프론트 `Dashboard.tsx` `DashboardCardData` 4필드 확장 + 카드 렌더링에 델타 뱃지 1줄 추가 ("지난달 대비" 라벨 함께) + hover violet 테두리
+> - 프론트 `components/CustomerDBModal.tsx` 헤더 우측 violet 그라디언트 "엑셀 다운로드" 버튼 + `handleDownload` (현재 `activeFilters`/`filterSmsOptIn`/`filterStoreCode` 그대로 query string으로 전달 → Blob 다운로드)
+>
+> **✅ Phase B — 카드 클릭 상세 모달 + 타겟 발송 연계:**
+> - 백엔드 `routes/companies.ts` **`GET /api/companies/dashboard-cards/:cardId/detail`** 신설. 카드 타입별 자동 분기:
+>   - **trend** (6개월 월별): count 카드 7종. generate_series + 상관 서브쿼리로 각 월말 기준 누적 카운트 (new_this_month는 해당월 신규, recent_30d_purchase는 각 월말 기준 최근 30일, inactive_90d는 90일 이상 비활성)
+>   - **breakdown**: 성별/연령대/등급/지역 4종 (Promise.all 병렬), gender enum 역변환, 연령대는 10대 단위 CASE
+>   - **topList** (생일 카드 전용): 이름/전화 검색(q) + 페이지네이션(page/limit). name ILIKE OR phone ILIKE
+>   - **fullDistribution** (distribution 카드): 전체 확장 (age/grade/region/store, LIMIT 상향)
+> - `npm install recharts` (React 친화 차트 라이브러리, ~50KB gzipped)
+> - 프론트 `components/dashboard/CardDetailModal.tsx` **신설** — FileUploadMappingModal violet 톤 100% 계승 (그라디언트 헤더/rounded-2xl/shadow-xl). 구조:
+>   - 요약 카드 2개 (현재값 + 지난달 대비 DeltaBadge)
+>   - recharts `LineChart` 6개월 추이 (violet stroke + 그라디언트 필)
+>   - breakdown 4칸 (성별/연령/등급/지역 프로그레스 바)
+>   - 생일 카드: BirthdayCustomerList 렌더
+>   - distribution 카드: fullDistribution 리스트
+>   - 푸터 CTA: "닫기" + violet 그라디언트 **"타겟 발송 바로가기"** (cardId별 필터 매핑 후 부모 콜백)
+> - 프론트 `components/dashboard/BirthdayCustomerList.tsx` **신설** — 검색 input + 페이지네이션(이전/다음) + 테이블(이름/전화/성별/생일/등급/총구매/최근구매). 페이지당 20건, violet 톤
+> - 프론트 `components/DirectTargetFilterModal.tsx` **`initialFilters` optional prop 추가** (하위호환 — undefined면 기존 `sms_opt_in=true` 기본 유지). 주입 시 `selectedFields`/`filterValues` 자동 세팅. 기존 5개 호출부(Dashboard/DirectPreviewModal/TargetSendModal/KakaoRcsPage) 영향 없음
+> - 프론트 `Dashboard.tsx` 카드 `onClick={() => setDetailCard(card)}` + CardDetailModal state(`detailCard`, `cardTargetFilters`) 연결 → "타겟 발송 바로가기" 클릭 시 `cardTargetFilters` 세팅 후 `showDirectTargeting=true`로 자동 연계
+>
+> **🛡️ 끌로드원칙 준수:**
+> - **CT-01 재활용** (다운로드 API는 `buildDynamicFilterCompat` 직접 호출) / CT-02(store-scope) 재활용
+> - 하드코딩 금지 (cardId/라벨/field_key 동적), 기간계 무접촉, 인라인 금지(3컴포넌트 별도 파일), 하위호환(DirectTargetFilterModal)
+> - 타입 체크 백엔드/프론트 모두 **0 error**
+>
+> **배포 대기:** `tp-push` → `tp-deploy-full`
+>
+> **검증 체크리스트 (배포 후):**
+> - [ ] DB 현황 count 카드에 violet/green/red 델타 뱃지 (`↑ +240 (+2.4%) 지난달 대비`)
+> - [ ] 카드 hover → violet 테두리 + cursor pointer
+> - [ ] 카드 클릭 → 상세 모달 (violet 헤더 + 요약 + 6개월 라인차트 + breakdown 4칸)
+> - [ ] 생일 카드 상세 → 검색/페이지네이션 테이블
+> - [ ] distribution 카드(연령/매장) 상세 → 전체 확장 리스트
+> - [ ] "타겟 발송 바로가기" → DirectTargetFilterModal 자동 필터 적용 (예: 남성 → gender=M)
+> - [ ] 고객 DB 조회 모달 → "엑셀 다운로드" 버튼 → 필터 적용된 XLSX 다운 (한글 헤더 + 성별/수신동의 변환 확인)
+
+---
+
 ### 🔥 D131 (2026-04-21 저녁) — Agent v1.5.1 + 알림톡 IMC 6005 + 담당자테스트 9007 + PPT 9건 일괄 처리
 
 > **세션 기록:** [`.claude/projects/.../memory/project_d131.md`](../.claude/projects/C--Users-ceo-projects-targetup/memory/project_d131.md) — 8섹션 전수 기록
