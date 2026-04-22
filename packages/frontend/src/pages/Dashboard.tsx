@@ -1,4 +1,4 @@
-﻿import { Award, BarChart3, Bell, BellOff, Cake, ChevronLeft, ChevronRight, Clock, CreditCard, DollarSign, HelpCircle, Mail, MapPin, Rocket, Send, ShoppingCart, Sparkles, Store, User, UserPlus, Users, UserX } from 'lucide-react';
+﻿import { Award, BarChart3, Bell, BellOff, Cake, Calendar, ChevronLeft, ChevronRight, Clock, CreditCard, DollarSign, HelpCircle, Mail, MapPin, Percent, Rocket, Send, ShoppingCart, Sparkles, Store, User, UserPlus, Users, UserX } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { aiApi, campaignsApi, customersApi } from '../api/client';
@@ -97,7 +97,7 @@ interface PlanInfo {
 
 // D41 대시보드 동적 카드 아이콘 맵
 const CARD_ICON_MAP: Record<string, any> = {
-  Users, User, Cake, BarChart3, Award, MapPin, Store, Mail, DollarSign, ShoppingCart, UserX, UserPlus, BellOff, Bell, Send, CreditCard, HelpCircle,
+  Users, User, Cake, Calendar, BarChart3, Award, MapPin, Store, Mail, DollarSign, ShoppingCart, UserX, UserPlus, BellOff, Bell, Send, CreditCard, HelpCircle, Percent,
 };
 
 // D41 카드 아이콘 액센트 색상 (카드 자체는 white 통일)

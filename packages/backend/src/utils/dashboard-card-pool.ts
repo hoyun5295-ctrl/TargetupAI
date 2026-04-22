@@ -61,9 +61,118 @@ export function getCardDef(cardId: string): DashboardCardDef | undefined {
   return DASHBOARD_CARD_POOL.find(c => c.cardId === cardId);
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// ★ D136 (2026-04-22 PDF #8): 동적 카드 — 고객사 업로드 커스텀 필드 기반 자동 생성
+// ═══════════════════════════════════════════════════════════════════════════
+// 배경:
+//   suran/인비토 등 고객사가 업로드한 실제 컬럼(시리얼/사이즈/평균주문금액 등)에 대한 카드가
+//   고정 풀 17개에 포함돼 있지 않음 → "7개만 보인다" 이슈.
+// 해결:
+//   CT-18 detectEnabledFields의 커스텀 필드(is_custom=true)마다 data_type 기반 동적 카드 자동 생성.
+//   cardId 접두사 `dyn_`로 고정 풀과 구분. 파싱은 `dyn_{fieldKey}_{aggType}` 패턴.
+
+export const DYNAMIC_CARD_PREFIX = 'dyn_';
+
+export type DynamicAggType = 'dist' | 'sum' | 'has' | 'recent30d' | 'rate';
+const DYNAMIC_AGG_TYPES: DynamicAggType[] = ['dist', 'sum', 'has', 'recent30d', 'rate'];
+
+export function isDynamicCardId(cardId: string): boolean {
+  return cardId.startsWith(DYNAMIC_CARD_PREFIX);
+}
+
+export interface ParsedDynamicCardId {
+  fieldKey: string;
+  aggType: DynamicAggType;
+}
+
+/**
+ * `dyn_{fieldKey}_{aggType}` 파싱. 실패 시 null.
+ * aggType이 suffix에 위치하므로 뒤에서 매칭 (fieldKey에 `_` 포함 가능성 대비).
+ */
+export function parseDynamicCardId(cardId: string): ParsedDynamicCardId | null {
+  if (!isDynamicCardId(cardId)) return null;
+  const rest = cardId.slice(DYNAMIC_CARD_PREFIX.length);
+  for (const at of DYNAMIC_AGG_TYPES) {
+    const suffix = `_${at}`;
+    if (rest.endsWith(suffix)) {
+      const fieldKey = rest.slice(0, -suffix.length);
+      if (!fieldKey) return null;
+      return { fieldKey, aggType: at };
+    }
+  }
+  return null;
+}
+
+/**
+ * 커스텀 필드 배열에서 동적 카드 목록 생성
+ * - is_custom=true인 필드만 대상 (직접 컬럼은 고정 풀로 커버됨)
+ * - data_type에 따라 자연스러운 집계 카드 1개씩 생성
+ *
+ * @param fields CT-18 detectEnabledFields의 fields 배열
+ */
+export function generateDynamicCards(
+  fields: Array<{ field_key: string; field_label: string; data_type: string; is_custom: boolean }>
+): DashboardCardDef[] {
+  const cards: DashboardCardDef[] = [];
+  for (const f of fields) {
+    if (!f.is_custom) continue;
+
+    const base = { fieldKey: f.field_key, label: f.field_label };
+    switch (f.data_type) {
+      case 'string':
+        cards.push({
+          cardId: `${DYNAMIC_CARD_PREFIX}${base.fieldKey}_dist`,
+          label: `${base.label}별 분포`,
+          type: 'distribution',
+          icon: 'BarChart3',
+          emoji: '📊',
+          description: `${base.label}별 고객 분포 (상위 10)`,
+        });
+        break;
+      case 'number':
+        cards.push({
+          cardId: `${DYNAMIC_CARD_PREFIX}${base.fieldKey}_sum`,
+          label: `${base.label} 합계`,
+          type: 'sum',
+          icon: 'CreditCard',
+          emoji: '💰',
+          description: `전체 고객의 ${base.label} 합계`,
+        });
+        break;
+      case 'date':
+        cards.push({
+          cardId: `${DYNAMIC_CARD_PREFIX}${base.fieldKey}_recent30d`,
+          label: `${base.label} 최근 30일`,
+          type: 'count',
+          icon: 'Calendar',
+          emoji: '📅',
+          description: `최근 30일 내 ${base.label} 값이 있는 고객 수`,
+        });
+        break;
+      case 'boolean':
+        cards.push({
+          cardId: `${DYNAMIC_CARD_PREFIX}${base.fieldKey}_rate`,
+          label: `${base.label} 비율`,
+          type: 'rate',
+          icon: 'Percent',
+          emoji: '📈',
+          description: `${base.label} 값이 있는 고객 비율 (%)`,
+        });
+        break;
+    }
+  }
+  return cards;
+}
+
 /** 카드 ID 배열 유효성 검증 */
 export function validateCardIds(cardIds: string[]): { valid: boolean; invalid: string[] } {
-  const invalid = cardIds.filter(id => !VALID_CARD_IDS.has(id));
+  const invalid = cardIds.filter(id => {
+    if (isDynamicCardId(id)) {
+      // 동적 카드: 패턴 유효성만 검증 (실제 field 유효성은 집계 시점에 graceful 처리)
+      return parseDynamicCardId(id) == null;
+    }
+    return !VALID_CARD_IDS.has(id);
+  });
   return { valid: invalid.length === 0, invalid };
 }
 

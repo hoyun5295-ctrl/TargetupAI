@@ -136,6 +136,7 @@
 > | **D9-(a)** | 담당브랜드 없는 중간관리자(suran)에서 수신거부 자동 업로드 안 됨 (중간관리자 5건, suran 0건) | `admin-sync.ts` 또는 `upload.ts` 수신거부 처리 경로 |
 > | **D9-(b)** | gwchae/sgbaek 담당브랜드 지정됐으나 "분류코드 없어 전체 접근"으로 표시됨 + 실제 DB조회 안 됨 | `store-scope.ts` (CT-02) 또는 사용자 관리 UI |
 > | **알림톡 B7** | 강조 이미지 업로드 실패 (800x400 25.3KB JPG) — pm2 로그 재현 후 진단 | Harold님 업로드 재시도 + 로그 확인 |
+> | **CSS 경고 정리** | Vite 빌드 시 `Expected identifier but found "-"` 경고 — `new Date().toISOString().replace(/[-:T]/g, '')` regex를 Tailwind JIT가 arbitrary value로 오스캔 → `-: T;` 무효 CSS 생성 (런타임 영향 0, 무해). 6개 파일 `compactTimestamp()` 유틸로 통합 | `CustomerDBModal.tsx:279` + 5곳 동일 패턴. `formatDate.ts`에 `compactTimestamp()` 신설 후 import 교체 |
 >
 > **배포 순서 (오늘 세션 완료분):**
 > 1. `tp-push "D136 디버깅 9건 수정"` → `tp-deploy-full`

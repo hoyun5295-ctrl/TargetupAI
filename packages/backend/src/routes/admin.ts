@@ -4,7 +4,8 @@ import { Request, Response, Router } from 'express';
 import { mysqlQuery, query } from '../config/database';
 import { authenticate, requireSuperAdmin } from '../middlewares/auth';
 import { ALL_SMS_TABLES, invalidateLineGroupCache, getCampaignSmsTables, smsCountAll, smsSelectAll, smsAggAll, getTestSmsTables, kakaoCountWhere, kakaoSelectWhere } from '../utils/sms-queue';
-import { DASHBOARD_CARD_POOL, validateCardIds, getRequiredFields, filterPoolByAvailableData } from '../utils/dashboard-card-pool';
+import { DASHBOARD_CARD_POOL, validateCardIds, getRequiredFields, filterPoolByAvailableData, generateDynamicCards } from '../utils/dashboard-card-pool';
+import { detectEnabledFields } from '../utils/enabled-fields';
 import { SUCCESS_CODES_SQL, PENDING_CODES_SQL, getStatusLabel, getStatusType, getCarrierLabel, isSuccess, isPending } from '../utils/sms-result-map';
 import { DEFAULT_COSTS } from '../config/defaults';
 import { validateSmsTables } from '../utils/sms-table-validator';
@@ -578,13 +579,31 @@ router.get('/companies/:id/dashboard-cards', authenticate, requireSuperAdmin, as
     // 3. 직접 컬럼 OR 커스텀 필드 라벨 매칭으로 카드 풀 필터링
     const filteredPool = filterPoolByAvailableData(availableColumns, customFieldLabels);
 
-    // 기존 selectedCards 중 필터링된 풀에 없는 카드 제거
-    const filteredPoolIds = new Set(filteredPool.map(c => c.cardId));
-    const validSelectedCards = selectedCards.filter(cid => filteredPoolIds.has(cid));
+    // ★ D136 (2026-04-22 PDF #8): 고객사 업로드 커스텀 필드 기반 동적 카드 자동 생성
+    //   CT-18 detectEnabledFields로 해당 회사의 실제 활성 필드 탐지 →
+    //   커스텀 필드(is_custom=true)마다 data_type 기반 동적 카드 생성 → 풀에 merge.
+    //   예: 고객사가 "시리얼" 업로드 → `dyn_custom_1_dist` "시리얼별 분포" 자동 노출.
+    let dynamicCards: typeof filteredPool = [];
+    try {
+      const { fields } = await detectEnabledFields({
+        companyId: id,
+        scopeWhere: 'company_id = $1 AND is_active = true',
+        scopeParams: [id],
+      });
+      dynamicCards = generateDynamicCards(fields);
+    } catch (detectErr) {
+      console.warn('[admin/dashboard-cards] 동적 카드 생성 실패 (고정 풀만 노출):', (detectErr as any)?.message);
+    }
+
+    const fullPool = [...filteredPool, ...dynamicCards];
+
+    // 기존 selectedCards 중 풀에 없는 카드 제거 (고정+동적 합쳐서 검증)
+    const fullPoolIds = new Set(fullPool.map(c => c.cardId));
+    const validSelectedCards = selectedCards.filter(cid => fullPoolIds.has(cid));
 
     res.json({
       companyName: companyCheck.rows[0].company_name,
-      pool: filteredPool,
+      pool: fullPool,
       selectedCards: validSelectedCards,
       cardCount: validSelectedCards.length,
     });

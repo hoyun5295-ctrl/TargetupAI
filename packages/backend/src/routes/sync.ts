@@ -279,20 +279,50 @@ async function registerSyncUnsubscribes(companyId: string, companyName?: string)
       console.log(`[Sync] 수신거부 자동등록(admin): ${r2.rowCount}건 (company: ${companyName})`);
     }
 
-    // 4. store_code 담당 company_user들에게 INSERT (브랜드별 필터링)
+    // 4. company_user들에게 INSERT — getStoreScope(CT-02)와 동일 판정 기준
+    // ★ D136 (2026-04-22) 재작성:
+    //   기존 `c.store_code = ANY(u.store_codes)` 단일 조건은 다음 두 케이스를 모두 놓침.
+    //     - (A) suran 케이스: store_codes=NULL → ANY(NULL) → 매칭 0건
+    //     - (B) gwchae/sgbaek 케이스: 브랜드 체계 없는 회사(customer_stores 0건)에
+    //           수동 store_codes 배정 → customers.store_code NULL이라 매칭 0건
+    //   해결: getStoreScope의 4단계 판정을 SQL에 그대로 이식.
+    //     - no_filter  : customer_stores 없음 OR store_codes 배정됐으나 실존 매칭 0 → 전체 고객
+    //     - filtered   : customer_stores 있음 AND store_codes 실존 매칭 → 해당 store 고객
+    //     - blocked    : customer_stores 있음 AND store_codes 미배정/빈 배열 → 스킵
     const r3 = await query(
       `INSERT INTO unsubscribes (company_id, user_id, phone, source)
        SELECT c.company_id, u.id, c.phone, 'sync'
        FROM customers c
        JOIN users u ON u.company_id = c.company_id
          AND u.user_type = 'user'
-         AND c.store_code = ANY(u.store_codes)
-       WHERE c.company_id = $1 AND c.sms_opt_in = false AND c.is_active = true
+         AND COALESCE(u.is_active, true) = true
+       WHERE c.company_id = $1
+         AND c.sms_opt_in = false
+         AND c.is_active = true
+         AND (
+           -- (no_filter-1) 회사에 customer_stores 체계 없음 → 전체 고객 매칭
+           NOT EXISTS (SELECT 1 FROM customer_stores cs WHERE cs.company_id = $1)
+           OR
+           -- (no_filter-2) store_codes 배정됐으나 customer_stores 실존 매칭 0 → 유령 배정, 전체 고객 매칭
+           (u.store_codes IS NOT NULL
+            AND array_length(u.store_codes, 1) > 0
+            AND NOT EXISTS (SELECT 1 FROM customer_stores cs
+                             WHERE cs.company_id = $1
+                               AND cs.store_code = ANY(u.store_codes)))
+           OR
+           -- (filtered) customer_stores 실존 매칭 있음 → 해당 store_code 고객만
+           (u.store_codes IS NOT NULL
+            AND array_length(u.store_codes, 1) > 0
+            AND c.store_code = ANY(u.store_codes)
+            AND EXISTS (SELECT 1 FROM customer_stores cs
+                         WHERE cs.company_id = $1
+                           AND cs.store_code = ANY(u.store_codes)))
+         )
        ON CONFLICT (user_id, phone) DO NOTHING`,
       [companyId]
     );
     if (r3.rowCount && r3.rowCount > 0) {
-      console.log(`[Sync] 수신거부 자동등록(store_code 담당): ${r3.rowCount}건 (company: ${companyName})`);
+      console.log(`[Sync] 수신거부 자동등록(company_user, CT-02 판정): ${r3.rowCount}건 (company: ${companyName})`);
     }
   } catch (unsubError) {
     console.error('[Sync] 수신거부 자동등록 실패:', unsubError);
@@ -696,14 +726,67 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
 
       // Agent 통계 업데이트
       await query(
-        `UPDATE sync_agents 
-         SET total_customers_synced = total_customers_synced + $1, 
+        `UPDATE sync_agents
+         SET total_customers_synced = total_customers_synced + $1,
              last_sync_at = NOW(), updated_at = NOW()
          WHERE id = $2`,
         [upsertedCount, agentId]
       );
     }
 
+    // ═══════════════════════════════════════════════════════════════════════════
+    // ★ D136 (D1-2 근본): customer_field_definitions 자동 UPSERT 안전망 (2026-04-22)
+    // ═══════════════════════════════════════════════════════════════════════════
+    //
+    // 배경:
+    //   - Sync Agent가 POST /api/sync/field-definitions를 건너뛰거나 실패하면
+    //     `customer_field_definitions` 0건 상태로 `custom_fields` JSONB만 저장됨.
+    //   - suran(인비토) 경로 실사례: customer_field_definitions 0건, JSONB는 정상 → 화면/다운로드에서 라벨 누락.
+    //
+    // 방어:
+    //   1. 이번 배치의 `custom_fields` JSONB에 실제로 등장한 key 수집
+    //   2. DB에 정의 없는 key만 "key 자체를 라벨로" 기본 UPSERT (기존 라벨 보호)
+    //   3. Agent가 나중에 /field-definitions 호출하면 EXCLUDED로 라벨이 자동 갱신됨.
+    //
+    // ⚠️ 원칙: Agent 측 버그/누락에도 한줄로 측 데이터가 완결되도록 하는 "서버 측 안전망".
+    //        sync 전체 실패로 전파되지 않도록 try/catch 격리.
+    try {
+      const customFieldKeys = new Set<string>();
+      for (const row of validRows) {
+        if (!row.custom_fields) continue;
+        const parsed = typeof row.custom_fields === 'string'
+          ? JSON.parse(row.custom_fields)
+          : row.custom_fields;
+        if (parsed && typeof parsed === 'object') {
+          for (const k of Object.keys(parsed)) {
+            if (k.startsWith('custom_')) customFieldKeys.add(k);
+          }
+        }
+      }
+
+      if (customFieldKeys.size > 0) {
+        const keyArr = Array.from(customFieldKeys);
+        const existing = await query(
+          `SELECT field_key FROM customer_field_definitions
+            WHERE company_id = $1 AND field_key = ANY($2::text[])`,
+          [companyId, keyArr]
+        );
+        const existingSet = new Set(existing.rows.map((r: any) => r.field_key));
+        const missing = keyArr.filter(k => !existingSet.has(k));
+        if (missing.length > 0) {
+          // 라벨 = key 자체 (Agent가 나중에 /field-definitions로 정식 라벨 보내면 EXCLUDED로 갱신)
+          const defs = missing.map(key => ({ fieldKey: key, label: key }));
+          const upsertedDefs = await upsertCustomFieldDefinitions(companyId, defs);
+          console.log(
+            `[Sync customers] customer_field_definitions 안전망 자동 UPSERT: ${upsertedDefs}건 `
+            + `(company=${req.companyName}, missing=[${missing.join(',')}])`
+          );
+        }
+      }
+    } catch (autoErr) {
+      // 안전망 실패는 sync 정상 완료를 막지 않음
+      console.warn('[Sync customers] customer_field_definitions 안전망 실패 (sync 정상 완료):', (autoErr as any)?.message);
+    }
 
     // ===== sms_opt_in=false 고객 → unsubscribes 3단 배정 (system + admin + store_code user) =====
     await registerSyncUnsubscribes(companyId, req.companyName);

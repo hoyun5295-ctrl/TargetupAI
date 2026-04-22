@@ -12,6 +12,7 @@ import { getTestSmsTables } from '../utils/sms-queue';
 import { detectPhoneFields } from '../utils/callback-filter';
 import { blockIfSyncActive } from '../middlewares/sync-active-check';
 import { createCustomerUpsertBuilder } from '../utils/customer-upsert';
+import { detectEnabledFields, buildDynamicSelectExpr } from '../utils/enabled-fields';
 
 const router = Router();
 
@@ -184,6 +185,10 @@ if (smsOptIn === 'true') {
 // ★ D132 Phase A: GET /api/customers/download - 현재 필터 조건 고객 리스트 XLSX 다운로드
 //   CT-01 buildDynamicFilterCompat 재활용 (인라인 쿼리 금지).
 //   GET /api/customers 와 동일한 WHERE 절 로직을 적용하되 limit 없이 전체 매칭 고객 내보냄.
+// ★ CT-18 기반 동적 다운로드
+//   Harold님 원칙 (D136, 2026-04-22): "고객사에서 바라보는 현황을 동적으로 바라보고 그걸 그대로 다운로드"
+//   → detectEnabledFields 단일 진입점 사용. standardHeaders 19개 하드코딩 전면 제거.
+//   → 화면(/enabled-fields) ≡ 엑셀(/download) 100% 일치 보장.
 router.get('/download', async (req: Request, res: Response) => {
   try {
     let companyId = req.user?.companyId;
@@ -199,16 +204,17 @@ router.get('/download', async (req: Request, res: Response) => {
 
     const { filters, search, smsOptIn } = req.query;
 
-    let whereClause = 'WHERE company_id = $1 AND is_active = true';
-    const params: any[] = [companyId];
+    // ─── 1. scope/filter WHERE 절 조립 ───
+    let scopeWhere = 'company_id = $1 AND is_active = true';
+    const scopeParams: any[] = [companyId];
     let paramIndex = 2;
 
     // 브랜드 격리 (CT-02)
     if (userType === 'company_user' && userId) {
       const scope = await getStoreScope(companyId, userId);
       if (scope.type === 'filtered') {
-        whereClause += ` AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = $1 AND store_code = ANY($${paramIndex++}::text[]))`;
-        params.push(scope.storeCodes);
+        scopeWhere += ` AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = $1 AND store_code = ANY($${paramIndex++}::text[]))`;
+        scopeParams.push(scope.storeCodes);
       } else if (scope.type === 'blocked') {
         return res.status(403).json({ error: '접근 권한이 없습니다' });
       }
@@ -220,38 +226,50 @@ router.get('/download', async (req: Request, res: Response) => {
       const fuResult = await query('SELECT store_codes FROM users WHERE id = $1 AND company_id = $2', [filterUserId, companyId]);
       const fuStoreCodes = fuResult.rows[0]?.store_codes;
       if (fuStoreCodes && fuStoreCodes.length > 0) {
-        whereClause += ` AND store_code = ANY($${paramIndex++}::text[])`;
-        params.push(fuStoreCodes);
+        scopeWhere += ` AND store_code = ANY($${paramIndex++}::text[])`;
+        scopeParams.push(fuStoreCodes);
       } else {
-        whereClause += ` AND uploaded_by = $${paramIndex++}`;
-        params.push(filterUserId);
+        scopeWhere += ` AND uploaded_by = $${paramIndex++}`;
+        scopeParams.push(filterUserId);
       }
     }
 
     // 브랜드(store_code) 필터
     const filterStoreCode = req.query.filterStoreCode as string;
     if (filterStoreCode && (userType === 'company_admin' || userType === 'super_admin')) {
-      whereClause += ` AND store_code = $${paramIndex++}`;
-      params.push(filterStoreCode);
+      scopeWhere += ` AND store_code = $${paramIndex++}`;
+      scopeParams.push(filterStoreCode);
     }
+
+    // ─── 2. CT-18: 활성 필드 동적 탐지 (화면과 동일 결과) ───
+    //   이 시점의 scopeWhere/scopeParams 기준으로 실제 데이터 유무 판정
+    const { fields } = await detectEnabledFields({
+      companyId,
+      scopeWhere,
+      scopeParams: [...scopeParams],
+    });
+
+    // ─── 3. 동적 필터/검색/수신동의 WHERE 절 (리스트 쿼리 전용 추가) ───
+    let listWhere = scopeWhere;
+    const listParams = [...scopeParams];
 
     // 동적 필터 (CT-01)
     if (filters) {
       const parsedFilters = typeof filters === 'string' ? JSON.parse(filters) : filters;
       const filterResult = buildDynamicFilterCompat(parsedFilters, paramIndex);
-      whereClause += filterResult.where;
-      params.push(...filterResult.params);
+      listWhere += filterResult.where;
+      listParams.push(...filterResult.params);
       paramIndex = filterResult.nextIndex;
     }
 
     // 수신동의 필터
     if (smsOptIn === 'true') {
-      whereClause += ` AND sms_opt_in = true AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${paramIndex} AND u.phone = customers_unified.phone)`;
-      params.push(userId);
+      listWhere += ` AND sms_opt_in = true AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${paramIndex} AND u.phone = customers_unified.phone)`;
+      listParams.push(userId);
       paramIndex++;
     } else if (smsOptIn === 'false') {
-      whereClause += ` AND (sms_opt_in = false OR EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${paramIndex} AND u.phone = customers_unified.phone))`;
-      params.push(userId);
+      listWhere += ` AND (sms_opt_in = false OR EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${paramIndex} AND u.phone = customers_unified.phone))`;
+      listParams.push(userId);
       paramIndex++;
     }
 
@@ -261,147 +279,86 @@ router.get('/download', async (req: Request, res: Response) => {
       const cleanSearch = searchStr.replace(/-/g, '');
       if (/^\d+$/.test(cleanSearch)) {
         if (cleanSearch.length === 4) {
-          whereClause += ` AND (REPLACE(phone, '-', '') LIKE $${paramIndex} OR REPLACE(phone, '-', '') LIKE $${paramIndex + 1})`;
-          params.push(`___${cleanSearch}____`, `_______${cleanSearch}`);
+          listWhere += ` AND (REPLACE(phone, '-', '') LIKE $${paramIndex} OR REPLACE(phone, '-', '') LIKE $${paramIndex + 1})`;
+          listParams.push(`___${cleanSearch}____`, `_______${cleanSearch}`);
           paramIndex++;
         } else {
-          whereClause += ` AND REPLACE(phone, '-', '') LIKE $${paramIndex}`;
-          params.push(`%${cleanSearch}%`);
+          listWhere += ` AND REPLACE(phone, '-', '') LIKE $${paramIndex}`;
+          listParams.push(`%${cleanSearch}%`);
         }
       } else {
-        whereClause += ` AND (name ILIKE $${paramIndex} OR phone ILIKE $${paramIndex})`;
-        params.push(`%${searchStr}%`);
+        listWhere += ` AND (name ILIKE $${paramIndex} OR phone ILIKE $${paramIndex})`;
+        listParams.push(`%${searchStr}%`);
       }
       paramIndex++;
     }
 
-    // 수신거부 반영된 sms_opt_in
-    const unsubCaseIdx = paramIndex++;
-    params.push(userId);
+    // ─── 4. 동적 SELECT (CT-18 buildDynamicSelectExpr) ───
+    //   - fields에 sms_opt_in 포함 시 unsubscribes 반영 CASE 자동 생성
+    //   - date 필드는 TO_CHAR('YYYY-MM-DD') 자동 적용
+    //   - 커스텀 필드는 custom_fields JSONB 한 번만 SELECT
+    const unsubParamIndex = paramIndex++;
+    listParams.push(userId);
+
+    const { selectExpr } = buildDynamicSelectExpr(fields, {
+      unsubParamIndex,
+      tableAlias: 'customers_unified',
+    });
+
+    if (!selectExpr) {
+      // 이 고객사에 활성 필드가 없음 — 빈 엑셀 반환 방지용 방어
+      return res.status(400).json({ error: '다운로드할 컬럼이 없습니다.' });
+    }
 
     const result = await query(
-      `SELECT name, phone, gender, TO_CHAR(birth_date, 'YYYY-MM-DD') as birth_date, age, email, address, region,
-              grade, points,
-              CASE WHEN EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${unsubCaseIdx} AND u.phone = customers_unified.phone)
-                   THEN false ELSE sms_opt_in END as sms_opt_in,
-              store_code, store_name, registered_store, recent_purchase_store, store_phone,
-              total_purchase_amount, recent_purchase_amount, purchase_count,
-              TO_CHAR(recent_purchase_date, 'YYYY-MM-DD') as recent_purchase_date, custom_fields
-       FROM customers_unified
-       ${whereClause}
-       ORDER BY created_at DESC`,
-      params
+      `SELECT ${selectExpr}
+         FROM customers_unified
+        WHERE ${listWhere}
+        ORDER BY created_at DESC`,
+      listParams,
     );
 
-    // 커스텀 필드 라벨 조회 — 실 스키마 기준 (field_label / display_order / is_hidden)
-    //   · 라벨: field_label 직접 사용 (+ display_name/label 호환용 COALESCE — 다른 환경 대비)
-    //   · 정렬: display_order 우선, field_key 보조
-    //   · is_hidden=true 제외 (숨김 필드 다운로드 제외)
-    //   · 쿼리 실패 시 빈 배열 폴백 → 표준 컬럼만 다운로드 (에러로 전체 막히지 않음)
-    let customFieldDefs: { key: string; label: string }[] = [];
-    try {
-      const defRes = await query(
-        `SELECT field_key,
-                COALESCE(
-                  to_jsonb(cfd.*) ->> 'display_name',
-                  field_label,
-                  to_jsonb(cfd.*) ->> 'label',
-                  field_key
-                ) AS label
-           FROM customer_field_definitions cfd
-          WHERE company_id = $1
-            AND field_key LIKE 'custom_%'
-            AND COALESCE(is_hidden, false) = false
-          ORDER BY COALESCE(display_order, 999), field_key`,
-        [companyId]
-      );
-      customFieldDefs = defRes.rows.map((r: any) => ({
-        key: r.field_key,
-        label: r.label || r.field_key,
-      }));
-    } catch (err) {
-      console.warn('[customers/download] customer_field_definitions 조회 실패 — custom_fields 동적 컬럼 없이 진행:', (err as any)?.message);
-      customFieldDefs = [];
-    }
-
-    // ★ D136 (D1-2): customer_field_definitions 미등록 상태에서도 JSONB에 실제 저장된 key 출력.
-    //   원인: Sync Agent가 고객 데이터 API(/api/sync/customers)만 호출하고 field-definitions API를 건너뛴 케이스.
-    //   값은 저장됐지만 라벨 정의가 없어 downloads에서 누락되던 버그.
-    //   정의에 등록된 key는 기존 라벨 그대로, 정의에 없는 key는 key 자체를 라벨로 사용 (union).
-    const definedKeys = new Set(customFieldDefs.map(cf => cf.key));
-    const jsonbKeys = new Set<string>();
-    for (const r of result.rows) {
-      if (r.custom_fields && typeof r.custom_fields === 'object') {
-        for (const k of Object.keys(r.custom_fields)) jsonbKeys.add(k);
-      }
-    }
-    for (const k of Array.from(jsonbKeys).sort()) {
-      if (!definedKeys.has(k)) {
-        customFieldDefs.push({ key: k, label: k });
-      }
-    }
-
-    // 표준 컬럼 헤더 + transform (enum 역변환 포함)
-    const standardHeaders: { key: string; label: string; transform?: (v: any) => any }[] = [
-      { key: 'name', label: '이름' },
-      { key: 'phone', label: '전화번호' },
-      { key: 'gender', label: '성별', transform: (v) => (v === 'M' ? '남성' : v === 'F' ? '여성' : v || '') },
-      { key: 'birth_date', label: '생년월일' },
-      { key: 'age', label: '나이' },
-      { key: 'email', label: '이메일' },
-      { key: 'address', label: '주소' },
-      { key: 'region', label: '지역' },
-      { key: 'grade', label: '등급' },
-      { key: 'points', label: '포인트' },
-      { key: 'sms_opt_in', label: '수신동의', transform: (v) => (v === true || v === 'true' ? 'Y' : 'N') },
-      { key: 'store_code', label: '매장코드' },
-      { key: 'store_name', label: '매장명' },
-      { key: 'registered_store', label: '등록매장' },
-      { key: 'recent_purchase_store', label: '최근구매매장' },
-      { key: 'store_phone', label: '매장전화' },
-      { key: 'total_purchase_amount', label: '총구매금액' },
-      { key: 'recent_purchase_amount', label: '최근구매금액' },
-      { key: 'purchase_count', label: '구매횟수' },
-      { key: 'recent_purchase_date', label: '최근구매일' },
-    ];
-
-    // ★ D136 (D1-1): 해당 고객사가 실제 데이터를 보유한 컬럼만 출력.
-    //   기존: standardHeaders 19개 + customFieldDefs 전부 항상 출력 → 매칭 안 한 빈 컬럼까지 노출.
-    //   수정: rows 전체를 미리 스캔해서 "한 건이라도 값이 있는" 컬럼만 activeHeaders로 유지.
-    //   phone/name은 필수이므로 데이터 없어도 유지.
-    const hasValue = (v: any): boolean => {
-      if (v === null || v === undefined || v === '') return false;
-      if (typeof v === 'boolean') return true; // sms_opt_in false도 유효
-      return true;
-    };
-    const activeStandardHeaders = standardHeaders.filter(h => {
-      if (h.key === 'name' || h.key === 'phone') return true;
-      return result.rows.some((r: any) => hasValue(r[h.key]));
-    });
-    const activeCustomFieldDefs = customFieldDefs.filter(cf =>
-      result.rows.some((r: any) => hasValue(r.custom_fields?.[cf.key])),
-    );
-
-    // Row 변환 (숫자/문자 혼합 + custom_fields 평면화)
+    // ─── 5. 동적 Row 변환 (enum 역변환 + boolean Y/N + 커스텀 평면화) ───
+    //   · 화면 sample과 동일한 reverseDisplayValue 적용 (FIELD_DISPLAY_MAP 기반)
+    //   · sms_opt_in: boolean → 'Y'/'N' (엑셀 관행)
+    //   · 커스텀 필드: 원본 보존 (feedback_custom_field_raw_preserve.md)
     const rows = result.rows.map((c: any) => {
       const row: Record<string, any> = {};
-      for (const h of activeStandardHeaders) {
-        const raw = c[h.key];
-        row[h.label] = h.transform ? h.transform(raw) : (raw === null || raw === undefined ? '' : raw);
-      }
-      for (const cf of activeCustomFieldDefs) {
-        row[cf.label] = c.custom_fields?.[cf.key] ?? '';
+      for (const f of fields) {
+        const label = f.field_label;
+        let val: any;
+
+        if (f.is_custom) {
+          val = c.custom_fields?.[f.field_key];
+          row[label] = val == null ? '' : val;
+          continue;
+        }
+
+        val = c[f.field_key];
+
+        // enum 역변환 (gender 'F' → '여성')
+        if (FIELD_DISPLAY_MAP[f.field_key]) {
+          row[label] = val == null ? '' : reverseDisplayValue(f.field_key, val);
+          continue;
+        }
+
+        // boolean → Y/N (엑셀 관행)
+        if (f.data_type === 'boolean') {
+          row[label] = val === true || val === 'true' ? 'Y' : 'N';
+          continue;
+        }
+
+        row[label] = val == null ? '' : val;
       }
       return row;
     });
 
-    // XLSX 생성
+    // ─── 6. XLSX 생성 ───
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, '고객DB');
     const buffer: Buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
 
-    // 파일명 (영문 + 타임스탬프 — 브라우저 호환성)
     const ts = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '').slice(0, 14);
     const filename = `customers_${ts}.xlsx`;
 
@@ -1276,7 +1233,7 @@ router.get('/filter-options', async (req: Request, res: Response) => {
 });
 
 // GET /api/customers/enabled-fields - 회사별 전체 필드 + 커스텀 필드 + 샘플 데이터
-// ★ FIELD_MAP(standard-field-map.ts) 기반 동적 생성 — 하드코딩 금지
+// ★ CT-18 detectEnabledFields 단일 진입점 — 하드코딩 금지
 router.get('/enabled-fields', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
@@ -1299,143 +1256,8 @@ router.get('/enabled-fields', async (req: Request, res: Response) => {
       }
     }
 
-    const fields: any[] = [];
-    const existingKeys = new Set<string>();
-
-    // 0. customer_field_definitions 라벨 맵 조회 (라벨 오버라이드용)
-    const fieldDefsResult = await query(
-      `SELECT field_key, field_label, field_type, display_order
-       FROM customer_field_definitions 
-       WHERE company_id = $1 AND (is_hidden = false OR is_hidden IS NULL)
-       ORDER BY display_order`,
-      [companyId]
-    );
-    const fieldDefLabels: Record<string, string> = {};
-    const fieldDefTypes: Record<string, string> = {};
-    for (const fd of fieldDefsResult.rows) {
-      fieldDefLabels[fd.field_key] = fd.field_label;
-      if (fd.field_type) fieldDefTypes[fd.field_key] = fd.field_type;
-    }
-
-    // 1. 직접 컬럼 필드 — 항상 FIELD_MAP + 실제 데이터 감지 (단일 경로)
-    // name, phone은 필수 — 항상 포함
-    fields.push(
-      { field_key: 'name', display_name: fieldDefLabels['name'] || '고객명', field_label: fieldDefLabels['name'] || '고객명', data_type: 'string', category: 'basic', sort_order: 1, is_custom: false },
-      { field_key: 'phone', display_name: fieldDefLabels['phone'] || '고객전화번호', field_label: fieldDefLabels['phone'] || '고객전화번호', data_type: 'string', category: 'basic', sort_order: 2, is_custom: false },
-    );
-    existingKeys.add('name');
-    existingKeys.add('phone');
-
-    // FIELD_MAP에서 직접 컬럼 필드 중 name, phone 제외한 나머지를 동적 감지
-    const detectableFields = getColumnFields().filter(f => f.fieldKey !== 'name' && f.fieldKey !== 'phone');
-
-    // 동적 COUNT FILTER 쿼리 생성
-    const countFilters = detectableFields.map(f => {
-      const col = f.columnName;
-      if (f.dataType === 'boolean') {
-        return `COUNT(*) FILTER (WHERE ${col} IS NOT NULL) as cnt_${f.fieldKey}`;
-      } else if (f.dataType === 'number') {
-        return `COUNT(*) FILTER (WHERE ${col} IS NOT NULL AND ${col} > 0) as cnt_${f.fieldKey}`;
-      } else if (f.dataType === 'date') {
-        return `COUNT(*) FILTER (WHERE ${col} IS NOT NULL) as cnt_${f.fieldKey}`;
-      } else {
-        return `COUNT(*) FILTER (WHERE ${col} IS NOT NULL AND ${col} != '') as cnt_${f.fieldKey}`;
-      }
-    });
-
-    const dataCheckResult = await query(
-      `SELECT ${countFilters.join(', ')} FROM customers WHERE ${scopeWhere}`,
-      scopeParams
-    );
-    const dc = dataCheckResult.rows[0] || {};
-
-    for (const f of detectableFields) {
-      if (parseInt(dc[`cnt_${f.fieldKey}`] || '0') > 0) {
-        const label = fieldDefLabels[f.fieldKey] || f.displayName;
-        fields.push({
-          field_key: f.fieldKey,
-          display_name: label,
-          field_label: label,
-          data_type: f.dataType,
-          category: f.category,
-          sort_order: f.sortOrder,
-          is_custom: false,
-        });
-        existingKeys.add(f.fieldKey);
-      }
-    }
-
-    // 2. 커스텀 필드 — custom_fields JSONB에 실제 데이터 있는 것만
-    // ★ D88: 실제 데이터 기반 타입 자동 감지 — 고객사가 뭘 올리든 동적 대응
-    // field_definitions.field_type 우선 → 없으면 실제 DISTINCT 값 샘플링으로 자동 감지
-    try {
-      const customKeysResult = await query(
-        `SELECT DISTINCT jsonb_object_keys(custom_fields) as field_key
-         FROM customers
-         WHERE ${scopeWhere} AND custom_fields IS NOT NULL AND custom_fields != '{}'::jsonb`,
-        scopeParams
-      );
-      for (const row of customKeysResult.rows) {
-        if (!existingKeys.has(row.field_key)) {
-          const mapped = getFieldByKey(row.field_key);
-          const label = fieldDefLabels[row.field_key] || mapped?.displayName || row.field_key;
-
-          // ★ D88: 커스텀 필드 data_type 자동 감지
-          // 우선순위: (1) field_definitions.field_type → (2) 실제 데이터 샘플링
-          let detectedType = 'string';
-          const defType = fieldDefTypes[row.field_key];
-          if (defType) {
-            const upper = defType.toUpperCase();
-            if (['NUMBER', 'INTEGER', 'INT', 'FLOAT', 'NUMERIC', 'DECIMAL'].includes(upper)) {
-              detectedType = 'number';
-            } else if (['DATE', 'DATETIME', 'TIMESTAMP'].includes(upper)) {
-              detectedType = 'date';
-            }
-          }
-
-          // ★ D100: field_definitions에 타입 정보 없거나 VARCHAR(기본값)이면 실제 데이터로 감지
-          //   업로드 시 fieldType 미전달 → 'VARCHAR' 기본 저장 → 숫자 필드도 string 판정 → 쉼표 미적용
-          if (detectedType === 'string' && (!defType || defType.toUpperCase() === 'VARCHAR')) {
-            try {
-              const sampleResult = await query(
-                `SELECT DISTINCT custom_fields->>'${row.field_key}' as val
-                 FROM customers
-                 WHERE ${scopeWhere} AND custom_fields->>'${row.field_key}' IS NOT NULL
-                   AND custom_fields->>'${row.field_key}' != ''
-                 LIMIT 20`,
-                scopeParams
-              );
-              const sampleValues = sampleResult.rows.map((r: any) => r.val).filter((v: any) => v != null && String(v).trim() !== '');
-              if (sampleValues.length > 0) {
-                // ★ D91: 숫자 감지 — 유효 값(NULL/빈값 제외) 전체가 숫자이면 number
-                // 공백 trim 후 검증하여 " 100000 " 같은 값도 정확히 감지
-                const numPattern = /^-?[\d,]+(\.\d+)?$/;
-                const allNumeric = sampleValues.every((v: string) => numPattern.test(String(v).trim()));
-                if (allNumeric) {
-                  detectedType = 'number';
-                } else {
-                  // 날짜 감지: 전체 샘플이 날짜 형식이면 date
-                  const datePattern = /^\d{4}[-/.]\d{1,2}[-/.]\d{1,2}$|^\d{8}$/;
-                  const allDate = sampleValues.every((v: string) => datePattern.test(v.trim()));
-                  if (allDate) detectedType = 'date';
-                }
-              }
-            } catch (e) { /* 샘플링 실패 시 string 유지 */ }
-          }
-
-          fields.push({
-            field_key: row.field_key,
-            display_name: label,
-            field_label: label,
-            data_type: detectedType,
-            category: mapped?.category || 'custom',
-            sort_order: mapped?.sortOrder || 900,
-            is_custom: true,
-          });
-          existingKeys.add(row.field_key);
-        }
-      }
-    } catch (e) { /* custom_fields 없으면 무시 */ }
+    // ★ CT-18: 활성 필드 탐지 단일 진입점
+    const { fields } = await detectEnabledFields({ companyId, scopeWhere, scopeParams });
 
     // 3. 드롭다운 옵션 (실제 DB 값 기반 — 동적 감지)
     // 고카디널리티 필드 제외 (이름, 전화번호, 이메일, 주소는 DISTINCT 의미 없음)

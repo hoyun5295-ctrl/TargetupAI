@@ -3,7 +3,7 @@ import { Request, Response, Router } from 'express';
 import nodemailer from 'nodemailer';
 import { query } from '../config/database';
 import { authenticate, requireSuperAdmin } from '../middlewares/auth';
-import { getCardDef } from '../utils/dashboard-card-pool';
+import { getCardDef, isDynamicCardId, parseDynamicCardId, type ParsedDynamicCardId } from '../utils/dashboard-card-pool';
 import { getStoreScope } from '../utils/store-scope';
 import { getOpt080Number } from '../utils/messageUtils';
 
@@ -386,6 +386,133 @@ interface CardDataResult {
 }
 
 /**
+ * ★ D136 (2026-04-22 PDF #8): 동적 카드 집계 헬퍼
+ *
+ * cardId: `dyn_{fieldKey}_{aggType}`
+ *   - fieldKey는 파라미터 바인딩($2)으로 주입 (SQL 인젝션 방어)
+ *   - customer_field_definitions.field_label을 라벨로 우선 사용, 없으면 fieldKey 원문
+ *
+ * 지원 aggType:
+ *   - dist      : 상위 10 분포 (distribution)
+ *   - sum       : 숫자 합계 (sum)
+ *   - recent30d : 최근 30일 내 date 값 보유 수 (count, 정규식 캐스팅 방어)
+ *   - has       : 값 보유 수 (count)
+ *   - rate      : 값 보유 비율 % (rate)
+ *
+ * 실패 시 null 반환 → 호출부가 skip하여 대시보드 전체 실패로 전파되지 않음.
+ */
+async function aggregateDynamicCard(
+  companyId: string,
+  cardId: string,
+  parsed: ParsedDynamicCardId,
+  storeFilter: string,
+): Promise<CardDataResult | null> {
+  const { fieldKey, aggType } = parsed;
+
+  // 라벨 조회 — customer_field_definitions.field_label 우선, 없으면 fieldKey 원문
+  let label = fieldKey;
+  try {
+    const labelRes = await query(
+      `SELECT field_label FROM customer_field_definitions WHERE company_id = $1 AND field_key = $2 LIMIT 1`,
+      [companyId, fieldKey],
+    );
+    if (labelRes.rows[0]?.field_label) label = labelRes.rows[0].field_label;
+  } catch { /* 라벨 조회 실패 시 fieldKey 원문 사용 */ }
+
+  const baseWhere = `company_id = $1${storeFilter}`;
+  const nullSafe = `AND custom_fields->>$2 IS NOT NULL AND custom_fields->>$2 != ''`;
+  const commonFalse = { delta: null, deltaPercent: null, hasTrend: false } as const;
+
+  try {
+    switch (aggType) {
+      case 'dist': {
+        const r = await query(
+          `SELECT custom_fields->>$2 AS label, COUNT(*)::int AS count
+             FROM customers
+            WHERE ${baseWhere} ${nullSafe}
+            GROUP BY custom_fields->>$2
+            ORDER BY count DESC, label
+            LIMIT 10`,
+          [companyId, fieldKey],
+        );
+        const distribution = r.rows.map((row: any) => ({ label: row.label, count: parseInt(row.count) }));
+        return {
+          cardId, label: `${label}별 분포`, type: 'distribution',
+          icon: 'BarChart3', value: distribution, hasData: distribution.length > 0,
+          ...commonFalse,
+        };
+      }
+      case 'sum': {
+        // 숫자 외 문자 제거 후 numeric 캐스팅 (콤마/공백 허용)
+        const r = await query(
+          `SELECT
+             COALESCE(SUM(NULLIF(REGEXP_REPLACE(custom_fields->>$2, '[^0-9.-]', '', 'g'), '')::numeric), 0) AS total,
+             COUNT(*) FILTER (WHERE custom_fields->>$2 IS NOT NULL AND custom_fields->>$2 != '') AS cnt
+             FROM customers WHERE ${baseWhere}`,
+          [companyId, fieldKey],
+        );
+        const total = parseFloat(r.rows[0]?.total ?? 0);
+        const cnt = parseInt(r.rows[0]?.cnt ?? 0);
+        return {
+          cardId, label: `${label} 합계`, type: 'sum',
+          icon: 'CreditCard', value: total, hasData: cnt > 0,
+          ...commonFalse,
+        };
+      }
+      case 'recent30d': {
+        // 정규식으로 YYYY-MM-DD 형식만 캐스팅 — 잘못된 값은 자동 제외 (에러 방지)
+        const r = await query(
+          `SELECT COUNT(*) FILTER (
+             WHERE custom_fields->>$2 ~ '^\\d{4}-\\d{2}-\\d{2}'
+               AND (custom_fields->>$2)::date >= (NOW() - INTERVAL '30 days')::date
+           )::int AS cnt
+             FROM customers WHERE ${baseWhere}`,
+          [companyId, fieldKey],
+        );
+        return {
+          cardId, label: `${label} 최근 30일`, type: 'count',
+          icon: 'Calendar', value: parseInt(r.rows[0]?.cnt ?? 0), hasData: true,
+          ...commonFalse,
+        };
+      }
+      case 'has': {
+        const r = await query(
+          `SELECT COUNT(*) FILTER (WHERE custom_fields->>$2 IS NOT NULL AND custom_fields->>$2 != '')::int AS cnt
+             FROM customers WHERE ${baseWhere}`,
+          [companyId, fieldKey],
+        );
+        return {
+          cardId, label: `${label} 보유 수`, type: 'count',
+          icon: 'Users', value: parseInt(r.rows[0]?.cnt ?? 0), hasData: true,
+          ...commonFalse,
+        };
+      }
+      case 'rate': {
+        const r = await query(
+          `SELECT
+             COUNT(*) FILTER (WHERE custom_fields->>$2 IS NOT NULL AND custom_fields->>$2 != '')::int AS has_cnt,
+             COUNT(*)::int AS total
+             FROM customers WHERE ${baseWhere}`,
+          [companyId, fieldKey],
+        );
+        const hasCnt = parseInt(r.rows[0]?.has_cnt ?? 0);
+        const total = parseInt(r.rows[0]?.total ?? 0);
+        const rate = total > 0 ? Math.round((hasCnt / total) * 1000) / 10 : 0;
+        return {
+          cardId, label: `${label} 비율`, type: 'rate',
+          icon: 'Percent', value: rate, hasData: total > 0,
+          ...commonFalse,
+        };
+      }
+    }
+  } catch (err) {
+    console.warn(`[aggregateDynamicCard] ${cardId} 집계 실패:`, (err as any)?.message);
+    return null;
+  }
+  return null;
+}
+
+/**
  * 대시보드 카드 집계 함수
  * 설정된 카드만 효율적으로 집계 (단일 customers 쿼리 + 필요한 외부 테이블만)
  */
@@ -464,6 +591,17 @@ async function aggregateDashboardCards(companyId: string, cardIds: string[], use
 
   // ── 2단계: 각 카드별 결과 조립 ──
   for (const cardId of cardIds) {
+    // ★ D136 (2026-04-22 PDF #8): 동적 카드(dyn_{fieldKey}_{aggType}) 분기 집계
+    //   고객사가 업로드한 커스텀 필드(custom_1~15 또는 임의 JSONB 키) 기반 카드.
+    //   fieldKey는 파라미터 바인딩($2)으로 주입 → SQL 인젝션 방어.
+    if (isDynamicCardId(cardId)) {
+      const parsed = parseDynamicCardId(cardId);
+      if (!parsed) continue;
+      const dynResult = await aggregateDynamicCard(companyId, cardId, parsed, customerStoreFilter);
+      if (dynResult) results.push(dynResult);
+      continue;
+    }
+
     const def = getCardDef(cardId);
     if (!def) continue;
 

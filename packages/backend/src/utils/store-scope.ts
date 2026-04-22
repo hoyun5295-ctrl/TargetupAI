@@ -23,6 +23,23 @@ export async function getStoreScope(companyId: string, userId: string): Promise<
   const storeCodes = userResult.rows[0]?.store_codes;
 
   if (storeCodes && storeCodes.length > 0) {
+    // ★ D136 (2026-04-22): 유령 배정 방어
+    //   배경: 주식회사 인비토 사례 — customer_stores 0건(브랜드 체계 없음)인데
+    //         users.store_codes에 {JIHYUN}/{EUNJI} 수동 배정 → filtered 판정 후
+    //         customers.store_code 전원 NULL로 매칭 0건 → 고객DB 조회 0건.
+    //   방어: 배정된 store_codes 중 customer_stores에 실존하는 것이 하나도 없으면
+    //         "brand 체계 없는 회사의 유령 배정"으로 간주하고 no_filter 폴백.
+    //         향후 customer_stores 채워지면 자동으로 filtered 동작 복귀.
+    const validCheck = await query(
+      `SELECT EXISTS(
+         SELECT 1 FROM customer_stores
+          WHERE company_id = $1 AND store_code = ANY($2::text[])
+       ) AS has_match`,
+      [companyId, storeCodes]
+    );
+    if (!validCheck.rows[0]?.has_match) {
+      return { type: 'no_filter' };
+    }
     return { type: 'filtered', storeCodes };
   }
 

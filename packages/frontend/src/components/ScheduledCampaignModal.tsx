@@ -32,6 +32,8 @@ export default function ScheduledCampaignModal({
   const [editSubject, setEditSubject] = useState('');
   const [messageEditProgress, setMessageEditProgress] = useState(0);
   const [messageEditing, setMessageEditing] = useState(false);
+  // ★ D136 (2026-04-22 PDF #6): 예약대기 MMS 이미지 클릭 확대 — ResultsModal과 동일 패턴
+  const [enlargedImage, setEnlargedImage] = useState<{ url: string; filename: string } | null>(null);
 
   // ★ D111 P4: 캠페인 선택 race condition 차단 — 응답 도착 시점에 여전히 같은 캠페인이 선택돼 있는지 확인
   //   (이전 버그: A 클릭 → B 클릭 → A 응답이 B 후에 도착 → B 수신자를 A로 덮어쓰기)
@@ -147,7 +149,14 @@ export default function ScheduledCampaignModal({
                         return (
                           <div className="mt-2">
                             {/* ★ D131: 예약대기도 결과 페이지처럼 이미지 하단에 파일명 표시 (서수란 팀장 제보) */}
-                            <MmsImagePreview images={mmsImages} size="sm" compact showFilename />
+                            {/* ★ D136 (2026-04-22 PDF #6): onImageClick으로 확대 활성화 — 발송결과와 동일 UX */}
+                            <MmsImagePreview
+                              images={mmsImages}
+                              size="sm"
+                              compact
+                              showFilename
+                              onImageClick={(url, filename) => setEnlargedImage({ url, filename })}
+                            />
                           </div>
                         );
                       })()}
@@ -535,6 +544,29 @@ export default function ScheduledCampaignModal({
               disabled={messageEditing}
               className="flex-1 py-3.5 bg-amber-500 text-white hover:bg-amber-600 font-medium disabled:opacity-50"
             >{messageEditing ? '수정 중...' : '수정하기'}</button>
+          </div>
+        </div>
+      </div>
+    )}
+    {/* ★ D136 (2026-04-22 PDF #6): MMS 이미지 확대 모달 — ResultsModal 패턴 동일 */}
+    {enlargedImage && (
+      <div
+        className="fixed inset-0 bg-black/80 flex items-center justify-center z-[90] animate-in fade-in duration-150 p-6"
+        onClick={() => setEnlargedImage(null)}
+      >
+        <div className="relative max-w-[90vw] max-h-[90vh] flex flex-col items-center" onClick={(e) => e.stopPropagation()}>
+          <button
+            onClick={() => setEnlargedImage(null)}
+            className="absolute top-2 right-2 z-10 w-8 h-8 bg-white/90 rounded-full flex items-center justify-center text-gray-700 hover:bg-white shadow"
+            aria-label="닫기"
+          >✕</button>
+          <img
+            src={enlargedImage.url}
+            alt={enlargedImage.filename}
+            className="max-w-[90vw] max-h-[80vh] object-contain rounded-lg shadow-2xl animate-in zoom-in-95 duration-200"
+          />
+          <div className="mt-3 px-4 py-2 bg-white/90 rounded-lg text-sm text-gray-700 font-medium shadow">
+            {enlargedImage.filename}
           </div>
         </div>
       </div>
