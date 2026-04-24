@@ -19,6 +19,7 @@ import {
   replaceDirectVars,
   buildAdMessageFront,
   detectPhoneHeaders,
+  normalizePhoneKr,
 } from '../utils/formatDate';
 import { insertAtCursorPos } from '../utils/textInsert';
 import MmsImagePreview from './shared/MmsImagePreview';
@@ -204,6 +205,8 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
   const [directInputText, setDirectInputText] = useState('');
   const [directSearchQuery, setDirectSearchQuery] = useState('');
   const [selectedRecipients, setSelectedRecipients] = useState<Set<number>>(new Set());
+  // ★ D137 (0423 D3): 직접발송 수신자 리스트 페이지네이션 (기본 10건/페이지)
+  const [directPage, setDirectPage] = useState(0);
 
   // ============================================================
   // 헬퍼
@@ -270,12 +273,14 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
     });
     const checkData = await checkRes.json();
     const unsubCount = checkData.unsubscribeCount || 0;
+    const dupCount = checkData.duplicateCount || 0;  // ★ D137 D4
 
     onSendConfirm({
       show: true,
       type: reserveEnabled ? 'scheduled' : 'immediate',
-      count: directRecipients.length - (unsubFilterEnabled ? unsubCount : 0),
+      count: directRecipients.length - (unsubFilterEnabled ? unsubCount : 0) - (dedupEnabled ? dupCount : 0),
       unsubscribeCount: unsubFilterEnabled ? unsubCount : 0,
+      duplicateCount: dedupEnabled ? dupCount : 0,  // ★ D137 D4
       dateTime: reserveEnabled && reserveDateTime ? reserveDateTime : undefined,
       from: 'direct',
       msgType: directMsgType,
@@ -298,7 +303,8 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
     const checkRes = await fetch('/api/unsubscribes/check', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ phones }) });
     const checkData = await checkRes.json();
     const unsubCount = checkData.unsubscribeCount || 0;
-    onSendConfirm({ show: true, type: 'immediate', count: directRecipients.length - unsubCount, unsubscribeCount: unsubCount, from: 'direct', msgType: '알림톡' });
+    const dupCount = checkData.duplicateCount || 0;  // ★ D137 D4
+    onSendConfirm({ show: true, type: 'immediate', count: directRecipients.length - unsubCount - dupCount, unsubscribeCount: unsubCount, duplicateCount: dupCount, from: 'direct', msgType: '알림톡' });
   };
 
   // 스팸필터 열기
@@ -371,14 +377,16 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
     for (let i = 0; i < total; i += chunkSize) {
       const chunk = directFileData.slice(i, i + chunkSize);
       const processed = chunk.map(row => {
-        let phone = String(row[directColumnMapping.phone] || '').trim();
+        // ★ D137 D5: 파일 업로드 시 앞 0 누락 보정 (Excel 숫자 저장 대응)
+        const phone = normalizePhoneKr(row[directColumnMapping.phone]);
         const entry: any = {
           phone,
           name: directColumnMapping.name ? (row[directColumnMapping.name] || '') : '',
           extra1: directColumnMapping.extra1 ? (row[directColumnMapping.extra1] || '') : '',
           extra2: directColumnMapping.extra2 ? (row[directColumnMapping.extra2] || '') : '',
           extra3: directColumnMapping.extra3 ? (row[directColumnMapping.extra3] || '') : '',
-          callback: directColumnMapping.callback ? String(row[directColumnMapping.callback] || '').trim() : '',
+          // ★ D137 D5: 회신번호도 앞 0 누락 자동 보정 (엑셀 숫자 저장 대응)
+          callback: directColumnMapping.callback ? normalizePhoneKr(row[directColumnMapping.callback]) : '',
         };
         // 알림톡 템플릿 변수 매핑
         if (directSendChannel === 'kakao_alimtalk' && kakaoSelectedTemplate) {
@@ -807,13 +815,11 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
               <div className="bg-gray-50 px-4 py-3 flex justify-between items-center border-b">
                 <span className="text-sm font-medium">
                   총 <span className="text-emerald-600 font-bold text-lg">{directRecipients.length.toLocaleString()}</span> 건
-                  {directRecipients.length > 10 && !directSearchQuery && (
-                    <span className="text-gray-400 text-xs ml-2">(상위 10개 표시)</span>
-                  )}
+                  {/* ★ D137 D3: "(상위 10개 표시)" 문구 제거 — 하단 페이지네이션으로 대체 */}
                 </span>
-                <input type="text" placeholder="🔍 수신번호 검색" value={directSearchQuery} onChange={(e) => setDirectSearchQuery(e.target.value)} className="border rounded-lg px-3 py-2 text-sm w-52" />
+                <input type="text" placeholder="🔍 수신번호 검색" value={directSearchQuery} onChange={(e) => { setDirectSearchQuery(e.target.value); setDirectPage(0); }} className="border rounded-lg px-3 py-2 text-sm w-52" />
               </div>
-              <div className="flex-1 overflow-y-auto">
+              <div className="flex-1 overflow-y-auto max-h-[520px]">
                 <table className="w-full">
                   {(() => {
                     const activeFields = directRecipients.length > 0
@@ -843,31 +849,67 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                             <div className="text-4xl mb-2">📋</div>
                             <div className="text-sm">파일을 업로드하거나 직접 입력해주세요</div>
                           </td></tr>
-                        ) : (
-                          directRecipients
+                        ) : (() => {
+                          // ★ D137 D3: 페이지네이션 적용 — 검색 포함 항상 10건/페이지
+                          const DIRECT_PAGE_SIZE = 10;
+                          const filtered = directRecipients
                             .map((r, idx) => ({ ...r, originalIdx: idx }))
-                            .filter(r => !directSearchQuery || String(r.phone || '').includes(directSearchQuery))
-                            .slice(0, directSearchQuery ? 100 : 10)
-                            .map((r) => (
-                              <tr key={r.originalIdx} className="hover:bg-gray-50">
-                                <td className="px-4 py-3">
-                                  <input type="checkbox" className="rounded w-4 h-4"
-                                    checked={selectedRecipients.has(r.originalIdx)}
-                                    onChange={(e) => { const s = new Set(selectedRecipients); if (e.target.checked) s.add(r.originalIdx); else s.delete(r.originalIdx); setSelectedRecipients(s); }}
-                                  />
-                                </td>
-                                <td className="px-4 py-3 text-sm">{formatPhoneNumber(r.phone)}</td>
-                                {activeFields.map(f => (
-                                  <td key={f} className={`px-4 py-3 text-sm ${f === 'callback' ? 'font-mono text-xs text-gray-600' : ''}`}>{f === 'callback' && r[f] ? formatPhoneNumber(r[f]) : (r[f] || '-')}</td>
-                                ))}
-                              </tr>
-                            ))
-                        )}
+                            .filter(r => !directSearchQuery || String(r.phone || '').includes(directSearchQuery));
+                          const totalPages = Math.max(1, Math.ceil(filtered.length / DIRECT_PAGE_SIZE));
+                          const currentPage = Math.min(directPage, Math.max(0, totalPages - 1));
+                          const pageItems = filtered.slice(currentPage * DIRECT_PAGE_SIZE, (currentPage + 1) * DIRECT_PAGE_SIZE);
+                          if (pageItems.length === 0) {
+                            return (
+                              <tr><td colSpan={colCount} className="px-4 py-12 text-center text-gray-400 text-sm">
+                                {directSearchQuery ? `"${directSearchQuery}" 검색 결과가 없습니다` : '데이터가 없습니다'}
+                              </td></tr>
+                            );
+                          }
+                          return pageItems.map((r) => (
+                            <tr key={r.originalIdx} className="hover:bg-gray-50">
+                              <td className="px-4 py-3">
+                                <input type="checkbox" className="rounded w-4 h-4"
+                                  checked={selectedRecipients.has(r.originalIdx)}
+                                  onChange={(e) => { const s = new Set(selectedRecipients); if (e.target.checked) s.add(r.originalIdx); else s.delete(r.originalIdx); setSelectedRecipients(s); }}
+                                />
+                              </td>
+                              <td className="px-4 py-3 text-sm">{formatPhoneNumber(r.phone)}</td>
+                              {activeFields.map(f => (
+                                <td key={f} className={`px-4 py-3 text-sm ${f === 'callback' ? 'font-mono text-xs text-gray-600' : ''}`}>{f === 'callback' && r[f] ? formatPhoneNumber(r[f]) : (r[f] || '-')}</td>
+                              ))}
+                            </tr>
+                          ));
+                        })()}
                       </tbody>
                     </>);
                   })()}
                 </table>
               </div>
+              {/* ★ D137 D3: 페이지네이션 (BirthdayCustomerList 톤 — 이전/1-N/다음) */}
+              {(() => {
+                const DIRECT_PAGE_SIZE = 10;
+                const filteredCount = directSearchQuery
+                  ? directRecipients.filter(r => String(r.phone || '').includes(directSearchQuery)).length
+                  : directRecipients.length;
+                const totalPages = Math.max(1, Math.ceil(filteredCount / DIRECT_PAGE_SIZE));
+                if (totalPages <= 1) return null;
+                const currentPage = Math.min(directPage, Math.max(0, totalPages - 1));
+                return (
+                  <div className="flex items-center justify-center gap-2 py-3 bg-gray-50 border-t">
+                    <button onClick={() => setDirectPage((p) => Math.max(0, p - 1))}
+                      disabled={currentPage === 0}
+                      className="px-3 py-1 text-xs rounded-md border border-gray-200 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed">
+                      이전
+                    </button>
+                    <span className="text-xs text-gray-600">{currentPage + 1} / {totalPages}</span>
+                    <button onClick={() => setDirectPage((p) => Math.min(totalPages - 1, p + 1))}
+                      disabled={currentPage >= totalPages - 1}
+                      className="px-3 py-1 text-xs rounded-md border border-gray-200 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed">
+                      다음
+                    </button>
+                  </div>
+                );
+              })()}
             </div>
 
             {/* 하단 버튼 */}
@@ -1049,10 +1091,16 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                         ))}
                         <button onClick={() => {
                           const phoneEl = document.getElementById('directInputPhone') as HTMLInputElement;
-                          const phone = phoneEl?.value?.replace(/-/g, '').trim();
+                          // ★ D137 D5: 앞 0 누락 자동 보정
+                          const phone = normalizePhoneKr(phoneEl?.value);
                           if (!phone || phone.length < 10) { setToast({ show: true, type: 'error', message: '유효한 수신번호를 입력해주세요' }); return; }
                           const entry: any = { phone, name: '', extra1: '', extra2: '', extra3: '', callback: '' };
-                          usedVars.forEach(f => { const el = document.getElementById(`directInput_${f}`) as HTMLInputElement; entry[f] = el?.value || ''; });
+                          // ★ D137 D5: 회신번호(callback)는 앞 0 누락 보정, 그 외 문자열 그대로
+                          usedVars.forEach(f => {
+                            const el = document.getElementById(`directInput_${f}`) as HTMLInputElement;
+                            const val = el?.value || '';
+                            entry[f] = f === 'callback' ? normalizePhoneKr(val) : val;
+                          });
                           setDirectRecipients(prev => [...prev, entry]);
                           phoneEl.value = '';
                           usedVars.forEach(f => { const el = document.getElementById(`directInput_${f}`) as HTMLInputElement; if (el) el.value = ''; });
@@ -1071,7 +1119,10 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                   {usedVars.length === 0 && (
                     <button onClick={() => {
                       const lines = directInputText.split('\n').map(l => l.trim()).filter(l => l);
-                      const newRecipients = lines.map(phone => ({ phone: phone.replace(/-/g, ''), name: '', extra1: '', extra2: '', extra3: '', callback: '' }));
+                      // ★ D137 D5: 앞 0 누락 자동 보정 + 유효하지 않은 번호 필터링
+                      const newRecipients = lines
+                        .map(line => ({ phone: normalizePhoneKr(line), name: '', extra1: '', extra2: '', extra3: '', callback: '' }))
+                        .filter(r => r.phone && r.phone.length >= 10);
                       setDirectRecipients(prev => [...prev, ...newRecipients]);
                       setDirectInputText('');
                       setShowDirectInput(false);

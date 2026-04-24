@@ -194,8 +194,22 @@ async function main(): Promise<void> {
     log.info(`Agent ID: ${state.agentId}`);
   }
 
-  // 8.5. 커스텀 필드 정의 등록 (v1.4.0)
-  const customFieldLabels = config.mapping.customFieldLabels || {};
+  // 8.5. 커스텀 필드 정의 등록 (v1.4.0 → D137 D10 근본 수정)
+  //   ★ D137 D10: customFieldLabels 자동 유도 —
+  //     config에 customFieldLabels가 비어있으면 mapping.customers의 `custom_N` 매핑에서
+  //     원본 DB 컬럼명을 라벨로 역추출 (setup을 AI 매핑 없이 수동으로 했거나, 이관 계정에서 설정 누락된 경우 보완).
+  //     → 한줄로 슈퍼관리자 대시보드 카드 설정에서 `custom_1` 대신 업체 DB 원본 컬럼명이 표시됨.
+  const customFieldLabels: Record<string, string> = { ...(config.mapping.customFieldLabels || {}) };
+  if (Object.keys(customFieldLabels).length === 0 && config.mapping.customers) {
+    for (const [srcCol, destKey] of Object.entries(config.mapping.customers)) {
+      if (typeof destKey === 'string' && destKey.startsWith('custom_')) {
+        customFieldLabels[destKey] = srcCol;
+      }
+    }
+    if (Object.keys(customFieldLabels).length > 0) {
+      log.info(`커스텀 필드 라벨 자동 유도: ${Object.keys(customFieldLabels).length}개 (mapping.customers 역추출)`);
+    }
+  }
   const hasCustomFieldLabels = Object.keys(customFieldLabels).length > 0;
 
   if (hasCustomFieldLabels) {
@@ -205,7 +219,11 @@ async function main(): Promise<void> {
     }
   }
 
-  if (!DRY_RUN && apiClient && hasCustomFieldLabels && !syncState.isFieldDefinitionsRegistered()) {
+  // ★ D137 D10 근본: `!isFieldDefinitionsRegistered()` 체크 제거 — Agent 시작 시마다 재등록.
+  //   서버 CT-07 upsertCustomFieldDefinitions는 idempotent (ON CONFLICT DO UPDATE) →
+  //   중복 호출해도 안전. 라벨 변경/신규 커스텀 필드 추가 시 자동 반영 보장.
+  //   (isFieldDefinitionsRegistered state는 하위호환/로깅용으로 남겨둠.)
+  if (!DRY_RUN && apiClient && hasCustomFieldLabels) {
     try {
       const definitions = Object.entries(customFieldLabels).map(([key, label]) => ({
         field_key: key,
@@ -219,7 +237,7 @@ async function main(): Promise<void> {
       const result = await apiClient.registerFieldDefinitions({ definitions });
       if (result !== null) {
         syncState.setFieldDefinitionsRegistered(true);
-        log.info('✅ 커스텀 필드 정의 서버 등록 완료');
+        log.info(`✅ 커스텀 필드 정의 서버 등록 완료 (${definitions.length}개)`);
       } else {
         // result=null: api/client.ts가 이미 warn 로그 찍음. 다음 실행 때 재시도.
         log.warn('커스텀 필드 정의 서버 등록 실패 — 다음 실행 시 재시도');
@@ -393,6 +411,29 @@ function getDefaultPurchaseMapping(): Record<string, string> {
 }
 
 // ─── 실행 ───────────────────────────────────────────────
+
+// ★ D137 D8 근본: Windows 서비스 안정성 강화 —
+//   unhandledRejection / uncaughtException 은 로그만 남기고 프로세스 유지.
+//   (기존에는 Node 기본 동작으로 크래시 → Windows 서비스 복구 설정이 '아무 작업도 안 함'이면 재시작 안 됨)
+//   네트워크/DB 일시 장애에서도 Agent가 계속 돌아가 다음 사이클에 회복됨.
+//   치명적 초기화 실패(설정 로드/DB 연결)만 main.catch → process.exit(1).
+process.on('unhandledRejection', (reason) => {
+  try {
+    const log = getLogger('main');
+    log.error('Unhandled Rejection (서비스 유지)', { reason: reason instanceof Error ? reason.message : String(reason) });
+  } catch {
+    console.error('[unhandledRejection]', reason);
+  }
+});
+
+process.on('uncaughtException', (err) => {
+  try {
+    const log = getLogger('main');
+    log.error('Uncaught Exception (서비스 유지)', { error: err?.message, stack: err?.stack });
+  } catch {
+    console.error('[uncaughtException]', err);
+  }
+});
 
 main().catch((error) => {
   console.error('치명적 오류:', error);

@@ -2,6 +2,7 @@ import { Request, Response, Router } from 'express';
 import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
 import { process080Callback, getUserUnsubscribes, registerUnsubscribe } from '../utils/unsubscribe-helper';
+import { deduplicateByPhone } from '../utils/deduplicate';
 
 const router = Router();
 
@@ -282,10 +283,17 @@ router.post('/check', async (req: Request, res: Response) => {
 
     const { phones } = req.body;
     if (!phones || !Array.isArray(phones)) {
-      return res.json({ unsubscribeCount: 0, unsubscribePhones: [] });
+      return res.json({ unsubscribeCount: 0, unsubscribePhones: [], duplicateCount: 0 });
     }
 
-    const cleanPhones = phones.map((p: string) => p.replace(/\D/g, ''));
+    // ★ D137 D4: 중복 카운트도 함께 반환 (발송 전 안내창 미리보기)
+    //   CT-14 deduplicateByPhone 재사용 — 실제 발송 시와 동일한 normalizePhone 기준 → 카운트 일치 보장
+    const dedupResult = deduplicateByPhone(phones.map((p: string) => ({ phone: String(p || '') })));
+    const duplicateCount = dedupResult.duplicateCount;
+    const cleanPhones = dedupResult.unique
+      .map((r: any) => String(r.phone || '').replace(/\D/g, ''))
+      .filter(Boolean);
+
     const result = await query(
       `SELECT DISTINCT phone FROM unsubscribes WHERE user_id = $1 AND phone = ANY($2)`,
       [userId, cleanPhones]
@@ -294,6 +302,7 @@ router.post('/check', async (req: Request, res: Response) => {
     return res.json({
       unsubscribeCount: result.rows.length,
       unsubscribePhones: result.rows.map((r: any) => r.phone),
+      duplicateCount,
     });
   } catch (error) {
     console.error('수신거부 체크 에러:', error);

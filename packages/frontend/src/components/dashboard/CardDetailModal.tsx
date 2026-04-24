@@ -7,7 +7,7 @@
  *     · count/rate/sum: 현재값·델타 요약 → recharts LineChart (6개월 추이) → breakdown 4칸
  *     · birthday: 위 + BirthdayCustomerList (검색+페이지네이션)
  *     · distribution: 전체 확장 리스트 (프로그레스 바)
- *   - 푸터 CTA: "닫기" / "타겟 발송 바로가기" (cardId별 필터 매핑 후 onTargetSend 콜백)
+ *   - 푸터: "닫기" 버튼
  */
 import { useEffect, useState } from 'react';
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
@@ -51,37 +51,9 @@ interface CardDetailResponse {
   fullDistribution?: { label: string; count: number }[];
 }
 
-export interface CardTargetFilterOutput {
-  selectedFields: string[];
-  filterValues: Record<string, any>;
-}
-
 interface CardDetailModalProps {
   card: DashboardCardData | null; // null이면 닫힘
   onClose: () => void;
-  /** "타겟 발송 바로가기" 클릭 시 호출되는 콜백. 부모는 이 필터를 DirectTargetFilterModal initialFilters로 주입. */
-  onTargetSend: (filters: CardTargetFilterOutput) => void;
-}
-
-// ─── 카드 → 타겟 필터 매핑 (CTA 연계용) ───
-
-/** cardId별 "해당 카드가 의미하는 고객 집합"을 DirectTargetFilterModal 필터로 변환 */
-function buildTargetFilters(cardId: string): CardTargetFilterOutput {
-  const thisMonth = new Date().getMonth() + 1;
-  switch (cardId) {
-    case 'gender_male':
-      return { selectedFields: ['gender'], filterValues: { gender: 'M' } };
-    case 'gender_female':
-      return { selectedFields: ['gender'], filterValues: { gender: 'F' } };
-    case 'birthday_this_month':
-      return { selectedFields: ['birth_date'], filterValues: { birth_date: { mode: 'preset', presets: [`month:${thisMonth}`] } } };
-    case 'opt_in_count':
-    case 'total_customers':
-    case 'new_this_month':
-      return { selectedFields: [], filterValues: {} };
-    default:
-      return { selectedFields: [], filterValues: {} };
-  }
 }
 
 // ─── 내부 컴포넌트 ───
@@ -171,7 +143,7 @@ function SummaryCards({ card }: { card: DashboardCardData }) {
 
 // ─── 메인 ───
 
-export default function CardDetailModal({ card, onClose, onTargetSend }: CardDetailModalProps) {
+export default function CardDetailModal({ card, onClose }: CardDetailModalProps) {
   const [detail, setDetail] = useState<CardDetailResponse | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -206,12 +178,6 @@ export default function CardDetailModal({ card, onClose, onTargetSend }: CardDet
 
   const isBirthday = card.cardId === 'birthday_this_month';
   const isDistribution = card.type === 'distribution';
-
-  const handleTargetSend = () => {
-    const filters = buildTargetFilters(card.cardId);
-    onTargetSend(filters);
-    onClose();
-  };
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60] p-4">
@@ -336,22 +302,13 @@ export default function CardDetailModal({ card, onClose, onTargetSend }: CardDet
           )}
         </div>
 
-        {/* 푸터 CTA */}
-        <div className="p-4 border-t bg-white flex justify-end gap-2 shrink-0">
+        {/* 푸터 */}
+        <div className="p-4 border-t bg-white flex justify-end shrink-0">
           <button
             onClick={onClose}
             className="px-5 py-2.5 rounded-xl bg-white border border-gray-200 text-gray-700 text-sm font-medium hover:bg-gray-50 transition-colors"
           >
             닫기
-          </button>
-          <button
-            onClick={handleTargetSend}
-            className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-violet-600 to-purple-600 text-white text-sm font-semibold shadow-sm shadow-violet-200/60 hover:from-violet-700 hover:to-purple-700 flex items-center gap-2 transition-all"
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" />
-            </svg>
-            타겟 발송 바로가기
           </button>
         </div>
       </div>

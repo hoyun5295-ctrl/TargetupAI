@@ -197,7 +197,12 @@
       "Bash(node -e ' *)",
       "Bash(grep -E \"^axios$|^form-data$|^node-cron$\")",
       "Bash(pwsh -NoProfile -c 'echo $PROFILE; echo \"---\"; echo $PROFILE.AllUsersAllHosts; echo $PROFILE.AllUsersCurrentHost; echo $PROFILE.CurrentUserAllHosts; echo $PROFILE.CurrentUserCurrentHost')",
-      "PowerShell($ErrorActionPreference = 'Stop'; $installerDir = 'C:\\\\Users\\\\ceo\\\\projects\\\\targetup\\\\sync-agent\\\\installer'; $releaseDir = 'C:\\\\Users\\\\ceo\\\\projects\\\\targetup\\\\sync-agent\\\\release'; $targetDir = Join-Path $installerDir 'release'; if \\(!\\(Test-Path $targetDir\\)\\) { New-Item -ItemType Directory -Path $targetDir -Force | Out-Null }; Copy-Item -Path \\(Join-Path $releaseDir 'sync-agent.exe'\\) -Destination $targetDir -Force; Copy-Item -Path \\(Join-Path $releaseDir 'sql-wasm.wasm'\\) -Destination $targetDir -Force; Write-Host \"Files copied to $targetDir\"; Get-ChildItem $targetDir | Format-Table Name, Length, LastWriteTime)"
+      "PowerShell($ErrorActionPreference = 'Stop'; $installerDir = 'C:\\\\Users\\\\ceo\\\\projects\\\\targetup\\\\sync-agent\\\\installer'; $releaseDir = 'C:\\\\Users\\\\ceo\\\\projects\\\\targetup\\\\sync-agent\\\\release'; $targetDir = Join-Path $installerDir 'release'; if \\(!\\(Test-Path $targetDir\\)\\) { New-Item -ItemType Directory -Path $targetDir -Force | Out-Null }; Copy-Item -Path \\(Join-Path $releaseDir 'sync-agent.exe'\\) -Destination $targetDir -Force; Copy-Item -Path \\(Join-Path $releaseDir 'sql-wasm.wasm'\\) -Destination $targetDir -Force; Write-Host \"Files copied to $targetDir\"; Get-ChildItem $targetDir | Format-Table Name, Length, LastWriteTime)",
+      "Bash(nslookup -type=NS sys.hanjullo.com)",
+      "Bash(nslookup -type=NS hanjullo.com)",
+      "Bash(nslookup -type=NS hanjul.ai)",
+      "Bash(node ../../tools/gen-super-admin-permission-matrix.js)",
+      "Bash(node \"C:/Users/ceo/projects/targetup/tools/gen-super-admin-permission-matrix.js\")"
     ]
   }
 }

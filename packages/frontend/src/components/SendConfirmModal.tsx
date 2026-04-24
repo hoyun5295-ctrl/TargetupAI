@@ -4,6 +4,7 @@ interface SendConfirmModalProps {
     type: 'immediate' | 'scheduled';
     count: number;
     unsubscribeCount: number;
+    duplicateCount?: number;  // ★ D137 D4: 중복 제외 건수 (0이거나 undefined면 UI 숨김)
     dateTime?: string;
     from?: 'direct' | 'target';
     msgType?: string;
@@ -44,6 +45,13 @@ export default function SendConfirmModal({
               <div className="flex justify-between">
                 <span className="text-gray-500">수신거부 제외</span>
                 <span className="font-bold text-rose-500">{sendConfirm.unsubscribeCount.toLocaleString()}건</span>
+              </div>
+            )}
+            {/* ★ D137 D4: 중복 제외 건수 미리 표시 (0이면 숨김) */}
+            {sendConfirm.duplicateCount !== undefined && sendConfirm.duplicateCount > 0 && (
+              <div className="flex justify-between">
+                <span className="text-gray-500">중복 제외</span>
+                <span className="font-bold text-amber-500">{sendConfirm.duplicateCount.toLocaleString()}건</span>
               </div>
             )}
             {sendConfirm.type === 'scheduled' && sendConfirm.dateTime && (

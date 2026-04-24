@@ -107,8 +107,40 @@
 
 ---
 
-### 🔴 D136 (2026-04-22 밤) — PDF `한줄로_20260422.pdf` 디버깅 9건 + 추가 2건
+### 🟢 D136 P1 (2026-04-22 밤 연속 세션) — PDF 9건 전체 완료 + 전수점검 추가 수정
 
+> **상태:** 코드 수정 완료, 1차 배포 완료(D1/D1-2/D9/D6/D8/CustomerDBModal fieldKey), 전수점검 추가 2건 배포 대기(upload.ts/unsubscribe-helper.ts CT-03 통합)
+>
+> **✅ D136 P1 추가 완료 (전수점검으로 마무리):**
+>
+> | # | 내용 | 파일 |
+> |---|------|------|
+> | D1 근본 | **CT-18 신설** `utils/enabled-fields.ts` — `detectEnabledFields` + `buildDynamicSelectExpr`. standardHeaders 19개 하드코딩 전면 제거. enabled-fields ≡ download 100% 일치 | `utils/enabled-fields.ts` (신설), `routes/customers.ts` |
+> | D1-2 근본 | sync.ts `/customers` 핸들러에 `customer_field_definitions` 자동 UPSERT 안전망 | `routes/sync.ts` |
+> | D9-a/b 근본 | `getStoreScope` 유령 배정 방어 + **CT-03 `registerBulkCompanyUserUnsubscribes` 신설**으로 sync.ts/upload.ts/unsubscribe-helper.ts 3곳 분산 인라인 SQL 통합 | `utils/store-scope.ts`, `utils/unsubscribe-helper.ts`, `routes/sync.ts`, `routes/upload.ts` |
+> | D6 | 예약대기 MMS 이미지 클릭 확대 모달 (ResultsModal 패턴) | `components/ScheduledCampaignModal.tsx` |
+> | D8 | 대시보드 동적 카드 (`dyn_{key}_{aggType}` 패턴) — 고객사 업로드 커스텀 필드 기반 자동 생성 | `utils/dashboard-card-pool.ts`, `routes/admin.ts`, `routes/companies.ts`, `pages/Dashboard.tsx` |
+> | 추가 P1 | CustomerDBModal fieldKey 전달 3곳 (커스텀 필드 콤마 포맷 가드 활성화) | `components/CustomerDBModal.tsx` |
+> | 추가 P1 | admin.ts PUT dashboard-cards 카드 상한 17→50 (동적 카드 대응) | `routes/admin.ts` |
+>
+> **🎓 D136 P1 핵심 교훈 (CLAUDE.md 필수 체크 원칙 4 신설):**
+>
+> Harold님 지적: "전수 점검에서 맨날 놓치는게 있네" — sync.ts만 보고 "완료" 보고했으나 같은 SQL 패턴이 upload.ts + unsubscribe-helper.ts에 분산되어 있음. CLAUDE.md 7-1 프로세스 정면 위반.
+>
+> **교정:** 작업 시작 전 반드시 `grep -rn "패턴"` 전수 리스트업 → Harold님께 "N곳 수정" 컨펌 후 작업 → 완료 선언 전 grep 재확인.
+>
+> **배포 대기:**
+> 1. `tp-push "D136 P1 전수점검 완료 (upload.ts + CT-03 통합)"` → `tp-deploy-full`
+> 2. Agent 재동기화 후 Harold님 검증:
+>    - suran/gwchae/sgbaek 고객DB 1500명 노출
+>    - unsubscribes 카운트 5건 동일 (mobile/system_sync/suran/gwchae/sgbaek)
+>    - 슈퍼관리자 대시보드 카드 설정에 커스텀 필드 동적 카드 추가 노출
+>    - 예약대기 MMS 이미지 클릭 확대
+>
+> ---
+>
+> ### 🔴 D136 (초기 세션 — PDF 9건 최초 기록 / 아카이브)
+>
 > **PDF:** `C:\Users\ceo\OneDrive\문서\카카오톡 받은 파일\한줄로_20260422.pdf` 9건
 > **세션 완료분 (타입체크 통과, 배포 대기):**
 >

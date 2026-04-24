@@ -46,6 +46,7 @@
 | CT-15 | saved-segments.ts | AI 발송 템플릿 저장/조회/수정/삭제/touch (D107) |
 | CT-16 | customer-upsert.ts | **(D131 신설)** customers 테이블 UPSERT 단일 진입점 — `createCustomerUpsertBuilder({source:'upload'\|'sync'\|'manual', includeUploadedBy, returning})` + `buildBatch()` — FIELD_MAP 기반 `insertCols`/`updateClauses`/`values` 동적 조립. **region 중복 같은 실수가 구조적으로 불가능**. routes: upload.ts / sync.ts / customers.ts(단건/벌크) 전부 이 빌더 사용 |
 | CT-17 | plan-guard.ts | **(D132 신설)** 요금제·트라이얼·기능 게이팅 단일 진입점 — `loadPlanContext` / `canUseFeature` / `isSubscriptionBlocked` / `resolveMaxAutoCampaigns` / `getDirectRecipientLimit` / `checkDirectRecipientLimit` / `requirePlanFeature` 미들웨어. FeatureKey 10종(basic_send/customer_db/target_send/ai_mapping/spam_filter/ai_messaging/ai_premium/auto_campaign/mobile_dm/auto_spam_test). **`isTrialActive` 판정은 plan_code='TRIAL' 기반**(subscription_status 의존 제거 — 여러 경로가 덮어쓸 수 있어 취약). 보조: `trial-downgrade-worker.ts` 매일 04:00 KST 자동 강등 |
+| CT-18 | enabled-fields.ts | **(D136 P1 신설, 2026-04-22)** 고객사 활성 필드 탐지 단일 진입점 — `detectEnabledFields({companyId, scopeWhere, scopeParams})` → `{fields, fieldDefLabels, fieldDefTypes}` + `buildDynamicSelectExpr(fields, {unsubParamIndex, tableAlias})` → 동적 SELECT 절. **"고객DB 현황 ≡ 엑셀 다운로드 ≡ 대시보드 카드 선택" 100% 일치 보장.** 소비처: customers.ts(enabled-fields+download), admin.ts(dashboard-cards 동적 풀), dashboard-card-pool.ts(generateDynamicCards). FIELD_MAP + customer_field_definitions + JSONB 실키 기반 완전 동적. standardHeaders 19개 하드코딩 전면 제거 |
 | CT-SA | SYNC-AGENT-TROUBLESHOOTING.md | **(D131 신설)** 싱크에이전트 이슈 발생 시 반드시 먼저 참조. § 3 진단 체크리스트 + § 4 에러 유형별 1차 대응 + § 5 Agent 재시작 방법 + § 6 SQL 쿼리 |
 | CT-DM | dm/dm-builder.ts | **(D119 신설)** 모바일 DM CRUD + 단축URL 발행 + 열람 추적(UPSERT) + 통계 집계 |
 | CT-DM2 | dm/dm-viewer.ts | **(D119 신설)** 모바일 DM 공개 뷰어 HTML 렌더러 — 상단 4종 + 하단 4종 + 스와이프 + 추적 JS |
@@ -54,7 +55,7 @@
 | — | messageUtils.ts | 변수 치환 (5개 발송 경로 통합) + buildAdMessage (광고+080 전경로 D102) + getOpt080Number (080번호 조회 D102) + prepareFieldMappings (schema+varCatalog+enrich D102) + **prepareSendMessage (변수치환+광고080 통합 D103)** + **replaceVariables enum 역변환 (D109)** |
 | — | normalize.ts | 값 정규화 + normalizeCustomFieldValue (커스텀 필드 Date/문자열 정규화) |
 | — | stats-aggregation.ts | 대시보드 통계 집계 + AI 캠페인 성과 집계 |
-| — | unsubscribe-helper.ts (CT-03 확장) | **(D109 추가)** `CAMPAIGN_OPT080_SELECT_EXPR` + `buildCampaignOpt080LeftJoin(alias='c', userIdCol='created_by')` — 캠페인 SELECT에 user/company 080번호 LEFT JOIN. 자동발송용 alias 'ac' + user_id 지원 |
+| — | unsubscribe-helper.ts (CT-03 확장) | **(D109 추가)** `CAMPAIGN_OPT080_SELECT_EXPR` + `buildCampaignOpt080LeftJoin(alias='c', userIdCol='created_by')` — 캠페인 SELECT에 user/company 080번호 LEFT JOIN. 자동발송용 alias 'ac' + user_id 지원 / **(D136 P1, 2026-04-22)** `registerBulkCompanyUserUnsubscribes(companyId, source)` — sync.ts+upload.ts 공통 진입점. `registerUnsubscribe` 내부 SQL도 getStoreScope 4단계 판정으로 재작성. 분산 인라인 SQL 3곳(sync.ts/upload.ts/unsubscribe-helper.ts) 통합 |
 | — | standard-field-map.ts (CT-07 확장) | **(D109 추가)** `FIELD_DISPLAY_MAP` + `reverseDisplayValue(fieldKey, dbValue)` — DB enum 값(gender F/M) → 표시 한글(여성/남성) 역변환. 향후 enum 필드 추가 시 한 곳만 수정 |
 | — | formatDate.ts (프론트) | calculateSmsBytes + truncateToSmsBytes + replaceMessageVars + formatPreviewValue + DIRECT_VAR_MAP/replaceDirectVars (D96) + mmsServerPathToUrl (D98) + resolveRecipientCallback (D99) + buildAdMessageFront (D102) + **isPhoneLikeValue/detectPhoneHeaders (D103)** + **(D109 추가)** `formatCampaignMessageForDisplay()` + `stripAdParts()` (D103 위반 데이터 정규화 + is_ad 기반 재부착) + `FRONT_FIELD_DISPLAY_MAP`/`reverseDisplayValueFront` (백엔드와 동기화) + `replaceVarsByFieldMeta()` + `replaceVarsBySampleCustomer()` (인라인 7곳 통합) + `mergeAndHighlightVars()` (변수 강조 ↔ 머지 결과 토글) |
 
@@ -597,6 +598,8 @@ PostgreSQL campaigns/campaign_runs 생성
 | **SCHEMA.md vs 실제 DB CHECK 제약 불일치** | 레거시 이관 SQL 실행 시 `users_user_type_check` CHECK 위반 발생. SCHEMA.md에는 `user_type varchar(20)`만 기재, CHECK 허용값(`'admin'/'user'/'system'`) 누락. 코드 용어 `company_admin`/`company_user`는 논리적 구분일 뿐 DB 실값은 `admin`/`user`. 이 불일치로 SQL 1차 실행 전체 실패(62 companies INSERT 성공 후 users 첫 행에서 ROLLBACK) | **DB CHECK 제약은 SCHEMA.md가 아닌 `pg_constraint` 쿼리가 진실의 원천.** SQL 작성 전 `SELECT conname, pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid = '테이블'::regclass AND contype = 'c';` **선행 필수.** INSERT 작업 사전 충돌 검사는 UNIQUE + CHECK 둘 다. 코드 용어 vs DB 실값 매핑(company_admin→admin) CLAUDE.md·SCHEMA.md에 문서화 (D134) |
 | **프론트 pagination.total vs 배열.length 혼동** | 슈퍼관리자 고객사 목록이 DB에 72개 있는데 "총 20개"만 표시. 원인: `companiesApi.list()` 파라미터 미지정 → 백엔드 기본 limit=20 → 20개만 반환. 프론트는 `companies.length`를 total로 오해 → Harold님 "기존 데이터 다 날아갔다" 대형 오해 유발 | **전체 조회가 필요한 슈퍼관리자 목록은 반드시 `{ limit: 1000 }` 명시** 또는 프론트가 `pagination.total` 제대로 소비. 기본값 의존 금지. 혹은 백엔드 GET / 엔드포인트에 "전체 조회" 모드(limit=-1 등) 추가 고려 (D134) |
 | **xlsx 병합셀 `sheet_to_json` 무시** | 레거시 이관 엑셀 분석 시 C컬럼(회사명) 병합셀 21개를 `sheet_to_json`이 무시 → 첫 행만 값 있고 나머지 undefined → `_` prefix로 멋대로 추론해서 "아난티_커넥트팀"을 "아난티"로, 라프레리 매장 16개를 별개 회사로 분류하는 등 그룹핑 완전 오류 | **엑셀 분석 시 반드시 `sheet['!merges']` 먼저 확인 + 병합 범위 좌상단 값 상속 처리.** `mergeValue[addr] = 좌상단값`으로 병합셀 영역 전체에 값 채움. `sheet_to_json` 결과 그대로 쓰면 안 됨 (D134) |
+| **동일 SQL 패턴 3곳 분산 — sync only 수정하고 upload/CT 놓침** | D136 P1: `c.store_code = ANY(u.store_codes)` 단일 조건이 sync.ts/upload.ts/unsubscribe-helper.ts 3곳에 분산. sync.ts만 4단계 판정으로 수정하고 완료 보고 → 전수 점검에서 나머지 2곳 발견. 인비토 admin 엑셀 업로드 시 gwchae/sgbaek/suran 수신거부 0건, admin 수동 등록도 0건 상태 지속 | **작업 시작 전 `grep -rn "패턴"` 전수 리스트업 필수 (CLAUDE.md 7-1 1단계).** 리스트업 결과를 먼저 보고하고 "N곳 모두 수정" 컨펌 후 작업. 완료 선언 전 `grep` 재확인. **"다 했다" 자신있게 말하기 전에 반드시 grep.** D136 P1에서 CT-03에 `registerBulkCompanyUserUnsubscribes` 신설 + 3곳 모두 교체로 근본 해결 |
+| **formatPreviewValue fieldKey 가드 추가했지만 호출부 3곳 전달 누락** | D136 P1: `formatPreviewValue`/`formatByType`에 `fieldKey` 파라미터 추가하여 `custom_` 가드 구현했으나 `CustomerDBModal.tsx` 3곳 호출부가 `fieldKey` 전달 안 함 → 커스텀2 "20260518140000" varchar가 `data_type='number'` 자동 감지되어 "20,260,518,140,000" 콤마 포맷. Harold님 "재업로드?"로 오해 유발. D104 교훈(formatNumberPreview 누락) 그대로 재발 | **컨트롤타워 함수 시그니처에 파라미터 추가 시 소비처 전수 grep 후 모두 전달 필수.** 한쪽만 수정 = 실질 미적용. `grep -rn "formatPreviewValue\|formatByType"`로 호출부 파악 → 모든 호출부에 인자 추가하여 가드 발동 보장 (D136 P1) |
 
 ### ⚠️ 필수 체크 원칙 1: 유틸 함수 수정/추가 시 소비처 전수 확인
 
@@ -628,7 +631,26 @@ PostgreSQL campaigns/campaign_runs 생성
 > 2. 모든 인라인 코드를 컨트롤타워 호출로 교체한다
 > 3. 신규 기능 구현 시에도 "이 로직이 다른 경로에서도 필요한가?" 먼저 확인하고, 필요하면 처음부터 컨트롤타워로 만든다
 
-### ⚠️ 필수 체크 원칙 4: SPECIAL_FIELDS / 하드코딩 리스트에 필드 등록 금지 (D82 교훈)
+### ⚠️ 필수 체크 원칙 4: 작업 시작 전 grep 전수 리스트업 절대 필수 (D136 P1 교훈 — 최우선)
+
+> **D136 P1에서 재발한 패턴:** D9 버그 원인 `c.store_code = ANY(u.store_codes)` 패턴이 sync.ts/upload.ts/unsubscribe-helper.ts 3곳에 분산되어 있었는데, sync.ts만 수정하고 "D9 완료" 자신있게 보고 → 전수 점검에서 나머지 2곳 발견. Harold님 "맨날 놓치는게 있네 제대로 좀 안볼래?" 정당한 지적.
+>
+> **원칙:** 버그 수정/기능 추가 **시작 전** 반드시:
+> 1. **grep으로 유사 패턴 전수 리스트업.** 버그 원인 패턴(SQL/함수 호출/변수 참조 등)을 `grep -rn "패턴"`으로 전 소스 스캔.
+> 2. **리스트업 결과를 Harold님께 먼저 보고.** "이 N곳 전부 수정합니다" 명시 후 컨펌 받고 작업 시작.
+> 3. **"다 했다" 자신있게 보고 금지.** 완료 선언 전 반드시 `grep`으로 잔존 0건 재확인.
+>
+> **금지 행동:**
+> - 버그 발견 지점 1곳만 보고 바로 수정 시작
+> - 컨트롤타워 신설 후 호출부/유사 패턴 grep 생략
+> - "TypeScript 빌드 0 error니까 완료" 잘못된 완료 기준
+>
+> **올바른 체크리스트 (CLAUDE.md 7-1 프로세스):**
+> - [ ] 1단계: 수정 대상 패턴 grep 리스트업 → Harold님 확인
+> - [ ] 2단계: 수정 후 인라인 잔존 0건 grep 재확인 → Harold님 확인
+> - [ ] 3단계: 표시 경로(캘린더/발송결과/관리자 대시보드/미리보기)까지 전수 확인
+
+### ⚠️ 필수 체크 원칙 5: SPECIAL_FIELDS / 하드코딩 리스트에 필드 등록 금지 (D82 교훈)
 
 > **D82에서 반복된 패턴:** customer-filter.ts mixed 모드의 SPECIAL_FIELDS에 name/email/address가 포함 → FIELD_MAP 동적 루프에서 건너뜀 → 전용 핸들러도 없어서 필터 무시 → 전체 고객 반환. structured 모드의 STRING_FIELDS에 phone 누락 → 고객DB 전화번호 필터 무시.
 >

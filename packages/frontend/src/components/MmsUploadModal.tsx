@@ -76,6 +76,8 @@ export default function MmsUploadModal({
               // ★ B3(0417 PDF #3): 파일명 라벨 표시 — 통계(ResultsModal)와 동일한 원본 파일명
               //   컨트롤타워 getMmsImageDisplayName: originalName > filename > path basename > fallback
               const filenameDisplay = img ? getMmsImageDisplayName(img, `이미지 ${slotIdx + 1}`) : '';
+              // ★ D137 D7: 빈 앞슬롯 존재 시 뒷슬롯 비활성화 — "왼쪽부터 순서대로" 강제
+              const isLockedSlot = !img && slotIdx > mmsUploadedImages.length;
               return (
                 <div key={slotIdx} className="flex flex-col">
                   <div className="aspect-square relative">
@@ -101,8 +103,15 @@ export default function MmsUploadModal({
                           {slotIdx + 1}
                         </div>
                       </div>
+                    ) : isLockedSlot ? (
+                      /* 잠긴 슬롯 — 왼쪽부터 순서대로 등록 강제 */
+                      <div className="w-full h-full rounded-xl border-2 border-dashed border-gray-200 bg-gray-100 flex flex-col items-center justify-center cursor-not-allowed opacity-60">
+                        <div className="text-3xl text-gray-300 mb-2">🔒</div>
+                        <div className="text-xs text-gray-400 font-medium">이미지 {slotIdx + 1}</div>
+                        <div className="text-[10px] text-gray-400 mt-1 px-2 text-center leading-tight">이미지 {mmsUploadedImages.length + 1}부터<br/>순서대로 등록</div>
+                      </div>
                     ) : (
-                      /* 빈 슬롯 */
+                      /* 빈 슬롯 (등록 가능) */
                       <label className={`w-full h-full rounded-xl border-2 border-dashed border-gray-300 bg-gray-50 flex flex-col items-center justify-center cursor-pointer hover:border-amber-400 hover:bg-amber-50 transition-all ${mmsUploading ? 'opacity-50 pointer-events-none' : ''}`}>
                         <div className="text-3xl text-gray-300 mb-2">+</div>
                         <div className="text-xs text-gray-400 font-medium">이미지 {slotIdx + 1}</div>

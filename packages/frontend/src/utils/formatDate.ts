@@ -647,6 +647,37 @@ export function replaceVarsBySampleCustomer(
 }
 
 /**
+ * ★ D137 D5: 한국 전화번호 앞 0 자동 보정 + 정규화 컨트롤타워
+ *   - 백엔드 utils/normalize.ts `normalizePhone` 의 보정 로직과 완전 동일 (미러)
+ *   - 특수문자 제거 + 국가코드(+82/82) 변환 + 앞 0 보정 (휴대폰 + 서울/지방 지역번호 + 070/050X)
+ *   - 유효성 검사는 하지 않음 (프론트는 입력 시점 보정 전용)
+ *   - 사용처: DirectSendPanel 직접입력/파일등록 3곳
+ *
+ * 보정 규칙 (엑셀 숫자 저장 등으로 앞 0 빠진 경우만):
+ *   - `2`  (8~10자리) → 02  (서울)
+ *   - `1[016789]` → 01X (휴대폰 010/011/016/017/018/019)
+ *   - `3[1-3]` → 031/032/033 (경기/인천/강원)
+ *   - `4[1-4]` → 041/042/043/044 (충남/대전/충북/세종)
+ *   - `5[1-5]` → 051/052/053/054/055 (부산/울산/대구/경북/경남)
+ *   - `50[2-9]` → 0502~0509 (안심번호)
+ *   - `6[1-4]` → 061/062/063/064 (전남/광주/전북/제주)
+ *   - `70` → 070 (인터넷전화)
+ *   - 위 prefix 에 해당 안 하면 건드리지 않음 (오변환 방지)
+ */
+export function normalizePhoneKr(value: any): string {
+  if (value == null || value === '') return '';
+  let v = String(value).trim();
+  v = v.replace(/[\s\-()+.]/g, '');
+  if (v.startsWith('+82')) v = '0' + v.slice(3);
+  else if (v.startsWith('82')) v = '0' + v.slice(2);
+  v = v.replace(/\D/g, '');
+  if (!v.startsWith('0') && /^(2|1[016789]|3[1-3]|4[1-4]|5(?:[1-5]|0[2-9])|6[1-4]|70)\d{6,10}$/.test(v)) {
+    v = '0' + v;
+  }
+  return v;
+}
+
+/**
  * ★ D97: 전화번호 포맷팅 컨트롤타워
  * 하이픈 없는 번호 → 하이픈 포함 포맷. 이미 하이픈이 있으면 정규화 후 재포맷.
  * 사용처: Dashboard, DirectSendPanel, AiCampaignSendModal,
@@ -771,10 +802,10 @@ export function buildAdMessageFront(
   const isLms = !isSms; // LMS/MMS
   const adPrefix = isSms ? '(광고)' : '(광고) ';
 
-  // ★ D136 (D2 재수정): 백엔드 messageUtils.ts buildAdMessage와 완전 동일 규칙 (미러).
-  //   - 본문 끝 개행 고객 입력 그대로 보존 (제한 없음)
-  //   - 최소 개행 보장: SMS=1, LMS/MMS=2 (D124 가독성)
-  //   - AI 문안은 이미 "[브랜드명]\n\n무료수신거부 080..."을 포함하므로 hasRejectFooter=true → 원본 유지
+  // ★ D137 (0423 D2 근본): 백엔드 messageUtils.ts buildAdMessage와 완전 동일 규칙 (미러).
+  //   - minBreaks=1 통일 (D136까지 LMS/MMS=2 강제 → D137 완화, 사용자 직접발송 빈 줄 제거)
+  //   - 빈 줄은 고객 입력 또는 AI 원본 개행 (ai.ts 자동제거 regex `\n?` 제거로 보존)에 의해서만 발생
+  //   - AI 문안이 이미 "무료수신거부 080..."을 포함하면 hasRejectFooter=true → 원본 유지
   const hasAdPrefix = message.startsWith('(광고)');
   const hasRejectFooter = /무료수신거부|무료거부/.test(message);
 
@@ -782,7 +813,7 @@ export function buildAdMessageFront(
 
   const trailingMatch = message.match(/\n*$/);
   const trailingCount = trailingMatch ? trailingMatch[0].length : 0;
-  const minBreaks = isLms ? 2 : 1;
+  const minBreaks = 1;
   const actualBreaks = Math.max(trailingCount, minBreaks);
 
   const rejectText = optOutNumber
@@ -834,16 +865,21 @@ function stripAdParts(text: string): string {
 }
 
 /**
- * ★ B2: 캠페인 표시용 메시지 컨트롤타워
+ * ★ B2 → D137 D6: 캠페인 표시용 메시지 컨트롤타워
  *
  * 발송 결과/캘린더/슈퍼관리자/대시보드/자동발송 등 모든 표시 경로에서
- * "(광고)+080번호" 부착된 최종 메시지를 일관되게 생성한다.
+ * "(광고)+080번호" 부착된 최종 메시지를 **일관되게** 생성한다.
  *
- * 데이터 출처 우선순위:
- *  1) realSentMessage (MySQL msg_contents 등 이미 발송된 텍스트) → 그대로 사용
- *     (prepareSendMessage 거쳐 큐에 INSERT됐으므로 이미 (광고)+080 포함 상태)
- *  2) campaign.message_content (DB 순수본문) → stripAdParts 로 D103 위반 데이터 정규화 후
- *     buildAdMessageFront 로 is_ad 에 따라 다시 부착
+ * ★ D137 D6 근본 수정 — (광고)/무료거부 표시 불일치 3번째 재발(D102/D106/D109) 해결:
+ *   - 기존: `if (realSentMessage) return realSentMessage;` → msg_contents 그대로 반환
+ *     → MySQL 저장값이 경로별(프리셋/구버전/AI생성)로 (광고)/무료거부 포함여부 섞여 있으면
+ *        "리스트에는 붙어있는데 상세에는 누락" 같은 불일치 발생
+ *   - 변경: realSentMessage 도 **stripAdParts + buildAdMessageFront** 통과 →
+ *          데이터 출처와 무관하게 **순수본문 + is_ad 기반 재부착** 으로 완전 일관
+ *
+ * 데이터 출처 우선순위 (통과하는 파이프라인은 동일):
+ *  1) realSentMessage (MySQL msg_contents 등 실 발송 텍스트)
+ *  2) campaign.message_content (DB 순수본문)
  *
  * ⚠️ 절대 금지:
  *  - 4번째 인자 자리에 callback_number(회신번호) 전달 금지 (D106 재발 패턴)
@@ -861,10 +897,11 @@ export function formatCampaignMessageForDisplay(
   } | null | undefined,
   realSentMessage?: string | null
 ): string {
-  if (realSentMessage) return realSentMessage;
-  if (!campaign) return '';
-  // ★ D103 위반 데이터 정규화: 본문에 박힌 (광고)/무료거부 제거 후 is_ad 에 따라 다시 부착
-  const pureBody = stripAdParts(campaign.message_content || '');
+  // ★ D137 D6: realSentMessage / message_content 둘 다 동일 파이프라인 통과
+  const source = realSentMessage || campaign?.message_content || '';
+  if (!campaign) return source; // campaign 없으면 정규화 불가 — 원본 반환
+  // D103 위반 데이터 및 msg_contents 에 박힌 (광고)/무료거부 흔적 제거 후 is_ad 기반 재부착
+  const pureBody = stripAdParts(source);
   return buildAdMessageFront(
     pureBody,
     campaign.message_type || 'SMS',

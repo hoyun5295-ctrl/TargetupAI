@@ -335,7 +335,8 @@ export default function TargetSendModal({
     const checkRes = await fetch('/api/unsubscribes/check', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ phones }) });
     const checkData = await checkRes.json();
     const unsubCount = checkData.unsubscribeCount || 0;
-    setSendConfirm({ show: true, type: reserveEnabled ? 'scheduled' : 'immediate', count: targetRecipients.length - unsubCount, unsubscribeCount: unsubCount, dateTime: reserveEnabled && reserveDateTime ? reserveDateTime : undefined, from: 'target', msgType: '카카오' });
+    const dupCount = checkData.duplicateCount || 0;  // ★ D137 D4 (타겟발송은 이미 dedup → 0)
+    setSendConfirm({ show: true, type: reserveEnabled ? 'scheduled' : 'immediate', count: targetRecipients.length - unsubCount - dupCount, unsubscribeCount: unsubCount, duplicateCount: dupCount, dateTime: reserveEnabled && reserveDateTime ? reserveDateTime : undefined, from: 'target', msgType: '카카오' });
   };
 
   const handleAlimtalkSend = async () => {
@@ -346,7 +347,8 @@ export default function TargetSendModal({
     const checkRes = await fetch('/api/unsubscribes/check', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ phones }) });
     const checkData = await checkRes.json();
     const unsubCount = checkData.unsubscribeCount || 0;
-    setSendConfirm({ show: true, type: reserveEnabled ? 'scheduled' : 'immediate', count: targetRecipients.length - unsubCount, unsubscribeCount: unsubCount, dateTime: reserveEnabled && reserveDateTime ? reserveDateTime : undefined, from: 'target', msgType: '알림톡' });
+    const dupCount = checkData.duplicateCount || 0;  // ★ D137 D4 (타겟발송은 이미 dedup → 0)
+    setSendConfirm({ show: true, type: reserveEnabled ? 'scheduled' : 'immediate', count: targetRecipients.length - unsubCount - dupCount, unsubscribeCount: unsubCount, duplicateCount: dupCount, dateTime: reserveEnabled && reserveDateTime ? reserveDateTime : undefined, from: 'target', msgType: '알림톡' });
   };
 
   // ====== 미리보기 핸들러 ======

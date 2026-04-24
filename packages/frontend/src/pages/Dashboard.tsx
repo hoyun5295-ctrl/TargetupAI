@@ -13,7 +13,7 @@ import AnalysisModal from '../components/AnalysisModal';
 import BalanceModals from '../components/BalanceModals';
 import CalendarModal from '../components/CalendarModal';
 import DeltaBadge from '../components/dashboard/DeltaBadge';
-import CardDetailModal, { type CardTargetFilterOutput } from '../components/dashboard/CardDetailModal';
+import CardDetailModal from '../components/dashboard/CardDetailModal';
 import CampaignSuccessModal from '../components/CampaignSuccessModal';
 import { LmsConvertModal, SmsConvertModal } from '../components/ChannelConvertModals';
 import CustomerDBModal from '../components/CustomerDBModal';
@@ -233,7 +233,6 @@ export default function Dashboard() {
   const [showDirectTargeting, setShowDirectTargeting] = useState(false);
   // ★ D132 Phase B: 대시보드 카드 상세 모달
   const [detailCard, setDetailCard] = useState<DashboardCardData | null>(null);
-  const [cardTargetFilters, setCardTargetFilters] = useState<CardTargetFilterOutput | undefined>(undefined);
   // 직접 타겟 관련 state → DirectTargetFilterModal로 이동 (D43-3)
   const [showTemplates, setShowTemplates] = useState(false);
   const [showInsights, setShowInsights] = useState(false);
@@ -731,6 +730,14 @@ export default function Dashboard() {
 
   // MMS 이미지 단일 슬롯 업로드 함수
   const handleMmsSlotUpload = async (file: File, slotIndex: number) => {
+    // ★ D137 D7: 왼쪽(앞) 슬롯부터 순서대로 등록 강제 — 빈 앞슬롯이 있는 상태에서 뒷슬롯 업로드 차단
+    //   기존 `updated[slotIndex] = img` 가 배열에 빈 자리(hole)를 만들어 length 카운트 오류 유발 →
+    //   근본 해결: "이미지 1 없이 이미지 2/3에 넣을 수 없음" UX 강제.
+    if (slotIndex > mmsUploadedImages.length) {
+      setToast({ show: true, type: 'error', message: `이미지 ${mmsUploadedImages.length + 1}번부터 순서대로 등록해주세요` });
+      setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
+      return;
+    }
     // 검증: JPG만
     if (!file.name.toLowerCase().endsWith('.jpg') && !file.name.toLowerCase().endsWith('.jpeg')) {
       setToast({ show: true, type: 'error', message: 'JPG 파일만 업로드 가능합니다 (PNG/GIF 미지원)' });
@@ -757,6 +764,7 @@ export default function Dashboard() {
       const data = await res.json();
       if (res.ok && data.success && data.images.length > 0) {
         setMmsUploadedImages(prev => {
+          // 위 guard 로 slotIndex ≤ prev.length 보장 → 배열 hole 없음
           const updated = [...prev];
           updated[slotIndex] = data.images[0];
           return updated;
@@ -3038,19 +3046,14 @@ const campaignData = {
         {/* 직접 타겟 설정 모달 (D43-3: 컴포넌트 분리) */}
         <DirectTargetFilterModal
           show={showDirectTargeting}
-          onClose={() => { setShowDirectTargeting(false); setCardTargetFilters(undefined); }}
+          onClose={() => setShowDirectTargeting(false)}
           onExtracted={handleTargetExtracted}
-          initialFilters={cardTargetFilters}
         />
 
         {/* ★ D132 Phase B: 대시보드 카드 클릭 → 상세 모달 */}
         <CardDetailModal
           card={detailCard}
           onClose={() => setDetailCard(null)}
-          onTargetSend={(filters) => {
-            setCardTargetFilters(filters);
-            setShowDirectTargeting(true);
-          }}
         />
 
         <FileUploadMappingModal

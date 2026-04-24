@@ -200,10 +200,11 @@ export function normalizePhone(value: any): string | null {
   if (v.startsWith('+82')) v = '0' + v.slice(3);
   // 숫자만 남기기
   v = v.replace(/\D/g, '');
-  // Excel 숫자 저장으로 인한 앞 0 빠짐 보정
-  // 10XXXXXXXX (10자리) → 010XXXXXXXX (11자리)
-  // 11~19XXXXXXX (9~10자리) → 011~019XXXXXXX (구번호)
-  if (!v.startsWith('0') && /^1[016789]/.test(v)) {
+  // ★ D137 D5: Excel 숫자 저장 등으로 앞 0 빠짐 보정 — 휴대폰 + 서울/지방 지역번호 + 070/050X 전수
+  //   프론트 formatDate.ts `normalizePhoneKr` 과 완전 동일 regex (미러)
+  //   - `2` 서울 / `1[016789]` 휴대폰 / `3[1-3]`·`4[1-4]`·`5[1-5]`·`6[1-4]` 지방
+  //   - `50[2-9]` 안심번호 0502~0509 / `70` 070 인터넷전화
+  if (!v.startsWith('0') && /^(2|1[016789]|3[1-3]|4[1-4]|5(?:[1-5]|0[2-9])|6[1-4]|70)\d{6,10}$/.test(v)) {
     v = '0' + v;
   }
   // 유효성 검사: 한국 휴대폰 번호만 허용
