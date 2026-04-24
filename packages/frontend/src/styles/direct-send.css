@@ -114,6 +114,52 @@
 }
 
 /* ============================================================
+   모달 Footer Bar (primary + tertiary 액션 통합)
+   ============================================================ */
+.ds-modal__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 24px;
+  border-top: 1px solid var(--ds-stone-200);
+  background: var(--ds-stone-50);
+  flex-shrink: 0;
+}
+.ds-modal__footer-left {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 1;
+  min-width: 0;
+}
+.ds-modal__footer-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* Footer용 primary 버튼 (고정 폭) */
+.ds-btn-primary--footer {
+  width: 240px;
+  margin-top: 0;
+}
+
+/* 긴 안내 텍스트 (수신자 N명 등) */
+.ds-footer-hint {
+  font-size: 12.5px;
+  color: var(--ds-stone-500);
+  font-weight: 500;
+  padding: 0 6px;
+}
+.ds-footer-hint strong {
+  color: var(--ds-emerald-700);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ============================================================
    모달 헤더 (아이콘 + 제목 + 창닫기)
    ============================================================ */
 .ds-head-icon {
@@ -536,10 +582,14 @@
   background: var(--ds-stone-50);
   border: 1px solid var(--ds-stone-200);
   border-radius: 10px;
-  padding: 9px 10px 9px 11px;
+  padding: 10px 11px;
   cursor: pointer;
   transition: all .18s cubic-bezier(.4, 0, .2, 1);
-  display: block;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  height: 64px;
+  box-sizing: border-box;
 }
 .ds-optcard:hover {
   border-color: var(--ds-stone-300);
@@ -565,11 +615,14 @@
   display: flex;
   align-items: center;
   gap: 7px;
+  height: 20px;
+  flex-shrink: 0;
 }
 .ds-optcard-title {
   font-size: 12.5px;
   font-weight: 600;
   color: var(--ds-stone-800);
+  line-height: 1;
 }
 .ds-optcard--on .ds-optcard-title,
 .ds-optcard--on-blue .ds-optcard-title { color: #1E3A8A; }
@@ -578,12 +631,15 @@
 .ds-optcard-sub {
   font-size: 11px;
   color: var(--ds-stone-500);
-  margin-top: 4px;
+  margin-top: 0;
   display: flex;
   align-items: center;
   gap: 5px;
+  height: 18px;
+  line-height: 1;
+  flex-shrink: 0;
 }
-.ds-optcard-sub svg { width: 12px; height: 12px; }
+.ds-optcard-sub svg { width: 12px; height: 12px; flex-shrink: 0; }
 
 /* ============================================================
    주 버튼 (전송하기)
@@ -898,19 +954,20 @@
    분할전송 숫자 인풋
    ============================================================ */
 .ds-num-in {
-  height: 30px;
-  width: 64px;
+  height: 18px;
+  width: 50px;
   background: #FFFFFF;
   border: 1px solid var(--ds-stone-200);
-  border-radius: 7px;
-  padding: 0 8px;
-  font-size: 12.5px;
+  border-radius: 5px;
+  padding: 0 6px;
+  font-size: 11px;
   font-weight: 600;
   text-align: right;
   color: var(--ds-stone-900);
   font-family: inherit;
   font-variant-numeric: tabular-nums;
   box-shadow: inset 0 1px 2px rgb(0 0 0 / .03);
+  line-height: 1;
 }
 .ds-num-in:focus { border-color: var(--ds-emerald-500); }
 .ds-num-in:disabled {
@@ -983,15 +1040,15 @@
   flex-direction: column;
   background: white;
   box-shadow: inset 0 1px 2px rgb(0 0 0 / .02);
-  min-height: 420px;
+  min-height: 0;
 }
 
 .ds-list-head {
   display: grid;
-  grid-template-columns: 44px 1fr auto;
+  grid-template-columns: 44px 160px 1fr;
   align-items: center;
   padding: 0 20px;
-  height: 44px;
+  height: 42px;
   background: var(--ds-stone-50);
   border-bottom: 1px solid var(--ds-stone-200);
   font-size: 12.5px;
@@ -999,20 +1056,29 @@
   color: var(--ds-stone-600);
   flex-shrink: 0;
 }
+.ds-list-head .ds-head-extra {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--ds-stone-500);
+}
 
 .ds-list-body {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .ds-list-row {
   display: grid;
-  grid-template-columns: 44px 1fr auto;
+  grid-template-columns: 44px 160px 1fr;
   align-items: center;
   padding: 0 20px;
-  height: 48px;
+  height: 44px;
   border-bottom: 1px solid var(--ds-stone-100);
-  font-size: 13.5px;
+  font-size: 13px;
   color: var(--ds-stone-800);
   transition: background .15s ease;
 }
@@ -1026,17 +1092,37 @@
   flex: 1;
 }
 
-/* 테이블 내부 셀 gap */
+/* 테이블 내부 셀 — 동일 grid로 행별 균일 정렬 */
 .ds-cell-extra {
-  display: inline-flex;
-  gap: 10px;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 20px;
   align-items: center;
   color: var(--ds-stone-500);
-  font-size: 12.5px;
+  font-size: 12px;
+  min-width: 0;
 }
-.ds-cell-extra span.val { color: var(--ds-stone-800); }
-.ds-cell-callback {
-  font-family: 'Pretendard Variable', Pretendard, system-ui, sans-serif;
+.ds-cell-extra > span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.ds-cell-extra .val {
+  color: var(--ds-stone-800);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.ds-cell-extra .lbl {
+  color: var(--ds-stone-400);
+  font-size: 11px;
+  flex-shrink: 0;
+}
+.ds-cell-callback .val {
   font-variant-numeric: tabular-nums;
   color: var(--ds-stone-600);
   font-size: 12px;
