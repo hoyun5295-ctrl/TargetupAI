@@ -442,11 +442,16 @@ export default function Dashboard() {
         callback: isAlimtalk ? (callbackNumbers[0]?.phone || '') : (useIndividualCallback ? null : selectedCallback),
         useIndividualCallback: isAlimtalk ? false : useIndividualCallback,
         individualCallbackColumn: (!isAlimtalk && useIndividualCallback) ? individualCallbackColumn : undefined,
-        // ★ D137 (0424): executeTargetSend와 동일 패턴으로 통일 — resolveRecipientCallback CT로 개별회신번호 resolve.
-        // 백엔드 campaigns.ts:1376 filterByIndividualCallback은 direct-send 경로에서 callbackColumn을
-        // 전달받지 않으므로 (주석: "프론트가 이미 callback에 매핑해서 전달") 프론트에서 resolve 필수.
+        // ★ D137 (0424-NIGHT): recipients 페이로드 경량화 — executeTargetSend와 동일 패턴.
+        // 이전 `...r` 스프레드 시도는 원본 엑셀 row(한글 컬럼 키 + Date 등)가 그대로 섞여 nginx body size/JSON 파싱
+        // 실패로 fetch가 throw되어 "발송 실패" 토스트(catch 블록)에 직행했음. 백엔드 CT-08은 callbackColumn 없이
+        // 호출되므로 c.callback 하나만 정확히 전달하면 미등록 회신번호 확인 모달(callbackConfirmRequired)까지 정상 동작.
         recipients: directRecipients.map((r: any) => ({
-          ...r,
+          phone: r.phone,
+          name: r.name || '',
+          extra1: r.extra1 || '',
+          extra2: r.extra2 || '',
+          extra3: r.extra3 || '',
           callback: resolveRecipientCallback(r, useIndividualCallback, individualCallbackColumn) || r.callback || null,
         })),
         adEnabled: isAlimtalk ? false : adTextEnabled,
@@ -528,15 +533,19 @@ export default function Dashboard() {
         setToast({show: true, type: 'error', message: data.error});
         setTimeout(() => setToast({show: false, type: 'error', message: ''}), 3000);
       }
-    } catch (err) {
-      setToast({show: true, type: 'error', message: '발송 실패'});
-      setTimeout(() => setToast({show: false, type: 'error', message: ''}), 3000);
+    } catch (err: any) {
+      // ★ D137 (0424-NIGHT): F12 차단 환경에서 원인 파악 가능하도록 에러 상세 노출.
+      // 기존에는 "발송 실패"만 떠서 fetch/JSON.stringify throw 원인(페이로드 과대/네트워크/CORS 등) 구분 불가했음.
+      const errMsg = err?.message || String(err) || '알 수 없는 오류';
+      console.error('[direct-send] fetch 실패:', err);
+      setToast({show: true, type: 'error', message: `발송 실패: ${errMsg.substring(0, 120)}`});
+      setTimeout(() => setToast({show: false, type: 'error', message: ''}), 6000);
     } finally {
       setDirectSending(false);
     }
     setSendConfirm({show: false, type: 'immediate', count: 0, unsubscribeCount: 0});
   };
-  
+
   // 직접타겟추출 발송 함수
   const executeTargetSend = async (confirmCallbackExclusion?: boolean, confirmNameEmpty?: boolean) => {
     // ★ D131: MMS 이미지 첨부 검증 — 채널 조건 제거 (MMS msgType은 어떤 채널에서도 이미지 필수)
