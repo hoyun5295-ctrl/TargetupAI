@@ -14,7 +14,7 @@
  *   - textInsert.ts: insertAtCursorPos
  */
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import {
   MessageSquare, Smartphone, Bell,
   SendHorizontal, Send,
@@ -22,8 +22,9 @@ import {
   PencilLine, FolderOpen, Contact,
   Asterisk, Archive, Save,
   Eye, ShieldCheck, Lock,
-  CalendarClock, Star, ChevronDown, Image as ImageIcon,
+  CalendarClock, ChevronDown, Image as ImageIcon,
   Trash2, XCircle, RotateCcw, ChevronRight,
+  Plus,
 } from 'lucide-react';
 import {
   calculateSmsBytes,
@@ -201,10 +202,25 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
   const directTextareaRef = useRef<HTMLTextAreaElement>(null);
   const directCursorPosRef = useRef<number>(0);
 
+  // ★ D137 UI: 변수 삽입 드롭다운 (발신번호 옆 병치)
+  const [varMenuOpen, setVarMenuOpen] = useState(false);
+  const varMenuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!varMenuOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (varMenuRef.current && !varMenuRef.current.contains(e.target as Node)) {
+        setVarMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [varMenuOpen]);
+
   // ============================================================
   // 내부 state
   // ============================================================
-  const [directInputMode, setDirectInputMode] = useState<'file' | 'direct' | 'address'>('file');
+  // ★ D137 UI: 초기엔 아무것도 선택되지 않은 상태 (파일등록이 디폴트처럼 보이는 현상 제거)
+  const [directInputMode, setDirectInputMode] = useState<'file' | 'direct' | 'address' | null>(null);
   const [directFileHeaders, setDirectFileHeaders] = useState<string[]>([]);
   const [directFilePreview, setDirectFilePreview] = useState<any[]>([]);
   const [directFileData, setDirectFileData] = useState<any[]>([]);
@@ -599,9 +615,9 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                   </div>
                 </div>
 
-                {/* 발신번호 */}
-                <div className="ds-field-group">
-                  <label className="ds-label">발신번호</label>
+                {/* 발신번호 — 라벨 인라인 */}
+                <div className="ds-callback-row">
+                  <span className="ds-callback-label">발신번호</span>
                   <select
                     className="ds-sel ds-num"
                     value={selectedCallbackValue}
@@ -643,40 +659,51 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                       ))}
                     </optgroup>
                   </select>
-                  {useIndividualCallback && individualCallbackColumn && (
-                    <div className="ds-ind-callback-hint">
-                      각 수신자의 <strong>{individualCallbackColumn}</strong> 값으로 발송됩니다
-                    </div>
-                  )}
-                </div>
 
-                {/* 자동입력 칩 */}
-                <div className="ds-field-group">
-                  <div className="ds-autoinput-head">
-                    <strong>자동입력</strong>
-                    <span>· 본문에 변수를 삽입합니다</span>
-                  </div>
-                  <div className="grid grid-cols-5 gap-1.5">
-                    {DIRECT_VAR_MAP.map(v => (
-                      <button
-                        key={v.fieldKey}
-                        type="button"
-                        className={`ds-chip ds-t ${v.fieldKey === 'callback' ? 'ds-chip--callback' : ''}`}
-                        onClick={() => {
-                          insertAtCursorPos(
-                            directCursorPosRef.current,
-                            v.variable,
-                            setDirectMessage,
-                            directTextareaRef.current,
-                            directCursorPosRef,
-                          );
-                        }}
-                      >
-                        {v.label}
-                      </button>
-                    ))}
+                  {/* ★ D137 UI A안: 변수 삽입 드롭다운 (발신번호 옆 병치) */}
+                  <div className="ds-var-wrap" ref={varMenuRef}>
+                    <button
+                      type="button"
+                      className={`ds-var-trigger ds-t ${varMenuOpen ? 'ds-var-trigger--on' : ''}`}
+                      onClick={() => setVarMenuOpen(o => !o)}
+                    >
+                      <Plus size={14} strokeWidth={2} />
+                      <span>변수 삽입</span>
+                      <ChevronDown size={13} strokeWidth={2} className={`ds-var-chev ${varMenuOpen ? 'ds-var-chev--open' : ''}`} />
+                    </button>
+                    {varMenuOpen && (
+                      <div className="ds-var-menu" role="menu">
+                        <div className="ds-var-menu__head">본문에 변수를 삽입합니다</div>
+                        {DIRECT_VAR_MAP.map(v => (
+                          <button
+                            key={v.fieldKey}
+                            type="button"
+                            role="menuitem"
+                            className={`ds-var-item ds-t ${v.fieldKey === 'callback' ? 'ds-var-item--callback' : ''}`}
+                            onClick={() => {
+                              insertAtCursorPos(
+                                directCursorPosRef.current,
+                                v.variable,
+                                setDirectMessage,
+                                directTextareaRef.current,
+                                directCursorPosRef,
+                              );
+                              setVarMenuOpen(false);
+                            }}
+                          >
+                            <span className="ds-var-item__label">{v.label}</span>
+                            <span className="ds-var-item__code">{v.variable}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
+                {useIndividualCallback && individualCallbackColumn && (
+                  <div className="ds-ind-callback-hint flex-shrink-0">
+                    각 수신자의 <strong>{individualCallbackColumn}</strong> 값으로 발송됩니다
+                  </div>
+                )}
 
                 {/* 보조 액션 (미리보기 / 스팸필터) */}
                 <div className="grid grid-cols-2 gap-2">
@@ -875,7 +902,7 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                 <button
                   type="button"
                   className={`ds-rtab ${directInputMode === 'direct' ? 'ds-rtab--on' : ''}`}
-                  onClick={() => setShowDirectInput(true)}
+                  onClick={() => { setDirectInputMode('direct'); setShowDirectInput(true); }}
                 >
                   <PencilLine size={17} strokeWidth={1.75} />
                   <span>직접입력</span>
@@ -900,6 +927,7 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                   type="button"
                   className={`ds-rtab ${directInputMode === 'address' ? 'ds-rtab--on' : ''}`}
                   onClick={async () => {
+                    setDirectInputMode('address');
                     const token = localStorage.getItem('token');
                     const res = await fetch('/api/address-books/groups', { headers: { Authorization: `Bearer ${token}` } });
                     const data = await res.json();
