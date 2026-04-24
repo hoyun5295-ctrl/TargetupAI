@@ -216,6 +216,24 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
     return () => document.removeEventListener('mousedown', handler);
   }, [varMenuOpen]);
 
+  // ★ D137 UI: 회신번호 커스텀 드롭다운 (native select 대체 — 5개 이상 스크롤 + 검색)
+  const [callbackMenuOpen, setCallbackMenuOpen] = useState(false);
+  const [callbackSearch, setCallbackSearch] = useState('');
+  const callbackMenuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!callbackMenuOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (callbackMenuRef.current && !callbackMenuRef.current.contains(e.target as Node)) {
+        setCallbackMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [callbackMenuOpen]);
+  useEffect(() => {
+    if (!callbackMenuOpen) setCallbackSearch('');
+  }, [callbackMenuOpen]);
+
   // ============================================================
   // 내부 state
   // ============================================================
@@ -615,95 +633,170 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                   </div>
                 </div>
 
-                {/* 발신번호 — 라벨 인라인 */}
-                <div className="ds-callback-row">
-                  <span className="ds-callback-label">발신번호</span>
-                  <select
-                    className="ds-sel ds-num"
-                    value={selectedCallbackValue}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      if (val.startsWith('__col__')) {
-                        setUseIndividualCallback(true);
-                        setSelectedCallback('');
-                        setIndividualCallbackColumn(val.replace('__col__', ''));
-                      } else {
-                        setUseIndividualCallback(false);
-                        setSelectedCallback(val);
-                        setIndividualCallbackColumn('');
-                      }
-                    }}
-                  >
-                    <option value="">회신번호 선택</option>
-                    {directFileHeaders.length > 0 && (() => {
-                      const phoneHeaders = detectPhoneHeaders(directFileHeaders, directFileData)
-                        .filter(h => h !== directColumnMapping.phone);
-                      return phoneHeaders.length > 0 ? (
-                        <optgroup label="수신자별 회신번호 컬럼">
-                          {phoneHeaders.map(h => {
-                            const sample = directFileData[0]?.[h];
-                            return (
-                              <option key={h} value={`__col__${h}`}>
-                                {h}{sample ? ` (예: ${String(sample).slice(0, 15)})` : ''} (수신자별)
-                              </option>
-                            );
-                          })}
-                        </optgroup>
-                      ) : null;
-                    })()}
-                    <optgroup label="등록된 회신번호">
-                      {callbackNumbers.map((cb) => (
-                        <option key={cb.id} value={cb.phone}>
-                          {formatPhoneNumber(cb.phone)} {cb.label ? `(${cb.label})` : ''} {cb.is_default ? '⭐' : ''}
-                        </option>
-                      ))}
-                    </optgroup>
-                  </select>
-
-                  {/* ★ D137 UI A안: 변수 삽입 드롭다운 (발신번호 옆 병치) */}
-                  <div className="ds-var-wrap" ref={varMenuRef}>
-                    <button
-                      type="button"
-                      className={`ds-var-trigger ds-t ${varMenuOpen ? 'ds-var-trigger--on' : ''}`}
-                      onClick={() => setVarMenuOpen(o => !o)}
-                    >
-                      <Plus size={14} strokeWidth={2} />
-                      <span>변수 삽입</span>
-                      <ChevronDown size={13} strokeWidth={2} className={`ds-var-chev ${varMenuOpen ? 'ds-var-chev--open' : ''}`} />
-                    </button>
-                    {varMenuOpen && (
-                      <div className="ds-var-menu" role="menu">
-                        <div className="ds-var-menu__head">본문에 변수를 삽입합니다</div>
-                        {DIRECT_VAR_MAP.map(v => (
+                {/* 발신번호 — 커스텀 드롭다운 (검색 + 스크롤) */}
+                {(() => {
+                  const phoneHeaders = directFileHeaders.length > 0
+                    ? detectPhoneHeaders(directFileHeaders, directFileData).filter(h => h !== directColumnMapping.phone)
+                    : [];
+                  const selectedLabel = useIndividualCallback && individualCallbackColumn
+                    ? `${individualCallbackColumn} (수신자별)`
+                    : selectedCallback
+                      ? (() => {
+                          const cb = callbackNumbers.find(c => c.phone === selectedCallback);
+                          return cb
+                            ? `${formatPhoneNumber(cb.phone)}${cb.label ? ` (${cb.label})` : ''}`
+                            : formatPhoneNumber(selectedCallback);
+                        })()
+                      : '';
+                  const selectedIsDefault = !!(selectedCallback && callbackNumbers.find(c => c.phone === selectedCallback)?.is_default);
+                  const q = callbackSearch.trim().toLowerCase();
+                  const filteredPhoneHeaders = q
+                    ? phoneHeaders.filter(h => h.toLowerCase().includes(q))
+                    : phoneHeaders;
+                  const filteredCallbacks = q
+                    ? callbackNumbers.filter(cb =>
+                        cb.phone.replace(/-/g, '').includes(q.replace(/-/g, '')) ||
+                        (cb.label || '').toLowerCase().includes(q)
+                      )
+                    : callbackNumbers;
+                  return (
+                    <>
+                      <div className="ds-callback-row">
+                        <span className="ds-callback-label">발신번호</span>
+                        <div className="ds-callback-wrap" ref={callbackMenuRef}>
                           <button
-                            key={v.fieldKey}
                             type="button"
-                            role="menuitem"
-                            className={`ds-var-item ds-t ${v.fieldKey === 'callback' ? 'ds-var-item--callback' : ''}`}
-                            onClick={() => {
-                              insertAtCursorPos(
-                                directCursorPosRef.current,
-                                v.variable,
-                                setDirectMessage,
-                                directTextareaRef.current,
-                                directCursorPosRef,
-                              );
-                              setVarMenuOpen(false);
-                            }}
+                            className={`ds-sel ds-sel--btn ds-num ${callbackMenuOpen ? 'ds-sel--open' : ''} ${!selectedLabel ? 'ds-sel--placeholder' : ''}`}
+                            onClick={() => setCallbackMenuOpen(o => !o)}
                           >
-                            <span className="ds-var-item__label">{v.label}</span>
-                            <span className="ds-var-item__code">{v.variable}</span>
+                            <span className="ds-sel-label">
+                              {selectedLabel || '회신번호 선택'}
+                              {selectedIsDefault && <span className="ds-sel-star">⭐</span>}
+                            </span>
                           </button>
-                        ))}
+                          {callbackMenuOpen && (
+                            <div className="ds-callback-menu" role="menu">
+                              {callbackNumbers.length + phoneHeaders.length > 5 && (
+                                <div className="ds-callback-menu__search">
+                                  <Search size={13} strokeWidth={1.75} />
+                                  <input
+                                    type="text"
+                                    autoFocus
+                                    placeholder="번호·라벨 검색"
+                                    value={callbackSearch}
+                                    onChange={(e) => setCallbackSearch(e.target.value)}
+                                  />
+                                </div>
+                              )}
+                              <div className="ds-callback-menu__scroll">
+                                {filteredPhoneHeaders.length > 0 && (
+                                  <>
+                                    <div className="ds-callback-menu__group">수신자별 회신번호 컬럼</div>
+                                    {filteredPhoneHeaders.map(h => {
+                                      const sample = directFileData[0]?.[h];
+                                      const isActive = useIndividualCallback && individualCallbackColumn === h;
+                                      return (
+                                        <button
+                                          key={h}
+                                          type="button"
+                                          role="menuitem"
+                                          className={`ds-callback-item ${isActive ? 'ds-callback-item--on' : ''}`}
+                                          onClick={() => {
+                                            setUseIndividualCallback(true);
+                                            setSelectedCallback('');
+                                            setIndividualCallbackColumn(h);
+                                            setCallbackMenuOpen(false);
+                                          }}
+                                        >
+                                          <span className="ds-callback-item__label">{h} <span className="ds-callback-item__hint">(수신자별)</span></span>
+                                          {sample && <span className="ds-callback-item__sample">예: {String(sample).slice(0, 15)}</span>}
+                                        </button>
+                                      );
+                                    })}
+                                  </>
+                                )}
+                                <div className="ds-callback-menu__group">등록된 회신번호{callbackSearch && ` · ${filteredCallbacks.length}건`}</div>
+                                {callbackNumbers.length === 0 ? (
+                                  <div className="ds-callback-menu__empty">등록된 회신번호가 없습니다</div>
+                                ) : filteredCallbacks.length === 0 ? (
+                                  <div className="ds-callback-menu__empty">검색 결과가 없습니다</div>
+                                ) : (
+                                  filteredCallbacks.map((cb) => {
+                                    const isActive = !useIndividualCallback && selectedCallback === cb.phone;
+                                    return (
+                                      <button
+                                        key={cb.id}
+                                        type="button"
+                                        role="menuitem"
+                                        className={`ds-callback-item ${isActive ? 'ds-callback-item--on' : ''}`}
+                                        onClick={() => {
+                                          setUseIndividualCallback(false);
+                                          setSelectedCallback(cb.phone);
+                                          setIndividualCallbackColumn('');
+                                          setCallbackMenuOpen(false);
+                                        }}
+                                      >
+                                        <span className="ds-callback-item__label">
+                                          {formatPhoneNumber(cb.phone)}
+                                          {cb.label && <span className="ds-callback-item__hint"> ({cb.label})</span>}
+                                        </span>
+                                        {cb.is_default && <span className="ds-callback-item__star">⭐</span>}
+                                      </button>
+                                    );
+                                  })
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* 변수 삽입 드롭다운 (발신번호 옆 병치) */}
+                        <div className="ds-var-wrap" ref={varMenuRef}>
+                          <button
+                            type="button"
+                            className={`ds-var-trigger ds-t ${varMenuOpen ? 'ds-var-trigger--on' : ''}`}
+                            onClick={() => setVarMenuOpen(o => !o)}
+                          >
+                            <Plus size={14} strokeWidth={2} />
+                            <span>변수 삽입</span>
+                            <ChevronDown size={13} strokeWidth={2} className={`ds-var-chev ${varMenuOpen ? 'ds-var-chev--open' : ''}`} />
+                          </button>
+                          {varMenuOpen && (
+                            <div className="ds-var-menu" role="menu">
+                              <div className="ds-var-menu__head">본문에 변수를 삽입합니다</div>
+                              {DIRECT_VAR_MAP.map(v => (
+                                <button
+                                  key={v.fieldKey}
+                                  type="button"
+                                  role="menuitem"
+                                  className={`ds-var-item ds-t ${v.fieldKey === 'callback' ? 'ds-var-item--callback' : ''}`}
+                                  onClick={() => {
+                                    insertAtCursorPos(
+                                      directCursorPosRef.current,
+                                      v.variable,
+                                      setDirectMessage,
+                                      directTextareaRef.current,
+                                      directCursorPosRef,
+                                    );
+                                    setVarMenuOpen(false);
+                                  }}
+                                >
+                                  <span className="ds-var-item__label">{v.label}</span>
+                                  <span className="ds-var-item__code">{v.variable}</span>
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    )}
-                  </div>
-                </div>
-                {useIndividualCallback && individualCallbackColumn && (
-                  <div className="ds-ind-callback-hint flex-shrink-0">
-                    각 수신자의 <strong>{individualCallbackColumn}</strong> 값으로 발송됩니다
-                  </div>
-                )}
+                      {useIndividualCallback && individualCallbackColumn && (
+                        <div className="ds-ind-callback-hint flex-shrink-0">
+                          각 수신자의 <strong>{individualCallbackColumn}</strong> 값으로 발송됩니다
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
 
                 {/* 보조 액션 (미리보기 / 스팸필터) */}
                 <div className="grid grid-cols-2 gap-2">
