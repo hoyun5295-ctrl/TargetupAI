@@ -3574,6 +3574,7 @@ const campaignData = {
         calculateBytes={calculateBytes}
         getFullMessage={getFullMessage}
         targetFieldsMeta={targetFieldsMeta}
+        adTextEnabled={adTextEnabled}
       />
       <SendConfirmModal
         sendConfirm={sendConfirm}

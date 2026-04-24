@@ -521,7 +521,7 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                 {(directMsgType === 'LMS' || directMsgType === 'MMS') && (
                   <div className="relative flex-shrink-0">
                     {adTextEnabled && (
-                      <span className="ds-ad-tag absolute left-[10px] top-1/2 -translate-y-1/2 pointer-events-none">광고</span>
+                      <span className="ds-ad-prefix ds-ad-prefix--subject absolute left-[12px] top-1/2 -translate-y-1/2">(광고)</span>
                     )}
                     <input
                       type="text"
@@ -529,7 +529,7 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                       onChange={(e) => setDirectSubject(e.target.value)}
                       placeholder="제목을 입력해주세요 (필수)"
                       className="ds-subject-in"
-                      style={adTextEnabled ? { paddingLeft: 52 } : undefined}
+                      style={adTextEnabled ? { paddingLeft: 54 } : undefined}
                     />
                   </div>
                 )}
@@ -538,7 +538,7 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                 <div className="ds-editor-wrap ds-t">
                   <div className="ds-editor-body">
                     {adTextEnabled && (
-                      <span className="ds-ad-tag absolute left-0 top-0 z-10">광고</span>
+                      <span className="ds-ad-prefix absolute left-0 top-0 z-10">(광고)</span>
                     )}
                     <textarea
                       ref={directTextareaRef}
@@ -548,7 +548,7 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                       onSelect={(e) => { directCursorPosRef.current = (e.target as HTMLTextAreaElement).selectionStart; }}
                       placeholder="전송하실 내용을 입력하세요."
                       spellCheck={false}
-                      style={adTextEnabled ? { textIndent: 42 } : undefined}
+                      style={adTextEnabled ? { textIndent: 52 } : undefined}
                     />
                   </div>
 
@@ -1116,8 +1116,8 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
               })()}
             </div>
 
-            {/* 하단 액션 */}
-            <div className="flex items-center justify-between">
+            {/* 하단 액션 — 좌측 전송하기 bottom과 정렬 */}
+            <div className="ds-bottom-actions">
               <div className="flex items-center gap-1">
                 <button type="button" className="ds-ter ds-ter--danger ds-t" onClick={() => {
                   if (selectedRecipients.size === 0) { setToast({ show: true, type: 'error', message: '선택된 항목이 없습니다' }); return; }

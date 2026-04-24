@@ -320,7 +320,7 @@
   color: var(--ds-amber-600);
 }
 
-/* (광고) amber 태그 (제목/본문 내부 pill) */
+/* (광고) amber 태그 (옵션 카드 등 라벨용 pill — 본문/제목엔 사용 X) */
 .ds-ad-tag {
   display: inline-flex;
   align-items: center;
@@ -333,6 +333,21 @@
   font-weight: 600;
   letter-spacing: 0;
   margin-right: 4px;
+}
+
+/* (광고) 실제 텍스트 프리픽스 — 핸드폰 수신 화면과 동일한 모습 */
+.ds-ad-prefix {
+  color: #EA580C;
+  font-weight: 500;
+  font-size: 13.5px;
+  letter-spacing: -0.01em;
+  pointer-events: none;
+  user-select: none;
+}
+.ds-ad-prefix--subject {
+  font-size: 13px;
+  color: var(--ds-amber-700);
+  font-weight: 600;
 }
 
 /* ============================================================
@@ -591,6 +606,7 @@
   cursor: pointer;
   font-family: inherit;
   flex-shrink: 0;
+  margin-top: auto; /* ★ D137 UI: 좌측 섹션 bottom edge 고정 */
 }
 .ds-btn-primary:hover:not(:disabled) {
   background: var(--ds-emerald-700);
@@ -1054,6 +1070,16 @@
   color: #BE123C;
 }
 .ds-ter svg { width: 13px; height: 13px; stroke-width: 1.75; }
+
+/* 우측 섹션 하단 액션 바 — bottom edge 고정 (좌측 전송하기와 동일 라인) */
+.ds-bottom-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: auto;
+  flex-shrink: 0;
+  padding-top: 4px;
+}
 
 /* ============================================================
    카운트 표시 (총 N 건)

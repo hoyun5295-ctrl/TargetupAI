@@ -18,6 +18,8 @@ interface DirectPreviewModalProps {
   getFullMessage: (msg: string) => string;
   // ★ D43-3c: 타겟발송 동적 필드 메타
   targetFieldsMeta: FieldMeta[];
+  // ★ D137 UI: 광고표기 ON/OFF — LMS/MMS 제목에 (광고) prefix 적용
+  adTextEnabled?: boolean;
 }
 
 // ★ B+0407-1: 인라인 replaceVarsWithMeta 제거 — formatDate.ts replaceVarsByFieldMeta 컨트롤타워 사용
@@ -39,8 +41,14 @@ export default function DirectPreviewModal({
   selectedCallback, mmsUploadedImages,
   formatPhoneNumber, calculateBytes, getFullMessage,
   targetFieldsMeta,
+  adTextEnabled = false,
 }: DirectPreviewModalProps) {
   if (!show) return null;
+
+  // ★ D137 UI: 제목에 (광고) 자동 prefix — 이미 포함되어 있으면 중복 방지
+  const subjectWithAd = adTextEnabled && directSubject
+    ? (directSubject.trim().startsWith('(광고)') ? directSubject : `(광고) ${directSubject}`)
+    : directSubject;
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60]">
@@ -57,13 +65,13 @@ export default function DirectPreviewModal({
               <div className="bg-white rounded-[1.6rem] overflow-hidden flex flex-col w-[280px]" style={{ height: '420px' }}>
                 {/* 상단 - 회신번호 */}
                 <div className="px-4 py-2.5 bg-gradient-to-r from-gray-50 to-gray-100 flex justify-between items-center shrink-0 border-b">
-                  <span className="text-[11px] text-gray-400 font-medium">문자메시지</span>
+                  <span className="text-[11px] text-gray-400 font-medium">{directMsgType === 'MMS' ? 'MMS' : directMsgType === 'LMS' ? 'LMS' : '문자메시지'}</span>
                   <span className="text-[11px] font-bold text-emerald-600">{formatPhoneNumber(selectedCallback) || '회신번호'}</span>
                 </div>
-                {/* LMS/MMS 제목 */}
-                {(directMsgType === 'LMS' || directMsgType === 'MMS') && directSubject && (
+                {/* LMS/MMS 제목 — (광고) prefix 포함 */}
+                {(directMsgType === 'LMS' || directMsgType === 'MMS') && subjectWithAd && (
                   <div className="px-4 py-2 bg-orange-50 border-b border-orange-200">
-                    <span className="text-sm font-bold text-orange-700">{directSubject}</span>
+                    <span className="text-sm font-bold text-orange-700" style={{ wordBreak: 'keep-all' }}>{subjectWithAd}</span>
                   </div>
                 )}
                 {/* 메시지 영역 */}
@@ -74,7 +82,7 @@ export default function DirectPreviewModal({
                   )}
                   <div className="flex gap-2 mt-1">
                     <div className="w-7 h-7 rounded-full bg-emerald-100 flex items-center justify-center shrink-0 text-xs">📱</div>
-                    <div className="bg-white rounded-2xl rounded-tl-sm p-3 shadow-sm border border-gray-100 text-[13px] leading-[1.7] whitespace-pre-wrap text-gray-700 max-w-[95%]">
+                    <div className="bg-white rounded-2xl rounded-tl-sm p-3 shadow-sm border border-gray-100 text-[13px] leading-[1.7] whitespace-pre-wrap text-gray-700 max-w-[95%]" style={{ wordBreak: 'keep-all', overflowWrap: 'anywhere' }}>
                       {/* ★ D43-3c: 동적 변수 치환 (폰 프레임) */}
                       {(() => {
                         const firstR = showTargetSend ? targetRecipients[0] : directRecipients[0];
