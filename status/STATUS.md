@@ -107,6 +107,65 @@
 
 ---
 
+### 🟣 D137 (2026-04-24) — 한줄로_20260423.pdf 10건 전건 근본수정 + Sync Agent v1.5.2 빌드 완료
+
+> **상태:** 🟡 코드 수정 + Agent 빌드 완료 · **배포 대기** · **다음 세션 실서버 재검증 필수**
+>
+> **PDF:** `C:\Users\ceo\OneDrive\문서\카카오톡 받은 파일\한줄로_20260423.pdf` 10건
+>
+> **✅ 수정 완료 (10건 전건):**
+>
+> | # | 제목 | 수정 파일 | 방식 |
+> |---|------|----------|------|
+> | D1 | DB현황 카드 모달 "타겟발송 바로가기" 삭제 | CardDetailModal/Dashboard/DirectTargetFilterModal (3파일 14지점) | **옵션 A 뿌리째** — `CardTargetFilterOutput` 타입·`onTargetSend` prop·`buildTargetFilters` 함수·푸터 버튼·Dashboard state·DirectTargetFilterModal `initialFilters` prop까지 완전 제거 |
+> | D2 | LMS/MMS 무료거부 위 빈 줄 과잉 (D136 D2 재발) | `messageUtils.ts` L378 + `formatDate.ts` L785 + `services/ai.ts` L950-951, L1912-1913 | **근본 분리:** `minBreaks = 1` 통일 (LMS/MMS 강제 빈줄 제거) + AI 자동제거 regex `\n?` 삭제 (AI 경로 원본 개행 보존) → 직접발송은 고객 입력대로, AI 경로는 빈줄 1개 유지 |
+> | D3 | 직접발송 "상위 10개 표시" 제거 + 페이지네이션 | `DirectSendPanel.tsx` (state + 렌더 + 페이지네이션 UI) | BirthdayCustomerList 톤 계승 (이전/1-N/다음), selectedRecipients `originalIdx` 기반이라 페이지 이동해도 선택 유지 |
+> | D4 | 발송 전 안내창 중복제거 건수 표시 | 백엔드 `/api/unsubscribes/check` + `SendConfirmModal` + 호출부 4곳 | CT-14 `deduplicateByPhone` 재사용 → 발송 시 실제 dedup 기준과 카운트 일치 보장 |
+> | D5 | 수신번호/회신번호 앞 0 자동 보정 | `formatDate.ts` `normalizePhoneKr` 신설 + 백엔드 `normalize.ts` 미러 + `DirectSendPanel.tsx` 5지점 | 한국 전화번호 prefix 전수(02/01X/03X/04X/05X/50X/06X/70) · 정상 입력은 절대 변형 X · Harold님 지시 "phone + callback 2개 필드만" 준수 |
+> | D6 | (광고)/무료거부 표시 불일치 — D102/D106/D109 **3번째 재발** | `formatDate.ts` `formatCampaignMessageForDisplay` | **근본:** `realSentMessage`도 `stripAdParts + buildAdMessageFront` 파이프라인 통과 → msg_contents 저장 상태와 무관하게 모든 표시 경로에서 완전 일관 |
+> | D7 | MMS 이미지 1/2/3 순서 카운트 이상 (D136 D3 재발) | `Dashboard.tsx` `handleMmsSlotUpload` guard + `MmsUploadModal.tsx` 잠금 UI | Harold님 지시 **"왼쪽부터 순서대로 강제"** 방식: `slotIndex > length` 차단 + 잠긴 슬롯 UI(🔒 + 안내) |
+> | D8 | Sync Agent 크래시 후 서비스 중지 + 자동재시작 실패 | `sync-agent/src/index.ts` L395 | `unhandledRejection` / `uncaughtException` 핸들러 추가 → 일시 장애에도 서비스 유지 (+ Harold님 Windows 서비스 복구 설정 조치 필요) |
+> | D9 | Sync Agent grade `NORMAL/SILVER` 영문 표기 | `field-map.ts` grade `trim` 유지 | **코드 이미 OK** (D131 반영) · **배포된 Setup-1.5.1.exe가 구 빌드** → v1.5.2 재빌드로 해결 |
+> | D10 | 슈퍼관리자 대시보드 카드 설정 `custom_1` 라벨 | `sync-agent/src/index.ts` L198 + L208 근본 수정 | **근본 2단:** (a) `customFieldLabels` 자동 유도 — config 비어있으면 `mapping.customers` 역추출로 원본 DB 컬럼명을 라벨로 (b) `isFieldDefinitionsRegistered()` 체크 제거 — 매 시작 시 재등록 (CT-07 idempotent) |
+>
+> **📦 Sync Agent v1.5.2 빌드 완료:**
+> - Windows: `sync-agent/installer/SyncAgent-Setup-1.5.2.exe` (19MB, NSIS)
+> - Linux: `sync-agent/installer/SyncAgent-1.5.2-linux-x64.tar.gz` (37MB)
+> - 구 버전(1.5.0 tar.gz / 1.5.1 exe·zip) 전부 삭제
+> - `package.json` 1.5.1 → 1.5.2, `config/schema.ts` default 1.5.2
+>
+> **🎓 D137 핵심 교훈:**
+> 1. **서브 폴더 추측 금지** — sync-agent가 `packages/` 밑이 아닌 프로젝트 루트에 있는데 `packages/`만 보고 "저장소 밖"이라고 오판. 전체 tree 확인 절대 필수.
+> 2. **재발 버그는 경로 불일치** — D2/D7 둘 다 D136에서 "1곳만" 수정됐던 것. **5경로×표시경로 매트릭스** 전수 점검이 아닌 SMS/맞춤한줄만 보고 완료 선언한 게 원인.
+> 3. **컨트롤타워 + 배포된 빌드 버전 불일치** — D9는 소스는 D131에서 `trim`으로 고쳤지만 배포된 Setup-1.5.1.exe가 구 빌드. **소스 수정 + 빌드 + 재배포 3중 확인** 필수.
+> 4. **근본 분리 원칙** — D2 해결 시 "AI 경로 빈줄 유지" vs "직접발송 빈줄 제거" 충돌처럼 보였지만 실제로는 두 경로의 데이터 흐름이 달라 **regex `\n?` 제거 + `minBreaks=1` 분리 수정**으로 근본 분리. 한쪽 정책 철회가 아니라 경로별 분리.
+>
+> **🚦 배포 순서 (Harold님):**
+> 1. `tp-push "D137 PDF 10건 근본수정 + Sync Agent v1.5.2"` → `tp-deploy-full` (백엔드 + 프론트)
+> 2. `sync-agent/installer/SyncAgent-Setup-1.5.2.exe` 각 업체 PC 재설치 (Linux는 tar.gz)
+> 3. Windows `services.msc` → SyncAgent → 복구 탭: 첫 번째/두 번째/후속 실패 → **"서비스 다시 시작"** (1분 간격)
+>
+> **🧪 다음 세션 재검증 필수 (Harold님 지시):**
+>
+> 배포 후 실서버에서 D1~D10 전건 재검증:
+>
+> | # | 검증 방법 |
+> |---|-----------|
+> | D1 | DB현황 카드(생일/등급/성별 등) 클릭 → 상세 모달 하단에 "타겟 발송 바로가기" 버튼 **없음** 확인 |
+> | D2 | 직접발송/직접타겟발송 LMS/MMS 미리보기: 본문 끝 개행 없이 입력 → 무료거부 위 빈줄 **없음**. AI 한줄로 생성 시 LMS/MMS는 "[브랜드]\n\n무료수신거부" 빈줄 1개 유지 |
+> | D3 | 직접발송 주소록 대량(수만건) 업로드 → "(상위 10개 표시)" 문구 **없음** + 하단 이전/N-M/다음 페이지네이션 정상 작동 + 검색 시 페이지 리셋 |
+> | D4 | 직접발송 즉시발송/예약발송 안내창에 "중복 제외 N건" 라인 표시 (수신거부 제외 아래) |
+> | D5 | 직접입력 `1052958517` 입력 → 리스트/실발송에 `01052958517` 로 보정. `01052958517` 정상 입력은 그대로. 파일업로드도 동일. **회신번호도 동일 보정** |
+> | D6 | 발송결과 리스트 / "보기 상세" / "발송내역보기" / 캠페인 상세 → 동일 메시지에 (광고)/무료거부가 **모든 창에서 일관** 표시 |
+> | D7 | MMS 업로드 모달에서 빈 1번 슬롯 있을 때 2번/3번 슬롯 🔒 잠금 표시 + 클릭 시 토스트 "이미지 N번부터 순서대로 등록해주세요" |
+> | D8 | Agent 강제 crash 시뮬레이션 (일시 DB 단절 등) → 서비스 유지 확인. Windows 서비스 "복구" 탭 설정 확인 |
+> | D9 | 시세이도 등 `일반/실버/골든` 한글 고객 데이터 sync → 한줄로 고객DB 조회에 한글 그대로 표시 |
+> | D10 | 슈퍼관리자 → 고객사 관리 → 대시보드 카드 설정 → **커스텀 필드 라벨이 업체 DB 원본 컬럼명으로 표시** (`custom_1` 원문 아님) |
+>
+> **⚠️ D-Day(2026-05-05 레거시 이관)까지 D-11. D137 배포 + 재검증 먼저 완료 후 레거시 이관 작업 진행.**
+
+---
+
 ### 🟢 D136 P1 (2026-04-22 밤 연속 세션) — PDF 9건 전체 완료 + 전수점검 추가 수정
 
 > **상태:** 코드 수정 완료, 1차 배포 완료(D1/D1-2/D9/D6/D8/CustomerDBModal fieldKey), 전수점검 추가 2건 배포 대기(upload.ts/unsubscribe-helper.ts CT-03 통합)

@@ -1,14 +1,30 @@
 /**
  * ★ D96: 직접발송 패널 — Dashboard.tsx에서 분리
+ * ★ D137 (2026-04-24): 디자인 전면 리프트 (Claude Design 시안 기반)
  *
- * 좌측: 메시지 작성 (SMS/RCS/알림톡 채널 선택)
- * 우측: 수신자 목록 (직접입력/파일등록/주소록)
- * 하위모달: 파일매핑, 직접입력
+ *   - 좌측 520px: 메시지 에디터 (SMS/RCS/알림톡 채널 선택)
+ *   - 우측: 수신자 목록 (직접입력/파일등록/주소록)
+ *   - 기능/state/props/유틸 호출은 100% 기존 유지
+ *   - 디자인 토큰: packages/frontend/src/styles/direct-send.css (ds-* 클래스)
  *
- * 컨트롤타워: formatDate.ts의 DIRECT_VAR_MAP, DIRECT_FIELD_LABELS, DIRECT_MAPPING_FIELDS, replaceDirectVars
+ * 컨트롤타워:
+ *   - formatDate.ts: DIRECT_VAR_MAP, DIRECT_FIELD_LABELS, DIRECT_MAPPING_FIELDS,
+ *                    replaceDirectVars, buildAdMessageFront, detectPhoneHeaders,
+ *                    normalizePhoneKr, calculateSmsBytes, formatPreviewValue
+ *   - textInsert.ts: insertAtCursorPos
  */
 
 import { useState, useRef } from 'react';
+import {
+  MessageSquare, Smartphone, Bell,
+  SendHorizontal, Send,
+  X, Search, Upload,
+  PencilLine, FolderOpen, Contact,
+  Asterisk, Archive, Save,
+  Eye, ShieldCheck, Lock,
+  CalendarClock, Star, ChevronDown, Image as ImageIcon,
+  Trash2, XCircle, RotateCcw, ChevronRight,
+} from 'lucide-react';
 import {
   calculateSmsBytes,
   formatPreviewValue,
@@ -28,6 +44,7 @@ import AlimtalkChannelPanel, {
   type AlimtalkSenderProfile,
   type AlimtalkTemplate,
 } from './alimtalk/AlimtalkChannelPanel';
+import '../styles/direct-send.css';
 
 // ============================================================
 // Props 인터페이스
@@ -89,17 +106,16 @@ export interface DirectSendPanelProps {
   setKakaoSelectedTemplate: (t: any) => void;
   kakaoTemplateVars: Record<string, string>;
   setKakaoTemplateVars: React.Dispatch<React.SetStateAction<Record<string, string>>>;
-  alimtalkFallback: 'N' | 'S' | 'L' | 'A' | 'B';           // ★ D130: A/B 타입 확장
+  alimtalkFallback: 'N' | 'S' | 'L' | 'A' | 'B';
   setAlimtalkFallback: (f: 'N' | 'S' | 'L' | 'A' | 'B') => void;
   kakaoMessage: string;
   setKakaoMessage: (m: string) => void;
-  // ★ D130 신규 알림톡 필드 (설계서 §6-3-D)
-  alimtalkSenders?: AlimtalkSenderProfile[];               // 승인된 발신프로필 목록
-  alimtalkProfileId?: string;                              // 선택된 발신프로필 id
+  alimtalkSenders?: AlimtalkSenderProfile[];
+  alimtalkProfileId?: string;
   setAlimtalkProfileId?: (id: string) => void;
-  alimtalkNextContents?: string;                           // A/B 대체 문구
+  alimtalkNextContents?: string;
   setAlimtalkNextContents?: (v: string) => void;
-  customerFieldOptions?: { key: string; label: string }[]; // 변수 매핑용 고객 필드
+  customerFieldOptions?: { key: string; label: string }[];
 
   // RCS
   rcsTemplates: any[];
@@ -163,8 +179,7 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
     kakaoTemplates, kakaoSelectedTemplate, setKakaoSelectedTemplate,
     kakaoTemplateVars, setKakaoTemplateVars,
     alimtalkFallback, setAlimtalkFallback,
-    kakaoMessage, setKakaoMessage,
-    // ★ D130 신규
+    setKakaoMessage,
     alimtalkSenders = [],
     alimtalkProfileId = '',
     setAlimtalkProfileId,
@@ -178,7 +193,7 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
     onSendConfirm, setToast,
     lmsKeepAccepted, smsOverrideAccepted,
     setPendingBytes, setShowLmsConfirm, setShowSmsConvert,
-    getFullMessage, getMaxByteMessage, formatPhoneNumber, formatRejectNumber,
+    getMaxByteMessage, formatPhoneNumber, formatRejectNumber,
     onClose,
   } = props;
 
@@ -187,7 +202,7 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
   const directCursorPosRef = useRef<number>(0);
 
   // ============================================================
-  // 내부 state (직접발송 전용 — Dashboard에서 이동)
+  // 내부 state
   // ============================================================
   const [directInputMode, setDirectInputMode] = useState<'file' | 'direct' | 'address'>('file');
   const [directFileHeaders, setDirectFileHeaders] = useState<string[]>([]);
@@ -199,26 +214,28 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
   const [directLoadingProgress, setDirectLoadingProgress] = useState(0);
   const [directShowMapping, setDirectShowMapping] = useState(false);
   const [showDirectInput, setShowDirectInput] = useState(false);
-  // ★ D102: 중복제거/수신거부제거 체크박스 state (기본 true)
   const [dedupEnabled, setDedupEnabled] = useState(true);
   const [unsubFilterEnabled, setUnsubFilterEnabled] = useState(true);
   const [directInputText, setDirectInputText] = useState('');
   const [directSearchQuery, setDirectSearchQuery] = useState('');
   const [selectedRecipients, setSelectedRecipients] = useState<Set<number>>(new Set());
-  // ★ D137 (0423 D3): 직접발송 수신자 리스트 페이지네이션 (기본 10건/페이지)
+  // ★ D137 (0423 D3): 페이지네이션
   const [directPage, setDirectPage] = useState(0);
 
   // ============================================================
   // 헬퍼
   // ============================================================
   const calculateBytes = calculateSmsBytes;
-
-  // ★ D102: getAdSuffix UI 표시용으로만 유지 (메시지 조합은 buildAdMessageFront 사용)
   const getAdSuffix = () => {
     return directMsgType === 'SMS'
       ? `무료거부${optOutNumber.replace(/-/g, '')}`
       : `무료수신거부 ${formatRejectNumber(optOutNumber)}`;
   };
+
+  // 바이트 진행도 — 0~1
+  const byteRatio = Math.min(messageBytes / Math.max(1, maxBytes), 1);
+  const byteState: 'ok' | 'warn' | 'danger' =
+    byteRatio >= 1 ? 'danger' : byteRatio >= 0.8 ? 'warn' : byteRatio >= 0.5 ? 'warn' : 'ok';
 
   // ============================================================
   // 전송 유효성 검사 + 확인 모달
@@ -245,14 +262,12 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
       return;
     }
 
-    // SMS 바이트 초과 시 LMS 전환 모달
     if (directMsgType === 'SMS' && messageBytes > 90 && !smsOverrideAccepted) {
       setPendingBytes(messageBytes);
       setShowLmsConfirm(true);
       return;
     }
 
-    // LMS/MMS인데 SMS로 보내도 되는 경우 비용 절감 안내
     if (directMsgType !== 'SMS' && !lmsKeepAccepted && mmsUploadedImages.length === 0) {
       const smsMaxMsg = getMaxByteMessage(directMessage, directRecipients, DIRECT_VAR_TO_FIELD);
       const smsFullMsg = buildAdMessageFront(smsMaxMsg, 'SMS', adTextEnabled, optOutNumber);
@@ -263,7 +278,6 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
       }
     }
 
-    // 수신거부 체크
     const token = localStorage.getItem('token');
     const phones = directRecipients.map((r: any) => r.phone);
     const checkRes = await fetch('/api/unsubscribes/check', {
@@ -273,18 +287,17 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
     });
     const checkData = await checkRes.json();
     const unsubCount = checkData.unsubscribeCount || 0;
-    const dupCount = checkData.duplicateCount || 0;  // ★ D137 D4
+    const dupCount = checkData.duplicateCount || 0;
 
     onSendConfirm({
       show: true,
       type: reserveEnabled ? 'scheduled' : 'immediate',
       count: directRecipients.length - (unsubFilterEnabled ? unsubCount : 0) - (dedupEnabled ? dupCount : 0),
       unsubscribeCount: unsubFilterEnabled ? unsubCount : 0,
-      duplicateCount: dedupEnabled ? dupCount : 0,  // ★ D137 D4
+      duplicateCount: dedupEnabled ? dupCount : 0,
       dateTime: reserveEnabled && reserveDateTime ? reserveDateTime : undefined,
       from: 'direct',
       msgType: directMsgType,
-      // ★ D102: 중복제거/수신거부제거 플래그 전달
       dedupEnabled,
       unsubFilterEnabled,
     });
@@ -303,14 +316,13 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
     const checkRes = await fetch('/api/unsubscribes/check', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ phones }) });
     const checkData = await checkRes.json();
     const unsubCount = checkData.unsubscribeCount || 0;
-    const dupCount = checkData.duplicateCount || 0;  // ★ D137 D4
+    const dupCount = checkData.duplicateCount || 0;
     onSendConfirm({ show: true, type: 'immediate', count: directRecipients.length - unsubCount - dupCount, unsubscribeCount: unsubCount, duplicateCount: dupCount, from: 'direct', msgType: '알림톡' });
   };
 
-  // 스팸필터 열기
+  // 스팸필터
   const handleSpamFilter = () => {
     if (isSpamFilterLocked) { setShowSpamFilterLock(true); return; }
-    // ★ PPT#4: 발송리스트 없으면 스팸테스트 차단
     if (!directRecipients || directRecipients.length === 0) {
       setToast({ show: true, type: 'error', message: '발송리스트를 먼저 업로드해주세요.' });
       return;
@@ -330,7 +342,7 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
     setShowSpamFilter(true);
   };
 
-  // 파일 업로드 처리
+  // 파일 업로드
   const handleFileUpload = async (file: File) => {
     setDirectFileLoading(true);
     const formData = new FormData();
@@ -377,7 +389,6 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
     for (let i = 0; i < total; i += chunkSize) {
       const chunk = directFileData.slice(i, i + chunkSize);
       const processed = chunk.map(row => {
-        // ★ D137 D5: 파일 업로드 시 앞 0 누락 보정 (Excel 숫자 저장 대응)
         const phone = normalizePhoneKr(row[directColumnMapping.phone]);
         const entry: any = {
           phone,
@@ -385,10 +396,8 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
           extra1: directColumnMapping.extra1 ? (row[directColumnMapping.extra1] || '') : '',
           extra2: directColumnMapping.extra2 ? (row[directColumnMapping.extra2] || '') : '',
           extra3: directColumnMapping.extra3 ? (row[directColumnMapping.extra3] || '') : '',
-          // ★ D137 D5: 회신번호도 앞 0 누락 자동 보정 (엑셀 숫자 저장 대응)
           callback: directColumnMapping.callback ? normalizePhoneKr(row[directColumnMapping.callback]) : '',
         };
-        // 알림톡 템플릿 변수 매핑
         if (directSendChannel === 'kakao_alimtalk' && kakaoSelectedTemplate) {
           const vars = kakaoSelectedTemplate.content?.match(/#{[^}]+}/g) || [];
           const varValues: Record<string, string> = {};
@@ -412,187 +421,252 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
   };
 
   // ============================================================
+  // 파생값
+  // ============================================================
+  const selectedCallbackValue = useIndividualCallback
+    ? `__col__${individualCallbackColumn}`
+    : selectedCallback;
+
+  // ============================================================
   // JSX
   // ============================================================
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-2xl shadow-2xl w-[1400px] max-h-[95vh] overflow-y-auto">
-        {/* 본문 */}
-        <div className="px-6 py-5 flex gap-5">
-          {/* 좌측: 메시지 작성 */}
-          <div className="w-[400px]">
-            {/* 채널 선택 탭 */}
-            <div className="flex mb-2 bg-gray-100 rounded-lg p-1 gap-0.5">
+    <div className="ds-scope ds-backdrop">
+      <div className="ds-modal">
+
+        {/* ============ 모달 헤더 ============ */}
+        <header className="ds-modal__header">
+          <div className="flex items-center gap-3">
+            <div className="ds-head-icon">
+              <SendHorizontal size={18} strokeWidth={1.75} />
+            </div>
+            <div>
+              <div className="ds-head-title">직접발송</div>
+              <div className="ds-head-sub">메시지를 작성하고 수신자에게 바로 전송합니다</div>
+            </div>
+          </div>
+
+          <button className="ds-close-btn ds-t" onClick={onClose}>
+            <X size={14} strokeWidth={1.75} />
+            <span>창닫기</span>
+          </button>
+        </header>
+
+        {/* ============ 2컬럼 body ============ */}
+        <div className="ds-modal__body">
+
+          {/* ====== 좌측: 메시지 에디터 ====== */}
+          <section className="ds-section">
+
+            {/* 채널 탭 */}
+            <div className="ds-channel-group">
               {([
-                { key: 'sms' as const, label: '📱 문자', activeColor: 'text-emerald-600' },
-                { key: 'rcs' as const, label: '📱 RCS', activeColor: 'text-purple-600' },
-                { key: 'kakao_alimtalk' as const, label: '🔔 알림톡', activeColor: 'text-blue-600' },
-              ] as const).map(ch => (
-                <button key={ch.key}
-                  onClick={() => { setDirectSendChannel(ch.key); if (ch.key === 'sms') setMmsUploadedImages([]); }}
-                  className={`flex-1 py-2 text-xs font-medium rounded-md transition-all ${
-                    directSendChannel === ch.key
-                      ? `bg-white shadow ${ch.activeColor}`
-                      : 'text-gray-400 hover:text-gray-600'
-                  }`}
-                >{ch.label}</button>
+                { key: 'sms' as const, label: '문자', Icon: MessageSquare, on: 'ds-pill--on' },
+                { key: 'rcs' as const, label: 'RCS', Icon: Smartphone, on: 'ds-pill--on-purple' },
+                { key: 'kakao_alimtalk' as const, label: '알림톡', Icon: Bell, on: 'ds-pill--on-blue' },
+              ]).map(({ key, label, Icon, on }) => (
+                <button
+                  key={key}
+                  type="button"
+                  className={`ds-pill ${directSendChannel === key ? on : ''}`}
+                  onClick={() => {
+                    setDirectSendChannel(key);
+                    if (key === 'sms') setMmsUploadedImages([]);
+                  }}
+                >
+                  <Icon size={15} strokeWidth={1.75} />
+                  <span>{label}</span>
+                </button>
               ))}
             </div>
 
             {/* === SMS 채널 === */}
-            {directSendChannel === 'sms' && (<>
-            {/* SMS/LMS/MMS 서브탭 */}
-            <div className="flex mb-2 bg-gray-50 rounded-lg p-0.5">
-              <button
-                onClick={() => { setDirectMsgType('SMS'); setMmsUploadedImages([]); }}
-                className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-colors ${directMsgType === 'SMS' ? 'bg-white shadow text-emerald-600' : 'text-gray-500 hover:text-gray-700'}`}
-              >SMS</button>
-              <button
-                onClick={() => { setDirectMsgType('LMS'); setMmsUploadedImages([]); }}
-                className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-colors ${directMsgType === 'LMS' ? 'bg-white shadow text-emerald-600' : 'text-gray-500 hover:text-gray-700'}`}
-              >LMS</button>
-              <button
-                onClick={() => { setDirectMsgType('MMS'); }}
-                className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-colors ${directMsgType === 'MMS' ? 'bg-white shadow text-emerald-600' : 'text-gray-500 hover:text-gray-700'}`}
-              >MMS</button>
-            </div>
-
-            {/* SMS 메시지 작성 영역 */}
-            <div className="border-2 border-gray-200 rounded-2xl overflow-hidden bg-white shadow-sm">
-              {/* LMS/MMS 제목 */}
-              {(directMsgType === 'LMS' || directMsgType === 'MMS') && (
-                <div className="px-4 pt-3">
-                  <div className="relative">
-                    {adTextEnabled && (
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-orange-600 font-medium pointer-events-none select-none">(광고) </span>
-                    )}
-                    <input
-                      type="text"
-                      value={directSubject}
-                      onChange={(e) => setDirectSubject(e.target.value)}
-                      placeholder={adTextEnabled ? "제목 입력 (필수)" : "제목 (필수)"}
-                      style={adTextEnabled ? { paddingLeft: '52px' } : {}}
-                      className="w-full px-3 py-2 border border-orange-300 bg-orange-50 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 placeholder-orange-400"
-                    />
-                  </div>
+            {directSendChannel === 'sms' && (
+              <>
+                {/* SMS/LMS/MMS 세그먼트 */}
+                <div className="ds-seg">
+                  {(['SMS', 'LMS', 'MMS'] as const).map(t => (
+                    <button
+                      key={t}
+                      type="button"
+                      className={directMsgType === t ? 'ds-seg--on' : ''}
+                      onClick={() => {
+                        setDirectMsgType(t);
+                        if (t !== 'MMS') setMmsUploadedImages([]);
+                      }}
+                    >
+                      {t}
+                    </button>
+                  ))}
                 </div>
-              )}
 
-              {/* 메시지 입력 */}
-              <div className="p-4">
-                <div className="relative">
-                  {adTextEnabled && (
-                    <span className="absolute left-0 top-0 text-sm text-orange-600 font-medium pointer-events-none select-none">(광고) </span>
-                  )}
-                  <textarea
-                    ref={directTextareaRef}
-                    data-char-target="direct"
-                    value={directMessage}
-                    onChange={(e) => { setDirectMessage(e.target.value); directCursorPosRef.current = e.target.selectionStart; }}
-                    onSelect={(e) => { directCursorPosRef.current = (e.target as HTMLTextAreaElement).selectionStart; }}
-                    placeholder="전송하실 내용을 입력하세요."
-                    style={adTextEnabled ? { textIndent: '42px' } : {}}
-                    className={`w-full resize-none border-0 focus:outline-none text-sm leading-relaxed ${directMsgType === 'SMS' ? 'h-[180px]' : 'h-[140px]'}`}
-                  />
-                </div>
-                {/* 무료거부 표기 */}
-                {adTextEnabled && (
-                  <div className="text-sm text-orange-600 mt-1">
-                    {getAdSuffix()}
-                  </div>
-                )}
-
-                {/* ★ B3: MMS 이미지 미리보기 — 공용 컴포넌트 MmsImagePreview 사용 */}
-                {directMsgType === 'MMS' && (
-                  <div className="mt-2 pt-2 border-t cursor-pointer hover:bg-amber-50/50 transition-colors rounded-lg p-2" onClick={() => setShowMmsUploadModal(true)}>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-semibold text-gray-600">🖼️ MMS 이미지</span>
-                      {mmsUploadedImages.length > 0 ? (
-                        <div className="flex items-center gap-1">
-                          <MmsImagePreview images={mmsUploadedImages} size="xs" compact />
-                          <span className="text-xs text-purple-600 ml-1">✏️ 수정</span>
-                        </div>
-                      ) : (
-                        <span className="text-xs text-amber-600">클릭하여 이미지 첨부 →</span>
+                {/* 제목 (LMS/MMS 전용) */}
+                {(directMsgType === 'LMS' || directMsgType === 'MMS') && (
+                  <div className="ds-field-group">
+                    <label className="ds-label">제목 <span className="text-rose-500">*</span></label>
+                    <div className="relative">
+                      {adTextEnabled && (
+                        <span className="ds-ad-tag absolute left-[10px] top-1/2 -translate-y-1/2 pointer-events-none">광고</span>
                       )}
+                      <input
+                        type="text"
+                        value={directSubject}
+                        onChange={(e) => setDirectSubject(e.target.value)}
+                        placeholder="제목을 입력해주세요"
+                        className="ds-subject-in"
+                        style={adTextEnabled ? { paddingLeft: 52 } : undefined}
+                      />
                     </div>
                   </div>
                 )}
-              </div>
 
-              {/* 버튼들 + 바이트 표시 */}
-              <div className="px-3 py-1.5 bg-gray-50 border-t flex items-center justify-between">
-                <div className="flex items-center gap-0.5">
-                  <button onClick={() => setShowSpecialChars('direct')} className="px-2 py-1 text-xs bg-white border rounded hover:bg-gray-100">특수문자</button>
-                  <button onClick={() => { loadTemplates(); setShowTemplateBox('direct'); }} className="px-2 py-1 text-xs bg-white border rounded hover:bg-gray-100">보관함</button>
-                  <button onClick={() => { if (!directMessage.trim()) { setToast({ show: true, type: 'error', message: '저장할 메시지를 먼저 입력해주세요.' }); return; } setTemplateSaveName(''); setShowTemplateSave('direct'); }} className="px-2 py-1 text-xs bg-white border rounded hover:bg-gray-100">문자저장</button>
+                {/* 본문 에디터 */}
+                <div className="ds-editor-wrap ds-t">
+                  <div className="relative">
+                    {adTextEnabled && (
+                      <span className="ds-ad-tag absolute left-0 top-0">광고</span>
+                    )}
+                    <textarea
+                      ref={directTextareaRef}
+                      data-char-target="direct"
+                      value={directMessage}
+                      onChange={(e) => { setDirectMessage(e.target.value); directCursorPosRef.current = e.target.selectionStart; }}
+                      onSelect={(e) => { directCursorPosRef.current = (e.target as HTMLTextAreaElement).selectionStart; }}
+                      placeholder="전송하실 내용을 입력하세요."
+                      rows={directMsgType === 'SMS' ? 8 : 6}
+                      spellCheck={false}
+                      style={adTextEnabled ? { textIndent: 42 } : undefined}
+                    />
+                  </div>
+
+                  {/* 하단 고정 문구 (자동 부착) */}
+                  {adTextEnabled && (
+                    <div className="ds-editor-foot">
+                      <span className="ds-lock-tag">
+                        <Lock size={12} strokeWidth={1.75} />
+                        자동 부착
+                      </span>
+                      <span className="ds-opt-out-num">{getAdSuffix()}</span>
+                    </div>
+                  )}
+
+                  {/* MMS 이미지 박스 */}
+                  {directMsgType === 'MMS' && (
+                    <div className="ds-mms-box ds-t" onClick={() => setShowMmsUploadModal(true)}>
+                      <span className="ds-mms-box__title">
+                        <ImageIcon size={13} strokeWidth={1.75} />
+                        MMS 이미지
+                      </span>
+                      {mmsUploadedImages.length > 0 ? (
+                        <div className="flex items-center gap-2">
+                          <MmsImagePreview images={mmsUploadedImages} size="xs" compact />
+                          <span className="text-[11.5px] text-amber-700 font-medium">수정</span>
+                        </div>
+                      ) : (
+                        <span className="ds-mms-box__hint">클릭하여 이미지 첨부 →</span>
+                      )}
+                    </div>
+                  )}
                 </div>
-                <span className="text-xs text-gray-500 whitespace-nowrap">
-                  <span className={`font-bold ${messageBytes > maxBytes ? 'text-red-500' : 'text-emerald-600'}`}>{messageBytes}</span>/{maxBytes}byte
-                </span>
-              </div>
 
-              {/* 회신번호 선택 */}
-              <div className="px-3 py-1.5 border-t">
-                <select
-                  value={useIndividualCallback ? `__col__${individualCallbackColumn}` : selectedCallback}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    if (val.startsWith('__col__')) {
-                      setUseIndividualCallback(true);
-                      setSelectedCallback('');
-                      setIndividualCallbackColumn(val.replace('__col__', ''));
-                    } else {
-                      setUseIndividualCallback(false);
-                      setSelectedCallback(val);
-                      setIndividualCallbackColumn('');
-                    }
-                  }}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                >
-                  <option value="">회신번호 선택</option>
-                  {/* ★ D103: 파일 업로드 시 전화번호 형태 컬럼만 동적 표시 */}
-                  {/* ★ D106: 수신번호 컬럼은 회신번호로 사용 불가 → 제외 */}
-                  {directFileHeaders.length > 0 && (() => {
-                    const phoneHeaders = detectPhoneHeaders(directFileHeaders, directFileData)
-                      .filter(h => h !== directColumnMapping.phone);
-                    return phoneHeaders.length > 0 ? (
-                      <optgroup label="수신자별 회신번호 컬럼">
-                        {phoneHeaders.map(h => {
-                          const sample = directFileData[0]?.[h];
-                          return (
-                            <option key={h} value={`__col__${h}`}>
-                              {h}{sample ? ` (예: ${String(sample).slice(0, 15)})` : ''} (수신자별)
-                            </option>
-                          );
-                        })}
-                      </optgroup>
-                    ) : null;
-                  })()}
-                  <optgroup label="등록된 회신번호">
-                    {callbackNumbers.map((cb) => (
-                      <option key={cb.id} value={cb.phone}>
-                        {formatPhoneNumber(cb.phone)} {cb.label ? `(${cb.label})` : ''} {cb.is_default ? '⭐' : ''}
-                      </option>
-                    ))}
-                  </optgroup>
-                </select>
-                {useIndividualCallback && individualCallbackColumn && (
-                  <p className="text-xs text-blue-600 mt-1">각 수신자의 <strong>{individualCallbackColumn}</strong> 값으로 발송됩니다</p>
-                )}
-              </div>
+                {/* 에디터 툴바 (유틸 + 바이트) */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <button type="button" className="ds-util ds-t" onClick={() => setShowSpecialChars('direct')}>
+                      <Asterisk size={13} strokeWidth={1.75} />
+                      <span>특수문자</span>
+                    </button>
+                    <button type="button" className="ds-util ds-t" onClick={() => { loadTemplates(); setShowTemplateBox('direct'); }}>
+                      <Archive size={13} strokeWidth={1.75} />
+                      <span>보관함</span>
+                    </button>
+                    <button type="button" className="ds-util ds-t" onClick={() => {
+                      if (!directMessage.trim()) { setToast({ show: true, type: 'error', message: '저장할 메시지를 먼저 입력해주세요.' }); return; }
+                      setTemplateSaveName(''); setShowTemplateSave('direct');
+                    }}>
+                      <Save size={13} strokeWidth={1.75} />
+                      <span>문자저장</span>
+                    </button>
+                  </div>
 
-              {/* 자동입력 버튼 — 컨트롤타워(DIRECT_VAR_MAP) 기반 */}
-              <div className="px-3 py-1.5 border-t bg-gray-50">
-                <div className="flex items-center gap-3">
-                  <span className="text-sm font-bold text-gray-700 whitespace-nowrap">자동입력</span>
-                  <div className="flex gap-2 flex-1">
+                  <div className="flex items-center gap-2">
+                    <div className={`ds-bytebar ${byteState === 'warn' ? 'ds-bytebar--warn' : byteState === 'danger' ? 'ds-bytebar--danger' : ''}`}>
+                      <div style={{ width: `${byteRatio * 100}%` }} />
+                    </div>
+                    <span className={`ds-byte-text ${byteState === 'danger' ? 'ds-byte-text--danger' : ''}`}>
+                      <span className="ds-byte-cur">{messageBytes}</span>
+                      <span className="ds-byte-slash">/</span>
+                      <span className="ds-byte-max">{maxBytes}</span>
+                      <span className="ds-byte-unit">byte</span>
+                    </span>
+                  </div>
+                </div>
+
+                {/* 발신번호 */}
+                <div className="ds-field-group">
+                  <label className="ds-label">발신번호</label>
+                  <select
+                    className="ds-sel ds-num"
+                    value={selectedCallbackValue}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val.startsWith('__col__')) {
+                        setUseIndividualCallback(true);
+                        setSelectedCallback('');
+                        setIndividualCallbackColumn(val.replace('__col__', ''));
+                      } else {
+                        setUseIndividualCallback(false);
+                        setSelectedCallback(val);
+                        setIndividualCallbackColumn('');
+                      }
+                    }}
+                  >
+                    <option value="">회신번호 선택</option>
+                    {directFileHeaders.length > 0 && (() => {
+                      const phoneHeaders = detectPhoneHeaders(directFileHeaders, directFileData)
+                        .filter(h => h !== directColumnMapping.phone);
+                      return phoneHeaders.length > 0 ? (
+                        <optgroup label="수신자별 회신번호 컬럼">
+                          {phoneHeaders.map(h => {
+                            const sample = directFileData[0]?.[h];
+                            return (
+                              <option key={h} value={`__col__${h}`}>
+                                {h}{sample ? ` (예: ${String(sample).slice(0, 15)})` : ''} (수신자별)
+                              </option>
+                            );
+                          })}
+                        </optgroup>
+                      ) : null;
+                    })()}
+                    <optgroup label="등록된 회신번호">
+                      {callbackNumbers.map((cb) => (
+                        <option key={cb.id} value={cb.phone}>
+                          {formatPhoneNumber(cb.phone)} {cb.label ? `(${cb.label})` : ''} {cb.is_default ? '⭐' : ''}
+                        </option>
+                      ))}
+                    </optgroup>
+                  </select>
+                  {useIndividualCallback && individualCallbackColumn && (
+                    <div className="ds-ind-callback-hint">
+                      각 수신자의 <strong>{individualCallbackColumn}</strong> 값으로 발송됩니다
+                    </div>
+                  )}
+                </div>
+
+                {/* 자동입력 칩 */}
+                <div className="ds-field-group">
+                  <div className="ds-autoinput-head">
+                    <strong>자동입력</strong>
+                    <span>· 본문에 변수를 삽입합니다</span>
+                  </div>
+                  <div className="grid grid-cols-5 gap-1.5">
                     {DIRECT_VAR_MAP.map(v => (
                       <button
                         key={v.fieldKey}
+                        type="button"
+                        className={`ds-chip ds-t ${v.fieldKey === 'callback' ? 'ds-chip--callback' : ''}`}
                         onClick={() => {
-                          // ★ D124 N3: 컨트롤타워 insertAtCursorPos (cursorPosRef 기반 삽입)
                           insertAtCursorPos(
                             directCursorPosRef.current,
                             v.variable,
@@ -601,128 +675,164 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                             directCursorPosRef,
                           );
                         }}
-                        className={`flex-1 py-2 text-sm bg-white border rounded-lg font-medium ${v.fieldKey === 'callback' ? 'hover:bg-blue-50 text-blue-700' : 'hover:bg-gray-100'}`}
-                      >{v.label}</button>
+                      >
+                        {v.label}
+                      </button>
                     ))}
                   </div>
                 </div>
-              </div>
 
-              {/* 미리보기 + 스팸필터 버튼 */}
-              <div className="px-3 py-1.5 border-t">
+                {/* 보조 액션 (미리보기 / 스팸필터) */}
                 <div className="grid grid-cols-2 gap-2">
                   <button
+                    type="button"
+                    className="ds-btn-sec ds-btn-sec--primary ds-t"
                     onClick={() => {
-                      if (!directMessage.trim()) {
-                        setToast({ show: true, type: 'error', message: '메시지를 입력해주세요' });
-                        return;
-                      }
+                      if (!directMessage.trim()) { setToast({ show: true, type: 'error', message: '메시지를 입력해주세요' }); return; }
                       setShowDirectPreview(true);
                     }}
-                    className="py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-sm font-medium transition-colors"
                   >
-                    📄 미리보기
+                    <Eye size={14} strokeWidth={1.75} />
+                    <span>미리보기</span>
                   </button>
                   <button
+                    type="button"
+                    className={`ds-btn-sec ds-btn-sec--ghost ds-t ${isSpamFilterLocked ? 'opacity-60' : ''}`}
                     onClick={handleSpamFilter}
-                    className={`py-2.5 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg text-sm font-medium transition-colors ${isSpamFilterLocked ? 'opacity-60' : ''}`}
                   >
-                    {isSpamFilterLocked ? '🔒' : '🛡️'} 스팸필터테스트
+                    {isSpamFilterLocked ? <Lock size={14} strokeWidth={1.75} /> : <ShieldCheck size={14} strokeWidth={1.75} />}
+                    <span>스팸필터테스트</span>
                   </button>
                 </div>
-              </div>
 
-              {/* 예약/분할/광고 옵션 */}
-              <div className="px-3 py-2 border-t">
-                <div className="grid grid-cols-3 gap-2 text-xs">
-                  <div className={`rounded-lg p-3 text-center ${reserveEnabled ? 'bg-blue-50' : 'bg-gray-50'}`}>
-                    <label className="flex items-center justify-center gap-1.5 cursor-pointer">
-                      <input type="checkbox" checked={reserveEnabled} onChange={(e) => { setReserveEnabled(e.target.checked); if (e.target.checked) setShowReservePicker(true); }} className="rounded w-4 h-4" />
-                      <span className={`font-medium ${reserveEnabled ? 'text-blue-700' : ''}`}>예약전송</span>
-                    </label>
-                    <div className={`mt-1.5 text-xs cursor-pointer ${reserveEnabled ? 'text-blue-600 font-medium' : 'text-gray-400'}`} onClick={() => reserveEnabled && setShowReservePicker(true)}>
-                      {reserveDateTime ? new Date(reserveDateTime).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '예약시간 선택'}
+                {/* 옵션 카드 3종 */}
+                <div className="grid grid-cols-3 gap-2">
+                  {/* 예약전송 */}
+                  <label className={`ds-optcard ds-t ${reserveEnabled ? 'ds-optcard--on-blue' : ''}`}>
+                    <div className="ds-optcard-top">
+                      <input
+                        type="checkbox"
+                        className="ds-chk ds-chk--blue"
+                        checked={reserveEnabled}
+                        onChange={(e) => { setReserveEnabled(e.target.checked); if (e.target.checked) setShowReservePicker(true); }}
+                      />
+                      <span className="ds-optcard-title">예약전송</span>
                     </div>
-                  </div>
-                  <div className={`rounded-lg p-3 text-center ${splitEnabled ? 'bg-purple-50' : 'bg-gray-50'}`}>
-                    <label className="flex items-center justify-center gap-1.5 cursor-pointer">
-                      <input type="checkbox" className="rounded w-4 h-4" checked={splitEnabled} onChange={(e) => setSplitEnabled(e.target.checked)} />
-                      <span className={`font-medium ${splitEnabled ? 'text-purple-700' : ''}`}>분할전송</span>
-                    </label>
-                    <div className="mt-1.5 flex items-center justify-center gap-1">
-                      <input type="number" className="w-14 border rounded px-1.5 py-1 text-xs text-center" placeholder="1000" value={splitCount} onChange={(e) => setSplitCount(Number(e.target.value) || 1000)} disabled={!splitEnabled} />
-                      <span className="text-xs text-gray-500">건/분</span>
+                    <div
+                      className="ds-optcard-sub"
+                      style={reserveEnabled ? { color: '#1D4ED8', fontWeight: 500 } : undefined}
+                      onClick={(e) => { e.preventDefault(); if (reserveEnabled) setShowReservePicker(true); }}
+                    >
+                      <CalendarClock size={12} strokeWidth={1.75} />
+                      <span>
+                        {reserveDateTime
+                          ? new Date(reserveDateTime).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+                          : '예약시간 선택'}
+                      </span>
                     </div>
-                  </div>
-                  <div className={`rounded-lg p-3 text-center ${adTextEnabled ? 'bg-orange-50' : 'bg-gray-50'}`}>
-                    <label className="flex items-center justify-center gap-1.5 cursor-pointer">
-                      <input type="checkbox" checked={adTextEnabled} onChange={(e) => handleAdToggle(e.target.checked)} className="rounded w-4 h-4" />
-                      <span className={`font-medium ${adTextEnabled ? 'text-orange-700' : ''}`}>광고표기</span>
-                    </label>
-                    <div className={`mt-1.5 text-xs ${adTextEnabled ? 'text-orange-500' : 'text-gray-400'}`}>080 수신거부</div>
-                  </div>
+                  </label>
+
+                  {/* 분할전송 */}
+                  <label className={`ds-optcard ds-t ${splitEnabled ? 'ds-optcard--on-purple' : ''}`}>
+                    <div className="ds-optcard-top">
+                      <input
+                        type="checkbox"
+                        className="ds-chk ds-chk--purple"
+                        checked={splitEnabled}
+                        onChange={(e) => setSplitEnabled(e.target.checked)}
+                      />
+                      <span className="ds-optcard-title">분할전송</span>
+                    </div>
+                    <div className="ds-optcard-sub" style={{ gap: 6 }}>
+                      <input
+                        type="number"
+                        className="ds-num-in"
+                        value={splitCount}
+                        onChange={(e) => setSplitCount(Number(e.target.value) || 1000)}
+                        disabled={!splitEnabled}
+                      />
+                      <span>건/분</span>
+                    </div>
+                  </label>
+
+                  {/* 광고표기 */}
+                  <label className={`ds-optcard ds-t ${adTextEnabled ? 'ds-optcard--on-amber' : ''}`}>
+                    <div className="ds-optcard-top">
+                      <input
+                        type="checkbox"
+                        className="ds-chk ds-chk--amber"
+                        checked={adTextEnabled}
+                        onChange={(e) => handleAdToggle(e.target.checked)}
+                      />
+                      <span className="ds-optcard-title">광고표기</span>
+                    </div>
+                    <div className="ds-optcard-sub">
+                      {adTextEnabled && <span className="ds-ad-tag" style={{ height: 16, fontSize: 10, padding: '0 5px' }}>광고</span>}
+                      <span style={adTextEnabled ? { color: 'var(--ds-amber-700)' } : undefined}>080 수신거부</span>
+                    </div>
+                  </label>
                 </div>
-              </div>
 
-              {/* 전송하기 버튼 */}
-              <div className="px-3 py-2 border-t">
-                <button
-                  onClick={handleSendClick}
-                  className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-base transition-colors"
-                >
-                  전송하기
+                {/* 전송하기 */}
+                <button type="button" className="ds-btn-primary ds-t" onClick={handleSendClick}>
+                  <Send size={17} strokeWidth={2} />
+                  <span>전송하기</span>
                 </button>
-              </div>
-            </div>
-            </>)}
+              </>
+            )}
 
             {/* === RCS 채널 === */}
             {directSendChannel === 'rcs' && (
-              <div className="border-2 border-purple-200 rounded-2xl overflow-hidden bg-white shadow-sm">
-                <div className="p-4">
-                  <div className="flex items-center gap-2 mb-3">
-                    <span className="text-lg">📱</span>
-                    <span className="text-sm font-semibold text-purple-800">RCS (템플릿 기반)</span>
+              <>
+                <div className="ds-channel-card ds-channel-card--purple">
+                  <div className="flex items-center gap-2 mb-4">
+                    <Smartphone size={16} strokeWidth={1.75} className="text-purple-700" />
+                    <span className="text-[14px] font-semibold text-purple-900">RCS (템플릿 기반)</span>
                   </div>
                   {rcsTemplates.length === 0 ? (
-                    <div className="text-center py-12">
-                      <div className="text-4xl mb-3">📱</div>
-                      <p className="text-sm text-gray-500 font-medium">등록된 RCS 템플릿이 없습니다</p>
-                      <p className="text-xs text-gray-400 mt-1">카카오&RCS → RCS 템플릿에서 등록해주세요</p>
+                    <div className="text-center py-14">
+                      <div className="inline-flex w-12 h-12 rounded-full bg-purple-100 items-center justify-center mb-3">
+                        <Smartphone size={20} strokeWidth={1.75} className="text-purple-500" />
+                      </div>
+                      <p className="text-[13.5px] text-stone-600 font-medium">등록된 RCS 템플릿이 없습니다</p>
+                      <p className="text-[12px] text-stone-400 mt-1">카카오&RCS → RCS 템플릿에서 등록해주세요</p>
                     </div>
                   ) : (
-                    <div className="space-y-2 max-h-[300px] overflow-y-auto">
+                    <div className="space-y-2 max-h-[320px] overflow-y-auto">
                       {rcsTemplates.map((t: any) => (
-                        <div key={t.id} onClick={() => setRcsSelectedTemplate(t)}
-                          className={`p-3 border rounded-lg cursor-pointer transition-colors ${rcsSelectedTemplate?.id === t.id ? 'border-purple-500 bg-purple-50' : 'border-gray-200 hover:border-purple-300'}`}
+                        <div
+                          key={t.id}
+                          onClick={() => setRcsSelectedTemplate(t)}
+                          className={`p-3 border rounded-[10px] cursor-pointer transition-colors ${rcsSelectedTemplate?.id === t.id ? 'border-purple-500 bg-purple-50' : 'border-stone-200 hover:border-purple-300 bg-white'}`}
                         >
                           <div className="flex items-center justify-between">
-                            <span className="text-sm font-medium">{t.template_name}</span>
-                            <span className="text-xs px-2 py-0.5 rounded-full bg-purple-100 text-purple-700">{t.message_type}</span>
+                            <span className="text-[13.5px] font-medium text-stone-800">{t.template_name}</span>
+                            <span className="text-[11px] px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 font-medium">{t.message_type}</span>
                           </div>
-                          <p className="text-xs text-gray-500 mt-1 line-clamp-2">{t.content}</p>
+                          <p className="text-[12px] text-stone-500 mt-1 line-clamp-2">{t.content}</p>
                         </div>
                       ))}
                     </div>
                   )}
-                  <div className="text-xs text-gray-400 mt-2">RCS 미지원 단말은 SMS/LMS로 자동 폴백됩니다</div>
+                  <div className="text-[11.5px] text-stone-400 mt-3">RCS 미지원 단말은 SMS/LMS로 자동 폴백됩니다</div>
                 </div>
-                <div className="px-3 py-2 border-t">
-                  <button
-                    onClick={() => setToast({ show: true, type: 'error', message: 'RCS 발송 기능은 곧 오픈 예정입니다' })}
-                    disabled={!rcsSelectedTemplate}
-                    className={`w-full py-3 rounded-xl font-bold text-base transition-colors ${rcsSelectedTemplate ? 'bg-purple-500 hover:bg-purple-600 text-white' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}`}
-                  >
-                    {!rcsSelectedTemplate ? '템플릿을 선택해주세요' : '📱 RCS 전송하기'}
-                  </button>
-                  <p className="text-xs text-center text-purple-400 mt-1.5">RCS 발송 기능은 곧 오픈 예정입니다</p>
-                </div>
-              </div>
+
+                <button
+                  type="button"
+                  className="ds-btn-primary ds-btn-primary--purple ds-t"
+                  onClick={() => setToast({ show: true, type: 'error', message: 'RCS 발송 기능은 곧 오픈 예정입니다' })}
+                  disabled={!rcsSelectedTemplate}
+                >
+                  <Send size={17} strokeWidth={2} />
+                  <span>{!rcsSelectedTemplate ? '템플릿을 선택해주세요' : 'RCS 전송하기'}</span>
+                </button>
+                <p className="text-[11.5px] text-center text-purple-400 -mt-2">RCS 발송 기능은 곧 오픈 예정입니다</p>
+              </>
             )}
 
-            {/* === 카카오 알림톡 채널 (D130: AlimtalkChannelPanel 공용 컨트롤타워) === */}
+            {/* === 알림톡 채널 === */}
             {directSendChannel === 'kakao_alimtalk' && (
-              <div className="space-y-2">
+              <>
                 <AlimtalkChannelPanel
                   senders={alimtalkSenders}
                   templates={kakaoTemplates as AlimtalkTemplate[]}
@@ -737,222 +847,307 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                   }}
                   onChange={(v: AlimtalkChannelState) => {
                     if (setAlimtalkProfileId) setAlimtalkProfileId(v.profileId);
-                    const nextTpl =
-                      kakaoTemplates.find((t: any) => t.id === v.templateId) || null;
+                    const nextTpl = kakaoTemplates.find((t: any) => t.id === v.templateId) || null;
                     setKakaoSelectedTemplate(nextTpl);
                     setKakaoTemplateVars(v.variableMap);
                     setAlimtalkFallback(v.nextType);
                     if (setAlimtalkNextContents) setAlimtalkNextContents(v.nextContents);
                   }}
                 />
-                <div className="bg-white rounded-2xl border-2 border-blue-200 px-3 py-2">
-                  <button
-                    onClick={handleAlimtalkSend}
-                    disabled={
-                      !kakaoSelectedTemplate ||
-                      !['approved', 'APPROVED', 'APR', 'A'].includes(
-                        kakaoSelectedTemplate?.status,
-                      )
-                    }
-                    className={`w-full py-3 rounded-xl font-bold text-base transition-colors ${
-                      ['approved', 'APPROVED', 'APR', 'A'].includes(
-                        kakaoSelectedTemplate?.status,
-                      )
-                        ? 'bg-blue-500 hover:bg-blue-600 text-white'
-                        : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                    }`}
-                  >
-                    {!kakaoSelectedTemplate
-                      ? '템플릿을 선택해주세요'
-                      : '🔔 알림톡 발송하기'}
-                  </button>
-                </div>
-              </div>
+                <button
+                  type="button"
+                  className="ds-btn-primary ds-btn-primary--blue ds-t"
+                  onClick={handleAlimtalkSend}
+                  disabled={!kakaoSelectedTemplate || !['approved', 'APPROVED', 'APR', 'A'].includes(kakaoSelectedTemplate?.status)}
+                >
+                  <Bell size={17} strokeWidth={2} />
+                  <span>{!kakaoSelectedTemplate ? '템플릿을 선택해주세요' : '알림톡 발송하기'}</span>
+                </button>
+              </>
             )}
-          </div>
+          </section>
 
-          {/* 우측: 수신자 목록 */}
-          <div className="flex-1 flex flex-col">
-            {/* 입력 방식 탭 */}
-            <div className="flex items-center gap-3 mb-4">
-              <button onClick={() => setShowDirectInput(true)}
-                className={`px-5 py-2.5 border-2 rounded-lg text-sm font-medium hover:bg-gray-50 ${directInputMode === 'direct' ? 'bg-emerald-50 border-emerald-400 text-emerald-700' : ''}`}
-              >✏️ 직접입력</button>
-              <label className={`px-5 py-2.5 border-2 rounded-lg text-sm font-medium cursor-pointer hover:bg-gray-50 ${directInputMode === 'file' ? 'bg-amber-50 border-amber-400 text-amber-700' : ''} ${directFileLoading ? 'opacity-50 cursor-wait' : ''}`}>
-                {directFileLoading ? '⏳ 파일 분석중...' : '📁 파일등록'}
-                <input type="file" accept=".xlsx,.xls,.csv" className="hidden"
-                  onChange={(e) => { const file = e.target.files?.[0]; if (file) handleFileUpload(file); e.target.value = ''; }}
-                />
-              </label>
-              <button
-                onClick={async () => {
-                  const token = localStorage.getItem('token');
-                  const res = await fetch('/api/address-books/groups', { headers: { Authorization: `Bearer ${token}` } });
-                  const data = await res.json();
-                  if (data.success) setAddressGroups(data.groups || []);
-                  setShowAddressBook(true);
-                }}
-                className={`px-5 py-2.5 border-2 rounded-lg text-sm font-medium hover:bg-gray-50 ${directInputMode === 'address' ? 'bg-emerald-50 border-emerald-400 text-emerald-700' : ''}`}
-              >📒 주소록</button>
-              <label className="flex items-center gap-2 text-sm cursor-pointer ml-2">
-                <input type="checkbox" checked={dedupEnabled} onChange={e => setDedupEnabled(e.target.checked)} className="rounded w-4 h-4 accent-emerald-600" />
-                <span className="font-medium">중복제거</span>
-              </label>
-              <label className="flex items-center gap-2 text-sm cursor-pointer">
-                <input type="checkbox" checked={unsubFilterEnabled} onChange={e => setUnsubFilterEnabled(e.target.checked)} className="rounded w-4 h-4 accent-emerald-600" />
-                <span className="font-medium">수신거부제거</span>
-              </label>
-              <div className="flex-1"></div>
-              <button onClick={onClose}
-                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-medium flex items-center gap-1"
-              >
-                <span>✕</span> 창닫기
-              </button>
+          {/* 구분선 */}
+          <div className="ds-modal__vdiv" />
+
+          {/* ====== 우측: 수신자 관리 ====== */}
+          <section className="flex flex-col gap-4 min-w-0">
+
+            {/* 입력 방식 탭 + 필터 */}
+            <div className="flex items-center justify-between gap-4 flex-wrap">
+              <div className="ds-rtab-group">
+                <button
+                  type="button"
+                  className={`ds-rtab ${directInputMode === 'direct' ? 'ds-rtab--on' : ''}`}
+                  onClick={() => setShowDirectInput(true)}
+                >
+                  <PencilLine size={17} strokeWidth={1.75} />
+                  <span>직접입력</span>
+                </button>
+
+                <label className={`ds-rtab ds-rtab--label ${directInputMode === 'file' ? 'ds-rtab--on' : ''} ${directFileLoading ? 'ds-rtab--loading' : ''}`}>
+                  <FolderOpen size={17} strokeWidth={1.75} />
+                  <span>{directFileLoading ? '파일 분석중...' : '파일등록'}</span>
+                  <input
+                    type="file"
+                    accept=".xlsx,.xls,.csv"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) handleFileUpload(file);
+                      e.target.value = '';
+                    }}
+                  />
+                </label>
+
+                <button
+                  type="button"
+                  className={`ds-rtab ${directInputMode === 'address' ? 'ds-rtab--on' : ''}`}
+                  onClick={async () => {
+                    const token = localStorage.getItem('token');
+                    const res = await fetch('/api/address-books/groups', { headers: { Authorization: `Bearer ${token}` } });
+                    const data = await res.json();
+                    if (data.success) setAddressGroups(data.groups || []);
+                    setShowAddressBook(true);
+                  }}
+                >
+                  <Contact size={17} strokeWidth={1.75} />
+                  <span>주소록</span>
+                </button>
+              </div>
+
+              <div className="ds-filter-row">
+                <label>
+                  <input
+                    type="checkbox"
+                    className="ds-chk"
+                    checked={dedupEnabled}
+                    onChange={e => setDedupEnabled(e.target.checked)}
+                  />
+                  <span>중복제거</span>
+                </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    className="ds-chk"
+                    checked={unsubFilterEnabled}
+                    onChange={e => setUnsubFilterEnabled(e.target.checked)}
+                  />
+                  <span>수신거부제거</span>
+                </label>
+              </div>
             </div>
 
-            {/* 수신자 테이블 */}
-            <div className="border-2 rounded-xl overflow-hidden flex-1 flex flex-col">
-              <div className="bg-gray-50 px-4 py-3 flex justify-between items-center border-b">
-                <span className="text-sm font-medium">
-                  총 <span className="text-emerald-600 font-bold text-lg">{directRecipients.length.toLocaleString()}</span> 건
-                  {/* ★ D137 D3: "(상위 10개 표시)" 문구 제거 — 하단 페이지네이션으로 대체 */}
-                </span>
-                <input type="text" placeholder="🔍 수신번호 검색" value={directSearchQuery} onChange={(e) => { setDirectSearchQuery(e.target.value); setDirectPage(0); }} className="border rounded-lg px-3 py-2 text-sm w-52" />
+            {/* 카운트 + 검색 */}
+            <div className="flex items-center justify-between">
+              <div className="ds-count-wrap">
+                <span className="ds-count-label">총</span>
+                <span className="ds-count-num">{directRecipients.length.toLocaleString()}</span>
+                <span className="ds-count-label">건</span>
               </div>
-              <div className="flex-1 overflow-y-auto max-h-[520px]">
-                <table className="w-full">
-                  {(() => {
-                    const activeFields = directRecipients.length > 0
-                      ? (['name', 'callback', 'extra1', 'extra2', 'extra3'] as const).filter(f => directRecipients.some(r => r[f] && String(r[f]).trim()))
-                      : (directSendChannel === 'sms'
-                        ? (['name', 'callback', 'extra1', 'extra2', 'extra3'] as const).filter(f => directColumnMapping[f])
-                        : []);
-                    const colCount = 2 + activeFields.length;
-                    return (<>
-                      <thead className="bg-gray-50 border-b sticky top-0">
-                        <tr>
-                          <th className="px-4 py-3 text-left text-xs font-bold text-gray-600 w-10">
-                            <input type="checkbox" className="rounded w-4 h-4"
-                              checked={directRecipients.length > 0 && selectedRecipients.size === directRecipients.length}
-                              onChange={(e) => { if (e.target.checked) setSelectedRecipients(new Set(directRecipients.map((_, i) => i))); else setSelectedRecipients(new Set()); }}
-                            />
-                          </th>
-                          <th className="px-4 py-3 text-left text-xs font-bold text-gray-600">수신번호</th>
-                          {activeFields.map(f => (
-                            <th key={f} className="px-4 py-3 text-left text-xs font-bold text-gray-600">{DIRECT_FIELD_LABELS[f] || f}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y">
-                        {directRecipients.length === 0 ? (
-                          <tr><td colSpan={colCount} className="px-4 py-24 text-center text-gray-400">
-                            <div className="text-4xl mb-2">📋</div>
-                            <div className="text-sm">파일을 업로드하거나 직접 입력해주세요</div>
-                          </td></tr>
-                        ) : (() => {
-                          // ★ D137 D3: 페이지네이션 적용 — 검색 포함 항상 10건/페이지
-                          const DIRECT_PAGE_SIZE = 10;
-                          const filtered = directRecipients
-                            .map((r, idx) => ({ ...r, originalIdx: idx }))
-                            .filter(r => !directSearchQuery || String(r.phone || '').includes(directSearchQuery));
-                          const totalPages = Math.max(1, Math.ceil(filtered.length / DIRECT_PAGE_SIZE));
-                          const currentPage = Math.min(directPage, Math.max(0, totalPages - 1));
-                          const pageItems = filtered.slice(currentPage * DIRECT_PAGE_SIZE, (currentPage + 1) * DIRECT_PAGE_SIZE);
-                          if (pageItems.length === 0) {
-                            return (
-                              <tr><td colSpan={colCount} className="px-4 py-12 text-center text-gray-400 text-sm">
-                                {directSearchQuery ? `"${directSearchQuery}" 검색 결과가 없습니다` : '데이터가 없습니다'}
-                              </td></tr>
-                            );
-                          }
-                          return pageItems.map((r) => (
-                            <tr key={r.originalIdx} className="hover:bg-gray-50">
-                              <td className="px-4 py-3">
-                                <input type="checkbox" className="rounded w-4 h-4"
-                                  checked={selectedRecipients.has(r.originalIdx)}
-                                  onChange={(e) => { const s = new Set(selectedRecipients); if (e.target.checked) s.add(r.originalIdx); else s.delete(r.originalIdx); setSelectedRecipients(s); }}
-                                />
-                              </td>
-                              <td className="px-4 py-3 text-sm">{formatPhoneNumber(r.phone)}</td>
-                              {activeFields.map(f => (
-                                <td key={f} className={`px-4 py-3 text-sm ${f === 'callback' ? 'font-mono text-xs text-gray-600' : ''}`}>{f === 'callback' && r[f] ? formatPhoneNumber(r[f]) : (r[f] || '-')}</td>
-                              ))}
-                            </tr>
-                          ));
-                        })()}
-                      </tbody>
-                    </>);
-                  })()}
-                </table>
+              <div className="ds-search-wrap">
+                <Search size={15} strokeWidth={1.75} />
+                <input
+                  type="text"
+                  className="ds-search-in"
+                  placeholder="수신번호 검색"
+                  value={directSearchQuery}
+                  onChange={(e) => { setDirectSearchQuery(e.target.value); setDirectPage(0); }}
+                />
               </div>
-              {/* ★ D137 D3: 페이지네이션 (BirthdayCustomerList 톤 — 이전/1-N/다음) */}
+            </div>
+
+            {/* 리스트 프레임 */}
+            <div className="ds-list-frame">
               {(() => {
+                const activeFields = directRecipients.length > 0
+                  ? (['name', 'callback', 'extra1', 'extra2', 'extra3'] as const).filter(f => directRecipients.some(r => r[f] && String(r[f]).trim()))
+                  : (directSendChannel === 'sms'
+                    ? (['name', 'callback', 'extra1', 'extra2', 'extra3'] as const).filter(f => directColumnMapping[f])
+                    : []);
+
                 const DIRECT_PAGE_SIZE = 10;
-                const filteredCount = directSearchQuery
-                  ? directRecipients.filter(r => String(r.phone || '').includes(directSearchQuery)).length
-                  : directRecipients.length;
-                const totalPages = Math.max(1, Math.ceil(filteredCount / DIRECT_PAGE_SIZE));
-                if (totalPages <= 1) return null;
+                const filtered = directRecipients
+                  .map((r, idx) => ({ ...r, originalIdx: idx }))
+                  .filter(r => !directSearchQuery || String(r.phone || '').includes(directSearchQuery));
+                const totalPages = Math.max(1, Math.ceil(filtered.length / DIRECT_PAGE_SIZE));
                 const currentPage = Math.min(directPage, Math.max(0, totalPages - 1));
+                const pageItems = filtered.slice(currentPage * DIRECT_PAGE_SIZE, (currentPage + 1) * DIRECT_PAGE_SIZE);
+
                 return (
-                  <div className="flex items-center justify-center gap-2 py-3 bg-gray-50 border-t">
-                    <button onClick={() => setDirectPage((p) => Math.max(0, p - 1))}
-                      disabled={currentPage === 0}
-                      className="px-3 py-1 text-xs rounded-md border border-gray-200 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed">
-                      이전
-                    </button>
-                    <span className="text-xs text-gray-600">{currentPage + 1} / {totalPages}</span>
-                    <button onClick={() => setDirectPage((p) => Math.min(totalPages - 1, p + 1))}
-                      disabled={currentPage >= totalPages - 1}
-                      className="px-3 py-1 text-xs rounded-md border border-gray-200 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed">
-                      다음
-                    </button>
-                  </div>
+                  <>
+                    {/* 헤더 */}
+                    <div className="ds-list-head">
+                      <label className="flex items-center cursor-pointer">
+                        <input
+                          type="checkbox"
+                          className="ds-chk ds-chk--lg"
+                          checked={directRecipients.length > 0 && selectedRecipients.size === directRecipients.length}
+                          onChange={(e) => {
+                            if (e.target.checked) setSelectedRecipients(new Set(directRecipients.map((_, i) => i)));
+                            else setSelectedRecipients(new Set());
+                          }}
+                        />
+                      </label>
+                      <span>수신번호</span>
+                      {activeFields.length > 0 && (
+                        <span className="text-stone-500 text-[11.5px] font-medium">
+                          {activeFields.map(f => DIRECT_FIELD_LABELS[f] || f).join(' · ')}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* 바디 */}
+                    {directRecipients.length === 0 ? (
+                      <div className="ds-list-empty">
+                        <div className="ds-dropzone ds-t w-full" onClick={() => {
+                          const input = document.querySelector<HTMLInputElement>('.ds-rtab--label input[type="file"]');
+                          input?.click();
+                        }}>
+                          <svg width="76" height="76" viewBox="0 0 76 76" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                            <rect x="20" y="14" width="40" height="50" rx="6" fill="#FFFFFF" stroke="#D6D3D1" strokeWidth="1.5" />
+                            <rect x="30" y="8" width="20" height="10" rx="3" fill="#ECFDF5" stroke="#10B981" strokeWidth="1.5" />
+                            <rect x="28" y="28" width="24" height="2.5" rx="1.25" fill="#E7E5E4" />
+                            <rect x="28" y="36" width="18" height="2.5" rx="1.25" fill="#E7E5E4" />
+                            <rect x="28" y="44" width="22" height="2.5" rx="1.25" fill="#E7E5E4" />
+                            <circle cx="52" cy="54" r="8" fill="#10B981" />
+                            <path d="M48.5 54 L51 56.5 L55.5 51.5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                          </svg>
+                          <div>
+                            <div className="text-[14px] font-semibold text-stone-800">파일을 업로드하거나 직접 입력해주세요</div>
+                            <div className="text-[12.5px] text-stone-500 mt-1">CSV · XLSX · XLS 형식을 지원합니다</div>
+                          </div>
+                          <div className="flex items-center gap-2 mt-1">
+                            <span className="ds-btn-sec ds-btn-sec--primary px-4 pointer-events-none">
+                              <Upload size={14} strokeWidth={1.75} />
+                              <span>파일 선택</span>
+                            </span>
+                            <span className="text-[12px] text-stone-400">또는 여기로 드래그</span>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="ds-list-body">
+                          {pageItems.length === 0 ? (
+                            <div className="py-12 text-center text-stone-400 text-[13px]">
+                              {directSearchQuery ? `"${directSearchQuery}" 검색 결과가 없습니다` : '데이터가 없습니다'}
+                            </div>
+                          ) : (
+                            pageItems.map((r) => (
+                              <div key={r.originalIdx} className="ds-list-row">
+                                <label className="flex items-center cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    className="ds-chk"
+                                    checked={selectedRecipients.has(r.originalIdx)}
+                                    onChange={(e) => {
+                                      const s = new Set(selectedRecipients);
+                                      if (e.target.checked) s.add(r.originalIdx);
+                                      else s.delete(r.originalIdx);
+                                      setSelectedRecipients(s);
+                                    }}
+                                  />
+                                </label>
+                                <span className="ds-num text-stone-800 font-medium">{formatPhoneNumber(r.phone)}</span>
+                                <span className="ds-cell-extra">
+                                  {activeFields.map(f => {
+                                    if (!r[f]) return null;
+                                    const v = f === 'callback' ? formatPhoneNumber(r[f]) : String(r[f]);
+                                    return (
+                                      <span key={f} className={f === 'callback' ? 'ds-cell-callback' : ''}>
+                                        <span className="text-stone-400 text-[11px] mr-1">{DIRECT_FIELD_LABELS[f] || f}</span>
+                                        <span className="val">{v}</span>
+                                      </span>
+                                    );
+                                  })}
+                                </span>
+                              </div>
+                            ))
+                          )}
+                        </div>
+
+                        {/* 페이지네이션 */}
+                        {totalPages > 1 && (
+                          <div className="ds-page">
+                            <button
+                              onClick={() => setDirectPage((p) => Math.max(0, p - 1))}
+                              disabled={currentPage === 0}
+                            >
+                              이전
+                            </button>
+                            <span className="ds-page-num">{currentPage + 1} / {totalPages}</span>
+                            <button
+                              onClick={() => setDirectPage((p) => Math.min(totalPages - 1, p + 1))}
+                              disabled={currentPage >= totalPages - 1}
+                            >
+                              다음
+                            </button>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </>
                 );
               })()}
             </div>
 
-            {/* 하단 버튼 */}
-            <div className="flex gap-3 mt-4">
-              <button onClick={() => {
-                if (selectedRecipients.size === 0) { setToast({ show: true, type: 'error', message: '선택된 항목이 없습니다' }); return; }
-                setDirectRecipients(prev => prev.filter((_, idx) => !selectedRecipients.has(idx)));
-                setSelectedRecipients(new Set());
-              }} className="px-5 py-3 border-2 rounded-xl text-sm font-medium hover:bg-gray-50">선택삭제</button>
-              <button onClick={() => {
-                if (directRecipients.length === 0) return;
-                setDirectRecipients([]);
-                setSelectedRecipients(new Set());
-              }} className="px-5 py-3 border-2 rounded-xl text-sm font-medium hover:bg-gray-50">전체삭제</button>
-              <div className="flex-1"></div>
-              <button onClick={() => {
+            {/* 하단 액션 */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1">
+                <button type="button" className="ds-ter ds-ter--danger ds-t" onClick={() => {
+                  if (selectedRecipients.size === 0) { setToast({ show: true, type: 'error', message: '선택된 항목이 없습니다' }); return; }
+                  setDirectRecipients(prev => prev.filter((_, idx) => !selectedRecipients.has(idx)));
+                  setSelectedRecipients(new Set());
+                }}>
+                  <Trash2 size={13} strokeWidth={1.75} />
+                  <span>선택삭제</span>
+                </button>
+                <button type="button" className="ds-ter ds-ter--danger ds-t" onClick={() => {
+                  if (directRecipients.length === 0) return;
+                  setDirectRecipients([]);
+                  setSelectedRecipients(new Set());
+                }}>
+                  <XCircle size={13} strokeWidth={1.75} />
+                  <span>전체삭제</span>
+                </button>
+              </div>
+              <button type="button" className="ds-ter ds-t" onClick={() => {
                 setDirectRecipients([]);
                 setDirectMessage('');
                 setDirectSubject('');
                 setMmsUploadedImages([]);
                 setSelectedRecipients(new Set());
                 setSelectedCallback('');
-              }} className="px-5 py-3 border-2 rounded-xl text-sm font-medium hover:bg-gray-50">🔄 초기화</button>
+              }}>
+                <RotateCcw size={13} strokeWidth={1.75} />
+                <span>초기화</span>
+              </button>
             </div>
-          </div>
+          </section>
         </div>
 
-        {/* 파일 매핑 모달 */}
+        {/* ============ 파일 매핑 모달 ============ */}
         {directShowMapping && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60]">
             <div className="bg-white rounded-2xl shadow-2xl w-[650px] max-h-[80vh] overflow-y-auto">
-              <div className="px-5 py-3 border-b bg-blue-50 flex justify-between items-center">
+              <div className="px-5 py-3 border-b bg-emerald-50 flex justify-between items-center">
                 <div>
-                  <h3 className="font-bold text-sm">📁 컬럼 매핑</h3>
-                  <p className="text-xs text-gray-500 mt-0.5">수신번호 필수, 나머지는 사용할 항목만 선택</p>
+                  <h3 className="font-semibold text-[14px] text-emerald-900 flex items-center gap-2">
+                    <FolderOpen size={14} strokeWidth={1.75} />
+                    컬럼 매핑
+                  </h3>
+                  <p className="text-[11.5px] text-emerald-700/80 mt-0.5">수신번호 필수, 나머지는 사용할 항목만 선택</p>
                 </div>
-                <button onClick={() => setDirectShowMapping(false)} className="text-gray-500 hover:text-gray-700">✕</button>
+                <button onClick={() => setDirectShowMapping(false)} className="text-stone-500 hover:text-stone-700">
+                  <X size={16} strokeWidth={1.75} />
+                </button>
               </div>
               <div className="px-5 py-4">
                 {/* 수신번호 필수 */}
                 <div className="flex items-center gap-3 p-3 bg-red-50 rounded-lg border border-red-200 mb-3">
-                  <span className="text-xs font-bold text-red-700 w-20 shrink-0">📱 수신번호 *</span>
-                  <span className="text-gray-400 text-xs">→</span>
+                  <span className="text-xs font-bold text-red-700 w-20 shrink-0">수신번호 *</span>
+                  <ChevronRight size={14} strokeWidth={1.75} className="text-stone-400" />
                   <select className="flex-1 border border-red-300 rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-red-400 min-w-0"
                     value={directColumnMapping.phone || ''} onChange={(e) => setDirectColumnMapping({ ...directColumnMapping, phone: e.target.value })}>
                     <option value="">-- 선택 --</option>
@@ -962,12 +1157,11 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                     })}
                   </select>
                 </div>
-                {/* SMS 필드 매핑 — 컨트롤타워(DIRECT_MAPPING_FIELDS) 기반 */}
                 {directSendChannel === 'sms' && (
                   <div className="grid grid-cols-2 gap-2">
                     {DIRECT_MAPPING_FIELDS.map(field => (
-                      <div key={field.key} className="flex items-center gap-2 p-2 bg-gray-50 rounded-lg min-w-0">
-                        <span className="text-xs font-medium text-gray-600 w-14 shrink-0">{field.label}</span>
+                      <div key={field.key} className="flex items-center gap-2 p-2 bg-stone-50 rounded-lg min-w-0">
+                        <span className="text-xs font-medium text-stone-600 w-14 shrink-0">{field.label}</span>
                         <select className="flex-1 border rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-emerald-400 min-w-0"
                           value={(directColumnMapping as any)[field.key] || ''} onChange={(e) => setDirectColumnMapping({ ...directColumnMapping, [field.key]: e.target.value })}>
                           <option value="">-- 선택 --</option>
@@ -980,10 +1174,9 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                     ))}
                   </div>
                 )}
-                {/* 알림톡 템플릿 변수 매핑 */}
                 {directSendChannel === 'kakao_alimtalk' && kakaoSelectedTemplate && (
                   <div>
-                    <p className="text-xs font-medium text-blue-700 mb-2">🔔 템플릿 변수 매핑</p>
+                    <p className="text-xs font-medium text-blue-700 mb-2">템플릿 변수 매핑</p>
                     <div className="grid grid-cols-2 gap-2">
                       {(kakaoSelectedTemplate.content?.match(/#{[^}]+}/g) || []).map((varName: string, i: number) => {
                         const varKey = `tplvar_${i}`;
@@ -1003,19 +1196,18 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                       })}
                     </div>
                     {!kakaoSelectedTemplate.content?.match(/#{[^}]+}/g) && (
-                      <p className="text-xs text-gray-400 py-2">템플릿에 변수가 없습니다 (수신번호만 매핑)</p>
+                      <p className="text-xs text-stone-400 py-2">템플릿에 변수가 없습니다 (수신번호만 매핑)</p>
                     )}
                   </div>
                 )}
                 {directSendChannel === 'kakao_alimtalk' && !kakaoSelectedTemplate && (
-                  <div className="p-3 bg-yellow-50 rounded-lg border border-yellow-200">
-                    <p className="text-xs text-yellow-700">⚠️ 먼저 알림톡 템플릿을 선택해주세요.</p>
+                  <div className="p-3 bg-amber-50 rounded-lg border border-amber-200">
+                    <p className="text-xs text-amber-700">먼저 알림톡 템플릿을 선택해주세요.</p>
                   </div>
                 )}
                 {directSendChannel === 'rcs' && (
-                  <p className="text-xs text-gray-400 py-2">RCS는 수신번호만 매핑하면 됩니다.</p>
+                  <p className="text-xs text-stone-400 py-2">RCS는 수신번호만 매핑하면 됩니다.</p>
                 )}
-                {/* 매핑 요약 */}
                 {Object.values(directColumnMapping).some(v => v) && (
                   <div className="mt-3 flex flex-wrap gap-1">
                     {Object.entries(directColumnMapping).filter(([, v]) => v).map(([k, v]) => {
@@ -1033,10 +1225,10 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                   </div>
                 )}
               </div>
-              <div className="px-5 py-3 border-t bg-gray-50 flex justify-between items-center">
-                <span className="text-xs text-gray-600">총 <strong>{directFileData.length.toLocaleString()}</strong>건</span>
+              <div className="px-5 py-3 border-t bg-stone-50 flex justify-between items-center">
+                <span className="text-xs text-stone-600">총 <strong>{directFileData.length.toLocaleString()}</strong>건</span>
                 <div className="flex gap-2">
-                  <button onClick={() => setDirectShowMapping(false)} className="px-4 py-2 border rounded-lg text-xs font-medium hover:bg-gray-100">취소</button>
+                  <button onClick={() => setDirectShowMapping(false)} className="px-4 py-2 border rounded-lg text-xs font-medium hover:bg-stone-100">취소</button>
                   <button onClick={handleMappingApply} disabled={!directColumnMapping.phone || directMappingLoading}
                     className="px-6 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-xs font-bold disabled:opacity-50"
                   >{directMappingLoading ? `처리중... ${directLoadingProgress}%` : '등록하기'}</button>
@@ -1046,7 +1238,7 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
           </div>
         )}
 
-        {/* 직접입력 모달 — 메시지 변수 기반 동적 입력폼 */}
+        {/* ============ 직접입력 모달 ============ */}
         {showDirectInput && (() => {
           const usedVars = directSendChannel === 'sms'
             ? DIRECT_VAR_MAP.filter(v => directMessage.includes(v.variable)).map(v => v.fieldKey)
@@ -1054,21 +1246,26 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
           return (
             <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60]">
               <div className="bg-white rounded-2xl shadow-2xl w-[550px] overflow-hidden">
-                <div className="px-5 py-3 border-b bg-blue-50 flex justify-between items-center">
+                <div className="px-5 py-3 border-b bg-emerald-50 flex justify-between items-center">
                   <div>
-                    <h3 className="font-bold text-sm">✏️ 직접입력</h3>
-                    <p className="text-xs text-gray-500 mt-0.5">
+                    <h3 className="font-semibold text-[14px] text-emerald-900 flex items-center gap-2">
+                      <PencilLine size={14} strokeWidth={1.75} />
+                      직접입력
+                    </h3>
+                    <p className="text-[11.5px] text-emerald-700/80 mt-0.5">
                       {usedVars.length > 0
                         ? `메시지에 사용된 변수: ${usedVars.map(f => DIRECT_FIELD_LABELS[f] || f).join(', ')}`
                         : '수신번호를 입력해주세요 (한 줄에 하나씩 또는 한 건씩 추가)'}
                     </p>
                   </div>
-                  <button onClick={() => setShowDirectInput(false)} className="text-gray-500 hover:text-gray-700">✕</button>
+                  <button onClick={() => setShowDirectInput(false)} className="text-stone-500 hover:text-stone-700">
+                    <X size={16} strokeWidth={1.75} />
+                  </button>
                 </div>
                 <div className="p-5">
                   {usedVars.length === 0 ? (
                     <>
-                      <div className="mb-2 text-xs text-gray-500">전화번호를 한 줄에 하나씩 입력</div>
+                      <div className="mb-2 text-xs text-stone-500">전화번호를 한 줄에 하나씩 입력</div>
                       <textarea value={directInputText} onChange={(e) => setDirectInputText(e.target.value)}
                         placeholder={'01012345678\n01087654321\n01011112222'}
                         className="w-full h-[200px] border rounded-lg p-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-emerald-500"
@@ -1078,24 +1275,22 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                     <>
                       <div className="flex gap-2 items-end mb-3">
                         <div className="flex-1">
-                          <label className="block text-xs font-medium text-gray-600 mb-1">수신번호 *</label>
+                          <label className="block text-xs font-medium text-stone-600 mb-1">수신번호 *</label>
                           <input id="directInputPhone" type="text" placeholder="01012345678"
                             className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" />
                         </div>
                         {usedVars.map(f => (
                           <div key={f} className="flex-1">
-                            <label className="block text-xs font-medium text-gray-600 mb-1">{DIRECT_FIELD_LABELS[f]}</label>
+                            <label className="block text-xs font-medium text-stone-600 mb-1">{DIRECT_FIELD_LABELS[f]}</label>
                             <input id={`directInput_${f}`} type="text" placeholder={DIRECT_FIELD_LABELS[f]}
                               className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" />
                           </div>
                         ))}
                         <button onClick={() => {
                           const phoneEl = document.getElementById('directInputPhone') as HTMLInputElement;
-                          // ★ D137 D5: 앞 0 누락 자동 보정
                           const phone = normalizePhoneKr(phoneEl?.value);
                           if (!phone || phone.length < 10) { setToast({ show: true, type: 'error', message: '유효한 수신번호를 입력해주세요' }); return; }
                           const entry: any = { phone, name: '', extra1: '', extra2: '', extra3: '', callback: '' };
-                          // ★ D137 D5: 회신번호(callback)는 앞 0 누락 보정, 그 외 문자열 그대로
                           usedVars.forEach(f => {
                             const el = document.getElementById(`directInput_${f}`) as HTMLInputElement;
                             const val = el?.value || '';
@@ -1114,12 +1309,11 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                     </>
                   )}
                 </div>
-                <div className="px-5 py-3 border-t bg-gray-50 flex justify-end gap-2">
-                  <button onClick={() => setShowDirectInput(false)} className="px-4 py-2 border rounded-lg text-xs font-medium hover:bg-gray-100">닫기</button>
+                <div className="px-5 py-3 border-t bg-stone-50 flex justify-end gap-2">
+                  <button onClick={() => setShowDirectInput(false)} className="px-4 py-2 border rounded-lg text-xs font-medium hover:bg-stone-100">닫기</button>
                   {usedVars.length === 0 && (
                     <button onClick={() => {
                       const lines = directInputText.split('\n').map(l => l.trim()).filter(l => l);
-                      // ★ D137 D5: 앞 0 누락 자동 보정 + 유효하지 않은 번호 필터링
                       const newRecipients = lines
                         .map(line => ({ phone: normalizePhoneKr(line), name: '', extra1: '', extra2: '', extra3: '', callback: '' }))
                         .filter(r => r.phone && r.phone.length >= 10);

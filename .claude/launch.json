@@ -6,6 +6,12 @@
       "runtimeExecutable": "npx",
       "runtimeArgs": ["-y", "http-server", ".", "-p", "8787", "-c-1", "--cors"],
       "port": 8787
+    },
+    {
+      "name": "frontend-dev",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--prefix", "packages/frontend"],
+      "port": 5173
     }
   ]
 }

@@ -202,7 +202,14 @@
       "Bash(nslookup -type=NS hanjullo.com)",
       "Bash(nslookup -type=NS hanjul.ai)",
       "Bash(node ../../tools/gen-super-admin-permission-matrix.js)",
-      "Bash(node \"C:/Users/ceo/projects/targetup/tools/gen-super-admin-permission-matrix.js\")"
+      "Bash(node \"C:/Users/ceo/projects/targetup/tools/gen-super-admin-permission-matrix.js\")",
+      "Bash(grep -E \"SyncAgent|Setup\" echo \"---release---\" ls C:/Users/ceo/projects/targetup/sync-agent/release/)",
+      "Bash(./build-installer.bat 1.5.2)",
+      "Bash(mkdir -p installer/release)",
+      "Bash(cp release/sync-agent.exe installer/release/)",
+      "Bash(cp release/sql-wasm.wasm installer/release/)",
+      "Bash(\"/c/Program Files \\(x86\\)/NSIS/makensis.exe\" //V3 //INPUTCHARSET UTF8 //DPRODUCT_VERSION=1.5.2 //DHAS_ICON installer/sync-agent-installer.nsi)",
+      "Bash(bash /c/Users/ceo/projects/targetup/sync-agent/installer/build-linux-package.sh 1.5.2)"
     ]
   }
 }
