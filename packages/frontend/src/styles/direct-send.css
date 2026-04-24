@@ -856,31 +856,41 @@
   transform: rotate(180deg);
 }
 
+/* ★ D137 UI: 드롭다운을 위로 펼침 — 트리거가 모달 하단 가까이 있어서
+   아래로 펼치면 마지막 항목(기타3)이 잘림 */
 .ds-var-menu {
   position: absolute;
-  top: calc(100% + 6px);
+  bottom: calc(100% + 6px);
   right: 0;
   min-width: 220px;
+  max-height: 300px;
+  overflow-y: auto;
   background: #FFFFFF;
   border: 1px solid var(--ds-stone-200);
   border-radius: 12px;
   padding: 6px;
-  box-shadow: 0 8px 32px rgb(0 0 0 / .12), 0 2px 6px rgb(0 0 0 / .06);
+  box-shadow: 0 -8px 32px rgb(0 0 0 / .12), 0 -2px 6px rgb(0 0 0 / .06);
   z-index: 50;
   animation: ds-var-menu-in .15s cubic-bezier(.4, 0, .2, 1);
 }
 @keyframes ds-var-menu-in {
-  from { opacity: 0; transform: translateY(-4px); }
+  from { opacity: 0; transform: translateY(4px); }
   to   { opacity: 1; transform: translateY(0); }
 }
 
+/* 헤더는 위로 펼치는 메뉴에선 하단에 배치 */
 .ds-var-menu__head {
-  padding: 7px 10px 6px;
+  padding: 6px 10px 7px;
   font-size: 11px;
   font-weight: 500;
   color: var(--ds-stone-400);
-  border-bottom: 1px solid var(--ds-stone-100);
-  margin-bottom: 4px;
+  border-top: 1px solid var(--ds-stone-100);
+  margin-top: 4px;
+  order: 99;
+}
+.ds-var-menu {
+  display: flex;
+  flex-direction: column;
 }
 
 .ds-var-item {
