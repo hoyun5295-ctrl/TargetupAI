@@ -503,29 +503,26 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
 
                 {/* 제목 (LMS/MMS 전용) */}
                 {(directMsgType === 'LMS' || directMsgType === 'MMS') && (
-                  <div className="ds-field-group">
-                    <label className="ds-label">제목 <span className="text-rose-500">*</span></label>
-                    <div className="relative">
-                      {adTextEnabled && (
-                        <span className="ds-ad-tag absolute left-[10px] top-1/2 -translate-y-1/2 pointer-events-none">광고</span>
-                      )}
-                      <input
-                        type="text"
-                        value={directSubject}
-                        onChange={(e) => setDirectSubject(e.target.value)}
-                        placeholder="제목을 입력해주세요"
-                        className="ds-subject-in"
-                        style={adTextEnabled ? { paddingLeft: 52 } : undefined}
-                      />
-                    </div>
+                  <div className="relative flex-shrink-0">
+                    {adTextEnabled && (
+                      <span className="ds-ad-tag absolute left-[10px] top-1/2 -translate-y-1/2 pointer-events-none">광고</span>
+                    )}
+                    <input
+                      type="text"
+                      value={directSubject}
+                      onChange={(e) => setDirectSubject(e.target.value)}
+                      placeholder="제목을 입력해주세요 (필수)"
+                      className="ds-subject-in"
+                      style={adTextEnabled ? { paddingLeft: 52 } : undefined}
+                    />
                   </div>
                 )}
 
                 {/* 본문 에디터 */}
                 <div className="ds-editor-wrap ds-t">
-                  <div className="relative">
+                  <div className="ds-editor-body">
                     {adTextEnabled && (
-                      <span className="ds-ad-tag absolute left-0 top-0">광고</span>
+                      <span className="ds-ad-tag absolute left-0 top-0 z-10">광고</span>
                     )}
                     <textarea
                       ref={directTextareaRef}
@@ -534,7 +531,6 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                       onChange={(e) => { setDirectMessage(e.target.value); directCursorPosRef.current = e.target.selectionStart; }}
                       onSelect={(e) => { directCursorPosRef.current = (e.target as HTMLTextAreaElement).selectionStart; }}
                       placeholder="전송하실 내용을 입력하세요."
-                      rows={directMsgType === 'SMS' ? 8 : 6}
                       spellCheck={false}
                       style={adTextEnabled ? { textIndent: 42 } : undefined}
                     />

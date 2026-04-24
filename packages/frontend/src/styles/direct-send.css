@@ -76,8 +76,8 @@
     0 2px 6px rgb(0 0 0 / .04);
   overflow: hidden;
   width: 1400px;
-  max-width: calc(100vw - 40px);
-  max-height: calc(100vh - 40px);
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 32px);
   display: flex;
   flex-direction: column;
 }
@@ -86,23 +86,26 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 18px 28px 16px;
+  padding: 12px 24px;
   border-bottom: 1px solid rgba(231, 229, 228, 0.7);
   flex-shrink: 0;
 }
 
 .ds-modal__body {
   display: grid;
-  grid-template-columns: 520px 1px 1fr;
+  grid-template-columns: 500px 1px 1fr;
   flex: 1;
   min-height: 0;
   overflow: hidden;
 }
 
 .ds-modal__body > section {
-  overflow-y: auto;
-  padding: 24px;
+  overflow: hidden;
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
 }
+.ds-modal__body > section.ds-section { gap: 10px; }
 
 .ds-modal__vdiv {
   width: 1px;
@@ -113,9 +116,9 @@
    모달 헤더 (아이콘 + 제목 + 창닫기)
    ============================================================ */
 .ds-head-icon {
-  width: 34px;
-  height: 34px;
-  border-radius: 10px;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
   background: var(--ds-emerald-50);
   border: 1px solid var(--ds-emerald-100);
   display: flex;
@@ -125,16 +128,16 @@
 }
 
 .ds-head-title {
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--ds-stone-900);
-  line-height: 1.25;
+  line-height: 1.2;
 }
 
 .ds-head-sub {
-  font-size: 12px;
+  font-size: 11.5px;
   color: var(--ds-stone-500);
-  line-height: 1.25;
+  line-height: 1.2;
   margin-top: 2px;
 }
 
@@ -142,13 +145,13 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 36px;
-  padding: 0 14px;
-  border-radius: 9px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 8px;
   background: #FFFFFF;
   border: 1px solid var(--ds-stone-200);
   color: var(--ds-stone-600);
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 500;
   cursor: pointer;
   transition: all .18s cubic-bezier(.4, 0, .2, 1);
@@ -232,10 +235,20 @@
    ============================================================ */
 .ds-editor-wrap {
   background: #FFFFFF;
-  border-radius: 12px;
+  border-radius: 10px;
   box-shadow: inset 0 0 0 1px var(--ds-stone-200), inset 0 1px 2px rgb(0 0 0 / .03);
   transition: all .18s cubic-bezier(.4, 0, .2, 1);
-  padding: 16px;
+  padding: 12px 12px 10px;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.ds-editor-wrap > .ds-editor-body {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  display: flex;
 }
 .ds-editor-wrap:focus-within {
   box-shadow:
@@ -245,26 +258,29 @@
 }
 .ds-editor-wrap textarea {
   width: 100%;
+  height: 100%;
   background: transparent;
   border: 0;
   resize: none;
   color: var(--ds-stone-900);
-  line-height: 1.6;
-  font-size: 14px;
+  line-height: 1.55;
+  font-size: 13.5px;
   font-family: inherit;
+  flex: 1;
+  min-height: 0;
 }
 .ds-editor-wrap textarea::placeholder { color: var(--ds-stone-400); }
 
 /* 제목(LMS/MMS) 인풋 */
 .ds-subject-in {
   width: 100%;
-  height: 40px;
+  height: 36px;
   padding: 0 12px;
-  border-radius: 10px;
+  border-radius: 9px;
   border: 1px solid var(--ds-amber-200);
   background: var(--ds-amber-50);
   color: var(--ds-amber-800);
-  font-size: 13.5px;
+  font-size: 13px;
   font-weight: 500;
   font-family: inherit;
   transition: all .18s cubic-bezier(.4, 0, .2, 1);
@@ -277,12 +293,13 @@
 
 /* 무료거부 하단 고정 문구 */
 .ds-editor-foot {
-  margin-top: 14px;
-  padding-top: 12px;
+  margin-top: 8px;
+  padding-top: 8px;
   border-top: 1px dashed var(--ds-stone-200);
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-shrink: 0;
 }
 .ds-lock-tag {
   display: inline-flex;
@@ -323,11 +340,12 @@
 .ds-channel-group {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px;
+  gap: 4px;
+  padding: 3px;
   background: var(--ds-stone-50);
-  border-radius: 12px;
+  border-radius: 10px;
   border: 1px solid rgba(231, 229, 228, 0.7);
+  flex-shrink: 0;
 }
 
 .ds-pill {
@@ -335,11 +353,11 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  height: 40px;
-  padding: 0 14px;
-  border-radius: 9px;
-  font-size: 13.5px;
+  gap: 5px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 8px;
+  font-size: 13px;
   font-weight: 500;
   color: var(--ds-stone-500);
   border: 1px solid transparent;
@@ -381,19 +399,20 @@
   grid-auto-columns: 1fr;
   gap: 2px;
   background: var(--ds-stone-100);
-  padding: 4px;
-  border-radius: 10px;
+  padding: 3px;
+  border-radius: 8px;
   box-shadow: inset 0 0 0 1px var(--ds-stone-150);
+  flex-shrink: 0;
 }
 .ds-seg button {
   position: relative;
   z-index: 1;
-  height: 34px;
-  font-size: 13px;
+  height: 30px;
+  font-size: 12.5px;
   font-weight: 500;
   color: var(--ds-stone-500);
   border: 0;
-  border-radius: 7px;
+  border-radius: 6px;
   background: transparent;
   cursor: pointer;
   transition: color .2s ease;
@@ -461,10 +480,10 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 34px;
-  padding: 0 14px;
-  border-radius: 9px;
-  font-size: 13px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 8px;
+  font-size: 12.5px;
   font-weight: 500;
   color: var(--ds-stone-600);
   background: #FFFFFF;
@@ -496,8 +515,8 @@
   position: relative;
   background: var(--ds-stone-50);
   border: 1px solid var(--ds-stone-200);
-  border-radius: 12px;
-  padding: 12px 12px 12px 14px;
+  border-radius: 10px;
+  padding: 9px 10px 9px 11px;
   cursor: pointer;
   transition: all .18s cubic-bezier(.4, 0, .2, 1);
   display: block;
@@ -525,10 +544,10 @@
 .ds-optcard-top {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
 }
 .ds-optcard-title {
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 600;
   color: var(--ds-stone-800);
 }
@@ -537,9 +556,9 @@
 .ds-optcard--on-purple .ds-optcard-title { color: #5B21B6; }
 .ds-optcard--on-amber .ds-optcard-title { color: var(--ds-amber-800); }
 .ds-optcard-sub {
-  font-size: 11.5px;
+  font-size: 11px;
   color: var(--ds-stone-500);
-  margin-top: 6px;
+  margin-top: 4px;
   display: flex;
   align-items: center;
   gap: 5px;
@@ -550,13 +569,13 @@
    주 버튼 (전송하기)
    ============================================================ */
 .ds-btn-primary {
-  height: 52px;
+  height: 44px;
   width: 100%;
   background: var(--ds-emerald-600);
   color: white;
-  font-size: 15.5px;
+  font-size: 14.5px;
   font-weight: 600;
-  border-radius: 12px;
+  border-radius: 10px;
   border: 0;
   display: inline-flex;
   align-items: center;
@@ -566,6 +585,7 @@
   transition: all .18s cubic-bezier(.4, 0, .2, 1);
   cursor: pointer;
   font-family: inherit;
+  flex-shrink: 0;
 }
 .ds-btn-primary:hover:not(:disabled) {
   background: var(--ds-emerald-700);
@@ -601,9 +621,9 @@
    보조 액션 버튼 (미리보기 / 스팸필터)
    ============================================================ */
 .ds-btn-sec {
-  height: 42px;
-  border-radius: 10px;
-  font-size: 13.5px;
+  height: 36px;
+  border-radius: 9px;
+  font-size: 12.5px;
   font-weight: 500;
   display: inline-flex;
   align-items: center;
@@ -638,17 +658,17 @@
    에디터 유틸 버튼 (특수문자/보관함/문자저장)
    ============================================================ */
 .ds-util {
-  height: 30px;
-  padding: 0 11px;
-  border-radius: 8px;
-  font-size: 12px;
+  height: 26px;
+  padding: 0 9px;
+  border-radius: 7px;
+  font-size: 11.5px;
   font-weight: 500;
   color: var(--ds-stone-600);
   background: var(--ds-stone-100);
   border: 1px solid transparent;
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   cursor: pointer;
   transition: all .15s ease;
   font-family: inherit;
@@ -663,13 +683,13 @@
    발신번호 셀렉트
    ============================================================ */
 .ds-sel {
-  height: 44px;
+  height: 38px;
   width: 100%;
   background: #FFFFFF;
   border: 1px solid var(--ds-stone-200);
-  border-radius: 10px;
+  border-radius: 9px;
   padding: 0 12px;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
   color: var(--ds-stone-900);
   font-family: inherit;
@@ -679,7 +699,7 @@
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23A8A29E' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
   background-repeat: no-repeat;
   background-position: right 12px center;
-  padding-right: 38px;
+  padding-right: 36px;
 }
 .ds-sel:hover { border-color: var(--ds-stone-300); }
 .ds-sel:focus {
@@ -689,10 +709,10 @@
 
 .ds-label {
   display: block;
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 500;
   color: var(--ds-stone-500);
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 
 /* ============================================================
@@ -967,9 +987,9 @@
    MMS 이미지 표시 박스
    ============================================================ */
 .ds-mms-box {
-  margin-top: 10px;
-  padding: 10px 12px;
-  border-radius: 10px;
+  margin-top: 6px;
+  padding: 7px 10px;
+  border-radius: 8px;
   background: var(--ds-amber-50);
   border: 1px dashed var(--ds-amber-200);
   cursor: pointer;
@@ -977,6 +997,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-shrink: 0;
 }
 .ds-mms-box:hover {
   background: var(--ds-amber-100);
@@ -1018,13 +1039,15 @@
 .ds-section {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 10px;
 }
 .ds-field-group {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 4px;
+  flex-shrink: 0;
 }
+.ds-section > .ds-editor-wrap { flex: 1; min-height: 140px; }
 
 /* Lucide 아이콘 기본 크기 */
 .ds-scope svg { flex-shrink: 0; }
@@ -1045,11 +1068,11 @@
 .ds-autoinput-head {
   display: flex;
   align-items: baseline;
-  gap: 8px;
-  margin-bottom: 8px;
+  gap: 6px;
+  margin-bottom: 5px;
 }
-.ds-autoinput-head strong { font-size: 12.5px; font-weight: 600; color: var(--ds-stone-700); }
-.ds-autoinput-head span { font-size: 11.5px; color: var(--ds-stone-400); }
+.ds-autoinput-head strong { font-size: 12px; font-weight: 600; color: var(--ds-stone-700); }
+.ds-autoinput-head span { font-size: 11px; color: var(--ds-stone-400); }
 
 /* 필터 체크박스 라인 */
 .ds-filter-row {
