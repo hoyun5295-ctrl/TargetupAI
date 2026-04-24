@@ -20,6 +20,9 @@ interface DirectPreviewModalProps {
   targetFieldsMeta: FieldMeta[];
   // ★ D137 UI: 광고표기 ON/OFF — LMS/MMS 제목에 (광고) prefix 적용
   adTextEnabled?: boolean;
+  // ★ D137 UI: 개별회신번호 컬럼 매핑 검증
+  useIndividualCallback?: boolean;
+  individualCallbackColumn?: string;
 }
 
 // ★ B+0407-1: 인라인 replaceVarsWithMeta 제거 — formatDate.ts replaceVarsByFieldMeta 컨트롤타워 사용
@@ -42,6 +45,8 @@ export default function DirectPreviewModal({
   formatPhoneNumber, calculateBytes, getFullMessage,
   targetFieldsMeta,
   adTextEnabled = false,
+  useIndividualCallback = false,
+  individualCallbackColumn = '',
 }: DirectPreviewModalProps) {
   if (!show) return null;
 
@@ -49,6 +54,14 @@ export default function DirectPreviewModal({
   const subjectWithAd = adTextEnabled && directSubject
     ? (directSubject.trim().startsWith('(광고)') ? directSubject : `(광고) ${directSubject}`)
     : directSubject;
+
+  // ★ D137 UI: 수신자별 실제 적용될 회신번호 계산
+  const resolveCallback = (r: any): string => {
+    if (useIndividualCallback && individualCallbackColumn && r) {
+      return r[individualCallbackColumn] || '';
+    }
+    return selectedCallback || '';
+  };
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60]">
@@ -63,10 +76,21 @@ export default function DirectPreviewModal({
           <div className="flex flex-col items-center shrink-0">
             <div className="rounded-[1.8rem] p-[3px] bg-gradient-to-b from-emerald-400 to-emerald-600 shadow-lg shadow-emerald-200">
               <div className="bg-white rounded-[1.6rem] overflow-hidden flex flex-col w-[280px]" style={{ height: '420px' }}>
-                {/* 상단 - 회신번호 */}
+                {/* 상단 - 회신번호 (첫 수신자의 실제 적용 번호) */}
                 <div className="px-4 py-2.5 bg-gradient-to-r from-gray-50 to-gray-100 flex justify-between items-center shrink-0 border-b">
                   <span className="text-[11px] text-gray-400 font-medium">{directMsgType === 'MMS' ? 'MMS' : directMsgType === 'LMS' ? 'LMS' : '문자메시지'}</span>
-                  <span className="text-[11px] font-bold text-emerald-600">{formatPhoneNumber(selectedCallback) || '회신번호'}</span>
+                  {(() => {
+                    const firstR = showTargetSend ? targetRecipients[0] : directRecipients[0];
+                    const cb = resolveCallback(firstR);
+                    return (
+                      <span className="text-[11px] font-bold text-emerald-600">
+                        {cb ? formatPhoneNumber(cb) : '회신번호'}
+                        {useIndividualCallback && individualCallbackColumn && (
+                          <span className="ml-1 text-blue-500 font-medium">· {individualCallbackColumn}</span>
+                        )}
+                      </span>
+                    );
+                  })()}
                 </div>
                 {/* LMS/MMS 제목 — (광고) prefix 포함 */}
                 {(directMsgType === 'LMS' || directMsgType === 'MMS') && subjectWithAd && (
@@ -129,12 +153,22 @@ export default function DirectPreviewModal({
           {/* 우측: 수신자별 미리보기 */}
           {(directMessage.includes('%') && (directRecipients.length > 0 || targetRecipients.length > 0)) && (
             <div className="flex-1 flex flex-col min-w-0">
-              <div className="text-sm font-medium text-gray-700 mb-2">📋 수신자별 미리보기 (최대 10건)</div>
+              <div className="text-sm font-medium text-gray-700 mb-2">
+                📋 수신자별 미리보기 (최대 10건)
+                {useIndividualCallback && individualCallbackColumn && (
+                  <span className="ml-2 text-xs text-blue-600 font-normal">
+                    · 회신번호: <strong>{individualCallbackColumn}</strong> 컬럼 매핑
+                  </span>
+                )}
+              </div>
               <div className="border rounded-lg overflow-hidden flex-1 overflow-y-auto" style={{ maxHeight: '420px' }}>
                 <table className="w-full text-xs">
                   <thead className="bg-gray-100 sticky top-0">
                     <tr>
                       <th className="px-2 py-1.5 text-left w-24">수신번호</th>
+                      {useIndividualCallback && individualCallbackColumn && (
+                        <th className="px-2 py-1.5 text-left w-28 text-blue-700">회신번호</th>
+                      )}
                       <th className="px-2 py-1.5 text-left">치환 메시지</th>
                     </tr>
                   </thead>
@@ -147,10 +181,18 @@ export default function DirectPreviewModal({
                       } else {
                         msg = replaceVarsDirectWrap(msg, r, selectedCallback, false);
                       }
+                      const rowCb = resolveCallback(r);
                       return (
                         <tr key={idx} className="hover:bg-gray-50">
                           <td className="px-2 py-1.5 font-mono text-gray-600">{r.phone}</td>
-                          <td className="px-2 py-1.5 text-gray-700 whitespace-pre-wrap leading-snug">{msg}</td>
+                          {useIndividualCallback && individualCallbackColumn && (
+                            <td className="px-2 py-1.5 font-mono text-xs">
+                              {rowCb
+                                ? <span className="text-blue-700 font-medium">{formatPhoneNumber(rowCb)}</span>
+                                : <span className="text-red-500 font-medium">⚠ 없음</span>}
+                            </td>
+                          )}
+                          <td className="px-2 py-1.5 text-gray-700 whitespace-pre-wrap leading-snug" style={{ wordBreak: 'keep-all', overflowWrap: 'anywhere' }}>{msg}</td>
                         </tr>
                       );
                     })}

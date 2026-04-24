@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { formatDate, formatPreviewValue, formatPhoneNumber } from '../utils/formatDate';
+import { formatDate, formatPreviewValue, formatPhoneNumber, compactTimestamp } from '../utils/formatDate';
 
 interface CustomerDBModalProps {
   onClose: () => void;
@@ -276,8 +276,7 @@ export default function CustomerDBModal({ onClose, token, userType }: CustomerDB
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      const ts = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '').slice(0, 14);
-      a.download = `customers_${ts}.xlsx`;
+      a.download = `customers_${compactTimestamp()}.xlsx`;
       document.body.appendChild(a);
       a.click();
       a.remove();

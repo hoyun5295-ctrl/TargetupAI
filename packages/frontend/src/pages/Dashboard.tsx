@@ -3575,6 +3575,8 @@ const campaignData = {
         getFullMessage={getFullMessage}
         targetFieldsMeta={targetFieldsMeta}
         adTextEnabled={adTextEnabled}
+        useIndividualCallback={useIndividualCallback}
+        individualCallbackColumn={individualCallbackColumn}
       />
       <SendConfirmModal
         sendConfirm={sendConfirm}

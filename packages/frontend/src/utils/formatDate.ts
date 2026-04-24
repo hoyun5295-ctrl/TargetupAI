@@ -239,6 +239,23 @@ export function formatDateTimeShort(dateStr: string | null | undefined): string 
 }
 
 /**
+ * ★ D137: 파일명용 압축 타임스탬프 `YYYYMMDDHHmmss` (14자)
+ * 이전 inline 패턴 `toISOString().replace(/[-:T]/g, '')`가 Tailwind JIT에
+ * arbitrary value(`-: T;`)로 오스캔되어 CSS 빌드 WARNING 발생 → 컨트롤타워화.
+ * 사용처: CustomerDBModal 등 파일 다운로드 시 파일명 suffix.
+ */
+export function compactTimestamp(date: Date = new Date()): string {
+  const iso = date.toISOString().slice(0, 19); // YYYY-MM-DDTHH:mm:ss
+  const y = iso.slice(0, 4);
+  const mo = iso.slice(5, 7);
+  const d = iso.slice(8, 10);
+  const h = iso.slice(11, 13);
+  const mi = iso.slice(14, 16);
+  const s = iso.slice(17, 19);
+  return `${y}${mo}${d}${h}${mi}${s}`;
+}
+
+/**
  * ★ D95: SMS 바이트 계산 — EUC-KR 기준 (한글 2byte, 영문/숫자/ASCII 1byte)
  * 프론트 전 경로의 유일한 바이트 계산 함수.
  * 사용처: Dashboard.tsx, AiCustomSendFlow.tsx, TargetSendModal.tsx 등
