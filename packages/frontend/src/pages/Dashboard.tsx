@@ -442,7 +442,13 @@ export default function Dashboard() {
         callback: isAlimtalk ? (callbackNumbers[0]?.phone || '') : (useIndividualCallback ? null : selectedCallback),
         useIndividualCallback: isAlimtalk ? false : useIndividualCallback,
         individualCallbackColumn: (!isAlimtalk && useIndividualCallback) ? individualCallbackColumn : undefined,
-        recipients: directRecipients.map((r: any) => ({ ...r, callback: r.callback || null })),
+        // ★ D137 (0424): executeTargetSend와 동일 패턴으로 통일 — resolveRecipientCallback CT로 개별회신번호 resolve.
+        // 백엔드 campaigns.ts:1376 filterByIndividualCallback은 direct-send 경로에서 callbackColumn을
+        // 전달받지 않으므로 (주석: "프론트가 이미 callback에 매핑해서 전달") 프론트에서 resolve 필수.
+        recipients: directRecipients.map((r: any) => ({
+          ...r,
+          callback: resolveRecipientCallback(r, useIndividualCallback, individualCallbackColumn) || r.callback || null,
+        })),
         adEnabled: isAlimtalk ? false : adTextEnabled,
         scheduled: reserveEnabled,
         scheduledAt: reserveEnabled && reserveDateTime ? new Date(reserveDateTime).toISOString() : null,

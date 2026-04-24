@@ -425,6 +425,10 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
       const processed = chunk.map(row => {
         const phone = normalizePhoneKr(row[directColumnMapping.phone]);
         const entry: any = {
+          // ★ D137 (0424): 원본 파일 헤더 키 보존 — 개별회신번호 매핑 (r[individualCallbackColumn])이
+          // 미리보기/CT-08 resolveRecipientCallback에서 원본 헤더로 값 접근하기 때문.
+          // D99 원칙: "축소된 객체에서 resolveRecipientCallback 호출 금지" 준수.
+          ...row,
           phone,
           name: directColumnMapping.name ? (row[directColumnMapping.name] || '') : '',
           extra1: directColumnMapping.extra1 ? (row[directColumnMapping.extra1] || '') : '',

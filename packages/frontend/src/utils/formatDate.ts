@@ -744,20 +744,27 @@ export function formatPhoneNumber(phone: string): string {
  * individualCallbackColumn이 지정되면 해당 컬럼에서 회신번호 추출.
  * custom_fields JSONB 내부 키(custom_1~15)도 지원.
  *
- * 적용: Dashboard.tsx executeTargetSend (recipients + customMessages 2곳)
+ * ★ D137 (0424): fallbackCallback 파라미터 추가 (optional, 하위호환).
+ *   - 개별회신번호 OFF이거나 매핑 컬럼값 비었을 때 쓸 대체 번호.
+ *   - DirectPreviewModal에서 selectedCallback(사용자가 드롭다운에서 선택한 기본 발신번호) 전달.
+ *   - D137 이전 호출부(Dashboard.tsx executeTargetSend)는 파라미터 생략 시 기존 동작 유지.
+ *
+ * 적용: Dashboard.tsx executeTargetSend/executeDirectSend, DirectPreviewModal
  */
 export function resolveRecipientCallback(
   recipient: any,
   useIndividualCallback: boolean,
-  individualCallbackColumn: string
+  individualCallbackColumn: string,
+  fallbackCallback?: string
 ): string | null {
   if (!useIndividualCallback || !individualCallbackColumn) {
-    return recipient.callback || null;
+    return recipient.callback || fallbackCallback || null;
   }
   return recipient[individualCallbackColumn]
     || (recipient.custom_fields && individualCallbackColumn.startsWith('custom_')
         ? recipient.custom_fields[individualCallbackColumn]
         : null)
+    || fallbackCallback
     || null;
 }
 

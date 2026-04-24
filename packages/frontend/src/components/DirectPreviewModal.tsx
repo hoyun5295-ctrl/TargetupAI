@@ -1,5 +1,5 @@
 import type { FieldMeta } from './DirectTargetFilterModal';
-import { replaceDirectVars, replaceVarsByFieldMeta } from '../utils/formatDate';
+import { replaceDirectVars, replaceVarsByFieldMeta, resolveRecipientCallback } from '../utils/formatDate';
 import MmsImagePreview from './shared/MmsImagePreview';
 
 interface DirectPreviewModalProps {
@@ -55,13 +55,10 @@ export default function DirectPreviewModal({
     ? (directSubject.trim().startsWith('(광고)') ? directSubject : `(광고) ${directSubject}`)
     : directSubject;
 
-  // ★ D137 UI: 수신자별 실제 적용될 회신번호 계산
-  const resolveCallback = (r: any): string => {
-    if (useIndividualCallback && individualCallbackColumn && r) {
-      return r[individualCallbackColumn] || '';
-    }
-    return selectedCallback || '';
-  };
+  // ★ D137 (0424): formatDate.ts resolveRecipientCallback 컨트롤타워 사용 (원칙 3 준수).
+  // 인라인 중복 제거 — custom_fields JSONB 내부 키(custom_1~15) 지원 + fallbackCallback=selectedCallback.
+  const resolveCallback = (r: any): string =>
+    resolveRecipientCallback(r, !!useIndividualCallback, individualCallbackColumn || '', selectedCallback) || '';
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60]">
