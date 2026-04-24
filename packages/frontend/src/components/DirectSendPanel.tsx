@@ -797,6 +797,11 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                   </label>
                 </div>
 
+                {/* 전송하기 — 좌측 섹션 하단 */}
+                <button type="button" className="ds-btn-primary ds-t" onClick={handleSendClick}>
+                  <Send size={17} strokeWidth={2} />
+                  <span>{directRecipients.length > 0 ? `${directRecipients.length.toLocaleString()}명에게 전송하기` : '전송하기'}</span>
+                </button>
               </>
             )}
 
@@ -836,7 +841,16 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                   <div className="text-[11.5px] text-stone-400 mt-3">RCS 미지원 단말은 SMS/LMS로 자동 폴백됩니다</div>
                 </div>
 
-                <p className="text-[11.5px] text-center text-purple-400 mt-2">RCS 발송 기능은 곧 오픈 예정입니다</p>
+                <button
+                  type="button"
+                  className="ds-btn-primary ds-btn-primary--purple ds-t"
+                  onClick={() => setToast({ show: true, type: 'error', message: 'RCS 발송 기능은 곧 오픈 예정입니다' })}
+                  disabled={!rcsSelectedTemplate}
+                >
+                  <Send size={17} strokeWidth={2} />
+                  <span>{!rcsSelectedTemplate ? '템플릿을 선택해주세요' : 'RCS 전송하기'}</span>
+                </button>
+                <p className="text-[11.5px] text-center text-purple-400 -mt-1">RCS 발송 기능은 곧 오픈 예정입니다</p>
               </>
             )}
 
@@ -864,6 +878,15 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                     if (setAlimtalkNextContents) setAlimtalkNextContents(v.nextContents);
                   }}
                 />
+                <button
+                  type="button"
+                  className="ds-btn-primary ds-btn-primary--blue ds-t"
+                  onClick={handleAlimtalkSend}
+                  disabled={!kakaoSelectedTemplate || !['approved', 'APPROVED', 'APR', 'A'].includes(kakaoSelectedTemplate?.status)}
+                >
+                  <Bell size={17} strokeWidth={2} />
+                  <span>{!kakaoSelectedTemplate ? '템플릿을 선택해주세요' : (directRecipients.length > 0 ? `${directRecipients.length.toLocaleString()}명에게 알림톡 발송` : '알림톡 발송하기')}</span>
+                </button>
               </>
             )}
           </section>
@@ -1095,77 +1118,40 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
               })()}
             </div>
 
+            {/* 하단 액션 — 우측 섹션 하단 (원래 자리) */}
+            <div className="ds-bottom-actions">
+              <div className="flex items-center gap-1">
+                <button type="button" className="ds-ter ds-ter--danger ds-t" onClick={() => {
+                  if (selectedRecipients.size === 0) { setToast({ show: true, type: 'error', message: '선택된 항목이 없습니다' }); return; }
+                  setDirectRecipients(prev => prev.filter((_, idx) => !selectedRecipients.has(idx)));
+                  setSelectedRecipients(new Set());
+                }}>
+                  <Trash2 size={13} strokeWidth={1.75} />
+                  <span>선택삭제</span>
+                </button>
+                <button type="button" className="ds-ter ds-ter--danger ds-t" onClick={() => {
+                  if (directRecipients.length === 0) return;
+                  setDirectRecipients([]);
+                  setSelectedRecipients(new Set());
+                }}>
+                  <XCircle size={13} strokeWidth={1.75} />
+                  <span>전체삭제</span>
+                </button>
+              </div>
+              <button type="button" className="ds-ter ds-t" onClick={() => {
+                setDirectRecipients([]);
+                setDirectMessage('');
+                setDirectSubject('');
+                setMmsUploadedImages([]);
+                setSelectedRecipients(new Set());
+                setSelectedCallback('');
+              }}>
+                <RotateCcw size={13} strokeWidth={1.75} />
+                <span>초기화</span>
+              </button>
+            </div>
           </section>
         </div>
-
-        {/* ============ 모달 Footer — 좌우 하단 액션 통합 ============ */}
-        <footer className="ds-modal__footer">
-          <div className="ds-modal__footer-left">
-            <button type="button" className="ds-ter ds-ter--danger ds-t" onClick={() => {
-              if (selectedRecipients.size === 0) { setToast({ show: true, type: 'error', message: '선택된 항목이 없습니다' }); return; }
-              setDirectRecipients(prev => prev.filter((_, idx) => !selectedRecipients.has(idx)));
-              setSelectedRecipients(new Set());
-            }}>
-              <Trash2 size={13} strokeWidth={1.75} />
-              <span>선택삭제</span>
-            </button>
-            <button type="button" className="ds-ter ds-ter--danger ds-t" onClick={() => {
-              if (directRecipients.length === 0) return;
-              setDirectRecipients([]);
-              setSelectedRecipients(new Set());
-            }}>
-              <XCircle size={13} strokeWidth={1.75} />
-              <span>전체삭제</span>
-            </button>
-            <button type="button" className="ds-ter ds-t" onClick={() => {
-              setDirectRecipients([]);
-              setDirectMessage('');
-              setDirectSubject('');
-              setMmsUploadedImages([]);
-              setSelectedRecipients(new Set());
-              setSelectedCallback('');
-            }}>
-              <RotateCcw size={13} strokeWidth={1.75} />
-              <span>초기화</span>
-            </button>
-          </div>
-
-          <div className="ds-modal__footer-right">
-            {directRecipients.length > 0 && (
-              <span className="ds-footer-hint">
-                수신자 <strong>{directRecipients.length.toLocaleString()}</strong>명 준비됨
-              </span>
-            )}
-            {directSendChannel === 'sms' && (
-              <button type="button" className="ds-btn-primary ds-btn-primary--footer ds-t" onClick={handleSendClick}>
-                <Send size={17} strokeWidth={2} />
-                <span>전송하기</span>
-              </button>
-            )}
-            {directSendChannel === 'rcs' && (
-              <button
-                type="button"
-                className="ds-btn-primary ds-btn-primary--purple ds-btn-primary--footer ds-t"
-                onClick={() => setToast({ show: true, type: 'error', message: 'RCS 발송 기능은 곧 오픈 예정입니다' })}
-                disabled={!rcsSelectedTemplate}
-              >
-                <Send size={17} strokeWidth={2} />
-                <span>{!rcsSelectedTemplate ? '템플릿을 선택해주세요' : 'RCS 전송하기'}</span>
-              </button>
-            )}
-            {directSendChannel === 'kakao_alimtalk' && (
-              <button
-                type="button"
-                className="ds-btn-primary ds-btn-primary--blue ds-btn-primary--footer ds-t"
-                onClick={handleAlimtalkSend}
-                disabled={!kakaoSelectedTemplate || !['approved', 'APPROVED', 'APR', 'A'].includes(kakaoSelectedTemplate?.status)}
-              >
-                <Bell size={17} strokeWidth={2} />
-                <span>{!kakaoSelectedTemplate ? '템플릿을 선택해주세요' : '알림톡 발송하기'}</span>
-              </button>
-            )}
-          </div>
-        </footer>
 
         {/* ============ 파일 매핑 모달 ============ */}
         {directShowMapping && (

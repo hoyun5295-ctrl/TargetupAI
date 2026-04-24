@@ -125,38 +125,46 @@
   border-top: 1px solid var(--ds-stone-200);
   background: var(--ds-stone-50);
   flex-shrink: 0;
+  min-width: 0;
 }
 .ds-modal__footer-left {
   display: flex;
   align-items: center;
   gap: 4px;
-  flex-shrink: 1;
-  min-width: 0;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 .ds-modal__footer-right {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
   flex-shrink: 0;
+  white-space: nowrap;
 }
 
 /* Footer용 primary 버튼 (고정 폭) */
 .ds-btn-primary--footer {
-  width: 240px;
+  width: 220px;
   margin-top: 0;
+  flex-shrink: 0;
 }
 
 /* 긴 안내 텍스트 (수신자 N명 등) */
 .ds-footer-hint {
-  font-size: 12.5px;
-  color: var(--ds-stone-500);
+  font-size: 13px;
+  color: var(--ds-stone-600);
   font-weight: 500;
-  padding: 0 6px;
+  padding: 0 4px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  line-height: 1;
 }
 .ds-footer-hint strong {
   color: var(--ds-emerald-700);
-  font-weight: 600;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
+  font-size: 14px;
+  margin: 0 2px;
 }
 
 /* ============================================================
