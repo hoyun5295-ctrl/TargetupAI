@@ -99,9 +99,10 @@ export default function KakaoChannelImageUpload({
         throw new Error(data?.error || `업로드 실패 (${res.status})`);
       }
 
+      // ★ D139 #2 (0425): 사용자 노출 텍스트에 IMC 표기 금지 — '카카오' 통일
       const imc = data.imc?.data;
       if (!imc?.imageUrl || !imc?.imageName) {
-        throw new Error('IMC 응답에 imageUrl/imageName 없음');
+        throw new Error('카카오 응답에 이미지 정보가 없습니다');
       }
       onChange(imc.imageUrl, imc.imageName);
     } catch (e: any) {

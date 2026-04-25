@@ -630,16 +630,17 @@ export default function AlimtalkTemplateFormV2({
                     (말풍선 전역 클릭, 변수 사용 불가)
                   </span>
                 </label>
-                {/* ★ D139 #2 (0425): 체크 미설정 시 빨간 경고 — IMC 미전달 위험 강조 */}
+                {/* ★ D139 #2 (0425): 체크 미설정 시 빨간 경고 — 카카오 미전달 위험 강조.
+                    원칙: 사용자 노출 텍스트에 'IMC' 등 라우터/중계사 명칭 표기 금지 → '카카오'로 통일. */}
                 {!form.representLinkEnabled && (
                   <span className="text-[11px] text-red-600 font-medium">
-                    ⚠ 체크해야 IMC로 전달됩니다
+                    ⚠ 체크해야 카카오로 전달됩니다
                   </span>
                 )}
                 {/* ★ D139 #2 (0425): 체크 ON + Mobile URL 입력 시 녹색 확인 인디케이터 */}
                 {form.representLinkEnabled && form.representLinkMobile.trim() && (
                   <span className="text-[11px] text-emerald-600 font-medium">
-                    ✓ IMC 등록 시 대표링크 포함
+                    ✓ 카카오 등록 시 대표링크 포함
                   </span>
                 )}
               </div>
@@ -652,7 +653,7 @@ export default function AlimtalkTemplateFormV2({
                         {/* ★ D139 #2 (0425): 체크 ON인데 Mobile URL 비어있을 때 빨간 경고 */}
                         {!form.representLinkMobile.trim() && (
                           <span className="ml-1 text-red-500 text-[10px] font-medium">
-                            (입력하지 않으면 IMC 등록 시 누락됩니다)
+                            (입력하지 않으면 카카오 등록 시 누락됩니다)
                           </span>
                         )}
                       </label>
@@ -710,9 +711,9 @@ export default function AlimtalkTemplateFormV2({
                   <p className="text-[11px] text-gray-500">
                     https:// 또는 http:// 로 시작해야 하며, 각 항목 최대 500자. 웹링크/앱링크 버튼 가이드와 동일 기준이 적용됩니다.
                   </p>
-                  {/* ★ D139 #2 (0425): 등록 전 최종 확인 안내 — 체크박스 해제·URL 미입력 시 IMC 어드민에 표시 안 됨 */}
+                  {/* ★ D139 #2 (0425): 등록 전 최종 확인 안내 — 체크박스 해제·URL 미입력 시 카카오톡에 표시 안 됨 */}
                   <p className="text-[11px] text-amber-700 bg-amber-100/60 border border-amber-200 rounded px-2 py-1">
-                    📌 체크박스 해제 시 IMC 어드민에 표시되지 않습니다. 등록 전 ① 체크박스 ON ② Mobile URL 입력 두 가지를 모두 확인하세요.
+                    📌 체크박스 해제 시 카카오톡에 대표링크가 표시되지 않습니다. 등록 전 ① 체크박스 ON ② Mobile URL 입력 두 가지를 모두 확인하세요.
                   </p>
                 </div>
               )}

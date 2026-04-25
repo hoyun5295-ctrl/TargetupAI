@@ -1302,23 +1302,73 @@ async function persistImage(
  *   기존 9개 라우트가 `res.json({ success: r.code === '0000', imc: r })`만 반환 →
  *   IMC가 HTTP 200 + body code≠'0000' (예: 4000 BAD_REQUEST)으로 거부 시 axios catch 미진입,
  *   `error` 필드 없이 응답 → 프론트 KakaoChannelImageUpload는 `'업로드 실패 (200)'` fallback 표시 →
- *   직원이 "오류코드 200"으로 오해 + 실제 IMC 거부 사유(사이즈 초과/형식 불일치 등) 노출 안 됨.
- *   본 헬퍼는 실패 시 IMC 메시지+코드를 `error` 필드로 명시 노출하여 사용자가 원인 즉시 확인 가능.
+ *   직원이 "오류코드 200"으로 오해 + 실제 거부 사유(사이즈 초과/형식 불일치 등) 노출 안 됨.
+ *   본 헬퍼는 실패 시 메시지를 사용자 친화적으로 정제 후 `error` 필드로 노출.
+ *
+ * ★ D139 추가 (0425): 사용자 노출 텍스트에 'IMC'/영문 ExceptionName/깨진 한글 파일명 금지 정책 반영.
+ *   sanitizeImageErrorForUser()로 한글 메시지만 추출하여 노출.
  */
+
+/**
+ * 카카오(IMC) 이미지 업로드 에러 메시지를 사용자 친화적으로 정제.
+ *
+ * 입력 예: `InvalidImageShapeException(가로:세로 비율은 2:1여야 합니다, ë틀ɑì틀´.jpg)`
+ * 출력 예: `이미지 가로:세로 비율은 2:1이어야 합니다`
+ *
+ * 처리:
+ *  - 영문 ExceptionName/ErrorName 제거
+ *  - 괄호 안 첫 번째 콤마까지를 메시지로 추출 (그 뒤는 파일명 등 부가 정보 → 제거)
+ *  - 'IMC'/'humuson' 등 라우터 명칭 제거
+ *  - 메시지 못 추출 시 "이미지 업로드에 실패했습니다" + 코드 fallback
+ */
+function sanitizeImageErrorForUser(rawMsg: string | undefined, code: string | undefined): string {
+  const msg = (rawMsg || '').trim();
+  if (!msg) return code ? `이미지 업로드에 실패했습니다 (코드 ${code})` : '이미지 업로드에 실패했습니다';
+  // 1) 영문 ExceptionName/ErrorName(...) 패턴 → 괄호 안 첫 콤마 이전만 추출
+  const m = msg.match(/^[A-Za-z][A-Za-z0-9_]*(?:Exception|Error|Failure)\s*\((.+)\)\s*$/);
+  let inner = m ? m[1] : msg;
+  // 괄호 안에 콤마가 있으면 첫 콤마까지만 (이후는 파일명/부가정보)
+  const commaIdx = inner.indexOf(',');
+  if (commaIdx > 0) inner = inner.slice(0, commaIdx);
+  // 2) 라우터 명칭 제거 (사용자 노출 금지 정책)
+  inner = inner.replace(/\bIMC\b/gi, '').replace(/humuson/gi, '').trim();
+  // 3) 잔여 정리
+  inner = inner.replace(/\s{2,}/g, ' ').trim();
+  return inner || (code ? `이미지 업로드에 실패했습니다 (코드 ${code})` : '이미지 업로드에 실패했습니다');
+}
+
 function sendImageUploadResponse(
   res: Response,
   r: imc.ImcResponse<imc.ImageUploadResult>,
 ) {
   const ok = r?.code === '0000';
   if (ok) return res.json({ success: true, imc: r });
-  const detail = r?.message ? `${r.message} (IMC ${r.code})` : `IMC 응답 코드 ${r?.code || '없음'}`;
-  console.warn(`[alimtalk][image-upload 실패] ${detail}`);
+  // 운영 진단용 로그는 실제 IMC 코드/메시지 그대로 (사용자에게는 안 보임)
+  console.warn(`[alimtalk][image-upload 실패] code=${r?.code || 'N/A'} rawMsg=${r?.message || 'N/A'}`);
+  // 사용자 응답은 정제된 한글 메시지만
+  const userMsg = sanitizeImageErrorForUser(r?.message, r?.code);
   return res.status(400).json({
     success: false,
     code: r?.code,
-    error: detail,
+    error: userMsg,
     imc: r,
   });
+}
+
+/**
+ * ★ D139 (0425): multer가 multipart/form-data의 filename을 latin1로 디코딩 →
+ *   한글 파일명 깨짐 (`행사이미지.jpg` → `ë틀ɑì틀´ë²틀(틀틀틀´.jpg`).
+ *   이를 utf-8로 재해석해 정상 한글로 복원. 9개 업로드 라우트 + persistImage(DB INSERT) 자동 정상화.
+ */
+function decodeOriginalName(file: Express.Multer.File): Express.Multer.File {
+  if (file && typeof file.originalname === 'string') {
+    try {
+      file.originalname = Buffer.from(file.originalname, 'latin1').toString('utf8');
+    } catch {
+      /* noop — 원본 유지 */
+    }
+  }
+  return file;
 }
 
 function requireFile(req: Request, res: Response): Express.Multer.File | null {
@@ -1327,7 +1377,7 @@ function requireFile(req: Request, res: Response): Express.Multer.File | null {
     res.status(400).json({ success: false, error: '파일이 필요합니다' });
     return null;
   }
-  return file;
+  return decodeOriginalName(file);
 }
 
 function requireFiles(req: Request, res: Response): Express.Multer.File[] | null {
@@ -1336,7 +1386,7 @@ function requireFiles(req: Request, res: Response): Express.Multer.File[] | null
     res.status(400).json({ success: false, error: '파일이 필요합니다' });
     return null;
   }
-  return files;
+  return files.map(decodeOriginalName);
 }
 
 // (1) 알림톡 기본 이미지
