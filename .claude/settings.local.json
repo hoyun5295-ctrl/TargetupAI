@@ -209,7 +209,8 @@
       "Bash(cp release/sync-agent.exe installer/release/)",
       "Bash(cp release/sql-wasm.wasm installer/release/)",
       "Bash(\"/c/Program Files \\(x86\\)/NSIS/makensis.exe\" //V3 //INPUTCHARSET UTF8 //DPRODUCT_VERSION=1.5.2 //DHAS_ICON installer/sync-agent-installer.nsi)",
-      "Bash(bash /c/Users/ceo/projects/targetup/sync-agent/installer/build-linux-package.sh 1.5.2)"
+      "Bash(bash /c/Users/ceo/projects/targetup/sync-agent/installer/build-linux-package.sh 1.5.2)",
+      "Bash(awk '/^\\\\\"200\\\\\"$|^200$/{flag=NR;next} flag && NR<=flag+5{print}' \"C:\\\\Users\\\\ceo\\\\Downloads\\\\imc_extracted/10_52_06_응답 코드.txt\")"
     ]
   }
 }

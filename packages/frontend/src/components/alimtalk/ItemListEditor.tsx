@@ -72,23 +72,31 @@ export default function ItemListEditor({
   const headerEnabled = header !== '' || false;
   const highlightEnabled = !!highlight;
 
-  // 토글 핸들러 — 체크 해제 시 값 초기화
-  const toggleImage = (on: boolean) => {
-    if (!on) onImageChange('', '');
-    // on=true일 때는 업로드 UI가 노출되고 사용자가 직접 업로드하면 onImageChange로 값 설정됨
-    // 빈 on=true 토글을 표현하기 위한 sentinel — 현재 구현은 imageUrl이 비어있어도 체크박스 상태를 렌더에 반영
-    // (아래 state 별도 유지)
-    if (on && !imageUrl) setImageToggleManual(true);
-  };
+  // ★ D139 #5 (0425): 체크 해제가 안 되던 버그 근본 수정.
+  //   기존엔 imageToggleManual / headerToggleManual을 `!on` 시 false로 되돌리지 않아
+  //   `imageSectionOpen = imageEnabled || imageToggleManual` 식이 영원히 true로 고정됐음.
+  //   해제 시 manual sentinel도 false로 함께 내려야 체크박스 표시가 정상 토글된다.
   const [imageToggleManual, setImageToggleManual] = React.useState(false);
-  const imageSectionOpen = imageEnabled || imageToggleManual;
-
-  const toggleHeader = (on: boolean) => {
-    if (!on) onHeaderChange('');
-    if (on && !header) setHeaderToggleManual(true);
-  };
   const [headerToggleManual, setHeaderToggleManual] = React.useState(false);
+  const imageSectionOpen = imageEnabled || imageToggleManual;
   const headerSectionOpen = headerEnabled || headerToggleManual;
+
+  const toggleImage = (on: boolean) => {
+    if (on) {
+      if (!imageUrl) setImageToggleManual(true);
+    } else {
+      onImageChange('', '');
+      setImageToggleManual(false); // ★ 해제 시 sentinel도 초기화
+    }
+  };
+  const toggleHeader = (on: boolean) => {
+    if (on) {
+      if (!header) setHeaderToggleManual(true);
+    } else {
+      onHeaderChange('');
+      setHeaderToggleManual(false); // ★ 해제 시 sentinel도 초기화
+    }
+  };
 
   const toggleHighlight = (on: boolean) => {
     if (on && !highlight) onHighlightChange({ title: '', description: '' });
@@ -207,7 +215,10 @@ export default function ItemListEditor({
             <label className="flex items-center gap-2">
               <input
                 type="checkbox"
-                checked={!!highlight.imageUrl}
+                /* ★ D139 #6 (0425): `!!imageUrl`은 빈 문자열('')도 falsy라 체크 표시 사라지는 버그.
+                   체크 ON 직후 imageUrl=''로 세팅되어 업로드 UI는 열리는데 체크박스 표시는 미반영됐었음.
+                   undefined ≠ '' 으로 토글 상태 구분: undefined=꺼짐, '' 또는 URL=켜짐. */
+                checked={highlight.imageUrl !== undefined}
                 disabled={disabled}
                 onChange={(e) => {
                   if (!e.target.checked) {
@@ -217,7 +228,7 @@ export default function ItemListEditor({
                       imageName: undefined,
                     });
                   } else {
-                    // 업로드 UI를 그냥 노출만 (실제 업로드하면 onChange로 값 설정)
+                    // 업로드 UI 노출 (실제 업로드 시 onChange가 url 세팅). '' 유지로 체크 표시 유지.
                     onHighlightChange({ ...highlight, imageUrl: '', imageName: '' });
                   }
                 }}

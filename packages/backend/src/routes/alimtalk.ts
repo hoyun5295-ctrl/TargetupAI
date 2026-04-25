@@ -705,8 +705,16 @@ router.post(
       // ─────────────────────────────────────────
       // 2) DB INSERT — status는 DRAFT로 시작. B9 자동 검수요청 성공 시 REQUESTED로 승격.
       //    (기존에는 'REQUESTED'로 하드코딩 → 실제 IMC는 '등록' 상태라 불일치 — D135+ 교정)
+      //
+      // ★ D139 #1+#3 (0425): PG INSERT 실패 시 IMC 등록 롤백.
+      //    기존엔 IMC 등록 성공 + PG INSERT 실패 시 IMC에는 templateKey가 남아 있어
+      //    사용자 재시도 마다 IMC 4014(templateKey 중복) 응답 → "재클릭 시 IMC 중복 등록" 인식 유발.
+      //    + DB에는 영원히 안 들어가서 관리 화면 빈 상태 유지(#3).
+      //    아래 try/catch로 실패 시 IMC deleteAlimtalkTemplate으로 롤백 + 명확한 error 메시지 노출.
       // ─────────────────────────────────────────
-      const ins = await query(
+      let ins;
+      try {
+        ins = await query(
         `INSERT INTO kakao_templates
            (company_id, profile_id, template_code, template_key, template_name,
             content, buttons, variables, status,
@@ -756,52 +764,39 @@ router.post(
           body.customTemplateCode || null,
           userId,
         ],
-      );
-
-      // ─────────────────────────────────────────
-      // 3) B9: 등록 성공 직후 자동 검수요청 (휴머스온 스펙: 등록/검수요청 API 분리)
-      //    실패해도 템플릿 등록 자체는 성공 — status='DRAFT' 유지하여 사용자가 수동 재요청 가능
-      // ─────────────────────────────────────────
-      let inspectionRequested = false;
-      let inspectionError: string | null = null;
-      try {
-        const inspectRes = await imc.requestInspection(
-          senderKey,
-          templateCode,
-          body.inspectionComment || '',
         );
-        if (inspectRes.code === '0000') {
-          inspectionRequested = true;
-          await query(
-            `UPDATE kakao_templates
-                SET status = 'REQUESTED',
-                    requested_at = now(),
-                    updated_at = now(),
-                    last_synced_at = now()
-              WHERE id = $1`,
-            [ins.rows[0].id],
-          );
-          ins.rows[0].status = 'REQUESTED';
-        } else {
-          inspectionError = inspectRes.message || `검수요청 실패 (${inspectRes.code})`;
-          console.warn(
-            `[alimtalk][auto-inspect 실패] ${templateCode} code=${inspectRes.code} msg=${inspectRes.message}`,
+      } catch (insertErr: any) {
+        // ★ D139 #1+#3: PG INSERT 실패 시 IMC 등록 롤백
+        const errDetail = insertErr?.message || insertErr?.detail || '알 수 없는 DB 오류';
+        console.error(
+          `[alimtalk][DB INSERT 실패] templateCode=${templateCode} templateKey=${templateKey} → IMC 롤백 시도. detail=${errDetail}`,
+        );
+        try {
+          await imc.deleteAlimtalkTemplate(senderKey, templateCode);
+          console.log(`[alimtalk][롤백] IMC 템플릿 삭제 완료: ${templateCode}`);
+        } catch (rollbackErr: any) {
+          console.error(
+            `[alimtalk][롤백 실패] ${templateCode}: ${rollbackErr?.message || rollbackErr}`,
           );
         }
-      } catch (inspectErr: any) {
-        inspectionError = inspectErr?.message || '검수요청 중 오류';
-        console.error(
-          `[alimtalk][auto-inspect 예외] ${templateCode}`,
-          inspectErr?.message || inspectErr,
-        );
+        return res.status(500).json({
+          success: false,
+          error: `DB 저장에 실패했습니다 (${errDetail}). IMC 등록은 자동 롤백되었습니다. 다시 시도해주세요.`,
+          dbError: errDetail,
+        });
       }
+
+      // ─────────────────────────────────────────
+      // ★ D139 #4 (0425): 등록과 검수요청 분리 — 자동 검수요청 제거.
+      //    이전(D135 B9)엔 등록 성공 직후 자동 검수요청 호출 → 휴머스온 스펙·직원 요청과 부합 안 함.
+      //    이제 status='DRAFT' 유지. 검수요청은 별도 엔드포인트 POST /templates/:code/inspect (기존 존재) 호출.
+      //    프론트는 목록에서 '검수요청' 액션 버튼으로 명시 호출 (D139 #4-1).
+      // ─────────────────────────────────────────
 
       res.status(201).json({
         success: true,
         template: ins.rows[0],
         imc: r,
-        inspectionRequested,
-        inspectionError,
       });
     } catch (err) {
       return handleImcError(res, err);
@@ -1302,6 +1297,30 @@ async function persistImage(
   );
 }
 
+/**
+ * ★ D139 #7+#6-1 (0425): 이미지 업로드 응답 통합 헬퍼.
+ *   기존 9개 라우트가 `res.json({ success: r.code === '0000', imc: r })`만 반환 →
+ *   IMC가 HTTP 200 + body code≠'0000' (예: 4000 BAD_REQUEST)으로 거부 시 axios catch 미진입,
+ *   `error` 필드 없이 응답 → 프론트 KakaoChannelImageUpload는 `'업로드 실패 (200)'` fallback 표시 →
+ *   직원이 "오류코드 200"으로 오해 + 실제 IMC 거부 사유(사이즈 초과/형식 불일치 등) 노출 안 됨.
+ *   본 헬퍼는 실패 시 IMC 메시지+코드를 `error` 필드로 명시 노출하여 사용자가 원인 즉시 확인 가능.
+ */
+function sendImageUploadResponse(
+  res: Response,
+  r: imc.ImcResponse<imc.ImageUploadResult>,
+) {
+  const ok = r?.code === '0000';
+  if (ok) return res.json({ success: true, imc: r });
+  const detail = r?.message ? `${r.message} (IMC ${r.code})` : `IMC 응답 코드 ${r?.code || '없음'}`;
+  console.warn(`[alimtalk][image-upload 실패] ${detail}`);
+  return res.status(400).json({
+    success: false,
+    code: r?.code,
+    error: detail,
+    imc: r,
+  });
+}
+
 function requireFile(req: Request, res: Response): Express.Multer.File | null {
   const file = (req as any).file;
   if (!file) {
@@ -1330,7 +1349,7 @@ router.post(
       const file = requireFile(req, res); if (!file) return;
       const r = await imc.uploadAlimtalkTemplateImage(file.buffer, file.originalname);
       await persistImage(req, 'alimtalk_template', r, file);
-      res.json({ success: r.code === '0000', imc: r });
+      return sendImageUploadResponse(res, r);
     } catch (err) { return handleImcError(res, err); }
   },
 );
@@ -1345,7 +1364,7 @@ router.post(
       const file = requireFile(req, res); if (!file) return;
       const r = await imc.uploadAlimtalkHighlightImage(file.buffer, file.originalname);
       await persistImage(req, 'alimtalk_highlight', r, file);
-      res.json({ success: r.code === '0000', imc: r });
+      return sendImageUploadResponse(res, r);
     } catch (err) { return handleImcError(res, err); }
   },
 );
@@ -1360,7 +1379,7 @@ router.post(
       const file = requireFile(req, res); if (!file) return;
       const r = await imc.uploadBrandDefaultImage(file.buffer, file.originalname);
       await persistImage(req, 'brand_default', r, file);
-      res.json({ success: r.code === '0000', imc: r });
+      return sendImageUploadResponse(res, r);
     } catch (err) { return handleImcError(res, err); }
   },
 );
@@ -1375,7 +1394,7 @@ router.post(
       const file = requireFile(req, res); if (!file) return;
       const r = await imc.uploadBrandWideImage(file.buffer, file.originalname);
       await persistImage(req, 'brand_wide', r, file);
-      res.json({ success: r.code === '0000', imc: r });
+      return sendImageUploadResponse(res, r);
     } catch (err) { return handleImcError(res, err); }
   },
 );
@@ -1390,7 +1409,7 @@ router.post(
       const file = requireFile(req, res); if (!file) return;
       const r = await imc.uploadBrandWideListFirstImage(file.buffer, file.originalname);
       await persistImage(req, 'brand_wide_list_first', r, file);
-      res.json({ success: r.code === '0000', imc: r });
+      return sendImageUploadResponse(res, r);
     } catch (err) { return handleImcError(res, err); }
   },
 );
@@ -1416,7 +1435,7 @@ router.post(
           );
         }
       }
-      res.json({ success: r.code === '0000', imc: r });
+      return sendImageUploadResponse(res, r as any);
     } catch (err) { return handleImcError(res, err); }
   },
 );
@@ -1442,7 +1461,7 @@ router.post(
           );
         }
       }
-      res.json({ success: r.code === '0000', imc: r });
+      return sendImageUploadResponse(res, r as any);
     } catch (err) { return handleImcError(res, err); }
   },
 );
@@ -1468,7 +1487,7 @@ router.post(
           );
         }
       }
-      res.json({ success: r.code === '0000', imc: r });
+      return sendImageUploadResponse(res, r as any);
     } catch (err) { return handleImcError(res, err); }
   },
 );
@@ -1500,7 +1519,7 @@ router.post(
         [r?.data?.imageName || null, req.params.senderId],
       );
       await persistImage(req, 'marketing_agree', r, file);
-      res.json({ success: r.code === '0000', imc: r });
+      return sendImageUploadResponse(res, r);
     } catch (err) { return handleImcError(res, err); }
   },
 );

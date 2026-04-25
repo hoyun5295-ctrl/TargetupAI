@@ -73,6 +73,8 @@ interface Props {
   }[];
   onClose: () => void;
   onSuccess: () => void;
+  /** ★ D139 #4-1 (0425): 상세보기 모달용 — 모든 필드 disabled + 저장 버튼 숨김 */
+  readOnly?: boolean;
 }
 
 const MSG_TYPES: { value: MsgType; label: string; desc: string }[] = [
@@ -132,6 +134,7 @@ export default function AlimtalkTemplateFormV2({
   categories,
   onClose,
   onSuccess,
+  readOnly = false,
 }: Props) {
   const isEdit = !!template?.id;
   const [form, setForm] = useState<TemplateFormData>(() => initialForm(template));
@@ -304,15 +307,8 @@ export default function AlimtalkTemplateFormV2({
         });
         return;
       }
-      // ★ D135+ (B9): 등록 성공 + 자동 검수요청 실패 시 사용자에게 안내
-      //   (템플릿 자체는 DRAFT로 저장됨 → 목록에서 '검수요청' 버튼으로 수동 재시도 가능)
-      if (!isEdit && data.inspectionError) {
-        alert(
-          `템플릿은 등록되었으나 자동 검수요청에 실패했습니다.\n` +
-          `사유: ${data.inspectionError}\n\n` +
-          `목록에서 '검수요청' 버튼으로 다시 시도할 수 있습니다.`,
-        );
-      }
+      // ★ D139 #4 (0425): 자동 검수요청 분기 제거 (등록과 검수요청 분리).
+      //   템플릿은 DRAFT 상태로 저장 → 목록에서 '검수요청' 버튼으로 명시 액션.
       onSuccess();
     } catch (e: any) {
       setToast({ type: 'error', message: e?.message || '서버 오류' });
@@ -331,10 +327,16 @@ export default function AlimtalkTemplateFormV2({
         <div className="px-6 py-4 border-b border-gray-200 bg-gradient-to-r from-amber-50 to-white flex justify-between items-center">
           <div>
             <h2 className="text-lg font-bold text-gray-900">
-              {isEdit ? '알림톡 템플릿 수정 (D130)' : '알림톡 템플릿 등록'}
+              {readOnly
+                ? '알림톡 템플릿 상세보기'
+                : isEdit
+                  ? '알림톡 템플릿 수정'
+                  : '알림톡 템플릿 등록'}
             </h2>
             <p className="text-xs text-gray-500 mt-0.5">
-              카카오 검수 승인 후 발송할 수 있습니다
+              {readOnly
+                ? '읽기 전용으로 템플릿 내용을 확인할 수 있습니다'
+                : '카카오 검수 승인 후 발송할 수 있습니다'}
             </p>
           </div>
           <button
@@ -612,9 +614,9 @@ export default function AlimtalkTemplateFormV2({
               forceChannelAdd={forceChannelAdd}
             />
 
-            {/* 대표링크 — D135+ (B4): 말풍선 전역 클릭 시 이동 (변수 사용 불가, 고정 URL) */}
+            {/* 대표링크 — D135+ (B4) / D139 #2 (0425) UI 가드 강화 */}
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <input
                   type="checkbox"
                   id="representLinkToggle"
@@ -628,6 +630,18 @@ export default function AlimtalkTemplateFormV2({
                     (말풍선 전역 클릭, 변수 사용 불가)
                   </span>
                 </label>
+                {/* ★ D139 #2 (0425): 체크 미설정 시 빨간 경고 — IMC 미전달 위험 강조 */}
+                {!form.representLinkEnabled && (
+                  <span className="text-[11px] text-red-600 font-medium">
+                    ⚠ 체크해야 IMC로 전달됩니다
+                  </span>
+                )}
+                {/* ★ D139 #2 (0425): 체크 ON + Mobile URL 입력 시 녹색 확인 인디케이터 */}
+                {form.representLinkEnabled && form.representLinkMobile.trim() && (
+                  <span className="text-[11px] text-emerald-600 font-medium">
+                    ✓ IMC 등록 시 대표링크 포함
+                  </span>
+                )}
               </div>
               {form.representLinkEnabled && (
                 <div className="mt-2 space-y-2 rounded-xl border border-amber-200 bg-amber-50/40 p-3">
@@ -635,13 +649,23 @@ export default function AlimtalkTemplateFormV2({
                     <div>
                       <label className="block text-[11px] text-gray-600 mb-1">
                         Mobile URL <span className="text-red-500">*</span>
+                        {/* ★ D139 #2 (0425): 체크 ON인데 Mobile URL 비어있을 때 빨간 경고 */}
+                        {!form.representLinkMobile.trim() && (
+                          <span className="ml-1 text-red-500 text-[10px] font-medium">
+                            (입력하지 않으면 IMC 등록 시 누락됩니다)
+                          </span>
+                        )}
                       </label>
                       <input
                         value={form.representLinkMobile}
                         onChange={(e) => setForm({ ...form, representLinkMobile: e.target.value })}
                         placeholder="https://"
                         maxLength={500}
-                        className="w-full border border-gray-300 rounded px-2 py-1 text-sm"
+                        className={`w-full border rounded px-2 py-1 text-sm ${
+                          !form.representLinkMobile.trim()
+                            ? 'border-red-300 bg-red-50/30'
+                            : 'border-gray-300'
+                        }`}
                       />
                     </div>
                     <div>
@@ -685,6 +709,10 @@ export default function AlimtalkTemplateFormV2({
                   </div>
                   <p className="text-[11px] text-gray-500">
                     https:// 또는 http:// 로 시작해야 하며, 각 항목 최대 500자. 웹링크/앱링크 버튼 가이드와 동일 기준이 적용됩니다.
+                  </p>
+                  {/* ★ D139 #2 (0425): 등록 전 최종 확인 안내 — 체크박스 해제·URL 미입력 시 IMC 어드민에 표시 안 됨 */}
+                  <p className="text-[11px] text-amber-700 bg-amber-100/60 border border-amber-200 rounded px-2 py-1">
+                    📌 체크박스 해제 시 IMC 어드민에 표시되지 않습니다. 등록 전 ① 체크박스 ON ② Mobile URL 입력 두 가지를 모두 확인하세요.
                   </p>
                 </div>
               )}
@@ -738,16 +766,20 @@ export default function AlimtalkTemplateFormV2({
             onClick={onClose}
             className="px-5 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-sm"
           >
-            취소
+            {readOnly ? '닫기' : '취소'}
           </button>
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={saving}
-            className="px-5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-medium disabled:opacity-50"
-          >
-            {saving ? '저장 중...' : isEdit ? '수정 저장' : '등록 + 검수요청'}
-          </button>
+          {!readOnly && (
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={saving}
+              className="px-5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-medium disabled:opacity-50"
+            >
+              {/* ★ D139 #4 (0425): '등록 + 검수요청' → '등록'으로 분리.
+                  검수요청은 목록의 '검수요청' 액션 버튼(#4-1)으로 명시 호출. */}
+              {saving ? '저장 중...' : isEdit ? '수정 저장' : '등록'}
+            </button>
+          )}
         </div>
 
         {toast && (

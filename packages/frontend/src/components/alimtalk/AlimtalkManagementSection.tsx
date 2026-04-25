@@ -126,6 +126,9 @@ export default function AlimtalkManagementSection() {
   const [filter, setFilter] = useState<string>('ALL');
 
   const [editing, setEditing] = useState<Partial<TemplateFormData> | null | undefined>(undefined);
+  // ★ D139 #4-1 (0425): 상세보기(read-only) 전용 state — 수정 모달과 분리.
+  //   동일 폼 컴포넌트 AlimtalkTemplateFormV2를 readOnly prop으로 재사용.
+  const [viewing, setViewing] = useState<Partial<TemplateFormData> | null>(null);
   const [showAlarm, setShowAlarm] = useState(false);
   const [showWizard, setShowWizard] = useState(false);
   const [unsubTarget, setUnsubTarget] = useState<Profile | null>(null);
@@ -212,6 +215,13 @@ export default function AlimtalkManagementSection() {
   };
 
   const remove = async (t: Template) => {
+    // ★ D139 #4-1 (0425): 삭제는 등록(DRAFT) 상태에서만 허용 (직원 검수 요청 정책).
+    //   검수요청/검수중/승인/반려 상태에서는 삭제 버튼 자체가 노출되지 않지만,
+    //   이중 가드로 함수 진입 시에도 한 번 더 차단.
+    if (t.status !== 'DRAFT') {
+      setToast('초안(등록) 상태에서만 삭제할 수 있습니다.');
+      return;
+    }
     if (!confirm(`'${t.template_name || t.template_code}' 템플릿을 삭제할까요?`)) return;
     const res = await fetch(`/api/alimtalk/templates/${t.template_code}`, {
       method: 'DELETE',
@@ -449,8 +459,14 @@ export default function AlimtalkManagementSection() {
                   label: t.status,
                   cls: 'bg-gray-100 text-gray-500',
                 };
-                const canInspect = ['DRAFT', 'REJECTED', 'REJ'].includes(t.status);
-                const canCancel = ['REQUESTED', 'REQ', 'REVIEWING', 'REV'].includes(t.status);
+                // ★ D139 #4-1 (0425): 상태별 액션 버튼 노출 분기
+                //   DRAFT(등록): 수정 / 검수요청 / 삭제 / 상세보기
+                //   REQUESTED·REVIEWING(검수요청·검수중): 검수요청 취소 / 상세보기
+                //   REJECTED(반려): 재검수 / 상세보기
+                //   APPROVED(승인): 상세보기만
+                const isDraft = t.status === 'DRAFT';
+                const isReq   = ['REQUESTED', 'REQ', 'REVIEWING', 'REV'].includes(t.status);
+                const isRej   = ['REJECTED', 'REJ'].includes(t.status);
                 return (
                   <tr key={t.id} className="border-t border-gray-100 hover:bg-gray-50">
                     <td className="px-4 py-2">
@@ -498,14 +514,26 @@ export default function AlimtalkManagementSection() {
                         : '-'}
                     </td>
                     <td className="text-right px-4 py-2 space-x-1">
+                      {/* 상세보기: 모든 상태에서 노출 (read-only 모달) */}
                       <button
                         type="button"
-                        onClick={() => setEditing(toFormData(t))}
+                        onClick={() => setViewing(toFormData(t))}
                         className="text-[11px] px-2 py-0.5 bg-gray-100 hover:bg-gray-200 rounded"
                       >
-                        상세
+                        상세보기
                       </button>
-                      {canInspect && (
+                      {/* 수정: DRAFT(등록)에서만 */}
+                      {isDraft && (
+                        <button
+                          type="button"
+                          onClick={() => setEditing(toFormData(t))}
+                          className="text-[11px] px-2 py-0.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded"
+                        >
+                          수정
+                        </button>
+                      )}
+                      {/* 검수요청: DRAFT 전용 */}
+                      {isDraft && (
                         <button
                           type="button"
                           onClick={() => inspect(t)}
@@ -514,22 +542,36 @@ export default function AlimtalkManagementSection() {
                           검수요청
                         </button>
                       )}
-                      {canCancel && (
+                      {/* 검수요청 취소: REQUESTED/REVIEWING */}
+                      {isReq && (
                         <button
                           type="button"
                           onClick={() => cancelInspect(t)}
                           className="text-[11px] px-2 py-0.5 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded"
                         >
-                          검수취소
+                          검수요청 취소
                         </button>
                       )}
-                      <button
-                        type="button"
-                        onClick={() => remove(t)}
-                        className="text-[11px] px-2 py-0.5 bg-red-50 hover:bg-red-100 text-red-600 rounded"
-                      >
-                        삭제
-                      </button>
+                      {/* 재검수: REJECTED 전용 (inspect 함수 그대로 재사용) */}
+                      {isRej && (
+                        <button
+                          type="button"
+                          onClick={() => inspect(t)}
+                          className="text-[11px] px-2 py-0.5 bg-amber-50 hover:bg-amber-100 text-amber-700 rounded"
+                        >
+                          재검수
+                        </button>
+                      )}
+                      {/* 삭제: DRAFT 전용 (remove 함수 내 이중 가드) */}
+                      {isDraft && (
+                        <button
+                          type="button"
+                          onClick={() => remove(t)}
+                          className="text-[11px] px-2 py-0.5 bg-red-50 hover:bg-red-100 text-red-600 rounded"
+                        >
+                          삭제
+                        </button>
+                      )}
                     </td>
                   </tr>
                 );
@@ -551,6 +593,18 @@ export default function AlimtalkManagementSection() {
             setToast('저장 완료');
             load();
           }}
+        />
+      )}
+
+      {/* ★ D139 #4-1 (0425): 상세보기 read-only 모달 — 모든 상태에서 노출 */}
+      {viewing && (
+        <AlimtalkTemplateFormV2
+          template={viewing}
+          profiles={profiles}
+          categories={categories}
+          readOnly
+          onClose={() => setViewing(null)}
+          onSuccess={() => setViewing(null)}
         />
       )}
 

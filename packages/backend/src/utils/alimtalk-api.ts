@@ -476,6 +476,18 @@ export async function createAlimtalkTemplate(
     console.log(
       `[alimtalk][createTemplate] senderKey=${senderKey} payload=${JSON.stringify(normalized).slice(0, 2000)}`,
     );
+    // ★ D139 #2 (0425): templateRepresentLink 전달 여부 명시 로그
+    //   직원 보고 "대표링크 IMC 미전달" 진단 — 페이로드에 실제 포함되었는지 확정 가능.
+    const repLink = (normalized as any).templateRepresentLink;
+    if (repLink && typeof repLink === 'object') {
+      console.log(
+        `[alimtalk][createTemplate] templateRepresentLink 포함 | ${JSON.stringify(repLink)}`,
+      );
+    } else {
+      console.log(
+        `[alimtalk][createTemplate] templateRepresentLink 없음 (사용자가 체크박스 OFF or Mobile URL 미입력)`,
+      );
+    }
   } catch {
     /* noop */
   }
@@ -492,6 +504,18 @@ export async function createAlimtalkTemplate(
     console.log(
       `[alimtalk][createTemplate] response=${JSON.stringify(data).slice(0, 1500)}`,
     );
+    // ★ D139 #2 (0425): IMC 응답에 templateRepresentLink 포함 여부 검증 로그
+    //   IMC가 페이로드를 받았으면 보통 응답 data에 echo back. 누락 시 IMC 측 무시 의심.
+    const respRepLink = data?.data?.templateRepresentLink ?? data?.templateRepresentLink;
+    if (respRepLink) {
+      console.log(
+        `[alimtalk][createTemplate] IMC 응답 templateRepresentLink 확인됨 | ${JSON.stringify(respRepLink)}`,
+      );
+    } else if ((normalized as any).templateRepresentLink) {
+      console.warn(
+        `[alimtalk][createTemplate] ⚠ 페이로드에 templateRepresentLink 보냈으나 응답에 누락 — IMC 측 처리 확인 필요`,
+      );
+    }
   } catch {
     /* noop */
   }
