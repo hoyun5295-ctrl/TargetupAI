@@ -210,7 +210,11 @@
       "Bash(cp release/sql-wasm.wasm installer/release/)",
       "Bash(\"/c/Program Files \\(x86\\)/NSIS/makensis.exe\" //V3 //INPUTCHARSET UTF8 //DPRODUCT_VERSION=1.5.2 //DHAS_ICON installer/sync-agent-installer.nsi)",
       "Bash(bash /c/Users/ceo/projects/targetup/sync-agent/installer/build-linux-package.sh 1.5.2)",
-      "Bash(awk '/^\\\\\"200\\\\\"$|^200$/{flag=NR;next} flag && NR<=flag+5{print}' \"C:\\\\Users\\\\ceo\\\\Downloads\\\\imc_extracted/10_52_06_응답 코드.txt\")"
+      "Bash(awk '/^\\\\\"200\\\\\"$|^200$/{flag=NR;next} flag && NR<=flag+5{print}' \"C:\\\\Users\\\\ceo\\\\Downloads\\\\imc_extracted/10_52_06_응답 코드.txt\")",
+      "Bash(pdftotext -layout \"C:/Users/ceo/OneDrive/바탕 화면/bito-gateway/[휴머스온]브랜드메시지 Agent 사용 메뉴얼_20260209.pdf\" \"C:/Users/ceo/projects/targetup/status/_bm_manual.txt\")",
+      "Bash(xargs -I{} grep -l \"CHAT_BUBBLE_TYPE\\\\|IMC_BM_FREE_BIZ_MSG\\\\|IMC_BM_BASIC_BIZ_MSG\" {})",
+      "Bash(xargs -I{} grep -l \"Agent\\\\|발송 가능\\\\|CHAT_BUBBLE\\\\|TARGETING\" {})",
+      "Bash(awk '/^router\\\\.\\(post|put|delete\\)\\\\\\(/{getline; print NR\": \"$0}' \"C:/Users/ceo/projects/targetup/packages/backend/src/routes/alimtalk.ts\")"
     ]
   }
 }

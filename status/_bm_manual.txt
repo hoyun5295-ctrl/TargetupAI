@@ -1,0 +1,3765 @@
+  Agent  
+
+    1.  ?
+    2.  
+
+         2.1   (  )
+         2.2   
+
+             2.2.1 I  (  )
+             2.2.2 M/N  (  )
+    3.     
+    4.   (TARGETING)
+         4.1 M:     
+         4.2 N:        
+         4.3 I:      
+    5.   (CHAT_BUBBLE_TYPE)
+    6.   
+         6.1    (IMC_BM_BASIC_BIZ_MSG)
+             6.1.1   
+             6.1.2   
+             6.1.3   
+             6.1.4 JSON  
+             6.1.5    
+         6.2    (IMC_BM_FREE_BIZ_MSG)
+             6.2.1   
+              6.2.2   
+             6.2.3 JSON  
+             6.2.4    
+    7.   
+         7.1    
+             7.2.1  -   ()
+             7.2.2  -  :  
+             7.2.3  -  :  
+             7.2.4  -  :  
+             7.2.5   -  :  
+             7.2.6   -  :  
+             7.2.7   -  :  
+             7.2.8  -  :  
+             7.2.9   -  :  
+             7.2.10  -  :  
+             7.2.11  -  :  
+             7.2.12  -  :  
+             7.2.13   -  :  
+             7.2.14   -  :  
+             7.2.15   -  :  
+             7.2.16  -  :  
+             7.2.17   -  :  
+         7.2    
+             7.2.1 
+             7.2.2 
+             7.2.3  
+             7.2.4  
+             7.2.5  
+             7.2.6  
+             7.2.7 
+
+  7.2.8  
+         Appendix --   JSON   
+    A. Attachment JSON
+
+         A-1.  
+         A-2. button (Button[])
+    A-3. image (Image)
+    A-4. coupon (Coupon)
+    A-5. item.list[] (WIDE_ITEM_LIST )
+    A-6. commerce (COMMERCE )
+    A-7. video (PREMIUM_VIDEO )
+B.  
+C. Carousel JSON
+    C-1.  
+    C-2. head ( )
+    C-3. list[] ( )
+    C-4. tail ()
+     
+
+1.  ?
+
+      .   () 
+                                                                                     
+
+  
+
+  : 08:00 ~ 20:50 (  ,  (   )  )
+    
+ :  ( ) / ( )
+ :   8 (, ,  ,  ,  ,  , ,  )
+ :     ( )
+
+2.                                                                            
+2.1   (  )
+                                                                                 
+       .                                                                      ()    
+    :    
+
+                                                                        
+                                                                       080  
+                                                                           
+
+        
+
+2.2   
+2.2.1 I  (  )
+
+   :      
+     
+
+2.2.2 M/N  (  )
+
+M/N       .
+
+                                        
+          
+                                             
+                        (:  >  >   
+                        >  )
+
+     (:  >  >   > 
+                                         )
+
+    5                      
+
+  3                     1  
+ 
+
+3.     
+
+( )         .
+
+ :    
+
+ 
+a.    (8 )  
+
+    b.
+ (  )
+
+c.        
+
+              
+
+TARGETING 4.   (  )
+
+         .
+
+                     
+
+M                         .
+
+                         ,    
+
+                       
+
+N                            
+
+                     .
+
+                           
+
+I                           .
+
+                         
+
+4.1 M:     
+
+        .
+             .
+         .
+         .
+4.2 N:        
+
+           .
+            .
+         .
+
+4.3 I:      
+
+           .
+        .
+
+5.   ( CHAT_BUBBLE_TYPE )
+
+          8   .
+
+                  
+
+(TEXT)              ,     
+                   
+
+(IMAGE)            ,        
+                  
+
+ (WIDE)             ,     
+                  
+
+                   /   ,   
+(WIDE_ITEM_LIST)   
+
+                        ·
+(CAROUSEL_FEED)     
+
+                  TV       
+(PREMIUM_VIDEO)
+
+(COMMERCE)    ,    
+
+                      ,  
+(CAROUSEL_COMME     
+
+RCE)
+                                
+
+6.   
+
+6.1    ( IMC_BM_BASIC_BIZ_MSG )
+
+        .
+   ,      .
+
+                             Null    
+                             
+1 ID
+2 CHAT_BUBBLE_TYPE  BIGINT   NOT     ID
+                             NULL
+3 STATUS
+4 PRIORITY          VARCHAR(20 NOT   (TEXT, IMAGE, WIDE,
+                                    WIDE_ITEM_LIST,
+                    )        NULL   CAROUSEL_FEED,
+                                    PREMIUM_VIDEO, COMMERCE,
+                                    CAROUSEL_COMMERCE)
+
+                    CHAR(1)  NOT    '1'   (1-, 2-
+                             NULL           , 3-)
+
+                    CHAR(1)  NOT    'N'   (S-Slow, N-Normal,
+                             NULL           F-Fast)
+5 AD_FLAG              CHAR(1)     NOT   'Y' ()      
+6 RESERVED_DATE                    NULL            
+7 SENDER_KEY                                       
+8 PHONE_NUMBER         VARCHAR(19 NOT             
+9 APP_USER_ID                                      ID (phone_number   
+                       )           NULL           ,    phone_number
+                                                 )
+                       VARCHAR(40 NOT              (M/N/I)
+                                                    
+                       )           NULL
+                                         'Y'   
+                       VARCHAR(64 NULL             
+                       )                           
+                                                  
+                       VARCHAR(20 NULL             
+                       )                          
+                                                   
+1 TARGETING            CHAR(1)     NOT             
+                                   NULL            
+0                                                   ()
+                                                   
+1 TEMPLATE_CODE        VARCHAR(40 NOT              
+
+1
+
+                       )           NULL
+
+1 PUSH_ALARM           CHAR(1)     NOT
+                                   NULL
+2
+
+1 HEADER               VARCHAR(80 NULL
+                       )
+3
+
+1 MESSAGE              VARCHAR(40 NULL
+                       00)
+4
+
+1 ADDITIONAL_CONTENT   VARCHAR(12  NULL
+                       8)
+5
+
+1 ATTACHMENT_JSON      TEXT        NULL
+                       TEXT        NULL
+6                      TEXT        NULL
+
+1 CAROUSEL_JSON
+
+7
+
+1 MESSAGE_VARIABLE_JS
+
+8
+
+   ON
+
+1 BUTTON_VARIABLE_JSO TEXT         NULL
+
+9
+
+   N
+
+2 COUPON_VARIABLE_JSO TEXT         NULL
+
+0
+
+   N
+
+2 IMAGE_VARIABLE_JSON TEXT         NULL
+                                   NULL
+1                                  NULL
+
+2 VIDEO_VARIABLE_JSON TEXT
+
+2
+
+2 COMMERCE_VARIABLE_J TEXT
+
+3
+
+   SON
+2 CAROUSEL_VARIABLE_JS TEXT                 NULL             ////
+                                                              ()
+4                                                 'NO'    (NO/SM/LM/MM)
+
+   ON                                                         
+
+2 RESEND_MT_TYPE      VARCHAR(2)            NOT               
+                                            NULL
+5                                                              (LMS/MMS 
+                                                            )
+2 RESEND_MT_FROM      VARCHAR(16 NULL                            
+                      )                                     
+6                                                             
+
+2 RESEND_MT_TO        VARCHAR(64 NULL                       MMS    
+                      )
+7                                                             Unique ID
+
+2 RESEND_MT_TITLE     VARCHAR(10 NULL                         
+                      0)
+8                                                             
+
+2 RESEND_MT_MESSAGE_ CHAR(1)                NULL              
+                                                              
+9                                                              
+
+   REUSE                                                      
+                                                              
+3 RESEND_MT_MESSAGE   VARCHAR(30            NULL
+                      00)                                     
+0                                                             
+
+3 RESEND_ATTACH_FILE  VARCHAR(12 NULL                         ( )
+                      8)                                      
+1
+
+3 REQUEST_UID         VARCHAR(40 NULL
+                      )
+2
+
+3 REQUEST_DATE        VARCHAR(19 NULL
+                      )
+3
+
+3 RESPONSE_DATE       VARCHAR(19 NULL
+                      )
+4
+
+3 RESPONSE_CODE       VARCHAR(5) NULL
+
+5                     VARCHAR(2) NULL
+
+3 REPORT_TYPE         VARCHAR(19 NULL
+                      )
+6
+
+3 REPORT_DATE
+
+7
+
+3 REPORT_CODE         VARCHAR(5) NULL
+
+8                     VARCHAR(19 NULL
+                      )
+3 ARRIVAL_DATE
+
+9
+
+4 RESEND_REPORT_CODE VARCHAR(5)             NULL
+                                            NULL
+0
+
+4 RESEND_ARRIVAL_DATE VARCHAR(19
+
+1
+
+                                         )
+
+4 BILL_CODE           VARCHAR(5) NULL
+                      VARCHAR(2) NULL
+2
+
+4 SENDER_CODE
+
+3
+4 BUSINESS_CODE  VARCHAR(9)       NULL    
+                                  NULL
+4                                         (  
+                                          )
+4 UNSUBSCRIBE_PHONE_N VARCHAR(20          ( 
+5                                         )
+
+   UMBER         )
+
+4 UNSUBSCRIBE_AUTH_NU VARCHAR(10  NULL
+6
+
+   MBER          )
+
+6.1.1   
+
+            .
+
+        
+
+        
+    variable   
+
+        
+
+        
+
+   MESSAGE_VARIABLE_JSON , BUTTON_VARIABLE_JSON , COUPON_VARIABLE_JSON ,
+   IMAGE_VARIABLE_JSON , VIDEO_VARIABLE_JSON , COMMERCE_VARIABLE_JSON ,
+   CAROUSEL_VARIABLE_JSON  
+
+         
+
+       ( JSON) 
+
+   ATTACHMENT_JSON , CAROUSEL_JSON    
+
+6.1.2   
+
+   :    CHAT_BUBBLE_TYPE
+      TEXT ()
+      IMAGE ()
+      WIDE ( )
+      WIDE_ITEM_LIST ( )
+      CAROUSEL_FEED ( )
+      PREMIUM_VIDEO ( )
+      COMMERCE ()
+      CAROUSEL_COMMERCE ( )
+
+   STATUS :  
+      1: 
+      2:   
+      3: 
+
+   PRIORITY :  
+      S: Slow
+      N: Normal
+      F: Fast
+  RESERVED_DATE :    ( yyyyMMddHHmmss )
+
+   SENDER_KEY :   
+   PHONE_NUMBER / APP_USER_ID :      ID (   , PHONE_NUMBER )
+   TARGETING :  
+
+      M:  
+      N: -
+      I:     
+      F:  
+   TEMPLATE_CODE :       (  )
+   PUSH_ALARM :     
+      Y:  ()
+      N: 
+
+6.1.3   
+
+   HEADER :   
+      WIDE_ITEM_LIST   (20,  )
+      PREMIUM_VIDEO   (20,  )
+         
+
+   :   ADDITIONAL_CONTENT
+      COMMERCE   (34,   1)
+         
+
+   MESSAGE :   
+      TEXT   (1300,   99, URL   )
+      IMAGE   (1300,   99, URL   )
+      WIDE   (76,   5)
+      PREMIUM_VIDEO   (76,   5)
+      WIDE_ITEM_LIST, CAROUSEL_FEED, COMMERCE, CAROUSEL_COMMERCE  
+
+6.1.4 JSON  
+
+ ATTACHMENT_JSON : , , ,      
+             [Attachment JSON ] 
+      :
+         / :  5 ,     4
+          /   :  2
+           :  1
+          :  1 ,  2
+      : jpg/png, 5MB,  800×400px
+           : ,   , 
+      :    (: n , n% ,   )
+       :  3 ~  4  
+ CAROUSEL_JSON : ·     JSON
+             [Carousel JSON ] 
+       :  2,  6
+       : (head)   ,    
+      : jpg/png, 5MB,  800×600px  800×400px
+   MESSAGE_VARIABLE_JSON :    (··   )
+
+      TEXT / IMAGE / WIDE    
+      WIDE_ITEM_LIST  , , 
+      PREMIUM_VIDEO  , 
+      COMMERCE    
+   BUTTON_VARIABLE_JSON :    ( ,   )
+      TEXT / IMAGE / WIDE / WIDE_ITEM_LIST / PREMIUM_VIDEO / COMMERCE 
+            (WL url_mobile , AL   2  )
+   :    COUPON_VARIABLE_JSON
+      TEXT / IMAGE / WIDE / WIDE_ITEM_LIST / PREMIUM_VIDEO / COMMERCE 
+
+       "ESCAPE_COUPON" 
+
+   :    IMAGE_VARIABLE_JSON
+      IMAGE, WIDE   
+      WIDE_ITEM_LIST    
+      TEXT  
+           
+
+   VIDEO_VARIABLE_JSON :    (PREMIUM_VIDEO )
+           
+
+    TV URL  ( https://tv.kakao.com/v/{} )
+
+   COMMERCE_VARIABLE_JSON :    (· )
+      COMMERCE 
+         
+          
+          +  + 
+          +  + 
+
+   CAROUSEL_VARIABLE_JSON :   ····   ( )
+      CAROUSEL_FEED, CAROUSEL_COMMERCE 
+
+           ( {} )
+
+           
+
+      {}   
+
+6.1.5    
+
+   :    RESEND_MT_TYPE
+      NO: 
+   SM: SMS
+   LM: LMS
+   MM: MMS
+UNSUBSCRIBE_PHONE_NUMBER :    (   )
+UNSUBSCRIBE_AUTH_NUMBER :    (   )
+
+6.2    ( IMC_BM_FREE_BIZ_MSG )
+
+         ( )   .
+
+                                Null    
+                                       
+1 ID                                   
+2 CHAT_BUBBLE_TYPE
+                    BIGINT      NOT     ID
+3 STATUS                        NULL
+4 PRIORITY
+5 AD_FLAG           VARCHAR(20  NOT     (TEXT, IMAGE, WIDE,
+6 RESERVED_DATE     )           NULL   WIDE_ITEM_LIST,
+7 SENDER_KEY                           CAROUSEL_FEED,
+8 PHONE_NUMBER                         PREMIUM_VIDEO, COMMERCE,
+9 APP_USER_ID                          CAROUSEL_COMMERCE)
+10 TARGETING
+11 PUSH_ALARM       CHAR(1)     NOT    '1'   (1-, 2-
+                                NULL         , 3-)
+
+                    CHAR(1)     NOT    'N   (S-Slow, N-
+                                NULL    ' Normal, F-Fast)
+
+                    CHAR(1)     NOT    'Y' ()      
+                                NULL         
+
+                    VARCHAR(19  NOT      
+                    )           NULL
+
+                    VARCHAR(40  NOT      
+                    )           NULL
+
+                    VARCHAR(64  NULL    
+                    )
+
+                    VARCHAR(20  NULL     ID (phone_number  
+                    )                   ,   
+                                       phone_number )
+
+                    CHAR(1)     NOT    'I'   (M/N/I)
+                                NULL
+
+                    CHAR(1)     NOT    'Y'   
+                                NULL
+12 GROUP_TAG_KEY       VARCHAR(40  NULL     ()
+13 HEADER              )
+14 MESSAGE                         NULL    
+15 ADDITIONAL_CONTENT  VARCHAR(80
+16 ATTACHMENT_JSON     )           NULL    
+17 CAROUSEL_JSON
+18 ADULT               VARCHAR(40  NULL   
+                       00)
+                                   NULL         
+                       VARCHAR(12  NULL        
+                       8)          NOT   'N   (Y/N)
+                                   NULL   '
+                       TEXT        NOT   'N   
+                                   NULL  O' (NO/SM/LM/MM)
+                       TEXT        NULL         
+
+                       CHAR(1)
+
+19 RESEND_MT_TYPE      VARCHAR(2)
+
+20 RESEND_MT_FROM      VARCHAR(16
+                       )
+
+21 RESEND_MT_TO        VARCHAR(64  NULL    
+                       )
+
+22 RESEND_MT_TITLE     VARCHAR(10  NULL     (LMS/MMS
+                       0)          NULL   )
+                                   NULL
+23 RESEND_MT_MESSAGE_RE CHAR(1)               
+     USE                                 
+
+24 RESEND_MT_MESSAGE   VARCHAR(30          
+                       00)
+
+25 RESEND_ATTACH_FILE  VARCHAR(12  NULL  MMS    
+                       8)
+
+26 REQUEST_UID         VARCHAR(40  NULL    Unique ID
+                       )
+
+27 REQUEST_DATE        VARCHAR(19  NULL    
+                       )
+
+28 RESPONSE_DATE       VARCHAR(19  NULL    
+                       )
+
+29 RESPONSE_CODE       VARCHAR(5)  NULL    
+                                   NULL    
+30 REPORT_TYPE         VARCHAR(2)  NULL     
+
+31 REPORT_DATE         VARCHAR(19
+                       )
+32 REPORT_CODE          VARCHAR(5)       NULL    
+                                         NULL    
+33 ARRIVAL_DATE         VARCHAR(19
+                        )                NULL    
+                                         NULL    
+34 RESEND_REPORT_CODE VARCHAR(5)
+                                         NULL    ( )
+35 RESEND_ARRIVAL_DATE  VARCHAR(19       NULL    
+                        )                NULL    
+                                         NULL    (  
+36 BILL_CODE            VARCHAR(5)               )
+                                         NULL    ( 
+37 SENDER_CODE          VARCHAR(2)               )
+
+38 BUSINESS_CODE        VARCHAR(9)
+
+39 UNSUBSCRIBE_PHONE_NU VARCHAR(20
+
+MBER                    )
+
+40 UNSUBSCRIBE_AUTH_NUM VARCHAR(10
+
+BER                     )
+
+6.2.1   
+
+   :    CHAT_BUBBLE_TYPE
+      TEXT ()
+      IMAGE ()
+      WIDE ( )
+      WIDE_ITEM_LIST ( )
+      CAROUSEL_FEED ( )
+      PREMIUM_VIDEO ( )
+      COMMERCE ()
+      CAROUSEL_COMMERCE ( )
+
+   STATUS :  
+      1: 
+      2:   
+      3: 
+
+   PRIORITY :  
+      S: Slow
+      N: Normal
+      F: Fast
+
+  RESERVED_DATE :    ( yyyyMMddHHmmss )
+
+   SENDER_KEY :   
+   :   PHONE_NUMBER
+   TARGETING :  
+
+      M:  
+      N: -
+      I:     
+   PUSH_ALARM :     
+      Y:  ()
+      N: 
+   ADULT :  
+      Y: 
+      N:  ()
+
+ 6.2.2   
+
+   HEADER :   
+      WIDE_ITEM_LIST   (20,  )
+      PREMIUM_VIDEO   (20,  )
+         
+
+   :   ADDITIONAL_CONTENT
+      COMMERCE   (34,  1)
+         
+
+   MESSAGE :   
+      TEXT   (1300,   99, URL )
+      IMAGE   (1300,   29, URL )
+      WIDE   (76,   5)
+      PREMIUM_VIDEO   (76,   5)
+      WIDE_ITEM_LIST, CAROUSEL_FEED, COMMERCE, CAROUSEL_COMMERCE  
+
+6.2.3 JSON  
+
+ ATTACHMENT_JSON : , , ,      
+             [Attachment JSON ] 
+
+ CAROUSEL_JSON : ·     JSON
+             [Carousel JSON ] 
+
+6.2.4    
+
+   :    RESEND_MT_TYPE
+      NO: 
+      SM: SMS
+      LM: LMS
+      MM: MMS
+
+   UNSUBSCRIBE_PHONE_NUMBER :    (   )
+   UNSUBSCRIBE_AUTH_NUMBER :    (   )
+7.   
+
+7.1    
+
+7.2.1  -   ()
+
+               1 INSERT INTO IMC_BM_BASIC_BIZ_MSG (
+
+               2      , STATUS
+
+               3 PRIORITY,
+
+               4 AD_FLAG,
+
+               5 CHAT_BUBBLE_TYPE,
+
+               6 TEMPLATE_CODE,
+
+               7 TARGETING,
+
+               8 RESERVED_DATE,
+
+               9 SENDER_KEY,
+
+               10 PHONE_NUMBER,
+
+               11 RESEND_MT_TYPE
+
+               12 )
+
+               13 ( VALUES
+
+               14 '1',
+
+               15 'N',
+
+               16 'Y',
+
+               17 'TEXT',
+
+               18 '970dc7a74b726051ec1b9194eca7b0ef6c488a36',
+
+               19 'I',
+
+               20 DATE_FORMAT(NOW(), '%Y%m%d%H%i%s'),
+
+               21 'abcdefghijklmnopqrstuvwxyz1234567890abcd',
+
+               22 '821012345678',
+
+               23 'NO'
+
+               24 );
+
+7.2.2  -  :  
+
+               1 INSERT INTO IMC_BM_BASIC_BIZ_MSG (
+
+               2      , STATUS
+
+               3 PRIORITY,
+
+               4 AD_FLAG,
+
+               5 CHAT_BUBBLE_TYPE,
+
+               6 TEMPLATE_CODE,
+
+               7 TARGETING,
+
+               8 RESERVED_DATE,
+
+               9 SENDER_KEY,
+
+               10 PHONE_NUMBER,
+
+               11 MESSAGE_VARIABLE_JSON,
+
+               12 BUTTON_VARIABLE_JSON,
+
+               13 RESEND_MT_TYPE
+
+               14 )
+
+               15 ( VALUES
+
+               16 '1',
+
+               17 'N',
+
+               18 'Y',
+
+               19 'TEXT',
+
+               20 '58b12557d84945efe08f6e3ff4f01d45136b5cce',
+
+               21 'I',
+
+               22 DATE_FORMAT(NOW(), '%Y%m%d%H%i%s'),
+
+               23 'abcdefghijklmnopqrstuvwxyz1234567890abcd',
+
+               24 '821012345678',
+
+               25 '{
+
+               26     "name": "   1,300"
+
+               27 }',
+
+               28 '{
+
+               29     "mobile_url": "imc.humuson.com",
+
+               30     "pc_url": "imc.humuson.com"
+
+               31 }',
+
+               32 'NO'
+
+               33 );
+
+7.2.3  -  :  
+
+               1 INSERT INTO IMC_BM_BASIC_BIZ_MSG (
+
+               2      , STATUS
+
+               3 PRIORITY,
+
+               4 AD_FLAG,
+
+               5 CHAT_BUBBLE_TYPE,
+
+               6 TEMPLATE_CODE,
+
+               7 TARGETING,
+               8 RESERVED_DATE,
+
+               9 SENDER_KEY,
+
+10 PHONE_NUMBER,
+
+11 MESSAGE_VARIABLE_JSON,
+
+12 BUTTON_VARIABLE_JSON,
+
+13 IMAGE_VARIABLE_JSON,
+
+14 RESEND_MT_TYPE
+
+15 )
+
+16 ( VALUES
+
+17 '1',
+
+18 'N',
+
+19 'Y',
+
+20 'IMAGE',
+
+21 'f7639030ba875cf0e0346f2a778796013d3c37c3',
+
+22 'I',
+
+23 DATE_FORMAT(NOW(), '%Y%m%d%H%i%s'),
+
+24 'abcdefghijklmnopqrstuvwxyz1234567890abcd',
+
+25 '821012345678',
+
+26 '{
+
+27                "name": "   1300"
+
+28 }',
+
+29 '{
+
+30                "mobile_button_url": "imc.humuson.com"
+
+31 }',
+
+32 '[
+
+33                {
+
+34                   "imc.img_url": "bmfiles___.jpg",
+
+35                   "img_link": "https://imc.humuson.com"
+
+36                }
+
+37 ]',
+
+38 'NO'
+
+39 );
+
+7.2.4  -  :  
+
+               1 INSERT INTO IMC_BM_BASIC_BIZ_MSG (
+
+               2  , STATUS
+
+               3 PRIORITY,
+
+               4 AD_FLAG,
+
+               5 CHAT_BUBBLE_TYPE,
+
+               6 TEMPLATE_CODE,
+
+               7 TARGETING,
+
+               8 RESERVED_DATE,
+
+               9 SENDER_KEY,
+
+10 PHONE_NUMBER,
+
+11 MESSAGE_VARIABLE_JSON,
+
+12 BUTTON_VARIABLE_JSON,
+
+13 COUPON_VARIABLE_JSON,
+
+14 IMAGE_VARIABLE_JSON,
+
+15 RESEND_MT_TYPE
+
+16 )
+
+17 ( VALUES
+
+18 '1',
+
+19 'N',
+
+20 'Y',
+
+21 'WIDE',
+
+22 '389e547e4f45be38338743b16500795663f630c2',
+
+23 'I',
+
+24 DATE_FORMAT(NOW(), '%Y%m%d%H%i%s'),
+
+25 'abcdefghijklmnopqrstuvwxyz1234567890abcd',
+
+26 '821012345678',
+
+27 '{
+
+28                "name": "    76 (  5)"
+
+29 }',
+
+30 '{
+
+31                "button_url": "imc.humuson.com"
+
+32 }',
+
+33 '{
+
+34                "coupon_url": "imc.humuson.com"
+
+35 }',
+
+36 '[
+
+37                {
+
+38                   "imc.img_url": "bmfiles____.jpg",
+
+39                   "img_link": "https://imc.humuson.com"
+
+40                }
+
+41 ]',
+
+42 'NO'
+
+43 );
+7.2.5   -  :  
+
+1 INSERT INTO IMC_BM_BASIC_BIZ_MSG (
+
+2               , STATUS
+
+3 PRIORITY,
+
+4 AD_FLAG,
+
+5 CHAT_BUBBLE_TYPE,
+
+6 TEMPLATE_CODE,
+
+7 TARGETING,
+
+8 RESERVED_DATE,
+
+9 SENDER_KEY,
+
+10 PHONE_NUMBER,
+
+11 MESSAGE_VARIABLE_JSON,
+
+12 BUTTON_VARIABLE_JSON,
+
+13 COUPON_VARIABLE_JSON,
+
+14 IMAGE_VARIABLE_JSON,
+
+15 RESEND_MT_TYPE
+
+16 )
+
+17 ( VALUES
+
+18 '1',
+
+19 'N',
+
+20 'Y',
+
+21 'WIDE_ITEM_LIST',
+
+22 'b29f685e34adeba28efcfc6ce36ff9a8bc980f2f',
+
+23 'I',
+
+24 DATE_FORMAT(NOW(), '%Y%m%d%H%i%s'),
+
+25 'abcdefghijklmnopqrstuvwxyz1234567890abcd',
+
+26 '821012345678',
+
+27 '{
+
+28              "": " 20(:)",
+
+29              "1": " 25",
+
+30              "1__": "imc.humuson.com",
+
+31              "1_PC_": "imc.humuson.com",
+
+32              "2": " 30",
+
+33              "2__": "imc.humuson.com",
+
+34              "2_PC_": "imc.humuson.com",
+
+35              "3": " 30",
+
+36              "3__": "imc.humuson.com",
+
+37              "3_PC_": "imc.humuson.com"
+
+38 }',
+
+39 '{
+
+40              "mobile_url": "imc.humuson.com",
+
+41              "pc_url": "imc.humuson.com"
+
+42 }',
+
+43 '{
+
+44              "": "1,000",
+
+45              "": " 18",
+
+46              "coupon_url": "imc.humuson.com"
+
+47 }',
+
+48 '[
+
+49              {
+
+50                  "imc.img_url": "bmfiles_____.jpg"
+
+51              },
+
+52              {
+
+53                  "imc.img_url": "bmfiles_____.jpg"
+
+54              },
+
+55              {
+
+56                  "imc.img_url": "bmfiles_____.jpg"
+
+57              }
+
+58 ]',
+
+59 'NO'
+
+60 );
+
+7.2.6   -  :  
+
+1 INSERT INTO IMC_BM_BASIC_BIZ_MSG (
+
+2               , STATUS
+
+3 PRIORITY,
+
+4 AD_FLAG,
+
+5 CHAT_BUBBLE_TYPE,
+
+6 TEMPLATE_CODE,
+
+7 TARGETING,
+
+8 RESERVED_DATE,
+
+9 SENDER_KEY,
+
+10 PHONE_NUMBER,
+
+11 CAROUSEL_VARIABLE_JSON,
+
+12 RESEND_MT_TYPE
+13 )
+
+14 ( VALUES
+
+15 '1',
+
+16 'N',
+
+17 'Y',
+
+18 'CAROUSEL_FEED',
+
+19 'eb6f4c3c1397285bef63acab421645faf087fba7',
+
+20 'I',
+
+21 DATE_FORMAT(NOW(), '%Y%m%d%H%i%s'),
+
+22 'abcdefghijklmnopqrstuvwxyz1234567890abcd',
+
+23 '821012345678',
+
+24 '[
+
+25              {
+
+26                  "message_variable": {
+
+27                      "name": " 180(:10)"
+
+28                  },
+
+29                  "button_variable": {
+
+30                      "button_url": "imc.humuson.com"
+
+31                  },
+
+32                  "coupon_variable": {
+
+33                      "": " 7",
+
+34                      "": " 12",
+
+35                      "coupon_url": "imc.humuson.com"
+
+36                  },
+
+37                  "image_variable": {
+
+38                      "imc.img_url": "bmfiles_____.jpg",
+
+39                      "img_link": "https://imc.humuson.com"
+
+40                  }
+
+41              },
+
+42              {
+
+43                  "message_variable": {
+
+44                      "name2": " 180"
+
+45                  },
+
+46                  "button_variable": {
+
+47                      "button_url2": "imc.humuson.com"
+
+48                  },
+
+49                  "coupon_variable": {
+
+50                      "": "100",
+
+51                      "": " 12",
+
+52                      "coupon_url2": "imc.humuson.com"
+
+53                  },
+
+54                  "image_variable": {
+
+55                      "imc.img_url": "bmfiles_____.jpg",
+
+56                      "img_link": "https://imc.humuson.com"
+
+57                  }
+
+58              }
+
+59 ]',
+
+60 'NO'
+
+61 );
+
+7.2.7   -  :  
+
+1 INSERT INTO IMC_BM_BASIC_BIZ_MSG (
+
+2      , STATUS
+
+3 PRIORITY,
+
+4 AD_FLAG,
+
+5 CHAT_BUBBLE_TYPE,
+
+6 TEMPLATE_CODE,
+
+7 TARGETING,
+
+8 RESERVED_DATE,
+
+9 SENDER_KEY,
+
+10 PHONE_NUMBER,
+
+11 MESSAGE_VARIABLE_JSON,
+
+12 COUPON_VARIABLE_JSON,
+
+13 VIDEO_VARIABLE_JSON,
+
+14 RESEND_MT_TYPE
+
+15 )
+
+16 ( VALUES
+
+17 '1',
+
+18 'N',
+
+19 'Y',
+
+20 'PREMIUM_VIDEO',
+
+21 'fa1e3a8dd151182357df4190fe3119ce9af46968',
+
+22 'I',
+
+23 DATE_FORMAT(NOW(), '%Y%m%d%H%i%s'),
+
+24 'abcdefghijklmnopqrstuvwxyz1234567890abcd',
+
+25 '821012345678',
+
+26 '{
+
+27              "": " 20(:)",
+28                "name": " 76(: 5)"
+
+29 }',
+
+30 '{
+
+31                "": " 7",
+
+32                "": " 12",
+
+33                "coupon_url": "imc.humuson.com"
+
+34 }',
+
+35 '{
+
+36                "video_url": "https://tv.kakao.com/v/422641013",
+
+37                "imc.thumbnail_url": "bmfiles____.jpg"
+
+38 }',
+
+39 'NO'
+
+40 );
+
+7.2.8  -  :  
+
+               1 INSERT INTO IMC_BM_BASIC_BIZ_MSG (
+
+               2  , STATUS
+
+               3 PRIORITY,
+
+               4 AD_FLAG,
+
+               5 CHAT_BUBBLE_TYPE,
+
+               6 TEMPLATE_CODE,
+
+               7 TARGETING,
+
+               8 RESERVED_DATE,
+
+               9 SENDER_KEY,
+
+10 PHONE_NUMBER,
+
+11 MESSAGE_VARIABLE_JSON,
+
+12 COMMERCE_VARIABLE_JSON,
+
+13 BUTTON_VARIABLE_JSON,
+
+14 COUPON_VARIABLE_JSON,
+
+15 IMAGE_VARIABLE_JSON,
+
+16 RESEND_MT_TYPE
+
+17 )
+
+18 ( VALUES
+
+19 '1',
+
+20 'N',
+
+21 'Y',
+
+22 'COMMERCE',
+
+23 'dba63626b2ac5a32f8a96a3cac4e0b07c96b40f5',
+
+24 'I',
+
+25 DATE_FORMAT(NOW(), '%Y%m%d%H%i%s'),
+
+26 'abcdefghijklmnopqrstuvwxyz1234567890abcd',
+
+27 '821012345678',
+
+28 '{
+
+29                "name": " 34(: 1)"
+
+30 }',
+
+31 '{
+
+32                "": " 30",
+
+33                "": "3000",
+
+34                "": "1000",
+
+35                "": "60",
+
+36                "": "2000"
+
+37 }',
+
+38 '{
+
+39                "mobile_url": "imc.humuson.com",
+
+40                "pc_url": "imc.humuson.com"
+
+41 }',
+
+42 '{
+
+43                "": "1000",
+
+44                "": " 12",
+
+45                "coupon_url": "imc.humuson.com"
+
+46 }',
+
+47 '[
+
+48                {
+
+49                   "imc.img_url": "bmfiles____.jpg",
+
+50                   "img_link": "https://imc.humuson.com"
+
+51                }
+
+52 ]',
+
+53 'NO'
+
+54 );
+
+7.2.9   -  :  
+
+               1 INSERT INTO IMC_BM_BASIC_BIZ_MSG (
+
+               2  , STATUS
+
+               3 PRIORITY,
+
+               4 AD_FLAG,
+5 CHAT_BUBBLE_TYPE,
+
+6 TEMPLATE_CODE,
+
+7 TARGETING,
+
+8 RESERVED_DATE,
+
+9 SENDER_KEY,
+
+10 PHONE_NUMBER,
+
+11 CAROUSEL_VARIABLE_JSON,
+
+12 RESEND_MT_TYPE
+
+13 )
+
+14 ( VALUES
+
+15 '1',
+
+16 'N',
+
+17 'Y',
+
+18 'CAROUSEL_COMMERCE',
+
+19 '44348c7928d7df15f558aaadcce55712fbc27f58',
+
+20 'I',
+
+21 DATE_FORMAT(NOW(), '%Y%m%d%H%i%s'),
+
+22 'abcdefghijklmnopqrstuvwxyz1234567890abcd',
+
+23 '821012345678',
+
+24 '[
+
+25     {
+
+26         "message_variable": {
+
+27             "": " 20( )",
+
+28             "1": " 50(:2)",
+
+29             "__": "imc.humuson.com",
+
+30             "_PC_": "imc.humuson.com"
+
+31         },
+
+32         "image_variable": {
+
+33             "imc.img_url": "bmfiles_____.jpg"
+
+34         }
+
+35     },
+
+36     {
+
+37         "message_variable": {
+
+38             "1": " 34"
+
+39         },
+
+40         "commerce_variable": {
+
+41             "1": " 30",
+
+42             "": "3000",
+
+43             "": "1000",
+
+44             "": "60",
+
+45             "": "2000"
+
+46         },
+
+47         "button_variable": {
+
+48             "button_url1": "imc.humuson.com",
+
+49             "pc_url1": "imc.humuson.com"
+
+50         },
+
+51         "coupon_variable": {
+
+52             "1": " 7",
+
+53             "1": " 12",
+
+54             "coupon_url1": "imc.humuson.com"
+
+55         },
+
+56         "image_variable": {
+
+57             "imc.img_url": "bmfiles_____.jpg",
+
+58             "img_link": "https://imc.humuson.com"
+
+59         }
+
+60     },
+
+61     {
+
+62         "message_variable": {
+
+63             "2": " 34"
+
+64         },
+
+65         "commerce_variable": {
+
+66             "2": " 30",
+
+67             "": "3000",
+
+68             "": "1000",
+
+69             "": "60",
+
+70             "": "2000"
+
+71         },
+
+72         "button_variable": {
+
+73             "button_url2": "imc.humuson.com",
+
+74             "pc_url2": "imc.humuson.com"
+
+75         },
+
+76         "coupon_variable": {
+
+77             "2": " 7",
+
+78             "2": " 12",
+
+79             "coupon_url2": "imc.humuson.com"
+
+80         },
+
+81         "image_variable": {
+
+82             "imc.img_url": "bmfiles_____.jpg",
+
+83             "img_link": "https://imc.humuson.com"
+
+84         }
+
+85     }
+86 ]',
+87 'NO'
+88 );
+
+7.2.10  -  :  
+
+                1 INSERT INTO IMC_BM_BASIC_BIZ_MSG (
+
+                2  , STATUS
+
+                3 PRIORITY,
+
+                4 AD_FLAG,
+
+                5 CHAT_BUBBLE_TYPE,
+
+                6 TEMPLATE_CODE,
+
+                7 TARGETING,
+
+                8 RESERVED_DATE,
+
+                9 SENDER_KEY,
+
+10 PHONE_NUMBER,
+
+11 MESSAGE,
+
+12 ATTACHMENT_JSON,
+
+13 RESEND_MT_TYPE
+
+14 )
+
+15 ( VALUES
+
+16 '1',
+
+17 'N',
+
+18 'Y',
+
+19 'TEXT',
+
+20 '58b12557d84945efe08f6e3ff4f01d45136b5cce',
+
+21 'I',
+
+22 DATE_FORMAT(NOW(), '%Y%m%d%H%i%s'),
+
+23 'abcdefghijklmnopqrstuvwxyz1234567890abcd',
+
+24 '821012345678',
+
+25 '.\n 1,300     .\n.',
+
+26 '{
+
+27                 "button": [
+
+28                     {
+
+29                        "type": "WL",
+
+30                        "url_mobile": "https://imc.humuson.com",
+
+31                        "url_pc": "https://imc.humuson.com"
+
+32                     }
+
+33                 ]
+
+34 }',
+
+35 'NO'
+
+36 );
+
+7.2.11  -  :  
+
+                1 INSERT INTO IMC_BM_BASIC_BIZ_MSG (
+
+                2  , STATUS
+
+                3 PRIORITY,
+
+                4 AD_FLAG,
+
+                5 CHAT_BUBBLE_TYPE,
+
+                6 TEMPLATE_CODE,
+
+                7 TARGETING,
+
+                8 RESERVED_DATE,
+
+                9 SENDER_KEY,
+
+10 PHONE_NUMBER,
+
+11 MESSAGE,
+
+12 ATTACHMENT_JSON,
+
+13 RESEND_MT_TYPE
+
+14 )
+
+15 ( VALUES
+
+16 '1',
+
+17 'N',
+
+18 'Y',
+
+19 'IMAGE',
+
+20 'f7639030ba875cf0e0346f2a778796013d3c37c3',
+
+21 'I',
+
+22 DATE_FORMAT(NOW(), '%Y%m%d%H%i%s'),
+
+23 'abcdefghijklmnopqrstuvwxyz1234567890abcd',
+
+24 '821012345678',
+
+25 '.\n1,300     .\n.',
+
+26 '{
+
+27                 "image": {
+
+28                     "imc.img_url": "bmfiles___.jpg",
+
+29                     "img_link": "https://imc.humuson.com"
+
+30                 },
+
+31                 "button": [
+
+32                     {
+33                        "type": "WL",
+
+34                        "url_mobile": "https://imc.humuson.com"
+
+35                     }
+
+36                 ]
+
+37 }',
+
+38 'NO'
+
+39 );
+
+7.2.12  -  :  
+
+                1 INSERT INTO IMC_BM_BASIC_BIZ_MSG (
+
+                2  , STATUS
+
+                3 PRIORITY,
+
+                4 AD_FLAG,
+
+                5 CHAT_BUBBLE_TYPE,
+
+                6 TEMPLATE_CODE,
+
+                7 TARGETING,
+
+                8 RESERVED_DATE,
+
+                9 SENDER_KEY,
+
+10 PHONE_NUMBER,
+
+11 MESSAGE,
+
+12 ATTACHMENT_JSON,
+
+13 RESEND_MT_TYPE
+
+14 )
+
+15 ( VALUES
+
+16 '1',
+
+17 'N',
+
+18 'Y',
+
+19 'WIDE',
+
+20 '389e547e4f45be38338743b16500795663f630c2',
+
+21 'I',
+
+22 DATE_FORMAT(NOW(), '%Y%m%d%H%i%s'),
+
+23 'abcdefghijklmnopqrstuvwxyz1234567890abcd',
+
+24 '821012345678',
+
+25 '  \n 76  .',
+
+26 '{
+
+27                 "image": {
+
+28                     "imc.img_url": "bmfiles____.jpg",
+
+29                     "img_link": "https://imc.humuson.com"
+
+30                 },
+
+31                 "button": [
+
+32                     {
+
+33                        "type": "WL",
+
+34                        "url_mobile": "https://imc.humuson.com",
+
+35                        "url_pc": "https://imc.humuson.com"
+
+36                     }
+
+37                 ],
+
+38                 "coupon": {
+
+39                     "url_mobile": "https://imc.humuson.com",
+
+40                     "url_pc": "https://imc.humuson.com"
+
+41                 }
+
+42 }',
+
+43 'NO'
+
+44 );
+
+7.2.13   -  :  
+
+                1 INSERT INTO IMC_BM_BASIC_BIZ_MSG (
+
+                2  , STATUS
+
+                3 PRIORITY,
+
+                4 AD_FLAG,
+
+                5 CHAT_BUBBLE_TYPE,
+
+                6 TEMPLATE_CODE,
+
+                7 TARGETING,
+
+                8 RESERVED_DATE,
+
+                9 SENDER_KEY,
+
+10 PHONE_NUMBER,
+
+11 HEADER,
+
+12 ATTACHMENT_JSON,
+
+13 RESEND_MT_TYPE
+
+14 )
+
+15 ( VALUES
+
+16 '1',
+
+17 'N',
+
+18 'Y',
+
+19 'WIDE_ITEM_LIST',
+
+20 'b29f685e34adeba28efcfc6ce36ff9a8bc980f2f',
+21 'I',
+
+22 DATE_FORMAT(NOW(), '%Y%m%d%H%i%s'),
+
+23 'abcdefghijklmnopqrstuvwxyz1234567890abcd',
+
+24 '821012345678',
+
+25 ' 20   ',
+
+26 '{
+
+27               "item": {
+
+28                   "list": [
+
+29                      {
+
+30                          "title": " 25 \n.",
+
+31                          "imc.img_url": "bmfiles_____.jpg",
+
+32                          "url_mobile": "https://imc.humuson.com",
+
+33                          "url_pc": "https://imc.humuson.com"
+
+34                      },
+
+35                      {
+
+36                          "title": " 30 \n.",
+
+37                          "imc.img_url": "bmfiles_____.jpg",
+
+38                          "url_mobile": "https://imc.humuson.com",
+
+39                          "url_pc": "https://imc.humuson.com"
+
+40                      },
+
+41                      {
+
+42                          "title": " 30 \n.",
+
+43                          "imc.img_url": "bmfiles_____.jpg",
+
+44                          "url_mobile": "https://imc.humuson.com",
+
+45                          "url_pc": "https://imc.humuson.com"
+
+46                      }
+
+47                   ]
+
+48               },
+
+49               "button": [
+
+50                   {
+
+51                      "type": "WL",
+
+52                      "url_mobile": "https://imc.humuson.com",
+
+53                      "url_pc": "https://imc.humuson.com"
+
+54                   }
+
+55               ],
+
+56               "coupon": {
+
+57                   "title": "1000  ",
+
+58                   "description": " 12 ",
+
+59                   "url_mobile": "https://imc.humuson.com"
+
+60               }
+
+61 }',
+
+62 'NO'
+
+63 );
+
+7.2.14   -  :  
+
+1 INSERT INTO IMC_BM_BASIC_BIZ_MSG (
+
+2                , STATUS
+
+3 PRIORITY,
+
+4 AD_FLAG,
+
+5 CHAT_BUBBLE_TYPE,
+
+6 TEMPLATE_CODE,
+
+7 TARGETING,
+
+8 RESERVED_DATE,
+
+9 SENDER_KEY,
+
+10 PHONE_NUMBER,
+
+11 CAROUSEL_JSON,
+
+12 RESEND_MT_TYPE
+
+13 )
+
+14 ( VALUES
+
+15 '1',
+
+16 'N',
+
+17 'Y',
+
+18 'CAROUSEL_FEED',
+
+19 'eb6f4c3c1397285bef63acab421645faf087fba7',
+
+20 'I',
+
+21 DATE_FORMAT(NOW(), '%Y%m%d%H%i%s'),
+
+22 'abcdefghijklmnopqrstuvwxyz1234567890abcd',
+
+23 '821012345678',
+
+24 '{
+
+25               "list": [
+
+26                   {
+
+27                      "header": "  ",
+
+28                      "message": "  \n 180  .",
+
+29                      "attachment": {
+
+30                          "image": {
+
+31                              "imc.img_url": "bmfiles_____.jpg",
+
+32                              "img_link": "https://imc.humuson.com"
+
+33                          },
+34                      "button": [
+
+35                          {
+
+36                             "type": "WL",
+
+37                             "url_mobile": "https://imc.humuson.com",
+
+38                             "url_pc": "https://imc.humuson.com"
+
+39                          }
+
+40                      ],
+
+41                      "coupon": {
+
+42                          "title": "  ",
+
+43                          "description": " 12 ",
+
+44                          "url_mobile": "https://imc.humuson.com"
+
+45                      }
+
+46                   }
+
+47               },
+
+48               {
+
+49                   "header": "  ",
+
+50                   "message": "  \n 180  .",
+
+51                   "attachment": {
+
+52                      "image": {
+
+53                          "imc.img_url": "bmfiles_____.jpg",
+
+54                          "img_link": "https://imc.humuson.com"
+
+55                      },
+
+56                      "button": [
+
+57                          {
+
+58                             "type": "WL",
+
+59                             "url_mobile": "https://imc.humuson.com",
+
+60                             "url_pc": "https://imc.humuson.com"
+
+61                          }
+
+62                      ],
+
+63                      "coupon": {
+
+64                          "title": "100%  ",
+
+65                          "description": " 12 ",
+
+66                          "url_mobile": "https://imc.humuson.com"
+
+67                      }
+
+68                   }
+
+69               }
+
+70     ]
+
+71 }',
+
+72 'NO'
+
+73 );
+
+7.2.15   -  :  
+
+1 INSERT INTO IMC_BM_BASIC_BIZ_MSG (
+
+2      , STATUS
+
+3 PRIORITY,
+
+4 AD_FLAG,
+
+5 CHAT_BUBBLE_TYPE,
+
+6 TEMPLATE_CODE,
+
+7 TARGETING,
+
+8 RESERVED_DATE,
+
+9 SENDER_KEY,
+
+10 PHONE_NUMBER,
+
+11 HEADER,
+
+12 MESSAGE,
+
+13 ATTACHMENT_JSON,
+
+14 RESEND_MT_TYPE
+
+15 )
+
+16 ( VALUES
+
+17 '1',
+
+18 'N',
+
+19 'Y',
+
+20 'PREMIUM_VIDEO',
+
+21 'fa1e3a8dd151182357df4190fe3119ce9af46968',
+
+22 'I',
+
+23 DATE_FORMAT(NOW(), '%Y%m%d%H%i%s'),
+
+24 'abcdefghijklmnopqrstuvwxyz1234567890abcd',
+
+25 '821012345678',
+
+26 ' 20  ',
+
+27 '  \n# 76  .',
+
+28 '{
+
+29     "video": {
+
+30               "video_url": "https://tv.kakao.com/v/422641013",
+
+31               "imc.thumbnail_url": "bmfiles____.jpg"
+
+32     },
+
+33     "coupon": {
+
+34               "title": " 7  ",
+
+35               "description": " 12 ",
+
+36               "url_mobile": "https://imc.humuson.com"
+37                 }
+
+38 }',
+
+39 'NO'
+
+40 );
+
+7.2.16  -  :  
+
+                1 INSERT INTO IMC_BM_BASIC_BIZ_MSG (
+
+                2  , STATUS
+
+                3 PRIORITY,
+
+                4 AD_FLAG,
+
+                5 CHAT_BUBBLE_TYPE,
+
+                6 TEMPLATE_CODE,
+
+                7 TARGETING,
+
+                8 RESERVED_DATE,
+
+                9 SENDER_KEY,
+
+10 PHONE_NUMBER,
+
+11 ADDITIONAL_CONTENT,
+
+12 ATTACHMENT_JSON,
+
+13 RESEND_MT_TYPE
+
+14 )
+
+15 ( VALUES
+
+16 '1',
+
+17 'N',
+
+18 'Y',
+
+19 'COMMERCE',
+
+20 'dba63626b2ac5a32f8a96a3cac4e0b07c96b40f5',
+
+21 'I',
+
+22 DATE_FORMAT(NOW(), '%Y%m%d%H%i%s'),
+
+23 'abcdefghijklmnopqrstuvwxyz1234567890abcd',
+
+24 '821012345678',
+
+25 ' \n 34  .',
+
+26 '{
+
+27                 "image": {
+
+28                     "imc.img_url": "bmfiles____.jpg",
+
+29                     "img_link": "https://imc.humuson.com"
+
+30                 },
+
+31                 "commerce": {
+
+32                     "title": " 30 ",
+
+33                     "regular_price": 3000,
+
+34                     "discount_price": 1000,
+
+35                     "discount_fixed": 2000
+
+36                 },
+
+37                 "button": [
+
+38                     {
+
+39                        "type": "WL",
+
+40                        "url_mobile": "https://imc.humuson.com",
+
+41                        "url_pc": "https://imc.humuson.com"
+
+42                     }
+
+43                 ],
+
+44                 "coupon": {
+
+45                     "title": "1000  ",
+
+46                     "description": " 12 ",
+
+47                     "url_mobile": "https://imc.humuson.com"
+
+48                 }
+
+49 }',
+
+50 'NO'
+
+51 );
+
+7.2.17   -  :  
+
+                1 INSERT INTO IMC_BM_BASIC_BIZ_MSG (
+
+                2  , STATUS
+
+                3 PRIORITY,
+
+                4 AD_FLAG,
+
+                5 CHAT_BUBBLE_TYPE,
+
+                6 TEMPLATE_CODE,
+
+                7 TARGETING,
+
+                8 RESERVED_DATE,
+
+                9 SENDER_KEY,
+
+10 PHONE_NUMBER,
+
+11 CAROUSEL_JSON,
+
+12 RESEND_MT_TYPE
+
+13 )
+
+14 ( VALUES
+
+15 '1',
+
+16 'N',
+17 'Y',
+
+18 'CAROUSEL_COMMERCE',
+
+19 '44348c7928d7df15f558aaadcce55712fbc27f58',
+
+20 'I',
+
+21 DATE_FORMAT(NOW(), '%Y%m%d%H%i%s'),
+
+22 'abcdefghijklmnopqrstuvwxyz1234567890abcd',
+
+23 '821012345678',
+
+24 '{
+
+25     "head": {
+
+26         "header": " 20 ",
+
+27         "content": " 50  .\n.",
+
+28         "imc.image_url": "bmfiles_____.jpg",
+
+29         "url_mobile": "https://imc.humuson.com",
+
+30         "url_pc": "https://imc.humuson.com"
+
+31     },
+
+32     "list": [
+
+33         {
+
+34             "additional_content": "1  34",
+
+35             "attachment": {
+
+36                "image": {
+
+37                    "imc.img_url": "bmfiles_____.jpg",
+
+38                    "img_link": "https://imc.humuson.com"
+
+39                },
+
+40                "commerce": {
+
+41                    "title": "1  30",
+
+42                    "regular_price": 3000,
+
+43                    "discount_price": 1000,
+
+44                    "discount_rate": 60,
+
+45                    "discount_fixed": 2000
+
+46                },
+
+47                "button": [
+
+48                    {
+
+49                       "type": "WL",
+
+50                       "url_mobile": "https://imc.humuson.com",
+
+51                       "url_pc": "https://imc.humuson.com"
+
+52                    }
+
+53                ],
+
+54                "coupon": {
+
+55                    "title": " 7 UP ",
+
+56                    "description": " 12 ",
+
+57                    "url_mobile": "https://imc.humuson.com"
+
+58                }
+
+59             }
+
+60         },
+
+61         {
+
+62             "additional_content": "2  34",
+
+63             "attachment": {
+
+64                "image": {
+
+65                    "imc.img_url": "bmfiles_____.jpg",
+
+66                    "img_link": "https://imc.humuson.com"
+
+67                },
+
+68                "commerce": {
+
+69                    "title": "2  30",
+
+70                    "regular_price": 3000,
+
+71                    "discount_price": 1000,
+
+72                    "discount_rate": 60,
+
+73                    "discount_fixed": 2000
+
+74                },
+
+75                "button": [
+
+76                    {
+
+77                       "type": "WL",
+
+78                       "url_mobile": "https://imc.humuson.com",
+
+79                       "url_pc": "https://imc.humuson.com"
+
+80                    }
+
+81                ],
+
+82                "coupon": {
+
+83                    "title": " 7 UP ",
+
+84                    "description": " 12 ",
+
+85                    "url_mobile": "https://imc.humuson.com"
+
+86                }
+
+87             }
+
+88         }
+
+89     ]
+
+90 }',
+
+91 'NO'
+
+92 );
+7.2    
+7.2.1 
+
+         1 INSERT INTO IMC_BM_FREE_BIZ_MSG (
+
+         2      , STATUS
+
+         3 PRIORITY,
+
+         4 AD_FLAG,
+
+         5 CHAT_BUBBLE_TYPE,
+
+         6 RESERVED_DATE,
+
+         7 SENDER_KEY,
+
+         8 PHONE_NUMBER,
+
+         9 TARGETING,
+
+         10 MESSAGE,
+
+         11 RESEND_MT_TYPE
+
+         12 )
+
+         13 ( VALUES
+
+         14 '1',
+
+         15 'N',
+
+         16 'Y',
+
+         17 'TEXT',
+
+         18 DATE_FORMAT(NOW(), '%Y%m%d%H%i%s'),
+
+         19 'abcdefghijklmnopqrstuvwxyz1234567890abcd',
+
+         20 '821012345678',
+
+         21 'I',
+
+         22 '   .\n   1,300   .',
+
+         23 'NO'
+
+         24 );
+
+7.2.2 
+
+         1 INSERT INTO IMC_BM_FREE_BIZ_MSG (
+
+         2      , STATUS
+
+         3 PRIORITY,
+
+         4 AD_FLAG,
+
+         5 CHAT_BUBBLE_TYPE,
+
+         6 RESERVED_DATE,
+
+         7 SENDER_KEY,
+
+         8 PHONE_NUMBER,
+
+         9 TARGETING,
+
+         10 MESSAGE,
+
+         11 ATTACHMENT_JSON,
+
+         12 RESEND_MT_TYPE
+
+         13 )
+
+         14 ( VALUES
+
+         15 '1',
+
+         16 'N',
+
+         17 'Y',
+
+         18 'IMAGE',
+
+         19 DATE_FORMAT(NOW(), '%Y%m%d%H%i%s'),
+
+         20 'abcdefghijklmnopqrstuvwxyz1234567890abcd',
+
+         21 '821012345678',
+
+         22 'I',
+
+         23 '   .\n   1300   .',
+
+         24 '{
+
+         25 "image": {
+
+         26     "imc.img_url": "bmfiles___.jpg",
+
+         27     "img_link": "https://imc.humuson.com"
+
+         28 },
+
+         29 "button": [
+
+         30     {
+
+         31        "type": "WL",
+
+         32        "name": "  14",
+
+         33        "url_mobile": "https://imc.humuson.com"
+
+         34     }
+
+         35 ],
+
+         36 "coupon": {
+
+         37     "title": "1000  ",
+
+         38     "description": "  12",
+
+         39     "url_mobile": "https://imc.humuson.com"
+
+         40 }
+
+         41 }',
+
+         42 'NO'
+
+         43 );
+
+7.2.3  
+         1 INSERT INTO IMC_BM_FREE_BIZ_MSG (
+
+         2      , STATUS
+
+         3 PRIORITY,
+
+         4 AD_FLAG,
+
+         5 CHAT_BUBBLE_TYPE,
+
+         6 RESERVED_DATE,
+
+         7 SENDER_KEY,
+
+         8 PHONE_NUMBER,
+
+         9 TARGETING,
+
+         10 MESSAGE,
+
+         11 ATTACHMENT_JSON,
+
+         12 RESEND_MT_TYPE
+
+         13 )
+
+         14 ( VALUES
+
+         15 '1',
+
+         16 'N',
+
+         17 'Y',
+
+         18 'WIDE',
+
+         19 DATE_FORMAT(NOW(), '%Y%m%d%H%i%s'),
+
+         20 'abcdefghijklmnopqrstuvwxyz1234567890abcd',
+
+         21 '821012345678',
+
+         22 'I',
+
+         23 '    .\n    76   .',
+
+         24 '{
+
+         25     "image": {
+
+         26           "imc.img_url": "bmfiles____.jpg",
+
+         27           "img_link": "https://imc.humuson.com"
+
+         28     },
+
+         29     "button": [
+
+         30        {
+
+         31           "type": "WL",
+
+         32           "name": " 8",
+
+         33           "url_mobile": "https://imc.humuson.com"
+
+         34        }
+
+         35     ],
+
+         36     "coupon": {
+
+         37           "title": "1000  ",
+
+         38           "description": "  18",
+
+         39           "url_mobile": "https://imc.humuson.com"
+
+         40     }
+
+         41 }',
+
+         42 'NO'
+
+         43 );
+
+7.2.4  
+
+         1 INSERT INTO IMC_BM_FREE_BIZ_MSG (
+
+         2      , STATUS
+
+         3 PRIORITY,
+
+         4 AD_FLAG,
+
+         5 CHAT_BUBBLE_TYPE,
+
+         6 RESERVED_DATE,
+
+         7 SENDER_KEY,
+
+         8 PHONE_NUMBER,
+
+         9 TARGETING,
+
+         10 HEADER,
+
+         11 ATTACHMENT_JSON,
+
+         12 RESEND_MT_TYPE
+
+         13 )
+
+         14 ( VALUES
+
+         15 '1',
+
+         16 'N',
+
+         17 'Y',
+
+         18 'WIDE_ITEM_LIST',
+
+         19 DATE_FORMAT(NOW(), '%Y%m%d%H%i%s'),
+
+         20 'abcdefghijklmnopqrstuvwxyz1234567890abcd',
+
+         21 '821012345678',
+
+         22 'I',
+
+         23 '  20',
+
+         24 '{
+
+         25     "item": {
+
+         26           "list": [
+
+         27           {
+
+         28               "title": "1   25",
+
+         29               "imc.img_url": "bmfiles_____.jpg",
+
+         30               "url_mobile": "https://imc.humuson.com"
+
+         31           },
+
+         32           {
+
+         33               "title": "2   30",
+         34                   "imc.img_url": "bmfiles_____.jpg",
+
+         35                   "url_mobile": "https://imc.humuson.com"
+
+         36               },
+
+         37               {
+
+         38                   "title": "3   30",
+
+         39                   "imc.img_url": "bmfiles_____.jpg",
+
+         40                   "url_mobile": "https://imc.humuson.com"
+
+         41               }
+
+         42           ]
+
+         43     },
+
+         44     "button": [
+
+         45        {
+
+         46              "type": "WL",
+
+         47              "name": " 8",
+
+         48              "url_mobile": "https://imc.humuson.com"
+
+         49        }
+
+         50     ],
+
+         51     "coupon": {
+
+         52           "title": "1000  ",
+
+         53           "description": "  18",
+
+         54           "url_mobile": "https://imc.humuson.com"
+
+         55     }
+
+         56 }',
+
+         57 'NO'
+
+         58 );
+
+7.2.5  
+
+         1 INSERT INTO IMC_BM_FREE_BIZ_MSG (
+
+         2      , STATUS
+
+         3 PRIORITY,
+
+         4 AD_FLAG,
+
+         5 CHAT_BUBBLE_TYPE,
+
+         6 RESERVED_DATE,
+
+         7 SENDER_KEY,
+
+         8 PHONE_NUMBER,
+
+         9 TARGETING,
+
+         10 CAROUSEL_JSON,
+
+         11 RESEND_MT_TYPE
+
+         12 )
+
+         13 ( VALUES
+
+         14 '1',
+
+         15 'N',
+
+         16 'Y',
+
+         17 'CAROUSEL_FEED',
+
+         18 DATE_FORMAT(NOW(), '%Y%m%d%H%i%s'),
+
+         19 'abcdefghijklmnopqrstuvwxyz1234567890abcd',
+
+         20 '821012345678',
+
+         21 'I',
+
+         22 '{
+
+         23     "list": [
+
+         24           {
+
+         25               "header": "1   20",
+
+         26               "message": "1   .\n  180   .",
+
+         27               "attachment": {
+
+         28                   "image": {
+
+         29                       "imc.img_url": "bmfiles_____.jpg",
+
+         30                       "img_link": "https://imc.humuson.com"
+
+         31                   },
+
+         32                   "button": [
+
+         33                       {
+
+         34                          "type": "WL",
+
+         35                          "name": " 8",
+
+         36                          "url_mobile": "https://imc.humuson.com"
+
+         37                       }
+
+         38                   ],
+
+         39                   "coupon": {
+
+         40                       "title": "1000  ",
+
+         41                       "description": "  12",
+
+         42                       "url_mobile": "https://imc.humuson.com"
+
+         43                   }
+
+         44               }
+
+         45           },
+
+         46           {
+
+         47               "header": "2   20",
+
+         48               "message": "2   .\n  180   .",
+
+         49               "attachment": {
+
+         50                   "image": {
+
+         51                       "imc.img_url": "bmfiles_____.jpg",
+         52                     "img_link": "https://imc.humuson.com"
+
+         53                 },
+
+         54                 "button": [
+
+         55                     {
+
+         56                        "type": "WL",
+
+         57                        "name": " 8",
+
+         58                        "url_mobile": "https://imc.humuson.com"
+
+         59                     }
+
+         60                 ],
+
+         61                 "coupon": {
+
+         62                     "title": "100%  ",
+
+         63                     "description": "  12",
+
+         64                     "url_mobile": "https://imc.humuson.com"
+
+         65                 }
+
+         66              }
+
+         67           }
+
+         68     ],
+
+         69     "tail": {
+
+         70           "url_mobile": "https://imc.humuson.com",
+
+         71           "url_pc": "https://imc.humuson.com",
+
+         72           "scheme_ios": "scheme://imc.humuson.com",
+
+         73           "scheme_android": "scheme://imc.humuson.com"
+
+         74     }
+
+         75 }',
+
+         76 'NO'
+
+         77 );
+
+7.2.6    1 INSERT INTO IMC_BM_FREE_BIZ_MSG (
+7.2.7 
+         2      , STATUS
+
+         3 PRIORITY,
+
+         4 AD_FLAG,
+
+         5 CHAT_BUBBLE_TYPE,
+
+         6 RESERVED_DATE,
+
+         7 SENDER_KEY,
+
+         8 PHONE_NUMBER,
+
+         9 TARGETING,
+
+         10 HEADER,
+
+         11 MESSAGE,
+
+         12 ATTACHMENT_JSON,
+
+         13 RESEND_MT_TYPE
+
+         14 )
+
+         15 ( VALUES
+
+         16 '1',
+
+         17 'N',
+
+         18 'Y',
+
+         19 'PREMIUM_VIDEO',
+
+         20 DATE_FORMAT(NOW(), '%Y%m%d%H%i%s'),
+
+         21 'abcdefghijklmnopqrstuvwxyz1234567890abcd',
+
+         22 '821012345678',
+
+         23 'I',
+
+         24 '  20()',
+
+         25 '   .\n   76   .()',
+
+         26 '{
+
+         27     "video": {
+
+         28           "video_url": "https://tv.kakao.com/v/422641013",
+
+         29           "imc.thumbnail_url": "bmfiles____.jpg"
+
+         30     },
+
+         31     "button": [
+
+         32        {
+
+         33              "type": "WL",
+
+         34              "name": " 8",
+
+         35              "url_mobile": "https://imc.humuson.com"
+
+         36        }
+
+         37     ],
+
+         38     "coupon": {
+
+         39           "title": "1000  ",
+
+         40           "description": "  18",
+
+         41           "url_mobile": "https://imc.humuson.com"
+
+         42     }
+
+         43 }',
+
+         44 'NO'
+
+         45 );
+         1 INSERT INTO IMC_BM_FREE_BIZ_MSG (
+
+         2      , STATUS
+
+         3 PRIORITY,
+
+         4 AD_FLAG,
+
+         5 CHAT_BUBBLE_TYPE,
+
+         6 RESERVED_DATE,
+
+         7 SENDER_KEY,
+
+         8 PHONE_NUMBER,
+
+         9 TARGETING,
+
+         10 ADDITIONAL_CONTENT,
+
+         11 ATTACHMENT_JSON,
+
+         12 RESEND_MT_TYPE
+
+         13 )
+
+         14 ( VALUES
+
+         15 '1',
+
+         16 'N',
+
+         17 'Y',
+
+         18 'COMMERCE',
+
+         19 DATE_FORMAT(NOW(), '%Y%m%d%H%i%s'),
+
+         20 'abcdefghijklmnopqrstuvwxyz1234567890abcd',
+
+         21 '821012345678',
+
+         22 'I',
+
+         23 '  34()',
+
+         24 '{
+
+         25 "image": {
+
+         26           "imc.img_url": "bmfiles____.jpg",
+
+         27           "img_link": "https://imc.humuson.com"
+
+         28     },
+
+         29 "commerce": {
+
+         30           "title": "   30",
+
+         31           "regular_price": 3000,
+
+         32           "discount_price": 1000,
+
+         33           "discount_rate": 60
+
+         34     },
+
+         35     "button": [
+
+         36        {
+
+         37           "type": "WL",
+
+         38           "name": " 8",
+
+         39           "url_mobile": "https://imc.humuson.com"
+
+         40        }
+
+         41     ],
+
+         42     "coupon": {
+
+         43           "title": "1000  ",
+
+         44           "description": "  12",
+
+         45           "url_mobile": "https://imc.humuson.com"
+
+         46     }
+
+         47 }',
+
+         48 'NO'
+
+         49 );
+
+7.2.8  
+
+         1 INSERT INTO IMC_BM_FREE_BIZ_MSG (
+
+         2      , STATUS
+
+         3 PRIORITY,
+
+         4 AD_FLAG,
+
+         5 CHAT_BUBBLE_TYPE,
+
+         6 RESERVED_DATE,
+
+         7 SENDER_KEY,
+
+         8 PHONE_NUMBER,
+
+         9 TARGETING,
+
+         10 CAROUSEL_JSON,
+
+         11 RESEND_MT_TYPE
+
+         12 )
+
+         13 ( VALUES
+
+         14 '1',
+
+         15 'N',
+
+         16 'Y',
+
+         17 'CAROUSEL_COMMERCE',
+
+         18 DATE_FORMAT(NOW(), '%Y%m%d%H%i%s'),
+
+         19 'abcdefghijklmnopqrstuvwxyz1234567890abcd',
+
+         20 '821012345678',
+
+         21 'I',
+
+         22 '{
+
+         23     "head": {
+
+         24           "header": "   20",
+
+         25           "content": "   .\n  50   .",
+
+         26           "imc.image_url": "bmfiles_____.jpg",
+
+         27           "url_mobile": "https://imc.humuson.com",
+  28         "url_pc": "https://imc.humuson.com",
+
+  29         "scheme_ios": "scheme://imc.humuson.com",
+
+  30         "scheme_android": "scheme://imc.humuson.com"
+
+  31     },
+
+  32     "list": [
+
+  33         {
+
+  34             "additional_content": "1   34()",
+
+  35                "attachment": {
+
+  36                   "image": {
+
+  37                      "imc.img_url": "bmfiles_____.jpg",
+
+  38                      "img_link": "https://imc.humuson.com"
+
+  39                },
+
+  40                "commerce": {
+
+  41                      "title": "1  30",
+
+  42                      "regular_price": 3000,
+
+  43                      "discount_price": 1000,
+
+  44                      "discount_rate": 60,
+
+  45                      "discount_fixed": 2000
+
+  46                },
+
+  47                "button": [
+
+  48                   {
+
+  49                      "type": "WL",
+
+  50                      "name": "18",
+
+  51                      "url_mobile": "http://imc.humuson.com"
+
+  52                   }
+
+  53                ],
+
+  54                "coupon": {
+
+  55                      "title": "1000  ",
+
+  56                      "description": "  12",
+
+  57                      "url_mobile": "https://imc.humuson.com"
+
+  58                }
+
+  59             }
+
+  60         },
+
+  61         {
+
+  62             "additional_content": "2   34()",
+
+  63                "attachment": {
+
+  64                   "image": {
+
+  65                      "imc.img_url": "bmfiles_____.jpg",
+
+  66                      "img_link": "https://imc.humuson.com"
+
+  67                },
+
+  68                "commerce": {
+
+  69                      "title": "2  30",
+
+  70                      "regular_price": 3000,
+
+  71                      "discount_price": 1000,
+
+  72                      "discount_rate": 60,
+
+  73                      "discount_fixed": 2000
+
+  74                },
+
+  75                "button": [
+
+  76                   {
+
+  77                      "type": "WL",
+
+  78                      "name": "28",
+
+  79                      "url_mobile": "http://imc.humuson.com"
+
+  80                   }
+
+  81                ],
+
+  82                "coupon": {
+
+  83                      "title": "1000  ",
+
+  84                      "description": "  12",
+
+  85                      "url_mobile": "https://imc.humuson.com"
+
+  86                }
+
+  87             }
+
+  88         }
+
+  89     ],
+
+  90     "tail": {
+
+  91         "url_mobile": "https://imc.humuson.com",
+
+  92         "url_pc": "https://imc.humuson.com",
+
+  93         "scheme_ios": "scheme://imc.humuson.com",
+
+  94         "scheme_android": "scheme://imc.humuson.com"
+
+  95     }
+
+  96 }',
+
+  97 'NO'
+
+  98 );
+
+
+ Appendix --   JSON   
+
+   /   ATTACHMENT_JSON / CAROUSEL_JSON   /
+
+    .
+    (  : URL···     )
+
+A. Attachment JSON                                                                         
+A-1.  
+                                                                          Button[]   N      
+                                                                        
+
+                       button
+
+                                                                                           TEXT, IMAGE - Coupon
+                                                                                              4,  
+                                                                                            5
+                                                                                           WIDE, WIDE_ITEM_LIST -
+                                                                                            2
+                                                                                           PREMIUM_VIDEO -  1
+                                                                                           
+                                                                                           COMMERCE -  1, 
+                                                                                            2
+
+                         image                                            Image      Y      
+
+                                                                                           IMAGE, WIDE,
+                                                                                           COMMERCE 
+
+                         coupon                                           Coupon     N       (  )
+
+                         item.list array                                             Y*        (
+
+                                                                                           3,  4)
+
+                                                                                           WIDE_ITEM_LIST 
+
+                         commerce object                                             N       
+
+                                                                                           COMMERCE 
+
+                         video                                            object     N        
+
+                                                                                           PREMIUM_VIDEO 
+
+button A-2.  (Button[])
+
+                                                                                         
+
+                         name                                             text    Y      
+
+                                                                                          : 14 ,  1 (
+                                                                                             ... )
+                       type     text    Y   : 14 ,  1 (
+                                               ...  )
+                       url_mobil text   -   : 8 ,  
+                                            ( B.   )
+                       e                      URL
+
+                       url_pc   text    N  PC   URL
+                                           iOS   
+                       scheme_io text   -
+                                           Android   
+                       s
+                                           <->    
+                       scheme_and text  -   
+                                                
+                       roid                  
+                                              
+                       chat_extr text   N  bizFormKey
+
+                       a
+
+                       chat_even text   N
+
+                       t
+
+                       biz_form_k text  N
+
+                       ey
+
+image A-3.  (Image)
+
+                                           
+
+                       img_url  text    -    URL
+
+                       imc.img_ur text  -       URL
+                       l
+
+                       img_link text          URL ( 
+                                            )
+
+ // :   800×400, ( 500),  2:1~3:4, jpg/png 5MB
+ / :   800×600  800×400 ( 500),  2:1~3:4,  
+    ,  jpg/png 5MB
+
+coupon A-4.  (Coupon)
+                                              
+
+                  title              text  Y   . (    )
+
+                                              ${}   (: 1 ~
+                                              99,999,999)
+                                              ${}%   (: 1 ~
+                                              100)
+                                                
+                                              ${7 }  
+                                              ${7 } UP 
+
+                  descriptio text          Y   
+                  n
+                                              WIDE, WIDE_ITEM_LIST,
+                                              PREMIUM_VIDEO -  18 (
+                                              : )
+                                                -  12 (: )
+
+                  url_mobil text           -     URL
+                  e
+
+                  url_pc             text  N  PC   URL
+
+                  scheme_and text          -  Android   
+                  roid
+
+                  scheme_io text           -  iOS   
+                  s
+
+item.list[] A-5.  (WIDE_ITEM_LIST )
+
+                                              
+
+                  title              text  -    (1   , 
+                                              2~4 ) 
+                  img_url            text  -
+                                                 1  -  25 (:
+                                                  1)
+                                                 2~4  -  30 (
+                                                 :  1)
+
+                                                URL
+
+                  imc.img_ur text          -       URL
+                  l
+               url_mobil text       Y        URL
+               e
+
+               url_pc         text  N     PC   URL
+
+               scheme_and text      N     Android   
+               roid
+
+               scheme_io text       N     iOS   
+               s
+
+  :   500,  2:1 , jpg/png 5MB
+ :  ~    500,  1:1 , jpg/png 5MB
+
+commerce A-6.  (COMMERCE )
+
+                                          
+
+               title          text  Y      (30,  )
+
+               regular_pr number Y        (0~99,999,999)
+               ice
+
+               discount_p number N        (0~99,999,999)
+               rice
+
+               discount_r number N        (0~100)
+               ate
+
+               discount_f number N        (0~999,999)
+               ixed
+
+   discount_rate  discount_fixed   
+
+video A-7.  (PREMIUM_VIDEO )
+
+                                          
+
+               video_url text          Y  TV  URL
+
+               thumbnail_ text         -    URL ( 
+               url
+                                          )
+      imc.thumbn text     -       / URL
+
+      ail_url
+
+  :   800×400, ( 500),  2:1~3:4, jpg/png 5MB
+
+B.  
+
+                                
+
+      WL ()    url_mob text  Y  /  URL
+               ile
+
+               url_pc text   N  PC  URL
+
+      AL ()    scheme_ text  Y  iOS   
+               ios
+
+               scheme_ text  Y  Android   
+               android
+
+      - AC ()          -     -      
+
+                                 () 
+                                ,   
+                                   
+
+                                TEXT, IMAGE -  
+                                 ()
+
+                                  -   ()
+
+                                name   
+
+                                   
+                                 1 
+
+                                 M,N  
+
+      - BK ()          -     -    
+
+      - MD (           -     -    +   
+
+      )
+
+      BC       chat_ex text  Y    
+      ( )      tra
+                                
+
+      BT       chat_ex text  Y   I   
+      ( )      tra
+                                  
+
+               chat_ev text  Y      
+               ent
+                                  
+                  BF       -         -     -    
+
+                  ()
+
+( : AC/BC/BT/BF        )
+
+C. Carousel JSON
+C-1.  
+
+                                              
+
+                  head        json      N      
+                                              CAROUSEL_COMMERCE 
+                                               
+
+                  list        array     Y      
+                                                  (head) 
+                                                 - 1~5
+                                                   - 2~6
+
+                  tail        json      N       ()
+
+head C-2.  ( )
+
+                                              
+
+                  header      text      Y      (20 ,  
+
+                                              )
+
+                  content     text      Y      (50 ,  
+
+                                               2)
+
+                  image_url text        -       URL
+
+                  imc.image_u text      -       / URL
+                  rl
+
+                  url_mobile text       -        URL
+
+                  url_pc      text      N     PC  URL
+
+                  scheme_andr text      N     Android   
+                  oid
+
+                  scheme_ios text       N     iOS   
+url_mobile / url_pc / scheme_android / scheme_ios    
+url_mobile . 
+
+   :   800×400, ( 500),  2:1~3:4,    , jpg/png
+5MB
+
+list[] C-3.  ( )
+
+                                        
+
+               header    text   -        (20,  
+                                        ).
+               message   text   -
+                                             : 
+               additional text  N            :  
+
+               _content                  (180,  :
+                                         10).
+               attachment Attach N
+                                  ment       : 
+                                             :  
+
+                                        (  34, 
+                                        :  1).
+
+                                             : 
+                                             : 
+
+                                        / ( A.
+                                        ) Attachment JSON
+
+tail C-4.  ()
+
+                                        
+
+               url_mobil text   Y          URL
+               e
+
+               url_pc    text   N       PC  URL
+
+               scheme_io text   N       iOS   
+               s
+
+               scheme_and text  N       Android   
+               roid
+ 
+
+     ( ·  )       
+    /      
+    /   **(/// )**   
+

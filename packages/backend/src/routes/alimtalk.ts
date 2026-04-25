@@ -497,11 +497,14 @@ router.post(
         return res.status(404).json({ success: false, error: '발신프로필 없음' });
       }
       const r = await imc.applyBrandTargeting(row.rows[0].profile_key, req.body || {});
-      await query(
-        `UPDATE kakao_sender_profiles SET brand_targeting_yn='Y', updated_at=now() WHERE id=$1`,
-        [req.params.id],
-      );
-      res.json({ success: r.code === '0000', imc: r });
+      if (r.code === '0000') {
+        await query(
+          `UPDATE kakao_sender_profiles SET brand_targeting_yn='Y', updated_at=now() WHERE id=$1`,
+          [req.params.id],
+        );
+      }
+      // ★ D140 #C (0425): IMC raw 메시지 사용자 노출 방지 (D139 IMC 단어 정책)
+      return sendImcManagedResponse(res, r, { fallback: '브랜드메시지 타겟팅 신청에 실패했습니다' });
     } catch (err) {
       return handleImcError(res, err);
     }
@@ -520,7 +523,8 @@ router.get(
         return res.status(404).json({ success: false, error: '발신프로필 없음' });
       }
       const r = await imc.checkBrandTargeting(row.rows[0].profile_key);
-      res.json({ success: r.code === '0000', imc: r });
+      // ★ D140 #C (0425): 매뉴얼 정합 응답 + IMC raw 메시지 사용자 노출 방지
+      return sendImcManagedResponse(res, r, { fallback: '타겟팅 가능 여부 확인에 실패했습니다' });
     } catch (err) {
       return handleImcError(res, err);
     }
@@ -1147,7 +1151,13 @@ router.post(
         templateKey,
       });
       if (r.code !== '0000') {
-        return res.status(400).json({ success: false, code: r.code, error: r.message });
+        // ★ D140 #C (0425): IMC raw 메시지 정제 후 반환
+        return res.status(400).json({
+          success: false,
+          code: r.code,
+          error: sanitizeImcMessageForUser(r.message, r.code, '브랜드메시지 템플릿 등록에 실패했습니다'),
+          imc: r,
+        });
       }
 
       const ins = await query(
@@ -1225,11 +1235,14 @@ router.put(
         templateKey: req.params.templateKey,
         ...(req.body || {}),
       });
-      await query(
-        `UPDATE brand_message_templates SET updated_at=now() WHERE id=$1`,
-        [r.rows[0].id],
-      );
-      res.json({ success: imcRes.code === '0000', imc: imcRes });
+      if (imcRes.code === '0000') {
+        await query(
+          `UPDATE brand_message_templates SET updated_at=now() WHERE id=$1`,
+          [r.rows[0].id],
+        );
+      }
+      // ★ D140 #C (0425): IMC raw 메시지 사용자 노출 방지
+      return sendImcManagedResponse(res, imcRes, { fallback: '브랜드메시지 템플릿 수정에 실패했습니다' });
     } catch (err) {
       return handleImcError(res, err);
     }
@@ -1256,13 +1269,16 @@ router.delete(
         r.rows[0].profile_key,
         req.params.templateKey,
       );
-      await query(
-        `UPDATE brand_message_templates
-            SET status='DELETED', deleted_at=now(), updated_at=now()
-          WHERE id=$1`,
-        [r.rows[0].id],
-      );
-      res.json({ success: imcRes.code === '0000', imc: imcRes });
+      if (imcRes.code === '0000') {
+        await query(
+          `UPDATE brand_message_templates
+              SET status='DELETED', deleted_at=now(), updated_at=now()
+            WHERE id=$1`,
+          [r.rows[0].id],
+        );
+      }
+      // ★ D140 #C (0425): IMC raw 메시지 사용자 노출 방지
+      return sendImcManagedResponse(res, imcRes, { fallback: '브랜드메시지 템플릿 삭제에 실패했습니다' });
     } catch (err) {
       return handleImcError(res, err);
     }
@@ -1321,9 +1337,13 @@ async function persistImage(
  *  - 'IMC'/'humuson' 등 라우터 명칭 제거
  *  - 메시지 못 추출 시 "이미지 업로드에 실패했습니다" + 코드 fallback
  */
-function sanitizeImageErrorForUser(rawMsg: string | undefined, code: string | undefined): string {
+function sanitizeImcMessageForUser(
+  rawMsg: string | undefined,
+  code: string | undefined,
+  fallback: string = '요청 처리에 실패했습니다',
+): string {
   const msg = (rawMsg || '').trim();
-  if (!msg) return code ? `이미지 업로드에 실패했습니다 (코드 ${code})` : '이미지 업로드에 실패했습니다';
+  if (!msg) return code ? `${fallback} (코드 ${code})` : fallback;
   // 1) 영문 ExceptionName/ErrorName(...) 패턴 → 괄호 안 첫 콤마 이전만 추출
   const m = msg.match(/^[A-Za-z][A-Za-z0-9_]*(?:Exception|Error|Failure)\s*\((.+)\)\s*$/);
   let inner = m ? m[1] : msg;
@@ -1334,7 +1354,44 @@ function sanitizeImageErrorForUser(rawMsg: string | undefined, code: string | un
   inner = inner.replace(/\bIMC\b/gi, '').replace(/humuson/gi, '').trim();
   // 3) 잔여 정리
   inner = inner.replace(/\s{2,}/g, ' ').trim();
-  return inner || (code ? `이미지 업로드에 실패했습니다 (코드 ${code})` : '이미지 업로드에 실패했습니다');
+  return inner || (code ? `${fallback} (코드 ${code})` : fallback);
+}
+
+// 이미지 업로드 전용 폴백 메시지 (기존 호출 호환)
+function sanitizeImageErrorForUser(rawMsg: string | undefined, code: string | undefined): string {
+  return sanitizeImcMessageForUser(rawMsg, code, '이미지 업로드에 실패했습니다');
+}
+
+/**
+ * ★ D140 (0425): 브랜드메시지/알림톡 관리 API 응답 통합 헬퍼.
+ *   IMC 응답을 받아 success 시 그대로 + extra, 실패 시 정제된 사용자 친화적 error 필드로 응답.
+ *   기존 `res.json({ success: r.code === '0000', imc: r })` 패턴이 14곳 라우트에 분산 →
+ *   IMC raw 메시지가 사용자에게 노출되는 문제(D139 IMC 단어 노출 사고와 동일 패턴) 해결.
+ */
+function sendImcManagedResponse(
+  res: Response,
+  r: imc.ImcResponse<any>,
+  opts: {
+    /** 실패 시 사용자에게 보여줄 폴백 (예: '템플릿 등록에 실패했습니다') */
+    fallback?: string;
+    /** 실패 시 HTTP status (default 400) */
+    statusOnFail?: number;
+    /** 성공 시 응답 객체에 추가할 extra 필드 (예: { template: row }) */
+    extra?: Record<string, any>;
+  } = {},
+) {
+  const ok = r?.code === '0000';
+  if (ok) {
+    return res.json({ success: true, ...(opts.extra || {}), imc: r });
+  }
+  const fallback = opts.fallback || '요청 처리에 실패했습니다';
+  console.warn(`[alimtalk][imc-managed 실패] code=${r?.code || 'N/A'} rawMsg=${r?.message || 'N/A'}`);
+  return res.status(opts.statusOnFail || 400).json({
+    success: false,
+    code: r?.code,
+    error: sanitizeImcMessageForUser(r?.message, r?.code, fallback),
+    imc: r,
+  });
 }
 
 function sendImageUploadResponse(
