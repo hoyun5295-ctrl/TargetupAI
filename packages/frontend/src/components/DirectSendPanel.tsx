@@ -239,6 +239,7 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
   // ============================================================
   // ★ D137 UI: 초기엔 아무것도 선택되지 않은 상태 (파일등록이 디폴트처럼 보이는 현상 제거)
   const [directInputMode, setDirectInputMode] = useState<'file' | 'direct' | 'address' | null>(null);
+  const [directDragActive, setDirectDragActive] = useState(false);
   const [directFileHeaders, setDirectFileHeaders] = useState<string[]>([]);
   const [directFilePreview, setDirectFilePreview] = useState<any[]>([]);
   const [directFileData, setDirectFileData] = useState<any[]>([]);
@@ -470,7 +471,11 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
   // ============================================================
 
   return (
-    <div className="ds-scope ds-backdrop">
+    <div
+      className="ds-scope ds-backdrop"
+      onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+      onDrop={(e) => { e.preventDefault(); e.stopPropagation(); }}
+    >
       <div className="ds-modal">
 
         {/* ============ 모달 헤더 ============ */}
@@ -1124,10 +1129,22 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                     {/* 바디 */}
                     {directRecipients.length === 0 ? (
                       <div className="ds-list-empty">
-                        <div className="ds-dropzone ds-t w-full" onClick={() => {
-                          const input = document.querySelector<HTMLInputElement>('.ds-rtab--label input[type="file"]');
-                          input?.click();
-                        }}>
+                        <div
+                          className={`ds-dropzone ds-t w-full ${directDragActive ? 'ds-dropzone--active' : ''}`}
+                          onClick={() => {
+                            const input = document.querySelector<HTMLInputElement>('.ds-rtab--label input[type="file"]');
+                            input?.click();
+                          }}
+                          onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setDirectDragActive(true); }}
+                          onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setDirectDragActive(true); }}
+                          onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setDirectDragActive(false); }}
+                          onDrop={(e) => {
+                            e.preventDefault(); e.stopPropagation();
+                            setDirectDragActive(false);
+                            const file = e.dataTransfer?.files?.[0];
+                            if (file) handleFileUpload(file);
+                          }}
+                        >
                           <svg width="76" height="76" viewBox="0 0 76 76" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
                             <rect x="20" y="14" width="40" height="50" rx="6" fill="#FFFFFF" stroke="#D6D3D1" strokeWidth="1.5" />
                             <rect x="30" y="8" width="20" height="10" rx="3" fill="#ECFDF5" stroke="#10B981" strokeWidth="1.5" />

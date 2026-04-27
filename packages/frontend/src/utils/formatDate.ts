@@ -325,7 +325,11 @@ export function replaceDirectVars(
   fallbackCallback?: string,
   useFallbackLabels?: boolean
 ): string {
-  if (!text) return text;
+  // ★ D141 B3 심화: recipient null/undefined 가드 — 컨트롤타워 자체 안전망
+  //   D109 원칙: "데이터 출처 시점에서 안전 처리하여 모든 호출부 자동 보호"
+  //   현재 호출부(DirectSendPanel, DirectPreviewModal)는 외부 가드 있지만,
+  //   향후 호출부 추가 시 가드 누락으로 인한 흰화면 사고 재발 차단.
+  if (!text || !recipient) return text;
   let result = text;
   for (const { variable, fieldKey, label } of DIRECT_VAR_MAP) {
     const val = recipient[fieldKey];
@@ -478,7 +482,12 @@ export function replaceMessageVars(
   customerData: Record<string, any>,
   options?: { removeUnmatched?: boolean; extraReplacements?: Record<string, string> }
 ): string {
+  // ★ D141 B3 심화: customerData null/undefined 가드 — 컨트롤타워 자체 안전망
+  //   D109 원칙: "데이터 출처 시점에서 안전 처리하여 모든 호출부 자동 보호"
+  //   호출부 3곳(AiCustomSendFlow 2곳 + AutoSendFormModal)에서 sampleData/sc/spamSampleCustomer가
+  //   undefined인 시점이 있으면 customerData[fieldKey] 또는 Object.entries 접근으로 흰화면 사고.
   if (!text) return text;
+  const data = customerData || {};
   let result = text;
 
   // regex 특수문자 이스케이프 (라벨에 괄호 등 포함 시 에러 방지)
@@ -503,7 +512,7 @@ export function replaceMessageVars(
   // 필드 정의 기반 치환 (field_label → field_key 매핑)
   for (const f of fields) {
     const label = f.field_label || f.display_name || f.field_key;
-    const val = customerData[f.field_key];
+    const val = data[f.field_key];
     const dt = f.data_type || (f.field_type ? f.field_type.toLowerCase() : undefined);
     if (label && val != null) {
       result = result.replace(new RegExp(`%${escapeRegex(label)}%`, 'g'), renderValue(f.field_key, val, dt));
@@ -511,7 +520,7 @@ export function replaceMessageVars(
   }
 
   // column 키로도 치환 (sampleCustomer가 column 키일 때 호환)
-  for (const [k, v] of Object.entries(customerData)) {
+  for (const [k, v] of Object.entries(data)) {
     if (v != null) {
       result = result.replace(new RegExp(`%${escapeRegex(k)}%`, 'g'), renderValue(k, v, typeMap[k]));
     }
@@ -757,6 +766,13 @@ export function resolveRecipientCallback(
   individualCallbackColumn: string,
   fallbackCallback?: string
 ): string | null {
+  // ★ D141 B3: recipient null/undefined 가드
+  //   보관함 → 메시지 적용 → 수신자 0명 상태에서 미리보기 클릭 시
+  //   firstR=undefined가 그대로 들어와 `recipient.callback` 접근으로 TypeError 발생.
+  //   React 트리 unmount → 흰 화면 → 새로고침 시 JWT 만료로 로그아웃 인식되던 문제.
+  if (!recipient) {
+    return fallbackCallback || null;
+  }
   if (!useIndividualCallback || !individualCallbackColumn) {
     return recipient.callback || fallbackCallback || null;
   }

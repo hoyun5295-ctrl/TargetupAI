@@ -107,6 +107,94 @@
 
 ---
 
+### 🟣 D140 (2026-04-25) — 브랜드메시지 IMC 매뉴얼 16개 정합성 전수 점검 + Phase C 정제 헬퍼 일반화
+
+> **상태:** 🟡 코드 수정 완료 · **배포 대기**
+>
+> **매뉴얼 자료:** `Downloads/imc_extracted/` 11_18~21번대 16개 IMC 공식 스펙 + `OneDrive/바탕 화면/bito-gateway/[휴머스온]브랜드메시지 Agent 사용 메뉴얼_20260209.pdf` (40p)
+>
+> **점검 결과 16/16 매뉴얼 정합 ✅** (큰 리팩토링 불필요. D130 결정 아키텍처 유지):
+>
+> | 그룹 | 한줄로 정석 | 상태 |
+> |------|-----------|------|
+> | 관리 API 14개 (#3~#16) | 백엔드 IMC HTTP 직접 호출 (`alimtalk-api.ts`) | ✅ 라우트+함수 |
+> | 발송 API 2개 (#1~#2) | MySQL 큐 INSERT (`insertKakaoQueue`/`insertKakaoBasicQueue` → `IMC_BM_FREE_BIZ_MSG`/`IMC_BM_BASIC_BIZ_MSG`) → QTmsg/BM Agent 위임 | ✅ Agent 영역 |
+> | 8종 chatBubbleType / 8종 BUTTON | 백엔드 `brand-message.ts` + 프론트 `BrandMessageEditor.tsx` 동기화 | ✅ 모든 제약 정합 |
+>
+> **Phase C 보강 (D139 IMC 단어 정책 일관 적용):**
+> - **신규 헬퍼 (`routes/alimtalk.ts`):** `sanitizeImcMessageForUser(rawMsg, code, fallback)` 일반화 + `sendImcManagedResponse(res, r, opts)` 통합 헬퍼
+> - **브랜드 라우트 7곳 일괄 적용:** `POST /senders/:id/brand-targeting`, `GET /senders/:id/brand-targeting-check`, `POST/PUT/DELETE /brand-templates/...` (5종)
+> - **DB 부정합 방지:** IMC 실패 시 한국 DB UPDATE 안 함 (기존: IMC 실패해도 `updated_at` 갱신되던 라우트 다수)
+> - **운영 진단 로그 raw 보존:** `console.warn`은 IMC code/message 그대로 (개발자 전용)
+>
+> **빌드 검증:** 백엔드 + 프론트 `tsc --noEmit` 0 에러
+>
+> **🎓 D140 핵심 교훈:**
+> 1. **발송 정석 = MySQL INSERT (D130 아키텍처)** — 처음 잘못 분석한 "IMC API 직접 호출"을 Harold님 지적("매뉴얼이 정석") 받고 정정
+> 2. **매뉴얼 우선 — 옵션 비교 X** — A/B/C 옵션 분류는 잘못된 접근
+> 3. **D139 IMC 단어 정책 일관 적용** — 신규/기존 라우트 모두 정제 헬퍼 사용
+> 4. **Auto mode이지만 끌로드원칙 7-1 절차 유지** — 각 Phase 직전 grep 전수 리스트업 + 변경 범위 보고
+>
+> **배포:** `tp-push "0425 D140 브랜드메시지 IMC 매뉴얼 정합성 전수 점검 + Phase C 정제 헬퍼 일반화 + 브랜드 라우트 7곳 IMC 단어 노출 차단"` → `tp-deploy-full`
+
+---
+
+### 🟣 D139 (2026-04-25) — 알림톡 PDF 7건 후속 검수 피드백 (D135 후속)
+
+> **상태:** 🟡 코드 수정 완료 (5개 파일) · **배포 대기**
+>
+> **PDF:** `OneDrive/문서/카카오톡 받은 파일/한줄로 알림톡_260424.pdf` (D135 B1~B9 배포 후 직원 재검수)
+>
+> **✅ 7건 전건 수정 (5개 파일):**
+>
+> | # | 이슈 | 파일 / 핵심 변경 |
+> |---|------|------------------|
+> | #1+#3 | SUCCESS 후 등록창 닫힘 + 재클릭 IMC 중복 + 관리화면 미반영 | `routes/alimtalk.ts` PG INSERT를 try/catch로 감싸 실패 시 `imc.deleteAlimtalkTemplate` 자동 롤백. IMC-DB 정합성 100% |
+> | #4 | "등록 + 검수요청" → "등록만"으로 분리 | `routes/alimtalk.ts` 자동 검수요청 블록 제거 / `AlimtalkTemplateFormV2.tsx` 등록 버튼 텍스트 변경 + `inspectionError` alert 제거 |
+> | #4-1 | 상태별 액션 버튼 4종 분기 (DRAFT/REQ·REV/REJ/APR) | `AlimtalkManagementSection.tsx` 액션 셀 재구성 + `viewing` state 신설 + readOnly DetailModal 인스턴스 / `AlimtalkTemplateFormV2.tsx` `readOnly` prop 추가 |
+> | #5 | [강조표기형] 이미지/헤더 체크 해제 안 됨 | `ItemListEditor.tsx` `imageToggleManual`/`headerToggleManual` sentinel 양방향 동기화 |
+> | #6 | 하이라이트 썸네일 체크 미반영 + 업로드 200 | `ItemListEditor.tsx` `checked={imageUrl !== undefined}` 변경 (빈 문자열도 ON) + `routes/alimtalk.ts` `sendImageUploadResponse` 헬퍼 |
+> | #7+#6-1 | 이미지 업로드 "오류코드 200" 사용자 메시지 정제 | `routes/alimtalk.ts` `sendImageUploadResponse` 헬퍼 추출 + 9개 업로드 라우트 일괄 적용. IMC 거부 시 영문 ExceptionName/IMC 코드 제거 + 한글 메시지만 노출 |
+> | #2 | 대표링크 IMC 전달 검증 (코드는 정상, 진단 강화) | `AlimtalkTemplateFormV2.tsx` UI 가드 3중 (빨강/녹색/amber 안내) + `alimtalk-api.ts` `templateRepresentLink` 포함여부 + IMC 응답 echo back 검증 로깅 |
+>
+> **추가 보강:**
+> - **multer originalname latin1→utf8 디코딩** (`decodeOriginalName` 헬퍼) — 한글 파일명 깨짐 (`ë틀ɑì틀´.jpg`) 근본 해결
+> - **사용자 노출 IMC 단어 5곳 → '카카오'로 통일** (D135 정책 재발 방지)
+> - **catch 블록 에러 메시지 상세화** (F12 차단 환경에서 fetch throw 원인 노출)
+>
+> **🎓 D139 핵심 교훈:**
+> 1. **끌로드원칙 7-1 절차 위반 후 Harold님 정당한 지적** ("니 멋대로 코드 보고 바로 수정하라고했나") — 1단계 컨펌이 큰 우산이어도 각 수정 직전 명시적 grep 리스트업+컨펌 재거쳐야 함
+> 2. **사용자 노출 텍스트에 'IMC'/'humuson' 단어 절대 금지** — D135 작업 재발. `feedback_no_imc_keyword_in_user_text.md` 메모리 신설로 영구 기록
+> 3. **IMC-DB 롤백 패턴** — 정합성 문제는 양방향 처리 (IMC 성공+DB 실패 시 IMC 롤백)
+> 4. **9곳 동일 응답 패턴 = 즉시 헬퍼 추출** — 원칙 3 (CT 추출)
+> 5. **F12 차단 환경 진단** — 토스트 에러 메시지 상세화가 유일한 통로
+
+---
+
+### 🟣 D138 (2026-04-24~25 새벽) — 직접발송 파일등록+개별회신번호 "발송 실패" 근본 수정
+
+> **상태:** 🟡 코드 수정 완료 (5건) · **배포 대기**
+>
+> **증상:** 직접발송 창 20,000건 CSV + 개별회신번호(매장전화번호 수신자별) 선택 → "발송 실패" 토스트만 뜨고 미등록 회신번호 확인 모달 안 뜸. PM2에 `direct-send` 요청 0건.
+>
+> **✅ 최종 근본 수정 5건:**
+>
+> | # | 파일 | 핵심 변경 |
+> |---|------|----------|
+> | 1 | `DirectSendPanel.tsx:427` | `handleMappingApply` `entry`에 `...row` 보존 (미리보기용 원본 헤더 키) |
+> | 2 | `formatDate.ts:749` | `resolveRecipientCallback`에 optional `fallbackCallback` 파라미터 추가 (하위호환) |
+> | 3 | `Dashboard.tsx:448` | **`executeDirectSend` recipients 페이로드 경량화** — `...r` 제거, 표준 필드만 + `resolveRecipientCallback`으로 callback resolve |
+> | 4 | `Dashboard.tsx:534` | **catch 에러 상세화** — `err.message`를 토스트에 120자까지 노출. F12 차단 환경 진단 |
+> | 5 | `DirectPreviewModal.tsx:58` | 인라인 `resolveCallback` 6줄 제거 → CT 호출 (원칙 3 "2곳 이상 = CT") |
+>
+> **🎓 D138 핵심 교훈:**
+> 1. **recipients payload `...r` 스프레드 금지** — 엑셀 원본 row(한글 키/Date/커스텀 필드) 그대로 실으면 nginx body size/JSON 파싱 실패로 fetch가 throw → 백엔드 도달조차 안 됨
+> 2. **F12 차단 환경의 catch 블록은 반드시 `err.message` 토스트 노출** — "발송 실패" 고정 문자열만으로는 원인 파악 불가
+> 3. **"껍데기만 바꿨지" Harold님 지적이 정확** — 1차 미리보기 수정이 오히려 catch 진입 유발. 흐름 전체 검증 필수
+> 4. **PM2 로그 빈 결과 = 요청 미도달** — 프론트에서 막힌 것
+
+---
+
 ### 🟣 D137 (2026-04-24) — 한줄로_20260423.pdf 10건 전건 근본수정 + Sync Agent v1.5.2 빌드 완료
 
 > **상태:** 🟡 코드 수정 + Agent 빌드 완료 · **배포 대기** · **다음 세션 실서버 재검증 필수**

@@ -459,7 +459,9 @@ export default function Dashboard() {
         scheduledAt: reserveEnabled && reserveDateTime ? new Date(reserveDateTime).toISOString() : null,
         splitEnabled: isAlimtalk ? false : splitEnabled,
         splitCount: isAlimtalk ? null : (splitEnabled ? splitCount : null),
-        mmsImagePaths: isAlimtalk ? [] : toMmsImagePaths(mmsUploadedImages),
+        // ★ D141 B4 심화: 채널이 MMS일 때만 이미지 paths 전달 (5경로 일관성)
+        //   채널 변경 로직(setMmsUploadedImages([]))이 깨질 경우에도 LMS+MMS paths 불일치 차단
+        mmsImagePaths: (isAlimtalk || directMsgType !== 'MMS') ? [] : toMmsImagePaths(mmsUploadedImages),
         ...(confirmCallbackExclusion ? { confirmCallbackExclusion: true } : {}),
         // ★ D102: 중복제거/수신거부제거 사용자 선택 전달
         dedupEnabled: sendConfirm.dedupEnabled ?? true,
@@ -619,7 +621,8 @@ export default function Dashboard() {
           scheduledAt: reserveEnabled && reserveDateTime ? new Date(reserveDateTime).toISOString() : null,
           splitEnabled: isTargetAlimtalk ? false : splitEnabled,
           splitCount: isTargetAlimtalk ? null : (splitEnabled ? splitCount : null),
-          mmsImagePaths: isTargetAlimtalk ? [] : toMmsImagePaths(mmsUploadedImages),
+          // ★ D141 B4 심화: 채널이 MMS일 때만 이미지 paths 전달 (5경로 일관성)
+          mmsImagePaths: (isTargetAlimtalk || targetMsgType !== 'MMS') ? [] : toMmsImagePaths(mmsUploadedImages),
           ...(confirmCallbackExclusion ? { confirmCallbackExclusion: true } : {}),
           // ★ D102: 중복제거/수신거부제거 사용자 선택 전달
           dedupEnabled: sendConfirm.dedupEnabled ?? true,
@@ -1664,7 +1667,8 @@ const campaignData = {
       individualCallbackColumn: _useIndividualCallback ? (modalData?.individualCallbackColumn ?? individualCallbackColumn) : undefined,
       // ★ B-D75-01: 모달에서 수정된 제목 우선 사용
       subject: modalData?.subject ?? selectedMsg.subject ?? '',
-      mmsImagePaths: toMmsImagePaths(mmsUploadedImages),
+      // ★ D141 B4 심화: 채널이 MMS일 때만 이미지 paths 전달 (5경로 일관성 — 한줄로AI 캠페인 생성)
+      mmsImagePaths: selectedChannel === 'MMS' ? toMmsImagePaths(mmsUploadedImages) : [],
     };
 
     const response = await campaignsApi.create(campaignData);
@@ -1908,7 +1912,8 @@ const campaignData = {
           messageType: selectedChannel,
           isAd: isAd,
           subject: selectedMsg.subject || '',
-          mmsImagePaths: toMmsImagePaths(mmsUploadedImages),
+          // ★ D141 B4 심화: 채널이 MMS일 때만 이미지 paths 전달 (5경로 일관성 — 한줄로AI 담당자 테스트)
+          mmsImagePaths: selectedChannel === 'MMS' ? toMmsImagePaths(mmsUploadedImages) : [],
           // ★ D85: column 키 raw 데이터 전달 — replaceVariables가 customer[column]으로 접근
           sampleCustomer: sampleCustomerRaw && Object.keys(sampleCustomerRaw).length > 0 ? sampleCustomerRaw : undefined,
         }),
@@ -1958,7 +1963,8 @@ const campaignData = {
           messageType: targetMsgType,
           isAd: adTextEnabled,
           subject: targetSubject || '',
-          mmsImagePaths: toMmsImagePaths(mmsUploadedImages),
+          // ★ D141 B4 심화: 채널이 MMS일 때만 이미지 paths 전달 (5경로 일관성 — 직접타겟 담당자 테스트)
+          mmsImagePaths: targetMsgType === 'MMS' ? toMmsImagePaths(mmsUploadedImages) : [],
           // ★ D85: column 키 raw 데이터 전달
           sampleCustomer: sampleCustomerRaw && Object.keys(sampleCustomerRaw).length > 0 ? sampleCustomerRaw : undefined,
         }),

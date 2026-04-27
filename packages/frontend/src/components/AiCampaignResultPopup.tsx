@@ -298,30 +298,32 @@ export default function AiCampaignResultPopup({
               </div>
             </div>
 
-            {/* MMS 이미지 첨부 */}
-            <div>
-              <div className="text-base font-semibold text-gray-700 mb-3">🖼️ 이미지 첨부 (MMS)</div>
-              <div
-                onClick={() => setShowMmsUploadModal(true)}
-                className="border-2 border-dashed border-gray-200 rounded-xl p-4 bg-gray-50/50 cursor-pointer hover:border-purple-400 hover:bg-purple-50/50 transition-all"
-              >
-                {mmsUploadedImages.length > 0 ? (
-                  <div className="flex items-center gap-3">
-                    {/* ★ B3: 공용 컴포넌트 MmsImagePreview 사용 */}
-                    <MmsImagePreview images={mmsUploadedImages} size="sm" compact />
-                    <div className="text-sm text-purple-600 font-medium">✏️ {mmsUploadedImages.length}장 첨부됨 (클릭하여 수정)</div>
-                  </div>
-                ) : (
-                  <div className="flex flex-col items-center gap-2 py-2">
-                    <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center">
-                      <span className="text-xl">📷</span>
+            {/* MMS 이미지 첨부 — ★ B4 (D141): LMS/SMS일 때는 영역 자체 미렌더 (맞춤한줄과 동일 패턴)
+                LMS 선택 → 이미지 첨부 → 자동 MMS 전환 → 첨부 삭제해도 MMS 잠금 → 발송 차단 시나리오 차단 */}
+            {selectedChannel === 'MMS' && (
+              <div>
+                <div className="text-base font-semibold text-gray-700 mb-3">🖼️ 이미지 첨부 (MMS)</div>
+                <div
+                  onClick={() => setShowMmsUploadModal(true)}
+                  className="border-2 border-dashed border-gray-200 rounded-xl p-4 bg-gray-50/50 cursor-pointer hover:border-purple-400 hover:bg-purple-50/50 transition-all"
+                >
+                  {mmsUploadedImages.length > 0 ? (
+                    <div className="flex items-center gap-3">
+                      <MmsImagePreview images={mmsUploadedImages} size="sm" compact />
+                      <div className="text-sm text-purple-600 font-medium">✏️ {mmsUploadedImages.length}장 첨부됨 (클릭하여 수정)</div>
                     </div>
-                    <div className="text-sm text-gray-500">클릭하여 이미지를 첨부하면 MMS로 발송됩니다</div>
-                    <div className="text-xs text-gray-400">JPG만 · 300KB 이하 · 최대 3장</div>
-                  </div>
-                )}
+                  ) : (
+                    <div className="flex flex-col items-center gap-2 py-2">
+                      <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center">
+                        <span className="text-xl">📷</span>
+                      </div>
+                      <div className="text-sm text-gray-500">클릭하여 이미지를 첨부합니다</div>
+                      <div className="text-xs text-gray-400">JPG만 · 300KB 이하 · 최대 3장</div>
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
+            )}
 
 {/* 하단 버튼 */}
 {testSentResult && (

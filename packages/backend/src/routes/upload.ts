@@ -35,6 +35,37 @@ const storage = multer.diskStorage({
   }
 });
 
+// ================================================================
+// ★ D141 B1: 동일 헤더 자동 디덱싱 (헬퍼)
+//   고객사 엑셀에 같은 이름의 컬럼이 2개 있으면 (예: "전화번호" 2개)
+//   객체 키 충돌로 한쪽 데이터가 사라지고 매핑 시 모두 동일 값으로 적용되는 사고 방지.
+//   해법: 두 번째 이후 동일 헤더에 " (2)", " (3)" 접미사를 자동 부여.
+//   빈 헤더는 "컬럼N"으로 통일.
+//
+//   적용 3곳: POST /parse / POST /validate-mapping / processUploadInBackground.
+//   세 곳이 동일 결과를 내야 클라이언트 mapping(unique header key)과 백엔드 처리가 일치한다.
+// ================================================================
+function dedupeHeaders(rawHeaders: any[]): string[] {
+  // ★ Set 기반 단일 패스 — 결과가 항상 unique 보장 (엣지 케이스 포함)
+  //   예) 입력 ["전화번호", "전화번호", "전화번호 (2)"] → 출력 ["전화번호", "전화번호 (2)", "전화번호 (3)"]
+  //   카운터 기반 단순 디덱싱은 위 입력에서 ["전화번호", "전화번호 (2)", "전화번호 (2)"] 충돌 가능.
+  const seen = new Set<string>();
+  const result: string[] = [];
+  rawHeaders.forEach((raw, idx) => {
+    let h = String(raw ?? '').trim();
+    if (!h) h = `컬럼${idx + 1}`;
+    let candidate = h;
+    let n = 2;
+    while (seen.has(candidate)) {
+      candidate = `${h} (${n})`;
+      n++;
+    }
+    seen.add(candidate);
+    result.push(candidate);
+  });
+  return result;
+}
+
 const upload = multer({
   storage,
   limits: {
@@ -110,11 +141,12 @@ router.post('/parse', authenticate, upload.single('file'), async (req: Request, 
       return str && isNaN(Number(str.replace(/-/g, '')));
     });
 
+    // ★ D141 B1: 동일 헤더 자동 디덱싱 (dedupeHeaders 헬퍼)
     let headers: string[];
     let dataRows: any[][];
-    
+
     if (isFirstRowHeader) {
-      headers = firstRow.map((h: any) => String(h || ''));
+      headers = dedupeHeaders(firstRow);
       dataRows = data.slice(1);
     } else {
       headers = firstRow.map((_: any, idx: number) => `컬럼${idx + 1}`);
@@ -359,7 +391,10 @@ router.post('/validate-mapping', authenticate, async (req: Request, res: Respons
     if (data.length === 0) {
       return res.status(400).json({ error: '파일이 비어있습니다.' });
     }
-    const headers = (data[0] as any[]).map((h: any) => String(h || ''));
+    // ★ D141 B1: dedupeHeaders 헬퍼 — /parse와 동일 결과 보장
+    //   클라이언트가 보낸 mapping의 unique header 키와 백엔드 sampleData의 키가 일치해야
+    //   매핑 검증 결과(타입 감지 등)가 정확.
+    const headers = dedupeHeaders(data[0] as any[]);
     const rows = data.slice(1, Math.min(21, data.length));
 
     const sampleData: Record<string, any[]> = {};
@@ -523,8 +558,10 @@ async function processUploadInBackground(
     const sheetName = workbook.SheetNames[0];
     const worksheet = workbook.Sheets[sheetName];
     const data = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][];
-    
-    const headers = data[0] as string[];
+
+    // ★ D141 B1: dedupeHeaders 헬퍼 — 클라이언트 mapping의 unique header 키와 정확히 일치해야 매핑 적용
+    //   누락 시: 동일 헤더 컬럼이 있는 엑셀 업로드 → 백그라운드 처리에서 raw header 사용 → mapping[rawHeader] 미스 → 매핑 미적용 → 데이터 손실 사고
+    const headers = dedupeHeaders(data[0] as any[]);
     const rows = data.slice(1);
     const totalRows = rows.length;
 
