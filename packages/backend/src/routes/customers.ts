@@ -3,7 +3,7 @@ import * as XLSX from 'xlsx';
 import { query, mysqlQuery } from '../config/database';
 import { authenticate } from '../middlewares/auth';
 import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getGenderVariants } from '../utils/normalize';
-import { FIELD_MAP, getFieldByKey, getColumnFields, CATEGORY_LABELS, FIELD_DISPLAY_MAP, reverseDisplayValue } from '../utils/standard-field-map';
+import { FIELD_MAP, getFieldByKey, getColumnFields, CATEGORY_LABELS, FIELD_DISPLAY_MAP, reverseDisplayValue, renderFieldValue } from '../utils/standard-field-map';
 import { DEFAULT_COSTS, redis, CACHE_TTL } from '../config/defaults';
 import { isValidCustomFieldKey } from '../utils/safe-field-name';
 import { getStoreScope } from '../utils/store-scope';
@@ -318,10 +318,14 @@ router.get('/download', async (req: Request, res: Response) => {
       listParams,
     );
 
-    // ─── 5. 동적 Row 변환 (enum 역변환 + boolean Y/N + 커스텀 평면화) ───
-    //   · 화면 sample과 동일한 reverseDisplayValue 적용 (FIELD_DISPLAY_MAP 기반)
-    //   · sms_opt_in: boolean → 'Y'/'N' (엑셀 관행)
-    //   · 커스텀 필드: 원본 보존 (feedback_custom_field_raw_preserve.md)
+    // ─── 5. 동적 Row 변환 (renderFieldValue 단일 진입점) ───
+    //   ★ D142 (2026-04-28) Harold님 원칙: "고객사 보는 화면 그대로 다운로드"
+    //   · 22개 고정 필드: renderFieldValue → FIELD_DISPLAY_FORMAT_MAP 룰 적용
+    //     (phone/store_phone → 하이픈 / recent_purchase_amount/total_purchase_amount/points → 콤마+정수
+    //      / gender → 한글 / birth_date/recent_purchase_date → YYYY-MM-DD)
+    //   · 커스텀 필드: 원본 보존 (Harold님 원칙 — feedback_custom_field_raw_preserve.md)
+    //   · sms_opt_in(boolean): 엑셀 관행 'Y'/'N' (별도 분기 유지)
+    //   화면 sample(reverseDisplayValue 적용) ≡ 엑셀 다운로드 100% 일치 보장.
     const rows = result.rows.map((c: any) => {
       const row: Record<string, any> = {};
       for (const f of fields) {
@@ -330,25 +334,21 @@ router.get('/download', async (req: Request, res: Response) => {
 
         if (f.is_custom) {
           val = c.custom_fields?.[f.field_key];
-          row[label] = val == null ? '' : val;
+          // 커스텀 필드: 원본 100% 보존 (자동 추론 X)
+          row[label] = val == null ? '' : String(val);
           continue;
         }
 
         val = c[f.field_key];
 
-        // enum 역변환 (gender 'F' → '여성')
-        if (FIELD_DISPLAY_MAP[f.field_key]) {
-          row[label] = val == null ? '' : reverseDisplayValue(f.field_key, val);
-          continue;
-        }
-
-        // boolean → Y/N (엑셀 관행)
+        // boolean(sms_opt_in 등) → Y/N (엑셀 관행, 화면과는 별개)
         if (f.data_type === 'boolean') {
           row[label] = val === true || val === 'true' ? 'Y' : 'N';
           continue;
         }
 
-        row[label] = val == null ? '' : val;
+        // 22개 고정 필드: 컨트롤타워 단일 진입점 (화면 displayValue와 동일 룰)
+        row[label] = renderFieldValue(val, f.field_key);
       }
       return row;
     });
@@ -1147,11 +1147,18 @@ router.post('/extract', async (req: Request, res: Response) => {
 
     // ★ B-D75-03: custom_fields JSONB를 flat하게 풀어서 반환 (프론트에서 r[field_key]로 직접 접근 가능)
     // ★ B+0407-1: enum 필드(gender F→여성) 미리 변환 — 모든 frontend 표시 경로 자동 정상화
+    // ★ D142 (2026-04-28): custom_fields 평면화 시 모든 값을 String()로 강제 (Harold님 원칙).
+    //   custom_1~15는 고객사 업로드 원본을 100% 보존해야 하는데, JSONB에 number/Date 객체 등으로
+    //   저장된 케이스가 있으면 프론트에서 typeof로 자동 추론되어 콤마 사고 발생 가능.
+    //   백엔드 출구에서 String() 박제 → 프론트 어디서든 number 추론 불가.
     const flatRecipients = result.rows.map((r: any) => {
       let flat: any;
       if (r.custom_fields && typeof r.custom_fields === 'object') {
         const { custom_fields, ...rest } = r;
-        flat = { ...rest, ...custom_fields };
+        const customFlat = Object.fromEntries(
+          Object.entries(custom_fields).map(([k, v]) => [k, v == null ? '' : String(v)])
+        );
+        flat = { ...rest, ...customFlat };
       } else {
         flat = { ...r };
       }

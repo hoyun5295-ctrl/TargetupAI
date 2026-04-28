@@ -356,7 +356,12 @@ router.post('/recommend-target', async (req: Request, res: Response) => {
           }
         }
         // 커스텀 필드 → 실제 라벨명 매핑
-        // ★ D101: field_type 기반 숫자/날짜 포맷팅 (기존 String(val) 하드코딩 → 타입 인식)
+        // ★ D142 (2026-04-28): Harold님 원칙 — "커스텀 필드는 있는 그대로".
+        //   D101에서 field_type 기반 NUMBER/DATE 자동 추론을 넣었으나, 이게 PDF 0428 #5
+        //   "한줄로AI 미리보기/스팸필터/메시지추천 모두 콤마" 사고의 핵심 원인.
+        //   field_type='NUMBER'여도 사용자가 텍스트(생년월일 14자리 varchar 등)로 올린 경우 콤마 사고.
+        //   고정 필드는 단일 진입점(messageUtils.replaceVariables → renderFieldValue)에서 처리되므로
+        //   여기서는 String() 원본만 박제. 자동 추론 발동 X.
         if (row.custom_fields && typeof row.custom_fields === 'object') {
           const defResult = await query(
             'SELECT field_key, field_label, field_type FROM customer_field_definitions WHERE company_id = $1',
@@ -365,14 +370,7 @@ router.post('/recommend-target', async (req: Request, res: Response) => {
           for (const def of defResult.rows) {
             const val = row.custom_fields[def.field_key];
             if (val !== null && val !== undefined && val !== '') {
-              const ft = (def.field_type || '').toUpperCase();
-              if ((ft === 'NUMBER' || ft === 'INTEGER' || ft === 'NUMERIC') && !isNaN(Number(val))) {
-                sampleCustomer[def.field_label] = Number(val).toLocaleString();
-              } else if ((ft === 'DATE' || ft === 'DATETIME') && val) {
-                sampleCustomer[def.field_label] = formatDateValue(val);
-              } else {
-                sampleCustomer[def.field_label] = String(val);
-              }
+              sampleCustomer[def.field_label] = String(val);
             }
           }
         }
@@ -676,9 +674,10 @@ router.post('/parse-briefing', authenticate, async (req: Request, res: Response)
         const row = sampleResult.rows[0];
         sampleCustomer = { ...row };
         // custom_fields JSONB flat 처리 — 프론트에서 field_key로 직접 접근 가능하게
+        // ★ D142 (2026-04-28): custom_* 값은 String() 강제 — 프론트 typeof 자동 추론 차단 (Harold님 원칙)
         if (row.custom_fields && typeof row.custom_fields === 'object') {
           for (const [k, v] of Object.entries(row.custom_fields)) {
-            if (sampleCustomer[k] === undefined) sampleCustomer[k] = v;
+            if (sampleCustomer[k] === undefined) sampleCustomer[k] = v == null ? '' : String(v);
           }
         }
       }

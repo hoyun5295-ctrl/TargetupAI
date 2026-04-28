@@ -124,24 +124,32 @@ function isWithinSendHours(): boolean {
 }
 
 // ============================================================
-// ★ 1단계: D-2 AI 문안 생성 + 스팸테스트
-// ai_generate_enabled=true AND next_run_at 24~48시간 이내 AND 아직 미생성
+// ★ 1단계: D-1 AI 문안 생성 + 스팸테스트
+// ai_generate_enabled=true AND next_run_at 12~36시간 이내 AND 아직 미생성
+//
+// ★ D142 (2026-04-28) Harold님 정책:
+//   "하루전날 문안생성하고 테스트하고 그 문안으로 다음날 발송시점 2시간전에 테스트하고
+//    스팸에 안걸리면 담당자에게 테스트보내는걸로 자동으로 예약이 걸리게 하면 되잖아?"
+//   → 4단계(D-2 생성/D-1 사전알림/D-day 2h 스팸/D-day 발송) → 3단계로 단순화.
+//   → 1단계(생성+스팸)를 D-1 시점으로 당김 (PDF 0428 #7 — D-2 미만 풀백 무한리턴 차단).
+//   → 사전알림(`runPreNotification`)은 메인 루프에서 호출 제거 (단계 자체 폐지).
 // ============================================================
 
 async function runMessageGeneration(): Promise<void> {
   const logPrefix = '[auto-worker][gen]';
 
   try {
-    // D-2 범위: next_run_at이 24~48시간 이내 + AI 모드 + 아직 생성 안 한 건
-    // ★ D114 P6: generating_at IS NULL 조건 추가 — 중복 생성 방지
-    //   이전: 워커 1분 간격인데 AI 생성+스팸테스트 1분 이상 소요 → 같은 캠페인 2번 픽업 → 알림 2건
+    // ★ D142 (2026-04-28): D-1 범위로 당김 (12~36시간 이내, 기존 24~48h).
+    //   → "하루 전날 문안생성"(Harold님 정책) — 발송시각 기준 12h~36h 윈도우면 충분.
+    //   → 그동안 등록 시 발송시각이 "지금 + 24h 미만"이면 풀백 무한리턴되던 사고 차단.
+    // ★ D114 P6: generating_at 잠금 — 워커 폴링 중복 픽업 방지 (AI 생성+스팸테스트 1분+ 소요)
     const result = await query(
       `SELECT * FROM auto_campaigns
        WHERE status = 'active'
          AND ai_generate_enabled = true
-         AND next_run_at > NOW() + INTERVAL '24 hours'
-         AND next_run_at <= NOW() + INTERVAL '48 hours'
-         AND (generated_at IS NULL OR generated_at < NOW() - INTERVAL '48 hours')
+         AND next_run_at > NOW() + INTERVAL '12 hours'
+         AND next_run_at <= NOW() + INTERVAL '36 hours'
+         AND (generated_at IS NULL OR generated_at < NOW() - INTERVAL '36 hours')
          AND (generating_at IS NULL OR generating_at < NOW() - INTERVAL '30 minutes')
        ORDER BY next_run_at ASC`
     );
@@ -976,8 +984,9 @@ async function advanceNextRun(ac: any, sentCount?: number): Promise<void> {
 }
 
 // ============================================================
-// ★ 3단계: D-day 2시간 전 자동 스팸테스트 + 담당자 알림 (D105 신설)
+// ★ 2단계: D-day 2시간 전 자동 스팸 재테스트 + 담당자 테스트발송 (D105 신설, D142 단계 번호 변경)
 // next_run_at 0~2시간 이내 AND 아직 스팸테스트 안 한 건
+// 스팸 통과 시 담당자 테스트발송 자동 예약 (Harold님 정책 — D142 2026-04-28).
 // ============================================================
 
 async function runPreSendSpamTest(): Promise<void> {
@@ -1132,23 +1141,27 @@ async function executePreSendSpamTest(ac: any): Promise<void> {
 }
 
 // ============================================================
-// 메인 실행 함수 (4단계 순차 실행)
+// 메인 실행 함수 (3단계 순차 실행)
+//
+// ★ D142 (2026-04-28) Harold님 정책 — 4단계 → 3단계 단순화.
+//   1단계: D-1 AI 문안생성 + 스팸테스트 (12~36h 이전)
+//   2단계: D-day 2h전 스팸 재테스트 + 통과 시 담당자 테스트발송 (0~2h 이전)
+//   3단계: D-day 실제 발송 (next_run_at <= NOW())
+//
+//   사전알림(runPreNotification) 단계는 폐지 — 함수 자체는 dead code로 보존(롤백 가능).
 // ============================================================
 
 export async function runAutoCampaignWorker(): Promise<void> {
   const logPrefix = '[auto-worker]';
 
   try {
-    // ★ 1단계: D-2 AI 문안 생성 (24~48시간 전)
+    // ★ 1단계: D-1 AI 문안 생성 + 스팸테스트 (12~36시간 이전)
     await runMessageGeneration();
 
-    // ★ 2단계: D-1 사전 알림 (0~24시간 전)
-    await runPreNotification();
-
-    // ★ 3단계: D-day 2시간 전 스팸테스트 (D105 신설)
+    // ★ 2단계: D-day 2시간 전 스팸 재테스트 + 담당자 테스트발송 (0~2h 이전)
     await runPreSendSpamTest();
 
-    // ★ 4단계: D-day 발송 (next_run_at <= NOW())
+    // ★ 3단계: D-day 발송 (next_run_at <= NOW())
     const result = await query(
       `SELECT * FROM auto_campaigns
        WHERE status = 'active' AND next_run_at <= NOW()

@@ -12,7 +12,7 @@
 
 import { VarCatalogEntry, extractVarCatalog } from '../services/ai';
 import { formatNumericLike } from './format-number';
-import { reverseDisplayValue, FIELD_DISPLAY_MAP } from './standard-field-map';
+import { reverseDisplayValue, FIELD_DISPLAY_MAP, renderFieldValue } from './standard-field-map';
 import { query } from '../config/database';
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -216,6 +216,16 @@ export function replaceVariables(
   }
 
   // 1단계: fieldMappings 기반 DB 필드 치환
+  // ★ D142 (2026-04-28): renderFieldValue 단일 진입점으로 단순화 — Harold님 원칙 그대로 구현.
+  //   "고정 22개 = FIELD_DISPLAY_FORMAT_MAP 룰대로 / 커스텀(custom_1~15) = 있는 그대로"
+  //
+  //   이전: mapping.type === 'number' 자동 추론 → custom_* varchar에 콤마 찍히는 사고 반복
+  //         (D104, D136 P1, D141 PDF B5, 0428 PDF #5 — 1년 넘게 N회 재발).
+  //   신:   mapping.column이 fieldKey 역할 → FIELD_DISPLAY_FORMAT_MAP 매칭 = 룰대로,
+  //         매칭 실패(= custom_*, 미지정 키) = String(value) 원본 자동 보존.
+  //
+  //   skipNumberFormatting 옵션: 호환성 위해 시그니처 유지하되 새 구조에서는 의미 없음
+  //   (커스텀 필드는 자동 원본 보존이 동일한 효과 — 옛 D123 의도 그대로 달성).
   for (const [varName, mapping] of Object.entries(fieldMappings)) {
     const pattern = `%${varName}%`;
     if (!result.includes(pattern)) continue;
@@ -228,39 +238,10 @@ export function replaceVariables(
       rawValue = customer.custom_fields?.[mapping.column] ?? null;
     }
 
-    // 타입별 포맷팅
-    let displayValue = '';
-    if (rawValue === null || rawValue === undefined) {
-      displayValue = '';
-    } else if (FIELD_DISPLAY_MAP[mapping.column]) {
-      // ★ B+0407-1: enum 필드(gender 등) → 한글 역변환 (FIELD_DISPLAY_MAP 컨트롤타워)
-      displayValue = reverseDisplayValue(mapping.column, rawValue);
-    } else if (mapping.type === 'number') {
-      // ★ D123: 직접발송은 원본 그대로, AI발송만 숫자 포맷팅
-      if (options?.skipNumberFormatting) {
-        displayValue = String(rawValue);
-      } else {
-        const fmt = formatNumericLike(rawValue);
-        displayValue = fmt !== null ? fmt : String(rawValue);
-      }
-    } else if (mapping.type === 'date' && rawValue) {
-      // ★ D100: 날짜 KST 고정 — 순수 YYYY-MM-DD는 new Date() 없이 직접 파싱 (하루 밀림 방지)
-      displayValue = formatDateValue(rawValue);
-    } else {
-      const strVal = String(rawValue);
-      // ★ D100: 날짜 패턴 자동 감지 — 순수 YYYY-MM-DD는 직접 파싱, ISO는 KST 변환
-      if (/^\d{4}-\d{2}-\d{2}($|T|\s)/.test(strVal)) {
-        displayValue = formatDateValue(strVal);
-      } else {
-        // ★ D123: 직접발송은 원본 그대로, AI발송만 숫자 자동 포맷팅
-        if (options?.skipNumberFormatting) {
-          displayValue = strVal;
-        } else {
-          const fmt = formatNumericLike(strVal);
-          displayValue = fmt !== null ? fmt : strVal;
-        }
-      }
-    }
+    // ★ D142: 단일 진입점 — mapping.column이 fieldKey.
+    //   22개 고정(name/phone/gender/age/birth_date/email/address/region/...) → FIELD_DISPLAY_FORMAT_MAP
+    //   custom_1~15 + 미지정 키 → String(value) 원본 (자동 보존)
+    const displayValue = renderFieldValue(rawValue, mapping.column);
 
     // 전역 치환 (동일 변수가 여러 번 나올 수 있음)
     result = result.split(pattern).join(displayValue);

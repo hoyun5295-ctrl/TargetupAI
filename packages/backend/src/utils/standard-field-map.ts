@@ -368,3 +368,168 @@ export function reverseDisplayValue(fieldKey: string, dbValue: any): string {
   const key = String(dbValue).trim().toLowerCase();
   return map[key] || String(dbValue);
 }
+
+// ============================================================
+// ★ D142 (2026-04-28): displayFormat 컨트롤타워 — Harold님 원칙 그대로 구현
+//
+// 원칙: "고정 22개 = 그 필드 룰대로 / 커스텀 = 있는 그대로"
+//
+// 사용처:
+//   - messageUtils.ts replaceVariables (변수 치환 시 표시값 결정)
+//   - 추후 백엔드 어디서든 "DB값 → 표시값" 변환은 renderFieldValue() 호출
+//   - frontend/utils/formatDate.ts 동일 로직 미러 (FRONT_DISPLAY_FORMAT_MAP)
+//
+// ⚠️ 자동 type 추론 (data_type === 'number' 보고 콤마 등) 절대 금지.
+//    fieldKey 누락되면 → FIELD_DISPLAY_FORMAT_MAP 매칭 실패 → String(value) 원본 반환.
+//    이게 안전한 기본값. custom_1~15는 의도적으로 매핑 등록 안 하므로 자동으로 원본 보존.
+// ============================================================
+
+/** 전화번호 표시 — 휴대폰/유선/대표번호 모두 하이픈 포함 형태로 (frontend formatPhoneNumber와 미러) */
+function fmtPhoneDisplay(value: any): string {
+  if (value === null || value === undefined || value === '') return '';
+  const cleaned = String(value).replace(/\D/g, '');
+  if (!cleaned) return String(value);
+  // 휴대폰 11자리: 010-XXXX-XXXX
+  if (cleaned.length === 11 && cleaned.startsWith('01')) return `${cleaned.slice(0, 3)}-${cleaned.slice(3, 7)}-${cleaned.slice(7)}`;
+  // 휴대폰 10자리 (구형): 01X-XXX-XXXX
+  if (cleaned.length === 10 && cleaned.startsWith('01')) return `${cleaned.slice(0, 3)}-${cleaned.slice(3, 6)}-${cleaned.slice(6)}`;
+  // 서울 02 (9자리): 02-XXX-XXXX
+  if (cleaned.length === 9 && cleaned.startsWith('02')) return `${cleaned.slice(0, 2)}-${cleaned.slice(2, 5)}-${cleaned.slice(5)}`;
+  // 서울 02 (10자리): 02-XXXX-XXXX
+  if (cleaned.length === 10 && cleaned.startsWith('02')) return `${cleaned.slice(0, 2)}-${cleaned.slice(2, 6)}-${cleaned.slice(6)}`;
+  // 대표번호 8자리 (1588/1599/1644/1666/1670/1800/1833/1855/1877/1899): 1XXX-XXXX
+  if (cleaned.length === 8 && cleaned.startsWith('1')) return `${cleaned.slice(0, 4)}-${cleaned.slice(4)}`;
+  // 050X 인터넷전화 12자리: 050X-XXXX-XXXX
+  if (cleaned.length === 12 && cleaned.startsWith('050')) return `${cleaned.slice(0, 4)}-${cleaned.slice(4, 8)}-${cleaned.slice(8)}`;
+  // 기타 지역번호 10자리: 0XX-XXX-XXXX
+  if (cleaned.length === 10 && cleaned.startsWith('0')) return `${cleaned.slice(0, 3)}-${cleaned.slice(3, 6)}-${cleaned.slice(6)}`;
+  // 기타 지역번호 11자리: 0XX-XXXX-XXXX
+  if (cleaned.length === 11 && cleaned.startsWith('0')) return `${cleaned.slice(0, 3)}-${cleaned.slice(3, 7)}-${cleaned.slice(7)}`;
+  return String(value);
+}
+
+/** 날짜 표시 — YYYY-MM-DD 형식 (KST 기준, 하루 밀림 방지) */
+function fmtDateDisplay(value: any): string {
+  if (value === null || value === undefined || value === '') return '';
+  const str = String(value).trim();
+  // 순수 YYYY-MM-DD (UTC 변환 X)
+  const m = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  // ISO timestamp → KST 변환 후 YYYY-MM-DD
+  const d = new Date(str.includes('T') || str.endsWith('Z') ? str : str.replace(' ', 'T') + 'Z');
+  if (!isNaN(d.getTime())) {
+    const kst = new Date(d.getTime() + 9 * 60 * 60 * 1000);
+    return `${kst.getUTCFullYear()}-${String(kst.getUTCMonth() + 1).padStart(2, '0')}-${String(kst.getUTCDate()).padStart(2, '0')}`;
+  }
+  return str;
+}
+
+/** 금액/포인트 표시 — 천 단위 콤마 (정수: 50,000 / 소수: trailing zero 제거 50,000.5) */
+function fmtMoneyDisplay(value: any): string {
+  if (value === null || value === undefined || value === '') return '';
+  const str = String(value).replace(/,/g, '').trim();
+  if (!/^-?\d+(\.\d+)?$/.test(str)) return String(value);
+  const num = Number(str);
+  if (isNaN(num) || !isFinite(num)) return String(value);
+  if (Number.isInteger(num)) return num.toLocaleString('ko-KR');
+  const [intPart, decPart] = num.toString().split('.');
+  return Number(intPart).toLocaleString('ko-KR') + (decPart ? '.' + decPart : '');
+}
+
+/** 정수 표시 — 콤마 X (나이/구매횟수: "30", "5") */
+function fmtIntDisplay(value: any): string {
+  if (value === null || value === undefined || value === '') return '';
+  return String(value).trim();
+}
+
+/** 성별 표시 — DB enum (M/F/male/female/남/여) → 한글 (남성/여성) */
+function fmtGenderDisplay(value: any): string {
+  if (value === null || value === undefined || value === '') return '';
+  const k = String(value).trim().toLowerCase();
+  const map: Record<string, string> = { m: '남성', f: '여성', male: '남성', female: '여성', 남: '남성', 여: '여성' };
+  return map[k] || String(value);
+}
+
+/** 수신동의 표시 — boolean → '동의'/'비동의' */
+function fmtSmsOptInDisplay(value: any): string {
+  if (value === null || value === undefined || value === '') return '';
+  if (value === true || value === 1 || value === 'Y' || value === 'y') return '동의';
+  if (value === false || value === 0 || value === 'N' || value === 'n') return '비동의';
+  const k = String(value).toLowerCase();
+  if (k === 'true') return '동의';
+  if (k === 'false') return '비동의';
+  return String(value);
+}
+
+/** 일반 string 필드 — trim만 (이름/주소/매장명 등) */
+function fmtStringDisplay(value: any): string {
+  if (value === null || value === undefined) return '';
+  return String(value).trim();
+}
+
+/**
+ * ★ FIELD_DISPLAY_FORMAT_MAP — 22개 고정 필드의 displayFormat 1:1 매핑.
+ *
+ * Harold님 원칙: "고정 22개 = 그 필드 룰대로 / 커스텀 = 있는 그대로"
+ *
+ * - 키: FIELD_MAP의 fieldKey
+ * - 값: 해당 필드 표시 함수
+ * - 등록되지 않은 fieldKey (= custom_1~15, 미정의) → renderFieldValue가 String(value) 반환
+ *
+ * ⚠️ 새 고정 필드 추가 시 이 MAP에만 등록하면 백엔드 자동 반영. 호출부 수정 불필요.
+ */
+export const FIELD_DISPLAY_FORMAT_MAP: Record<string, (value: any) => string> = {
+  // ── basic 8 ──
+  name:       fmtStringDisplay,
+  phone:      fmtPhoneDisplay,
+  gender:     fmtGenderDisplay,
+  age:        fmtIntDisplay,
+  birth_date: fmtDateDisplay,
+  email:      fmtStringDisplay,
+  address:    fmtStringDisplay,
+  region:     fmtStringDisplay,
+  // ── purchase 5 ──
+  recent_purchase_store:  fmtStringDisplay,
+  recent_purchase_amount: fmtMoneyDisplay,
+  total_purchase_amount:  fmtMoneyDisplay,
+  purchase_count:         fmtIntDisplay,
+  recent_purchase_date:   fmtDateDisplay,
+  // ── store 5 ──
+  store_code:        fmtStringDisplay,
+  registration_type: fmtStringDisplay,
+  registered_store:  fmtStringDisplay,
+  store_phone:       fmtPhoneDisplay,
+  store_name:        fmtStringDisplay,
+  // ── membership 2 ──
+  grade:  fmtStringDisplay,
+  points: fmtMoneyDisplay,
+  // ── marketing 1 ──
+  sms_opt_in: fmtSmsOptInDisplay,
+  // ── custom_1 ~ custom_15: 의도적으로 등록 안 함 → renderFieldValue가 String(value) 원본 반환 ──
+};
+
+/**
+ * ★ renderFieldValue — DB값 → 표시값 단일 진입점.
+ *
+ * 흐름:
+ *   1. value null/undefined → ''
+ *   2. fieldKey 없음 → String(value) (안전한 기본값)
+ *   3. FIELD_DISPLAY_FORMAT_MAP[fieldKey] 매칭 → 해당 함수 호출
+ *   4. 매칭 실패 (= custom_1~15, 미지정) → String(value) 원본
+ *
+ * @example
+ *   renderFieldValue('01012345678', 'phone')              → '010-1234-5678'
+ *   renderFieldValue('1800-8125', 'store_phone')          → '1800-8125'
+ *   renderFieldValue('M', 'gender')                       → '남성'
+ *   renderFieldValue('50000.00', 'recent_purchase_amount')→ '50,000'
+ *   renderFieldValue('1995-03-01', 'birth_date')          → '1995-03-01'
+ *   renderFieldValue('20260518140000', 'custom_2')        → '20260518140000' (원본)
+ *   renderFieldValue('홍길동', 'name')                     → '홍길동'
+ */
+export function renderFieldValue(value: any, fieldKey?: string): string {
+  if (value === null || value === undefined) return '';
+  if (!fieldKey) return String(value);
+  const formatter = FIELD_DISPLAY_FORMAT_MAP[fieldKey];
+  if (formatter) return formatter(value);
+  return String(value);
+}

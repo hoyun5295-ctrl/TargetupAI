@@ -147,8 +147,19 @@ export function normalizePhone(value: any): string | null {
   if (v.startsWith('82')) v = '0' + v.slice(2);
   if (v.startsWith('+82')) v = '0' + v.slice(3);
   v = v.replace(/\D/g, '');
-  // Excel 숫자 저장으로 인한 앞 0 빠짐 보정
-  if (!v.startsWith('0') && /^1[016789]/.test(v)) {
+  // ★ D142 (2026-04-28): 한줄로 backend normalize.ts와 미러. prefix별 정확한 자릿수 강제.
+  //   PDF 0428 #2 "1800-8125 → 018008125" 사고 차단.
+  //   8자리 대표번호(1588/1644/1670/1800/1899 등)는 어떤 prefix에도 매치 안 되어 0 추가 안 됨.
+  if (!v.startsWith('0') && (
+    /^2\d{7,8}$/.test(v) ||           // 02 서울
+    /^1[016789]\d{7,8}$/.test(v) ||   // 휴대폰 010~019
+    /^3[1-3]\d{7,8}$/.test(v) ||      // 경기/인천/강원
+    /^4[1-4]\d{7,8}$/.test(v) ||      // 충남/대전/충북/세종
+    /^5[1-5]\d{7,8}$/.test(v) ||      // 부산/울산/대구/경북/경남
+    /^50[2-9]\d{6,7}$/.test(v) ||     // 050X 안심번호
+    /^6[1-4]\d{7,8}$/.test(v) ||      // 전남/광주/전북/제주
+    /^70\d{8}$/.test(v)               // 070
+  )) {
     v = '0' + v;
   }
   if (!isValidKoreanPhone(v)) return null;

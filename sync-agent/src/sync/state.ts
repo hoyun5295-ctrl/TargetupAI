@@ -33,7 +33,12 @@ export class SyncStateManager {
       : this.state.lastPurchaseSyncAt;
   }
 
-  /** 동기화 완료 후 상태 업데이트 */
+  /** 동기화 완료 후 상태 업데이트
+   *
+   * ★ D142 (2026-04-28) PDF 0428 #9: 누적(+=) → 마지막 sync 카운트(=)로 변경.
+   *   누적은 서버 sync_agents.total_customers_synced를 매 sync마다 N×1500 부풀게 만드는 사고 유발.
+   *   Agent state는 "직전 sync에서 처리된 행수"만 추적. 실제 회사 총고객수는 서버가 SET 스냅샷 관리.
+   */
   updateAfterSync(
     target: SyncTarget,
     syncedAt: string,
@@ -41,10 +46,10 @@ export class SyncStateManager {
   ): void {
     if (target === 'customers') {
       this.state.lastCustomerSyncAt = syncedAt;
-      this.state.totalCustomersSynced += count;
+      this.state.totalCustomersSynced = count;
     } else {
       this.state.lastPurchaseSyncAt = syncedAt;
-      this.state.totalPurchasesSynced += count;
+      this.state.totalPurchasesSynced = count;
     }
     this.save();
   }

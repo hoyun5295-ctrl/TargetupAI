@@ -168,10 +168,12 @@ function isDateFieldByLabel(label: string): boolean {
 
 export function formatPreviewValue(val: any, opts?: { fieldLabel?: string; fieldKey?: string }): string {
   if (val == null || val === '') return '';
-  // ★ D136 (D7-2): 커스텀필드는 고객사 업로드 원본 그대로 표시 — 숫자 콤마/날짜 변환 금지
-  //   Harold님 원칙: 고정필드(FIELD_MAP column)만 매핑된 형식으로 보여주고, custom_1~15는 고객 데이터 훼손 금지.
-  //   14자리 varchar "20260416150000" → "20,260,416,150,000" 콤마 적용되던 버그 차단.
-  if (opts?.fieldKey?.startsWith('custom_')) return String(val);
+  // ★ D142 (2026-04-28): Harold님 원칙 그대로 구현 — fieldKey 있으면 displayValue 단일 진입점.
+  //   "고정 22개 = 그 필드 룰대로 / 커스텀 = 있는 그대로"
+  //   FRONT_DISPLAY_FORMAT_MAP 매칭 → 룰대로 / custom_* + 미지정 → String(val) 원본 (자동 추론 X).
+  //   1년 넘게 반복된 "fieldKey 가드 누락 → 콤마/6·8자리 날짜 변환 사고" 구조적 종결.
+  if (opts?.fieldKey) return displayValue(val, opts.fieldKey);
+  // fieldKey 미전달 legacy 경로 — 옛 자동 추론 유지 (호환성, 점진 제거 대상)
   const str = String(val);
   // 날짜: ISO 형식(YYYY-MM-DDT...) — KST 변환 후 날짜 추출 (하루 밀림 방지)
   if (/^\d{4}-\d{2}-\d{2}(T|\s)/.test(str)) {
@@ -423,21 +425,22 @@ function formatNumberPreview(val: any): string {
 }
 
 /**
- * ★ D101: 필드 data_type 기반 포맷팅 (type-aware)
- * date → formatDatePreview, number → formatNumberPreview, 기타 → formatPreviewValue
+ * ★ D142 (2026-04-28): Harold님 원칙 그대로 구현 — fieldKey 있으면 displayValue 단일 진입점.
+ *   "고정 22개 = 그 필드 룰대로 / 커스텀 = 있는 그대로"
  *
- * ★ D136 (D7-2 Harold님 원칙): 3번째 인자 fieldKey 추가.
- *   커스텀필드(custom_1~15)는 고객사 업로드 원본 그대로 표시.
- *   data_type 무시하고 String(val) 반환 — 숫자 콤마/날짜 변환/포맷팅 금지.
- *   고정필드(FIELD_MAP column)만 매핑된 형식으로 포맷팅.
+ *   - fieldKey 전달 시: FRONT_DISPLAY_FORMAT_MAP 매핑(22개) → displayFormat / custom_* + 미지정 → 원본.
+ *     dataType 자동 추론 발동 안 함 (1년 넘게 반복된 콤마 사고 구조적 종결).
+ *   - fieldKey 미전달 시 (legacy): 옛 dataType 자동 추론 호환 유지.
+ *     (호출부 12개 전수 fieldKey 전달 작업 별도 step — 점진 제거 대상)
  */
 export function formatByType(val: any, dataType?: string, fieldKey?: string): string {
   if (val == null || val === '') return '';
-  // 커스텀필드: 원본 그대로 (Harold님 원칙 — 고객사 데이터 훼손 금지)
-  if (fieldKey && fieldKey.startsWith('custom_')) return String(val);
+  // ★ D142: fieldKey 있으면 displayValue 단일 진입점 — 자동 추론 발동 X
+  if (fieldKey) return displayValue(val, fieldKey);
+  // fieldKey 없으면 호환성 유지 (legacy 호출부)
   if (dataType === 'date') return formatDatePreview(val);
   if (dataType === 'number') return formatNumberPreview(val);
-  return formatPreviewValue(val, { fieldKey });
+  return formatPreviewValue(val);
 }
 
 /**
@@ -500,13 +503,15 @@ export function replaceMessageVars(
     if (dt) typeMap[f.field_key] = dt;
   }
 
-  // ★ B+0407-1: enum 필드 우선 역변환 (gender 'F' → '여성'). formatByType보다 먼저 적용.
-  // ★ D136 (D7-2): fieldKey 전달 — 커스텀필드(custom_1~15)는 formatByType에서 원본 그대로 반환.
+  // ★ D142 (2026-04-28): Harold님 원칙 — displayValue 단일 진입점.
+  //   고정 22개(name/phone/gender/birth_date/...) → FRONT_DISPLAY_FORMAT_MAP 룰대로
+  //   custom_1~15 + 미지정 → String(val) 원본
+  //   gender enum 역변환은 displayValue 내부 fmtGenderFrontDisplay가 자동 처리 (분기 통합).
+  //   1년 넘게 반복된 "fieldKey 가드 누락 → 콤마 사고" 패턴 구조적 종결.
   const renderValue = (fieldKey: string | undefined, val: any, dt: string | undefined): string => {
-    if (fieldKey && FRONT_FIELD_DISPLAY_MAP[fieldKey]) {
-      return reverseDisplayValueFront(fieldKey, val);
-    }
-    return formatByType(val, dt, fieldKey);
+    if (fieldKey) return displayValue(val, fieldKey);
+    // fieldKey 미전달 legacy 경로 — formatByType의 호환 분기 사용
+    return formatByType(val, dt);
   };
 
   // 필드 정의 기반 치환 (field_label → field_key 매핑)
@@ -597,13 +602,10 @@ export function replaceVarsByFieldMeta(
 
     let display: string;
     if (rawValue != null && rawValue !== '') {
-      // ★ enum 필드(gender F→여성) 역변환 우선
-      if (FRONT_FIELD_DISPLAY_MAP[fm.field_key]) {
-        display = reverseDisplayValueFront(fm.field_key, rawValue);
-      } else {
-        // ★ D136 (D7-2): fieldKey 전달 — 커스텀필드 원본 그대로 반환
-        display = formatByType(rawValue, fm.data_type, fm.field_key);
-      }
+      // ★ D142 (2026-04-28): displayValue 단일 진입점.
+      //   22개 고정 → FRONT_DISPLAY_FORMAT_MAP 룰대로 (gender 역변환 포함 자동 처리)
+      //   custom_1~15 + 미지정 → String(value) 원본
+      display = displayValue(rawValue, fm.field_key);
     } else {
       display = fallback ? (fm.display_name || fm.field_key) : '';
     }
@@ -640,13 +642,14 @@ export function replaceVarsBySampleCustomer(
   let result = text;
   const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+  // ★ D142 (2026-04-28): displayValue 단일 진입점.
+  //   k가 fieldKey면 22개 룰대로 / 한글 라벨 또는 미지정이면 String(v) 원본.
+  //   gender enum 역변환은 displayValue 내부 fmtGenderFrontDisplay가 자동 처리 (분기 통합).
+
   // 1) sampleCustomer 직접 치환
   Object.entries(sc).forEach(([k, v]) => {
     if (v == null) return;
-    // enum 필드(column 키) 역변환 우선
-    const display = FRONT_FIELD_DISPLAY_MAP[k]
-      ? reverseDisplayValueFront(k, v)
-      : formatPreviewValue(v);
+    const display = displayValue(v, k);
     result = result.replace(new RegExp(`%${escapeRegex(k)}%`, 'g'), display);
   });
 
@@ -655,9 +658,7 @@ export function replaceVarsBySampleCustomer(
     Object.entries(options.aliasMap).forEach(([realKey, aliases]) => {
       const val = sc[realKey];
       if (val == null) return;
-      const display = FRONT_FIELD_DISPLAY_MAP[realKey]
-        ? reverseDisplayValueFront(realKey, val)
-        : formatPreviewValue(val);
+      const display = displayValue(val, realKey);
       aliases.forEach(a => {
         result = result.replace(new RegExp(`%${escapeRegex(a)}%`, 'g'), display);
       });
@@ -697,7 +698,20 @@ export function normalizePhoneKr(value: any): string {
   if (v.startsWith('+82')) v = '0' + v.slice(3);
   else if (v.startsWith('82')) v = '0' + v.slice(2);
   v = v.replace(/\D/g, '');
-  if (!v.startsWith('0') && /^(2|1[016789]|3[1-3]|4[1-4]|5(?:[1-5]|0[2-9])|6[1-4]|70)\d{6,10}$/.test(v)) {
+  // ★ D142 (2026-04-28): regex 정밀화 — backend normalize.ts/normalizePhone 미러.
+  //   PDF 0428 #2 "1800-8125 → 018008125" 사고 차단.
+  //   prefix별 정확한 자릿수 강제. 8자리 대표번호(1588/1644/1670/1800/1899 등)는
+  //   어떤 prefix에도 매치 안 되어 0 추가 안 됨.
+  if (!v.startsWith('0') && (
+    /^2\d{7,8}$/.test(v) ||           // 02 서울 (총 9~10자리, 0 빠짐 = 8~9자리)
+    /^1[016789]\d{7,8}$/.test(v) ||   // 휴대폰 010~019 (총 10~11자리, 0 빠짐 = 9~10자리)
+    /^3[1-3]\d{7,8}$/.test(v) ||      // 경기/인천/강원
+    /^4[1-4]\d{7,8}$/.test(v) ||      // 충남/대전/충북/세종
+    /^5[1-5]\d{7,8}$/.test(v) ||      // 부산/울산/대구/경북/경남
+    /^50[2-9]\d{6,7}$/.test(v) ||     // 050X 안심번호 (총 11~12자리, 0 빠짐 = 10~11자리)
+    /^6[1-4]\d{7,8}$/.test(v) ||      // 전남/광주/전북/제주
+    /^70\d{8}$/.test(v)               // 070 (총 11자리, 0 빠짐 = 10자리)
+  )) {
     v = '0' + v;
   }
   return v;
@@ -948,4 +962,146 @@ export function formatCampaignMessageForDisplay(
     campaign.is_ad || false,
     campaign.opt_out_080_number || ''
   );
+}
+
+// ============================================================
+// ★ D142 (2026-04-28): displayValue 컨트롤타워 (프론트) — Harold님 원칙 그대로 구현.
+// 백엔드 standard-field-map.ts FIELD_DISPLAY_FORMAT_MAP / renderFieldValue 미러.
+//
+// 원칙: "고정 22개 = 그 필드 룰대로 / 커스텀(custom_1~15) = 있는 그대로"
+//
+// ⚠️ 자동 type 추론 (data_type='number' 보고 콤마 등) 절대 금지.
+//    fieldKey 누락 = FRONT_DISPLAY_FORMAT_MAP 매칭 실패 = String(value) 원본 (안전한 기본값).
+//    custom_1~15는 의도적으로 매핑 등록 안 함 → 자동으로 원본 보존.
+//    1년 넘게 반복된 "fieldKey 가드 누락 → 콤마 사고" 패턴 구조적 종결.
+// ============================================================
+
+/** 전화번호 표시 — 휴대폰/유선/대표번호(1588/1800 등) 모두 하이픈 포함 */
+function fmtPhoneFrontDisplay(value: any): string {
+  if (value === null || value === undefined || value === '') return '';
+  const cleaned = String(value).replace(/\D/g, '');
+  if (!cleaned) return String(value);
+  if (cleaned.length === 11 && cleaned.startsWith('01')) return `${cleaned.slice(0, 3)}-${cleaned.slice(3, 7)}-${cleaned.slice(7)}`;
+  if (cleaned.length === 10 && cleaned.startsWith('01')) return `${cleaned.slice(0, 3)}-${cleaned.slice(3, 6)}-${cleaned.slice(6)}`;
+  if (cleaned.length === 9 && cleaned.startsWith('02')) return `${cleaned.slice(0, 2)}-${cleaned.slice(2, 5)}-${cleaned.slice(5)}`;
+  if (cleaned.length === 10 && cleaned.startsWith('02')) return `${cleaned.slice(0, 2)}-${cleaned.slice(2, 6)}-${cleaned.slice(6)}`;
+  if (cleaned.length === 8 && cleaned.startsWith('1')) return `${cleaned.slice(0, 4)}-${cleaned.slice(4)}`;
+  if (cleaned.length === 12 && cleaned.startsWith('050')) return `${cleaned.slice(0, 4)}-${cleaned.slice(4, 8)}-${cleaned.slice(8)}`;
+  if (cleaned.length === 10 && cleaned.startsWith('0')) return `${cleaned.slice(0, 3)}-${cleaned.slice(3, 6)}-${cleaned.slice(6)}`;
+  if (cleaned.length === 11 && cleaned.startsWith('0')) return `${cleaned.slice(0, 3)}-${cleaned.slice(3, 7)}-${cleaned.slice(7)}`;
+  return String(value);
+}
+
+/** 날짜 표시 — YYYY-MM-DD (KST, 하루 밀림 방지) */
+function fmtDateFrontDisplay(value: any): string {
+  if (value === null || value === undefined || value === '') return '';
+  const str = String(value).trim();
+  const m = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  const d = new Date(str.includes('T') || str.endsWith('Z') ? str : str.replace(' ', 'T') + 'Z');
+  if (!isNaN(d.getTime())) {
+    const kst = new Date(d.getTime() + 9 * 60 * 60 * 1000);
+    return `${kst.getUTCFullYear()}-${String(kst.getUTCMonth() + 1).padStart(2, '0')}-${String(kst.getUTCDate()).padStart(2, '0')}`;
+  }
+  return str;
+}
+
+/** 금액/포인트 — 천 단위 콤마 (정수: 50,000 / 소수: trailing zero 제거) */
+function fmtMoneyFrontDisplay(value: any): string {
+  if (value === null || value === undefined || value === '') return '';
+  const str = String(value).replace(/,/g, '').trim();
+  if (!/^-?\d+(\.\d+)?$/.test(str)) return String(value);
+  const num = Number(str);
+  if (isNaN(num) || !isFinite(num)) return String(value);
+  if (Number.isInteger(num)) return num.toLocaleString('ko-KR');
+  const [intPart, decPart] = num.toString().split('.');
+  return Number(intPart).toLocaleString('ko-KR') + (decPart ? '.' + decPart : '');
+}
+
+/** 정수 — 콤마 X (나이/구매횟수) */
+function fmtIntFrontDisplay(value: any): string {
+  if (value === null || value === undefined || value === '') return '';
+  return String(value).trim();
+}
+
+/** 성별 — DB enum → 한글 */
+function fmtGenderFrontDisplay(value: any): string {
+  if (value === null || value === undefined || value === '') return '';
+  const k = String(value).trim().toLowerCase();
+  const map: Record<string, string> = { m: '남성', f: '여성', male: '남성', female: '여성', 남: '남성', 여: '여성' };
+  return map[k] || String(value);
+}
+
+/** 수신동의 — boolean → 한글 */
+function fmtSmsOptInFrontDisplay(value: any): string {
+  if (value === null || value === undefined || value === '') return '';
+  if (value === true || value === 1 || value === 'Y' || value === 'y') return '동의';
+  if (value === false || value === 0 || value === 'N' || value === 'n') return '비동의';
+  const k = String(value).toLowerCase();
+  if (k === 'true') return '동의';
+  if (k === 'false') return '비동의';
+  return String(value);
+}
+
+/** 일반 string — trim */
+function fmtStringFrontDisplay(value: any): string {
+  if (value === null || value === undefined) return '';
+  return String(value).trim();
+}
+
+/**
+ * ★ FRONT_DISPLAY_FORMAT_MAP — 22개 고정 필드 displayFormat 1:1 매핑 (백엔드 미러).
+ * custom_1~15는 의도적으로 미등록 → displayValue가 String(value) 원본 반환.
+ */
+export const FRONT_DISPLAY_FORMAT_MAP: Record<string, (value: any) => string> = {
+  // basic 8
+  name:       fmtStringFrontDisplay,
+  phone:      fmtPhoneFrontDisplay,
+  gender:     fmtGenderFrontDisplay,
+  age:        fmtIntFrontDisplay,
+  birth_date: fmtDateFrontDisplay,
+  email:      fmtStringFrontDisplay,
+  address:    fmtStringFrontDisplay,
+  region:     fmtStringFrontDisplay,
+  // purchase 5
+  recent_purchase_store:  fmtStringFrontDisplay,
+  recent_purchase_amount: fmtMoneyFrontDisplay,
+  total_purchase_amount:  fmtMoneyFrontDisplay,
+  purchase_count:         fmtIntFrontDisplay,
+  recent_purchase_date:   fmtDateFrontDisplay,
+  // store 5
+  store_code:        fmtStringFrontDisplay,
+  registration_type: fmtStringFrontDisplay,
+  registered_store:  fmtStringFrontDisplay,
+  store_phone:       fmtPhoneFrontDisplay,
+  store_name:        fmtStringFrontDisplay,
+  // membership 2
+  grade:  fmtStringFrontDisplay,
+  points: fmtMoneyFrontDisplay,
+  // marketing 1
+  sms_opt_in: fmtSmsOptInFrontDisplay,
+};
+
+/**
+ * ★ displayValue — DB값 → 표시값 단일 진입점 (프론트).
+ *
+ *   1. value null/undefined → ''
+ *   2. fieldKey 없음 → String(value) (안전한 기본값 — 절대 자동 추론 X)
+ *   3. FRONT_DISPLAY_FORMAT_MAP[fieldKey] 매칭 → 해당 함수 호출
+ *   4. 매칭 실패 (= custom_1~15, 미지정) → String(value) 원본
+ *
+ * @example
+ *   displayValue('01012345678', 'phone')              → '010-1234-5678'
+ *   displayValue('1800-8125', 'store_phone')          → '1800-8125'
+ *   displayValue('M', 'gender')                       → '남성'
+ *   displayValue('50000.00', 'recent_purchase_amount')→ '50,000'
+ *   displayValue('1995-03-01', 'birth_date')          → '1995-03-01'
+ *   displayValue('20260518140000', 'custom_2')        → '20260518140000' (원본)
+ */
+export function displayValue(value: any, fieldKey?: string): string {
+  if (value === null || value === undefined) return '';
+  if (!fieldKey) return String(value);
+  const formatter = FRONT_DISPLAY_FORMAT_MAP[fieldKey];
+  if (formatter) return formatter(value);
+  return String(value);
 }

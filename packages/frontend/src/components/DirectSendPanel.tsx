@@ -869,11 +869,19 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                       <span className="ds-optcard-title">분할전송</span>
                     </div>
                     <div className="ds-optcard-sub" style={{ gap: 6 }}>
+                      {/* ★ D142 (2026-04-28): 분할전송 정책 — 기본 1000건/분, 1~9999 범위 검증.
+                          PDF 0428 #4 — 천단위 입력 시 앞 3자리만 보이던 버그 수정 (CSS width 64px). */}
                       <input
                         type="number"
                         className="ds-num-in"
+                        min={1}
+                        max={9999}
                         value={splitCount}
-                        onChange={(e) => setSplitCount(Number(e.target.value) || 1000)}
+                        onChange={(e) => {
+                          const n = Number(e.target.value) || 1000;
+                          // 1~9999 범위 강제 (4자리 초과 입력 차단)
+                          setSplitCount(Math.max(1, Math.min(9999, n)));
+                        }}
                         disabled={!splitEnabled}
                       />
                       <span>건/분</span>

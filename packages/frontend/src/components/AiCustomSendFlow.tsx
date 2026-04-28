@@ -1137,7 +1137,7 @@ export default function AiCustomSendFlow({
                 <div className="mt-3 p-2 bg-purple-50 rounded-lg">
                   <div className="text-[10px] text-purple-600 font-medium mb-1">✨ 실제 타겟 고객 데이터 기반 미리보기</div>
                   <div className="text-[10px] text-purple-500">
-                    {availableFields.filter(f => sampleData[f.field_key] != null).slice(0, 5).map(f => `${f.field_label || f.field_key}: ${formatPreviewValue(sampleData[f.field_key])}`).join(' | ')}
+                    {availableFields.filter(f => sampleData[f.field_key] != null).slice(0, 5).map(f => `${f.field_label || f.field_key}: ${formatPreviewValue(sampleData[f.field_key], { fieldKey: f.field_key, fieldLabel: f.field_label })}`).join(' | ')}
                   </div>
                 </div>
               )}

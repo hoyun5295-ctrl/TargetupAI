@@ -98,7 +98,12 @@ export async function fetchTargetSampleCustomer(
     }
     const row = result.rows[0];
     // custom_fields JSONB를 평탄화하여 합침 (replaceVariables/replaceMessageVars 호환)
-    const flat = { ...row, ...(row.custom_fields || {}) };
+    // ★ D142 (2026-04-28): Harold님 원칙 — custom_fields 평면화 시 모든 값 String() 강제.
+    //   custom_1~15는 고객사 업로드 원본 100% 보존. 프론트 typeof 자동 추론 차단.
+    const customFlat = Object.fromEntries(
+      Object.entries(row.custom_fields || {}).map(([k, v]) => [k, v == null ? '' : String(v)])
+    );
+    const flat = { ...row, ...customFlat };
     // ★ B+0407-1: enum 필드(gender F→여성) 미리 변환
     //   frontend의 모든 표시 컨트롤타워가 이미 변환된 값을 받음 → 일관 표시 보장
     for (const fk of Object.keys(FIELD_DISPLAY_MAP)) {

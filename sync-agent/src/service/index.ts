@@ -83,18 +83,21 @@ function installServiceWindows(): void {
     process.exit(1);
   }
 
-  // 서비스 생성
+  // ★ D142 (2026-04-28) PDF 0428 #10: 재부팅 시 자동실행 안 되던 사고.
+  //   원인 분석: `start= auto`는 부팅 즉시 시작 → 네트워크(Tcpip/Dnscache)나 DB 미준비 상태에서 시작 시도 → 실패.
+  //   해결: `start= delayed-auto` (Delayed Automatic Start) — 부팅 후 ~2분 지연. 시스템 안정화 후 시작.
+  //   추가 안전망: 실패 시 자동 재시작(아래 sc failure)으로 임시 실패도 자동 복구.
   const createResult = runCommand(
     `sc create ${WIN_SERVICE_NAME} ` +
     `binPath= "${exePath}" ` +
     `DisplayName= "${WIN_SERVICE_DISPLAY}" ` +
-    `start= auto`,
+    `start= delayed-auto`,
   );
   if (!createResult.success) {
     console.error('❌ 서비스 생성 실패:', createResult.output);
     process.exit(1);
   }
-  console.log('✅ 서비스 생성 완료');
+  console.log('✅ 서비스 생성 완료 (Delayed Auto Start — 부팅 후 시스템 안정화 후 시작)');
 
   // 설명 추가
   runCommand(`sc description ${WIN_SERVICE_NAME} "${SERVICE_DESCRIPTION}"`);

@@ -107,6 +107,70 @@
 
 ---
 
+### 🟢 D141 (2026-04-27~28) — 한줄로_20260427.pdf 5건 근본수정 + 끌로드원칙 7-1 3차 재점검 (배포 완료 2026-04-28)
+
+> **상태:** ✅ 배포 완료 (2026-04-28)
+>
+> **PDF:** `C:\Users\ceo\OneDrive\문서\카카오톡 받은 파일\한줄로_20260427.pdf` 5건
+>
+> **🚨 1차→2차→3차 재점검에서 누적 추가 사고 후보 8건 발견 + 차단 (Harold님 끌로드원칙 강조 지시):**
+>
+> #### PDF 5건 직접 수정
+> | # | 이슈 | 파일 / 핵심 변경 |
+> |---|------|------------------|
+> | B1 | 직접발송 파일 업로드 동일 기준필드(전화번호 컬럼 2개) → 회신번호 하나로만 인식 | **`upload.ts` `dedupeHeaders` 헬퍼 신설** + 3곳 적용 (/parse, /validate-mapping, processUploadInBackground). Set 기반 단일 패스 — 어떤 입력도 결과 unique 보장 |
+> | B2 | 직접발송 화면에 파일 드래그 시 업로드 안되고 다운로드됨 | `DirectSendPanel.tsx` 모달 root 글로벌 차단 + dropzone 4핸들러(onDragEnter/Over/Leave/Drop) + `direct-send.css` `ds-dropzone--active` 시각 피드백 |
+> | B3 | 직접발송 보관함 적용 후 미리보기 클릭 → 흰화면 + 새로고침 시 로그아웃 | **근본 원인:** `resolveRecipientCallback(undefined,...)` → `recipient.callback` TypeError → React 트리 unmount. `formatDate.ts`의 5개 변수치환 컨트롤타워 모두 가드 추가 |
+> | B4 | 한줄로(AI) LMS 채널일 때 MMS 이미지 첨부란 노출 → 자동 MMS 전환 → 첨부 삭제해도 MMS 잠금 → 발송 차단 | `AiCampaignResultPopup.tsx:303` `selectedChannel === 'MMS' && (...)` 가드 (맞춤한줄 패턴 이식) + Dashboard 발송 payload 4곳 channel 가드 통일 |
+> | B5 | 발송결과-테스트발송 담당자/스팸필터 컬럼 순서 불일치 | `ResultsModal.tsx:693-725` 스팸필터 컬럼을 **날짜/발송자/유형/통신사/문안/판정**으로 변경 (담당자 테스트와 1~3 컬럼 일치) |
+>
+> #### 끌로드원칙 7-1 3차 재점검에서 추가 발견 + 수정한 잠재 사고 8건
+>
+> | 차수 | 발견 |
+> |------|------|
+> | 1차 | PDF 5건 표면 수정 — `/parse`만 디덱싱 |
+> | **2차** | `upload.ts /validate-mapping` + `processUploadInBackground` 디덱싱 누락 발견 → 고객DB 업로드 매핑 미적용 데이터 손실 사고 잠재 차단. `dedupeHeaders` 헬퍼 추출로 3곳 통합 |
+> | **3차** | (a) `dedupeHeaders` 카운터 방식 엣지 케이스 `["A", "A", "A (2)"]` → `["A", "A (2)", "A (2)"]` 충돌 가능 → Set 기반 재작성 / (b) `FileUploadMappingModal` 모달 root 글로벌 차단 누락 (D131 누락분, B2 일관성) / (c) `replaceDirectVars` 컨트롤타워 자체에 recipient 가드 누락 / (d) `replaceMessageVars` 컨트롤타워 자체에 customerData 가드 누락 (호출부 3곳에서 sampleData/sc/spamSampleCustomer undefined 시 흰화면 잠재) / (e) Dashboard 발송 payload mmsImagePaths channel 가드 4곳 누락 (직접발송/직접타겟/한줄로AI 캠페인/한줄로AI 담당자테스트/직접타겟 담당자테스트) |
+>
+> #### 5경로 매트릭스 검증 (D109 원칙 준수)
+>
+> | # | 경로 | UI LMS 가드 | Payload channel 가드 |
+> |---|------|------------|--------------------|
+> | 1 | 한줄로AI | ✅ 이번 | ✅ 이번 (Dashboard:1671, 1916) |
+> | 2 | 맞춤한줄 | ✅ 기존 | ✅ 기존 (1809) |
+> | 3 | 자동발송 | ✅ 기존 | ⚠️ 별건 — MMS 이미지 서버 업로드 미구현 (별개 버그) |
+> | 4 | 직접발송 | ✅ 기존 | ✅ 이번 (Dashboard:464) |
+> | 5 | 직접타겟발송 | ✅ 기존 | ✅ 이번 (Dashboard:625, 1967) |
+>
+> #### 컨트롤타워 가드 매트릭스 (5/5 완성)
+>
+> | 함수 | 가드 |
+> |------|------|
+> | `replaceDirectVars` | ✅ `if (!text \|\| !recipient) return text` (이번 추가) |
+> | `replaceMessageVars` | ✅ `const data = customerData \|\| {}` (이번 추가) |
+> | `replaceVarsByFieldMeta` | ✅ 기존 |
+> | `replaceVarsBySampleCustomer` | ✅ `const sc = sampleCustomer \|\| {}` 기존 |
+> | `resolveRecipientCallback` | ✅ `if (!recipient) return fallbackCallback \|\| null` (이번 추가) |
+>
+> **수정 파일 (8개):**
+> - 백엔드: `routes/upload.ts` (dedupeHeaders 헬퍼 + 3곳)
+> - 프론트: `components/DirectSendPanel.tsx` / `styles/direct-send.css` / `components/FileUploadMappingModal.tsx` / `components/AiCampaignResultPopup.tsx` / `components/ResultsModal.tsx` / `utils/formatDate.ts` / `pages/Dashboard.tsx`
+>
+> **🎓 D141 핵심 교훈:**
+> 1. **PDF 표면 수정만으로 절대 완료 선언 금지** — 1차에서 /parse만 보고 완료 보고했다가 2차에서 /validate-mapping + processUploadInBackground 매핑 미적용 사고 잠재 차단. **데이터 흐름 끝까지 추적 (입력→처리→저장→조회→표시) 절대 필수**
+> 2. **컨트롤타워 자체에 안전망** — D109 원칙 "데이터 출처 시점에서 안전 처리". 외부 호출부 가드는 향후 추가 호출부 누락 시 재발. 컨트롤타워에 가드 두면 모든 호출부 자동 보호. 변수치환 컨트롤타워 5개 모두 가드 정합 완성
+> 3. **5경로 매트릭스 × Payload 일관성** — UI 가드만으로는 부족. 발송 payload(channel === 'MMS' ? ... : []) 5경로 일관성 통일이 진짜 안전망. 채널 변경 로직 깨질 시에도 LMS+MMS paths 불일치 차단
+> 4. **엣지 케이스 단일 패스 보장** — 카운터 방식 디덱싱은 입력에 디덱스 결과와 같은 헤더가 있으면 충돌. Set 기반 단일 패스로 어떤 입력도 결과 unique 보장
+> 5. **3차 재점검 = 진짜 끌로드원칙** — 1차 표면 / 2차 호출부 전수 / 3차 컨트롤타워 자체 + 엣지 케이스 + payload 일관성. Harold님 "끌로드원칙에 맞게 전수 재점검" 지시 3회로 누적 8개 사고 후보 차단
+>
+> **⏭️ 별건 대기 (D141에서 식별):**
+> - `AddressBookModal` 드래그앤드롭 미적용 (B2 패턴)
+> - `Unsubscribes` 드래그앤드롭 미적용 (B2 패턴)
+> - `flyer/customers.ts` / `flyer/flyers.ts` 헤더 디덱싱 미적용 (B1 패턴, 전단AI)
+> - 자동발송 MMS 이미지 서버 업로드 미구현 (`AutoSendFormModal.handleMmsImageUpload`은 blob URL만 생성, 서버 업로드 안 함, body에 mms_image_paths 누락 → 자동발송 MMS 발송 자체 불가)
+
+---
+
 ### 🟣 D140 (2026-04-25) — 브랜드메시지 IMC 매뉴얼 16개 정합성 전수 점검 + Phase C 정제 헬퍼 일반화
 
 > **상태:** 🟡 코드 수정 완료 · **배포 대기**

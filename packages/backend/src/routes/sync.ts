@@ -403,6 +403,10 @@ router.post('/heartbeat', async (req: SyncAuthRequest, res: Response) => {
     //   기존엔 commands를 싱크 응답(customers/purchases POST)에서만 전달했으나,
     //   Agent가 변경분 0건이면 POST 자체를 안 보내 명령이 영영 수신 안 되는 케이스 발생.
     //   heartbeat 응답으로도 commands 전달하여 pause/resume/restart를 안정적으로 전달.
+    // ★ D142 (2026-04-28) PDF 0428 #9: Agent가 보내는 totalCustomersSynced는 누적값(state.ts L44 +=)
+    //   → heartbeat에서 그대로 덮어쓰면 sync 직후 SET 스냅샷이 다시 누적값으로 돌아감.
+    //   해결: heartbeat에서는 total_customers_synced 갱신 안 함 (POST /sync에서만 실제 카운트 SET).
+    //   $6 자리는 호환성 위해 시그니처 유지하되 SQL에서 제외. Agent 재빌드 시 state.ts도 정정 예정.
     const { rows: configRows } = await query(
       `UPDATE sync_agents
        SET agent_version = COALESCE($1, agent_version),
@@ -411,14 +415,13 @@ router.post('/heartbeat', async (req: SyncAuthRequest, res: Response) => {
            db_type = COALESCE($4, db_type),
            last_heartbeat_at = NOW(),
            last_sync_at = COALESCE($5, last_sync_at),
-           total_customers_synced = COALESCE($6, total_customers_synced),
-           queued_items = COALESCE($7, queued_items),
-           uptime = COALESCE($8, uptime),
+           queued_items = COALESCE($6, queued_items),
+           uptime = COALESCE($7, uptime),
            updated_at = NOW()
-       WHERE id = $9
+       WHERE id = $8
        RETURNING config`,
       [agentVersion, status, osInfo, dbType, lastSyncAt,
-       totalCustomersSynced, queuedItems, uptime, agentId]
+       queuedItems, uptime, agentId]
     );
 
     const currentConfig = configRows[0]?.config || {};
@@ -687,13 +690,18 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
          customers.length, upsertedCount, failedCount, JSON.stringify(failures)]
       );
 
-      // Agent 통계 업데이트
+      // ★ D142 (2026-04-28) PDF 0428 #9: "고객수 중복/합산" 사고 근본 수정.
+      //   기존: total_customers_synced = total_customers_synced + $1 → 매 sync마다 1500건씩 누적
+      //         → DB 실제 1,501건인데 화면에는 N×1500으로 표시 (Harold님 신고).
+      //   신: 현재 회사의 실제 active customers 카운트로 SET (스냅샷). 누적 X.
       await query(
         `UPDATE sync_agents
-         SET total_customers_synced = total_customers_synced + $1,
+         SET total_customers_synced = (
+               SELECT COUNT(*) FROM customers WHERE company_id = $2 AND is_active = true
+             ),
              last_sync_at = NOW(), updated_at = NOW()
-         WHERE id = $2`,
-        [upsertedCount, agentId]
+         WHERE id = $1`,
+        [agentId, companyId]
       );
     }
 

@@ -234,14 +234,14 @@ export default function TargetSendModal({
   // ★ D111 E1: 인라인 GENDER_DISPLAY_MAP/isGenderField 하드코딩 제거 →
   //   FRONT_FIELD_DISPLAY_MAP 컨트롤타워 사용 (enum 필드 추가 시 한 곳만 수정).
   //   '0':'여성' 같은 모호한 매핑 제거 — 백엔드 reverseDisplayValue와 동일 기준.
+  // ★ D142 (2026-04-28): formatByType 호출 시 fieldKey 전달 누락 수정.
+  //   원인: PDF 0428 #5 — 직접타겟발송 담당자테스트에서 custom_* 텍스트가 숫자 콤마로 표시.
+  //   해결: fieldKey 전달 → formatByType이 displayValue 단일 진입점으로 전환 → custom_*은 자동 원본 보존.
+  //   gender enum 역변환은 displayValue 내부가 자동 처리 (분기 통합).
   const formatCellValue = (value: any, dataType: string, fieldKey?: string): string => {
     if (value == null || value === '') return '-';
-    // enum 필드 (gender 등) → 한글 역변환 컨트롤타워
-    if (fieldKey && FRONT_FIELD_DISPLAY_MAP[fieldKey]) {
-      return reverseDisplayValueFront(fieldKey, value);
-    }
     if (dataType === 'boolean') return value === true || value === 'true' ? '예' : '아니오';
-    return formatByType(value, dataType);
+    return formatByType(value, dataType, fieldKey);
   };
 
   // ====== SMS 전송하기 핸들러 ======
