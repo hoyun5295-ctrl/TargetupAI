@@ -24,6 +24,7 @@ import { kstToUtc, calcNextRunAt } from '../utils/auto-campaign-worker';
 import { filterByIndividualCallback } from '../utils/callback-filter';
 // ★ CT-17: 요금제/트라이얼/기능 게이팅 컨트롤타워
 import { loadPlanContext, canUseFeature, resolveMaxAutoCampaigns, type PlanContext } from '../utils/plan-guard';
+import { normalizePhone } from '../utils/normalize-phone';
 
 const router = Router();
 
@@ -378,11 +379,11 @@ router.post('/', async (req: Request, res: Response) => {
       return res.status(400).json({ error: '발신번호를 선택해주세요.' });
     }
 
-    // 발신번호 등록 여부 확인 (개별회신번호 사용 시 스킵)
+    // 발신번호 등록 여부 확인 (개별회신번호 사용 시 스킵) — ★ D142+ B5: 정규화 기준
     if (!use_individual_callback && callback_number) {
       const cbCheck = await query(
-        `SELECT id FROM callback_numbers WHERE company_id = $1 AND phone = $2`,
-        [companyId, callback_number]
+        `SELECT id FROM callback_numbers WHERE company_id = $1 AND regexp_replace(phone, '\\D', '', 'g') = $2`,
+        [companyId, normalizePhone(callback_number)]
       );
       if (cbCheck.rows.length === 0) {
         return res.status(400).json({ error: '등록되지 않은 발신번호입니다.' });
@@ -584,11 +585,11 @@ router.put('/:id', async (req: Request, res: Response) => {
       }
     }
 
-    // 발신번호 변경 시 등록 여부 확인
+    // 발신번호 변경 시 등록 여부 확인 — ★ D142+ B5: 정규화 기준
     if (callback_number) {
       const cbCheck = await query(
-        `SELECT id FROM callback_numbers WHERE company_id = $1 AND phone = $2`,
-        [companyId, callback_number]
+        `SELECT id FROM callback_numbers WHERE company_id = $1 AND regexp_replace(phone, '\\D', '', 'g') = $2`,
+        [companyId, normalizePhone(callback_number)]
       );
       if (cbCheck.rows.length === 0) {
         return res.status(400).json({ error: '등록되지 않은 발신번호입니다.' });

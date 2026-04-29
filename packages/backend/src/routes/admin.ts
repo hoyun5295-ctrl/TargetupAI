@@ -11,6 +11,7 @@ import { DEFAULT_COSTS } from '../config/defaults';
 import { validateSmsTables } from '../utils/sms-table-validator';
 import { getUserUnsubscribes, deleteUserUnsubscribes, exportUserUnsubscribes, CAMPAIGN_OPT080_SELECT_EXPR, CAMPAIGN_OPT080_LEFT_JOIN } from '../utils/unsubscribe-helper';
 import { buildDateRangeFilter } from '../utils/stats-aggregation';
+import { normalizePhone } from '../utils/normalize-phone';
 
 const router = Router();
 
@@ -813,28 +814,57 @@ router.get('/callback-numbers', authenticate, requireSuperAdmin, async (req: Req
 // 발신번호 등록
 router.post('/callback-numbers', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   const { companyId, phone, label, isDefault } = req.body;
-  
+
   if (!companyId || !phone) {
     return res.status(400).json({ error: '회사와 발신번호는 필수입니다.' });
   }
-  
+
+  // ★ D142+ (2026-04-29) 0429 PDF B5 — phone 정규화 + 중복 등록 사전 차단
+  //   기존: 사용자 입력 그대로 INSERT → '02-3145-2186' / '0231452186' 같은 형식 차이로 중복 등록 가능
+  //   변경: normalizePhone으로 통일 저장 + 사전 SELECT로 중복 체크 + DB UNIQUE 제약(별도 마이그레이션)
+  const normalizedPhone = normalizePhone(phone);
+  if (normalizedPhone.length < 8 || normalizedPhone.length > 11) {
+    return res.status(400).json({ error: '유효하지 않은 발신번호 형식입니다.' });
+  }
+
   try {
+    // 사전 중복 체크 (정규화된 phone 기준 — 형식 차이로 인한 우회 차단)
+    const dupCheck = await query(
+      `SELECT id FROM callback_numbers WHERE company_id = $1 AND regexp_replace(phone, '\\D', '', 'g') = $2`,
+      [companyId, normalizedPhone]
+    );
+    if (dupCheck.rows.length > 0) {
+      return res.status(409).json({
+        error: '이미 등록된 발신번호입니다. 같은 고객사에 동일한 번호를 중복 등록할 수 없습니다.',
+        code: 'DUPLICATE_CALLBACK_NUMBER',
+      });
+    }
+
     // 대표번호로 설정 시 기존 대표번호 해제
     if (isDefault) {
       await query('UPDATE callback_numbers SET is_default = false WHERE company_id = $1', [companyId]);
     }
-    
+
+    // ★ D142+ B5: INSERT는 사용자 입력 phone 그대로 저장 (UI 표시 형식 유지 — '02-3145-2186')
+    //   중복 차단은 위 사전 체크(정규화 비교) + DB functional UNIQUE index가 책임
     const result = await query(`
       INSERT INTO callback_numbers (company_id, phone, label, is_default)
       VALUES ($1, $2, $3, $4)
       RETURNING id, phone, label, is_default
     `, [companyId, phone, label || null, isDefault || false]);
-    
-    res.json({ 
+
+    res.json({
       message: '발신번호가 등록되었습니다.',
       callbackNumber: result.rows[0]
     });
-  } catch (error) {
+  } catch (error: any) {
+    // PostgreSQL UNIQUE 제약 위반(에러코드 23505) 안내 — DB 레벨 중복 차단
+    if (error?.code === '23505') {
+      return res.status(409).json({
+        error: '이미 등록된 발신번호입니다. 같은 고객사에 동일한 번호를 중복 등록할 수 없습니다.',
+        code: 'DUPLICATE_CALLBACK_NUMBER',
+      });
+    }
     console.error('발신번호 등록 실패:', error);
     res.status(500).json({ error: '발신번호 등록 실패' });
   }

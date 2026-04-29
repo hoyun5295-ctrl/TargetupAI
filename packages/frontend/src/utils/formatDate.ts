@@ -839,6 +839,48 @@ export function detectPhoneHeaders(headers: string[], data: Record<string, any>[
   });
 }
 
+/**
+ * ★ D142+ (2026-04-29) 0429 PDF B4 — 머지값 최대 길이 기반 SMS 바이트 계산 컨트롤타워
+ *
+ * 자동입력 변수(%이름%, %등급% 등)를 수신자 목록 중 **가장 긴 값**으로 치환하여
+ * 실발송 시 잘림 없는 보수적 max byte 계산용 메시지 생성.
+ *
+ * 사용처: 직접발송, 직접타겟발송, 자동발송, LMS 전환 모달.
+ * - recipients가 비어있거나 해당 필드 값이 없으면 한국어 max 추정값 사용
+ * - 직접발송 패턴: variableMap = DIRECT_VAR_TO_FIELD ({'%이름%': 'name', ...})
+ * - 자동발송 패턴: variableMap = availableFields 기반 동적 생성 ({'%고객명%': 'name', '%생일%': 'birth_date', ...})
+ *
+ * 이전: Dashboard.tsx:1041에 인라인. 자동발송에 누락 → 미리보기 byte ≠ 실발송 byte → 잘림 사고.
+ * 이후: 컨트롤타워 단일 진입점. 모든 발송 경로 일관 보장.
+ */
+export function getMaxByteMessage(msg: string, recipients: any[], variableMap: Record<string, string>): string {
+  let result = msg;
+  Object.entries(variableMap).forEach(([variable, field]) => {
+    if (!result.includes(variable)) return;
+    let maxValue = '';
+    recipients.forEach((r: any) => {
+      const val = String(r[field] || '');
+      if (val.length > maxValue.length) maxValue = val;
+    });
+    // 수신자가 없거나 값이 없으면 한국어 기준 최대 추정값 사용
+    if (!maxValue) {
+      const defaults: Record<string, string> = {
+        '%이름%': '홍길동어머니', '%고객명%': '홍길동어머니', '%성함%': '홍길동어머니',
+        '%등급%': 'VVIP', '%지역%': '경기도 성남시',
+        '%매장명%': '서울특별시 강남본점', '%포인트%': '9,999,999',
+        '%구매금액%': '99,999,999원', '%누적구매금액%': '99,999,999원',
+        '%기타1%': '가나다라마바사', '%기타2%': '가나다라마바사', '%기타3%': '가나다라마바사',
+        '%회신번호%': '07012345678', '%전화번호%': '01012345678',
+        '%생일%': '1998-04-04', '%이메일%': 'customer@example.com',
+        '%구매횟수%': '999', '%연령%': '99', '%성별%': '여성',
+      };
+      maxValue = defaults[variable] || '가나다라마바';
+    }
+    result = result.replace(new RegExp(variable.replace(/%/g, '%'), 'g'), maxValue);
+  });
+  return result;
+}
+
 /** @param msgType      'SMS' | 'LMS' | 'MMS'
  * @param isAd         광고 여부
  * @param optOutNumber 080 수신거부번호

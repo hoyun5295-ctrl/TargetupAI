@@ -374,6 +374,34 @@ export function buildAdMessage(
 }
 
 /**
+ * ★ D142+ (2026-04-29) 0429 PDF B1 — INSERT 직전 D103 강제 정규화 컨트롤타워
+ *
+ * frontend `formatDate.ts:909 stripAdParts`와 정확히 동일 로직(미러).
+ * 사용자가 textarea에 (광고)/무료거부를 직접 박은 변칙 입력을 정규화하여
+ * DB의 `campaigns.message_content`는 항상 "순수본문"만 저장되도록 강제한다.
+ *
+ * 사용처: campaigns.ts direct-send / POST `/` AI 캠페인 등 INSERT 직전
+ * 호출부 패턴:
+ *   const sanitized = stripAdParts(rawMessage);
+ *   const hadMarker = sanitized !== rawMessage;
+ *   const finalIsAd = (req.body.adEnabled === true) || hadMarker;  // 자동 승격
+ *
+ * 정규식은 buildAdMessage가 만드는 정확한 패턴만 매칭 — 본문 내부 텍스트 훼손 방지.
+ * idempotent: 이미 순수본문이면 변화 없음. 여러 번 적용해도 동일 결과.
+ */
+export function stripAdParts(text: string): string {
+  if (!text) return '';
+  let result = text;
+  // 끝의 무료수신거부 (LMS) 제거: "\n무료수신거부 080-xxx-xxxx"
+  result = result.replace(/\s*\n?\s*무료수신거부\s*[\d-]+\s*$/g, '');
+  // 끝의 무료거부 (SMS) 제거: "\n무료거부080xxxxxxxx"
+  result = result.replace(/\s*\n?\s*무료거부\d+\s*$/g, '');
+  // 시작의 (광고) prefix 제거 (양식: "(광고)" or "(광고) ")
+  result = result.replace(/^\s*\(광고\)\s*/g, '');
+  return result;
+}
+
+/**
  * ★ KISA 2026-05: LMS/MMS 제목에 (광고) 자동 부착
  * - isAd=true + LMS/MMS일 때만 제목 앞에 "(광고) " 접두사
  * - SMS는 제목 필드 없으므로 원본 반환

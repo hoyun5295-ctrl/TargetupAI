@@ -7,6 +7,7 @@
 // ============================================================
 
 import pool from '../config/database';
+import { normalizePhone } from './normalize-phone';
 
 // ============================================================
 //  타입 정의
@@ -257,17 +258,17 @@ export async function createRegistration(data: {
   // 중복 신청 체크: 같은 회사에서 같은 번호로 pending 상태인 건이 있으면 차단
   const dupCheck = await pool.query(
     `SELECT id FROM sender_registrations
-     WHERE company_id = $1 AND phone = $2 AND status = 'pending'`,
-    [data.companyId, data.phone]
+     WHERE company_id = $1 AND regexp_replace(phone, '\\D', '', 'g') = $2 AND status = 'pending'`,
+    [data.companyId, normalizePhone(data.phone)]
   );
   if (dupCheck.rows.length > 0) {
     throw new Error('이미 동일 번호로 승인 대기 중인 신청이 있습니다.');
   }
 
-  // 이미 등록된 번호인지 체크
+  // 이미 등록된 번호인지 체크 (★ D142+ B5: 정규화 기준)
   const existCheck = await pool.query(
-    `SELECT id FROM callback_numbers WHERE company_id = $1 AND phone = $2`,
-    [data.companyId, data.phone]
+    `SELECT id FROM callback_numbers WHERE company_id = $1 AND regexp_replace(phone, '\\D', '', 'g') = $2`,
+    [data.companyId, normalizePhone(data.phone)]
   );
   if (existCheck.rows.length > 0) {
     throw new Error('이미 등록된 발신번호입니다.');
@@ -383,15 +384,17 @@ export async function approveRegistration(
     const reg = regResult.rows[0] as SenderRegistration;
 
     // 2. 이미 등록된 번호인지 다시 확인 (동시성 방어)
+    // ★ D142+ (2026-04-29) 0429 PDF B5 — 정규화 기준 비교 + INSERT도 정규화된 phone 저장
+    const normalizedRegPhone = normalizePhone(reg.phone);
     const existCheck = await client.query(
-      `SELECT id FROM callback_numbers WHERE company_id = $1 AND phone = $2`,
-      [reg.company_id, reg.phone]
+      `SELECT id FROM callback_numbers WHERE company_id = $1 AND regexp_replace(phone, '\\D', '', 'g') = $2`,
+      [reg.company_id, normalizedRegPhone]
     );
     if (existCheck.rows.length > 0) {
       throw new Error('이미 등록된 발신번호입니다. 신청을 반려 처리해주세요.');
     }
 
-    // 3. callback_numbers에 INSERT (manage-callbacks.ts의 POST / 로직 재현)
+    // 3. callback_numbers에 INSERT — ★ D142+ B5: 사용자 입력 phone 그대로 저장
     const cbResult = await client.query(
       `INSERT INTO callback_numbers (company_id, phone, label, is_default, store_code, store_name)
        VALUES ($1, $2, $3, false, $4, $5)

@@ -1024,6 +1024,23 @@ async function executePreSendSpamTest(ac: any): Promise<void> {
   const logPrefix = `[auto-worker][spam][${ac.id}]`;
 
   try {
+    // ★ D142+ (2026-04-29) 0429 PDF B3 — 24h 미만 등록 사각지대 fallback
+    //   1단계 윈도우(D-1, 12~36h)를 못 잡은 캠페인이 D-day 2h 윈도우 진입 시
+    //   generated_message_content가 비어있으면 그 시점에 AI 생성 통합 진행.
+    //   이전: 풀백 메시지(fallback_message_content/message_content)로 본 발송 → "풀백 무한 리턴" 신고
+    //   이후: D-day 2h 전에라도 AI 생성 + 스팸테스트 + 담당자 테스트 보장
+    if (ac.ai_generate_enabled && !ac.generated_message_content) {
+      console.log(`${logPrefix} generated_message_content 없음 — D-day 2h 전 AI 생성 시도 (24h 미만 등록 fallback)`);
+      try {
+        await generateMessageForAutoCampaign(ac);
+        // 재조회하여 최신 generated_message_content 확보
+        const refreshed = await query('SELECT * FROM auto_campaigns WHERE id = $1', [ac.id]);
+        if (refreshed.rows[0]) Object.assign(ac, refreshed.rows[0]);
+      } catch (genErr) {
+        console.error(`${logPrefix} D-day 2h 전 AI 생성 실패:`, genErr);
+      }
+    }
+
     // 사용할 메시지 결정 (AI 생성 문안 or 고정 문안)
     const messageContent = ac.ai_generate_enabled && ac.generated_message_content
       ? ac.generated_message_content
@@ -1050,8 +1067,10 @@ async function executePreSendSpamTest(ac: any): Promise<void> {
       console.warn(`${logPrefix} 스팸테스트용 첫 고객 조회 결과 0건 (필터 매칭 없음)`);
     }
 
-    // ★ CT-09: autoSpamTestWithRegenerate 재활용
-    // D-day 2시간 전 스팸테스트에서는 재생성하지 않음 (이미 문안이 확정된 상태)
+    // ★ D142+ (2026-04-29) 0429 PDF B3 — Harold님 정책: 스팸 차단 시 새 문안 생성하여 통과까지 재시도
+    //   이전: maxRetries: 0 → 차단되어도 결과 기록만 + 그대로 발송 → 사용자 의도 위반
+    //   이후: maxRetries: 2 + regenerateCallback → 통과한 문안으로 담당자 테스트 + 본 발송
+    const spamRejectNumber = await getOpt080Number(ac.user_id, ac.company_id);
     const spamResult = await autoSpamTestWithRegenerate({
       companyId: ac.company_id,
       userId: ac.user_id,
@@ -1063,10 +1082,86 @@ async function executePreSendSpamTest(ac: any): Promise<void> {
         subject: ac.message_subject || ac.generated_message_subject,
       }],
       isAd: ac.is_ad || false,
-      rejectNumber: await getOpt080Number(ac.user_id, ac.company_id),
+      rejectNumber: spamRejectNumber,
       firstRecipient,
-      maxRetries: 0, // 재생성 없이 1회 테스트만
+      maxRetries: 2, // ★ Harold님 정책: 통과까지 재시도
+      regenerateCallback: async (blockedVariantId: string) => {
+        try {
+          console.log(`${logPrefix} 스팸 차단 — 새 문안 재생성 (variant ${blockedVariantId})`);
+          // 1단계와 동일 패턴: 회사 정보 조회 + extraContext 구성 + generateMessages 호출
+          const companyResult = await query(
+            `SELECT company_name, brand_name, brand_tone, brand_description, brand_slogan,
+                    COALESCE(reject_number, opt_out_080_number) as reject_number, customer_schema
+             FROM companies WHERE id = $1`,
+            [ac.company_id]
+          );
+          const companyInfo = companyResult.rows[0] || {};
+          if (ac.user_id) {
+            const userOptResult = await query('SELECT opt_out_080_number FROM users WHERE id = $1', [ac.user_id]);
+            const userOpt080 = userOptResult.rows[0]?.opt_out_080_number;
+            if (userOpt080) companyInfo.reject_number = userOpt080;
+          }
+          const { fieldMappings: varCatalog, availableVars } = extractVarCatalog(companyInfo.customer_schema);
+          await filterVarCatalogByData(varCatalog, availableVars, ac.company_id);
+          const rawPersonalFields: string[] = Array.isArray(ac.personal_fields) ? ac.personal_fields : [];
+          let customFieldLabels: Record<string, string> = {};
+          if (rawPersonalFields.some(k => k.startsWith('custom_'))) {
+            const cfdResult = await query(
+              `SELECT field_key, field_label FROM customer_field_definitions WHERE company_id = $1 AND field_key LIKE 'custom_%'`,
+              [ac.company_id]
+            );
+            for (const row of cfdResult.rows) customFieldLabels[row.field_key] = row.field_label;
+          }
+          const personalizationVars: string[] = rawPersonalFields.map(key => {
+            const field = getFieldByKey(key);
+            if (field) return field.displayName;
+            if (customFieldLabels[key]) return customFieldLabels[key];
+            return key;
+          });
+          const regenResult = await generateMessages(
+            (ac.ai_prompt || ac.campaign_name) + '\n(이전 문안이 스팸필터에 차단되었습니다. 다른 표현으로 작성해주세요.)',
+            { total_count: 0, avg_purchase_count: 0, avg_total_spent: 0 },
+            {
+              brandName: companyInfo.brand_name || companyInfo.company_name || '브랜드',
+              brandTone: companyInfo.brand_tone,
+              brandDescription: companyInfo.brand_description,
+              brandSlogan: companyInfo.brand_slogan,
+              channel: channel,
+              isAd: ac.is_ad ?? false,
+              rejectNumber: companyInfo.reject_number,
+              availableVarsCatalog: varCatalog,
+              availableVars,
+              usePersonalization: personalizationVars.length > 0,
+              personalizationVars,
+            }
+          );
+          if (regenResult.variants?.length > 0) {
+            const nv = regenResult.variants[0] as any;
+            return {
+              messageText: nv.message_text || nv.sms_text || nv.lms_text || '',
+              subject: nv.subject,
+            };
+          }
+          return null;
+        } catch (regenErr) {
+          console.error(`${logPrefix} 재생성 실패:`, regenErr);
+          return null;
+        }
+      },
     });
+
+    // ★ D142+ B3: 재생성된 문안이 있으면 generated_message_content UPDATE
+    //   본 발송(`executeAutoCampaign`) 시 최신 통과 문안 사용 보장
+    const regeneratedFinal = spamResult.variants[0];
+    if (regeneratedFinal?.regenerated && regeneratedFinal.messageText) {
+      await query(
+        `UPDATE auto_campaigns SET generated_message_content = $1, generated_message_subject = $2 WHERE id = $3`,
+        [regeneratedFinal.messageText, regeneratedFinal.subject || ac.generated_message_subject, ac.id]
+      );
+      ac.generated_message_content = regeneratedFinal.messageText;
+      if (regeneratedFinal.subject) ac.generated_message_subject = regeneratedFinal.subject;
+      console.log(`${logPrefix} 재생성된 문안으로 generated_message_content 갱신`);
+    }
 
     // 결과 판정
     const finalVariant = spamResult.variants[0];

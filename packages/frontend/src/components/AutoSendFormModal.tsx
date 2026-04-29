@@ -14,7 +14,7 @@
 
 import { useEffect, useState, useMemo, useRef } from 'react';
 import { aiApi } from '../api/client';
-import { calculateSmsBytes, buildAdMessageFront, buildAdSubjectFront, replaceMessageVars, formatPhoneNumber } from '../utils/formatDate';
+import { calculateSmsBytes, buildAdMessageFront, buildAdSubjectFront, replaceMessageVars, formatPhoneNumber, getMaxByteMessage } from '../utils/formatDate';
 import MmsImagePreview from './shared/MmsImagePreview';
 import { insertAtCursorPos } from '../utils/textInsert';
 import AiMessageSuggestModal from './AiMessageSuggestModal';
@@ -167,6 +167,8 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
 
   // ★ D105: 스팸테스트 개인화용 샘플 고객 (P8 — recommend-target에서 받은 타겟 매칭 고객)
   const [spamSampleCustomer, setSpamSampleCustomer] = useState<Record<string, any> | undefined>(undefined);
+  // ★ D142+ (2026-04-29) 0429 PDF B4 — 머지값 max byte 계산용 N명 sample (recommend-target에서 100명 받음)
+  const [sampleCustomersRaw, setSampleCustomersRaw] = useState<Record<string, any>[]>([]);
 
   // MMS 이미지
   const [mmsUploadedImages, setMmsUploadedImages] = useState<{ url: string; file?: File }[]>(
@@ -281,13 +283,31 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
   // ★ D95: 바이트 계산 — formatDate.ts 컨트롤타워 사용
   const getByteLength = calculateSmsBytes;
 
-  // ★ D142 (2026-04-28) PDF 0428 #8: 자동발송 SMS 바이트 계산이 개인화 미반영되던 사고.
-  //   기존: getByteLength(messageContent) — 원본 메시지만 계산 → 개인화로 길어진 실 발송 메시지 잘려서 발송됨.
-  //   해결: spamSampleCustomer(recommend-target에서 받은 실 타겟 샘플)로 변수치환 + (광고)+080 부착 후 계산.
-  //         AiCustomSendFlow:1129 패턴 이식. 직접발송에 이미 적용된 패턴.
-  const previewMsg = spamSampleCustomer
-    ? replaceMessageVars(messageContent, availableFields as any, spamSampleCustomer)
-    : messageContent;
+  // ★ D142+ (2026-04-29) 0429 PDF B4 — 머지값 max byte 기준 보수적 byte 계산
+  //   히스토리:
+  //     · D142 (#8): spamSampleCustomer 1명 기준 변수치환 → 다른 고객 길이로 실발송 시 잘림
+  //     · D142+ (B4, 0429): getMaxByteMessage 컨트롤타워 적용 — recommend-target 응답 sampleCustomersRaw
+  //       (100명) 중 변수별 가장 긴 값으로 치환 → 실발송에서 잘림 없는 보수적 byte 표시
+  //   직접발송/직접타겟발송에 이미 적용된 패턴(Dashboard.tsx:1071, 2020 / DirectSendPanel:307)을 자동발송에도 일관 적용.
+  //
+  // varMap 구성: availableFields의 display_name → field_key 매핑
+  //   예: { '%고객명%': 'name', '%생일%': 'birth_date', '%커스텀1%': 'custom_1' }
+  const autoVarMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const f of availableFields) {
+      if (!f.field_key || !f.display_name) continue;
+      if (f.field_key === 'phone' || f.field_key === 'sms_opt_in') continue;
+      map[`%${f.display_name}%`] = f.field_key;
+    }
+    return map;
+  }, [availableFields]);
+
+  // 머지값 max byte 메시지 (변수당 sample 100명 중 가장 긴 값으로 치환). sample 없으면 컨트롤타워의 한국어 기준 max 추정값 사용.
+  const previewMsg = sampleCustomersRaw.length > 0
+    ? getMaxByteMessage(messageContent, sampleCustomersRaw, autoVarMap)
+    : (spamSampleCustomer
+      ? replaceMessageVars(messageContent, availableFields as any, spamSampleCustomer)
+      : getMaxByteMessage(messageContent, [], autoVarMap)); // sample 0건이면 한국어 max 추정값 사용
   const fullMsg = buildAdMessageFront(
     previewMsg,
     (messageType === 'SMS' || messageType === 'LMS' || messageType === 'MMS' ? messageType : 'SMS') as 'SMS' | 'LMS' | 'MMS',
@@ -341,6 +361,10 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
           const raw = data.sample_customer_raw;
           // custom_fields JSONB flat 처리 (백엔드 replaceVariables가 접근 가능하도록)
           setSpamSampleCustomer({ ...raw, ...(raw.custom_fields || {}) });
+        }
+        // ★ D142+ B4: 머지값 max byte 계산용 100명 sample (자동발송 미리보기 byte 정확도)
+        if (Array.isArray(data.sample_customers_raw)) {
+          setSampleCustomersRaw(data.sample_customers_raw);
         }
         if (Object.keys(filters).length === 0) {
           setToast({ show: true, type: 'warning', message: 'AI가 타겟 조건을 인식하지 못했습니다. 좀 더 구체적으로 입력해주세요.' });
@@ -1021,7 +1045,15 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
                       </div>
                     </div>
                     {aiGenerateEnabled && (
-                      <p className="text-xs text-violet-600 mt-1.5">발송 D-2에 AI가 문안을 자동 생성하고 스팸테스트까지 진행합니다.</p>
+                      <div className="mt-1.5 space-y-1">
+                        <p className="text-xs text-violet-600 leading-relaxed">
+                          발송 <strong>하루 전날(D-1)</strong> AI가 문안을 생성하고 스팸필터 통과 후 담당자에게 테스트 발송합니다.<br />
+                          발송 <strong>2시간 전</strong> 한 번 더 스팸필터로 점검하고, 차단 시 새 문안을 자동 생성하여 담당자 테스트까지 마친 뒤 본 발송됩니다.
+                        </p>
+                        <p className="text-[11px] text-amber-600 leading-relaxed">
+                          ※ 발송시각이 <strong>24시간 미만</strong>으로 등록될 경우, 발송 2시간 전 시점에 AI 문안이 생성됩니다.
+                        </p>
+                      </div>
                     )}
                   </div>
                 )}
@@ -1374,7 +1406,14 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
                   <div className="bg-violet-50 rounded-lg p-3 border border-violet-200">
                     <p className="text-xs text-violet-600 font-medium mb-1">AI 자동생성 설정</p>
                     <p className="text-sm text-gray-700 mb-2">{aiPrompt}</p>
-                    <p className="text-xs text-gray-500">발송 D-2에 AI가 문안을 생성하고 스팸테스트를 자동 진행합니다. 실패 시 아래 폴백 메시지가 발송됩니다.</p>
+                    <p className="text-xs text-gray-500 leading-relaxed">
+                      <strong>D-1(하루 전날):</strong> AI 문안 생성 → 스팸필터 통과 → 담당자 테스트 발송<br />
+                      <strong>D-day 2시간 전:</strong> 스팸필터 재점검 (차단 시 새 문안 자동 생성) → 담당자 테스트<br />
+                      <strong>D-day:</strong> 본 발송. AI 생성 실패 시 아래 폴백 메시지가 발송됩니다.
+                    </p>
+                    <p className="text-[11px] text-amber-600 mt-1.5 leading-relaxed">
+                      ※ 발송시각이 24시간 미만으로 등록되면 발송 2시간 전 시점에 AI 문안이 생성됩니다.
+                    </p>
                     <div className="mt-2 p-2 bg-white rounded border border-violet-100 text-xs text-gray-600">
                       <span className="font-medium text-violet-600">폴백: </span>{fallbackMessageContent}
                     </div>

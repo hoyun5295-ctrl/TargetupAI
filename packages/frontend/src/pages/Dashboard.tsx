@@ -44,7 +44,7 @@ import TodayStatsModal from '../components/TodayStatsModal';
 import UploadProgressModal from '../components/UploadProgressModal';
 import UploadResultModal from '../components/UploadResultModal';
 import { useAuthStore } from '../stores/authStore';
-import { formatDate, formatPreviewValue, formatByType, calculateSmsBytes, truncateToSmsBytes, DIRECT_VAR_MAP, DIRECT_VAR_TO_FIELD, DIRECT_FIELD_LABELS, DIRECT_MAPPING_FIELDS, replaceDirectVars, formatPhoneNumber, mmsServerPathToUrl, resolveRecipientCallback, buildAdMessageFront, validateMmsBeforeSend } from '../utils/formatDate';
+import { formatDate, formatPreviewValue, formatByType, calculateSmsBytes, truncateToSmsBytes, DIRECT_VAR_MAP, DIRECT_VAR_TO_FIELD, DIRECT_FIELD_LABELS, DIRECT_MAPPING_FIELDS, replaceDirectVars, formatPhoneNumber, mmsServerPathToUrl, resolveRecipientCallback, buildAdMessageFront, validateMmsBeforeSend, getMaxByteMessage } from '../utils/formatDate';
 import { insertAtCursorOrAppend } from '../utils/textInsert';
 import { getMmsImagePath, getMmsImageDisplayName, toMmsImagePaths, type MmsImageItem } from '../utils/mmsImage';
 import DirectSendPanel from '../components/DirectSendPanel';
@@ -1037,32 +1037,9 @@ export default function Dashboard() {
     };
   }, []);
 
-// 자동입력 변수를 수신자 중 가장 긴 값으로 치환하여 최대 바이트 메시지 생성
-const getMaxByteMessage = (msg: string, recipients: any[], variableMap: Record<string, string>) => {
-  let result = msg;
-  // variableMap: { '%이름%': 'name', '%등급%': 'grade', ... }
-  Object.entries(variableMap).forEach(([variable, field]) => {
-    if (!result.includes(variable)) return;
-    // 수신자 중 해당 필드의 가장 긴 값 찾기
-    let maxValue = '';
-    recipients.forEach((r: any) => {
-      const val = String(r[field] || '');
-      if (val.length > maxValue.length) maxValue = val;
-    });
-    // 수신자가 없거나 값이 없으면 기본 최대값 사용
-    if (!maxValue) {
-      const defaults: Record<string, string> = {
-        '%이름%': '홍길동어머니', '%등급%': 'VVIP', '%지역%': '경기도 성남시',
-        '%매장명%': '서울특별시 강남본점', '%포인트%': '9,999,999',
-        '%구매금액%': '99,999,999원', '%기타1%': '가나다라마바사', '%기타2%': '가나다라마바사', '%기타3%': '가나다라마바사',
-        '%회신번호%': '07012345678',
-      };
-      maxValue = defaults[variable] || '가나다라마바';
-    }
-    result = result.replace(new RegExp(variable.replace(/%/g, '%'), 'g'), maxValue);
-  });
-  return result;
-};
+// ★ D142+ (2026-04-29) 0429 PDF B4: 인라인 getMaxByteMessage 제거
+//   formatDate.ts 컨트롤타워로 승격 → import해서 사용 (위 import 라인).
+//   자동발송에도 동일 컨트롤타워 적용 (AutoSendFormModal). 5경로 일관성 보장.
   // 바이트 초과 시 자동 LMS 전환 (SMS→LMS만, LMS→SMS 복귀는 수동)
   useEffect(() => {
     // 메시지 변경 시 오버라이드 리셋

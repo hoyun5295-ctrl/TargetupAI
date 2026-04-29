@@ -5,7 +5,7 @@ import { authenticate } from '../middlewares/auth';
 import { extractVarCatalog, validatePersonalizationVars, VarCatalogEntry } from '../services/ai';
 import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getRegionVariants } from '../utils/normalize';
 import { getSourceRef, logTrainingData, updateTrainingMetrics } from '../utils/training-logger';
-import { replaceVariables, enrichWithCustomFields, getOpt080Number, buildAdMessage, prepareFieldMappings, prepareSendMessage } from '../utils/messageUtils';
+import { replaceVariables, enrichWithCustomFields, getOpt080Number, buildAdMessage, prepareFieldMappings, prepareSendMessage, stripAdParts } from '../utils/messageUtils';
 import { SUCCESS_CODES, PENDING_CODES, isSuccess, isFail, SPAM_RESULT } from '../utils/sms-result-map';
 import { DEFAULT_COSTS, redis, CACHE_TTL, BATCH_SIZES, SEND_HOURS } from '../config/defaults';
 import { isValidSmsTable } from '../utils/sms-table-validator';
@@ -476,6 +476,12 @@ router.post('/', async (req: Request, res: Response) => {
       return res.status(400).json({ error: '필수 항목을 입력하세요.' });
     }
 
+    // ★ D142+ (2026-04-29) 0429 PDF B1 — D103 강제 정규화 + 광고 자동 승격
+    //   사용자가 본문에 (광고)/무료거부를 직접 박은 경우 정규화하여 DB는 항상 순수본문
+    const sanitizedContent = stripAdParts(messageContent || '');
+    const hadAdMarkerAi = (messageContent || '') !== sanitizedContent;
+    const finalIsAdAi = (isAd === true) || hadAdMarkerAi;
+
     // ★ D131: MMS 이미지 첨부 필수 가드 — mms-validator 컨트롤타워
     const aiMmsCheck = validateMmsPayload(messageType, mmsImagePaths);
     if (!aiMmsCheck.ok) {
@@ -514,7 +520,8 @@ router.post('/', async (req: Request, res: Response) => {
       RETURNING *`,
       [
         companyId, campaignName, messageType, JSON.stringify(targetFilter),
-        messageContent, subject || null, subject || null, messageContent, scheduledAt, isAd ?? false, targetCount, userId,
+        // ★ D142+ B1: sanitizedContent(D103 순수본문) + finalIsAdAi(자동 승격) 사용
+        sanitizedContent, subject || null, subject || null, sanitizedContent, scheduledAt, finalIsAdAi, targetCount, userId,
         eventStartDate || null, eventEndDate || null,
         mmsImagePaths && mmsImagePaths.length > 0 ? JSON.stringify(mmsImagePaths) : null,
         sendChannel || 'sms',
@@ -1295,6 +1302,15 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       unsubFilterEnabled = true,
     } = req.body;
 
+    // ★ D142+ (2026-04-29) 0429 PDF B1 — D103 강제 정규화 + 광고 자동 승격
+    //   사용자가 textarea에 (광고)/무료거부를 직접 박은 변칙 입력 시
+    //   ① 본문에서 (광고)/무료거부 마커 제거 → DB는 항상 순수본문
+    //   ② 마커 발견 시 사용자 의도가 광고 발송이라 보고 is_ad 자동 승격
+    //   stripAdParts는 idempotent — 이미 순수본문이면 변화 없음
+    const sanitizedMessage = stripAdParts(message || '');
+    const hadAdMarker = (message || '') !== sanitizedMessage;
+    const finalIsAd = (adEnabled === true) || hadAdMarker;
+
     // ★ D102: customMessageMap 제거 — 프론트 치환 폐기, 백엔드 replaceVariables 컨트롤타워 통일
 
     if (!recipients || recipients.length === 0) {
@@ -1474,13 +1490,13 @@ router.post('/direct-send', async (req: Request, res: Response) => {
         companyId,
         `직접발송 ${new Date().toLocaleString('ko-KR')}`,
         msgType,
-        message,
+        sanitizedMessage,  // ★ D142+ B1: stripAdParts로 (광고)/무료거부 제거된 순수본문 (D103)
         subject || null,
         callback,
         filteredRecipients.length,
         scheduled ? 'scheduled' : 'sending',
         scheduled && scheduledAt ? new Date(scheduledAt) : null,
-        message,  // message_template: 원본 템플릿
+        sanitizedMessage,  // ★ D142+ B1: message_template 도 순수본문 동일 적용
         subject || null,  // message_subject: 원본 제목
         userId,  // created_by: 발송자
         mmsImagePaths && mmsImagePaths.length > 0 ? JSON.stringify(mmsImagePaths) : null,
@@ -1491,7 +1507,7 @@ router.post('/direct-send', async (req: Request, res: Response) => {
         kakaoAttachmentJson || null,
         kakaoCarouselJson || null,
         kakaoResendType || 'SM',
-        adEnabled ?? false,  // ★ is_ad 명시 저장
+        finalIsAd,  // ★ D142+ B1: 본문에 (광고) 마커 있으면 사용자 의도가 광고라 보고 자동 승격
       ]
     );
     const campaignId = campaignResult.rows[0].id;
@@ -1520,7 +1536,8 @@ router.post('/direct-send', async (req: Request, res: Response) => {
     let directSmsSentCount = 0;
 
     // ★ D102: 080 수신거부번호 — CT-AD 컨트롤타워 사용
-    const directOpt080 = adEnabled ? await getOpt080Number(userId, companyId) : '';
+    // ★ D142+ B1: finalIsAd(광고 자동 승격 결과) 기준 — 사용자가 본문에 (광고) 박았으면 080번호 조회
+    const directOpt080 = finalIsAd ? await getOpt080Number(userId, companyId) : '';
 
     // ★ D102: prepareFieldMappings 컨트롤타워로 통합 (customer_schema 조회 + extractVarCatalog + enrichWithCustomFields)
     const directFieldMappings = await prepareFieldMappings(companyId);
@@ -1548,8 +1565,9 @@ router.post('/direct-send', async (req: Request, res: Response) => {
         const cleanPhone = normalizePhone(recipient.phone);
         const dbCustomer = directCustomerMap.get(cleanPhone) || null;
         // ★ D123: 직접발송은 고객이 올린 데이터 그대로 (숫자 콤마 자동변환 안 함)
-        const { message: finalMessage, subject: finalSubject } = prepareSendMessage(message, dbCustomer, directFieldMappings, {
-          msgType, isAd: adEnabled, opt080Number: directOpt080,
+        // ★ D142+ B1: sanitizedMessage(D103 순수본문) + finalIsAd(자동승격) 사용 — INSERT/표시/발송 일관성
+        const { message: finalMessage, subject: finalSubject } = prepareSendMessage(sanitizedMessage, dbCustomer, directFieldMappings, {
+          msgType, isAd: finalIsAd, opt080Number: directOpt080,
           addressBookFields: {
             name: recipient.name,
             extra1: recipient.extra1,
@@ -1604,7 +1622,8 @@ router.post('/direct-send', async (req: Request, res: Response) => {
           const cleanKakaoPhone = normalizePhone(recipient.phone);
           const dbKakaoCustomer = directCustomerMap.get(cleanKakaoPhone) || null;
           // ★ D123: 직접발송 카카오도 고객 원본 데이터 그대로
-          const finalMessage = replaceVariables(message, dbKakaoCustomer, directFieldMappings, {
+          // ★ D142+ B1: sanitizedMessage(D103 순수본문) 사용 — INSERT와 발송 본문 일관
+          const finalMessage = replaceVariables(sanitizedMessage, dbKakaoCustomer, directFieldMappings, {
             name: recipient.name,
             extra1: recipient.extra1,
             extra2: recipient.extra2,
@@ -1632,7 +1651,8 @@ router.post('/direct-send', async (req: Request, res: Response) => {
             phone: normalizePhone(recipient.phone),
             targeting: kakaoTargeting || 'I',
             message: finalMessage,
-            isAd: adEnabled || false,
+            // ★ D142+ B1: finalIsAd(자동 승격) 사용 — INSERT/SMS 발송과 일관
+            isAd: finalIsAd,
             reservedDate: kakaoSendTime,
             attachmentJson: kakaoAttachmentJson || undefined,
             carouselJson: kakaoCarouselJson || undefined,
@@ -1800,8 +1820,9 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       brandTone: directCompanyInfo.rows[0]?.brand_tone,
       targetCount: filteredRecipients.length,
       messageType: msgType,
-      isAd: adEnabled || false,
-      finalMessage: message || '',
+      // ★ D142+ B1: finalIsAd / sanitizedMessage 사용 — DB와 학습로그 일관
+      isAd: finalIsAd,
+      finalMessage: sanitizedMessage,
       finalSource: 'manual',
       sendAt: scheduled && scheduledAt ? new Date(scheduledAt) : new Date(),
     });
@@ -2136,6 +2157,10 @@ router.put('/:id/message', async (req: Request, res: Response) => {
     const companyId = (req as any).user?.companyId;
     const campaignId = req.params.id;
     const { message, subject } = req.body;
+    // ★ D142+ (2026-04-29) 0429 PDF B1 — 메시지 수정 시에도 D103 강제 정규화
+    //   사용자가 본문에 (광고)/무료거부를 박은 경우 DB는 순수본문만 저장.
+    //   캠페인 자체의 is_ad는 변경하지 않음 (수정 범위 외). 광고 부착은 캠페인 is_ad 기준.
+    const sanitizedEditMessage = stripAdParts(message || '');
 
     // 캠페인 확인
     const campaign = await query(
@@ -2173,7 +2198,8 @@ router.put('/:id/message', async (req: Request, res: Response) => {
     if (recipients.length === 0) {
       await query(
         `UPDATE campaigns SET message_template = $1, message_subject = $2, message_content = $3, updated_at = NOW() WHERE id = $4`,
-        [message, subject || null, message, campaignId]
+        // ★ D142+ B1: sanitizedEditMessage(D103 순수본문) 저장
+        [sanitizedEditMessage, subject || null, sanitizedEditMessage, campaignId]
       );
       return res.json({ success: true, message: '문안이 수정되었습니다 (발송 시 적용)' });
     }
@@ -2237,7 +2263,8 @@ router.put('/:id/message', async (req: Request, res: Response) => {
           const customer = customerMap.get(recipient.dest_no) || {};
 
           // ★ D103: prepareSendMessage 컨트롤타워 — 변수 치환 + (광고)+080 + ★ KISA 2026-05 제목(광고) 통합
-          const { message: finalMessage, subject: finalSubject } = prepareSendMessage(message, customer, editFieldMappings, {
+          // ★ D142+ B1: sanitizedEditMessage(D103 순수본문) 사용 — 메시지 수정 시 (광고) 중복 부착 차단
+          const { message: finalMessage, subject: finalSubject } = prepareSendMessage(sanitizedEditMessage, customer, editFieldMappings, {
             msgType, isAd: adEnabled, opt080Number: optOut080,
             subject: subject || '',
           });
@@ -2283,7 +2310,8 @@ router.put('/:id/message', async (req: Request, res: Response) => {
     // 5. PostgreSQL 캠페인 템플릿 업데이트
     await query(
       `UPDATE campaigns SET message_template = $1, message_subject = $2, message_content = $3, updated_at = NOW() WHERE id = $4`,
-      [message, subject || null, message, campaignId]
+      // ★ D142+ B1: sanitizedEditMessage(D103 순수본문) 저장 — DB 일관성
+      [sanitizedEditMessage, subject || null, sanitizedEditMessage, campaignId]
     );
 
     res.json({

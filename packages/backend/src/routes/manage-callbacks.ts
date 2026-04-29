@@ -9,6 +9,7 @@ import {
   getAssignmentsByCallback,
   replaceAssignments,
 } from '../utils/sender-registration';
+import { normalizePhone } from '../utils/normalize-phone';
 
 const router = Router();
 
@@ -92,6 +93,12 @@ router.post('/', async (req: Request, res: Response) => {
     return res.status(400).json({ error: '회사와 발신번호는 필수입니다.' });
   }
 
+  // ★ D142+ (2026-04-29) 0429 PDF B5 — phone 정규화 + 중복 등록 사전 차단
+  const normalizedPhone = normalizePhone(phone);
+  if (normalizedPhone.length < 8 || normalizedPhone.length > 11) {
+    return res.status(400).json({ error: '유효하지 않은 발신번호 형식입니다.' });
+  }
+
   // 고객사관리자: 자체등록 허용 여부 체크
   if (callerType === 'company_admin') {
     const allowed = await checkSelfRegisterAllowed(callerCompanyId!);
@@ -101,11 +108,24 @@ router.post('/', async (req: Request, res: Response) => {
   }
 
   try {
+    // ★ 사전 중복 체크 (정규화된 phone 기준)
+    const dupCheck = await pool.query(
+      `SELECT id FROM callback_numbers WHERE company_id = $1 AND regexp_replace(phone, '\\D', '', 'g') = $2`,
+      [targetCompanyId, normalizedPhone]
+    );
+    if (dupCheck.rows.length > 0) {
+      return res.status(409).json({
+        error: '이미 등록된 발신번호입니다. 같은 고객사에 동일한 번호를 중복 등록할 수 없습니다.',
+        code: 'DUPLICATE_CALLBACK_NUMBER',
+      });
+    }
+
     // 대표번호로 설정 시 기존 대표번호 해제
     if (isDefault) {
       await pool.query('UPDATE callback_numbers SET is_default = false WHERE company_id = $1', [targetCompanyId]);
     }
 
+    // ★ D142+ B5: INSERT는 사용자 입력 phone 그대로 저장 (UI 표시 형식 유지)
     const result = await pool.query(`
       INSERT INTO callback_numbers (company_id, phone, label, is_default, store_code, store_name)
       VALUES ($1, $2, $3, $4, $5, $6)
@@ -116,7 +136,13 @@ router.post('/', async (req: Request, res: Response) => {
       message: '발신번호가 등록되었습니다.',
       callbackNumber: result.rows[0]
     });
-  } catch (error) {
+  } catch (error: any) {
+    if (error?.code === '23505') {
+      return res.status(409).json({
+        error: '이미 등록된 발신번호입니다. 같은 고객사에 동일한 번호를 중복 등록할 수 없습니다.',
+        code: 'DUPLICATE_CALLBACK_NUMBER',
+      });
+    }
     console.error('발신번호 등록 실패:', error);
     res.status(500).json({ error: '발신번호 등록 실패' });
   }

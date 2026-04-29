@@ -310,6 +310,10 @@ router.post('/recommend-target', async (req: Request, res: Response) => {
 
     let sampleCustomer: Record<string, string> = {};
     let sampleCustomerRaw: Record<string, any> = {};
+    // ★ D142+ (2026-04-29) 0429 PDF B4 — 머지값 max byte 계산용 N명 sample
+    //   기존: LIMIT 1 → 자동발송 미리보기 byte ≠ 실발송 byte 차이로 잘림 사고
+    //   변경: LIMIT 100 → 프론트 getMaxByteMessage()가 가장 긴 변수값으로 보수적 byte 계산
+    let sampleCustomersRaw: Record<string, any>[] = [];
     try {
       const sampleResult = await query(
         `SELECT name, gender, age, grade, points, email, address,
@@ -320,9 +324,24 @@ router.post('/recommend-target', async (req: Request, res: Response) => {
          FROM customers c
          WHERE c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true${storeFilter} ${sampleFilterWhere}
          AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${sampleUnsubIdx} AND u.phone = c.phone)
-         ORDER BY c.updated_at DESC NULLS LAST LIMIT 1`,
+         ORDER BY c.updated_at DESC NULLS LAST LIMIT 100`,
         [...baseParams, ...sampleFilterParams, userId]
       );
+
+      // ★ D142+ B4: 100명 raw 배열 매핑 (column 키 + custom_fields 평면화 + enum 역변환)
+      for (const row of sampleResult.rows) {
+        const rawRow: Record<string, any> = { ...row };
+        for (const fk of Object.keys(FIELD_DISPLAY_MAP)) {
+          if (rawRow[fk] != null) rawRow[fk] = reverseDisplayValue(fk, rawRow[fk]);
+        }
+        // custom_fields JSONB 내부 키를 최상위로 평면화 (getMaxByteMessage가 r.custom_1 직접 접근)
+        if (rawRow.custom_fields && typeof rawRow.custom_fields === 'object') {
+          for (const [k, v] of Object.entries(rawRow.custom_fields)) {
+            if (rawRow[k] === undefined) rawRow[k] = v;
+          }
+        }
+        sampleCustomersRaw.push(rawRow);
+      }
 
       if (sampleResult.rows[0]) {
         const row = sampleResult.rows[0];
@@ -380,6 +399,8 @@ router.post('/recommend-target', async (req: Request, res: Response) => {
     }
     (result as any).sample_customer = sampleCustomer;
     (result as any).sample_customer_raw = sampleCustomerRaw;
+    // ★ D142+ B4: 머지값 max byte 계산용 N명 sample (자동발송 미리보기 byte 정확도 보장)
+    (result as any).sample_customers_raw = sampleCustomersRaw;
 
     return res.json(result);
   } catch (error) {

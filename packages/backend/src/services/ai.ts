@@ -786,6 +786,40 @@ SMS/LMS/MMS: 이모지 절대 금지! 아래 특수문자만 사용:
 }`;
 
 // ============================================================
+// ★ D142+ (2026-04-29) 0429 PDF B2 — [브랜드] placeholder 후처리 컨트롤타워
+//
+// AI(Anthropic/OpenAI)가 프롬프트의 `브랜드명은 "[${brandName}]" 형태로 정확히 사용` 지침을
+// 종종 무시하고 `[브랜드]` 또는 `[브랜드명]` placeholder를 그대로 출력하는 케이스가 있다.
+// 모든 AI 결과 반환 직전에 이 헬퍼로 후처리 → 한 곳에서 모든 호출 경로 자동 해결.
+//
+// - brandName 폴백값('브랜드')일 때는 치환 안 함 (회사 정보 미입력 상태 — 원래 동작 유지)
+// - 결과 객체의 모든 string 필드에 재귀적으로 적용 (variants/promotion_card/subject 등 누락 방지)
+// - `[${brandName}]` 형태로 치환 — D109 메시지 디자인 일관성 (대괄호 강조 유지)
+// ============================================================
+
+function replaceBrandPlaceholder(text: string, brandName: string): string {
+  if (!text || !brandName || brandName === '브랜드') return text;
+  return text
+    .replace(/\[브랜드명\]/g, `[${brandName}]`)
+    .replace(/\[브랜드\]/g, `[${brandName}]`)
+    .replace(/\[Brand\]/g, `[${brandName}]`);
+}
+
+function deepReplaceBrand<T>(obj: T, brandName: string): T {
+  if (!brandName || brandName === '브랜드') return obj;
+  if (typeof obj === 'string') return replaceBrandPlaceholder(obj, brandName) as any;
+  if (Array.isArray(obj)) return obj.map(item => deepReplaceBrand(item, brandName)) as any;
+  if (obj && typeof obj === 'object') {
+    const result: any = {};
+    for (const key of Object.keys(obj as any)) {
+      result[key] = deepReplaceBrand((obj as any)[key], brandName);
+    }
+    return result;
+  }
+  return obj;
+}
+
+// ============================================================
 // 메시지 생성 (generateMessages)
 // ============================================================
 
@@ -1002,8 +1036,9 @@ ${usePersonalization ? `- 사용할 개인화 변수: ${personalizationTags}
         }
       }
     }
-    
-    return result;
+
+    // ★ D142+ B1(0429 PDF B2): [브랜드] placeholder → [실제브랜드명] 후처리
+    return deepReplaceBrand(result, brandName);
   } catch (error) {
     console.error('AI 메시지 생성 오류:', error);
     return getFallbackVariants(extraContext);
@@ -1339,7 +1374,8 @@ ${varCatalogPrompt}
         : (aiPersonalizationVars.length > 0 ? aiPersonalizationVars : personalizationVars))
       : [];
     
-    return {
+    // ★ D142+ B1(0429 PDF B2): [브랜드] placeholder → [실제브랜드명] 후처리
+    return deepReplaceBrand({
       filters: result.filters,
       reasoning: result.reasoning,
       estimated_count: Math.round((customerStats.total * (result.estimated_percentage ?? 10)) / 100),
@@ -1351,7 +1387,7 @@ ${varCatalogPrompt}
       use_individual_callback: result.use_individual_callback || useIndividualCallback,
       use_personalization: finalUsePersonalization,
       personalization_vars: finalPersonalizationVars,
-    };
+    }, brandName);
   } catch (error) {
     console.error('AI 타겟 추천 오류:', error);
     return {
@@ -1962,10 +1998,11 @@ ${channel} 채널에 최적화된 3가지 맞춤 문안(A/B/C)을 생성해주�
       }
     }
 
-    return {
+    // ★ D142+ B1(0429 PDF B2): [브랜드] placeholder → [실제브랜드명] 후처리
+    return deepReplaceBrand({
       variants: result.variants || [],
       recommendation: result.recommendation || 'A',
-    };
+    }, brandName);
   } catch (error) {
     console.error('맞춤 문안 생성 오류:', error);
     return {
@@ -2253,13 +2290,14 @@ ${JSON.stringify(performanceData, null, 2)}
     }
 
     const result = JSON.parse(jsonStr);
-    return {
+    // ★ D142+ B1(0429 PDF B2): [브랜드] placeholder → [실제브랜드명] 후처리
+    return deepReplaceBrand({
       recommended_target: result.recommended_target || { filters: {}, reasoning: '' },
       recommended_time: result.recommended_time || '',
       recommended_channel: result.recommended_channel || 'SMS',
       insights: result.insights || [],
       suggested_objective: result.suggested_objective || '',
-    };
+    }, brandName);
   } catch (err) {
     console.error('[AI] recommendNextCampaign 실패:', err);
     return {
