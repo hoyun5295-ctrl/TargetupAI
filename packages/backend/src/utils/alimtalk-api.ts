@@ -881,7 +881,25 @@ async function uploadSingleImage(
   const res = await getClient().post(endpoint, form, {
     headers: { ...form.getHeaders(), 'x-imc-api-key': getApiKey() },
   });
-  return res.data;
+  const data: any = res.data;
+  // ★ D142+ E (2026-04-29) PDF 0428 알림톡 #1-1/#2: "카카오 응답에 이미지 정보가 없습니다" 근본 수정.
+  //   IMC가 `{code,message,data:{data:{imageUrl,imageName}}}` 이중 래핑 응답 케이스 확인됨 (D131 sender/template과 동일 패턴).
+  //   uploadSingleImage가 unwrap 없이 res.data 그대로 반환 → frontend `data.imc.data.imageUrl` → undefined → 에러 throw.
+  //   해결: data.data.imageUrl 없는데 data.data.data.imageUrl 있으면 unwrap.
+  if (
+    data && data.data && typeof data.data === 'object' && !data.data.imageUrl
+    && data.data.data && typeof data.data.data === 'object' && data.data.data.imageUrl
+  ) {
+    console.log(`[alimtalk][uploadImage] 이중 래핑 unwrap: ${endpoint}`);
+    data.data = data.data.data;
+  }
+  // 운영 진단용 raw 로그
+  try {
+    console.log(
+      `[alimtalk][uploadImage] ${endpoint} code=${data?.code} hasImageUrl=${!!data?.data?.imageUrl} hasImageName=${!!data?.data?.imageName} rawSnippet=${JSON.stringify(data).slice(0, 500)}`,
+    );
+  } catch { /* noop */ }
+  return data;
 }
 
 async function uploadMultipleImages(
@@ -894,7 +912,21 @@ async function uploadMultipleImages(
   const res = await getClient().post(endpoint, form, {
     headers: { ...form.getHeaders(), 'x-imc-api-key': getApiKey() },
   });
-  return res.data;
+  const data: any = res.data;
+  // ★ D142+ E (2026-04-29): 다중 이미지도 동일 unwrap 패턴 — data.list 없는데 data.data.list 있으면 승격.
+  if (
+    data && data.data && typeof data.data === 'object' && !Array.isArray(data.data.list)
+    && data.data.data && typeof data.data.data === 'object' && Array.isArray(data.data.data.list)
+  ) {
+    console.log(`[alimtalk][uploadImage(multi)] 이중 래핑 unwrap: ${endpoint}`);
+    data.data = data.data.data;
+  }
+  try {
+    console.log(
+      `[alimtalk][uploadImage(multi)] ${endpoint} code=${data?.code} listCount=${data?.data?.list?.length || 0}`,
+    );
+  } catch { /* noop */ }
+  return data;
 }
 
 // 알림톡용 (2개)

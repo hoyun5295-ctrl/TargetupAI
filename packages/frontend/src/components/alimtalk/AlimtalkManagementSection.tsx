@@ -131,6 +131,12 @@ export default function AlimtalkManagementSection() {
   const [viewing, setViewing] = useState<Partial<TemplateFormData> | null>(null);
   const [showAlarm, setShowAlarm] = useState(false);
   const [showWizard, setShowWizard] = useState(false);
+
+  // ★ D142+ F (2026-04-29): 검수요청 시 코멘트 + 증빙자료 입력 모달용 state
+  const [inspectionTarget, setInspectionTarget] = useState<Template | null>(null);
+  const [inspectionComment, setInspectionComment] = useState('');
+  const [inspectionFile, setInspectionFile] = useState<File | null>(null);
+  const [inspectionSubmitting, setInspectionSubmitting] = useState(false);
   const [unsubTarget, setUnsubTarget] = useState<Profile | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
@@ -185,22 +191,62 @@ export default function AlimtalkManagementSection() {
     return templates.filter((t) => t.status === filter || t.status === filter.slice(0, 3));
   }, [templates, filter]);
 
-  const inspect = async (t: Template) => {
+  // ★ D142+ F (2026-04-29) PDF 0428 알림톡 #3: 검수요청 시 코멘트 + 증빙자료 입력 모달.
+  //   "코멘트 입력칸 + 코멘트 증빙자료 추가" — 직원 요구. backend는 이미 /inspect-with-file 보유.
+  //   (등록 폼 하단 추가는 DB 컬럼 마이그레이션 필요 → 별건. 우선 검수요청 시점에서 받음.)
+  const inspect = (t: Template) => {
     if (!['DRAFT', 'REJECTED', 'REJ'].includes(t.status)) {
       setToast('초안/반려 상태만 검수요청 가능');
       return;
     }
-    const res = await fetch(`/api/alimtalk/templates/${t.template_code}/inspect`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${getToken()}`,
-      },
-      body: JSON.stringify({ comment: '' }),
-    });
-    const data = await res.json();
-    setToast(data.success ? '검수요청 완료' : data?.error || '실패');
-    load();
+    setInspectionTarget(t);
+    setInspectionComment('');
+    setInspectionFile(null);
+  };
+
+  const submitInspection = async () => {
+    if (!inspectionTarget) return;
+    setInspectionSubmitting(true);
+    try {
+      let res;
+      if (inspectionFile) {
+        const fd = new FormData();
+        fd.append('file', inspectionFile);
+        fd.append('comment', inspectionComment || '');
+        res = await fetch(
+          `/api/alimtalk/templates/${inspectionTarget.template_code}/inspect-with-file`,
+          {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${getToken()}` },
+            body: fd,
+          },
+        );
+      } else {
+        res = await fetch(
+          `/api/alimtalk/templates/${inspectionTarget.template_code}/inspect`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${getToken()}`,
+            },
+            body: JSON.stringify({ comment: inspectionComment || '' }),
+          },
+        );
+      }
+      const data = await res.json();
+      setToast(data.success ? '검수요청 완료' : data?.error || '실패');
+      if (data.success) {
+        setInspectionTarget(null);
+        setInspectionComment('');
+        setInspectionFile(null);
+        load();
+      }
+    } catch (e: any) {
+      setToast(e?.message || '검수요청 중 오류');
+    } finally {
+      setInspectionSubmitting(false);
+    }
   };
 
   const cancelInspect = async (t: Template) => {
@@ -606,6 +652,72 @@ export default function AlimtalkManagementSection() {
           onClose={() => setViewing(null)}
           onSuccess={() => setViewing(null)}
         />
+      )}
+
+      {/* ★ D142+ F (2026-04-29): 검수요청 시 코멘트 + 증빙자료 입력 모달 (PDF 0428 알림톡 #3) */}
+      {inspectionTarget && (
+        <div
+          className="fixed inset-0 bg-black/40 z-[60] flex items-center justify-center animate-in fade-in duration-150"
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !inspectionSubmitting) {
+              setInspectionTarget(null);
+            }
+          }}
+        >
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full mx-4 p-6 animate-in zoom-in-95 duration-200">
+            <h3 className="text-lg font-semibold text-gray-900 mb-1">검수요청</h3>
+            <p className="text-xs text-gray-500 mb-4 truncate">
+              {inspectionTarget.template_name}
+            </p>
+
+            <label className="block text-xs font-semibold text-gray-700 mb-1">
+              코멘트 <span className="text-gray-400 font-normal">(생략 가능)</span>
+            </label>
+            <textarea
+              value={inspectionComment}
+              onChange={(e) => setInspectionComment(e.target.value)}
+              placeholder="정보성 메시지에 대한 근거 정보(생략가능)"
+              rows={4}
+              disabled={inspectionSubmitting}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm resize-none focus:ring-2 focus:ring-amber-300 focus:border-amber-400 outline-none disabled:bg-gray-50"
+            />
+
+            <label className="block text-xs font-semibold text-gray-700 mt-3 mb-1">
+              코멘트 증빙자료 <span className="text-gray-400 font-normal">(이미지/PDF, 생략 가능)</span>
+            </label>
+            <input
+              type="file"
+              accept="image/*,.pdf"
+              onChange={(e) => setInspectionFile(e.target.files?.[0] || null)}
+              disabled={inspectionSubmitting}
+              className="block w-full text-xs text-gray-600 file:mr-2 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:bg-amber-50 file:text-amber-700 hover:file:bg-amber-100"
+            />
+            {inspectionFile && (
+              <p className="text-[11px] text-gray-500 mt-1 truncate">
+                선택됨: {inspectionFile.name} ({Math.ceil(inspectionFile.size / 1024)} KB)
+              </p>
+            )}
+
+            <div className="flex gap-2 justify-end mt-5">
+              <button
+                type="button"
+                onClick={() => setInspectionTarget(null)}
+                disabled={inspectionSubmitting}
+                className="px-4 py-1.5 text-sm bg-gray-100 hover:bg-gray-200 rounded-lg disabled:opacity-50"
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                onClick={submitInspection}
+                disabled={inspectionSubmitting}
+                className="px-4 py-1.5 text-sm bg-amber-500 hover:bg-amber-600 text-white rounded-lg disabled:opacity-50"
+              >
+                {inspectionSubmitting ? '요청 중...' : '검수요청'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {showAlarm && <AlarmUserManager onClose={() => setShowAlarm(false)} />}

@@ -193,8 +193,9 @@ export default function AlimtalkTemplateFormV2({
     if (form.emphasizeType === 'IMAGE' && !form.imageName)
       return '이미지를 업로드하세요';
     if (form.emphasizeType === 'ITEM_LIST') {
-      if (!form.itemList || form.itemList.length === 0)
-        return '아이템리스트에 최소 1개 이상 항목이 필요합니다';
+      // ★ D142+ D (2026-04-29) PDF 0428 알림톡 [아이템리스트형] #1: 최소 1개 → 2개 (직원 정책)
+      if (!form.itemList || form.itemList.length < 2)
+        return '아이템리스트는 최소 2개 이상 항목이 필요합니다';
       // ★ D135+ (B8): 이미지/헤더/하이라이트 중 1개 이상 필수
       const hasImage = !!form.imageUrl;
       const hasHeader = !!form.header.trim();
@@ -227,6 +228,13 @@ export default function AlimtalkTemplateFormV2({
   };
 
   const handleSave = async () => {
+    // ★ D142+ A1 (2026-04-29): 재클릭 중복 등록 가드.
+    //   PDF 0428 알림톡 #1 신고 — "SUCCESS 피드백 이후 등록창 닫히지 않습니다. 안닫힌 상태로 '등록' 클릭 시 IMC 중복 등록".
+    //   원인: handleSave 진행 중 fetch 응답 직후 onSuccess→setEditing(undefined) 사이 unmount까지 시간차 +
+    //         finally의 setSaving(false)가 unmount 직전에 실행되면 재클릭 윈도우 발생.
+    //   해결: 상단에 `if (saving) return` 가드 + 성공 시 setSaving(true) 유지(모달 unmount까지) + 명시적 onClose fallback.
+    if (saving) return;
+
     const err = validate();
     if (err) {
       setToast({ type: 'error', message: err });
@@ -282,7 +290,10 @@ export default function AlimtalkTemplateFormV2({
       }
 
       // ★ D135+ (B4): 대표링크 payload
-      if (form.representLinkEnabled && form.representLinkMobile.trim()) {
+      // ★ D142+ B (2026-04-29) PDF 0428 알림톡 #3: "대표링크가 IMC로 전달이 안됩니다" 재발 차단.
+      //   직원이 체크박스 안 누르고 URL만 입력하면 페이로드 누락되던 사고 → 체크박스 의존 제거.
+      //   Mobile URL이 입력되어 있으면 무조건 페이로드 포함 (URL 입력 자체가 enabled 시그널).
+      if (form.representLinkMobile.trim()) {
         payload.templateRepresentLink = {
           urlMobile: form.representLinkMobile.trim(),
           ...(form.representLinkPc.trim() ? { urlPc: form.representLinkPc.trim() } : {}),
@@ -305,16 +316,20 @@ export default function AlimtalkTemplateFormV2({
           type: 'error',
           message: data?.error || `저장 실패 (${res.status})`,
         });
+        setSaving(false); // 실패 시에만 saving 해제 (재시도 가능)
         return;
       }
       // ★ D139 #4 (0425): 자동 검수요청 분기 제거 (등록과 검수요청 분리).
       //   템플릿은 DRAFT 상태로 저장 → 목록에서 '검수요청' 버튼으로 명시 액션.
+      // ★ D142+ A1+A2 (2026-04-29): 성공 시 setSaving(true) 유지 → 모달 unmount까지 등록 버튼 비활성화.
+      //   onSuccess()는 부모 setEditing(undefined) → 모달 unmount. onClose() 명시 호출로 fallback 안전망.
       onSuccess();
+      onClose(); // 안전장치: onSuccess가 setEditing(undefined) 못 하는 케이스도 모달 close 보장
     } catch (e: any) {
       setToast({ type: 'error', message: e?.message || '서버 오류' });
-    } finally {
-      setSaving(false);
+      setSaving(false); // 예외 시 재시도 가능하게 해제
     }
+    // ★ D142+ A1: finally의 setSaving(false) 제거 — 성공 시 모달 unmount까지 saving=true 유지로 재클릭 100% 차단
   };
 
   return (
@@ -659,7 +674,16 @@ export default function AlimtalkTemplateFormV2({
                       </label>
                       <input
                         value={form.representLinkMobile}
-                        onChange={(e) => setForm({ ...form, representLinkMobile: e.target.value })}
+                        onChange={(e) => {
+                          // ★ D142+ B (2026-04-29): URL 입력 시 representLinkEnabled 자동 ON.
+                          //   직원이 체크박스 안 누르고 URL만 입력해도 페이로드 누락되지 않도록 UX 안전망.
+                          const v = e.target.value;
+                          setForm({
+                            ...form,
+                            representLinkMobile: v,
+                            representLinkEnabled: v.trim() ? true : form.representLinkEnabled,
+                          });
+                        }}
                         placeholder="https://"
                         maxLength={500}
                         className={`w-full border rounded px-2 py-1 text-sm ${

@@ -107,6 +107,38 @@
 
 ---
 
+### 🟡 D142+ 알림톡 PDF 0428 (2026-04-29) — D135/D139 후속 7건 + IMC 이미지 이중 래핑 unwrap (수정 완료 · 배포 대기)
+
+> **상태:** 🟡 코드 수정 완료 · TS 0 error · **배포 대기**
+>
+> **PDF:** `한줄로 알림톡_260428.pdf` (D135 9건 + D139 7건 배포 후 직원 재검수)
+>
+> #### 처리 6건 + 별건 1건
+>
+> | # | 카테고리 | 처리 |
+> |:--:|:--:|------|
+> | A1+A2 | 등록창 close + 중복 등록 | `AlimtalkTemplateFormV2.tsx` `handleSave`에 `if (saving) return` 가드 + 성공 시 `setSaving(true)` 유지 + `onClose()` fallback |
+> | C 4-1 | 상태별 액션 버튼 | D139에서 이미 구현 ✅ (재확인). **4 일괄 체크박스+DORMANT는 신규 기능 → 별건 분리** |
+> | D | 아이템리스트 최소 2개 | `ItemListEditor.tsx` `removeRow` 가드 + 삭제 버튼 disabled + validate 최소 2개 |
+> | F | 검수요청 시 코멘트+증빙자료 모달 | `AlimtalkManagementSection.tsx` 모달 신설. backend `/inspect-with-file`은 D135부터 보유 |
+> | B | 대표링크 IMC 미전달 | `AlimtalkTemplateFormV2.tsx` `handleSave` 페이로드 조건 체크박스 의존 제거 → Mobile URL 자체가 enabled 시그널. URL onChange 시 자동 체크 ON |
+> | **E** 🎯 | 이미지 업로드 "카카오 응답에 이미지가 없습니다" | **`alimtalk-api.ts` uploadSingleImage/uploadMultipleImages에 IMC 이중 래핑 unwrap 추가** (D131 패턴이 image API에 미적용되어 사고 발생). 응답 raw 로그 강화 |
+>
+> #### 핵심 교훈
+> 1. IMC 이중 래핑 unwrap은 **모든 IMC API에 일관 적용 필수**. D131에서 sender/template만 처리하고 image API 빠뜨려 3일 후 신고 재발
+> 2. 체크박스+URL 입력 UX는 위험 (사용자가 한쪽만 충족하는 케이스 多). URL 입력 자체를 enabled 시그널로
+> 3. 신규 기능 보고 받으면 **backend 우선 grep** (검수요청 모달은 backend 라우트 이미 있었음)
+>
+> **수정 파일 (4개):**
+> - `frontend/components/alimtalk/AlimtalkTemplateFormV2.tsx`
+> - `frontend/components/alimtalk/AlimtalkManagementSection.tsx`
+> - `frontend/components/alimtalk/ItemListEditor.tsx`
+> - `backend/utils/alimtalk-api.ts`
+>
+> **배포:** `tp-push "0429 D142 알림톡 PDF 0428 7건 — A1+A2 close 가드 / B 대표링크 체크박스 의존 제거 / D 아이템리스트 최소 2개 / E IMC 이미지 이중 래핑 unwrap / F 검수요청 코멘트+증빙자료 모달"` → `tp-deploy-full`
+
+---
+
 ### 🟡 D142 (2026-04-28) — 한줄로_20260428.pdf 11건 + 1년 반복 필드값 사고 패턴 구조적 종결 (수정 완료 · 배포 대기)
 
 > **상태:** 🟡 코드 수정 + sync-agent v1.5.4 빌드 완료 · **배포 대기**

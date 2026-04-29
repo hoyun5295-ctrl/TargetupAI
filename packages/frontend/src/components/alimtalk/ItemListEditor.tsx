@@ -107,7 +107,13 @@ export default function ItemListEditor({
     if (list.length >= 10) return;
     onListChange([...list, { title: '', description: '' }]);
   };
-  const removeRow = (i: number) => onListChange(list.filter((_, idx) => idx !== i));
+  // ★ D142+ D (2026-04-29) PDF 0428 알림톡 #1 [아이템리스트형]:
+  //   "최소 2개 리스트 고정, 이후 추가 및 삭제 가능" — 직원 신고 정책.
+  //   2개 이하일 때 삭제 차단 (실수로 1개로 줄이는 사고 방지).
+  const removeRow = (i: number) => {
+    if (list.length <= 2) return;
+    onListChange(list.filter((_, idx) => idx !== i));
+  };
   const patchRow = (i: number, p: Partial<ItemListEntry>) => {
     const next = list.slice();
     next[i] = { ...next[i], ...p };
@@ -260,7 +266,8 @@ export default function ItemListEditor({
       <div className="space-y-2 rounded-lg bg-white p-2 border border-gray-200">
         <div className="flex items-center justify-between">
           <label className="text-xs font-semibold text-gray-700">
-            아이템 목록 <span className="text-gray-400">({list.length}/10, 최소 1개 필수)</span>
+            {/* ★ D142+ D (2026-04-29): 최소 1개 → 2개 (PDF 0428 알림톡 [아이템리스트형] #1) */}
+            아이템 목록 <span className="text-gray-400">({list.length}/10, 최소 2개 필수)</span>
           </label>
           <button
             type="button"
@@ -271,8 +278,8 @@ export default function ItemListEditor({
             + 아이템 추가
           </button>
         </div>
-        {list.length === 0 && (
-          <p className="text-xs text-gray-400">최소 1개 이상의 아이템을 추가하세요.</p>
+        {list.length < 2 && (
+          <p className="text-xs text-amber-600">최소 2개 이상의 아이템을 추가하세요.</p>
         )}
         {list.map((item, i) => (
           <div key={i} className="flex gap-2 items-center">
@@ -296,7 +303,8 @@ export default function ItemListEditor({
             <button
               type="button"
               onClick={() => removeRow(i)}
-              disabled={disabled}
+              disabled={disabled || list.length <= 2}
+              title={list.length <= 2 ? '최소 2개 필수' : '아이템 삭제'}
               className="text-sm px-1 text-red-400 hover:text-red-600 disabled:text-gray-300"
             >
               &times;
