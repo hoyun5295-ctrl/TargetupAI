@@ -107,6 +107,81 @@
 
 ---
 
+### 🟡 D142 (2026-04-28) — 한줄로_20260428.pdf 11건 + 1년 반복 필드값 사고 패턴 구조적 종결 (수정 완료 · 배포 대기)
+
+> **상태:** 🟡 코드 수정 + sync-agent v1.5.4 빌드 완료 · **배포 대기**
+>
+> **PDF:** `C:\Users\ceo\OneDrive\문서\카카오톡 받은 파일\한줄로_20260428.pdf` 11건 (suran/eunji/Jihyun/시세이도 + 슈퍼관리자)
+>
+> **🚨 Harold님 정당한 분노 — "한 달 넘게 같은 필드값 사고 반복":**
+> 1년 누적 패턴: D104(formatNumberPreview) → D136 P1(CustomerDBModal fieldKey) → D141(B5) → 0428 #5. 매번 인라인 누더기 패치 → 호출부 누락 → 재발 → 또 패치. **사람 기억 의존 = 100% 재발.**
+>
+> **Harold님 답 (단순함이 정답):** "고정필드 22개는 그 필드 룰대로 / 커스텀필드는 있는 그대로"
+>
+> #### D142 1차 — 필드값 컨트롤타워 통합 (구조적 종결)
+>
+> | 변경 | 위치 | 효과 |
+> |------|------|------|
+> | **`FIELD_DISPLAY_FORMAT_MAP` + `renderFieldValue()` 신설** | `backend/utils/standard-field-map.ts` | 22개 고정 displayFormat 1:1 매핑. custom_1~15는 의도적 미등록 → 자동으로 String(원본) 반환. **호출부 fieldKey 누락 = 안전한 기본값** |
+> | **`FRONT_DISPLAY_FORMAT_MAP` + `displayValue()` 신설** | `frontend/utils/formatDate.ts` | 백엔드 미러. fmtPhone/fmtDate/fmtMoney/fmtInt/fmtGender/fmtSmsOptIn/fmtString 헬퍼 |
+> | **`replaceVariables` 자동 type 추론 분기 전부 삭제** | `backend/utils/messageUtils.ts` | mapping.type === 'number' → renderFieldValue 단일 호출 |
+> | **5개 변수치환 컨트롤타워 displayValue 통합** | frontend formatDate.ts | formatByType / formatPreviewValue / replaceMessageVars / replaceVarsByFieldMeta / replaceVarsBySampleCustomer |
+> | **TargetSendModal:244 / AiCustomSendFlow:1140 호출부 fieldKey 전달** | 2개 컴포넌트 | PDF #5 직접타겟발송 담당자테스트 + 미리보기 콤마 차단 |
+> | **백엔드 4곳 custom_fields 평면화 시 String() 강제** | customers.ts /extract / ai.ts parse-briefing/recommend-target / target-sample.ts | 프론트 typeof 자동 추론 차단 (D142 안전망 1차) |
+> | **전화번호 regex 정밀화** | normalize.ts + formatDate.ts + sync-agent index.ts (3곳) | `\d{6,10}` → prefix별 `\d{7,8}`. 8자리 대표번호(1588/1644/1670/1800/1899) 휴대폰 prefix 매치 차단 |
+>
+> #### D142 2차 — Harold님 추가 지시 5건
+>
+> | # | 카테고리 | 처리 |
+> |:--:|:--:|------|
+> | **#1** A 엑셀다운로드 | `customers.ts /download` row 변환부 → `renderFieldValue` 단일 진입점. **화면 ≡ 다운로드 100% 일치** (boolean Y/N만 엑셀 관행 유지) |
+> | **#4** D 분할전송 UI | 기본 1000건/분 + min={1} max={9999} 검증 + CSS width 50→64px (4자리 안 잘리고 다 보임) |
+> | **#7** E 자동발송 | **4단계 → 3단계 단순화**: ① D-1 (12~36h) AI생성+스팸 ② D-day 2h전 스팸+담당자테스트 ③ D-day 발송. 사전알림 단계 메인 루프 호출 제거. 48h 미만 풀백 무한리턴 차단 |
+> | **#9** F SyncAgent 중복/합산 | **3곳 동시 수정** — sync.ts /sync 후 SET 스냅샷 + heartbeat에서 total_customers_synced 무시 + Agent state.ts `+= count` → `= count` 직접 대입 |
+> | **#10** F SyncAgent 자동실행 | `start= auto` → **`start= delayed-auto`**. 부팅 후 ~2분 지연으로 네트워크/DB 안정화 후 시작 |
+>
+> #### sync-agent v1.5.4 산출물 + v1.5.3 구버전 전부 삭제
+>
+> - ✅ `SyncAgent-Setup-1.5.4.exe` (19.4 MB)
+> - ✅ `SyncAgent-Setup-1.5.4.zip` (19.4 MB)
+> - ✅ `SyncAgent-1.5.4-linux-x64.tar.gz` (38.2 MB)
+> - 🗑 v1.5.3 .exe / .zip / .tar.gz 전부 삭제
+>
+> #### D142 3차 — 별건 잔존 2건 추가 처리
+>
+> | # | 카테고리 | 처리 |
+> |:--:|:--:|------|
+> | **#8** | E 자동발송 바이트 계산 | `AutoSendFormModal` `msgBytes` 계산을 **`spamSampleCustomer`로 변수치환 + `buildAdMessageFront`로 (광고)+080 부착 후** 결과 기준 계산. 직접발송·AiCustomSendFlow:1129 패턴 이식. 개인화 적용으로 길어진 메시지 SMS 90byte 초과 시 자동 LMS 전환 정상 동작 |
+> | **#11** | F SyncAgent 행 skip | sync-agent engine.ts는 이미 normalize/validation 실패 행 단위 skip 구현 ✅ (재확인). **진짜 문제는 backend** `sync.ts` chunk(500건) 일괄 UPSERT 실패 시 1건 잘못으로 500건 전부 fail 처리되던 사고. customers + purchases **2곳 단건 재시도 패턴 적용** — chunk 실패 시 1건씩 재시도 → 실패 행만 정확히 식별 + 정상 행은 정상 처리 |
+>
+> #### PDF 0428 11건 최종 처리 현황 (D142 1차+2차+3차 합산)
+>
+> | 상태 | 건수 | 번호 |
+> |:----:|:----:|------|
+> | ✅ 완벽 처리 | **11건** | #1, #2, #3, #4, #5, #6, #7, #8, #9, #10, #11 |
+>
+> #### TypeScript 빌드 (3프로젝트 모두 0 error)
+>
+> ✅ backend / ✅ frontend / ✅ sync-agent
+>
+> **🎓 D142 핵심 교훈 (CLAUDE.md 갱신 대상):**
+> 1. **호출부 의존 가드 = 1년 재발 패턴** — fieldKey 누락 시 자동 type 추론 발동 → 매번 새 호출부에서 재발. 이번에 **컨트롤타워 자체 안전한 기본값**(매칭 실패 = String 원본)으로 구조적 종결
+> 2. **고정 22개 룰대로 / 커스텀 원본 그대로** — Harold님 정답. 자동 type 추론 분기 자체가 위험. dataType 보고 콤마 찍지 말 것
+> 3. **데이터 출처 시점에 String() 박제** — backend 평면화 4곳에서 custom_fields 값을 String() 강제. 프론트 typeof 자동 추론 자체를 불가능하게
+> 4. **자동발송 D-2 → D-1로 시점 당김** — 발송시각 24h 미만 등록 시 풀백 무한리턴 차단. 단계 4→3로 단순화
+> 5. **SyncAgent 누적 합산 ≠ 실제 카운트** — sync_agents.total_customers_synced는 누적이 아니라 회사별 실제 customers COUNT 스냅샷이어야 함
+> 6. **Windows 서비스 `start= delayed-auto`** — 부팅 직후 네트워크/DB 미준비 상태에서 시작 실패 방지
+>
+> **배포 명령:**
+> ```
+> tp-push "0428 D142 필드값 사고 1년 패턴 구조적 종결 + Harold님 추가 지시 5건 + sync-agent v1.5.4"
+> tp-deploy-full
+> ```
+>
+> **SyncAgent 배포:** 직원에게 `SyncAgent-Setup-1.5.4.exe` 또는 `.zip` 배포. 기존 v1.5.2/v1.5.3 사용자는 제거 후 재설치 권장 (start type이 auto → delayed-auto로 바뀌므로).
+
+---
+
 ### 🟢 D141 (2026-04-27~28) — 한줄로_20260427.pdf 5건 근본수정 + 끌로드원칙 7-1 3차 재점검 (배포 완료 2026-04-28)
 
 > **상태:** ✅ 배포 완료 (2026-04-28)

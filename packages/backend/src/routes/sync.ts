@@ -674,9 +674,34 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
           );
         }
       } catch (chunkError: any) {
-        failedCount += chunk.length;
-        for (const r of chunk) {
-          failures.push({ phone: r.phone, reason: chunkError.message || 'Bulk insert failed' });
+        // ★ D142 (2026-04-28) PDF 0428 #11: chunk(500건) 일괄 UPSERT는 단일 트랜잭션이라
+        //   1건만 잘못되어도 PostgreSQL이 전체 롤백 → 500건 전부 fail로 카운트되던 사고.
+        //   "정제되지 않으면 동기화가 안 되는 것 같다"는 직원 신고 핵심 원인.
+        //   해결: 일괄 실패 시 단건씩 재시도 → 실패 행만 정확히 식별 + 정상 행은 정상 처리.
+        //   느리지만(최대 500회 SQL) 정확. chunk 일괄 실패는 흔한 케이스 아니라 성능 영향 미미.
+        console.warn(`[Sync] Chunk ${Math.floor(i / CHUNK_SIZE) + 1} 일괄 UPSERT 실패 → 단건 재시도 모드: ${chunkError.message || chunkError}`);
+        for (const row of chunk) {
+          try {
+            const { sql: rowSql, values: rowValues } = upsertBuilder.buildBatch(companyId, [row]);
+            const rowResult = await query(rowSql, rowValues);
+            upsertedCount += rowResult.rowCount || 1;
+
+            // customer_stores 단건 처리 (chunk 일괄 실패 시 fallback)
+            if (row.store_code) {
+              await query(
+                `INSERT INTO customer_stores (company_id, customer_id, store_code)
+                 VALUES ($1, (SELECT id FROM customers WHERE company_id = $1 AND phone = $2 LIMIT 1), $3)
+                 ON CONFLICT (customer_id, store_code) DO NOTHING`,
+                [companyId, row.phone, row.store_code]
+              );
+            }
+          } catch (rowError: any) {
+            failedCount++;
+            failures.push({
+              phone: row.phone,
+              reason: rowError.message || rowError.detail || 'Single-row UPSERT failed',
+            });
+          }
         }
       }
     }
@@ -912,9 +937,31 @@ router.post('/purchases', async (req: SyncAuthRequest, res: Response) => {
 
         insertedCount += result.rowCount || chunk.length;
       } catch (chunkError: any) {
-        failedCount += chunk.length;
+        // ★ D142 (2026-04-28) PDF 0428 #11: purchases도 동일 패턴 — 단건 재시도로 실패 행만 식별
+        console.warn(`[Sync] Purchases chunk ${Math.floor(i / P_CHUNK) + 1} 일괄 INSERT 실패 → 단건 재시도: ${chunkError.message || chunkError}`);
         for (const r of chunk) {
-          failures.push({ phone: r.phone, reason: chunkError.message || 'Bulk insert failed' });
+          try {
+            await query(
+              `INSERT INTO purchases (
+                company_id, customer_id, customer_phone, purchase_date,
+                store_code, store_name, product_code, product_name,
+                quantity, unit_price, total_amount, created_at
+              ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NOW())`,
+              [
+                companyId, phoneToCustomerId[r.phone] || null, r.phone,
+                r.purchase_date, r.store_code, r.store_name,
+                r.product_code, r.product_name,
+                r.quantity, r.unit_price, r.total_amount,
+              ]
+            );
+            insertedCount++;
+          } catch (rowError: any) {
+            failedCount++;
+            failures.push({
+              phone: r.phone,
+              reason: rowError.message || rowError.detail || 'Single-row INSERT failed',
+            });
+          }
         }
       }
     }

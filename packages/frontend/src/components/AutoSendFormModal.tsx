@@ -281,7 +281,20 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
   // ★ D95: 바이트 계산 — formatDate.ts 컨트롤타워 사용
   const getByteLength = calculateSmsBytes;
 
-  const msgBytes = getByteLength(messageContent);
+  // ★ D142 (2026-04-28) PDF 0428 #8: 자동발송 SMS 바이트 계산이 개인화 미반영되던 사고.
+  //   기존: getByteLength(messageContent) — 원본 메시지만 계산 → 개인화로 길어진 실 발송 메시지 잘려서 발송됨.
+  //   해결: spamSampleCustomer(recommend-target에서 받은 실 타겟 샘플)로 변수치환 + (광고)+080 부착 후 계산.
+  //         AiCustomSendFlow:1129 패턴 이식. 직접발송에 이미 적용된 패턴.
+  const previewMsg = spamSampleCustomer
+    ? replaceMessageVars(messageContent, availableFields as any, spamSampleCustomer)
+    : messageContent;
+  const fullMsg = buildAdMessageFront(
+    previewMsg,
+    (messageType === 'SMS' || messageType === 'LMS' || messageType === 'MMS' ? messageType : 'SMS') as 'SMS' | 'LMS' | 'MMS',
+    isAd,
+    optOutNumber || ''
+  );
+  const msgBytes = getByteLength(fullMsg);
   const maxBytes = messageType === 'SMS' ? 90 : 2000;
 
   // SMS 자동 전환 경고
