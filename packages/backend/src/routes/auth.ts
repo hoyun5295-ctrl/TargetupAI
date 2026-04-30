@@ -20,7 +20,9 @@ const loginLimiter = rateLimit({
 
 router.post('/login', loginLimiter, async (req: Request, res: Response) => {
   try {
-    const { loginId, password, userType } = req.body;
+    // ★ loginId 앞뒤 공백 제거 — frontend trim 누락 또는 다른 클라이언트 방어선
+    const loginId: string = String(req.body.loginId || '').trim();
+    const { password, userType } = req.body;
     // ★ D111 P0: app_source 기반 단일 세션 — 'hanjul' | 'flyer' | 'super'
     //   - 한줄로 메인(hanjul.ai) + 고객사관리자(app.hanjul.ai) 전부 'hanjul'로 묶음
     //   - 전단AI(flyer-frontend)는 'flyer' → 한줄로와 별개 공존

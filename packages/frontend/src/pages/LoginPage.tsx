@@ -48,8 +48,9 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
+      // ★ loginId 앞뒤 공백 제거 — 모바일 자동완성/복붙 시 공백 끼면 backend SELECT 0 row → "계정 없음"
       const response = await authApi.login({
-        loginId,
+        loginId: loginId.trim(),
         password,
         userType: isSuperAdminOnly ? 'super_admin' : undefined,
       });
