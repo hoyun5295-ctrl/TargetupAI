@@ -2196,6 +2196,7 @@ const campaignData = {
         userName={user?.name || ''}
         department={(user as any)?.department}
         isCompanyAdmin={user?.userType === 'company_admin'}
+        planCode={planInfo?.plan_code}
         onDirectSend={async () => {
           setShowDirectSend(true);
           try {

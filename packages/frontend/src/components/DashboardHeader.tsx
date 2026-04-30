@@ -18,6 +18,8 @@ interface DashboardHeaderProps {
   // ★ D88: 구독 만료 시 전체 잠금
   isSubscriptionLocked?: boolean;
   onSubscriptionLocked?: () => void;
+  // ★ ENTERPRISE 전용 기능 게이팅 (자동발송, 카카오&RCS)
+  planCode?: string;
 }
 
 type MenuColor = 'green' | 'gold' | 'gray';
@@ -52,6 +54,7 @@ export default function DashboardHeader({
   customerDbEnabled,
   isSubscriptionLocked,
   onSubscriptionLocked,
+  planCode,
 }: DashboardHeaderProps) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -66,10 +69,37 @@ export default function DashboardHeader({
     handler();
   };
 
+  // ★ ENTERPRISE 전용 게이팅 — 자동발송 / 카카오&RCS
+  //   planCode가 아직 로드되지 않았으면(undefined/'') 잠금 표시 보류
+  const isEnterprise = planCode === 'ENTERPRISE';
+  const isEnterpriseLocked = !!planCode && !isEnterprise;
+  const [enterpriseModal, setEnterpriseModal] = useState<{ show: boolean; featureName: string; description: string }>({ show: false, featureName: '', description: '' });
+  const enterpriseGuard = (featureName: string, description: string, handler: () => void) => {
+    if (isEnterpriseLocked) {
+      setEnterpriseModal({ show: true, featureName, description });
+      return;
+    }
+    handler();
+  };
+
   const menuItems: MenuItem[] = [
-    { label: '자동발송', onClick: () => lockGuard(() => navigate('/auto-send')), color: 'gold', locked: isSubscriptionLocked, path: '/auto-send' },
+    {
+      label: '자동발송',
+      onClick: () => enterpriseGuard('자동발송', '반복 발송 스케줄을 설정하면 자동으로 메시지가 발송됩니다.',
+        () => lockGuard(() => navigate('/auto-send'))),
+      color: 'gold',
+      locked: isEnterpriseLocked || isSubscriptionLocked,
+      path: '/auto-send',
+    },
     { label: '모바일DM', onClick: () => lockGuard(() => navigate('/dm-builder')), color: 'gold', locked: isSubscriptionLocked, path: '/dm-builder' },
-    { label: '카카오&RCS', onClick: () => navigate('/kakao-rcs'), color: 'green', path: '/kakao-rcs' },
+    {
+      label: '카카오&RCS',
+      onClick: () => enterpriseGuard('카카오 & RCS', '알림톡 템플릿 · 브랜드메시지 · RCS 통합 관리 기능입니다.',
+        () => navigate('/kakao-rcs')),
+      color: 'green',
+      locked: isEnterpriseLocked,
+      path: '/kakao-rcs',
+    },
     { label: '직접발송', onClick: onDirectSend, color: 'green', path: '/' },
     { label: '발송결과', onClick: onResults, color: 'green', path: '/' },
     { label: '수신거부', onClick: () => navigate('/unsubscribes'), color: 'gold', path: '/unsubscribes' },
@@ -141,6 +171,31 @@ export default function DashboardHeader({
           })}
         </nav>
       </div>
+
+      {/* ★ 베타테스트 잠금 안내 모달 */}
+      {enterpriseModal.show && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-2xl shadow-xl max-w-sm w-full mx-4 p-6">
+            <div className="text-center">
+              <div className="text-4xl mb-3">🧪</div>
+              <h3 className="text-lg font-bold text-gray-900 mb-2">{enterpriseModal.featureName}</h3>
+              <p className="text-xs text-gray-500 mb-4">{enterpriseModal.description}</p>
+              <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 mb-5">
+                <p className="text-sm text-gray-700">
+                  현재 <span className="font-bold text-amber-700">베타테스트 진행 중</span>입니다.<br />
+                  테스트 완료 후 사용 가능합니다.
+                </p>
+              </div>
+              <button
+                onClick={() => setEnterpriseModal({ show: false, featureName: '', description: '' })}
+                className="w-full px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-sm font-medium transition"
+              >
+                확인
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </header>
   );
 }

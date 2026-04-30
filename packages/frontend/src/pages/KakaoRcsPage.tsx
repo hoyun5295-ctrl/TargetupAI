@@ -126,6 +126,60 @@ export default function KakaoRcsPage() {
     { key: 'rcs' as Tab, label: 'RCS 템플릿', icon: '📱', color: 'purple' },
   ];
 
+  // ★ ENTERPRISE 전용 페이지 가드 — planCode 로드 후 비-ENTERPRISE는 블러 프리뷰 + CTA
+  //   AutoSendPage 게이팅 패턴 미러. planCode 미로드 시(빈 문자열)는 깜빡임 방지를 위해 통과.
+  if (planCode && planCode !== 'ENTERPRISE') {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <div className="bg-white border-b border-gray-200">
+          <div className="max-w-5xl mx-auto px-6 py-5 flex items-center justify-between">
+            <div>
+              <h1 className="text-xl font-bold text-gray-900">카카오 & RCS</h1>
+              <p className="text-sm text-gray-500 mt-0.5">알림톡 템플릿, 브랜드메시지, RCS 관리</p>
+            </div>
+            <button onClick={() => navigate('/')}
+              className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-lg text-sm transition">
+              ← 대시보드
+            </button>
+          </div>
+        </div>
+        <div className="max-w-5xl mx-auto px-6 py-8">
+          {/* 기능 소개 */}
+          <div className="mb-6">
+            <h3 className="text-sm font-semibold text-gray-600 mb-3">이런 기능이 포함됩니다</h3>
+            <div className="space-y-3">
+              {[
+                { icon: '💬', name: '알림톡 템플릿 등록', desc: '카카오 채널 + 템플릿 검수 + 자동 발송' },
+                { icon: '📢', name: '브랜드메시지 8종', desc: '카카오 브랜드메시지 + 템플릿 기반 개인화 발송' },
+                { icon: '📱', name: 'RCS 템플릿 관리', desc: 'RCS 메시지 + SMS 자동 폴백' },
+              ].map((item, idx) => (
+                <div key={idx} className="bg-white rounded-lg border border-gray-200 p-4 flex items-center gap-3">
+                  <div className="text-2xl">{item.icon}</div>
+                  <div>
+                    <div className="font-medium text-gray-800 text-sm">{item.name}</div>
+                    <div className="text-xs text-gray-500">{item.desc}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* 베타 안내 */}
+          <div className="bg-amber-50 rounded-xl border border-amber-200 p-5 text-center">
+            <div className="flex items-center justify-center gap-2 mb-2">
+              <span className="text-lg">🧪</span>
+              <h3 className="text-base font-bold text-gray-800">현재 베타테스트 진행 중</h3>
+            </div>
+            <p className="text-sm text-gray-600">
+              카카오 알림톡 · 브랜드메시지 · RCS 기능은 안정성 검증을 위해 베타테스트 중입니다.<br />
+              테스트 완료 후 순차적으로 사용 가능합니다.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* 헤더 */}

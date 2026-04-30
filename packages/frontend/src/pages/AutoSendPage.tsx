@@ -364,10 +364,8 @@ export default function AutoSendPage() {
               {/* 블러 오버레이 */}
               <div className="absolute inset-0 bg-white/40 backdrop-blur-sm z-10 flex items-center justify-center">
                 <div className="bg-white/90 rounded-xl px-5 py-3 shadow-lg flex items-center gap-2 border border-amber-200">
-                  <svg className="w-3.5 h-3.5 text-amber-600" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
-                  </svg>
-                  <span className="text-sm font-medium text-gray-700">프로 요금제 이상 사용 가능</span>
+                  <span className="text-sm">🧪</span>
+                  <span className="text-sm font-medium text-gray-700">베타테스트 중 · 테스트 완료 후 사용 가능</span>
                 </div>
               </div>
               <div className="space-y-3 select-none" style={{ filter: 'blur(6px)' }}>
@@ -388,32 +386,19 @@ export default function AutoSendPage() {
             </div>
           </div>
 
-          {/* CTA */}
+          {/* 베타 안내 */}
           <div
-            className="bg-gradient-to-r from-amber-50 to-orange-50 rounded-xl border border-amber-200 p-6 text-center"
+            className="bg-amber-50 rounded-xl border border-amber-200 p-5 text-center"
             style={{ animation: 'fadeIn 0.6s ease-out' }}
           >
             <div className="flex items-center justify-center gap-2 mb-2">
-              <span className="text-xl">👑</span>
-              <h3 className="text-lg font-bold text-gray-800">프로 요금제로 업그레이드</h3>
+              <span className="text-lg">🧪</span>
+              <h3 className="text-base font-bold text-gray-800">현재 베타테스트 진행 중</h3>
             </div>
-            <p className="text-sm text-gray-500 mb-4">
-              월 100만원으로 자동발송, AI 분석까지 모두 사용하세요
+            <p className="text-sm text-gray-600">
+              자동발송 기능은 안정성 검증을 위해 베타테스트 중입니다.<br />
+              테스트 완료 후 순차적으로 사용 가능합니다.
             </p>
-            <div className="flex items-center justify-center gap-3">
-              <button
-                onClick={() => navigate('/pricing')}
-                className="bg-white border border-gray-300 text-gray-700 px-5 py-2 rounded-lg text-sm hover:bg-gray-50 transition"
-              >
-                요금제 안내 보기
-              </button>
-              <button
-                onClick={() => navigate('/pricing')}
-                className="bg-amber-500 hover:bg-amber-600 text-white px-5 py-2 rounded-lg text-sm font-medium transition"
-              >
-                업그레이드 신청
-              </button>
-            </div>
           </div>
         </div>
 
