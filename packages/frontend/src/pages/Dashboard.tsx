@@ -3664,6 +3664,8 @@ const campaignData = {
         <span>|</span>
         <a href="/terms" target="_blank" className="hover:text-gray-600 transition">이용약관</a>
         <span>|</span>
+        <a href="/manual/manual.html" target="_blank" rel="noopener" className="hover:text-emerald-600 transition">사용자 매뉴얼</a>
+        <span>|</span>
         <span>© {new Date().getFullYear()} INVITO</span>
       </div>
     </div>
