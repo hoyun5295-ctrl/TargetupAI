@@ -305,9 +305,11 @@ export default function Dashboard() {
     try {
       const token = localStorage.getItem('token');
       const headers = { Authorization: `Bearer ${token}` };
-      // ★ D130: D94 호환 — kakao-templates status=approved 로드 + 신규 /api/alimtalk/senders 로드
+      // ★ D130: D94 호환 — kakao-templates status=APPROVED 로드 + 신규 /api/alimtalk/senders 로드
+      // ★ D143 (2026-04-30): kakao_templates_status_check CHECK 대문자 교체로 'APPROVED' 대문자 사용.
+      //   backend GET /api/companies/kakao-templates는 정규화 처리되어 있으나 명시성 위해 대문자.
       const [tplRes, sndRes] = await Promise.all([
-        fetch('/api/companies/kakao-templates?status=approved', { headers }),
+        fetch('/api/companies/kakao-templates?status=APPROVED', { headers }),
         fetch('/api/alimtalk/senders', { headers }).catch(() => null),
       ]);
       if (tplRes.ok) {

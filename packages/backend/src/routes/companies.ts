@@ -1753,7 +1753,19 @@ router.get('/kakao-templates', async (req: Request, res: Response) => {
     const params: any[] = [companyId];
 
     if (status) {
-      params.push(status);
+      // ★ D143 (2026-04-30): D135 새 IMC 시스템에서 status는 대문자 풀네임 8개로 통일됨
+      //   (CHECK constraint: DRAFT/REQUESTED/REVIEWING/APPROVED/REJECTED/BLOCKED/DORMANT/DELETED).
+      //   레거시 호출자(Dashboard.tsx ?status=approved 등)와 호환을 위해 backend에서 정규화.
+      const normalized = (() => {
+        const u = status.toUpperCase().trim();
+        if (u === 'PENDING') return 'REQUESTED'; // 옛 'pending' = 새 'REQUESTED' (검수요청)
+        if (u === 'REQ') return 'REQUESTED';
+        if (u === 'REV') return 'REVIEWING';
+        if (u === 'APR') return 'APPROVED';
+        if (u === 'REJ') return 'REJECTED';
+        return u;
+      })();
+      params.push(normalized);
       sql += ` AND kt.status = $${params.length}`;
     }
     if (category) {
@@ -1796,13 +1808,14 @@ router.post('/kakao-templates', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: '동일한 템플릿 이름이 이미 존재합니다' });
     }
 
+    // ★ D143 (2026-04-30): 'pending' → 'REQUESTED' (CHECK constraint 대문자 교체로 호환).
     const result = await query(
       `INSERT INTO kakao_templates (
         company_id, profile_id, template_code, template_name, category,
         message_type, emphasize_type, emphasize_title, emphasize_sub_title, content, image_url,
         extra_content, ad_content, security_flag, buttons, quick_replies,
         status, requested_at
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'pending',NOW())
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'REQUESTED',NOW())
       RETURNING *`,
       [
         companyId, profileId || null, templateCode || null, templateName, category || null,
@@ -1835,8 +1848,9 @@ router.put('/kakao-templates/:id', async (req: Request, res: Response) => {
     if (existing.rows.length === 0) {
       return res.status(404).json({ success: false, error: '템플릿을 찾을 수 없습니다' });
     }
-    if (!['pending', 'rejected'].includes(existing.rows[0].status)) {
-      return res.status(400).json({ success: false, error: '승인대기 또는 반려 상태에서만 수정 가능합니다' });
+    // ★ D143 (2026-04-30): CHECK 대문자 교체 — 'pending'/'rejected' → 'REQUESTED'/'REJECTED'/'DRAFT'.
+    if (!['REQUESTED', 'REJECTED', 'DRAFT'].includes(existing.rows[0].status)) {
+      return res.status(400).json({ success: false, error: '검수요청/반려/초안 상태에서만 수정 가능합니다' });
     }
 
     const {
@@ -1862,7 +1876,7 @@ router.put('/kakao-templates/:id', async (req: Request, res: Response) => {
         security_flag = COALESCE($15, security_flag),
         buttons = COALESCE($16, buttons),
         quick_replies = COALESCE($17, quick_replies),
-        status = 'pending',
+        status = 'REQUESTED',
         updated_at = NOW()
       WHERE id = $1 AND company_id = $2
       RETURNING *`,
@@ -1889,12 +1903,14 @@ router.delete('/kakao-templates/:id', async (req: Request, res: Response) => {
     const { id } = req.params;
     if (!companyId) return res.status(401).json({ success: false, error: '인증 필요' });
 
+    // ★ D143 (2026-04-30): CHECK 대문자 교체 — 'pending' → 'DRAFT'/'REQUESTED'/'REJECTED'.
+    //   새 IMC 시스템에서는 'DRAFT'(초안)만 자유 삭제 허용 (alimtalk.ts:935와 동일 정책).
     const result = await query(
-      `DELETE FROM kakao_templates WHERE id = $1 AND company_id = $2 AND status = 'pending' RETURNING id`,
+      `DELETE FROM kakao_templates WHERE id = $1 AND company_id = $2 AND status IN ('DRAFT','REQUESTED','REJECTED') RETURNING id`,
       [id, companyId]
     );
     if (result.rows.length === 0) {
-      return res.status(400).json({ success: false, error: '승인대기 상태의 템플릿만 삭제 가능합니다' });
+      return res.status(400).json({ success: false, error: '초안/검수요청/반려 상태의 템플릿만 삭제 가능합니다' });
     }
 
     res.json({ success: true, message: '삭제되었습니다.' });

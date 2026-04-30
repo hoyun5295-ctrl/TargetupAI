@@ -252,8 +252,12 @@ export async function syncPendingTemplatesJob(): Promise<void> {
       );
       if (res.code !== '0000' || !res.data) continue;
 
-      const latestStatus = (res.data as any).status;
-      if (!latestStatus) continue;
+      const rawLatestStatus = (res.data as any).status;
+      if (!rawLatestStatus) continue;
+      // ★ D143 (2026-04-30): IMC 약어(REQ/REV/APR/REJ) → 풀네임 정규화.
+      //   CHECK constraint(`kakao_templates_status_check`)가 대문자 풀네임 8개만 허용 →
+      //   약어 그대로 UPDATE하면 위반으로 status 갱신 영구 실패. PDF 0430 #2(B 신고) 부수 원인 차단.
+      const latestStatus = normalizeImcTemplateStatus(rawLatestStatus);
 
       const rejectReason = (res.data as any).rejectReason ?? null;
 
@@ -315,6 +319,25 @@ function toTerminalStatus(status: string): 'APPROVED' | 'REJECTED' | null {
   if (s === 'APR' || s === 'APPROVED') return 'APPROVED';
   if (s === 'REJ' || s === 'REJECTED') return 'REJECTED';
   return null;
+}
+
+/**
+ * ★ D143 추가 (2026-04-30): IMC 약어 → 한줄로 풀네임 정규화.
+ *
+ *  IMC 응답 status가 약어(REQ/REV/APR/REJ)로 오는 경우가 있음.
+ *  D135 도입 후 syncPendingTemplatesJob이 약어를 그대로 DB에 UPDATE 시도하면
+ *  kakao_templates_status_check CHECK constraint 위반(대문자 풀네임 8개만 허용).
+ *
+ *  PDF 0430 #2(B 신고) "IMC에는 등록되는데 한줄로 관리 화면에 등록 안됨"의 부수 원인 차단.
+ *  CHECK 제약 자체는 D143에서 대문자로 교체 완료 — 본 헬퍼는 풀네임 통일을 보장.
+ */
+function normalizeImcTemplateStatus(status: string): string {
+  const u = String(status || '').toUpperCase().trim();
+  if (u === 'REQ') return 'REQUESTED';
+  if (u === 'REV') return 'REVIEWING';
+  if (u === 'APR') return 'APPROVED';
+  if (u === 'REJ') return 'REJECTED';
+  return u;
 }
 
 /**

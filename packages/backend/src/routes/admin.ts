@@ -2646,21 +2646,25 @@ router.put('/kakao-templates/:id/approve', authenticate, requireSuperAdmin, asyn
     const adminId = (req as any).user?.id;
     const { templateCode } = req.body;
 
+    // ★ D143 (2026-04-30): kakao_templates_status_check CHECK 대문자 풀네임 8개로 교체됨.
+    //   기존 소문자('approved'/'pending'/'rejected')는 위반 → 대문자 + 'REQUESTED'(옛 'pending') 매핑.
+    //   본 라우트는 frontend 미사용(dead) — 슈퍼관리자가 IMC 통한 새 워크플로우(/api/alimtalk/templates)에서 처리.
+    //   안전 차원에서 새 CHECK 호환되게 상수만 갱신 (라우트 폐기는 별건).
     const result = await query(
       `UPDATE kakao_templates SET
-        status = 'approved',
+        status = 'APPROVED',
         template_code = COALESCE($2, template_code),
         approved_at = NOW(),
         reviewed_at = NOW(),
         reviewed_by = $3,
         updated_at = NOW()
-      WHERE id = $1 AND status = 'pending'
+      WHERE id = $1 AND status = 'REQUESTED'
       RETURNING *`,
       [id, templateCode || null, adminId]
     );
 
     if (result.rows.length === 0) {
-      return res.status(400).json({ success: false, error: '승인대기 상태의 템플릿만 승인 가능합니다' });
+      return res.status(400).json({ success: false, error: '검수요청 상태의 템플릿만 승인 가능합니다' });
     }
 
     res.json({ success: true, template: result.rows[0] });
@@ -2681,20 +2685,21 @@ router.put('/kakao-templates/:id/reject', authenticate, requireSuperAdmin, async
       return res.status(400).json({ success: false, error: '반려 사유는 필수입니다' });
     }
 
+    // ★ D143 (2026-04-30): 'rejected'/'pending' → 'REJECTED'/'REQUESTED' 대문자 풀네임으로 교체 (CHECK 호환).
     const result = await query(
       `UPDATE kakao_templates SET
-        status = 'rejected',
+        status = 'REJECTED',
         reject_reason = $2,
         reviewed_at = NOW(),
         reviewed_by = $3,
         updated_at = NOW()
-      WHERE id = $1 AND status = 'pending'
+      WHERE id = $1 AND status = 'REQUESTED'
       RETURNING *`,
       [id, rejectReason, adminId]
     );
 
     if (result.rows.length === 0) {
-      return res.status(400).json({ success: false, error: '승인대기 상태의 템플릿만 반려 가능합니다' });
+      return res.status(400).json({ success: false, error: '검수요청 상태의 템플릿만 반려 가능합니다' });
     }
 
     res.json({ success: true, template: result.rows[0] });
