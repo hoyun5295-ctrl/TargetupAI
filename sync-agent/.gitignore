@@ -19,3 +19,4 @@ installer/*.zip
 SyncAgent_*.docx
 src.zip
 unpacked/
+build-manual.js

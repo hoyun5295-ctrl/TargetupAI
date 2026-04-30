@@ -99,12 +99,17 @@ export default function KakaoChannelImageUpload({
         throw new Error(data?.error || `업로드 실패 (${res.status})`);
       }
 
-      // ★ D139 #2 (0425): 사용자 노출 텍스트에 IMC 표기 금지 — '카카오' 통일
-      const imc = data.imc?.data;
-      if (!imc?.imageUrl || !imc?.imageName) {
+      // ★ D143 E (2026-04-30) PDF 0430 알림톡 #1-2/#2: backend 평탄 키 우선 + legacy fallback.
+      //   backend `sendImageUploadResponse`가 imageUrl/imageName을 응답 최상단에 평탄화함 (어떤 IMC 래핑이든 견고).
+      //   `data.imc?.data` 깊은 경로 의존을 끊고, 어떤 IMC 응답 구조 변종이 와도 정상 동작.
+      const imageUrl: string | undefined =
+        data.imageUrl || data.imc?.data?.imageUrl || data.imc?.data?.data?.imageUrl;
+      const imageName: string | undefined =
+        data.imageName || data.imc?.data?.imageName || data.imc?.data?.data?.imageName;
+      if (!imageUrl || !imageName) {
         throw new Error('카카오 응답에 이미지 정보가 없습니다');
       }
-      onChange(imc.imageUrl, imc.imageName);
+      onChange(imageUrl, imageName);
     } catch (e: any) {
       setErr(e?.message || '업로드 실패');
     } finally {

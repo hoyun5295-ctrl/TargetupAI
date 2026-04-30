@@ -54,6 +54,9 @@ interface Template {
   service_mode: string;
   custom_template_code: string | null;
   security_flag: boolean;
+  // ★ D143 F (2026-04-30) PDF 0430 알림톡 #3: 등록 폼 하단 코멘트+증빙자료
+  inspection_comment: string | null;
+  inspection_evidence_filename: string | null;
   created_at: string;
   updated_at: string;
   last_synced_at: string | null;
@@ -307,6 +310,9 @@ export default function AlimtalkManagementSection() {
     representLinkPc: t.represent_link?.urlPc || '',
     representLinkIosScheme: t.represent_link?.schemeIos || '',
     representLinkAndroidScheme: t.represent_link?.schemeAndroid || '',
+    // ★ D143 F (2026-04-30) PDF 0430 #3: 등록 폼 하단 코멘트+증빙자료 (수정/상세보기 시 복원)
+    inspectionComment: t.inspection_comment || '',
+    inspectionEvidenceFilename: t.inspection_evidence_filename || '',
   });
 
   const canRegisterTemplate = profiles.length > 0;
@@ -666,9 +672,27 @@ export default function AlimtalkManagementSection() {
         >
           <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full mx-4 p-6 animate-in zoom-in-95 duration-200">
             <h3 className="text-lg font-semibold text-gray-900 mb-1">검수요청</h3>
-            <p className="text-xs text-gray-500 mb-4 truncate">
+            <p className="text-xs text-gray-500 mb-2 truncate">
               {inspectionTarget.template_name}
             </p>
+
+            {/* ★ D143 F (2026-04-30) PDF 0430 #3: 등록 폼 하단에서 입력한 정보 자동 사용 안내 */}
+            {(inspectionTarget.inspection_comment || inspectionTarget.inspection_evidence_filename) && (
+              <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800 leading-relaxed">
+                💡 등록 시 입력한 정보가 자동으로 카카오에 전달됩니다.
+                {inspectionTarget.inspection_comment && (
+                  <div className="mt-1 truncate">
+                    <span className="font-medium">코멘트:</span> {inspectionTarget.inspection_comment.slice(0, 80)}{inspectionTarget.inspection_comment.length > 80 ? '…' : ''}
+                  </div>
+                )}
+                {inspectionTarget.inspection_evidence_filename && (
+                  <div className="mt-0.5 truncate">
+                    <span className="font-medium">증빙자료:</span> {inspectionTarget.inspection_evidence_filename}
+                  </div>
+                )}
+                <div className="mt-1 text-amber-600">아래에서 추가/수정도 가능합니다.</div>
+              </div>
+            )}
 
             <label className="block text-xs font-semibold text-gray-700 mb-1">
               코멘트 <span className="text-gray-400 font-normal">(생략 가능)</span>

@@ -610,7 +610,14 @@ router.get('/templates', async (req: Request, res: Response) => {
         ORDER BY t.updated_at DESC NULLS LAST, t.created_at DESC`,
       params,
     );
-    res.json({ success: true, templates: r.rows });
+    // ★ D143 F (2026-04-30) PDF 0430 알림톡 #3: BYTEA(증빙자료 data)는 목록 응답에서 제외.
+    //   클라이언트로 base64 변환되어 전송되면 페이로드 폭증 + 보안 노출 위험. 파일명만 전달하여 UI 표시.
+    const rows = r.rows.map((row: any) => {
+      const { inspection_evidence_data, ...rest } = row;
+      void inspection_evidence_data;
+      return rest;
+    });
+    res.json({ success: true, templates: rows });
   } catch (err) {
     return handleImcError(res, err);
   }
@@ -935,17 +942,110 @@ router.delete(
   },
 );
 
+/**
+ * ★ D143 F (2026-04-30) PDF 0430 알림톡 #3: 등록/수정 폼 하단 코멘트+증빙자료 별도 저장.
+ *
+ *  직원 요청: "템플릿 등록 제일 하단에 '코멘트' 입력 칸, '코멘트 증빙자료' 추가 해야 합니다."
+ *
+ *  설계:
+ *    - 템플릿 등록 자체는 application/json (POST /templates).
+ *    - 코멘트+증빙자료는 multipart/form-data로 본 라우트에 별도 호출 (frontend handleSave가 등록 직후 자동 호출).
+ *    - DB 컬럼: inspection_comment TEXT, inspection_evidence_filename/_mimetype/_data BYTEA
+ *    - 검수요청(POST /inspect) 시점에 DB 값을 자동으로 IMC에 전달 → 직원 입장에서 "등록 폼 하단" 한 번 입력으로 종결.
+ *
+ *  DB 마이그레이션 (Harold님 직접 실행):
+ *    ALTER TABLE kakao_templates
+ *      ADD COLUMN IF NOT EXISTS inspection_comment TEXT,
+ *      ADD COLUMN IF NOT EXISTS inspection_evidence_filename TEXT,
+ *      ADD COLUMN IF NOT EXISTS inspection_evidence_mimetype TEXT,
+ *      ADD COLUMN IF NOT EXISTS inspection_evidence_data BYTEA;
+ */
+router.post(
+  '/templates/:templateCode/inspection-meta',
+  requireCompanyAdmin as any,
+  upload.single('evidenceFile'),
+  async (req: Request, res: Response) => {
+    try {
+      const ctx = await requireTemplateAccess(req, res);
+      if (!ctx) return;
+      const file = (req as any).file as Express.Multer.File | undefined;
+      const decodedFile = file ? decodeOriginalName(file) : undefined;
+      const comment = (req.body?.comment ?? '').toString();
+
+      if (decodedFile) {
+        await query(
+          `UPDATE kakao_templates
+              SET inspection_comment = $1,
+                  inspection_evidence_filename = $2,
+                  inspection_evidence_mimetype = $3,
+                  inspection_evidence_data = $4,
+                  updated_at = now()
+            WHERE id = $5`,
+          [comment, decodedFile.originalname, decodedFile.mimetype, decodedFile.buffer, ctx.id],
+        );
+      } else {
+        // 파일 미첨부 시 기존 evidence는 유지하고 코멘트만 갱신
+        await query(
+          `UPDATE kakao_templates
+              SET inspection_comment = $1,
+                  updated_at = now()
+            WHERE id = $2`,
+          [comment, ctx.id],
+        );
+      }
+      res.json({
+        success: true,
+        inspection_comment: comment,
+        inspection_evidence_filename: decodedFile?.originalname || null,
+      });
+    } catch (err) {
+      return handleImcError(res, err);
+    }
+  },
+);
+
 router.post(
   '/templates/:templateCode/inspect',
   async (req: Request, res: Response) => {
     try {
       const ctx = await requireTemplateAccess(req, res);
       if (!ctx) return;
-      const r = await imc.requestInspection(
-        ctx.senderKey,
-        req.params.templateCode,
-        req.body?.comment,
+
+      // ★ D143 F (2026-04-30) PDF 0430 #3: 등록 폼에서 저장한 코멘트+증빙자료를 자동으로 IMC에 전달.
+      //   body.comment가 명시되면 우선 사용 (재검수 모달에서 추가 입력 가능).
+      //   evidence가 DB에 있으면 IMC requestInspectionWithFile, 없으면 requestInspection.
+      const meta = await query(
+        `SELECT inspection_comment,
+                inspection_evidence_filename,
+                inspection_evidence_data
+           FROM kakao_templates WHERE id = $1`,
+        [ctx.id],
       );
+      const row = meta.rows[0] || {};
+      const finalComment: string =
+        (req.body?.comment as string) || row.inspection_comment || '';
+      const evidenceBuffer: Buffer | null =
+        row.inspection_evidence_data && Buffer.isBuffer(row.inspection_evidence_data)
+          ? row.inspection_evidence_data
+          : null;
+      const evidenceFilename: string = row.inspection_evidence_filename || 'evidence';
+
+      let r;
+      if (evidenceBuffer) {
+        r = await imc.requestInspectionWithFile(
+          ctx.senderKey,
+          req.params.templateCode,
+          finalComment,
+          evidenceBuffer,
+          evidenceFilename,
+        );
+      } else {
+        r = await imc.requestInspection(
+          ctx.senderKey,
+          req.params.templateCode,
+          finalComment || undefined,
+        );
+      }
       await query(
         `UPDATE kakao_templates
             SET status='REQUESTED', requested_at=now(), updated_at=now()
@@ -967,15 +1067,34 @@ router.post(
       const ctx = await requireTemplateAccess(req, res);
       if (!ctx) return;
       const file = (req as any).file;
-      if (!file) {
+      // ★ D143 F (2026-04-30): 파일이 직접 첨부되지 않아도 DB의 inspection_evidence_data로 폴백.
+      //   기존엔 첨부 필수였지만, 등록 폼 하단에서 이미 저장된 증빙자료를 검수요청 모달에서 재사용 가능.
+      let buffer: Buffer | undefined;
+      let filename: string | undefined;
+      if (file) {
+        buffer = file.buffer;
+        filename = file.originalname;
+      } else {
+        const meta = await query(
+          `SELECT inspection_evidence_filename, inspection_evidence_data
+             FROM kakao_templates WHERE id = $1`,
+          [ctx.id],
+        );
+        const row = meta.rows[0] || {};
+        if (row.inspection_evidence_data && Buffer.isBuffer(row.inspection_evidence_data)) {
+          buffer = row.inspection_evidence_data;
+          filename = row.inspection_evidence_filename || 'evidence';
+        }
+      }
+      if (!buffer || !filename) {
         return res.status(400).json({ success: false, error: '첨부파일이 필요합니다' });
       }
       const r = await imc.requestInspectionWithFile(
         ctx.senderKey,
         req.params.templateCode,
         req.body?.comment || '',
-        file.buffer,
-        file.originalname,
+        buffer,
+        filename,
       );
       await query(
         `UPDATE kakao_templates
@@ -1295,7 +1414,15 @@ async function persistImage(
   r: imc.ImcResponse<imc.ImageUploadResult>,
   file?: Express.Multer.File,
 ) {
-  if (!r?.data?.imageName) return;
+  // ★ D143 E (2026-04-30): 어떤 래핑이든 imageUrl/imageName 추출 (extractImageFromAnyShape 재사용).
+  //   D131/D142+의 부분 unwrap이 새 응답 구조에서 깨지면 DB INSERT가 silent skip되어 있던 문제 차단.
+  const { imageUrl, imageName } = extractImageFromAnyShape(r);
+  if (!imageName || !imageUrl) {
+    console.warn(
+      `[alimtalk][persistImage] skip — imageName/Url 추출 실패. uploadType=${uploadType} raw=${JSON.stringify(r).slice(0, 400)}`,
+    );
+    return;
+  }
   await query(
     `INSERT INTO kakao_image_uploads
        (company_id, user_id, upload_type, image_name, image_url,
@@ -1305,8 +1432,8 @@ async function persistImage(
       req.user?.companyId || null,
       req.user?.userId || null,
       uploadType,
-      r.data.imageName,
-      r.data.imageUrl,
+      imageName,
+      imageUrl,
       file?.originalname || null,
       file?.size || null,
     ],
@@ -1394,15 +1521,115 @@ function sendImcManagedResponse(
   });
 }
 
+/**
+ * ★ D143 E (2026-04-30) PDF 0430 알림톡 #1-2/#2: "규격 맞춰서 넣어도 카카오 응답에 이미지가 없습니다" 근본 종결.
+ *
+ *  D131이 sender/template unwrap만 처리, D142+가 image 이중래핑(`data.data.data.imageUrl`)까지 처리했지만,
+ *  IMC가 또 다른 응답 구조(예: `data.imageUrl`/`data.list[0].imageUrl`/wrapper 변종)를 반환하면 frontend의
+ *  `data.imc?.data?.imageUrl` 깊은 경로 접근이 또 깨짐 → "카카오 응답에 이미지가 없습니다" 재발.
+ *
+ *  해결: backend가 어떤 래핑이든 imageUrl/imageName을 추출해 응답 최상단에 평탄화.
+ *        frontend는 `data.imageUrl`/`data.imageName`만 신뢰 → 미래의 새 래핑 케이스에도 자동 견고.
+ *
+ *  단일 이미지: `{ success, imageUrl, imageName, imc }`
+ *  다중 이미지: `{ success, list: [{imageUrl,imageName}], imc }`
+ */
+function extractImageFromAnyShape(r: any): { imageUrl?: string; imageName?: string } {
+  if (!r) return {};
+  // 단일 이미지 추출 — 가능한 모든 위치 시도 (1중/2중/3중 래핑)
+  const cands = [
+    r?.data,
+    r?.data?.data,
+    r?.data?.data?.data,
+    r?.data?.image,
+    r,
+  ];
+  for (const c of cands) {
+    if (c && typeof c === 'object' && (c.imageUrl || c.imageName)) {
+      return { imageUrl: c.imageUrl, imageName: c.imageName };
+    }
+  }
+  return {};
+}
+
+function extractImageListFromAnyShape(r: any): { imageUrl: string; imageName: string }[] {
+  if (!r) return [];
+  const cands = [
+    r?.data?.list,
+    r?.data?.data?.list,
+    r?.data?.images,
+    r?.data?.data?.images,
+    Array.isArray(r?.data) ? r.data : null,
+  ];
+  for (const c of cands) {
+    if (Array.isArray(c) && c.length > 0) {
+      return c
+        .map((it: any) => ({ imageUrl: it?.imageUrl, imageName: it?.imageName }))
+        .filter((it) => it.imageUrl && it.imageName);
+    }
+  }
+  return [];
+}
+
 function sendImageUploadResponse(
   res: Response,
   r: imc.ImcResponse<imc.ImageUploadResult>,
 ) {
   const ok = r?.code === '0000';
-  if (ok) return res.json({ success: true, imc: r });
+  if (ok) {
+    // ★ D143 E (2026-04-30): 평탄화 — 어떤 래핑이든 최상단 imageUrl/imageName 보장.
+    const { imageUrl, imageName } = extractImageFromAnyShape(r);
+    if (!imageUrl || !imageName) {
+      // 응답 자체가 비정상(IMC가 0000 코드 + 빈 데이터) — 운영 진단 로그 + 사용자 명확 안내
+      console.error(
+        `[alimtalk][image-upload 비정상응답] code=0000인데 imageUrl/Name 추출 불가. raw=${JSON.stringify(r).slice(0, 800)}`,
+      );
+      return res.status(502).json({
+        success: false,
+        code: '0000',
+        error: '이미지 업로드는 처리됐으나 응답에서 이미지 정보를 추출하지 못했습니다. 다시 시도해주세요.',
+        imc: r,
+      });
+    }
+    return res.json({ success: true, imageUrl, imageName, imc: r });
+  }
   // 운영 진단용 로그는 실제 IMC 코드/메시지 그대로 (사용자에게는 안 보임)
   console.warn(`[alimtalk][image-upload 실패] code=${r?.code || 'N/A'} rawMsg=${r?.message || 'N/A'}`);
   // 사용자 응답은 정제된 한글 메시지만
+  const userMsg = sanitizeImageErrorForUser(r?.message, r?.code);
+  return res.status(400).json({
+    success: false,
+    code: r?.code,
+    error: userMsg,
+    imc: r,
+  });
+}
+
+/**
+ * ★ D143 E (2026-04-30): 다중 이미지 업로드 응답 평탄화 (brand wide-list/carousel-feed/carousel-commerce).
+ *  단일과 동일하게 list를 응답 최상단에 평탄화하여 frontend가 깊은 경로 의존하지 않도록.
+ */
+function sendImageUploadMultiResponse(
+  res: Response,
+  r: imc.ImcResponse<{ list: imc.ImageUploadResult[] }>,
+) {
+  const ok = r?.code === '0000';
+  if (ok) {
+    const list = extractImageListFromAnyShape(r);
+    if (list.length === 0) {
+      console.error(
+        `[alimtalk][image-upload(multi) 비정상응답] code=0000인데 list 추출 불가. raw=${JSON.stringify(r).slice(0, 800)}`,
+      );
+      return res.status(502).json({
+        success: false,
+        code: '0000',
+        error: '이미지 업로드는 처리됐으나 응답에서 이미지 목록을 추출하지 못했습니다. 다시 시도해주세요.',
+        imc: r,
+      });
+    }
+    return res.json({ success: true, list, imc: r });
+  }
+  console.warn(`[alimtalk][image-upload(multi) 실패] code=${r?.code || 'N/A'} rawMsg=${r?.message || 'N/A'}`);
   const userMsg = sanitizeImageErrorForUser(r?.message, r?.code);
   return res.status(400).json({
     success: false,
@@ -1522,6 +1749,7 @@ router.post(
 );
 
 // (6) 브랜드 와이드 리스트 (최대 3장)
+// ★ D143 E (2026-04-30): 다중 이미지도 sendImageUploadMultiResponse로 평탄화 + extractImageListFromAnyShape로 어떤 래핑이든 list 추출
 router.post(
   '/images/brand/wide-list',
   requireCompanyAdmin as any,
@@ -1532,17 +1760,18 @@ router.post(
       const r = await imc.uploadBrandWideListImages(
         files.map((f) => ({ buffer: f.buffer, name: f.originalname })),
       );
-      if (r.code === '0000' && r.data?.list) {
-        for (let i = 0; i < r.data.list.length; i++) {
+      if (r.code === '0000') {
+        const list = extractImageListFromAnyShape(r);
+        for (let i = 0; i < list.length && i < files.length; i++) {
           await persistImage(
             req,
             'brand_wide_list',
-            { code: '0000', message: 'OK', data: r.data.list[i] },
+            { code: '0000', message: 'OK', data: list[i] },
             files[i],
           );
         }
       }
-      return sendImageUploadResponse(res, r as any);
+      return sendImageUploadMultiResponse(res, r as any);
     } catch (err) { return handleImcError(res, err); }
   },
 );
@@ -1558,17 +1787,18 @@ router.post(
       const r = await imc.uploadBrandCarouselFeedImages(
         files.map((f) => ({ buffer: f.buffer, name: f.originalname })),
       );
-      if (r.code === '0000' && r.data?.list) {
-        for (let i = 0; i < r.data.list.length; i++) {
+      if (r.code === '0000') {
+        const list = extractImageListFromAnyShape(r);
+        for (let i = 0; i < list.length && i < files.length; i++) {
           await persistImage(
             req,
             'brand_carousel_feed',
-            { code: '0000', message: 'OK', data: r.data.list[i] },
+            { code: '0000', message: 'OK', data: list[i] },
             files[i],
           );
         }
       }
-      return sendImageUploadResponse(res, r as any);
+      return sendImageUploadMultiResponse(res, r as any);
     } catch (err) { return handleImcError(res, err); }
   },
 );
@@ -1584,17 +1814,18 @@ router.post(
       const r = await imc.uploadBrandCarouselCommerceImages(
         files.map((f) => ({ buffer: f.buffer, name: f.originalname })),
       );
-      if (r.code === '0000' && r.data?.list) {
-        for (let i = 0; i < r.data.list.length; i++) {
+      if (r.code === '0000') {
+        const list = extractImageListFromAnyShape(r);
+        for (let i = 0; i < list.length && i < files.length; i++) {
           await persistImage(
             req,
             'brand_carousel_commerce',
-            { code: '0000', message: 'OK', data: r.data.list[i] },
+            { code: '0000', message: 'OK', data: list[i] },
             files[i],
           );
         }
       }
-      return sendImageUploadResponse(res, r as any);
+      return sendImageUploadMultiResponse(res, r as any);
     } catch (err) { return handleImcError(res, err); }
   },
 );
@@ -1619,11 +1850,13 @@ router.post(
         file.buffer,
         file.originalname,
       );
+      // ★ D143 E (2026-04-30): IMC 래핑 변종에도 imageName 견고하게 추출
+      const { imageName: marketingImgName } = extractImageFromAnyShape(r);
       await query(
         `UPDATE kakao_sender_profiles
             SET marketing_agree_file_key = $1, updated_at = now()
           WHERE id = $2`,
-        [r?.data?.imageName || null, req.params.senderId],
+        [marketingImgName || null, req.params.senderId],
       );
       await persistImage(req, 'marketing_agree', r, file);
       return sendImageUploadResponse(res, r);

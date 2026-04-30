@@ -54,6 +54,9 @@ export interface TemplateFormData {
   representLinkPc: string;
   representLinkIosScheme: string;
   representLinkAndroidScheme: string;
+  // ★ D143 F (2026-04-30) PDF 0430 알림톡 #3: 등록 폼 하단 코멘트(증빙자료는 별도 File state 관리)
+  inspectionComment: string;
+  inspectionEvidenceFilename: string; // 수정 모달에서 기존 첨부파일명 표시용 (read-only)
 }
 
 interface Props {
@@ -125,6 +128,9 @@ function initialForm(seed?: Partial<TemplateFormData> | null): TemplateFormData 
     representLinkPc: seed?.representLinkPc || '',
     representLinkIosScheme: seed?.representLinkIosScheme || '',
     representLinkAndroidScheme: seed?.representLinkAndroidScheme || '',
+    // ★ D143 F (2026-04-30): 등록 폼 하단 코멘트 + 증빙자료 (PDF 0430 #3)
+    inspectionComment: seed?.inspectionComment || '',
+    inspectionEvidenceFilename: seed?.inspectionEvidenceFilename || '',
   };
 }
 
@@ -140,6 +146,8 @@ export default function AlimtalkTemplateFormV2({
   const [form, setForm] = useState<TemplateFormData>(() => initialForm(template));
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<{ type: 'error' | 'success'; message: string } | null>(null);
+  // ★ D143 F (2026-04-30) PDF 0430 알림톡 #3: 등록 폼 하단 증빙자료 (File 객체는 form state 외 별도)
+  const [inspectionEvidenceFile, setInspectionEvidenceFile] = useState<File | null>(null);
 
   // ★ D135+ (B5): 미리보기 메시지 체크박스 — 기존값이 있으면 ON으로 초기화
   const [previewEnabled, setPreviewEnabled] = useState(() => !!template?.previewMessage);
@@ -241,6 +249,12 @@ export default function AlimtalkTemplateFormV2({
       return;
     }
 
+    // ★ D143 F (2026-04-30) PDF 0430 #3: 증빙자료 5MB 제한 (backend multer fileSize와 동일)
+    if (inspectionEvidenceFile && inspectionEvidenceFile.size > 5 * 1024 * 1024) {
+      setToast({ type: 'error', message: '증빙자료는 최대 5MB까지 첨부 가능합니다' });
+      return;
+    }
+
     setSaving(true);
     try {
       const endpoint = isEdit
@@ -319,6 +333,43 @@ export default function AlimtalkTemplateFormV2({
         setSaving(false); // 실패 시에만 saving 해제 (재시도 가능)
         return;
       }
+
+      // ★ D143 F (2026-04-30) PDF 0430 알림톡 #3: 등록/수정 직후 코멘트+증빙자료 별도 저장.
+      //   템플릿 자체는 application/json. 증빙자료는 multipart/form-data 별도 라우트 호출.
+      //   기존 코멘트와 다르거나 새 파일이 있을 때만 호출 (불필요한 PUT 절약).
+      const savedTemplateCode: string = data.template?.template_code || form.template_code || '';
+      const commentChanged = (form.inspectionComment || '') !== (template?.inspectionComment || '');
+      const hasNewFile = !!inspectionEvidenceFile;
+      if (savedTemplateCode && (commentChanged || hasNewFile)) {
+        try {
+          const fd = new FormData();
+          fd.append('comment', form.inspectionComment || '');
+          if (inspectionEvidenceFile) fd.append('evidenceFile', inspectionEvidenceFile);
+          const metaRes = await fetch(
+            `/api/alimtalk/templates/${encodeURIComponent(savedTemplateCode)}/inspection-meta`,
+            {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${getToken()}` },
+              body: fd,
+            },
+          );
+          const metaData = await metaRes.json().catch(() => ({}));
+          if (!metaRes.ok || !metaData.success) {
+            // 코멘트 저장 실패는 치명적이지 않음 — 토스트로 안내하되 등록 자체는 성공 처리
+            setToast({
+              type: 'error',
+              message: `등록은 완료됐지만 코멘트/증빙자료 저장에 실패했습니다: ${metaData?.error || metaRes.status}`,
+            });
+          }
+        } catch (metaErr: any) {
+          console.error('[AlimtalkTemplateFormV2] inspection-meta 저장 실패', metaErr);
+          setToast({
+            type: 'error',
+            message: '등록은 완료됐지만 코멘트/증빙자료 저장 중 오류가 발생했습니다',
+          });
+        }
+      }
+
       // ★ D139 #4 (0425): 자동 검수요청 분기 제거 (등록과 검수요청 분리).
       //   템플릿은 DRAFT 상태로 저장 → 목록에서 '검수요청' 버튼으로 명시 액션.
       // ★ D142+ A1+A2 (2026-04-29): 성공 시 setSaving(true) 유지 → 모달 unmount까지 등록 버튼 비활성화.
@@ -759,6 +810,49 @@ export default function AlimtalkTemplateFormV2({
               </div>
               <p className="mt-1 ml-6 text-[11px] text-gray-500 leading-relaxed">
                 보안 템플릿 체크 시, 메인 디바이스 모바일 외 모든 서브 디바이스에서는 메시지 내용이 노출되지 않습니다.
+              </p>
+            </div>
+
+            {/* ★ D143 F (2026-04-30) PDF 0430 알림톡 #3: 코멘트 + 증빙자료 (등록 폼 제일 하단)
+                 직원 요청: "코멘트 입력칸에는 '정보성 메시지에 대한 근거 정보(생략가능)' 선 입력".
+                 등록 시점에 함께 저장되며, 검수요청 시 IMC에 자동 전달됨. */}
+            <div className="border-t border-gray-200 pt-4">
+              <label className="block text-xs font-medium text-gray-600 mb-1">
+                코멘트 <span className="text-gray-400 font-normal">(생략 가능)</span>
+              </label>
+              <textarea
+                value={form.inspectionComment}
+                onChange={(e) => setForm({ ...form, inspectionComment: e.target.value })}
+                placeholder="정보성 메시지에 대한 근거 정보(생략가능)"
+                rows={3}
+                disabled={readOnly}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm resize-none focus:ring-2 focus:ring-amber-300 focus:border-amber-400 outline-none disabled:bg-gray-50"
+              />
+
+              <label className="block text-xs font-medium text-gray-600 mt-3 mb-1">
+                코멘트 증빙자료 <span className="text-gray-400 font-normal">(이미지/PDF, 생략 가능 · 최대 5MB)</span>
+              </label>
+              {/* 수정 모달에서 기존 첨부파일명 표시 */}
+              {form.inspectionEvidenceFilename && !inspectionEvidenceFile && (
+                <p className="text-[11px] text-gray-500 mb-1">
+                  기존 첨부: {form.inspectionEvidenceFilename}
+                </p>
+              )}
+              {!readOnly && (
+                <input
+                  type="file"
+                  accept="image/*,.pdf"
+                  onChange={(e) => setInspectionEvidenceFile(e.target.files?.[0] || null)}
+                  className="block w-full text-xs text-gray-600 file:mr-2 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:bg-amber-50 file:text-amber-700 hover:file:bg-amber-100"
+                />
+              )}
+              {inspectionEvidenceFile && (
+                <p className="text-[11px] text-gray-500 mt-1 truncate">
+                  새 첨부: {inspectionEvidenceFile.name} ({Math.ceil(inspectionEvidenceFile.size / 1024)} KB)
+                </p>
+              )}
+              <p className="text-[11px] text-gray-400 mt-1 leading-relaxed">
+                ℹ 등록 시점에 저장되며, 검수요청 시 카카오에 함께 전달됩니다.
               </p>
             </div>
           </div>

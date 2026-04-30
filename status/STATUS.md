@@ -107,6 +107,66 @@
 
 ---
 
+### 🟢 D143 (2026-04-30) — ENTERPRISE 잠금 + 매뉴얼 + 자연인 오픈 + app.hanjul.ai 폐기 (배포 완료)
+
+> **상태:** 🟢 배포 완료 (PM2 restart 4/30 17:24 KST 확인). 자연인 isoi/isoics 첫 시범 업체 오픈 준비 완료.
+
+#### 처리 항목
+
+1. **자동발송/카카오&RCS ENTERPRISE 잠금 + 베타테스트 안내**
+   - DB: `UPDATE plans SET auto_campaign_enabled = (plan_code = 'ENTERPRISE')`
+   - Frontend: DashboardHeader planCode prop, 메뉴 자물쇠+베타 모달, KakaoRcsPage 페이지 잠금, AutoSendPage 멘트 변경
+   - **🔮 디버깅 완료 후 환원 SQL 메모됨** (project_d143_session.md 9. 핵심메모 참조)
+
+2. **자연인 isoi/isoics 오픈 준비**
+   - `must_change_password=true` 강제 (직원이 한 번 로그인해서 false였던 것 정정)
+   - 비밀번호는 `qwer1234` 유지 (직원 안내값 그대로)
+   - **하지만 자연인 plan은 PRO 그대로** — Harold님 결정. 디버깅 완료 후 plans 환원 시 자동발송 자동 사용 가능
+
+3. **로그인 ID 공백 trim — 사고 차단**
+   - 자연인 isoi 로그인 4회 실패 사고 추적: audit_logs `details::text`로 입력값에 공백 발견(` isoi`, ` isoi `)
+   - LoginPage.tsx + auth.ts trim
+   - DB CHECK: `users_login_id_no_space CHECK (login_id !~ '\s')` 재발 방지
+
+4. **app.hanjul.ai 폐기 → hanjul.ai 자동 리다이렉트**
+   - `packages/company-frontend/index.html` `<head>` 최상단에 location.replace
+   - **company-frontend는 별도 빌드 필요:** `cd packages/company-frontend && npm run build`
+   - 발견: company-frontend LoginPage.tsx에 mustChangePassword 체크 누락 → 폐기로 자연 해결
+
+5. **사용자 매뉴얼 (manual.html) 신설**
+   - `git mv "한줄로 매뉴얼 html" "packages/frontend/public/manual"` (history 보존)
+   - 9장 페이징 방식 (좌측 메뉴 클릭 → 챕터 단위 전환, 키보드 ←/→ 단축키, URL #ch 해시)
+   - 보안 8중: 우클릭/단축키/window.print/이미지 드래그/텍스트 선택/DevTools 감지 blur/세션 검증/robots noindex
+   - Dashboard.tsx 푸터에 `사용자 매뉴얼` 링크 추가
+   - 직원 검토 4건 반영 (담당자 테스트 위치/회신번호 제외/AI 발송 템플릿/매일 제거)
+   - TargetUp → hanjul.ai, MMS 1장 → 3장
+
+6. **SyncAgent 설치매뉴얼 v1.5.4 신설**
+   - `sync-agent/SyncAgent_설치매뉴얼_v1_5_4.docx` (24KB) — 신규
+   - v1.5(구버전) 그대로 보존
+   - 9.4 신설: 한줄로 슈퍼관리자 원격 제어
+   - Q10/Q11/Q12 트러블슈팅 추가 (1053/Delayed Auto Start/단건 재시도)
+   - 12. 버전 히스토리 v1.5.1/v1.5.2/v1.5.4 추가
+   - **🔒 한줄로 내부 정보 노출 0건 검증 완료** (IP/DB/스키마/API 경로/도메인/Docker/Nginx/SSH/bcrypt/JWT 모두 grep 0건)
+
+#### 미완료 (다음 세션 이어가기)
+
+- **알림톡 PDF 0430 7건 진단** — D142 0428 작업 후에도 재발 신고
+  - **#7 등록 폼 코멘트 입력 위치 오류** 확정 (D142 F가 검수요청 모달에 잘못 추가) — 즉시 수정 가능
+  - 나머지 6건 — 사용자 재현 + pm2 로그 캡처 필요. PM2 메모리 새 코드 로드 확인됨(4/30 15:14 KST)
+- **MEMORY.md 크기 38KB** — 한도(24.4KB) 초과. 다음 세션에서 정리 필요
+
+#### 배포 명령
+
+```powershell
+tp-push "D143 ENTERPRISE잠금+매뉴얼+로그인trim+자연인오픈+appHanjulAi폐기"
+tp-deploy-full
+# 추가
+cd packages/company-frontend && npm run build  # app.hanjul.ai redirect 적용
+```
+
+---
+
 ### 🟡 D142+ 알림톡 PDF 0428 (2026-04-29) — D135/D139 후속 7건 + IMC 이미지 이중 래핑 unwrap (수정 완료 · 배포 대기)
 
 > **상태:** 🟡 코드 수정 완료 · TS 0 error · **배포 대기**
