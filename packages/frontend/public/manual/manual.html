@@ -131,17 +131,17 @@ main {
 .step-content ul { margin:8px 0 12px; padding-left:20px; color:var(--gray-700); font-size:14px; }
 .step-content ul li { margin-bottom:4px; }
 
-/* 이미지 카드 — D143+ (2026-05-01): 작은 이미지 강제 확대로 흐려지는 문제 해결 */
+/* 이미지 카드 — D143+ (2026-05-01): 적정 표시 크기 + 라이트박스 확대 */
 .shot {
-  border:1px solid var(--gray-200); border-radius:12px; overflow:hidden; margin-top:12px;
+  border:1px solid var(--gray-200); border-radius:12px; overflow:hidden; margin:12px auto 0;
   box-shadow:0 4px 14px rgba(15,23,42,0.06);
   background:#fff;
   cursor: zoom-in;
   transition: transform 0.15s ease, box-shadow 0.15s ease;
+  max-width: 720px;  /* 매뉴얼 본문에서 이미지 카드 자체를 720px로 제한 — 글씨/UI가 과도하게 크게 보이지 않도록 */
 }
 .shot:hover { box-shadow:0 6px 20px rgba(15,23,42,0.10); }
-/* width:100% → max-width:100% + width:auto + height:auto + 가운데 정렬.
-   원본보다 크게 늘어나지 않아 흐려짐 방지 + 작은 이미지는 자연 크기로 표시. */
+/* 이미지는 컨테이너에 맞춤 + 원본보다 크게 늘어나지 않도록 width:auto, max-width:100% */
 .shot img { display:block; max-width:100%; width:auto; height:auto; margin:0 auto; }
 
 /* 라이트박스 — 클릭 시 원본 크기로 풀스크린 표시 */
