@@ -993,15 +993,21 @@ export function formatCampaignMessageForDisplay(
   } | null | undefined,
   realSentMessage?: string | null
 ): string {
-  // ★ D137 D6: realSentMessage / message_content 둘 다 동일 파이프라인 통과
   const source = realSentMessage || campaign?.message_content || '';
-  if (!campaign) return source; // campaign 없으면 정규화 불가 — 원본 반환
-  // D103 위반 데이터 및 msg_contents 에 박힌 (광고)/무료거부 흔적 제거 후 is_ad 기반 재부착
-  const pureBody = stripAdParts(source);
+  if (!campaign) return source;
+
+  // ★ D143 (2026-05-04, 정식 오픈 D-Day 1일 전) — Harold님 명시 정책:
+  //   광고체크 OFF (is_ad=false) → 사용자 입력 본문 그대로 표시 (어떤 처리도 안 함)
+  //   사용자가 본문에 (광고)/무료거부 복붙한 경우도 사용자 입력이므로 그대로 보존
+  if (!campaign.is_ad) return source;
+
+  // ★ D143: 광고체크 ON일 때만 (광고)+무료거부 시스템 부착
+  //   stripAdParts 호출 제거 — 사용자 입력 깎지 않음
+  //   buildAdMessageFront 내부 hasRejectFooter/hasAdPrefix 체크가 중복 부착 방지
   return buildAdMessageFront(
-    pureBody,
+    source,
     campaign.message_type || 'SMS',
-    campaign.is_ad || false,
+    true,
     campaign.opt_out_080_number || ''
   );
 }

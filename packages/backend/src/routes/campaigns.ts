@@ -476,11 +476,13 @@ router.post('/', async (req: Request, res: Response) => {
       return res.status(400).json({ error: '필수 항목을 입력하세요.' });
     }
 
-    // ★ D142+ (2026-04-29) 0429 PDF B1 — D103 강제 정규화 + 광고 자동 승격
-    //   사용자가 본문에 (광고)/무료거부를 직접 박은 경우 정규화하여 DB는 항상 순수본문
-    const sanitizedContent = stripAdParts(messageContent || '');
-    const hadAdMarkerAi = (messageContent || '') !== sanitizedContent;
-    const finalIsAdAi = (isAd === true) || hadAdMarkerAi;
+    // ★ D143 (2026-05-04, 정식 오픈 D-Day 1일 전) — D142+ 자동 승격 정책 폐지
+    //   정책 변경 사유 (Harold님 명시): 사용자가 광고체크 OFF + 본문에 (광고)/무료거부 복붙한
+    //   케이스에서 D142+가 본문 깎고 is_ad 강제 승격 → 사용자 의도 무시 → 정합성 위반
+    //   새 정책: 사용자 입력 본문 그대로 저장 + 광고체크 의도 그대로 저장
+    //   변수명은 호환성 위해 유지 (sanitizedContent = 사용자 입력 그대로)
+    const sanitizedContent = messageContent || '';  // ★ D143: sanitize 미적용 — 사용자 입력 보존
+    const finalIsAdAi = isAd === true;               // ★ D143: 자동 승격 제거 — 사용자 광고체크 그대로
 
     // ★ D131: MMS 이미지 첨부 필수 가드 — mms-validator 컨트롤타워
     const aiMmsCheck = validateMmsPayload(messageType, mmsImagePaths);
@@ -1302,14 +1304,13 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       unsubFilterEnabled = true,
     } = req.body;
 
-    // ★ D142+ (2026-04-29) 0429 PDF B1 — D103 강제 정규화 + 광고 자동 승격
-    //   사용자가 textarea에 (광고)/무료거부를 직접 박은 변칙 입력 시
-    //   ① 본문에서 (광고)/무료거부 마커 제거 → DB는 항상 순수본문
-    //   ② 마커 발견 시 사용자 의도가 광고 발송이라 보고 is_ad 자동 승격
-    //   stripAdParts는 idempotent — 이미 순수본문이면 변화 없음
-    const sanitizedMessage = stripAdParts(message || '');
-    const hadAdMarker = (message || '') !== sanitizedMessage;
-    const finalIsAd = (adEnabled === true) || hadAdMarker;
+    // ★ D143 (2026-05-04, 정식 오픈 D-Day 1일 전) — D142+ 자동 승격 정책 폐지
+    //   정책 변경 사유 (Harold님 명시): 사용자가 광고체크 OFF + 본문에 (광고)/무료거부 복붙한
+    //   케이스에서 D142+가 본문 깎고 is_ad 강제 승격 → 사용자 의도 무시 → 정합성 위반
+    //   새 정책: 사용자 입력 본문 그대로 저장 + 광고체크 의도 그대로 저장
+    //   변수명은 호환성 위해 유지 (sanitizedMessage = 사용자 입력 그대로)
+    const sanitizedMessage = message || '';   // ★ D143: sanitize 미적용 — 사용자 입력 보존
+    const finalIsAd = adEnabled === true;     // ★ D143: 자동 승격 제거 — 사용자 광고체크 그대로
 
     // ★ D102: customMessageMap 제거 — 프론트 치환 폐기, 백엔드 replaceVariables 컨트롤타워 통일
 

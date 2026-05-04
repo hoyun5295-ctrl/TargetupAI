@@ -107,8 +107,10 @@ router.get('/summary', async (req: Request, res: Response) => {
     // ★ D98: draft/cancelled도 실패로 카운트 (목록에서 제외하지 않음)
     summaryQuery += ` AND status NOT IN ('cancelled')`;
 
-    // ★ D106: 발송결과는 sent_at(발송일) 기준 필터링. 미발송(draft)은 created_at 폴백
-    const summaryDr = buildPeriodFilter('COALESCE(sent_at, created_at)', {
+    // ★ D143 (2026-05-04, shiseido6 신고): 발송결과 출력 기준 = 발송일시
+    //   발송 완료(sent_at) 우선 → 예약 대기(scheduled_at) → 미발송(created_at) 폴백
+    //   정산이 발송일 기준이므로 4/30 등록 + 5/7 예약 캠페인은 5월 결과에 표시되어야 함
+    const summaryDr = buildPeriodFilter('COALESCE(sent_at, scheduled_at, created_at)', {
       fromDate: fromDate ? String(fromDate) : undefined,
       toDate: toDate ? String(toDate) : undefined,
       yearMonth: (!fromDate || !toDate) ? yearMonth : undefined,
@@ -194,8 +196,10 @@ router.get('/campaigns', async (req: Request, res: Response) => {
       params.push(req.query.filter_user_id);
     }
 
-    // ★ D106: 발송결과는 sent_at(발송일) 기준 필터링. 미발송(draft)은 created_at 폴백
-    const campDr = buildPeriodFilter('COALESCE(sent_at, created_at)', {
+    // ★ D143 (2026-05-04, shiseido6 신고): 발송결과 출력 기준 = 발송일시
+    //   발송 완료(sent_at) 우선 → 예약 대기(scheduled_at) → 미발송(created_at) 폴백
+    //   정산이 발송일 기준이므로 4/30 등록 + 5/7 예약 캠페인은 5월 결과에 표시되어야 함
+    const campDr = buildPeriodFilter('COALESCE(sent_at, scheduled_at, created_at)', {
       fromDate: fromDate ? String(fromDate) : undefined,
       toDate: toDate ? String(toDate) : undefined,
       yearMonth: (!fromDate || !toDate) ? (from ? String(from) : undefined) : undefined,
