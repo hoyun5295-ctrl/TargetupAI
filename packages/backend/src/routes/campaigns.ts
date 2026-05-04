@@ -2158,10 +2158,10 @@ router.put('/:id/message', async (req: Request, res: Response) => {
     const companyId = (req as any).user?.companyId;
     const campaignId = req.params.id;
     const { message, subject } = req.body;
-    // ★ D142+ (2026-04-29) 0429 PDF B1 — 메시지 수정 시에도 D103 강제 정규화
-    //   사용자가 본문에 (광고)/무료거부를 박은 경우 DB는 순수본문만 저장.
-    //   캠페인 자체의 is_ad는 변경하지 않음 (수정 범위 외). 광고 부착은 캠페인 is_ad 기준.
-    const sanitizedEditMessage = stripAdParts(message || '');
+    // ★ D143 (2026-05-04, 정식 오픈 D-Day 1일 전) — D142+ 자동 정규화 폐지
+    //   정책 변경 사유 (Harold님 명시): 사용자 입력 본문 그대로 저장. 시스템이 깎지 않음.
+    //   변수명은 호환성 위해 유지 (sanitizedEditMessage = 사용자 입력 그대로)
+    const sanitizedEditMessage = message || '';   // ★ D143: sanitize 미적용 — 사용자 입력 보존
 
     // 캠페인 확인
     const campaign = await query(
