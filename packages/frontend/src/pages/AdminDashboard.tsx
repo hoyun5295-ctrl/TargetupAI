@@ -2808,7 +2808,9 @@ const handleApproveRequest = async (id: string) => {
                           {campaign.company_name}
                           <span className="text-gray-400 ml-1 text-xs">({campaign.company_code})</span>
                         </td>
-                        <td className="px-4 py-3 text-gray-900 max-w-xs truncate" title={campaign.campaign_name}>{campaign.campaign_name}</td>
+                        <td className="px-4 py-3 text-gray-900" style={{ maxWidth: '320px' }}>
+                          <div className="truncate" title={campaign.campaign_name}>{campaign.campaign_name}</div>
+                        </td>
                         <td className="px-4 py-3 text-center text-gray-500 whitespace-nowrap">
                           {campaign.target_count?.toLocaleString() || 0}명
                         </td>
@@ -2822,7 +2824,7 @@ const handleApproveRequest = async (id: string) => {
                         <td className="px-4 py-3 text-center text-gray-500 whitespace-nowrap text-xs">
                           {campaign.scheduled_at ? formatDateTime(campaign.scheduled_at) : '-'}
                         </td>
-                        <td className="px-4 py-3 text-center whitespace-nowrap">
+                        <td className="px-4 py-3 text-center whitespace-nowrap" style={{ minWidth: '70px' }}>
                           {campaign.status === 'scheduled' ? (
                             <span className="px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">예약</span>
                           ) : (
@@ -2834,11 +2836,11 @@ const handleApproveRequest = async (id: string) => {
                             </div>
                           )}
                         </td>
-                        <td className="px-4 py-3 text-center whitespace-nowrap">
+                        <td className="px-4 py-3 text-center whitespace-nowrap" style={{ minWidth: '60px' }}>
                           <button onClick={() => openSmsDetail(campaign.id)}
                             className="text-blue-600 hover:text-blue-800 text-xs font-medium">[조회]</button>
                         </td>
-                        <td className="px-4 py-3 text-center whitespace-nowrap">
+                        <td className="px-4 py-3 text-center whitespace-nowrap" style={{ minWidth: '60px' }}>
                           {campaign.status === 'scheduled' ? (
                             <button onClick={() => openCancelModal(campaign.id, campaign.campaign_name)}
                               className="text-red-600 hover:text-red-800 text-sm">취소</button>
