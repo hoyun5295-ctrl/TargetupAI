@@ -144,8 +144,8 @@ const [allCampaignsCompany, setAllCampaignsCompany] = useState('');
 // 발송 통계
 const [sendStats, setSendStats] = useState<any>(null);
 const [statsView, setStatsView] = useState<'daily' | 'monthly'>('daily');
-const [statsStartDate, setStatsStartDate] = useState(() => new Date().toISOString().slice(0, 10));
-const [statsEndDate, setStatsEndDate] = useState(() => new Date().toISOString().slice(0, 10));
+const [statsStartDate, setStatsStartDate] = useState(() => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' }));
+const [statsEndDate, setStatsEndDate] = useState(() => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' }));
 const [statsCompanyFilter, setStatsCompanyFilter] = useState('');
 const [statsPage, setStatsPage] = useState(1);
 const [statsTotal, setStatsTotal] = useState(0);
