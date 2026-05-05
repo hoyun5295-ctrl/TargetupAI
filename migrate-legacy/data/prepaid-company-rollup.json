@@ -6,18 +6,18 @@
     "userids": [
       {
         "userid": "blanc101",
-        "balance": 8832093,
+        "balance": 8832092,
         "charged": 69500000,
         "used": 60667907
       },
       {
         "userid": "efolium",
-        "balance": 753834,
+        "balance": 753833,
         "charged": 73000000,
         "used": 72246166
       }
     ],
-    "total_balance": 9585927,
+    "total_balance": 9585925,
     "total_charged": 142500000,
     "total_used": 132914073
   },
@@ -28,14 +28,14 @@
     "userids": [
       {
         "userid": "pckr",
-        "balance": 4036070,
+        "balance": 3972582,
         "charged": 228699000,
-        "used": 224662930
+        "used": 224726417
       }
     ],
-    "total_balance": 4036070,
+    "total_balance": 3972582,
     "total_charged": 228699000,
-    "total_used": 224662930
+    "total_used": 224726417
   },
   "techfood": {
     "company_id": "12f8602f-b7f7-43e8-915a-57b57ae49110",
@@ -44,14 +44,14 @@
     "userids": [
       {
         "userid": "techfood",
-        "balance": 1837398,
+        "balance": 1836490,
         "charged": 1930083,
-        "used": 92685
+        "used": 93592
       }
     ],
-    "total_balance": 1837398,
+    "total_balance": 1836490,
     "total_charged": 1930083,
-    "total_used": 92685
+    "total_used": 93592
   },
   "comvita": {
     "company_id": "db4b30be-56fd-4a5e-888f-cfb14e4b99e3",
@@ -60,20 +60,20 @@
     "userids": [
       {
         "userid": "comvita",
-        "balance": 789545,
-        "charged": 18994700,
-        "used": 18205155
+        "balance": 618028,
+        "charged": 19654700,
+        "used": 19036671
       },
       {
         "userid": "comvitaon",
-        "balance": 336501,
+        "balance": 336398,
         "charged": 4945000,
-        "used": 4608499
+        "used": 4608601
       }
     ],
-    "total_balance": 1126046,
-    "total_charged": 23939700,
-    "total_used": 22813654
+    "total_balance": 954426,
+    "total_charged": 24599700,
+    "total_used": 23645272
   },
   "labelyoung": {
     "company_id": "932bc9c5-df2b-4418-af42-723c004b15a1",
@@ -82,14 +82,14 @@
     "userids": [
       {
         "userid": "labelyoung",
-        "balance": 806261,
+        "balance": 805013,
         "charged": 39916570,
-        "used": 39110309
+        "used": 39111556
       }
     ],
-    "total_balance": 806261,
+    "total_balance": 805013,
     "total_charged": 39916570,
-    "total_used": 39110309
+    "total_used": 39111556
   },
   "jisam": {
     "company_id": "144f5470-bb23-4e9f-93e1-af0ae8478ea3",
@@ -98,30 +98,14 @@
     "userids": [
       {
         "userid": "coreya",
-        "balance": 427264,
+        "balance": 427263,
         "charged": 12834000,
         "used": 12406736
       }
     ],
-    "total_balance": 427264,
+    "total_balance": 427263,
     "total_charged": 12834000,
     "total_used": 12406736
-  },
-  "bacon": {
-    "company_id": "c4e06607-7681-4813-8ef3-04b538ee225d",
-    "company_name": "주식회사 베이컨",
-    "is_multi": false,
-    "userids": [
-      {
-        "userid": "babynews",
-        "balance": 377082,
-        "charged": 41290841,
-        "used": 40913759
-      }
-    ],
-    "total_balance": 377082,
-    "total_charged": 41290841,
-    "total_used": 40913759
   },
   "paige": {
     "company_id": "a33445aa-a2bd-4fd7-9159-f2757a117d6d",
@@ -130,46 +114,14 @@
     "userids": [
       {
         "userid": "beigic",
-        "balance": 341373,
+        "balance": 326209,
         "charged": 5650000,
-        "used": 5308628
+        "used": 5323791
       }
     ],
-    "total_balance": 341373,
+    "total_balance": 326209,
     "total_charged": 5650000,
-    "total_used": 5308628
-  },
-  "kbjfood": {
-    "company_id": "05f568c8-99cc-4291-a9c4-51d0d056d6f6",
-    "company_name": "강복자식품",
-    "is_multi": false,
-    "userids": [
-      {
-        "userid": "kbjfood",
-        "balance": 262168,
-        "charged": 4570000,
-        "used": 4307832
-      }
-    ],
-    "total_balance": 262168,
-    "total_charged": 4570000,
-    "total_used": 4307832
-  },
-  "dsfashion": {
-    "company_id": "4fede2b0-75e9-4477-b52f-4b1f97d91747",
-    "company_name": "디에스패션컴퍼니",
-    "is_multi": false,
-    "userids": [
-      {
-        "userid": "dsfashion",
-        "balance": 255097,
-        "charged": 5600000,
-        "used": 5344903
-      }
-    ],
-    "total_balance": 255097,
-    "total_charged": 5600000,
-    "total_used": 5344903
+    "total_used": 5323791
   },
   "nsb": {
     "company_id": "806d13d7-4fea-4188-b4d4-ca2d46ecfe2e",
@@ -178,14 +130,30 @@
     "userids": [
       {
         "userid": "biellee4040",
-        "balance": 242315,
-        "charged": 15050000,
-        "used": 14807685
+        "balance": 292194,
+        "charged": 15550000,
+        "used": 15257805
       }
     ],
-    "total_balance": 242315,
-    "total_charged": 15050000,
-    "total_used": 14807685
+    "total_balance": 292194,
+    "total_charged": 15550000,
+    "total_used": 15257805
+  },
+  "bacon": {
+    "company_id": "c4e06607-7681-4813-8ef3-04b538ee225d",
+    "company_name": "주식회사 베이컨",
+    "is_multi": false,
+    "userids": [
+      {
+        "userid": "babynews",
+        "balance": 244838,
+        "charged": 41290841,
+        "used": 41046002
+      }
+    ],
+    "total_balance": 244838,
+    "total_charged": 41290841,
+    "total_used": 41046002
   },
   "skincure": {
     "company_id": "96a4d972-d244-42c3-a0ae-807645d14769",
@@ -194,12 +162,12 @@
     "userids": [
       {
         "userid": "skincure",
-        "balance": 226563,
+        "balance": 226562,
         "charged": 47170000,
         "used": 46943437
       }
     ],
-    "total_balance": 226563,
+    "total_balance": 226562,
     "total_charged": 47170000,
     "total_used": 46943437
   },
@@ -212,28 +180,44 @@
         "userid": "lumourkorea",
         "balance": 202463,
         "charged": 20300000,
-        "used": 20097537
+        "used": 20097536
       }
     ],
     "total_balance": 202463,
     "total_charged": 20300000,
-    "total_used": 20097537
+    "total_used": 20097536
   },
-  "familytwo": {
-    "company_id": "7a0b6c45-b088-4aa3-96b2-4772440e66b5",
-    "company_name": "패밀리투",
+  "dsfashion": {
+    "company_id": "4fede2b0-75e9-4477-b52f-4b1f97d91747",
+    "company_name": "디에스패션컴퍼니",
     "is_multi": false,
     "userids": [
       {
-        "userid": "rudtjr",
-        "balance": 100003,
-        "charged": 6689416,
-        "used": 6589413
+        "userid": "dsfashion",
+        "balance": 160980,
+        "charged": 5600000,
+        "used": 5439019
       }
     ],
-    "total_balance": 100003,
-    "total_charged": 6689416,
-    "total_used": 6589413
+    "total_balance": 160980,
+    "total_charged": 5600000,
+    "total_used": 5439019
+  },
+  "kbjfood": {
+    "company_id": "05f568c8-99cc-4291-a9c4-51d0d056d6f6",
+    "company_name": "강복자식품",
+    "is_multi": false,
+    "userids": [
+      {
+        "userid": "kbjfood",
+        "balance": 109280,
+        "charged": 4570000,
+        "used": 4460719
+      }
+    ],
+    "total_balance": 109280,
+    "total_charged": 4570000,
+    "total_used": 4460719
   },
   "fnda": {
     "company_id": "4bc0b9d3-f135-4dba-b7de-8967950cb16e",
@@ -242,30 +226,30 @@
     "userids": [
       {
         "userid": "repair",
-        "balance": 97994,
+        "balance": 97993,
         "charged": 100000,
         "used": 2006
       }
     ],
-    "total_balance": 97994,
+    "total_balance": 97993,
     "total_charged": 100000,
     "total_used": 2006
   },
-  "crispybaba": {
-    "company_id": "ccef7e86-ad74-49f7-8b7b-9586fc4175ca",
-    "company_name": "(주)경희 크리스피바바",
+  "familytwo": {
+    "company_id": "7a0b6c45-b088-4aa3-96b2-4772440e66b5",
+    "company_name": "패밀리투",
     "is_multi": false,
     "userids": [
       {
-        "userid": "crispyba",
-        "balance": 62839,
-        "charged": 62121225,
-        "used": 62058386
+        "userid": "rudtjr",
+        "balance": 85705,
+        "charged": 6689416,
+        "used": 6603710
       }
     ],
-    "total_balance": 62839,
-    "total_charged": 62121225,
-    "total_used": 62058386
+    "total_balance": 85705,
+    "total_charged": 6689416,
+    "total_used": 6603710
   },
   "knoumedia": {
     "company_id": "cca68c71-4be9-46a5-a6ae-aa52674e8e4b",
@@ -274,30 +258,14 @@
     "userids": [
       {
         "userid": "dp26",
-        "balance": 49937,
+        "balance": 49734,
         "charged": 340500,
-        "used": 290563
+        "used": 290765
       }
     ],
-    "total_balance": 49937,
+    "total_balance": 49734,
     "total_charged": 340500,
-    "total_used": 290563
-  },
-  "lululemon": {
-    "company_id": "c9772fc2-f16b-4919-9760-20ef1d501e40",
-    "company_name": "룰루레몬애틀라티카코리아유한회사",
-    "is_multi": false,
-    "userids": [
-      {
-        "userid": "lululemon44117",
-        "balance": 48716,
-        "charged": 260000,
-        "used": 211284
-      }
-    ],
-    "total_balance": 48716,
-    "total_charged": 260000,
-    "total_used": 211284
+    "total_used": 290765
   },
   "knoustat": {
     "company_id": "65f18e25-2049-483c-8db1-f5c5b6b0e90e",
@@ -308,12 +276,12 @@
         "userid": "dp35",
         "balance": 47813,
         "charged": 850750,
-        "used": 802937
+        "used": 802936
       }
     ],
     "total_balance": 47813,
     "total_charged": 850750,
-    "total_used": 802937
+    "total_used": 802936
   },
   "elensilia": {
     "company_id": "b657b9fb-91ab-440c-98d4-00d1d6edd687",
@@ -322,14 +290,30 @@
     "userids": [
       {
         "userid": "elensilia",
-        "balance": 47777,
+        "balance": 47540,
         "charged": 310000,
-        "used": 262224
+        "used": 262459
       }
     ],
-    "total_balance": 47777,
+    "total_balance": 47540,
     "total_charged": 310000,
-    "total_used": 262224
+    "total_used": 262459
+  },
+  "lululemon": {
+    "company_id": "c9772fc2-f16b-4919-9760-20ef1d501e40",
+    "company_name": "룰루레몬애틀라티카코리아유한회사",
+    "is_multi": false,
+    "userids": [
+      {
+        "userid": "lululemon44117",
+        "balance": 45152,
+        "charged": 260000,
+        "used": 214847
+      }
+    ],
+    "total_balance": 45152,
+    "total_charged": 260000,
+    "total_used": 214847
   },
   "augustinus": {
     "company_id": "ecb714dc-ee06-4869-9c2d-7139b6960369",
@@ -338,94 +322,14 @@
     "userids": [
       {
         "userid": "ABCOZX",
-        "balance": 45076,
+        "balance": 45075,
         "charged": 470000,
-        "used": 424925
+        "used": 424924
       }
     ],
-    "total_balance": 45076,
+    "total_balance": 45075,
     "total_charged": 470000,
-    "total_used": 424925
-  },
-  "amcommerce": {
-    "company_id": "191b1dae-3155-4a83-b6d5-70e477b635f8",
-    "company_name": "(주)에이엠커머스",
-    "is_multi": false,
-    "userids": [
-      {
-        "userid": "amc2020",
-        "balance": 39189,
-        "charged": 14900000,
-        "used": 14860811
-      }
-    ],
-    "total_balance": 39189,
-    "total_charged": 14900000,
-    "total_used": 14860811
-  },
-  "easyschool": {
-    "company_id": "2239adb7-d9f4-4bd5-91b5-a808d2a74d20",
-    "company_name": "금정이지어학원",
-    "is_multi": false,
-    "userids": [
-      {
-        "userid": "speakingworks",
-        "balance": 28752,
-        "charged": 600000,
-        "used": 571248
-      }
-    ],
-    "total_balance": 28752,
-    "total_charged": 600000,
-    "total_used": 571248
-  },
-  "treksta": {
-    "company_id": "9f508edd-ce63-4764-9bdd-bd92c485d525",
-    "company_name": "트렉스타",
-    "is_multi": false,
-    "userids": [
-      {
-        "userid": "Treksta",
-        "balance": 27015,
-        "charged": 78935454,
-        "used": 78908440
-      }
-    ],
-    "total_balance": 27015,
-    "total_charged": 78935454,
-    "total_used": 78908440
-  },
-  "catsfactory": {
-    "company_id": "96ed922b-f310-4fc6-bced-1351330618bc",
-    "company_name": "캣츠팩토리",
-    "is_multi": false,
-    "userids": [
-      {
-        "userid": "cats0901",
-        "balance": 19952,
-        "charged": 147041000,
-        "used": 147021048
-      }
-    ],
-    "total_balance": 19952,
-    "total_charged": 147041000,
-    "total_used": 147021048
-  },
-  "everych": {
-    "company_id": "45ec5da2-2f4f-4184-9e2d-bfef5705ed11",
-    "company_name": "에브리치",
-    "is_multi": false,
-    "userids": [
-      {
-        "userid": "Everych",
-        "balance": 18595,
-        "charged": 180000,
-        "used": 161405
-      }
-    ],
-    "total_balance": 18595,
-    "total_charged": 180000,
-    "total_used": 161405
+    "total_used": 424924
   },
   "afex": {
     "company_id": "9423394c-1ac9-452b-91bf-3d4753d4d2ab",
@@ -434,14 +338,94 @@
     "userids": [
       {
         "userid": "afexkorea",
-        "balance": 13247,
-        "charged": 710000,
-        "used": 696753
+        "balance": 44344,
+        "charged": 760000,
+        "used": 715655
       }
     ],
-    "total_balance": 13247,
-    "total_charged": 710000,
-    "total_used": 696753
+    "total_balance": 44344,
+    "total_charged": 760000,
+    "total_used": 715655
+  },
+  "amcommerce": {
+    "company_id": "191b1dae-3155-4a83-b6d5-70e477b635f8",
+    "company_name": "(주)에이엠커머스",
+    "is_multi": false,
+    "userids": [
+      {
+        "userid": "amc2020",
+        "balance": 28894,
+        "charged": 14900000,
+        "used": 14871105
+      }
+    ],
+    "total_balance": 28894,
+    "total_charged": 14900000,
+    "total_used": 14871105
+  },
+  "easyschool": {
+    "company_id": "2239adb7-d9f4-4bd5-91b5-a808d2a74d20",
+    "company_name": "금정이지어학원",
+    "is_multi": false,
+    "userids": [
+      {
+        "userid": "speakingworks",
+        "balance": 25701,
+        "charged": 600000,
+        "used": 574298
+      }
+    ],
+    "total_balance": 25701,
+    "total_charged": 600000,
+    "total_used": 574298
+  },
+  "catsfactory": {
+    "company_id": "96ed922b-f310-4fc6-bced-1351330618bc",
+    "company_name": "캣츠팩토리",
+    "is_multi": false,
+    "userids": [
+      {
+        "userid": "cats0901",
+        "balance": 19645,
+        "charged": 147041000,
+        "used": 147021354
+      }
+    ],
+    "total_balance": 19645,
+    "total_charged": 147041000,
+    "total_used": 147021354
+  },
+  "everych": {
+    "company_id": "45ec5da2-2f4f-4184-9e2d-bfef5705ed11",
+    "company_name": "에브리치",
+    "is_multi": false,
+    "userids": [
+      {
+        "userid": "Everych",
+        "balance": 18594,
+        "charged": 180000,
+        "used": 161405
+      }
+    ],
+    "total_balance": 18594,
+    "total_charged": 180000,
+    "total_used": 161405
+  },
+  "crispybaba": {
+    "company_id": "ccef7e86-ad74-49f7-8b7b-9586fc4175ca",
+    "company_name": "(주)경희 크리스피바바",
+    "is_multi": false,
+    "userids": [
+      {
+        "userid": "crispyba",
+        "balance": 15854,
+        "charged": 62391225,
+        "used": 62375370
+      }
+    ],
+    "total_balance": 15854,
+    "total_charged": 62391225,
+    "total_used": 62375370
   },
   "chaumet": {
     "company_id": "aab44666-8ed2-4663-92c9-0c5b6cc08534",
@@ -466,30 +450,14 @@
     "userids": [
       {
         "userid": "quiksilver",
-        "balance": 7542,
+        "balance": 7491,
         "charged": 9197,
-        "used": 1655
+        "used": 1705
       }
     ],
-    "total_balance": 7542,
+    "total_balance": 7491,
     "total_charged": 9197,
-    "total_used": 1655
-  },
-  "idlook": {
-    "company_id": "807cc016-1050-43ae-8bed-67822ab101c0",
-    "company_name": "아이디룩",
-    "is_multi": true,
-    "userids": [
-      {
-        "userid": "idlookcs",
-        "balance": 2988,
-        "charged": 60000,
-        "used": 57012
-      }
-    ],
-    "total_balance": 2988,
-    "total_charged": 60000,
-    "total_used": 57012
+    "total_used": 1705
   },
   "arnew": {
     "company_id": "62ffa713-521b-4720-aeec-976d1fa5b815",
@@ -498,14 +466,30 @@
     "userids": [
       {
         "userid": "arnew",
-        "balance": 1640,
-        "charged": 12829511,
-        "used": 12827871
+        "balance": 4749,
+        "charged": 12839511,
+        "used": 12834761
       }
     ],
-    "total_balance": 1640,
-    "total_charged": 12829511,
-    "total_used": 12827871
+    "total_balance": 4749,
+    "total_charged": 12839511,
+    "total_used": 12834761
+  },
+  "idlook": {
+    "company_id": "807cc016-1050-43ae-8bed-67822ab101c0",
+    "company_name": "아이디룩",
+    "is_multi": true,
+    "userids": [
+      {
+        "userid": "idlookcs",
+        "balance": 1107,
+        "charged": 60000,
+        "used": 58892
+      }
+    ],
+    "total_balance": 1107,
+    "total_charged": 60000,
+    "total_used": 58892
   },
   "banilaco": {
     "company_id": "7bca94c7-25af-4ea4-809f-e65c50ee3929",
@@ -514,14 +498,14 @@
     "userids": [
       {
         "userid": "banilaco",
-        "balance": 673,
+        "balance": 417,
         "charged": 70000,
-        "used": 69327
+        "used": 69582
       }
     ],
-    "total_balance": 673,
+    "total_balance": 417,
     "total_charged": 70000,
-    "total_used": 69327
+    "total_used": 69582
   },
   "benetton": {
     "company_id": "d6b3d71c-ed35-4d49-ab72-0392cf789d9e",
@@ -532,12 +516,12 @@
         "userid": "benetton",
         "balance": 13,
         "charged": 1000,
-        "used": 987
+        "used": 986
       }
     ],
     "total_balance": 13,
     "total_charged": 1000,
-    "total_used": 987
+    "total_used": 986
   },
   "mariooutlet": {
     "company_id": "9c228259-a3ca-4832-9feb-d25572717697",
@@ -545,16 +529,16 @@
     "is_multi": true,
     "userids": [
       {
-        "userid": "mario4",
-        "balance": 0,
-        "charged": 59,
-        "used": 59
-      },
-      {
         "userid": "mario1",
         "balance": 0,
         "charged": 26,
-        "used": 26
+        "used": 25
+      },
+      {
+        "userid": "mario4",
+        "balance": 0,
+        "charged": 59,
+        "used": 58
       },
       {
         "userid": "mario2",
@@ -565,6 +549,22 @@
     ],
     "total_balance": 0,
     "total_charged": 93,
-    "total_used": 93
+    "total_used": 91
+  },
+  "treksta": {
+    "company_id": "9f508edd-ce63-4764-9bdd-bd92c485d525",
+    "company_name": "트렉스타",
+    "is_multi": false,
+    "userids": [
+      {
+        "userid": "Treksta",
+        "balance": 0,
+        "charged": 79203328,
+        "used": 79203335
+      }
+    ],
+    "total_balance": 0,
+    "total_charged": 79203328,
+    "total_used": 79203335
   }
 }

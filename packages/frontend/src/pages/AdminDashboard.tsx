@@ -3881,8 +3881,9 @@ const handleApproveRequest = async (id: string) => {
               const sent = Number(sendStats.summary.total_sent);
               const success = Number(sendStats.summary.total_success);
               const fail = Number(sendStats.summary.total_fail);
-              const pending = sent - success - fail;
-              const rate = sent > 0 ? (success / sent * 100).toFixed(1) : '0.0';
+              const pending = Math.max(0, sent - success - fail);
+              const denom = success + fail;
+              const rate = denom > 0 ? (success / denom * 100).toFixed(1) : '-';
               return (
                 <div className="bg-white rounded-lg shadow px-6 py-3 flex items-center gap-8 text-sm">
                   <span className="text-gray-500">조회 기간 합계</span>
@@ -3890,7 +3891,7 @@ const handleApproveRequest = async (id: string) => {
                   <span className="font-semibold text-green-600">성공 {success.toLocaleString()}</span>
                   <span className="font-semibold text-red-600">실패 {fail.toLocaleString()}</span>
                   <span className="font-semibold text-amber-600">대기 {pending.toLocaleString()}</span>
-                  <span className="font-semibold text-gray-700">성공률 {rate}%</span>
+                  <span className="font-semibold text-gray-700">성공률 {denom > 0 ? `${rate}%` : '-'}</span>
                 </div>
               );
             })()}

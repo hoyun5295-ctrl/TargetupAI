@@ -43,9 +43,10 @@ for (const line of raw.split(/\r?\n/)) {
   const parts = t.split('|').map((s) => s.trim());
   if (parts.length < 5) continue;
   const [userid, name, chargedStr, usedStr, balanceStr] = parts;
-  const charged = parseInt(String(chargedStr).replace(/[^0-9-]/g, ''), 10);
-  const used = parseInt(String(usedStr).replace(/[^0-9-]/g, ''), 10);
-  const balance = parseInt(String(balanceStr).replace(/[^0-9-]/g, ''), 10);
+  // 소수점 유지 위해 parseFloat. 한줄로 PG balance는 정수형이지만, 합산 후 floor 처리.
+  const charged = Math.floor(parseFloat(String(chargedStr).replace(/[^0-9.-]/g, '')) || 0);
+  const used = Math.floor(parseFloat(String(usedStr).replace(/[^0-9.-]/g, '')) || 0);
+  const balance = Math.floor(parseFloat(String(balanceStr).replace(/[^0-9.-]/g, '')) || 0);
   if (Number.isNaN(charged) || Number.isNaN(used) || Number.isNaN(balance)) continue;
   PREPAID.push({ userid, name, charged, used, balance });
 }

@@ -107,21 +107,79 @@
 
 ---
 
-### 🔴 D143 D-Day (2026-05-05) — 예약발송 이관 INSERT 완료 · 정합성 추가검증 + 5/6 발송 모니터링 + 레거시 차단 잔여
+### 🟢 D143 D-Day (2026-05-05) — 레거시 이관 100% 완료 · 5/6 발송 모니터링만 잔여
 
-> **상태:** 🟢 INSERT 100% 완료 · 카운트/회신번호 검증 통과 · ⏳ **다음 세션: ID별 매핑 정합 결정적 검증 + 5/6 발송 모니터링 + 레거시 차단**
+> **상태:** 🟢 **데이터 이관 4종 + 레거시 차단 모두 완료.** ⏳ **5/6 07:00 첫 발송 모니터링만 잔여.**
 >
-> **🚨 다음 세션 시작 시 반드시:** `migrate-legacy/D-DAY-RESERVATION-RUNBOOK.md` + `memory/project_d143_reservation_migration.md` 정독 → 아래 §정합성 검증 SQL 6개 그대로 실행
->
-> **이미 완료된 검증:**
-> - ✅ PG `campaigns` **70건** INSERT (단일 트랜잭션 BEGIN/COMMIT)
-> - ✅ MySQL `SMSQ_SEND` **1454건** INSERT (라프레리 SMSQ_1/2/3=23+23+23=69 / 최선·캐럿 SMSQ_4/5/6=462+462+461=1385)
-> - ✅ MMS 9개 UUID 매핑 + 절대경로 (`/home/administrator/mms-images/{company_id}/{uuid}.jpg`)
-> - ✅ `sender_numbers` + `callback_numbers` + `callback_number_assignments` 7/7 (sender_ok/callback_ok 모두 t)
-> - ✅ scheduled_at KST 정확 (5/6 07:00~5/31)
-> - ✅ is_ad 자동 감지 (DYB최선 (광고) 2건만 true)
+> **🚨 다음 세션 시작 시 반드시:** `memory/project_d143_reservation_migration.md` (D-Day 최종본) 정독.
 
-#### 🔍 다음 세션 §1. ID별 매핑 정합 결정적 검증 (6개 SQL)
+#### ✅ 데이터 이관 결과 (모두 BEGIN/COMMIT 트랜잭션 + 사전/사후 검증 통과)
+
+| 영역 | 결과 |
+|---|---|
+| **예약발송** | PG `campaigns` 70건 + MySQL `SMSQ_SEND_*` 1,454건 + MMS 이미지 9개 (PG path ↔ 서버 jpg 100% 일치) |
+| **회신번호 D143 차분** | sgbaek `01082336860` callback 1 + assignment 4 / kumkang2 `0338115560` assignment 4 추가 (B안 적용) |
+| **수신거부 D143 차분** | BLOCKEDNUM 4/22~5/5 phone DIFF → **5,607건 INSERT** (`source='legacy_d143'`, ON CONFLICT DO NOTHING로 4건 자동 스킵) |
+| **선불잔액** | 34사 / **19,742,368원** UPDATE (4/22 베이스라인 -655,742원 소진 = 정상) |
+| **시세이도/아이소이** | callback 119개 + assignment 14개 모두 한줄로AI 측 5/4 직접 등록되어 있어 추가 작업 불필요. 검증 통과 |
+| **D135 정합** | 1,492 callback / 1,051 assignment 누락 0 ✅ |
+
+#### ✅ 레거시 차단 결과
+
+| 영역 | 결과 |
+|---|---|
+| QTmsg Agent | 운영 6대(invitoMsg_auto/web/gyeongnam/web1/web2/web3) + 별개 1대(/home/event/libs/invitoMsg) = **7대 모두 정지** (`ps grep "qtmsg\|invito"` 0건) |
+| MSGSUMMARY 예약 | **70건 RESERVEYN='0' 차단** (사후 SELECT 0건 확인 + COMMIT) |
+
+#### ⏳ 5/6 모니터링 (Harold님)
+
+| 시점 | 항목 |
+|---|---|
+| **5/6 07:00 KST** | bhappy4 LMS 14건 (캐럿글로벌, app_etc2=e8f0ffa7…) — 1차 검증 포인트 |
+| 5/6 09:00~ | hddg2135 SMS (라프레리 현대대구) 연속 |
+| 5/7 14:00 | choisun MMS 1,371건 (DYB최선어학원 시간표) |
+| ~ 5/31 | 70건 분산 발송 |
+| 6/30 | 레거시 읽기전용 병행 종료 (자연) |
+
+QTmsg `status_code` 1000=성공 / 6=진행중 / 7/8/16/55/2008=실패
+
+---
+
+### ✅ D144 (2026-05-06) — SMSQ_SEND 정체 확정 종결
+
+> **결론:** **`SMSQ_SEND`는 BASE TABLE이 아니라 VIEW** (`SMSQ_SEND_1 ~ SMSQ_SEND_11` UNION ALL).
+> "잔재 19,871건"은 잘못된 전제. 실제로는 SMSQ_SEND_1~11 base table에 한줄로AI가 정상 INSERT한 5/6~5/31 발송 데이터를 VIEW가 그대로 비춘 것. 발송되면 VIEW에서 자동 사라짐.
+> **운영 영향 0, 잔재 정리 불필요, D-Day 추가 작업 불필요.**
+
+#### 검증 사실 (2026-05-06 검증, 추측 0)
+
+1. `information_schema.TABLES` → `SMSQ_SEND` `TABLE_TYPE='VIEW'`
+2. `information_schema.VIEWS.VIEW_DEFINITION` → `SELECT * FROM SMSQ_SEND_1 UNION ALL ... SMSQ_SEND_11` 단순 UNION 가상 뷰
+3. MySQL 전체 SMSQ_SEND* 68개 = VIEW 1 + LIVE base 12 (1~12, 12는 env 미포함 잔존) + LOG 55
+4. 레거시 invitoMsg watch 대상이던 `SMSQ_SEND_AUTH/GYEONGNAM/01/02/03` MySQL DB에 **0건 존재** — 레거시 base table 이미 제거됨, VIEW 1개만 잔존
+5. `bulkInsertSmsQueue`는 INSERT 시 seqno 컬럼 미명시 (코드 검증) — 한줄로AI는 SMSQ_SEND VIEW에 INSERT 불가능
+6. 라프레리 8c9e4b12 캠페인의 SMSQ_SEND seqno=223091/223125가 SMSQ_SEND_1/2/3의 AUTO_INCREMENT seqno와 정확 일치 — VIEW가 그대로 비춘 것
+7. 5/6 캐럿 14건 정상 발송: SMSQ_SEND_4/5/6_202605 LOG status=1000 확인 (정상 동작)
+
+#### 정정된 이전 가정
+
+- ❌ "SMSQ_SEND에 19,871건 잔재 INSERT됨" → 실제로는 base table 0건, VIEW 통한 가상 표시
+- ❌ "이중 INSERT 의심" → VIEW의 정상 동작
+- ❌ "잔재 정리 필요" → 정리할 잔재 없음, SMSQ_SEND_X 발송되면 VIEW 자동 갱신
+
+#### 캐럿 5/6 발송 14건 메시지 검증 (2026-05-06 완료)
+
+- 캠페인 ID `9d56b7a1-a2b0-4264-a25c-2a3553197e3f` LMS 14건 — `[삼성전자 DS부문 전기작업 폐강 안내]`
+- 14/14 status=1000, 통신사 리포트(repmsg_recvtm) 정상 수신 (5/6 07:00:03~34 KST)
+- 본문 문의번호(010-3806-5467) = call_back 일치, 정보성 안내라 (광고)/무료거부 미부착 정상
+- 한줄로AI 정식 오픈 후 첫 실제 발송 성공 — D-Day 이관 완전 안정화 확인
+
+#### 잔여 별건 (D144와 무관, 별도 진행)
+
+1. **PG sync-results 미반영** — bhappy4 PG `status='scheduled'` 그대로 (5/6 발송 완료인데 PG 미동기화). sync-results 워커 동작 확인 필요
+2. **(낮은 우선순위) 호버 팝업 (광고) 표시 일관성** — DB는 D102 정책 준수, 화면 잘림 가능성 재확인
+
+#### 🔍 [참고] D-Day 검증 SQL 자료 (이미 통과 — 다음 세션 재실행 불필요)
 
 ##### A. 캠페인별 수신자 수 일치 (PG.target_count vs MySQL row count) — 가장 중요
 ```sql
