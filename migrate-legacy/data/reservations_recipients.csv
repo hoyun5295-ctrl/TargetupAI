@@ -1,0 +1,15 @@
+SQL> SELECT
+  2    r.CODE || '|' ||
+  3    r.MOBILE || '|' ||
+  4    REPLACE(REPLACE(NVL(r.NAME,''), CHR(10), ' '), '|', ' ') || '|' ||
+  5    REPLACE(REPLACE(NVL(r.ETC1,''), CHR(10), ' '), '|', ' ') || '|' ||
+  6    REPLACE(REPLACE(NVL(r.ETC2,''), CHR(10), ' '), '|', ' ') || '|' ||
+  7    REPLACE(REPLACE(NVL(r.ETC3,''), CHR(10), ' '), '|', ' ')
+  8  FROM MSGRECIPIENT r
+  9  WHERE r.CODE IN (
+ 10    SELECT CODE FROM MSGSUMMARY
+ 11    WHERE RESERVEYN='1' AND SENTYN='0'
+ 12      AND RESERVEDT >= '20260506000000'
+ 13  )
+ 14  ORDER BY r.CODE;
+SQL> SPOOL OFF

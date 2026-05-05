@@ -107,6 +107,156 @@
 
 ---
 
+### 🔴 D143 D-Day (2026-05-05) — 예약발송 이관 INSERT 완료 · 정합성 추가검증 + 5/6 발송 모니터링 + 레거시 차단 잔여
+
+> **상태:** 🟢 INSERT 100% 완료 · 카운트/회신번호 검증 통과 · ⏳ **다음 세션: ID별 매핑 정합 결정적 검증 + 5/6 발송 모니터링 + 레거시 차단**
+>
+> **🚨 다음 세션 시작 시 반드시:** `migrate-legacy/D-DAY-RESERVATION-RUNBOOK.md` + `memory/project_d143_reservation_migration.md` 정독 → 아래 §정합성 검증 SQL 6개 그대로 실행
+>
+> **이미 완료된 검증:**
+> - ✅ PG `campaigns` **70건** INSERT (단일 트랜잭션 BEGIN/COMMIT)
+> - ✅ MySQL `SMSQ_SEND` **1454건** INSERT (라프레리 SMSQ_1/2/3=23+23+23=69 / 최선·캐럿 SMSQ_4/5/6=462+462+461=1385)
+> - ✅ MMS 9개 UUID 매핑 + 절대경로 (`/home/administrator/mms-images/{company_id}/{uuid}.jpg`)
+> - ✅ `sender_numbers` + `callback_numbers` + `callback_number_assignments` 7/7 (sender_ok/callback_ok 모두 t)
+> - ✅ scheduled_at KST 정확 (5/6 07:00~5/31)
+> - ✅ is_ad 자동 감지 (DYB최선 (광고) 2건만 true)
+
+#### 🔍 다음 세션 §1. ID별 매핑 정합 결정적 검증 (6개 SQL)
+
+##### A. 캠페인별 수신자 수 일치 (PG.target_count vs MySQL row count) — 가장 중요
+```sql
+-- (PG psql) 70건 캠페인 ID + target_count
+\COPY (
+  SELECT id::text, u.login_id, ca.message_type, ca.target_count
+  FROM campaigns ca JOIN users u ON ca.created_by = u.id
+  WHERE ca.campaign_name LIKE '[레거시이관]%'
+  ORDER BY u.login_id, ca.scheduled_at
+) TO '/tmp/pg_70.csv' CSV HEADER;
+```
+```sql
+-- (MySQL) 같은 app_etc1별 행수 (3+3 라인그룹 합산)
+SELECT app_etc1 AS campaign_id, COUNT(*) AS mysql_cnt FROM (
+  SELECT app_etc1 FROM SMSQ_SEND_1 WHERE app_etc1 IN (SELECT app_etc1 FROM SMSQ_SEND_1 WHERE app_etc2='df63bcb0-3900-4a1c-8ad0-93c6b5a1db04' AND status_code=100)
+  UNION ALL SELECT app_etc1 FROM SMSQ_SEND_2 WHERE app_etc2='df63bcb0-3900-4a1c-8ad0-93c6b5a1db04' AND status_code=100
+  UNION ALL SELECT app_etc1 FROM SMSQ_SEND_3 WHERE app_etc2='df63bcb0-3900-4a1c-8ad0-93c6b5a1db04' AND status_code=100
+  UNION ALL SELECT app_etc1 FROM SMSQ_SEND_4 WHERE app_etc2 IN ('0d20b03b-4c66-4205-ae81-a3b53a70481d','e8f0ffa7-2e59-4e2c-ad9f-b762c1d81f98') AND status_code=100
+  UNION ALL SELECT app_etc1 FROM SMSQ_SEND_5 WHERE app_etc2 IN ('0d20b03b-4c66-4205-ae81-a3b53a70481d','e8f0ffa7-2e59-4e2c-ad9f-b762c1d81f98') AND status_code=100
+  UNION ALL SELECT app_etc1 FROM SMSQ_SEND_6 WHERE app_etc2 IN ('0d20b03b-4c66-4205-ae81-a3b53a70481d','e8f0ffa7-2e59-4e2c-ad9f-b762c1d81f98') AND status_code=100
+) t GROUP BY app_etc1 ORDER BY mysql_cnt DESC;
+```
+**기대:** 70 캠페인 ID 각각 PG.target_count == MySQL.cnt. 합계 1454.
+
+##### B. 캠페인별 발송시각 일치 (PG.scheduled_at vs MySQL.sendreq_time)
+```sql
+-- (PG)
+SELECT id::text, TO_CHAR(scheduled_at AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS') AS pg_sched
+FROM campaigns WHERE campaign_name LIKE '[레거시이관]%';
+```
+```sql
+-- (MySQL) 캠페인별 sendreq_time DISTINCT (한 캠페인 = 하나 시각이어야)
+SELECT app_etc1, sendreq_time FROM SMSQ_SEND_1 WHERE app_etc2='df63bcb0-3900-4a1c-8ad0-93c6b5a1db04' AND status_code=100 GROUP BY app_etc1, sendreq_time
+UNION ALL SELECT app_etc1, sendreq_time FROM SMSQ_SEND_2 WHERE app_etc2='df63bcb0-3900-4a1c-8ad0-93c6b5a1db04' AND status_code=100 GROUP BY app_etc1, sendreq_time
+UNION ALL SELECT app_etc1, sendreq_time FROM SMSQ_SEND_3 WHERE app_etc2='df63bcb0-3900-4a1c-8ad0-93c6b5a1db04' AND status_code=100 GROUP BY app_etc1, sendreq_time
+UNION ALL SELECT app_etc1, sendreq_time FROM SMSQ_SEND_4 WHERE app_etc2 IN ('0d20b03b-4c66-4205-ae81-a3b53a70481d','e8f0ffa7-2e59-4e2c-ad9f-b762c1d81f98') AND status_code=100 GROUP BY app_etc1, sendreq_time
+UNION ALL SELECT app_etc1, sendreq_time FROM SMSQ_SEND_5 WHERE app_etc2 IN ('0d20b03b-4c66-4205-ae81-a3b53a70481d','e8f0ffa7-2e59-4e2c-ad9f-b762c1d81f98') AND status_code=100 GROUP BY app_etc1, sendreq_time
+UNION ALL SELECT app_etc1, sendreq_time FROM SMSQ_SEND_6 WHERE app_etc2 IN ('0d20b03b-4c66-4205-ae81-a3b53a70481d','e8f0ffa7-2e59-4e2c-ad9f-b762c1d81f98') AND status_code=100 GROUP BY app_etc1, sendreq_time;
+```
+**기대:** 캠페인별 PG vs MySQL 발송시각 1초도 안 틀림. MySQL은 KST 그대로 ('YYYY-MM-DD HH:MM:SS'). PG는 timestamptz라 KST 변환 후 비교.
+
+##### C. 캠페인별 회신번호 일치 (PG.callback_number vs MySQL.call_back)
+```sql
+-- (PG)
+SELECT id::text, callback_number FROM campaigns WHERE campaign_name LIKE '[레거시이관]%';
+```
+```sql
+-- (MySQL) 같은 app_etc1의 call_back DISTINCT (1개여야)
+SELECT app_etc1, call_back FROM SMSQ_SEND_1 WHERE app_etc2='df63bcb0-3900-4a1c-8ad0-93c6b5a1db04' AND status_code=100 GROUP BY app_etc1, call_back
+UNION ALL ... 6개 라인그룹;
+```
+
+##### D. MMS 24건 file_name1 일치 (PG.mms_image_paths.path vs MySQL.file_name1)
+```sql
+-- (PG) MMS 24건의 mms_image_paths.path (jsonb 추출)
+SELECT id::text, mms_image_paths::jsonb->0->>'path' AS pg_mms_path
+FROM campaigns WHERE campaign_name LIKE '[레거시이관]%' AND message_type='MMS';
+```
+```sql
+-- (MySQL) 같은 app_etc1의 file_name1 DISTINCT (1개여야)
+SELECT app_etc1, file_name1 FROM SMSQ_SEND_1 WHERE app_etc2='df63bcb0-3900-4a1c-8ad0-93c6b5a1db04' AND status_code=100 AND msg_type='M' GROUP BY app_etc1, file_name1
+UNION ALL ... 6개 라인그룹;
+```
+**기대:** 24행, PG.path == MySQL.file_name1, 9개 unique 이미지 경로
+
+##### E. 메시지 본문 sample 일치 (3건)
+```sql
+-- (PG)
+SELECT id::text, LEFT(message_content, 80) AS msg_head, LENGTH(message_content) AS len
+FROM campaigns WHERE campaign_name LIKE '[레거시이관]%'
+AND id IN (앞 쿼리 A에서 첫 3건 ID) ;
+```
+```sql
+-- (MySQL)
+SELECT app_etc1, LEFT(msg_contents, 80) AS msg_head, LENGTH(msg_contents) AS len
+FROM SMSQ_SEND_X WHERE app_etc1 IN (...) GROUP BY app_etc1, msg_contents LIMIT 3;
+```
+**기대:** 본문 80자 sample + LENGTH 동일
+
+##### F. user → company 매핑 일치 (PG.created_by user의 company_id vs MySQL.app_etc2)
+```sql
+SELECT ca.id::text, u.login_id, u.company_id AS pg_user_company,
+       'expected_app_etc2' AS expected_mysql
+FROM campaigns ca JOIN users u ON ca.created_by = u.id
+WHERE ca.campaign_name LIKE '[레거시이관]%' GROUP BY ca.id, u.login_id, u.company_id;
+```
+**기대:** 라프레리 67캠페인 user.company_id = df63bcb0... / 최선 2 = 0d20b03b... / 캐럿 1 = e8f0ffa7...
+
+#### 🚦 다음 세션 §2. 5/6 새벽 발송 모니터링
+
+- **5/6 07:00 KST bhappy4 LMS 14건** (캐럿글로벌) — 가장 빠른 발송, 1차 검증 포인트
+- 5/6 09:00~ hddg2135 SMS 4건 (라프레리 현대대구) 연속
+- QTmsg `status_code` 확인:
+  - 1000 = 성공
+  - 6 = 진행중
+  - 7/8/16/55/2008 = 실패
+- 발송 결과 모니터링 SQL:
+```sql
+-- 5/6 새벽 발송 결과 (PG)
+SELECT id, message_type, target_count, sent_count, success_count, fail_count, status, sent_at
+FROM campaigns WHERE campaign_name LIKE '[레거시이관]%' AND scheduled_at < '2026-05-06 12:00:00 KST'
+ORDER BY scheduled_at;
+```
+
+#### 🔒 다음 세션 §3. 레거시 RESERVEYN=0 차단 (5/6 첫 발송 OK 확인 후)
+
+```bash
+ssh -p 27153 root@27.102.203.143
+su - oracle && sqlplus usom_user/<pw>@orcl
+```
+```sql
+UPDATE MSGSUMMARY SET RESERVEYN='0', FINAL_UPD_ID='legacy_migration', FINAL_UPD_DT=TO_CHAR(SYSDATE,'YYYYMMDDHH24MISS')
+WHERE RESERVEYN='1' AND SENTYN='0' AND RESERVEDT >= '20260506000000';
+COMMIT;
+SELECT COUNT(*) FROM MSGSUMMARY WHERE RESERVEYN='1' AND SENTYN='0' AND RESERVEDT >= '20260506000000';
+-- 0 기대
+```
+
+#### 🔑 핵심 자산 위치
+- **스크립트:** `migrate-legacy/scripts/migrate-reservations.js` (dry-run + live 모드)
+- **데이터:** `migrate-legacy/data/recipients_v2.csv` (1454행, MSGDV 정확)
+- **MMS UUID 캐시:** `migrate-legacy/data/mms-uuid-map.json` (재실행 시 동일 UUID 재사용)
+- **user 매핑:** `migrate-legacy/data/user-map.json` (USERID 7명 → user_id/company_id)
+- **MMS 9개 서버 위치:** `/home/administrator/mms-images/{company_id}/{uuid}.jpg`
+- **런북:** `migrate-legacy/D-DAY-RESERVATION-RUNBOOK.md`
+
+#### ⚠️ 다음 세션 절대 금지 (D-Day 검증 과정 5번 사고 교훈)
+1. **추측 절대 금지** — MSGSUMMARY.MSGDV가 진실의 원천 (SMSQ_SEND.MSG_TYPE='M' ≠ MMS, 35건 LMS를 MMS로 오판한 사고)
+2. **MSGATTACH 53,367행은 미사용** — 첨부는 SMSQ_SEND.FILE_NAME1만
+3. **AI는 SSH/git/배포/.env 비번 읽기 절대 금지** — Harold 직접 실행
+4. **docker 접속:** PG = `docker exec -it targetup-postgres psql -U targetup targetup` / MySQL = `docker exec -it targetup-mysql mysql -usmsuser -p smsdb`
+5. **6개 정합 SQL 모두 실행 + Harold 결과 보고** 후에만 5/6 발송 모니터링 진행
+
+---
+
 ### 🟢 D143 (2026-04-30) — ENTERPRISE 잠금 + 매뉴얼 + 자연인 오픈 + app.hanjul.ai 폐기 (배포 완료)
 
 > **상태:** 🟢 배포 완료 (PM2 restart 4/30 17:24 KST 확인). 자연인 isoi/isoics 첫 시범 업체 오픈 준비 완료.
