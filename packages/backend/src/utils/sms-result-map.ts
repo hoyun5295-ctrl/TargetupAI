@@ -25,8 +25,8 @@ export const STATUS_CODE_MAP: Record<number, StatusCodeInfo> = {
   1800: { label: '카카오 성공',      type: 'success' },
 
   // 대기
-  100:  { label: '발송 대기',        type: 'pending' },
-  104:  { label: '발송 대기',        type: 'pending' },
+  100:  { label: '결과 대기',        type: 'pending' },
+  104:  { label: '결과 대기',        type: 'pending' },
 
   // 실패 — 수신자 문제
   7:    { label: '결번/서비스정지',   type: 'fail' },

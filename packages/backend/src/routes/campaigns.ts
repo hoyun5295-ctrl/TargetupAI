@@ -26,7 +26,7 @@ import {
 import { prepaidDeduct, prepaidRefund } from '../utils/prepaid';
 import { normalizeMmsImagePaths, type MmsImageItem } from '../utils/mms-image-util';
 import { validateMmsPayload } from '../utils/mms-validator';
-import { buildDateRangeFilter, aggregateSmsCountsByCampaign } from '../utils/stats-aggregation';
+import { buildDateRangeFilter, aggregateSmsCountsByCampaign, aggregateSmsSendTimesByCampaign } from '../utils/stats-aggregation';
 import { cancelCampaign, syncCampaignResults } from '../utils/campaign-lifecycle';
 import { buildFilterQueryCompat } from '../utils/customer-filter';
 import { filterByIndividualCallback, buildCallbackErrorResponse, buildCallbackConfirmResponse, resolveCustomerCallback } from '../utils/callback-filter';
@@ -140,8 +140,6 @@ router.get('/', async (req: Request, res: Response) => {
         const scheduledCampaigns = await query(scheduleQuery, scheduleParams);
 
         for (const camp of scheduledCampaigns.rows) {
-          const pendingCount = await smsCountAll(companyTables, `app_etc1 = ? AND status_code IN (${PENDING_CODES.join(',')})`, [camp.id]);
-
           // 예약 시간이 아직 안 됐으면 스킵 (MySQL에 데이터 없는게 정상)
           const campDetail = await query(`SELECT scheduled_at FROM campaigns WHERE id = $1`, [camp.id]);
           const scheduledAt = campDetail.rows[0]?.scheduled_at;
@@ -149,24 +147,25 @@ router.get('/', async (req: Request, res: Response) => {
             continue; // 예약 시간 전이면 완료 처리하지 않음
           }
 
-          if (pendingCount === 0) {
-            // 대기 건이 없으면 발송 완료 처리 (LIVE+LOG 조회 — Agent가 완료 후 LOG로 이동)
-            const tablesWithLogs = await getCompanySmsTablesWithLogs(companyId);
-            const sentCount = await smsCountAll(tablesWithLogs, 'app_etc1 = ?', [camp.id]);
-            const successCount = await smsCountAll(tablesWithLogs, `app_etc1 = ? AND status_code IN (${SUCCESS_CODES.join(',')})`, [camp.id]);
-            const failCount = await smsCountAll(tablesWithLogs, `app_etc1 = ? AND status_code NOT IN (${[...SUCCESS_CODES, ...PENDING_CODES].join(',')})`, [camp.id]);
+          // ★ D144 후속: bulk INSERT 완료 = 발송완료 정책 — pending 무관 항상 처리.
+          //   pending은 통신사 백그라운드 처리, 발송 자체(MySQL 큐 INSERT)는 끝났음.
+          //   화면 카운트는 D144 후 MySQL 직접이라 결과 들어올 때마다 실시간 갱신.
+          const tablesWithLogs = await getCompanySmsTablesWithLogs(companyId);
+          const sentCount = await smsCountAll(tablesWithLogs, 'app_etc1 = ?', [camp.id]);
+          const successCount = await smsCountAll(tablesWithLogs, `app_etc1 = ? AND status_code IN (${SUCCESS_CODES.join(',')})`, [camp.id]);
+          const failCount = await smsCountAll(tablesWithLogs, `app_etc1 = ? AND status_code NOT IN (${[...SUCCESS_CODES, ...PENDING_CODES].join(',')})`, [camp.id]);
+          const newStatus = sentCount === 0 ? 'failed' : 'completed';
 
-            await query(
-              `UPDATE campaigns SET status = 'completed', sent_count = $1, success_count = $2, fail_count = $3, sent_at = COALESCE(sent_at, scheduled_at, NOW()), updated_at = NOW() WHERE id = $4`,
-              [sentCount, successCount, failCount, camp.id]
-            );
+          await query(
+            `UPDATE campaigns SET status = $1, sent_count = $2, success_count = $3, fail_count = $4, sent_at = COALESCE(sent_at, scheduled_at, NOW()), updated_at = NOW() WHERE id = $5`,
+            [newStatus, sentCount, successCount, failCount, camp.id]
+          );
 
-            // ★ 선불 실패건 환불
-            if (failCount > 0) {
-              const campInfo = await query('SELECT company_id, message_type FROM campaigns WHERE id = $1', [camp.id]);
-              if (campInfo.rows.length > 0) {
-                await prepaidRefund(campInfo.rows[0].company_id, failCount, campInfo.rows[0].message_type, camp.id, '발송 실패 환불');
-              }
+          // ★ 선불 실패건 환불
+          if (failCount > 0) {
+            const campInfo = await query('SELECT company_id, message_type FROM campaigns WHERE id = $1', [camp.id]);
+            if (campInfo.rows.length > 0) {
+              await prepaidRefund(campInfo.rows[0].company_id, failCount, campInfo.rows[0].message_type, camp.id, '발송 실패 환불');
             }
           }
         }
@@ -231,6 +230,7 @@ router.get('/', async (req: Request, res: Response) => {
 
     const listSmsMap = await aggregateSmsCountsByCampaign(result.rows);
     const listKakaoMap = await kakaoBatchAggByGroup(result.rows.map((c: any) => c.id));
+    const listSentTimeMap = await aggregateSmsSendTimesByCampaign(result.rows);
     const campaigns = result.rows.map((c: any) => {
       const sms = listSmsMap.get(c.id) || { total_count: 0, success_count: 0, fail_count: 0 };
       const kakao = listKakaoMap.get(c.id) || { total: 0, success: 0, fail: 0, pending: 0 };
@@ -239,6 +239,7 @@ router.get('/', async (req: Request, res: Response) => {
         sent_count: Number(sms.total_count || 0) + kakao.total,
         success_count: Number(sms.success_count || 0) + kakao.success,
         fail_count: Number(sms.fail_count || 0) + kakao.fail,
+        sent_at: listSentTimeMap.get(c.id) ?? c.sent_at,
       };
     });
 
@@ -916,18 +917,21 @@ if (aiFailCount > 0) {
 // campaign_runs 상태 업데이트
 // ★ #6: 예약 캠페인은 sent_at 설정하지 않음
 // ★ C1: aiSentCount 기반으로 실제 성공 건수 반영
+// ★ D144 후속: bulk INSERT 완료 = 발송완료 정책 — 'sending' 단계 폐기, 즉시 'completed' set.
+//   pending(통신사 처리 대기)은 백그라운드. 화면 카운트는 D144 후 MySQL 직접이라 실시간 갱신.
 await query(
   `UPDATE campaign_runs SET
     sent_count = $1,
     status = $2
     ${isScheduled ? '' : ', sent_at = CURRENT_TIMESTAMP'}
    WHERE id = $3`,
-  [aiSentCount, aiSentCount === 0 ? 'failed' : (isScheduled ? 'scheduled' : 'sending'), campaignRun.id]
+  [aiSentCount, aiSentCount === 0 ? 'failed' : (isScheduled ? 'scheduled' : 'completed'), campaignRun.id]
 );
 
 // 캠페인 상태 업데이트
-// ★ #6: 예약 캠페인은 sent_at 설정하지 않음 (sync-results에서 실제 발송 완료 시 설정)
+// ★ #6: 예약 캠페인은 sent_at 설정하지 않음 (예약 시점 발송 시 set)
 // ★ C1: aiSentCount 기반
+// ★ D144 후속: 동일 정책 — 즉시발송은 'completed', 예약은 'scheduled' 유지, 0건이면 'failed'
 await query(
   `UPDATE campaigns SET
     status = $1,
@@ -935,7 +939,7 @@ await query(
     target_count = $3
     ${isScheduled ? '' : ', sent_at = CURRENT_TIMESTAMP'}
    WHERE id = $4`,
-   [aiSentCount === 0 ? 'failed' : (isScheduled ? 'scheduled' : 'sending'), aiSentCount, filteredCustomers.length, id]
+   [aiSentCount === 0 ? 'failed' : (isScheduled ? 'scheduled' : 'completed'), aiSentCount, filteredCustomers.length, id]
   );
 
       // ★ AI 학습 데이터 적재 (비동기, 실패해도 발송에 영향 없음)
@@ -1804,13 +1808,12 @@ router.post('/direct-send', async (req: Request, res: Response) => {
     const directTotalSent = Math.max(directSmsSentCount || 0, directKakaoSentCount || 0, directAlimtalkSentCount || 0);
     const directFailTotal = filteredRecipients.length - directTotalSent;
 
-    // 3. 즉시발송이면 상태 업데이트 (★ #5: sending으로 설정 → sync-results에서 Agent 완료 후 completed 전환)
+    // 3. 즉시발송이면 상태 업데이트
+    // ★ D144 후속: bulk INSERT 완료 = 발송완료 정책 — 'sending' 단계 폐기, 즉시 'completed'.
+    //   pending(통신사 처리 대기)은 백그라운드. 화면 카운트는 D144 후 MySQL 직접이라 실시간 갱신.
     // ★ C1: directTotalSent 기반으로 실제 성공 건수 반영
     if (!scheduled) {
-      // 즉시발송: MySQL INSERT 완료 후 상태 설정
-      // QTmsg Agent가 처리할 시간을 고려하여 sending으로 설정하되,
-      // sent_count와 fail_count를 함께 기록
-      const immediateStatus = directTotalSent === 0 ? 'failed' : 'sending';
+      const immediateStatus = directTotalSent === 0 ? 'failed' : 'completed';
       await query(
         `UPDATE campaigns SET status = $1, sent_count = $2, fail_count = $3, sent_at = NOW(), updated_at = NOW() WHERE id = $4`,
         [immediateStatus, directTotalSent, directFailTotal, campaignId]

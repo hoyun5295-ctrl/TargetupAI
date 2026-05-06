@@ -6,6 +6,7 @@ import { formatDateTime, formatDate, formatDateTimeShort, formatCampaignMessageF
 import SessionTimer from '../components/SessionTimer';
 import ServiceSwitcher from '../components/ServiceSwitcher'; // ★ D112
 import AlimtalkSendersSection from '../components/alimtalk/AlimtalkSendersSection'; // ★ D130
+import MessageDetailModal from '../components/MessageDetailModal'; // ★ D144 후속: 발송 상세 내역 모달의 메시지 셀 클릭 시 표시 + 복사
 import { COMPANY_NAME_EN, COMPANY_EMAIL } from '../constants/company';
 
 interface Company {
@@ -179,6 +180,8 @@ const [messageDetailContent, setMessageDetailContent] = useState<{ name: string;
   const [smsDetailSearchType, setSmsDetailSearchType] = useState('dest_no');
   const [smsDetailSearchValue, setSmsDetailSearchValue] = useState('');
   const [smsDetailLoading, setSmsDetailLoading] = useState(false);
+  // ★ D144 후속: 메시지 셀 클릭 시 전체 메시지 + 복사 버튼 모달
+  const [smsDetailMsgModal, setSmsDetailMsgModal] = useState<string | null>(null);
 
   // 전체 캠페인 날짜필터
   const [allCampaignsStartDate, setAllCampaignsStartDate] = useState('');
@@ -6101,7 +6104,11 @@ const handleApproveRequest = async (id: string) => {
                         <td className="px-3 py-2 text-center text-gray-700 font-mono text-xs">{r.destNo}</td>
                         <td className="px-3 py-2 text-center text-gray-500 font-mono text-xs">{r.callBack}</td>
                         <td className="px-3 py-2 text-gray-700 text-xs max-w-xs">
-                          <div className="truncate cursor-pointer" title={r.msgContents}>
+                          <div
+                            className="truncate cursor-pointer hover:text-blue-600 hover:underline"
+                            title="클릭하면 전체 메시지 + 복사"
+                            onClick={() => r.msgContents && setSmsDetailMsgModal(r.msgContents)}
+                          >
                             {r.msgContents ? (r.msgContents.length > 40 ? r.msgContents.substring(0, 40) + '…' : r.msgContents) : '-'}
                           </div>
                         </td>
@@ -6138,6 +6145,12 @@ const handleApproveRequest = async (id: string) => {
           </div>
         </div>
       )}
+
+      {/* ★ D144 후속: 발송 상세 내역 모달 메시지 셀 클릭 시 표시 + 복사 */}
+      <MessageDetailModal
+        content={smsDetailMsgModal}
+        onClose={() => setSmsDetailMsgModal(null)}
+      />
 
       {/* 예약 취소 모달 */}
       {showCancelModal && cancelTarget && (

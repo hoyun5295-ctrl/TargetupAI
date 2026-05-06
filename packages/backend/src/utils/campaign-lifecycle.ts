@@ -173,8 +173,11 @@ export async function syncCampaignResults(companyId: string): Promise<SyncResult
      FROM campaign_runs cr
      JOIN campaigns c ON c.id = cr.campaign_id
      WHERE c.company_id = $1
-       AND cr.status IN ('sending', 'scheduled')
-       AND cr.created_at >= NOW() - INTERVAL '7 days'`,
+       AND cr.status IN ('sending', 'scheduled', 'completed')
+       AND cr.created_at >= NOW() - INTERVAL '7 days'
+       AND (cr.target_count IS NULL
+            OR cr.success_count IS NULL
+            OR cr.target_count > COALESCE(cr.success_count, 0) + COALESCE(cr.fail_count, 0))`,
     [companyId]
   );
   console.log(`[sync-results] AI캠페인 ${runsResult.rows.length}건 대상`);
@@ -221,10 +224,12 @@ export async function syncCampaignResults(companyId: string): Promise<SyncResult
       const minutesSinceSend = campSentAt ? (Date.now() - new Date(campSentAt).getTime()) / (1000 * 60) : 0;
       const isTimedOut = minutesSinceSend > 30 && pendingCount > 0 && successCount === 0 && failCount === 0;
 
-      if (successCount > 0 || failCount > 0 || isTimedOut) {
+      if (successCount > 0 || failCount > 0 || pendingCount > 0 || isTimedOut) {
         const effectiveFailCount = isTimedOut ? failCount + pendingCount : failCount;
         const effectivePendingCount = isTimedOut ? 0 : pendingCount;
-        const newStatus = effectivePendingCount > 0 ? 'sending' : ((successCount + effectiveFailCount) > 0 ? 'completed' : 'failed');
+        // ★ D144 후속: pending 무관 — 발송 활동(MySQL 큐 INSERT) 있으면 'completed'.
+        //   pending은 통신사 처리 대기일 뿐 발송 자체는 끝남. 화면 카운트는 MySQL 직접 갱신.
+        const newStatus = (successCount + effectiveFailCount + effectivePendingCount) > 0 ? 'completed' : 'failed';
         if (isTimedOut) {
           console.warn(`[sync-results] campaign_run ${run.id}: 30분 타임아웃 — pending ${pendingCount}건 → fail 처리`);
         }
@@ -299,7 +304,9 @@ export async function syncCampaignResults(companyId: string): Promise<SyncResult
     `SELECT id, company_id, scheduled_at, created_at, sent_at, created_by FROM campaigns
      WHERE company_id = $1 AND send_type = 'direct'
        AND (status IN ('sending', 'completed') OR (status = 'scheduled' AND scheduled_at <= NOW()))
-       AND (success_count IS NULL OR success_count = 0)
+       AND (target_count IS NULL
+            OR success_count IS NULL
+            OR target_count > COALESCE(success_count, 0) + COALESCE(fail_count, 0))
        AND created_at >= NOW() - INTERVAL '7 days'`,
     [companyId]
   );
@@ -343,12 +350,12 @@ export async function syncCampaignResults(companyId: string): Promise<SyncResult
       const directMinutesSince = directSentAt ? (Date.now() - new Date(directSentAt).getTime()) / (1000 * 60) : 0;
       const directTimedOut = directMinutesSince > 30 && pendingCount > 0 && successCount === 0 && failCount === 0;
 
-      if (successCount > 0 || failCount > 0 || directTimedOut) {
+      if (successCount > 0 || failCount > 0 || pendingCount > 0 || directTimedOut) {
         const dEffectiveFailCount = directTimedOut ? failCount + pendingCount : failCount;
         const dEffectivePendingCount = directTimedOut ? 0 : pendingCount;
-        const newStatus = dEffectivePendingCount === 0
-          ? ((successCount + dEffectiveFailCount) > 0 ? 'completed' : 'failed')
-          : (directTimedOut ? 'completed' : 'sending');
+        // ★ D144 후속: pending 무관 — 발송 활동(MySQL 큐 INSERT) 있으면 'completed'.
+        //   pending은 통신사 처리 대기일 뿐 발송 자체는 끝남. 화면 카운트는 MySQL 직접 갱신.
+        const newStatus = (successCount + dEffectiveFailCount + dEffectivePendingCount) > 0 ? 'completed' : 'failed';
         if (directTimedOut) {
           console.warn(`[sync-results] direct campaign ${campaign.id}: 30분 타임아웃 — pending ${pendingCount}건 → fail 처리`);
         }

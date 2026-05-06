@@ -7,7 +7,7 @@
  * ★ 기능 2 추가: aggregateCampaignPerformance() — AI 캠페인 추천용 성과 집계
  */
 
-import { query } from '../config/database';
+import { query, mysqlQuery } from '../config/database';
 import { CAMPAIGN_OPT080_SELECT_EXPR, CAMPAIGN_OPT080_LEFT_JOIN } from './unsubscribe-helper';
 // ★ D144: PG sent_count 캐시 의존 제거 — MySQL 직접 카운트로 전환
 import { getCompanySmsTablesWithLogs, smsBatchAggByGroup, kakaoBatchAggByGroup } from './sms-queue';
@@ -268,6 +268,70 @@ export async function aggregateSmsCountsByCampaign(
 }
 
 /**
+ * ★ D144 후속: 캠페인 배열에 대해 MySQL 큐 `sendreq_time`(KST 그대로 저장)의
+ * 첫 발송 요청 시각을 배치 조회. PG `campaigns.sent_at`은 bulk INSERT 완료 시점에
+ * NOW()로 set되어 큰 캠페인일수록 실제 통신사 발송 시각과 분~수십분 차이 발생.
+ * 이 헬퍼가 반환하는 시각이 사용자가 인식하는 "발송 시각"과 일치 (통신사로 첫 요청한 시각).
+ *
+ * @returns Map<campaignId, Date>  — KST 시각의 Date 객체. 응답으로 ISO 변환 시 +0900 포함.
+ */
+export async function aggregateSmsSendTimesByCampaign(
+  campaigns: Array<{ id: string; company_id: string; created_by: string | null }>
+): Promise<Map<string, Date>> {
+  const result = new Map<string, Date>();
+  if (campaigns.length === 0) return result;
+
+  // (company_id, created_by) 쌍별 ID 묶기 — aggregateSmsCountsByCampaign과 동일 패턴
+  type UserGroup = { companyId: string; userId: string | null; ids: string[] };
+  const byUser = new Map<string, UserGroup>();
+  for (const c of campaigns) {
+    const key = `${c.company_id}::${c.created_by || ''}`;
+    if (!byUser.has(key)) {
+      byUser.set(key, { companyId: c.company_id, userId: c.created_by, ids: [] });
+    }
+    byUser.get(key)!.ids.push(c.id);
+  }
+
+  // 라인그룹 테이블 조회 병렬
+  const userGroupTables: Array<{ ug: UserGroup; tables: string[] }> = await Promise.all(
+    Array.from(byUser.values()).map(async (ug) => ({
+      ug,
+      tables: await getCompanySmsTablesWithLogs(ug.companyId, ug.userId || undefined),
+    }))
+  );
+
+  // 라인그룹 테이블셋별 묶음 (대부분 default BULK_ONLY 공유)
+  const byTableSet = new Map<string, { tables: string[]; ids: string[] }>();
+  for (const { ug, tables } of userGroupTables) {
+    if (tables.length === 0) continue;
+    const tableKey = [...tables].sort().join(',');
+    if (!byTableSet.has(tableKey)) byTableSet.set(tableKey, { tables, ids: [] });
+    byTableSet.get(tableKey)!.ids.push(...ug.ids);
+  }
+
+  // 라인그룹 테이블셋별 UNION ALL — outer MIN으로 첫 sendreq_time 추출
+  // ★ sendreq_time은 KST 그대로 저장(D98) → DATE_FORMAT으로 +09:00 ISO 명시하면
+  //   JS Date 생성/직렬화가 서버 TZ 무관하게 정확. PG sent_at(timestamptz UTC) 응답과 호환.
+  for (const [, group] of byTableSet) {
+    if (group.ids.length === 0 || group.tables.length === 0) continue;
+    const placeholders = group.ids.map(() => '?').join(',');
+    const unions = group.tables
+      .map(t => `SELECT app_etc1 AS _grp, DATE_FORMAT(MIN(sendreq_time), '%Y-%m-%dT%H:%i:%s+09:00') AS first_sendreq_iso FROM ${t} WHERE app_etc1 IN (${placeholders}) GROUP BY app_etc1`)
+      .join(' UNION ALL ');
+    const sql = `SELECT _grp, MIN(first_sendreq_iso) AS first_sendreq_iso FROM (${unions}) t GROUP BY _grp`;
+    const params: any[] = [];
+    for (let i = 0; i < group.tables.length; i++) params.push(...group.ids);
+    const rows = await mysqlQuery(sql, params) as any[];
+    for (const r of rows) {
+      if (!r._grp || !r.first_sendreq_iso) continue;
+      const d = new Date(String(r.first_sendreq_iso));
+      if (!isNaN(d.getTime())) result.set(String(r._grp), d);
+    }
+  }
+  return result;
+}
+
+/**
  * 발송통계 조회 (일별/월별) — 단일 진입점
  * manage-stats.ts, results.ts 등에서 import하여 사용.
  * 슈퍼관리자(companyId=null): 전체 회사 통계
@@ -453,9 +517,10 @@ export async function querySendStatsDetail(
     return { userStats: [], campaigns: [], unitCost: { sms: cSms, lms: cLms } };
   }
 
-  // 2) MySQL 큐 + 카카오 배치 집계
+  // 2) MySQL 큐 + 카카오 배치 집계 + 첫 발송 시각
   const smsCountMap = await aggregateSmsCountsByCampaign(metaRows);
   const kakaoCountMap = await kakaoBatchAggByGroup(metaRows.map((c: any) => c.id));
+  const sentTimeMap = await aggregateSmsSendTimesByCampaign(metaRows);
 
   // 3) JS에서 사용자별 집계 + 캠페인 row 빌드
   type UserAgg = {
@@ -499,6 +564,8 @@ export async function querySendStatsDetail(
     if (isLmsOrMms) u.lms_success += success;
 
     // 캠페인 row (기존 응답 키 형태 그대로)
+    // ★ D144 후속: sent_at은 MySQL MIN(sendreq_time)이 실제 통신사 발송 시각.
+    //   PG c.sent_at은 INSERT 완료 시점(NOW())이라 큰 캠페인은 늦게 찍힘 → MySQL 우선.
     campaignRows.push({
       campaign_id: c.id,
       campaign_name: c.campaign_name,
@@ -516,7 +583,7 @@ export async function querySendStatsDetail(
       success_count: success,
       fail_count: fail,
       target_count: c.target_count,
-      sent_at: c.sent_at,
+      sent_at: sentTimeMap.get(c.id) ?? c.sent_at,
     });
   }
 

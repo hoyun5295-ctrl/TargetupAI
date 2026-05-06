@@ -107,6 +107,78 @@
 
 ---
 
+### 🔥 D144 후속2 (2026-05-06 17:00 작성) — **미배포 작업 + 추가 수정 후 일괄 배포 대기**
+
+> **상태:** 🟡 **코드 수정 완료, TS 빌드 EXIT=0, push/deploy 대기.** Harold님 약속 일정으로 다음 세션에서 추가 수정 + 한 번에 배포.
+>
+> **🚨 다음 세션 시작 시 반드시:** (1) 본 섹션 정독 → (2) 추가 수정건 묶음 작업 → (3) 한 번에 `tp-push` + `tp-deploy-full` 진행
+
+#### 📦 미배포 변경 파일 (Backend 6 + Frontend 2)
+
+| 영역 | 파일 | 작업 |
+|---|---|---|
+| **sent_at MySQL 직접** | `packages/backend/src/utils/stats-aggregation.ts` | `aggregateSmsSendTimesByCampaign` helper 신설 — `MIN(sendreq_time)` UNION ALL + DATE_FORMAT `+09:00` ISO 명시(서버 TZ 무관) + byTableSet 그룹핑 + `querySendStatsDetail` campaignRows 매핑 |
+| | `packages/backend/src/routes/admin.ts` | sent_at 매핑 3곳: `/stats/send/detail`, `/campaigns/all`, `/campaigns/:id/sms-detail` header. + MessageDetailModal import + state(`smsDetailMsgModal`) 코드는 frontend |
+| | `packages/backend/src/routes/campaigns.ts` | sent_at 매핑(`/api/campaigns`) — 회사+사용자 메타 SELECT 후 helper로 매핑 |
+| | `packages/backend/src/routes/results.ts` | sent_at 매핑 2곳: `/campaigns` row + `/campaigns/:id` chart |
+| **status 'sending'→'completed'** | `packages/backend/src/routes/campaigns.ts` | AI 발송(line 927, 940) + 직접발송(line 1813) + 자동완료 처리(line 142-172) `pendingCount === 0` 조건 제거 |
+| | `packages/backend/src/utils/auto-campaign-worker.ts` | line 911-921 자동발송 status 'sending'→'completed' (campaigns + campaign_runs) |
+| | `packages/backend/src/utils/campaign-lifecycle.ts` | sync newStatus 단순화 — line 227(AI run) + line 349(direct campaign): `(success+fail+pending) > 0 ? 'completed' : 'failed'`. 진입 조건도 `pendingCount > 0` 추가하여 pending만 있어도 sync 진입 |
+| **메시지 클릭 복사** | `packages/frontend/src/components/MessageDetailModal.tsx` | **신설(CT)** — content/onClose props, 모달 내 메시지 전체 + 복사 버튼 + 닫기. 슈퍼관리자 전용 |
+| | `packages/frontend/src/pages/AdminDashboard.tsx` | import + state `smsDetailMsgModal` + 발송 상세 모달 메시지 셀 onClick(`setSmsDetailMsgModal(r.msgContents)`) + 모달 렌더링 (예약관리/캠페인관리 [조회] 버튼이 같은 모달이라 한 번 적용으로 둘 다 커버) |
+
+#### 🛡 사용자 측 불변 (검증 완료)
+- `packages/frontend/src/components/ResultsModal.tsx` MessageCell 변경 0 ✅ (Harold님 지시 — 사용자 측 건드리지 않음)
+
+#### ✅ 검증 완료
+- Backend `tsc --noEmit` → EXIT=0
+- Frontend `tsc --noEmit` → EXIT=0
+- grep 재확인: 잔존 `'sending'`은 임시 INSERT 시점값(직후 UPDATE에서 'completed' set) + read condition만 — 정상
+
+#### 🚀 배포 명령어 (다음 세션에서 추가 수정 후 일괄 실행)
+
+```powershell
+tp-push "0506 D144 후속2 — sent_at MySQL 직접(MIN sendreq_time) + status 'sending'→'completed' 정책(INSERT 완료=발송완료, pending은 통신사 백그라운드) + 슈퍼관리자 메시지 셀 클릭 복사(MessageDetailModal CT 신설). 사용자측 불변."
+tp-deploy-full
+```
+
+#### 🔍 배포 후 검증 항목
+
+1. **슈퍼관리자 캠페인관리/예약관리 [조회]** → 발송 상세 모달 → 메시지 셀 클릭 → 복사 모달 정상 표시 + 복사 버튼 작동
+2. **status 자동 완료** — 5/6 발송 캠페인의 "발송중" 표시가 "완료"로 자동 전환 확인 (자동완료 처리 GET /api/campaigns?status=scheduled 호출 시 작동)
+3. **폴라초이스 sent_at = 11:00:00 그대로** (PG 보정값 + MySQL `MIN(sendreq_time)` = 같은 값)
+4. **다른 5/6 캠페인 sent_at 자동 정상화** — 라프레리 16:24 잘못 표시 → 16:00 (또는 실제 통신사 시각)으로 자동 변경
+5. **PM2 로그 에러 없음** — `pm2 logs targetup-backend --lines 30`
+6. **사용자 측 ResultsModal 발송결과 모달** — MessageCell 동작 변경 없음 (클릭 시 상세 모달 열림 그대로)
+
+#### 📋 D144 후속1 (점심시간 12:00경 배포 완료) — 참고
+
+| 영역 | 작업 |
+|---|---|
+| Phase 1~5 | stats-aggregation/admin/results/campaigns/customers/ai 카운트 MySQL 직접 |
+| byTableSet 최적화 | 67회사 통계 N회 sequential → K회 (라인그룹 테이블셋별 그룹핑) |
+| fire-and-forget 복원 | Dashboard/ResultsModal 진입 시 sync-results 호출 — 통신사 실패분 자동 환불 + status 전환 + auto_campaign_runs 갱신 보장 |
+| Phase 5-A | sync-results-worker.ts 삭제 + app.ts 롤백 (5/6 5분 워커 거부 결정 따름) |
+
+#### 🚧 다음 세션에서 검토할 추가 수정 후보
+
+**📄 0506 PDF 사용자 피드백 13건 분석 완료 → [`status/D144-PDF-0506-FIXES.md`](D144-PDF-0506-FIXES.md) 정독**
+
+| 그룹 | PDF 항목 | 우선순위 | 미배포 연관성 |
+|---|---|---|---|
+| A — 미배포 + 검증 | P4 (발송완료 표시) / P7 (성공 대기 표시) | 🔴 긴급 | ✅ 후속2 status 정책 그대로 해결 |
+| B — 정산/환불 직결 | P8 (슈퍼관리자 기간 필터 sent_at 기준) / P6 (폴라초이스 환불 누락) | 🟠 높음 | ⚠️ 부분 연관 — 추가 작업 필요 |
+| C — 발송 정확성 | P2 (% 데이터 보존) / P1 (MMS 보관함 이미지) | 🟠 높음 | ❌ 별건 |
+| D — UX | P11 (사용자 추가 회사 검색) / P13 (발송통계 회사 검색) / P12 (발신번호 검색) / P9 (고객사 정렬) | 🟡 중간 | ❌ 별건 |
+| E — 신규 기능 | P5 (중간관리자 DB 전체삭제) + P10 (슈퍼관리자 DB 화면 단순화) / P3 (주소록 직접입력+다중선택) | 🟡 중간 | ❌ 별건 |
+
+**다음 세션 진행 옵션 (Harold님 결정):**
+- **Option 1 (권장):** D144 후속2 미배포 + 그룹 A/B 묶음 배포 (P4/P7 검증 + P8 기간필터 잔존 점검 + P6 환불 검증)
+- Option 2: 그룹 A 먼저 빠르게 (D144 후속2만 우선 배포 후 안정화)
+- Option 3: 그룹 A/B/C 모두 한 번에 (시간 여유 있을 때)
+
+---
+
 ### 🟢 D143 D-Day (2026-05-05) — 레거시 이관 100% 완료 · 5/6 발송 모니터링만 잔여
 
 > **상태:** 🟢 **데이터 이관 4종 + 레거시 차단 모두 완료.** ⏳ **5/6 07:00 첫 발송 모니터링만 잔여.**

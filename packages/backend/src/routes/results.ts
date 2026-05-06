@@ -13,7 +13,7 @@ import {
 } from '../utils/sms-queue';
 import { STATUS_CODE_MAP, CARRIER_MAP, SUCCESS_CODES, PENDING_CODES, getStatusLabel, getStatusType, getCarrierLabel, isSuccess } from '../utils/sms-result-map';
 import { DEFAULT_COSTS, redis, CACHE_TTL } from '../config/defaults';
-import { buildDateRangeFilter, buildPeriodFilter, aggregateSmsCountsByCampaign } from '../utils/stats-aggregation';
+import { buildDateRangeFilter, buildPeriodFilter, aggregateSmsCountsByCampaign, aggregateSmsSendTimesByCampaign } from '../utils/stats-aggregation';
 import { CAMPAIGN_OPT080_SELECT_EXPR, CAMPAIGN_OPT080_LEFT_JOIN } from '../utils/unsubscribe-helper';
 
 const router = Router();
@@ -263,6 +263,7 @@ router.get('/campaigns', async (req: Request, res: Response) => {
 
     const campListSmsMap = await aggregateSmsCountsByCampaign(result.rows);
     const campListKakaoMap = await kakaoBatchAggByGroup(result.rows.map((c: any) => c.id));
+    const campListSentTimeMap = await aggregateSmsSendTimesByCampaign(result.rows);
     const campaigns = result.rows.map((c: any) => {
       const sms = campListSmsMap.get(c.id) || { total_count: 0, success_count: 0, fail_count: 0 };
       const kakao = campListKakaoMap.get(c.id) || { total: 0, success: 0, fail: 0, pending: 0 };
@@ -275,6 +276,7 @@ router.get('/campaigns', async (req: Request, res: Response) => {
         success_count: success,
         fail_count: fail,
         success_rate: sent > 0 ? Math.round((success / sent) * 1000) / 10 : 0,
+        sent_at: campListSentTimeMap.get(c.id) ?? c.sent_at,
       };
     });
 
@@ -422,14 +424,17 @@ router.get('/campaigns/:id', async (req: Request, res: Response) => {
       } catch (e) { /* Redis 실패 시 무시 — 다음 요청에서 재조회 */ }
     }
 
-    // ★ D144: campaign.success_count/fail_count 캐시 의존 제거 → MySQL 큐 + 카카오 직접 카운트
+    // ★ D144: campaign.success_count/fail_count/sent_at 캐시 의존 제거 → MySQL 직접
     const chartSmsMap = await aggregateSmsCountsByCampaign([campaign]);
     const chartKakaoMap = await kakaoBatchAggByGroup([campaign.id]);
+    const chartSentTimeMap = await aggregateSmsSendTimesByCampaign([campaign]);
     const chSms = chartSmsMap.get(campaign.id) || { total_count: 0, success_count: 0, fail_count: 0 };
     const chKakao = chartKakaoMap.get(campaign.id) || { total: 0, success: 0, fail: 0, pending: 0 };
     campaign.success_count = Number(chSms.success_count || 0) + chKakao.success;
     campaign.fail_count = Number(chSms.fail_count || 0) + chKakao.fail;
     campaign.sent_count = Number(chSms.total_count || 0) + chKakao.total;
+    const chSentTime = chartSentTimeMap.get(campaign.id);
+    if (chSentTime) campaign.sent_at = chSentTime;
 
     return res.json({
       campaign,

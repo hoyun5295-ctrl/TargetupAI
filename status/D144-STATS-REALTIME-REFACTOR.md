@@ -384,3 +384,42 @@ PG는 다음 용도로만 유지:
 
 > **이 문서를 정독하고 § 9 절차를 따르면 다음 세션에서 5/6에 했던 헛소리·땜질 시도를 반복하지 않을 수 있다.**
 > **Harold의 분노는 정당했다. 추측·컨펌 없이 코드 수정·운영 중 배포 권한·핵심 못 짚고 통계만 운운한 것 모두 잘못. 다음 세션에서는 이 문서 그대로 따라가서 처음부터 옳게 진행한다.**
+
+---
+
+## § 13. 2026-05-06 진행 마감 (Harold + Claude 공동 작업)
+
+### 13-1. 후속1 — 점심시간 (12:00경) 배포 완료 ✅
+- Phase 1~5: stats-aggregation/admin/results/campaigns/customers/ai 카운트 MySQL 직접
+- byTableSet 최적화 (67회사 N→K회 sequential 축소)
+- fire-and-forget 복원 (Dashboard/ResultsModal — 통신사 실패분 환불 + status 전환 + auto_campaign_runs 보조 보장)
+- Phase 5-A: sync-results-worker.ts 삭제 + app.ts 롤백 (5/6 5분 워커 거부 결정)
+
+### 13-2. 후속2 — 오후 작업 완료 / 미배포 (다음 세션 일괄 배포) 🟡
+**작업 내용:**
+1. **sent_at MySQL 직접** — `aggregateSmsSendTimesByCampaign` helper 신설 (MIN(sendreq_time) UNION ALL + DATE_FORMAT `+09:00` ISO) + 7곳 매핑
+2. **status 'sending'→'completed' 정책** — INSERT 완료 = 발송완료. pending은 통신사 백그라운드. 6곳 수정:
+   - campaigns.ts AI 발송(line 927, 940), 직접발송(line 1813), 자동완료 처리(line 142-172) pending=0 조건 제거
+   - auto-campaign-worker.ts:912 자동발송
+   - campaign-lifecycle.ts:227, 349 sync newStatus 단순화
+3. **슈퍼관리자 메시지 셀 클릭 복사** — `MessageDetailModal.tsx` CT 신설 + AdminDashboard 발송 상세 모달 적용 (예약관리/캠페인관리 둘 다 [조회] 버튼이 같은 모달이라 한 번 적용으로 커버)
+
+**원인 추적 (사고 사례):**
+- 폴라초이스 5/6 11:00 예약 발송인데 PG `sent_at = 11:24:01` 표시 → 16,106건 bulk INSERT 24분 소요 + INSERT 완료 시점 NOW() 호출이 원인. **MySQL `MIN(sendreq_time) = 11:00:00` 정확.** D144 후속1로 카운트는 MySQL 직접 전환했으나 sent_at 누락 → 후속2에서 sent_at도 MySQL 우선 + PG fallback.
+- 라프레리 발송 상세 모달의 7번 row 발송 대기 + 다른 row 발송중 → status='sending' 영구 표시 사고. 정책 변경 (INSERT 완료 = completed) 적용으로 종결.
+
+**검증:**
+- Backend `tsc --noEmit` → EXIT=0 ✅
+- Frontend `tsc --noEmit` → EXIT=0 ✅
+- 사용자측 ResultsModal MessageCell 변경 0 ✅
+- 잔존 `'sending'`은 INSERT 시점 임시값 + read condition만 (정상)
+
+**미배포 사유:** Harold님 7시 약속 일정 + 추가 수정 사항 다음 세션에서 묶음 진행 결정. **상세 배포 가이드는 [`status/STATUS.md` § 4 D144 후속2 섹션](STATUS.md) 참조.**
+
+### 13-3. 다음 세션 시작 절차
+
+1. `status/STATUS.md` § 4 **D144 후속2 (미배포 작업)** 섹션 정독
+2. Harold님이 알려주실 추가 수정 사항 진행 (CLAUDE.md 끌로드원칙 7-1 절차 그대로)
+3. TS 빌드 EXIT=0 재확인
+4. `tp-push` + `tp-deploy-full` 한 번에 실행
+5. STATUS.md 검증 항목 6건 확인 후 마감

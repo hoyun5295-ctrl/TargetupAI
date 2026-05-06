@@ -10,7 +10,7 @@ import { SUCCESS_CODES_SQL, PENDING_CODES_SQL, getStatusLabel, getStatusType, ge
 import { DEFAULT_COSTS } from '../config/defaults';
 import { validateSmsTables } from '../utils/sms-table-validator';
 import { getUserUnsubscribes, deleteUserUnsubscribes, exportUserUnsubscribes, CAMPAIGN_OPT080_SELECT_EXPR, CAMPAIGN_OPT080_LEFT_JOIN } from '../utils/unsubscribe-helper';
-import { buildDateRangeFilter, aggregateSmsCountsByCampaign } from '../utils/stats-aggregation';
+import { buildDateRangeFilter, aggregateSmsCountsByCampaign, aggregateSmsSendTimesByCampaign } from '../utils/stats-aggregation';
 import { normalizePhone } from '../utils/normalize-phone';
 
 const router = Router();
@@ -698,12 +698,12 @@ router.get('/campaigns/scheduled', authenticate, requireSuperAdmin, async (req: 
       paramIdx++;
     }
     if (startDate) {
-      where += ` AND COALESCE(c.scheduled_at, c.created_at) >= $${paramIdx}::date`;
+      where += ` AND COALESCE(c.sent_at, c.scheduled_at, c.created_at) >= $${paramIdx}::date`;
       params.push(startDate);
       paramIdx++;
     }
     if (endDate) {
-      where += ` AND COALESCE(c.scheduled_at, c.created_at) < ($${paramIdx}::date + INTERVAL '1 day')`;
+      where += ` AND COALESCE(c.sent_at, c.scheduled_at, c.created_at) < ($${paramIdx}::date + INTERVAL '1 day')`;
       params.push(endDate);
       paramIdx++;
     }
@@ -1385,6 +1385,7 @@ router.get('/stats/send/detail', authenticate, requireSuperAdmin, async (req: Re
     const detailMetaRows = metaResult.rows;
     const detailSmsMap = await aggregateSmsCountsByCampaign(detailMetaRows);
     const detailKakaoMap = await kakaoBatchAggByGroup(detailMetaRows.map((c: any) => c.id));
+    const detailSentTimeMap = await aggregateSmsSendTimesByCampaign(detailMetaRows);
 
     type DetailUserAgg = { user_id: any; user_name: any; login_id: any; department: any; store_codes: any; runs: Set<string>; sent: number; success: number; fail: number };
     const byUser = new Map<string, DetailUserAgg>();
@@ -1427,7 +1428,7 @@ router.get('/stats/send/detail', authenticate, requireSuperAdmin, async (req: Re
         fail_count: fail,
         target_count: c.target_count,
         created_at: c.created_at,
-        sent_at: c.sent_at,
+        sent_at: detailSentTimeMap.get(c.id) ?? c.sent_at,
       });
     }
 
@@ -1592,6 +1593,7 @@ router.get('/campaigns/all', authenticate, requireSuperAdmin, async (req: Reques
 
     const adminCampSmsMap = await aggregateSmsCountsByCampaign(result.rows);
     const adminCampKakaoMap = await kakaoBatchAggByGroup(result.rows.map((c: any) => c.id));
+    const adminCampSentTimeMap = await aggregateSmsSendTimesByCampaign(result.rows);
     const campaigns = result.rows.map((c: any) => {
       const sms = adminCampSmsMap.get(c.id) || { total_count: 0, success_count: 0, fail_count: 0 };
       const kakao = adminCampKakaoMap.get(c.id) || { total: 0, success: 0, fail: 0, pending: 0 };
@@ -1600,6 +1602,7 @@ router.get('/campaigns/all', authenticate, requireSuperAdmin, async (req: Reques
         total_sent: Number(sms.total_count || 0) + kakao.total,
         total_success: Number(sms.success_count || 0) + kakao.success,
         total_fail: Number(sms.fail_count || 0) + kakao.fail,
+        sent_at: adminCampSentTimeMap.get(c.id) ?? c.sent_at,
       };
     });
 
@@ -1646,11 +1649,14 @@ router.get('/campaigns/:id/sms-detail', authenticate, requireSuperAdmin, async (
     {
       const headerSmsMap = await aggregateSmsCountsByCampaign([campaign]);
       const headerKakaoMap = await kakaoBatchAggByGroup([campaign.id]);
+      const headerSentTimeMap = await aggregateSmsSendTimesByCampaign([campaign]);
       const hSms = headerSmsMap.get(campaign.id) || { total_count: 0, success_count: 0, fail_count: 0 };
       const hKakao = headerKakaoMap.get(campaign.id) || { total: 0, success: 0, fail: 0, pending: 0 };
       campaign.success_count = Number(hSms.success_count || 0) + hKakao.success;
       campaign.fail_count = Number(hSms.fail_count || 0) + hKakao.fail;
       campaign.sent_count = Number(hSms.total_count || 0) + hKakao.total;
+      const hSentTime = headerSentTimeMap.get(campaign.id);
+      if (hSentTime) campaign.sent_at = hSentTime;
     }
     const sendChannel = campaign.send_channel || 'sms';
     const showSms = (!channelFilter || channelFilter === 'sms') && (sendChannel === 'sms' || sendChannel === 'both');

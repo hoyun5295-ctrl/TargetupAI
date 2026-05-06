@@ -908,16 +908,19 @@ async function executeAutoCampaign(ac: any): Promise<void> {
     );
 
     // ★ campaigns 상태 업데이트
+    // ★ D144 후속: bulk INSERT 완료 = 발송완료 — 'sending' 단계 폐기, 즉시 'completed'.
+    //   pending(통신사 처리)은 백그라운드. 화면 카운트는 MySQL 직접이라 실시간 갱신.
+    const autoStatus = sentCount === 0 ? 'failed' : 'completed';
     await query(
-      `UPDATE campaigns SET status = 'sending', sent_count = $2, sent_at = NOW() WHERE id = $1`,
-      [campaignId, sentCount]
+      `UPDATE campaigns SET status = $2, sent_count = $3, sent_at = NOW() WHERE id = $1`,
+      [campaignId, autoStatus, sentCount]
     );
 
     // ★ campaign_runs 연결 레코드
     await query(
       `INSERT INTO campaign_runs (campaign_id, run_number, target_count, sent_count, status, sent_at)
-       VALUES ($1, 1, $2, $3, 'sending', NOW())`,
-      [campaignId, customers.length, sentCount]
+       VALUES ($1, 1, $2, $3, $4, NOW())`,
+      [campaignId, customers.length, sentCount, autoStatus]
     );
 
     // ★ auto_campaigns 통계 + next_run_at 갱신 + generated 초기화
