@@ -1479,12 +1479,18 @@ router.post('/delete-all', blockIfSyncActive, async (req: Request, res: Response
     const userId = req.user?.userId;
     const userType = req.user?.userType;
 
-    if (userType !== 'super_admin') {
-      return res.status(403).json({ error: '슈퍼관리자만 전체 삭제가 가능합니다' });
+    // ★ D144 P5 (2026-05-06): company_admin도 자기 회사 전체 삭제 가능
+    //   - super_admin: 임의 회사 (targetCompanyId)
+    //   - company_admin: 자기 회사만 (targetCompanyId 무시, 본인 companyId 강제)
+    if (userType !== 'super_admin' && userType !== 'company_admin') {
+      return res.status(403).json({ error: '관리자만 전체 삭제가 가능합니다' });
     }
 
     const { targetCompanyId, confirmCompanyName } = req.body;
-    const deleteCompanyId = targetCompanyId || companyId;
+    // company_admin은 자기 companyId 강제 (다른 회사 삭제 시도 차단)
+    const deleteCompanyId = userType === 'company_admin'
+      ? companyId
+      : (targetCompanyId || companyId);
 
     if (!deleteCompanyId) return res.status(400).json({ error: '회사 ID가 필요합니다' });
     if (!confirmCompanyName) return res.status(400).json({ error: '회사명 확인이 필요합니다' });

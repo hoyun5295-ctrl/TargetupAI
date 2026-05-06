@@ -37,10 +37,50 @@ export default function CustomerDBModal({ onClose, token, userType }: CustomerDB
   // ★ D132 Phase A: 다운로드 상태
   const [downloading, setDownloading] = useState(false);
 
+  // ★ D144 P5 (2026-05-06): 고객DB 전체 삭제 (company_admin/super_admin)
+  const [showDeleteAllConfirm, setShowDeleteAllConfirm] = useState(false);
+  const [deleteConfirmInput, setDeleteConfirmInput] = useState('');
+  const [deletingAll, setDeletingAll] = useState(false);
+  const [deleteResult, setDeleteResult] = useState<{ ok: boolean; message: string } | null>(null);
+
   useEffect(() => {
     fetchEnabledFieldsAndOptions();
     fetchCustomers(1);
   }, []);
+
+  // ★ D144 P5: 전체 삭제 실행
+  const handleDeleteAll = async () => {
+    if (!deleteConfirmInput.trim()) {
+      setDeleteResult({ ok: false, message: '회사명을 입력해주세요' });
+      return;
+    }
+    setDeletingAll(true);
+    setDeleteResult(null);
+    try {
+      const res = await fetch('/api/customers/delete-all', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirmCompanyName: deleteConfirmInput.trim() }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setDeleteResult({ ok: true, message: `${data.deletedCount?.toLocaleString() || 0}명의 고객 데이터가 전체 삭제되었습니다` });
+        // 2초 후 모달 닫고 목록 새로고침
+        setTimeout(() => {
+          setShowDeleteAllConfirm(false);
+          setDeleteConfirmInput('');
+          setDeleteResult(null);
+          fetchCustomers(1);
+        }, 2000);
+      } else {
+        setDeleteResult({ ok: false, message: data.error || '삭제 실패' });
+      }
+    } catch (e) {
+      setDeleteResult({ ok: false, message: '네트워크 오류' });
+    } finally {
+      setDeletingAll(false);
+    }
+  };
 
   // ★ D88: enabled-fields 하나로 통합 — 필드 정의 + 필터 옵션 + 브랜드 코드를 한 번에 가져옴
   // 기존 fetchFieldDefinitions + fetchFilterOptions 2개 API 호출 → 1개로 통합
@@ -345,6 +385,20 @@ export default function CustomerDBModal({ onClose, token, userType }: CustomerDB
               </svg>
               {downloading ? '다운로드 중...' : '엑셀 다운로드'}
             </button>
+            {/* ★ D144 P5: 전체 삭제 (company_admin/super_admin만) */}
+            {(userType === 'company_admin' || userType === 'super_admin') && (
+              <button
+                onClick={() => { setShowDeleteAllConfirm(true); setDeleteConfirmInput(''); setDeleteResult(null); }}
+                disabled={total === 0}
+                title={total === 0 ? '삭제할 고객이 없습니다' : '고객 DB 전체를 영구 삭제합니다 (회사명 확인 필요)'}
+                className="px-3 py-1.5 text-xs font-semibold bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center gap-1.5"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3" />
+                </svg>
+                전체 삭제
+              </button>
+            )}
             <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-200 text-gray-400 hover:text-gray-600 transition-colors text-lg">&times;</button>
           </div>
         </div>
@@ -640,6 +694,67 @@ export default function CustomerDBModal({ onClose, token, userType }: CustomerDB
           </div>
         )}
       </div>
+
+      {/* ★ D144 P5: 고객 DB 전체 삭제 확인 모달 (안전장치 — 회사명 일치 검증) */}
+      {showDeleteAllConfirm && (
+        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md animate-in fade-in zoom-in">
+            <div className="px-6 py-5">
+              <div className="flex items-start gap-3 mb-4">
+                <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0">
+                  <svg className="w-5 h-5 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                </div>
+                <div className="flex-1">
+                  <h3 className="text-lg font-bold text-gray-900">고객 DB 전체 삭제</h3>
+                  <p className="text-sm text-gray-600 mt-1">
+                    등록된 모든 고객 데이터, 구매내역, 수신거부, 필드 정의가 <strong className="text-red-600">영구 삭제</strong>됩니다. 복구 불가능합니다.
+                  </p>
+                </div>
+              </div>
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4 text-xs text-amber-800">
+                <strong>안전 확인:</strong> 본인 회사의 정확한 회사명을 아래에 입력해야 삭제됩니다.
+              </div>
+              <input
+                type="text"
+                value={deleteConfirmInput}
+                onChange={(e) => { setDeleteConfirmInput(e.target.value); setDeleteResult(null); }}
+                placeholder="회사명을 정확히 입력하세요"
+                disabled={deletingAll}
+                className="w-full px-3 py-2 border-2 border-gray-300 rounded-lg text-sm focus:border-red-500 focus:ring-2 focus:ring-red-100 outline-none disabled:bg-gray-50"
+                onKeyDown={(e) => { if (e.key === 'Enter' && !deletingAll) handleDeleteAll(); }}
+              />
+              {deleteResult && (
+                <div className={`mt-3 p-3 rounded-lg text-sm ${deleteResult.ok ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
+                  {deleteResult.message}
+                </div>
+              )}
+            </div>
+            <div className="px-6 py-4 bg-gray-50 border-t flex justify-end gap-2 rounded-b-xl">
+              <button
+                onClick={() => { setShowDeleteAllConfirm(false); setDeleteConfirmInput(''); setDeleteResult(null); }}
+                disabled={deletingAll}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+              >
+                취소
+              </button>
+              <button
+                onClick={handleDeleteAll}
+                disabled={deletingAll || !deleteConfirmInput.trim() || (deleteResult?.ok === true)}
+                className="px-4 py-2 text-sm font-bold text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                {deletingAll ? (
+                  <>
+                    <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" strokeWidth="3" strokeDasharray="60" strokeLinecap="round" /></svg>
+                    삭제 중...
+                  </>
+                ) : '영구 삭제'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

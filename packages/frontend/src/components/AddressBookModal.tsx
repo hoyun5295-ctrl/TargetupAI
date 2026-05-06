@@ -27,6 +27,51 @@ export default function AddressBookModal({
   const [addressPage, setAddressPage] = useState(0);
   const [loaded, setLoaded] = useState(false);
 
+  // ★ D144 P3 (2026-05-06): 다중 선택 + 직접 입력
+  const [selectedGroupNames, setSelectedGroupNames] = useState<Set<string>>(new Set());
+  const [directInputMode, setDirectInputMode] = useState(false);
+  const [directInputRows, setDirectInputRows] = useState<{ phone: string; name: string; extra1: string; extra2: string; extra3: string }[]>(
+    Array.from({ length: 5 }, () => ({ phone: '', name: '', extra1: '', extra2: '', extra3: '' }))
+  );
+
+  const toggleGroupSelection = (groupName: string) => {
+    setSelectedGroupNames(prev => {
+      const next = new Set(prev);
+      if (next.has(groupName)) next.delete(groupName); else next.add(groupName);
+      return next;
+    });
+  };
+
+  const handleLoadMultipleGroups = async () => {
+    if (selectedGroupNames.size === 0) return;
+    const token = localStorage.getItem('token');
+    const allContacts: { phone: string; name: string; extra1: string; extra2: string; extra3: string }[] = [];
+    const seenPhones = new Set<string>();
+    for (const groupName of selectedGroupNames) {
+      try {
+        const res = await fetch(`/api/address-books/${encodeURIComponent(groupName)}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        const data = await res.json();
+        if (data.success && Array.isArray(data.contacts)) {
+          for (const c of data.contacts) {
+            const phone = String(c.phone || '').trim();
+            if (!phone || seenPhones.has(phone)) continue;
+            seenPhones.add(phone);
+            allContacts.push({
+              phone, name: c.name || '', extra1: c.extra1 || '', extra2: c.extra2 || '', extra3: c.extra3 || ''
+            });
+          }
+        }
+      } catch (e) { /* 한 그룹 실패해도 다음 진행 */ }
+    }
+    setDirectRecipients(allContacts);
+    setSelectedGroupNames(new Set());
+    onClose();
+    setToast({ show: true, type: 'success', message: `${selectedGroupNames.size}개 그룹 ${allContacts.length}명 불러오기 완료 (중복 제거)` });
+    setTimeout(() => setToast({ show: false, type: 'success', message: '' }), 3000);
+  };
+
   // 모달 열릴 때 그룹 로드
   React.useEffect(() => {
     if (show && !loaded) {
@@ -49,6 +94,10 @@ export default function AddressBookModal({
       setAddressViewContacts([]);
       setAddressViewSearch('');
       setAddressPage(0);
+      // ★ D144 P3: 다중 선택 + 직접 입력 reset
+      setSelectedGroupNames(new Set());
+      setDirectInputMode(false);
+      setDirectInputRows(Array.from({ length: 5 }, () => ({ phone: '', name: '', extra1: '', extra2: '', extra3: '' })));
     }
   }, [show]);
 
@@ -63,8 +112,127 @@ export default function AddressBookModal({
         </div>
         
         <div className="p-6 overflow-y-auto max-h-[60vh]">
+          {/* ★ D144 P3-(a): 직접 입력 모드 토글 + 폼 */}
+          {!addressSaveMode && !directInputMode && (
+            <div className="mb-3 flex gap-2">
+              <button
+                onClick={() => setDirectInputMode(true)}
+                className="flex-1 py-2 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 text-sm font-medium"
+              >✏️ 직접 입력으로 등록</button>
+            </div>
+          )}
+
+          {/* 직접 입력 폼 */}
+          {directInputMode && (
+            <div className="mb-4 p-4 bg-emerald-50 rounded-lg border border-emerald-200">
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-sm font-medium text-emerald-700">✏️ 직접 입력 ({directInputRows.filter(r => r.phone.trim()).length}건 입력)</div>
+                <button
+                  onClick={() => setDirectInputRows(prev => [...prev, { phone: '', name: '', extra1: '', extra2: '', extra3: '' }])}
+                  className="px-2 py-1 bg-emerald-600 text-white rounded text-xs hover:bg-emerald-700"
+                >+ 행 추가</button>
+              </div>
+              <div className="max-h-[300px] overflow-y-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-emerald-100 sticky top-0">
+                    <tr>
+                      <th className="px-2 py-1 text-left text-xs">번호 *</th>
+                      <th className="px-2 py-1 text-left text-xs">이름</th>
+                      <th className="px-2 py-1 text-left text-xs">기타1</th>
+                      <th className="px-2 py-1 text-left text-xs">기타2</th>
+                      <th className="px-2 py-1 text-left text-xs">기타3</th>
+                      <th className="w-8"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {directInputRows.map((row, idx) => (
+                      <tr key={idx} className="border-t">
+                        <td className="px-1 py-1">
+                          <input type="text" value={row.phone}
+                            onChange={(e) => setDirectInputRows(prev => prev.map((r, i) => i === idx ? { ...r, phone: e.target.value } : r))}
+                            placeholder="01012345678"
+                            className="w-full px-2 py-1 border rounded text-sm" />
+                        </td>
+                        <td className="px-1 py-1">
+                          <input type="text" value={row.name}
+                            onChange={(e) => setDirectInputRows(prev => prev.map((r, i) => i === idx ? { ...r, name: e.target.value } : r))}
+                            className="w-full px-2 py-1 border rounded text-sm" />
+                        </td>
+                        <td className="px-1 py-1">
+                          <input type="text" value={row.extra1}
+                            onChange={(e) => setDirectInputRows(prev => prev.map((r, i) => i === idx ? { ...r, extra1: e.target.value } : r))}
+                            className="w-full px-2 py-1 border rounded text-sm" />
+                        </td>
+                        <td className="px-1 py-1">
+                          <input type="text" value={row.extra2}
+                            onChange={(e) => setDirectInputRows(prev => prev.map((r, i) => i === idx ? { ...r, extra2: e.target.value } : r))}
+                            className="w-full px-2 py-1 border rounded text-sm" />
+                        </td>
+                        <td className="px-1 py-1">
+                          <input type="text" value={row.extra3}
+                            onChange={(e) => setDirectInputRows(prev => prev.map((r, i) => i === idx ? { ...r, extra3: e.target.value } : r))}
+                            className="w-full px-2 py-1 border rounded text-sm" />
+                        </td>
+                        <td className="px-1 py-1 text-center">
+                          {directInputRows.length > 1 && (
+                            <button
+                              onClick={() => setDirectInputRows(prev => prev.filter((_, i) => i !== idx))}
+                              className="text-red-500 hover:text-red-700 text-sm"
+                              title="삭제"
+                            >×</button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="flex items-center gap-2 mt-3">
+                <span className="text-sm text-gray-600 w-20">그룹명 *</span>
+                <input
+                  type="text"
+                  value={newGroupName}
+                  onChange={(e) => setNewGroupName(e.target.value)}
+                  placeholder="예: VIP고객"
+                  className="flex-1 px-3 py-2 border rounded-lg text-sm"
+                />
+              </div>
+              <div className="flex gap-2 mt-3">
+                <button
+                  onClick={async () => {
+                    const valid = directInputRows.filter(r => r.phone.trim().replace(/\D/g, '').length >= 10);
+                    if (valid.length === 0) { alert('유효한 번호를 1건 이상 입력하세요'); return; }
+                    if (!newGroupName.trim()) { alert('그룹명을 입력하세요'); return; }
+                    const token = localStorage.getItem('token');
+                    const res = await fetch('/api/address-books', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                      body: JSON.stringify({ groupName: newGroupName.trim(), contacts: valid })
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                      setToast({ show: true, type: 'success', message: data.message });
+                      setTimeout(() => setToast({ show: false, type: 'success', message: '' }), 3000);
+                      setDirectInputMode(false);
+                      setNewGroupName('');
+                      setDirectInputRows(Array.from({ length: 5 }, () => ({ phone: '', name: '', extra1: '', extra2: '', extra3: '' })));
+                      const groupRes = await fetch('/api/address-books/groups', { headers: { Authorization: `Bearer ${token}` } });
+                      const groupData = await groupRes.json();
+                      if (groupData.success) setAddressGroups(groupData.groups || []);
+                    } else { alert(data.error || '저장 실패'); }
+                  }}
+                  className="flex-1 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700"
+                >💾 주소록 저장</button>
+                <button
+                  onClick={() => { setDirectInputMode(false); setNewGroupName(''); setDirectInputRows(Array.from({ length: 5 }, () => ({ phone: '', name: '', extra1: '', extra2: '', extra3: '' }))); }}
+                  className="px-4 py-2 bg-gray-300 rounded-lg hover:bg-gray-400"
+                >취소</button>
+              </div>
+            </div>
+          )}
+
           {/* 파일 업로드 영역 */}
-          {!addressSaveMode && (
+          {!addressSaveMode && !directInputMode && (
             <div className="mb-4 p-4 border-2 border-dashed border-amber-300 rounded-lg text-center bg-amber-50">
               <label className="cursor-pointer">
                 <div className="text-amber-600 mb-2">📁 파일을 선택하여 주소록 등록</div>
@@ -244,9 +412,20 @@ export default function AddressBookModal({
           )}
 
           {/* 그룹 목록 */}
-          {!addressSaveMode && (
+          {!addressSaveMode && !directInputMode && (
             <>
-              <div className="text-sm font-medium text-gray-600 mb-2">저장된 주소록</div>
+              <div className="flex items-center justify-between mb-2">
+                <div className="text-sm font-medium text-gray-600">저장된 주소록</div>
+                {/* ★ D144 P3-(b): 다중 선택 일괄 불러오기 */}
+                {selectedGroupNames.size > 0 && (
+                  <button
+                    onClick={handleLoadMultipleGroups}
+                    className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-700"
+                  >
+                    📥 선택 {selectedGroupNames.size}개 그룹 일괄 불러오기 (중복 제거)
+                  </button>
+                )}
+              </div>
               {addressGroups.length === 0 ? (
             <div className="text-center py-8 text-gray-400">
               <div className="text-4xl mb-2">📭</div>
@@ -258,9 +437,19 @@ export default function AddressBookModal({
                 {addressGroups.slice(addressPage * 5, addressPage * 5 + 5).map((group) => (
                   <div key={group.group_name} className="border rounded-lg overflow-hidden">
                     <div className="flex items-center justify-between p-3 bg-gray-50 hover:bg-gray-100">
-                      <div>
-                        <div className="font-medium">{group.group_name}</div>
-                        <div className="text-sm text-gray-500">{group.count}명</div>
+                      <div className="flex items-center gap-2">
+                        {/* ★ D144 P3-(b): 다중 선택 체크박스 */}
+                        <input
+                          type="checkbox"
+                          checked={selectedGroupNames.has(group.group_name)}
+                          onChange={() => toggleGroupSelection(group.group_name)}
+                          className="w-4 h-4 cursor-pointer accent-blue-600"
+                          title="다중 선택"
+                        />
+                        <div>
+                          <div className="font-medium">{group.group_name}</div>
+                          <div className="text-sm text-gray-500">{group.count}명</div>
+                        </div>
                       </div>
                       <div className="flex gap-2">
                         <button

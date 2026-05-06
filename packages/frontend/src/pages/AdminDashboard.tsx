@@ -5868,20 +5868,10 @@ const handleApproveRequest = async (id: string) => {
                     )}
                   </div>
 
-                  {/* 전체 삭제 */}
-                  <div className="pt-3 border-t border-red-200">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <div className="text-xs font-medium text-red-600">⚠️ 전체 삭제</div>
-                        <p className="text-[11px] text-gray-400">모든 고객 및 구매내역 영구 삭제</p>
-                      </div>
-                      <button type="button"
-                        onClick={() => { setCustomerDeleteConfirmName(''); setShowCustomerDeleteAll(true); }}
-                        className="px-3 py-1.5 bg-red-50 text-red-600 border border-red-200 rounded-lg text-xs font-medium hover:bg-red-100 transition">
-                        전체 삭제
-                      </button>
-                    </div>
-                  </div>
+                  {/* ★ D144 P10 (2026-05-06): 슈퍼관리자 측 전체 삭제 제거.
+                       PDF Harold님 결정: "슈퍼관리자에 고객 DB를 확인하고 삭제할 수 있는 기능이 없어도 될 것 같다".
+                       전체 삭제는 P5에서 고객사관리자(company_admin) 측 CustomerDBModal에 이관됨.
+                       정보 출력은 감사/모니터링 용도로 유지. */}
 
                   {/* 닫기 버튼 */}
                   <div className="flex pt-4 mt-4 border-t">
