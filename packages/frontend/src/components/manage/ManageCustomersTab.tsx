@@ -51,6 +51,45 @@ export default function CustomersTab() {
   // 토스트
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
 
+  // ★ D144 P5 (2026-05-07): 고객DB 전체 삭제
+  const [showDeleteAllModal, setShowDeleteAllModal] = useState(false);
+  const [deleteAllConfirmInput, setDeleteAllConfirmInput] = useState('');
+  const [deletingAll, setDeletingAll] = useState(false);
+  const [deleteAllResult, setDeleteAllResult] = useState<{ ok: boolean; message: string } | null>(null);
+
+  const handleDeleteAll = async () => {
+    if (!deleteAllConfirmInput.trim()) {
+      setDeleteAllResult({ ok: false, message: '회사명을 입력해주세요' });
+      return;
+    }
+    setDeletingAll(true);
+    setDeleteAllResult(null);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch('/api/customers/delete-all', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirmCompanyName: deleteAllConfirmInput.trim() }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setDeleteAllResult({ ok: true, message: `${data.deletedCount?.toLocaleString() || 0}명의 고객 데이터가 전체 삭제되었습니다` });
+        setTimeout(() => {
+          setShowDeleteAllModal(false);
+          setDeleteAllConfirmInput('');
+          setDeleteAllResult(null);
+          loadCustomers(1);
+        }, 2000);
+      } else {
+        setDeleteAllResult({ ok: false, message: data.error || '삭제 실패' });
+      }
+    } catch (e) {
+      setDeleteAllResult({ ok: false, message: '네트워크 오류' });
+    } finally {
+      setDeletingAll(false);
+    }
+  };
+
   // 사용자 목록 로드
   useEffect(() => {
     (async () => {
@@ -216,9 +255,85 @@ export default function CustomersTab() {
                 선택 삭제 ({selectedIds.size}명)
               </button>
             )}
+
+            {/* ★ D144 P5: 전체 삭제 (회사명 입력 안전장치) */}
+            {pagination.total > 0 && (
+              <button
+                onClick={() => { setShowDeleteAllModal(true); setDeleteAllConfirmInput(''); setDeleteAllResult(null); }}
+                className="px-4 py-2 bg-red-700 text-white rounded-lg text-sm font-medium hover:bg-red-800 transition flex items-center gap-1.5"
+                title="고객 DB 전체 영구 삭제 (회사명 확인 필요)"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+                전체 삭제
+              </button>
+            )}
           </div>
         </div>
       </div>
+
+      {/* ★ D144 P5: 고객 DB 전체 삭제 confirm 모달 */}
+      {showDeleteAllModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md animate-in fade-in zoom-in">
+            <div className="px-6 py-5">
+              <div className="flex items-start gap-3 mb-4">
+                <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0">
+                  <svg className="w-5 h-5 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                </div>
+                <div className="flex-1">
+                  <h3 className="text-lg font-bold text-gray-900">고객 DB 전체 삭제</h3>
+                  <p className="text-sm text-gray-600 mt-1">
+                    등록된 모든 고객 데이터({pagination.total.toLocaleString()}명), 구매내역, 수신거부, 필드 정의가 <strong className="text-red-600">영구 삭제</strong>됩니다. 복구 불가능합니다.
+                  </p>
+                </div>
+              </div>
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4 text-xs text-amber-800">
+                <strong>안전 확인:</strong> 본인 회사의 정확한 회사명을 아래에 입력해야 삭제됩니다.
+              </div>
+              <input
+                type="text"
+                value={deleteAllConfirmInput}
+                onChange={(e) => { setDeleteAllConfirmInput(e.target.value); setDeleteAllResult(null); }}
+                placeholder="회사명을 정확히 입력하세요"
+                disabled={deletingAll}
+                className="w-full px-3 py-2 border-2 border-gray-300 rounded-lg text-sm focus:border-red-500 focus:ring-2 focus:ring-red-100 outline-none disabled:bg-gray-50"
+                onKeyDown={(e) => { if (e.key === 'Enter' && !deletingAll) handleDeleteAll(); }}
+                autoFocus
+              />
+              {deleteAllResult && (
+                <div className={`mt-3 p-3 rounded-lg text-sm ${deleteAllResult.ok ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
+                  {deleteAllResult.message}
+                </div>
+              )}
+            </div>
+            <div className="px-6 py-4 bg-gray-50 border-t flex justify-end gap-2 rounded-b-xl">
+              <button
+                onClick={() => { setShowDeleteAllModal(false); setDeleteAllConfirmInput(''); setDeleteAllResult(null); }}
+                disabled={deletingAll}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+              >
+                취소
+              </button>
+              <button
+                onClick={handleDeleteAll}
+                disabled={deletingAll || !deleteAllConfirmInput.trim() || (deleteAllResult?.ok === true)}
+                className="px-4 py-2 text-sm font-bold text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                {deletingAll ? (
+                  <>
+                    <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" strokeWidth="3" strokeDasharray="60" strokeLinecap="round" /></svg>
+                    삭제 중...
+                  </>
+                ) : '영구 삭제'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 테이블 */}
       <div className="bg-white rounded-xl shadow-sm overflow-hidden">

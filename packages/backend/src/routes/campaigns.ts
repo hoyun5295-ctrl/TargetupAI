@@ -231,17 +231,41 @@ router.get('/', async (req: Request, res: Response) => {
     const listSmsMap = await aggregateSmsCountsByCampaign(result.rows);
     const listKakaoMap = await kakaoBatchAggByGroup(result.rows.map((c: any) => c.id));
     const listSentTimeMap = await aggregateSmsSendTimesByCampaign(result.rows);
+
+    // ★ D144 P4/P7 후속 (2026-05-07): 사용자 캠페인 목록에서도 status='sending' 자동 정리
+    //   Dashboard 진입 시 fire-and-forget sync-results가 호출되지만, 사용자가 캠페인 목록만 보고
+    //   Dashboard 안 들어갈 수 있음. 목록 조회 시점에도 MySQL 결과 도착(pending=0 + success/fail>0) 시
+    //   PG status를 'completed'로 자동 정리.
+    const userAutoCompleteIds: string[] = [];
     const campaigns = result.rows.map((c: any) => {
-      const sms = listSmsMap.get(c.id) || { total_count: 0, success_count: 0, fail_count: 0 };
+      const sms = listSmsMap.get(c.id) || { total_count: 0, success_count: 0, fail_count: 0, pending_count: 0 };
       const kakao = listKakaoMap.get(c.id) || { total: 0, success: 0, fail: 0, pending: 0 };
+      const totalSuccess = Number(sms.success_count || 0) + kakao.success;
+      const totalFail = Number(sms.fail_count || 0) + kakao.fail;
+      const totalPending = Number(sms.pending_count || 0) + kakao.pending;
+      let effectiveStatus = c.status;
+      if (c.status === 'sending' && totalPending === 0 && (totalSuccess > 0 || totalFail > 0)) {
+        effectiveStatus = 'completed';
+        userAutoCompleteIds.push(c.id);
+      }
       return {
         ...c,
+        status: effectiveStatus,
         sent_count: Number(sms.total_count || 0) + kakao.total,
-        success_count: Number(sms.success_count || 0) + kakao.success,
-        fail_count: Number(sms.fail_count || 0) + kakao.fail,
+        success_count: totalSuccess,
+        fail_count: totalFail,
         sent_at: listSentTimeMap.get(c.id) ?? c.sent_at,
       };
     });
+
+    // 백그라운드 fire-and-forget으로 PG status UPDATE
+    if (userAutoCompleteIds.length > 0) {
+      query(
+        `UPDATE campaigns SET status = 'completed', updated_at = NOW()
+         WHERE id = ANY($1::uuid[]) AND status = 'sending'`,
+        [userAutoCompleteIds]
+      ).catch((e) => console.warn('[campaigns] sending→completed 자동 정리 실패:', e?.message));
+    }
 
     return res.json({
       campaigns,

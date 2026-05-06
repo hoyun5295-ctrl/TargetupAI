@@ -1594,17 +1594,42 @@ router.get('/campaigns/all', authenticate, requireSuperAdmin, async (req: Reques
     const adminCampSmsMap = await aggregateSmsCountsByCampaign(result.rows);
     const adminCampKakaoMap = await kakaoBatchAggByGroup(result.rows.map((c: any) => c.id));
     const adminCampSentTimeMap = await aggregateSmsSendTimesByCampaign(result.rows);
+
+    // ★ D144 P4/P7 후속 (2026-05-07): 슈퍼관리자 캠페인 목록 조회 시 status='sending' 자동 정리
+    //   사용자가 Dashboard 안 들어가면 fire-and-forget sync-results가 안 돌아 'sending' 영구 잔존.
+    //   슈퍼관리자가 화면 보는 시점에 MySQL 결과 모두 도착(pending=0 + success/fail > 0)이면
+    //   PG status를 'completed'로 자동 정리 (응답에 즉시 반영 + 백그라운드 DB UPDATE).
+    const autoCompleteIds: string[] = [];
     const campaigns = result.rows.map((c: any) => {
-      const sms = adminCampSmsMap.get(c.id) || { total_count: 0, success_count: 0, fail_count: 0 };
+      const sms = adminCampSmsMap.get(c.id) || { total_count: 0, success_count: 0, fail_count: 0, pending_count: 0 };
       const kakao = adminCampKakaoMap.get(c.id) || { total: 0, success: 0, fail: 0, pending: 0 };
+      const totalSuccess = Number(sms.success_count || 0) + kakao.success;
+      const totalFail = Number(sms.fail_count || 0) + kakao.fail;
+      const totalPending = Number(sms.pending_count || 0) + kakao.pending;
+      // 자동 정리 대상: status='sending' + pending=0 + (success>0 or fail>0)
+      let effectiveStatus = c.status;
+      if (c.status === 'sending' && totalPending === 0 && (totalSuccess > 0 || totalFail > 0)) {
+        effectiveStatus = 'completed';
+        autoCompleteIds.push(c.id);
+      }
       return {
         ...c,
+        status: effectiveStatus,
         total_sent: Number(sms.total_count || 0) + kakao.total,
-        total_success: Number(sms.success_count || 0) + kakao.success,
-        total_fail: Number(sms.fail_count || 0) + kakao.fail,
+        total_success: totalSuccess,
+        total_fail: totalFail,
         sent_at: adminCampSentTimeMap.get(c.id) ?? c.sent_at,
       };
     });
+
+    // 백그라운드 fire-and-forget으로 PG status UPDATE (응답 지연 없음)
+    if (autoCompleteIds.length > 0) {
+      query(
+        `UPDATE campaigns SET status = 'completed', updated_at = NOW()
+         WHERE id = ANY($1::uuid[]) AND status = 'sending'`,
+        [autoCompleteIds]
+      ).catch((e) => console.warn('[admin][campaigns] sending→completed 자동 정리 실패:', e?.message));
+    }
 
     res.json({
       campaigns,
