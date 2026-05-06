@@ -1021,6 +1021,8 @@
 
 ### SMSQ_SEND_1~11 (SMS 발송 큐 - 11개 Agent 라인그룹 분배)
 > 로컬: SMSQ_SEND (1개), 서버: SMSQ_SEND_1~11 (11개, 환경변수 SMS_TABLES + 라인그룹으로 분기)
+>
+> **★ D144 검증(2026-05-06):** 서버 `SMSQ_SEND`는 BASE TABLE이 아니라 **VIEW** = `SMSQ_SEND_1 UNION ALL ... SMSQ_SEND_11` 단순 가상 뷰. 한줄로AI는 SMSQ_SEND_X에 INSERT, VIEW는 모니터링 가상 표시. 한줄로AI 코드는 fallback 단일 'SMSQ_SEND'에 직접 INSERT 가능하나 서버 .env에 SMS_TABLES 명시되어 fallback 미발동. 레거시 invitoMsg watch 대상이던 base table은 D-Day 5/5에 DROP됨.
 
 | 컬럼 | 타입 | 설명 |
 |------|------|------|

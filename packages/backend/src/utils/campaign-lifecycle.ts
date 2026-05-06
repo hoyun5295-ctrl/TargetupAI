@@ -247,7 +247,7 @@ export async function syncCampaignResults(companyId: string): Promise<SyncResult
         if (runInfo.rows.length > 0) {
           await query(
             `UPDATE campaigns SET
-              sent_count = $1 + $2,
+              sent_count = ($1::int + $2::int),
               success_count = $1,
               fail_count = $2,
               status = $3::text,
@@ -355,7 +355,7 @@ export async function syncCampaignResults(companyId: string): Promise<SyncResult
 
         await query(
           `UPDATE campaigns SET
-            sent_count = $1 + $2,
+            sent_count = ($1::int + $2::int),
             success_count = $1,
             fail_count = $2,
             status = $3::text,
