@@ -9,10 +9,11 @@ import {
   kakaoCountWhere,
   kakaoSelectWhere,
   kakaoGroupBy,
+  kakaoBatchAggByGroup,
 } from '../utils/sms-queue';
 import { STATUS_CODE_MAP, CARRIER_MAP, SUCCESS_CODES, PENDING_CODES, getStatusLabel, getStatusType, getCarrierLabel, isSuccess } from '../utils/sms-result-map';
 import { DEFAULT_COSTS, redis, CACHE_TTL } from '../config/defaults';
-import { buildDateRangeFilter, buildPeriodFilter } from '../utils/stats-aggregation';
+import { buildDateRangeFilter, buildPeriodFilter, aggregateSmsCountsByCampaign } from '../utils/stats-aggregation';
 import { CAMPAIGN_OPT080_SELECT_EXPR, CAMPAIGN_OPT080_LEFT_JOIN } from '../utils/unsubscribe-helper';
 
 const router = Router();
@@ -93,42 +94,53 @@ router.get('/summary', async (req: Request, res: Response) => {
     const userId = req.user?.userId;
     const userType = req.user?.userType;
     
-    let summaryQuery = `SELECT 
-        COUNT(*) as total_campaigns,
-        SUM(target_count) as total_target,
-        SUM(sent_count) as total_sent,
-        SUM(success_count) as total_success,
-        SUM(fail_count) as total_fail
-       FROM campaigns 
-       WHERE company_id = $1`;
-    
+    // ★ D144: PG sent_count/success_count/fail_count 캐시 의존 제거.
+    //   PG는 캠페인 메타(id/target)만 SELECT → MySQL 큐 + 카카오 직접 카운트 → JS 합산.
+    let summaryQuery = `SELECT
+        c.id, c.company_id, c.created_by, c.target_count
+       FROM campaigns c
+       WHERE c.company_id = $1`;
+
     const summaryParams: any[] = [companyId];
 
     // ★ D98: draft/cancelled도 실패로 카운트 (목록에서 제외하지 않음)
-    summaryQuery += ` AND status NOT IN ('cancelled')`;
+    summaryQuery += ` AND c.status NOT IN ('cancelled')`;
 
     // ★ D143 (2026-05-04, shiseido6 신고): 발송결과 출력 기준 = 발송일시
     //   발송 완료(sent_at) 우선 → 예약 대기(scheduled_at) → 미발송(created_at) 폴백
     //   정산이 발송일 기준이므로 4/30 등록 + 5/7 예약 캠페인은 5월 결과에 표시되어야 함
-    const summaryDr = buildPeriodFilter('COALESCE(sent_at, scheduled_at, created_at)', {
+    const summaryDr = buildPeriodFilter('COALESCE(c.sent_at, c.scheduled_at, c.created_at)', {
       fromDate: fromDate ? String(fromDate) : undefined,
       toDate: toDate ? String(toDate) : undefined,
       yearMonth: (!fromDate || !toDate) ? yearMonth : undefined,
     }, summaryParams.length + 1);
     summaryQuery += summaryDr.sql;
     summaryParams.push(...summaryDr.params);
-    
+
     if (userType === 'company_user') {
-      summaryQuery += ` AND created_by = $${summaryParams.length + 1}`;
+      summaryQuery += ` AND c.created_by = $${summaryParams.length + 1}`;
       summaryParams.push(userId);
     }
 
     if (userType === 'company_admin' && req.query.filter_user_id) {
-      summaryQuery += ` AND created_by = $${summaryParams.length + 1}`;
+      summaryQuery += ` AND c.created_by = $${summaryParams.length + 1}`;
       summaryParams.push(req.query.filter_user_id);
     }
-    
-    const campaignStats = await query(summaryQuery, summaryParams);
+
+    const summaryMeta = await query(summaryQuery, summaryParams);
+    const summarySmsMap = await aggregateSmsCountsByCampaign(summaryMeta.rows);
+    const summaryKakaoMap = await kakaoBatchAggByGroup(summaryMeta.rows.map((c: any) => c.id));
+
+    let totalSent = 0, totalSuccess = 0, totalFail = 0, totalTarget = 0;
+    for (const c of summaryMeta.rows) {
+      totalTarget += Number(c.target_count || 0);
+      const sms = summarySmsMap.get(c.id) || { total_count: 0, success_count: 0, fail_count: 0 };
+      const kakao = summaryKakaoMap.get(c.id) || { total: 0, success: 0, fail: 0, pending: 0 };
+      totalSent += Number(sms.total_count || 0) + kakao.total;
+      totalSuccess += Number(sms.success_count || 0) + kakao.success;
+      totalFail += Number(sms.fail_count || 0) + kakao.fail;
+    }
+    const totalCampaigns = summaryMeta.rows.length;
 
     const costResult = await query(
       `SELECT cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao FROM companies WHERE id = $1`,
@@ -136,18 +148,17 @@ router.get('/summary', async (req: Request, res: Response) => {
     );
     const costs = costResult.rows[0] || {};
 
-    const stats = campaignStats.rows[0];
-    const successRate = stats.total_sent > 0 
-      ? ((stats.total_success / stats.total_sent) * 100).toFixed(1) 
+    const successRate = totalSent > 0
+      ? ((totalSuccess / totalSent) * 100).toFixed(1)
       : '0';
 
     return res.json({
       period: yearMonth,
       summary: {
-        totalCampaigns: parseInt(stats.total_campaigns) || 0,
-        totalSent: parseInt(stats.total_sent) || 0,
-        totalSuccess: parseInt(stats.total_success) || 0,
-        totalFail: parseInt(stats.total_fail) || 0,
+        totalCampaigns,
+        totalSent,
+        totalSuccess,
+        totalFail,
         successRate: parseFloat(successRate),
       },
       costs: {
@@ -229,20 +240,18 @@ router.get('/campaigns', async (req: Request, res: Response) => {
       .replace(/\bcreated_at\b/g, 'c.created_at')
       .replace(/\bmessage_type\b/g, 'c.message_type');
 
+    // ★ D144: PG c.sent_count/success_count/fail_count + success_rate 캐시 의존 제거.
+    //   페이지된 캠페인을 PG에서 메타만 SELECT → MySQL 카운트 매핑 + success_rate JS 계산.
     const result = await query(
       `SELECT
-        c.id, c.campaign_name, c.message_type, c.message_content, c.send_type, c.status,
-        c.target_count, c.sent_count, c.success_count, c.fail_count,
+        c.id, c.company_id, c.created_by, c.campaign_name, c.message_type, c.message_content, c.send_type, c.status,
+        c.target_count,
         c.is_ad, c.scheduled_at, c.sent_at, c.created_at, c.send_channel, c.callback_number,
         c.subject, c.message_subject, c.mms_image_paths,
         (c.created_at AT TIME ZONE 'Asia/Seoul')::date as created_date_kst,
         c.cancelled_by_type, c.cancel_reason,
         u.login_id as created_by_name,
-        ${CAMPAIGN_OPT080_SELECT_EXPR},
-        CASE WHEN c.sent_count > 0
-          THEN ROUND((c.success_count::numeric / c.sent_count) * 100, 1)
-          ELSE 0
-        END as success_rate
+        ${CAMPAIGN_OPT080_SELECT_EXPR}
        FROM campaigns c
        LEFT JOIN users u ON c.created_by = u.id
        ${CAMPAIGN_OPT080_LEFT_JOIN}
@@ -252,8 +261,25 @@ router.get('/campaigns', async (req: Request, res: Response) => {
       params
     );
 
+    const campListSmsMap = await aggregateSmsCountsByCampaign(result.rows);
+    const campListKakaoMap = await kakaoBatchAggByGroup(result.rows.map((c: any) => c.id));
+    const campaigns = result.rows.map((c: any) => {
+      const sms = campListSmsMap.get(c.id) || { total_count: 0, success_count: 0, fail_count: 0 };
+      const kakao = campListKakaoMap.get(c.id) || { total: 0, success: 0, fail: 0, pending: 0 };
+      const sent = Number(sms.total_count || 0) + kakao.total;
+      const success = Number(sms.success_count || 0) + kakao.success;
+      const fail = Number(sms.fail_count || 0) + kakao.fail;
+      return {
+        ...c,
+        sent_count: sent,
+        success_count: success,
+        fail_count: fail,
+        success_rate: sent > 0 ? Math.round((success / sent) * 1000) / 10 : 0,
+      };
+    });
+
     return res.json({
-      campaigns: result.rows,
+      campaigns,
       pagination: {
         total,
         page: Number(page),
@@ -395,6 +421,15 @@ router.get('/campaigns/:id', async (req: Request, res: Response) => {
         await redis.setex(chartCacheKey, ttl, JSON.stringify({ errorStats, carrierStats }));
       } catch (e) { /* Redis 실패 시 무시 — 다음 요청에서 재조회 */ }
     }
+
+    // ★ D144: campaign.success_count/fail_count 캐시 의존 제거 → MySQL 큐 + 카카오 직접 카운트
+    const chartSmsMap = await aggregateSmsCountsByCampaign([campaign]);
+    const chartKakaoMap = await kakaoBatchAggByGroup([campaign.id]);
+    const chSms = chartSmsMap.get(campaign.id) || { total_count: 0, success_count: 0, fail_count: 0 };
+    const chKakao = chartKakaoMap.get(campaign.id) || { total: 0, success: 0, fail: 0, pending: 0 };
+    campaign.success_count = Number(chSms.success_count || 0) + chKakao.success;
+    campaign.fail_count = Number(chSms.fail_count || 0) + chKakao.fail;
+    campaign.sent_count = Number(chSms.total_count || 0) + chKakao.total;
 
     return res.json({
       campaign,

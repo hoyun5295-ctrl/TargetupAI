@@ -106,9 +106,8 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
     setLoading(true);
     setCooldown(5);
     try {
-      // fire-and-forget: sync-results는 백그라운드에서 실행 (대량 발송 시 블로킹 방지)
-      fetch('/api/campaigns/sync-results', { method: 'POST', headers: { Authorization: `Bearer ${token}` } })
-        .catch(err => console.warn('sync-results 백그라운드 동기화 실패:', err));
+      // ★ D144: sync-results fire-and-forget 제거.
+      //   /api/v1/results/* 엔드포인트가 MySQL 직접 카운트로 전환되어 PG 캐시 sync 불필요.
       const from = startDate.replace(/-/g, '').slice(0, 6);
       const summaryRes = await fetch(`/api/v1/results/summary?from=${from}&fromDate=${startDate}&toDate=${endDate}`, { headers: { Authorization: `Bearer ${token}` } });
       setSummary(await summaryRes.json());

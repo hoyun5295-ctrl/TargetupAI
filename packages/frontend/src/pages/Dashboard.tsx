@@ -1135,11 +1135,8 @@ export default function Dashboard() {
   const loadRecentCampaigns = async () => {
     try {
       const token = localStorage.getItem('token');
-      // ★ B8-13: sync-results를 fire-and-forget으로 변경 (대량 캠페인 시 대시보드 로딩 지연 방지)
-      fetch('/api/campaigns/sync-results', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      }).catch(() => {});
+      // ★ D144: sync-results fire-and-forget 제거.
+      //   캠페인 리스트(/api/campaigns)가 MySQL 직접 카운트로 전환되어 PG 캐시 sync 불필요.
       const res = await fetch('/api/campaigns?limit=10', {
         headers: { Authorization: `Bearer ${token}` },
       });

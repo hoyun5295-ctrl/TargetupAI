@@ -176,8 +176,12 @@ QTmsg `status_code` 1000=성공 / 6=진행중 / 7/8/16/55/2008=실패
 
 #### 잔여 별건 (D144와 무관, 별도 진행)
 
-1. **PG sync-results 미반영** — bhappy4 PG `status='scheduled'` 그대로 (5/6 발송 완료인데 PG 미동기화). sync-results 워커 동작 확인 필요
-2. **(낮은 우선순위) 호버 팝업 (광고) 표시 일관성** — DB는 D102 정책 준수, 화면 잘림 가능성 재확인
+1. **🔥 발송 통계 실시간 동기화 근본 리팩터 (다음 세션 1순위)** — 5/6 운영 첫날 슈퍼관리자/고객사 발송통계가 모든 회사에 대해 잘못 표시되는 문제 발생 (폴라/자연인/한국시세이도/이새/수스 등). 근본 원인은 PG `campaigns.sent_count/success_count/fail_count` 캐시 + sync 의존 설계. 옵션 B (PG 카운트 deprecate, 화면 모두 MySQL 직접 카운트) 진행 결정. **상세: [`status/D144-STATS-REALTIME-REFACTOR.md`](D144-STATS-REALTIME-REFACTOR.md) 정독 후 § 9 절차대로 시작.**
+2. **잔액 정합성 (직원 비교)** — 비즈웹 vs 한줄로AI 잔액 1~30원 ~ 백단위 차이. Harold 결정: 직원에게 적당히 처리하라고 함. 종결.
+3. **(낮은 우선순위) 호버 팝업 (광고) 표시 일관성** — DB는 D102 정책 준수, 화면 잘림 가능성 재확인
+4. **(별건) 폴라초이스 5번 등록 UX** — 사용자가 예약 버튼 5번 눌러서 4번 취소 + 1번 활성. 중복 등록 방지 confirm 검토.
+5. **(별건) `cancelled_at < created_at` 시간 역전** — 5/6 캐럿 직접발송 cancelled_at 5/5로 표시. UTC/KST 변환 잠재 버그.
+6. **(참고) SMSQ_SEND_12 base table 존재** — env 미포함, 운영 무관.
 
 #### 🔍 [참고] D-Day 검증 SQL 자료 (이미 통과 — 다음 세션 재실행 불필요)
 

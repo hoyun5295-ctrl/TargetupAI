@@ -3,14 +3,14 @@ import crypto from 'crypto';
 import { Request, Response, Router } from 'express';
 import { mysqlQuery, query } from '../config/database';
 import { authenticate, requireSuperAdmin } from '../middlewares/auth';
-import { ALL_SMS_TABLES, invalidateLineGroupCache, getCampaignSmsTables, smsCountAll, smsSelectAll, smsAggAll, getTestSmsTables, kakaoCountWhere, kakaoSelectWhere } from '../utils/sms-queue';
+import { ALL_SMS_TABLES, invalidateLineGroupCache, getCampaignSmsTables, smsCountAll, smsSelectAll, smsAggAll, getTestSmsTables, kakaoCountWhere, kakaoSelectWhere, kakaoBatchAggByGroup } from '../utils/sms-queue';
 import { DASHBOARD_CARD_POOL, validateCardIds, getRequiredFields, filterPoolByAvailableData, generateDynamicCards } from '../utils/dashboard-card-pool';
 import { detectEnabledFields } from '../utils/enabled-fields';
 import { SUCCESS_CODES_SQL, PENDING_CODES_SQL, getStatusLabel, getStatusType, getCarrierLabel, isSuccess, isPending } from '../utils/sms-result-map';
 import { DEFAULT_COSTS } from '../config/defaults';
 import { validateSmsTables } from '../utils/sms-table-validator';
 import { getUserUnsubscribes, deleteUserUnsubscribes, exportUserUnsubscribes, CAMPAIGN_OPT080_SELECT_EXPR, CAMPAIGN_OPT080_LEFT_JOIN } from '../utils/unsubscribe-helper';
-import { buildDateRangeFilter } from '../utils/stats-aggregation';
+import { buildDateRangeFilter, aggregateSmsCountsByCampaign } from '../utils/stats-aggregation';
 import { normalizePhone } from '../utils/normalize-phone';
 
 const router = Router();
@@ -1195,55 +1195,81 @@ router.get('/stats/send', authenticate, requireSuperAdmin, async (req: Request, 
       paramIdx++;
     }
 
-    // 1) 요약 (campaigns 직접 조회 - 직접발송 포함)
-    const summaryResult = await query(`
-      SELECT 
-        COALESCE(SUM(c.sent_count), 0) as total_sent,
-        COALESCE(SUM(c.success_count), 0) as total_success,
-        COALESCE(SUM(c.fail_count), 0) as total_fail
-      FROM campaigns c
-      WHERE c.sent_at IS NOT NULL
-        AND c.status NOT IN ('cancelled', 'draft') ${dateWhere} ${companyWhere}
-    `, baseParams);
-
-    // 2) 페이징된 일별/월별
+    // ★ D144: PG sent_count/success_count/fail_count 캐시 의존 제거.
+    //   PG에서 캠페인 메타만 SELECT → MySQL 큐 + 카카오에서 직접 카운트 → JS에서 (period, company)별 그룹핑 + summary.
+    //   응답 키(summary/rows) 형태는 그대로 유지하여 frontend 변경 0.
     const groupCol = view === 'monthly'
       ? `TO_CHAR(c.sent_at AT TIME ZONE 'Asia/Seoul', 'YYYY-MM')`
       : `TO_CHAR(c.sent_at AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD')`;
     const groupAlias = view === 'monthly' ? 'month' : 'date';
 
-    const countResult = await query(`
-      SELECT COUNT(*) FROM (
-        SELECT ${groupCol} as grp, co.company_name
-        FROM campaigns c
-        JOIN companies co ON c.company_id = co.id
-        LEFT JOIN sms_line_groups lg ON co.line_group_id = lg.id
-        WHERE c.sent_at IS NOT NULL
-          AND c.status NOT IN ('cancelled', 'draft') ${dateWhere} ${companyWhere}
-        GROUP BY grp, co.company_name, lg.group_name
-      ) sub
-    `, baseParams);
-    const total = parseInt(countResult.rows[0].count);
-
-    const rowsResult = await query(`
-      SELECT 
-        ${groupCol} as "${groupAlias}",
-        co.id as company_id,
+    const metaResult = await query(`
+      SELECT
+        c.id, c.company_id, c.created_by, c.message_type,
+        ${groupCol} as period,
         co.company_name,
-        lg.group_name as line_group_name,
-        COUNT(DISTINCT c.id) as runs,
-        COALESCE(SUM(c.sent_count), 0) as sent,
-        COALESCE(SUM(c.success_count), 0) as success,
-        COALESCE(SUM(c.fail_count), 0) as fail
+        lg.group_name as line_group_name
       FROM campaigns c
       JOIN companies co ON c.company_id = co.id
       LEFT JOIN sms_line_groups lg ON co.line_group_id = lg.id
       WHERE c.sent_at IS NOT NULL
         AND c.status NOT IN ('cancelled', 'draft') ${dateWhere} ${companyWhere}
-      GROUP BY ${groupCol}, co.id, co.company_name, lg.group_name
-      ORDER BY "${groupAlias}" DESC, co.company_name
-      LIMIT $${paramIdx} OFFSET $${paramIdx + 1}
-    `, [...baseParams, limit, offset]);
+    `, baseParams);
+
+    const metaCampaigns = metaResult.rows;
+    const smsCountMap = await aggregateSmsCountsByCampaign(metaCampaigns);
+    const kakaoCountMap = await kakaoBatchAggByGroup(metaCampaigns.map((c: any) => c.id));
+
+    // (period, company_id)별 그룹핑 + 전체 summary 합산
+    type Bucket = { period: string; company_id: any; company_name: any; line_group_name: any; runs: Set<string>; sent: number; success: number; fail: number };
+    const byKey = new Map<string, Bucket>();
+    let totalSent = 0, totalSuccess = 0, totalFail = 0;
+
+    for (const c of metaCampaigns) {
+      const sms = smsCountMap.get(c.id) || { total_count: 0, success_count: 0, fail_count: 0 };
+      const kakao = kakaoCountMap.get(c.id) || { total: 0, success: 0, fail: 0, pending: 0 };
+      const sent = Number(sms.total_count || 0) + kakao.total;
+      const success = Number(sms.success_count || 0) + kakao.success;
+      const fail = Number(sms.fail_count || 0) + kakao.fail;
+      totalSent += sent; totalSuccess += success; totalFail += fail;
+
+      const key = `${c.period}|${c.company_id}`;
+      if (!byKey.has(key)) {
+        byKey.set(key, {
+          period: c.period, company_id: c.company_id,
+          company_name: c.company_name, line_group_name: c.line_group_name,
+          runs: new Set<string>(), sent: 0, success: 0, fail: 0,
+        });
+      }
+      const b = byKey.get(key)!;
+      b.runs.add(c.id);
+      b.sent += sent; b.success += success; b.fail += fail;
+    }
+
+    const allRows = Array.from(byKey.values())
+      .map((v) => ({
+        [groupAlias]: v.period,
+        company_id: v.company_id,
+        company_name: v.company_name,
+        line_group_name: v.line_group_name,
+        runs: v.runs.size,
+        sent: v.sent,
+        success: v.success,
+        fail: v.fail,
+      }))
+      .sort((a: any, b: any) => {
+        const pa = a[groupAlias], pb = b[groupAlias];
+        if (pa < pb) return 1;
+        if (pa > pb) return -1;
+        return String(a.company_name || '').localeCompare(String(b.company_name || ''));
+      });
+
+    const total = allRows.length;
+    const pagedRows = allRows.slice(offset, offset + limit);
+    const summaryResult = {
+      rows: [{ total_sent: String(totalSent), total_success: String(totalSuccess), total_fail: String(totalFail) }],
+    };
+    const rowsResult = { rows: pagedRows };
 
     // ===== 테스트 발송 통계 (담당자 + 스팸필터) =====
     let testSummary = { total: 0, success: 0, fail: 0, pending: 0, sms: 0, lms: 0, cost: 0 };
@@ -1337,50 +1363,15 @@ router.get('/stats/send/detail', authenticate, requireSuperAdmin, async (req: Re
       ? `TO_CHAR(c.sent_at AT TIME ZONE 'Asia/Seoul', 'YYYY-MM')`
       : `TO_CHAR(c.sent_at AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD')`;
 
-    // 사용자별 통계 (campaigns 직접 조회)
-    const result = await query(`
-      SELECT 
-        u.id as user_id,
-        u.name as user_name,
-        u.login_id,
-        u.department,
-        u.store_codes,
-        COUNT(DISTINCT c.id) as runs,
-        COALESCE(SUM(c.sent_count), 0) as sent,
-        COALESCE(SUM(c.success_count), 0) as success,
-        COALESCE(SUM(c.fail_count), 0) as fail
-      FROM campaigns c
-      LEFT JOIN users u ON c.created_by = u.id
-      WHERE c.sent_at IS NOT NULL
-        AND c.status NOT IN ('cancelled', 'draft')
-        AND ${groupCol} = $1
-        AND c.company_id = $2
-      GROUP BY u.id, u.name, u.login_id, u.department, u.store_codes
-      ORDER BY sent DESC
-    `, [dateVal, companyId]);
-
-    // 캠페인 상세 목록 (campaigns 직접 조회)
-    // ★ B2: opt_out_080_number 포함을 위해 LEFT JOIN
-    const campaignsResult = await query(`
+    // ★ D144: PG sent_count/success_count/fail_count 캐시 의존 제거.
+    //   PG에서 캠페인+사용자+opt080 메타만 SELECT → MySQL 큐 + 카카오 직접 카운트 → JS 집계.
+    //   응답 키(userStats/campaigns) 형태는 그대로 유지하여 frontend 변경 0.
+    const metaResult = await query(`
       SELECT
-        c.id as campaign_id,
-        c.campaign_name,
-        c.send_type,
-        c.message_content,
-        c.message_type,
-        c.is_ad,
-        c.callback_number,
+        c.id, c.company_id, c.created_by, c.campaign_name, c.send_type, c.message_content,
+        c.message_type, c.is_ad, c.callback_number, c.target_count, c.created_at, c.sent_at,
         ${CAMPAIGN_OPT080_SELECT_EXPR},
-        u.name as user_name,
-        u.login_id,
-        c.id as run_id,
-        1 as run_number,
-        c.sent_count,
-        c.success_count,
-        c.fail_count,
-        c.target_count,
-        c.created_at,
-        c.sent_at
+        u.id as user_id, u.name as user_name, u.login_id, u.department, u.store_codes
       FROM campaigns c
       LEFT JOIN users u ON c.created_by = u.id
       ${CAMPAIGN_OPT080_LEFT_JOIN}
@@ -1390,6 +1381,72 @@ router.get('/stats/send/detail', authenticate, requireSuperAdmin, async (req: Re
         AND c.company_id = $2
       ORDER BY c.sent_at DESC
     `, [dateVal, companyId]);
+
+    const detailMetaRows = metaResult.rows;
+    const detailSmsMap = await aggregateSmsCountsByCampaign(detailMetaRows);
+    const detailKakaoMap = await kakaoBatchAggByGroup(detailMetaRows.map((c: any) => c.id));
+
+    type DetailUserAgg = { user_id: any; user_name: any; login_id: any; department: any; store_codes: any; runs: Set<string>; sent: number; success: number; fail: number };
+    const byUser = new Map<string, DetailUserAgg>();
+    const campaignRows: any[] = [];
+
+    for (const c of detailMetaRows) {
+      const sms = detailSmsMap.get(c.id) || { total_count: 0, success_count: 0, fail_count: 0 };
+      const kakao = detailKakaoMap.get(c.id) || { total: 0, success: 0, fail: 0, pending: 0 };
+      const sent = Number(sms.total_count || 0) + kakao.total;
+      const success = Number(sms.success_count || 0) + kakao.success;
+      const fail = Number(sms.fail_count || 0) + kakao.fail;
+
+      const uKey = c.user_id || 'null';
+      if (!byUser.has(uKey)) {
+        byUser.set(uKey, {
+          user_id: c.user_id, user_name: c.user_name, login_id: c.login_id,
+          department: c.department, store_codes: c.store_codes,
+          runs: new Set<string>(), sent: 0, success: 0, fail: 0,
+        });
+      }
+      const u = byUser.get(uKey)!;
+      u.runs.add(c.id);
+      u.sent += sent; u.success += success; u.fail += fail;
+
+      campaignRows.push({
+        campaign_id: c.id,
+        campaign_name: c.campaign_name,
+        send_type: c.send_type,
+        message_content: c.message_content,
+        message_type: c.message_type,
+        is_ad: c.is_ad,
+        callback_number: c.callback_number,
+        opt_out_080_number: c.opt_out_080_number ?? null,
+        user_name: c.user_name,
+        login_id: c.login_id,
+        run_id: c.id,
+        run_number: 1,
+        sent_count: sent,
+        success_count: success,
+        fail_count: fail,
+        target_count: c.target_count,
+        created_at: c.created_at,
+        sent_at: c.sent_at,
+      });
+    }
+
+    const result = {
+      rows: Array.from(byUser.values())
+        .map((u) => ({
+          user_id: u.user_id,
+          user_name: u.user_name,
+          login_id: u.login_id,
+          department: u.department,
+          store_codes: u.store_codes,
+          runs: u.runs.size,
+          sent: u.sent,
+          success: u.success,
+          fail: u.fail,
+        }))
+        .sort((a, b) => b.sent - a.sent),
+    };
+    const campaignsResult = { rows: campaignRows };
 
     // ===== 테스트 발송 상세 (담당자 + 스팸필터) =====
     let testDetail: any[] = [];
@@ -1514,15 +1571,15 @@ router.get('/campaigns/all', authenticate, requireSuperAdmin, async (req: Reques
     );
     const total = parseInt(countResult.rows[0].count);
 
+    // ★ D144: PG campaign_runs sent_count/success_count/fail_count subquery 제거.
+    //   PG는 캠페인+회사+사용자 메타만 SELECT → MySQL 큐 + 카카오 직접 카운트 → JS 매핑.
+    //   target_count/sent_at은 last_run 메타라 그대로 subquery 유지 (캐시 아님).
     const result = await query(`
-      SELECT 
+      SELECT
         c.id, c.campaign_name as name, c.status, c.send_type as campaign_type, c.created_at,
-        c.company_id, c.message_type, c.send_channel, c.scheduled_at, c.sent_at,
+        c.company_id, c.created_by, c.message_type, c.send_channel, c.scheduled_at, c.sent_at,
         co.company_name, co.company_code,
         u.name as created_by_name, u.login_id as created_by_login,
-        (SELECT COALESCE(SUM(cr.sent_count), 0) FROM campaign_runs cr WHERE cr.campaign_id = c.id) as total_sent,
-        (SELECT COALESCE(SUM(cr.success_count), 0) FROM campaign_runs cr WHERE cr.campaign_id = c.id) as total_success,
-        (SELECT COALESCE(SUM(cr.fail_count), 0) FROM campaign_runs cr WHERE cr.campaign_id = c.id) as total_fail,
         (SELECT cr.target_count FROM campaign_runs cr WHERE cr.campaign_id = c.id ORDER BY cr.run_number DESC LIMIT 1) as last_target_count,
         (SELECT cr.sent_at FROM campaign_runs cr WHERE cr.campaign_id = c.id ORDER BY cr.run_number DESC LIMIT 1) as last_sent_at
       FROM campaigns c
@@ -1533,8 +1590,21 @@ router.get('/campaigns/all', authenticate, requireSuperAdmin, async (req: Reques
       LIMIT $${paramIdx} OFFSET $${paramIdx + 1}
     `, [...params, limit, offset]);
 
-    res.json({ 
-      campaigns: result.rows, 
+    const adminCampSmsMap = await aggregateSmsCountsByCampaign(result.rows);
+    const adminCampKakaoMap = await kakaoBatchAggByGroup(result.rows.map((c: any) => c.id));
+    const campaigns = result.rows.map((c: any) => {
+      const sms = adminCampSmsMap.get(c.id) || { total_count: 0, success_count: 0, fail_count: 0 };
+      const kakao = adminCampKakaoMap.get(c.id) || { total: 0, success: 0, fail: 0, pending: 0 };
+      return {
+        ...c,
+        total_sent: Number(sms.total_count || 0) + kakao.total,
+        total_success: Number(sms.success_count || 0) + kakao.success,
+        total_fail: Number(sms.fail_count || 0) + kakao.fail,
+      };
+    });
+
+    res.json({
+      campaigns,
       total,
       page,
       totalPages: Math.ceil(total / limit)
@@ -1557,10 +1627,11 @@ router.get('/campaigns/:id/sms-detail', authenticate, requireSuperAdmin, async (
     const channelFilter = (req.query.channel as string) || ''; // sms / kakao / '' (all)
 
     // 캠페인 기본 정보 (PostgreSQL)
+    // ★ D144: PG c.success_count/fail_count 캐시 의존 제거 → 헤더 카운트는 MySQL 직접 집계로 대체
     const campResult = await query(`
       SELECT c.id, c.company_id, c.created_by, c.created_at,
              c.campaign_name, c.message_type, c.send_type, c.status, c.scheduled_at, c.sent_at, c.target_count,
-             c.success_count, c.fail_count, c.send_channel,
+             c.send_channel,
              co.company_name, co.company_code,
              u.name as created_by_name, u.login_id as created_by_login
       FROM campaigns c
@@ -1572,6 +1643,15 @@ router.get('/campaigns/:id/sms-detail', authenticate, requireSuperAdmin, async (
       return res.status(404).json({ error: '캠페인을 찾을 수 없습니다.' });
     }
     const campaign = campResult.rows[0];
+    {
+      const headerSmsMap = await aggregateSmsCountsByCampaign([campaign]);
+      const headerKakaoMap = await kakaoBatchAggByGroup([campaign.id]);
+      const hSms = headerSmsMap.get(campaign.id) || { total_count: 0, success_count: 0, fail_count: 0 };
+      const hKakao = headerKakaoMap.get(campaign.id) || { total: 0, success: 0, fail: 0, pending: 0 };
+      campaign.success_count = Number(hSms.success_count || 0) + hKakao.success;
+      campaign.fail_count = Number(hSms.fail_count || 0) + hKakao.fail;
+      campaign.sent_count = Number(hSms.total_count || 0) + hKakao.total;
+    }
     const sendChannel = campaign.send_channel || 'sms';
     const showSms = (!channelFilter || channelFilter === 'sms') && (sendChannel === 'sms' || sendChannel === 'both');
     const showKakao = (!channelFilter || channelFilter === 'kakao') && (sendChannel === 'kakao' || sendChannel === 'both');
@@ -2857,30 +2937,74 @@ router.get('/stats/export', authenticate, requireSuperAdmin, async (req: Request
       params.push(companyId);
     }
 
-    const result = await query(
+    // ★ D144: PG sent_count/success_count/fail_count 캐시 의존 제거.
+    //   PG는 캠페인 메타 + 회사+사용자만 SELECT → MySQL 큐 + 카카오 직접 카운트 → JS에서 6-key 그룹핑.
+    const exportMetaResult = await query(
       `SELECT
+        c.id, c.company_id, c.created_by, c.target_count, c.message_type, c.send_type,
         TO_CHAR(c.sent_at AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD') as send_date,
         co.company_name,
         co.company_code,
         u.login_id,
-        u.name as user_name,
-        c.message_type,
-        c.send_type,
-        COUNT(*) as campaign_count,
-        COALESCE(SUM(c.target_count), 0) as total_target,
-        COALESCE(SUM(c.sent_count), 0) as total_sent,
-        COALESCE(SUM(c.success_count), 0) as total_success,
-        COALESCE(SUM(c.fail_count), 0) as total_fail,
-        COALESCE(SUM(c.sent_count) - SUM(COALESCE(c.success_count,0)) - SUM(COALESCE(c.fail_count,0)), 0) as total_pending
+        u.name as user_name
       FROM campaigns c
       JOIN companies co ON c.company_id = co.id
       LEFT JOIN users u ON c.created_by = u.id
       ${whereClause}
-        AND c.status NOT IN ('draft', 'cancelled')
-      GROUP BY send_date, co.company_name, co.company_code, u.login_id, u.name, c.message_type, c.send_type
-      ORDER BY send_date DESC, co.company_name, u.login_id, c.message_type`,
+        AND c.status NOT IN ('draft', 'cancelled')`,
       params
     );
+
+    const exportSmsMap = await aggregateSmsCountsByCampaign(exportMetaResult.rows);
+    const exportKakaoMap = await kakaoBatchAggByGroup(exportMetaResult.rows.map((c: any) => c.id));
+
+    type ExportBucket = {
+      send_date: string; company_name: any; company_code: any; login_id: any; user_name: any;
+      message_type: any; send_type: any;
+      campaign_count: number; total_target: number;
+      total_sent: number; total_success: number; total_fail: number; total_pending: number;
+    };
+    const exportByKey = new Map<string, ExportBucket>();
+    for (const c of exportMetaResult.rows) {
+      const sms = exportSmsMap.get(c.id) || { total_count: 0, success_count: 0, fail_count: 0, pending_count: 0 };
+      const kakao = exportKakaoMap.get(c.id) || { total: 0, success: 0, fail: 0, pending: 0 };
+      const sent = Number(sms.total_count || 0) + kakao.total;
+      const success = Number(sms.success_count || 0) + kakao.success;
+      const fail = Number(sms.fail_count || 0) + kakao.fail;
+      const pending = Number(sms.pending_count || 0) + kakao.pending;
+
+      const key = `${c.send_date}|${c.company_id}|${c.created_by || ''}|${c.message_type || ''}|${c.send_type || ''}`;
+      if (!exportByKey.has(key)) {
+        exportByKey.set(key, {
+          send_date: c.send_date,
+          company_name: c.company_name,
+          company_code: c.company_code,
+          login_id: c.login_id,
+          user_name: c.user_name,
+          message_type: c.message_type,
+          send_type: c.send_type,
+          campaign_count: 0, total_target: 0,
+          total_sent: 0, total_success: 0, total_fail: 0, total_pending: 0,
+        });
+      }
+      const b = exportByKey.get(key)!;
+      b.campaign_count++;
+      b.total_target += Number(c.target_count || 0);
+      b.total_sent += sent;
+      b.total_success += success;
+      b.total_fail += fail;
+      b.total_pending += pending;
+    }
+
+    const exportRows = Array.from(exportByKey.values()).sort((a, b) => {
+      if (a.send_date !== b.send_date) return a.send_date < b.send_date ? 1 : -1;
+      const cn = String(a.company_name || '').localeCompare(String(b.company_name || ''));
+      if (cn !== 0) return cn;
+      const lg = String(a.login_id || '').localeCompare(String(b.login_id || ''));
+      if (lg !== 0) return lg;
+      return String(a.message_type || '').localeCompare(String(b.message_type || ''));
+    });
+    const result = { rows: exportRows };
 
     // CSV 생성 — 쉼표/큰따옴표 포함 값은 이스케이핑
     const BOM = '\uFEFF';

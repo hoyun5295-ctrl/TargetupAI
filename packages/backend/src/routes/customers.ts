@@ -8,8 +8,9 @@ import { DEFAULT_COSTS, redis, CACHE_TTL } from '../config/defaults';
 import { isValidCustomFieldKey } from '../utils/safe-field-name';
 import { getStoreScope } from '../utils/store-scope';
 import { buildDynamicFilterCompat } from '../utils/customer-filter';
-import { getTestSmsTables } from '../utils/sms-queue';
+import { getTestSmsTables, kakaoBatchAggByGroup } from '../utils/sms-queue';
 import { detectPhoneFields } from '../utils/callback-filter';
+import { aggregateSmsCountsByCampaign } from '../utils/stats-aggregation';
 import { blockIfSyncActive } from '../middlewares/sync-active-check';
 import { createCustomerUpsertBuilder } from '../utils/customer-upsert';
 import { detectEnabledFields, buildDynamicSelectExpr } from '../utils/enabled-fields';
@@ -725,75 +726,42 @@ router.get('/stats', async (req: Request, res: Response) => {
 
     // 이번 달 채널별 발송 통계 (취소/초안/예약 제외, 성공 건수 기준)
     // ★ 사용자(company_user)는 본인 발송만, 관리자(company_admin)는 전체
-    const sendFilterClause = userType === 'company_user' && userId ? ' AND c.created_by = $2' : '';
-    const sendFilterParams = userType === 'company_user' && userId ? [companyId, userId] : [companyId];
+    // ★ D144: PG cr.sent_count/success_count + c.sent_count/success_count 캐시 의존 제거.
+    //   PG는 캠페인 메타만 SELECT → MySQL 큐 + 카카오 직접 카운트 → JS에서 message_type별 합산.
+    const monthlySendFilterClause = userType === 'company_user' && userId ? ' AND c.created_by = $2' : '';
+    const monthlySendFilterParams: any[] = userType === 'company_user' && userId ? [companyId, userId] : [companyId];
 
-    // campaign_runs 기반 (AI추천발송)
-    const campaignStats = await query(
-      `SELECT
-        c.message_type,
-        COALESCE(SUM(cr.sent_count), 0) as sent,
-        COALESCE(SUM(cr.success_count), 0) as success
-       FROM campaign_runs cr
-       JOIN campaigns c ON cr.campaign_id = c.id
+    const monthlyMetaResult = await query(
+      `SELECT c.id, c.company_id, c.created_by, c.message_type
+       FROM campaigns c
        WHERE c.company_id = $1
          AND c.status NOT IN ('cancelled', 'draft', 'scheduled')
-         AND cr.status NOT IN ('cancelled')
-         AND cr.created_at >= date_trunc('month', (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Seoul'))::date::timestamp AT TIME ZONE 'Asia/Seoul'${sendFilterClause}
-       GROUP BY c.message_type`,
-      sendFilterParams
+         AND c.created_at >= date_trunc('month', (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Seoul'))::date::timestamp AT TIME ZONE 'Asia/Seoul'${monthlySendFilterClause}`,
+      monthlySendFilterParams
     );
 
-    // 직접발송(send_type=direct)은 campaign_runs 없을 수 있으므로 campaigns 직접 조회
-    const directSendFilterClause = userType === 'company_user' && userId ? ' AND created_by = $2' : '';
-    const directStats = await query(
-      `SELECT
-        message_type,
-        COALESCE(SUM(sent_count), 0) as sent,
-        COALESCE(SUM(success_count), 0) as success
-       FROM campaigns
-       WHERE company_id = $1
-         AND send_type = 'direct'
-         AND status NOT IN ('cancelled', 'draft', 'scheduled')
-         AND created_at >= date_trunc('month', (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Seoul'))::date::timestamp AT TIME ZONE 'Asia/Seoul'
-         AND id NOT IN (SELECT DISTINCT campaign_id FROM campaign_runs WHERE campaign_id IS NOT NULL)${directSendFilterClause}
-       GROUP BY message_type`,
-      sendFilterParams
-    );
+    const monthlySmsMap = await aggregateSmsCountsByCampaign(monthlyMetaResult.rows);
+    const monthlyKakaoMap = await kakaoBatchAggByGroup(monthlyMetaResult.rows.map((c: any) => c.id));
 
     // 채널별 집계 (성공 건수 기준으로 비용 계산)
     let smsSent = 0, lmsSent = 0, mmsSent = 0, kakaoSent = 0;
     let totalSent = 0, totalSuccess = 0;
 
-    // campaign_runs 기반 통계
-    campaignStats.rows.forEach((row: any) => {
-      const sent = parseInt(row.sent || '0');
-      const success = parseInt(row.success || '0');
+    for (const c of monthlyMetaResult.rows) {
+      const sms = monthlySmsMap.get(c.id) || { total_count: 0, success_count: 0, fail_count: 0 };
+      const kakao = monthlyKakaoMap.get(c.id) || { total: 0, success: 0, fail: 0, pending: 0 };
+      const sent = Number(sms.total_count || 0) + kakao.total;
+      const success = Number(sms.success_count || 0) + kakao.success;
       totalSent += sent;
       totalSuccess += success;
 
-      switch (row.message_type) {
+      switch (c.message_type) {
         case 'SMS': smsSent += success; break;
         case 'LMS': lmsSent += success; break;
         case 'MMS': mmsSent += success; break;
         case 'KAKAO': kakaoSent += success; break;
       }
-    });
-
-    // 직접발송 통계 합산
-    directStats.rows.forEach((row: any) => {
-      const sent = parseInt(row.sent || '0');
-      const success = parseInt(row.success || '0');
-      totalSent += sent;
-      totalSuccess += success;
-
-      switch (row.message_type) {
-        case 'SMS': smsSent += success; break;
-        case 'LMS': lmsSent += success; break;
-        case 'MMS': mmsSent += success; break;
-        case 'KAKAO': kakaoSent += success; break;
-      }
-    });
+    }
 
     // 월 사용금액 계산 (고객사 DB 단가 우선, 없으면 환경변수 기본단가)
     const costSms = parseFloat(company.cost_per_sms) || DEFAULT_COSTS.sms;

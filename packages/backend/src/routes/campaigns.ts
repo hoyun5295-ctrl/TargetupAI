@@ -20,13 +20,13 @@ import {
   invalidateLineGroupCache, getNextSmsTable,
   smsCountAll, smsAggAll, smsSelectAll, smsMinAll, smsExecAll,
   getCompanySmsTablesWithLogs,
-  insertKakaoQueue, kakaoAgg, kakaoCountPending, kakaoCancelPending,
+  insertKakaoQueue, kakaoAgg, kakaoCountPending, kakaoCancelPending, kakaoBatchAggByGroup,
   bulkInsertSmsQueue, insertAlimtalkQueue, toQtmsgType, insertTestSmsQueue
 } from '../utils/sms-queue';
 import { prepaidDeduct, prepaidRefund } from '../utils/prepaid';
 import { normalizeMmsImagePaths, type MmsImageItem } from '../utils/mms-image-util';
 import { validateMmsPayload } from '../utils/mms-validator';
-import { buildDateRangeFilter } from '../utils/stats-aggregation';
+import { buildDateRangeFilter, aggregateSmsCountsByCampaign } from '../utils/stats-aggregation';
 import { cancelCampaign, syncCampaignResults } from '../utils/campaign-lifecycle';
 import { buildFilterQueryCompat } from '../utils/customer-filter';
 import { filterByIndividualCallback, buildCallbackErrorResponse, buildCallbackConfirmResponse, resolveCustomerCallback } from '../utils/callback-filter';
@@ -209,10 +209,12 @@ router.get('/', async (req: Request, res: Response) => {
       .replace(/\bcreated_at\b/g, 'c.created_at')
       .replace(/\bevent_start_date\b/g, 'c.event_start_date')
       .replace(/\bevent_end_date\b/g, 'c.event_end_date');
+    // ★ D144: PG c.sent_count/success_count/fail_count 캐시 의존 제거.
+    //   페이지된 캠페인을 PG에서 메타만 SELECT → MySQL 큐 + 카카오 직접 카운트 매핑.
     const result = await query(
       `SELECT
-        c.id, c.campaign_name, c.status, c.message_type, c.send_type,
-        c.target_count, c.sent_count, c.success_count, c.fail_count,
+        c.id, c.company_id, c.created_by, c.campaign_name, c.status, c.message_type, c.send_type,
+        c.target_count,
         c.scheduled_at, c.sent_at, c.created_at,
         TO_CHAR(c.event_start_date, 'YYYY-MM-DD') as event_start_date,
         TO_CHAR(c.event_end_date, 'YYYY-MM-DD') as event_end_date,
@@ -227,8 +229,21 @@ router.get('/', async (req: Request, res: Response) => {
       params
     );
 
+    const listSmsMap = await aggregateSmsCountsByCampaign(result.rows);
+    const listKakaoMap = await kakaoBatchAggByGroup(result.rows.map((c: any) => c.id));
+    const campaigns = result.rows.map((c: any) => {
+      const sms = listSmsMap.get(c.id) || { total_count: 0, success_count: 0, fail_count: 0 };
+      const kakao = listKakaoMap.get(c.id) || { total: 0, success: 0, fail: 0, pending: 0 };
+      return {
+        ...c,
+        sent_count: Number(sms.total_count || 0) + kakao.total,
+        success_count: Number(sms.success_count || 0) + kakao.success,
+        fail_count: Number(sms.fail_count || 0) + kakao.fail,
+      };
+    });
+
     return res.json({
-      campaigns: result.rows,
+      campaigns,
       pagination: {
         total,
         page: Number(page),
