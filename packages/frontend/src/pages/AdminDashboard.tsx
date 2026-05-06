@@ -7,6 +7,7 @@ import SessionTimer from '../components/SessionTimer';
 import ServiceSwitcher from '../components/ServiceSwitcher'; // ★ D112
 import AlimtalkSendersSection from '../components/alimtalk/AlimtalkSendersSection'; // ★ D130
 import MessageDetailModal from '../components/MessageDetailModal'; // ★ D144 후속: 발송 상세 내역 모달의 메시지 셀 클릭 시 표시 + 복사
+import SearchableSelect from '../components/SearchableSelect'; // ★ D144 P11+P13: 검색 가능 select (사용자 추가 소속회사 + 발송통계 회사 필터)
 import { COMPANY_NAME_EN, COMPANY_EMAIL } from '../constants/company';
 
 interface Company {
@@ -2218,17 +2219,17 @@ const handleApproveRequest = async (id: string) => {
     return <span className="px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">일반</span>;
   };
 
-  // 필터링된 회사 목록
+  // 필터링된 회사 목록 — D144 P9: 회사명 오름차순 정렬로 안정화 (수정 후 페이지 흔들림 방지)
   const filteredCompanies = companies.filter((company) => {
-    const matchesSearch = companySearch === '' || 
+    const matchesSearch = companySearch === '' ||
       company.company_code.toLowerCase().includes(companySearch.toLowerCase()) ||
       company.company_name.toLowerCase().includes(companySearch.toLowerCase()) ||
       (company.contact_name && company.contact_name.toLowerCase().includes(companySearch.toLowerCase()));
-    
+
     const matchesStatus = companyStatusFilter === 'all' || company.status === companyStatusFilter;
-    
+
     return matchesSearch && matchesStatus;
-  });
+  }).sort((a, b) => (a.company_name || '').localeCompare(b.company_name || '', 'ko'));
 
   // 임시 비밀번호 생성
   const generateTempPassword = () => {
@@ -2937,7 +2938,7 @@ const handleApproveRequest = async (id: string) => {
                 type="text"
                 value={callbackSearch}
                 onChange={(e) => setCallbackSearch(e.target.value)}
-                placeholder="고객사명으로 검색..."
+                placeholder="고객사명, 번호로 검색..."
                 className="w-full max-w-xs px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
               />
               <span className="text-sm text-gray-500">총 {callbackNumbers.length}개</span>
@@ -2945,9 +2946,18 @@ const handleApproveRequest = async (id: string) => {
 
             <div>
               {(() => {
-                const filtered = callbackNumbers.filter(cb =>
-                  !callbackSearch || (cb.company_name || '').toLowerCase().includes(callbackSearch.toLowerCase())
-                );
+                // D144 P12: 번호 검색 추가 — 회사명 OR 번호(대시 제거 숫자 비교)
+                const filtered = callbackNumbers.filter(cb => {
+                  if (!callbackSearch) return true;
+                  const searchLower = callbackSearch.toLowerCase();
+                  if ((cb.company_name || '').toLowerCase().includes(searchLower)) return true;
+                  const searchDigits = callbackSearch.replace(/[^0-9]/g, '');
+                  if (searchDigits.length >= 2) {
+                    const phoneDigits = String(cb.phone || '').replace(/[^0-9]/g, '');
+                    if (phoneDigits.includes(searchDigits)) return true;
+                  }
+                  return false;
+                });
 
                 const grouped = filtered.reduce((acc: Record<string, { companyName: string; companyCode: string; items: any[] }>, cb: any) => {
                   const cid = cb.company_id || 'none';
@@ -3929,16 +3939,15 @@ const handleApproveRequest = async (id: string) => {
                   className="px-3 py-1.5 border rounded-lg text-sm"
                 />
               </div>
-              <select
+              {/* ★ D144 P13: 검색 가능 select — 회사명 입력으로 검색, 67개+ 스크롤 대신 */}
+              <SearchableSelect
+                options={companies.map(c => ({ value: c.id, label: c.company_name }))}
                 value={statsCompanyFilter}
-                onChange={(e) => setStatsCompanyFilter(e.target.value)}
-                className="px-3 py-1.5 border rounded-lg text-sm"
-              >
-                <option value="">전체 고객사</option>
-                {companies.map(c => (
-                  <option key={c.id} value={c.id}>{c.company_name}</option>
-                ))}
-              </select>
+                onChange={setStatsCompanyFilter}
+                emptyLabel="전체 고객사"
+                placeholder="고객사 선택/검색..."
+                className="w-48"
+              />
               <button
                 onClick={() => loadSendStats(1)}
                 className="px-4 py-1.5 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700"
@@ -4444,19 +4453,17 @@ const handleApproveRequest = async (id: string) => {
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   소속 회사 *
                 </label>
-                <select
+                {/* ★ D144 P11: 검색 가능 select — 회사명 입력으로 검색, 67개+ 스크롤 대신 */}
+                <SearchableSelect
+                  options={companies.map((company) => ({
+                    value: company.id,
+                    label: `${company.company_name} (${company.company_code})`,
+                  }))}
                   value={newUser.companyId}
-                  onChange={(e) => setNewUser({ ...newUser, companyId: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                  onChange={(v) => setNewUser({ ...newUser, companyId: v })}
+                  placeholder="회사명 검색..."
                   required
-                >
-                  <option value="">선택하세요</option>
-                  {companies.map((company) => (
-                    <option key={company.id} value={company.id}>
-                      {company.company_name} ({company.company_code})
-                    </option>
-                  ))}
-                </select>
+                />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">

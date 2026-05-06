@@ -133,6 +133,29 @@ export async function enrichWithCustomFields(
   }
   return fieldMappings;
 }
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 0-C) 잔여 %변수% 안전장치 컨트롤타워 (D144 후속 P2 — 2026-05-06)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+/**
+ * fieldMappings 순회 후 잔여 %변수명% 패턴을 빈문자열로 제거.
+ *
+ * ★ 시작 문자 한글/영문/언더스코어 강제 — 사용자 본문 보존:
+ *   - %이름% / %name% / %기타1% — 한글/영문/언더스코어 시작 → 매칭 (정상 변수)
+ *   - %~30% / %50% — 특수문자/숫자 시작 → 매칭 안 됨 (사용자 본문 "50%~30% 할인")
+ *
+ * 의도: 오타/매핑 안 된 변수만 제거. 본문 % 문자는 보존.
+ *
+ * @param text 원본 메시지 (이미 fieldMappings 순회 완료 상태)
+ * @returns 잔여 %변수% 제거된 메시지
+ */
+export function cleanLeftoverVars(text: string): string {
+  if (!text) return '';
+  return text.replace(/%[가-힣A-Za-z_][^%\s]{0,19}%/g, '');
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // 1) 핵심 치환 함수
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -211,7 +234,7 @@ export function replaceVariables(
 
   // customer나 fieldMappings 없으면 주소록 치환만 하고 안전망 적용 후 반환
   if (!customer || !fieldMappings) {
-    result = result.replace(/%[^%\s]{1,20}%/g, '');
+    result = cleanLeftoverVars(result);
     return result;
   }
 
@@ -247,8 +270,8 @@ export function replaceVariables(
     result = result.split(pattern).join(displayValue);
   }
 
-  // 2단계 안전장치: 매핑에 없는 잔여 %...% 패턴 제거
-  result = result.replace(/%[^%\s]{1,20}%/g, '');
+  // 2단계 안전장치: 매핑에 없는 잔여 %...% 패턴 제거 (D144 P2: 시작 문자 한글/영문 강제로 본문 % 보존)
+  result = cleanLeftoverVars(result);
 
   return result;
 }

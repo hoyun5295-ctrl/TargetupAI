@@ -1,6 +1,19 @@
 // ★ D89: 날짜 포맷팅 유틸 — 순수 날짜(YYYY-MM-DD)는 UTC 변환 없이 직접 파싱
 
 /**
+ * ★ D144 P2 (2026-05-06): 잔여 %변수% 안전장치 컨트롤타워 (frontend)
+ *   백엔드 messageUtils.ts cleanLeftoverVars 미러.
+ *
+ *   시작 문자 한글/영문/언더스코어 강제 — 사용자 본문 보존:
+ *   - %이름% / %name% / %기타1% — 매칭 (정상 변수)
+ *   - %~30% / %50% — 매칭 안 됨 (사용자 본문 "50%~30% 할인" 보존)
+ */
+export function cleanLeftoverVars(text: string): string {
+  if (!text) return '';
+  return text.replace(/%[가-힣A-Za-z_][^%\s]{0,19}%/g, '');
+}
+
+/**
  * ★ B2(0417 PDF #2): MMS 발송 전 이미지 첨부 검증 컨트롤타워
  *   MMS 유형 선택 후 이미지 0장인 상태로 발송 시 과금 혼동(MMS 단가) 발생 → 차단.
  *   5개 발송 경로(직접/직접타겟/한줄로AI/맞춤한줄/자동발송) 전부 동일 검증.
@@ -350,8 +363,8 @@ export function replaceDirectVars(
       displayVal
     );
   }
-  // 잔여 %변수% 제거 (기존 동작 호환 — 매핑 안 된 변수는 빈값으로)
-  result = result.replace(/%[^%\s]{1,20}%/g, '');
+  // 잔여 %변수% 제거 (D144 P2: 시작 문자 한글/영문 강제로 본문 % 보존)
+  result = cleanLeftoverVars(result);
   return result;
 }
 
@@ -538,9 +551,9 @@ export function replaceMessageVars(
     }
   }
 
-  // 잔여 %변수% 제거
+  // 잔여 %변수% 제거 (D144 P2: 시작 문자 한글/영문 강제로 본문 % 보존)
   if (options?.removeUnmatched) {
-    result = result.replace(/%[^%\s]{1,20}%/g, '');
+    result = cleanLeftoverVars(result);
   }
 
   return result;
@@ -665,9 +678,9 @@ export function replaceVarsBySampleCustomer(
     });
   }
 
-  // 3) 잔여 %변수% 제거
+  // 3) 잔여 %변수% 제거 (D144 P2: 시작 문자 한글/영문 강제로 본문 % 보존)
   if (options?.removeUnmatched !== false) {
-    result = result.replace(/%[^%\s]{1,20}%/g, '');
+    result = cleanLeftoverVars(result);
   }
 
   return result;

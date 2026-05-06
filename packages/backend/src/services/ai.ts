@@ -4,6 +4,7 @@ import { FIELD_MAP, getFieldByKey, getColumnFields, applyFieldAliases } from '..
 import { query } from '../config/database';
 import { AI_MODELS, AI_MAX_TOKENS, TIMEOUTS } from '../config/defaults';
 import { buildFilterWhereClauseCompat } from '../utils/customer-filter';
+import { cleanLeftoverVars } from '../utils/messageUtils';
 
 if (!process.env.ANTHROPIC_API_KEY) console.warn('[AI] ANTHROPIC_API_KEY not configured — Claude AI 기능 비활성 상태');
 if (!process.env.OPENAI_API_KEY) console.warn('[AI] OPENAI_API_KEY not configured — OpenAI 기능 비활성 상태');
@@ -1001,7 +1002,7 @@ ${usePersonalization ? `- 사용할 개인화 변수: ${personalizationTags}
         
         // ★ D28: 제목에서 %변수% 강제 제거 (AI가 프롬프트 무시 시 안전장치)
         if ((variant as any).subject) {
-          (variant as any).subject = ((variant as any).subject as string).replace(/%[^%\s]{1,20}%/g, '').replace(/  +/g, ' ').trim();
+          (variant as any).subject = cleanLeftoverVars((variant as any).subject as string).replace(/  +/g, ' ').trim();
         }
         
         // ★ #11 수정: 개인화 모드일 때 personalizationVars(선택된 변수)만 허용, 비선택 변수 제거
@@ -1963,7 +1964,7 @@ ${channel} 채널에 최적화된 3가지 맞춤 문안(A/B/C)을 생성해주�
 
         // ★ D28: 제목에서 %변수% 강제 제거 (AI가 프롬프트 무시 시 안전장치)
         if (variant.subject) {
-          variant.subject = variant.subject.replace(/%[^%\s]{1,20}%/g, '').replace(/  +/g, ' ').trim();
+          variant.subject = cleanLeftoverVars(variant.subject).replace(/  +/g, ' ').trim();
         }
 
         // ★ 버그 #1: 미선택 변수 엄격 제거
