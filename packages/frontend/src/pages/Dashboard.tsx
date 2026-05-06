@@ -1135,8 +1135,13 @@ export default function Dashboard() {
   const loadRecentCampaigns = async () => {
     try {
       const token = localStorage.getItem('token');
-      // ★ D144: sync-results fire-and-forget 제거.
-      //   캠페인 리스트(/api/campaigns)가 MySQL 직접 카운트로 전환되어 PG 캐시 sync 불필요.
+      // ★ D144 후속: 화면 카운트는 MySQL 직접 카운트로 전환됐으나, sync-results는 통신사 실패분 자동 환불 +
+      //   campaigns/campaign_runs/auto_campaign_runs status 전환 책임이 있어 보조용으로 유지.
+      //   fire-and-forget으로 사용자 화면 진입 시 PG 캐시도 갱신.
+      fetch('/api/campaigns/sync-results', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      }).catch(() => {});
       const res = await fetch('/api/campaigns?limit=10', {
         headers: { Authorization: `Bearer ${token}` },
       });

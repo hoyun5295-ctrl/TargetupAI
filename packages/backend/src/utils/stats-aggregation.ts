@@ -205,12 +205,16 @@ export interface SendStatsResult {
 }
 
 /**
- * ★ D144 헬퍼: 캠페인 배열을 (company_id, created_by)별로 그룹핑하여
+ * ★ D144 헬퍼: 캠페인 배열을 라인그룹 테이블셋별로 그룹핑하여
  * MySQL 큐(SMSQ_SEND_*) 테이블에서 status_code 기반 success/fail/pending을
  * 배치 집계한다. CT-04 `getCompanySmsTablesWithLogs` + `smsBatchAggByGroup` 사용.
  *
  * 소비처: querySendStats / querySendStatsDetail (이 파일) +
  *        admin.ts / results.ts / customers.ts (Phase 2~4) — 같은 패턴 재사용.
+ *
+ * ★ 최적화 (D144 후속): 67개 회사 통계 등 다회사 조회 시 (company_id, created_by) 쌍별
+ *   그룹핑은 N회 sequential MySQL 쿼리 발생. 대부분 회사가 동일 default BULK_ONLY 라인그룹
+ *   공유하므로 "라인그룹 테이블셋"별로 묶으면 K(<<N)회로 축소 (CLAUDE.md D110 UNION ALL 교훈).
  *
  * @returns Map<campaignId, { total_count, success_count, fail_count, pending_count }>
  */
@@ -227,8 +231,9 @@ export async function aggregateSmsCountsByCampaign(
     SUM(CASE WHEN status_code IN (${PENDING_CODES_SQL}) THEN 1 ELSE 0 END) as pending_count
   `;
 
-  // (company_id, created_by) 쌍 단위로 그룹핑 → 회사/유저별 라인그룹 테이블 1번씩 조회
-  const byUser = new Map<string, { companyId: string; userId: string | null; ids: string[] }>();
+  // 1) (company_id, created_by) 쌍별 캠페인 ID 그룹핑
+  type UserGroup = { companyId: string; userId: string | null; ids: string[] };
+  const byUser = new Map<string, UserGroup>();
   for (const c of campaigns) {
     const key = `${c.company_id}::${c.created_by || ''}`;
     if (!byUser.has(key)) {
@@ -237,10 +242,26 @@ export async function aggregateSmsCountsByCampaign(
     byUser.get(key)!.ids.push(c.id);
   }
 
-  for (const [, group] of byUser) {
-    const tables = await getCompanySmsTablesWithLogs(group.companyId, group.userId || undefined);
+  // 2) 각 (company, user) 쌍의 라인그룹 테이블셋 조회 (캐시 hit이면 빠름) — 병렬 await
+  const userGroupTables: Array<{ ug: UserGroup; tables: string[] }> = await Promise.all(
+    Array.from(byUser.values()).map(async (ug) => ({
+      ug,
+      tables: await getCompanySmsTablesWithLogs(ug.companyId, ug.userId || undefined),
+    }))
+  );
+
+  // 3) 라인그룹 테이블셋이 동일한 그룹끼리 묶음 (대부분 default BULK_ONLY 공유 → K << N)
+  const byTableSet = new Map<string, { tables: string[]; ids: string[] }>();
+  for (const { ug, tables } of userGroupTables) {
     if (tables.length === 0) continue;
-    const partial = await smsBatchAggByGroup(tables, 'app_etc1', smsAggFields, group.ids);
+    const tableKey = [...tables].sort().join(',');
+    if (!byTableSet.has(tableKey)) byTableSet.set(tableKey, { tables, ids: [] });
+    byTableSet.get(tableKey)!.ids.push(...ug.ids);
+  }
+
+  // 4) 라인그룹 테이블셋별 1쿼리(UNION ALL) — K회 호출
+  for (const [, group] of byTableSet) {
+    const partial = await smsBatchAggByGroup(group.tables, 'app_etc1', smsAggFields, group.ids);
     for (const [cid, v] of partial) result.set(cid, v);
   }
   return result;
