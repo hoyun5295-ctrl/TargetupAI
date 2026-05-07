@@ -6,6 +6,7 @@ import AddressBookModal from '../components/AddressBookModal';
 import AiCampaignResultPopup from '../components/AiCampaignResultPopup';
 import AiCampaignSendModal from '../components/AiCampaignSendModal';
 import AiCustomSendFlow from '../components/AiCustomSendFlow';
+import AiGuidePopup from '../components/AiGuidePopup';
 import AiMessageSuggestModal from '../components/AiMessageSuggestModal';
 import AiPreviewModal from '../components/AiPreviewModal';
 import AiSendTypeModal from '../components/AiSendTypeModal';
@@ -3661,6 +3662,9 @@ const campaignData = {
           handleAiCampaignGenerate(prompt);
         }}
       />
+
+      {/* AI 활용 안내 팝업 — 로그인 직후 1회 노출 (24h localStorage 차단) */}
+      <AiGuidePopup />
 
       {/* 하단 링크 */}
       <div className="max-w-7xl mx-auto px-4 py-6 mt-8 border-t border-gray-200 text-center text-xs text-gray-400 space-x-3">
