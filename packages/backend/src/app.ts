@@ -25,6 +25,7 @@ import billingRoutes from './routes/billing';
 import adminSyncRoutes from './routes/admin-sync';
 import adminRoutes from './routes/admin';
 import smsTemplatesRoutes from './routes/sms-templates';
+import internalAlertRoutes from './routes/internal-alert'; // ★ D145 (2026-05-07): 시스템 알림 SMS (localhost 전용)
 import mmsImagesRoutes from './routes/mms-images';
 import spamFilterRoutes from './routes/spam-filter';
 import analysisRoutes from './routes/analysis';
@@ -162,6 +163,7 @@ app.use('/api/admin/sync', adminSyncRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/test-contacts', testContactsRoutes);
 app.use('/api/sms-templates', smsTemplatesRoutes);
+app.use('/api/internal', internalAlertRoutes); // ★ D145: localhost 전용 시스템 알림
 app.use('/api/mms-images', mmsImagesRoutes);
 app.use('/api/auto-campaigns', autoCampaignsRoutes);
 app.use('/api/saved-segments', savedSegmentsRoutes);
