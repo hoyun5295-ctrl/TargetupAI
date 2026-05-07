@@ -1809,13 +1809,15 @@ router.post('/kakao-templates', async (req: Request, res: Response) => {
     }
 
     // ★ D143 (2026-04-30): 'pending' → 'REQUESTED' (CHECK constraint 대문자 교체로 호환).
+    // ★ D146 (2026-05-07): emphasize_sub_title + emphasize_subtitle 두 컬럼 동시 INSERT (V1/V2 호환).
+    //   기존 V1 라우트는 emphasize_sub_title만 박아 V2 SELECT(emphasize_subtitle)에서 누락되던 문제 차단.
     const result = await query(
       `INSERT INTO kakao_templates (
         company_id, profile_id, template_code, template_name, category,
-        message_type, emphasize_type, emphasize_title, emphasize_sub_title, content, image_url,
+        message_type, emphasize_type, emphasize_title, emphasize_sub_title, emphasize_subtitle, content, image_url,
         extra_content, ad_content, security_flag, buttons, quick_replies,
         status, requested_at
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'REQUESTED',NOW())
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$9,$10,$11,$12,$13,$14,$15,$16,'REQUESTED',NOW())
       RETURNING *`,
       [
         companyId, profileId || null, templateCode || null, templateName, category || null,
@@ -1859,6 +1861,7 @@ router.put('/kakao-templates/:id', async (req: Request, res: Response) => {
       securityFlag, buttons, quickReplies, templateCode,
     } = req.body;
 
+    // ★ D146 (2026-05-07): emphasize_sub_title + emphasize_subtitle 두 컬럼 동시 UPDATE (V1/V2 호환).
     const result = await query(
       `UPDATE kakao_templates SET
         profile_id = COALESCE($3, profile_id),
@@ -1869,6 +1872,7 @@ router.put('/kakao-templates/:id', async (req: Request, res: Response) => {
         emphasize_type = COALESCE($8, emphasize_type),
         emphasize_title = $9,
         emphasize_sub_title = $10,
+        emphasize_subtitle = $10,
         content = COALESCE($11, content),
         image_url = $12,
         extra_content = $13,

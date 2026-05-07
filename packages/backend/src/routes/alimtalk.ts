@@ -730,17 +730,19 @@ router.post(
       // ─────────────────────────────────────────
       let ins;
       try {
+        // ★ D146 (2026-05-07): emphasize_subtitle + emphasize_sub_title 두 컬럼 동시 INSERT (V1/V2 호환).
+        //   V1 routes/companies.ts SELECT(emphasize_sub_title)에서도 V2 등록 데이터 보이도록.
         ins = await query(
         `INSERT INTO kakao_templates
            (company_id, profile_id, template_code, template_key, template_name,
             content, buttons, variables, status,
-            category, message_type, emphasize_type, emphasize_title, emphasize_subtitle,
+            category, message_type, emphasize_type, emphasize_title, emphasize_subtitle, emphasize_sub_title,
             image_name, extra_content, ad_content, security_flag, quick_replies,
             template_header, item_highlight, item_list, item_summary, represent_link,
             preview_message, alarm_phone_numbers, service_mode, custom_template_code,
             created_by, created_at, updated_at, last_synced_at)
          VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::text[],'DRAFT',
-                 $9,$10,$11,$12,$13,$14,$15,$16,$17,$18::jsonb,
+                 $9,$10,$11,$12,$13,$13,$14,$15,$16,$17,$18::jsonb,
                  $19,$20::jsonb,$21::jsonb,$22::jsonb,$23::jsonb,
                  $24,$25,$26,$27,$28,now(),now(),now())
          RETURNING *`,
