@@ -89,21 +89,24 @@ export async function prepaidRefund(
   );
   const totalDeducted = Number(deducted.rows[0].total);
 
-  // ★ D145 P0 (2026-05-07): idempotency 강화 — "같은 양 반복 환불" 차단
-  //   원인: 기존 가드 `Math.min(unitPrice*count, totalDeducted - alreadyRefunded)`는
-  //         차감 잔여분이 충분히 크면 같은 양 반복 환불 허용 = idempotency 무력.
-  //   사례: 폴라초이스 5/4 16,106건 deduct(416,340원) → 5/7 sync-results 호출 시마다 fail=191로
-  //         매번 4,937원 환불 → 1시간 23회 누적 113,559원 이상지급(실제 fail은 191건뿐).
-  //   원인2: sync-results WHERE `target_count > success+fail`이 MySQL INSERT 실패분(target-sent)
-  //         때문에 영구 TRUE → 사용자 화면 진입 시마다 매번 환불 호출.
-  //   해결: 누적 환불 건수가 요청 환불 건수에 도달하면 차단. fail이 추가로 늘어나면 차이만 환불.
-  const refundedCount = unitPrice > 0 ? Math.round(alreadyRefunded / unitPrice) : 0;
-  if (refundedCount >= count) {
-    // 같은 캠페인에 대해 이미 같은 양(이상) 환불됨 → 추가 환불 차단
-    return { refunded: 0 };
-  }
-  const additionalCount = count - refundedCount;
-  const refundAmount = Math.round(Math.min(unitPrice * additionalCount, totalDeducted - alreadyRefunded) * 100) / 100;
+  // ★ D145 P0+ (2026-05-07): idempotent 환불 패턴 — 호출측 누적값 + 함수측 차이 계산
+  //   설계: count = "이 캠페인의 총 실패 건수"(누적). 함수가 alreadyRefunded와 비교해 차이만 환불.
+  //   - 호출측은 매번 누적 fail 그대로 보냄 (delta 계산 불필요, 호출/함수 의미 일치)
+  //   - 함수가 idempotent — 같은 count 반복 호출해도 추가 환불 0
+  //   - fail 증가 시 자동으로 차이만큼만 환불 (sync-results 누락 사고 자동 보정)
+  //   - 차감 한도 안전망(totalDeducted - alreadyRefunded)으로 무한환불 0%
+  //   사고 사례 검증:
+  //   - D145 P0 폴라초이스 5/4: 같은 fail로 24회 호출 → 113,559원 이상지급
+  //     → 새 패턴: 2회차부터 additionalRefund=0 → 자동 차단 ✅
+  //   - D145 트렉스타 5/7: delta 계산 깨져서 사실상 누적값 호출 → D145 가드가 정상 환불 차단 → 607건 누락
+  //     → 새 패턴: 누적값이 정상 의미 → 자연스럽게 차이만 환불 + 5/8 sync에서 누락분 자동 보정 ✅
+  const targetTotalRefund = Math.round(unitPrice * count * 100) / 100;
+  const additionalRefund = Math.round((targetTotalRefund - alreadyRefunded) * 100) / 100;
+
+  if (additionalRefund <= 0) return { refunded: 0 };  // 이미 충분히 환불됨 (idempotency)
+
+  // 차감 한도 안전망 — 누적 환불이 차감 총액 초과 절대 금지
+  const refundAmount = Math.round(Math.min(additionalRefund, totalDeducted - alreadyRefunded) * 100) / 100;
   if (refundAmount <= 0) return { refunded: 0 };
 
   const result = await query(
