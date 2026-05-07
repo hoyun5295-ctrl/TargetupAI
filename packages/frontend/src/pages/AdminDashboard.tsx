@@ -8,6 +8,7 @@ import ServiceSwitcher from '../components/ServiceSwitcher'; // ★ D112
 import AlimtalkSendersSection from '../components/alimtalk/AlimtalkSendersSection'; // ★ D130
 import MessageDetailModal from '../components/MessageDetailModal'; // ★ D144 후속: 발송 상세 내역 모달의 메시지 셀 클릭 시 표시 + 복사
 import SearchableSelect from '../components/SearchableSelect'; // ★ D144 P11+P13: 검색 가능 select (사용자 추가 소속회사 + 발송통계 회사 필터)
+import LoginBlocksManagement from '../components/admin/LoginBlocksManagement'; // ★ D145 P0 (2026-05-07): 로그인 차단 관리 (B안: IP+loginId 쌍)
 import { COMPANY_NAME_EN, COMPANY_EMAIL } from '../constants/company';
 
 interface Company {
@@ -64,7 +65,7 @@ export default function AdminDashboard() {
   const navigate = useNavigate();
   const { user, logout } = useAuthStore();
 
-  const [activeTab, setActiveTab] = useState<'companies' | 'users' | 'scheduled' | 'callbacks' | 'plans' | 'requests' | 'deposits' | 'allCampaigns' | 'stats' | 'billing' | 'syncAgents' | 'auditLogs' | 'lineGroups' | 'templates'>('companies');
+  const [activeTab, setActiveTab] = useState<'companies' | 'users' | 'scheduled' | 'callbacks' | 'plans' | 'requests' | 'deposits' | 'allCampaigns' | 'stats' | 'billing' | 'syncAgents' | 'auditLogs' | 'lineGroups' | 'templates' | 'loginBlocks'>('companies');
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [plans, setPlans] = useState<Plan[]>([]);
@@ -2350,10 +2351,11 @@ const handleApproveRequest = async (id: string) => {
               },
               {
                 label: '시스템', color: 'gray',
-                tabs: ['syncAgents', 'auditLogs'] as const,
+                tabs: ['syncAgents', 'auditLogs', 'loginBlocks'] as const,
                 items: [
                   { key: 'syncAgents', label: 'Sync 모니터링' },
                   { key: 'auditLogs', label: '감사 로그' },
+                  { key: 'loginBlocks', label: '로그인 차단 관리' },
                 ],
               },
             ].map(group => {
@@ -7554,6 +7556,11 @@ const handleApproveRequest = async (id: string) => {
             </div>
           )}
         </div>
+      )}
+
+      {/* ★ D145 P0: 로그인 차단 관리 탭 */}
+      {activeTab === 'loginBlocks' && (
+        <LoginBlocksManagement />
       )}
 
       {/* 감사 로그 탭 */}

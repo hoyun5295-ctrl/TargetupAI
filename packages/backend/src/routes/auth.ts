@@ -5,6 +5,7 @@ import { query } from '../config/database';
 import { TIMEOUTS } from '../config/defaults';
 import { authenticate, generateToken, JwtPayload } from '../middlewares/auth';
 import { rotateUserSession, normalizeAppSource, newSessionId } from '../utils/session-manager';
+import { isBlocked, recordFailureAndMaybeBlock, clearBlocksOnSuccess } from '../utils/login-block';
 
 const router = Router();
 
@@ -33,6 +34,21 @@ router.post('/login', loginLimiter, async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'ID and password required' });
     }
 
+    // ★ D145 P0 (2026-05-07): 어플리케이션 레벨 차단 — (IP, loginId) 쌍 단위
+    //   같은 (ip, loginId)에서 5회 실패 / 10분 윈도우 → 30분 자동 차단.
+    //   다른 IP의 같은 loginId, 다른 loginId의 같은 IP는 영향 없음(정상 사용자 보호).
+    const ipForBlock = req.ip || '';
+    const blocked = await isBlocked(ipForBlock, loginId);
+    if (blocked) {
+      const remainSec = Math.max(0, Math.floor((new Date(blocked.expires_at).getTime() - Date.now()) / 1000));
+      const remainMin = Math.ceil(remainSec / 60);
+      return res.status(403).json({
+        error: `로그인 시도 5회 초과로 임시 차단되었습니다. ${remainMin}분 후 자동 해제 또는 관리자에게 문의하세요.`,
+        code: 'LOGIN_BLOCKED',
+        remainingSeconds: remainSec,
+      });
+    }
+
     // ===== 슈퍼관리자 로그인 (★ 보안: 세션 관리 적용) =====
     if (userType === 'super_admin') {
       const result = await query(
@@ -46,6 +62,7 @@ router.post('/login', loginLimiter, async (req: Request, res: Response) => {
            VALUES (gen_random_uuid(), 'login_fail', 'super_admin', $1, $2, $3, NOW())`,
           [JSON.stringify({ loginId, reason: 'user_not_found' }), req.ip, req.headers['user-agent'] || '']
         );
+        await recordFailureAndMaybeBlock(ipForBlock, loginId);
         return res.status(401).json({ error: 'Invalid credentials' });
       }
 
@@ -58,6 +75,7 @@ router.post('/login', loginLimiter, async (req: Request, res: Response) => {
            VALUES (gen_random_uuid(), $1, 'login_fail', 'super_admin', $2, $3, $4, NOW())`,
           [admin.id, JSON.stringify({ loginId, reason: 'invalid_password' }), req.ip, req.headers['user-agent'] || '']
         );
+        await recordFailureAndMaybeBlock(ipForBlock, loginId);
         return res.status(401).json({ error: 'Invalid credentials' });
       }
 
@@ -92,6 +110,9 @@ router.post('/login', loginLimiter, async (req: Request, res: Response) => {
         [admin.id, JSON.stringify({ loginId }), req.ip, req.headers['user-agent'] || '']
       );
 
+      // ★ D145: 성공 시 같은 (ip, loginId)의 미만료 차단 자동 해제
+      await clearBlocksOnSuccess(ipForBlock, loginId, admin.id);
+
       await query(
         'UPDATE super_admins SET last_login_at = CURRENT_TIMESTAMP WHERE id = $1',
         [admin.id]
@@ -125,6 +146,7 @@ router.post('/login', loginLimiter, async (req: Request, res: Response) => {
          VALUES (gen_random_uuid(), 'login_fail', 'user', $1, $2, $3, NOW())`,
         [JSON.stringify({ loginId, reason: 'user_not_found' }), req.ip, req.headers['user-agent'] || '']
       );
+      await recordFailureAndMaybeBlock(ipForBlock, loginId);
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
@@ -164,6 +186,7 @@ router.post('/login', loginLimiter, async (req: Request, res: Response) => {
          VALUES (gen_random_uuid(), $1, 'login_fail', 'user', $2, $3, $4, NOW())`,
         [user.id, JSON.stringify({ loginId, reason: 'invalid_password', companyName: user.company_name }), req.ip, req.headers['user-agent'] || '']
       );
+      await recordFailureAndMaybeBlock(ipForBlock, loginId);
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
@@ -209,6 +232,9 @@ router.post('/login', loginLimiter, async (req: Request, res: Response) => {
        VALUES (gen_random_uuid(), $1, 'login_success', 'user', $2, $3, $4, NOW())`,
       [user.id, JSON.stringify({ loginId, companyName: user.company_name, userType: user.user_type }), req.ip, req.headers['user-agent'] || '']
     );
+
+    // ★ D145: 성공 시 같은 (ip, loginId)의 미만료 차단 자동 해제
+    await clearBlocksOnSuccess(ipForBlock, loginId, user.id);
 
     // 로그인 시간 갱신
     await query(

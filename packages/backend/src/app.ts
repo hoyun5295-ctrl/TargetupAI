@@ -56,6 +56,8 @@ import { dmPublicRouter, dmRouter } from './routes/dm';
 // ★ D112: 전단AI 완전 분리 라우트 (flyer_* 테이블 기반)
 import switchServiceRoutes from './routes/admin/switch-service';
 import flyerAdminRoutes from './routes/admin/flyer-admin';
+// ★ D145 P0 (2026-05-07): 슈퍼관리자 로그인 차단 관리
+import loginBlocksRoutes from './routes/admin/login-blocks';
 import flyerAuthRoutes from './routes/flyer/auth';
 import flyerCompaniesRoutes from './routes/flyer/companies';
 import flyerCustomersRoutes from './routes/flyer/customers';
@@ -160,6 +162,8 @@ app.use('/api/address-books', addressBooksRoutes);
 app.use('/api/balance', balanceRoutes);
 app.use('/api/admin/billing', billingRoutes);
 app.use('/api/admin/sync', adminSyncRoutes);
+// ★ D145 P0: 더 구체적 경로 먼저 등록 (/api/admin 와일드카드 위에)
+app.use('/api/admin/login-blocks', loginBlocksRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/test-contacts', testContactsRoutes);
 app.use('/api/sms-templates', smsTemplatesRoutes);
