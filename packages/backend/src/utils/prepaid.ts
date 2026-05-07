@@ -46,10 +46,11 @@ export async function prepaidDeduct(
   }
 
   // 거래 기록 — ★ D98: created_by 추가 (사용자별 사용금액 격리)
+  // ★ D145 PDF 후속 (2026-05-07): message_type 컬럼 박음 — both 채널 발송 시 messageType별 환불 분리
   await query(
-    `INSERT INTO balance_transactions (company_id, type, amount, balance_after, description, reference_type, reference_id, payment_method, created_by)
-     VALUES ($1, 'deduct', $2, $3, $4, 'campaign', $5, 'system', $6)`,
-    [companyId, totalAmount, result.rows[0].balance, `${messageType} ${count}건 발송 차감 (건당 ${unitPrice}원)`, referenceId, createdBy || null]
+    `INSERT INTO balance_transactions (company_id, type, amount, balance_after, description, reference_type, reference_id, payment_method, created_by, message_type)
+     VALUES ($1, 'deduct', $2, $3, $4, 'campaign', $5, 'system', $6, $7)`,
+    [companyId, totalAmount, result.rows[0].balance, `${messageType} ${count}건 발송 차감 (건당 ${unitPrice}원)`, referenceId, createdBy || null, messageType]
   );
 
   console.log(`[선불차감] company=${companyId} ${messageType}×${count} = ${totalAmount}원 차감 → 잔액 ${result.rows[0].balance}원`);
@@ -74,18 +75,25 @@ export async function prepaidRefund(
     : messageType === 'KAKAO' ? Number(c.cost_per_kakao || 0) : 0;
 
   // 이미 환불된 금액 조회 (중복 환불 방지)
+  // ★ D145 PDF 후속 (2026-05-07): messageType 필터 — both 채널 발송 시 SMS/카카오 환불 분리
+  //   기존 row(message_type=NULL) 호환 — NULL은 옛 패턴이므로 함께 합산
+  //   사고 사례: directChannel='both' SMS 환불(15,000원) → 카카오 환불 호출 시 alreadyRefunded=15,000으로
+  //              누적되어 카카오 환불 차단됨 → 카카오 실패분 환불 누락
+  //   해결: messageType별로 alreadyRefunded/totalDeducted 분리 조회
   const existing = await query(
     `SELECT COALESCE(SUM(amount), 0) as total FROM balance_transactions
-     WHERE company_id = $1 AND type = 'refund' AND reference_type = 'campaign' AND reference_id = $2`,
-    [companyId, campaignId]
+     WHERE company_id = $1 AND type = 'refund' AND reference_type = 'campaign' AND reference_id = $2
+       AND (message_type = $3 OR message_type IS NULL)`,
+    [companyId, campaignId, messageType]
   );
   const alreadyRefunded = Number(existing.rows[0].total);
 
   // 원래 차감 금액 조회
   const deducted = await query(
     `SELECT COALESCE(SUM(amount), 0) as total FROM balance_transactions
-     WHERE company_id = $1 AND type = 'deduct' AND reference_type = 'campaign' AND reference_id = $2`,
-    [companyId, campaignId]
+     WHERE company_id = $1 AND type = 'deduct' AND reference_type = 'campaign' AND reference_id = $2
+       AND (message_type = $3 OR message_type IS NULL)`,
+    [companyId, campaignId, messageType]
   );
   const totalDeducted = Number(deducted.rows[0].total);
 
@@ -115,10 +123,11 @@ export async function prepaidRefund(
   );
 
   if (result.rows.length > 0) {
+    // ★ D145 PDF 후속: message_type 컬럼 박음 (both 채널 환불 분리)
     await query(
-      `INSERT INTO balance_transactions (company_id, type, amount, balance_after, description, reference_type, reference_id, payment_method)
-       VALUES ($1, 'refund', $2, $3, $4, 'campaign', $5, 'system')`,
-      [companyId, refundAmount, result.rows[0].balance, `${reason} (${messageType} ${count}건 × ${unitPrice}원)`, campaignId]
+      `INSERT INTO balance_transactions (company_id, type, amount, balance_after, description, reference_type, reference_id, payment_method, message_type)
+       VALUES ($1, 'refund', $2, $3, $4, 'campaign', $5, 'system', $6)`,
+      [companyId, refundAmount, result.rows[0].balance, `${reason} (${messageType} ${count}건 × ${unitPrice}원)`, campaignId, messageType]
     );
     console.log(`[선불환불] company=${companyId} ${refundAmount}원 환불 → 잔액 ${result.rows[0].balance}원`);
   }

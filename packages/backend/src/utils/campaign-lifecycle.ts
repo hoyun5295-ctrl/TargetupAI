@@ -20,9 +20,10 @@ import { getSourceRef, updateTrainingMetrics } from './training-logger';
  * scheduled_at 지난 status='scheduled' 캠페인을 MySQL count 기반 'completed'/'failed'로 정리.
  * 사용자/공용/슈퍼관리자 모든 발송 관련 라우트에서 동일 호출 → 정합성 보장.
  *
- * D145 P0: delta 기반 환불 (sync-results 패턴과 동일).
- *  - UPDATE 직전 prev fail_count 조회 → delta = new - prev → delta > 0일 때만 환불.
- *  - prepaid.ts idempotency 안전망과 이중 보호.
+ * D145 P0+ (2026-05-07): idempotent 환불 패턴.
+ *  - 호출측은 누적 failCount 그대로 prepaidRefund에 전달 (delta 계산 폐기)
+ *  - 함수가 alreadyRefunded와 비교해 차이만 환불 (idempotency 함수 측 보장)
+ *  - 같은 count 반복 = 자동 차단 / fail 증가 = 자동 보정 / 차감 한도 안전망 = 무한환불 0%
  */
 export interface CleanupScheduledFilter {
   companyId?: string;      // null이면 전체 회사 (슈퍼관리자)

@@ -454,11 +454,14 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                               {c.send_channel === 'kakao' ? '💬 카카오' : c.send_channel === 'both' ? '📱+💬' : `📱 ${msgTypeLabel[c.message_type] || 'SMS'}`}
                             </span>
                           </td>
-                          <td className="px-3 py-2.5 text-center font-medium">{(c.target_count || c.sent_count || 0).toLocaleString()}</td>
+                          {/* ★ D145 P0+ (2026-05-07 폴라초이스 사고): sent_count 우선 — MySQL 실제 발송 건수가 정확.
+                              PG target_count는 발송 시점 INSERT 누락 가능성(폴라초이스 466건 차이)으로 잘못된 값일 수 있음. */}
+                          <td className="px-3 py-2.5 text-center font-medium">{(c.sent_count || c.target_count || 0).toLocaleString()}</td>
                           <td className="px-3 py-2.5 text-center text-green-600 font-medium">{(c.success_count || 0).toLocaleString()}</td>
                           <td className="px-3 py-2.5 text-center text-red-600 font-medium">{(c.fail_count || 0).toLocaleString()}</td>
                           <td className="px-3 py-2.5 text-center text-amber-500 font-medium">
-                            {((c.target_count || 0) - (c.success_count || 0) - (c.fail_count || 0)).toLocaleString()}
+                            {/* 대기 = sent - success - fail (음수 가드 — target_count가 잘못된 경우 방지) */}
+                            {Math.max(0, (c.sent_count || c.target_count || 0) - (c.success_count || 0) - (c.fail_count || 0)).toLocaleString()}
                           </td>
                           <td className="px-3 py-2.5 text-center">
                             {(() => {
@@ -877,7 +880,7 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                         { label: '유형', value: `${selectedCampaign.send_type === 'direct' ? '수동' : 'AI'} / ${msgTypeLabel[selectedCampaign.message_type] || selectedCampaign.message_type}` },
                         { label: '발송자', value: selectedCampaign.created_by_name || '-' },
                         { label: '회신번호', value: selectedCampaign.callback_number || '-' },
-                        { label: '전송건수', value: `${(selectedCampaign.target_count || selectedCampaign.sent_count || 0).toLocaleString()}건` },
+                        { label: '전송건수', value: `${(selectedCampaign.sent_count || selectedCampaign.target_count || 0).toLocaleString()}건` },
                         { label: '성공 / 실패', value: `${(selectedCampaign.success_count || 0).toLocaleString()} / ${(selectedCampaign.fail_count || 0).toLocaleString()}` },
                         { label: '등록일시', value: new Date(selectedCampaign.created_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) },
                         // ★ D131: 취소 건은 (예약) 대신 (예약취소)로 표시 (서수란 팀장 제보)

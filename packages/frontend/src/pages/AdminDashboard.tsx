@@ -6181,19 +6181,18 @@ const handleApproveRequest = async (id: string) => {
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   고객사 *
                 </label>
-                <select
+                {/* ★ D145 P3 (2026-05-07): SearchableSelect 적용 — 162개+ 고객사 스크롤 대신 입력으로 검색 */}
+                <SearchableSelect
+                  options={companies.map((company) => ({
+                    value: company.id,
+                    label: `${company.company_name} (${company.company_code})`,
+                  }))}
                   value={newCallback.companyId}
-                  onChange={(e) => setNewCallback({ ...newCallback, companyId: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                  onChange={(value) => setNewCallback({ ...newCallback, companyId: value })}
+                  placeholder="고객사 선택 또는 입력 검색..."
                   required
-                >
-                  <option value="">선택하세요</option>
-                  {companies.map((company) => (
-                    <option key={company.id} value={company.id}>
-                      {company.company_name} ({company.company_code})
-                    </option>
-                  ))}
-                </select>
+                  className="w-full"
+                />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
