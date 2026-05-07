@@ -107,11 +107,68 @@
 
 ---
 
-### 🔥 D144 후속2 (2026-05-06 17:00 작성) — **미배포 작업 + 추가 수정 후 일괄 배포 대기**
+### 🚨🚨🚨 D145 (2026-05-07 새벽) — 9시간 사이트 차단 사고 + PDF 0506 13건 마감 (미배포)
 
-> **상태:** 🟡 **코드 수정 완료, TS 빌드 EXIT=0, push/deploy 대기.** Harold님 약속 일정으로 다음 세션에서 추가 수정 + 한 번에 배포.
+> **상태:** 🔴 **오픈 둘째날 critical 사고 발생 후 복구.** 5/6 18:54 ~ 5/7 04:00 거래처 9시간 사이트 차단.
 >
-> **🚨 다음 세션 시작 시 반드시:** (1) 본 섹션 정독 → (2) 추가 수정건 묶음 작업 → (3) 한 번에 `tp-push` + `tp-deploy-full` 진행
+> **사고 원인:** 5/6 18:26 `tp-deploy-full` 실행 → backend 빌드 OK → frontend `vite build` 단계가 `emptyOutDir: true`(기본)로 dist 비운 후 비정상 종료 → dist 비어있는 상태로 tp-deploy-full 정상 종료 → nginx 403 `"directory index of dist/ is forbidden"` 9시간.
+>
+> **복구:** 5/7 04:00 Harold님이 SSH 후 `cd packages/frontend && npm run build` 한 줄로 dist 재생성.
+>
+> **🚨 다음 세션 1순위:** atomic deploy 패턴 (dist-new swap) + dist 모니터링 cron으로 영구 재발 방지.
+>
+> **상세 메모리:** `memory/project_d145_critical_deploy_failure.md` 정독 필수.
+
+#### ✅ 5/6 18:26 운영 배포 완료 (D144 후속2 + 그룹 A/B)
+- D144 후속2 — sent_at MySQL 직접 + status `'sending'`→`'completed'` 정책 + 슈퍼관리자 메시지 클릭 복사
+- P8 — `admin.ts:701,706` 슈퍼관리자 예약관리 sent_at COALESCE 통일
+- P4/P7 — `sms-result-map.ts:28-29` 라벨 `'발송 대기'` → `'결과 대기'`
+- P6 — `campaign-lifecycle.ts:175-180, 305-310` sync-results 진입 조건 완화 (target_count 비교)
+- 폴라초이스 14df97e7 LMS 188건 × 25.85 = **4,859.80원 환불** (Harold님 직접 SQL 실행)
+
+#### 🟡 5/7 새벽 미배포 (코드 + 빌드 통과, 다음 배포 대기)
+
+**Backend (6파일):** messageUtils.ts (cleanLeftoverVars CT 신설+2곳) / ai.ts (cleanLeftoverVars 2곳) / customers.ts (delete-all 권한 확장) / sms-templates.ts (filterExistingImagePaths fs.existsSync 검증+DB 정리) / admin.ts (status='sending' 자동 정리) / campaigns.ts (동일 패턴)
+
+**Frontend (5파일):** formatDate.ts (cleanLeftoverVars CT 신설+3곳) / SearchableSelect.tsx (**신설**) / AdminDashboard.tsx (SearchableSelect 2곳+고객사 정렬+발신번호 검색+**P10 정정 DB 출력 제거+전체삭제 유지**) / CustomerDBModal.tsx (전체삭제 버튼+confirm) / AddressBookModal.tsx (직접입력+다중선택) / **components/manage/ManageCustomersTab.tsx (전체삭제 버튼+confirm — P5 정정 누락 발견 추가)**
+
+#### 🚀 안전 배포 절차 (한 줄 명령어 금지 — D145 사고 재발 방지)
+
+```bash
+# 1. 로컬 push
+tp-push "0507 D145 — PDF 0506 13건 + P4/P7 후속 + P10/P5 정정 (atomic deploy 적용 전 안전 배포)"
+
+# 2. 서버 SSH 단계별 배포 (반드시 단계별 검증)
+ssh administrator@58.227.193.62
+cd /home/administrator/targetup-app && git pull
+cd packages/frontend && npm run build 2>&1 | tail -5
+ls -la dist/index.html  # ★ 시각이 방금이어야 통과
+cd ../backend && npm run build
+pm2 restart all
+
+# 3. 즉시 https://hanjul.ai 접속 검증 (Ctrl+F5)
+```
+
+#### 🔍 배포 후 검증 항목 (8건)
+1. https://hanjul.ai 정상 로드 (Ctrl+F5)
+2. 고객사관리자 ManagePage → 고객DB 탭 → "전체 삭제" 빨간 버튼 + confirm 모달 작동
+3. 슈퍼관리자 회사 편집 모달 → 고객DB 탭 → 정보 출력 X + "전체 삭제" 버튼만
+4. 슈퍼관리자 발송관리 → status='sending' 잔존 캠페인 자동 '완료' 전환
+5. 슈퍼관리자 사용자 추가 + 발송통계 회사 필터 SearchableSelect 검색 작동
+6. 슈퍼관리자 발신번호 관리 번호 입력 검색 작동
+7. 직접발송 "50%~30% 할인" 입력 → 본문 보존 (안전망 regex 한글/영문 시작 강제)
+8. 주소록 모달 — 직접 입력 + 다중 선택 일괄 불러오기 작동
+
+#### 🔧 다음 세션 1순위 (영구 재발 방지)
+1. **atomic deploy 패턴 적용** — `vite build --outDir dist-new` → `index.html` 생성 시에만 `dist`로 swap
+2. **dist 모니터링 cron** — 1분 간격 부재 감지 → 자동 알림 + 자동 빌드 재시도
+3. **PM2 로그 `c.callback.trim is not a function` 별건 수정** — `callback-filter.ts:85` String() 캐스팅 (직접발송 일부 회사)
+
+---
+
+### 🔥 D144 후속2 (2026-05-06 17:00 작성, 5/7 새벽 D145로 흡수) — **참고 보존**
+
+> **상태:** ✅ 일부는 5/6 18:26 배포 완료, 나머지 + PDF 0506은 5/7 새벽 D145로 이관 (위 D145 섹션 참조).
 
 #### 📦 미배포 변경 파일 (Backend 6 + Frontend 2)
 

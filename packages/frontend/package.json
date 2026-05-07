@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "build:safe": "bash scripts/safe-build.sh",
     "preview": "vite preview"
   },
   "dependencies": {

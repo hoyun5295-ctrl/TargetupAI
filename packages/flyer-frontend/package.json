@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:safe": "bash scripts/safe-build.sh",
     "lint": "eslint .",
     "preview": "vite preview"
   },
