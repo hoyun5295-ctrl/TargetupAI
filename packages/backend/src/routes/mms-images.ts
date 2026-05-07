@@ -5,6 +5,7 @@ import fs from 'fs';
 import { v4 as uuidv4 } from 'uuid';
 import { LIMITS } from '../config/defaults';
 import { authenticate } from '../middlewares/auth';
+import { query } from '../config/database';
 
 const router = express.Router();
 
@@ -145,7 +146,14 @@ router.get('/:companyId/:filename', (req: any, res: any) => {
 // ─────────────────────────────────────────
 // DELETE /api/mms-images/:companyId/:filename — 이미지 삭제
 // ─────────────────────────────────────────
-router.delete('/:companyId/:filename', authenticate, (req: any, res: any) => {
+// ★ D145 P0 (2026-05-07): 보관함/캠페인에 참조 중인 이미지는 unlink 차단
+//   원인: 사용자가 보관함 템플릿 불러와서 [X] 클릭 → backend DELETE → fs.unlinkSync 실행
+//         → 다음 GET /api/sms-templates에서 D144 P1이 fs.existsSync false 감지 → DB도 자동 제거
+//         → 보관함 이미지 영구 소실 (서수란 팀장 신고)
+//   해결: sms_templates.mms_image_paths 또는 campaigns.mms_image_paths에 해당 filename 참조 시
+//         실제 파일 삭제 안 함 (UI에서만 제거). UUID 파일명이라 LIKE 매칭 충돌 사실상 불가.
+//   보존 대상: ① 보관함 템플릿 ② 모든 캠페인(완료된 캠페인의 결과 모달에서도 이미지 표시 필요)
+router.delete('/:companyId/:filename', authenticate, async (req: any, res: any) => {
   const { companyId, filename } = req.params;
 
   if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
@@ -154,6 +162,29 @@ router.delete('/:companyId/:filename', authenticate, (req: any, res: any) => {
 
   if (req.user.companyId !== companyId && req.user.role !== 'super_admin') {
     return res.status(403).json({ error: '접근 권한 없음' });
+  }
+
+  // ★ 보관함/캠페인 참조 체크 — 참조 중이면 unlink 차단
+  try {
+    const refCheck = await query(
+      `SELECT 1 FROM sms_templates
+       WHERE company_id = $1 AND mms_image_paths IS NOT NULL
+         AND mms_image_paths::text LIKE '%' || $2 || '%'
+       UNION ALL
+       SELECT 1 FROM campaigns
+       WHERE company_id = $1 AND mms_image_paths IS NOT NULL
+         AND mms_image_paths::text LIKE '%' || $2 || '%'
+       LIMIT 1`,
+      [companyId, filename]
+    );
+    if (refCheck.rows.length > 0) {
+      console.log(`[MMS] 이미지 ${filename} — 보관함/캠페인 참조 중 → unlink 차단 (UI 제거만)`);
+      return res.json({ success: true, retained: true });
+    }
+  } catch (e: any) {
+    // 참조 체크 실패 시 안전하게 unlink 진행 안 함 (보관함 소실 방지 우선)
+    console.warn(`[MMS] 참조 체크 실패 → 안전하게 unlink 차단: ${filename}`, e?.message);
+    return res.json({ success: true, retained: true });
   }
 
   const filePath = path.join(MMS_IMAGE_BASE, companyId, filename);

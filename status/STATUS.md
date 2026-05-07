@@ -107,7 +107,56 @@
 
 ---
 
-### 🚨🚨🚨 D145 (2026-05-07 새벽) — 9시간 사이트 차단 사고 + PDF 0506 13건 마감 (미배포)
+### 🟢 D145 (2026-05-07) — 9시간 사고 복구 + PDF 0506 13건 배포 + 영구 재발 방지 인프라 적용
+
+> **상태:** ✅ **5/7 오전 마감.** PDF 0506 13건 배포 + atomic deploy 인프라 적용 + SMS 알림 통합 완료.
+>
+> **남은 1회 작업 (다음 세션):** crontab 등록 + (선택) PowerShell `tp-deploy-full` 함수 교체.
+>
+> **상세 메모리:** `memory/project_d145_critical_deploy_failure.md` 정독.
+
+#### ✅ 영구 재발 방지 3단 안전망 완성 (5/7 오전 적용)
+
+| 안전망 | 파일 | 효과 |
+|---|---|---|
+| **1차 — atomic deploy** | `packages/{frontend,company-frontend,flyer-frontend}/scripts/safe-build.sh` + `build:safe` 스크립트 | 빌드 실패 시 옛 dist 유지 = 차단 0초 |
+| **2차 — 모니터링 cron** | `scripts/monitor-dist.sh` | 1분 cron — dist 부재 감지 → 자동 재빌드 |
+| **3차 — SMS 알림** | `routes/internal-alert.ts` (localhost only) → SMSQ_SEND_10 → 010-5295-8517 | 자동 복구 결과 즉시 휴대폰 LMS |
+
+**검증:** 5/7 09:32 frontend build:safe 첫 실행 → 30.51초 + dist/index.html 3420 bytes 정상 생성 + dist-old 자동 백업.
+
+#### ✅ PDF 0506 13건 배포 완료 (5/6 18:26 + 5/7 오전)
+
+- 5/6 18:26: D144 후속2 + P8/P4/P7/P6 (어제 배포)
+- 5/7 오전: P2 cleanLeftoverVars CT(8곳) + P9 정렬 + P12 발신번호검색 + P11+P13 SearchableSelect + P5 고객DB 전체삭제(CustomerDBModal + ManageCustomersTab) + P10 슈퍼관리자 정보출력 제거+전체삭제 유지 + P1 보관함 fs.existsSync 자동정리 + P3 주소록 직접입력+다중선택 + P4/P7 후속(admin/campaigns status='sending' 자동 정리)
+- 폴라초이스 14df97e7 환불 4,859.80원 (Harold님 직접 SQL)
+
+#### ⏳ 다음 세션 1회 작업 (Harold님 직접)
+
+```bash
+# 1. 서버 crontab 등록 (1분 cron — dist 모니터링 + SMS 알림)
+ssh administrator@58.227.193.62
+(crontab -l 2>/dev/null; echo "* * * * * /home/administrator/targetup-app/scripts/monitor-dist.sh >> /home/administrator/dist-monitor.log 2>&1") | crontab -
+crontab -l
+
+# 2. (선택) 알림 작동 검증
+curl -X POST http://127.0.0.1:3000/api/internal/dist-alert \
+  -H "Content-Type: application/json" \
+  -d '{"message":"테스트 알림 — atomic deploy 작동 검증"}'
+# → 1분 내 010-5295-8517 LMS 도착 확인
+
+# 3. (선택) 로컬 PowerShell tp-deploy-full 함수 교체
+#    status/D145-DEPLOY-SAFETY.md § B 그대로 — npm run build → npm run build:safe
+```
+
+#### 🔧 별건 (다음 세션 또는 후속)
+
+- **company-frontend dist 갱신** — 4/30 잔존, 다음 build:safe 실행 시 자동 갱신
+- **callback-filter.ts:85 `c.callback.trim is not a function`** — 직접발송 일부 회사 영향 (PM2 로그 별건)
+
+---
+
+### 🟡 D144/D145 미배포 작업 보존 (참고)
 
 > **상태:** 🔴 **오픈 둘째날 critical 사고 발생 후 복구.** 5/6 18:54 ~ 5/7 04:00 거래처 9시간 사이트 차단.
 >

@@ -89,7 +89,21 @@ export async function prepaidRefund(
   );
   const totalDeducted = Number(deducted.rows[0].total);
 
-  const refundAmount = Math.round(Math.min(unitPrice * count, totalDeducted - alreadyRefunded) * 100) / 100;
+  // ★ D145 P0 (2026-05-07): idempotency 강화 — "같은 양 반복 환불" 차단
+  //   원인: 기존 가드 `Math.min(unitPrice*count, totalDeducted - alreadyRefunded)`는
+  //         차감 잔여분이 충분히 크면 같은 양 반복 환불 허용 = idempotency 무력.
+  //   사례: 폴라초이스 5/4 16,106건 deduct(416,340원) → 5/7 sync-results 호출 시마다 fail=191로
+  //         매번 4,937원 환불 → 1시간 23회 누적 113,559원 이상지급(실제 fail은 191건뿐).
+  //   원인2: sync-results WHERE `target_count > success+fail`이 MySQL INSERT 실패분(target-sent)
+  //         때문에 영구 TRUE → 사용자 화면 진입 시마다 매번 환불 호출.
+  //   해결: 누적 환불 건수가 요청 환불 건수에 도달하면 차단. fail이 추가로 늘어나면 차이만 환불.
+  const refundedCount = unitPrice > 0 ? Math.round(alreadyRefunded / unitPrice) : 0;
+  if (refundedCount >= count) {
+    // 같은 캠페인에 대해 이미 같은 양(이상) 환불됨 → 추가 환불 차단
+    return { refunded: 0 };
+  }
+  const additionalCount = count - refundedCount;
+  const refundAmount = Math.round(Math.min(unitPrice * additionalCount, totalDeducted - alreadyRefunded) * 100) / 100;
   if (refundAmount <= 0) return { refunded: 0 };
 
   const result = await query(
