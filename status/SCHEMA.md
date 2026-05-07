@@ -1130,7 +1130,17 @@
 | reference_type | varchar(30) | campaign/payment/admin 등 |
 | reference_id | uuid | 연관 ID |
 | admin_id | uuid | 관리자 수동 조정 시 |
+| created_by | uuid | ★ D98: 차감 실행 사용자 (사용자별 사용금액 격리) |
+| message_type | varchar(10) | ★ D145 P0+ (2026-05-07): SMS/LMS/MMS/KAKAO 분리 — `directChannel='both'` 환불 차단 위험 해결. 옛 row는 NULL (호환). prepaidRefund alreadyRefunded/totalDeducted 조회 시 `message_type = $X OR IS NULL` 필터 적용 |
 | created_at | timestamptz | |
+
+### campaigns 보호 trigger (★ D145 PDF 후속 — 2026-05-07)
+
+**`protect_completed_target_count`** — 완료된 캠페인의 `target_count` UPDATE 시 RAISE EXCEPTION으로 영구 차단.
+- 신설 사유: 폴라초이스 캠페인(`14df97e7`) PG `target_count`가 5/7 새벽 디버깅 도중 수동 SQL UPDATE로 잘못 박힘(15,640). 코드 흐름상 발생 불가 → audit 없는 데이터 오염 사고.
+- 동작: `BEFORE UPDATE OF target_count ON campaigns FOR EACH ROW`. `OLD.status = 'completed' AND OLD.target_count IS DISTINCT FROM NEW.target_count` 시 차단.
+- 정상 코드 흐름은 모두 `status='scheduled'` 가드라 영향 0 (campaigns.ts:2079, 2088, 926).
+- 검증: `UPDATE campaigns SET target_count = 9999 WHERE id = '14df97e7'` → `ERROR: 완료된 캠페인의 target_count는 변경할 수 없습니다.`
 
 ### payments (PG 결제 내역)
 | 컬럼 | 타입 | 설명 |

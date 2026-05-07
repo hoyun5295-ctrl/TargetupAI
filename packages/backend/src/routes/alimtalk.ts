@@ -678,6 +678,11 @@ router.post(
       //    D135+ (B3 복구): IMC는 성공했는데 DB INSERT 실패로 한줄로 DB에만 없는 상태
       //    → 재등록 시 IMC가 4014 반환 → listAlimtalkTemplates로 templateCode 복구 후 DB INSERT
       // ─────────────────────────────────────────
+      // ★ D146 (2026-05-07) PDF 0506 #2 진단 보강: createTemplate 라우트 진입 + IMC 호출 시점 명시 로그.
+      //   "IMC에는 등록되나 한줄로 PG에 안 들어감" 재신고 시 PM2 grep으로 어느 단계에서 끊겼는지 즉시 파악.
+      console.log(
+        `[alimtalk][createTemplate 진입] companyId=${companyId} templateKey=${templateKey} manageName=${body.manageName}`,
+      );
       let r = await imc.createAlimtalkTemplate(senderKey, {
         ...body,
         templateKey,
@@ -803,6 +808,10 @@ router.post(
       //    이제 status='DRAFT' 유지. 검수요청은 별도 엔드포인트 POST /templates/:code/inspect (기존 존재) 호출.
       //    프론트는 목록에서 '검수요청' 액션 버튼으로 명시 호출 (D139 #4-1).
       // ─────────────────────────────────────────
+      // ★ D146 (2026-05-07) PDF 0506 #2 진단 보강: PG INSERT 성공 시점 명시 로그.
+      console.log(
+        `[alimtalk][createTemplate 성공] id=${ins.rows[0].id} templateCode=${templateCode} status=DRAFT`,
+      );
 
       res.status(201).json({
         success: true,
@@ -1549,6 +1558,17 @@ function extractImageFromAnyShape(r: any): { imageUrl?: string; imageName?: stri
       return { imageUrl: c.imageUrl, imageName: c.imageName };
     }
   }
+  // ★ D146 (2026-05-07) PDF 0506 #6/#7: IMC가 단일 'image' 키 + string URL로 보내는 변종.
+  //   raw: {"code":"0000","data":{"image":"https://mud-kage.kakao.com/dn/.../img_l.jpg"}}
+  //   imageName이 응답에 없으므로 URL 끝의 파일명을 imageName으로 사용.
+  const stringCands = [r?.data?.image, r?.image, r?.data?.imageUrl];
+  for (const url of stringCands) {
+    if (typeof url === 'string' && url.startsWith('http')) {
+      const tail = url.split('/').pop() || '';
+      const imageName = (tail.split('?')[0] || 'image').slice(0, 200);
+      return { imageUrl: url, imageName };
+    }
+  }
   return {};
 }
 
@@ -1561,11 +1581,25 @@ function extractImageListFromAnyShape(r: any): { imageUrl: string; imageName: st
     r?.data?.data?.images,
     Array.isArray(r?.data) ? r.data : null,
   ];
+  // ★ D146 (2026-05-07): list element 변종 수용 — {imageUrl,imageName} / {image:"url"} / "url"(string)
+  const fromUrl = (url: string) => {
+    const tail = url.split('/').pop() || '';
+    return { imageUrl: url, imageName: (tail.split('?')[0] || 'image').slice(0, 200) };
+  };
   for (const c of cands) {
     if (Array.isArray(c) && c.length > 0) {
-      return c
-        .map((it: any) => ({ imageUrl: it?.imageUrl, imageName: it?.imageName }))
-        .filter((it) => it.imageUrl && it.imageName);
+      const out = c
+        .map((it: any): { imageUrl: string; imageName: string } | null => {
+          if (!it) return null;
+          if (typeof it === 'string' && it.startsWith('http')) return fromUrl(it);
+          if (typeof it === 'object') {
+            if (it.imageUrl && it.imageName) return { imageUrl: it.imageUrl, imageName: it.imageName };
+            if (typeof it.image === 'string' && it.image.startsWith('http')) return fromUrl(it.image);
+          }
+          return null;
+        })
+        .filter((it): it is { imageUrl: string; imageName: string } => !!it);
+      if (out.length > 0) return out;
     }
   }
   return [];

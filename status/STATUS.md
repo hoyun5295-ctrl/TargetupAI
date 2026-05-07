@@ -131,6 +131,24 @@
 - 5/7 오전: P2 cleanLeftoverVars CT(8곳) + P9 정렬 + P12 발신번호검색 + P11+P13 SearchableSelect + P5 고객DB 전체삭제(CustomerDBModal + ManageCustomersTab) + P10 슈퍼관리자 정보출력 제거+전체삭제 유지 + P1 보관함 fs.existsSync 자동정리 + P3 주소록 직접입력+다중선택 + P4/P7 후속(admin/campaigns status='sending' 자동 정리)
 - 폴라초이스 14df97e7 환불 4,859.80원 (Harold님 직접 SQL)
 
+#### ✅ 5/7 밤 — PDF 0507 후속 3건 진짜 근본 마감
+
+| Issue | 진단 | Fix |
+|---|---|---|
+| **#1** 폴라초이스 카드(16,106) vs 목록(15,640) 불일치 | 차감 16,106 정확. MySQL 16,106 정확. **PG `target_count`만 15,640으로 잘못 박힘** — 코드 흐름 정독상 UPDATE 경로 0건. PM2 로그 라우트 호출 0건. 5/7 새벽 D145 P0 환불 무한루프 fix 디버깅 도중 수동 SQL 추정. **466 차감 누락 가설 폐기**(회사 손실 0건) | (a) `protect_completed_target_count` PG trigger 신설 — 완료 캠페인 target_count UPDATE 시 RAISE EXCEPTION 영구 차단. (b) target_count 정정(15640→16106). (c) ResultsModal frontend (sent_count 우선 + 대기 음수가드). |
+| **#2** 트렉스타 11:49(607건)/14:46(68건) 환불 누락 17,820원 | D145 P0 강화 가드(`refundedCount >= count` 차단)가 호출측 delta와 의미 충돌 → 정상 환불도 차단 | prepaid.ts **idempotent 패턴**(count=누적 totalFailCount, 함수가 alreadyRefunded와 비교해 `additionalRefund` 자동 계산). delta 계산 폐기. campaign-lifecycle.ts 3분기(cleanup/AI/Direct) 누적값 호출 통일. 자동 보정 — sync-results 다음 호출 시 누락분 자동 환불. |
+| **#3** 발신번호 등록 모달 162개 회사 dropdown | 입력 검색 불가 | `<select>` → `<SearchableSelect>` (D144 P11/P13 컴포넌트 재활용). |
+| **(C)** directChannel='both' SMS+카카오 동시 환불 차단 위험 | prepaid.ts `alreadyRefunded`/`totalDeducted` 조회가 messageType 무관 합산 | balance_transactions에 **`message_type` 컬럼 신설(DDL)** + INSERT 시 박음 + SELECT WHERE filter (`message_type = $X OR IS NULL` — 옛 row 호환). |
+| **(인프라)** backend atomic deploy 미적용 | D145에서 frontend 3패키지만 build:safe. backend 일반 build | `packages/backend/scripts/safe-build.sh` 신설 + `build:safe` 스크립트 추가. backend도 dist-new → 검증 → atomic mv. |
+
+**신규 메모리:**
+- `feedback_no_manual_sql_update` — 수동 PG UPDATE/DELETE 신중 + 영향 범위 명시 의무화
+- `feedback_tp_push_no_followup` — git push는 `tp-push` 통일 / 별건 미루지 않기
+- `project_d145_pdf_followup` — D145 PDF 0507 신고 3건 종합
+- `project_d145_p0plus_refund_idempotent` — 환불 idempotent 패턴 근본 해결
+
+**다음 세션 작업: 알림톡 디버깅** (Harold님 명시 — 다음 세션 시작 시 디테일 확인)
+
 #### ⏳ 다음 세션 1회 작업 (Harold님 직접)
 
 ```bash

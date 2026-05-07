@@ -362,10 +362,12 @@ AND NOT EXISTS (
 - **역할:** 포인트 차감/환불의 유일한 진입점. DB 기반 단가 조회 (하드코딩 금지)
 - **차감 로직:** `billing_type === 'prepaid'`일 때만 작동, 후불은 자동 패스
 - **Atomic 처리:** `balance >= totalAmount` 조건부 UPDATE로 잔액 부족 시 실패 반환
+- **★ D145 P0+ (2026-05-07) idempotent 환불 패턴:** count = "이 캠페인 총 실패 건수"(누적). 함수가 alreadyRefunded와 비교해 `additionalRefund = unitPrice*count - alreadyRefunded` 계산하여 차이만 환불. **delta 계산 패턴 폐기** (호출/함수 의미 일치). 같은 count 반복=자동 차단(idempotency) / fail 증가=자동 보정 / 차감 한도 안전망(`Math.min(additional, totalDeducted - alreadyRefunded)`)으로 무한환불 0%. **D145 P0 무한환불(폴라초이스 113,559원 이상지급) + D145 P0+ 누락환불(트렉스타 17,820원) 양방향 영구 종결.**
+- **★ D145 P0+ messageType 분리:** `balance_transactions.message_type` 컬럼 신설(DDL) + alreadyRefunded/totalDeducted SELECT WHERE `message_type = $X OR IS NULL` 필터 → directChannel='both' SMS+카카오 동시 환불 시 두 번째 차단 위험 해결. NULL 호환으로 옛 row 처리 보장.
 - **주요 함수:**
-  - `prepaidDeduct(companyId, count, messageType, referenceId)` — 발송 시 차감
-  - `prepaidRefund(companyId, amount, referenceId)` — 취소 시 환불
-- **적용 파일:** campaigns.ts(발송 시 차감), campaign-lifecycle.ts(취소 시 환불)
+  - `prepaidDeduct(companyId, count, messageType, referenceId, createdBy?)` — 발송 시 차감 (message_type 컬럼 박음)
+  - `prepaidRefund(companyId, count, messageType, campaignId, reason)` — 환불 (count=누적값, idempotent 함수측 차이 계산)
+- **적용 파일:** campaigns.ts(발송 시 차감), campaign-lifecycle.ts(취소+sync-results 누적값 호출 — 3분기 cleanup/AI/Direct)
 
 #### CT-06: campaign-lifecycle.ts — 캠페인 생명주기 (취소 + 결과동기화)
 - **역할:** 캠페인 상태 변경의 유일한 진입점. sms-queue.ts + prepaid.ts를 조합
