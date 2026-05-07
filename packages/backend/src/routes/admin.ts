@@ -9,6 +9,8 @@ import { detectEnabledFields } from '../utils/enabled-fields';
 import { SUCCESS_CODES_SQL, PENDING_CODES_SQL, getStatusLabel, getStatusType, getCarrierLabel, isSuccess, isPending } from '../utils/sms-result-map';
 import { DEFAULT_COSTS } from '../config/defaults';
 import { validateSmsTables } from '../utils/sms-table-validator';
+// ★ D145 P0: 예약 캠페인 자동 정리 (모든 발송 관련 라우트 정합성)
+import { cleanupScheduledCampaigns } from '../utils/campaign-lifecycle';
 import { getUserUnsubscribes, deleteUserUnsubscribes, exportUserUnsubscribes, CAMPAIGN_OPT080_SELECT_EXPR, CAMPAIGN_OPT080_LEFT_JOIN } from '../utils/unsubscribe-helper';
 import { buildDateRangeFilter, aggregateSmsCountsByCampaign, aggregateSmsSendTimesByCampaign } from '../utils/stats-aggregation';
 import { normalizePhone } from '../utils/normalize-phone';
@@ -682,6 +684,12 @@ router.get('/campaigns/scheduled', authenticate, requireSuperAdmin, async (req: 
     const startDate = (req.query.startDate as string) || '';
     const endDate = (req.query.endDate as string) || '';
     const loginId = (req.query.loginId as string) || '';     // 사용자 계정 검색
+
+    // ★ D145 P0: scheduled_at 지난 status='scheduled' 자동 정리 (컨트롤타워)
+    //   슈퍼관리자는 전체 회사 대상 (filter X)
+    await cleanupScheduledCampaigns({
+      companyId: companyId || undefined,
+    });
 
     let where = `WHERE c.status IN ('scheduled', 'cancelled')`;
     const params: any[] = [];

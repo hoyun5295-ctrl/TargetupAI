@@ -27,7 +27,7 @@ import { prepaidDeduct, prepaidRefund } from '../utils/prepaid';
 import { normalizeMmsImagePaths, type MmsImageItem } from '../utils/mms-image-util';
 import { validateMmsPayload } from '../utils/mms-validator';
 import { buildDateRangeFilter, aggregateSmsCountsByCampaign, aggregateSmsSendTimesByCampaign } from '../utils/stats-aggregation';
-import { cancelCampaign, syncCampaignResults } from '../utils/campaign-lifecycle';
+import { cancelCampaign, syncCampaignResults, cleanupScheduledCampaigns } from '../utils/campaign-lifecycle';
 import { buildFilterQueryCompat } from '../utils/customer-filter';
 import { filterByIndividualCallback, buildCallbackErrorResponse, buildCallbackConfirmResponse, resolveCustomerCallback } from '../utils/callback-filter';
 import { deduplicateByPhone } from '../utils/deduplicate';
@@ -124,51 +124,14 @@ router.get('/', async (req: Request, res: Response) => {
     }
 
     if (status) {
-      // status=scheduled 조회 시 MySQL과 동기화
+      // ★ D145 P0: 컨트롤타워 cleanupScheduledCampaigns 호출로 통합
+      //   사용자/공용/슈퍼관리자 모든 라우트에서 동일 함수 호출 → 정합성 보장
       if (status === 'scheduled') {
-        // 예약 캠페인 중 MySQL에 대기 건이 없는 것들 찾아서 상태 업데이트
-        let scheduleQuery = `SELECT id FROM campaigns WHERE company_id = $1 AND status = 'scheduled'`;
-        const scheduleParams: any[] = [companyId];
-        if (userType === 'company_user' && userId) {
-          scheduleQuery += ` AND created_by = $2`;
-          scheduleParams.push(userId);
-        }
-        if (userType === 'company_admin' && req.query.filter_user_id) {
-          scheduleQuery += ` AND created_by = $2`;
-          scheduleParams.push(req.query.filter_user_id);
-        }
-        const scheduledCampaigns = await query(scheduleQuery, scheduleParams);
-
-        for (const camp of scheduledCampaigns.rows) {
-          // 예약 시간이 아직 안 됐으면 스킵 (MySQL에 데이터 없는게 정상)
-          const campDetail = await query(`SELECT scheduled_at FROM campaigns WHERE id = $1`, [camp.id]);
-          const scheduledAt = campDetail.rows[0]?.scheduled_at;
-          if (scheduledAt && new Date(scheduledAt) > new Date()) {
-            continue; // 예약 시간 전이면 완료 처리하지 않음
-          }
-
-          // ★ D144 후속: bulk INSERT 완료 = 발송완료 정책 — pending 무관 항상 처리.
-          //   pending은 통신사 백그라운드 처리, 발송 자체(MySQL 큐 INSERT)는 끝났음.
-          //   화면 카운트는 D144 후 MySQL 직접이라 결과 들어올 때마다 실시간 갱신.
-          const tablesWithLogs = await getCompanySmsTablesWithLogs(companyId);
-          const sentCount = await smsCountAll(tablesWithLogs, 'app_etc1 = ?', [camp.id]);
-          const successCount = await smsCountAll(tablesWithLogs, `app_etc1 = ? AND status_code IN (${SUCCESS_CODES.join(',')})`, [camp.id]);
-          const failCount = await smsCountAll(tablesWithLogs, `app_etc1 = ? AND status_code NOT IN (${[...SUCCESS_CODES, ...PENDING_CODES].join(',')})`, [camp.id]);
-          const newStatus = sentCount === 0 ? 'failed' : 'completed';
-
-          await query(
-            `UPDATE campaigns SET status = $1, sent_count = $2, success_count = $3, fail_count = $4, sent_at = COALESCE(sent_at, scheduled_at, NOW()), updated_at = NOW() WHERE id = $5`,
-            [newStatus, sentCount, successCount, failCount, camp.id]
-          );
-
-          // ★ 선불 실패건 환불
-          if (failCount > 0) {
-            const campInfo = await query('SELECT company_id, message_type FROM campaigns WHERE id = $1', [camp.id]);
-            if (campInfo.rows.length > 0) {
-              await prepaidRefund(campInfo.rows[0].company_id, failCount, campInfo.rows[0].message_type, camp.id, '발송 실패 환불');
-            }
-          }
-        }
+        await cleanupScheduledCampaigns({
+          companyId,
+          userId: userType === 'company_user' ? userId : undefined,
+          filterUserId: (userType === 'company_admin' && req.query.filter_user_id) ? String(req.query.filter_user_id) : undefined,
+        });
       }
 
       whereClause += ` AND status = $${paramIndex++}`;

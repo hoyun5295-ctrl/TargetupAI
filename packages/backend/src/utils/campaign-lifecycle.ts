@@ -14,6 +14,77 @@ import { prepaidRefund } from './prepaid';
 import { SUCCESS_CODES, PENDING_CODES } from './sms-result-map';
 import { getSourceRef, updateTrainingMetrics } from './training-logger';
 
+// ===== 예약 캠페인 자동 정리 (D145 P0) =====
+
+/**
+ * scheduled_at 지난 status='scheduled' 캠페인을 MySQL count 기반 'completed'/'failed'로 정리.
+ * 사용자/공용/슈퍼관리자 모든 발송 관련 라우트에서 동일 호출 → 정합성 보장.
+ *
+ * D145 P0: delta 기반 환불 (sync-results 패턴과 동일).
+ *  - UPDATE 직전 prev fail_count 조회 → delta = new - prev → delta > 0일 때만 환불.
+ *  - prepaid.ts idempotency 안전망과 이중 보호.
+ */
+export interface CleanupScheduledFilter {
+  companyId?: string;      // null이면 전체 회사 (슈퍼관리자)
+  userId?: string;          // company_user 본인 캠페인만
+  filterUserId?: string;    // company_admin이 보는 특정 사용자
+}
+
+export async function cleanupScheduledCampaigns(filter: CleanupScheduledFilter = {}): Promise<{ cleaned: number }> {
+  let cleaned = 0;
+
+  let sql = `SELECT id, company_id FROM campaigns
+             WHERE status = 'scheduled' AND scheduled_at < NOW()`;
+  const params: any[] = [];
+
+  if (filter.companyId) {
+    params.push(filter.companyId);
+    sql += ` AND company_id = $${params.length}`;
+  }
+  if (filter.userId) {
+    params.push(filter.userId);
+    sql += ` AND created_by = $${params.length}`;
+  }
+  if (filter.filterUserId) {
+    params.push(filter.filterUserId);
+    sql += ` AND created_by = $${params.length}`;
+  }
+
+  const targets = await query(sql, params);
+
+  for (const camp of targets.rows) {
+    try {
+      const tablesWithLogs = await getCompanySmsTablesWithLogs(camp.company_id);
+      const sentCount = await smsCountAll(tablesWithLogs, 'app_etc1 = ?', [camp.id]);
+      const successCount = await smsCountAll(tablesWithLogs, `app_etc1 = ? AND status_code IN (${SUCCESS_CODES.join(',')})`, [camp.id]);
+      const failCount = await smsCountAll(tablesWithLogs, `app_etc1 = ? AND status_code NOT IN (${[...SUCCESS_CODES, ...PENDING_CODES].join(',')})`, [camp.id]);
+      const newStatus = sentCount === 0 ? 'failed' : 'completed';
+
+      // ★ D145 P0: delta 기반 환불 — UPDATE 직전 prev fail_count 조회
+      const prevResult = await query('SELECT fail_count, message_type FROM campaigns WHERE id = $1', [camp.id]);
+      const prevFail = Number(prevResult.rows[0]?.fail_count || 0);
+      const messageType = prevResult.rows[0]?.message_type;
+      const deltaFailCount = failCount - prevFail;
+
+      await query(
+        `UPDATE campaigns SET status = $1, sent_count = $2, success_count = $3, fail_count = $4,
+         sent_at = COALESCE(sent_at, scheduled_at, NOW()), updated_at = NOW() WHERE id = $5`,
+        [newStatus, sentCount, successCount, failCount, camp.id]
+      );
+
+      if (deltaFailCount > 0 && messageType) {
+        await prepaidRefund(camp.company_id, deltaFailCount, messageType, camp.id, '발송 실패 환불');
+      }
+
+      cleaned++;
+    } catch (err: any) {
+      console.error(`[cleanup-scheduled] campaign ${camp.id} 처리 에러:`, err.message);
+    }
+  }
+
+  return { cleaned };
+}
+
 // ===== 캠페인 취소 =====
 
 export interface CancelCampaignResult {

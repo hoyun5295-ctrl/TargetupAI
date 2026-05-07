@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import { authenticate, requireCompanyAdmin } from '../middlewares/auth';
 import { query } from '../config/database';
 // ★ 메시징 컨트롤타워 — 취소 로직 통합
-import { cancelCampaign } from '../utils/campaign-lifecycle';
+import { cancelCampaign, cleanupScheduledCampaigns } from '../utils/campaign-lifecycle';
 import { getCompanyScope } from '../utils/permission-helper';
 
 const router = Router();
@@ -22,6 +22,12 @@ router.use(authenticate, requireCompanyAdmin);
 router.get('/', async (req: Request, res: Response) => {
   try {
     const companyScope = getCompanyScope(req);
+
+    // ★ D145 P0: scheduled_at 지난 status='scheduled' 자동 정리 (컨트롤타워)
+    await cleanupScheduledCampaigns({
+      companyId: companyScope || undefined,
+      filterUserId: req.query.filter_user_id ? String(req.query.filter_user_id) : undefined,
+    });
 
     let sql = `
       SELECT
