@@ -69,6 +69,7 @@
 | 52 | flyers | 전단AI 전단지 (Phase 1) |
 | 53 | short_urls | 전단AI 단축URL (Phase 1) |
 | 54 | url_clicks | 전단AI 클릭 로그 (Phase 1) |
+| 55 | login_blocks | 로그인 차단 (D145 P0, 2026-05-07 — IP+loginId 쌍 5회/10분 자동 차단 30분) |
 
 ---
 
@@ -97,6 +98,33 @@
 | ip_address | inet |
 | user_agent | text |
 | created_at | timestamptz |
+
+### login_blocks (로그인 차단 — D145 P0, 2026-05-07)
+| 컬럼 | 타입 | 설명 |
+|------|------|------|
+| id | uuid PK | gen_random_uuid() |
+| ip_address | inet NOT NULL | 차단 IP |
+| login_id | varchar(100) NOT NULL | 차단 loginId (B안: IP+ID 쌍) |
+| blocked_at | timestamptz NOT NULL | 차단 시각 |
+| expires_at | timestamptz NOT NULL | 만료 시각 (자동: blocked_at + 30분) |
+| reason | varchar(50) NOT NULL | 'auto_5fail_10min' / 'manual:상세' |
+| fail_count | int NOT NULL DEFAULT 5 | 차단 trigger 시점 실패 횟수 (수동=0) |
+| blocked_by | uuid | 수동 차단한 super_admin id |
+| unblocked_at | timestamptz | 해제 시각 (NULL=활성) |
+| unblocked_by | uuid | 해제한 super_admin id 또는 user(login_success) |
+| unblock_reason | text | 'login_success' / 'admin_unblock' / 사용자 입력 |
+| created_at | timestamptz | |
+
+**인덱스:**
+- `idx_login_blocks_active` — `(login_id, ip_address) WHERE unblocked_at IS NULL` (활성 차단 빠른 조회)
+- `idx_login_blocks_history` — `(created_at DESC)` (이력 페이지)
+
+**정책 (CT-08과 별개, utils/login-block.ts 컨트롤타워):**
+- 같은 (IP, loginId) 쌍에서 5회 이상 실패 within 10분 → 30분 자동 차단
+- audit_logs(login_fail) 기준 카운트 (action='login_fail' AND ip_address=X AND details->>'loginId'=Y)
+- 차단 중 같은 쌍 시도 → 즉시 403 LOGIN_BLOCKED + 남은 시간 안내
+- 다른 IP의 같은 loginId, 다른 loginId의 같은 IP는 영향 없음 (정상 사용자 보호)
+- 로그인 성공 시 해당 쌍의 미만료 차단 자동 해제
 
 ### callback_numbers (발신번호)
 | 컬럼 | 타입 |

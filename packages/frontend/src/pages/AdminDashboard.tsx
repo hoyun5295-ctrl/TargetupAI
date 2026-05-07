@@ -2791,18 +2791,19 @@ const handleApproveRequest = async (id: string) => {
             </div>
 
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              {/* ★ D145 P0 (2026-05-07): 컴팩트 — text-xs base + py-2 + 짧은 일시 포맷 + 캠페인명 240px */}
+              <table className="w-full text-xs">
               <thead className="bg-gray-50">
                   <tr>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 whitespace-nowrap">고객사</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 whitespace-nowrap">캠페인명</th>
-                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">대상</th>
-                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">생성자</th>
-                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">등록일시</th>
-                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">예약시간</th>
-                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">상태</th>
-                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">상세</th>
-                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">관리</th>
+                    <th className="px-3 py-2 text-left font-medium text-gray-500 whitespace-nowrap">고객사</th>
+                    <th className="px-3 py-2 text-left font-medium text-gray-500 whitespace-nowrap">캠페인명</th>
+                    <th className="px-3 py-2 text-center font-medium text-gray-500 whitespace-nowrap">대상</th>
+                    <th className="px-3 py-2 text-center font-medium text-gray-500 whitespace-nowrap">생성자</th>
+                    <th className="px-3 py-2 text-center font-medium text-gray-500 whitespace-nowrap">등록</th>
+                    <th className="px-3 py-2 text-center font-medium text-gray-500 whitespace-nowrap">예약시간</th>
+                    <th className="px-3 py-2 text-center font-medium text-gray-500 whitespace-nowrap">상태</th>
+                    <th className="px-3 py-2 text-center font-medium text-gray-500 whitespace-nowrap">상세</th>
+                    <th className="px-3 py-2 text-center font-medium text-gray-500 whitespace-nowrap">관리</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
@@ -2810,48 +2811,48 @@ const handleApproveRequest = async (id: string) => {
                     <tr><td colSpan={9} className="px-6 py-12 text-center text-gray-500">예약/취소 캠페인이 없습니다.</td></tr>
                   ) : scheduledCampaigns.map((campaign) => (
                       <tr key={campaign.id} className="hover:bg-gray-50">
-                        <td className="px-4 py-3 text-gray-900">
+                        <td className="px-3 py-2 text-gray-900 whitespace-nowrap">
                           {campaign.company_name}
-                          <span className="text-gray-400 ml-1 text-xs">({campaign.company_code})</span>
+                          <span className="text-gray-400 ml-1">({campaign.company_code})</span>
                         </td>
-                        <td className="px-4 py-3 text-gray-900" style={{ maxWidth: '320px' }}>
+                        <td className="px-3 py-2 text-gray-900" style={{ maxWidth: '240px' }}>
                           <div className="truncate" title={campaign.campaign_name}>{campaign.campaign_name}</div>
                         </td>
-                        <td className="px-4 py-3 text-center text-gray-500 whitespace-nowrap">
+                        <td className="px-3 py-2 text-center text-gray-500 whitespace-nowrap">
                           {campaign.target_count?.toLocaleString() || 0}명
                         </td>
-                        <td className="px-4 py-3 text-center text-xs text-gray-500 whitespace-nowrap">
+                        <td className="px-3 py-2 text-center text-gray-500 whitespace-nowrap">
                           {campaign.created_by_name || '-'}
                           {campaign.created_by_login && <span className="text-gray-400 ml-0.5">({campaign.created_by_login})</span>}
                         </td>
-                        <td className="px-4 py-3 text-center text-gray-500 whitespace-nowrap text-xs">
-                          {campaign.created_at ? formatDateTime(campaign.created_at) : '-'}
+                        <td className="px-3 py-2 text-center text-gray-500 whitespace-nowrap">
+                          {campaign.created_at ? formatDateTimeShort(campaign.created_at) : '-'}
                         </td>
-                        <td className="px-4 py-3 text-center text-gray-500 whitespace-nowrap text-xs">
-                          {campaign.scheduled_at ? formatDateTime(campaign.scheduled_at) : '-'}
+                        <td className="px-3 py-2 text-center text-gray-500 whitespace-nowrap">
+                          {campaign.scheduled_at ? formatDateTimeShort(campaign.scheduled_at) : '-'}
                         </td>
-                        <td className="px-4 py-3 text-center whitespace-nowrap" style={{ minWidth: '70px' }}>
+                        <td className="px-3 py-2 text-center whitespace-nowrap" style={{ minWidth: '70px' }}>
                           {campaign.status === 'scheduled' ? (
-                            <span className="px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">예약</span>
+                            <span className="px-2 py-0.5 rounded-full font-medium bg-blue-100 text-blue-800">예약</span>
                           ) : (
                             <div>
-                              <span className="px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">취소</span>
+                              <span className="px-2 py-0.5 rounded-full font-medium bg-gray-100 text-gray-800">취소</span>
                               {campaign.cancelled_by_type === 'super_admin' && (
-                                <span className="ml-1 text-xs text-red-500">(관리자)</span>
+                                <span className="ml-1 text-red-500">(관리자)</span>
                               )}
                             </div>
                           )}
                         </td>
-                        <td className="px-4 py-3 text-center whitespace-nowrap" style={{ minWidth: '60px' }}>
+                        <td className="px-3 py-2 text-center whitespace-nowrap" style={{ minWidth: '60px' }}>
                           <button onClick={() => openSmsDetail(campaign.id)}
-                            className="text-blue-600 hover:text-blue-800 text-xs font-medium">[조회]</button>
+                            className="text-blue-600 hover:text-blue-800 font-medium">[조회]</button>
                         </td>
-                        <td className="px-4 py-3 text-center whitespace-nowrap" style={{ minWidth: '60px' }}>
+                        <td className="px-3 py-2 text-center whitespace-nowrap" style={{ minWidth: '60px' }}>
                           {campaign.status === 'scheduled' ? (
                             <button onClick={() => openCancelModal(campaign.id, campaign.campaign_name)}
-                              className="text-red-600 hover:text-red-800 text-sm">취소</button>
+                              className="text-red-600 hover:text-red-800">취소</button>
                           ) : (
-                            <span className="text-xs text-gray-400" title={campaign.cancel_reason || ''}>
+                            <span className="text-gray-400" title={campaign.cancel_reason || ''}>
                               {campaign.cancel_reason ? `사유: ${campaign.cancel_reason.substring(0, 15)}${campaign.cancel_reason.length > 15 ? '…' : ''}` : '-'}
                             </span>
                           )}
