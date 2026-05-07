@@ -234,6 +234,14 @@ export async function syncCampaignResults(companyId: string): Promise<SyncResult
           console.warn(`[sync-results] campaign_run ${run.id}: 30분 타임아웃 — pending ${pendingCount}건 → fail 처리`);
         }
 
+        // ★ D145 P0 (2026-05-07): delta 기반 환불 — UPDATE 직전 prev fail_count 조회
+        //   원인: sync-results가 호출될 때마다 fail=N으로 prepaidRefund 호출 →
+        //         같은 캠페인 같은 fail이 매번 환불 trigger → 무한 환불 (폴라초이스 사고)
+        //   해결: 이번 fail - 이전 fail = delta. delta > 0일 때만 차이만큼 환불.
+        const prevRunFailResult = await query('SELECT fail_count FROM campaign_runs WHERE id = $1', [run.id]);
+        const prevRunFail = Number(prevRunFailResult.rows[0]?.fail_count || 0);
+        const deltaFailCount = effectiveFailCount - prevRunFail;
+
         // campaign_runs 업데이트
         await query(
           `UPDATE campaign_runs SET
@@ -263,11 +271,11 @@ export async function syncCampaignResults(companyId: string): Promise<SyncResult
             [successCount, effectiveFailCount, newStatus, runInfo.rows[0].campaign_id]
           );
 
-          // 선불 실패건 환불
-          if (effectiveFailCount > 0) {
+          // ★ D145: delta 기반 환불 — 이번 sync에서 새로 늘어난 fail만큼만 환불
+          if (deltaFailCount > 0) {
             const campInfo = await query('SELECT company_id, message_type FROM campaigns WHERE id = $1', [runInfo.rows[0].campaign_id]);
             if (campInfo.rows.length > 0) {
-              await prepaidRefund(campInfo.rows[0].company_id, effectiveFailCount, campInfo.rows[0].message_type, runInfo.rows[0].campaign_id, isTimedOut ? '타임아웃 실패 환불' : '발송 실패 환불');
+              await prepaidRefund(campInfo.rows[0].company_id, deltaFailCount, campInfo.rows[0].message_type, runInfo.rows[0].campaign_id, isTimedOut ? '타임아웃 실패 환불' : '발송 실패 환불');
             }
           }
 
@@ -360,6 +368,12 @@ export async function syncCampaignResults(companyId: string): Promise<SyncResult
           console.warn(`[sync-results] direct campaign ${campaign.id}: 30분 타임아웃 — pending ${pendingCount}건 → fail 처리`);
         }
 
+        // ★ D145 P0 (2026-05-07): delta 기반 환불 — UPDATE 직전 prev fail_count 조회
+        //   AI 캠페인 분기와 동일 패턴 — "결과값 업데이트분만 환불"
+        const prevDirectFailResult = await query('SELECT fail_count FROM campaigns WHERE id = $1', [campaign.id]);
+        const prevDirectFail = Number(prevDirectFailResult.rows[0]?.fail_count || 0);
+        const dDeltaFailCount = dEffectiveFailCount - prevDirectFail;
+
         await query(
           `UPDATE campaigns SET
             sent_count = ($1::int + $2::int),
@@ -373,11 +387,11 @@ export async function syncCampaignResults(companyId: string): Promise<SyncResult
           [successCount, dEffectiveFailCount, newStatus, campaign.id]
         );
 
-        // 선불 실패건 환불
-        if (dEffectiveFailCount > 0) {
+        // ★ D145: delta 기반 환불 — 이번 sync에서 새로 늘어난 fail만큼만 환불
+        if (dDeltaFailCount > 0) {
           const campInfo = await query('SELECT company_id, message_type FROM campaigns WHERE id = $1', [campaign.id]);
           if (campInfo.rows.length > 0) {
-            await prepaidRefund(campInfo.rows[0].company_id, dEffectiveFailCount, campInfo.rows[0].message_type, campaign.id, directTimedOut ? '타임아웃 실패 환불' : '발송 실패 환불');
+            await prepaidRefund(campInfo.rows[0].company_id, dDeltaFailCount, campInfo.rows[0].message_type, campaign.id, directTimedOut ? '타임아웃 실패 환불' : '발송 실패 환불');
           }
         }
 
