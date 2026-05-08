@@ -920,22 +920,85 @@ router.get('/templates/:templateCode', async (req: Request, res: Response) => {
 });
 
 // 템플릿 수정: 본인 소유 + company_admin/super_admin (D130 §2-2, requireTemplateAccess 내 체크)
+// ★ D149-#A (2026-05-08) PDF 0508 후속 직원 카톡 신고: "수정 시 IMC에 수정반영 되고 한줄로에선 수정 반영이 안돼요"
+//   D146/D147 메모리에 별건으로 명시한 사항 — IMC만 갱신하고 PG 본문(content/emphasize/buttons/represent_link 등) 미갱신.
+//   PG 0행이라 D147까지 발현 안 됐지만 D147 #2 자연 해결 후 즉시 발현. INSERT 패턴(라인 729~) 미러로 모든 본문 컬럼 UPDATE.
 router.put(
   '/templates/:templateCode',
   async (req: Request, res: Response) => {
     try {
       const ctx = await requireTemplateAccess(req, res);
       if (!ctx) return;
+      const body = req.body || {};
       const r = await imc.updateAlimtalkTemplate(
         ctx.senderKey,
         req.params.templateCode,
-        req.body || {},
+        body,
       );
+      if (r.code !== '0000') {
+        return res.status(400).json({
+          success: false,
+          code: r.code,
+          error: r.message || '수정 실패',
+          imc: r,
+        });
+      }
+      // ★ D149-#A: PG 본문 컬럼 동시 갱신 (emphasize_subtitle/sub_title 둘 다 — D146 정합화 미러).
+      //   COALESCE 패턴 — body에 명시된 필드만 갱신. 미명시 필드는 기존 값 유지.
       await query(
-        `UPDATE kakao_templates SET updated_at=now(), last_synced_at=now() WHERE id=$1`,
-        [ctx.id],
+        `UPDATE kakao_templates SET
+           template_name        = COALESCE($2, template_name),
+           content              = COALESCE($3, content),
+           buttons              = COALESCE($4::jsonb, buttons),
+           variables            = COALESCE($5::text[], variables),
+           category             = COALESCE($6, category),
+           message_type         = COALESCE($7, message_type),
+           emphasize_type       = COALESCE($8, emphasize_type),
+           emphasize_title      = COALESCE($9, emphasize_title),
+           emphasize_subtitle   = COALESCE($10, emphasize_subtitle),
+           emphasize_sub_title  = COALESCE($10, emphasize_sub_title),
+           image_name           = COALESCE($11, image_name),
+           extra_content        = COALESCE($12, extra_content),
+           security_flag        = COALESCE($13, security_flag),
+           quick_replies        = COALESCE($14::jsonb, quick_replies),
+           template_header      = COALESCE($15, template_header),
+           item_highlight       = COALESCE($16::jsonb, item_highlight),
+           item_list            = COALESCE($17::jsonb, item_list),
+           item_summary         = COALESCE($18::jsonb, item_summary),
+           represent_link       = COALESCE($19::jsonb, represent_link),
+           preview_message      = COALESCE($20, preview_message),
+           service_mode         = COALESCE($21, service_mode),
+           custom_template_code = COALESCE($22, custom_template_code),
+           updated_at           = now(),
+           last_synced_at       = now()
+         WHERE id = $1`,
+        [
+          ctx.id,
+          body.manageName || null,
+          body.templateContent || null,
+          body.buttonList ? JSON.stringify(body.buttonList) : null,
+          body.variables || null,
+          body.categoryCode || null,
+          body.templateMessageType || null,
+          body.templateEmphasizeType || null,
+          body.templateTitle || null,
+          body.templateSubtitle || null,
+          body.templateImageName || null,
+          body.templateExtra || null,
+          typeof body.securityFlag === 'boolean' ? body.securityFlag : null,
+          body.quickReplyList ? JSON.stringify(body.quickReplyList) : null,
+          body.templateHeader || null,
+          body.templateItemHighlight ? JSON.stringify(body.templateItemHighlight) : null,
+          body.templateItem?.list ? JSON.stringify(body.templateItem.list) : null,
+          body.templateItem?.summary ? JSON.stringify(body.templateItem.summary) : null,
+          body.templateRepresentLink ? JSON.stringify(body.templateRepresentLink) : null,
+          body.templatePreviewMessage || null,
+          body.serviceMode || null,
+          body.customTemplateCode || null,
+        ],
       );
-      res.json({ success: r.code === '0000', imc: r });
+      console.log(`[alimtalk][updateTemplate 성공] templateCode=${req.params.templateCode} (PG 본문+IMC 갱신)`);
+      res.json({ success: true, imc: r });
     } catch (err) {
       return handleImcError(res, err);
     }
