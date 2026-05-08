@@ -107,26 +107,46 @@
 
 ---
 
-### 🟡 D150 (2026-05-08~10) — 알림톡+카카오 전체 디버깅+개발 완료 마라톤 (5/10 일요일 마감)
+### 🟢 D150 (2026-05-08~11) — 알림톡+카카오 전체 마무리 (코드 작업 종결, 월요일 자연 검증만 잔여)
 
-> **Harold님 명시:** "5월 10일 일요일까지 전부 끝내려고 해. 같이 제대로 해보자 원칙에 맞게. 밤을 새서라도 계속 해서라도 제대로 업그레이드할 거야."
+> **Harold님 명시:** "5월 10일 일요일까지 전부 끝내려고 해. 같이 제대로 해보자 원칙에 맞게."
 >
-> **상세 메모리:** `memory/project_d150_alimtalk_kakao_full_audit.md` 정독 — Step 0~4 가이드 + 배포 명령어 + 금지 패턴 명시.
+> **상세 메모리:** `memory/project_d150_alimtalk_kakao_full_audit.md` 정독 — Step 0~4 결과 + 다음 세션 진입 가이드.
 
-#### ✅ 1순위 코드 fix 완료 (5/8 저녁 — 배포 대기)
+#### ✅ 5/9 토요일 작업 결과 (Step 0~3 모두 완료)
 
-- `uploadSingleImage` (alimtalk-api.ts:981) + `uploadMultipleImages` (1030) 함수 2곳 fix
-- D149-#B 검증된 패턴 미러 — form.getLength + Content-Length 헤더 + contentType 명시 + maxBodyLength: Infinity
-- 9개 이미지 업로드 라우트(alimtalk_template/highlight + brand 6종 + marketing_agree) 자동 반영
-- TS 0 error / D150 마커 + form.getLength + Content-Length 헤더 grep 검증 OK
+| Step | 결과 |
+|---|---|
+| **0** D150-1 이미지 업로드 9개 atomic 배포 | ✅ 5/9 08:05 KST. dist 매칭 6건 / hanjul.ai HTTP/1.1 200 OK |
+| **1** updateAlimtalkTemplate D148 누락 점검 | ✅ 누락 0건 (normalize 자동 경유 확인) |
+| **2** 브랜드메시지 9개 매뉴얼+코드 정독 | ✅ 누락 0건 (brand-message.ts 처음부터 snake_case + 이미지 6종 D150-1 자동 반영) |
+| **3** 알림톡 매뉴 24개 vs 한줄로 14개 매핑 | ✅ 시급 누락 0건 (미구현 10개 모두 불요 또는 선택) |
 
-#### 다음 세션 진입 즉시 (5/9 토요일)
+#### ⏸ Step 4 — 월요일(5/11) 직원 자연 검증만 잔여
 
-- **Step 0:** 배포 (atomic safe-build + pm2 reload)
-- **Step 1:** updateAlimtalkTemplate D148 변환 누락 점검 (10분)
-- **Step 2:** 브랜드메시지 9개 매뉴얼 정독 (Harold님 페이지 따주신 후)
-- **Step 3:** 알림톡 매뉴 24개 전수 비교
-- **Step 4:** 5/10 종결 검증 (직원 자연 검증 + 100% 보고)
+- 토요일 직원 검증 불가
+- **A안:** 박성용 과장님 새 템플릿 시도 → IMC 화면 정상 표시
+- **B안:** 한줄로 자체 검증 (node IMC GET 직접) — magic `ffd8ffe0` + size 일치 + match PG: true
+
+검증 통과 시 D135~D150 100% 마감.
+
+#### D135~D150 종결 매트릭스 (검증 후 확정)
+
+| 신고 | fix | 검증 |
+|---|---|:-:|
+| 등록창 안 닫힘 | D147 자동 | ✅ |
+| 한줄로 관리화면 등록 안됨 | D147 | ✅ |
+| 상태별 액션 버튼 | D139 + D147 | ✅ |
+| 대표링크 IMC 미전달 (7번 누적) | D148 (snake_case) | ✅ |
+| 안내문구 삭제 | D146 | ✅ |
+| 이미지 추출 실패 | D146 | ✅ |
+| 수정 시 한줄로 미반영 | D149-#A | ✅ |
+| **IMC 이미지 깨짐 (4주 누적)** | **D149-#B (Content-Length)** | ✅ byte 일치 검증 |
+| 이미지 업로드 9개 동일 risk | **D150-1 (D149-#B 패턴 미러)** | ✅ 배포 |
+| updateAlimtalkTemplate D148 누락 | Step 1 검증 | ✅ |
+| 브랜드메시지 D148/D149-#B 누락 | Step 2 검증 | ✅ |
+| 알림톡 매뉴 24개 누락 | Step 3 검증 | ✅ |
+| 월요일 직원 자연 검증 | A/B안 | ⏸ 5/11 |
 
 #### IMC API 60개 vs 한줄로 적용 매트릭스
 

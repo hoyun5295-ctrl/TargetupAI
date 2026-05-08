@@ -123,11 +123,17 @@ export async function prepaidRefund(
   );
 
   if (result.rows.length > 0) {
-    // ★ D145 PDF 후속: message_type 컬럼 박음 (both 채널 환불 분리)
+    // ★ D150-2 (2026-05-09) PDF #3 — description 행 단위 일치: 신규 환불 건수 표시 + 누적 보존
+    //   직원 신고: 트렉스타 5/7 11:50:11 행 "LMS 112건 × 26.4원" + 환불 +1,161.6원 → "112×26.4=2,956.8원이어야 하는데?" 오해
+    //   원인: count=누적fail, refundAmount=차액 → 행 단위 모순 (전체 누적은 정확)
+    const newRefundCount = Math.round(refundAmount / unitPrice);
+    const desc = alreadyRefunded > 0
+      ? `${reason} (${messageType} 추가 ${newRefundCount}건 × ${unitPrice}원, 누적 ${count}건)`
+      : `${reason} (${messageType} ${count}건 × ${unitPrice}원)`;
     await query(
       `INSERT INTO balance_transactions (company_id, type, amount, balance_after, description, reference_type, reference_id, payment_method, message_type)
        VALUES ($1, 'refund', $2, $3, $4, 'campaign', $5, 'system', $6)`,
-      [companyId, refundAmount, result.rows[0].balance, `${reason} (${messageType} ${count}건 × ${unitPrice}원)`, campaignId, messageType]
+      [companyId, refundAmount, result.rows[0].balance, desc, campaignId, messageType]
     );
     console.log(`[선불환불] company=${companyId} ${refundAmount}원 환불 → 잔액 ${result.rows[0].balance}원`);
   }
