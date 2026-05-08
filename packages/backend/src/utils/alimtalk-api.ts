@@ -648,10 +648,32 @@ export async function requestInspectionWithFile(
     contentType: mimetype || guessMimeFromFilename(fileName),
     knownLength: fileBuffer.length,
   });
+  // ★ D149-#B 추가 fix (2026-05-08): Content-Length 명시 + 진단 로그.
+  //   사실 검증: IMC GET /comment/file 호출 결과 4104 "파일 다운로드 실패" → IMC 측 binary 미저장 확정.
+  //   원인 가설: form-data + axios 조합에서 Content-Length 자동 계산 X → chunked Transfer-Encoding →
+  //              IMC 측 마지막 chunk 처리 실패로 binary 저장 누락 (IMC 200 0000 회신은 별개 정책).
+  //   fix: form.getLength()로 form 전체 byte 길이 정확히 계산 + 'Content-Length' 헤더 명시.
+  const formLength = await new Promise<number>((resolve, reject) =>
+    form.getLength((err, length) => (err ? reject(err) : resolve(length))),
+  );
+  console.log(
+    `[alimtalk][requestInspectionWithFile] templateKey=${templateCode} fileSize=${fileBuffer.length} formLength=${formLength} mimetype=${mimetype || 'auto'} filename=${fileName} commentLen=${(comment || '').length}`,
+  );
   const res = await getClient().post(
     `/kakao-management/api/v1/sender/${senderKey}/alimtalk/template/${templateCode}/comment/file`,
     form,
-    { headers: { ...form.getHeaders(), 'x-imc-api-key': getApiKey() } },
+    {
+      headers: {
+        ...form.getHeaders(),
+        'Content-Length': String(formLength),
+        'x-imc-api-key': getApiKey(),
+      },
+      maxBodyLength: Infinity,
+      maxContentLength: Infinity,
+    },
+  );
+  console.log(
+    `[alimtalk][requestInspectionWithFile] IMC response code=${res.data?.code} message=${res.data?.message || ''} dataKeys=${res.data?.data ? Object.keys(res.data.data).join(',') : 'null'}`,
   );
   return res.data;
 }
