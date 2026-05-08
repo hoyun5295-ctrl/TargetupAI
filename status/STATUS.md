@@ -107,6 +107,103 @@
 
 ---
 
+### 🟡 D150 (2026-05-08~10) — 알림톡+카카오 전체 디버깅+개발 완료 마라톤 (5/10 일요일 마감)
+
+> **Harold님 명시:** "5월 10일 일요일까지 전부 끝내려고 해. 같이 제대로 해보자 원칙에 맞게. 밤을 새서라도 계속 해서라도 제대로 업그레이드할 거야."
+>
+> **상세 메모리:** `memory/project_d150_alimtalk_kakao_full_audit.md` 정독 — Step 0~4 가이드 + 배포 명령어 + 금지 패턴 명시.
+
+#### ✅ 1순위 코드 fix 완료 (5/8 저녁 — 배포 대기)
+
+- `uploadSingleImage` (alimtalk-api.ts:981) + `uploadMultipleImages` (1030) 함수 2곳 fix
+- D149-#B 검증된 패턴 미러 — form.getLength + Content-Length 헤더 + contentType 명시 + maxBodyLength: Infinity
+- 9개 이미지 업로드 라우트(alimtalk_template/highlight + brand 6종 + marketing_agree) 자동 반영
+- TS 0 error / D150 마커 + form.getLength + Content-Length 헤더 grep 검증 OK
+
+#### 다음 세션 진입 즉시 (5/9 토요일)
+
+- **Step 0:** 배포 (atomic safe-build + pm2 reload)
+- **Step 1:** updateAlimtalkTemplate D148 변환 누락 점검 (10분)
+- **Step 2:** 브랜드메시지 9개 매뉴얼 정독 (Harold님 페이지 따주신 후)
+- **Step 3:** 알림톡 매뉴 24개 전수 비교
+- **Step 4:** 5/10 종결 검증 (직원 자연 검증 + 100% 보고)
+
+#### IMC API 60개 vs 한줄로 적용 매트릭스
+
+| 영역 | 개수 | D148 (snake_case) | D149-#B (Content-Length) | 시급 |
+|---|:-:|:-:|:-:|:-:|
+| **이미지 업로드** | **9** | N/A | ❌ **미적용** | 🔴 |
+| 알림톡 템플릿 관리 | 24 | createTemplate ✅ / updateTemplate **미점검** | requestInspectionWithFile ✅ | 🟡 |
+| 검수 알림 수신자 관리 | 5 | N/A | N/A | 🟢 |
+| 브랜드메시지 템플릿 | 9 | **미점검** | **미점검** | 🟡 |
+| 발신프로필 관리 | 11 | N/A | N/A | 🟢 |
+| 템플릿 카테고리 조회 | 2 | N/A | N/A | 🟢 |
+
+#### 5/10 마감 작업 우선순위
+
+1. **🔴 이미지 업로드 9개 Content-Length 적용** (D149-#B 검증된 패턴 미러 / 회귀 위험 0 / 즉시 진행)
+2. **🟡 updateAlimtalkTemplate D148 변환 누락 점검** (코드 정독 → 필요 시 normalizeTemplateBodyForImc 호출 추가)
+3. **🟡 브랜드메시지 9개 매뉴얼 정독 + 패턴 적용** (Harold님 페이지 따주신 후)
+4. **🟡 알림톡 매뉴 24개 전수 비교** (현재 한줄로 구현 vs 매뉴얼)
+
+#### 끌로드원칙 자기검증 의무
+
+작업 진입 시 한 줄: 적용 feedback 명시 → 매뉴얼/코드 정독 → grep 전수 → 보고 → 컨펌 → Edit → 잔존 0 grep → TS 0 → atomic 배포.
+
+**금지 패턴 (D149-#B에서 반복 위반):** 옵션 A/B/C 추천 / Auto mode 절차 우회 / grep 후행 / 매뉴얼 미검증 가설.
+
+---
+
+### 🟢 D149-#B 진짜 root cause 100% 검증 (2026-05-08 저녁) — D135~ 4주 알림톡 디버깅 진짜 종결
+
+> **상태:** ✅ **5/8 19:58 atomic safe-build + 검증 흐름(PG hex + IMC GET 직접 호출 + 재전송 재현)으로 진짜 root cause 100% 확정.** IMC 측 저장 binary와 PG 174905 bytes byte 단위 일치 검증.
+
+#### 🎯 진짜 root cause = form-data + axios Content-Length 누락 → chunked Transfer-Encoding → IMC binary 저장 누락
+
+**검증 흐름 (사실 기반):**
+1. **PG `inspection_evidence_data` 100% 정상** (`encode(..., 'hex')` 검증) — size 174,905 / magic `ffd8ffe0` / first_16 `ffd8ffe000104a464946000101010060` (JFIF JPG 표준)
+2. **IMC GET `/comment/file` 직접 호출** (alimtalk-api.ts:`getAlimtalkCommentFile` + 검증 라우트 `_debug-evidence-binary` 신설) → 105 bytes JSON `{"code":"4104","message":"파일 다운로드 실패","data":null}` = **IMC 측 첨부파일 미저장 확정**
+3. **D149-#B 1차 fix(mimetype + contentType + knownLength)로 안 됨** → 2차 fix: `form.getLength()` 호출 + `Content-Length` 헤더 명시 + `maxBodyLength: Infinity`
+4. **재현 검증** — 동일 PG buffer로 D149-#B fix 적용 IMC 재전송 + 즉시 GET 다운로드:
+   - POST: `code:"0000", message:"SUCCESS"` + formLength=175301 (form 전체 길이 명시 박힘)
+   - GET: 174,905 bytes / magic `ffd8ffe0` / **match PG?: true** = byte 단위 일치
+
+→ **유일한 차이 = Content-Length 헤더 명시.** form-data + axios 조합에서 자동 계산 X → chunked Transfer-Encoding → IMC가 multipart binary 저장 시 누락. **D135부터 4주 끌어온 진짜 root cause.**
+
+#### ✅ D147+D148+D149-#A+D149-#B 종합
+
+| # | fix |
+|:-:|---|
+| **D147** | `templateCode` null fallback (templateKey 3단계 폴백) |
+| **D148** | `templateRepresentLink` camelCase → snake_case 변환 |
+| **D149-#A** | V2 PUT PG 본문 미갱신 → INSERT 패턴 미러 UPDATE |
+| **D149-#B 1차** | mimetype + contentType + knownLength 명시 |
+| **D149-#B 2차 (진짜 fix)** | **form.getLength() + Content-Length 헤더 명시** (chunked transfer 차단) |
+| 검증 라우트 | `getAlimtalkCommentFile` 함수 + `_debug-evidence-binary` 라우트 신설 (미래 비슷한 사고 즉시 진단) |
+
+#### ✅ D135부터 누적 신고 모두 종결
+
+| 신고 | 처리 |
+|---|:-:|
+| 등록창 안 닫힘 | ✅ D147 자동 |
+| 한줄로 관리화면 등록 안됨 | ✅ D147 |
+| 상태별 액션 버튼 | ✅ D139 + D147 자동 |
+| **대표링크 IMC 미전달 (7번 누적)** | ✅ **D148 (snake_case)** |
+| 안내문구 삭제 | ✅ D146 |
+| 이미지 추출 실패 | ✅ D146 |
+| 수정 시 한줄로 미반영 | ✅ D149-#A |
+| **IMC 이미지 깨짐 (4주 누적)** | ✅ **D149-#B 2차 (Content-Length 명시) — IMC 측 byte 단위 일치 확정** |
+| 코멘트/증빙자료 등록 시점 | ✅ 매뉴얼 동작 정상 (검수요청 시점, 직원 검증) |
+
+#### 잔존 별건 (낮은 우선순위)
+
+1. ALIMTALK-DESIGN.md:626-631 명세 정정 (camelCase → snake_case)
+2. AlimtalkTemplateFormModal V1 레거시 폐기 (D143 명시)
+3. emphasize_sub_title 컬럼 DB DROP (V1 폐기 후)
+4. uploadSingleImage / uploadMultipleImages도 Content-Length 명시 (현재 작동 중 + 직원 신고 0건 = 시급 X, 미래 사고 방지)
+
+---
+
 ### 🟢 D147+D148+D149 (2026-05-08 오후) — 알림톡 PDF 0508 누적 4건 root cause fix 종결 (D135~ 마감)
 
 > **상태:** ✅ **5/8 17:10 atomic safe-build + pm2 reload 배포 + dist/PG/PM2/외부응답 검증 완료.** 직원 1회 IMC 이미지 정상 표시 자연 검증만 잔여. **D135부터 누적 신고된 알림톡 사고 진짜 마감.**

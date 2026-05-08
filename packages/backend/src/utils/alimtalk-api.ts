@@ -982,11 +982,29 @@ async function uploadSingleImage(
   endpoint: string,
   fileBuffer: Buffer,
   fileName: string,
+  mimetype?: string,
 ): Promise<ImcResponse<ImageUploadResult>> {
+  // ★ D150 (2026-05-08): D149-#B 패턴 미러 — Content-Length 명시 + contentType 명시.
+  //   form-data + axios 조합에서 Content-Length 자동 계산 X → chunked Transfer-Encoding →
+  //   IMC multipart binary 저장 누락 risk (D149-#B 검수요청 첨부에서 확정된 패턴).
+  //   D146에서 imageUrl 회신은 정상이었으나 IMC 측 binary 정확성 미검증 → 미래 사고 방지.
   const form = new FormData();
-  form.append('image', fileBuffer, fileName);
+  form.append('image', fileBuffer, {
+    filename: fileName,
+    contentType: mimetype || guessMimeFromFilename(fileName),
+    knownLength: fileBuffer.length,
+  });
+  const formLength = await new Promise<number>((resolve, reject) =>
+    form.getLength((err, length) => (err ? reject(err) : resolve(length))),
+  );
   const res = await getClient().post(endpoint, form, {
-    headers: { ...form.getHeaders(), 'x-imc-api-key': getApiKey() },
+    headers: {
+      ...form.getHeaders(),
+      'Content-Length': String(formLength),
+      'x-imc-api-key': getApiKey(),
+    },
+    maxBodyLength: Infinity,
+    maxContentLength: Infinity,
   });
   const data: any = res.data;
   // ★ D142+ E (2026-04-29) PDF 0428 알림톡 #1-1/#2: "카카오 응답에 이미지 정보가 없습니다" 근본 수정.
@@ -1011,13 +1029,30 @@ async function uploadSingleImage(
 
 async function uploadMultipleImages(
   endpoint: string,
-  files: { buffer: Buffer; name: string }[],
+  files: { buffer: Buffer; name: string; mimetype?: string }[],
   fieldName = 'images',
 ): Promise<ImcResponse<{ list: ImageUploadResult[] }>> {
+  // ★ D150 (2026-05-08): D149-#B 패턴 미러 — Content-Length 명시 + contentType 명시.
+  //   동일 이유로 chunked transfer 차단. 다중 파일은 각 element마다 contentType 박힘.
   const form = new FormData();
-  for (const f of files) form.append(fieldName, f.buffer, f.name);
+  for (const f of files) {
+    form.append(fieldName, f.buffer, {
+      filename: f.name,
+      contentType: f.mimetype || guessMimeFromFilename(f.name),
+      knownLength: f.buffer.length,
+    });
+  }
+  const formLength = await new Promise<number>((resolve, reject) =>
+    form.getLength((err, length) => (err ? reject(err) : resolve(length))),
+  );
   const res = await getClient().post(endpoint, form, {
-    headers: { ...form.getHeaders(), 'x-imc-api-key': getApiKey() },
+    headers: {
+      ...form.getHeaders(),
+      'Content-Length': String(formLength),
+      'x-imc-api-key': getApiKey(),
+    },
+    maxBodyLength: Infinity,
+    maxContentLength: Infinity,
   });
   const data: any = res.data;
   // ★ D142+ E (2026-04-29): 다중 이미지도 동일 unwrap 패턴 — data.list 없는데 data.data.list 있으면 승격.
