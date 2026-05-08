@@ -107,6 +107,55 @@
 
 ---
 
+### 🟢 D146 (2026-05-07 밤) — 알림톡 PDF 0506 7건 마감 + emphasize 정합화 + atomic build 메모리
+
+> **상태:** ✅ **5/7 22:36 빌드 + PM2 재시작 + 운영 dist + Node 시뮬레이션 검증 완료.** 직원 1회 시도 자연 검증만 잔여.
+>
+> **상세 메모리:** `memory/project_d146_alimtalk_pdf0506.md` 정독.
+
+#### 🎯 root cause 100% 확정 (PM2 raw + Node 시뮬레이션)
+
+PM2 raw IMC 응답: `{"code":"0000","data":{"image":"https://mud-kage.kakao.com/dn/.../img_l.jpg"}}` — 단일 `image` 키 + string URL 변종. D131(sender/template unwrap) / D142+(이중래핑) / D143 E(extractImageFromAnyShape 평탄화) **모두 미처리한 새 변종** → frontend "이미지 정보를 추출하지 못했습니다" 토스트.
+
+#### ✅ 7건 처리 결과
+
+| # | 카테고리 | 처리 |
+|:-:|---|---|
+| **#5** | 안내문구 2건 삭제 (UI) | ✅ FormV2.tsx:703 ⚠ + 791 📌 박스 제거. 라인 722 유지 (PDF 직접 언급 X) |
+| **#6+#7** | 이미지 업로드 추출 실패 | ✅ extractImageFromAnyShape stringCands 분기 추가 (URL 끝 파일명 → imageName fallback). extractImageListFromAnyShape list 변종 3종 수용. **9개 업로드 라우트 자동 반영.** |
+| **#1** | 등록창 안 닫힘 | ✅ D142+ A1+A2 코드 이미 박힘 + 부모 setToast('저장 완료'). PDF는 D142+ 빌드 이전 옛 캡처 추정 |
+| **#3** | 상태별 액션 버튼 4종 | ✅ D139 #4-1 코드 이미 박힘. PG 0행이라 표시 X. #2 해결 시 자동 |
+| **#2** | 한줄로 관리화면 등록 안됨 | ✅ INSERT 진단 로그 2곳 추가 (createTemplate 진입 + 성공). PG 0행은 #6/#7 좌절로 도달 못함. #6/#7 fix 후 자연 해결 |
+| **#4** | 대표링크 IMC 미전달 | ✅ INSERT/페이로드 코드 정상 + 진단 로깅 박힘. PG 0행 → #2 해결 후 재검증 |
+
+#### ✅ 추가 작업
+
+- **emphasize_subtitle/sub_title 중복 컬럼 정합화** — V1 INSERT/UPDATE (companies.ts:1815, 1871) + V2 INSERT (alimtalk.ts:737) 3곳 두 컬럼 동시 갱신. V1↔V2 SELECT 분기 차단.
+- **`feedback_atomic_build_only.md` 메모리 박음** — tp-deploy-full 단일 안내 영구 금지. atomic build 4단계 분리 강제.
+
+#### ✅ 검증
+
+- backend dist 5/7 22:36 + frontend dist 5/7 22:36 빌드
+- PM2 재시작 22:36:19 KST, uptime 2m+ 정상
+- `stringCands` 매칭 2건 + `D146` 매칭 5건 운영 dist 박힘
+- 컴파일된 분기 본문 정확: `if (typeof url === 'string' && url.startsWith('http'))`
+- **Node 시뮬레이션** (운영 코드 + 실제 IMC raw 응답): `{ imageUrl, imageName: "img_l.jpg" }` 정상 반환
+- TS 0 error (backend + frontend)
+
+#### 별건 (D147+ 처리)
+
+- V2 PUT `/templates/:templateCode` PG 본문 미갱신 ([alimtalk.ts:914-934](packages/backend/src/routes/alimtalk.ts:914)) — IMC만 갱신 + PG는 last_synced_at만. #2 자연 해결 후 발현 위험.
+- AlimtalkTemplateFormModal V1 레거시 폐기 (D143 메모리 명시).
+- emphasize_sub_title 컬럼 자체 DB DROP (V1 폐기 후).
+
+#### 직원 1회 시도 자연 검증 항목
+
+- PM2 새 로그: `image-upload 비정상응답` 미출현 + `createTemplate 진입`+`성공` 출현
+- `kakao_image_uploads` 새 행: `image_name = 'img_l.jpg'`(URL 끝 파일명)
+- `kakao_templates` 새 행: `emphasize_subtitle == emphasize_sub_title` + `represent_link` JSONB 정상
+
+---
+
 ### 🟢 D145 (2026-05-07) — 9시간 사고 복구 + PDF 0506 13건 배포 + 영구 재발 방지 인프라 적용
 
 > **상태:** ✅ **5/7 오전 마감.** PDF 0506 13건 배포 + atomic deploy 인프라 적용 + SMS 알림 통합 완료.

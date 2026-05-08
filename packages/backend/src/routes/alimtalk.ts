@@ -687,7 +687,14 @@ router.post(
         ...body,
         templateKey,
       });
-      let templateCode: string | null = r.data?.templateCode || null;
+      // ★ D147 (2026-05-08) PDF 0508 #2/#3 root cause fix:
+      //   IMC 등록 응답에 templateCode=null + inspectionStatus="REG"로 회신 (검수요청 전에는 templateCode 미발급 정상 동작).
+      //   D135부터 r.data.templateCode만 의존 → null이면 라인 708 `!templateCode` 분기에서 400 반환 → PG INSERT 차단.
+      //   IMC는 등록 성공(templateKey 발급)인데 한줄로 PG에 안 들어가 "관리화면 등록 안됨" 신고 반복.
+      //   3단계 fallback: IMC응답 templateCode → IMC응답 templateKey → 로컬 templateKey(한줄로가 IMC에 보낸 키).
+      //   PG `template_code` = templateKey 박힘 → 다른 라우트(GET/PUT/DELETE/inspect 등) `template_code` WHERE 식별 정상 작동 (IMC가 templateKey로 식별).
+      let templateCode: string | null =
+        r.data?.templateCode || (r.data as any)?.templateKey || templateKey || null;
 
       // B3 복구 경로: 4014 템플릿키 중복 → IMC에서 기존 템플릿 조회
       if (r.code === '4014' && !templateCode) {
