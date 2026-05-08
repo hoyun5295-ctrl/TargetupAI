@@ -1095,9 +1095,11 @@ router.post(
       // ★ D143 F (2026-04-30) PDF 0430 #3: 등록 폼에서 저장한 코멘트+증빙자료를 자동으로 IMC에 전달.
       //   body.comment가 명시되면 우선 사용 (재검수 모달에서 추가 입력 가능).
       //   evidence가 DB에 있으면 IMC requestInspectionWithFile, 없으면 requestInspection.
+      // ★ D149-#B (2026-05-08) PDF 0508 후속 "IMC 이미지 깨짐" fix: mimetype 컬럼도 SELECT.
       const meta = await query(
         `SELECT inspection_comment,
                 inspection_evidence_filename,
+                inspection_evidence_mimetype,
                 inspection_evidence_data
            FROM kakao_templates WHERE id = $1`,
         [ctx.id],
@@ -1110,6 +1112,7 @@ router.post(
           ? row.inspection_evidence_data
           : null;
       const evidenceFilename: string = row.inspection_evidence_filename || 'evidence';
+      const evidenceMimetype: string | undefined = row.inspection_evidence_mimetype || undefined;
 
       let r;
       if (evidenceBuffer) {
@@ -1119,6 +1122,7 @@ router.post(
           finalComment,
           evidenceBuffer,
           evidenceFilename,
+          evidenceMimetype,
         );
       } else {
         r = await imc.requestInspection(
@@ -1150,14 +1154,18 @@ router.post(
       const file = (req as any).file;
       // ★ D143 F (2026-04-30): 파일이 직접 첨부되지 않아도 DB의 inspection_evidence_data로 폴백.
       //   기존엔 첨부 필수였지만, 등록 폼 하단에서 이미 저장된 증빙자료를 검수요청 모달에서 재사용 가능.
+      // ★ D149-#B (2026-05-08): mimetype도 함께 추출 (IMC FormData contentType 명시 — 이미지 깨짐 fix).
       let buffer: Buffer | undefined;
       let filename: string | undefined;
+      let mimetype: string | undefined;
       if (file) {
-        buffer = file.buffer;
-        filename = file.originalname;
+        const decoded = decodeOriginalName(file);
+        buffer = decoded.buffer;
+        filename = decoded.originalname;
+        mimetype = decoded.mimetype;
       } else {
         const meta = await query(
-          `SELECT inspection_evidence_filename, inspection_evidence_data
+          `SELECT inspection_evidence_filename, inspection_evidence_mimetype, inspection_evidence_data
              FROM kakao_templates WHERE id = $1`,
           [ctx.id],
         );
@@ -1165,6 +1173,7 @@ router.post(
         if (row.inspection_evidence_data && Buffer.isBuffer(row.inspection_evidence_data)) {
           buffer = row.inspection_evidence_data;
           filename = row.inspection_evidence_filename || 'evidence';
+          mimetype = row.inspection_evidence_mimetype || undefined;
         }
       }
       if (!buffer || !filename) {
@@ -1176,6 +1185,7 @@ router.post(
         req.body?.comment || '',
         buffer,
         filename,
+        mimetype,
       );
       await query(
         `UPDATE kakao_templates

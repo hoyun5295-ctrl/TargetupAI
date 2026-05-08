@@ -632,19 +632,45 @@ export async function requestInspectionWithFile(
   comment: string,
   fileBuffer: Buffer,
   fileName: string,
+  mimetype?: string,
 ): Promise<ImcResponse> {
-  // ★ IMC 실제 스펙 검증 (10_57_41_문자 관리.txt):
+  // ★ IMC 실제 스펙 검증 (10_57_41_문자 관리.txt + POST_검수요청(첨부파일포함) 매뉴얼):
   //   URL: POST /sender/{senderKey}/alimtalk/template/{templateKey}/comment/file
-  //   multipart fields: comment (string, required), attachment (binary, required)
+  //   multipart fields: comment (string, optional), attachment (binary, required)
+  //   허용 확장자: png, jpg, jpeg, gif, pdf, hwp, doc, docx (최대 10MB)
+  // ★ D149-#B (2026-05-08) PDF 0508 후속 직원 카톡 신고 "IMC에서 이미지가 깨짐" root cause fix:
+  //   기존: form.append('attachment', fileBuffer, fileName) — contentType 미명시 → IMC가 octet-stream으로 인식 → 이미지 깨짐.
+  //   수정: contentType 명시 (knownLength + filename + mimetype 모두 박음).
   const form = new FormData();
   form.append('comment', comment);
-  form.append('attachment', fileBuffer, fileName);
+  form.append('attachment', fileBuffer, {
+    filename: fileName,
+    contentType: mimetype || guessMimeFromFilename(fileName),
+    knownLength: fileBuffer.length,
+  });
   const res = await getClient().post(
     `/kakao-management/api/v1/sender/${senderKey}/alimtalk/template/${templateCode}/comment/file`,
     form,
     { headers: { ...form.getHeaders(), 'x-imc-api-key': getApiKey() } },
   );
   return res.data;
+}
+
+// ★ D149-#B: 파일명 확장자 → MIME type 추정 (mimetype DB 누락 시 fallback).
+//   IMC 매뉴얼 허용 확장자: png, jpg, jpeg, gif, pdf, hwp, doc, docx
+function guessMimeFromFilename(filename: string): string {
+  const ext = (filename.split('.').pop() || '').toLowerCase();
+  const map: Record<string, string> = {
+    png: 'image/png',
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    gif: 'image/gif',
+    pdf: 'application/pdf',
+    hwp: 'application/x-hwp',
+    doc: 'application/msword',
+    docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  };
+  return map[ext] || 'application/octet-stream';
 }
 
 export async function cancelInspection(
