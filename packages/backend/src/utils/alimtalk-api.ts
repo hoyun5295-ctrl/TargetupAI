@@ -464,7 +464,38 @@ function normalizeTemplateBodyForImc<T extends Record<string, any>>(body: T): T 
   if (Array.isArray(body.quickReplyList)) {
     out.quickReplyList = body.quickReplyList.map(toImcButton);
   }
+  // ★ D148 (2026-05-08) PDF 0508 #4 IMC측 진짜 root cause fix:
+  //   IMC 매뉴얼은 templateRepresentLink 하위 키를 snake_case (url_mobile/url_pc/scheme_android/scheme_ios) 요구.
+  //   D135부터 한줄로가 camelCase(urlMobile/urlPc/schemeIos/schemeAndroid)로 보냄 → IMC 키 매칭 실패 → 응답 빈 echo + IMC DB 미저장.
+  //   "대표링크 IMC 미전달" 신고 D139/D142+/D146 누적 반복의 진짜 원인.
+  if (out.templateRepresentLink && typeof out.templateRepresentLink === 'object') {
+    out.templateRepresentLink = toImcRepresentLink(out.templateRepresentLink);
+  }
   return out as T;
+}
+
+/**
+ * ★ D148 (2026-05-08): templateRepresentLink camelCase → snake_case 변환.
+ *   IMC 매뉴얼 응답 명세: { url_mobile, url_pc, scheme_android, scheme_ios }.
+ *   한줄로 frontend는 camelCase 그대로 유지 (코드 가독성), backend가 IMC 호출 직전에만 변환.
+ *   이미 snake_case가 세팅된 필드는 그대로 유지(idempotent).
+ */
+function toImcRepresentLink(rl: any): any {
+  if (!rl || typeof rl !== 'object') return rl;
+  const pick = (camel: string, snake: string) =>
+    rl[snake] !== undefined ? rl[snake] : rl[camel];
+  const out: any = {};
+  const map: Array<[string, string]> = [
+    ['urlMobile', 'url_mobile'],
+    ['urlPc', 'url_pc'],
+    ['schemeAndroid', 'scheme_android'],
+    ['schemeIos', 'scheme_ios'],
+  ];
+  for (const [c, s] of map) {
+    const v = pick(c, s);
+    if (v !== undefined && v !== null && v !== '') out[s] = v;
+  }
+  return out;
 }
 
 export async function createAlimtalkTemplate(

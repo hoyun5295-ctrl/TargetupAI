@@ -107,6 +107,57 @@
 
 ---
 
+### 🟢 D147 (2026-05-08 오후) — 알림톡 PDF 0508 root cause fix + atomic safe-build (고객사 사용 중 차단 0초)
+
+> **상태:** ✅ **5/8 16:07 atomic safe-build + pm2 reload 배포 + PG/PM2 검증 완료.** 직원 1회 시도 → PG row 등장 + 모든 컬럼 정상 INSERT 확정.
+>
+> **상세 메모리:** `memory/project_d147_alimtalk_pdf0508.md` 정독.
+
+#### 🎯 root cause 100% 확정 (PM2 raw)
+
+IMC 등록 응답: `{templateKey:"Tmowko4nzkdq3fvmg59", templateCode:null, templateRepresentLink:{}, inspectionStatus:"REG"}`
+
+D135부터 깔린 `r.data.templateCode` 의존 가정이 D139 #4 (등록과 검수요청 분리) 후 깨짐. IMC가 등록 시점에 templateCode 발급 안 함 (검수요청 후 발급) → null 회신 → alimtalk.ts:708 분기 400 → PG INSERT 차단.
+
+#### ✅ D147 fix (alimtalk.ts:690 — 3단계 fallback)
+
+```typescript
+let templateCode: string | null =
+  r.data?.templateCode || (r.data as any)?.templateKey || templateKey || null;
+```
+
+PG `template_code = template_key` 박힘 → 다른 라우트(GET/PUT/DELETE/inspect) 정상 작동.
+
+#### ✅ 7건 동시 해결 (PDF 0508 검증 row 등장)
+
+| # | 결과 |
+|:-:|---|
+| #1 등록창 안 닫힘 | ✅ 자동 (201 응답 → onSuccess+onClose) |
+| #2 한줄로 관리화면 등록 안됨 | ✅ **직접 해결** |
+| #3 상태별 액션 버튼 | ✅ 자동 (PG row 등장 → D139 #4-1 표시) |
+| #4-한줄로 대표링크 | ✅ represent_link JSONB 정상 INSERT |
+| #4-한줄로 코멘트 | ✅ inspection_comment 정상 |
+| #4-한줄로 증빙자료 | ✅ inspection_evidence 2675 bytes BYTEA 정상 |
+
+#### 잔존 별건 (D148+)
+
+- **IMC 측 representLink 빈 echo** — payload는 정확히 보냄, IMC 응답 `{}` + IMC 화면 비어있음. IMC 매뉴얼 + `getAlimtalkTemplate` 직접 호출 검증 필요
+- V2 PUT PG 본문 미갱신 (D146 명시)
+- AlimtalkTemplateFormModal V1 레거시 폐기 (D143 명시)
+- emphasize_sub_title 컬럼 DB DROP (V1 폐기 후)
+
+#### atomic build 흐름 (D145 사고 재발 방지 + 고객사 사용 중 차단 0초)
+
+```bash
+cd /home/administrator/targetup-app && git pull
+cd /home/administrator/targetup-app/packages/backend && bash scripts/safe-build.sh
+pm2 reload targetup-backend
+```
+
+→ `dist-new` 빌드 → 검증 → `atomic mv` swap. 빌드 실패 시 옛 dist 그대로 유지 = 차단 0초.
+
+---
+
 ### 🟢 D146 (2026-05-07 밤) — 알림톡 PDF 0506 7건 마감 + emphasize 정합화 + atomic build 메모리
 
 > **상태:** ✅ **5/7 22:36 빌드 + PM2 재시작 + 운영 dist + Node 시뮬레이션 검증 완료.** 직원 1회 시도 자연 검증만 잔여.
