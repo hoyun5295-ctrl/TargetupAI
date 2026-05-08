@@ -1005,6 +1005,69 @@ router.put(
   },
 );
 
+// ★ D149-#B 검증 라우트 (2026-05-08): IMC 측 저장 binary와 PG inspection_evidence_data hex 비교.
+//   목적: 검수요청 첨부파일 IMC 화면 다운로드 시 깨짐 → PG 100% 정상(magic ffd8ffe0) 확인됨 →
+//         IMC 측 저장 단계 손상인지 / 한줄로→IMC 전송 단계 손상인지 가르는 검증.
+//   응답: { imc: {size, magic_4, first_16, content_type}, pg: {size, magic_4, first_16}, match: bool }
+//   호출: GET /api/alimtalk/templates/:templateCode/_debug-evidence-binary (운영 영향 0, 검증 전용)
+router.get(
+  '/templates/:templateCode/_debug-evidence-binary',
+  async (req: Request, res: Response) => {
+    try {
+      const ctx = await requireTemplateAccess(req, res);
+      if (!ctx) return;
+      // PG 데이터
+      const pgRow = await query(
+        `SELECT inspection_evidence_data, inspection_evidence_filename, inspection_evidence_mimetype,
+                LENGTH(inspection_evidence_data) AS size
+           FROM kakao_templates WHERE id = $1`,
+        [ctx.id],
+      );
+      const pgRowData = pgRow.rows[0] || {};
+      const pgBuffer: Buffer | null =
+        pgRowData.inspection_evidence_data && Buffer.isBuffer(pgRowData.inspection_evidence_data)
+          ? pgRowData.inspection_evidence_data
+          : null;
+      // IMC 측 binary 가져오기
+      let imcResult: any = null;
+      let imcError: any = null;
+      try {
+        const imcDownload = await imc.getAlimtalkCommentFile(ctx.senderKey, req.params.templateCode);
+        imcResult = {
+          size: imcDownload.size,
+          content_type: imcDownload.contentType,
+          magic_4: imcDownload.buffer.slice(0, 4).toString('hex'),
+          first_16: imcDownload.buffer.slice(0, 16).toString('hex'),
+          last_8: imcDownload.buffer.slice(-8).toString('hex'),
+        };
+      } catch (e: any) {
+        imcError = { message: e?.message, status: e?.response?.status, body: e?.response?.data ? String(e.response.data).slice(0, 300) : null };
+      }
+      const pgInfo = pgBuffer ? {
+        size: pgBuffer.length,
+        filename: pgRowData.inspection_evidence_filename,
+        mimetype: pgRowData.inspection_evidence_mimetype,
+        magic_4: pgBuffer.slice(0, 4).toString('hex'),
+        first_16: pgBuffer.slice(0, 16).toString('hex'),
+        last_8: pgBuffer.slice(-8).toString('hex'),
+      } : null;
+      res.json({
+        success: true,
+        templateCode: req.params.templateCode,
+        senderKey: ctx.senderKey,
+        pg: pgInfo,
+        imc: imcResult,
+        imcError: imcError,
+        match: pgInfo && imcResult
+          ? (pgInfo.size === imcResult.size && pgInfo.first_16 === imcResult.first_16)
+          : null,
+      });
+    } catch (err) {
+      return handleImcError(res, err);
+    }
+  },
+);
+
 router.delete(
   '/templates/:templateCode',
   async (req: Request, res: Response) => {

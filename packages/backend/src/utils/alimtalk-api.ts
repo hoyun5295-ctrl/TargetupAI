@@ -673,6 +673,34 @@ function guessMimeFromFilename(filename: string): string {
   return map[ext] || 'application/octet-stream';
 }
 
+/**
+ * ★ D149-#B 추가 검증 (2026-05-08): IMC 측에 저장된 검수 코멘트 첨부파일을 binary로 다운로드.
+ *   매뉴얼: GET /kakao-management/api/v1/sender/{senderKey}/alimtalk/template/{templateKey}/comment/file
+ *   응답: body string(binary) — IMC가 raw binary 그대로 회신.
+ *   목적: PG `inspection_evidence_data`(magic ffd8ffe0 정상 확인됨)와 IMC 측 저장 binary를 hex 비교 →
+ *         손상 단계가 (a) 한줄로→IMC 전송 (b) IMC 측 저장 (c) IMC 화면 다운로드 중 어디인지 확정.
+ */
+export async function getAlimtalkCommentFile(
+  senderKey: string,
+  templateCode: string,
+): Promise<{ buffer: Buffer; contentType: string; size: number }> {
+  const res = await getClient().get(
+    `/kakao-management/api/v1/sender/${senderKey}/alimtalk/template/${templateCode}/comment/file`,
+    {
+      headers: { 'x-imc-api-key': getApiKey() },
+      responseType: 'arraybuffer',
+      maxBodyLength: Infinity,
+      maxContentLength: Infinity,
+    },
+  );
+  const buffer = Buffer.from(res.data);
+  return {
+    buffer,
+    contentType: res.headers['content-type'] || 'application/octet-stream',
+    size: buffer.length,
+  };
+}
+
 export async function cancelInspection(
   senderKey: string,
   templateCode: string,
