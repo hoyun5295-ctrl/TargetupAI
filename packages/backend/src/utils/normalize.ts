@@ -594,3 +594,20 @@ export function normalizeByFieldKey(fieldKey: string, value: any): any {
       return String(value).trim();
   }
 }
+
+/**
+ * 셀 값(엑셀/JSON)을 안전하게 문자열로 변환.
+ * null/undefined/NaN만 빈 문자열, 0 / '0' / false / Date 등은 그대로 보존.
+ *
+ * ★ D150-3 (2026-05-09) PDF #5 — 직접발송 0 NULL 사고 root cause fix
+ *   frontend formatDate.ts cellToString 미러. 모든 backend 셀/주소록 변환을 이 헬퍼로 통합.
+ *   인라인 safeStr 정의 금지 — 컨트롤타워 일관 import.
+ */
+export function cellToString(val: unknown): string {
+  if (val === null || val === undefined) return '';
+  if (typeof val === 'number') return Number.isNaN(val) ? '' : String(val);
+  if (typeof val === 'string') return val;
+  if (typeof val === 'boolean') return String(val);
+  if (val instanceof Date) return val.toISOString();
+  return String(val);
+}

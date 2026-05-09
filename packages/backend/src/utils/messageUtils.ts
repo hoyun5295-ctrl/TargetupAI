@@ -13,6 +13,7 @@
 import { VarCatalogEntry, extractVarCatalog } from '../services/ai';
 import { formatNumericLike } from './format-number';
 import { reverseDisplayValue, FIELD_DISPLAY_MAP, renderFieldValue } from './standard-field-map';
+import { cellToString } from './normalize';
 import { query } from '../config/database';
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -205,10 +206,9 @@ export function replaceVariables(
   // — fieldMappings에 없는 주소록 전용 변수를 먼저 치환하여 안전망에 잡히지 않도록
   if (addressBookFields) {
     // ★ D123: 직접발송은 고객 원본 데이터 그대로 (skipNumberFormatting=true), AI발송만 포맷팅
-    // ★ D150-3 (2026-05-09) PDF #5: 0/'0' 보존 — null/undefined/'' 만 빈 문자열, number 0은 "0" 반환
+    // ★ D150-3 (2026-05-09) PDF #5: cellToString 컨트롤타워(normalize.ts) 사용 — 0/'0' 보존 통일
     const fmtExtra = (val: string | number | null | undefined): string => {
-      if (val === null || val === undefined || val === '') return '';
-      const s = typeof val === 'number' && Number.isNaN(val) ? '' : String(val);
+      const s = cellToString(val);
       if (s === '') return '';
       if (options?.skipNumberFormatting) return s;
       return formatNumericLike(s) ?? s;
@@ -223,10 +223,9 @@ export function replaceVariables(
     //   - customer가 없으면 주소록 name 사용 (기존 로직)
     //   - customer는 있지만 customer.name이 비어있으면 주소록 name으로 폴백 (NEW)
     //   - customer.name이 있어도 아래 1단계 fieldMappings 치환이 동일한 결과를 내므로 덮어써도 무관
-    // ★ D150-3 (2026-05-09) PDF #5: name도 number 가능 → string 변환 후 사용
+    // ★ D150-3 (2026-05-09) PDF #5: cellToString 컨트롤타워 활용 — 0/'0' 보존
     const customerNameEmpty = !customer || !customer.name || String(customer.name).trim() === '';
-    const fbName = addressBookFields.name === null || addressBookFields.name === undefined
-      ? '' : String(addressBookFields.name).trim();
+    const fbName = cellToString(addressBookFields.name).trim();
     if (customerNameEmpty && fbName) {
       // 이름+고객명+성함 등 FIELD_MAP.aliases 키 전부 커버 (가장 흔한 한글 변수명)
       result = result

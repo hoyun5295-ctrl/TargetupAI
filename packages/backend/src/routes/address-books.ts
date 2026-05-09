@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
+import { cellToString } from '../utils/normalize';
 
 const router = Router();
 
@@ -94,13 +95,11 @@ router.post('/', async (req: Request, res: Response) => {
     for (const contact of contacts) {
       const phone = String(contact.phone || '').replace(/\D/g, '');
       if (phone.length >= 10) {
-        // ★ D150-3 (2026-05-09) PDF #5: 0/'0' 보존 — null/undefined만 빈 문자열
-        const safeStr = (v: unknown): string =>
-          v === null || v === undefined ? '' : String(v);
+        // ★ D150-3 (2026-05-09) PDF #5: cellToString 컨트롤타워(normalize.ts) 사용 — 인라인 safeStr 폐기
         await query(
           `INSERT INTO address_books (company_id, user_id, group_name, phone, name, extra1, extra2, extra3)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-          [companyId, userId, groupName, phone, safeStr(contact.name), safeStr(contact.extra1), safeStr(contact.extra2), safeStr(contact.extra3)]
+          [companyId, userId, groupName, phone, cellToString(contact.name), cellToString(contact.extra1), cellToString(contact.extra2), cellToString(contact.extra3)]
         );
         insertCount++;
       }
