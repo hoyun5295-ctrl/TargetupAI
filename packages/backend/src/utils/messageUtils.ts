@@ -165,10 +165,11 @@ export function cleanLeftoverVars(text: string): string {
  * - %기타1%, %기타2%, %기타3%, %회신번호% 치환에 사용
  */
 export interface AddressBookFields {
-  name?: string;
-  extra1?: string;
-  extra2?: string;
-  extra3?: string;
+  // ★ D150-3 (2026-05-09) PDF #5: number 허용 — 엑셀 셀이 number 0으로 도착해도 수용
+  name?: string | number;
+  extra1?: string | number;
+  extra2?: string | number;
+  extra3?: string | number;
   callback?: string;
 }
 
@@ -204,10 +205,13 @@ export function replaceVariables(
   // — fieldMappings에 없는 주소록 전용 변수를 먼저 치환하여 안전망에 잡히지 않도록
   if (addressBookFields) {
     // ★ D123: 직접발송은 고객 원본 데이터 그대로 (skipNumberFormatting=true), AI발송만 포맷팅
-    const fmtExtra = (val: string | undefined) => {
-      if (!val) return '';
-      if (options?.skipNumberFormatting) return val;  // 직접발송: 원본 그대로
-      return formatNumericLike(val) ?? val;           // AI발송: 숫자 포맷팅
+    // ★ D150-3 (2026-05-09) PDF #5: 0/'0' 보존 — null/undefined/'' 만 빈 문자열, number 0은 "0" 반환
+    const fmtExtra = (val: string | number | null | undefined): string => {
+      if (val === null || val === undefined || val === '') return '';
+      const s = typeof val === 'number' && Number.isNaN(val) ? '' : String(val);
+      if (s === '') return '';
+      if (options?.skipNumberFormatting) return s;
+      return formatNumericLike(s) ?? s;
     };
     result = result
       .replace(/%기타1%/g, fmtExtra(addressBookFields.extra1))
@@ -219,13 +223,16 @@ export function replaceVariables(
     //   - customer가 없으면 주소록 name 사용 (기존 로직)
     //   - customer는 있지만 customer.name이 비어있으면 주소록 name으로 폴백 (NEW)
     //   - customer.name이 있어도 아래 1단계 fieldMappings 치환이 동일한 결과를 내므로 덮어써도 무관
+    // ★ D150-3 (2026-05-09) PDF #5: name도 number 가능 → string 변환 후 사용
     const customerNameEmpty = !customer || !customer.name || String(customer.name).trim() === '';
-    if (customerNameEmpty && addressBookFields.name) {
+    const fbName = addressBookFields.name === null || addressBookFields.name === undefined
+      ? '' : String(addressBookFields.name).trim();
+    if (customerNameEmpty && fbName) {
       // 이름+고객명+성함 등 FIELD_MAP.aliases 키 전부 커버 (가장 흔한 한글 변수명)
       result = result
-        .replace(/%이름%/g, addressBookFields.name)
-        .replace(/%고객명%/g, addressBookFields.name)
-        .replace(/%성함%/g, addressBookFields.name);
+        .replace(/%이름%/g, fbName)
+        .replace(/%고객명%/g, fbName)
+        .replace(/%성함%/g, fbName);
     } else if (!customer) {
       // customer도 없고 addressBookFields.name도 없으면 빈값으로 처리 (안전망 진입 전 선치환)
       result = result.replace(/%이름%/g, '').replace(/%고객명%/g, '').replace(/%성함%/g, '');

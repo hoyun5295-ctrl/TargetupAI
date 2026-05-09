@@ -1166,3 +1166,21 @@ export function displayValue(value: any, fieldKey?: string): string {
   if (formatter) return formatter(value);
   return String(value);
 }
+
+/**
+ * 셀 값(엑셀/JSON)을 안전하게 문자열로 변환.
+ * null/undefined/NaN만 빈 문자열, 0 / '0' / false / Date 등은 그대로 보존.
+ *
+ * ★ D150-3 (2026-05-09) PDF #5 — 직접발송 0 NULL 사고 root cause fix
+ *   직원 신고: 벤제프 113건 발송에서 엑셀 D2/E2/F2=0 값이 NULL로 발송 (총: (상품+유상품))
+ *   원인: 기존 `row[col] || ''` 패턴이 number 0을 falsy 처리 → 빈 문자열
+ *   해결: 모든 엑셀/주소록 셀 변환을 이 헬퍼로 통합 (DirectSendPanel/AddressBookModal/Dashboard)
+ */
+export function cellToString(val: unknown): string {
+  if (val === null || val === undefined) return '';
+  if (typeof val === 'number') return Number.isNaN(val) ? '' : String(val);
+  if (typeof val === 'string') return val;
+  if (typeof val === 'boolean') return String(val);
+  if (val instanceof Date) return val.toISOString();
+  return String(val);
+}

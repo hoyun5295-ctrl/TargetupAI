@@ -37,6 +37,7 @@ import {
   buildAdMessageFront,
   detectPhoneHeaders,
   normalizePhoneKr,
+  cellToString,
 } from '../utils/formatDate';
 import { insertAtCursorPos } from '../utils/textInsert';
 import MmsImagePreview from './shared/MmsImagePreview';
@@ -431,10 +432,11 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
           // D99 원칙: "축소된 객체에서 resolveRecipientCallback 호출 금지" 준수.
           ...row,
           phone,
-          name: directColumnMapping.name ? (row[directColumnMapping.name] || '') : '',
-          extra1: directColumnMapping.extra1 ? (row[directColumnMapping.extra1] || '') : '',
-          extra2: directColumnMapping.extra2 ? (row[directColumnMapping.extra2] || '') : '',
-          extra3: directColumnMapping.extra3 ? (row[directColumnMapping.extra3] || '') : '',
+          // ★ D150-3 (2026-05-09) PDF #5: 0/'0' 값 보존 (cellToString — null/undefined만 빈문자열)
+          name: directColumnMapping.name ? cellToString(row[directColumnMapping.name]) : '',
+          extra1: directColumnMapping.extra1 ? cellToString(row[directColumnMapping.extra1]) : '',
+          extra2: directColumnMapping.extra2 ? cellToString(row[directColumnMapping.extra2]) : '',
+          extra3: directColumnMapping.extra3 ? cellToString(row[directColumnMapping.extra3]) : '',
           callback: directColumnMapping.callback ? normalizePhoneKr(row[directColumnMapping.callback]) : '',
         };
         if (directSendChannel === 'kakao_alimtalk' && kakaoSelectedTemplate) {
@@ -442,7 +444,7 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
           const varValues: Record<string, string> = {};
           vars.forEach((varName: string, vi: number) => {
             const mappedCol = (directColumnMapping as any)[`tplvar_${vi}`];
-            if (mappedCol) varValues[varName] = String(row[mappedCol] || '');
+            if (mappedCol) varValues[varName] = cellToString(row[mappedCol]);
           });
           entry._templateVars = varValues;
         }

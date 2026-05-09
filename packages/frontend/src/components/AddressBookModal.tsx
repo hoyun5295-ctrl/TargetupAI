@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { cellToString } from '../utils/formatDate';
 
 interface AddressBookModalProps {
   show: boolean;
@@ -59,7 +60,8 @@ export default function AddressBookModal({
             if (!phone || seenPhones.has(phone)) continue;
             seenPhones.add(phone);
             allContacts.push({
-              phone, name: c.name || '', extra1: c.extra1 || '', extra2: c.extra2 || '', extra3: c.extra3 || ''
+              // ★ D150-3 (2026-05-09) PDF #5: 0/'0' 보존
+              phone, name: cellToString(c.name), extra1: cellToString(c.extra1), extra2: cellToString(c.extra2), extra3: cellToString(c.extra3)
             });
           }
         }
@@ -327,11 +329,12 @@ export default function AddressBookModal({
                       return;
                     }
                     const contacts = addressFileData.map((row: any) => ({
-                      phone: row[addressColumnMapping.phone] || '',
-                      name: row[addressColumnMapping.name] || '',
-                      extra1: row[addressColumnMapping.extra1] || '',
-                      extra2: row[addressColumnMapping.extra2] || '',
-                      extra3: row[addressColumnMapping.extra3] || '',
+                      // ★ D150-3 (2026-05-09) PDF #5: 엑셀 0 값 보존
+                      phone: cellToString(row[addressColumnMapping.phone]),
+                      name: cellToString(row[addressColumnMapping.name]),
+                      extra1: cellToString(row[addressColumnMapping.extra1]),
+                      extra2: cellToString(row[addressColumnMapping.extra2]),
+                      extra3: cellToString(row[addressColumnMapping.extra3]),
                     }));
                     const token = localStorage.getItem('token');
                     const res = await fetch('/api/address-books', {
@@ -482,11 +485,12 @@ export default function AddressBookModal({
                             const data = await res.json();
                             if (data.success) {
                               setDirectRecipients(data.contacts.map((c: any) => ({
+                                // ★ D150-3 (2026-05-09) PDF #5: 0/'0' 보존
                                 phone: c.phone,
-                                name: c.name || '',
-                                extra1: c.extra1 || '',
-                                extra2: c.extra2 || '',
-                                extra3: c.extra3 || ''
+                                name: cellToString(c.name),
+                                extra1: cellToString(c.extra1),
+                                extra2: cellToString(c.extra2),
+                                extra3: cellToString(c.extra3)
                               })));
                               onClose();
                               setAddressViewGroup(null);

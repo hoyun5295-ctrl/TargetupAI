@@ -45,7 +45,7 @@ import TodayStatsModal from '../components/TodayStatsModal';
 import UploadProgressModal from '../components/UploadProgressModal';
 import UploadResultModal from '../components/UploadResultModal';
 import { useAuthStore } from '../stores/authStore';
-import { formatDate, formatPreviewValue, formatByType, calculateSmsBytes, truncateToSmsBytes, DIRECT_VAR_MAP, DIRECT_VAR_TO_FIELD, DIRECT_FIELD_LABELS, DIRECT_MAPPING_FIELDS, replaceDirectVars, formatPhoneNumber, mmsServerPathToUrl, resolveRecipientCallback, buildAdMessageFront, validateMmsBeforeSend, getMaxByteMessage } from '../utils/formatDate';
+import { formatDate, formatPreviewValue, formatByType, calculateSmsBytes, truncateToSmsBytes, DIRECT_VAR_MAP, DIRECT_VAR_TO_FIELD, DIRECT_FIELD_LABELS, DIRECT_MAPPING_FIELDS, replaceDirectVars, formatPhoneNumber, mmsServerPathToUrl, resolveRecipientCallback, buildAdMessageFront, validateMmsBeforeSend, getMaxByteMessage, cellToString } from '../utils/formatDate';
 import { insertAtCursorOrAppend } from '../utils/textInsert';
 import { getMmsImagePath, getMmsImageDisplayName, toMmsImagePaths, type MmsImageItem } from '../utils/mmsImage';
 import DirectSendPanel from '../components/DirectSendPanel';
@@ -450,11 +450,12 @@ export default function Dashboard() {
         // 실패로 fetch가 throw되어 "발송 실패" 토스트(catch 블록)에 직행했음. 백엔드 CT-08은 callbackColumn 없이
         // 호출되므로 c.callback 하나만 정확히 전달하면 미등록 회신번호 확인 모달(callbackConfirmRequired)까지 정상 동작.
         recipients: directRecipients.map((r: any) => ({
+          // ★ D150-3 (2026-05-09) PDF #5: 0/'0' 보존
           phone: r.phone,
-          name: r.name || '',
-          extra1: r.extra1 || '',
-          extra2: r.extra2 || '',
-          extra3: r.extra3 || '',
+          name: cellToString(r.name),
+          extra1: cellToString(r.extra1),
+          extra2: cellToString(r.extra2),
+          extra3: cellToString(r.extra3),
           callback: resolveRecipientCallback(r, useIndividualCallback, individualCallbackColumn) || r.callback || null,
         })),
         adEnabled: isAlimtalk ? false : adTextEnabled,
@@ -581,11 +582,12 @@ export default function Dashboard() {
       // ★ D102: 프론트 변수 치환 제거 — 백엔드 replaceVariables 컨트롤타워 하나로 통일
       // customMessages를 보내지 않으므로 백엔드에서 DB 고객 데이터 기반으로 치환 + 포맷팅
       const recipientsForSend = targetRecipients.map((r: any) => ({
+        // ★ D150-3 (2026-05-09) PDF #5: 0/'0' 보존
         phone: r.phone,
-        name: r.name || '',
-        extra1: r.extra1 || '',
-        extra2: r.extra2 || '',
-        extra3: r.extra3 || '',
+        name: cellToString(r.name),
+        extra1: cellToString(r.extra1),
+        extra2: cellToString(r.extra2),
+        extra3: cellToString(r.extra3),
         callback: resolveRecipientCallback(r, useIndividualCallback, individualCallbackColumn),
       }));
 
