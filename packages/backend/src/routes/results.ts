@@ -588,7 +588,11 @@ router.get('/campaigns/:id/messages', async (req: Request, res: Response) => {
 
     // ===== DATA — 단일 쿼리, MySQL이 정렬+페이징 =====
     // ★ LOG 테이블 스키마 차이 시 전체 UNION ALL 실패 → LIVE 테이블만 재시도
-    const dataSql = `${dataSubqueries.join(' UNION ALL ')} ORDER BY _sort_time DESC LIMIT ? OFFSET ?`;
+    // ★ D150-4 (2026-05-09) PDF #1: dest_no tie-breaker 추가 — 동일 _sort_time row가
+    //   페이지 사이에 비결정적으로 분배되어 분류 카운트 차이 발생 (폴라초이스 14df97e7
+    //   16,106건이 모두 sendreq_time='2026-05-06 11:00:00' 단일 시각). dest_no는 CT-14
+    //   deduplicate로 한 캠페인 내 unique → 결정적 정렬 보장.
+    const dataSql = `${dataSubqueries.join(' UNION ALL ')} ORDER BY _sort_time DESC, dest_no ASC LIMIT ? OFFSET ?`;
     dataParams.push(limitNum, offset);
     let messages: any[];
     try {
@@ -631,7 +635,8 @@ router.get('/campaigns/:id/messages', async (req: Request, res: Response) => {
       }
 
       if (liveOnlyDataSubs.length > 0) {
-        const fallbackSql = `${liveOnlyDataSubs.join(' UNION ALL ')} ORDER BY _sort_time DESC LIMIT ? OFFSET ?`;
+        // ★ D150-4 (2026-05-09) PDF #1: dest_no tie-breaker 추가 (591번과 동일 사고 패턴)
+        const fallbackSql = `${liveOnlyDataSubs.join(' UNION ALL ')} ORDER BY _sort_time DESC, dest_no ASC LIMIT ? OFFSET ?`;
         liveOnlyParams.push(limitNum, offset);
         messages = await mysqlQuery(fallbackSql, liveOnlyParams) as any[];
       } else {
@@ -730,8 +735,14 @@ router.get('/campaigns/:id/export', async (req: Request, res: Response) => {
 
     while (true) {
       const chunkParams = [...baseParams, CHUNK_SIZE, chunkOffset];
+      // ★ D150-4 (2026-05-09) PDF #1 root cause: 폴라초이스 14df97e7 16,106건이 모두
+      //   sendreq_time='2026-05-06 11:00:00' 단일 시각 → ORDER BY tie-breaker 없으면
+      //   청크 1(OFFSET 0)과 청크 2(OFFSET 10000) 사이에 동일 row가 비결정적으로 분배
+      //   → 총 건수는 동일하지만 분류별 row 수가 화면 요약(SQL COUNT)과 어긋남
+      //   (직원 신고: 화면 15,450/656 vs 엑셀 15,470/636).
+      //   해결: dest_no ASC tie-breaker 추가 (CT-14 deduplicate로 한 캠페인 내 unique).
       const rows = await mysqlQuery(
-        `${baseSql} ORDER BY sendreq_time ASC LIMIT ? OFFSET ?`,
+        `${baseSql} ORDER BY sendreq_time ASC, dest_no ASC LIMIT ? OFFSET ?`,
         chunkParams
       ) as any[];
 
