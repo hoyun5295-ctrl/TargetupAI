@@ -704,7 +704,8 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                                   <>
                                     <div className="ds-callback-menu__group">수신자별 회신번호 컬럼</div>
                                     {filteredPhoneHeaders.map(h => {
-                                      const sample = directFileData[0]?.[h];
+                                      // ★ D150-3 (2026-05-09) PDF #5: 0/'0' 보존
+                                      const sample = cellToString(directFileData[0]?.[h]);
                                       const isActive = useIndividualCallback && individualCallbackColumn === h;
                                       return (
                                         <button
@@ -720,7 +721,7 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                                           }}
                                         >
                                           <span className="ds-callback-item__label">{h} <span className="ds-callback-item__hint">(수신자별)</span></span>
-                                          {sample && <span className="ds-callback-item__sample">예: {String(sample).slice(0, 15)}</span>}
+                                          {sample !== '' && <span className="ds-callback-item__sample">예: {sample.slice(0, 15)}</span>}
                                         </button>
                                       );
                                     })}
@@ -1098,7 +1099,8 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
             <div className="ds-list-frame">
               {(() => {
                 const activeFields = directRecipients.length > 0
-                  ? (['name', 'callback', 'extra1', 'extra2', 'extra3'] as const).filter(f => directRecipients.some(r => r[f] && String(r[f]).trim()))
+                  // ★ D150-3 (2026-05-09) PDF #5: 0/'0' 값 컬럼도 헤더 표시되도록 falsy → null/undefined 체크
+                  ? (['name', 'callback', 'extra1', 'extra2', 'extra3'] as const).filter(f => directRecipients.some(r => r[f] != null && String(r[f]).trim() !== ''))
                   : (directSendChannel === 'sms'
                     ? (['name', 'callback', 'extra1', 'extra2', 'extra3'] as const).filter(f => directColumnMapping[f])
                     : []);
@@ -1302,8 +1304,9 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                     value={directColumnMapping.phone || ''} onChange={(e) => setDirectColumnMapping({ ...directColumnMapping, phone: e.target.value })}>
                     <option value="">-- 선택 --</option>
                     {directFileHeaders.map((h, i) => {
-                      const sample = directFileData[0]?.[h];
-                      return <option key={i} value={h}>{h}{sample ? ` (예: ${String(sample).slice(0, 15)})` : ''}</option>;
+                      // ★ D150-3 (2026-05-09) PDF #5: 0/'0' 보존
+                      const sample = cellToString(directFileData[0]?.[h]);
+                      return <option key={i} value={h}>{h}{sample !== '' ? ` (예: ${sample.slice(0, 15)})` : ''}</option>;
                     })}
                   </select>
                 </div>
@@ -1316,8 +1319,9 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                           value={(directColumnMapping as any)[field.key] || ''} onChange={(e) => setDirectColumnMapping({ ...directColumnMapping, [field.key]: e.target.value })}>
                           <option value="">-- 선택 --</option>
                           {directFileHeaders.map((h, i) => {
-                            const sample = directFileData[0]?.[h];
-                            return <option key={i} value={h}>{h}{sample ? ` (예: ${String(sample).slice(0, 15)})` : ''}</option>;
+                            // ★ D150-3 (2026-05-09) PDF #5: 0/'0' 보존
+                            const sample = cellToString(directFileData[0]?.[h]);
+                            return <option key={i} value={h}>{h}{sample !== '' ? ` (예: ${sample.slice(0, 15)})` : ''}</option>;
                           })}
                         </select>
                       </div>
@@ -1337,8 +1341,9 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                               value={(directColumnMapping as any)[varKey] || ''} onChange={(e) => setDirectColumnMapping({ ...directColumnMapping, [varKey]: e.target.value })}>
                               <option value="">-- 선택 --</option>
                               {directFileHeaders.map((h, hi) => {
-                                const sample = directFileData[0]?.[h];
-                                return <option key={hi} value={h}>{h}{sample ? ` (예: ${String(sample).slice(0, 15)})` : ''}</option>;
+                                // ★ D150-3 (2026-05-09) PDF #5: 0/'0' 보존
+                                const sample = cellToString(directFileData[0]?.[h]);
+                                return <option key={hi} value={h}>{h}{sample !== '' ? ` (예: ${sample.slice(0, 15)})` : ''}</option>;
                               })}
                             </select>
                           </div>
