@@ -679,11 +679,12 @@ export default function CallbacksTab() {
                     <div>
                       <p className="text-sm font-medium text-orange-800">필요 서류 (해당하는 서류를 모두 첨부)</p>
                       <div className="mt-2 space-y-1.5">
+                        {/* ★ D150-5 (2026-05-09) PDF #6: 통신가입증명원 누락 보완 */}
                         <div className="text-xs text-orange-700">
-                          <span className="font-medium">직원 개인번호:</span> 재직증명서 + 발신번호 사용 동의서
+                          <span className="font-medium">직원 개인번호:</span> 재직증명서 + 발신번호 사용 동의서 + 통신가입증명원
                         </div>
                         <div className="text-xs text-orange-700">
-                          <span className="font-medium">대리점·지사·기타 명의:</span> 거래관계증명파일(계약서, 거래내역서) + 발신번호 사용 동의서
+                          <span className="font-medium">대리점·지사·기타 명의:</span> 거래관계증명파일(계약서, 거래내역서) + 발신번호 사용 동의서 + 통신가입증명원
                         </div>
                       </div>
                       <div className="mt-3">
@@ -749,10 +750,12 @@ export default function CallbacksTab() {
                             {regNumberType === 'company' ? (
                               <option value="telecom_cert">통신가입증명원</option>
                             ) : (
+                              // ★ D150-5 (2026-05-09) PDF #6: 기타명의도 통신가입증명원 옵션 추가
                               <>
                                 <option value="consent_form">발신번호 사용 동의서</option>
                                 <option value="employment_cert">재직증명서</option>
                                 <option value="business_relation">거래관계증명파일</option>
+                                <option value="telecom_cert">통신가입증명원</option>
                               </>
                             )}
                           </select>

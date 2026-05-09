@@ -3597,16 +3597,20 @@ const handleApproveRequest = async (id: string) => {
                   </button>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <select
-                    value={chargeTxCompanyFilter}
-                    onChange={(e) => setChargeTxCompanyFilter(e.target.value)}
-                    className="px-3 py-2 border rounded-lg text-sm"
-                  >
-                    <option value="all">전체 고객사</option>
-                    {companies.filter((c: any) => c.billing_type === 'prepaid').map(c => (
-                      <option key={c.id} value={c.id}>{c.company_name}</option>
-                    ))}
-                  </select>
+                  {/* ★ D150-5 (2026-05-09) PDF #2: 입력 검색 가능하도록 SearchableSelect 적용 */}
+                  <div className="min-w-[200px]">
+                    <SearchableSelect
+                      options={companies.filter((c: any) => c.billing_type === 'prepaid').map((c: any) => ({
+                        value: c.id,
+                        label: c.company_name,
+                      }))}
+                      value={chargeTxCompanyFilter === 'all' ? '' : chargeTxCompanyFilter}
+                      onChange={(value) => setChargeTxCompanyFilter(value || 'all')}
+                      placeholder="고객사 검색..."
+                      emptyLabel="전체 고객사"
+                      className="w-full"
+                    />
+                  </div>
                   <select
                     value={chargeTxTypeFilter}
                     onChange={(e) => setChargeTxTypeFilter(e.target.value)}
@@ -6891,14 +6895,19 @@ const handleApproveRequest = async (id: string) => {
               정산 생성
             </h3>
             <div className="flex flex-wrap items-end gap-4">
-              {/* 고객사 */}
+              {/* 고객사 — ★ D150-5 (2026-05-09) PDF #2: SearchableSelect 적용 */}
               <div className="min-w-[200px]">
                 <label className="block text-xs font-medium text-gray-500 mb-1">고객사</label>
-                <select value={billingCompanyId} onChange={e => setBillingCompanyId(e.target.value)}
-                  className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
-                  <option value="">선택</option>
-                  {companies.map(c => <option key={c.id} value={c.id}>{c.company_name}</option>)}
-                </select>
+                <SearchableSelect
+                  options={companies.map((c: any) => ({
+                    value: c.id,
+                    label: c.company_name,
+                  }))}
+                  value={billingCompanyId}
+                  onChange={(value) => setBillingCompanyId(value)}
+                  placeholder="고객사 선택 또는 입력 검색..."
+                  className="w-full"
+                />
               </div>
               {/* 시작일 */}
               <div>

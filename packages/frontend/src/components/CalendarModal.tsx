@@ -239,24 +239,14 @@ export default function CalendarModal({ onClose, token, onEdit, embedded }: Cale
                     <span className="font-medium">{selectedCampaign.target_count?.toLocaleString()}명</span>
                   </div>
                   
-                  {/* 예약시간 */}
-                  {selectedCampaign.scheduled_at && (
-                    <div className="flex items-center gap-2">
-                      <span className="text-gray-500 w-16">예약</span>
-                      <span className="font-medium text-blue-600">
-                        {new Date(selectedCampaign.scheduled_at).toLocaleString('ko-KR', {
-                          timeZone: 'Asia/Seoul', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
-                        })}
-                      </span>
-                    </div>
-                  )}
-                  
-                  {/* 발송시간 */}
-                  {selectedCampaign.sent_at && (
+                  {/* ★ D150-5 (2026-05-09) PDF #4: 예약/발송 시간 중복 표시 제거.
+                      sent_at 우선, 없으면 scheduled_at 폴백. 상태 라벨이 예약/완료 구분 표시하므로
+                      시간 라벨은 "발송"으로 통일 (라프레리/벤제프 신고). */}
+                  {(selectedCampaign.sent_at || selectedCampaign.scheduled_at) && (
                     <div className="flex items-center gap-2">
                       <span className="text-gray-500 w-16">발송</span>
                       <span className="font-medium">
-                        {new Date(selectedCampaign.sent_at).toLocaleString('ko-KR', {
+                        {new Date(selectedCampaign.sent_at || selectedCampaign.scheduled_at).toLocaleString('ko-KR', {
                           timeZone: 'Asia/Seoul', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
                         })}
                       </span>
