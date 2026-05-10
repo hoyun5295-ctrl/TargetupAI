@@ -25,6 +25,8 @@ import { filterByIndividualCallback } from '../utils/callback-filter';
 // ★ CT-17: 요금제/트라이얼/기능 게이팅 컨트롤타워
 import { loadPlanContext, canUseFeature, resolveMaxAutoCampaigns, type PlanContext } from '../utils/plan-guard';
 import { normalizePhone } from '../utils/normalize-phone';
+// ★ D150-3 (2026-05-10) LOW#7: 광고성 자동발송 등록 시 080 무료거부 번호 검증
+import { getOpt080Number } from '../utils/messageUtils';
 
 const router = Router();
 
@@ -379,6 +381,19 @@ router.post('/', async (req: Request, res: Response) => {
       return res.status(400).json({ error: '발신번호를 선택해주세요.' });
     }
 
+    // ★ D150-3 (2026-05-10) LOW#7 fix: 광고성 자동발송 등록 시 080 무료거부 번호 강제.
+    //   이전: is_ad=true인 캠페인이 080 미설정 회사에서 등록 가능 → 발송 시 빈 080 → 통신사 차단 위험.
+    //   이후: 등록 시점에 회사/사용자 080 미보유 시 거부.
+    if (is_ad) {
+      const opt080 = await getOpt080Number(userId, companyId);
+      if (!opt080) {
+        return res.status(400).json({
+          error: '광고성 자동발송은 080 무료거부 번호가 등록된 계정에서만 등록 가능합니다. 관리자 페이지에서 080 번호를 먼저 등록해주세요.',
+          code: 'OPT080_REQUIRED',
+        });
+      }
+    }
+
     // 발신번호 등록 여부 확인 (개별회신번호 사용 시 스킵) — ★ D142+ B5: 정규화 기준
     if (!use_individual_callback && callback_number) {
       const cbCheck = await query(
@@ -593,6 +608,19 @@ router.put('/:id', async (req: Request, res: Response) => {
       );
       if (cbCheck.rows.length === 0) {
         return res.status(400).json({ error: '등록되지 않은 발신번호입니다.' });
+      }
+    }
+
+    // ★ D150-3 (2026-05-10) LOW#7 fix: 광고성 자동발송 수정 시 080 무료거부 번호 강제.
+    //   is_ad가 true로 (재)설정될 때 080 미보유 차단. is_ad가 false로 변경되거나 미명시 시 통과.
+    const finalIsAd = is_ad !== undefined ? is_ad : ownership.campaign.is_ad;
+    if (finalIsAd) {
+      const opt080 = await getOpt080Number(userId, companyId);
+      if (!opt080) {
+        return res.status(400).json({
+          error: '광고성 자동발송은 080 무료거부 번호가 등록된 계정에서만 사용 가능합니다. 관리자 페이지에서 080 번호를 먼저 등록해주세요.',
+          code: 'OPT080_REQUIRED',
+        });
       }
     }
 

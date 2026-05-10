@@ -373,11 +373,15 @@ async function generateMessageForAutoCampaign(ac: any): Promise<void> {
     }
 
     // auto_campaigns에 생성된 문안 저장
+    // ★ D150-3 (2026-05-10) LOW#8 fix: generating_at NULL 동시 정리 (잠금 해제).
+    //   이전: generated_at만 갱신, generating_at은 그대로 → 다음 워커 polling에서 30분 timeout으로만 풀림.
+    //   이후: 생성 완료 시점에 잠금 즉시 해제 (cosmetic, race 없음).
     await query(
       `UPDATE auto_campaigns SET
         generated_message_content = $2,
         generated_message_subject = $3,
         generated_at = NOW(),
+        generating_at = NULL,
         updated_at = NOW()
        WHERE id = $1`,
       [ac.id, generatedContent, generatedSubject || null]
@@ -634,6 +638,29 @@ async function executeAutoCampaign(ac: any): Promise<void> {
       return;
     }
 
+    // ★ D150-3 (2026-05-10) HIGH#2 fix: 직전 spam_tested 결과가 차단(blocked)이면 본 발송 중단.
+    //   이전: maxRetries:2 후에도 차단된 채로 spam_tested INSERT만 하고 본 발송 진행 → 사용자 정책 위반.
+    //   이후: 본 발송 직전 spam_tested.spam_test_result.isBlocked 체크 → 차단 시 markFailed + 담당자 알림.
+    try {
+      const spamCheck = await query(
+        `SELECT spam_test_result FROM auto_campaign_runs
+         WHERE auto_campaign_id = $1
+           AND status = 'spam_tested'
+           AND scheduled_at = $2
+         ORDER BY id DESC LIMIT 1`,
+        [ac.id, ac.next_run_at]
+      );
+      const spamRow = spamCheck.rows[0];
+      if (spamRow?.spam_test_result?.isBlocked === true) {
+        console.warn(`${logPrefix} 스팸필터 차단된 문안 — 본 발송 중단 (담당자 확인 필요)`);
+        await markFailed(ac, '스팸필터 차단으로 발송 중단 — 문안 수정 후 재시도');
+        return;
+      }
+    } catch (spamGuardErr) {
+      // 가드 자체 실패는 무시 (발송 진행) — 가드 실패가 발송 차단 사유는 아님
+      console.error(`${logPrefix} 스팸 차단 가드 조회 실패 (발송 진행):`, spamGuardErr);
+    }
+
     // ★ 라인그룹 미설정 체크
     if (!(await hasCompanyLineGroup(ac.company_id))) {
       console.warn(`${logPrefix} 라인그룹 미설정 — 스킵`);
@@ -791,6 +818,38 @@ async function executeAutoCampaign(ac: any): Promise<void> {
       if (cbResult.callbackSkippedCount > 0) {
         console.log(`${logPrefix} 개별회신번호 — ${cbResult.callbackSkippedCount}명 제외 (미보유 ${cbResult.callbackMissingCount}, 미등록 ${cbResult.callbackUnregisteredCount})`);
       }
+    }
+
+    // ★ D150-3 (2026-05-10) MED#3 fix: 개별회신번호 필터 후 발송 대상 0명 가드.
+    //   이전: filteredCustomers.length === 0이어도 빈 INSERT 진행 → sentCount=0 → 'failed' 회차 + 차감만 환불.
+    //   이후: 사전에 가드 + 차감 환불 + 'failed' 회차 + advanceNextRun.
+    if (filteredCustomers.length === 0) {
+      console.warn(`${logPrefix} 개별회신번호 필터 후 발송 대상 0명 — 발송 스킵 (전체 환불)`);
+      try {
+        await prepaidRefund(
+          ac.company_id,
+          customers.length,
+          ac.message_type,
+          campaignId,
+          '개별회신번호 미보유로 전체 제외 — 환불',
+        );
+      } catch (refundErr) {
+        console.error(`${logPrefix} 환불 실패:`, refundErr);
+      }
+      await query(
+        `UPDATE auto_campaign_runs
+         SET status = 'failed', completed_at = NOW(),
+             sent_count = 0, success_count = 0, fail_count = $2,
+             cancel_reason = $3
+         WHERE id = $1`,
+        [runId, customers.length, '개별회신번호 미보유로 전체 제외'],
+      );
+      await query(
+        `UPDATE campaigns SET status = 'failed', sent_count = 0, sent_at = NOW() WHERE id = $1`,
+        [campaignId],
+      );
+      await advanceNextRun(ac);
+      return;
     }
 
     // ★ D130: 알림톡 분기 — channel='alimtalk'이면 insertAlimtalkQueue 사용 (SMS/LMS/MMS 경로 분리)
@@ -960,6 +1019,36 @@ async function markFailed(ac: any, reason: string): Promise<void> {
     console.error(`[auto-worker][${ac.id}] 실패 기록 오류:`, err);
   }
 
+  // ★ D150-3 (2026-05-10) MED#5 fix: 7일간 연속 5회 이상 fail 시 자동 일시정지.
+  //   이전: 알림톡 가드/타겟 0/시간 외/라인그룹 미설정 등 회차별 fail이 영원히 누적.
+  //         담당자 알림 정책 미적용 시 운영자가 발견 못 함.
+  //   이후: 자동 paused → 워커 polling에서 자동 제외 + 운영자 화면에서 paused 시각화로 발견 가능.
+  try {
+    const recentFails = await query(
+      `SELECT COUNT(*)::int AS cnt
+       FROM auto_campaign_runs
+       WHERE auto_campaign_id = $1
+         AND status = 'failed'
+         AND created_at >= NOW() - INTERVAL '7 days'`,
+      [ac.id]
+    );
+    if ((recentFails.rows[0]?.cnt || 0) >= 5) {
+      const pauseResult = await query(
+        `UPDATE auto_campaigns
+         SET status = 'paused', next_run_at = NULL, updated_at = NOW()
+         WHERE id = $1 AND status IN ('active', 'executing')
+         RETURNING id`,
+        [ac.id]
+      );
+      if (pauseResult.rows.length > 0) {
+        console.warn(`[auto-worker][${ac.id}] 7일간 5회 이상 실패 — 자동 일시정지 (운영자 확인 필요)`);
+        return; // advanceNextRun 호출 안 함 (paused로 next_run 의미 없음)
+      }
+    }
+  } catch (pauseErr) {
+    console.error(`[auto-worker][${ac.id}] 자동 일시정지 체크 실패:`, pauseErr);
+  }
+
   await advanceNextRun(ac);
 }
 
@@ -983,6 +1072,18 @@ async function advanceNextRun(ac: any, sentCount?: number): Promise<void> {
     await query(`UPDATE auto_campaigns SET ${updateFields} WHERE id = $1`, params);
   } catch (err) {
     console.error(`[auto-worker][${ac.id}] next_run_at 갱신 오류:`, err);
+    // ★ D150-3 (2026-05-10) HIGH#1 fix: 치명 오류로도 status='executing' stuck 차단.
+    //   이전: catch 후 status는 그대로 'executing' → 워커 polling이 active만 픽업 → 영원히 발동 안 됨.
+    //   이후: fallback UPDATE로 active 강제 복원 (next_run_at은 그대로 → 다음 polling 시 정상 진행).
+    try {
+      await query(
+        `UPDATE auto_campaigns SET status = 'active', updated_at = NOW()
+         WHERE id = $1 AND status = 'executing'`,
+        [ac.id]
+      );
+    } catch (recoverErr) {
+      console.error(`[auto-worker][${ac.id}] executing → active fallback 복원도 실패:`, recoverErr);
+    }
   }
 }
 
@@ -1253,6 +1354,22 @@ export async function runAutoCampaignWorker(): Promise<void> {
   const logPrefix = '[auto-worker]';
 
   try {
+    // ★ D150-3 (2026-05-10) HIGH#1 안전망: executing 5분 이상 stuck 자동 복원.
+    //   advanceNextRun fallback이 실패한 극단 케이스 + 워커 프로세스 강제 종료 케이스 대비.
+    //   updated_at 5분 이전 = 정상 발송이라면 이미 active로 복원됐을 시간 충분 경과.
+    try {
+      const recovered = await query(
+        `UPDATE auto_campaigns SET status = 'active', updated_at = NOW()
+         WHERE status = 'executing' AND updated_at < NOW() - INTERVAL '5 minutes'
+         RETURNING id`
+      );
+      if (recovered.rows.length > 0) {
+        console.warn(`${logPrefix} executing → active 자동 복원 ${recovered.rows.length}건 (stuck 안전망)`);
+      }
+    } catch (recoverErr) {
+      console.error(`${logPrefix} stuck 복원 안전망 실패 (무시하고 계속):`, recoverErr);
+    }
+
     // ★ 1단계: D-1 AI 문안 생성 + 스팸테스트 (12~36시간 이전)
     await runMessageGeneration();
 
