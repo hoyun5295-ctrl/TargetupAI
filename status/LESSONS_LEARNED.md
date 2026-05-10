@@ -53,6 +53,8 @@
 
 | 교훈 / 사고 번호 | 상세 내용 및 대책 |
 |---|---|
+| **D150-5 (UX 3건 통합)** | PDF #4 캘린더 모달 예약/발송 시간 중복 표시 → 발송 1개로 통일(sent_at \|\| scheduled_at). PDF #6 발신번호 등록 기타명의 안내문에 통신가입증명원 누락 + 파일 매칭 select 옵션 누락. PDF #2 슈퍼관리자 충전관리/정산생성 단순 select → SearchableSelect 적용. **대책:** D144 P11+P13에서 SearchableSelect 컨트롤타워 신설된 것 확장 적용. UX 사고는 동일 패턴(드롭다운 검색)이 다른 영역에 분산되지 않도록 grep 전수 후 통합 적용. |
+| **D150-4 (발송결과 ORDER BY tie)** | 폴라초이스 14df97e7 16,106건이 모두 sendreq_time='2026-05-06 11:00:00' 단일 시각 → `ORDER BY sendreq_time ASC LIMIT 10000 OFFSET ?` tie-breaker 없음 → 청크 1과 2 사이 row 비결정적 분배 → 총 건수 동일하지만 분류별 row 수가 어긋남(직원 신고: 화면 15,450/656 vs 엑셀 15,470/636). **대책:** `dest_no ASC` tie-breaker 추가 (results.ts:591/634/734 3곳, CT-14 deduplicate로 한 캠페인 내 unique 보장). LIMIT/OFFSET 청크 패턴은 unique tie-breaker 필수. |
 | **D150-3 (직접발송 0 NULL)** | 엑셀 D2/E2/F2 = 0 값이 `row[col] \|\| ''` falsy 처리로 빈 문자열 변환되어 발송 본문에 NULL로 박힘. 벤제프 113건 잘못 발송. **대책:** `cellToString` 컨트롤타워 신설(frontend formatDate.ts + backend normalize.ts), `\|\| ''` 패턴 25곳+ 일괄 교체. 인라인 `safeStr` 정의 금지 — 컨트롤타워 일관 import. |
 | **D150-2 (환불 description 행 단위 모순)** | `prepaid.ts:130` description이 누적 fail × 단가 표시인데 amount는 차액 → 행 단위로 모순 표시 (직원/고객사 오해). **대책:** `alreadyRefunded > 0`이면 신규 환불 건수 + 누적 정보 별도 표시로 행 단위 일치. |
 | **D145 (5/7 배포 사고)** | **[가장 치명적]** `tp-deploy-full` 스크립트 실행 중 frontend vite 빌드가 실패하여 `dist` 폴더가 빈 채로 종료. 9시간 거래처 차단 장애. **대책:** `tp-deploy-full` 안내 절대 금지. 빌드는 반드시 `atomic safe-build` (`npm run build:safe` — frontend/backend 모두). dist-new → 검증 → atomic swap. 빌드 실패 시 옛 dist 유지 = 차단 0초. |

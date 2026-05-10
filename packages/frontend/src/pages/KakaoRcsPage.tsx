@@ -5,12 +5,16 @@ import BrandMessageEditor from '../components/BrandMessageEditor';
 import DirectTargetFilterModal from '../components/DirectTargetFilterModal';
 // ★ D130: 알림톡 통합 관리 (IMC 연동)
 import AlimtalkManagementSection from '../components/alimtalk/AlimtalkManagementSection';
+// ★ D150-2 (2026-05-09): 브랜드메시지 템플릿 관리 (IMC 연동)
+import BrandTemplateManagementSection from '../components/alimtalk/BrandTemplateManagementSection';
 
 function getToken(): string {
   return localStorage.getItem('token') || '';
 }
 
 type Tab = 'alimtalk' | 'brand' | 'rcs';
+// ★ D150-2 (2026-05-09): 브랜드 탭 sub-tab — 템플릿 관리 / 발송 분리
+type BrandSubTab = 'template' | 'send';
 
 const STATUS_BADGE: Record<string, { label: string; bg: string; text: string }> = {
   pending:  { label: '승인대기', bg: 'bg-amber-100', text: 'text-amber-700' },
@@ -22,6 +26,8 @@ const STATUS_BADGE: Record<string, { label: string; bg: string; text: string }> 
 export default function KakaoRcsPage() {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<Tab>('alimtalk');
+  // ★ D150-2 (2026-05-09): 브랜드 sub-tab (템플릿 관리 / 발송)
+  const [brandSubTab, setBrandSubTab] = useState<BrandSubTab>('template');
   const [loading, setLoading] = useState(false);
 
   // ★ 브랜드메시지 엔터프라이즈 게이팅
@@ -231,8 +237,40 @@ export default function KakaoRcsPage() {
         {activeTab === 'alimtalk' && <AlimtalkManagementSection />}
 
         {/* ═══ 브랜드메시지 탭 ═══ */}
+        {/* ★ D150-2 (2026-05-09): sub-tab 도입 — "템플릿 관리"(신규) / "발송"(기존) 분리 */}
         {activeTab === 'brand' && (
-          <BrandMessageTab profiles={profiles} setToast={setToast} />
+          <div>
+            <div className="flex gap-1 mb-4 border-b border-gray-200">
+              <button
+                type="button"
+                onClick={() => setBrandSubTab('template')}
+                className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                  brandSubTab === 'template'
+                    ? 'border-blue-500 text-blue-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                템플릿 관리
+              </button>
+              <button
+                type="button"
+                onClick={() => setBrandSubTab('send')}
+                className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                  brandSubTab === 'send'
+                    ? 'border-blue-500 text-blue-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                발송
+              </button>
+            </div>
+            {brandSubTab === 'template' && (
+              <BrandTemplateManagementSection profiles={profiles} setToast={setToast} />
+            )}
+            {brandSubTab === 'send' && (
+              <BrandMessageTab profiles={profiles} setToast={setToast} />
+            )}
+          </div>
         )}
 
         {/* ═══ RCS 템플릿 탭 ═══ */}

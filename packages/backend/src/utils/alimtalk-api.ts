@@ -784,6 +784,76 @@ export async function updateServiceMode(
   return res.data;
 }
 
+// ────────────────────────────────────────────────────────────
+// 알림톡 템플릿 이력 (D150-2, 2026-05-09)
+//   GET /sender/{senderKey}/alimtalk/template/{templateKey}/history
+//   GET /sender/{senderKey}/alimtalk/template/{templateKey}/history/{histId}
+// 페이징 없음. 한 템플릿당 일반 10~수십 건.
+// ────────────────────────────────────────────────────────────
+
+/**
+ * 이력의 필드 단위 변경 내역 (알림톡/브랜드 공통).
+ * 단순/텍스트/복잡 JSON 필드인지에 따라 표현 방식이 달라진다.
+ */
+export interface TemplateHistoryChange {
+  field: string;            // 엔티티 필드명 (camelCase)
+  label: string;            // 화면 표기용 한글 라벨
+  before: string | null;
+  after: string | null;
+  truncated: boolean;       // 항상 false (원문 그대로 반환)
+  complex: boolean;         // true면 before/after는 직렬화된 JSON 문자열
+}
+
+/** 알림톡 이력 요약 항목 (목록용) */
+export interface AlimtalkHistoryItem {
+  histId: number;
+  changeType: 'CREATE' | 'DELETE' | 'INSPECTION' | 'STATUS' | 'UPDATE';
+  inspectionStatus?: 'REG' | 'REQ' | 'HREJ' | 'KREQ' | 'KREJ' | 'APR';
+  templateStatus?: 'S' | 'A' | 'R';
+  modifiedAt: string;       // yyyy-MM-dd HH:mm:ss
+  modifiedBy: string;
+  changedCount: number;
+  changes: TemplateHistoryChange[];
+}
+
+export interface AlimtalkHistoryListData {
+  templateKey: string;
+  totalCount: number;
+  histories: AlimtalkHistoryItem[];
+}
+
+/** 알림톡 이력 상세 — 그 시점 템플릿 전체 스냅샷(AlimtalkTemplateData 동일 스키마) + 변경 요약 */
+export interface AlimtalkHistoryDetailData {
+  histId: number;
+  changeType: 'CREATE' | 'DELETE' | 'INSPECTION' | 'STATUS' | 'UPDATE';
+  changes: TemplateHistoryChange[];
+  modifiedAt: string;
+  modifiedBy: string;
+  // AlimtalkTemplateData 동일 스키마 — 그 시점 템플릿 전체 필드 (동적)
+  [key: string]: any;
+}
+
+export async function getAlimtalkTemplateHistory(
+  senderKey: string,
+  templateCode: string,
+): Promise<ImcResponse<AlimtalkHistoryListData>> {
+  const res = await getClient().get(
+    `/kakao-management/api/v1/sender/${senderKey}/alimtalk/template/${templateCode}/history`,
+  );
+  return res.data;
+}
+
+export async function getAlimtalkTemplateHistoryDetail(
+  senderKey: string,
+  templateCode: string,
+  histId: number | string,
+): Promise<ImcResponse<AlimtalkHistoryDetailData>> {
+  const res = await getClient().get(
+    `/kakao-management/api/v1/sender/${senderKey}/alimtalk/template/${templateCode}/history/${histId}`,
+  );
+  return res.data;
+}
+
 // ════════════════════════════════════════════════════════════
 // 알림톡 검수 알림 수신자 — 4개
 // ════════════════════════════════════════════════════════════
@@ -965,6 +1035,62 @@ export async function deleteBrandTemplate(
 ): Promise<ImcResponse> {
   const res = await getClient().delete(
     `/kakao-management/api/v1/sender/${senderKey}/brand-message/template/${templateKey}`,
+  );
+  return res.data;
+}
+
+// ────────────────────────────────────────────────────────────
+// 브랜드메시지 템플릿 이력 (D150-2, 2026-05-09)
+//   GET /sender/{senderKey}/brand-message/template/{templateKey}/history
+//   GET /sender/{senderKey}/brand-message/template/{templateKey}/history/{histId}
+// 페이징 없음. 검수 없음(CREATE/DELETE/STATUS/UPDATE).
+// ────────────────────────────────────────────────────────────
+
+/** 브랜드 이력 요약 항목 (목록용) */
+export interface BrandHistoryItem {
+  histId: number;
+  changeType: 'CREATE' | 'DELETE' | 'STATUS' | 'UPDATE';
+  status?: 'A' | 'S';
+  modifiedAt: string;       // yyyy-MM-dd HH:mm:ss
+  modifiedBy: string;
+  changedCount: number;
+  changes: TemplateHistoryChange[];
+}
+
+export interface BrandHistoryListData {
+  templateKey: string;
+  totalCount: number;
+  histories: BrandHistoryItem[];
+}
+
+/** 브랜드 이력 상세 — 그 시점 템플릿 전체 스냅샷(BmTemplateResponse 동일 스키마) + 변경 요약 */
+export interface BrandHistoryDetailData {
+  histId: number;
+  changeType: 'CREATE' | 'DELETE' | 'STATUS' | 'UPDATE';
+  changes: TemplateHistoryChange[];
+  modifiedAt: string;
+  modifiedBy: string;
+  // BmTemplateResponse 동일 스키마 — 그 시점 템플릿 전체 필드 (동적)
+  [key: string]: any;
+}
+
+export async function getBrandTemplateHistory(
+  senderKey: string,
+  templateKey: string,
+): Promise<ImcResponse<BrandHistoryListData>> {
+  const res = await getClient().get(
+    `/kakao-management/api/v1/sender/${senderKey}/brand-message/template/${templateKey}/history`,
+  );
+  return res.data;
+}
+
+export async function getBrandTemplateHistoryDetail(
+  senderKey: string,
+  templateKey: string,
+  histId: number | string,
+): Promise<ImcResponse<BrandHistoryDetailData>> {
+  const res = await getClient().get(
+    `/kakao-management/api/v1/sender/${senderKey}/brand-message/template/${templateKey}/history/${histId}`,
   );
   return res.data;
 }

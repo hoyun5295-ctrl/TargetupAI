@@ -211,7 +211,7 @@ export default function SenderRegistrationWizard({
                   onChange={(e) =>
                     setYellowId(e.target.value.startsWith('@') ? e.target.value : `@${e.target.value}`)
                   }
-                  placeholder="@humuson"
+                  placeholder="@채널아이디"
                   className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm"
                 />
               </StepGrid>

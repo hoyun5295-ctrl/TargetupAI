@@ -72,14 +72,14 @@ function handleImcError(res: Response, err: any): Response {
     return res.status(statusHttp).json({
       success: false,
       code: err.code,
-      error: mapped.userMessage || err.message,
+      error: mapped.userMessage || sanitizeImcMessageForUser(err.message, err.code),
       kind: mapped.kind,
     });
   }
   console.error('[alimtalk] 처리 실패', err);
   return res.status(500).json({
     success: false,
-    error: err?.message || '알 수 없는 오류',
+    error: sanitizeImcMessageForUser(err?.message, undefined, '알 수 없는 오류'),
   });
 }
 
@@ -230,7 +230,11 @@ router.post(
         topSenderKeyYn,
       });
       if (r.code !== '0000' || !r.data?.senderKey) {
-        return res.status(400).json({ success: false, code: r.code, error: r.message });
+        return res.status(400).json({
+          success: false,
+          code: r.code,
+          error: sanitizeImcMessageForUser(r.message, r.code, '발신프로필 등록에 실패했습니다'),
+        });
       }
 
       // 카테고리 이름 캐시
@@ -721,7 +725,7 @@ router.post(
         return res.status(400).json({
           success: false,
           code: r.code,
-          error: r.message || '등록 실패',
+          error: sanitizeImcMessageForUser(r.message, r.code, '템플릿 등록에 실패했습니다'),
         });
       }
 
@@ -919,6 +923,66 @@ router.get('/templates/:templateCode', async (req: Request, res: Response) => {
   }
 });
 
+// ★ D150-2 (2026-05-09): 알림톡 템플릿 이력 조회 — 직원 잠금(슈퍼관리자 전용)
+//   매뉴얼:
+//     GET /sender/{senderKey}/alimtalk/template/{templateKey}/history
+//     GET /sender/{senderKey}/alimtalk/template/{templateKey}/history/{histId}
+//   슈퍼관리자는 회사 무관하게 모든 템플릿 이력 조회 가능 → companyId 제약 없이 PG 직접 조회.
+router.get(
+  '/templates/:templateCode/history',
+  requireSuperAdmin as any,
+  async (req: Request, res: Response) => {
+    try {
+      const tpl = await query(
+        `SELECT p.profile_key
+           FROM kakao_templates t
+           LEFT JOIN kakao_sender_profiles p ON p.id = t.profile_id
+          WHERE t.template_code = $1
+          LIMIT 1`,
+        [req.params.templateCode],
+      );
+      if (tpl.rows.length === 0 || !tpl.rows[0].profile_key) {
+        return res.status(404).json({ success: false, error: '템플릿 없음' });
+      }
+      const r = await imc.getAlimtalkTemplateHistory(
+        tpl.rows[0].profile_key,
+        req.params.templateCode,
+      );
+      return sendImcManagedResponse(res, r, { fallback: '이력 조회에 실패했습니다' });
+    } catch (err) {
+      return handleImcError(res, err);
+    }
+  },
+);
+
+router.get(
+  '/templates/:templateCode/history/:histId',
+  requireSuperAdmin as any,
+  async (req: Request, res: Response) => {
+    try {
+      const tpl = await query(
+        `SELECT p.profile_key
+           FROM kakao_templates t
+           LEFT JOIN kakao_sender_profiles p ON p.id = t.profile_id
+          WHERE t.template_code = $1
+          LIMIT 1`,
+        [req.params.templateCode],
+      );
+      if (tpl.rows.length === 0 || !tpl.rows[0].profile_key) {
+        return res.status(404).json({ success: false, error: '템플릿 없음' });
+      }
+      const r = await imc.getAlimtalkTemplateHistoryDetail(
+        tpl.rows[0].profile_key,
+        req.params.templateCode,
+        req.params.histId,
+      );
+      return sendImcManagedResponse(res, r, { fallback: '이력 상세 조회에 실패했습니다' });
+    } catch (err) {
+      return handleImcError(res, err);
+    }
+  },
+);
+
 // 템플릿 수정: 본인 소유 + company_admin/super_admin (D130 §2-2, requireTemplateAccess 내 체크)
 // ★ D149-#A (2026-05-08) PDF 0508 후속 직원 카톡 신고: "수정 시 IMC에 수정반영 되고 한줄로에선 수정 반영이 안돼요"
 //   D146/D147 메모리에 별건으로 명시한 사항 — IMC만 갱신하고 PG 본문(content/emphasize/buttons/represent_link 등) 미갱신.
@@ -939,7 +1003,7 @@ router.put(
         return res.status(400).json({
           success: false,
           code: r.code,
-          error: r.message || '수정 실패',
+          error: sanitizeImcMessageForUser(r.message, r.code, '템플릿 수정에 실패했습니다'),
           imc: r,
         });
       }
@@ -1487,6 +1551,65 @@ router.get('/brand-templates/:templateKey', async (req: Request, res: Response) 
     return handleImcError(res, err);
   }
 });
+
+// ★ D150-2 (2026-05-09): 브랜드메시지 템플릿 이력 조회 — 직원 잠금(슈퍼관리자 전용)
+//   매뉴얼:
+//     GET /sender/{senderKey}/brand-message/template/{templateKey}/history
+//     GET /sender/{senderKey}/brand-message/template/{templateKey}/history/{histId}
+router.get(
+  '/brand-templates/:templateKey/history',
+  requireSuperAdmin as any,
+  async (req: Request, res: Response) => {
+    try {
+      const tpl = await query(
+        `SELECT p.profile_key
+           FROM brand_message_templates b
+           LEFT JOIN kakao_sender_profiles p ON p.id = b.profile_id
+          WHERE b.template_key = $1
+          LIMIT 1`,
+        [req.params.templateKey],
+      );
+      if (tpl.rows.length === 0 || !tpl.rows[0].profile_key) {
+        return res.status(404).json({ success: false, error: '템플릿 없음' });
+      }
+      const r = await imc.getBrandTemplateHistory(
+        tpl.rows[0].profile_key,
+        req.params.templateKey,
+      );
+      return sendImcManagedResponse(res, r, { fallback: '이력 조회에 실패했습니다' });
+    } catch (err) {
+      return handleImcError(res, err);
+    }
+  },
+);
+
+router.get(
+  '/brand-templates/:templateKey/history/:histId',
+  requireSuperAdmin as any,
+  async (req: Request, res: Response) => {
+    try {
+      const tpl = await query(
+        `SELECT p.profile_key
+           FROM brand_message_templates b
+           LEFT JOIN kakao_sender_profiles p ON p.id = b.profile_id
+          WHERE b.template_key = $1
+          LIMIT 1`,
+        [req.params.templateKey],
+      );
+      if (tpl.rows.length === 0 || !tpl.rows[0].profile_key) {
+        return res.status(404).json({ success: false, error: '템플릿 없음' });
+      }
+      const r = await imc.getBrandTemplateHistoryDetail(
+        tpl.rows[0].profile_key,
+        req.params.templateKey,
+        req.params.histId,
+      );
+      return sendImcManagedResponse(res, r, { fallback: '이력 상세 조회에 실패했습니다' });
+    } catch (err) {
+      return handleImcError(res, err);
+    }
+  },
+);
 
 router.put(
   '/brand-templates/:templateKey',

@@ -15,6 +15,7 @@ import AlimtalkTemplateFormV2, { type TemplateFormData } from './AlimtalkTemplat
 import AlarmUserManager from './AlarmUserManager';
 import SenderRegistrationWizard from './SenderRegistrationWizard';
 import UnsubscribeSettingModal from './UnsubscribeSettingModal';
+import TemplateHistoryModal from './TemplateHistoryModal';
 import { useAuthStore } from '../../stores/authStore';
 
 interface Template {
@@ -142,6 +143,12 @@ export default function AlimtalkManagementSection() {
   const [inspectionSubmitting, setInspectionSubmitting] = useState(false);
   const [unsubTarget, setUnsubTarget] = useState<Profile | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+
+  // ★ D150-2 (2026-05-09): 슈퍼관리자 전용 변경 이력 조회 모달
+  const [historyTarget, setHistoryTarget] = useState<{
+    templateCode: string;
+    templateName: string;
+  } | null>(null);
 
   // 내 회사 정보 (Wizard에 전달) — authStore에서 직접 참조 (별도 API 호출 불필요)
   const authUser = useAuthStore((s) => s.user);
@@ -624,6 +631,21 @@ export default function AlimtalkManagementSection() {
                           삭제
                         </button>
                       )}
+                      {/* ★ D150-2 (2026-05-09): 변경 이력 (슈퍼관리자만, 모든 상태 노출) */}
+                      {authUser?.userType === 'super_admin' && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setHistoryTarget({
+                              templateCode: t.template_code,
+                              templateName: t.template_name || t.template_code,
+                            })
+                          }
+                          className="text-[11px] px-2 py-0.5 bg-violet-50 hover:bg-violet-100 text-violet-700 rounded"
+                        >
+                          이력
+                        </button>
+                      )}
                     </td>
                   </tr>
                 );
@@ -657,6 +679,16 @@ export default function AlimtalkManagementSection() {
           readOnly
           onClose={() => setViewing(null)}
           onSuccess={() => setViewing(null)}
+        />
+      )}
+
+      {/* ★ D150-2 (2026-05-09): 슈퍼관리자 전용 변경 이력 조회 모달 */}
+      {historyTarget && (
+        <TemplateHistoryModal
+          type="alimtalk"
+          templateRef={historyTarget.templateCode}
+          templateName={historyTarget.templateName}
+          onClose={() => setHistoryTarget(null)}
         />
       )}
 
