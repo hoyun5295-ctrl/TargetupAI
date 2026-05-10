@@ -379,6 +379,7 @@
 | updated_at | timestamp |
 - UNIQUE: (company_id, COALESCE(store_code,'__NONE__'), phone)
 - INDEX: uploaded_by
+- INDEX: **idx_customers_active_smsable** (company_id, store_code) WHERE is_active=true AND sms_opt_in=true — ★ D150-3 (2026-05-10) 자동발송 worker `runAutoCampaignWorker` D-day 발송 + customer-filter 매 회차 SELECT 시 활성 SMS 가능 고객 부분 인덱스. 1만+ 고객 회사에서 풀스캔 → Bitmap Index Scan 전환.
 
 ### file_uploads (파일 업로드)
 | 컬럼 | 타입 |
