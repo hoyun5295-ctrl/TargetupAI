@@ -109,6 +109,13 @@ async function checkOwnership(
   }
   const campaign = result.rows[0];
 
+  // ★ D151-3 (2026-05-11): company_user(일반 사용자)는 본인 등록분만 — user_id 격리
+  //   기존엔 company_id + store_code 만 격리 → 같은 회사 다른 사용자 캠페인 조회/수정/삭제 가능 사고.
+  //   company_admin/super_admin은 회사 전체 유지.
+  if (userType === 'company_user' && campaign.user_id !== userId) {
+    return { ok: false, errorMsg: '해당 자동발송에 대한 권한이 없습니다.', statusCode: 403 };
+  }
+
   // company_user는 본인 store_code 범위만
   if (userType === 'company_user') {
     const scope = await getStoreScope(companyId, userId);
@@ -179,8 +186,9 @@ router.get('/', async (req: Request, res: Response) => {
       return res.status(400).json({ error: '회사 정보가 없습니다.' });
     }
 
-    // store-scope 필터
+    // store-scope 필터 + ★ D151-3 user_id 격리 (company_user)
     let storeFilter = '';
+    let userIdFilter = '';
     const params: any[] = [companyId];
 
     if (userType === 'company_user') {
@@ -189,9 +197,13 @@ router.get('/', async (req: Request, res: Response) => {
         return res.status(403).json({ error: '소속 브랜드가 지정되지 않았습니다. 관리자에게 문의하세요.' });
       }
       if (scope.type === 'filtered') {
-        storeFilter = ` AND (ac.store_code IS NULL OR ac.store_code = ANY($2::text[]))`;
+        storeFilter = ` AND (ac.store_code IS NULL OR ac.store_code = ANY($${params.length + 1}::text[]))`;
         params.push(scope.storeCodes);
       }
+
+      // ★ D151-3 (2026-05-11): 일반 사용자는 본인 등록분만 보임. company_admin/super_admin은 회사 전체.
+      userIdFilter = ` AND ac.user_id = $${params.length + 1}`;
+      params.push(userId);
     }
 
     // 요금제 정보도 함께 조회 (프론트에서 게이팅 판단용) + 회사별 오버라이드 반영 + 구독 상태
@@ -207,7 +219,7 @@ router.get('/', async (req: Request, res: Response) => {
        FROM auto_campaigns ac
        LEFT JOIN users u ON ac.user_id = u.id
        ${buildCampaignOpt080LeftJoin('ac', 'user_id')}
-       WHERE ac.company_id = $1 AND ac.status != 'deleted'${storeFilter}
+       WHERE ac.company_id = $1 AND ac.status != 'deleted'${storeFilter}${userIdFilter}
        ORDER BY ac.created_at DESC`,
       params
     );
