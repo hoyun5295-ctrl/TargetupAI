@@ -782,6 +782,7 @@ router.post('/generate-custom', authenticate, async (req: Request, res: Response
 router.post('/refine-message', requirePlanFeature('ai_messaging'), async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
     if (!companyId) {
       return res.status(403).json({ success: false, error: '회사 권한이 필요합니다' });
     }
@@ -795,20 +796,52 @@ router.post('/refine-message', requirePlanFeature('ai_messaging'), async (req: R
     const safeTone: 'friendly' | 'formal' | 'urgent' | 'warm' =
       tone === 'formal' || tone === 'urgent' || tone === 'warm' ? tone : 'friendly';
 
-    // 회사 브랜드명 조회 (body 우선, 미전달 시 DB)
+    // 회사 브랜드명 + 무료수신거부 번호 조회 (body 우선, 미전달 시 DB)
     let companyName: string | undefined = typeof bodyCompanyName === 'string' && bodyCompanyName.trim()
       ? bodyCompanyName.trim()
       : undefined;
+    const companyResult = await query(
+      'SELECT brand_name, company_name, COALESCE(reject_number, opt_out_080_number) AS reject_number FROM companies WHERE id = $1',
+      [companyId],
+    );
+    const row = companyResult.rows[0] || {};
     if (!companyName) {
-      const companyResult = await query(
-        'SELECT brand_name, company_name FROM companies WHERE id = $1',
-        [companyId],
-      );
-      const row = companyResult.rows[0] || {};
       companyName = row.brand_name || row.company_name || undefined;
     }
+    // CT-02 (getOpt080Number) — user 단위 080 우선
+    const userOpt080 = await getOpt080Number(userId || null, companyId);
+    const rejectNumber: string | undefined = userOpt080 || row.reject_number || undefined;
 
-    const result = await refineDirectMessage({ message, tone: safeTone, companyName });
+    // D120 패턴 미러 — 회사별 최근 발송 문안 10개 (campaigns.message_content, 30일, status='completed', LENGTH > 30)
+    //   AI few-shot 학습용 — 각 회사 톤/스타일 자동 반영해서 다듬기 품질 향상.
+    const recentMsgResult = await query(
+      `SELECT DISTINCT message_content AS content
+         FROM campaigns
+        WHERE company_id = $1 AND status = 'completed'
+          AND message_content IS NOT NULL
+          AND LENGTH(message_content) > 30
+          AND sent_at > NOW() - INTERVAL '30 days'
+        ORDER BY content
+        LIMIT 10`,
+      [companyId],
+    );
+    const recentMessages: string[] = recentMsgResult.rows.map((r: any) => r.content);
+
+    const result = await refineDirectMessage({
+      message,
+      tone: safeTone,
+      companyName,
+      recentMessages,
+      rejectNumber,
+    });
+
+    if (result.candidates.length === 0) {
+      return res.status(200).json({
+        success: false,
+        error: 'AI가 다듬은 안을 생성하지 못했습니다. 메시지를 조금 더 구체적으로 작성하거나 다시 시도해 주세요.',
+        candidates: [],
+      });
+    }
     return res.json({ success: true, candidates: result.candidates });
   } catch (err: any) {
     console.error('[ai/refine-message] 오류:', err);

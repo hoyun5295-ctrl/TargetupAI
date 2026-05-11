@@ -1524,7 +1524,10 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
           isOpen={showAiRefineModal}
           originalMessage={directMessage}
           onClose={() => setShowAiRefineModal(false)}
-          onApply={(text) => setDirectMessage(text)}
+          onApply={(text) => {
+            setDirectMessage(text);
+            setToast({ show: true, type: 'success', message: 'AI 안 적용됨 · 발송 전 미리보기 확인 권장' });
+          }}
         />
 
       </div>

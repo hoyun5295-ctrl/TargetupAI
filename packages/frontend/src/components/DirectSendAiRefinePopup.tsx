@@ -92,7 +92,7 @@ export default function DirectSendAiRefinePopup({
         {/* 3) 서브 */}
         <p className="text-[13.5px] text-gray-600 leading-relaxed mx-1.5 mb-5">
           직접 쓰신 메시지를 AI가 톤·길이·이모지를 자동으로 정리해서<br />
-          안 3~5개로 보여드려요.
+          다듬은 안을 보여드려요.
         </p>
 
         {/* 4) 미니 Before/After */}

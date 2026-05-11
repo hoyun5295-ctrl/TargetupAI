@@ -71,13 +71,21 @@ export default function AiRefineModal({
         body: JSON.stringify({ message: originalMessage, tone, companyName }),
       });
       const data = await res.json();
-      if (!res.ok || !data.success) {
+      if (!res.ok) {
         if (res.status === 403) {
           throw new Error(data?.error || 'AI 다듬기는 베이직 요금제(35만원/월) 이상에서 이용 가능합니다');
         }
         throw new Error(data?.error || 'AI 다듬기에 실패했습니다');
       }
-      setCandidates(data.candidates || []);
+      // ★ D152+ 0건 fallback — Backend 후처리 검증 후 결과 0건이면 success:false + 친화 에러 (200)
+      if (!data.success) {
+        throw new Error(data?.error || 'AI가 다듬은 안을 생성하지 못했습니다. 다시 시도해 주세요.');
+      }
+      const incoming: RefineCandidate[] = Array.isArray(data.candidates) ? data.candidates : [];
+      if (incoming.length === 0) {
+        throw new Error('AI 결과가 비어있습니다. 다시 시도해 주세요.');
+      }
+      setCandidates(incoming);
     } catch (e: any) {
       setError(e?.message || 'AI 다듬기 중 오류가 발생했습니다');
     } finally {
@@ -193,7 +201,7 @@ export default function AiRefineModal({
             <div className="py-10 flex flex-col items-center gap-3">
               <Loader2 className="w-9 h-9 text-emerald-500 animate-spin" strokeWidth={2.5} />
               <p className="text-sm text-gray-700 font-medium">AI가 메시지를 다듬는 중...</p>
-              <p className="text-[11px] text-gray-400">보통 2~4초 소요됩니다</p>
+              <p className="text-[11px] text-gray-400">다듬은 안을 보여드릴게요 · 보통 2~4초</p>
             </div>
           )}
 
@@ -218,7 +226,7 @@ export default function AiRefineModal({
             <div>
               <div className="flex items-center justify-between mb-3">
                 <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
-                  AI 다듬은 안 ({candidates.length}개)
+                  AI 다듬은 안
                 </label>
                 <button
                   type="button"
@@ -267,17 +275,18 @@ export default function AiRefineModal({
                 ))}
               </div>
               <p className="mt-3 text-[11px] text-gray-400 text-center">
-                카드 클릭 시 본문에 즉시 적용됩니다
+                안을 클릭하면 본문에 즉시 적용됩니다
               </p>
             </div>
           )}
         </div>
 
         {/* ── Footer ─────────────────────────────────────────── */}
-        <div className="px-6 py-3 border-t border-gray-100 bg-gray-50 flex items-center justify-center text-[11px] text-gray-500 flex-shrink-0">
+        <div className="px-6 py-3 border-t border-gray-100 bg-gray-50 flex flex-col items-center gap-1 text-[11px] text-gray-500 flex-shrink-0">
           <span className="flex items-center gap-1">
-            <span className="font-mono text-gray-600">%이름%</span> 등 변수 자리 보존
+            <span className="font-mono text-gray-600">%이름%</span> 등 변수 자리 보존 · (광고) 표기 자동 정합
           </span>
+          <span className="text-amber-600 font-medium">AI 결과는 참고용 · 발송 전 반드시 미리보기로 확인하세요</span>
         </div>
       </div>
     </div>

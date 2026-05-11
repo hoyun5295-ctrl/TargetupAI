@@ -2342,7 +2342,9 @@ export interface RefineDirectMessageOptions {
   message: string;
   tone?: RefineTone;
   companyName?: string;
-  maxBytes?: number; // 기본 90바이트(SMS) — 결과는 SMS/LMS 자동 분류
+  maxBytes?: number;        // 기본 90바이트(SMS) — 결과는 SMS/LMS 자동 분류
+  recentMessages?: string[]; // D120 패턴 미러: 회사별 최근 발송 문안 few-shot 학습용
+  rejectNumber?: string;    // 무료수신거부 번호 — 후처리에서 AI 임의 추가/중복 제거
 }
 
 export interface RefineCandidate {
@@ -2401,10 +2403,110 @@ function parseRefineCandidates(rawText: string): RefineCandidate[] {
     });
 }
 
+// ─────────────────────────────────────────────────────────────
+// 결과 후처리 검증 (D152+ 사고 방지 5건):
+//   (a) 변수 자리 보존 — 원본 %xxx% 추출 → 각 안에 동일 변수 모두 박혀있는지 체크, 누락 시 끝에 자동 복원
+//   (b) 광고 표기 — 원본에 (광고) 박혀있으면 각 안 첫머리에 박혀있는지 검증, 누락 시 자동 prepend, 중복 시 자동 제거
+//   (c) 무료수신거부 패턴 제거 — AI가 임의 박은 `무료수신거부 080-...` / `무료거부XXXX` 자동 제거 (buildAdMessage 자동 부착 중복 차단)
+//   (d) 길이/유사도 — 10자 미만 또는 2000B 초과 제외, 원본과 80%+ 동일 제외
+//   (e) 결과 0건 fallback — 모든 안 필터링 후 0건이면 빈 배열 반환 (라우트에서 친화 메시지 처리)
+// ─────────────────────────────────────────────────────────────
+function extractVariables(text: string): string[] {
+  const re = /%[^%\s]{1,30}%/g;
+  return Array.from(new Set(text.match(re) || []));
+}
+
+function stripRejectNumberPatterns(text: string): string {
+  // 다양한 무료수신거부 표기 자동 제거 (buildAdMessage가 자동 부착 — AI가 박으면 중복)
+  let out = text;
+  out = out.replace(/(?:^|\n)\s*무료\s?수신\s?거부[\s:·]*0?80[-\s]?\d{3,4}[-\s]?\d{4}\s*(?=\n|$)/g, '');
+  out = out.replace(/(?:^|\n)\s*무료거부\s?\d{4,}\s*(?=\n|$)/g, '');
+  out = out.replace(/(?:^|\n)\s*수신\s?거부[\s:·]*0?80[-\s]?\d{3,4}[-\s]?\d{4}\s*(?=\n|$)/g, '');
+  return out.replace(/\n{3,}/g, '\n\n').trim();
+}
+
+function ensureAdPrefix(text: string, hasAd: boolean): string {
+  const hasInText = /\(\s*광고\s*\)/.test(text);
+  if (hasAd) {
+    if (hasInText) {
+      // 중복 (광고) 제거 — 첫 번째만 유지
+      let firstSeen = false;
+      return text.replace(/\(\s*광고\s*\)\s*/g, () => {
+        if (firstSeen) return '';
+        firstSeen = true;
+        return '(광고) ';
+      });
+    }
+    return `(광고) ${text}`;
+  } else {
+    // 원본에 (광고) 없는데 AI가 박았으면 제거
+    return hasInText ? text.replace(/\(\s*광고\s*\)\s*/g, '').trim() : text;
+  }
+}
+
+function appendMissingVariables(text: string, missing: string[]): string {
+  if (missing.length === 0) return text;
+  return `${text}\n${missing.join(' ')}`.trim();
+}
+
+function similarity(a: string, b: string): number {
+  // 단순 비교 — 공통 길이 / 더 긴 쪽 길이. 80% 이상이면 거의 동일로 판단.
+  if (!a || !b) return 0;
+  const sa = a.replace(/\s+/g, '');
+  const sb = b.replace(/\s+/g, '');
+  if (sa === sb) return 1;
+  const longer = sa.length >= sb.length ? sa : sb;
+  const shorter = sa.length >= sb.length ? sb : sa;
+  let matched = 0;
+  for (let i = 0; i < shorter.length; i += 1) {
+    if (longer[i] === shorter[i]) matched += 1;
+  }
+  return matched / longer.length;
+}
+
+function validateAndNormalizeRefinedCandidates(
+  candidates: RefineCandidate[],
+  originalMessage: string,
+  rejectNumber?: string,
+): RefineCandidate[] {
+  if (candidates.length === 0) return [];
+  const originalVars = extractVariables(originalMessage);
+  const hasAd = /\(\s*광고\s*\)/.test(originalMessage);
+  const out: RefineCandidate[] = [];
+  void rejectNumber; // 미사용 — stripRejectNumberPatterns는 일반 패턴으로 검출. 향후 회사별 reject_number 정확 매칭 시 활용.
+  for (const c of candidates) {
+    if (!c?.text || typeof c.text !== 'string') continue;
+    let text = c.text.trim();
+
+    // (c) AI가 박은 무료수신거부 패턴 제거
+    text = stripRejectNumberPatterns(text);
+
+    // (b) 광고 표기 정합화
+    text = ensureAdPrefix(text, hasAd);
+
+    // (a) 변수 자리 보존 — 누락 시 끝에 복원
+    const candVars = extractVariables(text);
+    const missing = originalVars.filter((v) => !candVars.includes(v));
+    text = appendMissingVariables(text, missing);
+
+    text = text.trim();
+    const bytes = computeKsxBytes(text);
+
+    // (d) 길이 필터
+    if (text.length < 10) continue;
+    if (bytes > 2000) continue;
+    // (d) 유사도 필터 — 원본과 80%+ 동일하면 제외
+    if (similarity(text, originalMessage) >= 0.8) continue;
+
+    out.push({ text, bytes, type: classifyType(bytes) });
+  }
+  return out;
+}
+
 export async function refineDirectMessage(
   opts: RefineDirectMessageOptions,
 ): Promise<{ candidates: RefineCandidate[] }> {
-  const { message, tone = 'friendly', companyName, maxBytes } = opts;
+  const { message, tone = 'friendly', companyName, maxBytes, recentMessages, rejectNumber } = opts;
   if (!message || !message.trim()) {
     return { candidates: [] };
   }
@@ -2415,27 +2517,39 @@ export async function refineDirectMessage(
     ? `${maxBytes}바이트 이내로 다양하게 (짧은 안 ~ 긴 안 분산)`
     : '가능하면 90바이트(SMS) 이내, 길어지면 2000바이트(LMS) 이내로';
 
-  const systemPrompt = `당신은 한국어 마케팅 메시지 다듬기 전문가입니다.
-사용자가 작성한 SMS/LMS 메시지를 받아서, 톤·길이·이모지·스팸 회피를 다듬은 안 4개를 제시합니다.
+  // D120 패턴 미러 — 회사별 최근 발송 문안 few-shot (각 회사 톤/스타일 자동 학습)
+  // 광고 표기·무료거부·무료수신거부 자동 제거 후 300자로 잘라서 전달 (generateMessages 정합)
+  const fewShotBlock = recentMessages && recentMessages.length > 0
+    ? `\n## 이 브랜드의 최근 실제 발송 문안 (⚠️ 반드시 이 톤과 구성을 참고하세요!)\n${recentMessages
+        .slice(0, 10)
+        .map((m, i) => `${i + 1}. ${m
+          .replace(/\(\s*광고\s*\)/g, '')
+          .replace(/무료거부\d+/g, '')
+          .replace(/무료수신거부\s?\d{3}-?\d{3,4}-?\d{4}/g, '')
+          .trim()
+          .slice(0, 300)}`)
+        .join('\n')}\n`
+    : '';
 
-원칙:
-1. 원본의 핵심 의미는 100% 유지. 사실 변경/추가 금지.
-2. 변수 자리(예: %이름%, %등급%, %포인트%, %기타1%, %기타2%, %기타3%, %회신번호%)는 원본 그대로 보존. 절대 제거/변경 금지.
-3. (광고) 표기는 제거하지 않음 (자동 부착됨). 무료거부 번호도 제거 금지.
-4. 톤 가이드: ${toneGuide}
-5. 길이: ${lengthTarget}
-6. KISA 스팸 차단 키워드(무료체험, 무이자, 100% 보장, 대출, 도박 등) 회피.
-7. 사람이 직접 작성한 듯한 자연스러운 한국어. AI 티 나는 표현 자제.
-8. 4개 안은 서로 다른 표현/길이/이모지 사용 방식으로 분산.
+  const systemPrompt = `당신은 한국어 마케팅 메시지 다듬기 전문가입니다.
+사용자가 작성한 SMS/LMS 메시지를 받아서, 톤·길이·이모지·스팸 회피를 적용한 **다듬은 안 1개**를 제시합니다.
+
+원칙 (절대 준수):
+1. 원본의 핵심 의미·약속·일시·할인율 등 사실은 100% 유지. 변경/추가/제거 금지.
+2. 변수 자리(예: %이름%, %등급%, %포인트%, %기타1%, %기타2%, %기타3%, %회신번호%, %매장명% 등)는 **원본에 박힌 그대로 보존**. 절대 제거/변경/추가 금지. 원본에 박힌 변수는 결과에도 반드시 포함.
+3. (광고) 표기: 원본에 박혀있으면 결과 첫머리에 (광고) 그대로 유지. 원본에 없으면 박지 않음.
+4. **무료수신거부 / 무료거부 / 수신거부 080-XXXX-XXXX 같은 표기는 절대 박지 마세요** — 한줄로 시스템이 자동 부착합니다. AI가 박으면 중복 발송 사고.
+5. 톤 가이드: ${toneGuide}
+6. 길이: ${lengthTarget}
+7. KISA 스팸 차단 키워드(무료체험, 무이자, 100% 보장, 대출, 도박 등) 회피.
+8. 사람이 직접 작성한 듯한 자연스러운 한국어. AI 티 나는 표현(예: "안녕하세요 고객님" 남발) 자제.
+9. 가장 자연스럽고 효과적인 **단 하나의 안**만 제시. 여러 후보 나열 금지.
 
 ${brandLine}
-
-응답 형식 — JSON 배열만, 다른 설명/주석/코드펜스 금지:
+${fewShotBlock}
+응답 형식 — JSON 배열(원소 1개)만, 다른 설명/주석/코드펜스 금지:
 [
-  { "text": "다듬은 메시지 1" },
-  { "text": "다듬은 메시지 2" },
-  { "text": "다듬은 메시지 3" },
-  { "text": "다듬은 메시지 4" }
+  { "text": "다듬은 메시지" }
 ]`;
 
   // Claude 우선
@@ -2446,14 +2560,15 @@ ${brandLine}
         max_tokens: AI_MAX_TOKENS.refineMessage,
         system: systemPrompt,
         messages: [
-          { role: 'user', content: `원본 메시지:\n\n${message}\n\n위 메시지를 다듬어 안 4개를 JSON 배열로만 제시해주세요.` },
+          { role: 'user', content: `원본 메시지:\n\n${message}\n\n위 메시지를 다듬어 가장 자연스럽고 효과적인 안 1개를 JSON 배열로만 제시해주세요.` },
         ],
       });
       const textBlock = response.content.find((b: any) => b.type === 'text') as any;
       const rawText = textBlock?.text || '';
       const candidates = parseRefineCandidates(rawText);
-      if (candidates.length > 0) return { candidates };
-      console.warn('[ai][refineDirectMessage] Claude 응답 파싱 0건, OpenAI fallback');
+      const validated = validateAndNormalizeRefinedCandidates(candidates, message, rejectNumber);
+      if (validated.length > 0) return { candidates: validated };
+      console.warn(`[ai][refineDirectMessage] Claude 응답 파싱/검증 후 0건 (raw=${candidates.length}, validated=${validated.length}), OpenAI fallback`);
     } catch (err: any) {
       console.error('[ai][refineDirectMessage] Anthropic 호출 실패:', err?.message);
     }
@@ -2466,7 +2581,7 @@ ${brandLine}
         model: AI_MODELS.gpt,
         messages: [
           { role: 'system', content: systemPrompt },
-          { role: 'user', content: `원본 메시지:\n${message}\n\n4개 안을 JSON 배열 형식 {"candidates":[{"text":"..."},...]}로 반환` },
+          { role: 'user', content: `원본 메시지:\n${message}\n\n다듬은 안 1개를 JSON 형식 {"candidates":[{"text":"..."}]}로 반환` },
         ],
         temperature: 0.8,
         max_tokens: AI_MAX_TOKENS.refineMessage,
@@ -2487,7 +2602,8 @@ ${brandLine}
           const bytes = computeKsxBytes(text);
           return { text, bytes, type: classifyType(bytes) };
         });
-      return { candidates };
+      const validated = validateAndNormalizeRefinedCandidates(candidates, message, rejectNumber);
+      return { candidates: validated };
     } catch (err: any) {
       console.error('[ai][refineDirectMessage][OpenAI] 실패:', err?.message);
     }
