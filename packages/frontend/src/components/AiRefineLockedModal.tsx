@@ -104,7 +104,7 @@ export default function AiRefineLockedModal({ isOpen, onClose }: Props) {
               AI 다듬기
             </span>
             <div className="text-[11.5px] leading-[1.55] text-gray-900 break-keep">
-              내일 신상품이 입고됩니다 😊
+              내일 신상품이 입고됩니다 ★
             </div>
           </div>
         </div>
