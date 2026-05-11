@@ -6,6 +6,18 @@ import { TIMEOUTS } from '../config/defaults';
 import { authenticate, generateToken, JwtPayload } from '../middlewares/auth';
 import { rotateUserSession, normalizeAppSource, newSessionId } from '../utils/session-manager';
 import { isBlocked, recordFailureAndMaybeBlock, clearBlocksOnSuccess } from '../utils/login-block';
+import {
+  generateTotpSecret,
+  buildOtpAuthUrl,
+  generateQrDataUrl,
+  verifyTotpCode,
+  generateBackupCodesPlain,
+  hashBackupCodes,
+  verifyBackupCode,
+  signEnrollToken,
+  verifyEnrollToken,
+  BackupCodeRecord,
+} from '../utils/totp';
 
 const router = Router();
 
@@ -77,6 +89,65 @@ router.post('/login', loginLimiter, async (req: Request, res: Response) => {
         );
         await recordFailureAndMaybeBlock(ipForBlock, loginId);
         return res.status(401).json({ error: 'Invalid credentials' });
+      }
+
+      // ★ 2026-05-11: 슈퍼관리자 2FA(TOTP) 게이트 — utils/totp.ts CT
+      //   - totp_enabled=false → enrollment 모드: QR + 백업 코드 발급, enrollToken 응답 (JWT 미발급)
+      //   - totp_enabled=true → totpCode 6자리 또는 백업 코드 8자(hex) 검증 통과해야 JWT 발급
+      if (!admin.totp_enabled) {
+        const newSecret = generateTotpSecret();
+        const plainBackupCodes = generateBackupCodesPlain();
+        const hashedBackupCodes = await hashBackupCodes(plainBackupCodes);
+        await query(
+          'UPDATE super_admins SET totp_secret = $1, backup_codes = $2 WHERE id = $3',
+          [newSecret, JSON.stringify(hashedBackupCodes), admin.id]
+        );
+        const otpAuthUrl = buildOtpAuthUrl(admin.login_id, newSecret);
+        const qrDataUrl = await generateQrDataUrl(otpAuthUrl);
+        const enrollToken = signEnrollToken(admin.id);
+        await query(
+          `INSERT INTO audit_logs (id, user_id, action, target_type, details, ip_address, user_agent, created_at)
+           VALUES (gen_random_uuid(), $1, 'totp_enroll_start', 'super_admin', $2, $3, $4, NOW())`,
+          [admin.id, JSON.stringify({ loginId }), req.ip, req.headers['user-agent'] || '']
+        );
+        return res.json({
+          enrollmentRequired: true,
+          enrollToken,
+          qrDataUrl,
+          backupCodes: plainBackupCodes,
+          loginId: admin.login_id,
+        });
+      }
+
+      const totpCodeRaw = String(req.body.totpCode || '').trim();
+      if (!totpCodeRaw) {
+        return res.status(401).json({ error: 'OTP 코드가 필요합니다.', needTotp: true });
+      }
+      let totpValid = verifyTotpCode(admin.totp_secret, totpCodeRaw);
+      let usedBackup = false;
+      let updatedBackupCodes: BackupCodeRecord[] = Array.isArray(admin.backup_codes) ? admin.backup_codes : [];
+      if (!totpValid) {
+        const br = await verifyBackupCode(updatedBackupCodes, totpCodeRaw);
+        if (br.matched) {
+          totpValid = true;
+          usedBackup = true;
+          updatedBackupCodes = br.updatedCodes;
+        }
+      }
+      if (!totpValid) {
+        await query(
+          `INSERT INTO audit_logs (id, user_id, action, target_type, details, ip_address, user_agent, created_at)
+           VALUES (gen_random_uuid(), $1, 'login_fail', 'super_admin', $2, $3, $4, NOW())`,
+          [admin.id, JSON.stringify({ loginId, reason: 'invalid_totp' }), req.ip, req.headers['user-agent'] || '']
+        );
+        await recordFailureAndMaybeBlock(ipForBlock, loginId);
+        return res.status(401).json({ error: 'OTP 코드가 일치하지 않습니다.', needTotp: true });
+      }
+      if (usedBackup) {
+        await query(
+          'UPDATE super_admins SET backup_codes = $1 WHERE id = $2',
+          [JSON.stringify(updatedBackupCodes), admin.id]
+        );
       }
 
       // ★ D111 P0: 슈퍼관리자는 app_source='super' 단일 세션 (D100의 5개 허용 폐기)
@@ -377,6 +448,78 @@ router.post('/extend-session', authenticate, async (req: any, res: Response) => 
 
 router.get('/session-check', authenticate, async (req: Request, res: Response) => {
   res.json({ ok: true });
+});
+
+// ===========================================================================
+// 슈퍼관리자 TOTP 등록 확정 (★ 2026-05-11)
+// - enrollToken(5분 JWT)으로 admin 식별 → DB에 임시 저장된 totp_secret로 첫 6자리 검증
+// - 성공 시 totp_enabled=true UPDATE + 정상 JWT 발급 (자동 로그인)
+// ===========================================================================
+router.post('/super/confirm-totp', async (req: Request, res: Response) => {
+  try {
+    const enrollToken = String(req.body.enrollToken || '');
+    const code = String(req.body.code || '').trim();
+    const adminId = verifyEnrollToken(enrollToken);
+    if (!adminId) {
+      return res.status(401).json({ error: '등록 토큰이 만료되었습니다. 다시 로그인해주세요.' });
+    }
+    const r = await query(
+      'SELECT * FROM super_admins WHERE id = $1 AND is_active = true',
+      [adminId]
+    );
+    if (r.rows.length === 0) {
+      return res.status(401).json({ error: '관리자 계정을 찾을 수 없습니다.' });
+    }
+    const admin = r.rows[0];
+    if (!admin.totp_secret) {
+      return res.status(400).json({ error: '등록 절차를 다시 시작해주세요.' });
+    }
+    if (!verifyTotpCode(admin.totp_secret, code)) {
+      return res.status(401).json({ error: 'OTP 코드가 일치하지 않습니다.' });
+    }
+    await query('UPDATE super_admins SET totp_enabled = TRUE WHERE id = $1', [admin.id]);
+
+    const sessionTimeoutMinutes = TIMEOUTS.superAdminSessionMinutes;
+    const sessionId = newSessionId();
+    const payload: JwtPayload = {
+      userId: admin.id,
+      userType: 'super_admin',
+      loginId: admin.login_id,
+      sessionId,
+    };
+    const token = generateToken(payload);
+    await rotateUserSession({
+      sessionId,
+      userId: admin.id,
+      token,
+      appSource: 'super',
+      req,
+      expiresInMinutes: sessionTimeoutMinutes,
+    });
+    await query(
+      `INSERT INTO audit_logs (id, user_id, action, target_type, details, ip_address, user_agent, created_at)
+       VALUES (gen_random_uuid(), $1, 'totp_enrolled', 'super_admin', $2, $3, $4, NOW())`,
+      [admin.id, JSON.stringify({ loginId: admin.login_id }), req.ip, req.headers['user-agent'] || '']
+    );
+    await query(
+      'UPDATE super_admins SET last_login_at = CURRENT_TIMESTAMP WHERE id = $1',
+      [admin.id]
+    );
+    return res.json({
+      token,
+      user: {
+        id: admin.id,
+        loginId: admin.login_id,
+        name: admin.name,
+        email: admin.email,
+        userType: 'super_admin',
+      },
+      sessionTimeoutMinutes,
+    });
+  } catch (err: any) {
+    console.error('[super/confirm-totp]', err);
+    return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
 });
 
 export default router;

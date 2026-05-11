@@ -15,6 +15,16 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
+  // ★ 슈퍼관리자 2FA(TOTP) state
+  const [showTotp, setShowTotp] = useState(false);
+  const [totpCode, setTotpCode] = useState('');
+  const [enrollmentData, setEnrollmentData] = useState<{ enrollToken: string; qrDataUrl: string; backupCodes: string[]; loginId: string } | null>(null);
+  const [enrollStep, setEnrollStep] = useState<'backup' | 'verify'>('backup');
+  const [enrollCode, setEnrollCode] = useState('');
+  const [enrollLoading, setEnrollLoading] = useState(false);
+  const [enrollError, setEnrollError] = useState('');
+  const [backupAcknowledged, setBackupAcknowledged] = useState(false);
+
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [tempUser, setTempUser] = useState<any>(null);
   const [tempToken, setTempToken] = useState('');
@@ -53,9 +63,28 @@ export default function LoginPage() {
         loginId: loginId.trim(),
         password,
         userType: isSuperAdminOnly ? 'super_admin' : undefined,
-      });
+        totpCode: showTotp ? totpCode.trim() : undefined,
+      } as any);
 
-      const { token, user, sessionTimeoutMinutes } = response.data;
+      const data = response.data;
+
+      // ★ 슈퍼관리자 2FA — enrollment 모드 진입 (QR + 백업 코드)
+      if (data.enrollmentRequired) {
+        setEnrollmentData({
+          enrollToken: data.enrollToken,
+          qrDataUrl: data.qrDataUrl,
+          backupCodes: data.backupCodes,
+          loginId: data.loginId,
+        });
+        setEnrollStep('backup');
+        setBackupAcknowledged(false);
+        setEnrollCode('');
+        setEnrollError('');
+        setLoading(false);
+        return;
+      }
+
+      const { token, user, sessionTimeoutMinutes } = data;
       localStorage.setItem('sessionTimeoutMinutes', String(sessionTimeoutMinutes || 30));
 
       if (user.mustChangePassword) {
@@ -82,11 +111,46 @@ export default function LoginPage() {
       if (status === 409 && data?.reason === 'sending_in_progress') {
         setSendingBlockMessage(data.error);
         setShowSendingBlockModal(true);
+      } else if (status === 401 && data?.needTotp) {
+        // ★ 슈퍼관리자 2FA — OTP 코드 입력 단계로 진입
+        setShowTotp(true);
+        setTotpCode('');
+        setError(data.error || 'OTP 코드를 입력하세요.');
       } else {
         setError(data?.error || '로그인에 실패했습니다.');
       }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleConfirmEnrollment = async () => {
+    if (!enrollmentData) return;
+    setEnrollError('');
+    if (!/^\d{6}$/.test(enrollCode)) {
+      setEnrollError('6자리 숫자 코드를 입력하세요.');
+      return;
+    }
+    setEnrollLoading(true);
+    try {
+      const res = await fetch('/api/auth/super/confirm-totp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enrollToken: enrollmentData.enrollToken, code: enrollCode }),
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        setEnrollError(errData.error || 'OTP 검증에 실패했습니다.');
+        return;
+      }
+      const result = await res.json();
+      localStorage.setItem('sessionTimeoutMinutes', String(result.sessionTimeoutMinutes || 30));
+      login(result.user, result.token);
+      navigate('/admin');
+    } catch (err: any) {
+      setEnrollError('등록 중 오류가 발생했습니다.');
+    } finally {
+      setEnrollLoading(false);
     }
   };
 
@@ -156,6 +220,80 @@ export default function LoginPage() {
             확인
           </button>
         </div>
+      </div>
+    </div>
+  );
+
+  // ★ 슈퍼관리자 2FA(TOTP) 등록 모달 — QR + 백업 코드 + 첫 6자리 확인
+  const enrollmentModal = enrollmentData && (
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-[fadeIn_0.2s_ease-out]">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-[zoomIn_0.25s_ease-out]">
+        {enrollStep === 'backup' ? (
+          <>
+            <div className="px-6 pt-8 pb-2 text-center">
+              <div className="w-14 h-14 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <svg className="w-7 h-7 text-slate-700" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 013.75 9.375v-4.5zM3.75 14.625c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5a1.125 1.125 0 01-1.125-1.125v-4.5zM13.5 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0113.5 9.375v-4.5z" />
+                </svg>
+              </div>
+              <h3 className="text-lg font-bold text-gray-900">2단계 인증(OTP) 등록</h3>
+              <p className="text-sm text-gray-500 mt-2">Google Authenticator 앱으로 QR 스캔 후 6자리 코드 입력</p>
+            </div>
+            <div className="px-6 pb-6 pt-2 space-y-4">
+              <div className="flex justify-center bg-gray-50 rounded-xl p-4">
+                <img src={enrollmentData.qrDataUrl} alt="OTP QR" className="w-48 h-48" />
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-gray-700 mb-2">백업 코드 (폰 분실 대비, 1회용 · 안전 보관)</p>
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 grid grid-cols-2 gap-1.5 font-mono text-xs">
+                  {enrollmentData.backupCodes.map((c, i) => (
+                    <div key={i} className="px-2 py-1 bg-white rounded border border-amber-100 text-center">{c}</div>
+                  ))}
+                </div>
+                <button type="button" onClick={() => navigator.clipboard.writeText(enrollmentData.backupCodes.join('\n'))}
+                  className="mt-2 text-xs text-slate-600 hover:text-slate-900 underline">전체 복사</button>
+              </div>
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input type="checkbox" checked={backupAcknowledged} onChange={(e) => setBackupAcknowledged(e.target.checked)}
+                  className="mt-0.5 w-4 h-4 rounded border-gray-300 text-slate-700 focus:ring-slate-700" />
+                <span className="text-xs text-gray-600">백업 코드를 안전한 곳에 저장했습니다 (이 화면을 떠나면 다시 볼 수 없음)</span>
+              </label>
+              <button onClick={() => setEnrollStep('verify')} disabled={!backupAcknowledged}
+                className="w-full bg-slate-800 hover:bg-slate-900 disabled:bg-gray-300 text-white font-medium py-2.5 rounded-xl text-sm transition-colors">
+                다음 (6자리 코드 입력)
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="px-6 pt-8 pb-2 text-center">
+              <div className="w-14 h-14 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <svg className="w-7 h-7 text-slate-700" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <h3 className="text-lg font-bold text-gray-900">등록 확인</h3>
+              <p className="text-sm text-gray-500 mt-2">{enrollmentData.loginId} · 앱에 표시된 6자리 코드</p>
+            </div>
+            <div className="px-6 pb-6 pt-4 space-y-3">
+              <input type="text" inputMode="numeric" maxLength={6} value={enrollCode}
+                onChange={(e) => setEnrollCode(e.target.value.replace(/\D/g, ''))}
+                className="w-full px-4 py-3 rounded-xl border border-gray-300 focus:ring-2 focus:ring-slate-700 focus:border-slate-700 outline-none transition text-center text-2xl font-mono tracking-widest"
+                placeholder="000000" autoFocus />
+              {enrollError && <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-2.5 text-sm text-red-600">{enrollError}</div>}
+              <div className="flex gap-2">
+                <button onClick={() => setEnrollStep('backup')} disabled={enrollLoading}
+                  className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium py-2.5 rounded-xl text-sm transition-colors">
+                  이전
+                </button>
+                <button onClick={handleConfirmEnrollment} disabled={enrollLoading || enrollCode.length !== 6}
+                  className="flex-1 bg-slate-800 hover:bg-slate-900 disabled:bg-gray-300 text-white font-medium py-2.5 rounded-xl text-sm transition-colors">
+                  {enrollLoading ? '확인 중...' : '등록 확인'}
+                </button>
+              </div>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
@@ -273,6 +411,17 @@ export default function LoginPage() {
                   placeholder="비밀번호를 입력하세요" required />
               </div>
 
+              {isSuperAdminOnly && showTotp && (
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1.5">OTP 코드 (6자리)</label>
+                  <input type="text" inputMode="numeric" maxLength={6} value={totpCode}
+                    onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, ''))}
+                    className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-slate-700 focus:border-slate-700 outline-none transition bg-white tracking-widest text-center font-mono"
+                    placeholder="000000" autoFocus required />
+                  <p className="text-xs text-gray-400 mt-1.5">Google Authenticator 앱의 6자리 코드. 폰 분실 시 백업 코드(8자 hex)도 사용 가능.</p>
+                </div>
+              )}
+
               {error && (
                 <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-2.5">
                   <p className="text-sm text-red-600">{error}</p>
@@ -312,6 +461,7 @@ export default function LoginPage() {
       {forceLogoutModal}
       {sendingBlockModalEl}
       {passwordModal}
+      {enrollmentModal}
     </div>
   );
 }
