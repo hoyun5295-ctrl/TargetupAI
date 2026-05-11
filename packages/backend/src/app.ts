@@ -39,6 +39,8 @@ import { startSpamTestQueueWorker } from './utils/spam-test-queue';
 import { startAlimtalkScheduler } from './utils/alimtalk-jobs';
 // ★ CT-17: 30일 PRO 무료체험 자동 강등 Cron (2026-04-22)
 import { startTrialDowngradeWorker } from './utils/trial-downgrade-worker';
+// ★ D151 (2026-05-11): 캠페인 결과 자동 sync 워커 (5분 주기, 환불 누락 영구 차단)
+import { startCampaignSyncWorker } from './utils/campaign-sync-worker';
 
 // 공용 관리 라우트 (슈퍼관리자 + 고객사관리자)
 import manageUsersRoutes from './routes/manage-users';
@@ -262,6 +264,9 @@ app.listen(PORT, () => {
 
   // ★ CT-17: 30일 PRO 무료체험 자동 강등 (매일 04:00 KST)
   startTrialDowngradeWorker();
+
+  // ★ D151 (2026-05-11): 캠페인 결과 자동 sync (5분 주기) — fire-and-forget 사용자 진입 의존 → 백그라운드 자동
+  startCampaignSyncWorker();
 });
 
 export default app;
