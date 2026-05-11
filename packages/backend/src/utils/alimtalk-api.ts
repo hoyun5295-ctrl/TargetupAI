@@ -644,7 +644,7 @@ export async function requestInspectionWithFile(
   const form = new FormData();
   form.append('comment', comment);
   form.append('attachment', fileBuffer, {
-    filename: fileName,
+    filename: toAsciiSafeFilename(fileName),
     contentType: mimetype || guessMimeFromFilename(fileName),
     knownLength: fileBuffer.length,
   });
@@ -693,6 +693,19 @@ function guessMimeFromFilename(filename: string): string {
     docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   };
   return map[ext] || 'application/octet-stream';
+}
+
+// ★ D151+ (PDF 0511 #4): IMC 전송 시 한글/특수문자 파일명 → ASCII-safe 강제.
+//   form-data v4.0.5 `_getContentDisposition`은 filename을 헤더에 그대로 박음 (RFC 5987 자동 처리 X).
+//   IMC humuson Java/Spring 서버가 ASCII 외 byte를 latin1로 해석 → 확장자 추출 실패
+//   → octet-stream 인식 → 미리보기 깨짐 (PG byte는 정상 저장됨).
+//   원본 파일명은 PG `inspection_evidence_filename`에 보존되며, IMC 전송 시점만 ASCII-safe 변환.
+//   ASCII 영문/숫자/`.-_`만 포함 시 원본 유지 (D149-#B 영문 파일명 호환).
+function toAsciiSafeFilename(filename: string): string {
+  if (/^[A-Za-z0-9._-]+$/.test(filename)) return filename;
+  const ext = (filename.split('.').pop() || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const safeExt = ext && ext.length <= 5 ? ext : 'bin';
+  return `evidence_${Date.now()}.${safeExt}`;
 }
 
 /**
@@ -1116,7 +1129,7 @@ async function uploadSingleImage(
   //   D146에서 imageUrl 회신은 정상이었으나 IMC 측 binary 정확성 미검증 → 미래 사고 방지.
   const form = new FormData();
   form.append('image', fileBuffer, {
-    filename: fileName,
+    filename: toAsciiSafeFilename(fileName),
     contentType: mimetype || guessMimeFromFilename(fileName),
     knownLength: fileBuffer.length,
   });
@@ -1163,7 +1176,7 @@ async function uploadMultipleImages(
   const form = new FormData();
   for (const f of files) {
     form.append(fieldName, f.buffer, {
-      filename: f.name,
+      filename: toAsciiSafeFilename(f.name),
       contentType: f.mimetype || guessMimeFromFilename(f.name),
       knownLength: f.buffer.length,
     });

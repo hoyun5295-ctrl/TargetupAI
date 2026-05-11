@@ -18,9 +18,12 @@ import ItemListEditor, {
 } from './ItemListEditor';
 import KakaoChannelImageUpload from './KakaoChannelImageUpload';
 import AlimtalkPreview from './AlimtalkPreview';
-
-export type MsgType = 'BA' | 'EX' | 'AD' | 'MI';
-export type EmphType = 'NONE' | 'TEXT' | 'IMAGE' | 'ITEM_LIST';
+import {
+  MSG_TYPES,
+  EMPH_TYPES,
+  type MsgType,
+  type EmphType,
+} from './alimtalk-types';
 
 export interface TemplateFormData {
   id?: string;
@@ -79,20 +82,6 @@ interface Props {
   /** ★ D139 #4-1 (0425): 상세보기 모달용 — 모든 필드 disabled + 저장 버튼 숨김 */
   readOnly?: boolean;
 }
-
-const MSG_TYPES: { value: MsgType; label: string; desc: string }[] = [
-  { value: 'BA', label: '기본형',       desc: '본문만' },
-  { value: 'EX', label: '부가정보형',   desc: '본문 + 부가정보' },
-  { value: 'AD', label: '채널추가형',   desc: '본문 + 채널 추가 버튼' },
-  { value: 'MI', label: '복합형',       desc: '본문 + 부가정보 + 채널 추가' },
-];
-
-const EMPH_TYPES: { value: EmphType; label: string }[] = [
-  { value: 'NONE',      label: '없음' },
-  { value: 'TEXT',      label: '강조표기 (TEXT)' },
-  { value: 'IMAGE',     label: '이미지' },
-  { value: 'ITEM_LIST', label: '아이템리스트' },
-];
 
 function getToken() {
   return localStorage.getItem('token') || '';
@@ -414,8 +403,13 @@ export default function AlimtalkTemplateFormV2({
           </button>
         </div>
 
-        {/* Body: 2-col (폼 / 미리보기) */}
-        <div className="grid grid-cols-1 md:grid-cols-[1fr_360px] flex-1 overflow-hidden">
+        {/* Body: 2-col (폼 / 미리보기).
+            ★ D151+ (PDF 0511 #3): readOnly 시 모든 input/select/checkbox/button 자동 disabled.
+              fieldset disabled가 자식 form 컨트롤 일괄 비활성 (HTML5 표준). min-w-0 + border-0 reset. */}
+        <fieldset
+          disabled={readOnly}
+          className="grid grid-cols-1 md:grid-cols-[1fr_360px] flex-1 overflow-hidden border-0 p-0 m-0 min-w-0"
+        >
           {/* Left: Form */}
           <div className="px-6 py-4 overflow-y-auto space-y-4 border-r border-gray-100">
             {/* 발신 프로필 */}
@@ -867,7 +861,7 @@ export default function AlimtalkTemplateFormV2({
               profileName={profileName}
             />
           </div>
-        </div>
+        </fieldset>
 
         {/* Footer */}
         <div className="px-6 py-3 border-t border-gray-200 bg-gray-50 flex justify-end gap-3">

@@ -75,10 +75,22 @@ export default function ButtonEditor({
   //   기존: forceChannelAdd(AD/MI 타입)일 때만 name 고정 → 기본형(BA)에서 사용자가 AC 수동 추가 시
   //         name 자유 편집 가능 → IMC가 `buttonList[i] AC 버튼명은 "채널 추가"로만 설정 가능` 에러 반환.
   //   수정: type 전환/추가와 관계없이 type='AC'면 항상 name='채널 추가' 강제. forceChannelAdd 무관.
+  // ★ D151+ (PDF 0511 #1): type 전환 시 name 잔존 차단.
+  //   AC→다른 type: 이전 '채널 추가' 텍스트 자동 클리어 (사용자가 빈 input에서 새 버튼명 입력).
+  //   다른→AC: '채널 추가' 강제 (IMC 정책 유지).
   const updateBtn = (idx: number, patch: Partial<AlimtalkButton>) => {
     const next = buttons.slice();
-    const merged = { ...next[idx], ...patch };
-    if (merged.type === 'AC') merged.name = '채널 추가';
+    const prev = next[idx];
+    const merged = { ...prev, ...patch };
+    if (patch.type && patch.type !== prev?.type) {
+      if (patch.type === 'AC') {
+        merged.name = '채널 추가';
+      } else if (prev?.type === 'AC') {
+        merged.name = '';
+      }
+    } else if (merged.type === 'AC') {
+      merged.name = '채널 추가';
+    }
     next[idx] = merged;
     onChange(next);
   };

@@ -16,6 +16,7 @@ import AlarmUserManager from './AlarmUserManager';
 import SenderRegistrationWizard from './SenderRegistrationWizard';
 import UnsubscribeSettingModal from './UnsubscribeSettingModal';
 import TemplateHistoryModal from './TemplateHistoryModal';
+import { formatTemplateType } from './alimtalk-types';
 import { useAuthStore } from '../../stores/authStore';
 
 interface Template {
@@ -95,7 +96,7 @@ function getToken() {
 }
 
 const STATUS_LABELS: Record<string, { label: string; cls: string }> = {
-  DRAFT:     { label: '초안',     cls: 'bg-gray-100 text-gray-600' },
+  DRAFT:     { label: '등록',     cls: 'bg-gray-100 text-gray-600' },
   REQUESTED: { label: '검수요청', cls: 'bg-amber-100 text-amber-700' },
   REQ:       { label: '검수요청', cls: 'bg-amber-100 text-amber-700' },
   REVIEWING: { label: '검수중',   cls: 'bg-blue-100 text-blue-700' },
@@ -508,6 +509,7 @@ export default function AlimtalkManagementSection() {
                 <th className="text-left px-4 py-2">등록자</th>
                 <th className="text-center px-4 py-2">유형</th>
                 <th className="text-center px-4 py-2">상태</th>
+                <th className="text-left px-4 py-2">등록일시</th>
                 <th className="text-left px-4 py-2">업데이트</th>
                 <th className="text-right px-4 py-2">관리</th>
               </tr>
@@ -530,9 +532,6 @@ export default function AlimtalkManagementSection() {
                   <tr key={t.id} className="border-t border-gray-100 hover:bg-gray-50">
                     <td className="px-4 py-2">
                       <div className="font-medium text-gray-900">{t.template_name}</div>
-                      <div className="text-[11px] text-gray-400 font-mono truncate max-w-[240px]">
-                        {t.template_code}
-                      </div>
                       {(t.status === 'REJECTED' || t.status === 'REJ') &&
                         t.reject_reason && (
                           <div className="text-[11px] text-red-500 mt-0.5">
@@ -558,7 +557,7 @@ export default function AlimtalkManagementSection() {
                       )}
                     </td>
                     <td className="text-center px-4 py-2 text-xs text-gray-600">
-                      {t.message_type}/{t.emphasize_type}
+                      {formatTemplateType(t.message_type, t.emphasize_type)}
                     </td>
                     <td className="text-center px-4 py-2">
                       <span
@@ -566,6 +565,11 @@ export default function AlimtalkManagementSection() {
                       >
                         {st.label}
                       </span>
+                    </td>
+                    <td className="px-4 py-2 text-xs text-gray-500">
+                      {t.created_at
+                        ? new Date(t.created_at).toLocaleString('ko-KR')
+                        : '-'}
                     </td>
                     <td className="px-4 py-2 text-xs text-gray-500">
                       {t.updated_at
