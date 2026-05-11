@@ -354,7 +354,7 @@ export default function CallbacksTab() {
   const handleSubmitRegistration = async () => {
     if (!regPhone.trim()) { setToast({ msg: '발신번호를 입력해주세요.', type: 'error' }); return; }
     if (regFiles.length === 0) {
-      const msg = regNumberType === 'other' ? '필요 서류를 첨부해주세요. (발신번호 사용 동의서 + 재직증명서 또는 거래관계증명파일)' : '통신가입증명원을 첨부해주세요.';
+      const msg = regNumberType === 'other' ? '필요 서류를 첨부해주세요. (발신번호 사용 동의서 + 재직증명서 또는 거래관계증명파일 + 통신가입증명원)' : '통신가입증명원을 첨부해주세요.';
       setToast({ msg, type: 'error' }); return;
     }
     setRegSubmitting(true);
@@ -732,7 +732,7 @@ export default function CallbacksTab() {
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     서류 첨부 * {regNumberType === 'company'
                       ? '(통신가입증명원)'
-                      : '(발신번호 사용 동의서 + 재직증명서 또는 거래관계증명파일)'}
+                      : '(발신번호 사용 동의서 + 재직증명서 또는 거래관계증명파일 + 통신가입증명원)'}
                   </label>
                   <div className="flex items-center gap-3">
                     <button onClick={() => fileInputRef.current?.click()}

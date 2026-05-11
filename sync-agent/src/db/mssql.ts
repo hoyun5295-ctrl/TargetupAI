@@ -130,19 +130,45 @@ export class MssqlConnector implements IDbConnector {
     const safeTable = this.sanitizeIdentifier(tableName);
     const safeColumn = this.sanitizeIdentifier(timestampColumn);
 
-    const result = await this.pool!.request()
-      .input('since', sql.DateTime, new Date(since))
-      .input('limit', sql.Int, limit)
-      .input('offset', sql.Int, offset)
-      .query(`
-        SELECT * FROM [${safeTable}]
-        WHERE [${safeColumn}] > @since
-        ORDER BY [${safeColumn}] ASC
-        OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
-      `);
+    try {
+      const result = await this.pool!.request()
+        .input('since', sql.DateTime, new Date(since))
+        .input('limit', sql.Int, limit)
+        .input('offset', sql.Int, offset)
+        .query(`
+          SELECT * FROM [${safeTable}]
+          WHERE [${safeColumn}] > @since
+          ORDER BY [${safeColumn}] ASC
+          OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
+        `);
 
-    logger.debug(`증분 조회: ${result.recordset.length}건`, { tableName, since, offset });
-    return result.recordset;
+      logger.debug(`증분 조회: ${result.recordset.length}건`, { tableName, since, offset });
+      return result.recordset;
+    } catch (err: any) {
+      // ★ D151-5 (2026-05-11): SQL Server raw 에러 → 사용자 친화 메시지 변환
+      //   timestamp/테이블 누락 시 mssql 패키지가 EREQUEST raw 에러를 그대로 throw하여
+      //   운영 화면엔 "Invalid column name 'updated_at'..." 같은 영문 원본만 노출 → 직원 진단 어려움.
+      //   설치 마법사 재실행 안내 메시지로 변환.
+      const msg = err?.message || err?.originalError?.message || String(err);
+      const colMatch = msg.match(/Invalid column name '([^']+)'/i);
+      if (colMatch) {
+        logger.error('MSSQL 증분 조회 실패: 컬럼 누락', { tableName, timestampColumn, rawMessage: msg });
+        throw new Error(
+          `타임스탬프 컬럼 '${colMatch[1]}'이 테이블 [${safeTable}]에 없습니다. ` +
+          `설치 마법사를 다시 실행하여 올바른 컬럼명을 입력해주세요. ` +
+          `(SQL Server에서 SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='${safeTable}' 로 확인 가능)`
+        );
+      }
+      const tableMatch = msg.match(/Invalid object name '([^']+)'/i);
+      if (tableMatch) {
+        logger.error('MSSQL 증분 조회 실패: 테이블 누락', { tableName, rawMessage: msg });
+        throw new Error(
+          `테이블 '${tableMatch[1]}'이 DB에 없습니다. 설치 마법사에서 올바른 테이블명을 재확인해주세요.`
+        );
+      }
+      logger.error('MSSQL 증분 조회 실패', { tableName, timestampColumn, error: msg });
+      throw err;
+    }
   }
 
   async fetchAll(
