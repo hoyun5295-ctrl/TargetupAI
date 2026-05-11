@@ -49,6 +49,7 @@ import { formatDate, formatPreviewValue, formatByType, calculateSmsBytes, trunca
 import { insertAtCursorOrAppend } from '../utils/textInsert';
 import { getMmsImagePath, getMmsImageDisplayName, toMmsImagePaths, type MmsImageItem } from '../utils/mmsImage';
 import DirectSendPanel from '../components/DirectSendPanel';
+import DirectSendAiRefinePopup from '../components/DirectSendAiRefinePopup';
 
 interface Stats {
   total: string;
@@ -267,6 +268,9 @@ export default function Dashboard() {
   const uploadProgressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [showDirectSend, setShowDirectSend] = useState(false);
   const [showTargetSend, setShowTargetSend] = useState(false);
+  // ★ D152+ (PDF 0511 funnel fix): 직접발송 진입 시 24h 1회 AI 다듬기 안내 팝업.
+  //   67사 무료체험 funnel(고객DB 업로드 3%) 절대 병목 해소 — AI 가치 DB 없이 즉시 체감 동선.
+  const [showAiRefinePopup, setShowAiRefinePopup] = useState(false);
   // ★ D43-3c: 타겟 필드 메타 (동적 변수/테이블용)
   const [targetFieldsMeta, setTargetFieldsMeta] = useState<FieldMeta[]>([]);
   const [phoneFields, setPhoneFields] = useState<string[]>([]);  // ★ D103: 전화번호 형태 필드
@@ -1031,6 +1035,35 @@ export default function Dashboard() {
     loadScheduledCampaigns();
     loadCompanySettings();
   }, []);
+
+  // ★ D152+ (PDF 0511 funnel fix): 직접발송 진입 시 24h 1회 AI 다듬기 안내 팝업.
+  //   요금제 잠금(FREE/STARTER) 시 노출 안 함. TRIAL/BASIC+ 만 노출.
+  //   "지금 써볼게요" 클릭 시 CustomEvent 발생 → DirectSendPanel의 AI 다듬기 버튼 3초 glow.
+  useEffect(() => {
+    if (!showDirectSend) return;
+    if (isAiMessagingLocked) return; // 요금제 잠금 시 노출 X
+    const STORAGE_KEY = 'directSendAiRefinePopupSeen';
+    const seen = localStorage.getItem(STORAGE_KEY);
+    if (seen) {
+      const seenAt = Number(seen);
+      if (!Number.isNaN(seenAt) && Date.now() - seenAt < 24 * 60 * 60 * 1000) return;
+    }
+    const t = setTimeout(() => setShowAiRefinePopup(true), 150);
+    return () => clearTimeout(t);
+  }, [showDirectSend, isAiMessagingLocked]);
+
+  const closeAiRefinePopup = (action: 'now' | 'later' | 'backdrop' = 'later') => {
+    try {
+      localStorage.setItem('directSendAiRefinePopupSeen', String(Date.now()));
+    } catch { /* noop */ }
+    setShowAiRefinePopup(false);
+    if (action === 'now') {
+      // DirectSendPanel의 AI 다듬기 버튼에 glow 트리거
+      setTimeout(() => {
+        document.dispatchEvent(new CustomEvent('focus-ai-refine-btn'));
+      }, 220);
+    }
+  };
 
   // 업로드 프로그레스 폴링 cleanup (컴포넌트 언마운트 시 interval 정리)
   useEffect(() => {
@@ -3363,6 +3396,15 @@ const campaignData = {
           onClose={() => { setShowDirectSend(false); setKakaoMessage(''); setDirectSendChannel('sms'); }}
         />
       )}
+
+      {/* ★ D152+ (PDF 0511 funnel fix): 직접발송 진입 시 AI 다듬기 안내 팝업 (24h 1회). */}
+      <DirectSendAiRefinePopup
+        isOpen={showAiRefinePopup}
+        isTrialActive={planInfo?.plan_code === 'TRIAL'}
+        onClose={() => closeAiRefinePopup('later')}
+        onNow={() => closeAiRefinePopup('now')}
+      />
+
       {/* 특수문자 모달 (직접발송 + 직접타겟발송 공용) */}
       {showSpecialChars && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[70]" onClick={() => setShowSpecialChars(null)}>

@@ -208,6 +208,21 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
   //   BASIC(35만원/월) 이상 + TRIAL 자동. CT-17 ai_messaging_enabled 게이팅은 백엔드에서.
   const [showAiRefineModal, setShowAiRefineModal] = useState(false);
 
+  // ★ D152+ 진입 안내 팝업의 "지금 써볼게요" → CustomEvent 'focus-ai-refine-btn' → 버튼 3초 glow + focus.
+  //   Dashboard.tsx closeAiRefinePopup('now') 핸들러에서 dispatch.
+  const aiRefineBtnRef = useRef<HTMLButtonElement>(null);
+  const [aiBtnGlowing, setAiBtnGlowing] = useState(false);
+  useEffect(() => {
+    const handler = () => {
+      setAiBtnGlowing(true);
+      aiRefineBtnRef.current?.focus();
+      const t = setTimeout(() => setAiBtnGlowing(false), 3000);
+      return () => clearTimeout(t);
+    };
+    document.addEventListener('focus-ai-refine-btn', handler);
+    return () => document.removeEventListener('focus-ai-refine-btn', handler);
+  }, []);
+
   // ★ D137 UI: 변수 삽입 드롭다운 (발신번호 옆 병치)
   const [varMenuOpen, setVarMenuOpen] = useState(false);
   const varMenuRef = useRef<HTMLDivElement>(null);
@@ -837,9 +852,10 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                     <span>스팸필터테스트</span>
                   </button>
                   <button
+                    ref={aiRefineBtnRef}
                     type="button"
                     data-ai-refine-btn
-                    className="ds-btn-sec ds-t flex items-center justify-center gap-1.5 rounded-lg border-2 border-emerald-200 bg-gradient-to-r from-emerald-50 to-emerald-100/50 hover:from-emerald-100 hover:to-emerald-200/60 hover:border-emerald-300 text-emerald-700 font-semibold transition-all"
+                    className={`ds-btn-sec ds-t flex items-center justify-center gap-1.5 rounded-lg border-2 border-emerald-200 bg-gradient-to-r from-emerald-50 to-emerald-100/50 hover:from-emerald-100 hover:to-emerald-200/60 hover:border-emerald-300 text-emerald-700 font-semibold transition-all ${aiBtnGlowing ? 'animate-pulse ring-4 ring-emerald-400/60 shadow-lg shadow-emerald-300/50' : ''}`}
                     onClick={() => {
                       if (!directMessage.trim()) { setToast({ show: true, type: 'error', message: '다듬을 메시지를 입력해주세요' }); return; }
                       setShowAiRefineModal(true);
