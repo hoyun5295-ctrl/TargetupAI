@@ -2449,6 +2449,27 @@ function appendMissingVariables(text: string, missing: string[]): string {
   return `${text}\n${missing.join(' ')}`.trim();
 }
 
+// ★ D152+ Harold님 지적: 직접발송에 phone-only 데이터인데 AI가 %이름% 같은 변수 임의 추가하면
+//   발송 시 미치환 사고("안녕하세요 %이름%님" 그대로 발송). 원본에 없는 변수는 자동 제거.
+//   변수 뒤 조사("님", "씨", "고객님")도 함께 제거하여 자연스럽게 정리.
+function removeAddedVariables(text: string, originalVars: string[]): string {
+  const candVars = extractVariables(text);
+  const added = candVars.filter((v) => !originalVars.includes(v));
+  if (added.length === 0) return text;
+  let out = text;
+  for (const v of added) {
+    const escaped = v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    // 변수 + 후속 조사("님", "씨", "고객님") 제거. 변수 자체 + 직전 공백/콤마도 함께 정리.
+    out = out.replace(new RegExp(`\\s*${escaped}(님|씨|고객님)?\\s*[,，]?\\s*`, 'g'), ' ');
+  }
+  // 공백 / 줄바꿈 정리
+  return out
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/^[\s,，]+|[\s,，]+$/g, '')
+    .trim();
+}
+
 function similarity(a: string, b: string): number {
   // 단순 비교 — 공통 길이 / 더 긴 쪽 길이. 80% 이상이면 거의 동일로 판단.
   if (!a || !b) return 0;
@@ -2484,7 +2505,11 @@ function validateAndNormalizeRefinedCandidates(
     // (b) 광고 표기 정합화
     text = ensureAdPrefix(text, hasAd);
 
-    // (a) 변수 자리 보존 — 누락 시 끝에 복원
+    // (a-1) ★ D152+ Harold님 지적: AI가 원본에 없는 변수 임의 추가 시 자동 제거.
+    //   직접발송 phone-only 데이터에 %이름% 추가되면 발송 시 미치환 사고.
+    text = removeAddedVariables(text, originalVars);
+
+    // (a-2) 변수 자리 보존 — 원본에 있는데 결과에 누락 시 끝에 복원
     const candVars = extractVariables(text);
     const missing = originalVars.filter((v) => !candVars.includes(v));
     text = appendMissingVariables(text, missing);
@@ -2536,16 +2561,42 @@ export async function refineDirectMessage(
 
 원칙 (절대 준수):
 1. 원본의 핵심 의미·약속·일시·할인율 등 사실은 100% 유지. 변경/추가/제거 금지.
-2. 변수 자리(예: %이름%, %등급%, %포인트%, %기타1%, %기타2%, %기타3%, %회신번호%, %매장명% 등)는 **원본에 박힌 그대로 보존**. 절대 제거/변경/추가 금지. 원본에 박힌 변수는 결과에도 반드시 포함.
+2. 변수 자리(%이름%, %등급%, %포인트%, %기타1%, %기타2%, %기타3%, %회신번호%, %매장명% 등):
+   - **원본에 박힌 변수만 그대로 보존**. 위치 자유롭게 재배치 가능.
+   - **🚨 원본에 없는 변수는 절대 추가 금지** — 직접발송 데이터는 사용자가 매핑한 컬럼만 들어있어, 원본에 없는 %이름%를 임의 추가하면 발송 시 미치환 사고("안녕하세요 %이름%님" 그대로 발송) 발생.
+   - 원본에 변수 없으면 결과에도 변수 추가하지 말고, "고객님"이나 일반 표현으로 자연스럽게 처리.
 3. (광고) 표기: 원본에 박혀있으면 결과 첫머리에 (광고) 그대로 유지. 원본에 없으면 박지 않음.
 4. **무료수신거부 / 무료거부 / 수신거부 080-XXXX-XXXX 같은 표기는 절대 박지 마세요** — 한줄로 시스템이 자동 부착합니다. AI가 박으면 중복 발송 사고.
 5. 톤 가이드: ${toneGuide}
 6. 길이: ${lengthTarget}
 7. KISA 스팸 차단 키워드(무료체험, 무이자, 100% 보장, 대출, 도박 등) 회피.
-8. 사람이 직접 작성한 듯한 자연스러운 한국어. AI 티 나는 표현(예: "안녕하세요 고객님" 남발) 자제.
+8. 사람이 직접 작성한 듯한 자연스러운 한국어. AI 티 나는 표현(예: "안녕하세요 고객님" 남발) 자제. temperature 안정적으로 일관된 품질.
 9. 가장 자연스럽고 효과적인 **단 하나의 안**만 제시. 여러 후보 나열 금지.
 
 ${brandLine}
+
+## 모범 예시 (변수 처리 케이스별 학습)
+
+### 케이스 A — 변수 없는 원본 (직접발송 phone-only 데이터)
+원본: "내일 신상품 입고됩니다!"
+다듬: "내일 드디어 기다리시던 신상품이 입고됩니다 😊 매장에서 만나뵐게요"
+(✓ 변수 없음, "고객님" 같은 일반 표현으로 자연스럽게)
+
+### 케이스 B — 변수 없는 원본, 긴급 톤
+원본: "이번 주말 30% 할인 이벤트입니다"
+다듬: "단 3일 한정! 전 제품 30% 할인 — 이번 주말까지만 ⚡ 놓치지 마세요"
+(✓ 원본에 변수 없으니 결과에도 변수 추가 금지)
+
+### 케이스 C — 변수 있는 원본 (변수 보존)
+원본: "%이름%님 안녕하세요. 내일 신상품 입고됩니다."
+다듬: "%이름%님, 내일 드디어 신상품이 입고됩니다 😊 매장에서 만나뵐게요"
+(✓ 원본에 있는 %이름% 그대로 보존, 다른 변수는 추가 금지)
+
+### 케이스 D — 변수 + 광고 표기 보존
+원본: "(광고) %이름%님 %매장명% 5월 이벤트 안내"
+다듬: "(광고) %이름%님, %매장명% 5월 이벤트가 시작되었습니다 ✨"
+(✓ (광고) 첫머리 유지, %이름% + %매장명% 보존, 무료수신거부 추가 금지)
+
 ${fewShotBlock}
 응답 형식 — JSON 배열(원소 1개)만, 다른 설명/주석/코드펜스 금지:
 [
