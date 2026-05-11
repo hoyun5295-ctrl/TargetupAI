@@ -2326,3 +2326,172 @@ export function checkAPIStatus(): { available: boolean; message: string; fallbac
     fallback: hasGPT,
   };
 }
+
+// ============================================================
+// AI 인라인 다듬기 (D152+ PDF 0511 funnel fix)
+// ============================================================
+//
+// 직접발송 화면에서 작성 중인 메시지를 톤·길이·이모지·스팸회피 다듬기 적용 후 안 4개 반환.
+// 요금제 게이팅: routes/ai.ts `requirePlanFeature('ai_messaging')` 미들웨어 (BASIC+ / TRIAL).
+// 변수 치환 자리(`%이름%`, `%등급%`, `%기타1~3%`, `%회신번호%` 등)는 원본 그대로 보존.
+// 5/11 67사 무료체험 funnel(고객DB 업로드 2/67=3%) 절대 병목 해소 — AI 가치를 DB 없이 즉시 체감.
+
+export type RefineTone = 'friendly' | 'formal' | 'urgent' | 'warm';
+
+export interface RefineDirectMessageOptions {
+  message: string;
+  tone?: RefineTone;
+  companyName?: string;
+  maxBytes?: number; // 기본 90바이트(SMS) — 결과는 SMS/LMS 자동 분류
+}
+
+export interface RefineCandidate {
+  text: string;
+  bytes: number;
+  type: 'SMS' | 'LMS';
+}
+
+const TONE_GUIDE: Record<RefineTone, string> = {
+  friendly: '편안하고 가까운 말투. 이모지 1~2개 자연스럽게. 친구에게 알려주는 느낌.',
+  formal:   '정중하고 신뢰감 있는 말투. 이모지 없음. 비즈니스 톤. 정확한 정보 전달.',
+  urgent:   '주목 끄는 긴박한 말투. "지금", "오늘만", "한정" 같은 시급성 단어 활용. 이모지 1개 정도.',
+  warm:     '진심 어린 감성 말투. 따뜻한 표현. 이모지 1~2개. 고객을 배려하는 느낌.',
+};
+
+// KSX-1001 기준 byte 계산 — 한글 2바이트, ASCII 1바이트, 이모지/서로게이트 4바이트.
+// frontend formatDate.ts calculateSmsBytes 미러.
+function computeKsxBytes(text: string): number {
+  let bytes = 0;
+  for (const ch of text) {
+    const code = ch.codePointAt(0) || 0;
+    if (code < 0x80) bytes += 1;
+    else if (code < 0x10000) bytes += 2;
+    else bytes += 4;
+  }
+  return bytes;
+}
+
+function classifyType(bytes: number): 'SMS' | 'LMS' {
+  return bytes <= 90 ? 'SMS' : 'LMS';
+}
+
+function parseRefineCandidates(rawText: string): RefineCandidate[] {
+  // 코드 펜스 제거 + 첫 [ ~ 마지막 ] 매칭으로 JSON 추출
+  let jsonText = rawText.trim();
+  jsonText = jsonText.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '');
+  const firstBracket = jsonText.indexOf('[');
+  const lastBracket = jsonText.lastIndexOf(']');
+  if (firstBracket >= 0 && lastBracket > firstBracket) {
+    jsonText = jsonText.slice(firstBracket, lastBracket + 1);
+  }
+  let parsed: Array<{ text?: string }>;
+  try {
+    parsed = JSON.parse(jsonText);
+  } catch {
+    console.warn('[ai][refineDirectMessage] JSON parse 실패, raw snippet:', rawText.slice(0, 300));
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+  return parsed
+    .filter((p) => typeof p?.text === 'string' && p.text.trim().length > 0)
+    .map((p) => {
+      const text = String(p.text).trim();
+      const bytes = computeKsxBytes(text);
+      return { text, bytes, type: classifyType(bytes) };
+    });
+}
+
+export async function refineDirectMessage(
+  opts: RefineDirectMessageOptions,
+): Promise<{ candidates: RefineCandidate[] }> {
+  const { message, tone = 'friendly', companyName, maxBytes } = opts;
+  if (!message || !message.trim()) {
+    return { candidates: [] };
+  }
+
+  const toneGuide = TONE_GUIDE[tone];
+  const brandLine = companyName ? `브랜드명: ${companyName}` : '';
+  const lengthTarget = maxBytes && maxBytes > 90
+    ? `${maxBytes}바이트 이내로 다양하게 (짧은 안 ~ 긴 안 분산)`
+    : '가능하면 90바이트(SMS) 이내, 길어지면 2000바이트(LMS) 이내로';
+
+  const systemPrompt = `당신은 한국어 마케팅 메시지 다듬기 전문가입니다.
+사용자가 작성한 SMS/LMS 메시지를 받아서, 톤·길이·이모지·스팸 회피를 다듬은 안 4개를 제시합니다.
+
+원칙:
+1. 원본의 핵심 의미는 100% 유지. 사실 변경/추가 금지.
+2. 변수 자리(예: %이름%, %등급%, %포인트%, %기타1%, %기타2%, %기타3%, %회신번호%)는 원본 그대로 보존. 절대 제거/변경 금지.
+3. (광고) 표기는 제거하지 않음 (자동 부착됨). 무료거부 번호도 제거 금지.
+4. 톤 가이드: ${toneGuide}
+5. 길이: ${lengthTarget}
+6. KISA 스팸 차단 키워드(무료체험, 무이자, 100% 보장, 대출, 도박 등) 회피.
+7. 사람이 직접 작성한 듯한 자연스러운 한국어. AI 티 나는 표현 자제.
+8. 4개 안은 서로 다른 표현/길이/이모지 사용 방식으로 분산.
+
+${brandLine}
+
+응답 형식 — JSON 배열만, 다른 설명/주석/코드펜스 금지:
+[
+  { "text": "다듬은 메시지 1" },
+  { "text": "다듬은 메시지 2" },
+  { "text": "다듬은 메시지 3" },
+  { "text": "다듬은 메시지 4" }
+]`;
+
+  // Claude 우선
+  if (process.env.ANTHROPIC_API_KEY) {
+    try {
+      const response = await anthropic.messages.create({
+        model: AI_MODELS.claude,
+        max_tokens: AI_MAX_TOKENS.refineMessage,
+        system: systemPrompt,
+        messages: [
+          { role: 'user', content: `원본 메시지:\n\n${message}\n\n위 메시지를 다듬어 안 4개를 JSON 배열로만 제시해주세요.` },
+        ],
+      });
+      const textBlock = response.content.find((b: any) => b.type === 'text') as any;
+      const rawText = textBlock?.text || '';
+      const candidates = parseRefineCandidates(rawText);
+      if (candidates.length > 0) return { candidates };
+      console.warn('[ai][refineDirectMessage] Claude 응답 파싱 0건, OpenAI fallback');
+    } catch (err: any) {
+      console.error('[ai][refineDirectMessage] Anthropic 호출 실패:', err?.message);
+    }
+  }
+
+  // OpenAI fallback
+  if (process.env.OPENAI_API_KEY) {
+    try {
+      const gptResponse = await openai.chat.completions.create({
+        model: AI_MODELS.gpt,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: `원본 메시지:\n${message}\n\n4개 안을 JSON 배열 형식 {"candidates":[{"text":"..."},...]}로 반환` },
+        ],
+        temperature: 0.8,
+        max_tokens: AI_MAX_TOKENS.refineMessage,
+        response_format: { type: 'json_object' },
+      });
+      const rawText = gptResponse.choices[0]?.message?.content || '';
+      let parsed: any;
+      try {
+        parsed = JSON.parse(rawText);
+      } catch {
+        return { candidates: [] };
+      }
+      const list = Array.isArray(parsed) ? parsed : (parsed.candidates || parsed.items || parsed.results || []);
+      const candidates: RefineCandidate[] = (list || [])
+        .filter((p: any) => typeof p?.text === 'string' && p.text.trim().length > 0)
+        .map((p: any) => {
+          const text = String(p.text).trim();
+          const bytes = computeKsxBytes(text);
+          return { text, bytes, type: classifyType(bytes) };
+        });
+      return { candidates };
+    } catch (err: any) {
+      console.error('[ai][refineDirectMessage][OpenAI] 실패:', err?.message);
+    }
+  }
+
+  return { candidates: [] };
+}

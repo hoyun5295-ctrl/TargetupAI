@@ -1,7 +1,7 @@
 import { Request, Response, Router } from 'express';
 import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
-import { checkAPIStatus, extractVarCatalog, filterVarCatalogByData, generateCustomMessages, generateMessages, parseBriefing, recommendTarget, countFilteredCustomers, relaxFilters, recommendNextCampaign } from '../services/ai';
+import { checkAPIStatus, extractVarCatalog, filterVarCatalogByData, generateCustomMessages, generateMessages, parseBriefing, recommendTarget, countFilteredCustomers, relaxFilters, recommendNextCampaign, refineDirectMessage } from '../services/ai';
 import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getGenderVariants, getRegionVariants } from '../utils/normalize';
 import { FIELD_MAP, FIELD_DISPLAY_MAP, reverseDisplayValue } from '../utils/standard-field-map';
 import { isValidCustomFieldKey } from '../utils/safe-field-name';
@@ -9,7 +9,7 @@ import { getStoreScope } from '../utils/store-scope';
 import { buildFilterWhereClauseCompat } from '../utils/customer-filter';
 import { aggregateCampaignPerformance } from '../utils/stats-aggregation';
 import { formatDateValue, getOpt080Number } from '../utils/messageUtils';
-import { loadPlanContext, canUseFeature } from '../utils/plan-guard';
+import { loadPlanContext, canUseFeature, requirePlanFeature } from '../utils/plan-guard';
 
 
 // ★ D79: 인라인 래퍼 제거 → CT-01 buildFilterWhereClauseCompat 직접 사용
@@ -769,6 +769,50 @@ router.post('/generate-custom', authenticate, async (req: Request, res: Response
   } catch (error) {
     console.error('맞춤 문안 생성 오류:', error);
     return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// ============================================================
+// POST /api/ai/refine-message — AI 인라인 다듬기 (D152+ PDF 0511 funnel fix)
+// ============================================================
+//
+// 직접발송 화면에서 작성 중인 메시지를 톤·길이·이모지·스팸회피 다듬기 적용한 안 4개 반환.
+// 요금제 게이팅: requirePlanFeature('ai_messaging') (BASIC+ / TRIAL 자동).
+// 5/11 67사 무료체험 funnel(고객DB 업로드 2/67=3%) 절대 병목 해소 — AI 가치를 DB 없이 즉시 체감.
+router.post('/refine-message', requirePlanFeature('ai_messaging'), async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) {
+      return res.status(403).json({ success: false, error: '회사 권한이 필요합니다' });
+    }
+    const { message, tone, companyName: bodyCompanyName } = req.body || {};
+    if (!message || typeof message !== 'string' || !message.trim()) {
+      return res.status(400).json({ success: false, error: '다듬을 메시지를 입력해주세요' });
+    }
+    if (message.length > 4000) {
+      return res.status(400).json({ success: false, error: '메시지가 너무 깁니다 (최대 4000자)' });
+    }
+    const safeTone: 'friendly' | 'formal' | 'urgent' | 'warm' =
+      tone === 'formal' || tone === 'urgent' || tone === 'warm' ? tone : 'friendly';
+
+    // 회사 브랜드명 조회 (body 우선, 미전달 시 DB)
+    let companyName: string | undefined = typeof bodyCompanyName === 'string' && bodyCompanyName.trim()
+      ? bodyCompanyName.trim()
+      : undefined;
+    if (!companyName) {
+      const companyResult = await query(
+        'SELECT brand_name, company_name FROM companies WHERE id = $1',
+        [companyId],
+      );
+      const row = companyResult.rows[0] || {};
+      companyName = row.brand_name || row.company_name || undefined;
+    }
+
+    const result = await refineDirectMessage({ message, tone: safeTone, companyName });
+    return res.json({ success: true, candidates: result.candidates });
+  } catch (err: any) {
+    console.error('[ai/refine-message] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || 'AI 다듬기 실패' });
   }
 });
 

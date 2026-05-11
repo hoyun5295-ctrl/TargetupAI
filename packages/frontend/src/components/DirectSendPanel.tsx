@@ -24,7 +24,7 @@ import {
   Eye, ShieldCheck, Lock,
   CalendarClock, ChevronDown, Image as ImageIcon,
   Trash2, XCircle, RotateCcw, ChevronRight,
-  Plus,
+  Plus, Sparkles,
 } from 'lucide-react';
 import {
   calculateSmsBytes,
@@ -41,6 +41,7 @@ import {
 } from '../utils/formatDate';
 import { insertAtCursorPos } from '../utils/textInsert';
 import MmsImagePreview from './shared/MmsImagePreview';
+import AiRefineModal from './AiRefineModal';
 import AlimtalkChannelPanel, {
   type AlimtalkChannelState,
   type AlimtalkSenderProfile,
@@ -202,6 +203,10 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
   // ★ D120: 커서 위치 기반 변수 삽입용 ref
   const directTextareaRef = useRef<HTMLTextAreaElement>(null);
   const directCursorPosRef = useRef<number>(0);
+
+  // ★ D152+ (PDF 0511 funnel fix): AI 인라인 다듬기 모달 토글.
+  //   BASIC(35만원/월) 이상 + TRIAL 자동. CT-17 ai_messaging_enabled 게이팅은 백엔드에서.
+  const [showAiRefineModal, setShowAiRefineModal] = useState(false);
 
   // ★ D137 UI: 변수 삽입 드롭다운 (발신번호 옆 병치)
   const [varMenuOpen, setVarMenuOpen] = useState(false);
@@ -810,8 +815,8 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                   );
                 })()}
 
-                {/* 보조 액션 (미리보기 / 스팸필터) */}
-                <div className="grid grid-cols-2 gap-2">
+                {/* 보조 액션 3등분 (미리보기 / 스팸필터테스트 / AI 다듬기 — D152+ PDF 0511 funnel fix) */}
+                <div className="grid grid-cols-3 gap-2">
                   <button
                     type="button"
                     className="ds-btn-sec ds-btn-sec--primary ds-t"
@@ -830,6 +835,18 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                   >
                     {isSpamFilterLocked ? <Lock size={14} strokeWidth={1.75} /> : <ShieldCheck size={14} strokeWidth={1.75} />}
                     <span>스팸필터테스트</span>
+                  </button>
+                  <button
+                    type="button"
+                    data-ai-refine-btn
+                    className="ds-btn-sec ds-t flex items-center justify-center gap-1.5 rounded-lg border-2 border-emerald-200 bg-gradient-to-r from-emerald-50 to-emerald-100/50 hover:from-emerald-100 hover:to-emerald-200/60 hover:border-emerald-300 text-emerald-700 font-semibold transition-all"
+                    onClick={() => {
+                      if (!directMessage.trim()) { setToast({ show: true, type: 'error', message: '다듬을 메시지를 입력해주세요' }); return; }
+                      setShowAiRefineModal(true);
+                    }}
+                  >
+                    <Sparkles size={14} strokeWidth={2} className="text-emerald-600" />
+                    <span>AI 다듬기</span>
                   </button>
                 </div>
 
@@ -1483,6 +1500,16 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
             </div>
           );
         })()}
+
+        {/* ★ D152+ (PDF 0511 funnel fix): AI 인라인 다듬기 모달.
+            BASIC(35만원/월)+ TRIAL 게이팅은 백엔드 requirePlanFeature('ai_messaging') 미들웨어에서 처리.
+            요금제 미달 시 모달 안에서 403 응답 안내. */}
+        <AiRefineModal
+          isOpen={showAiRefineModal}
+          originalMessage={directMessage}
+          onClose={() => setShowAiRefineModal(false)}
+          onApply={(text) => setDirectMessage(text)}
+        />
 
       </div>
     </div>

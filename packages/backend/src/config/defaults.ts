@@ -133,6 +133,8 @@ export const AI_MAX_TOKENS = {
   customMessage: 2048,
   /** 분석 인사이트 */
   analysis: 4096,
+  /** AI 인라인 다듬기 (D152+) */
+  refineMessage: 2048,
 };
 
 // ============================================================
