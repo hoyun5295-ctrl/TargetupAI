@@ -27,6 +27,16 @@ echo "[atomic-build] backend safe build 시작 — $(date '+%Y-%m-%d %H:%M:%S')"
 echo "[atomic-build] 작업 폴더: $BACKEND_DIR"
 echo "════════════════════════════════════════════════════════════"
 
+# ★ D151-6 (2026-05-11): devDependencies 누락 자동 차단 안전망
+#   운영 서버 NODE_ENV=production 이면 npm install이 devDependencies skip → tsc 빌드 차단
+#   사고: D151-2 backend 1310 tsc 에러 / D151-4 frontend 21,328 tsc 에러 동일 패턴 반복 발생
+#   대책: typescript 누락 시 자동으로 npm install --include=dev 선행 → 운영 사이클 안전망
+if [ ! -d "node_modules/typescript" ]; then
+  echo "[atomic-build] ⚠️  devDependencies 누락 감지 (node_modules/typescript 없음)"
+  echo "[atomic-build] 자동 복구: npm install --include=dev 실행"
+  npm install --include=dev
+fi
+
 # 0. 잔존 dist-new 청소 (이전 빌드 실패 잔존물)
 if [ -d "$DIST_NEW" ]; then
   echo "[atomic-build] 잔존 dist-new 청소"
