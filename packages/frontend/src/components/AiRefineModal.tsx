@@ -274,11 +274,10 @@ export default function AiRefineModal({
         </div>
 
         {/* ── Footer ─────────────────────────────────────────── */}
-        <div className="px-6 py-3 border-t border-gray-100 bg-gray-50 flex items-center justify-between text-[11px] text-gray-500 flex-shrink-0">
+        <div className="px-6 py-3 border-t border-gray-100 bg-gray-50 flex items-center justify-center text-[11px] text-gray-500 flex-shrink-0">
           <span className="flex items-center gap-1">
             <span className="font-mono text-gray-600">%이름%</span> 등 변수 자리 보존
           </span>
-          <span className="text-gray-400">Powered by Claude AI</span>
         </div>
       </div>
     </div>
