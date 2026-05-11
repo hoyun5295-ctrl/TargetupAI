@@ -3365,6 +3365,7 @@ const campaignData = {
           mmsUploadedImages={mmsUploadedImages} setMmsUploadedImages={setMmsUploadedImages}
           setShowMmsUploadModal={setShowMmsUploadModal}
           isSpamFilterLocked={isSpamFilterLocked} setShowSpamFilterLock={setShowSpamFilterLock}
+          isAiMessagingLocked={isAiMessagingLocked}
           setSpamFilterData={setSpamFilterData} setShowSpamFilter={setShowSpamFilter}
           kakaoTemplates={kakaoTemplates}
           kakaoSelectedTemplate={kakaoSelectedTemplate} setKakaoSelectedTemplate={setKakaoSelectedTemplate}

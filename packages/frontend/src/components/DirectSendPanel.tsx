@@ -42,6 +42,7 @@ import {
 import { insertAtCursorPos } from '../utils/textInsert';
 import MmsImagePreview from './shared/MmsImagePreview';
 import AiRefineModal from './AiRefineModal';
+import AiRefineLockedModal from './AiRefineLockedModal';
 import AlimtalkChannelPanel, {
   type AlimtalkChannelState,
   type AlimtalkSenderProfile,
@@ -102,6 +103,9 @@ export interface DirectSendPanelProps {
   setShowSpamFilterLock: (b: boolean) => void;
   setSpamFilterData: (d: any) => void;
   setShowSpamFilter: (b: boolean) => void;
+
+  // ★ D152+ AI 다듬기 요금제 잠금 (BASIC 이상 + TRIAL만 활성, FREE/STARTER 잠금)
+  isAiMessagingLocked?: boolean;
 
   // 카카오 (알림톡 전용 — SMS/RCS는 건드리지 않음)
   kakaoTemplates: any[];
@@ -179,6 +183,7 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
     optOutNumber,
     mmsUploadedImages, setMmsUploadedImages, setShowMmsUploadModal,
     isSpamFilterLocked, setShowSpamFilterLock, setSpamFilterData, setShowSpamFilter,
+    isAiMessagingLocked,
     kakaoTemplates, kakaoSelectedTemplate, setKakaoSelectedTemplate,
     kakaoTemplateVars, setKakaoTemplateVars,
     alimtalkFallback, setAlimtalkFallback,
@@ -207,6 +212,8 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
   // ★ D152+ (PDF 0511 funnel fix): AI 인라인 다듬기 모달 토글.
   //   BASIC(35만원/월) 이상 + TRIAL 자동. CT-17 ai_messaging_enabled 게이팅은 백엔드에서.
   const [showAiRefineModal, setShowAiRefineModal] = useState(false);
+  // ★ D152+ FREE/STARTER 잠금 사용자에게 가치 안내 + 업그레이드 동선 (어떤 기능인지 + 베이직 이상 안내)
+  const [showAiRefineLockedModal, setShowAiRefineLockedModal] = useState(false);
 
   // ★ D152+ 진입 안내 팝업의 "지금 써볼게요" → CustomEvent 'focus-ai-refine-btn' → 버튼 3초 glow + focus.
   //   Dashboard.tsx closeAiRefinePopup('now') 핸들러에서 dispatch.
@@ -857,6 +864,11 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                     data-ai-refine-btn
                     className={`ds-btn-sec ds-t flex items-center justify-center gap-1.5 rounded-lg border-2 border-emerald-200 bg-gradient-to-r from-emerald-50 to-emerald-100/50 hover:from-emerald-100 hover:to-emerald-200/60 hover:border-emerald-300 text-emerald-700 font-semibold transition-all ${aiBtnGlowing ? 'animate-pulse ring-4 ring-emerald-400/60 shadow-lg shadow-emerald-300/50' : ''}`}
                     onClick={() => {
+                      // ★ D152+ FREE/STARTER 잠금 시 — 기능 안내 + 베이직 이상 업그레이드 동선
+                      if (isAiMessagingLocked) {
+                        setShowAiRefineLockedModal(true);
+                        return;
+                      }
                       if (!directMessage.trim()) { setToast({ show: true, type: 'error', message: '다듬을 메시지를 입력해주세요' }); return; }
                       setShowAiRefineModal(true);
                     }}
@@ -1528,6 +1540,12 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
             setDirectMessage(text);
             setToast({ show: true, type: 'success', message: 'AI 안 적용됨 · 발송 전 미리보기 확인 권장' });
           }}
+        />
+
+        {/* ★ D152+ FREE/STARTER 잠금 안내 — 기능 설명 + 베이직 이상 업그레이드 동선 */}
+        <AiRefineLockedModal
+          isOpen={showAiRefineLockedModal}
+          onClose={() => setShowAiRefineLockedModal(false)}
         />
 
       </div>
