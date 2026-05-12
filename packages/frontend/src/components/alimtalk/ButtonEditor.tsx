@@ -40,9 +40,16 @@ interface Props {
   max?: number;
   /** 메시지 타입이 AD(채널추가형)인 경우 AC 버튼 자동 고정 */
   forceChannelAdd?: boolean;
+  /**
+   * ★ D152-4 Harold님 지시 (2026-05-12) — 직원 5/12 PDF #1:
+   *   알림톡 메시지유형 (BA/EX/AD/MI). AC(채널추가) 버튼은 카카오 정책상
+   *   AD(채널추가형) 또는 MI(복합형)에서만 사용 가능.
+   *   BA(기본형)/EX(부가정보형)에서는 select 옵션에서 AC 미노출 → 직원 사고 차단.
+   */
+  messageType?: 'BA' | 'EX' | 'AD' | 'MI' | string;
 }
 
-const BUTTON_TYPES: { value: ButtonLinkType; label: string; hint: string }[] = [
+const BUTTON_TYPES_ALL: { value: ButtonLinkType; label: string; hint: string }[] = [
   { value: 'WL', label: '웹링크',        hint: '모바일/PC URL' },
   { value: 'AL', label: '앱링크',        hint: '모바일/PC URL + Android/iOS scheme' },
   { value: 'DS', label: '배송조회',      hint: '택배사 연동' },
@@ -50,9 +57,21 @@ const BUTTON_TYPES: { value: ButtonLinkType; label: string; hint: string }[] = [
   { value: 'MD', label: '메시지전달',    hint: 'chatExtra' },
   { value: 'BF', label: '비즈폼',        hint: 'bizFormId 필수' },
   { value: 'BC', label: '비즈콜',        hint: '전화번호' },
-  { value: 'AC', label: '채널추가',      hint: '변수 불가' },
+  { value: 'AC', label: '채널추가',      hint: '채널추가형/복합형 메시지유형 전용 (BA/EX 불가)' },
   { value: 'PD', label: '상품상세',      hint: 'productId' },
 ];
+
+/**
+ * ★ D152-4 Harold님 지시 (2026-05-12) — 직원 5/12 PDF #1:
+ *   메시지유형별 사용 가능 버튼 옵션 동적 필터링.
+ *   AC(채널추가) 버튼은 messageType이 'AD'(채널추가형) 또는 'MI'(복합형)일 때만 노출.
+ *   BA(기본형)/EX(부가정보형)에서는 AC 옵션 자체를 select에서 숨김 → 직원이 잘못 선택 불가.
+ */
+function getAvailableButtonTypes(messageType?: string, forceChannelAdd?: boolean) {
+  const canUseAC = forceChannelAdd || messageType === 'AD' || messageType === 'MI';
+  if (canUseAC) return BUTTON_TYPES_ALL;
+  return BUTTON_TYPES_ALL.filter((t) => t.value !== 'AC');
+}
 
 export default function ButtonEditor({
   buttons,
@@ -60,7 +79,9 @@ export default function ButtonEditor({
   disabled,
   max = 5,
   forceChannelAdd,
+  messageType,
 }: Props) {
+  const availableTypes = getAvailableButtonTypes(messageType, forceChannelAdd);
   const addBtn = () => {
     if (buttons.length >= max) return;
     onChange([...buttons, { type: 'WL', name: '' }]);
@@ -125,6 +146,7 @@ export default function ButtonEditor({
           disabled={disabled}
           nameLocked={btn.type === 'AC'}
           removeLocked={!!(forceChannelAdd && btn.type === 'AC')}
+          availableTypes={availableTypes}
           onPatch={(p) => updateBtn(idx, p)}
           onRemove={() => removeBtn(idx)}
         />
@@ -139,6 +161,7 @@ function ButtonRow({
   disabled,
   nameLocked,
   removeLocked,
+  availableTypes,
   onPatch,
   onRemove,
 }: {
@@ -149,11 +172,21 @@ function ButtonRow({
   nameLocked?: boolean;
   /** AD/MI 타입에서 강제 삽입된 AC 버튼 → 타입/삭제 잠금 */
   removeLocked?: boolean;
+  /** ★ D152-4: 메시지유형별 사용 가능 버튼 옵션 (BA/EX에서는 AC 제외) */
+  availableTypes: typeof BUTTON_TYPES_ALL;
   onPatch: (p: Partial<AlimtalkButton>) => void;
   onRemove: () => void;
 }) {
+  // ★ D152-4: 기존 AC 버튼이 박혀있는데 messageType=BA/EX로 변경된 경우
+  //   availableTypes에 AC가 없어도 select에는 현재 type 값이 보여야 함 (사용자 인지 가능)
+  const typesForSelect = useMemo(() => {
+    if (availableTypes.find((t) => t.value === btn.type)) return availableTypes;
+    const currentType = BUTTON_TYPES_ALL.find((t) => t.value === btn.type);
+    return currentType ? [...availableTypes, currentType] : availableTypes;
+  }, [availableTypes, btn.type]);
+
   const hint = useMemo(
-    () => BUTTON_TYPES.find((t) => t.value === btn.type)?.hint || '',
+    () => BUTTON_TYPES_ALL.find((t) => t.value === btn.type)?.hint || '',
     [btn.type],
   );
 
@@ -169,7 +202,7 @@ function ButtonRow({
           onChange={(e) => onPatch({ type: e.target.value as ButtonLinkType })}
           className="border border-gray-300 rounded px-2 py-1 text-xs w-24 disabled:bg-gray-200"
         >
-          {BUTTON_TYPES.map((t) => (
+          {typesForSelect.map((t) => (
             <option key={t.value} value={t.value}>
               {t.label}
             </option>

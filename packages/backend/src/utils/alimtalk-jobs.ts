@@ -219,6 +219,12 @@ export async function syncPendingTemplatesJob(): Promise<void> {
   }> = [];
 
   try {
+    // ★ D152-4 Harold님 핵심 지시 (2026-05-12): IMC 6단계 정합 — KREQ 누락이 D135부터 4주 반복 사고의 진짜 root cause.
+    //   IMC 흐름: REG(등록) → REQ(검수요청, 한줄로→휴머스온) → HREJ(휴머스온 반려) | KREQ(카카오 검수요청, 휴머스온 통과)
+    //                                                          → KREJ(카카오 반려) | APR(승인완료)
+    //   기존: REQUESTED/REVIEWING/REQ/REV 4종만 폴링 → KREQ 단계가 폴링 대상에서 빠져 영원히 동기화 X
+    //   수정: IMC 진행 중 상태 5종(REG/REQ/REV/KREQ + 한줄로 풀네임 REQUESTED/REVIEWING) 전부 포함.
+    //         REG는 검수요청 전 상태지만 IMC 측 변경(승인 자동 진행 등) 대비 포함.
     const res = await query(
       `SELECT t.id,
               t.company_id,
@@ -230,7 +236,7 @@ export async function syncPendingTemplatesJob(): Promise<void> {
               t.alarm_notified_status
          FROM kakao_templates t
          JOIN kakao_sender_profiles p ON p.id = t.profile_id
-        WHERE t.status IN ('REQUESTED','REVIEWING','REQ','REV')
+        WHERE t.status IN ('REQUESTED','REVIEWING','REG','REQ','REV','KREQ')
           AND (t.last_synced_at IS NULL OR t.last_synced_at < now() - INTERVAL '5 minutes')
         LIMIT 100`,
     );
@@ -312,31 +318,47 @@ export async function syncPendingTemplatesJob(): Promise<void> {
 
 /**
  * IMC status 값을 내부 terminal 상태(APPROVED/REJECTED)로 정규화.
- * 검수 진행 중(REQUESTED/REVIEWING/REQ/REV) 또는 기타 상태는 null 반환 (알림 대상 아님).
+ *
+ * ★ D152-4 Harold님 지시 (2026-05-12): IMC 6단계 정합 (kakao_alimtalk.md 매뉴얼).
+ *   - APR / APPROVED → 'APPROVED' (승인완료, 발송 가능 = 종결)
+ *   - REJ / REJECTED / KREJ → 'REJECTED' (카카오 반려 = 종결, 재검수 가능하지만 알림 발송 시점)
+ *   - HREJ → null (휴머스온 내부 반려 = 비종결 — 재검수 가능, 알림 발송 X)
+ *   - REG / REQ / REV / KREQ / REQUESTED / REVIEWING → null (진행 중)
  */
 function toTerminalStatus(status: string): 'APPROVED' | 'REJECTED' | null {
   const s = String(status || '').toUpperCase();
   if (s === 'APR' || s === 'APPROVED') return 'APPROVED';
-  if (s === 'REJ' || s === 'REJECTED') return 'REJECTED';
+  if (s === 'REJ' || s === 'REJECTED' || s === 'KREJ') return 'REJECTED';
   return null;
 }
 
 /**
- * ★ D143 추가 (2026-04-30): IMC 약어 → 한줄로 풀네임 정규화.
+ * ★ D143 (2026-04-30): IMC 약어 → 한줄로 풀네임 정규화.
+ * ★ D152-4 Harold님 지시 (2026-05-12): IMC 6단계 정합 — KREQ/HREJ/KREJ 추가.
  *
- *  IMC 응답 status가 약어(REQ/REV/APR/REJ)로 오는 경우가 있음.
- *  D135 도입 후 syncPendingTemplatesJob이 약어를 그대로 DB에 UPDATE 시도하면
- *  kakao_templates_status_check CHECK constraint 위반(대문자 풀네임 8개만 허용).
+ *  IMC 정의 6단계 (kakao_alimtalk.md 매뉴얼):
+ *    REG  → 요청등록 (검수 전)
+ *    REQ  → 검수요청 (한줄로 → 휴머스온)
+ *    HREJ → 휴머스온 반려 (내부, 재검수 가능)
+ *    KREQ → 카카오 검수요청 (휴머스온 통과)
+ *    KREJ → 카카오 반려 (재검수 가능)
+ *    APR  → 승인완료
  *
- *  PDF 0430 #2(B 신고) "IMC에는 등록되는데 한줄로 관리 화면에 등록 안됨"의 부수 원인 차단.
- *  CHECK 제약 자체는 D143에서 대문자로 교체 완료 — 본 헬퍼는 풀네임 통일을 보장.
+ *  기존 풀네임 4종(REQUESTED/REVIEWING/APPROVED/REJECTED)은 호환 유지.
+ *  신규 6단계 raw IMC code(REG/HREJ/KREQ/KREJ)는 그대로 통과 — DB CHECK에 ALTER 추가 필요.
+ *
+ *  D135부터 D152-1까지 4주 반복 "검수 결과 미반영" 사고 = 이 함수가 KREQ를 받으면 그대로 통과시키지만
+ *  syncPendingTemplatesJob SELECT가 KREQ를 폴링 대상에 포함하지 않아 영원히 동기화 안 됨 = root cause.
  */
 function normalizeImcTemplateStatus(status: string): string {
   const u = String(status || '').toUpperCase().trim();
+  // 기존 약어 → 풀네임 (D143 호환)
   if (u === 'REQ') return 'REQUESTED';
   if (u === 'REV') return 'REVIEWING';
   if (u === 'APR') return 'APPROVED';
   if (u === 'REJ') return 'REJECTED';
+  // ★ D152-4 신규: IMC 6단계 raw code 그대로 통과 (DB CHECK에 KREQ/HREJ/KREJ 허용 필요)
+  if (u === 'REG' || u === 'HREJ' || u === 'KREQ' || u === 'KREJ') return u;
   return u;
 }
 

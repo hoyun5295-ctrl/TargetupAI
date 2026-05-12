@@ -95,18 +95,34 @@ function getToken() {
   return localStorage.getItem('token') || '';
 }
 
+// ★ D152-4 Harold님 지시 (2026-05-12): IMC 6단계 정합 (kakao_alimtalk.md 매뉴얼 기반).
+//   IMC 정의: REG → REQ → HREJ(휴머스온 반려) | KREQ(카카오 검수요청) → KREJ(카카오 반려) | APR
+//   기존 5단계(DRAFT/REQUESTED/REVIEWING/APPROVED/REJECTED) → 6단계 완전 정합.
+//   - REVIEWING/REV 폐기 (IMC 정의에 없음 — REQ 다음은 바로 KREQ)
+//   - HREJ(내부 반려) / KREQ(카카오 검수요청) / KREJ(카카오 반려) 신규 추가
+//   - DORMANT 라벨 유지하되 filter 탭에서는 제거(직원 #4 요청)
 const STATUS_LABELS: Record<string, { label: string; cls: string }> = {
-  DRAFT:     { label: '등록',     cls: 'bg-gray-100 text-gray-600' },
-  REQUESTED: { label: '검수요청', cls: 'bg-amber-100 text-amber-700' },
-  REQ:       { label: '검수요청', cls: 'bg-amber-100 text-amber-700' },
-  REVIEWING: { label: '검수중',   cls: 'bg-blue-100 text-blue-700' },
-  REV:       { label: '검수중',   cls: 'bg-blue-100 text-blue-700' },
-  APPROVED:  { label: '승인',     cls: 'bg-emerald-100 text-emerald-700' },
-  APR:       { label: '승인',     cls: 'bg-emerald-100 text-emerald-700' },
-  REJECTED:  { label: '반려',     cls: 'bg-red-100 text-red-700' },
-  REJ:       { label: '반려',     cls: 'bg-red-100 text-red-700' },
-  DORMANT:   { label: '휴면',     cls: 'bg-amber-100 text-amber-700' },
-  DELETED:   { label: '삭제',     cls: 'bg-gray-200 text-gray-500' },
+  // 검수 전
+  DRAFT:     { label: '등록',           cls: 'bg-gray-100 text-gray-600' },
+  REG:       { label: '등록',           cls: 'bg-gray-100 text-gray-600' },
+  // 검수 진행
+  REQUESTED: { label: '검수요청',       cls: 'bg-amber-100 text-amber-700' },
+  REQ:       { label: '검수요청',       cls: 'bg-amber-100 text-amber-700' },
+  KREQ:      { label: '카카오 검수요청', cls: 'bg-blue-100 text-blue-700' },
+  // 종결 (승인)
+  APPROVED:  { label: '승인',           cls: 'bg-emerald-100 text-emerald-700' },
+  APR:       { label: '승인',           cls: 'bg-emerald-100 text-emerald-700' },
+  // 종결 (반려) — IMC 6단계 정확 분리
+  HREJ:      { label: '내부 반려',      cls: 'bg-orange-100 text-orange-700' },
+  KREJ:      { label: '카카오 반려',    cls: 'bg-red-100 text-red-700' },
+  // 레거시 호환 (D143 풀네임)
+  REJECTED:  { label: '반려',           cls: 'bg-red-100 text-red-700' },
+  REJ:       { label: '반려',           cls: 'bg-red-100 text-red-700' },
+  REVIEWING: { label: '검수중',         cls: 'bg-blue-100 text-blue-700' },  // 레거시 — 신규 row는 KREQ 사용
+  REV:       { label: '검수중',         cls: 'bg-blue-100 text-blue-700' },
+  // 기타
+  DORMANT:   { label: '휴면',           cls: 'bg-amber-100 text-amber-700' },
+  DELETED:   { label: '삭제',           cls: 'bg-gray-200 text-gray-500' },
 };
 
 const SENDER_STATUS_LABELS: Record<string, { label: string; cls: string }> = {
@@ -197,17 +213,31 @@ export default function AlimtalkManagementSection() {
     return () => clearTimeout(t);
   }, [toast]);
 
+  // ★ D152-4 Harold님 지시 (2026-05-12): IMC 6단계 정합 — filter 탭 ↔ DB status 매핑.
+  //   IMC raw(REG/REQ/KREQ/KREJ/HREJ/APR) + 한줄로 풀네임(DRAFT/REQUESTED/REVIEWING/APPROVED/REJECTED) 양쪽 호환.
+  //   레거시 REJECTED/REJ는 "카카오 반려"(KREJ) 탭에 흡수 — 운영 데이터 손실 없이 6단계 UI 정합.
+  const FILTER_MATCH: Record<string, string[]> = {
+    DRAFT:     ['DRAFT', 'REG'],
+    REQUESTED: ['REQUESTED', 'REQ', 'REVIEWING', 'REV'],  // 한줄로 → 휴머스온 검수 중
+    KREQ:      ['KREQ'],                                   // 카카오 검수 중 (휴머스온 통과)
+    APPROVED:  ['APPROVED', 'APR'],
+    HREJ:      ['HREJ'],                                   // 휴머스온 내부 반려
+    KREJ:      ['KREJ', 'REJECTED', 'REJ'],                // 카카오 반려 (레거시 REJ 흡수)
+  };
+
   const filtered = useMemo(() => {
     if (filter === 'ALL') return templates;
-    return templates.filter((t) => t.status === filter || t.status === filter.slice(0, 3));
+    const allowed = FILTER_MATCH[filter] || [filter];
+    return templates.filter((t) => allowed.includes(t.status));
   }, [templates, filter]);
 
   // ★ D142+ F (2026-04-29) PDF 0428 알림톡 #3: 검수요청 시 코멘트 + 증빙자료 입력 모달.
   //   "코멘트 입력칸 + 코멘트 증빙자료 추가" — 직원 요구. backend는 이미 /inspect-with-file 보유.
-  //   (등록 폼 하단 추가는 DB 컬럼 마이그레이션 필요 → 별건. 우선 검수요청 시점에서 받음.)
+  // ★ D152-4 (2026-05-12): IMC 매뉴얼 정합 — 검수요청 가능 = REG/HREJ/KREJ + 레거시 DRAFT/REJECTED/REJ.
+  //   "검수요청은 검수상태가 등록(REG), 휴머스온 반려(HREJ), 카카오 반려(KREJ) 상태에서만 가능합니다."
   const inspect = (t: Template) => {
-    if (!['DRAFT', 'REJECTED', 'REJ'].includes(t.status)) {
-      setToast('초안/반려 상태만 검수요청 가능');
+    if (!['DRAFT', 'REG', 'REJECTED', 'REJ', 'HREJ', 'KREJ'].includes(t.status)) {
+      setToast('등록/반려 상태에서만 검수요청 가능');
       return;
     }
     setInspectionTarget(t);
@@ -273,10 +303,9 @@ export default function AlimtalkManagementSection() {
 
   const remove = async (t: Template) => {
     // ★ D139 #4-1 (0425): 삭제는 등록(DRAFT) 상태에서만 허용 (직원 검수 요청 정책).
-    //   검수요청/검수중/승인/반려 상태에서는 삭제 버튼 자체가 노출되지 않지만,
-    //   이중 가드로 함수 진입 시에도 한 번 더 차단.
-    if (t.status !== 'DRAFT') {
-      setToast('초안(등록) 상태에서만 삭제할 수 있습니다.');
+    // ★ D152-4 (2026-05-12): IMC 6단계 정합 — DRAFT + REG(IMC raw) 둘 다 허용.
+    if (!['DRAFT', 'REG'].includes(t.status)) {
+      setToast('등록 상태에서만 삭제할 수 있습니다.');
       return;
     }
     if (!confirm(`'${t.template_name || t.template_code}' 템플릿을 삭제할까요?`)) return;
@@ -369,7 +398,9 @@ export default function AlimtalkManagementSection() {
                   <th className="text-left px-3 py-2">채널ID</th>
                   <th className="text-left px-3 py-2">카테고리</th>
                   <th className="text-center px-3 py-2">승인</th>
-                  <th className="text-center px-3 py-2">080</th>
+                  {/* ★ D152-4 Harold님 지시 (2026-05-12): 직원 #5 "080이 왜 알림톡에 있냐" 혼란 해소.
+                        알림톡 자체는 정보성 메시지라 080 불요. 발송 실패 시 SMS/LMS 대체발송이 광고 LMS면 080 필요. */}
+                  <th className="text-center px-3 py-2" title="알림톡 발송 실패 시 SMS/LMS 대체발송이 광고성이면 표시되는 무료수신거부 번호">대체발송 080</th>
                   <th className="text-right px-3 py-2">관리</th>
                 </tr>
               </thead>
@@ -440,9 +471,14 @@ export default function AlimtalkManagementSection() {
       </div>
 
       {/* ── 필터 + 버튼 ─────────────────────────── */}
+      {/* ★ D152-4 Harold님 지시 (2026-05-12): IMC 6단계 정합 — 직원 5/12 PDF #3/#4/#5 동시 처리.
+            #3 "검수중 → 카카오 검수요청 으로 변경" — REVIEWING 폐기, KREQ 신규 탭
+            #4 "휴면 삭제" — DORMANT 탭 제거 (라벨은 유지)
+            #5 "카카오 반려 메뉴 추가" — KREJ 신규 탭 (HREJ '내부 반려'와 분리)
+            filter 시 IMC raw + 한줄로 풀네임 양쪽 매칭으로 호환 (filtered useMemo) */}
       <div className="flex items-center justify-between">
         <div className="flex flex-wrap gap-1 text-xs">
-          {(['ALL', 'DRAFT', 'REQUESTED', 'REVIEWING', 'APPROVED', 'REJECTED', 'DORMANT'] as const).map((s) => (
+          {(['ALL', 'DRAFT', 'REQUESTED', 'KREQ', 'APPROVED', 'HREJ', 'KREJ'] as const).map((s) => (
             <button
               key={s}
               type="button"
@@ -520,14 +556,18 @@ export default function AlimtalkManagementSection() {
                   label: t.status,
                   cls: 'bg-gray-100 text-gray-500',
                 };
-                // ★ D139 #4-1 (0425): 상태별 액션 버튼 노출 분기
-                //   DRAFT(등록): 수정 / 검수요청 / 삭제 / 상세보기
-                //   REQUESTED·REVIEWING(검수요청·검수중): 검수요청 취소 / 상세보기
-                //   REJECTED(반려): 재검수 / 상세보기
-                //   APPROVED(승인): 상세보기만
-                const isDraft = t.status === 'DRAFT';
+                // ★ D139 #4-1 (0425) + D152-4 (2026-05-12): 상태별 액션 버튼 노출 분기.
+                //   IMC 6단계 정합 (kakao_alimtalk.md 매뉴얼):
+                //     DRAFT/REG(등록): 수정 / 검수요청 / 삭제 / 상세보기
+                //     REQUESTED/REQ/REVIEWING/REV(휴머스온 검수 중): 검수요청 취소 / 상세보기
+                //     KREQ(카카오 검수 중): 상세보기만 (카카오 측 검수 진행 — 취소/수정 불가)
+                //     HREJ(내부 반려) / KREJ(카카오 반려) / REJECTED/REJ: 재검수 / 상세보기
+                //     APPROVED/APR(승인): 상세보기만
+                const isDraft = ['DRAFT', 'REG'].includes(t.status);
                 const isReq   = ['REQUESTED', 'REQ', 'REVIEWING', 'REV'].includes(t.status);
-                const isRej   = ['REJECTED', 'REJ'].includes(t.status);
+                const isKreq  = t.status === 'KREQ';
+                const isRej   = ['REJECTED', 'REJ', 'HREJ', 'KREJ'].includes(t.status);
+                void isKreq; // KREQ는 액션 버튼 미노출(상세보기만) — 상태 라벨로만 표시
                 return (
                   <tr key={t.id} className="border-t border-gray-100 hover:bg-gray-50">
                     <td className="px-4 py-2">

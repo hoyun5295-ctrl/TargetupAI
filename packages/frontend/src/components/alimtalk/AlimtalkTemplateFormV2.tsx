@@ -668,10 +668,14 @@ export default function AlimtalkTemplateFormV2({
             )}
 
             {/* 버튼 */}
+            {/* ★ D152-4 Harold님 지시 (2026-05-12) — 직원 5/12 PDF #1:
+                  messageType 전달 → ButtonEditor가 BA/EX에서 AC(채널추가) 옵션 자동 숨김.
+                  AD/MI에서만 AC 노출 (카카오 정책 정합). */}
             <ButtonEditor
               buttons={form.buttons}
               onChange={(b) => setForm({ ...form, buttons: b })}
               forceChannelAdd={forceChannelAdd}
+              messageType={form.messageType}
             />
 
             {/* 대표링크 — D135+ (B4) / D139 #2 (0425) UI 가드 강화 */}
