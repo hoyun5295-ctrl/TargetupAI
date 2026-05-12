@@ -16,7 +16,9 @@
 import { useState } from 'react';
 import { X, Sparkles, ArrowRight, Loader2, RotateCcw } from 'lucide-react';
 
-type Tone = 'friendly' | 'formal' | 'urgent' | 'warm';
+// ★ D152+ Harold님 지시 (2026-05-12): 4개 추상 톤 → 8개 실용 톤 재설계.
+//   실제 마케팅 시나리오 기반(세일/긴급/VIP/런칭/재방문 추가) — backend TONE_GUIDE와 1:1 매핑.
+type Tone = 'friendly' | 'formal' | 'sale' | 'urgent' | 'vip' | 'warm' | 'launch' | 'winback';
 
 interface RefineCandidate {
   text: string;
@@ -33,10 +35,14 @@ interface Props {
 }
 
 const TONES: { value: Tone; label: string; emoji: string; desc: string }[] = [
-  { value: 'friendly', label: '친근',   emoji: '😊', desc: '편안하고 가까운 톤' },
-  { value: 'formal',   label: '공식',   emoji: '🏢', desc: '정중하고 신뢰감 있는 톤' },
-  { value: 'urgent',   label: '긴급',   emoji: '⚡', desc: '주목 끄는 긴박한 톤' },
-  { value: 'warm',     label: '따뜻함', emoji: '🤝', desc: '진심 어린 감성 톤' },
+  { value: 'friendly', label: '친근',     emoji: '😊', desc: '카톡 친구톤' },
+  { value: 'formal',   label: '공식',     emoji: '🏢', desc: '격조 있는 안내' },
+  { value: 'sale',     label: '세일강타', emoji: '🔥', desc: '할인/특가 폭발' },
+  { value: 'urgent',   label: '긴급마감', emoji: '⚡', desc: '시급성/마감' },
+  { value: 'vip',      label: 'VIP케어',  emoji: '💎', desc: '단골/회원 우대' },
+  { value: 'warm',     label: '감성따뜻', emoji: '💝', desc: '진심 어린 편지감' },
+  { value: 'launch',   label: '신상런칭', emoji: '✨', desc: '새로움/기대감' },
+  { value: 'winback',  label: '재방문',   emoji: '🌷', desc: '오랜만의 안부' },
 ];
 
 function getToken() {

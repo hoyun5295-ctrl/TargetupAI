@@ -793,8 +793,11 @@ router.post('/refine-message', requirePlanFeature('ai_messaging'), async (req: R
     if (message.length > 4000) {
       return res.status(400).json({ success: false, error: '메시지가 너무 깁니다 (최대 4000자)' });
     }
-    const safeTone: 'friendly' | 'formal' | 'urgent' | 'warm' =
-      tone === 'formal' || tone === 'urgent' || tone === 'warm' ? tone : 'friendly';
+    // ★ D152+ Harold님 지시 (2026-05-12): 4개 추상 톤 → 8개 실용 톤 확장.
+    //   friendly/formal/sale/urgent/vip/warm/launch/winback
+    const VALID_TONES = ['friendly', 'formal', 'sale', 'urgent', 'vip', 'warm', 'launch', 'winback'] as const;
+    type ValidTone = typeof VALID_TONES[number];
+    const safeTone: ValidTone = (VALID_TONES as readonly string[]).includes(tone) ? (tone as ValidTone) : 'friendly';
 
     // 회사 브랜드명 + 무료수신거부 번호 조회 (body 우선, 미전달 시 DB)
     let companyName: string | undefined = typeof bodyCompanyName === 'string' && bodyCompanyName.trim()
