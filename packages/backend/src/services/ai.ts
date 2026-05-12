@@ -2549,6 +2549,8 @@ function validateAndNormalizeRefinedCandidates(
   const hasAd = /\(\s*광고\s*\)/.test(originalMessage);
   const out: RefineCandidate[] = [];
   void rejectNumber; // 미사용 — stripRejectNumberPatterns는 일반 패턴으로 검출. 향후 회사별 reject_number 정확 매칭 시 활용.
+  // ★ D152+ Harold님 PM2 진단: dropout 단계별 카운트 — 어느 필터에서 제외되는지 정확히 파악
+  const dropCounts = { tooShort: 0, tooLong: 0, infoLoss: 0, similar: 0 };
   for (const c of candidates) {
     if (!c?.text || typeof c.text !== 'string') continue;
     let text = c.text.trim();
@@ -2576,15 +2578,30 @@ function validateAndNormalizeRefinedCandidates(
     const bytes = computeKsxBytes(text);
 
     // (d) 길이 필터
-    if (text.length < 10) continue;
-    if (bytes > 2000) continue;
+    if (text.length < 10) { dropCounts.tooShort += 1; continue; }
+    if (bytes > 2000) { dropCounts.tooLong += 1; continue; }
     // (d-2) ★ D152+ Harold님 지적: 다듬기 결과가 원본보다 너무 짧으면 정보 손실(예: "증정" 단어 삭제로 의미 모호화).
-    //   원본 50자+ 인데 결과가 원본 70% 미만이면 핵심 정보 누락 의심 = 제외.
-    if (originalMessage.length >= 50 && text.length < originalMessage.length * 0.7) continue;
-    // (d) 유사도 필터 — 원본과 80%+ 동일하면 제외 (단순 정리 수준은 다듬기 가치 X)
-    if (similarity(text, originalMessage) >= 0.8) continue;
+    //   원본 50자+ 인데 결과가 원본 60% 미만이면 핵심 정보 누락 의심 = 제외.
+    //   긴 LMS는 다듬어도 길이 유지되는 게 정상 — 60% 임계값으로 완화(80% → 70% → 60%).
+    if (originalMessage.length >= 50 && text.length < originalMessage.length * 0.6) {
+      dropCounts.infoLoss += 1;
+      continue;
+    }
+    // (d) 유사도 필터 — 너무 동일하면 제외 (단순 정리는 다듬기 가치 X).
+    //   ★ D152+ Harold님 PM2 진단: 긴 LMS(NARS 700자+)는 핵심 사실 보존하면 자연스럽게 유사도 80%+ → 자동 제외 사고.
+    //   92%로 완화 — 거의 동일한 안만 제외, 진짜 다듬은 안은 통과.
+    if (similarity(text, originalMessage) >= 0.92) {
+      dropCounts.similar += 1;
+      continue;
+    }
 
     out.push({ text, bytes, type: classifyType(bytes) });
+  }
+  if (candidates.length > 0 && out.length === 0) {
+    console.warn(
+      `[ai][refineDirectMessage] validateAndNormalize dropout — raw=${candidates.length} out=0 ` +
+      `(tooShort=${dropCounts.tooShort}, tooLong=${dropCounts.tooLong}, infoLoss=${dropCounts.infoLoss}, similar=${dropCounts.similar})`,
+    );
   }
   return out;
 }
@@ -2725,14 +2742,15 @@ ${fewShotBlock}
   // OpenAI fallback
   if (process.env.OPENAI_API_KEY) {
     try {
+      // ★ D152+ Harold님 PM2 로그 진단: gpt-5.1은 max_tokens 미지원 → max_completion_tokens 사용 (OpenAI 최신 모델 정책).
+      //   temperature도 일부 최신 모델에서 1.0만 허용 → 기본값 유지(전달 안 함).
       const gptResponse = await openai.chat.completions.create({
         model: AI_MODELS.gpt,
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: `원본 메시지:\n${message}\n\n다듬은 안 1개를 JSON 형식 {"candidates":[{"text":"..."}]}로 반환` },
         ],
-        temperature: 0.8,
-        max_tokens: AI_MAX_TOKENS.refineMessage,
+        max_completion_tokens: AI_MAX_TOKENS.refineMessage,
         response_format: { type: 'json_object' },
       });
       const rawText = gptResponse.choices[0]?.message?.content || '';

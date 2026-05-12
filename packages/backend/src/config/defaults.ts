@@ -19,8 +19,10 @@ redis.on('error', (err) => console.error('[Redis] 연결 에러:', err.message))
 // AI 모델명 (환경변수로 모델 업그레이드 시 .env만 수정)
 // ============================================================
 export const AI_MODELS = {
-  claude: process.env.CLAUDE_MODEL || 'claude-sonnet-4-5-20250929',
-  gpt: process.env.GPT_MODEL || 'gpt-5.1',
+  // ★ D152+ (2026-05-12) 모델 업그레이드: Sonnet 4.5 → 4.6 (다듬기 품질↑) / GPT 5.1 → 5.3 (fallback 강화).
+  //   .env CLAUDE_MODEL / GPT_MODEL로 런타임 오버라이드 가능.
+  claude: process.env.CLAUDE_MODEL || 'claude-sonnet-4-6',
+  gpt: process.env.GPT_MODEL || 'gpt-5.3',
 };
 
 // ============================================================
