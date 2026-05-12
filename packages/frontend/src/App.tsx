@@ -16,7 +16,6 @@ import PrivacyPage from './pages/PrivacyPage';
 import TermsPage from './pages/TermsPage';
 import AutoSendPage from './pages/AutoSendPage';
 import KakaoRcsPage from './pages/KakaoRcsPage';
-import FlyerAdminDashboard from './pages/FlyerAdminDashboard'; // ★ D112
 import DmBuilderPage from './pages/DmBuilderPage'; // ★ 모바일 DM 빌더
 // ★ D130: 슈퍼관리자 알림톡 발신프로필 모니터링 페이지
 import AlimtalkSendersPage from './pages/AlimtalkSendersPage';
@@ -169,15 +168,7 @@ function App() {
           }
         />
 
-        {/* ★ D112: 전단AI 슈퍼관리자 대시보드 */}
-        <Route
-          path="/admin/flyer"
-          element={
-            <PrivateRoute allowedTypes={['super_admin']}>
-              <FlyerAdminDashboard />
-            </PrivateRoute>
-          }
-        />
+        {/* ★ D152: FlyerAdminDashboard 라우트 제거 — hanjulDM 분리. admin.hanjuldm.kr 별도 도메인 */}
 
         {/* 고객사 대시보드 */}
         <Route

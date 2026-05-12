@@ -49,38 +49,18 @@ import manageScheduledRoutes from './routes/manage-scheduled';
 import manageStatsRoutes from './routes/manage-stats';
 import senderRegistrationRoutes from './routes/sender-registration';
 
-// 전단AI 라우트 (기존)
-import flyerRoutes from './routes/flyer/flyers';
-import flyerPublicRoutes from './routes/flyer/short-urls';
-// ★ 모바일 DM 빌더 (한줄로 AI 프로 기능)
+// ★ 모바일 DM 빌더 (한줄로 AI 프로 기능 — hanjulDM 분리 후 한줄AI 본진 자체 유지)
 import { dmPublicRouter, dmRouter } from './routes/dm';
 
-// ★ D112: 전단AI 완전 분리 라우트 (flyer_* 테이블 기반)
-import switchServiceRoutes from './routes/admin/switch-service';
-import flyerAdminRoutes from './routes/admin/flyer-admin';
 // ★ D145 P0 (2026-05-07): 슈퍼관리자 로그인 차단 관리
 import loginBlocksRoutes from './routes/admin/login-blocks';
-import flyerAuthRoutes from './routes/flyer/auth';
-import flyerCompaniesRoutes from './routes/flyer/companies';
-import flyerCustomersRoutes from './routes/flyer/customers';
-import flyerCampaignsRoutes from './routes/flyer/campaigns';
-import flyerUnsubscribesRoutes from './routes/flyer/unsubscribes';
-import flyerBalanceRoutes from './routes/flyer/balance';
-import flyerStatsRoutes from './routes/flyer/stats';
-import flyerCatalogRoutes from './routes/flyer/catalog';
-import flyerAddressBooksRoutes from './routes/flyer/address-books';
-import flyerSenderRegistrationRoutes from './routes/flyer/sender-registration';
-import flyerPosRoutes from './routes/flyer/pos';
-import flyerBusinessTypesRoutes from './routes/flyer/business-types';
-import flyerCouponsRoutes, { publicRouter as flyerCouponPublicRoutes } from './routes/flyer/coupons';
-import flyerCartPublicRoutes from './routes/flyer/carts';
-import flyerOrdersRoutes from './routes/flyer/orders';
-import { startAutoFlyerWorker } from './utils/flyer/pos/flyer-pos-auto';
+
+// ★ D152 (2026-05-12): 전단AI(hanjulDM) 완전 분리 — flyer 관련 라우트/유틸/미들웨어 모두 hanjulDM/으로 이전됨.
+//    여기서는 import/마운트/워커 시작 라인 모두 제거. 한줄AI는 hanjulDM 코드 의존 0건.
 
 // DB 연결
 import './config/database';
 import { LIMITS } from './config/defaults';
-import path from 'path';
 
 const app = express();
 // ★ trust proxy: 'loopback'(127.0.0.1)만 신뢰 → Nginx가 앞단에 있어 여기만 허용
@@ -88,13 +68,8 @@ const app = express();
 app.set('trust proxy', 'loopback');
 const PORT = process.env.PORT || 3000;
 
-// ★ 전단AI 공개 페이지 — helmet(CSP) 전에 마운트 (인라인 스크립트 필요)
-app.use('/api/flyer/p', flyerPublicRoutes);
 // ★ 모바일 DM 공개 뷰어 — helmet 전에 마운트 (인라인 스크립트 필요)
 app.use('/api/dm/v', dmPublicRouter);
-app.use('/api/flyer/q', flyerCouponPublicRoutes);
-// ★ Phase 3: 장바구니 공개 API (인증 불필요 — phone 기반)
-app.use('/api/flyer/cart', flyerCartPublicRoutes);
 
 // 미들웨어
 app.use(helmet());
@@ -136,7 +111,7 @@ app.get('/health', (req, res) => {
 
 // API 라우트
 app.get('/api', (req, res) => {
-  res.json({ 
+  res.json({
     message: 'Target-UP API Server',
     version: '1.0.0',
     endpoints: {
@@ -184,35 +159,6 @@ app.use('/api/manage/scheduled', manageScheduledRoutes);
 app.use('/api/manage/stats', manageStatsRoutes);
 app.use('/api/sender-registration', senderRegistrationRoutes);
 
-// ★ D112: 슈퍼관리자 서비스 스위처 + 전단AI 관리
-app.use('/api/admin/switch-service', switchServiceRoutes);
-app.use('/api/admin/flyer', flyerAdminRoutes);
-
-// ★ D112: 전단AI 완전 분리 라우트 (flyer_* 테이블 기반)
-app.use('/api/flyer/auth', flyerAuthRoutes);
-app.use('/api/flyer/companies', flyerCompaniesRoutes);
-app.use('/api/flyer/customers', flyerCustomersRoutes);
-app.use('/api/flyer/campaigns', flyerCampaignsRoutes);
-app.use('/api/flyer/unsubscribes', flyerUnsubscribesRoutes);
-app.use('/api/flyer/balance', flyerBalanceRoutes);
-app.use('/api/flyer/stats', flyerStatsRoutes);
-app.use('/api/flyer/catalog', flyerCatalogRoutes);
-app.use('/api/flyer/address-books', flyerAddressBooksRoutes);
-app.use('/api/flyer/companies/sender-registration', flyerSenderRegistrationRoutes);
-app.use('/api/flyer/pos', flyerPosRoutes);
-app.use('/api/flyer/business-types', flyerBusinessTypesRoutes);
-
-app.use('/api/flyer/coupons', flyerCouponsRoutes);
-// ★ Phase 3: 주문 관리 (인증 필요)
-app.use('/api/flyer/orders', flyerOrdersRoutes);
-
-// ★ 카탈로그 이미지 공개 서빙 (인증 불필요 — static)
-app.use('/api/flyer/catalog-images', express.static(path.join(process.cwd(), 'uploads', 'catalog-images')));
-
-// 전단AI 기존 라우트 (전단지 CRUD + 공개 페이지)
-app.use('/api/flyer/flyers', flyerRoutes);
-// ★ /api/flyer/p, /api/flyer/q는 helmet 전에 마운트됨 (상단 참조)
-
 // 404 처리
 app.use((req, res) => {
   res.status(404).json({ error: '요청한 리소스를 찾을 수 없습니다.' });
@@ -255,9 +201,6 @@ app.listen(PORT, () => {
 
   // ★ D78: 스팸테스트 큐 워커 시작 (3초 간격)
   startSpamTestQueueWorker();
-
-  // ★ Phase 4: POS 자동 전단 생성 워커 시작 (5분 간격)
-  startAutoFlyerWorker();
 
   // ★ D130: 알림톡 배치 스케줄러 (카테고리=매일 03:00 KST, 템플릿상태=5분, 발신프로필=1시간)
   startAlimtalkScheduler();

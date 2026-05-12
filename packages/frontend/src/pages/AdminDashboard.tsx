@@ -4,7 +4,6 @@ import { companiesApi, plansApi, billingApi } from '../api/client';
 import { useAuthStore } from '../stores/authStore';
 import { formatDateTime, formatDate, formatDateTimeShort, formatCampaignMessageForDisplay } from '../utils/formatDate';
 import SessionTimer from '../components/SessionTimer';
-import ServiceSwitcher from '../components/ServiceSwitcher'; // ★ D112
 import AlimtalkSendersSection from '../components/alimtalk/AlimtalkSendersSection'; // ★ D130
 import MessageDetailModal from '../components/MessageDetailModal'; // ★ D144 후속: 발송 상세 내역 모달의 메시지 셀 클릭 시 표시 + 복사
 import SearchableSelect from '../components/SearchableSelect'; // ★ D144 P11+P13: 검색 가능 select (사용자 추가 소속회사 + 발송통계 회사 필터)
@@ -2257,27 +2256,7 @@ const handleApproveRequest = async (id: string) => {
         <div className="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
         <div className="flex items-center gap-4">
             <h1 className="text-xl font-bold text-gray-800 cursor-pointer hover:text-blue-600 transition" onClick={() => window.location.reload()}>시스템 관리</h1>
-            {/* ★ D112: 서비스 스위처 — 한줄로AI ↔ 전단AI 전환 */}
-            <ServiceSwitcher
-              currentService="hanjullo"
-              onSwitch={async (to) => {
-                if (to === 'flyer') {
-                  try {
-                    const token = localStorage.getItem('token');
-                    const res = await fetch('/api/admin/switch-service', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                      body: JSON.stringify({ to: 'flyer' }),
-                    });
-                    if (res.ok) {
-                      const data = await res.json();
-                      localStorage.setItem('token', data.token);
-                      navigate('/admin/flyer');
-                    }
-                  } catch (e) { console.error('서비스 전환 실패:', e); }
-                }
-              }}
-            />
+            {/* ★ D152: ServiceSwitcher 제거 — hanjulDM 분리, admin.hanjuldm.kr 별도 도메인 */}
           </div>
           <div className="flex items-center gap-4">
             <SessionTimer />
