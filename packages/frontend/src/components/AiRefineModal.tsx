@@ -26,44 +26,58 @@ function highlightAdditions(
   original: string,
   modified: string,
 ): Array<{ text: string; added: boolean }> {
-  // ★ D152-6 정정 (2026-05-12 Harold님 명시): "▶단" / "▶ 단" 같이 특수문자가 어절에 붙은 케이스
-  //   기존 공백 split만 사용 시 "▶단"이 한 어절로 박혀서 "▶ 단"이 별도 토큰으로 인식 안 됨.
-  //   특수문자(★☆▶◀◆◇■□●○◎♥♡♨※☞☎↑↓←→ 등) + 구두점도 별도 토큰으로 분리.
-  const tokenize = (s: string) =>
-    s
-      .split(/(\s+|[▶◀★☆①②③④⑤⑥⑦⑧⑨⑩◆◇■□●○◎◐◑♥♡♨♪♬※☞☎↑↓←→▷◁▽△【】「」『』·—–~?!])/g)
-      .filter((t) => t !== '');
-  const a = tokenize(original);
-  const b = tokenize(modified);
-  const m = a.length;
-  const n = b.length;
+  // ★ D152-6 정정3 (2026-05-12 Harold님 명시): "20분전" vs "20분 전" 같이 어절 자체가 공백으로 분리되는 케이스
+  //   기존 어절 단위 LCS는 "20분전" 한 어절이 "20분 전" 두 어절과 매칭 X → 전체가 added로 잘못 강조.
+  //   글자 단위 LCS로 변경 — 정확도 100%. 공백/구두점만 변경된 경우 공백 자체만 added(거의 안 보임), 진짜 추가된 어절만 강조.
+  const m = original.length;
+  const n = modified.length;
 
-  // LCS DP 매트릭스
-  const dp: number[][] = Array(m + 1)
-    .fill(0)
-    .map(() => Array(n + 1).fill(0));
+  // Int32Array 메모리 절약 (긴 LMS 1000자도 ~4MB 안전)
+  const width = n + 1;
+  const dp = new Int32Array((m + 1) * width);
   for (let i = 1; i <= m; i += 1) {
     for (let j = 1; j <= n; j += 1) {
-      dp[i][j] =
-        a[i - 1] === b[j - 1]
-          ? dp[i - 1][j - 1] + 1
-          : Math.max(dp[i - 1][j], dp[i][j - 1]);
+      const cur = i * width + j;
+      if (original.charCodeAt(i - 1) === modified.charCodeAt(j - 1)) {
+        dp[cur] = dp[cur - width - 1] + 1;
+      } else {
+        const a = dp[cur - width];
+        const b = dp[cur - 1];
+        dp[cur] = a > b ? a : b;
+      }
     }
   }
 
-  // backtrack — modified 기준 결과(같은 어절 = same, 다듬에만 있는 어절 = added)
+  // backtrack — modified 기준. 연속된 same/added 글자는 자동 그룹화로 token 수 절약.
   const result: Array<{ text: string; added: boolean }> = [];
   let i = m;
   let j = n;
   while (j > 0) {
-    if (i > 0 && a[i - 1] === b[j - 1]) {
-      result.unshift({ text: b[j - 1], added: false });
+    const isSame =
+      i > 0 && original.charCodeAt(i - 1) === modified.charCodeAt(j - 1);
+    const isAdded =
+      !isSame &&
+      (i === 0 || dp[i * width + j - 1] >= dp[(i - 1) * width + j]);
+
+    if (isSame) {
+      // 같은 글자 — 직전 항목이 same이면 prepend로 연결
+      if (result.length > 0 && !result[0].added) {
+        result[0].text = modified[j - 1] + result[0].text;
+      } else {
+        result.unshift({ text: modified[j - 1], added: false });
+      }
       i -= 1;
       j -= 1;
-    } else if (i === 0 || dp[i][j - 1] >= dp[i - 1][j]) {
-      result.unshift({ text: b[j - 1], added: true });
+    } else if (isAdded) {
+      // 다듬에만 있는 글자 = added
+      if (result.length > 0 && result[0].added) {
+        result[0].text = modified[j - 1] + result[0].text;
+      } else {
+        result.unshift({ text: modified[j - 1], added: true });
+      }
       j -= 1;
     } else {
+      // 원본에만 있는 글자 = skip (modified 기준)
       i -= 1;
     }
   }
@@ -245,9 +259,11 @@ export default function AiRefineModal({
             </div>
           </div>
 
-          {/* ── 가운데: ▶ 화살표 + CTA/로딩/다시 다듬기 ────── */}
-          <div className="flex lg:flex-col items-center justify-center gap-3 lg:py-8 lg:px-1 lg:min-w-[120px]">
-            <ArrowRight className="hidden lg:block w-10 h-10 text-emerald-300 lg:rotate-0" strokeWidth={2.5} />
+          {/* ── 가운데: ▶ 화살표 + CTA/로딩/다시 다듬기 ──────
+                ★ D152-6 정정3 (Harold님 명시): "공간여유 많으니까 세로로, 다듬기와 띄어서"
+                ▶ 크기 키움(lg:w-12) + ▶와 버튼 사이 lg:gap-6 박음 + items-start로 자연 위쪽 배치 */}
+          <div className="flex lg:flex-col items-center justify-start gap-3 lg:gap-6 lg:pt-8 lg:px-2 lg:min-w-[140px]">
+            <ArrowRight className="hidden lg:block w-12 h-12 text-emerald-400" strokeWidth={2.5} />
             <ArrowRight className="block lg:hidden w-8 h-8 text-emerald-300 rotate-90" strokeWidth={2.5} />
 
             {/* CTA — 결과 없고 로딩 아닐 때 */}
@@ -256,7 +272,7 @@ export default function AiRefineModal({
                 type="button"
                 onClick={handleRefine}
                 disabled={!originalMessage.trim()}
-                className="w-full lg:w-auto px-4 py-3 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white text-sm font-semibold shadow-md hover:shadow-lg shadow-emerald-200 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none whitespace-nowrap"
+                className="w-full lg:w-auto px-5 py-3 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white text-sm font-semibold shadow-md hover:shadow-lg shadow-emerald-200 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none whitespace-nowrap"
               >
                 <Sparkles className="w-4 h-4" strokeWidth={2.25} />
                 <span>다듬기 시작</span>
@@ -266,7 +282,7 @@ export default function AiRefineModal({
             {/* 로딩 */}
             {loading && (
               <div className="flex flex-col items-center gap-2">
-                <Loader2 className="w-8 h-8 text-emerald-500 animate-spin" strokeWidth={2.5} />
+                <Loader2 className="w-9 h-9 text-emerald-500 animate-spin" strokeWidth={2.5} />
                 <p className="text-[11px] text-gray-500 text-center leading-tight whitespace-nowrap">다듬는 중...</p>
               </div>
             )}
