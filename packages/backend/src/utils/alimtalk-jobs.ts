@@ -258,11 +258,18 @@ export async function syncPendingTemplatesJob(): Promise<void> {
       );
       if (res.code !== '0000' || !res.data) continue;
 
-      const rawLatestStatus = (res.data as any).status;
+      // ★ D152-4 추가 fix (2026-05-12 자기검증) — D135부터 4주 반복의 진짜 진짜 root cause.
+      //   kakao_alimtalk.md 매뉴얼 정독 결과 IMC 응답 스펙:
+      //     - `inspectionStatus` (string enum): 검수 상태 (REG/REQ/HREJ/KREQ/KREJ/APR) ← 한줄로 모니터링 대상
+      //     - `status` (string enum): 템플릿 상태 (별도 — 활성/비활성)
+      //   기존 코드: `(res.data as any).status` → 잘못된 필드 읽음 → 검수 결과 영원히 미반영.
+      //   수정: inspectionStatus 우선, fallback으로 status (구버전 호환).
+      const rawLatestStatus =
+        (res.data as any).inspectionStatus ??
+        (res.data as any).status;
       if (!rawLatestStatus) continue;
       // ★ D143 (2026-04-30): IMC 약어(REQ/REV/APR/REJ) → 풀네임 정규화.
-      //   CHECK constraint(`kakao_templates_status_check`)가 대문자 풀네임 8개만 허용 →
-      //   약어 그대로 UPDATE하면 위반으로 status 갱신 영구 실패. PDF 0430 #2(B 신고) 부수 원인 차단.
+      // ★ D152-4 (2026-05-12): IMC 6단계 raw(REG/HREJ/KREQ/KREJ) 그대로 통과 (DB CHECK 12개 허용).
       const latestStatus = normalizeImcTemplateStatus(rawLatestStatus);
 
       const rejectReason = (res.data as any).rejectReason ?? null;
