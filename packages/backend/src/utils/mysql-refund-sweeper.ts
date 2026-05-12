@@ -27,7 +27,7 @@ import { getCompanySmsTablesWithLogs, smsBatchAggByGroup, kakaoBatchAggByGroup }
 import { SUCCESS_CODES, PENDING_CODES } from './sms-result-map';
 import { prepaidRefund } from './prepaid';
 
-const INTERVAL_MS = 5 * 60 * 1000; // 5분
+const INTERVAL_MS = 60 * 1000;     // 1분 — Harold님 명시 (D153 5/13): 5분은 짜치고 부하 미미(336 candidates / 17 user_groups / 1.5초/사이클 / 2.5% 점유)
 const BOOT_DELAY_MS = 90 * 1000;   // campaign-sync-worker(60초)와 시작 시점 차이 둠
 
 let _timer: NodeJS.Timeout | null = null;
