@@ -2392,26 +2392,26 @@ const SMS_SAFE_SPECIAL_CHARS = new Set([
 ]);
 
 function stripIncompatibleEmojis(text: string): string {
-  // 픽토그램/이모지 범위 자동 제거 + variation selector + zero-width joiner.
-  // BMP 외 supplementary plane (U+1F000~U+1FFFF) 전부 차단.
-  // ☀~➿ 범위 중 일부는 SMS 호환(☎/☞/♨) — 화이트리스트 보존.
+  // ★ D152+ Harold님 PM2 진단: 한글 다 제거 사고 fix.
+  //   기존: `code < 0x2600` 통과 → 한글 U+AC00(44032) > 0x2600(9728)이라 한글 모두 제거됨.
+  //   수정: 블랙리스트 방식 — 이모지 픽토그램 범위만 명시 제거, 그 외(ASCII/한글/한자/일반부호) 모두 통과.
   let out = '';
   for (const ch of text) {
     const code = ch.codePointAt(0) || 0;
-    // ASCII / 한글 / 일반 기호 그대로 통과
-    if (code < 0x2600) {
-      out += ch;
-      continue;
-    }
-    // SMS 호환 특수문자 화이트리스트 통과
-    if (SMS_SAFE_SPECIAL_CHARS.has(ch)) {
-      out += ch;
-      continue;
-    }
-    // variation selector (U+FE00~FE0F) / ZWJ (U+200D) / 픽토그램 (U+1F000+) / 화이트리스트 외 모두 제거
-    // 그대로 skip (out에 추가 안 함)
+    // 픽토그램/이모지 supplementary plane (U+1F000~U+1FFFF) 제거
+    if (code >= 0x1F000 && code <= 0x1FFFF) continue;
+    // variation selector (U+FE00~U+FE0F) 제거
+    if (code >= 0xFE00 && code <= 0xFE0F) continue;
+    // ZWJ (U+200D) 제거 — 이모지 결합용
+    if (code === 0x200D) continue;
+    // BOM (U+FEFF) 제거
+    if (code === 0xFEFF) continue;
+    // 기타 픽토그램 범위 (U+2600~U+27BF) 중 화이트리스트 외 제거 (☀/⚡/✨ 같은 이모지 차단, ★/♥/▶/♨/※/☎/☞ 같은 SMS 호환만 통과)
+    if (code >= 0x2600 && code <= 0x27BF && !SMS_SAFE_SPECIAL_CHARS.has(ch)) continue;
+    // 그 외 모든 문자(ASCII/한글/한자/일반부호/숫자/특수기호 등) 통과
+    out += ch;
   }
-  return out.replace(/\s{2,}/g, ' ').replace(/\s+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  return out.replace(/[ \t]{2,}/g, ' ').replace(/\s+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
 // KSX-1001 기준 byte 계산 — 한글 2바이트, ASCII 1바이트, 이모지/서로게이트 4바이트.
