@@ -205,9 +205,9 @@ export default function AiRefineModal({
           </button>
         </div>
 
-        {/* ── Body — 3컬럼 (좌: 원본+톤 / 가운데: ▶+CTA / 우: 결과). 모바일은 1단. ── */}
+        {/* ── Body — 3컬럼 (좌: 원본 / 가운데: ▶+CTA+톤 선택 / 우: 결과). 모바일은 1단. ── */}
         <div className="overflow-y-auto flex-1 p-6 grid grid-cols-1 lg:grid-cols-[1fr_auto_1fr] gap-5 lg:gap-4 items-start">
-          {/* ── 좌측: 원본 + 톤 선택 ────────────────────────── */}
+          {/* ── 좌측: 원본 메시지 ────────────────────────── */}
           <div className="space-y-5">
             {/* 원본 메시지 카드 */}
             <div>
@@ -223,46 +223,12 @@ export default function AiRefineModal({
                   : <span className="text-gray-300">메시지를 먼저 입력해주세요</span>}
               </div>
             </div>
-
-            {/* 톤 선택 4개 */}
-            <div>
-              <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2 block">톤 선택</label>
-              <div className="grid grid-cols-2 gap-2">
-                {TONES.map((t) => {
-                  const active = tone === t.value;
-                  return (
-                    <button
-                      key={t.value}
-                      type="button"
-                      disabled={loading}
-                      onClick={() => setTone(t.value)}
-                      className={`relative px-3 py-3 rounded-xl border-2 text-left transition-all ${
-                        active
-                          ? 'border-emerald-500 bg-emerald-50 shadow-sm'
-                          : 'border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50/50'
-                      } disabled:opacity-50 disabled:cursor-not-allowed`}
-                    >
-                      <div className="text-xl mb-1 leading-none">{t.emoji}</div>
-                      <div className="text-sm font-semibold text-gray-900">{t.label}</div>
-                      <div className="text-[10px] text-gray-500 mt-0.5 leading-tight">{t.desc}</div>
-                      {active && (
-                        <div className="absolute top-2 right-2 w-4 h-4 rounded-full bg-emerald-500 flex items-center justify-center shadow-sm">
-                          <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={3}>
-                            <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
-                          </svg>
-                        </div>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
           </div>
 
-          {/* ── 가운데: ▶ 화살표 + CTA/로딩/다시 다듬기 ──────
-                ★ D152-6 정정3 (Harold님 명시): "공간여유 많으니까 세로로, 다듬기와 띄어서"
-                ▶ 크기 키움(lg:w-12) + ▶와 버튼 사이 lg:gap-6 박음 + items-start로 자연 위쪽 배치 */}
-          <div className="flex lg:flex-col items-center justify-start gap-3 lg:gap-6 lg:pt-8 lg:px-2 lg:min-w-[140px]">
+          {/* ── 가운데: ▶ + CTA/로딩/다시 다듬기 + (아래) 톤 선택 세로 ──
+                ★ D152-6 정정4 (Harold님 명시): "톤 선택을 다듬기 아래 세로로, 다듬기와 띄어서"
+                톤 선택을 좌측에서 가운데로 이동 + 세로 stack (grid-cols-1) + 다듬기와 lg:mt-6 띄움 */}
+          <div className="flex lg:flex-col items-center justify-start gap-3 lg:gap-6 lg:pt-8 lg:px-2 lg:min-w-[180px]">
             <ArrowRight className="hidden lg:block w-12 h-12 text-emerald-400" strokeWidth={2.5} />
             <ArrowRight className="block lg:hidden w-8 h-8 text-emerald-300 rotate-90" strokeWidth={2.5} />
 
@@ -298,6 +264,46 @@ export default function AiRefineModal({
                 다시 다듬기
               </button>
             )}
+
+            {/* ── 톤 선택 — 다듬기 시작 아래, 충분히 띄어서 세로 배치 ──
+                  ★ D152-6 정정7 (Harold님 명시 "조금 띄어서"): lg:mt-12로 다듬기 버튼과 큰 간격.
+                  border 없이 자연 간격만으로 시각 분리. 모바일은 mt-4. */}
+            <div className="w-full mt-4 lg:mt-12">
+              <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-2 block text-center">톤 선택</label>
+              <div className="grid grid-cols-2 lg:grid-cols-1 gap-2">
+                {TONES.map((t) => {
+                  const active = tone === t.value;
+                  return (
+                    <button
+                      key={t.value}
+                      type="button"
+                      disabled={loading}
+                      onClick={() => setTone(t.value)}
+                      className={`relative px-2.5 py-2.5 rounded-xl border-2 text-left transition-all ${
+                        active
+                          ? 'border-emerald-500 bg-emerald-50 shadow-sm'
+                          : 'border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50/50'
+                      } disabled:opacity-50 disabled:cursor-not-allowed`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <div className="text-lg leading-none flex-shrink-0">{t.emoji}</div>
+                        <div className="min-w-0 flex-1">
+                          <div className="text-xs font-semibold text-gray-900 leading-tight">{t.label}</div>
+                          <div className="text-[10px] text-gray-500 mt-0.5 leading-tight truncate">{t.desc}</div>
+                        </div>
+                      </div>
+                      {active && (
+                        <div className="absolute top-1.5 right-1.5 w-3.5 h-3.5 rounded-full bg-emerald-500 flex items-center justify-center shadow-sm">
+                          <svg className="w-2 h-2 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={3}>
+                            <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        </div>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           </div>
 
           {/* ── 우측: 결과 / 에러 / placeholder ──────────────── */}
