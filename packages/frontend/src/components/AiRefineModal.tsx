@@ -13,8 +13,57 @@
  *   - 헤더 / 원본 카드 / 톤 4선택 / CTA / 결과 3~5개 / 푸터 5섹션
  */
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { X, Sparkles, ArrowRight, Loader2, RotateCcw } from 'lucide-react';
+
+/**
+ * ★ D152-6 (2026-05-12) Before/After 하이라이트 — Harold님 지시:
+ *   "지금은 뭐가 바꼈는지 올라갔다 내려갔다 확인해야하잖아"
+ *   결과 카드에 원본 대비 추가된 부분 emerald 강조 → 사용자가 한 화면에서 즉시 체감.
+ *   외부 의존성 없이 어절 단위 LCS(Longest Common Subsequence)로 자체 구현.
+ */
+function highlightAdditions(
+  original: string,
+  modified: string,
+): Array<{ text: string; added: boolean }> {
+  // 어절 단위(공백 보존) tokenize — 한국어 어절 기반
+  const tokenize = (s: string) => s.split(/(\s+)/);
+  const a = tokenize(original);
+  const b = tokenize(modified);
+  const m = a.length;
+  const n = b.length;
+
+  // LCS DP 매트릭스
+  const dp: number[][] = Array(m + 1)
+    .fill(0)
+    .map(() => Array(n + 1).fill(0));
+  for (let i = 1; i <= m; i += 1) {
+    for (let j = 1; j <= n; j += 1) {
+      dp[i][j] =
+        a[i - 1] === b[j - 1]
+          ? dp[i - 1][j - 1] + 1
+          : Math.max(dp[i - 1][j], dp[i][j - 1]);
+    }
+  }
+
+  // backtrack — modified 기준 결과(같은 어절 = same, 다듬에만 있는 어절 = added)
+  const result: Array<{ text: string; added: boolean }> = [];
+  let i = m;
+  let j = n;
+  while (j > 0) {
+    if (i > 0 && a[i - 1] === b[j - 1]) {
+      result.unshift({ text: b[j - 1], added: false });
+      i -= 1;
+      j -= 1;
+    } else if (i === 0 || dp[i][j - 1] >= dp[i - 1][j]) {
+      result.unshift({ text: b[j - 1], added: true });
+      j -= 1;
+    } else {
+      i -= 1;
+    }
+  }
+  return result;
+}
 
 // ★ D152+ Harold님 지시 재정정 (2026-05-12): 8→2 컨셉 축소.
 //   톤 분류 자체가 의미 없음 — 풍성화 본질에 집중.
@@ -241,43 +290,17 @@ export default function AiRefineModal({
               </div>
               <div className="space-y-2.5">
                 {candidates.map((c, i) => (
-                  <div
+                  <ResultCard
                     key={i}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => handleApply(c.text)}
-                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleApply(c.text); }}
-                    className="group relative p-4 rounded-xl border-2 border-gray-200 hover:border-emerald-400 hover:bg-emerald-50/30 cursor-pointer transition-all focus:outline-none focus:ring-2 focus:ring-emerald-300"
-                  >
-                    <div className="flex items-start gap-3">
-                      <div className="flex-shrink-0 w-7 h-7 rounded-lg bg-emerald-100 group-hover:bg-emerald-200 flex items-center justify-center text-[11px] font-bold text-emerald-700 transition-colors">
-                        {i + 1}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm text-gray-900 whitespace-pre-wrap break-words leading-relaxed">
-                          {c.text}
-                        </p>
-                        <div className="flex items-center gap-2 mt-2">
-                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${
-                            c.type === 'SMS' ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'
-                          }`}>
-                            {c.type}
-                          </span>
-                          <span className="text-[11px] text-gray-500 font-mono">{c.bytes}B</span>
-                        </div>
-                      </div>
-                      <div className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity self-center">
-                        <div className="px-3 py-1.5 rounded-lg bg-emerald-500 group-hover:bg-emerald-600 text-white text-xs font-semibold flex items-center gap-1 shadow-sm">
-                          적용
-                          <ArrowRight className="w-3 h-3" strokeWidth={2.5} />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
+                    index={i}
+                    candidate={c}
+                    originalMessage={originalMessage}
+                    onApply={handleApply}
+                  />
                 ))}
               </div>
               <p className="mt-3 text-[11px] text-gray-400 text-center">
-                안을 클릭하면 본문에 즉시 적용됩니다
+                <span className="bg-emerald-100 text-emerald-900 font-semibold rounded px-1">강조된 부분</span>이 AI가 풍성하게 다듬은 표현입니다 · 안을 클릭하면 본문에 즉시 적용됩니다
               </p>
             </div>
           )}
@@ -289,6 +312,82 @@ export default function AiRefineModal({
             <span className="font-mono text-gray-600">%이름%</span> 등 변수 자리 보존 · (광고) 표기 자동 정합
           </span>
           <span className="text-amber-600 font-medium">AI 결과는 참고용 · 발송 전 반드시 미리보기로 확인하세요</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * ★ D152-6 (2026-05-12) 결과 카드 — Before/After 하이라이트 적용.
+ *   원본 대비 추가/변경된 어절을 emerald 강조로 표시.
+ *   사용자가 한 화면에서 "어떻게 풍성해졌는지" 즉시 체감 → AI 체험 가치 명확.
+ */
+function ResultCard({
+  index,
+  candidate,
+  originalMessage,
+  onApply,
+}: {
+  index: number;
+  candidate: { text: string; bytes: number; type: 'SMS' | 'LMS' };
+  originalMessage: string;
+  onApply: (text: string) => void;
+}) {
+  const parts = useMemo(
+    () => highlightAdditions(originalMessage, candidate.text),
+    [originalMessage, candidate.text],
+  );
+
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={() => onApply(candidate.text)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') onApply(candidate.text);
+      }}
+      className="group relative p-4 rounded-xl border-2 border-gray-200 hover:border-emerald-400 hover:bg-emerald-50/30 cursor-pointer transition-all focus:outline-none focus:ring-2 focus:ring-emerald-300"
+    >
+      <div className="flex items-start gap-3">
+        <div className="flex-shrink-0 w-7 h-7 rounded-lg bg-emerald-100 group-hover:bg-emerald-200 flex items-center justify-center text-[11px] font-bold text-emerald-700 transition-colors">
+          {index + 1}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm text-gray-900 whitespace-pre-wrap break-words leading-relaxed">
+            {parts.map((p, idx) =>
+              p.added ? (
+                <span
+                  key={idx}
+                  className="bg-emerald-100 text-emerald-900 font-semibold rounded px-0.5"
+                >
+                  {p.text}
+                </span>
+              ) : (
+                <span key={idx}>{p.text}</span>
+              ),
+            )}
+          </p>
+          <div className="flex items-center gap-2 mt-2">
+            <span
+              className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${
+                candidate.type === 'SMS'
+                  ? 'bg-blue-100 text-blue-700'
+                  : 'bg-amber-100 text-amber-700'
+              }`}
+            >
+              {candidate.type}
+            </span>
+            <span className="text-[11px] text-gray-500 font-mono">
+              {candidate.bytes}B
+            </span>
+          </div>
+        </div>
+        <div className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity self-center">
+          <div className="px-3 py-1.5 rounded-lg bg-emerald-500 group-hover:bg-emerald-600 text-white text-xs font-semibold flex items-center gap-1 shadow-sm">
+            적용
+            <ArrowRight className="w-3 h-3" strokeWidth={2.5} />
+          </div>
         </div>
       </div>
     </div>
