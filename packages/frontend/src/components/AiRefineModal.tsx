@@ -26,8 +26,13 @@ function highlightAdditions(
   original: string,
   modified: string,
 ): Array<{ text: string; added: boolean }> {
-  // 어절 단위(공백 보존) tokenize — 한국어 어절 기반
-  const tokenize = (s: string) => s.split(/(\s+)/);
+  // ★ D152-6 정정 (2026-05-12 Harold님 명시): "▶단" / "▶ 단" 같이 특수문자가 어절에 붙은 케이스
+  //   기존 공백 split만 사용 시 "▶단"이 한 어절로 박혀서 "▶ 단"이 별도 토큰으로 인식 안 됨.
+  //   특수문자(★☆▶◀◆◇■□●○◎♥♡♨※☞☎↑↓←→ 등) + 구두점도 별도 토큰으로 분리.
+  const tokenize = (s: string) =>
+    s
+      .split(/(\s+|[▶◀★☆①②③④⑤⑥⑦⑧⑨⑩◆◇■□●○◎◐◑♥♡♨♪♬※☞☎↑↓←→▷◁▽△【】「」『』·—–~?!])/g)
+      .filter((t) => t !== '');
   const a = tokenize(original);
   const b = tokenize(modified);
   const m = a.length;
@@ -161,7 +166,10 @@ export default function AiRefineModal({
       role="dialog"
       aria-modal="true"
     >
-      <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[88vh] overflow-hidden flex flex-col animate-in zoom-in-95 duration-200">
+      {/* ★ D152-6 정정2 (2026-05-12 Harold님 명시): 3컬럼 레이아웃 (좌 원본 / 가운데 ▶ / 우 결과).
+            "왼쪽 원본, 가운데 다듬기 ▶ 화살표, 우측 다듬 결과 — 시각적 흐름으로 변화 즉시 체감"
+            모달 max-w-6xl (1152px), grid-cols-1 lg:grid-cols-[1fr_auto_1fr]. */}
+      <div className="bg-white rounded-2xl shadow-2xl max-w-6xl w-full max-h-[90vh] overflow-hidden flex flex-col animate-in zoom-in-95 duration-200">
         {/* ── Header ─────────────────────────────────────────── */}
         <div className="px-6 py-4 border-b border-gray-100 bg-gradient-to-r from-emerald-50 via-emerald-50/50 to-white flex justify-between items-center flex-shrink-0">
           <div className="flex items-center gap-3">
@@ -183,127 +191,151 @@ export default function AiRefineModal({
           </button>
         </div>
 
-        {/* ── Body ───────────────────────────────────────────── */}
-        <div className="overflow-y-auto flex-1 p-6 space-y-5">
-          {/* 원본 메시지 카드 */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">원본 메시지</label>
-              <span className="text-[10px] text-gray-400 font-mono">
-                {originalMessage.length}자
-              </span>
-            </div>
-            <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 text-sm text-gray-700 whitespace-pre-wrap break-words min-h-[64px]">
-              {originalMessage.trim()
-                ? originalMessage
-                : <span className="text-gray-300">메시지를 먼저 입력해주세요</span>}
-            </div>
-          </div>
-
-          {/* 톤 선택 4개 */}
-          <div>
-            <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2 block">톤 선택</label>
-            <div className="grid grid-cols-2 gap-2">
-              {TONES.map((t) => {
-                const active = tone === t.value;
-                return (
-                  <button
-                    key={t.value}
-                    type="button"
-                    disabled={loading}
-                    onClick={() => setTone(t.value)}
-                    className={`relative px-3 py-3 rounded-xl border-2 text-left transition-all ${
-                      active
-                        ? 'border-emerald-500 bg-emerald-50 shadow-sm'
-                        : 'border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50/50'
-                    } disabled:opacity-50 disabled:cursor-not-allowed`}
-                  >
-                    <div className="text-xl mb-1 leading-none">{t.emoji}</div>
-                    <div className="text-sm font-semibold text-gray-900">{t.label}</div>
-                    <div className="text-[10px] text-gray-500 mt-0.5 leading-tight">{t.desc}</div>
-                    {active && (
-                      <div className="absolute top-2 right-2 w-4 h-4 rounded-full bg-emerald-500 flex items-center justify-center shadow-sm">
-                        <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={3}>
-                          <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
-                        </svg>
-                      </div>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* CTA — 결과 없고 로딩 아닐 때 */}
-          {candidates.length === 0 && !loading && !error && (
-            <button
-              type="button"
-              onClick={handleRefine}
-              disabled={!originalMessage.trim()}
-              className="w-full py-3.5 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white font-semibold shadow-md hover:shadow-lg shadow-emerald-200 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none"
-            >
-              <Sparkles className="w-5 h-5" strokeWidth={2.25} />
-              <span>AI 다듬기 시작</span>
-            </button>
-          )}
-
-          {/* 로딩 */}
-          {loading && (
-            <div className="py-10 flex flex-col items-center gap-3">
-              <Loader2 className="w-9 h-9 text-emerald-500 animate-spin" strokeWidth={2.5} />
-              <p className="text-sm text-gray-700 font-medium">AI가 메시지를 다듬는 중...</p>
-              <p className="text-[11px] text-gray-400">다듬은 안을 보여드릴게요 · 보통 2~4초</p>
-            </div>
-          )}
-
-          {/* 에러 */}
-          {error && !loading && (
+        {/* ── Body — 3컬럼 (좌: 원본+톤 / 가운데: ▶+CTA / 우: 결과). 모바일은 1단. ── */}
+        <div className="overflow-y-auto flex-1 p-6 grid grid-cols-1 lg:grid-cols-[1fr_auto_1fr] gap-5 lg:gap-4 items-start">
+          {/* ── 좌측: 원본 + 톤 선택 ────────────────────────── */}
+          <div className="space-y-5">
+            {/* 원본 메시지 카드 */}
             <div>
-              <div className="p-4 rounded-xl bg-red-50 border border-red-200 text-sm text-red-700 leading-relaxed">
-                {error}
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">원본 메시지</label>
+                <span className="text-[10px] text-gray-400 font-mono">
+                  {originalMessage.length}자
+                </span>
               </div>
+              <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 text-sm text-gray-700 whitespace-pre-wrap break-words min-h-[64px]">
+                {originalMessage.trim()
+                  ? originalMessage
+                  : <span className="text-gray-300">메시지를 먼저 입력해주세요</span>}
+              </div>
+            </div>
+
+            {/* 톤 선택 4개 */}
+            <div>
+              <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2 block">톤 선택</label>
+              <div className="grid grid-cols-2 gap-2">
+                {TONES.map((t) => {
+                  const active = tone === t.value;
+                  return (
+                    <button
+                      key={t.value}
+                      type="button"
+                      disabled={loading}
+                      onClick={() => setTone(t.value)}
+                      className={`relative px-3 py-3 rounded-xl border-2 text-left transition-all ${
+                        active
+                          ? 'border-emerald-500 bg-emerald-50 shadow-sm'
+                          : 'border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50/50'
+                      } disabled:opacity-50 disabled:cursor-not-allowed`}
+                    >
+                      <div className="text-xl mb-1 leading-none">{t.emoji}</div>
+                      <div className="text-sm font-semibold text-gray-900">{t.label}</div>
+                      <div className="text-[10px] text-gray-500 mt-0.5 leading-tight">{t.desc}</div>
+                      {active && (
+                        <div className="absolute top-2 right-2 w-4 h-4 rounded-full bg-emerald-500 flex items-center justify-center shadow-sm">
+                          <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={3}>
+                            <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        </div>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          {/* ── 가운데: ▶ 화살표 + CTA/로딩/다시 다듬기 ────── */}
+          <div className="flex lg:flex-col items-center justify-center gap-3 lg:py-8 lg:px-1 lg:min-w-[120px]">
+            <ArrowRight className="hidden lg:block w-10 h-10 text-emerald-300 lg:rotate-0" strokeWidth={2.5} />
+            <ArrowRight className="block lg:hidden w-8 h-8 text-emerald-300 rotate-90" strokeWidth={2.5} />
+
+            {/* CTA — 결과 없고 로딩 아닐 때 */}
+            {candidates.length === 0 && !loading && !error && (
               <button
                 type="button"
-                onClick={reset}
-                className="mt-3 w-full py-2.5 rounded-xl border border-gray-300 hover:bg-gray-50 text-sm text-gray-700 font-medium transition-colors"
+                onClick={handleRefine}
+                disabled={!originalMessage.trim()}
+                className="w-full lg:w-auto px-4 py-3 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white text-sm font-semibold shadow-md hover:shadow-lg shadow-emerald-200 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none whitespace-nowrap"
               >
-                다시 시도
+                <Sparkles className="w-4 h-4" strokeWidth={2.25} />
+                <span>다듬기 시작</span>
               </button>
-            </div>
-          )}
+            )}
 
-          {/* 결과 카드 */}
-          {candidates.length > 0 && !loading && (
-            <div>
-              <div className="flex items-center justify-between mb-3">
-                <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
-                  AI 다듬은 안
-                </label>
+            {/* 로딩 */}
+            {loading && (
+              <div className="flex flex-col items-center gap-2">
+                <Loader2 className="w-8 h-8 text-emerald-500 animate-spin" strokeWidth={2.5} />
+                <p className="text-[11px] text-gray-500 text-center leading-tight whitespace-nowrap">다듬는 중...</p>
+              </div>
+            )}
+
+            {/* 다시 다듬기 (결과 있을 때) */}
+            {candidates.length > 0 && !loading && (
+              <button
+                type="button"
+                onClick={handleRefine}
+                className="px-3 py-2 rounded-lg border border-emerald-200 hover:bg-emerald-50 text-xs text-emerald-700 font-medium flex items-center gap-1 transition-colors whitespace-nowrap"
+              >
+                <RotateCcw className="w-3.5 h-3.5" strokeWidth={2} />
+                다시 다듬기
+              </button>
+            )}
+          </div>
+
+          {/* ── 우측: 결과 / 에러 / placeholder ──────────────── */}
+          <div className="space-y-3">
+            <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider block">
+              AI 다듬은 안
+            </label>
+
+            {/* Placeholder — 다듬기 전 */}
+            {candidates.length === 0 && !loading && !error && (
+              <div className="border-2 border-dashed border-gray-200 rounded-xl p-6 min-h-[200px] flex items-center justify-center text-center">
+                <p className="text-xs text-gray-400 leading-relaxed">
+                  가운데 <span className="text-emerald-500 font-semibold">다듬기 시작</span> 버튼을 누르면<br />
+                  여기에 AI가 풍성하게 다듬은 결과가 표시됩니다
+                </p>
+              </div>
+            )}
+
+            {/* 에러 */}
+            {error && !loading && (
+              <div>
+                <div className="p-4 rounded-xl bg-red-50 border border-red-200 text-sm text-red-700 leading-relaxed">
+                  {error}
+                </div>
                 <button
                   type="button"
-                  onClick={handleRefine}
-                  className="text-xs text-emerald-600 hover:text-emerald-700 font-medium flex items-center gap-1 transition-colors"
+                  onClick={reset}
+                  className="mt-3 w-full py-2.5 rounded-xl border border-gray-300 hover:bg-gray-50 text-sm text-gray-700 font-medium transition-colors"
                 >
-                  <RotateCcw className="w-3.5 h-3.5" strokeWidth={2} />
-                  다시 다듬기
+                  다시 시도
                 </button>
               </div>
-              <div className="space-y-2.5">
-                {candidates.map((c, i) => (
-                  <ResultCard
-                    key={i}
-                    index={i}
-                    candidate={c}
-                    originalMessage={originalMessage}
-                    onApply={handleApply}
-                  />
-                ))}
+            )}
+
+            {/* 결과 카드 */}
+            {candidates.length > 0 && !loading && (
+              <div>
+                <div className="space-y-2.5">
+                  {candidates.map((c, i) => (
+                    <ResultCard
+                      key={i}
+                      index={i}
+                      candidate={c}
+                      originalMessage={originalMessage}
+                      onApply={handleApply}
+                    />
+                  ))}
+                </div>
+                <p className="mt-3 text-[11px] text-gray-400 text-center">
+                  <span className="bg-emerald-100 text-emerald-900 font-semibold rounded px-1">강조된 부분</span>이 AI가 풍성하게 다듬은 표현입니다 · 안을 클릭하면 본문에 즉시 적용됩니다
+                </p>
               </div>
-              <p className="mt-3 text-[11px] text-gray-400 text-center">
-                <span className="bg-emerald-100 text-emerald-900 font-semibold rounded px-1">강조된 부분</span>이 AI가 풍성하게 다듬은 표현입니다 · 안을 클릭하면 본문에 즉시 적용됩니다
-              </p>
-            </div>
-          )}
+            )}
+          </div>
         </div>
 
         {/* ── Footer ─────────────────────────────────────────── */}
