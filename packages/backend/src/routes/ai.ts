@@ -793,11 +793,13 @@ router.post('/refine-message', requirePlanFeature('ai_messaging'), async (req: R
     if (message.length > 4000) {
       return res.status(400).json({ success: false, error: '메시지가 너무 깁니다 (최대 4000자)' });
     }
-    // ★ D152+ Harold님 지시 (2026-05-12): 4개 추상 톤 → 8개 실용 톤 확장.
-    //   friendly/formal/sale/urgent/vip/warm/launch/winback
-    const VALID_TONES = ['friendly', 'formal', 'sale', 'urgent', 'vip', 'warm', 'launch', 'winback'] as const;
+    // ★ D152+ Harold님 지시 재정정 (2026-05-12): 8→2 컨셉 축소.
+    //   ① seasonal — 시즌/월별 감성 자연 반영
+    //   ② trendy   — 최신 트렌드 감성 카피
+    //   톤 분류 자체는 의미 X — 풍성화 본질이 핵심.
+    const VALID_TONES = ['seasonal', 'trendy'] as const;
     type ValidTone = typeof VALID_TONES[number];
-    const safeTone: ValidTone = (VALID_TONES as readonly string[]).includes(tone) ? (tone as ValidTone) : 'friendly';
+    const safeTone: ValidTone = (VALID_TONES as readonly string[]).includes(tone) ? (tone as ValidTone) : 'seasonal';
 
     // 회사 브랜드명 + 무료수신거부 번호 조회 (body 우선, 미전달 시 DB)
     let companyName: string | undefined = typeof bodyCompanyName === 'string' && bodyCompanyName.trim()

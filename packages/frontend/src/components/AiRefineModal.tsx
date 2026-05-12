@@ -16,9 +16,11 @@
 import { useState } from 'react';
 import { X, Sparkles, ArrowRight, Loader2, RotateCcw } from 'lucide-react';
 
-// ★ D152+ Harold님 지시 (2026-05-12): 4개 추상 톤 → 8개 실용 톤 재설계.
-//   실제 마케팅 시나리오 기반(세일/긴급/VIP/런칭/재방문 추가) — backend TONE_GUIDE와 1:1 매핑.
-type Tone = 'friendly' | 'formal' | 'sale' | 'urgent' | 'vip' | 'warm' | 'launch' | 'winback';
+// ★ D152+ Harold님 지시 재정정 (2026-05-12): 8→2 컨셉 축소.
+//   톤 분류 자체가 의미 없음 — 풍성화 본질에 집중.
+//   ① seasonal — 시즌/월별 감성 자연 반영
+//   ② trendy   — 최신 트렌드 감성 카피
+type Tone = 'seasonal' | 'trendy';
 
 interface RefineCandidate {
   text: string;
@@ -35,14 +37,8 @@ interface Props {
 }
 
 const TONES: { value: Tone; label: string; emoji: string; desc: string }[] = [
-  { value: 'friendly', label: '친근',     emoji: '😊', desc: '카톡 친구톤' },
-  { value: 'formal',   label: '공식',     emoji: '🏢', desc: '격조 있는 안내' },
-  { value: 'sale',     label: '세일강타', emoji: '🔥', desc: '할인/특가 폭발' },
-  { value: 'urgent',   label: '긴급마감', emoji: '⚡', desc: '시급성/마감' },
-  { value: 'vip',      label: 'VIP케어',  emoji: '💎', desc: '단골/회원 우대' },
-  { value: 'warm',     label: '감성따뜻', emoji: '💝', desc: '진심 어린 편지감' },
-  { value: 'launch',   label: '신상런칭', emoji: '✨', desc: '새로움/기대감' },
-  { value: 'winback',  label: '재방문',   emoji: '🌷', desc: '오랜만의 안부' },
+  { value: 'seasonal', label: '시즌 풍성',   emoji: '🌸', desc: '계절/월별 감성 자연 반영' },
+  { value: 'trendy',   label: '최신 트렌드', emoji: '✨', desc: 'MZ 감성 + 트렌디 카피' },
 ];
 
 function getToken() {
@@ -56,7 +52,7 @@ export default function AiRefineModal({
   onClose,
   onApply,
 }: Props) {
-  const [tone, setTone] = useState<Tone>('friendly');
+  const [tone, setTone] = useState<Tone>('seasonal');
   const [loading, setLoading] = useState(false);
   const [candidates, setCandidates] = useState<RefineCandidate[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -158,7 +154,7 @@ export default function AiRefineModal({
           {/* 톤 선택 4개 */}
           <div>
             <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2 block">톤 선택</label>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <div className="grid grid-cols-2 gap-2">
               {TONES.map((t) => {
                 const active = tone === t.value;
                 return (
